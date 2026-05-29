@@ -105,16 +105,29 @@ class AgentHarness:
         else:
             print(f"🔀 [Model Router] '{role_name}' 임무 ➔ [Pro 심층] 모드 가동 (Active: {self.current_model_name})")
         
+        # [핵심] 무료 티어 분당 토큰(TPM 250k) 폭발 방지를 위한 컨텍스트 압축 로직
+        MAX_CONTEXT_LENGTH = 15000  # 약 1만 5천 자(대략 1.5만~2만 토큰)로 제한
+        
+        safe_context = context_data
+        if len(safe_context) > MAX_CONTEXT_LENGTH:
+            print(f"  [최적화] 입력 컨텍스트가 너무 깁니다. 하단 {MAX_CONTEXT_LENGTH}자만 추출합니다. (TPM 방어)")
+            safe_context = "...(상단 생략)...\n" + safe_context[-MAX_CONTEXT_LENGTH:]
+            
         prompt_template = skill_data["body"]
-        prompt = f"다음 지침에 따라 임무를 수행하십시오.\n\n{prompt_template}\n\n[Context Data]\n{context_data}\n"
+        prompt = f"다음 지침에 따라 임무를 수행하십시오.\n\n{prompt_template}\n\n[Context Data]\n{safe_context}\n"
         
         if previous_output:
-            prompt += f"\n[Previous Output (기존 산출물)]\n{previous_output}\n"
+            # 이전 산출물도 무한정 길어지는 것 방지
+            safe_prev_out = previous_output
+            if len(safe_prev_out) > 8000:
+                safe_prev_out = "...(상단 생략)...\n" + safe_prev_out[-8000:]
+            prompt += f"\n[Previous Output (기존 산출물)]\n{safe_prev_out}\n"
+            
             if feedback:
                 prompt += f"\n[Human Feedback (수정 지시사항)]\n사용자의 피드백을 엄격히 반영하여 기존 산출물을 수정(Delta Update) 하십시오:\n{feedback}\n"
         
         return self._safe_invoke(is_pro, prompt)
-
+    
     def summarize_context(self, text: str) -> str:
         if not text:
             return ""
