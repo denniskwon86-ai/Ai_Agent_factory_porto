@@ -16,9 +16,7 @@ def save_artifact_to_disk(output_dir: str, filename: str, content: str):
         f.write(content)
     print(f"📁 파일 저장 완료: {file_path}")
 
-llm_pro = "pro_model_instance"
-llm_flash = "flash_model_instance"
-harness = AgentHarness(llm_pro, llm_flash)
+harness = AgentHarness()
 
 def run_pm(state: ProjectState) -> ProjectState:
     print(f"[Agent] PM 실행 중... (재시도 횟수: {state.get('pm_retry_count', 0)})")
@@ -192,15 +190,15 @@ def pm_router(state: ProjectState) -> str:
 def map_builder_router(state: ProjectState) -> str:
     """CodeBuilderNode 컴파일 성공 여부에 따른 자동 피드백 루프 라우터"""
     status = state.get("build_status", "pending")
+    # 이미 CodeBuilder에서 +1 되어 넘어온 카운터를 읽기만 함
     retry_count = state.get("developer_retry_count", 0)
     max_retry = state.get("max_review_iterations", 3)
     
     if status == "failed":
-        if retry_count >= max_retry:
-            print(f"🚨 [WARNING] 빌드 연속 실패 한도({max_retry}회) 초과. 강제로 다음 단계(Reviewer)로 회피합니다.")
+        if retry_count > max_retry:
+            print(f"🚨 [WARNING] 빌드 연속 실패 한도({max_retry}회) 초과. 무한 루프를 방지하고 강제로 다음 단계(Reviewer)로 회피합니다.")
             return "proceed"
-        print(f"🔄 [Build Fail Loop] 빌드 결함 감지! 개발 에이전트(Frontend/Backend)로 에러 로그를 주입하고 재구동합니다. ({retry_count + 1}/{max_retry})")
-        state["developer_retry_count"] = retry_count + 1
+        print(f"🔄 [Build Fail Loop] 빌드 결함 감지! 개발 에이전트(Frontend/Backend)로 에러 로그를 주입하고 재구동합니다. ({retry_count}/{max_retry})")
         return "recode"
     
     print("✅ 빌드 무결성 테스트 대성공! 리뷰어 단계로 진입합니다.")

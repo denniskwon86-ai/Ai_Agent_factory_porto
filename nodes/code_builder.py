@@ -197,9 +197,12 @@ def run_code_builder(state: ProjectState) -> ProjectState:
         truncated_log = truncate_error_log(raw_error_log, head=10, tail=40)
         state["build_status"] = "failed"
         state["build_error_log"] = truncated_log
+        # [수정] 실패 시 노드 안에서 카운터를 명시적으로 +1 증가시켜 DB에 저장
+        state["developer_retry_count"] = state.get("developer_retry_count", 0) + 1
     else:
         print("🎉 모든 소스코드가 컴파일 과정을 무결하게 통과하여 실제 빌드가 완성되었습니다!")
         state["build_status"] = "success"
         state["build_error_log"] = ""
+        state["developer_retry_count"] = 0 # 성공 시 카운터 초기화
         
     return state
