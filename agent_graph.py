@@ -1,8 +1,19 @@
 import os
+import sqlite3
 from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from harness import AgentHarness
+
+# ==========================================
+# 물리적 파일 저장 헬퍼 함수
+# ==========================================
+def save_artifact_to_disk(output_dir: str, filename: str, content: str):
+    os.makedirs(output_dir, exist_ok=True)
+    file_path = os.path.join(output_dir, filename)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"📁 파일 저장 완료: {file_path}")
 
 # ==========================================
 # 1. 블랙보드 스키마 정의 (ProjectState)
@@ -15,7 +26,6 @@ class ProjectState(TypedDict):
     error_log: str
     output_dir: str
     
-    # [수정] 루프 제어 및 HOTL 변수 (무한 루프 방지 및 명시적 라우팅)
     review_iteration: int
     max_review_iterations: int
     pm_retry_count: int         
@@ -38,7 +48,7 @@ class ProjectState(TypedDict):
     qa_report_summary: str
 
 # ==========================================
-# 2. 하네스 초기화 (실제 LLM은 main.py에서 덮어씌워짐)
+# 2. 하네스 초기화
 # ==========================================
 llm_pro = "pro_model_instance"
 llm_flash = "flash_model_instance"
@@ -62,9 +72,11 @@ def run_pm(state: ProjectState) -> ProjectState:
     if feedback:
         state["pm_retry_count"] += 1
 
+    save_artifact_to_disk(state["output_dir"], "01_prd.md", output)
+
     state["prd"] = output
     state["prd_summary"] = summary
-    state["needs_revision"] = False # 기본값은 승인 상태로 초기화
+    state["needs_revision"] = False
     return state
 
 def run_architect(state: ProjectState) -> ProjectState:
@@ -81,6 +93,8 @@ def run_architect(state: ProjectState) -> ProjectState:
     
     if feedback:
         state["architect_retry_count"] += 1
+
+    save_artifact_to_disk(state["output_dir"], "02_architecture_doc.md", output)
 
     state["architecture_doc"] = output
     state["architecture_summary"] = summary
@@ -100,6 +114,8 @@ def run_tech_lead(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
+    save_artifact_to_disk(state["output_dir"], "03_tech_spec.md", output)
+    
     state["tech_spec"] = output
     state["tech_spec_summary"] = summary
     return state
@@ -117,6 +133,8 @@ def run_frontend(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
+    save_artifact_to_disk(state["output_dir"], "04_frontend_code.md", output)
+    
     state["frontend_code"] = output
     state["frontend_code_summary"] = summary
     return state
@@ -133,6 +151,8 @@ def run_backend(state: ProjectState) -> ProjectState:
         previous_output=state.get("backend_code")
     )
     summary = harness.summarize_context(output)
+    
+    save_artifact_to_disk(state["output_dir"], "05_backend_code.md", output)
     
     state["backend_code"] = output
     state["backend_code_summary"] = summary
@@ -155,6 +175,8 @@ def run_reviewer(state: ProjectState) -> ProjectState:
         previous_output=state.get("code_review_report")
     )
     summary = harness.summarize_context(output)
+    
+    save_artifact_to_disk(state["output_dir"], "06_code_review_report.md", output)
     
     state["code_review_report"] = output
     state["code_review_report_summary"] = summary
@@ -179,6 +201,8 @@ def run_qa(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
+    save_artifact_to_disk(state["output_dir"], "07_qa_report.md", output)
+    
     state["qa_report"] = output
     state["qa_report_summary"] = summary
     state["pipeline_status"] = "completed"
@@ -187,7 +211,6 @@ def run_qa(state: ProjectState) -> ProjectState:
 # ==========================================
 # 4. 라우팅 로직 (Conditional Edges)
 # ==========================================
-# [수정] PM 및 Architect 노드의 명시적 루프 탈출 제어 라우터 추가
 def pm_router(state: ProjectState) -> str:
     if state.get("needs_revision"):
         if state.get("pm_retry_count", 0) >= state.get("max_review_iterations", 3):
@@ -217,7 +240,7 @@ def reviewer_router(state: ProjectState) -> str:
     return "proceed"
 
 # ==========================================
-# 5. LangGraph 파이프라인 조립 및 체크포인트 설정
+# 5. LangGraph 파이프라인 조립 및 영구 체크포인트 설정
 # ==========================================
 workflow = StateGraph(ProjectState)
 
@@ -231,7 +254,6 @@ workflow.add_node("QA", run_qa)
 
 workflow.set_entry_point("PM")
 
-# [수정] PM 및 Architect 노드 직후 조건부 엣지 삽입
 workflow.add_conditional_edges("PM", pm_router, {"revision": "PM", "proceed": "Architect"})
 workflow.add_conditional_edges("Architect", architect_router, {"revision": "Architect", "proceed": "Tech_Lead"})
 
@@ -242,8 +264,10 @@ workflow.add_edge("Backend", "Reviewer")
 workflow.add_conditional_edges("Reviewer", reviewer_router, {"rollback": "Frontend", "proceed": "QA"})
 workflow.add_edge("QA", END)
 
-# [수정] MemorySaver 결합 및 중단점 설정
-memory = MemorySaver()
+# [수정] In-Memory를 영구 저장 로컬 SQLite DB로 교체
+conn = sqlite3.connect("pipeline_state.db", check_same_thread=False)
+memory = SqliteSaver(conn)
+
 app = workflow.compile(
     checkpointer=memory,
     interrupt_after=["PM", "Architect"]
