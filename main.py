@@ -7,9 +7,10 @@ from agent_graph import app, harness, ProjectState
 
 load_dotenv()
 
-print("⚙️ Gemini LLM 엔진을 초기화합니다... (일일 한도 방어 및 정속 주행 모드 가동)")
-llm_pro = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.2)
-llm_flash = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
+# [핵심 픽스] 404 에러 방지를 위해 명시적인 풀네임(-latest) 사용 및 일일 한도 1500회 방어
+print("⚙️ Gemini LLM 엔진을 초기화합니다... (1.5-Flash-latest 안전 모드 가동)")
+llm_pro = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
+llm_flash = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1)
 
 harness.llm_pro = llm_pro
 harness.llm_flash = llm_flash
@@ -50,7 +51,6 @@ def run_pipeline():
         
         snapshot = app.get_state(config)
         
-        # [핵심 픽스] DB에 세션 기록이 없더라도 로컬 폴더를 스캔하여 상태를 강제 복원
         if not snapshot.values:
             folder_path = f"outputs/{session_id}"
             if os.path.exists(folder_path):
@@ -58,7 +58,6 @@ def run_pipeline():
                 
                 recovered_state = create_initial_state("로컬 파일 기반 복구 세션", session_id)
                 
-                # 파일명과 상태 키, 그리고 완료된 노드명을 매핑
                 file_node_map = [
                     ("01_prd.md", "prd", "PM"),
                     ("02_architecture_doc.md", "architecture_doc", "Architect"),
@@ -77,15 +76,13 @@ def run_pipeline():
                             content = f.read()
                         recovered_state[state_key] = content
                         
-                        # 컨텍스트 압축 토큰을 아끼기 위해 내용 일부만 요약본으로 주입
                         recovered_state[f"{state_key}_summary"] = content[:500] + "\n\n... (로컬 파일에서 복원됨)"
                         last_node = node_name
                 
                 if last_node:
-                    # 복원된 상태를 LangGraph의 해당 노드 시점으로 강제 덮어쓰기
                     app.update_state(config, recovered_state, as_node=last_node)
                     print(f"✅ [{last_node}] 에이전트 단계까지의 산출물 복원이 완벽하게 완료되었습니다.")
-                    snapshot = app.get_state(config) # 스냅샷 갱신
+                    snapshot = app.get_state(config)
                 else:
                     print("🚨 폴더는 존재하지만 복구 가능한 마크다운(.md) 산출물이 없습니다.")
                     return
