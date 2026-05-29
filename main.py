@@ -7,9 +7,9 @@ from agent_graph import app, harness, ProjectState
 
 load_dotenv()
 
-# [복구됨] 모델 라우팅을 위해 Pro와 Flash를 각각 올바르게 초기화합니다.
-print("⚙️ Gemini LLM 엔진을 초기화합니다... (Model Router 및 지수 백오프 방어막 가동)")
-llm_pro = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.2)
+# [수정됨] 일일 할당량(Daily Quota) 초과 방어를 위해 임시로 All-Flash 모드 가동
+print("⚙️ Gemini LLM 엔진을 초기화합니다... (일일 한도 초과 방어: All-Flash 임시 가동)")
+llm_pro = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.2)
 llm_flash = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 
 harness.llm_pro = llm_pro
