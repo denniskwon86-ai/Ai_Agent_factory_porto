@@ -1,13 +1,14 @@
 import os
 import sqlite3
-from typing import TypedDict, List
+from typing import List
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 from harness import AgentHarness
 
-# ==========================================
-# 물리적 파일 저장 헬퍼 함수
-# ==========================================
+# [신규 추가] state와 code_builder 모듈 참조
+from state import ProjectState
+from nodes.code_builder import run_code_builder
+
 def save_artifact_to_disk(output_dir: str, filename: str, content: str):
     os.makedirs(output_dir, exist_ok=True)
     file_path = os.path.join(output_dir, filename)
@@ -15,48 +16,10 @@ def save_artifact_to_disk(output_dir: str, filename: str, content: str):
         f.write(content)
     print(f"📁 파일 저장 완료: {file_path}")
 
-# ==========================================
-# 1. 블랙보드 스키마 정의 (ProjectState)
-# ==========================================
-class ProjectState(TypedDict):
-    initial_idea: str
-    human_feedback_queue: List[str]
-    
-    pipeline_status: str
-    error_log: str
-    output_dir: str
-    
-    review_iteration: int
-    max_review_iterations: int
-    pm_retry_count: int         
-    architect_retry_count: int  
-    needs_revision: bool        
-    
-    prd: str
-    prd_summary: str
-    architecture_doc: str
-    architecture_summary: str
-    tech_spec: str
-    tech_spec_summary: str
-    frontend_code: str
-    frontend_code_summary: str
-    backend_code: str
-    backend_code_summary: str
-    code_review_report: str
-    code_review_report_summary: str
-    qa_report: str
-    qa_report_summary: str
-
-# ==========================================
-# 2. 하네스 초기화
-# ==========================================
 llm_pro = "pro_model_instance"
 llm_flash = "flash_model_instance"
 harness = AgentHarness(llm_pro, llm_flash)
 
-# ==========================================
-# 3. 노드 실행 함수 정의
-# ==========================================
 def run_pm(state: ProjectState) -> ProjectState:
     print(f"[Agent] PM 실행 중... (재시도 횟수: {state.get('pm_retry_count', 0)})")
     feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
@@ -73,7 +36,6 @@ def run_pm(state: ProjectState) -> ProjectState:
         state["pm_retry_count"] += 1
 
     save_artifact_to_disk(state["output_dir"], "01_prd.md", output)
-
     state["prd"] = output
     state["prd_summary"] = summary
     state["needs_revision"] = False
@@ -95,7 +57,6 @@ def run_architect(state: ProjectState) -> ProjectState:
         state["architect_retry_count"] += 1
 
     save_artifact_to_disk(state["output_dir"], "02_architecture_doc.md", output)
-
     state["architecture_doc"] = output
     state["architecture_summary"] = summary
     state["needs_revision"] = False
@@ -115,15 +76,20 @@ def run_tech_lead(state: ProjectState) -> ProjectState:
     summary = harness.summarize_context(output)
     
     save_artifact_to_disk(state["output_dir"], "03_tech_spec.md", output)
-    
     state["tech_spec"] = output
     state["tech_spec_summary"] = summary
     return state
 
 def run_frontend(state: ProjectState) -> ProjectState:
-    print("[Agent] Frontend Engineer 실행 중...")
-    feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
+    print(f"[Agent] Frontend Engineer 실행 중... (빌드 루프 횟수: {state.get('developer_retry_count', 0)})")
+    
+    # [핵심] 컴파일 에러 발생 시 개발 에이전트의 프롬프트에 자동 주입
+    build_err = state.get("build_error_log", "")
     context = f"Tech Spec Summary: {state['tech_spec_summary']}"
+    if build_err:
+        context += f"\n\n🚨 [빌드 오류 피드백 발생] 이전 컴파일이 실패했습니다. 아래 에러 로그를 분석하고 코드를 엄격히 수정하십시오:\n{build_err}"
+        
+    feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
     
     output = harness.execute(
         role_name="frontend_skill",
@@ -134,15 +100,20 @@ def run_frontend(state: ProjectState) -> ProjectState:
     summary = harness.summarize_context(output)
     
     save_artifact_to_disk(state["output_dir"], "04_frontend_code.md", output)
-    
     state["frontend_code"] = output
     state["frontend_code_summary"] = summary
     return state
 
 def run_backend(state: ProjectState) -> ProjectState:
     print("[Agent] Backend Engineer 실행 중...")
-    feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
+    
+    # [핵심] 컴파일 에러 발생 시 개발 에이전트의 프롬프트에 자동 주입
+    build_err = state.get("build_error_log", "")
     context = f"Tech Spec Summary: {state['tech_spec_summary']}"
+    if build_err:
+        context += f"\n\n🚨 [빌드 오류 피드백 발생] 이전 컴파일이 실패했습니다. 아래 에러 로그를 분석하고 코드를 엄격히 수정하십시오:\n{build_err}"
+        
+    feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
     
     output = harness.execute(
         role_name="backend_skill",
@@ -153,7 +124,6 @@ def run_backend(state: ProjectState) -> ProjectState:
     summary = harness.summarize_context(output)
     
     save_artifact_to_disk(state["output_dir"], "05_backend_code.md", output)
-    
     state["backend_code"] = output
     state["backend_code_summary"] = summary
     return state
@@ -177,7 +147,6 @@ def run_reviewer(state: ProjectState) -> ProjectState:
     summary = harness.summarize_context(output)
     
     save_artifact_to_disk(state["output_dir"], "06_code_review_report.md", output)
-    
     state["code_review_report"] = output
     state["code_review_report_summary"] = summary
     state["review_iteration"] += 1  
@@ -186,11 +155,13 @@ def run_reviewer(state: ProjectState) -> ProjectState:
 def run_qa(state: ProjectState) -> ProjectState:
     print("[Agent] QA Engineer 실행 중...")
     feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
+    
+    # [신규] QA 에이전트가 빌드된 실제 폴더 경로를 인지할 수 있도록 컨텍스트 주입
     context = (
         f"PRD Summary: {state['prd_summary']}\n"
         f"Tech Spec Summary: {state['tech_spec_summary']}\n"
-        f"Frontend Summary: {state['frontend_code_summary']}\n"
-        f"Backend Summary: {state['backend_code_summary']}"
+        f"Project Path: {state.get('project_output_path', '')}\n"
+        f"Executable Entry Point: {state.get('executable_entry_point', '')}"
     )
     
     output = harness.execute(
@@ -202,14 +173,13 @@ def run_qa(state: ProjectState) -> ProjectState:
     summary = harness.summarize_context(output)
     
     save_artifact_to_disk(state["output_dir"], "07_qa_report.md", output)
-    
     state["qa_report"] = output
     state["qa_report_summary"] = summary
     state["pipeline_status"] = "completed"
     return state
 
 # ==========================================
-# 4. 라우팅 로직 (Conditional Edges)
+# 라우팅 로직 (Conditional Edges)
 # ==========================================
 def pm_router(state: ProjectState) -> str:
     if state.get("needs_revision"):
@@ -217,6 +187,23 @@ def pm_router(state: ProjectState) -> str:
             print("🚨 [WARNING] PM 기획 수정 최대 한도 초과. 강제 진행합니다.")
             return "proceed"
         return "revision"
+    return "proceed"
+
+def map_builder_router(state: ProjectState) -> str:
+    """CodeBuilderNode 컴파일 성공 여부에 따른 자동 피드백 루프 라우터"""
+    status = state.get("build_status", "pending")
+    retry_count = state.get("developer_retry_count", 0)
+    max_retry = state.get("max_review_iterations", 3)
+    
+    if status == "failed":
+        if retry_count >= max_retry:
+            print(f"🚨 [WARNING] 빌드 연속 실패 한도({max_retry}회) 초과. 강제로 다음 단계(Reviewer)로 회피합니다.")
+            return "proceed"
+        print(f"🔄 [Build Fail Loop] 빌드 결함 감지! 개발 에이전트(Frontend/Backend)로 에러 로그를 주입하고 재구동합니다. ({retry_count + 1}/{max_retry})")
+        state["developer_retry_count"] = retry_count + 1
+        return "recode"
+    
+    print("✅ 빌드 무결성 테스트 대성공! 리뷰어 단계로 진입합니다.")
     return "proceed"
 
 def architect_router(state: ProjectState) -> str:
@@ -233,14 +220,12 @@ def reviewer_router(state: ProjectState) -> str:
     max_iter = state.get("max_review_iterations", 3)
     
     if "[CRITICAL]" in report and iteration < max_iter:
-        print("🚨 [CRITICAL] 결함 발견! 프론트엔드/백엔드 코드를 재수정하기 위해 Rollback 합니다.")
+        print("🚨 [CRITICAL] 리뷰어 검증 결함 발견! 코드를 재수정하기 위해 개발 단계로 롤백합니다.")
         return "rollback"
-    
-    print("✅ 리뷰 통과 또는 최대 반복 횟수 도달. QA 단계로 넘어갑니다.")
     return "proceed"
 
 # ==========================================
-# 5. LangGraph 파이프라인 조립 및 영구 체크포인트 설정
+# LangGraph 파이프라인 조립 및 영구 체크포인트 설정
 # ==========================================
 workflow = StateGraph(ProjectState)
 
@@ -249,6 +234,7 @@ workflow.add_node("Architect", run_architect)
 workflow.add_node("Tech_Lead", run_tech_lead)
 workflow.add_node("Frontend", run_frontend)
 workflow.add_node("Backend", run_backend)
+workflow.add_node("CodeBuilder", run_code_builder) # [신규] 노드 추가
 workflow.add_node("Reviewer", run_reviewer)
 workflow.add_node("QA", run_qa)
 
@@ -259,12 +245,16 @@ workflow.add_conditional_edges("Architect", architect_router, {"revision": "Arch
 
 workflow.add_edge("Tech_Lead", "Frontend")
 workflow.add_edge("Frontend", "Backend")
-workflow.add_edge("Backend", "Reviewer")
+
+# [신규] 백엔드 완료 후 코드를 수집하여 CodeBuilder 가동
+workflow.add_edge("Backend", "CodeBuilder") 
+
+# [신규] CodeBuilder 검증 결과 라우팅 연결 (실패 시 Frontend 재수정 루프, 성공 시 Reviewer행)
+workflow.add_conditional_edges("CodeBuilder", map_builder_router, {"recode": "Frontend", "proceed": "Reviewer"})
 
 workflow.add_conditional_edges("Reviewer", reviewer_router, {"rollback": "Frontend", "proceed": "QA"})
 workflow.add_edge("QA", END)
 
-# [수정] In-Memory를 영구 저장 로컬 SQLite DB로 교체
 conn = sqlite3.connect("pipeline_state.db", check_same_thread=False)
 memory = SqliteSaver(conn)
 

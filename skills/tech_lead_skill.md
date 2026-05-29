@@ -38,3 +38,9 @@ Output-File: 03_tech_spec.md
 # 5. 예외 처리 및 보안 가이드라인
 * 공통 에러 핸들링 메커니즘과 표준 에러 응답 코드를 정의합니다.
 * 데이터 암호화, 인증/인가(JWT 등), 입력값 검증(Validation) 규칙을 명시합니다.
+
+# [필수 파일 출력 표준 (XML Format)]
+모든 소스코드(package.json, requirements.txt 포함)는 반드시 아래와 같은 XML 태그 규격을 엄격히 준수하여 출력하십시오. 어길 시 빌드 시스템이 붕괴됩니다.
+<file path="backend/main.py">
+(여기에 실제 파이썬 코드 작성)
+</file>

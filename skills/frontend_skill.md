@@ -29,3 +29,9 @@ Output-File: 04_frontend_code.md
 # 3. UI 컴포넌트 및 페이지 코드 (Components / Pages)
 * 화면 단위의 페이지 컴포넌트와 재사용 가능한 공통 UI 컴포넌트 코드.
 * 스타일링(CSS-in-JS, Tailwind 등)이 적용된 마크다운 코드 블록 제공.
+
+# [필수 파일 출력 표준 (XML Format)]
+모든 소스코드(package.json, requirements.txt 포함)는 반드시 아래와 같은 XML 태그 규격을 엄격히 준수하여 출력하십시오. 어길 시 빌드 시스템이 붕괴됩니다.
+<file path="backend/main.py">
+(여기에 실제 파이썬 코드 작성)
+</file>

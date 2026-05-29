@@ -29,3 +29,9 @@ Output-File: 05_backend_code.md
 # 3. 비즈니스 로직 및 API 엔드포인트 (Services / Routers)
 * 실제 데이터 처리와 예외가 발생하는 서비스 레이어 코드.
 * 프론트엔드와 통신하는 엔드포인트 라우팅 코드.
+
+# [필수 파일 출력 표준 (XML Format)]
+모든 소스코드(package.json, requirements.txt 포함)는 반드시 아래와 같은 XML 태그 규격을 엄격히 준수하여 출력하십시오. 어길 시 빌드 시스템이 붕괴됩니다.
+<file path="backend/main.py">
+(여기에 실제 파이썬 코드 작성)
+</file>
