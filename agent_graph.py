@@ -1,26 +1,27 @@
 import os
 from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
 from harness import AgentHarness
 
 # ==========================================
 # 1. 블랙보드 스키마 정의 (ProjectState)
 # ==========================================
 class ProjectState(TypedDict):
-    # 입력 및 메타데이터
     initial_idea: str
     human_feedback_queue: List[str]
     
-    # 상태 관제 및 로깅
     pipeline_status: str
     error_log: str
     output_dir: str
     
-    # 루프 제어 변수
+    # [수정] 루프 제어 및 HOTL 변수 (무한 루프 방지 및 명시적 라우팅)
     review_iteration: int
     max_review_iterations: int
+    pm_retry_count: int         
+    architect_retry_count: int  
+    needs_revision: bool        
     
-    # 에이전트 산출물 (원본 및 요약본)
     prd: str
     prd_summary: str
     architecture_doc: str
@@ -37,21 +38,19 @@ class ProjectState(TypedDict):
     qa_report_summary: str
 
 # ==========================================
-# 2. 하네스 초기화 및 글로벌 설정
+# 2. 하네스 초기화 (실제 LLM은 main.py에서 덮어씌워짐)
 # ==========================================
-# 실제 환경에 맞게 LLM 인스턴스를 주입해야 합니다. (예: ChatOpenAI, ChatGoogleGenerativeAI 등)
-llm_pro = "pro_model_instance"      # 실제 LangChain LLM 객체로 대체 필요
-llm_flash = "flash_model_instance"  # 실제 LangChain LLM 객체로 대체 필요
+llm_pro = "pro_model_instance"
+llm_flash = "flash_model_instance"
 harness = AgentHarness(llm_pro, llm_flash)
 
 # ==========================================
 # 3. 노드 실행 함수 정의
 # ==========================================
 def run_pm(state: ProjectState) -> ProjectState:
-    print("[Agent] PM 실행 중...")
+    print(f"[Agent] PM 실행 중... (재시도 횟수: {state.get('pm_retry_count', 0)})")
     feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
     
-    # 하네스를 통해 PM 스킬 실행
     output = harness.execute(
         role_name="pm_skill",
         context_data=f"Initial Idea: {state['initial_idea']}",
@@ -60,12 +59,16 @@ def run_pm(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
+    if feedback:
+        state["pm_retry_count"] += 1
+
     state["prd"] = output
     state["prd_summary"] = summary
+    state["needs_revision"] = False # 기본값은 승인 상태로 초기화
     return state
 
 def run_architect(state: ProjectState) -> ProjectState:
-    print("[Agent] Architect 실행 중...")
+    print(f"[Agent] Architect 실행 중... (재시도 횟수: {state.get('architect_retry_count', 0)})")
     feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
     
     output = harness.execute(
@@ -76,8 +79,12 @@ def run_architect(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
+    if feedback:
+        state["architect_retry_count"] += 1
+
     state["architecture_doc"] = output
     state["architecture_summary"] = summary
+    state["needs_revision"] = False
     return state
 
 def run_tech_lead(state: ProjectState) -> ProjectState:
@@ -151,7 +158,7 @@ def run_reviewer(state: ProjectState) -> ProjectState:
     
     state["code_review_report"] = output
     state["code_review_report_summary"] = summary
-    state["review_iteration"] += 1  # 리뷰 반복 횟수 1 증가
+    state["review_iteration"] += 1  
     return state
 
 def run_qa(state: ProjectState) -> ProjectState:
@@ -180,29 +187,40 @@ def run_qa(state: ProjectState) -> ProjectState:
 # ==========================================
 # 4. 라우팅 로직 (Conditional Edges)
 # ==========================================
+# [수정] PM 및 Architect 노드의 명시적 루프 탈출 제어 라우터 추가
+def pm_router(state: ProjectState) -> str:
+    if state.get("needs_revision"):
+        if state.get("pm_retry_count", 0) >= state.get("max_review_iterations", 3):
+            print("🚨 [WARNING] PM 기획 수정 최대 한도 초과. 강제 진행합니다.")
+            return "proceed"
+        return "revision"
+    return "proceed"
+
+def architect_router(state: ProjectState) -> str:
+    if state.get("needs_revision"):
+        if state.get("architect_retry_count", 0) >= state.get("max_review_iterations", 3):
+            print("🚨 [WARNING] Architect 설계 수정 최대 한도 초과. 강제 진행합니다.")
+            return "proceed"
+        return "revision"
+    return "proceed"
+
 def reviewer_router(state: ProjectState) -> str:
-    """
-    Reviewer의 검토 결과를 분석하여 다음 진행 방향을 결정합니다.
-    """
     report = state.get("code_review_report", "")
     iteration = state.get("review_iteration", 0)
     max_iter = state.get("max_review_iterations", 3)
     
-    # 조건 1: [CRITICAL] 태그 존재 및 반복 한도 미도달 ➔ Frontend로 롤백 (재개발)
     if "[CRITICAL]" in report and iteration < max_iter:
         print("🚨 [CRITICAL] 결함 발견! 프론트엔드/백엔드 코드를 재수정하기 위해 Rollback 합니다.")
         return "rollback"
-        
-    # 조건 2: 무결함 또는 반복 한도 도달 ➔ QA 노드로 강제 진행
+    
     print("✅ 리뷰 통과 또는 최대 반복 횟수 도달. QA 단계로 넘어갑니다.")
     return "proceed"
 
 # ==========================================
-# 5. LangGraph 파이프라인 조립
+# 5. LangGraph 파이프라인 조립 및 체크포인트 설정
 # ==========================================
 workflow = StateGraph(ProjectState)
 
-# 노드 추가
 workflow.add_node("PM", run_pm)
 workflow.add_node("Architect", run_architect)
 workflow.add_node("Tech_Lead", run_tech_lead)
@@ -211,29 +229,25 @@ workflow.add_node("Backend", run_backend)
 workflow.add_node("Reviewer", run_reviewer)
 workflow.add_node("QA", run_qa)
 
-# 엣지 연결 (정상 흐름)
 workflow.set_entry_point("PM")
-workflow.add_edge("PM", "Architect")
-workflow.add_edge("Architect", "Tech_Lead")
+
+# [수정] PM 및 Architect 노드 직후 조건부 엣지 삽입
+workflow.add_conditional_edges("PM", pm_router, {"revision": "PM", "proceed": "Architect"})
+workflow.add_conditional_edges("Architect", architect_router, {"revision": "Architect", "proceed": "Tech_Lead"})
+
 workflow.add_edge("Tech_Lead", "Frontend")
 workflow.add_edge("Frontend", "Backend")
 workflow.add_edge("Backend", "Reviewer")
 
-# 조건부 분기 (리뷰 결과에 따른 롤백 or 진행)
-workflow.add_conditional_edges(
-    "Reviewer",
-    reviewer_router,
-    {
-        "rollback": "Frontend",  # 반려 시 Frontend부터 다시 파이프라인 수행
-        "proceed": "QA"          # 통과 시 QA로 이동
-    }
-)
-
-# QA 종료 지점 연결
+workflow.add_conditional_edges("Reviewer", reviewer_router, {"rollback": "Frontend", "proceed": "QA"})
 workflow.add_edge("QA", END)
 
-# 그래프 컴파일 (HOTL - 사용자 개입 정지 시점을 설정할 수 있습니다)
-app = workflow.compile()
+# [수정] MemorySaver 결합 및 중단점 설정
+memory = MemorySaver()
+app = workflow.compile(
+    checkpointer=memory,
+    interrupt_after=["PM", "Architect"]
+)
 
 if __name__ == "__main__":
     print("다중 에이전트 자동화 파이프라인 그래프 조립 완료.")
