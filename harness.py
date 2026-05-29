@@ -1,82 +1,77 @@
-# harness.py
 import os
-import re
-from langchain_core.messages import SystemMessage, HumanMessage
+import time
+import yaml
 
 class AgentHarness:
     def __init__(self, llm_pro, llm_flash):
-        """
-        토큰 최적화를 위해 무거운 추론용(Pro)과 가벼운 요약/정제용(Flash) 
-        두 가지 모델을 모두 주입받습니다.
-        """
         self.llm_pro = llm_pro
         self.llm_flash = llm_flash
-        self.skills_dir = os.path.join(os.path.dirname(__file__), 'skills')
+        self.skills_dir = "skills"
+
+    def _safe_invoke(self, llm, prompt: str) -> str:
+        """429 Rate Limit 방어를 위한 지수 백오프(Exponential Backoff) 자동 재시도 로직"""
+        max_retries = 3
+        delay = 35  # 에러가 요구하는 기본 대기 시간 (32초 + 안전 마진)
+
+        for attempt in range(max_retries):
+            try:
+                # LLM API 호출
+                response = llm.invoke(prompt)
+                return response.content
+            except Exception as e:
+                error_msg = str(e)
+                # 429 RESOURCE_EXHAUSTED 에러 감지
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                    if attempt < max_retries - 1:
+                        print(f"\n⏳ [Rate Limit 쉴드 가동] API 분당 호출 한도 도달. {int(delay)}초간 대기 후 파이프라인을 자동 재개합니다... (재시도: {attempt + 1}/{max_retries})")
+                        time.sleep(delay)
+                        delay *= 1.5  # 다음 실패 시 대기 시간을 1.5배로 늘림 (지수 백오프)
+                    else:
+                        print("\n🚨 최대 재시도 대기 횟수를 초과하여 파이프라인을 중단합니다.")
+                        raise e
+                else:
+                    # 429가 아닌 다른 치명적 에러는 즉시 예외 발생
+                    raise e
 
     def _parse_skill_document(self, role_name: str) -> dict:
-        """스킬 문서에서 티어링(Model) 정보와 프롬프트 본문을 분리하여 파싱합니다."""
-        file_path = os.path.join(self.skills_dir, f"{role_name.lower()}_skill.md")
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # 정규식으로 최상단 메타데이터(--- Model: pro ---) 추출
-            meta_match = re.search(r'^---\nModel:\s*(pro|flash)\n---\n(.*)', content, re.DOTALL)
-            if meta_match:
-                model_tier = meta_match.group(1).strip()
-                instruction = meta_match.group(2).strip()
-            else:
-                model_tier = 'pro' # 기본값은 안전하게 Pro로 설정
-                instruction = content
-                
-            return {"tier": model_tier, "instruction": instruction}
-        except FileNotFoundError:
-            return {"tier": "pro", "instruction": f"당신은 {role_name} 전문가입니다."}
-
-    def execute(self, role_name: str, context_data: str, feedback: list = None, previous_output: str = None) -> str:
-        """
-        모델 티어링 및 델타(Delta) 업데이트 로직이 포함된 코어 실행기
-        """
-        parsed_skill = self._parse_skill_document(role_name)
+        """마크다운 스킬 문서에서 YAML 프론트매터와 프롬프트 본문을 분리합니다."""
+        file_path = os.path.join(self.skills_dir, f"{role_name}.md")
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"스킬 문서를 찾을 수 없습니다: {file_path}")
         
-        # 1. 라우터: 티어에 맞는 모델 선택
-        selected_llm = self.llm_pro if parsed_skill["tier"] == "pro" else self.llm_flash
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                frontmatter = yaml.safe_load(parts[1])
+                body = parts[2].strip()
+                return {"meta": frontmatter, "body": body}
         
-        # 2. 델타 업데이트 로직: 피드백이 존재하면 전체 재작성 대신 수정본만 요청하여 토큰 절약
-        if feedback and previous_output:
-            system_prompt = (
-                f"{parsed_skill['instruction']}\n\n"
-                "--- [DELTA UPDATE MODE] ---\n"
-                "사용자의 피드백이 접수되었습니다. 문서를 처음부터 다시 쓰지 마시오.\n"
-                "기존 산출물에서 피드백이 반영되어야 할 부분만 수정하고, 변경되지 않은 부분은 그대로 유지하여 완성된 마크다운을 반환하시오.\n"
-                "인사말이나 부연 설명은 절대 금지합니다."
-            )
-            human_input = f"[기존 산출물]\n{previous_output}\n\n[사용자 피드백]\n{feedback}"
-        else:
-            system_prompt = (
-                f"{parsed_skill['instruction']}\n\n"
-                "--- [STRICT RULES] ---\n"
-                "1. 인사말이나 부연 설명을 절대 포함하지 마시오.\n"
-                "2. 오직 요구된 산출물의 결과(Markdown 내용)만 출력하시오."
-            )
-            human_input = f"[입력 데이터/컨텍스트]\n{context_data}"
+        return {"meta": {"Model": "pro"}, "body": content}
 
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=human_input)
-        ]
-
-        response = selected_llm.invoke(messages)
-        return response.content.strip()
+    def execute(self, role_name: str, context_data: str, feedback: str = None, previous_output: str = None) -> str:
+        """에이전트 역할에 맞는 프롬프트를 조립하고 LLM을 실행합니다."""
+        skill_data = self._parse_skill_document(role_name)
+        
+        # 현재는 Rate Limit 우회를 위해 모든 처리를 llm_flash로 일괄 라우팅 중입니다.
+        llm = self.llm_flash 
+        
+        prompt_template = skill_data["body"]
+        prompt = f"다음 지침에 따라 임무를 수행하십시오.\n\n{prompt_template}\n\n[Context Data]\n{context_data}\n"
+        
+        # 델타 업데이트 모드 분기
+        if previous_output:
+            prompt += f"\n[Previous Output (기존 산출물)]\n{previous_output}\n"
+            if feedback:
+                prompt += f"\n[Human Feedback (수정 지시사항)]\n사용자의 피드백을 엄격히 반영하여 기존 산출물을 수정(Delta Update) 하십시오:\n{feedback}\n"
+        
+        return self._safe_invoke(llm, prompt)
 
     def summarize_context(self, text: str) -> str:
-        """
-        컨텍스트 압축(Pruning) 전용 메서드: 저렴한 Flash 모델을 강제 사용합니다.
-        다음 작업자에게 불필요한 맥락이 전달되는 것을 방지하여 입력 토큰을 획기적으로 줄입니다.
-        """
-        messages = [
-            SystemMessage(content="주어진 문서에서 개발 및 설계에 필요한 '핵심 기술 요구사항'과 '기능 명세'만 500자 이내의 마크다운 불릿 포인트로 압축하시오. 부연 설명은 금지합니다."),
-            HumanMessage(content=text)
-        ]
-        response = self.llm_flash.invoke(messages)
-        return response.content.strip()
+        """다음 에이전트로 넘길 컨텍스트 토큰 최적화를 위한 500자 요약기"""
+        if not text:
+            return ""
+        prompt = f"다음 텍스트를 파이프라인의 다음 에이전트가 이해하기 쉽도록 핵심만 500자 이내의 마크다운 불릿 포인트로 요약하십시오:\n\n{text}"
+        return self._safe_invoke(self.llm_flash, prompt)
