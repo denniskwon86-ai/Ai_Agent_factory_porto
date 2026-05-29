@@ -4,44 +4,14 @@ import json
 import re
 from datetime import datetime
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
 from agent_graph import app, harness, ProjectState
 
 load_dotenv()
 
-print("⚙️ Gemini LLM 엔진을 초기화합니다... (검증된 Lite 모델 및 Semantic Router 가동)")
+print("⚙️ Gemini LLM E2E 파이프라인 가동 (Dynamic 429 Failover Router 탑재)")
 
-def initialize_models():
-    primary_model = "gemini-2.5-flash-lite"
-    fallback_model = "gemini-flash-lite-latest"
-    
-    try:
-        print(f"🔍 '{primary_model}' 모델 가용성 테스트(Ping) 중...")
-        test_llm = ChatGoogleGenerativeAI(model=primary_model, temperature=0.1)
-        test_llm.invoke("ping")
-        print(f"✅ {primary_model} 모델이 정상적으로 인식되었습니다!")
-        return primary_model
-    except Exception as e:
-        error_msg = str(e)
-        if "404" in error_msg or "NOT_FOUND" in error_msg:
-            print(f"⚠️ '{primary_model}' 모델을 찾을 수 없습니다.")
-            print(f"🔄 범용 Lite 모델인 '{fallback_model}'(으)로 자동 폴백(Fallback) 합니다.")
-            return fallback_model
-        elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-            print("✅ 모델 존재는 확인되었으나, 현재 분당 API 호출 한도(RPM)에 도달한 상태입니다.")
-            print("⏳ 6초간 숨을 고른 후 작업을 시작합니다...")
-            time.sleep(6)
-            return primary_model
-        else:
-            raise e
-
-active_model_name = initialize_models()
-
-llm_pro = ChatGoogleGenerativeAI(model=active_model_name, temperature=0.2)
-llm_flash = ChatGoogleGenerativeAI(model=active_model_name, temperature=0.1)
-
-harness.llm_pro = llm_pro
-harness.llm_flash = llm_flash
+# harness 모듈 내부에서 이미 동적 라우터 예비 탄창이 장전되어 있습니다.
+# 더 이상 main.py에서 핑(Ping) 테스트나 강제 핫스와핑을 할 필요가 없습니다.
 
 def create_initial_state(idea: str, timestamp: str) -> ProjectState:
     return {
@@ -90,7 +60,8 @@ def handle_feedback_routing(user_input: str, config: dict):
     print("\n🧠 [RouterAgent] 피드백 문맥 분석 및 최적 타겟 노드 계산 중...")
     
     try:
-        response = llm_flash.invoke(prompt).content
+        # harness 내부의 동적 라우팅이 걸린 flash(False) 객체를 직접 사용합니다.
+        response = harness._safe_invoke(False, prompt)
         json_str = re.search(r'\{.*\}', response, re.DOTALL).group()
         router_result = json.loads(json_str)
         
@@ -109,7 +80,6 @@ def handle_feedback_routing(user_input: str, config: dict):
         "4": "Frontend", "5": "Backend", "6": "CodeBuilder"
     }
 
-    # 1. 신뢰도(Confidence) 점수에 따른 HITL 분기
     if confidence >= 0.85 and target in targets_map.values():
         print(f"\n🤖 판단 근거: {reason}")
         print(f"   추천 시작점: [{target}] (신뢰도: {int(confidence*100)}%)")
@@ -120,7 +90,6 @@ def handle_feedback_routing(user_input: str, config: dict):
         if confidence > 0:
             print(f"\n🤖 라우터 추천: [{target}] (신뢰도: {int(confidence*100)}%) - 확신도가 낮아 수동 선택으로 전환합니다.")
 
-    # 2. 수동 메뉴 (N 선택 시 또는 Confidence 미달 시)
     if not final_target:
         print("\n시작 노드를 직접 선택하세요:")
         print("  [1] PM (기획 변경)")
@@ -138,7 +107,6 @@ def handle_feedback_routing(user_input: str, config: dict):
             else:
                 print("⚠️ 올바른 숫자를 입력해주세요 (1~6).")
 
-    # 3. Time-travel 상태 주입 (선택된 타겟 직전 노드에서 출발하도록 설정)
     print(f"\n🔄 [{final_target}] 단계부터 델타 업데이트 및 파이프라인 재가동을 준비합니다...")
     
     current_state = app.get_state(config).values
@@ -163,7 +131,7 @@ def handle_feedback_routing(user_input: str, config: dict):
 
 def run_pipeline():
     print("=" * 60)
-    print("🚀 다중 에이전트 자동화 파이프라인 (v3.0 E2E) 가동 준비 완료")
+    print("🚀 다중 에이전트 자동화 파이프라인 (v3.1 동적 라우팅) 가동 준비 완료")
     print("=" * 60)
     
     print("1. 새 프로젝트 시작")
@@ -233,7 +201,6 @@ def run_pipeline():
         print("시동을 겁니다. 파이프라인 실행 중...\n")
 
     try:
-        # 최초 1회 스트림
         if initial_input is not None:
             for event in app.stream(initial_input, config=config):
                 for key, value in event.items():
@@ -244,7 +211,6 @@ def run_pipeline():
             snapshot = app.get_state(config)
             
             if not snapshot.next:
-                # [수정] 파이프라인이 QA까지 모두 완료된 상태일 때 Semantic Router 가동
                 print("\n" + "="*60)
                 print("🎉 [E2E 파이프라인 완료] 모든 산출물 및 빌드 패키지가 생성되었습니다.")
                 print("="*60)
@@ -256,13 +222,11 @@ def run_pipeline():
                 
                 handle_feedback_routing(user_input, config)
                 
-                # 라우팅 결과에 따라 재가동
                 for event in app.stream(None, config=config):
                     for key, value in event.items():
                         print(f"✅ [{key}] 에이전트 작업 완료!")
                         time.sleep(1)
             else:
-                # [유지] 진행 중 Interrupt 발생 시 Node-specific HOTL 제어
                 print("\n" + "="*60)
                 print(f"⏸️ [HOTL] 파이프라인 일시 정지 (현재 대기 노드: {snapshot.next})")
                 print("="*60)
