@@ -7,8 +7,9 @@ from agent_graph import app, harness, ProjectState
 
 load_dotenv()
 
-print("⚙️ Gemini LLM 엔진을 초기화합니다... (Rate Limit 우회를 위해 All-Flash 모드 가동)")
-llm_pro = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.2)
+# [복구됨] 모델 라우팅을 위해 Pro와 Flash를 각각 올바르게 초기화합니다.
+print("⚙️ Gemini LLM 엔진을 초기화합니다... (Model Router 및 지수 백오프 방어막 가동)")
+llm_pro = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.2)
 llm_flash = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 
 harness.llm_pro = llm_pro
@@ -45,7 +46,6 @@ def run_pipeline():
     choice = input("\n원하시는 작업을 선택하세요 (1 또는 2):\n> ").strip()
 
     if choice == "2":
-        # [추가] 상태 복원 로직
         session_id = input("\n📂 이어서 진행할 폴더명(세션 ID)을 입력하세요 (예: 20260529_101255):\n> ").strip()
         config = {"configurable": {"thread_id": session_id}}
         
@@ -61,17 +61,16 @@ def run_pipeline():
             print("✅ 이 파이프라인은 이미 끝까지 완료된 상태입니다.")
             return
             
-        initial_input = None # 재개 시에는 상태를 주입하지 않고 None 전달
+        initial_input = None 
         
     else:
-        # [수정] 새 프로젝트 생성 로직
         idea = input("\n💡 개발하고자 하는 소프트웨어의 초기 아이디어를 입력하세요:\n> ")
         if not idea.strip():
             print("아이디어가 입력되지 않아 실행을 종료합니다.")
             return
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_id = timestamp # 타임스탬프를 세션 ID로 사용하여 폴더명과 일치시킴
+        session_id = timestamp 
         config = {"configurable": {"thread_id": session_id}}
         initial_input = create_initial_state(idea, timestamp)
         
@@ -80,13 +79,11 @@ def run_pipeline():
         print("시동을 겁니다. 파이프라인 실행 중...\n")
 
     try:
-        # 최초 실행이든 재개(Resume)든 동일하게 스트리밍 실행
         for event in app.stream(initial_input, config=config):
             for key, value in event.items():
                 print(f"✅ [{key}] 에이전트 작업 완료!")
                 time.sleep(1)
 
-        # HOTL 루프 제어
         while True:
             snapshot = app.get_state(config)
             
@@ -102,7 +99,6 @@ def run_pipeline():
             
             user_input = input("\n📝 [승인(Enter)] / [피드백 입력 (반려 및 델타 업데이트)] / [종료(exit)]:\n> ").strip()
             
-            # [추가] 언제든 종료 후 나중에 다시 할 수 있도록 exit 옵션 추가
             if user_input.lower() == 'exit':
                 print("\n🛑 파이프라인을 안전하게 일시 중단합니다. 나중에 [2. 이어서 진행] 메뉴를 통해 재개할 수 있습니다.")
                 break

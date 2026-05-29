@@ -11,26 +11,23 @@ class AgentHarness:
     def _safe_invoke(self, llm, prompt: str) -> str:
         """429 Rate Limit 방어를 위한 지수 백오프(Exponential Backoff) 자동 재시도 로직"""
         max_retries = 3
-        delay = 35  # 에러가 요구하는 기본 대기 시간 (32초 + 안전 마진)
+        delay = 35
 
         for attempt in range(max_retries):
             try:
-                # LLM API 호출
                 response = llm.invoke(prompt)
                 return response.content
             except Exception as e:
                 error_msg = str(e)
-                # 429 RESOURCE_EXHAUSTED 에러 감지
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
                     if attempt < max_retries - 1:
                         print(f"\n⏳ [Rate Limit 쉴드 가동] API 분당 호출 한도 도달. {int(delay)}초간 대기 후 파이프라인을 자동 재개합니다... (재시도: {attempt + 1}/{max_retries})")
                         time.sleep(delay)
-                        delay *= 1.5  # 다음 실패 시 대기 시간을 1.5배로 늘림 (지수 백오프)
+                        delay *= 1.5
                     else:
                         print("\n🚨 최대 재시도 대기 횟수를 초과하여 파이프라인을 중단합니다.")
                         raise e
                 else:
-                    # 429가 아닌 다른 치명적 에러는 즉시 예외 발생
                     raise e
 
     def _parse_skill_document(self, role_name: str) -> dict:
@@ -55,13 +52,18 @@ class AgentHarness:
         """에이전트 역할에 맞는 프롬프트를 조립하고 LLM을 실행합니다."""
         skill_data = self._parse_skill_document(role_name)
         
-        # 현재는 Rate Limit 우회를 위해 모든 처리를 llm_flash로 일괄 라우팅 중입니다.
-        llm = self.llm_flash 
+        # [복구 및 수정됨] YAML 프론트매터 기반 동적 모델 라우팅
+        model_tier = skill_data["meta"].get("Model", "pro").lower()
+        if model_tier == "flash":
+            llm = self.llm_flash
+            print(f"🔀 [Model Router] '{role_name}' 임무 ➔ [Flash 모델] 할당 (고속/경량 처리)")
+        else:
+            llm = self.llm_pro
+            print(f"🔀 [Model Router] '{role_name}' 임무 ➔ [Pro 모델] 할당 (복잡/심층 추론)")
         
         prompt_template = skill_data["body"]
         prompt = f"다음 지침에 따라 임무를 수행하십시오.\n\n{prompt_template}\n\n[Context Data]\n{context_data}\n"
         
-        # 델타 업데이트 모드 분기
         if previous_output:
             prompt += f"\n[Previous Output (기존 산출물)]\n{previous_output}\n"
             if feedback:
@@ -73,5 +75,6 @@ class AgentHarness:
         """다음 에이전트로 넘길 컨텍스트 토큰 최적화를 위한 500자 요약기"""
         if not text:
             return ""
+        # 요약은 단순 작업이므로 항상 비용이 저렴한 Flash 모델을 고정 사용합니다.
         prompt = f"다음 텍스트를 파이프라인의 다음 에이전트가 이해하기 쉽도록 핵심만 500자 이내의 마크다운 불릿 포인트로 요약하십시오:\n\n{text}"
         return self._safe_invoke(self.llm_flash, prompt)
