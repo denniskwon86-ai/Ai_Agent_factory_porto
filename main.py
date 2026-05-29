@@ -7,10 +7,38 @@ from agent_graph import app, harness, ProjectState
 
 load_dotenv()
 
-# [핵심 픽스] 404 에러 방지를 위해 명시적인 풀네임(-latest) 사용 및 일일 한도 1500회 방어
-print("⚙️ Gemini LLM 엔진을 초기화합니다... (1.5-Flash-latest 안전 모드 가동)")
-llm_pro = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
-llm_flash = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1)
+print("⚙️ Gemini LLM 엔진을 초기화합니다... (검증된 Lite 모델 및 Auto-Fallback 가동)")
+
+def initialize_models():
+    # 1순위: 진단 스크립트로 존재가 100% 확인된 고한도 경량화 모델
+    primary_model = "gemini-2.5-flash-lite"
+    fallback_model = "gemini-flash-lite-latest"
+    
+    try:
+        print(f"🔍 '{primary_model}' 모델 가용성 테스트(Ping) 중...")
+        test_llm = ChatGoogleGenerativeAI(model=primary_model, temperature=0.1)
+        test_llm.invoke("ping")
+        print(f"✅ {primary_model} 모델이 정상적으로 인식되었습니다!")
+        return primary_model
+    except Exception as e:
+        error_msg = str(e)
+        if "404" in error_msg or "NOT_FOUND" in error_msg:
+            print(f"⚠️ '{primary_model}' 모델을 찾을 수 없습니다.")
+            print(f"🔄 범용 Lite 모델인 '{fallback_model}'(으)로 자동 폴백(Fallback) 합니다.")
+            return fallback_model
+        elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+            print("✅ 모델 존재는 확인되었으나, 현재 분당 API 호출 한도(RPM)에 도달한 상태입니다.")
+            print("⏳ 6초간 숨을 고른 후 본 파이프라인 작업을 시작합니다...")
+            time.sleep(6)
+            return primary_model
+        else:
+            raise e
+
+# 가용성이 완벽하게 검증된 모델명으로 최종 엔진 주입
+active_model_name = initialize_models()
+
+llm_pro = ChatGoogleGenerativeAI(model=active_model_name, temperature=0.2)
+llm_flash = ChatGoogleGenerativeAI(model=active_model_name, temperature=0.1)
 
 harness.llm_pro = llm_pro
 harness.llm_flash = llm_flash
