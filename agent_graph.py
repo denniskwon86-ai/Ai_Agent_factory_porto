@@ -5,7 +5,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 from harness import AgentHarness
 
-# [신규 추가] state와 code_builder 모듈 참조
+# [수정] state와 code_builder 모듈 참조 (ProjectState 확장 필드 사용)
 from state import ProjectState
 from nodes.code_builder import run_code_builder
 
@@ -18,13 +18,46 @@ def save_artifact_to_disk(output_dir: str, filename: str, content: str):
 
 harness = AgentHarness()
 
+# ==========================================
+# 에이전트 노드 실행 함수
+# ==========================================
+
+# [신규 추가] Master PMO 에이전트 (PLANNING 모드 전용)
+def run_pmo(state: ProjectState) -> ProjectState:
+    print("\n" + "="*50)
+    print("🧭 [Agent] Master PMO 실행 중... (전체 WBS 마스터플랜 수립)")
+    print("="*50)
+    
+    context = f"Project Name: {state.get('project_name', 'Unknown')}\nInitial Idea: {state.get('initial_idea', '')}"
+    
+    output = harness.execute(
+        role_name="pmo_skill",
+        context_data=context,
+        feedback=None,
+        previous_output=None
+    )
+    
+    wbs_path = state.get("wbs_master_plan_path", "00_wbs_master_plan.json")
+    save_artifact_to_disk(state.get("output_dir", ""), wbs_path, output)
+    print(f"✅ [PMO] 일일 자원 한도를 고려한 WBS 마스터 플랜 생성 완료: {wbs_path}")
+    
+    return state
+
 def run_pm(state: ProjectState) -> ProjectState:
-    print(f"[Agent] PM 실행 중... (재시도 횟수: {state.get('pm_retry_count', 0)})")
+    task_id = state.get("current_sprint_task_id", "Unknown")
+    print(f"[Agent] Sprint PM 실행 중... [Task: {task_id}] (재시도 횟수: {state.get('pm_retry_count', 0)})")
     feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
+    
+    # [수정] PM은 이제 전체 기획이 아닌 WBS의 특정 Task에만 집중
+    context = (
+        f"Initial Idea: {state.get('initial_idea', '')}\n"
+        f"WBS Path: {state.get('wbs_master_plan_path', '00_wbs_master_plan.json')}\n"
+        f"Current Target Task ID: {task_id}"
+    )
     
     output = harness.execute(
         role_name="pm_skill",
-        context_data=f"Initial Idea: {state['initial_idea']}",
+        context_data=context,
         feedback=feedback,
         previous_output=state.get("prd")
     )
@@ -33,7 +66,7 @@ def run_pm(state: ProjectState) -> ProjectState:
     if feedback:
         state["pm_retry_count"] += 1
 
-    save_artifact_to_disk(state["output_dir"], "01_prd.md", output)
+    save_artifact_to_disk(state.get("output_dir", ""), "01_prd.md", output)
     state["prd"] = output
     state["prd_summary"] = summary
     state["needs_revision"] = False
@@ -54,7 +87,7 @@ def run_architect(state: ProjectState) -> ProjectState:
     if feedback:
         state["architect_retry_count"] += 1
 
-    save_artifact_to_disk(state["output_dir"], "02_architecture_doc.md", output)
+    save_artifact_to_disk(state.get("output_dir", ""), "02_architecture_doc.md", output)
     state["architecture_doc"] = output
     state["architecture_summary"] = summary
     state["needs_revision"] = False
@@ -73,7 +106,7 @@ def run_tech_lead(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
-    save_artifact_to_disk(state["output_dir"], "03_tech_spec.md", output)
+    save_artifact_to_disk(state.get("output_dir", ""), "03_tech_spec.md", output)
     state["tech_spec"] = output
     state["tech_spec_summary"] = summary
     return state
@@ -81,7 +114,6 @@ def run_tech_lead(state: ProjectState) -> ProjectState:
 def run_frontend(state: ProjectState) -> ProjectState:
     print(f"[Agent] Frontend Engineer 실행 중... (빌드 루프 횟수: {state.get('developer_retry_count', 0)})")
     
-    # [핵심] 컴파일 에러 발생 시 개발 에이전트의 프롬프트에 자동 주입
     build_err = state.get("build_error_log", "")
     context = f"Tech Spec Summary: {state['tech_spec_summary']}"
     if build_err:
@@ -97,7 +129,7 @@ def run_frontend(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
-    save_artifact_to_disk(state["output_dir"], "04_frontend_code.md", output)
+    save_artifact_to_disk(state.get("output_dir", ""), "04_frontend_code.md", output)
     state["frontend_code"] = output
     state["frontend_code_summary"] = summary
     return state
@@ -105,7 +137,6 @@ def run_frontend(state: ProjectState) -> ProjectState:
 def run_backend(state: ProjectState) -> ProjectState:
     print("[Agent] Backend Engineer 실행 중...")
     
-    # [핵심] 컴파일 에러 발생 시 개발 에이전트의 프롬프트에 자동 주입
     build_err = state.get("build_error_log", "")
     context = f"Tech Spec Summary: {state['tech_spec_summary']}"
     if build_err:
@@ -121,7 +152,7 @@ def run_backend(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
-    save_artifact_to_disk(state["output_dir"], "05_backend_code.md", output)
+    save_artifact_to_disk(state.get("output_dir", ""), "05_backend_code.md", output)
     state["backend_code"] = output
     state["backend_code_summary"] = summary
     return state
@@ -144,7 +175,7 @@ def run_reviewer(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
-    save_artifact_to_disk(state["output_dir"], "06_code_review_report.md", output)
+    save_artifact_to_disk(state.get("output_dir", ""), "06_code_review_report.md", output)
     state["code_review_report"] = output
     state["code_review_report_summary"] = summary
     state["review_iteration"] += 1  
@@ -154,7 +185,6 @@ def run_qa(state: ProjectState) -> ProjectState:
     print("[Agent] QA Engineer 실행 중...")
     feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
     
-    # [신규] QA 에이전트가 빌드된 실제 폴더 경로를 인지할 수 있도록 컨텍스트 주입
     context = (
         f"PRD Summary: {state['prd_summary']}\n"
         f"Tech Spec Summary: {state['tech_spec_summary']}\n"
@@ -170,7 +200,7 @@ def run_qa(state: ProjectState) -> ProjectState:
     )
     summary = harness.summarize_context(output)
     
-    save_artifact_to_disk(state["output_dir"], "07_qa_report.md", output)
+    save_artifact_to_disk(state.get("output_dir", ""), "07_qa_report.md", output)
     state["qa_report"] = output
     state["qa_report_summary"] = summary
     state["pipeline_status"] = "completed"
@@ -179,6 +209,19 @@ def run_qa(state: ProjectState) -> ProjectState:
 # ==========================================
 # 라우팅 로직 (Conditional Edges)
 # ==========================================
+
+# [신규 추가] 초기 모드 판별 라우터
+def route_factory_mode(state: ProjectState) -> str:
+    """factory_mode 상태값에 따라 파이프라인의 진입점을 결정합니다."""
+    mode = state.get("factory_mode", "EXECUTION")
+    
+    if mode == "PLANNING":
+        print("🧭 [Router] 마스터 플랜 수립(PLANNING) 모드로 진입합니다 ➔ PMO 노드")
+        return "PMO"
+    else:
+        print(f"⚙️ [Router] 스프린트 팩토리 가동(EXECUTION) 모드로 진입합니다 (Task: {state.get('current_sprint_task_id', 'Unknown')}) ➔ PM 노드")
+        return "PM"
+
 def pm_router(state: ProjectState) -> str:
     if state.get("needs_revision"):
         if state.get("pm_retry_count", 0) >= state.get("max_review_iterations", 3):
@@ -188,9 +231,7 @@ def pm_router(state: ProjectState) -> str:
     return "proceed"
 
 def map_builder_router(state: ProjectState) -> str:
-    """CodeBuilderNode 컴파일 성공 여부에 따른 자동 피드백 루프 라우터"""
     status = state.get("build_status", "pending")
-    # 이미 CodeBuilder에서 +1 되어 넘어온 카운터를 읽기만 함
     retry_count = state.get("developer_retry_count", 0)
     max_retry = state.get("max_review_iterations", 3)
     
@@ -227,29 +268,37 @@ def reviewer_router(state: ProjectState) -> str:
 # ==========================================
 workflow = StateGraph(ProjectState)
 
+# 노드 등록
+workflow.add_node("PMO", run_pmo)  # [신규 등록]
 workflow.add_node("PM", run_pm)
 workflow.add_node("Architect", run_architect)
 workflow.add_node("Tech_Lead", run_tech_lead)
 workflow.add_node("Frontend", run_frontend)
 workflow.add_node("Backend", run_backend)
-workflow.add_node("CodeBuilder", run_code_builder) # [신규] 노드 추가
+workflow.add_node("CodeBuilder", run_code_builder)
 workflow.add_node("Reviewer", run_reviewer)
 workflow.add_node("QA", run_qa)
 
-workflow.set_entry_point("PM")
+# [수정] 정적 진입점 대신, 상태에 따라 길을 나누는 조건부 진입점 적용
+workflow.set_conditional_entry_point(
+    route_factory_mode,
+    {
+        "PMO": "PMO",
+        "PM": "PM"
+    }
+)
 
+# [신규] PLANNING 트랙의 종점 (WBS 작성 완료 후 즉시 종료)
+workflow.add_edge("PMO", END)
+
+# EXECUTION 트랙 엣지 연결
 workflow.add_conditional_edges("PM", pm_router, {"revision": "PM", "proceed": "Architect"})
 workflow.add_conditional_edges("Architect", architect_router, {"revision": "Architect", "proceed": "Tech_Lead"})
 
 workflow.add_edge("Tech_Lead", "Frontend")
 workflow.add_edge("Frontend", "Backend")
-
-# [신규] 백엔드 완료 후 코드를 수집하여 CodeBuilder 가동
 workflow.add_edge("Backend", "CodeBuilder") 
-
-# [신규] CodeBuilder 검증 결과 라우팅 연결 (실패 시 Frontend 재수정 루프, 성공 시 Reviewer행)
 workflow.add_conditional_edges("CodeBuilder", map_builder_router, {"recode": "Frontend", "proceed": "Reviewer"})
-
 workflow.add_conditional_edges("Reviewer", reviewer_router, {"rollback": "Frontend", "proceed": "QA"})
 workflow.add_edge("QA", END)
 
