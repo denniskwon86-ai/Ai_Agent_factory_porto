@@ -3,6 +3,9 @@ import re
 import subprocess
 from state import ProjectState
 
+# [신규 추가] 통합 WBS 관리 유틸리티 임포트
+from nodes.utils.wbs_manager import WBSManager 
+
 def sanitize_path(base_dir: str, file_path: str) -> str:
     """Path Traversal 공격 방지를 위한 경로 검증 및 정규화"""
     full_path = os.path.realpath(os.path.join(base_dir, file_path))
@@ -197,12 +200,31 @@ def run_code_builder(state: ProjectState) -> ProjectState:
         truncated_log = truncate_error_log(raw_error_log, head=10, tail=40)
         state["build_status"] = "failed"
         state["build_error_log"] = truncated_log
-        # [수정] 실패 시 노드 안에서 카운터를 명시적으로 +1 증가시켜 DB에 저장
+        # 실패 시 노드 안에서 카운터를 명시적으로 +1 증가시켜 DB에 저장
         state["developer_retry_count"] = state.get("developer_retry_count", 0) + 1
     else:
         print("🎉 모든 소스코드가 컴파일 과정을 무결하게 통과하여 실제 빌드가 완성되었습니다!")
         state["build_status"] = "success"
         state["build_error_log"] = ""
         state["developer_retry_count"] = 0 # 성공 시 카운터 초기화
+        
+        # ---------------------------------------------------------
+        # [신규 로직] QA 통과 및 빌드 성공 시 WBS 자동 체크아웃
+        # ---------------------------------------------------------
+        task_id = state.get("current_sprint_task_id")
+        if task_id:
+            print(f"✅ [CodeBuilder] 로컬 QA 테스트 통과. WBS 태스크 [{task_id}] 체크아웃 진행...")
+            
+            # 하드코딩 지양: state에서 경로 동적 로드 (기본값 설정)
+            wbs_path = state.get("wbs_master_plan_path", "00_wbs_master_plan.json")
+            
+            # WBSManager 인스턴스화 및 체크아웃 시도 (FileLock 기반 원자적 처리)
+            wbs_mgr = WBSManager(json_path=wbs_path)
+            checkout_result = wbs_mgr.checkout_task(task_id)
+            
+            if checkout_result:
+                print(f"🎉 [CodeBuilder] 태스크 [{task_id}] 완료! JSON 및 Excel 갱신 성공.")
+            else:
+                print(f"⚠️ [CodeBuilder] 태스크 완료 처리에 실패했습니다. (동시성 락 타임아웃 또는 JSON 누락)")
         
     return state
