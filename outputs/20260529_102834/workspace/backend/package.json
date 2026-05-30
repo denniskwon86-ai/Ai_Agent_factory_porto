@@ -1,0 +1,14 @@
+{
+  "name": "backend-fastapi",
+  "version": "1.0.0",
+  "description": "Backend for the session management application using FastAPI (Python). This file is a placeholder as the primary backend is Python-based, but included to satisfy strict output format rules.",
+  "main": "main.py",
+  "scripts": {
+    "start": "uvicorn main:app --host 0.0.0.0 --port 8000",
+    "dev": "uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["fastapi", "python", "backend", "session-management"],
+  "author": "",
+  "license": "ISC"
+}

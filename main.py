@@ -4,9 +4,11 @@ import json
 import re
 from datetime import datetime
 from dotenv import load_dotenv
+load_dotenv()
+
 from agent_graph import app, harness, ProjectState
 
-load_dotenv()
+
 
 print("⚙️ Gemini LLM E2E 파이프라인 가동 (Dynamic 429 Failover Router 탑재)")
 

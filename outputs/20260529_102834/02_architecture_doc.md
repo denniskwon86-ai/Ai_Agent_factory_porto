@@ -1,75 +1,63 @@
-```markdown
-## 1. 시스템 개요
+## 1. 전체 아키텍처 개요
 
-OMEGA ERP 시스템의 BOM, 재고, 생산 계획 데이터를 활용하여 자재 소요량(MRP)을 정확하게 계산하고, 그 결과를 직관적인 대시보드로 시각화하여 제공하는 웹 기반 시스템. 생산 계획 수립 및 자재 관리를 지원하며, 계산 결과 저장 및 내보내기 기능을 포함한다.
+본 시스템은 로컬 파일 기반 복구 세션 관리를 위한 데스크톱 애플리케이션으로 설계됩니다. 사용자 인터페이스는 직관적이고 사용하기 쉬워야 하며, 백엔드 로직은 파일 시스템과의 상호작용, 세션 정보 관리, 압축 및 암호화 기능을 담당합니다. 데이터베이스는 세션 메타데이터를 저장하여 효율적인 검색 및 관리를 지원합니다. 확장성은 로컬 파일 시스템에 국한되므로, 주요 고려사항은 **성능 (특히 파일 탐색 및 복구 속도)**과 **유지보수 용이성 (코드의 모듈화 및 명확성)**입니다.
 
-## 2. 기술 스택
+## 2. 기술 스택 (Front, Back, DB)
 
-*   **프론트엔드**: React (JavaScript/TypeScript)
-*   **백엔드**: FastAPI (Python)
-*   **데이터베이스**: OMEGA ERP DB (기존 시스템 연동)
-*   **데이터 연동**: RESTful API, DB Direct Connection (필요시)
+*   **Front-end (Desktop Application UI)**:
+    *   **기술**: Electron (Node.js 기반 크로스 플랫폼 데스크톱 앱 프레임워크)
+    *   **언어**: JavaScript / TypeScript
+    *   **UI 라이브러리**: React 또는 Vue.js (선택 사항, 개발 생산성 및 UI 복잡성에 따라 결정)
+    *   **역할**: 사용자 인터페이스 제공, 사용자 입력 처리, 백엔드 API 호출, 결과 시각화.
 
-## 3. 아키텍처 구성
+*   **Back-end (Core Logic & File System Interaction)**:
+    *   **기술**: Node.js (Electron의 런타임 환경 활용)
+    *   **언어**: JavaScript / TypeScript
+    *   **라이브러리**:
+        *   `fs-extra`: 파일 시스템 작업 (복사, 이동, 삭제, 디렉토리 생성 등)
+        *   `archiver`: ZIP, TAR.GZ 압축 생성
+        *   `crypto`: 암호화 (AES 등)
+        *   `glob` 또는 `fast-glob`: 파일/폴더 패턴 매칭 및 탐색
+        *   `uuid`: 고유 ID 생성
+    *   **역할**: 세션 자동 탐지, 파일/폴더 선택 처리, 세션 생성/구성 로직, 압축 및 암호화, 실행/복원 로직, 진행 상황 표시, 오류 처리.
 
-### 3.1. 프론트엔드 (Frontend)
+*   **Database (Session Metadata Storage)**:
+    *   **기술**: SQLite (로컬 파일 기반, 별도 서버 불필요)
+    *   **ORM/라이브러리**: `Sequelize` 또는 `TypeORM` (TypeScript 사용 시) 또는 `Knex.js`
+    *   **역할**: 복구 세션의 메타데이터 (이름, 생성일, 저장 경로, 압축/암호화 설정, 대상 파일 목록 등) 저장 및 관리.
 
-*   **기술**: React (JavaScript/TypeScript)
-*   **역할**:
-    *   사용자 인터페이스(UI) 및 사용자 경험(UX) 제공
-    *   생산 목표량 및 기간 입력 폼
-    *   자재 소요량 현황, 재고 현황 비교, 부족 자재 알림 대시보드 시각화
-    *   백엔드 API를 통한 데이터 요청 및 응답 처리
-    *   계산 결과 저장 및 CSV 내보내기 기능 트리거
+## 3. 데이터베이스 스키마 (주요 테이블 구조)
 
-### 3.2. 백엔드 API (Backend API)
+```sql
+-- 세션 정보를 저장하는 테이블
+CREATE TABLE sessions (
+    id TEXT PRIMARY KEY, -- 고유 세션 ID (UUID)
+    name TEXT NOT NULL, -- 사용자 지정 세션 이름
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, -- 세션 생성 일시
+    storage_path TEXT NOT NULL, -- 세션 파일이 저장될 기본 경로 (압축 파일 경로)
+    compression_type TEXT, -- 압축 방식 (e.g., 'zip', 'tar.gz', NULL)
+    encryption_key TEXT, -- 암호화 키 (실제로는 안전하게 관리되어야 함, 여기서는 개념적 표현)
+    is_encrypted BOOLEAN DEFAULT FALSE, -- 암호화 여부
+    description TEXT -- 세션에 대한 추가 설명 (선택 사항)
+);
 
-*   **기술**: FastAPI (Python)
-*   **역할**:
-    *   프론트엔드 요청 처리 및 응답 반환
-    *   **MRP 계산 로직 구현**: OMEGA ERP로부터 수집된 데이터를 기반으로 자재 소요량 자동 계산 (정확도 99% 이상 보장)
-    *   OMEGA ERP 시스템과의 데이터 연동 및 조회 관리
-    *   계산 결과 저장 및 관리
-    *   시각화 데이터 및 부족 자재 알림 데이터 가공 및 제공
-    *   CSV 파일 생성 및 제공
+-- 각 세션에 포함된 파일/폴더 정보를 저장하는 테이블
+CREATE TABLE session_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL, -- sessions 테이블의 id와 연결
+    item_path TEXT NOT NULL, -- 원본 파일 또는 폴더의 절대 경로
+    item_type TEXT NOT NULL, -- 'file' 또는 'directory'
+    FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+);
 
-### 3.3. 데이터 계층 및 외부 시스템 연동 (Data Layer & External System Integration)
-
-*   **기술**: OMEGA ERP DB (기존), Python DB Connector (FastAPI에서 사용)
-*   **역할**:
-    *   **OMEGA ERP DB**: BOM 데이터, 재고 현황, 생산 계획 데이터의 원천 시스템
-    *   **연동 방식**:
-        *   **Direct DB Connection**: FastAPI 백엔드에서 OMEGA ERP DB에 직접 연결하여 필요한 데이터를 조회. (보안 및 성능 최적화 필요)
-        *   **API Gateway/Middleware**: OMEGA ERP가 외부 연동 API를 제공하는 경우, 해당 API를 통해 데이터 연동.
-        *   **ETL/Batch Processing**: 대량의 데이터 또는 주기적인 동기화가 필요한 경우, 별도의 ETL 프로세스를 통해 데이터를 추출하여 백엔드 내부 캐시 또는 임시 저장소에 저장 후 활용 가능.
-
-## 4. 데이터 흐름
-
-1.  **사용자 입력**: 프론트엔드에서 생산 목표량 및 기간을 입력하고 MRP 계산을 요청.
-2.  **API 요청**: 프론트엔드가 백엔드 API에 MRP 계산 요청 (생산 목표, 기간 포함).
-3.  **ERP 데이터 조회**: 백엔드 API는 OMEGA ERP DB에서 BOM 데이터, 재고 현황, 생산 계획 데이터를 조회.
-4.  **MRP 계산**: 백엔드 API는 조회된 데이터를 기반으로 MRP 계산 로직을 수행하여 자재 소요량을 산출.
-5.  **결과 반환**: 백엔드 API는 계산된 자재 소요량 목록, 시각화 데이터, 부족 자재 알림 등을 프론트엔드에 반환.
-6.  **데이터 시각화**: 프론트엔드는 반환된 데이터를 대시보드에 시각화하여 표시.
-7.  **결과 저장/내보내기**: 사용자가 요청 시, 백엔드 API는 계산 결과를 저장하거나 CSV 파일로 생성하여 제공.
-
-## 5. 핵심 아키텍처 고려사항
-
-*   **MRP 계산 정확도 (99% 이상)**:
-    *   복잡한 MRP 계산 로직을 FastAPI 백엔드에서 견고하게 구현.
-    *   단위 테스트 및 통합 테스트를 통해 계산 로직의 정확성 철저히 검증.
-    *   OMEGA ERP 데이터의 정합성 확보 및 데이터 유효성 검증 로직 포함.
-*   **대시보드 로딩 시간 (3초 이내)**:
-    *   **백엔드**: FastAPI의 비동기 처리(async/await)를 활용하여 I/O 바운드 작업 최적화. MRP 계산 로직의 성능 최적화 (알고리즘, 데이터 구조). 자주 조회되는 ERP 데이터에 대한 캐싱 전략 도입 (예: Redis). DB 쿼리 최적화.
-    *   **프론트엔드**: React 컴포넌트의 효율적인 렌더링. 데이터 페칭 최적화 (필요한 데이터만 요청). 번들 사이즈 최적화 및 코드 스플리팅.
-*   **OMEGA ERP 연동**:
-    *   기존 OMEGA ERP 시스템에 미치는 영향 최소화.
-    *   데이터 동기화 주기 및 방식 (실시간 vs 배치) 결정 및 구현.
-    *   OMEGA ERP DB 접근에 대한 보안 및 접근 제어 정책 수립.
-*   **확장성**:
-    *   향후 사용자 증가 및 기능 확장을 고려한 모듈화된 아키텍처 설계.
-    *   FastAPI의 마이크로서비스 지향적 특성을 활용하여 필요시 서비스 분리 용이성 확보.
-*   **데이터 무결성 및 일관성**:
-    *   MRP 계산에 사용되는 OMEGA ERP 데이터의 무결성 및 일관성 유지 전략 수립.
-    *   데이터 변경 감지 및 동기화 메커니즘 고려.
-```
+-- 복구 작업 기록을 저장하는 테이블 (선택 사항, 감사 및 디버깅 용이)
+CREATE TABLE recovery_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    operation_type TEXT NOT NULL, -- 'restore', 'create' 등
+    status TEXT NOT NULL, -- 'success', 'failed', 'in_progress'
+    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    end_time DATETIME,
+    error_details TEXT, -- 오류 발생 시 상세 정보
+    FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+);
