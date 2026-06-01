@@ -92,8 +92,8 @@ if data:
                 return 'background-color: #e6ffed; color: #1e7e34; font-weight: bold'
             return 'background-color: #fff5eb; color: #fd7e14; font-weight: bold'
         
-        # 스타일 적용하여 데이터프레임 출력
-        st.dataframe(display_df.style.map(color_status, subset=['상태(Status)']), use_container_width=True)
+        # 스타일 적용하여 데이터프레임 출력 (최신 Streamlit API 규격으로 변경)
+        st.dataframe(display_df.style.map(color_status, subset=['상태(Status)']), width='stretch')
         
         # ---------------------------------------------------------
         # 5. 아코디언 뷰: 태스크 상세 스코프 (Scope 락 통제 확인용)

@@ -23,13 +23,13 @@ class AgentHarness:
         self.llm_pro = ChatGoogleGenerativeAI(
             model=self.current_model_name, 
             temperature=0.2, 
-            timeout=30.0, 
+            timeout=120.0, 
             max_retries=0
         )
         self.llm_flash = ChatGoogleGenerativeAI(
             model=self.current_model_name, 
             temperature=0.1, 
-            timeout=30.0, 
+            timeout=120.0, 
             max_retries=0
         )
 

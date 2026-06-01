@@ -35,3 +35,6 @@ Output-File: 05_backend_code.md
 <file path="backend/main.py">
 (여기에 실제 파이썬 코드 작성)
 </file>
+
+# [CRITICAL: 빌드 통과 필수 조건]
+코드를 생성할 때 src/ 폴더 내부의 로직뿐만 아니라, 정적 빌드(npm run build)가 완벽하게 구동되기 위한 최상위 설정 파일들(index.html, vite.config.ts, tsconfig.json)을 절대 생략하지 말고 반드시 함께 생성하여 XML 태그로 출력하십시오. 이 파일들이 누락되면 시스템 컴파일이 100% 실패합니다.

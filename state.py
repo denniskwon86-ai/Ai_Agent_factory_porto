@@ -1,37 +1,54 @@
-import operator
-from typing import TypedDict, Annotated, List, Optional
-from langchain_core.messages import BaseMessage
+from typing import TypedDict, List, Optional
 
 class ProjectState(TypedDict):
-    """
-    범용 다중 에이전트 소프트웨어 팩토리(v3.2) 상태 메모리 객체
-    LangGraph의 SqliteSaver와 결합하여 체크포인터에 영구 저장됩니다.
-    """
+    # ==========================================
+    # 1. 기존 공통 상태 및 파이프라인 제어
+    # ==========================================
+    initial_idea: str
+    human_feedback_queue: List[str]
     
-    # ---------------------------------------------------------
-    # 1. LangGraph 코어 메시지 버스
-    # ---------------------------------------------------------
-    messages: Annotated[List[BaseMessage], operator.add]
+    pipeline_status: str
+    error_log: str
+    output_dir: str             # [복구 완료] 파일 저장 물리 경로 (WinError 3 해결 핵심)
+    
+    review_iteration: int
+    max_review_iterations: int
+    pm_retry_count: int         
+    architect_retry_count: int  
+    developer_retry_count: int  # 빌드 자동 피드백 루프 카운터
+    needs_revision: bool        
 
-    # ---------------------------------------------------------
-    # 2. [신규] PMO & WBS 자원 관리 (투 트랙 아키텍처)
-    # ---------------------------------------------------------
-    factory_mode: str               # "PLANNING" (마스터플랜 수립 모드) | "EXECUTION" (스프린트 가동 모드)
-    wbs_master_plan_path: str       # WBS JSON 파일 물리 경로 (기본값: "00_wbs_master_plan.json")
-    current_sprint_task_id: Optional[str]  # 현재 가동 중인 태스크 ID (예: "E2E-01"). thread_id로도 사용됨
-    accumulated_token_usage: int    # 파이프라인 누적 토큰 사용량 (TPM 한도 방어 및 예산 추적용)
+    # ==========================================
+    # 2. [신규 추가] PMO & WBS 자원 관리 (투 트랙 아키텍처)
+    # ==========================================
+    factory_mode: str               # "PLANNING" (마스터플랜) | "EXECUTION" (스프린트 가동)
+    wbs_master_plan_path: str       # WBS JSON 파일 경로
+    current_sprint_task_id: Optional[str] # 현재 가동 중인 Task ID (thread_id로 사용)
+    accumulated_token_usage: int    # 누적 토큰 사용량 (대시보드 예산 추적용)
+    project_name: str               # 프로젝트 명칭
 
-    # ---------------------------------------------------------
-    # 3. 프로젝트 메타데이터
-    # ---------------------------------------------------------
-    project_name: str               # 프로젝트 명칭 (예: "제조업 E2E 경영 시뮬레이터")
-    project_output_path: str        # 코드가 물리적으로 생성될 루트 디렉토리
+    # ==========================================
+    # 3. 각 에이전트 산출물 및 요약 메모리
+    # ==========================================
+    prd: str
+    prd_summary: str
+    architecture_doc: str
+    architecture_summary: str
+    tech_spec: str
+    tech_spec_summary: str
+    frontend_code: str
+    frontend_code_summary: str
+    backend_code: str
+    backend_code_summary: str
+    code_review_report: str
+    code_review_report_summary: str
+    qa_report: str
+    qa_report_summary: str
 
-    # ---------------------------------------------------------
-    # 4. [기존] Code Builder 자가 치유(Self-Healing) 인프라
-    # ---------------------------------------------------------
-    # 라우터 증발 버그를 해결하고 물리 노드에서 영구 기억하도록 밖으로 빼낸 카운터
-    developer_retry_count: int      
-    build_status: str               # "pending" | "success" | "failed"
-    build_error_log: str            # Head+Tail 기법으로 압축된 에러 로그 (컨텍스트 슬라이싱)
-    executable_entry_point: str     # 컴파일 검증을 위한 진입점 파일 (예: "main.py", "index.js")
+    # ==========================================
+    # 4. CodeBuilderNode 물리적 빌드 상태
+    # ==========================================
+    project_output_path: str        # 생성된 실제 프로젝트 경로 (outputs/TIMESTAMP/workspace)
+    build_status: str               # "success" | "failed" | "pending"
+    build_error_log: str            # 빌드 실패 시 에러 로그 (Dev 에이전트 피드백용)
+    executable_entry_point: str     # 실행 진입점 경로
