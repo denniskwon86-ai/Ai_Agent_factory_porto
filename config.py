@@ -25,7 +25,6 @@ MAX_BUILD_RETRIES = 3      # 코드 빌드 실패 시 최대 롤백 횟수
 CONTEXT_MAX_LENGTH = 10000
 PREVIOUS_OUTPUT_MAX_LENGTH = 8000
 SUMMARY_MAX_LENGTH = 4000
-
 # ==========================================
 # 4. LLM 엔진 설정 (모델 불가지성 보장)
 # ==========================================
@@ -36,20 +35,20 @@ ENGINE_TIERS = {
         "flash": "gemini-2.5-flash-lite",
     },
     "groq": {
-        "pro":   "llama3-70b-8192",
-        "flash": "mixtral-8x7b-32768",
+        "pro":   "llama-3.3-70b-versatile", # [수정] 퇴역한 llama3-70b-8192 모델을 최신 주력 모델로 교체
+        "flash": "llama-3.1-8b-instant",    # [수정] mixtral 대신 최신 고속 모델로 교체
     }
 }
 
 # 폴백(Fallback) 순서 리스트
-LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "llama3-70b-8192"]
-LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash-lite", "mixtral-8x7b-32768"]
+LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "llama-3.3-70b-versatile"]
+LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash-lite", "llama-3.1-8b-instant"]
 
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)
 MODEL_CONTEXT_LIMITS = {
-    "gemini-2.5-pro":         600000,
-    "gemini-2.5-flash-lite":   75000,
-    "llama3-70b-8192":          6000,  # 8k 제한 방어
-    "mixtral-8x7b-32768":      24000,  # 32k 제한 방어
+    "gemini-2.5-pro":          600000,
+    "gemini-2.5-flash-lite":    75000,
+    "llama-3.3-70b-versatile":   6000,  # 8k 제한 방어
+    "llama-3.1-8b-instant":      6000,  # 8k 제한 방어
 }
-CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정 (안전 마진 상향)
+CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
