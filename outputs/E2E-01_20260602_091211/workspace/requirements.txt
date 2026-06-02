@@ -1,0 +1,6 @@
+fastapi==0.111.0
+uvicorn==0.29.0
+SQLAlchemy==2.0.29
+pydantic==1.10.13 # Pinned to v1 to avoid pydantic-core native build issues on Windows
+python-dotenv==1.0.1
+# psycopg2-binary==2.9.9 # Uncomment if using PostgreSQL

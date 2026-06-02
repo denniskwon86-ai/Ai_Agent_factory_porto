@@ -76,15 +76,34 @@ def run_code_builder(state: ProjectState) -> ProjectState:
         return state
 
     print("📦 2. 프로젝트 타입 감지 및 격리 빌드 환경 구성 중...")
-    is_python_project = False
-    is_node_project = False
     
-    for root, dirs, files in os.walk(workspace_dir):
-        if "requirements.txt" in files or "main.py" in files:
-            is_python_project = True
-        if "package.json" in files:
-            is_node_project = True
+    # [수정] state에 명시된 project_type 최우선 참조
+    declared_type = state.get("project_type", "").lower()
+    
+    if declared_type:
+        is_python_project = declared_type in ("python", "fullstack")
+        is_node_project   = declared_type in ("node", "fullstack")
+        print(f"  📋 선언된 프로젝트 타입: {declared_type}")
+    else:
+        # [수정] 선언값 누락 시, os.walk 대신 루트 레벨만 안전하게 폴백(Fallback) 감지
+        print("  ⚠️ project_type 미선언. 최상위 루트 레벨 파일로 폴백 감지합니다.")
+        is_python_project = False
+        is_node_project = False
+        
+        try:
+            root_files = os.listdir(workspace_dir)
+            is_python_project = "requirements.txt" in root_files or "main.py" in root_files
+            is_node_project   = "package.json" in root_files
+            
+            # 백엔드/프론트엔드 폴더가 분리되어 있을 경우를 대비한 추가 검사
+            if not is_python_project and os.path.exists(os.path.join(workspace_dir, "backend")):
+                is_python_project = True
+            if not is_node_project and os.path.exists(os.path.join(workspace_dir, "frontend")):
+                is_node_project = True
+        except Exception as e:
+            print(f"  ❌ 파일 시스템 감지 중 오류: {e}")
 
+    # 진입점(Entry Point) 확인
     if os.path.exists(os.path.join(workspace_dir, "main.py")):
         state["executable_entry_point"] = os.path.join(workspace_dir, "main.py")
     elif os.path.exists(os.path.join(workspace_dir, "backend", "main.py")):
@@ -98,7 +117,8 @@ def run_code_builder(state: ProjectState) -> ProjectState:
         print("  🐍 Python 프로젝트 감지: 독립 가상환경(venv)을 구성합니다.")
         venv_dir = os.path.join(workspace_dir, ".venv")
         try:
-            subprocess.run(["python", "-m", "venv", venv_dir], check=True, capture_output=True, timeout=60)
+            subprocess.run(["python", "-m", "venv", venv_dir], check=True, capture_output=True, encoding="utf-8",    # 👈 [신규 추가] 윈도우 인코딩 충돌 방지
+    errors="replace", timeout=60)
             
             if os.name == "nt":
                 pip_path = os.path.join(venv_dir, "Scripts", "pip")
@@ -117,6 +137,8 @@ def run_code_builder(state: ProjectState) -> ProjectState:
                     [pip_path, "install", "-r", req_path, "--no-input"],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",    # 👈 [신규 추가] 윈도우 인코딩 충돌 방지
+                    errors="replace",    # 👈 [신규 추가] 깨진 문자는 강제로 변환하여 다운 방지
                     timeout=300
                 )
                 if result.returncode != 0:
@@ -132,6 +154,8 @@ def run_code_builder(state: ProjectState) -> ProjectState:
                         [python_path, "-m", "py_compile", state["executable_entry_point"]],
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",    # 👈 [신규 추가] 윈도우 인코딩 충돌 방지
+                        errors="replace",    # 👈 [신규 추가] 깨진 문자는 강제로 변환하여 다운 방지
                         timeout=30
                     )
                     if syntax_result.returncode != 0:
@@ -161,6 +185,8 @@ def run_code_builder(state: ProjectState) -> ProjectState:
                 cwd=node_target_dir,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",    # 👈 [신규 추가] 윈도우 인코딩 충돌 방지
+                errors="replace",    # 👈 [신규 추가] 깨진 문자는 강제로 변환하여 다운 방지
                 timeout=300
             )
             if result.returncode != 0:

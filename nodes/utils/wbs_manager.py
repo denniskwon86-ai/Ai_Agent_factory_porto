@@ -58,35 +58,31 @@ class WBSManager:
             return False
 
     def _export_to_excel(self, wbs_data: dict):
-        """내부 메서드: JSON 데이터를 Pandas로 읽어 Excel로 변환 및 백분율 서식 적용"""
+        """내부 메서드: JSON 데이터를 Pandas로 읽어 Excel로 단일 패스(Atomic) 변환"""
         tasks = wbs_data.get("tasks", [])
         if not tasks:
             return
 
-        # 진척률 파이썬 내부 계산 (Lazy Evaluation 방어)
         total_tasks = len(tasks)
         completed_tasks = sum(1 for t in tasks if t.get("status") == "DONE")
         progress_rate = completed_tasks / total_tasks if total_tasks > 0 else 0.0
 
-        # DataFrame 변환
         df = pd.DataFrame(tasks)
         
-        # 1차 쓰기 (Pandas Engine)
-        df.to_excel(self.excel_path, index=False, sheet_name="WBS_Master")
+        # [수정] ExcelWriter를 사용하여 단일 패스로 메모리 상에서 작업 후 한 번에 저장
+        with pd.ExcelWriter(self.excel_path, engine='openpyxl') as writer:
+            # 1. 먼저 빈 데이터프레임으로 시트를 생성하고 (1행부터 시작)
+            df.to_excel(writer, index=False, sheet_name="WBS_Master", startrow=3)
+            
+            # 2. 생성된 워크북과 워크시트 객체에 접근
+            wb = writer.book
+            ws = writer.sheets["WBS_Master"]
 
-        # 2차 쓰기 (Openpyxl을 이용한 메타데이터 및 서식 주입)
-        wb = load_workbook(self.excel_path)
-        ws = wb["WBS_Master"]
-
-        # 상단에 3행을 삽입하여 요약 정보 배치
-        ws.insert_rows(1, 3)
-        ws["A1"] = f"프로젝트명: {wbs_data.get('project_name', 'Unknown')}"
-        ws["A2"] = "전체 진척률:"
-        
-        # 엑셀 수식이 아닌 계산된 실수(Float)를 직접 주입
-        progress_cell = ws["B2"]
-        progress_cell.value = progress_rate
-        # 엑셀 열기 전에도 완벽하게 %로 보이도록 서식만 적용
-        progress_cell.number_format = '0.00%' 
-
-        wb.save(self.excel_path)
+            # 3. 상단 메타데이터 주입
+            ws["A1"] = f"프로젝트명: {wbs_data.get('project_name', 'Unknown')}"
+            ws["A2"] = "전체 진척률:"
+            
+            progress_cell = ws["B2"]
+            progress_cell.value = progress_rate
+            progress_cell.number_format = '0.00%' 
+        # with 블록을 빠져나갈 때 자동으로 단 한 번의 원자적 save()가 호출됨.

@@ -1,3 +1,9 @@
+---
+Model: pro
+Agent: Master PMO
+Output-File: 00_wbs_master_plan.json
+---
+
 # Master PMO Agent (Project Management Office)
 
 ## 🎯 Role

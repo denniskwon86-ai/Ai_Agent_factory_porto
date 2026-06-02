@@ -2,33 +2,31 @@ from typing import TypedDict, List, Optional
 
 class ProjectState(TypedDict):
     # ==========================================
-    # 1. 기존 공통 상태 및 파이프라인 제어
+    # 1. 공통 제어
     # ==========================================
     initial_idea: str
     human_feedback_queue: List[str]
-    
     pipeline_status: str
     error_log: str
-    output_dir: str             # [복구 완료] 파일 저장 물리 경로 (WinError 3 해결 핵심)
-    
+    output_dir: str
     review_iteration: int
     max_review_iterations: int
-    pm_retry_count: int         
-    architect_retry_count: int  
-    developer_retry_count: int  # 빌드 자동 피드백 루프 카운터
-    needs_revision: bool        
+    pm_retry_count: int
+    architect_retry_count: int
+    developer_retry_count: int
+    needs_revision: bool
 
     # ==========================================
-    # 2. [신규 추가] PMO & WBS 자원 관리 (투 트랙 아키텍처)
+    # 2. PMO & WBS 자원 관리
     # ==========================================
-    factory_mode: str               # "PLANNING" (마스터플랜) | "EXECUTION" (스프린트 가동)
-    wbs_master_plan_path: str       # WBS JSON 파일 경로
-    current_sprint_task_id: Optional[str] # 현재 가동 중인 Task ID (thread_id로 사용)
-    accumulated_token_usage: int    # 누적 토큰 사용량 (대시보드 예산 추적용)
-    project_name: str               # 프로젝트 명칭
+    factory_mode: str               
+    wbs_master_plan_path: str       
+    current_sprint_task_id: Optional[str] 
+    accumulated_token_usage: int    
+    project_name: str               
 
     # ==========================================
-    # 3. 각 에이전트 산출물 및 요약 메모리
+    # 3. 각 에이전트 산출물 메모리
     # ==========================================
     prd: str
     prd_summary: str
@@ -46,9 +44,52 @@ class ProjectState(TypedDict):
     qa_report_summary: str
 
     # ==========================================
-    # 4. CodeBuilderNode 물리적 빌드 상태
+    # 4. CodeBuilder & 환경 상태
     # ==========================================
-    project_output_path: str        # 생성된 실제 프로젝트 경로 (outputs/TIMESTAMP/workspace)
-    build_status: str               # "success" | "failed" | "pending"
-    build_error_log: str            # 빌드 실패 시 에러 로그 (Dev 에이전트 피드백용)
-    executable_entry_point: str     # 실행 진입점 경로
+    project_output_path: str        
+    build_status: str               
+    build_error_log: str            
+    executable_entry_point: str     
+    project_type: str               # [신규] Tech Lead가 명시적으로 선언 ("python" | "node" | "fullstack")
+
+
+def create_initial_state(**overrides) -> ProjectState:
+    """
+    파이프라인 초기 상태를 안전하게 생성하는 헬퍼 함수.
+    모든 필드에 기본값을 보장하여 런타임 KeyError를 원천 차단합니다.
+    """
+    defaults: ProjectState = {
+        "initial_idea": "",
+        "human_feedback_queue": [],
+        "pipeline_status": "idle",
+        "error_log": "",
+        "output_dir": "",
+        "review_iteration": 0,
+        "max_review_iterations": 1,
+        "pm_retry_count": 0,
+        "architect_retry_count": 0,
+        "developer_retry_count": 0,
+        "needs_revision": False,
+        
+        "factory_mode": "EXECUTION",
+        "wbs_master_plan_path": "00_wbs_master_plan.json",
+        "current_sprint_task_id": None,
+        "accumulated_token_usage": 0,
+        "project_name": "",
+        
+        "prd": "", "prd_summary": "",
+        "architecture_doc": "", "architecture_summary": "",
+        "tech_spec": "", "tech_spec_summary": "",
+        "frontend_code": "", "frontend_code_summary": "",
+        "backend_code": "", "backend_code_summary": "",
+        "code_review_report": "", "code_review_report_summary": "",
+        "qa_report": "", "qa_report_summary": "",
+        
+        "project_output_path": "",
+        "build_status": "pending",
+        "build_error_log": "",
+        "executable_entry_point": "",
+        "project_type": "",
+    }
+    defaults.update(overrides)
+    return defaults
