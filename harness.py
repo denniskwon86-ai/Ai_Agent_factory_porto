@@ -3,182 +3,153 @@ import time
 import yaml
 import re
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_groq import ChatGroq  # 👈 [신규 추가] Groq 라이브러리
+from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, HumanMessage
+import config
 
 class AgentHarness:
-    def __init__(self, model_names: list = None):
-        self.fallback_list = model_names or [
-            "gemini-2.5-flash-lite",
-            "gemini-2.0-flash-lite-001",
-            "gemini-2.0-flash-lite",
-            "gemini-2.5-flash"
-        ]
-        self.exhausted_models = set()
-        self.current_model_name = self.fallback_list[0]
-        print(f"⚙️ [Harness Core] 초기 메인 엔진 가동: {self.current_model_name}")
-        self._init_current_llm()
+    def __init__(self):
+        self.pro_fallback_list = config.LLM_PRO_FALLBACK_LIST
+        self.flash_fallback_list = config.LLM_FLASH_FALLBACK_LIST
+        self.pro_idx = 0
+        self.flash_idx = 0
         self.skills_dir = "skills"
+        self._init_current_llm()
 
     def _init_current_llm(self):
-        # 1. 메인 엔진: 구글 Gemini 초기화
-        self.llm_pro = ChatGoogleGenerativeAI(
-            model=self.current_model_name, 
-            temperature=0.2, 
-            timeout=300.0, 
-            max_retries=0
-        )
-        self.llm_flash = ChatGoogleGenerativeAI(
-            model=self.current_model_name, 
-            temperature=0.1, 
-            timeout=300.0, 
-            max_retries=0
-        )
-
-        # 2. 보조(Fallback) 엔진: Groq 초기화 (키가 있을 때만 활성화)
-        groq_key = os.environ.get("GROQ_API_KEY")
-        self.use_groq = bool(groq_key)
+        """현재 인덱스에 맞춰 Gemini 또는 Groq 클라이언트를 동적으로 생성합니다."""
+        pro_model = self.pro_fallback_list[self.pro_idx]
+        flash_model = self.flash_fallback_list[self.flash_idx]
         
-        if self.use_groq:
-            print("🚀 [System] Groq API Key 감지됨. 듀얼 코어 하이브리드 엔진을 스탠바이합니다.")
-            self.groq_pro = ChatGroq(
-                model="llama3-70b-8192", # Architect/PM 등 복잡한 추론용 대형 모델
-                temperature=0.2, 
-                max_retries=0, 
-                timeout=120.0, 
-                api_key=groq_key
-            )
-            self.groq_flash = ChatGroq(
-                model="mixtral-8x7b-32768", # 코드/문서 작성용 빠르고 컨텍스트 긴 모델
-                temperature=0.1, 
-                max_retries=0, 
-                timeout=120.0, 
-                api_key=groq_key
-            )
+        print(f"⚙️ [Harness Core] 현재 엔진 ➔ PRO: {pro_model} / FLASH: {flash_model}")
 
-    def _rotate_model(self):
-        self.exhausted_models.add(self.current_model_name)
-        available = [m for m in self.fallback_list if m not in self.exhausted_models]
+        # PRO 모델 인스턴스화
+        if "gemini" in pro_model:
+            self.llm_pro = ChatGoogleGenerativeAI(model=pro_model, temperature=0.2, timeout=120.0, max_retries=0)
+        else:
+            self.llm_pro = ChatGroq(model=pro_model, temperature=0.2, timeout=120.0, max_retries=0)
+
+        # FLASH 모델 인스턴스화
+        if "gemini" in flash_model:
+            self.llm_flash = ChatGoogleGenerativeAI(model=flash_model, temperature=0.1, timeout=120.0, max_retries=0)
+        else:
+            self.llm_flash = ChatGroq(model=flash_model, temperature=0.1, timeout=120.0, max_retries=0)
+
+    def _rotate_model(self, is_pro: bool):
+        """할당량 초과 시 예비 모델로 크로스오버(스위칭)합니다."""
+        if is_pro:
+            self.pro_idx += 1
+            if self.pro_idx >= len(self.pro_fallback_list):
+                raise Exception("⛔ [CRITICAL ERROR] PRO 예비 모델 한도 전면 소진")
+        else:
+            self.flash_idx += 1
+            if self.flash_idx >= len(self.flash_fallback_list):
+                raise Exception("⛔ [CRITICAL ERROR] FLASH 예비 모델 한도 전면 소진")
         
-        if not available:
-            print("\n⛔ [CRITICAL ERROR] 패닉! 준비된 모든 예비 모델의 일일 무료 한도가 완전히 소진되었습니다.")
-            raise Exception("QuotaExhaustedAllModelsException")
-            
-        self.current_model_name = available[0]
-        print(f"🔄 [동적 라우터] -> 차순위 대안 모델인 '{self.current_model_name}'(으)로 즉시 엔진을 교체합니다.")
+        print(f"🔄 [동적 라우터] 서킷 브레이커 가동. 엔진 교체 및 핫스와핑 진행 중...")
         self._init_current_llm()
 
-    def _safe_invoke(self, is_pro: bool, skill_body: str, context: str) -> str:
-        """
-        LLM 호출 및 에러 핸들링. 
-        [하이브리드 로직] 구글 API 실패 시 Groq로 즉시 우회(Fallback)합니다.
-        """
-        import time
-        retry_count = 0
-        current_context = context
+    def _get_safe_char_limit(self, is_pro: bool) -> int:
+        """모델별 토큰 한도를 기반으로 동적 문자열 압축 허용치를 계산합니다."""
+        model_name = self.pro_fallback_list[self.pro_idx] if is_pro else self.flash_fallback_list[self.flash_idx]
+        token_limit = config.MODEL_CONTEXT_LIMITS.get(model_name, 6000)
+        return int(token_limit * config.CHARS_PER_TOKEN_ESTIMATE)
 
+    def _safe_invoke(self, is_pro: bool, skill_body: str, current_context: str) -> str:
+        """System/User 메시지 분리 및 HumanMessage 전용 다이나믹 압축 방어막"""
+        retry_count = 0
+        
         while True:
-            full_prompt = f"{skill_body}\n\n{current_context}"
+            # 페르소나(System)와 작업 데이터(Human)를 엄격히 분리
+            messages = [
+                SystemMessage(content=skill_body),
+                HumanMessage(content=current_context)
+            ]
+            
             llm = self.llm_pro if is_pro else self.llm_flash
 
             try:
-                # [1지망] 구글 Gemini 호출 시도
-                response = llm.invoke(full_prompt)
-                time.sleep(6) # 구글 Rate limit 방어
+                response = llm.invoke(messages)
+                time.sleep(4) 
                 return response.content
 
             except Exception as e:
                 error_msg = str(e).lower()
-                
-                # 타임아웃(504)이나 할당량 초과(429) 감지 시
-                if "429" in error_msg or "exhausted" in error_msg or "timeout" in error_msg or "timed out" in error_msg or "deadline_exceeded" in error_msg or "504" in error_msg:
-                    
-                    # 🚀 [비상 가동] Groq API로 즉시 우회 (Fallback)
-                    if getattr(self, 'use_groq', False):
-                        print("🔄 [Fallback] 구글 API 병목/타임아웃 감지! 초고속 Groq 엔진으로 즉시 우회하여 생성합니다...")
-                        try:
-                            fallback_llm = self.groq_pro if is_pro else self.groq_flash
-                            groq_response = fallback_llm.invoke(full_prompt)
-                            time.sleep(2) # Groq는 속도가 빠르므로 대기시간 단축
-                            return groq_response.content
-                        except Exception as groq_e:
-                            print(f"⚠️ [Fallback 경고] Groq 엔진도 응답하지 않습니다 (재시도 루프 진입): {groq_e}")
-                            # Groq도 뻗었으면 아래의 기존 구글 재시도/압축 로직으로 자연스럽게 넘어감
-
-                    # [기존 로직] 구글 일일 할당량 완전 소진 시 모델 교체
+                if "429" in error_msg or "exhausted" in error_msg or "timeout" in error_msg or "limit" in error_msg:
+                    # 일일 할당량 소진 에러 감지 시 즉각 스위칭
                     if "perday" in error_msg or "per_day" in error_msg or "free_tier_requests" in error_msg:
-                        self._rotate_model()
+                        self._rotate_model(is_pro)
                         retry_count = 0
                         continue
                     else:
                         retry_count += 1
                         if retry_count > 3:
-                            print("🚨 [압축 방어] context만 50% 압축. skill_body(지침)는 안전하게 보존합니다.")
-                            half = len(current_context) // 4
-                            current_context = (
-                                current_context[:half]
-                                + "\n\n... [context 중략 - 안전 방어막 가동] ...\n\n"
-                                + current_context[-half:]
-                            )
+                            print("🚨 [압축 방어] 토큰 오버플로우 감지. 작업 데이터(HumanMessage)를 동적 압축합니다.")
+                            char_limit = self._get_safe_char_limit(is_pro)
+                            if len(current_context) > char_limit:
+                                half = char_limit // 3
+                                # SystemMessage(skill_body)는 건드리지 않고 오직 작업 데이터만 압축
+                                current_context = current_context[:half] + "\n\n...[중략 (안전 방어막)]...\n\n" + current_context[-half:]
                             retry_count = 0
                             time.sleep(5)
                             continue
-                        print(f"⏳ [병목 감지] 60초 대기 후 재시도... (시도: {retry_count}/3)")
-                        time.sleep(60)
+                        
+                        print(f"⏳ [병목 감지] 30초 대기 후 재시도... ({retry_count}/3)")
+                        time.sleep(30)
                         continue
                 else:
                     raise e
 
     def _parse_skill_document(self, role_name: str) -> dict:
         file_path = os.path.join(self.skills_dir, f"{role_name}.md")
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"스킬 문서 없음: {file_path}")
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                return {"meta": yaml.safe_load(parts[1]), "body": parts[2].strip()}
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            return {"meta": yaml.safe_load(parts[1]), "body": parts[2].strip()}
         return {"meta": {"Model": "pro"}, "body": content}
 
     def execute(self, role_name, context_data, feedback=None, previous_output=None) -> str:
-        """
-        스킬 문서를 읽어 프롬프트를 조립하고 안전하게 실행합니다.
-        [수정] skill_body와 context를 분리하여 _safe_invoke에 전달합니다.
-        """
         skill_data = self._parse_skill_document(role_name)
-        is_pro = (skill_data["meta"].get("Model", "pro").lower() != "flash")
-
-        # 1. 절대 압축 금지 영역 (역할 지침)
-        skill_body = f"다음 지침에 따라 임무를 수행하십시오:\n\n{skill_data['body']}"
-
-        # 2. 압축 허용 영역 (컨텍스트 및 이전 산출물)
-        safe_context = context_data
-        if len(safe_context) > 10000:
-            safe_context = "...(상단 생략)...\n" + safe_context[-10000:]
-
-        context = f"[Context]\n{safe_context}\n"
-
-        if previous_output:
-            safe_prev = previous_output
-            if len(safe_prev) > 8000:
-                safe_prev = "...(생략)...\n" + safe_prev[-8000:]
-            context += f"\n[Previous Output]\n{safe_prev}\n"
-            
-        if feedback:
-            context += f"\n[Feedback]\n수정(Delta Update) 지시:\n{feedback}\n"
-
-        return self._safe_invoke(is_pro, skill_body, context)
-
-    def summarize_context(self, text: str) -> str:
-        if not text:
-            return ""
-            
-        safe_text = text
-        if len(safe_text) > 4000:
-            safe_text = safe_text[:2000] + "\n\n... (중간 생략) ...\n\n" + safe_text[-2000:]
-            
-        # [수정] 지침(skill_body)과 대상 텍스트(context)를 명확히 분리하여 안전하게 호출
-        skill_body = "다음 텍스트를 파이프라인의 다음 에이전트가 이해하기 쉽도록 핵심만 500자 이내의 마크다운 불릿 포인트로 요약하십시오."
-        context_data = f"[요약 대상 텍스트]\n{safe_text}"
         
-        return self._safe_invoke(False, skill_body, context_data)
+        # 명시적 TIER_MAP 기반 티어 할당
+        model_tier = skill_data["meta"].get("Model", "pro").lower()
+        TIER_MAP = {"pro": True, "flash": False, "lite": False}
+        is_pro = TIER_MAP.get(model_tier, True)
+
+        skill_body = f"다음 지침에 따라 임무를 수행하십시오:\n\n{skill_data['body']}"
+        
+        context = f"[Context]\n{context_data}\n"
+        if previous_output:
+            context += f"\n[Previous Output]\n{previous_output}\n"
+        if feedback:
+            context += f"\n[Feedback]\n수정 지시:\n{feedback}\n"
+
+        output = self._safe_invoke(is_pro, skill_body, context)
+
+        # 코딩 에이전트의 Zero-Chatter 강제 (XML 태그 외의 찌꺼기 제거)
+        if role_name in ("frontend_skill", "backend_skill"):
+            clean_blocks = re.findall(r'<file\s[^>]*>.*?</file>', output, re.DOTALL)
+            if clean_blocks:
+                output = "\n".join(clean_blocks)
+                print(f"  🧹 [Chatter Stripper] XML 태그 외 텍스트 제거 완료 ({role_name})")
+
+        return output
+
+    def summarize_context(self, context: str) -> str:
+        """
+        컨텍스트가 너무 길 경우 요약본을 생성합니다. (Head+Tail 기법 적용 유지)
+        """
+        if not context or len(context) < 3000:
+            return context
+            
+        print("  ✂️ [Diet] 컨텍스트 크기가 커서 요약을 진행합니다.")
+        
+        # Head + Tail 기법: 앞 2000자, 뒤 2000자만 추출하여 토큰 폭발 방어
+        if len(context) > 6000:
+            context = context[:2000] + "\n\n...[중간 생략]...\n\n" + context[-2000:]
+            
+        skill_body = "당신은 제공된 문서를 핵심만 간결하게 요약하는 전문 요약 에이전트입니다. 코드 마크다운과 핵심 로직은 훼손하지 마십시오."
+        
+        # 요약은 속도와 비용을 위해 flash 모델 사용
+        return self._safe_invoke(is_pro=False, skill_body=skill_body, current_context=context)

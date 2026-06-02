@@ -1,7 +1,8 @@
 # prompts.py
 
-# 하드코딩을 지양하고 역할별 프롬프트를 중앙에서 관리합니다.
-# 추후 시스템 확장이나 역할 수정 시 이 파일만 유지보수하면 됩니다.
+# [DEPRECATED] 이 파일은 더 이상 사용되지 않습니다.
+# 실제 에이전트 프롬프트는 skills/*.md 파일에서 관리됩니다.
+# 참고: harness.py → _parse_skill_document()
 
 AGENT_PROMPTS = {
     "PM": """당신은 수석 IT Product Manager입니다. 
