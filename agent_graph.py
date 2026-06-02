@@ -235,18 +235,24 @@ def run_backend(state: ProjectState) -> ProjectState:
     state["backend_code_summary"] = harness.summarize_context(output)
     return state
 
+# agent_graph.py 내부 수정 (기존 run_reviewer 함수 덮어쓰기)
+
 def run_reviewer(state: ProjectState) -> ProjectState:
     print(f"[Agent] Reviewer 실행 중... (코드 품질 리포트 작성)")
-    feedback = state["human_feedback_queue"].pop() if state["human_feedback_queue"] else None
+    feedback = state.get("human_feedback_queue", [])
+    current_feedback = feedback.pop() if feedback else None
+    if feedback != state.get("human_feedback_queue"):
+        state["human_feedback_queue"] = feedback
+
     context = (
-        f"Arch Summary: {state['architecture_summary']}\n"
-        f"Frontend Code: {state['frontend_code_summary']}\n"
-        f"Backend Code: {state['backend_code_summary']}"
+        f"Arch Summary: {state.get('architecture_summary', '')}\n"
+        f"Frontend Code: {state.get('frontend_code_summary', '')}\n"
+        f"Backend Code: {state.get('backend_code_summary', '')}"
     )
-    output = harness.execute(role_name="reviewer_skill", context_data=context, feedback=feedback, previous_output=state.get("code_review_report"))
+    output = harness.execute(role_name="reviewer_skill", context_data=context, feedback=current_feedback, previous_output=state.get("code_review_report"))
     
-    # 스프린트 완료 시 WBS 상태를 DONE으로 업데이트
-    task_id = state.get("current_sprint_task_id")
+    # 1. 스프린트 완료 시 WBS 상태를 DONE으로 업데이트
+    task_id = state.get("current_sprint_task_id", "unknown_task")
     wbs_path = state.get("wbs_master_plan_path")
     if task_id and wbs_path:
         from nodes.utils.wbs_manager import WBSManager
@@ -255,6 +261,20 @@ def run_reviewer(state: ProjectState) -> ProjectState:
     save_artifact_to_disk(state.get("output_dir", ""), config.OUTPUT_ARTIFACTS["review"], output)
     state["code_review_report"] = output
     state["code_review_report_summary"] = harness.summarize_context(output)
+    
+    # 2. [신규] Git Layer 자동화 커밋 및 State 연동
+    from nodes.utils.git_manager import GitManager
+    workspace_root = state.get("workspace_root", "./workspace")
+    git_mgr = GitManager(workspace_root)
+    
+    commit_hash = git_mgr.commit_sprint_changes(task_id, state)
+    if commit_hash:
+        if "git_info" not in state:
+            state["git_info"] = {}
+        state["git_info"]["last_commit_hash"] = commit_hash
+        state["git_info"]["last_commit_timestamp"] = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
+        state["git_info"]["last_commit_task"] = task_id
+        
     return state
 
 # ==========================================
