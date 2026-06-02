@@ -1,6 +1,7 @@
 import json
 import os
 import pandas as pd
+import filelock
 from openpyxl import load_workbook
 from filelock import FileLock, Timeout
 
@@ -86,3 +87,23 @@ class WBSManager:
             progress_cell.value = progress_rate
             progress_cell.number_format = '0.00%' 
         # with 블록을 빠져나갈 때 자동으로 단 한 번의 원자적 save()가 호출됨.
+   
+    @staticmethod
+    def set_status(file_path: str, task_id: str, new_status: str):
+        """[신규] WBS 태스크의 상태(IN_PROGRESS, DONE 등)를 원자적으로 업데이트합니다."""
+        lock_path = f"{file_path}.lock"
+        lock = filelock.FileLock(lock_path, timeout=10)
+        with lock:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    wbs_data = json.load(f)
+                
+                for task in wbs_data.get("tasks", []):
+                    if task.get("task_id") == task_id:
+                        task["status"] = new_status
+                        break
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(wbs_data, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                print(f"⚠️ WBS 상태 업데이트 실패: {e}")    
