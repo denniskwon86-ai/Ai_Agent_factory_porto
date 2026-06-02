@@ -125,6 +125,30 @@ def run_architect(state: ProjectState) -> ProjectState:
     state["needs_revision"] = False
     return state
 
+# 🚨 [신규 추가] main.py의 버그를 완벽히 우회하는 물리적 HOTL(대기) 노드
+def run_hotl(state: ProjectState) -> ProjectState:
+    print("\n" + "="*60)
+    print("⏸️ [HOTL] 파이프라인 일시 정지 (Architect 설계 확인 및 승인 대기)")
+    print("="*60)
+    user_input = input("\n📝 [설계 승인(Enter)] / [수정 피드백 입력] / [종료(exit)]:\n> ").strip()
+    
+    if user_input.lower() == 'exit':
+        print("🛑 시스템을 종료합니다.")
+        import sys
+        sys.exit(0)
+    
+    if user_input:
+        q = state.get("human_feedback_queue", [])
+        q.append(user_input)
+        state["human_feedback_queue"] = q
+        state["needs_revision"] = True
+        print("🔄 피드백이 접수되었습니다. Architect 노드로 롤백하여 재설계합니다...")
+    else:
+        state["needs_revision"] = False
+        print("▶️ 설계가 승인되었습니다. Tech Lead 노드로 진행합니다...")
+        
+    return state
+
 def run_tech_lead(state: ProjectState) -> ProjectState:
     task_id = state.get("current_sprint_task_id", "Unknown")
     print(f"\n[Agent] Tech Lead 실행 중... [Task: {task_id}]")
@@ -221,7 +245,7 @@ def run_reviewer(state: ProjectState) -> ProjectState:
     )
     output = harness.execute(role_name="reviewer_skill", context_data=context, feedback=feedback, previous_output=state.get("code_review_report"))
     
-    # [Phase 4 추가 적용] 스프린트 완료 시 WBS 상태를 DONE으로 업데이트
+    # 스프린트 완료 시 WBS 상태를 DONE으로 업데이트
     task_id = state.get("current_sprint_task_id")
     wbs_path = state.get("wbs_master_plan_path")
     if task_id and wbs_path:
@@ -310,6 +334,7 @@ workflow = StateGraph(ProjectState)
 workflow.add_node("Master_PM", run_master_pm)
 workflow.add_node("Master_PMO", run_master_pmo)
 workflow.add_node("Architect", run_architect)
+workflow.add_node("HOTL", run_hotl) # 🚨 물리적 HOTL 노드 추가
 workflow.add_node("Tech_Lead", run_tech_lead)
 workflow.add_node("Frontend", run_frontend)
 workflow.add_node("Backend", run_backend)
@@ -331,7 +356,8 @@ workflow.add_edge("Master_PM", "Master_PMO")
 workflow.add_edge("Master_PMO", END)
 
 # Track 1 흐름
-workflow.add_conditional_edges("Architect", architect_router, {"revision": "Architect", "proceed": "Tech_Lead"})
+workflow.add_edge("Architect", "HOTL") # Architect 종료 후 무조건 HOTL 진입
+workflow.add_conditional_edges("HOTL", architect_router, {"revision": "Architect", "proceed": "Tech_Lead"}) # HOTL 입력 결과에 따라 분기
 workflow.add_edge("Tech_Lead", "Frontend")
 workflow.add_edge("Frontend", "Backend")
 workflow.add_edge("Backend", "CodeBuilder") 
@@ -345,9 +371,8 @@ conn = sqlite3.connect(config.PIPELINE_DB_FILE, check_same_thread=False)
 memory = SqliteSaver(conn)
 
 app = workflow.compile(
-    checkpointer=memory,
-    # [수정] 무한 롤백 트랩을 피하기 위해 after 대신 before 사용
-    interrupt_before=["Tech_Lead"] 
+    checkpointer=memory
+    # 🚨 LangGraph 엔진의 interrupt 기능 완전 제거 (버그 원천 차단)
 )
 
 if __name__ == "__main__":
