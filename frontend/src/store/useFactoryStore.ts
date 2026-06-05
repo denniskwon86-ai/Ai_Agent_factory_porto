@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+// 백엔드의 state_models.py와 동기화되는 프론트엔드 타입 정의
 export interface ProjectState {
   project_name: string;
   factory_mode: string;
@@ -8,6 +9,14 @@ export interface ProjectState {
   needs_revision: boolean;
   human_feedback_queue: any[];
   developer_retry_count: number;
+  
+  // 🚨 PreviewPanel 출력을 위한 에이전트 산출물 속성 추가
+  prd_summary: string;
+  architecture_summary: string;
+  tech_spec_summary: string;
+  frontend_code_summary: string;
+  backend_code_summary: string;
+  code_review_report_summary: string;
 }
 
 interface FactoryStore {
