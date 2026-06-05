@@ -76,10 +76,11 @@ async def run_reviewer(state: ProjectState) -> Dict[str, Any]:
     prompt = _load_skill("reviewer_skill")
     output = await gateway.aexecute(state, prompt, is_heavy=False)
     
-    # Git Layer 자동 커밋
+    # Git Layer 자동 커밋 및 WBS 매니저 호출
     from nodes.utils.git_manager import GitManager
+    from nodes.utils.wbs_manager import WBSManager  # 🚨 WBS 매니저 임포트 추가
+    import os
     
-    # state가 LangGraph에 의해 Dict로 풀렸을 경우와 Pydantic 객체로 들어왔을 경우를 모두 방어
     workspace_root = state.get("workspace_root", "./workspace") if isinstance(state, dict) else state.workspace_root
     task_id = state.get("current_sprint_task_id", "") if isinstance(state, dict) else state.current_sprint_task_id
     state_dict = state if isinstance(state, dict) else state.model_dump()
@@ -87,12 +88,16 @@ async def run_reviewer(state: ProjectState) -> Dict[str, Any]:
     git_mgr = GitManager(workspace_root)
     commit_hash = git_mgr.commit_sprint_changes(task_id, state_dict)
     
-    # 🚨 Pydantic 객체 자체가 아닌 순수 Dict로 변환하여 LangGraph 상태망에 안전하게 병합
     git_info = state.get("git_info", {}) if isinstance(state, dict) else state.git_info.model_dump()
-    
     if commit_hash:
         git_info["last_commit_hash"] = commit_hash
         git_info["last_commit_task"] = task_id
+
+    # 🚨 [추가 로직] 스프린트 최종 완료 시 WBS 마스터플랜 파일에 'DONE' 상태 원자적 기록
+    wbs_path = os.path.join(workspace_root, "00_wbs_master_plan.json")
+    if os.path.exists(wbs_path):
+        wbs_mgr = WBSManager(json_path=wbs_path)
+        wbs_mgr.checkout_task(task_id)
 
     return {
         "code_review_report_summary": output,

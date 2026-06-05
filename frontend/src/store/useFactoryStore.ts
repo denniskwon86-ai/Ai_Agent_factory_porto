@@ -52,7 +52,16 @@ export const useFactoryStore = create<FactoryStore>()((set) => ({
           state: { 
             ...(prev.state || {}), 
             needs_revision: true,
-            current_sprint_task_id: data.payload.task_id // 🚨 핵심 조치: 백엔드 이벤트에서 직접 Task ID를 구출해 주입!
+            current_sprint_task_id: "data.payload.task_id" // 🚨 핵심 조치: 백엔드 이벤트에서 직접 Task ID를 구출해 주입!
+          } as ProjectState
+        }));
+      
+      } else if (data.type === 'SPRINT_COMPLETED') {
+        // 🚨 [추가된 로직] 스프린트가 완전히 종료되면, 현재 진행 중인 Task ID를 비워 UI 잠금을 해제합니다.
+        set((prev) => ({
+          state: { 
+            ...(prev.state || {}), 
+            current_sprint_task_id: "" 
           } as ProjectState
         }));
       }
