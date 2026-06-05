@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional, TypedDict
 from datetime import datetime, timezone
 
-from state import ProjectState
+from state_models import ProjectState
 
 class PatchResult(TypedDict):
     success: bool
