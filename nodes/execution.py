@@ -78,14 +78,21 @@ async def run_reviewer(state: ProjectState) -> Dict[str, Any]:
     
     # Git Layer 자동 커밋
     from nodes.utils.git_manager import GitManager
-    git_mgr = GitManager(state.workspace_root)
-    commit_hash = git_mgr.commit_sprint_changes(state.current_sprint_task_id, state.model_dump())
     
-    git_info = state.git_info
+    # state가 LangGraph에 의해 Dict로 풀렸을 경우와 Pydantic 객체로 들어왔을 경우를 모두 방어
+    workspace_root = state.get("workspace_root", "./workspace") if isinstance(state, dict) else state.workspace_root
+    task_id = state.get("current_sprint_task_id", "") if isinstance(state, dict) else state.current_sprint_task_id
+    state_dict = state if isinstance(state, dict) else state.model_dump()
+    
+    git_mgr = GitManager(workspace_root)
+    commit_hash = git_mgr.commit_sprint_changes(task_id, state_dict)
+    
+    # 🚨 Pydantic 객체 자체가 아닌 순수 Dict로 변환하여 LangGraph 상태망에 안전하게 병합
+    git_info = state.get("git_info", {}) if isinstance(state, dict) else state.git_info.model_dump()
+    
     if commit_hash:
-        # Pydantic v2 모델 내부 필드 갱신용 객체 조립
-        git_info.last_commit_hash = commit_hash
-        git_info.last_commit_task = state.current_sprint_task_id
+        git_info["last_commit_hash"] = commit_hash
+        git_info["last_commit_task"] = task_id
 
     return {
         "code_review_report_summary": output,
