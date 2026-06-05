@@ -71,14 +71,16 @@ async def run_code_builder(state: ProjectState) -> Dict[str, Any]:
     }
 
 async def run_reviewer(state: ProjectState) -> Dict[str, Any]:
-    """[Track 1] 스프린트 릴리즈 노트 작성 및 자동 커밋 (Flash 모델 배정)"""
+    """[Track 1] 스프린트 릴리즈 노트 작성 및 자동 커밋"""
     print("📝 [Agent] Reviewer 비동기 문서화 진행 중...")
-    prompt = _load_skill("reviewer_skill")
+    
+    # 🚨 임시: _load_skill 모듈이 없거나 설정이 다를 수 있으니 안전하게 프롬프트 직접 주입
+    prompt = "현재 작성된 모든 코드를 리뷰하고 릴리즈 노트를 작성하십시오."
     output = await gateway.aexecute(state, prompt, is_heavy=False)
     
-    # Git Layer 자동 커밋 및 WBS 매니저 호출
     from nodes.utils.git_manager import GitManager
-    from nodes.utils.wbs_manager import WBSManager  # 🚨 WBS 매니저 임포트 추가
+    from nodes.utils.wbs_manager import WBSManager
+    from core.broadcaster import factory_broadcaster
     import os
     
     workspace_root = state.get("workspace_root", "./workspace") if isinstance(state, dict) else state.workspace_root
@@ -93,11 +95,12 @@ async def run_reviewer(state: ProjectState) -> Dict[str, Any]:
         git_info["last_commit_hash"] = commit_hash
         git_info["last_commit_task"] = task_id
 
-    # 🚨 [추가 로직] 스프린트 최종 완료 시 WBS 마스터플랜 파일에 'DONE' 상태 원자적 기록
+    # 🚨 [핵심 로직] 리뷰가 끝나면 WBS 상태를 DONE으로 바꾸고 프론트엔드로 신호 발송
     wbs_path = os.path.join(workspace_root, "00_wbs_master_plan.json")
     if os.path.exists(wbs_path):
         wbs_mgr = WBSManager(json_path=wbs_path)
-        wbs_mgr.checkout_task(task_id)
+        wbs_mgr.complete_task(task_id)
+        await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "status": "DONE"})
 
     return {
         "code_review_report_summary": output,
