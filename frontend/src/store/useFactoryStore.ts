@@ -20,14 +20,14 @@ interface FactoryStore {
   state: ProjectState | null;
   logs: any[];
   isConnected: boolean;
-  
-  // 🚨 [추가] WBS 및 서킷 브레이커 전역 상태
   wbsData: any;
   isWbsError: boolean;
   wbsErrorCount: number;
-  
+  completed_agents: string[];
+
   connectSSE: () => void;
   fetchWBS: () => Promise<void>;
+  clearSprintData: () => void;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -39,49 +39,48 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   wbsData: null,
   isWbsError: false,
   wbsErrorCount: 0,
+  completed_agents: [],
 
-  // 🚨 능동적 API 폴링 함수 (서킷 브레이커 내장)
+  // 🚨 [핵심 요건 반영] PM님의 상시 관전 지시에 따라 state(코드, 리뷰 기록)는 절대 지우지 않습니다.
+  // 새 스프린트 시작 시 '에이전트 노선도'를 위해 completed_agents 배열만 롤백합니다.
+  clearSprintData: () => set({ completed_agents: [] }),
+
   fetchWBS: async () => {
-    // 이미 에러가 3번 나서 차단기가 내려갔다면 더 이상 요청하지 않음
     if (get().isWbsError) return;
-    
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/wbs`);
       if (!res.ok) throw new Error("Fetch Fail");
       const result = await res.json();
       if (result.status === "success") {
-        set({ wbsData: result.data, wbsErrorCount: 0 }); // 성공 시 에러 카운트 초기화
+        set({ wbsData: result.data, wbsErrorCount: 0 });
       }
     } catch (error) {
       const newCount = get().wbsErrorCount + 1;
-      // 3회 이상 실패 시 서킷 브레이커 작동
       set({ wbsErrorCount: newCount, isWbsError: newCount >= 3 });
-      console.error("🚨 WBS 로드 실패. 누적 에러:", newCount);
     }
   },
 
   connectSSE: () => {
     const eventSource = new EventSource(`${API_BASE_URL}/ws/timeline`);
 
-    eventSource.onopen = () => {
-      console.log('✅ AI Factory 관제 센터 통신망 연결 완료');
-      set({ isConnected: true });
-    };
+    eventSource.onopen = () => set({ isConnected: true });
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       
       if (data.type === 'NODE_COMPLETED') {
-        set((prev) => ({ state: { ...(prev.state || {}), ...data.payload.state } as ProjectState }));
+        set((prev) => ({ 
+            state: { ...(prev.state || {}), ...data.payload.state } as ProjectState,
+            completed_agents: [...prev.completed_agents, data.payload.node] 
+        }));
       } else if (data.type === 'HOTL_PAUSED') {
         set((prev) => ({
           state: { ...(prev.state || {}), needs_revision: true, current_sprint_task_id: data.payload.task_id } as ProjectState
         }));
       } else if (data.type === 'SPRINT_COMPLETED') {
         set((prev) => ({ state: { ...(prev.state || {}), current_sprint_task_id: "" } as ProjectState }));
-        get().fetchWBS(); // 스프린트 종료 시 WBS 갱신
+        get().fetchWBS();
       } else if (data.type === 'WBS_UPDATED') {
-        // 🚨 [핵심] 백엔드에서 WBS 상태가 바뀌었다고 방송(SSE)하면, 그때만 딱 1번 WBS를 새로 읽어옴!
         get().fetchWBS();
       }
       
@@ -91,7 +90,6 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     };
 
     eventSource.onerror = () => {
-      console.error('🚨 통신 단절. 재연결을 시도합니다...');
       set({ isConnected: false });
       eventSource.close();
       setTimeout(() => useFactoryStore.getState().connectSSE(), 5000);

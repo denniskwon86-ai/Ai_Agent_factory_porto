@@ -6,8 +6,7 @@ from typing import Optional
 
 from core.async_orchestrator import orchestrator
 
-# 최상위 main.py에서 prefix="/api/v1/factory"를 처리하므로 여기서는 순수 라우터만 선언합니다.
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/factory")
 
 class SprintStartRequest(BaseModel):
     task_id: str
@@ -16,6 +15,10 @@ class SprintStartRequest(BaseModel):
 class HOTLResumeRequest(BaseModel):
     task_id: str
     feedback: Optional[str] = ""
+
+# 🚨 [신규 추가] 피드백 요청 페이로드
+class RevisionRequest(BaseModel):
+    feedback: str
 
 @router.post("/sprint/start")
 async def start_sprint(req: SprintStartRequest):
@@ -30,6 +33,16 @@ async def resume_from_hotl(req: HOTLResumeRequest):
     if not success:
         raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")
     return {"status": "resumed", "task_id": req.task_id}
+
+# 🚨 [신규 추가] PM의 피드백을 받아 WBS에 신규 태스크를 생성하는 엔드포인트
+@router.post("/sprint/revision")
+async def create_revision_task(req: RevisionRequest):
+    from nodes.utils.wbs_manager import WBSManager
+    wbs_mgr = WBSManager()
+    task_id = wbs_mgr.add_revision_task(req.feedback)
+    if not task_id:
+        raise HTTPException(status_code=500, detail="WBS를 찾을 수 없습니다. (Track 0 기획 선행 필요)")
+    return {"status": "success", "task_id": task_id}
 
 @router.get("/wbs")
 async def get_wbs_master_plan():

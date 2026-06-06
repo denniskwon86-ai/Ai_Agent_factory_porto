@@ -40,3 +40,25 @@ class WBSManager:
             if task.get('task_id') == task_id:
                 task['status'] = 'DONE'
         self._write_wbs(data)
+
+    # 🚨 [신규 추가] PM의 피드백을 애자일 백로그(새로운 태스크)로 WBS 최하단에 주입합니다.
+    def add_revision_task(self, feedback: str) -> str:
+        data = self._read_wbs()
+        if not data:
+            return ""
+        
+        tasks = data.get('tasks', [])
+        # 기존 REV- 태스크 개수를 세어서 번호를 땁니다. (예: REV-001)
+        rev_count = sum(1 for t in tasks if str(t.get('task_id', '')).startswith('REV-'))
+        new_task_id = f"REV-{(rev_count + 1):03d}"
+        
+        new_task = {
+            "task_id": new_task_id,
+            "title": f"UI/UX 및 기능 피드백 반영 (Revision {rev_count + 1})",
+            "goal": feedback,
+            "status": "TODO"
+        }
+        
+        tasks.append(new_task)
+        self._write_wbs(data)
+        return new_task_id

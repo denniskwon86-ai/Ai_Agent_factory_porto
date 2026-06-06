@@ -13,6 +13,7 @@ const PIPELINE = [
 
 export default function ControlPanel() {
   const [idea, setIdea] = useState("");
+  const [feedback, setFeedback] = useState(""); // 🚨 피드백 입력 상태 추가
   const [isStarting, setIsStarting] = useState(false);
   
   const state = useFactoryStore((s) => s.state);
@@ -33,15 +34,10 @@ export default function ControlPanel() {
   const progressPercent = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
 
   const handleStartPlanning = async () => {
-    if (!idea.trim()) {
-      alert("💡 기획 아이디어를 입력해주세요.");
-      return;
-    }
+    if (!idea.trim()) return alert("💡 기획 아이디어를 입력해주세요.");
     setIsStarting(true);
     
-    // 🚨 [원인 해결 2] LangGraph 쓰레드가 옛날 기억을 살려내지 못하도록 매번 고유한 타임스탬프 ID 부여
     const uniquePlanningId = `PLANNING_${Date.now()}`;
-    
     try {
       await fetch(`${API_BASE_URL}/api/v1/factory/sprint/start`, {
         method: 'POST',
@@ -68,7 +64,7 @@ export default function ControlPanel() {
     if (!confirm(`[${targetTask.task_id}] ${targetTask.title}\n해당 스프린트를 가동하시겠습니까?`)) return;
     
     setIsStarting(true);
-    clearSprintData();
+    clearSprintData(); // 에이전트 노선도만 리셋, 코드는 유지!
 
     try {
       await fetch(`${API_BASE_URL}/api/v1/factory/sprint/start`, {
@@ -77,15 +73,37 @@ export default function ControlPanel() {
         body: JSON.stringify({
           task_id: targetTask.task_id,
           project_state_payload: {
+            ...(state || {}), // 🚨 [핵심] 빈 깡통이 아니라 이전까지 짜놓은 코드를 그대로 에이전트에게 물려줍니다.
             schema_version: "5.1.0",
             project_name: wbsData.project_name,
             current_sprint_task_id: targetTask.task_id,
-            factory_mode: "EXECUTION", 
+            factory_mode: targetTask.task_id.startsWith('REV-') ? "REVISION" : "EXECUTION", 
           }
         })
       });
     } catch (error) {
       console.error("스프린트 가동 실패:", error);
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  // 🚨 [신규] 고객 피드백 접수 처리기
+  const handleSubmitFeedback = async () => {
+    if (!feedback.trim()) return alert("수정 사항을 입력해주세요.");
+    setIsStarting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/sprint/revision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback })
+      });
+      if (res.ok) {
+        setFeedback("");
+        fetchWBS(); // WBS를 새로고침하여 추가된 태스크(REV-XXX)를 UI에 띄움
+      }
+    } catch (error) {
+      console.error("피드백 전송 실패:", error);
     } finally {
       setIsStarting(false);
     }
@@ -216,6 +234,29 @@ export default function ControlPanel() {
                 </div>
               );
             })}
+
+            {/* 🚨 [신규] 완료된 태스크가 1개라도 있으면 피드백 데스크 노출 */}
+            {doneTasks > 0 && (
+              <div className="mt-4 pt-4 border-t border-gray-700 flex flex-col gap-2">
+                <label className="text-sm font-semibold text-yellow-500">🎯 3. 고객 리뷰 및 수정 지시 (Track 2)</label>
+                <p className="text-xs text-gray-400">Live Preview를 확인하고 변경하고 싶은 디자인이나 기능을 입력하세요. WBS에 피드백 태스크가 자동 발행됩니다.</p>
+                <textarea 
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  disabled={isStarting || !!state?.current_sprint_task_id}
+                  placeholder="예: 헤더 배경색을 다크 그레이로 바꾸고, 우측 상단에 로그인 버튼을 크게 만들어줘."
+                  className="w-full h-24 bg-gray-950 border border-gray-700 rounded p-3 text-sm focus:outline-none focus:border-yellow-500 resize-none"
+                />
+                <button 
+                  onClick={handleSubmitFeedback}
+                  disabled={isStarting || !feedback.trim() || !!state?.current_sprint_task_id}
+                  className="mt-1 w-full bg-yellow-600 hover:bg-yellow-500 disabled:bg-gray-700 font-bold py-3 rounded transition-colors text-white"
+                >
+                  {isStarting ? "처리 중..." : "📨 피드백 백로그 발행 (WBS 추가)"}
+                </button>
+              </div>
+            )}
+            
           </div>
         )}
       </div>
