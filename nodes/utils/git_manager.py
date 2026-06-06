@@ -10,13 +10,16 @@ class GitManager:
         self._init_if_needed()
 
     def _run_cmd(self, cmd: list) -> subprocess.CompletedProcess:
-        """Git 명령어 실행 래퍼"""
+        """
+        [Hotfix] Windows cp949 인코딩 충돌 방지를 위해 encoding="utf-8" 강제 적용
+        """
         try:
             return subprocess.run(
                 cmd,
                 cwd=self.workspace_root,
                 capture_output=True,
                 text=True,
+                encoding="utf-8", # 🚨 Windows 환경 한글 깨짐 방지 핵심 조치
                 check=False
             )
         except FileNotFoundError:
@@ -31,7 +34,6 @@ class GitManager:
             self._run_cmd(["git", "config", "user.name", "AI Factory Agent"])
             self._run_cmd(["git", "config", "user.email", "agent@aifactory.local"])
             
-            # 초기 커밋용 더미 파일 (빈 폴더 커밋 방지)
             readme = self.workspace_root / "README.md"
             if not readme.exists():
                 readme.write_text("# AI Factory Unified Workspace\n자동 생성된 워크스페이스입니다.", encoding="utf-8")
@@ -42,19 +44,14 @@ class GitManager:
 
     def commit_sprint_changes(self, task_id: str, state: Dict[str, Any]) -> Optional[str]:
         """변경된 파일을 스테이징하고 ProjectState 정보를 바탕으로 커밋"""
-        # 1. 변경사항 확인
         status = self._run_cmd(["git", "status", "--porcelain"])
         if not status.stdout.strip():
             print("ℹ️ [GitManager] 변경된 파일이 없어 커밋을 건너뜁니다.")
             return None
 
-        # 2. 모든 변경사항 스테이징
         self._run_cmd(["git", "add", "."])
 
-        # 3. 커밋 메시지 생성 (ProjectState 기반)
         file_index = state.get("file_index", {})
-        
-        # 이번 태스크에 의해 수정된 파일들의 요약 취합
         change_summaries = []
         for path, meta in file_index.items():
             if meta.get("last_modified_task") == task_id and meta.get("change_summary"):
@@ -69,10 +66,8 @@ class GitManager:
 
         commit_msg = f"feat({task_id}): {summary_title}\n\n[AI Factory Auto Commit]\n{body}"
 
-        # 4. 커밋 실행
         res = self._run_cmd(["git", "commit", "-m", commit_msg])
         if res.returncode == 0:
-            # 5. 최신 커밋 해시 추출
             log_res = self._run_cmd(["git", "rev-parse", "HEAD"])
             commit_hash = log_res.stdout.strip()
             print(f"📦 [GitManager] Git 커밋 완료 (Hash: {commit_hash[:7]})")
