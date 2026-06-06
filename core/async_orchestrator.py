@@ -1,4 +1,6 @@
 import asyncio
+import os
+import shutil
 from typing import Optional, Dict, Any
 from core.agent_graph import app as langgraph_engine
 from core.broadcaster import factory_broadcaster
@@ -11,11 +13,22 @@ class AsyncFactoryOrchestrator:
         self.active_tasks: Dict[str, asyncio.Task] = {}
 
     async def start_sprint(self, task_id: str, project_state_payload: dict) -> bool:
-        """새로운 스프린트를 가동합니다."""
-        # 🚨 [추가 로직] 스프린트 시작 시 WBS를 IN_PROGRESS로 바꾸고 프론트엔드에 실시간 갱신 신호 발송
-        wbs_mgr = WBSManager()
-        wbs_mgr.checkout_task(task_id)
-        await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "status": "IN_PROGRESS"})
+        """새로운 스프린트(또는 신규 기획)를 가동합니다."""
+        
+        # 🚨 [원인 해결 1] 신규 기획(PLANNING) 시작 시 '과거의 유령'을 없애기 위해 workspace 폴더를 완전히 폭파 후 재생성
+        if task_id.startswith("PLANNING"):
+            workspace_path = project_state_payload.get("workspace_root", "./workspace")
+            if os.path.exists(workspace_path):
+                # 권한 오류 방지를 위해 ignore_errors=True 옵션 적용
+                shutil.rmtree(workspace_path, ignore_errors=True)
+            os.makedirs(workspace_path, exist_ok=True)
+            print(f"🧹 [Orchestrator] 신규 기획을 위해 {workspace_path} 폴더를 초기화했습니다.")
+
+        # 신규 기획이 아닐 때만 WBS 상태를 업데이트 (PLANNING 트랙은 WBS가 아직 없으므로 패스)
+        if not task_id.startswith("PLANNING"):
+            wbs_mgr = WBSManager()
+            wbs_mgr.checkout_task(task_id)
+            await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "status": "IN_PROGRESS"})
 
         config = {"configurable": {"thread_id": f"sprint_{task_id}"}}
         task = asyncio.create_task(self._run_sprint_loop(config, project_state_payload, task_id))
@@ -29,7 +42,11 @@ class AsyncFactoryOrchestrator:
                 for node_name, state_data in event.items():
                     await factory_broadcaster.broadcast("NODE_COMPLETED", {"node": node_name, "state": state_data})
                     
-            await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id})
+            snapshot = await langgraph_engine.aget_state(config)
+            if snapshot.next:
+                await factory_broadcaster.broadcast("HOTL_PAUSED", {"task_id": task_id})
+            else:
+                await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id})
         except Exception as e:
             print(f"🚨 [Orchestrator] Sprint Loop Error: {e}")
 
@@ -71,7 +88,11 @@ class AsyncFactoryOrchestrator:
                 for node_name, state_data in event.items():
                     await factory_broadcaster.broadcast("NODE_COMPLETED", {"node": node_name, "state": state_data})
                     
-            await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id})
+            snapshot = await langgraph_engine.aget_state(config)
+            if snapshot.next:
+                await factory_broadcaster.broadcast("HOTL_PAUSED", {"task_id": task_id})
+            else:
+                await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id})
         except Exception as e:
             print(f"🚨 [Orchestrator] Resume Stream Error: {e}")
 

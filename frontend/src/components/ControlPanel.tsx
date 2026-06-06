@@ -3,6 +3,14 @@ import { useFactoryStore } from '../store/useFactoryStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+const PIPELINE = [
+  { id: 'architect', label: 'Architect' },
+  { id: 'tech_lead', label: 'Tech Lead' },
+  { id: 'backend_worker', label: 'Backend' },
+  { id: 'code_builder', label: 'Builder' },
+  { id: 'reviewer', label: 'Reviewer' }
+];
+
 export default function ControlPanel() {
   const [idea, setIdea] = useState("");
   const [isStarting, setIsStarting] = useState(false);
@@ -11,13 +19,15 @@ export default function ControlPanel() {
   const wbsData = useFactoryStore((s) => s.wbsData);
   const isWbsError = useFactoryStore((s) => s.isWbsError);
   const fetchWBS = useFactoryStore((s) => s.fetchWBS);
+  
+  const completedAgents = useFactoryStore((s) => s.completed_agents);
+  const isWaitingForHuman = useFactoryStore((s) => s.state?.needs_revision);
+  const clearSprintData = useFactoryStore((s) => s.clearSprintData);
 
-  // 컴포넌트 마운트 시 1회만 호출 (이후 갱신은 SSE가 알아서 처리함)
   useEffect(() => {
     fetchWBS();
   }, [fetchWBS]);
 
-  // 🎯 진척률 계산 로직
   const totalTasks = wbsData?.tasks?.length || 0;
   const doneTasks = wbsData?.tasks?.filter((t: any) => t.status === 'DONE').length || 0;
   const progressPercent = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
@@ -28,12 +38,16 @@ export default function ControlPanel() {
       return;
     }
     setIsStarting(true);
+    
+    // 🚨 [원인 해결 2] LangGraph 쓰레드가 옛날 기억을 살려내지 못하도록 매번 고유한 타임스탬프 ID 부여
+    const uniquePlanningId = `PLANNING_${Date.now()}`;
+    
     try {
       await fetch(`${API_BASE_URL}/api/v1/factory/sprint/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          task_id: "PLANNING_TRACK",
+          task_id: uniquePlanningId,
           project_state_payload: {
             schema_version: "5.1.0",
             project_name: "Auto-Generated Project",
@@ -54,6 +68,8 @@ export default function ControlPanel() {
     if (!confirm(`[${targetTask.task_id}] ${targetTask.title}\n해당 스프린트를 가동하시겠습니까?`)) return;
     
     setIsStarting(true);
+    clearSprintData();
+
     try {
       await fetch(`${API_BASE_URL}/api/v1/factory/sprint/start`, {
         method: 'POST',
@@ -75,6 +91,49 @@ export default function ControlPanel() {
     }
   };
 
+  const renderPipelineTracker = () => {
+    const currentAgentIdx = PIPELINE.findIndex(a => !completedAgents.map(ca => ca.toLowerCase()).includes(a.id));
+
+    return (
+      <div className="mt-3 pt-3 border-t border-blue-900/50">
+        <div className="text-[10px] text-blue-300 mb-3 font-bold tracking-wider">🤖 AGENT PIPELINE STATUS</div>
+        <div className="flex justify-between items-center relative px-2 mb-2">
+          <div className="absolute top-2.5 left-3 right-3 h-[2px] bg-gray-700 -z-10"></div>
+          
+          {PIPELINE.map((agent, idx) => {
+            const isCompleted = completedAgents.map(ca => ca.toLowerCase()).includes(agent.id);
+            const isCurrent = currentAgentIdx === idx || (currentAgentIdx === -1 && idx === PIPELINE.length - 1 && !isCompleted);
+            const isBottleneck = isCurrent && isWaitingForHuman;
+
+            let circleClass = "bg-gray-800 border-gray-600";
+            let textClass = "text-gray-500";
+
+            if (isCompleted) {
+              circleClass = "bg-green-500 border-green-400";
+              textClass = "text-green-400";
+            } else if (isBottleneck) {
+              circleClass = "bg-red-500 border-red-400 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]";
+              textClass = "text-red-400 font-bold";
+            } else if (isCurrent) {
+              circleClass = "bg-blue-500 border-blue-400 animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.8)]";
+              textClass = "text-blue-300 font-bold";
+            }
+
+            return (
+              <div key={agent.id} className="flex flex-col items-center gap-1 z-10 relative bg-blue-900/20">
+                <div className={`w-5 h-5 rounded-full border-2 ${circleClass}`}></div>
+                <span className={`text-[9px] absolute top-6 whitespace-nowrap ${textClass}`}>
+                  {agent.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="h-4"></div> 
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col h-full bg-gray-800 text-gray-200">
       <div className="p-4 border-b border-gray-700 bg-gray-900 shrink-0">
@@ -84,18 +143,15 @@ export default function ControlPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        {/* 🚨 서킷 브레이커 발동 시 에러 경고 UI */}
         {isWbsError && (
           <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded text-sm text-red-200">
-            🚨 백엔드 서버와의 통신이 단절되었습니다. (네트워크 차단 발동 중)<br/>
-            서버를 재가동하신 후 브라우저를 새로고침 해주세요.
+            🚨 백엔드 서버와의 통신 단절. 서버 재가동 후 새로고침 해주세요.
           </div>
         )}
 
         {!wbsData ? (
           <div className="flex flex-col gap-2">
             <label className="text-sm font-semibold text-gray-400">💡 1. 신규 기획 (Track 0)</label>
-            <p className="text-xs text-gray-500 mb-1">PM과 PMO가 Master PRD와 WBS를 작성합니다.</p>
             <textarea 
               value={idea}
               onChange={(e) => setIdea(e.target.value)}
@@ -106,14 +162,13 @@ export default function ControlPanel() {
             <button 
               onClick={handleStartPlanning}
               disabled={isStarting || !idea.trim()}
-              className="mt-2 w-full bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 font-bold py-3 rounded transition-colors"
+              className="mt-2 w-full bg-purple-600 hover:bg-purple-500 font-bold py-3 rounded transition-colors"
             >
               {isStarting ? "가동 중..." : "🎯 기획 및 WBS 분할 가동"}
             </button>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            {/* 🎯 진척률 대시보드 UI */}
             <div className="flex flex-col mb-2 border-b border-gray-700 pb-3">
               <div className="flex justify-between items-end mb-1">
                 <label className="text-sm font-semibold text-gray-400">📋 2. 일일 스프린트 통제</label>
@@ -124,7 +179,6 @@ export default function ControlPanel() {
               </div>
             </div>
             
-            {/* 🎯 3단계 상태 시각화 카드 */}
             {wbsData.tasks.map((task: any) => {
               const isDone = task.status === 'DONE';
               const isInProgress = task.status === 'IN_PROGRESS';
@@ -148,19 +202,17 @@ export default function ControlPanel() {
                   <h4 className="text-sm font-bold text-gray-200 mb-1">{task.title}</h4>
                   <p className="text-xs text-gray-400 mb-3">{task.goal}</p>
                   
-                  {!isDone && (
+                  {!isDone && !isInProgress && (
                     <button 
                       onClick={() => handleStartSprint(task)}
                       disabled={isStarting || !!state?.current_sprint_task_id}
-                      className={`w-full text-xs font-bold py-2 rounded transition-colors ${
-                        isInProgress 
-                          ? 'bg-blue-800 text-blue-200 cursor-not-allowed' 
-                          : 'bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white'
-                      }`}
+                      className="w-full text-xs font-bold py-2 rounded transition-colors bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white"
                     >
-                      {isInProgress ? "▶️ 현재 작업 중 (대기 중)" : "🚀 이 스프린트 가동하기"}
+                      🚀 이 스프린트 가동하기
                     </button>
                   )}
+
+                  {isInProgress && renderPipelineTracker()}
                 </div>
               );
             })}
