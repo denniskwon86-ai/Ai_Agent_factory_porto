@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional, TypedDict
 from datetime import datetime, timezone
 
-from state_models import ProjectState
-
 class PatchResult(TypedDict):
     success: bool
     file_path: str
@@ -19,12 +17,15 @@ class PatchResult(TypedDict):
     match_method: Optional[str]
 
 class CodeBuilder:
-    def __init__(self, workspace_root: str = "./workspace"):
+    # 🚨 [패치] 하드코딩된 기본값("./workspace") 제거
+    def __init__(self, workspace_root: str):
+        if not workspace_root:
+            raise ValueError("CodeBuilder: workspace_root가 명시되어야 합니다.")
         self.workspace_root = Path(workspace_root)
         self.workspace_root.mkdir(parents=True, exist_ok=True)
     
-    def run(self, state: ProjectState, tech_lead_output: str) -> Tuple[ProjectState, List[PatchResult]]:
-        """메인 엔트리 포인트"""
+    def run(self, state: Dict[str, Any], tech_lead_output: str) -> Tuple[Dict[str, Any], List[PatchResult]]:
+        """메인 엔트리 포인트 (State는 Dict 타입만 보장됨)"""
         instructions = self._parse_instructions(tech_lead_output)
         results = []
         
@@ -36,7 +37,6 @@ class CodeBuilder:
                 
         state["build_status"] = "success" if all(r["success"] for r in results) else "failed"
         
-        # 에러 발생 시 로그를 state에 저장하여 다음 에이전트가 복구할 수 있도록 함
         errors = [r["error"] for r in results if not r["success"] and r.get("error")]
         if errors:
             state["build_error_log"] = "\n".join(errors)
@@ -48,8 +48,6 @@ class CodeBuilder:
     def _parse_instructions(self, output: str) -> List[Dict]:
         """Tech Lead의 최신 XML 형식 파싱 (<files><file action=...>...</file></files>)"""
         instructions = []
-        
-        # <file ...> ... </file> 블록 추출
         file_pattern = re.compile(r'<file\s+action="([^"]+)"\s+path="([^"]+)">\s*(.*?)\s*</file>', re.DOTALL)
         
         for match in file_pattern.finditer(output):
@@ -57,13 +55,11 @@ class CodeBuilder:
             target = None
             replace_block = inner_content.strip()
             
-            # <replace-block target="..."> 추출
             rb_match = re.search(r'<replace-block\s+target="([^"]+)">(.*?)</replace-block>', inner_content, re.DOTALL)
             if rb_match:
                 target = rb_match.group(1)
                 replace_block = rb_match.group(2).strip()
             else:
-                # <target> 태그 탐색 (Fallback)
                 t_match = re.search(r'<target>(.*?)</target>', inner_content)
                 if t_match:
                     target = t_match.group(1).strip()
@@ -98,60 +94,48 @@ class CodeBuilder:
             full_path.unlink()
             return {"success": True, "action": "delete", "file_path": str(full_path), "lines_changed": -len(original_code.splitlines()), "target": target, "error": None, "warning": None, "match_method": None}
 
-        # Smart Patch 적용 (4계층)
         patched_code, match_method = self._smart_patch(original_code, target, new_content, full_path.suffix)
         
         if patched_code is None:
             return {"success": False, "error": f"Target not found: {target}", "action": action, "file_path": str(full_path), "lines_changed": 0, "target": target, "warning": None, "match_method": None}
 
-        # Atomic Write + Validation
         return self._atomic_write(full_path, patched_code, original_code, target, match_method)
 
     def _smart_patch(self, code: str, target: str, new_content: str, file_ext: str) -> Tuple[Optional[str], str]:
-        """4계층 스마트 매칭"""
         if not target or target.lower() == "전체파일":
             return new_content, "full_replace"
 
-        # 1. Exact Match (Python AST)
         if file_ext == ".py":
             result = self._patch_python_ast(code, target, new_content)
             if result: 
                 return result, "ast_exact"
         
-        # 2. Regex Function/Class Match
         result = self._patch_regex(code, target, new_content)
         if result: 
             return result, "regex"
         
-        # 3. Marker Match (Fallback)
         result = self._patch_marker(code, target, new_content)
         if result: 
             return result, "marker"
         
-        # 4. Last Resort
         return None, "not_found"
 
     def _patch_python_ast(self, code: str, target: str, new_content: str) -> Optional[str]:
-        """Python AST 기반 라인 추출 및 치환 (원본 포맷팅 보존)"""
         try:
             tree = ast.parse(code)
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     if node.name == target:
-                        # AST 노드의 시작/종료 라인 확보
                         start_line = node.lineno - 1
                         end_line = node.end_lineno
-                        
                         lines = code.splitlines()
-                        # 정확한 블록만 새 코드로 교체
                         patched = "\n".join(lines[:start_line]) + "\n" + new_content + "\n" + "\n".join(lines[end_line:])
                         return patched
         except SyntaxError:
-            pass # 문법 에러가 있는 코드는 정규식으로 Fallback
+            pass 
         return None
 
     def _patch_regex(self, code: str, target: str, new_content: str) -> Optional[str]:
-        """고급 정규식 패턴 탐색 (TS/JS 등 다중 언어 지원)"""
         patterns = [
             rf"(?m)^(?:export\s+)?(?:async\s+)?(?:def|class|const|function|interface)\s+{re.escape(target)}\b[\s\S]*?^(?=\S)",
             rf"(?m)^(?:export\s+)?(?:const|let|var)\s+{re.escape(target)}\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=]*)\s*=>[\s\S]*?^(?=\S)"
@@ -163,7 +147,6 @@ class CodeBuilder:
         return None
 
     def _patch_marker(self, code: str, target: str, new_content: str) -> Optional[str]:
-        """주석 마커 기반 탐색"""
         patterns = [
             rf"//\s*@TARGET:\s*{re.escape(target)}[\s\S]*?//\s*@END",
             rf"/\*\s*@TARGET:\s*{re.escape(target)}\s*\*/[\s\S]*?/\*\s*@END\s*\*/",
@@ -176,17 +159,14 @@ class CodeBuilder:
         return None
 
     def _atomic_write(self, full_path: Path, new_code: str, original: str, target: str, method: str) -> PatchResult:
-        """원자적 쓰기 + 언어별 컴파일 검증"""
         tmp_path = full_path.with_suffix(full_path.suffix + ".tmp")
         
         try:
             tmp_path.write_text(new_code, encoding="utf-8")
             
-            # 파이썬 파일인 경우 임시 파일 문법 검증
             if full_path.suffix == ".py":
                 compile(new_code, str(full_path), "exec")
             
-            # 성공 시 원자적 교체
             os.replace(tmp_path, full_path)
             
             return {
@@ -213,14 +193,12 @@ class CodeBuilder:
                 "warning": None
             }
 
-    def _update_file_index(self, state: ProjectState, result: PatchResult):
-        """성공한 패치에 대해 ProjectState의 SSOT(file_index) 업데이트"""
+    def _update_file_index(self, state: Dict[str, Any], result: PatchResult):
         file_path = result["file_path"]
         
         if "file_index" not in state:
             state["file_index"] = {}
             
-        # 워크스페이스 루트 기준 상대 경로 추출 (안전하게)
         try:
             rel_path = str(Path(file_path).relative_to(self.workspace_root)).replace("\\", "/")
         except ValueError:
@@ -247,25 +225,3 @@ class CodeBuilder:
             meta["last_modified_at"] = datetime.now(timezone.utc).isoformat()
             meta["change_summary"] = f"Target {result['target']} updated via {result['match_method']}"
             meta["last_hash"] = file_hash
-
-# agent_graph.py 연동용 브릿지 함수
-def run_code_builder(state: ProjectState) -> ProjectState:
-    print("\n[Agent] CodeBuilder 실행 중... (스마트 병합 엔진 가동)")
-    
-    # 워크스페이스 경로 가져오기 (기본값 설정)
-    workspace_root = state.get("workspace_root", "./workspace")
-    builder = CodeBuilder(workspace_root=workspace_root)
-    
-    # 프론트/백엔드 출력물에서 지시사항 가져오기 (가장 최근의 코드를 우선 적용)
-    target_code = state.get("frontend_code", "") + "\n" + state.get("backend_code", "")
-    
-    updated_state, results = builder.run(state, target_code)
-    
-    for res in results:
-        status = "✅" if res["success"] else "❌"
-        target_info = f" [{res['target']}]" if res.get("target") else ""
-        print(f"  {status} {res['action'].upper()} {res['file_path']}{target_info} ({res['match_method']})")
-        if not res["success"] and res.get("error"):
-            print(f"     └─ Error: {res['error']}")
-            
-    return updated_state

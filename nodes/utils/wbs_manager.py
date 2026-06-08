@@ -4,8 +4,12 @@ import os
 class WBSManager:
     """WBS 마스터 플랜 JSON 파일의 상태를 원자적으로 읽고 쓰는 유틸리티"""
     
-    def __init__(self, json_path="workspace/00_wbs_master_plan.json"):
-        self.json_path = json_path
+    # 🚨 [패치] 단일 하드코딩 기본값("./workspace")을 삭제하여 상위 노드가 격리 경로를 의무 명시하도록 강제
+    def __init__(self, workspace_root: str):
+        if not workspace_root:
+            raise ValueError("workspace_root가 반드시 전달되어야 합니다.")
+        self.workspace_root = workspace_root
+        self.json_path = os.path.join(self.workspace_root, "00_wbs_master_plan.json")
 
     def _read_wbs(self):
         if not os.path.exists(self.json_path):
@@ -41,14 +45,13 @@ class WBSManager:
                 task['status'] = 'DONE'
         self._write_wbs(data)
 
-    # 🚨 [신규 추가] PM의 피드백을 애자일 백로그(새로운 태스크)로 WBS 최하단에 주입합니다.
     def add_revision_task(self, feedback: str) -> str:
+        """PM의 피드백을 애자일 백로그(새로운 태스크)로 WBS 최하단에 주입합니다."""
         data = self._read_wbs()
         if not data:
             return ""
         
         tasks = data.get('tasks', [])
-        # 기존 REV- 태스크 개수를 세어서 번호를 땁니다. (예: REV-001)
         rev_count = sum(1 for t in tasks if str(t.get('task_id', '')).startswith('REV-'))
         new_task_id = f"REV-{(rev_count + 1):03d}"
         

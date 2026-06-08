@@ -25,7 +25,6 @@ async def run_master_pm(state: ProjectState) -> Dict[str, Any]:
     output = await gateway.aexecute(state, prompt, is_heavy=True)
     
     # 2. 토큰 과금 방어용 고속 요약 (Flash 모델)
-    # LLM 컨텍스트 윈도우 폭발을 막기 위해 상태(SSOT)에는 요약본만 주입합니다.
     summary_prompt = "다음 기획서를 핵심 기능과 Out-of-Scope 위주로 짧게 요약하십시오:\n\n" + output[:8000]
     summary = await gateway.aexecute(state, summary_prompt, is_heavy=False)
     
@@ -51,18 +50,24 @@ async def run_master_pmo(state: ProjectState) -> Dict[str, Any]:
             json_str = match.group()
     except Exception:
         pass
+    
+    # 🚨 [패치] Pydantic vs Dict 타입 충돌 방어
+    workspace_root = state.get("workspace_root") if isinstance(state, dict) else state.workspace_root
         
     def _save_wbs_to_disk():
         """디스크 I/O 블로킹 방지를 위한 내부 헬퍼 함수"""
-        os.makedirs(state.workspace_root, exist_ok=True)
-        wbs_path = os.path.join(state.workspace_root, "00_wbs_master_plan.json")
+        if not workspace_root:
+            print("🚨 [에러] workspace_root가 설정되지 않아 WBS 저장을 건너뜁니다.")
+            return
+            
+        os.makedirs(workspace_root, exist_ok=True)
+        wbs_path = os.path.join(workspace_root, "00_wbs_master_plan.json")
         with open(wbs_path, "w", encoding="utf-8") as f:
             f.write(json_str)
             
     # 비동기 이벤트 루프가 멈추지 않도록 별도 워커 스레드로 파일 저장 오프로딩
     await asyncio.to_thread(_save_wbs_to_disk)
     
-    # WBS 저장이 완료되었으므로 상태를 다음 단계로 전이
     return {
         "factory_mode": "EXECUTION"
     }
