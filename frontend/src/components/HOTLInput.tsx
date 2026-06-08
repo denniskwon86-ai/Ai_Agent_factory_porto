@@ -8,20 +8,29 @@ export default function HOTLInput() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const state = useFactoryStore((store) => store.state);
+  // 🚨 [수정 1] 글로벌 스토어에서 현재 프로젝트 ID 동적 할당
+  const currentProjectId = useFactoryStore((store) => store.currentProjectId);
 
   const isWaitingForHuman = state?.needs_revision || false;
   const currentTask = state?.current_sprint_task_id;
 
   const handleSubmit = async () => {
-    // 🚨 조치: 더 이상 조용히 무시하지 않고 경고창을 띄워 원인을 알림
+    // 🚨 [조치] 태스크 ID 누락 방어
     if (!currentTask) {
       alert("🚨 타겟 태스크(Task ID)를 찾을 수 없습니다. 통신 지연일 수 있으니 새로고침 후 시도해주세요.");
+      return;
+    }
+
+    // 🚨 [수정 2] 프로젝트 ID 누락 방어
+    if (!currentProjectId) {
+      alert("🚨 현재 프로젝트 ID를 찾을 수 없습니다. 프로젝트를 다시 선택해주세요.");
       return;
     }
     
     setIsSubmitting(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/factory/hotl/resume`, {
+      // 🚨 [수정 3] 하드코딩 경로 제거 및 currentProjectId 기반 동적 라우팅 적용
+      const response = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/hotl/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -36,7 +45,7 @@ export default function HOTLInput() {
 
       setFeedback("");
       
-      // 🚨 조치: 버튼 클릭 성공 직후 프론트엔드 UI를 강제로 '진행 중'으로 전환하여 이중 클릭(따닥) 차단
+      // 전송 성공 시 즉시 UI 락(Lock)을 걸어 중복 클릭 방지
       useFactoryStore.setState((prev) => ({
         state: prev.state ? { ...prev.state, needs_revision: false } : null
       }));
