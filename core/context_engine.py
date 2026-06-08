@@ -4,7 +4,6 @@ import re
 import sqlite3
 import os
 from typing import Dict, Any, Optional
-from state_models import ProjectState
 
 # 프롬프트 템플릿 외부 분리 (하드코딩 지양)
 # 확장성과 유지보수 용이성을 위해 딕셔너리로 분리. 향후 YAML 등 외부 파일로 분리 가능.
@@ -27,9 +26,7 @@ class ContextEngine:
 
     def _init_db(self):
         """멀티 워커 안전형 SQLite 파일 캐시 초기화 및 동시 쓰기(Lock) 방어"""
-        # timeout=10.0으로 설정하여 다중 프로세스 동시 접근 시 데이터베이스 락 대기 유연성 확보
         with sqlite3.connect(self.db_path, timeout=10.0) as conn:
-            # 동시성 및 쓰기 성능 강화를 위한 WAL(Write-Ahead Logging) 모드 강제 적용
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS llm_cache "
@@ -50,19 +47,25 @@ class ContextEngine:
             return text[:half] + "\n\n...[System: Context Truncated for Token Limit]...\n\n" + text[-half:]
         return text
 
-    def compress_and_format(self, state: ProjectState, skill_prompt: str, max_chars: int = 15000) -> str:
+    def compress_and_format(self, state: Any, skill_prompt: str, max_chars: int = 15000) -> str:
         """
         JSON 파괴 버그 방지 로직 적용:
         직렬화(json.dumps)를 수행하기 전에 개별 텍스트 데이터를 먼저 절삭하여 포맷을 안전하게 보존합니다.
         """
-        # 각 필드별로 할당할 최대 글자 수 균등 분배
-        field_max = max_chars // 4 
+        # 필드가 늘어났으므로 균등 분배 비율 조정
+        field_max = max_chars // 6 
 
+        # 🚨 [패치 1] Pydantic Object vs Dict 하이브리드 안전 추출기
+        get_val = lambda key, default="": state.get(key, default) if isinstance(state, dict) else getattr(state, key, default)
+
+        # 🚨 [패치 2] 신규 프로젝트 환각/복제 방지를 위해 project_name과 initial_idea 명시적 주입
         core_context = {
-            "prd": self._truncate_text(state.prd_summary, field_max),
-            "architecture": self._truncate_text(state.architecture_summary, field_max),
-            "tech_spec": self._truncate_text(state.tech_spec_summary, field_max),
-            "target_task": state.current_sprint_task_id
+            "project_name": get_val("project_name", "Unknown Project"),
+            "initial_idea": get_val("initial_idea", ""),
+            "prd": self._truncate_text(get_val("prd_summary", ""), field_max),
+            "architecture": self._truncate_text(get_val("architecture_summary", ""), field_max),
+            "tech_spec": self._truncate_text(get_val("tech_spec_summary", ""), field_max),
+            "target_task": get_val("current_sprint_task_id", "Unknown Task")
         }
         
         # 절삭이 모두 끝난 안전한 텍스트들을 마지막에 직렬화
