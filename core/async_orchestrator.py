@@ -2,6 +2,7 @@ import asyncio
 import os
 import shutil
 import json
+from datetime import datetime
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, Dict, Any
 
@@ -23,13 +24,27 @@ class AsyncFactoryOrchestrator:
         except Exception as e:
             print(f"🚨 상태 백업 실패: {e}")
 
-    async def start_sprint(self, task_id: str, project_state_payload: dict, workspace_root: str) -> bool:
-        
+async def start_sprint(self, task_id: str, project_state_payload: dict, workspace_root: str) -> bool:
         if task_id.startswith("PLANNING"):
             if os.path.exists(workspace_root):
-                shutil.rmtree(workspace_root, ignore_errors=True)
+                # 🚨 [Phase 3] 파괴적 삭제(rmtree) 제거 및 스마트 아카이빙 적용
+                archive_dir = os.path.join(workspace_root, ".archive", datetime.now().strftime("%Y%m%d_%H%M%S"))
+                os.makedirs(archive_dir, exist_ok=True)
+                
+                for item in os.listdir(workspace_root):
+                    # .git 저장소와 기존 아카이브 폴더는 절대 건드리지 않음
+                    if item in [".git", ".archive"]:
+                        continue
+                        
+                    src_path = os.path.join(workspace_root, item)
+                    dst_path = os.path.join(archive_dir, item)
+                    try:
+                        shutil.move(src_path, dst_path)
+                    except Exception as e:
+                        print(f"⚠️ [Orchestrator] 아카이브 이동 실패 ({item}): {e}")
+                        
             os.makedirs(workspace_root, exist_ok=True)
-            print(f"🧹 [Orchestrator] 신규 기획을 위해 {workspace_root} 폴더를 초기화했습니다.")
+            print(f"🧹 [Orchestrator] 신규 기획을 위해 기존 산출물을 .archive/ 폴더로 안전하게 백업했습니다.")
 
         if not task_id.startswith("PLANNING"):
             wbs_mgr = WBSManager(workspace_root=workspace_root)
@@ -41,16 +56,25 @@ class AsyncFactoryOrchestrator:
         self.active_tasks[task_id] = task
         return True
 
+    # 🚨 [Phase 3] 세션 인지형 프로세스 강제 일시정지 (Pause) 메서드 추가
+    async def pause_sprint(self, task_id: str) -> bool:
+        task = self.active_tasks.get(task_id)
+        if task and not task.done():
+            task.cancel()  # 비동기 태스크 강제 종료
+            del self.active_tasks[task_id]
+            print(f"🛑 [Orchestrator] Task {task_id} 프로세스가 사용자에 의해 일시정지 되었습니다.")
+            await factory_broadcaster.broadcast("SPRINT_PAUSED", {"task_id": task_id})
+            return True
+        return False
+
     async def _run_sprint_loop(self, config: dict, state_dict: dict, task_id: str, workspace_root: str):
         try:
             async for event in langgraph_engine.astream(state_dict, config=config):
                 for node_name, state_data in event.items():
-                    # 🚨 [핵심 패치 1] Delta(state_data)가 아닌 Full State를 퍼올려 물리적 파일에 저장 (Docs 증발 방지)
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
                     self._save_latest_state(full_state, workspace_root) 
                     
-                    # 브로드캐스터에는 Delta만 보내어 프론트엔드의 Zustand 상태망과 효율적으로 병합되게 함
                     await factory_broadcaster.broadcast("NODE_COMPLETED", {"node": node_name, "state": state_data})
                     
             snapshot = await langgraph_engine.aget_state(config)
@@ -58,6 +82,8 @@ class AsyncFactoryOrchestrator:
                 await factory_broadcaster.broadcast("HOTL_PAUSED", {"task_id": task_id})
             else:
                 await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id})
+        except asyncio.CancelledError:
+            print(f"⏸️ [Orchestrator] Sprint Loop Cancelled (Paused): {task_id}")
         except Exception as e:
             print(f"🚨 [Orchestrator] Sprint Loop Error: {e}")
 
@@ -92,7 +118,6 @@ class AsyncFactoryOrchestrator:
         try:
             async for event in langgraph_engine.astream(None, config=config):
                 for node_name, state_data in event.items():
-                    # 🚨 [핵심 패치 2] Resume 루프에서도 Full State 백업 로직 동일 적용
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
                     self._save_latest_state(full_state, workspace_root) 
@@ -104,6 +129,8 @@ class AsyncFactoryOrchestrator:
                 await factory_broadcaster.broadcast("HOTL_PAUSED", {"task_id": task_id})
             else:
                 await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id})
+        except asyncio.CancelledError:
+            print(f"⏸️ [Orchestrator] Resume Stream Cancelled (Paused): {task_id}")
         except Exception as e:
             print(f"🚨 [Orchestrator] Resume Stream Error: {e}")
 

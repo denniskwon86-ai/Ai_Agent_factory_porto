@@ -55,15 +55,14 @@ async def run_master_pmo(state: ProjectState) -> Dict[str, Any]:
     workspace_root = state.get("workspace_root") if isinstance(state, dict) else state.workspace_root
         
     def _save_wbs_to_disk():
-        """디스크 I/O 블로킹 방지를 위한 내부 헬퍼 함수"""
+        """디스크 I/O 블로킹 방지를 위한 내부 헬퍼 함수 (Lock 적용 완료)"""
         if not workspace_root:
             print("🚨 [에러] workspace_root가 설정되지 않아 WBS 저장을 건너뜁니다.")
             return
             
-        os.makedirs(workspace_root, exist_ok=True)
-        wbs_path = os.path.join(workspace_root, "00_wbs_master_plan.json")
-        with open(wbs_path, "w", encoding="utf-8") as f:
-            f.write(json_str)
+        from nodes.utils.wbs_manager import WBSManager
+        wbs_mgr = WBSManager(workspace_root=workspace_root)
+        wbs_mgr.save_raw_wbs(json_str)
             
     # 비동기 이벤트 루프가 멈추지 않도록 별도 워커 스레드로 파일 저장 오프로딩
     await asyncio.to_thread(_save_wbs_to_disk)
