@@ -1,5 +1,4 @@
 import { useFactoryStore } from '../store/useFactoryStore';
-// 🚨 [수정 1] 복원된 HOTLInput 컴포넌트 임포트
 import HOTLInput from './HOTLInput'; 
 
 export default function TimelinePanel() {
@@ -22,14 +21,12 @@ export default function TimelinePanel() {
               <span className="text-blue-400 font-bold">{log.type}</span>
               {log.node && (
                 <span className="text-gray-300">
-                  <span className="text-gray-500">Node: </span>
-                  {log.node}
+                  <span className="text-gray-500">Node: </span>{log.node}
                 </span>
               )}
               {log.task_id && (
                 <span className="text-yellow-400/80">
-                  <span className="text-gray-500">Task: </span>
-                  {log.task_id}
+                  <span className="text-gray-500">Task: </span>{log.task_id}
                 </span>
               )}
             </div>
@@ -57,7 +54,6 @@ export default function TimelinePanel() {
         </div>
       </div>
 
-      {/* 🚨 [수정 2] HOTLInput Embed: 인간의 통제권을 타임라인 로그 바로 아래에 일체화시켜 시야 분산을 막음 */}
       <HOTLInput />
     </div>
   );
