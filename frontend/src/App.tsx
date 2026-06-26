@@ -1,11 +1,12 @@
-import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from 'react';
+import React, { Component, useEffect, useState } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
+
 import { useFactoryStore } from './store/useFactoryStore';
 
 import ControlPanel from './components/ControlPanel';
 import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
 
-// 🛡️ 최상단 무결성 래퍼 (WSOD 셧다운 방어)
 interface EBProps { children: ReactNode; }
 interface EBState { hasError: boolean; error: Error | null; }
 
@@ -48,7 +49,9 @@ export default function App() {
   const currentProjectId = useFactoryStore((state) => state.currentProjectId);
   const fetchProjects = useFactoryStore((state) => state.fetchProjects);
   const createProject = useFactoryStore((state) => state.createProject);
+  const deleteProject = useFactoryStore((state) => state.deleteProject);
   const setCurrentProject = useFactoryStore((state) => state.setCurrentProject);
+  const statePayload = useFactoryStore((state) => state.state);
 
   const [newProjectId, setNewProjectId] = useState("");
 
@@ -68,7 +71,18 @@ export default function App() {
     }
   };
 
-  // 🚀 오리지널 런처(프로젝트 대장) 뷰어 렌더링
+  const handleDeleteProject = async (id: string, name: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // 카드 진입 이벤트 전파 방지
+    if (!confirm(`⚠️ [경고] 프로젝트 볼트 '${name} (${id})'를 완전히 삭제하시겠습니까?\n이 작업은 물리 디스크의 모든 산출물을 지우며 복구할 수 없습니다.`)) return;
+    
+    const success = await deleteProject(id);
+    if (success) {
+      alert("프로젝트가 안전하게 삭제되었습니다.");
+    } else {
+      alert("프로젝트 삭제 중 에러가 발생했습니다.");
+    }
+  };
+
   if (!currentProjectId) {
     return (
       <ErrorBoundary>
@@ -91,8 +105,17 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 {projects.map((proj) => (
-                  <div key={proj.id} className="bg-gray-800 border border-gray-700 rounded-lg p-6 hover:border-blue-500 transition-colors shadow-lg flex flex-col">
-                    <div className="flex items-start justify-between mb-4">
+                  <div key={proj.id} className="bg-gray-800 border border-gray-700 rounded-lg p-6 hover:border-blue-500 transition-colors shadow-lg flex flex-col relative group">
+                    {/* 🗑️ 독립 프로젝트 물리 삭제 버튼 추가 */}
+                    <button
+                      onClick={(e) => handleDeleteProject(proj.id, proj.name, e)}
+                      className="absolute top-4 right-4 text-xs bg-red-950 hover:bg-red-600 text-red-400 hover:text-white border border-red-800 rounded px-2.5 py-1 transition-colors z-10"
+                      title="프로젝트 폴더 영구 삭제"
+                    >
+                      🗑️ 완전 삭제
+                    </button>
+
+                    <div className="flex items-start justify-between mb-4 pr-24">
                       <h3 className="text-lg font-bold text-blue-400 truncate">{proj.name}</h3>
                       <span className="text-xs px-2 py-1 bg-gray-900 rounded text-gray-400 font-mono">{proj.id}</span>
                     </div>
@@ -135,11 +158,11 @@ export default function App() {
     );
   }
 
-  // 🚀 오리지널 메인 통제실 뷰어 (3-Column Layout)
+  // 🚀 [3단 레이아웃 독립 스크롤 최적화 설계 구조 적용]
   return (
     <ErrorBoundary>
       <div className="h-screen w-screen bg-gray-900 text-gray-100 flex flex-col font-sans overflow-hidden">
-        <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0">
+        <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0 z-20">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setCurrentProject(null)}
@@ -157,20 +180,21 @@ export default function App() {
           </div>
         </header>
 
+        {/* 하위 컬럼 간 스크롤 연동 크래시 방지 락(Lock) 컨테이너 */}
         <div className="flex-1 flex w-full h-full overflow-hidden">
           {/* 좌측: 제어반 */}
-          <div className="w-1/5 bg-gray-800 flex flex-col border-r border-gray-700 shrink-0 min-w-[300px]">
+          <div className="w-1/5 bg-gray-800 flex flex-col border-r border-gray-700 shrink-0 min-w-[300px] h-full overflow-hidden">
             <ControlPanel />
           </div>
 
           {/* 중앙: 타임라인 */}
-          <div className="w-2/5 bg-gray-900 flex flex-col relative border-r border-gray-700 shrink-0 min-w-[350px]">
+          <div className="w-2/5 bg-gray-900 flex flex-col relative border-r border-gray-700 shrink-0 min-w-[350px] h-full overflow-hidden">
             <TimelinePanel />
           </div>
 
           {/* 우측: 다중 탭 및 렌더링 샌드박스 */}
-          <div className="flex-1 bg-gray-800 flex flex-col min-w-[350px]">
-            <PreviewPanel />
+          <div className="flex-1 bg-gray-800 flex flex-col min-w-[350px] h-full overflow-hidden">
+            <PreviewPanel rawCode={statePayload?.frontend_code_summary || ""} />
           </div>
         </div>
       </div>

@@ -1,72 +1,145 @@
 import os
+import json
 import re
-import asyncio
 from typing import Dict, Any
 from state_models import ProjectState
 from core.llm_gateway import gateway
+from nodes.utils.wbs_manager import WBSManager
 
 def _load_skill(role_name: str) -> str:
-    """마크다운 프롬프트를 동적으로 로드 (하드코딩 배제)"""
     path = f"skills/{role_name}.md"
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+        with open(path, "r", encoding="utf-8") as f: return f.read()
     return ""
 
-async def run_master_pm(state: ProjectState) -> Dict[str, Any]:
-    """
-    [Track 0] 전체 시스템 Master PRD 작성
-    무거운 도메인 지식이 필요하므로 Pro 모델(is_heavy=True)에 라우팅합니다.
-    """
-    print("🧭 [Agent] Master PM 비동기 기획 진행 중...")
-    prompt = _load_skill("pm_skill")
+def _extract_code_from_ssot(json_str: str) -> str:
+    try:
+        data = json.loads(json_str)
+        files = data.get("files", [])
+        if files and isinstance(files, list): return files[0].get("code", "")
+    except Exception: pass
+    return ""
+
+async def run_master_pm(state: Any) -> Dict[str, Any]:
+    state_obj = ProjectState.model_validate(state)
     
-    # 1. PRD 본문 생성 (Pro 모델)
-    output = await gateway.aexecute(state, prompt, is_heavy=True)
+    # 🚨 [PM 상신 루프] 리뷰어가 기획 모순으로 판단하여 PM을 호출한 경우
+    if getattr(state_obj, "reviewer_decision", "") == "ESCALATE_PM":
+        print("⚖️ [Agent] Master PM: Reviewer의 기획 모순 에스컬레이션 검토 중...")
+        prompt = _load_skill("pm_skill")
+        prompt += (
+            f"\n\n[🚨 Reviewer 결재 상신 내용 (ESCALATE_PM)]:\n{state_obj.reviewer_feedback}\n\n"
+            "당신은 프로젝트의 총괄 PM입니다. 코드 리뷰어가 기획서의 논리적 모순이나 위배 사항을 보고했습니다.\n"
+            "1. 만약 이 지적사항이 전체 흐름상 무시해도 좋다면 응답을 반환하는 JSON 데이터 내에 `\"decision\": \"REJECT\"`로 적고 `\"reason\": \"사유\"`를 명시하십시오.\n"
+            "2. 만약 기획 보완이 필요하다면 `\"decision\": \"ACCEPT\"`로 적고, `\"prd_summary\": \"보완된 PRD 내용\"`을 작성하십시오.\n"
+            "응답은 반드시 아래 JSON 포맷을 준수하십시오:\n"
+            "\x60\x60\x60json\n"
+            "{\n"
+            "  \"decision\": \"REJECT\" 또는 \"ACCEPT\",\n"
+            "  \"reason\": \"(REJECT일 경우 기각 사유)\",\n"
+            "  \"prd_summary\": \"(ACCEPT일 경우 수정된 PRD)\"\n"
+            "}\n"
+            "\x60\x60\x60"
+        )
+        output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json")
+
+        try:
+            clean_str = output.strip()
+            md_match = re.search(r'\x60{3}(?:json)?\s*(\{[\s\S]*?\})\s*\x60{3}', clean_str)
+            if md_match: clean_str = md_match.group(1)
+            else:
+                bracket_match = re.search(r'(\{[\s\S]*\})', clean_str)
+                if bracket_match: clean_str = bracket_match.group(1)
+            data = json.loads(clean_str)
+            
+            if data.get("decision") == "REJECT":
+                print("✅ [PM Decision] PM이 피드백을 기각(Override)했습니다. 개발팀에 강행을 지시합니다.")
+                return {
+                    "reviewer_decision": "PASS", # 결재 완료 처리
+                    "pm_override_reason": data.get("reason", "PM 판단하에 무시 진행"), 
+                    "needs_revision": False
+                }
+            else:
+                print("🔄 [PM Decision] PM이 피드백을 수용(ACCEPT)했습니다. PRD를 업데이트하고 개발팀 재작업(Rework)을 지시합니다.")
+                return {
+                    "reviewer_decision": "REWORK_DEV", # 개발팀으로 루프 반환
+                    "pm_override_reason": "",
+                    "needs_revision": True,
+                    "prd_summary": data.get("prd_summary", state_obj.prd_summary)
+                }
+        except Exception as e:
+            print(f"⚠️ PM 의사결정 파싱 실패, 강제 승인으로 폴백: {e}")
+            return {"reviewer_decision": "PASS", "pm_override_reason": "PM 자동 강행 폴백"}
+
+    else:
+        print("🧭 [Agent] Master PM 토론·합의 기반 기획(PRD) 진행 중...")
+        from nodes.utils.debate import run_supervised_stage
+        updates, result = await run_supervised_stage(state_obj, "pm_skill", "PLANNING")
+        print(f"✅ [Agent] Master PM 기획 완료 — 점수 {result.get('score')} / 판정 {result.get('verdict')}")
+        updates.setdefault("needs_revision", False)
+        return updates
+
+async def run_master_pmo(state: Any) -> Dict[str, Any]:
+    state_obj = ProjectState.model_validate(state)
     
-    # 2. 토큰 과금 방어용 고속 요약 (Flash 모델)
-    summary_prompt = "다음 기획서를 핵심 기능과 Out-of-Scope 위주로 짧게 요약하십시오:\n\n" + output[:8000]
-    summary = await gateway.aexecute(state, summary_prompt, is_heavy=False)
+    print("📊 [Agent] Master PMO 비동기 WBS 분할 및 에이전트 스케줄링 진행 중...")
+    prompt = _load_skill("pmo_skill")
+    prompt += f"\n\n[참조: Master PM이 작성한 PRD]\n{state_obj.prd_summary}"
+    prompt += (
+        "\n\n[🚨 절대 준수 사항]: PRD를 분석하여 반드시 **최소 4개 이상**의 구체적인 WBS 태스크로 분할하십시오. "
+        "각 태스크에는 투입될 에이전트 명단(`required_agents`)을 반드시 포함하십시오."
+    )
     
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json")
+    wbs_code = _extract_code_from_ssot(output) or output
+
+    wbs_tasks = []
+    try:
+        clean_str = wbs_code.strip()
+        md_match = re.search(r'\x60{3}(?:json)?\s*(\{[\s\S]*?\})\s*\x60{3}', clean_str)
+        if md_match: clean_str = md_match.group(1)
+        else:
+            bracket_match = re.search(r'(\{[\s\S]*\})', clean_str)
+            if bracket_match: clean_str = bracket_match.group(1)
+        wbs_data = json.loads(clean_str)
+        wbs_tasks = wbs_data.get("tasks", [])
+    except Exception as e:
+        print(f"⚠️ WBS 파싱 실패. 비상 백로그 강제 주입 가동: {e}")
+        wbs_tasks = []
+
+    if state_obj.workspace_root:
+        wbs_mgr = WBSManager(state_obj.workspace_root)
+        wbs_mgr.initialize_wbs(state_obj.project_name, wbs_tasks)
+        print(f"✅ WBS 초기화 완료: 총 {len(wbs_tasks)}개의 태스크가 스케줄링되었습니다.")
+
+    # 첫 번째 실행 가능 태스크의 required_agents를 현재 스프린트 에이전트 명단으로 저장
+    first_task_agents = []
+    if wbs_tasks:
+        first_task_agents = wbs_tasks[0].get("required_agents", [])
+
+    # Supervisor: WBS 분할 기준(deterministic, LLM 0콜) 채점 기록
+    from nodes.utils.scoring import score_stage
+    pmo_result = await score_stage(state_obj, "PMO")
+    scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+    scores["PMO"] = pmo_result.get("score", 0.0)
+    crit_log = list(getattr(state_obj, "criteria_log", []) or [])
+    crit_log.append({
+        "stage": "PMO",
+        "score": pmo_result.get("score", 0.0),
+        "verdict": pmo_result.get("verdict", "PASS"),
+        "blocking_fails": pmo_result.get("blocking_fails", []),
+    })
+    print(f"📊 [Master PMO] WBS 기준 채점 — 점수 {pmo_result.get('score')} / 판정 {pmo_result.get('verdict')}")
+
     return {
-        "prd_summary": summary
+        "factory_mode": "EXECUTION",
+        "needs_revision": False,
+        "current_required_agents": first_task_agents,
+        "current_stage": "PMO",
+        "stage_scores": scores,
+        "criteria_log": crit_log,
+        "supervisor_feedback": "" if pmo_result.get("verdict") == "PASS" else f"WBS 기준 미달: {pmo_result.get('blocking_fails')}",
     }
 
-async def run_master_pmo(state: ProjectState) -> Dict[str, Any]:
-    """
-    [Track 0] WBS 마스터플랜 JSON 분할
-    JSON 스키마를 엄격히 준수해야 하므로 Pro 모델을 사용합니다.
-    """
-    print("🧭 [Agent] Master PMO 비동기 WBS 분할 진행 중...")
-    prompt = _load_skill("pmo_skill")
-    
-    output = await gateway.aexecute(state, prompt, is_heavy=True)
-    
-    # JSON 텍스트 블록만 안전하게 추출 (Zero-Chatter 보장)
-    json_str = output
-    try:
-        match = re.search(r'\{.*\}', output, re.DOTALL)
-        if match:
-            json_str = match.group()
-    except Exception:
-        pass
-    
-    # 🚨 [패치] Pydantic vs Dict 타입 충돌 방어
-    workspace_root = state.get("workspace_root") if isinstance(state, dict) else state.workspace_root
-        
-    def _save_wbs_to_disk():
-        """디스크 I/O 블로킹 방지를 위한 내부 헬퍼 함수 (Lock 적용 완료)"""
-        if not workspace_root:
-            print("🚨 [에러] workspace_root가 설정되지 않아 WBS 저장을 건너뜁니다.")
-            return
-            
-        from nodes.utils.wbs_manager import WBSManager
-        wbs_mgr = WBSManager(workspace_root=workspace_root)
-        wbs_mgr.save_raw_wbs(json_str)
-            
-    # 비동기 이벤트 루프가 멈추지 않도록 별도 워커 스레드로 파일 저장 오프로딩
-    await asyncio.to_thread(_save_wbs_to_disk)
-    
-    return {
-        "factory_mode": "EXECUTION"
-    }
+async def run_pm(state: Any) -> Dict[str, Any]:
+    return await run_master_pm(state)

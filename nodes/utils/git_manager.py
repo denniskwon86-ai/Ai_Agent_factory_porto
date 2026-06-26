@@ -1,7 +1,6 @@
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
-import datetime
 
 class GitManager:
     def __init__(self, workspace_root: str):
@@ -10,16 +9,13 @@ class GitManager:
         self._init_if_needed()
 
     def _run_cmd(self, cmd: list) -> subprocess.CompletedProcess:
-        """
-        [Hotfix] Windows cp949 인코딩 충돌 방지를 위해 encoding="utf-8" 강제 적용
-        """
         try:
             return subprocess.run(
                 cmd,
                 cwd=self.workspace_root,
                 capture_output=True,
                 text=True,
-                encoding="utf-8", # 🚨 Windows 환경 한글 깨짐 방지 핵심 조치
+                encoding="utf-8", 
                 check=False
             )
         except FileNotFoundError:
@@ -27,7 +23,6 @@ class GitManager:
             return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="Git not found")
 
     def _init_if_needed(self):
-        """Git 저장소가 없으면 초기화"""
         git_dir = self.workspace_root / ".git"
         if not git_dir.exists():
             self._run_cmd(["git", "init"])
@@ -43,7 +38,6 @@ class GitManager:
             print("🌱 [GitManager] 통합 워크스페이스 Git 저장소 초기화 완료")
 
     def commit_sprint_changes(self, task_id: str, state: Dict[str, Any]) -> Optional[str]:
-        """변경된 파일을 스테이징하고 ProjectState 정보를 바탕으로 커밋"""
         status = self._run_cmd(["git", "status", "--porcelain"])
         if not status.stdout.strip():
             print("ℹ️ [GitManager] 변경된 파일이 없어 커밋을 건너뜁니다.")
@@ -75,3 +69,21 @@ class GitManager:
         else:
             print(f"⚠️ [GitManager] 커밋 실패: {res.stderr}")
             return None
+
+    # 🚨 누락되었던 롤백 복구 엔진 추가 (서킷 브레이커 크래시 원천 차단)
+    def rollback_to_safe_state(self, target_commit: Optional[str] = None):
+        print(f"🔄 [GitManager] 안전 지대(Safe State)로 강제 롤백을 시작합니다.")
+        
+        self._run_cmd(["git", "reset", "--hard"])
+        self._run_cmd(["git", "clean", "-fd"])
+        
+        if target_commit:
+            res = self._run_cmd(["git", "checkout", target_commit])
+            if res.returncode == 0:
+                print(f"✅ [GitManager] 지정된 커밋({target_commit[:7]})으로 롤백 성공.")
+                return
+            else:
+                print(f"⚠️ [GitManager] 커밋 이동 실패. HEAD 기준으로 롤백을 대체합니다.")
+        
+        self._run_cmd(["git", "checkout", "dev"]) # 또는 주 브랜치
+        print("✅ [GitManager] 최종 커밋(HEAD) 상태로 작업 공간 복원 완료.")

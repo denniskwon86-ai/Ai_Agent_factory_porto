@@ -3,15 +3,42 @@ import { useFactoryStore } from '../store/useFactoryStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-const PIPELINE = [
-  { id: 'architect', label: 'Architect' },
-  { id: 'tech_lead', label: 'Tech Lead' },
-  { id: 'backend', label: 'Backend' },
-  { id: 'frontend', label: 'Frontend' },
-  { id: 'codebuilder', label: 'Builder' },
-  { id: 'reviewer', label: 'Reviewer' },
-  { id: 'qa', label: 'QA' }
+// 실행 스프린트 전체 파이프라인 정의 (노드 id ↔ 라벨 ↔ 배정 에이전트명)
+const EXEC_PIPELINE = [
+  { id: 'architect', label: 'Architect', agent: 'Architect' },
+  { id: 'tech_lead', label: 'Tech Lead', agent: 'Tech_Lead' },
+  { id: 'backend', label: 'Backend', agent: 'Backend' },
+  { id: 'frontend', label: 'Frontend', agent: 'Frontend' },
+  { id: 'codebuilder', label: 'Builder', agent: null as string | null },
+  { id: 'reviewer', label: 'Supervisor', agent: null as string | null },
+  { id: 'qa', label: 'QA', agent: 'QA' },
+  { id: 'manualwriter', label: 'Manual', agent: null as string | null },
 ];
+
+// 노드 id → Supervisor 채점 단계 키 (배지 표시용)
+const STAGE_BY_NODE: Record<string, string> = {
+  architect: 'ARCHITECTURE',
+  tech_lead: 'TECH_SPEC',
+  reviewer: 'CODE_REVIEW',
+};
+
+// 태스크에 배정된 required_agents 기준으로, 그 태스크가 실제 거치는 노드만 추려낸다.
+const buildTaskPipeline = (requiredAgents: string[]) => {
+  const ra = (requiredAgents || []).map((a) => a.toLowerCase());
+  const has = (agent: string) => ra.some((r) => r.includes(agent.toLowerCase()));
+  const hasCode = has('Backend') || has('Frontend');
+  return EXEC_PIPELINE.filter((n) => {
+    if (n.id === 'codebuilder') return hasCode;          // 코드가 있을 때만 빌더
+    if (n.id === 'reviewer') return true;                 // Supervisor 게이트는 항상
+    if (n.id === 'manualwriter') return has('Frontend');  // 프론트가 있을 때만 매뉴얼
+    return n.agent ? has(n.agent) : false;                // 그 외엔 배정된 에이전트만
+  });
+};
+
+// 토론·채점 단계(phase) → 표시 아이콘 (LIVE 배너용)
+const PHASE_ICON: Record<string, string> = {
+  draft: '✍️', critique: '🔍', revise: '♻️', scoring: '📊', scored: '✅',
+};
 
 export default function ControlPanel() {
   const [idea, setIdea] = useState("");
@@ -25,10 +52,12 @@ export default function ControlPanel() {
   const currentProjectId = useFactoryStore((s) => s.currentProjectId); 
   
   const completedAgents = useFactoryStore((s) => s.completed_agents);
+  const currentActivity = useFactoryStore((s) => s.currentActivity);
   const isWaitingForHuman = useFactoryStore((s) => s.state?.needs_revision);
   const clearSprintData = useFactoryStore((s) => s.clearSprintData);
   const activeSprintId = useFactoryStore((s) => s.activeSprintId);
   const setActiveSprintId = useFactoryStore((s) => s.setActiveSprintId);
+  const hotlTaskId = useFactoryStore((s) => s.hotlTaskId);
 
   useEffect(() => {
     if (currentProjectId) fetchWBS();
@@ -87,7 +116,7 @@ export default function ControlPanel() {
             schema_version: "5.1.0",
             project_name: wbsData.project_name || currentProjectId,
             current_sprint_task_id: targetTask.task_id,
-            factory_mode: targetTask.task_id.startsWith('REV-') ? "REVISION" : "EXECUTION", 
+            factory_mode: targetTask.task_id.startsWith('TASK_REV_') ? "REVISION" : "EXECUTION",
           }
         })
       });
@@ -134,19 +163,28 @@ export default function ControlPanel() {
     }
   };
 
-  const renderPipelineTracker = (isPaused: boolean) => {
-    const currentAgentIdx = PIPELINE.findIndex(a => !completedAgents.map((ca: string) => ca.toLowerCase()).includes(a.id));
+  const renderPipelineTracker = (isPaused: boolean, task: any) => {
+    // 이 태스크에 배정된 에이전트만으로 파이프라인 구성 (PMO Task별 매핑 반영)
+    const pipeline = buildTaskPipeline(task?.required_agents || []);
+    const currentAgentIdx = pipeline.findIndex(a => !completedAgents.map((ca: string) => ca.toLowerCase()).includes(a.id));
+
+    // 단계별 최신 Supervisor 판정 맵 (criteria_log에서 추출)
+    const verdictByStage: Record<string, string> = {};
+    ((state?.criteria_log as any[]) || []).forEach((e) => { if (e?.stage) verdictByStage[e.stage] = e.verdict; });
+    const supFb = state?.supervisor_feedback || '';
+    const assigned = (task?.required_agents || []).join(', ') || '—';
 
     return (
       <div className={`mt-3 pt-3 border-t ${isPaused ? 'border-orange-900/50' : 'border-blue-900/50'}`}>
-        <div className={`text-[10px] mb-3 font-bold tracking-wider ${isPaused ? 'text-orange-300' : 'text-blue-300'}`}>
+        <div className={`text-[10px] mb-1 font-bold tracking-wider ${isPaused ? 'text-orange-300' : 'text-blue-300'}`}>
           🤖 AGENT PIPELINE STATUS
         </div>
+        <div className="text-[9px] text-gray-500 mb-3">배정 에이전트: <span className="text-gray-300">{assigned}</span></div>
         <div className="flex justify-between items-center relative px-2 mb-2">
           <div className="absolute top-2.5 left-3 right-3 h-[2px] bg-gray-700 -z-10"></div>
-          {PIPELINE.map((agent, idx) => {
+          {pipeline.map((agent, idx) => {
             const isCompleted = completedAgents.map((ca: string) => ca.toLowerCase()).includes(agent.id);
-            const isCurrent = currentAgentIdx === idx || (currentAgentIdx === -1 && idx === PIPELINE.length - 1 && !isCompleted);
+            const isCurrent = currentAgentIdx === idx || (currentAgentIdx === -1 && idx === pipeline.length - 1 && !isCompleted);
             const isBottleneck = isCurrent && isWaitingForHuman && !isPaused;
 
             let circleClass = "bg-gray-800 border-gray-600";
@@ -162,15 +200,34 @@ export default function ControlPanel() {
               circleClass = "bg-blue-500 border-blue-400 animate-pulse"; textClass = "text-blue-300 font-bold";
             }
 
+            // Supervisor 채점 배지 (점수 + 판정색 + 토론 라운드)
+            const stageKey = STAGE_BY_NODE[agent.id];
+            const score = stageKey ? state?.stage_scores?.[stageKey] : undefined;
+            const verdict = stageKey ? verdictByStage[stageKey] : undefined;
+            const rounds = stageKey ? state?.debate_rounds_used?.[stageKey] : undefined;
+            let badgeColor = 'text-gray-400';
+            if (verdict === 'PASS') badgeColor = 'text-green-400';
+            else if (verdict === 'REWORK') badgeColor = 'text-amber-400';
+            else if (verdict === 'ROLLBACK') badgeColor = 'text-red-400';
+            const hasBadge = stageKey && typeof score === 'number';
+
             return (
               <div key={agent.id} className="flex flex-col items-center gap-1 z-10 relative bg-gray-800">
                 <div className={`w-5 h-5 rounded-full border-2 ${circleClass}`}></div>
                 <span className={`text-[9px] absolute top-6 whitespace-nowrap ${textClass}`}>{agent.label}</span>
+                {hasBadge && (
+                  <span
+                    className={`text-[8px] absolute top-11 whitespace-nowrap font-bold ${badgeColor}`}
+                    title={verdict ? `${stageKey} 채점: ${(score as number).toFixed(2)} / ${verdict}${rounds ? ` · 토론 ${rounds}R` : ''}${verdict !== 'PASS' && supFb ? ` · ${supFb}` : ''}` : ''}
+                  >
+                    {(score as number).toFixed(1)}{rounds ? ` ×${rounds}` : ''} {verdict === 'PASS' ? '✓' : verdict ? '!' : ''}
+                  </span>
+                )}
               </div>
             );
           })}
         </div>
-        <div className="h-4"></div> 
+        <div className="h-12"></div>
       </div>
     );
   };
@@ -180,6 +237,16 @@ export default function ControlPanel() {
       <div className="p-4 border-b border-gray-700 bg-gray-900 shrink-0">
         <h2 className="text-lg font-bold text-white flex items-center gap-2">⚙️ 팩토리 제어반</h2>
       </div>
+
+      {currentActivity && (
+        <div className="px-4 py-2 bg-blue-950/60 border-b border-blue-800 flex items-center gap-2 shrink-0">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0"></span>
+          <span className="text-[10px] text-red-300 font-bold tracking-widest shrink-0">LIVE</span>
+          <span className="text-xs text-gray-100 truncate">
+            {(PHASE_ICON[currentActivity.phase] || '⚙️')} {currentActivity.detail}
+          </span>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4">
         {isWbsError && (
@@ -221,21 +288,24 @@ export default function ControlPanel() {
               const isRunning = isInProgress && activeSprintId === task.task_id;
               const isPaused = isInProgress && activeSprintId !== task.task_id;
               const isIdle = !isDone && !isInProgress;
-              
+              const isHotl = task.task_id === hotlTaskId;
+
               return (
                 <div key={task.task_id} className={`p-3 rounded border transition-colors ${
-                  isDone ? 'bg-gray-900 border-green-900/50 opacity-60' : 
-                  isRunning ? 'bg-blue-900/20 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 
+                  isDone ? 'bg-gray-900 border-green-900/50 opacity-60' :
+                  isRunning ? 'bg-blue-900/20 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.2)]' :
+                  isHotl ? 'bg-amber-900/20 border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.2)]' :
                   isPaused ? 'bg-orange-900/20 border-orange-500' : 'bg-gray-800 border-gray-600'
                 }`}>
                   <div className="flex justify-between items-center mb-2">
-                    <span className={`text-xs font-bold ${isPaused ? 'text-orange-300' : 'text-blue-300'}`}>{task.task_id}</span>
+                    <span className={`text-xs font-bold ${isHotl ? 'text-amber-300' : isPaused ? 'text-orange-300' : 'text-blue-300'}`}>{task.task_id}</span>
                     <span className={`text-xs px-2 py-0.5 rounded font-bold ${
-                      isDone ? 'bg-green-900 text-green-300' : 
-                      isRunning ? 'bg-blue-600 text-white animate-pulse' : 
+                      isDone ? 'bg-green-900 text-green-300' :
+                      isRunning ? 'bg-blue-600 text-white animate-pulse' :
+                      isHotl ? 'bg-amber-500 text-white animate-pulse' :
                       isPaused ? 'bg-orange-600 text-white' : 'bg-gray-700 text-gray-300'
                     }`}>
-                      {isDone ? "✅ DONE" : isRunning ? "⚙️ RUNNING" : isPaused ? "⏸️ PAUSED" : "TODO"}
+                      {isDone ? "✅ DONE" : isRunning ? "⚙️ RUNNING" : isHotl ? "⚠️ HOTL REVIEW" : isPaused ? "⏸️ PAUSED" : "TODO"}
                     </span>
                   </div>
                   <h4 className="text-sm font-bold text-gray-200 mb-1">{task.title}</h4>
@@ -250,10 +320,10 @@ export default function ControlPanel() {
                   {isRunning && (
                     <div className="flex flex-col gap-2">
                       <button onClick={() => handlePauseSprint(task)} className="w-full text-xs font-bold py-2 rounded bg-red-600 hover:bg-red-500 text-white">🛑 강제 일시정지 (Pause)</button>
-                      {renderPipelineTracker(false)}
+                      {renderPipelineTracker(false, task)}
                     </div>
                   )}
-                  {isPaused && renderPipelineTracker(true)}
+                  {isPaused && renderPipelineTracker(true, task)}
                 </div>
               );
             })}

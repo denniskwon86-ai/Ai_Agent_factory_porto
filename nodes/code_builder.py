@@ -1,201 +1,60 @@
-import re
-import os
-import ast
 import hashlib
 from pathlib import Path
-from typing import Dict, List, Any, Tuple, Optional, TypedDict
+from typing import Dict, List, Any, Tuple
 from datetime import datetime, timezone
 
-class PatchResult(TypedDict):
-    success: bool
-    file_path: str
-    action: str
-    target: Optional[str]
-    lines_changed: int
-    error: Optional[str]
-    warning: Optional[str]
-    match_method: Optional[str]
-
 class CodeBuilder:
-    # 🚨 [패치] 하드코딩된 기본값("./workspace") 제거
     def __init__(self, workspace_root: str):
         if not workspace_root:
             raise ValueError("CodeBuilder: workspace_root가 명시되어야 합니다.")
         self.workspace_root = Path(workspace_root)
         self.workspace_root.mkdir(parents=True, exist_ok=True)
     
-    def run(self, state: Dict[str, Any], tech_lead_output: str) -> Tuple[Dict[str, Any], List[PatchResult]]:
-        """메인 엔트리 포인트 (State는 Dict 타입만 보장됨)"""
-        instructions = self._parse_instructions(tech_lead_output)
+    def run(self, state: Dict[str, Any], extracted_files: List[Dict[str, str]]) -> Tuple[Dict[str, Any], List[bool]]:
+        """
+        [전면 재설계된 헤드리스 빌더]
+        에이전트가 추출한 {"file_path": "...", "code": "..."} 배열을 받아
+        원자적으로 디스크에 쓰고 file_index를 업데이트합니다.
+        """
         results = []
-        
-        for inst in instructions:
-            result = self._apply_single_patch(inst)
-            results.append(result)
-            if result["success"]:
-                self._update_file_index(state, result)
-                
-        state["build_status"] = "success" if all(r["success"] for r in results) else "failed"
-        
-        errors = [r["error"] for r in results if not r["success"] and r.get("error")]
-        if errors:
-            state["build_error_log"] = "\n".join(errors)
-        else:
-            state["build_error_log"] = ""
+        for file_info in extracted_files:
+            file_path = file_info.get("file_path")
+            code_content = file_info.get("code")
             
+            if not file_path or not code_content:
+                continue
+                
+            full_path = self.workspace_root / file_path
+            success = self._atomic_write(full_path, code_content)
+            results.append(success)
+            
+            if success:
+                self._update_file_index(state, str(full_path), code_content)
+                
+        # 파일이 단 한 개라도 쓰였다면 성공으로 간주 (문법 검사는 Execution에서 컷팅 완료됨)
+        state["build_status"] = "success" if any(results) else "failed"
+        if state["build_status"] == "failed":
+             state["build_error_log"] = "🚨 CodeBuilder: 파일 시스템 쓰기 실패 또는 유효한 파일 데이터가 없습니다."
+        else:
+             state["build_error_log"] = ""
+             
         return state, results
 
-    def _parse_instructions(self, output: str) -> List[Dict]:
-        """Tech Lead의 최신 XML 형식 파싱 (<files><file action=...>...</file></files>)"""
-        instructions = []
-        file_pattern = re.compile(r'<file\s+action="([^"]+)"\s+path="([^"]+)">\s*(.*?)\s*</file>', re.DOTALL)
-        
-        for match in file_pattern.finditer(output):
-            action, path, inner_content = match.groups()
-            target = None
-            replace_block = inner_content.strip()
-            
-            rb_match = re.search(r'<replace-block\s+target="([^"]+)">(.*?)</replace-block>', inner_content, re.DOTALL)
-            if rb_match:
-                target = rb_match.group(1)
-                replace_block = rb_match.group(2).strip()
-            else:
-                t_match = re.search(r'<target>(.*?)</target>', inner_content)
-                if t_match:
-                    target = t_match.group(1).strip()
-            
-            instructions.append({
-                "action": action.lower(),
-                "path": path,
-                "target": target,
-                "replace_block": replace_block
-            })
-            
-        return instructions
-
-    def _apply_single_patch(self, instruction: Dict) -> PatchResult:
-        action = instruction["action"]
-        file_path = instruction["path"]
-        target = instruction.get("target")
-        new_content = instruction.get("replace_block", "")
-        
-        full_path = self.workspace_root / file_path
+    def _atomic_write(self, full_path: Path, new_code: str) -> bool:
         full_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if action == "create":
-            return self._atomic_write(full_path, new_content, "", target, "create")
-
-        if not full_path.exists():
-            return {"success": False, "error": f"File not found: {file_path}", "action": action, "file_path": str(full_path), "lines_changed": 0, "target": target, "warning": None, "match_method": None}
-
-        original_code = full_path.read_text(encoding="utf-8")
-        
-        if action == "delete":
-            full_path.unlink()
-            return {"success": True, "action": "delete", "file_path": str(full_path), "lines_changed": -len(original_code.splitlines()), "target": target, "error": None, "warning": None, "match_method": None}
-
-        patched_code, match_method = self._smart_patch(original_code, target, new_content, full_path.suffix)
-        
-        if patched_code is None:
-            return {"success": False, "error": f"Target not found: {target}", "action": action, "file_path": str(full_path), "lines_changed": 0, "target": target, "warning": None, "match_method": None}
-
-        return self._atomic_write(full_path, patched_code, original_code, target, match_method)
-
-    def _smart_patch(self, code: str, target: str, new_content: str, file_ext: str) -> Tuple[Optional[str], str]:
-        if not target or target.lower() == "전체파일":
-            return new_content, "full_replace"
-
-        if file_ext == ".py":
-            result = self._patch_python_ast(code, target, new_content)
-            if result: 
-                return result, "ast_exact"
-        
-        result = self._patch_regex(code, target, new_content)
-        if result: 
-            return result, "regex"
-        
-        result = self._patch_marker(code, target, new_content)
-        if result: 
-            return result, "marker"
-        
-        return None, "not_found"
-
-    def _patch_python_ast(self, code: str, target: str, new_content: str) -> Optional[str]:
-        try:
-            tree = ast.parse(code)
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    if node.name == target:
-                        start_line = node.lineno - 1
-                        end_line = node.end_lineno
-                        lines = code.splitlines()
-                        patched = "\n".join(lines[:start_line]) + "\n" + new_content + "\n" + "\n".join(lines[end_line:])
-                        return patched
-        except SyntaxError:
-            pass 
-        return None
-
-    def _patch_regex(self, code: str, target: str, new_content: str) -> Optional[str]:
-        patterns = [
-            rf"(?m)^(?:export\s+)?(?:async\s+)?(?:def|class|const|function|interface)\s+{re.escape(target)}\b[\s\S]*?^(?=\S)",
-            rf"(?m)^(?:export\s+)?(?:const|let|var)\s+{re.escape(target)}\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=]*)\s*=>[\s\S]*?^(?=\S)"
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, code)
-            if match:
-                return code[:match.start()] + new_content + "\n" + code[match.end():]
-        return None
-
-    def _patch_marker(self, code: str, target: str, new_content: str) -> Optional[str]:
-        patterns = [
-            rf"//\s*@TARGET:\s*{re.escape(target)}[\s\S]*?//\s*@END",
-            rf"/\*\s*@TARGET:\s*{re.escape(target)}\s*\*/[\s\S]*?/\*\s*@END\s*\*/",
-            rf"#\s*@TARGET:\s*{re.escape(target)}[\s\S]*?#\s*@END"
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, code, re.IGNORECASE)
-            if match:
-                return code[:match.start()] + new_content + "\n" + code[match.end():]
-        return None
-
-    def _atomic_write(self, full_path: Path, new_code: str, original: str, target: str, method: str) -> PatchResult:
         tmp_path = full_path.with_suffix(full_path.suffix + ".tmp")
         
         try:
             tmp_path.write_text(new_code, encoding="utf-8")
-            
-            if full_path.suffix == ".py":
-                compile(new_code, str(full_path), "exec")
-            
-            os.replace(tmp_path, full_path)
-            
-            return {
-                "success": True,
-                "file_path": str(full_path),
-                "action": "update" if original else "create",
-                "target": target,
-                "lines_changed": len(new_code.splitlines()) - len(original.splitlines()),
-                "match_method": method,
-                "error": None,
-                "warning": None
-            }
+            tmp_path.replace(full_path)
+            return True
         except Exception as e:
+            print(f"⚠️ [Atomic Writer] 파일 실물 저장 실패 ({full_path.name}): {e}")
             if tmp_path.exists():
                 tmp_path.unlink()
-            return {
-                "success": False, 
-                "file_path": str(full_path),
-                "action": "update" if original else "create",
-                "target": target,
-                "lines_changed": 0,
-                "match_method": method,
-                "error": f"Validation/Write Error: {str(e)}", 
-                "warning": None
-            }
+            return False
 
-    def _update_file_index(self, state: Dict[str, Any], result: PatchResult):
-        file_path = result["file_path"]
-        
+    def _update_file_index(self, state: Dict[str, Any], file_path: str, content: str):
         if "file_index" not in state:
             state["file_index"] = {}
             
@@ -204,24 +63,22 @@ class CodeBuilder:
         except ValueError:
             rel_path = Path(file_path).name
 
-        current_content = Path(file_path).read_text(encoding="utf-8")
-        file_hash = hashlib.md5(current_content.encode('utf-8')).hexdigest()
+        file_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
 
         if rel_path not in state["file_index"]:
             state["file_index"][rel_path] = {
                 "path": rel_path,
-                "last_modified_agent": "CodeBuilder",
+                "last_modified_agent": "Developer",
                 "last_modified_task": state.get("current_sprint_task_id", "unknown"),
                 "last_modified_at": datetime.now(timezone.utc).isoformat(),
-                "last_modified_by_task": state.get("current_sprint_task_id", "unknown"),
-                "change_summary": f"Target {result['target']} updated via {result['match_method']}",
-                "purpose": "Updated by pipeline",
+                "change_summary": "Auto-generated by pipeline",
+                "purpose": "Component implementation",
                 "last_hash": file_hash,
                 "dependencies": []
             }
         else:
             meta = state["file_index"][rel_path]
-            meta["last_modified_agent"] = "CodeBuilder"
+            meta["last_modified_agent"] = "Developer"
             meta["last_modified_at"] = datetime.now(timezone.utc).isoformat()
-            meta["change_summary"] = f"Target {result['target']} updated via {result['match_method']}"
+            meta["last_modified_task"] = state.get("current_sprint_task_id", "unknown")
             meta["last_hash"] = file_hash

@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import stat
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -16,44 +18,175 @@ class HOTLResumeRequest(BaseModel):
     task_id: str
     feedback: Optional[str] = ""
 
-# 🚨 [신규 추가] 피드백 요청 페이로드
 class RevisionRequest(BaseModel):
     feedback: str
 
-@router.post("/sprint/start")
-async def start_sprint(req: SprintStartRequest):
-    """프론트엔드의 가동 명령을 받아 오케스트레이터의 스프린트를 시작합니다."""
-    await orchestrator.start_sprint(req.task_id, req.project_state_payload)
+class ProjectCreateRequest(BaseModel):
+    project_id: str
+
+class HealRequest(BaseModel):
+    error_log: str
+
+class SprintPauseRequest(BaseModel):
+    task_id: str
+
+# Windows '.git' 읽기 전용 폴더 강제 권한 해제 콜백 (Python 3.12+ onexc 규격)
+def _on_rmtree_error(func, path, exc):
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+@router.get("/projects")
+async def get_projects():
+    projects_dir = "./projects"
+    os.makedirs(projects_dir, exist_ok=True)
+    
+    project_list = []
+    for item in os.listdir(projects_dir):
+        item_path = os.path.join(projects_dir, item)
+        if os.path.isdir(item_path):
+            wbs_path = os.path.join(item_path, "00_wbs_master_plan.json")
+            project_name = item
+            if os.path.exists(wbs_path):
+                try:
+                    with open(wbs_path, "r", encoding="utf-8") as f:
+                        wbs_data = json.load(f)
+                        project_name = wbs_data.get("project_name", item)
+                except:
+                    pass
+            project_list.append({"id": item, "name": project_name})
+            
+    return {"status": "success", "data": project_list}
+
+@router.post("/projects")
+async def create_project(req: ProjectCreateRequest):
+    project_path = os.path.join("./projects", req.project_id)
+    if os.path.exists(project_path):
+        raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
+    os.makedirs(project_path, exist_ok=True)
+    return {"status": "success", "project_id": req.project_id}
+
+@router.delete("/projects/{project_id}")
+async def delete_project(project_id: str):
+    # 🛑 삭제 전, 해당 프로젝트의 실행 중 스프린트를 취소 (좀비 스프린트 방지)
+    await orchestrator.cancel_project(project_id)
+    project_path = os.path.join("./projects", project_id)
+    if os.path.exists(project_path):
+        try:
+            # 🚨 ignore_errors=True 대신 강제 권한 해제(onerror) 로직 적용
+            shutil.rmtree(project_path, onexc=_on_rmtree_error)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"삭제 실패 (파일이 사용 중일 수 있습니다): {str(e)}")
+    return {"status": "success"}
+
+@router.post("/{project_id}/sprint/start")
+async def start_sprint(project_id: str, req: SprintStartRequest):
+    workspace_root = f"./projects/{project_id}"
+    req.project_state_payload["workspace_root"] = workspace_root
+
+    # 리비전 태스크(TASK_REV_*)는 Architect를 건너뛰고 Tech_Lead로 직행해야 하므로
+    # 프론트엔드 오탐을 방어하기 위해 백엔드에서도 factory_mode를 강제 보정합니다.
+    if req.task_id.startswith("TASK_REV_"):
+        req.project_state_payload["factory_mode"] = "REVISION"
+
+    await orchestrator.start_sprint(req.task_id, req.project_state_payload, workspace_root)
     return {"status": "started", "task_id": req.task_id}
 
-@router.post("/hotl/resume")
-async def resume_from_hotl(req: HOTLResumeRequest):
-    """인간의 승인/피드백을 받아 멈춰있던 파이프라인을 재가동합니다."""
+@router.post("/{project_id}/sprint/pause")
+async def pause_sprint(project_id: str, req: SprintPauseRequest):
+    await orchestrator.pause_sprint(req.task_id)
+    return {"status": "paused", "task_id": req.task_id}
+
+@router.post("/{project_id}/hotl/resume")
+async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
     success = await orchestrator.resume_hotl(req.task_id, req.feedback)
     if not success:
         raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")
     return {"status": "resumed", "task_id": req.task_id}
 
-# 🚨 [신규 추가] PM의 피드백을 받아 WBS에 신규 태스크를 생성하는 엔드포인트
-@router.post("/sprint/revision")
-async def create_revision_task(req: RevisionRequest):
+@router.get("/{project_id}/hotl/check")
+async def check_hotl(project_id: str):
+    """진행 중(IN_PROGRESS) 태스크가 HOTL 중단점에서 대기 중인지 조회 (SSE 이벤트 유실 복구용)."""
     from nodes.utils.wbs_manager import WBSManager
-    wbs_mgr = WBSManager()
+    try:
+        wbs = WBSManager(workspace_root=f"./projects/{project_id}").get_wbs()
+    except Exception:
+        wbs = {"tasks": []}
+    for t in wbs.get("tasks", []):
+        if t.get("status") == "IN_PROGRESS":
+            tid = t.get("task_id")
+            if await orchestrator.is_hotl_pending(tid):
+                return {"status": "success", "hotl_task_id": tid}
+    return {"status": "success", "hotl_task_id": None}
+
+@router.post("/{project_id}/sprint/revision")
+async def create_revision_task(project_id: str, req: RevisionRequest):
+    from nodes.utils.wbs_manager import WBSManager
+    wbs_mgr = WBSManager(workspace_root=f"./projects/{project_id}")
     task_id = wbs_mgr.add_revision_task(req.feedback)
     if not task_id:
-        raise HTTPException(status_code=500, detail="WBS를 찾을 수 없습니다. (Track 0 기획 선행 필요)")
+        raise HTTPException(status_code=500, detail="WBS를 찾을 수 없습니다.")
     return {"status": "success", "task_id": task_id}
 
-@router.get("/wbs")
-async def get_wbs_master_plan():
-    """프론트엔드에서 현재 WBS 진행 현황을 조회하기 위한 엔드포인트"""
-    wbs_path = os.path.join("workspace", "00_wbs_master_plan.json")
-    if not os.path.exists(wbs_path):
-        return {"status": "not_found", "message": "WBS 마스터 플랜이 아직 생성되지 않았습니다.", "data": None}
+@router.post("/{project_id}/heal")
+async def trigger_self_healing(project_id: str, req: HealRequest):
+    from nodes.utils.wbs_manager import WBSManager
     
+    workspace_root = f"./projects/{project_id}"
+    wbs_mgr = WBSManager(workspace_root=workspace_root)
+
+    feedback = f"🚨 [자동 캡처 에러 리포트] UI 렌더링 중 에러 발생:\n{req.error_log}\n해당 에러를 분석하여 코드를 즉시 복원하십시오."
+    task_id = wbs_mgr.add_revision_task(feedback)
+
+    state_path = os.path.join(workspace_root, "latest_state.json")
+    project_state_payload = {}
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                project_state_payload = json.load(f)
+        except:
+            pass
+
+    project_state_payload["build_error_log"] = req.error_log
+    project_state_payload["factory_mode"] = "REVISION"
+    project_state_payload["current_sprint_task_id"] = task_id
+    project_state_payload["workspace_root"] = workspace_root
+
+    await orchestrator.start_sprint(task_id, project_state_payload, workspace_root)
+    return {"status": "healing_started", "task_id": task_id}
+
+@router.get("/{project_id}/wbs")
+async def get_wbs_master_plan(project_id: str):
+    wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
+    if not os.path.exists(wbs_path):
+        return {"status": "not_found", "data": None}
     try:
         with open(wbs_path, "r", encoding="utf-8") as f:
             wbs_data = json.load(f)
         return {"status": "success", "data": wbs_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"WBS 파일을 읽는 중 오류 발생: {str(e)}")
+
+@router.get("/{project_id}/feed")
+async def get_supervisor_feed(project_id: str):
+    """슈퍼바이저 콘솔 피드(토론·채점 내레이션) 조회 — 새로고침/재접속 복구용."""
+    feed_path = os.path.join("projects", project_id, "supervisor_feed.json")
+    if not os.path.exists(feed_path):
+        return {"status": "success", "data": []}
+    try:
+        with open(feed_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {"status": "success", "data": data if isinstance(data, list) else []}
+    except Exception:
+        return {"status": "success", "data": []}
+
+@router.get("/{project_id}/state/latest")
+async def get_latest_state(project_id: str):
+    state_path = os.path.join("projects", project_id, "latest_state.json")
+    if not os.path.exists(state_path):
+        return {"status": "not_found", "data": None}
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state_data = json.load(f)
+        return {"status": "success", "data": state_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"상태 파일 읽기 오류: {str(e)}")
