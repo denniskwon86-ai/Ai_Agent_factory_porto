@@ -205,12 +205,77 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
         has_fe_code = bool(_extract_files_from_json(state_obj.frontend_code_summary))
         has_be_code = bool(_extract_files_from_json(state_obj.backend_code_summary))
         
+        # 🖥️ 프론트 렌더 검증 테스트러너: 실제 renderToString 으로 동작 확인 (실패 시 LLM 리뷰 없이 즉시 재작업)
+        render_note = ""
+        if has_fe_code:
+            from nodes.utils.render_checker import check_frontend_render
+            fe_files = _extract_files_from_json(state_obj.frontend_code_summary)
+            render = check_frontend_render(fe_files)
+            if not render.get("ok") and not render.get("skipped"):
+                errs = render.get("errors", [])
+                print(f"❌ [TestRunner] 프론트 렌더 검증 실패: {errs}")
+                review_text = (
+                    "🖥️ 프론트엔드 렌더 검증 실패 — 생성 코드가 실제로 렌더되지 않습니다:\n- "
+                    + "\n- ".join(errs[:5])
+                    + "\n\n위 오류(특히 허용되지 않은 외부 import / null 안전성)를 수정해 다시 작성하십시오."
+                )
+                reviewer_decision = "REWORK_DEV"
+                # 렌더 실패는 결정적 결함 → LLM 리뷰 생략하고 재작업 루프로 직행
+                workspace_root = state_obj.workspace_root
+                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+                cr_scores["CODE_REVIEW"] = 0.0
+                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
+                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV", "blocking_fails": ["frontend_render"]})
+                return {
+                    "reviewer_decision": "REWORK_DEV",
+                    "reviewer_feedback": review_text,
+                    "pm_override_reason": "",
+                    "needs_revision": False,
+                    "current_stage": "CODE_REVIEW",
+                    "stage_scores": cr_scores,
+                    "criteria_log": cr_log,
+                    "supervisor_feedback": review_text,
+                }
+            elif render.get("ok") and not render.get("skipped"):
+                render_note += f"\n(✅ 프론트 렌더 검증 통과 — renderToString {render.get('rendered', 0)}자)"
+
+        # ⚙️ 백엔드 스모크 테스트러너: 격리 부팅 + 엔드포인트 검증 (실패 시 즉시 재작업)
+        if has_be_code:
+            from nodes.utils.backend_smoke import check_backend_smoke
+            be_files = _extract_files_from_json(state_obj.backend_code_summary)
+            smoke = check_backend_smoke(be_files)
+            if not smoke.get("ok") and not smoke.get("skipped"):
+                errs = smoke.get("errors", [])
+                print(f"❌ [TestRunner] 백엔드 스모크 실패: {errs}")
+                review_text = (
+                    "⚙️ 백엔드 스모크 실패 — 생성 코드가 정상 부팅/응답하지 않습니다:\n- "
+                    + "\n- ".join(errs[:5])
+                    + "\n\n위 오류(부팅 크래시 / 내부 모듈 import 누락 / 엔드포인트 5xx 등)를 수정해 다시 작성하십시오."
+                )
+                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+                cr_scores["CODE_REVIEW"] = 0.0
+                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
+                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV", "blocking_fails": ["backend_smoke"]})
+                return {
+                    "reviewer_decision": "REWORK_DEV",
+                    "reviewer_feedback": review_text,
+                    "pm_override_reason": "",
+                    "needs_revision": False,
+                    "current_stage": "CODE_REVIEW",
+                    "stage_scores": cr_scores,
+                    "criteria_log": cr_log,
+                    "supervisor_feedback": review_text,
+                }
+            elif smoke.get("ok") and not smoke.get("skipped"):
+                _w = smoke.get("warnings", [])
+                render_note += f"\n(✅ 백엔드 스모크 통과 — 라우트 {smoke.get('routes', 0)}개" + (f", 경고 {len(_w)}건" if _w else "") + ")"
+
         if not has_fe_code and not has_be_code:
             print("⏩ [Smart Bypass] 코드 작성 내역이 없으므로 리뷰를 통과(PASS)합니다.")
             reviewer_decision = "PASS"
             review_text = "코드 작성 없음 - 설계/문서 업데이트 정상 완료."
         else:
-            print("📝 [Agent] Reviewer 비동기 코드 리뷰 및 의사결정 분류 중...")
+            print(f"📝 [Agent] Reviewer 비동기 코드 리뷰 및 의사결정 분류 중...{render_note}")
             prompt = (
                 "현재 작성된 모든 코드를 리뷰하고, 다음 3가지 중 하나의 의사결정(decision)을 선택하십시오.\n"
                 "1. `PASS`: 문제가 없거나 사소한 오타 수준일 때. 릴리즈 노트 작성.\n"
