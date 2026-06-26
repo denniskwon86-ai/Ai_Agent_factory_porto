@@ -3,6 +3,14 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 from state_models import ProjectState
+import config
+
+def _clip(text: str, limit: int) -> str:
+    """긴 텍스트를 limit자로 절단 (토큰/할당량 절감)."""
+    text = text or ""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n…(이하 {len(text) - limit}자 생략)"
 
 class ContextEngine:
     @staticmethod
@@ -10,9 +18,13 @@ class ContextEngine:
         """
         [전면 개편]
         기존의 무거운 코드 문자열 대신, 물리 디스크의 실제 파일을 읽어오는 컨텍스트 라우터.
-        light=True이면 워크스페이스 전체 파일 주입을 생략하고 요약만 포함한다
-        (토론 비평가/Supervisor 채점 호출의 토큰·429 폭증 방어).
+        light=True이면 워크스페이스 전체 파일 주입을 생략하고 요약만 포함한다.
+        모든 산출물 요약/파일은 토큰 상한으로 절단하여 무료 티어 할당량(TPM) 폭증을 방어한다.
         """
+        sm = getattr(config, "SUMMARY_MAX_LENGTH", 4000)
+        ctx_max = getattr(config, "CONTEXT_MAX_LENGTH", 10000)
+        per_file = 1500
+
         context_parts = [
             f"🎯 [프로젝트 목표]: {state.project_name}",
             f"💡 [초기 기획]: {state.initial_idea}",
@@ -20,15 +32,15 @@ class ContextEngine:
         ]
 
         if getattr(state, "rfp_summary", ""):
-            context_parts.append(f"📋 [요구사항 정의서 (RFP) — 반드시 충족해야 할 기준 계약]:\n{state.rfp_summary}")
+            context_parts.append(f"📋 [요구사항 정의서 (RFP) — 반드시 충족해야 할 기준 계약]:\n{_clip(state.rfp_summary, sm)}")
         if state.prd_summary:
-            context_parts.append(f"📄 [기획서 (PRD)]:\n{state.prd_summary}")
+            context_parts.append(f"📄 [기획서 (PRD)]:\n{_clip(state.prd_summary, sm)}")
         if state.architecture_summary:
-            context_parts.append(f"🏗️ [아키텍처]:\n{state.architecture_summary}")
+            context_parts.append(f"🏗️ [아키텍처]:\n{_clip(state.architecture_summary, sm)}")
         if state.tech_spec_summary:
-            context_parts.append(f"🛠️ [기술 사양 (Tech Spec)]:\n{state.tech_spec_summary}")
+            context_parts.append(f"🛠️ [기술 사양 (Tech Spec)]:\n{_clip(state.tech_spec_summary, sm)}")
 
-        # 🚨 [컨텍스트 라우터] QA, Reviewer, 개발자 교차 참조를 위해 실제 파일 디스크에서 읽어오기
+        # 🚨 [컨텍스트 라우터] QA, Reviewer, 개발자 교차 참조를 위해 실제 파일 디스크에서 읽어오기 (파일별 절단)
         if not light and state.workspace_root and state.file_index:
             ws_path = Path(state.workspace_root)
             if ws_path.exists():
@@ -37,13 +49,13 @@ class ContextEngine:
                     target_file = ws_path / rel_path
                     if target_file.exists():
                         try:
-                            content = target_file.read_text(encoding="utf-8")
-                            # 토큰 최적화: 파일당 2000줄 제한 등 필요시 여기에 추가
+                            content = _clip(target_file.read_text(encoding="utf-8"), per_file)
                             context_parts.append(f"--- FILE: {rel_path} ---\n```\n{content}\n```\n")
                         except Exception as e:
                             context_parts.append(f"--- FILE: {rel_path} (읽기 실패: {e}) ---\n")
-        
-        return "\n\n".join(context_parts)
+
+        # 전체 컨텍스트 총량 상한 (TPM 방어)
+        return _clip("\n\n".join(context_parts), ctx_max)
 
     @staticmethod
     def get_strict_json_instruction() -> str:

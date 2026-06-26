@@ -3,9 +3,12 @@ import type { ErrorInfo, ReactNode } from 'react';
 
 import { useFactoryStore } from './store/useFactoryStore';
 
+import { Group, Panel, Separator } from 'react-resizable-panels';
+
 import ControlPanel from './components/ControlPanel';
 import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
+import WorkflowStrip from './components/WorkflowStrip';
 
 interface EBProps { children: ReactNode; }
 interface EBState { hasError: boolean; error: Error | null; }
@@ -180,23 +183,34 @@ export default function App() {
           </div>
         </header>
 
-        {/* 하위 컬럼 간 스크롤 연동 크래시 방지 락(Lock) 컨테이너 */}
-        <div className="flex-1 flex w-full h-full overflow-hidden">
-          {/* 좌측: 제어반 */}
-          <div className="w-1/5 bg-gray-800 flex flex-col border-r border-gray-700 shrink-0 min-w-[300px] h-full overflow-hidden">
-            <ControlPanel />
-          </div>
+        {/* 전체 워크플로우 진행 스트립 */}
+        <WorkflowStrip />
 
-          {/* 중앙: 타임라인 */}
-          <div className="w-2/5 bg-gray-900 flex flex-col relative border-r border-gray-700 shrink-0 min-w-[350px] h-full overflow-hidden">
-            <TimelinePanel />
-          </div>
+        {/* 3단 레이아웃 — 드래그로 크기 조절 가능 (react-resizable-panels) */}
+        <Group orientation="horizontal" className="flex-1 w-full h-full overflow-hidden flex">
+          {/* 좌측: 제어반 */}
+          <Panel defaultSize="22%" minSize="14%" className="h-full">
+            <div className="bg-gray-800 flex flex-col h-full overflow-hidden">
+              <ControlPanel />
+            </div>
+          </Panel>
+          <Separator className="w-1.5 bg-gray-700 hover:bg-blue-500 transition-colors cursor-col-resize shrink-0" />
+
+          {/* 중앙: 슈퍼바이저 콘솔 */}
+          <Panel defaultSize="40%" minSize="20%" className="h-full">
+            <div className="bg-gray-900 flex flex-col relative h-full overflow-hidden">
+              <TimelinePanel />
+            </div>
+          </Panel>
+          <Separator className="w-1.5 bg-gray-700 hover:bg-blue-500 transition-colors cursor-col-resize shrink-0" />
 
           {/* 우측: 다중 탭 및 렌더링 샌드박스 */}
-          <div className="flex-1 bg-gray-800 flex flex-col min-w-[350px] h-full overflow-hidden">
-            <PreviewPanel rawCode={statePayload?.frontend_code_summary || ""} />
-          </div>
-        </div>
+          <Panel defaultSize="38%" minSize="20%" className="h-full">
+            <div className="bg-gray-800 flex flex-col h-full overflow-hidden">
+              <PreviewPanel rawCode={statePayload?.frontend_code_summary || ""} />
+            </div>
+          </Panel>
+        </Group>
       </div>
     </ErrorBoundary>
   );

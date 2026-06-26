@@ -58,7 +58,7 @@ CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
 # ==========================================
 # 다중 에이전트 토론을 적용할 단계 (상류 생성 단계만 — 무료 티어 429/비용 절제)
 DEBATE_STAGES = ["RFP", "PLANNING", "ARCHITECTURE", "TECH_SPEC"]
-DEBATE_MAX_ROUNDS = 2   # 토론 최대 라운드(초안→비평→개정 반복 상한). 합의(치명결함 0) 시 조기 종료
+DEBATE_MAX_ROUNDS = 1   # 토론 최대 라운드(무료 티어 할당량 절감 — 초안→비평 1회). 합의 시 조기 종료
 DEBATE_CRITICS = 1      # 라운드당 비평가 수 (무료 티어 429 방어로 1명 권장)
 
 # 단계별 비평가 페르소나 (관점 차등 비평)
@@ -70,7 +70,7 @@ STAGE_CRITIC_PERSONAS = {
 }
 
 # Supervisor 게이트 / 무한루프 안전장치
-MAX_STAGE_REWORKS = 2            # 단계별 in-node 재작업 한도. 초과 시 인간 개입(HOTL)
+MAX_STAGE_REWORKS = 1            # 단계별 in-node 재작업 한도(할당량 절감). 초과 시 인간 개입(HOTL)
 GLOBAL_MAX_SUPERVISOR_HOPS = 8   # 전역 Supervisor 왕복 상한
 ON_STAGE_LIMIT_EXCEEDED = "HOTL" # 한도 초과 시: "HOTL"(인간 대기) | "FORCE_PASS"(강행)
 

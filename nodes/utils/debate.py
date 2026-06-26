@@ -196,6 +196,20 @@ async def run_supervised_stage(state_obj, author_skill: str, stage_key: str, ext
     label = STAGE_LABELS.get(stage_key, stage_key)
 
     artifact, rounds_used = await run_debate(state_obj, author_skill, stage_key, extra_instruction=extra_instruction)
+
+    # 할당량 소진 등으로 산출 실패 → 에러 sentinel을 산출물로 저장하지 않고, 사람이 읽을 메시지 + 인간개입 신호
+    if _is_llm_error(artifact):
+        msg = f"⚠️ {label} 단계가 LLM 할당량(무료 티어) 소진으로 중단되었습니다. 쿼터 회복 후 재가동하세요."
+        await _emit(state_obj, stage_key, "scored", 0, msg, meta={"verdict": "REWORK", "score": 0.0})
+        updates = {
+            "current_stage": stage_key,
+            "supervisor_feedback": msg,
+            "needs_revision": True,
+        }
+        if field:
+            updates[field] = msg
+        return updates, {"score": 0.0, "verdict": "REWORK", "blocking_fails": [], "per_check": {}, "rationale": msg}
+
     if field:
         setattr(state_obj, field, artifact)
 
