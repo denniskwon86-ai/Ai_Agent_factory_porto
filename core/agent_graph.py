@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from state_models import ProjectState
 
-from nodes.planning import run_master_pm, run_master_pmo
+from nodes.planning import run_rfp_analyst, run_master_pm, run_master_pmo
 from nodes.execution import (
     run_architect,
     run_tech_lead,
@@ -75,7 +75,7 @@ def _route_to_first_assigned(agents: list, include_design: bool = True) -> str:
     return "CodeBuilder"
 
 def route_factory_mode(state: ProjectState) -> str:
-    if state.factory_mode == "PLANNING": return "Master_PM"
+    if state.factory_mode == "PLANNING": return "RFP_Analyst"
     elif state.factory_mode == "REVISION": return "Tech_Lead"
     # EXECUTION: 태스크에 배정된 에이전트 기준으로 진입 (설계 재사용 — 미배정 시 Architect/Tech_Lead 생략)
     return _route_to_first_assigned(_get_required_agents(state), include_design=True)
@@ -149,6 +149,7 @@ def route_from_pm(state: ProjectState) -> str:
 def create_factory_graph():
     workflow = StateGraph(ProjectState)
 
+    workflow.add_node("RFP_Analyst", run_rfp_analyst)
     workflow.add_node("Master_PM", run_master_pm)
     workflow.add_node("Master_PMO", run_master_pmo)
     workflow.add_node("Architect", run_architect)
@@ -163,11 +164,12 @@ def create_factory_graph():
     workflow.set_conditional_entry_point(
         route_factory_mode,
         {
-            "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", "Architect": "Architect",
+            "RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", "Architect": "Architect",
             "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"
         }
     )
 
+    workflow.add_edge("RFP_Analyst", "Master_PM")
     workflow.add_conditional_edges("Master_PM", route_from_pm, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
     workflow.add_edge("Master_PMO", END)
     
@@ -183,7 +185,7 @@ def create_factory_graph():
 
     memory = MemorySaver()
     # 이전 HOTL 중단점 설정 유지
-    app = workflow.compile(checkpointer=memory, interrupt_after=["Master_PMO", "Tech_Lead"])
+    app = workflow.compile(checkpointer=memory, interrupt_after=["RFP_Analyst", "Master_PMO", "Tech_Lead"])
     return app
 
 app = create_factory_graph()

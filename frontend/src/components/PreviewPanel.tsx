@@ -43,7 +43,7 @@ interface PreviewPanelProps {
   isLoading?: boolean;
 }
 
-type TabType = 'PREVIEW' | 'PRD' | 'ARCH' | 'TECH' | 'FRONTEND' | 'BACKEND' | 'REVIEW' | 'QA' | 'MANUAL';
+type TabType = 'PREVIEW' | 'RFP' | 'PRD' | 'ARCH' | 'TECH' | 'FRONTEND' | 'BACKEND' | 'REVIEW' | 'QA' | 'MANUAL';
 
 interface CodeFile {
   file_path: string;
@@ -364,6 +364,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading }) => {
   const getTabContent = () => {
     if (!statePayload) return "데이터 로딩 대기 중...";
     switch (activeTab) {
+      case 'RFP': return statePayload.rfp_summary || "요구사항 정의서(RFP)가 아직 없습니다.";
       case 'PRD': return statePayload.prd_summary || "기획서가 없습니다.";
       case 'ARCH': return statePayload.architecture_summary || "아키텍처가 없습니다.";
       case 'TECH': return statePayload.tech_spec_summary || "기술 사양이 없습니다.";
@@ -377,7 +378,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading }) => {
   };
 
   const tabs: { id: TabType; label: string }[] = [
-    { id: 'PREVIEW', label: '🖥️ 실시간 샌드박스' }, { id: 'PRD', label: '📄 기획서' },
+    { id: 'PREVIEW', label: '🖥️ 실시간 샌드박스' }, { id: 'RFP', label: '📋 요구정의(RFP)' }, { id: 'PRD', label: '📄 기획서' },
     { id: 'ARCH', label: '🏗️ 아키텍처' }, { id: 'TECH', label: '🛠️ 기술사양' },
     { id: 'FRONTEND', label: '🎨 프론트엔드' }, { id: 'BACKEND', label: '⚙️ 백엔드' },
     { id: 'REVIEW', label: '📝 리뷰' }, { id: 'QA', label: '🧪 QA' },

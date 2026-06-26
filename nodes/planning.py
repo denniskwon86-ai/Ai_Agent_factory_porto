@@ -20,6 +20,16 @@ def _extract_code_from_ssot(json_str: str) -> str:
     except Exception: pass
     return ""
 
+async def run_rfp_analyst(state: Any) -> Dict[str, Any]:
+    """요구사항 정의서(RFP) 작성 — 기획(PM) 이전에 '무엇을·왜'를 확정하는 기준 계약."""
+    state_obj = ProjectState.model_validate(state)
+    print("📋 [Agent] RFP Analyst — 토론·합의 기반 요구사항 정의서(RFP) 작성 중...")
+    from nodes.utils.debate import run_supervised_stage
+    updates, result = await run_supervised_stage(state_obj, "rfp_skill", "RFP")
+    print(f"✅ [Agent] RFP 요구정의 완료 — 점수 {result.get('score')} / 판정 {result.get('verdict')}")
+    updates.setdefault("needs_revision", False)
+    return updates
+
 async def run_master_pm(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     

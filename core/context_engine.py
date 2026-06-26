@@ -19,6 +19,8 @@ class ContextEngine:
             f"📍 [현재 스프린트 태스크]: {state.current_sprint_task_id}"
         ]
 
+        if getattr(state, "rfp_summary", ""):
+            context_parts.append(f"📋 [요구사항 정의서 (RFP) — 반드시 충족해야 할 기준 계약]:\n{state.rfp_summary}")
         if state.prd_summary:
             context_parts.append(f"📄 [기획서 (PRD)]:\n{state.prd_summary}")
         if state.architecture_summary:

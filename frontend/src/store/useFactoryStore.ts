@@ -8,6 +8,7 @@ export interface ProjectState {
   needs_revision: boolean;
   human_feedback_queue: any[];
   developer_retry_count: number;
+  rfp_summary: string;
   prd_summary: string;
   architecture_summary: string;
   tech_spec_summary: string;

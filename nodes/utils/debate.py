@@ -40,6 +40,7 @@ def _rubric_brief(stage_key: str) -> str:
 
 
 STAGE_LABELS = {
+    "RFP": "요구정의(RFP)",
     "PLANNING": "기획(PRD)",
     "ARCHITECTURE": "아키텍처",
     "TECH_SPEC": "기술명세",
@@ -101,6 +102,7 @@ def _build_feedback(result: dict) -> str:
 
 
 _STAGE_SUMMARY_FIELD = {
+    "RFP": "rfp_summary",
     "PLANNING": "prd_summary",
     "ARCHITECTURE": "architecture_summary",
     "TECH_SPEC": "tech_spec_summary",

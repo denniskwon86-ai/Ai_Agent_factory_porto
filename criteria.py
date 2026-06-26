@@ -8,6 +8,10 @@ import json
 import config
 
 
+def _rfp_text(state) -> str:
+    return (getattr(state, "rfp_summary", "") or "").strip()
+
+
 def _prd_text(state) -> str:
     return (getattr(state, "prd_summary", "") or "").strip()
 
@@ -26,6 +30,10 @@ def _read_wbs_tasks(state) -> list:
 
 
 # --- Deterministic 검사 레지스트리 (LLM 호출 0회로 핵심 결함 차단) ---
+def _check_rfp_min_length(state) -> bool:
+    return len(_rfp_text(state)) >= config.RFP_MIN_LENGTH
+
+
 def _check_prd_min_length(state) -> bool:
     return len(_prd_text(state)) >= config.PRD_MIN_LENGTH
 
@@ -50,6 +58,7 @@ def _check_build_success(state) -> bool:
 
 
 DETERMINISTIC_CHECKS = {
+    "rfp_min_length": _check_rfp_min_length,
     "prd_min_length": _check_prd_min_length,
     "wbs_min_tasks": _check_wbs_min_tasks,
     "agents_nonempty": _check_agents_nonempty,
@@ -62,6 +71,16 @@ DETERMINISTIC_CHECKS = {
 # checks[].type: 'deterministic' | 'llm_judge'
 # hard_fail_checks: 하나라도 실패하면 즉시 ROLLBACK/ESCALATE (인간 개입)
 STAGE_RUBRICS = {
+    "RFP": {
+        "checks": [
+            {"id": "rfp_min_length", "desc": "요구정의서 본문이 최소 분량 이상", "weight": 1, "type": "deterministic"},
+            {"id": "purpose_clear", "desc": "프로그램의 목적·의도(왜 만드는가, 해결할 문제)가 명확히 정의됨", "weight": 2, "type": "llm_judge"},
+            {"id": "must_have_components", "desc": "반드시 포함될 필수 구성요소/기능이 REQ-ID 체크리스트로 5개 이상 명시됨", "weight": 2, "type": "llm_judge"},
+            {"id": "acceptance_criteria", "desc": "각 핵심 요구의 인수 기준(완성·정상작동 판정 방법)이 제시됨", "weight": 1, "type": "llm_judge"},
+        ],
+        "pass_threshold": 0.8,
+        "hard_fail_checks": ["rfp_min_length"],
+    },
     "PLANNING": {
         "checks": [
             {"id": "prd_min_length", "desc": "PRD 본문이 최소 분량 이상 (빈약한 3~5줄 기획서 차단)", "weight": 1, "type": "deterministic"},

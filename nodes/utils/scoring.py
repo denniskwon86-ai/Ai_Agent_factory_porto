@@ -30,6 +30,7 @@ def _parse_json(text):
 
 
 _STAGE_ARTIFACT_FIELD = {
+    "RFP": "rfp_summary",
     "PLANNING": "prd_summary",
     "ARCHITECTURE": "architecture_summary",
     "TECH_SPEC": "tech_spec_summary",

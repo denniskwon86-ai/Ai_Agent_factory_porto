@@ -83,6 +83,7 @@ class ProjectState(BaseModel):
     agent_memories: Dict[str, AgentMemory] = Field(default_factory=dict)
 
     # 에이전트 산출물 요약
+    rfp_summary: str = Field(default="")  # 요구사항 정의서(RFP) — 기획·QA의 기준 계약
     prd_summary: str = Field(default="")
     architecture_summary: str = Field(default="")
     tech_spec_summary: str = Field(default="")

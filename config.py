@@ -57,12 +57,13 @@ CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
 # 5. 토론·합의 루프 / 단계별 성공기준 / Supervisor 설정 (V5.1)
 # ==========================================
 # 다중 에이전트 토론을 적용할 단계 (상류 생성 단계만 — 무료 티어 429/비용 절제)
-DEBATE_STAGES = ["PLANNING", "ARCHITECTURE", "TECH_SPEC"]
+DEBATE_STAGES = ["RFP", "PLANNING", "ARCHITECTURE", "TECH_SPEC"]
 DEBATE_MAX_ROUNDS = 2   # 토론 최대 라운드(초안→비평→개정 반복 상한). 합의(치명결함 0) 시 조기 종료
 DEBATE_CRITICS = 1      # 라운드당 비평가 수 (무료 티어 429 방어로 1명 권장)
 
 # 단계별 비평가 페르소나 (관점 차등 비평)
 STAGE_CRITIC_PERSONAS = {
+    "RFP":          "발주처 입장에서 진짜 목적과 필수 요건이 빠짐없이 정의됐는지 따지는 시니어 비즈니스 분석가",
     "PLANNING":     "실현 가능성과 사용자 가치를 동시에 따지는 시니어 프로덕트 매니저",
     "ARCHITECTURE": "확장성·보안·결합도를 검증하는 수석 아키텍트",
     "TECH_SPEC":    "구현 누락과 PRD 추적성을 검증하는 테크리드",
@@ -75,6 +76,7 @@ ON_STAGE_LIMIT_EXCEEDED = "HOTL" # 한도 초과 시: "HOTL"(인간 대기) | "F
 
 # 단계별 통과 임계 점수 (rubric 가중합 기준)
 STAGE_PASS_THRESHOLDS = {
+    "RFP":          0.8,
     "PLANNING":     0.8,
     "PMO":          1.0,
     "ARCHITECTURE": 0.7,
@@ -83,5 +85,6 @@ STAGE_PASS_THRESHOLDS = {
 }
 
 # Deterministic 기준 임계값 (LLM 0콜로 검사)
+RFP_MIN_LENGTH = 600   # 빈약 요구정의서 차단
 PRD_MIN_LENGTH = 800   # 빈약 PRD(3~5줄) 정면 차단
 WBS_MIN_TASKS  = 4     # WBS 최소 태스크 수
