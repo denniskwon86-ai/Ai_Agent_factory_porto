@@ -62,6 +62,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   // pendingFilesRef: 멀티파일 배열 캐시 (IFRAME_READY 수신 시 즉시 전송)
   const pendingFilesRef = useRef<CodeFile[]>([]);
 
+  // 전체화면(인앱 오버레이) / 새 창(독립 OS 창) 상태
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPoppedOut, setIsPoppedOut] = useState(false);
+  const popupRef = useRef<Window | null>(null);
+
   const statePayload = useFactoryStore((s) => s.state);
   // release(라이브러리 결과물)가 주어지면 문서 탭은 그 스냅샷에서 읽는다. 그렇지 않으면 현재 프로젝트 state.
   const docs: any = release ?? statePayload;
@@ -96,7 +101,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
 
         <script>
           window.onerror = function(msg) {
-            window.parent.postMessage({ type: 'PREVIEW_ERROR', message: msg }, '*');
+            (window.opener || window.parent).postMessage({ type: 'PREVIEW_ERROR', message: msg }, '*');
             return false;
           };
 
@@ -105,7 +110,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
               setTimeout(notifyReady, 50);
               return;
             }
-            window.parent.postMessage({ type: 'IFRAME_READY' }, '*');
+            (window.opener || window.parent).postMessage({ type: 'IFRAME_READY' }, '*');
           }
           notifyReady();
 
@@ -279,7 +284,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
                 document.getElementById('root').innerHTML =
                   '<div style="background:#fee2e2;color:#b91c1c;padding:20px;margin:10px;border-radius:8px;border:1px solid #f87171;">' +
                   '<h3 style="margin-top:0;">🚨 렌더링 에러</h3><pre style="white-space:pre-wrap;font-size:13px;">' + err.message + '</pre></div>';
-                window.parent.postMessage({ type: 'PREVIEW_ERROR', message: err.message }, '*');
+                (window.opener || window.parent).postMessage({ type: 'PREVIEW_ERROR', message: err.message }, '*');
               }
             }
           });
@@ -320,11 +325,61 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     return [];
   }, []);
 
-  // iframe 에 EXECUTE_FILES 메시지 전송
+  // EXECUTE_FILES 전송 — 팝업이 열려 있으면 팝업으로, 아니면 인앱 iframe 으로 라우팅
   const sendExecuteFiles = useCallback((files: CodeFile[]) => {
-    if (!files.length || !iframeRef.current?.contentWindow) return;
-    iframeRef.current.contentWindow.postMessage({ type: 'EXECUTE_FILES', files }, '*');
+    if (!files.length) return;
+    const target: Window | null | undefined =
+      (popupRef.current && !popupRef.current.closed) ? popupRef.current : iframeRef.current?.contentWindow;
+    if (!target) return;
+    target.postMessage({ type: 'EXECUTE_FILES', files }, '*');
   }, []);
+
+  // ↗ 새 창: 독립 OS 창에 동일 샌드박스를 띄운다(싱글톤). 사용자 제스처(클릭) 안에서 호출 → 팝업 차단 회피.
+  const openPopout = useCallback(() => {
+    if (popupRef.current && !popupRef.current.closed) { popupRef.current.focus(); return; }
+    const w = window.open('', 'omega_preview', 'width=1024,height=768,resizable=yes,scrollbars=yes');
+    if (!w) { alert('팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용해 주세요.'); return; }
+    w.document.open();
+    w.document.write(htmlTemplate);
+    w.document.close();
+    popupRef.current = w;
+    // 새 타깃(팝업) 준비 대기 → 팝업이 IFRAME_READY 를 보내면 핸들러가 pending 파일을 전송
+    isIframeReadyRef.current = false;
+    setIsPoppedOut(true);
+  }, [htmlTemplate]);
+
+  // 팝업 닫고 메인(iframe)으로 복귀
+  const closePopout = useCallback(() => {
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+    popupRef.current = null;
+    setIsPoppedOut(false);
+    if (pendingFilesRef.current.length) sendExecuteFiles(pendingFilesRef.current);
+  }, [sendExecuteFiles]);
+
+  // 팝업을 사용자가 직접 닫으면 자동으로 메인 복원
+  useEffect(() => {
+    if (!isPoppedOut) return;
+    const id = window.setInterval(() => {
+      if (!popupRef.current || popupRef.current.closed) {
+        window.clearInterval(id);
+        popupRef.current = null;
+        setIsPoppedOut(false);
+        if (pendingFilesRef.current.length) sendExecuteFiles(pendingFilesRef.current);
+      }
+    }, 600);
+    return () => window.clearInterval(id);
+  }, [isPoppedOut, sendExecuteFiles]);
+
+  // ESC 로 전체화면 해제
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFullscreen]);
+
+  // 언마운트 시 열린 팝업 정리
+  useEffect(() => () => { if (popupRef.current && !popupRef.current.closed) popupRef.current.close(); }, []);
 
   // PREVIEW 탭 진입 시 iframe 재초기화
   useEffect(() => {
@@ -390,13 +445,21 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   ];
 
   return (
-    <div className="w-full h-full flex flex-col bg-gray-900 rounded-lg shadow-inner overflow-hidden relative">
-      <div className="flex bg-gray-800 border-b border-gray-700 overflow-x-auto shrink-0 select-none">
-        {tabs.map((tab) => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 py-2.5 text-xs font-bold border-r border-gray-700 whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-gray-900 text-blue-400 border-b-2 border-b-blue-500' : 'text-gray-400 hover:bg-gray-750 hover:text-gray-200'}`}>
-            {tab.label}
-          </button>
-        ))}
+    <div className={`flex flex-col bg-gray-900 shadow-inner overflow-hidden relative ${isFullscreen ? 'fixed inset-0 z-50' : 'w-full h-full rounded-lg'}`}>
+      <div className="flex items-center bg-gray-800 border-b border-gray-700 shrink-0 select-none">
+        <div className="flex overflow-x-auto">
+          {tabs.map((tab) => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 py-2.5 text-xs font-bold border-r border-gray-700 whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-gray-900 text-blue-400 border-b-2 border-b-blue-500' : 'text-gray-400 hover:bg-gray-750 hover:text-gray-200'}`}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {activeTab === 'PREVIEW' && (
+          <div className="flex items-center gap-1 ml-auto px-2 shrink-0">
+            <button onClick={openPopout} title="독립 OS 창으로 실행" className="text-xs font-bold text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors">↗ 새 창</button>
+            <button onClick={() => setIsFullscreen(v => !v)} title={isFullscreen ? '축소 (Esc)' : '전체화면'} className="text-xs font-bold text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors">{isFullscreen ? '✕ 축소' : '⛶ 전체화면'}</button>
+          </div>
+        )}
       </div>
       <div className="flex-1 min-h-0 relative bg-white">
         {activeTab === 'PREVIEW' ? (
@@ -404,6 +467,16 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
             {isLoading && (<div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center z-20"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div><span className="text-gray-600 font-medium animate-pulse text-sm">에이전트가 코드를 컴파일하는 중입니다...</span></div>)}
             {error && !isLoading && (<div className="absolute top-0 left-0 w-full p-3 bg-red-50 text-red-600 text-sm z-10 border-b border-red-200 shadow-sm flex items-start gap-2"><span>🚨</span><div className="flex-1 overflow-hidden overflow-ellipsis"><strong>렌더링 에러:</strong> {error}</div></div>)}
             <iframe ref={iframeRef} title="AI Factory Preview Sandbox" className="w-full h-full border-none flex-1 bg-transparent" sandbox="allow-scripts allow-same-origin" />
+            {isPoppedOut && (
+              <div className="absolute inset-0 bg-gray-900/95 flex flex-col items-center justify-center gap-4 z-20">
+                <div className="text-5xl">🪟</div>
+                <div className="text-gray-300 text-sm font-medium">새 창에서 실행 중입니다</div>
+                <div className="flex gap-2">
+                  <button onClick={() => { if (popupRef.current && !popupRef.current.closed) popupRef.current.focus(); }} className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded transition-colors">새 창 포커스</button>
+                  <button onClick={closePopout} className="text-xs font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded transition-colors">메인으로 복귀</button>
+                </div>
+              </div>
+            )}
           </>
         ) : activeTab === 'MANUAL' ? (
           <div className="w-full h-full bg-white overflow-y-auto">
