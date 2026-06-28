@@ -16,6 +16,12 @@ import config
 # 시스템 부팅 시 최우선으로 .env 파일의 환경변수를 메모리에 안전하게 로드합니다.
 load_dotenv()
 
+# 모든 LLM 호출에 공통 적용되는 언어 지침 — Gemini의 한자(漢字) 혼입 미관 이슈 억제.
+_LANG_DIRECTIVE = (
+    " 모든 자연어 텍스트는 한국어(한글)로만 작성하고 한자(漢字)는 절대 사용하지 마라"
+    " (예: '滿'이 아니라 '가득', '完了'가 아니라 '완료'). 코드 식별자·기술용어의 영문 표기만 허용한다."
+)
+
 class LLMGateway:
     """
     LLM 호출과 자원 최적화를 전담하는 비동기 게이트웨이.
@@ -112,6 +118,8 @@ class LLMGateway:
             final_prompt = f"{core_context}\n\n[요청 지시사항]:\n{skill_prompt}"
             system_content = "You are a V5.0 AI Software Factory Agent. Produce a thorough, well-structured document exactly as instructed. Do NOT wrap it in JSON or code fences."
 
+        system_content += _LANG_DIRECTIVE
+
         messages = [
             SystemMessage(content=system_content),
             HumanMessage(content=final_prompt)
@@ -173,12 +181,14 @@ class LLMGateway:
         text = re.sub(r'</?file[^>]*>', '', text)
         text = re.sub(r'</?files>', '', text)
         
-        # 3. JSON 문법 유효성 검증
-        try:
-            parsed = json.loads(text)
-            return json.dumps(parsed, ensure_ascii=False, indent=2)
-        except json.JSONDecodeError as e:
-            print(f"⚠️ [JSON Repair] 디코딩 에러 감지됨. 원시 텍스트 반환을 시도합니다: {e}")
-            return text
+        # 3. JSON 문법 유효성 검증 (실패 시 트레일링 콤마 제거 후 1회 재시도)
+        for candidate in (text, re.sub(r',(\s*[}\]])', r'\1', text)):
+            try:
+                parsed = json.loads(candidate)
+                return json.dumps(parsed, ensure_ascii=False, indent=2)
+            except json.JSONDecodeError:
+                continue
+        print("⚠️ [JSON Repair] 디코딩 실패. 원시 텍스트를 반환합니다.")
+        return text
 
 gateway = LLMGateway()

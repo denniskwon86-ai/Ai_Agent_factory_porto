@@ -19,14 +19,9 @@ def _load_skill(role_name: str) -> str:
 
 
 def _parse_json(text):
-    try:
-        s = str(text).strip()
-        m = re.search(r'(\{[\s\S]*\})', s)
-        if m:
-            s = m.group(1)
-        return json.loads(s)
-    except Exception:
-        return {}
+    # 관대한 파서로 위임 — 트레일링 콤마/코드펜스/단일따옴표 등 비정형 JSON 복구
+    from nodes.utils.json_utils import loads_lenient
+    return loads_lenient(text)
 
 
 def _is_llm_error(text) -> bool:

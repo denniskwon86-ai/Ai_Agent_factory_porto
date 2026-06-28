@@ -19,14 +19,9 @@ def _load_skill(role_name: str) -> str:
 
 
 def _parse_json(text):
-    try:
-        s = str(text).strip()
-        m = re.search(r'(\{[\s\S]*\})', s)
-        if m:
-            s = m.group(1)
-        return json.loads(s)
-    except Exception:
-        return {}
+    # 관대한 파서로 위임 — judge 채점 JSON이 비정형이어도 점수가 0으로 유실되지 않도록
+    from nodes.utils.json_utils import loads_lenient
+    return loads_lenient(text)
 
 
 _STAGE_ARTIFACT_FIELD = {
