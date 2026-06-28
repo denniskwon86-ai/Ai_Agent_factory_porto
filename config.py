@@ -86,5 +86,5 @@ STAGE_PASS_THRESHOLDS = {
 
 # Deterministic 기준 임계값 (LLM 0콜로 검사)
 RFP_MIN_LENGTH = 600   # 빈약 요구정의서 차단
-PRD_MIN_LENGTH = 800   # 빈약 PRD(3~5줄) 정면 차단
+PRD_MIN_LENGTH = 1200  # 빈약 PRD 차단 — 7개 섹션 깊이를 강제하기 위해 상향(기존 800)
 WBS_MIN_TASKS  = 4     # WBS 최소 태스크 수

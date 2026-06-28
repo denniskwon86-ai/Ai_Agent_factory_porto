@@ -84,9 +84,12 @@ STAGE_RUBRICS = {
     "PLANNING": {
         "checks": [
             {"id": "prd_min_length", "desc": "PRD 본문이 최소 분량 이상 (빈약한 3~5줄 기획서 차단)", "weight": 1, "type": "deterministic"},
-            {"id": "func_req_5", "desc": "기능 요구사항(FR)이 5개 이상 구체적으로 명시됨", "weight": 2, "type": "llm_judge"},
-            {"id": "nonfunc_req", "desc": "비기능 요구사항(성능/보안/확장성)이 포함됨", "weight": 1, "type": "llm_judge"},
-            {"id": "measurable_ac", "desc": "측정 가능한 수용 기준(Acceptance Criteria)이 명시됨", "weight": 1, "type": "llm_judge"},
+            {"id": "func_req_5", "desc": "기능 요구사항(FR)이 FR-ID로 5개 이상, 각 우선순위(High/Med/Low)와 함께 구체적으로 명시됨", "weight": 2, "type": "llm_judge"},
+            {"id": "nonfunc_req", "desc": "비기능 요구사항(성능/보안/확장성/가용성)이 구체적 수치·기준으로 제시됨", "weight": 1, "type": "llm_judge"},
+            {"id": "measurable_ac", "desc": "사용자 스토리(US)별 측정 가능한 수용 기준(AC)이 각 2개 이상 제시됨", "weight": 1, "type": "llm_judge"},
+            {"id": "data_domain", "desc": "핵심 데이터 엔티티와 엔티티 간 관계(1:N, N:M 등)가 명시됨 (Architect가 스키마 설계에 사용)", "weight": 1, "type": "llm_judge"},
+            {"id": "scope_defined", "desc": "In-Scope와 Out-of-Scope가 (제외 이유와 함께) 명확히 구분됨", "weight": 1, "type": "llm_judge"},
+            {"id": "rfp_traceability", "desc": "각 FR이 어떤 RFP 요구(REQ-ID)를 충족하는지 추적성이 드러남 (RFP가 있을 때)", "weight": 1, "type": "llm_judge"},
         ],
         "pass_threshold": 0.8,
         "hard_fail_checks": ["prd_min_length"],
