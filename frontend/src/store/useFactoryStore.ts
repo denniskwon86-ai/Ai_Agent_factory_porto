@@ -36,6 +36,8 @@ interface FactoryStore {
   completed_agents: string[];
   currentActivity: any | null;
   supervisorFeed: any[];
+  releases: any[];
+  viewingRelease: any | null;
   projects: { id: string, name: string }[];
   currentProjectId: string | null;
   healingRetryCount: number;
@@ -51,6 +53,11 @@ interface FactoryStore {
   fetchLatestState: () => Promise<void>;
   checkHotl: () => Promise<void>;
   fetchFeed: () => Promise<void>;
+  fetchReleases: () => Promise<void>;
+  saveRelease: (projectId: string) => Promise<string | null>;
+  viewRelease: (releaseId: string) => Promise<void>;
+  closeRelease: () => void;
+  deleteRelease: (releaseId: string) => Promise<void>;
   clearSprintData: () => void;
   triggerSelfHealing: (errorMsg: string) => Promise<void>;
 }
@@ -70,6 +77,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   completed_agents: [],
   currentActivity: null,
   supervisorFeed: [],
+  releases: [],
+  viewingRelease: null,
   projects: [],
   currentProjectId: null,
   healingRetryCount: 0,
@@ -132,7 +141,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       if (res.ok) {
         await get().fetchProjects();
         if (get().currentProjectId === id) {
-          set({ currentProjectId: null });
+          // 삭제된 프로젝트의 state가 스토어에 남아 다른 화면(릴리스 보기 등)에 노출되지 않도록 함께 비운다
+          set({ currentProjectId: null, state: null, wbsData: null });
         }
         return true;
       }
@@ -174,6 +184,61 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       }
     } catch (error) {
       console.error("슈퍼바이저 피드 로드 실패:", error);
+    }
+  },
+
+  fetchReleases: async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/library/list`);
+      if (res.ok) {
+        const r = await res.json();
+        set({ releases: Array.isArray(r.data) ? r.data : [] });
+      }
+    } catch (error) {
+      console.error("라이브러리 목록 로드 실패:", error);
+    }
+  },
+
+  saveRelease: async (projectId: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${projectId}/release`, { method: 'POST' });
+      if (res.ok) {
+        const r = await res.json();
+        await get().fetchReleases();
+        return r.release_id || null;
+      }
+    } catch (error) {
+      console.error("최종 결과물 저장 실패:", error);
+    }
+    return null;
+  },
+
+  viewRelease: async (releaseId: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/library/item/${releaseId}`);
+      if (res.ok) {
+        const r = await res.json();
+        set({ viewingRelease: r.data });
+      }
+    } catch (error) {
+      console.error("결과물 로드 실패:", error);
+    }
+  },
+
+  closeRelease: () => set({ viewingRelease: null }),
+
+  deleteRelease: async (releaseId: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/library/item/${releaseId}`, { method: 'DELETE' });
+      // 500(파일 잠김 등)은 사용자에게 알린다. 404(이미 삭제됨)는 목록 갱신으로 흡수.
+      if (!res.ok && res.status !== 404) {
+        let msg = "결과물 삭제에 실패했습니다.";
+        try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+        alert(msg);
+      }
+      await get().fetchReleases();
+    } catch (error) {
+      console.error("결과물 삭제 실패:", error);
     }
   },
 

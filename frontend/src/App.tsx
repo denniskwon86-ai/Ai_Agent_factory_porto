@@ -55,13 +55,20 @@ export default function App() {
   const deleteProject = useFactoryStore((state) => state.deleteProject);
   const setCurrentProject = useFactoryStore((state) => state.setCurrentProject);
   const statePayload = useFactoryStore((state) => state.state);
+  const releases = useFactoryStore((state) => state.releases);
+  const viewingRelease = useFactoryStore((state) => state.viewingRelease);
+  const fetchReleases = useFactoryStore((state) => state.fetchReleases);
+  const viewRelease = useFactoryStore((state) => state.viewRelease);
+  const closeRelease = useFactoryStore((state) => state.closeRelease);
+  const deleteRelease = useFactoryStore((state) => state.deleteRelease);
 
   const [newProjectId, setNewProjectId] = useState("");
 
   useEffect(() => {
     connectSSE();
     fetchProjects();
-  }, [connectSSE, fetchProjects]);
+    fetchReleases();
+  }, [connectSSE, fetchProjects, fetchReleases]);
 
   const handleCreateProject = async () => {
     if (!newProjectId.trim()) return;
@@ -85,6 +92,27 @@ export default function App() {
       alert("프로젝트 삭제 중 에러가 발생했습니다.");
     }
   };
+
+  if (viewingRelease) {
+    return (
+      <ErrorBoundary>
+        <div className="h-screen w-screen bg-gray-900 text-gray-100 flex flex-col font-sans overflow-hidden">
+          <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0">
+            <div className="flex items-center gap-4 min-w-0">
+              <button onClick={closeRelease} className="text-sm font-bold text-gray-400 hover:text-white bg-gray-700 px-3 py-1.5 rounded transition-colors shrink-0">◀ 라이브러리</button>
+              <h1 className="text-lg font-bold text-white truncate">
+                📦 결과물 실행: <span className="text-emerald-400">{viewingRelease.project_name}</span>
+                <span className="text-xs text-gray-500 font-normal ml-2">{viewingRelease.created_at}</span>
+              </h1>
+            </div>
+          </header>
+          <div className="flex-1 overflow-hidden">
+            <PreviewPanel rawCode={viewingRelease.frontend_code_summary || ""} release={viewingRelease} />
+          </div>
+        </div>
+      </ErrorBoundary>
+    );
+  }
 
   if (!currentProjectId) {
     return (
@@ -153,6 +181,38 @@ export default function App() {
                 >
                   신규 기획 공간 할당
                 </button>
+              </div>
+
+              {/* 📦 결과물 라이브러리 (배포된 최종 산출물) */}
+              <div className="mt-12">
+                <h2 className="text-xl font-bold text-gray-300 mb-4 flex items-center gap-2">
+                  📦 결과물 라이브러리 <span className="text-sm font-normal text-gray-500">— 배포된 최종 산출물</span>
+                </h2>
+                {releases.length === 0 ? (
+                  <div className="text-gray-600 text-sm italic border border-dashed border-gray-700 rounded-lg p-6 text-center">
+                    아직 배포된 결과물이 없습니다. 프로젝트를 완료한 뒤 통제실에서 <span className="text-gray-400">"최종 결과물 저장(배포)"</span>을 누르면 여기에 모입니다.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {releases.map((rel: any) => (
+                      <div key={rel.release_id} className="bg-gray-800 border border-gray-700 rounded-lg p-5 hover:border-emerald-500 transition-colors flex flex-col">
+                        <div className="flex items-start justify-between mb-2 gap-2">
+                          <h3 className="text-base font-bold text-emerald-400 truncate">{rel.project_name}</h3>
+                          <button
+                            onClick={() => { if (confirm(`결과물 '${rel.project_name}'을(를) 삭제하시겠습니까?`)) deleteRelease(rel.release_id); }}
+                            className="text-xs text-red-400 hover:text-white hover:bg-red-600 border border-red-800 rounded px-2 py-0.5 shrink-0"
+                            title="결과물 삭제"
+                          >🗑</button>
+                        </div>
+                        <div className="text-xs text-gray-500 mb-4">{rel.created_at} · 태스크 {rel.task_count}개</div>
+                        <button
+                          onClick={() => viewRelease(rel.release_id)}
+                          className="mt-auto w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded transition-colors"
+                        >▶ 결과물 실행 / 미리보기</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </main>

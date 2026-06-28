@@ -49,7 +49,8 @@ export default function ControlPanel() {
   const wbsData = useFactoryStore((s) => s.wbsData);
   const isWbsError = useFactoryStore((s) => s.isWbsError);
   const fetchWBS = useFactoryStore((s) => s.fetchWBS);
-  const currentProjectId = useFactoryStore((s) => s.currentProjectId); 
+  const currentProjectId = useFactoryStore((s) => s.currentProjectId);
+  const saveRelease = useFactoryStore((s) => s.saveRelease);
   
   const completedAgents = useFactoryStore((s) => s.completed_agents);
   const currentActivity = useFactoryStore((s) => s.currentActivity);
@@ -281,7 +282,25 @@ export default function ControlPanel() {
                 <div className="bg-blue-500 h-2 rounded-full transition-all duration-500 ease-out" style={{ width: `${progressPercent}%` }}></div>
               </div>
             </div>
-            
+
+            {/* 🚀 모든 단계 완료 시 — 최종 결과물 저장(배포) */}
+            {progressPercent === 100 && currentProjectId && (
+              <button
+                onClick={async () => {
+                  if (!confirm("이 프로젝트의 최종 결과물을 라이브러리에 저장(배포)하시겠습니까?")) return;
+                  const rid = await saveRelease(currentProjectId);
+                  if (rid) {
+                    alert("✅ 최종 결과물이 라이브러리에 저장되었습니다.\n런처(프로젝트 선택) 화면의 '📦 결과물 라이브러리'에서 다시 실행/미리보기 할 수 있습니다.");
+                  } else {
+                    alert("❌ 결과물 저장에 실패했습니다.");
+                  }
+                }}
+                className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all border border-emerald-400/30 mb-1"
+              >
+                🚀 최종 결과물 저장 (배포)
+              </button>
+            )}
+
             {wbsData.tasks.map((task: any) => {
               const isDone = task.status === 'DONE';
               const isInProgress = task.status === 'IN_PROGRESS';

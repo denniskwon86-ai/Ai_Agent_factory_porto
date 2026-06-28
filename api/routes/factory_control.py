@@ -1,7 +1,9 @@
 import json
 import os
+import re
 import shutil
 import stat
+from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -9,6 +11,8 @@ from typing import Optional
 from core.async_orchestrator import orchestrator
 
 router = APIRouter(prefix="/api/v1/factory")
+
+LIBRARY_DIR = "library"  # 배포된 최종 결과물 보관소
 
 class SprintStartRequest(BaseModel):
     task_id: str
@@ -34,6 +38,15 @@ class SprintPauseRequest(BaseModel):
 def _on_rmtree_error(func, path, exc):
     os.chmod(path, stat.S_IWRITE)
     func(path)
+
+# 경로 파라미터(project_id/release_id)는 파일시스템 경로로 직접 사용되므로 단일 세그먼트만 허용한다.
+# '/', '\\', '..', 절대경로, 빈값을 차단해 디렉토리 이탈(path traversal)을 원천 봉쇄한다.
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+def _safe_id(value: str, label: str = "id") -> str:
+    if not _ID_RE.match(value or ""):
+        raise HTTPException(status_code=400, detail=f"잘못된 {label} 형식입니다.")
+    return value
 
 @router.get("/projects")
 async def get_projects():
@@ -190,3 +203,104 @@ async def get_latest_state(project_id: str):
         return {"status": "success", "data": state_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"상태 파일 읽기 오류: {str(e)}")
+
+
+# ==========================================
+# 결과물 라이브러리 (배포/최종 결과물 저장 + 보관 + 재실행)
+# ==========================================
+@router.post("/{project_id}/release")
+async def create_release(project_id: str):
+    """완료된 프로젝트의 최종 결과물을 라이브러리에 스냅샷 저장(배포)."""
+    _safe_id(project_id, "project_id")  # 경로 이탈 방지 + release_id가 라이브러리 라우트와 왕복 가능하도록 보장
+    state_path = os.path.join("projects", project_id, "latest_state.json")
+    if not os.path.exists(state_path):
+        raise HTTPException(status_code=404, detail="저장할 결과물 상태가 없습니다.")
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            s = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"상태 읽기 오류: {str(e)}")
+
+    wbs_tasks = []
+    wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
+    if os.path.exists(wbs_path):
+        try:
+            with open(wbs_path, "r", encoding="utf-8") as f:
+                wbs_tasks = json.load(f).get("tasks", [])
+        except Exception:
+            pass
+
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    release_id = f"{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    release = {
+        "release_id": release_id,
+        "project_id": project_id,
+        "project_name": s.get("project_name", project_id),
+        "created_at": created_at,
+        "rfp_summary": s.get("rfp_summary", ""),
+        "prd_summary": s.get("prd_summary", ""),
+        "architecture_summary": s.get("architecture_summary", ""),
+        "tech_spec_summary": s.get("tech_spec_summary", ""),
+        "frontend_code_summary": s.get("frontend_code_summary", ""),
+        "backend_code_summary": s.get("backend_code_summary", ""),
+        "code_review_report_summary": s.get("code_review_report_summary", ""),
+        "qa_report_summary": s.get("qa_report_summary", ""),
+        "user_manual_summary": s.get("user_manual_summary", ""),
+        "wbs_tasks": wbs_tasks,
+    }
+    rel_dir = os.path.join(LIBRARY_DIR, release_id)
+    os.makedirs(rel_dir, exist_ok=True)
+    with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
+        json.dump(release, f, ensure_ascii=False, indent=2)
+    return {"status": "success", "release_id": release_id}
+
+
+@router.get("/library/list")
+async def list_releases():
+    """라이브러리에 보관된 결과물 목록(요약)."""
+    os.makedirs(LIBRARY_DIR, exist_ok=True)
+    items = []
+    for rid in os.listdir(LIBRARY_DIR):
+        rp = os.path.join(LIBRARY_DIR, rid, "release.json")
+        if os.path.exists(rp):
+            try:
+                with open(rp, "r", encoding="utf-8") as f:
+                    r = json.load(f)
+                items.append({
+                    "release_id": r.get("release_id", rid),
+                    "project_name": r.get("project_name", rid),
+                    "created_at": r.get("created_at", ""),
+                    "task_count": len(r.get("wbs_tasks", [])),
+                })
+            except Exception:
+                continue
+    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return {"status": "success", "data": items}
+
+
+@router.get("/library/item/{release_id}")
+async def get_release(release_id: str):
+    """결과물 상세(재실행/프리뷰용 — frontend 코드 포함)."""
+    _safe_id(release_id, "release_id")  # 경로 이탈로 임의 release.json 읽기 방지
+    rp = os.path.join(LIBRARY_DIR, release_id, "release.json")
+    if not os.path.exists(rp):
+        raise HTTPException(status_code=404, detail="결과물을 찾을 수 없습니다.")
+    try:
+        with open(rp, "r", encoding="utf-8") as f:
+            return {"status": "success", "data": json.load(f)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"결과물 읽기 오류: {str(e)}")
+
+
+@router.delete("/library/item/{release_id}")
+async def delete_release(release_id: str):
+    _safe_id(release_id, "release_id")  # 경로 이탈로 임의 디렉토리 삭제 방지
+    rel_dir = os.path.join(LIBRARY_DIR, release_id)
+    if not os.path.isdir(rel_dir):
+        raise HTTPException(status_code=404, detail="결과물을 찾을 수 없습니다.")
+    try:
+        # delete_project와 동일하게 onexc로 Windows 잠금/읽기전용 파일 실패를 표면화한다(ignore_errors=True의 무음 실패 방지)
+        shutil.rmtree(rel_dir, onexc=_on_rmtree_error)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"삭제 실패 (파일이 사용 중일 수 있습니다): {str(e)}")
+    return {"status": "success"}

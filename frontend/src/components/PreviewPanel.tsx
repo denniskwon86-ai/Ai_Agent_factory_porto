@@ -41,6 +41,8 @@ function ManualRenderer({ markdown }: { markdown: string }) {
 interface PreviewPanelProps {
   rawCode: string;
   isLoading?: boolean;
+  // 라이브러리 결과물 보기 모드: 문서 탭을 이 스냅샷에서 읽는다(현재/다른 프로젝트 state 노출 방지)
+  release?: any;
 }
 
 type TabType = 'PREVIEW' | 'RFP' | 'PRD' | 'ARCH' | 'TECH' | 'FRONTEND' | 'BACKEND' | 'REVIEW' | 'QA' | 'MANUAL';
@@ -50,7 +52,7 @@ interface CodeFile {
   code: string;
 }
 
-const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading }) => {
+const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('PREVIEW');
@@ -61,6 +63,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading }) => {
   const pendingFilesRef = useRef<CodeFile[]>([]);
 
   const statePayload = useFactoryStore((s) => s.state);
+  // release(라이브러리 결과물)가 주어지면 문서 탭은 그 스냅샷에서 읽는다. 그렇지 않으면 현재 프로젝트 state.
+  const docs: any = release ?? statePayload;
   const isConnected = useFactoryStore((s) => s.isConnected);
   const triggerSelfHealing = useFactoryStore((s) => s.triggerSelfHealing);
   const isConnectedRef = useRef(isConnected);
@@ -362,17 +366,17 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading }) => {
   }, [sendExecuteFiles]);
 
   const getTabContent = () => {
-    if (!statePayload) return "데이터 로딩 대기 중...";
+    if (!docs) return "데이터 로딩 대기 중...";
     switch (activeTab) {
-      case 'RFP': return statePayload.rfp_summary || "요구사항 정의서(RFP)가 아직 없습니다.";
-      case 'PRD': return statePayload.prd_summary || "기획서가 없습니다.";
-      case 'ARCH': return statePayload.architecture_summary || "아키텍처가 없습니다.";
-      case 'TECH': return statePayload.tech_spec_summary || "기술 사양이 없습니다.";
-      case 'FRONTEND': return statePayload.frontend_code_summary || "프론트엔드 코드가 없습니다.";
-      case 'BACKEND': return statePayload.backend_code_summary || "백엔드 코드가 없습니다.";
-      case 'REVIEW': return statePayload.code_review_report_summary || "리뷰 리포트가 없습니다.";
-      case 'QA': return statePayload.qa_report_summary || "QA 리포트가 없습니다.";
-      case 'MANUAL': return statePayload.user_manual_summary || "사용자 매뉴얼이 아직 생성되지 않았습니다.\nQA 승인 완료 후 자동으로 작성됩니다.";
+      case 'RFP': return docs.rfp_summary || "요구사항 정의서(RFP)가 아직 없습니다.";
+      case 'PRD': return docs.prd_summary || "기획서가 없습니다.";
+      case 'ARCH': return docs.architecture_summary || "아키텍처가 없습니다.";
+      case 'TECH': return docs.tech_spec_summary || "기술 사양이 없습니다.";
+      case 'FRONTEND': return docs.frontend_code_summary || "프론트엔드 코드가 없습니다.";
+      case 'BACKEND': return docs.backend_code_summary || "백엔드 코드가 없습니다.";
+      case 'REVIEW': return docs.code_review_report_summary || "리뷰 리포트가 없습니다.";
+      case 'QA': return docs.qa_report_summary || "QA 리포트가 없습니다.";
+      case 'MANUAL': return docs.user_manual_summary || "사용자 매뉴얼이 아직 생성되지 않았습니다.\nQA 승인 완료 후 자동으로 작성됩니다.";
       default: return "";
     }
   };
@@ -404,8 +408,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading }) => {
         ) : activeTab === 'MANUAL' ? (
           <div className="w-full h-full bg-white overflow-y-auto">
             <div className="max-w-3xl mx-auto p-8 prose prose-sm">
-              {statePayload?.user_manual_summary
-                ? <ManualRenderer markdown={statePayload.user_manual_summary} />
+              {docs?.user_manual_summary
+                ? <ManualRenderer markdown={docs.user_manual_summary} />
                 : <p className="text-gray-400 text-sm mt-8 text-center">사용자 매뉴얼이 아직 생성되지 않았습니다.<br />QA 승인 완료 후 자동으로 작성됩니다.</p>
               }
             </div>
