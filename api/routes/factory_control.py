@@ -72,6 +72,7 @@ async def get_projects():
 
 @router.post("/projects")
 async def create_project(req: ProjectCreateRequest):
+    _safe_id(req.project_id, "project_id")  # 디스크에 안전한 id만 생성 → 이후 모든 라우트가 안전한 id를 다루도록 보장
     project_path = os.path.join("./projects", req.project_id)
     if os.path.exists(project_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
@@ -80,6 +81,7 @@ async def create_project(req: ProjectCreateRequest):
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str):
+    _safe_id(project_id, "project_id")  # rmtree 대상 경로 이탈 방지(가장 파괴적인 벡터)
     # 🛑 삭제 전, 해당 프로젝트의 실행 중 스프린트를 취소 (좀비 스프린트 방지)
     await orchestrator.cancel_project(project_id)
     project_path = os.path.join("./projects", project_id)
@@ -93,6 +95,7 @@ async def delete_project(project_id: str):
 
 @router.post("/{project_id}/sprint/start")
 async def start_sprint(project_id: str, req: SprintStartRequest):
+    _safe_id(project_id, "project_id")
     workspace_root = f"./projects/{project_id}"
     req.project_state_payload["workspace_root"] = workspace_root
 
@@ -106,11 +109,13 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
 
 @router.post("/{project_id}/sprint/pause")
 async def pause_sprint(project_id: str, req: SprintPauseRequest):
+    _safe_id(project_id, "project_id")
     await orchestrator.pause_sprint(req.task_id)
     return {"status": "paused", "task_id": req.task_id}
 
 @router.post("/{project_id}/hotl/resume")
 async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
+    _safe_id(project_id, "project_id")
     success = await orchestrator.resume_hotl(req.task_id, req.feedback)
     if not success:
         raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")
@@ -119,6 +124,7 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
 @router.get("/{project_id}/hotl/check")
 async def check_hotl(project_id: str):
     """진행 중(IN_PROGRESS) 태스크가 HOTL 중단점에서 대기 중인지 조회 (SSE 이벤트 유실 복구용)."""
+    _safe_id(project_id, "project_id")
     from nodes.utils.wbs_manager import WBSManager
     try:
         wbs = WBSManager(workspace_root=f"./projects/{project_id}").get_wbs()
@@ -133,6 +139,7 @@ async def check_hotl(project_id: str):
 
 @router.post("/{project_id}/sprint/revision")
 async def create_revision_task(project_id: str, req: RevisionRequest):
+    _safe_id(project_id, "project_id")
     from nodes.utils.wbs_manager import WBSManager
     wbs_mgr = WBSManager(workspace_root=f"./projects/{project_id}")
     task_id = wbs_mgr.add_revision_task(req.feedback)
@@ -142,8 +149,9 @@ async def create_revision_task(project_id: str, req: RevisionRequest):
 
 @router.post("/{project_id}/heal")
 async def trigger_self_healing(project_id: str, req: HealRequest):
+    _safe_id(project_id, "project_id")
     from nodes.utils.wbs_manager import WBSManager
-    
+
     workspace_root = f"./projects/{project_id}"
     wbs_mgr = WBSManager(workspace_root=workspace_root)
 
@@ -169,6 +177,7 @@ async def trigger_self_healing(project_id: str, req: HealRequest):
 
 @router.get("/{project_id}/wbs")
 async def get_wbs_master_plan(project_id: str):
+    _safe_id(project_id, "project_id")
     wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
     if not os.path.exists(wbs_path):
         return {"status": "not_found", "data": None}
@@ -182,6 +191,7 @@ async def get_wbs_master_plan(project_id: str):
 @router.get("/{project_id}/feed")
 async def get_supervisor_feed(project_id: str):
     """슈퍼바이저 콘솔 피드(토론·채점 내레이션) 조회 — 새로고침/재접속 복구용."""
+    _safe_id(project_id, "project_id")
     feed_path = os.path.join("projects", project_id, "supervisor_feed.json")
     if not os.path.exists(feed_path):
         return {"status": "success", "data": []}
@@ -194,6 +204,7 @@ async def get_supervisor_feed(project_id: str):
 
 @router.get("/{project_id}/state/latest")
 async def get_latest_state(project_id: str):
+    _safe_id(project_id, "project_id")
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):
         return {"status": "not_found", "data": None}
