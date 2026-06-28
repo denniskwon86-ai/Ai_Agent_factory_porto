@@ -9,6 +9,7 @@ import ControlPanel from './components/ControlPanel';
 import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
+import AgentMasterPanel from './components/AgentMasterPanel';
 
 interface EBProps { children: ReactNode; }
 interface EBState { hasError: boolean; error: Error | null; }
@@ -61,6 +62,8 @@ export default function App() {
   const viewRelease = useFactoryStore((state) => state.viewRelease);
   const closeRelease = useFactoryStore((state) => state.closeRelease);
   const deleteRelease = useFactoryStore((state) => state.deleteRelease);
+  const showAgentPanel = useFactoryStore((state) => state.showAgentPanel);
+  const openAgentPanel = useFactoryStore((state) => state.openAgentPanel);
 
   const [newProjectId, setNewProjectId] = useState("");
 
@@ -93,6 +96,14 @@ export default function App() {
     }
   };
 
+  if (showAgentPanel) {
+    return (
+      <ErrorBoundary>
+        <AgentMasterPanel />
+      </ErrorBoundary>
+    );
+  }
+
   if (viewingRelease) {
     return (
       <ErrorBoundary>
@@ -122,9 +133,18 @@ export default function App() {
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
               🏭 V5.2 Private AI Cockpit
             </h1>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-400 font-medium">통신망 상태:</span>
-              <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+            <div className="flex items-center gap-4">
+              <button
+                onClick={openAgentPanel}
+                className="text-sm font-bold text-gray-200 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded transition-colors"
+                title="각 에이전트의 역할·스킬·모델·순서·HOTL을 설정"
+              >
+                ⚙️ 에이전트 마스터 제어판
+              </button>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-400 font-medium">통신망 상태:</span>
+                <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+              </div>
             </div>
           </header>
 

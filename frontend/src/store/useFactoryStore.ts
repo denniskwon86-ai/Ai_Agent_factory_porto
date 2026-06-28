@@ -38,6 +38,8 @@ interface FactoryStore {
   supervisorFeed: any[];
   releases: any[];
   viewingRelease: any | null;
+  agentRegistry: any | null;
+  showAgentPanel: boolean;
   projects: { id: string, name: string }[];
   currentProjectId: string | null;
   healingRetryCount: number;
@@ -58,6 +60,11 @@ interface FactoryStore {
   viewRelease: (releaseId: string) => Promise<void>;
   closeRelease: () => void;
   deleteRelease: (releaseId: string) => Promise<void>;
+  fetchAgentRegistry: () => Promise<void>;
+  saveAgentRegistry: (reg: any) => Promise<boolean>;
+  resetAgentRegistry: () => Promise<void>;
+  openAgentPanel: () => void;
+  closeAgentPanel: () => void;
   clearSprintData: () => void;
   triggerSelfHealing: (errorMsg: string) => Promise<void>;
 }
@@ -79,6 +86,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   supervisorFeed: [],
   releases: [],
   viewingRelease: null,
+  agentRegistry: null,
+  showAgentPanel: false,
   projects: [],
   currentProjectId: null,
   healingRetryCount: 0,
@@ -241,6 +250,45 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       console.error("결과물 삭제 실패:", error);
     }
   },
+
+  fetchAgentRegistry: async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/agents`);
+      if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data }); }
+    } catch (error) {
+      console.error("에이전트 레지스트리 로드 실패:", error);
+    }
+  },
+
+  saveAgentRegistry: async (reg: any) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/agents`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reg),
+      });
+      if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data }); return true; }
+      let msg = "레지스트리 저장에 실패했습니다.";
+      try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+      alert(msg);
+      return false;
+    } catch (error) {
+      console.error("에이전트 레지스트리 저장 실패:", error);
+      return false;
+    }
+  },
+
+  resetAgentRegistry: async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/agents/reset`, { method: 'POST' });
+      if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data }); }
+    } catch (error) {
+      console.error("에이전트 레지스트리 초기화 실패:", error);
+    }
+  },
+
+  openAgentPanel: () => { get().fetchAgentRegistry(); set({ showAgentPanel: true }); },
+  closeAgentPanel: () => set({ showAgentPanel: false }),
 
   clearSprintData: () => set({ completed_agents: [], currentActivity: null, healingRetryCount: 0 }),
 

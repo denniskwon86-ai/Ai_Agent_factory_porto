@@ -184,8 +184,14 @@ def create_factory_graph():
     workflow.add_edge("ManualWriter", END)
 
     memory = MemorySaver()
-    # 이전 HOTL 중단점 설정 유지
-    app = workflow.compile(checkpointer=memory, interrupt_after=["RFP_Analyst", "Master_PMO", "Tech_Lead"])
+    # HOTL 중단점은 에이전트 마스터 레지스트리(제어판)에서 읽는다.
+    # 레지스트리 부재/손상 시 기존 기본값으로 안전 폴백(무중단). 변경은 서버 재시작 시 반영.
+    try:
+        from core.agent_registry import get_interrupt_after
+        interrupt_after = get_interrupt_after(default=["RFP_Analyst", "Master_PMO", "Tech_Lead"])
+    except Exception:
+        interrupt_after = ["RFP_Analyst", "Master_PMO", "Tech_Lead"]
+    app = workflow.compile(checkpointer=memory, interrupt_after=interrupt_after)
     return app
 
 app = create_factory_graph()

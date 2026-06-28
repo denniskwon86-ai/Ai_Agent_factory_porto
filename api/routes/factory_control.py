@@ -315,3 +315,42 @@ async def delete_release(release_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"삭제 실패 (파일이 사용 중일 수 있습니다): {str(e)}")
     return {"status": "success"}
+
+
+# ==========================================
+# 에이전트 마스터 제어판 — 레지스트리(역할/스킬/모델/순서/HOTL/활성화) 조회·저장
+# (범용 멀티에이전트 플랫폼 Phase 1: 외부 SSOT. HOTL 중단점은 서버 재시작 시 그래프에 반영)
+# ==========================================
+class AgentRegistryPayload(BaseModel):
+    version: Optional[int] = 1
+    pipeline_name: Optional[str] = ""
+    description: Optional[str] = ""
+    agents: list
+
+
+@router.get("/agents")
+async def get_agent_registry():
+    """에이전트 마스터 레지스트리 조회."""
+    from core.agent_registry import load_registry
+    return {"status": "success", "data": load_registry()}
+
+
+@router.put("/agents")
+async def update_agent_registry(payload: AgentRegistryPayload):
+    """제어판에서 편집한 레지스트리 저장(검증·정규화 후 영속화)."""
+    from core.agent_registry import save_registry
+    try:
+        saved = save_registry(payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"레지스트리 저장 오류: {str(e)}")
+    # 주의: HOTL 중단점 등 실행 반영은 그래프 재컴파일(서버 재시작) 시 적용된다.
+    return {"status": "success", "data": saved, "note": "HOTL 중단점 변경은 서버 재시작 후 파이프라인에 반영됩니다."}
+
+
+@router.post("/agents/reset")
+async def reset_agent_registry():
+    """레지스트리를 기본값(현재 SW 파이프라인)으로 초기화."""
+    from core.agent_registry import reset_registry
+    return {"status": "success", "data": reset_registry()}
