@@ -16,6 +16,17 @@ export default function HOTLInput() {
   const isWaitingForHuman = !!(state?.needs_revision || hotlTaskId);
   const currentTask = state?.current_sprint_task_id || hotlTaskId;
 
+  // 지금 '무엇을' 승인하는지 + 어디서 검토하는지 안내 (HOTL 중단점 = 직전 산출 단계)
+  const APPROVAL_MAP: Record<string, { what: string; where: string }> = {
+    RFP: { what: "요구사항 정의서 (RFP)", where: "우측 '요구정의(RFP)' 탭" },
+    PLANNING: { what: "기획서 (PRD)", where: "우측 '기획서' 탭" },
+    PMO: { what: "작업 분해 계획 (WBS)", where: "좌측 통제실의 태스크 목록" },
+    ARCHITECTURE: { what: "아키텍처 설계", where: "우측 '아키텍처' 탭" },
+    TECH_SPEC: { what: "기술 설계 명세", where: "우측 '기술사양' 탭" },
+    CODE_REVIEW: { what: "코드 리뷰 결과", where: "우측 '리뷰' 탭" },
+  };
+  const approval = APPROVAL_MAP[(state as any)?.current_stage] || null;
+
   const handleSubmit = async () => {
     if (!currentTask) {
       alert("🚨 타겟 태스크(Task ID)를 찾을 수 없습니다.");
@@ -69,7 +80,18 @@ export default function HOTLInput() {
           </span>
           <span className="text-xs text-gray-400">Target Task: {currentTask || "알 수 없음"}</span>
         </div>
-        
+
+        {/* ✋ 무엇을 승인하는지 명확히 안내 */}
+        {isWaitingForHuman && (
+          <div className="rounded border border-yellow-700/50 bg-yellow-900/20 p-2.5 text-xs text-yellow-100 leading-relaxed">
+            <div>✋ 승인 대상: <b className="text-yellow-300">{approval?.what || "직전 단계 산출물"}</b></div>
+            <div className="mt-1 text-yellow-200/80">
+              {approval ? `${approval.where}에서 내용을 검토한 뒤, ` : "산출물을 검토한 뒤, "}
+              그대로 진행하려면 <b>빈칸으로 '설계 승인 및 진행'</b>, 수정이 필요하면 아래에 <b>피드백</b>을 적어 보내세요.
+            </div>
+          </div>
+        )}
+
         <textarea 
           disabled={!isWaitingForHuman || isSubmitting}
           value={feedback}

@@ -104,12 +104,13 @@ export default function TimelinePanel() {
         <div ref={endRef} />
       </div>
 
-      <div className="p-4 bg-gray-800 border-t border-gray-700 shrink-0">
-        <div className="text-[10px] text-gray-500 mb-2 font-bold tracking-wider">✅ COMPLETED AGENTS</div>
-        <div className="flex flex-wrap gap-2">
+      <div className="px-4 py-3 bg-gray-800 border-t border-gray-700 shrink-0">
+        <div className="text-[10px] text-gray-500 mb-2 font-bold tracking-wider">✅ COMPLETED AGENTS ({completedAgents.length})</div>
+        {/* 높이 제한 + 내부 스크롤 — 길어져도 피드·승인버튼을 밀어내지 않음 */}
+        <div className="flex flex-wrap gap-2 max-h-16 overflow-y-auto pr-1">
           {completedAgents.length > 0 ? (
             completedAgents.map((agent: string, i: number) => (
-              <span key={i} className="px-2 py-1 bg-green-900/30 text-green-400 border border-green-700/50 rounded text-[10px] font-bold shadow-sm">
+              <span key={i} className="px-2 py-1 bg-green-900/30 text-green-400 border border-green-700/50 rounded text-[10px] font-bold shadow-sm h-fit">
                 {agent.toUpperCase()}
               </span>
             ))
