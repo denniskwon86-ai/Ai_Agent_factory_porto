@@ -102,6 +102,36 @@ export default function ControlPanel() {
   } else {
     pipeStatus = { key: "idle", icon: "💤", label: "대기 (가동 안 함)", cls: "bg-gray-800 border-gray-600 text-gray-400" };
   }
+
+  // ── 라이브 진행 카드용 계산: 매크로 파이프라인 위치(%) + 단계 내 미니 국면(초안→비평→개정→채점) ──
+  const MACRO_STAGES: [string, string][] = [
+    ["RFP", "요구정의"], ["PLANNING", "기획"], ["PMO", "WBS"], ["ARCHITECTURE", "아키텍처"],
+    ["TECH_SPEC", "기술설계"], ["EXECUTION", "구현"], ["BUILD", "빌드"], ["CODE_REVIEW", "검수"],
+    ["QA", "QA"], ["MANUAL", "매뉴얼"],
+  ];
+  const NODE_MACRO: Record<string, number> = {
+    RFP_Analyst: 0, Master_PM: 1, Master_PMO: 2, Architect: 3, Tech_Lead: 4,
+    Backend: 5, Frontend: 5, CodeBuilder: 6, Reviewer: 7, QA: 8, ManualWriter: 9,
+  };
+  const STAGE_MACRO: Record<string, number> = {
+    RFP: 0, PLANNING: 1, PMO: 2, ARCHITECTURE: 3, TECH_SPEC: 4,
+    EXECUTION: 5, BUILD: 6, CODE_REVIEW: 7, QA: 8, MANUAL: 9,
+  };
+  const completedIdx = (completedAgents || []).reduce((m: number, n: string) => Math.max(m, NODE_MACRO[n] ?? -1), -1);
+  const activeStageIdx = currentActivity?.stage != null ? (STAGE_MACRO[currentActivity.stage] ?? -1) : -1;
+  const curMacroIdx = Math.max(completedIdx, activeStageIdx);
+  const macroPct = curMacroIdx >= 0 ? Math.round(((curMacroIdx + 1) / MACRO_STAGES.length) * 100) : 0;
+  const curMacroLabel = curMacroIdx >= 0 ? MACRO_STAGES[Math.min(curMacroIdx, MACRO_STAGES.length - 1)][1] : "";
+
+  const PHASE_STEPS = ["초안", "비평", "개정", "채점"];
+  const phaseIdx = (() => {
+    const p: string = currentActivity?.phase || "";
+    if (p.startsWith("draft")) return 0;
+    if (p.startsWith("critique")) return 1;
+    if (p.startsWith("revise")) return 2;
+    if (p.startsWith("scoring") || p.startsWith("scored")) return 3;
+    return -1;
+  })();
   const progressPercent = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
 
   const handleStartPlanning = async () => {
@@ -315,6 +345,59 @@ export default function ControlPanel() {
             </div>
           )}
         </div>
+
+        {/* ⚡ 라이브 진행 카드 — 가동 중 '지금 무엇을 하는지' 애니메이션 + 진행률 시각화 */}
+        {pipeStatus.key === "running" && (
+          <div className="mb-4 rounded-lg border border-emerald-700/60 bg-gray-900/80 p-4">
+            <style>{`@keyframes omega-indet{0%{left:-42%}100%{left:100%}}`}</style>
+
+            {/* 헤더: 회전 스피너 + 현재 단계 + 마지막 활동 경과 */}
+            <div className="flex items-center gap-2 mb-3">
+              <span className="inline-block w-4 h-4 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></span>
+              <span className="text-sm font-bold text-emerald-300">{curMacroLabel || "에이전트 작업"} 진행 중</span>
+              {secsSinceAct !== null && (
+                <span className="ml-auto text-[11px] text-gray-400">마지막 활동 {secsSinceAct}s 전{secsSinceAct > 60 ? " ⚠️" : ""}</span>
+              )}
+            </div>
+
+            {/* 매크로 파이프라인 진행률 (수치 %) */}
+            <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+              <span>파이프라인 {Math.min(curMacroIdx + 1, MACRO_STAGES.length)}/{MACRO_STAGES.length} · {curMacroLabel || "—"}</span>
+              <span className="font-bold text-emerald-300">{macroPct}%</span>
+            </div>
+            <div className="w-full h-2 bg-gray-950 rounded-full border border-gray-700 overflow-hidden mb-3">
+              <div className="h-full bg-emerald-500 transition-all duration-700 ease-out" style={{ width: `${macroPct}%` }}></div>
+            </div>
+
+            {/* 단계 내 미니 국면: 초안 → 비평 → 개정 → 채점 (현재 pulse) */}
+            {phaseIdx >= 0 && (
+              <div className="flex items-center flex-wrap gap-1 mb-3">
+                {PHASE_STEPS.map((label, i) => (
+                  <div key={label} className="flex items-center gap-1">
+                    <span className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors ${
+                      i < phaseIdx ? "border-emerald-700 text-emerald-400 bg-emerald-900/30"
+                      : i === phaseIdx ? "border-emerald-400 text-emerald-100 bg-emerald-700/50 animate-pulse"
+                      : "border-gray-700 text-gray-500"}`}>
+                      {i < phaseIdx ? "✓" : i === phaseIdx ? "●" : "○"} {label}
+                    </span>
+                    {i < PHASE_STEPS.length - 1 && <span className="text-gray-600 text-xs px-0.5">→</span>}
+                  </div>
+                ))}
+                {currentActivity?.round ? <span className="ml-1 text-[11px] text-gray-500">{currentActivity.round}R</span> : null}
+              </div>
+            )}
+
+            {/* 살아있음 표시: 항상 흐르는 막대 (진행 상황과 무관하게 '작동 중'임을 보장) */}
+            <div className="relative w-full h-1.5 bg-gray-800 rounded-full overflow-hidden mb-2">
+              <div className="absolute top-0 h-full w-2/5 bg-emerald-400/70 rounded-full" style={{ animation: "omega-indet 1.3s linear infinite" }}></div>
+            </div>
+
+            {/* 실시간 내레이션 (최근 활동만 — 오래되면 숨김) */}
+            {currentActivity?.detail && secsSinceAct !== null && secsSinceAct < 90 && (
+              <div className="text-xs text-gray-300 leading-relaxed break-words">💬 {currentActivity.detail}</div>
+            )}
+          </div>
+        )}
 
         {!wbsData ? (
           <div className="flex flex-col gap-2">
