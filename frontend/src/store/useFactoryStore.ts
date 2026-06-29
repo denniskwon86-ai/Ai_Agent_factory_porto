@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export interface ProjectState {
   project_name: string;
+  initial_idea?: string;
   factory_mode: string;
   build_status: string;
   current_sprint_task_id: string;

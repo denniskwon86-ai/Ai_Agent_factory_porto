@@ -59,13 +59,49 @@ export default function ControlPanel() {
   const activeSprintId = useFactoryStore((s) => s.activeSprintId);
   const setActiveSprintId = useFactoryStore((s) => s.setActiveSprintId);
   const hotlTaskId = useFactoryStore((s) => s.hotlTaskId);
+  const isConnected = useFactoryStore((s) => s.isConnected);
+
+  // 사용자가 접수시킨 요구사항(즉시 표시용 — 백엔드 state.initial_idea 가 도착하기 전 폴백)
+  const [submittedIdea, setSubmittedIdea] = useState("");
+  // "마지막 활동 N초 전" 상대시간 갱신용 틱
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
   useEffect(() => {
     if (currentProjectId) fetchWBS();
   }, [fetchWBS, currentProjectId]);
 
+  useEffect(() => {
+    const id = setInterval(() => setNowTs(Date.now()), 3000);
+    return () => clearInterval(id);
+  }, []);
+
   const totalTasks = wbsData?.tasks?.length || 0;
   const doneTasks = wbsData?.tasks?.filter((t: any) => t.status === 'DONE').length || 0;
+
+  // ── 파이프라인 상태 표시(가동/대기/오류/완료) + 접수된 요구사항 ──
+  const acceptedIdea = ((state as any)?.initial_idea || submittedIdea || "").trim();
+  const supFb = (state?.supervisor_feedback || "").trim();
+  const errorLike = /할당량|소진|LIMIT|UNKNOWN ERROR|중단/i.test(supFb);
+  const lastActTs = currentActivity?.ts ? new Date(currentActivity.ts).getTime() : 0;
+  const secsSinceAct = lastActTs ? Math.max(0, Math.round((nowTs - lastActTs) / 1000)) : null;
+
+  let pipeStatus: { key: string; icon: string; label: string; cls: string; detail?: string };
+  if (!isConnected) {
+    pipeStatus = { key: "disconnected", icon: "🔌", label: "서버 연결 끊김 — 재연결 시도 중", cls: "bg-red-900/40 border-red-600 text-red-200" };
+  } else if (errorLike && !activeSprintId) {
+    // 할당량 소진/LLM 오류 등은 needs_revision 도 세팅되지만, '대기'가 아니라 '오류 정지'로 명확히 구분
+    pipeStatus = { key: "error", icon: "🚨", label: "오류로 정지 — 재가동이 필요합니다", cls: "bg-red-900/40 border-red-600 text-red-200", detail: supFb };
+  } else if (hotlTaskId || (isWaitingForHuman && !activeSprintId)) {
+    pipeStatus = { key: "hotl", icon: "⏸️", label: "인간 검토 대기 (HOTL) — 승인 또는 피드백이 필요합니다", cls: "bg-amber-900/40 border-amber-500 text-amber-200" };
+  } else if (activeSprintId) {
+    const act = currentActivity?.detail
+      || (currentActivity?.stage_label ? `${currentActivity.stage_label} ${currentActivity.phase || ""}`.trim() : "에이전트 작업 중");
+    pipeStatus = { key: "running", icon: "⚙️", label: "가동 중", cls: "bg-emerald-900/40 border-emerald-500 text-emerald-200", detail: act };
+  } else if (totalTasks > 0 && doneTasks === totalTasks) {
+    pipeStatus = { key: "done", icon: "✅", label: "모든 단계 완료", cls: "bg-blue-900/40 border-blue-500 text-blue-200" };
+  } else {
+    pipeStatus = { key: "idle", icon: "💤", label: "대기 (가동 안 함)", cls: "bg-gray-800 border-gray-600 text-gray-400" };
+  }
   const progressPercent = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
 
   const handleStartPlanning = async () => {
@@ -90,7 +126,9 @@ export default function ControlPanel() {
           }
         })
       });
-      setIdea(""); 
+      // 입력창은 비우되, 접수된 요구사항은 별도 보존하여 WBS 생성 전까지 화면에 유지한다.
+      setSubmittedIdea(idea);
+      setIdea("");
     } catch (error) {
       console.error("기획 가동 실패:", error);
     } finally {
@@ -255,6 +293,28 @@ export default function ControlPanel() {
             🚨 서버 통신 단절. 새로고침 해주세요.
           </div>
         )}
+
+        {/* 🚦 파이프라인 상태 배너 — 가동/대기/오류 명확 표시 + 접수된 요구사항(WBS 생성 전까지 유지) */}
+        <div className={`mb-4 rounded border p-3 ${pipeStatus.cls}`}>
+          <div className="flex items-center gap-2 text-sm font-bold">
+            <span className={pipeStatus.key === "running" ? "animate-pulse" : ""}>{pipeStatus.icon}</span>
+            <span>{pipeStatus.label}</span>
+            {pipeStatus.key === "running" && secsSinceAct !== null && (
+              <span className="ml-auto text-[11px] font-normal opacity-80 whitespace-nowrap">
+                마지막 활동 {secsSinceAct}초 전{secsSinceAct > 60 ? " · 응답 지연(할당량/점검 확인)" : ""}
+              </span>
+            )}
+          </div>
+          {pipeStatus.detail && (
+            <div className="mt-1 text-xs opacity-90 break-words">현재: {pipeStatus.detail}</div>
+          )}
+          {acceptedIdea && totalTasks === 0 && (
+            <div className="mt-2 pt-2 border-t border-white/10 text-xs">
+              <span className="opacity-70">📨 접수된 요구사항 (WBS 분할 전까지 표시)</span>
+              <div className="mt-1 text-gray-100 whitespace-pre-wrap break-words leading-relaxed">{acceptedIdea}</div>
+            </div>
+          )}
+        </div>
 
         {!wbsData ? (
           <div className="flex flex-col gap-2">
