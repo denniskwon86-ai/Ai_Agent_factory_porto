@@ -28,3 +28,5 @@ library/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
