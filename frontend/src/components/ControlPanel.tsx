@@ -166,6 +166,31 @@ export default function ControlPanel() {
     }
   };
 
+  // 📋 전체 WBS 를 새 창에 표 형태로 표시 (현재 wbsData 스냅샷)
+  const openWbsWindow = () => {
+    const tasks: any[] = wbsData?.tasks || [];
+    if (!tasks.length) { alert("아직 WBS 가 없습니다. 기획(WBS 분할)을 먼저 가동하세요."); return; }
+    const esc = (s: any) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] || c));
+    const rows = tasks.map((t, i) => {
+      const st = String(t.status || "");
+      const stCls = st === "DONE" ? "done" : st === "IN_PROGRESS" ? "prog" : "";
+      return `<tr><td>${i + 1}</td><td>${esc(t.task_id)}</td><td>${esc(t.title || t.name || t.description)}</td>`
+        + `<td class="${stCls}">${esc(st)}</td><td>${esc((t.required_agents || []).join(", "))}</td><td>${esc(t.sprint_day ?? "")}</td></tr>`;
+    }).join("");
+    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>WBS · ${esc(currentProjectId)}</title>`
+      + `<style>body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:20px}`
+      + `h1{font-size:17px;margin:0 0 14px}table{border-collapse:collapse;width:100%;font-size:13px}`
+      + `th,td{border:1px solid #334155;padding:8px 10px;text-align:left;vertical-align:top}`
+      + `th{background:#1e293b;position:sticky;top:0}tr:nth-child(even) td{background:#15213330}`
+      + `.done{color:#4ade80;font-weight:700}.prog{color:#fbbf24;font-weight:700}</style></head><body>`
+      + `<h1>📋 전체 WBS — ${esc(currentProjectId)} <span style="color:#64748b;font-weight:400">(${tasks.length}개 태스크)</span></h1>`
+      + `<table><thead><tr><th>#</th><th>Task ID</th><th>태스크</th><th>상태</th><th>배정 에이전트</th><th>Sprint Day</th></tr></thead>`
+      + `<tbody>${rows}</tbody></table></body></html>`;
+    const w = window.open("", "omega_wbs", "width=920,height=720,resizable=yes,scrollbars=yes");
+    if (!w) { alert("팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용해 주세요."); return; }
+    w.document.open(); w.document.write(html); w.document.close(); w.focus();
+  };
+
   const handleStartSprint = async (targetTask: any) => {
     if (!confirm(`[${targetTask.task_id}] ${targetTask.title}\n해당 스프린트를 가동/재가동하시겠습니까?`)) return;
     if (!currentProjectId) return;
@@ -424,6 +449,13 @@ export default function ControlPanel() {
               <div className="w-full bg-gray-950 rounded-full h-2 mt-1 border border-gray-700">
                 <div className="bg-blue-500 h-2 rounded-full transition-all duration-500 ease-out" style={{ width: `${progressPercent}%` }}></div>
               </div>
+              <button
+                onClick={openWbsWindow}
+                className="mt-2 self-start text-[11px] font-bold text-gray-200 bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors"
+                title="전체 WBS 를 새 창에 표로 보기"
+              >
+                ↗ 전체 WBS 표 보기
+              </button>
             </div>
 
             {/* 🚀 모든 단계 완료 시 — 최종 결과물 저장(배포) */}
