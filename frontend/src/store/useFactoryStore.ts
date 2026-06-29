@@ -17,6 +17,7 @@ export interface ProjectState {
   backend_code_summary: string;
   code_review_report_summary: string;
   qa_report_summary: string;
+  qa_verdict?: string;  // "" | "PASS" | "FAIL" — 최종 QA 판정
   user_manual_summary: string;
   build_error_log?: string;
   // 토론·합의 / 단계별 성공기준 / Supervisor (V5.1 관측성)

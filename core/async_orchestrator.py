@@ -92,12 +92,20 @@ class AsyncFactoryOrchestrator:
         return False
 
     async def is_hotl_pending(self, task_id: str) -> bool:
-        """해당 태스크 스레드가 HOTL 중단점에서 대기 중인지 확인 (SSE 이벤트 유실 시 UI 복구용)."""
+        """해당 태스크 스레드가 HOTL 중단점에서 '대기 중'인지 확인 (SSE 유실 복구용).
+        ⚠️ snapshot.next 는 실행 중에도(다음 노드 예정) 차 있어 그것만으로는 오탐이 난다.
+        → 스프린트 asyncio 태스크가 '아직 실행 중'이면 HOTL 대기가 아니다(오탐 방지).
+        태스크가 끝났는데(또는 재시작으로 없는데) next 가 남아 있으면 = interrupt 에서 멈춘 진짜 HOTL."""
         try:
             langgraph_engine = await get_runtime_app()
             config = {"configurable": {"thread_id": f"sprint_{task_id}"}}
             snapshot = await langgraph_engine.aget_state(config)
-            return bool(getattr(snapshot, "values", None)) and bool(getattr(snapshot, "next", None))
+            if not (getattr(snapshot, "values", None) and getattr(snapshot, "next", None)):
+                return False  # 다음 노드가 없으면 완료(END) — HOTL 아님
+            running = self.active_tasks.get(task_id)
+            if running is not None and not running.done():
+                return False  # 아직 스트리밍 중 = 가동 중이지 HOTL 대기 아님(오탐 차단)
+            return True
         except Exception:
             return False
 

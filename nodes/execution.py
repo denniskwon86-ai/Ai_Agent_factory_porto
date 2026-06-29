@@ -392,21 +392,36 @@ async def run_qa(state: Any) -> Dict[str, Any]:
     print("🧪 [Agent] QA 최종 통합 검증(RFP 대조) 진행 중...")
 
     rfp = getattr(state_obj, "rfp_summary", "") or ""
+    _verdict_rule = (
+        "\n\n[🚨 판정 의무]: 리포트 **맨 마지막 줄에 정확히** `QA_VERDICT: PASS` 또는 `QA_VERDICT: FAIL` 만 출력하라. "
+        "RFP의 필수 요구(REQ-ID) 중 하나라도 구현/작동이 확인되지 않으면 FAIL."
+    )
     if state_obj.build_status == "failed":
         prompt = (
             f"🚨 [품질 검사 낙제]: 빌드 실패. 에러 로그:\n{state_obj.build_error_log}\n\n"
-            "무엇이 깨졌는지와 RFP 대비 미충족 항목을 담은 불합격 리포트를 작성하십시오."
+            "무엇이 깨졌는지와 RFP 대비 미충족 항목을 담은 불합격 리포트를 작성하십시오." + _verdict_rule
         )
     else:
         prompt = (
             f"{_load_skill(agent_skill('QA', 'qa_skill'))}\n\n"
             "[검증 기준 — 요구사항 정의서(RFP)]:\n"
             f"{rfp if rfp else '(RFP 없음 — PRD/구현 기준으로 평가)'}\n\n"
-            "위 RFP의 각 REQ-ID가 실제 구현 코드에 반영되었는지(추적성)와 빌드/작동 가능성을 평가해 리포트를 작성하십시오."
+            "위 RFP의 각 REQ-ID가 실제 구현 코드에 반영되었는지(추적성)와 빌드/작동 가능성을 평가해 리포트를 작성하십시오." + _verdict_rule
         )
 
     output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="document")
-    return {"qa_report_summary": _safe_str(output), "current_stage": "QA"}
+    report = _safe_str(output)
+    # QA 판정 파싱 — 빌드 실패는 무조건 FAIL, 아니면 리포트의 QA_VERDICT 토큰. 토큰 없으면 보수적으로 PASS 간주하지 않고 FAIL 경고.
+    if state_obj.build_status == "failed":
+        verdict = "FAIL"
+    elif re.search(r"QA_VERDICT\s*:\s*PASS", report, re.IGNORECASE):
+        verdict = "PASS"
+    elif re.search(r"QA_VERDICT\s*:\s*FAIL", report, re.IGNORECASE):
+        verdict = "FAIL"
+    else:
+        verdict = "FAIL"  # 판정 누락 = 검증 불가 → 완료로 간주하지 않음(보수적)
+    print(f"🧪 [QA] 최종 판정: {verdict}")
+    return {"qa_report_summary": report, "qa_verdict": verdict, "current_stage": "QA"}
 
 async def run_manual_writer(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
