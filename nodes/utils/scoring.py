@@ -6,7 +6,6 @@
 import os
 import re
 import json
-import config
 from criteria import STAGE_RUBRICS, DETERMINISTIC_CHECKS
 
 
@@ -103,7 +102,8 @@ async def score_stage(state, stage_key: str) -> dict:
                 blocking_fails.append(c["id"])
 
     score = (got_w / total_w) if total_w > 0 else 1.0
-    threshold = config.STAGE_PASS_THRESHOLDS.get(stage_key, 0.7)
+    # 통과 임계는 rubric(criteria.py)을 단일 진실원천으로 사용 (config 중복 제거 — SSOT 단일화)
+    threshold = rubric.get("pass_threshold", 0.7)
 
     if blocking_fails:
         verdict = "ROLLBACK"

@@ -56,7 +56,8 @@ CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
 # ==========================================
 # 5. 토론·합의 루프 / 단계별 성공기준 / Supervisor 설정 (V5.1)
 # ==========================================
-# 다중 에이전트 토론을 적용할 단계 (상류 생성 단계만 — 무료 티어 429/비용 절제)
+# [예약/미참조] 현재 코드는 이 목록을 읽지 않는다 — 토론 적용 단계는 run_supervised_stage 를
+# 호출하는 노드(planning/execution)가 결정한다. Phase 2에서 registry.debate 로 통합 예정.
 DEBATE_STAGES = ["RFP", "PLANNING", "ARCHITECTURE", "TECH_SPEC"]
 DEBATE_MAX_ROUNDS = 1   # 토론 최대 라운드(무료 티어 할당량 절감 — 초안→비평 1회). 합의 시 조기 종료
 DEBATE_CRITICS = 1      # 라운드당 비평가 수 (무료 티어 429 방어로 1명 권장)
@@ -74,15 +75,8 @@ MAX_STAGE_REWORKS = 1            # 단계별 in-node 재작업 한도(할당량 
 GLOBAL_MAX_SUPERVISOR_HOPS = 8   # 전역 Supervisor 왕복 상한
 ON_STAGE_LIMIT_EXCEEDED = "HOTL" # 한도 초과 시: "HOTL"(인간 대기) | "FORCE_PASS"(강행)
 
-# 단계별 통과 임계 점수 (rubric 가중합 기준)
-STAGE_PASS_THRESHOLDS = {
-    "RFP":          0.8,
-    "PLANNING":     0.8,
-    "PMO":          1.0,
-    "ARCHITECTURE": 0.7,
-    "TECH_SPEC":    0.7,
-    "CODE_REVIEW":  0.9,
-}
+# 단계별 통과 임계 점수는 criteria.py 의 각 STAGE_RUBRICS[...]["pass_threshold"] 로 단일화됨(SSOT).
+# (과거 여기 중복 정의됐던 STAGE_PASS_THRESHOLDS 는 scoring.py 가 rubric 값을 직접 읽도록 바뀌며 제거)
 
 # Deterministic 기준 임계값 (LLM 0콜로 검사)
 RFP_MIN_LENGTH = 600   # 빈약 요구정의서 차단
