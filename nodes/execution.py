@@ -237,7 +237,50 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
     else:
         has_fe_code = bool(_extract_files_from_json(state_obj.frontend_code_summary))
         has_be_code = bool(_extract_files_from_json(state_obj.backend_code_summary))
-        
+
+        # 🔁 [심볼 회귀 게이트] 직전 커밋(baseline) 대비 사라진 export/핸들러/입력요소/엔드포인트를
+        #    결정적으로 탐지(LLM 0콜). 모든 다른 게이트는 신규 파일만 stateless 로 보므로 '기능 삭제'를
+        #    못 잡는다(삭제는 오히려 통과). 이 게이트가 멀티태스크 기능 소실의 최종 안전망.
+        from nodes.utils.regression_checker import check_symbol_regression, is_deletion_intended
+        _new_files = _extract_files_from_json(state_obj.frontend_code_summary) + _extract_files_from_json(state_obj.backend_code_summary)
+        if _new_files:
+            _hf = " ".join(getattr(fi, "feedback", "") if not isinstance(fi, dict) else fi.get("feedback", "")
+                           for fi in (getattr(state_obj, "human_feedback_queue", []) or []))
+            _allow_del = is_deletion_intended(" ".join([getattr(state_obj, "reviewer_feedback", "") or "",
+                                                        getattr(state_obj, "pm_override_reason", "") or "", _hf]))
+            _baseline_commit = getattr(getattr(state_obj, "git_info", None), "last_commit_hash", "") or ""
+            _git = GitManager(state_obj.workspace_root)
+            reg = check_symbol_regression(
+                _new_files,
+                lambda rel: _git.read_file_at_commit(_baseline_commit, rel),
+                allow_deletion=_allow_del,
+            )
+            if not reg.get("ok"):
+                errs = reg.get("errors", [])
+                print(f"❌ [Supervisor] 심볼 회귀 감지: {len(reg.get('regressions', []))}개 파일에서 기능 소실")
+                review_text = (
+                    "🔁 회귀 감지 — 직전 버전에 있던 기능/심볼이 이번 출력에서 사라졌습니다:\n- "
+                    + "\n- ".join(errs[:6])
+                    + "\n\n[수정 지침] 컨텍스트의 '현재 워크스페이스 실제 파일'에 주어진 기존 코드 전부를 보존하고, "
+                      "이번 태스크 기능만 추가/수정해 '기존 전부 + 신규'를 합친 완전한 코드를 다시 출력하십시오. "
+                      "기존 기능을 의도적으로 제거해야 한다면 그 사유를 명시하십시오."
+                )
+                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+                cr_scores["CODE_REVIEW"] = 0.0
+                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
+                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV", "blocking_fails": ["symbol_regression"]})
+                return {
+                    "reviewer_decision": "REWORK_DEV",
+                    "reviewer_feedback": review_text,
+                    "pm_override_reason": "",
+                    "needs_revision": False,
+                    "current_stage": "CODE_REVIEW",
+                    "stage_scores": cr_scores,
+                    "criteria_log": cr_log,
+                    "supervisor_feedback": review_text,
+                    "supervisor_hops": hops,
+                }
+
         # 🖥️ 프론트 렌더 검증 테스트러너: 실제 renderToString 으로 동작 확인 (실패 시 LLM 리뷰 없이 즉시 재작업)
         render_note = ""
         if has_fe_code:

@@ -70,6 +70,17 @@ class GitManager:
             print(f"⚠️ [GitManager] 커밋 실패: {res.stderr}")
             return None
 
+    def read_file_at_commit(self, commit: Optional[str], rel_path: str) -> Optional[str]:
+        """지정 커밋 시점의 파일 내용을 반환(회귀 게이트의 baseline용). 없으면 None.
+        git 미설치/경로 부재/커밋 부재 시 None(=비교 생략, 비차단)."""
+        if not commit or not rel_path:
+            return None
+        rel = str(rel_path).replace("\\", "/")
+        res = self._run_cmd(["git", "show", f"{commit}:{rel}"])
+        if res.returncode == 0:
+            return res.stdout
+        return None
+
     # 🚨 누락되었던 롤백 복구 엔진 추가 (서킷 브레이커 크래시 원천 차단)
     def rollback_to_safe_state(self, target_commit: Optional[str] = None):
         print(f"🔄 [GitManager] 안전 지대(Safe State)로 강제 롤백을 시작합니다.")
