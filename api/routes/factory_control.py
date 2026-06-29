@@ -354,3 +354,64 @@ async def reset_agent_registry():
     """레지스트리를 기본값(현재 SW 파이프라인)으로 초기화."""
     from core.agent_registry import reset_registry
     return {"status": "success", "data": reset_registry()}
+
+
+# ==========================================
+# 다중 워크플로우 템플릿 (Copy 모델) — 기존(default) 보존 + 복사로 새 워크플로우 생성/편집
+# ==========================================
+class TemplateCopyRequest(BaseModel):
+    src_id: str = "default"
+    new_id: str
+    new_name: Optional[str] = ""
+
+
+@router.get("/templates")
+async def list_workflow_templates():
+    """공존하는 워크플로우 템플릿 목록(항상 default 포함)."""
+    from core.agent_registry import list_templates
+    return {"status": "success", "data": list_templates()}
+
+
+@router.get("/templates/{template_id}")
+async def get_workflow_template(template_id: str):
+    from core.agent_registry import load_template, _safe_tid
+    try:
+        _safe_tid(template_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success", "data": load_template(template_id)}
+
+
+@router.post("/templates/copy")
+async def copy_workflow_template(req: TemplateCopyRequest):
+    """기존 템플릿을 복사해 새 워크플로우 생성(기존은 불변 — Copy 모델)."""
+    from core.agent_registry import copy_template
+    try:
+        tpl = copy_template(req.src_id, req.new_id, req.new_name or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success", "template_id": req.new_id, "data": tpl}
+
+
+@router.put("/templates/{template_id}")
+async def update_workflow_template(template_id: str, payload: AgentRegistryPayload):
+    from core.agent_registry import save_template, _safe_tid
+    try:
+        _safe_tid(template_id)
+        saved = save_template(template_id, payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"템플릿 저장 오류: {str(e)}")
+    return {"status": "success", "data": saved}
+
+
+@router.delete("/templates/{template_id}")
+async def delete_workflow_template(template_id: str):
+    from core.agent_registry import delete_template, _safe_tid
+    try:
+        _safe_tid(template_id)
+        delete_template(template_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success"}
