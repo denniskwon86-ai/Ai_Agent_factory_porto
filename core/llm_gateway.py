@@ -97,15 +97,17 @@ class LLMGateway:
         return str(raw)
 
     async def aexecute(self, state: Any, skill_prompt: str, is_heavy: bool = True, retry_count: int = 0,
-                       output_mode: str = "code", light: bool = False) -> str:
+                       output_mode: str = "code", light: bool = False, full_file_exts=None) -> str:
         """output_mode: 'code'(파일 스키마 강제 JSON) | 'json'(자유 스키마 JSON) | 'document'(자유 서술 문서).
-        light=True이면 경량 컨텍스트(요약만)로 호출하여 토큰·429를 절감한다."""
+        light=True이면 경량 컨텍스트(요약만)로 호출하여 토큰·429를 절감한다.
+        full_file_exts: 개발자가 전체 재출력할 소유 파일 확장자(예: (".tsx",".ts")) — 해당 파일은
+        절단 없이 전체 주입되어 멀티태스크 기능 누락(회귀)을 차단한다(증분 codegen)."""
         state_obj = ProjectState.model_validate(state) if isinstance(state, dict) else state
 
         llm = self.llm_pro if is_heavy else self.llm_flash
         logical_model_name = "pro_router" if is_heavy else "flash_router"
 
-        core_context = ContextEngine.build_core_context(state_obj, light=light)
+        core_context = ContextEngine.build_core_context(state_obj, light=light, full_file_exts=full_file_exts)
 
         if output_mode == "code":
             strict_json_rule = ContextEngine.get_strict_json_instruction()
@@ -142,13 +144,13 @@ class LLMGateway:
                     print(f"⚠️ [LLM Gateway] Pro 계열 모델 및 Groq 체인 모두 할당량 초과(429) 또는 한도 도달.")
                     print(f"🔄 [LLM Gateway] 고속(Flash) 티어로 수직 강하(Cross-Tier Fallback) 하여 임무를 속행합니다!")
                     return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=retry_count + 1,
-                                               output_mode=output_mode, light=light)
+                                               output_mode=output_mode, light=light, full_file_exts=full_file_exts)
                 else:
                     if retry_count < 3:
                         print(f"🚨 [LLM Gateway] Flash 체인마저 할당량 초과. 15초 대기 후 재시도 (시도 {retry_count+1}/3)...")
                         await asyncio.sleep(15)
                         return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=retry_count + 1,
-                                                   output_mode=output_mode, light=light)
+                                                   output_mode=output_mode, light=light, full_file_exts=full_file_exts)
                     else:
                         print("💥 [LLM Gateway] 치명적 에러: 가용한 모든 LLM API의 할당량이 고갈되었습니다.")
                         return json.dumps({"files": [], "error": "LLM API LIMIT ERROR"})
@@ -157,7 +159,7 @@ class LLMGateway:
                 if is_heavy and retry_count == 0:
                     print("🔄 [LLM Gateway] 알 수 없는 오류 복구를 위해 Flash 체인으로 긴급 우회합니다.")
                     return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=1,
-                                               output_mode=output_mode, light=light)
+                                               output_mode=output_mode, light=light, full_file_exts=full_file_exts)
                 return json.dumps({"files": [], "error": f"LLM UNKNOWN ERROR: {error_str}"})
 
         # 3. 문서 모드는 원문 그대로, 그 외는 JSON 정제 엔진 통과

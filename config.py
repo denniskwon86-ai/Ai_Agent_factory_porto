@@ -23,6 +23,9 @@ OUTPUT_ARTIFACTS = {
 MAX_REVIEW_ITERATIONS = 1  # V4.0 터보 모드 적용 (리뷰어 무한 루프 방지)
 MAX_BUILD_RETRIES = 3      # 코드 빌드 실패 시 최대 롤백 횟수
 CONTEXT_MAX_LENGTH = 20000  # 코드 누적/기존기능 보존 위해 상향(기존 10000). 멀티태스크 회귀 완화.
+# 개발자(코드 작성) 호출에서 '본인 소유 파일'을 전체(무절단) 주입할 때의 총 컨텍스트 상한.
+# 전체 파일 재출력 시 truncation 으로 기존 기능이 누락되던 회귀의 근본 차단용(증분 codegen).
+CONTEXT_MAX_LENGTH_CODE = 200000
 PREVIOUS_OUTPUT_MAX_LENGTH = 8000
 SUMMARY_MAX_LENGTH = 4000
 # ==========================================

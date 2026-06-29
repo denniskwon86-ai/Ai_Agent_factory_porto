@@ -119,13 +119,18 @@ async def run_tech_lead(state: Any) -> Dict[str, Any]:
     return updates
 
 # 증분 개발 지시 — 멀티태스크에서 이전 태스크가 만든 기능을 덮어써 잃어버리는 회귀 방지.
+# 소유 파일은 컨텍스트에 '전체 코드'로(절단 없이) 주입되므로, 모델은 기존 기능을 빠짐없이 볼 수 있다.
 _INCREMENTAL_GUARD = (
     "\n\n[🚨 증분 개발 — 절대 준수]: 당신은 빈 화면이 아니라 **기존 코드베이스를 확장**한다. "
-    "컨텍스트의 '현재 워크스페이스 실제 파일'에 이미 구현된 모든 기능(예: 데이터 입력/CRUD/목록/상태)을 "
-    "**절대 삭제하거나 누락하지 말 것.** 이번 태스크의 기능을 **추가/수정만** 하라. "
-    "기존 파일을 다시 출력할 때는 반드시 '기존 기능 전부 + 이번 신규 기능'을 합친 완전한 코드를 내라. "
-    "(컨텍스트에 파일이 일부 잘려 보이면, 잘린 기능까지 보존하도록 신중히 작성하라.)"
+    "컨텍스트의 '현재 워크스페이스 실제 파일 상태'에는 당신이 수정할 파일들의 **전체 코드가 절단 없이** 들어 있다. "
+    "거기 이미 구현된 모든 기능(데이터 입력/CRUD/목록/상태/이벤트 핸들러 등)을 **절대 삭제하거나 누락하지 말 것.** "
+    "이번 태스크의 기능은 **추가/수정만** 하라. 파일을 다시 출력할 때는 반드시 "
+    "'기존 코드 전부 + 이번 신규 기능'을 합친 완전한 코드를 내라. 기존 기능을 하나라도 빠뜨리면 즉시 재작업 처리된다."
 )
+
+# 개발자별 '소유 파일' 확장자 — 컨텍스트에 전체(무절단) 주입할 대상(증분 codegen).
+_FE_OWNED_EXTS = (".tsx", ".ts", ".jsx", ".js", ".css", ".html")
+_BE_OWNED_EXTS = (".py",)
 
 
 async def run_developer_fe(state: Any) -> Dict[str, Any]:
@@ -137,8 +142,8 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
     # 코드 생성은 Flash(고속) — 재작업 루프가 잦아 속도가 중요. 회귀 방지는 _INCREMENTAL_GUARD +
-    # 컨텍스트 예산(기존 파일 주입)이 담당(모델 티어 무관). 라이브 검증상 Pro 는 루프를 수 분으로 느리게 함.
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=False)
+    # 소유 프론트 파일 전체(무절단) 주입(full_file_exts)이 담당(모델 티어 무관).
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=False, full_file_exts=_FE_OWNED_EXTS)
     return {"frontend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_developer_be(state: Any) -> Dict[str, Any]:
@@ -149,8 +154,8 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
     if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
-    # 코드 생성은 Flash(고속) — 회귀 방지는 _INCREMENTAL_GUARD + 컨텍스트 예산이 담당(티어 무관).
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=False)
+    # 코드 생성은 Flash(고속) — 회귀 방지는 _INCREMENTAL_GUARD + 소유 백엔드 파일 전체(무절단) 주입이 담당.
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=False, full_file_exts=_BE_OWNED_EXTS)
     return {"backend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_code_builder(state: Any) -> Dict[str, Any]:
