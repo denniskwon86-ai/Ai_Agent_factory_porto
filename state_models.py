@@ -70,6 +70,7 @@ class ProjectState(BaseModel):
     build_error_log: str = Field(default="")
     developer_retry_count: int = Field(default=0, ge=0)
     failed_node: str = Field(default="")
+    supervisor_hops: int = Field(default=0, ge=0)  # 리뷰 의사결정 왕복 횟수(무한루프 차단용 — GLOBAL_MAX_SUPERVISOR_HOPS)
 
     # 이원화 피드백 루프 상태
     reviewer_decision: str = Field(default="NONE")  # "PASS", "REWORK_DEV", "ESCALATE_PM"

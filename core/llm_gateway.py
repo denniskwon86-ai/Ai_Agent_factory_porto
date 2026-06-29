@@ -191,4 +191,23 @@ class LLMGateway:
         print("⚠️ [JSON Repair] 디코딩 실패. 원시 텍스트를 반환합니다.")
         return text
 
-gateway = LLMGateway()
+
+class _LazyGateway:
+    """LLMGateway 지연 초기화 프록시.
+    import/compile 시점에 SDK·모델목록 조회(네트워크)를 트리거하지 않고, 첫 실제 호출 때 1회 생성한다.
+    공개 메서드(aexecute)를 명시적으로 위임 정의한다 — __getattr__ 로 위임하면 LangGraph compile 의
+    노드 클로저 정적 분석(get_function_nonlocals 의 getattr)이 프록시 생성을 유발하므로,
+    getattr 가 메서드 객체만 돌려주고 실제 호출 시에만 생성되도록 한다."""
+    _inst = None
+
+    @classmethod
+    def _instance(cls):
+        if cls._inst is None:
+            cls._inst = LLMGateway()
+        return cls._inst
+
+    async def aexecute(self, *args, **kwargs):
+        return await type(self)._instance().aexecute(*args, **kwargs)
+
+
+gateway = _LazyGateway()

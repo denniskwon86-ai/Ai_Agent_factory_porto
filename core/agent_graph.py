@@ -1,5 +1,6 @@
 import os
 import json
+import config
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from state_models import ProjectState
@@ -118,7 +119,13 @@ def map_builder_router(state: ProjectState) -> str:
 
 def route_from_reviewer(state: ProjectState) -> str:
     decision = getattr(state, "reviewer_decision", "PASS")
-    
+
+    # 🚦 무한루프 차단: 리뷰 의사결정 왕복(ESCALATE_PM/REWORK_DEV)이 전역 상한 도달 시 강제 종료
+    hops = getattr(state, "supervisor_hops", 0)
+    if decision in ("ESCALATE_PM", "REWORK_DEV") and hops >= config.GLOBAL_MAX_SUPERVISOR_HOPS:
+        print(f"🚨 [Supervisor Circuit Breaker] 리뷰 의사결정 왕복 {hops}회 도달(상한 {config.GLOBAL_MAX_SUPERVISOR_HOPS}) — 무한 루프 차단, 파이프라인 정지(END).")
+        return END
+
     if decision == "ESCALATE_PM":
         print("🔙 [PM 상신 루프] 기획적 모순 발견. PM에게 최종 판단을 받으러 갑니다.")
         return "Master_PM"

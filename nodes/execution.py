@@ -196,6 +196,8 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
     """범용 단계 게이트(구 run_reviewer를 일반화). 코드리뷰 단계의 PASS/REWORK_DEV/ESCALATE_PM
     3분기 및 Git 커밋/WBS 완료 로직은 그대로 보존하고, 단계 기준 채점을 기록한다."""
     state_obj = ProjectState.model_validate(state)
+    # Supervisor 왕복 카운터 — 매 리뷰 실행마다 +1 (route_from_reviewer 가 상한 초과 시 루프 차단)
+    hops = getattr(state_obj, "supervisor_hops", 0) + 1
 
     if getattr(state_obj, "pm_override_reason", ""):
         print(f"⚖️ [Agent] Reviewer: PM의 기각/강행 지시 수용 (사유: {state_obj.pm_override_reason})")
@@ -235,6 +237,7 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
                     "stage_scores": cr_scores,
                     "criteria_log": cr_log,
                     "supervisor_feedback": review_text,
+                    "supervisor_hops": hops,
                 }
             elif render.get("ok") and not render.get("skipped"):
                 render_note += f"\n(✅ 프론트 렌더 검증 통과 — renderToString {render.get('rendered', 0)}자)"
@@ -265,6 +268,7 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
                     "stage_scores": cr_scores,
                     "criteria_log": cr_log,
                     "supervisor_feedback": review_text,
+                    "supervisor_hops": hops,
                 }
             elif smoke.get("ok") and not smoke.get("skipped"):
                 _w = smoke.get("warnings", [])
@@ -338,6 +342,7 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
             "stage_scores": cr_scores,
             "criteria_log": cr_log,
             "supervisor_feedback": review_text,
+            "supervisor_hops": hops,
         }
 
     if getattr(state_obj, "build_status", "pending") == "success":
@@ -363,6 +368,7 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
         "stage_scores": cr_scores,
         "criteria_log": cr_log,
         "supervisor_feedback": "",
+        "supervisor_hops": hops,
     }
 
 
