@@ -5,6 +5,11 @@ from typing import Dict, Any
 from state_models import ProjectState
 import config
 
+# 디스크 walk 시 제외할 디렉터리(노이즈/대용량 방지)
+_EXCLUDE_DIRS = {".git", ".archive", "node_modules", "dist", "build", ".next",
+                 "venv", ".venv", "__pycache__", "coverage", ".turbo", "out"}
+
+
 def _clip(text: str, limit: int) -> str:
     """긴 텍스트를 limit자로 절단 (토큰/할당량 절감)."""
     text = text or ""
@@ -53,16 +58,21 @@ class ContextEngine:
         # 🚨 [컨텍스트 라우터] QA, Reviewer, 개발자 교차 참조를 위해 실제 파일 디스크에서 읽어오기.
         #   - 소유 파일(full_file_exts 일치): 전체 주입(절단 금지) — 재출력 시 기존 기능 보존.
         #   - 그 외 파일: per_file 절단(전체파일 모드에선 1줄 색인만) — 토큰 절감.
-        if not light and state.workspace_root and state.file_index:
+        #   - file_index 가 비거나 stale 해도, 소유 확장자는 디스크를 직접 walk 해 주입(자가복구).
+        if not light and state.workspace_root:
             ws_path = Path(state.workspace_root)
             if ws_path.exists():
-                context_parts.append("\n📁 [현재 워크스페이스 실제 파일 상태 (Context Router)]:")
                 owned_blocks: list[str] = []
                 other_blocks: list[str] = []
-                for rel_path, meta in state.file_index.items():
+                injected: set[str] = set()  # 중복 주입 방지(소문자 정규화 비교)
+
+                def _emit(rel_path: str, meta=None):
+                    key = rel_path.lower()
+                    if key in injected:
+                        return
                     target_file = ws_path / rel_path
                     if not target_file.exists():
-                        continue
+                        return
                     is_owned = bool(full_file_exts) and rel_path.endswith(full_file_exts)
                     try:
                         raw = target_file.read_text(encoding="utf-8")
@@ -70,16 +80,37 @@ class ContextEngine:
                             owned_blocks.append(
                                 f"--- FILE (이번 작업의 수정 대상 — 전체 코드 보존 필수): {rel_path} ---\n```\n{raw}\n```\n")
                         elif full_file_exts:
-                            # 전체파일 모드의 비소유 파일은 본문 없이 1줄 색인(토큰 절감)
                             purpose = getattr(meta, "purpose", "") or (meta.get("purpose", "") if isinstance(meta, dict) else "")
                             other_blocks.append(f"--- FILE (참조 — 본 작업 비대상): {rel_path}" + (f" — {purpose}" if purpose else "") + " ---")
                         else:
                             other_blocks.append(f"--- FILE: {rel_path} ---\n```\n{_clip(raw, per_file)}\n```\n")
+                        injected.add(key)
                     except Exception as e:
                         other_blocks.append(f"--- FILE: {rel_path} (읽기 실패: {e}) ---")
-                # 소유 파일을 먼저 배치 → 총량 절단 시에도 보존 우선
-                context_parts.extend(owned_blocks)
-                context_parts.extend(other_blocks)
+
+                # 1) file_index 기반 주입(기존 동작)
+                for rel_path, meta in (state.file_index or {}).items():
+                    _emit(rel_path, meta)
+
+                # 2) [자가복구] 소유 확장자 파일을 디스크에서 직접 발견해 주입 — file_index 에 없어
+                #    누락되던 기존 코드까지 보장(멀티태스크 file_index 유실 회귀 차단).
+                if full_file_exts:
+                    for disk_path in sorted(ws_path.rglob("*")):
+                        if len(injected) >= 120:
+                            break
+                        if not disk_path.is_file():
+                            continue
+                        rel = str(disk_path.relative_to(ws_path)).replace("\\", "/")
+                        if any(seg in _EXCLUDE_DIRS for seg in rel.split("/")):
+                            continue
+                        if rel.endswith(full_file_exts):
+                            _emit(rel)
+
+                if owned_blocks or other_blocks:
+                    context_parts.append("\n📁 [현재 워크스페이스 실제 파일 상태 (Context Router)]:")
+                    # 소유 파일을 먼저 배치 → 총량 절단 시에도 보존 우선
+                    context_parts.extend(owned_blocks)
+                    context_parts.extend(other_blocks)
 
         # 전체 컨텍스트 총량 상한 (TPM 방어)
         return _clip("\n\n".join(context_parts), ctx_max)

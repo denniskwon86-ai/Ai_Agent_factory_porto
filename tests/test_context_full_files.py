@@ -51,3 +51,29 @@ def test_light_mode_skips_files(tmp_path):
     # light=True 면 파일 주입 자체를 생략
     assert SENTINEL not in ctx
     assert "워크스페이스 실제 파일" not in ctx
+
+
+def test_disk_walk_recovers_owned_file_missing_from_index(tmp_path):
+    # file_index 가 비어 있어도(유실/stale) 소유 확장자 파일은 디스크에서 직접 발견·주입돼야 한다
+    big_tsx = "// App\n" + ("const filler = 1;\n" * 400) + f"\n// {SENTINEL}\n"
+    (tmp_path / "src").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "src" / "App.tsx").write_text(big_tsx, encoding="utf-8")
+    state = ProjectState.model_validate({
+        "project_name": "T",
+        "workspace_root": str(tmp_path),
+        "file_index": {},  # 인덱스 유실 상황
+    })
+    ctx = ContextEngine.build_core_context(state, full_file_exts=(".tsx", ".ts"))
+    assert SENTINEL in ctx  # 인덱스에 없어도 디스크 walk 로 복구 주입
+    assert "전체 코드 보존 필수" in ctx
+
+
+def test_disk_walk_excludes_noise_dirs(tmp_path):
+    # node_modules 등 제외 디렉터리의 owned 확장자는 주입하지 않는다
+    (tmp_path / "node_modules" / "pkg").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "node_modules" / "pkg" / "index.tsx").write_text(f"// {SENTINEL}_NOISE\n", encoding="utf-8")
+    state = ProjectState.model_validate({
+        "project_name": "T", "workspace_root": str(tmp_path), "file_index": {},
+    })
+    ctx = ContextEngine.build_core_context(state, full_file_exts=(".tsx",))
+    assert f"{SENTINEL}_NOISE" not in ctx
