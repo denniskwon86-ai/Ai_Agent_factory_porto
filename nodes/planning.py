@@ -100,7 +100,14 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
         "\n\n[🚨 절대 준수 사항]: PRD를 분석하여 반드시 **최소 4개 이상**의 구체적인 WBS 태스크로 분할하십시오. "
         "각 태스크에는 투입될 에이전트 명단(`required_agents`)을 반드시 포함하십시오."
     )
-    
+
+    # WBS 게이트에서 사용자가 피드백을 줬으면(재분할 루프) 그 내용을 반영해 다시 분할한다.
+    _fb_items = getattr(state_obj, "human_feedback_queue", []) or []
+    _latest_fb = (_fb_items[-1].get("feedback", "") if _fb_items and isinstance(_fb_items[-1], dict) else "") or ""
+    if _latest_fb.strip():
+        prompt += f"\n\n[🚨 사용자 피드백 — WBS 재분할 시 반드시 반영하십시오]:\n{_latest_fb.strip()}"
+        print(f"🔁 [Master PMO] 사용자 피드백을 반영해 WBS 를 재분할합니다: {_latest_fb.strip()[:80]}")
+
     output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json")
     wbs_code = _extract_code_from_ssot(output) or output
 
@@ -145,6 +152,7 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
     return {
         "factory_mode": "EXECUTION",
         "needs_revision": False,
+        "human_feedback_queue": [],  # 소비한 피드백 비움 — 다음 게이트에서 과거 피드백 재적용 방지
         "current_required_agents": first_task_agents,
         "current_stage": "PMO",
         "stage_scores": scores,

@@ -46,6 +46,14 @@ def test_pm_default_to_reviewer():
     assert ag.route_from_pm(S(current_sprint_task_id="T1", needs_revision=False)) == "Reviewer"
 
 
+# ── route_from_pmo (WBS 게이트 피드백 루프) ──────────────────────────
+def test_pmo_feedback_loops_back_to_resplit():
+    assert ag.route_from_pmo(S(needs_revision=True)) == "Master_PMO"
+
+def test_pmo_approve_ends_planning():
+    assert ag.route_from_pmo(S(needs_revision=False)) == END
+
+
 # ── route_from_reviewer (의사결정 분기 + hop 차단기) ─────────────────
 def test_reviewer_escalate_to_pm():
     assert ag.route_from_reviewer(S(reviewer_decision="ESCALATE_PM")) == "Master_PM"

@@ -197,6 +197,14 @@ def route_from_pm(state: ProjectState) -> str:
     print("⏩ [의사결정 완료] PM이 강행을 지시했습니다. Reviewer에게 강제 승인을 지시합니다.")
     return "Reviewer"
 
+def route_from_pmo(state: ProjectState) -> str:
+    """WBS(PMO) 게이트 직후 분기: 사용자가 피드백을 줬으면(needs_revision) WBS 재분할을 위해
+    Master_PMO 로 되돌리고, 승인(피드백 없음)이면 기획 종료(END). 인간 게이트라 무한루프 없음."""
+    if getattr(state, "needs_revision", False):
+        print("🔁 [WBS 재분할] 사용자 피드백 반영 — Master_PMO 로 되돌려 WBS 를 다시 분할합니다.")
+        return "Master_PMO"
+    return END
+
 # 레지스트리 id → 노드 구현 함수. 레지스트리가 노드 멤버십을 구동하기 위한 seam.
 # (모든 레지스트리 에이전트 id 를 커버해야 동적 빌더가 임의 enabled 집합을 생성 가능)
 NODE_IMPL = {
@@ -227,7 +235,8 @@ def _wire_edges(workflow):
     )
     workflow.add_edge("RFP_Analyst", "Master_PM")
     workflow.add_conditional_edges("Master_PM", route_from_pm, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
-    workflow.add_edge("Master_PMO", END)
+    # WBS 게이트 피드백 루프: 피드백 시 Master_PMO 재실행(WBS 재분할), 승인 시 END
+    workflow.add_conditional_edges("Master_PMO", route_from_pmo, {"Master_PMO": "Master_PMO", END: END})
 
     workflow.add_conditional_edges("Architect", route_from_architect, {"Tech_Lead": "Tech_Lead", "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
     workflow.add_conditional_edges("Tech_Lead", route_from_tech_lead, {"Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
