@@ -22,7 +22,7 @@ OUTPUT_ARTIFACTS = {
 # 3. 파이프라인 엔진 제어 파라미터
 MAX_REVIEW_ITERATIONS = 1  # V4.0 터보 모드 적용 (리뷰어 무한 루프 방지)
 MAX_BUILD_RETRIES = 3      # 코드 빌드 실패 시 최대 롤백 횟수
-CONTEXT_MAX_LENGTH = 10000
+CONTEXT_MAX_LENGTH = 20000  # 코드 누적/기존기능 보존 위해 상향(기존 10000). 멀티태스크 회귀 완화.
 PREVIOUS_OUTPUT_MAX_LENGTH = 8000
 SUMMARY_MAX_LENGTH = 4000
 # ==========================================

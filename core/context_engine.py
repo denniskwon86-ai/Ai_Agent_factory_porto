@@ -22,8 +22,10 @@ class ContextEngine:
         모든 산출물 요약/파일은 토큰 상한으로 절단하여 무료 티어 할당량(TPM) 폭증을 방어한다.
         """
         sm = getattr(config, "SUMMARY_MAX_LENGTH", 4000)
-        ctx_max = getattr(config, "CONTEXT_MAX_LENGTH", 10000)
-        per_file = 1500
+        # 코드 누적/기존기능 보존을 위해 컨텍스트 예산 상향(Pro 600k 컨텍스트 기준 안전).
+        # 기존 파일이 과하게 잘려 재생성 시 기능이 누락되던 회귀 완화. (무료티어 TPM과의 트레이드오프)
+        ctx_max = getattr(config, "CONTEXT_MAX_LENGTH", 20000)
+        per_file = 4000
 
         context_parts = [
             f"🎯 [프로젝트 목표]: {state.project_name}",

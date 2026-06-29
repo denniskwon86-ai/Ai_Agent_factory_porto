@@ -184,7 +184,9 @@ def route_from_reviewer(state: ProjectState) -> str:
     if _is_final_task(state):
         print("🧪 [최종 통합 검증] 모든 WBS 태스크 완료 — QA를 자동 투입합니다 (WBS 미배정이어도 실행).")
         return "QA"
-    return "ManualWriter"
+    # 비최종 태스크는 여기서 스프린트 종료(END). 매뉴얼은 최종 태스크의 QA 직후(QA→ManualWriter)에만 1회 작성.
+    print("✅ [태스크 완료] 비최종 태스크 — 스프린트 종료(매뉴얼은 마지막에 한 번만 작성).")
+    return END
 
 def route_from_pm(state: ProjectState) -> str:
     if not state.current_sprint_task_id:

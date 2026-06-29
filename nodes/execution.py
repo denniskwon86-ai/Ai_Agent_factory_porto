@@ -118,28 +118,38 @@ async def run_tech_lead(state: Any) -> Dict[str, Any]:
     print(f"✅ [Agent] Tech Lead 기술명세 완료 — 점수 {result.get('score')} / 판정 {result.get('verdict')}")
     return updates
 
+# 증분 개발 지시 — 멀티태스크에서 이전 태스크가 만든 기능을 덮어써 잃어버리는 회귀 방지.
+_INCREMENTAL_GUARD = (
+    "\n\n[🚨 증분 개발 — 절대 준수]: 당신은 빈 화면이 아니라 **기존 코드베이스를 확장**한다. "
+    "컨텍스트의 '현재 워크스페이스 실제 파일'에 이미 구현된 모든 기능(예: 데이터 입력/CRUD/목록/상태)을 "
+    "**절대 삭제하거나 누락하지 말 것.** 이번 태스크의 기능을 **추가/수정만** 하라. "
+    "기존 파일을 다시 출력할 때는 반드시 '기존 기능 전부 + 이번 신규 기능'을 합친 완전한 코드를 내라. "
+    "(컨텍스트에 파일이 일부 잘려 보이면, 잘린 기능까지 보존하도록 신중히 작성하라.)"
+)
+
+
 async def run_developer_fe(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     print("🎨 [Agent] Frontend Worker 비동기 코딩 중...")
-    prompt = _load_skill(agent_skill("Frontend", "frontend_skill"))
-    
+    prompt = _load_skill(agent_skill("Frontend", "frontend_skill")) + _INCREMENTAL_GUARD
+
     if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
-    # 🚨 FIX: 다시 가볍고 빠른 Flash 티어(is_heavy=False)로 롤백
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=False) 
+    # 코드 생성은 핵심 산출물 → Pro 티어(품질 우선). 멀티파일 누적·기존기능 보존엔 강모델 필요.
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=True)
     return {"frontend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_developer_be(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     print("⚙️ [Agent] Backend Worker 비동기 코딩 중...")
-    prompt = _load_skill(agent_skill("Backend", "backend_skill"))
-    
+    prompt = _load_skill(agent_skill("Backend", "backend_skill")) + _INCREMENTAL_GUARD
+
     if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
-    # 🚨 FIX: 다시 가볍고 빠른 Flash 티어(is_heavy=False)로 롤백
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=False)
+    # 코드 생성은 핵심 산출물 → Pro 티어(품질 우선).
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=True)
     return {"backend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_code_builder(state: Any) -> Dict[str, Any]:

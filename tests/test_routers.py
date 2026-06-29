@@ -61,8 +61,9 @@ def test_reviewer_escalate_to_pm():
 def test_reviewer_rework_to_techlead():
     assert ag.route_from_reviewer(S(reviewer_decision="REWORK_DEV")) == "Tech_Lead"
 
-def test_reviewer_pass_no_qa_to_manual():
-    assert ag.route_from_reviewer(S(reviewer_decision="PASS", current_required_agents=["Frontend"])) == "ManualWriter"
+def test_reviewer_pass_nonfinal_ends_no_manual():
+    # 비최종 태스크 PASS → END (매뉴얼은 최종 QA 직후에만 1회)
+    assert ag.route_from_reviewer(S(reviewer_decision="PASS", current_required_agents=["Frontend"])) == END
 
 def test_reviewer_pass_qa_assigned_to_qa():
     assert ag.route_from_reviewer(S(reviewer_decision="PASS", current_required_agents=["QA"])) == "QA"
@@ -75,9 +76,9 @@ def test_reviewer_under_hop_cap_still_loops():
     assert ag.route_from_reviewer(S(reviewer_decision="REWORK_DEV", supervisor_hops=1)) == "Tech_Lead"
 
 def test_reviewer_hop_cap_does_not_block_pass():
-    # 상한 도달이어도 PASS(완료)는 막지 않는다 — 완료 신호 보호
+    # 상한 도달이어도 PASS(완료)는 막지 않는다 — 비최종이면 END 로 정상 종료
     s = S(reviewer_decision="PASS", supervisor_hops=config.GLOBAL_MAX_SUPERVISOR_HOPS, current_required_agents=["Frontend"])
-    assert ag.route_from_reviewer(s) == "ManualWriter"
+    assert ag.route_from_reviewer(s) == END
 
 
 # ── map_builder_router ──────────────────────────────────────────────
