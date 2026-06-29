@@ -56,6 +56,18 @@ MODEL_CONTEXT_LIMITS = {
 }
 CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
 
+# 모델별 '출력' 토큰 상한. 미설정 시 SDK 기본값(예: Gemini 8192)으로 응답이 잘려
+# 누적 파일 전체 재출력이 중간에 끊기고(=기능 누락 회귀), 그 JSON이 파싱 실패로 전량 폐기된다.
+# → 코드 생성에 충분한 큰 값으로 명시 설정. (Gemini 2.5 계열 64k 출력 지원)
+MODEL_OUTPUT_LIMITS = {
+    "gemini-2.5-pro":          65536,
+    "gemini-2.5-flash-lite":   65536,
+    "llama-3.3-70b-versatile":  8000,
+    "llama-3.1-8b-instant":     8000,
+}
+DEFAULT_OUTPUT_LIMIT_GEMINI = 65536
+DEFAULT_OUTPUT_LIMIT_GROQ = 8000
+
 # ==========================================
 # 5. 토론·합의 루프 / 단계별 성공기준 / Supervisor 설정 (V5.1)
 # ==========================================

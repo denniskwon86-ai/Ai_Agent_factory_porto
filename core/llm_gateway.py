@@ -16,6 +16,35 @@ import config
 # 시스템 부팅 시 최우선으로 .env 파일의 환경변수를 메모리에 안전하게 로드합니다.
 load_dotenv()
 
+
+def _gemini_out(model: str) -> int:
+    return config.MODEL_OUTPUT_LIMITS.get(model, config.DEFAULT_OUTPUT_LIMIT_GEMINI)
+
+
+def _groq_out(model: str) -> int:
+    return config.MODEL_OUTPUT_LIMITS.get(model, config.DEFAULT_OUTPUT_LIMIT_GROQ)
+
+
+def _is_truncated(response: Any) -> bool:
+    """LLM 응답이 출력 토큰 상한으로 잘렸는지 best-effort 판정.
+    Gemini: finish_reason 'MAX_TOKENS' / Groq(OpenAI 호환): 'length'. 메타데이터 위치가
+    제공자/버전마다 달라 여러 경로를 방어적으로 탐색하며, 불확실하면 False(오탐 방지)."""
+    try:
+        candidates = []
+        meta = getattr(response, "response_metadata", None) or {}
+        if isinstance(meta, dict):
+            candidates.append(meta.get("finish_reason"))
+            candidates.append(((meta.get("candidates") or [{}])[0] or {}).get("finish_reason"))
+        rmeta = getattr(response, "additional_kwargs", None) or {}
+        if isinstance(rmeta, dict):
+            candidates.append(rmeta.get("finish_reason"))
+        for c in candidates:
+            if isinstance(c, str) and c.strip().upper() in ("MAX_TOKENS", "LENGTH"):
+                return True
+    except Exception:
+        pass
+    return False
+
 # 모든 LLM 호출에 공통 적용되는 언어 지침 — Gemini의 한자(漢字) 혼입 미관 이슈 억제.
 _LANG_DIRECTIVE = (
     " 모든 자연어 텍스트는 한국어(한글)로만 작성하고 한자(漢字)는 절대 사용하지 마라"
@@ -53,12 +82,12 @@ class LLMGateway:
         
         pro_fallbacks = []
         for m in pro_candidates[1:]:
-            pro_fallbacks.append(ChatGoogleGenerativeAI(model=m, temperature=0.2, max_retries=0))
+            pro_fallbacks.append(ChatGoogleGenerativeAI(model=m, temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(m)))
         # 최후의 보루: 타사(Groq) LLM 추가
-        pro_fallbacks.append(ChatGroq(model=config.LLM_PRO_FALLBACK_LIST[1], temperature=0.2, max_retries=0))
-        
+        pro_fallbacks.append(ChatGroq(model=config.LLM_PRO_FALLBACK_LIST[1], temperature=0.2, max_retries=0, max_tokens=_groq_out(config.LLM_PRO_FALLBACK_LIST[1])))
+
         self.llm_pro = ChatGoogleGenerativeAI(
-            model=pro_candidates[0], temperature=0.2, max_retries=0
+            model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0])
         ).with_fallbacks(pro_fallbacks)
 
         # 4. [Track 2] Flash 모델 체인 조립 (고속 단순 작업용)
@@ -69,11 +98,11 @@ class LLMGateway:
                 
         flash_fallbacks = []
         for m in flash_candidates[1:]:
-            flash_fallbacks.append(ChatGoogleGenerativeAI(model=m, temperature=0.1, max_retries=0))
-        flash_fallbacks.append(ChatGroq(model=config.LLM_FLASH_FALLBACK_LIST[1], temperature=0.1, max_retries=0))
-        
+            flash_fallbacks.append(ChatGoogleGenerativeAI(model=m, temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(m)))
+        flash_fallbacks.append(ChatGroq(model=config.LLM_FLASH_FALLBACK_LIST[1], temperature=0.1, max_retries=0, max_tokens=_groq_out(config.LLM_FLASH_FALLBACK_LIST[1])))
+
         self.llm_flash = ChatGoogleGenerativeAI(
-            model=flash_candidates[0], temperature=0.1, max_retries=0
+            model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0])
         ).with_fallbacks(flash_fallbacks)
 
         # 콘솔에 완성된 라우팅 체인 구조 출력
@@ -136,6 +165,12 @@ class LLMGateway:
             #    (이걸 빼면 str()로 뭉개져 JSON 파싱 실패 → 코드 미생성 버그 발생)
             raw_output = self._stringify(response.content)
 
+            # 🚨 출력 토큰 상한으로 응답이 잘렸으면(code 모드) 절대 부분 결과를 신뢰하지 않는다.
+            #    잘린 코드를 디스크에 덮어쓰면 기존 기능이 통째로 사라지므로 깨끗이 실패시켜 재작업으로.
+            if output_mode == "code" and _is_truncated(response):
+                print("🚨 [LLM Gateway] 응답이 출력 토큰 상한에서 절단됨(MAX_TOKENS). 부분 코드 폐기 → 빌드 실패 처리.")
+                return json.dumps({"files": [], "error": "OUTPUT_TRUNCATED"}, ensure_ascii=False)
+
         except Exception as e:
             error_str = str(e)
             # 2. 🚨 [크로스 티어 우회] Pro 체인이 429로 터지면 즉시 Flash 티어로 수직 강하
@@ -167,9 +202,40 @@ class LLMGateway:
             return self._stringify(raw_output).strip()
         return self._repair_and_parse_json(raw_output)
 
+    @staticmethod
+    def _escape_raw_control_chars(text: str) -> str:
+        """JSON 문자열 리터럴 내부의 escape 안 된 제어문자(리터럴 개행/CR/탭 등)를 escape.
+        LLM이 code 필드에 raw 개행을 그대로 넣어 'Invalid control character' 로 파싱이 통째로
+        깨지는(=파일 전량 폐기) 가장 흔한 실패를 보정. 문자열 '밖'의 구조는 건드리지 않는다."""
+        out = []
+        in_string = False
+        escaped = False
+        for ch in text:
+            if in_string:
+                if escaped:
+                    out.append(ch); escaped = False; continue
+                if ch == "\\":
+                    out.append(ch); escaped = True; continue
+                if ch == '"':
+                    out.append(ch); in_string = False; continue
+                if ch == "\n":
+                    out.append("\\n"); continue
+                if ch == "\r":
+                    out.append("\\r"); continue
+                if ch == "\t":
+                    out.append("\\t"); continue
+                if ord(ch) < 0x20:
+                    out.append("\\u%04x" % ord(ch)); continue
+                out.append(ch)
+            else:
+                if ch == '"':
+                    in_string = True
+                out.append(ch)
+        return "".join(out)
+
     def _repair_and_parse_json(self, raw_text: str) -> str:
         text = str(raw_text).strip()
-        
+
         # 1. 마크다운 백틱 제거
         md_match = re.search(r'\x60\x60\x60(?:json)?\s*(\{[\s\S]*?\})\s*\x60\x60\x60', text)
         if md_match:
@@ -178,13 +244,17 @@ class LLMGateway:
             bracket_match = re.search(r'(\{[\s\S]*\})', text)
             if bracket_match:
                 text = bracket_match.group(1)
-                
+
         # 2. 잔존하는 XML 찌꺼기 제거
         text = re.sub(r'</?file[^>]*>', '', text)
         text = re.sub(r'</?files>', '', text)
-        
-        # 3. JSON 문법 유효성 검증 (실패 시 트레일링 콤마 제거 후 1회 재시도)
-        for candidate in (text, re.sub(r',(\s*[}\]])', r'\1', text)):
+
+        # 3. JSON 유효성 검증 — 단계적 보정 후보를 순서대로 시도(가장 보존적인 것부터):
+        #    원본 → 트레일링콤마 제거 → 제어문자 escape → (제어문자 escape + 트레일링콤마 제거)
+        no_trailing = re.sub(r',(\s*[}\]])', r'\1', text)
+        escaped = self._escape_raw_control_chars(text)
+        escaped_no_trailing = re.sub(r',(\s*[}\]])', r'\1', escaped)
+        for candidate in (text, no_trailing, escaped, escaped_no_trailing):
             try:
                 parsed = json.loads(candidate)
                 return json.dumps(parsed, ensure_ascii=False, indent=2)
