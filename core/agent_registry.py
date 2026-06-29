@@ -11,10 +11,19 @@
 """
 import json
 import os
+import re
 from typing import Any, Dict, List
 
-# 레지스트리 JSON 위치(루트). 서버 CWD 기준.
-REGISTRY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agents_registry.json")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 레지스트리 JSON 위치(루트). 서버 CWD 기준. = "default" 템플릿(SW 파이프라인)의 저장소.
+REGISTRY_PATH = os.path.join(_ROOT, "agents_registry.json")
+
+# ── 다중 워크플로우 템플릿 (Copy 모델) ──────────────────────────────────────────
+# 기존 단일 레지스트리(agents_registry.json) = "default" 템플릿(SW 파이프라인). 보존·하위호환.
+# 추가 템플릿은 templates/<id>.json 에 저장(복사로 생성, 기존은 불변). 작업은 자기 템플릿으로 실행(T2).
+TEMPLATES_DIR = os.path.join(_ROOT, "templates")
+DEFAULT_TEMPLATE_ID = "default"
+_TID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # 에이전트 메타 스키마 키(누락 시 보정)
 _AGENT_FIELDS = {
@@ -157,3 +166,96 @@ def agent_meta(agent_id: str) -> dict:
 def agent_skill(agent_id: str, default: str = "") -> str:
     """노드의 스킬 파일명을 레지스트리에서 조회(제어판 override 반영). 미설정 시 default(현행 동작 보존)."""
     return agent_meta(agent_id).get("skill") or default
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 다중 템플릿(Copy 모델) — "default"(=기존 단일 레지스트리)는 그대로, 추가 템플릿은 templates/<id>.json
+# ──────────────────────────────────────────────────────────────────────────────
+def _safe_tid(template_id: str) -> str:
+    if not _TID_RE.match(template_id or ""):
+        raise ValueError("잘못된 template_id 형식입니다(허용: 영숫자/_/-).")
+    return template_id
+
+
+def _template_path(template_id: str) -> str:
+    return os.path.join(TEMPLATES_DIR, f"{_safe_tid(template_id)}.json")
+
+
+def load_template(template_id: str = DEFAULT_TEMPLATE_ID) -> Dict[str, Any]:
+    """템플릿 레지스트리 로드.
+    - default: 기존 단일 레지스트리(agents_registry.json, 없으면 DEFAULT_REGISTRY) — 하위호환.
+    - 그 외: templates/<id>.json (없거나 손상/빈 결과 시 DEFAULT_REGISTRY 폴백 → 부팅 안전)."""
+    if template_id == DEFAULT_TEMPLATE_ID:
+        return load_registry()
+    path = _template_path(template_id)
+    if not os.path.exists(path):
+        return _normalize(DEFAULT_REGISTRY)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            reg = _normalize(json.load(f))
+        return reg if reg["agents"] else _normalize(DEFAULT_REGISTRY)
+    except Exception:
+        return _normalize(DEFAULT_REGISTRY)
+
+
+def list_templates() -> List[Dict[str, Any]]:
+    """공존하는 워크플로우 템플릿 요약(항상 default 포함)."""
+    base = load_registry()
+    items = [{
+        "id": DEFAULT_TEMPLATE_ID,
+        "name": base.get("pipeline_name", "기본 워크플로우"),
+        "description": base.get("description", ""),
+        "agent_count": len(base.get("agents", [])),
+        "builtin": True,
+    }]
+    if os.path.isdir(TEMPLATES_DIR):
+        for fn in sorted(os.listdir(TEMPLATES_DIR)):
+            if not fn.endswith(".json"):
+                continue
+            tid = fn[:-5]
+            try:
+                reg = load_template(tid)
+                items.append({
+                    "id": tid,
+                    "name": reg.get("pipeline_name", tid),
+                    "description": reg.get("description", ""),
+                    "agent_count": len(reg.get("agents", [])),
+                    "builtin": False,
+                })
+            except Exception:
+                continue
+    return items
+
+
+def save_template(template_id: str, reg: Dict[str, Any]) -> Dict[str, Any]:
+    """템플릿 저장(정규화·검증). default 는 기존 레지스트리 경로로 위임."""
+    if template_id == DEFAULT_TEMPLATE_ID:
+        return save_registry(reg)
+    norm = _normalize(reg)
+    if not norm["agents"]:
+        raise ValueError("최소 1개 이상의 에이전트가 필요합니다.")
+    os.makedirs(TEMPLATES_DIR, exist_ok=True)
+    with open(_template_path(template_id), "w", encoding="utf-8") as f:
+        json.dump(norm, f, ensure_ascii=False, indent=2)
+    return norm
+
+
+def copy_template(src_id: str, new_id: str, new_name: str = "") -> Dict[str, Any]:
+    """src 템플릿을 복사해 새 템플릿을 만든다(기존 템플릿은 불변 — Copy 모델 핵심)."""
+    _safe_tid(new_id)
+    if new_id == DEFAULT_TEMPLATE_ID:
+        raise ValueError("default 는 예약된 템플릿 id 입니다.")
+    if os.path.exists(_template_path(new_id)):
+        raise ValueError("이미 존재하는 template_id 입니다.")
+    src = dict(load_template(src_id))
+    if new_name:
+        src["pipeline_name"] = new_name
+    return save_template(new_id, src)
+
+
+def delete_template(template_id: str) -> None:
+    if template_id == DEFAULT_TEMPLATE_ID:
+        raise ValueError("기본(default) 템플릿은 삭제할 수 없습니다.")
+    path = _template_path(template_id)
+    if os.path.exists(path):
+        os.remove(path)
