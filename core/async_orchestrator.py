@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, Dict, Any
 
-from core.agent_graph import app as langgraph_engine
+from core.agent_graph import get_runtime_app
 from core.broadcaster import factory_broadcaster
 from nodes.utils.wbs_manager import WBSManager
 
@@ -94,6 +94,7 @@ class AsyncFactoryOrchestrator:
     async def is_hotl_pending(self, task_id: str) -> bool:
         """해당 태스크 스레드가 HOTL 중단점에서 대기 중인지 확인 (SSE 이벤트 유실 시 UI 복구용)."""
         try:
+            langgraph_engine = await get_runtime_app()
             config = {"configurable": {"thread_id": f"sprint_{task_id}"}}
             snapshot = await langgraph_engine.aget_state(config)
             return bool(getattr(snapshot, "values", None)) and bool(getattr(snapshot, "next", None))
@@ -102,6 +103,7 @@ class AsyncFactoryOrchestrator:
 
     async def _run_sprint_loop(self, config: dict, state_dict: dict, task_id: str, workspace_root: str):
         pid = _pid(workspace_root)
+        langgraph_engine = await get_runtime_app()
         try:
             async for event in langgraph_engine.astream(state_dict, config=config):
                 for node_name, state_data in event.items():
@@ -122,6 +124,7 @@ class AsyncFactoryOrchestrator:
             print(f"🚨 [Orchestrator] Sprint Loop Error: {e}")
 
     async def resume_hotl(self, task_id: str, feedback: Optional[str]) -> bool:
+        langgraph_engine = await get_runtime_app()
         config = {"configurable": {"thread_id": f"sprint_{task_id}"}}
         snapshot = await langgraph_engine.aget_state(config)
         if not snapshot.values:
@@ -151,6 +154,7 @@ class AsyncFactoryOrchestrator:
 
     async def _resume_stream(self, config: dict, task_id: str, workspace_root: str):
         pid = _pid(workspace_root)
+        langgraph_engine = await get_runtime_app()
         try:
             async for event in langgraph_engine.astream(None, config=config):
                 for node_name, state_data in event.items():

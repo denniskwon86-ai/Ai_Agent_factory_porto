@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 import config
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -153,7 +154,9 @@ def route_from_pm(state: ProjectState) -> str:
     print("⏩ [의사결정 완료] PM이 강행을 지시했습니다. Reviewer에게 강제 승인을 지시합니다.")
     return "Reviewer"
 
-def create_factory_graph():
+def _build_workflow():
+    """노드·엣지 토폴로지를 구성해 (workflow, interrupt_after) 반환 (checkpointer 미적용).
+    create_factory_graph(스튜디오/테스트용)와 get_runtime_app(런타임 영속용)이 공유하는 단일 토폴로지 정의."""
     workflow = StateGraph(ProjectState)
 
     workflow.add_node("RFP_Analyst", run_rfp_analyst)
@@ -179,18 +182,17 @@ def create_factory_graph():
     workflow.add_edge("RFP_Analyst", "Master_PM")
     workflow.add_conditional_edges("Master_PM", route_from_pm, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
     workflow.add_edge("Master_PMO", END)
-    
+
     workflow.add_conditional_edges("Architect", route_from_architect, {"Tech_Lead": "Tech_Lead", "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
     workflow.add_conditional_edges("Tech_Lead", route_from_tech_lead, {"Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
     workflow.add_conditional_edges("Backend", route_from_backend, {"Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
     workflow.add_edge("Frontend", "CodeBuilder")
     workflow.add_conditional_edges("CodeBuilder", map_builder_router, {"Frontend": "Frontend", "Backend": "Backend", "Reviewer": "Reviewer", END: END})
-    
+
     workflow.add_conditional_edges("Reviewer", route_from_reviewer, {"QA": "QA", "ManualWriter": "ManualWriter", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", END: END})
     workflow.add_edge("QA", "ManualWriter")
     workflow.add_edge("ManualWriter", END)
 
-    memory = MemorySaver()
     # HOTL 중단점은 에이전트 마스터 레지스트리(제어판)에서 읽는다.
     # 레지스트리 부재/손상 시 기존 기본값으로 안전 폴백(무중단). 변경은 서버 재시작 시 반영.
     try:
@@ -198,7 +200,44 @@ def create_factory_graph():
         interrupt_after = get_interrupt_after(default=["RFP_Analyst", "Master_PMO", "Tech_Lead"])
     except Exception:
         interrupt_after = ["RFP_Analyst", "Master_PMO", "Tech_Lead"]
-    app = workflow.compile(checkpointer=memory, interrupt_after=interrupt_after)
-    return app
+    return workflow, interrupt_after
 
+
+def create_factory_graph():
+    """동기 컴파일(MemorySaver) — LangGraph Studio/langgraph.json 및 단위 테스트용.
+    런타임(오케스트레이터)은 재시작 내성을 위해 영속 체크포인터를 쓰는 get_runtime_app()을 사용한다."""
+    workflow, interrupt_after = _build_workflow()
+    return workflow.compile(checkpointer=MemorySaver(), interrupt_after=interrupt_after)
+
+
+# 스튜디오/langgraph.json/테스트용 동기 인스턴스(휘발성). 런타임은 get_runtime_app() 사용.
 app = create_factory_graph()
+
+
+# ── 런타임 전용 영속 체크포인터 그래프 (재시작 내성) ──────────────────────────────
+# AsyncSqliteSaver 는 생성 시 실행 중 이벤트루프가 필요하므로 모듈 import 시점엔 만들 수 없다.
+# → 첫 호출(오케스트레이터의 async 컨텍스트) 때 1회 lazy compile 하고 캐시한다.
+_runtime_app = None
+_runtime_lock = asyncio.Lock()
+
+
+async def _build_runtime_app(db_path: str):
+    import aiosqlite
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    conn = await aiosqlite.connect(db_path, check_same_thread=False)
+    saver = AsyncSqliteSaver(conn)
+    await saver.setup()
+    workflow, interrupt_after = _build_workflow()
+    return workflow.compile(checkpointer=saver, interrupt_after=interrupt_after)
+
+
+async def get_runtime_app():
+    """오케스트레이터용 그래프(영속 체크포인터=SQLite). 첫 호출 시 이벤트루프 내에서 1회 compile·캐시.
+    → 서버 재시작 시에도 HOTL 대기 체크포인트가 디스크에 보존되어 스프린트 재개가 가능하다."""
+    global _runtime_app
+    if _runtime_app is not None:
+        return _runtime_app
+    async with _runtime_lock:
+        if _runtime_app is None:
+            _runtime_app = await _build_runtime_app(config.PIPELINE_DB_FILE)
+    return _runtime_app
