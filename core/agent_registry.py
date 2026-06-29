@@ -141,3 +141,19 @@ def get_interrupt_after(default: List[str] = None) -> List[str]:
     except Exception:
         pass
     return default if default is not None else ["RFP_Analyst", "Master_PMO", "Tech_Lead"]
+
+
+def agent_meta(agent_id: str) -> dict:
+    """레지스트리에서 해당 에이전트 메타를 반환(미존재/오류 시 {})."""
+    try:
+        for a in load_registry().get("agents", []):
+            if a.get("id") == agent_id:
+                return a
+    except Exception:
+        pass
+    return {}
+
+
+def agent_skill(agent_id: str, default: str = "") -> str:
+    """노드의 스킬 파일명을 레지스트리에서 조회(제어판 override 반영). 미설정 시 default(현행 동작 보존)."""
+    return agent_meta(agent_id).get("skill") or default
