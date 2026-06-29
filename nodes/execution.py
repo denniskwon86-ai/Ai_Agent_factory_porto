@@ -254,6 +254,38 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
             elif render.get("ok") and not render.get("skipped"):
                 render_note += f"\n(✅ 프론트 렌더 검증 통과 — renderToString {render.get('rendered', 0)}자)"
 
+            # ⌨️ 입력 동작(인터랙티비티) 정적 검증: value 제어 input 에 onChange 누락 = 입력 불가(동결)
+            #    renderToString 은 '렌더됨'만 보장하고 '입력됨'은 못 잡으므로 별도 정적 분석으로 차단.
+            from nodes.utils.interactivity_checker import check_frontend_interactivity
+            interact = check_frontend_interactivity(fe_files)
+            if not interact.get("ok"):
+                errs = interact.get("errors", [])
+                n_frozen = len(interact.get("frozen", []))
+                print(f"❌ [TestRunner] 프론트 입력 동작 검증 실패: 동결 입력 {n_frozen}건")
+                review_text = (
+                    "⌨️ 프론트엔드 입력 동작 검증 실패 — 사용자가 값을 입력할 수 없는 '동결된 입력 필드'가 있습니다:\n- "
+                    + "\n- ".join(errs[:5])
+                    + "\n\n[수정 지침] 제어 컴포넌트(value={...})에는 반드시 onChange 핸들러와 useState 를 연결하십시오. "
+                      "표시 전용 필드라면 readOnly 를 명시하고, 비제어 입력이면 value 대신 defaultValue 를 사용하십시오."
+                )
+                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+                cr_scores["CODE_REVIEW"] = 0.0
+                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
+                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV", "blocking_fails": ["frontend_interactivity"]})
+                return {
+                    "reviewer_decision": "REWORK_DEV",
+                    "reviewer_feedback": review_text,
+                    "pm_override_reason": "",
+                    "needs_revision": False,
+                    "current_stage": "CODE_REVIEW",
+                    "stage_scores": cr_scores,
+                    "criteria_log": cr_log,
+                    "supervisor_feedback": review_text,
+                    "supervisor_hops": hops,
+                }
+            else:
+                render_note += "\n(✅ 입력 동작 검증 통과 — 제어 입력에 onChange 연결 확인)"
+
         # ⚙️ 백엔드 스모크 테스트러너: 격리 부팅 + 엔드포인트 검증 (실패 시 즉시 재작업)
         if has_be_code:
             from nodes.utils.backend_smoke import check_backend_smoke
