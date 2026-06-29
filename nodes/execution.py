@@ -185,6 +185,20 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
     has_be = any("backend" in a.lower() or "백엔드" in a for a in req_agents)
     has_coding_agent = has_fe or has_be
 
+    # 🚨 [무결성 가드] 코딩 에이전트가 요구됐는데 '그 에이전트'의 추출 파일이 0개면(출력 절단/
+    #    JSON 전량 폐기/모델 누락 의심) 다른 에이전트 산출물이 있어도 success 로 위장되지 않게
+    #    명시적 실패 처리. 이를 빼면 FE 유실 + BE 성공 → success 커밋 → 다음 태스크에 FE 영구 손실.
+    if has_fe and not fe_files:
+        print("🚨 [무결성] Frontend 요구됐으나 추출 파일 0개 → 빌드 실패(재작업).")
+        return {"build_status": "failed", "failed_node": "Frontend",
+                "build_error_log": "프론트엔드 산출물이 비어 있습니다(출력 절단/파싱 실패 의심). 기존 코드 전부 + 신규 기능을 합쳐 전체를 다시 생성하십시오.",
+                "developer_retry_count": current_retry + 1}
+    if has_be and not be_files:
+        print("🚨 [무결성] Backend 요구됐으나 추출 파일 0개 → 빌드 실패(재작업).")
+        return {"build_status": "failed", "failed_node": "Backend",
+                "build_error_log": "백엔드 산출물이 비어 있습니다(출력 절단/파싱 실패 의심). 기존 코드 전부 + 신규 기능을 합쳐 전체를 다시 생성하십시오.",
+                "developer_retry_count": current_retry + 1}
+
     if not all_files_to_write:
         if not has_coding_agent: return {"build_status": "success", "failed_node": "", "developer_retry_count": 0}
         else: return {"build_status": "failed", "failed_node": ("Frontend" if has_fe else "Backend"), "developer_retry_count": current_retry + 1}
