@@ -9,9 +9,12 @@ export default function HOTLInput() {
   
   const state = useFactoryStore((store) => store.state);
   const currentProjectId = useFactoryStore((store) => store.currentProjectId);
+  const hotlTaskId = useFactoryStore((store) => store.hotlTaskId);
 
-  const isWaitingForHuman = state?.needs_revision || false;
-  const currentTask = state?.current_sprint_task_id;
+  // HOTL 대기 판정을 단일화: needs_revision 또는 hotlTaskId 중 하나라도 켜져 있으면 '대기'(승인 가능)
+  // → 좌측 상태 배너와 신호가 어긋나 '버튼은 비활성인데 실제론 멈춰 대기' 데드락 방지.
+  const isWaitingForHuman = !!(state?.needs_revision || hotlTaskId);
+  const currentTask = state?.current_sprint_task_id || hotlTaskId;
 
   const handleSubmit = async () => {
     if (!currentTask) {
@@ -40,9 +43,13 @@ export default function HOTLInput() {
       }
 
       setFeedback("");
-      
+
+      // 승인/재가동 직후 상태를 '가동 중'으로 일관되게 전환:
+      // needs_revision=false + hotlTaskId 제거(좌측 배너 모순 해소) + activeSprintId 설정('⚙️ 가동 중' + 라이브 카드 표시)
       useFactoryStore.setState((prev) => ({
-        state: prev.state ? { ...prev.state, needs_revision: false } : null
+        state: prev.state ? { ...prev.state, needs_revision: false } : null,
+        hotlTaskId: null,
+        activeSprintId: currentTask,
       }));
 
     } catch (error) {
