@@ -1,38 +1,41 @@
 """레지스트리 ↔ 그래프 노드 정합성 — Phase 2 동적 빌더의 핵심 불변식 가드.
 
-agent_graph.py 를 import 하지 않고(게이트웨이 네트워크 호출 회피) 소스를 정적 파싱해
-add_node 이름 집합과 DEFAULT_REGISTRY id 집합이 1:1인지 검사한다.
+(b)-1 이후 노드 멤버십 SSOT 는 NODE_IMPL(레지스트리 id → 노드 함수, 동적 빌더가 사용)이다.
+지연 게이트웨이 seam 덕분에 agent_graph import 가 ~2s 라 직접 import 해 검증한다.
 """
-import os
-import re
+import core.agent_graph as ag
 from core.agent_registry import DEFAULT_REGISTRY, get_interrupt_after
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _graph_node_names():
-    src = open(os.path.join(ROOT, "core", "agent_graph.py"), encoding="utf-8").read()
-    return set(re.findall(r'add_node\(\s*"([^"]+)"', src))
+    # 노드 멤버십 SSOT = NODE_IMPL (build_graph_from_registry 가 이 매핑으로 노드를 생성)
+    return set(ag.NODE_IMPL.keys())
 
 
 def test_every_registry_id_is_a_graph_node():
     nodes = _graph_node_names()
     reg_ids = {a["id"] for a in DEFAULT_REGISTRY["agents"]}
     missing = reg_ids - nodes
-    assert not missing, f"레지스트리 id가 그래프 노드에 없음: {missing}"
+    assert not missing, f"레지스트리 id가 NODE_IMPL 에 없음(동적 빌더가 노드 생성 불가): {missing}"
 
 
 def test_every_graph_node_is_in_registry():
     nodes = _graph_node_names()
     reg_ids = {a["id"] for a in DEFAULT_REGISTRY["agents"]}
     missing = nodes - reg_ids
-    assert not missing, f"그래프 노드가 레지스트리에 없음: {missing}"
+    assert not missing, f"NODE_IMPL 노드가 레지스트리에 없음: {missing}"
+
+
+def test_node_impl_matches_compiled_graph():
+    # NODE_IMPL 의 id 들이 실제 compile 된 그래프 노드와 일치(전부 enabled 인 DEFAULT 기준)
+    compiled_nodes = set(ag.create_factory_graph().get_graph().nodes.keys())
+    assert set(ag.NODE_IMPL.keys()) <= compiled_nodes
 
 
 def test_interrupt_after_ids_are_valid_graph_nodes():
     nodes = _graph_node_names()
     for nid in get_interrupt_after(default=["RFP_Analyst", "Master_PMO", "Tech_Lead"]):
-        assert nid in nodes, f"interrupt_after id가 그래프 노드 아님: {nid}"
+        assert nid in nodes, f"interrupt_after id가 노드 아님: {nid}"
 
 
 def test_every_rubric_has_threshold_ssot():

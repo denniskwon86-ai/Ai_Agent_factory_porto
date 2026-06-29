@@ -154,23 +154,27 @@ def route_from_pm(state: ProjectState) -> str:
     print("⏩ [의사결정 완료] PM이 강행을 지시했습니다. Reviewer에게 강제 승인을 지시합니다.")
     return "Reviewer"
 
-def _build_workflow():
-    """노드·엣지 토폴로지를 구성해 (workflow, interrupt_after) 반환 (checkpointer 미적용).
-    create_factory_graph(스튜디오/테스트용)와 get_runtime_app(런타임 영속용)이 공유하는 단일 토폴로지 정의."""
-    workflow = StateGraph(ProjectState)
+# 레지스트리 id → 노드 구현 함수. 레지스트리가 노드 멤버십을 구동하기 위한 seam.
+# (모든 레지스트리 에이전트 id 를 커버해야 동적 빌더가 임의 enabled 집합을 생성 가능)
+NODE_IMPL = {
+    "RFP_Analyst": run_rfp_analyst,
+    "Master_PM": run_master_pm,
+    "Master_PMO": run_master_pmo,
+    "Architect": run_architect,
+    "Tech_Lead": run_tech_lead,
+    "Backend": run_developer_be,
+    "Frontend": run_developer_fe,
+    "CodeBuilder": run_code_builder,
+    "Reviewer": run_supervisor,
+    "QA": run_qa,
+    "ManualWriter": run_manual_writer,
+}
 
-    workflow.add_node("RFP_Analyst", run_rfp_analyst)
-    workflow.add_node("Master_PM", run_master_pm)
-    workflow.add_node("Master_PMO", run_master_pmo)
-    workflow.add_node("Architect", run_architect)
-    workflow.add_node("Tech_Lead", run_tech_lead)
-    workflow.add_node("Backend", run_developer_be)
-    workflow.add_node("Frontend", run_developer_fe)
-    workflow.add_node("CodeBuilder", run_code_builder)
-    workflow.add_node("Reviewer", run_supervisor)
-    workflow.add_node("QA", run_qa)
-    workflow.add_node("ManualWriter", run_manual_writer)
 
+def _wire_edges(workflow):
+    """현 SW 파이프라인의 엣지/라우터 구조.
+    (b)-1 동작 보존: 하드코딩 유지. (b)-2 에서 레지스트리 order/category 기반 데이터 구동으로 전환 예정.
+    (상태 구동 결정 라우터 — include_design·역방향 수렴·QA 자동투입·빌드실패 되돌림 — 은 함수 로직 유지)"""
     workflow.set_conditional_entry_point(
         route_factory_mode,
         {
@@ -178,7 +182,6 @@ def _build_workflow():
             "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"
         }
     )
-
     workflow.add_edge("RFP_Analyst", "Master_PM")
     workflow.add_conditional_edges("Master_PM", route_from_pm, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
     workflow.add_edge("Master_PMO", END)
@@ -193,14 +196,35 @@ def _build_workflow():
     workflow.add_edge("QA", "ManualWriter")
     workflow.add_edge("ManualWriter", END)
 
-    # HOTL 중단점은 에이전트 마스터 레지스트리(제어판)에서 읽는다.
-    # 레지스트리 부재/손상 시 기존 기본값으로 안전 폴백(무중단). 변경은 서버 재시작 시 반영.
-    try:
-        from core.agent_registry import get_interrupt_after
-        interrupt_after = get_interrupt_after(default=["RFP_Analyst", "Master_PMO", "Tech_Lead"])
-    except Exception:
-        interrupt_after = ["RFP_Analyst", "Master_PMO", "Tech_Lead"]
+
+def build_graph_from_registry(registry=None):
+    """레지스트리의 enabled 에이전트 id 로 노드를 생성(NODE_IMPL 매핑)하고, 엣지/라우터와
+    interrupt_after(hotl_after) 를 적용해 (workflow, interrupt_after) 반환.
+
+    (b)-1 동작 보존: DEFAULT_REGISTRY(전부 enabled)에서는 기존 하드코딩 토폴로지와 동일하다.
+    엣지는 아직 _wire_edges 하드코딩이므로, enabled 에서 노드를 빼는 것은 (b)-2 에서 엣지 데이터화와
+    함께 지원한다(현재 임의 비활성화는 dangling edge 로 compile 실패할 수 있음)."""
+    from core.agent_registry import load_registry, get_interrupt_after
+    reg = registry or load_registry()
+    enabled_ids = [a["id"] for a in reg.get("agents", []) if a.get("enabled", True)]
+
+    workflow = StateGraph(ProjectState)
+    for aid in enabled_ids:
+        impl = NODE_IMPL.get(aid)
+        if impl is not None:
+            workflow.add_node(aid, impl)
+
+    _wire_edges(workflow)
+
+    # HOTL 중단점 = 레지스트리 hotl_after(enabled 노드로 한정). 손상/부재 시 기존 기본값 폴백.
+    interrupt_after = [i for i in get_interrupt_after(default=["RFP_Analyst", "Master_PMO", "Tech_Lead"]) if i in enabled_ids]
     return workflow, interrupt_after
+
+
+def _build_workflow():
+    """토폴로지 빌더 진입점 — 레지스트리 구동(build_graph_from_registry)으로 위임.
+    create_factory_graph(studio/테스트)와 get_runtime_app(런타임 영속)이 공유한다."""
+    return build_graph_from_registry()
 
 
 def create_factory_graph():
