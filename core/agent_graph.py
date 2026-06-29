@@ -18,6 +18,49 @@ from nodes.execution import (
     run_manual_writer
 )
 
+# 요구 에이전트 명단 정규화: 별칭(영문 키워드/한글) → 정규 노드 id.
+# PMO 는 정규 영문 id(Architect/Tech_Lead/Backend/Frontend/Reviewer/QA)를 내도록 지시받지만,
+# 간헐적 비정형 출력에 대비해 정규화 후 '정확 id 일치'로 라우팅한다(substring 오탐 제거).
+_AGENT_ALIASES = {
+    "Architect": ("architect", "아키"),
+    "Tech_Lead": ("tech_lead", "techlead", "tech lead", "테크", "기술"),
+    "Backend": ("backend", "백엔드"),
+    "Frontend": ("frontend", "프론트"),
+    "QA": ("qa", "품질", "테스트"),
+    "Reviewer": ("reviewer", "리뷰", "검수"),
+    "RFP_Analyst": ("rfp_analyst", "rfp", "요구"),
+    "Master_PM": ("master_pm", "기획"),
+    "Master_PMO": ("master_pmo", "pmo", "wbs"),
+    "CodeBuilder": ("codebuilder", "code_builder", "빌더"),
+    "ManualWriter": ("manualwriter", "manual_writer", "manual", "매뉴얼"),
+}
+_CANON_IDS = set(_AGENT_ALIASES.keys())
+
+
+def _canonicalize(raw: str) -> str:
+    """단일 요구 에이전트 문자열 → 정규 노드 id. 정규 id 면 그대로, 별칭이면 매핑, 미상이면 원문 유지(보수)."""
+    if not raw:
+        return raw
+    s = str(raw).strip()
+    if s in _CANON_IDS:  # 이미 정규 id (PMO 정상 출력) → 별칭 검사 생략(오탐 방지)
+        return s
+    low = s.lower()
+    for cid, aliases in _AGENT_ALIASES.items():
+        if low == cid.lower() or any(al in low for al in aliases):
+            return cid
+    return s
+
+
+def _normalize_agents(raw_list) -> list:
+    seen, out = set(), []
+    for r in (raw_list or []):
+        c = _canonicalize(r)
+        if c and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
 def _get_required_agents(state: ProjectState) -> list:
     agents = []
     try:
@@ -31,23 +74,23 @@ def _get_required_agents(state: ProjectState) -> list:
                         break
     except Exception:
         pass
-    
+
     # 🚨 [치명적 버그 수정] 피드백(Revision) 생성 시 WBS 투입 명단이 비어버리는 현상 완벽 방어
     # agents가 비어있으면 AI가 코딩을 건너뛰는 사태를 막기 위해 강제로 개발 요원을 투입합니다.
     if not agents or len(agents) == 0:
         agents = getattr(state, "current_required_agents", [])
-        
+
     if not agents or len(agents) == 0:
         agents = ["Architect", "Tech_Lead", "Backend", "Frontend", "QA"]
-        
-    return agents
 
-def _has_role(agents: list, role_en: str, role_ko: str) -> bool:
-    for a in agents:
-        a_lower = a.lower()
-        if role_en.lower() in a_lower or role_ko in a:
-            return True
-    return False
+    # 정규 id 로 정규화 → 라우터의 정확 일치(_has_role) 입력
+    return _normalize_agents(agents)
+
+
+def _has_role(agents: list, role_en: str, role_ko: str = "") -> bool:
+    # agents 는 _normalize_agents 로 정규화된 정규 id 목록 → 정확 일치(substring 오탐 제거).
+    # role_en 은 항상 정규 id(Architect/Tech_Lead/Backend/Frontend/QA 등). role_ko 는 하위호환용 미사용.
+    return role_en in (agents or [])
 
 def _is_final_task(state: ProjectState) -> bool:
     """현재 시점에 WBS의 모든 태스크가 DONE인지(=마지막 태스크가 방금 완료됐는지) 확인.
