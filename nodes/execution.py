@@ -136,8 +136,9 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
     if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
-    # 코드 생성은 핵심 산출물 → Pro 티어(품질 우선). 멀티파일 누적·기존기능 보존엔 강모델 필요.
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=True)
+    # 코드 생성은 Flash(고속) — 재작업 루프가 잦아 속도가 중요. 회귀 방지는 _INCREMENTAL_GUARD +
+    # 컨텍스트 예산(기존 파일 주입)이 담당(모델 티어 무관). 라이브 검증상 Pro 는 루프를 수 분으로 느리게 함.
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=False)
     return {"frontend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_developer_be(state: Any) -> Dict[str, Any]:
@@ -148,8 +149,8 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
     if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
-    # 코드 생성은 핵심 산출물 → Pro 티어(품질 우선).
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=True)
+    # 코드 생성은 Flash(고속) — 회귀 방지는 _INCREMENTAL_GUARD + 컨텍스트 예산이 담당(티어 무관).
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=False)
     return {"backend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_code_builder(state: Any) -> Dict[str, Any]:

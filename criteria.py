@@ -75,7 +75,7 @@ STAGE_RUBRICS = {
         "checks": [
             {"id": "rfp_min_length", "desc": "요구정의서 본문이 최소 분량 이상", "weight": 1, "type": "deterministic"},
             {"id": "purpose_clear", "desc": "프로그램의 목적·의도(왜 만드는가, 해결할 문제)가 명확히 정의됨", "weight": 2, "type": "llm_judge"},
-            {"id": "must_have_components", "desc": "반드시 포함될 필수 구성요소/기능이 REQ-ID 체크리스트로 5개 이상 명시됨", "weight": 2, "type": "llm_judge"},
+            {"id": "must_have_components", "desc": "사용자 의도에서 직접 도출된 핵심 요건이 REQ-ID 체크리스트로 빠짐없이 명시됨(아이디어 규모에 비례 — 단순 앱은 소수여도 OK, 단 요청 안 한 엔터프라이즈 기능 환각은 감점)", "weight": 2, "type": "llm_judge"},
             {"id": "acceptance_criteria", "desc": "각 핵심 요구의 인수 기준(완성·정상작동 판정 방법)이 제시됨", "weight": 1, "type": "llm_judge"},
         ],
         "pass_threshold": 0.8,
