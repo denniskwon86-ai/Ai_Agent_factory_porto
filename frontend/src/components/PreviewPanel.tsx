@@ -74,6 +74,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   const triggerSelfHealing = useFactoryStore((s) => s.triggerSelfHealing);
   const isConnectedRef = useRef(isConnected);
   useEffect(() => { isConnectedRef.current = isConnected; }, [isConnected]);
+  // release(라이브러리 결과물) 보기 모드 추적 — message 핸들러 재구독 없이 최신값 참조
+  const releaseRef = useRef<any>(null);
+  useEffect(() => { releaseRef.current = release; }, [release]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // iframe HTML 템플릿
@@ -407,7 +410,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'PREVIEW_ERROR') {
         setError(event.data.message);
-        if (isConnectedRef.current && event.data.message) {
+        // 릴리스/결과물 프리뷰 보기 모드에서는 자가치유(/heal) 트리거 금지
+        // — 옛 결과물의 렌더 에러가 무관한 현재 작업 프로젝트의 실제 빌드를 오염시키는 것 방지
+        if (isConnectedRef.current && event.data.message && !releaseRef.current) {
           triggerSelfHealing(event.data.message);
         }
       } else if (event.data?.type === 'IFRAME_READY') {
