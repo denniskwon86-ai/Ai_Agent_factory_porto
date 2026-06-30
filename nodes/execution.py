@@ -166,6 +166,10 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     print("🎨 [Agent] Frontend Worker 비동기 코딩 중...")
     prompt = _load_skill(agent_skill("Frontend", "frontend_skill")) + _INCREMENTAL_GUARD
+    # 디자인 토큰 가이드 주입 — 일관된 스타일로 첫 판 품질↑(재작업↓). 안정 텍스트라 캐시 친화적.
+    _ds = _load_skill("design_system")
+    if _ds:
+        prompt += "\n\n[디자인 시스템 가이드 — 아래 Tailwind 토큰/레시피를 그대로 사용]\n" + _ds
 
     if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
