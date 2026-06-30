@@ -45,7 +45,7 @@ interface PreviewPanelProps {
   release?: any;
 }
 
-type TabType = 'PREVIEW' | 'RFP' | 'PRD' | 'ARCH' | 'TECH' | 'FRONTEND' | 'BACKEND' | 'REVIEW' | 'QA' | 'MANUAL';
+type TabType = 'PREVIEW' | 'RFP' | 'PRD' | 'ARCH' | 'TECH' | 'FRONTEND' | 'BACKEND' | 'REVIEW' | 'QA' | 'ACCEPT' | 'MANUAL';
 
 interface CodeFile {
   file_path: string;
@@ -435,8 +435,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
       case 'FRONTEND': return docs.frontend_code_summary || "프론트엔드 코드가 없습니다.";
       case 'BACKEND': return docs.backend_code_summary || "백엔드 코드가 없습니다.";
       case 'REVIEW': return docs.code_review_report_summary || "리뷰 리포트가 없습니다.";
-      case 'QA': return docs.qa_report_summary || "QA 리포트가 없습니다.";
-      case 'MANUAL': return docs.user_manual_summary || "사용자 매뉴얼이 아직 생성되지 않았습니다.\nQA 승인 완료 후 자동으로 작성됩니다.";
+      case 'QA': return docs.qa_report_summary || "QA(통합검수) 리포트가 없습니다.";
+      case 'ACCEPT': return docs.supervisor_report_summary || "고객사 수용검수 리포트가 아직 없습니다.\nQA 통과 후 최종 수용검수가 수행됩니다.";
+      case 'MANUAL': return docs.user_manual_summary || "사용자 매뉴얼이 아직 생성되지 않았습니다.\n최종 수용검수 통과 후 자동으로 작성됩니다.";
       default: return "";
     }
   };
@@ -446,7 +447,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     { id: 'ARCH', label: '🏗️ 아키텍처' }, { id: 'TECH', label: '🛠️ 기술사양' },
     { id: 'FRONTEND', label: '🎨 프론트엔드' }, { id: 'BACKEND', label: '⚙️ 백엔드' },
     { id: 'REVIEW', label: '📝 리뷰' }, { id: 'QA', label: '🧪 QA' },
-    { id: 'MANUAL', label: '📘 사용자 매뉴얼' }
+    { id: 'ACCEPT', label: '🧑‍⚖️ 수용검수' }, { id: 'MANUAL', label: '📘 사용자 매뉴얼' }
   ];
 
   return (

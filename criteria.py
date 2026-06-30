@@ -120,11 +120,41 @@ STAGE_RUBRICS = {
         "pass_threshold": 0.7,
         "hard_fail_checks": [],
     },
+    # Reviewer(개발 엔지니어, 단위 관점): 코드 정확성·버그·해당 단위 기능 동작
     "CODE_REVIEW": {
         "checks": [
             {"id": "build_success", "desc": "빌드/문법 검사 통과", "weight": 3, "type": "deterministic"},
+            {"id": "unit_correctness", "desc": "이번 태스크 코드에 명백한 버그/오작동/누락 로직이 없고, 작성한 단위 기능이 실제로 동작하도록 상태·핸들러가 올바르게 연결됨", "weight": 2, "type": "llm_judge"},
+            {"id": "code_quality", "desc": "가독성·구조(과도한 단일 거대 파일 지양, 적절한 컴포넌트/함수 분리)·타입 적용이 양호함", "weight": 1, "type": "llm_judge"},
         ],
-        "pass_threshold": 0.9,
+        "pass_threshold": 0.8,
         "hard_fail_checks": ["build_success"],
+    },
+    # QA(수행사 인도 전 검수, 전체/통합 관점): 기획서·설계서대로 옳게 통합 구현되어 고객 인도 가능한가
+    "QA": {
+        "checks": [
+            {"id": "build_success", "desc": "빌드/문법 검사 통과", "weight": 2, "type": "deterministic"},
+            {"id": "design_conformance", "desc": "구현이 아키텍처·기술명세(설계서)의 파일 책임·인터페이스·데이터 모델대로 되어 있음", "weight": 2, "type": "llm_judge"},
+            {"id": "prd_fr_coverage", "desc": "PRD의 기능 요구(FR)가 누락 없이 전체적으로 통합 구현됨(부분/더미 아님)", "weight": 2, "type": "llm_judge"},
+            {"id": "integration_soundness", "desc": "모듈/컴포넌트/API 연동과 핵심 E2E 흐름이 끊김 없이 동작할 구조임", "weight": 1, "type": "llm_judge"},
+            {"id": "delivery_readiness", "desc": "명백한 미완성·깨진 화면·미연결 기능이 없어 고객에게 인도할 수 있는 수준임", "weight": 1, "type": "llm_judge"},
+        ],
+        "pass_threshold": 0.8,
+        "hard_fail_checks": ["build_success"],
+        "judge_heavy": True,
+        "judge_persona": "qa_skill",
+    },
+    # Supervisor(발주 고객사 대리인, 비즈니스 수용): RFP 계약대로인가, 실무에 써먹나, 완료 검수 통과인가 (엄격)
+    "SUPERVISOR": {
+        "checks": [
+            {"id": "rfp_business_coverage", "desc": "RFP의 필수 비즈니스 요구(REQ-ID)가 결과물에서 빠짐없이 실제로 충족됨", "weight": 3, "type": "llm_judge"},
+            {"id": "usability_real_work", "desc": "실제 업무에 바로 써먹을 수 있는 수준의 완결성·사용성(핵심 사용자 시나리오가 매끄럽게 수행됨)", "weight": 2, "type": "llm_judge"},
+            {"id": "completeness_polish", "desc": "빈틈·미흡·거친 마감이 없어 완성도가 인도·검수 통과 수준임(엄격하게 판단)", "weight": 2, "type": "llm_judge"},
+            {"id": "acceptance_signoff", "desc": "발주사 입장에서 용역비를 지불하고 완료 수용해도 될 만한 종합 품질인가", "weight": 1, "type": "llm_judge"},
+        ],
+        "pass_threshold": 0.85,
+        "hard_fail_checks": ["rfp_business_coverage"],
+        "judge_heavy": True,
+        "judge_persona": "supervisor_skill",
     },
 }

@@ -458,28 +458,33 @@ export default function ControlPanel() {
               </button>
             </div>
 
-            {/* 🚀 모든 단계 완료 시 — QA 판정 연동 + 최종 결과물 저장(배포) */}
+            {/* 🚀 모든 단계 완료 시 — 고객 수용검수(Supervisor) 연동 + 최종 결과물 저장(배포) */}
             {progressPercent === 100 && currentProjectId && (
               <div className="flex flex-col gap-2 mb-1">
-                {state?.qa_verdict === "FAIL" ? (
-                  <div className="rounded border border-red-600 bg-red-900/30 p-2.5 text-xs text-red-200 leading-relaxed">
-                    🚨 <b>QA 미통과</b> — RFP 요구가 모두 구현·작동하지 않았습니다. 결과물이 불완전할 수 있어 재작업/검토를 권장합니다. (우측 'QA' 탭에서 리포트 확인)
-                  </div>
-                ) : state?.qa_verdict === "PASS" ? (
+                {/* QA(수행사 통합검수) 보조 표시 */}
+                <div className="text-[11px] text-gray-400">
+                  🧪 QA(통합검수): {state?.qa_verdict === "PASS" ? "✅ 통과" : state?.qa_verdict === "FAIL" ? "❌ 미통과" : "—"}
+                </div>
+                {/* Supervisor(고객사 수용검수) = 완료/배포 판단 기준 */}
+                {state?.supervisor_verdict === "PASS" ? (
                   <div className="rounded border border-emerald-700/50 bg-emerald-900/20 p-2.5 text-xs text-emerald-200">
-                    ✅ <b>QA 통과</b> — RFP 요구가 구현·작동 확인됨.
+                    ✅ <b>고객 수용검수 통과</b> — RFP 요구가 충족되어 인도·배포 가능한 완료 상태입니다. (우측 '수용검수' 탭 참조)
+                  </div>
+                ) : state?.supervisor_verdict === "REJECT" ? (
+                  <div className="rounded border border-red-600 bg-red-900/30 p-2.5 text-xs text-red-200 leading-relaxed">
+                    🚨 <b>고객 수용검수 반려</b> — RFP 대비 요구 미충족/완성도 미달입니다. 인도·배포 부적합 — 보완을 권장합니다. (우측 '수용검수' 탭에서 사유 확인)
                   </div>
                 ) : (
                   <div className="rounded border border-gray-600 bg-gray-800 p-2.5 text-xs text-gray-400">
-                    ℹ️ QA 판정 정보 없음 — 최종 통합 검증(QA)이 아직 수행되지 않았을 수 있습니다.
+                    ℹ️ 수용검수 정보 없음 — 고객사 최종 수용검수(Supervisor)가 아직 수행되지 않았을 수 있습니다.
                   </div>
                 )}
                 <button
                   onClick={async () => {
-                    const fail = state?.qa_verdict === "FAIL";
-                    const msg = fail
-                      ? "⚠️ QA 미통과 상태입니다 — 요구가 모두 충족되지 않았습니다.\n그래도 이 결과물을 라이브러리에 저장(배포)하시겠습니까?"
-                      : "이 프로젝트의 최종 결과물을 라이브러리에 저장(배포)하시겠습니까?";
+                    const accepted = state?.supervisor_verdict === "PASS";
+                    const msg = accepted
+                      ? "이 프로젝트의 최종 결과물을 라이브러리에 저장(배포)하시겠습니까?"
+                      : "⚠️ 고객 수용검수를 통과하지 못한 상태입니다 — 요구가 모두 충족되지 않았습니다.\n그래도 이 결과물을 라이브러리에 저장(배포)하시겠습니까?";
                     if (!confirm(msg)) return;
                     const rid = await saveRelease(currentProjectId);
                     if (rid) {
@@ -489,12 +494,12 @@ export default function ControlPanel() {
                     }
                   }}
                   className={`w-full text-white font-bold py-3 rounded-lg shadow-lg transition-all border ${
-                    state?.qa_verdict === "FAIL"
+                    state?.supervisor_verdict !== "PASS"
                       ? "bg-gradient-to-r from-orange-700 to-red-700 hover:from-orange-600 hover:to-red-600 border-red-400/30"
                       : "bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 border-emerald-400/30"
                   }`}
                 >
-                  {state?.qa_verdict === "FAIL" ? "⚠️ QA 미통과 — 그래도 배포(저장)" : "🚀 최종 결과물 저장 (배포)"}
+                  {state?.supervisor_verdict !== "PASS" ? "⚠️ 수용검수 미통과 — 그래도 배포(저장)" : "🚀 최종 결과물 저장 (배포)"}
                 </button>
               </div>
             )}

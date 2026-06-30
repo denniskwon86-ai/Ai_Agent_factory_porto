@@ -63,18 +63,29 @@ def test_rfp_approve_proceeds_to_pm():
     assert ag.route_from_rfp(S(needs_revision=False)) == "Master_PM"
 
 
-# ── route_from_qa (매뉴얼은 최종 태스크 QA 통과 시에만) ───────────────
-def test_qa_final_pass_writes_manual(monkeypatch):
+# ── route_from_qa (QA 통합검수 → Supervisor 수용검수 / 미달→Tech_Lead) ──
+def test_qa_final_pass_goes_to_supervisor(monkeypatch):
     monkeypatch.setattr(ag, "_is_final_task", lambda s: True)
-    assert ag.route_from_qa(S(qa_verdict="PASS")) == "ManualWriter"
+    assert ag.route_from_qa(S(qa_verdict="PASS")) == "Supervisor"
 
-def test_qa_nonfinal_skips_manual(monkeypatch):
+def test_qa_fail_reworks_to_techlead(monkeypatch):
+    monkeypatch.setattr(ag, "_is_final_task", lambda s: True)
+    assert ag.route_from_qa(S(qa_verdict="FAIL")) == "Tech_Lead"
+
+def test_qa_nonfinal_pass_ends(monkeypatch):
     monkeypatch.setattr(ag, "_is_final_task", lambda s: False)
     assert ag.route_from_qa(S(qa_verdict="PASS")) == END
 
-def test_qa_final_fail_skips_manual(monkeypatch):
-    monkeypatch.setattr(ag, "_is_final_task", lambda s: True)
-    assert ag.route_from_qa(S(qa_verdict="FAIL")) == END
+
+# ── route_from_supervisor (고객 수용검수: 수용→매뉴얼 / 반려→PM / 상한→종료) ──
+def test_supervisor_accept_writes_manual():
+    assert ag.route_from_supervisor(S(supervisor_verdict="PASS")) == "ManualWriter"
+
+def test_supervisor_reject_escalates_to_pm():
+    assert ag.route_from_supervisor(S(supervisor_verdict="REJECT", stage_attempt_counts={"SUPERVISOR": 1})) == "Master_PM"
+
+def test_supervisor_reject_cap_ends():
+    assert ag.route_from_supervisor(S(supervisor_verdict="REJECT", stage_attempt_counts={"SUPERVISOR": 2})) == END
 
 
 # ── route_from_reviewer (의사결정 분기 + hop 차단기) ─────────────────

@@ -64,12 +64,14 @@ DEFAULT_REGISTRY: Dict[str, Any] = {
          "stage": "EXECUTION", "category": "execution", "model_tier": "pro", "order": 7, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
         {"id": "CodeBuilder", "name_ko": "코드 빌더", "role": "생성된 코드를 워크스페이스에 원자적으로 기록(비-LLM 시스템 노드)", "skill": "",
          "stage": "BUILD", "category": "system", "model_tier": "flash", "order": 8, "enabled": True, "hotl_after": False, "debate": False, "llm": False},
-        {"id": "Reviewer", "name_ko": "슈퍼바이저(리뷰어)", "role": "코드 리뷰·렌더/스모크 검증·재작업 판정", "skill": "reviewer_skill",
+        {"id": "Reviewer", "name_ko": "리뷰어", "role": "단위 코드·버그·해당 단위 기능 동작 검증(개발 엔지니어 관점)", "skill": "reviewer_skill",
          "stage": "CODE_REVIEW", "category": "review", "model_tier": "pro", "order": 9, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
-        {"id": "QA", "name_ko": "QA 엔지니어", "role": "RFP 추적성 기반 최종 통합 검증", "skill": "qa_skill",
+        {"id": "QA", "name_ko": "QA 엔지니어", "role": "기획서·설계서 대비 통합 구현 정합·인도 검수(수행사 인도 전)", "skill": "qa_skill",
          "stage": "QA", "category": "review", "model_tier": "pro", "order": 10, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
+        {"id": "Supervisor", "name_ko": "슈퍼바이저(고객사 대리인)", "role": "RFP 대비 비즈니스 수용·완료 최종 검수(고객사 관점·엄격)", "skill": "supervisor_skill",
+         "stage": "SUPERVISOR", "category": "review", "model_tier": "pro", "order": 11, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
         {"id": "ManualWriter", "name_ko": "매뉴얼 작성가", "role": "최종 사용자 매뉴얼 작성", "skill": "manual_skill",
-         "stage": "MANUAL", "category": "review", "model_tier": "flash", "order": 11, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
+         "stage": "MANUAL", "category": "review", "model_tier": "flash", "order": 12, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
     ],
 }
 

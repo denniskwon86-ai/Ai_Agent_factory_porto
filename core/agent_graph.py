@@ -13,8 +13,9 @@ from nodes.execution import (
     run_developer_fe,
     run_developer_be,
     run_code_builder,
-    run_supervisor,
+    run_reviewer,
     run_qa,
+    run_supervisor,
     run_manual_writer
 )
 
@@ -227,16 +228,28 @@ def route_from_rfp(state: ProjectState) -> str:
     return "Master_PM"
 
 def route_from_qa(state: ProjectState) -> str:
-    """QA 직후 분기: 사용자 매뉴얼은 '프로젝트 최종 태스크의 QA 통과' 시점에만 1회 작성한다.
-    초기/중간 태스크에 (전용)QA 가 배정돼 실행되더라도 비최종이면 매뉴얼 없이 스프린트 종료.
-    최종 태스크라도 QA 미통과(FAIL)면 미완성 제품의 매뉴얼은 무의미하므로 생략."""
-    if _is_final_task(state) and getattr(state, "qa_verdict", "") == "PASS":
-        return "ManualWriter"
-    if not _is_final_task(state):
-        print("✅ [전용 QA 완료] 비최종 태스크의 통합 테스트 — 매뉴얼 작성 없이 스프린트 종료.")
-        return END
-    print("⚠️ [최종 QA 미통과] 매뉴얼 작성을 생략하고 스프린트를 종료합니다.")
+    """QA(수행사 통합검수) 직후 분기: 합격이면 고객사 수용검수(Supervisor)로, 미달이면 Tech_Lead 재작업.
+    (비최종 태스크의 전용 QA는 드물게 실행되며 통과 시 그대로 스프린트 종료.)"""
+    if getattr(state, "qa_verdict", "") == "FAIL":
+        print("🔁 [QA 미달] 설계·통합 결함 — Tech_Lead 에게 재작업 지시.")
+        return "Tech_Lead"
+    if _is_final_task(state):
+        print("➡️ [QA 통과] 고객사 수용검수(Supervisor)로 진행.")
+        return "Supervisor"
+    print("✅ [전용 QA 통과] 비최종 태스크 — 스프린트 종료.")
     return END
+
+def route_from_supervisor(state: ProjectState) -> str:
+    """고객사 수용검수(Supervisor) 직후 분기: 수용(PASS)→매뉴얼, 반려(REJECT)→PM 재조정.
+    수용 시도 2회 초과(반복 반려) 시 무한 루프 대신 종료(인간 검토)로 표면화 — 보수적."""
+    if getattr(state, "supervisor_verdict", "") == "PASS":
+        return "ManualWriter"
+    attempts = (getattr(state, "stage_attempt_counts", {}) or {}).get("SUPERVISOR", 0)
+    if attempts >= 2:
+        print("⚠️ [수용검수 상한] 반복 반려 — 무한 루프 방지 위해 종료(인간 검토 필요).")
+        return END
+    print("🔁 [고객 수용 미달] PM 에게 요구·기능 재조정 상신.")
+    return "Master_PM"
 
 # 레지스트리 id → 노드 구현 함수. 레지스트리가 노드 멤버십을 구동하기 위한 seam.
 # (모든 레지스트리 에이전트 id 를 커버해야 동적 빌더가 임의 enabled 집합을 생성 가능)
@@ -249,8 +262,9 @@ NODE_IMPL = {
     "Backend": run_developer_be,
     "Frontend": run_developer_fe,
     "CodeBuilder": run_code_builder,
-    "Reviewer": run_supervisor,
+    "Reviewer": run_reviewer,
     "QA": run_qa,
+    "Supervisor": run_supervisor,
     "ManualWriter": run_manual_writer,
 }
 
@@ -282,8 +296,11 @@ def _wire_edges(workflow):
     workflow.add_conditional_edges("CodeBuilder", map_builder_router, {"Frontend": "Frontend", "Backend": "Backend", "Reviewer": "Reviewer", END: END})
 
     workflow.add_conditional_edges("Reviewer", route_from_reviewer, {"QA": "QA", "ManualWriter": "ManualWriter", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", END: END})
-    # 매뉴얼은 '최종 태스크 QA 통과' 시에만 1회 작성 — 초기/중간 태스크의 QA 후에는 종료
-    workflow.add_conditional_edges("QA", route_from_qa, {"ManualWriter": "ManualWriter", END: END})
+    # 3단 수용 사다리: QA(수행사 통합검수) → Supervisor(고객사 수용검수) → ManualWriter
+    #   QA: 통과→Supervisor / 미달→Tech_Lead 재작업
+    #   Supervisor: 수용→ManualWriter / 반려→PM 재조정(상한 초과 시 종료)
+    workflow.add_conditional_edges("QA", route_from_qa, {"Supervisor": "Supervisor", "Tech_Lead": "Tech_Lead", END: END})
+    workflow.add_conditional_edges("Supervisor", route_from_supervisor, {"ManualWriter": "ManualWriter", "Master_PM": "Master_PM", END: END})
     workflow.add_edge("ManualWriter", END)
 
 

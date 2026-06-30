@@ -1,6 +1,6 @@
 import { useFactoryStore } from '../store/useFactoryStore';
 
-// 전체 워크플로우 매크로 단계 (요구정의→기획→WBS→설계→구현→빌드→검수→QA→매뉴얼)
+// 전체 워크플로우 매크로 단계 (요구정의→기획→WBS→설계→구현→빌드→검수→QA→수용검수→매뉴얼)
 const FLOW: { key: string; label: string; agents?: string[] }[] = [
   { key: 'RFP', label: '요구정의' },
   { key: 'PLANNING', label: '기획' },
@@ -11,16 +11,17 @@ const FLOW: { key: string; label: string; agents?: string[] }[] = [
   { key: '__build', label: '빌드', agents: ['codebuilder'] },
   { key: 'CODE_REVIEW', label: '검수' },
   { key: 'QA', label: 'QA' },
+  { key: 'SUPERVISOR', label: '수용검수' },
   { key: '__manual', label: '매뉴얼', agents: ['manualwriter'] },
 ];
 
 // FLOW 인덱스 = 매크로 단계 순서. 에이전트/단계키 → FLOW 인덱스 매핑(프론티어 계산용).
 const NODE_TO_IDX: Record<string, number> = {
   rfp_analyst: 0, master_pm: 1, master_pmo: 2, architect: 3, tech_lead: 4,
-  backend: 5, frontend: 5, codebuilder: 6, reviewer: 7, qa: 8, manualwriter: 9,
+  backend: 5, frontend: 5, codebuilder: 6, reviewer: 7, qa: 8, supervisor: 9, manualwriter: 10,
 };
 const STAGE_TO_IDX: Record<string, number> = {
-  RFP: 0, PLANNING: 1, PMO: 2, ARCHITECTURE: 3, TECH_SPEC: 4, EXECUTION: 5, BUILD: 6, CODE_REVIEW: 7, QA: 8, MANUAL: 9,
+  RFP: 0, PLANNING: 1, PMO: 2, ARCHITECTURE: 3, TECH_SPEC: 4, EXECUTION: 5, BUILD: 6, CODE_REVIEW: 7, QA: 8, SUPERVISOR: 9, MANUAL: 10,
 };
 
 export default function WorkflowStrip() {

@@ -32,10 +32,22 @@ _STAGE_ARTIFACT_FIELD = {
 
 
 def _stage_artifact(state, stage_key: str) -> str:
+    fe = getattr(state, "frontend_code_summary", "") or ""
+    be = getattr(state, "backend_code_summary", "") or ""
+    code = (fe + "\n\n" + be).strip()
     if stage_key == "CODE_REVIEW":
-        fe = getattr(state, "frontend_code_summary", "") or ""
-        be = getattr(state, "backend_code_summary", "") or ""
-        return (fe + "\n\n" + be).strip()
+        return code
+    if stage_key == "QA":
+        # 수행사 통합검수: 코드 + 설계서(PRD/아키텍처/기술명세) 대조
+        prd = getattr(state, "prd_summary", "") or ""
+        arch = getattr(state, "architecture_summary", "") or ""
+        tech = getattr(state, "tech_spec_summary", "") or ""
+        return (f"[기획서(PRD)]\n{prd}\n\n[아키텍처]\n{arch}\n\n[기술명세]\n{tech}\n\n[구현 코드]\n{code}").strip()
+    if stage_key == "SUPERVISOR":
+        # 고객사 수용검수: 코드(결과물) + RFP(계약) 대조
+        rfp = getattr(state, "rfp_summary", "") or ""
+        prd = getattr(state, "prd_summary", "") or ""
+        return (f"[요구사항 정의서(RFP) — 계약]\n{rfp or '(RFP 없음 — PRD 기준)'}\n\n[기획서(PRD)]\n{prd}\n\n[구현 결과물 코드]\n{code}").strip()
     field = _STAGE_ARTIFACT_FIELD.get(stage_key)
     if field:
         return getattr(state, field, "") or ""
@@ -78,15 +90,20 @@ async def score_stage(state, stage_key: str) -> dict:
 
     if llm_checks:
         judge_skill = _load_skill("judge_skill")
+        # 단계별 평가 페르소나(QA=수행사 검수자 / Supervisor=고객사 대리인)를 judge 프롬프트에 주입 — 관점 차등
+        persona = _load_skill(rubric.get("judge_persona", "")) if rubric.get("judge_persona") else ""
+        persona_block = (persona + "\n\n") if persona else ""
         checks_brief = "\n".join([f'- {c["id"]}: {c["desc"]}' for c in llm_checks])
         artifact = _stage_artifact(state, stage_key)
         prompt = (
-            f"{judge_skill}\n\n[평가 기준]:\n{checks_brief}\n\n"
+            f"{persona_block}{judge_skill}\n\n[평가 기준]:\n{checks_brief}\n\n"
             f"[검토 산출물]:\n{artifact}\n\n"
             '아래 JSON만 출력하라(각 기준 0.0~1.0 점수 + 통과/미흡 사유 한 줄 총평): '
             '{"scores": {"기준id": 0.0}, "rationale": "한 줄 판단 근거"}'
         )
-        raw = await gateway.aexecute(state, prompt, is_heavy=False, output_mode="json", light=True)
+        # QA·Supervisor 같은 고위험 수용검수는 Pro judge로 엄격 채점(rubric의 judge_heavy), 그 외는 Flash 경량.
+        judge_heavy = bool(rubric.get("judge_heavy", False))
+        raw = await gateway.aexecute(state, prompt, is_heavy=judge_heavy, output_mode="json", light=True)
         jdata = _parse_json(raw)
         scores = jdata.get("scores", {}) or {}
         rationale = str(jdata.get("rationale", "") or "")

@@ -263,11 +263,12 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
         out["backend_code_summary"] = json.dumps({"files": be_full}, ensure_ascii=False)
     return out
 
-async def run_supervisor(state: Any) -> Dict[str, Any]:
-    """범용 단계 게이트(구 run_reviewer를 일반화). 코드리뷰 단계의 PASS/REWORK_DEV/ESCALATE_PM
-    3분기 및 Git 커밋/WBS 완료 로직은 그대로 보존하고, 단계 기준 채점을 기록한다."""
+async def run_reviewer(state: Any) -> Dict[str, Any]:
+    """Reviewer(개발 엔지니어, 단위 관점) — 코드 정확성·버그·해당 단위 기능 동작 검증 게이트.
+    코드리뷰 단계의 PASS/REWORK_DEV/ESCALATE_PM 3분기 및 Git 커밋/WBS 완료 로직 보존, 단계 기준 채점 기록.
+    (역할 분리: '전체 통합 정합'은 QA, '고객 RFP 수용'은 Supervisor 가 담당.)"""
     state_obj = ProjectState.model_validate(state)
-    # Supervisor 왕복 카운터 — 매 리뷰 실행마다 +1 (route_from_reviewer 가 상한 초과 시 루프 차단)
+    # 리뷰 왕복 카운터 — 매 리뷰 실행마다 +1 (route_from_reviewer 가 상한 초과 시 루프 차단)
     hops = getattr(state_obj, "supervisor_hops", 0) + 1
 
     if getattr(state_obj, "pm_override_reason", ""):
@@ -518,44 +519,75 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
     }
 
 
-# 하위 호환 별칭: 기존 import(run_reviewer)를 깨지 않도록 유지
-run_reviewer = run_supervisor
+# 하위 호환 별칭: 기존 import(run_supervisor)를 깨지 않도록 — 이제 run_supervisor 는 '고객사 수용검수' 노드(아래 정의).
+# (구 run_reviewer 별칭 사용처는 run_reviewer 로 통일됨.)
+
+
+def _format_gate_report(title: str, result: Dict[str, Any]) -> str:
+    """score_stage 결과를 사람이 읽는 검수 리포트(마크다운)로 정리."""
+    lines = [f"## {title}", f"- 판정: {result.get('verdict')} · 점수 {result.get('score')}"]
+    per = result.get("per_check", {}) or {}
+    if per:
+        lines.append("- 기준별 점수:")
+        for k, v in per.items():
+            lines.append(f"  - {'✅' if v >= 0.5 else '❌'} {k}: {v}")
+    if result.get("blocking_fails"):
+        lines.append(f"- 🚨 치명 미달: {', '.join(result['blocking_fails'])}")
+    if result.get("rationale"):
+        lines.append(f"- 총평: {result['rationale']}")
+    return "\n".join(lines)
+
 
 async def run_qa(state: Any) -> Dict[str, Any]:
+    """QA(수행사 인도 전 통합 검수) — 기획서·설계서 대비 통합 구현 정합/인도 적합성 평가.
+    PASS → Supervisor(고객 수용검수), FAIL → Tech_Lead 재작업. (RFP 비즈니스 수용은 Supervisor 담당.)"""
     state_obj = ProjectState.model_validate(state)
-    print("🧪 [Agent] QA 최종 통합 검증(RFP 대조) 진행 중...")
-
-    rfp = getattr(state_obj, "rfp_summary", "") or ""
-    _verdict_rule = (
-        "\n\n[🚨 판정 의무]: 리포트 **맨 마지막 줄에 정확히** `QA_VERDICT: PASS` 또는 `QA_VERDICT: FAIL` 만 출력하라. "
-        "RFP의 필수 요구(REQ-ID) 중 하나라도 구현/작동이 확인되지 않으면 FAIL."
-    )
+    print("🧪 [Agent] QA 통합 검수(설계서 대비) 진행 중...")
     if state_obj.build_status == "failed":
-        prompt = (
-            f"🚨 [품질 검사 낙제]: 빌드 실패. 에러 로그:\n{state_obj.build_error_log}\n\n"
-            "무엇이 깨졌는지와 RFP 대비 미충족 항목을 담은 불합격 리포트를 작성하십시오." + _verdict_rule
-        )
-    else:
-        prompt = (
-            f"{_load_skill(agent_skill('QA', 'qa_skill'))}\n\n"
-            "[검증 기준 — 요구사항 정의서(RFP)]:\n"
-            f"{rfp if rfp else '(RFP 없음 — PRD/구현 기준으로 평가)'}\n\n"
-            "위 RFP의 각 REQ-ID가 실제 구현 코드에 반영되었는지(추적성)와 빌드/작동 가능성을 평가해 리포트를 작성하십시오." + _verdict_rule
-        )
+        report = f"## QA 통합 검수\n- 판정: FAIL (빌드 실패)\n- 에러:\n{state_obj.build_error_log}"
+        print("🧪 [QA] 판정: FAIL (빌드 실패)")
+        return {"qa_report_summary": report, "qa_verdict": "FAIL", "current_stage": "QA",
+                "reviewer_decision": "REWORK_DEV", "reviewer_feedback": report}
 
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="document")
-    report = _safe_str(output)
-    # QA 판정 파싱 — 빌드 실패는 무조건 FAIL, 아니면 리포트의 QA_VERDICT 토큰. 토큰 없으면 보수적으로 PASS 간주하지 않고 FAIL 경고.
+    from nodes.utils.scoring import score_stage
+    result = await score_stage(state_obj, "QA")
+    verdict = "PASS" if result.get("verdict") == "PASS" else "FAIL"
+    report = _format_gate_report("QA 통합 검수(기획서·설계서 대비)", result)
+    print(f"🧪 [QA] 판정: {verdict} (점수 {result.get('score')})")
+    updates = {"qa_report_summary": report, "qa_verdict": verdict, "current_stage": "QA"}
+    if verdict == "FAIL":
+        # 설계대로 미구현/통합 결함 → 실무진 재작업(REWORK_DEV→Tech_Lead). 미흡 내역을 피드백으로 전달.
+        updates["reviewer_decision"] = "REWORK_DEV"
+        updates["reviewer_feedback"] = "🧪 [QA 통합 검수 미달 — 설계/통합 결함]\n" + report
+    return updates
+
+
+async def run_supervisor(state: Any) -> Dict[str, Any]:
+    """Supervisor(발주 고객사 대리인) — RFP 계약 대비 비즈니스 수용·완료 검수(엄격).
+    PASS → ManualWriter, REJECT → PM(ESCALATE_PM, 요구·기능 재조정). route_from_supervisor 가 분기.
+    보수적 상한: 수용 시도 2회 초과 시 무한 루프 대신 종료(인간 검토)."""
+    state_obj = ProjectState.model_validate(state)
+    print("🧑‍⚖️ [Agent] Supervisor 최종 수용검수(RFP 대비) 진행 중...")
+    attempts = dict(getattr(state_obj, "stage_attempt_counts", {}) or {})
+    attempts["SUPERVISOR"] = attempts.get("SUPERVISOR", 0) + 1
+
     if state_obj.build_status == "failed":
-        verdict = "FAIL"
-    elif re.search(r"QA_VERDICT\s*:\s*PASS", report, re.IGNORECASE):
-        verdict = "PASS"
-    elif re.search(r"QA_VERDICT\s*:\s*FAIL", report, re.IGNORECASE):
-        verdict = "FAIL"
-    else:
-        verdict = "FAIL"  # 판정 누락 = 검증 불가 → 완료로 간주하지 않음(보수적)
-    print(f"🧪 [QA] 최종 판정: {verdict}")
-    return {"qa_report_summary": report, "qa_verdict": verdict, "current_stage": "QA"}
+        report = "## 고객사 수용검수\n- 판정: REJECT (빌드 실패로 인도 불가)"
+        return {"supervisor_report_summary": report, "supervisor_verdict": "REJECT",
+                "current_stage": "SUPERVISOR", "stage_attempt_counts": attempts}
+
+    from nodes.utils.scoring import score_stage
+    result = await score_stage(state_obj, "SUPERVISOR")
+    verdict = "PASS" if result.get("verdict") == "PASS" else "REJECT"
+    report = _format_gate_report("고객사 최종 수용검수(RFP 대비)", result)
+    print(f"🧑‍⚖️ [Supervisor] 수용 판정: {verdict} (점수 {result.get('score')} / 시도 {attempts['SUPERVISOR']})")
+    updates = {"supervisor_report_summary": report, "supervisor_verdict": verdict,
+               "current_stage": "SUPERVISOR", "stage_attempt_counts": attempts}
+    if verdict == "REJECT":
+        # 요구·비즈니스 미충족 → PM 상신(요구·기능 재조정). 미흡 내역 전달.
+        updates["reviewer_decision"] = "ESCALATE_PM"
+        updates["reviewer_feedback"] = "🧑‍⚖️ [고객사 수용검수 반려 — 요구·완성도 미달]\n" + report
+    return updates
 
 async def run_manual_writer(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)

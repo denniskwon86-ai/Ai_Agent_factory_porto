@@ -92,7 +92,9 @@ class ProjectState(BaseModel):
     backend_code_summary: str = Field(default="")
     code_review_report_summary: str = Field(default="")
     qa_report_summary: str = Field(default="")
-    qa_verdict: str = Field(default="")  # 최종 QA 판정: "" | "PASS" | "FAIL" (완료/배포 게이트)
+    qa_verdict: str = Field(default="")  # QA(수행사 통합검수) 판정: "" | "PASS" | "FAIL"
+    supervisor_report_summary: str = Field(default="")  # 고객사 대리인 최종 수용검수 리포트
+    supervisor_verdict: str = Field(default="")  # 최종 수용검수 판정: "" | "PASS" | "REJECT" (완료/배포 게이트)
     user_manual_summary: str = Field(default="")
 
     human_feedback_queue: List[FeedbackItem] = Field(default_factory=list)
