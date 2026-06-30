@@ -135,6 +135,11 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
     # 그 외(실행/리비전) 태스크는 stale 페이로드의 빈 누적 필드를 디스크 진실원본에서 복원.
     if not req.task_id.startswith("PLANNING"):
         req.project_state_payload = _restore_accumulated_from_disk(req.project_state_payload, workspace_root)
+        # 🚨 태스크별 재작업 카운터 리셋 — 이전 태스크의 누적(supervisor_hops/developer_retry_count)이
+        #   새 태스크로 새어 즉시 상한에 걸려 검수가 통째로 건너뛰어지는 크로스-태스크 오염 차단.
+        #   (각 태스크는 독립적인 리뷰/빌드 재작업 예산을 받는다.)
+        req.project_state_payload["supervisor_hops"] = 0
+        req.project_state_payload["developer_retry_count"] = 0
 
     # 리비전 태스크(TASK_REV_*)는 Architect를 건너뛰고 Tech_Lead로 직행해야 하므로
     # 프론트엔드 오탐을 방어하기 위해 백엔드에서도 factory_mode를 강제 보정합니다.

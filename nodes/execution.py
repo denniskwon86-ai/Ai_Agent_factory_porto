@@ -3,6 +3,7 @@ import json
 import re
 from pathlib import Path
 from typing import Dict, Any, List
+import config
 from state_models import ProjectState
 from core.llm_gateway import gateway
 from core.agent_registry import agent_skill
@@ -275,6 +276,13 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         print(f"⚖️ [Agent] Reviewer: PM의 기각/강행 지시 수용 (사유: {state_obj.pm_override_reason})")
         reviewer_decision = "PASS"
         review_text = "PM 최종 승인 지시: " + state_obj.pm_override_reason
+    elif hops >= getattr(config, "GLOBAL_MAX_SUPERVISOR_HOPS", 8):
+        # 🚨 [재작업 상한] 이 태스크의 리뷰 재작업 예산 소진 — 더 돌리지 않고 best-effort 로 통과시켜
+        #    태스크를 완료(DONE)시키고, 미해결 이슈는 상위 게이트(QA 통합검수 / Supervisor 수용검수)로 이관한다.
+        #    (예산 소진 태스크를 IN_PROGRESS 로 방치하면 최종 태스크 판정이 안 돼 QA/Supervisor 가 영영 실행 안 됨.)
+        print(f"⚠️ [Reviewer] 재작업 상한({hops}) 도달 — best-effort 수용. 미해결 이슈는 QA/Supervisor 로 이관.")
+        reviewer_decision = "PASS"
+        review_text = "리뷰 재작업 상한 도달 — best-effort 수용(미해결 이슈는 상위 게이트에서 판정)."
     else:
         has_fe_code = bool(_extract_files_from_json(state_obj.frontend_code_summary))
         has_be_code = bool(_extract_files_from_json(state_obj.backend_code_summary))
