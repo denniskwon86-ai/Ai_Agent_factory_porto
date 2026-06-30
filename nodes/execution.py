@@ -336,6 +336,7 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
 
         # 🖥️ 프론트 렌더 검증 테스트러너: 실제 renderToString 으로 동작 확인 (실패 시 LLM 리뷰 없이 즉시 재작업)
         render_note = ""
+        quality_advisory = ""  # 정적 품질 백스톱 권고(하드 차단 아님) — LLM 리뷰어 프롬프트에 주입
         if has_fe_code:
             from nodes.utils.render_checker import check_frontend_render
             fe_files = _extract_files_from_json(state_obj.frontend_code_summary)
@@ -401,6 +402,19 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             else:
                 render_note += "\n(✅ 입력 동작 검증 통과 — 제어 입력에 onChange 연결 확인)"
 
+            # 🧹 정적 품질 백스톱(Phase 2): 컴포넌트 분리/빈상태/디자인토큰 — 하드 차단이 아니라
+            #    권고로 LLM 리뷰어 판단에 주입(오탐 재작업 폭증 방지). frontend_skill/design_system 가
+            #    1차 규율, 이 검사기는 그 규율이 무너진 경우를 잡는 백스톱.
+            from nodes.utils.quality_checker import check_code_quality
+            quality = check_code_quality(fe_files)
+            if not quality.get("ok") and not quality.get("skipped"):
+                _qw = quality.get("warnings", [])
+                quality_advisory = "\n".join(f"- {w}" for w in _qw[:6])
+                print(f"⚠️ [QualityCheck] 정적 품질 권고 {len(_qw)}건 (리뷰 판단에 반영)")
+                render_note += f"\n(⚠️ 정적 품질 권고 {len(_qw)}건 — 컴포넌트 분리/빈상태/디자인토큰)"
+            else:
+                render_note += "\n(✅ 정적 품질 점검 통과 — 컴포넌트 분리/빈상태/디자인토큰)"
+
         # ⚙️ 백엔드 스모크 테스트러너: 격리 부팅 + 엔드포인트 검증 (실패 시 즉시 재작업)
         if has_be_code:
             from nodes.utils.backend_smoke import check_backend_smoke
@@ -452,6 +466,14 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                 "}\n"
                 "\x60\x60\x60"
             )
+            # 정적 품질 백스톱 권고를 리뷰 판단에 주입 — 단, 기능 동작에 지장 없는 사소한 권고만으로는
+            # REWORK_DEV 를 남발하지 말 것(재작업 비용 통제). 명백한 분리 결여/디자인 난맥만 반영.
+            if quality_advisory:
+                prompt += (
+                    "\n\n[정적 품질 점검 권고 — 아래를 리뷰에 참고하라. 기능 동작은 정상이나 품질 개선 여지가 있는 항목이다.\n"
+                    " 심각한 분리 결여/디자인 난맥이면 REWORK_DEV 사유로 포함하되, 사소한 권고만이라면 PASS 해도 된다]\n"
+                    + quality_advisory
+                )
             # 🚨 FIX: 리뷰어 역시 빠르고 비용 효율적인 Flash 모델로 롤백 (자유 스키마 JSON 모드)
             output = await gateway.aexecute(state_obj, prompt, is_heavy=False, output_mode="json")
             output_str = _safe_str(output)

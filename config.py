@@ -97,3 +97,7 @@ ON_STAGE_LIMIT_EXCEEDED = "HOTL" # 한도 초과 시: "HOTL"(인간 대기) | "F
 RFP_MIN_LENGTH = 600   # 빈약 요구정의서 차단
 PRD_MIN_LENGTH = 1200  # 빈약 PRD 차단 — 7개 섹션 깊이를 강제하기 위해 상향(기존 800)
 WBS_MIN_TASKS  = 4     # WBS 최소 태스크 수
+
+# 프론트 코드 품질 정적 백스톱(quality_checker) — 거대 단일 파일 판정 임계(둘 다 충족 시 권고)
+FE_MONOLITH_MAX_LINES      = 400  # 한 파일이 이 줄 수 이상이고
+FE_MONOLITH_MIN_COMPONENTS = 3    # 컴포넌트가 이 개수 이상이면 '분리 누락' 권고
