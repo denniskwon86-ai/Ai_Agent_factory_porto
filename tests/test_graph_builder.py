@@ -38,7 +38,27 @@ def test_builder_equivalent_to_create_factory_graph():
 
 
 def test_build_workflow_delegates_to_registry_builder():
-    # create_factory_graph/_build_runtime_app 이 쓰는 _build_workflow 가 빌더 경로를 통하는지
+    # create_factory_graph/get_runtime_app 이 쓰는 _build_workflow 가 빌더 경로를 통하는지
     wf, ia = ag._build_workflow()
     assert ia == ["RFP_Analyst", "Master_PMO"]
     assert EXPECTED_NODES <= set(wf.compile().get_graph().nodes.keys())
+
+
+def test_interrupt_derived_from_passed_registry():
+    # T2-b: interrupt_after 는 "전달된 레지스트리"의 hotl_after 에서 도출(default 만 읽지 않음).
+    import copy
+    reg = copy.deepcopy(DEFAULT_REGISTRY)
+    for a in reg["agents"]:
+        a["hotl_after"] = (a["id"] == "Tech_Lead")  # 게이트를 Tech_Lead 단 하나로 바꿈
+    _, ia = ag.build_graph_from_registry(reg)
+    assert ia == ["Tech_Lead"], ia
+
+
+def test_interrupt_empty_when_no_hotl():
+    # hotl_after 가 전혀 없으면 중단점도 없음(템플릿이 게이트 없이 설계됐을 때 그 의도를 존중)
+    import copy
+    reg = copy.deepcopy(DEFAULT_REGISTRY)
+    for a in reg["agents"]:
+        a["hotl_after"] = False
+    _, ia = ag.build_graph_from_registry(reg)
+    assert ia == []

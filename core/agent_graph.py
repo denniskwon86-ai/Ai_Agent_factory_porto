@@ -311,7 +311,7 @@ def build_graph_from_registry(registry=None):
     (b)-1 동작 보존: DEFAULT_REGISTRY(전부 enabled)에서는 기존 하드코딩 토폴로지와 동일하다.
     엣지는 아직 _wire_edges 하드코딩이므로, enabled 에서 노드를 빼는 것은 (b)-2 에서 엣지 데이터화와
     함께 지원한다(현재 임의 비활성화는 dangling edge 로 compile 실패할 수 있음)."""
-    from core.agent_registry import load_registry, get_interrupt_after
+    from core.agent_registry import load_registry
     reg = registry or load_registry()
     enabled_ids = [a["id"] for a in reg.get("agents", []) if a.get("enabled", True)]
 
@@ -323,15 +323,19 @@ def build_graph_from_registry(registry=None):
 
     _wire_edges(workflow)
 
-    # HOTL 중단점 = 레지스트리 hotl_after(enabled 노드로 한정). 손상/부재 시 기존 기본값 폴백.
-    interrupt_after = [i for i in get_interrupt_after(default=["RFP_Analyst", "Master_PMO"]) if i in enabled_ids]
+    # HOTL 중단점 = "전달된 레지스트리" 의 hotl_after(enabled 노드로 한정). 템플릿별로 다른 게이트를
+    # 갖도록 reg 에서 직접 도출(과거엔 get_interrupt_after 가 default 템플릿만 읽어 템플릿 게이트가
+    # 무시됐다 — T2-b). reg.agents 는 _normalize 로 order 정렬됨. DEFAULT_REGISTRY 면 기존과 동일.
+    interrupt_after = [a["id"] for a in reg.get("agents", [])
+                       if a.get("enabled", True) and a.get("hotl_after", False) and a["id"] in NODE_IMPL]
     return workflow, interrupt_after
 
 
-def _build_workflow():
+def _build_workflow(registry=None):
     """토폴로지 빌더 진입점 — 레지스트리 구동(build_graph_from_registry)으로 위임.
-    create_factory_graph(studio/테스트)와 get_runtime_app(런타임 영속)이 공유한다."""
-    return build_graph_from_registry()
+    create_factory_graph(studio/테스트)와 get_runtime_app(런타임 영속)이 공유한다.
+    registry 미지정 시 default 레지스트리(하위호환)."""
+    return build_graph_from_registry(registry)
 
 
 def create_factory_graph():
@@ -347,28 +351,38 @@ app = create_factory_graph()
 
 # ── 런타임 전용 영속 체크포인터 그래프 (재시작 내성) ──────────────────────────────
 # AsyncSqliteSaver 는 생성 시 실행 중 이벤트루프가 필요하므로 모듈 import 시점엔 만들 수 없다.
-# → 첫 호출(오케스트레이터의 async 컨텍스트) 때 1회 lazy compile 하고 캐시한다.
-_runtime_app = None
+# → 첫 호출(오케스트레이터의 async 컨텍스트) 때 1회 lazy 생성하고 캐시한다.
+# T2-b: 템플릿마다 토폴로지가 다를 수 있으므로 컴파일 그래프를 template_id 별로 캐시한다.
+#       체크포인터(SQLite saver)는 전 템플릿이 공유한다 — thread_id(project__task)가 상태를
+#       격리하고, 한 프로젝트/태스크는 항상 같은 템플릿으로 실행되므로 충돌하지 않는다.
+_runtime_saver = None                 # 공유 AsyncSqliteSaver(1회 생성)
+_runtime_apps: dict = {}              # template_id -> 컴파일된 그래프
 _runtime_lock = asyncio.Lock()
 
 
-async def _build_runtime_app(db_path: str):
-    import aiosqlite
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-    conn = await aiosqlite.connect(db_path, check_same_thread=False)
-    saver = AsyncSqliteSaver(conn)
-    await saver.setup()
-    workflow, interrupt_after = _build_workflow()
-    return workflow.compile(checkpointer=saver, interrupt_after=interrupt_after)
+async def _get_runtime_saver():
+    global _runtime_saver
+    if _runtime_saver is None:
+        import aiosqlite
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+        conn = await aiosqlite.connect(config.PIPELINE_DB_FILE, check_same_thread=False)
+        _runtime_saver = AsyncSqliteSaver(conn)
+        await _runtime_saver.setup()
+    return _runtime_saver
 
 
-async def get_runtime_app():
-    """오케스트레이터용 그래프(영속 체크포인터=SQLite). 첫 호출 시 이벤트루프 내에서 1회 compile·캐시.
-    → 서버 재시작 시에도 HOTL 대기 체크포인트가 디스크에 보존되어 스프린트 재개가 가능하다."""
-    global _runtime_app
-    if _runtime_app is not None:
-        return _runtime_app
+async def get_runtime_app(template_id: str = "default"):
+    """오케스트레이터용 그래프(영속 체크포인터=SQLite). template_id 별로 1회 compile·캐시.
+    → 서버 재시작 시에도 HOTL 대기 체크포인트가 디스크에 보존되어 스프린트 재개가 가능하다.
+    → 템플릿마다 enabled/hotl_after 가 다르면 토폴로지·중단점도 그에 맞게 컴파일된다(T2-b)."""
+    tid = template_id or "default"
+    cached = _runtime_apps.get(tid)
+    if cached is not None:
+        return cached
     async with _runtime_lock:
-        if _runtime_app is None:
-            _runtime_app = await _build_runtime_app(config.PIPELINE_DB_FILE)
-    return _runtime_app
+        if tid not in _runtime_apps:
+            from core.agent_registry import load_template
+            saver = await _get_runtime_saver()
+            workflow, interrupt_after = _build_workflow(load_template(tid))
+            _runtime_apps[tid] = workflow.compile(checkpointer=saver, interrupt_after=interrupt_after)
+    return _runtime_apps[tid]

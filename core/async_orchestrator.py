@@ -126,7 +126,9 @@ class AsyncFactoryOrchestrator:
 
     async def _run_sprint_loop(self, config: dict, state_dict: dict, task_id: str, workspace_root: str):
         pid = _pid(workspace_root)
-        langgraph_engine = await get_runtime_app()
+        # T2-b: 이 프로젝트의 워크플로우 템플릿 그래프로 실행(스킬/토폴로지/HOTL 게이트가 템플릿별)
+        tid = (state_dict or {}).get("template_id", "default")
+        langgraph_engine = await get_runtime_app(tid)
         try:
             async for event in langgraph_engine.astream(state_dict, config=config):
                 for node_name, state_data in event.items():
@@ -155,30 +157,34 @@ class AsyncFactoryOrchestrator:
             
         current_state = snapshot.values
         workspace_root = current_state.get("workspace_root", "./workspace") if isinstance(current_state, dict) else current_state.workspace_root
-        
+        # T2-b: 재개도 이 프로젝트의 템플릿 그래프로(초기 스프린트와 동일 토폴로지여야 체크포인트 정합)
+        tid = (current_state.get("template_id", "default") if isinstance(current_state, dict)
+               else getattr(current_state, "template_id", "default"))
+        langgraph_engine = await get_runtime_app(tid)
+
         try:
             if feedback:
                 if isinstance(current_state, dict):
                     queue = current_state.get("human_feedback_queue", [])
                 else:
                     queue = getattr(current_state, "human_feedback_queue", [])
-                
+
                 queue.append({"task_id": task_id, "feedback": feedback, "status": "pending", "priority": 1})
                 await langgraph_engine.aupdate_state(config, {"human_feedback_queue": queue, "needs_revision": True})
             else:
                 await langgraph_engine.aupdate_state(config, {"needs_revision": False})
         except Exception:
             return False
-            
+
         skey = _skey(_pid(workspace_root), task_id)
-        task = asyncio.create_task(self._resume_stream(config, task_id, workspace_root))
+        task = asyncio.create_task(self._resume_stream(config, task_id, workspace_root, tid))
         self.active_tasks[skey] = task
         self.task_projects[skey] = _pid(workspace_root)
         return True
 
-    async def _resume_stream(self, config: dict, task_id: str, workspace_root: str):
+    async def _resume_stream(self, config: dict, task_id: str, workspace_root: str, template_id: str = "default"):
         pid = _pid(workspace_root)
-        langgraph_engine = await get_runtime_app()
+        langgraph_engine = await get_runtime_app(template_id)
         try:
             async for event in langgraph_engine.astream(None, config=config):
                 for node_name, state_data in event.items():
