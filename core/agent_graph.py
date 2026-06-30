@@ -201,11 +201,21 @@ def route_from_pm(state: ProjectState) -> str:
 
 def route_from_pmo(state: ProjectState) -> str:
     """WBS(PMO) 게이트 직후 분기: 사용자가 피드백을 줬으면(needs_revision) WBS 재분할을 위해
-    Master_PMO 로 되돌리고, 승인(피드백 없음)이면 기획 종료(END). 인간 게이트라 무한루프 없음."""
+    Master_PMO 로 되돌리고, 승인(피드백 없음)이면 종결 노드(WBS_Approved)로 진행.
+    ⚠️ 승인 경로를 END 로 직접 두면 interrupt_after 가 '멈출 다음 노드'가 없어 HOTL 일시정지가
+    생기지 않는다(=WBS 승인 게이트가 작동 안 함). 실제 노드(WBS_Approved)로 보내야 게이트가 멈추고,
+    재개 시 needs_revision 으로 재평가되어 재분할/종료가 갈린다(RFP 게이트와 동일 패턴)."""
     if getattr(state, "needs_revision", False):
         print("🔁 [WBS 재분할] 사용자 피드백 반영 — Master_PMO 로 되돌려 WBS 를 다시 분할합니다.")
         return "Master_PMO"
-    return END
+    return "WBS_Approved"
+
+
+def run_wbs_approved(state: ProjectState) -> dict:
+    """WBS 승인 종결 노드(no-op) — WBS 게이트가 실제로 멈출 수 있도록 두는 '다음 노드'.
+    승인되면 여기로 진행한 뒤 END 로 종료(기획 완료). 상태는 변경하지 않는다."""
+    print("✅ [WBS 승인] 사용자가 WBS 를 승인했습니다 — 기획 단계를 종료합니다.")
+    return {}
 
 def route_from_rfp(state: ProjectState) -> str:
     """RFP HOTL 게이트 직후 분기: 사용자 피드백(needs_revision)이면 RFP 재작성을 위해
@@ -259,8 +269,11 @@ def _wire_edges(workflow):
     # RFP 게이트 피드백 루프: 피드백 시 RFP_Analyst 재실행(요구정의 재작성), 승인 시 Master_PM 진행
     workflow.add_conditional_edges("RFP_Analyst", route_from_rfp, {"RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM"})
     workflow.add_conditional_edges("Master_PM", route_from_pm, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
-    # WBS 게이트 피드백 루프: 피드백 시 Master_PMO 재실행(WBS 재분할), 승인 시 END
-    workflow.add_conditional_edges("Master_PMO", route_from_pmo, {"Master_PMO": "Master_PMO", END: END})
+    # WBS 게이트: interrupt_after=Master_PMO 가 실제로 멈추도록 승인 경로를 '실제 노드'(WBS_Approved)로
+    # 보낸다. 피드백 시 Master_PMO 재실행(WBS 재분할), 승인 시 WBS_Approved→END(기획 종료).
+    workflow.add_node("WBS_Approved", run_wbs_approved)
+    workflow.add_conditional_edges("Master_PMO", route_from_pmo, {"Master_PMO": "Master_PMO", "WBS_Approved": "WBS_Approved"})
+    workflow.add_edge("WBS_Approved", END)
 
     workflow.add_conditional_edges("Architect", route_from_architect, {"Tech_Lead": "Tech_Lead", "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
     workflow.add_conditional_edges("Tech_Lead", route_from_tech_lead, {"Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})

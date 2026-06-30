@@ -50,8 +50,9 @@ def test_pm_default_to_reviewer():
 def test_pmo_feedback_loops_back_to_resplit():
     assert ag.route_from_pmo(S(needs_revision=True)) == "Master_PMO"
 
-def test_pmo_approve_ends_planning():
-    assert ag.route_from_pmo(S(needs_revision=False)) == END
+def test_pmo_approve_goes_to_wbs_approved():
+    # 승인 시 END 직행이 아니라 실제 종결 노드로 가야 interrupt_after 가 멈춤(WBS 게이트 작동)
+    assert ag.route_from_pmo(S(needs_revision=False)) == "WBS_Approved"
 
 
 # ── route_from_rfp (RFP 게이트 피드백 루프) ──────────────────────────
