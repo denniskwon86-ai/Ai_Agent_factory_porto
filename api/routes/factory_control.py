@@ -48,6 +48,38 @@ def _safe_id(value: str, label: str = "id") -> str:
         raise HTTPException(status_code=400, detail=f"잘못된 {label} 형식입니다.")
     return value
 
+# 새로고침/SSE 재연결 후 클라이언트 state가 비거나 stale 해지면, 다음 태스크 페이로드에서
+# 누적 산출물(file_index/요약/git)이 유실되어 기존 맥락·기능이 사라진다(감사: file_index_gap).
+# → 태스크 시작 시 디스크 진실원본(latest_state.json)에서 '비어 있는 누적 필드만' 채운다
+#   (클라이언트가 채운 값/이번 태스크 의도는 절대 덮어쓰지 않는 보수적 병합).
+_ACCUMULATED_FIELDS = [
+    "file_index", "rfp_summary", "prd_summary", "architecture_summary", "tech_spec_summary",
+    "frontend_code_summary", "backend_code_summary", "code_review_report_summary",
+    "qa_report_summary", "user_manual_summary", "git_info",
+    "architecture_decisions", "technical_debt", "initial_idea", "project_name",
+]
+
+
+def _is_empty(v) -> bool:
+    return v in (None, "", [], {})
+
+
+def _restore_accumulated_from_disk(payload: dict, workspace_root: str) -> dict:
+    state_path = os.path.join(workspace_root, "latest_state.json")
+    if not os.path.exists(state_path):
+        return payload
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            disk = json.load(f)
+    except Exception:
+        return payload  # 읽기 실패 시 원본 유지
+    if not isinstance(disk, dict):
+        return payload
+    for k in _ACCUMULATED_FIELDS:
+        if _is_empty(payload.get(k)) and not _is_empty(disk.get(k)):
+            payload[k] = disk[k]
+    return payload
+
 @router.get("/projects")
 async def get_projects():
     projects_dir = "./projects"
@@ -98,6 +130,11 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
     _safe_id(project_id, "project_id")
     workspace_root = f"./projects/{project_id}"
     req.project_state_payload["workspace_root"] = workspace_root
+
+    # 신규 기획(PLANNING)은 새 출발이므로 옛 누적 산출물을 복원하지 않는다.
+    # 그 외(실행/리비전) 태스크는 stale 페이로드의 빈 누적 필드를 디스크 진실원본에서 복원.
+    if not req.task_id.startswith("PLANNING"):
+        req.project_state_payload = _restore_accumulated_from_disk(req.project_state_payload, workspace_root)
 
     # 리비전 태스크(TASK_REV_*)는 Architect를 건너뛰고 Tech_Lead로 직행해야 하므로
     # 프론트엔드 오탐을 방어하기 위해 백엔드에서도 factory_mode를 강제 보정합니다.
