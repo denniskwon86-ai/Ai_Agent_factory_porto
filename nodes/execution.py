@@ -1,6 +1,7 @@
 import os
 import json
 import re
+from pathlib import Path
 from typing import Dict, Any, List
 from state_models import ProjectState
 from core.llm_gateway import gateway
@@ -59,6 +60,33 @@ def _extract_files_from_json(json_str: Any) -> List[Dict[str, str]]:
         return files if isinstance(files, list) else []
     except Exception:
         return []
+
+def _collect_disk_files(workspace_root: str, exts: tuple, cap: int = 120) -> List[Dict[str, str]]:
+    """워크스페이스 디스크에서 지정 확장자 파일을 수집해 [{file_path, code}] 로 반환.
+    프리뷰/회귀 게이트가 '마지막 LLM 출력'이 아니라 '디스크의 현재 전체 파일 집합'을 보도록 한다.
+    노이즈 디렉터리(node_modules/.git/.archive 등)는 제외."""
+    out: List[Dict[str, str]] = []
+    if not workspace_root:
+        return out
+    root = Path(workspace_root)
+    if not root.exists():
+        return out
+    from core.context_engine import _EXCLUDE_DIRS
+    for p in sorted(root.rglob("*")):
+        if len(out) >= cap:
+            break
+        if not p.is_file():
+            continue
+        rel = str(p.relative_to(root)).replace("\\", "/")
+        if any(seg in _EXCLUDE_DIRS for seg in rel.split("/")):
+            continue
+        if rel.endswith(exts):
+            try:
+                out.append({"file_path": rel, "code": p.read_text(encoding="utf-8")})
+            except Exception:
+                continue
+    return out
+
 
 async def run_architect(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
@@ -221,7 +249,19 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
         if not has_coding_agent: return {"build_status": "success", "developer_retry_count": 0}
         else: return {"build_status": "failed", "failed_node": ("Frontend" if has_fe else "Backend"), "developer_retry_count": current_retry + 1}
 
-    return {"build_status": "success", "developer_retry_count": 0, "file_index": updated_state_dict.get("file_index", state_obj.file_index)}
+    # 🖼️ [프리뷰/회귀 정합성] frontend/backend_code_summary 를 'LLM 마지막 출력'이 아니라
+    #    '디스크의 현재 전체 파일 집합'으로 재구성. 이번 태스크가 일부 파일만 재출력해도(또는 한
+    #    파일을 통째로 누락해도) 과거 파일이 디스크에 남아 프리뷰에서 사라지지 않고, 회귀 게이트가
+    #    전체 그림을 본다. 미수정 파일은 baseline 과 동일하므로 회귀로 오인되지 않는다.
+    out: Dict[str, Any] = {"build_status": "success", "developer_retry_count": 0,
+                           "file_index": updated_state_dict.get("file_index", state_obj.file_index)}
+    fe_full = _collect_disk_files(state_obj.workspace_root, _FE_OWNED_EXTS)
+    be_full = _collect_disk_files(state_obj.workspace_root, _BE_OWNED_EXTS)
+    if fe_full:
+        out["frontend_code_summary"] = json.dumps({"files": fe_full}, ensure_ascii=False)
+    if be_full:
+        out["backend_code_summary"] = json.dumps({"files": be_full}, ensure_ascii=False)
+    return out
 
 async def run_supervisor(state: Any) -> Dict[str, Any]:
     """범용 단계 게이트(구 run_reviewer를 일반화). 코드리뷰 단계의 PASS/REWORK_DEV/ESCALATE_PM
