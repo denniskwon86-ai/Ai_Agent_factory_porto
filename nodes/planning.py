@@ -41,7 +41,7 @@ async def run_rfp_analyst(state: Any) -> Dict[str, Any]:
         print("📋 [Agent] RFP Analyst — 토론·합의 기반 요구사항 정의서(RFP) 작성 중...")
 
     from nodes.utils.debate import run_supervised_stage
-    updates, result = await run_supervised_stage(state_obj, agent_skill("RFP_Analyst", "rfp_skill"), "RFP", extra_instruction=_extra)
+    updates, result = await run_supervised_stage(state_obj, agent_skill("RFP_Analyst", "rfp_skill", template_id=state_obj.template_id), "RFP", extra_instruction=_extra)
     print(f"✅ [Agent] RFP 요구정의 완료 — 점수 {result.get('score')} / 판정 {result.get('verdict')}")
     # 재진입 시 다시 Master_PM 으로 흐르도록 needs_revision 리셋 + 소비한 피드백 큐 비움(다음 단계 재적용 방지)
     updates["needs_revision"] = False
@@ -54,7 +54,7 @@ async def run_master_pm(state: Any) -> Dict[str, Any]:
     # 🚨 [PM 상신 루프] 리뷰어가 기획 모순으로 판단하여 PM을 호출한 경우
     if getattr(state_obj, "reviewer_decision", "") == "ESCALATE_PM":
         print("⚖️ [Agent] Master PM: Reviewer의 기획 모순 에스컬레이션 검토 중...")
-        prompt = _load_skill(agent_skill("Master_PM", "pm_skill"))
+        prompt = _load_skill(agent_skill("Master_PM", "pm_skill", template_id=state_obj.template_id))
         prompt += (
             f"\n\n[🚨 Reviewer 결재 상신 내용 (ESCALATE_PM)]:\n{state_obj.reviewer_feedback}\n\n"
             "당신은 프로젝트의 총괄 PM입니다. 코드 리뷰어가 기획서의 논리적 모순이나 위배 사항을 보고했습니다.\n"
@@ -102,7 +102,7 @@ async def run_master_pm(state: Any) -> Dict[str, Any]:
     else:
         print("🧭 [Agent] Master PM 토론·합의 기반 기획(PRD) 진행 중...")
         from nodes.utils.debate import run_supervised_stage
-        updates, result = await run_supervised_stage(state_obj, agent_skill("Master_PM", "pm_skill"), "PLANNING")
+        updates, result = await run_supervised_stage(state_obj, agent_skill("Master_PM", "pm_skill", template_id=state_obj.template_id), "PLANNING")
         print(f"✅ [Agent] Master PM 기획 완료 — 점수 {result.get('score')} / 판정 {result.get('verdict')}")
         updates.setdefault("needs_revision", False)
         return updates
@@ -111,7 +111,7 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     
     print("📊 [Agent] Master PMO 비동기 WBS 분할 및 에이전트 스케줄링 진행 중...")
-    prompt = _load_skill(agent_skill("Master_PMO", "pmo_skill"))
+    prompt = _load_skill(agent_skill("Master_PMO", "pmo_skill", template_id=state_obj.template_id))
     prompt += f"\n\n[참조: Master PM이 작성한 PRD]\n{state_obj.prd_summary}"
     prompt += (
         "\n\n[🚨 절대 준수 사항]: PRD를 분석하여 반드시 **최소 4개 이상**의 구체적인 WBS 태스크로 분할하십시오. "

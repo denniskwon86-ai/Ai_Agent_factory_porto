@@ -56,6 +56,9 @@ class ProjectState(BaseModel):
     schema_version: str = Field(default="5.1.0", pattern=r"^\d+\.\d+\.\d+$")
     project_name: str = Field(default="New Project")
     initial_idea: str = Field(default="")
+    # 범용 플랫폼(T2-b): 이 프로젝트가 실행될 워크플로우 템플릿 id(레지스트리/그래프/스킬 해석의 기준).
+    # "default" = 기존 SW 파이프라인(하위호환). 노드는 이 값으로 자기 스킬/그래프를 해석한다.
+    template_id: str = Field(default="default")
     factory_mode: Literal["PLANNING", "EXECUTION", "REVISION", "REVIEW", "QA_RELEASE", "HOTL_PAUSED"] = Field(default="PLANNING")
     workspace_root: str = Field(default="./workspace")
     git_info: GitInfo = Field(default_factory=GitInfo)

@@ -93,7 +93,7 @@ async def run_architect(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     print("🧭 [Agent] Architect 토론·합의 기반 설계 진행 중...")
     from nodes.utils.debate import run_supervised_stage
-    updates, result = await run_supervised_stage(state_obj, agent_skill("Architect", "architect_skill"), "ARCHITECTURE")
+    updates, result = await run_supervised_stage(state_obj, agent_skill("Architect", "architect_skill", template_id=state_obj.template_id), "ARCHITECTURE")
     print(f"✅ [Agent] Architect 설계 완료 — 점수 {result.get('score')} / 판정 {result.get('verdict')}")
     updates.setdefault("factory_mode", "EXECUTION")
     updates.setdefault("needs_revision", False)
@@ -110,7 +110,7 @@ async def run_tech_lead(state: Any) -> Dict[str, Any]:
         print("🛠️ [Agent] Tech Lead 토론·합의 기반 기술명세 진행 중...")
 
     from nodes.utils.debate import run_supervised_stage
-    updates, result = await run_supervised_stage(state_obj, agent_skill("Tech_Lead", "tech_lead_skill"), "TECH_SPEC", extra_instruction=extra)
+    updates, result = await run_supervised_stage(state_obj, agent_skill("Tech_Lead", "tech_lead_skill", template_id=state_obj.template_id), "TECH_SPEC", extra_instruction=extra)
     output_str = updates.get("tech_spec_summary", getattr(state_obj, "tech_spec_summary", "") or "")
 
     # 기존 STATE_UPDATES(ADR/기술부채/파일인덱스) 파싱 로직 유지
@@ -165,7 +165,7 @@ _BE_OWNED_EXTS = (".py",)
 async def run_developer_fe(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     print("🎨 [Agent] Frontend Worker 비동기 코딩 중...")
-    prompt = _load_skill(agent_skill("Frontend", "frontend_skill")) + _INCREMENTAL_GUARD
+    prompt = _load_skill(agent_skill("Frontend", "frontend_skill", template_id=state_obj.template_id)) + _INCREMENTAL_GUARD
     # 디자인 토큰 가이드 주입 — 일관된 스타일로 첫 판 품질↑(재작업↓). 안정 텍스트라 캐시 친화적.
     _ds = _load_skill("design_system")
     if _ds:
@@ -182,7 +182,7 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
 async def run_developer_be(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     print("⚙️ [Agent] Backend Worker 비동기 코딩 중...")
-    prompt = _load_skill(agent_skill("Backend", "backend_skill")) + _INCREMENTAL_GUARD
+    prompt = _load_skill(agent_skill("Backend", "backend_skill", template_id=state_obj.template_id)) + _INCREMENTAL_GUARD
 
     if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
@@ -632,7 +632,7 @@ async def run_manual_writer(state: Any) -> Dict[str, Any]:
         return {}
 
     print("📖 [Agent] Technical Writer 사용자 매뉴얼 작성 중...")
-    skill = _load_skill(agent_skill("ManualWriter", "manual_skill"))
+    skill = _load_skill(agent_skill("ManualWriter", "manual_skill", template_id=state_obj.template_id))
     prompt = (
         f"{skill}\n\n"
         f"[참조: 기획서(PRD)]\n{state_obj.prd_summary}\n\n"

@@ -154,10 +154,11 @@ def get_interrupt_after(default: List[str] = None) -> List[str]:
     return default if default is not None else ["RFP_Analyst", "Master_PMO"]
 
 
-def agent_meta(agent_id: str) -> dict:
-    """레지스트리에서 해당 에이전트 메타를 반환(미존재/오류 시 {})."""
+def agent_meta(agent_id: str, template_id: str = DEFAULT_TEMPLATE_ID) -> dict:
+    """레지스트리에서 해당 에이전트 메타를 반환(미존재/오류 시 {}).
+    template_id 로 해당 템플릿 레지스트리에서 조회(T2-b 런타임 해석). 기본은 default(하위호환)."""
     try:
-        for a in load_registry().get("agents", []):
+        for a in load_template(template_id).get("agents", []):
             if a.get("id") == agent_id:
                 return a
     except Exception:
@@ -165,9 +166,10 @@ def agent_meta(agent_id: str) -> dict:
     return {}
 
 
-def agent_skill(agent_id: str, default: str = "") -> str:
-    """노드의 스킬 파일명을 레지스트리에서 조회(제어판 override 반영). 미설정 시 default(현행 동작 보존)."""
-    return agent_meta(agent_id).get("skill") or default
+def agent_skill(agent_id: str, default: str = "", template_id: str = DEFAULT_TEMPLATE_ID) -> str:
+    """노드의 스킬 파일명을 레지스트리에서 조회(제어판 override 반영). 미설정 시 default(현행 동작 보존).
+    template_id 가 주어지면 그 템플릿의 스킬을 해석(T2-b) — 노드가 state.template_id 를 넘긴다."""
+    return agent_meta(agent_id, template_id).get("skill") or default
 
 
 # ──────────────────────────────────────────────────────────────────────────────
