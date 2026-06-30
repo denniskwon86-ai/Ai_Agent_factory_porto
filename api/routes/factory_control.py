@@ -147,13 +147,13 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
 @router.post("/{project_id}/sprint/pause")
 async def pause_sprint(project_id: str, req: SprintPauseRequest):
     _safe_id(project_id, "project_id")
-    await orchestrator.pause_sprint(req.task_id)
+    await orchestrator.pause_sprint(req.task_id, project_id)
     return {"status": "paused", "task_id": req.task_id}
 
 @router.post("/{project_id}/hotl/resume")
 async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
     _safe_id(project_id, "project_id")
-    success = await orchestrator.resume_hotl(req.task_id, req.feedback)
+    success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id)
     if not success:
         raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")
     return {"status": "resumed", "task_id": req.task_id}
@@ -170,7 +170,7 @@ async def check_hotl(project_id: str):
     for t in wbs.get("tasks", []):
         if t.get("status") == "IN_PROGRESS":
             tid = t.get("task_id")
-            if await orchestrator.is_hotl_pending(tid):
+            if await orchestrator.is_hotl_pending(tid, project_id):
                 return {"status": "success", "hotl_task_id": tid}
     return {"status": "success", "hotl_task_id": None}
 

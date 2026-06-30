@@ -337,18 +337,21 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   },
 
   fetchLatestState: async () => {
-    const { currentProjectId } = get();
-    if (!currentProjectId) return;
+    const pid = get().currentProjectId;
+    if (!pid) return;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/state/latest`);
-      if (res.ok) {
-        const result = await res.json();
-        if (result.status === "success" && result.data) {
-          set((prev) => ({ 
-            state: { ...(prev.state || {}), ...result.data } as ProjectState 
-          }));
-        }
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${pid}/state/latest`);
+      if (!res.ok) return;
+      const result = await res.json();
+      // 전환 중 늦게 도착한 '이전 프로젝트' 응답을 새 프로젝트 store 에 덮지 않도록 재검증
+      if (get().currentProjectId !== pid) return;
+      if (result.status === "success" && result.data) {
+        // 머지(...prev.state) 금지 — 전체 교체. 빈 누적 필드가 이전 프로젝트 값으로 남는 stale 누수 차단.
+        set({ state: { ...result.data } as ProjectState });
+      } else {
+        // not_found(신규/초기 프로젝트) → 명시적 비움
+        set({ state: null });
       }
     } catch (error) {
       console.error("최신 상태 복구 실패:", error);
@@ -369,10 +372,13 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
-      // 🔒 SSE 프로젝트 격리: 다른 프로젝트(또는 삭제된 좀비 스프린트)의 이벤트는 무시
+      // 🔒 SSE 프로젝트 격리(fail-closed): 프로젝트를 보고 있는데 이벤트의 project_id 가
+      // 현재 프로젝트와 정확히 일치하지 않으면(없거나 다르면) 전부 폐기 — 타 프로젝트/좀비
+      // 스프린트의 상태·로그·피드가 새 프로젝트 화면으로 새는 것을 차단. (런처 화면 curPid=null 은
+      // 그릴 프로젝트가 없어 무해하므로 통과)
       const evtPid = data?.payload?.project_id;
       const curPid = get().currentProjectId;
-      if (evtPid && curPid && evtPid !== curPid) return;
+      if (curPid && evtPid !== curPid) return;
 
       if (data.type === 'NODE_COMPLETED') {
         set((prev) => ({ 

@@ -15,6 +15,18 @@ def _pid(workspace_root: str) -> str:
     return os.path.basename(str(workspace_root or "").rstrip("/\\"))
 
 
+def _skey(project_id: str, task_id: str) -> str:
+    """프로젝트 격리 복합 키 — langgraph thread_id 및 active_tasks 키 공용.
+    동일 task_id(예: 'E2E-01' — WBS 가 프로젝트마다 동일하게 생성)가 서로 다른 프로젝트에서
+    같은 체크포인트(pipeline_state.db)를 공유해 이전 프로젝트의 산출물/진행상태가 새 프로젝트로
+    새는 것을 차단한다. thread_id 와 in-memory active_tasks 키 모두 이 복합키로 통일."""
+    return f"{project_id}__{task_id}"
+
+
+def _thread(project_id: str, task_id: str) -> str:
+    return f"sprint_{_skey(project_id, task_id)}"
+
+
 class AsyncFactoryOrchestrator:
     def __init__(self):
         self.active_tasks: Dict[str, asyncio.Task] = {}
@@ -58,10 +70,11 @@ class AsyncFactoryOrchestrator:
             wbs_mgr.checkout_task(task_id)
             await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "status": "IN_PROGRESS", "project_id": pid})
 
-        config = {"configurable": {"thread_id": f"sprint_{task_id}"}}
+        skey = _skey(pid, task_id)
+        config = {"configurable": {"thread_id": _thread(pid, task_id)}}
         task = asyncio.create_task(self._run_sprint_loop(config, project_state_payload, task_id, workspace_root))
-        self.active_tasks[task_id] = task
-        self.task_projects[task_id] = pid
+        self.active_tasks[skey] = task
+        self.task_projects[skey] = pid
         return True
 
     async def cancel_project(self, project_id: str) -> int:
@@ -79,30 +92,32 @@ class AsyncFactoryOrchestrator:
         return cancelled
 
     # 🚨 [Phase 3] 세션 인지형 프로세스 강제 일시정지 (Pause) 메서드 추가
-    async def pause_sprint(self, task_id: str) -> bool:
-        task = self.active_tasks.get(task_id)
+    async def pause_sprint(self, task_id: str, project_id: str) -> bool:
+        skey = _skey(project_id, task_id)
+        task = self.active_tasks.get(skey)
         if task and not task.done():
             task.cancel()  # 비동기 태스크 강제 종료
-            pid = self.task_projects.get(task_id, "")
-            del self.active_tasks[task_id]
-            self.task_projects.pop(task_id, None)
-            print(f"🛑 [Orchestrator] Task {task_id} 프로세스가 사용자에 의해 일시정지 되었습니다.")
+            pid = self.task_projects.get(skey, project_id)
+            del self.active_tasks[skey]
+            self.task_projects.pop(skey, None)
+            print(f"🛑 [Orchestrator] Task {task_id} (project={project_id}) 프로세스가 사용자에 의해 일시정지 되었습니다.")
             await factory_broadcaster.broadcast("SPRINT_PAUSED", {"task_id": task_id, "project_id": pid})
             return True
         return False
 
-    async def is_hotl_pending(self, task_id: str) -> bool:
+    async def is_hotl_pending(self, task_id: str, project_id: str) -> bool:
         """해당 태스크 스레드가 HOTL 중단점에서 '대기 중'인지 확인 (SSE 유실 복구용).
         ⚠️ snapshot.next 는 실행 중에도(다음 노드 예정) 차 있어 그것만으로는 오탐이 난다.
         → 스프린트 asyncio 태스크가 '아직 실행 중'이면 HOTL 대기가 아니다(오탐 방지).
         태스크가 끝났는데(또는 재시작으로 없는데) next 가 남아 있으면 = interrupt 에서 멈춘 진짜 HOTL."""
         try:
             langgraph_engine = await get_runtime_app()
-            config = {"configurable": {"thread_id": f"sprint_{task_id}"}}
+            skey = _skey(project_id, task_id)
+            config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
             snapshot = await langgraph_engine.aget_state(config)
             if not (getattr(snapshot, "values", None) and getattr(snapshot, "next", None)):
                 return False  # 다음 노드가 없으면 완료(END) — HOTL 아님
-            running = self.active_tasks.get(task_id)
+            running = self.active_tasks.get(skey)
             if running is not None and not running.done():
                 return False  # 아직 스트리밍 중 = 가동 중이지 HOTL 대기 아님(오탐 차단)
             return True
@@ -131,9 +146,9 @@ class AsyncFactoryOrchestrator:
         except Exception as e:
             print(f"🚨 [Orchestrator] Sprint Loop Error: {e}")
 
-    async def resume_hotl(self, task_id: str, feedback: Optional[str]) -> bool:
+    async def resume_hotl(self, task_id: str, feedback: Optional[str], project_id: str) -> bool:
         langgraph_engine = await get_runtime_app()
-        config = {"configurable": {"thread_id": f"sprint_{task_id}"}}
+        config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
         snapshot = await langgraph_engine.aget_state(config)
         if not snapshot.values:
             return False
@@ -155,9 +170,10 @@ class AsyncFactoryOrchestrator:
         except Exception:
             return False
             
+        skey = _skey(_pid(workspace_root), task_id)
         task = asyncio.create_task(self._resume_stream(config, task_id, workspace_root))
-        self.active_tasks[task_id] = task
-        self.task_projects[task_id] = _pid(workspace_root)
+        self.active_tasks[skey] = task
+        self.task_projects[skey] = _pid(workspace_root)
         return True
 
     async def _resume_stream(self, config: dict, task_id: str, workspace_root: str):
