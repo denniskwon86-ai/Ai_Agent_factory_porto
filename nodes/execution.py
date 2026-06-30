@@ -617,6 +617,8 @@ async def run_manual_writer(state: Any) -> Dict[str, Any]:
         f"[참조: 프론트엔드 코드 요약]\n{state_obj.frontend_code_summary}\n\n"
         f"[참조: QA 최종 검증 리포트]\n{state_obj.qa_report_summary}"
     )
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=True)
+    # B2: 매뉴얼은 요약/코드가 이미 프롬프트에 임베드돼 있어 워크스페이스 재주입 불필요(light=True),
+    #     사용자 매뉴얼은 고난도 추론이 아니므로 Flash(is_heavy=False)로 충분 — 비용 절감.
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=False, light=True)
     print("✅ [Agent] 사용자 매뉴얼 작성 완료.")
     return {"user_manual_summary": _safe_str(output)}
