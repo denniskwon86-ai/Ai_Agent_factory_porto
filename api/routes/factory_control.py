@@ -27,6 +27,7 @@ class RevisionRequest(BaseModel):
 
 class ProjectCreateRequest(BaseModel):
     project_id: str
+    template_id: str = "default"  # 이 프로젝트가 실행될 워크플로우 템플릿(범용 플랫폼 T2-b)
 
 class HealRequest(BaseModel):
     error_log: str
@@ -62,6 +63,29 @@ _ACCUMULATED_FIELDS = [
 
 def _is_empty(v) -> bool:
     return v in (None, "", [], {})
+
+
+# 프로젝트↔워크플로우 템플릿 바인딩(T2-b) — 프로젝트 폴더에 영속해, 새로고침/HOTL 재개로
+# 프론트 state 가 stale 해져도 모든 태스크가 같은 템플릿으로 실행되도록 보장한다.
+def _project_meta_path(workspace_root: str) -> str:
+    return os.path.join(workspace_root, "project_meta.json")
+
+
+def _read_project_template(workspace_root: str) -> str:
+    try:
+        with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
+            tid = (json.load(f) or {}).get("template_id", "default")
+        return tid or "default"
+    except Exception:
+        return "default"
+
+
+def _write_project_template(workspace_root: str, template_id: str) -> None:
+    try:
+        with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
+            json.dump({"template_id": template_id or "default"}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ project_meta 저장 실패: {e}")
 
 
 def _restore_accumulated_from_disk(payload: dict, workspace_root: str) -> dict:
@@ -105,11 +129,23 @@ async def get_projects():
 @router.post("/projects")
 async def create_project(req: ProjectCreateRequest):
     _safe_id(req.project_id, "project_id")  # 디스크에 안전한 id만 생성 → 이후 모든 라우트가 안전한 id를 다루도록 보장
+    # 템플릿 id 검증(형식 + 존재). 미존재/잘못된 형식이면 거부 — 잘못된 바인딩이 조용히 default 로
+    # 폴백해 사용자가 고른 워크플로우와 다르게 실행되는 혼란을 막는다.
+    from core.agent_registry import _safe_tid, list_templates
+    tid = req.template_id or "default"
+    try:
+        _safe_tid(tid)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="잘못된 template_id 형식입니다.")
+    if tid not in {t["id"] for t in list_templates()}:
+        raise HTTPException(status_code=404, detail=f"존재하지 않는 템플릿입니다: {tid}")
+
     project_path = os.path.join("./projects", req.project_id)
     if os.path.exists(project_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
     os.makedirs(project_path, exist_ok=True)
-    return {"status": "success", "project_id": req.project_id}
+    _write_project_template(project_path, tid)  # 프로젝트↔템플릿 바인딩 영속
+    return {"status": "success", "project_id": req.project_id, "template_id": tid}
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str):
@@ -130,6 +166,9 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
     _safe_id(project_id, "project_id")
     workspace_root = f"./projects/{project_id}"
     req.project_state_payload["workspace_root"] = workspace_root
+    # T2-b: 프로젝트에 바인딩된 템플릿을 권위 있는 출처(project_meta.json)에서 주입 — 프론트 state 가
+    #   stale 해도 모든 태스크가 같은 워크플로우로 실행되도록 보장(오케스트레이터가 이 값으로 그래프 선택).
+    req.project_state_payload["template_id"] = _read_project_template(workspace_root)
 
     # 신규 기획(PLANNING)은 새 출발이므로 옛 누적 산출물을 복원하지 않는다.
     # 그 외(실행/리비전) 태스크는 stale 페이로드의 빈 누적 필드를 디스크 진실원본에서 복원.
@@ -213,6 +252,7 @@ async def trigger_self_healing(project_id: str, req: HealRequest):
     project_state_payload["factory_mode"] = "REVISION"
     project_state_payload["current_sprint_task_id"] = task_id
     project_state_payload["workspace_root"] = workspace_root
+    project_state_payload["template_id"] = _read_project_template(workspace_root)  # T2-b: 바인딩 템플릿 유지
 
     await orchestrator.start_sprint(task_id, project_state_payload, workspace_root)
     return {"status": "healing_started", "task_id": task_id}
