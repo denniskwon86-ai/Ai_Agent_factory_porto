@@ -59,6 +59,9 @@ class ProjectState(BaseModel):
     # 범용 플랫폼(T2-b): 이 프로젝트가 실행될 워크플로우 템플릿 id(레지스트리/그래프/스킬 해석의 기준).
     # "default" = 기존 SW 파이프라인(하위호환). 노드는 이 값으로 자기 스킬/그래프를 해석한다.
     template_id: str = Field(default="default")
+    # 범용 노드(T3): 커스텀 에이전트 파이프라인의 단계별 산출물 저장소(<agent_id> → 텍스트).
+    # SW 파이프라인은 전용 *_summary 필드를 쓰고 이 필드는 비어 있다(추가 전용·하위호환).
+    artifacts: Dict[str, str] = Field(default_factory=dict)
     factory_mode: Literal["PLANNING", "EXECUTION", "REVISION", "REVIEW", "QA_RELEASE", "HOTL_PAUSED"] = Field(default="PLANNING")
     workspace_root: str = Field(default="./workspace")
     git_info: GitInfo = Field(default_factory=GitInfo)

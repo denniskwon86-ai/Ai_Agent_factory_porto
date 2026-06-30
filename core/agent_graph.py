@@ -313,21 +313,40 @@ def build_graph_from_registry(registry=None):
     함께 지원한다(현재 임의 비활성화는 dangling edge 로 compile 실패할 수 있음)."""
     from core.agent_registry import load_registry
     reg = registry or load_registry()
-    enabled_ids = [a["id"] for a in reg.get("agents", []) if a.get("enabled", True)]
+    # reg.agents 는 _normalize 로 order 정렬됨 — 범용 선형 그래프의 실행 순서로 사용
+    enabled = [a for a in reg.get("agents", []) if a.get("enabled", True)]
+    enabled_ids = [a["id"] for a in enabled]
 
     workflow = StateGraph(ProjectState)
-    for aid in enabled_ids:
-        impl = NODE_IMPL.get(aid)
-        if impl is not None:
-            workflow.add_node(aid, impl)
 
-    _wire_edges(workflow)
+    # 토폴로지 분기:
+    #  - 순수 SW 템플릿(모든 enabled 노드가 NODE_IMPL 에 구현됨) → 기존 하드코딩 라우팅(동작 보존).
+    #  - 커스텀 에이전트가 하나라도 있으면 → 범용 선형 파이프라인(T3): 모든 노드를 범용 실행기로
+    #    생성하고 order 순으로 연결. SW 전용 라우터/필드에 의존하지 않는다.
+    is_sw_pipeline = bool(enabled_ids) and all(aid in NODE_IMPL for aid in enabled_ids)
 
-    # HOTL 중단점 = "전달된 레지스트리" 의 hotl_after(enabled 노드로 한정). 템플릿별로 다른 게이트를
-    # 갖도록 reg 에서 직접 도출(과거엔 get_interrupt_after 가 default 템플릿만 읽어 템플릿 게이트가
-    # 무시됐다 — T2-b). reg.agents 는 _normalize 로 order 정렬됨. DEFAULT_REGISTRY 면 기존과 동일.
-    interrupt_after = [a["id"] for a in reg.get("agents", [])
-                       if a.get("enabled", True) and a.get("hotl_after", False) and a["id"] in NODE_IMPL]
+    if is_sw_pipeline:
+        for aid in enabled_ids:
+            impl = NODE_IMPL.get(aid)
+            if impl is not None:
+                workflow.add_node(aid, impl)
+        _wire_edges(workflow)
+        # HOTL 중단점 = "전달된 레지스트리" 의 hotl_after(SW 노드로 한정). DEFAULT_REGISTRY 면 기존과 동일.
+        interrupt_after = [a["id"] for a in enabled
+                           if a.get("hotl_after", False) and a["id"] in NODE_IMPL]
+    else:
+        # 범용 선형 파이프라인 — 설정만으로 새 에이전트 타입(마케팅/리서치/문서 등) 실행
+        from nodes.universal import make_universal_node
+        for aid in enabled_ids:
+            workflow.add_node(aid, make_universal_node(aid))
+        if enabled_ids:
+            workflow.set_entry_point(enabled_ids[0])
+            for a_id, b_id in zip(enabled_ids, enabled_ids[1:]):
+                workflow.add_edge(a_id, b_id)
+            workflow.add_edge(enabled_ids[-1], END)
+        # HOTL 중단점 = enabled 노드 중 hotl_after(범용 노드는 모두 add_node 됐으므로 제한 없음)
+        interrupt_after = [a["id"] for a in enabled if a.get("hotl_after", False)]
+
     return workflow, interrupt_after
 
 
