@@ -226,8 +226,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
 
             // App.tsx 마지막에 컴파일되도록 정렬 (의존성 먼저)
             filtered.sort(function(a, b) {
-              var aIsApp = /[\\/]App\\.(tsx?|jsx?)$/.test(a.file_path) || /^App\\.(tsx?|jsx?)$/.test(a.file_path);
-              var bIsApp = /[\\/]App\\.(tsx?|jsx?)$/.test(b.file_path) || /^App\\.(tsx?|jsx?)$/.test(b.file_path);
+              var aIsApp = /[\\/]App\\.(tsx?|jsx?)$/i.test(a.file_path) || /^App\\.(tsx?|jsx?)$/i.test(a.file_path);
+              var bIsApp = /[\\/]App\\.(tsx?|jsx?)$/i.test(b.file_path) || /^App\\.(tsx?|jsx?)$/i.test(b.file_path);
               return (aIsApp ? 1 : 0) - (bIsApp ? 1 : 0);
             });
 
@@ -240,7 +240,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
 
             // 1순위: App.tsx
             var appKeys = Object.keys(moduleRegistry).filter(function(k) {
-              return /[\\/]App$/.test(k) || k === 'App';
+              return /[\\/]App$/i.test(k) || k.toLowerCase() === 'app';
             });
             for (var i = 0; i < appKeys.length; i++) {
               var exp = moduleRegistry[appKeys[i]];
@@ -251,7 +251,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
             // 2순위: 가장 많은 코드를 가진 컴포넌트 파일
             if (!TargetComponent) {
               var sortedBySize = filtered
-                .filter(function(f) { return !/[\\/]App\\./.test(f.file_path) && !/^App\\./.test(f.file_path); })
+                .filter(function(f) { return !/[\\/]App\\./i.test(f.file_path) && !/^App\\./i.test(f.file_path); })
                 .sort(function(a, b) { return (b.code || '').length - (a.code || '').length; });
               for (var j = 0; j < sortedBySize.length; j++) {
                 var key = normalizePath(sortedBySize[j].file_path);
