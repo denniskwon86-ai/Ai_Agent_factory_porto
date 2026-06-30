@@ -34,7 +34,7 @@ def test_node_impl_matches_compiled_graph():
 
 def test_interrupt_after_ids_are_valid_graph_nodes():
     nodes = _graph_node_names()
-    for nid in get_interrupt_after(default=["RFP_Analyst", "Master_PMO", "Tech_Lead"]):
+    for nid in get_interrupt_after(default=["RFP_Analyst", "Master_PMO"]):
         assert nid in nodes, f"interrupt_after id가 노드 아님: {nid}"
 
 

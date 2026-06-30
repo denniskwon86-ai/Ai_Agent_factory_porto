@@ -57,7 +57,7 @@ DEFAULT_REGISTRY: Dict[str, Any] = {
         {"id": "Architect", "name_ko": "아키텍트", "role": "시스템 아키텍처·ADR 설계", "skill": "architect_skill",
          "stage": "ARCHITECTURE", "category": "execution", "model_tier": "pro", "order": 4, "enabled": True, "hotl_after": False, "debate": True, "llm": True},
         {"id": "Tech_Lead", "name_ko": "테크리드", "role": "기술 사양·인터페이스 상세 설계", "skill": "tech_lead_skill",
-         "stage": "TECH_SPEC", "category": "execution", "model_tier": "pro", "order": 5, "enabled": True, "hotl_after": True, "debate": True, "llm": True},
+         "stage": "TECH_SPEC", "category": "execution", "model_tier": "pro", "order": 5, "enabled": True, "hotl_after": False, "debate": True, "llm": True},
         {"id": "Backend", "name_ko": "백엔드 개발자", "role": "FastAPI 백엔드 코드 생성", "skill": "backend_skill",
          "stage": "EXECUTION", "category": "execution", "model_tier": "pro", "order": 6, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
         {"id": "Frontend", "name_ko": "프론트엔드 개발자", "role": "React 프론트엔드 코드 생성", "skill": "frontend_skill",
@@ -149,7 +149,7 @@ def get_interrupt_after(default: List[str] = None) -> List[str]:
             return ids
     except Exception:
         pass
-    return default if default is not None else ["RFP_Analyst", "Master_PMO", "Tech_Lead"]
+    return default if default is not None else ["RFP_Analyst", "Master_PMO"]
 
 
 def agent_meta(agent_id: str) -> dict:

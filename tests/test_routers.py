@@ -54,6 +54,28 @@ def test_pmo_approve_ends_planning():
     assert ag.route_from_pmo(S(needs_revision=False)) == END
 
 
+# ── route_from_rfp (RFP 게이트 피드백 루프) ──────────────────────────
+def test_rfp_feedback_loops_back_to_rewrite():
+    assert ag.route_from_rfp(S(needs_revision=True)) == "RFP_Analyst"
+
+def test_rfp_approve_proceeds_to_pm():
+    assert ag.route_from_rfp(S(needs_revision=False)) == "Master_PM"
+
+
+# ── route_from_qa (매뉴얼은 최종 태스크 QA 통과 시에만) ───────────────
+def test_qa_final_pass_writes_manual(monkeypatch):
+    monkeypatch.setattr(ag, "_is_final_task", lambda s: True)
+    assert ag.route_from_qa(S(qa_verdict="PASS")) == "ManualWriter"
+
+def test_qa_nonfinal_skips_manual(monkeypatch):
+    monkeypatch.setattr(ag, "_is_final_task", lambda s: False)
+    assert ag.route_from_qa(S(qa_verdict="PASS")) == END
+
+def test_qa_final_fail_skips_manual(monkeypatch):
+    monkeypatch.setattr(ag, "_is_final_task", lambda s: True)
+    assert ag.route_from_qa(S(qa_verdict="FAIL")) == END
+
+
 # ── route_from_reviewer (의사결정 분기 + hop 차단기) ─────────────────
 def test_reviewer_escalate_to_pm():
     assert ag.route_from_reviewer(S(reviewer_decision="ESCALATE_PM")) == "Master_PM"

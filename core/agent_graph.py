@@ -207,6 +207,27 @@ def route_from_pmo(state: ProjectState) -> str:
         return "Master_PMO"
     return END
 
+def route_from_rfp(state: ProjectState) -> str:
+    """RFP HOTL 게이트 직후 분기: 사용자 피드백(needs_revision)이면 RFP 재작성을 위해
+    RFP_Analyst 로 되돌리고(자기루프), 승인(피드백 없음)이면 다음 단계(Master_PM)로 진행.
+    interrupt_after=RFP_Analyst 라 매 라운드 인간 게이트가 강제되므로 자동 무한루프 없음."""
+    if getattr(state, "needs_revision", False):
+        print("🔁 [RFP 재작성] 사용자 피드백 반영 — RFP_Analyst 로 되돌려 요구정의서를 다시 작성합니다.")
+        return "RFP_Analyst"
+    return "Master_PM"
+
+def route_from_qa(state: ProjectState) -> str:
+    """QA 직후 분기: 사용자 매뉴얼은 '프로젝트 최종 태스크의 QA 통과' 시점에만 1회 작성한다.
+    초기/중간 태스크에 (전용)QA 가 배정돼 실행되더라도 비최종이면 매뉴얼 없이 스프린트 종료.
+    최종 태스크라도 QA 미통과(FAIL)면 미완성 제품의 매뉴얼은 무의미하므로 생략."""
+    if _is_final_task(state) and getattr(state, "qa_verdict", "") == "PASS":
+        return "ManualWriter"
+    if not _is_final_task(state):
+        print("✅ [전용 QA 완료] 비최종 태스크의 통합 테스트 — 매뉴얼 작성 없이 스프린트 종료.")
+        return END
+    print("⚠️ [최종 QA 미통과] 매뉴얼 작성을 생략하고 스프린트를 종료합니다.")
+    return END
+
 # 레지스트리 id → 노드 구현 함수. 레지스트리가 노드 멤버십을 구동하기 위한 seam.
 # (모든 레지스트리 에이전트 id 를 커버해야 동적 빌더가 임의 enabled 집합을 생성 가능)
 NODE_IMPL = {
@@ -235,7 +256,8 @@ def _wire_edges(workflow):
             "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"
         }
     )
-    workflow.add_edge("RFP_Analyst", "Master_PM")
+    # RFP 게이트 피드백 루프: 피드백 시 RFP_Analyst 재실행(요구정의 재작성), 승인 시 Master_PM 진행
+    workflow.add_conditional_edges("RFP_Analyst", route_from_rfp, {"RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM"})
     workflow.add_conditional_edges("Master_PM", route_from_pm, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
     # WBS 게이트 피드백 루프: 피드백 시 Master_PMO 재실행(WBS 재분할), 승인 시 END
     workflow.add_conditional_edges("Master_PMO", route_from_pmo, {"Master_PMO": "Master_PMO", END: END})
@@ -247,7 +269,8 @@ def _wire_edges(workflow):
     workflow.add_conditional_edges("CodeBuilder", map_builder_router, {"Frontend": "Frontend", "Backend": "Backend", "Reviewer": "Reviewer", END: END})
 
     workflow.add_conditional_edges("Reviewer", route_from_reviewer, {"QA": "QA", "ManualWriter": "ManualWriter", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", END: END})
-    workflow.add_edge("QA", "ManualWriter")
+    # 매뉴얼은 '최종 태스크 QA 통과' 시에만 1회 작성 — 초기/중간 태스크의 QA 후에는 종료
+    workflow.add_conditional_edges("QA", route_from_qa, {"ManualWriter": "ManualWriter", END: END})
     workflow.add_edge("ManualWriter", END)
 
 
@@ -271,7 +294,7 @@ def build_graph_from_registry(registry=None):
     _wire_edges(workflow)
 
     # HOTL 중단점 = 레지스트리 hotl_after(enabled 노드로 한정). 손상/부재 시 기존 기본값 폴백.
-    interrupt_after = [i for i in get_interrupt_after(default=["RFP_Analyst", "Master_PMO", "Tech_Lead"]) if i in enabled_ids]
+    interrupt_after = [i for i in get_interrupt_after(default=["RFP_Analyst", "Master_PMO"]) if i in enabled_ids]
     return workflow, interrupt_after
 
 

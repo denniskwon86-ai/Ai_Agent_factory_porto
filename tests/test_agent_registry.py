@@ -15,7 +15,7 @@ def test_default_registry_loads(isolated_registry):
     reg = ar.load_registry()  # 파일 없음 → DEFAULT
     ids = [a["id"] for a in reg["agents"]]
     assert reg["agents"]
-    assert "RFP_Analyst" in ids and "Master_PMO" in ids and "Tech_Lead" in ids
+    assert "RFP_Analyst" in ids and "Master_PMO" in ids and "Tech_Lead" in ids  # 노드 자체는 존재(게이트 여부와 무관)
 
 
 def test_coerce_fills_missing_fields():
@@ -34,7 +34,8 @@ def test_normalize_sorts_and_drops_idless():
 
 
 def test_get_interrupt_after_default(isolated_registry):
-    assert ar.get_interrupt_after(default=["X"]) == ["RFP_Analyst", "Master_PMO", "Tech_Lead"]
+    # Tech_Lead 게이트 제거됨 — RFP·PMO/WBS 게이트만 유지
+    assert ar.get_interrupt_after(default=["X"]) == ["RFP_Analyst", "Master_PMO"]
 
 
 def test_save_load_roundtrip(isolated_registry):

@@ -22,13 +22,30 @@ def _extract_code_from_ssot(json_str: str) -> str:
     return ""
 
 async def run_rfp_analyst(state: Any) -> Dict[str, Any]:
-    """요구사항 정의서(RFP) 작성 — 기획(PM) 이전에 '무엇을·왜'를 확정하는 기준 계약."""
+    """요구사항 정의서(RFP) 작성 — 기획(PM) 이전에 '무엇을·왜'를 확정하는 기준 계약.
+    RFP HOTL 게이트에서 사용자가 피드백을 주면(route_from_rfp 가 여기로 되돌림) 그 피드백을
+    재작성 지시로 주입해 RFP 자체를 고친다(다음 단계 PRD 로 새지 않도록)."""
     state_obj = ProjectState.model_validate(state)
-    print("📋 [Agent] RFP Analyst — 토론·합의 기반 요구사항 정의서(RFP) 작성 중...")
+
+    # HOTL 피드백 흡수: 게이트웨이/ContextEngine 은 human_feedback_queue 를 LLM 에 전달하지 않으므로,
+    # 최신 피드백을 extra_instruction 으로 직접 합성하는 것이 RFP 재작성에 반영하는 유일한 통로.
+    _fb_items = getattr(state_obj, "human_feedback_queue", []) or []
+    _latest = _fb_items[-1] if _fb_items else None
+    _latest_fb = (_latest.get("feedback", "") if isinstance(_latest, dict) else getattr(_latest, "feedback", "")) or ""
+    _extra = ""
+    if _latest_fb.strip():
+        _extra = (f"\n\n[🚨 사용자 피드백 — RFP(요구정의서)를 이 피드백에 맞게 반드시 수정/반영해 재작성하십시오. "
+                  f"다음 단계(기획서)로 미루지 말 것]:\n{_latest_fb.strip()}")
+        print(f"🔁 [RFP Analyst] 사용자 피드백 반영해 RFP 재작성: {_latest_fb.strip()[:80]}")
+    else:
+        print("📋 [Agent] RFP Analyst — 토론·합의 기반 요구사항 정의서(RFP) 작성 중...")
+
     from nodes.utils.debate import run_supervised_stage
-    updates, result = await run_supervised_stage(state_obj, agent_skill("RFP_Analyst", "rfp_skill"), "RFP")
+    updates, result = await run_supervised_stage(state_obj, agent_skill("RFP_Analyst", "rfp_skill"), "RFP", extra_instruction=_extra)
     print(f"✅ [Agent] RFP 요구정의 완료 — 점수 {result.get('score')} / 판정 {result.get('verdict')}")
-    updates.setdefault("needs_revision", False)
+    # 재진입 시 다시 Master_PM 으로 흐르도록 needs_revision 리셋 + 소비한 피드백 큐 비움(다음 단계 재적용 방지)
+    updates["needs_revision"] = False
+    updates["human_feedback_queue"] = []
     return updates
 
 async def run_master_pm(state: Any) -> Dict[str, Any]:
