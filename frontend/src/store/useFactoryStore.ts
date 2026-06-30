@@ -30,6 +30,15 @@ export interface ProjectState {
   criteria_log?: any[];
 }
 
+// 워크플로우 템플릿(범용 플랫폼 Copy 모델) — 목록 요약 및 상세 레지스트리
+export interface WorkflowTemplate {
+  id: string;
+  name?: string;
+  description?: string;
+  agent_count?: number;
+  builtin?: boolean;
+}
+
 interface FactoryStore {
   state: ProjectState | null;
   logs: any[];
@@ -44,6 +53,10 @@ interface FactoryStore {
   viewingRelease: any | null;
   agentRegistry: any | null;
   showAgentPanel: boolean;
+  // 워크플로우 템플릿(T2-c)
+  templates: WorkflowTemplate[];
+  selectedTemplateId: string;   // 신규 프로젝트 생성 시 선택된 템플릿
+  editingTemplateId: string;    // 마스터 제어판이 현재 편집 중인 템플릿
   projects: { id: string, name: string }[];
   currentProjectId: string | null;
   healingRetryCount: number;
@@ -52,7 +65,7 @@ interface FactoryStore {
   setActiveSprintId: (id: string | null) => void;
   setCurrentProject: (id: string | null) => void;
   fetchProjects: () => Promise<void>;
-  createProject: (id: string) => Promise<boolean>;
+  createProject: (id: string, templateId?: string) => Promise<boolean>;
   deleteProject: (id: string) => Promise<boolean>; // 🗑️ 프로젝트 완전 삭제 기능 정의
   connectSSE: () => void;
   fetchWBS: () => Promise<void>;
@@ -69,6 +82,13 @@ interface FactoryStore {
   resetAgentRegistry: () => Promise<void>;
   openAgentPanel: () => void;
   closeAgentPanel: () => void;
+  // 템플릿 관리(T2-c)
+  fetchTemplates: () => Promise<void>;
+  setSelectedTemplate: (id: string) => void;
+  selectEditingTemplate: (id: string) => Promise<void>;
+  saveTemplateRegistry: (id: string, reg: any) => Promise<boolean>;
+  copyTemplate: (srcId: string, newId: string, newName?: string) => Promise<boolean>;
+  deleteTemplate: (id: string) => Promise<boolean>;
   clearSprintData: () => void;
   triggerSelfHealing: (errorMsg: string) => Promise<void>;
 }
@@ -92,6 +112,9 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   viewingRelease: null,
   agentRegistry: null,
   showAgentPanel: false,
+  templates: [],
+  selectedTemplateId: 'default',
+  editingTemplateId: 'default',
   projects: [],
   currentProjectId: null,
   healingRetryCount: 0,
@@ -127,17 +150,21 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  createProject: async (id: string) => {
+  createProject: async (id: string, templateId?: string) => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: id })
+        body: JSON.stringify({ project_id: id, template_id: templateId || get().selectedTemplateId || 'default' })
       });
       if (res.ok) {
         await get().fetchProjects();
         return true;
       }
+      // 백엔드 검증 실패(404 미존재 템플릿 / 400 형식 / 409 중복)는 사유를 표면화
+      let msg = "프로젝트 생성에 실패했습니다. (중복된 ID일 수 있습니다)";
+      try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+      alert(msg);
       return false;
     } catch (error) {
       console.error("프로젝트 생성 실패:", error);
@@ -285,14 +312,109 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   resetAgentRegistry: async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/agents/reset`, { method: 'POST' });
-      if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data }); }
+      if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data, editingTemplateId: 'default' }); }
     } catch (error) {
       console.error("에이전트 레지스트리 초기화 실패:", error);
     }
   },
 
-  openAgentPanel: () => { get().fetchAgentRegistry(); set({ showAgentPanel: true }); },
+  openAgentPanel: () => {
+    // 패널 열 때 편집 대상을 default 로 초기화하고 템플릿 목록 + default 레지스트리 로드
+    set({ showAgentPanel: true, editingTemplateId: 'default' });
+    get().fetchTemplates();
+    get().fetchAgentRegistry();
+  },
   closeAgentPanel: () => set({ showAgentPanel: false }),
+
+  // ── 워크플로우 템플릿 관리(T2-c) ──────────────────────────────────────────────
+  fetchTemplates: async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/templates`);
+      if (res.ok) { const r = await res.json(); set({ templates: r.data || [] }); }
+    } catch (error) {
+      console.error("템플릿 목록 로드 실패:", error);
+    }
+  },
+
+  setSelectedTemplate: (id: string) => set({ selectedTemplateId: id || 'default' }),
+
+  // 제어판이 편집할 템플릿을 전환 — 해당 템플릿 레지스트리를 agentRegistry 로 로드
+  selectEditingTemplate: async (id: string) => {
+    const tid = id || 'default';
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/templates/${tid}`);
+      if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data, editingTemplateId: tid }); }
+    } catch (error) {
+      console.error("템플릿 로드 실패:", error);
+    }
+  },
+
+  // 편집 중인 템플릿 저장 — PUT /templates/{id} (id=default 면 백엔드가 기본 레지스트리로 위임)
+  saveTemplateRegistry: async (id: string, reg: any) => {
+    const tid = id || 'default';
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/templates/${tid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reg),
+      });
+      if (res.ok) {
+        const r = await res.json();
+        set({ agentRegistry: r.data });
+        await get().fetchTemplates();
+        return true;
+      }
+      let msg = "템플릿 저장에 실패했습니다.";
+      try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+      alert(msg);
+      return false;
+    } catch (error) {
+      console.error("템플릿 저장 실패:", error);
+      return false;
+    }
+  },
+
+  copyTemplate: async (srcId: string, newId: string, newName?: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/templates/copy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ src_id: srcId || 'default', new_id: newId, new_name: newName || '' }),
+      });
+      if (res.ok) {
+        await get().fetchTemplates();
+        await get().selectEditingTemplate(newId);  // 복사본을 바로 편집 대상으로
+        return true;
+      }
+      let msg = "템플릿 복사에 실패했습니다.";
+      try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+      alert(msg);
+      return false;
+    } catch (error) {
+      console.error("템플릿 복사 실패:", error);
+      return false;
+    }
+  },
+
+  deleteTemplate: async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/templates/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await get().fetchTemplates();
+        // 편집 중이던 템플릿을 지웠으면 default 로 복귀
+        if (get().editingTemplateId === id) await get().selectEditingTemplate('default');
+        if (get().selectedTemplateId === id) set({ selectedTemplateId: 'default' });
+        return true;
+      }
+      let msg = "템플릿 삭제에 실패했습니다.";
+      try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+      alert(msg);
+      return false;
+    } catch (error) {
+      console.error("템플릿 삭제 실패:", error);
+      return false;
+    }
+  },
 
   clearSprintData: () => set({ completed_agents: [], currentActivity: null, healingRetryCount: 0 }),
 

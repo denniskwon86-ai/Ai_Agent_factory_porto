@@ -64,6 +64,10 @@ export default function App() {
   const deleteRelease = useFactoryStore((state) => state.deleteRelease);
   const showAgentPanel = useFactoryStore((state) => state.showAgentPanel);
   const openAgentPanel = useFactoryStore((state) => state.openAgentPanel);
+  const templates = useFactoryStore((state) => state.templates);
+  const selectedTemplateId = useFactoryStore((state) => state.selectedTemplateId);
+  const setSelectedTemplate = useFactoryStore((state) => state.setSelectedTemplate);
+  const fetchTemplates = useFactoryStore((state) => state.fetchTemplates);
 
   const [newProjectId, setNewProjectId] = useState("");
 
@@ -71,16 +75,16 @@ export default function App() {
     connectSSE();
     fetchProjects();
     fetchReleases();
-  }, [connectSSE, fetchProjects, fetchReleases]);
+    fetchTemplates();  // 신규 프로젝트 생성 시 고를 수 있는 워크플로우 템플릿 목록
+  }, [connectSSE, fetchProjects, fetchReleases, fetchTemplates]);
 
   const handleCreateProject = async () => {
     if (!newProjectId.trim()) return;
-    const success = await createProject(newProjectId.trim());
+    // 선택한 워크플로우 템플릿으로 프로젝트를 생성(범용 플랫폼) — 실패 사유는 store 가 alert 로 표면화
+    const success = await createProject(newProjectId.trim(), selectedTemplateId);
     if (success) {
       setNewProjectId("");
       setCurrentProject(newProjectId.trim());
-    } else {
-      alert("프로젝트 생성에 실패했습니다. (중복된 ID일 수 있습니다)");
     }
   };
 
@@ -183,7 +187,7 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 flex items-center gap-4 shadow-lg">
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 flex items-end gap-4 shadow-lg">
                 <div className="flex-1">
                   <label className="block text-sm font-bold text-gray-400 mb-2">➕ 신규 독립 프로젝트 생성 (영문 ID)</label>
                   <input
@@ -194,10 +198,26 @@ export default function App() {
                     className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white focus:outline-none focus:border-green-500"
                   />
                 </div>
+                <div className="w-64">
+                  <label className="block text-sm font-bold text-gray-400 mb-2">🧩 워크플로우 템플릿</label>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(e) => setSelectedTemplate(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white focus:outline-none focus:border-green-500"
+                    title="이 프로젝트가 사용할 에이전트 파이프라인을 선택합니다 (제어판에서 복사·편집)"
+                  >
+                    {templates.length === 0 && <option value="default">기본 워크플로우</option>}
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name || t.id}{t.builtin ? " (기본)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <button
                   onClick={handleCreateProject}
                   disabled={!newProjectId.trim()}
-                  className="mt-6 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 text-white font-bold py-3 px-6 rounded transition-colors whitespace-nowrap"
+                  className="bg-green-600 hover:bg-green-500 disabled:bg-gray-700 text-white font-bold py-3 px-6 rounded transition-colors whitespace-nowrap"
                 >
                   신규 기획 공간 할당
                 </button>

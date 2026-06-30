@@ -28,13 +28,19 @@ function Toggle({ on, onClick, label, title }: { on: boolean; onClick: () => voi
 
 export default function AgentMasterPanel() {
   const agentRegistry = useFactoryStore((s) => s.agentRegistry);
-  const saveAgentRegistry = useFactoryStore((s) => s.saveAgentRegistry);
   const resetAgentRegistry = useFactoryStore((s) => s.resetAgentRegistry);
   const closeAgentPanel = useFactoryStore((s) => s.closeAgentPanel);
+  const templates = useFactoryStore((s) => s.templates);
+  const editingTemplateId = useFactoryStore((s) => s.editingTemplateId);
+  const selectEditingTemplate = useFactoryStore((s) => s.selectEditingTemplate);
+  const saveTemplateRegistry = useFactoryStore((s) => s.saveTemplateRegistry);
+  const copyTemplate = useFactoryStore((s) => s.copyTemplate);
+  const deleteTemplate = useFactoryStore((s) => s.deleteTemplate);
 
   const [draft, setDraft] = useState<any | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const isDefault = editingTemplateId === "default";
 
   // 레지스트리 로드 시 편집 사본 초기화
   useEffect(() => {
@@ -68,13 +74,39 @@ export default function AgentMasterPanel() {
 
   const handleSave = async () => {
     setSaving(true);
-    const ok = await saveAgentRegistry(draft);
+    const ok = await saveTemplateRegistry(editingTemplateId, draft);
     setSaving(false);
-    if (ok) { setDirty(false); alert("✅ 레지스트리를 저장했습니다.\n(HOTL 중단점 변경은 서버 재시작 후 파이프라인에 반영됩니다.)"); }
+    if (ok) {
+      setDirty(false);
+      alert(`✅ 템플릿 '${editingTemplateId}' 을(를) 저장했습니다.\n(이 템플릿으로 새로 생성하는 프로젝트부터 반영됩니다. 진행 중인 작업에는 영향 없음.)`);
+    }
   };
   const handleReset = async () => {
-    if (!confirm("레지스트리를 기본값(현재 SW 파이프라인)으로 초기화하시겠습니까? 저장된 커스텀 설정이 사라집니다.")) return;
+    if (!confirm("기본(default) 템플릿을 출고 상태(현재 SW 파이프라인)로 초기화하시겠습니까? 저장된 커스텀 설정이 사라집니다.")) return;
     await resetAgentRegistry();
+  };
+
+  // 편집 대상 템플릿 전환 — 저장 안 된 변경이 있으면 경고(전환 시 사라짐)
+  const handleSwitchTemplate = async (tid: string) => {
+    if (tid === editingTemplateId) return;
+    if (dirty && !confirm("저장하지 않은 변경이 있습니다. 템플릿을 전환하면 변경이 사라집니다. 계속할까요?")) return;
+    await selectEditingTemplate(tid);
+  };
+
+  // 현재 편집 중인 템플릿을 복사해 새 워크플로우 생성(Copy 모델 — 기존은 불변)
+  const handleCopy = async () => {
+    const newId = prompt("새 템플릿 ID (영문/숫자/_/- 만):", "");
+    if (!newId || !newId.trim()) return;
+    const newName = prompt("새 템플릿 표시 이름:", "") || "";
+    const ok = await copyTemplate(editingTemplateId, newId.trim(), newName.trim());
+    if (ok) alert(`✅ 템플릿 '${newId.trim()}' 을(를) 만들었습니다. 지금부터 이 템플릿을 편집합니다.`);
+  };
+
+  const handleDelete = async () => {
+    if (isDefault) return;
+    if (!confirm(`템플릿 '${editingTemplateId}' 을(를) 삭제하시겠습니까? 복구할 수 없습니다.\n(이미 이 템플릿으로 생성된 프로젝트는 계속 동작합니다.)`)) return;
+    const ok = await deleteTemplate(editingTemplateId);
+    if (ok) alert("템플릿을 삭제했습니다. 기본(default) 템플릿으로 돌아갑니다.");
   };
 
   const hotlCount = agents.filter((a) => a.enabled && a.hotl_after).length;
@@ -89,20 +121,50 @@ export default function AgentMasterPanel() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {dirty && <span className="text-xs text-amber-400 mr-1">● 저장 안 됨</span>}
-          <button onClick={handleReset} className="text-xs font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded transition-colors">기본값 초기화</button>
+          {isDefault && <button onClick={handleReset} className="text-xs font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded transition-colors">기본값 초기화</button>}
           <button onClick={handleSave} disabled={!dirty || saving} className="text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 px-4 py-1.5 rounded transition-colors">
             {saving ? "저장 중…" : "💾 저장"}
           </button>
         </div>
       </header>
 
+      {/* 템플릿 전환·복사·삭제 바 (Copy 모델 — 기존 워크플로우 보존, 복사해 새 구성 제작) */}
+      <div className="bg-gray-850 bg-gray-800/60 border-b border-gray-700 px-6 py-2.5 flex items-center gap-3 shrink-0 flex-wrap">
+        <span className="text-xs font-bold text-gray-400 shrink-0">🧩 편집 중인 템플릿</span>
+        <select
+          value={editingTemplateId}
+          onChange={(e) => handleSwitchTemplate(e.target.value)}
+          className="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500 outline-none min-w-[16rem]"
+        >
+          {templates.length === 0 && <option value="default">기본 워크플로우</option>}
+          {templates.map((t) => (
+            <option key={t.id} value={t.id}>{t.name || t.id}{t.builtin ? " (기본)" : ""}</option>
+          ))}
+        </select>
+        <button onClick={handleCopy} className="text-xs font-bold text-emerald-300 bg-emerald-900/40 border border-emerald-700/50 hover:bg-emerald-800/50 px-3 py-1.5 rounded transition-colors">
+          ＋ 복사해서 새 템플릿
+        </button>
+        <button
+          onClick={handleDelete}
+          disabled={isDefault}
+          title={isDefault ? "기본 템플릿은 삭제할 수 없습니다" : "이 템플릿 삭제"}
+          className="text-xs font-bold text-rose-300 bg-rose-900/30 border border-rose-800/50 hover:bg-rose-800/40 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded transition-colors"
+        >
+          🗑 삭제
+        </button>
+        <span className="text-xs text-gray-500 ml-auto">
+          {isDefault ? "기본 템플릿(default) — 모든 신규 프로젝트의 기본값" : `커스텀 템플릿 — id: ${editingTemplateId}`}
+        </span>
+      </div>
+
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-6 py-6">
           {/* 안내 */}
           <div className="bg-blue-950/40 border border-blue-800/50 rounded-lg p-4 text-sm text-blue-200 mb-6">
             각 에이전트의 <b>역할·스킬·모델·순서·HOTL(인간 검토)·활성화</b>를 이 화면에서 관리합니다.
-            <span className="text-blue-300/80"> 현재(Phase 1)는 <b>HOTL 중단점</b>이 저장 후 <b>서버 재시작 시</b> 파이프라인에 실제 반영됩니다.
-            노드 활성/순서·동적 그래프 생성의 실행 반영은 Phase 2(동적 빌더)에서 적용됩니다.</span>
+            <span className="text-blue-300/80"> <b>Copy 모델</b>: 기존 워크플로우는 보존하고, 복사해 새 템플릿을 만들어 편집합니다(진행 중 작업에 영향 없음).
+            템플릿은 <b>그 템플릿으로 새로 생성하는 프로젝트부터</b> 적용되며, 각 에이전트의 <b>스킬·HOTL 중단점</b>이 실행에 반영됩니다.
+            노드 활성/순서를 살아있는 그래프에서 바꾸는 토폴로지 변형은 적용 대상이 아닙니다(Copy 모델로 대체).</span>
           </div>
 
           {/* 파이프라인 메타 */}
