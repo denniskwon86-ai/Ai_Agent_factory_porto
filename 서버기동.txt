@@ -1,0 +1,20 @@
+# 1. 백엔드 폴더로 이동
+cd backend
+
+# 2. 가상환경 활성화 (설정하셨다면)
+# Windows: venv\Scripts\activate
+# Mac/Linux: source venv/bin/activate
+
+# 3. FastAPI 서버 실행 (Uvicorn)
+uvicorn main:app --reload
+
+-------------------------------------------------------------------------------------------
+
+# 1. 프론트엔드 폴더로 이동
+cd frontend
+
+# 2. 의존성 패키지 설치 (어제 Recharts 설치했으니 한 번 더 해주면 안전합니다)
+npm install
+
+# 3. 개발 서버 실행
+npm run dev

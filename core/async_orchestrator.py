@@ -92,7 +92,7 @@ class AsyncFactoryOrchestrator:
         return cancelled
 
     # 🚨 [Phase 3] 세션 인지형 프로세스 강제 일시정지 (Pause) 메서드 추가
-    async def pause_sprint(self, task_id: str, project_id: str) -> bool:
+    async def pause_sprint(self, task_id: str, project_id: str, reason: str = "") -> bool:
         skey = _skey(project_id, task_id)
         task = self.active_tasks.get(skey)
         if task and not task.done():
@@ -100,8 +100,23 @@ class AsyncFactoryOrchestrator:
             pid = self.task_projects.get(skey, project_id)
             del self.active_tasks[skey]
             self.task_projects.pop(skey, None)
-            print(f"🛑 [Orchestrator] Task {task_id} (project={project_id}) 프로세스가 사용자에 의해 일시정지 되었습니다.")
-            await factory_broadcaster.broadcast("SPRINT_PAUSED", {"task_id": task_id, "project_id": pid})
+            print(f"🛑 [Orchestrator] Task {task_id} (project={project_id}) 프로세스가 강제 일시정지 되었습니다. 사유: {reason}")
+            
+            # 슈퍼바이저 인터럽트 발생 시 LangGraph State에 기록하여 UI가 인지하도록 함
+            if reason:
+                try:
+                    langgraph_engine = await get_runtime_app()
+                    config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
+                    snapshot = await langgraph_engine.aget_state(config)
+                    if snapshot.values:
+                        current_state = snapshot.values
+                        queue = current_state.get("human_feedback_queue", []) if isinstance(current_state, dict) else getattr(current_state, "human_feedback_queue", [])
+                        queue.append({"task_id": task_id, "feedback": f"[SUPERVISOR] {reason}", "status": "pending", "priority": 5})
+                        await langgraph_engine.aupdate_state(config, {"human_feedback_queue": queue, "needs_revision": True})
+                except Exception as e:
+                    print(f"⚠️ [Orchestrator] 슈퍼바이저 인터럽트 상태 기록 실패: {e}")
+
+            await factory_broadcaster.broadcast("SPRINT_PAUSED", {"task_id": task_id, "project_id": pid, "reason": reason})
             return True
         return False
 

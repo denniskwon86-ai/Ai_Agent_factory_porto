@@ -25,9 +25,17 @@ class HOTLResumeRequest(BaseModel):
 class RevisionRequest(BaseModel):
     feedback: str
 
+class SupervisorChatRequest(BaseModel):
+    task_id: str
+    message: str
+
 class ProjectCreateRequest(BaseModel):
     project_id: str
     template_id: str = "default"  # 이 프로젝트가 실행될 워크플로우 템플릿(범용 플랫폼 T2-b)
+    output_format_id: str = "default"  # 이 프로젝트에 적용될 출력 포맷
+
+class ProjectCopyRequest(BaseModel):
+    new_project_id: str
 
 class HealRequest(BaseModel):
     error_log: str
@@ -71,19 +79,25 @@ def _project_meta_path(workspace_root: str) -> str:
     return os.path.join(workspace_root, "project_meta.json")
 
 
-def _read_project_template(workspace_root: str) -> str:
+def _read_project_meta(workspace_root: str) -> tuple[str, str]:
     try:
         with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
-            tid = (json.load(f) or {}).get("template_id", "default")
-        return tid or "default"
+            data = json.load(f) or {}
+            tid = data.get("template_id", "default")
+            fid = data.get("output_format_id", "default")
+        return tid or "default", fid or "default"
     except Exception:
-        return "default"
+        return "default", "default"
+
+def _read_project_template(workspace_root: str) -> str:
+    tid, _ = _read_project_meta(workspace_root)
+    return tid
 
 
-def _write_project_template(workspace_root: str, template_id: str) -> None:
+def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default") -> None:
     try:
         with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
-            json.dump({"template_id": template_id or "default"}, f, ensure_ascii=False, indent=2)
+            json.dump({"template_id": template_id or "default", "output_format_id": output_format_id or "default"}, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ project_meta 저장 실패: {e}")
 
@@ -144,7 +158,7 @@ async def create_project(req: ProjectCreateRequest):
     if os.path.exists(project_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
     os.makedirs(project_path, exist_ok=True)
-    _write_project_template(project_path, tid)  # 프로젝트↔템플릿 바인딩 영속
+    _write_project_meta(project_path, tid, req.output_format_id)  # 프로젝트↔템플릿/포맷 바인딩 영속
     return {"status": "success", "project_id": req.project_id, "template_id": tid}
 
 @router.delete("/projects/{project_id}")
@@ -160,6 +174,26 @@ async def delete_project(project_id: str):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"삭제 실패 (파일이 사용 중일 수 있습니다): {str(e)}")
     return {"status": "success"}
+
+@router.post("/projects/{project_id}/copy")
+async def copy_project(project_id: str, req: ProjectCopyRequest):
+    _safe_id(project_id, "project_id")
+    _safe_id(req.new_project_id, "new_project_id")
+    
+    src_path = os.path.join("./projects", project_id)
+    dst_path = os.path.join("./projects", req.new_project_id)
+    
+    if not os.path.exists(src_path):
+        raise HTTPException(status_code=404, detail="원본 프로젝트가 없습니다.")
+    if os.path.exists(dst_path):
+        raise HTTPException(status_code=409, detail="새 프로젝트 ID가 이미 존재합니다.")
+        
+    try:
+        shutil.copytree(src_path, dst_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"복사 실패: {e}")
+        
+    return {"status": "success", "new_project_id": req.new_project_id}
 
 @router.post("/{project_id}/sprint/start")
 async def start_sprint(project_id: str, req: SprintStartRequest):
@@ -185,6 +219,29 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
     if req.task_id.startswith("TASK_REV_"):
         req.project_state_payload["factory_mode"] = "REVISION"
 
+    req.project_state_payload["current_sprint_task_id"] = req.task_id
+
+    # Reset old stages and inject current_required_agents from WBS
+    wbs_path = os.path.join(workspace_root, "00_wbs_master_plan.json")
+    if os.path.exists(wbs_path):
+        try:
+            with open(wbs_path, "r", encoding="utf-8") as f:
+                wbs_data = json.load(f)
+                for t in wbs_data.get("tasks", []):
+                    if t.get("task_id") == req.task_id:
+                        req.project_state_payload["current_required_agents"] = t.get("required_agents", [])
+                        break
+        except Exception:
+            pass
+
+    # Clear current_stage and stage_scores for execution so it runs cleanly
+    if req.project_state_payload.get("factory_mode") == "EXECUTION" and not req.task_id.startswith("PLANNING"):
+        req.project_state_payload["current_stage"] = ""
+        # Remove old coding scores so it doesn't skip
+        for st in ["CODE_REVIEW", "Backend", "Frontend", "QA"]:
+            if "stage_scores" in req.project_state_payload and st in req.project_state_payload["stage_scores"]:
+                del req.project_state_payload["stage_scores"][st]
+
     await orchestrator.start_sprint(req.task_id, req.project_state_payload, workspace_root)
     return {"status": "started", "task_id": req.task_id}
 
@@ -201,6 +258,21 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
     if not success:
         raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")
     return {"status": "resumed", "task_id": req.task_id}
+
+@router.post("/{project_id}/supervisor/chat")
+async def supervisor_chat(project_id: str, req: SupervisorChatRequest):
+    _safe_id(project_id, "project_id")
+    state_path = os.path.join("projects", project_id, "latest_state.json")
+    state_data = {}
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                state_data = json.load(f)
+        except:
+            pass
+    from core.supervisor_daemon import supervisor_daemon
+    response = await supervisor_daemon.handle_user_chat(project_id, req.task_id, req.message, state_data)
+    return response
 
 @router.get("/{project_id}/hotl/check")
 async def check_hotl(project_id: str):
@@ -289,10 +361,15 @@ async def get_latest_state(project_id: str):
     _safe_id(project_id, "project_id")
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):
-        return {"status": "not_found", "data": None}
+        tid, fid = _read_project_meta(os.path.join("projects", project_id))
+        return {"status": "not_found", "data": {"template_id": tid, "output_format_id": fid}}
     try:
         with open(state_path, "r", encoding="utf-8") as f:
             state_data = json.load(f)
+        # fallback to meta if missing in state
+        if "output_format_id" not in state_data or not state_data["output_format_id"]:
+            _, fid = _read_project_meta(os.path.join("projects", project_id))
+            state_data["output_format_id"] = fid
         return {"status": "success", "data": state_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"상태 파일 읽기 오류: {str(e)}")

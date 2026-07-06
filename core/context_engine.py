@@ -1,5 +1,6 @@
 import os
 import json
+import ast
 from pathlib import Path
 from typing import Dict, Any
 from state_models import ProjectState
@@ -66,6 +67,29 @@ class ContextEngine:
                 other_blocks: list[str] = []
                 injected: set[str] = set()  # 중복 주입 방지(소문자 정규화 비교)
 
+                def _extract_snippet(raw: str, rel_path: str, limit: int) -> str:
+                    if rel_path.endswith(".py"):
+                        try:
+                            tree = ast.parse(raw)
+                            lines = raw.splitlines()
+                            skeleton = []
+                            for node in tree.body:
+                                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                                    sig = lines[node.lineno - 1].strip()
+                                    doc = ast.get_docstring(node)
+                                    if doc:
+                                        skeleton.append(f"{sig}\n    \"\"\"{doc.split(chr(10))[0]}...\"\"\"\n    ...")
+                                    else:
+                                        skeleton.append(f"{sig}\n    ...")
+                                elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                                    skeleton.append(lines[node.lineno - 1])
+                            skeleton_text = "\n".join(skeleton)
+                            if skeleton_text and len(skeleton_text) < limit:
+                                return f"[AST Skeleton]\n{skeleton_text}"
+                        except Exception:
+                            pass
+                    return _clip(raw, limit)
+
                 def _emit(rel_path: str, meta=None):
                     key = rel_path.lower()
                     if key in injected:
@@ -83,7 +107,14 @@ class ContextEngine:
                             purpose = getattr(meta, "purpose", "") or (meta.get("purpose", "") if isinstance(meta, dict) else "")
                             other_blocks.append(f"--- FILE (참조 — 본 작업 비대상): {rel_path}" + (f" — {purpose}" if purpose else "") + " ---")
                         else:
-                            other_blocks.append(f"--- FILE: {rel_path} ---\n```\n{_clip(raw, per_file)}\n```\n")
+                            from core.jit_context import extract_signatures
+                            _, ext = os.path.splitext(rel_path)
+                            if ext in [".ts", ".tsx", ".js", ".jsx", ".py"]:
+                                snippet = extract_signatures(raw, ext)
+                                other_blocks.append(f"--- FILE: {rel_path} (JIT Signature) ---\n```\n{snippet}\n```\n")
+                            else:
+                                snippet = _extract_snippet(raw, rel_path, per_file)
+                                other_blocks.append(f"--- FILE: {rel_path} ---\n```\n{snippet}\n```\n")
                         injected.add(key)
                     except Exception as e:
                         other_blocks.append(f"--- FILE: {rel_path} (읽기 실패: {e}) ---")

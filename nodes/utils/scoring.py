@@ -54,7 +54,7 @@ def _stage_artifact(state, stage_key: str) -> str:
     return ""
 
 
-async def score_stage(state, stage_key: str) -> dict:
+async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
     """단계 산출물을 rubric으로 채점하고 verdict(PASS/REWORK/ROLLBACK)를 결정한다."""
     from core.llm_gateway import gateway  # 순환 임포트 방지를 위한 지연 임포트
 
@@ -95,6 +95,8 @@ async def score_stage(state, stage_key: str) -> dict:
         persona_block = (persona + "\n\n") if persona else ""
         checks_brief = "\n".join([f'- {c["id"]}: {c["desc"]}' for c in llm_checks])
         artifact = _stage_artifact(state, stage_key)
+        if extra_context:
+            artifact += f"\n\n{extra_context}"
         prompt = (
             f"{persona_block}{judge_skill}\n\n[평가 기준]:\n{checks_brief}\n\n"
             f"[검토 산출물]:\n{artifact}\n\n"

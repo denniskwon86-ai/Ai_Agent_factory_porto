@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
-// 실행 스프린트 전체 파이프라인 정의 (노드 id ↔ 라벨 ↔ 배정 에이전트명)
-const EXEC_PIPELINE = [
+// 기본 실행 스프린트 전체 파이프라인 정의 (노드 id ↔ 라벨 ↔ 배정 에이전트명)
+const DEFAULT_EXEC_PIPELINE = [
   { id: 'architect', label: 'Architect', agent: 'Architect' },
   { id: 'tech_lead', label: 'Tech Lead', agent: 'Tech_Lead' },
   { id: 'backend', label: 'Backend', agent: 'Backend' },
@@ -15,6 +15,20 @@ const EXEC_PIPELINE = [
   { id: 'manualwriter', label: 'Manual', agent: null as string | null },
 ];
 
+const DEFAULT_MACRO_STAGES: [string, string][] = [
+  ["RFP", "요구정의"], ["PLANNING", "기획"], ["PMO", "WBS"], ["ARCHITECTURE", "아키텍처"],
+  ["TECH_SPEC", "기술설계"], ["EXECUTION", "구현"], ["BUILD", "빌드"], ["CODE_REVIEW", "검수"],
+  ["QA", "QA"], ["MANUAL", "매뉴얼"],
+];
+const DEFAULT_NODE_MACRO: Record<string, number> = {
+  RFP_Analyst: 0, Master_PM: 1, Master_PMO: 2, Architect: 3, Tech_Lead: 4,
+  Backend: 5, Frontend: 5, CodeBuilder: 6, Reviewer: 7, QA: 8, ManualWriter: 9,
+};
+const DEFAULT_STAGE_MACRO: Record<string, number> = {
+  RFP: 0, PLANNING: 1, PMO: 2, ARCHITECTURE: 3, TECH_SPEC: 4,
+  EXECUTION: 5, BUILD: 6, CODE_REVIEW: 7, QA: 8, MANUAL: 9,
+};
+
 // 노드 id → Supervisor 채점 단계 키 (배지 표시용)
 const STAGE_BY_NODE: Record<string, string> = {
   architect: 'ARCHITECTURE',
@@ -22,17 +36,50 @@ const STAGE_BY_NODE: Record<string, string> = {
   reviewer: 'CODE_REVIEW',
 };
 
-// 태스크에 배정된 required_agents 기준으로, 그 태스크가 실제 거치는 노드만 추려낸다.
-const buildTaskPipeline = (requiredAgents: string[]) => {
+const getDynamicPipelineData = (templateData: any) => {
+  if (!templateData || !templateData.agents || templateData.id === 'default') {
+    return {
+      execPipeline: DEFAULT_EXEC_PIPELINE,
+      macroStages: DEFAULT_MACRO_STAGES,
+      nodeMacro: DEFAULT_NODE_MACRO,
+      stageMacro: DEFAULT_STAGE_MACRO,
+    };
+  }
+  const agents = [...templateData.agents].sort((a: any, b: any) => a.order - b.order);
+  const execPipeline = agents.map((a: any) => ({
+    id: a.id.toLowerCase(),
+    label: a.name_ko || a.id,
+    agent: a.id,
+  }));
+  const macroStages: [string, string][] = agents.map((a: any) => [
+    a.stage || a.id.toUpperCase(),
+    a.name_ko || a.id
+  ]);
+  const nodeMacro: Record<string, number> = {};
+  const stageMacro: Record<string, number> = {};
+  agents.forEach((a: any, idx: number) => {
+    nodeMacro[a.id] = idx;
+    stageMacro[a.stage || a.id.toUpperCase()] = idx;
+  });
+  return { execPipeline, macroStages, nodeMacro, stageMacro };
+};
+
+const buildTaskPipeline = (requiredAgents: string[], execPipeline: any[], templateData: any) => {
   const ra = (requiredAgents || []).map((a) => a.toLowerCase());
   const has = (agent: string) => ra.some((r) => r.includes(agent.toLowerCase()));
-  const hasCode = has('Backend') || has('Frontend');
-  return EXEC_PIPELINE.filter((n) => {
-    if (n.id === 'codebuilder') return hasCode;          // 코드가 있을 때만 빌더
-    if (n.id === 'reviewer') return true;                 // Supervisor 게이트는 항상
-    if (n.id === 'manualwriter') return has('Frontend');  // 프론트가 있을 때만 매뉴얼
-    return n.agent ? has(n.agent) : false;                // 그 외엔 배정된 에이전트만
-  });
+  
+  if (!templateData || templateData.id === 'default') {
+    const hasCode = has('Backend') || has('Frontend');
+    return execPipeline.filter((n) => {
+      if (n.id === 'codebuilder') return hasCode;
+      if (n.id === 'reviewer') return true;
+      if (n.id === 'manualwriter') return has('Frontend');
+      return n.agent ? has(n.agent) : false;
+    });
+  }
+  
+  if (ra.length === 0) return execPipeline;
+  return execPipeline.filter(n => n.agent && has(n.agent));
 };
 
 // 토론·채점 단계(phase) → 표시 아이콘 (LIVE 배너용)
@@ -42,6 +89,7 @@ const PHASE_ICON: Record<string, string> = {
 
 export default function ControlPanel() {
   const [idea, setIdea] = useState("");
+  const [masterData, setMasterData] = useState("");
   const [feedback, setFeedback] = useState("");
   const [isStarting, setIsStarting] = useState(false);
   
@@ -60,6 +108,9 @@ export default function ControlPanel() {
   const setActiveSprintId = useFactoryStore((s) => s.setActiveSprintId);
   const hotlTaskId = useFactoryStore((s) => s.hotlTaskId);
   const isConnected = useFactoryStore((s) => s.isConnected);
+  const currentTemplateData = useFactoryStore((s) => s.currentTemplateData);
+  
+  const { execPipeline, macroStages: MACRO_STAGES, nodeMacro: NODE_MACRO, stageMacro: STAGE_MACRO } = getDynamicPipelineData(currentTemplateData);
 
   // 사용자가 접수시킨 요구사항(즉시 표시용 — 백엔드 state.initial_idea 가 도착하기 전 폴백)
   const [submittedIdea, setSubmittedIdea] = useState("");
@@ -104,19 +155,6 @@ export default function ControlPanel() {
   }
 
   // ── 라이브 진행 카드용 계산: 매크로 파이프라인 위치(%) + 단계 내 미니 국면(초안→비평→개정→채점) ──
-  const MACRO_STAGES: [string, string][] = [
-    ["RFP", "요구정의"], ["PLANNING", "기획"], ["PMO", "WBS"], ["ARCHITECTURE", "아키텍처"],
-    ["TECH_SPEC", "기술설계"], ["EXECUTION", "구현"], ["BUILD", "빌드"], ["CODE_REVIEW", "검수"],
-    ["QA", "QA"], ["MANUAL", "매뉴얼"],
-  ];
-  const NODE_MACRO: Record<string, number> = {
-    RFP_Analyst: 0, Master_PM: 1, Master_PMO: 2, Architect: 3, Tech_Lead: 4,
-    Backend: 5, Frontend: 5, CodeBuilder: 6, Reviewer: 7, QA: 8, ManualWriter: 9,
-  };
-  const STAGE_MACRO: Record<string, number> = {
-    RFP: 0, PLANNING: 1, PMO: 2, ARCHITECTURE: 3, TECH_SPEC: 4,
-    EXECUTION: 5, BUILD: 6, CODE_REVIEW: 7, QA: 8, MANUAL: 9,
-  };
   const completedIdx = (completedAgents || []).reduce((m: number, n: string) => Math.max(m, NODE_MACRO[n] ?? -1), -1);
   const activeStageIdx = currentActivity?.stage != null ? (STAGE_MACRO[currentActivity.stage] ?? -1) : -1;
   const curMacroIdx = Math.max(completedIdx, activeStageIdx);
@@ -152,6 +190,7 @@ export default function ControlPanel() {
             schema_version: "5.1.0",
             project_name: currentProjectId,
             initial_idea: idea,
+            master_data: masterData,
             factory_mode: "PLANNING",
           }
         })
@@ -159,6 +198,7 @@ export default function ControlPanel() {
       // 입력창은 비우되, 접수된 요구사항은 별도 보존하여 WBS 생성 전까지 화면에 유지한다.
       setSubmittedIdea(idea);
       setIdea("");
+      setMasterData("");
     } catch (error) {
       console.error("기획 가동 실패:", error);
     } finally {
@@ -259,7 +299,7 @@ export default function ControlPanel() {
 
   const renderPipelineTracker = (isPaused: boolean, task: any) => {
     // 이 태스크에 배정된 에이전트만으로 파이프라인 구성 (PMO Task별 매핑 반영)
-    const pipeline = buildTaskPipeline(task?.required_agents || []);
+    const pipeline = buildTaskPipeline(task?.required_agents || [], execPipeline, currentTemplateData);
     const currentAgentIdx = pipeline.findIndex(a => !completedAgents.map((ca: string) => ca.toLowerCase()).includes(a.id));
 
     // 단계별 최신 Supervisor 판정 맵 (criteria_log에서 추출)
@@ -430,7 +470,13 @@ export default function ControlPanel() {
             <textarea 
               value={idea} onChange={(e) => setIdea(e.target.value)} disabled={isStarting || activeSprintId !== null}
               placeholder="프로젝트 아이디어를 입력하세요..."
-              className="w-full h-32 bg-gray-950 border border-gray-700 rounded p-3 text-sm focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
+              className="w-full h-20 bg-gray-950 border border-gray-700 rounded p-3 text-sm focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
+            />
+            <label className="text-sm font-semibold text-gray-400 mt-1">🌍 전사 마스터 데이터 (선택)</label>
+            <textarea 
+              value={masterData} onChange={(e) => setMasterData(e.target.value)} disabled={isStarting || activeSprintId !== null}
+              placeholder="시뮬레이션 전사 환경 변수(환율, 단가, 목표 KPI 등)를 입력하세요..."
+              className="w-full h-20 bg-gray-950 border border-gray-700 rounded p-3 text-sm focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
             />
             <button 
               onClick={handleStartPlanning} disabled={isStarting || !idea.trim() || activeSprintId !== null}

@@ -10,6 +10,7 @@ import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
 import AgentMasterPanel from './components/AgentMasterPanel';
+import FormatMasterPanel from './components/FormatMasterPanel';
 
 interface EBProps { children: ReactNode; }
 interface EBState { hasError: boolean; error: Error | null; }
@@ -68,6 +69,12 @@ export default function App() {
   const selectedTemplateId = useFactoryStore((state) => state.selectedTemplateId);
   const setSelectedTemplate = useFactoryStore((state) => state.setSelectedTemplate);
   const fetchTemplates = useFactoryStore((state) => state.fetchTemplates);
+  const formats = useFactoryStore((state) => state.formats);
+  const selectedFormatId = useFactoryStore((state) => state.selectedFormatId);
+  const setSelectedFormat = useFactoryStore((state) => state.setSelectedFormat);
+  const fetchFormats = useFactoryStore((state) => state.fetchFormats);
+  const showFormatPanel = useFactoryStore((state) => state.showFormatPanel);
+  const openFormatPanel = useFactoryStore((state) => state.openFormatPanel);
 
   const [newProjectId, setNewProjectId] = useState("");
 
@@ -76,12 +83,13 @@ export default function App() {
     fetchProjects();
     fetchReleases();
     fetchTemplates();  // 신규 프로젝트 생성 시 고를 수 있는 워크플로우 템플릿 목록
-  }, [connectSSE, fetchProjects, fetchReleases, fetchTemplates]);
+    fetchFormats();    // 신규 프로젝트 생성 시 고를 수 있는 출력 포맷 목록
+  }, [connectSSE, fetchProjects, fetchReleases, fetchTemplates, fetchFormats]);
 
   const handleCreateProject = async () => {
     if (!newProjectId.trim()) return;
-    // 선택한 워크플로우 템플릿으로 프로젝트를 생성(범용 플랫폼) — 실패 사유는 store 가 alert 로 표면화
-    const success = await createProject(newProjectId.trim(), selectedTemplateId);
+    // 선택한 워크플로우 템플릿과 출력 포맷으로 프로젝트를 생성(범용 플랫폼)
+    const success = await createProject(newProjectId.trim(), selectedTemplateId, selectedFormatId);
     if (success) {
       setNewProjectId("");
       setCurrentProject(newProjectId.trim());
@@ -100,10 +108,29 @@ export default function App() {
     }
   };
 
+  const copyProject = useFactoryStore((s) => s.copyProject);
+  const handleCopyProject = async (id: string, name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newId = prompt(`'${name}' 시나리오를 복제합니다.\n새로운 프로젝트 ID를 입력하세요 (영문/숫자/하이픈):`, `${id}-copy`);
+    if (!newId || !newId.trim()) return;
+    const success = await copyProject(id, newId.trim());
+    if (success) {
+      alert("시나리오가 성공적으로 복제되었습니다.");
+    }
+  };
+
   if (showAgentPanel) {
     return (
       <ErrorBoundary>
         <AgentMasterPanel />
+      </ErrorBoundary>
+    );
+  }
+
+  if (showFormatPanel) {
+    return (
+      <ErrorBoundary>
+        <FormatMasterPanel />
       </ErrorBoundary>
     );
   }
@@ -139,11 +166,18 @@ export default function App() {
             </h1>
             <div className="flex items-center gap-4">
               <button
+                onClick={openFormatPanel}
+                className="text-sm font-bold text-gray-200 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded transition-colors"
+                title="출력 양식을 설정"
+              >
+                📄 Format Master
+              </button>
+              <button
                 onClick={openAgentPanel}
                 className="text-sm font-bold text-gray-200 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded transition-colors"
                 title="각 에이전트의 역할·스킬·모델·순서·HOTL을 설정"
               >
-                ⚙️ 에이전트 마스터 제어판
+                ⚙️ Agent Master
               </button>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-400 font-medium">통신망 상태:</span>
@@ -153,7 +187,7 @@ export default function App() {
           </header>
 
           <main className="flex-1 flex flex-col items-center p-10 overflow-y-auto">
-            <div className="w-full max-w-4xl">
+            <div className="w-full max-w-5xl">
               <h2 className="text-xl font-bold text-gray-300 mb-6 flex items-center gap-2">
                 📂 나의 프로젝트 가동 대장 (Vault Registry)
               </h2>
@@ -162,13 +196,22 @@ export default function App() {
                 {projects.map((proj) => (
                   <div key={proj.id} className="bg-gray-800 border border-gray-700 rounded-lg p-6 hover:border-blue-500 transition-colors shadow-lg flex flex-col relative group">
                     {/* 🗑️ 독립 프로젝트 물리 삭제 버튼 추가 */}
-                    <button
-                      onClick={(e) => handleDeleteProject(proj.id, proj.name, e)}
-                      className="absolute top-4 right-4 text-xs bg-red-950 hover:bg-red-600 text-red-400 hover:text-white border border-red-800 rounded px-2.5 py-1 transition-colors z-10"
-                      title="프로젝트 폴더 영구 삭제"
-                    >
-                      🗑️ 완전 삭제
-                    </button>
+                    <div className="absolute top-4 right-4 flex gap-2 z-10">
+                      <button
+                        onClick={(e) => handleCopyProject(proj.id, proj.name, e)}
+                        className="text-xs bg-gray-950 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-800 rounded px-2.5 py-1 transition-colors"
+                        title="시나리오 복제 (What-If 분석용)"
+                      >
+                        🧬 시나리오 복제
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteProject(proj.id, proj.name, e)}
+                        className="text-xs bg-red-950 hover:bg-red-600 text-red-400 hover:text-white border border-red-800 rounded px-2.5 py-1 transition-colors"
+                        title="프로젝트 폴더 영구 삭제"
+                      >
+                        🗑️ 완전 삭제
+                      </button>
+                    </div>
 
                     <div className="flex items-start justify-between mb-4 pr-24">
                       <h3 className="text-lg font-bold text-blue-400 truncate">{proj.name}</h3>
@@ -198,7 +241,7 @@ export default function App() {
                     className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white focus:outline-none focus:border-green-500"
                   />
                 </div>
-                <div className="w-64">
+                <div className="w-48">
                   <label className="block text-sm font-bold text-gray-400 mb-2">🧩 워크플로우 템플릿</label>
                   <select
                     value={selectedTemplateId}
@@ -214,12 +257,28 @@ export default function App() {
                     ))}
                   </select>
                 </div>
+                <div className="w-48">
+                  <label className="block text-sm font-bold text-gray-400 mb-2">📄 출력 양식 (Harness)</label>
+                  <select
+                    value={selectedFormatId}
+                    onChange={(e) => setSelectedFormat(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white focus:outline-none focus:border-green-500"
+                    title="에이전트가 생성할 최종 산출물(결과물)의 형식을 강제합니다."
+                  >
+                    {formats.length === 0 && <option value="default">일반 마크다운 (기본)</option>}
+                    {formats.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <button
                   onClick={handleCreateProject}
                   disabled={!newProjectId.trim()}
                   className="bg-green-600 hover:bg-green-500 disabled:bg-gray-700 text-white font-bold py-3 px-6 rounded transition-colors whitespace-nowrap"
                 >
-                  신규 기획 공간 할당
+                  신규 공간 할당
                 </button>
               </div>
 

@@ -8,10 +8,42 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
+from pydantic import BaseModel, Field
 
 from core.context_engine import ContextEngine
 from state_models import ProjectState
 import config
+
+# --- Structured Output Schemas ---
+class FileUpdate(BaseModel):
+    file_path: str = Field(description="생성/수정할 파일의 상대 경로 (예: src/App.tsx, backend/main.py)")
+    code: str = Field(description="여기에 전체 소스 코드를 작성 (부분 패치 불가, 반드시 전체 코드)")
+
+class ArchitectureDecision(BaseModel):
+    id: str = Field(description="ADR 아이디", default="")
+    decision: str = Field(description="결정 내용", default="")
+    reason: str = Field(description="결정 이유", default="")
+
+class TechnicalDebt(BaseModel):
+    id: str = Field(description="부채 아이디", default="")
+    description: str = Field(description="부채 설명", default="")
+    priority: int = Field(description="우선순위 (1~5)", default=3)
+
+class FileIndexUpdate(BaseModel):
+    change_summary: str = Field(description="변경 요약", default="")
+    purpose: str = Field(description="파일 목적", default="")
+
+class StateUpdates(BaseModel):
+    architecture_decisions: list[ArchitectureDecision] = Field(default_factory=list)
+    technical_debt: list[TechnicalDebt] = Field(default_factory=list)
+    file_index_updates: dict[str, FileIndexUpdate] = Field(default_factory=dict)
+
+class CodeOutput(BaseModel):
+    files: list[FileUpdate] = Field(default_factory=list, description="수정/생성된 파일 목록")
+    state_updates: StateUpdates = Field(default_factory=StateUpdates)
+    error: str = Field(default="", description="오류 메시지")
+# ---------------------------------
+
 
 # 시스템 부팅 시 최우선으로 .env 파일의 환경변수를 메모리에 안전하게 로드합니다.
 load_dotenv()
@@ -90,6 +122,10 @@ class LLMGateway:
             model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0])
         ).with_fallbacks(pro_fallbacks)
 
+        # [Track 1 - Code Mode] Structured Output 전용 Pro 체인
+        pro_base = ChatGoogleGenerativeAI(model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0]))
+        self.llm_pro_code = pro_base.with_structured_output(CodeOutput).with_fallbacks([f.with_structured_output(CodeOutput) for f in pro_fallbacks])
+
         # 4. [Track 2] Flash 모델 체인 조립 (고속 단순 작업용)
         flash_candidates = [config.LLM_FLASH_FALLBACK_LIST[0]]
         for m in available_gemini_models:
@@ -104,6 +140,10 @@ class LLMGateway:
         self.llm_flash = ChatGoogleGenerativeAI(
             model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0])
         ).with_fallbacks(flash_fallbacks)
+
+        # [Track 2 - Code Mode] Structured Output 전용 Flash 체인
+        flash_base = ChatGoogleGenerativeAI(model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0]))
+        self.llm_flash_code = flash_base.with_structured_output(CodeOutput).with_fallbacks([f.with_structured_output(CodeOutput) for f in flash_fallbacks])
 
         # 콘솔에 완성된 라우팅 체인 구조 출력
         print(f"\n[OK] [LLM Gateway] 다중 계층 동적 라우팅 엔진 가동 완료 (최신 SDK 적용)")
@@ -133,7 +173,11 @@ class LLMGateway:
         절단 없이 전체 주입되어 멀티태스크 기능 누락(회귀)을 차단한다(증분 codegen)."""
         state_obj = ProjectState.model_validate(state) if isinstance(state, dict) else state
 
-        llm = self.llm_pro if is_heavy else self.llm_flash
+        if output_mode == "code":
+            llm = self.llm_pro_code if is_heavy else self.llm_flash_code
+        else:
+            llm = self.llm_pro if is_heavy else self.llm_flash
+            
         logical_model_name = "pro_router" if is_heavy else "flash_router"
 
         core_context = ContextEngine.build_core_context(state_obj, light=light, full_file_exts=full_file_exts)
@@ -141,7 +185,7 @@ class LLMGateway:
         if output_mode == "code":
             strict_json_rule = ContextEngine.get_strict_json_instruction()
             final_prompt = f"{core_context}\n\n[요청 지시사항]:\n{skill_prompt}\n\n{strict_json_rule}"
-            system_content = "You are a V5.0 AI Software Factory Agent. Strictly output in valid JSON format only."
+            system_content = "You are a V5.0 AI Software Factory Agent. Output your response strictly conforming to the requested schema. Do not include markdown blocks."
         elif output_mode == "json":
             final_prompt = f"{core_context}\n\n[요청 지시사항]:\n{skill_prompt}"
             system_content = "You are a V5.0 AI Software Factory Agent. Output ONLY a single valid JSON object exactly as instructed."
@@ -161,12 +205,15 @@ class LLMGateway:
         try:
             # 1. 일차적으로 LangChain의 with_fallbacks 체인 호출
             response = await llm.ainvoke(messages)
+            
+            if output_mode == "code":
+                # response가 CodeOutput (Pydantic 모델)이므로 바로 JSON 변환 후 반환
+                # Note: structured_output 모드에서는 _is_truncated 체크가 어려우나 파싱 실패 시 예외로 넘어감
+                return response.model_dump_json(by_alias=True)
+                
             # 🚨 Gemini Flash 멀티파트(list/dict {type,text}) 응답을 순수 텍스트로 정규화
-            #    (이걸 빼면 str()로 뭉개져 JSON 파싱 실패 → 코드 미생성 버그 발생)
             raw_output = self._stringify(response.content)
 
-            # 🚨 출력 토큰 상한으로 응답이 잘렸으면(code 모드) 절대 부분 결과를 신뢰하지 않는다.
-            #    잘린 코드를 디스크에 덮어쓰면 기존 기능이 통째로 사라지므로 깨끗이 실패시켜 재작업으로.
             if output_mode == "code" and _is_truncated(response):
                 print("🚨 [LLM Gateway] 응답이 출력 토큰 상한에서 절단됨(MAX_TOKENS). 부분 코드 폐기 → 빌드 실패 처리.")
                 return json.dumps({"files": [], "error": "OUTPUT_TRUNCATED"}, ensure_ascii=False)

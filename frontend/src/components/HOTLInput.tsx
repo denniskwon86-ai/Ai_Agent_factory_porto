@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
 export default function HOTLInput() {
   const [feedback, setFeedback] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [supervisorReply, setSupervisorReply] = useState<string | null>(null);
   
   const state = useFactoryStore((store) => store.state);
   const currentProjectId = useFactoryStore((store) => store.currentProjectId);
@@ -36,36 +37,59 @@ export default function HOTLInput() {
       alert("🚨 현재 프로젝트 ID를 찾을 수 없습니다.");
       return;
     }
+    if (!isWaitingForHuman && !feedback.trim()) {
+      alert("메시지를 입력해주세요.");
+      return;
+    }
     
     setIsSubmitting(true);
+    setSupervisorReply(null);
     try {
-      // 🚀 원본 정상 경로 복구
-      const response = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/hotl/resume`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task_id: currentTask,
-          feedback: feedback.trim()
-        }),
-      });
+      if (isWaitingForHuman) {
+        // 🚀 원본 정상 경로 복구
+        const response = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/hotl/resume`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task_id: currentTask,
+            feedback: feedback.trim()
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(`서버 응답 오류 (상태 코드: ${response.status})`);
+        if (!response.ok) {
+          throw new Error(`서버 응답 오류 (상태 코드: ${response.status})`);
+        }
+
+        setFeedback("");
+
+        // 승인/재가동 직후 상태를 '가동 중'으로 일관되게 전환
+        useFactoryStore.setState((prev) => ({
+          state: prev.state ? { ...prev.state, needs_revision: false } : null,
+          hotlTaskId: null,
+          activeSprintId: currentTask,
+        }));
+      } else {
+        // 🚀 슈퍼바이저와 실시간 채팅
+        const response = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/supervisor/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task_id: currentTask,
+            message: feedback.trim()
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`서버 응답 오류 (상태 코드: ${response.status})`);
+        }
+
+        const data = await response.json();
+        setSupervisorReply(data.reply);
+        setFeedback("");
       }
-
-      setFeedback("");
-
-      // 승인/재가동 직후 상태를 '가동 중'으로 일관되게 전환:
-      // needs_revision=false + hotlTaskId 제거(좌측 배너 모순 해소) + activeSprintId 설정('⚙️ 가동 중' + 라이브 카드 표시)
-      useFactoryStore.setState((prev) => ({
-        state: prev.state ? { ...prev.state, needs_revision: false } : null,
-        hotlTaskId: null,
-        activeSprintId: currentTask,
-      }));
-
     } catch (error) {
-      console.error("🚨 HOTL 재가동 실패:", error);
-      alert("파이프라인 재가동에 실패했습니다. 백엔드 서버를 확인해주세요.");
+      console.error("🚨 전송 실패:", error);
+      alert("서버 통신에 실패했습니다. 백엔드 서버를 확인해주세요.");
     } finally {
       setIsSubmitting(false);
     }
@@ -76,40 +100,72 @@ export default function HOTLInput() {
       <div className="flex flex-col gap-3">
         <div className="flex justify-between items-center">
           <span className={`text-sm font-semibold ${isWaitingForHuman ? 'text-yellow-400' : 'text-blue-400'}`}>
-            {isWaitingForHuman ? "⏸️ 인간의 개입(설계 승인/피드백) 대기 중" : "▶️ AI 팩토리 자율 가동 중"}
+            {isWaitingForHuman ? "⏸️ 인간의 개입(설계 승인/피드백) 대기 중" : "▶️ AI 팩토리 자율 가동 중 (슈퍼바이저에게 질문 가능)"}
           </span>
           <span className="text-xs text-gray-400">Target Task: {currentTask || "알 수 없음"}</span>
         </div>
 
-        {/* ✋ 무엇을 승인하는지 명확히 안내 */}
+        {/* ✋ 실시간 채팅 응답 박스 */}
+        {supervisorReply && (
+          <div className="rounded border border-blue-700/50 bg-blue-900/20 p-2.5 text-xs text-blue-100 leading-relaxed relative">
+            <button 
+              onClick={() => setSupervisorReply(null)} 
+              className="absolute top-1 right-2 text-blue-400 hover:text-blue-200"
+            >✕</button>
+            <div className="font-bold flex items-center gap-1 mb-1">
+              <span>🤖 슈퍼바이저 답변</span>
+            </div>
+            <div className="whitespace-pre-wrap">{supervisorReply}</div>
+          </div>
+        )}
+
+        {/* ✋ 무엇을 승인하는지 명확히 안내 및 슈퍼바이저 메시지 표시 */}
         {isWaitingForHuman && (
-          <div className="rounded border border-yellow-700/50 bg-yellow-900/20 p-2.5 text-xs text-yellow-100 leading-relaxed">
-            <div>✋ 승인 대상: <b className="text-yellow-300">{approval?.what || "직전 단계 산출물"}</b></div>
-            <div className="mt-1 text-yellow-200/80">
-              {approval ? `${approval.where}에서 내용을 검토한 뒤, ` : "산출물을 검토한 뒤, "}
-              그대로 진행하려면 <b>빈칸으로 '설계 승인 및 진행'</b>, 수정이 필요하면 아래에 <b>피드백</b>을 적어 보내세요.
+          <div className="flex flex-col gap-2">
+            {/* 슈퍼바이저 인터럽트 감지 */}
+            {state?.human_feedback_queue?.filter((q: any) => q.feedback.includes("[SUPERVISOR]")).length > 0 && (
+              <div className="rounded border border-red-700/50 bg-red-900/20 p-2.5 text-xs text-red-100 leading-relaxed">
+                <div className="font-bold flex items-center gap-1">
+                  <span>🤖 슈퍼바이저 개입 발생!</span>
+                </div>
+                <div className="mt-1 text-red-200/90 whitespace-pre-wrap">
+                  {state.human_feedback_queue.filter((q: any) => q.feedback.includes("[SUPERVISOR]")).pop().feedback.replace("[SUPERVISOR] ", "")}
+                </div>
+              </div>
+            )}
+            
+            <div className="rounded border border-yellow-700/50 bg-yellow-900/20 p-2.5 text-xs text-yellow-100 leading-relaxed">
+              <div>✋ 승인 대상: <b className="text-yellow-300">{approval?.what || "직전 단계 산출물"}</b></div>
+              <div className="mt-1 text-yellow-200/80">
+                {approval ? `${approval.where}에서 내용을 검토한 뒤, ` : "산출물을 검토한 뒤, "}
+                그대로 진행하려면 <b>빈칸으로 '설계 승인 및 진행'</b>, 수정이 필요하면 아래에 <b>피드백</b>을 적어 보내세요.
+              </div>
             </div>
           </div>
         )}
 
         <textarea 
-          disabled={!isWaitingForHuman || isSubmitting}
+          disabled={isSubmitting}
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           placeholder={
             isWaitingForHuman 
               ? "승인하려면 빈칸으로 두고 전송하세요. 수정이 필요하면 요구사항을 입력하세요." 
-              : "현재 파이프라인이 자율 주행 중입니다."
+              : "가동 중인 파이프라인에 대해 슈퍼바이저에게 지시하거나 질문하세요."
           }
           className="w-full h-24 bg-gray-900 border border-gray-600 rounded p-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
         />
         
         <button 
-          disabled={!isWaitingForHuman || isSubmitting} 
+          disabled={isSubmitting} 
           onClick={handleSubmit}
           className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-2.5 rounded shadow-lg"
         >
-          {isSubmitting ? "전송 중..." : (feedback.trim() ? "피드백 적용 후 재가동" : "설계 승인 및 진행")}
+          {isSubmitting 
+            ? "전송 중..." 
+            : (isWaitingForHuman 
+                ? (feedback.trim() ? "피드백 적용 후 재가동" : "설계 승인 및 진행") 
+                : "슈퍼바이저에게 질문/지시")}
         </button>
       </div>
     </div>

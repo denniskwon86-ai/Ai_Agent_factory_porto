@@ -266,6 +266,7 @@ NODE_IMPL = {
     "QA": run_qa,
     "Supervisor": run_supervisor,
     "ManualWriter": run_manual_writer,
+    "VisionQA": __import__("nodes.vision_qa", fromlist=["run_vision_qa"]).run_vision_qa,
 }
 
 
@@ -382,11 +383,27 @@ _runtime_lock = asyncio.Lock()
 async def _get_runtime_saver():
     global _runtime_saver
     if _runtime_saver is None:
-        import aiosqlite
-        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-        conn = await aiosqlite.connect(config.PIPELINE_DB_FILE, check_same_thread=False)
-        _runtime_saver = AsyncSqliteSaver(conn)
-        await _runtime_saver.setup()
+        postgres_uri = os.environ.get("POSTGRES_URI")
+        if postgres_uri:
+            try:
+                import asyncpg
+                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+                conn = await asyncpg.connect(postgres_uri)
+                _runtime_saver = AsyncPostgresSaver(conn)
+                await _runtime_saver.setup()
+                print("🐘 [Checkpointer] PostgreSQL 분산 DB 어댑터 연결 성공.")
+            except ImportError:
+                print("⚠️ [Checkpointer] asyncpg 모듈이 없어 PostgreSQL 연동 실패. SQLite로 Fallback합니다.")
+                postgres_uri = None
+        
+        if not postgres_uri:
+            import aiosqlite
+            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+            conn = await aiosqlite.connect(config.PIPELINE_DB_FILE, check_same_thread=False)
+            _runtime_saver = AsyncSqliteSaver(conn)
+            await _runtime_saver.setup()
+            print("🗄️ [Checkpointer] 기본 SQLite 어댑터 연결 완료.")
+            
     return _runtime_saver
 
 

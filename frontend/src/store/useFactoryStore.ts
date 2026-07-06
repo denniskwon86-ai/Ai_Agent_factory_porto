@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export interface ProjectState {
   project_name: string;
+  template_id?: string;
   initial_idea?: string;
   factory_mode: string;
   build_status: string;
@@ -28,6 +29,7 @@ export interface ProjectState {
   debate_rounds_used?: Record<string, number>;
   supervisor_feedback?: string;
   criteria_log?: any[];
+  artifacts?: Record<string, string>;
 }
 
 // 워크플로우 템플릿(범용 플랫폼 Copy 모델) — 목록 요약 및 상세 레지스트리
@@ -37,6 +39,13 @@ export interface WorkflowTemplate {
   description?: string;
   agent_count?: number;
   builtin?: boolean;
+}
+
+export interface OutputFormat {
+  id: string;
+  name: string;
+  description: string;
+  prompt_injection: string;
 }
 
 interface FactoryStore {
@@ -57,15 +66,21 @@ interface FactoryStore {
   templates: WorkflowTemplate[];
   selectedTemplateId: string;   // 신규 프로젝트 생성 시 선택된 템플릿
   editingTemplateId: string;    // 마스터 제어판이 현재 편집 중인 템플릿
+  // 출력 포맷 마스터 (Two-Track Harness)
+  formats: OutputFormat[];
+  selectedFormatId: string;
+  showFormatPanel: boolean;
   projects: { id: string, name: string }[];
   currentProjectId: string | null;
   healingRetryCount: number;
   activeSprintId: string | null;
   hotlTaskId: string | null;
+  currentTemplateData: any | null;
   setActiveSprintId: (id: string | null) => void;
   setCurrentProject: (id: string | null) => void;
   fetchProjects: () => Promise<void>;
-  createProject: (id: string, templateId?: string) => Promise<boolean>;
+  createProject: (id: string, templateId?: string, formatId?: string) => Promise<boolean>;
+  copyProject: (id: string, newId: string) => Promise<boolean>;
   deleteProject: (id: string) => Promise<boolean>; // 🗑️ 프로젝트 완전 삭제 기능 정의
   connectSSE: () => void;
   fetchWBS: () => Promise<void>;
@@ -89,11 +104,18 @@ interface FactoryStore {
   saveTemplateRegistry: (id: string, reg: any) => Promise<boolean>;
   copyTemplate: (srcId: string, newId: string, newName?: string) => Promise<boolean>;
   deleteTemplate: (id: string) => Promise<boolean>;
+  // 출력 포맷 관리
+  fetchFormats: () => Promise<void>;
+  setSelectedFormat: (id: string) => void;
+  saveFormat: (fmt: OutputFormat) => Promise<boolean>;
+  deleteFormat: (id: string) => Promise<boolean>;
+  openFormatPanel: () => void;
+  closeFormatPanel: () => void;
   clearSprintData: () => void;
   triggerSelfHealing: (errorMsg: string) => Promise<void>;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;
@@ -115,18 +137,22 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   templates: [],
   selectedTemplateId: 'default',
   editingTemplateId: 'default',
+  formats: [],
+  selectedFormatId: 'default',
+  showFormatPanel: false,
   projects: [],
   currentProjectId: null,
   healingRetryCount: 0,
   activeSprintId: null,
   hotlTaskId: null,
+  currentTemplateData: null,
 
   setActiveSprintId: (id) => set({ activeSprintId: id }),
 
   setCurrentProject: (id) => {
     set({
       currentProjectId: id, state: null, wbsData: null, logs: [],
-      completed_agents: [], currentActivity: null, supervisorFeed: [], healingRetryCount: 0, activeSprintId: null, hotlTaskId: null
+      completed_agents: [], currentActivity: null, supervisorFeed: [], healingRetryCount: 0, activeSprintId: null, hotlTaskId: null, currentTemplateData: null
     });
     if (id) {
       get().fetchWBS();
@@ -150,12 +176,16 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  createProject: async (id: string, templateId?: string) => {
+  createProject: async (id: string, templateId?: string, formatId?: string) => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: id, template_id: templateId || get().selectedTemplateId || 'default' })
+        body: JSON.stringify({ 
+          project_id: id, 
+          template_id: templateId || get().selectedTemplateId || 'default',
+          output_format_id: formatId || get().selectedFormatId || 'default'
+        })
       });
       if (res.ok) {
         await get().fetchProjects();
@@ -168,6 +198,27 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       return false;
     } catch (error) {
       console.error("프로젝트 생성 실패:", error);
+      return false;
+    }
+  },
+
+  copyProject: async (id: string, newId: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects/${id}/copy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_project_id: newId })
+      });
+      if (res.ok) {
+        await get().fetchProjects();
+        return true;
+      }
+      let msg = "시나리오 복제에 실패했습니다.";
+      try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+      alert(msg);
+      return false;
+    } catch (error) {
+      console.error("프로젝트 복제 실패:", error);
       return false;
     }
   },
@@ -416,6 +467,69 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
+  // ── 출력 포맷 관리 (Two-Track Harness) ──────────────────────────────────────────────
+  fetchFormats: async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/formats`);
+      if (res.ok) { const r = await res.json(); set({ formats: r.data || [] }); }
+    } catch (error) {
+      console.error("포맷 목록 로드 실패:", error);
+    }
+  },
+
+  setSelectedFormat: (id: string) => set({ selectedFormatId: id || 'default' }),
+
+  saveFormat: async (fmt: OutputFormat) => {
+    try {
+      // 신규 등록인지 수정인지 판별하여 POST/PUT 처리 가능 (단순화를 위해 PUT/POST)
+      const existing = get().formats.find(f => f.id === fmt.id);
+      const method = existing ? 'PUT' : 'POST';
+      const url = existing ? `${API_BASE_URL}/api/v1/factory/formats/${fmt.id}` : `${API_BASE_URL}/api/v1/factory/formats`;
+      
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fmt),
+      });
+      if (res.ok) {
+        await get().fetchFormats();
+        return true;
+      }
+      let msg = "포맷 저장에 실패했습니다.";
+      try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+      alert(msg);
+      return false;
+    } catch (error) {
+      console.error("포맷 저장 실패:", error);
+      return false;
+    }
+  },
+
+  deleteFormat: async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/formats/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await get().fetchFormats();
+        if (get().selectedFormatId === id) set({ selectedFormatId: 'default' });
+        return true;
+      }
+      let msg = "포맷 삭제에 실패했습니다.";
+      try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+      alert(msg);
+      return false;
+    } catch (error) {
+      console.error("포맷 삭제 실패:", error);
+      return false;
+    }
+  },
+
+  openFormatPanel: () => {
+    set({ showFormatPanel: true });
+    get().fetchFormats();
+  },
+  
+  closeFormatPanel: () => set({ showFormatPanel: false }),
+
   clearSprintData: () => set({ completed_agents: [], currentActivity: null, healingRetryCount: 0 }),
 
   triggerSelfHealing: async (errorMsg: string) => {
@@ -473,9 +587,17 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       if (result.status === "success" && result.data) {
         // 머지(...prev.state) 금지 — 전체 교체. 빈 누적 필드가 이전 프로젝트 값으로 남는 stale 누수 차단.
         set({ state: { ...result.data } as ProjectState });
+        const tid = result.data.template_id || 'default';
+        try {
+          const tRes = await fetch(`${API_BASE_URL}/api/v1/factory/templates/${tid}`);
+          if (tRes.ok) {
+            const tData = await tRes.json();
+            set({ currentTemplateData: tData.data });
+          }
+        } catch(e) { console.error("템플릿 정보 로드 실패", e); }
       } else {
         // not_found(신규/초기 프로젝트) → 명시적 비움
-        set({ state: null });
+        set({ state: null, currentTemplateData: null });
       }
     } catch (error) {
       console.error("최신 상태 복구 실패:", error);

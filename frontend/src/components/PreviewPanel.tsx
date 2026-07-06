@@ -45,7 +45,7 @@ interface PreviewPanelProps {
   release?: any;
 }
 
-type TabType = 'PREVIEW' | 'RFP' | 'PRD' | 'ARCH' | 'TECH' | 'FRONTEND' | 'BACKEND' | 'REVIEW' | 'QA' | 'ACCEPT' | 'MANUAL';
+type TabType = string;
 
 interface CodeFile {
   file_path: string;
@@ -77,6 +77,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   // release(라이브러리 결과물) 보기 모드 추적 — message 핸들러 재구독 없이 최신값 참조
   const releaseRef = useRef<any>(null);
   useEffect(() => { releaseRef.current = release; }, [release]);
+
+  const currentTemplateData = useFactoryStore((s) => s.currentTemplateData);
+  const isDynamic = currentTemplateData && currentTemplateData.agents && currentTemplateData.id !== 'default';
 
   // ─────────────────────────────────────────────────────────────────────────
   // iframe HTML 템플릿
@@ -427,6 +430,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
 
   const getTabContent = () => {
     if (!docs) return "데이터 로딩 대기 중...";
+    if (isDynamic && activeTab !== 'PREVIEW') {
+      return docs.artifacts?.[activeTab] || "산출물이 아직 없습니다.";
+    }
     switch (activeTab) {
       case 'RFP': return docs.rfp_summary || "요구사항 정의서(RFP)가 아직 없습니다.";
       case 'PRD': return docs.prd_summary || "기획서가 없습니다.";
@@ -442,13 +448,22 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     }
   };
 
-  const tabs: { id: TabType; label: string }[] = [
-    { id: 'PREVIEW', label: '🖥️ 실시간 샌드박스' }, { id: 'RFP', label: '📋 요구정의(RFP)' }, { id: 'PRD', label: '📄 기획서' },
-    { id: 'ARCH', label: '🏗️ 아키텍처' }, { id: 'TECH', label: '🛠️ 기술사양' },
-    { id: 'FRONTEND', label: '🎨 프론트엔드' }, { id: 'BACKEND', label: '⚙️ 백엔드' },
-    { id: 'REVIEW', label: '📝 리뷰' }, { id: 'QA', label: '🧪 QA' },
-    { id: 'ACCEPT', label: '🧑‍⚖️ 수용검수' }, { id: 'MANUAL', label: '📘 사용자 매뉴얼' }
-  ];
+  let tabs: { id: TabType; label: string }[] = [];
+  if (isDynamic) {
+    tabs = [{ id: 'PREVIEW', label: '🖥️ 실시간 대시보드' }];
+    const agents = [...currentTemplateData.agents].sort((a: any, b: any) => a.order - b.order);
+    agents.forEach((a: any) => {
+      tabs.push({ id: a.id, label: `📄 ${a.name_ko || a.id}` });
+    });
+  } else {
+    tabs = [
+      { id: 'PREVIEW', label: '🖥️ 실시간 샌드박스' }, { id: 'RFP', label: '📋 요구정의(RFP)' }, { id: 'PRD', label: '📄 기획서' },
+      { id: 'ARCH', label: '🏗️ 아키텍처' }, { id: 'TECH', label: '🛠️ 기술사양' },
+      { id: 'FRONTEND', label: '🎨 프론트엔드' }, { id: 'BACKEND', label: '⚙️ 백엔드' },
+      { id: 'REVIEW', label: '📝 리뷰' }, { id: 'QA', label: '🧪 QA' },
+      { id: 'ACCEPT', label: '🧑‍⚖️ 수용검수' }, { id: 'MANUAL', label: '📘 사용자 매뉴얼' }
+    ];
+  }
 
   return (
     <div className={`flex flex-col bg-gray-900 shadow-inner overflow-hidden relative ${isFullscreen ? 'fixed inset-0 z-50' : 'w-full h-full rounded-lg'}`}>

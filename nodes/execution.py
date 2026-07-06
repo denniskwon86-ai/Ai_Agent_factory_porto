@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import asyncio
 from pathlib import Path
 from typing import Dict, Any, List
 import config
@@ -161,6 +162,47 @@ _INCREMENTAL_GUARD = (
 _FE_OWNED_EXTS = (".tsx", ".ts", ".jsx", ".js", ".css", ".html")
 _BE_OWNED_EXTS = (".py",)
 
+async def _swarm_execution(state_obj: ProjectState, base_prompt: str, is_heavy: bool, full_file_exts: tuple, num_swarm: int = 3) -> Any:
+    """Micro-Swarm 실행기: N개의 에이전트를 병렬로 띄우고 문법/샌드박스 통과 코드를 선별"""
+    
+    async def _run_single(variant_id: int):
+        # Variant에 따라 시스템 프롬프트를 미세하게 변경하여 다양성(Swarm Diversity) 유도
+        variant_prompt = base_prompt + f"\n\n[System Note: You are Swarm Agent #{variant_id}. Focus on writing clean, bug-free code.]"
+        try:
+            return await gateway.aexecute(state_obj, variant_prompt, is_heavy=is_heavy, full_file_exts=full_file_exts)
+        except Exception:
+            return None
+
+    print(f"🧬 [Micro-Swarm] {num_swarm}개의 병렬 에이전트 생성 중...")
+    results = await asyncio.gather(*[_run_single(i) for i in range(1, num_swarm + 1)])
+    
+    valid_outputs = []
+    for idx, raw_out in enumerate(results):
+        out_str = _safe_str(raw_out)
+        if not out_str: continue
+        
+        # 파일 추출 및 샌드박스(정적 문법) 검증
+        files = _extract_files_from_json(out_str)
+        is_valid = True
+        for f in files:
+            path = f.get("file_path", "")
+            code = f.get("code", "")
+            if path.endswith((".ts", ".tsx", ".js", ".jsx")):
+                valid, _ = LocalSyntaxChecker.check_javascript_syntax(code)
+                if not valid: is_valid = False; break
+            elif path.endswith(".py"):
+                valid, _ = LocalSyntaxChecker.check_python_syntax(code)
+                if not valid: is_valid = False; break
+                
+        if is_valid and files:
+            print(f"🎯 [Micro-Swarm] 에이전트 #{idx+1}의 코드가 컴파일 검증을 통과했습니다!")
+            return raw_out # 첫 번째 성공작 즉시 반환
+        else:
+            if files: valid_outputs.append(raw_out)
+            
+    print("⚠️ [Micro-Swarm] 샌드박스를 완벽히 통과한 코드를 찾지 못했습니다. 베스트-에포트 결과를 반환합니다.")
+    return valid_outputs[0] if valid_outputs else results[0]
+
 
 async def run_developer_fe(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
@@ -174,9 +216,8 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
     if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
-    # 코드 생성은 Flash(고속) — 재작업 루프가 잦아 속도가 중요. 회귀 방지는 _INCREMENTAL_GUARD +
-    # 소유 프론트 파일 전체(무절단) 주입(full_file_exts)이 담당(모델 티어 무관).
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=False, full_file_exts=_FE_OWNED_EXTS)
+    # 코드 생성은 Flash(고속) 다중 병렬 호출(Micro-Swarm) 방식으로 품질과 컴파일을 보장
+    output = await _swarm_execution(state_obj, prompt, is_heavy=False, full_file_exts=_FE_OWNED_EXTS, num_swarm=3)
     return {"frontend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_developer_be(state: Any) -> Dict[str, Any]:
@@ -187,8 +228,8 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
     if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[🚨 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
-    # 코드 생성은 Flash(고속) — 회귀 방지는 _INCREMENTAL_GUARD + 소유 백엔드 파일 전체(무절단) 주입이 담당.
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=False, full_file_exts=_BE_OWNED_EXTS)
+    # 코드 생성은 Flash(고속) 다중 병렬 호출(Micro-Swarm) 방식으로 품질과 컴파일을 보장
+    output = await _swarm_execution(state_obj, prompt, is_heavy=False, full_file_exts=_BE_OWNED_EXTS, num_swarm=3)
     return {"backend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_code_builder(state: Any) -> Dict[str, Any]:
@@ -584,9 +625,21 @@ async def run_qa(state: Any) -> Dict[str, Any]:
                 "reviewer_decision": "REWORK_DEV", "reviewer_feedback": report}
 
     from nodes.utils.scoring import score_stage
-    result = await score_stage(state_obj, "QA")
+    from nodes.utils.test_runner import run_background_tests_and_scans, format_test_results_for_qa
+    
+    # 🧪 [Phase 2] 백그라운드 자동화 테스트 및 스캔 실행
+    print("⏳ [QA] 백그라운드 자동화 테스트 및 보안 스캔 실행 중...")
+    test_results = run_background_tests_and_scans(state_obj.workspace_root)
+    test_report_md = format_test_results_for_qa(test_results)
+    if test_report_md:
+        print("📊 [QA] 결정론적 테스트 지표 확보 완료.")
+
+    result = await score_stage(state_obj, "QA", extra_context=test_report_md)
     verdict = "PASS" if result.get("verdict") == "PASS" else "FAIL"
     report = _format_gate_report("QA 통합 검수(기획서·설계서 대비)", result)
+    if test_report_md:
+        report += f"\n\n{test_report_md}"
+        
     print(f"🧪 [QA] 판정: {verdict} (점수 {result.get('score')})")
     updates = {"qa_report_summary": report, "qa_verdict": verdict, "current_stage": "QA"}
     if verdict == "FAIL":

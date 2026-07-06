@@ -12,7 +12,10 @@ except Exception:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import factory_control, realtime
+from api.routes import factory_control, realtime, format_control
+
+# 슈퍼바이저 데몬 초기화 (백그라운드 이벤트 리스너 등록)
+import core.supervisor_daemon
 
 app = FastAPI(
     title="V5.0 AI Factory Studio API",
@@ -21,7 +24,7 @@ app = FastAPI(
 )
 
 # [QA 보완] 하드코딩 배제: 운영 서버와 로컬 환경을 분리하기 위해 환경 변수 사용
-allowed_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
+allowed_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
 
 app.add_middleware(
@@ -33,4 +36,5 @@ app.add_middleware(
 )
 
 app.include_router(factory_control.router)
+app.include_router(format_control.router)
 app.include_router(realtime.router)
