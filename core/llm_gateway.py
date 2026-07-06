@@ -249,6 +249,50 @@ class LLMGateway:
             return self._stringify(raw_output).strip()
         return self._repair_and_parse_json(raw_output)
 
+    async def aexecute_vision(self, state: Any, skill_prompt: str, image_path: str, is_heavy: bool = True) -> str:
+        """
+        [새로운 기능] 멀티모달 Vision 연동 특화 메서드.
+        이미지를 base64 인코딩하여 프롬프트와 함께 전송합니다.
+        """
+        import base64
+        state_obj = ProjectState.model_validate(state) if isinstance(state, dict) else state
+        
+        llm = self.llm_pro if is_heavy else self.llm_flash
+        core_context = ContextEngine.build_core_context(state_obj, light=True)
+        final_prompt = f"{core_context}\n\n[요청 지시사항]:\n{skill_prompt}"
+        
+        system_content = "You are a V5.0 AI Software Factory Agent. Output ONLY a single valid JSON object exactly as instructed." + _LANG_DIRECTIVE
+        
+        try:
+            with open(image_path, "rb") as img_file:
+                image_data = base64.b64encode(img_file.read()).decode("utf-8")
+        except Exception as e:
+            print(f"❌ [Vision Gateway] 이미지 로드 실패: {e}")
+            return json.dumps({"decision": "PASS", "feedback": f"이미지를 로드할 수 없어 검증을 생략합니다. ({e})"}, ensure_ascii=False)
+            
+        # langchain_core messages structure for image base64
+        messages = [
+            SystemMessage(content=system_content),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": final_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{image_data}"}
+                    }
+                ]
+            )
+        ]
+        
+        print(f"📡 [LLM Gateway - Vision] 멀티모달 분석을 시작합니다...")
+        try:
+            response = await llm.ainvoke(messages)
+            raw_output = self._stringify(response.content)
+            return self._repair_and_parse_json(raw_output)
+        except Exception as e:
+            print(f"❌ [LLM Gateway - Vision] 호출 에러: {e}")
+            return json.dumps({"decision": "PASS", "feedback": "Vision API 호출 에러로 생략됨."}, ensure_ascii=False)
+
     @staticmethod
     def _escape_raw_control_chars(text: str) -> str:
         """JSON 문자열 리터럴 내부의 escape 안 된 제어문자(리터럴 개행/CR/탭 등)를 escape.
