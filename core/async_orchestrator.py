@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any
 from core.agent_graph import get_runtime_app
 from core.broadcaster import factory_broadcaster
 from nodes.utils.wbs_manager import WBSManager
+from core.persona_learner import persona_learner
 
 def _pid(workspace_root: str) -> str:
     """workspace_root(./projects/<id>)에서 project_id 추출 — SSE 프로젝트 격리용."""
@@ -186,6 +187,9 @@ class AsyncFactoryOrchestrator:
 
                 queue.append({"task_id": task_id, "feedback": feedback, "status": "pending", "priority": 1})
                 await langgraph_engine.aupdate_state(config, {"human_feedback_queue": queue, "needs_revision": True})
+                
+                # 피드백 내용 학습 기록
+                persona_learner.record_interaction("hotl_feedback", feedback, project_id)
             else:
                 await langgraph_engine.aupdate_state(config, {"needs_revision": False})
         except Exception:

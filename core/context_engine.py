@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Dict, Any
 from state_models import ProjectState
 import config
+from core.persona_learner import persona_learner
+from core.knowledge_base import knowledge_base
 
 # 디스크 walk 시 제외할 디렉터리(노이즈/대용량 방지)
 _EXCLUDE_DIRS = {".git", ".archive", "node_modules", "dist", "build", ".next",
@@ -41,11 +43,22 @@ class ContextEngine:
         ctx_max = (getattr(config, "CONTEXT_MAX_LENGTH_CODE", 200000)
                    if full_file_exts else getattr(config, "CONTEXT_MAX_LENGTH", 20000))
 
+        profile = persona_learner.get_company_profile()
+        profile_str = json.dumps(profile, ensure_ascii=False, indent=2) if profile else "학습된 프로필 없음"
+
+        rag_context = knowledge_base.get_relevant_context(state)
+
         context_parts = [
+            f"🏢 [기업 프로필 & 사용자 성향]:\n{profile_str}"
+        ]
+        if rag_context:
+            context_parts.append(f"📚 [과거 유사 사례 참고]:\n{rag_context}")
+            
+        context_parts.extend([
             f"🎯 [프로젝트 목표]: {state.project_name}",
             f"💡 [초기 기획]: {state.initial_idea}",
             f"📍 [현재 스프린트 태스크]: {state.current_sprint_task_id}"
-        ]
+        ])
 
         if getattr(state, "rfp_summary", ""):
             context_parts.append(f"📋 [요구사항 정의서 (RFP) — 반드시 충족해야 할 기준 계약]:\n{_clip(state.rfp_summary, sm)}")

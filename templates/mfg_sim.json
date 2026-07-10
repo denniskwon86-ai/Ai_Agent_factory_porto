@@ -1,22 +1,89 @@
 {
-  "version": 1,
+  "version": 2,
   "pipeline_name": "제조업 경영관리 시뮬레이터",
-  "description": "환율 변동, 유가 상승, 관세 등의 변수가 매출/원가/영업이익에 미치는 영향을 시뮬레이션하고 대응 시나리오를 도출하는 워크플로우",
+  "description": "환율 변동, 유가 상승, 관세 등의 변수가 매출/원가/영업이익에 미치는 영향을 시뮬레이션하고 대응 시나리오를 도출하는 워크플로우. 시나리오 설계 → 인자 수집 → 가치사슬 시뮬레이션 → 평가 → 인사이트 추천 → 반복 재실행을 지원합니다.",
   "deliverable_type": "hybrid_simulation",
+  "simulation_framework": true,
+  "framework_agents": {
+    "preparation": ["Sim_PM", "Sim_Designer", "Sim_InputCollector", "Sim_Validator"],
+    "evaluation": ["Analysis_Agent", "Sim_Evaluator", "Supervisor_Agent", "Sim_Insight", "Sim_Comparator"],
+    "resim_entry": "Sim_Validator"
+  },
   "agents": [
+    {
+      "id": "Sim_PM",
+      "name_ko": "시뮬레이션 총괄 PM",
+      "role": "사용자의 시뮬레이션 목적을 분석하여 시나리오 프레임워크(가설, KPI, 성공기준, 시나리오 전략)를 수립하고 전체 시뮬레이션을 총괄 관리",
+      "skill": "sim_pm",
+      "stage": "SIM_PLANNING",
+      "category": "planning",
+      "model_tier": "pro",
+      "order": 1,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true,
+      "is_framework": true
+    },
+    {
+      "id": "Sim_Designer",
+      "name_ko": "시뮬레이션 변수 설계사",
+      "role": "PM의 시나리오 프레임워크를 바탕으로 시뮬레이션에 필요한 모든 인풋 변수(이름, 단위, 기본값, 범위, 분류)를 정의",
+      "skill": "sim_designer",
+      "stage": "SIM_DESIGN",
+      "category": "planning",
+      "model_tier": "pro",
+      "order": 2,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true,
+      "is_framework": true
+    },
+    {
+      "id": "Sim_InputCollector",
+      "name_ko": "인풋 수집기",
+      "role": "변수 설계사가 정의한 변수 목록을 바탕으로 사용자에게 각 변수의 실제 값 입력을 요청하는 양식 제공",
+      "skill": "sim_input_collector",
+      "stage": "SIM_INPUT",
+      "category": "planning",
+      "model_tier": "flash",
+      "order": 3,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true,
+      "is_framework": true
+    },
+    {
+      "id": "Sim_Validator",
+      "name_ko": "정합성 검증기",
+      "role": "입력된 인자 값들의 논리적 정합성(범위 초과, 상호 모순, 필수값 누락, 현실성)을 자동 점검",
+      "skill": "sim_validator",
+      "stage": "SIM_VALIDATION",
+      "category": "planning",
+      "model_tier": "pro",
+      "order": 4,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true,
+      "is_framework": true
+    },
     {
       "id": "Sales_Agent",
       "name_ko": "영업 에이전트",
       "role": "시장 트렌드와 고객사 수요를 분석하여 매출 목표 및 필요 공급량을 예측",
       "skill": "sim_sales",
       "stage": "SALES",
-      "category": "planning",
+      "category": "execution",
       "model_tier": "pro",
-      "order": 1,
+      "order": 5,
       "enabled": true,
       "hotl_after": false,
       "debate": false,
-      "llm": true
+      "llm": true,
+      "is_framework": false
     },
     {
       "id": "Purchase_Agent",
@@ -24,13 +91,14 @@
       "role": "수요 예측에 기반하여 최적의 원료 구매 계획 수립 및 구매 시뮬레이션",
       "skill": "sim_purchase",
       "stage": "PURCHASE",
-      "category": "planning",
+      "category": "execution",
       "model_tier": "pro",
-      "order": 2,
+      "order": 6,
       "enabled": true,
       "hotl_after": false,
       "debate": false,
-      "llm": true
+      "llm": true,
+      "is_framework": false
     },
     {
       "id": "Production_Agent",
@@ -40,11 +108,12 @@
       "stage": "PRODUCTION",
       "category": "execution",
       "model_tier": "pro",
-      "order": 3,
+      "order": 7,
       "enabled": true,
       "hotl_after": true,
       "debate": false,
-      "llm": true
+      "llm": true,
+      "is_framework": false
     },
     {
       "id": "Quality_Agent",
@@ -52,13 +121,14 @@
       "role": "생산 공정 및 설비 정보를 바탕으로 예상 수율 및 품질 수준 산출",
       "skill": "sim_quality",
       "stage": "QUALITY",
-      "category": "review",
+      "category": "execution",
       "model_tier": "pro",
-      "order": 4,
+      "order": 8,
       "enabled": true,
       "hotl_after": false,
       "debate": false,
-      "llm": true
+      "llm": true,
+      "is_framework": false
     },
     {
       "id": "Logistics_Agent",
@@ -68,11 +138,12 @@
       "stage": "LOGISTICS",
       "category": "execution",
       "model_tier": "pro",
-      "order": 5,
+      "order": 9,
       "enabled": true,
       "hotl_after": false,
       "debate": false,
-      "llm": true
+      "llm": true,
+      "is_framework": false
     },
     {
       "id": "Finance_Agent",
@@ -80,13 +151,14 @@
       "role": "모든 가치사슬 활동 비용 및 매출을 종합하여 예상 실적(P&L) 산출",
       "skill": "sim_finance",
       "stage": "FINANCE",
-      "category": "review",
+      "category": "execution",
       "model_tier": "pro",
-      "order": 6,
+      "order": 10,
       "enabled": true,
       "hotl_after": false,
       "debate": false,
-      "llm": true
+      "llm": true,
+      "is_framework": false
     },
     {
       "id": "Analysis_Agent",
@@ -96,11 +168,27 @@
       "stage": "ANALYSIS",
       "category": "review",
       "model_tier": "pro",
-      "order": 7,
+      "order": 11,
       "enabled": true,
       "hotl_after": false,
       "debate": false,
-      "llm": true
+      "llm": true,
+      "is_framework": true
+    },
+    {
+      "id": "Sim_Evaluator",
+      "name_ko": "시뮬레이션 평가사",
+      "role": "시뮬레이션 결과의 정합성, 현실성을 평가하고 핵심 리스크를 등급화(Risk Scoring)하여 품질 보증",
+      "skill": "sim_evaluator",
+      "stage": "SIM_EVALUATION",
+      "category": "review",
+      "model_tier": "pro",
+      "order": 12,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true,
+      "is_framework": true
     },
     {
       "id": "Supervisor_Agent",
@@ -110,11 +198,42 @@
       "stage": "SUPERVISOR",
       "category": "review",
       "model_tier": "pro",
-      "order": 8,
+      "order": 13,
       "enabled": true,
       "hotl_after": true,
       "debate": false,
-      "llm": true
+      "llm": true,
+      "is_framework": true
+    },
+    {
+      "id": "Sim_Insight",
+      "name_ko": "인사이트 추천 에이전트",
+      "role": "시뮬레이션 결과를 분석하여 인자 변경 추천, 신규 관리 인자 제안, 민감도 분석을 수행",
+      "skill": "sim_insight",
+      "stage": "SIM_INSIGHT",
+      "category": "review",
+      "model_tier": "pro",
+      "order": 14,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true,
+      "is_framework": true
+    },
+    {
+      "id": "Sim_Comparator",
+      "name_ko": "시나리오 비교 리포터",
+      "role": "2사이클 이상의 시뮬레이션 결과를 비교 분석하여 최적 시나리오 추천 및 트레이드오프 분석",
+      "skill": "sim_comparator",
+      "stage": "SIM_COMPARISON",
+      "category": "review",
+      "model_tier": "pro",
+      "order": 15,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true,
+      "is_framework": true
     }
   ]
 }

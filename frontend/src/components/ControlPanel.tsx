@@ -91,7 +91,9 @@ export default function ControlPanel() {
   const [idea, setIdea] = useState("");
   const [masterData, setMasterData] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [resimParams, setResimParams] = useState("");
   const [isStarting, setIsStarting] = useState(false);
+
   
   const state = useFactoryStore((s) => s.state);
   const wbsData = useFactoryStore((s) => s.wbsData);
@@ -248,6 +250,7 @@ export default function ControlPanel() {
           project_state_payload: {
             ...(state || {}),
             schema_version: "5.1.0",
+
             project_name: wbsData.project_name || currentProjectId,
             current_sprint_task_id: targetTask.task_id,
             factory_mode: targetTask.task_id.startsWith('TASK_REV_') ? "REVISION" : "EXECUTION",
@@ -569,6 +572,51 @@ export default function ControlPanel() {
                 </button>
               </div>
             )}
+            
+            {/* 시뮬레이션 반복 재실행 UI */}
+            {progressPercent === 100 && currentTemplateData?.simulation_framework && currentProjectId && (
+              <div className="flex flex-col gap-2 mb-3 mt-2 p-3 rounded-lg border border-purple-500/50 bg-purple-900/10">
+                <label className="text-sm font-semibold text-purple-300">🔄 인자 변경 후 재실행 (What-if Analysis)</label>
+                <p className="text-xs text-gray-400">변경할 인자와 값을 JSON 형식으로 입력하세요. (예: {`{"환율": 1450, "유가": 85}`})</p>
+                <textarea 
+                  value={resimParams} onChange={(e) => setResimParams(e.target.value)} disabled={isStarting || activeSprintId !== null}
+                  placeholder='{"변수명": 변경값}'
+                  className="w-full h-20 bg-gray-950 border border-gray-700 rounded p-2 text-sm focus:outline-none focus:border-purple-500 resize-none font-mono disabled:opacity-50 text-gray-300"
+                />
+                <button 
+                  onClick={async () => {
+                    try {
+                      const params = JSON.parse(resimParams || "{}");
+                      if (Object.keys(params).length === 0) return alert("변경할 인자를 입력해주세요.");
+                      if (!confirm("현재 결과를 보존하고 새로운 인자로 시뮬레이션을 재실행하시겠습니까?")) return;
+                      
+                      setIsStarting(true);
+                      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/resimulate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ modified_params: params, base_cycle: state?.sim_cycle_count || 1 })
+                      });
+                      const data = await res.json();
+                      if (res.ok) {
+                        alert(data.message);
+                        setResimParams("");
+                      } else {
+                        alert(`재실행 오류: ${data.detail}`);
+                      }
+                    } catch (e) {
+                      alert("유효한 JSON 형식이 아닙니다.");
+                    } finally {
+                      setIsStarting(false);
+                    }
+                  }} 
+                  disabled={isStarting || !resimParams.trim() || activeSprintId !== null}
+                  className="mt-1 w-full bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 font-bold py-2 rounded text-white text-sm"
+                >
+                  {isStarting ? "처리 중..." : "▶️ 시뮬레이션 재실행"}
+                </button>
+              </div>
+            )}
+
 
             {wbsData.tasks.map((task: any) => {
               const isDone = task.status === 'DONE';

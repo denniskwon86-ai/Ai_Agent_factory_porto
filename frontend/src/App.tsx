@@ -10,6 +10,7 @@ import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
 import AgentMasterPanel from './components/AgentMasterPanel';
+import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 
 interface EBProps { children: ReactNode; }
 interface EBState { hasError: boolean; error: Error | null; }
@@ -70,6 +71,7 @@ export default function App() {
   const fetchTemplates = useFactoryStore((state) => state.fetchTemplates);
 
   const [newProjectId, setNewProjectId] = useState("");
+  const [showSkillEvolution, setShowSkillEvolution] = useState(false);
 
   const selectedTemplateData = templates.find((t: any) => t.id === selectedTemplateId);
 
@@ -157,6 +159,13 @@ export default function App() {
                 title="각 에이전트의 역할·스킬·모델·순서·HOTL을 설정"
               >
                 ⚙️ Agent Master
+              </button>
+              <button
+                onClick={() => setShowSkillEvolution(true)}
+                className="text-sm font-bold text-purple-200 bg-purple-900/50 hover:bg-purple-800 border border-purple-700 px-3 py-1.5 rounded transition-colors"
+                title="에이전트가 스스로 제안한 스킬 개선안 승인/반려"
+              >
+                🧬 스킬 진화
               </button>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-400 font-medium">통신망 상태:</span>

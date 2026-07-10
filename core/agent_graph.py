@@ -340,15 +340,31 @@ def build_graph_from_registry(registry=None):
         from nodes.universal import make_universal_node
         for aid in enabled_ids:
             workflow.add_node(aid, make_universal_node(aid))
+            
         if enabled_ids:
-            start_agent = next((a["id"] for a in enabled if a.get("is_start")), enabled_ids[0])
-            workflow.set_entry_point(start_agent)
+            def route_universal(state: ProjectState) -> str:
+                # 재실행(resimulate) 모드일 경우 시작점을 다르게 라우팅
+                if state.factory_mode == "EXECUTION" and reg.get("simulation_framework", False):
+                    resim_entry = reg.get("framework_agents", {}).get("resim_entry", "")
+                    if resim_entry and resim_entry in enabled_ids:
+                        print(f"🔄 [Resimulate] 기존 설계 건너뛰기. {resim_entry}부터 재실행합니다.")
+                        return resim_entry
+                
+                # 기본 시작점
+                return next((a["id"] for a in enabled if a.get("is_start")), enabled_ids[0])
+
+            # 조건부 진입점 설정
+            workflow.set_conditional_entry_point(
+                route_universal,
+                {aid: aid for aid in enabled_ids}
+            )
             
             for a_id, b_id in zip(enabled_ids, enabled_ids[1:]):
                 workflow.add_edge(a_id, b_id)
                 
             end_agent = next((a["id"] for a in enabled if a.get("is_end")), enabled_ids[-1])
             workflow.add_edge(end_agent, END)
+            
         # HOTL 중단점 = enabled 노드 중 hotl_after(범용 노드는 모두 add_node 됐으므로 제한 없음)
         interrupt_after = [a["id"] for a in enabled if a.get("hotl_after", False)]
 

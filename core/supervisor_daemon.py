@@ -3,6 +3,8 @@ import json
 from core.broadcaster import factory_broadcaster
 from core.async_orchestrator import orchestrator
 from core.llm_gateway import gateway
+from core.persona_learner import persona_learner
+from core.skill_evolution import skill_evolution
 
 class SupervisorDaemon:
     """
@@ -66,10 +68,22 @@ class SupervisorDaemon:
                 print(f"👁️‍🗨️ [Supervisor Daemon] 치명적 결함 감지! 파이프라인 개입(Pause)을 시도합니다. 사유: {reason}")
                 await orchestrator.pause_sprint(task_id, project_id, reason=reason)
                 
+                # 에이전트 실패 자가 반성 트리거
+                import asyncio
+                asyncio.create_task(skill_evolution.analyze_failure(node_name, reason, state_data))
+            elif state_data.get("needs_revision", False) or state_data.get("factory_mode") == "REVISION":
+                # 피드백에 의한 수정 작업일 경우에도 반성 트리거 (사유는 큐에서 가장 최근 피드백 추출)
+                feedback_queue = state_data.get("human_feedback_queue", [])
+                if feedback_queue:
+                    latest_feedback = feedback_queue[-1].get("feedback", "알 수 없는 피드백")
+                    import asyncio
+                    asyncio.create_task(skill_evolution.analyze_failure(node_name, latest_feedback, state_data))
+                    
         except Exception as e:
             print(f"⚠️ [Supervisor Daemon] 상태 모니터링 중 오류 발생: {e}")
 
     async def handle_user_chat(self, project_id: str, task_id: str, message: str, state_data: dict) -> dict:
+        persona_learner.record_interaction("supervisor_chat", message, project_id)
         prompt = f"""
 당신은 현재 가동 중인 프로젝트의 비즈니스 관점 슈퍼바이저(AGI)입니다.
 사용자(인간)가 파이프라인 가동 중에 당신에게 다음과 같은 메시지(질문/지시)를 보냈습니다:

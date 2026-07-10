@@ -440,8 +440,139 @@ async def create_release(project_id: str):
     os.makedirs(rel_dir, exist_ok=True)
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
         json.dump(release, f, ensure_ascii=False, indent=2)
+        
+    # 지식 베이스(RAG) 인덱싱 (백그라운드에서 실행되도록 asyncio_task 등록 등 가능하지만 여기서는 간단히 직접 호출)
+    try:
+        from core.knowledge_base import knowledge_base
+        import asyncio
+        
+        # 파일 내용을 구성
+        files_content = {
+            "rfp.md": release.get("rfp_summary", ""),
+            "prd.md": release.get("prd_summary", ""),
+            "architecture.md": release.get("architecture_summary", ""),
+            "tech_spec.md": release.get("tech_spec_summary", ""),
+            "code_review.md": release.get("code_review_report_summary", ""),
+            "qa_report.md": release.get("qa_report_summary", ""),
+            "manual.md": release.get("user_manual_summary", "")
+        }
+        
+        # 범용 T3 에이전트들의 산출물
+        artifacts = s.get("artifacts", {})
+        for k, v in artifacts.items():
+            if isinstance(v, str) and v.strip():
+                files_content[f"{k}.md"] = v
+                
+        # 워크스페이스 내 주요 파일들도 읽어서 추가 가능 (코드 등)
+        ws_path = os.path.join("projects", project_id)
+        for root_dir, _, files in os.walk(ws_path):
+            if any(exc in root_dir for exc in [".git", "node_modules", "dist", ".archive"]):
+                continue
+            for fname in files:
+                if fname.endswith(('.md', '.py', '.ts', '.tsx', '.json', '.txt')):
+                    fpath = os.path.join(root_dir, fname)
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as rf:
+                            files_content[fname] = rf.read()
+                    except:
+                        pass
+        
+        metadata = {
+            "template_id": release.get("template_id", "default"),
+            "deliverable_type": release.get("deliverable_type", "software_app")
+        }
+        
+        # 메인 스레드 블로킹을 피하기 위해 비동기로 위임 (FastAPI BackgroundTasks도 좋으나 여기서는 asyncio)
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(
+            None, 
+            knowledge_base.index_release, 
+            project_id, 
+            release_id, 
+            files_content, 
+            metadata
+        )
+    except Exception as e:
+        print(f"⚠️ [FactoryControl] 지식 베이스 인덱싱 트리거 실패: {e}")
+
     return {"status": "success", "release_id": release_id}
 
+
+# ==========================================
+# 시뮬레이션 인자 변경 반복 재실행 (Re-simulation)
+# ==========================================
+class ResimulateRequest(BaseModel):
+    modified_params: dict  # 변경된 인자 값 {"환율": 1450, "유가": 85}
+    base_cycle: int = 1    # 기준 사이클 번호
+
+@router.post("/{project_id}/resimulate")
+async def resimulate(project_id: str, req: ResimulateRequest):
+    """시뮬레이션 인자를 변경하여 재실행. 기존 변수 정의를 유지한 채 Validator → 실행 파이프라인만 재가동."""
+    _safe_id(project_id, "project_id")
+    
+    state_path = os.path.join("projects", project_id, "latest_state.json")
+    if not os.path.exists(state_path):
+        raise HTTPException(status_code=404, detail="재실행할 시뮬레이션 상태가 없습니다.")
+    
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            current_state = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"상태 읽기 오류: {str(e)}")
+    
+    # 사이클 번호 관리
+    cycle_count = current_state.get("sim_cycle_count", 1) + 1
+    
+    # 이전 사이클 결과를 보존 (artifacts에 사이클 태깅)
+    artifacts = current_state.get("artifacts", {})
+    artifact_summaries = current_state.get("artifact_summaries", {})
+    
+    # 이전 사이클 결과를 cycle_N_ 접두사로 보존
+    prev_cycle = cycle_count - 1
+    preserved_artifacts = {}
+    preserved_summaries = {}
+    for key, val in artifacts.items():
+        preserved_artifacts[f"cycle_{prev_cycle}_{key}"] = val
+    for key, val in artifact_summaries.items():
+        preserved_summaries[f"cycle_{prev_cycle}_{key}"] = val
+    
+    # 변경된 인자 정보를 initial_idea에 추가 (에이전트들이 참조할 수 있도록)
+    modified_params_text = "\n".join([f"- {k}: {v}" for k, v in req.modified_params.items()])
+    resim_context = f"\n\n[시뮬레이션 {cycle_count}사이클 — 인자 변경 재실행]\n변경된 인자:\n{modified_params_text}\n\n이전 사이클({prev_cycle}사이클) 결과와 비교하여 분석하시오."
+    
+    # 새로운 태스크 ID 생성
+    resim_task_id = f"TASK_RESIM_{cycle_count}"
+    
+    # 상태 업데이트
+    updated_state = {
+        **current_state,
+        "current_sprint_task_id": resim_task_id,
+        "factory_mode": "EXECUTION",  # 설계 단계 건너뛰고 실행
+        "sim_cycle_count": cycle_count,
+        "sim_modified_params": req.modified_params,
+        "sim_base_cycle": req.base_cycle,
+        "artifacts": {**preserved_artifacts},  # 이전 결과 보존, 현재 사이클은 비우기
+        "artifact_summaries": {**preserved_summaries},
+        "initial_idea": current_state.get("initial_idea", "") + resim_context,
+    }
+    
+    # 상태 저장
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(updated_state, f, ensure_ascii=False, indent=2)
+    
+    # 스프린트 가동 (Validator부터 시작 — 설계 건너뛰기)
+    workspace = os.path.join("projects", project_id)
+    success = await orchestrator.start_sprint(resim_task_id, updated_state, workspace)
+    
+    if success:
+        return {
+            "status": "success", 
+            "cycle": cycle_count, 
+            "task_id": resim_task_id,
+            "message": f"{cycle_count}사이클 재실행이 시작되었습니다."
+        }
+    else:
+        raise HTTPException(status_code=409, detail="이미 실행 중인 스프린트가 있습니다.")
 
 @router.get("/library/list")
 async def list_releases():
@@ -550,7 +681,47 @@ class AIRecommendSkillRequest(BaseModel):
 @router.post("/ai-recommend/pipeline")
 async def ai_recommend_pipeline(req: AIRecommendPipelineRequest):
     from core.llm_gateway import LLMGateway
-    prompt = f"""
+    
+    # 시뮬레이션 성격 판별 키워드
+    sim_keywords = ["시뮬레이션", "시뮬레이터", "simulation", "simulator", "what-if", "시나리오", "scenario"]
+    is_simulation = any(kw in req.user_request.lower() for kw in sim_keywords)
+    
+    if is_simulation:
+        # 시뮬레이션 프레임워크: 실행 단계만 AI에게 생성 요청
+        prompt = f"""
+사용자가 시뮬레이션 파이프라인을 요청했습니다.
+시뮬레이션 워크플로우의 "실행 단계(Execution Phase)" 에이전트만 설계해 주세요.
+준비 단계(PM, 설계사, 수집기, 검증기)와 평가 단계(분석, 평가, 총괄, 인사이트, 비교)는 시스템이 자동으로 삽입합니다.
+당신은 가치사슬이나 업무 프로세스의 핵심 실행 에이전트만 설계하면 됩니다.
+
+사용자 요청: {req.user_request}
+
+출력 형식: 반드시 아래 JSON 스키마를 따를 것 (실행 단계 에이전트만 포함):
+{{
+    "execution_agents": [
+        {{
+            "id": "영문_ID_형식",
+            "name_ko": "한글 표시명",
+            "role": "역할 상세 설명",
+            "skill": "skill_name_without_md",
+            "stage": "STAGE_NAME",
+            "category": "execution",
+            "model_tier": "pro",
+            "enabled": true,
+            "hotl_after": false,
+            "debate": false,
+            "llm": true
+        }}
+    ],
+    "pipeline_name": "...",
+    "description": "..."
+}}
+
+실행 에이전트는 3~8개 범위로, 해당 도메인의 핵심 업무 흐름에 맞게 설계하십시오.
+"""
+    else:
+        # 일반 워크플로우: 전체 파이프라인 생성 (기존 로직)
+        prompt = f"""
     사용자가 원하는 에이전트 기능을 바탕으로 전체 파이프라인(에이전트 목록 및 연결 관계)을 설계해 줘.
     요청: {req.user_request}
     
@@ -591,14 +762,74 @@ async def ai_recommend_pipeline(req: AIRecommendPipelineRequest):
     res = await llm.aexecute({}, prompt, output_mode="json", light=True)
     try:
         import re
-        # 마크다운 ```json ... ``` 코드블록 제거
         match = re.search(r'```(?:json)?\s*(.*?)\s*```', res, re.DOTALL)
         if match:
             res = match.group(1)
         data = json.loads(res)
+        
+        if is_simulation:
+            # 시뮬레이션 프레임워크 셸 자동 조립
+            data = _assemble_simulation_framework(data)
+        
         return {"status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"파이프라인 생성 실패: {str(e)}\n\n(LLM 응답: {res[:100]}...)")
+
+
+def _assemble_simulation_framework(ai_data: dict) -> dict:
+    """AI가 생성한 실행 단계 에이전트를 고정 프레임워크 셸에 조립합니다."""
+    
+    # 고정 프레임워크: 준비 단계 (order 1~4)
+    prep_agents = [
+        {"id": "Sim_PM", "name_ko": "시뮬레이션 총괄 PM", "role": "시나리오 프레임워크 수립 및 전체 시뮬레이션 총괄 관리", "skill": "sim_pm", "stage": "SIM_PLANNING", "category": "planning", "model_tier": "pro", "order": 1, "enabled": True, "hotl_after": True, "debate": False, "llm": True, "is_framework": True},
+        {"id": "Sim_Designer", "name_ko": "시뮬레이션 변수 설계사", "role": "시뮬레이션에 필요한 인풋 변수 목록 정의", "skill": "sim_designer", "stage": "SIM_DESIGN", "category": "planning", "model_tier": "pro", "order": 2, "enabled": True, "hotl_after": True, "debate": False, "llm": True, "is_framework": True},
+        {"id": "Sim_InputCollector", "name_ko": "인풋 수집기", "role": "사용자에게 변수 값 입력 요청", "skill": "sim_input_collector", "stage": "SIM_INPUT", "category": "planning", "model_tier": "flash", "order": 3, "enabled": True, "hotl_after": True, "debate": False, "llm": True, "is_framework": True},
+        {"id": "Sim_Validator", "name_ko": "정합성 검증기", "role": "입력된 인자 값의 논리적 정합성 점검", "skill": "sim_validator", "stage": "SIM_VALIDATION", "category": "planning", "model_tier": "pro", "order": 4, "enabled": True, "hotl_after": False, "debate": False, "llm": True, "is_framework": True},
+    ]
+    
+    # AI가 생성한 실행 단계 에이전트 (order 5~)
+    exec_agents = ai_data.get("execution_agents", ai_data.get("agents", []))
+    for i, agent in enumerate(exec_agents):
+        agent["order"] = 5 + i
+        agent["is_framework"] = False
+    
+    exec_end_order = 5 + len(exec_agents)
+    
+    # 고정 프레임워크: 평가 단계
+    eval_agents = [
+        {"id": "Analysis_Agent", "name_ko": "분석/개선 에이전트", "role": "가치사슬 병목 분석 및 효율화 포인트 발굴", "skill": "sim_analysis", "stage": "ANALYSIS", "category": "review", "model_tier": "pro", "order": exec_end_order, "enabled": True, "hotl_after": False, "debate": False, "llm": True, "is_framework": True},
+        {"id": "Sim_Evaluator", "name_ko": "시뮬레이션 평가사", "role": "시뮬레이션 결과의 정합성, 현실성 평가 및 리스크 스코어링", "skill": "sim_evaluator", "stage": "SIM_EVALUATION", "category": "review", "model_tier": "pro", "order": exec_end_order + 1, "enabled": True, "hotl_after": False, "debate": False, "llm": True, "is_framework": True},
+        {"id": "Supervisor_Agent", "name_ko": "경영관리 총괄(슈퍼바이저)", "role": "C레벨 의사결정용 요약 보고서 도출", "skill": "sim_supervisor", "stage": "SUPERVISOR", "category": "review", "model_tier": "pro", "order": exec_end_order + 2, "enabled": True, "hotl_after": True, "debate": False, "llm": True, "is_framework": True},
+        {"id": "Sim_Insight", "name_ko": "인사이트 추천 에이전트", "role": "인자 변경 추천, 신규 관리 인자 제안, 민감도 분석", "skill": "sim_insight", "stage": "SIM_INSIGHT", "category": "review", "model_tier": "pro", "order": exec_end_order + 3, "enabled": True, "hotl_after": True, "debate": False, "llm": True, "is_framework": True},
+        {"id": "Sim_Comparator", "name_ko": "시나리오 비교 리포터", "role": "2사이클 이상 결과 비교 분석 및 최적 시나리오 추천", "skill": "sim_comparator", "stage": "SIM_COMPARISON", "category": "review", "model_tier": "pro", "order": exec_end_order + 4, "enabled": True, "hotl_after": True, "debate": False, "llm": True, "is_framework": True},
+    ]
+    
+    all_agents = prep_agents + exec_agents + eval_agents
+    
+    # 엣지 생성 (선형 연결)
+    edges = []
+    for i in range(len(all_agents) - 1):
+        edges.append({
+            "id": f"e-{all_agents[i]['id']}-{all_agents[i+1]['id']}",
+            "source": all_agents[i]["id"],
+            "target": all_agents[i+1]["id"],
+            "animated": True,
+            "style": {"stroke": "#4b5563", "strokeWidth": 2}
+        })
+    
+    return {
+        "pipeline_name": ai_data.get("pipeline_name", "시뮬레이션 파이프라인"),
+        "description": ai_data.get("description", ""),
+        "deliverable_type": "hybrid_simulation",
+        "simulation_framework": True,
+        "framework_agents": {
+            "preparation": [a["id"] for a in prep_agents],
+            "evaluation": [a["id"] for a in eval_agents],
+            "resim_entry": "Sim_Validator"
+        },
+        "agents": all_agents,
+        "edges": edges
+    }
 
 @router.post("/ai-recommend/skill")
 async def ai_recommend_skill(req: AIRecommendSkillRequest):
