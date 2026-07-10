@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "pipeline_name": "제조업 원가 분석",
+  "description": "재료비, 노무비, 제조간접비를 종합적으로 수집하고 분석하여 제품별 원가를 산출하고 원가 절감 요소를 파악합니다.",
+  "deliverable_type": "document_report",
+  "agents": [
+    {
+      "id": "Cost_Data_Collector",
+      "name_ko": "원가 데이터 수집기",
+      "role": "ERP 및 회계 시스템에서 자재 명세서(BOM), 임율, 설비 감가상각비 등 원가 계산의 기초 데이터를 수집합니다.",
+      "skill": "cost_data_collector_skill",
+      "stage": "DATA_COLLECTION",
+      "category": "system",
+      "model_tier": "flash",
+      "order": 1,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true
+    },
+    {
+      "id": "Direct_Cost_Analyzer",
+      "name_ko": "직접원가 분석가",
+      "role": "수집된 데이터를 바탕으로 제품별 직접 재료비와 직접 노무비를 계산하고 표준원가와 비교하여 차이를 분석합니다.",
+      "skill": "direct_cost_analyzer_skill",
+      "stage": "DIRECT_COST",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 2,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": true,
+      "llm": true
+    },
+    {
+      "id": "Overhead_Allocator",
+      "name_ko": "제조간접비 배부 전문가",
+      "role": "활동기준원가계산(ABC) 등을 활용하여 제조간접비를 공정별, 제품별로 합리적으로 배부합니다.",
+      "skill": "overhead_allocator_skill",
+      "stage": "OVERHEAD_ALLOC",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 3,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true
+    },
+    {
+      "id": "Cost_Reduction_Strategist",
+      "name_ko": "원가 절감 전략가",
+      "role": "원가 차이(Variance) 분석 결과를 바탕으로 낭비 요소를 식별하고 공정 개선 및 원가 절감 방안을 도출합니다.",
+      "skill": "cost_reduction_strategist_skill",
+      "stage": "STRATEGY",
+      "category": "planning",
+      "model_tier": "pro",
+      "order": 4,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": true,
+      "llm": true
+    },
+    {
+      "id": "CFO_Report_Generator",
+      "name_ko": "재무 보고서 생성기",
+      "role": "최종 원가 분석 결과와 절감 전략을 종합하여 경영진(CFO)을 위한 의사결정 지원 보고서를 작성합니다.",
+      "skill": "cfo_report_generator_skill",
+      "stage": "REPORT",
+      "category": "review",
+      "model_tier": "pro",
+      "order": 5,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true
+    }
+  ]
+}

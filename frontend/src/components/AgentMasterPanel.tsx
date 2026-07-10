@@ -1,30 +1,12 @@
-import { useEffect, useState } from "react";
-import { useFactoryStore } from "../store/useFactoryStore";
+import { useEffect, useState, useCallback } from "react";
+import { useFactoryStore, API_BASE_URL } from "../store/useFactoryStore";
+import { ReactFlow, Background, Controls, useNodesState, useEdgesState, addEdge, applyEdgeChanges } from "@xyflow/react";
+import type { Edge, Node, Connection } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import AgentNode from "./AgentFlow/AgentNode";
+import AgentDetailSidebar from "./AgentFlow/AgentDetailSidebar";
 
-// 에이전트 마스터 제어판 (범용 멀티에이전트 플랫폼 Phase 1)
-// 각 에이전트의 역할·스킬·모델티어·순서·HOTL·활성화를 외부 레지스트리(SSOT)에서 보고 편집/저장한다.
-
-const CATEGORY_META: Record<string, { label: string; color: string }> = {
-  planning: { label: "기획", color: "text-sky-400 border-sky-500/40 bg-sky-500/10" },
-  execution: { label: "실행", color: "text-emerald-400 border-emerald-500/40 bg-emerald-500/10" },
-  review: { label: "검수", color: "text-amber-400 border-amber-500/40 bg-amber-500/10" },
-  system: { label: "시스템", color: "text-gray-400 border-gray-500/40 bg-gray-500/10" },
-};
-
-function Toggle({ on, onClick, label, title }: { on: boolean; onClick: () => void; label: string; title?: string }) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className={`px-2.5 py-1 rounded text-xs font-bold border transition-colors ${
-        on ? "bg-blue-600 border-blue-400 text-white" : "bg-gray-900 border-gray-700 text-gray-500 hover:text-gray-300"
-      }`}
-    >
-      {on ? "● " : "○ "}{label}
-    </button>
-  );
-}
+const nodeTypes = { agentNode: AgentNode };
 
 export default function AgentMasterPanel() {
   const agentRegistry = useFactoryStore((s) => s.agentRegistry);
@@ -40,6 +22,14 @@ export default function AgentMasterPanel() {
   const [draft, setDraft] = useState<any | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [isGeneratingPipeline, setIsGeneratingPipeline] = useState(false);
+  const [showAiModal, setShowAiModal] = useState(false);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
   const isDefault = editingTemplateId === "default";
 
   // 레지스트리 로드 시 편집 사본 초기화
@@ -47,8 +37,141 @@ export default function AgentMasterPanel() {
     if (agentRegistry) {
       setDraft(JSON.parse(JSON.stringify(agentRegistry)));
       setDirty(false);
+      setSelectedAgentId(null);
     }
   }, [agentRegistry]);
+
+  // draft가 변경될 때마다 React Flow 노드/엣지 초기화 동기화
+  useEffect(() => {
+    if (!draft || !draft.agents) return;
+    const sortedAgents = [...draft.agents].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    
+    setNodes((nds) => {
+      const itemsPerRow = Math.max(3, Math.floor(window.innerWidth / 300));
+      return sortedAgents.map((agent, index) => {
+        const existingNode = nds.find((n) => n.id === agent.id);
+        const position = agent.position || (existingNode ? existingNode.position : { 
+          x: (index % itemsPerRow) * 280, 
+          y: 100 + Math.floor(index / itemsPerRow) * 160 
+        });
+        return {
+          id: agent.id,
+          type: "agentNode",
+          position,
+          data: agent,
+          selected: agent.id === selectedAgentId,
+        };
+      });
+    });
+
+    // 만약 draft.edges가 있으면 그걸 사용하고, 없으면 기존 order 기반으로 생성
+    let currentEdges: Edge[] = draft.edges || [];
+    if (currentEdges.length === 0 && sortedAgents.length > 1) {
+      for (let i = 0; i < sortedAgents.length - 1; i++) {
+        currentEdges.push({
+          id: `e-${sortedAgents[i].id}-${sortedAgents[i+1].id}`,
+          source: sortedAgents[i].id,
+          target: sortedAgents[i+1].id,
+          animated: true,
+          style: { stroke: '#4b5563', strokeWidth: 2 },
+        });
+      }
+    }
+    setEdges(currentEdges);
+  }, [draft?.agents?.length, draft?.edges, selectedAgentId, editingTemplateId]); 
+
+  const updateOrderFromEdges = (currentEdges: Edge[], agents: any[]) => {
+    const inDegree: Record<string, number> = {};
+    const graph: Record<string, string[]> = {};
+    agents.forEach(a => { inDegree[a.id] = 0; graph[a.id] = []; });
+    
+    currentEdges.forEach(e => {
+      if (graph[e.source] && inDegree[e.target] !== undefined) {
+        graph[e.source].push(e.target);
+        inDegree[e.target] += 1;
+      }
+    });
+
+    const queue = agents.filter(a => inDegree[a.id] === 0).map(a => a.id);
+    let currentOrder = 1;
+    const newOrderMap: Record<string, number> = {};
+
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      newOrderMap[node] = currentOrder++;
+      (graph[node] || []).forEach(neighbor => {
+        inDegree[neighbor] -= 1;
+        if (inDegree[neighbor] === 0) queue.push(neighbor);
+      });
+    }
+
+    agents.forEach(a => {
+      if (!newOrderMap[a.id]) newOrderMap[a.id] = currentOrder++;
+    });
+
+    return newOrderMap;
+  };
+
+  const handleEdgesChange = useCallback(
+    (changes: any) => {
+      setEdges((eds) => {
+        const nextEdges = applyEdgeChanges(changes, eds) as Edge[];
+        setDraft((d: any) => {
+          if (!d) return d;
+          const newOrderMap = updateOrderFromEdges(nextEdges, d.agents);
+          return {
+            ...d,
+            edges: nextEdges,
+            agents: d.agents.map((a: any) => ({ ...a, order: newOrderMap[a.id] })),
+          };
+        });
+        setDirty(true);
+        return nextEdges;
+      });
+    },
+    [setEdges]
+  );
+
+  const onConnect = useCallback(
+    (params: Connection) => {
+      const newEdge = { ...params, animated: true, style: { stroke: '#4b5563', strokeWidth: 2 } };
+      setEdges((eds) => {
+        const nextEdges = addEdge(newEdge, eds) as Edge[];
+        setDraft((d: any) => {
+          if (!d) return d;
+          const newOrderMap = updateOrderFromEdges(nextEdges, d.agents);
+          return {
+            ...d,
+            edges: nextEdges,
+            agents: d.agents.map((a: any) => ({ ...a, order: newOrderMap[a.id] })),
+          };
+        });
+        setDirty(true);
+        return nextEdges;
+      });
+    },
+    [setEdges]
+  );
+
+  // 노드 드래그 종료 시 위치만 저장 (순서는 엣지가 결정)
+  const onNodeDragStop = useCallback((event: any, node: any) => {
+    setDraft((d: any) => {
+      if (!d || !d.agents) return d;
+      return {
+        ...d,
+        agents: d.agents.map((a: any) => a.id === node.id ? { ...a, position: node.position } : a)
+      };
+    });
+    setDirty(true);
+  }, []);
+
+  const onNodeClick = useCallback((event: any, node: any) => {
+    setSelectedAgentId(node.id);
+  }, []);
+
+  const onPaneClick = useCallback(() => {
+    setSelectedAgentId(null);
+  }, []);
 
   if (!draft) {
     return (
@@ -58,7 +181,9 @@ export default function AgentMasterPanel() {
     );
   }
 
-  const agents: any[] = [...(draft.agents || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const agents: any[] = draft.agents || [];
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId) || null;
+  const hotlCount = agents.filter((a) => a.enabled && a.hotl_after).length;
 
   const updateAgent = (id: string, key: string, value: any) => {
     setDraft((d: any) => ({
@@ -67,6 +192,7 @@ export default function AgentMasterPanel() {
     }));
     setDirty(true);
   };
+
   const updateMeta = (key: string, value: any) => {
     setDraft((d: any) => ({ ...d, [key]: value }));
     setDirty(true);
@@ -81,19 +207,46 @@ export default function AgentMasterPanel() {
       alert(`✅ 템플릿 '${editingTemplateId}' 을(를) 저장했습니다.\n(이 템플릿으로 새로 생성하는 프로젝트부터 반영됩니다. 진행 중인 작업에는 영향 없음.)`);
     }
   };
+
+  const handleGeneratePipeline = async () => {
+    if (!aiPrompt.trim()) return;
+    if (dirty && !confirm("저장하지 않은 변경사항이 사라집니다. 계속하시겠습니까?")) return;
+    
+    setIsGeneratingPipeline(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/ai-recommend/pipeline`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_request: aiPrompt })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === "success") {
+        setDraft(data.data);
+        setDirty(true);
+        setSelectedAgentId(null);
+        setAiPrompt("");
+        setShowAiModal(false);
+      } else {
+        alert(`생성 실패: ${data.detail || "알 수 없는 오류"}`);
+      }
+    } catch (e: any) {
+      alert(`생성 중 오류 발생: ${e.message}`);
+    } finally {
+      setIsGeneratingPipeline(false);
+    }
+  };
+
   const handleReset = async () => {
     if (!confirm("기본(default) 템플릿을 출고 상태(현재 SW 파이프라인)로 초기화하시겠습니까? 저장된 커스텀 설정이 사라집니다.")) return;
     await resetAgentRegistry();
   };
 
-  // 편집 대상 템플릿 전환 — 저장 안 된 변경이 있으면 경고(전환 시 사라짐)
   const handleSwitchTemplate = async (tid: string) => {
     if (tid === editingTemplateId) return;
     if (dirty && !confirm("저장하지 않은 변경이 있습니다. 템플릿을 전환하면 변경이 사라집니다. 계속할까요?")) return;
     await selectEditingTemplate(tid);
   };
 
-  // 현재 편집 중인 템플릿을 복사해 새 워크플로우 생성(Copy 모델 — 기존은 불변)
   const handleCopy = async () => {
     const newId = prompt("새 템플릿 ID (영문/숫자/_/- 만):", "");
     if (!newId || !newId.trim()) return;
@@ -109,12 +262,10 @@ export default function AgentMasterPanel() {
     if (ok) alert("템플릿을 삭제했습니다. 기본(default) 템플릿으로 돌아갑니다.");
   };
 
-  const hotlCount = agents.filter((a) => a.enabled && a.hotl_after).length;
-
   return (
     <div className="h-screen w-screen bg-gray-900 text-gray-100 flex flex-col font-sans overflow-hidden">
       {/* 헤더 */}
-      <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0">
+      <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0 z-10 shadow-sm">
         <div className="flex items-center gap-4 min-w-0">
           <button onClick={closeAgentPanel} className="text-sm font-bold text-gray-400 hover:text-white bg-gray-700 px-3 py-1.5 rounded transition-colors shrink-0">◀ 런처</button>
           <h1 className="text-lg font-bold text-white truncate">⚙️ 에이전트 마스터 제어판</h1>
@@ -128,8 +279,8 @@ export default function AgentMasterPanel() {
         </div>
       </header>
 
-      {/* 템플릿 전환·복사·삭제 바 (Copy 모델 — 기존 워크플로우 보존, 복사해 새 구성 제작) */}
-      <div className="bg-gray-850 bg-gray-800/60 border-b border-gray-700 px-6 py-2.5 flex items-center gap-3 shrink-0 flex-wrap">
+      {/* 템플릿 툴바 */}
+      <div className="bg-gray-850 bg-gray-800/60 border-b border-gray-700 px-6 py-2.5 flex items-center gap-3 shrink-0 flex-wrap z-10">
         <span className="text-xs font-bold text-gray-400 shrink-0">🧩 편집 중인 템플릿</span>
         <select
           value={editingTemplateId}
@@ -144,6 +295,9 @@ export default function AgentMasterPanel() {
         <button onClick={handleCopy} className="text-xs font-bold text-emerald-300 bg-emerald-900/40 border border-emerald-700/50 hover:bg-emerald-800/50 px-3 py-1.5 rounded transition-colors">
           ＋ 복사해서 새 템플릿
         </button>
+        <button onClick={() => setShowAiModal(true)} className="text-xs font-bold text-blue-300 bg-blue-900/40 border border-blue-700/50 hover:bg-blue-800/50 px-3 py-1.5 rounded transition-colors ml-2">
+          ✨ AI로 템플릿 신규 구상
+        </button>
         <button
           onClick={handleDelete}
           disabled={isDefault}
@@ -157,113 +311,111 @@ export default function AgentMasterPanel() {
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-6 py-6">
-          {/* 안내 */}
-          <div className="bg-blue-950/40 border border-blue-800/50 rounded-lg p-4 text-sm text-blue-200 mb-6">
-            각 에이전트의 <b>역할·스킬·모델·순서·HOTL(인간 검토)·활성화</b>를 이 화면에서 관리합니다.
-            <span className="text-blue-300/80"> <b>Copy 모델</b>: 기존 워크플로우는 보존하고, 복사해 새 템플릿을 만들어 편집합니다(진행 중 작업에 영향 없음).
-            템플릿은 <b>그 템플릿으로 새로 생성하는 프로젝트부터</b> 적용되며, 각 에이전트의 <b>스킬·HOTL 중단점</b>이 실행에 반영됩니다.
-            노드 활성/순서를 살아있는 그래프에서 바꾸는 토폴로지 변형은 적용 대상이 아닙니다(Copy 모델로 대체).</span>
-          </div>
-
-          {/* 파이프라인 메타 */}
-          <div className="bg-gray-800 border border-gray-700 rounded-lg p-5 mb-6">
-            <label className="block text-xs font-bold text-gray-400 mb-1">파이프라인 이름</label>
+      <div className="flex-1 flex overflow-hidden">
+        {/* React Flow 캔버스 */}
+        <div className="flex-1 relative bg-gray-900">
+          {/* 상단 파이프라인 메타 정보 */}
+          <div className="absolute top-4 left-4 z-10 bg-gray-800/90 backdrop-blur-md border border-gray-700 p-4 rounded-xl shadow-lg w-96">
             <input
               value={draft.pipeline_name || ""}
               onChange={(e) => updateMeta("pipeline_name", e.target.value)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-white mb-3 focus:border-blue-500 outline-none"
+              placeholder="파이프라인 이름"
+              className="w-full bg-transparent text-white font-bold text-lg outline-none border-b border-transparent hover:border-gray-600 focus:border-blue-500 mb-2 px-1"
             />
-            <label className="block text-xs font-bold text-gray-400 mb-1">설명</label>
             <textarea
               value={draft.description || ""}
               onChange={(e) => updateMeta("description", e.target.value)}
+              placeholder="파이프라인 설명"
               rows={2}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 resize-y focus:border-blue-500 outline-none"
+              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 resize-none outline-none focus:border-blue-500 mb-2"
             />
-            <div className="text-xs text-gray-500 mt-3">
-              총 {agents.length}개 에이전트 · 활성 {agents.filter((a) => a.enabled).length}개 · HOTL 중단점 {hotlCount}개
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs text-gray-400 whitespace-nowrap">최종 산출물 유형:</span>
+              <select
+                value={draft.deliverable_type || "software_app"}
+                onChange={(e) => updateMeta("deliverable_type", e.target.value)}
+                className="bg-gray-800 text-xs text-gray-200 border border-gray-600 rounded px-2 py-1 outline-none focus:border-blue-500 w-full"
+              >
+                <option value="software_app">소프트웨어 애플리케이션 (실행 가능)</option>
+                <option value="document_report">분석/보고서 문서 (열람 및 다운로드)</option>
+                <option value="hybrid_simulation">복합 시뮬레이터 (UI 렌더링 및 최종 보고서)</option>
+              </select>
+            </div>
+            <div className="text-[10px] text-gray-400 px-1 flex gap-2">
+              <span>드래그앤드랍으로 실행 순서 동적 변경</span>
+              <span>•</span>
+              <span className="text-blue-400 font-bold">{agents.length} Nodes</span>
+              <span>•</span>
+              <span className="text-rose-400 font-bold">{hotlCount} HOTL</span>
             </div>
           </div>
 
-          {/* 에이전트 카드 목록 */}
-          <div className="space-y-3">
-            {agents.map((a, idx) => {
-              const cat = CATEGORY_META[a.category] || CATEGORY_META.system;
-              return (
-                <div key={a.id} className={`bg-gray-800 border rounded-lg p-4 ${a.enabled ? "border-gray-700" : "border-gray-800 opacity-60"}`}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="text-xs font-mono text-gray-500 w-6 text-right">{idx + 1}</span>
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${cat.color}`}>{cat.label}</span>
-                    <input
-                      value={a.name_ko || ""}
-                      onChange={(e) => updateAgent(a.id, "name_ko", e.target.value)}
-                      className="bg-transparent text-base font-bold text-white border-b border-transparent hover:border-gray-600 focus:border-blue-500 outline-none px-1 flex-1 min-w-0"
-                    />
-                    <span className="text-xs font-mono text-gray-600 shrink-0">{a.id}</span>
-                  </div>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={handleEdgesChange}
+            onConnect={onConnect}
+            onNodeDragStop={onNodeDragStop}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.2}
+          >
+            <Background color="#374151" gap={16} />
+            <Controls className="bg-gray-800 border-gray-700 fill-white" />
+          </ReactFlow>
+        </div>
 
-                  <textarea
-                    value={a.role || ""}
-                    onChange={(e) => updateAgent(a.id, "role", e.target.value)}
-                    rows={2}
-                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 resize-y focus:border-blue-500 outline-none mb-3"
-                    placeholder="역할 설명"
-                  />
-
-                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-                    <label className="flex items-center gap-1.5 text-gray-400">
-                      스킬
-                      <input
-                        value={a.skill || ""}
-                        onChange={(e) => updateAgent(a.id, "skill", e.target.value)}
-                        placeholder="(없음)"
-                        className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-gray-200 font-mono w-36 focus:border-blue-500 outline-none"
-                      />
-                    </label>
-                    <label className="flex items-center gap-1.5 text-gray-400">
-                      단계
-                      <input
-                        value={a.stage || ""}
-                        onChange={(e) => updateAgent(a.id, "stage", e.target.value)}
-                        className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-gray-200 font-mono w-28 focus:border-blue-500 outline-none"
-                      />
-                    </label>
-                    <label className="flex items-center gap-1.5 text-gray-400">
-                      모델
-                      <select
-                        value={a.model_tier || "pro"}
-                        onChange={(e) => updateAgent(a.id, "model_tier", e.target.value)}
-                        className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-gray-200 focus:border-blue-500 outline-none"
-                      >
-                        <option value="pro">pro (고성능)</option>
-                        <option value="flash">flash (고속)</option>
-                      </select>
-                    </label>
-                    <label className="flex items-center gap-1.5 text-gray-400">
-                      순서
-                      <input
-                        type="number"
-                        value={a.order ?? 0}
-                        onChange={(e) => updateAgent(a.id, "order", parseInt(e.target.value || "0", 10))}
-                        className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-gray-200 w-16 focus:border-blue-500 outline-none"
-                      />
-                    </label>
-
-                    <div className="flex items-center gap-2 ml-auto">
-                      <Toggle on={!!a.enabled} onClick={() => updateAgent(a.id, "enabled", !a.enabled)} label="활성" title="비활성 시 파이프라인에서 제외(Phase 2 반영)" />
-                      <Toggle on={!!a.hotl_after} onClick={() => updateAgent(a.id, "hotl_after", !a.hotl_after)} label="HOTL" title="이 단계 직후 인간 검토 중단점(재시작 시 반영)" />
-                      <Toggle on={!!a.debate} onClick={() => updateAgent(a.id, "debate", !a.debate)} label="토론" title="다중 에이전트 토론·합의 루프" />
-                      {!a.llm && <span className="text-[11px] text-gray-500 border border-gray-700 rounded px-2 py-1">비-LLM</span>}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        {/* 우측 상세 패널 */}
+        <div
+          className={`transition-all duration-300 ease-in-out border-l border-gray-700 bg-gray-800 flex-shrink-0 overflow-hidden ${
+            selectedAgentId ? "w-80 opacity-100" : "w-0 opacity-0 border-none"
+          }`}
+        >
+          {selectedAgent && (
+            <AgentDetailSidebar
+              agent={selectedAgent}
+              updateAgent={updateAgent}
+              onClose={() => setSelectedAgentId(null)}
+            />
+          )}
         </div>
       </div>
+
+      {/* AI 파이프라인 생성 모달 */}
+      {showAiModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl w-[500px]">
+            <h2 className="text-lg font-bold text-white mb-2">✨ AI 파이프라인 자동 구상</h2>
+            <p className="text-xs text-gray-400 mb-4">어떤 에이전트 파이프라인을 만들고 싶으신가요? AI가 최적의 구조를 제안합니다.<br/>(기존 편집 내용이 덮어쓰기 됩니다.)</p>
+            <textarea
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="예: 제조업 원가 분석을 위한 에이전트 구성을 만들어 줘"
+              rows={4}
+              className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white resize-none outline-none focus:border-blue-500 mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowAiModal(false)}
+                className="px-4 py-2 text-sm font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleGeneratePipeline}
+                disabled={isGeneratingPipeline || !aiPrompt.trim()}
+                className="px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 rounded transition-colors"
+              >
+                {isGeneratingPipeline ? "⏳ 생성 중..." : "파이프라인 생성"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

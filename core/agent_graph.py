@@ -341,10 +341,14 @@ def build_graph_from_registry(registry=None):
         for aid in enabled_ids:
             workflow.add_node(aid, make_universal_node(aid))
         if enabled_ids:
-            workflow.set_entry_point(enabled_ids[0])
+            start_agent = next((a["id"] for a in enabled if a.get("is_start")), enabled_ids[0])
+            workflow.set_entry_point(start_agent)
+            
             for a_id, b_id in zip(enabled_ids, enabled_ids[1:]):
                 workflow.add_edge(a_id, b_id)
-            workflow.add_edge(enabled_ids[-1], END)
+                
+            end_agent = next((a["id"] for a in enabled if a.get("is_end")), enabled_ids[-1])
+            workflow.add_edge(end_agent, END)
         # HOTL 중단점 = enabled 노드 중 hotl_after(범용 노드는 모두 add_node 됐으므로 제한 없음)
         interrupt_after = [a["id"] for a in enabled if a.get("hotl_after", False)]
 

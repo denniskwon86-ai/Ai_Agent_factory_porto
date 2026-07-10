@@ -33,6 +33,7 @@ class ProjectCreateRequest(BaseModel):
     project_id: str
     template_id: str = "default"  # 이 프로젝트가 실행될 워크플로우 템플릿(범용 플랫폼 T2-b)
     output_format_id: str = "default"  # 이 프로젝트에 적용될 출력 포맷
+    view_type: str = "react_app"
 
 class ProjectCopyRequest(BaseModel):
     new_project_id: str
@@ -79,25 +80,26 @@ def _project_meta_path(workspace_root: str) -> str:
     return os.path.join(workspace_root, "project_meta.json")
 
 
-def _read_project_meta(workspace_root: str) -> tuple[str, str]:
+def _read_project_meta(workspace_root: str) -> tuple[str, str, str]:
     try:
         with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
             data = json.load(f) or {}
             tid = data.get("template_id", "default")
             fid = data.get("output_format_id", "default")
-        return tid or "default", fid or "default"
+            vtype = data.get("view_type", "react_app")
+        return tid or "default", fid or "default", vtype or "react_app"
     except Exception:
-        return "default", "default"
+        return "default", "default", "react_app"
 
 def _read_project_template(workspace_root: str) -> str:
-    tid, _ = _read_project_meta(workspace_root)
+    tid, _, _ = _read_project_meta(workspace_root)
     return tid
 
 
-def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default") -> None:
+def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app") -> None:
     try:
         with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
-            json.dump({"template_id": template_id or "default", "output_format_id": output_format_id or "default"}, f, ensure_ascii=False, indent=2)
+            json.dump({"template_id": template_id or "default", "output_format_id": output_format_id or "default", "view_type": view_type or "react_app"}, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ project_meta 저장 실패: {e}")
 
@@ -129,6 +131,7 @@ async def get_projects():
         if os.path.isdir(item_path):
             wbs_path = os.path.join(item_path, "00_wbs_master_plan.json")
             project_name = item
+            initial_idea = ""
             if os.path.exists(wbs_path):
                 try:
                     with open(wbs_path, "r", encoding="utf-8") as f:
@@ -136,7 +139,15 @@ async def get_projects():
                         project_name = wbs_data.get("project_name", item)
                 except:
                     pass
-            project_list.append({"id": item, "name": project_name})
+            state_path = os.path.join(item_path, "latest_state.json")
+            if os.path.exists(state_path):
+                try:
+                    with open(state_path, "r", encoding="utf-8") as f:
+                        state_data = json.load(f)
+                        initial_idea = state_data.get("initial_idea", "")
+                except:
+                    pass
+            project_list.append({"id": item, "name": project_name, "initial_idea": initial_idea})
             
     return {"status": "success", "data": project_list}
 
@@ -158,8 +169,8 @@ async def create_project(req: ProjectCreateRequest):
     if os.path.exists(project_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
     os.makedirs(project_path, exist_ok=True)
-    _write_project_meta(project_path, tid, req.output_format_id)  # 프로젝트↔템플릿/포맷 바인딩 영속
-    return {"status": "success", "project_id": req.project_id, "template_id": tid}
+    _write_project_meta(project_path, tid, req.output_format_id, req.view_type)  # 프로젝트↔템플릿/포맷 바인딩 영속
+    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type}
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str):
@@ -361,15 +372,16 @@ async def get_latest_state(project_id: str):
     _safe_id(project_id, "project_id")
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):
-        tid, fid = _read_project_meta(os.path.join("projects", project_id))
-        return {"status": "not_found", "data": {"template_id": tid, "output_format_id": fid}}
+        tid, fid, vtype = _read_project_meta(os.path.join("projects", project_id))
+        return {"status": "not_found", "data": {"template_id": tid, "output_format_id": fid, "view_type": vtype}}
     try:
         with open(state_path, "r", encoding="utf-8") as f:
             state_data = json.load(f)
         # fallback to meta if missing in state
         if "output_format_id" not in state_data or not state_data["output_format_id"]:
-            _, fid = _read_project_meta(os.path.join("projects", project_id))
+            _, fid, vtype = _read_project_meta(os.path.join("projects", project_id))
             state_data["output_format_id"] = fid
+            state_data["view_type"] = vtype
         return {"status": "success", "data": state_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"상태 파일 읽기 오류: {str(e)}")
@@ -391,6 +403,10 @@ async def create_release(project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"상태 읽기 오류: {str(e)}")
 
+    from core.agent_registry import load_template
+    tid = s.get("template_id", "default")
+    template_data = load_template(tid)
+
     wbs_tasks = []
     wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
     if os.path.exists(wbs_path):
@@ -407,6 +423,8 @@ async def create_release(project_id: str):
         "project_id": project_id,
         "project_name": s.get("project_name", project_id),
         "created_at": created_at,
+        "template_id": s.get("template_id", "default"),
+        "deliverable_type": template_data.get("deliverable_type", "software_app"),
         "rfp_summary": s.get("rfp_summary", ""),
         "prd_summary": s.get("prd_summary", ""),
         "architecture_summary": s.get("architecture_summary", ""),
@@ -439,6 +457,8 @@ async def list_releases():
                 items.append({
                     "release_id": r.get("release_id", rid),
                     "project_name": r.get("project_name", rid),
+                    "template_id": r.get("template_id", "default"),
+                    "deliverable_type": r.get("deliverable_type", "software_app"),
                     "created_at": r.get("created_at", ""),
                     "task_count": len(r.get("wbs_tasks", [])),
                 })
@@ -485,6 +505,7 @@ class AgentRegistryPayload(BaseModel):
     pipeline_name: Optional[str] = ""
     description: Optional[str] = ""
     agents: list
+    edges: Optional[list] = []
 
 
 @router.get("/agents")
@@ -516,6 +537,108 @@ async def reset_agent_registry():
 
 
 # ==========================================
+# AI 추천 엔진 연동 (파이프라인 및 스킬 자동 생성)
+# ==========================================
+class AIRecommendPipelineRequest(BaseModel):
+    user_request: str
+
+class AIRecommendSkillRequest(BaseModel):
+    agent_id: str
+    agent_name_ko: str
+    role_description: str
+
+@router.post("/ai-recommend/pipeline")
+async def ai_recommend_pipeline(req: AIRecommendPipelineRequest):
+    from core.llm_gateway import LLMGateway
+    prompt = f"""
+    사용자가 원하는 에이전트 기능을 바탕으로 전체 파이프라인(에이전트 목록 및 연결 관계)을 설계해 줘.
+    요청: {req.user_request}
+    
+    출력 형식: 반드시 아래 JSON 스키마를 따를 것.
+    {{
+        "pipeline_name": "...",
+        "description": "...",
+        "agents": [
+            {{
+                "id": "영문_ID_형식",
+                "name_ko": "한글 표시명",
+                "role": "역할 상세 설명",
+                "skill": "skill_name_without_md",
+                "stage": "STAGE_NAME",
+                "category": "planning|execution|review|system 중에 하나 선택",
+                "model_tier": "pro",
+                "order": 1,
+                "enabled": true,
+                "hotl_after": false,
+                "debate": false,
+                "llm": true,
+                "is_start": true/false,
+                "is_end": true/false
+            }}
+        ],
+        "edges": [
+            {{
+                "id": "e-source_agent_id-target_agent_id",
+                "source": "source_agent_id",
+                "target": "target_agent_id",
+                "animated": true,
+                "style": {{"stroke": "#4b5563", "strokeWidth": 2}}
+            }}
+        ]
+    }}
+    """
+    llm = LLMGateway()
+    res = await llm.aexecute({}, prompt, output_mode="json", light=True)
+    try:
+        import re
+        # 마크다운 ```json ... ``` 코드블록 제거
+        match = re.search(r'```(?:json)?\s*(.*?)\s*```', res, re.DOTALL)
+        if match:
+            res = match.group(1)
+        data = json.loads(res)
+        return {"status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"파이프라인 생성 실패: {str(e)}\n\n(LLM 응답: {res[:100]}...)")
+
+@router.post("/ai-recommend/skill")
+async def ai_recommend_skill(req: AIRecommendSkillRequest):
+    from core.llm_gateway import LLMGateway
+    prompt = f"""
+    사용자가 지정한 에이전트의 간략한 역할을 바탕으로, 이 에이전트가 어떤 입력을 받아 어떤 산출물을 내고, 누구에게 전달해야 하는지를 명시하는 상세 마크다운 스킬 문서를 작성해 줘.
+    - 에이전트 ID: {req.agent_id}
+    - 에이전트 명: {req.agent_name_ko}
+    - 사용자 입력 간략 역할: {req.role_description}
+    
+    [출력 요구사항]
+    1. 이 에이전트의 구체적 역할과 책임을 상세히 작성할 것 (role 업데이트용으로 사용됨).
+    2. 그에 맞는 스킬 마크다운 문서 내용을 작성할 것.
+    
+    출력 형식: 반드시 아래 JSON 형식으로 반환해 줘.
+    {{
+        "role_expanded": "에이전트 역할에 대한 2~3줄 상세 설명",
+        "skill_markdown": "작성된 스킬 마크다운 내용 전체 (문자열)"
+    }}
+    """
+    llm = LLMGateway()
+    res = await llm.aexecute({}, prompt, output_mode="json", light=True)
+    try:
+        import re
+        match = re.search(r'```(?:json)?\s*(.*?)\s*```', res, re.DOTALL)
+        if match:
+            res = match.group(1)
+        data = json.loads(res)
+        skill_id = f"{req.agent_id.lower()}_skill"
+        skill_path = os.path.join("skills", f"{skill_id}.md")
+        os.makedirs("skills", exist_ok=True)
+        with open(skill_path, "w", encoding="utf-8") as f:
+            f.write(data["skill_markdown"])
+            
+        return {"status": "success", "role": data["role_expanded"], "skill": skill_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"스킬 생성 실패: {str(e)}\n\n(LLM 응답: {res[:100]}...)")
+
+
+# ==========================================
 # 다중 워크플로우 템플릿 (Copy 모델) — 기존(default) 보존 + 복사로 새 워크플로우 생성/편집
 # ==========================================
 class TemplateCopyRequest(BaseModel):
@@ -533,11 +656,12 @@ async def list_workflow_templates():
 
 @router.get("/templates/{template_id}")
 async def get_workflow_template(template_id: str):
-    from core.agent_registry import load_template, _safe_tid
+    from core.agent_registry import load_template, _safe_tid, _template_path
     try:
         _safe_tid(template_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    print("DEBUG get_template path:", _template_path(template_id))
     return {"status": "success", "data": load_template(template_id)}
 
 

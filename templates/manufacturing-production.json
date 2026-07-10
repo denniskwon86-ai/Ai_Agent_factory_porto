@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "pipeline_name": "제조업 생산 계획 관리 (Manufacturing Production)",
+  "description": "생산 수요 예측, 자재 소요량 계획(MRP) 수립, 설비 가동 일정 작성을 통해 제조 공정을 최적화합니다.",
+  "deliverable_type": "software_app",
+  "agents": [
+    {
+      "id": "Demand_Forecaster",
+      "name_ko": "수요 예측가",
+      "role": "과거 판매 데이터와 시장 동향을 분석하여 향후 제품별 수요를 예측합니다.",
+      "skill": "demand_forecaster_skill",
+      "stage": "FORECAST",
+      "category": "planning",
+      "model_tier": "flash",
+      "order": 1,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true,
+      "position": null,
+      "is_start": true,
+      "is_end": false,
+      "output_format": ""
+    },
+    {
+      "id": "Material_Planner",
+      "name_ko": "자재 수급 계획가",
+      "role": "예측된 수요를 바탕으로 BOM(자재명세서)을 전개하여 원부자재 소요량(MRP)을 산출하고 발주 계획을 수립합니다.",
+      "skill": "material_planner_skill",
+      "stage": "MRP",
+      "category": "planning",
+      "model_tier": "pro",
+      "order": 2,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": true,
+      "llm": true,
+      "position": null,
+      "is_start": false,
+      "is_end": false,
+      "output_format": ""
+    },
+    {
+      "id": "Production_Scheduler",
+      "name_ko": "생산 스케줄러",
+      "role": "자재 입고 일정과 설비 가동 능력(Capacity)을 고려하여 주간/일간 생산 일정(Master Production Schedule)을 수립합니다.",
+      "skill": "production_scheduler_skill",
+      "stage": "SCHEDULING",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 3,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": true,
+      "llm": true,
+      "position": null,
+      "is_start": false,
+      "is_end": false,
+      "output_format": ""
+    },
+    {
+      "id": "Inventory_Manager",
+      "name_ko": "재고 및 물류 관리자",
+      "role": "수립된 생산 일정에 따라 창고 입/출고 스케줄을 점검하고, 완성품 출하 물류 계획을 최적화합니다.",
+      "skill": "inventory_manager_skill",
+      "stage": "INVENTORY",
+      "category": "execution",
+      "model_tier": "flash",
+      "order": 4,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true,
+      "position": null,
+      "is_start": false,
+      "is_end": false,
+      "output_format": ""
+    },
+    {
+      "id": "Production_Reviewer",
+      "name_ko": "생산 관리 책임자",
+      "role": "전체 수요-자재-생산-물류 계획의 정합성을 최종 검토하고 예상 병목(Bottleneck) 요인을 분석해 보고합니다.",
+      "skill": "production_reviewer_skill",
+      "stage": "REVIEW",
+      "category": "review",
+      "model_tier": "pro",
+      "order": 5,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true,
+      "position": null,
+      "is_start": false,
+      "is_end": true,
+      "output_format": ""
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-Demand_Forecaster-Material_Planner",
+      "source": "Demand_Forecaster",
+      "target": "Material_Planner",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Material_Planner-Production_Scheduler",
+      "source": "Material_Planner",
+      "target": "Production_Scheduler",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Production_Scheduler-Inventory_Manager",
+      "source": "Production_Scheduler",
+      "target": "Inventory_Manager",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Inventory_Manager-Production_Reviewer",
+      "source": "Inventory_Manager",
+      "target": "Production_Reviewer",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    }
+  ]
+}

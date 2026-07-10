@@ -1,7 +1,8 @@
 {
   "version": 1,
-  "pipeline_name": "제조업 통합 경영관리 시뮬레이터",
-  "description": "영업부터 재무까지 가치사슬 전반의 의사결정을 시뮬레이션하는 파이프라인",
+  "pipeline_name": "제조업 경영관리 시뮬레이터",
+  "description": "환율 변동, 유가 상승, 관세 등의 변수가 매출/원가/영업이익에 미치는 영향을 시뮬레이션하고 대응 시나리오를 도출하는 워크플로우",
+  "deliverable_type": "hybrid_simulation",
   "agents": [
     {
       "id": "Sales_Agent",

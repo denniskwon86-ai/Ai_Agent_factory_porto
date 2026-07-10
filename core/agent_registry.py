@@ -39,6 +39,10 @@ _AGENT_FIELDS = {
     "hotl_after": False, # 이 노드 직후 인간 검토 중단점(현재 그래프 interrupt_after에 즉시 반영)
     "debate": False,     # 토론·합의 루프 적용 여부(표시용 — config.DEBATE_STAGES와 정합)
     "llm": True,         # LLM 호출 노드 여부(CodeBuilder 등 시스템 노드는 False)
+    "position": None,    # UI 노드 위치
+    "is_start": False,   # 시작점 여부
+    "is_end": False,     # 종료점 여부
+    "output_format": "", # 포맷 마스터의 출력 양식 ID (빈 값이면 시스템 프롬프트만 사용)
 }
 
 # 현재 하드코딩 그래프(core/agent_graph.py)와 1:1로 동일한 기본 레지스트리.
@@ -47,6 +51,7 @@ DEFAULT_REGISTRY: Dict[str, Any] = {
     "version": 1,
     "pipeline_name": "소프트웨어 개발 팩토리",
     "description": "한 줄 아이디어 → RFP → 기획 → 설계 → 구현 → 빌드 → 검수 → QA → 매뉴얼까지 자율 수행하는 기본 파이프라인",
+    "deliverable_type": "software_app",
     "agents": [
         {"id": "RFP_Analyst", "name_ko": "RFP 분석가", "role": "발주 의도를 구조화한 요구사항 정의서(RFP) 작성", "skill": "rfp_skill",
          "stage": "RFP", "category": "planning", "model_tier": "pro", "order": 1, "enabled": True, "hotl_after": True, "debate": True, "llm": True},
@@ -101,7 +106,9 @@ def _normalize(reg: Dict[str, Any]) -> Dict[str, Any]:
         "version": int(reg.get("version", 1)),
         "pipeline_name": str(reg.get("pipeline_name", DEFAULT_REGISTRY["pipeline_name"])),
         "description": str(reg.get("description", "")),
+        "deliverable_type": str(reg.get("deliverable_type", "software_app")),
         "agents": agents,
+        "edges": reg.get("edges", []),
     }
 
 

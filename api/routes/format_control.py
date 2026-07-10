@@ -13,6 +13,7 @@ class OutputFormat(BaseModel):
     name: str
     description: str
     prompt_injection: str
+    view_type: Optional[str] = "react_app"
 
 def load_formats() -> List[dict]:
     if not os.path.exists(FORMATS_FILE):

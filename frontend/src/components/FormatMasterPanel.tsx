@@ -18,7 +18,7 @@ export default function FormatMasterPanel() {
       if (f) {
         setDraft(JSON.parse(JSON.stringify(f)));
       } else {
-        setDraft({ id: editingId, name: "", description: "", prompt_injection: "" });
+        setDraft({ id: editingId, name: "", description: "", prompt_injection: "", view_type: "react_app" });
       }
     } else {
       setDraft(null);
@@ -170,6 +170,21 @@ export default function FormatMasterPanel() {
                       className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500" 
                       placeholder="이 양식에 대한 간단한 설명을 작성합니다."
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 mb-1">뷰어 타입 (View Type)</label>
+                    <select
+                      value={draft.view_type || 'react_app'}
+                      onChange={e => setDraft({ ...draft, view_type: e.target.value as any })}
+                      className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="react_app">React App (Live Iframe)</option>
+                      <option value="markdown">Markdown (A4 Report)</option>
+                      <option value="json">JSON Data (Code Block)</option>
+                      <option value="slide">Slide (Presentation)</option>
+                      <option value="mermaid">Mermaid (Diagram)</option>
+                    </select>
                   </div>
 
                   <div>

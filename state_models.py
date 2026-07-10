@@ -72,6 +72,7 @@ class ProjectState(BaseModel):
     # "default" = 기존 SW 파이프라인(하위호환). 노드는 이 값으로 자기 스킬/그래프를 해석한다.
     template_id: str = Field(default="default")
     output_format_id: str = Field(default="default")
+    view_type: str = Field(default="react_app")
     # 범용 노드(T3): 커스텀 에이전트 파이프라인의 단계별 산출물 저장소(<agent_id> → 텍스트).
     # SW 파이프라인은 전용 *_summary 필드를 쓰고 이 필드는 비어 있다(추가 전용·하위호환).
     artifacts: Dict[str, str] = Field(default_factory=dict)

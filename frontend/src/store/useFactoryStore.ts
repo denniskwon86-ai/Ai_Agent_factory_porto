@@ -46,6 +46,7 @@ export interface OutputFormat {
   name: string;
   description: string;
   prompt_injection: string;
+  view_type?: 'react_app' | 'markdown' | 'json' | 'slide' | 'mermaid';
 }
 
 interface FactoryStore {
@@ -70,7 +71,7 @@ interface FactoryStore {
   formats: OutputFormat[];
   selectedFormatId: string;
   showFormatPanel: boolean;
-  projects: { id: string, name: string }[];
+  projects: { id: string, name: string, initial_idea?: string }[];
   currentProjectId: string | null;
   healingRetryCount: number;
   activeSprintId: string | null;
@@ -79,7 +80,7 @@ interface FactoryStore {
   setActiveSprintId: (id: string | null) => void;
   setCurrentProject: (id: string | null) => void;
   fetchProjects: () => Promise<void>;
-  createProject: (id: string, templateId?: string, formatId?: string) => Promise<boolean>;
+  createProject: (id: string, templateId?: string) => Promise<boolean>;
   copyProject: (id: string, newId: string) => Promise<boolean>;
   deleteProject: (id: string) => Promise<boolean>; // 🗑️ 프로젝트 완전 삭제 기능 정의
   connectSSE: () => void;
@@ -115,7 +116,7 @@ interface FactoryStore {
   triggerSelfHealing: (errorMsg: string) => Promise<void>;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;
@@ -176,15 +177,15 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  createProject: async (id: string, templateId?: string, formatId?: string) => {
+  createProject: async (id: string, templateId?: string) => {
     try {
+      
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           project_id: id, 
-          template_id: templateId || get().selectedTemplateId || 'default',
-          output_format_id: formatId || get().selectedFormatId || 'default'
+          template_id: templateId || get().selectedTemplateId || 'default'
         })
       });
       if (res.ok) {
@@ -595,10 +596,24 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
             set({ currentTemplateData: tData.data });
           }
         } catch(e) { console.error("템플릿 정보 로드 실패", e); }
-      } else {
-        // not_found(신규/초기 프로젝트) → 명시적 비움
-        set({ state: null, currentTemplateData: null });
-      }
+        } else if (result.status === "not_found") {
+          const tid = result.data?.template_id || 'default';
+          try {
+            const tRes = await fetch(`${API_BASE_URL}/api/v1/factory/templates/${tid}`);
+            if (tRes.ok) {
+              const tData = await tRes.json();
+              set({ state: null, currentTemplateData: tData.data });
+            } else {
+              set({ state: null, currentTemplateData: null });
+            }
+          } catch(e) { 
+            console.error("템플릿 정보 로드 실패", e);
+            set({ state: null, currentTemplateData: null }); 
+          }
+        } else {
+          // 기타 에러 (명시적 비움)
+          set({ state: null, currentTemplateData: null });
+        }
     } catch (error) {
       console.error("최신 상태 복구 실패:", error);
     }

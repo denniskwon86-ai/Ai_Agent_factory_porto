@@ -30,3 +30,21 @@ library/
 *.sqlite3
 *.db-shm
 *.db-wal
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===== OS =====
+Thumbs.db
+.DS_Store
+
+# ===== Test / Cache =====
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ===== Claude / AI agent =====
+.claude/

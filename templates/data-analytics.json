@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "pipeline_name": "데이터 분석 및 리포트 자동화",
+  "description": "원시 데이터를 추출하여 정제, 분석한 뒤 인사이트를 도출하고 경영진 보고서를 자동으로 생성하는 파이프라인",
+  "agents": [
+    {
+      "id": "Data_Engineer",
+      "name_ko": "데이터 엔지니어",
+      "role": "요청된 기간 및 조건에 맞는 데이터를 DB/API에서 추출 및 전처리",
+      "skill": "data_engineer_skill",
+      "stage": "EXTRACTION",
+      "category": "planning",
+      "model_tier": "flash",
+      "order": 1,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true,
+      "is_start": true
+    },
+    {
+      "id": "Data_Analyst",
+      "name_ko": "데이터 애널리스트",
+      "role": "전처리된 데이터를 바탕으로 통계 분석, 트렌드 파악 및 핵심 지표(KPI) 계산",
+      "skill": "analyst_skill",
+      "stage": "ANALYSIS",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 2,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": true,
+      "llm": true
+    },
+    {
+      "id": "Business_Strategist",
+      "name_ko": "비즈니스 전략가",
+      "role": "분석된 데이터를 해석하여 실질적인 비즈니스 인사이트 및 Action Item 도출",
+      "skill": "business_strategist_skill",
+      "stage": "INSIGHT",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 3,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": true,
+      "llm": true
+    },
+    {
+      "id": "Report_Generator",
+      "name_ko": "리포트 생성기",
+      "role": "도출된 인사이트와 지표를 Markdown 및 HTML 형태의 시각화된 최종 보고서로 컴파일",
+      "skill": "report_generator_skill",
+      "stage": "REPORT",
+      "category": "system",
+      "model_tier": "flash",
+      "order": 4,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": false,
+      "is_end": true
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-Data_Engineer-Data_Analyst",
+      "source": "Data_Engineer",
+      "target": "Data_Analyst",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Data_Analyst-Business_Strategist",
+      "source": "Data_Analyst",
+      "target": "Business_Strategist",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Business_Strategist-Report_Generator",
+      "source": "Business_Strategist",
+      "target": "Report_Generator",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    }
+  ]
+}

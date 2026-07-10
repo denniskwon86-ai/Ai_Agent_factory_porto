@@ -67,9 +67,10 @@ def make_universal_node(agent_id: str):
         from core.parser import extract_summary, extract_artifact
         state_obj = ProjectState.model_validate(state)
         tid = getattr(state_obj, "template_id", "default") or "default"
-        fmt_id = getattr(state_obj, "output_format_id", "default") or "default"
-
+        fmt_id_from_state = getattr(state_obj, "output_format_id", "default") or "default"
         meta = agent_meta(agent_id, tid)
+        fmt_id = meta.get("output_format") or fmt_id_from_state
+
         role = meta.get("role", "") or agent_id
         name_ko = meta.get("name_ko", "") or agent_id
         is_heavy = (meta.get("model_tier", "flash") == "pro")
@@ -85,7 +86,7 @@ def make_universal_node(agent_id: str):
         master_data = (getattr(state_obj, "master_data", "") or "").strip()
 
         master_block = f"[전사 마스터 데이터 및 제약사항]\n{master_data}\n\n" if master_data else ""
-        format_injection = _get_format_injection(fmt_id)
+        format_injection = _get_format_injection(fmt_id) if fmt_id else ""
 
         prompt = (
             f"[당신의 역할]\n{role}\n\n"

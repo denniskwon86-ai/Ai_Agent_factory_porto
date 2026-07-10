@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "pipeline_name": "제조업 시장 수요 및 대외 지표 예측 (Market Forecast)",
+  "description": "국제 원자재 가격, 환율, 거시경제 지표 및 시장 트렌드를 분석하여 수요를 예측하고 공급망 리스크를 관리합니다.",
+  "agents": [
+    {
+      "id": "Macro_Indicator_Crawler",
+      "name_ko": "대외 지표 수집기",
+      "role": "환율, 금리, 주요 원자재 가격(구리, 철강, 원유 등) 및 글로벌 경제 지표 데이터를 실시간으로 수집합니다.",
+      "skill": "macro_crawler_skill",
+      "stage": "DATA_COLLECTION",
+      "category": "system",
+      "model_tier": "flash",
+      "order": 1,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true,
+      "is_start": true
+    },
+    {
+      "id": "Market_Trend_Analyst",
+      "name_ko": "시장 트렌드 분석가",
+      "role": "수집된 대외 지표와 업계 뉴스, 리포트를 분석하여 당사 제품 수요에 미치는 거시적 영향을 평가합니다.",
+      "skill": "market_trend_analyst_skill",
+      "stage": "ANALYSIS",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 2,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": true,
+      "llm": true
+    },
+    {
+      "id": "Demand_Prediction_Engine",
+      "name_ko": "수요 예측 엔진",
+      "role": "과거 판매 실적과 분석된 시장 트렌드 데이터를 결합하여 분기별, 연간 제품 수요를 시뮬레이션하고 예측합니다.",
+      "skill": "demand_prediction_skill",
+      "stage": "PREDICTION",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 3,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true
+    },
+    {
+      "id": "Risk_Management_Strategist",
+      "name_ko": "리스크 관리 전략가",
+      "role": "예측된 수요 변동성과 원자재 가격 리스크를 기반으로 공급망 다변화 및 헤징(Hedging) 전략을 수립합니다.",
+      "skill": "risk_management_skill",
+      "stage": "STRATEGY",
+      "category": "planning",
+      "model_tier": "pro",
+      "order": 4,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": true,
+      "llm": true
+    },
+    {
+      "id": "Executive_Briefing_Bot",
+      "name_ko": "임원진 브리핑 봇",
+      "role": "시장 수요 예측과 리스크 관리 대책을 요약하여 최고경영진 회의용 종합 브리핑 문서를 작성합니다.",
+      "skill": "executive_briefing_skill",
+      "stage": "REPORT",
+      "category": "review",
+      "model_tier": "pro",
+      "order": 5,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true,
+      "is_end": true
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-Macro_Indicator_Crawler-Market_Trend_Analyst",
+      "source": "Macro_Indicator_Crawler",
+      "target": "Market_Trend_Analyst",
+      "animated": true,
+      "style": { "stroke": "#4b5563", "strokeWidth": 2 }
+    },
+    {
+      "id": "e-Market_Trend_Analyst-Demand_Prediction_Engine",
+      "source": "Market_Trend_Analyst",
+      "target": "Demand_Prediction_Engine",
+      "animated": true,
+      "style": { "stroke": "#4b5563", "strokeWidth": 2 }
+    },
+    {
+      "id": "e-Demand_Prediction_Engine-Risk_Management_Strategist",
+      "source": "Demand_Prediction_Engine",
+      "target": "Risk_Management_Strategist",
+      "animated": true,
+      "style": { "stroke": "#4b5563", "strokeWidth": 2 }
+    },
+    {
+      "id": "e-Risk_Management_Strategist-Executive_Briefing_Bot",
+      "source": "Risk_Management_Strategist",
+      "target": "Executive_Briefing_Bot",
+      "animated": true,
+      "style": { "stroke": "#4b5563", "strokeWidth": 2 }
+    }
+  ]
+}

@@ -10,7 +10,6 @@ import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
 import AgentMasterPanel from './components/AgentMasterPanel';
-import FormatMasterPanel from './components/FormatMasterPanel';
 
 interface EBProps { children: ReactNode; }
 interface EBState { hasError: boolean; error: Error | null; }
@@ -69,27 +68,22 @@ export default function App() {
   const selectedTemplateId = useFactoryStore((state) => state.selectedTemplateId);
   const setSelectedTemplate = useFactoryStore((state) => state.setSelectedTemplate);
   const fetchTemplates = useFactoryStore((state) => state.fetchTemplates);
-  const formats = useFactoryStore((state) => state.formats);
-  const selectedFormatId = useFactoryStore((state) => state.selectedFormatId);
-  const setSelectedFormat = useFactoryStore((state) => state.setSelectedFormat);
-  const fetchFormats = useFactoryStore((state) => state.fetchFormats);
-  const showFormatPanel = useFactoryStore((state) => state.showFormatPanel);
-  const openFormatPanel = useFactoryStore((state) => state.openFormatPanel);
 
   const [newProjectId, setNewProjectId] = useState("");
+
+  const selectedTemplateData = templates.find((t: any) => t.id === selectedTemplateId);
 
   useEffect(() => {
     connectSSE();
     fetchProjects();
     fetchReleases();
     fetchTemplates();  // 신규 프로젝트 생성 시 고를 수 있는 워크플로우 템플릿 목록
-    fetchFormats();    // 신규 프로젝트 생성 시 고를 수 있는 출력 포맷 목록
-  }, [connectSSE, fetchProjects, fetchReleases, fetchTemplates, fetchFormats]);
+  }, [connectSSE, fetchProjects, fetchReleases, fetchTemplates]);
 
   const handleCreateProject = async () => {
     if (!newProjectId.trim()) return;
-    // 선택한 워크플로우 템플릿과 출력 포맷으로 프로젝트를 생성(범용 플랫폼)
-    const success = await createProject(newProjectId.trim(), selectedTemplateId, selectedFormatId);
+    // 선택한 워크플로우 템플릿으로 프로젝트를 생성(범용 플랫폼)
+    const success = await createProject(newProjectId.trim(), selectedTemplateId);
     if (success) {
       setNewProjectId("");
       setCurrentProject(newProjectId.trim());
@@ -127,14 +121,6 @@ export default function App() {
     );
   }
 
-  if (showFormatPanel) {
-    return (
-      <ErrorBoundary>
-        <FormatMasterPanel />
-      </ErrorBoundary>
-    );
-  }
-
   if (viewingRelease) {
     return (
       <ErrorBoundary>
@@ -165,13 +151,6 @@ export default function App() {
               🏭 V5.2 Private AI Cockpit
             </h1>
             <div className="flex items-center gap-4">
-              <button
-                onClick={openFormatPanel}
-                className="text-sm font-bold text-gray-200 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded transition-colors"
-                title="출력 양식을 설정"
-              >
-                📄 Format Master
-              </button>
               <button
                 onClick={openAgentPanel}
                 className="text-sm font-bold text-gray-200 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded transition-colors"
@@ -217,8 +196,8 @@ export default function App() {
                       <h3 className="text-lg font-bold text-blue-400 truncate">{proj.name}</h3>
                       <span className="text-xs px-2 py-1 bg-gray-900 rounded text-gray-400 font-mono">{proj.id}</span>
                     </div>
-                    <div className="flex-1 text-sm text-gray-400 mb-6">
-                      이 프로젝트 볼트(Vault)는 완벽히 격리된 독립 환경에서 가동됩니다.
+                    <div className="flex-1 text-sm text-gray-400 mb-6 overflow-hidden line-clamp-3">
+                      {proj.initial_idea || "이 프로젝트 볼트(Vault)는 완벽히 격리된 독립 환경에서 가동됩니다."}
                     </div>
                     <button
                       onClick={() => setCurrentProject(proj.id)}
@@ -230,56 +209,48 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 flex items-end gap-4 shadow-lg">
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-gray-400 mb-2">➕ 신규 독립 프로젝트 생성 (영문 ID)</label>
-                  <input
-                    type="text"
-                    value={newProjectId}
-                    onChange={(e) => setNewProjectId(e.target.value)}
-                    placeholder="예: smart-life-app"
-                    className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white focus:outline-none focus:border-green-500"
-                  />
-                </div>
-                <div className="w-48">
-                  <label className="block text-sm font-bold text-gray-400 mb-2">🧩 워크플로우 템플릿</label>
-                  <select
-                    value={selectedTemplateId}
-                    onChange={(e) => setSelectedTemplate(e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white focus:outline-none focus:border-green-500"
-                    title="이 프로젝트가 사용할 에이전트 파이프라인을 선택합니다 (제어판에서 복사·편집)"
+              <div className="bg-gray-800 p-8 rounded-lg shadow-xl w-full">
+                <div className="flex items-end gap-4 bg-gray-900/50 p-6 rounded-lg mb-2 border border-gray-700">
+                  <div className="flex-[2]">
+                    <label className="block text-sm font-bold text-gray-400 mb-2">➕ 신규 독립 프로젝트 생성 (영문 ID)</label>
+                    <input
+                      type="text"
+                      value={newProjectId}
+                      onChange={(e) => setNewProjectId(e.target.value)}
+                      placeholder="예: smart-life-app"
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white focus:outline-none focus:border-green-500"
+                    />
+                  </div>
+                  <div className="flex-[3]">
+                    <label className="block text-sm font-bold text-gray-400 mb-2">🧩 워크플로우 템플릿</label>
+                    <select
+                      value={selectedTemplateId}
+                      onChange={(e) => setSelectedTemplate(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white focus:outline-none focus:border-green-500"
+                      title="이 프로젝트가 사용할 에이전트 파이프라인을 선택합니다 (제어판에서 복사·편집)"
+                    >
+                      {templates.length === 0 && <option value="default">기본 워크플로우</option>}
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name || t.id}{t.builtin ? " (기본)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={handleCreateProject}
+                    disabled={!newProjectId.trim()}
+                    className="bg-green-600 hover:bg-green-500 disabled:bg-gray-700 text-white font-bold py-3 px-6 rounded transition-colors whitespace-nowrap"
                   >
-                    {templates.length === 0 && <option value="default">기본 워크플로우</option>}
-                    {templates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name || t.id}{t.builtin ? " (기본)" : ""}
-                      </option>
-                    ))}
-                  </select>
+                    신규 공간 할당
+                  </button>
                 </div>
-                <div className="w-48">
-                  <label className="block text-sm font-bold text-gray-400 mb-2">📄 출력 양식 (Harness)</label>
-                  <select
-                    value={selectedFormatId}
-                    onChange={(e) => setSelectedFormat(e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white focus:outline-none focus:border-green-500"
-                    title="에이전트가 생성할 최종 산출물(결과물)의 형식을 강제합니다."
-                  >
-                    {formats.length === 0 && <option value="default">일반 마크다운 (기본)</option>}
-                    {formats.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  onClick={handleCreateProject}
-                  disabled={!newProjectId.trim()}
-                  className="bg-green-600 hover:bg-green-500 disabled:bg-gray-700 text-white font-bold py-3 px-6 rounded transition-colors whitespace-nowrap"
-                >
-                  신규 공간 할당
-                </button>
+
+                {selectedTemplateData && selectedTemplateData.description && (
+                  <div className="text-sm text-gray-400 mt-2 px-2">
+                    이 워크플로우가 하는 일: {selectedTemplateData.description}
+                  </div>
+                )}
               </div>
 
               {/* 📦 결과물 라이브러리 (배포된 최종 산출물) */}
@@ -304,10 +275,17 @@ export default function App() {
                           >🗑</button>
                         </div>
                         <div className="text-xs text-gray-500 mb-4">{rel.created_at} · 태스크 {rel.task_count}개</div>
-                        <button
-                          onClick={() => viewRelease(rel.release_id)}
-                          className="mt-auto w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded transition-colors"
-                        >▶ 결과물 실행 / 미리보기</button>
+                        {(!rel.deliverable_type || rel.deliverable_type === "software_app") ? (
+                          <button
+                            onClick={() => viewRelease(rel.release_id)}
+                            className="mt-auto w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded transition-colors"
+                          >▶ 소프트웨어 앱 실행 (Run App)</button>
+                        ) : (
+                          <button
+                            onClick={() => viewRelease(rel.release_id)}
+                            className="mt-auto w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded transition-colors"
+                          >📄 문서 보고서 열람 및 다운로드</button>
+                        )}
                       </div>
                     ))}
                   </div>

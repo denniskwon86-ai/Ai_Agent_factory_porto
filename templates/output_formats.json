@@ -3,18 +3,35 @@
     "id": "default",
     "name": "일반 마크다운 (기본)",
     "description": "표준 마크다운 양식. 다음 작업자를 위한 요약을 포함합니다.",
-    "prompt_injection": "당신의 최종 결과물은 반드시 <artifact> ... </artifact> 태그 안에 작성하시오. 본문을 작성하기 전, 다음 단계 작업자가 참고할 수 있도록 <summary> ... </summary> 태그 안에 3줄 이내의 핵심 요약(결론, 주요 결정사항 등)을 먼저 작성하시오."
+    "prompt_injection": "당신의 최종 결과물은 반드시 <artifact> ... </artifact> 태그 안에 작성하시오. 본문을 작성하기 전, 다음 단계 작업자가 참고할 수 있도록 <summary> ... </summary> 태그 안에 3줄 이내의 핵심 요약(결론, 주요 결정사항 등)을 먼저 작성하시오.",
+    "view_type": "markdown"
   },
   {
     "id": "strict_json",
     "name": "엄격한 JSON 데이터",
     "description": "시스템 파싱용 JSON 포맷. 마크다운 기호를 제외한 순수 JSON만 출력합니다.",
-    "prompt_injection": "당신의 최종 결과물은 반드시 <artifact> ... </artifact> 태그 안에 순수 JSON 포맷으로 작성하시오. 백틱(```json)을 포함하지 말고 오직 JSON 내용만 넣으시오. 그 전에, 이 JSON 구조의 목적과 주요 키값에 대한 설명을 <summary> ... </summary> 태그 안에 3줄로 요약하시오."
+    "prompt_injection": "당신의 최종 결과물은 반드시 <artifact> ... </artifact> 태그 안에 순수 JSON 포맷으로 작성하시오. 백틱(```json)을 포함하지 말고 오직 JSON 내용만 넣으시오. 그 전에, 이 JSON 구조의 목적과 주요 키값에 대한 설명을 <summary> ... </summary> 태그 안에 3줄로 요약하시오.",
+    "view_type": "json"
   },
   {
     "id": "html_ui",
     "name": "HTML 동적 UI",
     "description": "단일 파일로 실행 가능한 완전한 HTML/CSS/JS 코드 양식입니다.",
-    "prompt_injection": "당신의 최종 결과물은 반드시 <artifact> ... </artifact> 태그 안에 단일 HTML 파일 코드 전체를 작성하시오. 코드 안에는 CSS와 Javascript가 포함되어야 하며, 백틱(```html)을 제외한 순수 코드만 작성하시오. 코드를 작성하기 전에, 이 UI의 목적과 주요 기능, 사용된 라이브러리에 대한 요약을 <summary> ... </summary> 태그 안에 작성하시오."
+    "prompt_injection": "당신의 최종 결과물은 반드시 <artifact> ... </artifact> 태그 안에 단일 HTML 파일 코드 전체를 작성하시오. 코드 안에는 CSS와 Javascript가 포함되어야 하며, 백틱(```html)을 제외한 순수 코드만 작성하시오. 코드를 작성하기 전에, 이 UI의 목적과 주요 기능, 사용된 라이브러리에 대한 요약을 <summary> ... </summary> 태그 안에 작성하시오.",
+    "view_type": "react_app"
+  },
+  {
+    "id": "markdown_report",
+    "name": "마크다운 검토 보고서",
+    "description": "경영진 및 의사결정자를 위한 깔끔한 구조의 마크다운 보고서 양식입니다.",
+    "prompt_injection": "당신의 최종 결과물은 반드시 <artifact> ... </artifact> 태그 안에 작성하시오. 결과물은 경영진 보고용 문서 형태로, 반드시 1) 요약본(Executive Summary), 2) 주요 지표 및 데이터 표(Markdown Table), 3) 시사점 및 제언(Conclusion & Recommendations) 섹션이 명확히 구분되어 포함되도록 하시오.",
+    "view_type": "markdown"
+  },
+  {
+    "id": "dashboard_ui",
+    "name": "데이터 대시보드 UI (HTML)",
+    "description": "Chart.js 등을 활용하여 데이터 지표를 시각화하는 대시보드 형태의 UI 양식입니다.",
+    "prompt_injection": "당신의 최종 결과물은 반드시 <artifact> ... </artifact> 태그 안에 단일 HTML 파일 코드 전체를 작성하시오. 이 UI는 데이터 시각화 대시보드로 구성되어야 하며, CDN을 통해 Chart.js나 TailwindCSS를 포함하여 즉각적으로 보기 좋은 차트와 KPI 지표를 렌더링하도록 작성하시오. 백틱(```html)은 제외하고 순수 코드만 작성하시오.",
+    "view_type": "react_app"
   }
 ]

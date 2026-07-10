@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "pipeline_name": "마케팅 콘텐츠 제작 파이프라인",
+  "description": "전략 수립부터 카피라이팅, 디자인 기획 및 최종 검수까지 디지털 마케팅 콘텐츠를 자동으로 생성하는 플로우",
+  "agents": [
+    {
+      "id": "Marketing_Strategist",
+      "name_ko": "마케팅 전략가",
+      "role": "핵심 타겟층 분석 및 캠페인 주요 메시지(Key Message)와 전략 방향 수립",
+      "skill": "strategist_skill",
+      "stage": "STRATEGY",
+      "category": "planning",
+      "model_tier": "pro",
+      "order": 1,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": true,
+      "llm": true,
+      "is_start": true
+    },
+    {
+      "id": "Copywriter",
+      "name_ko": "카피라이터",
+      "role": "수립된 전략을 바탕으로 매체별 맞춤형 광고 카피 및 본문 텍스트 초안 작성",
+      "skill": "copywriter_skill",
+      "stage": "CONTENT",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 2,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true
+    },
+    {
+      "id": "Design_Director",
+      "name_ko": "아트 디렉터",
+      "role": "작성된 카피에 어울리는 시각 디자인 콘셉트 및 이미지 생성 프롬프트 기획",
+      "skill": "designer_skill",
+      "stage": "DESIGN",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 3,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": true,
+      "llm": true
+    },
+    {
+      "id": "SEO_Specialist",
+      "name_ko": "SEO 마케터",
+      "role": "콘텐츠의 검색엔진 최적화를 위한 키워드 추가 및 해시태그 배치",
+      "skill": "seo_skill",
+      "stage": "OPTIMIZATION",
+      "category": "execution",
+      "model_tier": "flash",
+      "order": 4,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true
+    },
+    {
+      "id": "Chief_Editor",
+      "name_ko": "편집장",
+      "role": "브랜드 톤앤매너 검증 및 최종 콘텐츠 품질 평가 후 피드백",
+      "skill": "editor_skill",
+      "stage": "REVIEW",
+      "category": "review",
+      "model_tier": "pro",
+      "order": 5,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true,
+      "is_end": true
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-Marketing_Strategist-Copywriter",
+      "source": "Marketing_Strategist",
+      "target": "Copywriter",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Copywriter-Design_Director",
+      "source": "Copywriter",
+      "target": "Design_Director",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Design_Director-SEO_Specialist",
+      "source": "Design_Director",
+      "target": "SEO_Specialist",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-SEO_Specialist-Chief_Editor",
+      "source": "SEO_Specialist",
+      "target": "Chief_Editor",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    }
+  ]
+}

@@ -38,6 +38,98 @@ function ManualRenderer({ markdown }: { markdown: string }) {
   return <>{elements}</>;
 }
 
+
+// --- Viewers ---
+function MarkdownViewer({ rawCode }: { rawCode: string }) {
+  const content = rawCode.replace(/^```(?:markdown)?\n/, '').replace(/\n```$/, '');
+  return (
+    <div className="w-full h-full bg-gray-100 overflow-y-auto p-8 flex justify-center">
+      <div className="bg-white p-10 shadow-lg rounded-sm max-w-4xl w-full min-h-[1056px] prose prose-sm md:prose-base">
+        <ManualRenderer markdown={content} />
+      </div>
+    </div>
+  );
+}
+
+function JsonViewer({ rawCode }: { rawCode: string }) {
+  let formatted = rawCode;
+  try {
+    let jsonStr = rawCode.trim();
+    const mdMatch = jsonStr.match(/^```(?:json)?\s*(\{[\s\S]*\}|\[[\s\S]*\])\s*```$/);
+    if (mdMatch) jsonStr = mdMatch[1];
+    formatted = JSON.stringify(JSON.parse(jsonStr), null, 2);
+  } catch(e) {}
+  return (
+    <div className="w-full h-full bg-gray-900 text-green-400 overflow-y-auto p-6 font-mono text-sm whitespace-pre-wrap">
+      {formatted}
+    </div>
+  );
+}
+
+function SlideViewer({ rawCode }: { rawCode: string }) {
+  const [currentSlide, setCurrentSlide] = React.useState(0);
+  const content = rawCode.replace(/^```(?:markdown)?\n/, '').replace(/\n```$/, '');
+  const slides = content.split('\n---\n').filter(s => s.trim() !== '');
+  
+  if (slides.length === 0) return <div className="p-8 text-center">슬라이드가 없습니다.</div>;
+
+  return (
+    <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center p-4 relative">
+      <div className="w-full max-w-5xl aspect-video bg-white rounded-xl shadow-2xl p-12 overflow-y-auto flex flex-col justify-center">
+         <div className="prose max-w-none"><ManualRenderer markdown={slides[currentSlide]} /></div>
+      </div>
+      <div className="absolute bottom-6 flex gap-4 bg-gray-800/80 px-4 py-2 rounded-full backdrop-blur">
+         <button onClick={() => setCurrentSlide(s => Math.max(0, s - 1))} disabled={currentSlide === 0} className="text-white disabled:text-gray-500 font-bold px-3">이전</button>
+         <span className="text-gray-300 font-mono flex items-center">{currentSlide + 1} / {slides.length}</span>
+         <button onClick={() => setCurrentSlide(s => Math.min(slides.length - 1, s + 1))} disabled={currentSlide === slides.length - 1} className="text-white disabled:text-gray-500 font-bold px-3">다음</button>
+      </div>
+    </div>
+  );
+}
+
+function MermaidViewer({ rawCode }: { rawCode: string }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  
+  React.useEffect(() => {
+    let code = rawCode.trim();
+    const match = code.match(/^```mermaid\s*\n([\s\S]*?)\n```$/);
+    if (match) code = match[1];
+
+    if (!containerRef.current) return;
+    
+    const scriptId = 'mermaid-script';
+    let script = document.getElementById(scriptId) as HTMLScriptElement;
+    
+    const renderDiagram = () => {
+       const m = (window as any).mermaid;
+       if (m) {
+         m.initialize({ startOnLoad: false, theme: 'default' });
+         containerRef.current!.innerHTML = '<div class="mermaid">' + code + '</div>';
+         m.init(undefined, containerRef.current!.querySelectorAll('.mermaid'));
+       }
+    };
+
+    if (!script) {
+      script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+      script.onload = () => {
+         renderDiagram();
+      };
+      document.body.appendChild(script);
+    } else {
+      renderDiagram();
+    }
+  }, [rawCode]);
+
+  return (
+    <div className="w-full h-full bg-white overflow-auto p-8 flex items-center justify-center">
+      <div ref={containerRef} className="max-w-full" />
+    </div>
+  );
+}
+// -----------------
+
 interface PreviewPanelProps {
   rawCode: string;
   isLoading?: boolean;
@@ -448,12 +540,19 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     }
   };
 
+  const deliverable_type = currentTemplateData?.deliverable_type || 'software_app';
+  const isDocType = deliverable_type === 'document_report';
+  const isHybrid = deliverable_type === 'hybrid_simulation';
+
   let tabs: { id: TabType; label: string }[] = [];
   if (isDynamic) {
-    tabs = [{ id: 'PREVIEW', label: '🖥️ 실시간 대시보드' }];
+    if (isDocType) tabs = [{ id: 'PREVIEW', label: '📄 최종 보고서' }];
+    else if (isHybrid) tabs = [{ id: 'PREVIEW', label: '📊 종합 보고서' }];
+    else tabs = [{ id: 'PREVIEW', label: '🖥️ 실시간 대시보드' }];
+    
     const agents = [...currentTemplateData.agents].sort((a: any, b: any) => a.order - b.order);
     agents.forEach((a: any) => {
-      tabs.push({ id: a.id, label: `📄 ${a.name_ko || a.id}` });
+      tabs.push({ id: a.id, label: `📑 ${a.name_ko || a.id}` });
     });
   } else {
     tabs = [
@@ -484,6 +583,10 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
       </div>
       <div className="flex-1 min-h-0 relative bg-white">
         {activeTab === 'PREVIEW' ? (
+          docs?.view_type === 'markdown' ? <MarkdownViewer rawCode={rawCode} /> :
+          docs?.view_type === 'json' ? <JsonViewer rawCode={rawCode} /> :
+          docs?.view_type === 'slide' ? <SlideViewer rawCode={rawCode} /> :
+          docs?.view_type === 'mermaid' ? <MermaidViewer rawCode={rawCode} /> :
           <>
             {isLoading && (<div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center z-20"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div><span className="text-gray-600 font-medium animate-pulse text-sm">에이전트가 코드를 컴파일하는 중입니다...</span></div>)}
             {error && !isLoading && (<div className="absolute top-0 left-0 w-full p-3 bg-red-50 text-red-600 text-sm z-10 border-b border-red-200 shadow-sm flex items-start gap-2"><span>🚨</span><div className="flex-1 overflow-hidden overflow-ellipsis"><strong>렌더링 에러:</strong> {error}</div></div>)}
@@ -509,7 +612,15 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
             </div>
           </div>
         ) : (
-          <div className="w-full h-full bg-gray-950 p-5 overflow-y-auto text-gray-300 font-mono text-xs whitespace-pre-wrap">{getTabContent()}</div>
+          <div className="w-full h-full bg-white overflow-y-auto">
+            {typeof getTabContent() === 'string' && getTabContent().includes('<html') ? (
+              <iframe srcDoc={getTabContent()} className="w-full h-full border-none bg-white" sandbox="allow-scripts allow-same-origin" />
+            ) : (
+              <div className="max-w-4xl mx-auto p-6 text-gray-800">
+                <MarkdownViewer rawCode={getTabContent()} />
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

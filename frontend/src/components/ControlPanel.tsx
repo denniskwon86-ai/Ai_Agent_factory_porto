@@ -472,12 +472,32 @@ export default function ControlPanel() {
               placeholder="프로젝트 아이디어를 입력하세요..."
               className="w-full h-20 bg-gray-950 border border-gray-700 rounded p-3 text-sm focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
             />
-            <label className="text-sm font-semibold text-gray-400 mt-1">🌍 전사 마스터 데이터 (선택)</label>
-            <textarea 
-              value={masterData} onChange={(e) => setMasterData(e.target.value)} disabled={isStarting || activeSprintId !== null}
-              placeholder="시뮬레이션 전사 환경 변수(환율, 단가, 목표 KPI 등)를 입력하세요..."
-              className="w-full h-20 bg-gray-950 border border-gray-700 rounded p-3 text-sm focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
-            />
+            <div className="mt-4 border border-gray-700 rounded-lg bg-gray-800/50 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <label className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                  <span>🔗 데이터 소스 및 외부 지식 연결</span>
+                  <span className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded border border-blue-800">MCP 연동 대기중</span>
+                </label>
+              </div>
+              
+              <div className="flex gap-2 mb-3">
+                <button disabled className="flex-1 bg-gray-900 border border-gray-700 rounded py-2 text-xs text-gray-500 flex items-center justify-center gap-2 opacity-50 cursor-not-allowed" title="향후 지원 예정">
+                  <span>📓 Notion 연동</span>
+                </button>
+                <button disabled className="flex-1 bg-gray-900 border border-gray-700 rounded py-2 text-xs text-gray-500 flex items-center justify-center gap-2 opacity-50 cursor-not-allowed" title="향후 지원 예정">
+                  <span>💎 Obsidian 연동</span>
+                </button>
+                <button className="flex-1 bg-blue-900/20 border border-blue-800 rounded py-2 text-xs text-blue-400 flex items-center justify-center gap-2 font-bold cursor-default">
+                  <span>📝 텍스트 직접 입력</span>
+                </button>
+              </div>
+
+              <textarea 
+                value={masterData} onChange={(e) => setMasterData(e.target.value)} disabled={isStarting || activeSprintId !== null}
+                placeholder="시뮬레이션 전사 환경 변수(환율, 단가, 목표 KPI 등)나 레퍼런스 문서를 직접 입력하세요..."
+                className="w-full h-24 bg-gray-950 border border-gray-700 rounded p-3 text-sm focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
+              />
+            </div>
             <button 
               onClick={handleStartPlanning} disabled={isStarting || !idea.trim() || activeSprintId !== null}
               className="mt-2 w-full bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 font-bold py-3 rounded transition-colors"

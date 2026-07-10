@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "pipeline_name": "제조업 품질 관리 및 불량 원인 분석 (QC/QA)",
+  "description": "공정 데이터와 검사 로그를 바탕으로 품질 이상을 추적하고 원인 분석 및 개선 대책(CAPA)을 도출하는 워크플로우",
+  "deliverable_type": "document_report",
+  "agents": [
+    {
+      "id": "Data_Collector",
+      "name_ko": "공정 데이터 수집기",
+      "role": "IoT 센서, MES 시스템 및 비전 검사기(Vision Inspection)의 원시 로그 데이터를 수집 및 정제합니다.",
+      "skill": "qc_data_collector_skill",
+      "stage": "EXTRACTION",
+      "category": "system",
+      "model_tier": "flash",
+      "order": 1,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true,
+      "is_start": true
+    },
+    {
+      "id": "Defect_Detector",
+      "name_ko": "이상 탐지기",
+      "role": "수집된 데이터를 통계적 공정 관리(SPC) 기법으로 분석하여 규격 이탈(Out of Spec) 및 불량 의심 항목을 식별합니다.",
+      "skill": "defect_detector_skill",
+      "stage": "DETECTION",
+      "category": "execution",
+      "model_tier": "flash",
+      "order": 2,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true
+    },
+    {
+      "id": "Root_Cause_Analyst",
+      "name_ko": "원인 분석 전문가",
+      "role": "불량이 발생한 시점의 4M(Man, Machine, Material, Method) 데이터를 심층 분석하여 근본 원인(Root Cause)을 도출합니다.",
+      "skill": "root_cause_analyst_skill",
+      "stage": "ANALYSIS",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 3,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": true,
+      "llm": true
+    },
+    {
+      "id": "Quality_Assurance_Engineer",
+      "name_ko": "품질 보증 엔지니어",
+      "role": "분석된 원인을 바탕으로 시정 및 예방 조치(CAPA) 대책을 수립하고, 기존 표준 작업 절차서(SOP)의 수정안을 제안합니다.",
+      "skill": "qa_engineer_skill",
+      "stage": "CAPA",
+      "category": "planning",
+      "model_tier": "pro",
+      "order": 4,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": true,
+      "llm": true
+    },
+    {
+      "id": "Quality_Manager",
+      "name_ko": "품질 관리 책임자",
+      "role": "제안된 개선 대책의 타당성을 최종 승인하고 경영진에 보고할 요약 품질 보고서(Quality Report)를 생성합니다.",
+      "skill": "qc_manager_skill",
+      "stage": "REVIEW",
+      "category": "review",
+      "model_tier": "pro",
+      "order": 5,
+      "enabled": true,
+      "hotl_after": true,
+      "debate": false,
+      "llm": true,
+      "is_end": true
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-Data_Collector-Defect_Detector",
+      "source": "Data_Collector",
+      "target": "Defect_Detector",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Defect_Detector-Root_Cause_Analyst",
+      "source": "Defect_Detector",
+      "target": "Root_Cause_Analyst",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Root_Cause_Analyst-Quality_Assurance_Engineer",
+      "source": "Root_Cause_Analyst",
+      "target": "Quality_Assurance_Engineer",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "e-Quality_Assurance_Engineer-Quality_Manager",
+      "source": "Quality_Assurance_Engineer",
+      "target": "Quality_Manager",
+      "animated": true,
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
+    }
+  ]
+}
