@@ -128,6 +128,61 @@ function MermaidViewer({ rawCode }: { rawCode: string }) {
     </div>
   );
 }
+function ServerLogViewer() {
+  const [logs, setLogs] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+  
+  const fetchLogs = async () => {
+    setLoading(true);
+    try {
+      const { API_BASE_URL } = await import('../store/useFactoryStore');
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/logs`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data && Array.isArray(json.data)) {
+          setLogs(json.data);
+        }
+      }
+    } catch (e) {
+      console.error("로그 불러오기 실패:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+  }, []);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  return (
+    <div className="w-full h-full bg-black text-green-400 font-mono text-xs overflow-hidden flex flex-col">
+      <div className="p-3 bg-gray-900 border-b border-gray-700 flex justify-between items-center shrink-0">
+        <span className="text-gray-400 font-bold">백엔드 메모리 큐 (최근 1,000줄)</span>
+        <button 
+          onClick={fetchLogs} 
+          disabled={loading}
+          className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white px-4 py-1.5 rounded text-sm font-bold transition-colors"
+        >
+          {loading ? '⏳ 불러오는 중...' : '🔄 로그 불러오기'}
+        </button>
+      </div>
+      <div className="p-4 flex-1 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+        {logs.length === 0 ? (
+          <div className="text-gray-500 italic">표시할 로그가 없습니다.</div>
+        ) : (
+          logs.map((l, i) => <div key={i} className="mb-0.5">{l}</div>)
+        )}
+        <div ref={endRef} />
+      </div>
+    </div>
+  );
+}
+
 // -----------------
 
 interface PreviewPanelProps {
@@ -555,6 +610,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     agents.forEach((a: any) => {
       tabs.push({ id: a.id, label: `📑 ${a.name_ko || a.id}` });
     });
+    tabs.push({ id: 'SERVER_LOG', label: '🖥️ 서버 로그' });
   } else {
     tabs = [
       { id: 'PREVIEW', label: '🖥️ 실시간 샌드박스' }, { id: 'RFP', label: '📋 요구정의(RFP)' }, { id: 'PRD', label: '📄 기획서' },
@@ -562,7 +618,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
       { id: 'ARCH', label: '🏗️ 아키텍처' }, { id: 'TECH', label: '🛠️ 기술사양' },
       { id: 'FRONTEND', label: '🎨 프론트엔드' }, { id: 'BACKEND', label: '⚙️ 백엔드' },
       { id: 'REVIEW', label: '📝 리뷰' }, { id: 'QA', label: '🧪 QA' },
-      { id: 'ACCEPT', label: '🧑‍⚖️ 수용검수' }, { id: 'MANUAL', label: '📘 사용자 매뉴얼' }
+      { id: 'ACCEPT', label: '🧑‍⚖️ 수용검수' }, { id: 'MANUAL', label: '📘 사용자 매뉴얼' },
+      { id: 'SERVER_LOG', label: '🖥️ 서버 로그' }
     ];
   }
 
@@ -613,6 +670,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
               }
             </div>
           </div>
+        ) : activeTab === 'SERVER_LOG' ? (
+          <ServerLogViewer />
         ) : (
           <div className="w-full h-full bg-white overflow-y-auto">
             {typeof getTabContent() === 'string' && getTabContent().includes('<html') ? (

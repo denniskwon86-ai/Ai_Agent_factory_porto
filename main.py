@@ -10,6 +10,10 @@ try:
 except Exception:
     pass
 
+from core.sys_logger import StdoutInterceptor
+sys.stdout = StdoutInterceptor(sys.stdout)
+sys.stderr = StdoutInterceptor(sys.stderr)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import factory_control, realtime, format_control

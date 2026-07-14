@@ -601,6 +601,20 @@ async def get_latest_state(project_id: str):
 
 
 # ==========================================
+# 백엔드 서버 시스템 로그 조회
+# ==========================================
+@router.get("/logs")
+async def get_system_logs():
+    """백엔드 메모리 큐에 쌓인 최근 서버 로그를 반환합니다."""
+    try:
+        from core.sys_logger import get_recent_logs
+        logs = get_recent_logs()
+        return {"status": "success", "data": logs}
+    except ImportError:
+        return {"status": "success", "data": ["로그 시스템 초기화 중입니다..."]}
+
+
+# ==========================================
 # 결과물 라이브러리 (배포/최종 결과물 저장 + 보관 + 재실행)
 # ==========================================
 @router.post("/{project_id}/release")
