@@ -12,7 +12,7 @@
 * **프론트엔드 (Frontend):** React, Vite, Tailwind CSS 기반의 통제실(Control Panel) 대시보드.
 * **핵심 컨셉 (Core Concept):** 
   - 각 단계별 특화된 페르소나와 스킬을 가진 에이전트(`Master_PM`, `UIDesigner`, `Architect` 등)가 순차적/병렬적으로 역할을 수행.
-  - 중요한 분기점(예: WBS 확정, UI/UX 승인, 최종 검수 등)에서 사용자(Supervisor)가 개입하여 승인/반려/수정 지시를 내리는 **HOTL (Human-in-the-Loop)** 체계 구축.
+  - 중요한 분기점(예: WBS 확정, UI/UX 승인, 최종 검수 등)에서 사용자(Supervisor)가 개입하여 승인/반려/수정 지시를 내리는 **HOTL (Human-On-The-Loop)** 체계 구축.
 
 ---
 
@@ -69,7 +69,7 @@
 
 ## 3. 직전 작업 내역 (당신이 이어나갈 맥락)
 - 최근 `UIDesigner` 에이전트가 새롭게 도입되어 `Master_PM` 직후 HTML/Tailwind 기반의 목업을 생성하고 통제실 iframe에 렌더링하는 기능이 구현되었습니다.
-- HOTL(Human-in-the-Loop) 입력 인터페이스와 파이프라인 상태 UI 반응성(CSS Flex 랩핑 등)이 수정되었습니다.
+- HOTL(Human-On-The-Loop) 입력 인터페이스와 파이프라인 상태 UI 반응성(CSS Flex 랩핑 등)이 수정되었습니다.
 
 위 내용을 바탕으로 사용자의 다음 요구사항(Next Request)을 분석하고, 필요한 디렉토리 및 파일을 탐색하여 개발을 이어나가십시오.
 ```
