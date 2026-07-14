@@ -201,9 +201,20 @@ def route_from_pm(state: ProjectState) -> str:
     return "Reviewer"
 
 def route_from_ui_designer(state: ProjectState) -> str:
-    if getattr(state, "needs_revision", False):
-        print("🔁 [UI 재설계] 사용자 피드백 반영 — UIDesigner 로 되돌려 다시 디자인합니다.")
+    # UIDesigner 직후에는 무조건 VisionQA로 넘겨 시각적 검수를 1차로 받습니다.
+    return "VisionQA"
+
+def route_from_vision_qa(state: ProjectState) -> str:
+    # 1. Vision QA(AI) 자체 판단 반려 시
+    if getattr(state, "reviewer_decision", "") == "REWORK_DEV":
+        print("🔁 [VisionQA 반려] 시각적 결함 발견 — UIDesigner 로 되돌려 다시 디자인합니다.")
         return "UIDesigner"
+    
+    # 2. Vision QA 통과 후, 사용자(HOTL)가 미리보기를 보고 피드백을 남긴 경우
+    if getattr(state, "needs_revision", False):
+        print("🔁 [사용자 UI 재설계 요청] 피드백 반영 — UIDesigner 로 되돌려 다시 디자인합니다.")
+        return "UIDesigner"
+        
     return "Master_PMO"
 
 def route_from_pmo(state: ProjectState) -> str:
@@ -292,7 +303,8 @@ def _wire_edges(workflow):
     workflow.add_conditional_edges("RFP_Analyst", route_from_rfp, {"RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM"})
     workflow.add_conditional_edges("Master_PM", route_from_pm, {"UIDesigner": "UIDesigner", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
     
-    workflow.add_conditional_edges("UIDesigner", route_from_ui_designer, {"UIDesigner": "UIDesigner", "Master_PMO": "Master_PMO"})
+    workflow.add_conditional_edges("UIDesigner", route_from_ui_designer, {"VisionQA": "VisionQA"})
+    workflow.add_conditional_edges("VisionQA", route_from_vision_qa, {"UIDesigner": "UIDesigner", "Master_PMO": "Master_PMO"})
     
     # WBS 게이트: interrupt_after=Master_PMO 가 실제로 멈추도록 승인 경로를 '실제 노드'(WBS_Approved)로
     # 보낸다. 피드백 시 Master_PMO 재실행(WBS 재분할), 승인 시 WBS_Approved→END(기획 종료).
