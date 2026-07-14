@@ -191,7 +191,8 @@ def route_from_reviewer(state: ProjectState) -> str:
     return END
 
 def route_from_pm(state: ProjectState) -> str:
-    if not state.current_sprint_task_id:
+    # 기획(PLANNING) 단계 신규 가동이거나 task_id가 비어있으면 UIDesigner로 진행
+    if not state.current_sprint_task_id or state.factory_mode == "PLANNING":
         return "UIDesigner"
     
     if getattr(state, "needs_revision", False):

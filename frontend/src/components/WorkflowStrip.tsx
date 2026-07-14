@@ -1,9 +1,10 @@
 import { useFactoryStore } from '../store/useFactoryStore';
 
-// 전체 워크플로우 매크로 단계 (기본 SW 개발 파이프라인)
 const DEFAULT_FLOW: { key: string; label: string; agents?: string[] }[] = [
   { key: 'RFP', label: '요구정의' },
   { key: 'PLANNING', label: '기획' },
+  { key: 'UI_DESIGN', label: 'UI디자인' },
+  { key: 'VISION_QA', label: '비전QA' },
   { key: 'PMO', label: 'WBS분할' },
   { key: 'ARCHITECTURE', label: '아키텍처' },
   { key: 'TECH_SPEC', label: '기술설계' },
@@ -16,11 +17,11 @@ const DEFAULT_FLOW: { key: string; label: string; agents?: string[] }[] = [
 ];
 
 const DEFAULT_NODE_TO_IDX: Record<string, number> = {
-  rfp_analyst: 0, master_pm: 1, master_pmo: 2, architect: 3, tech_lead: 4,
-  backend: 5, frontend: 5, codebuilder: 6, reviewer: 7, qa: 8, supervisor: 9, manualwriter: 10,
+  rfp_analyst: 0, master_pm: 1, uidesigner: 2, visionqa: 3, master_pmo: 4, architect: 5, tech_lead: 6,
+  backend: 7, frontend: 7, codebuilder: 8, reviewer: 9, qa: 10, supervisor: 11, manualwriter: 12,
 };
 const DEFAULT_STAGE_TO_IDX: Record<string, number> = {
-  RFP: 0, PLANNING: 1, PMO: 2, ARCHITECTURE: 3, TECH_SPEC: 4, EXECUTION: 5, BUILD: 6, CODE_REVIEW: 7, QA: 8, SUPERVISOR: 9, MANUAL: 10,
+  RFP: 0, PLANNING: 1, UI_DESIGN: 2, VISION_QA: 3, PMO: 4, ARCHITECTURE: 5, TECH_SPEC: 6, EXECUTION: 7, BUILD: 8, CODE_REVIEW: 9, QA: 10, SUPERVISOR: 11, MANUAL: 12,
 };
 
 export default function WorkflowStrip() {
@@ -52,20 +53,37 @@ export default function WorkflowStrip() {
     });
   }
 
-  // 도달한 가장 앞선 매크로 단계(프론티어). 누적 신호(완료 에이전트·current_stage·채점)를 모두 합산해
-  // '단조'를 보장 → 더 뒤 단계가 done 인데 앞 단계가 active 인 모순을 구조적으로 제거.
+  // 1. 프론티어(가장 멀리 도달한 진도)는 여전히 active 상태 추론의 폴백용으로 계산합니다.
   let frontier = -1;
   completed.forEach((a: string) => { if (NODE_TO_IDX[a] != null) frontier = Math.max(frontier, NODE_TO_IDX[a]); });
   if (current && STAGE_TO_IDX[current] != null) frontier = Math.max(frontier, STAGE_TO_IDX[current]);
   Object.keys(scores).forEach((k) => { const idx = FLOW.findIndex((f) => f.key === k); if (idx >= 0) frontier = Math.max(frontier, idx); });
+  if (hotlTaskId && NODE_TO_IDX[hotlTaskId.toLowerCase()] != null) frontier = Math.max(frontier, NODE_TO_IDX[hotlTaskId.toLowerCase()]);
 
   return (
     <div className="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center gap-0.5 overflow-x-auto shrink-0">
       <span className="text-[10px] text-gray-500 font-bold tracking-wider mr-2 shrink-0">🔭 WORKFLOW</span>
       {FLOW.map((step, i) => {
-        // 프론티어 이전 = 완료, 프론티어 = (가동 중이면 active, 아니면 완료), 이후 = 대기
-        const done = i < frontier || (i === frontier && !running);
-        const active = running && i === frontier;
+        // 2. 정확한 상태 매핑 (단조 증가 꼼수 제거, 개별 에이전트 완료/활성 상태 명확히 추적)
+        const agentsForStep = Object.keys(NODE_TO_IDX).filter(k => NODE_TO_IDX[k] === i);
+        
+        // [완료 조건]: 이 단계에 속한 에이전트 중 하나라도 completed_agents 에 있거나, 채점(scores) 기록이 있는 경우
+        const isCompletedExact = agentsForStep.some(a => completed.includes(a)) || scores[step.key] != null;
+        
+        // [활성 조건]: 
+        // A) 멈춰있는 HOTL(인간개입) 태스크가 현재 단계에 속하는 경우
+        // B) 현재 단계(current_stage)가 정확히 일치하는 경우
+        // C) 정확한 추적이 어려울 때 가장 프론티어(frontier)에 도달해 있으면서 아직 완료되지 않은 경우
+        let isActiveExact = false;
+        if (running) {
+          if (hotlTaskId && agentsForStep.includes(hotlTaskId.toLowerCase())) isActiveExact = true;
+          else if (current && STAGE_TO_IDX[current] === i) isActiveExact = true;
+          else if (i === frontier && !isCompletedExact) isActiveExact = true;
+        }
+
+        const done = isCompletedExact;
+        const active = isActiveExact;
+
         const cls = active
           ? 'bg-blue-600 text-white animate-pulse border border-blue-400'
           : done

@@ -120,6 +120,7 @@ interface FactoryStore {
   closeFormatPanel: () => void;
   clearSprintData: () => void;
   triggerSelfHealing: (errorMsg: string) => Promise<void>;
+  stopSprint: (projectId: string, taskId: string) => Promise<void>;
 }
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
@@ -230,6 +231,25 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     } catch (error) {
       console.error("메가 프로젝트 생성 실패:", error);
       return false;
+    }
+  },
+
+  stopSprint: async (projectId: string, taskId: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/sprint/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId })
+      });
+      if (!res.ok) {
+        alert("스프린트 중지 요청이 서버에서 거부되었습니다.");
+      }
+    } catch (error) {
+      console.error('Stop sprint API failed, but UI state will be forcefully cleared:', error);
+      alert("서버에 연결할 수 없어 강제로 UI 상태를 초기화합니다.");
+    } finally {
+      // API 통신 성공/실패 여부와 관계없이 무조건 프론트엔드의 진행 중 상태를 초기화하여 UI 블로킹 해제
+      set({ activeSprintId: null, hotlTaskId: null, currentActivity: null });
     }
   },
 

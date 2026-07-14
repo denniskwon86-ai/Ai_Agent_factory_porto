@@ -13,6 +13,7 @@ import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
 import ErrorBoundary from './components/ErrorBoundary';
+import ServerLogPopup from './components/ServerLogPopup';
 
 
 export default function App() {
@@ -43,6 +44,7 @@ export default function App() {
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
+  const [showLogPopup, setShowLogPopup] = useState(false);
 
   const isSubProject = (id: string) => projects.some(p => p.is_mega_project && id.startsWith(p.id + "_"));
 
@@ -132,8 +134,8 @@ export default function App() {
         {showSkillEvolution && (
           <SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />
         )}
-        <div className="min-h-screen w-screen bg-gradient-to-br from-gray-950 via-gray-900 to-indigo-950/20 text-gray-100 flex flex-col font-sans">
-          <header className="h-16 bg-gray-900/80 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-8 shrink-0 sticky top-0 z-10">
+        <div className="min-h-screen w-screen bg-[#0B0C10] text-gray-100 flex flex-col font-sans">
+          <header className="h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-[#1F2833] flex items-center justify-between px-8 shrink-0 sticky top-0 z-10">
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
               <span className="text-indigo-400">🏭 V5.2</span> Private AI Cockpit
             </h1>
@@ -152,9 +154,16 @@ export default function App() {
               >
                 🧬 AI 스킬 진화
               </button>
-              <div className="flex items-center gap-2 bg-black/20 px-3 py-1.5 rounded-full border border-white/5">
-                <span className="text-xs text-gray-400 font-medium">Network</span>
-                <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_8px] ${isConnected ? 'bg-green-500 shadow-green-500/50' : 'bg-red-500 shadow-red-500/50 animate-pulse'}`} />
+              <div className="relative">
+                <button 
+                  onClick={() => setShowLogPopup(v => !v)}
+                  title="서버 로그 보기"
+                  className="flex items-center gap-2 bg-black/20 hover:bg-black/40 transition-colors px-3 py-1.5 rounded-full border border-white/5 cursor-pointer"
+                >
+                  <span className="text-xs text-gray-400 font-medium">Network</span>
+                  <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_8px] ${isConnected ? 'bg-green-500 shadow-green-500/50' : 'bg-red-500 shadow-red-500/50 animate-pulse'}`} />
+                </button>
+                {showLogPopup && <ServerLogPopup onClose={() => setShowLogPopup(false)} />}
               </div>
             </div>
           </header>
@@ -163,7 +172,7 @@ export default function App() {
             <div className="w-full max-w-6xl flex flex-col gap-8">
               
               {/* Hero Section: 신규 프로젝트 생성 */}
-              <div className="relative overflow-hidden bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl">
+              <div className="relative overflow-hidden bg-[#1A1A1D] border border-[#2F3640] rounded-2xl p-8 shadow-2xl">
                 <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2 relative z-10">
                   ✨ 신규 프로젝트 개설
                 </h2>
@@ -175,7 +184,7 @@ export default function App() {
                       value={newProjectId}
                       onChange={(e) => setNewProjectId(e.target.value)}
                       placeholder="예: smart-life-app"
-                      className="w-full bg-black/20 border border-white/10 rounded-xl p-3.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full bg-[#0B0C10] border border-[#2F3640] rounded-xl p-3.5 text-sm text-gray-200 focus:outline-none focus:border-indigo-500 transition-colors shadow-inner"
                     />
                   </div>
                   <div className="flex-[3] min-w-[250px]">
@@ -183,7 +192,7 @@ export default function App() {
                     <select
                       value={selectedTemplateId}
                       onChange={(e) => setSelectedTemplate(e.target.value)}
-                      className="w-full bg-black/20 border border-white/10 rounded-xl p-3.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full bg-[#0B0C10] border border-[#2F3640] rounded-xl p-3.5 text-sm text-gray-200 focus:outline-none focus:border-indigo-500 transition-colors shadow-inner"
                     >
                       {templates.length === 0 && <option value="default">기본 워크플로우</option>}
                       {templates.map((t) => (
@@ -195,9 +204,9 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-6 p-4 bg-black/20 border border-white/10 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="mt-6 p-4 bg-[#0B0C10]/50 border border-[#2F3640] rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium text-gray-400 mb-1">프로젝트 유형 선택</label>
+                    <label className="text-sm font-medium text-gray-300 mb-1">프로젝트 유형 선택</label>
                     <div className="flex gap-6">
                       <label className="flex items-center gap-2 cursor-pointer group">
                         <input type="radio" name="projectType" value="independent" checked={projectType === "independent"} onChange={() => setProjectType("independent")} className="hidden" />
@@ -238,10 +247,10 @@ export default function App() {
                         }
                       }
                     }}
-                    className={`shrink-0 w-full md:w-32 h-[46px] rounded-xl font-bold text-white shadow-lg transition-all ${
+                    className={`shrink-0 w-full md:w-32 h-[46px] rounded-xl font-bold text-white shadow-lg transition-all hover:scale-[1.02] ${
                       projectType === "independent"
                         ? "bg-indigo-600 hover:bg-indigo-500"
-                        : "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
+                        : "bg-purple-600 hover:bg-purple-500"
                     }`}
                   >
                     프로젝트 생성
@@ -249,29 +258,29 @@ export default function App() {
                 </div>
 
                 {selectedTemplateData && selectedTemplateData.description && (
-                  <div className="text-sm text-gray-400 mt-4 bg-black/20 p-3 rounded-lg border border-white/5 inline-block">
+                  <div className="text-sm text-gray-300 mt-4 bg-[#0B0C10]/50 p-3 rounded-lg border border-[#2F3640] inline-block">
                     ℹ️ {selectedTemplateData.description}
                   </div>
                 )}
               </div>
 
               {/* Tabs Section */}
-              <div className="flex items-center gap-6 border-b border-white/10 pb-2">
+              <div className="flex items-center gap-6 border-b border-[#2F3640] pb-2">
                 <button 
                   onClick={() => setActiveTab("mega")}
-                  className={`text-lg font-bold pb-2 border-b-2 transition-all ${activeTab === "mega" ? "text-purple-400 border-purple-500" : "text-gray-500 border-transparent hover:text-gray-300"}`}
+                  className={`text-lg font-bold pb-2 border-b-2 transition-all ${activeTab === "mega" ? "text-purple-400 border-purple-500" : "text-gray-400 border-transparent hover:text-gray-200"}`}
                 >
                   🌟 메가 프로젝트
                 </button>
                 <button 
                   onClick={() => setActiveTab("vault")}
-                  className={`text-lg font-bold pb-2 border-b-2 transition-all ${activeTab === "vault" ? "text-indigo-400 border-indigo-500" : "text-gray-500 border-transparent hover:text-gray-300"}`}
+                  className={`text-lg font-bold pb-2 border-b-2 transition-all ${activeTab === "vault" ? "text-indigo-400 border-indigo-500" : "text-gray-400 border-transparent hover:text-gray-200"}`}
                 >
                   📂 독립 가동 대장
                 </button>
                 <button 
                   onClick={() => setActiveTab("releases")}
-                  className={`text-lg font-bold pb-2 border-b-2 transition-all ${activeTab === "releases" ? "text-emerald-400 border-emerald-500" : "text-gray-500 border-transparent hover:text-gray-300"}`}
+                  className={`text-lg font-bold pb-2 border-b-2 transition-all ${activeTab === "releases" ? "text-emerald-400 border-emerald-500" : "text-gray-400 border-transparent hover:text-gray-200"}`}
                 >
                   📦 결과물 라이브러리
                 </button>
@@ -288,26 +297,51 @@ export default function App() {
                   {projects.filter(p => p.is_mega_project).map((mega) => {
                     const subs = projects.filter(p => p.parent_project_id === mega.id);
                     return (
-                      <div key={mega.id} className="bg-white/5 backdrop-blur-md border border-purple-500/30 rounded-2xl p-6 shadow-xl relative group">
-                        <div className="flex items-start justify-between mb-4">
+                      <div key={mega.id} className="bg-[#1A1A1D] border border-[#2F3640] hover:border-purple-500/50 rounded-2xl p-6 shadow-2xl relative group transition-colors">
+                        <div className="flex items-start justify-between mb-2">
                           <div className="flex items-center gap-3">
                             <h3 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">🌟 {mega.name}</h3>
                             <span className="text-xs px-2 py-1 bg-purple-900/40 text-purple-300 border border-purple-700/50 rounded-full font-mono">Mega Vault</span>
                           </div>
                           <button onClick={(e) => handleDeleteProject(mega.id, mega.name, e)} className="text-xs text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-900/60 border border-red-900/50 rounded-lg px-3 py-1.5 transition-colors">🗑️ 완전 삭제</button>
                         </div>
-                        <button onClick={() => setCurrentProject(mega.id)} className="w-full mb-6 bg-purple-600/20 hover:bg-purple-600/40 border border-purple-500/50 text-purple-200 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg hover:shadow-purple-500/20">🔌 메가 프로젝트 보드룸 진입</button>
+                        <div className="flex items-center gap-4 mb-4">
+                          <span className="text-xs bg-purple-900/60 text-purple-200 border border-purple-700/50 rounded px-2 py-1">
+                            {templates.find((t: any) => t.id === mega.template_id)?.name || mega.template_id || "템플릿 없음"}
+                          </span>
+                          <div className="flex-1 max-w-xs">
+                            {(() => {
+                              const megaTotal = subs.reduce((sum, s) => sum + (s.total_tasks || 0), 0) + (mega.total_tasks || 0);
+                              const megaCompleted = subs.reduce((sum, s) => sum + (s.completed_tasks || 0), 0) + (mega.completed_tasks || 0);
+                              const progress = megaTotal > 0 ? Math.round((megaCompleted / megaTotal) * 100) : 0;
+                              return megaTotal > 0 ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 h-1.5 bg-gray-800 border border-gray-700 rounded-full overflow-hidden">
+                                    <div className="h-full bg-gradient-to-r from-purple-500 to-indigo-500" style={{ width: `${progress}%` }}></div>
+                                  </div>
+                                  <span className="text-xs text-gray-400 font-medium">{progress}%</span>
+                                </div>
+                              ) : null;
+                            })()}
+                          </div>
+                        </div>
+                        <button onClick={() => setCurrentProject(mega.id)} className="w-full mb-6 bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-transform hover:scale-[1.01] shadow-lg">🔌 메가 프로젝트 보드룸 진입</button>
                         
                         {/* 서브 프로젝트 그리드 최적화 */}
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                           {subs.map(sub => (
-                            <div key={sub.id} className="bg-black/30 border border-white/5 rounded-xl p-4 hover:bg-white/5 hover:border-indigo-500/50 transition-all flex flex-col relative group/sub">
-                              <div className="flex items-start justify-between mb-2">
+                            <div key={sub.id} className="bg-[#12141C] border border-[#2F3640] rounded-xl p-4 hover:border-indigo-500/50 hover:bg-[#161821] transition-all flex flex-col relative group/sub shadow-inner">
+                              <div className="flex items-start justify-between mb-1">
                                 <h4 className="text-sm font-bold text-indigo-300 truncate pr-2">🔹 {sub.name}</h4>
                                 <button onClick={(e) => handleDeleteProject(sub.id, sub.name, e)} className="opacity-0 group-hover/sub:opacity-100 text-[10px] text-red-400 hover:text-red-300 transition-opacity">🗑</button>
                               </div>
+                              {sub.total_tasks > 0 && (
+                                <div className="w-full h-1 bg-gray-800 rounded-full mb-1 overflow-hidden">
+                                  <div className="h-full bg-indigo-500" style={{ width: `${Math.round(((sub.completed_tasks || 0) / sub.total_tasks) * 100)}%` }}></div>
+                                </div>
+                              )}
                               <span className="text-[10px] text-gray-500 font-mono mb-4">{sub.id}</span>
-                              <button onClick={() => setCurrentProject(sub.id)} className="w-full mt-auto bg-indigo-900/40 hover:bg-indigo-600/60 border border-indigo-700/50 text-indigo-100 text-xs font-bold py-2 rounded-lg transition-colors">서브 진입</button>
+                              <button onClick={() => setCurrentProject(sub.id)} className="w-full mt-auto bg-[#1F2833] hover:bg-indigo-600 text-gray-300 hover:text-white text-xs font-bold py-2 rounded-lg transition-colors border border-[#2F3640] hover:border-transparent">서브 진입</button>
                             </div>
                           ))}
                         </div>
@@ -320,14 +354,14 @@ export default function App() {
               {activeTab === "vault" && (
                 <div className="animate-fade-in flex flex-col gap-6">
                   {projects.filter(p => !p.is_mega_project && !p.parent_project_id && !isSubProject(p.id)).length === 0 && (
-                    <div className="text-gray-500 text-center py-10 bg-white/5 border border-white/5 rounded-xl">
+                    <div className="text-gray-500 text-center py-10 bg-[#1A1A1D] border border-[#2F3640] rounded-xl">
                       가동 중인 독립 프로젝트가 없습니다.
                     </div>
                   )}
                   {/* 일반 프로젝트 그리드 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {projects.filter(p => !p.is_mega_project && !p.parent_project_id && !isSubProject(p.id)).map((proj) => (
-                      <div key={proj.id} className="bg-gray-800/90 border border-gray-700 rounded-2xl p-6 hover:bg-gray-800 hover:border-blue-500/50 transition-all shadow-lg flex flex-col group relative">
+                      <div key={proj.id} className="bg-[#1A1A1D] border border-[#2F3640] hover:border-blue-500/50 hover:bg-[#1C1E26] rounded-2xl p-6 transition-all shadow-xl flex flex-col group relative">
                         <div className="flex items-start justify-between mb-4 gap-2">
                           <div className="flex flex-col gap-1 min-w-0">
                             <h3 className="text-lg font-bold text-blue-300 truncate">{proj.name}</h3>
@@ -346,12 +380,25 @@ export default function App() {
                             >🗑️</button>
                           </div>
                         </div>
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-xs bg-indigo-900/40 text-indigo-300 border border-indigo-700/50 rounded px-2 py-0.5 truncate">
+                            {templates.find((t: any) => t.id === proj.template_id)?.name || proj.template_id || "기본 워크플로우"}
+                          </span>
+                          {proj.total_tasks > 0 && (
+                            <div className="flex items-center gap-1.5 flex-1 ml-2 text-xs text-gray-400">
+                              <div className="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
+                                <div className="h-full bg-blue-500" style={{ width: `${Math.round(((proj.completed_tasks || 0) / proj.total_tasks) * 100)}%` }}></div>
+                              </div>
+                              <span className="shrink-0">{Math.round(((proj.completed_tasks || 0) / proj.total_tasks) * 100)}%</span>
+                            </div>
+                          )}
+                        </div>
                         <div className="flex-1 text-xs text-gray-400 mb-6 overflow-hidden line-clamp-3 leading-relaxed">
                           {proj.initial_idea || "독립 환경에서 가동 대기 중입니다."}
                         </div>
                         <button
                           onClick={() => setCurrentProject(proj.id)}
-                          className="w-full bg-blue-600/20 hover:bg-blue-500/40 border border-blue-500/30 text-blue-200 font-bold py-2.5 rounded-xl transition-all shadow-lg hover:shadow-blue-500/20"
+                          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl transition-transform hover:scale-[1.02] shadow-lg"
                         >
                           🔌 통제실 진입
                         </button>
@@ -364,7 +411,7 @@ export default function App() {
               {activeTab === "releases" && (
                 <div className="animate-fade-in">
                   {releases.length === 0 ? (
-                    <div className="bg-gray-800/80 border border-dashed border-gray-700 rounded-2xl p-10 flex flex-col items-center justify-center text-center">
+                    <div className="bg-[#1A1A1D] border border-dashed border-[#2F3640] rounded-2xl p-10 flex flex-col items-center justify-center text-center">
                       <div className="text-4xl mb-4 opacity-50">📦</div>
                       <div className="text-gray-400 font-medium">아직 배포된 결과물이 없습니다.</div>
                       <div className="text-gray-500 text-sm mt-2">프로젝트 통제실에서 "최종 결과물 저장(배포)"을 완료하면 이곳에 표시됩니다.</div>
@@ -372,7 +419,7 @@ export default function App() {
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6">
                       {releases.map((rel: any) => (
-                        <div key={rel.release_id} className="bg-gray-800/90 border border-gray-700 rounded-2xl p-5 hover:border-emerald-500/60 transition-all flex flex-col shadow-lg hover:shadow-emerald-500/10 group">
+                        <div key={rel.release_id} className="bg-[#1A1A1D] border border-[#2F3640] rounded-2xl p-5 hover:border-emerald-500/60 hover:bg-[#1C2220] transition-all flex flex-col shadow-xl group">
                           <div className="flex items-start justify-between mb-3 gap-2">
                             <h3 className="text-base font-bold text-emerald-300 truncate">{rel.project_name}</h3>
                             <button
@@ -381,19 +428,19 @@ export default function App() {
                               title="삭제"
                             >🗑</button>
                           </div>
-                          <div className="text-[11px] text-gray-400 mb-6 bg-black/20 p-2 rounded-lg border border-white/5">
+                          <div className="text-[11px] text-gray-400 mb-6 bg-[#0B0C10] p-2 rounded-lg border border-[#2F3640]">
                             <div className="mb-1 text-gray-300">📅 {rel.created_at}</div>
                             <div>✓ 태스크 {rel.task_count}개 완료</div>
                           </div>
                           {(!rel.deliverable_type || rel.deliverable_type === "software_app") ? (
                             <button
                               onClick={() => viewRelease(rel.release_id)}
-                              className="mt-auto w-full bg-emerald-600/20 hover:bg-emerald-500/40 border border-emerald-500/30 text-emerald-200 font-bold py-2.5 rounded-xl transition-all"
+                              className="mt-auto w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl transition-transform hover:scale-[1.02] shadow-lg"
                             >▶ 앱 실행 (Run)</button>
                           ) : (
                             <button
                               onClick={() => viewRelease(rel.release_id)}
-                              className="mt-auto w-full bg-indigo-600/20 hover:bg-indigo-500/40 border border-indigo-500/30 text-indigo-200 font-bold py-2.5 rounded-xl transition-all"
+                              className="mt-auto w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-xl transition-transform hover:scale-[1.02] shadow-lg"
                             >📄 보고서 열람</button>
                           )}
                         </div>
@@ -421,8 +468,8 @@ export default function App() {
   // 🚀 [3단 레이아웃 독립 스크롤 최적화 설계 구조 적용]
   return (
     <ErrorBoundary>
-      <div className="h-screen w-screen bg-gray-900 text-gray-100 flex flex-col font-sans overflow-hidden">
-        <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0 z-20">
+      <div className="h-screen w-screen bg-[#0B0C10] text-gray-100 flex flex-col font-sans overflow-hidden">
+        <header className="h-14 bg-[#0B0C10]/95 backdrop-blur border-b border-[#1F2833] flex items-center justify-between px-6 shrink-0 z-20">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setCurrentProject(null)}
@@ -434,9 +481,16 @@ export default function App() {
               <span className="text-blue-400 truncate">[{projects.find(p => p.id === currentProjectId)?.name || currentProjectId}]</span> 통제실
             </h1>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400 font-medium">실시간 통신망:</span>
-            <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+          <div className="relative flex items-center">
+            <button 
+              onClick={() => setShowLogPopup(v => !v)}
+              title="서버 로그 보기"
+              className="flex items-center gap-3 hover:bg-white/10 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+            >
+              <span className="text-sm text-gray-400 font-medium">실시간 통신망:</span>
+              <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+            </button>
+            {showLogPopup && <ServerLogPopup onClose={() => setShowLogPopup(false)} />}
           </div>
         </header>
 

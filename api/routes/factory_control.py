@@ -133,11 +133,17 @@ async def get_projects():
             wbs_path = os.path.join(item_path, "00_wbs_master_plan.json")
             project_name = item
             initial_idea = ""
+            total_tasks = 0
+            completed_tasks = 0
+            template_id, _, _ = _read_project_meta(item_path)
             if os.path.exists(wbs_path):
                 try:
                     with open(wbs_path, "r", encoding="utf-8") as f:
                         wbs_data = json.load(f)
                         project_name = wbs_data.get("project_name", item)
+                        tasks = wbs_data.get("tasks", [])
+                        total_tasks = wbs_data.get("total_tasks", len(tasks))
+                        completed_tasks = sum(1 for t in tasks if t.get("status") == "DONE")
                 except:
                     pass
             state_path = os.path.join(item_path, "latest_state.json")
@@ -157,7 +163,10 @@ async def get_projects():
                 "name": project_name, 
                 "initial_idea": initial_idea,
                 "is_mega_project": is_mega_project,
-                "parent_project_id": parent_project_id
+                "parent_project_id": parent_project_id,
+                "template_id": template_id,
+                "total_tasks": total_tasks,
+                "completed_tasks": completed_tasks
             })
             
     return {"status": "success", "data": project_list}
@@ -388,15 +397,33 @@ async def start_all_mega_subprojects(project_id: str):
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str):
     _safe_id(project_id, "project_id")  # rmtree 대상 경로 이탈 방지(가장 파괴적인 벡터)
-    # 🛑 삭제 전, 해당 프로젝트의 실행 중 스프린트를 취소 (좀비 스프린트 방지)
+    
+    projects_dir = "./projects"
+    # 🛑 삭제 전, 해당 프로젝트와 서브 프로젝트들의 실행 중 스프린트를 취소 (좀비 스프린트 방지)
     await orchestrator.cancel_project(project_id)
-    project_path = os.path.join("./projects", project_id)
+    sub_projects = []
+    if os.path.exists(projects_dir):
+        for item in os.listdir(projects_dir):
+            if item.startswith(f"{project_id}_"):
+                sub_projects.append(item)
+                await orchestrator.cancel_project(item)
+
+    project_path = os.path.join(projects_dir, project_id)
     if os.path.exists(project_path):
         try:
             # 🚨 ignore_errors=True 대신 강제 권한 해제(onerror) 로직 적용
             shutil.rmtree(project_path, onexc=_on_rmtree_error)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"삭제 실패 (파일이 사용 중일 수 있습니다): {str(e)}")
+            
+    # 서브 프로젝트 디렉토리들도 삭제
+    for sub in sub_projects:
+        sub_path = os.path.join(projects_dir, sub)
+        if os.path.exists(sub_path):
+            try:
+                shutil.rmtree(sub_path, onexc=_on_rmtree_error)
+            except Exception:
+                pass
     return {"status": "success"}
 
 @router.post("/projects/{project_id}/copy")
@@ -474,6 +501,13 @@ async def pause_sprint(project_id: str, req: SprintPauseRequest):
     _safe_id(project_id, "project_id")
     await orchestrator.pause_sprint(req.task_id, project_id)
     return {"status": "paused", "task_id": req.task_id}
+
+@router.post("/{project_id}/sprint/stop")
+async def stop_sprint(project_id: str, req: SprintPauseRequest):
+    _safe_id(project_id, "project_id")
+    # 빈 reason을 전달하여 SUPERVISOR 피드백 큐 삽입 없이 태스크만 강제 종료(Kill)
+    await orchestrator.pause_sprint(req.task_id, project_id, reason="")
+    return {"status": "stopped", "task_id": req.task_id}
 
 @router.post("/{project_id}/hotl/resume")
 async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):

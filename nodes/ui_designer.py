@@ -1,7 +1,7 @@
 import json
 from typing import Dict, Any
-from core.state_models import ProjectState
-from skills import agent_skill
+from state_models import ProjectState
+from core.agent_registry import agent_skill
 
 async def run_ui_designer(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)

@@ -101,6 +101,7 @@ export default function ControlPanel() {
   const fetchWBS = useFactoryStore((s) => s.fetchWBS);
   const currentProjectId = useFactoryStore((s) => s.currentProjectId);
   const saveRelease = useFactoryStore((s) => s.saveRelease);
+  const stopSprint = useFactoryStore((s) => s.stopSprint);
   
   const completedAgents = useFactoryStore((s) => s.completed_agents);
   const currentActivity = useFactoryStore((s) => s.currentActivity);
@@ -399,6 +400,13 @@ export default function ControlPanel() {
     );
   };
 
+  const handleStopSprint = async () => {
+    if (!currentProjectId || !activeSprintId) return;
+    if (!confirm("실행 중인 에이전트를 강제로 정지하시겠습니까? (이전 체크포인트까지만 저장됩니다)")) return;
+    await stopSprint(currentProjectId, activeSprintId);
+    alert("에이전트 가동을 강제로 정지했습니다.");
+  };
+
   return (
     <div className="flex flex-col h-full bg-gray-800 text-gray-200">
       <div className="p-4 border-b border-gray-700 bg-gray-900 shrink-0">
@@ -433,10 +441,17 @@ export default function ControlPanel() {
         <div className={`mb-4 rounded border p-3 ${pipeStatus.cls}`}>
           <div className="flex flex-wrap items-center gap-2 text-sm font-bold">
             <span className={`shrink-0 ${pipeStatus.key === "running" ? "animate-pulse" : ""}`}>{pipeStatus.icon}</span>
-            <span className="shrink-0">{pipeStatus.label}</span>
+            <span className="break-words w-full sm:w-auto flex-1">{pipeStatus.label}</span>
             {pipeStatus.key === "running" && secsSinceAct !== null && (
-              <span className="ml-auto text-[11px] font-normal opacity-80 break-words mt-1 w-full sm:w-auto sm:mt-0">
-                마지막 활동 {secsSinceAct}초 전{secsSinceAct > 60 ? " · 응답 지연(할당량/점검 확인)" : ""}
+              <span className="ml-auto text-[11px] font-normal opacity-80 break-words mt-1 w-full sm:w-auto sm:mt-0 flex items-center gap-2">
+                <span>마지막 활동 {secsSinceAct}초 전{secsSinceAct > 60 ? " · 응답 지연(할당량/점검 확인)" : ""}</span>
+                <button 
+                  onClick={handleStopSprint}
+                  className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded text-[10px] font-bold"
+                  title="서버 오류 또는 지연 시 강제로 실행을 중단합니다."
+                >
+                  🛑 강제 정지
+                </button>
               </span>
             )}
           </div>
