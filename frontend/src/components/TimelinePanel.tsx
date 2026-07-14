@@ -19,6 +19,19 @@ function verdictBadge(v?: string) {
   return { label: v || '-', cls: 'text-gray-300 border-gray-700/50 bg-gray-800' };
 }
 
+const NODE_KO_MAP: Record<string, string> = {
+  FORECAST: "수요 예측",
+  MRP: "자재 수급",
+  SCHEDULING: "생산 스케줄링",
+  INVENTORY: "재고/물류 관리",
+  REVIEW: "검수 및 리뷰",
+  IDEA: "초안 기획",
+  DESIGN: "시스템 설계",
+  DEV: "기능 개발",
+  TEST: "품질 테스트",
+  DEPLOY: "최종 배포"
+};
+
 export default function TimelinePanel() {
   const feed = useFactoryStore((s) => s.supervisorFeed);
   const logs = useFactoryStore((s) => s.logs);
@@ -49,8 +62,9 @@ export default function TimelinePanel() {
       <div className="flex-1 overflow-y-auto p-4 space-y-2 text-xs">
         {items.map((e: any, i: number) => {
           if (e.kind === 'milestone') {
-            let txt = `${e.node} 단계 완료`;
-            if (e.type === 'HOTL_PAUSED') txt = '사용자 승인 대기 (HOTL 중단점)';
+            const nodeName = NODE_KO_MAP[e.node] || e.node;
+            let txt = `${nodeName} 단계 완료`;
+            if (e.type === 'HOTL_PAUSED') txt = 'HOTL (전문가 개입) 대기 중';
             if (e.type === 'SPRINT_COMPLETED') txt = '스프린트 완료';
             const ico = e.type === 'HOTL_PAUSED' ? '⏸️' : e.type === 'SPRINT_COMPLETED' ? '🏁' : '▸';
             return (

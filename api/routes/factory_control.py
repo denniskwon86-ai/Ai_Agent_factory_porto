@@ -67,6 +67,7 @@ _ACCUMULATED_FIELDS = [
     "frontend_code_summary", "backend_code_summary", "code_review_report_summary",
     "qa_report_summary", "user_manual_summary", "git_info",
     "architecture_decisions", "technical_debt", "initial_idea", "project_name",
+    "domain_agents", "is_mega_project", "parent_project_id", "sub_projects_map", "shared_ledger",
 ]
 
 
@@ -140,14 +141,24 @@ async def get_projects():
                 except:
                     pass
             state_path = os.path.join(item_path, "latest_state.json")
+            is_mega_project = False
+            parent_project_id = ""
             if os.path.exists(state_path):
                 try:
                     with open(state_path, "r", encoding="utf-8") as f:
                         state_data = json.load(f)
                         initial_idea = state_data.get("initial_idea", "")
+                        is_mega_project = state_data.get("is_mega_project", False)
+                        parent_project_id = state_data.get("parent_project_id", "")
                 except:
                     pass
-            project_list.append({"id": item, "name": project_name, "initial_idea": initial_idea})
+            project_list.append({
+                "id": item, 
+                "name": project_name, 
+                "initial_idea": initial_idea,
+                "is_mega_project": is_mega_project,
+                "parent_project_id": parent_project_id
+            })
             
     return {"status": "success", "data": project_list}
 
@@ -171,6 +182,208 @@ async def create_project(req: ProjectCreateRequest):
     os.makedirs(project_path, exist_ok=True)
     _write_project_meta(project_path, tid, req.output_format_id, req.view_type)  # 프로젝트↔템플릿/포맷 바인딩 영속
     return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type}
+
+class MegaProjectCreateRequest(BaseModel):
+    mega_project_id: str
+    template_id: str = "manufacturing-production" # Default master template
+    
+@router.post("/projects/mega")
+async def create_mega_project(req: MegaProjectCreateRequest):
+    """메가 프로젝트 생성 (마스터 + 8개 서브 프로젝트 일괄 프로비저닝)"""
+    _safe_id(req.mega_project_id, "mega_project_id")
+
+    # 템플릿 존재 검증 — 미존재 템플릿으로 서브 프로젝트가 default 폴백되는 것을 방지
+    from core.agent_registry import _safe_tid, list_templates
+    tid = req.template_id or "manufacturing-production"
+    try:
+        _safe_tid(tid)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="잘못된 template_id 형식입니다.")
+    if tid not in {t["id"] for t in list_templates()}:
+        raise HTTPException(status_code=404, detail=f"존재하지 않는 템플릿입니다: {tid}")
+    
+    mega_path = os.path.join("./projects", req.mega_project_id)
+    if os.path.exists(mega_path):
+        raise HTTPException(status_code=409, detail="이미 존재하는 메가 프로젝트 ID입니다.")
+        
+    # 1. 마스터 프로젝트 생성
+    os.makedirs(mega_path, exist_ok=True)
+    _write_project_meta(mega_path, tid, "default", "react_app")
+    
+    domain_agents_map = {
+        "sales": ["Sales_Agent"],
+        "procurement": ["Purchase_Agent"],
+        "production": ["Production_Agent"],
+        "quality": ["Quality_Agent"],
+        "logistics": ["Logistics_Agent"],
+        "marketing": ["Marketing_Agent"],
+        "finance": ["Finance_Agent"],
+        "accounting": ["Finance_Agent"]
+    }
+    
+    sub_projects_map = {}
+    
+    domain_templates_map = {
+        "sales": "manufacturing-market-forecast",
+        "procurement": "manufacturing-cost-analysis",
+        "production": "manufacturing-production",
+        "quality": "manufacturing-qc",
+        "logistics": "manufacturing-production",
+        "marketing": "content-marketing",
+        "finance": "manufacturing-cost-analysis",
+        "accounting": "manufacturing-cost-analysis"
+    }
+    
+    domain_ko_map = {
+        "sales": "영업",
+        "procurement": "구매",
+        "production": "생산",
+        "quality": "품질",
+        "logistics": "물류",
+        "marketing": "마케팅",
+        "finance": "재무",
+        "accounting": "회계"
+    }
+    
+    # 2. 서브 프로젝트들 생성 — 도메인별 템플릿 및 에이전트 필터 주입
+    for domain, domain_agents in domain_agents_map.items():
+        sub_id = f"{req.mega_project_id}_{domain}"
+        sub_path = os.path.join("./projects", sub_id)
+        os.makedirs(sub_path, exist_ok=True)
+        
+        sub_tid = domain_templates_map.get(domain, tid)
+        # 서브 프로젝트는 도메인 특화 템플릿 사용 (없으면 마스터 템플릿)
+        _write_project_meta(sub_path, sub_tid, "default", "react_app")
+        
+        domain_name_ko = domain_ko_map.get(domain, domain.upper())
+        # 서브 프로젝트 상태 초기화
+        sub_state = {
+            "is_mega_project": False,
+            "parent_project_id": req.mega_project_id,
+            "project_name": f"[{domain_name_ko}] {req.mega_project_id}",
+            "template_id": sub_tid,
+            "domain_agents": domain_agents
+        }
+        with open(os.path.join(sub_path, "latest_state.json"), "w", encoding="utf-8") as f:
+            json.dump(sub_state, f, ensure_ascii=False, indent=2)
+            
+        sub_projects_map[domain] = sub_id
+        
+    # 3. 마스터 프로젝트 상태 초기화
+    master_state = {
+        "is_mega_project": True,
+        "parent_project_id": "",
+        "sub_projects_map": sub_projects_map,
+        "project_name": f"🌟 메가 프로젝트: {req.mega_project_id}",
+        "template_id": tid,
+        "shared_ledger": {}
+    }
+    with open(os.path.join(mega_path, "latest_state.json"), "w", encoding="utf-8") as f:
+        json.dump(master_state, f, ensure_ascii=False, indent=2)
+
+    return {"status": "success", "mega_project_id": req.mega_project_id, "sub_projects": sub_projects_map}
+
+
+
+class MegaPlanRequest(BaseModel):
+    initial_idea: str
+
+@router.post("/projects/{project_id}/mega/plan")
+async def mega_project_plan(project_id: str, req: MegaPlanRequest):
+    """마스터 에이전트 연동: 초기 기획안을 바탕으로 master_data를 추천/생성"""
+    _safe_id(project_id, "project_id")
+    state_path = os.path.join("projects", project_id, "latest_state.json")
+    if not os.path.exists(state_path):
+        raise HTTPException(status_code=404, detail="마스터 프로젝트 상태를 찾을 수 없습니다.")
+        
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            master_state = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"상태 읽기 오류: {e}")
+
+    # LLM 호출을 통해 master_data 도출
+    from core.llm_gateway import gateway
+    
+    prompt = f"""
+당신은 기업의 전사 목표를 설정하고 거시 변수를 관리하는 최고 경영자(CEO/Master) 에이전트입니다.
+사용자가 다음의 시나리오 기획을 전달했습니다:
+"{req.initial_idea}"
+
+이 기획을 분석하여, 서브 프로젝트(생산, 재무, 마케팅 등) 시뮬레이션 전체에 공통으로 적용될 초기 'master_data'(거시 경제 지표, 전사 예산, 원자재 단가 예측치 등)를 JSON 형태로 도출하세요.
+반드시 아래 JSON 스키마를 따르십시오.
+{{
+    "추천_지표_1": "값",
+    "추천_지표_2": "값"
+}}
+"""
+    try:
+        response = await gateway.aexecute(
+            state=master_state,
+            skill_prompt=prompt,
+            is_heavy=True,
+            output_mode="json"
+        )
+        recommended_data = json.loads(response)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"마스터 데이터 분석 중 오류: {e}")
+
+    master_state["master_data"] = json.dumps(recommended_data, ensure_ascii=False, indent=2)
+    master_state["initial_idea"] = req.initial_idea
+    
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(master_state, f, ensure_ascii=False, indent=2)
+        
+    return {"status": "success", "master_data": master_state["master_data"]}
+
+@router.post("/projects/{project_id}/mega/start_all")
+async def start_all_mega_subprojects(project_id: str):
+    """마스터에 종속된 모든 서브 프로젝트 일괄 가동"""
+    _safe_id(project_id, "project_id")
+    state_path = os.path.join("projects", project_id, "latest_state.json")
+    if not os.path.exists(state_path):
+        raise HTTPException(status_code=404, detail="마스터 프로젝트 상태를 찾을 수 없습니다.")
+        
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            master_state = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"상태 읽기 오류: {e}")
+        
+    sub_map = master_state.get("sub_projects_map", {})
+    if not sub_map:
+        raise HTTPException(status_code=400, detail="연결된 서브 프로젝트가 없습니다.")
+        
+    results = []
+    import time
+    for domain, sub_id in sub_map.items():
+        sub_ws = os.path.join("projects", sub_id)
+        sub_state_path = os.path.join(sub_ws, "latest_state.json")
+        
+        try:
+            with open(sub_state_path, "r", encoding="utf-8") as f:
+                sub_state = json.load(f)
+        except Exception:
+            continue
+            
+        # 마스터 데이터 주입
+        sub_state["shared_ledger"] = master_state.get("master_data", "{}")
+        sub_state["initial_idea"] = master_state.get("initial_idea", "")
+        
+        # 새 Task ID로 PLANNING 가동
+        task_id = f"PLANNING_{int(time.time() * 1000)}_{domain}"
+        sub_state["current_sprint_task_id"] = task_id
+        sub_state["factory_mode"] = "PLANNING"
+        sub_state["workspace_root"] = sub_ws
+        sub_state["template_id"] = _read_project_template(sub_ws)
+        
+        with open(sub_state_path, "w", encoding="utf-8") as f:
+            json.dump(sub_state, f, ensure_ascii=False, indent=2)
+            
+        await orchestrator.start_sprint(task_id, sub_state, sub_ws)
+        results.append(sub_id)
+        
+    return {"status": "success", "started_projects": results}
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str):

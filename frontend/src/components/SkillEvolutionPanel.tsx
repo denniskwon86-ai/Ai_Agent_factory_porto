@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../store/useFactoryStore';
 
 interface SkillProposal {
@@ -78,8 +78,21 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
             </div>
           ) : proposals.length === 0 ? (
-            <div className="text-center py-10 text-gray-500 bg-gray-800/50 rounded-lg border border-gray-700/50">
-              승인 대기 중인 스킬 개선 제안이 없습니다.
+            <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-gray-800/30 rounded-xl border border-gray-700/50 shadow-inner">
+              <div className="text-5xl mb-4">🧬</div>
+              <h3 className="text-xl font-bold text-gray-200 mb-2">스킬 개선 제안이 없습니다</h3>
+              <div className="max-w-lg space-y-3 text-sm text-gray-400 leading-relaxed">
+                <p>
+                  <strong>AI 스킬 진화(Skill Evolution)</strong>란 에이전트가 업무 수행 중 반복되는 실수나 
+                  사용자의 피드백을 학습하여, 스스로 자신의 프롬프트(마크다운 규칙)를 개선하는 시스템입니다.
+                </p>
+                <p className="bg-gray-900/50 p-3 rounded border border-gray-700 text-left">
+                  <span className="text-blue-400 font-bold block mb-1">💡 작동 방식</span>
+                  1. 에이전트가 작업 중 한계점이나 개선점을 스스로 인식합니다.<br/>
+                  2. 에이전트가 새로운 규칙(제안)을 이 대기열에 등록합니다.<br/>
+                  3. 사용자가 제안을 검토 후 <strong>승인</strong>하면 에이전트의 핵심 행동 규칙(마크다운)이 영구적으로 업데이트됩니다.
+                </p>
+              </div>
             </div>
           ) : (
             <div className="space-y-4">

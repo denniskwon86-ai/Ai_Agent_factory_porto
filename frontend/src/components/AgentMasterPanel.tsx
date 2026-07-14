@@ -28,7 +28,7 @@ export default function AgentMasterPanel() {
   const [showAiModal, setShowAiModal] = useState(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [edges, setEdges] = useEdgesState<Edge>([]);
 
   const isDefault = editingTemplateId === "default";
 
@@ -154,7 +154,7 @@ export default function AgentMasterPanel() {
   );
 
   // 노드 드래그 종료 시 위치만 저장 (순서는 엣지가 결정)
-  const onNodeDragStop = useCallback((event: any, node: any) => {
+  const onNodeDragStop = useCallback((_event: any, node: any) => {
     setDraft((d: any) => {
       if (!d || !d.agents) return d;
       return {
@@ -165,7 +165,7 @@ export default function AgentMasterPanel() {
     setDirty(true);
   }, []);
 
-  const onNodeClick = useCallback((event: any, node: any) => {
+  const onNodeClick = useCallback((_event: any, node: any) => {
     setSelectedAgentId(node.id);
   }, []);
 
@@ -346,7 +346,7 @@ export default function AgentMasterPanel() {
               <span>•</span>
               <span className="text-blue-400 font-bold">{agents.length} Nodes</span>
               <span>•</span>
-              <span className="text-rose-400 font-bold">{hotlCount} HOTL</span>
+              <span className="text-rose-400 font-bold">{hotlCount} HOTL (전문가 개입)</span>
             </div>
           </div>
 

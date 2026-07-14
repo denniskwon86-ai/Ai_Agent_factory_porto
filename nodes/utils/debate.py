@@ -100,6 +100,7 @@ _STAGE_SUMMARY_FIELD = {
     "RFP": "rfp_summary",
     "PLANNING": "prd_summary",
     "ARCHITECTURE": "architecture_summary",
+    "UI_DESIGN": "ui_mockup_summary",
     "TECH_SPEC": "tech_spec_summary",
 }
 

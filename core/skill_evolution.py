@@ -110,30 +110,33 @@ class SkillEvolutionEngine:
             agent_id = proposal["agent_id"]
             rules = proposal["proposed_rules"]
             
-            # TODO: agent_id를 바탕으로 실제 파일명 매핑 (단순 변환 또는 Agent Registry 참조)
-            # 여기서는 편의상 agent_id의 소문자 변환 + _skill.md 로 시도
-            file_candidates = [
-                f"{agent_id.lower()}_skill.md",
-                f"{agent_id.lower()}.md",
-            ]
+            from core.agent_registry import list_templates, agent_skill
             
-            # 매핑 특수 케이스
-            if agent_id.lower() == "rfp_analyst": file_candidates.insert(0, "rfp_skill.md")
-            if agent_id.lower() == "master_pm": file_candidates.insert(0, "pm_skill.md")
-            if agent_id.lower() == "master_pmo": file_candidates.insert(0, "pmo_skill.md")
-            if agent_id.lower() == "codebuilder": file_candidates.insert(0, "backend_skill.md") # 또는 공통
-            if agent_id.lower() == "manualwriter": file_candidates.insert(0, "manual_skill.md")
-            if agent_id.lower() == "developer_be": file_candidates.insert(0, "backend_skill.md")
-            if agent_id.lower() == "developer_fe": file_candidates.insert(0, "frontend_skill.md")
-            
-            target_file = None
-            for fname in file_candidates:
-                fpath = os.path.join(SKILLS_DIR, fname)
-                if os.path.exists(fpath):
-                    target_file = fpath
+            skill_name = None
+            # 전체 템플릿을 순회하며 해당 agent_id의 skill 설정값을 찾음
+            for t in list_templates():
+                s = agent_skill(agent_id, template_id=t["id"])
+                if s:
+                    skill_name = s
                     break
                     
-            if not target_file:
+            if not skill_name:
+                # 못 찾을 경우 기존의 범용 폴백 룰 적용
+                skill_name = f"{agent_id.lower()}_skill"
+                if agent_id.lower() == "rfp_analyst": skill_name = "rfp_skill"
+                if agent_id.lower() == "master_pm": skill_name = "pm_skill"
+                if agent_id.lower() == "master_pmo": skill_name = "pmo_skill"
+                if agent_id.lower() == "codebuilder": skill_name = "backend_skill"
+                if agent_id.lower() == "manualwriter": skill_name = "manual_skill"
+                if agent_id.lower() == "developer_be": skill_name = "backend_skill"
+                if agent_id.lower() == "developer_fe": skill_name = "frontend_skill"
+            
+            if not skill_name.endswith(".md"):
+                skill_name += ".md"
+                
+            target_file = os.path.join(SKILLS_DIR, skill_name)
+            
+            if not os.path.exists(target_file):
                 # 못 찾으면 범용적으로 일단 기록
                 target_file = os.path.join(SKILLS_DIR, f"common_rules.md")
                 if not os.path.exists(target_file):

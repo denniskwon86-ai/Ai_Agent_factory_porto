@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
@@ -111,6 +111,22 @@ export default function ControlPanel() {
   const hotlTaskId = useFactoryStore((s) => s.hotlTaskId);
   const isConnected = useFactoryStore((s) => s.isConnected);
   const currentTemplateData = useFactoryStore((s) => s.currentTemplateData);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result;
+      if (typeof content === "string") {
+        setMasterData(prev => prev ? prev + "\n\n" + content : content);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so the same file can be uploaded again if needed
+    e.target.value = '';
+  };
   
   const { execPipeline, macroStages: MACRO_STAGES, nodeMacro: NODE_MACRO, stageMacro: STAGE_MACRO } = getDynamicPipelineData(currentTemplateData);
 
@@ -128,9 +144,23 @@ export default function ControlPanel() {
     return () => clearInterval(id);
   }, []);
 
-  const totalTasks = wbsData?.tasks?.length || 0;
-  const doneTasks = wbsData?.tasks?.filter((t: any) => t.status === 'DONE').length || 0;
+  const isDynamic = currentTemplateData && currentTemplateData.agents && currentTemplateData.id !== 'default' && currentTemplateData.pipeline_name !== '소프트웨어 개발 팩토리';
 
+  let totalTasks = wbsData?.tasks?.length || 0;
+  let doneTasks = wbsData?.tasks?.filter((t: any) => t.status === 'DONE').length || 0;
+  let progressPercent = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
+
+  if (!isDynamic && totalTasks === 0) {
+    totalTasks = 5;
+    const legacyStages = ["RFP", "PLANNING", "TECH_SPEC", "CODE_REVIEW", "QA", "END"];
+    const curIdx = legacyStages.indexOf(state?.current_stage || "RFP");
+    doneTasks = Math.max(0, curIdx);
+    progressPercent = curIdx >= 0 ? Math.round((curIdx / (legacyStages.length - 1)) * 100) : 0;
+    if (state?.supervisor_verdict) {
+      progressPercent = 100;
+      doneTasks = totalTasks;
+    }
+  }
   // ── 파이프라인 상태 표시(가동/대기/오류/완료) + 접수된 요구사항 ──
   const acceptedIdea = ((state as any)?.initial_idea || submittedIdea || "").trim();
   const supFb = (state?.supervisor_feedback || "").trim();
@@ -145,7 +175,7 @@ export default function ControlPanel() {
     // 할당량 소진/LLM 오류 등은 needs_revision 도 세팅되지만, '대기'가 아니라 '오류 정지'로 명확히 구분
     pipeStatus = { key: "error", icon: "🚨", label: "오류로 정지 — 재가동이 필요합니다", cls: "bg-red-900/40 border-red-600 text-red-200", detail: supFb };
   } else if (hotlTaskId || (isWaitingForHuman && !activeSprintId)) {
-    pipeStatus = { key: "hotl", icon: "⏸️", label: "인간 검토 대기 (HOTL) — 승인 또는 피드백이 필요합니다", cls: "bg-amber-900/40 border-amber-500 text-amber-200" };
+    pipeStatus = { key: "hotl", icon: "⏸️", label: "HOTL (전문가 개입) 대기 중 — 승인 또는 피드백이 필요합니다", cls: "bg-amber-900/40 border-amber-500 text-amber-200" };
   } else if (activeSprintId) {
     const act = currentActivity?.detail
       || (currentActivity?.stage_label ? `${currentActivity.stage_label} ${currentActivity.phase || ""}`.trim() : "에이전트 작업 중");
@@ -172,7 +202,7 @@ export default function ControlPanel() {
     if (p.startsWith("scoring") || p.startsWith("scored")) return 3;
     return -1;
   })();
-  const progressPercent = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
+  // progressPercent calculated above
 
   const handleStartPlanning = async () => {
     if (!idea.trim()) return alert("💡 기획 아이디어를 입력해주세요.");
@@ -372,7 +402,14 @@ export default function ControlPanel() {
   return (
     <div className="flex flex-col h-full bg-gray-800 text-gray-200">
       <div className="p-4 border-b border-gray-700 bg-gray-900 shrink-0">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">⚙️ 팩토리 제어반</h2>
+        <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          ⚙️ 팩토리 제어반
+          {currentTemplateData && currentTemplateData.id !== 'default' && (
+            <span className="text-[10px] bg-purple-900/60 text-purple-300 border border-purple-700 px-2 py-0.5 rounded-full shadow-sm ml-2">
+              🛠️ {currentTemplateData.name || currentTemplateData.id} 템플릿
+            </span>
+          )}
+        </h2>
       </div>
 
       {currentActivity && (
@@ -394,11 +431,11 @@ export default function ControlPanel() {
 
         {/* 🚦 파이프라인 상태 배너 — 가동/대기/오류 명확 표시 + 접수된 요구사항(WBS 생성 전까지 유지) */}
         <div className={`mb-4 rounded border p-3 ${pipeStatus.cls}`}>
-          <div className="flex items-center gap-2 text-sm font-bold">
-            <span className={pipeStatus.key === "running" ? "animate-pulse" : ""}>{pipeStatus.icon}</span>
-            <span>{pipeStatus.label}</span>
+          <div className="flex flex-wrap items-center gap-2 text-sm font-bold">
+            <span className={`shrink-0 ${pipeStatus.key === "running" ? "animate-pulse" : ""}`}>{pipeStatus.icon}</span>
+            <span className="shrink-0">{pipeStatus.label}</span>
             {pipeStatus.key === "running" && secsSinceAct !== null && (
-              <span className="ml-auto text-[11px] font-normal opacity-80 whitespace-nowrap">
+              <span className="ml-auto text-[11px] font-normal opacity-80 break-words mt-1 w-full sm:w-auto sm:mt-0">
                 마지막 활동 {secsSinceAct}초 전{secsSinceAct > 60 ? " · 응답 지연(할당량/점검 확인)" : ""}
               </span>
             )}
@@ -467,7 +504,7 @@ export default function ControlPanel() {
           </div>
         )}
 
-        {!wbsData ? (
+        {!wbsData && !state?.project_name ? (
           <div className="flex flex-col gap-2">
             <label className="text-sm font-semibold text-gray-400">💡 1. 신규 기획 (Track 0)</label>
             <textarea 
@@ -484,11 +521,20 @@ export default function ControlPanel() {
               </div>
               
               <div className="flex gap-2 mb-3">
-                <button disabled className="flex-1 bg-gray-900 border border-gray-700 rounded py-2 text-xs text-gray-500 flex items-center justify-center gap-2 opacity-50 cursor-not-allowed" title="향후 지원 예정">
-                  <span>📓 Notion 연동</span>
-                </button>
-                <button disabled className="flex-1 bg-gray-900 border border-gray-700 rounded py-2 text-xs text-gray-500 flex items-center justify-center gap-2 opacity-50 cursor-not-allowed" title="향후 지원 예정">
-                  <span>💎 Obsidian 연동</span>
+                <input 
+                  type="file" 
+                  accept=".txt,.md,.json,.csv" 
+                  ref={fileInputRef} 
+                  onChange={handleFileUpload} 
+                  className="hidden" 
+                />
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isStarting || activeSprintId !== null}
+                  className="flex-[2] bg-indigo-900/40 hover:bg-indigo-800/60 border border-indigo-700 rounded py-2 text-xs text-indigo-300 flex items-center justify-center gap-2 font-bold transition-colors" 
+                  title="로컬 텍스트/마크다운 파일을 선택하여 시뮬레이션 환경에 주입합니다."
+                >
+                  <span>📁 로컬 문서 업로드 (MCP 연동)</span>
                 </button>
                 <button className="flex-1 bg-blue-900/20 border border-blue-800 rounded py-2 text-xs text-blue-400 flex items-center justify-center gap-2 font-bold cursor-default">
                   <span>📝 텍스트 직접 입력</span>
@@ -618,7 +664,7 @@ export default function ControlPanel() {
             )}
 
 
-            {wbsData.tasks.map((task: any) => {
+            {wbsData?.tasks?.map((task: any) => {
               const isDone = task.status === 'DONE';
               const isInProgress = task.status === 'IN_PROGRESS';
               const isRunning = isInProgress && activeSprintId === task.task_id;
@@ -641,7 +687,7 @@ export default function ControlPanel() {
                       isHotl ? 'bg-amber-500 text-white animate-pulse' :
                       isPaused ? 'bg-orange-600 text-white' : 'bg-gray-700 text-gray-300'
                     }`}>
-                      {isDone ? "✅ DONE" : isRunning ? "⚙️ RUNNING" : isHotl ? "⚠️ HOTL REVIEW" : isPaused ? "⏸️ PAUSED" : "TODO"}
+                      {isDone ? "✅ DONE" : isRunning ? "⚙️ RUNNING" : isHotl ? "⚠️ HOTL (전문가 개입)" : isPaused ? "⏸️ PAUSED" : "TODO"}
                     </span>
                   </div>
                   <h4 className="text-sm font-bold text-gray-200 mb-1">{task.title}</h4>

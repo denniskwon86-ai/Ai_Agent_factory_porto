@@ -191,7 +191,7 @@ def route_from_reviewer(state: ProjectState) -> str:
 
 def route_from_pm(state: ProjectState) -> str:
     if not state.current_sprint_task_id:
-        return "Master_PMO"
+        return "UIDesigner"
     
     if getattr(state, "needs_revision", False):
         print("⏩ [의사결정 완료] PM이 기획서를 수정했습니다. Tech Lead에게 변경된 설계 반영을 지시합니다.")
@@ -199,6 +199,12 @@ def route_from_pm(state: ProjectState) -> str:
         
     print("⏩ [의사결정 완료] PM이 강행을 지시했습니다. Reviewer에게 강제 승인을 지시합니다.")
     return "Reviewer"
+
+def route_from_ui_designer(state: ProjectState) -> str:
+    if getattr(state, "needs_revision", False):
+        print("🔁 [UI 재설계] 사용자 피드백 반영 — UIDesigner 로 되돌려 다시 디자인합니다.")
+        return "UIDesigner"
+    return "Master_PMO"
 
 def route_from_pmo(state: ProjectState) -> str:
     """WBS(PMO) 게이트 직후 분기: 사용자가 피드백을 줬으면(needs_revision) WBS 재분할을 위해
@@ -256,6 +262,7 @@ def route_from_supervisor(state: ProjectState) -> str:
 NODE_IMPL = {
     "RFP_Analyst": run_rfp_analyst,
     "Master_PM": run_master_pm,
+    "UIDesigner": __import__("nodes.ui_designer", fromlist=["run_ui_designer"]).run_ui_designer,
     "Master_PMO": run_master_pmo,
     "Architect": run_architect,
     "Tech_Lead": run_tech_lead,
@@ -283,7 +290,10 @@ def _wire_edges(workflow):
     )
     # RFP 게이트 피드백 루프: 피드백 시 RFP_Analyst 재실행(요구정의 재작성), 승인 시 Master_PM 진행
     workflow.add_conditional_edges("RFP_Analyst", route_from_rfp, {"RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM"})
-    workflow.add_conditional_edges("Master_PM", route_from_pm, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
+    workflow.add_conditional_edges("Master_PM", route_from_pm, {"UIDesigner": "UIDesigner", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
+    
+    workflow.add_conditional_edges("UIDesigner", route_from_ui_designer, {"UIDesigner": "UIDesigner", "Master_PMO": "Master_PMO"})
+    
     # WBS 게이트: interrupt_after=Master_PMO 가 실제로 멈추도록 승인 경로를 '실제 노드'(WBS_Approved)로
     # 보낸다. 피드백 시 Master_PMO 재실행(WBS 재분할), 승인 시 WBS_Approved→END(기획 종료).
     workflow.add_node("WBS_Approved", run_wbs_approved)
@@ -342,28 +352,48 @@ def build_graph_from_registry(registry=None):
             workflow.add_node(aid, make_universal_node(aid))
             
         if enabled_ids:
-            def route_universal(state: ProjectState) -> str:
+            def route_universal(state: ProjectState, current_node_id: str) -> str:
                 # 재실행(resimulate) 모드일 경우 시작점을 다르게 라우팅
                 if state.factory_mode == "EXECUTION" and reg.get("simulation_framework", False):
                     resim_entry = reg.get("framework_agents", {}).get("resim_entry", "")
-                    if resim_entry and resim_entry in enabled_ids:
+                    if resim_entry and current_node_id == "" and resim_entry in enabled_ids:
                         print(f"🔄 [Resimulate] 기존 설계 건너뛰기. {resim_entry}부터 재실행합니다.")
                         return resim_entry
                 
-                # 기본 시작점
-                return next((a["id"] for a in enabled if a.get("is_start")), enabled_ids[0])
+                # 다음 실행할 노드를 찾습니다.
+                try:
+                    current_idx = enabled_ids.index(current_node_id) if current_node_id else -1
+                except ValueError:
+                    current_idx = -1
+                
+                # domain_agents 필터가 있으면 적용 (프레임워크 에이전트는 무조건 실행)
+                domain_agents = getattr(state, "domain_agents", [])
+                framework_agents = []
+                if reg.get("simulation_framework", False):
+                    framework_agents = reg.get("framework_agents", {}).get("preparation", []) + \
+                                       reg.get("framework_agents", {}).get("evaluation", [])
+                
+                for idx in range(current_idx + 1, len(enabled_ids)):
+                    next_node = enabled_ids[idx]
+                    # 서브 프로젝트의 domain_agents가 지정된 경우 필터링
+                    if domain_agents and next_node not in framework_agents and next_node not in domain_agents:
+                        continue
+                    return next_node
+                
+                return END
 
             # 조건부 진입점 설정
             workflow.set_conditional_entry_point(
-                route_universal,
+                lambda s: route_universal(s, ""),
                 {aid: aid for aid in enabled_ids}
             )
             
-            for a_id, b_id in zip(enabled_ids, enabled_ids[1:]):
-                workflow.add_edge(a_id, b_id)
-                
-            end_agent = next((a["id"] for a in enabled if a.get("is_end")), enabled_ids[-1])
-            workflow.add_edge(end_agent, END)
+            for a_id in enabled_ids:
+                workflow.add_conditional_edges(
+                    a_id,
+                    lambda s, current_node=a_id: route_universal(s, current_node),
+                    {aid: aid for aid in enabled_ids} | {END: END}
+                )
             
         # HOTL 중단점 = enabled 노드 중 hotl_after(범용 노드는 모두 add_node 됐으므로 제한 없음)
         interrupt_after = [a["id"] for a in enabled if a.get("hotl_after", False)]

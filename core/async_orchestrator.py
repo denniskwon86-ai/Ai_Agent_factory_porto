@@ -113,7 +113,11 @@ class AsyncFactoryOrchestrator:
                         current_state = snapshot.values
                         queue = current_state.get("human_feedback_queue", []) if isinstance(current_state, dict) else getattr(current_state, "human_feedback_queue", [])
                         queue.append({"task_id": task_id, "feedback": f"[SUPERVISOR] {reason}", "status": "pending", "priority": 5})
-                        await langgraph_engine.aupdate_state(config, {"human_feedback_queue": queue, "needs_revision": True})
+                        await langgraph_engine.aupdate_state(config, {"human_feedback_queue": queue, "needs_revision": True, "supervisor_feedback": reason})
+                        
+                        new_snapshot = await langgraph_engine.aget_state(config)
+                        ws_root = current_state.get("workspace_root", f"./projects/{project_id}") if isinstance(current_state, dict) else getattr(current_state, "workspace_root", f"./projects/{project_id}")
+                        self._save_latest_state(new_snapshot.values, ws_root)
                 except Exception as e:
                     print(f"⚠️ [Orchestrator] 슈퍼바이저 인터럽트 상태 기록 실패: {e}")
 

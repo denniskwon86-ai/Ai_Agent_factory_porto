@@ -77,6 +77,16 @@ class ProjectState(BaseModel):
     # SW 파이프라인은 전용 *_summary 필드를 쓰고 이 필드는 비어 있다(추가 전용·하위호환).
     artifacts: Dict[str, str] = Field(default_factory=dict)
     artifact_summaries: Dict[str, str] = Field(default_factory=dict)
+    
+    # ----------------------------------------------------
+    # [메가 프로젝트 연동 및 계층화 속성]
+    # ----------------------------------------------------
+    is_mega_project: bool = Field(default=False, description="이 프로젝트가 여러 서브 프로젝트를 관장하는 마스터인지 여부")
+    parent_project_id: str = Field(default="", description="이 프로젝트가 속한 마스터 프로젝트 ID (빈 값이면 최상위)")
+    sub_projects_map: Dict[str, str] = Field(default_factory=dict, description="마스터 프로젝트일 경우, 하위 프로젝트 목록 (domain -> project_id)")
+    shared_ledger: Dict[str, dict] = Field(default_factory=dict, description="서브 프로젝트 간 공유되는 전사 공통 원장 (이벤트/변수 버스)")
+    domain_agents: List[str] = Field(default_factory=list, description="서브 프로젝트에 할당된 실행 에이전트 ID 목록 (비어 있으면 전체 파이프라인 실행)")
+    
     factory_mode: Literal["PLANNING", "EXECUTION", "REVISION", "REVIEW", "QA_RELEASE", "HOTL_PAUSED"] = Field(default="PLANNING")
     workspace_root: str = Field(default="./workspace")
     git_info: GitInfo = Field(default_factory=GitInfo)
@@ -108,6 +118,7 @@ class ProjectState(BaseModel):
     rfp_summary: str = Field(default="")  # 요구사항 정의서(RFP) — 기획·QA의 기준 계약
     prd_summary: str = Field(default="")
     architecture_summary: str = Field(default="")
+    ui_mockup_summary: str = Field(default="")
     tech_spec_summary: str = Field(default="")
     frontend_code_summary: str = Field(default="")
     backend_code_summary: str = Field(default="")

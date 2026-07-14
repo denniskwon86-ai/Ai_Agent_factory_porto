@@ -4,8 +4,6 @@ import asyncio
 from datetime import datetime
 from typing import Dict, Any
 
-from core.llm_gateway import gateway
-
 DATA_DIR = "data"
 INTERACTION_LOG_PATH = os.path.join(DATA_DIR, "interaction_log.jsonl")
 PROFILE_PATH = os.path.join(DATA_DIR, "company_profile.json")
@@ -90,6 +88,7 @@ class PersonaLearner:
 """
         try:
             from state_models import ProjectState
+            from core.llm_gateway import gateway
             response = await gateway.aexecute(
                 state=ProjectState(), 
                 skill_prompt=prompt, 

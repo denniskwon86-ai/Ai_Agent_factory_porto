@@ -28,7 +28,7 @@ export default function AgentNode({ data, selected }: { data: any; selected: boo
             {data.is_end && <span className="text-[10px] font-bold bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded" title="End Point">■ 종료</span>}
           </div>
           <div className="flex gap-1">
-            {data.hotl_after && <span className="text-[10px] font-bold bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded" title="HOTL">✋</span>}
+            {data.hotl_after && <span className="text-[10px] font-bold bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded" title="HOTL (전문가 개입)">✋</span>}
             {data.debate && <span className="text-[10px] font-bold bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded" title="Debate">💬</span>}
           </div>
         </div>

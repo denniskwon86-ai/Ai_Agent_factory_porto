@@ -9,5 +9,9 @@ export default defineConfig({
   ],
   optimizeDeps: {
     exclude: ['react-resizable-panels']
+  },
+  server: {
+    port: 5173,
+    strictPort: true
   }
 })

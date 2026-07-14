@@ -30,6 +30,11 @@ export interface ProjectState {
   supervisor_feedback?: string;
   criteria_log?: any[];
   artifacts?: Record<string, string>;
+  // 메가 프로젝트 / 시뮬레이션 확장 변수
+  is_mega_project?: boolean;
+  sub_projects_map?: Record<string, string>;
+  master_data?: string;
+  sim_cycle_count?: number;
 }
 
 // 워크플로우 템플릿(범용 플랫폼 Copy 모델) — 목록 요약 및 상세 레지스트리
@@ -71,7 +76,7 @@ interface FactoryStore {
   formats: OutputFormat[];
   selectedFormatId: string;
   showFormatPanel: boolean;
-  projects: { id: string, name: string, initial_idea?: string }[];
+  projects: { id: string, name: string, initial_idea?: string, is_mega_project?: boolean, parent_project_id?: string }[];
   currentProjectId: string | null;
   healingRetryCount: number;
   activeSprintId: string | null;
@@ -81,6 +86,7 @@ interface FactoryStore {
   setCurrentProject: (id: string | null) => void;
   fetchProjects: () => Promise<void>;
   createProject: (id: string, templateId?: string) => Promise<boolean>;
+  createMegaProject: (id: string, templateId?: string) => Promise<boolean>;
   copyProject: (id: string, newId: string) => Promise<boolean>;
   deleteProject: (id: string) => Promise<boolean>; // 🗑️ 프로젝트 완전 삭제 기능 정의
   connectSSE: () => void;
@@ -199,6 +205,30 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       return false;
     } catch (error) {
       console.error("프로젝트 생성 실패:", error);
+      return false;
+    }
+  },
+
+  createMegaProject: async (id: string, templateId?: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects/mega`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          mega_project_id: id, 
+          template_id: templateId || get().selectedTemplateId || 'manufacturing-production'
+        })
+      });
+      if (res.ok) {
+        await get().fetchProjects();
+        return true;
+      }
+      let msg = "메가 프로젝트 생성에 실패했습니다. (중복된 ID일 수 있습니다)";
+      try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+      alert(msg);
+      return false;
+    } catch (error) {
+      console.error("메가 프로젝트 생성 실패:", error);
       return false;
     }
   },
@@ -371,8 +401,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   },
 
   openAgentPanel: () => {
-    // 패널 열 때 편집 대상을 default 로 초기화하고 템플릿 목록 + default 레지스트리 로드
-    set({ showAgentPanel: true, editingTemplateId: 'default' });
+    const tid = get().currentTemplateData?.id || 'default';
+    set({ showAgentPanel: true, editingTemplateId: tid });
     get().fetchTemplates();
     get().fetchAgentRegistry();
   },
@@ -593,7 +623,18 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
           const tRes = await fetch(`${API_BASE_URL}/api/v1/factory/templates/${tid}`);
           if (tRes.ok) {
             const tData = await tRes.json();
-            set({ currentTemplateData: tData.data });
+            let templateData = tData.data;
+            // 🎯 [서브 프로젝트 에이전트 필터링] domain_agents가 존재하면 해당 에이전트 + 프레임워크 에이전트만 남김
+            const domainAgents: string[] = result.data.domain_agents || [];
+            if (domainAgents.length > 0 && templateData?.agents) {
+              templateData = {
+                ...templateData,
+                agents: templateData.agents.filter((a: any) =>
+                  domainAgents.includes(a.id) || a.is_framework === true
+                )
+              };
+            }
+            set({ currentTemplateData: templateData });
           }
         } catch(e) { console.error("템플릿 정보 로드 실패", e); }
         } else if (result.status === "not_found") {

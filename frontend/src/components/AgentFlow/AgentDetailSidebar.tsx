@@ -209,8 +209,8 @@ export default function AgentDetailSidebar({
             <Toggle
               on={!!agent.hotl_after}
               onClick={() => updateAgent(agent.id, "hotl_after", !agent.hotl_after)}
-              label="Human-In-The-Loop"
-              title="이 에이전트 실행 직후 사용자 검토(HOTL)를 위해 파이프라인이 일시 중지됩니다."
+              label="HOTL (전문가 개입)"
+              title="이 에이전트 실행 직후 HOTL (전문가 개입)을 위해 파이프라인이 일시 중지됩니다."
             />
             <Toggle
               on={!!agent.debate}

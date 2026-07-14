@@ -42,12 +42,14 @@ _AGENT_FIELDS = {
     "position": None,    # UI 노드 위치
     "is_start": False,   # 시작점 여부
     "is_end": False,     # 종료점 여부
+    "is_framework": False, # 시뮬레이션 프레임워크 고정 에이전트 여부
     "output_format": "", # 포맷 마스터의 출력 양식 ID (빈 값이면 시스템 프롬프트만 사용)
 }
 
 # 현재 하드코딩 그래프(core/agent_graph.py)와 1:1로 동일한 기본 레지스트리.
 # id는 그래프의 add_node 이름과 정확히 일치해야 한다.
 DEFAULT_REGISTRY: Dict[str, Any] = {
+    "id": "default",
     "version": 1,
     "pipeline_name": "소프트웨어 개발 팩토리",
     "description": "한 줄 아이디어 → RFP → 기획 → 설계 → 구현 → 빌드 → 검수 → QA → 매뉴얼까지 자율 수행하는 기본 파이프라인",
@@ -59,24 +61,26 @@ DEFAULT_REGISTRY: Dict[str, Any] = {
          "stage": "PLANNING", "category": "planning", "model_tier": "pro", "order": 2, "enabled": True, "hotl_after": False, "debate": True, "llm": True},
         {"id": "Master_PMO", "name_ko": "마스터 PMO", "role": "PRD를 실행 가능한 WBS(작업분해도)로 분할·에이전트 배정", "skill": "pmo_skill",
          "stage": "PMO", "category": "planning", "model_tier": "pro", "order": 3, "enabled": True, "hotl_after": True, "debate": False, "llm": True},
+        {"id": "UIDesigner", "name_ko": "UI 디자이너", "role": "기획서 기반 To-Be UI/UX 화면 목업(HTML/CSS) 생성", "skill": "ui_designer_skill",
+         "stage": "UI_DESIGN", "category": "planning", "model_tier": "pro", "order": 4, "enabled": True, "hotl_after": False, "debate": True, "llm": True},
         {"id": "Architect", "name_ko": "아키텍트", "role": "시스템 아키텍처·ADR 설계", "skill": "architect_skill",
-         "stage": "ARCHITECTURE", "category": "execution", "model_tier": "pro", "order": 4, "enabled": True, "hotl_after": False, "debate": True, "llm": True},
+         "stage": "ARCHITECTURE", "category": "execution", "model_tier": "pro", "order": 5, "enabled": True, "hotl_after": False, "debate": True, "llm": True},
         {"id": "Tech_Lead", "name_ko": "테크리드", "role": "기술 사양·인터페이스 상세 설계", "skill": "tech_lead_skill",
-         "stage": "TECH_SPEC", "category": "execution", "model_tier": "pro", "order": 5, "enabled": True, "hotl_after": False, "debate": True, "llm": True},
+         "stage": "TECH_SPEC", "category": "execution", "model_tier": "pro", "order": 6, "enabled": True, "hotl_after": False, "debate": True, "llm": True},
         {"id": "Backend", "name_ko": "백엔드 개발자", "role": "FastAPI 백엔드 코드 생성", "skill": "backend_skill",
-         "stage": "EXECUTION", "category": "execution", "model_tier": "pro", "order": 6, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
-        {"id": "Frontend", "name_ko": "프론트엔드 개발자", "role": "React 프론트엔드 코드 생성", "skill": "frontend_skill",
          "stage": "EXECUTION", "category": "execution", "model_tier": "pro", "order": 7, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
+        {"id": "Frontend", "name_ko": "프론트엔드 개발자", "role": "React 프론트엔드 코드 생성", "skill": "frontend_skill",
+         "stage": "EXECUTION", "category": "execution", "model_tier": "pro", "order": 8, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
         {"id": "CodeBuilder", "name_ko": "코드 빌더", "role": "생성된 코드를 워크스페이스에 원자적으로 기록(비-LLM 시스템 노드)", "skill": "",
-         "stage": "BUILD", "category": "system", "model_tier": "flash", "order": 8, "enabled": True, "hotl_after": False, "debate": False, "llm": False},
+         "stage": "BUILD", "category": "system", "model_tier": "flash", "order": 9, "enabled": True, "hotl_after": False, "debate": False, "llm": False},
         {"id": "Reviewer", "name_ko": "리뷰어", "role": "단위 코드·버그·해당 단위 기능 동작 검증(개발 엔지니어 관점)", "skill": "reviewer_skill",
-         "stage": "CODE_REVIEW", "category": "review", "model_tier": "pro", "order": 9, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
+         "stage": "CODE_REVIEW", "category": "review", "model_tier": "pro", "order": 10, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
         {"id": "QA", "name_ko": "QA 엔지니어", "role": "기획서·설계서 대비 통합 구현 정합·인도 검수(수행사 인도 전)", "skill": "qa_skill",
-         "stage": "QA", "category": "review", "model_tier": "pro", "order": 10, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
+         "stage": "QA", "category": "review", "model_tier": "pro", "order": 11, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
         {"id": "Supervisor", "name_ko": "슈퍼바이저(고객사 대리인)", "role": "RFP 대비 비즈니스 수용·완료 최종 검수(고객사 관점·엄격)", "skill": "supervisor_skill",
-         "stage": "SUPERVISOR", "category": "review", "model_tier": "pro", "order": 11, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
+         "stage": "SUPERVISOR", "category": "review", "model_tier": "pro", "order": 12, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
         {"id": "ManualWriter", "name_ko": "매뉴얼 작성가", "role": "최종 사용자 매뉴얼 작성", "skill": "manual_skill",
-         "stage": "MANUAL", "category": "review", "model_tier": "flash", "order": 12, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
+         "stage": "MANUAL", "category": "review", "model_tier": "flash", "order": 13, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
     ],
 }
 
@@ -102,7 +106,7 @@ def _coerce_agent(a: Dict[str, Any]) -> Dict[str, Any]:
 def _normalize(reg: Dict[str, Any]) -> Dict[str, Any]:
     agents = [_coerce_agent(a) for a in reg.get("agents", []) if isinstance(a, dict) and a.get("id")]
     agents.sort(key=lambda x: x.get("order", 0))
-    return {
+    result = {
         "version": int(reg.get("version", 1)),
         "pipeline_name": str(reg.get("pipeline_name", DEFAULT_REGISTRY["pipeline_name"])),
         "description": str(reg.get("description", "")),
@@ -110,6 +114,12 @@ def _normalize(reg: Dict[str, Any]) -> Dict[str, Any]:
         "agents": agents,
         "edges": reg.get("edges", []),
     }
+    # 시뮬레이션 프레임워크 메타데이터 보존 — agent_graph.py의 build_graph_from_registry()가
+    # simulation_framework / framework_agents 를 참조해 resimulate 라우팅·프레임워크 셸 조립에 사용한다.
+    if reg.get("simulation_framework"):
+        result["simulation_framework"] = True
+        result["framework_agents"] = reg.get("framework_agents", {})
+    return result
 
 
 def load_registry() -> Dict[str, Any]:

@@ -5,8 +5,19 @@
   "deliverable_type": "hybrid_simulation",
   "simulation_framework": true,
   "framework_agents": {
-    "preparation": ["Sim_PM", "Sim_Designer", "Sim_InputCollector", "Sim_Validator"],
-    "evaluation": ["Analysis_Agent", "Sim_Evaluator", "Supervisor_Agent", "Sim_Insight", "Sim_Comparator"],
+    "preparation": [
+      "Sim_PM",
+      "Sim_Designer",
+      "Sim_InputCollector",
+      "Sim_Validator"
+    ],
+    "evaluation": [
+      "Analysis_Agent",
+      "Sim_Evaluator",
+      "Supervisor_Agent",
+      "Sim_Insight",
+      "Sim_Comparator"
+    ],
     "resim_entry": "Sim_Validator"
   },
   "agents": [
@@ -146,6 +157,21 @@
       "is_framework": false
     },
     {
+      "id": "Marketing_Agent",
+      "name_ko": "마케팅 에이전트",
+      "role": "제품 포지셔닝 및 프로모션 예산을 할당하여 영업 수요를 부스팅하고 마케팅 ROI를 시뮬레이션합니다.",
+      "skill": "sim_marketing",
+      "stage": "MARKETING",
+      "category": "execution",
+      "model_tier": "pro",
+      "order": 10,
+      "enabled": true,
+      "hotl_after": false,
+      "debate": false,
+      "llm": true,
+      "is_framework": false
+    },
+    {
       "id": "Finance_Agent",
       "name_ko": "재무회계 에이전트",
       "role": "모든 가치사슬 활동 비용 및 매출을 종합하여 예상 실적(P&L) 산출",
@@ -153,7 +179,7 @@
       "stage": "FINANCE",
       "category": "execution",
       "model_tier": "pro",
-      "order": 10,
+      "order": 11,
       "enabled": true,
       "hotl_after": false,
       "debate": false,
@@ -168,7 +194,7 @@
       "stage": "ANALYSIS",
       "category": "review",
       "model_tier": "pro",
-      "order": 11,
+      "order": 12,
       "enabled": true,
       "hotl_after": false,
       "debate": false,
@@ -183,7 +209,7 @@
       "stage": "SIM_EVALUATION",
       "category": "review",
       "model_tier": "pro",
-      "order": 12,
+      "order": 13,
       "enabled": true,
       "hotl_after": false,
       "debate": false,
@@ -198,7 +224,7 @@
       "stage": "SUPERVISOR",
       "category": "review",
       "model_tier": "pro",
-      "order": 13,
+      "order": 14,
       "enabled": true,
       "hotl_after": true,
       "debate": false,
@@ -213,7 +239,7 @@
       "stage": "SIM_INSIGHT",
       "category": "review",
       "model_tier": "pro",
-      "order": 14,
+      "order": 15,
       "enabled": true,
       "hotl_after": true,
       "debate": false,
@@ -228,7 +254,7 @@
       "stage": "SIM_COMPARISON",
       "category": "review",
       "model_tier": "pro",
-      "order": 15,
+      "order": 16,
       "enabled": true,
       "hotl_after": true,
       "debate": false,

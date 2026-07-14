@@ -171,7 +171,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   useEffect(() => { releaseRef.current = release; }, [release]);
 
   const currentTemplateData = useFactoryStore((s) => s.currentTemplateData);
-  const isDynamic = currentTemplateData && currentTemplateData.agents && currentTemplateData.id !== 'default';
+  const isDynamic = currentTemplateData && currentTemplateData.agents && currentTemplateData.id !== 'default' && currentTemplateData.pipeline_name !== '소프트웨어 개발 팩토리';
 
   // ─────────────────────────────────────────────────────────────────────────
   // iframe HTML 템플릿
@@ -529,6 +529,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
       case 'RFP': return docs.rfp_summary || "요구사항 정의서(RFP)가 아직 없습니다.";
       case 'PRD': return docs.prd_summary || "기획서가 없습니다.";
       case 'ARCH': return docs.architecture_summary || "아키텍처가 없습니다.";
+      case 'UI_DESIGN': return docs.ui_mockup_summary || "UI 디자인 목업이 없습니다.";
       case 'TECH': return docs.tech_spec_summary || "기술 사양이 없습니다.";
       case 'FRONTEND': return docs.frontend_code_summary || "프론트엔드 코드가 없습니다.";
       case 'BACKEND': return docs.backend_code_summary || "백엔드 코드가 없습니다.";
@@ -557,6 +558,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   } else {
     tabs = [
       { id: 'PREVIEW', label: '🖥️ 실시간 샌드박스' }, { id: 'RFP', label: '📋 요구정의(RFP)' }, { id: 'PRD', label: '📄 기획서' },
+      { id: 'UI_DESIGN', label: '🎨 UI 디자인' },
       { id: 'ARCH', label: '🏗️ 아키텍처' }, { id: 'TECH', label: '🛠️ 기술사양' },
       { id: 'FRONTEND', label: '🎨 프론트엔드' }, { id: 'BACKEND', label: '⚙️ 백엔드' },
       { id: 'REVIEW', label: '📝 리뷰' }, { id: 'QA', label: '🧪 QA' },
@@ -614,10 +616,21 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
         ) : (
           <div className="w-full h-full bg-white overflow-y-auto">
             {typeof getTabContent() === 'string' && getTabContent().includes('<html') ? (
-              <iframe srcDoc={getTabContent()} className="w-full h-full border-none bg-white" sandbox="allow-scripts allow-same-origin" />
+              <iframe srcDoc={getTabContent().match(/```[a-z]*\n([\s\S]*?)```/)?.[1] || getTabContent()} className="w-full h-full border-none bg-white" sandbox="allow-scripts allow-same-origin" />
             ) : (
               <div className="max-w-4xl mx-auto p-6 text-gray-800">
-                <MarkdownViewer rawCode={getTabContent()} />
+                <MarkdownViewer rawCode={(() => {
+                  const content = getTabContent();
+                  if (activeTab === 'FRONTEND' || activeTab === 'BACKEND') {
+                    try {
+                      const parsed = JSON.parse(content);
+                      if (parsed.files && Array.isArray(parsed.files)) {
+                        return parsed.files.map((f: any) => `### 📄 \`${f.file_path || f.filename}\`\n\n\`\`\`${f.file_path?.endsWith('.py') ? 'python' : 'tsx'}\n${f.code}\n\`\`\``).join('\n\n---\n\n');
+                      }
+                    } catch(e) {}
+                  }
+                  return content;
+                })()} />
               </div>
             )}
           </div>
