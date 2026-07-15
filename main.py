@@ -10,6 +10,16 @@ try:
 except Exception:
     pass
 
+# [SSL 신뢰저장소 주입] 사내망 등 SSL 검사(자체 루트 CA 주입) 환경에서 certifi 번들에 해당 CA 가
+# 없어 외부 LLM API 호출이 CERTIFICATE_VERIFY_FAILED 로 전부 실패하는 문제를 방지한다.
+# truststore 는 파이썬 ssl/httpx/requests 가 'OS 신뢰저장소'(사내 CA 포함)를 쓰게 만든다.
+# SSL 검사가 없는 환경에서도 무해(그냥 OS 저장소 사용)하므로 항상 주입한다. 미설치 시 조용히 건너뜀.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
 from core.sys_logger import StdoutInterceptor
 sys.stdout = StdoutInterceptor(sys.stdout)
 sys.stderr = StdoutInterceptor(sys.stderr)
