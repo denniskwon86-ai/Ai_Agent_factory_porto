@@ -1,10 +1,13 @@
+import io
 import json
 import os
 import re
 import shutil
 import stat
+import zipfile
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -760,6 +763,46 @@ async def create_release(project_id: str):
 
 
 # ==========================================
+# 산출물 Export (프로젝트 워크스페이스 → zip 다운로드)
+# ==========================================
+# zip 에서 제외할 무거운/비산출물 디렉토리(빌드 캐시·의존성·VCS·아카이브).
+_EXPORT_EXCLUDE_DIRS = {".git", "node_modules", "dist", "build", ".archive", "__pycache__", ".venv", "venv"}
+
+
+@router.get("/{project_id}/export")
+async def export_project_zip(project_id: str):
+    """프로젝트 워크스페이스(생성된 코드·문서 등 모든 산출물)를 zip 으로 패키징해 스트리밍 다운로드한다.
+    의존성/빌드 캐시/VCS 디렉토리(_EXPORT_EXCLUDE_DIRS)는 제외한다.
+    zip 내부는 project_id 를 최상위 폴더로 하는 상대경로 구조를 유지한다."""
+    _safe_id(project_id, "project_id")  # 경로 이탈 방지(임의 디렉토리 압축 차단)
+    project_path = os.path.join("projects", project_id)
+    if not os.path.isdir(project_path):
+        raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+
+    buf = io.BytesIO()
+    file_count = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root_dir, dirs, files in os.walk(project_path):
+            # 제외 디렉토리는 하위 순회 자체를 건너뛴다(성능·용량).
+            dirs[:] = [d for d in dirs if d not in _EXPORT_EXCLUDE_DIRS]
+            for fname in files:
+                fpath = os.path.join(root_dir, fname)
+                arcname = os.path.join(project_id, os.path.relpath(fpath, project_path))
+                try:
+                    zf.write(fpath, arcname)
+                    file_count += 1
+                except Exception:
+                    continue  # 잠긴/읽기 불가 파일은 건너뛰고 나머지를 계속 패키징
+
+    if file_count == 0:
+        raise HTTPException(status_code=404, detail="내보낼 산출물이 없습니다.")
+
+    buf.seek(0)
+    headers = {"Content-Disposition": f'attachment; filename="{project_id}.zip"'}
+    return StreamingResponse(buf, media_type="application/zip", headers=headers)
+
+
+# ==========================================
 # 시뮬레이션 인자 변경 반복 재실행 (Re-simulation)
 # ==========================================
 class ResimulateRequest(BaseModel):
@@ -1148,12 +1191,11 @@ async def list_workflow_templates():
 
 @router.get("/templates/{template_id}")
 async def get_workflow_template(template_id: str):
-    from core.agent_registry import load_template, _safe_tid, _template_path
+    from core.agent_registry import load_template, _safe_tid
     try:
         _safe_tid(template_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    print("DEBUG get_template path:", _template_path(template_id))
     return {"status": "success", "data": load_template(template_id)}
 
 

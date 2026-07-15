@@ -2,6 +2,10 @@
 .env
 .env.*
 !.env.example
+# 점 없는 변형(env, env.example 등)도 실키가 담길 수 있으므로 전부 제외.
+# 버전관리되는 정본 템플릿은 오직 .env.example(점 있음) 하나뿐이다.
+/env
+/env.*
 
 # ===== Python =====
 __pycache__/

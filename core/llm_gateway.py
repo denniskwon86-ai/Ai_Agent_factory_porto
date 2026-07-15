@@ -10,6 +10,17 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
 
+# [3차 폴백] Cerebras 는 선택적(optional) 의존성이다.
+# 패키지(langchain-cerebras)가 설치돼 있지 않거나 CEREBRAS_API_KEY 가 없으면
+# 폴백 체인에서 조용히 제외되어 기존 동작(Gemini→Groq)에 아무 영향이 없도록 한다.
+# → import 실패가 서버 부팅을 막지 않게 try/except 로 방어한다(무중단·하위호환).
+try:
+    from langchain_cerebras import ChatCerebras
+    _CEREBRAS_AVAILABLE = True
+except Exception:
+    ChatCerebras = None
+    _CEREBRAS_AVAILABLE = False
+
 from core.context_engine import ContextEngine
 from state_models import ProjectState
 import config
@@ -55,6 +66,22 @@ def _gemini_out(model: str) -> int:
 
 def _groq_out(model: str) -> int:
     return config.MODEL_OUTPUT_LIMITS.get(model, config.DEFAULT_OUTPUT_LIMIT_GROQ)
+
+
+def _cerebras_out(model: str) -> int:
+    return config.MODEL_OUTPUT_LIMITS.get(model, config.DEFAULT_OUTPUT_LIMIT_CEREBRAS)
+
+
+def _cerebras_enabled() -> bool:
+    """Cerebras 를 폴백 체인에 넣을 수 있는 조건: 패키지 설치 + API 키 존재.
+    둘 중 하나라도 없으면 조용히 비활성(기존 Gemini→Groq 동작 유지)."""
+    return _CEREBRAS_AVAILABLE and bool(os.environ.get("CEREBRAS_API_KEY"))
+
+
+def _make_cerebras(model: str, temperature: float):
+    """Cerebras 챗 모델 인스턴스 생성(폴백 최후미용). max_retries=0 은 체인 전파 지연 방지."""
+    # langchain_cerebras.ChatCerebras 는 max_tokens 로 출력 상한을 받는다(OpenAI 호환).
+    return ChatCerebras(model=model, temperature=temperature, max_retries=0, max_tokens=_cerebras_out(model))
 
 
 def _is_truncated(response: Any) -> bool:
@@ -115,8 +142,11 @@ class LLMGateway:
         pro_fallbacks = []
         for m in pro_candidates[1:]:
             pro_fallbacks.append(ChatGoogleGenerativeAI(model=m, temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(m)))
-        # 최후의 보루: 타사(Groq) LLM 추가
+        # 2차 보루: 타사(Groq) LLM 추가
         pro_fallbacks.append(ChatGroq(model=config.LLM_PRO_FALLBACK_LIST[1], temperature=0.2, max_retries=0, max_tokens=_groq_out(config.LLM_PRO_FALLBACK_LIST[1])))
+        # 3차 보루: Cerebras(무료 티어, 조건부). 키/패키지가 있을 때만 체인 최후미에 추가한다.
+        if _cerebras_enabled():
+            pro_fallbacks.append(_make_cerebras(config.LLM_PRO_FALLBACK_LIST[2], temperature=0.2))
 
         self.llm_pro = ChatGoogleGenerativeAI(
             model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0])
@@ -135,7 +165,11 @@ class LLMGateway:
         flash_fallbacks = []
         for m in flash_candidates[1:]:
             flash_fallbacks.append(ChatGoogleGenerativeAI(model=m, temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(m)))
+        # 2차 보루: Groq
         flash_fallbacks.append(ChatGroq(model=config.LLM_FLASH_FALLBACK_LIST[1], temperature=0.1, max_retries=0, max_tokens=_groq_out(config.LLM_FLASH_FALLBACK_LIST[1])))
+        # 3차 보루: Cerebras(조건부)
+        if _cerebras_enabled():
+            flash_fallbacks.append(_make_cerebras(config.LLM_FLASH_FALLBACK_LIST[2], temperature=0.1))
 
         self.llm_flash = ChatGoogleGenerativeAI(
             model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0])
@@ -145,10 +179,17 @@ class LLMGateway:
         flash_base = ChatGoogleGenerativeAI(model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0]))
         self.llm_flash_code = flash_base.with_structured_output(CodeOutput).with_fallbacks([f.with_structured_output(CodeOutput) for f in flash_fallbacks])
 
-        # 콘솔에 완성된 라우팅 체인 구조 출력
+        # 콘솔에 완성된 라우팅 체인 구조 출력 (Cerebras 는 활성화된 경우에만 꼬리에 표시)
+        _cb = _cerebras_enabled()
+        _cb_pro = f" -> Cerebras({config.LLM_PRO_FALLBACK_LIST[2]})" if _cb else ""
+        _cb_flash = f" -> Cerebras({config.LLM_FLASH_FALLBACK_LIST[2]})" if _cb else ""
+        _cb_note = "" if _cb else "  (Cerebras 3차 폴백: 비활성 — CEREBRAS_API_KEY 또는 langchain-cerebras 미설치)"
         print(f"\n[OK] [LLM Gateway] 다중 계층 동적 라우팅 엔진 가동 완료 (최신 SDK 적용)")
-        print(f"   [Pro Tier] {' -> '.join(pro_candidates)} -> Groq({config.LLM_PRO_FALLBACK_LIST[1]})")
-        print(f"   [Flash Tier] {' -> '.join(flash_candidates)} -> Groq({config.LLM_FLASH_FALLBACK_LIST[1]})\n")
+        print(f"   [Pro Tier] {' -> '.join(pro_candidates)} -> Groq({config.LLM_PRO_FALLBACK_LIST[1]}){_cb_pro}")
+        print(f"   [Flash Tier] {' -> '.join(flash_candidates)} -> Groq({config.LLM_FLASH_FALLBACK_LIST[1]}){_cb_flash}")
+        if _cb_note:
+            print(_cb_note)
+        print()
 
     @staticmethod
     def _stringify(raw: Any) -> str:
@@ -223,7 +264,7 @@ class LLMGateway:
             # 2. 🚨 [크로스 티어 우회] Pro 체인이 429로 터지면 즉시 Flash 티어로 수직 강하
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                 if is_heavy:
-                    print(f"⚠️ [LLM Gateway] Pro 계열 모델 및 Groq 체인 모두 할당량 초과(429) 또는 한도 도달.")
+                    print(f"⚠️ [LLM Gateway] Pro 계열 모델 및 Groq/Cerebras 체인 모두 할당량 초과(429) 또는 한도 도달.")
                     print(f"🔄 [LLM Gateway] 고속(Flash) 티어로 수직 강하(Cross-Tier Fallback) 하여 임무를 속행합니다!")
                     return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=retry_count + 1,
                                                output_mode=output_mode, light=light, full_file_exts=full_file_exts)

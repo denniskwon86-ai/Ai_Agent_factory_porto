@@ -16,7 +16,7 @@ sys.stderr = StdoutInterceptor(sys.stderr)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import factory_control, realtime, format_control
+from api.routes import factory_control, realtime, format_control, skill_control
 
 # 슈퍼바이저 데몬 초기화 (백그라운드 이벤트 리스너 등록)
 import core.supervisor_daemon
@@ -42,3 +42,4 @@ app.add_middleware(
 app.include_router(factory_control.router)
 app.include_router(format_control.router)
 app.include_router(realtime.router)
+app.include_router(skill_control.router)

@@ -90,7 +90,9 @@ export default function WorkflowStrip() {
           ? 'bg-green-900/40 text-green-300 border border-green-700/50'
           : 'bg-gray-900 text-gray-500 border border-gray-700';
         return (
-          <div key={step.key} className="flex items-center shrink-0">
+          // key 는 인덱스를 붙여 고유화 — 커스텀 템플릿에서 두 에이전트가 같은 stage(예: EXECUTION)를
+          // 공유하면 step.key 만으로는 중복되어 React 경고가 난다(step.key 자체는 scores 조회에 계속 사용).
+          <div key={`${step.key}__${i}`} className="flex items-center shrink-0">
             <span className={`px-2 py-1 rounded text-[10px] font-bold whitespace-nowrap ${cls}`}>
               {done && !active ? '✓ ' : ''}{step.label}
             </span>

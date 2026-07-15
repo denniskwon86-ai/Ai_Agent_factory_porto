@@ -631,6 +631,20 @@ export default function ControlPanel() {
                 >
                   {state?.supervisor_verdict !== "PASS" ? "⚠️ 수용검수 미통과 — 그래도 배포(저장)" : "🚀 최종 결과물 저장 (배포)"}
                 </button>
+                {/* 생성된 산출물(코드·문서)을 zip 으로 즉시 내려받기 — Content-Disposition 헤더가 파일명 지정 */}
+                <button
+                  onClick={() => {
+                    const a = document.createElement('a');
+                    a.href = `${API_BASE_URL}/api/v1/factory/${currentProjectId}/export`;
+                    a.download = `${currentProjectId}.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                  }}
+                  className="w-full mt-2 text-emerald-200 font-bold py-2.5 rounded-lg border border-emerald-700/50 bg-emerald-900/20 hover:bg-emerald-800/40 transition-all text-sm"
+                >
+                  ⬇ 산출물 코드 ZIP 다운로드
+                </button>
               </div>
             )}
             

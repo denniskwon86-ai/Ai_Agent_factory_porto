@@ -128,8 +128,9 @@ class SkillEvolutionEngine:
                 if agent_id.lower() == "master_pmo": skill_name = "pmo_skill"
                 if agent_id.lower() == "codebuilder": skill_name = "backend_skill"
                 if agent_id.lower() == "manualwriter": skill_name = "manual_skill"
-                if agent_id.lower() == "developer_be": skill_name = "backend_skill"
-                if agent_id.lower() == "developer_fe": skill_name = "frontend_skill"
+                # 레지스트리 정규 id 는 Backend/Frontend 이다(과거 developer_be/fe 는 오탈자였음).
+                if agent_id.lower() in ("backend", "developer_be"): skill_name = "backend_skill"
+                if agent_id.lower() in ("frontend", "developer_fe"): skill_name = "frontend_skill"
             
             if not skill_name.endswith(".md"):
                 skill_name += ".md"

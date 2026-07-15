@@ -24,6 +24,9 @@ REGISTRY_PATH = os.path.join(_ROOT, "agents_registry.json")
 TEMPLATES_DIR = os.path.join(_ROOT, "templates")
 DEFAULT_TEMPLATE_ID = "default"
 _TID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+# templates/ 에 있으나 워크플로우 템플릿이 아닌 예약 설정 파일(목록 노출 제외).
+# output_formats.json 은 format_control 이 출력 포맷 정의로 사용한다.
+_RESERVED_TEMPLATE_FILES = {"output_formats.json"}
 
 # 에이전트 메타 스키마 키(누락 시 보정)
 _AGENT_FIELDS = {
@@ -109,6 +112,9 @@ def _normalize(reg: Dict[str, Any]) -> Dict[str, Any]:
     agents = [_coerce_agent(a) for a in reg.get("agents", []) if isinstance(a, dict) and a.get("id")]
     agents.sort(key=lambda x: x.get("order", 0))
     result = {
+        # 템플릿 식별자(SSOT). 프론트(WorkflowStrip 등)가 default/커스텀을 구분하는 근거이므로
+        # 정규화 결과에 항상 실어 보낸다. 원본에 없으면 로더(load_registry/load_template)가 스탬프한다.
+        "id": str(reg.get("id", "") or ""),
         "version": int(reg.get("version", 1)),
         "pipeline_name": str(reg.get("pipeline_name", DEFAULT_REGISTRY["pipeline_name"])),
         "description": str(reg.get("description", "")),
@@ -125,19 +131,24 @@ def _normalize(reg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def load_registry() -> Dict[str, Any]:
-    """레지스트리 로드. 파일이 없거나 손상 시 DEFAULT로 안전 폴백."""
+    """레지스트리 로드. 파일이 없거나 손상 시 DEFAULT로 안전 폴백.
+    반환 결과의 id 는 항상 'default'(기존 단일 레지스트리 = default 템플릿)로 스탬프한다."""
+    def _as_default(reg: Dict[str, Any]) -> Dict[str, Any]:
+        reg["id"] = DEFAULT_TEMPLATE_ID
+        return reg
+
     if not os.path.exists(REGISTRY_PATH):
-        return _normalize(DEFAULT_REGISTRY)
+        return _as_default(_normalize(DEFAULT_REGISTRY))
     try:
         with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
         reg = _normalize(data)
         if not reg["agents"]:
-            return _normalize(DEFAULT_REGISTRY)
-        return reg
+            return _as_default(_normalize(DEFAULT_REGISTRY))
+        return _as_default(reg)
     except Exception:
         # 손상된 파일이 그래프 부팅을 막지 않도록 DEFAULT로 폴백
-        return _normalize(DEFAULT_REGISTRY)
+        return _as_default(_normalize(DEFAULT_REGISTRY))
 
 
 def save_registry(reg: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,7 +227,10 @@ def load_template(template_id: str = DEFAULT_TEMPLATE_ID) -> Dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             reg = _normalize(json.load(f))
-        return reg if reg["agents"] else _normalize(DEFAULT_REGISTRY)
+        if not reg["agents"]:
+            return _normalize(DEFAULT_REGISTRY)
+        reg["id"] = template_id  # 로더가 실제 template_id 를 SSOT 로 스탬프(파일 내 id 누락/불일치 방어)
+        return reg
     except Exception:
         return _normalize(DEFAULT_REGISTRY)
 
@@ -234,6 +248,10 @@ def list_templates() -> List[Dict[str, Any]]:
     if os.path.isdir(TEMPLATES_DIR):
         for fn in sorted(os.listdir(TEMPLATES_DIR)):
             if not fn.endswith(".json"):
+                continue
+            # 워크플로우 템플릿이 아닌 예약 설정 파일은 제외(예: output_formats.json = 출력 포맷 정의).
+            # 이런 파일은 agents 가 없어 load_template 에서 default 로 폴백되며 목록에 노출되면 혼란을 준다.
+            if fn in _RESERVED_TEMPLATE_FILES:
                 continue
             tid = fn[:-5]
             try:

@@ -32,6 +32,12 @@ SUMMARY_MAX_LENGTH = 4000
 # 4. LLM 엔진 설정 (모델 불가지성 보장)
 # ==========================================
 # 논리 티어 → 물리 모델 매핑 테이블
+#
+# [3중 폴백 아키텍처] 각 논리 티어(pro/flash)는 3개 제공사를 순차 폴백한다:
+#   Gemini(1차·주력) → Groq(2차) → Cerebras(3차·최후 보루)
+# 세 제공사 모두 '무료 티어'를 제공하므로, 한 곳의 일일/분당 할당량(429)이 소진돼도
+# 다음 제공사로 자동 강하하여 파이프라인이 멈추지 않는다(무료 쿼터를 사실상 3배로 확장).
+# Groq·Cerebras 는 동일 Llama 계열을 서빙하므로 폴백 시에도 응답 품질 편차가 작다.
 ENGINE_TIERS = {
     "gemini": {
         "pro":   "gemini-2.5-pro",
@@ -40,12 +46,20 @@ ENGINE_TIERS = {
     "groq": {
         "pro":   "llama-3.3-70b-versatile", # [수정] 퇴역한 llama3-70b-8192 모델을 최신 주력 모델로 교체
         "flash": "llama-3.1-8b-instant",    # [수정] mixtral 대신 최신 고속 모델로 교체
+    },
+    # Cerebras 무료 티어(일 100만 토큰, 카드 불필요). Meta 가 Llama API 공식 파트너로 택한
+    # 초고속 추론(LPU/웨이퍼스케일) 제공사. 모델 ID 는 Cerebras 문서 표기를 그대로 사용한다
+    # (주의: 70B 는 하이픈 'llama-3.3-70b', 8B 는 하이픈 없이 'llama3.1-8b' — Cerebras 표기 불일치).
+    "cerebras": {
+        "pro":   "llama-3.3-70b",
+        "flash": "llama3.1-8b",
     }
 }
 
-# 폴백(Fallback) 순서 리스트
-LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "llama-3.3-70b-versatile"]
-LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash-lite", "llama-3.1-8b-instant"]
+# 폴백(Fallback) 순서 리스트 — [0]=Gemini(1차), [1]=Groq(2차), [2]=Cerebras(3차)
+# ⚠️ 인덱스 계약: llm_gateway 가 [1]=Groq, [2]=Cerebras 로 참조하므로 순서를 바꾸지 말 것.
+LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "llama-3.3-70b-versatile", "llama-3.3-70b"]
+LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash-lite", "llama-3.1-8b-instant", "llama3.1-8b"]
 
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)
 MODEL_CONTEXT_LIMITS = {
@@ -53,6 +67,9 @@ MODEL_CONTEXT_LIMITS = {
     "gemini-2.5-flash-lite":    75000,
     "llama-3.3-70b-versatile":   6000,  # 8k 제한 방어
     "llama-3.1-8b-instant":      6000,  # 8k 제한 방어
+    # Cerebras 무료 티어는 컨텍스트 창이 보수적(모델 자체는 크나 무료 한도가 낮음) → Groq 와 동일하게 방어
+    "llama-3.3-70b":             6000,
+    "llama3.1-8b":               6000,
 }
 CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
 
@@ -64,9 +81,13 @@ MODEL_OUTPUT_LIMITS = {
     "gemini-2.5-flash-lite":   65536,
     "llama-3.3-70b-versatile":  8000,
     "llama-3.1-8b-instant":     8000,
+    # Cerebras Llama 계열 출력 상한 — Groq 와 동일하게 8k 로 설정
+    "llama-3.3-70b":            8000,
+    "llama3.1-8b":              8000,
 }
 DEFAULT_OUTPUT_LIMIT_GEMINI = 65536
 DEFAULT_OUTPUT_LIMIT_GROQ = 8000
+DEFAULT_OUTPUT_LIMIT_CEREBRAS = 8000
 
 # ==========================================
 # 5. 토론·합의 루프 / 단계별 성공기준 / Supervisor 설정 (V5.1)
