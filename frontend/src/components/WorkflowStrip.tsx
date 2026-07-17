@@ -1,12 +1,13 @@
 import { useFactoryStore } from '../store/useFactoryStore';
 
 const DEFAULT_FLOW: { key: string; label: string; agents?: string[] }[] = [
+  { key: 'CLARIFICATION', label: '요구확인' },
   { key: 'RFP', label: '요구정의' },
   { key: 'PLANNING', label: '기획' },
   { key: 'UI_DESIGN', label: 'UI디자인' },
   { key: 'VISION_QA', label: '비전QA' },
-  { key: 'PMO', label: 'WBS분할' },
   { key: 'ARCHITECTURE', label: '아키텍처' },
+  { key: 'PMO', label: 'WBS분할' },
   { key: 'TECH_SPEC', label: '기술설계' },
   { key: '__code', label: '구현', agents: ['backend', 'frontend'] },
   { key: '__build', label: '빌드', agents: ['codebuilder'] },
@@ -17,11 +18,11 @@ const DEFAULT_FLOW: { key: string; label: string; agents?: string[] }[] = [
 ];
 
 const DEFAULT_NODE_TO_IDX: Record<string, number> = {
-  rfp_analyst: 0, master_pm: 1, uidesigner: 2, visionqa: 3, master_pmo: 4, architect: 5, tech_lead: 6,
-  backend: 7, frontend: 7, codebuilder: 8, reviewer: 9, qa: 10, supervisor: 11, manualwriter: 12,
+  requirement_interviewer: 0, rfp_analyst: 1, master_pm: 2, uidesigner: 3, visionqa: 4, architect: 5, master_pmo: 6, tech_lead: 7,
+  backend: 8, frontend: 8, codebuilder: 9, reviewer: 10, qa: 11, supervisor: 12, manualwriter: 13,
 };
 const DEFAULT_STAGE_TO_IDX: Record<string, number> = {
-  RFP: 0, PLANNING: 1, UI_DESIGN: 2, VISION_QA: 3, PMO: 4, ARCHITECTURE: 5, TECH_SPEC: 6, EXECUTION: 7, BUILD: 8, CODE_REVIEW: 9, QA: 10, SUPERVISOR: 11, MANUAL: 12,
+  CLARIFICATION: 0, RFP: 1, PLANNING: 2, UI_DESIGN: 3, VISION_QA: 4, ARCHITECTURE: 5, PMO: 6, TECH_SPEC: 7, EXECUTION: 8, BUILD: 9, CODE_REVIEW: 10, QA: 11, SUPERVISOR: 12, MANUAL: 13,
 };
 
 export default function WorkflowStrip() {

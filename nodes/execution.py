@@ -93,8 +93,15 @@ def _collect_disk_files(workspace_root: str, exts: tuple, cap: int = 120) -> Lis
 async def run_architect(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     print(" [Agent] Architect 토론·합의 기반 설계 진행 중...")
+
+    # 기획 단계에서 사용자가 승인한 UI 목업이 있으면 화면 구조/컴포넌트 경계를 아키텍처에 반영
+    extra = ""
+    ui_mockup = (getattr(state_obj, "ui_mockup_summary", "") or "").strip()
+    if ui_mockup:
+        extra = f"\n\n[참조: 사용자가 승인한 UI 목업 - 화면 구성과 컴포넌트 경계를 아키텍처 설계에 반영하십시오]\n{ui_mockup}"
+
     from nodes.utils.debate import run_supervised_stage
-    updates, result = await run_supervised_stage(state_obj, agent_skill("Architect", "architect_skill", template_id=state_obj.template_id), "ARCHITECTURE")
+    updates, result = await run_supervised_stage(state_obj, agent_skill("Architect", "architect_skill", template_id=state_obj.template_id), "ARCHITECTURE", extra_instruction=extra)
     print(f"[OK] [Agent] Architect 설계 완료 - 점수 {result.get('score')} / 판정 {result.get('verdict')}")
     updates.setdefault("factory_mode", "EXECUTION")
     updates.setdefault("needs_revision", False)

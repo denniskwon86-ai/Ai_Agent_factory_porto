@@ -16,17 +16,17 @@ const DEFAULT_EXEC_PIPELINE = [
 ];
 
 const DEFAULT_MACRO_STAGES: [string, string][] = [
-  ["RFP", "요구정의"], ["PLANNING", "기획"], ["PMO", "WBS"], ["ARCHITECTURE", "아키텍처"],
+  ["CLARIFICATION", "요구확인"], ["RFP", "요구정의"], ["PLANNING", "기획"], ["ARCHITECTURE", "아키텍처"], ["PMO", "WBS"],
   ["TECH_SPEC", "기술설계"], ["EXECUTION", "구현"], ["BUILD", "빌드"], ["CODE_REVIEW", "검수"],
   ["QA", "QA"], ["MANUAL", "매뉴얼"],
 ];
 const DEFAULT_NODE_MACRO: Record<string, number> = {
-  RFP_Analyst: 0, Master_PM: 1, Master_PMO: 2, Architect: 3, Tech_Lead: 4,
-  Backend: 5, Frontend: 5, CodeBuilder: 6, Reviewer: 7, QA: 8, ManualWriter: 9,
+  Requirement_Interviewer: 0, RFP_Analyst: 1, Master_PM: 2, Architect: 3, Master_PMO: 4, Tech_Lead: 5,
+  Backend: 6, Frontend: 6, CodeBuilder: 7, Reviewer: 8, QA: 9, ManualWriter: 10,
 };
 const DEFAULT_STAGE_MACRO: Record<string, number> = {
-  RFP: 0, PLANNING: 1, PMO: 2, ARCHITECTURE: 3, TECH_SPEC: 4,
-  EXECUTION: 5, BUILD: 6, CODE_REVIEW: 7, QA: 8, MANUAL: 9,
+  CLARIFICATION: 0, RFP: 1, PLANNING: 2, ARCHITECTURE: 3, PMO: 4, TECH_SPEC: 5,
+  EXECUTION: 6, BUILD: 7, CODE_REVIEW: 8, QA: 9, MANUAL: 10,
 };
 
 // 노드 id → Supervisor 채점 단계 키 (배지 표시용)

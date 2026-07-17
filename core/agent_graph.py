@@ -112,23 +112,41 @@ def _is_final_task(state: ProjectState) -> bool:
     except Exception:
         return False
 
-def _route_to_first_assigned(agents: list, include_design: bool = True) -> str:
+def _route_to_first_assigned(agents: list, include_design: bool = True, include_architect: bool = True) -> str:
     """배정된 에이전트 명단에서 파이프라인 순서상 첫 실행 대상 노드를 고른다."""
     if include_design:
-        if _has_role(agents, "Architect", "아키"): return "Architect"
+        if include_architect and _has_role(agents, "Architect", "아키"): return "Architect"
         if _has_role(agents, "Tech_Lead", "테크") or _has_role(agents, "Tech_Lead", "기술"): return "Tech_Lead"
     if _has_role(agents, "Backend", "백엔드"): return "Backend"
     if _has_role(agents, "Frontend", "프론트"): return "Frontend"
     return "CodeBuilder"
 
+def _wbs_file_exists(state: ProjectState) -> bool:
+    """WBS 마스터플랜 파일 존재 여부 — 기획 파이프라인(PMO 이전)과 실행 태스크를 구분하는 신호.
+    기획 재가동 시 옛 산출물은 .archive 로 이동되므로, 기획 흐름에서는 항상 False 다."""
+    try:
+        return os.path.exists(os.path.join(state.workspace_root, "00_wbs_master_plan.json"))
+    except Exception:
+        return False
+
 def route_factory_mode(state: ProjectState) -> str:
-    if state.factory_mode == "PLANNING": return "RFP_Analyst"
+    # PLANNING 신규 가동: 요구 확인 인터뷰(선택형 질문 게이트)부터 시작 → 답변이 RFP/PRD 입력이 된다
+    if state.factory_mode == "PLANNING": return "Requirement_Interviewer"
     elif state.factory_mode == "REVISION": return "Tech_Lead"
     # EXECUTION: 태스크에 배정된 에이전트 기준으로 진입 (설계 재사용 - 미배정 시 Architect/Tech_Lead 생략)
-    return _route_to_first_assigned(_get_required_agents(state), include_design=True)
+    # 아키텍처는 기획 단계(UI 승인 직후)에서 1회 확정되므로, 산출물이 이미 있으면 Architect 재진입을
+    # 생략한다(설계 재사용). 기획 단계 아키텍처가 없는 레거시 프로젝트만 폴백으로 Architect 를 실행.
+    has_arch = bool((getattr(state, "architecture_summary", "") or "").strip())
+    return _route_to_first_assigned(_get_required_agents(state), include_design=True, include_architect=not has_arch)
 
 def route_from_architect(state: ProjectState) -> str:
-    # Architect 완료 후, 배정된 다음 에이전트로 (Tech_Lead 미배정 시 생략)
+    # 기획 파이프라인(UI 승인 → Architect → WBS): WBS 가 아직 없으면 기획 흐름이므로 PMO 로 진행.
+    # factory_mode 는 UIDesigner 가 이미 EXECUTION 으로 바꿔놓아 신뢰할 수 없다 → 태스크 id/WBS 파일로 판별.
+    tid = getattr(state, "current_sprint_task_id", "") or ""
+    if tid.startswith("PLANNING") or not _wbs_file_exists(state):
+        print("️ [기획 설계 완료] 아키텍처 확정 - Master PMO 에게 WBS 분할을 지시합니다.")
+        return "Master_PMO"
+    # 실행(폴백) 경로: Architect 완료 후, 배정된 다음 에이전트로 (Tech_Lead 미배정 시 생략)
     return _route_to_first_assigned(_get_required_agents(state), include_design=False) \
         if not _has_role(_get_required_agents(state), "Tech_Lead", "테크") \
         else "Tech_Lead"
@@ -216,8 +234,9 @@ def route_from_vision_qa(state: ProjectState) -> str:
     if getattr(state, "needs_revision", False):
         print(" [사용자 UI 재설계 요청] 피드백 반영 - UIDesigner 로 되돌려 다시 디자인합니다.")
         return "UIDesigner"
-        
-    return "Master_PMO"
+
+    # UI 확정 후 아키텍처 설계 → WBS 분할 순서(설계가 WBS 의 입력이 되도록 기획 단계에서 확정)
+    return "Architect"
 
 def route_from_pmo(state: ProjectState) -> str:
     """WBS(PMO) 게이트 직후 분기: 사용자가 피드백을 줬으면(needs_revision) WBS 재분할을 위해
@@ -236,6 +255,11 @@ def run_wbs_approved(state: ProjectState) -> dict:
     승인되면 여기로 진행한 뒤 END 로 종료(기획 완료). 상태는 변경하지 않는다."""
     print("[OK] [WBS 승인] 사용자가 WBS 를 승인했습니다 - 기획 단계를 종료합니다.")
     return {}
+
+def route_from_interviewer(state: ProjectState) -> str:
+    """요구 확인 인터뷰 직후(게이트 재개 시): 사용자의 선택 답변은 human_feedback_queue 에 실려
+    RFP_Analyst 가 소비·영속화한다. 질문이 없었거나 무피드백 승인이어도 그대로 RFP 진행."""
+    return "RFP_Analyst"
 
 def route_from_rfp(state: ProjectState) -> str:
     """RFP HOTL 게이트 직후 분기: 사용자 피드백(needs_revision)이면 RFP 재작성을 위해
@@ -273,6 +297,7 @@ def route_from_supervisor(state: ProjectState) -> str:
 # 레지스트리 id → 노드 구현 함수. 레지스트리가 노드 멤버십을 구동하기 위한 seam.
 # (모든 레지스트리 에이전트 id 를 커버해야 동적 빌더가 임의 enabled 집합을 생성 가능)
 NODE_IMPL = {
+    "Requirement_Interviewer": __import__("nodes.clarification", fromlist=["run_requirement_interviewer"]).run_requirement_interviewer,
     "RFP_Analyst": run_rfp_analyst,
     "Master_PM": run_master_pm,
     "UIDesigner": __import__("nodes.ui_designer", fromlist=["run_ui_designer"]).run_ui_designer,
@@ -297,16 +322,20 @@ def _wire_edges(workflow):
     workflow.set_conditional_entry_point(
         route_factory_mode,
         {
+            "Requirement_Interviewer": "Requirement_Interviewer",
             "RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", "Architect": "Architect",
             "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"
         }
     )
+    # 요구 확인 인터뷰 게이트: 선택형 질문 생성 직후 멈추고(hotl_after), 사용자의 선택 답변과 함께 RFP 로
+    workflow.add_conditional_edges("Requirement_Interviewer", route_from_interviewer, {"RFP_Analyst": "RFP_Analyst"})
     # RFP 게이트 피드백 루프: 피드백 시 RFP_Analyst 재실행(요구정의 재작성), 승인 시 Master_PM 진행
     workflow.add_conditional_edges("RFP_Analyst", route_from_rfp, {"RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM"})
     workflow.add_conditional_edges("Master_PM", route_from_pm, {"UIDesigner": "UIDesigner", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
     
     workflow.add_conditional_edges("UIDesigner", route_from_ui_designer, {"VisionQA": "VisionQA"})
-    workflow.add_conditional_edges("VisionQA", route_from_vision_qa, {"UIDesigner": "UIDesigner", "Master_PMO": "Master_PMO"})
+    # UI 승인(VisionQA 게이트) → Architect(아키텍처 확정) → Master_PMO(WBS 분할) — 설계가 WBS 의 입력
+    workflow.add_conditional_edges("VisionQA", route_from_vision_qa, {"UIDesigner": "UIDesigner", "Architect": "Architect"})
     
     # WBS 게이트: interrupt_after=Master_PMO 가 실제로 멈추도록 승인 경로를 '실제 노드'(WBS_Approved)로
     # 보낸다. 피드백 시 Master_PMO 재실행(WBS 재분할), 승인 시 WBS_Approved→END(기획 종료).
@@ -314,7 +343,7 @@ def _wire_edges(workflow):
     workflow.add_conditional_edges("Master_PMO", route_from_pmo, {"Master_PMO": "Master_PMO", "WBS_Approved": "WBS_Approved"})
     workflow.add_edge("WBS_Approved", END)
 
-    workflow.add_conditional_edges("Architect", route_from_architect, {"Tech_Lead": "Tech_Lead", "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
+    workflow.add_conditional_edges("Architect", route_from_architect, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
     workflow.add_conditional_edges("Tech_Lead", route_from_tech_lead, {"Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
     workflow.add_conditional_edges("Backend", route_from_backend, {"Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
     workflow.add_edge("Frontend", "CodeBuilder")

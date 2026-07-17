@@ -32,13 +32,26 @@ async def run_rfp_analyst(state: Any) -> Dict[str, Any]:
     _fb_items = getattr(state_obj, "human_feedback_queue", []) or []
     _latest = _fb_items[-1] if _fb_items else None
     _latest_fb = (_latest.get("feedback", "") if isinstance(_latest, dict) else getattr(_latest, "feedback", "")) or ""
+
+    _clar_qs = getattr(state_obj, "clarification_questions", []) or []
+    _clar_sum = (getattr(state_obj, "clarification_summary", "") or "").strip()
+    _new_clar_sum = ""
     _extra = ""
-    if _latest_fb.strip():
+    if _clar_qs and not _clar_sum and _latest_fb.strip():
+        # 요구 확인 인터뷰(선택형 질문) 답변 최초 소비: RFP 입력으로 주입 + 이후 단계(PRD) 참조용 영속화
+        _new_clar_sum = _latest_fb.strip()
+        _extra = (f"\n\n[ 사용자 요구 확인(인터뷰) 결과 - 아래 선택/답변을 RFP(요구정의서)에 반드시 반영하십시오]:\n{_new_clar_sum}")
+        print(f" [RFP Analyst] 요구 확인 인터뷰 답변 반영해 RFP 작성: {_new_clar_sum[:80]}")
+    elif _latest_fb.strip():
         _extra = (f"\n\n[ 사용자 피드백 - RFP(요구정의서)를 이 피드백에 맞게 반드시 수정/반영해 재작성하십시오. "
                   f"다음 단계(기획서)로 미루지 말 것]:\n{_latest_fb.strip()}")
         print(f" [RFP Analyst] 사용자 피드백 반영해 RFP 재작성: {_latest_fb.strip()[:80]}")
     else:
         print(" [Agent] RFP Analyst - 토론·합의 기반 요구사항 정의서(RFP) 작성 중...")
+
+    # 재작성 루프에서도 인터뷰에서 확정한 방향이 유실되지 않도록 항상 참조로 동봉
+    if _clar_sum:
+        _extra += f"\n\n[참조: 사용자 요구 확인(인터뷰) 결과 - 이 확정 방향과 모순되지 않게 작성하십시오]:\n{_clar_sum}"
 
     from nodes.utils.debate import run_supervised_stage
     updates, result = await run_supervised_stage(state_obj, agent_skill("RFP_Analyst", "rfp_skill", template_id=state_obj.template_id), "RFP", extra_instruction=_extra)
@@ -46,6 +59,8 @@ async def run_rfp_analyst(state: Any) -> Dict[str, Any]:
     # 재진입 시 다시 Master_PM 으로 흐르도록 needs_revision 리셋 + 소비한 피드백 큐 비움(다음 단계 재적용 방지)
     updates["needs_revision"] = False
     updates["human_feedback_queue"] = []
+    if _new_clar_sum:
+        updates["clarification_summary"] = _new_clar_sum
     return updates
 
 async def run_master_pm(state: Any) -> Dict[str, Any]:
@@ -101,8 +116,13 @@ async def run_master_pm(state: Any) -> Dict[str, Any]:
 
     else:
         print(" [Agent] Master PM 토론·합의 기반 기획(PRD) 진행 중...")
+        # 요구 확인 인터뷰에서 사용자가 선택으로 확정한 방향을 PRD 에도 직접 주입
+        _extra = ""
+        _clar_sum = (getattr(state_obj, "clarification_summary", "") or "").strip()
+        if _clar_sum:
+            _extra = f"\n\n[참조: 사용자 요구 확인(인터뷰) 결과 - 기획서(PRD)에 반드시 반영하십시오]:\n{_clar_sum}"
         from nodes.utils.debate import run_supervised_stage
-        updates, result = await run_supervised_stage(state_obj, agent_skill("Master_PM", "pm_skill", template_id=state_obj.template_id), "PLANNING")
+        updates, result = await run_supervised_stage(state_obj, agent_skill("Master_PM", "pm_skill", template_id=state_obj.template_id), "PLANNING", extra_instruction=_extra)
         print(f"[OK] [Agent] Master PM 기획 완료 - 점수 {result.get('score')} / 판정 {result.get('verdict')}")
         updates.setdefault("needs_revision", False)
         return updates
@@ -113,9 +133,13 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
     print(" [Agent] Master PMO 비동기 WBS 분할 및 에이전트 스케줄링 진행 중...")
     prompt = _load_skill(agent_skill("Master_PMO", "pmo_skill", template_id=state_obj.template_id))
     prompt += f"\n\n[참조: Master PM이 작성한 PRD]\n{state_obj.prd_summary}"
+    # 아키텍처는 기획 단계(UI 승인 직후)에서 이미 확정됨 — WBS 분할의 입력으로 주입
+    if (getattr(state_obj, "architecture_summary", "") or "").strip():
+        prompt += f"\n\n[참조: Architect가 확정한 시스템 아키텍처 - 태스크 분해 시 모듈 경계와 의존성을 이 설계에 맞추십시오]\n{state_obj.architecture_summary}"
     prompt += (
         "\n\n[ 절대 준수 사항]: PRD를 분석하여 반드시 **최소 4개 이상**의 구체적인 WBS 태스크로 분할하십시오. "
-        "각 태스크에는 투입될 에이전트 명단(`required_agents`)을 반드시 포함하십시오."
+        "각 태스크에는 투입될 에이전트 명단(`required_agents`)을 반드시 포함하십시오. "
+        "아키텍처 설계는 기획 단계에서 이미 확정되었으므로 `required_agents`에 `Architect`를 절대 배정하지 마십시오."
     )
 
     # WBS 게이트에서 사용자가 피드백을 줬으면(재분할 루프) 그 내용을 반영해 다시 분할한다.

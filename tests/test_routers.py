@@ -23,7 +23,8 @@ def S(**kw):
 
 # ── route_factory_mode ──────────────────────────────────────────────
 def test_factory_mode_planning():
-    assert ag.route_factory_mode(S(factory_mode="PLANNING")) == "RFP_Analyst"
+    # 기획 신규 가동은 요구 확인 인터뷰(선택형 질문 게이트)부터 시작
+    assert ag.route_factory_mode(S(factory_mode="PLANNING")) == "Requirement_Interviewer"
 
 def test_factory_mode_revision_to_techlead():
     assert ag.route_factory_mode(S(factory_mode="REVISION")) == "Tech_Lead"
@@ -35,15 +36,54 @@ def test_factory_mode_execution_skips_design_to_backend():
     assert ag.route_factory_mode(S(current_required_agents=["Backend"])) == "Backend"
 
 
+# ── route_from_interviewer (요구 확인 인터뷰 → RFP) ──────────────────
+def test_interviewer_always_proceeds_to_rfp():
+    # 답변 유무와 무관하게 RFP 로 진행(답변은 human_feedback_queue 로 RFP 가 소비)
+    assert ag.route_from_interviewer(S()) == "RFP_Analyst"
+    assert ag.route_from_interviewer(S(needs_revision=True)) == "RFP_Analyst"
+
+
 # ── route_from_pm ───────────────────────────────────────────────────
-def test_pm_no_task_to_pmo():
-    assert ag.route_from_pm(S(current_sprint_task_id="")) == "Master_PMO"
+def test_pm_no_task_to_uidesigner():
+    # 기획 흐름: PM(PRD) 직후에는 UIDesigner 로 진행 (UI→VisionQA→Architect→PMO 순)
+    assert ag.route_from_pm(S(current_sprint_task_id="")) == "UIDesigner"
 
 def test_pm_needs_revision_to_techlead():
     assert ag.route_from_pm(S(current_sprint_task_id="T1", needs_revision=True)) == "Tech_Lead"
 
 def test_pm_default_to_reviewer():
     assert ag.route_from_pm(S(current_sprint_task_id="T1", needs_revision=False)) == "Reviewer"
+
+
+# ── route_from_vision_qa (UI 승인 → Architect) ───────────────────────
+def test_vision_qa_pass_to_architect():
+    # UI 확정 후 아키텍처 설계가 WBS 분할(PMO)보다 선행한다
+    assert ag.route_from_vision_qa(S(reviewer_decision="NONE")) == "Architect"
+
+def test_vision_qa_rework_back_to_designer():
+    assert ag.route_from_vision_qa(S(reviewer_decision="REWORK_DEV")) == "UIDesigner"
+
+def test_vision_qa_user_feedback_back_to_designer():
+    assert ag.route_from_vision_qa(S(reviewer_decision="NONE", needs_revision=True)) == "UIDesigner"
+
+
+# ── route_from_architect (기획: →PMO / 실행 폴백: →Tech_Lead 등) ─────
+def test_architect_planning_flow_to_pmo():
+    # WBS 파일이 아직 없으면 기획 흐름 → Master_PMO 로 WBS 분할 지시
+    s = S(workspace_root="/no/such/dir", current_sprint_task_id="PLANNING_123")
+    assert ag.route_from_architect(s) == "Master_PMO"
+
+def test_architect_execution_fallback_to_techlead(tmp_path):
+    # WBS 가 존재하는 실행 태스크(레거시 폴백)에서는 기존처럼 다음 배정 에이전트로
+    wbs = {"tasks": [{"task_id": "T1", "required_agents": ["Tech_Lead", "Backend"]}]}
+    (tmp_path / "00_wbs_master_plan.json").write_text(json.dumps(wbs), encoding="utf-8")
+    s = S(workspace_root=str(tmp_path), current_sprint_task_id="T1")
+    assert ag.route_from_architect(s) == "Tech_Lead"
+
+def test_factory_mode_execution_arch_reuse_skips_architect():
+    # 기획 단계에서 아키텍처가 이미 확정됐으면(architecture_summary 존재) Architect 재진입 생략
+    s = S(current_required_agents=["Architect", "Tech_Lead", "Backend"], architecture_summary="# 확정 설계")
+    assert ag.route_factory_mode(s) == "Tech_Lead"
 
 
 # ── route_from_pmo (WBS 게이트 피드백 루프) ──────────────────────────

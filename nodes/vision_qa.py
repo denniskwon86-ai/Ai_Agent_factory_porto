@@ -79,16 +79,14 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
 
     if not has_screenshot:
         print("⏩ [Vision QA] UI 스크린샷이 확보되지 않아 평가를 생략합니다.")
-        
-        completed = state_obj.completed_agents.copy() if state_obj.completed_agents else []
-        if "VisionQA" not in completed:
-            completed.append("VisionQA")
+
         scores = state_obj.stage_scores.copy() if state_obj.stage_scores else {}
         scores["VISION_QA"] = 1.0
-        
+
+        # reviewer_decision 초기화: 직전 반려(REWORK_DEV) 잔존 시 라우터가 UIDesigner 로 무한 왕복함
         return {
-            "completed_agents": completed,
-            "stage_scores": scores
+            "stage_scores": scores,
+            "reviewer_decision": "NONE"
         }
     # Vision 모델 연동 프롬프트
     prompt = (
@@ -119,14 +117,12 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
         }
         
     print("[OK] [Vision QA] UI/UX 시각적 품질 검증 통과.")
-    
-    completed = state_obj.completed_agents.copy() if state_obj.completed_agents else []
-    if "VisionQA" not in completed:
-        completed.append("VisionQA")
+
     scores = state_obj.stage_scores.copy() if state_obj.stage_scores else {}
     scores["VISION_QA"] = 1.0
-    
+
+    # reviewer_decision 초기화: 직전 반려(REWORK_DEV) 잔존 시 라우터가 UIDesigner 로 무한 왕복함
     return {
-        "completed_agents": completed,
-        "stage_scores": scores
+        "stage_scores": scores,
+        "reviewer_decision": "NONE"
     }

@@ -131,6 +131,11 @@ class ProjectState(BaseModel):
 
     human_feedback_queue: List[FeedbackItem] = Field(default_factory=list)
 
+    # 요구 확인 인터뷰(RFP 이전 게이트): 에이전트가 생성한 선택형 질문 목록과,
+    # 사용자가 선택으로 답한 결과 요약(RFP/PRD 작성 시 입력으로 주입·참조)
+    clarification_questions: List[Dict] = Field(default_factory=list)
+    clarification_summary: str = Field(default="")
+
     # 토론·합의 루프 / 단계별 성공기준 / Supervisor (V5.1)
     current_stage: str = Field(default="")  # PLANNING/PMO/ARCHITECTURE/TECH_SPEC/CODE_REVIEW/QA
     stage_attempt_counts: Dict[str, int] = Field(default_factory=dict)
@@ -145,7 +150,7 @@ class ProjectState(BaseModel):
         # 부분 저장/레거시 상태에서 컬렉션 필드가 null로 들어와도 기본값으로 보정 (검증 크래시 방지)
         if isinstance(data, dict):
             none_to_list = ("architecture_decisions", "technical_debt", "human_feedback_queue",
-                            "criteria_log", "current_required_agents")
+                            "criteria_log", "current_required_agents", "clarification_questions")
             none_to_dict = ("file_index", "agent_memories", "stage_attempt_counts",
                             "stage_scores", "debate_rounds_used", "artifacts", "artifact_summaries")
             for k in none_to_list:
