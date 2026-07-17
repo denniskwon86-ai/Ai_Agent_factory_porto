@@ -76,7 +76,7 @@ interface FactoryStore {
   formats: OutputFormat[];
   selectedFormatId: string;
   showFormatPanel: boolean;
-  projects: { id: string, name: string, initial_idea?: string, is_mega_project?: boolean, parent_project_id?: string }[];
+  projects: { id: string, name: string, initial_idea?: string, is_mega_project?: boolean, parent_project_id?: string, template_id?: string, total_tasks?: number, completed_tasks?: number }[];
   currentProjectId: string | null;
   healingRetryCount: number;
   activeSprintId: string | null;

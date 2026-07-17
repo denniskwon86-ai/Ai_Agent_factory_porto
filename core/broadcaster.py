@@ -4,7 +4,7 @@ import os
 import urllib.request
 from datetime import datetime
 from typing import AsyncGenerator, Dict, Any
-from fastapi.encoders import jsonable_encoder  # 🚨 Pydantic 객체를 안전하게 변환하는 만능 인코더 추가
+from fastapi.encoders import jsonable_encoder  #  Pydantic 객체를 안전하게 변환하는 만능 인코더 추가
 
 class SSEBroadcaster:
     """
@@ -28,7 +28,7 @@ class SSEBroadcaster:
                 try:
                     event_data = await asyncio.wait_for(q.get(), timeout=15.0)
                     
-                    # 🚨 [핵심 조치] Pydantic 모델, datetime 등 직렬화 불가 객체를 기본 파이썬 타입(dict, str)으로 강제 분해
+                    #  [핵심 조치] Pydantic 모델, datetime 등 직렬화 불가 객체를 기본 파이썬 타입(dict, str)으로 강제 분해
                     safe_data = jsonable_encoder(event_data)
                     
                     yield f"data: {json.dumps(safe_data, ensure_ascii=False)}\n\n"
@@ -59,7 +59,7 @@ class SSEBroadcaster:
             print(f"⚠️ [Alert] ALERT_WEBHOOK_URL이 설정되지 않아 알람을 전송할 수 없습니다: {message}")
             return
             
-        payload = json.dumps({"text": f"🚨 [AI Factory Studio Alert] {message}"}).encode('utf-8')
+        payload = json.dumps({"text": f" [AI Factory Studio Alert] {message}"}).encode('utf-8')
         req = urllib.request.Request(webhook_url, data=payload, headers={'Content-Type': 'application/json'}, method='POST')
         
         def _send():

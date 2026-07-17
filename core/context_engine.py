@@ -30,7 +30,7 @@ class ContextEngine:
         모든 산출물 요약/파일은 토큰 상한으로 절단하여 무료 티어 할당량(TPM) 폭증을 방어한다.
 
         full_file_exts: 개발자가 '본인이 전체 재출력할 파일'의 확장자 튜플(예: (".tsx",".ts")).
-          여기에 해당하는 파일은 **절단 없이 전체** 주입한다(증분 codegen — 멀티태스크에서
+          여기에 해당하는 파일은 **절단 없이 전체** 주입한다(증분 codegen - 멀티태스크에서
           기존 기능이 truncation 으로 누락되던 회귀의 근본 차단). 미지정(None)이면 종전과
           100% 동일하게 동작한다(모든 파일 per_file 절단 + ctx_max 총량 절단).
         """
@@ -49,29 +49,29 @@ class ContextEngine:
         rag_context = knowledge_base.get_relevant_context(state)
 
         context_parts = [
-            f"🏢 [기업 프로필 & 사용자 성향]:\n{profile_str}"
+            f" [기업 프로필 & 사용자 성향]:\n{profile_str}"
         ]
         if rag_context:
-            context_parts.append(f"📚 [과거 유사 사례 참고]:\n{rag_context}")
+            context_parts.append(f" [과거 유사 사례 참고]:\n{rag_context}")
             
         context_parts.extend([
-            f"🎯 [프로젝트 목표]: {state.project_name}",
-            f"💡 [초기 기획]: {state.initial_idea}",
-            f"📍 [현재 스프린트 태스크]: {state.current_sprint_task_id}"
+            f" [프로젝트 목표]: {state.project_name}",
+            f" [초기 기획]: {state.initial_idea}",
+            f" [현재 스프린트 태스크]: {state.current_sprint_task_id}"
         ])
 
         if getattr(state, "rfp_summary", ""):
-            context_parts.append(f"📋 [요구사항 정의서 (RFP) — 반드시 충족해야 할 기준 계약]:\n{_clip(state.rfp_summary, sm)}")
+            context_parts.append(f" [요구사항 정의서 (RFP) - 반드시 충족해야 할 기준 계약]:\n{_clip(state.rfp_summary, sm)}")
         if state.prd_summary:
-            context_parts.append(f"📄 [기획서 (PRD)]:\n{_clip(state.prd_summary, sm)}")
+            context_parts.append(f" [기획서 (PRD)]:\n{_clip(state.prd_summary, sm)}")
         if state.architecture_summary:
-            context_parts.append(f"🏗️ [아키텍처]:\n{_clip(state.architecture_summary, sm)}")
+            context_parts.append(f"️ [아키텍처]:\n{_clip(state.architecture_summary, sm)}")
         if state.tech_spec_summary:
-            context_parts.append(f"🛠️ [기술 사양 (Tech Spec)]:\n{_clip(state.tech_spec_summary, sm)}")
+            context_parts.append(f"️ [기술 사양 (Tech Spec)]:\n{_clip(state.tech_spec_summary, sm)}")
 
-        # 🚨 [컨텍스트 라우터] QA, Reviewer, 개발자 교차 참조를 위해 실제 파일 디스크에서 읽어오기.
-        #   - 소유 파일(full_file_exts 일치): 전체 주입(절단 금지) — 재출력 시 기존 기능 보존.
-        #   - 그 외 파일: per_file 절단(전체파일 모드에선 1줄 색인만) — 토큰 절감.
+        #  [컨텍스트 라우터] QA, Reviewer, 개발자 교차 참조를 위해 실제 파일 디스크에서 읽어오기.
+        #   - 소유 파일(full_file_exts 일치): 전체 주입(절단 금지) - 재출력 시 기존 기능 보존.
+        #   - 그 외 파일: per_file 절단(전체파일 모드에선 1줄 색인만) - 토큰 절감.
         #   - file_index 가 비거나 stale 해도, 소유 확장자는 디스크를 직접 walk 해 주입(자가복구).
         if not light and state.workspace_root:
             ws_path = Path(state.workspace_root)
@@ -115,10 +115,10 @@ class ContextEngine:
                         raw = target_file.read_text(encoding="utf-8")
                         if is_owned:
                             owned_blocks.append(
-                                f"--- FILE (이번 작업의 수정 대상 — 전체 코드 보존 필수): {rel_path} ---\n```\n{raw}\n```\n")
+                                f"--- FILE (이번 작업의 수정 대상 - 전체 코드 보존 필수): {rel_path} ---\n```\n{raw}\n```\n")
                         elif full_file_exts:
                             purpose = getattr(meta, "purpose", "") or (meta.get("purpose", "") if isinstance(meta, dict) else "")
-                            other_blocks.append(f"--- FILE (참조 — 본 작업 비대상): {rel_path}" + (f" — {purpose}" if purpose else "") + " ---")
+                            other_blocks.append(f"--- FILE (참조 - 본 작업 비대상): {rel_path}" + (f" - {purpose}" if purpose else "") + " ---")
                         else:
                             from core.jit_context import extract_signatures
                             _, ext = os.path.splitext(rel_path)
@@ -136,7 +136,7 @@ class ContextEngine:
                 for rel_path, meta in (state.file_index or {}).items():
                     _emit(rel_path, meta)
 
-                # 2) [자가복구] 소유 확장자 파일을 디스크에서 직접 발견해 주입 — file_index 에 없어
+                # 2) [자가복구] 소유 확장자 파일을 디스크에서 직접 발견해 주입 - file_index 에 없어
                 #    누락되던 기존 코드까지 보장(멀티태스크 file_index 유실 회귀 차단).
                 if full_file_exts:
                     for disk_path in sorted(ws_path.rglob("*")):
@@ -151,7 +151,7 @@ class ContextEngine:
                             _emit(rel)
 
                 if owned_blocks or other_blocks:
-                    context_parts.append("\n📁 [현재 워크스페이스 실제 파일 상태 (Context Router)]:")
+                    context_parts.append("\n [현재 워크스페이스 실제 파일 상태 (Context Router)]:")
                     # 소유 파일을 먼저 배치 → 총량 절단 시에도 보존 우선
                     context_parts.extend(owned_blocks)
                     context_parts.extend(other_blocks)
@@ -162,13 +162,13 @@ class ContextEngine:
     @staticmethod
     def get_strict_json_instruction() -> str:
         """
-        🚨 [SSOT 규격 통일] 
+         [SSOT 규격 통일] 
         모든 에이전트의 프롬프트 끝에 강제로 주입되는 절대 출력 규칙.
         기존 skills 폴더의 모든 XML 지시를 무시하고 오직 이것만 따르도록 덮어씁니다.
         """
         return """
 ===================================================================
-🛑 [절대 준수 시스템 명령: STRICT JSON OUTPUT ONLY] 🛑
+ [절대 준수 시스템 명령: STRICT JSON OUTPUT ONLY] 
 
 당신의 응답은 반드시 아래의 JSON 포맷과 정확히 일치해야 합니다.
 마크다운 설명, 인삿말, XML 태그(<file> 등)는 절대 금지됩니다. 

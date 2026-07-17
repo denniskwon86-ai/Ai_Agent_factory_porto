@@ -1,5 +1,5 @@
 # ==========================================
-# Supervisor 채점기 — 단계별 Rubric 평가 (V5.1)
+# Supervisor 채점기 - 단계별 Rubric 평가 (V5.1)
 # deterministic 검사를 먼저 코드로 평가(LLM 0콜)하고, llm_judge 항목만 Flash 1콜로 채점.
 # 토론 자가검증과 Supervisor 게이트가 공유하는 SSOT.
 # ==========================================
@@ -18,7 +18,7 @@ def _load_skill(role_name: str) -> str:
 
 
 def _parse_json(text):
-    # 관대한 파서로 위임 — judge 채점 JSON이 비정형이어도 점수가 0으로 유실되지 않도록
+    # 관대한 파서로 위임 - judge 채점 JSON이 비정형이어도 점수가 0으로 유실되지 않도록
     from nodes.utils.json_utils import loads_lenient
     return loads_lenient(text)
 
@@ -47,7 +47,7 @@ def _stage_artifact(state, stage_key: str) -> str:
         # 고객사 수용검수: 코드(결과물) + RFP(계약) 대조
         rfp = getattr(state, "rfp_summary", "") or ""
         prd = getattr(state, "prd_summary", "") or ""
-        return (f"[요구사항 정의서(RFP) — 계약]\n{rfp or '(RFP 없음 — PRD 기준)'}\n\n[기획서(PRD)]\n{prd}\n\n[구현 결과물 코드]\n{code}").strip()
+        return (f"[요구사항 정의서(RFP) - 계약]\n{rfp or '(RFP 없음 - PRD 기준)'}\n\n[기획서(PRD)]\n{prd}\n\n[구현 결과물 코드]\n{code}").strip()
     field = _STAGE_ARTIFACT_FIELD.get(stage_key)
     if field:
         return getattr(state, field, "") or ""
@@ -90,7 +90,7 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
 
     if llm_checks:
         judge_skill = _load_skill("judge_skill")
-        # 단계별 평가 페르소나(QA=수행사 검수자 / Supervisor=고객사 대리인)를 judge 프롬프트에 주입 — 관점 차등
+        # 단계별 평가 페르소나(QA=수행사 검수자 / Supervisor=고객사 대리인)를 judge 프롬프트에 주입 - 관점 차등
         persona = _load_skill(rubric.get("judge_persona", "")) if rubric.get("judge_persona") else ""
         persona_block = (persona + "\n\n") if persona else ""
         checks_brief = "\n".join([f'- {c["id"]}: {c["desc"]}' for c in llm_checks])
@@ -121,7 +121,7 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
                 blocking_fails.append(c["id"])
 
     score = (got_w / total_w) if total_w > 0 else 1.0
-    # 통과 임계는 rubric(criteria.py)을 단일 진실원천으로 사용 (config 중복 제거 — SSOT 단일화)
+    # 통과 임계는 rubric(criteria.py)을 단일 진실원천으로 사용 (config 중복 제거 - SSOT 단일화)
     threshold = rubric.get("pass_threshold", 0.7)
 
     if blocking_fails:

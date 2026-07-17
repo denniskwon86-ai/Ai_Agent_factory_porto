@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useFactoryStore } from '../store/useFactoryStore';
+import { useState, useEffect, useRef } from 'react';
 
 interface ServerLogPopupProps {
   onClose: () => void;

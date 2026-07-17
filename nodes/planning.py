@@ -22,7 +22,7 @@ def _extract_code_from_ssot(json_str: str) -> str:
     return ""
 
 async def run_rfp_analyst(state: Any) -> Dict[str, Any]:
-    """요구사항 정의서(RFP) 작성 — 기획(PM) 이전에 '무엇을·왜'를 확정하는 기준 계약.
+    """요구사항 정의서(RFP) 작성 - 기획(PM) 이전에 '무엇을·왜'를 확정하는 기준 계약.
     RFP HOTL 게이트에서 사용자가 피드백을 주면(route_from_rfp 가 여기로 되돌림) 그 피드백을
     재작성 지시로 주입해 RFP 자체를 고친다(다음 단계 PRD 로 새지 않도록)."""
     state_obj = ProjectState.model_validate(state)
@@ -34,15 +34,15 @@ async def run_rfp_analyst(state: Any) -> Dict[str, Any]:
     _latest_fb = (_latest.get("feedback", "") if isinstance(_latest, dict) else getattr(_latest, "feedback", "")) or ""
     _extra = ""
     if _latest_fb.strip():
-        _extra = (f"\n\n[🚨 사용자 피드백 — RFP(요구정의서)를 이 피드백에 맞게 반드시 수정/반영해 재작성하십시오. "
+        _extra = (f"\n\n[ 사용자 피드백 - RFP(요구정의서)를 이 피드백에 맞게 반드시 수정/반영해 재작성하십시오. "
                   f"다음 단계(기획서)로 미루지 말 것]:\n{_latest_fb.strip()}")
-        print(f"🔁 [RFP Analyst] 사용자 피드백 반영해 RFP 재작성: {_latest_fb.strip()[:80]}")
+        print(f" [RFP Analyst] 사용자 피드백 반영해 RFP 재작성: {_latest_fb.strip()[:80]}")
     else:
-        print("📋 [Agent] RFP Analyst — 토론·합의 기반 요구사항 정의서(RFP) 작성 중...")
+        print(" [Agent] RFP Analyst - 토론·합의 기반 요구사항 정의서(RFP) 작성 중...")
 
     from nodes.utils.debate import run_supervised_stage
     updates, result = await run_supervised_stage(state_obj, agent_skill("RFP_Analyst", "rfp_skill", template_id=state_obj.template_id), "RFP", extra_instruction=_extra)
-    print(f"✅ [Agent] RFP 요구정의 완료 — 점수 {result.get('score')} / 판정 {result.get('verdict')}")
+    print(f"[OK] [Agent] RFP 요구정의 완료 - 점수 {result.get('score')} / 판정 {result.get('verdict')}")
     # 재진입 시 다시 Master_PM 으로 흐르도록 needs_revision 리셋 + 소비한 피드백 큐 비움(다음 단계 재적용 방지)
     updates["needs_revision"] = False
     updates["human_feedback_queue"] = []
@@ -51,12 +51,12 @@ async def run_rfp_analyst(state: Any) -> Dict[str, Any]:
 async def run_master_pm(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     
-    # 🚨 [PM 상신 루프] 리뷰어가 기획 모순으로 판단하여 PM을 호출한 경우
+    #  [PM 상신 루프] 리뷰어가 기획 모순으로 판단하여 PM을 호출한 경우
     if getattr(state_obj, "reviewer_decision", "") == "ESCALATE_PM":
         print("⚖️ [Agent] Master PM: Reviewer의 기획 모순 에스컬레이션 검토 중...")
         prompt = _load_skill(agent_skill("Master_PM", "pm_skill", template_id=state_obj.template_id))
         prompt += (
-            f"\n\n[🚨 Reviewer 결재 상신 내용 (ESCALATE_PM)]:\n{state_obj.reviewer_feedback}\n\n"
+            f"\n\n[ Reviewer 결재 상신 내용 (ESCALATE_PM)]:\n{state_obj.reviewer_feedback}\n\n"
             "당신은 프로젝트의 총괄 PM입니다. 코드 리뷰어가 기획서의 논리적 모순이나 위배 사항을 보고했습니다.\n"
             "1. 만약 이 지적사항이 전체 흐름상 무시해도 좋다면 응답을 반환하는 JSON 데이터 내에 `\"decision\": \"REJECT\"`로 적고 `\"reason\": \"사유\"`를 명시하십시오.\n"
             "2. 만약 기획 보완이 필요하다면 `\"decision\": \"ACCEPT\"`로 적고, `\"prd_summary\": \"보완된 PRD 내용\"`을 작성하십시오.\n"
@@ -81,14 +81,14 @@ async def run_master_pm(state: Any) -> Dict[str, Any]:
             data = json.loads(clean_str)
             
             if data.get("decision") == "REJECT":
-                print("✅ [PM Decision] PM이 피드백을 기각(Override)했습니다. 개발팀에 강행을 지시합니다.")
+                print("[OK] [PM Decision] PM이 피드백을 기각(Override)했습니다. 개발팀에 강행을 지시합니다.")
                 return {
                     "reviewer_decision": "PASS", # 결재 완료 처리
                     "pm_override_reason": data.get("reason", "PM 판단하에 무시 진행"), 
                     "needs_revision": False
                 }
             else:
-                print("🔄 [PM Decision] PM이 피드백을 수용(ACCEPT)했습니다. PRD를 업데이트하고 개발팀 재작업(Rework)을 지시합니다.")
+                print(" [PM Decision] PM이 피드백을 수용(ACCEPT)했습니다. PRD를 업데이트하고 개발팀 재작업(Rework)을 지시합니다.")
                 return {
                     "reviewer_decision": "REWORK_DEV", # 개발팀으로 루프 반환
                     "pm_override_reason": "",
@@ -100,21 +100,21 @@ async def run_master_pm(state: Any) -> Dict[str, Any]:
             return {"reviewer_decision": "PASS", "pm_override_reason": "PM 자동 강행 폴백"}
 
     else:
-        print("🧭 [Agent] Master PM 토론·합의 기반 기획(PRD) 진행 중...")
+        print(" [Agent] Master PM 토론·합의 기반 기획(PRD) 진행 중...")
         from nodes.utils.debate import run_supervised_stage
         updates, result = await run_supervised_stage(state_obj, agent_skill("Master_PM", "pm_skill", template_id=state_obj.template_id), "PLANNING")
-        print(f"✅ [Agent] Master PM 기획 완료 — 점수 {result.get('score')} / 판정 {result.get('verdict')}")
+        print(f"[OK] [Agent] Master PM 기획 완료 - 점수 {result.get('score')} / 판정 {result.get('verdict')}")
         updates.setdefault("needs_revision", False)
         return updates
 
 async def run_master_pmo(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
     
-    print("📊 [Agent] Master PMO 비동기 WBS 분할 및 에이전트 스케줄링 진행 중...")
+    print(" [Agent] Master PMO 비동기 WBS 분할 및 에이전트 스케줄링 진행 중...")
     prompt = _load_skill(agent_skill("Master_PMO", "pmo_skill", template_id=state_obj.template_id))
     prompt += f"\n\n[참조: Master PM이 작성한 PRD]\n{state_obj.prd_summary}"
     prompt += (
-        "\n\n[🚨 절대 준수 사항]: PRD를 분석하여 반드시 **최소 4개 이상**의 구체적인 WBS 태스크로 분할하십시오. "
+        "\n\n[ 절대 준수 사항]: PRD를 분석하여 반드시 **최소 4개 이상**의 구체적인 WBS 태스크로 분할하십시오. "
         "각 태스크에는 투입될 에이전트 명단(`required_agents`)을 반드시 포함하십시오."
     )
 
@@ -122,8 +122,8 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
     _fb_items = getattr(state_obj, "human_feedback_queue", []) or []
     _latest_fb = (_fb_items[-1].get("feedback", "") if _fb_items and isinstance(_fb_items[-1], dict) else "") or ""
     if _latest_fb.strip():
-        prompt += f"\n\n[🚨 사용자 피드백 — WBS 재분할 시 반드시 반영하십시오]:\n{_latest_fb.strip()}"
-        print(f"🔁 [Master PMO] 사용자 피드백을 반영해 WBS 를 재분할합니다: {_latest_fb.strip()[:80]}")
+        prompt += f"\n\n[ 사용자 피드백 - WBS 재분할 시 반드시 반영하십시오]:\n{_latest_fb.strip()}"
+        print(f" [Master PMO] 사용자 피드백을 반영해 WBS 를 재분할합니다: {_latest_fb.strip()[:80]}")
 
     output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json")
     wbs_code = _extract_code_from_ssot(output) or output
@@ -145,7 +145,7 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
     if state_obj.workspace_root:
         wbs_mgr = WBSManager(state_obj.workspace_root)
         wbs_mgr.initialize_wbs(state_obj.project_name, wbs_tasks)
-        print(f"✅ WBS 초기화 완료: 총 {len(wbs_tasks)}개의 태스크가 스케줄링되었습니다.")
+        print(f"[OK] WBS 초기화 완료: 총 {len(wbs_tasks)}개의 태스크가 스케줄링되었습니다.")
 
     # 첫 번째 실행 가능 태스크의 required_agents를 현재 스프린트 에이전트 명단으로 저장
     first_task_agents = []
@@ -164,12 +164,12 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
         "verdict": pmo_result.get("verdict", "PASS"),
         "blocking_fails": pmo_result.get("blocking_fails", []),
     })
-    print(f"📊 [Master PMO] WBS 기준 채점 — 점수 {pmo_result.get('score')} / 판정 {pmo_result.get('verdict')}")
+    print(f" [Master PMO] WBS 기준 채점 - 점수 {pmo_result.get('score')} / 판정 {pmo_result.get('verdict')}")
 
     return {
         "factory_mode": "EXECUTION",
         "needs_revision": False,
-        "human_feedback_queue": [],  # 소비한 피드백 비움 — 다음 게이트에서 과거 피드백 재적용 방지
+        "human_feedback_queue": [],  # 소비한 피드백 비움 - 다음 게이트에서 과거 피드백 재적용 방지
         "current_required_agents": first_task_agents,
         "current_stage": "PMO",
         "stage_scores": scores,

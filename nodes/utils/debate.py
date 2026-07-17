@@ -1,5 +1,5 @@
 # ==========================================
-# 다중 에이전트 토론·합의 루프 + Supervisor 게이트 헬퍼 — V5.1
+# 다중 에이전트 토론·합의 루프 + Supervisor 게이트 헬퍼 - V5.1
 # 노드 내부 서브루프(generate -> critique -> revise)로 동작하므로
 # LangGraph 사이클을 0개 추가한다(interrupt_after / MemorySaver 무영향).
 # ==========================================
@@ -19,7 +19,7 @@ def _load_skill(role_name: str) -> str:
 
 
 def _parse_json(text):
-    # 관대한 파서로 위임 — 트레일링 콤마/코드펜스/단일따옴표 등 비정형 JSON 복구
+    # 관대한 파서로 위임 - 트레일링 콤마/코드펜스/단일따옴표 등 비정형 JSON 복구
     from nodes.utils.json_utils import loads_lenient
     return loads_lenient(text)
 
@@ -116,7 +116,7 @@ async def run_debate(state_obj, author_skill: str, stage_key: str, rounds: int =
 
     label = STAGE_LABELS.get(stage_key, stage_key)
 
-    # 1) 초안 생성 (Pro, 문서 모드 — strict_json files 스키마 강제 회피)
+    # 1) 초안 생성 (Pro, 문서 모드 - strict_json files 스키마 강제 회피)
     await _emit(state_obj, stage_key, "draft", 0, f"{label} 초안을 작성하도록 담당 에이전트를 투입했습니다.")
     draft = await gateway.aexecute(state_obj, author_prompt, is_heavy=True, output_mode="document")
     if _is_llm_error(draft):
@@ -150,9 +150,9 @@ async def run_debate(state_obj, author_skill: str, stage_key: str, rounds: int =
         issues = [c for c in checks if not c.get("pass", True)]
         if issues:
             brief = "; ".join([f"[{c.get('id', '')}] {str(c.get('evidence', '')).strip()}"[:90] for c in issues[:3]])
-            crit_detail = f"{label} 비평 결과 — 결함 {len(issues)}건: {brief}"
+            crit_detail = f"{label} 비평 결과 - 결함 {len(issues)}건: {brief}"
         else:
-            crit_detail = f"{label} 비평 결과 — 치명 결함 없음, 합의 도달."
+            crit_detail = f"{label} 비평 결과 - 치명 결함 없음, 합의 도달."
         await _emit(state_obj, stage_key, "critique_result", r + 1, crit_detail, meta={"checks": checks, "blocking": bool(blocking)})
         if not blocking:
             break  # 합의 성립 → 조기 종료
@@ -161,7 +161,7 @@ async def run_debate(state_obj, author_skill: str, stage_key: str, rounds: int =
             revise_prompt = (
                 f"{author_prompt}\n\n"
                 f"[직전 초안]:\n{draft}\n\n"
-                f"[비평가 지적 사항 — 모두 반영하여 개정]:\n{feedback}\n\n"
+                f"[비평가 지적 사항 - 모두 반영하여 개정]:\n{feedback}\n\n"
                 "지적된 결함을 모두 해소한 개정 산출물 전체를 작성하라. 축약·생략 금지."
             )
             await _emit(state_obj, stage_key, "revise", r + 1, f"{label} 담당 에이전트에게 비평을 반영해 개정하도록 지시했습니다. (개정 {r + 1}R)")

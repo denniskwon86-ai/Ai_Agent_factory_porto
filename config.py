@@ -53,13 +53,20 @@ ENGINE_TIERS = {
     "cerebras": {
         "pro":   "llama-3.3-70b",
         "flash": "llama3.1-8b",
+    },
+    "xai": {
+        "pro":   "grok-2-latest",
+        "flash": "grok-2-latest",
+    },
+    "openrouter": {
+        "pro":   "meta-llama/llama-3.3-70b-instruct:free",
+        "flash": "google/gemini-2.0-flash-lite-preview-02-05:free",
     }
 }
 
-# 폴백(Fallback) 순서 리스트 — [0]=Gemini(1차), [1]=Groq(2차), [2]=Cerebras(3차)
-# ⚠️ 인덱스 계약: llm_gateway 가 [1]=Groq, [2]=Cerebras 로 참조하므로 순서를 바꾸지 말 것.
-LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "llama-3.3-70b-versatile", "llama-3.3-70b"]
-LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash-lite", "llama-3.1-8b-instant", "llama3.1-8b"]
+# 폴백(Fallback) 순서 리스트 — [0]=Gemini(1차), [1]=xAI(2차), [2]=Groq(3차), [3]=Cerebras(4차), [4]=OpenRouter(5차)
+LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct:free"]
+LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash-lite", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.0-flash-lite-preview-02-05:free"]
 
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)
 MODEL_CONTEXT_LIMITS = {
@@ -70,6 +77,9 @@ MODEL_CONTEXT_LIMITS = {
     # Cerebras 무료 티어는 컨텍스트 창이 보수적(모델 자체는 크나 무료 한도가 낮음) → Groq 와 동일하게 방어
     "llama-3.3-70b":             6000,
     "llama3.1-8b":               6000,
+    "grok-2-latest":             32000,
+    "meta-llama/llama-3.3-70b-instruct:free": 6000,
+    "google/gemini-2.0-flash-lite-preview-02-05:free": 60000,
 }
 CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
 
@@ -84,10 +94,15 @@ MODEL_OUTPUT_LIMITS = {
     # Cerebras Llama 계열 출력 상한 — Groq 와 동일하게 8k 로 설정
     "llama-3.3-70b":            8000,
     "llama3.1-8b":              8000,
+    "grok-2-latest":            8192,
+    "meta-llama/llama-3.3-70b-instruct:free": 8000,
+    "google/gemini-2.0-flash-lite-preview-02-05:free": 8192,
 }
 DEFAULT_OUTPUT_LIMIT_GEMINI = 65536
 DEFAULT_OUTPUT_LIMIT_GROQ = 8000
 DEFAULT_OUTPUT_LIMIT_CEREBRAS = 8000
+DEFAULT_OUTPUT_LIMIT_XAI = 8192
+DEFAULT_OUTPUT_LIMIT_OPENROUTER = 8000
 
 # ==========================================
 # 5. 토론·합의 루프 / 단계별 성공기준 / Supervisor 설정 (V5.1)

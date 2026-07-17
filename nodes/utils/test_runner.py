@@ -98,25 +98,25 @@ def format_test_results_for_qa(results: Dict[str, Any]) -> str:
         return ""
 
     if results.get("py_compile", {}).get("run"):
-        status = "✅ PASS" if results["py_compile"]["ok"] else "❌ FAIL (Syntax Error 발견)"
+        status = "[OK] PASS" if results["py_compile"]["ok"] else "❌ FAIL (Syntax Error 발견)"
         lines.append(f"- 파이썬 구문 검증: {status}")
         if not results["py_compile"]["ok"]:
             lines.append(f"  ```\n  {results['py_compile']['output'].strip()}\n  ```")
 
     if results.get("frontend_check", {}).get("run"):
-        status = "✅ PASS" if results["frontend_check"]["ok"] else "❌ FAIL (프론트엔드 빌드 에러)"
+        status = "[OK] PASS" if results["frontend_check"]["ok"] else "❌ FAIL (프론트엔드 빌드 에러)"
         lines.append(f"- 프론트엔드 빌드 검증: {status}")
         if not results["frontend_check"]["ok"]:
             lines.append(f"  ```\n  {results['frontend_check']['output'].strip()}\n  ```")
 
     if results.get("pytest", {}).get("run"):
-        status = "✅ PASS" if results["pytest"]["ok"] else "❌ FAIL"
+        status = "[OK] PASS" if results["pytest"]["ok"] else "❌ FAIL"
         lines.append(f"- Pytest 단위 테스트: {status}")
         if not results["pytest"]["ok"]:
             lines.append(f"  ```\n  {results['pytest']['output'].strip()}\n  ```")
 
     if results.get("bandit", {}).get("run"):
-        status = "✅ PASS (취약점 없음)" if results["bandit"]["ok"] else "⚠️ WARNING (보안 취약점 발견)"
+        status = "[OK] PASS (취약점 없음)" if results["bandit"]["ok"] else "⚠️ WARNING (보안 취약점 발견)"
         lines.append(f"- Bandit 보안 스캔: {status}")
         if not results["bandit"]["ok"]:
             lines.append(f"  ```\n  {results['bandit']['output'].strip()}\n  ```")

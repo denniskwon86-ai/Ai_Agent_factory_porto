@@ -17,7 +17,7 @@ class SupervisorDaemon:
         
     async def handle_event(self, event_type: str, payload: dict):
         if event_type == "NODE_COMPLETED":
-            await self._evaluate_state(payload)
+            asyncio.create_task(self._evaluate_state(payload))
             
     async def _evaluate_state(self, payload: dict):
         project_id = payload.get("project_id")
@@ -33,7 +33,7 @@ class SupervisorDaemon:
 당신은 백그라운드에서 프로젝트의 진행 상황을 모니터링하는 비즈니스 관점의 슈퍼바이저(AGI)입니다.
 현재 '{node_name}' 노드의 작업이 방금 완료되었습니다.
 
-[🚨 절대 주의사항]
+[ 절대 주의사항]
 하위 에이전트들(Micro-Swarm)이 단순 문법이나 컴파일(빌드) 에러는 자체적인 샌드박스를 통해 100% 필터링하고 해결합니다.
 따라서 당신은 "문법 에러", "오타", "import 누락" 같은 사소한 개발 결함을 지적할 필요가 없습니다.
 
@@ -65,7 +65,7 @@ class SupervisorDaemon:
             result = json.loads(response)
             if result.get("intervene") and result.get("reason"):
                 reason = result.get("reason")
-                print(f"👁️‍🗨️ [Supervisor Daemon] 치명적 결함 감지! 파이프라인 개입(Pause)을 시도합니다. 사유: {reason}")
+                print(f"️‍️ [Supervisor Daemon] 치명적 결함 감지! 파이프라인 개입(Pause)을 시도합니다. 사유: {reason}")
                 await orchestrator.pause_sprint(task_id, project_id, reason=reason)
                 
                 # 에이전트 실패 자가 반성 트리거
@@ -112,7 +112,7 @@ class SupervisorDaemon:
             result = json.loads(response)
             if result.get("intervene") and result.get("reason"):
                 reason = result.get("reason")
-                print(f"👁️‍🗨️ [Supervisor Daemon] 사용자의 지시로 파이프라인 개입(Pause)을 시도합니다. 사유: {reason}")
+                print(f"️‍️ [Supervisor Daemon] 사용자의 지시로 파이프라인 개입(Pause)을 시도합니다. 사유: {reason}")
                 await orchestrator.pause_sprint(task_id, project_id, reason=reason)
             
             return {"status": "success", "reply": result.get("reply", "답변을 생성하지 못했습니다.")}

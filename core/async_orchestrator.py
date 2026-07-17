@@ -12,13 +12,13 @@ from nodes.utils.wbs_manager import WBSManager
 from core.persona_learner import persona_learner
 
 def _pid(workspace_root: str) -> str:
-    """workspace_root(./projects/<id>)에서 project_id 추출 — SSE 프로젝트 격리용."""
+    """workspace_root(./projects/<id>)에서 project_id 추출 - SSE 프로젝트 격리용."""
     return os.path.basename(str(workspace_root or "").rstrip("/\\"))
 
 
 def _skey(project_id: str, task_id: str) -> str:
-    """프로젝트 격리 복합 키 — langgraph thread_id 및 active_tasks 키 공용.
-    동일 task_id(예: 'E2E-01' — WBS 가 프로젝트마다 동일하게 생성)가 서로 다른 프로젝트에서
+    """프로젝트 격리 복합 키 - langgraph thread_id 및 active_tasks 키 공용.
+    동일 task_id(예: 'E2E-01' - WBS 가 프로젝트마다 동일하게 생성)가 서로 다른 프로젝트에서
     같은 체크포인트(pipeline_state.db)를 공유해 이전 프로젝트의 산출물/진행상태가 새 프로젝트로
     새는 것을 차단한다. thread_id 와 in-memory active_tasks 키 모두 이 복합키로 통일."""
     return f"{project_id}__{task_id}"
@@ -41,12 +41,12 @@ class AsyncFactoryOrchestrator:
             with open(state_path, "w", encoding="utf-8") as f:
                 json.dump(data_to_save, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"🚨 상태 백업 실패: {e}")
+            print(f" 상태 백업 실패: {e}")
 
     async def start_sprint(self, task_id: str, project_state_payload: dict, workspace_root: str) -> bool:
         if task_id.startswith("PLANNING"):
             if os.path.exists(workspace_root):
-                # 🚨 [Phase 3] 파괴적 삭제(rmtree) 제거 및 스마트 아카이빙 적용
+                #  [Phase 3] 파괴적 삭제(rmtree) 제거 및 스마트 아카이빙 적용
                 archive_dir = os.path.join(workspace_root, ".archive", datetime.now().strftime("%Y%m%d_%H%M%S"))
                 os.makedirs(archive_dir, exist_ok=True)
                 
@@ -63,7 +63,7 @@ class AsyncFactoryOrchestrator:
                         print(f"⚠️ [Orchestrator] 아카이브 이동 실패 ({item}): {e}")
                         
             os.makedirs(workspace_root, exist_ok=True)
-            print(f"🧹 [Orchestrator] 신규 기획을 위해 기존 산출물을 .archive/ 폴더로 안전하게 백업했습니다.")
+            print(f" [Orchestrator] 신규 기획을 위해 기존 산출물을 .archive/ 폴더로 안전하게 백업했습니다.")
 
         pid = _pid(workspace_root)
         if not task_id.startswith("PLANNING"):
@@ -89,10 +89,10 @@ class AsyncFactoryOrchestrator:
                 self.active_tasks.pop(tid, None)
                 self.task_projects.pop(tid, None)
         if cancelled:
-            print(f"🛑 [Orchestrator] 프로젝트 '{project_id}'의 실행 중 스프린트 {cancelled}건을 취소했습니다.")
+            print(f" [Orchestrator] 프로젝트 '{project_id}'의 실행 중 스프린트 {cancelled}건을 취소했습니다.")
         return cancelled
 
-    # 🚨 [Phase 3] 세션 인지형 프로세스 강제 일시정지 (Pause) 메서드 추가
+    #  [Phase 3] 세션 인지형 프로세스 강제 일시정지 (Pause) 메서드 추가
     async def pause_sprint(self, task_id: str, project_id: str, reason: str = "") -> bool:
         skey = _skey(project_id, task_id)
         task = self.active_tasks.get(skey)
@@ -101,7 +101,7 @@ class AsyncFactoryOrchestrator:
             pid = self.task_projects.get(skey, project_id)
             del self.active_tasks[skey]
             self.task_projects.pop(skey, None)
-            print(f"🛑 [Orchestrator] Task {task_id} (project={project_id}) 프로세스가 강제 일시정지 되었습니다. 사유: {reason}")
+            print(f" [Orchestrator] Task {task_id} (project={project_id}) 프로세스가 강제 일시정지 되었습니다. 사유: {reason}")
             
             # 슈퍼바이저 인터럽트 발생 시 LangGraph State에 기록하여 UI가 인지하도록 함
             if reason:
@@ -136,7 +136,7 @@ class AsyncFactoryOrchestrator:
             config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
             snapshot = await langgraph_engine.aget_state(config)
             if not (getattr(snapshot, "values", None) and getattr(snapshot, "next", None)):
-                return False  # 다음 노드가 없으면 완료(END) — HOTL 아님
+                return False  # 다음 노드가 없으면 완료(END) - HOTL 아님
             running = self.active_tasks.get(skey)
             if running is not None and not running.done():
                 return False  # 아직 스트리밍 중 = 가동 중이지 HOTL 대기 아님(오탐 차단)
@@ -166,7 +166,7 @@ class AsyncFactoryOrchestrator:
         except asyncio.CancelledError:
             print(f"⏸️ [Orchestrator] Sprint Loop Cancelled (Paused): {task_id}")
         except Exception as e:
-            print(f"🚨 [Orchestrator] Sprint Loop Error: {e}")
+            print(f" [Orchestrator] Sprint Loop Error: {e}")
 
     async def resume_hotl(self, task_id: str, feedback: Optional[str], project_id: str) -> bool:
         langgraph_engine = await get_runtime_app()
@@ -225,6 +225,6 @@ class AsyncFactoryOrchestrator:
         except asyncio.CancelledError:
             print(f"⏸️ [Orchestrator] Resume Stream Cancelled (Paused): {task_id}")
         except Exception as e:
-            print(f"🚨 [Orchestrator] Resume Stream Error: {e}")
+            print(f" [Orchestrator] Resume Stream Error: {e}")
 
 orchestrator = AsyncFactoryOrchestrator()

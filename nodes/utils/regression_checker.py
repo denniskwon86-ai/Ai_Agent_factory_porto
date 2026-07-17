@@ -1,5 +1,5 @@
 # ==========================================
-# 심볼 회귀 게이트 — 순수 파이썬(결정적, LLM 0콜)
+# 심볼 회귀 게이트 - 순수 파이썬(결정적, LLM 0콜)
 # 모든 게이트(렌더/입력동작/스모크/LLM리뷰)는 '신규 파일 단독(stateless)'만 보므로,
 # 직전 태스크에 있던 기능이 새 버전에서 사라져도 잡지 못한다(삭제는 오히려 통과).
 # 이 게이트는 '직전 커밋(baseline) 대비 사라진 심볼/입력요소/라우트'를 비교해 회귀를 차단한다.
@@ -86,7 +86,7 @@ def check_symbol_regression(
     allow_deletion=True 면(삭제 의도 명시) 게이트 우회.
     반환: {ok, regressions: [{file, lost:[...]}], errors:[...], skipped?}"""
     if allow_deletion:
-        return {"ok": True, "regressions": [], "skipped": True, "reason": "삭제 의도 명시 — 회귀 게이트 우회"}
+        return {"ok": True, "regressions": [], "skipped": True, "reason": "삭제 의도 명시 - 회귀 게이트 우회"}
     if not new_files:
         return {"ok": True, "regressions": [], "skipped": True, "reason": "신규 파일 없음"}
 

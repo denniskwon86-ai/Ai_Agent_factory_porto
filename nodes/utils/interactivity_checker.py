@@ -1,5 +1,5 @@
 # ==========================================
-# 프론트엔드 입력 동작(인터랙티비티) 정적 검증기 — 순수 파이썬(Node 불필요)
+# 프론트엔드 입력 동작(인터랙티비티) 정적 검증기 - 순수 파이썬(Node 불필요)
 # renderToString 검증은 "렌더되는가"만 확인할 수 있고 "입력이 동작하는가"는 못 잡는다.
 # 대표 결함: 제어 컴포넌트(value={...})에 onChange 가 없으면 React 는 그 입력을
 #   '읽기전용'으로 렌더한다 → 사용자가 타이핑해도 값이 안 들어가는 '동결된 입력'.
@@ -9,7 +9,7 @@
 import re
 from typing import List, Dict, Any, Iterator, Tuple, Optional
 
-# 사용자 입력을 받는 네이티브 폼 요소(소문자) — 대문자 컴포넌트(<Input/>)는 자체 처리 가정, 제외
+# 사용자 입력을 받는 네이티브 폼 요소(소문자) - 대문자 컴포넌트(<Input/>)는 자체 처리 가정, 제외
 _FORM_TAGS = ("input", "textarea", "select")
 
 # value 가 라벨/정적 의미라 onChange 가 필요 없는 input type
@@ -19,7 +19,7 @@ _NON_TEXT_INPUT_TYPES = ("submit", "button", "reset", "hidden", "image", "file")
 def _iter_tags(code: str, tag: str) -> Iterator[Tuple[int, str]]:
     """code 안의 `<tag ...>` 시작 태그를 중괄호/따옴표 인지 방식으로 잘라 (start, tag_text) 산출.
     JSX 표현식 `onChange={(e)=>...}` 의 `>` 나 `placeholder="a > b"` 의 `>` 에서 오절단 방지."""
-    # 네이티브 태그는 소문자 — 대소문자 구분(<Input> 같은 컴포넌트는 매칭하지 않음)
+    # 네이티브 태그는 소문자 - 대소문자 구분(<Input> 같은 컴포넌트는 매칭하지 않음)
     pattern = re.compile(r"<" + tag + r"(?=[\s/>])")
     for m in pattern.finditer(code):
         i = m.end()

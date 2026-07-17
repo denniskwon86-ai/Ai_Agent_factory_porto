@@ -80,7 +80,7 @@ class SkillEvolutionEngine:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(proposal, f, ensure_ascii=False, indent=2)
             
-        print(f"🧬 [SkillEvolution] 에이전트 '{agent_id}'의 스킬 개선안이 승인 대기열에 등록되었습니다. ({proposal_id})")
+        print(f" [SkillEvolution] 에이전트 '{agent_id}'의 스킬 개선안이 승인 대기열에 등록되었습니다. ({proposal_id})")
 
     def list_pending_proposals(self) -> List[Dict]:
         proposals = []
@@ -146,7 +146,7 @@ class SkillEvolutionEngine:
             
             # 스킬 파일 업데이트 (Append)
             with open(target_file, "a", encoding="utf-8") as f:
-                f.write("\n\n### 💡 자가 반성 및 사용자 피드백 기반 추가 규칙\n")
+                f.write("\n\n###  자가 반성 및 사용자 피드백 기반 추가 규칙\n")
                 f.write(f"*(업데이트: {datetime.now().strftime('%Y-%m-%d')})*\n")
                 for rule in rules:
                     f.write(f"{rule}\n")

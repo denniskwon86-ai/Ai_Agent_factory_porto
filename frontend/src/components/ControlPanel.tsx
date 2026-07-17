@@ -64,7 +64,7 @@ const getDynamicPipelineData = (templateData: any) => {
   return { execPipeline, macroStages, nodeMacro, stageMacro };
 };
 
-const buildTaskPipeline = (requiredAgents: string[], execPipeline: any[], templateData: any) => {
+const buildTaskPipeline = (requiredAgents: string[], execPipeline: any[], templateData: any, isFinalTask: boolean = false) => {
   const ra = (requiredAgents || []).map((a) => a.toLowerCase());
   const has = (agent: string) => ra.some((r) => r.includes(agent.toLowerCase()));
   
@@ -73,7 +73,8 @@ const buildTaskPipeline = (requiredAgents: string[], execPipeline: any[], templa
     return execPipeline.filter((n) => {
       if (n.id === 'codebuilder') return hasCode;
       if (n.id === 'reviewer') return true;
-      if (n.id === 'manualwriter') return has('Frontend');
+      if (n.id === 'manualwriter') return isFinalTask;
+      if (n.id === 'qa') return has('QA') || isFinalTask;
       return n.agent ? has(n.agent) : false;
     });
   }
@@ -147,8 +148,9 @@ export default function ControlPanel() {
 
   const isDynamic = currentTemplateData && currentTemplateData.agents && currentTemplateData.id !== 'default' && currentTemplateData.pipeline_name !== '소프트웨어 개발 팩토리';
 
-  let totalTasks = wbsData?.tasks?.length || 0;
-  let doneTasks = wbsData?.tasks?.filter((t: any) => t.status === 'DONE').length || 0;
+  const coreTasks = wbsData?.tasks?.filter((t: any) => !t.task_id?.startsWith('TASK_REV_')) || [];
+  let totalTasks = coreTasks.length;
+  let doneTasks = coreTasks.filter((t: any) => t.status === 'DONE').length;
   let progressPercent = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
 
   if (!isDynamic && totalTasks === 0) {
@@ -332,8 +334,9 @@ export default function ControlPanel() {
   };
 
   const renderPipelineTracker = (isPaused: boolean, task: any) => {
+    const isFinalTask = coreTasks.length > 0 && task.task_id === coreTasks[coreTasks.length - 1].task_id;
     // 이 태스크에 배정된 에이전트만으로 파이프라인 구성 (PMO Task별 매핑 반영)
-    const pipeline = buildTaskPipeline(task?.required_agents || [], execPipeline, currentTemplateData);
+    const pipeline = buildTaskPipeline(task?.required_agents || [], execPipeline, currentTemplateData, isFinalTask);
     const currentAgentIdx = pipeline.findIndex(a => !completedAgents.map((ca: string) => ca.toLowerCase()).includes(a.id));
 
     // 단계별 최신 Supervisor 판정 맵 (criteria_log에서 추출)

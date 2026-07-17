@@ -76,7 +76,7 @@ class KnowledgeBase:
                     metadatas=metadatas,
                     ids=ids
                 )
-                print(f"📚 [KnowledgeBase] 프로젝트 '{project_id}' 배포판 '{release_id}' 인덱싱 완료 ({len(documents)} chunks)")
+                print(f" [KnowledgeBase] 프로젝트 '{project_id}' 배포판 '{release_id}' 인덱싱 완료 ({len(documents)} chunks)")
             except Exception as e:
                 print(f"⚠️ [KnowledgeBase] 인덱싱 실패: {e}")
 

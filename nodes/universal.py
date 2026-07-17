@@ -1,5 +1,5 @@
 # ==========================================
-# 범용 노드 실행기 (T3 — 범용 멀티에이전트 플랫폼)
+# 범용 노드 실행기 (T3 - 범용 멀티에이전트 플랫폼)
 # SW 전용 노드 함수(run_architect 등) 없이, 레지스트리 메타(역할·스킬·모델티어)만으로
 # 임의의 에이전트 타입(마케팅/리서치/문서 등)을 실행하는 일반화된 LLM 노드.
 #
@@ -26,11 +26,11 @@ def _load_skill(skill_name: str) -> str:
 
 
 def _format_upstream(artifacts: Dict[str, str], summaries: Dict[str, str], self_id: str) -> str:
-    """이전 단계 산출물을 사람이 읽는 블록으로 — 범용 노드가 맥락을 이어 작업하도록.
+    """이전 단계 산출물을 사람이 읽는 블록으로 - 범용 노드가 맥락을 이어 작업하도록.
     직전 노드(가장 마지막 항목)는 원본(artifacts)을 쓰고, 그 이전은 요약본(summaries)을 쓴다."""
     keys = [k for k in artifacts.keys() if k != self_id and (artifacts.get(k) or "").strip()]
     if not keys:
-        return "(아직 이전 단계 산출물이 없습니다 — 이번이 첫 단계입니다.)"
+        return "(아직 이전 단계 산출물이 없습니다 - 이번이 첫 단계입니다.)"
     
     # 마지막 키(직전 노드)는 원본, 나머지는 요약본
     last_key = keys[-1]
@@ -76,7 +76,7 @@ def make_universal_node(agent_id: str):
         is_heavy = (meta.get("model_tier", "flash") == "pro")
         skill = _load_skill(agent_skill(agent_id, "", template_id=tid))
 
-        print(f"🧩 [Universal] {name_ko}({agent_id}) 실행 중... (tier={'pro' if is_heavy else 'flash'}, format={fmt_id})")
+        print(f" [Universal] {name_ko}({agent_id}) 실행 중... (tier={'pro' if is_heavy else 'flash'}, format={fmt_id})")
 
         artifacts = dict(getattr(state_obj, "artifacts", {}) or {})
         summaries = dict(getattr(state_obj, "artifact_summaries", {}) or {})
@@ -108,7 +108,7 @@ def make_universal_node(agent_id: str):
         artifacts[agent_id] = str(out_artifact or "")
         summaries[agent_id] = str(out_summary or "")
         
-        print(f"✅ [Universal] {name_ko} 산출물 생성 (요약 {len(summaries[agent_id])}자, 상세 {len(artifacts[agent_id])}자)")
+        print(f"[OK] [Universal] {name_ko} 산출물 생성 (요약 {len(summaries[agent_id])}자, 상세 {len(artifacts[agent_id])}자)")
         return {"artifacts": artifacts, "artifact_summaries": summaries}
 
     _node.__name__ = f"universal_{agent_id}"

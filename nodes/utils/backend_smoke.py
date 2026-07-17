@@ -54,7 +54,7 @@ def check_backend_smoke(files: List[Dict[str, Any]], timeout: int = 45) -> Dict[
         except Exception:
             return {"ok": True, "skipped": True, "reason": "스모크 출력 파싱 실패", "raw": (out or (proc.stderr or ""))[:300]}
     except subprocess.TimeoutExpired:
-        return {"ok": False, "errors": [f"백엔드 스모크 타임아웃({timeout}초) — 부팅 시 무한 대기 의심"], "booted": False}
+        return {"ok": False, "errors": [f"백엔드 스모크 타임아웃({timeout}초) - 부팅 시 무한 대기 의심"], "booted": False}
     except Exception as e:
         return {"ok": True, "skipped": True, "reason": f"스모크 예외: {e}"}
     finally:

@@ -1,5 +1,5 @@
 """
-에이전트 마스터 레지스트리 (범용 멀티에이전트 플랫폼 — Phase 1)
+에이전트 마스터 레지스트리 (범용 멀티에이전트 플랫폼 - Phase 1)
 
 목표: 그래프에 하드코딩된 "어떤 에이전트가, 무슨 역할로, 어떤 스킬·모델로, 어떤 순서로,
 어디서 인간 검토(HOTL)를 받는가"를 외부 JSON(SSOT)으로 분리한다.
@@ -36,11 +36,11 @@ _AGENT_FIELDS = {
     "skill": "",         # skills/<skill>.md (없으면 "")
     "stage": "",         # criteria/config의 단계 키
     "category": "execution",  # planning | execution | review | system (UI 그룹핑)
-    "model_tier": "pro", # pro | flash (논리 티어 — config.ENGINE_TIERS)
+    "model_tier": "pro", # pro | flash (논리 티어 - config.ENGINE_TIERS)
     "order": 0,          # 파이프라인 표시 순서
     "enabled": True,     # 비활성 시 파이프라인에서 제외(Phase 2 빌더가 사용)
     "hotl_after": False, # 이 노드 직후 인간 검토 중단점(현재 그래프 interrupt_after에 즉시 반영)
-    "debate": False,     # 토론·합의 루프 적용 여부(표시용 — config.DEBATE_STAGES와 정합)
+    "debate": False,     # 토론·합의 루프 적용 여부(표시용 - config.DEBATE_STAGES와 정합)
     "llm": True,         # LLM 호출 노드 여부(CodeBuilder 등 시스템 노드는 False)
     "position": None,    # UI 노드 위치
     "is_start": False,   # 시작점 여부
@@ -122,7 +122,7 @@ def _normalize(reg: Dict[str, Any]) -> Dict[str, Any]:
         "agents": agents,
         "edges": reg.get("edges", []),
     }
-    # 시뮬레이션 프레임워크 메타데이터 보존 — agent_graph.py의 build_graph_from_registry()가
+    # 시뮬레이션 프레임워크 메타데이터 보존 - agent_graph.py의 build_graph_from_registry()가
     # simulation_framework / framework_agents 를 참조해 resimulate 라우팅·프레임워크 셸 조립에 사용한다.
     if reg.get("simulation_framework"):
         result["simulation_framework"] = True
@@ -198,12 +198,12 @@ def agent_meta(agent_id: str, template_id: str = DEFAULT_TEMPLATE_ID) -> dict:
 
 def agent_skill(agent_id: str, default: str = "", template_id: str = DEFAULT_TEMPLATE_ID) -> str:
     """노드의 스킬 파일명을 레지스트리에서 조회(제어판 override 반영). 미설정 시 default(현행 동작 보존).
-    template_id 가 주어지면 그 템플릿의 스킬을 해석(T2-b) — 노드가 state.template_id 를 넘긴다."""
+    template_id 가 주어지면 그 템플릿의 스킬을 해석(T2-b) - 노드가 state.template_id 를 넘긴다."""
     return agent_meta(agent_id, template_id).get("skill") or default
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 다중 템플릿(Copy 모델) — "default"(=기존 단일 레지스트리)는 그대로, 추가 템플릿은 templates/<id>.json
+# 다중 템플릿(Copy 모델) - "default"(=기존 단일 레지스트리)는 그대로, 추가 템플릿은 templates/<id>.json
 # ──────────────────────────────────────────────────────────────────────────────
 def _safe_tid(template_id: str) -> str:
     if not _TID_RE.match(template_id or ""):
@@ -217,7 +217,7 @@ def _template_path(template_id: str) -> str:
 
 def load_template(template_id: str = DEFAULT_TEMPLATE_ID) -> Dict[str, Any]:
     """템플릿 레지스트리 로드.
-    - default: 기존 단일 레지스트리(agents_registry.json, 없으면 DEFAULT_REGISTRY) — 하위호환.
+    - default: 기존 단일 레지스트리(agents_registry.json, 없으면 DEFAULT_REGISTRY) - 하위호환.
     - 그 외: templates/<id>.json (없거나 손상/빈 결과 시 DEFAULT_REGISTRY 폴백 → 부팅 안전)."""
     if template_id == DEFAULT_TEMPLATE_ID:
         return load_registry()
@@ -282,7 +282,7 @@ def save_template(template_id: str, reg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def copy_template(src_id: str, new_id: str, new_name: str = "") -> Dict[str, Any]:
-    """src 템플릿을 복사해 새 템플릿을 만든다(기존 템플릿은 불변 — Copy 모델 핵심)."""
+    """src 템플릿을 복사해 새 템플릿을 만든다(기존 템플릿은 불변 - Copy 모델 핵심)."""
     _safe_tid(new_id)
     if new_id == DEFAULT_TEMPLATE_ID:
         raise ValueError("default 는 예약된 템플릿 id 입니다.")

@@ -335,9 +335,9 @@ export default function App() {
                                 <h4 className="text-sm font-bold text-indigo-300 truncate pr-2">🔹 {sub.name}</h4>
                                 <button onClick={(e) => handleDeleteProject(sub.id, sub.name, e)} className="opacity-0 group-hover/sub:opacity-100 text-[10px] text-red-400 hover:text-red-300 transition-opacity">🗑</button>
                               </div>
-                              {sub.total_tasks > 0 && (
+                              {sub.total_tasks && sub.total_tasks > 0 && (
                                 <div className="w-full h-1 bg-gray-800 rounded-full mb-1 overflow-hidden">
-                                  <div className="h-full bg-indigo-500" style={{ width: `${Math.round(((sub.completed_tasks || 0) / sub.total_tasks) * 100)}%` }}></div>
+                                  <div className="h-full bg-indigo-500" style={{ width: `${Math.round(((sub.completed_tasks || 0) / (sub.total_tasks || 1)) * 100)}%` }}></div>
                                 </div>
                               )}
                               <span className="text-[10px] text-gray-500 font-mono mb-4">{sub.id}</span>
@@ -384,12 +384,12 @@ export default function App() {
                           <span className="text-xs bg-indigo-900/40 text-indigo-300 border border-indigo-700/50 rounded px-2 py-0.5 truncate">
                             {templates.find((t: any) => t.id === proj.template_id)?.name || proj.template_id || "기본 워크플로우"}
                           </span>
-                          {proj.total_tasks > 0 && (
+                          {proj.total_tasks && proj.total_tasks > 0 && (
                             <div className="flex items-center gap-1.5 flex-1 ml-2 text-xs text-gray-400">
                               <div className="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
-                                <div className="h-full bg-blue-500" style={{ width: `${Math.round(((proj.completed_tasks || 0) / proj.total_tasks) * 100)}%` }}></div>
+                                <div className="h-full bg-blue-500" style={{ width: `${Math.round(((proj.completed_tasks || 0) / (proj.total_tasks || 1)) * 100)}%` }}></div>
                               </div>
-                              <span className="shrink-0">{Math.round(((proj.completed_tasks || 0) / proj.total_tasks) * 100)}%</span>
+                              <span className="shrink-0">{Math.round(((proj.completed_tasks || 0) / (proj.total_tasks || 1)) * 100)}%</span>
                             </div>
                           )}
                         </div>

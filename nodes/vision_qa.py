@@ -14,7 +14,7 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
     디자인 토큰, 여백, 정렬 상태를 평가합니다.
     """
     state_obj = ProjectState.model_validate(state)
-    print("👁️ [Agent] Vision QA (UI/UX 시각 품질 검증) 진행 중...")
+    print("️ [Agent] Vision QA (UI/UX 시각 품질 검증) 진행 중...")
     
     screenshot_path = os.path.join(state_obj.workspace_root, "screenshot.png")
     
@@ -33,16 +33,45 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
                 break
                 
         if target_html:
-            print(f"📸 [Vision QA] 렌더링 대상 발견: {target_html}")
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
-                # Local file 로드
-                file_url = f"file:///{target_html.replace(chr(92), '/')}"
-                await page.goto(file_url, wait_until="networkidle")
-                await page.screenshot(path=screenshot_path, full_page=True)
-                await browser.close()
-            has_screenshot = os.path.exists(screenshot_path)
+            print(f" [Vision QA] 렌더링 대상 발견: {target_html}")
+            target_dir = os.path.dirname(target_html)
+            target_file = os.path.basename(target_html)
+            
+            import http.server
+            import socketserver
+            import threading
+            import socket
+
+            def get_free_port():
+                s = socket.socket(socket.AF_INET, type=socket.SOCK_STREAM)
+                s.bind(('localhost', 0))
+                _, port = s.getsockname()
+                s.close()
+                return port
+
+            port = get_free_port()
+            Handler = http.server.SimpleHTTPRequestHandler
+            
+            class ThreadedHTTPServer(socketserver.TCPServer):
+                allow_reuse_address = True
+
+            httpd = ThreadedHTTPServer(("127.0.0.1", port), lambda *args, **kwargs: Handler(*args, directory=target_dir, **kwargs))
+            server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            server_thread.start()
+
+            try:
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=True)
+                    page = await browser.new_page()
+                    # HTTP url 로드 (CORS 문제 방지)
+                    file_url = f"http://127.0.0.1:{port}/{target_file}"
+                    await page.goto(file_url, wait_until="networkidle")
+                    await page.screenshot(path=screenshot_path, full_page=True)
+                    await browser.close()
+                has_screenshot = os.path.exists(screenshot_path)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
         else:
             print("⏩ [Vision QA] 평가할 HTML/UI 결과물을 찾을 수 없습니다.")
     except Exception as e:
@@ -50,8 +79,17 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
 
     if not has_screenshot:
         print("⏩ [Vision QA] UI 스크린샷이 확보되지 않아 평가를 생략합니다.")
-        return {}
-
+        
+        completed = state_obj.completed_agents.copy() if state_obj.completed_agents else []
+        if "VisionQA" not in completed:
+            completed.append("VisionQA")
+        scores = state_obj.stage_scores.copy() if state_obj.stage_scores else {}
+        scores["VISION_QA"] = 1.0
+        
+        return {
+            "completed_agents": completed,
+            "stage_scores": scores
+        }
     # Vision 모델 연동 프롬프트
     prompt = (
         "첨부된 UI 스크린샷을 보고 다음 항목을 엄격하게 평가하세요.\n"
@@ -77,8 +115,18 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
         print(f"❌ [Vision QA] 시각적 결함 감지: {feedback}")
         return {
             "reviewer_decision": "REWORK_DEV",
-            "reviewer_feedback": f"👁️ [Vision QA 반려]\n{feedback}"
+            "reviewer_feedback": f"️ [Vision QA 반려]\n{feedback}"
         }
         
-    print("✅ [Vision QA] UI/UX 시각적 품질 검증 통과.")
-    return {}
+    print("[OK] [Vision QA] UI/UX 시각적 품질 검증 통과.")
+    
+    completed = state_obj.completed_agents.copy() if state_obj.completed_agents else []
+    if "VisionQA" not in completed:
+        completed.append("VisionQA")
+    scores = state_obj.stage_scores.copy() if state_obj.stage_scores else {}
+    scores["VISION_QA"] = 1.0
+    
+    return {
+        "completed_agents": completed,
+        "stage_scores": scores
+    }

@@ -34,7 +34,7 @@ class CodeBuilder:
         # 파일이 단 한 개라도 쓰였다면 성공으로 간주 (문법 검사는 Execution에서 컷팅 완료됨)
         state["build_status"] = "success" if any(results) else "failed"
         if state["build_status"] == "failed":
-             state["build_error_log"] = "🚨 CodeBuilder: 파일 시스템 쓰기 실패 또는 유효한 파일 데이터가 없습니다."
+             state["build_error_log"] = " CodeBuilder: 파일 시스템 쓰기 실패 또는 유효한 파일 데이터가 없습니다."
         else:
              state["build_error_log"] = ""
              

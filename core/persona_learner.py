@@ -101,7 +101,7 @@ class PersonaLearner:
             with open(PROFILE_PATH, "w", encoding="utf-8") as f:
                 json.dump(updated_profile, f, ensure_ascii=False, indent=2)
                 
-            print(f"🧠 [PersonaLearner] 기업 프로필이 사용자 상호작용을 바탕으로 업데이트 되었습니다.")
+            print(f" [PersonaLearner] 기업 프로필이 사용자 상호작용을 바탕으로 업데이트 되었습니다.")
         except Exception as e:
             print(f"⚠️ [PersonaLearner] 프로필 분석 중 오류 발생: {e}")
 

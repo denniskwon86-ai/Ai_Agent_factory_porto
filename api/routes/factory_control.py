@@ -145,8 +145,9 @@ async def get_projects():
                         wbs_data = json.load(f)
                         project_name = wbs_data.get("project_name", item)
                         tasks = wbs_data.get("tasks", [])
-                        total_tasks = wbs_data.get("total_tasks", len(tasks))
-                        completed_tasks = sum(1 for t in tasks if t.get("status") == "DONE")
+                        core_tasks = [t for t in tasks if not str(t.get("task_id", "")).startswith("TASK_REV_")]
+                        total_tasks = wbs_data.get("total_tasks", len(core_tasks)) if wbs_data.get("total_tasks") else len(core_tasks)
+                        completed_tasks = sum(1 for t in core_tasks if t.get("status") == "DONE")
                 except:
                     pass
             state_path = os.path.join(item_path, "latest_state.json")
@@ -539,6 +540,10 @@ async def supervisor_chat(project_id: str, req: SupervisorChatRequest):
 async def check_hotl(project_id: str):
     """진행 중(IN_PROGRESS) 태스크가 HOTL 중단점에서 대기 중인지 조회 (SSE 이벤트 유실 복구용)."""
     _safe_id(project_id, "project_id")
+    
+    if await orchestrator.is_hotl_pending("sprint_init", project_id):
+        return {"status": "success", "hotl_task_id": "sprint_init"}
+        
     from nodes.utils.wbs_manager import WBSManager
     try:
         wbs = WBSManager(workspace_root=f"./projects/{project_id}").get_wbs()
@@ -554,6 +559,10 @@ async def check_hotl(project_id: str):
 @router.post("/{project_id}/sprint/revision")
 async def create_revision_task(project_id: str, req: RevisionRequest):
     _safe_id(project_id, "project_id")
+    
+    if await orchestrator.is_hotl_pending("sprint_init", project_id):
+        return {"status": "success", "hotl_task_id": "sprint_init"}
+        
     from nodes.utils.wbs_manager import WBSManager
     wbs_mgr = WBSManager(workspace_root=f"./projects/{project_id}")
     task_id = wbs_mgr.add_revision_task(req.feedback)
@@ -564,6 +573,10 @@ async def create_revision_task(project_id: str, req: RevisionRequest):
 @router.post("/{project_id}/heal")
 async def trigger_self_healing(project_id: str, req: HealRequest):
     _safe_id(project_id, "project_id")
+    
+    if await orchestrator.is_hotl_pending("sprint_init", project_id):
+        return {"status": "success", "hotl_task_id": "sprint_init"}
+        
     from nodes.utils.wbs_manager import WBSManager
 
     workspace_root = f"./projects/{project_id}"

@@ -19,7 +19,7 @@ class GitManager:
                 check=False
             )
         except FileNotFoundError:
-            print("🚨 [GitManager] 시스템에 'git'이 설치되어 있지 않거나 PATH에 없습니다.")
+            print(" [GitManager] 시스템에 'git'이 설치되어 있지 않거나 PATH에 없습니다.")
             return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="Git not found")
 
     def _init_if_needed(self):
@@ -35,7 +35,7 @@ class GitManager:
                 
             self._run_cmd(["git", "add", "."])
             self._run_cmd(["git", "commit", "-m", "chore: Initialize unified workspace"])
-            print("🌱 [GitManager] 통합 워크스페이스 Git 저장소 초기화 완료")
+            print(" [GitManager] 통합 워크스페이스 Git 저장소 초기화 완료")
 
     def commit_sprint_changes(self, task_id: str, state: Dict[str, Any]) -> Optional[str]:
         status = self._run_cmd(["git", "status", "--porcelain"])
@@ -64,7 +64,7 @@ class GitManager:
         if res.returncode == 0:
             log_res = self._run_cmd(["git", "rev-parse", "HEAD"])
             commit_hash = log_res.stdout.strip()
-            print(f"📦 [GitManager] Git 커밋 완료 (Hash: {commit_hash[:7]})")
+            print(f" [GitManager] Git 커밋 완료 (Hash: {commit_hash[:7]})")
             return commit_hash
         else:
             print(f"⚠️ [GitManager] 커밋 실패: {res.stderr}")
@@ -81,9 +81,9 @@ class GitManager:
             return res.stdout
         return None
 
-    # 🚨 누락되었던 롤백 복구 엔진 추가 (서킷 브레이커 크래시 원천 차단)
+    #  누락되었던 롤백 복구 엔진 추가 (서킷 브레이커 크래시 원천 차단)
     def rollback_to_safe_state(self, target_commit: Optional[str] = None):
-        print(f"🔄 [GitManager] 안전 지대(Safe State)로 강제 롤백을 시작합니다.")
+        print(f" [GitManager] 안전 지대(Safe State)로 강제 롤백을 시작합니다.")
         
         self._run_cmd(["git", "reset", "--hard"])
         self._run_cmd(["git", "clean", "-fd"])
@@ -91,10 +91,10 @@ class GitManager:
         if target_commit:
             res = self._run_cmd(["git", "checkout", target_commit])
             if res.returncode == 0:
-                print(f"✅ [GitManager] 지정된 커밋({target_commit[:7]})으로 롤백 성공.")
+                print(f"[OK] [GitManager] 지정된 커밋({target_commit[:7]})으로 롤백 성공.")
                 return
             else:
                 print(f"⚠️ [GitManager] 커밋 이동 실패. HEAD 기준으로 롤백을 대체합니다.")
         
         self._run_cmd(["git", "checkout", "dev"]) # 또는 주 브랜치
-        print("✅ [GitManager] 최종 커밋(HEAD) 상태로 작업 공간 복원 완료.")
+        print("[OK] [GitManager] 최종 커밋(HEAD) 상태로 작업 공간 복원 완료.")
