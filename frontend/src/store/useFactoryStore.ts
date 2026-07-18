@@ -127,6 +127,7 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localho
 
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;
+let _sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   state: null,
@@ -236,7 +237,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
 
   stopSprint: async (projectId: string, taskId: string) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/sprint/stop`, {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${projectId}/sprint/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task_id: taskId })
@@ -249,7 +250,12 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       alert("서버에 연결할 수 없어 강제로 UI 상태를 초기화합니다.");
     } finally {
       // API 통신 성공/실패 여부와 관계없이 무조건 프론트엔드의 진행 중 상태를 초기화하여 UI 블로킹 해제
-      set({ activeSprintId: null, hotlTaskId: null, currentActivity: null });
+      // needs_revision/current_sprint_task_id 까지 지워야 정지 후 'HOTL 대기 중' 유령 배너와
+      // 죽은 태스크에 대한 승인(resume) 버튼이 남지 않는다
+      set((prev) => ({
+        activeSprintId: null, hotlTaskId: null, currentActivity: null,
+        state: prev.state ? ({ ...prev.state, needs_revision: false, current_sprint_task_id: "" } as ProjectState) : null,
+      }));
     }
   },
 
@@ -302,6 +308,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/${pid}/hotl/check`);
       if (res.ok) {
         const r = await res.json();
+        // 전환 중 늦게 도착한 '이전 프로젝트' 응답이 새 프로젝트에 HOTL 대기를 주입하지 않도록 재검증
+        if (get().currentProjectId !== pid) return;
         if (r.hotl_task_id) {
           set((prev) => ({
             hotlTaskId: r.hotl_task_id,
@@ -322,6 +330,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/${pid}/feed`);
       if (res.ok) {
         const r = await res.json();
+        if (get().currentProjectId !== pid) return; // 프로젝트 전환 중 stale 응답 차단
         if (Array.isArray(r.data)) set({ supervisorFeed: r.data.slice(-200) });
       }
     } catch (error) {
@@ -588,7 +597,11 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     if (!currentProjectId || !isConnected) return;
 
     if (healingRetryCount >= 3) {
-       alert(`🚨 [자가 치유 실패] 3회 연속 복구에 실패했습니다.\n에러: ${errorMsg}\n수동 개입(코드 수정)이 필요합니다.`);
+       // window.onerror 는 에러마다 반복 발화하므로 경고는 정확히 1회만(alert 폭풍 방지)
+       if (healingRetryCount === 3) {
+         set({ healingRetryCount: 4 });
+         alert(`🚨 [자가 치유 실패] 3회 연속 복구에 실패했습니다.\n에러: ${errorMsg}\n수동 개입(코드 수정)이 필요합니다.`);
+       }
        return;
     }
 
@@ -609,11 +622,12 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   fetchWBS: async () => {
     const { currentProjectId, isWbsError } = get();
     if (isWbsError || !currentProjectId) return;
-    
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/wbs`);
       if (!res.ok) throw new Error("Fetch Fail");
       const result = await res.json();
+      if (get().currentProjectId !== currentProjectId) return; // 프로젝트 전환 중 stale 응답 차단
       if (result.status === "success") {
         set({ wbsData: result.data, wbsErrorCount: 0 });
       } else if (result.status === "not_found") {
@@ -681,6 +695,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   },
 
   connectSSE: () => {
+    // 대기 중인 재연결 타이머 취소(수동/재연결 경합으로 인한 이중 연결 방지)
+    if (_sseReconnectTimer) { clearTimeout(_sseReconnectTimer); _sseReconnectTimer = null; }
     // 기존 연결이 있으면 닫아 중복 수신 방지 (멱등)
     if (_sseConn) {
       try { _sseConn.close(); } catch (e) { /* noop */ }
@@ -731,10 +747,14 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
         get().fetchWBS();
       } else if (data.type === 'SPRINT_PAUSED') {
         set({ activeSprintId: null, currentActivity: null });
+      } else if (data.type === 'SPRINT_FAILED') {
+        // 백엔드 스프린트 루프 크래시 - '영원히 가동 중' 상태에 갇히지 않게 즉시 해제
+        set({ activeSprintId: null, hotlTaskId: null, currentActivity: null });
       }
-      
+
+      // 로그는 상한(500)을 두고 누적 - 장시간 세션에서 무제한 메모리 증가 방지
       set((prev) => ({
-        logs: [...prev.logs, { timestamp: data.timestamp, type: data.type, ...data.payload }]
+        logs: [...prev.logs, { timestamp: data.timestamp, type: data.type, ...data.payload }].slice(-500)
       }));
     };
 
@@ -742,7 +762,9 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       set({ isConnected: false });
       try { eventSource.close(); } catch (e) { /* noop */ }
       if (_sseConn === eventSource) _sseConn = null;
-      setTimeout(() => useFactoryStore.getState().connectSSE(), 5000);
+      // 재연결 타이머는 항상 1개만 유지 - 이전 타이머가 건강한 새 연결을 5초 뒤 찢는 것 방지
+      if (_sseReconnectTimer) clearTimeout(_sseReconnectTimer);
+      _sseReconnectTimer = setTimeout(() => { _sseReconnectTimer = null; useFactoryStore.getState().connectSSE(); }, 5000);
     };
   }
 }));

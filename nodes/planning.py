@@ -115,16 +115,29 @@ async def run_master_pm(state: Any) -> Dict[str, Any]:
             return {"reviewer_decision": "PASS", "pm_override_reason": "PM 자동 강행 폴백"}
 
     else:
-        print(" [Agent] Master PM 토론·합의 기반 기획(PRD) 진행 중...")
         # 요구 확인 인터뷰에서 사용자가 선택으로 확정한 방향을 PRD 에도 직접 주입
         _extra = ""
         _clar_sum = (getattr(state_obj, "clarification_summary", "") or "").strip()
         if _clar_sum:
             _extra = f"\n\n[참조: 사용자 요구 확인(인터뷰) 결과 - 기획서(PRD)에 반드시 반영하십시오]:\n{_clar_sum}"
+
+        # PRD 게이트에서 사용자가 피드백을 준 경우(route_from_pm 자기루프) 재작성 지시로 소비
+        _fb_items = getattr(state_obj, "human_feedback_queue", []) or []
+        _latest = _fb_items[-1] if _fb_items else None
+        _latest_fb = (_latest.get("feedback", "") if isinstance(_latest, dict) else getattr(_latest, "feedback", "")) or ""
+        if _latest_fb.strip():
+            _extra += (f"\n\n[ 사용자 피드백 - 기획서(PRD)를 이 피드백에 맞게 반드시 수정/반영해 재작성하십시오. "
+                       f"다음 단계로 미루지 말 것]:\n{_latest_fb.strip()}")
+            print(f" [Master PM] 사용자 피드백 반영해 PRD 재작성: {_latest_fb.strip()[:80]}")
+        else:
+            print(" [Agent] Master PM 토론·합의 기반 기획(PRD) 진행 중...")
+
         from nodes.utils.debate import run_supervised_stage
         updates, result = await run_supervised_stage(state_obj, agent_skill("Master_PM", "pm_skill", template_id=state_obj.template_id), "PLANNING", extra_instruction=_extra)
         print(f"[OK] [Agent] Master PM 기획 완료 - 점수 {result.get('score')} / 판정 {result.get('verdict')}")
-        updates.setdefault("needs_revision", False)
+        updates["needs_revision"] = False
+        if _latest_fb.strip():
+            updates["human_feedback_queue"] = []  # 소비한 피드백 비움(후속 단계 재적용 방지)
         return updates
 
 async def run_master_pmo(state: Any) -> Dict[str, Any]:

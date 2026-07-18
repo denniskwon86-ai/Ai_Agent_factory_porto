@@ -202,6 +202,7 @@ class LLMGateway:
         self.llm_pro = ChatGoogleGenerativeAI(
             timeout=60, model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0])
         ).with_fallbacks(pro_fallbacks)
+        self._pro_primary_model = pro_candidates[0]
 
         # [Track 1 - Code Mode] Structured Output 전용 Pro 체인
         pro_base = ChatGoogleGenerativeAI(timeout=60, model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0]))
@@ -231,6 +232,7 @@ class LLMGateway:
         self.llm_flash = ChatGoogleGenerativeAI(
             timeout=60, model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0])
         ).with_fallbacks(flash_fallbacks)
+        self._flash_primary_model = flash_candidates[0]
 
         # [Track 2 - Code Mode] Structured Output 전용 Flash 체인
         flash_base = ChatGoogleGenerativeAI(timeout=60, model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0]))
@@ -256,6 +258,19 @@ class LLMGateway:
         if missing:
             print(f"  (참고: 비활성 폴백 티어 - API 키 또는 패키지 미설치: {', '.join(missing)})")
         print()
+
+    @staticmethod
+    def _clip_prompt(prompt: str, token_budget: int) -> str:
+        """모델 컨텍스트 한도(config.MODEL_CONTEXT_LIMITS)에 맞춰 프롬프트를 절단한다.
+        지시사항/스킬은 프롬프트 꼬리에 있으므로 꼬리를 보존하고 컨텍스트(앞부분)를 중략한다.
+        미클리핑 시 한도 초과 프롬프트는 해당 모델에서 400 으로 '항상' 실패해 폴백 왕복만 낭비된다."""
+        max_chars = int(token_budget * config.CHARS_PER_TOKEN_ESTIMATE)
+        if len(prompt) <= max_chars:
+            return prompt
+        head = int(max_chars * 0.3)
+        tail = max_chars - head - 120
+        print(f"✂️ [LLM Gateway] 프롬프트 {len(prompt):,}자 → 한도({token_budget:,}tok≈{max_chars:,}자)에 맞춰 절단.")
+        return prompt[:head] + "\n\n...[컨텍스트 중략: 대상 모델의 컨텍스트 한도 초과로 중간 내용이 절단됨]...\n\n" + prompt[-tail:]
 
     @staticmethod
     def _stringify(raw: Any) -> str:
@@ -302,6 +317,15 @@ class LLMGateway:
 
         system_content += _LANG_DIRECTIVE
 
+        # [컨텍스트 클리핑] 1차 모델 한도로 상시 절단(한도 초과 프롬프트의 400 즉사 방지).
+        # Flash 티어 재시도(=Pro·Flash 1차까지 쿼터 소진) 단계에서는 소형 폴백 모델(Groq/Cerebras 6k)도
+        # 실제로 성공할 수 있게 최소 한도로 강제 축소한다 — '품질 저하 < 완전 실패' (무중단 원칙).
+        _primary = self._pro_primary_model if is_heavy else self._flash_primary_model
+        _budget = config.MODEL_CONTEXT_LIMITS.get(_primary, 30000)
+        if not is_heavy and retry_count >= 1:
+            _budget = min(_budget, 6000)
+        final_prompt = self._clip_prompt(final_prompt, _budget)
+
         messages = [
             SystemMessage(content=system_content),
             HumanMessage(content=final_prompt)
@@ -320,10 +344,8 @@ class LLMGateway:
                 
             # [ERROR] Gemini Flash 멀티파트(list/dict {type,text}) 응답을 순수 텍스트로 정규화
             raw_output = self._stringify(response.content)
-
-            if output_mode == "code" and _is_truncated(response):
-                print("[ERROR] [LLM Gateway] 응답이 출력 토큰 상한에서 절단됨(MAX_TOKENS). 부분 코드 폐기 → 빌드 실패 처리.")
-                return json.dumps({"files": [], "error": "OUTPUT_TRUNCATED"}, ensure_ascii=False)
+            # (참고: code 모드는 위에서 이미 return 하므로 여기 도달하는 것은 json/document 모드뿐 -
+            #  과거 이 지점의 code 전용 _is_truncated 검사는 도달 불가 데드코드라 제거함)
 
         except Exception as e:
             error_str = str(e)
@@ -478,6 +500,10 @@ class _LazyGateway:
 
     async def aexecute(self, *args, **kwargs):
         return await type(self)._instance().aexecute(*args, **kwargs)
+
+    async def aexecute_vision(self, *args, **kwargs):
+        # VisionQA 가 호출 - 미위임 시 AttributeError 가 except 에 삼켜져 시각 검증이 영구 무력화된다
+        return await type(self)._instance().aexecute_vision(*args, **kwargs)
 
 
 gateway = _LazyGateway()

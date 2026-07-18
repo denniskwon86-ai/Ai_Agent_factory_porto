@@ -503,6 +503,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   // IFRAME_READY 수신 → 즉시 전송 (타이밍 경쟁 해소)
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      // 신뢰 소스 검증: 우리 프리뷰 iframe/팝업이 보낸 메시지만 처리 - 임베드된 임의 콘텐츠가
+      // PREVIEW_ERROR 를 스푸핑해 /heal 호출·경고를 유발하는 것 차단
+      const trusted =
+        event.source === iframeRef.current?.contentWindow ||
+        (popupRef.current && !popupRef.current.closed && event.source === popupRef.current);
+      if (!trusted) return;
       if (event.data?.type === 'PREVIEW_ERROR') {
         setError(event.data.message);
         // 릴리스/결과물 프리뷰 보기 모드에서는 자가치유(/heal) 트리거 금지
@@ -593,6 +599,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
           <>
             {isLoading && (<div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center z-20"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div><span className="text-gray-600 font-medium animate-pulse text-sm">에이전트가 코드를 컴파일하는 중입니다...</span></div>)}
             {error && !isLoading && (<div className="absolute top-0 left-0 w-full p-3 bg-red-50 text-red-600 text-sm z-10 border-b border-red-200 shadow-sm flex items-start gap-2"><span>🚨</span><div className="flex-1 overflow-hidden overflow-ellipsis"><strong>렌더링 에러:</strong> {error}</div></div>)}
+            {/* allow-same-origin 유지 이유: 생성 앱 다수가 localStorage 를 쓰는데 opaque origin 에서는
+                SecurityError 로 프리뷰가 전부 깨져 자가치유 오발동을 유발한다. 대신 message 핸들러의
+                event.source 검증으로 스푸핑을 차단한다. */}
             <iframe ref={iframeRef} title="AI Factory Preview Sandbox" className="w-full h-full border-none flex-1 bg-transparent" sandbox="allow-scripts allow-same-origin" />
             {isPoppedOut && (
               <div className="absolute inset-0 bg-gray-900/95 flex flex-col items-center justify-center gap-4 z-20">
@@ -617,7 +626,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
         ) : (
           <div className="w-full h-full bg-white overflow-y-auto">
             {typeof getTabContent() === 'string' && getTabContent().includes('<html') ? (
-              <iframe srcDoc={getTabContent().match(/```[a-z]*\n([\s\S]*?)```/)?.[1] || getTabContent()} className="w-full h-full border-none bg-white" sandbox="allow-scripts allow-same-origin" />
+              <iframe srcDoc={getTabContent().match(/```[a-z]*\n([\s\S]*?)```/)?.[1] || getTabContent()} className="w-full h-full border-none bg-white" sandbox="allow-scripts" />
             ) : (
               <div className="max-w-4xl mx-auto p-6 text-gray-800">
                 <MarkdownViewer rawCode={(() => {

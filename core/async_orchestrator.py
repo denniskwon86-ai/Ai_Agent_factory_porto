@@ -33,13 +33,17 @@ class AsyncFactoryOrchestrator:
         self.active_tasks: Dict[str, asyncio.Task] = {}
         self.task_projects: Dict[str, str] = {}  # task_id -> project_id (삭제 시 취소·격리용)
 
-    def _save_latest_state(self, state_data: Any, workspace_root: str):
-        try:
+    async def _save_latest_state(self, state_data: Any, workspace_root: str):
+        # 전체 상태(생성 코드 포함 - 수 MB 가능)의 json 직렬화+쓰기는 동기 작업이라
+        # 매 노드마다 이벤트 루프(SSE/전체 API)를 멈추게 하므로 스레드로 내린다
+        def _write():
             os.makedirs(workspace_root, exist_ok=True)
             state_path = os.path.join(workspace_root, "latest_state.json")
             data_to_save = jsonable_encoder(state_data)
             with open(state_path, "w", encoding="utf-8") as f:
                 json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+        try:
+            await asyncio.to_thread(_write)
         except Exception as e:
             print(f" 상태 백업 실패: {e}")
 
@@ -47,21 +51,23 @@ class AsyncFactoryOrchestrator:
         if task_id.startswith("PLANNING"):
             if os.path.exists(workspace_root):
                 #  [Phase 3] 파괴적 삭제(rmtree) 제거 및 스마트 아카이빙 적용
-                archive_dir = os.path.join(workspace_root, ".archive", datetime.now().strftime("%Y%m%d_%H%M%S"))
-                os.makedirs(archive_dir, exist_ok=True)
-                
-                for item in os.listdir(workspace_root):
-                    # .git 저장소와 기존 아카이브 폴더는 절대 건드리지 않음
-                    if item in [".git", ".archive"]:
-                        continue
-                        
-                    src_path = os.path.join(workspace_root, item)
-                    dst_path = os.path.join(archive_dir, item)
-                    try:
-                        shutil.move(src_path, dst_path)
-                    except Exception as e:
-                        print(f"⚠️ [Orchestrator] 아카이브 이동 실패 ({item}): {e}")
-                        
+                def _archive():
+                    archive_dir = os.path.join(workspace_root, ".archive", datetime.now().strftime("%Y%m%d_%H%M%S"))
+                    os.makedirs(archive_dir, exist_ok=True)
+                    for item in os.listdir(workspace_root):
+                        # .git/.archive 와 project_meta.json(템플릿 바인딩의 권위 원본, 생성 시 1회 기록)은
+                        # 절대 이동 금지 - 아카이브되면 이후 모든 태스크가 'default' 템플릿으로 강등된다
+                        if item in [".git", ".archive", "project_meta.json"]:
+                            continue
+                        src_path = os.path.join(workspace_root, item)
+                        dst_path = os.path.join(archive_dir, item)
+                        try:
+                            shutil.move(src_path, dst_path)
+                        except Exception as e:
+                            print(f"⚠️ [Orchestrator] 아카이브 이동 실패 ({item}): {e}")
+                # 디스크 이동은 동기 작업 - 이벤트 루프 동결 방지 위해 스레드로
+                await asyncio.to_thread(_archive)
+
             os.makedirs(workspace_root, exist_ok=True)
             print(f" [Orchestrator] 신규 기획을 위해 기존 산출물을 .archive/ 폴더로 안전하게 백업했습니다.")
 
@@ -72,10 +78,18 @@ class AsyncFactoryOrchestrator:
             await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "status": "IN_PROGRESS", "project_id": pid})
 
         skey = _skey(pid, task_id)
+        # 이중 가동 차단: 같은 thread_id 로 두 astream 이 동시에 돌면 체크포인트 오염 + LLM 중복 호출 +
+        # 먼저 돌던 태스크 핸들이 덮여 취소 불가(좀비)가 된다
+        existing = self.active_tasks.get(skey)
+        if existing and not existing.done():
+            print(f"⚠️ [Orchestrator] Task {task_id} (project={pid}) 는 이미 실행 중 - 중복 가동 요청 무시.")
+            return False
         config = {"configurable": {"thread_id": _thread(pid, task_id)}}
         task = asyncio.create_task(self._run_sprint_loop(config, project_state_payload, task_id, workspace_root))
         self.active_tasks[skey] = task
         self.task_projects[skey] = pid
+        # 완료 시 레지스트리에서 제거(무한 누적 방지). pause 가 먼저 지웠어도 pop(None) 이라 무해.
+        task.add_done_callback(lambda t, k=skey: (self.active_tasks.pop(k, None), self.task_projects.pop(k, None)))
         return True
 
     async def cancel_project(self, project_id: str) -> int:
@@ -117,7 +131,7 @@ class AsyncFactoryOrchestrator:
                         
                         new_snapshot = await langgraph_engine.aget_state(config)
                         ws_root = current_state.get("workspace_root", f"./projects/{project_id}") if isinstance(current_state, dict) else getattr(current_state, "workspace_root", f"./projects/{project_id}")
-                        self._save_latest_state(new_snapshot.values, ws_root)
+                        await self._save_latest_state(new_snapshot.values, ws_root)
                 except Exception as e:
                     print(f"⚠️ [Orchestrator] 슈퍼바이저 인터럽트 상태 기록 실패: {e}")
 
@@ -154,7 +168,7 @@ class AsyncFactoryOrchestrator:
                 for node_name, state_data in event.items():
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
-                    self._save_latest_state(full_state, workspace_root)
+                    await self._save_latest_state(full_state, workspace_root)
 
                     await factory_broadcaster.broadcast("NODE_COMPLETED", {"node": node_name, "state": state_data, "project_id": pid})
 
@@ -166,9 +180,16 @@ class AsyncFactoryOrchestrator:
         except asyncio.CancelledError:
             print(f"⏸️ [Orchestrator] Sprint Loop Cancelled (Paused): {task_id}")
         except Exception as e:
+            # 침묵 금지: 실패 이벤트를 브로드캐스트해야 UI 가 '영원히 가동 중' 상태에 갇히지 않는다
             print(f" [Orchestrator] Sprint Loop Error: {e}")
+            await factory_broadcaster.broadcast("SPRINT_FAILED", {"task_id": task_id, "project_id": pid, "error": str(e)})
 
     async def resume_hotl(self, task_id: str, feedback: Optional[str], project_id: str) -> bool:
+        # 이중 재개 차단: 실행 중인 스트림 위에 aupdate_state/astream 을 겹치면 체크포인트가 오염된다
+        _existing = self.active_tasks.get(_skey(project_id, task_id))
+        if _existing and not _existing.done():
+            print(f"⚠️ [Orchestrator] Task {task_id} (project={project_id}) 는 이미 실행 중 - 중복 재개 요청 무시.")
+            return False
         langgraph_engine = await get_runtime_app()
         config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
         snapshot = await langgraph_engine.aget_state(config)
@@ -203,6 +224,7 @@ class AsyncFactoryOrchestrator:
         task = asyncio.create_task(self._resume_stream(config, task_id, workspace_root, tid))
         self.active_tasks[skey] = task
         self.task_projects[skey] = _pid(workspace_root)
+        task.add_done_callback(lambda t, k=skey: (self.active_tasks.pop(k, None), self.task_projects.pop(k, None)))
         return True
 
     async def _resume_stream(self, config: dict, task_id: str, workspace_root: str, template_id: str = "default"):
@@ -213,7 +235,7 @@ class AsyncFactoryOrchestrator:
                 for node_name, state_data in event.items():
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
-                    self._save_latest_state(full_state, workspace_root)
+                    await self._save_latest_state(full_state, workspace_root)
 
                     await factory_broadcaster.broadcast("NODE_COMPLETED", {"node": node_name, "state": state_data, "project_id": pid})
 
@@ -226,5 +248,6 @@ class AsyncFactoryOrchestrator:
             print(f"⏸️ [Orchestrator] Resume Stream Cancelled (Paused): {task_id}")
         except Exception as e:
             print(f" [Orchestrator] Resume Stream Error: {e}")
+            await factory_broadcaster.broadcast("SPRINT_FAILED", {"task_id": task_id, "project_id": pid, "error": str(e)})
 
 orchestrator = AsyncFactoryOrchestrator()

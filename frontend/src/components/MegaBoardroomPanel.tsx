@@ -18,7 +18,8 @@ export default function MegaBoardroomPanel() {
           const res = await fetch(`${API_BASE_URL}/api/v1/factory/${projId}/state/latest`);
           if (res.ok) {
             const data = await res.json();
-            newSubStates[projId as string] = data;
+            // 응답은 {status, data:{...}} 봉투 구조 - 봉투째 저장하면 factory_mode 등이 전부 undefined
+            newSubStates[projId as string] = data.data ?? null;
           }
         } catch (e) {
           console.error(`Failed to fetch state for ${projId}`, e);
@@ -59,7 +60,6 @@ export default function MegaBoardroomPanel() {
     if (!subState) return 0;
     if (subState.factory_mode === 'QA_RELEASE') return 100;
     if (subState.factory_mode === 'PLANNING') return 10;
-    if (subState.factory_mode === 'EXECUTION') return 50;
     if (subState.factory_mode === 'EXECUTION') return 50;
     return 0;
   };

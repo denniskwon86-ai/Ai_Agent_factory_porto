@@ -225,11 +225,12 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
     if _ds:
         prompt += "\n\n[디자인 시스템 가이드 - 아래 Tailwind 토큰/레시피를 그대로 사용]\n" + _ds
 
-    if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
+    _is_rework = getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV" or getattr(state_obj, "developer_retry_count", 0) > 0
+    if _is_rework and getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[ 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
-    # 코드 생성은 Flash(고속) 다중 병렬 호출(Micro-Swarm) 방식으로 품질과 컴파일을 보장
-    output = await _swarm_execution(state_obj, prompt, is_heavy=False, full_file_exts=_FE_OWNED_EXTS, num_swarm=3)
+    # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
+    output = await _swarm_execution(state_obj, prompt, is_heavy=False, full_file_exts=_FE_OWNED_EXTS, num_swarm=3 if _is_rework else 1)
     return {"frontend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_developer_be(state: Any) -> Dict[str, Any]:
@@ -240,11 +241,12 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
     prompt += f"\n\n[참조: 아키텍처 설계]\n{getattr(state_obj, 'architecture_summary', '')}"
     prompt += f"\n\n[참조: 기술 명세]\n{getattr(state_obj, 'tech_spec_summary', '')}"
 
-    if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
+    _is_rework = getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV" or getattr(state_obj, "developer_retry_count", 0) > 0
+    if _is_rework and getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[ 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
-    # 코드 생성은 Flash(고속) 다중 병렬 호출(Micro-Swarm) 방식으로 품질과 컴파일을 보장
-    output = await _swarm_execution(state_obj, prompt, is_heavy=False, full_file_exts=_BE_OWNED_EXTS, num_swarm=3)
+    # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
+    output = await _swarm_execution(state_obj, prompt, is_heavy=False, full_file_exts=_BE_OWNED_EXTS, num_swarm=3 if _is_rework else 1)
     return {"backend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_code_builder(state: Any) -> Dict[str, Any]:
@@ -293,15 +295,21 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
         if not has_coding_agent: return {"build_status": "success", "failed_node": "", "developer_retry_count": 0}
         else: return {"build_status": "failed", "failed_node": ("Frontend" if has_fe else "Backend"), "developer_retry_count": current_retry + 1}
 
-    be_pure_code = "\n".join([f.get("code", "") for f in be_files if f.get("file_path", "").endswith(".py")])
-    if be_pure_code:
-        is_be_valid, be_msg = LocalSyntaxChecker.check_python_syntax(be_pure_code)
-        if not is_be_valid: return {"build_status": "failed", "build_error_log": be_msg, "failed_node": "Backend", "developer_retry_count": current_retry + 1}
+    # 파일별 개별 검사 - 전체를 이어붙여 검사하면 뒤 파일의 `from __future__ import` 가
+    # "파일 선두여야 한다" SyntaxError 를 내는 등 위양성 빌드 실패가 난다(_swarm_execution 과 동일 패턴)
+    for f in be_files:
+        fp = f.get("file_path", "")
+        if fp.endswith(".py") and f.get("code", ""):
+            is_be_valid, be_msg = LocalSyntaxChecker.check_python_syntax(f.get("code", ""))
+            if not is_be_valid:
+                return {"build_status": "failed", "build_error_log": f"[{fp}] {be_msg}", "failed_node": "Backend", "developer_retry_count": current_retry + 1}
 
-    fe_pure_code = "\n".join([f.get("code", "") for f in fe_files if f.get("file_path", "").endswith((".tsx", ".ts", ".js", ".jsx"))])
-    if fe_pure_code:
-        is_fe_valid, fe_msg = LocalSyntaxChecker.check_javascript_syntax(fe_pure_code)
-        if not is_fe_valid: return {"build_status": "failed", "build_error_log": fe_msg, "failed_node": "Frontend", "developer_retry_count": current_retry + 1}
+    for f in fe_files:
+        fp = f.get("file_path", "")
+        if fp.endswith((".tsx", ".ts", ".js", ".jsx")) and f.get("code", ""):
+            is_fe_valid, fe_msg = LocalSyntaxChecker.check_javascript_syntax(f.get("code", ""))
+            if not is_fe_valid:
+                return {"build_status": "failed", "build_error_log": f"[{fp}] {fe_msg}", "failed_node": "Frontend", "developer_retry_count": current_retry + 1}
 
     builder = CodeBuilder(workspace_root=state_obj.workspace_root)
     state_dict = state_obj.model_dump()
@@ -360,7 +368,9 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                                                         getattr(state_obj, "pm_override_reason", "") or "", _hf]))
             _baseline_commit = getattr(getattr(state_obj, "git_info", None), "last_commit_hash", "") or ""
             _git = GitManager(state_obj.workspace_root)
-            reg = check_symbol_regression(
+            # 파일마다 git subprocess 를 도는 동기 작업 - 이벤트 루프(SSE/API) 동결 방지 위해 스레드로
+            reg = await asyncio.to_thread(
+                check_symbol_regression,
                 _new_files,
                 lambda rel: _git.read_file_at_commit(_baseline_commit, rel),
                 allow_deletion=_allow_del,
@@ -397,7 +407,8 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         if has_fe_code:
             from nodes.utils.render_checker import check_frontend_render
             fe_files = _extract_files_from_json(state_obj.frontend_code_summary)
-            render = check_frontend_render(fe_files)
+            # 최대 60초 동기 subprocess - 이벤트 루프 동결 방지 위해 스레드로
+            render = await asyncio.to_thread(check_frontend_render, fe_files)
             if not render.get("ok") and not render.get("skipped"):
                 errs = render.get("errors", [])
                 print(f"❌ [TestRunner] 프론트 렌더 검증 실패: {errs}")
@@ -476,7 +487,8 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         if has_be_code:
             from nodes.utils.backend_smoke import check_backend_smoke
             be_files = _extract_files_from_json(state_obj.backend_code_summary)
-            smoke = check_backend_smoke(be_files)
+            # 최대 45초 동기 subprocess(격리 부팅) - 이벤트 루프 동결 방지 위해 스레드로
+            smoke = await asyncio.to_thread(check_backend_smoke, be_files)
             if not smoke.get("ok") and not smoke.get("skipped"):
                 errs = smoke.get("errors", [])
                 print(f"❌ [TestRunner] 백엔드 스모크 실패: {errs}")
@@ -539,12 +551,18 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             review_text = output_str
             try:
                 clean_str = output_str.strip()
-                md_match = re.search(r'\x60{3}(?:json)?\s*(\{[\s\S]*?\})\s*\x60{3}', clean_str)
-                if md_match: clean_str = md_match.group(1)
-                else:
-                    alt_match = re.search(r'(\{[\s\S]*?\})', clean_str)
-                    if alt_match: clean_str = alt_match.group(1)
-                data = json.loads(clean_str)
+                # 1차: 게이트웨이가 이미 복구한 JSON 일 가능성이 높으므로 전체 파싱을 먼저 시도
+                try:
+                    data = json.loads(clean_str)
+                except Exception:
+                    # 2차: 코드펜스/서술 혼입 시 추출 - 반드시 greedy(*). non-greedy(*?)는 feedback 안의
+                    # 첫 '}' 에서 잘려 파싱이 깨지고, except 폴백이 REWORK 를 PASS 로 둔갑시킨다
+                    md_match = re.search(r'\x60{3}(?:json)?\s*(\{[\s\S]*\})\s*\x60{3}', clean_str)
+                    if md_match: clean_str = md_match.group(1)
+                    else:
+                        alt_match = re.search(r'(\{[\s\S]*\})', clean_str)
+                        if alt_match: clean_str = alt_match.group(1)
+                    data = json.loads(clean_str)
                 reviewer_decision = data.get("decision", "PASS")
                 review_text = data.get("feedback", "")
             except Exception as e:
@@ -645,7 +663,8 @@ async def run_qa(state: Any) -> Dict[str, Any]:
     
     #  [Phase 2] 백그라운드 자동화 테스트 및 스캔 실행
     print("⏳ [QA] 백그라운드 자동화 테스트 및 보안 스캔 실행 중...")
-    test_results = run_background_tests_and_scans(state_obj.workspace_root)
+    # pytest/bandit/npm build 등 최대 ~2분 동기 subprocess - 이벤트 루프 동결 방지 위해 스레드로
+    test_results = await asyncio.to_thread(run_background_tests_and_scans, state_obj.workspace_root)
     test_report_md = format_test_results_for_qa(test_results)
     if test_report_md:
         print(" [QA] 결정론적 테스트 지표 확보 완료.")
@@ -710,6 +729,7 @@ async def run_manual_writer(state: Any) -> Dict[str, Any]:
     )
     # B2: 매뉴얼은 요약/코드가 이미 프롬프트에 임베드돼 있어 워크스페이스 재주입 불필요(light=True),
     #     사용자 매뉴얼은 고난도 추론이 아니므로 Flash(is_heavy=False)로 충분 - 비용 절감.
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=False, light=True)
+    # output_mode 미지정 시 기본 'code'(CodeOutput 구조화 출력 강제)라 매뉴얼이 files JSON 블롭으로 산출됨
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=False, light=True, output_mode="document")
     print("[OK] [Agent] 사용자 매뉴얼 작성 완료.")
     return {"user_manual_summary": _safe_str(output)}

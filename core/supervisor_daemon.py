@@ -11,12 +11,17 @@ class SupervisorDaemon:
     백그라운드에서 모든 노드 완료 이벤트를 모니터링하며,
     비용 효율적인 모델(예: Flash/GPT-4o-mini)을 이용해 프로젝트 진행 방향의 결함을 실시간으로 감지하고 개입합니다.
     """
+    # 감시 대상 노드 화이트리스트 - 비즈니스 정합을 실제로 판단할 산출물이 나오는 지점만 감시한다.
+    # 모든 NODE_COMPLETED 마다 LLM 을 태우면 파이프라인 총 호출이 약 2배가 되어(노드당 +1콜)
+    # 무료 쿼터를 파이프라인 본체와 경쟁적으로 소진(429 폭주)하는 주범이 된다.
+    _WATCH_NODES = {"Master_PM", "Master_PMO", "Reviewer", "QA", "Supervisor"}
+
     def __init__(self):
         # 브로드캐스터 내부 리스너에 등록
         factory_broadcaster.add_internal_listener(self.handle_event)
-        
+
     async def handle_event(self, event_type: str, payload: dict):
-        if event_type == "NODE_COMPLETED":
+        if event_type == "NODE_COMPLETED" and payload.get("node") in self._WATCH_NODES:
             asyncio.create_task(self._evaluate_state(payload))
             
     async def _evaluate_state(self, payload: dict):

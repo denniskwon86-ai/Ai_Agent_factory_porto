@@ -28,20 +28,26 @@ export default function HOTLInput() {
     !String((state as any)?.clarification_summary || '').trim();
 
   // 질문이 도착하면 각 질문의 추천안을 기본 선택값으로 세팅
+  // 지문(fingerprint)에 옵션 라벨까지 포함 - id 만 보면 같은 id 로 재생성된 질문의 옛 선택(stale 라벨)이
+  // 남아 직렬화 시 어떤 옵션과도 매칭되지 않아 '선택 없음'으로 전송되는 불일치가 생긴다
+  const questionsFingerprint = JSON.stringify(
+    clarQuestions.map((q: any) => [q.id, (q.options || []).map((o: any) => o.label)])
+  );
   useEffect(() => {
     if (!isClarification) return;
     setSelections((prev) => {
       const next: Record<string, string[]> = {};
       clarQuestions.forEach((q: any) => {
-        if (prev[q.id]?.length) { next[q.id] = prev[q.id]; return; }
+        const labels = (q.options || []).map((o: any) => o.label);
+        const kept = (prev[q.id] || []).filter((l) => labels.includes(l)); // stale 라벨 폐기
+        if (kept.length) { next[q.id] = kept; return; }
         const rec = (q.options || []).find((o: any) => o.recommended);
         next[q.id] = rec ? [rec.label] : [];
       });
       return next;
     });
-    // 질문 목록의 내용이 바뀔 때만 재초기화
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isClarification, JSON.stringify(clarQuestions.map((q: any) => q.id))]);
+  }, [isClarification, questionsFingerprint]);
 
   const toggleOption = (q: any, label: string) => {
     setSelections((prev) => {

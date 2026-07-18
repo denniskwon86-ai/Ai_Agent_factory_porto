@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import os
@@ -379,8 +380,16 @@ async def start_all_mega_subprojects(project_id: str):
         except Exception:
             continue
             
-        # 마스터 데이터 주입
-        sub_state["shared_ledger"] = master_state.get("master_data", "{}")
+        # 마스터 데이터 주입 - master_data 는 JSON '문자열'이므로 그대로 str 필드에 싣고,
+        # shared_ledger(Dict[str, dict])에는 파싱한 dict 를 키로 감싸 넣는다
+        # (문자열을 그대로 넣으면 첫 노드의 model_validate 에서 ValidationError 로 서브 전체가 즉사)
+        _md_str = master_state.get("master_data", "") or ""
+        sub_state["master_data"] = _md_str
+        try:
+            _md = json.loads(_md_str) if _md_str.strip() else {}
+        except Exception:
+            _md = {}
+        sub_state["shared_ledger"] = {"master_data": _md} if isinstance(_md, dict) else {}
         sub_state["initial_idea"] = master_state.get("initial_idea", "")
         
         # 새 Task ID로 PLANNING 가동
@@ -792,20 +801,25 @@ async def export_project_zip(project_id: str):
     if not os.path.isdir(project_path):
         raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
 
-    buf = io.BytesIO()
-    file_count = 0
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root_dir, dirs, files in os.walk(project_path):
-            # 제외 디렉토리는 하위 순회 자체를 건너뛴다(성능·용량).
-            dirs[:] = [d for d in dirs if d not in _EXPORT_EXCLUDE_DIRS]
-            for fname in files:
-                fpath = os.path.join(root_dir, fname)
-                arcname = os.path.join(project_id, os.path.relpath(fpath, project_path))
-                try:
-                    zf.write(fpath, arcname)
-                    file_count += 1
-                except Exception:
-                    continue  # 잠긴/읽기 불가 파일은 건너뛰고 나머지를 계속 패키징
+    def _build_zip():
+        buf = io.BytesIO()
+        file_count = 0
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root_dir, dirs, files in os.walk(project_path):
+                # 제외 디렉토리는 하위 순회 자체를 건너뛴다(성능·용량).
+                dirs[:] = [d for d in dirs if d not in _EXPORT_EXCLUDE_DIRS]
+                for fname in files:
+                    fpath = os.path.join(root_dir, fname)
+                    arcname = os.path.join(project_id, os.path.relpath(fpath, project_path))
+                    try:
+                        zf.write(fpath, arcname)
+                        file_count += 1
+                    except Exception:
+                        continue  # 잠긴/읽기 불가 파일은 건너뛰고 나머지를 계속 패키징
+        return buf, file_count
+
+    # 압축(CPU+디스크)은 동기 작업 - 대형 프로젝트에서 이벤트 루프 동결 방지 위해 스레드로
+    buf, file_count = await asyncio.to_thread(_build_zip)
 
     if file_count == 0:
         raise HTTPException(status_code=404, detail="내보낼 산출물이 없습니다.")
@@ -997,7 +1011,7 @@ class AIRecommendSkillRequest(BaseModel):
 
 @router.post("/ai-recommend/pipeline")
 async def ai_recommend_pipeline(req: AIRecommendPipelineRequest):
-    from core.llm_gateway import LLMGateway
+    from core.llm_gateway import gateway
     
     # 시뮬레이션 성격 판별 키워드
     sim_keywords = ["시뮬레이션", "시뮬레이터", "simulation", "simulator", "what-if", "시나리오", "scenario"]
@@ -1075,7 +1089,7 @@ async def ai_recommend_pipeline(req: AIRecommendPipelineRequest):
         ]
     }}
     """
-    llm = LLMGateway()
+    llm = gateway  # 요청마다 신규 생성 금지(동기 models.list 네트워크 콜) - 싱글턴 재사용
     res = await llm.aexecute({}, prompt, output_mode="json", light=True)
     try:
         import re
@@ -1150,7 +1164,7 @@ def _assemble_simulation_framework(ai_data: dict) -> dict:
 
 @router.post("/ai-recommend/skill")
 async def ai_recommend_skill(req: AIRecommendSkillRequest):
-    from core.llm_gateway import LLMGateway
+    from core.llm_gateway import gateway
     prompt = f"""
     사용자가 지정한 에이전트의 간략한 역할을 바탕으로, 이 에이전트가 어떤 입력을 받아 어떤 산출물을 내고, 누구에게 전달해야 하는지를 명시하는 상세 마크다운 스킬 문서를 작성해 줘.
     - 에이전트 ID: {req.agent_id}
@@ -1167,7 +1181,7 @@ async def ai_recommend_skill(req: AIRecommendSkillRequest):
         "skill_markdown": "작성된 스킬 마크다운 내용 전체 (문자열)"
     }}
     """
-    llm = LLMGateway()
+    llm = gateway  # 요청마다 신규 생성 금지(동기 models.list 네트워크 콜) - 싱글턴 재사용
     res = await llm.aexecute({}, prompt, output_mode="json", light=True)
     try:
         import re

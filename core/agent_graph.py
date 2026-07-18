@@ -211,6 +211,11 @@ def route_from_reviewer(state: ProjectState) -> str:
 def route_from_pm(state: ProjectState) -> str:
     # 기획(PLANNING) 단계 신규 가동이거나 task_id가 비어있으면 UIDesigner로 진행
     if not state.current_sprint_task_id or state.factory_mode == "PLANNING":
+        # PRD 게이트에서 사용자가 피드백을 줬으면 PM 자기루프로 PRD 재작성
+        # (피드백이 UIDesigner/PMO 로 새어 엉뚱한 단계의 지시로 오염되는 것 방지)
+        if getattr(state, "needs_revision", False):
+            print(" [PRD 재작성] 사용자 피드백 반영 - Master_PM 으로 되돌려 기획서를 다시 작성합니다.")
+            return "Master_PM"
         return "UIDesigner"
     
     if getattr(state, "needs_revision", False):
@@ -331,7 +336,7 @@ def _wire_edges(workflow):
     workflow.add_conditional_edges("Requirement_Interviewer", route_from_interviewer, {"RFP_Analyst": "RFP_Analyst"})
     # RFP 게이트 피드백 루프: 피드백 시 RFP_Analyst 재실행(요구정의 재작성), 승인 시 Master_PM 진행
     workflow.add_conditional_edges("RFP_Analyst", route_from_rfp, {"RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM"})
-    workflow.add_conditional_edges("Master_PM", route_from_pm, {"UIDesigner": "UIDesigner", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
+    workflow.add_conditional_edges("Master_PM", route_from_pm, {"Master_PM": "Master_PM", "UIDesigner": "UIDesigner", "Tech_Lead": "Tech_Lead", "Reviewer": "Reviewer"})
     
     workflow.add_conditional_edges("UIDesigner", route_from_ui_designer, {"VisionQA": "VisionQA"})
     # UI 승인(VisionQA 게이트) → Architect(아키텍처 확정) → Master_PMO(WBS 분할) — 설계가 WBS 의 입력

@@ -136,6 +136,11 @@ class ProjectState(BaseModel):
     clarification_questions: List[Dict] = Field(default_factory=list)
     clarification_summary: str = Field(default="")
 
+    # 시뮬레이션 재실행(What-if) 추적 - resimulate API 가 주입(extra='forbid'라 정식 필드 필요)
+    sim_cycle_count: int = Field(default=1, ge=1)
+    sim_modified_params: Dict = Field(default_factory=dict)
+    sim_base_cycle: int = Field(default=1)
+
     # 토론·합의 루프 / 단계별 성공기준 / Supervisor (V5.1)
     current_stage: str = Field(default="")  # PLANNING/PMO/ARCHITECTURE/TECH_SPEC/CODE_REVIEW/QA
     stage_attempt_counts: Dict[str, int] = Field(default_factory=dict)
