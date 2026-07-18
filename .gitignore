@@ -52,3 +52,7 @@ htmlcov/
 
 # ===== Claude / AI agent =====
 .claude/
+
+# 지식 허브 런타임 데이터 (벡터 인덱스/등록 자료 원본)
+data/chroma_db/
+data/knowledge_packs/
