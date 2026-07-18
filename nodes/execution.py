@@ -225,12 +225,23 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
     if _ds:
         prompt += "\n\n[디자인 시스템 가이드 - 아래 Tailwind 토큰/레시피를 그대로 사용]\n" + _ds
 
-    _is_rework = getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV" or getattr(state_obj, "developer_retry_count", 0) > 0
-    if _is_rework and getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
+    _retry = getattr(state_obj, "developer_retry_count", 0)
+    _is_rework = getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV" or _retry > 0
+    if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[ 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
+    # [자가복구 P1] 빌드 실패 재시도라면 직전 실패 '원인'을 반드시 주입 - 미주입 시 재시도는
+    # 같은 프롬프트의 재추첨일 뿐이라 같은 오류를 반복한다
+    _berr = (getattr(state_obj, "build_error_log", "") or "").strip()
+    if _berr:
+        prompt += f"\n\n[ 직전 빌드 실패 원인 - 아래 오류를 반드시 해결한 코드를 생성하십시오]:\n{_berr}"
+        print(f" [Frontend] 직전 빌드 오류 반영 재시도({_retry}회차): {_berr[:80]}")
+
+    # [자가복구 P2] 마지막 시도(3회차)는 Pro 모델 1회 정밀 시도로 승격(Flash 가 못 푸는 문제의 최후 기회)
+    _heavy = _retry >= 2
     # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
-    output = await _swarm_execution(state_obj, prompt, is_heavy=False, full_file_exts=_FE_OWNED_EXTS, num_swarm=3 if _is_rework else 1)
+    output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_FE_OWNED_EXTS,
+                                    num_swarm=1 if _heavy else (3 if _is_rework else 1))
     return {"frontend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_developer_be(state: Any) -> Dict[str, Any]:
@@ -241,12 +252,22 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
     prompt += f"\n\n[참조: 아키텍처 설계]\n{getattr(state_obj, 'architecture_summary', '')}"
     prompt += f"\n\n[참조: 기술 명세]\n{getattr(state_obj, 'tech_spec_summary', '')}"
 
-    _is_rework = getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV" or getattr(state_obj, "developer_retry_count", 0) > 0
-    if _is_rework and getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
+    _retry = getattr(state_obj, "developer_retry_count", 0)
+    _is_rework = getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV" or _retry > 0
+    if getattr(state_obj, "reviewer_decision", "") == "REWORK_DEV":
         prompt += f"\n\n[ 재작업(Rework) 지시사항]:\n{state_obj.reviewer_feedback}"
 
+    # [자가복구 P1] 빌드 실패 재시도라면 직전 실패 '원인'을 반드시 주입
+    _berr = (getattr(state_obj, "build_error_log", "") or "").strip()
+    if _berr:
+        prompt += f"\n\n[ 직전 빌드 실패 원인 - 아래 오류를 반드시 해결한 코드를 생성하십시오]:\n{_berr}"
+        print(f" [Backend] 직전 빌드 오류 반영 재시도({_retry}회차): {_berr[:80]}")
+
+    # [자가복구 P2] 마지막 시도(3회차)는 Pro 모델 1회 정밀 시도로 승격
+    _heavy = _retry >= 2
     # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
-    output = await _swarm_execution(state_obj, prompt, is_heavy=False, full_file_exts=_BE_OWNED_EXTS, num_swarm=3 if _is_rework else 1)
+    output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_BE_OWNED_EXTS,
+                                    num_swarm=1 if _heavy else (3 if _is_rework else 1))
     return {"backend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_code_builder(state: Any) -> Dict[str, Any]:

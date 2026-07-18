@@ -63,6 +63,9 @@ interface FactoryStore {
   wbsErrorCount: number;
   completed_agents: string[];
   currentActivity: any | null;
+  // 빌드 자가복구(3회) 소진 등 스프린트 최종 실패 정보 - ControlPanel 실패 배너/재시도 UI 용
+  lastSprintFailure: { taskId: string; error: string; detail?: string } | null;
+  clearSprintFailure: () => void;
   supervisorFeed: any[];
   releases: any[];
   viewingRelease: any | null;
@@ -138,6 +141,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   wbsErrorCount: 0,
   completed_agents: [],
   currentActivity: null,
+  lastSprintFailure: null,
   supervisorFeed: [],
   releases: [],
   viewingRelease: null,
@@ -161,7 +165,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   setCurrentProject: (id) => {
     set({
       currentProjectId: id, state: null, wbsData: null, logs: [],
-      completed_agents: [], currentActivity: null, supervisorFeed: [], healingRetryCount: 0, activeSprintId: null, hotlTaskId: null, currentTemplateData: null
+      completed_agents: [], currentActivity: null, lastSprintFailure: null, supervisorFeed: [], healingRetryCount: 0, activeSprintId: null, hotlTaskId: null, currentTemplateData: null
     });
     if (id) {
       get().fetchWBS();
@@ -590,7 +594,9 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   
   closeFormatPanel: () => set({ showFormatPanel: false }),
 
-  clearSprintData: () => set({ completed_agents: [], currentActivity: null, healingRetryCount: 0 }),
+  clearSprintData: () => set({ completed_agents: [], currentActivity: null, healingRetryCount: 0, lastSprintFailure: null }),
+
+  clearSprintFailure: () => set({ lastSprintFailure: null }),
 
   triggerSelfHealing: async (errorMsg: string) => {
     const { currentProjectId, isConnected, healingRetryCount } = get();
@@ -760,8 +766,15 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
           return { logs, activeSprintId: null, currentActivity: null };
         }
         if (data.type === 'SPRINT_FAILED') {
-          // 백엔드 스프린트 루프 크래시 - '영원히 가동 중' 상태에 갇히지 않게 즉시 해제
-          return { logs, activeSprintId: null, hotlTaskId: null, currentActivity: null };
+          // 백엔드 스프린트 최종 실패 - '영원히 가동 중' 상태 해제 + 실패 배너(재시도 UI)용 정보 보존
+          return {
+            logs, activeSprintId: null, hotlTaskId: null, currentActivity: null,
+            lastSprintFailure: {
+              taskId: data.payload.task_id || '',
+              error: data.payload.error || '스프린트 실패',
+              detail: data.payload.detail || ''
+            }
+          };
         }
         return { logs };
       });

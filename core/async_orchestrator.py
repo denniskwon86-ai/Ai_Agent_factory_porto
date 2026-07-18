@@ -139,6 +139,30 @@ class AsyncFactoryOrchestrator:
             return True
         return False
 
+    async def _broadcast_stream_end(self, langgraph_engine, config: dict, task_id: str, workspace_root: str):
+        """스트림 종료 시 결과 브로드캐스트. 빌드 재시도(3회) 소진 실패를 '완료'로 위장하지 않고
+        SPRINT_FAILED 로 보고하고 WBS 태스크를 FAILED 로 마킹한다(자가복구 P3)."""
+        pid = _pid(workspace_root)
+        snapshot = await langgraph_engine.aget_state(config)
+        if snapshot.next:
+            await factory_broadcaster.broadcast("HOTL_PAUSED", {"task_id": task_id, "project_id": pid})
+            return
+        vals = snapshot.values if isinstance(snapshot.values, dict) else {}
+        if vals.get("build_status") == "failed" and (vals.get("developer_retry_count") or 0) >= 3:
+            detail = (vals.get("build_error_log") or "").strip()
+            print(f"❌ [Orchestrator] Task {task_id}: 빌드 자가복구 3회 소진 - 실패로 종결(FAILED).")
+            try:
+                if not task_id.startswith("PLANNING"):
+                    WBSManager(workspace_root=workspace_root).update_task_status(task_id, "FAILED")
+            except Exception as e:
+                print(f"⚠️ [Orchestrator] WBS FAILED 마킹 실패: {e}")
+            await factory_broadcaster.broadcast("SPRINT_FAILED", {
+                "task_id": task_id, "project_id": pid,
+                "error": "빌드 3회 연속 실패(자가복구 소진)", "detail": detail[:2000],
+            })
+            return
+        await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id, "project_id": pid})
+
     async def is_hotl_pending(self, task_id: str, project_id: str) -> bool:
         """해당 태스크 스레드가 HOTL 중단점에서 '대기 중'인지 확인 (SSE 유실 복구용).
         ⚠️ snapshot.next 는 실행 중에도(다음 노드 예정) 차 있어 그것만으로는 오탐이 난다.
@@ -172,11 +196,7 @@ class AsyncFactoryOrchestrator:
 
                     await factory_broadcaster.broadcast("NODE_COMPLETED", {"node": node_name, "state": state_data, "project_id": pid})
 
-            snapshot = await langgraph_engine.aget_state(config)
-            if snapshot.next:
-                await factory_broadcaster.broadcast("HOTL_PAUSED", {"task_id": task_id, "project_id": pid})
-            else:
-                await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id, "project_id": pid})
+            await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)
         except asyncio.CancelledError:
             print(f"⏸️ [Orchestrator] Sprint Loop Cancelled (Paused): {task_id}")
         except Exception as e:
@@ -239,11 +259,7 @@ class AsyncFactoryOrchestrator:
 
                     await factory_broadcaster.broadcast("NODE_COMPLETED", {"node": node_name, "state": state_data, "project_id": pid})
 
-            snapshot = await langgraph_engine.aget_state(config)
-            if snapshot.next:
-                await factory_broadcaster.broadcast("HOTL_PAUSED", {"task_id": task_id, "project_id": pid})
-            else:
-                await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id, "project_id": pid})
+            await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)
         except asyncio.CancelledError:
             print(f"⏸️ [Orchestrator] Resume Stream Cancelled (Paused): {task_id}")
         except Exception as e:

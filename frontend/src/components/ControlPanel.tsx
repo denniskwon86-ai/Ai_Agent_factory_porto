@@ -113,6 +113,8 @@ export default function ControlPanel() {
   const hotlTaskId = useFactoryStore((s) => s.hotlTaskId);
   const isConnected = useFactoryStore((s) => s.isConnected);
   const currentTemplateData = useFactoryStore((s) => s.currentTemplateData);
+  const lastSprintFailure = useFactoryStore((s) => s.lastSprintFailure);
+  const clearSprintFailure = useFactoryStore((s) => s.clearSprintFailure);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -179,6 +181,14 @@ export default function ControlPanel() {
   } else if (errorLike && !activeSprintId) {
     // 할당량 소진/LLM 오류 등은 needs_revision 도 세팅되지만, '대기'가 아니라 '오류 정지'로 명확히 구분
     pipeStatus = { key: "error", icon: "🚨", label: "오류로 정지 — 재가동이 필요합니다", cls: "bg-red-900/40 border-red-600 text-red-200", detail: supFb };
+  } else if (lastSprintFailure && !activeSprintId) {
+    // 빌드 자가복구(3회) 소진 등 스프린트 최종 실패 - '완료' 위장 없이 실패로 표시 + 재시도 선택지 제공
+    pipeStatus = {
+      key: "failed", icon: "❌",
+      label: `[${lastSprintFailure.taskId}] ${lastSprintFailure.error}`,
+      cls: "bg-red-900/40 border-red-600 text-red-200",
+      detail: (lastSprintFailure.detail || "").slice(0, 400) || undefined
+    };
   } else if (hotlTaskId || (isWaitingForHuman && !activeSprintId)) {
     pipeStatus = { key: "hotl", icon: "⏸️", label: "HOTL (전문가 개입) 대기 중 — 승인 또는 피드백이 필요합니다", cls: "bg-amber-900/40 border-amber-500 text-amber-200" };
   } else if (activeSprintId) {
@@ -266,6 +276,49 @@ export default function ControlPanel() {
     const w = window.open("", "omega_wbs", "width=920,height=720,resizable=yes,scrollbars=yes");
     if (!w) { alert("팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용해 주세요."); return; }
     w.document.open(); w.document.write(html); w.document.close(); w.focus();
+  };
+
+  // 빌드 자가복구(3회) 소진 실패 태스크의 재시도 - 직전 빌드 오류(build_error_log)는 상태에 남아 있어
+  // 개발자 노드가 자동으로 프롬프트에 반영한다. withFeedback 이면 사용자의 추가 지시를 재작업 지시로 주입.
+  const handleRetryFailedTask = async (withFeedback: boolean) => {
+    if (!lastSprintFailure || !currentProjectId) return;
+    const taskId = lastSprintFailure.taskId;
+    let fb = "";
+    if (withFeedback) {
+      fb = window.prompt("재시도 시 에이전트에게 전달할 추가 지시를 입력하세요\n(예: 'X 라이브러리 대신 표준 API 사용', '해당 기능은 단순화해도 됨')") || "";
+      if (!fb.trim()) return;
+    }
+    setIsStarting(true);
+    clearSprintData(); // lastSprintFailure 포함 초기화
+    setActiveSprintId(taskId);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/sprint/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          project_state_payload: {
+            ...(state || {}),
+            schema_version: "5.1.0",
+            project_name: wbsData?.project_name || currentProjectId,
+            current_sprint_task_id: taskId,
+            factory_mode: taskId.startsWith('TASK_REV_') ? "REVISION" : "EXECUTION",
+            ...(fb.trim() ? {
+              // 기존 재작업 경로(Tech_Lead/개발자 노드가 reviewer_feedback 을 주입받음)를 그대로 활용
+              reviewer_decision: "REWORK_DEV",
+              reviewer_feedback: `[사용자 재시도 지시]\n${fb.trim()}`,
+              human_feedback_queue: [{ task_id: taskId, feedback: fb.trim() }],
+            } : {}),
+          }
+        })
+      });
+      if (!res.ok) setActiveSprintId(null);
+    } catch (error) {
+      console.error("실패 태스크 재시도 실패:", error);
+      setActiveSprintId(null);
+    } finally {
+      setIsStarting(false);
+    }
   };
 
   const handleStartSprint = async (targetTask: any) => {
@@ -462,6 +515,35 @@ export default function ControlPanel() {
           </div>
           {pipeStatus.detail && (
             <div className="mt-1 text-xs opacity-90 break-words">현재: {pipeStatus.detail}</div>
+          )}
+          {/* ❌ 자가복구 소진 실패 - 후속 처리 선택지 */}
+          {pipeStatus.key === "failed" && (
+            <div className="mt-2 pt-2 border-t border-white/10 flex flex-wrap gap-2">
+              <button
+                disabled={isStarting}
+                onClick={() => handleRetryFailedTask(false)}
+                className="px-2.5 py-1.5 bg-red-600 hover:bg-red-500 disabled:bg-gray-700 text-white rounded text-[11px] font-bold"
+                title="직전 빌드 오류 내용을 에이전트에게 전달하며 태스크를 재가동합니다."
+              >
+                🔁 오류 반영 재시도
+              </button>
+              <button
+                disabled={isStarting}
+                onClick={() => handleRetryFailedTask(true)}
+                className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 text-white rounded text-[11px] font-bold"
+                title="추가 지시(우회 방법, 범위 축소 등)를 입력해 함께 전달합니다."
+              >
+                💬 지시 추가 후 재시도
+              </button>
+              <button
+                disabled={isStarting}
+                onClick={clearSprintFailure}
+                className="px-2.5 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-[11px] font-bold"
+                title="태스크를 FAILED 상태로 보류합니다. 태스크 목록에서 언제든 재가동할 수 있습니다."
+              >
+                ⏸ 보류(닫기)
+              </button>
+            </div>
           )}
           {acceptedIdea && totalTasks === 0 && (
             <div className="mt-2 pt-2 border-t border-white/10 text-xs">
@@ -701,6 +783,7 @@ export default function ControlPanel() {
             {wbsData?.tasks?.map((task: any) => {
               const isDone = task.status === 'DONE';
               const isInProgress = task.status === 'IN_PROGRESS';
+              const isFailed = task.status === 'FAILED'; // 빌드 자가복구(3회) 소진 - 재가동 가능
               const isRunning = isInProgress && activeSprintId === task.task_id;
               const isPaused = isInProgress && activeSprintId !== task.task_id;
               const isIdle = !isDone && !isInProgress;
@@ -719,9 +802,10 @@ export default function ControlPanel() {
                       isDone ? 'bg-green-900 text-green-300' :
                       isRunning ? 'bg-blue-600 text-white animate-pulse' :
                       isHotl ? 'bg-amber-500 text-white animate-pulse' :
-                      isPaused ? 'bg-orange-600 text-white' : 'bg-gray-700 text-gray-300'
+                      isPaused ? 'bg-orange-600 text-white' :
+                      isFailed ? 'bg-red-700 text-white' : 'bg-gray-700 text-gray-300'
                     }`}>
-                      {isDone ? "✅ DONE" : isRunning ? "⚙️ RUNNING" : isHotl ? "⚠️ HOTL (전문가 개입)" : isPaused ? "⏸️ PAUSED" : "TODO"}
+                      {isDone ? "✅ DONE" : isRunning ? "⚙️ RUNNING" : isHotl ? "⚠️ HOTL (전문가 개입)" : isPaused ? "⏸️ PAUSED" : isFailed ? "❌ FAILED" : "TODO"}
                     </span>
                   </div>
                   <h4 className="text-sm font-bold text-gray-200 mb-1">{task.title}</h4>
