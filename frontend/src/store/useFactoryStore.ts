@@ -718,44 +718,56 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       const curPid = get().currentProjectId;
       if (curPid && evtPid !== curPid) return;
 
-      if (data.type === 'NODE_COMPLETED') {
-        set((prev) => ({ 
+      // 이벤트당 set() 은 1회만 - 타입별 갱신과 로그 누적을 한 트랜잭션으로 합쳐
+      // 모든 구독 컴포넌트가 이벤트마다 두 번씩 렌더되던 낭비를 제거
+      const logEntry = { timestamp: data.timestamp, type: data.type, ...data.payload };
+      set((prev) => {
+        // 로그는 상한(500)을 두고 누적 - 장시간 세션에서 무제한 메모리 증가 방지
+        const logs = [...prev.logs, logEntry].slice(-500);
+        if (data.type === 'NODE_COMPLETED') {
+          return {
+            logs,
             state: { ...(prev.state || {}), ...data.payload.state } as ProjectState,
-            completed_agents: [...prev.completed_agents, data.payload.node] 
-        }));
-      } else if (data.type === 'AGENT_ACTIVITY') {
-        set((prev) => ({
-          currentActivity: { ...data.payload, ts: data.timestamp },
-          supervisorFeed: [...prev.supervisorFeed, { ...data.payload, ts: data.timestamp }].slice(-200)
-        }));
-      } else if (data.type === 'HOTL_PAUSED') {
-        set((prev) => ({
-          state: { ...(prev.state || {}), needs_revision: true, current_sprint_task_id: data.payload.task_id } as ProjectState,
-          activeSprintId: null,
-          hotlTaskId: data.payload.task_id,
-          currentActivity: null
-        }));
-      } else if (data.type === 'SPRINT_COMPLETED') {
-        set((prev) => ({
-          state: { ...(prev.state || {}), current_sprint_task_id: "" } as ProjectState,
-          activeSprintId: null,
-          hotlTaskId: null,
-          currentActivity: null
-        }));
+            completed_agents: [...prev.completed_agents, data.payload.node]
+          };
+        }
+        if (data.type === 'AGENT_ACTIVITY') {
+          return {
+            logs,
+            currentActivity: { ...data.payload, ts: data.timestamp },
+            supervisorFeed: [...prev.supervisorFeed, { ...data.payload, ts: data.timestamp }].slice(-200)
+          };
+        }
+        if (data.type === 'HOTL_PAUSED') {
+          return {
+            logs,
+            state: { ...(prev.state || {}), needs_revision: true, current_sprint_task_id: data.payload.task_id } as ProjectState,
+            activeSprintId: null,
+            hotlTaskId: data.payload.task_id,
+            currentActivity: null
+          };
+        }
+        if (data.type === 'SPRINT_COMPLETED') {
+          return {
+            logs,
+            state: { ...(prev.state || {}), current_sprint_task_id: "" } as ProjectState,
+            activeSprintId: null,
+            hotlTaskId: null,
+            currentActivity: null
+          };
+        }
+        if (data.type === 'SPRINT_PAUSED') {
+          return { logs, activeSprintId: null, currentActivity: null };
+        }
+        if (data.type === 'SPRINT_FAILED') {
+          // 백엔드 스프린트 루프 크래시 - '영원히 가동 중' 상태에 갇히지 않게 즉시 해제
+          return { logs, activeSprintId: null, hotlTaskId: null, currentActivity: null };
+        }
+        return { logs };
+      });
+      if (data.type === 'SPRINT_COMPLETED' || data.type === 'WBS_UPDATED') {
         get().fetchWBS();
-      } else if (data.type === 'WBS_UPDATED') {
-        get().fetchWBS();
-      } else if (data.type === 'SPRINT_PAUSED') {
-        set({ activeSprintId: null, currentActivity: null });
-      } else if (data.type === 'SPRINT_FAILED') {
-        // 백엔드 스프린트 루프 크래시 - '영원히 가동 중' 상태에 갇히지 않게 즉시 해제
-        set({ activeSprintId: null, hotlTaskId: null, currentActivity: null });
       }
-
-      // 로그는 상한(500)을 두고 누적 - 장시간 세션에서 무제한 메모리 증가 방지
-      set((prev) => ({
-        logs: [...prev.logs, { timestamp: data.timestamp, type: data.type, ...data.payload }].slice(-500)
-      }));
     };
 
     eventSource.onerror = () => {

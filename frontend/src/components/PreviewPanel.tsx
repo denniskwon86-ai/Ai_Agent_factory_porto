@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 
 // 마크다운을 간단히 HTML로 변환하는 경량 렌더러 (외부 라이브러리 없음)
@@ -526,7 +526,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     return () => window.removeEventListener('message', handleMessage);
   }, [sendExecuteFiles]);
 
-  const getTabContent = () => {
+  // useMemo: SSE 상태 갱신마다 렌더당 최대 3회씩 재계산되던 탭 콘텐츠를 캐시
+  const tabContent = useMemo(() => {
     if (!docs) return "데이터 로딩 대기 중...";
     if (isDynamic && activeTab !== 'PREVIEW') {
       return docs.artifacts?.[activeTab] || "산출물이 아직 없습니다.";
@@ -545,7 +546,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
       case 'MANUAL': return docs.user_manual_summary || "사용자 매뉴얼이 아직 생성되지 않았습니다.\n최종 수용검수 통과 후 자동으로 작성됩니다.";
       default: return "";
     }
-  };
+  }, [docs, activeTab, isDynamic]);
 
   const deliverable_type = currentTemplateData?.deliverable_type || 'software_app';
   const isDocType = deliverable_type === 'document_report';
@@ -625,12 +626,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
           </div>
         ) : (
           <div className="w-full h-full bg-white overflow-y-auto">
-            {typeof getTabContent() === 'string' && getTabContent().includes('<html') ? (
-              <iframe srcDoc={getTabContent().match(/```[a-z]*\n([\s\S]*?)```/)?.[1] || getTabContent()} className="w-full h-full border-none bg-white" sandbox="allow-scripts" />
+            {typeof tabContent === 'string' && tabContent.includes('<html') ? (
+              <iframe srcDoc={tabContent.match(/```[a-z]*\n([\s\S]*?)```/)?.[1] || tabContent} className="w-full h-full border-none bg-white" sandbox="allow-scripts" />
             ) : (
               <div className="max-w-4xl mx-auto p-6 text-gray-800">
                 <MarkdownViewer rawCode={(() => {
-                  const content = getTabContent();
+                  const content = tabContent;
                   if (activeTab === 'FRONTEND' || activeTab === 'BACKEND') {
                     try {
                       const parsed = JSON.parse(content);

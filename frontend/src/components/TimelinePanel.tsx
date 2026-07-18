@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 import HOTLInput from './HOTLInput';
 
@@ -37,17 +37,22 @@ export default function TimelinePanel() {
   const logs = useFactoryStore((s) => s.logs);
   const completedAgents = useFactoryStore((s) => s.completed_agents);
   const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   // 토론/채점 내레이션 + 노드 완료 마일스톤을 시간순으로 병합
-  const items = [
+  // useMemo: SSE 이벤트마다 O(n log n) 재정렬이 모든 렌더에서 반복되던 낭비 제거
+  const items = useMemo(() => [
     ...feed.map((e: any) => ({ kind: 'feed', t: e.ts || '', ...e })),
     ...logs
       .filter((l: any) => ['NODE_COMPLETED', 'HOTL_PAUSED', 'SPRINT_COMPLETED'].includes(l.type))
       .map((l: any) => ({ kind: 'milestone', t: l.timestamp || '', type: l.type, node: l.node, task_id: l.task_id })),
-  ].sort((a: any, b: any) => String(a.t).localeCompare(String(b.t)));
+  ].sort((a: any, b: any) => String(a.t).localeCompare(String(b.t))), [feed, logs]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // 사용자가 위로 스크롤해 과거 기록을 보는 중이면 강제 스크롤로 빼앗지 않는다
+    const el = listRef.current;
+    const nearBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [items.length]);
 
   return (
@@ -59,7 +64,7 @@ export default function TimelinePanel() {
         </h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-2 text-xs">
+      <div ref={listRef} className="flex-1 overflow-y-auto p-4 space-y-2 text-xs">
         {items.map((e: any, i: number) => {
           if (e.kind === 'milestone') {
             const nodeName = NODE_KO_MAP[e.node] || e.node;

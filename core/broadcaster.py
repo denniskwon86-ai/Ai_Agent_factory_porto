@@ -21,21 +21,24 @@ class SSEBroadcaster:
 
     async def subscribe(self) -> AsyncGenerator[str, None]:
         """클라이언트(웹 브라우저) 구독 및 연결 유지"""
-        q = asyncio.Queue()
+        # 유한 큐: 죽은/느린 클라이언트의 큐가 무한히 쌓여 메모리를 잠식하는 것 방지
+        q: asyncio.Queue = asyncio.Queue(maxsize=500)
         self.clients.append(q)
         try:
             while True:
                 try:
-                    event_data = await asyncio.wait_for(q.get(), timeout=15.0)
-                    
-                    #  [핵심 조치] Pydantic 모델, datetime 등 직렬화 불가 객체를 기본 파이썬 타입(dict, str)으로 강제 분해
-                    safe_data = jsonable_encoder(event_data)
-                    
-                    yield f"data: {json.dumps(safe_data, ensure_ascii=False)}\n\n"
+                    # broadcast 가 이미 직렬화한 문자열을 그대로 전달(클라이언트 수만큼 재직렬화 방지)
+                    line = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield line
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"
-        except asyncio.CancelledError:
-            self.clients.remove(q)
+        finally:
+            # CancelledError 외의 어떤 종료 경로(인코딩 예외 등)에서도 큐를 반드시 회수
+            # - 회수 누락 시 broadcast 가 좀비 큐를 영원히 채우는 누수가 된다
+            try:
+                self.clients.remove(q)
+            except ValueError:
+                pass
 
     async def broadcast(self, event_type: str, payload: Dict[str, Any]):
         """시스템 전역에서 호출되는 실시간 상태 Push 메서드"""
@@ -44,10 +47,26 @@ class SSEBroadcaster:
             "timestamp": datetime.now().isoformat(),
             "payload": payload
         }
-        # SSE 클라이언트 전송
-        for q in self.clients:
-            await q.put(message)
-            
+        # 직렬화는 브로드캐스트 시 1회만 수행(과거: 클라이언트별 매 이벤트 재직렬화)
+        # Pydantic 모델, datetime 등 직렬화 불가 객체를 기본 파이썬 타입으로 강제 분해
+        try:
+            safe_data = jsonable_encoder(message)
+            line = f"data: {json.dumps(safe_data, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            print(f"⚠️ [Broadcaster] 이벤트 직렬화 실패({event_type}): {e}")
+            return
+
+        # SSE 클라이언트 전송 - 가득 찬 큐(느린/죽은 클라이언트)는 가장 오래된 이벤트를 버리고 최신 유지
+        for q in list(self.clients):
+            try:
+                q.put_nowait(line)
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                    q.put_nowait(line)
+                except Exception:
+                    pass
+
         # 내부 리스너 비동기 실행 (슈퍼바이저 데몬용)
         for callback in self.internal_listeners:
             asyncio.create_task(callback(event_type, payload))

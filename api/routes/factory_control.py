@@ -437,7 +437,38 @@ async def delete_project(project_id: str):
                 shutil.rmtree(sub_path, onexc=_on_rmtree_error)
             except Exception:
                 pass
+
+    # 체크포인트 DB 정리: 삭제 프로젝트의 스레드(sprint_<pid>__<task>)를 지우지 않으면
+    # DB 가 무한 증식하고, 같은 id 로 재생성 시 '옛 프로젝트의 체크포인트'에 이어붙는 오염이 생긴다.
+    # (실패해도 프로젝트 삭제 자체는 성공 처리 - 베스트 에포트)
+    await _purge_checkpoints([project_id] + sub_projects)
     return {"status": "success"}
+
+
+async def _purge_checkpoints(project_ids: list) -> None:
+    """해당 프로젝트들의 LangGraph 체크포인트 스레드를 SQLite 에서 삭제한다.
+    GLOB 사용 이유: LIKE 의 '_' 는 와일드카드라 다른 pid 를 오매칭할 수 있다(GLOB 은 '_' 가 리터럴)."""
+    import config as _cfg
+    try:
+        import aiosqlite
+        async with aiosqlite.connect(_cfg.PIPELINE_DB_FILE) as db:
+            total = 0
+            for pid in project_ids:
+                pattern = f"sprint_{pid}__*"
+                for table in ("checkpoints", "writes"):
+                    try:
+                        cur = await db.execute(f"DELETE FROM {table} WHERE thread_id GLOB ?", (pattern,))
+                        total += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                    except Exception:
+                        pass  # 테이블 미존재(첫 가동 전) 등은 무시
+            await db.commit()
+            if total:
+                print(f"🧹 [Checkpoint] 삭제 프로젝트 스레드 정리: {total}행 제거. 공간 회수(VACUUM) 실행...")
+                await db.execute("VACUUM")
+        if total:
+            print("🧹 [Checkpoint] VACUUM 완료.")
+    except Exception as e:
+        print(f"⚠️ [Checkpoint] 체크포인트 정리 실패(무시하고 진행): {e}")
 
 @router.post("/projects/{project_id}/copy")
 async def copy_project(project_id: str, req: ProjectCopyRequest):

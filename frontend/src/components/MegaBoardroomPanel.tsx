@@ -10,28 +10,38 @@ export default function MegaBoardroomPanel() {
 
   useEffect(() => {
     // Fetch state for all sub-projects
+    // 마운트 시 1회 인터벌만 생성하고 최신 상태는 getState()로 읽는다 - 과거엔 deps=[state]라
+    // SSE 상태 병합마다 인터벌이 파괴/재생성됐다. 병렬 조회 + 변경 없으면 set 생략.
+    let prevJson = "";
     const fetchSubStates = async () => {
-      if (!state || !state.sub_projects_map) return;
-      const newSubStates: Record<string, any> = {};
-      for (const projId of Object.values(state.sub_projects_map)) {
+      const cur = useFactoryStore.getState().state;
+      if (!cur || !cur.sub_projects_map) return;
+      const ids = Object.values(cur.sub_projects_map) as string[];
+      const entries = await Promise.all(ids.map(async (projId) => {
         try {
           const res = await fetch(`${API_BASE_URL}/api/v1/factory/${projId}/state/latest`);
           if (res.ok) {
             const data = await res.json();
             // 응답은 {status, data:{...}} 봉투 구조 - 봉투째 저장하면 factory_mode 등이 전부 undefined
-            newSubStates[projId as string] = data.data ?? null;
+            return [projId, data.data ?? null] as const;
           }
         } catch (e) {
           console.error(`Failed to fetch state for ${projId}`, e);
         }
+        return [projId, null] as const;
+      }));
+      const newSubStates: Record<string, any> = Object.fromEntries(entries);
+      const json = JSON.stringify(newSubStates);
+      if (json !== prevJson) {
+        prevJson = json;
+        setSubStates(newSubStates);
       }
-      setSubStates(newSubStates);
     };
 
     fetchSubStates();
     const interval = setInterval(fetchSubStates, 3000);
     return () => clearInterval(interval);
-  }, [state]);
+  }, []);
 
   if (!state || !state.is_mega_project) {
     return <div className="p-10 text-white text-center">Not a Mega Project</div>;

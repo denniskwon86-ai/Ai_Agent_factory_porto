@@ -142,9 +142,11 @@ export default function ControlPanel() {
   }, [fetchWBS, currentProjectId]);
 
   useEffect(() => {
+    // '경과 시간' 표시용 tick 은 실제 가동 중일 때만 - 유휴 상태에서 3초마다 패널 전체 재렌더 방지
+    if (!activeSprintId && !currentActivity) return;
     const id = setInterval(() => setNowTs(Date.now()), 3000);
     return () => clearInterval(id);
-  }, []);
+  }, [activeSprintId, currentActivity]);
 
   const isDynamic = currentTemplateData && currentTemplateData.agents && currentTemplateData.id !== 'default' && currentTemplateData.pipeline_name !== '소프트웨어 개발 팩토리';
 
