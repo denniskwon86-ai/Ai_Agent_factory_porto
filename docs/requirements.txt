@@ -28,3 +28,7 @@ streamlit>=1.32.0
 # 5. V5.0 API Server Prep (Phase 2 확장 대비용)
 fastapi>=0.110.0
 uvicorn>=0.29.0
+# 6. 지식 허브 (도메인 그라운딩 RAG) - 지식팩 인덱싱/검색
+chromadb>=0.5.0
+sentence-transformers>=3.0.0   # 다국어 임베딩(paraphrase-multilingual-MiniLM-L12-v2)
+pypdf>=5.0.0                   # PDF 텍스트 추출

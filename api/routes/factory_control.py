@@ -38,6 +38,11 @@ class ProjectCreateRequest(BaseModel):
     template_id: str = "default"  # 이 프로젝트가 실행될 워크플로우 템플릿(범용 플랫폼 T2-b)
     output_format_id: str = "default"  # 이 프로젝트에 적용될 출력 포맷
     view_type: str = "react_app"
+    knowledge_pack_ids: list = []  # 이 프로젝트에 연결할 도메인 지식팩(그라운딩 RAG)
+
+
+class ProjectKnowledgeRequest(BaseModel):
+    knowledge_pack_ids: list = []
 
 class ProjectCopyRequest(BaseModel):
     new_project_id: str
@@ -101,12 +106,28 @@ def _read_project_template(workspace_root: str) -> str:
     return tid
 
 
-def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app") -> None:
+def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None) -> None:
     try:
         with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
-            json.dump({"template_id": template_id or "default", "output_format_id": output_format_id or "default", "view_type": view_type or "react_app"}, f, ensure_ascii=False, indent=2)
+            json.dump({
+                "template_id": template_id or "default",
+                "output_format_id": output_format_id or "default",
+                "view_type": view_type or "react_app",
+                "knowledge_pack_ids": list(knowledge_pack_ids or []),
+            }, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ project_meta 저장 실패: {e}")
+
+
+def _read_project_packs(workspace_root: str) -> list:
+    """프로젝트에 연결된 지식팩 id 목록(project_meta.json). 없으면 빈 목록."""
+    try:
+        with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+        packs = data.get("knowledge_pack_ids", [])
+        return [p for p in packs if isinstance(p, str)]
+    except Exception:
+        return []
 
 
 def _restore_accumulated_from_disk(payload: dict, workspace_root: str) -> dict:
@@ -194,8 +215,25 @@ async def create_project(req: ProjectCreateRequest):
     if os.path.exists(project_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
     os.makedirs(project_path, exist_ok=True)
-    _write_project_meta(project_path, tid, req.output_format_id, req.view_type)  # 프로젝트↔템플릿/포맷 바인딩 영속
-    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type}
+    _write_project_meta(project_path, tid, req.output_format_id, req.view_type, req.knowledge_pack_ids)  # 프로젝트↔템플릿/포맷/지식팩 바인딩 영속
+    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids}
+
+
+@router.put("/projects/{project_id}/knowledge")
+async def update_project_knowledge(project_id: str, req: ProjectKnowledgeRequest):
+    """기존 프로젝트의 지식팩 연결을 변경한다(다음 스프린트부터 반영)."""
+    _safe_id(project_id, "project_id")
+    workspace_root = f"./projects/{project_id}"
+    if not os.path.isdir(workspace_root):
+        raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+    from core.knowledge_base import knowledge_base
+    known = {p.get("pack_id") for p in knowledge_base.list_packs()}
+    invalid = [p for p in req.knowledge_pack_ids if p not in known]
+    if invalid:
+        raise HTTPException(status_code=404, detail=f"존재하지 않는 지식팩: {invalid}")
+    tid, fid, vtype = _read_project_meta(workspace_root)
+    _write_project_meta(workspace_root, tid, fid, vtype, req.knowledge_pack_ids)
+    return {"status": "success", "knowledge_pack_ids": req.knowledge_pack_ids}
 
 class MegaProjectCreateRequest(BaseModel):
     mega_project_id: str
@@ -498,6 +536,8 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
     # T2-b: 프로젝트에 바인딩된 템플릿을 권위 있는 출처(project_meta.json)에서 주입 — 프론트 state 가
     #   stale 해도 모든 태스크가 같은 워크플로우로 실행되도록 보장(오케스트레이터가 이 값으로 그래프 선택).
     req.project_state_payload["template_id"] = _read_project_template(workspace_root)
+    # 지식팩 연결도 동일하게 권위 원본에서 주입 - 모든 에이전트 호출의 그라운딩 기준
+    req.project_state_payload["knowledge_pack_ids"] = _read_project_packs(workspace_root)
 
     # 신규 기획(PLANNING)은 새 출발이므로 옛 누적 산출물을 복원하지 않는다.
     # 그 외(실행/리비전) 태스크는 stale 페이로드의 빈 누적 필드를 디스크 진실원본에서 복원.

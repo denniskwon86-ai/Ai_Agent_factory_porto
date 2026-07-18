@@ -11,6 +11,7 @@ import WorkflowStrip from './components/WorkflowStrip';
 import AgentMasterPanel from './components/AgentMasterPanel';
 import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
+import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import ServerLogPopup from './components/ServerLogPopup';
@@ -42,9 +43,20 @@ export default function App() {
 
   const [newProjectId, setNewProjectId] = useState("");
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
+  const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
   const [showLogPopup, setShowLogPopup] = useState(false);
+  // 신규 프로젝트에 연결할 지식팩 선택 상태
+  const [knowledgePacks, setKnowledgePacks] = useState<any[]>([]);
+  const [selectedPackIds, setSelectedPackIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)
+    const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+    fetch(`${API}/api/v1/knowledge/packs`).then(r => r.ok ? r.json() : null)
+      .then(r => { if (r?.data) setKnowledgePacks(r.data); }).catch(() => {});
+  }, [showKnowledgeHub]); // 허브에서 팩을 만들고 닫으면 목록 갱신
 
   const isSubProject = (id: string) => projects.some(p => p.is_mega_project && id.startsWith(p.id + "_"));
 
@@ -59,9 +71,10 @@ export default function App() {
 
   const handleCreateProject = async () => {
     if (!newProjectId.trim()) return;
-    const success = await createProject(newProjectId.trim(), selectedTemplateId);
+    const success = await createProject(newProjectId.trim(), selectedTemplateId, selectedPackIds);
     if (success) {
       setNewProjectId("");
+      setSelectedPackIds([]);
       setCurrentProject(newProjectId.trim());
     }
   };
@@ -134,6 +147,9 @@ export default function App() {
         {showSkillEvolution && (
           <SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />
         )}
+        {showKnowledgeHub && (
+          <KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />
+        )}
         <div className="min-h-screen w-screen bg-[#0B0C10] text-gray-100 flex flex-col font-sans">
           <header className="h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-[#1F2833] flex items-center justify-between px-8 shrink-0 sticky top-0 z-10">
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
@@ -153,6 +169,13 @@ export default function App() {
                 title="에이전트가 스스로 제안한 스킬 개선안 승인/반려"
               >
                 🧬 AI 스킬 진화
+              </button>
+              <button
+                onClick={() => setShowKnowledgeHub(true)}
+                className="text-sm font-bold text-cyan-200 bg-cyan-900/40 hover:bg-cyan-800/60 border border-cyan-700/50 px-4 py-2 rounded-lg transition-all"
+                title="도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결"
+              >
+                📚 지식 허브
               </button>
               <div className="relative">
                 <button 
@@ -202,6 +225,35 @@ export default function App() {
                       ))}
                     </select>
                   </div>
+                </div>
+
+                {/* 📚 지식팩 연결 — 선택한 팩의 자료가 모든 에이전트 산출물의 그라운딩 기준이 된다 */}
+                <div className="mt-4 relative z-10">
+                  <label className="block text-sm font-medium text-gray-400 mb-2">
+                    📚 연결할 지식팩 <span className="text-gray-600">(선택 — 등록된 도메인 자료를 참고해 산출물을 생성)</span>
+                  </label>
+                  {knowledgePacks.length === 0 ? (
+                    <div className="text-xs text-gray-500 bg-[#0B0C10]/60 border border-[#2F3640] rounded-xl p-3">
+                      등록된 지식팩이 없습니다. 우측 상단 <b className="text-cyan-300">📚 지식 허브</b>에서 표준·논문 등 참고자료를 먼저 등록하세요.
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {knowledgePacks.map((p: any) => {
+                        const on = selectedPackIds.includes(p.pack_id);
+                        return (
+                          <button key={p.pack_id} type="button"
+                            onClick={() => setSelectedPackIds(prev => on ? prev.filter(x => x !== p.pack_id) : [...prev, p.pack_id])}
+                            className={`text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${
+                              on ? 'bg-cyan-900/50 border-cyan-500 text-cyan-200' : 'bg-[#0B0C10] border-[#2F3640] text-gray-400 hover:border-gray-500'
+                            }`}
+                            title={p.description || p.pack_id}
+                          >
+                            {on ? '✓ ' : ''}{p.name} <span className="opacity-60 font-normal">({p.documents?.length || 0})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-6 p-4 bg-[#0B0C10]/50 border border-[#2F3640] rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">

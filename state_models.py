@@ -141,6 +141,9 @@ class ProjectState(BaseModel):
     sim_modified_params: Dict = Field(default_factory=dict)
     sim_base_cycle: int = Field(default=1)
 
+    # 이 프로젝트에 연결된 도메인 지식팩(그라운딩 RAG) - project_meta 가 진실원본, 스프린트 시작 시 주입
+    knowledge_pack_ids: List[str] = Field(default_factory=list)
+
     # 토론·합의 루프 / 단계별 성공기준 / Supervisor (V5.1)
     current_stage: str = Field(default="")  # PLANNING/PMO/ARCHITECTURE/TECH_SPEC/CODE_REVIEW/QA
     stage_attempt_counts: Dict[str, int] = Field(default_factory=dict)
@@ -155,7 +158,8 @@ class ProjectState(BaseModel):
         # 부분 저장/레거시 상태에서 컬렉션 필드가 null로 들어와도 기본값으로 보정 (검증 크래시 방지)
         if isinstance(data, dict):
             none_to_list = ("architecture_decisions", "technical_debt", "human_feedback_queue",
-                            "criteria_log", "current_required_agents", "clarification_questions")
+                            "criteria_log", "current_required_agents", "clarification_questions",
+                            "knowledge_pack_ids")
             none_to_dict = ("file_index", "agent_memories", "stage_attempt_counts",
                             "stage_scores", "debate_rounds_used", "artifacts", "artifact_summaries")
             for k in none_to_list:

@@ -47,10 +47,15 @@ class ContextEngine:
         profile_str = json.dumps(profile, ensure_ascii=False, indent=2) if profile else "학습된 프로필 없음"
 
         rag_context = knowledge_base.get_relevant_context(state)
+        # 프로젝트에 연결된 지식팩(도메인 참고자료) 그라운딩 - 어떤 LLM 제공사로 폴백돼도
+        # 동일한 지식이 주입되어 산출물 품질의 기준선을 형성한다
+        grounding = knowledge_base.get_grounding_context(state)
 
         context_parts = [
             f" [기업 프로필 & 사용자 성향]:\n{profile_str}"
         ]
+        if grounding:
+            context_parts.append(f" [도메인 참고 지식 - 반드시 정합 유지]:\n{grounding}")
         if rag_context:
             context_parts.append(f" [과거 유사 사례 참고]:\n{rag_context}")
             
