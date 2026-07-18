@@ -620,10 +620,20 @@ async def supervisor_chat(project_id: str, req: SupervisorChatRequest):
 async def check_hotl(project_id: str):
     """진행 중(IN_PROGRESS) 태스크가 HOTL 중단점에서 대기 중인지 조회 (SSE 이벤트 유실 복구용)."""
     _safe_id(project_id, "project_id")
-    
+
     if await orchestrator.is_hotl_pending("sprint_init", project_id):
         return {"status": "success", "hotl_task_id": "sprint_init"}
-        
+
+    # 기획(PLANNING_*) 태스크는 WBS 목록에 없으므로 latest_state 의 현재 태스크 id 로도 확인
+    # - 미확인 시 기획 중 SSE 유실되면 UI/자동화가 인터뷰·RFP·WBS 게이트 대기를 영영 감지 못 한다
+    try:
+        with open(os.path.join("projects", project_id, "latest_state.json"), "r", encoding="utf-8") as f:
+            _cur_tid = (json.load(f) or {}).get("current_sprint_task_id") or ""
+        if _cur_tid and _cur_tid != "sprint_init" and await orchestrator.is_hotl_pending(_cur_tid, project_id):
+            return {"status": "success", "hotl_task_id": _cur_tid}
+    except Exception:
+        pass
+
     from nodes.utils.wbs_manager import WBSManager
     try:
         wbs = WBSManager(workspace_root=f"./projects/{project_id}").get_wbs()

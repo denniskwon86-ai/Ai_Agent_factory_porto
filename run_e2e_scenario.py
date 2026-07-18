@@ -1,0 +1,201 @@
+# -*- coding: utf-8 -*-
+"""E2E 시나리오 완주 드라이버 — 테스트 캠페인용.
+
+기획(PLANNING) 가동 → HOTL 게이트 자동 승인(무피드백 resume, 마스터플랜 §2-5 규칙)
+→ WBS 확정 → 실행 태스크 순차 가동 → 전 태스크 DONE 까지 무인 완주.
+
+사용:  venv\\Scripts\\python.exe run_e2e_scenario.py [project_id] [아이디어]
+기본:  A-1 (test_a1_unitconv, 단위 변환기)
+종료코드: 0=완주, 1=실패(원인 stdout), 2=타임아웃/스톨
+"""
+import sys
+import time
+import json
+import requests
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+BASE = "http://localhost:8080/api/v1/factory"
+POLL_SEC = 10
+STALL_LIMIT_SEC = 15 * 60      # 활동 없음 15분 → 스톨 판정
+PLANNING_TIMEOUT = 60 * 60
+TASK_TIMEOUT = 45 * 60
+
+PROJECT_ID = sys.argv[1] if len(sys.argv) > 1 else "test_a1_unitconv"
+IDEA = sys.argv[2] if len(sys.argv) > 2 else (
+    "길이(cm/inch), 무게(kg/lb), 온도(섭씨/화씨)를 서로 변환해주는 심플한 단위 변환기 웹앱. "
+    "로그인 불필요, 단일 화면, 변환 이력 5개까지 화면에 표시."
+)
+
+
+def log(msg: str):
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def get(path: str, timeout=15):
+    r = requests.get(f"{BASE}{path}", timeout=timeout)
+    return r.json() if r.ok else None
+
+
+def post(path: str, body: dict, timeout=30):
+    return requests.post(f"{BASE}{path}", json=body, timeout=timeout)
+
+
+def latest_state() -> dict:
+    d = get(f"/{PROJECT_ID}/state/latest")
+    return (d or {}).get("data") or {}
+
+
+def feed_tail(n=1):
+    d = get(f"/{PROJECT_ID}/feed")
+    items = (d or {}).get("data") or []
+    return items[-n:]
+
+
+def wbs():
+    d = get(f"/{PROJECT_ID}/wbs")
+    return (d or {}).get("data") if (d or {}).get("status") == "success" else None
+
+
+def check_hotl():
+    d = get(f"/{PROJECT_ID}/hotl/check")
+    return (d or {}).get("hotl_task_id")
+
+
+def auto_approve(task_id: str):
+    st = latest_state()
+    stage = st.get("current_stage", "?")
+    log(f"⏸️ HOTL 게이트 감지 (task={task_id}, stage={stage}) → 자동 승인(무피드백 resume)")
+    r = post(f"/{PROJECT_ID}/hotl/resume", {"task_id": task_id, "feedback": ""})
+    log(f"   resume 응답: {r.status_code} {r.text[:120]}")
+
+
+def activity_marker() -> str:
+    """활동 감지용 지문 — 피드 마지막 항목 ts + 상태의 current_stage/점수."""
+    tail = feed_tail(1)
+    st = latest_state()
+    return json.dumps([tail, st.get("current_stage"), st.get("stage_scores"),
+                       st.get("build_status"), st.get("developer_retry_count")], ensure_ascii=False, default=str)
+
+
+def wait_phase(done_check, phase_name: str, timeout_sec: int) -> str:
+    """done_check() -> 'done'|'failed:<msg>'|None. HOTL 자동승인/스톨감지 포함 폴링."""
+    started = time.time()
+    last_marker = activity_marker()
+    last_change = time.time()
+    while True:
+        time.sleep(POLL_SEC)
+        if time.time() - started > timeout_sec:
+            return f"failed:{phase_name} 전체 타임아웃({timeout_sec}s)"
+
+        hotl = check_hotl()
+        if hotl:
+            auto_approve(hotl)
+            last_change = time.time()
+            continue
+
+        res = done_check()
+        if res:
+            return res
+
+        m = activity_marker()
+        if m != last_marker:
+            last_marker = m
+            last_change = time.time()
+            tail = feed_tail(1)
+            if tail:
+                e = tail[0]
+                log(f"   … {e.get('stage_label', e.get('stage', ''))}/{e.get('phase', '')} : {str(e.get('detail', ''))[:80]}")
+        elif time.time() - last_change > STALL_LIMIT_SEC:
+            return f"failed:{phase_name} 스톨(활동 없음 {STALL_LIMIT_SEC // 60}분) — 서버 로그 확인 필요"
+
+
+def main():
+    log(f"=== E2E 완주 시작: {PROJECT_ID} ===")
+    log(f"아이디어: {IDEA[:80]}")
+
+    # 0) 프로젝트 보장
+    r = post("/projects", {"project_id": PROJECT_ID, "template_id": "default"})
+    log(f"프로젝트 생성: {r.status_code} ({'기존 재사용' if r.status_code in (400, 409) else '신규'})")
+
+    # 1) 기획(PLANNING) — UI 와 동일 페이로드
+    planning_id = f"PLANNING_{int(time.time() * 1000)}"
+    r = post(f"/{PROJECT_ID}/sprint/start", {
+        "task_id": planning_id,
+        "project_state_payload": {
+            "schema_version": "5.1.0",
+            "project_name": PROJECT_ID,
+            "initial_idea": IDEA,
+            "master_data": "",
+            "factory_mode": "PLANNING",
+        },
+    })
+    log(f"기획 가동({planning_id}): {r.status_code} {r.text[:120]}")
+    if not r.ok:
+        return 1
+
+    def planning_done():
+        w = wbs()
+        if w and (w.get("tasks") or []):
+            st = latest_state()
+            # WBS 게이트까지 승인 완료 후 스트림 종료 시점: hotl 없음 + WBS 존재
+            if not check_hotl():
+                return "done"
+        return None
+
+    res = wait_phase(planning_done, "PLANNING", PLANNING_TIMEOUT)
+    if res != "done":
+        log(f"❌ 기획 실패: {res}")
+        return 1
+    w = wbs()
+    tasks = w.get("tasks") or []
+    log(f"✅ 기획 완주 — WBS {len(tasks)}개 태스크: {[t.get('task_id') for t in tasks]}")
+
+    # 2) 실행 태스크 순차 가동
+    for t in tasks:
+        tid = t.get("task_id")
+        cur = (wbs() or {}).get("tasks") or []
+        status = next((x.get("status") for x in cur if x.get("task_id") == tid), "?")
+        if status == "DONE":
+            log(f"⏭️ {tid} 이미 DONE — 건너뜀")
+            continue
+
+        st = latest_state()
+        st.update({
+            "current_sprint_task_id": tid,
+            "factory_mode": "REVISION" if str(tid).startswith("TASK_REV_") else "EXECUTION",
+        })
+        r = post(f"/{PROJECT_ID}/sprint/start", {"task_id": tid, "project_state_payload": st})
+        log(f"🚀 태스크 가동 {tid} ({t.get('title', '')[:40]}): {r.status_code}")
+        if not r.ok:
+            log(f"❌ 가동 실패: {r.text[:200]}")
+            return 1
+
+        def task_done(tid=tid):
+            cur = (wbs() or {}).get("tasks") or []
+            stt = next((x.get("status") for x in cur if x.get("task_id") == tid), None)
+            if stt == "DONE":
+                return "done"
+            if stt == "FAILED":
+                s = latest_state()
+                return f"failed:태스크 {tid} FAILED — build_error_log: {str(s.get('build_error_log', ''))[:300]}"
+            return None
+
+        res = wait_phase(task_done, f"TASK {tid}", TASK_TIMEOUT)
+        if res != "done":
+            log(f"❌ {res}")
+            return 1
+        log(f"✅ {tid} DONE")
+
+    log("=== 🏁 전 태스크 완주 성공 ===")
+    st = latest_state()
+    log(f"최종 요약: stage_scores={json.dumps(st.get('stage_scores'), ensure_ascii=False)}")
+    log(f"qa_verdict={st.get('qa_verdict')} / supervisor_verdict={st.get('supervisor_verdict')}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
