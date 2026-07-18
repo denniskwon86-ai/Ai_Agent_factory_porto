@@ -1,100 +1,119 @@
 # 🤝 AI 세션 인계 지시서 (READ THIS FIRST)
 
-> **다른 IDE/PC에서 이 저장소를 이어받는 AI 에이전트는 이 문서를 가장 먼저 읽으세요.**
-> 이 문서 하나로 (1) 방금 무엇이 바뀌었는지, (2) 무엇을 먼저 해야 하는지, (3) 다음 할 일이
-> 무엇인지 파악할 수 있습니다.
+> **다른 IDE/PC에서 이 저장소를 이어받는 AI 에이전트(또는 개발자)는 이 문서를 가장 먼저 읽으세요.**
+> 이 문서 하나로 (1) 무엇이 바뀌었는지, (2) 환경을 어떻게 맞추는지, (3) 다음 할 일이 무엇인지 파악할 수 있습니다.
 
 - **대상 브랜치**: `dev`  (⚠️ `main` 은 README 스켈레톤일 뿐, 실제 코드는 `dev` 에 있음)
-- **최신 커밋**: `cb36e4741` — "스킬진화 API·ZIP Export·Cerebras 3중 폴백 + 실효성 테스트 계획"
-- **최종 갱신**: 2026-07-15
+- **최종 갱신**: 2026-07-18
 
 ---
 
-## 0. pull 직후 반드시 실행 (환경 동기화)
+## 0. 다른 PC에서 이어받을 때 (환경 동기화 — 이 순서대로)
 
 ```bash
+# 1) 최신 코드
 git checkout dev
-git pull                                            # 최신 코드
-.venv\Scripts\python.exe -m pip install -r docs/requirements.txt   # ⚠️ 신규 의존성(langchain-cerebras)
+git pull
+
+# 2) 파이썬 의존성 (⚠️ 신규: chromadb, sentence-transformers, pypdf — 지식 허브용, ~2GB)
+venv\Scripts\python.exe -m pip install -r docs/requirements.txt
+
+# 3) (선택·권장) Vision QA 시각 검증을 실제로 쓰려면 playwright 설치
+venv\Scripts\python.exe -m pip install playwright
+venv\Scripts\python.exe -m playwright install chromium
+
+# 4) 프론트 의존성 (변경 없으면 생략 가능)
+cd frontend && npm install && cd ..
+
+# 5) 서버 기동
+venv\Scripts\python.exe run.py          # 백엔드 http://localhost:8080 (포트/UTF-8 고정 — 반드시 run.py 로)
+cd frontend && npm run dev              # 프론트 http://localhost:5173
 ```
 
-- **`.env` 는 git 으로 전송되지 않는다**(비밀키 보호, .gitignore). 이 PC에 이미 `.env`(실키 포함)가
-  있으면 그대로 사용. Cerebras 를 쓰려면 `.env` 에 `CEREBRAS_API_KEY` 추가(선택).
-- 프론트 의존성은 이번에 변경 없음 → `npm install` 불필요.
-- ⚠️ 비밀키는 반드시 **`.env`(점 있음)** 에만 둘 것. 점 없는 `env` 는 과거 실키가 담겨 유출 위험이
-  있었고 현재 `.gitignore` 로 차단돼 있다(추적 안 됨).
+- **`.env` 는 git 으로 전송되지 않는다**(비밀키 보호). 새 PC라면 `.env.example` 을 복사해
+  실키를 채울 것. 현재 5중 폴백 체인이 쓰는 키: `GOOGLE_API_KEY`, `XAI_API_KEY`,
+  `groq_api_key`, `CEREBRAS_API_KEY`, `OPENROUTER_API_KEY` (없는 제공사는 자동 비활성 — 무중단).
+- **지식 허브 임베딩 모델**은 최초 지식팩 생성/검색 시 자동 다운로드된다
+  (`paraphrase-multilingual-MiniLM-L12-v2`, ~470MB, HuggingFace — 이후 로컬 캐시).
+- `data/chroma_db/`, `data/knowledge_packs/`, `pipeline_state.db` 는 **런타임 데이터**(gitignore).
+  PC 를 옮기면 지식팩은 새로 등록해야 한다(원본 파일은 `data/knowledge_packs/<pack>/files/` 에 보존되므로
+  필요 시 그 폴더만 복사해 와서 재업로드하면 됨).
+- 사내망(SSL 검사) 환경 대응은 `truststore` 로 이미 처리되어 있다(main.py).
 
 ---
 
-## 1. 이번 세션에서 바뀐 것 (What changed)
+## 1. 지금까지 작업한 것 (2026-07-17 ~ 07-18 세션 요약)
 
-| 영역 | 변경 | 파일 |
-|---|---|---|
-| **스킬 진화 API** | 승인/거부/목록 엔드포인트 신설(프론트가 호출하던 404 해결) | `api/routes/skill_control.py`, `main.py` |
-| 〃 | 폴백 스킬 매핑 버그 수정(`developer_be/fe`→`Backend/Frontend`) | `core/skill_evolution.py` |
-| **ZIP Export** | `GET /api/v1/factory/{project_id}/export` (node_modules 등 제외 스트리밍) + 통제실 다운로드 버튼 | `api/routes/factory_control.py`, `frontend/src/components/ControlPanel.tsx` |
-| **LLM 3중 폴백** | `Gemini → Groq → Cerebras`(무료 티어). 키/패키지 없으면 자동 비활성(무중단) | `config.py`, `core/llm_gateway.py` |
-| **레지스트리 정합성** | `_normalize` 가 템플릿 `id` 스탬프(WorkflowStrip 중복 key 경고 해소), `list_templates` 가 `output_formats.json` 제외 | `core/agent_registry.py`, `frontend/src/components/WorkflowStrip.tsx` |
-| **스킬 제안 승인** | 사용자가 승인한 4건 반영(pending→approved, 해당 skills/*.md 에 규칙 추가됨) | `data/skill_proposals/approved/`, `skills/pm_skill.md`·`sim_pm.md`·`tech_lead_skill.md` |
-| **보안** | 점 없는 `env` 변형 gitignore 규칙 추가 | `.gitignore` |
-| **테스트 계획** | 실효성 검증 문서 4종 신설 | `docs/test_plan/` |
+| 커밋 | 내용 |
+|---|---|
+| `d723bdf85` | **VisionQA 크래시 수정**(`completed_agents` AttributeError — A-1 관문 중단 원인) + **워크플로우 순서 재배선**(아키텍처를 WBS 앞으로) + **요구 확인 인터뷰 게이트** 신설 |
+| `6b3b722b0` | **전수 감사 반영** — 치명 5·주요 12·성능 6건 수정 (전체 목록: `docs/audit_2026-07-18.md`) |
+| `1002ca0f9` | 보류 성능 항목 완료 — 체크포인트 DB 정리(C5)·브로드캐스터(C8)·프론트 렌더링(C7) |
+| `61fcdd12d` | **빌드 자가복구 실효화** — 오류 주입(P1)·마지막 시도 Pro 승격(P2)·정직한 실패+재시도 UI(P3) |
+| `b9a413c62` | **지식 허브(도메인 그라운딩 RAG)** 1+2단계 — 지식팩 등록·프로젝트 연계·전 에이전트 주입 |
 
-### 검증 완료(UI 확인됨)
-- 스킬 진화 패널: 목록 표시 / 승인 / 거부 전 구간 정상
-- ZIP Export: 통제실 버튼 → `200 OK`, zip 내용물·제외규칙 확인
-- 템플릿 드롭다운에서 `output_formats` 사라짐, WorkflowStrip 중복 key 경고 해소
-
-### 주의: 아직 검증 안 된 것
-- **`langgraph.json`** 은 현재 `./agent_graph.py:app` 로 되어 있음(실제 파일은 `core/agent_graph.py`).
-  LangGraph Studio 로 직접 여는 경우에만 문제되며, FastAPI 런타임에는 영향 없음. (수정할지는 사용자 결정)
-
----
-
-## 2. 다음 할 일 (Next: 실효성 검증 테스트)
-
-이 저장소의 핵심 미완 작업은 **"플랫폼이 실제로 쓸 만한가"를 검증하는 전수 테스트**다.
-계획과 진행 상태가 아래 문서에 이미 준비돼 있다:
-
-- `docs/test_plan/00_master_plan.md` — 마스터플랜(11 Phase, 30점 루브릭, 리스크)
-- `docs/test_plan/01_scenario_catalog.md` — **39개 시나리오의 실제 입력 데이터**(그대로 투입 가능)
-- `docs/test_plan/02_progress_tracker.md` — **진행 현황판(SSOT)** — 매 시나리오 완료 시 갱신
-- `docs/test_plan/03_test_execution_command.md` — 실행 지시문(복사·붙여넣기용)
-
-### 테스트를 이어가려면
-1. `docs/test_plan/02_progress_tracker.md` 를 읽어 현재 어디까지 됐는지 파악.
-2. `IN_PROGRESS` 또는 첫 `PENDING` Phase 부터 진행.
-3. 시나리오 1건 끝날 때마다 tracker 를 **즉시 갱신**(끊겨도 이어갈 수 있도록).
-4. **P2(파일럿)가 관문** — 실패 시 P3+ 중단하고 원인부터 수정.
-
-> ⚠️ **P2 이후(실제 파이프라인 실행)에는 유효한 LLM 키가 필수**다. `.env` 의
-> `GOOGLE_API_KEY`/`groq_api_key`(선택 `CEREBRAS_API_KEY`)가 실제 값인지 먼저 확인할 것.
-
----
-
-## 3. 서버 기동 방법
+### 1-1. 현재 기본(SW) 파이프라인 순서 — 이번 세션에 변경됨!
 
 ```
-백엔드:  .venv\Scripts\python.exe run.py      # http://localhost:8080 (포트/UTF-8 고정)
+[기획]  요구확인 인터뷰 →(선택 답변)→ RFP →(승인)→ PRD →(승인)→ UI디자인 → VisionQA
+        →(UI승인)→ 아키텍처 → WBS분할 →(WBS승인)→ 기획 종료
+[실행]  (WBS 태스크마다) Tech_Lead → Backend → Frontend → 빌드 → 리뷰 → QA → 수용검수 → 매뉴얼
+        ※ 아키텍처는 기획 산출물 재사용(태스크에 Architect 배정 금지 — pmo_skill 에 반영됨)
+```
+
+- **요구 확인 인터뷰**: 아이디어 입력 시 에이전트가 선택형 질문 2~4개(추천안+이유)를 생성,
+  사용자는 클릭으로만 답변 → 답변이 `clarification_summary` 로 영속화되어 RFP/PRD 에 주입.
+  HOTL 게이트는 총 5곳(인터뷰/RFP/PM/VisionQA/PMO).
+- **빌드 자가복구**: 실패 시 직전 오류를 개발자 프롬프트에 주입(재추첨→수리), 3회차는 Pro 모델,
+  3회 소진 시 WBS 태스크 FAILED + `SPRINT_FAILED` 방송 + 통제실 배너에서
+  [오류 반영 재시도]/[지시 추가 후 재시도]/[보류] 선택.
+- **지식 허브**: 런처 상단 📚 버튼 → 지식팩 생성 → PDF/MD/TXT/CSV/JSON 업로드 → 프로젝트 생성 시
+  팩 선택 → 모든 에이전트 호출에 `[도메인 참고 지식+출처]` 주입(로컬 다국어 임베딩 = LLM 전환과 무관).
+  API: `/api/v1/knowledge/*`, 기존 프로젝트 연결 변경: `PUT /api/v1/factory/projects/{id}/knowledge`.
+- **성능**: 개발 노드 LLM 3회→1회(재작업 시 3회), 슈퍼바이저 데몬 화이트리스트, 모델별 컨텍스트
+  클리핑(`MODEL_CONTEXT_LIMITS` 활성화), 동기 블로킹 to_thread 처리, 체크포인트 DB 자동 정리.
+
+### 1-2. 관련 문서
+- `docs/audit_2026-07-18.md` — **전수 감사 결함/성능 목록과 처리 상태** (B9/C7 일부 PARTIAL, C8 상태 동봉 축소 보류)
+- `docs/test_plan/` — 39개 시나리오 실효성 검증 계획 (`02_progress_tracker.md` 가 진행 SSOT)
+- `docs/project_handoff.md`, `project_vision_and_spec.html` — 전체 비전/아키텍처 (일부 구식)
+- `서버기동.txt` — 서버 기동/트러블슈팅
+
+---
+
+## 2. 다음 할 일 (우선순위순)
+
+1. **A-1 관문 테스트 재실행 (P2)** — 워크플로우가 바뀌었으므로 처음부터.
+   `docs/test_plan/03_test_execution_command.md` 의 지시문을 그대로 사용하거나
+   `venv\Scripts\python.exe run_a1_test.py` 로 기동. 이번 세션의 수정(인터뷰 게이트,
+   순서 재배선, 자가복구, 지식 허브)이 한 번에 실전 검증된다.
+   ⚠️ 인터뷰 게이트가 첫 순서로 추가됐다 — 자동 승인 시 무피드백 resume 하면 통과.
+   ⚠️ Pro 체인 429 소진 이력 있음 — 쿼터 잔량 확인 후 실행.
+2. **P2 통과 후**: `02_progress_tracker.md` 갱신 → P1(구조 테스트, LLM 불필요) 보완 → P3+ 순차 진행.
+3. **지식 허브 3단계(피드백 학습 루프)** — 실행 결과+HOTL 피드백을 LLM 으로 증류 →
+   승인 게이트(스킬 진화 패널 패턴 재사용) → 팩에 learned 문서로 축적 → 반복 실행마다 고도화.
+   1+2단계 실사용 피드백을 본 뒤 착수 권장. (설계 메모: 증류는 Flash, 승인제 필수 — 지식 오염 방지)
+4. **잔여 기술부채**:
+   - pytest 낡은 테스트 7건(구버전 토폴로지 기대값) 현행화 — ENV-2 베이스라인 겸사
+   - `langgraph.json` 경로(`core/agent_graph.py`) — LangGraph Studio 사용 시에만 문제
+   - 스킬 제안 `prop_521c4962`(Tech_Lead) 승인/거부 결정 대기
+   - PreviewPanel 메인 iframe `allow-same-origin` 보안 트레이드오프(audit B9 참고)
+
+---
+
+## 3. 서버 기동 방법 (변경 없음)
+
+```
+백엔드:  venv\Scripts\python.exe run.py       # http://localhost:8080 (반드시 run.py — 포트/UTF-8 고정)
 프론트:  cd frontend && npm run dev            # http://localhost:5173
 ```
-- 반드시 `run.py` 로 백엔드 기동(포트 8080 + UTF-8 강제). 직접 `uvicorn` 실행 시 과거 포트/인코딩
-  장애 이력 있음(자세한 건 `서버기동.txt`).
 
----
-
-## 4. 더 넓은 컨텍스트
-
-- `docs/project_handoff.md` — 프로젝트 전체 비전·아키텍처·기능 설계
-- `project_vision_and_spec.html` — 제품 비전 문서
-- `서버기동.txt` — 서버 기동/트러블슈팅 매뉴얼
-
----
-
-## 5. 작업 종료 시
+## 4. 작업 종료 시
 
 ```bash
 git add -A
 git commit -m "작업 내용"
-git push          # origin/dev 로 자동 push (로컬 dev 가 origin/dev 추적 중)
+git push          # origin/dev
 ```
 > 두 곳(PC)에서 동시에 커밋하지 말 것 — `dev` 가 갈라져 충돌난다. 작업 시작=`git pull`, 종료=`git push`.
+> 이 문서(AI_HANDOFF.md)는 세션이 크게 바뀔 때마다 갱신해서 함께 커밋할 것.
