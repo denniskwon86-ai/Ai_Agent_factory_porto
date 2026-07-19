@@ -541,7 +541,7 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
 
     # 신규 기획(PLANNING)은 새 출발이므로 옛 누적 산출물을 복원하지 않는다.
     # 그 외(실행/리비전) 태스크는 stale 페이로드의 빈 누적 필드를 디스크 진실원본에서 복원.
-    if not req.task_id.startswith("PLANNING"):
+    if not (req.task_id.startswith("PLANNING") and len(req.task_id.split("_")) == 2):
         req.project_state_payload = _restore_accumulated_from_disk(req.project_state_payload, workspace_root)
         # 🚨 태스크별 재작업 카운터 리셋 — 이전 태스크의 누적(supervisor_hops/developer_retry_count)이
         #   새 태스크로 새어 즉시 상한에 걸려 검수가 통째로 건너뛰어지는 크로스-태스크 오염 차단.
@@ -570,7 +570,7 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
             pass
 
     # Clear current_stage and stage_scores for execution so it runs cleanly
-    if req.project_state_payload.get("factory_mode") == "EXECUTION" and not req.task_id.startswith("PLANNING"):
+    if req.project_state_payload.get("factory_mode") == "EXECUTION" and not (req.task_id.startswith("PLANNING") and len(req.task_id.split("_")) == 2):
         req.project_state_payload["current_stage"] = ""
         # Remove old coding scores so it doesn't skip
         for st in ["CODE_REVIEW", "Backend", "Frontend", "QA"]:

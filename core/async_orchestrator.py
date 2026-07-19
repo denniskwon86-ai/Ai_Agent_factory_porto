@@ -48,7 +48,7 @@ class AsyncFactoryOrchestrator:
             print(f" 상태 백업 실패: {e}")
 
     async def start_sprint(self, task_id: str, project_state_payload: dict, workspace_root: str) -> bool:
-        if task_id.startswith("PLANNING"):
+        if task_id.startswith("PLANNING") and len(task_id.split("_")) == 2:
             if os.path.exists(workspace_root):
                 #  [Phase 3] 파괴적 삭제(rmtree) 제거 및 스마트 아카이빙 적용
                 def _archive():
@@ -72,7 +72,7 @@ class AsyncFactoryOrchestrator:
             print(f" [Orchestrator] 신규 기획을 위해 기존 산출물을 .archive/ 폴더로 안전하게 백업했습니다.")
 
         pid = _pid(workspace_root)
-        if not task_id.startswith("PLANNING"):
+        if not (task_id.startswith("PLANNING") and len(task_id.split("_")) == 2):
             wbs_mgr = WBSManager(workspace_root=workspace_root)
             wbs_mgr.checkout_task(task_id)
             await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "status": "IN_PROGRESS", "project_id": pid})
@@ -152,7 +152,7 @@ class AsyncFactoryOrchestrator:
             detail = (vals.get("build_error_log") or "").strip()
             print(f"❌ [Orchestrator] Task {task_id}: 빌드 자가복구 3회 소진 - 실패로 종결(FAILED).")
             try:
-                if not task_id.startswith("PLANNING"):
+                if not (task_id.startswith("PLANNING") and len(task_id.split("_")) == 2):
                     WBSManager(workspace_root=workspace_root).update_task_status(task_id, "FAILED")
             except Exception as e:
                 print(f"⚠️ [Orchestrator] WBS FAILED 마킹 실패: {e}")
@@ -161,6 +161,13 @@ class AsyncFactoryOrchestrator:
                 "error": "빌드 3회 연속 실패(자가복구 소진)", "detail": detail[:2000],
             })
             return
+            
+        try:
+            if not (task_id.startswith("PLANNING") and len(task_id.split("_")) == 2):
+                WBSManager(workspace_root=workspace_root).update_task_status(task_id, "DONE")
+        except Exception as e:
+            print(f"⚠️ [Orchestrator] WBS DONE 마킹 실패: {e}")
+            
         await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id, "project_id": pid})
 
     async def is_hotl_pending(self, task_id: str, project_id: str) -> bool:

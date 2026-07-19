@@ -631,8 +631,7 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
 
         wbs_path = os.path.join(workspace_root, "00_wbs_master_plan.json")
         if os.path.exists(wbs_path):
-            wbs_mgr = WBSManager(workspace_root=workspace_root)
-            wbs_mgr.complete_task(task_id)
+            pass # (수정) 성급한 DONE 마킹 제거 - 파이프라인(END) 도달 시 Orchestrator가 처리하도록 위임
     
     return {
         "code_review_report_summary": review_text,

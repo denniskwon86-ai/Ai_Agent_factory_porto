@@ -25,12 +25,33 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
         
         # 프로젝트 루트에 index.html 이나 dist/index.html 이 있는지 확인
         target_html = None
-        # 확인 경로 우선순위: 빌드 결과물 -> 원본 -> 루트
-        for p in ["frontend/dist/index.html", "frontend/index.html", "index.html"]:
-            full_p = os.path.join(state_obj.workspace_root, p)
-            if os.path.exists(full_p):
-                target_html = full_p
-                break
+        
+        # 0순위: 기획 단계에서 생성된 UI 목업 추출
+        ui_mockup = getattr(state_obj, "ui_mockup_summary", "") or ""
+        if ui_mockup:
+            import re
+            mockup_html = ""
+            match = re.search(r'```(?:html)?\s*(<!DOCTYPE html>[\s\S]*?)```', ui_mockup, re.IGNORECASE)
+            if match:
+                mockup_html = match.group(1)
+            elif "<!DOCTYPE html>" in ui_mockup:
+                idx = ui_mockup.find("<!DOCTYPE html>")
+                mockup_html = ui_mockup[idx:]
+                
+            if mockup_html:
+                mockup_path = os.path.join(state_obj.workspace_root, "ui_mockup.html")
+                with open(mockup_path, "w", encoding="utf-8") as f:
+                    f.write(mockup_html)
+                target_html = mockup_path
+                print(f" [Vision QA] UI 목업 HTML 추출 완료: {mockup_path}")
+
+        if not target_html:
+            # 확인 경로 우선순위: 빌드 결과물 -> 원본 -> 루트
+            for p in ["frontend/dist/index.html", "frontend/index.html", "index.html", "public/index.html", "src/index.html", "dist/index.html"]:
+                full_p = os.path.join(state_obj.workspace_root, p)
+                if os.path.exists(full_p):
+                    target_html = full_p
+                    break
                 
         if target_html:
             print(f" [Vision QA] 렌더링 대상 발견: {target_html}")

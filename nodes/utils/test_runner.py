@@ -1,3 +1,5 @@
+import os
+import sys
 import subprocess
 from pathlib import Path
 from typing import Dict, Any
@@ -21,7 +23,7 @@ def run_background_tests_and_scans(workspace_root: str) -> Dict[str, Any]:
         try:
             results["pytest"]["run"] = True
             proc = subprocess.run(
-                ["pytest", "--disable-warnings", "-q"],
+                [sys.executable, "-m", "pytest", "--disable-warnings", "-q"],
                 cwd=str(root),
                 capture_output=True,
                 text=True,
@@ -38,7 +40,7 @@ def run_background_tests_and_scans(workspace_root: str) -> Dict[str, Any]:
             results["bandit"]["run"] = True
             target = "backend" if (root / "backend").exists() else "."
             proc = subprocess.run(
-                ["bandit", "-r", target, "-lll", "-ii"],
+                [sys.executable, "-m", "bandit", "-r", target, "-lll", "-ii"],
                 cwd=str(root),
                 capture_output=True,
                 text=True,

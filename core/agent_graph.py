@@ -146,7 +146,7 @@ def route_from_architect(state: ProjectState) -> str:
     # 기획 파이프라인(UI 승인 → Architect → WBS): WBS 가 아직 없으면 기획 흐름이므로 PMO 로 진행.
     # factory_mode 는 UIDesigner 가 이미 EXECUTION 으로 바꿔놓아 신뢰할 수 없다 → 태스크 id/WBS 파일로 판별.
     tid = getattr(state, "current_sprint_task_id", "") or ""
-    if tid.startswith("PLANNING") or not _wbs_file_exists(state):
+    if (tid.startswith("PLANNING") and len(tid.split("_")) == 2) or not _wbs_file_exists(state):
         print("️ [기획 설계 완료] 아키텍처 확정 - Master PMO 에게 WBS 분할을 지시합니다.")
         return "Master_PMO"
     # 실행(폴백) 경로: Architect 완료 후, 배정된 다음 에이전트로 (Tech_Lead 미배정 시 생략)

@@ -11,6 +11,9 @@ class WBSManager:
         os.makedirs(self.workspace_root, exist_ok=True)
 
     def initialize_wbs(self, project_name: str, tasks: list) -> None:
+        for i, t in enumerate(tasks):
+            if not t.get("task_id"):
+                t["task_id"] = f"WBS-{i+1:03d}"
         wbs_data = {
             "project_name": project_name,
             "version": "1.0",
