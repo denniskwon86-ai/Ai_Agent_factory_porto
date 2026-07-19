@@ -161,3 +161,7 @@ alias 는 공백 허용·128자 제한 / attributes 는 attr_schema 대비 타�
 
 **M2/M3 연결점** (이 설계가 이미 준비해 둔 것): `external_systems`·`key_crosswalk` 테이블,
 레코드 `source` 필드(`mcp:<system_id>`), 개정 계보(supersedes) — M3 캐시 테이블만 추가하면 됨.
+
+**시뮬 결과 승격 연결점** (proposals/product_strategy_vision.md 전략3 채택분): 시뮬레이션으로 검증된
+최적값을 사용자 승인 후 골든 레코드 '개정'으로 반영 — 기존 개정 규칙(version+1, 계보 유지)을 그대로 사용,
+`source` 에 `simulation:<project_id>` 표기. 별도 스키마 변경 불필요.
