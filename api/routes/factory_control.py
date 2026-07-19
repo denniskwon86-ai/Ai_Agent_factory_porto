@@ -30,7 +30,7 @@ class RevisionRequest(BaseModel):
     feedback: str
 
 class SupervisorChatRequest(BaseModel):
-    task_id: str
+    task_id: Optional[str] = ""  # 자비스 모드: 태스크 없이도(유휴 상태 포함) 시스템 전체에 대해 대화 가능
     message: str
 
 class ProjectCreateRequest(BaseModel):
@@ -612,8 +612,36 @@ async def supervisor_chat(project_id: str, req: SupervisorChatRequest):
                 state_data = json.load(f)
         except:
             pass
+
+    # [자비스 모드] 태스크/가동 여부와 무관하게 시스템 전체 현황을 브리핑으로 동봉 - 슈퍼바이저가
+    # "지금 어디까지 됐어?", "왜 멈췄어?", "다른 프로젝트 상태는?" 같은 전역 질문에 답할 수 있게 한다
+    snapshot = []
+    try:
+        st = state_data or {}
+        snapshot.append(f"[현재 프로젝트 {project_id}] 단계={st.get('current_stage','?')} / 모드={st.get('factory_mode','?')} "
+                        f"/ 태스크={st.get('current_sprint_task_id','없음')} / 단계점수={json.dumps(st.get('stage_scores') or {}, ensure_ascii=False)}")
+        wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
+        if os.path.exists(wbs_path):
+            with open(wbs_path, "r", encoding="utf-8") as f:
+                _tasks = (json.load(f) or {}).get("tasks", [])
+            snapshot.append("[WBS] " + (", ".join(f"{t.get('task_id')}:{t.get('status')}" for t in _tasks) if _tasks else "태스크 없음(분할 실패 또는 미실행)"))
+        else:
+            snapshot.append("[WBS] 아직 생성되지 않음(기획 미완)")
+        _hotl = await orchestrator.is_hotl_pending(st.get("current_sprint_task_id", "") or "sprint_init", project_id)
+        snapshot.append(f"[HOTL] {'사용자 승인 대기 중' if _hotl else '대기 없음'}")
+        from core.sys_logger import get_recent_logs
+        snapshot.append("[최근 서버 로그]\n" + "\n".join(get_recent_logs()[-12:]))
+        _projs = []
+        for item in os.listdir("./projects"):
+            if os.path.isdir(os.path.join("./projects", item)):
+                _projs.append(item)
+        snapshot.append(f"[전체 프로젝트 {len(_projs)}개] " + ", ".join(_projs[:25]))
+    except Exception as e:
+        snapshot.append(f"(현황 수집 일부 실패: {e})")
+
     from core.supervisor_daemon import supervisor_daemon
-    response = await supervisor_daemon.handle_user_chat(project_id, req.task_id, req.message, state_data)
+    response = await supervisor_daemon.handle_user_chat(project_id, req.task_id or "", req.message, state_data,
+                                                        system_snapshot="\n".join(snapshot))
     return response
 
 @router.get("/{project_id}/hotl/check")

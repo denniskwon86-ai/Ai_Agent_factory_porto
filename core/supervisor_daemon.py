@@ -87,14 +87,22 @@ class SupervisorDaemon:
         except Exception as e:
             print(f"⚠️ [Supervisor Daemon] 상태 모니터링 중 오류 발생: {e}")
 
-    async def handle_user_chat(self, project_id: str, task_id: str, message: str, state_data: dict) -> dict:
+    async def handle_user_chat(self, project_id: str, task_id: str, message: str, state_data: dict,
+                               system_snapshot: str = "") -> dict:
         persona_learner.record_interaction("supervisor_chat", message, project_id)
         prompt = f"""
-당신은 현재 가동 중인 프로젝트의 비즈니스 관점 슈퍼바이저(AGI)입니다.
-사용자(인간)가 파이프라인 가동 중에 당신에게 다음과 같은 메시지(질문/지시)를 보냈습니다:
+당신은 이 AI 팩토리 시스템 전체를 관장하는 슈퍼바이저(자비스)입니다. 파이프라인 가동 여부와
+무관하게 시스템의 모든 상태(프로젝트 진행, 멈춘 이유, WBS, 로그, 다른 프로젝트 현황)에 대해
+사용자에게 답할 수 있고, 답해야 합니다.
+
+[시스템 실시간 현황 브리핑 - 답변의 사실 근거로 사용하십시오]
+{system_snapshot or '(브리핑 없음)'}
+
+사용자(인간)의 메시지(질문/지시):
 "{message}"
 
-현재 프로젝트 상태와 산출물을 분석하여 사용자의 질문에 답변하거나, 지시에 대해 어떻게 처리할지 안내하세요.
+위 현황과 프로젝트 산출물을 근거로 구체적으로 답변하거나, 지시에 대해 어떻게 처리할지 안내하세요.
+모르는 것은 추측하지 말고 어디를 확인해야 하는지 알려주세요.
 만약 사용자의 지시가 매우 중요하여 현재 진행 중인 파이프라인을 당장 일시정지(Pause)하고 에이전트들의 작업 방향을 수정해야 한다면 'intervene': true 로 설정하세요.
 그렇지 않고 단순한 답변이나, 다음 작업에 반영해도 충분하다면 'intervene': false 로 설정하세요.
 
@@ -115,7 +123,8 @@ class SupervisorDaemon:
             )
             
             result = json.loads(response)
-            if result.get("intervene") and result.get("reason"):
+            # 개입(일시정지)은 대상 태스크가 특정된 경우에만 - 자비스 모드(무태스크 대화)에서는 답변만
+            if result.get("intervene") and result.get("reason") and task_id:
                 reason = result.get("reason")
                 print(f"️‍️ [Supervisor Daemon] 사용자의 지시로 파이프라인 개입(Pause)을 시도합니다. 사유: {reason}")
                 await orchestrator.pause_sprint(task_id, project_id, reason=reason)

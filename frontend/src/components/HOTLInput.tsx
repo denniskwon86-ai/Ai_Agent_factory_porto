@@ -92,8 +92,9 @@ export default function HOTLInput() {
   const approval = APPROVAL_MAP[(state as any)?.current_stage] || null;
 
   const handleSubmit = async () => {
-    if (!currentTask) {
-      alert("🚨 타겟 태스크(Task ID)를 찾을 수 없습니다.");
+    // 승인/재개(resume)에만 태스크가 필요 - 슈퍼바이저 대화(자비스)는 태스크·가동 여부와 무관하게 가능
+    if (isWaitingForHuman && !currentTask) {
+      alert("🚨 재개할 타겟 태스크(Task ID)를 찾을 수 없습니다.");
       return;
     }
     if (!currentProjectId) {
@@ -138,7 +139,7 @@ export default function HOTLInput() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            task_id: currentTask,
+            task_id: currentTask || "",  // 자비스 모드: 태스크 없이도 시스템 전체 질문 가능
             message: feedback.trim()
           }),
         });
