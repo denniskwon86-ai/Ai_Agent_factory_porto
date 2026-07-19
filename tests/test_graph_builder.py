@@ -26,7 +26,7 @@ def test_builder_default_node_set_matches():
 
 def test_builder_interrupt_after_default():
     _, interrupt_after = ag.build_graph_from_registry(DEFAULT_REGISTRY)
-    assert interrupt_after == ["RFP_Analyst", "Master_PMO"]
+    assert interrupt_after == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA", "Master_PMO"]
 
 
 def test_builder_equivalent_to_create_factory_graph():
@@ -40,7 +40,7 @@ def test_builder_equivalent_to_create_factory_graph():
 def test_build_workflow_delegates_to_registry_builder():
     # create_factory_graph/get_runtime_app 이 쓰는 _build_workflow 가 빌더 경로를 통하는지
     wf, ia = ag._build_workflow()
-    assert ia == ["RFP_Analyst", "Master_PMO"]
+    assert ia == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA", "Master_PMO"]
     assert EXPECTED_NODES <= set(wf.compile().get_graph().nodes.keys())
 
 

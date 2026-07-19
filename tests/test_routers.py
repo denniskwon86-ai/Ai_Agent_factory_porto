@@ -29,6 +29,10 @@ def test_factory_mode_planning():
 def test_factory_mode_revision_to_techlead():
     assert ag.route_factory_mode(S(factory_mode="REVISION")) == "Tech_Lead"
 
+def test_factory_mode_replan_to_pmo():
+    # WBS 재분할(REPLAN_*): 기획 산출물 재사용, Master_PMO 만 재실행
+    assert ag.route_factory_mode(S(current_sprint_task_id="REPLAN_123")) == "Master_PMO"
+
 def test_factory_mode_execution_first_is_architect():
     assert ag.route_factory_mode(S(current_required_agents=["Architect", "Backend"])) == "Architect"
 

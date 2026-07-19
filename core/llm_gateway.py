@@ -11,16 +11,10 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
 
 # [3차 폴백] Cerebras 는 선택적(optional) 의존성이다.
-# 패키지(langchain-cerebras)가 설치돼 있지 않거나 CEREBRAS_API_KEY 가 없으면
-# 폴백 체인에서 조용히 제외되어 기존 동작(Gemini→Groq)에 아무 영향이 없도록 한다.
-# → import 실패가 서버 부팅을 막지 않게 try/except 로 방어한다(무중단·하위호환).
-try:
-    from langchain_cerebras import ChatCerebras
-    _CEREBRAS_AVAILABLE = True
-except Exception:
-    ChatCerebras = None
-    _CEREBRAS_AVAILABLE = False
-
+# 프로바이더 패키지가 설치돼 있지 않거나 API 키가 없으면 폴백 체인에서 조용히 제외되어
+# 기존 동작에 아무 영향이 없도록 한다. import 실패가 서버 부팅을 막지 않게 try/except 방어.
+# ⚠️ Cerebras 는 langchain-cerebras 가 langchain-core 1.x 미지원(최신 0.6, core<1.0 고정)이라
+#    OpenAI 호환 엔드포인트(https://api.cerebras.ai/v1)를 ChatOpenAI 로 호출한다(OpenRouter 와 동일 패턴).
 try:
     from langchain_xai import ChatXAI
     _XAI_AVAILABLE = True
@@ -87,15 +81,22 @@ def _cerebras_out(model: str) -> int:
 
 
 def _cerebras_enabled() -> bool:
-    """Cerebras 를 폴백 체인에 넣을 수 있는 조건: 패키지 설치 + API 키 존재.
-    둘 중 하나라도 없으면 조용히 비활성(기존 Gemini→Groq 동작 유지)."""
-    return _CEREBRAS_AVAILABLE and bool(os.environ.get("CEREBRAS_API_KEY"))
+    """Cerebras 활성 조건: langchain-openai 설치 + API 키 존재 (OpenAI 호환 엔드포인트 사용).
+    둘 중 하나라도 없으면 조용히 비활성(기존 동작 유지)."""
+    return _OPENROUTER_AVAILABLE and bool(os.environ.get("CEREBRAS_API_KEY"))
 
 
 def _make_cerebras(model: str, temperature: float):
-    """Cerebras 챗 모델 인스턴스 생성(폴백 최후미용). max_retries=0 은 체인 전파 지연 방지."""
-    # langchain_cerebras.ChatCerebras 는 max_tokens 로 출력 상한을 받는다(OpenAI 호환).
-    return ChatCerebras(timeout=60, model=model, temperature=temperature, max_retries=0, max_tokens=_cerebras_out(model))
+    """Cerebras 챗 모델 인스턴스 생성(폴백 최후미용). max_retries=0 은 체인 전파 지연 방지.
+    langchain-cerebras 가 core 1.x 를 지원하지 않아 OpenAI 호환 API 로 직접 호출한다."""
+    return ChatOpenAI(
+        timeout=60, model=model,
+        temperature=temperature,
+        max_retries=0,
+        max_tokens=_cerebras_out(model),
+        base_url="https://api.cerebras.ai/v1",
+        api_key=os.environ.get("CEREBRAS_API_KEY")
+    )
 
 
 def _xai_out(model: str) -> int:

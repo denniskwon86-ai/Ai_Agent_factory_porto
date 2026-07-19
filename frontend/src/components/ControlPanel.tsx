@@ -666,13 +666,35 @@ export default function ControlPanel() {
               <div className="w-full bg-gray-950 rounded-full h-2 mt-1 border border-gray-700">
                 <div className="bg-blue-500 h-2 rounded-full transition-all duration-500 ease-out" style={{ width: `${progressPercent}%` }}></div>
               </div>
-              <button
-                onClick={openWbsWindow}
-                className="mt-2 self-start text-[11px] font-bold text-gray-200 bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors"
-                title="전체 WBS 를 새 창에 표로 보기"
-              >
-                ↗ 전체 WBS 표 보기
-              </button>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={openWbsWindow}
+                  className="text-[11px] font-bold text-gray-200 bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors"
+                  title="전체 WBS 를 새 창에 표로 보기"
+                >
+                  ↗ 전체 WBS 표 보기
+                </button>
+                {/* 🔁 WBS 재분할 - 기획 산출물(PRD/아키텍처)은 그대로 두고 태스크 분할만 다시 수행 */}
+                {!!(state as any)?.prd_summary && !activeSprintId && (
+                  <button
+                    onClick={async () => {
+                      if (!currentProjectId) return;
+                      if (!confirm("기획 산출물(RFP/PRD/UI/아키텍처)은 유지한 채 WBS 분할만 다시 수행합니다.\n(분할이 실패했거나 태스크 구성이 마음에 들지 않을 때 사용)\n진행할까요?")) return;
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/wbs/replan`, { method: 'POST' });
+                        const r = await res.json().catch(() => ({} as any));
+                        if (!res.ok) { alert(r?.detail || "재분할 가동 실패"); return; }
+                        clearSprintData();
+                        setActiveSprintId(r.task_id);
+                      } catch (e) { console.error("WBS 재분할 실패:", e); }
+                    }}
+                    className="text-[11px] font-bold text-amber-200 bg-amber-900/50 hover:bg-amber-800/60 border border-amber-700/50 px-2.5 py-1 rounded transition-colors"
+                    title="기획을 다시 돌리지 않고 WBS 분할(Master PMO)만 재실행합니다."
+                  >
+                    🔁 WBS 재분할
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* 🚀 모든 단계 완료 시 — 고객 수용검수(Supervisor) 연동 + 최종 결과물 저장(배포) */}

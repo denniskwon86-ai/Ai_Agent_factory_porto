@@ -10,9 +10,9 @@ langgraph-checkpoint-sqlite>=1.0.0
 langchain-core>=0.1.52
 langchain-google-genai>=1.0.3
 langchain-groq>=0.1.3
-langchain-cerebras>=0.5.0   # 3차 폴백(무료 티어) — CEREBRAS_API_KEY 미설정 시 게이트웨이가 자동 비활성
-langchain-xai>=0.1.0        # xAI (Grok) 연동용
-langchain-openai>=0.1.0     # OpenRouter (OpenAI 호환 API) 연동용
+# langchain-cerebras 제거: core 1.x 미지원(최신 0.6) — Cerebras 는 langchain-openai 의 OpenAI 호환 API 로 호출
+langchain-xai>=1.2         # xAI (Grok) 연동용 (core 1.x 호환)
+langchain-openai>=1.3      # OpenRouter·Cerebras (OpenAI 호환 API) 연동용 (core 1.x 호환)
 
 # 3. Utilities & Configuration
 python-dotenv>=1.0.1

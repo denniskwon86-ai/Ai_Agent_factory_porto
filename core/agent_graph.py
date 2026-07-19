@@ -130,6 +130,9 @@ def _wbs_file_exists(state: ProjectState) -> bool:
         return False
 
 def route_factory_mode(state: ProjectState) -> str:
+    # WBS 재분할(REPLAN_*): 기획 산출물(RFP/PRD/UI/아키텍처)을 그대로 재사용해 Master_PMO 만 재실행.
+    # WBS 분할이 실패/부실했을 때 기획 전체를 다시 돌리지 않고 복구하는 경로.
+    if (state.current_sprint_task_id or "").startswith("REPLAN"): return "Master_PMO"
     # PLANNING 신규 가동: 요구 확인 인터뷰(선택형 질문 게이트)부터 시작 → 답변이 RFP/PRD 입력이 된다
     if state.factory_mode == "PLANNING": return "Requirement_Interviewer"
     elif state.factory_mode == "REVISION": return "Tech_Lead"
@@ -328,7 +331,8 @@ def _wire_edges(workflow):
         route_factory_mode,
         {
             "Requirement_Interviewer": "Requirement_Interviewer",
-            "RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", "Architect": "Architect",
+            "RFP_Analyst": "RFP_Analyst", "Master_PM": "Master_PM", "Master_PMO": "Master_PMO",
+            "Tech_Lead": "Tech_Lead", "Architect": "Architect",
             "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"
         }
     )

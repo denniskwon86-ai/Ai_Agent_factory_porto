@@ -34,8 +34,8 @@ def test_sw_template_preserves_topology():
     # DEFAULT(순수 SW)는 기존과 동일한 노드 집합 + interrupt 유지(동작 보존)
     wf, ia = ag.build_graph_from_registry(DEFAULT_REGISTRY)
     names = set(wf.compile().get_graph().nodes.keys())
-    assert {"RFP_Analyst", "Master_PMO", "ManualWriter"} <= names
-    assert ia == ["RFP_Analyst", "Master_PMO"]
+    assert {"Requirement_Interviewer", "RFP_Analyst", "Architect", "Master_PMO", "ManualWriter"} <= names
+    assert ia == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA", "Master_PMO"]
 
 
 def test_generic_template_builds_linear_universal_graph():

@@ -72,7 +72,11 @@
 | 1 | A-1 | Critical | VisionQA가 `ProjectState`에 없는 `completed_agents` 필드 접근 → `AttributeError`로 파이프라인 중단 (nodes/vision_qa.py, 커밋 b5b8407에서 유입) | **FIXED** (2026-07-17, 통과 시 `reviewer_decision` 미초기화로 인한 UIDesigner 무한왕복 잠재결함도 함께 수정) |
 | 2 | A-1 | Major | 워크플로우 순서 결함: 아키텍처가 WBS 분할 *이후* 실행 태스크 안에서 수립되어 WBS가 설계 없이 작성됨 (스킬제안 prop_521c4962가 자가 진단한 정합성 오류의 근원) | **FIXED** (2026-07-17, B안: RFP→PRD→UI→VisionQA→**Architect**→WBS 로 재배선. agent_graph/planning/execution/registry/pmo_skill/프론트 2종 수정, 라우터 테스트 37건 통과) |
 | 3 | A-1 | Minor | `playwright` 미설치로 VisionQA 스크린샷 캡처가 항상 생략됨(시각 검증 실효성 없음) | OPEN — `pip install playwright && playwright install chromium` 필요 |
-| 4 | ENV-2 | Minor | pytest 기존 실패 7건(구버전 토폴로지 기준의 낡은 기대값: interrupt 2개 가정 등) — 이번 변경과 무관하게 HEAD에서도 동일 실패 확인 | OPEN — ENV-2 베이스라인 기록 대상 |
+| 4 | ENV-2 | Minor | pytest 기존 실패 7건(구버전 토폴로지 기준의 낡은 기대값: interrupt 2개 가정 등) — 이번 변경과 무관하게 HEAD에서도 동일 실패 확인 | **FIXED** (2026-07-19 어서션 현행화 + 형제 리포 pyc 캐시 오염 제거 → **전 스위트 155건 통과 = ENV-2 베이스라인**) |
+| 5 | A-1 4차 | Major | `hotl/check` 가 PLANNING_* 태스크의 HOTL 대기를 미감지(SSE 유실 시 기획 게이트 복구 불가) | **FIXED** (latest_state 의 현재 태스크로도 확인) |
+| 6 | A-1 4차·AABB | Critical | WBS 분할 결과가 빈 태스크로 저장되고 게이트 통과 → 기획이 '완료된 척' 정지 (non-greedy JSON 절단 + 빈 결과 무방어) | **FIXED** (파싱 견고화+1회 재시도+빈 WBS 저장 금지) + **복구 수단 신설**(`wbs/replan` API·UI 버튼) |
+| 7 | A-1 2차 | Major | `run.py` reload=True 가 .py 저장 시 서버 재시작 → 실행 중 스프린트 스트림 사망 | **FIXED** (운영 모드 기본 reload OFF, `--dev` 옵트인) |
+| 8 | 환경 | Major | 프로바이더 패키지 설치가 langchain-core 를 0.3 으로 다운그레이드시켜 gemini/groq 임포트 파손. langchain-cerebras 는 core 1.x 미지원 | **FIXED** (core 1.x 정렬, Cerebras 는 OpenAI 호환 API 로 전환 — 5중 폴백 전부 활성) |
 
 ## 세션 인수인계 메모
 

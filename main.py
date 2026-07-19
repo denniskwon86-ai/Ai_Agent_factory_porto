@@ -49,6 +49,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def _warmup():
+    """기동 시 기본 그래프·체크포인터를 미리 컴파일 - 재시작 직후 첫 API 호출이
+    초기화(그래프 컴파일+SQLite 커넥션)로 수십 초 지연되던 문제 제거."""
+    try:
+        from core.agent_graph import get_runtime_app
+        await get_runtime_app()
+        print("[OK] [Warmup] 기본 그래프/체크포인터 사전 컴파일 완료.")
+    except Exception as e:
+        print(f"⚠️ [Warmup] 사전 컴파일 실패(첫 호출 시 초기화됨): {e}")
+
+
 app.include_router(factory_control.router)
 app.include_router(format_control.router)
 app.include_router(realtime.router)

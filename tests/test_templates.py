@@ -16,7 +16,7 @@ def test_list_always_includes_default(isolated):
     assert "default" in ids
     default = next(t for t in ar.list_templates() if t["id"] == "default")
     assert default["builtin"] is True
-    assert default["agent_count"] == 12  # Supervisor(고객 수용검수) 추가
+    assert default["agent_count"] == 15  # 14 에이전트 + Requirement_Interviewer(요구확인 인터뷰)
 
 
 def test_load_default_equals_load_registry(isolated):

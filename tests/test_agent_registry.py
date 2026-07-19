@@ -34,8 +34,8 @@ def test_normalize_sorts_and_drops_idless():
 
 
 def test_get_interrupt_after_default(isolated_registry):
-    # Tech_Lead 게이트 제거됨 — RFP·PMO/WBS 게이트만 유지
-    assert ar.get_interrupt_after(default=["X"]) == ["RFP_Analyst", "Master_PMO"]
+    # 현행 HOTL 게이트 5곳: 인터뷰·RFP·PRD·VisionQA(UI승인)·PMO(WBS승인)
+    assert ar.get_interrupt_after(default=["X"]) == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA", "Master_PMO"]
 
 
 def test_save_load_roundtrip(isolated_registry):

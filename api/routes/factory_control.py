@@ -721,6 +721,36 @@ async def trigger_self_healing(project_id: str, req: HealRequest):
     await orchestrator.start_sprint(task_id, project_state_payload, workspace_root)
     return {"status": "healing_started", "task_id": task_id}
 
+@router.post("/{project_id}/wbs/replan")
+async def replan_wbs(project_id: str):
+    """WBS 재분할 - 기획 산출물(RFP/PRD/UI/아키텍처)을 재사용해 Master_PMO 만 재실행한다.
+    WBS 분할이 실패(빈 태스크)했거나 부실할 때 기획 전체 재가동 없이 복구하는 경로."""
+    _safe_id(project_id, "project_id")
+    workspace_root = f"./projects/{project_id}"
+    state_path = os.path.join(workspace_root, "latest_state.json")
+    if not os.path.exists(state_path):
+        raise HTTPException(status_code=404, detail="프로젝트 상태가 없습니다. 기획부터 가동하세요.")
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            st = json.load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"상태 읽기 오류: {e}")
+    if not (st.get("prd_summary") or "").strip():
+        raise HTTPException(status_code=400, detail="기획 산출물(PRD)이 없어 재분할할 수 없습니다. 기획을 먼저 완료하세요.")
+
+    import time as _time
+    task_id = f"REPLAN_{int(_time.time() * 1000)}"
+    st["current_sprint_task_id"] = task_id
+    st["factory_mode"] = "EXECUTION"  # REPLAN_* 접두사가 라우팅을 결정(기획 산출물 재사용)
+    st["needs_revision"] = False
+    st["workspace_root"] = workspace_root
+    st["template_id"] = _read_project_template(workspace_root)
+    ok = await orchestrator.start_sprint(task_id, st, workspace_root)
+    if not ok:
+        raise HTTPException(status_code=409, detail="이미 실행 중인 스프린트가 있습니다.")
+    return {"status": "started", "task_id": task_id}
+
+
 @router.get("/{project_id}/wbs")
 async def get_wbs_master_plan(project_id: str):
     _safe_id(project_id, "project_id")

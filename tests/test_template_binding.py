@@ -18,7 +18,7 @@ def client(tmp_path, monkeypatch):
 
 
 def test_meta_roundtrip(tmp_path):
-    fc._write_project_template(str(tmp_path), "marketing")
+    fc._write_project_meta(str(tmp_path), "marketing")
     assert fc._read_project_template(str(tmp_path)) == "marketing"
 
 

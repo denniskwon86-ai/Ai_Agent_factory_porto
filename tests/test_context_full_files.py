@@ -42,7 +42,8 @@ def test_default_mode_truncates_large_file(tmp_path):
     state = _make_state(tmp_path)
     ctx = ContextEngine.build_core_context(state)
     assert SENTINEL not in ctx
-    assert "자 생략" in ctx  # _clip 절단 마커
+    # 절단/요약 증거: 코드 파일은 JIT 시그니처 요약, 그 외는 _clip 절단 마커 중 하나가 있어야 한다
+    assert ("(JIT Signature)" in ctx) or ("자 생략" in ctx)
 
 
 def test_light_mode_skips_files(tmp_path):
