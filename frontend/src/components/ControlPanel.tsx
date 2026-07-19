@@ -112,6 +112,8 @@ export default function ControlPanel() {
   const setActiveSprintId = useFactoryStore((s) => s.setActiveSprintId);
   const hotlTaskId = useFactoryStore((s) => s.hotlTaskId);
   const isConnected = useFactoryStore((s) => s.isConnected);
+  const isSuspendedQuota = useFactoryStore((s) => s.isSuspendedQuota);
+  const clearSuspendedQuota = useFactoryStore((s) => s.clearSuspendedQuota);
   const currentTemplateData = useFactoryStore((s) => s.currentTemplateData);
   const lastSprintFailure = useFactoryStore((s) => s.lastSprintFailure);
   const clearSprintFailure = useFactoryStore((s) => s.clearSprintFailure);
@@ -492,6 +494,20 @@ export default function ControlPanel() {
         {isWbsError && (
           <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded text-sm text-red-200">
             🚨 서버 통신 단절. 새로고침 해주세요.
+          </div>
+        )}
+
+        {isSuspendedQuota && (
+          <div className="mb-4 p-4 bg-orange-900/50 border border-orange-500 rounded text-sm text-orange-200 shadow-lg">
+            <h3 className="font-bold text-base mb-2">🚨 LLM API 할당량(Quota) 모두 소진됨</h3>
+            <p className="mb-3 text-xs leading-relaxed opacity-90">
+              현재 연결된 모든 LLM(Groq, Gemini 등)의 무료 호출 할당량이 모두 바닥났습니다. <br/>
+              가동 중이던 에이전트 파이프라인은 현재 상태 그대로 안전하게 <strong>동결(Suspend)</strong> 되었습니다. 
+              내일 할당량이 갱신된 후 보류된 태스크를 재가동하거나, 새로운 API 키를 등록해 주세요.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={clearSuspendedQuota} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-white transition-colors">⏸️ 알림 닫기</button>
+            </div>
           </div>
         )}
 

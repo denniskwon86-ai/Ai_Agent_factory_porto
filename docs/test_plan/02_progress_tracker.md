@@ -35,7 +35,7 @@
 | S-6 | PENDING | — | | |
 | S-7 | PENDING | — | | |
 | S-8 | PENDING | — | | |
-| A-1 | IN_PROGRESS | — | 2026-07-16 | 🚧 관문 시나리오 실행 중 |
+| A-1 | FAIL | — | 2026-07-16 | ❌ 관문 시나리오 실패 (E2E-03 쿼터 소진) |
 | A-2 | PENDING | — | | |
 | A-3 | PENDING | — | | |
 | A-4 | PENDING | — | | |
@@ -85,6 +85,7 @@
 | 6 | A-1 4차·AABB | Critical | WBS 분할 결과가 빈 태스크로 저장되고 게이트 통과 → 기획이 '완료된 척' 정지 (non-greedy JSON 절단 + 빈 결과 무방어) | **FIXED** (파싱 견고화+1회 재시도+빈 WBS 저장 금지) + **복구 수단 신설**(`wbs/replan` API·UI 버튼) |
 | 7 | A-1 2차 | Major | `run.py` reload=True 가 .py 저장 시 서버 재시작 → 실행 중 스프린트 스트림 사망 | **FIXED** (운영 모드 기본 reload OFF, `--dev` 옵트인) |
 | 8 | 환경 | Major | 프로바이더 패키지 설치가 langchain-core 를 0.3 으로 다운그레이드시켜 gemini/groq 임포트 파손. langchain-cerebras 는 core 1.x 미지원 | **FIXED** (core 1.x 정렬, Cerebras 는 OpenAI 호환 API 로 전환 — 5중 폴백 전부 활성) |
+| 9 | A-1 (E2E-03) | Major | LLM Gateway 할당량(무료 티어) 소진으로 인해 기술명세 단계 중단 후 프론트엔드 산출물 빈 값 반환 → 파싱 실패 및 파이프라인 중단(FAILED) | OPEN — 쿼터 회복 대기 및 산출물 빈 값에 대한 예외 처리 강화 필요 |
 
 ## 세션 인수인계 메모
 

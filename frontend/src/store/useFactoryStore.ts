@@ -66,6 +66,8 @@ interface FactoryStore {
   // 빌드 자가복구(3회) 소진 등 스프린트 최종 실패 정보 - ControlPanel 실패 배너/재시도 UI 용
   lastSprintFailure: { taskId: string; error: string; detail?: string } | null;
   clearSprintFailure: () => void;
+  isSuspendedQuota: boolean;
+  clearSuspendedQuota: () => void;
   supervisorFeed: any[];
   releases: any[];
   viewingRelease: any | null;
@@ -142,6 +144,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   completed_agents: [],
   currentActivity: null,
   lastSprintFailure: null,
+  isSuspendedQuota: false,
   supervisorFeed: [],
   releases: [],
   viewingRelease: null,
@@ -598,6 +601,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   clearSprintData: () => set({ completed_agents: [], currentActivity: null, healingRetryCount: 0, lastSprintFailure: null }),
 
   clearSprintFailure: () => set({ lastSprintFailure: null }),
+  clearSuspendedQuota: () => set({ isSuspendedQuota: false }),
 
   triggerSelfHealing: async (errorMsg: string) => {
     const { currentProjectId, isConnected, healingRetryCount } = get();
@@ -751,7 +755,15 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
             state: { ...(prev.state || {}), needs_revision: true, current_sprint_task_id: data.payload.task_id } as ProjectState,
             activeSprintId: null,
             hotlTaskId: data.payload.task_id,
-            currentActivity: null
+            currentActivity: { node: "System", step: "인간 개입 필요", activity: "HOTL 게이트 대기 중..." }
+          };
+        }
+        if (data.type === 'QUOTA_EXHAUSTED') {
+          return {
+            logs,
+            isSuspendedQuota: true,
+            activeSprintId: null,
+            currentActivity: { node: "System", step: "일시 정지", activity: "LLM 할당량 소진으로 태스크 보류됨" }
           };
         }
         if (data.type === 'SPRINT_COMPLETED') {

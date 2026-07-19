@@ -4,11 +4,14 @@ import re
 import asyncio
 from typing import Any
 from google import genai
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
-from pydantic import BaseModel, Field
+
+class QuotaExhaustedException(Exception):
+    pass
 
 # [3차 폴백] Cerebras 는 선택적(optional) 의존성이다.
 # 프로바이더 패키지가 설치돼 있지 않거나 API 키가 없으면 폴백 체인에서 조용히 제외되어
@@ -365,7 +368,7 @@ class LLMGateway:
                                                    output_mode=output_mode, light=light, full_file_exts=full_file_exts)
                     else:
                         print(" [LLM Gateway] 치명적 에러: 가용한 모든 LLM API의 할당량이 고갈되었습니다.")
-                        return json.dumps({"files": [], "error": "LLM API LIMIT ERROR"})
+                        raise QuotaExhaustedException("가용한 모든 LLM API의 할당량이 고갈되었습니다.")
             else:
                 print(f"❌ [LLM Gateway] 예측 불가능한 네트워크 에러 발생: {error_str}")
                 if is_heavy and retry_count == 0:

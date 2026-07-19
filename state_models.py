@@ -87,7 +87,7 @@ class ProjectState(BaseModel):
     shared_ledger: Dict[str, dict] = Field(default_factory=dict, description="서브 프로젝트 간 공유되는 전사 공통 원장 (이벤트/변수 버스)")
     domain_agents: List[str] = Field(default_factory=list, description="서브 프로젝트에 할당된 실행 에이전트 ID 목록 (비어 있으면 전체 파이프라인 실행)")
     
-    factory_mode: Literal["PLANNING", "EXECUTION", "REVISION", "REVIEW", "QA_RELEASE", "HOTL_PAUSED"] = Field(default="PLANNING")
+    factory_mode: Literal["PLANNING", "EXECUTION", "REVISION", "REVIEW", "QA_RELEASE", "HOTL_PAUSED", "SUSPENDED_QUOTA"] = Field(default="PLANNING")
     workspace_root: str = Field(default="./workspace")
     git_info: GitInfo = Field(default_factory=GitInfo)
     workspace_hash: str = Field(default="")

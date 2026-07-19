@@ -10,6 +10,7 @@ from core.agent_graph import get_runtime_app
 from core.broadcaster import factory_broadcaster
 from nodes.utils.wbs_manager import WBSManager
 from core.persona_learner import persona_learner
+from core.llm_gateway import QuotaExhaustedException
 
 def _pid(workspace_root: str) -> str:
     """workspace_root(./projects/<id>)에서 project_id 추출 - SSE 프로젝트 격리용."""
@@ -206,6 +207,12 @@ class AsyncFactoryOrchestrator:
             await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)
         except asyncio.CancelledError:
             print(f"⏸️ [Orchestrator] Sprint Loop Cancelled (Paused): {task_id}")
+        except QuotaExhaustedException as e:
+            print(f"⏸️ [Orchestrator] 쿼터 소진으로 인해 태스크 보류됨: {task_id}")
+            await langgraph_engine.aupdate_state(config, {"factory_mode": "SUSPENDED_QUOTA"})
+            snapshot = await langgraph_engine.aget_state(config)
+            await self._save_latest_state(snapshot.values, workspace_root)
+            await factory_broadcaster.broadcast("QUOTA_EXHAUSTED", {"task_id": task_id, "project_id": pid})
         except Exception as e:
             # 침묵 금지: 실패 이벤트를 브로드캐스트해야 UI 가 '영원히 가동 중' 상태에 갇히지 않는다
             print(f" [Orchestrator] Sprint Loop Error: {e}")
@@ -269,6 +276,12 @@ class AsyncFactoryOrchestrator:
             await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)
         except asyncio.CancelledError:
             print(f"⏸️ [Orchestrator] Resume Stream Cancelled (Paused): {task_id}")
+        except QuotaExhaustedException as e:
+            print(f"⏸️ [Orchestrator] 쿼터 소진으로 인해 태스크 보류됨: {task_id}")
+            await langgraph_engine.aupdate_state(config, {"factory_mode": "SUSPENDED_QUOTA"})
+            snapshot = await langgraph_engine.aget_state(config)
+            await self._save_latest_state(snapshot.values, workspace_root)
+            await factory_broadcaster.broadcast("QUOTA_EXHAUSTED", {"task_id": task_id, "project_id": pid})
         except Exception as e:
             print(f" [Orchestrator] Resume Stream Error: {e}")
             await factory_broadcaster.broadcast("SPRINT_FAILED", {"task_id": task_id, "project_id": pid, "error": str(e)})
