@@ -94,23 +94,7 @@ def _has_role(agents: list, role_en: str, role_ko: str = "") -> bool:
     # role_en 은 항상 정규 id(Architect/Tech_Lead/Backend/Frontend/QA 등). role_ko 는 하위호환용 미사용.
     return role_en in (agents or [])
 
-def _is_final_task(state: ProjectState) -> bool:
-    """현재 시점에 WBS의 모든 태스크가 DONE인지(=마지막 태스크가 방금 완료됐는지) 확인.
-    QA(최종 통합 검증)를 WBS 매핑과 무관하게 마지막 단계에서 자동 실행하기 위함."""
-    try:
-        wbs_path = os.path.join(state.workspace_root, "00_wbs_master_plan.json")
-        if not os.path.exists(wbs_path):
-            return False
-        with open(wbs_path, "r", encoding="utf-8") as f:
-            tasks = json.load(f).get("tasks", []) or []
-        if not tasks:
-            return False
-        # 리비전(TASK_REV_*)은 후속 작업 유무 판단에서 제외하고 본 태스크 기준으로 본다
-        core = [t for t in tasks if not str(t.get("task_id", "")).startswith("TASK_REV_")]
-        target = core or tasks
-        return all(t.get("status") == "DONE" for t in target)
-    except Exception:
-        return False
+# (_is_final_task 함수가 명시적 역할 배정 로직으로 대체되어 삭제되었습니다)
 
 def _route_to_first_assigned(agents: list, include_design: bool = True, include_architect: bool = True) -> str:
     """배정된 에이전트 명단에서 파이프라인 순서상 첫 실행 대상 노드를 고른다."""
@@ -201,14 +185,15 @@ def route_from_reviewer(state: ProjectState) -> str:
         return "Tech_Lead"
         
     agents = _get_required_agents(state)
-    # QA는 ① 태스크에 명시 배정됐거나 ② 프로젝트 마지막 태스크가 완료된 시점(최종 통합 검증)에 자동 실행
+    # QA 역할이 명시적으로 배정된 경우 진입
     if _has_role(agents, "QA", "QA") or _has_role(agents, "QA", "테스트"):
         return "QA"
-    if _is_final_task(state):
-        print(" [최종 통합 검증] 모든 WBS 태스크 완료 - QA를 자동 투입합니다 (WBS 미배정이어도 실행).")
-        return "QA"
-    # 비최종 태스크는 여기서 스프린트 종료(END). 매뉴얼은 최종 태스크의 QA 직후(QA→ManualWriter)에만 1회 작성.
-    print("[OK] [태스크 완료] 비최종 태스크 - 스프린트 종료(매뉴얼은 마지막에 한 번만 작성).")
+    # QA는 없지만 Supervisor 역할이 명시적으로 배정된 경우 진입
+    if _has_role(agents, "Supervisor", "고객수용") or _has_role(agents, "Supervisor", "Supervisor"):
+        return "Supervisor"
+    
+    # 명시적 검수 역할이 없으면 스프린트 종료(END)
+    print("[OK] [태스크 완료] 추가 검수 역할이 배정되지 않았습니다 - 스프린트 종료.")
     return END
 
 def route_from_pm(state: ProjectState) -> str:
@@ -284,10 +269,13 @@ def route_from_qa(state: ProjectState) -> str:
     if getattr(state, "qa_verdict", "") == "FAIL":
         print(" [QA 미달] 설계·통합 결함 - Tech_Lead 에게 재작업 지시.")
         return "Tech_Lead"
-    if _is_final_task(state):
-        print("➡️ [QA 통과] 고객사 수용검수(Supervisor)로 진행.")
+        
+    agents = _get_required_agents(state)
+    if _has_role(agents, "Supervisor", "고객수용") or _has_role(agents, "Supervisor", "Supervisor"):
+        print("➡️ [QA 통과] WBS 명단에 따라 고객사 수용검수(Supervisor)로 진행.")
         return "Supervisor"
-    print("[OK] [전용 QA 통과] 비최종 태스크 - 스프린트 종료.")
+        
+    print("[OK] [QA 통과] Supervisor 역할이 배정되지 않았으므로 스프린트 종료.")
     return END
 
 def route_from_supervisor(state: ProjectState) -> str:

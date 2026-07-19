@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
+import TraceabilityGraph from './TraceabilityGraph';
 
 // 마크다운을 간단히 HTML로 변환하는 경량 렌더러 (외부 라이브러리 없음)
 function ManualRenderer({ markdown }: { markdown: string }) {
@@ -570,7 +571,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
       { id: 'ARCH', label: '🏗️ 아키텍처' }, { id: 'TECH', label: '🛠️ 기술사양' },
       { id: 'FRONTEND', label: '🎨 프론트엔드' }, { id: 'BACKEND', label: '⚙️ 백엔드' },
       { id: 'REVIEW', label: '📝 리뷰' }, { id: 'QA', label: '🧪 QA' },
-      { id: 'ACCEPT', label: '🧑‍⚖️ 수용검수' }, { id: 'MANUAL', label: '📘 사용자 매뉴얼' }
+      { id: 'ACCEPT', label: '🧑‍⚖️ 수용검수' }, { id: 'MANUAL', label: '📘 사용자 매뉴얼' },
+      { id: 'TRACE', label: '🔗 추적성' }
     ];
   }
 
@@ -624,6 +626,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
               }
             </div>
           </div>
+        ) : activeTab === 'TRACE' ? (
+          <TraceabilityGraph />
         ) : (
           <div className="w-full h-full bg-white overflow-y-auto">
             {typeof tabContent === 'string' && tabContent.includes('<html') ? (

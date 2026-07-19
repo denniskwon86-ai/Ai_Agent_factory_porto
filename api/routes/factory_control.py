@@ -764,6 +764,18 @@ async def get_wbs_master_plan(project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"WBS 파일을 읽는 중 오류 발생: {str(e)}")
 
+@router.get("/{project_id}/traceability")
+async def get_traceability_data(project_id: str):
+    """산출물 추적성 맵핑 데이터(FR-ID ↔ Files)를 조회합니다."""
+    _safe_id(project_id, "project_id")
+    workspace_root = f"./projects/{project_id}"
+    from nodes.utils.traceability_manager import TraceabilityManager
+    try:
+        tm = TraceabilityManager(workspace_root=workspace_root)
+        return {"status": "success", "data": tm.get_mappings()}
+    except Exception as e:
+        return {"status": "error", "message": f"추적성 데이터 조회 실패: {str(e)}"}
+
 @router.get("/{project_id}/feed")
 async def get_supervisor_feed(project_id: str):
     """슈퍼바이저 콘솔 피드(토론·채점 내레이션) 조회 — 새로고침/재접속 복구용."""

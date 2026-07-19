@@ -12,6 +12,7 @@ from nodes.utils.git_manager import GitManager
 from nodes.utils.wbs_manager import WBSManager
 from nodes.utils.syntax_checker import LocalSyntaxChecker
 from nodes.code_builder import CodeBuilder
+from nodes.utils.traceability_manager import TraceabilityManager
 
 def _load_skill(role_name: str) -> str:
     path = f"skills/{role_name}.md"
@@ -339,6 +340,18 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
     if updated_state_dict.get("build_status") == "failed":
         if not has_coding_agent: return {"build_status": "success", "developer_retry_count": 0}
         else: return {"build_status": "failed", "failed_node": ("Frontend" if has_fe else "Backend"), "developer_retry_count": current_retry + 1}
+
+    # 🔗 [추적성 엔젠] WBS 목표/스코프에서 FR-ID 추출 후 산출물 파일들과 맵핑 저장
+    goal = getattr(state_obj, "goal", "") or ""
+    scope = " ".join(getattr(state_obj, "scope", []) or [])
+    fr_ids = re.findall(r"FR-\d{3}", goal + " " + scope)
+    if fr_ids and all_files_to_write:
+        written_files = [f.get("file_path", "") for f in all_files_to_write if f.get("file_path")]
+        try:
+            tm = TraceabilityManager(workspace_root=state_obj.workspace_root)
+            tm.update_mapping(state_obj.current_sprint_task_id, fr_ids, written_files)
+        except Exception as e:
+            print(f"⚠️ [Traceability] 매핑 저장 실패: {e}")
 
     # ️ [프리뷰/회귀 정합성] frontend/backend_code_summary 를 'LLM 마지막 출력'이 아니라
     #    '디스크의 현재 전체 파일 집합'으로 재구성. 이번 태스크가 일부 파일만 재출력해도(또는 한
