@@ -1,7 +1,9 @@
 {
+  "id": "",
   "version": 1,
   "pipeline_name": "제조업 시장 수요 및 대외 지표 예측 (Market Forecast)",
   "description": "국제 원자재 가격, 환율, 거시경제 지표 및 시장 트렌드를 분석하여 수요를 예측하고 공급망 리스크를 관리합니다.",
+  "deliverable_type": "software_app",
   "agents": [
     {
       "id": "Macro_Indicator_Crawler",
@@ -16,7 +18,11 @@
       "hotl_after": false,
       "debate": false,
       "llm": true,
-      "is_start": true
+      "position": null,
+      "is_start": true,
+      "is_end": false,
+      "is_framework": false,
+      "output_format": ""
     },
     {
       "id": "Market_Trend_Analyst",
@@ -30,7 +36,12 @@
       "enabled": true,
       "hotl_after": false,
       "debate": true,
-      "llm": true
+      "llm": true,
+      "position": null,
+      "is_start": false,
+      "is_end": false,
+      "is_framework": false,
+      "output_format": ""
     },
     {
       "id": "Demand_Prediction_Engine",
@@ -44,7 +55,12 @@
       "enabled": true,
       "hotl_after": false,
       "debate": false,
-      "llm": true
+      "llm": true,
+      "position": null,
+      "is_start": false,
+      "is_end": false,
+      "is_framework": false,
+      "output_format": ""
     },
     {
       "id": "Risk_Management_Strategist",
@@ -58,7 +74,12 @@
       "enabled": true,
       "hotl_after": true,
       "debate": true,
-      "llm": true
+      "llm": true,
+      "position": null,
+      "is_start": false,
+      "is_end": false,
+      "is_framework": false,
+      "output_format": ""
     },
     {
       "id": "Executive_Briefing_Bot",
@@ -73,7 +94,11 @@
       "hotl_after": true,
       "debate": false,
       "llm": true,
-      "is_end": true
+      "position": null,
+      "is_start": false,
+      "is_end": true,
+      "is_framework": false,
+      "output_format": ""
     }
   ],
   "edges": [
@@ -82,28 +107,40 @@
       "source": "Macro_Indicator_Crawler",
       "target": "Market_Trend_Analyst",
       "animated": true,
-      "style": { "stroke": "#4b5563", "strokeWidth": 2 }
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
     },
     {
       "id": "e-Market_Trend_Analyst-Demand_Prediction_Engine",
       "source": "Market_Trend_Analyst",
       "target": "Demand_Prediction_Engine",
       "animated": true,
-      "style": { "stroke": "#4b5563", "strokeWidth": 2 }
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
     },
     {
       "id": "e-Demand_Prediction_Engine-Risk_Management_Strategist",
       "source": "Demand_Prediction_Engine",
       "target": "Risk_Management_Strategist",
       "animated": true,
-      "style": { "stroke": "#4b5563", "strokeWidth": 2 }
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
     },
     {
       "id": "e-Risk_Management_Strategist-Executive_Briefing_Bot",
       "source": "Risk_Management_Strategist",
       "target": "Executive_Briefing_Bot",
       "animated": true,
-      "style": { "stroke": "#4b5563", "strokeWidth": 2 }
+      "style": {
+        "stroke": "#4b5563",
+        "strokeWidth": 2
+      }
     }
   ]
 }

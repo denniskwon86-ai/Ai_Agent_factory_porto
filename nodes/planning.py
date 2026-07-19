@@ -162,27 +162,46 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
         prompt += f"\n\n[ 사용자 피드백 - WBS 재분할 시 반드시 반영하십시오]:\n{_latest_fb.strip()}"
         print(f" [Master PMO] 사용자 피드백을 반영해 WBS 를 재분할합니다: {_latest_fb.strip()[:80]}")
 
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json")
-    wbs_code = _extract_code_from_ssot(output) or output
-
-    wbs_tasks = []
-    try:
-        clean_str = wbs_code.strip()
-        md_match = re.search(r'\x60{3}(?:json)?\s*(\{[\s\S]*?\})\s*\x60{3}', clean_str)
-        if md_match: clean_str = md_match.group(1)
+    def _parse_wbs_tasks(raw: str) -> list:
+        clean_str = (raw or "").strip()
+        # 1차: 게이트웨이가 이미 복구한 JSON 일 가능성이 높으므로 전체 파싱 먼저
+        try:
+            return (json.loads(clean_str) or {}).get("tasks", []) or []
+        except Exception:
+            pass
+        # 2차: 코드펜스/서술 혼입 시 추출 - 반드시 greedy. non-greedy(*?)는 중첩 JSON(tasks 배열)의
+        # 첫 '}' 에서 잘려 파싱이 깨지고 '빈 WBS' 가 조용히 저장된다(A-1 완주 스프린트 실측 결함)
+        md_match = re.search(r'\x60{3}(?:json)?\s*(\{[\s\S]*\})\s*\x60{3}', clean_str)
+        if md_match:
+            clean_str = md_match.group(1)
         else:
             bracket_match = re.search(r'(\{[\s\S]*\})', clean_str)
-            if bracket_match: clean_str = bracket_match.group(1)
-        wbs_data = json.loads(clean_str)
-        wbs_tasks = wbs_data.get("tasks", [])
-    except Exception as e:
-        print(f"⚠️ WBS 파싱 실패. 비상 백로그 강제 주입 가동: {e}")
-        wbs_tasks = []
+            if bracket_match:
+                clean_str = bracket_match.group(1)
+        try:
+            return (json.loads(clean_str) or {}).get("tasks", []) or []
+        except Exception as e:
+            print(f"⚠️ WBS 파싱 실패: {e}")
+            return []
 
-    if state_obj.workspace_root:
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json")
+    wbs_tasks = _parse_wbs_tasks(_extract_code_from_ssot(output) or output)
+
+    if not wbs_tasks:
+        # 빈 WBS 는 치명(실행할 태스크가 없어 파이프라인이 '완료된 척' 멈춘다) → 지시 강화 후 1회 재시도
+        print("⚠️ [Master PMO] WBS 태스크 0개 - 지시를 강화해 1회 재시도합니다.")
+        retry_prompt = prompt + ("\n\n[ 재시도 - 직전 응답이 유효한 WBS JSON 이 아니었습니다. "
+                                 "부연 설명 없이 'tasks' 배열(최소 4개 태스크)을 포함한 JSON 객체 하나만 출력하십시오.]")
+        output = await gateway.aexecute(state_obj, retry_prompt, is_heavy=True, output_mode="json")
+        wbs_tasks = _parse_wbs_tasks(_extract_code_from_ssot(output) or output)
+
+    if state_obj.workspace_root and wbs_tasks:
         wbs_mgr = WBSManager(state_obj.workspace_root)
         wbs_mgr.initialize_wbs(state_obj.project_name, wbs_tasks)
         print(f"[OK] WBS 초기화 완료: 총 {len(wbs_tasks)}개의 태스크가 스케줄링되었습니다.")
+    elif not wbs_tasks:
+        # 빈 WBS 로 기존 파일을 덮어쓰지 않는다 - 게이트에서 사용자가 피드백(재분할)으로 복구 가능
+        print("❌ [Master PMO] 재시도에도 WBS 생성 실패 - 빈 WBS 를 저장하지 않고 재분할 대기 상태로 둡니다.")
 
     # 첫 번째 실행 가능 태스크의 required_agents를 현재 스프린트 에이전트 명단으로 저장
     first_task_agents = []

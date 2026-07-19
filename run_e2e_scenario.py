@@ -35,13 +35,29 @@ def log(msg: str):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def get(path: str, timeout=15):
-    r = requests.get(f"{BASE}{path}", timeout=timeout)
-    return r.json() if r.ok else None
+def get(path: str, timeout=45):
+    # 서버 재시작 직후 첫 호출은 그래프 컴파일/체크포인터 초기화로 수십 초 걸릴 수 있다
+    # → 일시 타임아웃/연결오류로 완주 드라이버가 죽지 않게 재시도 내성
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{BASE}{path}", timeout=timeout)
+            return r.json() if r.ok else None
+        except requests.exceptions.RequestException as e:
+            log(f"   (get {path} 시도 {attempt + 1}/3 실패: {type(e).__name__} — 15초 후 재시도)")
+            time.sleep(15)
+    return None
 
 
-def post(path: str, body: dict, timeout=30):
-    return requests.post(f"{BASE}{path}", json=body, timeout=timeout)
+def post(path: str, body: dict, timeout=60):
+    last = None
+    for attempt in range(3):
+        try:
+            return requests.post(f"{BASE}{path}", json=body, timeout=timeout)
+        except requests.exceptions.RequestException as e:
+            last = e
+            log(f"   (post {path} 시도 {attempt + 1}/3 실패: {type(e).__name__} — 15초 후 재시도)")
+            time.sleep(15)
+    raise last
 
 
 def latest_state() -> dict:
@@ -68,8 +84,28 @@ def check_hotl():
 def auto_approve(task_id: str):
     st = latest_state()
     stage = st.get("current_stage", "?")
-    log(f"⏸️ HOTL 게이트 감지 (task={task_id}, stage={stage}) → 자동 승인(무피드백 resume)")
-    r = post(f"/{PROJECT_ID}/hotl/resume", {"task_id": task_id, "feedback": ""})
+    feedback = ""
+
+    # 요구확인 인터뷰 게이트: UI 기본값과 동일하게 '추천안'으로 답변(그라운딩 품질 유지)
+    if stage == "CLARIFICATION" and (st.get("clarification_questions") or []) and not (st.get("clarification_summary") or "").strip():
+        lines = ["[요구 확인 인터뷰 답변]"]
+        for i, q in enumerate(st["clarification_questions"]):
+            opts = q.get("options") or []
+            rec = next((o for o in opts if o.get("recommended")), opts[0] if opts else None)
+            if rec:
+                lines.append(f"{i + 1}. {q.get('question', '')}")
+                lines.append(f"→ 선택: {rec.get('label', '')} ({rec.get('description', '')})")
+        feedback = "\n".join(lines)
+
+    # WBS 게이트인데 태스크가 비어 있으면 승인 대신 '재분할' 지시(빈 WBS 로 기획이 끝나는 것 방지)
+    if stage == "PMO":
+        w = wbs()
+        if not (w and (w.get("tasks") or [])):
+            feedback = "이전 분할 결과가 비어 있습니다. PRD와 아키텍처를 기준으로 WBS 를 다시 분할하십시오(최소 4개 태스크)."
+
+    mode = "자동 승인(무피드백)" if not feedback else ("추천안 답변" if stage == "CLARIFICATION" else "재분할 지시")
+    log(f"⏸️ HOTL 게이트 감지 (task={task_id}, stage={stage}) → {mode} resume")
+    r = post(f"/{PROJECT_ID}/hotl/resume", {"task_id": task_id, "feedback": feedback})
     log(f"   resume 응답: {r.status_code} {r.text[:120]}")
 
 
@@ -114,28 +150,34 @@ def wait_phase(done_check, phase_name: str, timeout_sec: int) -> str:
 
 
 def main():
-    log(f"=== E2E 완주 시작: {PROJECT_ID} ===")
-    log(f"아이디어: {IDEA[:80]}")
+    resume = "--resume" in sys.argv
+    log(f"=== E2E 완주 {'재개' if resume else '시작'}: {PROJECT_ID} ===")
 
-    # 0) 프로젝트 보장
-    r = post("/projects", {"project_id": PROJECT_ID, "template_id": "default"})
-    log(f"프로젝트 생성: {r.status_code} ({'기존 재사용' if r.status_code in (400, 409) else '신규'})")
+    if resume:
+        # 재개 모드: 진행 중인 기획/실행을 이어받는다(새 PLANNING 가동·아카이빙 없음)
+        st = latest_state()
+        log(f"재개 지점: task={st.get('current_sprint_task_id')} / stage={st.get('current_stage')}")
+    else:
+        log(f"아이디어: {IDEA[:80]}")
+        # 0) 프로젝트 보장
+        r = post("/projects", {"project_id": PROJECT_ID, "template_id": "default"})
+        log(f"프로젝트 생성: {r.status_code} ({'기존 재사용' if r.status_code in (400, 409) else '신규'})")
 
-    # 1) 기획(PLANNING) — UI 와 동일 페이로드
-    planning_id = f"PLANNING_{int(time.time() * 1000)}"
-    r = post(f"/{PROJECT_ID}/sprint/start", {
-        "task_id": planning_id,
-        "project_state_payload": {
-            "schema_version": "5.1.0",
-            "project_name": PROJECT_ID,
-            "initial_idea": IDEA,
-            "master_data": "",
-            "factory_mode": "PLANNING",
-        },
-    })
-    log(f"기획 가동({planning_id}): {r.status_code} {r.text[:120]}")
-    if not r.ok:
-        return 1
+        # 1) 기획(PLANNING) — UI 와 동일 페이로드
+        planning_id = f"PLANNING_{int(time.time() * 1000)}"
+        r = post(f"/{PROJECT_ID}/sprint/start", {
+            "task_id": planning_id,
+            "project_state_payload": {
+                "schema_version": "5.1.0",
+                "project_name": PROJECT_ID,
+                "initial_idea": IDEA,
+                "master_data": "",
+                "factory_mode": "PLANNING",
+            },
+        })
+        log(f"기획 가동({planning_id}): {r.status_code} {r.text[:120]}")
+        if not r.ok:
+            return 1
 
     def planning_done():
         w = wbs()
