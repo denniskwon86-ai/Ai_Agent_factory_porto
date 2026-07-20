@@ -33,10 +33,10 @@ SUMMARY_MAX_LENGTH = 4000
 # ==========================================
 # 논리 티어 → 물리 모델 매핑 테이블
 #
-# [3중 폴백 아키텍처] 각 논리 티어(pro/flash)는 3개 제공사를 순차 폴백한다:
-#   Gemini(1차·주력) → Groq(2차) → Cerebras(3차·최후 보루)
-# 세 제공사 모두 '무료 티어'를 제공하므로, 한 곳의 일일/분당 할당량(429)이 소진돼도
-# 다음 제공사로 자동 강하하여 파이프라인이 멈추지 않는다(무료 쿼터를 사실상 3배로 확장).
+# [5중 폴백 아키텍처] 각 논리 티어(pro/flash)는 5개 제공사를 순차 폴백한다:
+#   Gemini(1차·주력) → xAI(2차) → Groq(3차) → Cerebras(4차) → OpenRouter(5차·최후 보루)
+# 다섯 제공사 모두 '무료 티어'를 제공하므로, 한 곳의 일일/분당 할당량(429)이 소진돼도
+# 다음 제공사로 자동 강하하여 파이프라인이 멈추지 않는다(무료 쿼터를 사실상 5배로 확장).
 # Groq·Cerebras 는 동일 Llama 계열을 서빙하므로 폴백 시에도 응답 품질 편차가 작다.
 ENGINE_TIERS = {
     "gemini": {
@@ -66,7 +66,7 @@ ENGINE_TIERS = {
 
 # 폴백(Fallback) 순서 리스트 — [0]=Gemini(1차), [1]=xAI(2차), [2]=Groq(3차), [3]=Cerebras(4차), [4]=OpenRouter(5차)
 LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct:free"]
-LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.0-flash-lite-preview-02-05:free"]
+LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash-lite", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.0-flash-lite-preview-02-05:free"]
 
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)
 MODEL_CONTEXT_LIMITS = {
