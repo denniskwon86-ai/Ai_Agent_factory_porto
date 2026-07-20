@@ -71,7 +71,9 @@ LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash-lite", "grok-2-latest", "llama-3.1-
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)
 MODEL_CONTEXT_LIMITS = {
     "gemini-2.5-pro":          600000,
+    "gemini-2.5-flash":        500000,  # 동적 폴백 2순위 (flash-lite 소진 시)
     "gemini-2.5-flash-lite":    75000,
+    "gemini-2.0-flash":        500000,  # 동적 폴백 3순위
     "llama-3.3-70b-versatile":   6000,  # 8k 제한 방어
     "llama-3.1-8b-instant":      6000,  # 8k 제한 방어
     # Cerebras 무료 티어는 컨텍스트 창이 보수적(모델 자체는 크나 무료 한도가 낮음) → Groq 와 동일하게 방어
@@ -88,7 +90,9 @@ CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
 # → 코드 생성에 충분한 큰 값으로 명시 설정. (Gemini 2.5 계열 64k 출력 지원)
 MODEL_OUTPUT_LIMITS = {
     "gemini-2.5-pro":          65536,
+    "gemini-2.5-flash":        65536,  # 동적 폴백 2순위
     "gemini-2.5-flash-lite":   65536,
+    "gemini-2.0-flash":        65536,  # 동적 폴백 3순위
     "llama-3.3-70b-versatile":  8000,
     "llama-3.1-8b-instant":     8000,
     # Cerebras Llama 계열 출력 상한 — Groq 와 동일하게 8k 로 설정
