@@ -776,6 +776,26 @@ async def get_traceability_data(project_id: str):
     except Exception as e:
         return {"status": "error", "message": f"추적성 데이터 조회 실패: {str(e)}"}
 
+@router.get("/{project_id}/traceability/impact")
+async def get_traceability_impact(project_id: str, fr: str = "", file: str = "", feedback: str = ""):
+    """[G1-4] 리비전 영향 분석(LLM 0콜) — 특정 FR-ID/파일, 또는 리비전 피드백 텍스트가
+    건드리는 파일·태스크·연관 FR 범위를 역인덱스로 산출한다. 리비전 전 재작업 범위·회귀
+    주의 대상을 결정론적으로 제시(HOTL 판단 근거)."""
+    _safe_id(project_id, "project_id")
+    from nodes.utils.traceability_manager import read_mappings, impact_of, analyze_feedback_impact
+    mappings = read_mappings(f"./projects/{project_id}")
+    try:
+        if feedback:
+            data = analyze_feedback_impact(feedback, mappings)
+        else:
+            fr_ids = [x.strip() for x in fr.split(",") if x.strip()]
+            files = [x.strip() for x in file.split(",") if x.strip()]
+            data = impact_of(mappings, fr_ids=fr_ids, files=files)
+        return {"status": "success", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": f"영향 분석 실패: {str(e)}"}
+
+
 @router.get("/{project_id}/feed")
 async def get_supervisor_feed(project_id: str):
     """슈퍼바이저 콘솔 피드(토론·채점 내레이션) 조회 — 새로고침/재접속 복구용."""

@@ -132,6 +132,81 @@ def build_coverage_report(rfp_text: str, prd_text: str, mappings: List[Dict[str,
     return "\n".join(lines)
 
 
+def build_reverse_index(mappings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """추적성 맵에서 역방향 인덱스 2종을 만든다(LLM 0콜).
+    - by_fr:   FR-ID → {"tasks": [...], "files": [...]}
+    - by_file: 파일경로 → {"frs": [...], "tasks": [...]}
+    표기는 extract_ids 로 정규화(FR-1≡FR-001)해 기록부와 동일 규약을 보장한다."""
+    by_fr: Dict[str, Dict[str, list]] = {}
+    by_file: Dict[str, Dict[str, list]] = {}
+    for m in mappings or []:
+        task = m.get("task_id", "") or ""
+        files = [f for f in (m.get("files", []) or []) if f]
+        frs: List[str] = []
+        for raw in m.get("fr_ids", []) or []:
+            frs.extend(extract_ids(str(raw), "FR"))
+        for fr in frs:
+            e = by_fr.setdefault(fr, {"tasks": [], "files": []})
+            if task and task not in e["tasks"]:
+                e["tasks"].append(task)
+            for fpath in files:
+                if fpath not in e["files"]:
+                    e["files"].append(fpath)
+        for fpath in files:
+            e = by_file.setdefault(fpath, {"frs": [], "tasks": []})
+            if task and task not in e["tasks"]:
+                e["tasks"].append(task)
+            for fr in frs:
+                if fr not in e["frs"]:
+                    e["frs"].append(fr)
+    return {"by_fr": by_fr, "by_file": by_file}
+
+
+def impact_of(mappings: List[Dict[str, Any]], fr_ids: List[str] = None, files: List[str] = None) -> Dict[str, Any]:
+    """주어진 FR-ID 들 또는 파일들의 '변경 영향 범위'를 역인덱스로 산출(LLM 0콜).
+    리비전 시 재작업 대상(파일/태스크)을 결정론적으로 제시 → HOTL 판단 근거 + 회귀 주의 범위.
+    반환: {"seed_frs","seed_files","affected_files","affected_tasks","affected_frs"}"""
+    idx = build_reverse_index(mappings)
+    seed_frs = []
+    for raw in (fr_ids or []):
+        seed_frs.extend(extract_ids(str(raw), "FR"))
+    seed_frs = list(dict.fromkeys(seed_frs))
+    seed_files = list(dict.fromkeys(files or []))
+
+    aff_files, aff_tasks, aff_frs = set(), set(), set(seed_frs)
+    for fr in seed_frs:
+        e = idx["by_fr"].get(fr)
+        if e:
+            aff_files.update(e["files"])
+            aff_tasks.update(e["tasks"])
+    for fpath in seed_files:
+        aff_files.add(fpath)
+        e = idx["by_file"].get(fpath)
+        if e:
+            aff_tasks.update(e["tasks"])
+            aff_frs.update(e["frs"])
+    # 영향받은 파일이 공유하는 다른 FR 까지 1홉 확장(같은 파일을 건드리면 그 파일의 다른 요구도 회귀 위험)
+    for fpath in list(aff_files):
+        e = idx["by_file"].get(fpath)
+        if e:
+            aff_frs.update(e["frs"])
+            aff_tasks.update(e["tasks"])
+    return {
+        "seed_frs": seed_frs,
+        "seed_files": seed_files,
+        "affected_files": sorted(aff_files),
+        "affected_tasks": sorted(aff_tasks),
+        "affected_frs": sorted(aff_frs),
+    }
+
+
+def analyze_feedback_impact(feedback: str, mappings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """리비전 피드백 텍스트에서 FR-ID 를 추출해 영향 범위를 산출한다(LLM 0콜).
+    피드백에 FR-ID 가 없으면 seed 가 비어 영향 범위도 빈 결과(전체 재작업으로 폴백 판단은 호출측 몫)."""
+    frs = extract_ids(feedback or "", "FR")
+    return impact_of(mappings, fr_ids=frs)
+
+
 class TraceabilityManager:
     def __init__(self, workspace_root: str):
         self.workspace_root = workspace_root
