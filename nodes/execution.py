@@ -443,6 +443,17 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                     "supervisor_hops": hops,
                 }
 
+        # 🧮 [FinOps 리스크 분석기] 변경분 정적 위험도 산출(LLM 0콜) — baseline(직전 커밋) 대비.
+        #    LOW 는 아래에서 '자유 판단 LLM 리뷰' 1콜을 생략(자동 승인)하고, HIGH 는 정밀 검토
+        #    지시를 주입한다. 회귀/렌더/입력/품질/스모크 등 결정론 게이트는 그대로 전부 수행.
+        risk = None
+        if _new_files:
+            from core.risk_analyzer import assess_changes
+            _risk_git = GitManager(state_obj.workspace_root)
+            _risk_base = getattr(getattr(state_obj, "git_info", None), "last_commit_hash", "") or ""
+            risk = assess_changes(_new_files, read_old=lambda rel: _risk_git.read_file_at_commit(_risk_base, rel))
+            print(f"🧮 [Risk Analyzer] 변경 위험도: {risk['level']} — {risk['summary']} (변경 {risk['changed']}개 파일)")
+
         # ️ 프론트 렌더 검증 테스트러너: 실제 renderToString 으로 동작 확인 (실패 시 LLM 리뷰 없이 즉시 재작업)
         render_note = ""
         quality_advisory = ""  # 정적 품질 백스톱 권고(하드 차단 아님) - LLM 리뷰어 프롬프트에 주입
@@ -562,6 +573,14 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             print("⏩ [Smart Bypass] 코드 작성 내역이 없으므로 리뷰를 통과(PASS)합니다.")
             reviewer_decision = "PASS"
             review_text = "코드 작성 없음 - 설계/문서 업데이트 정상 완료."
+        elif risk and risk["level"] == "LOW" and getattr(state_obj, "reviewer_decision", "") != "REWORK_DEV":
+            # 🧮 [FinOps 자동 승인] 저위험 변경(스타일/문서/변경 없음)은 LLM 리뷰 생략 —
+            # 결정론 게이트(회귀/렌더/입력/품질/스모크)는 위에서 이미 전부 통과한 상태라 안전하다.
+            # 단 재작업 회차(직전 판정 REWORK_DEV)는 '수정이 됐는지'의 검증이 목적이므로 생략하지 않는다.
+            from core.risk_analyzer import format_risk_report
+            print("⏩ [Risk Analyzer] 저위험 변경 - LLM 리뷰 생략, 정적 분석 자동 승인(쿼터 절감).")
+            reviewer_decision = "PASS"
+            review_text = "🧮 정적 리스크 분석 자동 승인 - 저위험(스타일/문서 수준) 변경.\n" + format_risk_report(risk)
         else:
             print(f" [Agent] Reviewer 비동기 코드 리뷰 및 의사결정 분류 중...{render_note}")
             prompt = (
@@ -584,6 +603,15 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                     "\n\n[정적 품질 점검 권고 - 아래를 리뷰에 참고하라. 기능 동작은 정상이나 품질 개선 여지가 있는 항목이다.\n"
                     " 심각한 분리 결여/디자인 난맥이면 REWORK_DEV 사유로 포함하되, 사소한 권고만이라면 PASS 해도 된다]\n"
                     + quality_advisory
+                )
+            # 🚨 [FinOps 고위험 주입] 스키마/API/의존성/인증 변경은 파급이 크므로 정밀 검토를 지시
+            if risk and risk["level"] == "HIGH":
+                from core.risk_analyzer import format_risk_report
+                prompt += (
+                    "\n\n[🚨 정적 리스크 분석 - 고위험 변경 감지. 아래 파일들을 특히 정밀 검토하라.\n"
+                    " 스키마/API/의존성/인증 변경이 기획서·설계서와 부합하는지 확인하고, 의심스러우면\n"
+                    " PASS 대신 REWORK_DEV 로 구체적 수정 지시를 내릴 것]\n"
+                    + format_risk_report(risk)
                 )
             #  FIX: 리뷰어 역시 빠르고 비용 효율적인 Flash 모델로 롤백 (자유 스키마 JSON 모드)
             output = await gateway.aexecute(state_obj, prompt, is_heavy=False, output_mode="json")
