@@ -108,17 +108,19 @@ def test_rfp_approve_proceeds_to_pm():
 
 
 # ── route_from_qa (QA 통합검수 → Supervisor 수용검수 / 미달→Tech_Lead) ──
-def test_qa_final_pass_goes_to_supervisor(monkeypatch):
-    monkeypatch.setattr(ag, "_is_final_task", lambda s: True)
-    assert ag.route_from_qa(S(qa_verdict="PASS")) == "Supervisor"
+# (현행화) _is_final_task 는 명시적 역할 배정으로 대체·삭제됨(커밋 0467c7d42) —
+# QA 통과 후 Supervisor 진행 여부는 '최종 태스크 판정'이 아니라 WBS 배정 명단에 따른다.
+def test_qa_pass_with_supervisor_assigned_goes_to_supervisor():
+    s = S(qa_verdict="PASS", current_required_agents=["QA", "Supervisor"])
+    assert ag.route_from_qa(s) == "Supervisor"
 
-def test_qa_fail_reworks_to_techlead(monkeypatch):
-    monkeypatch.setattr(ag, "_is_final_task", lambda s: True)
+def test_qa_fail_reworks_to_techlead():
+    # FAIL 은 배정 명단과 무관하게 즉시 Tech_Lead 재작업
     assert ag.route_from_qa(S(qa_verdict="FAIL")) == "Tech_Lead"
 
-def test_qa_nonfinal_pass_ends(monkeypatch):
-    monkeypatch.setattr(ag, "_is_final_task", lambda s: False)
-    assert ag.route_from_qa(S(qa_verdict="PASS")) == END
+def test_qa_pass_without_supervisor_ends():
+    s = S(qa_verdict="PASS", current_required_agents=["QA"])
+    assert ag.route_from_qa(s) == END
 
 
 # ── route_from_supervisor (고객 수용검수: 수용→매뉴얼 / 반려→PM / 상한→종료) ──
@@ -172,17 +174,9 @@ def test_builder_fail_max_retry_to_end():
     assert ag.map_builder_router(s) == END
 
 
-# ── 헬퍼: _is_final_task / _get_required_agents (WBS 파일 I/O) ───────
-def test_is_final_task_all_done(tmp_path):
-    wbs = {"tasks": [{"task_id": "T1", "status": "DONE"}, {"task_id": "T2", "status": "DONE"}]}
-    (tmp_path / "00_wbs_master_plan.json").write_text(json.dumps(wbs), encoding="utf-8")
-    assert ag._is_final_task(S(workspace_root=str(tmp_path))) is True
-
-def test_is_final_task_not_all_done(tmp_path):
-    wbs = {"tasks": [{"task_id": "T1", "status": "DONE"}, {"task_id": "T2", "status": "PENDING"}]}
-    (tmp_path / "00_wbs_master_plan.json").write_text(json.dumps(wbs), encoding="utf-8")
-    assert ag._is_final_task(S(workspace_root=str(tmp_path))) is False
-
+# ── 헬퍼: _get_required_agents (WBS 파일 I/O) ────────────────────────
+# (현행화) test_is_final_task_* 2건은 대상 함수 _is_final_task 가 명시적 역할 배정으로
+# 대체·삭제(커밋 0467c7d42)되어 함께 제거 — 해당 의도는 위 route_from_qa 역할 기반 테스트가 커버.
 def test_get_required_agents_from_wbs(tmp_path):
     wbs = {"tasks": [{"task_id": "T1", "required_agents": ["Architect", "Backend"]}]}
     (tmp_path / "00_wbs_master_plan.json").write_text(json.dumps(wbs), encoding="utf-8")
