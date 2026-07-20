@@ -41,7 +41,7 @@ SUMMARY_MAX_LENGTH = 4000
 ENGINE_TIERS = {
     "gemini": {
         "pro":   "gemini-2.5-pro",
-        "flash": "gemini-2.5-flash-lite",
+        "flash": "gemini-2.5-flash",
     },
     "groq": {
         "pro":   "llama-3.3-70b-versatile", # [수정] 퇴역한 llama3-70b-8192 모델을 최신 주력 모델로 교체
@@ -66,7 +66,7 @@ ENGINE_TIERS = {
 
 # 폴백(Fallback) 순서 리스트 — [0]=Gemini(1차), [1]=xAI(2차), [2]=Groq(3차), [3]=Cerebras(4차), [4]=OpenRouter(5차)
 LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct:free"]
-LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash-lite", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.0-flash-lite-preview-02-05:free"]
+LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.0-flash-lite-preview-02-05:free"]
 
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)
 MODEL_CONTEXT_LIMITS = {
