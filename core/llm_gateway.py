@@ -1,8 +1,11 @@
 import os
 import json
 import re
+import time
 import asyncio
+from datetime import datetime
 from typing import Any
+from langchain_core.callbacks import BaseCallbackHandler
 from google import genai
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -131,6 +134,59 @@ def _make_openrouter(model: str, temperature: float):
         base_url="https://openrouter.ai/api/v1",
         api_key=os.environ.get("OPENROUTER_API_KEY")
     )
+
+
+def is_llm_error_text(text) -> bool:
+    """게이트웨이가 최종 실패 시 반환하는 에러 sentinel 문자열 감지(모든 소비자 공용).
+    이 문자열이 산출물/채점 입력으로 흘러들면 '조용한 오판'이 생기므로, 소비자는
+    반드시 이 함수로 걸러 fail-loud(예외 표면화) 처리해야 한다.
+    (nodes/utils/debate.py 의 _is_llm_error 와 동일 규약 — 그쪽은 수정하지 말 것)"""
+    return isinstance(text, str) and ("LLM API LIMIT ERROR" in text or "LLM UNKNOWN ERROR" in text)
+
+
+class _ModelRecorder(BaseCallbackHandler):
+    """[모델 텔레메트리] 폴백 체인에서 '실제로 어떤 물리 모델이 시도/성공했는지'를 포착한다.
+    with_fallbacks 는 성공 모델을 노출하지 않으므로, 콜백으로 각 시도의 모델명을 수집한다.
+    성공 시 attempts[-1] = 실제 응답을 만든 모델."""
+    def __init__(self):
+        self.attempts = []
+
+    def on_chat_model_start(self, serialized, messages, **kwargs):
+        try:
+            kw = (serialized or {}).get("kwargs", {}) or {}
+            name = kw.get("model") or kw.get("model_name") or ((serialized or {}).get("id") or ["?"])[-1]
+            self.attempts.append(str(name))
+        except Exception:
+            self.attempts.append("?")
+
+
+_LLM_CALL_LOG_PATH = os.path.join("data", "llm_call_log.jsonl")
+
+
+def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, attempts: list, ok: bool, duration_s: float):
+    """LLM 호출 1건당 텔레메트리 JSONL 1줄 기록 — '모델을 바꿔도 품질 유지' 주장을
+    사후에 데이터(단계별 사용 모델 x stage_scores)로 증명하기 위한 기초 계측.
+    기록 실패가 파이프라인을 막으면 안 되므로 모든 예외를 삼킨다(부가 기능)."""
+    try:
+        rec = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "project": getattr(state_obj, "project_name", "") or "",
+            "stage": getattr(state_obj, "current_stage", "") or "",
+            "tier": tier,
+            "output_mode": output_mode,
+            "retry_count": retry_count,
+            "attempts": attempts,
+            "used": (attempts[-1] if attempts else ""),
+            "ok": ok,
+            "duration_s": round(duration_s, 2),
+        }
+        os.makedirs("data", exist_ok=True)
+        with open(_LLM_CALL_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        if ok:
+            print(f"[Telemetry] stage={rec['stage'] or '-'} tier={tier} used={rec['used']} attempts={len(attempts)} {rec['duration_s']}s")
+    except Exception:
+        pass
 
 
 def _is_truncated(response: Any) -> bool:
@@ -337,9 +393,12 @@ class LLMGateway:
 
         print(f"[GW] [LLM Gateway] LangChain 라우터 체인 실행 중... ({logical_model_name}/{output_mode})")
 
+        _rec = _ModelRecorder()
+        _t0 = time.time()
         try:
-            # 1. 일차적으로 LangChain의 with_fallbacks 체인 호출
-            response = await llm.ainvoke(messages)
+            # 1. 일차적으로 LangChain의 with_fallbacks 체인 호출 (+텔레메트리 콜백)
+            response = await llm.ainvoke(messages, config={"callbacks": [_rec]})
+            _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, True, time.time() - _t0)
             
             if output_mode == "code":
                 # response가 CodeOutput (Pydantic 모델)이므로 바로 JSON 변환 후 반환
@@ -352,6 +411,7 @@ class LLMGateway:
             #  과거 이 지점의 code 전용 _is_truncated 검사는 도달 불가 데드코드라 제거함)
 
         except Exception as e:
+            _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, False, time.time() - _t0)
             error_str = str(e)
             # 2. [ERROR] [크로스 티어 우회] Pro 체인이 429로 터지면 즉시 Flash 티어로 수직 강하
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:

@@ -3,7 +3,7 @@ import json
 import asyncio
 from typing import Dict, Any
 from state_models import ProjectState
-from core.llm_gateway import gateway
+from core.llm_gateway import gateway, is_llm_error_text
 from langchain_core.messages import SystemMessage, HumanMessage
 import config
 
@@ -74,14 +74,24 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
     )
     
     print("⏳ [Vision QA] 정적 HTML 구조 분석 요청 중...")
+    # ⚠️ [판정 붕괴 수정] output_mode 기본값은 "code"(파일 스키마 강제 구조화 출력)라서
+    #    {"decision","feedback"} JSON 을 절대 받을 수 없다 → 판정이 항상 PASS 로 붕괴하던 결함.
+    #    반드시 "json" 모드로 호출한다. (UI 구조 자문 판정이므로 Flash + 경량 컨텍스트면 충분)
+    output_str = await gateway.aexecute(state_obj, prompt, is_heavy=False, output_mode="json", light=True)
+
+    # [fail-loud] 게이트웨이 최종 실패 sentinel 은 '판정 불가'다 — 조용한 PASS 로 삼키지 않고
+    # 예외로 표면화한다(오케스트레이터가 SPRINT_FAILED 방송 → UI 에 실패 노출 → 사람이 재시도 결정).
+    if is_llm_error_text(output_str):
+        raise RuntimeError(f"[Vision QA] 판정 LLM 호출 실패(인프라 오류) — 검증 불가로 중단: {str(output_str)[:200]}")
+
     try:
-        # aexecute_vision 대신 텍스트 기반 aexecute 사용
-        output_str = await gateway.aexecute(state_obj, prompt)
         data = json.loads(output_str)
         decision = data.get("decision", "PASS")
         feedback = data.get("feedback", "")
     except Exception as e:
-        print(f"⚠️ [Vision QA] 정적 분석 LLM 연동 실패: {e}")
+        # 모델이 '응답은 했으나' 형식이 비정형인 경우에 한해 보수적 PASS 유지(자문 게이트 성격).
+        # 인프라 실패(위 sentinel)와 달리, 이 경로는 게이트웨이가 정상 응답을 준 상태다.
+        print(f"⚠️ [Vision QA] 판정 JSON 파싱 실패(비정형 응답) — 보수적 PASS 처리: {e}")
         decision = "PASS"
         feedback = str(e)
     

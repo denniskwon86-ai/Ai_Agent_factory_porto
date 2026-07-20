@@ -125,6 +125,12 @@ STAGE_CRITIC_PERSONAS = {
     "TECH_SPEC":    "구현 누락과 PRD 추적성을 검증하는 테크리드",
 }
 
+# [심판 앵커링] llm_judge 채점을 항상 Pro(가용 최강) 체인으로 고정할지 여부.
+# 생성 모델이 폴백으로 약해져도 채점 '잣대'까지 함께 약해지는 동반 표류(약한 모델이 만든 산출물을
+# 약한 심판이 후하게 통과)를 차단한다 — 모델 불가지 품질 보장의 전제 조건.
+# 단점: 단계당 judge 1콜이 Pro 쿼터를 소모한다. 쿼터가 극도로 부족한 날은 False 로 완화 가능.
+JUDGE_FORCE_HEAVY = True
+
 # Supervisor 게이트 / 무한루프 안전장치
 MAX_STAGE_REWORKS = 1            # 단계별 in-node 재작업 한도(할당량 절감). 초과 시 인간 개입(HOTL)
 GLOBAL_MAX_SUPERVISOR_HOPS = 8   # 전역 Supervisor 왕복 상한

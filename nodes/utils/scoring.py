@@ -6,7 +6,16 @@
 import os
 import re
 import json
+import config
 from criteria import STAGE_RUBRICS, DETERMINISTIC_CHECKS
+
+
+class JudgeUnavailableError(Exception):
+    """심판(judge) LLM 자체가 응답 불능인 상태 — '산출물 결함'과 반드시 구분해야 한다.
+    이 예외는 노드 → LangGraph → 오케스트레이터의 일반 예외 핸들러까지 전파되어
+    SPRINT_FAILED 로 방송된다(fail-loud). 0점 처리로 삼키면 멀쩡한 산출물이
+    REWORK 루프를 돌며 쿼터만 태우는 오귀속이 생긴다."""
+    pass
 
 
 def _load_skill(role_name: str) -> str:
@@ -103,12 +112,33 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
             '아래 JSON만 출력하라(각 기준 0.0~1.0 점수 + 통과/미흡 사유 한 줄 총평): '
             '{"scores": {"기준id": 0.0}, "rationale": "한 줄 판단 근거"}'
         )
-        # QA·Supervisor 같은 고위험 수용검수는 Pro judge로 엄격 채점(rubric의 judge_heavy), 그 외는 Flash 경량.
-        judge_heavy = bool(rubric.get("judge_heavy", False))
+        # [심판 앵커링] 채점 잣대는 생성 모델과 함께 흔들리면 안 된다 — JUDGE_FORCE_HEAVY 가 켜져
+        # 있으면 모든 단계의 judge 를 Pro(가용 최강) 체인으로 고정한다. (끄면 기존 동작:
+        # QA/Supervisor 등 rubric 의 judge_heavy 단계만 Pro)
+        judge_heavy = bool(rubric.get("judge_heavy", False)) or bool(getattr(config, "JUDGE_FORCE_HEAVY", False))
         raw = await gateway.aexecute(state, prompt, is_heavy=judge_heavy, output_mode="json", light=True)
-        jdata = _parse_json(raw)
+
+        # [fail-loud] 심판 호출 실패(인프라 오류)는 산출물 결함이 아니다 — 예외로 표면화한다.
+        from core.llm_gateway import is_llm_error_text
+        if is_llm_error_text(raw):
+            raise JudgeUnavailableError(f"[{stage_key}] 심판 LLM 호출 실패(인프라 오류) — 채점 불가: {str(raw)[:200]}")
+
+        jdata = _parse_json(raw) or {}
         scores = jdata.get("scores", {}) or {}
         rationale = str(jdata.get("rationale", "") or "")
+
+        # 비정형 응답 방어: scores 가 비면 Pro 승격 1회 재시도, 그래도 비면 판정 불가(fail-loud).
+        # (조용히 전 항목 0점 처리하면 '심판 오류'가 '산출물 불합격'으로 둔갑한다)
+        if not scores:
+            print(f"⚠️ [Judge] {stage_key} 채점 JSON 비정형 — Pro 승격 1회 재시도")
+            raw = await gateway.aexecute(state, prompt, is_heavy=True, output_mode="json", light=True)
+            if is_llm_error_text(raw):
+                raise JudgeUnavailableError(f"[{stage_key}] 심판 재시도 실패(인프라 오류): {str(raw)[:200]}")
+            jdata = _parse_json(raw) or {}
+            scores = jdata.get("scores", {}) or {}
+            rationale = str(jdata.get("rationale", "") or "")
+            if not scores:
+                raise JudgeUnavailableError(f"[{stage_key}] 심판 채점 JSON 2회 연속 파싱 실패 — 판정 불가.")
         for c in llm_checks:
             try:
                 s = float(scores.get(c["id"], 0.0))
