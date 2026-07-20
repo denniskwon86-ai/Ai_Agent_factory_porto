@@ -341,10 +341,13 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
         if not has_coding_agent: return {"build_status": "success", "developer_retry_count": 0}
         else: return {"build_status": "failed", "failed_node": ("Frontend" if has_fe else "Backend"), "developer_retry_count": current_retry + 1}
 
-    # 🔗 [추적성 엔젠] WBS 목표/스코프에서 FR-ID 추출 후 산출물 파일들과 맵핑 저장
+    # 🔗 [추적성 엔진] WBS 목표/스코프에서 FR-ID 추출 후 산출물 파일들과 맵핑 저장
+    # 추출은 공용 추출기(traceability_manager.extract_ids)로 단일화 — 표기 정규화(FR-1→FR-001)
+    # 포함이라 QA 커버리지 게이트(fr_coverage)와 동일 규약으로 대조된다(정규식 SSOT).
+    from nodes.utils.traceability_manager import extract_ids as _extract_trace_ids
     goal = getattr(state_obj, "goal", "") or ""
     scope = " ".join(getattr(state_obj, "scope", []) or [])
-    fr_ids = re.findall(r"FR-\d{3}", goal + " " + scope)
+    fr_ids = _extract_trace_ids(goal + " " + scope, "FR")
     if fr_ids and all_files_to_write:
         written_files = [f.get("file_path", "") for f in all_files_to_write if f.get("file_path")]
         try:
@@ -352,6 +355,11 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
             tm.update_mapping(state_obj.current_sprint_task_id, fr_ids, written_files)
         except Exception as e:
             print(f"⚠️ [Traceability] 매핑 저장 실패: {e}")
+    elif all_files_to_write and not fr_ids and _extract_trace_ids(getattr(state_obj, "prd_summary", "") or "", "FR"):
+        # PRD 는 FR 체계를 쓰는데 이 태스크가 FR 을 인용하지 않음 → 매핑이 조용히 비어
+        # QA fr_coverage 게이트에서 '미구현'으로 집계된다. 침묵하지 않고 원인을 표면화(경고).
+        print(f"⚠️ [Traceability] 태스크 {state_obj.current_sprint_task_id} 가 FR-ID 를 인용하지 않아 "
+              f"추적성 매핑이 비었습니다 — WBS goal/scope 에 FR-ID 명시 필요(QA 커버리지 감점 요인).")
 
     # ️ [프리뷰/회귀 정합성] frontend/backend_code_summary 를 'LLM 마지막 출력'이 아니라
     #    '디스크의 현재 전체 파일 집합'으로 재구성. 이번 태스크가 일부 파일만 재출력해도(또는 한
@@ -732,9 +740,19 @@ async def run_supervisor(state: Any) -> Dict[str, Any]:
                 "current_stage": "SUPERVISOR", "stage_attempt_counts": attempts}
 
     from nodes.utils.scoring import score_stage
-    result = await score_stage(state_obj, "SUPERVISOR")
+    from nodes.utils.traceability_manager import read_mappings, build_coverage_report
+    # 🔗 [G1 수용검수 근거] 요구 추적성 현황(REQ↔FR↔태스크↔파일, 결정론 집계)을 심판 컨텍스트에
+    # 주입 — Supervisor 가 '감'이 아니라 표를 근거로 rfp_business_coverage 를 판정하게 한다.
+    trace_md = build_coverage_report(
+        getattr(state_obj, "rfp_summary", "") or "",
+        getattr(state_obj, "prd_summary", "") or "",
+        read_mappings(state_obj.workspace_root),
+    )
+    result = await score_stage(state_obj, "SUPERVISOR", extra_context=trace_md)
     verdict = "PASS" if result.get("verdict") == "PASS" else "REJECT"
     report = _format_gate_report("고객사 최종 수용검수(RFP 대비)", result)
+    if trace_md:
+        report += f"\n\n{trace_md}"  # 사람이 보는 수용검수 리포트에도 근거 표 동봉
     print(f"‍⚖️ [Supervisor] 수용 판정: {verdict} (점수 {result.get('score')} / 시도 {attempts['SUPERVISOR']})")
     updates = {"supervisor_report_summary": report, "supervisor_verdict": verdict,
                "current_stage": "SUPERVISOR", "stage_attempt_counts": attempts}

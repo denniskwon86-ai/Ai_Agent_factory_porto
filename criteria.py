@@ -57,6 +57,24 @@ def _check_build_success(state) -> bool:
     return getattr(state, "build_status", "") == "success"
 
 
+def _check_fr_coverage(state) -> bool:
+    """[G1 추적성 게이트] PRD 에 정의된 FR-ID 전수가 추적성 맵(태스크→파일 매핑)에
+    등장하는지 결정론 대조(LLM 0콜) — '요구 누락'을 심판 감이 아니라 집합 연산으로 잡는다.
+    - PRD 가 FR 체계를 안 쓰면(비SW 템플릿 등) 공허 통과.
+    - 맵이 없거나 비면(WBS 태스크가 FR 을 인용하지 않은 경우 포함) 전부 미구현으로 간주 실패.
+    소프트 게이트: hard_fail 아님(감점) — 완주 실측이 쌓이면 강화 여부 재평가."""
+    from nodes.utils.traceability_manager import read_mappings, compute_coverage
+    prd = _prd_text(state)
+    cov = compute_coverage(prd, read_mappings(getattr(state, "workspace_root", "") or ""))
+    if not cov["defined"]:
+        return True
+    if cov["missing"]:
+        print(f"⚠️ [Traceability Gate] PRD 정의 FR {len(cov['defined'])}건 중 "
+              f"미매핑 {len(cov['missing'])}건: {', '.join(cov['missing'][:10])}")
+        return False
+    return True
+
+
 DETERMINISTIC_CHECKS = {
     "rfp_min_length": _check_rfp_min_length,
     "prd_min_length": _check_prd_min_length,
@@ -64,6 +82,7 @@ DETERMINISTIC_CHECKS = {
     "agents_nonempty": _check_agents_nonempty,
     "adr_present": _check_adr_present,
     "build_success": _check_build_success,
+    "fr_coverage": _check_fr_coverage,
 }
 
 
@@ -134,6 +153,9 @@ STAGE_RUBRICS = {
     "QA": {
         "checks": [
             {"id": "build_success", "desc": "빌드/문법 검사 통과", "weight": 2, "type": "deterministic"},
+            # [G1] 요구 누락의 결정론 탐지 — LLM 심판(prd_fr_coverage)의 '감'을 집합 연산으로 보강.
+            # 소프트 감점(hard_fail 아님): WBS 의 FR 인용 누락이 흔한 초기에는 완주를 막지 않는다.
+            {"id": "fr_coverage", "desc": "PRD 정의 FR-ID 전수가 추적성 맵(태스크→구현 파일)에 매핑됨 — 요구 누락 결정론 탐지", "weight": 2, "type": "deterministic"},
             {"id": "design_conformance", "desc": "구현이 아키텍처·기술명세(설계서)의 파일 책임·인터페이스·데이터 모델대로 되어 있음", "weight": 2, "type": "llm_judge"},
             {"id": "prd_fr_coverage", "desc": "PRD의 기능 요구(FR)가 누락 없이 전체적으로 통합 구현됨(부분/더미 아님)", "weight": 2, "type": "llm_judge"},
             {"id": "integration_soundness", "desc": "모듈/컴포넌트/API 연동과 핵심 E2E 흐름이 끊김 없이 동작할 구조임", "weight": 1, "type": "llm_judge"},
