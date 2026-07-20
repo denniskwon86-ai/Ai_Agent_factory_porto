@@ -1,8 +1,13 @@
 # M1 상세 설계 — 경량 기준정보 저장소 (Master Data Store)
 
-> 작성: 2026-07-18 | 상태: **설계 확정, 구현 대기**
+> 작성: 2026-07-18 | 개정: 2026-07-20 (설계 검토 반영) | 상태: **설계 확정, 구현 대기**
 > 배경 검토: MDM/MCP 연계 타당성 검토(AI_HANDOFF §2-3 로드맵 참조).
 > M1 은 LLM 0콜·로컬 완결이며, M2(크로스워크)·M3(MCP 브로커)의 토대가 된다.
+
+> **[2026-07-20 설계 검토 반영]** 구현 착수 전 코드 리뷰에서 발견된 치명 1건·보완 5건을 반영해 개정.
+> - 🔴 **PK/버전 충돌 해소**: `master_code` 단독 PK → **복합 PK `(master_code, version)`** (구판·신판 공존 = 리니지 보존). §2 참조.
+> - 🟡 별칭 텍스트 감지 오탐 방지(단어경계+최소길이), `is_core` 일급 컬럼화, 주입 선정 결정론 tie-break,
+>   동기 SQLite 이벤트 루프 블록 → 인메모리 캐시, 주입 예산 우선순위 명시. §2·§4 참조.
 
 ---
 
@@ -39,25 +44,28 @@ CREATE TABLE IF NOT EXISTS entity_types (
 
 -- 골든 레코드
 CREATE TABLE IF NOT EXISTS master_records (
-    master_code TEXT PRIMARY KEY,          -- 예: 'PROC-ASSY-01' (형식: ^[A-Z0-9][A-Z0-9_-]{1,31}$)
+    master_code TEXT NOT NULL,             -- 예: 'PROC-ASSY-01' (형식: ^[A-Z0-9][A-Z0-9_-]{1,31}$)
     type_id     TEXT NOT NULL REFERENCES entity_types(type_id),
     name        TEXT NOT NULL,             -- 정식 명칭 (예: '조립 공정')
     attributes  TEXT DEFAULT '{}',         -- JSON: attr_schema 를 따르는 실제 값 {"표준리드타임_h": 72}
     domains     TEXT DEFAULT '[]',         -- JSON: 적용 도메인 태그 ["manufacturing"] — 프로젝트 주입 필터
+    is_core     INTEGER DEFAULT 0,         -- 주입 우선순위(도메인 대표 레코드 여부)
     version     INTEGER NOT NULL DEFAULT 1,
     valid_from  TEXT NOT NULL,             -- ISO 일자
     valid_to    TEXT,                      -- NULL = 현행. 개정 시 구판에 스탬프
     supersedes  TEXT,                      -- 개정 계보: 이전 버전 master_code@version
     status      TEXT NOT NULL DEFAULT 'active',  -- active | retired
     source      TEXT DEFAULT 'user',       -- user | csv_import | (M3) mcp:<system_id>
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (master_code, version)     -- 리니지 보존을 위한 복합 PK
 );
 CREATE INDEX IF NOT EXISTS idx_records_type   ON master_records(type_id, status);
+CREATE INDEX IF NOT EXISTS idx_records_current ON master_records(master_code) WHERE valid_to IS NULL AND status = 'active';
 
 -- 별칭 (검색·매칭·텍스트 감지의 핵심)
 CREATE TABLE IF NOT EXISTS aliases (
     alias       TEXT NOT NULL,             -- 예: 'ASSY', '조립', 'assembly'
-    master_code TEXT NOT NULL REFERENCES master_records(master_code),
+    master_code TEXT NOT NULL,             -- 현행 master_records(master_code)를 참조(논리적 FK)
     source      TEXT DEFAULT 'user',
     PRIMARY KEY (alias, master_code)
 );
@@ -75,7 +83,7 @@ CREATE TABLE IF NOT EXISTS key_crosswalk (      -- 마스터 코드 ↔ 외부 �
 );
 ```
 
-**개정 규칙**: 레코드 수정 시 값 변경이 아니라 **새 버전 삽입**(master_code 유지, version+1, 구판 `valid_to` 스탬프·`status=retired`)… 단순화를 위해 M1 구현은 "동일 master_code 재-POST = 개정"으로 처리한다.
+**개정 규칙**: 레코드 수정 시 in-place 업데이트가 아니라 **새 버전 삽입**(master_code 유지, version+1, 구판 `valid_to` 스탬프·`status=retired`)을 수행하여 리니지를 완전 보존한다. 조회 및 외래키 참조(alias 등)는 특별한 명시가 없는 한 `valid_to IS NULL AND status='active'` 인 현행 뷰를 기준으로 동작한다. 단순화를 위해 M1 구현은 "동일 master_code 재-POST = 개정"으로 처리한다.
 
 ---
 
@@ -117,12 +125,13 @@ CREATE TABLE IF NOT EXISTS key_crosswalk (      -- 마스터 코드 ↔ 외부 �
 
 `core/master_data.py` 에 **동기** 함수 `get_master_context(state) -> str` 를 두고
 `ContextEngine.build_core_context` 에서 지식팩 그라운딩 블록 **앞에** 주입한다(정형 기준 > 비정형 참고 순).
+매 LLM 호출 시 동기 SQLite I/O로 인한 이벤트 루프 블로킹을 막기 위해, 기준정보 조회는 **인메모리 프로세스 캐시**를 거치며 쓰기 발생 시 캐시를 무효화(invalidate)한다.
 
 **선정 로직 (결정론적, LLM 0콜):**
 1. 프로젝트 도메인 결정: `project_meta.json` 에 `master_domains: []` 추가(생성 UI 선택, 미지정 시 템플릿 id 로 유추: `manufacturing-*`/`mfg_sim` → `manufacturing`).
-2. **텍스트 별칭 감지**: `initial_idea + rfp_summary + prd_summary`(각 상한 절단)에서 aliases 테이블의 별칭 문자열 매칭 → 히트한 레코드.
-3. 도메인 태그 매칭 레코드 중 `is_core` 성격(속성에 표기) 상위 N.
-4. 합집합 상한 **12건 / 3,000자**. active + 현행 버전만.
+2. **텍스트 별칭 감지**: `initial_idea + rfp_summary + prd_summary`(각 상한 절단)에서 aliases 테이블의 별칭을 매칭한다. 오탐(예: '조립'이 '조립식'에 매칭)을 막기 위해 **단어 경계(`\b`) 매칭, 최소 2~3자 길이 가드, 대소문자 정책**을 엄격히 적용해 히트한 레코드를 찾는다.
+3. **도메인 핵심(is_core)**: 도메인 태그 매칭 레코드 중 `is_core = 1` 인 레코드를 `ORDER BY is_core DESC, master_code ASC` 조건으로 결정론적(tie-break) 추출.
+4. **예산 및 우선순위 상한**: **별칭 감지 히트 건을 1순위**로 채우고, 잔여 예산을 **도메인 핵심(`is_core`) 건으로 2순위** 할당한다. (합집합 상한 **12건 / 3,000자**, active + 현행 버전 한정)
 
 **주입 포맷:**
 ```
