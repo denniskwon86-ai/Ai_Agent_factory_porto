@@ -1117,6 +1117,7 @@ class AgentRegistryPayload(BaseModel):
     version: Optional[int] = 1
     pipeline_name: Optional[str] = ""
     description: Optional[str] = ""
+    deliverable_type: Optional[str] = "software_app"
     agents: list
     edges: Optional[list] = []
 
