@@ -163,9 +163,11 @@ class _ModelRecorder(BaseCallbackHandler):
 _LLM_CALL_LOG_PATH = os.path.join("data", "llm_call_log.jsonl")
 
 
-def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, attempts: list, ok: bool, duration_s: float):
+def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, attempts: list, ok: bool, duration_s: float,
+                  requested_tier: str = "", downgraded: bool = False):
     """LLM 호출 1건당 텔레메트리 JSONL 1줄 기록 — '모델을 바꿔도 품질 유지' 주장을
     사후에 데이터(단계별 사용 모델 x stage_scores)로 증명하기 위한 기초 계측.
+    requested_tier: 호출자가 원래 요청한 티어(브레이커 강등 전). downgraded: 브레이커로 강등됐는지.
     기록 실패가 파이프라인을 막으면 안 되므로 모든 예외를 삼킨다(부가 기능)."""
     try:
         rec = {
@@ -173,6 +175,8 @@ def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, atte
             "project": getattr(state_obj, "project_name", "") or "",
             "stage": getattr(state_obj, "current_stage", "") or "",
             "tier": tier,
+            "requested_tier": requested_tier or tier,
+            "downgraded": bool(downgraded),
             "output_mode": output_mode,
             "retry_count": retry_count,
             "attempts": attempts,
@@ -358,9 +362,16 @@ class LLMGateway:
         절단 없이 전체 주입되어 멀티태스크 기능 누락(회귀)을 차단한다(증분 codegen)."""
         state_obj = ProjectState.model_validate(state) if isinstance(state, dict) else state
 
+        # [텔레메트리] 호출자가 '원래 요청한' 티어를 브레이커 강등 전에 보존한다.
+        # 이걸 로그에 남겨야 대시보드가 "Pro 를 원했으나 브레이커로 Flash 강등됨"을 구분해
+        # '이 산출물이 실제로 어느 등급으로 만들어졌나'(모델 불변성 실측)를 정확히 보여줄 수 있다.
+        _requested_tier = "pro_router" if is_heavy else "flash_router"
+        _downgraded = False
+
         # [Circuit Breaker] Pro 체인이 이미 고갈되었다면 강제로 Flash로 전환
         if is_heavy and self.__class__._circuit_broken_to_flash:
             is_heavy = False
+            _downgraded = True
             print("[Circuit Breaker] Pro 체인 고갈 상태가 기억되어 즉시 Flash 체인으로 직행합니다.")
 
         if output_mode == "code":
@@ -406,7 +417,8 @@ class LLMGateway:
         try:
             # 1. 일차적으로 LangChain의 with_fallbacks 체인 호출 (+텔레메트리 콜백)
             response = await llm.ainvoke(messages, config={"callbacks": [_rec]})
-            _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, True, time.time() - _t0)
+            _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, True, time.time() - _t0,
+                          requested_tier=_requested_tier, downgraded=_downgraded)
             
             if output_mode == "code":
                 # response가 CodeOutput (Pydantic 모델)이므로 바로 JSON 변환 후 반환
@@ -419,7 +431,8 @@ class LLMGateway:
             #  과거 이 지점의 code 전용 _is_truncated 검사는 도달 불가 데드코드라 제거함)
 
         except Exception as e:
-            _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, False, time.time() - _t0)
+            _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, False, time.time() - _t0,
+                          requested_tier=_requested_tier, downgraded=_downgraded)
             error_str = str(e)
             # 2. [ERROR] [크로스 티어 우회] Pro 체인이 429로 터지면 즉시 Flash 티어로 수직 강하
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:

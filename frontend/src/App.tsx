@@ -12,6 +12,7 @@ import AgentMasterPanel from './components/AgentMasterPanel';
 import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
+import { TelemetryPanel } from './components/TelemetryPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import ServerLogPopup from './components/ServerLogPopup';
@@ -44,6 +45,7 @@ export default function App() {
   const [newProjectId, setNewProjectId] = useState("");
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
+  const [showTelemetry, setShowTelemetry] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
   const [showLogPopup, setShowLogPopup] = useState(false);
@@ -150,6 +152,9 @@ export default function App() {
         {showKnowledgeHub && (
           <KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />
         )}
+        {showTelemetry && (
+          <TelemetryPanel onClose={() => setShowTelemetry(false)} />
+        )}
         <div className="min-h-screen w-screen bg-[#0B0C10] text-gray-100 flex flex-col font-sans">
           <header className="h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-[#1F2833] flex items-center justify-between px-8 shrink-0 sticky top-0 z-10">
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
@@ -176,6 +181,13 @@ export default function App() {
                 title="도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결"
               >
                 📚 지식 허브
+              </button>
+              <button
+                onClick={() => setShowTelemetry(true)}
+                className="text-sm font-bold text-blue-200 bg-blue-900/40 hover:bg-blue-800/60 border border-blue-700/50 px-4 py-2 rounded-lg transition-all"
+                title="LLM 호출 텔레메트리 — 실제 사용 모델·폴백·소요시간(모델 불변성 실측)"
+              >
+                📊 운영 계기판
               </button>
               <div className="relative">
                 <button 
