@@ -91,16 +91,31 @@ class ContextEngine:
                         # 극단적 다이어트: Frontend/Backend 무관한 부분(문단 단위) 잘라내기 휴리스틱
                         is_fe = any("Front" in a or "UI" in a for a in agents)
                         is_be = any("Back" in a or "DB" in a or "Data" in a for a in agents)
-                        
+
+                        # [R1 수정] API/계약/인터페이스 섹션은 FE·BE 양쪽 모두에게 필수
+                        #   (프론트가 호출할 엔드포인트·요청/응답 스키마가 여기 있음).
+                        #   → FE 전담 태스크에서도 절대 drop 하지 않는다.
+                        #   순수 구현 세부(DB 스키마/서버 내부 등)만 무관 담당에서 제거.
+                        SHARED_KW = ("api", "계약", "contract", "endpoint", "엔드포인트",
+                                     "interface", "인터페이스")
+                        FE_KW = ("frontend", "front-end", "프론트", "ui", "client", "클라이언트")
+                        BE_KW = ("backend", "back-end", "백엔드", "database", "데이터베이스",
+                                 "db", "server", "서버")
+
                         filtered_ts = []
                         keep = True
                         for line in ts.splitlines():
                             if line.startswith("#"):
                                 lower_line = line.lower()
-                                if "frontend" in lower_line or "ui" in lower_line or "client" in lower_line:
-                                    keep = is_fe or not is_be # FE 담당이거나 BE 전담이 아니면 유지
-                                elif "backend" in lower_line or "api" in lower_line or "database" in lower_line or "db" in lower_line:
-                                    keep = is_be or not is_fe # BE 담당이거나 FE 전담이 아니면 유지
+                                # SHARED 를 먼저 판정 → "Backend API" 류 헤더도 계약으로 보존
+                                if any(k in lower_line for k in SHARED_KW):
+                                    keep = True
+                                elif any(k in lower_line for k in FE_KW):
+                                    keep = is_fe or not is_be  # FE 담당이거나 BE 전담이 아니면 유지
+                                elif any(k in lower_line for k in BE_KW):
+                                    keep = is_be or not is_fe  # BE 담당이거나 FE 전담이 아니면 유지
+                                else:
+                                    keep = True  # 분류 불가(개요 등 공용 섹션)는 항상 유지
                             if keep:
                                 filtered_ts.append(line)
                         ts = "\n".join(filtered_ts)

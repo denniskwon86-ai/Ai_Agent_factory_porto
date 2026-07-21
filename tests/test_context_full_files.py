@@ -78,3 +78,65 @@ def test_disk_walk_excludes_noise_dirs(tmp_path):
     })
     ctx = ContextEngine.build_core_context(state, full_file_exts=(".tsx",))
     assert f"{SENTINEL}_NOISE" not in ctx
+
+
+# --- [R1] 실행단계 컨텍스트 다이어트: tech_spec 섹션 필터 ---
+import json as _json
+
+# FE/API 계약/DB 세 섹션을 가진 기술사양. 각 본문에 고유 sentinel.
+_TECH_SPEC = """# Overview
+OVERVIEW_SENT
+
+# Frontend UI
+FE_SENT
+
+# Backend API Endpoints
+API_SENT: GET /api/orders -> {id, total}
+
+# Database Schema
+DB_SENT: CREATE TABLE orders(...)
+"""
+
+
+def _tech_spec_state(tmp_path, required_agents):
+    """실행단계(비기획) + WBS 태스크(required_agents) + tech_spec 를 갖춘 상태."""
+    wbs = {"tasks": [{"task_id": "WBS-001", "title": "t",
+                      "required_agents": required_agents}]}
+    (tmp_path / "00_wbs_master_plan.json").write_text(
+        _json.dumps(wbs, ensure_ascii=False), encoding="utf-8")
+    return ProjectState.model_validate({
+        "project_name": "T",
+        "workspace_root": str(tmp_path),
+        "current_stage": "BUILD",          # 비기획 → 다이어트 활성
+        "current_sprint_task_id": "WBS-001",
+        "tech_spec_summary": _TECH_SPEC,
+        "file_index": {},
+    })
+
+
+def test_tech_spec_fe_task_keeps_api_contract_drops_db(tmp_path):
+    # FE 전담 태스크: API 계약(프론트가 호출할 엔드포인트)은 유지, 순수 DB 스키마는 제거
+    state = _tech_spec_state(tmp_path, ["Frontend"])
+    ctx = ContextEngine.build_core_context(state, light=True)
+    assert "FE_SENT" in ctx          # 자기 담당
+    assert "API_SENT" in ctx         # ★ R1 핵심: FE 도 API 계약은 반드시 봐야 함
+    assert "OVERVIEW_SENT" in ctx    # 공용 섹션 유지
+    assert "DB_SENT" not in ctx      # 순수 백엔드 구현 세부는 제거
+
+
+def test_tech_spec_be_task_drops_fe_keeps_api(tmp_path):
+    # BE 전담 태스크: FE 섹션 제거, API/DB 유지
+    state = _tech_spec_state(tmp_path, ["Backend", "DB"])
+    ctx = ContextEngine.build_core_context(state, light=True)
+    assert "FE_SENT" not in ctx
+    assert "API_SENT" in ctx
+    assert "DB_SENT" in ctx
+
+
+def test_tech_spec_fullstack_task_keeps_all(tmp_path):
+    # 풀스택 태스크(FE+BE): 아무것도 버리지 않음
+    state = _tech_spec_state(tmp_path, ["Frontend", "Backend"])
+    ctx = ContextEngine.build_core_context(state, light=True)
+    assert "FE_SENT" in ctx
+    assert "API_SENT" in ctx
+    assert "DB_SENT" in ctx
