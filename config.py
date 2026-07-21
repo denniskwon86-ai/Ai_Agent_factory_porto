@@ -133,6 +133,14 @@ STAGE_CRITIC_PERSONAS = {
 #   검사(빌드/회귀/렌더/fr_coverage)가 이미 지킨다. → judge 는 rubric.judge_heavy(QA/Supervisor)만 Pro.
 JUDGE_FORCE_HEAVY = False
 
+# [저쿼터 모드] 무료 공통 키의 극소 Pro 한도(분당 2~5회 수준)에서 스프린트를 '완주'시키기 위한 절약 모드.
+# True 면 — 기획 드래프트 중 PRO_DRAFT_STAGES(구조 설계)만 Pro, 나머지(RFP/PRD/UI)는 Flash;
+# 토론 리비전·단계 재작업도 Flash. → 스프린트당 대용량 Pro 콜을 ~7~13 → ~4(아키텍처·기술명세 드래프트
+# + QA·Supervisor 판정)로 줄여 한도 내 완주를 노린다. 그라운딩(지식팩/기준정보)이 문서형 산출물의
+# 도메인 정확성을 받치므로 완주용 1차로는 Flash 로 충분. 완주 증거 확보 후 벤치마크로 단계별 Pro 복귀 판정.
+LOW_QUOTA_MODE = True
+PRO_DRAFT_STAGES = {"ARCHITECTURE", "TECH_SPEC"}  # 저쿼터 모드에서도 드래프트를 Pro 로 유지할 구조 설계 단계
+
 # Supervisor 게이트 / 무한루프 안전장치
 MAX_STAGE_REWORKS = 1            # 단계별 in-node 재작업 한도(할당량 절감). 초과 시 인간 개입(HOTL)
 GLOBAL_MAX_SUPERVISOR_HOPS = 8   # 전역 Supervisor 왕복 상한

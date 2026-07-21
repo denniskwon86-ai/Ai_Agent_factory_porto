@@ -116,9 +116,15 @@ async def run_debate(state_obj, author_skill: str, stage_key: str, rounds: int =
 
     label = STAGE_LABELS.get(stage_key, stage_key)
 
-    # 1) 초안 생성 (Pro, 문서 모드 - strict_json files 스키마 강제 회피)
-    await _emit(state_obj, stage_key, "draft", 0, f"{label} 초안을 작성하도록 담당 에이전트를 투입했습니다.")
-    draft = await gateway.aexecute(state_obj, author_prompt, is_heavy=True, output_mode="document")
+    # 1) 초안 생성 (문서 모드 - strict_json files 스키마 강제 회피)
+    #    [저쿼터 모드] 구조 설계(PRO_DRAFT_STAGES)만 Pro, 문서형(RFP/PRD/UI)은 Flash 로 내려 Pro 예산 보존.
+    #    그라운딩이 문서형 도메인 정확성을 받치므로 완주용 1차로는 Flash 로 충분.
+    _draft_heavy = True
+    if getattr(config, "LOW_QUOTA_MODE", False):
+        _draft_heavy = stage_key in getattr(config, "PRO_DRAFT_STAGES", set())
+    _tier = "Pro" if _draft_heavy else "Flash"
+    await _emit(state_obj, stage_key, "draft", 0, f"{label} 초안을 작성하도록 담당 에이전트를 투입했습니다. ({_tier})")
+    draft = await gateway.aexecute(state_obj, author_prompt, is_heavy=_draft_heavy, output_mode="document")
     if _is_llm_error(draft):
         return draft, 0
 
@@ -164,8 +170,10 @@ async def run_debate(state_obj, author_skill: str, stage_key: str, rounds: int =
                 f"[비평가 지적 사항 - 모두 반영하여 개정]:\n{feedback}\n\n"
                 "지적된 결함을 모두 해소한 개정 산출물 전체를 작성하라. 축약·생략 금지."
             )
+            # [저쿼터 모드] 리비전은 Flash — 드래프트가 최선을 뽑고, 비평 반영 개정은 Flash 로 절약(A1).
+            _rev_heavy = not getattr(config, "LOW_QUOTA_MODE", False)
             await _emit(state_obj, stage_key, "revise", r + 1, f"{label} 담당 에이전트에게 비평을 반영해 개정하도록 지시했습니다. (개정 {r + 1}R)")
-            revised = await gateway.aexecute(state_obj, revise_prompt, is_heavy=True, output_mode="document")
+            revised = await gateway.aexecute(state_obj, revise_prompt, is_heavy=_rev_heavy, output_mode="document")
             if _is_llm_error(revised):
                 break
             draft = revised
@@ -180,7 +188,9 @@ async def run_single_revision(state_obj, author_skill: str, prev_text: str, feed
         f"[Supervisor 기준 미달 지적]:\n{feedback}\n\n"
         "지적을 모두 반영하여 개정 산출물 전체를 작성하라. 축약·생략 금지."
     )
-    return await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="document")
+    # [저쿼터 모드] 단계 재작업도 Flash 로 절약(A1) — 드래프트는 이미 최선 티어로 뽑았음.
+    _rework_heavy = not getattr(config, "LOW_QUOTA_MODE", False)
+    return await gateway.aexecute(state_obj, prompt, is_heavy=_rework_heavy, output_mode="document")
 
 
 async def run_supervised_stage(state_obj, author_skill: str, stage_key: str, extra_instruction: str = "") -> tuple:
