@@ -43,7 +43,8 @@ def _read_records(project: str = "") -> list:
 def aggregate(recs: list) -> dict:
     """레코드 → 집계. used(실제 모델) 분포를 1순위로."""
     totals = {"calls": 0, "ok": 0, "failed": 0, "fallback_calls": 0,
-              "downgraded_calls": 0, "total_duration_s": 0.0}
+              "downgraded_calls": 0, "total_duration_s": 0.0, 
+              "total_input_tokens": 0, "total_output_tokens": 0}
     by_model = {}      # used(실제 모델) → 카운트  ← 핵심 지표
     by_stage = {}      # stage → {calls, ok, avg_duration_s, models{}}
     by_requested = {}  # requested_tier → {calls, downgraded}
@@ -52,6 +53,9 @@ def aggregate(recs: list) -> dict:
         ok = bool(r.get("ok"))
         totals["ok" if ok else "failed"] += 1
         totals["total_duration_s"] += float(r.get("duration_s", 0) or 0)
+        
+        totals["total_input_tokens"] += int(r.get("input_tokens", 0) or 0)
+        totals["total_output_tokens"] += int(r.get("output_tokens", 0) or 0)
 
         attempts = r.get("attempts") or []
         # 폴백: 1차 모델이 아닌 게 실제로 응답했거나(재귀 포함) 시도가 2회 이상이면 폴백으로 집계

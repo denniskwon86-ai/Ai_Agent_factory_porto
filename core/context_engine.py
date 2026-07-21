@@ -73,9 +73,40 @@ class ContextEngine:
         if getattr(state, "prd_summary", "") and is_planning:
             context_parts.append(f" [기획서 (PRD)]:\n{_clip(state.prd_summary, sm)}")
         if getattr(state, "architecture_summary", ""):
-            context_parts.append(f"️ [아키텍처]:\n{_clip(state.architecture_summary, sm)}")
+            arch = state.architecture_summary
+            if not is_planning:
+                # [Context Diet] 실행 단계에선 아키텍처는 절반으로 강제 압축 (핵심만)
+                arch = _clip(arch, sm // 2)
+            context_parts.append(f"️ [아키텍처]:\n{arch}")
+            
         if getattr(state, "tech_spec_summary", ""):
-            context_parts.append(f"️ [기술 사양 (Tech Spec)]:\n{_clip(state.tech_spec_summary, sm)}")
+            ts = state.tech_spec_summary
+            if not is_planning and state.current_sprint_task_id and state.workspace_root:
+                try:
+                    from nodes.utils.wbs_manager import WBSManager
+                    wbs = WBSManager(workspace_root=state.workspace_root).get_wbs()
+                    current_task = next((t for t in wbs.get("tasks", []) if t.get("task_id") == state.current_sprint_task_id), None)
+                    if current_task:
+                        agents = current_task.get("required_agents", [])
+                        # 극단적 다이어트: Frontend/Backend 무관한 부분(문단 단위) 잘라내기 휴리스틱
+                        is_fe = any("Front" in a or "UI" in a for a in agents)
+                        is_be = any("Back" in a or "DB" in a or "Data" in a for a in agents)
+                        
+                        filtered_ts = []
+                        keep = True
+                        for line in ts.splitlines():
+                            if line.startswith("#"):
+                                lower_line = line.lower()
+                                if "frontend" in lower_line or "ui" in lower_line or "client" in lower_line:
+                                    keep = is_fe or not is_be # FE 담당이거나 BE 전담이 아니면 유지
+                                elif "backend" in lower_line or "api" in lower_line or "database" in lower_line or "db" in lower_line:
+                                    keep = is_be or not is_fe # BE 담당이거나 FE 전담이 아니면 유지
+                            if keep:
+                                filtered_ts.append(line)
+                        ts = "\n".join(filtered_ts)
+                except Exception:
+                    pass
+            context_parts.append(f"️ [기술 사양 (Tech Spec)]:\n{_clip(ts, sm)}")
 
         #  [컨텍스트 라우터] QA, Reviewer, 개발자 교차 참조를 위해 실제 파일 디스크에서 읽어오기.
         #   - 소유 파일(full_file_exts 일치): 전체 주입(절단 금지) - 재출력 시 기존 기능 보존.

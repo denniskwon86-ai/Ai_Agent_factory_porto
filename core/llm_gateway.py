@@ -150,6 +150,8 @@ class _ModelRecorder(BaseCallbackHandler):
     성공 시 attempts[-1] = 실제 응답을 만든 모델."""
     def __init__(self):
         self.attempts = []
+        self.input_tokens = 0
+        self.output_tokens = 0
 
     def on_chat_model_start(self, serialized, messages, **kwargs):
         try:
@@ -158,13 +160,29 @@ class _ModelRecorder(BaseCallbackHandler):
             self.attempts.append(str(name))
         except Exception:
             self.attempts.append("?")
+            
+    def on_llm_end(self, response, **kwargs):
+        try:
+            # response is LLMResult
+            if response.llm_output and "token_usage" in response.llm_output:
+                usage = response.llm_output["token_usage"]
+                self.input_tokens = usage.get("prompt_tokens", self.input_tokens)
+                self.output_tokens = usage.get("completion_tokens", self.output_tokens)
+            # Alternative: check message.usage_metadata for ChatModels
+            if response.generations and len(response.generations) > 0 and len(response.generations[0]) > 0:
+                msg = response.generations[0][0].message
+                if hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                    self.input_tokens = msg.usage_metadata.get("input_tokens", self.input_tokens)
+                    self.output_tokens = msg.usage_metadata.get("output_tokens", self.output_tokens)
+        except Exception:
+            pass
 
 
 _LLM_CALL_LOG_PATH = os.path.join("data", "llm_call_log.jsonl")
 
 
 def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, attempts: list, ok: bool, duration_s: float,
-                  requested_tier: str = "", downgraded: bool = False):
+                  requested_tier: str = "", downgraded: bool = False, input_tokens: int = 0, output_tokens: int = 0):
     """LLM 호출 1건당 텔레메트리 JSONL 1줄 기록 — '모델을 바꿔도 품질 유지' 주장을
     사후에 데이터(단계별 사용 모델 x stage_scores)로 증명하기 위한 기초 계측.
     requested_tier: 호출자가 원래 요청한 티어(브레이커 강등 전). downgraded: 브레이커로 강등됐는지.
@@ -183,6 +201,8 @@ def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, atte
             "used": (attempts[-1] if attempts else ""),
             "ok": ok,
             "duration_s": round(duration_s, 2),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
         }
         os.makedirs("data", exist_ok=True)
         with open(_LLM_CALL_LOG_PATH, "a", encoding="utf-8") as f:
@@ -459,7 +479,7 @@ class LLMGateway:
             response = await llm.ainvoke(messages, config={"callbacks": [_rec]})
             self._update_cooldowns(_rec.attempts, ok=True)   # 성공 모델은 live, 앞서 실패한 모델은 쿨다운
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, True, time.time() - _t0,
-                          requested_tier=_requested_tier, downgraded=_downgraded)
+                          requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens, output_tokens=_rec.output_tokens)
 
             if output_mode == "code":
                 # response가 CodeOutput (Pydantic 모델)이므로 바로 JSON 변환 후 반환
@@ -475,7 +495,7 @@ class LLMGateway:
             # [레버B] 시도된 모델 전부 실패 → 각 모델 쿨다운(다음 호출부터 죽은 모델 스킵)
             self._update_cooldowns(_rec.attempts, ok=False)
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, False, time.time() - _t0,
-                          requested_tier=_requested_tier, downgraded=_downgraded)
+                          requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens, output_tokens=_rec.output_tokens)
             error_str = str(e)
             # 2. [ERROR] [크로스 티어 우회] Pro 체인이 429로 터지면 즉시 Flash 티어로 수직 강하
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
