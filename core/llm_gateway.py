@@ -193,6 +193,18 @@ def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, atte
         pass
 
 
+# [레버B 체인 정제] 동적 탐색된 Gemini 모델 중 '텍스트 생성용이 아닌' 변종(tts/이미지/오디오/임베딩 등)을
+# 폴백 체인에서 제외한다. 이들은 generateContent(텍스트)에서 실패하거나 무의미한데 체인에 섞여 429/에러
+# walk 를 늘린다.
+_NON_TEXT_MODEL_MARKERS = ("tts", "image", "audio", "lyria", "embedding", "aqa",
+                           "vision", "nano-banana", "imagen", "veo", "learnlm")
+
+
+def _is_text_gen_model(name: str) -> bool:
+    n = (name or "").lower()
+    return not any(mk in n for mk in _NON_TEXT_MODEL_MARKERS)
+
+
 def _is_truncated(response: Any) -> bool:
     """LLM 응답이 출력 토큰 상한으로 잘렸는지 best-effort 판정.
     Gemini: finish_reason 'MAX_TOKENS' / Groq(OpenAI 호환): 'length'. 메타데이터 위치가
@@ -242,65 +254,61 @@ class LLMGateway:
             except Exception as e:
                 print(f"⚠️ [Gateway] 최신 Gemini SDK 모델 동적 검색 실패 (기본값으로 진행): {e}")
 
+        # [레버B] 모델별 쿨다운 상태(모델명 → 해제 timestamp). 죽은 모델을 폴백 체인에서 한시적 제외.
+        self._model_cooldown = {}
+
         # 3. [Track 1] Pro 모델 체인 조립 (고난도 추론용)
+        # [레버B 정제] 비-텍스트 Gemini 변종 제외 + 변종 개수 상한(MAX_GEMINI_VARIANTS)으로 죽은 체인 walk 축소.
         pro_candidates = [config.LLM_PRO_FALLBACK_LIST[0]]
         for m in available_gemini_models:
-            if 'pro' in m.lower() and m not in pro_candidates:
+            if 'pro' in m.lower() and _is_text_gen_model(m) and m not in pro_candidates:
                 pro_candidates.append(m)
-        
-        pro_fallbacks = []
+        pro_candidates = pro_candidates[:1 + getattr(config, "MAX_GEMINI_VARIANTS", 3)]
+
+        # 이름↔인스턴스를 함께 추적해 per-model 쿨다운(런타임 체인 재구성)에 사용한다.
+        pro_named = [(pro_candidates[0],
+                      ChatGoogleGenerativeAI(timeout=60, model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0])))]
         for m in pro_candidates[1:]:
-            pro_fallbacks.append(ChatGoogleGenerativeAI(timeout=60, model=m, temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(m)))
-        # 2차 보루: xAI
+            pro_named.append((m, ChatGoogleGenerativeAI(timeout=60, model=m, temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(m))))
         if _xai_enabled():
-            pro_fallbacks.append(_make_xai(config.LLM_PRO_FALLBACK_LIST[1], temperature=0.2))
-        # 3차 보루: Groq
-        pro_fallbacks.append(ChatGroq(timeout=60, model=config.LLM_PRO_FALLBACK_LIST[2], temperature=0.2, max_retries=0, max_tokens=_groq_out(config.LLM_PRO_FALLBACK_LIST[2])))
-        # 4차 보루: Cerebras
+            pro_named.append((config.LLM_PRO_FALLBACK_LIST[1], _make_xai(config.LLM_PRO_FALLBACK_LIST[1], temperature=0.2)))
+        pro_named.append((config.LLM_PRO_FALLBACK_LIST[2], ChatGroq(timeout=60, model=config.LLM_PRO_FALLBACK_LIST[2], temperature=0.2, max_retries=0, max_tokens=_groq_out(config.LLM_PRO_FALLBACK_LIST[2]))))
         if _cerebras_enabled():
-            pro_fallbacks.append(_make_cerebras(config.LLM_PRO_FALLBACK_LIST[3], temperature=0.2))
-        # 5차 보루: OpenRouter
+            pro_named.append((config.LLM_PRO_FALLBACK_LIST[3], _make_cerebras(config.LLM_PRO_FALLBACK_LIST[3], temperature=0.2)))
         if _openrouter_enabled():
-            pro_fallbacks.append(_make_openrouter(config.LLM_PRO_FALLBACK_LIST[4], temperature=0.2))
+            pro_named.append((config.LLM_PRO_FALLBACK_LIST[4], _make_openrouter(config.LLM_PRO_FALLBACK_LIST[4], temperature=0.2)))
 
-        self.llm_pro = ChatGoogleGenerativeAI(
-            timeout=60, model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0])
-        ).with_fallbacks(pro_fallbacks)
+        self._pro_chain = pro_named          # [(name, instance), ...] — aexecute 가 런타임에 live 만 조립
         self._pro_primary_model = pro_candidates[0]
+        pro_fallbacks = [inst for (_, inst) in pro_named[1:]]
+        # 정적 전체 체인(vision 등 per-model 미적용 경로용 — 하위호환)
+        self.llm_pro = pro_named[0][1].with_fallbacks(pro_fallbacks)
+        self.llm_pro_code = pro_named[0][1].with_structured_output(CodeOutput).with_fallbacks([f.with_structured_output(CodeOutput) for f in pro_fallbacks])
 
-        # [Track 1 - Code Mode] Structured Output 전용 Pro 체인
-        pro_base = ChatGoogleGenerativeAI(timeout=60, model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0]))
-        self.llm_pro_code = pro_base.with_structured_output(CodeOutput).with_fallbacks([f.with_structured_output(CodeOutput) for f in pro_fallbacks])
-
-        # 4. [Track 2] Flash 모델 체인 조립 (고속 단순 작업용)
+        # 4. [Track 2] Flash 모델 체인 조립 (고속 단순 작업용) — Pro 와 동일한 정제·이름추적 방식.
         flash_candidates = [config.LLM_FLASH_FALLBACK_LIST[0]]
         for m in available_gemini_models:
-            if 'flash' in m.lower() and m not in flash_candidates:
+            if 'flash' in m.lower() and _is_text_gen_model(m) and m not in flash_candidates:
                 flash_candidates.append(m)
-                
-        flash_fallbacks = []
+        flash_candidates = flash_candidates[:1 + getattr(config, "MAX_GEMINI_VARIANTS", 3)]
+
+        flash_named = [(flash_candidates[0],
+                        ChatGoogleGenerativeAI(timeout=60, model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0])))]
         for m in flash_candidates[1:]:
-            flash_fallbacks.append(ChatGoogleGenerativeAI(timeout=60, model=m, temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(m)))
-        # 2차 보루: xAI
+            flash_named.append((m, ChatGoogleGenerativeAI(timeout=60, model=m, temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(m))))
         if _xai_enabled():
-            flash_fallbacks.append(_make_xai(config.LLM_FLASH_FALLBACK_LIST[1], temperature=0.1))
-        # 3차 보루: Groq
-        flash_fallbacks.append(ChatGroq(timeout=60, model=config.LLM_FLASH_FALLBACK_LIST[2], temperature=0.1, max_retries=0, max_tokens=_groq_out(config.LLM_FLASH_FALLBACK_LIST[2])))
-        # 4차 보루: Cerebras
+            flash_named.append((config.LLM_FLASH_FALLBACK_LIST[1], _make_xai(config.LLM_FLASH_FALLBACK_LIST[1], temperature=0.1)))
+        flash_named.append((config.LLM_FLASH_FALLBACK_LIST[2], ChatGroq(timeout=60, model=config.LLM_FLASH_FALLBACK_LIST[2], temperature=0.1, max_retries=0, max_tokens=_groq_out(config.LLM_FLASH_FALLBACK_LIST[2]))))
         if _cerebras_enabled():
-            flash_fallbacks.append(_make_cerebras(config.LLM_FLASH_FALLBACK_LIST[3], temperature=0.1))
-        # 5차 보루: OpenRouter
+            flash_named.append((config.LLM_FLASH_FALLBACK_LIST[3], _make_cerebras(config.LLM_FLASH_FALLBACK_LIST[3], temperature=0.1)))
         if _openrouter_enabled():
-            flash_fallbacks.append(_make_openrouter(config.LLM_FLASH_FALLBACK_LIST[4], temperature=0.1))
+            flash_named.append((config.LLM_FLASH_FALLBACK_LIST[4], _make_openrouter(config.LLM_FLASH_FALLBACK_LIST[4], temperature=0.1)))
 
-        self.llm_flash = ChatGoogleGenerativeAI(
-            timeout=60, model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0])
-        ).with_fallbacks(flash_fallbacks)
+        self._flash_chain = flash_named
         self._flash_primary_model = flash_candidates[0]
-
-        # [Track 2 - Code Mode] Structured Output 전용 Flash 체인
-        flash_base = ChatGoogleGenerativeAI(timeout=60, model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0]))
-        self.llm_flash_code = flash_base.with_structured_output(CodeOutput).with_fallbacks([f.with_structured_output(CodeOutput) for f in flash_fallbacks])
+        flash_fallbacks = [inst for (_, inst) in flash_named[1:]]
+        self.llm_flash = flash_named[0][1].with_fallbacks(flash_fallbacks)
+        self.llm_flash_code = flash_named[0][1].with_structured_output(CodeOutput).with_fallbacks([f.with_structured_output(CodeOutput) for f in flash_fallbacks])
 
         # 콘솔에 완성된 라우팅 체인 구조 출력
         _xai_pro = f" -> xAI({config.LLM_PRO_FALLBACK_LIST[1]})" if _xai_enabled() else ""
@@ -322,6 +330,42 @@ class LLMGateway:
         if missing:
             print(f"  (참고: 비활성 폴백 티어 - API 키 또는 패키지 미설치: {', '.join(missing)})")
         print()
+
+    # ── [레버B] per-model 쿨다운: 죽은 모델을 폴백 체인에서 한시적 제외 ──────────────
+    def _live_names(self, ordered):
+        now = time.time()
+        return [n for (n, _) in ordered if now >= self._model_cooldown.get(n, 0.0)]
+
+    def _all_cooled(self, ordered) -> bool:
+        """이 티어의 모든 모델이 쿨다운 중인가(= 티어 전체 소진)."""
+        return len(self._live_names(ordered)) == 0
+
+    def _compose_chain(self, ordered, code_mode: bool):
+        """쿨다운 안 걸린(live) 모델만으로 런타임 폴백 체인 구성.
+        전부 쿨다운이면 최소 1개(첫 모델)로 재프로브(완전 실패 방지)."""
+        now = time.time()
+        live = [inst for (n, inst) in ordered if now >= self._model_cooldown.get(n, 0.0)]
+        if not live:
+            live = [ordered[0][1]]
+        if code_mode:
+            live = [m.with_structured_output(CodeOutput) for m in live]
+        base = live[0]
+        return base.with_fallbacks(live[1:]) if len(live) > 1 else base
+
+    def _update_cooldowns(self, attempts, ok: bool):
+        """호출 결과로 모델별 생존 상태 갱신(반응형 학습).
+        성공: 마지막(응답) 모델은 살아있음 → 쿨다운 해제, 그 앞 시도들은 실패 → 쿨다운.
+        실패: 시도된 모든 모델이 실패 → 쿨다운."""
+        if not attempts:
+            return
+        now = time.time()
+        cd = getattr(config, "MODEL_COOLDOWN_SEC", 1800)
+        failed = attempts if not ok else attempts[:-1]
+        for n in failed:
+            if n and n != "?":
+                self._model_cooldown[n] = now + cd
+        if ok and attempts[-1]:
+            self._model_cooldown.pop(attempts[-1], None)
 
     @staticmethod
     def _clip_prompt(prompt: str, token_budget: int) -> str:
@@ -351,9 +395,6 @@ class LLMGateway:
             return str(v) if v is not None else str(raw)
         return str(raw)
 
-    _circuit_broken_to_flash = False
-    _circuit_flash_retries = 0
-
     async def aexecute(self, state: Any, skill_prompt: str, is_heavy: bool = True, retry_count: int = 0,
                        output_mode: str = "code", light: bool = False, full_file_exts=None) -> str:
         """output_mode: 'code'(파일 스키마 강제 JSON) | 'json'(자유 스키마 JSON) | 'document'(자유 서술 문서).
@@ -362,23 +403,20 @@ class LLMGateway:
         절단 없이 전체 주입되어 멀티태스크 기능 누락(회귀)을 차단한다(증분 codegen)."""
         state_obj = ProjectState.model_validate(state) if isinstance(state, dict) else state
 
-        # [텔레메트리] 호출자가 '원래 요청한' 티어를 브레이커 강등 전에 보존한다.
-        # 이걸 로그에 남겨야 대시보드가 "Pro 를 원했으나 브레이커로 Flash 강등됨"을 구분해
-        # '이 산출물이 실제로 어느 등급으로 만들어졌나'(모델 불변성 실측)를 정확히 보여줄 수 있다.
+        # [텔레메트리] 호출자가 '원래 요청한' 티어를 강등 전에 보존(대시보드가 "Pro 원했으나 Flash 강등"을 구분).
         _requested_tier = "pro_router" if is_heavy else "flash_router"
         _downgraded = False
 
-        # [Circuit Breaker] Pro 체인이 이미 고갈되었다면 강제로 Flash로 전환
-        if is_heavy and self.__class__._circuit_broken_to_flash:
+        # [레버B per-model 티어 브레이커] Pro 티어의 '모든 모델'이 쿨다운(=전부 소진)이면 Flash 로 직행.
+        # (과거의 단일 _circuit_broken_to_flash 플래그를 per-model 쿨다운으로 일반화 — 일부 모델만 죽으면
+        #  Pro 티어 안에서 살아있는 모델로 계속 진행하고, 전부 죽었을 때만 강등한다.)
+        if is_heavy and self._all_cooled(self._pro_chain):
             is_heavy = False
             _downgraded = True
-            print("[Circuit Breaker] Pro 체인 고갈 상태가 기억되어 즉시 Flash 체인으로 직행합니다.")
+            print("[Tier Breaker] Pro 티어 전 모델 쿨다운 — Flash 티어로 직행(재발견 세금 회피).")
 
-        if output_mode == "code":
-            llm = self.llm_pro_code if is_heavy else self.llm_flash_code
-        else:
-            llm = self.llm_pro if is_heavy else self.llm_flash
-            
+        ordered = self._pro_chain if is_heavy else self._flash_chain
+        llm = self._compose_chain(ordered, output_mode == "code")
         logical_model_name = "pro_router" if is_heavy else "flash_router"
 
         core_context = ContextEngine.build_core_context(state_obj, light=light, full_file_exts=full_file_exts)
@@ -401,7 +439,9 @@ class LLMGateway:
         # 실제로 성공할 수 있게 최소 한도로 강제 축소한다 — '품질 저하 < 완전 실패' (무중단 원칙).
         _primary = self._pro_primary_model if is_heavy else self._flash_primary_model
         _budget = config.MODEL_CONTEXT_LIMITS.get(_primary, 30000)
-        if not is_heavy and (retry_count >= 1 or self.__class__._circuit_flash_retries >= 1):
+        # Flash 재시도(retry_count>=1) 시에만 소형 한도로 축소 — per-call 조건이라 영구 래치되지 않는다
+        # (과거 _circuit_flash_retries 클래스 래치는 쿼터 회복 후에도 6k 로 영구 고정되는 결함이라 제거).
+        if not is_heavy and retry_count >= 1:
             _budget = min(_budget, 6000)
         final_prompt = self._clip_prompt(final_prompt, _budget)
 
@@ -417,9 +457,10 @@ class LLMGateway:
         try:
             # 1. 일차적으로 LangChain의 with_fallbacks 체인 호출 (+텔레메트리 콜백)
             response = await llm.ainvoke(messages, config={"callbacks": [_rec]})
+            self._update_cooldowns(_rec.attempts, ok=True)   # 성공 모델은 live, 앞서 실패한 모델은 쿨다운
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, True, time.time() - _t0,
                           requested_tier=_requested_tier, downgraded=_downgraded)
-            
+
             if output_mode == "code":
                 # response가 CodeOutput (Pydantic 모델)이므로 바로 JSON 변환 후 반환
                 # Note: structured_output 모드에서는 _is_truncated 체크가 어려우나 파싱 실패 시 예외로 넘어감
@@ -431,22 +472,24 @@ class LLMGateway:
             #  과거 이 지점의 code 전용 _is_truncated 검사는 도달 불가 데드코드라 제거함)
 
         except Exception as e:
+            # [레버B] 시도된 모델 전부 실패 → 각 모델 쿨다운(다음 호출부터 죽은 모델 스킵)
+            self._update_cooldowns(_rec.attempts, ok=False)
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, False, time.time() - _t0,
                           requested_tier=_requested_tier, downgraded=_downgraded)
             error_str = str(e)
             # 2. [ERROR] [크로스 티어 우회] Pro 체인이 429로 터지면 즉시 Flash 티어로 수직 강하
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                 if is_heavy:
-                    print(f"⚠️ [LLM Gateway] Pro 계열 모델 및 Groq/Cerebras 체인 모두 할당량 초과(429) 또는 한도 도달.")
+                    print(f"⚠️ [LLM Gateway] Pro 티어 전 모델 할당량 초과(429). 해당 모델들 쿨다운 등록됨.")
                     print(f" [LLM Gateway] 고속(Flash) 티어로 수직 강하(Cross-Tier Fallback) 하여 임무를 속행합니다!")
-                    self.__class__._circuit_broken_to_flash = True  # Circuit Breaker 영구 전환
+                    # (별도 플래그 불필요 — 방금 실패한 Pro 모델들이 쿨다운되어 다음 Pro 요청은 _all_cooled 로 자동 Flash 직행)
                     return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=retry_count + 1,
                                                output_mode=output_mode, light=light, full_file_exts=full_file_exts)
                 else:
                     if retry_count < 3:
-                        print(f"[ERROR] [LLM Gateway] Flash 체인마저 할당량 초과. 15초 대기 후 재시도 (시도 {retry_count+1}/3)...")
-                        self.__class__._circuit_flash_retries += 1
-                        await asyncio.sleep(15)
+                        _sleep = getattr(config, "QUOTA_RETRY_SLEEP_SEC", 8)
+                        print(f"[ERROR] [LLM Gateway] Flash 체인마저 할당량 초과. {_sleep}초 대기 후 재시도 (시도 {retry_count+1}/3)...")
+                        await asyncio.sleep(_sleep)
                         return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=retry_count + 1,
                                                    output_mode=output_mode, light=light, full_file_exts=full_file_exts)
                     else:

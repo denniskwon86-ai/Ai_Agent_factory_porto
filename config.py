@@ -68,6 +68,11 @@ ENGINE_TIERS = {
 LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct:free"]
 LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.0-flash-lite-preview-02-05:free"]
 
+# [레버B] 게이트웨이 자원 관리 파라미터
+MAX_GEMINI_VARIANTS = 3          # 동적 탐색된 Gemini 변종을 티어당 이 개수로 제한(죽은 체인 walk 축소)
+MODEL_COOLDOWN_SEC = 1800        # 특정 모델이 429/에러로 죽으면 이 시간(초) 동안 폴백 체인에서 제외(재시도 낭비 방지)
+QUOTA_RETRY_SLEEP_SEC = 8        # Flash 체인마저 소진 시 재시도 전 대기(과거 15초 → 단축)
+
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)
 MODEL_CONTEXT_LIMITS = {
     "gemini-2.5-pro":          600000,
