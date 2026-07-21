@@ -126,10 +126,12 @@ STAGE_CRITIC_PERSONAS = {
 }
 
 # [심판 앵커링] llm_judge 채점을 항상 Pro(가용 최강) 체인으로 고정할지 여부.
-# 생성 모델이 폴백으로 약해져도 채점 '잣대'까지 함께 약해지는 동반 표류(약한 모델이 만든 산출물을
-# 약한 심판이 후하게 통과)를 차단한다 — 모델 불가지 품질 보장의 전제 조건.
-# 단점: 단계당 judge 1콜이 Pro 쿼터를 소모한다. 쿼터가 극도로 부족한 날은 False 로 완화 가능.
-JUDGE_FORCE_HEAVY = True
+# ⚠️ False 로 되돌림 (2026-07-20): 공통 API 키라 Pro 일일 한도가 '단일 유한 풀'이다.
+#   True 였을 때는 채점마다 Pro 를 태워, 정작 중요한 '생성(creation)'에 쓸 Pro 예산을 앞당겨
+#   소진시키고 서킷 브레이커 트리거를 가속했다. 채점 잣대의 모델 불변성은 '실시간 Pro 채점'이
+#   아니라 '오프라인 골든 벤치마크(의도적 Pro 사용)'가 담당하는 게 맞다. 하드 게이트는 결정론
+#   검사(빌드/회귀/렌더/fr_coverage)가 이미 지킨다. → judge 는 rubric.judge_heavy(QA/Supervisor)만 Pro.
+JUDGE_FORCE_HEAVY = False
 
 # Supervisor 게이트 / 무한루프 안전장치
 MAX_STAGE_REWORKS = 1            # 단계별 in-node 재작업 한도(할당량 절감). 초과 시 인간 개입(HOTL)
@@ -143,6 +145,10 @@ ON_STAGE_LIMIT_EXCEEDED = "HOTL" # 한도 초과 시: "HOTL"(인간 대기) | "F
 RFP_MIN_LENGTH = 600   # 빈약 요구정의서 차단
 PRD_MIN_LENGTH = 1200  # 빈약 PRD 차단 — 7개 섹션 깊이를 강제하기 위해 상향(기존 800)
 WBS_MIN_TASKS  = 4     # WBS 최소 태스크 수
+# WBS 태스크당 추정 토큰 상한(결정론 게이트). pmo_skill 권장은 3,000~5,000 이므로 그 3배를
+# '명백히 과대'로 본다. 큰 태스크 하나는 1회 코드 생성에서 절단→재작업 루프를 유발하고, 공통 키의
+# 유한 일일 Pro 예산을 크게 잠식하므로 재분할을 유도한다. 필드 없음/비숫자는 판단 불가로 통과(오차단 방지).
+WBS_MAX_TASK_TOKENS = 15000
 
 # 프론트 코드 품질 정적 백스톱(quality_checker) — 거대 단일 파일 판정 임계(둘 다 충족 시 권고)
 FE_MONOLITH_MAX_LINES      = 400  # 한 파일이 이 줄 수 이상이고

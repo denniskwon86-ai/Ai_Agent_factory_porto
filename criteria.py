@@ -57,6 +57,32 @@ def _check_build_success(state) -> bool:
     return getattr(state, "build_status", "") == "success"
 
 
+def _check_wbs_task_sizes(state) -> bool:
+    """[원 컨셉 강제 — 마이크로 태스킹] WBS 태스크가 1회 스프린트에 소화 가능한 크기인지
+    결정론 검사(LLM 0콜). `estimated_token_budget` 이 상한(config.WBS_MAX_TASK_TOKENS)을
+    '명백히' 초과하는 태스크가 있으면 실패 → 재분할 유도.
+    - 필드 없음/비숫자 → 판단 불가로 통과(오차단 방지, 첫 버전 보수적).
+    - 태스크가 없으면 통과(wbs_min_tasks 가 별도로 잡음).
+    공통 API 키의 유한 일일 예산을 지키려면 큰 태스크 하나가 예산을 크게 잠식하지 않아야 한다."""
+    tasks = _read_wbs_tasks(state)
+    if not tasks:
+        return True
+    cap = getattr(config, "WBS_MAX_TASK_TOKENS", 15000)
+    oversized = []
+    for t in tasks:
+        try:
+            b = int(t.get("estimated_token_budget"))
+        except (TypeError, ValueError):
+            continue  # 필드 없음/비숫자 → 판단 불가, 통과
+        if b > cap:
+            oversized.append(f"{t.get('task_id', '?')}({b})")
+    if oversized:
+        print(f"⚠️ [WBS Size Gate] 과대 태스크 {len(oversized)}건 (상한 {cap}): "
+              f"{', '.join(oversized[:8])} — 마이크로 단위 재분할 권장")
+        return False
+    return True
+
+
 def _check_fr_coverage(state) -> bool:
     """[G1 추적성 게이트] PRD 에 정의된 FR-ID 전수가 추적성 맵(태스크→파일 매핑)에
     등장하는지 결정론 대조(LLM 0콜) — '요구 누락'을 심판 감이 아니라 집합 연산으로 잡는다.
@@ -83,6 +109,7 @@ DETERMINISTIC_CHECKS = {
     "adr_present": _check_adr_present,
     "build_success": _check_build_success,
     "fr_coverage": _check_fr_coverage,
+    "wbs_task_sizes": _check_wbs_task_sizes,
 }
 
 
@@ -117,6 +144,9 @@ STAGE_RUBRICS = {
         "checks": [
             {"id": "wbs_min_tasks", "desc": "WBS 태스크가 4개 이상으로 분할됨", "weight": 2, "type": "deterministic"},
             {"id": "agents_nonempty", "desc": "각 태스크의 required_agents가 비어있지 않음", "weight": 1, "type": "deterministic"},
+            # [원 컨셉] 과대 태스크(estimated_token_budget 상한 초과)면 재분할 유도. 상한이 넉넉해(권장의 3배)
+            # 정상 마이크로 태스크는 통과하고 명백히 뭉뚱그린 태스크만 잡는 백스톱. hard_fail 아님.
+            {"id": "wbs_task_sizes", "desc": "각 WBS 태스크의 추정 토큰 예산이 1회 처리 상한 이내(과대 태스크 재분할)", "weight": 1, "type": "deterministic"},
         ],
         "pass_threshold": 1.0,
         "hard_fail_checks": ["wbs_min_tasks"],
