@@ -65,13 +65,16 @@ class ContextEngine:
             f" [현재 스프린트 태스크]: {state.current_sprint_task_id}"
         ])
 
-        if getattr(state, "rfp_summary", ""):
+        stage = (getattr(state, "current_stage", "") or "").upper()
+        is_planning = stage in ("PLANNING", "RFP", "PRD", "ARCHITECTURE", "TECH_SPEC", "UI_DESIGN", "CLARIFICATION")
+
+        if getattr(state, "rfp_summary", "") and is_planning:
             context_parts.append(f" [요구사항 정의서 (RFP) - 반드시 충족해야 할 기준 계약]:\n{_clip(state.rfp_summary, sm)}")
-        if state.prd_summary:
+        if getattr(state, "prd_summary", "") and is_planning:
             context_parts.append(f" [기획서 (PRD)]:\n{_clip(state.prd_summary, sm)}")
-        if state.architecture_summary:
+        if getattr(state, "architecture_summary", ""):
             context_parts.append(f"️ [아키텍처]:\n{_clip(state.architecture_summary, sm)}")
-        if state.tech_spec_summary:
+        if getattr(state, "tech_spec_summary", ""):
             context_parts.append(f"️ [기술 사양 (Tech Spec)]:\n{_clip(state.tech_spec_summary, sm)}")
 
         #  [컨텍스트 라우터] QA, Reviewer, 개발자 교차 참조를 위해 실제 파일 디스크에서 읽어오기.

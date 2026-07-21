@@ -347,6 +347,9 @@ class LLMGateway:
             return str(v) if v is not None else str(raw)
         return str(raw)
 
+    _circuit_broken_to_flash = False
+    _circuit_flash_retries = 0
+
     async def aexecute(self, state: Any, skill_prompt: str, is_heavy: bool = True, retry_count: int = 0,
                        output_mode: str = "code", light: bool = False, full_file_exts=None) -> str:
         """output_mode: 'code'(파일 스키마 강제 JSON) | 'json'(자유 스키마 JSON) | 'document'(자유 서술 문서).
@@ -354,6 +357,11 @@ class LLMGateway:
         full_file_exts: 개발자가 전체 재출력할 소유 파일 확장자(예: (".tsx",".ts")) - 해당 파일은
         절단 없이 전체 주입되어 멀티태스크 기능 누락(회귀)을 차단한다(증분 codegen)."""
         state_obj = ProjectState.model_validate(state) if isinstance(state, dict) else state
+
+        # [Circuit Breaker] Pro 체인이 이미 고갈되었다면 강제로 Flash로 전환
+        if is_heavy and self.__class__._circuit_broken_to_flash:
+            is_heavy = False
+            print("[Circuit Breaker] Pro 체인 고갈 상태가 기억되어 즉시 Flash 체인으로 직행합니다.")
 
         if output_mode == "code":
             llm = self.llm_pro_code if is_heavy else self.llm_flash_code
@@ -382,7 +390,7 @@ class LLMGateway:
         # 실제로 성공할 수 있게 최소 한도로 강제 축소한다 — '품질 저하 < 완전 실패' (무중단 원칙).
         _primary = self._pro_primary_model if is_heavy else self._flash_primary_model
         _budget = config.MODEL_CONTEXT_LIMITS.get(_primary, 30000)
-        if not is_heavy and retry_count >= 1:
+        if not is_heavy and (retry_count >= 1 or self.__class__._circuit_flash_retries >= 1):
             _budget = min(_budget, 6000)
         final_prompt = self._clip_prompt(final_prompt, _budget)
 
@@ -418,11 +426,13 @@ class LLMGateway:
                 if is_heavy:
                     print(f"⚠️ [LLM Gateway] Pro 계열 모델 및 Groq/Cerebras 체인 모두 할당량 초과(429) 또는 한도 도달.")
                     print(f" [LLM Gateway] 고속(Flash) 티어로 수직 강하(Cross-Tier Fallback) 하여 임무를 속행합니다!")
+                    self.__class__._circuit_broken_to_flash = True  # Circuit Breaker 영구 전환
                     return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=retry_count + 1,
                                                output_mode=output_mode, light=light, full_file_exts=full_file_exts)
                 else:
                     if retry_count < 3:
                         print(f"[ERROR] [LLM Gateway] Flash 체인마저 할당량 초과. 15초 대기 후 재시도 (시도 {retry_count+1}/3)...")
+                        self.__class__._circuit_flash_retries += 1
                         await asyncio.sleep(15)
                         return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=retry_count + 1,
                                                    output_mode=output_mode, light=light, full_file_exts=full_file_exts)
