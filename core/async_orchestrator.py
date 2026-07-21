@@ -183,6 +183,11 @@ class AsyncFactoryOrchestrator:
             snapshot = await langgraph_engine.aget_state(config)
             if not (getattr(snapshot, "values", None) and getattr(snapshot, "next", None)):
                 return False  # 다음 노드가 없으면 완료(END) - HOTL 아님
+            
+            # 쿼터 고갈로 인한 SUSPENDED_QUOTA 상태라면 HOTL 이 아님
+            factory_mode = snapshot.values.get("factory_mode") if isinstance(snapshot.values, dict) else getattr(snapshot.values, "factory_mode", None)
+            if factory_mode == "SUSPENDED_QUOTA":
+                return False
             running = self.active_tasks.get(skey)
             if running is not None and not running.done():
                 return False  # 아직 스트리밍 중 = 가동 중이지 HOTL 대기 아님(오탐 차단)

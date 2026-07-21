@@ -138,6 +138,11 @@ def wait_phase(done_check, phase_name: str, timeout_sec: int) -> str:
             return res
 
         m = activity_marker()
+        st = latest_state()
+
+        if st.get("factory_mode") == "SUSPENDED_QUOTA":
+            return f"failed:{phase_name} 쿼터 완전 소진으로 인해 중단됨 (SUSPENDED_QUOTA)"
+
         if m != last_marker:
             last_marker = m
             last_change = time.time()
