@@ -95,6 +95,12 @@ input/output 토큰이 0으로 남을 가능성. 계기판 토큰 합계가 코�
    A-1/C-1/D-1(C-1·D-1 project_id 는 완주 시 실제 폴더명으로 조정). 잔여: 뷰 UI(선택), A-1 완주 후 골든 고정.
 6. **R3 (code 모드 토큰 실측 0 여부)** — A-1 완주 로그에서 code 단계 토큰이 0이면 `with_structured_output`
    경로 별도 토큰 집계 처리 추가.
+7. **M2 스키마 레지스트리 + 키 크로스워크** — ✅ **완료(2026-07-22, 백엔드+UI)**. 설계
+   `docs/design_master_data_m2.md`(a/b/c 확정)대로: `core/crosswalk.py`(시스템·스키마 CRUD·propose
+   [결정론+Flash 옵트인]·approve/reject·mappings, DDL 은 master_data 소유) + `api/routes/crosswalk_control.py`
+   + main.py 등록 + `frontend/src/components/CrosswalkPanel.tsx`(🔗 연계/크로스워크 버튼) +
+   `tests/test_crosswalk.py` 7건. 매핑은 승인(confirmed=1)해야 유효. 브라우저 UI 마운트·API E2E 검증 완료.
+   **다음(M3)**: 이 승인 매핑을 주소록으로 MCP 온디맨드 조회(메타+키맵만 복제, TTL 캐시, as-of, 읽기전용).
 
 ---
 
@@ -108,9 +114,9 @@ docs/NEXT_SESSION_2026-07-22.md 와 AI_HANDOFF.md 읽고 이어서 작업해줘.
 - 설계 근거: `docs/design_master_data_m1.md`, 고도화 로드맵은 `AI_HANDOFF.md §2-3`
 
 ## 5. 상태 스냅샷 (2026-07-22 갱신)
-- 로컬 `dev` = R1(`9d740c380`) + R2 resume(`e205eaceb`) + **M1 백엔드/주입** 커밋.
-- pytest **226건 통과**(이 환경 `.venv` 기준, 회귀 0). 내역: R2까지 214 + M1 11 + (외부 세션의)
-  LLM 캐시 1. 프론트 `tsc --noEmit` 통과(R2 기준).
+- 로컬 `dev` = R1 + R2 + M1(백엔드/주입/UI) + 3번문서 + 2번 골든벤치마크 + M2 설계 + **M2 구현** 누적.
+- pytest **239건 통과**(이 환경 `.venv` 기준, 회귀 0). 내역: R2까지 214 + M1 11 + 캐시 1 +
+  골든벤치마크 6 + 크로스워크 7. 프론트 `tsc --noEmit` 통과(M1 UI·골든·M2 UI 포함).
   ※ 이전 세션 211건과의 기준 차이는 환경별 선택 의존성(playwright/chromadb 등) 수집 차이로 추정.
 - ⚠️ **동시 작업 감지**: 워킹트리에 외부 세션의 'LLM Exact 캐시'(core/cache_manager.py 신규 +
   core/llm_gateway.py 수정 + tests/test_cache_manager.py) 유입됨. **이 커밋에는 포함하지 않음**

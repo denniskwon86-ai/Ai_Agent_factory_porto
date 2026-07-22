@@ -13,6 +13,7 @@ import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
 import { MasterDataPanel } from './components/MasterDataPanel';
+import { CrosswalkPanel } from './components/CrosswalkPanel';
 import { TelemetryPanel } from './components/TelemetryPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -47,6 +48,7 @@ export default function App() {
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
   const [showMasterData, setShowMasterData] = useState(false);
+  const [showCrosswalk, setShowCrosswalk] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
@@ -161,6 +163,9 @@ export default function App() {
         {showMasterData && (
           <MasterDataPanel onClose={() => setShowMasterData(false)} />
         )}
+        {showCrosswalk && (
+          <CrosswalkPanel onClose={() => setShowCrosswalk(false)} />
+        )}
         {showTelemetry && (
           <TelemetryPanel onClose={() => setShowTelemetry(false)} />
         )}
@@ -197,6 +202,13 @@ export default function App() {
                 title="자재·공정·설비·KPI 기준정보(골든 레코드)를 등록 — 확정 조회로 모든 에이전트에 주입(모델 불변)"
               >
                 🗂 기준정보 마스터
+              </button>
+              <button
+                onClick={() => setShowCrosswalk(true)}
+                className="text-sm font-bold text-sky-200 bg-sky-900/40 hover:bg-sky-800/60 border border-sky-700/50 px-4 py-2 rounded-lg transition-all"
+                title="외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사람 승인, M3 온디맨드 조회의 주소록"
+              >
+                🔗 연계/크로스워크
               </button>
               <button
                 onClick={() => setShowTelemetry(true)}

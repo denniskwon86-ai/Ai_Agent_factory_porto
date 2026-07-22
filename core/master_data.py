@@ -72,6 +72,33 @@ CREATE TABLE IF NOT EXISTS key_crosswalk (
     confirmed INTEGER DEFAULT 0,
     PRIMARY KEY (master_code, system_id)
 );
+-- ── M2 스키마 레지스트리 + 크로스워크 제안 (설계: docs/design_master_data_m2.md) ──────
+-- 외부 시스템 스키마('조인 컬럼 정의' 계층). 값이 아니라 구조만 저장.
+CREATE TABLE IF NOT EXISTS external_schemas (
+    system_id   TEXT NOT NULL,
+    entity      TEXT NOT NULL,
+    field       TEXT NOT NULL,
+    field_type  TEXT DEFAULT '',
+    is_key      INTEGER DEFAULT 0,
+    mapped_type TEXT DEFAULT '',          -- 정렬된 M1 entity_types.type_id
+    mapped_attr TEXT DEFAULT '',          -- 대응하는 M1 속성명(조인 컬럼)
+    note        TEXT DEFAULT '',
+    source      TEXT DEFAULT 'user',
+    PRIMARY KEY (system_id, entity, field)
+);
+CREATE INDEX IF NOT EXISTS idx_extschema_sys ON external_schemas(system_id, entity);
+-- 크로스워크 매핑 제안(승인 전). 승인되면 key_crosswalk(confirmed=1)로 승격.
+CREATE TABLE IF NOT EXISTS crosswalk_proposals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    master_code  TEXT NOT NULL,
+    system_id    TEXT NOT NULL,
+    external_key TEXT NOT NULL,
+    confidence   REAL DEFAULT 0.0,
+    rationale    TEXT DEFAULT '',
+    status       TEXT DEFAULT 'pending',  -- pending | approved | rejected
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_xwalk_prop_sys ON crosswalk_proposals(system_id, status);
 """
 
 
