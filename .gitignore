@@ -65,3 +65,6 @@ data/master/
 
 # 골든 벤치마크 스코어카드/사람점수 (런타임 계측). 골든 기준(golden/)은 A-1 완주 후 커밋 여부 재결정.
 data/benchmark/
+
+# [M3] MCP 브로커 온디맨드 조회 캐시 (복제 아님 — 단기 TTL 캐시, 런타임)
+data/mcp_cache.db

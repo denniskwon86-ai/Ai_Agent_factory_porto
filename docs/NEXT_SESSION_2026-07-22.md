@@ -100,7 +100,13 @@ input/output 토큰이 0으로 남을 가능성. 계기판 토큰 합계가 코�
    [결정론+Flash 옵트인]·approve/reject·mappings, DDL 은 master_data 소유) + `api/routes/crosswalk_control.py`
    + main.py 등록 + `frontend/src/components/CrosswalkPanel.tsx`(🔗 연계/크로스워크 버튼) +
    `tests/test_crosswalk.py` 7건. 매핑은 승인(confirmed=1)해야 유효. 브라우저 UI 마운트·API E2E 검증 완료.
-   **다음(M3)**: 이 승인 매핑을 주소록으로 MCP 온디맨드 조회(메타+키맵만 복제, TTL 캐시, as-of, 읽기전용).
+   ~~**다음(M3)**~~ ✅ 아래 8번에서 완료.
+8. **M3 MCP 데이터 브로커** — ✅ **완료(2026-07-22, 백엔드)**. 설계 `docs/design_master_data_m3.md`
+   (a~e 확정)대로: `core/mcp_broker.py`(어댑터 인터페이스+`MockMCPAdapter`, `resolve`[온디맨드·캐시·
+   as_of], `invalidate`, `health`, 읽기전용·정직한 실패·필드→속성 라벨링) + `api/routes/mcp_control.py`
+   + main.py 등록 + `tests/test_mcp_broker.py` 9건. 별도 `data/mcp_cache.db`(TTL 캐시, 복제 아님).
+   승인 매핑(confirmed=1)+활성 시스템만 조회. **실 MCP 커넥터는 `set_adapter`로 교체**(v1 목).
+   잔여(선택): 크로스워크 패널에 '실측 조회' 버튼, ContextEngine 실측 병기 토글(기본 off).
 
 ---
 
@@ -115,8 +121,9 @@ docs/NEXT_SESSION_2026-07-22.md 와 AI_HANDOFF.md 읽고 이어서 작업해줘.
 
 ## 5. 상태 스냅샷 (2026-07-22 갱신)
 - 로컬 `dev` = R1 + R2 + M1(백엔드/주입/UI) + 3번문서 + 2번 골든벤치마크 + M2 설계 + **M2 구현** 누적.
-- pytest **239건 통과**(이 환경 `.venv` 기준, 회귀 0). 내역: R2까지 214 + M1 11 + 캐시 1 +
-  골든벤치마크 6 + 크로스워크 7. 프론트 `tsc --noEmit` 통과(M1 UI·골든·M2 UI 포함).
+- pytest **248건 통과**(이 환경 `.venv` 기준, 회귀 0). 내역: R2까지 214 + M1 11 + 캐시 1 +
+  골든벤치마크 6 + 크로스워크 7 + MCP브로커 9. 프론트 `tsc --noEmit` 통과(M1 UI·골든·M2 UI 포함).
+- **로드맵 M1·M2·M3 전부 구현 완료.** 남은 최종 단계 = A-1 완주 재실행(별도 환경, 쿼터 회복 후).
   ※ 이전 세션 211건과의 기준 차이는 환경별 선택 의존성(playwright/chromadb 등) 수집 차이로 추정.
 - ⚠️ **동시 작업 감지**: 워킹트리에 외부 세션의 'LLM Exact 캐시'(core/cache_manager.py 신규 +
   core/llm_gateway.py 수정 + tests/test_cache_manager.py) 유입됨. **이 커밋에는 포함하지 않음**
