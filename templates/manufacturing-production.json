@@ -3,7 +3,7 @@
   "version": 1,
   "pipeline_name": "제조업 생산 계획 관리 (Manufacturing Production)",
   "description": "생산 수요 예측, 자재 소요량 계획(MRP) 수립, 설비 가동 일정 작성을 통해 제조 공정을 최적화합니다.",
-  "deliverable_type": "software_app",
+  "deliverable_type": "hybrid_simulation",
   "agents": [
     {
       "id": "Demand_Forecaster",
