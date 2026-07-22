@@ -150,6 +150,9 @@ class ProjectState(BaseModel):
     # [M1] 이 프로젝트에 적용할 기준정보(Master Data) 도메인 태그 - project_meta 가 진실원본,
     # 스프린트 시작 시 주입. 결정론적 기준정보 주입(get_master_context)의 도메인 필터로 쓰인다.
     master_domains: List[str] = Field(default_factory=list)
+    # [M3] 외부 실측값(MCP 브로커) 병기 토글. 기본 off — 켜면 매 LLM 호출에 활성 연계 시스템의
+    # 승인 매핑을 온디맨드 조회해 '참고(비신뢰)' 블록으로 병기(지연·쿼터·신뢰 리스크가 있어 명시 옵트인).
+    mcp_live_grounding: bool = Field(default=False)
 
     # 토론·합의 루프 / 단계별 성공기준 / Supervisor (V5.1)
     current_stage: str = Field(default="")  # PLANNING/PMO/ARCHITECTURE/TECH_SPEC/CODE_REVIEW/QA

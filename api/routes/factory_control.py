@@ -40,6 +40,7 @@ class ProjectCreateRequest(BaseModel):
     view_type: str = "react_app"
     knowledge_pack_ids: list = []  # 이 프로젝트에 연결할 도메인 지식팩(그라운딩 RAG)
     master_domains: list = []  # [M1] 이 프로젝트에 적용할 기준정보 도메인 태그
+    mcp_live_grounding: bool = False  # [M3] 외부 실측값 병기 토글(기본 off)
 
 
 class ProjectKnowledgeRequest(BaseModel):
@@ -108,16 +109,21 @@ def _read_project_template(workspace_root: str) -> str:
     return tid
 
 
-def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None, master_domains: list = None) -> None:
+def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None, master_domains: list = None, mcp_live_grounding: bool = None) -> None:
     try:
-        # [M1] master_domains 미지정(None)이면 기존 값을 보존한다 — 이 필드를 안 넘기는
-        # 기존 호출부(mega/sub 생성 등)가 기존 도메인 태그를 실수로 날리지 않도록.
-        if master_domains is None:
+        # [M1/M3] master_domains·mcp_live_grounding 미지정(None)이면 기존 값을 보존한다 —
+        # 이 필드를 안 넘기는 기존 호출부(mega/sub 생성 등)가 기존 설정을 실수로 날리지 않도록.
+        _prev = {}
+        if master_domains is None or mcp_live_grounding is None:
             try:
                 with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
-                    master_domains = (json.load(f) or {}).get("master_domains", [])
+                    _prev = json.load(f) or {}
             except Exception:
-                master_domains = []
+                _prev = {}
+        if master_domains is None:
+            master_domains = _prev.get("master_domains", [])
+        if mcp_live_grounding is None:
+            mcp_live_grounding = _prev.get("mcp_live_grounding", False)
         with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
             json.dump({
                 "template_id": template_id or "default",
@@ -125,6 +131,7 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                 "view_type": view_type or "react_app",
                 "knowledge_pack_ids": list(knowledge_pack_ids or []),
                 "master_domains": list(master_domains or []),
+                "mcp_live_grounding": bool(mcp_live_grounding),
             }, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ project_meta 저장 실패: {e}")
@@ -150,6 +157,15 @@ def _read_project_master_domains(workspace_root: str) -> list:
         return [d for d in doms if isinstance(d, str)]
     except Exception:
         return []
+
+
+def _read_project_mcp_live(workspace_root: str) -> bool:
+    """[M3] 프로젝트의 외부 실측값 병기 토글(project_meta.json). 기본 False."""
+    try:
+        with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
+            return bool((json.load(f) or {}).get("mcp_live_grounding", False))
+    except Exception:
+        return False
 
 
 def _restore_accumulated_from_disk(payload: dict, workspace_root: str) -> dict:
@@ -237,8 +253,8 @@ async def create_project(req: ProjectCreateRequest):
     if os.path.exists(project_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
     os.makedirs(project_path, exist_ok=True)
-    _write_project_meta(project_path, tid, req.output_format_id, req.view_type, req.knowledge_pack_ids, req.master_domains)  # 프로젝트↔템플릿/포맷/지식팩/기준정보 바인딩 영속
-    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids, "master_domains": req.master_domains}
+    _write_project_meta(project_path, tid, req.output_format_id, req.view_type, req.knowledge_pack_ids, req.master_domains, req.mcp_live_grounding)  # 프로젝트↔템플릿/포맷/지식팩/기준정보/실측토글 바인딩 영속
+    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids, "master_domains": req.master_domains, "mcp_live_grounding": req.mcp_live_grounding}
 
 
 @router.put("/projects/{project_id}/knowledge")
@@ -563,6 +579,8 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
     req.project_state_payload["knowledge_pack_ids"] = _read_project_packs(workspace_root)
     # [M1] 기준정보 도메인 태그도 권위 원본에서 주입 - 결정론적 기준정보 주입의 도메인 필터
     req.project_state_payload["master_domains"] = _read_project_master_domains(workspace_root)
+    # [M3] 외부 실측값 병기 토글도 권위 원본에서 주입(기본 off)
+    req.project_state_payload["mcp_live_grounding"] = _read_project_mcp_live(workspace_root)
 
     # 신규 기획(PLANNING)은 새 출발이므로 옛 누적 산출물을 복원하지 않는다.
     # 그 외(실행/리비전) 태스크는 stale 페이로드의 빈 누적 필드를 디스크 진실원본에서 복원.

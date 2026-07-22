@@ -16,6 +16,7 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
   const [schema, setSchema] = useState<Field[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [mappings, setMappings] = useState<Mapping[]>([]);
+  const [liveResults, setLiveResults] = useState<Record<string, any>>({});  // [M3] 실측 조회 결과
   const [busy, setBusy] = useState<string | null>(null);
 
   const [sysId, setSysId] = useState('');
@@ -123,6 +124,26 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
     });
     if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || '상태 변경 실패'); return; }
     await fetchSystems();
+  };
+
+  // [M3] 승인 매핑의 외부 실측값을 온디맨드 조회(읽기전용). 시스템 비활성/미승인이면 409.
+  const handleResolve = async (mc: string) => {
+    if (!sel) return;
+    setBusy('resolve');
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/v1/mcp/resolve`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ master_code: mc, system_id: sel }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({} as any));
+        setLiveResults((p) => ({ ...p, [mc]: { ok: false, error: d.detail || `HTTP ${r.status}` } }));
+        return;
+      }
+      setLiveResults((p) => ({ ...p, [mc]: (await r.json()).data }));
+    } catch (e) {
+      setLiveResults((p) => ({ ...p, [mc]: { ok: false, error: '요청 오류' } }));
+    } finally { setBusy(null); }
   };
 
   const inputCls = 'w-full bg-[#0B0C10] border border-[#2F3640] rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-sky-500';
@@ -248,13 +269,36 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
 
                 {/* 승인된 매핑 */}
                 <div>
-                  <div className="text-xs font-bold text-gray-300 mb-2">✅ 승인된 크로스워크 ({mappings.length}) <span className="text-gray-500 font-normal">— M3 가상 통합 주소록</span></div>
+                  <div className="text-xs font-bold text-gray-300 mb-2">✅ 승인된 크로스워크 ({mappings.length}) <span className="text-gray-500 font-normal">— M3 가상 통합 주소록 · 🔄 로 외부 실측값 온디맨드 조회</span></div>
                   <div className="space-y-1">
-                    {mappings.map((m) => (
-                      <div key={m.master_code} className="text-[11px] font-mono text-gray-300 bg-[#0B0C10] border border-[#2F3640] rounded px-2 py-1">
-                        <span className="text-emerald-300">{m.master_code}</span> ↔ <span className="text-sky-300">{m.external_key}</span>
-                      </div>
-                    ))}
+                    {mappings.map((m) => {
+                      const lr = liveResults[m.master_code];
+                      return (
+                        <div key={m.master_code} className="text-[11px] bg-[#0B0C10] border border-[#2F3640] rounded px-2 py-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-mono text-gray-300 truncate">
+                              <span className="text-emerald-300">{m.master_code}</span> ↔ <span className="text-sky-300">{m.external_key}</span>
+                            </div>
+                            <button onClick={() => handleResolve(m.master_code)} disabled={busy !== null}
+                              className="shrink-0 text-[10px] text-sky-300 hover:text-sky-200 bg-sky-950/40 border border-sky-900/50 rounded px-2 py-0.5">
+                              🔄 실측 조회
+                            </button>
+                          </div>
+                          {lr && (
+                            <div className="mt-1 text-[10px] pl-1">
+                              {lr.ok ? (
+                                <span className="text-gray-400">
+                                  실측: <span className="text-sky-200">{Object.entries(lr.values || {}).map(([k, v]) => `${k}=${v}`).join(', ') || '(빈값)'}</span>
+                                  <span className="opacity-60"> · as_of {String(lr.as_of || '').slice(0, 19)}{lr.cached ? ' · cache' : ''}</span>
+                                </span>
+                              ) : (
+                                <span className="text-red-400">조회 실패: {lr.error}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                     {mappings.length === 0 && <div className="text-xs text-gray-500 py-2 text-center">승인된 매핑이 없습니다.</div>}
                   </div>
                 </div>

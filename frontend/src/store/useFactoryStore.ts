@@ -91,7 +91,7 @@ interface FactoryStore {
   setActiveSprintId: (id: string | null) => void;
   setCurrentProject: (id: string | null) => void;
   fetchProjects: () => Promise<void>;
-  createProject: (id: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[]) => Promise<boolean>;
+  createProject: (id: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean) => Promise<boolean>;
   createMegaProject: (id: string, templateId?: string) => Promise<boolean>;
   copyProject: (id: string, newId: string) => Promise<boolean>;
   deleteProject: (id: string) => Promise<boolean>; // 🗑️ 프로젝트 완전 삭제 기능 정의
@@ -194,7 +194,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  createProject: async (id: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[]) => {
+  createProject: async (id: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean) => {
     try {
 
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects`, {
@@ -204,7 +204,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
           project_id: id,
           template_id: templateId || get().selectedTemplateId || 'default',
           knowledge_pack_ids: knowledgePackIds || [],
-          master_domains: masterDomains || []
+          master_domains: masterDomains || [],
+          mcp_live_grounding: mcpLiveGrounding || false
         })
       });
       if (res.ok) {

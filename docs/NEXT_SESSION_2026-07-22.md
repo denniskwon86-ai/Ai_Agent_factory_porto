@@ -106,7 +106,11 @@ input/output 토큰이 0으로 남을 가능성. 계기판 토큰 합계가 코�
    as_of], `invalidate`, `health`, 읽기전용·정직한 실패·필드→속성 라벨링) + `api/routes/mcp_control.py`
    + main.py 등록 + `tests/test_mcp_broker.py` 9건. 별도 `data/mcp_cache.db`(TTL 캐시, 복제 아님).
    승인 매핑(confirmed=1)+활성 시스템만 조회. **실 MCP 커넥터는 `set_adapter`로 교체**(v1 목).
-   잔여(선택): 크로스워크 패널에 '실측 조회' 버튼, ContextEngine 실측 병기 토글(기본 off).
+   - ✅ **UI 실측 조회**(2026-07-22): CrosswalkPanel 승인 매핑에 [🔄 실측 조회] 버튼 → `/mcp/resolve`
+     결과(값·as_of·cache) 인라인 표시.
+   - ✅ **ContextEngine 실측 병기 토글**(2026-07-22): `ProjectState.mcp_live_grounding`(기본 off) +
+     project_meta 연동 + start_sprint 주입 + 프로젝트 생성 폼 체크박스. 켜면 `mcp_broker.get_live_context`
+     가 활성 시스템 승인 매핑을 온디맨드 조회해 M1 골든값 뒤에 '참고(비신뢰)·as_of' 블록으로 병기.
 
 ---
 

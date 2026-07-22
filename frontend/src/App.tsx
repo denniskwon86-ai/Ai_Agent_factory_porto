@@ -58,6 +58,8 @@ export default function App() {
   const [selectedPackIds, setSelectedPackIds] = useState<string[]>([]);
   // [M1] 신규 프로젝트에 적용할 기준정보 도메인 태그(콤마구분)
   const [masterDomainsInput, setMasterDomainsInput] = useState('');
+  // [M3] 외부 실측값(MCP) 병기 토글 (기본 off)
+  const [mcpLiveGrounding, setMcpLiveGrounding] = useState(false);
 
   useEffect(() => {
     // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)
@@ -80,11 +82,12 @@ export default function App() {
   const handleCreateProject = async () => {
     if (!newProjectId.trim()) return;
     const masterDomains = masterDomainsInput.split(',').map((s) => s.trim()).filter(Boolean);
-    const success = await createProject(newProjectId.trim(), selectedTemplateId, selectedPackIds, masterDomains);
+    const success = await createProject(newProjectId.trim(), selectedTemplateId, selectedPackIds, masterDomains, mcpLiveGrounding);
     if (success) {
       setNewProjectId("");
       setSelectedPackIds([]);
       setMasterDomainsInput("");
+      setMcpLiveGrounding(false);
       setCurrentProject(newProjectId.trim());
     }
   };
@@ -308,6 +311,11 @@ export default function App() {
                     placeholder="예: manufacturing, logistics"
                     className="w-full bg-[#0B0C10] border border-[#2F3640] rounded-xl p-3 text-sm text-gray-200 focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
                   />
+                  {/* [M3] 외부 실측값 병기 토글 (기본 off) */}
+                  <label className="mt-2 flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                    <input type="checkbox" checked={mcpLiveGrounding} onChange={(e) => setMcpLiveGrounding(e.target.checked)} />
+                    🔗 외부 실측값(MCP) 병기 <span className="text-gray-600">— 켜면 활성 연계 시스템의 실측값을 매 산출물에 참고로 병기(지연·쿼터 증가, 기본 off)</span>
+                  </label>
                 </div>
 
                 <div className="mt-6 p-4 bg-[#0B0C10]/50 border border-[#2F3640] rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">

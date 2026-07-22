@@ -60,6 +60,16 @@ class ContextEngine:
         ]
         if master_context:
             context_parts.append(master_context)
+        # [M3] 외부 실측값 병기 - 기본 off. 켠 프로젝트만 활성 연계 시스템에서 온디맨드 조회해
+        # 기준값(M1) 바로 뒤에 '참고(비신뢰)'로 병기한다. lazy import 로 순환참조 회피.
+        if getattr(state, "mcp_live_grounding", False):
+            try:
+                from core.mcp_broker import mcp_broker
+                live_context = mcp_broker.get_live_context(state)
+                if live_context:
+                    context_parts.append(live_context)
+            except Exception as e:
+                print(f"⚠️ [ContextEngine] 실측 병기 실패(생략): {e}")
         if grounding:
             context_parts.append(f" [도메인 참고 지식 - 반드시 정합 유지]:\n{grounding}")
         if rag_context:

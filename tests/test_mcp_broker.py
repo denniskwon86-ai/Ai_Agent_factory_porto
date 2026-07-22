@@ -98,3 +98,25 @@ def test_batch_mixed():
     out = br.resolve_batch(["PROC-ASSY-01", "MISSING"], "mes")
     assert out[0]["ok"] is True
     assert out[1]["ok"] is False                         # 미승인은 개별 실패로
+
+
+class _State:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def test_live_context_domain_match_and_as_of():
+    _, _, br = _fx()
+    ctx = br.get_live_context(_State(master_domains=["mfg"]))
+    assert "외부 실측값" in ctx and "표준리드타임_h=68" in ctx and "as_of" in ctx
+
+
+def test_live_context_empty_on_domain_mismatch():
+    _, _, br = _fx()
+    assert br.get_live_context(_State(master_domains=["finance"])) == ""
+
+
+def test_live_context_empty_when_system_inactive():
+    _, cw, br = _fx()
+    cw.update_system("mes", status="inactive")
+    assert br.get_live_context(_State(master_domains=["mfg"])) == ""
