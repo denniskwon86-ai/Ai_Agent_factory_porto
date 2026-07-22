@@ -88,7 +88,11 @@ input/output 토큰이 0으로 남을 가능성. 계기판 토큰 합계가 코�
      주입 미리보기(별칭 감지 `매칭: PROC-ASSY-01` + 기준정보 블록 렌더)까지 실동작 확인. tsc 통과.
    - 잔여(후속): 캐시와의 상호작용은 무해 확인(기준정보가 프롬프트→캐시해시에 포함되어 변경 시 자동
      무효화). M2(크로스워크)·시뮬 승격 루프는 로드맵대로 이후.
-5. **골든 벤치마크** 구축 → 이후 LOW_QUOTA_MODE 단계별 Pro 복귀를 점수로 판정.
+5. **골든 벤치마크** — ✅ **프레임워크 구축 완료(2026-07-22)**. `core/golden_benchmark.py`(3축 채점:
+   deterministic LLM0콜 + llm_judge[score_stage 재사용] + human, 스코어카드 저장, 골든 승격, 회귀비교)
+   + `api/routes/benchmark_control.py`(scenarios·evaluate·human-score·promote-golden·compare) +
+   `tests/test_golden_benchmark.py` 6건. **골든 데이터는 A-1 완주 후 시드**(promote_golden). 대표 세트
+   A-1/C-1/D-1(C-1·D-1 project_id 는 완주 시 실제 폴더명으로 조정). 잔여: 뷰 UI(선택), A-1 완주 후 골든 고정.
 6. **R3 (code 모드 토큰 실측 0 여부)** — A-1 완주 로그에서 code 단계 토큰이 0이면 `with_structured_output`
    경로 별도 토큰 집계 처리 추가.
 
