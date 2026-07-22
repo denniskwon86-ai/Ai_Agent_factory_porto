@@ -147,6 +147,9 @@ class ProjectState(BaseModel):
 
     # 이 프로젝트에 연결된 도메인 지식팩(그라운딩 RAG) - project_meta 가 진실원본, 스프린트 시작 시 주입
     knowledge_pack_ids: List[str] = Field(default_factory=list)
+    # [M1] 이 프로젝트에 적용할 기준정보(Master Data) 도메인 태그 - project_meta 가 진실원본,
+    # 스프린트 시작 시 주입. 결정론적 기준정보 주입(get_master_context)의 도메인 필터로 쓰인다.
+    master_domains: List[str] = Field(default_factory=list)
 
     # 토론·합의 루프 / 단계별 성공기준 / Supervisor (V5.1)
     current_stage: str = Field(default="")  # PLANNING/PMO/ARCHITECTURE/TECH_SPEC/CODE_REVIEW/QA
@@ -163,7 +166,7 @@ class ProjectState(BaseModel):
         if isinstance(data, dict):
             none_to_list = ("architecture_decisions", "technical_debt", "human_feedback_queue",
                             "criteria_log", "current_required_agents", "clarification_questions",
-                            "knowledge_pack_ids")
+                            "knowledge_pack_ids", "master_domains")
             none_to_dict = ("file_index", "agent_memories", "stage_attempt_counts",
                             "stage_scores", "debate_rounds_used", "artifacts", "artifact_summaries")
             for k in none_to_list:

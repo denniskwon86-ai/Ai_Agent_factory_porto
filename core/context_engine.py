@@ -7,6 +7,7 @@ from state_models import ProjectState
 import config
 from core.persona_learner import persona_learner
 from core.knowledge_base import knowledge_base
+from core.master_data import master_data
 
 # 디스크 walk 시 제외할 디렉터리(노이즈/대용량 방지)
 _EXCLUDE_DIRS = {".git", ".archive", "node_modules", "dist", "build", ".next",
@@ -50,10 +51,15 @@ class ContextEngine:
         # 프로젝트에 연결된 지식팩(도메인 참고자료) 그라운딩 - 어떤 LLM 제공사로 폴백돼도
         # 동일한 지식이 주입되어 산출물 품질의 기준선을 형성한다
         grounding = knowledge_base.get_grounding_context(state)
+        # [M1] 결정론적 기준정보(Master Data) - 벡터 검색이 아닌 확정 조회로 주입되며,
+        # 정형 기준(수치·명칭·단위)이므로 비정형 지식팩 그라운딩보다 '앞에' 배치한다(우선순위).
+        master_context = master_data.get_master_context(state)
 
         context_parts = [
             f" [기업 프로필 & 사용자 성향]:\n{profile_str}"
         ]
+        if master_context:
+            context_parts.append(master_context)
         if grounding:
             context_parts.append(f" [도메인 참고 지식 - 반드시 정합 유지]:\n{grounding}")
         if rag_context:

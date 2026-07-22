@@ -59,3 +59,6 @@ data/knowledge_packs/
 
 # LLM 호출 텔레메트리(런타임 계측 데이터 — 커밋 금지)
 data/llm_call_log.jsonl
+
+# [M1] 기준정보 저장소 런타임 DB (골든 레코드 — 런타임 데이터, 커밋 금지)
+data/master/

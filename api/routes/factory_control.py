@@ -39,10 +39,12 @@ class ProjectCreateRequest(BaseModel):
     output_format_id: str = "default"  # 이 프로젝트에 적용될 출력 포맷
     view_type: str = "react_app"
     knowledge_pack_ids: list = []  # 이 프로젝트에 연결할 도메인 지식팩(그라운딩 RAG)
+    master_domains: list = []  # [M1] 이 프로젝트에 적용할 기준정보 도메인 태그
 
 
 class ProjectKnowledgeRequest(BaseModel):
     knowledge_pack_ids: list = []
+    master_domains: Optional[list] = None  # [M1] None 이면 기존 값 유지
 
 class ProjectCopyRequest(BaseModel):
     new_project_id: str
@@ -106,14 +108,23 @@ def _read_project_template(workspace_root: str) -> str:
     return tid
 
 
-def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None) -> None:
+def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None, master_domains: list = None) -> None:
     try:
+        # [M1] master_domains 미지정(None)이면 기존 값을 보존한다 — 이 필드를 안 넘기는
+        # 기존 호출부(mega/sub 생성 등)가 기존 도메인 태그를 실수로 날리지 않도록.
+        if master_domains is None:
+            try:
+                with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
+                    master_domains = (json.load(f) or {}).get("master_domains", [])
+            except Exception:
+                master_domains = []
         with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
             json.dump({
                 "template_id": template_id or "default",
                 "output_format_id": output_format_id or "default",
                 "view_type": view_type or "react_app",
                 "knowledge_pack_ids": list(knowledge_pack_ids or []),
+                "master_domains": list(master_domains or []),
             }, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ project_meta 저장 실패: {e}")
@@ -126,6 +137,17 @@ def _read_project_packs(workspace_root: str) -> list:
             data = json.load(f) or {}
         packs = data.get("knowledge_pack_ids", [])
         return [p for p in packs if isinstance(p, str)]
+    except Exception:
+        return []
+
+
+def _read_project_master_domains(workspace_root: str) -> list:
+    """[M1] 프로젝트에 연결된 기준정보 도메인 태그(project_meta.json). 없으면 빈 목록."""
+    try:
+        with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+        doms = data.get("master_domains", [])
+        return [d for d in doms if isinstance(d, str)]
     except Exception:
         return []
 
@@ -215,8 +237,8 @@ async def create_project(req: ProjectCreateRequest):
     if os.path.exists(project_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
     os.makedirs(project_path, exist_ok=True)
-    _write_project_meta(project_path, tid, req.output_format_id, req.view_type, req.knowledge_pack_ids)  # 프로젝트↔템플릿/포맷/지식팩 바인딩 영속
-    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids}
+    _write_project_meta(project_path, tid, req.output_format_id, req.view_type, req.knowledge_pack_ids, req.master_domains)  # 프로젝트↔템플릿/포맷/지식팩/기준정보 바인딩 영속
+    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids, "master_domains": req.master_domains}
 
 
 @router.put("/projects/{project_id}/knowledge")
@@ -232,8 +254,9 @@ async def update_project_knowledge(project_id: str, req: ProjectKnowledgeRequest
     if invalid:
         raise HTTPException(status_code=404, detail=f"존재하지 않는 지식팩: {invalid}")
     tid, fid, vtype = _read_project_meta(workspace_root)
-    _write_project_meta(workspace_root, tid, fid, vtype, req.knowledge_pack_ids)
-    return {"status": "success", "knowledge_pack_ids": req.knowledge_pack_ids}
+    _write_project_meta(workspace_root, tid, fid, vtype, req.knowledge_pack_ids, req.master_domains)
+    return {"status": "success", "knowledge_pack_ids": req.knowledge_pack_ids,
+            "master_domains": _read_project_master_domains(workspace_root)}
 
 class MegaProjectCreateRequest(BaseModel):
     mega_project_id: str
@@ -538,6 +561,8 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
     req.project_state_payload["template_id"] = _read_project_template(workspace_root)
     # 지식팩 연결도 동일하게 권위 원본에서 주입 - 모든 에이전트 호출의 그라운딩 기준
     req.project_state_payload["knowledge_pack_ids"] = _read_project_packs(workspace_root)
+    # [M1] 기준정보 도메인 태그도 권위 원본에서 주입 - 결정론적 기준정보 주입의 도메인 필터
+    req.project_state_payload["master_domains"] = _read_project_master_domains(workspace_root)
 
     # 신규 기획(PLANNING)은 새 출발이므로 옛 누적 산출물을 복원하지 않는다.
     # 그 외(실행/리비전) 태스크는 stale 페이로드의 빈 누적 필드를 디스크 진실원본에서 복원.

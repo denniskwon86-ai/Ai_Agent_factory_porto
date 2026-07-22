@@ -77,9 +77,13 @@ input/output 토큰이 0으로 남을 가능성. 계기판 토큰 합계가 코�
 2. ~~**R1 검토·수정**~~ ✅ **완료(`9d740c380`)** — API 계약 섹션을 FE·BE 양쪽 항상 보존하도록 분리.
 3. ~~**R2 resume 경로 구현**~~ ✅ **완료(2026-07-22)** — 중단 지점부터 재개(§2 R2 참조). 단 E2E 재개
    실측은 A-1 재실행(쿼터 소진 재현) 시 함께 확인 필요.
-4. **M1 기준정보 저장소 구현** — `docs/design_master_data_m1.md`(복합 PK·별칭 오탐 방지·결정론 선정
-   반영본)대로 `core/master_data.py`(DDL·CRUD·별칭감지·get_master_context) → API → ContextEngine 주입.
-   (환각 차단·모델 불변성의 최강 축)
+4. **M1 기준정보 저장소** — 🟩 **백엔드+주입 완료(2026-07-22)**, UI 잔여.
+   - 완료: `core/master_data.py`(SQLite DDL·CRUD·복합PK 개정 리니지·별칭 단어경계 감지·결정론 선정·
+     `get_master_context`) / `api/routes/master_control.py`(타입·레코드·별칭·CSV·grounding preview,
+     main.py 등록) / `ProjectState.master_domains` + `project_meta` 연동 + start_sprint 주입 /
+     ContextEngine 주입(지식팩 그라운딩 **앞**) / `tests/test_master_data.py` 11건 / gitignore.
+   - **잔여(다음)**: UI 패널(설계 §5 "🗂 기준정보 마스터" — 타입/레코드/별칭/CSV/미리보기 + 프로젝트
+     생성 폼 `master_domains` 선택). 런타임 검증(실 브라우저) 필요해 분리.
 5. **골든 벤치마크** 구축 → 이후 LOW_QUOTA_MODE 단계별 Pro 복귀를 점수로 판정.
 6. **R3 (code 모드 토큰 실측 0 여부)** — A-1 완주 로그에서 code 단계 토큰이 0이면 `with_structured_output`
    경로 별도 토큰 집계 처리 추가.
@@ -96,9 +100,14 @@ docs/NEXT_SESSION_2026-07-22.md 와 AI_HANDOFF.md 읽고 이어서 작업해줘.
 - 설계 근거: `docs/design_master_data_m1.md`, 고도화 로드맵은 `AI_HANDOFF.md §2-3`
 
 ## 5. 상태 스냅샷 (2026-07-22 갱신)
-- 로컬 `dev` = R1(`9d740c380`) + 문서 + **R2 resume 경로 구현** 커밋.
-- pytest **214건 통과**(이 환경 `.venv` 기준, 신규 6건 = R2, 회귀 0) + 프론트 `tsc --noEmit` 통과.
+- 로컬 `dev` = R1(`9d740c380`) + R2 resume(`e205eaceb`) + **M1 백엔드/주입** 커밋.
+- pytest **226건 통과**(이 환경 `.venv` 기준, 회귀 0). 내역: R2까지 214 + M1 11 + (외부 세션의)
+  LLM 캐시 1. 프론트 `tsc --noEmit` 통과(R2 기준).
   ※ 이전 세션 211건과의 기준 차이는 환경별 선택 의존성(playwright/chromadb 등) 수집 차이로 추정.
+- ⚠️ **동시 작업 감지**: 워킹트리에 외부 세션의 'LLM Exact 캐시'(core/cache_manager.py 신규 +
+  core/llm_gateway.py 수정 + tests/test_cache_manager.py) 유입됨. **이 커밋에는 포함하지 않음**
+  (M1 파일만 선택 스테이징). 캐시 변경 검토 소견은 세션 대화 참조 — TTL/무효화 부재·재작업 루프
+  무력화·토론 다양성 상실 위험 있어 그쪽 작업자와 협의 필요.
 - 미커밋: `data/interaction_log.jsonl`(런타임 로그)만.
 - **인터프리터 주의**: 이 PC의 실제 가상환경은 `venv\`가 아니라 **`.venv\Scripts\python.exe`** 다
   (AI_HANDOFF §0의 `venv\` 예시와 경로 다름). 시스템 Python312에는 deps 없음.
