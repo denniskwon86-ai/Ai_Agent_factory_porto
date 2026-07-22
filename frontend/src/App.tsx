@@ -12,6 +12,7 @@ import AgentMasterPanel from './components/AgentMasterPanel';
 import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
+import { MasterDataPanel } from './components/MasterDataPanel';
 import { TelemetryPanel } from './components/TelemetryPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -45,6 +46,7 @@ export default function App() {
   const [newProjectId, setNewProjectId] = useState("");
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
+  const [showMasterData, setShowMasterData] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
@@ -52,6 +54,8 @@ export default function App() {
   // 신규 프로젝트에 연결할 지식팩 선택 상태
   const [knowledgePacks, setKnowledgePacks] = useState<any[]>([]);
   const [selectedPackIds, setSelectedPackIds] = useState<string[]>([]);
+  // [M1] 신규 프로젝트에 적용할 기준정보 도메인 태그(콤마구분)
+  const [masterDomainsInput, setMasterDomainsInput] = useState('');
 
   useEffect(() => {
     // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)
@@ -73,10 +77,12 @@ export default function App() {
 
   const handleCreateProject = async () => {
     if (!newProjectId.trim()) return;
-    const success = await createProject(newProjectId.trim(), selectedTemplateId, selectedPackIds);
+    const masterDomains = masterDomainsInput.split(',').map((s) => s.trim()).filter(Boolean);
+    const success = await createProject(newProjectId.trim(), selectedTemplateId, selectedPackIds, masterDomains);
     if (success) {
       setNewProjectId("");
       setSelectedPackIds([]);
+      setMasterDomainsInput("");
       setCurrentProject(newProjectId.trim());
     }
   };
@@ -152,6 +158,9 @@ export default function App() {
         {showKnowledgeHub && (
           <KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />
         )}
+        {showMasterData && (
+          <MasterDataPanel onClose={() => setShowMasterData(false)} />
+        )}
         {showTelemetry && (
           <TelemetryPanel onClose={() => setShowTelemetry(false)} />
         )}
@@ -181,6 +190,13 @@ export default function App() {
                 title="도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결"
               >
                 📚 지식 허브
+              </button>
+              <button
+                onClick={() => setShowMasterData(true)}
+                className="text-sm font-bold text-emerald-200 bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-700/50 px-4 py-2 rounded-lg transition-all"
+                title="자재·공정·설비·KPI 기준정보(골든 레코드)를 등록 — 확정 조회로 모든 에이전트에 주입(모델 불변)"
+              >
+                🗂 기준정보 마스터
               </button>
               <button
                 onClick={() => setShowTelemetry(true)}
@@ -266,6 +282,20 @@ export default function App() {
                       })}
                     </div>
                   )}
+                </div>
+
+                {/* 🗂 기준정보 도메인 — 여기 지정한 도메인의 골든 레코드가 확정 조회로 산출물에 주입된다 */}
+                <div className="mt-4 relative z-10">
+                  <label className="block text-sm font-medium text-gray-400 mb-2">
+                    🗂 기준정보 도메인 <span className="text-gray-600">(선택 — 콤마구분, 예: manufacturing. 해당 도메인 골든 레코드가 확정 주입됨)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={masterDomainsInput}
+                    onChange={(e) => setMasterDomainsInput(e.target.value)}
+                    placeholder="예: manufacturing, logistics"
+                    className="w-full bg-[#0B0C10] border border-[#2F3640] rounded-xl p-3 text-sm text-gray-200 focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
+                  />
                 </div>
 
                 <div className="mt-6 p-4 bg-[#0B0C10]/50 border border-[#2F3640] rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">

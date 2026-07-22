@@ -77,13 +77,17 @@ input/output 토큰이 0으로 남을 가능성. 계기판 토큰 합계가 코�
 2. ~~**R1 검토·수정**~~ ✅ **완료(`9d740c380`)** — API 계약 섹션을 FE·BE 양쪽 항상 보존하도록 분리.
 3. ~~**R2 resume 경로 구현**~~ ✅ **완료(2026-07-22)** — 중단 지점부터 재개(§2 R2 참조). 단 E2E 재개
    실측은 A-1 재실행(쿼터 소진 재현) 시 함께 확인 필요.
-4. **M1 기준정보 저장소** — 🟩 **백엔드+주입 완료(2026-07-22)**, UI 잔여.
-   - 완료: `core/master_data.py`(SQLite DDL·CRUD·복합PK 개정 리니지·별칭 단어경계 감지·결정론 선정·
+4. **M1 기준정보 저장소** — ✅ **완료(2026-07-22, 백엔드+주입+UI)**.
+   - 백엔드: `core/master_data.py`(SQLite DDL·CRUD·복합PK 개정 리니지·별칭 단어경계 감지·결정론 선정·
      `get_master_context`) / `api/routes/master_control.py`(타입·레코드·별칭·CSV·grounding preview,
      main.py 등록) / `ProjectState.master_domains` + `project_meta` 연동 + start_sprint 주입 /
      ContextEngine 주입(지식팩 그라운딩 **앞**) / `tests/test_master_data.py` 11건 / gitignore.
-   - **잔여(다음)**: UI 패널(설계 §5 "🗂 기준정보 마스터" — 타입/레코드/별칭/CSV/미리보기 + 프로젝트
-     생성 폼 `master_domains` 선택). 런타임 검증(실 브라우저) 필요해 분리.
+   - UI: `frontend/src/components/MasterDataPanel.tsx`(설계 §5 "🗂 기준정보 마스터" — 타입/레코드/
+     별칭칩/CSV/주입 미리보기) + App 헤더 버튼 + 프로젝트 생성 폼 `master_domains` 입력.
+   - **런타임 검증 완료(브라우저 E2E)**: 타입 생성 → 레코드 생성(속성/도메인 저장) → 별칭 칩 →
+     주입 미리보기(별칭 감지 `매칭: PROC-ASSY-01` + 기준정보 블록 렌더)까지 실동작 확인. tsc 통과.
+   - 잔여(후속): 캐시와의 상호작용은 무해 확인(기준정보가 프롬프트→캐시해시에 포함되어 변경 시 자동
+     무효화). M2(크로스워크)·시뮬 승격 루프는 로드맵대로 이후.
 5. **골든 벤치마크** 구축 → 이후 LOW_QUOTA_MODE 단계별 Pro 복귀를 점수로 판정.
 6. **R3 (code 모드 토큰 실측 0 여부)** — A-1 완주 로그에서 code 단계 토큰이 0이면 `with_structured_output`
    경로 별도 토큰 집계 처리 추가.
