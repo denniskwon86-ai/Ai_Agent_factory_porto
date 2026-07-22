@@ -1,6 +1,6 @@
 # M2 상세 설계 — 스키마 레지스트리 + 키 크로스워크 (Schema Registry & Key Crosswalk)
 
-> 작성: 2026-07-22 | 상태: **설계 초안(검토 대기)** | 선행: M1(`docs/design_master_data_m1.md`, 구현 완료)
+> 작성: 2026-07-22 | 상태: **설계 확정(구현 대기 — 열린 질문 a/b/c 승인 완료)** | 선행: M1(`docs/design_master_data_m1.md`, 구현 완료)
 > 후속: M3 MCP 데이터 브로커. 근거: AI_HANDOFF §2-3 로드맵("연계 축").
 
 ---
@@ -35,13 +35,16 @@ M1 이 예약 생성한 두 테이블을 사용하고, 스키마 등록용 한 �
 -- external_systems(system_id, name, mcp_endpoint, auth_ref, scope, status, created_at)
 
 -- (신규) 외부 시스템의 스키마 — 엔티티(테이블)와 필드 목록. 값이 아니라 '구조'만 저장.
+-- [역할] '조인 컬럼 정의' 계층: 외부 필드가 우리 어느 타입/속성에 대응하는지(변환 규칙).
 CREATE TABLE IF NOT EXISTS external_schemas (
     system_id   TEXT NOT NULL,
     entity      TEXT NOT NULL,           -- 외부 테이블/오브젝트명 (예: 'MARA', 'work_order')
-    field       TEXT NOT NULL,           -- 외부 필드명 (예: 'MATNR')
+    field       TEXT NOT NULL,           -- 외부 필드명 (예: 'MATNR', 'LEAD_TIME_HRS')
     field_type  TEXT DEFAULT '',         -- string|number|date 등(외부 신고값, 신뢰X)
     is_key      INTEGER DEFAULT 0,       -- 외부 기본키 여부(크로스워크 후보 힌트)
-    mapped_type TEXT DEFAULT '',         -- 정렬된 M1 entity_types.type_id (선택)
+    mapped_type TEXT DEFAULT '',         -- 정렬된 M1 entity_types.type_id (엔티티 정렬, 선택)
+    mapped_attr TEXT DEFAULT '',         -- [(c) 확정] 이 외부 필드가 대응하는 M1 속성명(조인 컬럼)
+                                         --   예: LEAD_TIME_HRS → '표준리드타임_h'. 비면 미매핑.
     note        TEXT DEFAULT '',
     source      TEXT DEFAULT 'user',     -- user | csv_import | llm_introspect
     PRIMARY KEY (system_id, entity, field)
@@ -50,7 +53,11 @@ CREATE INDEX IF NOT EXISTS idx_extschema_sys ON external_schemas(system_id, enti
 
 -- (M1 예약, 확장) 마스터 코드 ↔ 외부 키 크로스워크
 -- key_crosswalk(master_code, system_id, external_key, confirmed)
---   ↑ M1 스키마 유지. external_key 는 external_schemas 의 (entity.field=value) 를 가리키는 논리 키.
+--   ↑ M1 스키마 유지(컬럼 추가 없음). [역할] '값 번역표(브리지)' 계층: 우리 골든 레코드 1건이
+--     외부 시스템에선 어느 인스턴스 키인지. 두 시스템의 키 값 공간이 다르므로 반드시 필요.
+--   [(c) 확정] external_key 형식 = "<entity>:<pk_field>=<value>"
+--     예: 'PROC-ASSY-01' → system='mes', external_key='work_order:WO_TYPE=ASSY'
+--         'MAT-100' → system='sap', external_key='MARA:MATNR=100-200-30'
 --   confirmed: 0=LLM/휴리스틱 제안, 1=사람 승인(사용 가능). 제안 근거·점수는 아래 별도 테이블.
 CREATE TABLE IF NOT EXISTS crosswalk_proposals (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,17 +122,30 @@ M1 `MasterDataPanel` 에 탭 추가(또는 별도 패널):
 confidence 0~1 / 승인은 confirmed=1 유일(동일 master_code+system_id 재승인 시 교체).
 
 **구현 순서**(예상: 백엔드 중, UI 소):
-1. `core/master_data.py` 에 external_schemas·crosswalk_proposals DDL 추가 + CRUD·propose·approve/reject
-   (M1 모듈 확장 — 별칭 감지·캐시 무효화 재사용). 또는 `core/crosswalk.py` 분리(응집도 판단).
-2. `api/routes/crosswalk_control.py` + main.py 등록
-3. propose 초안기: 결정론(별칭/이름 일치) 1차 + Flash 판정(온톨로지 제약) 2차
-4. UI 탭
-5. 테스트: 시스템/스키마 CRUD → propose → approve/reject → mappings, 승인 전 미사용 보장
+1. **[(a) 확정] DDL 은 `master_data.py` 가 소유** — `external_schemas`·`crosswalk_proposals` 를
+   `master_data._DDL` 에 추가(스키마 초기화 단일화, `master.db` 는 한 파일). 저수준 `_connect`·별칭 감지
+   `_alias_hit` 도 master_data 소유.
+2. **[(a) 확정] 비즈니스 로직은 `core/crosswalk.py` 분리** — systems/schemas CRUD·propose·approve/reject.
+   master_data 의 `_connect`/`_alias_hit` 를 import 재사용(중복 구현 금지). LLM(propose)이 들어가는
+   M2 를 LLM 0콜인 M1 과 파일로 격리.
+3. `api/routes/crosswalk_control.py` + main.py 등록
+4. propose 초안기: 결정론(별칭/이름 일치, LLM 0콜) 1차 + **[(b) 확정] Flash 판정은 옵트인 토글**
+   (온톨로지 entity_types 제약 JSON 강제; 기본 off, 완주·쿼터 절약 기조). 애매한 후보만 Flash.
+5. UI 탭(기준정보 마스터 패널 내 "🔗 연계/크로스워크")
+6. 테스트: 시스템/스키마 CRUD → propose → approve/reject → mappings, 승인 전 미사용 보장.
+   `external_key` 형식·`mapped_attr` 대응 검증 포함.
 
 **M3 연결점(이 설계가 준비하는 것)**: `external_systems.mcp_endpoint`·`auth_ref`, 승인된 크로스워크가
 곧 M3 의 "가상 통합 주소록". M3 는 여기에 as-of 타임스탬프·TTL 캐시·읽기전용 온디맨드 조회를 더한다.
 
-## 7. 열린 질문(검토 시 결정)
-- (a) M2 로직을 `master_data.py` 확장 vs `crosswalk.py` 분리 — 파일 크기·응집도로 판단.
-- (b) propose 의 Flash 사용을 옵트인 토글로 둘지(완주 우선·쿼터 절약 기조).
-- (c) external_key 표현: `entity.field` 수준 매핑 vs 특정 값(row) 매핑 — M3 조회 단위와 함께 확정.
+## 7. 확정된 결정 (2026-07-22 사용자 승인)
+- **(a) ✅ `core/crosswalk.py` 분리 + DDL 은 `master_data.py` 소유.** 파일 크기(master_data 552줄)·
+  관심사(내부 골든 vs 외부 매핑)·LLM 유무(M1 0콜 / M2 Flash) 분리. 단 `master.db`·`_connect`·별칭
+  감지는 공유(§6-1·2).
+- **(b) ✅ propose 의 Flash 판정은 옵트인 토글.** 기본은 결정론(별칭/이름 일치, LLM 0콜)만. 애매한
+  후보에 한해 사용자가 Flash 를 켤 때만 호출(완주·쿼터 절약 기조).
+- **(c) ✅ 2계층 매핑.** `key_crosswalk` = 값 번역표(브리지, 인스턴스 수준, `external_key="entity:field=value"`),
+  `external_schemas.mapped_attr` = 조인 컬럼 정의(필드↔속성). RDB 로 치면 "조인 컬럼 선정 + 값 번역
+  테이블" 이 둘 다 필요한 구조(이종 시스템이라 키 값 공간이 달라서). 실제 값 조회는 M3.
+
+착수 준비 완료 — 위 결정 반영본으로 M2 구현 가능.
