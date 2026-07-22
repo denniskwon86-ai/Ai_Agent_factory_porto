@@ -140,7 +140,8 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
         setLiveResults((p) => ({ ...p, [mc]: { ok: false, error: d.detail || `HTTP ${r.status}` } }));
         return;
       }
-      setLiveResults((p) => ({ ...p, [mc]: (await r.json()).data }));
+      const data = (await r.json()).data;
+      setLiveResults((p) => ({ ...p, [mc]: data }));
     } catch (e) {
       setLiveResults((p) => ({ ...p, [mc]: { ok: false, error: '요청 오류' } }));
     } finally { setBusy(null); }
