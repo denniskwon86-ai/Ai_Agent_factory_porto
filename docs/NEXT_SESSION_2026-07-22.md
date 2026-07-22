@@ -111,6 +111,10 @@ input/output 토큰이 0으로 남을 가능성. 계기판 토큰 합계가 코�
    - ✅ **ContextEngine 실측 병기 토글**(2026-07-22): `ProjectState.mcp_live_grounding`(기본 off) +
      project_meta 연동 + start_sprint 주입 + 프로젝트 생성 폼 체크박스. 켜면 `mcp_broker.get_live_context`
      가 활성 시스템 승인 매핑을 온디맨드 조회해 M1 골든값 뒤에 '참고(비신뢰)·as_of' 블록으로 병기.
+9. **토론 다양성 × 캐시(3번)** — ✅ **구현 완료(2026-07-22)**. 설계 `docs/design_debate_diversity_cache.md`
+   (방안 C)대로: `gateway.aexecute(cacheable=True)` 게이트(기본 True→draft/critique/judge 캐시 유지) +
+   `debate.py` 재작업·개정 경로 `cacheable=False` + 재작업 회차 프롬프트 주입. Exact 캐시가 재작업 루프에서
+   '동일 산출물'을 고정해 무한 동일 재작업에 빠지던 P1 해소. `tests/test_debate_diversity.py` 4건.
 
 ---
 
@@ -124,15 +128,14 @@ docs/NEXT_SESSION_2026-07-22.md 와 AI_HANDOFF.md 읽고 이어서 작업해줘.
 - 설계 근거: `docs/design_master_data_m1.md`, 고도화 로드맵은 `AI_HANDOFF.md §2-3`
 
 ## 5. 상태 스냅샷 (2026-07-22 갱신)
-- 로컬 `dev` = R1 + R2 + M1(백엔드/주입/UI) + 3번문서 + 2번 골든벤치마크 + M2 설계 + **M2 구현** 누적.
-- pytest **248건 통과**(이 환경 `.venv` 기준, 회귀 0). 내역: R2까지 214 + M1 11 + 캐시 1 +
-  골든벤치마크 6 + 크로스워크 7 + MCP브로커 9. 프론트 `tsc --noEmit` 통과(M1 UI·골든·M2 UI 포함).
-- **로드맵 M1·M2·M3 전부 구현 완료.** 남은 최종 단계 = A-1 완주 재실행(별도 환경, 쿼터 회복 후).
-  ※ 이전 세션 211건과의 기준 차이는 환경별 선택 의존성(playwright/chromadb 등) 수집 차이로 추정.
-- ⚠️ **동시 작업 감지**: 워킹트리에 외부 세션의 'LLM Exact 캐시'(core/cache_manager.py 신규 +
-  core/llm_gateway.py 수정 + tests/test_cache_manager.py) 유입됨. **이 커밋에는 포함하지 않음**
-  (M1 파일만 선택 스테이징). 캐시 변경 검토 소견은 세션 대화 참조 — TTL/무효화 부재·재작업 루프
-  무력화·토론 다양성 상실 위험 있어 그쪽 작업자와 협의 필요.
+- 로컬 `dev` = R1 + R2 + M1(백엔드/주입/UI) + 2번 골든벤치마크 + M2(백엔드/UI) + M3(백엔드/UI/토글)
+  + 3번 토론다양성 누적.
+- pytest **255건 통과**(이 환경 `.venv` 기준, 회귀 0). 내역: R2까지 214 + M1 11 + 캐시 1 +
+  골든벤치마크 6 + 크로스워크 7 + MCP브로커 12 + 토론다양성 4. 프론트 `tsc --noEmit` 통과.
+- **로드맵 M1·M2·M3 + 골든벤치마크 + 토론다양성 전부 구현 완료.** 남은 최종 단계 = A-1 완주 재실행
+  (별도 환경, 쿼터 회복 후). ※ 이전 세션 211건과의 기준 차이는 선택 의존성 수집 차이로 추정.
+- ✅ **캐시 상호작용 해소**: 앞서 우려한 'LLM Exact 캐시(외부 세션)'의 재작업 루프 무력화·토론 다양성
+  상실 위험은 3번(토론 다양성, `cacheable` 게이트 + 회차 주입) 구현으로 해소됨. 캐시 모듈은 무수정.
 - 미커밋: `data/interaction_log.jsonl`(런타임 로그)만.
 - **인터프리터 주의**: 이 PC의 실제 가상환경은 `venv\`가 아니라 **`.venv\Scripts\python.exe`** 다
   (AI_HANDOFF §0의 `venv\` 예시와 경로 다름). 시스템 Python312에는 deps 없음.

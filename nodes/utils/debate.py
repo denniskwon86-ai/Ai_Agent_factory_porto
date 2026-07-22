@@ -164,33 +164,42 @@ async def run_debate(state_obj, author_skill: str, stage_key: str, rounds: int =
             break  # 합의 성립 → 조기 종료
         if r < rounds - 1:
             feedback = json.dumps(checks, ensure_ascii=False, indent=2)
+            # [토론 다양성] 개정 라운드마다 '직전과 동일 결과 금지' + cacheable=False 로 캐시 우회
+            # (같은 초안·비평이 캐시 히트로 동일 개정을 반복하는 것을 막아 라운드 간 실질 변화를 유도).
             revise_prompt = (
                 f"{author_prompt}\n\n"
                 f"[직전 초안]:\n{draft}\n\n"
                 f"[비평가 지적 사항 - 모두 반영하여 개정]:\n{feedback}\n\n"
+                f"[개정 {r + 1}R] 직전 초안과 '동일한' 결과는 금지한다. 지적을 반영해 실질적으로 개선하라.\n"
                 "지적된 결함을 모두 해소한 개정 산출물 전체를 작성하라. 축약·생략 금지."
             )
             # [저쿼터 모드] 리비전은 Flash — 드래프트가 최선을 뽑고, 비평 반영 개정은 Flash 로 절약(A1).
             _rev_heavy = not getattr(config, "LOW_QUOTA_MODE", False)
             await _emit(state_obj, stage_key, "revise", r + 1, f"{label} 담당 에이전트에게 비평을 반영해 개정하도록 지시했습니다. (개정 {r + 1}R)")
-            revised = await gateway.aexecute(state_obj, revise_prompt, is_heavy=_rev_heavy, output_mode="document")
+            revised = await gateway.aexecute(state_obj, revise_prompt, is_heavy=_rev_heavy, output_mode="document", cacheable=False)
             if _is_llm_error(revised):
                 break
             draft = revised
     return draft, rounds_used
 
 
-async def run_single_revision(state_obj, author_skill: str, prev_text: str, feedback: str, extra_instruction: str = "") -> str:
+async def run_single_revision(state_obj, author_skill: str, prev_text: str, feedback: str,
+                              extra_instruction: str = "", attempt: int = 1, max_attempts: int = 1) -> str:
     from core.llm_gateway import gateway
+    # [토론 다양성] 2회차+ 재작업은 '직전과 동일 결과 금지' 지시로 다양성을 유도한다. 아울러
+    # cacheable=False 로 Exact 캐시를 우회 — 동일 (prev,feedback) 이 캐시 히트로 '똑같은 산출물'을
+    # 반복 반환해 재작업이 개선 없이 예산만 소진하는 무한 동일 고정(설계 §3 P1)을 차단한다.
+    diversity = (f"\n[재작업 {attempt}/{max_attempts}회차] 직전 개정과 '동일한' 결과는 금지한다. "
+                 "다른 구조·표현·접근으로 실질적으로 개선하라.\n") if attempt > 1 else ""
     prompt = (
         f"{_load_skill(author_skill)}{extra_instruction or ''}\n\n"
         f"[직전 산출물]:\n{prev_text}\n\n"
-        f"[Supervisor 기준 미달 지적]:\n{feedback}\n\n"
+        f"[Supervisor 기준 미달 지적]:\n{feedback}\n{diversity}\n"
         "지적을 모두 반영하여 개정 산출물 전체를 작성하라. 축약·생략 금지."
     )
     # [저쿼터 모드] 단계 재작업도 Flash 로 절약(A1) — 드래프트는 이미 최선 티어로 뽑았음.
     _rework_heavy = not getattr(config, "LOW_QUOTA_MODE", False)
-    return await gateway.aexecute(state_obj, prompt, is_heavy=_rework_heavy, output_mode="document")
+    return await gateway.aexecute(state_obj, prompt, is_heavy=_rework_heavy, output_mode="document", cacheable=False)
 
 
 async def run_supervised_stage(state_obj, author_skill: str, stage_key: str, extra_instruction: str = "") -> tuple:
@@ -231,7 +240,10 @@ async def run_supervised_stage(state_obj, author_skill: str, stage_key: str, ext
     while result.get("verdict") != "PASS" and used < config.MAX_STAGE_REWORKS:
         used += 1
         feedback = _build_feedback(result)
-        artifact = await run_single_revision(state_obj, author_skill, artifact, feedback, extra_instruction=extra_instruction)
+        # 회차(attempt) 를 넘겨 재작업마다 프롬프트가 달라지게 → 캐시 우회 + 다양성(설계 §3 P1 해소)
+        artifact = await run_single_revision(state_obj, author_skill, artifact, feedback,
+                                             extra_instruction=extra_instruction,
+                                             attempt=used, max_attempts=config.MAX_STAGE_REWORKS)
         if _is_llm_error(artifact):
             break
         if field:

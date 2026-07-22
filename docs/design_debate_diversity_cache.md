@@ -87,9 +87,14 @@ while result.verdict != PASS and used < MAX_STAGE_REWORKS:
 
 ---
 
-## 8. 홀딩 사유 / 다음 결정
-사용자 판단으로 **추가 고민 후 착수**(2026-07-22). 착수 시 방안 C 기준으로 debate.py 만 수정하면 되고
-캐시 모듈(외부 세션 소유)은 건드리지 않아도 된다(A 플래그 도입 시에만 gateway 시그니처 1줄 확장).
+## 8. 상태: ✅ 구현 완료 (2026-07-22)
+방안 C 로 구현·검증 완료. 캐시 모듈(외부 세션 소유) 무수정.
+- `core/llm_gateway.py`: `aexecute(cacheable=True)` 파라미터 + 조회/저장 게이트 3곳
+  (기본 True → draft·critique·judge[score_stage] 캐시 유지).
+- `nodes/utils/debate.py`: `run_single_revision(attempt, max_attempts)` 회차 주입 + `cacheable=False`,
+  `run_debate` 개정 라운드 주입 + `cacheable=False`, `run_supervised_stage` 재작업 루프가 회차 전달.
+- `tests/test_debate_diversity.py` 4건(재작업 캐시 우회·1회차 문구 없음·회차별 프롬프트 상이·시그니처).
+- 전 스위트 255건 통과. P1(무한 동일 재작업 고정) 해소.
 
 ---
 

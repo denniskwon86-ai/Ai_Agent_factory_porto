@@ -419,7 +419,8 @@ class LLMGateway:
         return str(raw)
 
     async def aexecute(self, state: Any, skill_prompt: str, is_heavy: bool = True, retry_count: int = 0,
-                       output_mode: str = "code", light: bool = False, full_file_exts=None) -> str:
+                       output_mode: str = "code", light: bool = False, full_file_exts=None,
+                       cacheable: bool = True) -> str:
         """output_mode: 'code'(파일 스키마 강제 JSON) | 'json'(자유 스키마 JSON) | 'document'(자유 서술 문서).
         light=True이면 경량 컨텍스트(요약만)로 호출하여 토큰·429를 절감한다.
         full_file_exts: 개발자가 전체 재출력할 소유 파일 확장자(예: (".tsx",".ts")) - 해당 파일은
@@ -474,8 +475,11 @@ class LLMGateway:
         ]
 
         # [v1 Exact Hash Cache Hook]
+        # cacheable=False 는 '생성·재작업'처럼 다양성이 필요한 경로(debate revise/재작업)에서 캐시를
+        # 우회하기 위한 것. 판정/비평/초안(기본 True)은 결정론이 바람직하므로 캐시를 유지한다.
+        # (설계: docs/design_debate_diversity_cache.md §11)
         prompt_hash = hashlib.sha256((system_content + final_prompt + output_mode).encode("utf-8")).hexdigest()
-        cached_response = await cache_manager.get_exact_cache(prompt_hash)
+        cached_response = await cache_manager.get_exact_cache(prompt_hash) if cacheable else None
         if cached_response:
             print(f"🎯 [LLM Gateway] Exact Cache HIT! (Hash: {prompt_hash[:8]}) - LLM 호출 생략")
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, ["cache_hit"], True, 0.0,
@@ -499,7 +503,7 @@ class LLMGateway:
                 final_res = response.model_dump_json(by_alias=True)
                 # [캐시 안전장치] 빈 코드 결과({"files":[]})는 캐시 금지 — LLM 비결정성상
                 # 다음 재실행에서 정상 파일이 나올 수 있으므로 재생성 기회를 막지 않는다.
-                if getattr(response, "files", None):
+                if cacheable and getattr(response, "files", None):
                     await cache_manager.set_exact_cache(prompt_hash, final_res)
                 return final_res
                 
@@ -548,7 +552,7 @@ class LLMGateway:
 
         # [캐시 안전장치] 빈 결과·오류 센티넬(LLM API/UNKNOWN ERROR)은 캐시하지 않는다 —
         # 성공한 HTTP 응답이라도 내용이 비었거나 실패 산출물이면 영구 고정을 막는다.
-        if final_res and final_res.strip() and not is_llm_error_text(final_res):
+        if cacheable and final_res and final_res.strip() and not is_llm_error_text(final_res):
             await cache_manager.set_exact_cache(prompt_hash, final_res)
         return final_res
 
