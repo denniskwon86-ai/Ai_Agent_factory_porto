@@ -3,6 +3,7 @@ import json
 import re
 import time
 import asyncio
+import hashlib
 from datetime import datetime
 from typing import Any
 from langchain_core.callbacks import BaseCallbackHandler
@@ -12,6 +13,8 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
+
+from core import cache_manager
 
 class QuotaExhaustedException(Exception):
     pass
@@ -470,6 +473,15 @@ class LLMGateway:
             HumanMessage(content=final_prompt)
         ]
 
+        # [v1 Exact Hash Cache Hook]
+        prompt_hash = hashlib.sha256((system_content + final_prompt + output_mode).encode("utf-8")).hexdigest()
+        cached_response = await cache_manager.get_exact_cache(prompt_hash)
+        if cached_response:
+            print(f"🎯 [LLM Gateway] Exact Cache HIT! (Hash: {prompt_hash[:8]}) - LLM 호출 생략")
+            _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, ["cache_hit"], True, 0.0,
+                          requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=0, output_tokens=0)
+            return cached_response
+
         print(f"[GW] [LLM Gateway] LangChain 라우터 체인 실행 중... ({logical_model_name}/{output_mode})")
 
         _rec = _ModelRecorder()
@@ -484,7 +496,12 @@ class LLMGateway:
             if output_mode == "code":
                 # response가 CodeOutput (Pydantic 모델)이므로 바로 JSON 변환 후 반환
                 # Note: structured_output 모드에서는 _is_truncated 체크가 어려우나 파싱 실패 시 예외로 넘어감
-                return response.model_dump_json(by_alias=True)
+                final_res = response.model_dump_json(by_alias=True)
+                # [캐시 안전장치] 빈 코드 결과({"files":[]})는 캐시 금지 — LLM 비결정성상
+                # 다음 재실행에서 정상 파일이 나올 수 있으므로 재생성 기회를 막지 않는다.
+                if getattr(response, "files", None):
+                    await cache_manager.set_exact_cache(prompt_hash, final_res)
+                return final_res
                 
             # [ERROR] Gemini Flash 멀티파트(list/dict {type,text}) 응답을 순수 텍스트로 정규화
             raw_output = self._stringify(response.content)
@@ -525,8 +542,15 @@ class LLMGateway:
 
         # 3. 문서 모드는 원문 그대로, 그 외는 JSON 정제 엔진 통과
         if output_mode == "document":
-            return self._stringify(raw_output).strip()
-        return self._repair_and_parse_json(raw_output)
+            final_res = self._stringify(raw_output).strip()
+        else:
+            final_res = self._repair_and_parse_json(raw_output)
+
+        # [캐시 안전장치] 빈 결과·오류 센티넬(LLM API/UNKNOWN ERROR)은 캐시하지 않는다 —
+        # 성공한 HTTP 응답이라도 내용이 비었거나 실패 산출물이면 영구 고정을 막는다.
+        if final_res and final_res.strip() and not is_llm_error_text(final_res):
+            await cache_manager.set_exact_cache(prompt_hash, final_res)
+        return final_res
 
     async def aexecute_vision(self, state: Any, skill_prompt: str, image_path: str, is_heavy: bool = True) -> str:
         """
@@ -563,11 +587,22 @@ class LLMGateway:
             )
         ]
         
+        # [v1 Exact Hash Cache Hook for Vision]
+        prompt_hash = hashlib.sha256((system_content + final_prompt + image_data).encode("utf-8")).hexdigest()
+        cached_response = await cache_manager.get_exact_cache(prompt_hash)
+        if cached_response:
+            print(f"🎯 [LLM Gateway - Vision] Exact Cache HIT! (Hash: {prompt_hash[:8]}) - API 호출 생략")
+            _log_llm_call(state_obj, "vision_router", "json", 0, ["cache_hit"], True, 0.0)
+            return cached_response
+        
         print(f"[GW] [LLM Gateway - Vision] 멀티모달 분석을 시작합니다...")
         try:
             response = await llm.ainvoke(messages)
             raw_output = self._stringify(response.content)
-            return self._repair_and_parse_json(raw_output)
+            final_res = self._repair_and_parse_json(raw_output)
+            if final_res and final_res.strip() and not is_llm_error_text(final_res):
+                await cache_manager.set_exact_cache(prompt_hash, final_res)
+            return final_res
         except Exception as e:
             print(f"❌ [LLM Gateway - Vision] 호출 에러: {e}")
             return json.dumps({"decision": "PASS", "feedback": "Vision API 호출 에러로 생략됨."}, ensure_ascii=False)
