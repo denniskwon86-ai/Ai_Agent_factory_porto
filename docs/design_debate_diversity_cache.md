@@ -90,3 +90,67 @@ while result.verdict != PASS and used < MAX_STAGE_REWORKS:
 ## 8. 홀딩 사유 / 다음 결정
 사용자 판단으로 **추가 고민 후 착수**(2026-07-22). 착수 시 방안 C 기준으로 debate.py 만 수정하면 되고
 캐시 모듈(외부 세션 소유)은 건드리지 않아도 된다(A 플래그 도입 시에만 gateway 시그니처 1줄 확장).
+
+---
+
+## 11. 세부 설계안 (방안 C 구현 명세, 2026-07-22 보고)
+
+### 11-0. 사실 확인(코드 실측)
+- `gateway.aexecute` 는 프롬프트 조립 후 `sha256(system_content+final_prompt+output_mode)` 로 캐시 조회/저장
+  (`core/llm_gateway.py` L477·L503·L552). 조건: 빈/오류 결과는 이미 저장 제외.
+- debate 3경로: draft `L127`(is_heavy), critique `L143`(json·light), revise `L176`(document) /
+  재작업 `run_single_revision L193`. 판정은 `score_stage`→`aexecute(output_mode="json")`(scoring.py L119·L134).
+
+### 11-1. gateway: `cacheable` 플래그 (방안 A, 최소 침습)
+```python
+async def aexecute(self, state, skill_prompt, is_heavy=True, retry_count=0,
+                   output_mode="code", light=False, full_file_exts=None,
+                   cacheable: bool = True):          # ← 추가(기본 True = 기존 동작·호환)
+    ...
+    prompt_hash = ...
+    if cacheable:                                    # ← 조회 게이트
+        cached = await cache_manager.get_exact_cache(prompt_hash)
+        if cached: ... return cached
+    ...
+    if cacheable and <기존 저장조건>:                 # ← 저장 게이트(L503·L552)
+        await cache_manager.set_exact_cache(prompt_hash, final_res)
+```
+- 기본 True → **draft·critique·judge(score_stage)는 자동으로 캐시 유지**(수정 불필요, 결정론 목표 부합).
+- 캐시 모듈(cache_manager.py, 외부 세션 소유) 무수정. gateway 시그니처 1개 + 조건 2줄.
+
+### 11-2. debate: 재작업 회차 주입 (방안 B) + cacheable=False (이중 안전)
+```python
+# run_single_revision(재작업 루프): 회차 파라미터 추가
+async def run_single_revision(state, author_skill, prev_text, feedback,
+                              attempt=1, max_attempts=1, extra_instruction=""):
+    diversity = (f"\n[재작업 {attempt}/{max_attempts}회차] 직전 개정과 '동일한' 결과는 금지한다. "
+                 "다른 구조·표현·접근으로 실질 개선하라.\n") if attempt > 1 else ""
+    prompt = f"{skill}{extra}\n\n[직전 산출물]:\n{prev_text}\n\n[지적]:\n{feedback}\n{diversity}..."
+    return await gateway.aexecute(state, prompt, is_heavy=_rework_heavy,
+                                  output_mode="document", cacheable=False)   # ← 재작업은 캐시 우회
+```
+- `run_supervised_stage` while 루프(`nodes/utils/debate.py` L231-239)에서 `used`(현재 회차)와
+  `config.MAX_STAGE_REWORKS` 를 `attempt/max_attempts` 로 전달.
+- `run_debate` 의 revise(L176)도 라운드 `r+1` 주입 + `cacheable=False`.
+- 효과: (1) 프롬프트가 회차마다 달라져 **P1 무한 동일 고정 해소**, (2) LLM 에 실제 다양성 신호.
+
+### 11-3. 경로별 최종 정책
+| 경로 | cacheable | 회차 주입 | 근거 |
+|---|---|---|---|
+| draft (초안) | True | — | 첫 생성 재현·쿼터 절약 |
+| critique (비평) | True | — | 같은 초안=같은 결함 지적(결정론 바람직) |
+| judge (score_stage) | True(기본) | — | 판정 결정론 = 재작업 루프 안정 |
+| revise (debate 개정) | **False** | 라운드 r | 개선=변화 |
+| single_revision (재작업) | **False** | attempt | P1 직접 해소 |
+
+### 11-4. 테스트 계획
+1. 단위: 동일 `(prev,feedback)` + attempt=1/2/3 → 프롬프트 문자열(=해시)이 서로 달라야.
+2. 단위: `aexecute(cacheable=False)` 시 `cache_manager.get/set` 미호출(모킹으로 검증).
+3. 회귀: judge/critique 는 동일 입력 시 캐시 히트 유지(cacheable 기본 True 불변).
+4. 통합: `MAX_STAGE_REWORKS` 루프가 "동일 산출물 고정"에 빠지지 않음(최소 1회 변화 여지).
+
+### 11-5. 리스크·트레이드오프
+- 재작업 경로 cacheable=False → 재작업마다 LLM 재호출(쿼터↑). 단 재작업은 본래 '개선' 목적이라 정당.
+- 캐시 모듈 무수정·gateway 최소 변경 → 외부 세션 작업과 충돌 위험 낮음.
+- 예상 변경 규모: `llm_gateway.py`(시그니처+조건 3줄), `nodes/utils/debate.py`(회차 주입·플래그 3곳),
+  테스트 1파일. **소규모**.
