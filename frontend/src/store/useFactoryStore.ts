@@ -67,6 +67,7 @@ interface FactoryStore {
   lastSprintFailure: { taskId: string; error: string; detail?: string } | null;
   clearSprintFailure: () => void;
   isSuspendedQuota: boolean;
+  suspendedTaskId: string | null;  // 쿼터 회복 재개(resume-quota) 대상 태스크
   clearSuspendedQuota: () => void;
   supervisorFeed: any[];
   releases: any[];
@@ -145,6 +146,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   currentActivity: null,
   lastSprintFailure: null,
   isSuspendedQuota: false,
+  suspendedTaskId: null,
   supervisorFeed: [],
   releases: [],
   viewingRelease: null,
@@ -601,7 +603,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   clearSprintData: () => set({ completed_agents: [], currentActivity: null, healingRetryCount: 0, lastSprintFailure: null }),
 
   clearSprintFailure: () => set({ lastSprintFailure: null }),
-  clearSuspendedQuota: () => set({ isSuspendedQuota: false }),
+  clearSuspendedQuota: () => set({ isSuspendedQuota: false, suspendedTaskId: null }),
 
   triggerSelfHealing: async (errorMsg: string) => {
     const { currentProjectId, isConnected, healingRetryCount } = get();
@@ -762,6 +764,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
           return {
             logs,
             isSuspendedQuota: true,
+            suspendedTaskId: data.payload?.task_id || prev.suspendedTaskId,
             activeSprintId: null,
             currentActivity: { node: "System", step: "일시 정지", activity: "LLM 할당량 소진으로 태스크 보류됨" }
           };

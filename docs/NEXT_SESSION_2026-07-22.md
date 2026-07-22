@@ -48,12 +48,19 @@
   분류 불가(개요 등) 헤더는 `keep=True`로 리셋(이전 drop 상태가 다음 섹션에 전파되던 버그도 수정).
 - **회귀 테스트 3건 추가**(`tests/test_context_full_files.py`): FE→계약 유지·DB 제거 / BE→FE 제거 / 풀스택→전체 유지. 전 스위트 **208건 통과**.
 
-### 🟡 R2. `SUSPENDED_QUOTA` **재개 경로 부재** — **결정: resume 경로 구현(향후 세션)**
-HOTL이 아니므로 UI 재개 게이트가 안 뜨고, 현재는 "fail-fast 종료 → 처음부터 재실행"만 가능하다.
-- **사용자 확정(2026-07-22)**: "처음부터 재실행"이 아니라, **쿼터 회복 시 SUSPENDED 지점부터 resume**하는
-  체크포인트 재개 경로를 구현하기로 결정. (이번 세션엔 착수하지 않음 — 규모 있는 작업으로 향후 진행.)
-- 착수 시 참고: `run_e2e_scenario.py::wait_phase()`의 `SUSPENDED_QUOTA` fail-fast 반환 지점,
-  `core/async_orchestrator.py::is_hotl_pending()`, 체크포인트 DB(`pipeline_state.db`) 재개 지점 매핑 필요.
+### ✅ R2. `SUSPENDED_QUOTA` **재개 경로** — **구현 완료(2026-07-22)**
+HOTL이 아니므로 재개 게이트가 없어 "처음부터 재실행"만 가능하던 문제를, **중단 지점부터 재개**하는
+경로로 해결. (기존 `_resume_stream`의 `astream(None)` 체크포인트 재개 인프라 재사용.)
+- **`state_models.py`**: `pre_suspend_mode` 필드 신설 — 동결 직전 정상 모드 보존.
+- **`core/async_orchestrator.py`**: 중복 SUSPEND 처리를 `_suspend_for_quota()` 헬퍼로 통합(직전 모드
+  보존, 재소진 시 원본 유지). **`resume_from_suspend()`** 신설 — 실행중/미동결 방어 → `factory_mode`를
+  `pre_suspend_mode`로 **복구**(이게 있어야 재개 후 `is_hotl_pending` 정상화) → `astream(None)` 재개.
+  쿼터 미회복이면 재개 스트림이 다시 소진을 만나 자연 재동결(무한루프 없음).
+- **`api/routes/factory_control.py`**: `POST /{pid}/sprint/resume-quota`(미동결 대상은 409).
+- **프론트**: `QUOTA_EXHAUSTED` 시 `suspendedTaskId` 저장, 배너에 **[▶️ 중단 지점부터 재가동]** 버튼 배선.
+- **테스트**: `tests/test_quota_resume.py` 6건(모드 보존/복구·미동결/실행중 거부). 전 스위트 **214건 통과**,
+  프론트 `tsc --noEmit` 통과.
+- **미검증(런타임)**: 실제 쿼터 소진 재현이 필요한 E2E 재개는 A-1 재실행 시 함께 실측 필요.
 
 ### 🟡 R3. 토큰 실측이 **code 모드(structured output)에서 0일 수 있음**
 `with_structured_output`(코드 생성) 경로는 `usage_metadata`/`token_usage`가 응답 객체에 안 실릴 수 있어
@@ -68,8 +75,8 @@ input/output 토큰이 0으로 남을 가능성. 계기판 토큰 합계가 코�
    완주하면 계기판 📊에서 `used`(실제 모델)·`downgraded`·**토큰 합계**·단계별 소요 확인.
    실패하면 `SUSPENDED_QUOTA`로 fail-fast 되므로 어느 단계에서 소진됐는지 로그로 즉시 파악 가능.
 2. ~~**R1 검토·수정**~~ ✅ **완료(`9d740c380`)** — API 계약 섹션을 FE·BE 양쪽 항상 보존하도록 분리.
-3. **R2 resume 경로 구현** (사용자 확정) — 쿼터 회복 시 SUSPENDED 지점부터 재개하는 체크포인트 경로.
-   §2 R2의 착수 참고 지점 사용.
+3. ~~**R2 resume 경로 구현**~~ ✅ **완료(2026-07-22)** — 중단 지점부터 재개(§2 R2 참조). 단 E2E 재개
+   실측은 A-1 재실행(쿼터 소진 재현) 시 함께 확인 필요.
 4. **M1 기준정보 저장소 구현** — `docs/design_master_data_m1.md`(복합 PK·별칭 오탐 방지·결정론 선정
    반영본)대로 `core/master_data.py`(DDL·CRUD·별칭감지·get_master_context) → API → ContextEngine 주입.
    (환각 차단·모델 불변성의 최강 축)
@@ -89,9 +96,9 @@ docs/NEXT_SESSION_2026-07-22.md 와 AI_HANDOFF.md 읽고 이어서 작업해줘.
 - 설계 근거: `docs/design_master_data_m1.md`, 고도화 로드맵은 `AI_HANDOFF.md §2-3`
 
 ## 5. 상태 스냅샷 (2026-07-22 갱신)
-- 로컬 `dev` = **`9d740c380`** (R1 수정 커밋). ⚠️ 아직 `git push` 안 함 — 다음에 push 필요.
-- pytest **208건 통과**(이 환경 `.venv` 기준, 신규 회귀 0). ※ 이전 세션 211건과의 차이는 환경별
-  선택 의존성(playwright/chromadb 등) 수집 차이로 추정 — 실패/에러 0.
+- 로컬 `dev` = R1(`9d740c380`) + 문서 + **R2 resume 경로 구현** 커밋.
+- pytest **214건 통과**(이 환경 `.venv` 기준, 신규 6건 = R2, 회귀 0) + 프론트 `tsc --noEmit` 통과.
+  ※ 이전 세션 211건과의 기준 차이는 환경별 선택 의존성(playwright/chromadb 등) 수집 차이로 추정.
 - 미커밋: `data/interaction_log.jsonl`(런타임 로그)만.
 - **인터프리터 주의**: 이 PC의 실제 가상환경은 `venv\`가 아니라 **`.venv\Scripts\python.exe`** 다
   (AI_HANDOFF §0의 `venv\` 예시와 경로 다름). 시스템 Python312에는 deps 없음.

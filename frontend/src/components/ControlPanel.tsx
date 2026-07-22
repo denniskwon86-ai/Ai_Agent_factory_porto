@@ -113,6 +113,7 @@ export default function ControlPanel() {
   const hotlTaskId = useFactoryStore((s) => s.hotlTaskId);
   const isConnected = useFactoryStore((s) => s.isConnected);
   const isSuspendedQuota = useFactoryStore((s) => s.isSuspendedQuota);
+  const suspendedTaskId = useFactoryStore((s) => s.suspendedTaskId);
   const clearSuspendedQuota = useFactoryStore((s) => s.clearSuspendedQuota);
   const currentTemplateData = useFactoryStore((s) => s.currentTemplateData);
   const lastSprintFailure = useFactoryStore((s) => s.lastSprintFailure);
@@ -368,6 +369,32 @@ export default function ControlPanel() {
     }
   };
 
+  // [R2] 쿼터 회복 후 SUSPENDED 지점부터 재개(처음부터 재실행이 아님)
+  const handleResumeQuota = async () => {
+    if (!currentProjectId) return;
+    if (!suspendedTaskId) return alert("재가동할 보류 태스크 정보가 없습니다. 페이지를 새로고침해 주세요.");
+    setIsStarting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/sprint/resume-quota`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: suspendedTaskId })
+      });
+      if (res.ok) {
+        setActiveSprintId(suspendedTaskId);
+        clearSuspendedQuota();
+      } else {
+        const d = await res.json().catch(() => ({} as any));
+        alert(`재가동 실패: ${d.detail || res.status}. 쿼터가 아직 회복되지 않았을 수 있습니다.`);
+      }
+    } catch (error) {
+      console.error("쿼터 재가동 실패:", error);
+      alert("재가동 요청 중 오류가 발생했습니다.");
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
   const handleSubmitFeedback = async () => {
     if (!feedback.trim()) return alert("수정 사항을 입력해주세요.");
     if (!currentProjectId) return;
@@ -506,6 +533,12 @@ export default function ControlPanel() {
               내일 할당량이 갱신된 후 보류된 태스크를 재가동하거나, 새로운 API 키를 등록해 주세요.
             </p>
             <div className="flex gap-2">
+              <button
+                onClick={handleResumeQuota}
+                disabled={isStarting || !suspendedTaskId}
+                title="쿼터 회복 후, 처음부터가 아니라 중단된 지점부터 이어서 재가동합니다."
+                className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs font-bold text-white transition-colors"
+              >▶️ 중단 지점부터 재가동</button>
               <button onClick={clearSuspendedQuota} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-white transition-colors">⏸️ 알림 닫기</button>
             </div>
           </div>

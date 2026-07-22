@@ -601,6 +601,17 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
         raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")
     return {"status": "resumed", "task_id": req.task_id}
 
+@router.post("/{project_id}/sprint/resume-quota")
+async def resume_from_quota(project_id: str, req: SprintPauseRequest):
+    """[R2] 쿼터 회복 후 SUSPENDED_QUOTA 로 동결된 스프린트를 마지막 체크포인트에서 재개.
+    '처음부터 재실행'이 아니라 중단 지점부터 이어서 실행한다. 쿼터가 아직도 없으면 재개 스트림이
+    다시 쿼터 소진을 만나 자연히 재동결된다(400 반환 조건: 대상이 SUSPENDED_QUOTA 상태가 아님)."""
+    _safe_id(project_id, "project_id")
+    success = await orchestrator.resume_from_suspend(req.task_id, project_id)
+    if not success:
+        raise HTTPException(status_code=409, detail="쿼터 재개 대상이 아니거나(이미 실행 중/미동결) 재개에 실패했습니다.")
+    return {"status": "resumed", "task_id": req.task_id}
+
 @router.post("/{project_id}/supervisor/chat")
 async def supervisor_chat(project_id: str, req: SupervisorChatRequest):
     _safe_id(project_id, "project_id")

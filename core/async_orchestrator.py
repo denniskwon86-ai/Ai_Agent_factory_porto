@@ -213,11 +213,7 @@ class AsyncFactoryOrchestrator:
         except asyncio.CancelledError:
             print(f"⏸️ [Orchestrator] Sprint Loop Cancelled (Paused): {task_id}")
         except QuotaExhaustedException as e:
-            print(f"⏸️ [Orchestrator] 쿼터 소진으로 인해 태스크 보류됨: {task_id}")
-            await langgraph_engine.aupdate_state(config, {"factory_mode": "SUSPENDED_QUOTA"})
-            snapshot = await langgraph_engine.aget_state(config)
-            await self._save_latest_state(snapshot.values, workspace_root)
-            await factory_broadcaster.broadcast("QUOTA_EXHAUSTED", {"task_id": task_id, "project_id": pid})
+            await self._suspend_for_quota(langgraph_engine, config, task_id, workspace_root)
         except Exception as e:
             # 침묵 금지: 실패 이벤트를 브로드캐스트해야 UI 가 '영원히 가동 중' 상태에 갇히지 않는다
             print(f" [Orchestrator] Sprint Loop Error: {e}")
@@ -282,13 +278,70 @@ class AsyncFactoryOrchestrator:
         except asyncio.CancelledError:
             print(f"⏸️ [Orchestrator] Resume Stream Cancelled (Paused): {task_id}")
         except QuotaExhaustedException as e:
-            print(f"⏸️ [Orchestrator] 쿼터 소진으로 인해 태스크 보류됨: {task_id}")
-            await langgraph_engine.aupdate_state(config, {"factory_mode": "SUSPENDED_QUOTA"})
-            snapshot = await langgraph_engine.aget_state(config)
-            await self._save_latest_state(snapshot.values, workspace_root)
-            await factory_broadcaster.broadcast("QUOTA_EXHAUSTED", {"task_id": task_id, "project_id": pid})
+            await self._suspend_for_quota(langgraph_engine, config, task_id, workspace_root)
         except Exception as e:
             print(f" [Orchestrator] Resume Stream Error: {e}")
             await factory_broadcaster.broadcast("SPRINT_FAILED", {"task_id": task_id, "project_id": pid, "error": str(e)})
+
+    async def _suspend_for_quota(self, langgraph_engine, config: dict, task_id: str, workspace_root: str):
+        """쿼터 완전 고갈 시 스프린트를 SUSPENDED_QUOTA 로 동결한다.
+        재개(resume_from_suspend) 시 정확 복구를 위해 SUSPEND '직전의 정상 모드'를 pre_suspend_mode 에
+        보존한다. 이미 SUSPENDED_QUOTA 인 상태(재개 직후 재소진)에서는 원래 보존값을 덮지 않는다."""
+        pid = _pid(workspace_root)
+        print(f"⏸️ [Orchestrator] 쿼터 소진으로 인해 태스크 보류됨: {task_id}")
+        try:
+            snap = await langgraph_engine.aget_state(config)
+            cur_vals = snap.values if isinstance(snap.values, dict) else {}
+            prev_mode = cur_vals.get("factory_mode") or "EXECUTION"
+            updates = {"factory_mode": "SUSPENDED_QUOTA"}
+            if prev_mode != "SUSPENDED_QUOTA":
+                updates["pre_suspend_mode"] = prev_mode  # 직전 정상 모드 보존
+            await langgraph_engine.aupdate_state(config, updates)
+            snapshot = await langgraph_engine.aget_state(config)
+            await self._save_latest_state(snapshot.values, workspace_root)
+        except Exception as e:
+            print(f"⚠️ [Orchestrator] SUSPENDED_QUOTA 상태 기록 실패: {e}")
+        await factory_broadcaster.broadcast("QUOTA_EXHAUSTED", {"task_id": task_id, "project_id": pid})
+
+    async def resume_from_suspend(self, task_id: str, project_id: str) -> bool:
+        """[R2] 쿼터 회복 후 SUSPENDED_QUOTA 로 동결된 스프린트를 마지막 체크포인트에서 재개한다.
+        factory_mode 를 SUSPEND 직전 모드(pre_suspend_mode)로 복구한 뒤 astream(None) 으로 이어서
+        실행하므로 '처음부터 재실행'이 아니라 중단 지점부터 이어진다. 쿼터가 아직 회복되지 않았다면
+        재개 스트림이 다시 QuotaExhaustedException 을 만나 자연히 재동결된다(무한루프/오탐 없음)."""
+        skey = _skey(project_id, task_id)
+        existing = self.active_tasks.get(skey)
+        if existing and not existing.done():
+            print(f"⚠️ [Orchestrator] Task {task_id} (project={project_id}) 는 이미 실행 중 - 중복 재개 요청 무시.")
+            return False
+        langgraph_engine = await get_runtime_app()
+        config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
+        snapshot = await langgraph_engine.aget_state(config)
+        if not snapshot.values:
+            return False
+        vals = snapshot.values if isinstance(snapshot.values, dict) else {}
+        # SUSPENDED_QUOTA 상태가 아니면 쿼터 재개 대상이 아니다(오작동/중복 트리거 방지)
+        if vals.get("factory_mode") != "SUSPENDED_QUOTA":
+            print(f"⚠️ [Orchestrator] Task {task_id} 는 SUSPENDED_QUOTA 상태가 아님 - 쿼터 재개 무시.")
+            return False
+        workspace_root = vals.get("workspace_root", "./workspace")
+        tid = vals.get("template_id", "default")
+        restored_mode = vals.get("pre_suspend_mode") or "EXECUTION"
+        # T2-b: 재개도 이 프로젝트의 템플릿 그래프로(초기 스프린트와 동일 토폴로지여야 체크포인트 정합)
+        langgraph_engine = await get_runtime_app(tid)
+        try:
+            # factory_mode 복구 + 보존값 초기화. 이 복구가 있어야 재개 후 HOTL 게이트 감지가 정상화된다.
+            await langgraph_engine.aupdate_state(config, {"factory_mode": restored_mode, "pre_suspend_mode": ""})
+        except Exception as e:
+            print(f"⚠️ [Orchestrator] 쿼터 재개 모드 복구 실패: {e}")
+            return False
+
+        pid = _pid(workspace_root)
+        skey = _skey(pid, task_id)
+        task = asyncio.create_task(self._resume_stream(config, task_id, workspace_root, tid))
+        self.active_tasks[skey] = task
+        self.task_projects[skey] = pid
+        task.add_done_callback(lambda t, k=skey: (self.active_tasks.pop(k, None), self.task_projects.pop(k, None)))
+        print(f"▶️ [Orchestrator] 쿼터 회복 재개: {task_id} (project={pid}, mode={restored_mode})")
+        return True
 
 orchestrator = AsyncFactoryOrchestrator()

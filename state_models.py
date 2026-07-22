@@ -88,6 +88,10 @@ class ProjectState(BaseModel):
     domain_agents: List[str] = Field(default_factory=list, description="서브 프로젝트에 할당된 실행 에이전트 ID 목록 (비어 있으면 전체 파이프라인 실행)")
     
     factory_mode: Literal["PLANNING", "EXECUTION", "REVISION", "REVIEW", "QA_RELEASE", "HOTL_PAUSED", "SUSPENDED_QUOTA"] = Field(default="PLANNING")
+    # 쿼터 완전 고갈로 SUSPENDED_QUOTA 로 전환하기 직전의 정상 모드를 보존한다.
+    # 쿼터 회복 후 재개(resume) 시 이 값으로 factory_mode 를 정확히 복구해야
+    # 이후 HOTL 게이트 감지(is_hotl_pending)가 정상 동작한다(SUSPENDED 는 항상 HOTL=False 이므로).
+    pre_suspend_mode: str = Field(default="")
     workspace_root: str = Field(default="./workspace")
     git_info: GitInfo = Field(default_factory=GitInfo)
     workspace_hash: str = Field(default="")
