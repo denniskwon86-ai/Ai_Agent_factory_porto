@@ -26,16 +26,8 @@
 |---|---|---|---|---|
 | ENV-1 | PASS | — | 2026-07-16 | LLM Gateway 다중 폴백 정상 구동 확인 |
 | ENV-2 | PASS | — | 2026-07-21 | 180건 모두 통과 완료 |
-| ENV-3 | PASS | — | 2026-07-16 | 백엔드(8080)/프론트(5173) 정상 동작 |
-| S-1 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| S-2 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| S-3 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| S-4 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| S-5 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| S-6 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| S-7 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| S-8 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| A-1 | FAIL | — | 2026-07-16 | ❌ 관문 시나리오 실패 (E2E-03 쿼터 소진) |
+| ENV-3 | PASS | — | 2026-07-16 | 백엔드(8080)/�| S-8 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
+| A-1 | FAIL | — | 2026-07-22 | ❌ 관문 시나리오 실패 (UI_DESIGN HOTL 무한루프) |
 | A-2 | PENDING | — | | |
 | A-3 | PENDING | — | | |
 | A-4 | PENDING | — | | |
@@ -83,6 +75,18 @@
 | 4 | ENV-2 | Minor | pytest 기존 실패 7건(구버전 토폴로지 기준의 낡은 기대값: interrupt 2개 가정 등) — 이번 변경과 무관하게 HEAD에서도 동일 실패 확인 | **FIXED** (2026-07-19 어서션 현행화 + 형제 리포 pyc 캐시 오염 제거 → **전 스위트 155건 통과 = ENV-2 베이스라인**) |
 | 5 | A-1 4차 | Major | `hotl/check` 가 PLANNING_* 태스크의 HOTL 대기를 미감지(SSE 유실 시 기획 게이트 복구 불가) | **FIXED** (latest_state 의 현재 태스크로도 확인) |
 | 6 | A-1 4차·AABB | Critical | WBS 분할 결과가 빈 태스크로 저장되고 게이트 통과 → 기획이 '완료된 척' 정지 (non-greedy JSON 절단 + 빈 결과 무방어) | **FIXED** (파싱 견고화+1회 재시도+빈 WBS 저장 금지) + **복구 수단 신설**(`wbs/replan` API·UI 버튼) |
+| 7 | A-1 2차 | Major | `run.py` reload=True 가 .py 저장 시 서버 재시작 → 실행 중 스프린트 스트림 사망 | **FIXED** (운영 모드 기본 reload OFF, `--dev` 옵트인) |
+| 8 | 환경 | Major | 프로바이더 패키지 설치가 langchain-core 를 0.3 으로 다운그레이드시켜 gemini/groq 임포트 파손. langchain-cerebras 는 core 1.x 미지원 | **FIXED** (core 1.x 정렬, Cerebras 는 OpenAI 호환 API 로 전환 — 5중 폴백 전부 활성) |
+| 9 | A-1 (E2E-03) | Major | LLM Gateway 할당량(무료 티어) 소진으로 인해 기술명세 단계 중단 후 프론트엔드 산출물 빈 값 반환 → 파싱 실패 및 파이프라인 중단(FAILED) | OPEN — 쿼터 회복 대기 및 산출물 빈 값에 대한 예외 처리 강화 필요 |
+| 10| A-1 (E2E-04) | Critical | `UI_DESIGN` 단계에서 HOTL 게이트 `자동 승인(resume)`이 무한루프로 발생하며 다음 단계(ARCHITECTURE)로 넘어가지 못함 | OPEN — 내일 우선 해결 과제 (리뷰어 결정 미초기화 또는 자동화 테스트 스크립트 결함 의심) |
+
+## 세션 인수인계 메모
+
+- 2026-07-16: 새 LLM 라우팅 체인(OpenRouter, xAI 등) 적용 완료 후 ENV-1 정상 동작 확인됨. 
+- 2026-07-16: A-1(test_a1_unitconv) 테스트 데이터를 생성하여 초기 스프린트 백엔드에서 가동 중.
+- 2026-07-17: A-1이 RFP(1.0)→PRD(0.963)→UI_DESIGN(1.0) 통과 후 VisionQA에서 결함 #1로 크래시. 결함 #1·#2 수정 완료(미커밋). **워크플로우가 바뀌었으므로 A-1은 처음부터 재실행 필요**(sprint_init 재가동 시 자동 아카이브됨). Pro 체인 전 제공사 429 소진 이력 있음 → 쿼터 잔량 확인 후 재실행 권장.
+- 2026-07-18: **신규 기능 — 요구 확인 인터뷰 게이트** 추가(미커밋). PLANNING 진입 시 `Requirement_Interviewer`가 선택형 질문 2~4개 생성 → HOTL 게이트(질문 카드 UI, 추천안 기본 선택) → 답변이 RFP/PRD에 주입. 기본 파이프라인이 **CLARIFICATION → RFP → PRD → UI → VisionQA → ARCHITECTURE → WBS** 로 변경됨. HOTL 게이트 5곳(인터뷰/RFP/PM/VisionQA/PMO). ⚠️ 테스트 시나리오의 HOTL 자동 승인 절차에 인터뷰 게이트 1회 추가 반영 필요(무피드백 resume 시 추천안 없이 아이디어만으로 RFP 진행되므로, 자동화 시엔 그냥 resume 하면 됨).
+- 2026-07-22: **v1 Exact Hash Cache 도입 완료** (쿼터 방어 목적). 이를 기반으로 A-1 시나리오 재개했으나, `UI_DESIGN` 단계에서 자동 승인 무한루프 결함(Bug #10) 발생으로 18분 강제 종료됨. 다음 세션에서 Bug #10 추적 요망. 4차·AABB | Critical | WBS 분할 결과가 빈 태스크로 저장되고 게이트 통과 → 기획이 '완료된 척' 정지 (non-greedy JSON 절단 + 빈 결과 무방어) | **FIXED** (파싱 견고화+1회 재시도+빈 WBS 저장 금지) + **복구 수단 신설**(`wbs/replan` API·UI 버튼) |
 | 7 | A-1 2차 | Major | `run.py` reload=True 가 .py 저장 시 서버 재시작 → 실행 중 스프린트 스트림 사망 | **FIXED** (운영 모드 기본 reload OFF, `--dev` 옵트인) |
 | 8 | 환경 | Major | 프로바이더 패키지 설치가 langchain-core 를 0.3 으로 다운그레이드시켜 gemini/groq 임포트 파손. langchain-cerebras 는 core 1.x 미지원 | **FIXED** (core 1.x 정렬, Cerebras 는 OpenAI 호환 API 로 전환 — 5중 폴백 전부 활성) |
 | 9 | A-1 (E2E-03) | Major | LLM Gateway 할당량(무료 티어) 소진으로 인해 기술명세 단계 중단 후 프론트엔드 산출물 빈 값 반환 → 파싱 실패 및 파이프라인 중단(FAILED) | OPEN — 쿼터 회복 대기 및 산출물 빈 값에 대한 예외 처리 강화 필요 |
