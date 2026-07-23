@@ -78,7 +78,7 @@
 | 7 | A-1 2차 | Major | `run.py` reload=True 가 .py 저장 시 서버 재시작 → 실행 중 스프린트 스트림 사망 | **FIXED** (운영 모드 기본 reload OFF, `--dev` 옵트인) |
 | 8 | 환경 | Major | 프로바이더 패키지 설치가 langchain-core 를 0.3 으로 다운그레이드시켜 gemini/groq 임포트 파손. langchain-cerebras 는 core 1.x 미지원 | **FIXED** (core 1.x 정렬, Cerebras 는 OpenAI 호환 API 로 전환 — 5중 폴백 전부 활성) |
 | 9 | A-1 (E2E-03) | Major | LLM Gateway 할당량(무료 티어) 소진으로 인해 기술명세 단계 중단 후 프론트엔드 산출물 빈 값 반환 → 파싱 실패 및 파이프라인 중단(FAILED) | OPEN — 쿼터 회복 대기 및 산출물 빈 값에 대한 예외 처리 강화 필요 |
-| 10| A-1 (E2E-04) | Critical | `UI_DESIGN` 단계에서 HOTL 게이트 `자동 승인(resume)`이 무한루프로 발생하며 다음 단계(ARCHITECTURE)로 넘어가지 못함 | OPEN — 내일 우선 해결 과제 (리뷰어 결정 미초기화 또는 자동화 테스트 스크립트 결함 의심) |
+| 10| A-1 (E2E-04) | Critical | `UI_DESIGN` 단계에서 HOTL 게이트 `자동 승인(resume)`이 무한루프로 발생하며 다음 단계(ARCHITECTURE)로 넘어가지 못함 | **FIXED** (2026-07-23, VisionQA 반려 피드백을 UIDesigner가 수용하고 상태를 초기화하도록 수정하여 캐시 무한루프 차단) |
 
 ## 세션 인수인계 메모
 
