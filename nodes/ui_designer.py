@@ -11,11 +11,20 @@ async def run_ui_designer(state: Any) -> Dict[str, Any]:
     _fb_items = getattr(state_obj, "human_feedback_queue", []) or []
     _latest = _fb_items[-1] if _fb_items else None
     _latest_fb = (_latest.get("feedback", "") if isinstance(_latest, dict) else getattr(_latest, "feedback", "")) or ""
+    
+    _rev_decision = getattr(state_obj, "reviewer_decision", "") or ""
+    _rev_feedback = getattr(state_obj, "reviewer_feedback", "") or ""
+    
     _extra = ""
     if _latest_fb.strip():
-        _extra = f"\n\n[ 사용자 UI 피드백 - 반드시 반영해 화면을 다시 디자인하십시오]:\n{_latest_fb.strip()}"
+        _extra += f"\n\n[ 사용자 UI 피드백 - 반드시 반영해 화면을 다시 디자인하십시오]:\n{_latest_fb.strip()}"
         print(f" [UIDesigner] 사용자 피드백 반영해 재디자인: {_latest_fb.strip()[:80]}")
-    else:
+        
+    if _rev_decision == "REWORK_DEV" and _rev_feedback.strip():
+        _extra += f"\n\n[ AI Vision QA 반려 피드백 - 이전 구조 결함을 반드시 수정하십시오]:\n{_rev_feedback.strip()}"
+        print(f" [UIDesigner] Vision QA 피드백 반영해 재디자인: {_rev_feedback.strip()[:80]}")
+
+    if not _latest_fb.strip() and not (_rev_decision == "REWORK_DEV" and _rev_feedback.strip()):
         print(" [Agent] UIDesigner 가동 중: UI 목업 화면을 디자인합니다...")
 
     from nodes.utils.debate import run_supervised_stage
@@ -27,4 +36,9 @@ async def run_ui_designer(state: Any) -> Dict[str, Any]:
     updates.setdefault("needs_revision", False)
     if _latest_fb.strip():
         updates["human_feedback_queue"] = []  # 소비한 피드백 비움(후속 단계 재적용 방지)
+        
+    if _rev_decision == "REWORK_DEV":
+        updates["reviewer_decision"] = "NONE"
+        updates["reviewer_feedback"] = ""
+        
     return updates
