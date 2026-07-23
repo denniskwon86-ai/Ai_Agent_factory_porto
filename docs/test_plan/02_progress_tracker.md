@@ -26,8 +26,8 @@
 |---|---|---|---|---|
 | ENV-1 | PASS | — | 2026-07-16 | LLM Gateway 다중 폴백 정상 구동 확인 |
 | ENV-2 | PASS | — | 2026-07-21 | 180건 모두 통과 완료 |
-| ENV-3 | PASS | — | 2026-07-16 | 백엔드(8080)/�| S-8 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| A-1 | FAIL | — | 2026-07-22 | ❌ 관문 시나리오 실패 (UI_DESIGN HOTL 무한루프) |
+| ENV-3 | PASS | — | 2026-07-16 | 백엔드(8080)/�| S-8 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
+| A-1 | DEFERRED | — | 2026-07-23 | 코드 결함(#10 무한루프·#12 왕복 폭발) 해소 완료. RFP→PRD→UI→ARCH 진입 확인. 무료 쿼터(RPD) 소진으로 재실행 대기 — `--resume` 또는 쿼터 회복 후 완주 실측 |
 | A-2 | PENDING | — | | |
 | A-3 | PENDING | — | | |
 | A-4 | PENDING | — | | |
@@ -71,14 +71,16 @@
 |---|---|---|---|---|
 | 1 | A-1 | Critical | VisionQA가 `ProjectState`에 없는 `completed_agents` 필드 접근 → `AttributeError`로 파이프라인 중단 (nodes/vision_qa.py, 커밋 b5b8407에서 유입) | **FIXED** (2026-07-17, 통과 시 `reviewer_decision` 미초기화로 인한 UIDesigner 무한왕복 잠재결함도 함께 수정) |
 | 2 | A-1 | Major | 워크플로우 순서 결함: 아키텍처가 WBS 분할 *이후* 실행 태스크 안에서 수립되어 WBS가 설계 없이 작성됨 (스킬제안 prop_521c4962가 자가 진단한 정합성 오류의 근원) | **FIXED** (2026-07-17, B안: RFP→PRD→UI→VisionQA→**Architect**→WBS 로 재배선. agent_graph/planning/execution/registry/pmo_skill/프론트 2종 수정, 라우터 테스트 37건 통과) |
-| 3 | A-1 | Minor | `playwright` 미설치로 VisionQA 스크린샷 캡처가 항상 생략됨(시각 검증 실효성 없음) | OPEN — `pip install playwright && playwright install chromium` 필요 |
+| 3 | A-1 | Minor | `playwright` 미설치로 VisionQA 스크린샷 캡처가 항상 생략됨(시각 검증 실효성 없음) | **해소됨(무의미화)** (2026-07-23, #12 로 VisionQA 를 자문 강등 — 더 이상 자동 반려/차단하지 않으므로 스크린샷 유무가 파이프라인에 영향 없음. 필요 시 사람이 실제 미리보기로 확인) |
 | 4 | ENV-2 | Minor | pytest 기존 실패 7건(구버전 토폴로지 기준의 낡은 기대값: interrupt 2개 가정 등) — 이번 변경과 무관하게 HEAD에서도 동일 실패 확인 | **FIXED** (2026-07-19 어서션 현행화 + 형제 리포 pyc 캐시 오염 제거 → **전 스위트 155건 통과 = ENV-2 베이스라인**) |
 | 5 | A-1 4차 | Major | `hotl/check` 가 PLANNING_* 태스크의 HOTL 대기를 미감지(SSE 유실 시 기획 게이트 복구 불가) | **FIXED** (latest_state 의 현재 태스크로도 확인) |
 | 6 | A-1 4차·AABB | Critical | WBS 분할 결과가 빈 태스크로 저장되고 게이트 통과 → 기획이 '완료된 척' 정지 (non-greedy JSON 절단 + 빈 결과 무방어) | **FIXED** (파싱 견고화+1회 재시도+빈 WBS 저장 금지) + **복구 수단 신설**(`wbs/replan` API·UI 버튼) |
 | 7 | A-1 2차 | Major | `run.py` reload=True 가 .py 저장 시 서버 재시작 → 실행 중 스프린트 스트림 사망 | **FIXED** (운영 모드 기본 reload OFF, `--dev` 옵트인) |
 | 8 | 환경 | Major | 프로바이더 패키지 설치가 langchain-core 를 0.3 으로 다운그레이드시켜 gemini/groq 임포트 파손. langchain-cerebras 는 core 1.x 미지원 | **FIXED** (core 1.x 정렬, Cerebras 는 OpenAI 호환 API 로 전환 — 5중 폴백 전부 활성) |
-| 9 | A-1 (E2E-03) | Major | LLM Gateway 할당량(무료 티어) 소진으로 인해 기술명세 단계 중단 후 프론트엔드 산출물 빈 값 반환 → 파싱 실패 및 파이프라인 중단(FAILED) | OPEN — 쿼터 회복 대기 및 산출물 빈 값에 대한 예외 처리 강화 필요 |
+| 9 | A-1 (E2E-03) | Major | LLM Gateway 할당량(무료 티어) 소진으로 인해 기술명세 단계 중단 후 프론트엔드 산출물 빈 값 반환 → 파싱 실패 및 파이프라인 중단(FAILED) | **MITIGATED** (2026-07-23) — 근본 원인이 #12(UI_DESIGN↔VisionQA 왕복이 RPD 소진)임을 텔레메트리로 규명·수정. 단 무료 RPD 자체의 한계는 잔존(BYO 유료키/초경량 파이프라인이 최종 해법). 산출물 빈 값 방어는 별도 강화 필요 |
 | 10| A-1 (E2E-04) | Critical | `UI_DESIGN` 단계에서 HOTL 게이트 `자동 승인(resume)`이 무한루프로 발생하며 다음 단계(ARCHITECTURE)로 넘어가지 못함 | **FIXED** (2026-07-23, VisionQA 반려 피드백을 UIDesigner가 수용하고 상태를 초기화하도록 수정하여 캐시 무한루프 차단) |
+| 11| 지식 허브 | Major | 지식팩 첫 파일은 등록되나 추가 업로드 시 chromadb "embedding function conflict: new sentence_transformer vs persisted default" 로 실패 | **FIXED** (2026-07-23, `42cc2b8c1`) — `_embedding_fn` 지연 로드 경쟁(완료 플래그를 로드 前 설정)으로 컬렉션이 default 임베딩으로 생성되던 것을 락+완료후 플래그로 차단. `_pack_collection` 은 기존 컬렉션을 get_collection 으로 열어 재지정 안 함. 오류 메시지 한국어화. 실증(sf_glossary 추가 업로드 성공) |
+| 12| A-1 | Critical | **완주 병목**: `route_from_vision_qa` 에 왕복 상한 부재 → VisionQA 가 REWORK_DEV 반복 시 UI_DESIGN↔UIDesigner 왕복(각 ~5콜)이 무료 티어 일일 요청수(RPD)를 소진해 ARCHITECTURE 도달 전 SUSPENDED. 텔레메트리상 UI_DESIGN 이 콜 대부분(07-22 127·07-23 29), Pro 는 1콜(병목 아님) | **FIXED** (2026-07-23, `e8f5e3837`) — VisionQA 를 차단 게이트→**자문(advisory)** 으로 강등. 자동 반려 루프 제거, 소견만 남겨 사람 HOTL 미리보기에서 검토. 왕복 0 |
 
 ## 세션 인수인계 메모
 
