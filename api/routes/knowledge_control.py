@@ -91,7 +91,12 @@ async def upload_document(pack_id: str, file: UploadFile = File(...)):
         # 추출+임베딩은 CPU 집약 - 이벤트 루프 동결 방지 위해 스레드로
         chunks = await asyncio.to_thread(_ingest)
     except ValueError as e:
+        # add_document/extract_text 의 도메인 오류(이미 한국어 메시지)
         raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        # 예기치 못한 라이브러리 오류도 한국어로 안내(원인은 디버깅용으로 덧붙임)
+        print(f"⚠️ [Knowledge] 문서 등록 실패({fname}): {e}")
+        raise HTTPException(status_code=500, detail=f"문서 등록 중 오류가 발생했습니다. 원인: {e}")
     return {"status": "success", "filename": fname, "chunks": chunks}
 
 

@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 from datetime import datetime
 
 try:
@@ -59,6 +60,7 @@ class KnowledgeBase:
         self.collection = None
         self._embed_fn = None
         self._embed_fn_loaded = False
+        self._embed_lock = threading.Lock()  # 지연 로드 스레드 경쟁 방지(to_thread 동시 업로드)
         if chromadb:
             os.makedirs(CHROMA_DB_DIR, exist_ok=True)
             os.makedirs(PACKS_DIR, exist_ok=True)
@@ -75,24 +77,43 @@ class KnowledgeBase:
     def _embedding_fn(self):
         if self._embed_fn_loaded:
             return self._embed_fn
-        self._embed_fn_loaded = True
-        try:
-            from chromadb.utils import embedding_functions
-            self._embed_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL_NAME)
-            print(f"[OK] [KnowledgeBase] 다국어 임베딩 로드 완료: {EMBED_MODEL_NAME}")
-        except Exception as e:
-            print(f"⚠️ [KnowledgeBase] 다국어 임베딩 로드 실패 - Chroma 기본 임베딩으로 폴백: {e}")
-            self._embed_fn = None
+        # [경쟁 방지] 로드가 느린데(모델 초기화) '완료 플래그'를 로드 전에 세우면, 동시에 들어온
+        # 다른 스레드가 아직 None 인 _embed_fn 을 받아 컬렉션을 'default' 임베딩으로 생성해 버린다.
+        # → 이후 sentence_transformer 를 넘기면 chromadb 임베딩 함수 충돌. 락 + 완료 후 플래그로 차단.
+        with self._embed_lock:
+            if self._embed_fn_loaded:
+                return self._embed_fn
+            try:
+                from chromadb.utils import embedding_functions
+                self._embed_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL_NAME)
+                print(f"[OK] [KnowledgeBase] 다국어 임베딩 로드 완료: {EMBED_MODEL_NAME}")
+            except Exception as e:
+                print(f"⚠️ [KnowledgeBase] 다국어 임베딩 로드 실패 - Chroma 기본 임베딩으로 폴백: {e}")
+                self._embed_fn = None
+            self._embed_fn_loaded = True  # 로드가 실제로 끝난 뒤에만 완료 표시
         return self._embed_fn
 
     def _pack_collection(self, pack_id: str):
         if not self.client:
             return None
-        kwargs = {"name": f"kp_{pack_id}", "metadata": {"hnsw:space": "cosine"}}
+        name = f"kp_{pack_id}"
+        # 기존 컬렉션은 '지속된 임베딩 설정' 그대로 연다(get_collection). 여기에 새 임베딩 함수를
+        # 다시 넘기면 chromadb 가 "embedding function conflict" 로 거부하므로, 존재 시엔 재지정하지
+        # 않는다(과거 버전/경쟁으로 default 로 생성된 팩도 무중단으로 계속 사용 가능).
+        try:
+            return self.client.get_collection(name=name)
+        except Exception:
+            pass  # 미존재 → 아래에서 임베딩 함수와 함께 생성
         ef = self._embedding_fn()
+        kwargs = {"name": name, "metadata": {"hnsw:space": "cosine"}}
         if ef is not None:
             kwargs["embedding_function"] = ef
-        return self.client.get_or_create_collection(**kwargs)
+        try:
+            return self.client.get_or_create_collection(**kwargs)
+        except Exception as e:
+            # 경쟁으로 그 사이 다른 스레드가 생성했을 수 있음 → 지속 설정으로 폴백(무중단)
+            print(f"⚠️ [KnowledgeBase] 컬렉션 임베딩 설정 충돌 - 지속 설정으로 폴백({name}): {e}")
+            return self.client.get_collection(name=name)
 
     # ── 공통 청킹 ────────────────────────────────────────────────────────
     def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> list:
@@ -189,11 +210,16 @@ class KnowledgeBase:
                 if pm:
                     m["page"] = int(pm[0])
                 metas.append(m)
-            col.add(
-                documents=chunks,
-                metadatas=metas,
-                ids=[f"{pack_id}_{filename}_{i}" for i in range(len(chunks))],
-            )
+            try:
+                col.add(
+                    documents=chunks,
+                    metadatas=metas,
+                    ids=[f"{pack_id}_{filename}_{i}" for i in range(len(chunks))],
+                )
+            except Exception as e:
+                # 라이브러리(chromadb/임베딩) 오류를 한국어 메시지로 감싸 사용자에게 전달
+                print(f"⚠️ [KnowledgeBase] 인덱싱 실패({filename}): {e}")
+                raise ValueError(f"문서 색인에 실패했습니다(임베딩/저장소 오류). 원인: {e}")
 
         # 원본 파일 보존(재인덱싱/감사용)
         if raw is not None:
