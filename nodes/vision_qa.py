@@ -48,7 +48,8 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
         scores["VISION_QA"] = 1.0
         return {
             "stage_scores": scores,
-            "reviewer_decision": "NONE"
+            "reviewer_decision": "NONE",
+            "ui_review_advisory": "",
         }
 
     # HTML body 부분 추출 (토큰 절약)
@@ -95,18 +96,34 @@ async def run_vision_qa(state: Any) -> Dict[str, Any]:
         decision = "PASS"
         feedback = str(e)
     
-    if decision == "REWORK_DEV":
-        print(f"❌ [Vision QA] 구조적 결함 감지: {feedback}")
-        return {
-            "reviewer_decision": "REWORK_DEV",
-            "reviewer_feedback": f"️ [Vision QA 반려]\n{feedback}"
-        }
-        
-    print("[OK] [Vision QA] UI/UX 정적 코드 품질 검증 통과.")
     scores = state_obj.stage_scores.copy() if state_obj.stage_scores else {}
     scores["VISION_QA"] = 1.0
 
+    # [자문 강등] VisionQA 는 더 이상 UI 를 자동 반려(REWORK_DEV → UIDesigner 왕복)하지 않는다.
+    # 텍스트 기반 추정 판정이 사람의 실제 미리보기보다 부정확한데다, 반려 왕복이 무료 티어 콜(RPD)을
+    # 태우는 주범이었다. 대신 소견만 남겨 사람 HOTL 미리보기에서 참고하도록 한다(왕복 0).
+    if decision == "REWORK_DEV" and (feedback or "").strip():
+        advisory = f"[Vision QA 자문] 아래 구조 개선 소견이 있습니다(참고용, 자동 반려 아님):\n{feedback.strip()}"
+        print(f"️ [Vision QA] 개선 소견(자문): {feedback.strip()[:120]}")
+        try:
+            from core.broadcaster import factory_broadcaster
+            pid = os.path.basename(str(state_obj.workspace_root or "").rstrip("/\\"))
+            await factory_broadcaster.broadcast("AGENT_ACTIVITY", {
+                "agent": "VisionQA", "project_id": pid, "stage": "UI_DESIGN",
+                "activity": "UI 구조 개선 소견(자문) — 사람이 미리보기와 함께 검토",
+                "detail": feedback.strip()[:500],
+            })
+        except Exception:
+            pass
+        return {
+            "stage_scores": scores,
+            "reviewer_decision": "NONE",   # 자동 반려 안 함 → 사람 HOTL 로 진행
+            "ui_review_advisory": advisory,
+        }
+
+    print("[OK] [Vision QA] UI/UX 정적 코드 품질 검증 통과.")
     return {
         "stage_scores": scores,
-        "reviewer_decision": "NONE"
+        "reviewer_decision": "NONE",
+        "ui_review_advisory": "",
     }

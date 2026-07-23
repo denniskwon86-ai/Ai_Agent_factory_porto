@@ -218,12 +218,12 @@ def route_from_ui_designer(state: ProjectState) -> str:
     return "VisionQA"
 
 def route_from_vision_qa(state: ProjectState) -> str:
-    # 1. Vision QA(AI) 자체 판단 반려 시
-    if getattr(state, "reviewer_decision", "") == "REWORK_DEV":
-        print(" [VisionQA 반려] 시각적 결함 발견 - UIDesigner 로 되돌려 다시 디자인합니다.")
-        return "UIDesigner"
-    
-    # 2. Vision QA 통과 후, 사용자(HOTL)가 미리보기를 보고 피드백을 남긴 경우
+    # [자문 강등] VisionQA 는 더 이상 자동 반려(REWORK_DEV → UIDesigner 왕복)하지 않는다.
+    #   소견(ui_review_advisory)만 남기고, UI 승인/재설계 판단은 사람(HOTL 미리보기)이 한다.
+    #   → 텍스트 추정 판정의 부정확성 + 무료 티어 콜 폭발(왕복)의 주범을 동시 제거.
+    #   방어적으로 남아 있을 수 있는 REWORK_DEV 는 무시하고 다음 단계로 진행한다.
+
+    # 사용자(HOTL)가 미리보기를 보고 재설계를 요청한 경우에만 UIDesigner 로 되돌린다.
     if getattr(state, "needs_revision", False):
         print(" [사용자 UI 재설계 요청] 피드백 반영 - UIDesigner 로 되돌려 다시 디자인합니다.")
         return "UIDesigner"

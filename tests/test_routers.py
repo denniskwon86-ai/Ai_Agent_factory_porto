@@ -64,10 +64,13 @@ def test_vision_qa_pass_to_architect():
     # UI 확정 후 아키텍처 설계가 WBS 분할(PMO)보다 선행한다
     assert ag.route_from_vision_qa(S(reviewer_decision="NONE")) == "Architect"
 
-def test_vision_qa_rework_back_to_designer():
-    assert ag.route_from_vision_qa(S(reviewer_decision="REWORK_DEV")) == "UIDesigner"
+def test_vision_qa_rework_is_advisory_not_blocking():
+    # [자문 강등] VisionQA 가 REWORK_DEV 소견을 내도 더 이상 UIDesigner 로 자동 반려하지 않고
+    # 다음 단계(Architect)로 진행한다(왕복 루프 제거 — 무료 티어 콜 폭발 방지). 판단은 사람 HOTL.
+    assert ag.route_from_vision_qa(S(reviewer_decision="REWORK_DEV")) == "Architect"
 
 def test_vision_qa_user_feedback_back_to_designer():
+    # 사람(HOTL)이 미리보기 보고 재설계를 요청한 경우에만 UIDesigner 로 되돌린다
     assert ag.route_from_vision_qa(S(reviewer_decision="NONE", needs_revision=True)) == "UIDesigner"
 
 

@@ -110,6 +110,9 @@ class ProjectState(BaseModel):
     # 이원화 피드백 루프 상태
     reviewer_decision: str = Field(default="NONE")  # "PASS", "REWORK_DEV", "ESCALATE_PM"
     reviewer_feedback: str = Field(default="")
+    # [VisionQA 자문 강등] VisionQA 는 UI 를 자동 반려하지 않고 '소견'만 남긴다. 사람이 미리보기 +
+    # 이 소견을 함께 보고 승인/재설계를 결정한다(왕복 루프 제거 → 무료 티어 콜 폭발 방지).
+    ui_review_advisory: str = Field(default="")
     pm_override_reason: str = Field(default="")
     needs_revision: bool = Field(default=False)
 
