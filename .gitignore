@@ -68,3 +68,7 @@ data/benchmark/
 
 # [M3] MCP 브로커 온디맨드 조회 캐시 (복제 아님 — 단기 TTL 캐시, 런타임)
 data/mcp_cache.db
+
+*- ���纻.*
+
+*���纻*
