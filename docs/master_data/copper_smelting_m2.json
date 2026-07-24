@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0",
+  "domain": "Copper Smelting and Refining (Pyrometallurgy & Hydrometallurgy)",
+  "description": "Master Data (M2) for Copper Smelting Digital Twin Simulation Agents, focusing on Pyrometallurgical processes and precious metal recovery.",
+  "material_master": [
+    {
+      "material_id": "RM-CuCON-001",
+      "material_name": "Copper Concentrate (30% Cu)",
+      "type": "Raw Material",
+      "uom": "Ton",
+      "lead_time_days": 60,
+      "supplier": "South American Mining Group"
+    },
+    {
+      "material_id": "WIP-MATTE-001",
+      "material_name": "Copper Matte (60% Cu)",
+      "type": "Work in Progress",
+      "uom": "Ton"
+    },
+    {
+      "material_id": "WIP-ANODE-001",
+      "material_name": "Anode Copper (99% Cu)",
+      "type": "Work in Progress",
+      "uom": "Ton"
+    },
+    {
+      "material_id": "FG-CATHODE-001",
+      "material_name": "Cathode Copper (99.99% Cu)",
+      "type": "Finished Good",
+      "uom": "Ton",
+      "base_price_usd": 9000,
+      "lead_time_days": 5
+    },
+    {
+      "material_id": "BP-H2SO4-001",
+      "material_name": "Sulfuric Acid (By-product)",
+      "type": "Finished Good",
+      "uom": "Ton",
+      "base_price_usd": 120
+    },
+    {
+      "material_id": "BP-GOLD-001",
+      "material_name": "Gold Bullion (from Slime)",
+      "type": "Finished Good",
+      "uom": "Ounce",
+      "base_price_usd": 2300
+    }
+  ],
+  "bill_of_materials": [
+    {
+      "parent_id": "FG-CATHODE-001",
+      "components": [
+        { "material_id": "RM-CuCON-001", "quantity": 3.4, "uom": "Ton" }
+      ],
+      "co_products": [
+        { "material_id": "BP-H2SO4-001", "quantity": 3.0, "uom": "Ton" },
+        { "material_id": "BP-GOLD-001", "quantity": 0.15, "uom": "Ounce" }
+      ],
+      "base_yield_rate": 0.98
+    }
+  ],
+  "equipment_master": [
+    {
+      "equipment_id": "EQ-FLASH-01",
+      "equipment_name": "Flash Smelting Furnace (자용로)",
+      "process_type": "Continuous",
+      "capacity_per_hour": 150.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.92,
+      "mtbf_hours": 1440,
+      "mttr_hours": 24
+    },
+    {
+      "equipment_id": "EQ-CONV-01",
+      "equipment_name": "Converter Furnace (전로)",
+      "process_type": "Batch",
+      "capacity_per_hour": 60.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.85,
+      "mtbf_hours": 720,
+      "mttr_hours": 12
+    },
+    {
+      "equipment_id": "EQ-REFIN-01",
+      "equipment_name": "Electrolytic Refining Cell (전해조)",
+      "process_type": "Continuous",
+      "capacity_per_hour": 50.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.98,
+      "mtbf_hours": 2880,
+      "mttr_hours": 8
+    }
+  ],
+  "quality_master": [
+    {
+      "product_id": "FG-CATHODE-001",
+      "inspection_method": "Spectrometry",
+      "critical_defects": [
+        {
+          "defect_name": "Surface Nodules (표면 불량)",
+          "tolerance_limit_ppm": 0.0,
+          "probability_distribution": "Poisson",
+          "lambda": 0.05
+        },
+        {
+          "defect_name": "Lead (Pb) Impurity",
+          "tolerance_limit_ppm": 5.0,
+          "probability_distribution": "Gaussian",
+          "mean": 1.5,
+          "std_dev": 0.8
+        }
+      ],
+      "target_cpk": 1.67
+    }
+  ],
+  "siop_finance_master": [
+    {
+      "category": "Market Economics",
+      "lme_copper_price_usd_ton": 9500,
+      "lbma_gold_price_usd_oz": 2350
+    },
+    {
+      "category": "Smelting Margins",
+      "tc_treatment_charge_usd_ton": 85,
+      "rc_refining_charge_usd_lb": 0.085
+    },
+    {
+      "category": "Cost Structure",
+      "energy_cost_usd_mwh": 85,
+      "environmental_compliance_cost_usd_ton": 15
+    }
+  ]
+}

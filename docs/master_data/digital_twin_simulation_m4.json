@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "domain": "Digital Twin Simulation Engine (M4 Core)",
+  "description": "Simulation Runtime Engine Parameters focusing on Discrete Event Simulation (DES), Spatial 3D Constraints, and Data Synchronization Fidelity.",
+  "discrete_event_simulation_des": {
+    "processing_time_variance": {
+      "distribution": "Normal",
+      "formula": "Normal(mean=Standard_Machine_Time, std_dev=0.1 * Standard_Machine_Time)"
+    },
+    "equipment_failure_mtbf": {
+      "distribution": "Weibull",
+      "shape_parameter_k": 2.5,
+      "scale_parameter_lambda": 1500,
+      "description": "k > 1 implies wear-out failure over time. Represents increasing failure rate as equipment ages."
+    },
+    "equipment_repair_mttr": {
+      "distribution": "Exponential",
+      "rate_parameter_lambda": 0.2,
+      "description": "Represents memoryless repair times with an average of 5 hours."
+    }
+  },
+  "spatial_3d_fab_layout": {
+    "nodes": [
+      {
+        "node_id": "Node_A_Flash_Furnace",
+        "coordinates": {"x": 0, "y": 0, "z": 0}
+      },
+      {
+        "node_id": "Node_B_Refinery_Cell",
+        "coordinates": {"x": 120, "y": 90, "z": 0}
+      },
+      {
+        "node_id": "Node_C_WMS_Storage",
+        "coordinates": {"x": -50, "y": 200, "z": 10}
+      }
+    ],
+    "edges": [
+      {
+        "from_node": "Node_A_Flash_Furnace",
+        "to_node": "Node_B_Refinery_Cell",
+        "distance_meters": 150,
+        "allowed_vehicles": ["AGV_Type_1", "Conveyor"]
+      }
+    ],
+    "logistics_physics": {
+      "agv_speed_meters_per_second": 2.0,
+      "agv_battery_capacity_kwh": 5.0,
+      "agv_discharge_rate_kw": 0.5,
+      "recharge_station_node": "Node_C_WMS_Storage"
+    }
+  },
+  "data_sync_fidelity": {
+    "real_time_streaming": {
+      "frequency_hz": 1,
+      "data_types": ["Sensor_Temperature", "Sensor_Vibration", "AGV_Location"],
+      "packet_loss_probability": 0.005,
+      "latency_ms": 50
+    },
+    "batch_processing": {
+      "frequency_minutes": 60,
+      "data_types": ["ERP_Inventory_Level", "Financial_Costing_Data"],
+      "delay_jitter_minutes": 5
+    }
+  }
+}

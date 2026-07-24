@@ -1,0 +1,157 @@
+{
+  "schema_version": "1.3",
+  "domain": "Global Manufacturing Standard (Agnostic Core Framework) - ERP Business Core Expanded",
+  "description": "Master Data (M3) Core Library integrating SAP ISA-95, ISO 22400, AAS, KS X 9101, and ERP Business Logics (S&OP, MPS, MRP, ROP, Costing).",
+  "erp_business_logic": {
+    "demand_planning_crm": {
+      "forecasting_model": "DDMRP (Demand Driven MRP)",
+      "decoupling_point_buffers": {
+        "red_zone": "Safety constraint against variability",
+        "yellow_zone": "Primary inventory coverage",
+        "green_zone": "Order generation size"
+      },
+      "customer_credit_control": {
+        "credit_limit_check": true,
+        "default_payment_terms": "Net 30 Days"
+      }
+    },
+    "production_planning_mps_mrp": {
+      "mps_scheduling_horizon_days": 30,
+      "mrp_calculation_logic": {
+        "explosion": "Top-down BOM Breakdown",
+        "scheduling": "Backward Scheduling from Due Date",
+        "netting": "Gross Requirements - On_Hand_Inventory - Scheduled_Receipts"
+      }
+    },
+    "inventory_rop": {
+      "reorder_point_formula": "(Average_Daily_Demand * Lead_Time_Days) + Safety_Stock",
+      "safety_stock_calculation": "Z-score * Standard_Deviation_of_Demand * SQRT(Lead_Time)",
+      "auto_replenishment_trigger": true
+    },
+    "cost_management": {
+      "standard_costing_formula": "Direct_Material_Cost + Direct_Labor_Cost + Manufacturing_Overhead",
+      "overhead_allocation_base": "Machine Hours or Direct Labor Hours",
+      "variance_analysis": {
+        "material_price_variance": "(Standard Price - Actual Price) * Actual Quantity",
+        "labor_efficiency_variance": "(Standard Hours - Actual Hours) * Standard Rate"
+      }
+    }
+  },
+  "isa95_sap_architecture": {
+    "work_center_master": [
+      {
+        "wc_type": "Machine",
+        "overhead_cost_rate_usd_hr": 25.0,
+        "labor_cost_rate_usd_hr": 40.0,
+        "factory_calendar": "24/7 Continuous (3 Shifts, 4 Groups)"
+      }
+    ],
+    "routing_template": {
+      "standard_elements": ["Setup Time", "Machine Time", "Labor Time", "Queue Time", "Move Time"],
+      "costing_formula": "(Setup + Machine) * overhead_rate + (Setup + Labor) * labor_rate"
+    }
+  },
+  "ks_x_9101_national_standard": {
+    "data_model_dictionary_part1": [
+      {
+        "standard_field_code": "CD_ITEM",
+        "legacy_mappings": ["ItemCode", "Material_ID", "MatNR"],
+        "description": "품목 식별을 위한 유일한 코드"
+      },
+      {
+        "standard_field_code": "NM_ITEM",
+        "legacy_mappings": ["ItemName", "Material_Name", "MAKTX"],
+        "description": "품목의 명칭"
+      },
+      {
+        "standard_field_code": "QTY_PROD",
+        "legacy_mappings": ["ProdQty", "Quantity", "Yield"],
+        "description": "생산 공정에서 산출된 수량"
+      }
+    ],
+    "data_management_system_part2": {
+      "data_ownership": "Manufacturer",
+      "security_level": "Confidential",
+      "retention_period_years": 5
+    },
+    "kamp_ax_strategy_2026": {
+      "data_value_grading": {
+        "A_Grade": "High-frequency PdM sensor data, fully mapped with AAS semantic tags, ready for Deep Learning.",
+        "B_Grade": "Structured ERP/MES transactional data.",
+        "C_Grade": "Unstructured logs or legacy formats."
+      },
+      "data_monetization": {
+        "is_tradable_on_kamp": true,
+        "estimated_value_usd_per_gb_grade_A": 1500
+      }
+    }
+  },
+  "aas_cpps_standard": {
+    "asset_administration_shell_iec63278": {
+      "asset_id_type": "URI",
+      "semantic_id_dictionary": "eCl@ss",
+      "submodels": [
+        {
+          "idShort": "Nameplate",
+          "description": "Manufacturer, Serial Number, Date of Manufacture"
+        },
+        {
+          "idShort": "OperationalData",
+          "description": "Real-time telemetry and state via OPC UA"
+        }
+      ]
+    },
+    "digital_product_passport_dpp": {
+      "carbon_footprint_tracking": true,
+      "recycled_material_content_percent": true,
+      "supply_chain_transparency_log": true
+    },
+    "plug_and_produce_pnp": {
+      "auto_discovery_protocol": "OPC UA PubSub",
+      "capability_skill_matching": true
+    }
+  },
+  "iso22400_kpi_dictionary": [
+    {
+      "kpi_id": "ISO-KPI-01",
+      "name": "Overall Equipment Effectiveness (OEE)",
+      "formula": "Availability * Performance * Quality",
+      "threshold_alert_below": 0.85
+    }
+  ],
+  "scm_wms_master": {
+    "logistics": [
+      {
+        "transport_mode": "Ocean Freight",
+        "lead_time_variance_days": 15,
+        "cost_per_ton_usd": 45.0
+      }
+    ],
+    "warehouse_capacity": {
+      "internal_storage_max_tons": 10000,
+      "external_3pl_cost_usd_ton_day": 1.5,
+      "demurrage_penalty_usd_day": 500
+    }
+  },
+  "esg_cbam_master": {
+    "emission_factors": [
+      {
+        "utility_type": "Electricity (Grid)",
+        "scope": 2,
+        "co2e_kg_per_unit": 0.45,
+        "unit": "kWh"
+      }
+    ],
+    "cbam_penalty": {
+      "carbon_tax_usd_per_ton": 85.0
+    }
+  },
+  "pdm_sensor_schema": [
+    {
+      "sensor_type": "Vibration (Motor)",
+      "unit": "mm/s",
+      "warning_threshold": 4.5,
+      "critical_shutdown_threshold": 7.1
+    }
+  ]
+}

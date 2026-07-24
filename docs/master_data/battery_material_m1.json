@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.0",
+  "domain": "Battery Materials Manufacturing (Precursor & Lithium)",
+  "description": "Master Data (M1) for Digital Twin Simulation Agents, incorporating SIOP, ERP, and MES perspectives.",
+  "material_master": [
+    {
+      "material_id": "RM-MHP-001",
+      "material_name": "Mixed Hydroxide Precipitate (MHP)",
+      "type": "Raw Material",
+      "uom": "Ton",
+      "base_price_usd": 15000,
+      "lead_time_days": 45,
+      "supplier": "Global Mining Co."
+    },
+    {
+      "material_id": "RM-H2SO4-001",
+      "material_name": "Sulfuric Acid (H2SO4, 98%)",
+      "type": "Raw Material",
+      "uom": "Liter",
+      "base_price_usd": 150,
+      "lead_time_days": 5,
+      "supplier": "Local Chemical Corp"
+    },
+    {
+      "material_id": "WIP-NiSO4-001",
+      "material_name": "Crude Nickel Sulfate Solution",
+      "type": "Work in Progress",
+      "uom": "Liter",
+      "base_price_usd": 0,
+      "lead_time_days": 0
+    },
+    {
+      "material_id": "FG-NiSO4-001",
+      "material_name": "High-Purity Nickel Sulfate (NiSO4) Crystals",
+      "type": "Finished Good",
+      "uom": "Ton",
+      "base_price_usd": 22000,
+      "lead_time_days": 2,
+      "customer_demand_volatility": "High"
+    },
+    {
+      "material_id": "FG-LiOH-001",
+      "material_name": "Lithium Hydroxide (LiOH) Battery Grade",
+      "type": "Finished Good",
+      "uom": "Ton",
+      "base_price_usd": 45000,
+      "lead_time_days": 3,
+      "customer_demand_volatility": "Medium"
+    }
+  ],
+  "bill_of_materials": [
+    {
+      "parent_id": "FG-NiSO4-001",
+      "components": [
+        { "material_id": "RM-MHP-001", "quantity": 1.2, "uom": "Ton" },
+        { "material_id": "RM-H2SO4-001", "quantity": 500, "uom": "Liter" }
+      ],
+      "base_yield_rate": 0.94,
+      "scrap_recovery_rate": 0.05
+    }
+  ],
+  "equipment_master": [
+    {
+      "equipment_id": "EQ-DIS-01",
+      "equipment_name": "Primary Leaching Dissolver",
+      "process_type": "Continuous",
+      "capacity_per_hour": 5.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.85,
+      "mtbf_hours": 720,
+      "mttr_hours": 8
+    },
+    {
+      "equipment_id": "EQ-SX-01",
+      "equipment_name": "Solvent Extraction (SX) Unit",
+      "process_type": "Continuous",
+      "capacity_per_hour": 4.5,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.90,
+      "mtbf_hours": 1440,
+      "mttr_hours": 12
+    },
+    {
+      "equipment_id": "EQ-CRY-01",
+      "equipment_name": "Crystallizer & Centrifuge",
+      "process_type": "Batch",
+      "capacity_per_hour": 4.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.80,
+      "mtbf_hours": 480,
+      "mttr_hours": 6
+    }
+  ],
+  "quality_master": [
+    {
+      "product_id": "FG-NiSO4-001",
+      "inspection_method": "ICP-OES/MS",
+      "critical_defects": [
+        {
+          "defect_name": "Cobalt (Co) Impurity",
+          "tolerance_limit_ppm": 10.0,
+          "probability_distribution": "Gaussian",
+          "mean": 5.0,
+          "std_dev": 2.0
+        },
+        {
+          "defect_name": "Iron (Fe) Impurity",
+          "tolerance_limit_ppm": 5.0,
+          "probability_distribution": "Gaussian",
+          "mean": 2.0,
+          "std_dev": 1.5
+        }
+      ],
+      "target_cpk": 1.33
+    }
+  ],
+  "siop_finance_master": [
+    {
+      "category": "Market Economics",
+      "lme_nickel_price_usd_ton": 16500,
+      "exchange_rate_krw_usd": 1350
+    },
+    {
+      "category": "Cost Structure",
+      "direct_labor_cost_usd_hr": 35,
+      "energy_cost_usd_kwh": 0.12,
+      "inventory_holding_cost_rate": 0.15
+    },
+    {
+      "category": "SLA & Penalties",
+      "delivery_delay_penalty_daily_rate": 0.02,
+      "quality_claim_penalty_multiplier": 3.0
+    }
+  ],
+  "traceability_rules": {
+    "genealogy_tracking": "Required (Lot-to-Batch-to-Lot)",
+    "carbon_footprint_cfp_reporting": "Mandatory (EU Battery Regulation 2023/1542)"
+  }
+}

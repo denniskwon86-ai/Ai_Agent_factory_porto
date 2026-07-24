@@ -9,3 +9,177 @@
 {"timestamp": "2026-07-19T17:51:26.516428", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 어떤 플랫폼에서 주로 사용될까요?\n→ 선택: 데스크톱 웹 브라우저 (PC 환경에 최적화된 UI/UX 제공.)\n3. 변환할 단위 종류를 어떻게 선택할까요?\n→ 선택: 드롭다운 메뉴로 선택 (각 카테고리(길이, 무게, 온도)별로 드롭다운을 제공하여 선택.)"}
 {"timestamp": "2026-07-19T18:51:02.853694", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 결과의 정밀도(소수점 처리)는 어떻게 설정할까요?\n→ 선택: 소수점 둘째 자리까지 고정 (가장 일반적이고 깔끔한 결과 표시.)\n2. 변환 방식은 어떤 형태를 선호하시나요?\n→ 선택: 입력 즉시 실시간 변환 (버튼 클릭 없이 입력과 동시에 결과 출력.)\n3. 추가로 필요한 편의 기능이 있을까요?\n→ 선택: 복사하기 버튼 제공 (결과값을 클립보드에 쉽게 복사.)"}
 {"timestamp": "2026-07-19T21:00:18.688710", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 어떤 플랫폼에서 주로 사용될까요?\n→ 선택: 데스크톱 웹 브라우저 (PC 환경에 최적화된 화면 구성.)\n3. 변환할 단위 종류는 어떻게 구성할까요?\n→ 선택: 길이, 무게, 온도만 (요청하신 기본 단위만 포함하여 빠르게 개발.)"}
+{"timestamp": "2026-07-20T10:27:29.181274", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:27:41.241435", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:27:53.291752", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:28:05.343769", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:28:17.404643", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:28:29.454223", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:28:41.504850", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:28:53.563139", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:29:05.618274", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:29:17.679183", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:29:29.737268", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:29:41.811238", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:29:53.876016", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:30:05.926288", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:30:17.986511", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:30:30.031715", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:30:42.085437", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:30:54.146881", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:31:06.208578", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:31:18.266020", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:31:30.318794", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:31:42.386293", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:31:54.432548", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:32:06.476384", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:32:18.506975", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:32:30.573451", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:32:42.613702", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:32:54.667556", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:33:06.724519", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:33:18.769721", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:33:30.814059", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:33:42.869024", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:33:54.916254", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:34:06.966427", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:34:19.043155", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:34:31.104192", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:34:43.158951", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:34:55.214184", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:35:07.265358", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:35:19.308193", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:35:31.363090", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:35:43.422592", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:35:55.470782", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:36:07.537779", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:36:19.576300", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:36:31.631121", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:36:43.680434", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:36:55.757483", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:37:07.798172", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:37:19.866089", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:37:31.926952", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:37:43.981466", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:37:56.060158", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:38:08.114879", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:38:20.176659", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:38:32.238962", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:38:44.293661", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:38:56.343480", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:39:08.382987", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:39:20.455670", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:39:32.495384", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:39:44.542676", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:39:56.583445", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:40:08.631464", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:40:20.668841", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:40:32.717873", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:40:44.763422", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:40:56.835713", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:41:08.892267", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:41:20.983256", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:41:33.033488", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:41:45.086193", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:41:57.126825", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:42:09.176589", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:42:21.239871", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:42:33.285006", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:42:45.328168", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:42:57.377770", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:43:09.424703", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:43:21.496641", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:43:33.575164", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:43:45.622852", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:43:57.698867", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:44:09.754354", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:44:21.798998", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:44:33.864047", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:44:45.918252", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:44:57.972975", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:45:10.020141", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:45:22.072111", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:45:34.170440", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:45:46.209391", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:45:58.253472", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:46:10.296977", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:46:22.354124", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:46:34.411825", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:46:46.476625", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:46:58.542902", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:47:10.604547", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:47:22.658851", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:47:34.704231", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:47:46.754376", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:47:58.806350", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:48:10.840185", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:48:22.902783", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:48:34.953162", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:48:46.997493", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:48:59.041032", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:49:11.085931", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:49:23.144089", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:49:35.199339", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:49:47.268630", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:49:59.310056", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:50:11.369436", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:50:23.433501", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:50:35.494546", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:50:47.563440", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:50:59.608913", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:51:11.683884", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:51:23.761945", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:51:35.818335", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:51:47.876296", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:51:59.923453", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:52:11.965028", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:52:24.015919", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:52:36.080856", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:52:48.139080", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:53:00.191595", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:53:12.255442", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:53:24.315911", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "자동 승인봇 패스"}
+{"timestamp": "2026-07-20T10:54:37.433325", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "에러 초기화 후 재가동"}
+{"timestamp": "2026-07-21T09:55:10.286716", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 웹앱의 화면은 어떤 기기에 최적화될까요?\n→ 선택: 모바일 우선 반응형 (작은 화면부터 디자인하여 모든 기기에서 최적화된 경험 제공.)\n3. 단위 변환은 어떤 방식으로 이루어질까요?\n→ 선택: 실시간 자동 변환 (입력 시 즉시 결과 표시. 사용자 편의성 높음.)"}
+{"timestamp": "2026-07-21T15:36:41.338713", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:38:12.317642", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:38:28.508538", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:39:00.756990", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:39:33.057776", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:40:05.376729", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:40:37.674230", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:41:09.938206", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:41:42.335054", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:42:14.640707", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:42:46.963813", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:43:19.233139", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:43:51.502275", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:44:23.790728", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:44:56.160908", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:45:28.441772", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:46:00.777801", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:46:33.070425", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:47:05.364901", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:47:37.647400", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:48:09.934506", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:48:42.281928", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:49:14.560828", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:49:46.870445", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:50:19.118310", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:50:51.431667", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:51:23.726393", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:51:56.034105", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:52:28.347902", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:53:00.634300", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:53:32.907611", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:54:05.206205", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:54:37.542074", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:55:09.801663", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:55:42.144818", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:56:14.447285", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:56:46.726448", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:57:19.039912", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:57:51.328496", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-21T15:58:23.639648", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환은 어떤 방식으로 동작할까요?\n→ 선택: 입력 값 변경 시 즉시 변환 (실시간 반응으로 편리하지만, 입력 중에도 계속 계산이 필요합니다.)"}
+{"timestamp": "2026-07-22T17:17:24.090094", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 값 입력 시 변환은 어떻게 동작할까요?\n→ 선택: 실시간 자동 변환 (입력 즉시 결과 표시) (사용자가 값을 입력하는 즉시 변환 결과를 보여줍니다. 현대적이고 반응성이 높은 사용자 경험을 제공합니다.)\n3. 어떤 기기에서 주로 사용될까요?\n→ 선택: 모든 기기(반응형 웹) (데스크톱, 태블릿, 모바일 등 다양한 화면 크기에 맞춰 레이아웃이 자동으로 조정됩니다. 개발 공수가 증가할 수 있습니다.)"}
+{"timestamp": "2026-07-23T08:50:29.204585", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 불필요, 기기별로 이력 분리. 가장 가볍고 빠른 구현.)\n2. 단위 변환의 사용자 입력 방식은 어떻게 할까요?\n→ 선택: 하나의 입력 필드와 단위 선택 (값을 입력하고, 변환할 원본 단위와 목표 단위를 선택합니다.)\n3. 모바일 기기에서도 최적화된 화면을 제공할까요?\n→ 선택: 예, 모든 기기에서 최적화 (데스크톱, 태블릿, 모바일 등 모든 화면 크기에 맞춰 UI가 유연하게 조정됩니다.)"}
