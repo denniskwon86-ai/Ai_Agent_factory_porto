@@ -59,13 +59,13 @@ ENGINE_TIERS = {
         "flash": "grok-2-latest",
     },
     "openrouter": {
-        "pro":   "meta-llama/llama-3.3-70b-instruct:free",
+        "pro":   "meta-llama/llama-3.3-70b-instruct",
         "flash": "google/gemini-2.0-flash-lite-preview-02-05:free",
     }
 }
 
 # 폴백(Fallback) 순서 리스트 — [0]=Gemini(1차), [1]=xAI(2차), [2]=Groq(3차), [3]=Cerebras(4차), [4]=OpenRouter(5차)
-LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct:free"]
+LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct"]
 LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.0-flash-lite-preview-02-05:free"]
 
 # [레버B] 게이트웨이 자원 관리 파라미터
@@ -85,7 +85,7 @@ MODEL_CONTEXT_LIMITS = {
     "llama-3.3-70b":             6000,
     "llama3.1-8b":               6000,
     "grok-2-latest":             32000,
-    "meta-llama/llama-3.3-70b-instruct:free": 6000,
+    "meta-llama/llama-3.3-70b-instruct": 200000,
     "google/gemini-2.0-flash-lite-preview-02-05:free": 60000,
 }
 CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
@@ -104,7 +104,7 @@ MODEL_OUTPUT_LIMITS = {
     "llama-3.3-70b":            8000,
     "llama3.1-8b":              8000,
     "grok-2-latest":            8192,
-    "meta-llama/llama-3.3-70b-instruct:free": 8000,
+    "meta-llama/llama-3.3-70b-instruct": 8192,
     "google/gemini-2.0-flash-lite-preview-02-05:free": 8192,
 }
 DEFAULT_OUTPUT_LIMIT_GEMINI = 65536
@@ -143,7 +143,7 @@ JUDGE_FORCE_HEAVY = False
 # 토론 리비전·단계 재작업도 Flash. → 스프린트당 대용량 Pro 콜을 ~7~13 → ~4(아키텍처·기술명세 드래프트
 # + QA·Supervisor 판정)로 줄여 한도 내 완주를 노린다. 그라운딩(지식팩/기준정보)이 문서형 산출물의
 # 도메인 정확성을 받치므로 완주용 1차로는 Flash 로 충분. 완주 증거 확보 후 벤치마크로 단계별 Pro 복귀 판정.
-LOW_QUOTA_MODE = True
+LOW_QUOTA_MODE = False
 PRO_DRAFT_STAGES = {"ARCHITECTURE", "TECH_SPEC"}  # 저쿼터 모드에서도 드래프트를 Pro 로 유지할 구조 설계 단계
 
 # Supervisor 게이트 / 무한루프 안전장치

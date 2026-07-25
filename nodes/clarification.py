@@ -1,7 +1,7 @@
 import json
 from typing import Dict, Any
 from state_models import ProjectState
-from core.llm_gateway import gateway
+from core.llm_gateway import gateway, QuotaExhaustedException
 from core.agent_registry import agent_skill
 
 
@@ -51,6 +51,8 @@ async def run_requirement_interviewer(state: Any) -> Dict[str, Any]:
                 "multi": bool(q.get("multi", False)),
                 "options": opts,
             })
+    except QuotaExhaustedException:
+        raise
     except Exception as e:
         print(f"⚠️ [Interviewer] 확인 질문 생성 실패 - 질문 없이 진행합니다: {e}")
         questions = []

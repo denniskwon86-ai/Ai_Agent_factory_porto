@@ -15,15 +15,17 @@ docs/test_plan/ 아래의 테스트 계획을 읽고 실효성 검증 테스트�
 3. 각 시나리오는 docs/test_plan/01_scenario_catalog.md 의 입력 데이터를 그대로 사용할 것.
 4. 시나리오 1건을 끝낼 때마다 02_progress_tracker.md 의 해당 행을
    상태/점수/특이사항과 함께 즉시 갱신할 것 (끊겨도 이어갈 수 있도록).
-5. 발견한 결함은 tracker 의 '발견된 결함 로그' 표에 기록할 것.
-6. 한 번에 한 Phase 만 진행하고, Phase 가 끝나면 결과 요약을 보고할 것.
-7. 토큰/컨텍스트가 소진될 것 같으면 진행 중이던 시나리오 상태를 tracker 에
+5. 시나리오 전 태스크 완료 시, 반드시 POST /api/v1/factory/{project_id}/release API를 호출하여
+   최종 결과물을 라이브러리에 게시(Release)하고 사용자 UI에서 확인 가능하도록 조치할 것.
+6. 발견한 결함은 tracker 의 '발견된 결함 로그' 표에 기록할 것.
+7. 한 번에 한 Phase 만 진행하고, Phase 가 끝나면 결과 요약을 보고할 것.
+8. 토큰/컨텍스트가 소진될 것 같으면 진행 중이던 시나리오 상태를 tracker 에
    정확히 기록하고 멈출 것. 애매하게 중단하지 말 것.
 ```
 
 ---
 
-## 🚦 실행 전 체크리스트 (Precondition)
+## 🚦 실행 전 체크리스트 (Precondition & UI 검증)
 
 | 항목 | 확인 | 조치 |
 |---|---|---|
@@ -31,6 +33,7 @@ docs/test_plan/ 아래의 테스트 계획을 읽고 실효성 검증 테스트�
 | 백엔드 | `http://localhost:8080` 응답 | `.venv\Scripts\python.exe run.py` 로 기동 |
 | 프론트 | `http://localhost:5173` 응답 | `cd frontend && npm run dev` |
 | Cerebras 3차 폴백 | 로그에 `-> Cerebras(...)` 표시되는가 | `CEREBRAS_API_KEY` 설정 시 자동 활성 (미설정 시 Gemini→Groq 만) |
+| 라이브러리 UI 노출 | 완주 후 UI의 **[결과물 라이브러리(Releases)]** 탭에서 산출물이 노출되는가 | 완주 직후 `/release` API 호환 및 정상 스냅샷 생성 여부 확인 |
 
 ## 🧭 Phase 진행 순서 (요약 — 상세는 00_master_plan.md)
 

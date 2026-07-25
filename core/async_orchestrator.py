@@ -331,6 +331,8 @@ class AsyncFactoryOrchestrator:
         try:
             # factory_mode 복구 + 보존값 초기화. 이 복구가 있어야 재개 후 HOTL 게이트 감지가 정상화된다.
             await langgraph_engine.aupdate_state(config, {"factory_mode": restored_mode, "pre_suspend_mode": ""})
+            snapshot = await langgraph_engine.aget_state(config)
+            await self._save_latest_state(snapshot.values, workspace_root)
         except Exception as e:
             print(f"⚠️ [Orchestrator] 쿼터 재개 모드 복구 실패: {e}")
             return False

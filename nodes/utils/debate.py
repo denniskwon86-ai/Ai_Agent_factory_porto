@@ -140,7 +140,7 @@ async def run_debate(state_obj, author_skill: str, stage_key: str, rounds: int =
         )
         # 비평가는 항상 Flash + 경량 컨텍스트(요약만)로 비용 억제
         await _emit(state_obj, stage_key, "critique", r + 1, f"{label} 산출물을 '{persona}' 관점으로 검토 중입니다. (비평 {r + 1}R)")
-        critique_raw = await gateway.aexecute(state_obj, critic_prompt, is_heavy=False, output_mode="json", light=True)
+        critique_raw = await gateway.aexecute(state_obj, critic_prompt, is_heavy=True, output_mode="json", light=True)
         rounds_used += 1
         if _is_llm_error(critique_raw):
             break

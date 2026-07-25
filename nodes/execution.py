@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 import config
 from state_models import ProjectState
-from core.llm_gateway import gateway
+from core.llm_gateway import gateway, QuotaExhaustedException
 from core.agent_registry import agent_skill
 from nodes.utils.git_manager import GitManager
 from nodes.utils.wbs_manager import WBSManager
@@ -178,14 +178,22 @@ async def _swarm_execution(state_obj: ProjectState, base_prompt: str, is_heavy: 
         variant_prompt = base_prompt + f"\n\n[System Note: You are Swarm Agent #{variant_id}. Focus on writing clean, bug-free code.]"
         try:
             return await gateway.aexecute(state_obj, variant_prompt, is_heavy=is_heavy, full_file_exts=full_file_exts)
+        except QuotaExhaustedException:
+            raise
         except Exception:
             return None
 
     print(f" [Micro-Swarm] {num_swarm}개의 병렬 에이전트 생성 중...")
-    results = await asyncio.gather(*[_run_single(i) for i in range(1, num_swarm + 1)])
+    results = await asyncio.gather(*[_run_single(i) for i in range(1, num_swarm + 1)], return_exceptions=True)
     
+    for r in results:
+        if isinstance(r, QuotaExhaustedException):
+            raise r
+
     valid_outputs = []
     for idx, raw_out in enumerate(results):
+        if isinstance(raw_out, Exception):
+            continue
         out_str = _safe_str(raw_out)
         if not out_str: continue
         
@@ -238,8 +246,8 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
         prompt += f"\n\n[ 직전 빌드 실패 원인 - 아래 오류를 반드시 해결한 코드를 생성하십시오]:\n{_berr}"
         print(f" [Frontend] 직전 빌드 오류 반영 재시도({_retry}회차): {_berr[:80]}")
 
-    # [자가복구 P2] 마지막 시도(3회차)는 Pro 모델 1회 정밀 시도로 승격(Flash 가 못 푸는 문제의 최후 기회)
-    _heavy = _retry >= 2
+    # 강제로 Pro 티어(유료) 사용
+    _heavy = True
     # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
     output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_FE_OWNED_EXTS,
                                     num_swarm=1 if _heavy else (3 if _is_rework else 1))
@@ -264,8 +272,8 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
         prompt += f"\n\n[ 직전 빌드 실패 원인 - 아래 오류를 반드시 해결한 코드를 생성하십시오]:\n{_berr}"
         print(f" [Backend] 직전 빌드 오류 반영 재시도({_retry}회차): {_berr[:80]}")
 
-    # [자가복구 P2] 마지막 시도(3회차)는 Pro 모델 1회 정밀 시도로 승격
-    _heavy = _retry >= 2
+    # 강제로 Pro 티어(유료) 사용
+    _heavy = True
     # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
     output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_BE_OWNED_EXTS,
                                     num_swarm=1 if _heavy else (3 if _is_rework else 1))
@@ -614,7 +622,7 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                     + format_risk_report(risk)
                 )
             #  FIX: 리뷰어 역시 빠르고 비용 효율적인 Flash 모델로 롤백 (자유 스키마 JSON 모드)
-            output = await gateway.aexecute(state_obj, prompt, is_heavy=False, output_mode="json")
+            output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json")
             output_str = _safe_str(output)
             
             reviewer_decision = "PASS"
@@ -809,6 +817,6 @@ async def run_manual_writer(state: Any) -> Dict[str, Any]:
     # B2: 매뉴얼은 요약/코드가 이미 프롬프트에 임베드돼 있어 워크스페이스 재주입 불필요(light=True),
     #     사용자 매뉴얼은 고난도 추론이 아니므로 Flash(is_heavy=False)로 충분 - 비용 절감.
     # output_mode 미지정 시 기본 'code'(CodeOutput 구조화 출력 강제)라 매뉴얼이 files JSON 블롭으로 산출됨
-    output = await gateway.aexecute(state_obj, prompt, is_heavy=False, light=True, output_mode="document")
+    output = await gateway.aexecute(state_obj, prompt, is_heavy=True, light=True, output_mode="document")
     print("[OK] [Agent] 사용자 매뉴얼 작성 완료.")
     return {"user_manual_summary": _safe_str(output)}

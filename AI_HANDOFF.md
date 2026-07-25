@@ -4,7 +4,7 @@
 > 이 문서 하나로 (1) 무엇이 바뀌었는지, (2) 환경을 어떻게 맞추는지, (3) 다음 할 일이 무엇인지 파악할 수 있습니다.
 
 - **대상 브랜치**: `dev`  (⚠️ `main` 은 README 스켈레톤일 뿐, 실제 코드는 `dev` 에 있음)
-- **최종 갱신**: 2026-07-18
+- **최종 갱신**: 2026-07-25
 
 ---
 
@@ -28,7 +28,26 @@ cd frontend && npm install && cd ..
 # 5) 서버 기동
 venv\Scripts\python.exe run.py          # 백엔드 http://localhost:8080 (포트/UTF-8 고정 — 반드시 run.py 로)
 cd frontend && npm run dev              # 프론트 http://localhost:5173
+
+# 6) ⚠️ 런타임 데이터 재주입 (PC 를 옮겼다면 필수 — 백엔드가 떠 있는 상태에서)
+venv\Scripts\python.exe scripts\api_data_loader.py       # 마스터데이터 M1~M4 → 골든레코드 36개
+venv\Scripts\python.exe scripts\api_knowledge_loader.py  # 지식팩 core-m3-standards (PDF 8종, ~10분)
 ```
+
+### 0-1. ⚠️ PC 를 옮기면 데이터가 따라오지 않는다 (2026-07-25 실측 확인)
+
+`data/master/`·`data/knowledge_packs/`·`data/chroma_db/` 는 전부 **gitignore 런타임 데이터**다.
+새 PC에서 `git pull` 만 하면 마스터데이터 **0건**, 지식팩 **0건** 상태이며, 이 상태로 시나리오를
+돌리면 **그라운딩 없이 완주**하게 되어 실측 데이터가 무의미해진다. 주입 여부는 이렇게 확인한다:
+
+```bash
+curl http://localhost:8080/api/v1/master/records    # data:[] 이면 미주입
+curl http://localhost:8080/api/v1/knowledge/packs   # data:[] 이면 미주입
+```
+
+원본(JSON 4종 `docs/master_data/`, PDF `docs/reference/`)과 로더는 커밋돼 있으므로 위 6) 재실행으로
+복원된다. 두 로더 모두 **LLM 0콜**(마스터데이터는 REST, 지식팩은 로컬 임베딩)이라 쿼터를 쓰지 않는다.
+임베딩 모델은 HuggingFace 캐시에 없으면 최초 1회 ~470MB 자동 다운로드된다.
 
 - **`.env` 는 git 으로 전송되지 않는다**(비밀키 보호). 새 PC라면 `.env.example` 을 복사해
   실키를 채울 것. 현재 5중 폴백 체인이 쓰는 키: `GOOGLE_API_KEY`, `XAI_API_KEY`,
@@ -42,7 +61,9 @@ cd frontend && npm run dev              # 프론트 http://localhost:5173
 
 ---
 
-## 1. 지금까지 작업한 것 (2026-07-17 ~ 07-18 세션 요약)
+## 1. 지금까지 작업한 것
+
+### 1-A. 2026-07-17 ~ 07-18 세션 요약
 
 | 커밋 | 내용 |
 |---|---|
@@ -52,7 +73,32 @@ cd frontend && npm run dev              # 프론트 http://localhost:5173
 | `61fcdd12d` | **빌드 자가복구 실효화** — 오류 주입(P1)·마지막 시도 Pro 승격(P2)·정직한 실패+재시도 UI(P3) |
 | `b9a413c62` | **지식 허브(도메인 그라운딩 RAG)** 1+2단계 — 지식팩 등록·프로젝트 연계·전 에이전트 주입 |
 
-### 1-1. 현재 기본(SW) 파이프라인 순서 — 이번 세션에 변경됨!
+### 1-B. 그 이후 (2026-07-19 ~ 07-24 — 커밋 62건)
+
+| 일자 | 내용 |
+|---|---|
+| 07-19 | 버그 일괄 수정(§2-2), **G1 추적성 엔진 착수**(`0467c7d42`), **쿼터 소진 서킷 브레이커 + Suspension UI**(`60d14eace`) |
+| 07-20 | **G1 추적성 엔진 완성**(`4a520f846` REQ↔FR 링크·커버리지 게이트·수용검수 근거) + **G1-4 리비전 영향 분석**(`8fcea5a46`) + **FinOps 리스크 분석기**(`974b9eee2` 변경분 정적 위험도 → 리뷰 자동승인/정밀검토) — **셋 다 LLM 0콜**. 품질 게이트 fail-loud 전환 + 심판 앵커링 + **LLM 텔레메트리**(`b7dc409f9`) |
+| 07-21 | **LOW_QUOTA_MODE**(`c99925186`), per-model 쿨다운·폴백 정제(`5f89ec974`), **운영 계기판(텔레메트리 뷰어)**(`ee5eb15f4`), 토큰 실측 v2 + 실행단계 컨텍스트 다이어트(`8cf42e558`), `JUDGE_FORCE_HEAVY` 되돌림 + WBS 태스크 크기 결정론 게이트(`0ad0f80e6`) |
+| 07-22 | **[M1] 기준정보 저장소**(`169612ccc` 백엔드+결정론 주입, `468c31487` UI), **[M2] 스키마 레지스트리+크로스워크**(`fa802c706`), **[M3] MCP 데이터 브로커**(`b05243239` 백엔드, `6cf3b87ba` 실측 병기 토글 기본 off), **골든 벤치마크 프레임워크**(`dc1a1ca50` 3축 채점·스코어카드·회귀비교), **v1 Exact Hash Cache**(`f9e3dcfc5`), **SUSPENDED_QUOTA 중단지점 resume**(`e205eaceb`), 토론 다양성 캐시 게이트(`193a7cef8`) |
+| 07-23 | 결함 #10 UI_DESIGN HOTL 무한루프 수정(`484ecb19a`), 지식허브 추가 업로드 임베딩 충돌 수정(`42cc2b8c1`), **VisionQA 차단 게이트 → 자문(advisory) 강등**(`e8f5e3837`) |
+| 07-24 | **한국어 전용 전역 정책 강제**(`b8baf39ab`), **시뮬 에이전트 7종 프롬프트 디지털 트윈 수준 고도화**(`5fbbd9330`), **디지털 트윈 마스터데이터 M1~M4 구축**(`40fd76ae9` 외부 세션), 3-Tier 비용 추산 보고서(`2b8c93b01`), **마스터데이터 정규화 주입 로더 재작성**(`94d6edc19` 통짜 주입 → 항목당 개별 골든레코드, 활성 5→36개) |
+
+> **정체성 변화**: 07-24 를 기점으로 이 시스템은 "SW 팩토리"가 아니라
+> **"디지털 트윈 제조 시뮬레이션 팩토리"** 로 구체화됐다(시뮬 스킬 고도화 + M1~M4 제조 마스터데이터).
+
+- **신규 코어 모듈**: `core/master_data.py`(M1) · `core/crosswalk.py`(M2) · `core/mcp_broker.py`(M3) ·
+  `core/golden_benchmark.py` · `core/risk_analyzer.py` · `core/cache_manager.py`
+- **신규 API**: `master_control` · `crosswalk_control` · `mcp_control` · `benchmark_control` ·
+  `telemetry_control` · `format_control` (`api/routes/`)
+- **신규 UI 패널**: `MasterDataPanel` · `CrosswalkPanel` · `TelemetryPanel` · `TraceabilityGraph` ·
+  `KnowledgeHubPanel` · `FormatMasterPanel` · `MegaBoardroomPanel` (`frontend/src/components/`)
+- **관련 설계 문서**: `docs/design_master_data_m1.md` · `m2.md` · `m3.md` ·
+  `docs/design_debate_diversity_cache.md` · `docs/directives/2026-07-20_fail-loud_judge-anchor_telemetry.md` ·
+  **`docs/design_org_permission_enterprise.md`**(조직·권한·부서게시·전사 데이터표준/검색/시뮬 — 설계 확정, **미착수**)
+- **세션 로그**: `docs/session_log_2026-07-21.md` ~ `2026-07-24.md`, `docs/cost_estimate_report.md`
+
+### 1-1. 현재 기본(SW) 파이프라인 순서 (2026-07-25 코드 대조 확인)
 
 ```
 [기획]  요구확인 인터뷰 →(선택 답변)→ RFP →(승인)→ PRD →(승인)→ UI디자인 → VisionQA
@@ -64,6 +110,10 @@ cd frontend && npm run dev              # 프론트 http://localhost:5173
 - **요구 확인 인터뷰**: 아이디어 입력 시 에이전트가 선택형 질문 2~4개(추천안+이유)를 생성,
   사용자는 클릭으로만 답변 → 답변이 `clarification_summary` 로 영속화되어 RFP/PRD 에 주입.
   HOTL 게이트는 총 5곳(인터뷰/RFP/PM/VisionQA/PMO).
+- ⚠️ **VisionQA 는 2026-07-23 부로 차단 게이트가 아니라 '자문(advisory)'** (`e8f5e3837`).
+  UI 를 자동 반려하지 않고 소견(`ui_review_advisory`)만 남기며, 재설계 여부는 사람이 미리보기를 보고
+  판단한다(`route_from_vision_qa` 는 `needs_revision` 일 때만 UIDesigner 로 되돌림). 이전의
+  UI_DESIGN↔VisionQA 왕복(각 ~5콜)이 무료 티어 일일 요청수를 소진하던 병목을 제거한 조치다.
 - **빌드 자가복구**: 실패 시 직전 오류를 개발자 프롬프트에 주입(재추첨→수리), 3회차는 Pro 모델,
   3회 소진 시 WBS 태스크 FAILED + `SPRINT_FAILED` 방송 + 통제실 배너에서
   [오류 반영 재시도]/[지시 추가 후 재시도]/[보류] 선택.
@@ -94,15 +144,29 @@ cd frontend && npm run dev              # 프론트 http://localhost:5173
 > 4. 이후 보강 순서: 인도물 패키지 UX(추적표+출처+앱+매뉴얼 단일 뷰, 리비전 diff) → 운영
 >    계기판(프로젝트당 호출/토큰/폴백/소요시간) → README 퀵스타트 → §2-3 고도화 로드맵.
 
+> ### 🧭 방향 보정 (2026-07-24, 사용자 확정)
+> **"무료 최적화는 중단하고, 유료/큰 모델로 일단 완주한다."** 미검증 시스템에 최적화를 얹는 건
+> 순서 오류다 — 완주 데이터가 벤치마크·병목·품질 판단 전부의 선행조건이다. 무료 티어의 일일
+> 요청수(RPD)를 '진짜' 줄이는 수단은 캐싱·중단지점 resume·로컬 추론뿐이며(07-24 리서치 결론),
+> 이들은 완주 실측 이후에 취사선택한다. 상세: `docs/session_log_2026-07-24.md` §B.
+
 ### 2-1. 안정화 (최우선)
 
-1. **A-1 관문 테스트 재실행 (P2)** — 워크플로우가 바뀌었으므로 처음부터.
+0. **런타임 데이터 재주입 확인** (§0-1) — PC 를 옮겼다면 시나리오 실행 **전에** 반드시.
+   마스터데이터·지식팩이 비어 있으면 그라운딩 없이 완주하게 되어 실측이 무의미하다. LLM 0콜.
+1. **완주용 유료/무제한 모델 1종 게이트웨이 장착** — EXAONE(FriendliAI·Together, 둘 다 OpenAI
+   호환이라 기존 게이트웨이에 반나절) 또는 A급 1종. 무료 RPD 한계가 A-1 완주를 막는 최종 병목이다.
+2. **A-1 관문 테스트 완주 (P2)** — 지금 가장 중요한 단일 행동.
    `docs/test_plan/03_test_execution_command.md` 의 지시문을 그대로 사용하거나
-   `venv\Scripts\python.exe run_a1_test.py` 로 기동. 이번 세션의 수정(인터뷰 게이트,
-   순서 재배선, 자가복구, 지식 허브)이 한 번에 실전 검증된다.
-   ⚠️ 인터뷰 게이트가 첫 순서로 추가됐다 — 자동 승인 시 무피드백 resume 하면 통과.
-   ⚠️ Pro 체인 429 소진 이력 있음 — 쿼터 잔량 확인 후 실행.
-2. **P2 통과 후**: `02_progress_tracker.md` 갱신 → P1(구조 테스트, LLM 불필요) 보완 → P3+ 순차 진행.
+   `venv\Scripts\python.exe run_a1_test.py` 로 기동. 중단분이 있으면 `--resume`(중단지점 재개,
+   `e205eaceb`)로 이어붙일 수 있다.
+   ⚠️ 인터뷰 게이트가 첫 순서다 — 자동 승인 시 무피드백 resume 하면 통과.
+   ⚠️ VisionQA 는 이제 자동 반려하지 않는다(자문) — UI 재설계는 사람이 미리보기 보고 판단.
+3. **완주 후**: `02_progress_tracker.md` 의 A-1 벤치마크 표(리드타임/자가복구/토큰/HOTL 피로도)를
+   실측으로 채움 → 골든 벤치마크(`core/golden_benchmark.py`)로 산출물 채점 → 그 다음에야
+   최적화 도구 취사선택(`docs/session_log_2026-07-24.md` §B-1 카탈로그) → P3+ 순차 진행.
+4. (미세) 마스터데이터 `is_core` 선별 조정 — 현재 설비 전체가 core + 광범위 `manufacturing` 태그라
+   관련성 낮은 core 가 함께 주입되는 경향. 완주 데이터 확인 후 조정.
 
 ### 2-2. ✅ 완료(2026-07-19): 버그·미구현 일괄 수정 (부분 점검 세션)
 
@@ -120,15 +184,31 @@ cd frontend && npm run dev              # 프론트 http://localhost:5173
 - **pytest 전 스위트 155건 통과**(스테일 테스트 7건 현행화 + 형제 리포에서 복사된 tests/__pycache__
   오염 제거 — pyc 캐시가 남의 리포 코드를 실행하고 있었음). ENV-2 베이스라인 확보
 
-### 2-3. 고도화 로드맵 (검토 완료 — 세 축, 순서 준수)
+### 2-3. 고도화 로드맵 (세 축 — ✅ 는 2026-07-25 기준 구현 완료)
 
 ```
-그라운딩 축: [즉시보완 3건] → G1 산출물 추적성 그래프 → 지식허브 3단계(학습루프) → G2 → G3
-기준정보 축:                    M1 기준정보 저장소  ──────────────┐
-연계 축:                                                       M2 크로스워크 → M3 MCP 브로커
+그라운딩 축: [즉시보완 3건]✅ → G1 산출물 추적성 그래프✅ → 지식허브 3단계(학습루프)❌ → G2❌ → G3❌
+기준정보 축:                    M1 기준정보 저장소✅  ──────────────┐
+연계 축:                                                       M2 크로스워크✅ → M3 MCP 브로커✅
 ```
 
-- **G1. 산출물 추적성 그래프** (LLM 0콜, 최고 가성비): REQ-ID↔FR-ID↔WBS태스크↔파일을 정규식으로
+> **남은 미착수: 지식 허브 3단계(피드백 학습 루프) · G2 · G3 · 조직/권한/전사 축.** 단 방향
+> 선언(§2 서두)에 따라 **A-1 완주 전까지 신규 기능 착수 금지** — 완주·벤치마크 이후 재판정한다.
+>
+> **[신규 축, 2026-07-25 설계 확정·미착수] 조직 구성 · 권한 · 부서별 게시 · 전사 데이터 표준 ·
+> 전사 검색 · 전사 시뮬레이션 · 경영진 총괄** — 전체 설계는
+> **`docs/design_org_permission_enterprise.md`** (Phase 0~12, 재사용 자산·테스트·리스크 포함).
+> 요지: 인증은 경량 사용자 전환(SSO 교체 가능), 권한은 백엔드 강제, 부서는 **기준정보로 관리**
+> (하드코딩 맵 3개 삭제), 데이터 표준은 **생성 시 권장 / 게시 시 정합화 / DA 정기 배치**,
+> 권한 축은 `executive`⟂`admin`⟂`DA` 3분리. 데이터 카탈로그는 **M2 스키마 레지스트리 재사용
+> (신규 테이블 0)**. 전사 단일 시뮬 실행 엔진은 `domain_agents` 필터 덕에 **코드 변경 0**.
+>
+> 완료 항목의 현재 진입점: 마스터데이터 `MasterDataPanel`+`/api/v1/master/*`, 크로스워크
+> `CrosswalkPanel`+`/api/v1/crosswalk/*`, MCP 브로커 `/api/v1/mcp/*`(실측 병기 토글 **기본 off**),
+> 추적성 `TraceabilityGraph`, 벤치마크 `/api/v1/benchmark/*`, 텔레메트리 `TelemetryPanel`.
+
+- ✅ **G1. 산출물 추적성 그래프** — 완료(`4a520f846`, 리비전 영향 분석 `8fcea5a46`).
+  (LLM 0콜, 최고 가성비): REQ-ID↔FR-ID↔WBS태스크↔파일을 정규식으로
   그래프화 → 리비전 영향 분석, QA 추적성 게이트(REQ→구현 누락 탐지), 수용검수 근거.
   산출물의 REQ/FR 인용은 이미 스킬 규칙으로 강제되어 있어 데이터는 준비돼 있음.
   ※ 사용자 기획서(proposals/implementation_plan_finops.md 1단계 '추적성 엔진')와 동일 목표 —
@@ -141,11 +221,15 @@ cd frontend && npm run dev              # 프론트 http://localhost:5173
 - **지식 허브 3단계(피드백 학습 루프)**: 실행 결과+HOTL 피드백을 Flash 로 증류 → **승인 게이트**
   (스킬 진화 패널 패턴, 지식 오염 방지) → 팩에 learned 문서 축적. 이때 **지식 사용 리니지**
   (어떤 청크가 어떤 산출물에 주입됐는지 기록)와 **문서 버전/유효기간**(개정판 관리)도 함께 구현.
-- **M1. 경량 기준정보 저장소** (LLM 0콜): 자재·공정·설비·KPI 골든 레코드 + 별칭 + 버전을
+- ✅ **M1. 경량 기준정보 저장소** — 완료(`169612ccc` 백엔드+결정론 주입, `468c31487` UI).
+  데이터 주입은 `scripts/api_data_loader.py`(§0-1) — 골든레코드 36개·타입 10종, 별칭 확정조회
+  작동 확인(자용로→EQ-FLASH-01, OEE→ISO-KPI-01, MHP→RM-MHP-001).
+  (LLM 0콜): 자재·공정·설비·KPI 골든 레코드 + 별칭 + 버전을
   단일 진실원본으로 관리, 에이전트 호출에 결정론적 주입(모델 전환 불변성의 최강 축).
   **상세 설계 확정: `docs/design_master_data_m1.md`** (스키마 DDL·API 명세·주입 규격·UI·체크리스트).
   온톨로지(G2)와 통합 설계 — entity_types 가 공용.
-- **[채택] 리스크 분석기 + 부분 승인(Granular HOTL)** (proposals/implementation_plan_finops.md 2단계
+- ✅ **[채택] 리스크 분석기** — 완료(`974b9eee2`, `core/risk_analyzer.py`). 부분 승인·시각 Diff UI 는 미착수.
+  (proposals/implementation_plan_finops.md 2단계
   + system_enhancement_analysis.md §2): 변경분 정적 분석으로 위험도 산출 — Low(스타일/텍스트)는
   자동 승인, High(스키마/API/의존성)만 인간 개입. LLM 0콜. 부분 승인·시각 Diff UI 는 후속 규모 큰 작업.
 - **[조건부 채택] 테스트 엔지니어 노드(Flash TDD)** (동 문서 3단계): 단위 테스트 생성을 Flash 전담.
@@ -159,14 +243,31 @@ cd frontend && npm run dev              # 프론트 http://localhost:5173
 - **[기각 기록]** Kafka/Redis 이벤트 버스(단일 프로세스에 과설계 — 기존 broadcaster 로 충분, 메가
   연합 실사용 시 재검토) / Docker·Wasm MicroVM 샌드박스(격리 서브프로세스 스모크가 이미 동작,
   현 단계 인프라 과투자).
-- **M2. 스키마 레지스트리 + 키 크로스워크**: 연계 시스템 등록·필드 매핑(LLM 초안 + 사용자 승인제).
-- **M3. MCP 데이터 브로커** (시스템 안정화 후): "전체 복제"가 아니라 **메타데이터+키맵만 복제,
+- ✅ **M2. 스키마 레지스트리 + 키 크로스워크** — 완료(`fa802c706`, `core/crosswalk.py`+`CrosswalkPanel`).
+  연계 시스템 등록·필드 매핑(LLM 초안 + 사용자 승인제).
+- ✅ **M3. MCP 데이터 브로커** — 완료(`b05243239` 백엔드, `6cf3b87ba` 실측 병기 토글 **기본 off**).
+  "전체 복제"가 아니라 **메타데이터+키맵만 복제,
   데이터는 MCP 온디맨드 조회 + TTL 캐시**(가상 통합). 읽기 전용부터, as-of 타임스탬프를 시뮬 결과에
   기록(재현성), MCP 유입 데이터도 비신뢰 입력으로 취급(인젝션 방어 동일 적용).
 
 ### 2-4. 잔여 기술부채
 
-- pytest 낡은 테스트 7건(구버전 토폴로지 기대값) 현행화 — ENV-2 베이스라인 겸사
+- ~~pytest 낡은 테스트 7건 현행화~~ → **해소**. 2026-07-25 기준 **전 스위트 258건 통과**(ENV-2 베이스라인)
+- **⚠️ 쿨다운이 유료 제공사까지 30분간 배제한다** (2026-07-25 텔레메트리 실측, 최우선 부채) —
+  `_update_cooldowns` 는 실패한 모델을 무조건 `MODEL_COOLDOWN_SEC`(기본 1800초) 쿨다운시킨다.
+  전 모델이 쿨다운되면 `_compose_chain` 이 **첫 모델(무료 Gemini) 하나만으로 재프로브**하므로,
+  크레딧이 남은 OpenRouter 유료 모델이 체인에서 빠진 채 무료 429 로 즉사하는 구간이 30분간 이어진다.
+  `_all_cooled(pro_chain)` 이면 Pro→Flash 강등까지 겹쳐 유료 Pro 가 더 멀어진다.
+  → **유료키로 완주를 노린다면 쿨다운 정책에서 유료 제공사를 제외하거나 쿨다운을 짧게 할 것.**
+  (`core/llm_gateway.py:383-412`, `config.MODEL_COOLDOWN_SEC`)
+- **유료 제공사(OpenRouter)가 폴백 체인의 맨 끝[4]** — 무료 4곳이 앞을 막고 있어, 무료 쿼터가
+  남아 있는 동안에는 유료 경로가 아예 실행되지 않는다. 유료 경로만 검증하려면 무료 키를 잠시
+  비우거나 체인 순서를 바꿔야 한다(체인 [0] 은 `ChatGoogleGenerativeAI` 로 하드와이어라 코드 수정 필요)
+- **langgraph 체크포인트 역직렬화 경고** — `state_models.FileMetadata` 미등록 타입.
+  현재는 동작하나 "향후 버전에서 차단" 예고 → langgraph 업그레이드 시 체크포인트 복구 불능 위험.
+  `allowed_msgpack_modules` 등록 필요
+- `scripts/api_data_loader.py:14` 실행 안내가 `.venv/Scripts/...` — PC 에 따라 `venv/`(점 없음)
+- 저장소 비대화: `docs/reference/` 에 수십 MB 바이너리 다수(60MB PDF 포함) 커밋됨 — Git LFS 검토 여지
 - `langgraph.json` 경로(`core/agent_graph.py`) — LangGraph Studio 사용 시에만 문제
 - 스킬 제안 `prop_521c4962`(Tech_Lead) 승인/거부 결정 대기
 - PreviewPanel 메인 iframe `allow-same-origin` 보안 트레이드오프(audit B9 참고)
@@ -179,6 +280,19 @@ cd frontend && npm run dev              # 프론트 http://localhost:5173
 백엔드:  venv\Scripts\python.exe run.py       # http://localhost:8080 (반드시 run.py — 포트/UTF-8 고정)
 프론트:  cd frontend && npm run dev            # http://localhost:5173
 ```
+
+### 3-1. 다중 환경 동시 작업 주의 (2026-07-25 실사고)
+
+- **8080 은 단일 포트다.** 다른 PC/세션이 A-1 을 돌리는 중에 이쪽에서 백엔드를 띄우거나 내리면
+  **상대의 스프린트가 그대로 끊긴다**(실제로 발생). 작업 전 상대 환경의 가동 여부를 확인할 것.
+- 스프린트 실행 중에는 `.py` 를 저장해도 서버가 재시작되지 않는다(운영 모드 reload OFF가 기본).
+  개발용 `--dev` 를 켠 채로 스프린트를 돌리지 말 것.
+- **커밋은 한 곳에서만.** 두 PC 에서 동시에 커밋하면 `dev` 가 갈라진다(§4).
+- ⚠️ **워킹 카피를 공유하는 경우**(같은 폴더를 두 세션이 보는 구성) — `git add -A` 금지.
+  상대의 미커밋 실험 변경까지 함께 커밋된다. 실제로 2026-07-25 에 유료모델 실험분
+  (`config.py` 의 `LOW_QUOTA_MODE=False`·OpenRouter 유료 모델, `nodes/execution.py` 의
+  개발자 노드 Pro 강제)이 워킹트리에 떠 있는 상태로 관찰됐다.
+  **커밋 전 `git status` 로 내가 만진 파일만 골라 `git add <파일>` 할 것.**
 
 ## 4. 작업 종료 시
 

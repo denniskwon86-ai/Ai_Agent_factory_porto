@@ -141,7 +141,10 @@ def wait_phase(done_check, phase_name: str, timeout_sec: int) -> str:
         st = latest_state()
 
         if st.get("factory_mode") == "SUSPENDED_QUOTA":
-            return f"failed:{phase_name} 쿼터 완전 소진으로 인해 중단됨 (SUSPENDED_QUOTA)"
+            time.sleep(POLL_SEC)
+            st2 = latest_state()
+            if st2.get("factory_mode") == "SUSPENDED_QUOTA":
+                return f"failed:{phase_name} 쿼터 완전 소진으로 인해 중단됨 (SUSPENDED_QUOTA)"
 
         if m != last_marker:
             last_marker = m
@@ -211,15 +214,24 @@ def main():
             continue
 
         st = latest_state()
-        st.update({
-            "current_sprint_task_id": tid,
-            "factory_mode": "REVISION" if str(tid).startswith("TASK_REV_") else "EXECUTION",
-        })
-        r = post(f"/{PROJECT_ID}/sprint/start", {"task_id": tid, "project_state_payload": st})
-        log(f"🚀 태스크 가동 {tid} ({t.get('title', '')[:40]}): {r.status_code}")
-        if not r.ok:
-            log(f"❌ 가동 실패: {r.text[:200]}")
-            return 1
+        if resume and st.get("factory_mode") == "SUSPENDED_QUOTA" and str(st.get("current_sprint_task_id")) == str(tid):
+            r = post(f"/{PROJECT_ID}/sprint/resume-quota", {"task_id": tid})
+            log(f"🚀 쿼터 재개 {tid} ({t.get('title', '')[:40]}): {r.status_code}")
+            if r.status_code == 409:
+                log(f"⚠️ 이미 실행 중이거나 재개 대상 아님 (무시하고 폴링 진입)")
+            elif not r.ok:
+                log(f"❌ 가동 실패: {r.text[:200]}")
+                return 1
+        else:
+            st.update({
+                "current_sprint_task_id": tid,
+                "factory_mode": "REVISION" if str(tid).startswith("TASK_REV_") else "EXECUTION",
+            })
+            r = post(f"/{PROJECT_ID}/sprint/start", {"task_id": tid, "project_state_payload": st})
+            log(f"🚀 태스크 가동 {tid} ({t.get('title', '')[:40]}): {r.status_code}")
+            if not r.ok:
+                log(f"❌ 가동 실패: {r.text[:200]}")
+                return 1
 
         def task_done(tid=tid):
             cur = (wbs() or {}).get("tasks") or []
@@ -241,6 +253,21 @@ def main():
     st = latest_state()
     log(f"최종 요약: stage_scores={json.dumps(st.get('stage_scores'), ensure_ascii=False)}")
     log(f"qa_verdict={st.get('qa_verdict')} / supervisor_verdict={st.get('supervisor_verdict')}")
+
+    # 3) 최종 결과물 라이브러리 자동 게시 (Release)
+    log("📦 최종 결과물 라이브러리 게시(Release) 진행 중...")
+    try:
+        r = post(f"/{PROJECT_ID}/release", {})
+        if r.ok:
+            rel_data = r.json()
+            rel_id = rel_data.get("release_id", "unknown") if isinstance(rel_data, dict) else "ok"
+            log(f"✅ 결과물 라이브러리 게시 완료! (release_id: {rel_id})")
+            log("👉 사용자 UI (http://localhost:5173) [결과물 라이브러리] 탭에서 확인 가능합니다.")
+        else:
+            log(f"⚠️ 결과물 라이브러리 게시 실패: {r.status_code} {r.text[:200]}")
+    except Exception as e:
+        log(f"⚠️ 결과물 라이브러리 게시 중 예외 발생: {e}")
+
     return 0
 
 
