@@ -132,16 +132,27 @@ async def run_tech_lead(state: Any) -> Dict[str, Any]:
         try:
             su = json.loads(state_update_match.group(1))
             #  견고화: LLM이 ADR/부채를 객체가 아닌 문자열(ID)로 줄 때 정상 스키마로 변환 (재개 시 검증 크래시 방지)
+            #  ⚠️ [2026-07-26] 과거 dict 는 **검증 없이 그대로** 상태에 넣었다. LLM 이 동의어 키
+            #     ({id,title,description})를 내면 이후 ProjectState 검증이 8개 오류로 실패해
+            #     스프린트 루프가 통째로 죽었다. → 여기서 모델로 즉시 검증해 불량 항목만 버린다.
+            #     (ADR/DebtItem 이 동의어 흡수·기본값을 갖고 있으므로 정상 편차는 살아남는다)
+            from state_models import ADR as _ADR, DebtItem as _Debt
             for item in (su.get("architecture_decisions") or []):
+                if isinstance(item, str) and item.strip():
+                    item = {"id": item.strip()[:64], "decision": item.strip(), "reason": ""}
                 if isinstance(item, dict):
-                    arch_decisions.append(item)
-                elif isinstance(item, str) and item.strip():
-                    arch_decisions.append({"id": item.strip()[:64], "decision": item.strip(), "reason": ""})
+                    try:
+                        arch_decisions.append(_ADR.model_validate(item).model_dump())
+                    except Exception as e:
+                        print(f"⚠️ ADR 항목 1건 스키마 불일치로 건너뜀: {e}")
             for item in (su.get("technical_debt") or []):
+                if isinstance(item, str) and item.strip():
+                    item = {"id": item.strip()[:64], "description": item.strip(), "priority": 3}
                 if isinstance(item, dict):
-                    tech_debt.append(item)
-                elif isinstance(item, str) and item.strip():
-                    tech_debt.append({"id": item.strip()[:64], "description": item.strip(), "priority": 3})
+                    try:
+                        tech_debt.append(_Debt.model_validate(item).model_dump())
+                    except Exception as e:
+                        print(f"⚠️ 기술부채 항목 1건 스키마 불일치로 건너뜀: {e}")
             if "file_index_updates" in su:
                 for path, info in su["file_index_updates"].items():
                     if path in file_idx:

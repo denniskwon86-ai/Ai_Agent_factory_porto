@@ -43,11 +43,40 @@ class DebtItem(BaseModel):
         return values
 
 class ADR(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    id: str
-    decision: str
-    reason: str
+    """아키텍처 결정 기록.
+
+    ⚠️ [2026-07-26 실측 결함] 과거 `extra='forbid'` + 필수 필드 3개(id/decision/reason)로
+    엄격했다. LLM 이 ADR 을 `{id, title, description}` 같은 **동의어 키**로 내면
+    `ProjectState` 검증이 8개 오류로 실패하고 **스프린트 루프가 통째로 죽었다**
+    (`Sprint Loop Error: 8 validation errors for ProjectState`).
+    산출물 형태의 사소한 편차가 파이프라인을 죽여선 안 된다 — 형제 모델 `DebtItem` 은
+    이미 `extra='ignore'` + 기본값 + before-validator 로 이 문제를 해결하고 있었으므로
+    **그 검증된 패턴을 여기에도 적용**한다(동의어 흡수 + 누락 시 기본값)."""
+    model_config = ConfigDict(extra='ignore')
+    id: str = Field(default="ADR-fallback")
+    decision: str = Field(default="")
+    reason: str = Field(default="")
     timestamp: str = Field(default_factory=now_utc)
+
+    @model_validator(mode='before')
+    @classmethod
+    def absorb_synonyms(cls, values):
+        """LLM 이 흔히 쓰는 동의어 키를 정규 필드로 흡수한다."""
+        if isinstance(values, dict):
+            if 'decision' not in values:
+                for alt in ('title', 'summary', 'what', 'content'):
+                    if values.get(alt):
+                        values['decision'] = values[alt]
+                        break
+            if 'reason' not in values:
+                for alt in ('description', 'rationale', 'why', 'reasoning'):
+                    if values.get(alt):
+                        values['reason'] = values[alt]
+                        break
+            if not values.get('id'):
+                import time
+                values['id'] = f"ADR-{int(time.time())}"
+        return values
 
 class AgentMemory(BaseModel):
     model_config = ConfigDict(extra='forbid')
