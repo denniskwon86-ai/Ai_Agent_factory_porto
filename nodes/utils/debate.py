@@ -140,7 +140,10 @@ async def run_debate(state_obj, author_skill: str, stage_key: str, rounds: int =
         )
         # 비평가는 항상 Flash + 경량 컨텍스트(요약만)로 비용 억제
         await _emit(state_obj, stage_key, "critique", r + 1, f"{label} 산출물을 '{persona}' 관점으로 검토 중입니다. (비평 {r + 1}R)")
-        critique_raw = await gateway.aexecute(state_obj, critic_prompt, is_heavy=True, output_mode="json", light=True)
+        # ⚠️ [결함 #19 계열] 비평도 cacheable=False — 개정본에 옛 비평이 재생되면 개정이 무의미해진다.
+        #   같은 파일 :179/:202(리비전·재작업)는 이미 우회하는데 비평만 빠져 있었다.
+        critique_raw = await gateway.aexecute(state_obj, critic_prompt, is_heavy=True, output_mode="json",
+                                              light=True, cacheable=False)
         rounds_used += 1
         if _is_llm_error(critique_raw):
             break

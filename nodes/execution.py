@@ -649,7 +649,15 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                     + format_risk_report(risk)
                 )
             #  FIX: 리뷰어 역시 빠르고 비용 효율적인 Flash 모델로 롤백 (자유 스키마 JSON 모드)
-            output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json")
+            # ⚠️ [2026-07-26 결함 #19] cacheable=False 필수 — 결함 #13 과 같은 계열의 재발.
+            #   재작업으로 코드를 개선해도 리뷰어 프롬프트가 이전 회차와 동일해지는 순간
+            #   **캐시된 옛 판정(REWORK_DEV)이 재생**되어 개선이 반영되지 않는다.
+            #   그 결과 supervisor_hops 가 상한(8)까지 오르고 CODE_REVIEW 점수는 0.0 에 고정된 채
+            #   'best-effort 수용' 으로 미해결 결함을 안고 통과한다(실측: hops 1→2→3, 점수 0.0 고정,
+            #   같은 해시 3d744629 반복 히트).
+            #   심사(judge)·검수 성격의 호출은 **매번 새로 판단해야** 하므로 캐시 대상이 아니다.
+            output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json",
+                                            cacheable=False)
             output_str = _safe_str(output)
             
             reviewer_decision = "PASS"

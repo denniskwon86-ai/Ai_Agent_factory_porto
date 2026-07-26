@@ -116,7 +116,10 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
         # 있으면 모든 단계의 judge 를 Pro(가용 최강) 체인으로 고정한다. (끄면 기존 동작:
         # QA/Supervisor 등 rubric 의 judge_heavy 단계만 Pro)
         judge_heavy = bool(rubric.get("judge_heavy", False)) or bool(getattr(config, "JUDGE_FORCE_HEAVY", False))
-        raw = await gateway.aexecute(state, prompt, is_heavy=judge_heavy, output_mode="json", light=True)
+        # ⚠️ [결함 #19 계열] 심판 채점은 cacheable=False — 재작업 후 개선된 산출물에 옛 점수가
+        #   재생되면 점수가 고정돼 재작업 루프가 영원히 수렴하지 못한다(매번 새로 판단해야 함).
+        raw = await gateway.aexecute(state, prompt, is_heavy=judge_heavy, output_mode="json", light=True,
+                                     cacheable=False)
 
         # [fail-loud] 심판 호출 실패(인프라 오류)는 산출물 결함이 아니다 — 예외로 표면화한다.
         from core.llm_gateway import is_llm_error_text
@@ -131,7 +134,8 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
         # (조용히 전 항목 0점 처리하면 '심판 오류'가 '산출물 불합격'으로 둔갑한다)
         if not scores:
             print(f"⚠️ [Judge] {stage_key} 채점 JSON 비정형 — Pro 승격 1회 재시도")
-            raw = await gateway.aexecute(state, prompt, is_heavy=True, output_mode="json", light=True)
+            raw = await gateway.aexecute(state, prompt, is_heavy=True, output_mode="json", light=True,
+                                         cacheable=False)  # 재시도 채점도 캐시 금지(#19 계열)
             if is_llm_error_text(raw):
                 raise JudgeUnavailableError(f"[{stage_key}] 심판 재시도 실패(인프라 오류): {str(raw)[:200]}")
             jdata = _parse_json(raw) or {}
