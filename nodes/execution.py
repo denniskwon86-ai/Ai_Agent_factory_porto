@@ -170,14 +170,26 @@ _INCREMENTAL_GUARD = (
 _FE_OWNED_EXTS = (".tsx", ".ts", ".jsx", ".js", ".css", ".html")
 _BE_OWNED_EXTS = (".py",)
 
-async def _swarm_execution(state_obj: ProjectState, base_prompt: str, is_heavy: bool, full_file_exts: tuple, num_swarm: int = 3) -> Any:
-    """Micro-Swarm 실행기: N개의 에이전트를 병렬로 띄우고 문법/샌드박스 통과 코드를 선별"""
-    
+async def _swarm_execution(state_obj: ProjectState, base_prompt: str, is_heavy: bool, full_file_exts: tuple,
+                           num_swarm: int = 3, cacheable: bool = True) -> Any:
+    """Micro-Swarm 실행기: N개의 에이전트를 병렬로 띄우고 문법/샌드박스 통과 코드를 선별
+
+    cacheable=False: 재작업/재시도 호출에서 Exact Hash Cache 를 우회한다.
+      ⚠️ [2026-07-26 실측 결함] 재시도 시 캐시를 타면 재작업 루프가 통째로 무력화된다.
+        빌드 실패 → build_error_log 를 프롬프트에 주입해 재시도하지만, **에러가 매번 같으므로
+        프롬프트 해시도 같다** → 캐시 히트 → 똑같은 코드 반환 → 똑같은 실패. 이 사이클이
+        재작업 상한(8)까지 0.0초에 반복되고(실측 9초에 캐시히트 38건) 결국
+        'best-effort 수용'으로 미해결 결함을 안고 통과해 버린다.
+        `nodes/utils/debate.py:179,202` 가 같은 함정 때문에 이미 cacheable=False 를 쓰고 있는데
+        개발자 노드에는 그 조치가 빠져 있었다. 재시도는 '새 표본을 뽑는 것'이 목적이므로
+        캐시를 타면 안 된다."""
+
     async def _run_single(variant_id: int):
         # Variant에 따라 시스템 프롬프트를 미세하게 변경하여 다양성(Swarm Diversity) 유도
         variant_prompt = base_prompt + f"\n\n[System Note: You are Swarm Agent #{variant_id}. Focus on writing clean, bug-free code.]"
         try:
-            return await gateway.aexecute(state_obj, variant_prompt, is_heavy=is_heavy, full_file_exts=full_file_exts)
+            return await gateway.aexecute(state_obj, variant_prompt, is_heavy=is_heavy,
+                                          full_file_exts=full_file_exts, cacheable=cacheable)
         except QuotaExhaustedException:
             raise
         except Exception:
@@ -249,8 +261,10 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
     # 강제로 Pro 티어(유료) 사용
     _heavy = True
     # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
+    # 재작업/재시도면 캐시 우회 — 같은 프롬프트에 같은 응답이 돌아와 루프가 무력화되는 것을 차단
     output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_FE_OWNED_EXTS,
-                                    num_swarm=1 if _heavy else (3 if _is_rework else 1))
+                                    num_swarm=1 if _heavy else (3 if _is_rework else 1),
+                                    cacheable=not _is_rework)
     return {"frontend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_developer_be(state: Any) -> Dict[str, Any]:
@@ -275,8 +289,10 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
     # 강제로 Pro 티어(유료) 사용
     _heavy = True
     # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
+    # 재작업/재시도면 캐시 우회 (위 프론트와 동일 사유)
     output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_BE_OWNED_EXTS,
-                                    num_swarm=1 if _heavy else (3 if _is_rework else 1))
+                                    num_swarm=1 if _heavy else (3 if _is_rework else 1),
+                                    cacheable=not _is_rework)
     return {"backend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_code_builder(state: Any) -> Dict[str, Any]:
