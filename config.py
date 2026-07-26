@@ -66,7 +66,13 @@ ENGINE_TIERS = {
 
 # 폴백(Fallback) 순서 리스트 — [0]=Gemini(1차), [1]=xAI(2차), [2]=Groq(3차), [3]=Cerebras(4차), [4]=OpenRouter(5차)
 LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct"]
-LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.0-flash-lite-preview-02-05:free"]
+# ⚠️ [2026-07-26 실측 결함 수정] Flash 체인 말단이 무료 모델(`...:free`)이었다.
+#   judge/scoring 은 Flash 티어를 쓰는데 체인 전체가 무료라 **OpenRouter 크레딧이 있어도
+#   Flash 호출은 쓸 수 없었다.** 실측: RFP 채점에서 depth=7 walk 전부 실패 → 전 모델 쿨다운 →
+#   `_compose_chain` 이 ordered[0](무료 gemini) 하나로 재프로브 → 0.15초 429 ×3 → SUSPENDED_QUOTA.
+#   → 말단을 유료 모델로 교체한다. 이 환경에서 22콜 연속 성공이 확인된 모델을 쓴다(신뢰성 우선).
+#   비용은 관측치 기준 콜당 약 $0.005 로 무시 가능. 더 저렴한 8B 로 교체는 슬러그 검증 후 별건.
+LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "meta-llama/llama-3.3-70b-instruct"]
 
 # ==========================================
 # 4-1. 제공사별 타임아웃 (2026-07-26 실측 기반 — 제공사마다 의미가 다르다!)
@@ -93,6 +99,15 @@ LLM_TOTAL_DEADLINE_SEC = 420
 # [레버B] 게이트웨이 자원 관리 파라미터
 MAX_GEMINI_VARIANTS = 3          # 동적 탐색된 Gemini 변종을 티어당 이 개수로 제한(죽은 체인 walk 축소)
 MODEL_COOLDOWN_SEC = 1800        # 특정 모델이 429/에러로 죽으면 이 시간(초) 동안 폴백 체인에서 제외(재시도 낭비 방지)
+# ⚠️ [2026-07-26] 유료/종량제 모델은 무료와 같은 장기 쿨다운을 적용하면 안 된다.
+#   무료가 죽는 건 일일 쿼터(RPD) 소진이라 30분 쉬는 게 맞지만, 유료는 크레딧이 있는 한 살아 있다.
+#   똑같이 30분 배제하면 '살아있는 유료'가 체인에서 빠지고 `_compose_chain` 이 ordered[0](무료)
+#   하나로 재프로브하다 즉사한다 — 실측으로 재현됨(0.15초 429 ×3 → SUSPENDED_QUOTA).
+#   → 유료 모델은 짧게만 쿨다운해 '항상 살아있는 백스톱'이 되게 한다(완전 면제는 진짜 장애 시
+#     무한 재시도가 되므로 하지 않는다).
+PAID_MODEL_COOLDOWN_SEC = 60
+# 유료 판정 마커. OpenRouter 유료 슬러그는 ':free' 접미사가 없다.
+PAID_MODEL_MARKERS = ("meta-llama/", "anthropic/", "openai/", "google/gemini-2.0-flash-001")
 QUOTA_RETRY_SLEEP_SEC = 8        # Flash 체인마저 소진 시 재시도 전 대기(과거 15초 → 단축)
 
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)

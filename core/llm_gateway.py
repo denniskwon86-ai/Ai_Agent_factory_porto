@@ -390,24 +390,45 @@ class LLMGateway:
         now = time.time()
         live = [inst for (n, inst) in ordered if now >= self._model_cooldown.get(n, 0.0)]
         if not live:
-            live = [ordered[0][1]]
+            # ⚠️ 전 모델 쿨다운 시 ordered[0](= 무료 1순위)로 재프로브하면 방금 429 로 죽은 모델을
+            #   다시 때려 0.15초에 실패하고 쿼터 소진 판정으로 직행한다(2026-07-26 실측).
+            #   → 재프로브 대상을 '유료 모델 우선'으로 고른다. 유료는 크레딧이 있는 한 살아 있으므로
+            #     이 경로가 실질적인 마지막 백스톱이 된다. 유료가 없으면 기존 동작(첫 모델) 유지.
+            paid = [inst for (n, inst) in ordered if self._is_paid_model(n)]
+            live = paid[:1] if paid else [ordered[0][1]]
+            if paid:
+                print("♻️ [LLM Gateway] 전 모델 쿨다운 — 유료 백스톱으로 재프로브합니다.")
         if code_mode:
             live = [m.with_structured_output(CodeOutput) for m in live]
         base = live[0]
         return base.with_fallbacks(live[1:]) if len(live) > 1 else base
 
+    @staticmethod
+    def _is_paid_model(name: str) -> bool:
+        """유료/종량제 모델인가. OpenRouter 유료 슬러그는 ':free' 접미사가 없다."""
+        if not name or name.endswith(":free"):
+            return False
+        markers = getattr(config, "PAID_MODEL_MARKERS", ())
+        return any(m in name for m in markers)
+
     def _update_cooldowns(self, attempts, ok: bool):
         """호출 결과로 모델별 생존 상태 갱신(반응형 학습).
         성공: 마지막(응답) 모델은 살아있음 → 쿨다운 해제, 그 앞 시도들은 실패 → 쿨다운.
-        실패: 시도된 모든 모델이 실패 → 쿨다운."""
+        실패: 시도된 모든 모델이 실패 → 쿨다운.
+
+        ⚠️ 유료 모델은 짧게만 쿨다운한다(PAID_MODEL_COOLDOWN_SEC). 무료가 죽는 건 일일
+        쿼터 소진이라 장기 배제가 맞지만, 유료는 크레딧이 있는 한 살아 있다. 똑같이 30분
+        배제하면 '살아있는 유료'가 체인에서 빠지고 `_compose_chain` 이 ordered[0](무료)
+        하나로 재프로브하다 즉사한다 — 2026-07-26 실측 재현(0.15초 429 ×3 → SUSPENDED_QUOTA)."""
         if not attempts:
             return
         now = time.time()
         cd = getattr(config, "MODEL_COOLDOWN_SEC", 1800)
+        cd_paid = getattr(config, "PAID_MODEL_COOLDOWN_SEC", 60)
         failed = attempts if not ok else attempts[:-1]
         for n in failed:
             if n and n != "?":
-                self._model_cooldown[n] = now + cd
+                self._model_cooldown[n] = now + (cd_paid if self._is_paid_model(n) else cd)
         if ok and attempts[-1]:
             self._model_cooldown.pop(attempts[-1], None)
 
