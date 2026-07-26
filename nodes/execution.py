@@ -118,6 +118,46 @@ async def run_tech_lead(state: Any) -> Dict[str, Any]:
     else:
         print("️ [Agent] Tech Lead 토론·합의 기반 기술명세 진행 중...")
 
+    # 기술명세 재작업에서 LLM이 오래된 예시 파일(index.tsx/App.css 등)을 사실처럼 다시 제안하면,
+    # 이미 정상인 워크스페이스를 스스로 깨뜨리고 심사-재작업 왕복만 반복한다. 스킬의 일반 규칙에만
+    # 맡기지 않고, 호출 시점의 실제 파일/태스크 사실을 프롬프트 마지막에 불변 조건으로 주입한다.
+    # 초기 태스크처럼 파일이 아직 없을 때는 새 파일 생성을 허용하되, 기존 파일이 하나라도 있으면
+    # 목록 밖 경로·상대 import·근거 없는 서버 API를 제안할 수 없다.
+    existing_paths = set((state_obj.file_index or {}).keys())
+    if state_obj.workspace_root:
+        root = Path(state_obj.workspace_root)
+        if root.exists():
+            for disk in root.rglob("*"):
+                if disk.is_file() and ".git" not in disk.parts and ".archive" not in disk.parts:
+                    try:
+                        existing_paths.add(str(disk.relative_to(root)).replace("\\", "/"))
+                    except ValueError:
+                        continue
+
+    task_goal = ""
+    try:
+        wbs = WBSManager(workspace_root=state_obj.workspace_root).get_wbs() or {}
+        task = next((t for t in (wbs.get("tasks") or [])
+                     if str(t.get("task_id")) == str(state_obj.current_sprint_task_id)), {})
+        task_goal = f"goal={task.get('goal', '')}; scope={', '.join(task.get('scope') or [])}"
+    except Exception:
+        task_goal = ""
+
+    if existing_paths:
+        inventory = "\n".join(f"- {p}" for p in sorted(existing_paths)[:80])
+        extra += (
+            "\n\n[시스템 강제 사실 — 위반 금지]\n"
+            f"현재 태스크: {state_obj.current_sprint_task_id}. {task_goal}\n"
+            "다음은 실제 워크스페이스에 존재하는 파일의 완전한 기준 목록이다. "
+            "기술명세·CODE INSTRUCTIONS·STATE_UPDATES에서 이 목록 밖의 기존 파일을 언급하거나 "
+            "상대 import 대상으로 삼지 마라. 새 파일이 꼭 필요하면 먼저 필요성을 설명하고 "
+            "같은 명세 안에 실제 전체 경로와 책임을 정의하라.\n"
+            f"{inventory}\n"
+            "이번 명세에는 (1) 각 실제 파일의 책임과 FR-ID, (2) 함수/컴포넌트 입력·출력·오류 처리, "
+            "(3) 서버 API가 필요 없으면 '서버 API 없음'을 반드시 포함하라. "
+            "이전 초안의 index.tsx, App.css, 근거 없는 백엔드 API는 현재 사실이 아니므로 재사용 금지."
+        )
+
     from nodes.utils.debate import run_supervised_stage
     updates, result = await run_supervised_stage(state_obj, agent_skill("Tech_Lead", "tech_lead_skill", template_id=state_obj.template_id), "TECH_SPEC", extra_instruction=extra)
     output_str = updates.get("tech_spec_summary", getattr(state_obj, "tech_spec_summary", "") or "")
