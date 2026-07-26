@@ -48,6 +48,55 @@ function dirOf(p) {
   return i < 0 ? '' : String(p).slice(0, i);
 }
 
+// ── 브라우저 전역 스텁 ────────────────────────────────────────────────
+// [2026-07-26 결함 #20] 이 하네스는 맨 Node 에서 도는데 브라우저 전역이 하나도 없었다.
+//   그래서 PRD 가 요구한 '이력 저장'을 localStorage 로 올바르게 구현한 코드가
+//   `localStorage is not defined` 로 렌더 실패 처리됐다 — **요구한 대로 만든 것을 감점**하는
+//   거짓 실패다. 실제 프리뷰(PreviewPanel)는 브라우저이므로 거기서는 정상 동작한다.
+//   → 브라우저와 같은 의미(semantics)의 최소 스텁을 주입해 하네스를 실제 실행 환경에 맞춘다.
+//   ⚠️ 과하게 스텁하지 말 것: 진짜 깨진 코드가 통과하면 검증의 의미가 없다.
+//      여기 있는 것은 모두 '브라우저라면 반드시 있는' 것들로 제한한다.
+function makeStorage() {
+  const m = new Map();
+  return {
+    getItem: (k) => (m.has(String(k)) ? m.get(String(k)) : null),
+    setItem: (k, v) => { m.set(String(k), String(v)); },
+    removeItem: (k) => { m.delete(String(k)); },
+    clear: () => m.clear(),
+    key: (i) => Array.from(m.keys())[i] ?? null,
+    get length() { return m.size; },
+  };
+}
+if (typeof globalThis.localStorage === 'undefined') globalThis.localStorage = makeStorage();
+if (typeof globalThis.sessionStorage === 'undefined') globalThis.sessionStorage = makeStorage();
+if (typeof globalThis.matchMedia === 'undefined') {
+  globalThis.matchMedia = () => ({
+    matches: false, media: '', onchange: null,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    dispatchEvent: () => false,
+  });
+}
+if (typeof globalThis.window === 'undefined') {
+  globalThis.window = globalThis;   // window.localStorage 등 접근 경로도 열어준다
+  globalThis.window.location = { href: 'http://localhost/', origin: 'http://localhost', pathname: '/', search: '', hash: '' };
+  globalThis.window.addEventListener = () => {};
+  globalThis.window.removeEventListener = () => {};
+}
+if (typeof globalThis.navigator === 'undefined') {
+  globalThis.navigator = { userAgent: 'render-check', language: 'ko-KR', clipboard: { writeText: async () => {} } };
+}
+// document: renderToString 은 DOM 을 쓰지 않지만 document.title 등을 만지는 코드가 있다.
+// getElementById 는 null 을 돌려준다 — 브라우저 초기 렌더와 동일하며, null 미확인 접근은 여기서 잡혀야 한다.
+if (typeof globalThis.document === 'undefined') {
+  globalThis.document = {
+    title: '', getElementById: () => null, querySelector: () => null,
+    querySelectorAll: () => [], addEventListener: () => {}, removeEventListener: () => {},
+    body: { classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, style: {} },
+    documentElement: { classList: { add() {}, remove() {}, toggle() {} }, style: {}, setAttribute() {} },
+    createElement: () => ({ style: {}, setAttribute() {}, appendChild() {}, classList: { add() {}, remove() {} } }),
+  };
+}
+
 const registry = {}; // file_path -> module.exports
 
 function makeRequire(fromPath) {

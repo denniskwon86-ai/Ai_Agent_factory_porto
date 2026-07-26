@@ -59,12 +59,16 @@ class SupervisorDaemon:
         try:
             # 실시간 백그라운드 모니터링이므로 비용 최적화를 위해 is_heavy=False (Flash/mini 모델) 사용
             # 컨텍스트 절감을 위해 light=True 속성 사용
+            # ⚠️ [결함 #19 계열] 감시·개입 판정도 cacheable=False — 이 데몬은 파이프라인
+            #   일시정지(개입)를 시도하므로, 캐시된 옛 판정이 재생되면 이미 해소된 결함으로
+            #   현재 스프린트를 멈춘다. 감시는 '지금 상태'를 매번 새로 봐야 한다.
             response = await gateway.aexecute(
                 state=state_data, 
                 skill_prompt=prompt, 
                 is_heavy=False, 
                 output_mode="json", 
-                light=True
+                light=True,
+                cacheable=False
             )
             
             result = json.loads(response)
@@ -114,12 +118,16 @@ class SupervisorDaemon:
 }}
 """
         try:
+            # ⚠️ [결함 #19 계열] 감시·개입 판정도 cacheable=False — 이 데몬은 파이프라인
+            #   일시정지(개입)를 시도하므로, 캐시된 옛 판정이 재생되면 이미 해소된 결함으로
+            #   현재 스프린트를 멈춘다. 감시는 '지금 상태'를 매번 새로 봐야 한다.
             response = await gateway.aexecute(
                 state=state_data, 
                 skill_prompt=prompt, 
                 is_heavy=False, 
                 output_mode="json", 
-                light=True
+                light=True,
+                cacheable=False
             )
             
             result = json.loads(response)
