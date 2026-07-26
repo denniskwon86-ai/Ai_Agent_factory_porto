@@ -507,8 +507,24 @@ class LLMGateway:
         _budget = config.MODEL_CONTEXT_LIMITS.get(_primary, 30000)
         # Flash 재시도(retry_count>=1) 시에만 소형 한도로 축소 — per-call 조건이라 영구 래치되지 않는다
         # (과거 _circuit_flash_retries 클래스 래치는 쿼터 회복 후에도 6k 로 영구 고정되는 결함이라 제거).
+        #
+        # ⚠️ [2026-07-26 실측 결함] 이 축소가 '유료 백스톱'과 'code 모드'를 동시에 파괴한다.
+        #   의도: 무료 소형 모델(Groq/Cerebras 6k)도 성공하게 → "품질 저하 < 완전 실패"(무료 시대엔 타당)
+        #   실제: ① 체인에 살아있는 모델이 유료(컨텍스트 200k)뿐인데도 6k 로 잘라 보낸다
+        #        ② code 모드는 `_INCREMENTAL_GUARD` 가 기존 파일 전체 재출력을 요구하는데
+        #           그 원본 코드가 절단돼 사라진다 → 모델이 볼 수 없는 것을 재현하라는 요구가 되어
+        #           구조적으로 실패한다(실측: 프롬프트 21,551자 → 15,000자 절단 후 실패).
+        #   → 두 경우를 축소 대상에서 제외한다.
         if not is_heavy and retry_count >= 1:
-            _budget = min(_budget, 6000)
+            _live_paid = any(self._is_paid_model(n) for (n, _) in
+                             (self._pro_chain if is_heavy else self._flash_chain)
+                             if time.time() >= self._model_cooldown.get(n, 0.0))
+            if output_mode == "code":
+                print("✋ [LLM Gateway] code 모드는 전체 파일 재출력이 필수 — 6k 축소를 건너뜁니다.")
+            elif _live_paid:
+                print("✋ [LLM Gateway] 유료 백스톱이 살아 있어 6k 축소를 건너뜁니다(컨텍스트 여유).")
+            else:
+                _budget = min(_budget, 6000)
         final_prompt = self._clip_prompt(final_prompt, _budget)
 
         messages = [
