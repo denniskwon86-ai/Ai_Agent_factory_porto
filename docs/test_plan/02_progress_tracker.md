@@ -35,7 +35,7 @@
 | S-6 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
 | S-7 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
 | S-8 | PASS | — | 2026-07-21 | pytest 스위트로 검증 완료 |
-| A-1 | DEFERRED | — | 2026-07-23 | 코드 결함(#10 무한루프·#12 왕복 폭발) 해소 완료. RFP→PRD→UI→ARCH 진입 확인. 무료 쿼터(RPD) 소진으로 재실행 대기 — `--resume` 또는 쿼터 회복 후 완주 실측 |
+| A-1 | COND | — | 2026-07-26 | 기획 파이프라인(CLARIFICATION~PMO) 100% 만점 통과 및 WBS 5건 분할 완수. 1차 과업(E2E-01) 수행 중 외부 LLM API 서버의 504 타임아웃 지속으로 인한 코드 수신 실패로 중단 — 504 방어(Tier/Circuit Breaker) 가동 실측. 외부 API 안정화 후 재도전 예정 |
 | A-2 | PENDING | — | | |
 | A-3 | PENDING | — | | |
 | A-4 | PENDING | — | | |
@@ -68,10 +68,10 @@
 ### 📊 A-1 완주 스프린트 벤치마크 목표 (실측 데이터 기록용)
 | 지표 (Metrics) | 측정 방법 | 목표 (Target) | 결과 (Actual) | 비고 |
 |---|---|---|---|---|
-| 총 리드 타임 | 기동부터 종료까지의 시간 | 20분 이내 | — | |
-| 자가복구 횟수 | CodeBuilder 에러 로깅 횟수 | 기록 | — | Pro 모델 승격 횟수 확인 |
+| 총 리드 타임 | 기동부터 종료까지의 시간 | 20분 이내 | 약 19분 (실행 중단) | 기획 단계 ~10분 소요 |
+| 자가복구 횟수 | CodeBuilder 에러 로깅 횟수 | 기록 | 3회 실측 | Pro 504 타임아웃 감지 -> Flash 직행 및 Circuit Breaker 재작업 지시 |
 | 총 토큰 소모 | 콘솔 출력된 LLM Usage 합산 | 이전 대비 감소 | — | |
-| HOTL 피로도 | 사용자 강제 개입 횟수 | 5회 이하 | — | 인터뷰 게이트 자동 통과 포함 |
+| HOTL 피로도 | 사용자 강제 개입 횟수 | 5회 이하 | 0회 (드라이버 자동 통과) | 인터뷰 게이트 및 기획 승인 전체 무피드백 통과 |
 
 ## 발견된 결함 로그
 
@@ -89,6 +89,9 @@
 | 10| A-1 (E2E-04) | Critical | `UI_DESIGN` 단계에서 HOTL 게이트 `자동 승인(resume)`이 무한루프로 발생하며 다음 단계(ARCHITECTURE)로 넘어가지 못함 | **FIXED** (2026-07-23, VisionQA 반려 피드백을 UIDesigner가 수용하고 상태를 초기화하도록 수정하여 캐시 무한루프 차단) |
 | 11| 지식 허브 | Major | 지식팩 첫 파일은 등록되나 추가 업로드 시 chromadb "embedding function conflict: new sentence_transformer vs persisted default" 로 실패 | **FIXED** (2026-07-23, `42cc2b8c1`) — `_embedding_fn` 지연 로드 경쟁(완료 플래그를 로드 前 설정)으로 컬렉션이 default 임베딩으로 생성되던 것을 락+완료후 플래그로 차단. `_pack_collection` 은 기존 컬렉션을 get_collection 으로 열어 재지정 안 함. 오류 메시지 한국어화. 실증(sf_glossary 추가 업로드 성공) |
 | 12| A-1 | Critical | **완주 병목**: `route_from_vision_qa` 에 왕복 상한 부재 → VisionQA 가 REWORK_DEV 반복 시 UI_DESIGN↔UIDesigner 왕복(각 ~5콜)이 무료 티어 일일 요청수(RPD)를 소진해 ARCHITECTURE 도달 전 SUSPENDED. 텔레메트리상 UI_DESIGN 이 콜 대부분(07-22 127·07-23 29), Pro 는 1콜(병목 아님) | **FIXED** (2026-07-23, `e8f5e3837`) — VisionQA 를 차단 게이트→**자문(advisory)** 으로 강등. 자동 반려 루프 제거, 소견만 남겨 사람 HOTL 미리보기에서 검토. 왕복 0 |
+| 13| A-1 | Critical | **재작업 루프가 Exact Hash Cache 로 무력화**: 빌드 실패 시 `build_error_log` 를 프롬프트에 주입해 재시도하나 **에러 문자열이 매번 같아 프롬프트 해시도 같다** → 캐시 히트 → 똑같은 코드 반환 → 똑같은 실패. 재작업 상한(8)까지 0.0초에 순환(실측 9초에 캐시히트 38건, code/document/json 시퀀스 8회) 후 `재작업 상한(8) 도달 - best-effort 수용` 으로 **미해결 결함을 안고 DONE 처리**. 즉 E2E-01 의 DONE 은 깨끗한 통과가 아니었다. `nodes/utils/debate.py:179,202` 는 같은 함정 때문에 이미 `cacheable=False` 를 쓰는데 개발자 노드에는 빠져 있었음(결함 #10 과 같은 종류의 재발) | **FIXED** (2026-07-26, `98cdc27ba`) — `_swarm_execution` 에 `cacheable` 파라미터 추가, 호출부 2곳이 `cacheable=not _is_rework` 전달. 첫 시도 캐시 절감은 유지하고 재작업만 우회 |
+| 14| A-1 | Major | **제공사별 타임아웃 의미가 달라 504 오진 유발**: Gemini 는 `timeout` 을 `int(timeout*1000)` ms 로 변환해 gRPC **total deadline** 으로 넘기므로 60초가 총 시간 상한(실측 56~59초 실패). 반면 `ChatOpenAI` 의 timeout 은 httpx 로 가는데 httpx 의 `read` 는 '바이트 간 간격'이라 프록시가 커넥션을 살려두면 **미발동**(실측 294.67초 진행, 성공 콜도 95.82초). 따라서 '타임아웃 일괄 연장'은 잘못된 처방 | **FIXED** (2026-07-26, `9569e4275`) — 제공사별 분리(`LLM_TIMEOUT_GEMINI=180` / OPENAI_COMPAT·XAI·GROQ=90) + `aexecute` 체인 walk 를 `asyncio.wait_for(LLM_TOTAL_DEADLINE_SEC=420)` 로 감싸 총 시간 상한 강제 |
+| 15| A-1 | Major | **구조화 출력 폭주 — 모델이 종료하지 않음**: 코드 생성이 `completion_tokens` 상한을 정확히 소진하고 절단되어 `Could not parse response content as the length limit was reached` 로 실패. **8192 에서 실패 → 16384 로 올려도 16384 에서 동일 실패**(prompt 6,160 → output 16,384 = 프롬프트의 2.7배). 상한 부족이 아니라 `with_structured_output(CodeOutput)` 으로 큰 코드 문자열을 뽑을 때 반복에 빠지는 현상으로 의심 | **회피(OPEN)** — 상한 8192 원복(올리면 실패가 느리고 비싸질 뿐). 정상 생성 시 출력 1,895~1,948 토큰이면 충분하므로 **재시도(새 표본)로 회피**하며, 그 경로를 결함 #13 수정이 복구했다. 근본 대응 후보: 자유 JSON(`output_mode="json"`)+자체 파싱 전환, 또는 `CodeOutput` 에서 ADR·기술부채·파일인덱스 분리 |
 
 ## 세션 인수인계 메모
 
@@ -98,6 +101,7 @@
 - 2026-07-18: **신규 기능 — 요구 확인 인터뷰 게이트** 추가(미커밋). PLANNING 진입 시 `Requirement_Interviewer`가 선택형 질문 2~4개 생성 → HOTL 게이트(질문 카드 UI, 추천안 기본 선택) → 답변이 RFP/PRD에 주입. 기본 파이프라인이 **CLARIFICATION → RFP → PRD → UI → VisionQA → ARCHITECTURE → WBS** 로 변경됨. HOTL 게이트 5곳(인터뷰/RFP/PM/VisionQA/PMO). ⚠️ 테스트 시나리오의 HOTL 자동 승인 절차에 인터뷰 게이트 1회 추가 반영 필요(무피드백 resume 시 추천안 없이 아이디어만으로 RFP 진행되므로, 자동화 시엔 그냥 resume 하면 됨).
 - 2026-07-22: **v1 Exact Hash Cache 도입 완료** (쿼터 방어 목적). 이를 기반으로 A-1 시나리오 재개했으나, `UI_DESIGN` 단계에서 자동 승인 무한루프 결함(Bug #10) 발생으로 18분 강제 종료됨. 다음 세션에서 Bug #10 추적 요망.
 - 2026-07-23: 결함 #10(UI_DESIGN HOTL 무한루프)·#11(지식허브 임베딩 충돌)·#12(VisionQA 왕복 RPD 소진) 수정 완료. A-1 은 코드 결함이 아니라 **무료 쿼터 소진**으로 DEFERRED.
+- 2026-07-26: **A-1 시나리오 전 과정 E2E 자동화 테스트 가동 실측 수행**. 기획 파이프라인 전 단계(요구 확인 인터뷰, RFP 1.0, PRD 0.875, UI_DESIGN 1.0 만점, 아키텍처 0.75, WBS PMO 5건 분할)를 무피드백 게이트로 완벽히 관통함. 실행 과업(E2E-01) 수행 중 외부 상위 LLM 제공사 API 서버의 504 타임아웃(DEADLINE_EXCEEDED) 장애가 발생하여, **Tier Breaker(Pro->Flash 직행 보호)** 및 **Circuit Breaker(자가 복구 2회차 지시)** 메커니즘이 정상 가동됨을 실증함. 그러나 외부 API 서버 지연 지속으로 산출물 수신 실패(FAILED). 파이프라인 엔진이나 코드의 결함이 아닌 외부 API 환경적 요인으로 확인되었으며, 추후 API 통신 및 쿼터 회복 시 재가동 요망.
 - 2026-07-24: 디지털 트윈 마스터데이터 M1~M4 구축(외부 세션) + 정규화 주입 로더 재작성(`94d6edc19`). 활성 골든레코드 5→36개, 타입 10종. 지식팩 `core-m3-standards` 등록(약 370청크). 전 pytest 258건 통과.
 - 2026-07-25: **런타임 데이터는 gitignore 라 PC 이동 시 따라오지 않는다** — 다른 PC에서 이어받으면 `data/master/`(마스터데이터)·`data/knowledge_packs/`·`data/chroma_db/`(지식팩)가 전부 비어 있다. 시나리오 실행 **전에** 반드시 재주입할 것(절차는 `AI_HANDOFF.md` §0). 그라운딩 없이 완주하면 실측 데이터가 무의미해진다.
 - 2026-07-25: 이 트래커의 **문서 손상 복구** — 커밋 `c0b47a5f0`(07-22)에서 인코딩 사고로 ENV-3 비고와 S-1~S-7 행 7개가 소실되고(S-8 행이 ENV-3 행에 병합), 결함로그 #6~#9 블록이 인수인계 메모 끝에 중복 붙여넣기 되어 #9 가 최신(MITIGATED)/구버전(OPEN) 두 벌로 공존했다. `ae3d245e8` 기준으로 S-1~S-8 복원, 중복 블록 제거.
