@@ -37,6 +37,7 @@
 7. **일반 사용자는 전체 DB를 검색엔진으로 검색해 정보 추출**할 수 있어야 한다.
 8. **전사 시뮬레이션 3종** — (a) 부서 결과 롤업·불일치 대조, (b) 전사 단일 시뮬 신규 실행, (c) 전사 검색.
 9. **재사용·포크로 사일로 중복 생성 방지** — 부서마다 유사 기능을 각자 만드는 것을 막기 위해, **기존 결과물을 복사해 가져오고 그 복사본을 추가 수정·보완**할 수 있어야 한다.
+10. **PRD 기준 유사 산출물 판정** — 요구사항 분석 에이전트가 PRD를 작성하면 **그 PRD로 기존 산출물과 유사도를 판정**해, 임계(기본 90점) 이상이면 **"이미 유사한 기능이 있다"고 안내하고 재생성 대신 복사·수정하도록 유도**한다. (Phase 8-2)
 
 ### 이미 갖춰져 있는 것 (설계의 출발점)
 
@@ -338,6 +339,7 @@ write `mega/plan:382`·`start_all:430`·`DELETE:487`·`copy:550`·`sprint/start:
 
 **3중 방어**
 1. **Chroma `where` 필터** — `search_similar(query, n_results=5, where=None, include_distances=False)` **하위호환 파라미터 추가**. `get_relevant_context`가 조립하되 허용 dept = **프로젝트 소유 부서 + 조상 체인**(상속은 "사람의 조회" 규칙, **프롬프트 주입은 자기+조상만** — 횡방향 유출 원천 차단). `""`(레거시 미태깅)는 **여기서 제외**(fail-closed). **폴백**: `$in`/`$or` 미지원 시 `n_results*5` over-fetch → 파이썬 필터 (**`search_packs:256-281`이 이미 이 패턴**).
+   ※ `where` 는 dept 필터 외에 **`filename` 필터와 AND 결합**해서도 쓴다 — Phase 8-2 의 PRD 대 PRD 후보 추리기가 `{"filename": "prd.md"}` 로 문서 종류를 좁힌다.
 2. **거리 임계값** — `RAG_PAST_CASES_CUTOFF`(기본 0.65 — `get_grounding_context:303-306`과 동일).
 3. **전역 킬스위치** — `RAG_PAST_CASES_ENABLED`.
 
@@ -425,7 +427,7 @@ def scaffold_reference_types(contract, domains) -> list[dict]
 `POST /api/v1/catalog/reconcile` — 전 카탈로그를 가로질러:
 - **동의어 충돌 탐지**: 서로 다른 `system_id`의 필드가 같은 `master_code`로 매핑됐는데 이름이 다른 경우 → 정규화 후보
 - **★ island 승격 감지**: 이전에 island로 분류됐던 것 중 **이제 교차 히트가 생긴 것** → 표준 편입 후보로 승격
-- **★ 공용 컴포넌트 후보**: 같은 원본에서 N개 부서가 포크한 것(Phase 8-4)
+- **★ 공용 컴포넌트 후보**: 같은 원본에서 N개 부서가 포크한 것(Phase 8-5)
 - **미매핑 누적 리포트**: 부서·시스템별 pending 건수
 - **고아 매핑**: 삭제된 릴리스를 가리키는 `key_crosswalk` 행
 LLM 0콜 결정론. 결과는 DA 콘솔에 표시.
@@ -521,7 +523,7 @@ GET /api/v1/search?q=&kinds=artifact,record,release,schema,standard&dept_id=&lim
 
 부서마다 비슷한 기능을 각자 만드는 것을 막는 실질 수단. **금지가 아니라 "이미 있는 걸 가져다 고치는 게 새로 만드는 것보다 쉽게" 만드는 것**이 설계 목표다.
 
-### 8-1. 발견 — 만들기 전에 보여준다 (진짜 레버)
+### 8-1. 발견 게이트 ① — 아이디어 입력 시 (값싼 사전 경고)
 
 포크 기능보다 **발견이 먼저**다. 있는 줄 몰라서 또 만드는 것이 사일로의 실제 원인이다.
 
@@ -532,7 +534,94 @@ GET /api/v1/search?q=&kinds=artifact,record,release,schema,standard&dept_id=&lim
 
 **"무시하고 새로 만들기"를 막지 않는다.** 대신 그 선택을 `ownership` 메타에 기록해 DA·경영진 대시보드의 **"중복 생성 강행" 지표**로 집계한다. 차단은 우회를 낳지만 가시성은 행동을 바꾼다.
 
-### 8-2. 포크 — 기존 `copy_project`는 그대로 쓰면 안 된다
+⚠️ **한 줄 아이디어는 신호가 약하다.** 이 게이트는 값싼 사전 경고일 뿐이며, 여기서 놓친 것은 **8-2 게이트 ②(PRD 확정 직후)** 가 정밀하게 잡는다.
+
+### 8-2 ★ — 발견 게이트 ② : PRD 확정 직후 정밀 판정
+
+**요구**: 요구사항 분석 에이전트가 PRD를 작성하면 그 PRD 기준으로 기존 산출물과 유사도를 판정해, **임계(기본 90점) 이상이면 "이미 유사한 기능이 있다"고 안내**하고 재생성 대신 **복사·수정하도록 유도**한다.
+
+**게이트 ①과의 관계 — 대체가 아니라 2단 구성**
+
+| | 시점 | 입력 신호 | 정확도 | 비용 |
+|---|---|---|---|---|
+| 게이트 ① (8-1) | 아이디어 입력 | 한 줄 아이디어 | 낮음 | 0 |
+| **게이트 ② (여기)** | **PRD 확정 직후** | **FR 목록 · 데이터 엔티티 · 수용기준** | **높음** | 이미 CLARIFICATION→RFP→PRD 콜 소비 |
+
+#### 판정 위치 — 새 노드도 새 인터럽트도 필요 없다
+
+**`Master_PM` 노드에 이미 `hotl_after: True` 가 걸려 있다**(`core/agent_registry.py:66`, stage `PLANNING`). PRD 직후 인터럽트 지점이 이미 존재하므로 **그래프 토폴로지를 건드리지 않고 기존 HOTL 게이트의 payload 만 채운다.**
+
+#### 비교 대상 — PRD 문서 대 PRD 문서
+
+기존 산출물에는 **PRD 원문이 이미 보관돼 있다**: `release.json.prd_summary`(`factory_control.py:940`). 별도 데이터 소스를 섞을 필요 없이 **PRD 대 PRD 한 가지 비교**로 점수가 나온다. FR 목록도 데이터 엔티티도 전부 PRD 안에 있다.
+
+> ⚠️ **Chroma 는 진실원본이 아니라 인덱스로만 쓴다.** `prd.md` 가 인덱싱되지만(`factory_control.py:963`) 1000자 청크로 쪼개져(`core/knowledge_base.py:119-125`) 문서 단위 비교에 부적합하다. **Chroma 는 "어느 릴리스를 볼지" 후보를 추리는 용도**이고, 실제 비교는 `release.json.prd_summary` 전문으로 한다.
+
+**2단 조회**
+1. **후보 추리기** — `search_similar(prd_text, where={"filename": "prd.md", ...dept 스코프}, include_distances=True)` 로 상위 N개 `release_id` 확보 (Phase 5-2 의 `where` 재사용, dept 필터와 **AND 결합**)
+2. **정밀 비교** — 각 후보의 `release.json.prd_summary` **전문**을 로드해 아래 3요소 대조
+
+릴리스가 적은 초기에는 1단계를 건너뛰고 **`_iter_releases()`(Phase 3에서 추출) 전량 순회**로 충분하다. Chroma 후보 추리기는 릴리스가 많아졌을 때의 최적화이며, 따라서 **콜드 스타트 구간에서는 임베딩 의존이 아예 없다**(재기동 후 첫 검색 수 초 지연도 안 겪는다).
+
+#### 점수 구성 (100점 만점, 전부 PRD 내부 요소, LLM 0콜)
+
+| 요소 | PRD 내 위치 | 배점 | 계산 |
+|---|---|---|---|
+| **기능 요구(FR) 집합 겹침** | FR-ID 목록 | **60** | 신규 PRD 의 FR 각 항목을 기존 PRD 의 FR 항목들과 임베딩 매칭 → `매칭 FR 수 / 전체 FR 수`. FR 추출은 **`extract_ids`(`nodes/utils/traceability_manager.py:15`) 재사용** |
+| 데이터 엔티티 겹침 | 데이터 도메인 절 | 20 | 엔티티명 집합 교집합 비율 |
+| 문서 전체 의미 유사도 | PRD 전문 | 20 | 문서 임베딩 코사인 |
+
+FR 집합에 최대 배점을 두는 이유: **사용자에게 설명 가능한 유일한 축**이고, 그대로 gap list 가 되기 때문이다.
+
+**소유 부서·도메인은 점수에 넣지 않는다** — 메타데이터가 유사도를 부풀리면 안 된다. 결과 카드에 "같은 부서 산출물입니다" 같은 **표시 힌트**로만 쓴다.
+
+집합 대조 방식은 **`criteria.py:86-103 _check_fr_coverage`** 와 동일 패턴(정의 집합 vs 구현 집합의 결정론 대조)이다.
+
+#### ★ 진짜 산출물은 점수가 아니라 gap list
+
+임계 통과 여부보다 **"무엇이 이미 있고 무엇이 없는가"** 가 핵심이다. 그것이 곧 다음 행동이 된다.
+
+> **유사 기능 발견 (92점)** — `구매팀 / 원료수입관리 v2`
+> 요구한 기능 12개 중 **10개가 이미 구현**되어 있습니다.
+> **없는 것 2개**: `FR-005 관세 자동계산`, `FR-011 환율 스냅샷`
+
+#### 사용자 선택 3지
+
+| 선택 | 동작 |
+|---|---|
+| **그대로 사용** | 파이프라인 종료, 해당 릴리스로 안내 |
+| **포크해서 수정** ★ | 파이프라인 종료 → 8-3 포크 실행 → **gap list 를 `sprint/revision`(`factory_control.py:731-744`) feedback 으로 자동 주입** → 기존 앱 + 부족한 2개 기능으로 증분 개발 |
+| **무시하고 새로 생성** | 계속 진행. 단 `ownership` 에 기록 → **중복 생성 강행 지표**(8-5) |
+
+**포크 선택 시 gap list 가 그대로 revision 지시가 되는 것**이 이 설계의 핵심 연결이다. 요구된 "카피해서 수정하여 사용"이 수작업 없이 성립한다. 8-4 에서 보듯 REVISION 경로는 Architect 를 건너뛰고 Tech_Lead 로 직행하므로 기획을 다시 돌리지 않는다.
+
+#### LLM 확증 1콜 (선택)
+
+결정론 점수로 임계 이상 후보를 추린 뒤, **상위 1건의 PRD 전문과 신규 PRD 전문을 나란히 주고** `output_mode="json"` 1콜로 "정말 동일 기능인가 + 누락 항목은 무엇인가"를 확증한다. **두 문서를 통째로 비교하므로 임베딩 매칭보다 정확하며** gap list 품질이 이 콜에서 결정된다. 후보가 없으면 콜 0.
+
+**점수는 결정론이 매기고 LLM 은 확증·gap 정제만 한다** — LLM 이 점수를 매기면 같은 입력에 다른 값이 나와 임계값 보정이 불가능해진다.
+
+#### 설정값 (`config.py`)
+
+```python
+SIMILARITY_GATE_ENABLED   = True   # 게이트 자체
+SIMILARITY_GATE_THRESHOLD = 90     # 안내 임계 (0~100)
+SIMILARITY_GATE_SHADOW    = True   # ★ 초기 기본: 판정은 하되 게이트를 띄우지 않고 로그만
+SIMILARITY_LLM_CONFIRM    = True   # 상위 후보 LLM 확증 1콜
+```
+
+**`SHADOW=True` 를 초기 기본으로 둔다** — 90점의 의미가 경험적으로 보정되기 전에는 오탐이 사용자를 막는다. 로그를 쌓아 임계값을 정한 뒤 켠다.
+
+#### 이 게이트의 한계 (반드시 인지할 것)
+
+1. **콜드 스타트** — 검색 대상은 **게시된 릴리스뿐**이다(`index_release`). 현재 `library/` 가 사실상 비어 있어 **초기에는 항상 "유사 없음"** 이 나온다. 오작동이 아니며 자산이 쌓이며 유용해진다.
+2. **진행 중 프로젝트는 안 잡힌다** — 두 부서가 동시에 비슷한 것을 만들면 둘 다 미게시라 서로를 못 본다. 게이트 ①도 동일한 사각지대다.
+3. **90점은 보정 전까지 임의값** — 임베딩 코사인은 "90 = 같은 기능"으로 교정돼 있지 않다. shadow 모드와 gap list 병기가 그래서 필수다.
+4. **FR 체계를 안 쓰는 PRD** — 비SW 템플릿 등에서는 FR 축(60점)이 계산 불가 → **공허 통과**(`_check_fr_coverage:93-94` 와 동일 정책). 최대 40점이라 임계 미달로 게이트가 뜨지 않는다.
+
+**검증**: `tests/test_similarity_gate.py` (Phase 10 표 참조).
+
+### 8-3. 포크 — 기존 `copy_project`는 그대로 쓰면 안 된다
 
 `copy_project`(`factory_control.py:550-568`)는 `shutil.copytree` 통짜 복사라 포크용으로는 결함이 4개다:
 
@@ -557,20 +646,21 @@ GET /api/v1/search?q=&kinds=artifact,record,release,schema,standard&dept_id=&lim
 
 **권한**: 원본 read + 대상 부서 write. 즉 **볼 수 있는 것만 포크할 수 있다** — 권한 모델이 그대로 재사용된다.
 
-### 8-3. 수정보완 — 신규 구현 불필요, 기존 REVISION 경로 그대로
+### 8-4. 수정보완 — 신규 구현 불필요, 기존 REVISION 경로 그대로
 
 포크 직후 `POST /{new_pid}/sprint/revision {feedback}`(`:731-744`) → `wbs_manager.add_revision_task`가 `TASK_REV_*` 생성 → `start_sprint`가 `:597-598`에서 `factory_mode`를 REVISION으로 강제 → **Architect를 건너뛰고 Tech_Lead 직행**(기획 산출물 재사용). 즉 포크한 앱을 처음부터 다시 만들지 않고 **증분 개선**한다.
 `_INCREMENTAL_GUARD`(`nodes/execution.py:161-167`)가 "기존 기능을 하나도 빠뜨리지 말 것"을 강제하므로 포크해온 자산이 재작성 과정에서 유실되지 않는다.
 
-### 8-4. 계보와 사일로 지표
+### 8-5. 계보와 사일로 지표
 
 `forked_from`을 `ownership`에 함께 저장해 조회 가능하게 한다.
 - `GET /api/v1/catalog/lineage/{resource_id}` — 조상·자손 트리
 - **공용 컴포넌트 승격 후보**: 같은 원본에서 **N개 부서가 포크**했으면 그건 전사 공용 기능이다 → Phase 6 T4 `reconcile` 배치에 규칙 추가
-- **중복 생성 후보**: 유사도가 높은데 포크가 아니라 새로 만든 것들 → 경영진 대시보드 지표
+- **중복 생성 후보**: 유사도가 높은데 포크가 아니라 새로 만든 것들 → 경영진 대시보드 지표.
+  **"강행" 기록은 두 곳에서 발생한다** — 게이트 ①(아이디어 시점, 8-1)과 게이트 ②(PRD 시점, 8-2). 어느 게이트에서 무시했는지 구분해 집계해야 게이트별 실효성을 판정할 수 있다
 - 이 두 지표가 8-1의 발견 품질을 사후 검증한다(발견이 잘 됐으면 중복 생성이 줄어야 한다)
 
-### 8-5. 업스트림 드리프트 (정직한 한계)
+### 8-6. 업스트림 드리프트 (정직한 한계)
 
 **원본이 개선돼도 포크는 따라오지 않는다.** 자동 병합은 LLM 산출 코드라 신뢰할 수 없어 이 계획의 범위 밖이다.
 최소 조치: 원본에 새 릴리스가 생기면 포크 목록에 **"원본이 v3으로 갱신됨(내 포크는 v1 기준)"** 배지를 띄운다. 반영 여부는 사람이 판단해 `sprint/revision`으로 처리한다.
@@ -673,12 +763,13 @@ GET  /approvals · POST /approvals/{id}   전사 HOTL 승인 큐
 | `ExecutiveBoardroom.tsx` | 런처 탭 (`can_run_enterprise` 게이팅) | `MegaBoardroomPanel:14-43` |
 | `DeptTree.tsx` | 프리젠테이션 (릴리스 탭 + OrgAdminPanel 공용) | — |
 | **`SimilarArtifactHint.tsx`** (Phase 8-1) | 생성 폼 아이디어 입력 **아래 인라인**(디바운스 호출) | — · 카드에 [그대로 사용]/[포크해서 수정]/[무시하고 새로 만들기] |
-| **`ForkDialog.tsx`** (Phase 8-2) | 오버레이 모달 — 새 ID·소유 부서 선택 → 포크 후 통제실 진입 | 생성 폼 필드 재사용 |
-| **`LineageView.tsx`** (Phase 8-4) | 프로젝트 카드·릴리스 카드에서 펼침 | 조상·자손 트리, 원본 갱신 배지 |
+| **`ForkDialog.tsx`** (Phase 8-3) | 오버레이 모달 — 새 ID·소유 부서 선택 → 포크 후 통제실 진입 | 생성 폼 필드 재사용 |
+| **`LineageView.tsx`** (Phase 8-5) | 프로젝트 카드·릴리스 카드에서 펼침 | 조상·자손 트리, 원본 갱신 배지 |
+| **`SimilarityGateCard.tsx`** (Phase 8-2) | **신규 패널 아님 — 기존 HOTL 승인 UI(`HOTLInput.tsx`) 안에 카드로 렌더** | 점수·gap list·3지 선택 버튼. 백엔드가 새 인터럽트를 안 만드는 것과 같은 이유로 프론트도 새 화면을 안 만든다 |
 
 **기존 화면 수정**
 1. 런처 탭 3 → 5개: `App.tsx:53`에 `"enterprise"`, `"search"` 추가(검색은 모달로 갈 수도).
-2. 결과물 라이브러리 탭(`:525-565`) → 부서 게시판: 좌 `DeptTree` + 우 카드 그리드, `GET /library/list?dept_id=`, 부서 배지 + **"표준 정합화 대기 N건" 배지** + **[포크] 버튼**(Phase 8-2) + 포크 수 배지.
+2. 결과물 라이브러리 탭(`:525-565`) → 부서 게시판: 좌 `DeptTree` + 우 카드 그리드, `GET /library/list?dept_id=`, 부서 배지 + **"표준 정합화 대기 N건" 배지** + **[포크] 버튼**(Phase 8-3) + 포크 수 배지.
 3. 프로젝트 생성 폼(`:241-379` 인라인)에 **"소유 부서" 셀렉트** + **선택 시 그 부서의 `master_domains`를 `masterDomainsInput`에 자동 프리필** — 오타로 도메인 필터가 조용히 실패하는 현 문제 완화. 아이디어 입력 시 **`SimilarArtifactHint` 표시**.
 3-1. **게시 시 "결과물 성격" 선택**(전사 업무 / 부서 내부 / 개인 편의) — **기본값은 6-7 자동 판정으로 프리필**, 사람은 틀렸을 때만 수정. `personal` 선택 시 전사 검색에서 소유자·DA 외 비노출.
 4. **`PUT /projects/{id}/knowledge`를 드디어 호출** — 현재 프론트 호출부 0곳. 프로젝트 카드에 "지식팩·기준정보 편집" 버튼. **P0-1 선행 필수.**
@@ -722,6 +813,7 @@ GET  /approvals · POST /approvals/{id}   전사 HOTL 승인 큐
 | `test_search_control.py` | 5소스 병합, **카탈로그 메타는 전사 공개·산출물 본문은 dept 스코프**, 빈 `q`·`kinds` 필터 |
 | **`test_relevance_classify.py`** ★ | A-1 스키마(`value`/`fromUnit`/`toUnit`)가 **island** 로 분류, 교차 히트 생기면 **enterprise 로 승격**, `(entity,field)` 쌍이라 동음이의(`order.status` vs `equipment.status`)를 구분, 표준 사전 비면 전부 island(정상) |
 | **`test_fork.py`** ★ | 제외 디렉터리 미복사, **`owner_dept_id`가 원본이 아니라 포크 부서**, `forked_from` 기록, 새 pid 체크포인트 비어 있음, read 권한 없는 원본 403, 포크 후 `sprint/revision`이 REVISION 진입 |
+| **`test_similarity_gate.py`** ★ | fake Chroma monkeypatch(`test_context_leak.py` 기법). 동일 PRD 2건 → 임계 이상·gap 비어있음 / FR 12개 중 10개 겹침 → FR 축 `60×10/12=50`·gap 2건 정확 열거 / FR 없는 PRD → 축 0점 **공허 통과**(최대 40점, 게이트 미발동) / **Chroma 없이 `_iter_releases()` 전량 순회 경로 동치성** / `SHADOW=True` 면 판정은 하되 게이트 미표시 / 릴리스 0건 콜드스타트 예외 없음 / 스코프 밖 릴리스 후보 제외 / 포크 선택 시 gap list 가 `sprint/revision` feedback 문자열로 변환 |
 | `test_project_meta_preserve.py` | `knowledge_pack_ids=None`·`owner_dept_id=None` 시 **보존** |
 
 **최종 목표**: `pytest -q` → 258 + 약 60건 그린.
@@ -764,7 +856,7 @@ GET  /approvals · POST /approvals/{id}   전사 HOTL 승인 큐
 | `index_release` 메타 str 통과 | `knowledge_base.py:355-356` | `owner_dept_id`를 Chroma 메타에 |
 | `list_records(q=)` / `list_releases` 루프 | `master_data.py:271-301` / `factory_control.py:1133-1155` | 전사 검색 / `_iter_releases()` 추출 |
 | `library/` + 런처 릴리스 탭 | `library/`, `App.tsx:525-565` | **이미 게시판** — 부서 탭으로 확장만 |
-| **`copy_project`(통짜 copytree)** | `factory_control.py:550-568` | **포크의 출발점 — 단 4개 결함 수정 필요**(Phase 8-2) |
+| **`copy_project`(통짜 copytree)** | `factory_control.py:550-568` | **포크의 출발점 — 단 4개 결함 수정 필요**(Phase 8-3) |
 | **`_EXPORT_EXCLUDE_DIRS`** | `factory_control.py:1016` | 포크 시 `.archive`/`.git`/`node_modules` 제외 — **이미 있는데 copy 에선 안 씀** |
 | **`add_revision_task` + `TASK_REV_*` REVISION 경로** | `factory_control.py:731-744`, `:597-598` | **포크본 수정보완 — 신규 구현 불필요**(Architect 건너뛰고 Tech_Lead 직행) |
 | **`_INCREMENTAL_GUARD`** | `nodes/execution.py:161-167` | 포크 자산이 재작성에서 유실되지 않게 강제 |
@@ -820,7 +912,9 @@ Phase 8 재사용·포크 (사일로 방지)                          │
 
 1. **표준 정합화는 게시된 것만 커버한다** — T3가 주 게이트이므로 **미게시 진행 중 프로젝트의 필드는 카탈로그에 없다.** Phase 9 롤업이 미게시 산출물을 다룰 때는 정규식 폴백에 의존한다. T2 프리뷰가 이 공백을 부분적으로만 메운다.
 1-1. **관련성 자동 판정은 필드명 기반이라 오분류한다** — `(entity, field)` 쌍으로 봐서 동음이의를 줄이지만 완전하지 않다. 그래서 **분류를 영구 상태로 저장하지 않고 `reconcile` 마다 재계산**하며, island 승격 규칙이 오분류를 시간이 지나 교정한다. 초기(표준 사전 3건)에는 거의 전부 island로 나오는 것이 정상이다.
-1-2. **포크는 업스트림 개선을 따라오지 않는다** — 원본이 v3이 돼도 포크는 v1 기준으로 남는다. 자동 병합은 LLM 산출 코드라 신뢰할 수 없어 범위 밖이며, 배지로 **가시화만** 한다(Phase 8-5). 포크가 늘수록 이 부채가 누적되므로 "N개 부서 포크 = 공용 컴포넌트 승격" 규칙으로 원본 일원화를 유도하는 것이 완화책이다.
+1-2. **포크는 업스트림 개선을 따라오지 않는다** — 원본이 v3이 돼도 포크는 v1 기준으로 남는다. 자동 병합은 LLM 산출 코드라 신뢰할 수 없어 범위 밖이며, 배지로 **가시화만** 한다(Phase 8-6). 포크가 늘수록 이 부채가 누적되므로 "N개 부서 포크 = 공용 컴포넌트 승격" 규칙으로 원본 일원화를 유도하는 것이 완화책이다.
+1-4. **유사도 게이트는 게시 자산이 쌓여야 작동한다**(8-2 한계 1·2) — 검색 대상이 게시 릴리스뿐이라 초기에는 항상 "유사 없음"이고, 진행 중 프로젝트끼리는 서로를 못 본다. 두 부서가 동시에 같은 것을 만드는 최악의 케이스를 **두 게이트 모두 놓친다.**
+1-5. **임계 90점은 보정 전까지 임의값**(8-2 한계 3) — 임베딩 코사인이 "90 = 같은 기능"으로 교정돼 있지 않다. `SIMILARITY_GATE_SHADOW=True` 로 로그를 먼저 쌓아 임계를 정한 뒤 켜야 한다. 켜자마자 오탐이 나면 사용자가 게이트 자체를 불신하게 된다.
 1-3. **사일로 방지는 강제가 아니다** — "무시하고 새로 만들기"를 막지 않고 지표로만 남긴다. 차단이 우회를 낳는다는 판단이지만, **가시화만으로 행동이 바뀐다는 보장은 없다.** 중복 생성 지표가 줄지 않으면 그때 정책(승인 게이트)을 얹을지 재판정해야 한다.
 2. **매핑 방식의 트레이드오프** — 코드를 고치지 않고 `key_crosswalk`로 해결하므로 **각 앱은 계속 비표준 필드명을 쓴다.** 전사 취합은 되지만 앱 코드를 직접 읽는 사람에게는 여전히 제각각으로 보인다. 근본 통일을 원하면 별도 리팩터링 작업이 필요하다.
 3. **표준 사전 커버리지가 곧 정합화 품질** — 현재 M1의 `standard_field`는 KS X 9101 **3건뿐**이다(`data_model_dictionary_part1` 길이 3). 초기에는 대부분의 필드가 pending으로 쌓여 DA 업무량이 폭증한다. **표준 사전 확충이 실질적 선행 과제**이며 `/catalog/standard/coverage`로 상태를 먼저 봐야 한다.
@@ -835,7 +929,7 @@ Phase 8 재사용·포크 (사일로 방지)                          │
 
 ## 주요 수정 파일
 
-- `api/routes/factory_control.py` — **하드코딩 맵 3개 삭제**(`:304-337`), **포크 라우트 신설 + `copy_project:550-568` 결함 4건 수정**(Phase 8-2), 소유권 필드(`:112-137` + `_read_project_ownership`), 목록 필터(`:187-236`, `:1133-1155`), 단건 403 약 21곳, **`create_release:904-1009`에 게시 정합화(T3) 훅**, `mega/start_all:430-486` fan-in. **P0-1/2/3 전부 이 파일**
+- `api/routes/factory_control.py` — **하드코딩 맵 3개 삭제**(`:304-337`), **포크 라우트 신설 + `copy_project:550-568` 결함 4건 수정**(Phase 8-3), 소유권 필드(`:112-137` + `_read_project_ownership`), 목록 필터(`:187-236`, `:1133-1155`), 단건 403 약 21곳, **`create_release:904-1009`에 게시 정합화(T3) 훅**, `mega/start_all:430-486` fan-in. **P0-1/2/3 전부 이 파일**
 - `core/master_data.py` — 조직 테이블 호스트 DB(`_DDL:32-102`, `_init_db:124-131`), 주입 예산 파라미터화(`:491-517, 531-547`), `_connect:117-122` WAL
 - `core/crosswalk.py` — 게시 앱 등재·자동 매핑·승인(기존 함수 재사용, 전사 카탈로그 조회 함수만 추가)
 - `core/knowledge_base.py` — 유출 차단(`get_relevant_context:401-423`, `search_similar:377-399`에 `where`/distance), `index_release:332-375` dept 메타
