@@ -68,6 +68,28 @@ ENGINE_TIERS = {
 LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct"]
 LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.0-flash-lite-preview-02-05:free"]
 
+# ==========================================
+# 4-1. 제공사별 타임아웃 (2026-07-26 실측 기반 — 제공사마다 의미가 다르다!)
+# ==========================================
+# [실측 근거] A-1 E2E 실패 5건 전수 분석:
+#   · Gemini  56.27s / 58.55s / 57.79s 에서 실패 → 504 DEADLINE_EXCEEDED
+#     ChatGoogleGenerativeAI 는 timeout 을 int(timeout*1000) ms 로 변환해 gRPC **total deadline**
+#     으로 넘긴다(langchain_google_genai/chat_models.py:2883-2887). 즉 60초가 '총 시간' 상한이라
+#     긴 코드 생성이 구조적으로 걸린다. → 넉넉히 연장해야 한다.
+#   · OpenRouter 294.67s 까지 진행(성공 콜도 최대 95.82s) → timeout=60 이 **발동하지 않았다**.
+#     ChatOpenAI 의 timeout 은 httpx 로 가는데 httpx 의 read 는 '바이트 간 간격'이지 총 시간이
+#     아니다. 프록시가 커넥션을 살려두면 무한정 기다린다. → 총 시간 상한을 별도로 걸어야 한다.
+# ⚠️ 따라서 "타임아웃을 일괄로 늘린다"는 잘못된 처방이다. Gemini 는 늘리고, OpenAI 호환 계열은
+#    오히려 상한을 씌워 빨리 폴백시키는 것이 옳다.
+LLM_TIMEOUT_GEMINI = 180         # gRPC total deadline (초). 60 → 180 으로 연장
+LLM_TIMEOUT_OPENAI_COMPAT = 90   # httpx read 간격(초). Cerebras/OpenRouter — read 는 '바이트 간격'이라 잘 안 걸림
+LLM_TIMEOUT_XAI = 90
+LLM_TIMEOUT_GROQ = 90
+# [핵심] aexecute 1회(= 폴백 체인 전체 walk)의 **총 시간 상한**. asyncio.wait_for 로 강제한다.
+# 없으면 httpx read 가 안 걸리는 프록시 경유 호출이 무한정 매달린다(실측 294.67초).
+# 단일 모델 상한(Gemini 180)보다 충분히 커야 정상 폴백을 잘라먹지 않는다.
+LLM_TOTAL_DEADLINE_SEC = 420
+
 # [레버B] 게이트웨이 자원 관리 파라미터
 MAX_GEMINI_VARIANTS = 3          # 동적 탐색된 Gemini 변종을 티어당 이 개수로 제한(죽은 체인 walk 축소)
 MODEL_COOLDOWN_SEC = 1800        # 특정 모델이 429/에러로 죽으면 이 시간(초) 동안 폴백 체인에서 제외(재시도 낭비 방지)

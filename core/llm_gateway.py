@@ -99,7 +99,7 @@ def _make_cerebras(model: str, temperature: float):
     """Cerebras 챗 모델 인스턴스 생성(폴백 최후미용). max_retries=0 은 체인 전파 지연 방지.
     langchain-cerebras 가 core 1.x 를 지원하지 않아 OpenAI 호환 API 로 직접 호출한다."""
     return ChatOpenAI(
-        timeout=60, model=model,
+        timeout=config.LLM_TIMEOUT_OPENAI_COMPAT, model=model,
         temperature=temperature,
         max_retries=0,
         max_tokens=_cerebras_out(model),
@@ -117,7 +117,7 @@ def _xai_enabled() -> bool:
 
 
 def _make_xai(model: str, temperature: float):
-    return ChatXAI(timeout=60, model=model, temperature=temperature, max_retries=0, max_tokens=_xai_out(model))
+    return ChatXAI(timeout=config.LLM_TIMEOUT_XAI, model=model, temperature=temperature, max_retries=0, max_tokens=_xai_out(model))
 
 
 def _openrouter_out(model: str) -> int:
@@ -130,7 +130,7 @@ def _openrouter_enabled() -> bool:
 
 def _make_openrouter(model: str, temperature: float):
     return ChatOpenAI(
-        timeout=60, model=model,
+        timeout=config.LLM_TIMEOUT_OPENAI_COMPAT, model=model,
         temperature=temperature,
         max_retries=0,
         max_tokens=_openrouter_out(model),
@@ -311,12 +311,12 @@ class LLMGateway:
 
         # 이름↔인스턴스를 함께 추적해 per-model 쿨다운(런타임 체인 재구성)에 사용한다.
         pro_named = [(pro_candidates[0],
-                      ChatGoogleGenerativeAI(timeout=60, model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0])))]
+                      ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0])))]
         for m in pro_candidates[1:]:
-            pro_named.append((m, ChatGoogleGenerativeAI(timeout=60, model=m, temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(m))))
+            pro_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(m))))
         if _xai_enabled():
             pro_named.append((config.LLM_PRO_FALLBACK_LIST[1], _make_xai(config.LLM_PRO_FALLBACK_LIST[1], temperature=0.2)))
-        pro_named.append((config.LLM_PRO_FALLBACK_LIST[2], ChatGroq(timeout=60, model=config.LLM_PRO_FALLBACK_LIST[2], temperature=0.2, max_retries=0, max_tokens=_groq_out(config.LLM_PRO_FALLBACK_LIST[2]))))
+        pro_named.append((config.LLM_PRO_FALLBACK_LIST[2], ChatGroq(timeout=config.LLM_TIMEOUT_GROQ, model=config.LLM_PRO_FALLBACK_LIST[2], temperature=0.2, max_retries=0, max_tokens=_groq_out(config.LLM_PRO_FALLBACK_LIST[2]))))
         if _cerebras_enabled():
             pro_named.append((config.LLM_PRO_FALLBACK_LIST[3], _make_cerebras(config.LLM_PRO_FALLBACK_LIST[3], temperature=0.2)))
         if _openrouter_enabled():
@@ -337,12 +337,12 @@ class LLMGateway:
         flash_candidates = flash_candidates[:1 + getattr(config, "MAX_GEMINI_VARIANTS", 3)]
 
         flash_named = [(flash_candidates[0],
-                        ChatGoogleGenerativeAI(timeout=60, model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0])))]
+                        ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0])))]
         for m in flash_candidates[1:]:
-            flash_named.append((m, ChatGoogleGenerativeAI(timeout=60, model=m, temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(m))))
+            flash_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(m))))
         if _xai_enabled():
             flash_named.append((config.LLM_FLASH_FALLBACK_LIST[1], _make_xai(config.LLM_FLASH_FALLBACK_LIST[1], temperature=0.1)))
-        flash_named.append((config.LLM_FLASH_FALLBACK_LIST[2], ChatGroq(timeout=60, model=config.LLM_FLASH_FALLBACK_LIST[2], temperature=0.1, max_retries=0, max_tokens=_groq_out(config.LLM_FLASH_FALLBACK_LIST[2]))))
+        flash_named.append((config.LLM_FLASH_FALLBACK_LIST[2], ChatGroq(timeout=config.LLM_TIMEOUT_GROQ, model=config.LLM_FLASH_FALLBACK_LIST[2], temperature=0.1, max_retries=0, max_tokens=_groq_out(config.LLM_FLASH_FALLBACK_LIST[2]))))
         if _cerebras_enabled():
             flash_named.append((config.LLM_FLASH_FALLBACK_LIST[3], _make_cerebras(config.LLM_FLASH_FALLBACK_LIST[3], temperature=0.1)))
         if _openrouter_enabled():
@@ -513,7 +513,16 @@ class LLMGateway:
         _t0 = time.time()
         try:
             # 1. 일차적으로 LangChain의 with_fallbacks 체인 호출 (+텔레메트리 콜백)
-            response = await llm.ainvoke(messages, config={"callbacks": [_rec]})
+            #
+            # [총 시간 상한] ⚠️ httpx 의 read 타임아웃은 '바이트 간 간격'이지 총 시간이 아니다.
+            #   프록시(OpenRouter 등)가 커넥션을 살려두면 ChatOpenAI 의 timeout 이 발동하지 않아
+            #   호출 하나가 무한정 매달린다 — 2026-07-26 실측 294.67초(성공 콜도 최대 95.82초).
+            #   Gemini 는 gRPC total deadline 이라 자체적으로 끊기지만, OpenAI 호환 계열은 안 끊긴다.
+            #   → 체인 walk 전체에 asyncio.wait_for 로 하드 상한을 씌운다. TimeoutError 는 아래
+            #     except 로 떨어져 기존 경로(Flash 우회 → 오류 센티넬)를 그대로 탄다.
+            _deadline = getattr(config, "LLM_TOTAL_DEADLINE_SEC", 420)
+            response = await asyncio.wait_for(
+                llm.ainvoke(messages, config={"callbacks": [_rec]}), timeout=_deadline)
             self._update_cooldowns(_rec.attempts, ok=True)   # 성공 모델은 live, 앞서 실패한 모델은 쿨다운
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, True, time.time() - _t0,
                           requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens, output_tokens=_rec.output_tokens)
@@ -539,6 +548,13 @@ class LLMGateway:
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, False, time.time() - _t0,
                           requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens, output_tokens=_rec.output_tokens)
             error_str = str(e)
+            # [총 시간 상한 초과] asyncio.TimeoutError 는 str(e) 가 비어 있어 로그가 무용해진다.
+            #   원인을 식별 가능한 문장으로 치환해 텔레메트리·배너에서 '왜 죽었는지'가 보이게 한다.
+            if isinstance(e, (asyncio.TimeoutError, TimeoutError)):
+                _dl = getattr(config, "LLM_TOTAL_DEADLINE_SEC", 420)
+                error_str = (f"LLM 총 시간 상한({_dl}초) 초과 — 폴백 체인 walk 가 끝나지 않았습니다. "
+                             f"시도 모델: {_rec.attempts or ['(기록 없음)']}")
+                print(f"⏱️ [LLM Gateway] {error_str}")
             # 2. [ERROR] [크로스 티어 우회] Pro 체인이 429로 터지면 즉시 Flash 티어로 수직 강하
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                 if is_heavy:
