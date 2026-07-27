@@ -26,7 +26,9 @@ def test_builder_default_node_set_matches():
 
 def test_builder_interrupt_after_default():
     _, interrupt_after = ag.build_graph_from_registry(DEFAULT_REGISTRY)
-    assert interrupt_after == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA", "Master_PMO"]
+    # [2026-07-27] Supervisor 추가 — 합부는 슈퍼바이저가 아니라 최종고객이 내린다.
+    assert interrupt_after == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM",
+                               "VisionQA", "Master_PMO", "Supervisor"]
 
 
 def test_builder_equivalent_to_create_factory_graph():
@@ -40,7 +42,11 @@ def test_builder_equivalent_to_create_factory_graph():
 def test_build_workflow_delegates_to_registry_builder():
     # create_factory_graph/get_runtime_app 이 쓰는 _build_workflow 가 빌더 경로를 통하는지
     wf, ia = ag._build_workflow()
-    assert ia == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA", "Master_PMO"]
+    # [2026-07-27 계약 변경] Supervisor 를 HOTL 중단점에 추가했다.
+    #   슈퍼바이저는 심판이 아니라 최종고객의 대리인이므로, 합부는 이 지점에서 **고객이** 내린다.
+    #   (이전에는 supervisor_verdict 로 스스로 판정해 고객이 개입할 지점이 아예 없었다.)
+    assert ia == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA",
+                  "Master_PMO", "Supervisor"]
     assert EXPECTED_NODES <= set(wf.compile().get_graph().nodes.keys())
 
 

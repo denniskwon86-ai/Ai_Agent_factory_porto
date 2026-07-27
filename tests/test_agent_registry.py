@@ -35,7 +35,9 @@ def test_normalize_sorts_and_drops_idless():
 
 def test_get_interrupt_after_default(isolated_registry):
     # 현행 HOTL 게이트 5곳: 인터뷰·RFP·PRD·VisionQA(UI승인)·PMO(WBS승인)
-    assert ar.get_interrupt_after(default=["X"]) == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA", "Master_PMO"]
+    # [2026-07-27] Supervisor 추가 — 합부는 슈퍼바이저가 아니라 최종고객이 내린다.
+    assert ar.get_interrupt_after(default=["X"]) == ["Requirement_Interviewer", "RFP_Analyst",
+                                                     "Master_PM", "VisionQA", "Master_PMO", "Supervisor"]
 
 
 def test_save_load_roundtrip(isolated_registry):

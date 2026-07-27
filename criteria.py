@@ -234,17 +234,21 @@ STAGE_RUBRICS = {
     #   수용검수가 반려**된다. 요구가 전부 충족돼도 막힌다.
     #   → 이 단계의 관문은 **계약 이행 여부와 실무 사용 가능성**으로 한정하고,
     #     마감 완성도는 `advisory` 로 내려 리포트에 남긴다(고객이 판단할 재료).
+    # ⚠️ [2026-07-27] 이 단계는 **관문이 아니다.** 전 항목이 `advisory` 이며, 점수는 최종고객이
+    #   판단할 때 참고하는 **권고 자료**일 뿐 통과/반려를 결정하지 않는다.
+    #   합부는 `hotl_after: True` 로 멈춘 지점에서 **최종고객이 직접** 내린다.
+    #   슈퍼바이저가 스스로 판정하면 고객의 결정권을 대신 행사하는 것이 되고,
+    #   실제로 그 구조에서 마감 품질만으로 수용이 반려되는 일이 벌어졌다.
     "SUPERVISOR": {
         "checks": [
-            {"id": "rfp_business_coverage", "desc": "RFP의 필수 비즈니스 요구(REQ-ID)가 결과물에서 빠짐없이 실제로 충족됨", "weight": 3, "type": "llm_judge"},
-            {"id": "usability_real_work", "desc": "실제 업무에 바로 써먹을 수 있는 수준의 완결성·사용성(핵심 사용자 시나리오가 매끄럽게 수행됨)", "weight": 2, "type": "llm_judge"},
-            {"id": "acceptance_signoff", "desc": "발주사 입장에서 용역비를 지불하고 완료 수용해도 될 만한가 — 계약 이행 관점", "weight": 1, "type": "llm_judge"},
-            # 보고 전용: 마감 완성도는 반려 사유가 아니라 고객에게 전달할 개선 권고다.
+            {"id": "rfp_business_coverage", "desc": "RFP의 필수 비즈니스 요구(REQ-ID)가 결과물에서 빠짐없이 실제로 충족됨", "weight": 3, "type": "llm_judge", "advisory": True},
+            {"id": "usability_real_work", "desc": "실제 업무에 바로 써먹을 수 있는 수준의 완결성·사용성", "weight": 2, "type": "llm_judge", "advisory": True},
+            {"id": "acceptance_signoff", "desc": "발주사 입장에서 용역비를 지불하고 완료 수용해도 될 만한가 — 권고 의견", "weight": 1, "type": "llm_judge", "advisory": True},
             {"id": "completeness_polish", "desc": "빈틈·미흡·거친 마감 없이 완성도가 높은가 — 개선 권고용 관찰", "weight": 1, "type": "llm_judge", "advisory": True},
         ],
-        # 관문 6점 기준. 계약 요구가 충족되고 실무에 쓸 수 있으면 수용한다.
-        "pass_threshold": 0.8,
-        "hard_fail_checks": ["rfp_business_coverage"],
+        # 전 항목 advisory 이므로 관문 가중치가 0 — 이 단계는 반려하지 않고 고객에게 넘긴다.
+        "pass_threshold": 0.0,
+        "hard_fail_checks": [],
         "judge_heavy": True,
         "judge_persona": "supervisor_skill",
     },

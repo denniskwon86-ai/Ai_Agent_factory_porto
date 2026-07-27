@@ -84,8 +84,13 @@ DEFAULT_REGISTRY: Dict[str, Any] = {
          "stage": "CODE_REVIEW", "category": "review", "model_tier": "pro", "order": 11, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
         {"id": "QA", "name_ko": "QA 엔지니어", "role": "기획서·설계서 대비 통합 구현 정합·인도 검수(수행사 인도 전)", "skill": "qa_skill",
          "stage": "QA", "category": "review", "model_tier": "pro", "order": 12, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
-        {"id": "Supervisor", "name_ko": "슈퍼바이저(고객사 대리인)", "role": "RFP 대비 비즈니스 수용·완료 최종 검수(고객사 관점·엄격)", "skill": "supervisor_skill",
-         "stage": "SUPERVISOR", "category": "review", "model_tier": "pro", "order": 13, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
+        # ★ [2026-07-27 역할 재정의] 슈퍼바이저는 **심판이 아니라 최종고객의 대리인·관리인**이다.
+        #   합부의 최종 판단은 최종고객이 내린다. 슈퍼바이저는 (1) 고객이 판단하기 쉽도록 결과를
+        #   고객의 언어로 정리해 제시하고 (2) 고객의 요구를 전문 용어로 번역해 담당 에이전트에게
+        #   전달·지시하며 (3) 고객 요구에 맞게 조율한다.
+        #   → `hotl_after: True` — 이 노드 직후 멈춰서 **최종고객이 판단**하게 한다.
+        {"id": "Supervisor", "name_ko": "슈퍼바이저(고객사 대리인)", "role": "결과물을 고객 언어로 정리해 최종고객의 수용 판단을 보조하고, 고객 요구를 전문 지시로 번역해 담당 에이전트에게 전달·조율", "skill": "supervisor_skill",
+         "stage": "SUPERVISOR", "category": "review", "model_tier": "pro", "order": 13, "enabled": True, "hotl_after": True, "debate": False, "llm": True},
         {"id": "ManualWriter", "name_ko": "매뉴얼 작성가", "role": "최종 사용자 매뉴얼 작성", "skill": "manual_skill",
          "stage": "MANUAL", "category": "review", "model_tier": "flash", "order": 14, "enabled": True, "hotl_after": False, "debate": False, "llm": True},
     ],

@@ -43,8 +43,19 @@ def test_every_rubric_has_threshold_ssot():
     from criteria import STAGE_RUBRICS
     for stage, rubric in STAGE_RUBRICS.items():
         assert "pass_threshold" in rubric, f"{stage} rubric 에 pass_threshold 없음"
-        assert 0.0 < rubric["pass_threshold"] <= 1.0
         assert "checks" in rubric and rubric["checks"], f"{stage} rubric 에 checks 없음"
+
+        # [2026-07-27 계약 변경] 전 항목이 advisory 인 단계는 **관문이 아니다**.
+        #   이 경우 관문 가중치가 0 이므로 임계도 0.0 이어야 하고, 그것이 정상이다.
+        #   (SUPERVISOR: 슈퍼바이저는 심판이 아니라 최종고객의 대리인이므로 스스로 반려하지 않고
+        #    권고 리포트만 내고 HOTL 에서 고객이 판단한다.)
+        gate_checks = [c for c in rubric["checks"] if not c.get("advisory")]
+        if gate_checks:
+            assert 0.0 < rubric["pass_threshold"] <= 1.0, f"{stage}: 관문이 있으면 임계는 0 초과여야 함"
+        else:
+            assert rubric["pass_threshold"] == 0.0, (
+                f"{stage}: 전 항목 advisory(비관문)인데 임계가 0 이 아니면 통과가 불가능해진다")
+            assert not rubric.get("hard_fail_checks"), f"{stage}: 비관문 단계는 하드 실패를 둘 수 없다"
 
 
 def test_config_no_longer_defines_duplicate_threshold():

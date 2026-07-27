@@ -35,7 +35,9 @@ def test_sw_template_preserves_topology():
     wf, ia = ag.build_graph_from_registry(DEFAULT_REGISTRY)
     names = set(wf.compile().get_graph().nodes.keys())
     assert {"Requirement_Interviewer", "RFP_Analyst", "Architect", "Master_PMO", "ManualWriter"} <= names
-    assert ia == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA", "Master_PMO"]
+    # [2026-07-27] Supervisor 가 HOTL 중단점에 추가됨 — 합부는 슈퍼바이저가 아니라 최종고객이 내린다.
+    assert ia == ["Requirement_Interviewer", "RFP_Analyst", "Master_PM", "VisionQA",
+                  "Master_PMO", "Supervisor"]
 
 
 def test_generic_template_builds_linear_universal_graph():
