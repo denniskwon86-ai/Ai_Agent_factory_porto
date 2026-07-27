@@ -11,7 +11,11 @@ from core.master_data import master_data
 
 # 디스크 walk 시 제외할 디렉터리(노이즈/대용량 방지)
 _EXCLUDE_DIRS = {".git", ".archive", "node_modules", "dist", "build", ".next",
-                 "venv", ".venv", "__pycache__", "coverage", ".turbo", "out"}
+                 "venv", ".venv", "__pycache__", "coverage", ".turbo", "out",
+                 # [2026-07-27] CodeBuilder 의 후보 스테이징 영역과 실패 번들.
+                 #   컨텍스트/프리뷰/회귀 게이트가 이것들을 '워크스페이스의 실제 파일'로
+                 #   착각하면 중복 파일이 잡히고 컨텍스트가 두 배로 부풀어 오른다.
+                 ".candidate", ".failures"}
 
 
 def _clip(text: str, limit: int) -> str:
