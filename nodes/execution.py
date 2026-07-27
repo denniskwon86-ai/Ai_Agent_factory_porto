@@ -535,7 +535,14 @@ async def run_terminal_handler(state: Any) -> Dict[str, Any]:
     # ── 1) 실패 번들: 무엇이 왜 실패했는지 사람이 재현할 수 있는 근거를 남긴다 ──
     try:
         if workspace_root:
-            bundle_dir = Path(workspace_root) / ".failures"
+            # ⚠️ [2026-07-27 결함] 실패 번들을 워크스페이스 안(`.failures/`)에 쓰면
+            #   바로 아래의 롤백이 `git clean -fd` 로 **추적되지 않은 파일을 전부 지운다**
+            #   (nodes/utils/git_manager.py:89). 즉 증거를 저장한 직후 스스로 삭제했다.
+            #   실측: test_a1_v8 의 번들이 "저장 완료" 로그를 남기고도 디스크에 없었다.
+            #   → 워크스페이스 **밖**(data/failures/<project>/)에 남긴다. 실패 번들은
+            #     프로젝트 산출물이 아니라 진단 자료이므로 롤백 대상이 되면 안 된다.
+            _pid = Path(workspace_root).name or "unknown_project"
+            bundle_dir = Path("data") / "failures" / _pid
             bundle_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             task_id = getattr(state_obj, "current_sprint_task_id", "") or "unknown"
@@ -960,6 +967,47 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                 "}\n"
                 "\x60\x60\x60"
             )
+
+            # ══════════════════════════════════════════════════════════════════
+            # ★ [2026-07-27] 리뷰어에게 **실제 코드**를 준다
+            # ══════════════════════════════════════════════════════════════════
+            # ⚠️ 실측 결함: 프롬프트는 "현재 작성된 모든 코드를 리뷰하라"고 지시하면서
+            #   **코드를 한 줄도 주지 않았다.** 리뷰어는 컨텍스트에 들어온 기술명세·아키텍처를
+            #   보고 판단했고, 그래서 **명세에만 존재하고 실제로는 생성되지 않은 파일**을 근거로
+            #   반려했다.
+            #   실측(test_a1_v8): 워크스페이스에 `src/App.tsx` 하나뿐인데 리뷰어는
+            #     "제공된 index.html 에 src/js/main.js 스크립트 태그가 없다" 며 8회 연속 반려.
+            #     index.html·main.js 는 **존재한 적이 없는 파일**이다. 개발자는 있지도 않은
+            #     파일을 고칠 수 없으니 재작업이 영원히 수렴하지 않는다.
+            #   → 디스크의 실제 파일 집합을 명시적으로 주입한다. 리뷰 대상은 '명세'가 아니라
+            #     '실제 산출물'이며, 명세와의 괴리 자체가 리뷰어가 판단할 사항이다.
+            _rv_fe = _collect_disk_files(state_obj.workspace_root, _FE_OWNED_EXTS)
+            _rv_be = _collect_disk_files(state_obj.workspace_root, _BE_OWNED_EXTS)
+            _rv_files = _rv_fe + _rv_be
+            if _rv_files:
+                _budget = getattr(config, "REVIEWER_CODE_BUDGET_CHARS", 60000)
+                _parts, _used = [], 0
+                for _f in _rv_files:
+                    _fp, _code = _f.get("file_path", "?"), (_f.get("code") or "")
+                    if _used + len(_code) > _budget:
+                        _parts.append(f"\n----- {_fp} (이하 생략: 리뷰 예산 초과) -----\n{_code[:1500]}")
+                        _used = _budget
+                        continue
+                    _parts.append(f"\n----- {_fp} -----\n{_code}")
+                    _used += len(_code)
+                prompt += (
+                    "\n\n[🔍 리뷰 대상 — 워크스페이스의 실제 파일 전체]\n"
+                    f"아래 {len(_rv_files)}개 파일이 **현재 디스크에 실제로 존재하는 산출물의 전부**입니다.\n"
+                    "⚠️ 여기에 없는 파일은 **존재하지 않습니다.** 기술명세에 언급됐더라도 아래 목록에 없으면 "
+                    "생성되지 않은 것이며, 그 파일의 내용을 가정하거나 그 파일을 근거로 반려하지 마십시오.\n"
+                    "누락이 문제라고 판단되면 '어떤 파일이 없다'가 아니라 **'어떤 기능이 구현되지 않았다'**로 "
+                    "지적하고, 개발자가 실제로 손댈 수 있는 파일을 지목하십시오.\n"
+                    f"파일 목록: {[f.get('file_path') for f in _rv_files]}\n"
+                    + "".join(_parts)
+                )
+            else:
+                prompt += ("\n\n[🔍 리뷰 대상] 워크스페이스에 산출물 파일이 없습니다. "
+                           "이 경우 구현 누락으로 판단하십시오.")
             # 정적 품질 백스톱 권고를 리뷰 판단에 주입 - 단, 기능 동작에 지장 없는 사소한 권고만으로는
             # REWORK_DEV 를 남발하지 말 것(재작업 비용 통제). 명백한 분리 결여/디자인 난맥만 반영.
             if quality_advisory:
