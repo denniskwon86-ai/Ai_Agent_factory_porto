@@ -113,8 +113,12 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
     try:
         # [M1/M3] master_domains·mcp_live_grounding 미지정(None)이면 기존 값을 보존한다 —
         # 이 필드를 안 넘기는 기존 호출부(mega/sub 생성 등)가 기존 설정을 실수로 날리지 않도록.
+        # ★ [2026-07-27 P0-1] `knowledge_pack_ids` 도 보존 대상에 편입한다.
+        #   기존엔 master_domains/mcp_live_grounding 만 None 이면 보존하고
+        #   knowledge_pack_ids 는 보존 로직이 없어 **호출부가 안 넘기면 `[]` 로 초기화**됐다.
+        #   이 함수를 부르는 다른 경로(소유권 변경 등)가 지식팩 연결을 조용히 날린다.
         _prev = {}
-        if master_domains is None or mcp_live_grounding is None:
+        if master_domains is None or mcp_live_grounding is None or knowledge_pack_ids is None:
             try:
                 with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
                     _prev = json.load(f) or {}
@@ -124,6 +128,8 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
             master_domains = _prev.get("master_domains", [])
         if mcp_live_grounding is None:
             mcp_live_grounding = _prev.get("mcp_live_grounding", False)
+        if knowledge_pack_ids is None:
+            knowledge_pack_ids = _prev.get("knowledge_pack_ids", [])
         with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
             json.dump({
                 "template_id": template_id or "default",
@@ -823,10 +829,13 @@ async def get_traceability_data(project_id: str):
     """산출물 추적성 맵핑 데이터(FR-ID ↔ Files)를 조회합니다."""
     _safe_id(project_id, "project_id")
     workspace_root = f"./projects/{project_id}"
-    from nodes.utils.traceability_manager import TraceabilityManager
+    # ★ [2026-07-27 P0-3] 순수 로더로 교체.
+    #   `TraceabilityManager` 생성자가 `os.makedirs` + `_init_if_not_exists()` 를 하므로
+    #   **조회(GET)만 해도 파일·디렉터리를 만드는 부수효과**가 있었다.
+    #   조회 API 가 상태를 바꾸면 안 된다(존재하지 않는 프로젝트를 조회하면 빈 껍데기가 생긴다).
+    from nodes.utils.traceability_manager import read_mappings
     try:
-        tm = TraceabilityManager(workspace_root=workspace_root)
-        return {"status": "success", "data": tm.get_mappings()}
+        return {"status": "success", "data": read_mappings(workspace_root)}
     except Exception as e:
         return {"status": "error", "message": f"추적성 데이터 조회 실패: {str(e)}"}
 
@@ -946,6 +955,18 @@ async def create_release(project_id: str):
         "qa_report_summary": s.get("qa_report_summary", ""),
         "user_manual_summary": s.get("user_manual_summary", ""),
         "wbs_tasks": wbs_tasks,
+        # ★ [2026-07-27 P0-2] `artifacts` 를 릴리스 파일에 남긴다.
+        #   기존엔 artifacts 가 아래 Chroma 인덱싱의 **입력으로만** 소비되고 release.json 에
+        #   저장되지 않아, 게시 후에는 범용 T3 에이전트 산출물을 되찾을 방법이 없었다.
+        #   게시 정합화·전사 롤업의 입력원이며, A-1 완주 판정의 '게시 확인' 근거이기도 하다.
+        "artifacts": s.get("artifacts", {}) or {},
+        "artifact_summaries": {
+            k: (v[:2000] if isinstance(v, str) else v)
+            for k, v in (s.get("artifacts", {}) or {}).items()
+        },
+        # 종료 상태를 함께 남겨, 미해결 결함을 안고 게시된 릴리스를 사후에 식별할 수 있게 한다.
+        "terminal_status": s.get("terminal_status", ""),
+        "terminal_reason": s.get("terminal_reason", ""),
     }
     rel_dir = os.path.join(LIBRARY_DIR, release_id)
     os.makedirs(rel_dir, exist_ok=True)

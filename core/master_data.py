@@ -119,6 +119,15 @@ class MasterData:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        # ★ [2026-07-27 P0-4] 동시성 보강.
+        #   기준정보 DB 는 파이프라인(주입)·API(조회)·배치가 동시에 건드린다. 기본 rollback
+        #   journal 은 쓰기 중 읽기를 막아 `database is locked` 를 유발한다.
+        #   WAL 은 읽기와 쓰기를 동시에 허용하고, busy_timeout 은 즉시 실패 대신 대기시킨다.
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA busy_timeout = 5000")
+        except Exception:
+            pass   # 파일시스템이 WAL 을 지원하지 않는 환경(일부 네트워크 드라이브)에서도 계속 동작
         return conn
 
     def _init_db(self):

@@ -381,17 +381,22 @@ class KnowledgeBase:
         try:
             results = self.collection.query(
                 query_texts=[query],
-                n_results=n_results
+                n_results=n_results,
+                # ★ [2026-07-27] 거리(distance)를 함께 받아온다. 없으면 호출부가
+                #   '얼마나 관련 있는지'를 판단할 수 없어 무관한 문서를 그대로 주입하게 된다.
+                include=["documents", "metadatas", "distances"],
             )
 
             snippets = []
             if results and results["documents"] and results["documents"][0]:
+                _dists = (results.get("distances") or [[]])[0]
                 for i in range(len(results["documents"][0])):
                     doc = results["documents"][0][i]
                     meta = results["metadatas"][0][i] if results["metadatas"] else {}
                     snippets.append({
                         "content": doc,
-                        "metadata": meta
+                        "metadata": meta,
+                        "distance": _dists[i] if i < len(_dists) else 1.0,
                     })
             return snippets
         except Exception as e:
@@ -407,9 +412,33 @@ class KnowledgeBase:
         if not query:
             return ""
 
-        snippets = self.search_similar(query, n_results=3)
+        # ══════════════════════════════════════════════════════════════════════
+        # ★ [2026-07-27] 전역 릴리스 무필터 주입 차단
+        # ══════════════════════════════════════════════════════════════════════
+        # ⚠️ 기존 결함: 전역 `project_releases` 컬렉션을 **프로젝트 필터도 거리 임계값도 없이**
+        #   검색해 상위 3건을 **모든 프롬프트에 주입**했다. 두 가지 해악이 있다.
+        #   ① 품질: 무관한 과거 산출물이 매 프롬프트에 섞여 들어가 컨텍스트를 오염시킨다.
+        #      (Chroma 는 항상 상위 N 건을 돌려준다 — 관련이 없어도 '가장 덜 무관한' 것을 준다)
+        #   ② 보안: 조직·권한을 얹는 순간 이 경로가 **부서 간 정보 유출**이 된다.
+        #   같은 파일의 `get_grounding_context()` 는 화이트리스트 + RELEVANCE_CUTOFF 이중 방어가
+        #   이미 검증되어 있으므로 **그 패턴을 이식한다.**
+        RELEVANCE_CUTOFF = 0.65
+        _self_pid = getattr(project_state, "project_name", "") or ""
+        raw = self.search_similar(query, n_results=6)   # 필터로 줄어들 것을 감안해 넉넉히 조회
+        snippets = []
+        for s in raw:
+            if s.get("distance", 1.0) > RELEVANCE_CUTOFF:
+                continue
+            # 자기 자신의 과거 릴리스는 '참고 사례'가 아니다(자기 참조로 컨텍스트만 부풀린다).
+            if _self_pid and (s.get("metadata") or {}).get("project_id") == _self_pid:
+                continue
+            snippets.append(s)
+            if len(snippets) >= 3:
+                break
         if not snippets:
             return ""
+        print(f"📚 [KnowledgeBase] 유사 사례 {len(snippets)}건 주입 "
+              f"(거리 임계값 {RELEVANCE_CUTOFF} 통과 / 후보 {len(raw)}건)")
 
         context = "이전에 성공적으로 배포된 유사한 프로젝트의 산출물 파편(Chunks)입니다. 새로운 결과물을 작성할 때 참고하세요:\n\n"
         for i, snippet in enumerate(snippets):
