@@ -551,7 +551,7 @@ class LLMGateway:
         markers = getattr(config, "PAID_MODEL_MARKERS", ())
         return any(m in name for m in markers)
 
-    def _update_cooldowns(self, attempts, ok: bool):
+    def _update_cooldowns(self, attempts, ok: bool, error_str: str = ""):
         """호출 결과로 모델별 생존 상태 갱신(반응형 학습).
         성공: 마지막(응답) 모델은 살아있음 → 쿨다운 해제, 그 앞 시도들은 실패 → 쿨다운.
         실패: 시도된 모든 모델이 실패 → 쿨다운.
@@ -565,10 +565,32 @@ class LLMGateway:
         now = time.time()
         cd = getattr(config, "MODEL_COOLDOWN_SEC", 1800)
         cd_paid = getattr(config, "PAID_MODEL_COOLDOWN_SEC", 60)
+        cd_transient = getattr(config, "TRANSIENT_MODEL_COOLDOWN_SEC", 90)
+
+        # ★ [2026-07-27] 일시적 실패에 장기 배제를 걸지 않는다.
+        #   ⚠️ 실측: 첫 호출에서 gemini-2.5-flash 가 한 번 실패해 30분 쿨다운에 들어갔고,
+        #     이후 모든 호출이 attempts=1 로 유료 백스톱 하나에 붕괴했다. 그런데 같은 시점에
+        #     그 모델을 직접 호출하면 구조화 출력까지 2.2초에 성공한다 — 죽지 않았는데 배제됐다.
+        #     완주가 15~20분인데 쿨다운이 30분이면 실행 내내 회복 기회가 없다.
+        #   일일 쿼터 소진만 장기 배제하고, 그 외는 짧게 쉬었다 다시 시도한다.
+        _e = (error_str or "").lower()
+        _is_quota = ("429" in _e or "resource_exhausted" in _e
+                     or "quota" in _e or "billing" in _e)
+        # ⚠️ 성공 경로(ok=True)가 진짜 함정이었다. 체인이 뒤쪽 모델(유료 백스톱)로 **성공**하면
+        #   앞선 모델들은 '실패'로 기록되는데, 이때 오류 문자열이 없다(LangChain with_fallbacks 가
+        #   개별 실패를 삼킨다). 그걸 전부 일일 쿼터 소진으로 간주해 30분 배제한 결과,
+        #   한 번의 체인 walk 만으로 살아있는 모델까지 통째로 빠지고 체인이 유료 하나로 붕괴했다.
+        #   실측: 1번째 호출 attempts=10 → 2·3번째 호출 attempts=1.
+        #   → 원인을 모르면 짧게 쉰다. 진짜 쿼터사면 다음 프로브에서 429 를 받아 그때 장기 배제된다.
+        _cd_free = cd if _is_quota else cd_transient
+
         failed = attempts if not ok else attempts[:-1]
+        if not _is_quota and failed:
+            _why = "일시적 실패" if error_str else "원인 불명(체인 내부 실패)"
+            print(f"⏳ [LLM Gateway] {_why} — 무료 모델 쿨다운 {_cd_free}초로 단축: {failed[:4]}")
         for n in failed:
             if n and n != "?":
-                self._model_cooldown[n] = now + (cd_paid if self._is_paid_model(n) else cd)
+                self._model_cooldown[n] = now + (cd_paid if self._is_paid_model(n) else _cd_free)
         if ok and attempts[-1]:
             self._model_cooldown.pop(attempts[-1], None)
 
@@ -721,7 +743,9 @@ class LLMGateway:
 
         except Exception as e:
             # [레버B] 시도된 모델 전부 실패 → 각 모델 쿨다운(다음 호출부터 죽은 모델 스킵)
-            self._update_cooldowns(_rec.attempts, ok=False)
+            #   ★ [2026-07-27] 오류 문자열을 넘겨 '일일 쿼터 소진'과 '일시적 실패'를 구분한다.
+            #     구분 없이 전부 30분 배제하면 살아있는 모델이 실행 내내 체인에서 빠진다.
+            self._update_cooldowns(_rec.attempts, ok=False, error_str=str(e))
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, False, time.time() - _t0,
                           requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens, output_tokens=_rec.output_tokens)
             error_str = str(e)
