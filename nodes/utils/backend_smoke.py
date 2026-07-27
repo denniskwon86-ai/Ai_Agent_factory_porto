@@ -43,9 +43,28 @@ def check_backend_smoke(files: List[Dict[str, Any]], timeout: int = 45) -> Dict[
             if not os.path.exists(initp):
                 open(initp, "w").close()
 
+        # ★ [2026-07-27 결함 수정] 서브프로세스를 **임시 워크스페이스에서** 실행한다.
+        #   기존엔 cwd 를 지정하지 않아 저장소 루트에서 돌았다. 그래서 생성 앱이
+        #   `sqlite:///./data/app.db` 나 `open('data.json','w')` 같은 **상대 경로**를 쓰면
+        #   임시 폴더가 아닌 엉뚱한 위치를 기준으로 해석되어
+        #   `OperationalError: unable to open database file` 로 부팅에 실패했다(실측).
+        #   앱 코드가 잘못된 게 아니라 하네스가 실행 위치를 안 맞춰준 것이다.
+        _env = dict(os.environ)
+        # 테스트용 DB 는 임시 폴더 안의 **절대 경로**로 주입한다. 앱이 DATABASE_URL 을
+        # 존중하면 상대 경로 문제 자체가 사라지고, 무시해도 cwd 덕분에 여전히 동작한다.
+        _env["DATABASE_URL"] = "sqlite:///" + os.path.join(tmp, "smoke_test.db").replace("\\", "/")
+        _env["APP_DATA_DIR"] = tmp
+        _env["PYTHONIOENCODING"] = "utf-8"
+        # 앱이 흔히 쓰는 하위 디렉터리를 미리 만들어 준다(앱이 스스로 안 만드는 경우 대비).
+        for _sub in ("data", "db", "storage", "instance", "var"):
+            try:
+                os.makedirs(os.path.join(tmp, _sub), exist_ok=True)
+            except Exception:
+                pass
         proc = subprocess.run(
-            [sys.executable, _RUNNER, tmp],
+            [sys.executable, os.path.abspath(_RUNNER), tmp],
             capture_output=True, text=True, timeout=timeout, encoding="utf-8",
+            cwd=tmp, env=_env,
         )
         out = (proc.stdout or "").strip()
         try:
