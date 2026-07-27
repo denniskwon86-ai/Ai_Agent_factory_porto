@@ -205,6 +205,8 @@ def main():
     log(f"✅ 기획 완주 — WBS {len(tasks)}개 태스크: {[t.get('task_id') for t in tasks]}")
 
     # 2) 실행 태스크 순차 가동
+    #    한 태스크가 실패해도 중단하지 않고 끝까지 시도한 뒤 마지막에 집계한다.
+    task_results = []   # [(task_id, "done" | "failed:...")]
     for t in tasks:
         tid = t.get("task_id")
         cur = (wbs() or {}).get("tasks") or []
@@ -231,7 +233,8 @@ def main():
             log(f"🚀 태스크 가동 {tid} ({t.get('title', '')[:40]}): {r.status_code}")
             if not r.ok:
                 log(f"❌ 가동 실패: {r.text[:200]}")
-                return 1
+                task_results.append((tid, f"START_FAILED: {r.text[:120]}"))
+                continue
 
         def task_done(tid=tid):
             cur = (wbs() or {}).get("tasks") or []
@@ -245,9 +248,31 @@ def main():
 
         res = wait_phase(task_done, f"TASK {tid}", TASK_TIMEOUT)
         if res != "done":
+            # ★ [2026-07-27] 한 태스크가 실패해도 **완주를 포기하지 않는다**.
+            #   ⚠️ 실측(test_a1_v9): E2E-04 가 FAILED 되자 드라이버가 즉시 종료해
+            #     E2E-05 는 시도조차 못 했고 E2E-03 은 IN_PROGRESS 로 방치됐다.
+            #     완주 테스트의 목적은 '5개 중 몇 개가 되는가'를 아는 것인데,
+            #     첫 실패에서 멈추면 전체 그림을 영영 볼 수 없다.
+            #   파이프라인은 정상이었다(FAILED_REVIEW 로 정직하게 종결 + 롤백 + 실패 번들).
+            #   포기한 것은 **테스트 하네스**였다.
             log(f"❌ {res}")
-            return 1
+            log(f"➡️ {tid} 실패 — 나머지 태스크를 계속 진행합니다(최종 집계는 마지막에).")
+            task_results.append((tid, res))
+            continue
         log(f"✅ {tid} DONE")
+        task_results.append((tid, "done"))
+
+    # ── 최종 집계 ────────────────────────────────────────────────────────────
+    _ok = [t for t, r in task_results if r == "done"]
+    _ng = [(t, r) for t, r in task_results if r != "done"]
+    log("=== 📊 태스크 집계 ===")
+    for _t, _r in task_results:
+        log(f"   {'✅' if _r == 'done' else '❌'} {_t}: {_r if _r != 'done' else 'DONE'}")
+    log(f"   → 성공 {len(_ok)} / 전체 {len(task_results)}")
+    if _ng:
+        log(f"=== ⛔ 미완주: 실패 태스크 {len(_ng)}건 — 게시(Release)를 진행하지 않습니다 ===")
+        log("   (A-1 완주 판정은 '전 태스크 DONE + QA + 수용검수 + 게시'를 모두 충족해야 합니다)")
+        return 1
 
     log("=== 🏁 전 태스크 완주 성공 ===")
     st = latest_state()
