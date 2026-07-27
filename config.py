@@ -59,8 +59,16 @@ ENGINE_TIERS = {
         "flash": "grok-2-latest",
     },
     "openrouter": {
-        "pro":   "meta-llama/llama-3.3-70b-instruct",
-        "flash": "google/gemini-2.0-flash-lite-preview-02-05:free",
+        # ★ [2026-07-27] 유료 백스톱을 llama-3.3-70b → google/gemini-2.5-flash 로 교체.
+        #   근거: ① llama 는 출력 상한 8,192 라 `with_structured_output` 코드 생성이 구조적으로
+        #        완결되지 못한다(결함 #15 의 정체). ② 무료 Gemini 일일 쿼터가 소진되면 체인에
+        #        고출력 모델이 하나도 남지 않는다(2026-07-27 실측: 2.5-pro·2.0-flash·2.5-flash 전부 429).
+        #        ③ 같은 모델을 무료 경로로 호출했을 때 구조화 출력이 2.2초에 성공함을 실측 확인했다.
+        #   비용: 출력 100만 토큰당 $2.50, 출력 상한 65,535 (llama 의 8배).
+        "pro":   "google/gemini-2.5-flash",
+        # 심사·채점용 Flash 백스톱도 고출력 저가 모델로. (기존 `:free` 슬러그는 크레딧이 있어도
+        #  무료 쿼터에 묶여 실패했다 — 2026-07-26 실측)
+        "flash": "google/gemini-2.5-flash-lite",
     }
 }
 
@@ -81,7 +89,7 @@ ENGINE_TIERS = {
 #   `llm_gateway._build_chains` 가 인덱스로 제공사를 매핑하므로 **중간에 항목을 끼워 넣으면
 #   전 제공사 매핑이 밀린다**(실측: 끼워 넣었더니 xAI 에 gemini 모델을 보내는 체인이 만들어졌다).
 #   Gemini 계열을 더 넣고 싶으면 이 리스트가 아니라 `PRO_TIER_EXTRA_GEMINI` 를 쓸 것.
-LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct"]
+LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "google/gemini-2.5-flash"]
 # ★ [2026-07-27] Pro 티어의 Gemini 변종 풀에 **추가로** 붙일 모델(제공사 매핑과 무관하게 안전).
 #   실측(라이브 프로브): gemini-2.5-pro = 429 RESOURCE_EXHAUSTED(무료 쿼터 소진)
 #                        gemini-2.5-flash = 성공 1.5초 (무료, 생존), 출력 상한 65,536
@@ -96,7 +104,7 @@ PRO_TIER_EXTRA_GEMINI = ["gemini-2.5-flash", "gemini-2.0-flash"]
 #   `_compose_chain` 이 ordered[0](무료 gemini) 하나로 재프로브 → 0.15초 429 ×3 → SUSPENDED_QUOTA.
 #   → 말단을 유료 모델로 교체한다. 이 환경에서 22콜 연속 성공이 확인된 모델을 쓴다(신뢰성 우선).
 #   비용은 관측치 기준 콜당 약 $0.005 로 무시 가능. 더 저렴한 8B 로 교체는 슬러그 검증 후 별건.
-LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "meta-llama/llama-3.3-70b-instruct"]
+LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "google/gemini-2.5-flash-lite"]
 
 # ==========================================
 # 4-0. ★ 코드 생성 모델 적격성 정책 (2026-07-27 신설)
@@ -164,7 +172,10 @@ GEMINI_MAX_RETRIES = 2
 #     무한 재시도가 되므로 하지 않는다).
 PAID_MODEL_COOLDOWN_SEC = 60
 # 유료 판정 마커. OpenRouter 유료 슬러그는 ':free' 접미사가 없다.
-PAID_MODEL_MARKERS = ("meta-llama/", "anthropic/", "openai/", "google/gemini-2.0-flash-001")
+# ⚠️ [2026-07-27] `google/` 전체를 유료로 인식시킨다. OpenRouter 의 `google/...` 슬러그는
+#   (`:free` 접미사가 없는 한) 크레딧 과금 모델이므로, 무료와 같은 30분 장기 쿨다운을 걸면
+#   '살아있는 유료 백스톱'이 체인에서 빠져 버린다. `_is_paid_model` 이 `:free` 는 이미 걸러낸다.
+PAID_MODEL_MARKERS = ("meta-llama/", "anthropic/", "openai/", "google/")
 QUOTA_RETRY_SLEEP_SEC = 8        # Flash 체인마저 소진 시 재시도 전 대기(과거 15초 → 단축)
 
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)
@@ -180,6 +191,8 @@ MODEL_CONTEXT_LIMITS = {
     "llama3.1-8b":               6000,
     "grok-2-latest":             32000,
     "meta-llama/llama-3.3-70b-instruct": 200000,
+    "google/gemini-2.5-flash": 1000000,
+    "google/gemini-2.5-flash-lite": 1000000,
     "google/gemini-2.0-flash-lite-preview-02-05:free": 60000,
 }
 CHARS_PER_TOKEN_ESTIMATE = 2.5  # 한국어 혼용 기준 보수적 추정
@@ -206,6 +219,10 @@ MODEL_OUTPUT_LIMITS = {
     #   폭주는 상한이 아니라 재시도(새 표본)로 회피한다 — 그래서 nodes/execution.py 의
     #   `cacheable=not _is_rework` 수정이 이 문제의 실질 대응이다.
     "meta-llama/llama-3.3-70b-instruct": 8192,
+    # ★ [2026-07-27] OpenRouter 유료 Gemini — 출력 상한이 llama 의 8배라 구조화 코드 생성이
+    #   중간에 잘리지 않는다(결함 #15 의 구조적 해소). OpenRouter models API 실측값.
+    "google/gemini-2.5-flash": 65535,
+    "google/gemini-2.5-flash-lite": 65535,
     "google/gemini-2.0-flash-lite-preview-02-05:free": 8192,
 }
 DEFAULT_OUTPUT_LIMIT_GEMINI = 65536
