@@ -213,6 +213,18 @@ async def run_supervised_stage(state_obj, author_skill: str, stage_key: str, ext
     field = _STAGE_SUMMARY_FIELD.get(stage_key)
     label = STAGE_LABELS.get(stage_key, stage_key)
 
+    # ★ [2026-07-27] 등록된 업무지침/규정 고지문을 작성 에이전트에게도 준다.
+    #   "우리 시스템의 업무지침에 따르면 당신은 이런 항목을 반드시 포함해 이렇게 작성해야 한다"를
+    #   기준정보에서 읽어 주입한다. 기준이 코드 상수로만 존재하면 에이전트는 자기가 무엇을
+    #   지켜야 하는지 프롬프트에서 알 수 없다.
+    try:
+        from core.work_standard import render_standard_brief
+        _std = render_standard_brief(stage_key)
+        if _std:
+            extra_instruction = (extra_instruction or "") + _std
+    except Exception:
+        pass   # 표준 조회 실패가 생성을 막으면 안 된다
+
     artifact, rounds_used = await run_debate(state_obj, author_skill, stage_key, extra_instruction=extra_instruction)
 
     # 할당량 소진 등으로 산출 실패 → 에러 sentinel을 산출물로 저장하지 않고, 사람이 읽을 메시지 + 인간개입 신호

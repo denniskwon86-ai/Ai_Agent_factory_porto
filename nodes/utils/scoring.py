@@ -67,9 +67,15 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
     """단계 산출물을 rubric으로 채점하고 verdict(PASS/REWORK/ROLLBACK)를 결정한다."""
     from core.llm_gateway import gateway  # 순환 임포트 방지를 위한 지연 임포트
 
-    rubric = STAGE_RUBRICS.get(stage_key)
+    # ★ [2026-07-27] 판정 기준을 **등록된 업무표준(기준정보)** 에서 가져온다.
+    #   기존에는 `criteria.py` 의 파이썬 상수를 직접 읽어, 기준을 바꾸려면 코드를 고쳐야 했고
+    #   언제 누가 왜 바꿨는지 이력이 남지 않았다. 이제 master.db 의 `work_standard` 레코드가
+    #   진실원천이며(법규처럼 버전·시행일·리니지 보존), 미등록/장애 시에만 상수로 폴백한다.
+    from core.work_standard import get_standard
+    rubric = get_standard(stage_key) or STAGE_RUBRICS.get(stage_key)
     if not rubric:
         return {"score": 1.0, "verdict": "PASS", "blocking_fails": [], "per_check": {}}
+    _std_meta = (rubric.get("_meta") or {}) if isinstance(rubric, dict) else {}
 
     per_check = {}
     total_w = 0.0
@@ -118,8 +124,14 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
         artifact = _stage_artifact(state, stage_key)
         if extra_context:
             artifact += f"\n\n{extra_context}"
+        # ★ [2026-07-27] 등록된 업무표준 고지문을 심판 프롬프트에 주입한다.
+        #   "우리 시스템의 업무규정에 따르면 당신은 무엇을 어떤 기준값으로 판정해야 한다"를
+        #   명시적으로 알려주지 않으면, 심판이 자기 취향으로 잣대를 만든다(실측: 리뷰어가
+        #   코드 품질로 반려, QA·Supervisor 가 각자 기준으로 완주를 막음).
+        from core.work_standard import render_standard_brief
+        _std_brief = render_standard_brief(stage_key)
         prompt = (
-            f"{persona_block}{judge_skill}\n\n[평가 기준]:\n{checks_brief}\n\n"
+            f"{persona_block}{judge_skill}{_std_brief}\n\n[평가 기준]:\n{checks_brief}\n\n"
             f"[검토 산출물]:\n{artifact}\n\n"
             '아래 JSON만 출력하라(각 기준 0.0~1.0 점수 + 통과/미흡 사유 한 줄 총평): '
             '{"scores": {"기준id": 0.0}, "rationale": "한 줄 판단 근거"}'

@@ -60,6 +60,20 @@ async def _warmup():
     except Exception as e:
         print(f"⚠️ [Warmup] 사전 컴파일 실패(첫 호출 시 초기화됨): {e}")
 
+    # ★ [2026-07-27] 업무표준(규정/지침) 분류 등록 + 초기 시드 — 멱등.
+    #   에이전트가 "나는 어떤 기준으로 일하고 무엇을 확인해 넘기는가"를 코드 상수가 아니라
+    #   관리되는 기준정보에서 조회하게 한다. 이미 등록된 표준은 덮어쓰지 않는다(운영 중 개정본 보호).
+    try:
+        from core.work_standard_seed import seed_from_criteria
+        _seeded = seed_from_criteria(force=False)
+        _new = [k for k, v in _seeded.items() if not v.startswith("skip")]
+        if _new:
+            print(f"📜 [업무표준] 신규 등록 {len(_new)}건: {_new}")
+        else:
+            print(f"📜 [업무표준] 등록본 {len(_seeded)}건 확인 (기존 유지)")
+    except Exception as e:
+        print(f"⚠️ [업무표준] 시드 실패(코드 기본값으로 폴백): {e}")
+
 
 app.include_router(factory_control.router)
 app.include_router(format_control.router)
