@@ -1031,6 +1031,32 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             #     파일을 고칠 수 없으니 재작업이 영원히 수렴하지 않는다.
             #   → 디스크의 실제 파일 집합을 명시적으로 주입한다. 리뷰 대상은 '명세'가 아니라
             #     '실제 산출물'이며, 명세와의 괴리 자체가 리뷰어가 판단할 사항이다.
+            # ══════════════════════════════════════════════════════════════════
+            # ★ [2026-07-27] 리뷰어에게 **자기 이전 판정 이력**을 돌려준다
+            # ══════════════════════════════════════════════════════════════════
+            # ⚠️ 실측 결함: 리뷰어 노드가 `supervisor_hops` 를 세기만 하고 프롬프트에는 넣지
+            #   않아, 매 회차가 **무상태**였다. 같은 결함을 보고 같은 REWORK_DEV 를 반복했고
+            #   "내가 이미 N번 같은 말을 했다"는 정보가 없으니 판단이 바뀔 이유가 없었다.
+            #   그 결과 상한(8)까지 소진하고 FAILED_REVIEW 로 죽었다.
+            #   설계상 `ESCALATE_PM` 경로가 존재하는데(라우터 → Master_PM) **발동 조건이
+            #   없어서** 한 번도 쓰이지 않았다. QA·Supervisor 는 리뷰어가 PASS 해야만 실행되므로
+            #   리뷰어에서 막히면 그 위의 에스컬레이션 사다리에 **도달 자체가 불가능**하다.
+            _hist = list(getattr(state_obj, "rework_history", []) or [])
+            if _hist:
+                _recent = _hist[-4:]
+                prompt += (
+                    f"\n\n[⏳ 당신의 이전 판정 이력 — 이번이 {hops}번째 검토입니다 "
+                    f"(상한 {getattr(config, 'GLOBAL_MAX_SUPERVISOR_HOPS', 8)})]\n"
+                    + "\n".join(f"  {i}회차: {t[:300]}" for i, t in
+                                enumerate(_recent, start=max(1, len(_hist) - len(_recent) + 1)))
+                    + "\n\n⚠️ **같은 지적을 반복하지 마십시오.** 위와 동일한 문제가 여전히 남아 있다면, "
+                      "그것은 개발자가 게을러서가 아니라 **그 지시를 수행할 수 없기 때문**일 가능성이 큽니다"
+                      "(예: 시스템이 제공하지 않는 동작 요구, 기획/설계 자체의 모순, 상충하는 요구사항).\n"
+                      "그런 경우 `REWORK_DEV` 를 반복하지 말고 **`ESCALATE_PM`** 을 선택해 "
+                      "PM 이 기획·설계 수준에서 조정하도록 상신하십시오. 무엇이 왜 수행 불가능해 보이는지 "
+                      "feedback 에 구체적으로 쓰십시오."
+                )
+
             _rv_fe = _collect_disk_files(state_obj.workspace_root, _FE_OWNED_EXTS)
             _rv_be = _collect_disk_files(state_obj.workspace_root, _BE_OWNED_EXTS)
             _rv_files = _rv_fe + _rv_be
@@ -1108,6 +1134,34 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             except Exception as e:
                 print(f"⚠️ Reviewer JSON 파싱 실패 (기본 통과 처리): {e}")
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # ★ [2026-07-27] 반복 지적 자동 승격 — LLM 의 자각에만 맡기지 않는다
+    # ══════════════════════════════════════════════════════════════════════════
+    # ⚠️ 위에서 프롬프트로 "반복하지 말고 상신하라"고 안내했지만, 그것만으로는 보장되지 않는다.
+    #   같은 지적이 반복된다는 것은 **개발자가 그 지시를 수행할 수 없다**는 신호다
+    #   (실측: 시스템에 파일 삭제 기능이 없는데 "삭제하라"를 8회 반복했다).
+    #   그 경우 재작업을 더 돌리는 것은 예산 낭비이므로, 기획·설계 권한을 가진 PM 으로
+    #   **결정론적으로** 승격한다. 이것이 없으면 상한까지 소진하고 그냥 죽는다.
+    _rework_hist = list(getattr(state_obj, "rework_history", []) or [])
+    if reviewer_decision == "REWORK_DEV" and review_text:
+        _norm = re.sub(r'\s+', ' ', str(review_text)).strip().lower()[:200]
+        _repeats = sum(1 for h in _rework_hist
+                       if re.sub(r'\s+', ' ', str(h)).strip().lower()[:200] == _norm)
+        _limit = getattr(config, "REPEAT_FEEDBACK_ESCALATE_AFTER", 2)
+        if _repeats >= _limit:
+            print(f"⬆️ [Reviewer] 동일 지적 {_repeats + 1}회 반복 감지 — 개발자가 수행할 수 없는 "
+                  f"지시일 가능성이 큽니다. PM 으로 자동 상신(ESCALATE_PM)합니다.")
+            reviewer_decision = "ESCALATE_PM"
+            review_text = (
+                f"[자동 상신] 아래 지적이 {_repeats + 1}회 반복되었으나 해소되지 않았습니다. "
+                f"실무 재작업으로는 수렴하지 않으므로 기획·설계 수준의 조정이 필요합니다.\n"
+                f"반복된 지적: {review_text}\n"
+                f"검토 요청: (1) 이 요구가 현재 시스템에서 **수행 가능한지** "
+                f"(2) 기술명세·아키텍처에 상충이 없는지 (3) 요구를 조정하거나 태스크를 분할할지."
+            )
+        _rework_hist.append(str(review_text)[:1000])
+        _rework_hist = _rework_hist[-8:]
+
     workspace_root = state_obj.workspace_root
     task_id = state_obj.current_sprint_task_id
     state_dict = state_obj.model_dump()
@@ -1132,6 +1186,8 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         return {
             "reviewer_decision": reviewer_decision,
             "reviewer_feedback": review_text,
+            # 다음 회차 리뷰어가 '내가 이미 무슨 말을 했는지' 알 수 있도록 이력을 남긴다.
+            "rework_history": _rework_hist,
             "pm_override_reason": "",
             "needs_revision": False,
             "current_stage": "CODE_REVIEW",

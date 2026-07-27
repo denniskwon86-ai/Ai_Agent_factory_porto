@@ -163,6 +163,10 @@ class ProjectState(BaseModel):
     # 이원화 피드백 루프 상태
     reviewer_decision: str = Field(default="NONE")  # "PASS", "REWORK_DEV", "ESCALATE_PM"
     reviewer_feedback: str = Field(default="")
+    # ★ [2026-07-27] 리뷰어 판정 이력. 리뷰어가 **자기 이전 판정을 기억하지 못해** 같은 지적을
+    #   반복하며 재작업 예산을 소진하던 결함을 막는다(실측: 동일 지적 8회 반복 → FAILED_REVIEW).
+    #   이 이력을 프롬프트에 되돌려주고, 반복이 감지되면 ESCALATE_PM 으로 자동 승격한다.
+    rework_history: List[str] = Field(default_factory=list)
     # [VisionQA 자문 강등] VisionQA 는 UI 를 자동 반려하지 않고 '소견'만 남긴다. 사람이 미리보기 +
     # 이 소견을 함께 보고 승인/재설계를 결정한다(왕복 루프 제거 → 무료 티어 콜 폭발 방지).
     ui_review_advisory: str = Field(default="")
