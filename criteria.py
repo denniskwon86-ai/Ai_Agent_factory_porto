@@ -170,11 +170,21 @@ STAGE_RUBRICS = {
         "hard_fail_checks": [],
     },
     # Reviewer(개발 엔지니어, 단위 관점): 코드 정확성·버그·해당 단위 기능 동작
+    # ══════════════════════════════════════════════════════════════════════════
+    # CODE_REVIEW = **사용자 수용 테스트 대리** (품질 심사가 아니다)
+    # ══════════════════════════════════════════════════════════════════════════
+    # ⚠️ [2026-07-27 역할 재정의] 이 단계는 사용자를 대신해 **요구사항 정의서 기준으로
+    #   기능이 구현되었는지**를 확인한다. 판정은 '있다/없다', '된다/안된다' 이며,
+    #   **잘 만들었는가(품질)는 따지지 않는다.** 품질 평가는 다음 단계인 QA 의 몫이다.
+    #   기존에는 `code_quality`(가독성·구조·타입)가 여기 있어 역할이 섞였고, 그 결과
+    #   리뷰어가 '동작하는 코드'를 품질 사유로 반려해 재작업 루프가 길어졌다.
+    #   → `code_quality` 는 QA 로 이관하고, 여기는 요구 충족 여부만 본다.
     "CODE_REVIEW": {
         "checks": [
-            {"id": "build_success", "desc": "빌드/문법 검사 통과", "weight": 3, "type": "deterministic"},
-            {"id": "unit_correctness", "desc": "이번 태스크 코드에 명백한 버그/오작동/누락 로직이 없고, 작성한 단위 기능이 실제로 동작하도록 상태·핸들러가 올바르게 연결됨", "weight": 2, "type": "llm_judge"},
-            {"id": "code_quality", "desc": "가독성·구조(과도한 단일 거대 파일 지양, 적절한 컴포넌트/함수 분리)·타입 적용이 양호함", "weight": 1, "type": "llm_judge"},
+            # 돌아가지 않으면 사용자 테스트 자체가 불가능하므로 하드 실패.
+            {"id": "build_success", "desc": "빌드/문법 검사 통과", "weight": 2, "type": "deterministic"},
+            {"id": "requirement_implemented", "desc": "이번 태스크가 담당한 요구사항(FR)이 **빠짐없이 구현되어 존재**하는가 — 있다/없다 판정. 스텁·TODO·더미 반환은 '없다'로 본다", "weight": 3, "type": "llm_judge"},
+            {"id": "requirement_operable", "desc": "구현된 기능이 **실제로 동작**하는가 — 된다/안된다 판정. 입력→처리→출력 경로가 실제로 연결되어 있고(핸들러·상태·이벤트 배선), 사용자가 그 기능을 쓸 수 있는가", "weight": 3, "type": "llm_judge"},
         ],
         "pass_threshold": 0.8,
         "hard_fail_checks": ["build_success"],
@@ -190,6 +200,9 @@ STAGE_RUBRICS = {
             {"id": "prd_fr_coverage", "desc": "PRD의 기능 요구(FR)가 누락 없이 전체적으로 통합 구현됨(부분/더미 아님)", "weight": 2, "type": "llm_judge"},
             {"id": "integration_soundness", "desc": "모듈/컴포넌트/API 연동과 핵심 E2E 흐름이 끊김 없이 동작할 구조임", "weight": 1, "type": "llm_judge"},
             {"id": "delivery_readiness", "desc": "명백한 미완성·깨진 화면·미연결 기능이 없어 고객에게 인도할 수 있는 수준임", "weight": 1, "type": "llm_judge"},
+            # ★ [2026-07-27] CODE_REVIEW 에서 이관. 품질 평가는 QA 의 몫이다 —
+            #   리뷰어는 '요구가 구현되어 동작하는가'만 보고, '잘 만들었는가'는 여기서 본다.
+            {"id": "code_quality", "desc": "가독성·구조(과도한 단일 거대 파일 지양, 적절한 컴포넌트/함수 분리)·타입 적용이 양호함", "weight": 1, "type": "llm_judge"},
         ],
         "pass_threshold": 0.8,
         "hard_fail_checks": ["build_success"],

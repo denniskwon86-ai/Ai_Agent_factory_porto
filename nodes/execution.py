@@ -1005,7 +1005,12 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         else:
             print(f" [Agent] Reviewer 비동기 코드 리뷰 및 의사결정 분류 중...{render_note}")
             prompt = (
-                "현재 작성된 모든 코드를 리뷰하고, 다음 3가지 중 하나의 의사결정(decision)을 선택하십시오.\n"
+                "당신은 **사용자를 대리해 수용 테스트**를 수행합니다. 요구사항 정의서 기준으로 "
+                "**기능이 있는가/없는가, 되는가/안되는가**만 판정하십시오.\n"
+                "⚠️ 코드 품질(가독성·구조·네이밍·타입·성능·테스트 부재)로는 반려하지 마십시오 — "
+                "그것은 다음 단계 QA 의 몫입니다. **동작하는데 마음에 안 드는 것은 통과**시키고 "
+                "개선 의견만 feedback 에 남기십시오.\n\n"
+                "다음 3가지 중 하나의 의사결정(decision)을 선택하십시오.\n"
                 "1. `PASS`: 문제가 없거나 사소한 오타 수준일 때. 릴리즈 노트 작성.\n"
                 "2. `REWORK_DEV`: 구현 누락, 버그, 설계 위반 등 실무진(Tech Lead, 개발자) 선에서 재작업이 필요할 때. 피드백 작성.\n"
                 "3. `ESCALATE_PM`: 기획서 자체의 논리적 모순이나 비즈니스 요구사항 위배로 PM의 최종 의사결정이 필요할 때. 피드백 작성.\n\n"
@@ -1056,6 +1061,31 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                       "PM 이 기획·설계 수준에서 조정하도록 상신하십시오. 무엇이 왜 수행 불가능해 보이는지 "
                       "feedback 에 구체적으로 쓰십시오."
                 )
+
+            # ★ [2026-07-27] 판정 기준(요구사항 정의서)을 명시적으로 준다.
+            #   기준 없이 "빠짐없이 구현됐는가"를 물으면 리뷰어가 자기 취향으로 판단하게 된다.
+            #   이 단계는 사용자 수용 테스트 대리이므로, **PRD 의 기능 요구와 이번 태스크의
+            #   범위**가 판정의 유일한 잣대다.
+            _prd = _safe_str(getattr(state_obj, "prd_summary", "") or "")
+            _task_scope = ""
+            try:
+                _wbs_tasks = (WBSManager(workspace_root=state_obj.workspace_root).get_wbs() or {}).get("tasks") or []
+                _cur = next((t for t in _wbs_tasks
+                             if t.get("task_id") == getattr(state_obj, "current_sprint_task_id", "")), None)
+                if _cur:
+                    _task_scope = (f"태스크 {_cur.get('task_id')}: {_cur.get('title', '')}\n"
+                                   f"목표: {_cur.get('goal', '')}\n범위: {_cur.get('scope', '')}")
+            except Exception:
+                pass
+            if _prd or _task_scope:
+                prompt += "\n\n[📋 판정 기준 — 이 요구사항만이 통과/반려의 잣대입니다]\n"
+                if _task_scope:
+                    prompt += f"\n▶ 이번 태스크가 담당한 범위(이 범위만 판정하십시오):\n{_task_scope}\n"
+                if _prd:
+                    prompt += f"\n▶ 요구사항 정의서(PRD):\n{_prd[:12000]}\n"
+                prompt += ("\n각 기능 요구(FR)에 대해 **있다/없다**, 있다면 **된다/안된다**를 확인하고, "
+                           "미충족 항목만 feedback 에 나열하십시오. "
+                           "이번 태스크 범위 밖의 요구는 판정 대상이 아닙니다.\n")
 
             _rv_fe = _collect_disk_files(state_obj.workspace_root, _FE_OWNED_EXTS)
             _rv_be = _collect_disk_files(state_obj.workspace_root, _BE_OWNED_EXTS)
