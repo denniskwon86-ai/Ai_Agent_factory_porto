@@ -4,6 +4,7 @@
 # 각 check는 type='deterministic'(LLM 0콜, 코드 평가) 또는 'llm_judge'(Flash 1콜).
 # ==========================================
 import os
+import re
 import json
 import config
 
@@ -47,6 +48,35 @@ def _check_agents_nonempty(state) -> bool:
     if not tasks:
         return False
     return all(len(t.get("required_agents", []) or []) > 0 for t in tasks)
+
+
+def _check_wbs_fr_coverage(state) -> bool:
+    """★ [2026-07-27 신설] PRD 의 기능 요구(FR-ID)가 WBS 태스크에 **전부 배정**됐는가 (LLM 0콜).
+
+    ⚠️ 왜 여기서 잡아야 하는가:
+      'WBS 가 잘못됐다'의 가장 흔한 형태는 **처리할 내용이 통째로 빠진 것**이다. 그런데
+      기존 PMO 검사는 태스크 개수(`wbs_min_tasks`)·에이전트 배정 유무(`agents_nonempty`)·
+      태스크 크기(`wbs_task_sizes`)만 봤고, **요구 누락은 보지 않았다.**
+      누락은 QA 단계의 `fr_coverage` 에서야 드러나는데 **그때는 이미 다 만든 뒤**라
+      되돌리는 비용이 가장 크다. WBS 시점에 잡으면 재분할 한 번으로 끝난다.
+
+    판정: PRD 에서 추출한 FR-ID 가 하나도 없으면 **판단 불가로 통과**(오차단 방지).
+          FR-ID 가 있으면, 그 전부가 WBS 태스크의 goal/scope/title/fr_ids 어딘가에 나타나야 한다."""
+    prd = str(getattr(state, "prd_summary", "") or "")
+    fr_ids = set(re.findall(r'\bFR-\d+\b', prd, flags=re.IGNORECASE))
+    if not fr_ids:
+        return True   # PRD 가 FR-ID 를 쓰지 않는 형식이면 이 검사로 막지 않는다
+    tasks = _read_wbs_tasks(state)
+    if not tasks:
+        return False
+    blob = " ".join(
+        f"{t.get('title','')} {t.get('goal','')} {t.get('scope','')} {' '.join(t.get('fr_ids', []) or [])}"
+        for t in tasks
+    ).upper()
+    missing = [f for f in fr_ids if f.upper() not in blob]
+    if missing:
+        print(f"⚠️ [WBS 요구 누락] PRD 의 다음 FR 이 WBS 어느 태스크에도 배정되지 않았습니다: {sorted(missing)}")
+    return not missing
 
 
 def _check_adr_present(state) -> bool:
@@ -110,6 +140,7 @@ DETERMINISTIC_CHECKS = {
     "build_success": _check_build_success,
     "fr_coverage": _check_fr_coverage,
     "wbs_task_sizes": _check_wbs_task_sizes,
+    "wbs_fr_coverage": _check_wbs_fr_coverage,
 }
 
 
@@ -147,7 +178,14 @@ STAGE_RUBRICS = {
             # [원 컨셉] 과대 태스크(estimated_token_budget 상한 초과)면 재분할 유도. 상한이 넉넉해(권장의 3배)
             # 정상 마이크로 태스크는 통과하고 명백히 뭉뚱그린 태스크만 잡는 백스톱. hard_fail 아님.
             {"id": "wbs_task_sizes", "desc": "각 WBS 태스크의 추정 토큰 예산이 1회 처리 상한 이내(과대 태스크 재분할)", "weight": 1, "type": "deterministic"},
+            # ★ [2026-07-27] 'WBS 가 잘못됐다'의 가장 흔한 형태 = **처리할 내용이 통째로 빠진 것**.
+            #   기존 검사는 개수·배정유무·크기만 봤고 요구 누락은 보지 않았다. 누락은 QA 에서야
+            #   드러나는데 그때는 이미 다 만든 뒤다. WBS 시점에 잡으면 재분할 한 번으로 끝난다.
+            {"id": "wbs_fr_coverage", "desc": "PRD 의 기능 요구(FR-ID)가 WBS 태스크에 빠짐없이 배정됨", "weight": 2, "type": "deterministic"},
         ],
+        # ⚠️ 임계 1.0 은 의도된 것이다. WBS 는 **이진**이다 — 내용이 빠졌거나 배분이 잘못됐으면
+        #   '미흡하지만 통과'가 성립하지 않고 다시 짜는 것이 맞다. 조건부 통과를 두면 잘못된
+        #   분할 위에 모든 구현이 얹힌다.
         "pass_threshold": 1.0,
         "hard_fail_checks": ["wbs_min_tasks"],
     },

@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import config
 from typing import Dict, Any
 from state_models import ProjectState
 from core.llm_gateway import gateway
@@ -222,6 +223,36 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
     })
     print(f" [Master PMO] WBS 기준 채점 - 점수 {pmo_result.get('score')} / 판정 {pmo_result.get('verdict')}")
 
+    # ★ [2026-07-27] 채점 결과를 **라우팅에 실제로 반영**한다.
+    #   ⚠️ 기존 결함: PMO 를 채점해놓고 `route_from_pmo` 는 `needs_revision`(사용자 피드백)만 봐서
+    #     **점수가 미달이어도 그대로 통과**했다. 채점 결과는 문자열로 기록되고 버려졌다.
+    #     WBS 는 이진이다 — 내용이 빠졌거나 배분이 잘못됐으면 다시 짜야 한다. 그 경로가
+    #     자동으로는 존재하지 않았고, 사람이 피드백을 줘야만 재분할됐다.
+    _pmo_pass = pmo_result.get("verdict") == "PASS"
+    _attempts = dict(getattr(state_obj, "stage_attempt_counts", {}) or {})
+    _pmo_tries = int(_attempts.get("PMO", 0)) + 1
+    _attempts["PMO"] = _pmo_tries
+    _max_tries = getattr(config, "WBS_MAX_RESPLIT_ATTEMPTS", 3)
+
+    if not _pmo_pass and _pmo_tries < _max_tries:
+        _fails = pmo_result.get("blocking_fails") or []
+        print(f"🔁 [WBS 재분할] 기준 미달({_fails}) — {_pmo_tries}/{_max_tries}회차, WBS 를 다시 분할합니다.")
+        return {
+            "needs_revision": True,          # route_from_pmo 가 Master_PMO 로 되돌린다
+            "current_stage": "PMO",
+            "stage_scores": scores,
+            "criteria_log": crit_log,
+            "stage_attempt_counts": _attempts,
+            "supervisor_feedback": (
+                f"WBS 기준 미달로 재분할이 필요합니다. 미달 항목: {_fails}. "
+                "특히 PRD 의 기능 요구(FR-ID)가 어느 태스크에도 배정되지 않았다면, "
+                "그 요구를 담당할 태스크를 반드시 추가하십시오."
+            ),
+        }
+    if not _pmo_pass:
+        # 상한 도달: 무한 재분할 대신 사람이 보도록 표면화하고 진행한다(HOTL 게이트가 뒤따른다).
+        print(f"⚠️ [WBS] 재분할 {_max_tries}회에도 기준 미달 — 사용자 확인이 필요합니다: {pmo_result.get('blocking_fails')}")
+
     return {
         "factory_mode": "EXECUTION",
         "needs_revision": False,
@@ -230,7 +261,8 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
         "current_stage": "PMO",
         "stage_scores": scores,
         "criteria_log": crit_log,
-        "supervisor_feedback": "" if pmo_result.get("verdict") == "PASS" else f"WBS 기준 미달: {pmo_result.get('blocking_fails')}",
+        "stage_attempt_counts": _attempts,
+        "supervisor_feedback": "" if _pmo_pass else f"WBS 기준 미달(재분할 상한 도달): {pmo_result.get('blocking_fails')}",
     }
 
 async def run_pm(state: Any) -> Dict[str, Any]:
