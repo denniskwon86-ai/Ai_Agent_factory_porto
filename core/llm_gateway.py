@@ -401,6 +401,8 @@ class LLMGateway:
 
         # [레버B] 모델별 쿨다운 상태(모델명 → 해제 timestamp). 죽은 모델을 폴백 체인에서 한시적 제외.
         self._model_cooldown = {}
+        # 마지막으로 응답에 성공한 모델(sticky winner) — 다음 체인 구성에서 맨 앞으로 올린다.
+        self._last_success_model = None
 
         # 3. [Track 1] Pro 모델 체인 조립 (고난도 추론용)
         # [레버B 정제] 비-텍스트 Gemini 변종 제외 + 변종 개수 상한(MAX_GEMINI_VARIANTS)으로 죽은 체인 walk 축소.
@@ -419,10 +421,14 @@ class LLMGateway:
                 pro_candidates.append(m)
 
         # 이름↔인스턴스를 함께 추적해 per-model 쿨다운(런타임 체인 재구성)에 사용한다.
+        # ★ [2026-07-27] max_retries 를 0 에서 올린다 — 자세한 근거는 config.GEMINI_MAX_RETRIES 주석.
+        #   요약: 분당 레이트리밋 한 번에 즉시 폴백하면 출력 8k 짜리 llama 가 받는데, 그게 더 느리고
+        #   품질도 낮아 재작업이 늘어난다. 몇 초 기다렸다 Gemini 로 받는 편이 모든 면에서 낫다.
+        _g_retry = getattr(config, "GEMINI_MAX_RETRIES", 2)
         pro_named = [(pro_candidates[0],
-                      ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=pro_candidates[0], temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(pro_candidates[0])))]
+                      ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=pro_candidates[0], temperature=0.2, max_retries=_g_retry, max_output_tokens=_gemini_out(pro_candidates[0])))]
         for m in pro_candidates[1:]:
-            pro_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.2, max_retries=0, max_output_tokens=_gemini_out(m))))
+            pro_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.2, max_retries=_g_retry, max_output_tokens=_gemini_out(m))))
         if _xai_enabled():
             pro_named.append((config.LLM_PRO_FALLBACK_LIST[1], _make_xai(config.LLM_PRO_FALLBACK_LIST[1], temperature=0.2)))
         pro_named.append((config.LLM_PRO_FALLBACK_LIST[2], ChatGroq(timeout=config.LLM_TIMEOUT_GROQ, model=config.LLM_PRO_FALLBACK_LIST[2], temperature=0.2, max_retries=0, max_tokens=_groq_out(config.LLM_PRO_FALLBACK_LIST[2]))))
@@ -446,9 +452,9 @@ class LLMGateway:
         flash_candidates = flash_candidates[:1 + getattr(config, "MAX_GEMINI_VARIANTS", 3)]
 
         flash_named = [(flash_candidates[0],
-                        ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=flash_candidates[0], temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(flash_candidates[0])))]
+                        ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=flash_candidates[0], temperature=0.1, max_retries=_g_retry, max_output_tokens=_gemini_out(flash_candidates[0])))]
         for m in flash_candidates[1:]:
-            flash_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.1, max_retries=0, max_output_tokens=_gemini_out(m))))
+            flash_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.1, max_retries=_g_retry, max_output_tokens=_gemini_out(m))))
         if _xai_enabled():
             flash_named.append((config.LLM_FLASH_FALLBACK_LIST[1], _make_xai(config.LLM_FLASH_FALLBACK_LIST[1], temperature=0.1)))
         flash_named.append((config.LLM_FLASH_FALLBACK_LIST[2], ChatGroq(timeout=config.LLM_TIMEOUT_GROQ, model=config.LLM_FLASH_FALLBACK_LIST[2], temperature=0.1, max_retries=0, max_tokens=_groq_out(config.LLM_FLASH_FALLBACK_LIST[2]))))
@@ -512,6 +518,13 @@ class LLMGateway:
         전부 쿨다운이면 최소 1개(첫 모델)로 재프로브(완전 실패 방지)."""
         now = time.time()
         live_pairs = [(n, inst) for (n, inst) in ordered if now >= self._model_cooldown.get(n, 0.0)]
+        # ★ 마지막으로 성공한 모델을 맨 앞으로(sticky winner). 죽은 모델을 매번 재시도로
+        #   두들기는 비용을 없앤다. 그 모델이 죽으면 자연히 다음 성공 모델로 갱신된다.
+        _win = getattr(self, "_last_success_model", None)
+        if _win:
+            _hit = [(n, i) for (n, i) in live_pairs if n == _win]
+            if _hit:
+                live_pairs = _hit + [(n, i) for (n, i) in live_pairs if n != _win]
         # ★ 코드 생성은 출력 예산이 충분한 모델을 **앞으로** 정렬한다(제거가 아니라 후순위화).
         #   제거하면 전멸 시 아무것도 못 하지만, 후순위화하면 적격 모델을 먼저 소진한 뒤에만
         #   부적격 모델로 내려간다. 순서는 안정 정렬로 원래 우선순위를 보존한다.
@@ -583,6 +596,15 @@ class LLMGateway:
         #   실측: 1번째 호출 attempts=10 → 2·3번째 호출 attempts=1.
         #   → 원인을 모르면 짧게 쉰다. 진짜 쿼터사면 다음 프로브에서 429 를 받아 그때 장기 배제된다.
         _cd_free = cd if _is_quota else cd_transient
+
+        # ★ [2026-07-27] '마지막으로 성공한 모델'을 기억해 다음 호출에서 먼저 시도한다(sticky winner).
+        #   ⚠️ max_retries 를 올리면(GEMINI_MAX_RETRIES) 죽은 모델을 재시도하는 비용도 함께 커진다.
+        #     실측 환경에서 gemini-2.5-pro 계열 4개가 일일 쿼터 소진 상태라, 매 walk 마다 그 4개를
+        #     재시도로 두들긴 뒤에야 살아있는 flash 에 도달하게 된다.
+        #   특정 모델명을 하드코딩하지 않고 **관측된 생존**으로 순서를 정한다 — 환경이 바뀌면
+        #   (쿼터 회복, 키 교체) 자동으로 따라간다.
+        if ok and attempts and attempts[-1] and attempts[-1] != "?":
+            self._last_success_model = attempts[-1]
 
         failed = attempts if not ok else attempts[:-1]
         if not _is_quota and failed:
