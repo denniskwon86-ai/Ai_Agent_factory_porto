@@ -223,15 +223,27 @@ STAGE_RUBRICS = {
         "judge_heavy": True,
         "judge_persona": "qa_skill",
     },
-    # Supervisor(발주 고객사 대리인, 비즈니스 수용): RFP 계약대로인가, 실무에 써먹나, 완료 검수 통과인가 (엄격)
+    # ══════════════════════════════════════════════════════════════════════════
+    # Supervisor(발주 고객사 대리인): **비즈니스 수용** 판단 — 품질 재심사가 아니다
+    # ══════════════════════════════════════════════════════════════════════════
+    # ⚠️ [2026-07-27 역할 정렬] QA 가 최소 기준선만 관문으로 쓰고 나머지 품질 관찰을
+    #   **리포트로 넘기면**, 그 리포트를 받는 이 단계가 다시 품질로 반려해서는 안 된다.
+    #   그러면 QA 에서 뺀 병목이 한 단계 뒤에서 그대로 부활한다.
+    #   기존 구성의 실제 계산: 총 8점 / 임계 0.85 → 통과에 6.8 필요.
+    #   `completeness_polish`(2점, "엄격하게 판단")가 0 이면 최대 6.0 → **마감 품질만으로
+    #   수용검수가 반려**된다. 요구가 전부 충족돼도 막힌다.
+    #   → 이 단계의 관문은 **계약 이행 여부와 실무 사용 가능성**으로 한정하고,
+    #     마감 완성도는 `advisory` 로 내려 리포트에 남긴다(고객이 판단할 재료).
     "SUPERVISOR": {
         "checks": [
             {"id": "rfp_business_coverage", "desc": "RFP의 필수 비즈니스 요구(REQ-ID)가 결과물에서 빠짐없이 실제로 충족됨", "weight": 3, "type": "llm_judge"},
             {"id": "usability_real_work", "desc": "실제 업무에 바로 써먹을 수 있는 수준의 완결성·사용성(핵심 사용자 시나리오가 매끄럽게 수행됨)", "weight": 2, "type": "llm_judge"},
-            {"id": "completeness_polish", "desc": "빈틈·미흡·거친 마감이 없어 완성도가 인도·검수 통과 수준임(엄격하게 판단)", "weight": 2, "type": "llm_judge"},
-            {"id": "acceptance_signoff", "desc": "발주사 입장에서 용역비를 지불하고 완료 수용해도 될 만한 종합 품질인가", "weight": 1, "type": "llm_judge"},
+            {"id": "acceptance_signoff", "desc": "발주사 입장에서 용역비를 지불하고 완료 수용해도 될 만한가 — 계약 이행 관점", "weight": 1, "type": "llm_judge"},
+            # 보고 전용: 마감 완성도는 반려 사유가 아니라 고객에게 전달할 개선 권고다.
+            {"id": "completeness_polish", "desc": "빈틈·미흡·거친 마감 없이 완성도가 높은가 — 개선 권고용 관찰", "weight": 1, "type": "llm_judge", "advisory": True},
         ],
-        "pass_threshold": 0.85,
+        # 관문 6점 기준. 계약 요구가 충족되고 실무에 쓸 수 있으면 수용한다.
+        "pass_threshold": 0.8,
         "hard_fail_checks": ["rfp_business_coverage"],
         "judge_heavy": True,
         "judge_persona": "supervisor_skill",

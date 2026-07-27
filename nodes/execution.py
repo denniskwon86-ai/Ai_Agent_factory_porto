@@ -1262,9 +1262,24 @@ def _format_gate_report(title: str, result: Dict[str, Any]) -> str:
     lines = [f"## {title}", f"- 판정: {result.get('verdict')} · 점수 {result.get('score')}"]
     per = result.get("per_check", {}) or {}
     if per:
-        lines.append("- 기준별 점수:")
-        for k, v in per.items():
-            lines.append(f"  - {'[OK]' if v >= 0.5 else '❌'} {k}: {v}")
+        # ★ [2026-07-27] 관문 항목과 '보고 전용(참고)' 항목을 구분해 표기한다.
+        #   구분이 없으면 다음 단계(Supervisor·고객)가 참고 항목의 낮은 점수를 결함으로 오인해
+        #   다시 반려하게 된다 — QA 에서 뺀 병목이 뒤에서 부활하는 경로다.
+        from criteria import STAGE_RUBRICS as _RUB
+        _key = next((k for k in _RUB if k.lower() in title.lower() or title.startswith(k)), None)
+        _adv = set()
+        if _key:
+            _adv = {c["id"] for c in _RUB[_key].get("checks", []) if c.get("advisory")}
+        _gate = {k: v for k, v in per.items() if k not in _adv}
+        _info = {k: v for k, v in per.items() if k in _adv}
+        if _gate:
+            lines.append("- 기준별 점수(관문 — 통과/반려 판정에 반영):")
+            for k, v in _gate.items():
+                lines.append(f"  - {'[OK]' if v >= 0.5 else '❌'} {k}: {v}")
+        if _info:
+            lines.append("- 개선 권고(참고 — **반려 사유가 아님**. 판단 재료로만 제공):")
+            for k, v in _info.items():
+                lines.append(f"  - {'[양호]' if v >= 0.5 else '[개선여지]'} {k}: {v}")
     if result.get("blocking_fails"):
         lines.append(f"-  치명 미달: {', '.join(result['blocking_fails'])}")
     if result.get("rationale"):
