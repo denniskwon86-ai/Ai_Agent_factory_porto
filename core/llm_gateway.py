@@ -409,6 +409,14 @@ class LLMGateway:
             if 'pro' in m.lower() and _is_text_gen_model(m) and m not in pro_candidates:
                 pro_candidates.append(m)
         pro_candidates = pro_candidates[:1 + getattr(config, "MAX_GEMINI_VARIANTS", 3)]
+        # ★ [2026-07-27] 살아있는 Gemini Flash 를 Pro 변종 풀 **뒤에** 덧붙인다.
+        #   Pro 변종들은 같은 무료 쿼터 풀을 공유해 함께 429 가 나는데, 그때 남은 선택지가
+        #   출력 8k 짜리 OpenRouter llama 뿐이라 코드 생성이 구조적으로 실패했다(v3·v4 실측).
+        #   ⚠️ `LLM_PRO_FALLBACK_LIST` 는 위치=제공사 매핑이라 거기에 끼워 넣으면 안 된다
+        #     (실제로 끼워 넣었다가 xAI 에 gemini 를 보내는 체인이 만들어졌다). 여기서 붙인다.
+        for m in getattr(config, "PRO_TIER_EXTRA_GEMINI", []):
+            if m and m not in pro_candidates and (not available_gemini_models or m in available_gemini_models):
+                pro_candidates.append(m)
 
         # 이름↔인스턴스를 함께 추적해 per-model 쿨다운(런타임 체인 재구성)에 사용한다.
         pro_named = [(pro_candidates[0],

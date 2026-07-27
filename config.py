@@ -77,7 +77,19 @@ ENGINE_TIERS = {
 #   → 살아있는 무료 Flash(출력 65,536 = llama 의 8배)를 Pro 체인에 편입한다. **비용 0.**
 #   'Pro 티어에 Flash 모델을 넣는 게 맞나'에 대한 답: **죽은 Pro 보다 살아있는 Flash 가 낫다.**
 #   품질이 필요한 자리는 1순위 2.5-pro 가 살아나면 자동으로 되찾는다(쿨다운 만료 시 재프로브).
-LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct"]
+# ⚠️⚠️ 이 리스트는 **위치 기반**이다: [0]=Gemini, [1]=xAI, [2]=Groq, [3]=Cerebras, [4]=OpenRouter.
+#   `llm_gateway._build_chains` 가 인덱스로 제공사를 매핑하므로 **중간에 항목을 끼워 넣으면
+#   전 제공사 매핑이 밀린다**(실측: 끼워 넣었더니 xAI 에 gemini 모델을 보내는 체인이 만들어졌다).
+#   Gemini 계열을 더 넣고 싶으면 이 리스트가 아니라 `PRO_TIER_EXTRA_GEMINI` 를 쓸 것.
+LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct"]
+# ★ [2026-07-27] Pro 티어의 Gemini 변종 풀에 **추가로** 붙일 모델(제공사 매핑과 무관하게 안전).
+#   실측(라이브 프로브): gemini-2.5-pro = 429 RESOURCE_EXHAUSTED(무료 쿼터 소진)
+#                        gemini-2.5-flash = 성공 1.5초 (무료, 생존), 출력 상한 65,536
+#   코드 생성은 is_heavy=True 라 Pro 체인만 타는데, 1순위가 쿼터사하면 나머지 제공사를 거쳐
+#   **출력 상한 8,192 인 OpenRouter llama** 에 착지했다. 그 결과 v3 100/100 · v4 35/35 호출이
+#   전부 llama 단독이었고 코드 생성에 Gemini 가 한 번도 쓰이지 않았다.
+#   → 살아있는 무료 Flash 를 Pro 변종 풀에 붙인다. 비용 0. 죽은 Pro 보다 살아있는 Flash 가 낫다.
+PRO_TIER_EXTRA_GEMINI = ["gemini-2.5-flash", "gemini-2.0-flash"]
 # ⚠️ [2026-07-26 실측 결함 수정] Flash 체인 말단이 무료 모델(`...:free`)이었다.
 #   judge/scoring 은 Flash 티어를 쓰는데 체인 전체가 무료라 **OpenRouter 크레딧이 있어도
 #   Flash 호출은 쓸 수 없었다.** 실측: RFP 채점에서 depth=7 walk 전부 실패 → 전 모델 쿨다운 →
