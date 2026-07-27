@@ -254,6 +254,50 @@ def _tech_spec_declares_no_server_api(state_obj: ProjectState) -> bool:
     return any(m.lower() in low for m in _NO_SERVER_API_MARKERS)
 
 
+def _is_syntax_clean(raw_out: Any) -> bool:
+    """이 표본의 파일들이 정적 문법 검사를 통과하는가(파일이 1개 이상일 것)."""
+    files = _extract_files_from_json(_safe_str(raw_out))
+    if not files:
+        return False
+    for f in files:
+        path = f.get("file_path", "")
+        code = f.get("code", "")
+        if path.endswith((".ts", ".tsx", ".js", ".jsx")):
+            valid, _ = LocalSyntaxChecker.check_javascript_syntax(code)
+            if not valid:
+                return False
+        elif path.endswith(".py"):
+            valid, _ = LocalSyntaxChecker.check_python_syntax(code)
+            if not valid:
+                return False
+    return True
+
+
+_FILE_ERR_RE = re.compile(r'^\s*\[([^\]]+\.(?:tsx?|jsx?|py|css|html))\]', re.MULTILINE)
+
+
+def _targeted_repair_instruction(build_error_log: str) -> str:
+    """빌드 오류가 특정 파일을 지목하면 **그 파일만** 정밀 복구하도록 지시한다.
+
+    ⚠️ [2026-07-27 C2] `_INCREMENTAL_GUARD` 는 항상 '기존 파일 전부 + 신규'를 재출력하라고
+      요구한다. 그런데 실패 원인이 파일 하나의 구문 오류일 때 전체를 다시 쓰게 하면
+      ① 출력 예산을 통째로 다시 태우고(잘릴 확률↑) ② 이미 정상인 파일까지 새로 쓰면서
+      앞 회차 수정이 되돌아간다(결함 #21 의 회귀 메커니즘). 지목된 파일만 고치게 한다."""
+    if not build_error_log:
+        return ""
+    targets = list(dict.fromkeys(_FILE_ERR_RE.findall(build_error_log)))
+    if not targets:
+        return ""
+    return (
+        "\n\n[🎯 정밀 복구 지시 - 이번 회차에 한함]\n"
+        f"직전 실패는 다음 파일에서만 발생했습니다: {', '.join(targets)}\n"
+        "· **이 파일들만** 수정해서 내십시오. 나머지 정상 파일은 이번 응답에 포함하지 마십시오.\n"
+        "· 이유: 정상 파일까지 다시 쓰면 출력이 잘릴 위험이 커지고, 앞 회차에서 이미 고친 "
+        "내용이 되돌아갑니다.\n"
+        "· 위의 '증분 개발' 지시 중 '기존 파일 전부 재출력' 부분은 **이번 회차에는 적용하지 않습니다.**"
+    )
+
+
 def _recovery_swarm_size(is_rework: bool, retry: int) -> int:
     """복구 시도의 표본 수.
 
@@ -316,7 +360,34 @@ async def _swarm_execution(state_obj: ProjectState, base_prompt: str, is_heavy: 
             return None
 
     print(f" [Micro-Swarm] {num_swarm}개의 병렬 에이전트 생성 중...")
-    results = await asyncio.gather(*[_run_single(i) for i in range(1, num_swarm + 1)], return_exceptions=True)
+    # ★ [2026-07-27 C2] 첫 유효 결과가 나오면 나머지를 **취소**한다.
+    #   기존 `asyncio.gather` 는 모든 표본이 끝날 때까지 기다렸다. 표본 하나가 이미
+    #   문법 검증을 통과했는데도 다른 표본의 420초 타임아웃을 끝까지 대기하는 낭비가 있었다.
+    _tasks = [asyncio.create_task(_run_single(i)) for i in range(1, num_swarm + 1)]
+    results: List[Any] = []
+    try:
+        _pending = set(_tasks)
+        while _pending:
+            _done, _pending = await asyncio.wait(_pending, return_when=asyncio.FIRST_COMPLETED)
+            for t in _done:
+                try:
+                    r = t.result()
+                except QuotaExhaustedException:
+                    raise
+                except Exception as ex:
+                    r = ex
+                results.append(r)
+                # 이 표본이 문법 검증까지 통과했으면 즉시 채택하고 나머지는 취소한다.
+                if not isinstance(r, Exception) and _is_syntax_clean(r):
+                    if _pending:
+                        print(f" [Micro-Swarm] 유효 결과 확보 — 나머지 표본 {len(_pending)}개 취소")
+                        for p in _pending:
+                            p.cancel()
+                    return r
+    finally:
+        for t in _tasks:
+            if not t.done():
+                t.cancel()
 
     for r in results:
         if isinstance(r, QuotaExhaustedException):
@@ -390,6 +461,7 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
     _berr = (getattr(state_obj, "build_error_log", "") or "").strip()
     if _berr:
         prompt += f"\n\n[ 직전 빌드 실패 원인 - 아래 오류를 반드시 해결한 코드를 생성하십시오]:\n{_berr}"
+        prompt += _targeted_repair_instruction(_berr)
         print(f" [Frontend] 직전 빌드 오류 반영 재시도({_retry}회차): {_berr[:80]}")
 
     # 강제로 Pro 티어(유료) 사용
@@ -419,6 +491,7 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
     _berr = (getattr(state_obj, "build_error_log", "") or "").strip()
     if _berr:
         prompt += f"\n\n[ 직전 빌드 실패 원인 - 아래 오류를 반드시 해결한 코드를 생성하십시오]:\n{_berr}"
+        prompt += _targeted_repair_instruction(_berr)
         print(f" [Backend] 직전 빌드 오류 반영 재시도({_retry}회차): {_berr[:80]}")
 
     # 강제로 Pro 티어(유료) 사용
@@ -726,7 +799,12 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         quality_advisory = ""  # 정적 품질 백스톱 권고(하드 차단 아님) - LLM 리뷰어 프롬프트에 주입
         if has_fe_code:
             from nodes.utils.render_checker import check_frontend_render
-            fe_files = _extract_files_from_json(state_obj.frontend_code_summary)
+            # ★ [2026-07-27] 마지막 LLM 출력이 아니라 **디스크의 현재 전체 파일 집합**을 검증한다.
+            #   ① 정밀 복구(C2)로 일부 파일만 재출력되면, LLM 출력만 보는 검증은 나머지 모듈을
+            #      찾지 못해 '미해결 상대 모듈' 거짓 실패를 낸다.
+            #   ② 실제로 배포되는 것은 디스크의 파일 집합이지 마지막 응답이 아니다.
+            fe_files = _collect_disk_files(state_obj.workspace_root, _FE_OWNED_EXTS) \
+                or _extract_files_from_json(state_obj.frontend_code_summary)
             # 최대 60초 동기 subprocess - 이벤트 루프 동결 방지 위해 스레드로
             render = await asyncio.to_thread(check_frontend_render, fe_files)
             if not render.get("ok") and not render.get("skipped"):
@@ -823,7 +901,9 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         # ⚙️ 백엔드 스모크 테스트러너: 격리 부팅 + 엔드포인트 검증 (실패 시 즉시 재작업)
         if has_be_code:
             from nodes.utils.backend_smoke import check_backend_smoke
-            be_files = _extract_files_from_json(state_obj.backend_code_summary)
+            # ★ [2026-07-27] 위 렌더 검증과 같은 이유로 디스크의 현재 전체 파일 집합을 검증한다.
+            be_files = _collect_disk_files(state_obj.workspace_root, _BE_OWNED_EXTS) \
+                or _extract_files_from_json(state_obj.backend_code_summary)
             # 최대 45초 동기 subprocess(격리 부팅) - 이벤트 루프 동결 방지 위해 스레드로
             smoke = await asyncio.to_thread(check_backend_smoke, be_files)
             if not smoke.get("ok") and not smoke.get("skipped"):
