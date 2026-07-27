@@ -17,7 +17,11 @@ from core.org_directory import AccessScope, OrgDirectory
 
 
 @pytest.fixture()
-def org(tmp_path):
+def org(tmp_path, monkeypatch):
+    """권한 해석을 검증하려면 강제 스위치를 켜야 한다.
+    기본값 ORG_ENFORCE=False 는 단계적 도입을 위한 안전판이며 별도 테스트로 검증한다."""
+    import config
+    monkeypatch.setattr(config, "ORG_ENFORCE", True, raising=False)
     return OrgDirectory(db_path=str(tmp_path / "org_test.db"))
 
 
@@ -28,6 +32,33 @@ def test_no_departments_means_unrestricted(org):
     assert s.unrestricted is True
     assert s.can_read("whatever") and s.can_write("whatever")
     assert org.visible_resources(s, "project") is None, "무제한이면 필터하지 말라는 뜻의 None 이어야 합니다"
+
+
+def test_bootstrap_not_locked_when_no_users_exist(org):
+    """★ 부서만 만들고 사용자가 없으면 무제한이어야 한다.
+    여기서 강제하면 **첫 관리자를 만들 권한을 가진 사람이 아무도 없어 시스템이 잠긴다**."""
+    org.create_department("sales", "영업부")
+    assert org.has_any_user() is False
+    s = org.resolve_scope("")
+    assert s.unrestricted is True and s.can_edit_org is True, "부트스트랩이 막히면 조직을 세울 수 없습니다"
+
+
+def test_enforcement_starts_after_first_user(org):
+    org.create_department("sales", "영업부")
+    org.upsert_user("u1", "사용자1")
+    assert org.resolve_scope("u1").unrestricted is False, "첫 사용자 등록 후에는 강제되어야 합니다"
+
+
+def test_org_enforce_switch_off_disables_all_filters(tmp_path, monkeypatch):
+    """ORG_ENFORCE=False 면 조직·사용자가 있어도 필터가 no-op — 단계적 도입 안전판."""
+    import config
+    monkeypatch.setattr(config, "ORG_ENFORCE", False, raising=False)
+    od = OrgDirectory(db_path=str(tmp_path / "off.db"))
+    od.create_department("sales", "영업부")
+    od.upsert_user("u1", "사용자1")
+    s = od.resolve_scope("u1")
+    assert s.unrestricted is True
+    assert od.visible_resources(s, "project") is None
 
 
 def test_visible_resources_none_vs_empty_are_distinct(org):
@@ -181,6 +212,7 @@ def test_data_admin_manages_standards_but_not_org(org):
 
 def test_unknown_user_sees_nothing(org):
     _org_with_tree(org)
+    org.upsert_user("someone", "등록사용자")   # 사용자가 있어야 강제가 시작된다(부트스트랩 해제)
     s = org.resolve_scope("ghost")
     assert s.unrestricted is False and s.readable_dept_ids == frozenset()
 

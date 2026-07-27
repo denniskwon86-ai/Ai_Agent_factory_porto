@@ -307,52 +307,43 @@ async def create_mega_project(req: MegaProjectCreateRequest):
     os.makedirs(mega_path, exist_ok=True)
     _write_project_meta(mega_path, tid, "default", "react_app")
     
-    domain_agents_map = {
-        "sales": ["Sales_Agent"],
-        "procurement": ["Purchase_Agent"],
-        "production": ["Production_Agent"],
-        "quality": ["Quality_Agent"],
-        "logistics": ["Logistics_Agent"],
-        "marketing": ["Marketing_Agent"],
-        "finance": ["Finance_Agent"],
-        "accounting": ["Finance_Agent"]
-    }
-    
+    # ★ [2026-07-27 Phase 1] 하드코딩 맵 3개(domain_agents_map / domain_templates_map /
+    #   domain_ko_map)를 제거하고 **부서 기준정보**를 조회한다.
+    #   ⚠️ 왜: 부서 하나를 추가·개명·이동·폐지하려면 코드를 고치고 배포해야 했고, 세 맵이
+    #     서로 어긋나도 아무도 알아채지 못했다(한 곳에만 추가하면 조용히 누락).
+    #   부서가 아직 시드되지 않았다면(조직 미도입) 기존과 동일하게 동작하도록
+    #   `core/org_seed._LEGACY_DEPARTMENTS` 를 기본값으로 쓴다 — 하위호환 계약.
+    from core.org_directory import org_directory
+    from core.org_seed import _LEGACY_DEPARTMENTS, resolve_department_config
+
+    _registered = [d for d in org_directory.list_departments()
+                   if (d.get("domain_agents") or d.get("default_template_id"))]
+    if _registered:
+        _domains = [d["dept_id"] for d in _registered]
+    else:
+        _domains = [d["dept_id"] for d in _LEGACY_DEPARTMENTS]
+
     sub_projects_map = {}
-    
-    domain_templates_map = {
-        "sales": "manufacturing-market-forecast",
-        "procurement": "manufacturing-cost-analysis",
-        "production": "manufacturing-production",
-        "quality": "manufacturing-qc",
-        "logistics": "manufacturing-production",
-        "marketing": "content-marketing",
-        "finance": "manufacturing-cost-analysis",
-        "accounting": "manufacturing-cost-analysis"
-    }
-    
-    domain_ko_map = {
-        "sales": "영업",
-        "procurement": "구매",
-        "production": "생산",
-        "quality": "품질",
-        "logistics": "물류",
-        "marketing": "마케팅",
-        "finance": "재무",
-        "accounting": "회계"
-    }
-    
+
     # 2. 서브 프로젝트들 생성 — 도메인별 템플릿 및 에이전트 필터 주입
-    for domain, domain_agents in domain_agents_map.items():
+    for domain in _domains:
+        _cfg = resolve_department_config(domain)
+        if not _cfg.get("agents") and not _cfg.get("template_id"):
+            # 미등록 부서 → 이관 원천에서 기본값 확보(조직 미도입 상태의 하위호환)
+            _legacy = next((d for d in _LEGACY_DEPARTMENTS if d["dept_id"] == domain), {})
+            _cfg = {"name_ko": _legacy.get("name_ko", domain), "agents": _legacy.get("agents", []),
+                    "template_id": _legacy.get("template", "")}
+        domain_agents = _cfg.get("agents") or []
+
         sub_id = f"{req.mega_project_id}_{domain}"
         sub_path = os.path.join("./projects", sub_id)
         os.makedirs(sub_path, exist_ok=True)
-        
-        sub_tid = domain_templates_map.get(domain, tid)
+
+        sub_tid = _cfg.get("template_id") or tid
         # 서브 프로젝트는 도메인 특화 템플릿 사용 (없으면 마스터 템플릿)
         _write_project_meta(sub_path, sub_tid, "default", "react_app")
-        
-        domain_name_ko = domain_ko_map.get(domain, domain.upper())
+
+        domain_name_ko = _cfg.get("name_ko") or domain.upper()
         # 서브 프로젝트 상태 초기화
         sub_state = {
             "is_mega_project": False,

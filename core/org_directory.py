@@ -422,6 +422,20 @@ class OrgDirectory:
                              "LIMIT 1").fetchone()
         return bool(r)
 
+    def has_any_user(self) -> bool:
+        with self._connect() as conn:
+            r = conn.execute("SELECT 1 FROM users WHERE status='active' LIMIT 1").fetchone()
+        return bool(r)
+
+    def is_bootstrap(self) -> bool:
+        """아직 조직이 '가동'되지 않은 상태인가.
+
+        ⚠️ [부트스트랩 잠금 방지] 부서만 등록하고 사용자가 하나도 없으면, 권한을 강제하는 순간
+          **첫 관리자를 만들 권한을 가진 사람이 아무도 없어 시스템이 잠긴다**(실측: /seed 직후
+          /users POST 가 403). 사용자가 0명이면 권한 강제는 의미가 없으므로 무제한으로 둔다.
+          첫 사용자가 등록되는 순간부터 정상 강제된다."""
+        return not self.has_any_department() or not self.has_any_user()
+
     def resolve_scope(self, user_id: str = "") -> AccessScope:
         """사용자의 확정 권한 스코프. 캐시되며 조직 쓰기 시 무효화된다."""
         key = user_id or "__anon__"
@@ -429,9 +443,14 @@ class OrgDirectory:
         if cached is not None:
             return cached
 
-        # ① 조직 미도입 → 전면 무제한. 지금과 100% 동일 동작(하위호환 계약).
-        if not self.has_any_department():
-            scope = AccessScope(user_id=user_id, display_name=user_id, unrestricted=True)
+        # ① 조직 미도입/부트스트랩/강제 해제 → 전면 무제한. 지금과 100% 동일 동작.
+        #   · 부서가 없다 = 조직을 도입하지 않았다
+        #   · 사용자가 없다 = 부서만 만들고 아직 가동하지 않았다 → 여기서 강제하면 첫 관리자를
+        #     만들 수 없어 시스템이 잠긴다(실측)
+        #   · ORG_ENFORCE=False = 단계적 도입을 위한 안전판
+        if self.is_bootstrap() or not getattr(config, "ORG_ENFORCE", False):
+            scope = AccessScope(user_id=user_id, display_name=user_id, unrestricted=True,
+                                can_edit_org=True, can_run_enterprise=True, can_manage_standard=True)
             self._scope_cache[key] = scope
             return scope
 
