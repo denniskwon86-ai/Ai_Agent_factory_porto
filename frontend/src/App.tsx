@@ -13,6 +13,7 @@ import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
 import { MasterDataPanel } from './components/MasterDataPanel';
+import { WorkStandardPanel } from './components/WorkStandardPanel';
 import { CrosswalkPanel } from './components/CrosswalkPanel';
 import { TelemetryPanel } from './components/TelemetryPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
@@ -48,6 +49,7 @@ export default function App() {
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
   const [showMasterData, setShowMasterData] = useState(false);
+  const [showWorkStandard, setShowWorkStandard] = useState(false);
   const [showCrosswalk, setShowCrosswalk] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
@@ -166,6 +168,9 @@ export default function App() {
         {showMasterData && (
           <MasterDataPanel onClose={() => setShowMasterData(false)} />
         )}
+        {showWorkStandard && (
+          <WorkStandardPanel onClose={() => setShowWorkStandard(false)} />
+        )}
         {showCrosswalk && (
           <CrosswalkPanel onClose={() => setShowCrosswalk(false)} />
         )}
@@ -205,6 +210,13 @@ export default function App() {
                 title="자재·공정·설비·KPI 기준정보(골든 레코드)를 등록 — 확정 조회로 모든 에이전트에 주입(모델 불변)"
               >
                 🗂 기준정보 마스터
+              </button>
+              <button
+                onClick={() => setShowWorkStandard(true)}
+                className="text-sm font-bold text-amber-200 bg-amber-900/40 hover:bg-amber-800/60 border border-amber-700/50 px-4 py-2 rounded-lg transition-all"
+                title="에이전트의 법규·사규 — 각 에이전트가 무엇을 어떤 기준으로 평가해 다음 단계로 넘기는지를 정의. 개정 시 새 버전이 생기고 구판은 보존된다"
+              >
+                📜 업무표준
               </button>
               <button
                 onClick={() => setShowCrosswalk(true)}
