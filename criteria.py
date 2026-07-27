@@ -189,22 +189,36 @@ STAGE_RUBRICS = {
         "pass_threshold": 0.8,
         "hard_fail_checks": ["build_success"],
     },
-    # QA(수행사 인도 전 검수, 전체/통합 관점): 기획서·설계서대로 옳게 통합 구현되어 고객 인도 가능한가
+    # ══════════════════════════════════════════════════════════════════════════
+    # QA = 품질을 **평가**하되, 통과는 **최소 기준선**으로만 막는다
+    # ══════════════════════════════════════════════════════════════════════════
+    # ⚠️ [2026-07-27 역할 재정의] QA 가 품질을 판정하는 것은 맞다. 그러나 **사용자가 요구한
+    #   기능이 모두 구현되어 있고 전체 시스템에 크게 해가 되지 않는다면**, 품질 잣대를 계속
+    #   들이대며 개발 완료된 산출물을 반려해서는 안 된다.
+    #   무조건 90~100점이어야 통과시키는 외곬이 되면 완주 자체가 불가능해진다.
+    #   → **관문(gate)은 최소한으로**: 빌드가 되고, 요구 기능이 실제로 다 들어 있고,
+    #     인도 못 할 수준의 파손이 없으면 통과시킨다.
+    #   → 그 이상(설계 정합성·통합 견고성·코드 품질)은 `advisory: True` 로 두어
+    #     **점수와 리포트에는 남기되 반려하지 않는다.** 그 내용은 Supervisor 와 최종 고객에게
+    #     리포트로 전달되어 판단 재료가 된다.
     "QA": {
         "checks": [
+            # ── 관문(통과/반려 계산에 반영) — 최소 기준선 ──────────────────
             {"id": "build_success", "desc": "빌드/문법 검사 통과", "weight": 2, "type": "deterministic"},
-            # [G1] 요구 누락의 결정론 탐지 — LLM 심판(prd_fr_coverage)의 '감'을 집합 연산으로 보강.
-            # 소프트 감점(hard_fail 아님): WBS 의 FR 인용 누락이 흔한 초기에는 완주를 막지 않는다.
-            {"id": "fr_coverage", "desc": "PRD 정의 FR-ID 전수가 추적성 맵(태스크→구현 파일)에 매핑됨 — 요구 누락 결정론 탐지", "weight": 2, "type": "deterministic"},
-            {"id": "design_conformance", "desc": "구현이 아키텍처·기술명세(설계서)의 파일 책임·인터페이스·데이터 모델대로 되어 있음", "weight": 2, "type": "llm_judge"},
-            {"id": "prd_fr_coverage", "desc": "PRD의 기능 요구(FR)가 누락 없이 전체적으로 통합 구현됨(부분/더미 아님)", "weight": 2, "type": "llm_judge"},
-            {"id": "integration_soundness", "desc": "모듈/컴포넌트/API 연동과 핵심 E2E 흐름이 끊김 없이 동작할 구조임", "weight": 1, "type": "llm_judge"},
-            {"id": "delivery_readiness", "desc": "명백한 미완성·깨진 화면·미연결 기능이 없어 고객에게 인도할 수 있는 수준임", "weight": 1, "type": "llm_judge"},
-            # ★ [2026-07-27] CODE_REVIEW 에서 이관. 품질 평가는 QA 의 몫이다 —
-            #   리뷰어는 '요구가 구현되어 동작하는가'만 보고, '잘 만들었는가'는 여기서 본다.
-            {"id": "code_quality", "desc": "가독성·구조(과도한 단일 거대 파일 지양, 적절한 컴포넌트/함수 분리)·타입 적용이 양호함", "weight": 1, "type": "llm_judge"},
+            {"id": "prd_fr_coverage", "desc": "PRD의 기능 요구(FR)가 누락 없이 구현됨(스텁/더미가 아니라 실제 동작)", "weight": 3, "type": "llm_judge"},
+            {"id": "delivery_readiness", "desc": "명백한 미완성·깨진 화면·미연결 기능이 없어 고객에게 인도할 수 있는 수준임", "weight": 2, "type": "llm_judge"},
+
+            # ── 보고 전용(advisory) — 반려 사유가 되지 않는다 ───────────────
+            # [G1] 요구 누락의 결정론 탐지. WBS 의 FR 인용 누락이 흔해 오탐이 잦으므로
+            #   관문이 아니라 리포트로만 쓴다(실측: FR-ID 미인용 경고가 상시 발생).
+            {"id": "fr_coverage", "desc": "PRD 정의 FR-ID 전수가 추적성 맵(태스크→구현 파일)에 매핑됨", "weight": 1, "type": "deterministic", "advisory": True},
+            {"id": "design_conformance", "desc": "구현이 아키텍처·기술명세의 파일 책임·인터페이스·데이터 모델대로 되어 있음", "weight": 1, "type": "llm_judge", "advisory": True},
+            {"id": "integration_soundness", "desc": "모듈/컴포넌트/API 연동과 핵심 E2E 흐름이 끊김 없이 동작할 구조임", "weight": 1, "type": "llm_judge", "advisory": True},
+            # CODE_REVIEW 에서 이관 — 리뷰어는 '요구가 되는가'만 보고, '잘 만들었는가'는 여기서 본다.
+            {"id": "code_quality", "desc": "가독성·구조(과도한 단일 거대 파일 지양, 적절한 컴포넌트/함수 분리)·타입 적용이 양호함", "weight": 1, "type": "llm_judge", "advisory": True},
         ],
-        "pass_threshold": 0.8,
+        # 관문 항목만으로 계산. 0.7 = 빌드 성공 + 요구 구현이 대체로 충족되면 통과하는 선.
+        "pass_threshold": 0.7,
         "hard_fail_checks": ["build_success"],
         "judge_heavy": True,
         "judge_persona": "qa_skill",

@@ -79,9 +79,19 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
     llm_checks = []
     rationale = ""
 
+    # ★ [2026-07-27] `advisory: True` = **보고 전용 항목**.
+    #   채점해서 리포트에는 남기지만 통과/반려 계산(total_w/got_w)에서는 제외하고,
+    #   하드 실패도 시키지 않는다.
+    #   ⚠️ 왜 필요한가: 검수 단계가 '기능이 다 되는가'와 '더 잘 만들 수 있는가'를 같은
+    #     저울에 올리면, 요구가 전부 구현된 산출물도 품질 점수 미달로 반려된다.
+    #     최소 기준만 관문으로 쓰고, 그 이상의 개선 여지는 상위 단계(Supervisor)와
+    #     최종 고객에게 **리포트로 전달**하는 것이 옳다.
+    advisory_ids = {c["id"] for c in rubric.get("checks", []) if c.get("advisory")}
+
     for c in rubric.get("checks", []):
         w = float(c.get("weight", 1))
-        total_w += w
+        if c["id"] not in advisory_ids:
+            total_w += w
         if c.get("type") == "deterministic":
             fn = DETERMINISTIC_CHECKS.get(c["id"])
             passed = False
@@ -90,7 +100,9 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
             except Exception:
                 passed = False
             per_check[c["id"]] = 1.0 if passed else 0.0
-            if passed:
+            if c["id"] in advisory_ids:
+                pass   # 보고 전용 — 점수/차단에 반영하지 않는다
+            elif passed:
                 got_w += w
             elif c["id"] in hard:
                 blocking_fails.append(c["id"])
@@ -150,6 +162,8 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
                 s = 0.0
             s = max(0.0, min(1.0, s))
             per_check[c["id"]] = s
+            if c["id"] in advisory_ids:
+                continue   # 보고 전용 — 통과/반려 계산과 차단에서 제외
             got_w += float(c.get("weight", 1)) * s
             if s < 0.5 and c["id"] in hard:
                 blocking_fails.append(c["id"])
