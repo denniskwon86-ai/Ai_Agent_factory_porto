@@ -3,10 +3,11 @@ import json
 import re
 import asyncio
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 import config
 from state_models import ProjectState
-from core.llm_gateway import gateway, QuotaExhaustedException
+from core.llm_gateway import gateway, QuotaExhaustedException, GenerationFailure
 from core.agent_registry import agent_skill
 from nodes.utils.git_manager import GitManager
 from nodes.utils.wbs_manager import WBSManager
@@ -230,6 +231,38 @@ _INCREMENTAL_GUARD = (
 _FE_OWNED_EXTS = (".tsx", ".ts", ".jsx", ".js", ".css", ".html")
 _BE_OWNED_EXTS = (".py",)
 
+def _recovery_swarm_size(is_rework: bool, retry: int) -> int:
+    """복구 시도의 표본 수.
+
+    ⚠️ [2026-07-27 실측 결함] 기존 식 `1 if _heavy else (3 if _is_rework else 1)` 은
+      Backend/Frontend 노드가 `_heavy=True` 로 **하드코딩**되어 있어 **항상 1** 이었다.
+      주석은 "재작업 시 3중 스웜"이라고 적혀 있었지만 그 분기는 도달하지 않는 죽은 코드였다.
+      즉 v4 의 재시도는 다양성 있는 복구가 아니라 **같은 모델에게 같은 요청을 다시 보낸 것**이다.
+
+    그렇다고 3개 병렬로 되돌리지 않는다 — 비용·429·타임아웃을 악화시킨다.
+    정책: 1차는 단일 생성, 2회차부터만 표본 2개(첫 유효 결과를 채택).
+    """
+    if not is_rework:
+        return 1
+    return 2 if retry >= 1 else 1
+
+
+def _generation_failure_update(gf: GenerationFailure, node: str) -> Dict[str, Any]:
+    """공급자/출력계약 실패를 '빌드 실패'가 아닌 종료 상태로 승격한다.
+
+    ⚠️ 핵심: `developer_retry_count` 를 **증가시키지 않는다.** 이 실패는 생성된 코드의
+      결함이 아니므로, 개발자가 코드를 고칠 기회를 여기서 소모하면 안 된다.
+      실측(test_a1_v4): 228.6s·420.0s·77.0s 공급자 타임아웃 3건이 그 예산을 먹었다."""
+    print(f"⛔ [{node}] 생성 실패({gf.kind}) — 코드 결함이 아니므로 재작업 예산을 소모하지 않고 종결합니다.")
+    return {
+        "terminal_status": gf.terminal_status,
+        "terminal_reason": f"[{node}] {gf.kind}: {str(gf)[:400]}",
+        "build_status": "failed",
+        "failed_node": node,
+        "factory_mode": "HOTL_PAUSED",
+    }
+
+
 async def _swarm_execution(state_obj: ProjectState, base_prompt: str, is_heavy: bool, full_file_exts: tuple,
                            num_swarm: int = 3, cacheable: bool = True) -> Any:
     """Micro-Swarm 실행기: N개의 에이전트를 병렬로 띄우고 문법/샌드박스 통과 코드를 선별
@@ -252,12 +285,16 @@ async def _swarm_execution(state_obj: ProjectState, base_prompt: str, is_heavy: 
                                           full_file_exts=full_file_exts, cacheable=cacheable)
         except QuotaExhaustedException:
             raise
+        except GenerationFailure:
+            # ⚠️ [2026-07-27] 여기서 삼켜 None 을 돌려주면 호출부가 '산출물이 비었다' =
+            #   빌드 실패로 오해해 개발자 재작업 예산을 소모한다. 반드시 전파한다.
+            raise
         except Exception:
             return None
 
     print(f" [Micro-Swarm] {num_swarm}개의 병렬 에이전트 생성 중...")
     results = await asyncio.gather(*[_run_single(i) for i in range(1, num_swarm + 1)], return_exceptions=True)
-    
+
     for r in results:
         if isinstance(r, QuotaExhaustedException):
             raise r
@@ -288,8 +325,22 @@ async def _swarm_execution(state_obj: ProjectState, base_prompt: str, is_heavy: 
         else:
             if files: valid_outputs.append(raw_out)
             
-    print("⚠️ [Micro-Swarm] 샌드박스를 완벽히 통과한 코드를 찾지 못했습니다. 베스트-에포트 결과를 반환합니다.")
-    return valid_outputs[0] if valid_outputs else results[0]
+    if valid_outputs:
+        print("⚠️ [Micro-Swarm] 샌드박스를 완벽히 통과한 코드를 찾지 못했습니다. 베스트-에포트 결과를 반환합니다.")
+        return valid_outputs[0]
+
+    # ★ [2026-07-27] 파일이 하나도 안 나온 경우: 원인을 구분해서 올려보낸다.
+    #   기존 코드는 `results[0]` 를 그대로 돌려줬는데, 그것이 예외 객체이거나 None 이면
+    #   호출부에서 '빈 산출물' = 빌드 실패가 되어 **공급자 장애가 코드 결함으로 둔갑**했다.
+    _gen_fail = next((r for r in results if isinstance(r, GenerationFailure)), None)
+    if _gen_fail is not None:
+        raise _gen_fail
+    _other_exc = next((r for r in results if isinstance(r, Exception)), None)
+    if _other_exc is not None:
+        print(f"⚠️ [Micro-Swarm] 전 표본 실패(예외): {type(_other_exc).__name__}: {str(_other_exc)[:200]}")
+        return None
+    print("⚠️ [Micro-Swarm] 전 표본이 파일을 생성하지 못했습니다.")
+    return results[0] if results else None
 
 
 async def run_developer_fe(state: Any) -> Dict[str, Any]:
@@ -320,11 +371,12 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
 
     # 강제로 Pro 티어(유료) 사용
     _heavy = True
-    # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
-    # 재작업/재시도면 캐시 우회 — 같은 프롬프트에 같은 응답이 돌아와 루프가 무력화되는 것을 차단
-    output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_FE_OWNED_EXTS,
-                                    num_swarm=1 if _heavy else (3 if _is_rework else 1),
-                                    cacheable=not _is_rework)
+    try:
+        output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_FE_OWNED_EXTS,
+                                        num_swarm=_recovery_swarm_size(_is_rework, _retry),
+                                        cacheable=not _is_rework)
+    except GenerationFailure as gf:
+        return _generation_failure_update(gf, "Frontend")
     return {"frontend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_developer_be(state: Any) -> Dict[str, Any]:
@@ -348,12 +400,92 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
 
     # 강제로 Pro 티어(유료) 사용
     _heavy = True
-    # 코드 생성: 평시 1회 호출(토큰 3배 낭비·429 폭주 방지), 재작업/재시도 시에만 3중 스웜으로 승격
-    # 재작업/재시도면 캐시 우회 (위 프론트와 동일 사유)
-    output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_BE_OWNED_EXTS,
-                                    num_swarm=1 if _heavy else (3 if _is_rework else 1),
-                                    cacheable=not _is_rework)
+    try:
+        output = await _swarm_execution(state_obj, prompt, is_heavy=_heavy, full_file_exts=_BE_OWNED_EXTS,
+                                        num_swarm=_recovery_swarm_size(_is_rework, _retry),
+                                        cacheable=not _is_rework)
+    except GenerationFailure as gf:
+        return _generation_failure_update(gf, "Backend")
     return {"backend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
+
+async def run_terminal_handler(state: Any) -> Dict[str, Any]:
+    """★ [2026-07-27 신설] 업무 종결 노드 — 실패를 '조용한 END' 로 흘리지 않는다.
+
+    ⚠️ 왜 이 노드가 필요한가 (실측 결함):
+      `run_code_builder` 의 롤백 분기는 `current_retry >= 3` 일 때만 도는데,
+      CodeBuilder 는 retry 0/1/2 로만 진입한다 — retry=2 에서 실패하면 3 을 반환하고
+      `map_builder_router` 가 `3 < 3` 거짓으로 **즉시 END** 로 보내기 때문이다.
+      따라서 **롤백은 정상 실패 흐름에서 한 번도 실행된 적이 없다**(죽은 코드).
+      게다가 END 로 나가면 오케스트레이터가 그것을 DONE 으로 마킹했다.
+
+    이 노드는 다음을 한 곳에서 원자적으로 처리한다:
+      1) 실패 번들 저장(재현 근거)  2) 마지막 안전 지점으로 롤백  3) 종료 상태 확정
+    """
+    state_obj = ProjectState.model_validate(state)
+    terminal = (getattr(state_obj, "terminal_status", "") or "").strip()
+    retry = getattr(state_obj, "developer_retry_count", 0)
+
+    # 종료 상태가 없이 도달했다면(= 빌드 자가복구 소진 경로) 여기서 확정한다.
+    if not terminal:
+        terminal = "FAILED_BUILD"
+    reason = (getattr(state_obj, "terminal_reason", "") or "").strip() \
+        or f"빌드 자가복구 {retry}회 소진 — 유효한 코드로 회복하지 못했습니다."
+
+    print(f"🏁 [종결 처리] terminal_status={terminal} / retry={retry}")
+    print(f"   사유: {reason[:300]}")
+
+    bundle_path = ""
+    workspace_root = getattr(state_obj, "workspace_root", "") or ""
+    # ── 1) 실패 번들: 무엇이 왜 실패했는지 사람이 재현할 수 있는 근거를 남긴다 ──
+    try:
+        if workspace_root:
+            bundle_dir = Path(workspace_root) / ".failures"
+            bundle_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            task_id = getattr(state_obj, "current_sprint_task_id", "") or "unknown"
+            bundle = {
+                "timestamp": ts,
+                "task_id": task_id,
+                "terminal_status": terminal,
+                "terminal_reason": reason,
+                "developer_retry_count": retry,
+                "supervisor_hops": getattr(state_obj, "supervisor_hops", 0),
+                "failed_node": getattr(state_obj, "failed_node", ""),
+                "build_error_log": (getattr(state_obj, "build_error_log", "") or "")[:8000],
+                "reviewer_feedback": (getattr(state_obj, "reviewer_feedback", "") or "")[:4000],
+                "frontend_files": [f.get("file_path") for f in _extract_files_from_json(state_obj.frontend_code_summary)],
+                "backend_files": [f.get("file_path") for f in _extract_files_from_json(state_obj.backend_code_summary)],
+                # 생성 응답 원문 — 결함 재현의 핵심 근거(모델 출력이 영속 저장되지 않아
+                # 과거 구문 오류의 출처를 특정할 수 없었던 문제를 여기서 해소한다).
+                "frontend_code_summary": (_safe_str(state_obj.frontend_code_summary) or "")[:60000],
+                "backend_code_summary": (_safe_str(state_obj.backend_code_summary) or "")[:60000],
+            }
+            bundle_file = bundle_dir / f"{task_id}_{ts}.json"
+            bundle_file.write_text(json.dumps(bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+            bundle_path = str(bundle_file)
+            print(f"   📦 실패 번들 저장: {bundle_path}")
+    except Exception as e:
+        print(f"   ⚠️ 실패 번들 저장 실패(무시하고 진행): {e}")
+
+    # ── 2) 롤백: 실패 코드가 실물에 남지 않게 마지막 안전 지점으로 되돌린다 ──
+    #    SUSPENDED_*(공급자/쿼터)는 코드가 잘못된 게 아니므로 롤백하지 않는다.
+    if workspace_root and not terminal.startswith("SUSPENDED_"):
+        try:
+            git_mgr = GitManager(workspace_root)
+            last_commit = getattr(state_obj.git_info, "last_commit_hash", None) if state_obj.git_info else None
+            git_mgr.rollback_to_safe_state(last_commit)
+            print(f"   ↩️ 마지막 안전 지점으로 롤백 완료 (commit={last_commit or 'HEAD'})")
+        except Exception as e:
+            print(f"   ⚠️ 롤백 실패(수동 확인 필요): {e}")
+
+    return {
+        "terminal_status": terminal,
+        "terminal_reason": reason,
+        "failure_bundle_path": bundle_path,
+        "build_status": "failed",
+        "factory_mode": "HOTL_PAUSED",
+    }
+
 
 async def run_code_builder(state: Any) -> Dict[str, Any]:
     print("️ [Headless 빌더] 파일 병합 및 원자적 디스크 저장 가동...")
@@ -364,13 +496,13 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
     current_retry = getattr(state_obj, "developer_retry_count", 0)
     req_agents = getattr(state_obj, "current_required_agents", [])
 
-    if current_retry >= 3:
-        print(" [Circuit Breaker] 3회 연속 자가 복구 실패. 안전 지점 롤백.")
-        git_mgr = GitManager(state_obj.workspace_root)
-        last_commit = getattr(state_obj.git_info, "last_commit_hash", None) if state_obj.git_info else None
-        git_mgr.rollback_to_safe_state(last_commit)
-        # ⚠️ 무한루프(Ping-Pong) 방지: developer_retry_count를 0으로 초기화하지 않고 그대로 반환하여 라우터가 END로 가게 함
-        return {"build_status": "failed", "developer_retry_count": current_retry + 1, "factory_mode": "HOTL_PAUSED"}
+    # ⚠️ [2026-07-27] 여기 있던 `if current_retry >= 3: 롤백` 분기를 제거했다.
+    #   그 분기는 **도달 불가능한 죽은 코드**였다: CodeBuilder 는 retry 0/1/2 로만 진입하고
+    #   (retry=2 에서 실패하면 3 을 반환), `map_builder_router` 가 `3 < 3` 거짓으로
+    #   곧장 빠져나가므로 retry>=3 상태로 이 노드에 들어올 일이 없었다.
+    #   즉 "3회 실패 시 롤백"은 설계 의도만 있었고 한 번도 실행되지 않았다.
+    #   → 롤백·실패 번들·종료 상태는 이제 `run_terminal_handler` 가 단독으로 책임진다
+    #     (라우터가 상한 초과 시 TerminalHandler 로 보낸다).
 
     arch_files = _extract_files_from_json(state_obj.architecture_summary)
     tech_files = _extract_files_from_json(state_obj.tech_spec_summary)
@@ -472,12 +604,29 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         reviewer_decision = "PASS"
         review_text = "PM 최종 승인 지시: " + state_obj.pm_override_reason
     elif hops >= getattr(config, "GLOBAL_MAX_SUPERVISOR_HOPS", 8):
-        #  [재작업 상한] 이 태스크의 리뷰 재작업 예산 소진 - 더 돌리지 않고 best-effort 로 통과시켜
-        #    태스크를 완료(DONE)시키고, 미해결 이슈는 상위 게이트(QA 통합검수 / Supervisor 수용검수)로 이관한다.
-        #    (예산 소진 태스크를 IN_PROGRESS 로 방치하면 최종 태스크 판정이 안 돼 QA/Supervisor 가 영영 실행 안 됨.)
-        print(f"⚠️ [Reviewer] 재작업 상한({hops}) 도달 - best-effort 수용. 미해결 이슈는 QA/Supervisor 로 이관.")
-        reviewer_decision = "PASS"
-        review_text = "리뷰 재작업 상한 도달 - best-effort 수용(미해결 이슈는 상위 게이트에서 판정)."
+        # ══════════════════════════════════════════════════════════════════════
+        # ★ [2026-07-27] best-effort PASS 제거 — 이것이 '가짜 통과'의 진원지였다
+        # ══════════════════════════════════════════════════════════════════════
+        # ⚠️ 기존 동작: 재작업 예산이 소진되면 `PASS` 를 강제 설정해 태스크를 DONE 으로 만들고
+        #   "미해결 이슈는 상위 게이트로 이관"한다고 적어놨다. 그러나 상위 게이트(QA/Supervisor)는
+        #   이 태스크가 미해결 상태로 왔다는 사실을 알 방법이 없었고, 오케스트레이터는 END 를
+        #   DONE 으로 마킹했다. 결과: **미해결 결함을 안고 '완료'로 보이는 산출물.**
+        #   실측(E2E-01): `재작업 상한(8) 도달 - best-effort 수용` 직후 WBS DONE.
+        #   A-1 수용 기준에서 이런 통과는 증거로 쓸 수 없다.
+        # → PASS 로 위장하지 않고 FAILED_REVIEW 로 종결한다. 기존 주석이 걱정한
+        #   "IN_PROGRESS 방치로 QA 가 영영 안 돌아감" 문제는 종료 상태를 부여함으로써
+        #   해결된다(오케스트레이터가 종결로 인식하므로 태스크가 매달리지 않는다).
+        print(f"⛔ [Reviewer] 리뷰 재작업 상한({hops}) 도달 — 미해결 결함이 남아 있으므로 "
+              f"FAILED_REVIEW 로 종결합니다(가짜 통과 금지).")
+        _last_fb = (getattr(state_obj, "reviewer_feedback", "") or "").strip()
+        return {
+            "reviewer_decision": "REWORK_DEV",       # 라우터가 상한을 보고 END 로 보낸다
+            "terminal_status": "FAILED_REVIEW",
+            "terminal_reason": (f"리뷰 재작업 왕복 상한({hops}) 도달 — 미해결 결함이 남은 채 예산이 소진되었습니다. "
+                                f"마지막 리뷰 의견: {_last_fb[:600] or '(없음)'}"),
+            "supervisor_hops": hops,
+            "factory_mode": "HOTL_PAUSED",
+        }
     else:
         has_fe_code = bool(_extract_files_from_json(state_obj.frontend_code_summary))
         has_be_code = bool(_extract_files_from_json(state_obj.backend_code_summary))

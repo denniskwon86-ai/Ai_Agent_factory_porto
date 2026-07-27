@@ -14,6 +14,7 @@ from nodes.execution import (
     run_developer_fe,
     run_developer_be,
     run_code_builder,
+    run_terminal_handler,
     run_reviewer,
     run_qa,
     run_supervisor,
@@ -144,12 +145,31 @@ def route_from_tech_lead(state: ProjectState) -> str:
     if _has_role(agents, "Frontend", "프론트"): return "Frontend"
     return "CodeBuilder"
 
+def _terminated(state: ProjectState) -> bool:
+    """이미 업무 종료 상태가 부여됐는가.
+
+    ⚠️ [2026-07-27] 공급자 타임아웃·출력 계약 실패는 '코드 결함'이 아니므로 개발자 재작업
+      루프로 되돌리면 안 된다(그 예산은 코드를 고치라고 준 것이다). 종료 상태가 찍힌 순간
+      더 이상 노드를 돌리지 않고 BuildRecoveryExhausted 종결 노드로 보낸다."""
+    t = (getattr(state, "terminal_status", "") or "").strip()
+    return bool(t) and t != "COMPLETED"
+
 def route_from_backend(state: ProjectState) -> str:
+    if _terminated(state):
+        return "TerminalHandler"
     agents = _get_required_agents(state)
     if _has_role(agents, "Frontend", "프론트"): return "Frontend"
     return "CodeBuilder"
 
+def route_from_frontend(state: ProjectState) -> str:
+    """Frontend 도 공급자/계약 실패로 종료 상태를 낼 수 있으므로 무조건 CodeBuilder 로 보내면 안 된다."""
+    if _terminated(state):
+        return "TerminalHandler"
+    return "CodeBuilder"
+
 def map_builder_router(state: ProjectState) -> str:
+    if _terminated(state):
+        return "TerminalHandler"
     if state.build_status == "failed":
         if state.developer_retry_count < 3:
             failed_target = state.failed_node
@@ -164,18 +184,26 @@ def map_builder_router(state: ProjectState) -> str:
             else:
                 return "Reviewer"
         else:
-            print(" [Circuit Breaker] 최대 재시도 초과. 파이프라인 일시정지.")
-            return END 
+            # ★ [2026-07-27] 예전엔 END 였다. 그래서 (a) CodeBuilder 의 롤백 분기가 영영
+            #   도달하지 못했고(retry>=3 으로 진입할 일이 없다), (b) 오케스트레이터가 이 END 를
+            #   DONE 으로 마킹했다. 종결 노드로 보내 롤백·실패 번들·종료 상태를 남긴다.
+            print(" [Circuit Breaker] 최대 재시도 초과. 종결 처리(롤백·실패 번들)로 보냅니다.")
+            return "TerminalHandler"
     return "Reviewer"
 
 def route_from_reviewer(state: ProjectState) -> str:
+    if _terminated(state):
+        return "TerminalHandler"
     decision = getattr(state, "reviewer_decision", "PASS")
 
     #  무한루프 차단: 리뷰 의사결정 왕복(ESCALATE_PM/REWORK_DEV)이 전역 상한 도달 시 강제 종료
     hops = getattr(state, "supervisor_hops", 0)
     if decision in ("ESCALATE_PM", "REWORK_DEV") and hops >= config.GLOBAL_MAX_SUPERVISOR_HOPS:
-        print(f" [Supervisor Circuit Breaker] 리뷰 의사결정 왕복 {hops}회 도달(상한 {config.GLOBAL_MAX_SUPERVISOR_HOPS}) - 무한 루프 차단, 파이프라인 정지(END).")
-        return END
+        # ★ [2026-07-27] 예전엔 그냥 END 였다 — 그러면 오케스트레이터가 DONE 으로 마킹했다.
+        #   종결 노드로 보내 실패 번들·롤백·종료 상태를 남긴다.
+        print(f" [Supervisor Circuit Breaker] 리뷰 의사결정 왕복 {hops}회 도달"
+              f"(상한 {config.GLOBAL_MAX_SUPERVISOR_HOPS}) - 무한 루프 차단, 종결 처리로 보냅니다.")
+        return "TerminalHandler"
 
     if decision == "ESCALATE_PM":
         print(" [PM 상신 루프] 기획적 모순 발견. PM에게 최종 판단을 받으러 갑니다.")
@@ -342,11 +370,16 @@ def _wire_edges(workflow):
 
     workflow.add_conditional_edges("Architect", route_from_architect, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
     workflow.add_conditional_edges("Tech_Lead", route_from_tech_lead, {"Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
-    workflow.add_conditional_edges("Backend", route_from_backend, {"Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
-    workflow.add_edge("Frontend", "CodeBuilder")
-    workflow.add_conditional_edges("CodeBuilder", map_builder_router, {"Frontend": "Frontend", "Backend": "Backend", "Reviewer": "Reviewer", END: END})
+    # ★ [2026-07-27] 업무 종결 노드 — 실패를 '조용한 END' 로 흘리지 않고 롤백·실패 번들·종료 상태를 남긴다.
+    workflow.add_node("TerminalHandler", run_terminal_handler)
+    workflow.add_edge("TerminalHandler", END)
 
-    workflow.add_conditional_edges("Reviewer", route_from_reviewer, {"QA": "QA", "ManualWriter": "ManualWriter", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", END: END})
+    workflow.add_conditional_edges("Backend", route_from_backend, {"Frontend": "Frontend", "CodeBuilder": "CodeBuilder", "TerminalHandler": "TerminalHandler"})
+    # Frontend 도 생성 실패 시 종료 상태를 낼 수 있으므로 무조건 간선에서 조건부로 승격한다.
+    workflow.add_conditional_edges("Frontend", route_from_frontend, {"CodeBuilder": "CodeBuilder", "TerminalHandler": "TerminalHandler"})
+    workflow.add_conditional_edges("CodeBuilder", map_builder_router, {"Frontend": "Frontend", "Backend": "Backend", "Reviewer": "Reviewer", "TerminalHandler": "TerminalHandler", END: END})
+
+    workflow.add_conditional_edges("Reviewer", route_from_reviewer, {"QA": "QA", "ManualWriter": "ManualWriter", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", "TerminalHandler": "TerminalHandler", END: END})
     # 3단 수용 사다리: QA(수행사 통합검수) → Supervisor(고객사 수용검수) → ManualWriter
     #   QA: 통과→Supervisor / 미달→Tech_Lead 재작업
     #   Supervisor: 수용→ManualWriter / 반려→PM 재조정(상한 초과 시 종료)

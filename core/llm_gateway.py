@@ -19,6 +19,82 @@ from core import cache_manager
 class QuotaExhaustedException(Exception):
     pass
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ★ [2026-07-27 신설] 생성 실패 분류
+# ══════════════════════════════════════════════════════════════════════════════
+# ⚠️ 왜 필요한가 (실측 결함):
+#   게이트웨이가 타임아웃·구조화 파싱 실패·네트워크 오류에도 코드 모드 JSON 센티널
+#   (`{"files": []}`)을 반환했고, `nodes/execution.py` 는 이를 '산출물이 비었다'는
+#   **빌드 실패**로 바꿔 `developer_retry_count` 를 소모했다.
+#   실측(test_a1_v4): 실패한 코드 호출 3건이 각각 228.6초·420.0초·77.0초 **타임아웃**이었다.
+#   즉 공급자 장애가 '코드 결함'으로 취급되어, 개발자가 코드를 고칠 기회 3번 중
+#   상당수를 OpenRouter 대기로 날렸다.
+#
+# 원칙: **코드 구문 오류만 개발자 재작업 예산을 소모한다.** 공급자·계약 실패는
+#       별도 종료 상태로 승격되어 사용자가 조치할 수 있어야 한다.
+class GenerationFailure(Exception):
+    """LLM 생성이 실패했다 — 단, 생성된 코드의 결함이 아니다.
+
+    `kind` 로 복구 전략이 갈린다:
+      PROVIDER_TIMEOUT  : 공급자 지연/총 시간 상한 초과  → SUSPENDED_PROVIDER
+      QUOTA             : 429/할당량 소진                → SUSPENDED_QUOTA
+      STRUCTURED_PARSE  : 구조화 응답 파싱 실패(절단 등)  → FAILED_GENERATION_CONTRACT
+      CAPACITY          : 출력 예산 부족으로 완결 불가    → FAILED_GENERATION_CONTRACT
+      NETWORK           : 연결 오류                      → SUSPENDED_PROVIDER
+    """
+    kind: str = "UNKNOWN"
+
+    def __init__(self, message: str, kind: str = "UNKNOWN", detail: str = "", attempts=None):
+        super().__init__(message)
+        self.kind = kind
+        self.detail = detail
+        self.attempts = list(attempts or [])
+
+    # 종료 상태 모델(state_models.TerminalStatus)로의 매핑을 한 곳에 둔다.
+    _TERMINAL = {
+        "PROVIDER_TIMEOUT": "SUSPENDED_PROVIDER",
+        "NETWORK":          "SUSPENDED_PROVIDER",
+        "QUOTA":            "SUSPENDED_QUOTA",
+        "STRUCTURED_PARSE": "FAILED_GENERATION_CONTRACT",
+        "CAPACITY":         "FAILED_GENERATION_CONTRACT",
+    }
+
+    @property
+    def terminal_status(self) -> str:
+        return self._TERMINAL.get(self.kind, "FAILED_GENERATION_CONTRACT")
+
+    @property
+    def consumes_dev_retry(self) -> bool:
+        """개발자 재작업 예산을 소모해야 하는 실패인가. 전부 False —
+        이 예외는 정의상 '코드 결함이 아닌 실패'이기 때문이다."""
+        return False
+
+
+class GenerationContractException(GenerationFailure):
+    """출력 계약을 만족할 수 없어 **호출조차 하지 않고** 종결한 경우."""
+    def __init__(self, message: str, detail: str = "", attempts=None):
+        super().__init__(message, kind="CAPACITY", detail=detail, attempts=attempts)
+
+
+def classify_generation_error(exc: Exception, attempts=None) -> GenerationFailure:
+    """게이트웨이 내부 예외를 생성 실패 분류로 승격한다."""
+    if isinstance(exc, GenerationFailure):
+        return exc
+    s = str(exc) or exc.__class__.__name__
+    low = s.lower()
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or "총 시간 상한" in s or "timeout" in low or "deadline" in low:
+        kind = "PROVIDER_TIMEOUT"
+    elif "429" in s or "resource_exhausted" in low or "quota" in low or "rate limit" in low:
+        kind = "QUOTA"
+    elif "length limit" in low or "could not parse" in low or "json" in low or "validation" in low:
+        kind = "STRUCTURED_PARSE"
+    elif "connect" in low or "network" in low or "ssl" in low or "dns" in low:
+        kind = "NETWORK"
+    else:
+        kind = "UNKNOWN"
+    return GenerationFailure(s[:500], kind=kind, detail=s[:2000], attempts=attempts)
+
 # [3차 폴백] Cerebras 는 선택적(optional) 의존성이다.
 # 프로바이더 패키지가 설치돼 있지 않거나 API 키가 없으면 폴백 체인에서 조용히 제외되어
 # 기존 동작에 아무 영향이 없도록 한다. import 실패가 서버 부팅을 막지 않게 try/except 방어.
@@ -384,11 +460,42 @@ class LLMGateway:
         """이 티어의 모든 모델이 쿨다운 중인가(= 티어 전체 소진)."""
         return len(self._live_names(ordered)) == 0
 
+    @staticmethod
+    def _code_gen_eligible(name: str) -> bool:
+        """코드 생성에 쓸 만한 출력 예산을 가진 모델인가.
+
+        ⚠️ [2026-07-27 결함 #15 의 정체] `with_structured_output(CodeOutput)` 는 JSON 이 마지막
+          `}` 까지 완결되어야 한다. 한 파일만 잘려도 응답 **전체가 폐기**된다. 따라서 출력 상한이
+          낮은 모델은 '가끔 실패'하는 게 아니라 **구조적으로 완결할 수 없다**.
+          실측: llama-3.3-70b-instruct(8,192) 가 정확히 8,192 를 소진하고 파싱 실패.
+          상한 설정을 16384 로 올려도 실패한 이유 — 설정값이 아니라 모델의 천장이었다."""
+        limit = (getattr(config, "MODEL_OUTPUT_LIMITS", {}) or {}).get(name)
+        if limit is None:
+            return True   # 미등록 모델은 판단 보류(배제하지 않음)
+        return limit >= getattr(config, "CODE_GEN_MIN_OUTPUT_TOKENS", 16000)
+
     def _compose_chain(self, ordered, code_mode: bool):
         """쿨다운 안 걸린(live) 모델만으로 런타임 폴백 체인 구성.
         전부 쿨다운이면 최소 1개(첫 모델)로 재프로브(완전 실패 방지)."""
         now = time.time()
-        live = [inst for (n, inst) in ordered if now >= self._model_cooldown.get(n, 0.0)]
+        live_pairs = [(n, inst) for (n, inst) in ordered if now >= self._model_cooldown.get(n, 0.0)]
+        # ★ 코드 생성은 출력 예산이 충분한 모델을 **앞으로** 정렬한다(제거가 아니라 후순위화).
+        #   제거하면 전멸 시 아무것도 못 하지만, 후순위화하면 적격 모델을 먼저 소진한 뒤에만
+        #   부적격 모델로 내려간다. 순서는 안정 정렬로 원래 우선순위를 보존한다.
+        if code_mode and live_pairs:
+            eligible = [(n, i) for (n, i) in live_pairs if self._code_gen_eligible(n)]
+            ineligible = [(n, i) for (n, i) in live_pairs if not self._code_gen_eligible(n)]
+            if eligible and ineligible:
+                print(f"🧭 [LLM Gateway] 코드 생성 적격 모델 우선: {[n for n, _ in eligible]} "
+                      f"(출력 예산 부족으로 후순위: {[n for n, _ in ineligible]})")
+            if not eligible and ineligible and not getattr(config, "CODE_GEN_ALLOW_INELIGIBLE_FALLBACK", True):
+                raise GenerationContractException(
+                    "코드 생성 적격 모델(출력 예산 "
+                    f"{getattr(config, 'CODE_GEN_MIN_OUTPUT_TOKENS', 16000)} 이상)이 모두 소진되었습니다. "
+                    f"살아있는 모델: {[n for n, _ in ineligible]} — 전부 출력 예산 부족으로 "
+                    "구조화 응답을 완결할 수 없어 호출하지 않고 종결합니다.")
+            live_pairs = eligible + ineligible
+        live = [inst for (_, inst) in live_pairs]
         if not live:
             # ⚠️ 전 모델 쿨다운 시 ordered[0](= 무료 1순위)로 재프로브하면 방금 429 로 죽은 모델을
             #   다시 때려 0.15초에 실패하고 쿼터 소진 판정으로 직행한다(2026-07-26 실측).
@@ -616,6 +723,16 @@ class LLMGateway:
                     print(" [LLM Gateway] 알 수 없는 오류 복구를 위해 Flash 체인으로 긴급 우회합니다.")
                     return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=1,
                                                output_mode=output_mode, light=light, full_file_exts=full_file_exts)
+                # ★ [2026-07-27] 여기서 `{"files": []}` 센티널을 돌려주면 호출부가 이를
+                #   '산출물이 비었다' = **빌드 실패**로 오해해 개발자 재작업 예산을 소모한다.
+                #   실측(test_a1_v4): 228.6s·420.0s·77.0s 타임아웃 3건이 그렇게 예산을 먹었다.
+                #   → 코드 모드에서는 분류된 예외로 승격해 호출부가 '공급자/계약 실패'로
+                #     구분 처리하게 한다. 문서/JSON 모드는 기존 동작을 유지한다(호출부 계약 보존).
+                if output_mode == "code":
+                    gf = classify_generation_error(e, attempts=_rec.attempts)
+                    print(f"⛔ [LLM Gateway] 생성 실패 분류: {gf.kind} → 종료 상태 {gf.terminal_status} "
+                          f"(개발자 재작업 예산 소모하지 않음)")
+                    raise gf from e
                 return json.dumps({"files": [], "error": f"LLM UNKNOWN ERROR: {error_str}"})
 
         # 3. 문서 모드는 원문 그대로, 그 외는 JSON 정제 엔진 통과

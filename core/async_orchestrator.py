@@ -149,26 +149,52 @@ class AsyncFactoryOrchestrator:
             await factory_broadcaster.broadcast("HOTL_PAUSED", {"task_id": task_id, "project_id": pid})
             return
         vals = snapshot.values if isinstance(snapshot.values, dict) else {}
-        if vals.get("build_status") == "failed" and (vals.get("developer_retry_count") or 0) >= 3:
-            detail = (vals.get("build_error_log") or "").strip()
-            print(f"❌ [Orchestrator] Task {task_id}: 빌드 자가복구 3회 소진 - 실패로 종결(FAILED).")
+        _is_planning = task_id.startswith("PLANNING") and len(task_id.split("_")) == 2
+
+        # ══════════════════════════════════════════════════════════════════════
+        # ★ [2026-07-27] END 는 성공이 아니다 — 업무 종료 상태로 판정한다
+        # ══════════════════════════════════════════════════════════════════════
+        # ⚠️ 기존 결함: 빌드 3회 실패만 걸러내고 **그 외 모든 END 를 DONE** 으로 마킹했다.
+        #   그래서 리뷰 왕복 상한 END, QA 반려 상한, 공급자 장애 종결이 전부 '완료'로 보였다.
+        #   실측: E2E-01 이 `재작업 상한(8) 도달 - best-effort 수용` 뒤 DONE 이 됐다.
+        #   `END` 는 "그래프가 더 진행할 노드가 없다"는 기술적 사실일 뿐이다.
+        terminal = (vals.get("terminal_status") or "").strip()
+
+        # 종료 상태가 비어 있는데 빌드가 실패로 끝났다면 = 자가복구 소진 (하위호환 경로)
+        if not terminal and vals.get("build_status") == "failed" and (vals.get("developer_retry_count") or 0) >= 3:
+            terminal = "FAILED_BUILD"
+
+        if terminal and terminal != "COMPLETED":
+            reason = (vals.get("terminal_reason") or "").strip()
+            detail = reason or (vals.get("build_error_log") or "").strip()
+            _suspended = terminal.startswith("SUSPENDED_")
+            # 보류(SUSPENDED)는 '실패'가 아니라 '회복 후 재개 가능' — WBS 를 FAILED 로 태우지 않는다.
+            wbs_status = "BLOCKED" if _suspended else "FAILED"
+            print(f"❌ [Orchestrator] Task {task_id}: 종결 상태 {terminal} → WBS {wbs_status}. 사유: {detail[:200]}")
             try:
-                if not (task_id.startswith("PLANNING") and len(task_id.split("_")) == 2):
-                    WBSManager(workspace_root=workspace_root).update_task_status(task_id, "FAILED")
+                if not _is_planning:
+                    WBSManager(workspace_root=workspace_root).update_task_status(task_id, wbs_status)
             except Exception as e:
-                print(f"⚠️ [Orchestrator] WBS FAILED 마킹 실패: {e}")
+                print(f"⚠️ [Orchestrator] WBS {wbs_status} 마킹 실패: {e}")
+            # UI 의 WBS 가 갱신되도록 WBS_UPDATED 도 함께 발행한다(기존엔 누락되어 화면이 안 바뀌었다).
+            await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "project_id": pid, "status": wbs_status})
             await factory_broadcaster.broadcast("SPRINT_FAILED", {
                 "task_id": task_id, "project_id": pid,
-                "error": "빌드 3회 연속 실패(자가복구 소진)", "detail": detail[:2000],
+                "terminal_status": terminal,
+                "error": detail[:300] or terminal,
+                "detail": detail[:2000],
+                "failure_bundle": (vals.get("failure_bundle_path") or ""),
+                "resumable": _suspended,
             })
             return
-            
+
         try:
-            if not (task_id.startswith("PLANNING") and len(task_id.split("_")) == 2):
+            if not _is_planning:
                 WBSManager(workspace_root=workspace_root).update_task_status(task_id, "DONE")
         except Exception as e:
             print(f"⚠️ [Orchestrator] WBS DONE 마킹 실패: {e}")
-            
+
+        await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "project_id": pid, "status": "DONE"})
         await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id, "project_id": pid})
 
     async def is_hotl_pending(self, task_id: str, project_id: str) -> bool:

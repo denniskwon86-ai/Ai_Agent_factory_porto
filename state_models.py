@@ -136,6 +136,30 @@ class ProjectState(BaseModel):
     failed_node: str = Field(default="")
     supervisor_hops: int = Field(default=0, ge=0)  # 리뷰 의사결정 왕복 횟수(무한루프 차단용 — GLOBAL_MAX_SUPERVISOR_HOPS)
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # ★ [2026-07-27 신설] 업무 종료 상태 (terminal status)
+    # ══════════════════════════════════════════════════════════════════════════
+    # ⚠️ 왜 필요한가 (실측 결함):
+    #   LangGraph 의 `END` 는 "그래프가 더 진행할 노드가 없다"는 **기술적 사실**일 뿐
+    #   성공을 뜻하지 않는다. 그런데 `async_orchestrator` 는 빌드 3회 실패만 걸러내고
+    #   **그 외 모든 END 를 WBS `DONE` 으로 마킹**했다.
+    #   실측: E2E-01 이 리뷰 재작업 상한에서 `best-effort 수용` 된 뒤 `DONE` 이 됐다.
+    #   즉 미해결 결함을 안고 '완료'로 보이는 **가짜 통과**가 구조적으로 가능했다.
+    # → WBS 상태와 UI 는 `END` 가 아니라 이 필드를 기준으로 결정해야 한다.
+    #   `""`(빈 값) = 아직 종결되지 않음(진행 중).
+    terminal_status: Literal[
+        "", "COMPLETED",
+        "FAILED_BUILD",                 # 자가복구 소진 — 코드가 끝내 빌드되지 않음
+        "FAILED_REVIEW",                # 리뷰 왕복 상한 — 미해결 결함이 남음
+        "FAILED_GENERATION_CONTRACT",   # 구조화 출력 절단·출력 예산 부족 (코드 결함 아님)
+        "REJECTED_ACCEPTANCE",          # 수용검수 반려
+        "SUSPENDED_QUOTA",              # 할당량 소진 — 회복 후 재개 가능
+        "SUSPENDED_PROVIDER",           # 공급자 타임아웃/네트워크 — 코드 결함 아님
+        "CANCELLED",
+    ] = Field(default="")
+    terminal_reason: str = Field(default="")     # 사람이 읽을 종결 사유
+    failure_bundle_path: str = Field(default="") # 실패 번들(재현 근거) 저장 경로
+
     # 이원화 피드백 루프 상태
     reviewer_decision: str = Field(default="NONE")  # "PASS", "REWORK_DEV", "ESCALATE_PM"
     reviewer_feedback: str = Field(default="")

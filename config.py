@@ -65,7 +65,19 @@ ENGINE_TIERS = {
 }
 
 # 폴백(Fallback) 순서 리스트 — [0]=Gemini(1차), [1]=xAI(2차), [2]=Groq(3차), [3]=Cerebras(4차), [4]=OpenRouter(5차)
-LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct"]
+# ⚠️⚠️ [2026-07-27 실측 — A-1 이 오래 완주하지 못한 최대 원인] Pro 체인에 `gemini-2.5-flash` 가 없었다.
+#   실측(라이브 프로브): `gemini-2.5-pro` → 429 RESOURCE_EXHAUSTED(무료 쿼터 소진)
+#                        `gemini-2.5-flash` → 성공 1.5초 (무료, 생존)
+#   그런데 코드 생성은 is_heavy=True 라 Pro 체인만 타므로, 1순위가 쿼터사하면 grok/groq/cerebras 를
+#   거쳐 **출력 상한 8,192 인 OpenRouter llama** 에 착지했다. 그 결과:
+#     · test_a1_v3 = 100/100 호출, test_a1_v4 = 35/35 호출이 **전부 llama-3.3-70b 단독**
+#     · 코드 생성에 Gemini 가 쓰인 횟수 **0회**
+#     · 결함 #15("정확히 8,192 에서 파싱 실패")의 정체 = 상한 설정값이 아니라 **그 모델의 천장**
+#       (상한을 16384 로 올려도 실패한 이유. 설정으로 풀 수 있는 문제가 아니었다)
+#   → 살아있는 무료 Flash(출력 65,536 = llama 의 8배)를 Pro 체인에 편입한다. **비용 0.**
+#   'Pro 티어에 Flash 모델을 넣는 게 맞나'에 대한 답: **죽은 Pro 보다 살아있는 Flash 가 낫다.**
+#   품질이 필요한 자리는 1순위 2.5-pro 가 살아나면 자동으로 되찾는다(쿨다운 만료 시 재프로브).
+LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "grok-2-latest", "llama-3.3-70b-versatile", "llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct"]
 # ⚠️ [2026-07-26 실측 결함 수정] Flash 체인 말단이 무료 모델(`...:free`)이었다.
 #   judge/scoring 은 Flash 티어를 쓰는데 체인 전체가 무료라 **OpenRouter 크레딧이 있어도
 #   Flash 호출은 쓸 수 없었다.** 실측: RFP 채점에서 depth=7 walk 전부 실패 → 전 모델 쿨다운 →
@@ -73,6 +85,21 @@ LLM_PRO_FALLBACK_LIST   = ["gemini-2.5-pro", "grok-2-latest", "llama-3.3-70b-ver
 #   → 말단을 유료 모델로 교체한다. 이 환경에서 22콜 연속 성공이 확인된 모델을 쓴다(신뢰성 우선).
 #   비용은 관측치 기준 콜당 약 $0.005 로 무시 가능. 더 저렴한 8B 로 교체는 슬러그 검증 후 별건.
 LLM_FLASH_FALLBACK_LIST = ["gemini-2.5-flash", "grok-2-latest", "llama-3.1-8b-instant", "llama3.1-8b", "meta-llama/llama-3.3-70b-instruct"]
+
+# ==========================================
+# 4-0. ★ 코드 생성 모델 적격성 정책 (2026-07-27 신설)
+# ==========================================
+# 코드 생성(output_mode="code")은 `with_structured_output(CodeOutput)` 로 **JSON 이 마지막 `}` 까지
+# 완결**되어야 한다. 한 파일만 잘려도 응답 전체가 폐기된다. 따라서 출력 예산이 부족한 모델은
+# "가끔 실패"하는 게 아니라 **구조적으로 완결할 수 없다**.
+#   실측: llama-3.3-70b-instruct(상한 8,192)가 정확히 8,192 를 소진하고 파싱 실패(결함 #15).
+#         같은 프롬프트를 gemini-2.5-flash(상한 65,536)로 보내면 여유가 8배.
+# → 코드 생성 폴백 체인에서는 이 기준 미만 모델을 **후순위로 밀어낸다**(제거는 하지 않는다 —
+#   전멸 시 아무것도 못 하는 것보다 낮은 확률이라도 시도하는 편이 낫다).
+CODE_GEN_MIN_OUTPUT_TOKENS = 16000
+# 적격 모델이 하나도 살아있지 않을 때 부적격 모델이라도 쓸지. False 면 즉시
+# FAILED_GENERATION_CONTRACT 로 종결한다(무의미한 3분 폭주를 미리 차단).
+CODE_GEN_ALLOW_INELIGIBLE_FALLBACK = True
 
 # ==========================================
 # 4-1. 제공사별 타임아웃 (2026-07-26 실측 기반 — 제공사마다 의미가 다르다!)

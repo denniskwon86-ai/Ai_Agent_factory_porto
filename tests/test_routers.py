@@ -152,8 +152,27 @@ def test_reviewer_pass_qa_assigned_to_qa():
     assert ag.route_from_reviewer(S(reviewer_decision="PASS", current_required_agents=["QA"])) == "QA"
 
 def test_reviewer_hop_cap_breaks_loop():
+    # [2026-07-27 계약 변경] 상한 도달은 조용한 END 가 아니라 **종결 처리**로 간다.
+    #   예전엔 END 였고, 오케스트레이터가 그 END 를 DONE 으로 마킹해 '가짜 통과'가 됐다.
     s = S(reviewer_decision="REWORK_DEV", supervisor_hops=config.GLOBAL_MAX_SUPERVISOR_HOPS)
-    assert ag.route_from_reviewer(s) == END
+    assert ag.route_from_reviewer(s) == "TerminalHandler"
+
+def test_terminal_status_short_circuits_reviewer():
+    # 종료 상태가 이미 부여됐으면 판정 내용과 무관하게 종결 처리로 간다.
+    s = S(reviewer_decision="PASS", terminal_status="SUSPENDED_PROVIDER")
+    assert ag.route_from_reviewer(s) == "TerminalHandler"
+
+def test_terminal_status_short_circuits_developer_routes():
+    # 공급자 실패는 코드 결함이 아니므로 개발자 재작업 루프로 되돌리지 않는다.
+    s = S(terminal_status="SUSPENDED_PROVIDER", current_required_agents=["Frontend"])
+    assert ag.route_from_backend(s) == "TerminalHandler"
+    assert ag.route_from_frontend(s) == "TerminalHandler"
+    assert ag.map_builder_router(s) == "TerminalHandler"
+
+def test_completed_terminal_status_does_not_short_circuit():
+    # COMPLETED 는 정상 흐름이므로 가로채지 않는다.
+    s = S(terminal_status="COMPLETED", build_status="success")
+    assert ag.map_builder_router(s) == "Reviewer"
 
 def test_reviewer_under_hop_cap_still_loops():
     assert ag.route_from_reviewer(S(reviewer_decision="REWORK_DEV", supervisor_hops=1)) == "Tech_Lead"
@@ -172,9 +191,12 @@ def test_builder_fail_retry_back_to_backend():
     s = S(build_status="failed", developer_retry_count=1, failed_node="Backend", current_required_agents=["Backend"])
     assert ag.map_builder_router(s) == "Backend"
 
-def test_builder_fail_max_retry_to_end():
+def test_builder_fail_max_retry_to_terminal_handler():
+    # [2026-07-27 계약 변경] 자가복구 소진은 END 가 아니라 종결 노드로 간다.
+    #   예전 END 경로 때문에 (a) CodeBuilder 의 롤백 분기가 도달 불가였고
+    #   (b) 오케스트레이터가 DONE 으로 마킹했다.
     s = S(build_status="failed", developer_retry_count=3, failed_node="Backend", current_required_agents=["Backend"])
-    assert ag.map_builder_router(s) == END
+    assert ag.map_builder_router(s) == "TerminalHandler"
 
 
 # ── 헬퍼: _get_required_agents (WBS 파일 I/O) ────────────────────────
