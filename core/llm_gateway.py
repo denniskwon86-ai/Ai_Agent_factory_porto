@@ -170,6 +170,17 @@ class CodeOutput(BaseModel):
 class CodeFilesOutput(BaseModel):
     """코드 생성 전용 최소 계약 — 파일과 오류만. 메타데이터는 요구하지 않는다."""
     files: list[FileUpdate] = Field(default_factory=list, description="수정/생성된 파일의 전체 코드")
+    # ★ [2026-07-27 결함] 파이프라인에 **파일 삭제 수단이 없었다.**
+    #   실측(test_a1_v9 E2E-04): Tech Lead 가 React→바닐라 JS 전환을 결정하고
+    #   `src/App.tsx` 등을 "삭제"하라고 명시했는데, 개발자는 생성/덮어쓰기만 가능해
+    #   지울 수가 없었다. 그래서 두 아키텍처가 공존했고 렌더 검증이 App 루트를 확정하지
+    #   못했다. 리뷰어가 "React 파일이 남아 있다"고 지적 → Tech Lead 가 "삭제하라" 재지시 →
+    #   개발자 삭제 불가 → 무한 반복(8회) → FAILED_REVIEW.
+    #   Tech Lead 의 THINKING 에 "삭제 지시가 있었음에도 여전히 존재합니다" 라고 적혀 있다 —
+    #   **시스템이 물리적으로 수행할 수 없는 일을 반복 지시**하고 있었다.
+    deleted_files: list[str] = Field(
+        default_factory=list,
+        description="삭제할 파일의 상대 경로 목록. 리팩터링/스택 전환으로 더 이상 필요 없는 파일을 여기에 넣는다.")
     error: str = Field(default="", description="생성 불가 시 사유(정상 생성 시 빈 문자열)")
 # ---------------------------------
 

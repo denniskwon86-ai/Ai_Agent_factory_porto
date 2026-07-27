@@ -11,6 +11,35 @@ class CodeBuilder:
         self.workspace_root = Path(workspace_root)
         self.workspace_root.mkdir(parents=True, exist_ok=True)
     
+    def delete_files(self, rel_paths: List[str]) -> List[str]:
+        """워크스페이스 안의 파일을 삭제한다. 삭제된 경로 목록을 돌려준다.
+
+        ⚠️ [2026-07-27] 파이프라인에 삭제 수단이 없어 리팩터링/스택 전환이 불가능했다
+          (실측 test_a1_v9 E2E-04: 같은 삭제 지시가 8회 반복되고도 파일이 남았다).
+        안전장치: 워크스페이스 밖 경로·`.git` 등 내부 디렉터리는 거부한다."""
+        removed = []
+        root = self.workspace_root.resolve()
+        for rel in rel_paths or []:
+            try:
+                rel_norm = str(rel).replace("\\", "/").lstrip("/")
+                if not rel_norm or rel_norm.startswith("."):
+                    continue
+                target = (self.workspace_root / rel_norm).resolve()
+                # 경로 이탈(`../`) 차단 — 워크스페이스 밖은 절대 건드리지 않는다.
+                if root not in target.parents and target != root:
+                    print(f"⚠️ [Deleter] 워크스페이스 밖 경로 삭제 거부: {rel}")
+                    continue
+                if any(seg in {".git", ".candidate", ".failures", "node_modules"} for seg in target.parts):
+                    continue
+                if target.is_file():
+                    target.unlink()
+                    removed.append(rel_norm)
+            except Exception as e:
+                print(f"⚠️ [Deleter] 삭제 실패 ({rel}): {e}")
+        if removed:
+            print(f"🗑️ [CodeBuilder] 파일 {len(removed)}건 삭제: {removed[:6]}")
+        return removed
+
     def run(self, state: Dict[str, Any], extracted_files: List[Dict[str, str]]) -> Tuple[Dict[str, Any], List[bool]]:
         """
         [전면 재설계된 헤드리스 빌더]

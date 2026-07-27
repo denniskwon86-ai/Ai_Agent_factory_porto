@@ -65,6 +65,30 @@ def _extract_files_from_json(json_str: Any) -> List[Dict[str, str]]:
     except Exception:
         return []
 
+
+def _extract_deleted_from_json(json_str: Any) -> List[str]:
+    """LLM 출력에서 `deleted_files`(삭제 요청 경로)를 뽑는다.
+
+    ⚠️ [2026-07-27] 이 경로가 없으면 파이프라인은 **파일을 지울 수 없다.**
+      실측(test_a1_v9 E2E-04): Tech Lead 가 스택 전환으로 React 파일 삭제를 지시했는데
+      개발자에게 삭제 수단이 없어 두 아키텍처가 공존했고, 같은 지적이 8회 반복되며
+      재작업 예산이 소진됐다."""
+    if not json_str:
+        return []
+    try:
+        s = str(json_str).strip()
+        try:
+            data = json.loads(s)
+        except Exception:
+            m = re.search(r'(\{[\s\S]*\})', s)
+            data = json.loads(m.group(1)) if m else None
+        if not isinstance(data, dict):
+            return []
+        out = data.get("deleted_files") or []
+        return [str(p) for p in out if isinstance(p, str) and p.strip()] if isinstance(out, list) else []
+    except Exception:
+        return []
+
 def _collect_disk_files(workspace_root: str, exts: tuple, cap: int = 120) -> List[Dict[str, str]]:
     """워크스페이스 디스크에서 지정 확장자 파일을 수집해 [{file_path, code}] 로 반환.
     프리뷰/회귀 게이트가 '마지막 LLM 출력'이 아니라 '디스크의 현재 전체 파일 집합'을 보도록 한다.
@@ -678,6 +702,19 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
 
     builder = CodeBuilder(workspace_root=state_obj.workspace_root)
     state_dict = state_obj.model_dump()
+
+    # ★ [2026-07-27] 삭제 요청 처리 — 리팩터링/스택 전환의 필수 수단.
+    #   쓰기 **전에** 지운다. 같은 회차에서 지우고 다시 만드는 경우(경로 이동)에도
+    #   최종 상태가 올바르도록.
+    _to_delete = (_extract_deleted_from_json(state_obj.frontend_code_summary)
+                  + _extract_deleted_from_json(state_obj.backend_code_summary))
+    if _to_delete:
+        _keep = {str(f.get("file_path", "")).replace("\\", "/").lstrip("/") for f in all_files_to_write}
+        _actually = [p for p in _to_delete
+                     if str(p).replace("\\", "/").lstrip("/") not in _keep]
+        if _actually:
+            builder.delete_files(_actually)
+
     updated_state_dict, results = builder.run(state_dict, all_files_to_write)
     
     if updated_state_dict.get("build_status") == "failed":
