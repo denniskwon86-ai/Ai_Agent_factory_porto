@@ -1,0 +1,17 @@
+{
+  "timestamp": "20260727T075535Z",
+  "task_id": "E2E-01",
+  "terminal_status": "FAILED_BUILD",
+  "terminal_reason": "빌드 자가복구 3회 소진 — 유효한 코드로 회복하지 못했습니다.",
+  "developer_retry_count": 3,
+  "supervisor_hops": 0,
+  "failed_node": "Backend",
+  "build_error_log": "[main.py] SyntaxError: invalid syntax (def load_data):",
+  "reviewer_feedback": "",
+  "frontend_files": [],
+  "backend_files": [
+    "main.py"
+  ],
+  "frontend_code_summary": "",
+  "backend_code_summary": "{\"files\": [{\"file_path\": \"main.py\", \"code\": \"def load_data):\"}]}"
+}
