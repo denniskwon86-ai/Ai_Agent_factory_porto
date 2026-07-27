@@ -231,6 +231,29 @@ _INCREMENTAL_GUARD = (
 _FE_OWNED_EXTS = (".tsx", ".ts", ".jsx", ".js", ".css", ".html")
 _BE_OWNED_EXTS = (".py",)
 
+_NO_SERVER_API_MARKERS = (
+    "서버 API 없음", "서버 api 없음", "server api 없음",
+    "no server api", "server_api_required: false", '"server_api_required": false',
+    "서버 API가 없", "백엔드 API 없음", "서버 없음",
+)
+
+
+def _tech_spec_declares_no_server_api(state_obj: ProjectState) -> bool:
+    """기술명세가 '서버 API 없음'을 명시적으로 선언했는가.
+
+    ⚠️ [2026-07-27] `skills/tech_lead_skill.md` 는 서버 API 가 없을 때 "서버 API 없음"을
+      **명시하도록** 요구한다(그 파일 :36, :53). 그런데 그 선언을 실제로 읽어서 역할 배정에
+      반영하는 곳이 없었다. 그 결과 backend_skill 의 'FastAPI·DB·main.py 를 만들어라'가
+      항상 이겨서, 서버가 필요 없는 앱에도 백엔드가 생성됐다(test_a1_v4 실측).
+
+    보수적으로 판정한다 — 선언이 **명확할 때만** True. 애매하면 기존 동작(백엔드 필요)을 유지한다."""
+    spec = (_safe_str(getattr(state_obj, "tech_spec_summary", "")) or "")
+    if not spec:
+        return False
+    low = spec.lower()
+    return any(m.lower() in low for m in _NO_SERVER_API_MARKERS)
+
+
 def _recovery_swarm_size(is_rework: bool, retry: int) -> int:
     """복구 시도의 표본 수.
 
@@ -513,6 +536,17 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
     
     has_fe = any("frontend" in a.lower() or "프론트" in a for a in req_agents)
     has_be = any("backend" in a.lower() or "백엔드" in a for a in req_agents)
+
+    # ★ [2026-07-27 C3] 서버 API 가 필요 없는 태스크에서 백엔드 산출물 0개를 결함으로 보지 않는다.
+    #   ⚠️ 실측 결함: `skills/backend_skill.md` 는 모든 백엔드 작업에 FastAPI·DB·main.py 를
+    #     강하게 요구하는데, Tech Lead 는 브라우저 내 단위 변환처럼 "서버 API 없음"으로
+    #     명세할 수 있다. 이 충돌 때문에 test_a1_v4 는 **서버가 필요 없는 단위 변환기에**
+    #     main.py 를 만들었고, 그 불필요한 파일이 구문 오류·스모크 실패의 표면이 됐다.
+    #   → 기술명세가 '서버 API 없음'을 선언했으면 백엔드 빈 산출물은 정상이다.
+    if has_be and not be_files and _tech_spec_declares_no_server_api(state_obj):
+        print("ℹ️ [무결성] 기술명세가 '서버 API 없음'을 선언했으므로 백엔드 산출물 0개를 정상으로 처리합니다.")
+        has_be = False
+
     has_coding_agent = has_fe or has_be
 
     #  [무결성 가드] 코딩 에이전트가 요구됐는데 '그 에이전트'의 추출 파일이 0개면(출력 절단/

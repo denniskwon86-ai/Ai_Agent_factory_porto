@@ -143,9 +143,34 @@ class StateUpdates(BaseModel):
     file_index_updates: dict[str, FileIndexUpdate] = Field(default_factory=dict)
 
 class CodeOutput(BaseModel):
+    """⚠️ [2026-07-27] 코드 생성에는 더 이상 이 스키마를 쓰지 않는다 — `CodeFilesOutput` 을 쓴다.
+    (외부 참조/하위호환을 위해 정의만 남긴다.)"""
     files: list[FileUpdate] = Field(default_factory=list, description="수정/생성된 파일 목록")
     state_updates: StateUpdates = Field(default_factory=StateUpdates)
     error: str = Field(default="", description="오류 메시지")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ★ [2026-07-27 C1] 코드 생성 출력 계약 축소
+# ══════════════════════════════════════════════════════════════════════════════
+# ⚠️ 왜 줄이는가 (실측 + 전수 확인):
+#   기존 `CodeOutput` 은 한 응답에 files + ADR + 기술부채 + 파일인덱스 + 오류를 전부
+#   요구했다. 구조화 출력은 **마지막 `}` 까지 완결**되어야 파싱되므로, 메타데이터가
+#   길어질수록 코드가 잘릴 확률이 오른다(한 파일만 잘려도 응답 전체가 폐기된다).
+#
+#   그런데 전수 확인 결과 **`state_updates` 를 읽는 소비자가 하나도 없다**:
+#     · `_extract_files_from_json` 은 `data["files"]` 만 읽는다
+#     · ADR·기술부채·파일인덱스는 **Tech Lead 노드**가 기술명세의 STATE_UPDATES 블록에서
+#       파싱해 채운다(nodes/execution.py) — 코드 생성 응답이 아니라 명세에서 온다
+#   즉 모델은 매 코드 응답마다 아무도 안 읽는 메타데이터를 만드느라 출력 예산을 태웠고,
+#   그 대가로 코드가 잘렸다.
+#
+# → 코드 생성은 파일만 받는다. 메타데이터는 이미 결정론적 경로(Tech Lead 산출물 +
+#   빌더의 실제 쓰기 결과)로 확보된다.
+class CodeFilesOutput(BaseModel):
+    """코드 생성 전용 최소 계약 — 파일과 오류만. 메타데이터는 요구하지 않는다."""
+    files: list[FileUpdate] = Field(default_factory=list, description="수정/생성된 파일의 전체 코드")
+    error: str = Field(default="", description="생성 불가 시 사유(정상 생성 시 빈 문자열)")
 # ---------------------------------
 
 
@@ -403,7 +428,7 @@ class LLMGateway:
         pro_fallbacks = [inst for (_, inst) in pro_named[1:]]
         # 정적 전체 체인(vision 등 per-model 미적용 경로용 — 하위호환)
         self.llm_pro = pro_named[0][1].with_fallbacks(pro_fallbacks)
-        self.llm_pro_code = pro_named[0][1].with_structured_output(CodeOutput).with_fallbacks([f.with_structured_output(CodeOutput) for f in pro_fallbacks])
+        self.llm_pro_code = pro_named[0][1].with_structured_output(CodeFilesOutput).with_fallbacks([f.with_structured_output(CodeFilesOutput) for f in pro_fallbacks])
 
         # 4. [Track 2] Flash 모델 체인 조립 (고속 단순 작업용) — Pro 와 동일한 정제·이름추적 방식.
         flash_candidates = [config.LLM_FLASH_FALLBACK_LIST[0]]
@@ -428,7 +453,7 @@ class LLMGateway:
         self._flash_primary_model = flash_candidates[0]
         flash_fallbacks = [inst for (_, inst) in flash_named[1:]]
         self.llm_flash = flash_named[0][1].with_fallbacks(flash_fallbacks)
-        self.llm_flash_code = flash_named[0][1].with_structured_output(CodeOutput).with_fallbacks([f.with_structured_output(CodeOutput) for f in flash_fallbacks])
+        self.llm_flash_code = flash_named[0][1].with_structured_output(CodeFilesOutput).with_fallbacks([f.with_structured_output(CodeFilesOutput) for f in flash_fallbacks])
 
         # 콘솔에 완성된 라우팅 체인 구조 출력
         _xai_pro = f" -> xAI({config.LLM_PRO_FALLBACK_LIST[1]})" if _xai_enabled() else ""
@@ -506,7 +531,7 @@ class LLMGateway:
             if paid:
                 print("♻️ [LLM Gateway] 전 모델 쿨다운 — 유료 백스톱으로 재프로브합니다.")
         if code_mode:
-            live = [m.with_structured_output(CodeOutput) for m in live]
+            live = [m.with_structured_output(CodeFilesOutput) for m in live]
         base = live[0]
         return base.with_fallbacks(live[1:]) if len(live) > 1 else base
 
