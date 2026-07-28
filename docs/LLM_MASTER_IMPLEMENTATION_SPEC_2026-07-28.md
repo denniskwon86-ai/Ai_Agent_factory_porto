@@ -941,7 +941,16 @@ Global Supervisor
    · **§12 정렬 완료** — 외부지표 6종(§12.10)을 `requirement_type: external` 로 반영하고 등급·`acceptable_latency`·`vintage_required`·권장 원천을 함께 담았다. M1 원천 등록부는 이 목록을 입력으로 쓴다(스키마 자리를 미리 잡아 마이그레이션 회피).
    · 선택형 질문은 `nodes/clarification.py` 가 만드는 형태와 **동일 계약**이라 프론트 `HOTLInput.tsx` 를 재사용할 수 있다(백로그 3 규모 축소).
    · 실측: 경영관리팀·부서단위·월1년·중앙입력·ERP실적 시나리오 → **준비도 64.2점**, 차단 결손 3건(환율·원자재·전기료)이 담당 부서·영향·다음 조치와 함께 산출.
-2. `SolutionBlueprint` Pydantic 모델과 저장소/API 설계
+2. ~~`SolutionBlueprint` Pydantic 모델과 저장소/API 설계~~ ✅ **완료 (2026-07-28)** — `core/advisor_blueprint.py`(§5.1 7영역 모델 + 결정론 조립) · `core/advisor_store.py`(`data/advisor.db`) · `api/routes/advisor_control.py`(라우트 10) · 테스트 52건.
+   · ★ **Blueprint 초안을 LLM 이 아니라 플레이북에서 결정론적으로 조립한다**(LLM 0콜). 근거: 바이블 §9.3(AI 에게 진실을 맡기지 말 것) · §0-3(숫자·판정은 결정론) · 같은 답변이면 같은 Blueprint 라야 "왜 이렇게 나왔나"를 설명할 수 있다. LLM 보강은 나중에 `origin="ai"` 로 구분해 얹는다.
+   · **제외 범위는 추론이 아니라 사실** — 사용자가 고르지 않은 선택지가 곧 제외 범위다(§5.1 필수 필드).
+   · **출처 표시**(§5.2·바이블 §9.3): `origin`(rule|user|ai) + `confirmed` 2필드. 승인은 `confirmed` 만 켜고 **`origin` 은 지우지 않는다** — AI 가 제안했던 것은 승인 뒤에도 그렇고, 지우면 결정의 계보가 끊긴다(§1.3).
+   · **바이블 §7.1 정렬**: 요구사항마다 `data_kind`(actual/plan/forecast/scenario/reference/event). 외부지표는 등급이 성격을 정한다 — Gold=actual, Silver=forecast, Bronze=event.
+   · 데이터 요구사항을 **행으로도** 저장한다(`blueprint_data_requirements`) — "어느 부서가 어떤 데이터를 몇 건 못 갖췄나"를 질의해야 하고 JSON 안에 있는 것은 검색되지 않는다(§4.4 데이터 보드, M1 카탈로그 매칭 입력).
+   · **권한을 처음부터 부서 스코프로 걸었다.** 나중에 얹는 비용이 이 프로젝트에서 반복적으로 컸다(Phase 4 는 21곳에 단언을 뒤늦게 주입, Phase 5 는 이미 전역 유출 상태였다). ⚠️ 상담은 이 기능과 함께 새로 생기는 데이터라 지킬 레거시가 없으므로, 프로젝트 목록과 달리 **부서 미지정(개인) 상담은 본인만**(fail-closed).
+   · **차단이 아니라 가시화**: 필수 데이터 결손 상태로도 승인은 되지만 `approved_with_blocking_gaps` 로 무엇을 안고 승인했는지 남는다. 막으면 우회한다.
+   · ⚠️ 명세서 §4.5 의 `tenant_id` 는 **넣지 않았다** — §2.2 가 멀티테넌트를 미구현으로 명시하고 있어 쓰지 않는 컬럼은 오해를 만든다. 실제로 존재하는 `owner_dept_id` 를 쓴다(멱등 DDL 이라 나중 추가 안전).
+   · 미구현(백로그 4 = M0-d): `bootstrap-project`, `create-data-tasks`.
 3. 전역 상담 패널 UI와 선택형 질문 컴포넌트
 4. 상담 결과를 기존 프로젝트 생성·RFP 입력으로 연결
 5. `DecisionLedgerEvent` 최소 모델과 Blueprint 승인 이력 기록
