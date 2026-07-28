@@ -6,6 +6,15 @@
 - **대상 브랜치**: `dev`  (⚠️ `main` 은 README 스켈레톤일 뿐, 실제 코드는 `dev` 에 있음)
 - **최종 갱신**: 2026-07-27
 
+## 📖 제품의 장기 기준 문서
+
+구현·설계·우선순위를 판단하기 전에 다음 두 문서를 함께 읽습니다.
+
+- **[docs/AI_FACTORY_STUDIO_PRODUCT_BIBLE.md](docs/AI_FACTORY_STUDIO_PRODUCT_BIBLE.md)**: 제품의 존재 이유, 시장 가설, 핵심 사상, 비협상 원칙, 팀 협업 헌장
+- **[docs/LLM_MASTER_IMPLEMENTATION_SPEC_2026-07-28.md](docs/LLM_MASTER_IMPLEMENTATION_SPEC_2026-07-28.md)**: To-Be 기능 명세, 데이터 모델, API 초안, 단계별 수행계획
+
+두 문서는 목표 설계를 담고 있습니다. 현재 구현 여부는 As-Is 설계서와 최신 handoff를 우선 확인하고, 목표 기능을 이미 구현된 것으로 취급하지 마세요.
+
 ---
 
 ## 🏁 2026-07-27 — A-1 관문 시나리오 **완주 달성 (PASS)**
