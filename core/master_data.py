@@ -159,6 +159,66 @@ CREATE TABLE IF NOT EXISTS master_scope_bindings (
 );
 CREATE INDEX IF NOT EXISTS idx_msb_code ON master_scope_bindings(master_code, status);
 CREATE INDEX IF NOT EXISTS idx_msb_scope ON master_scope_bindings(tenant_id, scope_node_id, entity_mode, status);
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- [§6.3 / §14 M1] 데이터 카탈로그 (2026-07-29)
+--
+-- 명세서 §6.1 은 MDM 과 카탈로그를 **서로 대체 불가**로 규정한다:
+--   MDM   = 전사 공통 '기준값'          (master_records — 값 그 자체)
+--   카탈로그 = 데이터 자산의 '설명·위치·책임·갱신·민감도' (여기 — 값이 아니라 값이 사는 곳)
+--
+-- ⚠️ **크로스워크(external_systems/external_schemas)와 병렬 테이블을 만들지 않는다.**
+--   `external_schemas(system_id, entity, field)` 와 `data_assets`/`data_asset_fields` 는
+--   **같은 물리 대상을 다른 목적으로 기술**한다(전자=연계 계약, 후자=거버넌스). 따로 만들면
+--   같은 테이블이 두 벌로 등록되어, 2026-07-29 에 기준정보에서 실제로 겪은 중복 문제를 그대로
+--   재생산한다. 그래서 카탈로그는 **크로스워크 위에 얹는 거버넌스 계층**이다:
+--     · `(system_id, entity)` 로 크로스워크 항목을 가리킨다(선택 — 파일·보고서는 링크 없음)
+--     · 필드는 `sync_from_crosswalk()` 로 **단방향 임포트**하고 `origin='crosswalk'` 로 표시한다
+--     · origin='crosswalk' 필드의 **스키마 속성(이름·타입)은 편집 금지** — 편집해도 다음 동기화에
+--       되돌아가 사용자가 이유를 알 수 없다. 거버넌스 속성(PII·용어연결)만 편집 가능하다
+CREATE TABLE IF NOT EXISTS data_assets (
+    asset_id        TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    asset_type      TEXT DEFAULT 'table',     -- table|file|api|report|topic|dashboard
+    system_id       TEXT DEFAULT '',          -- external_systems 링크(선택)
+    entity          TEXT DEFAULT '',          -- system_id 와 함께 external_schemas 를 가리킨다
+    location        TEXT DEFAULT '',          -- 경로·URL·스키마명 등 '어디에 있나'
+    owner_dept_id   TEXT DEFAULT '',          -- 기존 부서 권한 체계 재사용(D-004)
+    owner_user_id   TEXT DEFAULT '',
+    sensitivity     TEXT DEFAULT 'internal',  -- public|internal|confidential|restricted
+    refresh_cadence TEXT DEFAULT '',          -- realtime|hourly|daily|weekly|monthly|adhoc
+    last_refreshed_at TEXT DEFAULT '',
+    description     TEXT DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'active',
+    origin          TEXT DEFAULT 'user',      -- user|crosswalk
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+-- 같은 외부 엔터티를 두 자산으로 등록하는 것을 막는다(링크가 있는 경우에만).
+-- ⚠️ **폐기된 자산은 제외한다.** 폐기는 소프트 삭제인데 인덱스가 그것까지 잡으면 한 번 폐기한
+--   테이블을 영원히 다시 등록할 수 없고, 동기화는 폐기된 자산을 '재사용'해 조용히 필드만
+--   써넣는다(카탈로그에는 안 보이는데 성공했다고 보고한다 — 실측으로 확인한 결함).
+DROP INDEX IF EXISTS uq_asset_source;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_asset_source_active ON data_assets(system_id, entity)
+    WHERE system_id <> '' AND entity <> '' AND status = 'active';
+CREATE INDEX IF NOT EXISTS idx_asset_owner ON data_assets(owner_dept_id, status);
+CREATE INDEX IF NOT EXISTS idx_asset_sens ON data_assets(sensitivity, status);
+
+CREATE TABLE IF NOT EXISTS data_asset_fields (
+    asset_id        TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    logical_type    TEXT DEFAULT '',
+    term_id         TEXT DEFAULT '',          -- 용어사전 연결(§6.4 매칭의 출발점)
+    master_code     TEXT DEFAULT '',          -- MDM 기준 엔터티 연결(§6.4 3단계)
+    pii_classification TEXT DEFAULT 'none',   -- none|pii|sensitive_pii
+    is_key          INTEGER DEFAULT 0,
+    description     TEXT DEFAULT '',
+    origin          TEXT DEFAULT 'user',      -- user|crosswalk
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (asset_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_field_term ON data_asset_fields(term_id);
+CREATE INDEX IF NOT EXISTS idx_field_pii ON data_asset_fields(pii_classification);
 """
 
 

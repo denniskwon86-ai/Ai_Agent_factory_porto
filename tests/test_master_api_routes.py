@@ -28,6 +28,8 @@ _LITERAL_ROUTES = [
     "/api/v1/master/scope-bindings/coverage",
     "/api/v1/master/scope-bindings/allowed?scope_node_id=node_none",
     "/api/v1/master/documents/quality",
+    "/api/v1/catalog/assets/search?q=x",       # `/assets/{asset_id}` 에 잡아먹히기 쉽다
+    "/api/v1/catalog/governance/gaps",
 ]
 
 
