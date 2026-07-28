@@ -18,6 +18,7 @@ import { OrgChartPanel } from './components/OrgChartPanel';
 import { UserSwitcher } from './components/UserSwitcher';
 import { CrosswalkPanel } from './components/CrosswalkPanel';
 import { TelemetryPanel } from './components/TelemetryPanel';
+import { AdvisorPanel } from './components/AdvisorPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import ServerLogPopup from './components/ServerLogPopup';
@@ -55,6 +56,8 @@ export default function App() {
   const [showOrgChart, setShowOrgChart] = useState(false);
   const [showCrosswalk, setShowCrosswalk] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
+  // [M0] 업무·데이터 설계 상담 — §4.3 F-DA-01: 런처와 프로젝트 화면 **양쪽에서** 접근 가능해야 한다
+  const [showAdvisor, setShowAdvisor] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
   const [showLogPopup, setShowLogPopup] = useState(false);
@@ -183,12 +186,22 @@ export default function App() {
         {showTelemetry && (
           <TelemetryPanel onClose={() => setShowTelemetry(false)} />
         )}
+        {showAdvisor && (
+          <AdvisorPanel onClose={() => setShowAdvisor(false)} onProjectCreated={fetchProjects} />
+        )}
         <div className="min-h-screen w-screen bg-[#0B0C10] text-gray-100 flex flex-col font-sans">
           <header className="h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-[#1F2833] flex items-center justify-between px-8 shrink-0 sticky top-0 z-10">
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
               <span className="text-indigo-400">🏭 V5.2</span> Private AI Cockpit
             </h1>
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => setShowAdvisor(true)}
+                className="text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 px-4 py-2 rounded-lg transition-all"
+                title="무엇을 만들지 모를 때 — 선택형 대화로 필요한 데이터와 추진 순서를 정하고, 승인하면 프로젝트가 됩니다"
+              >
+                🧭 업무·데이터 설계 상담
+              </button>
               <button
                 onClick={openAgentPanel}
                 className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
@@ -621,7 +634,14 @@ export default function App() {
               <span className="text-blue-400 truncate">[{projects.find(p => p.id === currentProjectId)?.name || currentProjectId}]</span> 통제실
             </h1>
           </div>
-          <div className="relative flex items-center">
+          <div className="relative flex items-center gap-3">
+            <button
+              onClick={() => setShowAdvisor(true)}
+              className="text-xs font-bold text-indigo-200 bg-indigo-900/50 hover:bg-indigo-800/70 border border-indigo-700/60 px-3 py-1.5 rounded-lg transition-colors"
+              title="업무·데이터 설계 상담 — 필요한 데이터와 추진 순서를 선택형 대화로 정합니다"
+            >
+              🧭 설계 상담
+            </button>
             <button 
               onClick={() => setShowLogPopup(v => !v)}
               title="서버 로그 보기"
@@ -633,6 +653,10 @@ export default function App() {
             {showLogPopup && <ServerLogPopup onClose={() => setShowLogPopup(false)} />}
           </div>
         </header>
+
+        {showAdvisor && (
+          <AdvisorPanel onClose={() => setShowAdvisor(false)} onProjectCreated={fetchProjects} />
+        )}
 
         {/* 전체 워크플로우 진행 스트립 */}
         <WorkflowStrip />
