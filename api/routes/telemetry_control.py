@@ -10,13 +10,17 @@ data/llm_call_log.jsonl (게이트웨이가 호출마다 append)을 읽어 프�
 """
 import os
 import json
+from typing import Optional
 from fastapi import APIRouter, Depends
 
-# 🚨 [Phase 4] 텔레메트리는 **전역 롤업**이다. 그런데 로그 키가 `project_id` 가 아니라
-#   `project_name`(core/llm_gateway.py) 이라 **부서로 매핑할 수단이 없다.**
-#   부서별 필터를 정확히 만들 수 없으므로, 단기 조치로 전사 열람 권한자에게만 연다.
-#   근본 수정(로그에 project_id·owner_dept_id 를 싣기)은 별도 항목이다.
-from api.deps import Principal, assert_enterprise, current_principal
+# ★ [2026-07-28] Phase 4 의 단기 조치(전사 열람 권한자 전용 게이트)를 해제했다.
+#   그때는 로그 키가 `project_name` 뿐이어서 **부서로 매핑할 수단이 없어** 부서별 필터를 만들 수
+#   없었고, 그래서 통째로 잠그는 것 말고 방법이 없었다. 이제 게이트웨이가 `owner_dept_id` 와
+#   `project_id` 를 함께 남기므로(core/llm_gateway.py) 정상적인 부서 스코프로 대체한다.
+#   ⚠️ 귀속 불가(구 레코드, `owner_dept_id` 없음)는 스코프 조회에서 **제외**하고 그 건수를
+#     응답에 실어 보낸다 - 조용히 빼면 집계가 틀린 줄도 모르고 작아진다.
+from api.deps import Principal, current_principal
+from core.llm_cost import estimate_cost_usd, provider_of
 
 router = APIRouter(prefix="/api/v1/telemetry", tags=["Telemetry"])
 
@@ -40,20 +44,64 @@ def _read_records(project: str = "") -> list:
                     continue  # 부분 기록/깨진 줄 skip
                 if project and (r.get("project") or "") != project:
                     continue
-                recs.append(r)
+                recs.append(_backfill(r))
     except Exception:
         pass
     return recs
 
 
+def _backfill(r: dict) -> dict:
+    """구 레코드에 비용·제공사를 **소급 산정**한다.
+
+    기존 로그에 이미 `used`(실제 모델)와 입·출력 토큰이 남아 있으므로, 단가표를 나중에 채워도
+    과거 데이터를 되살릴 수 있다. 이것이 `core/llm_cost.py` 를 게이트웨이에서 분리한 이유다.
+    ⚠️ 파일을 고쳐 쓰지 않는다 — 로그는 append-only 이고 파이프라인이 동시에 쓰는 중이다."""
+    if r.get("cost_basis") is None:
+        cost, basis = estimate_cost_usd(r.get("used") or "",
+                                       r.get("input_tokens") or 0, r.get("output_tokens") or 0)
+        r["cost_estimate_usd"] = cost
+        r["cost_basis"] = basis
+        r["backfilled"] = True
+    if not r.get("provider"):
+        r["provider"] = provider_of(r.get("used") or "")
+    return r
+
+
+def apply_scope(recs: list, p: Principal) -> dict:
+    """부서 스코프를 적용하고 **무엇이 왜 빠졌는지**를 함께 돌려준다.
+
+    조직 미도입/무제한(기본값 `ORG_ENFORCE=False`)이면 전량 통과 — 종전 동작과 동일하다."""
+    if p.scope.unrestricted or p.scope.can_run_enterprise:
+        return {"records": recs, "excluded_unattributed": 0, "excluded_other_dept": 0,
+                "scope": "enterprise"}
+    readable = set(p.scope.readable_dept_ids or ())
+    kept, unattributed, other = [], 0, 0
+    for r in recs:
+        dept = str(r.get("owner_dept_id") or "")
+        if not dept:
+            unattributed += 1          # 귀속 불가 — 남의 부서일 수 있으므로 보여주지 않는다
+        elif dept in readable:
+            kept.append(r)
+        else:
+            other += 1
+    return {"records": kept, "excluded_unattributed": unattributed,
+            "excluded_other_dept": other, "scope": "dept:" + ",".join(sorted(readable))}
+
+
 def aggregate(recs: list) -> dict:
     """레코드 → 집계. used(실제 모델) 분포를 1순위로."""
     totals = {"calls": 0, "ok": 0, "failed": 0, "fallback_calls": 0,
-              "downgraded_calls": 0, "total_duration_s": 0.0, 
-              "total_input_tokens": 0, "total_output_tokens": 0}
+              "downgraded_calls": 0, "total_duration_s": 0.0,
+              "total_input_tokens": 0, "total_output_tokens": 0,
+              # ★ [2026-07-28] 비용(§10.1). `cost_usd` 는 **산정 가능한 것만의 합**이고
+              #   `unpriced_calls` 가 0 이 아니면 그 합은 하한이다 — UI 가 완전한 총액으로
+              #   오해하지 않도록 `cost_complete` 로 명시한다.
+              "cost_usd": 0.0, "priced_calls": 0, "unpriced_calls": 0}
     by_model = {}      # used(실제 모델) → 카운트  ← 핵심 지표
     by_stage = {}      # stage → {calls, ok, avg_duration_s, models{}}
     by_requested = {}  # requested_tier → {calls, downgraded}
+    by_cost_basis = {}  # cost_basis → {calls, cost_usd}  ← 무료/유료/미산정 분리
+    by_provider = {}    # provider → {calls, cost_usd}
     for r in recs:
         totals["calls"] += 1
         ok = bool(r.get("ok"))
@@ -85,25 +133,60 @@ def aggregate(recs: list) -> dict:
         rq["calls"] += 1
         rq["downgraded"] += 1 if r.get("downgraded") else 0
 
+        # ── 비용 ──────────────────────────────────────────────────────────
+        basis = r.get("cost_basis") or "unpriced"
+        cost = r.get("cost_estimate_usd")
+        cb = by_cost_basis.setdefault(basis, {"calls": 0, "cost_usd": 0.0})
+        cb["calls"] += 1
+        prov = r.get("provider") or "(none)"
+        bp = by_provider.setdefault(prov, {"calls": 0, "cost_usd": 0.0})
+        bp["calls"] += 1
+        if cost is None:
+            totals["unpriced_calls"] += 1     # 유료인데 단가 미등록 — 0 으로 삼키지 않는다
+        else:
+            totals["priced_calls"] += 1
+            totals["cost_usd"] += float(cost)
+            cb["cost_usd"] += float(cost)
+            bp["cost_usd"] += float(cost)
+
     # 파생 지표 정리
     for s in by_stage.values():
         s["avg_duration_s"] = round(s["dur"] / s["calls"], 2) if s["calls"] else 0.0
         del s["dur"]
+    for d in list(by_cost_basis.values()) + list(by_provider.values()):
+        d["cost_usd"] = round(d["cost_usd"], 6)
     totals["total_duration_s"] = round(totals["total_duration_s"], 1)
     totals["success_rate"] = round(totals["ok"] / totals["calls"], 3) if totals["calls"] else 0.0
     totals["fallback_rate"] = round(totals["fallback_calls"] / totals["calls"], 3) if totals["calls"] else 0.0
+    totals["cost_usd"] = round(totals["cost_usd"], 6)
+    # ★ 총액을 '완전한 값'으로 제시할 수 있는지의 판정. 하나라도 미산정이면 이 합은 **하한**이다.
+    totals["cost_complete"] = totals["unpriced_calls"] == 0
+    # `paid_partial` 은 단가 일부만 등록된 것이라 과소 추정이다 — 총액 해석에 필요하니 노출한다.
+    totals["cost_partial_calls"] = by_cost_basis.get("paid_partial", {}).get("calls", 0)
 
-    return {"totals": totals, "by_model": by_model, "by_stage": by_stage, "by_requested_tier": by_requested}
+    return {"totals": totals, "by_model": by_model, "by_stage": by_stage,
+            "by_requested_tier": by_requested, "by_cost_basis": by_cost_basis,
+            "by_provider": by_provider}
+
+
+def _scope_meta(scoped: dict) -> dict:
+    """응답에 실을 권한 범위 근거(§9.3 "조회는 주체·목적·범위·권한 근거를 남긴다")."""
+    return {
+        "scope": scoped["scope"],
+        "excluded_unattributed": scoped["excluded_unattributed"],
+        "excluded_other_dept": scoped["excluded_other_dept"],
+    }
 
 
 @router.get("/summary")
 async def telemetry_summary(project: str = "", p: Principal = Depends(current_principal)):
-    """프로젝트(project_name)별 LLM 호출 집계. project 미지정 시 전역 롤업."""
-    assert_enterprise(p)
-    recs = _read_records(project)
+    """프로젝트(project_name)별 LLM 호출 집계. project 미지정 시 권한 범위 내 롤업."""
+    scoped = apply_scope(_read_records(project), p)
+    recs = scoped["records"]
     data = aggregate(recs)
     data["record_count"] = len(recs)
     data["project"] = project or "(전역)"
+    data["permission"] = _scope_meta(scoped)
     return {"status": "success", "data": data}
 
 
@@ -111,23 +194,27 @@ async def telemetry_summary(project: str = "", p: Principal = Depends(current_pr
 async def telemetry_raw(project: str = "", limit: int = 200,
                         p: Principal = Depends(current_principal)):
     """최근 N건 원시 레코드(디버그/타임라인용)."""
-    assert_enterprise(p)
-    recs = _read_records(project)
-    return {"status": "success", "data": recs[-max(1, min(limit, 2000)):]}
+    scoped = apply_scope(_read_records(project), p)
+    recs = scoped["records"]
+    return {"status": "success", "data": recs[-max(1, min(limit, 2000)):],
+            "permission": _scope_meta(scoped)}
 
 
 @router.get("/projects")
 async def telemetry_projects(p: Principal = Depends(current_principal)):
-    """로그에 등장한 distinct 프로젝트명 목록(패널 필터용). project_id 가 아니라 로그의
-    project_name 기준이라, 프론트가 데이터에서 직접 실제 이름을 받아 필터할 수 있게 한다.
+    """로그에 등장한 distinct 프로젝트 목록(패널 필터용).
 
-    ⚠️ 이 목록 자체가 **전 부서 프로젝트명 노출**이므로 전사 열람 권한자에게만 연다."""
-    assert_enterprise(p)
-    names = []
-    seen = set()
-    for r in _read_records():
-        p = r.get("project") or ""
-        if p and p not in seen:
-            seen.add(p)
-            names.append(p)
-    return {"status": "success", "data": names}
+    ⚠️ 이 목록 자체가 프로젝트명 노출이므로 **권한 범위 안의 것만** 돌려준다. Phase 4 는
+      부서 매핑 수단이 없어 전사 열람 권한자에게만 열었는데, 이제 레코드에 `owner_dept_id` 가
+      있으므로 부서 스코프로 정상화한다. 집계 축이 `project_name` 이므로 이름을 1급으로 유지하되
+      `project_id` 도 함께 준다(이름은 바뀔 수 있고 중복될 수 있다)."""
+    scoped = apply_scope(_read_records(), p)
+    items, seen = [], set()
+    for r in scoped["records"]:
+        name = r.get("project") or ""
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        items.append({"project": name, "project_id": r.get("project_id") or "",
+                      "owner_dept_id": r.get("owner_dept_id") or ""})
+    return {"status": "success", "data": items, "permission": _scope_meta(scoped)}

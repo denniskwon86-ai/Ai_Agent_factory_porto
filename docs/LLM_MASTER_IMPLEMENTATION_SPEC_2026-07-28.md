@@ -588,7 +588,228 @@ simulation_runs
 
 ---
 
-## 12. 기능 9 — 전역 자비스형 슈퍼바이저
+## 12. 기능 9 — 외부환경 인텔리전스와 검증 데이터 기반 시뮬레이션
+
+### 12.1 목표와 기본 입장
+
+경영계획과 디지털트윈에서 가장 불확실하면서 영향이 큰 입력은 환율, 금리, 원자재, 에너지, 수요, 물류, 규제 같은 외부환경 요인이다. 이 기능의 목표는 인터넷에서 가장 빠른 정보를 수집하는 것이 아니라, **출처·발표 시점·수정 이력·검증 상태가 명확한 외부 데이터를 회사의 계획과 시나리오에 안전하게 연결**하는 것이다.
+
+따라서 1~2일의 지연이 있더라도 검증·확정된 데이터를 기본 시뮬레이션에 우선 사용한다. 실시간 시장 정보, 뉴스, 웹 크롤링은 경보와 위험 시나리오 후보를 만드는 보조 정보이며, 검증 없이 기준 계획이나 공식 수치를 자동 변경해서는 안 된다.
+
+### 12.2 데이터 등급과 사용 정책
+
+| 등급 | 데이터 예 | 허용 용도 | 금지 용도 |
+|---|---|---|---|
+| Gold: 검증·확정 | 공식 통계, 확정 단가, 승인된 사내 실적, 규제기관 고지 | 기준 계획, 공식 시뮬레이션, 경영 보고 | 없음. 단, 권한·기준일은 적용 |
+| Silver: 잠정·전망 | 잠정 통계, 시장 전망, 공급사 전망, 허가된 유료 데이터 | 전망/공격/위험 시나리오, 검토 자료 | 실제값 또는 확정 계획으로 표시 |
+| Bronze: 사건 후보 | 기사, RSS, 공시 알림, 웹 수집, 비정형 보고서 | 사건 감지, 검토 요청, 근거 탐색 | 자동 수치 변경, 자동 의사결정 |
+
+모든 화면과 API는 실제값(Actual), 외부 전망(Forecast), 사내 경영 가정(Plan Assumption), 의도적 시나리오(Scenario)를 구분해 표시한다.
+
+### 12.3 물리 저장 위치와 기존 시스템 경계
+
+외부정보를 기존 LangGraph 체크포인트 또는 RAG에 무분별하게 넣지 않는다.
+
+```text
+data/
+  pipeline_state.db                 # 기존 LangGraph 체크포인트 전용. 외부정보 저장 금지
+  chroma_db/                        # 기존 RAG. 승인된 해설/요약/근거 탐색에만 사용
+  external_intelligence.db          # 신규: 외부지표·관측값·전망·사건·수집 이력
+  external_raw/                     # 신규: API 응답, CSV, HTML, PDF 원문과 메타데이터
+```
+
+초기에는 별도 SQLite 저장소로 시작할 수 있으나, 시계열·다중 사용자·감사 범위가 커지면 PostgreSQL 기반 `external_intelligence` 스키마로 이전한다. 시간별 관측량이 커질 경우 시계열 확장 저장소를 별도 검토한다.
+
+MDM에는 국가, 통화, 품목, 산업, 지역, 지표 유형 같은 **기준 정의**만 둔다. 날짜별 환율·가격·통계값은 외부 인텔리전스 저장소에 둔다. 데이터 카탈로그는 해당 데이터가 어디에서 왔고, 누가 책임지고, 얼마나 신뢰할 수 있는지 설명한다.
+
+### 12.4 원천 등록부(Source Registry)
+
+범용 웹 크롤러를 만들지 않는다. 승인된 원천만 등록하고 수집한다. 원천 선택 우선순위는 다음과 같다.
+
+```text
+공식 API
+  → 공식 CSV/엑셀 다운로드
+  → RSS/공시 피드
+  → 계약된 데이터 제공자 API
+  → 사용자가 등록한 보고서/PDF
+  → 이용약관상 허용된 웹페이지 HTML 수집
+```
+
+```text
+external_sources
+  id, name, source_type(API/RSS/CSV/WEB/REPORT), base_url,
+  license_type, allowed_usage, collection_method,
+  refresh_frequency, rate_limit, owner_department,
+  trust_grade, enabled, canonical_source_priority
+```
+
+각 외부지표는 `canonical_source_id`, `backup_source_id`, `acceptable_latency`, `verification_policy`를 가져야 한다. 유료 데이터는 공식·저비용 대체 원천이 없고, 의사결정 품질 개선이 구독료보다 크며, 내부 분석·재사용 라이선스가 명확할 때만 보조 원천으로 도입한다.
+
+### 12.5 핵심 데이터 모델
+
+```text
+external_indicators
+  id, canonical_term_id, code, name, category,
+  geography_code, unit, frequency, default_source_id,
+  canonical_source_id, backup_source_id, acceptable_latency,
+  verification_policy, status
+
+external_observations
+  id, indicator_id, observed_at, published_at, ingested_at,
+  value, unit, vintage, source_id, source_record_ref,
+  quality_status(RAW/VALIDATED/REJECTED/SUPERSEDED), snapshot_hash
+
+external_forecasts
+  id, indicator_id, provider_name, forecast_period, published_at,
+  vintage, value, lower_bound, upper_bound, confidence_level,
+  methodology_summary, source_record_ref, quality_status
+
+external_events
+  id, event_type(REGULATION/WEATHER/SUPPLY_CHAIN/MARKET/POLITICAL),
+  title, occurred_at, detected_at, geography_scope, industry_scope,
+  severity, confidence, status(CANDIDATE/REVIEWED/APPROVED/DISMISSED),
+  summary, owner_department, created_by
+
+external_event_evidence
+  id, event_id, source_id, source_url, raw_document_ref,
+  extracted_excerpt, published_at, evidence_hash
+
+driver_mappings
+  id, external_indicator_id, internal_metric_id, target_scope,
+  mapping_type(FORMULA/ELASTICITY/RULE/MODEL), formula_definition,
+  lag_period, effective_from, effective_to, evidence_ref,
+  owner_department, approval_status, version
+```
+
+`vintage`는 필수다. 나중에 수정된 지표가 있어도, 특정 경영계획과 시뮬레이션이 당시 어떤 발표값을 사용했는지 재현할 수 있어야 한다.
+
+### 12.6 수집·검증·공개 처리 흐름
+
+외부 수집은 SSE 리스너나 슈퍼바이저 데몬에 넣지 않고 별도 워커로 구현한다.
+
+```text
+Scheduler
+  → Collector(API/RSS/CSV/허용 WEB)
+  → Raw Store 원문 보관
+  → Normalizer 표준화
+  → Validator(단위/날짜/범위/중복/수정값 검사)
+  → external_* 테이블 저장
+  → 데이터 오너 검토 또는 자동 검증
+  → Catalog Publisher 공개
+  → Decision Ledger 기록
+  → 영향 매핑 대상에 재계산 필요 알림
+```
+
+권장 코드 경계는 다음과 같다.
+
+```text
+core/external_intelligence/
+  source_registry.py
+  collector.py
+  normalizer.py
+  validator.py
+  event_extractor.py
+  publisher.py
+  scheduler.py
+
+api/routes/external_intelligence_control.py
+frontend/src/components/ExternalIntelligencePanel.tsx
+frontend/src/components/ScenarioWorkbenchPanel.tsx
+```
+
+LLM은 비정형 문서에서 사건 후보를 추출하고 요약할 수 있다. 그러나 후보는 반드시 `CANDIDATE` 상태로 저장하며, 담당자 검토 없이 공식 시뮬레이션 입력으로 사용하지 않는다.
+
+### 12.7 내부 KPI와의 영향 매핑
+
+외부지표를 손익에 직접 연결하지 않는다. 중간의 업무·계산 경로를 명시적으로 등록한다.
+
+```text
+환율 상승
+  → 수입 원자재 매입단가 상승
+  → 제품별 제조원가 상승
+  → 매출총이익률 하락
+  → 운전자본·현금흐름 영향
+```
+
+예시 매핑:
+
+```text
+외부지표: 전기요금지수
+내부지표: 제조경비-전력비
+적용범위: A공장
+관계식: 전력비 = 기준 전력사용량 × 전기단가
+영향시차: 당월
+근거: 전력 계약·최근 12개월 실적
+승인자: 생산관리팀 + 재무팀
+```
+
+Driver Mapping은 업무 오너와 데이터 오너의 승인, 근거, 버전, 유효기간을 갖는다. 이 연결은 Graph RAG의 그래프 간선 후보가 될 수 있지만, 그래프 자체가 공식 계산 규칙을 대체해서는 안 된다.
+
+### 12.8 시나리오·시뮬레이션 연결 규칙
+
+```text
+Gold 관측값/승인된 외부 사건
+  → 외부 데이터 스냅샷 고정
+  → 승인된 Driver Mapping 적용
+  → 사용자 시나리오 가정 추가
+  → 결정론적 계산 엔진 실행
+  → 손익·원가·재고·납기·현금흐름 결과
+  → Decision Ledger 기록
+```
+
+모든 `simulation_runs`는 최소한 다음 참조를 보유한다.
+
+```text
+internal_data_snapshot_ref
+external_data_snapshot_ref
+external_event_version_refs
+driver_mapping_version_refs
+engine_version
+scenario_assumption_refs
+executed_by / approved_by
+```
+
+기준 시나리오는 Gold 데이터와 승인된 사내 계획 가정을 사용한다. Silver 데이터는 전망·공격·위험 시나리오에만 사용한다. Bronze 사건은 검토 요청 또는 위험 시나리오 후보일 뿐 자동 반영하지 않는다.
+
+### 12.9 화면과 사용자 흐름
+
+Private AI Cockpit의 공통 관리 진입에 다음 두 화면을 추가한다.
+
+```text
+External Intelligence Center
+  - 원천 관리
+  - 외부지표 카탈로그
+  - 수집 현황·오류·품질
+  - 실제값/전망값 시계열 비교
+  - 사건 후보 검토·승인
+  - 내부 KPI 영향 매핑
+  - 라이선스·소유자·갱신주기
+
+Scenario Workbench
+  - 기준 시나리오 선택
+  - 외부/내부 변수 조절
+  - 영향 범위 선택
+  - 결과·민감도·범위 비교
+  - 승인·저장·공유
+  - Shadow Mode 실행
+```
+
+### 12.10 경영계획 파일럿의 첫 지표
+
+처음부터 모든 지표를 수집하지 않는다. 다음 여섯 가지를 기준으로 시작한다.
+
+1. 환율
+2. 주요 원자재 가격
+3. 전기료/에너지 비용
+4. 금리
+5. 산업 수요지수 또는 판매량 선행지표
+6. 임금 상승률
+
+초기에는 공식 API·공식 CSV·수동 파일 등록을 지원한다. 웹 수집과 뉴스 사건 분석은 3단계 이후에 추가한다.
+
+---
+
+## 13. 기능 10 — 전역 자비스형 슈퍼바이저
 
 ### 12.1 현재 슈퍼바이저와의 차이
 
@@ -621,19 +842,27 @@ Global Supervisor
 
 ---
 
-## 13. 단계별 수행계획
+## 14. 단계별 수행계획
 
-### P0. 생성 공장 안정화
+### P0. 생성 공장 안정화 ✅ **완료 (2026-07-28)** — §18-2 의 M0 선행 게이트 해제
 
 **목표**: 기존 LangGraph 파이프라인이 성공·대기·실패·복구 상태를 신뢰성 있게 표현하도록 한다.
 
-| 작업 | 완료 기준 |
-|---|---|
-| 실패 계약 | `SPRINT_FAILED`, `NODE_FAILED`, `TERMINAL_FAILURE` 이벤트와 UI 표시 |
-| 복구 정책 | 3회 실패 뒤 실패 번들·후속 선택지·안전 종료 |
-| 공급자/문맥 | 모델 선택·컨텍스트 한도·타임아웃·폴백 기록 |
-| 테스트 하네스 | 실제 생성물 결함과 하네스 거짓 실패 분리 |
-| 비용 관측 | 호출 모델·비용·지연·성공 여부 수집 |
+| 작업 | 완료 기준 | 실제 구현 |
+|---|---|---|
+| 실패 계약 | `SPRINT_FAILED`, `NODE_FAILED`, `TERMINAL_FAILURE` 이벤트와 UI 표시 | ✅ 단일 `TERMINAL_FAILURE` 대신 **원인별 8값**으로 세분화: `terminal_status`(`state_models.py:157`) = `FAILED_BUILD`/`FAILED_REVIEW`/`FAILED_GENERATION_CONTRACT`/`REJECTED_ACCEPTANCE`/`SUSPENDED_QUOTA`/`SUSPENDED_PROVIDER`/`CANCELLED`/`COMPLETED` + `terminal_reason` + `SPRINT_FAILED` 방송(`async_orchestrator.py:181`). **`END` 는 성공이 아니다**를 구조로 강제 |
+| 복구 정책 | 3회 실패 뒤 실패 번들·후속 선택지·안전 종료 | ✅ `failure_bundle_path`, `_recovery_swarm_size`·`_targeted_repair_instruction`(`nodes/execution.py`). 보류(`SUSPENDED_*`)는 WBS `BLOCKED` 로 분리해 재개 가능 |
+| 공급자/문맥 | 모델 선택·컨텍스트 한도·타임아웃·폴백 기록 | ✅ `MODEL_CONTEXT_LIMITS`/`MODEL_OUTPUT_LIMITS`, `LLM_TOTAL_DEADLINE_SEC` 하드 상한, 모델 쿨다운·티어 강등, `attempts`(폴백 체인) 기록 |
+| 테스트 하네스 | 실제 생성물 결함과 하네스 거짓 실패 분리 | ✅ `FAILED_GENERATION_CONTRACT`(출력 절단·구조화 실패) = "코드 결함 아님"으로 분류 |
+| 비용 관측 | 호출 모델·비용·지연·성공 여부 수집 | ✅ **2026-07-28 완료** — `core/llm_cost.py` 신설. §10.3 `llm_calls` 표준 필드(`project_id`·`owner_dept_id`·`provider`·`cost_estimate_usd`·`cost_basis`)를 게이트웨이가 기록하고, 구 로그는 읽는 시점에 **소급 산정**. ⚠️ 단가 미등록 유료 모델은 **0 이 아니라 `unpriced`** 로 남겨 총액을 하한으로 표시한다(§16: 근거 없는 수치 금지) |
+
+> **비용 관측 실측 (2026-07-28)** — 실제 로그 972건 전량 소급 산정:
+> 총 **$4.556**(971/972 산정, 미산정 1건은 퇴역 모델) · 유료 720건 / 무료티어 144건 / 캐시적중 107건 ·
+> 제공사 분포 **openrouter 734건(전액) · gemini 130건($0) · groq 1건**.
+> 단가 출처는 OpenRouter 공식 모델 API(확인일 2026-07-28)이며, `google/gemini-2.5-flash` 출력
+> $2.50/1M 이 `config.py:67` 의 기존 실측 기록과 일치해 교차검증됐다.
+> ★ 시사점: **유료 백스톱이 호출의 76%** 를 처리했다. 무료 Pro 쿼터 소진 시 유료로 착지하는
+> 구조(`config.py:76` 주석)가 비용에서 실제로 확인된다 — §10.2 모델 라우팅 정책의 1차 근거.
 
 ### M0. 업무·데이터 설계 상담과 Blueprint
 
@@ -657,6 +886,7 @@ Global Supervisor
 | 용어사전 | 동의어·유사어·계산 정의·MDM 연결 |
 | 품질/계보 | 프로파일링, 원천→앱→보고서 영향 관계 |
 | 계약 | 스키마·품질·접근·버전 계약 |
+| 외부 인텔리전스 기반 | 승인 원천 등록부, 첫 외부지표 6종, 실제값/전망/사건 분리 |
 
 ### M2. 권한과 안전한 연계
 
@@ -687,6 +917,7 @@ Global Supervisor
 | 작업 묶음 | 주요 산출물 |
 |---|---|
 | 데이터 모델 | 조직·계정·제품·실적·계획·동인·시나리오 |
+| 외부환경 입력 | Gold 외부 데이터 스냅샷, 승인된 Driver Mapping, 외부 사건 버전 |
 | 계획 앱 | 부서 입력·검증·조정·승인·차이 분석 |
 | 계산 엔진 | 손익·원가·현금흐름 산식, 제약조건, 버전 |
 | 시나리오 | 기본/공격/위험 시나리오와 변화 요인 비교 |
@@ -698,7 +929,7 @@ Global Supervisor
 
 ---
 
-## 14. 우선 구현 백로그
+## 15. 우선 구현 백로그
 
 ### 즉시 착수 가능
 
@@ -707,7 +938,8 @@ Global Supervisor
 3. 전역 상담 패널 UI와 선택형 질문 컴포넌트
 4. 상담 결과를 기존 프로젝트 생성·RFP 입력으로 연결
 5. `DecisionLedgerEvent` 최소 모델과 Blueprint 승인 이력 기록
-6. 텔레메트리에 작업 유형·모델·비용·성공 여부 표준 필드 추가
+6. ~~텔레메트리에 작업 유형·모델·비용·성공 여부 표준 필드 추가~~ ✅ **완료 (2026-07-28)** — 위 P0 표 참조. 남은 항목은 §10.3 `quality_outcomes`(게이트별 pass/fail·재시도·근본원인 분류·인간 수용) 로, 이건 §8.3 실패 원인 분류와 함께 별도 작업이다
+7. 외부 인텔리전스의 원천 등록부·지표 마스터·관측값 스키마 상세 설계
 
 ### 선행 설계가 필요한 작업
 
@@ -719,7 +951,7 @@ Global Supervisor
 
 ---
 
-## 15. 품질·보안·운영의 비협상 조건
+## 16. 품질·보안·운영의 비협상 조건
 
 - 실제·계획·예측·시나리오 데이터를 혼합 표기하지 않는다.
 - 민감 데이터와 권한 밖 데이터는 LLM 문맥에 넣지 않는다.
@@ -732,7 +964,7 @@ Global Supervisor
 
 ---
 
-## 16. 첫 파일럿: 경영계획–실적–시나리오 관리
+## 17. 첫 파일럿: 경영계획–실적–시나리오 관리
 
 ### 16.1 사용자 목표
 
@@ -764,7 +996,7 @@ Global Supervisor
 
 ---
 
-## 17. 다음 작업자가 시작할 작업
+## 18. 다음 작업자가 시작할 작업
 
 1. 이 문서와 `AI_HANDOFF.md`, 최신 handoff를 읽고 현재 브랜치·작업트리 상태를 확인한다.
 2. P0 안정화 이슈가 미완료라면 M0 기능보다 먼저 해결한다.
@@ -776,7 +1008,7 @@ Global Supervisor
 
 ---
 
-## 18. 완료 선언 기준
+## 19. 완료 선언 기준
 
 어떤 마일스톤도 UI 화면 하나 또는 API 하나만으로 완료 선언하지 않는다. 아래 네 가지가 모두 있어야 한다.
 

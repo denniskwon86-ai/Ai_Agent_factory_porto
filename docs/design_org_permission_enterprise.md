@@ -343,6 +343,14 @@ write `mega/plan:382`·`start_all:430`·`DELETE:487`·`copy:550`·`sprint/start:
 
 **🚨 텔레메트리 전역 롤업** — `telemetry_control.py:20-40, 93-121`이 전량 파싱하는데 키가 `project_id`가 아니라 **`project_name`**(`core/llm_gateway.py:197`)이라 dept 매핑 불가. → 단기: **executive/admin 전용 게이트**. 근본 수정은 별도 항목.
 
+> ✅ **근본 수정 완료 (2026-07-28)** — 단기 게이트를 해제하고 부서 스코프로 정상화했다.
+> 게이트웨이가 `owner_dept_id`(Phase 3 에서 `ProjectState` 에 올라온 필드)와 `project_id`
+> (`workspace_root` 에서 `_pid` 와 같은 규약으로 유도 — **상태 모델 변경 0**)를 함께 기록한다.
+> `apply_scope()` 가 부서 교집합을 적용하고, **귀속 불가(구 레코드)는 제외하되 건수를 응답에
+> 실어 보낸다** — 조용히 빼면 집계가 작아진 줄도 모른다. 무제한/경영진은 전량.
+> 함께 P0 「비용 관측」도 닫았다(`core/llm_cost.py`) — 상세는
+> `docs/LLM_MASTER_IMPLEMENTATION_SPEC_2026-07-28.md` §14 P0 표.
+
 **SSE 필터 활성.**
 
 ---

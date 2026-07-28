@@ -15,6 +15,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from core import cache_manager
+from core.llm_cost import estimate_cost_usd, is_paid_model, provider_of
 
 class QuotaExhaustedException(Exception):
     pass
@@ -303,17 +304,34 @@ def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, atte
     requested_tier: 호출자가 원래 요청한 티어(브레이커 강등 전). downgraded: 브레이커로 강등됐는지.
     기록 실패가 파이프라인을 막으면 안 되므로 모든 예외를 삼킨다(부가 기능)."""
     try:
+        # ★ [2026-07-28] 식별·비용 표준 필드 (P0 「비용 관측」 / 마스터 명세서 §10.3 `llm_calls`)
+        #   ⚠️ 기존엔 식별이 `project_name` 뿐이라 **부서로 매핑할 수단이 없었다.** 그래서 Phase 4 가
+        #     텔레메트리를 전사 열람 권한자 전용으로 잠그는 단기 조치를 넣었다(근본 수정은 별도 항목).
+        #     `owner_dept_id` 는 Phase 3 에서 ProjectState 에 올라왔고, `project_id` 는
+        #     `workspace_root`(./projects/<id>) 에서 유도된다 — **상태 모델 변경 없이** 둘 다 실린다.
+        #     `_pid` 와 같은 규약(basename)을 쓴다.
+        _ws = str(getattr(state_obj, "workspace_root", "") or "")
+        _pid = os.path.basename(_ws.rstrip("/\\")) if _ws else ""
+        _used_model = (attempts[-1] if attempts else "")
+        # 비용은 결정론적 규칙으로 산정하고, 근거를 모르면 None + `unpriced` 로 남긴다
+        # (0 으로 두면 '공짜였다'는 거짓이 된다 — core/llm_cost.py 주석 참조).
+        _cost, _cost_basis = estimate_cost_usd(_used_model, input_tokens, output_tokens)
         rec = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "project": getattr(state_obj, "project_name", "") or "",
+            "project_id": _pid,
+            "owner_dept_id": str(getattr(state_obj, "owner_dept_id", "") or ""),
+            "provider": provider_of(_used_model),
+            "cost_estimate_usd": _cost,
+            "cost_basis": _cost_basis,
             "stage": getattr(state_obj, "current_stage", "") or "",
             "tier": tier,
             "requested_tier": requested_tier or tier,
             "downgraded": bool(downgraded),
             "output_mode": output_mode,
             "retry_count": retry_count,
-            "attempts": attempts,
-            "used": (attempts[-1] if attempts else ""),
+            "attempts": attempts,          # §10.3 `fallback_chain`
+            "used": _used_model,
             "ok": ok,
             "duration_s": round(duration_s, 2),
             "input_tokens": input_tokens,
@@ -569,11 +587,12 @@ class LLMGateway:
 
     @staticmethod
     def _is_paid_model(name: str) -> bool:
-        """유료/종량제 모델인가. OpenRouter 유료 슬러그는 ':free' 접미사가 없다."""
-        if not name or name.endswith(":free"):
-            return False
-        markers = getattr(config, "PAID_MODEL_MARKERS", ())
-        return any(m in name for m in markers)
+        """유료/종량제 모델인가. OpenRouter 유료 슬러그는 ':free' 접미사가 없다.
+
+        ★ [2026-07-28] 판정을 `core/llm_cost.py` 로 이관하고 여기서는 위임한다 — 쿨다운 정책과
+          비용 산정이 **같은 기준**을 써야 한다. 두 곳에 같은 규칙을 두면 조용히 어긋나서
+          '쿨다운은 유료로 보는데 비용은 무료로 집계'하는 모순이 생긴다."""
+        return is_paid_model(name)
 
     def _update_cooldowns(self, attempts, ok: bool, error_str: str = ""):
         """호출 결과로 모델별 생존 상태 갱신(반응형 학습).

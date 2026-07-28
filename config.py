@@ -189,6 +189,29 @@ PAID_MODEL_COOLDOWN_SEC = 60
 #   (`:free` 접미사가 없는 한) 크레딧 과금 모델이므로, 무료와 같은 30분 장기 쿨다운을 걸면
 #   '살아있는 유료 백스톱'이 체인에서 빠져 버린다. `_is_paid_model` 이 `:free` 는 이미 걸러낸다.
 PAID_MODEL_MARKERS = ("meta-llama/", "anthropic/", "openai/", "google/")
+
+# ── LLM 단가표 (P0 「비용 관측」 / 마스터 명세서 §10.1 「승인된 결과물 1건당 비용」) ──────
+# 단위: **USD / 100만 토큰**. `in`=입력(프롬프트), `out`=출력.
+#
+# ⚠️ 값을 추측으로 채우지 말 것. 등록되지 않은 유료 모델은 `core/llm_cost.py` 가
+#   `cost_basis="unpriced"` 로 기록하고 집계가 '미산정 N건'으로 **분리 표시**한다.
+#   0 으로 채우면 "공짜였다"는 거짓이 되고, 임의 추정치를 넣으면 근거 없는 숫자가 경영 판단에
+#   들어간다(§16 비협상 조건). 모르는 채로 두는 것이 틀린 값보다 낫다.
+#
+# ⚠️ 무료 티어 직접 호출(gemini-*/grok-*/llama-*)은 여기 등록하지 않는다 — `PAID_MODEL_MARKERS`
+#   에 걸리지 않아 `free_tier`(과금 0, 사실)로 산정된다. 다만 **유한한 일일 쿼터**를 소진하며,
+#   그건 비용이 아니라 별도 지표다(쿼터 소진이 A-1 지연의 최대 원인이었다 — 위 :76 주석 참조).
+#
+# 채울 때는 제공사 가격 페이지를 근거로 남길 것(주석에 출처·확인일).
+# 출처: OpenRouter 공식 모델 API `https://openrouter.ai/api/v1/models` 의 `pricing`
+#   (토큰당 USD → 100만 배). 확인일 2026-07-28.
+#   ✔ 교차검증: `google/gemini-2.5-flash` 출력 $2.50/1M 이 이 파일 :67 주석의 실측 기록과 일치.
+LLM_PRICE_PER_MTOK = {
+    "google/gemini-2.5-flash":            {"in": 0.30, "out": 2.50},   # Pro 티어 유료 백스톱
+    "google/gemini-2.5-flash-lite":       {"in": 0.10, "out": 0.40},   # Flash 티어 유료 백스톱
+    # 구 백스톱(2026-07-27 에 gemini-2.5-flash 로 교체됨 — :62 주석). 과거 로그 소급 산정용.
+    "meta-llama/llama-3.3-70b-instruct":  {"in": 0.13, "out": 0.40},
+}
 QUOTA_RETRY_SLEEP_SEC = 8        # Flash 체인마저 소진 시 재시도 전 대기(과거 15초 → 단축)
 
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)

@@ -3,8 +3,11 @@ import { API_BASE_URL } from '../store/useFactoryStore';
 
 // 운영 계기판 (Phase 4) — LLM 호출 텔레메트리 뷰어.
 // 1순위 축은 '실제 사용 모델(used)' — 이 산출물을 어느 제공사/모델이 만들었나 = 모델 불변성 실측.
+// 목록 항목 — 이름은 바뀌거나 중복될 수 있어 project_id·소유 부서를 함께 받는다.
+type ProjItem = { project: string; project_id?: string; owner_dept_id?: string };
+
 export function TelemetryPanel({ onClose }: { onClose: () => void }) {
-  const [projects, setProjects] = useState<string[]>([]);
+  const [projects, setProjects] = useState<ProjItem[]>([]);
   const [project, setProject] = useState('');   // '' = 전역
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -28,8 +31,23 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
   const byModel: Record<string, number> = data?.by_model || {};
   const byStage: Record<string, any> = data?.by_stage || {};
   const byReq: Record<string, any> = data?.by_requested_tier || {};
+  const byBasis: Record<string, any> = data?.by_cost_basis || {};
+  const byProvider: Record<string, any> = data?.by_provider || {};
+  const perm = data?.permission || {};
   const modelEntries = Object.entries(byModel).sort((a, b) => b[1] - a[1]);
   const maxModel = modelEntries.length ? modelEntries[0][1] : 1;
+
+  // 비용 표기 — 미산정이 하나라도 있으면 합계는 **하한**이므로 '≥' 를 붙인다.
+  // 0 으로 채워 완전한 총액처럼 보이게 하는 것이 이 화면에서 가장 위험한 거짓말이다.
+  const costLabel = `${t.cost_complete === false ? '≥ ' : ''}$${(t.cost_usd || 0).toFixed(4)}`;
+  const costHint = t.cost_complete === false
+    ? `미산정 ${t.unpriced_calls || 0}건 (단가 미등록)`
+    : (t.cost_partial_calls ? `${t.cost_partial_calls}건은 단가 일부만 등록(과소)` : '전 호출 산정됨');
+  // 산정 근거 라벨 — 무료 0 과 '모름'을 사람이 구분할 수 있어야 한다.
+  const basisKo: Record<string, string> = {
+    free_tier: '무료 티어(과금 0)', cache_hit: '캐시 적중(호출 없음)',
+    paid: '유료(산정)', paid_partial: '유료(단가 일부)', unpriced: '유료·단가 미등록',
+  };
 
   const kpi = (label: string, val: string, hint?: string) => (
     <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 flex flex-col gap-1">
@@ -51,7 +69,11 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
               className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200"
             >
               <option value="">전역 (모든 프로젝트)</option>
-              {projects.map(p => <option key={p} value={p}>{p}</option>)}
+              {projects.map(p => (
+                <option key={p.project} value={p.project}>
+                  {p.project}{p.owner_dept_id ? ` (${p.owner_dept_id})` : ''}
+                </option>
+              ))}
             </select>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
@@ -69,12 +91,50 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
           ) : (
             <div className="space-y-6">
               {/* KPI */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                 {kpi('총 호출', String(t.calls))}
                 {kpi('성공률', `${Math.round((t.success_rate || 0) * 100)}%`)}
                 {kpi('폴백률', `${Math.round((t.fallback_rate || 0) * 100)}%`, `${t.fallback_calls || 0}건`)}
                 {kpi('Pro 강등', String(t.downgraded_calls || 0), '브레이커 강등 호출')}
                 {kpi('총 소요', `${t.total_duration_s || 0}s`)}
+                {kpi('LLM 비용', costLabel, costHint)}
+              </div>
+
+              {/* 비용 산정 근거 — '무료라서 0' 과 '몰라서 0' 을 구분해 보여준다 */}
+              <div>
+                <h3 className="text-sm font-bold text-emerald-300 mb-2">
+                  💰 비용 산정 근거
+                  <span className="text-gray-500 font-normal"> (§10.1 승인된 결과물 1건당 비용의 기초 계측)</span>
+                </h3>
+                <div className="flex gap-3 flex-wrap">
+                  {Object.entries(byBasis).map(([b, v]: any) => (
+                    <div key={b} className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
+                      <span className={b === 'unpriced' ? 'text-amber-400' : 'text-gray-300'}>
+                        {basisKo[b] || b}
+                      </span>
+                      <span className="text-gray-500"> · {v.calls}건</span>
+                      {b === 'unpriced'
+                        ? <span className="text-amber-500"> · 산정 불가</span>
+                        : <span className="text-gray-400"> · ${(v.cost_usd || 0).toFixed(4)}</span>}
+                    </div>
+                  ))}
+                </div>
+                {t.unpriced_calls > 0 && (
+                  <div className="text-[10px] text-amber-500/80 mt-2">
+                    ⚠️ 단가가 등록되지 않은 유료 모델이 있어 총액은 하한입니다.
+                    추정으로 메우지 않습니다 — <code className="text-gray-400">config.LLM_PRICE_PER_MTOK</code> 에
+                    제공사 가격을 근거와 함께 등록하면 과거 로그까지 소급 산정됩니다.
+                  </div>
+                )}
+                {Object.keys(byProvider).length > 0 && (
+                  <div className="flex gap-2 flex-wrap mt-2">
+                    {Object.entries(byProvider).map(([pv, v]: any) => (
+                      <span key={pv} className="text-[11px] bg-gray-900 border border-gray-800 rounded px-2 py-1 text-gray-400">
+                        {pv} · {v.calls}건 · ${(v.cost_usd || 0).toFixed(4)}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* 실제 사용 모델 분포 — 핵심 지표 */}
@@ -132,7 +192,18 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
                   </tbody>
                 </table>
               </div>
-              <div className="text-[10px] text-gray-600">집계 레코드 {data.record_count}건 · 폴백률 = 시도 2회 이상 호출 비율 · 토큰 계측은 v2 예정</div>
+              <div className="text-[10px] text-gray-600">
+                집계 레코드 {data.record_count}건 · 폴백률 = 시도 2회 이상 호출 비율 ·
+                토큰 {(t.total_input_tokens || 0).toLocaleString()} in / {(t.total_output_tokens || 0).toLocaleString()} out
+                {perm.scope && <> · 권한 범위 {perm.scope}</>}
+                {/* 스코프에서 빠진 건수를 밝힌다 — 조용히 빼면 집계가 작아진 줄도 모른다 */}
+                {(perm.excluded_other_dept > 0 || perm.excluded_unattributed > 0) && (
+                  <span className="text-amber-600">
+                    {' '}· 권한 밖 제외 {perm.excluded_other_dept || 0}건
+                    {perm.excluded_unattributed > 0 && `, 부서 귀속 불가 제외 ${perm.excluded_unattributed}건`}
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>
