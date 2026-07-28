@@ -36,8 +36,10 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // [Phase 2] 평상시 식별은 전역 인터셉터(lib/api)가 붙인다. 여기 asUser 는
+  // **다른 사용자 시점을 즉석에서 확인**하기 위한 임시 오버라이드다(전역 상태를 바꾸지 않는다).
   const H = (): HeadersInit =>
-    asUser ? { 'Content-Type': 'application/json', 'X-User-Id': asUser }
+    asUser ? { 'Content-Type': 'application/json', 'X-Factory-User': asUser }
            : { 'Content-Type': 'application/json' };
 
   const load = async () => {

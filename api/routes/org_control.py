@@ -10,9 +10,12 @@
 import asyncio
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+# ★ [Phase 2] 식별·권한 판정을 라우트에서 하지 않는다. `api/deps.py` 단일 지점이 담당한다.
+#   그래야 SSO 이행 시 라우트를 하나도 안 고치고 전환된다.
+from api.deps import Principal, assert_can_edit_org, current_principal
 from core.master_data import MasterDataError
 from core.org_directory import org_directory
 
@@ -24,18 +27,6 @@ def _err(e: MasterDataError):
     if "이미 존재" in msg or "폐지할 수 없" in msg:
         raise HTTPException(status_code=409, detail=msg)
     raise HTTPException(status_code=400, detail=msg)
-
-
-def _principal(x_user_id: Optional[str]) -> str:
-    """현재 요청자 식별. 지금은 헤더 하나가 진실원천이며, SSO 이행 시 이 함수 1곳만 바뀐다."""
-    return (x_user_id or "").strip()
-
-
-async def _require_org_edit(x_user_id: Optional[str]):
-    scope = await asyncio.to_thread(org_directory.resolve_scope, _principal(x_user_id))
-    if not (scope.can_edit_org or scope.unrestricted):
-        raise HTTPException(status_code=403, detail="조직·사용자 편집 권한이 없습니다(관리자 전용).")
-    return scope
 
 
 # ── 요청 모델 ─────────────────────────────────────────────────────────────
@@ -74,10 +65,9 @@ class RolesUpdate(BaseModel):
 
 # ── 조회 ─────────────────────────────────────────────────────────────────
 @router.get("/me")
-async def whoami(x_user_id: Optional[str] = Header(default=None)):
+async def whoami(p: Principal = Depends(current_principal)):
     """현재 요청자와 확정 권한 스코프. 프론트의 화면 게이팅이 이 값을 기준으로 한다."""
-    scope = await asyncio.to_thread(org_directory.resolve_scope, _principal(x_user_id))
-    return {"status": "success", "data": scope.to_dict()}
+    return {"status": "success", "data": p.scope.to_dict()}
 
 
 @router.get("/tree")
@@ -110,8 +100,8 @@ async def dept_history(dept_id: str):
 
 # ── 부서 편집 ────────────────────────────────────────────────────────────
 @router.post("/departments")
-async def create_department(req: DeptCreate, x_user_id: Optional[str] = Header(default=None)):
-    await _require_org_edit(x_user_id)
+async def create_department(req: DeptCreate, p: Principal = Depends(current_principal)):
+    assert_can_edit_org(p)
     try:
         d = await asyncio.to_thread(
             org_directory.create_department, req.dept_id, req.name_ko, req.parent_id,
@@ -124,9 +114,9 @@ async def create_department(req: DeptCreate, x_user_id: Optional[str] = Header(d
 
 @router.put("/departments/{dept_id}")
 async def update_department(dept_id: str, req: DeptUpdate,
-                            x_user_id: Optional[str] = Header(default=None)):
+                            p: Principal = Depends(current_principal)):
     """개정. 새 버전이 되고 구판은 이력으로 보존된다. parent_id 변경 시 하위 트리가 함께 이동한다."""
-    await _require_org_edit(x_user_id)
+    assert_can_edit_org(p)
     try:
         d = await asyncio.to_thread(
             org_directory.update_department, dept_id, req.name_ko, req.parent_id,
@@ -137,9 +127,9 @@ async def update_department(dept_id: str, req: DeptUpdate,
 
 
 @router.delete("/departments/{dept_id}")
-async def retire_department(dept_id: str, x_user_id: Optional[str] = Header(default=None)):
+async def retire_department(dept_id: str, p: Principal = Depends(current_principal)):
     """소프트 폐지. 물리 삭제하지 않는다 — ownership 이 참조하므로 과거 해석이 깨지면 안 된다."""
-    await _require_org_edit(x_user_id)
+    assert_can_edit_org(p)
     try:
         ok = await asyncio.to_thread(org_directory.retire_department, dept_id)
     except MasterDataError as e:
@@ -164,8 +154,8 @@ async def get_user(user_id: str):
 
 
 @router.post("/users")
-async def upsert_user(req: UserUpsert, x_user_id: Optional[str] = Header(default=None)):
-    await _require_org_edit(x_user_id)
+async def upsert_user(req: UserUpsert, p: Principal = Depends(current_principal)):
+    assert_can_edit_org(p)
     try:
         u = await asyncio.to_thread(
             org_directory.upsert_user, req.user_id, req.display_name, req.primary_dept_id,
@@ -177,8 +167,8 @@ async def upsert_user(req: UserUpsert, x_user_id: Optional[str] = Header(default
 
 @router.put("/users/{user_id}/roles")
 async def set_roles(user_id: str, req: RolesUpdate,
-                    x_user_id: Optional[str] = Header(default=None)):
-    await _require_org_edit(x_user_id)
+                    p: Principal = Depends(current_principal)):
+    assert_can_edit_org(p)
     try:
         u = await asyncio.to_thread(org_directory.set_user_roles, user_id, req.roles)
     except MasterDataError as e:
@@ -187,8 +177,8 @@ async def set_roles(user_id: str, req: RolesUpdate,
 
 
 @router.delete("/users/{user_id}")
-async def delete_user(user_id: str, x_user_id: Optional[str] = Header(default=None)):
-    await _require_org_edit(x_user_id)
+async def delete_user(user_id: str, p: Principal = Depends(current_principal)):
+    assert_can_edit_org(p)
     ok = await asyncio.to_thread(org_directory.delete_user, user_id)
     if not ok:
         raise HTTPException(status_code=404, detail=f"사용자 '{user_id}' 가 없습니다.")
@@ -197,22 +187,22 @@ async def delete_user(user_id: str, x_user_id: Optional[str] = Header(default=No
 
 # ── 시드 · 재구축 ────────────────────────────────────────────────────────
 @router.post("/seed")
-async def seed(x_user_id: Optional[str] = Header(default=None)):
+async def seed(p: Principal = Depends(current_principal)):
     """하드코딩되어 있던 부서 맵을 `departments` 로 최초 적재(멱등).
 
     이 시드가 돌고 나면 코드에서 부서를 지워도 되고, 이후 부서 추가·개명·이동·폐지에
     코드 수정이 필요 없어진다."""
-    await _require_org_edit(x_user_id)
+    assert_can_edit_org(p)
     from core.org_seed import seed_departments
     return {"status": "success", "data": await asyncio.to_thread(seed_departments)}
 
 
 @router.post("/reconcile")
-async def reconcile(x_user_id: Optional[str] = Header(default=None)):
+async def reconcile(p: Principal = Depends(current_principal)):
     """파일(project_meta.json / release.json)에서 `ownership` 미러를 재구축한다.
 
     미러가 필요한 이유: 프로젝트·릴리스 목록이 전량 디렉터리 스캔 + 파일 오픈이라
     거기에 부서 필터·정렬·페이지네이션을 얹으면 감당이 안 된다. 미러가 어긋나면 이 API 로 재구축한다."""
-    await _require_org_edit(x_user_id)
+    assert_can_edit_org(p)
     from core.org_seed import reconcile_ownership
     return {"status": "success", "data": await asyncio.to_thread(reconcile_ownership)}

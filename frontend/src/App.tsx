@@ -15,6 +15,7 @@ import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
 import { MasterDataPanel } from './components/MasterDataPanel';
 import { WorkStandardPanel } from './components/WorkStandardPanel';
 import { OrgChartPanel } from './components/OrgChartPanel';
+import { UserSwitcher } from './components/UserSwitcher';
 import { CrosswalkPanel } from './components/CrosswalkPanel';
 import { TelemetryPanel } from './components/TelemetryPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
@@ -223,6 +224,7 @@ export default function App() {
               >
                 📜 업무표준
               </button>
+              <UserSwitcher />
               <button
                 onClick={() => setShowOrgChart(true)}
                 className="text-sm font-bold text-sky-200 bg-sky-900/40 hover:bg-sky-800/60 border border-sky-700/50 px-4 py-2 rounded-lg transition-all"

@@ -1,0 +1,71 @@
+import { useEffect, useState } from 'react';
+import { API_BASE_URL, getActingUser, setActingUser } from '../lib/api';
+
+interface OrgUser {
+  user_id: string; display_name: string;
+  is_admin: boolean; is_executive: boolean; is_data_admin: boolean;
+}
+interface Scope {
+  unrestricted: boolean; can_edit_org: boolean;
+  can_run_enterprise: boolean; can_manage_standard: boolean;
+  readable_dept_ids: string[];
+}
+
+// 누구로 접속했는지 고르고 그 권한을 즉시 확인하는 위젯.
+// ⚠️ 이건 인증이 아니라 **전환 도구**다. SSO 이행 전까지 권한 동작을 확인하기 위한 것이며,
+//    실제 인증은 백엔드 미들웨어가 request.state.principal_user_id 를 채우는 형태가 최종이다.
+export function UserSwitcher() {
+  const [users, setUsers] = useState<OrgUser[]>([]);
+  const [cur, setCur] = useState(getActingUser());
+  const [scope, setScope] = useState<Scope | null>(null);
+
+  const loadScope = async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/v1/org/me`);
+      setScope((await r.json())?.data || null);
+    } catch { setScope(null); }
+  };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/v1/org/users`);
+        setUsers((await r.json())?.data || []);
+      } catch { setUsers([]); }
+      await loadScope();
+    })();
+  }, []);
+
+  const change = async (uid: string) => {
+    setCur(uid);
+    setActingUser(uid);
+    await loadScope();
+    // SSE 는 ?as_user= 가 URL 에 박히므로 재연결이 필요하다. 목록도 권한에 따라 달라진다.
+    window.dispatchEvent(new CustomEvent('factory:acting-user-changed', { detail: { userId: uid } }));
+  };
+
+  if (users.length === 0) return null;   // 조직 미도입이면 표시할 이유가 없다
+
+  const badge =
+    scope?.unrestricted ? { t: '무제한', c: 'text-emerald-300 bg-emerald-900/40 border-emerald-700/50' }
+    : scope?.can_edit_org ? { t: '관리자', c: 'text-amber-300 bg-amber-900/40 border-amber-700/50' }
+    : scope?.can_run_enterprise ? { t: '경영진', c: 'text-sky-300 bg-sky-900/40 border-sky-700/50' }
+    : scope?.can_manage_standard ? { t: 'DA', c: 'text-violet-300 bg-violet-900/40 border-violet-700/50' }
+    : { t: `${scope?.readable_dept_ids?.length ?? 0}개 부서`, c: 'text-gray-400 bg-[#1F2833] border-[#1F2833]' };
+
+  return (
+    <div className="flex items-center gap-1.5" title="이 사용자의 권한으로 화면과 API 응답이 결정됩니다">
+      <select
+        value={cur}
+        onChange={(e) => change(e.target.value)}
+        className="text-xs bg-[#141a21] border border-[#1F2833] rounded px-2 py-1.5 text-gray-300"
+      >
+        <option value="">(익명)</option>
+        {users.map((u) => (
+          <option key={u.user_id} value={u.user_id}>{u.display_name}</option>
+        ))}
+      </select>
+      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.c}`}>{badge.t}</span>
+    </div>
+  );
+}
