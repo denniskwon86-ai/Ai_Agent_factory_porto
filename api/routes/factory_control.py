@@ -12,7 +12,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # [Phase 2/3] 식별·권한은 라우트에서 판정하지 않는다 — api/deps.py 단일 지점이 담당한다.
-from api.deps import (Principal, assert_project_writable, current_principal)
+from api.deps import (Principal, assert_enterprise, assert_project_readable,
+                      assert_project_writable, current_principal)
 from typing import Optional
 
 from core.async_orchestrator import orchestrator
@@ -133,6 +134,27 @@ def _ownership_visible(p, own: dict) -> bool:
     if (own or {}).get("owner_user_id") and own["owner_user_id"] == p.user_id:
         return True
     return bool(dept) and dept in p.scope.readable_dept_ids
+
+
+def _iter_visible_projects(p) -> list:
+    """요청자에게 보이는 프로젝트 id 목록 (설계서 Phase 4 공용 헬퍼).
+
+    ⚠️ `GET /projects` 와 `supervisor_chat` 이 각자 디렉터리를 훑고 있었는데, 후자는
+      **권한을 전혀 보지 않고 전체 프로젝트 이름을 LLM 브리핑에 동봉**했다.
+      즉 다른 부서의 프로젝트 이름이 그대로 새어나갔다. 목록 생성을 한 곳으로 모은다."""
+    root = "./projects"
+    out = []
+    try:
+        names = os.listdir(root)
+    except Exception:
+        return out
+    for item in names:
+        item_path = os.path.join(root, item)
+        if not os.path.isdir(item_path):
+            continue
+        if _ownership_visible(p, _read_project_ownership(item_path)):
+            out.append(item)
+    return out
 
 
 def _read_project_ownership(workspace_root: str) -> dict:
@@ -603,8 +625,10 @@ async def start_all_mega_subprojects(project_id: str):
     return {"status": "success", "started_projects": results}
 
 @router.delete("/projects/{project_id}")
-async def delete_project(project_id: str):
+async def delete_project(project_id: str,
+                          p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")  # rmtree 대상 경로 이탈 방지(가장 파괴적인 벡터)
+    assert_project_writable(p, project_id)
     
     projects_dir = "./projects"
     # 🛑 삭제 전, 해당 프로젝트와 서브 프로젝트들의 실행 중 스프린트를 취소 (좀비 스프린트 방지)
@@ -666,8 +690,10 @@ async def _purge_checkpoints(project_ids: list) -> None:
         print(f"⚠️ [Checkpoint] 체크포인트 정리 실패(무시하고 진행): {e}")
 
 @router.post("/projects/{project_id}/copy")
-async def copy_project(project_id: str, req: ProjectCopyRequest):
+async def copy_project(project_id: str, req: ProjectCopyRequest,
+                          p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
+    assert_project_writable(p, project_id)
     _safe_id(req.new_project_id, "new_project_id")
     
     src_path = os.path.join("./projects", project_id)
@@ -686,8 +712,10 @@ async def copy_project(project_id: str, req: ProjectCopyRequest):
     return {"status": "success", "new_project_id": req.new_project_id}
 
 @router.post("/{project_id}/sprint/start")
-async def start_sprint(project_id: str, req: SprintStartRequest):
+async def start_sprint(project_id: str, req: SprintStartRequest,
+                          p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
+    assert_project_writable(p, project_id)
     workspace_root = f"./projects/{project_id}"
     req.project_state_payload["workspace_root"] = workspace_root
     # T2-b: 프로젝트에 바인딩된 템플릿을 권위 있는 출처(project_meta.json)에서 주입 — 프론트 state 가
@@ -742,14 +770,18 @@ async def start_sprint(project_id: str, req: SprintStartRequest):
     return {"status": "started", "task_id": req.task_id}
 
 @router.post("/{project_id}/sprint/pause")
-async def pause_sprint(project_id: str, req: SprintPauseRequest):
+async def pause_sprint(project_id: str, req: SprintPauseRequest,
+                          p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
+    assert_project_writable(p, project_id)
     await orchestrator.pause_sprint(req.task_id, project_id)
     return {"status": "paused", "task_id": req.task_id}
 
 @router.post("/{project_id}/sprint/stop")
-async def stop_sprint(project_id: str, req: SprintPauseRequest):
+async def stop_sprint(project_id: str, req: SprintPauseRequest,
+                          p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
+    assert_project_writable(p, project_id)
     # 빈 reason을 전달하여 SUPERVISOR 피드백 큐 삽입 없이 태스크만 강제 종료(Kill)
     await orchestrator.pause_sprint(req.task_id, project_id, reason="")
     return {"status": "stopped", "task_id": req.task_id}
@@ -774,8 +806,10 @@ async def resume_from_quota(project_id: str, req: SprintPauseRequest):
     return {"status": "resumed", "task_id": req.task_id}
 
 @router.post("/{project_id}/supervisor/chat")
-async def supervisor_chat(project_id: str, req: SupervisorChatRequest):
+async def supervisor_chat(project_id: str, req: SupervisorChatRequest,
+                          p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
+    assert_project_readable(p, project_id)
     state_path = os.path.join("projects", project_id, "latest_state.json")
     state_data = {}
     if os.path.exists(state_path):
@@ -803,11 +837,10 @@ async def supervisor_chat(project_id: str, req: SupervisorChatRequest):
         snapshot.append(f"[HOTL] {'사용자 승인 대기 중' if _hotl else '대기 없음'}")
         from core.sys_logger import get_recent_logs
         snapshot.append("[최근 서버 로그]\n" + "\n".join(get_recent_logs()[-12:]))
-        _projs = []
-        for item in os.listdir("./projects"):
-            if os.path.isdir(os.path.join("./projects", item)):
-                _projs.append(item)
-        snapshot.append(f"[전체 프로젝트 {len(_projs)}개] " + ", ".join(_projs[:25]))
+        # 🚨 [Phase 4] 부서 유출 차단. 예전엔 전체 프로젝트 이름을 그대로 LLM 브리핑에 넣어
+        #   다른 부서의 프로젝트명이 새어나갔다. 요청자에게 보이는 것만 넣는다.
+        _projs = _iter_visible_projects(p)
+        snapshot.append(f"[열람 가능 프로젝트 {len(_projs)}개] " + ", ".join(_projs[:25]))
     except Exception as e:
         snapshot.append(f"(현황 수집 일부 실패: {e})")
 
@@ -924,8 +957,10 @@ async def replan_wbs(project_id: str):
 
 
 @router.get("/{project_id}/wbs")
-async def get_wbs_master_plan(project_id: str):
+async def get_wbs_master_plan(project_id: str,
+                          p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
+    assert_project_readable(p, project_id)
     wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
     if not os.path.exists(wbs_path):
         return {"status": "not_found", "data": None}
@@ -937,9 +972,11 @@ async def get_wbs_master_plan(project_id: str):
         raise HTTPException(status_code=500, detail=f"WBS 파일을 읽는 중 오류 발생: {str(e)}")
 
 @router.get("/{project_id}/traceability")
-async def get_traceability_data(project_id: str):
+async def get_traceability_data(project_id: str,
+                          p: Principal = Depends(current_principal)):
     """산출물 추적성 맵핑 데이터(FR-ID ↔ Files)를 조회합니다."""
     _safe_id(project_id, "project_id")
+    assert_project_readable(p, project_id)
     workspace_root = f"./projects/{project_id}"
     # ★ [2026-07-27 P0-3] 순수 로더로 교체.
     #   `TraceabilityManager` 생성자가 `os.makedirs` + `_init_if_not_exists()` 를 하므로
@@ -952,11 +989,13 @@ async def get_traceability_data(project_id: str):
         return {"status": "error", "message": f"추적성 데이터 조회 실패: {str(e)}"}
 
 @router.get("/{project_id}/traceability/impact")
-async def get_traceability_impact(project_id: str, fr: str = "", file: str = "", feedback: str = ""):
+async def get_traceability_impact(project_id: str, fr: str = "", file: str = "", feedback: str = "",
+                          p: Principal = Depends(current_principal)):
     """[G1-4] 리비전 영향 분석(LLM 0콜) — 특정 FR-ID/파일, 또는 리비전 피드백 텍스트가
     건드리는 파일·태스크·연관 FR 범위를 역인덱스로 산출한다. 리비전 전 재작업 범위·회귀
     주의 대상을 결정론적으로 제시(HOTL 판단 근거)."""
     _safe_id(project_id, "project_id")
+    assert_project_readable(p, project_id)
     from nodes.utils.traceability_manager import read_mappings, impact_of, analyze_feedback_impact
     mappings = read_mappings(f"./projects/{project_id}")
     try:
@@ -972,9 +1011,11 @@ async def get_traceability_impact(project_id: str, fr: str = "", file: str = "",
 
 
 @router.get("/{project_id}/feed")
-async def get_supervisor_feed(project_id: str):
+async def get_supervisor_feed(project_id: str,
+                          p: Principal = Depends(current_principal)):
     """슈퍼바이저 콘솔 피드(토론·채점 내레이션) 조회 — 새로고침/재접속 복구용."""
     _safe_id(project_id, "project_id")
+    assert_project_readable(p, project_id)
     feed_path = os.path.join("projects", project_id, "supervisor_feed.json")
     if not os.path.exists(feed_path):
         return {"status": "success", "data": []}
@@ -986,8 +1027,10 @@ async def get_supervisor_feed(project_id: str):
         return {"status": "success", "data": []}
 
 @router.get("/{project_id}/state/latest")
-async def get_latest_state(project_id: str):
+async def get_latest_state(project_id: str,
+                          p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
+    assert_project_readable(p, project_id)
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):
         tid, fid, vtype = _read_project_meta(os.path.join("projects", project_id))
@@ -1023,9 +1066,11 @@ async def get_system_logs():
 # 결과물 라이브러리 (배포/최종 결과물 저장 + 보관 + 재실행)
 # ==========================================
 @router.post("/{project_id}/release")
-async def create_release(project_id: str):
+async def create_release(project_id: str,
+                          p: Principal = Depends(current_principal)):
     """완료된 프로젝트의 최종 결과물을 라이브러리에 스냅샷 저장(배포)."""
     _safe_id(project_id, "project_id")  # 경로 이탈 방지 + release_id가 라이브러리 라우트와 왕복 가능하도록 보장
+    assert_project_writable(p, project_id)
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):
         raise HTTPException(status_code=404, detail="저장할 결과물 상태가 없습니다.")
@@ -1150,11 +1195,13 @@ _EXPORT_EXCLUDE_DIRS = {".git", "node_modules", "dist", "build", ".archive", "__
 
 
 @router.get("/{project_id}/export")
-async def export_project_zip(project_id: str):
+async def export_project_zip(project_id: str,
+                          p: Principal = Depends(current_principal)):
     """프로젝트 워크스페이스(생성된 코드·문서 등 모든 산출물)를 zip 으로 패키징해 스트리밍 다운로드한다.
     의존성/빌드 캐시/VCS 디렉토리(_EXPORT_EXCLUDE_DIRS)는 제외한다.
     zip 내부는 project_id 를 최상위 폴더로 하는 상대경로 구조를 유지한다."""
     _safe_id(project_id, "project_id")  # 경로 이탈 방지(임의 디렉토리 압축 차단)
+    assert_project_readable(p, project_id)
     project_path = os.path.join("projects", project_id)
     if not os.path.isdir(project_path):
         raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
@@ -1195,9 +1242,11 @@ class ResimulateRequest(BaseModel):
     base_cycle: int = 1    # 기준 사이클 번호
 
 @router.post("/{project_id}/resimulate")
-async def resimulate(project_id: str, req: ResimulateRequest):
+async def resimulate(project_id: str, req: ResimulateRequest,
+                          p: Principal = Depends(current_principal)):
     """시뮬레이션 인자를 변경하여 재실행. 기존 변수 정의를 유지한 채 Validator → 실행 파이프라인만 재가동."""
     _safe_id(project_id, "project_id")
+    assert_project_writable(p, project_id)
     
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):

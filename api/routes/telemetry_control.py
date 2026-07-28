@@ -10,7 +10,13 @@ data/llm_call_log.jsonl (게이트웨이가 호출마다 append)을 읽어 프�
 """
 import os
 import json
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+# 🚨 [Phase 4] 텔레메트리는 **전역 롤업**이다. 그런데 로그 키가 `project_id` 가 아니라
+#   `project_name`(core/llm_gateway.py) 이라 **부서로 매핑할 수단이 없다.**
+#   부서별 필터를 정확히 만들 수 없으므로, 단기 조치로 전사 열람 권한자에게만 연다.
+#   근본 수정(로그에 project_id·owner_dept_id 를 싣기)은 별도 항목이다.
+from api.deps import Principal, assert_enterprise, current_principal
 
 router = APIRouter(prefix="/api/v1/telemetry", tags=["Telemetry"])
 
@@ -91,8 +97,9 @@ def aggregate(recs: list) -> dict:
 
 
 @router.get("/summary")
-async def telemetry_summary(project: str = ""):
+async def telemetry_summary(project: str = "", p: Principal = Depends(current_principal)):
     """프로젝트(project_name)별 LLM 호출 집계. project 미지정 시 전역 롤업."""
+    assert_enterprise(p)
     recs = _read_records(project)
     data = aggregate(recs)
     data["record_count"] = len(recs)
@@ -101,16 +108,21 @@ async def telemetry_summary(project: str = ""):
 
 
 @router.get("/raw")
-async def telemetry_raw(project: str = "", limit: int = 200):
+async def telemetry_raw(project: str = "", limit: int = 200,
+                        p: Principal = Depends(current_principal)):
     """최근 N건 원시 레코드(디버그/타임라인용)."""
+    assert_enterprise(p)
     recs = _read_records(project)
     return {"status": "success", "data": recs[-max(1, min(limit, 2000)):]}
 
 
 @router.get("/projects")
-async def telemetry_projects():
+async def telemetry_projects(p: Principal = Depends(current_principal)):
     """로그에 등장한 distinct 프로젝트명 목록(패널 필터용). project_id 가 아니라 로그의
-    project_name 기준이라, 프론트가 데이터에서 직접 실제 이름을 받아 필터할 수 있게 한다."""
+    project_name 기준이라, 프론트가 데이터에서 직접 실제 이름을 받아 필터할 수 있게 한다.
+
+    ⚠️ 이 목록 자체가 **전 부서 프로젝트명 노출**이므로 전사 열람 권한자에게만 연다."""
+    assert_enterprise(p)
     names = []
     seen = set()
     for r in _read_records():

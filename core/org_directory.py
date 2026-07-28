@@ -416,16 +416,43 @@ class OrgDirectory:
         return ok
 
     # ── 권한 해석 ─────────────────────────────────────────────────────────
+    def _ensure_tables(self):
+        """스키마가 없으면 만든다.
+
+        ⚠️ `db_path` 가 상대 경로라 **작업 디렉터리가 바뀌면 다른 파일을 가리킨다**(테스트가
+          tmp 로 chdir 하는 경우 등). 그때 `no such table` 로 죽으면 권한 조회가 전 API 를
+          500 으로 만든다. 조회 경로에서 한 번 복구를 시도하고, 그래도 안 되면 '조직 미도입'
+          으로 간주해 통과시킨다 — 권한 인프라 장애가 기능 전체를 멈추면 안 된다."""
+        try:
+            self._init_db()
+            return True
+        except Exception:
+            return False
+
     def has_any_department(self) -> bool:
-        with self._connect() as conn:
-            r = conn.execute("SELECT 1 FROM departments WHERE valid_to IS NULL AND status='active' "
-                             "LIMIT 1").fetchone()
-        return bool(r)
+        for attempt in (0, 1):
+            try:
+                with self._connect() as conn:
+                    r = conn.execute("SELECT 1 FROM departments WHERE valid_to IS NULL "
+                                     "AND status='active' LIMIT 1").fetchone()
+                return bool(r)
+            except sqlite3.OperationalError:
+                if attempt == 0 and self._ensure_tables():
+                    continue
+                return False
+        return False
 
     def has_any_user(self) -> bool:
-        with self._connect() as conn:
-            r = conn.execute("SELECT 1 FROM users WHERE status='active' LIMIT 1").fetchone()
-        return bool(r)
+        for attempt in (0, 1):
+            try:
+                with self._connect() as conn:
+                    r = conn.execute("SELECT 1 FROM users WHERE status='active' LIMIT 1").fetchone()
+                return bool(r)
+            except sqlite3.OperationalError:
+                if attempt == 0 and self._ensure_tables():
+                    continue
+                return False
+        return False
 
     def is_bootstrap(self) -> bool:
         """아직 조직이 '가동'되지 않은 상태인가.
@@ -538,9 +565,12 @@ class OrgDirectory:
         return self.get_ownership(resource_kind, resource_id)
 
     def get_ownership(self, resource_kind: str, resource_id: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
-            r = conn.execute("SELECT * FROM ownership WHERE resource_kind=? AND resource_id=?",
-                             (resource_kind, resource_id)).fetchone()
+        try:
+            with self._connect() as conn:
+                r = conn.execute("SELECT * FROM ownership WHERE resource_kind=? AND resource_id=?",
+                                 (resource_kind, resource_id)).fetchone()
+        except sqlite3.OperationalError:
+            return None   # 미러가 없으면 '소유권 미기록' — 하위호환상 막지 않는다
         return dict(r) if r else None
 
     def visible_resources(self, scope: AccessScope, resource_kind: str) -> Optional[List[str]]:
