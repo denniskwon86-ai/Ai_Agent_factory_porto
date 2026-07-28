@@ -496,6 +496,34 @@ class AdvisorStore:
                 "approved_at=?, updated_at=? WHERE blueprint_id=?",
                 (bp.model_dump_json(), bp.status, bp.approved_by, bp.approved_at, now,
                  blueprint_id))
+
+        # ★ [M0-e] Decision Ledger 기록 (§5.2). 승인은 이 제품에서 가장 중요한 결정 이벤트다.
+        #   ⚠️ 라우트가 아니라 **여기서** 기록한다: 승인 경로가 늘어나도(배치 승인·경영진 일괄
+        #     승인 등) 기록이 자동으로 따라온다. 라우트에 두면 새 경로가 기록을 빠뜨린다 —
+        #     이 프로젝트에서 반복된 배선 누락 유형이다.
+        #   ⚠️ 기록 실패는 삼키지 않는다. 승인 이력이 없는 승인은 §1.3(의도와 결정의 보존)을
+        #     정면으로 어긴다. 감사 저장소가 죽었으면 호출부가 알아야 한다.
+        from core.decision_ledger import decision_ledger
+        _gaps = [g.canonical_term for g in bp.blocking_gaps()]
+        _unverified = bp.unverified_kpis()
+        decision_ledger.append(
+            event_type=("BLUEPRINT_APPROVED" if status == "approved" else "BLUEPRINT_REJECTED"),
+            subject_type="blueprint", subject_id=blueprint_id,
+            actor_type="user", actor_id=actor or "",
+            decision=("승인" if status == "approved" else f"반려: {reason}"),
+            # 무엇을 알면서 승인했는지가 근거의 핵심이다(§5.2 "근거 없는 수치는 추정으로 표시").
+            rationale=(f"준비도 {bp.readiness_score}점/100"
+                       + (f" · 미확보 필수 데이터 {len(_gaps)}건({', '.join(_gaps[:5])})" if _gaps else "")
+                       + (f" · 공식·단위 미기재 지표 {len(_unverified)}건" if _unverified else "")),
+            evidence_refs=[{"kind": "readiness", "score": bp.readiness_score,
+                            "measurable_max": (bp.readiness or {}).get("measurable_max"),
+                            "blocking_gaps": _gaps, "unverified_kpis": _unverified},
+                           {"kind": "playbook", "playbook_id": bp.playbook_id},
+                           {"kind": "consultation", "consultation_id": bp.consultation_id}],
+            input_version_refs=[{"blueprint_version": bp.version}],
+            tenant_id=bp.tenant_id or "tenant_default",
+            enterprise_scope_id=bp.enterprise_scope_id, entity_mode=bp.entity_mode,
+            blueprint_id=blueprint_id)
         return bp
 
     def requirement_rollup(self, dept_ids: Optional[List[str]] = None,

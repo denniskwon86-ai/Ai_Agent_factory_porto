@@ -480,6 +480,22 @@ async def bootstrap_project(blueprint_id: str, req: BootstrapIn,
         "owner_dept_id": bp.owner_dept_id,
         "owner_user_id": bp.owner_user_id,
     })
+    # [M0-e] 승인된 설계가 실제 프로젝트로 넘어간 지점을 남긴다 — 이 링크가 없으면 나중에
+    #   "이 프로젝트가 어느 승인에서 나왔나"를 프로젝트 파일 말고는 확인할 방법이 없다.
+    from core.decision_ledger import decision_ledger
+    await asyncio.to_thread(
+        decision_ledger.append,
+        event_type="PROJECT_BOOTSTRAPPED", subject_type="project", subject_id=req.project_id,
+        actor_type="user", actor_id=p.user_id or "",
+        decision=f"승인된 Blueprint 로 프로젝트 생성 (템플릿 {tid})",
+        rationale=f"준비도 {bp.readiness_score}점/100 · 승인자 {bp.approved_by or '-'}",
+        evidence_refs=[{"kind": "blueprint", "blueprint_id": bp.blueprint_id,
+                        "version": bp.version, "approved_at": bp.approved_at}],
+        output_version_refs=[{"project_id": req.project_id, "template_id": tid}],
+        tenant_id=bp.tenant_id or "tenant_default",
+        enterprise_scope_id=bp.enterprise_scope_id, entity_mode=bp.entity_mode,
+        project_id=req.project_id, blueprint_id=bp.blueprint_id)
+
     return {"status": "success", "data": {
         "project_id": req.project_id, "template_id": tid,
         "blueprint_id": bp.blueprint_id, "entity_mode": bp.entity_mode,
@@ -528,6 +544,20 @@ async def create_data_tasks(blueprint_id: str, project_id: str,
             created.append({"task_id": tid_, "canonical_term": g.canonical_term,
                             "owner_department": g.owner_department,
                             "necessity": g.necessity, "status": g.readiness_status})
+        # [M0-e] 어떤 데이터 요구를 준비 작업으로 확정했는지 남긴다(§5.2 DATA_REQUIREMENT_ACCEPTED).
+        from core.decision_ledger import decision_ledger
+        await asyncio.to_thread(
+            decision_ledger.append,
+            event_type="DATA_REQUIREMENT_ACCEPTED", subject_type="project",
+            subject_id=project_id, actor_type="user", actor_id=p.user_id or "",
+            decision=f"미확보 데이터 {len(created)}건을 WBS 준비 태스크로 확정",
+            rationale="Blueprint 의 필수·권장 데이터 중 보유(held)가 아닌 항목",
+            evidence_refs=[{"kind": "blueprint", "blueprint_id": bp.blueprint_id},
+                           {"kind": "requirements", "items": created}],
+            output_version_refs=[{"wbs_task_ids": [t["task_id"] for t in created]}],
+            tenant_id=bp.tenant_id or "tenant_default",
+            enterprise_scope_id=bp.enterprise_scope_id, entity_mode=bp.entity_mode,
+            project_id=project_id, blueprint_id=bp.blueprint_id)
     except FileNotFoundError:
         raise HTTPException(status_code=409,
                             detail="WBS가 아직 없습니다. 기획(WBS 생성)을 마친 뒤 호출하십시오 — "
