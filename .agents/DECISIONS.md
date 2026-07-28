@@ -31,6 +31,30 @@
   `docs/design_master_data_m1.md` §4 · `core/master_data.py:_INJECT_MAX_ITEMS` 주석 ·
   잠금 테스트 6건(`tests/test_master_document_seed.py`)
 
+### [D-012] ECM 조직 코드의 SSOT 는 `core/enterprise_context/seed.py` 하나다
+- **결정**: 조직 노드 코드 체계는 `core/enterprise_context/seed.py` 의 `_NODES`
+  (`LS` · `LS_MNM` · `MNM_SHARED` · `MNM_COPPER` · `MNM_BATTERY` · `BATT_PLANT_1/2` …)를 유일한
+  기준으로 삼는다. 다른 산출물이 조직을 정의하더라도 **ECM 에 적재하는 경로를 만들지 않는다.**
+  기준정보↔조직 바인딩(`DOCUMENT_SCOPES`)이 이 코드를 참조한다는 사실을 테스트로 잠근다.
+- **이유**: 외부 세션 산출물 `data/ls_mnm_realistic_enterprise_seed.json` 이 **같은 조직에 다른
+  코드 체계**를 쓴다(`BU_SMELTING`·`BU_BATTERY`·`LS_MNM_SHARED`·`PLANT_ONSAN_1/2`).
+  코드가 곧 식별자이므로 두 체계가 공존하면 바인딩이 어느 쪽도 가리키지 못한다. 더 나쁜 것은
+  **조용히 실패한다**는 점이다 — 코드를 못 찾으면 바인딩이 건너뛰어지고, 미바인딩 레코드는
+  「바인딩 없으면 전사 공통 통과」 규칙(R-001 점진 도입)을 타고 **모든 조직에 노출된다.**
+  즉 조직 코드 불일치가 곧 **권한 유출**이다(결함 3과 동일 계열).
+  현재 그 JSON 을 읽는 코드는 0곳이라 충돌은 잠재 상태이고, 지금이 정리 비용이 가장 싸다.
+- **판단 근거**: 어느 쪽 조직 구조도 M1~M4 문서에 근거가 없다(문서에 공장·사업장 정보가 전혀
+  없음 — 실측 확인). 따라서 "어느 쪽이 더 사실적인가"로는 정할 수 없고, **이미 배선된 쪽**을
+  택했다: `_NODES` 는 5개 모듈·테스트가 참조하고 기준정보 44건이 붙어 있다.
+  ⚠️ `seed_example_organization` 은 이름 그대로 **예시 조직**이다(`SEED_SOURCE_REF =
+  "design_doc_example"`). 실제 조직 데이터가 들어오면 그때 교체하며, 그 교체는 C등급이다.
+- **영향**: 외부 산출물의 `organization_tree` 는 참조 자료로만 남는다. 실제 조직 도입 시 두 체계의
+  크로스워크가 필요하면 M1 「카탈로그·크로스워크」 작업에서 다룬다.
+- **되돌림 비용**: 낮음(지금). 두 체계가 모두 적재된 뒤에는 높다 — 그래서 지금 정한다.
+- **근거**: `tests/test_master_document_seed.py::test_document_scopes_match_ecm_org_codes` ·
+  `::test_scope_code_mismatch_is_reported_as_misconfig` · 시드 리포트의
+  `summary.unbound_exposed` 와 `status="seeded_with_scope_misconfig"`
+
 ### [D-011] 문서 정식명은 별칭으로 그대로 쓰지 않고 매칭 가능한 형태로 파생한다
 - **결정**: 시드는 `derive_aliases()` 로 정식명을 분해해 별칭을 만든다
   (`"Mixed Hydroxide Precipitate (MHP)"` → 전체 · `"Mixed Hydroxide Precipitate"` · `"MHP"` · 문서상 식별자).

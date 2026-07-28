@@ -436,9 +436,23 @@ def seed_master_documents(md=None, ecm_repo=None, docs_dir: str = _DOCS_DIR,
                 continue
             node_id = code_to_node.get(spec["scope_code"])
             if not node_id:
+                # ★ 두 상황을 구분한다 — 조용히 같은 메시지로 넘기면 설정 오류를 못 잡는다.
+                #   · 조직이 아예 없다 = ECM 미도입 환경. 정상이며 나중에 다시 실행하면 된다.
+                #   · 조직은 있는데 **이 코드만 없다** = 조직 코드가 바뀌었거나 다른 코드 체계가
+                #     들어온 것이다. 이 경우 레코드가 **미바인딩으로 남고 「바인딩 없으면 전사
+                #     공통 통과」 규칙을 타고 모든 조직에 노출된다**(결함 3과 같은 계열).
+                #     설정 오류이므로 구분해서 크게 남긴다.
+                _misconfig = bool(code_to_node)
                 report["binding_skipped"].append({
                     "master_code": code, "scope_code": spec["scope_code"],
-                    "reason": "해당 ECM 노드가 없습니다(조직 시드 후 다시 실행하십시오)."})
+                    "kind": "scope_code_not_found" if _misconfig else "ecm_not_seeded",
+                    "reason": (
+                        f"ECM 조직은 있으나 코드 '{spec['scope_code']}' 가 없습니다. "
+                        f"조직 코드 체계가 어긋났습니다 — 이 레코드는 미바인딩으로 남아 "
+                        f"**모든 조직에 노출**됩니다. 존재하는 코드: "
+                        f"{sorted(code_to_node)[:10]}"
+                        if _misconfig else
+                        "해당 ECM 노드가 없습니다(조직 시드 후 다시 실행하십시오).")})
                 continue
             try:
                 md.bind_master_to_scope(code, node_id,
@@ -458,7 +472,13 @@ def seed_master_documents(md=None, ecm_repo=None, docs_dir: str = _DOCS_DIR,
         "quality_findings": len(report["quality_findings"]),
         "high_severity_findings": sum(1 for f in report["quality_findings"]
                                       if f["severity"] == "high"),
+        # 미바인딩으로 남은 건수 = 전사 공통으로 통과해 모든 조직에 노출되는 건수.
+        # 0 이 아니면 격리가 그만큼 뚫려 있다는 뜻이므로 리포트 최상위에 올린다.
+        "unbound_exposed": sum(1 for x in report["binding_skipped"]
+                               if x.get("kind") == "scope_code_not_found"),
     }
+    if report["summary"]["unbound_exposed"]:
+        report["status"] = "seeded_with_scope_misconfig"
     report["note"] = ("값의 정확도는 구현 단계에서 판정하지 않습니다. `quality_findings` 는 "
                       "실사용 전 보정 작업의 입력 목록이며, 시드는 값을 임의로 고치지 않습니다.")
     return report

@@ -237,6 +237,36 @@ def test_seed_without_ecm_still_loads(stack):
     assert r["summary"]["bindings"] == 0
 
 
+def test_document_scopes_match_ecm_org_codes():
+    """★★ `DOCUMENT_SCOPES` 는 조직 코드를 **문자열로** 참조한다. 조직 시드가 코드를 바꾸면
+    바인딩이 조용히 건너뛰어지고 → 미바인딩 → 「전사 공통 통과」 규칙을 타고 **모든 조직에
+    노출**된다. 실행 시점이 아니라 여기서 먼저 깨지게 한다.
+
+    (배경: 외부 세션 산출물이 같은 조직에 다른 코드 체계 `BU_SMELTING`/`PLANT_ONSAN_1` 을 쓴다.
+     D-012 로 `core/enterprise_context/seed.py` 를 조직 SSOT 로 확정했다.)"""
+    from core.enterprise_context import seed as ecm_seed
+    org_codes = {row[0] for row in ecm_seed._NODES}
+    declared = {s["scope_code"] for s in DOCUMENT_SCOPES.values() if s.get("scope_code")}
+    missing = declared - org_codes
+    assert not missing, (
+        f"문서가 참조하는 조직 코드가 ECM 시드에 없다: {sorted(missing)}. "
+        f"이대로 두면 해당 기준정보가 미바인딩으로 남아 모든 조직에 노출된다. "
+        f"ECM 시드 코드: {sorted(org_codes)}")
+
+
+def test_scope_code_mismatch_is_reported_as_misconfig(stack, monkeypatch):
+    """조직은 있는데 코드만 없는 경우를 'ECM 미도입'과 구분해 크게 남기는가."""
+    md, repo, ids = stack
+    monkeypatch.setitem(DOCUMENT_SCOPES, "global_standard_m3.json",
+                        {**DOCUMENT_SCOPES["global_standard_m3.json"],
+                         "scope_code": "NO_SUCH_ORG"})
+    r = seed_master_documents(md=md, ecm_repo=repo)
+    assert r["status"] == "seeded_with_scope_misconfig"
+    assert r["summary"]["unbound_exposed"] > 0
+    bad = [x for x in r["binding_skipped"] if x.get("kind") == "scope_code_not_found"]
+    assert bad and "모든 조직에 노출" in bad[0]["reason"]
+
+
 def test_missing_ecm_nodes_are_reported_not_silent(tmp_path, monkeypatch):
     """조직이 없으면 조용히 넘어가지 말고 왜 못 붙였는지 남겨야 한다."""
     md = MasterData(db_path=str(tmp_path / "m.db"))
