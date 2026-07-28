@@ -34,6 +34,7 @@ _LITERAL_ROUTES = [
     "/api/v1/glossary/match?term=x",
     "/api/v1/lineage/impact?node_type=master&node_id=x",
     "/api/v1/lineage/edges?node_type=master&node_id=x",
+    "/api/v1/contracts/evaluate",              # `/{contract_id}` 에 잡아먹히기 쉽다
 ]
 
 

@@ -314,6 +314,38 @@ CREATE TABLE IF NOT EXISTS lineage_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_lin_from ON lineage_edges(from_type, from_id, status);
 CREATE INDEX IF NOT EXISTS idx_lin_to ON lineage_edges(to_type, to_id, status);
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- [§6.3 / §6.1] 데이터 계약 (2026-07-29)
+--
+-- §6.1: "시스템/앱 간 필드·형식·권한·SLA 약속 — **직접 DB 결합의 대안**".
+--
+-- ⚠️ JSON 을 저장하는 것만으로는 계약이 아니다. 약속은 **지금 지켜지고 있는지 확인될 때**
+--   비로소 결합의 대안이 된다. 그래서 이 테이블의 값어치는 `schema_json` 이 아니라
+--   `evaluate_contract()` 가 매번 실제 카탈로그·품질·최신성과 대조한다는 데 있다.
+-- ⚠️ 버전은 **개정 시 새 행**이다(같은 contract_key 의 version+1). 덮어쓰면 소비자가 어떤
+--   약속을 보고 붙였는지 사라지고, 파기적 변경을 사후에 증명할 수 없다.
+CREATE TABLE IF NOT EXISTS data_contracts (
+    contract_id         TEXT PRIMARY KEY,
+    contract_key        TEXT NOT NULL,          -- 개정 계보를 잇는 논리 키
+    version             INTEGER NOT NULL DEFAULT 1,
+    name                TEXT NOT NULL,
+    producer_asset_id   TEXT NOT NULL,
+    consumer            TEXT NOT NULL,          -- 소비 주체(앱·부서·시스템 식별자)
+    schema_json         TEXT DEFAULT '{}',
+    quality_rules_json  TEXT DEFAULT '{}',
+    access_policy_json  TEXT DEFAULT '{}',
+    status              TEXT NOT NULL DEFAULT 'draft',  -- draft|active|deprecated|retired
+    activated_by        TEXT DEFAULT '',
+    activated_at        TEXT DEFAULT '',
+    supersedes          TEXT DEFAULT '',
+    note                TEXT DEFAULT '',
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    UNIQUE (contract_key, version)
+);
+CREATE INDEX IF NOT EXISTS idx_contract_producer ON data_contracts(producer_asset_id, status);
+CREATE INDEX IF NOT EXISTS idx_contract_consumer ON data_contracts(consumer, status);
 """
 
 
