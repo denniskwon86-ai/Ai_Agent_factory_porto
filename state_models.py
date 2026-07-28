@@ -95,6 +95,13 @@ class ProjectState(BaseModel):
     model_config = ConfigDict(extra='forbid', from_attributes=True)
     schema_version: str = Field(default="5.1.0", pattern=r"^\d+\.\d+\.\d+$")
     project_name: str = Field(default="New Project")
+
+    # ── 소유권 (설계서 Phase 3) ──────────────────────────────────────────
+    # ⚠️ `extra='forbid'` 이므로 여기에 선언하지 않으면 소유권을 실은 상태가
+    #   ValidationError 로 즉사한다. 진실원본은 `project_meta.json` 이고 여기는 주입본이다.
+    owner_dept_id: str = Field(default="", description="소유 부서(권한 스코프의 기준)")
+    owner_user_id: str = Field(default="", description="개인 소유자(personal 가시성일 때 의미)")
+    visibility: str = Field(default="dept", description="dept | company | personal")
     initial_idea: str = Field(default="")
     master_data: str = Field(default="", description="전사 통합 환경변수 및 제약사항 (마스터 데이터)")
     # 범용 플랫폼(T2-b): 이 프로젝트가 실행될 워크플로우 템플릿 id(레지스트리/그래프/스킬 해석의 기준).

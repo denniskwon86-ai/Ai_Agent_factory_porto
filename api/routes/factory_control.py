@@ -7,9 +7,12 @@ import shutil
 import stat
 import zipfile
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+# [Phase 2/3] 식별·권한은 라우트에서 판정하지 않는다 — api/deps.py 단일 지점이 담당한다.
+from api.deps import (Principal, assert_project_writable, current_principal)
 from typing import Optional
 
 from core.async_orchestrator import orchestrator
@@ -80,6 +83,8 @@ _ACCUMULATED_FIELDS = [
     "qa_report_summary", "user_manual_summary", "git_info",
     "architecture_decisions", "technical_debt", "initial_idea", "project_name",
     "domain_agents", "is_mega_project", "parent_project_id", "sub_projects_map", "shared_ledger",
+    # [Phase 3] 소유권은 스프린트 사이에 유실되면 안 된다 — 누적 보존 대상에 편입.
+    "owner_dept_id", "owner_user_id", "visibility",
 ]
 
 
@@ -109,7 +114,53 @@ def _read_project_template(workspace_root: str) -> str:
     return tid
 
 
-def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None, master_domains: list = None, mcp_live_grounding: bool = None) -> None:
+def _ownership_visible(p, own: dict) -> bool:
+    """이 소유권 정보를 가진 자원이 요청자에게 보이는가 (예외를 던지지 않는 목록 필터용).
+
+    ⚠️ 소유권이 **미기록**인 자원은 막지 않는다. 마이그레이션 전 기존 프로젝트가
+      전부 안 보이게 되면 기능이 통째로 멈춘다 — 하위호환이 우선이다."""
+    try:
+        if p is None or p.scope.unrestricted:
+            return True
+    except Exception:
+        return True
+    dept = (own or {}).get("owner_dept_id", "")
+    vis = (own or {}).get("visibility", "dept")
+    if not dept and not (own or {}).get("owner_user_id"):
+        return True                       # 미기록 = 무소속 → 하위호환
+    if vis == "company":
+        return True
+    if (own or {}).get("owner_user_id") and own["owner_user_id"] == p.user_id:
+        return True
+    return bool(dept) and dept in p.scope.readable_dept_ids
+
+
+def _read_project_ownership(workspace_root: str) -> dict:
+    """소유권 필드만 별도로 읽는다 (설계서 Phase 3).
+
+    ⚠️ `_read_project_meta` 의 3-튜플 반환은 **바꾸지 않는다** — 호출부가 많아 시그니처를
+      건드리면 전 경로가 깨진다. `_read_project_packs` 와 같은 패턴으로 따로 뽑는다."""
+    try:
+        with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
+            d = json.load(f) or {}
+    except Exception:
+        d = {}
+    return {
+        "owner_dept_id": str(d.get("owner_dept_id", "") or ""),
+        "owner_user_id": str(d.get("owner_user_id", "") or ""),
+        "visibility": str(d.get("visibility", "dept") or "dept"),
+        "nature": str(d.get("nature", "") or ""),
+        "forked_from": d.get("forked_from") or {},
+    }
+
+
+def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None, master_domains: list = None, mcp_live_grounding: bool = None,
+                        owner_dept_id: str = None, owner_user_id: str = None,
+                        visibility: str = None, nature: str = None,
+                        forked_from: dict = None) -> None:
+    """⚠️ 소유권 5필드도 **None 이면 보존**한다(Phase 3).
+    이 함수는 템플릿만 바꾸려는 호출부가 많은데, 거기서 소유권이 초기화되면
+    프로젝트가 조용히 무소속이 되어 권한 필터에서 사라진다."""
     try:
         # [M1/M3] master_domains·mcp_live_grounding 미지정(None)이면 기존 값을 보존한다 —
         # 이 필드를 안 넘기는 기존 호출부(mega/sub 생성 등)가 기존 설정을 실수로 날리지 않도록.
@@ -117,13 +168,26 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
         #   기존엔 master_domains/mcp_live_grounding 만 None 이면 보존하고
         #   knowledge_pack_ids 는 보존 로직이 없어 **호출부가 안 넘기면 `[]` 로 초기화**됐다.
         #   이 함수를 부르는 다른 경로(소유권 변경 등)가 지식팩 연결을 조용히 날린다.
+        _own_missing = any(v is None for v in
+                           (owner_dept_id, owner_user_id, visibility, nature, forked_from))
         _prev = {}
-        if master_domains is None or mcp_live_grounding is None or knowledge_pack_ids is None:
+        if (master_domains is None or mcp_live_grounding is None
+                or knowledge_pack_ids is None or _own_missing):
             try:
                 with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
                     _prev = json.load(f) or {}
             except Exception:
                 _prev = {}
+        if owner_dept_id is None:
+            owner_dept_id = _prev.get("owner_dept_id", "")
+        if owner_user_id is None:
+            owner_user_id = _prev.get("owner_user_id", "")
+        if visibility is None:
+            visibility = _prev.get("visibility", "dept")
+        if nature is None:
+            nature = _prev.get("nature", "")
+        if forked_from is None:
+            forked_from = _prev.get("forked_from", {})
         if master_domains is None:
             master_domains = _prev.get("master_domains", [])
         if mcp_live_grounding is None:
@@ -138,9 +202,34 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                 "knowledge_pack_ids": list(knowledge_pack_ids or []),
                 "master_domains": list(master_domains or []),
                 "mcp_live_grounding": bool(mcp_live_grounding),
+                # [Phase 3] 소유권 — 이 파일이 진실원본이고 ownership 테이블은 검색용 미러다.
+                "owner_dept_id": owner_dept_id or "",
+                "owner_user_id": owner_user_id or "",
+                "visibility": visibility or "dept",
+                "nature": nature or "",
+                "forked_from": forked_from or {},
             }, f, ensure_ascii=False, indent=2)
+        _sync_project_ownership(workspace_root, owner_dept_id, owner_user_id, visibility, nature)
     except Exception as e:
         print(f"⚠️ project_meta 저장 실패: {e}")
+
+
+def _sync_project_ownership(workspace_root: str, dept_id: str = "", user_id: str = "",
+                            visibility: str = "dept", nature: str = "") -> None:
+    """파일(진실원본) 저장 직후 `ownership` 미러를 갱신한다.
+
+    ⚠️ 미러가 필요한 이유: 프로젝트 목록이 전량 디렉터리 스캔 + 파일 오픈이라 거기에
+      부서 필터·정렬·페이지네이션을 얹으면 감당이 안 된다. 어긋나면 /org/reconcile 로 재구축한다.
+      미러 실패가 프로젝트 저장 자체를 막으면 안 되므로 조용히 넘어간다."""
+    try:
+        from core.org_directory import org_directory
+        pid = os.path.basename(os.path.normpath(workspace_root))
+        if pid:
+            org_directory.set_ownership("project", pid, dept_id=dept_id or "",
+                                        owner_user_id=user_id or "",
+                                        visibility=visibility or "dept", nature=nature or "")
+    except Exception as e:
+        print(f"⚠️ ownership 미러 갱신 실패(무시): {e}")
 
 
 def _read_project_packs(workspace_root: str) -> list:
@@ -190,15 +279,47 @@ def _restore_accumulated_from_disk(payload: dict, workspace_root: str) -> dict:
             payload[k] = disk[k]
     return payload
 
+class OwnershipUpdate(BaseModel):
+    owner_dept_id: Optional[str] = None
+    owner_user_id: Optional[str] = None
+    visibility: Optional[str] = None      # dept | company | personal
+    nature: Optional[str] = None          # 사용자 선언: enterprise | local | personal
+
+
+@router.put("/{project_id}/ownership")
+async def set_project_ownership(project_id: str, req: OwnershipUpdate,
+                                p: Principal = Depends(current_principal)):
+    """프로젝트의 소유 부서·가시성을 지정한다 (설계서 Phase 3).
+
+    진실원본은 `project_meta.json` 이며, 저장 직후 `ownership` 미러가 갱신된다."""
+    _safe_id(project_id, "project_id")
+    ws = os.path.join("./projects", project_id)
+    if not os.path.isdir(ws):
+        raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+    assert_project_writable(p, project_id)
+    if req.visibility is not None and req.visibility not in ("dept", "company", "personal"):
+        raise HTTPException(status_code=400, detail="visibility 는 dept|company|personal 이어야 합니다.")
+
+    tid, fid, vtype = _read_project_meta(ws)
+    _write_project_meta(ws, tid, fid, vtype,
+                        owner_dept_id=req.owner_dept_id, owner_user_id=req.owner_user_id,
+                        visibility=req.visibility, nature=req.nature)
+    return {"status": "success", "data": _read_project_ownership(ws)}
+
+
 @router.get("/projects")
-async def get_projects():
+async def get_projects(p: Principal = Depends(current_principal)):
     projects_dir = "./projects"
     os.makedirs(projects_dir, exist_ok=True)
-    
+
     project_list = []
     for item in os.listdir(projects_dir):
         item_path = os.path.join(projects_dir, item)
         if os.path.isdir(item_path):
+            # [Phase 3/4] 소유권 필터. 이 루프는 이미 메타 파일을 열고 있으므로 추가 I/O 는 실질 0.
+            _own = _read_project_ownership(item_path)
+            if not _ownership_visible(p, _own):
+                continue
             wbs_path = os.path.join(item_path, "00_wbs_master_plan.json")
             project_name = item
             initial_idea = ""
