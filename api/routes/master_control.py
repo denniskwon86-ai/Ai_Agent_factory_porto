@@ -208,6 +208,18 @@ async def create_scope_binding(req: ScopeBindRequest,
     return {"status": "success", "data": out}
 
 
+@router.get("/scope-bindings/coverage")
+async def scope_coverage(tenant_id: str = "tenant_default",
+                         p: Principal = Depends(current_principal)):
+    """[격리 관측] 미바인딩으로 남아 **모든 조직에 노출되는** 기준정보 현황.
+
+    같은 유형의 사고가 반복됐다 — 재시드가 바인딩을 건너뛰거나, 조직 코드가 어긋나거나,
+    바인딩을 해제하거나, ECM 시드 전에 적재하면 그 레코드는 전사 공통으로 통과한다.
+    규칙은 유지하되 **노출을 조용하지 않게** 만드는 것이 이 엔드포인트의 목적이다."""
+    data = await asyncio.to_thread(master_data.scope_coverage, tenant_id)
+    return {"status": "success", "data": data}
+
+
 @router.delete("/scope-bindings/{binding_id}")
 async def revoke_scope_binding(binding_id: str,
                                p: Principal = Depends(current_principal)):

@@ -637,6 +637,38 @@ class MasterData:
         self._invalidate()
         return changed
 
+    def scope_coverage(self, tenant_id: str = "tenant_default") -> dict:
+        """[격리 관측] **미바인딩으로 남아 전 조직에 노출되는 기준정보**를 센다.
+
+        ★ 이번 프로젝트에서 같은 유형의 사고가 네 번 났다 — 재시드가 바인딩을 건너뛰거나, 조직
+          코드가 어긋나거나, 바인딩을 해제하거나, ECM 시드 전에 적재하면, 그 레코드는
+          「바인딩 없으면 전사 공통 통과」 규칙(R-001 점진 도입)을 타고 **모든 조직에 노출된다.**
+          규칙 자체는 유지할 가치가 있다(전부 막으면 도입 전 기능이 통째로 멈춘다).
+          대신 **노출 건수를 상시 볼 수 있어야** 한다 — 조용한 노출이 위험한 것이지 규칙이
+          위험한 게 아니다.
+
+        반환: `exposed_codes`(전 조직 노출), `bound_codes`, `coverage_ratio`, `by_scope`.
+        """
+        active = [r["master_code"] for r in self.list_records()]
+        bound = {b["master_code"] for b in self.list_scope_bindings(tenant_id=tenant_id)}
+        exposed = sorted(set(active) - bound)
+        by_scope = {}
+        for b in self.list_scope_bindings(tenant_id=tenant_id):
+            by_scope[b["scope_node_id"]] = by_scope.get(b["scope_node_id"], 0) + 1
+        total = len(active)
+        return {
+            "tenant_id": tenant_id,
+            "total_records": total,
+            "bound_records": total - len(exposed),
+            "exposed_records": len(exposed),
+            "exposed_codes": exposed,
+            "coverage_ratio": round((total - len(exposed)) / total, 4) if total else 1.0,
+            "by_scope_node": by_scope,
+            "note": ("미바인딩 기준정보는 조직 범위 필터를 통과해 **모든 조직의 프롬프트에** "
+                     "들어갑니다(점진 도입 규칙). 의도한 전사 공통이면 정상이고, 아니면 "
+                     "바인딩을 넣거나 레코드를 폐기하십시오."),
+        }
+
     def list_scope_bindings(self, master_code: str = "", scope_node_id: str = "",
                             tenant_id: str = "") -> list:
         sql = "SELECT * FROM master_scope_bindings WHERE status='active'"

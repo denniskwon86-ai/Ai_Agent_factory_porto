@@ -153,6 +153,30 @@ def test_own_node_binding_overrides_inherited(md):
     assert other["RM-A"] == 1, "동제련은 전사 상속을 그대로 받아 v1 고정"
 
 
+# ── 격리 관측 ─────────────────────────────────────────────────────────────
+def test_coverage_reports_unbound_exposure(md):
+    """★★ 미바인딩 = 전 조직 노출. 조용한 노출이 위험한 것이지 규칙이 위험한 게 아니다."""
+    m, ids = md
+    cov = m.scope_coverage()
+    assert cov["exposed_records"] == 1 and "RM-A" in cov["exposed_codes"]
+    assert cov["coverage_ratio"] == 0.0
+
+    b = m.bind_master_to_scope("RM-A", ids["MNM_BATTERY"])
+    cov = m.scope_coverage()
+    assert cov["exposed_records"] == 0 and cov["coverage_ratio"] == 1.0
+    assert cov["by_scope_node"][ids["MNM_BATTERY"]] == 1
+
+    m.unbind_master_from_scope(b["binding_id"])
+    assert m.scope_coverage()["exposed_records"] == 1, "해제하면 다시 노출로 잡혀야 한다"
+
+
+def test_coverage_ignores_retired_records(md):
+    """폐기된 레코드는 주입되지 않으므로 노출로 세면 안 된다(허위 경보)."""
+    m, ids = md
+    m.retire_record("RM-A")
+    assert m.scope_coverage()["exposed_records"] == 0
+
+
 # ── 해제 ──────────────────────────────────────────────────────────────────
 def test_unbind_is_soft_and_removes_from_scope(md):
     """해제는 소프트 삭제다 — "언제 무엇이 적용됐었나"는 감사 대상이라 지우지 않는다."""
