@@ -1,0 +1,420 @@
+{
+  "seed_metadata": {
+    "version": "1.0-REALISTIC-SEED",
+    "generated_at": "2026-07-28T15:28:26.925764+00:00",
+    "description": "LS MnM 온산공장 실제급 제조 합성 시드 데이터 (M1~M4 문서 파라미터 통합)"
+  },
+  "organization_tree": {
+    "tenant_id": "tenant-ls-group-001",
+    "tenant_name": "LS 그룹 (LS Enterprise Group)",
+    "entity_mode": "REAL",
+    "status": "ACTIVE",
+    "effective_from": "2026-01-01T00:00:00Z",
+    "nodes": [
+      {
+        "node_id": "node-ls-group",
+        "node_type": "ENTERPRISE_GROUP",
+        "code": "LS_GROUP",
+        "name": "LS 그룹 지주사",
+        "parent_id": null
+      },
+      {
+        "node_id": "node-ls-mnm",
+        "node_type": "LEGAL_ENTITY",
+        "code": "LS_MNM",
+        "name": "LS MnM (주)",
+        "industry_code": "C24120",
+        "parent_id": "node-ls-group"
+      },
+      {
+        "node_id": "node-ls-mnm-shared",
+        "node_type": "SHARED_SERVICE",
+        "code": "LS_MNM_SHARED",
+        "name": "LS MnM 전사공통 (경영관리/재무회계/IT)",
+        "parent_id": "node-ls-mnm"
+      },
+      {
+        "node_id": "node-ls-mnm-smelting-bu",
+        "node_type": "BUSINESS_DIVISION",
+        "code": "BU_SMELTING",
+        "name": "동제련 사업부",
+        "parent_id": "node-ls-mnm"
+      },
+      {
+        "node_id": "node-ls-mnm-onsan-plant1",
+        "node_type": "PLANT",
+        "code": "PLANT_ONSAN_1",
+        "name": "온산 제1공장 (동제련/전해조)",
+        "parent_id": "node-ls-mnm-smelting-bu"
+      },
+      {
+        "node_id": "node-ls-mnm-battery-bu",
+        "node_type": "BUSINESS_DIVISION",
+        "code": "BU_BATTERY",
+        "name": "배터리 소재 사업부",
+        "parent_id": "node-ls-mnm"
+      },
+      {
+        "node_id": "node-ls-mnm-onsan-plant2",
+        "node_type": "PLANT",
+        "code": "PLANT_ONSAN_2",
+        "name": "온산 제2공장 (황산니켈/수산화리튬)",
+        "parent_id": "node-ls-mnm-battery-bu"
+      }
+    ]
+  },
+  "material_master": [
+    {
+      "material_id": "RM-MHP-001",
+      "material_name": "Mixed Hydroxide Precipitate (MHP)",
+      "type": "Raw Material",
+      "uom": "Ton",
+      "base_price_usd": 15000,
+      "lead_time_days": 45,
+      "supplier": "Global Mining Co."
+    },
+    {
+      "material_id": "RM-H2SO4-001",
+      "material_name": "Sulfuric Acid (H2SO4, 98%)",
+      "type": "Raw Material",
+      "uom": "Liter",
+      "base_price_usd": 150,
+      "lead_time_days": 5,
+      "supplier": "Local Chemical Corp"
+    },
+    {
+      "material_id": "WIP-NiSO4-001",
+      "material_name": "Crude Nickel Sulfate Solution",
+      "type": "Work in Progress",
+      "uom": "Liter",
+      "base_price_usd": 0,
+      "lead_time_days": 0
+    },
+    {
+      "material_id": "FG-NiSO4-001",
+      "material_name": "High-Purity Nickel Sulfate (NiSO4) Crystals",
+      "type": "Finished Good",
+      "uom": "Ton",
+      "base_price_usd": 22000,
+      "lead_time_days": 2,
+      "customer_demand_volatility": "High"
+    },
+    {
+      "material_id": "FG-LiOH-001",
+      "material_name": "Lithium Hydroxide (LiOH) Battery Grade",
+      "type": "Finished Good",
+      "uom": "Ton",
+      "base_price_usd": 45000,
+      "lead_time_days": 3,
+      "customer_demand_volatility": "Medium"
+    },
+    {
+      "material_id": "RM-CuCON-001",
+      "material_name": "Copper Concentrate (30% Cu)",
+      "type": "Raw Material",
+      "uom": "Ton",
+      "lead_time_days": 60,
+      "supplier": "South American Mining Group"
+    },
+    {
+      "material_id": "WIP-MATTE-001",
+      "material_name": "Copper Matte (60% Cu)",
+      "type": "Work in Progress",
+      "uom": "Ton"
+    },
+    {
+      "material_id": "WIP-ANODE-001",
+      "material_name": "Anode Copper (99% Cu)",
+      "type": "Work in Progress",
+      "uom": "Ton"
+    },
+    {
+      "material_id": "FG-CATHODE-001",
+      "material_name": "Cathode Copper (99.99% Cu)",
+      "type": "Finished Good",
+      "uom": "Ton",
+      "base_price_usd": 9000,
+      "lead_time_days": 5
+    },
+    {
+      "material_id": "BP-H2SO4-001",
+      "material_name": "Sulfuric Acid (By-product)",
+      "type": "Finished Good",
+      "uom": "Ton",
+      "base_price_usd": 120
+    },
+    {
+      "material_id": "BP-GOLD-001",
+      "material_name": "Gold Bullion (from Slime)",
+      "type": "Finished Good",
+      "uom": "Ounce",
+      "base_price_usd": 2300
+    }
+  ],
+  "bill_of_materials": [
+    {
+      "parent_id": "FG-NiSO4-001",
+      "components": [
+        {
+          "material_id": "RM-MHP-001",
+          "quantity": 1.2,
+          "uom": "Ton"
+        },
+        {
+          "material_id": "RM-H2SO4-001",
+          "quantity": 500,
+          "uom": "Liter"
+        }
+      ],
+      "base_yield_rate": 0.94,
+      "scrap_recovery_rate": 0.05
+    },
+    {
+      "parent_id": "FG-CATHODE-001",
+      "components": [
+        {
+          "material_id": "RM-CuCON-001",
+          "quantity": 3.4,
+          "uom": "Ton"
+        }
+      ],
+      "co_products": [
+        {
+          "material_id": "BP-H2SO4-001",
+          "quantity": 3.0,
+          "uom": "Ton"
+        },
+        {
+          "material_id": "BP-GOLD-001",
+          "quantity": 0.15,
+          "uom": "Ounce"
+        }
+      ],
+      "base_yield_rate": 0.98
+    }
+  ],
+  "equipment_master": [
+    {
+      "equipment_id": "EQ-DIS-01",
+      "equipment_name": "Primary Leaching Dissolver",
+      "process_type": "Continuous",
+      "capacity_per_hour": 5.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.85,
+      "mtbf_hours": 720,
+      "mttr_hours": 8
+    },
+    {
+      "equipment_id": "EQ-SX-01",
+      "equipment_name": "Solvent Extraction (SX) Unit",
+      "process_type": "Continuous",
+      "capacity_per_hour": 4.5,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.9,
+      "mtbf_hours": 1440,
+      "mttr_hours": 12
+    },
+    {
+      "equipment_id": "EQ-CRY-01",
+      "equipment_name": "Crystallizer & Centrifuge",
+      "process_type": "Batch",
+      "capacity_per_hour": 4.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.8,
+      "mtbf_hours": 480,
+      "mttr_hours": 6
+    },
+    {
+      "equipment_id": "EQ-FLASH-01",
+      "equipment_name": "Flash Smelting Furnace (자용로)",
+      "process_type": "Continuous",
+      "capacity_per_hour": 150.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.92,
+      "mtbf_hours": 1440,
+      "mttr_hours": 24
+    },
+    {
+      "equipment_id": "EQ-CONV-01",
+      "equipment_name": "Converter Furnace (전로)",
+      "process_type": "Batch",
+      "capacity_per_hour": 60.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.85,
+      "mtbf_hours": 720,
+      "mttr_hours": 12
+    },
+    {
+      "equipment_id": "EQ-REFIN-01",
+      "equipment_name": "Electrolytic Refining Cell (전해조)",
+      "process_type": "Continuous",
+      "capacity_per_hour": 50.0,
+      "capacity_uom": "Ton/hr",
+      "oee_target": 0.98,
+      "mtbf_hours": 2880,
+      "mttr_hours": 8
+    }
+  ],
+  "quality_master": [
+    {
+      "product_id": "FG-NiSO4-001",
+      "inspection_method": "ICP-OES/MS",
+      "critical_defects": [
+        {
+          "defect_name": "Cobalt (Co) Impurity",
+          "tolerance_limit_ppm": 10.0,
+          "probability_distribution": "Gaussian",
+          "mean": 5.0,
+          "std_dev": 2.0
+        },
+        {
+          "defect_name": "Iron (Fe) Impurity",
+          "tolerance_limit_ppm": 5.0,
+          "probability_distribution": "Gaussian",
+          "mean": 2.0,
+          "std_dev": 1.5
+        }
+      ],
+      "target_cpk": 1.33
+    },
+    {
+      "product_id": "FG-CATHODE-001",
+      "inspection_method": "Spectrometry",
+      "critical_defects": [
+        {
+          "defect_name": "Surface Nodules (표면 불량)",
+          "tolerance_limit_ppm": 0.0,
+          "probability_distribution": "Poisson",
+          "lambda": 0.05
+        },
+        {
+          "defect_name": "Lead (Pb) Impurity",
+          "tolerance_limit_ppm": 5.0,
+          "probability_distribution": "Gaussian",
+          "mean": 1.5,
+          "std_dev": 0.8
+        }
+      ],
+      "target_cpk": 1.67
+    }
+  ],
+  "siop_economics": {
+    "market_prices": {
+      "lme_copper_usd_ton": 9500,
+      "lme_nickel_usd_ton": 16500,
+      "lbma_gold_usd_oz": 2350,
+      "krw_usd_exchange_rate": 1350
+    },
+    "smelting_charges": {
+      "category": "Smelting Margins",
+      "tc_treatment_charge_usd_ton": 85,
+      "rc_refining_charge_usd_lb": 0.085
+    },
+    "cost_rates": {
+      "category": "Cost Structure",
+      "direct_labor_cost_usd_hr": 35,
+      "energy_cost_usd_kwh": 0.12,
+      "inventory_holding_cost_rate": 0.15
+    }
+  },
+  "digital_twin_telemetry_spec": {
+    "real_time_streaming": {
+      "frequency_hz": 1,
+      "data_types": [
+        "Sensor_Temperature",
+        "Sensor_Vibration",
+        "AGV_Location"
+      ],
+      "packet_loss_probability": 0.005,
+      "latency_ms": 50
+    },
+    "batch_processing": {
+      "frequency_minutes": 60,
+      "data_types": [
+        "ERP_Inventory_Level",
+        "Financial_Costing_Data"
+      ],
+      "delay_jitter_minutes": 5
+    }
+  },
+  "spatial_layout": {
+    "nodes": [
+      {
+        "node_id": "Node_A_Flash_Furnace",
+        "coordinates": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "node_id": "Node_B_Refinery_Cell",
+        "coordinates": {
+          "x": 120,
+          "y": 90,
+          "z": 0
+        }
+      },
+      {
+        "node_id": "Node_C_WMS_Storage",
+        "coordinates": {
+          "x": -50,
+          "y": 200,
+          "z": 10
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from_node": "Node_A_Flash_Furnace",
+        "to_node": "Node_B_Refinery_Cell",
+        "distance_meters": 150,
+        "allowed_vehicles": [
+          "AGV_Type_1",
+          "Conveyor"
+        ]
+      }
+    ],
+    "logistics_physics": {
+      "agv_speed_meters_per_second": 2.0,
+      "agv_battery_capacity_kwh": 5.0,
+      "agv_discharge_rate_kw": 0.5,
+      "recharge_station_node": "Node_C_WMS_Storage"
+    }
+  },
+  "global_standard_rules": {
+    "demand_planning_crm": {
+      "forecasting_model": "DDMRP (Demand Driven MRP)",
+      "decoupling_point_buffers": {
+        "red_zone": "Safety constraint against variability",
+        "yellow_zone": "Primary inventory coverage",
+        "green_zone": "Order generation size"
+      },
+      "customer_credit_control": {
+        "credit_limit_check": true,
+        "default_payment_terms": "Net 30 Days"
+      }
+    },
+    "production_planning_mps_mrp": {
+      "mps_scheduling_horizon_days": 30,
+      "mrp_calculation_logic": {
+        "explosion": "Top-down BOM Breakdown",
+        "scheduling": "Backward Scheduling from Due Date",
+        "netting": "Gross Requirements - On_Hand_Inventory - Scheduled_Receipts"
+      }
+    },
+    "inventory_rop": {
+      "reorder_point_formula": "(Average_Daily_Demand * Lead_Time_Days) + Safety_Stock",
+      "safety_stock_calculation": "Z-score * Standard_Deviation_of_Demand * SQRT(Lead_Time)",
+      "auto_replenishment_trigger": true
+    },
+    "cost_management": {
+      "standard_costing_formula": "Direct_Material_Cost + Direct_Labor_Cost + Manufacturing_Overhead",
+      "overhead_allocation_base": "Machine Hours or Direct Labor Hours",
+      "variance_analysis": {
+        "material_price_variance": "(Standard Price - Actual Price) * Actual Quantity",
+        "labor_efficiency_variance": "(Standard Hours - Actual Hours) * Standard Rate"
+      }
+    }
+  }
+}

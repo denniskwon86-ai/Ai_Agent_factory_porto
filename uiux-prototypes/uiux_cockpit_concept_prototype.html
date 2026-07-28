@@ -1,0 +1,238 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Factory Studio 쨌 Cockpit UX Concept</title>
+  <style>
+    :root {
+      --canvas: #090b12;
+      --surface: #111522;
+      --surface-2: #171c2b;
+      --surface-3: #20263a;
+      --line: rgba(164, 179, 214, .14);
+      --line-strong: rgba(164, 179, 214, .24);
+      --text: #f1f5ff;
+      --muted: #9ca8c5;
+      --subtle: #697594;
+      --violet: #8378ff;
+      --cyan: #4dd8f6;
+      --green: #46d49c;
+      --amber: #ffca6a;
+      --red: #ff7d8f;
+      --shadow: 0 22px 60px rgba(0, 0, 0, .28);
+      font-family: Inter, Pretendard, "Noto Sans KR", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 1180px; min-height: 100vh; color: var(--text); background: var(--canvas); }
+    button, input { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    .shell { min-height: 100vh; display: grid; grid-template-columns: 72px minmax(0, 1fr); }
+
+    /* 醫뚯륫? 湲곕뒫 紐⑸줉???꾨땲??'紐⑤뱶 ?꾪솚'?먮쭔 ?ъ슜?쒕떎. */
+    .rail { position: sticky; top: 0; height: 100vh; z-index: 3; display: flex; flex-direction: column; align-items: center; padding: 18px 10px; border-right: 1px solid var(--line); background: rgba(10, 13, 22, .9); backdrop-filter: blur(18px); }
+    .brand { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 26px; color: white; font-weight: 800; font-size: 18px; background: linear-gradient(145deg, #8e7dff, #3e7fff); border-radius: 13px; box-shadow: 0 10px 25px rgba(91, 102, 255, .35); }
+    .rail nav { display: grid; gap: 10px; width: 100%; }
+    .icon-button { position: relative; width: 48px; height: 48px; margin: 0 auto; border: 1px solid transparent; border-radius: 13px; background: transparent; color: var(--muted); transition: .18s ease; }
+    .icon-button:hover { color: white; background: rgba(255,255,255,.05); }
+    .icon-button.active { color: white; background: rgba(132, 119, 255, .19); border-color: rgba(132, 119, 255, .32); }
+    .icon-button.active:before { content:""; position:absolute; left:-11px; top:14px; width:3px; height:20px; border-radius:0 3px 3px 0; background: var(--violet); }
+    .ico { width: 20px; height: 20px; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .rail-bottom { margin-top: auto; display: grid; gap: 8px; }
+    .profile-dot { display: grid; place-items: center; width: 40px; height: 40px; margin: 10px auto 0; border-radius: 50%; background: linear-gradient(135deg, #31425c, #667a9e); color: #e9efff; font-size: 12px; font-weight: 750; }
+
+    .app { min-width: 0; }
+    .topbar { height: 72px; display:flex; align-items:center; gap: 18px; padding: 0 30px; border-bottom:1px solid var(--line); background: rgba(9,11,18,.82); backdrop-filter: blur(18px); position: sticky; top: 0; z-index: 2; }
+    .page-title { min-width: 200px; }
+    .eyebrow { color: var(--violet); font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .page-title strong { display:block; margin-top: 3px; font-size: 17px; letter-spacing:-.025em; }
+    .context-switcher { display:flex; align-items:center; gap: 7px; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.025); }
+    .context-part { display:flex; align-items:center; gap:8px; padding: 5px 8px; color: var(--muted); font-size:12px; white-space:nowrap; border-radius:8px; }
+    .context-part b { color: #dfe6fb; font-weight:650; }
+    .context-part.selected { color:#e9e7ff; background: rgba(132,119,255,.14); }
+    .slash { color: #49546e; }
+    .top-actions { display:flex; align-items:center; gap:10px; margin-left:auto; }
+    .ghost, .primary { border-radius: 10px; padding: 10px 13px; font-size:12px; font-weight: 700; transition:.18s ease; }
+    .ghost { border:1px solid var(--line); background:rgba(255,255,255,.025); color:#c6d0e9; }
+    .ghost:hover { background: rgba(255,255,255,.07); border-color:var(--line-strong); }
+    .primary { border:1px solid rgba(145,130,255,.65); background: linear-gradient(135deg, #766bfa, #4c7ff2); box-shadow: 0 8px 22px rgba(94, 94, 255, .25); }
+    .primary:hover { transform: translateY(-1px); filter: brightness(1.08); }
+    .online { display:flex; gap:7px; align-items:center; color:var(--muted); font-size:12px; }
+    .online i { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 12px var(--green); }
+
+    main { max-width: 1540px; margin: 0 auto; padding: 30px; }
+    .welcome { display:flex; justify-content:space-between; align-items:end; margin-bottom: 24px; }
+    .welcome h1 { margin:5px 0 4px; font-size:27px; letter-spacing:-.045em; }
+    .welcome p { margin:0; color:var(--muted); font-size:14px; }
+    .view-label { display:flex; gap:8px; align-items:center; padding: 8px 11px; color:#bfcae4; background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:999px; font-size:12px; }
+    .view-label i { display:block; width:7px; height:7px; border-radius:50%; background:var(--cyan); }
+
+    .layout { display:grid; grid-template-columns: minmax(310px, .9fr) minmax(480px, 1.55fr) minmax(295px, .85fr); gap:16px; align-items:start; }
+    .panel { border:1px solid var(--line); border-radius:18px; background:linear-gradient(145deg, rgba(25,30,45,.92), rgba(14,18,29,.95)); box-shadow: var(--shadow); overflow:hidden; }
+    .panel-head { display:flex; justify-content:space-between; align-items:center; padding:18px 18px 13px; }
+    .panel-head h2 { margin:0; font-size:14px; letter-spacing:-.015em; }
+    .panel-head span { color:var(--subtle); font-size:11px; }
+    .link { padding:0; border:0; background:transparent; color:#9ca8ff; font-size:12px; font-weight:650; }
+    .link:hover { color:white; }
+
+    .priority-list { display:grid; gap: 1px; padding:0 8px 8px; }
+    .priority { display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:10px; align-items:start; padding:12px 10px; border-radius:12px; transition:.18s ease; }
+    .priority:hover { background:rgba(255,255,255,.045); }
+    .priority .number { display:grid; place-items:center; width:25px; height:25px; border-radius:8px; color:#c8d2ec; font-size:11px; font-weight:800; background:rgba(255,255,255,.065); }
+    .priority strong { display:block; font-size:12px; font-weight:650; }
+    .priority p { margin:4px 0 0; color:var(--muted); font-size:11px; line-height:1.45; }
+    .state { padding:4px 7px; border-radius:999px; font-size:10px; font-weight:750; white-space:nowrap; }
+    .state.run { color:#97efd0; background:rgba(60,205,150,.12); }
+    .state.wait { color:#ffd990; background:rgba(255,190,89,.13); }
+    .state.ready { color:#b8c2e0; background:rgba(180,195,225,.1); }
+    .tiny-sep { height:1px; margin:3px 18px 12px; background:var(--line); }
+    .metric-grid { display:grid; grid-template-columns:repeat(3,1fr); padding:0 18px 18px; gap:8px; }
+    .metric { padding:11px 10px; border:1px solid var(--line); border-radius:12px; background:rgba(5,7,13,.21); }
+    .metric small { display:block; color:var(--subtle); font-size:10px; }
+    .metric b { display:block; margin-top:5px; font-size:17px; letter-spacing:-.04em; }
+    .metric em { color:var(--green); font-size:10px; font-style:normal; }
+
+    .hero { position:relative; min-height: 336px; padding:24px; overflow:hidden; background: radial-gradient(circle at 85% 5%, rgba(93,108,255,.18), transparent 38%), linear-gradient(135deg, #151a32, #111522 68%); }
+    .hero:after { content:""; position:absolute; right:-90px; bottom:-170px; width:360px; height:360px; border:1px solid rgba(130,122,255,.15); border-radius:50%; box-shadow:0 0 0 38px rgba(130,122,255,.035), 0 0 0 76px rgba(130,122,255,.025); }
+    .hero-top { display:flex; align-items:center; gap:9px; position:relative; z-index:1; }
+    .badge { padding:5px 8px; color:#dbd7ff; background:rgba(131,120,255,.16); border:1px solid rgba(131,120,255,.28); border-radius:7px; font-size:10px; font-weight:750; }
+    .hero-top span { color:var(--muted); font-size:11px; }
+    .hero h2 { position:relative; z-index:1; max-width:580px; margin:21px 0 10px; font-size:28px; line-height:1.22; letter-spacing:-.055em; }
+    .hero p { position:relative; z-index:1; max-width:535px; margin:0; color:#b7c2df; font-size:13px; line-height:1.65; }
+    .prompt { position:relative; z-index:1; display:flex; align-items:center; gap:10px; max-width:590px; margin-top:24px; padding:8px 8px 8px 14px; background:rgba(7,9,16,.52); border:1px solid rgba(159,174,219,.24); border-radius:13px; box-shadow:0 12px 35px rgba(0,0,0,.18); }
+    .prompt .spark { color:var(--cyan); font-size:18px; }
+    .prompt input { min-width:0; flex:1; border:0; outline:0; color:var(--text); background:transparent; font-size:12px; }
+    .prompt input::placeholder { color:#8290af; }
+    .send { width:33px; height:33px; border:0; border-radius:9px; background:#e7e9ff; color:#25255a; font-weight:900; }
+    .suggestions { position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
+    .suggestion { border:1px solid var(--line); border-radius:999px; padding:6px 9px; color:#c3cee9; background:rgba(255,255,255,.04); font-size:10px; }
+    .suggestion:hover { border-color:rgba(131,120,255,.55); color:white; }
+
+    .workflow { margin-top:16px; }
+    .flow { display:flex; align-items:center; gap:0; padding:5px 18px 19px; overflow:hidden; }
+    .flow-node { min-width:0; flex:1; position:relative; padding:10px 7px; text-align:center; }
+    .flow-node:after { content:""; position:absolute; top:22px; left:calc(50% + 27px); width:calc(100% - 50px); height:1px; background:#39435d; }
+    .flow-node:last-child:after { display:none; }
+    .dot { display:grid; place-items:center; position:relative; z-index:1; width:25px; height:25px; margin:0 auto 7px; border:1px solid #4a5571; border-radius:50%; color:#98a6c7; background:#1c2233; font-size:10px; }
+    .flow-node.done .dot { border-color:rgba(71,212,156,.5); color:#a8f3d2; background:rgba(71,212,156,.15); }
+    .flow-node.current .dot { color:white; border-color:#9c91ff; background:#786cfa; box-shadow:0 0 0 5px rgba(120,108,250,.15); }
+    .flow-node b { display:block; font-size:10px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .flow-node small { color:var(--subtle); font-size:9px; }
+
+    .project-list { display:grid; gap:7px; padding:0 12px 14px; }
+    .project { display:flex; align-items:center; gap:10px; padding:10px; border:1px solid transparent; border-radius:12px; transition:.18s; }
+    .project:hover, .project.selected { background:rgba(255,255,255,.045); border-color:var(--line); }
+    .project.selected { border-color:rgba(131,120,255,.32); background:rgba(131,120,255,.08); }
+    .project-icon { display:grid; place-items:center; width:29px; height:29px; border-radius:9px; background:#25314a; font-size:14px; }
+    .project div { min-width:0; flex:1; }
+    .project b { display:block; overflow:hidden; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+    .project small { display:block; margin-top:3px; color:var(--subtle); font-size:10px; }
+    .progress { width:52px; height:4px; overflow:hidden; border-radius:999px; background:#303950; }
+    .progress i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg, var(--cyan), #8278ff); }
+
+    .assistant { padding-bottom:13px; }
+    .agent-card { margin:0 13px; padding:14px; border:1px solid rgba(86,218,246,.18); border-radius:14px; background:linear-gradient(145deg, rgba(33,76,99,.32), rgba(18,24,40,.48)); }
+    .agent-head { display:flex; gap:10px; align-items:center; }
+    .orb { display:grid; place-items:center; width:31px; height:31px; border-radius:11px; color:#051722; background:linear-gradient(135deg, #63e5ff, #7a86ff); font-size:14px; box-shadow:0 0 20px rgba(81,215,246,.27); }
+    .agent-head b { display:block; font-size:12px; }
+    .agent-head small { color:#8ca1c6; font-size:10px; }
+    .agent-card p { margin:12px 0 0; color:#d4def5; font-size:11px; line-height:1.65; }
+    .agent-card p b { color:#86e5f6; }
+    .agent-actions { display:flex; gap:7px; margin-top:12px; }
+    .agent-actions button { flex:1; padding:7px; border:1px solid rgba(137,214,243,.2); border-radius:8px; color:#b8eefd; background:rgba(93,206,239,.09); font-size:10px; font-weight:700; }
+    .agent-actions button:hover { background:rgba(93,206,239,.18); }
+    .activity { margin:14px 13px 0; }
+    .activity h3 { margin:0 0 9px; color:#dfe7fa; font-size:11px; }
+    .event { display:grid; grid-template-columns:7px 1fr; gap:8px; padding:8px 0; border-top:1px solid rgba(164,179,214,.08); }
+    .event i { width:6px; height:6px; margin-top:4px; border-radius:50%; background:var(--green); }
+    .event i.amber { background:var(--amber); }
+    .event b { display:block; color:#cbd5ed; font-size:10px; font-weight:650; }
+    .event small { color:var(--subtle); font-size:10px; }
+
+    .hidden { display:none !important; }
+    .empty-view { min-height:560px; display:grid; place-items:center; border:1px dashed rgba(164,179,214,.25); border-radius:18px; color:var(--muted); text-align:center; }
+    .empty-view h2 { color:white; }
+    .toast { position:fixed; right:28px; bottom:28px; z-index:9; transform:translateY(90px); padding:12px 15px; border:1px solid rgba(85,224,180,.26); border-radius:12px; color:#d5fff0; background:#132b29; box-shadow:var(--shadow); font-size:12px; transition:.25s ease; }
+    .toast.show { transform:translateY(0); }
+    @media (max-width: 1240px) { .layout { grid-template-columns: 300px minmax(440px, 1fr); } .assistant { grid-column: 1 / -1; } .agent-card { margin-bottom: 0; } .activity { display:none; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail" aria-label="二쇱슂 紐⑤뱶">
+      <div class="brand">AF</div>
+      <nav>
+        <button class="icon-button active" data-view="overview" title="???묒뾽?? aria-label="???묒뾽??><svg class="ico" viewBox="0 0 24 24"><path d="M3 12 12 4l9 8v8H3z"/><path d="M9 20v-6h6v6"/></svg></button>
+        <button class="icon-button" data-view="create" title="???붾（?? aria-label="???붾（??><svg class="ico" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg></button>
+        <button class="icon-button" data-view="simulation" title="?쒕??덉씠?? aria-label="?쒕??덉씠??><svg class="ico" viewBox="0 0 24 24"><path d="M4 19V5m0 14h16M7 15l4-5 3 3 4-6"/></svg></button>
+        <button class="icon-button" data-view="knowledge" title="吏???덈툕" aria-label="吏???덈툕"><svg class="ico" viewBox="0 0 24 24"><path d="M4 5a3 3 0 0 1 3-3h12v18H7a3 3 0 0 0-3 3z"/><path d="M7 2v18"/></svg></button>
+        <button class="icon-button" data-view="organization" title="湲곗뾽 臾몃㎘" aria-label="湲곗뾽 臾몃㎘"><svg class="ico" viewBox="0 0 24 24"><path d="M4 21V9l8-5 8 5v12M9 21v-6h6v6M4 13h16"/></svg></button>
+      </nav>
+      <div class="rail-bottom">
+        <button class="icon-button" title="?뚮┝" aria-label="?뚮┝"><svg class="ico" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></button>
+        <button class="icon-button" title="?ㅼ젙" aria-label="?ㅼ젙"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.1 2.1-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56v.08h-3v-.08A1.7 1.7 0 0 0 10.68 18.64a1.7 1.7 0 0 0-1.88.34l-.06.06-2.1-2.1.06-.06A1.7 1.7 0 0 0 7.04 15 1.7 1.7 0 0 0 5.48 14h-.08v-3h.08A1.7 1.7 0 0 0 7.04 9.96 1.7 1.7 0 0 0 6.7 8.08l-.06-.06 2.1-2.1.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.72 4.8v-.08h3v.08a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.1 2.1-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 11h.08v3h-.08A1.7 1.7 0 0 0 19.4 15z"/></svg></button>
+        <div class="profile-dot">DK</div>
+      </div>
+    </aside>
+
+    <div class="app">
+      <header class="topbar">
+        <div class="page-title"><div class="eyebrow">AI Factory Studio</div><strong id="title">???묒뾽??/strong></div>
+        <div class="context-switcher" title="???좏깮? 沅뚰븳, ?곗씠?? 異붿쿇 ?쒗뵆由욧낵 ?쒕??덉씠??踰붿쐞瑜??④퍡 寃곗젙?⑸땲??">
+          <div class="context-part"><span>湲곗뾽吏묐떒</span><b>LS 洹몃９</b></div><span class="slash">/</span>
+          <div class="context-part"><span>踰뺤씤</span><b>LS MnM</b></div><span class="slash">/</span>
+          <div class="context-part selected"><span>?댁쁺 踰붿쐞</span><b>諛고꽣由ъ냼??쨌 ??怨듭옣</b></div>
+        </div>
+        <div class="top-actions"><div class="online"><i></i>?ㅼ떆媛??곌껐</div><button class="ghost">??K 寃??/button><button class="primary" id="newProject">???붾（??/button></div>
+      </header>
+
+      <main>
+        <section id="overview">
+          <div class="welcome"><div><div class="eyebrow">Monday, 28 July</div><h1>?ㅻ뒛? 臾댁뾿??吏꾩쟾?쒗궗源뚯슂?</h1><p>?꾩옱 議곗쭅 臾몃㎘???묒뾽, AI ?쒖븞, ?섏궗寃곗젙???쒓납??紐⑥엯?덈떎.</p></div><div class="view-label"><i></i> ?ㅼ젣 ?댁쁺 臾몃㎘</div></div>
+          <div class="layout">
+            <section class="panel">
+              <div class="panel-head"><h2>吏湲??꾩슂??寃곗젙</h2><button class="link">?꾩껜 蹂닿린</button></div>
+              <div class="priority-list">
+                <article class="priority"><span class="number">1</span><div><strong>諛고꽣由ъ냼???ъ뾽怨꾪쉷??媛?뺢컪???뺤씤?섏꽭??/strong><p>?꾨젰?④?? ?⑦봽??湲곌컙???먯씡 ?쒕??덉씠?섏쓽 ?좊ː?꾨? 醫뚯슦?⑸땲??</p></div><span class="state wait">寃???꾩슂</span></article>
+                <article class="priority"><span class="number">2</span><div><strong>?섏쑉 ?곗씠??怨꾩빟 2嫄댁씠 ?꾩쭅 ?곌껐?섏? ?딆븯?듬땲??/strong><p>怨듭젙蹂??섏쑉怨??ㅻ퉬媛?숇쪧???곌껐?섎㈃ ?앹궛?λ젰 紐⑤뜽???꾩꽦?????덉뒿?덈떎.</p></div><span class="state ready">以鍮꾨맖</span></article>
+                <article class="priority"><span class="number">3</span><div><strong>?앹궛怨꾪쉷 SW ?앹꽦??吏꾪뻾 以묒엯?덈떎</strong><p>?꾪궎?띿쿂? ?곗씠??怨꾩빟??寃?좏븳 ??寃곌낵臾쇱쓣 ?ㅽ뻾 ?섍꼍??寃뚯떆?⑸땲??</p></div><span class="state run">吏꾪뻾 以?/span></article>
+              </div>
+              <div class="tiny-sep"></div>
+              <div class="metric-grid"><div class="metric"><small>吏꾪뻾 ?꾨줈?앺듃</small><b>03</b><em>+1 ?대쾲 二?/em></div><div class="metric"><small>?뱀씤 ?湲?/small><b>02</b><em>?ㅻ뒛 ?뺤씤</em></div><div class="metric"><small>?ъ궗??媛???먯궛</small><b>28</b><em>吏???덈툕</em></div></div>
+            </section>
+
+            <section>
+              <article class="panel hero">
+                <div class="hero-top"><span class="badge">AI ?곷떞??/span><span>?좏깮??吏덈Ц?쇰줈 ?붽뎄?ы빆???④퍡 援ъ껜?뷀빀?덈떎</span></div>
+                <h2>?꾩슂???낅Т瑜?留먰븯硫?<br/>?곗씠?곕????ㅽ뻾 怨꾪쉷源뚯? ?④퍡 ?ㅺ퀎?⑸땲??</h2>
+                <p>?꾩옱 ?좏깮??諛고꽣由ъ냼????怨듭옣???낆쥌쨌怨듭젙쨌沅뚰븳쨌?깅줉 吏?앹쓣 諛뷀깢?쇰줈, ?꾩슂???곗씠?곗? ?곹빀???낅Т ?쒗뵆由우쓣 癒쇱? ?쒖븞?⑸땲??</p>
+                <div class="prompt"><span class="spark">??/span><input id="promptInput" placeholder="?? ?대뀈???앹궛쨌?먯씡 怨꾪쉷??留뚮뱾怨??띠뼱?? /><button class="send" id="sendPrompt" aria-label="AI ?곷떞 ?쒖옉">??/button></div>
+                <div class="suggestions"><button class="suggestion">?ъ뾽怨꾪쉷???쒖옉?섍퀬 ?띠뼱??/button><button class="suggestion">??怨듭옣 利앹꽕???쒕??덉씠?섑븷?섏슂</button><button class="suggestion">?꾩옱 ?곗씠?곗쓽 遺議깅텇???뚮젮以?/button></div>
+              </article>
+              <article class="panel workflow"><div class="panel-head"><h2>?앹궛怨꾪쉷 ?붾（???앹꽦 ?꾪솴</h2><span>74% 쨌 由щ럭 ?④퀎</span></div><div class="flow"><div class="flow-node done"><span class="dot">??/span><b>?붽뎄?ы빆</b><small>?뱀씤</small></div><div class="flow-node done"><span class="dot">??/span><b>?곗씠???ㅺ퀎</b><small>?뱀씤</small></div><div class="flow-node done"><span class="dot">??/span><b>?꾪궎?띿쿂</b><small>?뱀씤</small></div><div class="flow-node current"><span class="dot">4</span><b>援ы쁽쨌寃??/b><small>吏꾪뻾</small></div><div class="flow-node"><span class="dot">5</span><b>?ㅽ뻾쨌寃뚯떆</b><small>?湲?/small></div></div></article>
+              <article class="panel workflow"><div class="panel-head"><h2>???꾨줈?앺듃</h2><button class="link">?꾨줈?앺듃 蹂닿???/button></div><div class="project-list"><div class="project selected"><span class="project-icon">??/span><div><b>諛고꽣由ъ냼???앹궛怨꾪쉷</b><small>?ㅼ젣 ?댁쁺 쨌 ??怨듭옣</small></div><span class="progress"><i style="width:74%"></i></span></div><div class="project"><span class="project-icon">??/span><div><b>??怨듭옣 利앹꽕??A</b><small>媛???쒕굹由ъ삤 쨌 ?ъ뾽??寃??/small></div><span class="progress"><i style="width:46%"></i></span></div><div class="project"><span class="project-icon">??/span><div><b>?섏쑉 ?곗씠???쒖???/b><small>?꾩궗 怨듯넻 쨌 ?곗씠??怨꾩빟</small></div><span class="progress"><i style="width:91%"></i></span></div></div></article>
+            </section>
+
+            <aside class="panel assistant"><div class="panel-head"><h2>?덊띁諛붿씠?</h2><span>?꾩껜 ?곹깭 ?댄빐</span></div><div class="agent-card"><div class="agent-head"><span class="orb">??/span><div><b>AI 운영 비서</b><small>湲곗뾽 ?댁쁺 AI 鍮꾩꽌 쨌 ?⑤씪??/small></div></div><p><b>?앹궛怨꾪쉷 ?꾨줈?앺듃</b>??援ы쁽쨌寃???④퀎?낅땲?? ?섏쑉 ?곗씠??怨꾩빟 2嫄댁쓣 癒쇱? ?뺤젙?섎㈃, ?대뀈???먯씡 ?쒕??덉씠?섏쓽 ?ㅼ감 踰붿쐞瑜?以꾩씪 ???덉뒿?덈떎.</p><div class="agent-actions"><button>??以묒슂?쒓???</button><button>?곗씠??怨꾩빟 ?닿린</button></div></div><div class="activity"><h3>理쒓렐 ?쒕룞</h3><div class="event"><i></i><div><b>?꾪궎?띿쿂 ?뱀씤 ?꾨즺</b><small>?앹궛怨꾪쉷 쨌 12遺???/small></div></div><div class="event"><i class="amber"></i><div><b>?몃? ?꾨젰?④? 湲곗????뺤씤 ?꾩슂</b><small>?쒕??덉씠??쨌 28遺???/small></div></div><div class="event"><i></i><div><b>?섏쑉 留덉뒪??18嫄?寃利??꾨즺</b><small>吏??MDM 쨌 1?쒓컙 ??/small></div></div></div></aside>
+          </div>
+        </section>
+        <section id="alternate" class="empty-view hidden"><div><div class="eyebrow">Concept Navigation</div><h2 id="alternateTitle">???붾（??/h2><p id="alternateText">??紐⑤뱶???ㅼ쓬 ?쒖븞?먯꽌 媛숈? ?붿옄???몄뼱濡??뺤옣?⑸땲??</p></div></section>
+      </main>
+    </div>
+  </div>
+  <div class="toast" id="toast">AI ?곷떞?ш? ?붽뎄?ы빆???뺣━??以鍮꾨? 留덉낀?듬땲??</div>
+  <script>
+    const labels = { overview:['???묒뾽??,'?꾩옱 議곗쭅???낅Т瑜??쒕늿???댄뵾怨??ㅼ쓬 ?됰룞??怨좊쫭?덈떎.'], create:['???붾（??,'?곷떞?ъ? ?붽뎄?ы빆쨌?곗씠?걔룹뾽臾??쒗뵆由우쓣 ?④퍡 ?ㅺ퀎?⑸땲??'], simulation:['?쒕??덉씠??,'?ㅼ젣媛믨낵 媛?뺢컪??遺꾨━???덉쟾???쒕굹由ъ삤瑜??ㅽ뻾?⑸땲??'], knowledge:['吏???덈툕','?뱀씤??吏?? 湲곗??뺣낫, ?곗씠??怨꾩빟???먯깋?⑸땲??'], organization:['湲곗뾽 臾몃㎘','湲곗뾽吏묐떒쨌踰뺤씤쨌?ъ뾽遺쨌怨듭옣怨?沅뚰븳 踰붿쐞瑜?愿由ы빀?덈떎.'] };
+    const title = document.getElementById('title'); const overview = document.getElementById('overview'); const alternate = document.getElementById('alternate');
+    document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('[data-view]').forEach(x => x.classList.remove('active')); button.classList.add('active'); const view = button.dataset.view; title.textContent = labels[view][0];
+      if (view === 'overview') { overview.classList.remove('hidden'); alternate.classList.add('hidden'); } else { overview.classList.add('hidden'); alternate.classList.remove('hidden'); document.getElementById('alternateTitle').textContent = labels[view][0]; document.getElementById('alternateText').textContent = labels[view][1]; }
+    }));
+    const toast = document.getElementById('toast'); const openAdvisor = () => { toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 3200); };
+    document.getElementById('sendPrompt').addEventListener('click', openAdvisor); document.getElementById('newProject').addEventListener('click', openAdvisor);
+    document.querySelectorAll('.suggestion').forEach(x => x.addEventListener('click', () => { document.getElementById('promptInput').value = x.textContent; document.getElementById('promptInput').focus(); }));
+  </script>
+</body>
+</html>
+
