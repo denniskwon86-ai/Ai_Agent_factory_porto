@@ -14,6 +14,7 @@ import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
 import { MasterDataPanel } from './components/MasterDataPanel';
 import { WorkStandardPanel } from './components/WorkStandardPanel';
+import { OrgChartPanel } from './components/OrgChartPanel';
 import { CrosswalkPanel } from './components/CrosswalkPanel';
 import { TelemetryPanel } from './components/TelemetryPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
@@ -50,6 +51,7 @@ export default function App() {
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
   const [showMasterData, setShowMasterData] = useState(false);
   const [showWorkStandard, setShowWorkStandard] = useState(false);
+  const [showOrgChart, setShowOrgChart] = useState(false);
   const [showCrosswalk, setShowCrosswalk] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
@@ -171,6 +173,9 @@ export default function App() {
         {showWorkStandard && (
           <WorkStandardPanel onClose={() => setShowWorkStandard(false)} />
         )}
+        {showOrgChart && (
+          <OrgChartPanel onClose={() => setShowOrgChart(false)} />
+        )}
         {showCrosswalk && (
           <CrosswalkPanel onClose={() => setShowCrosswalk(false)} />
         )}
@@ -217,6 +222,13 @@ export default function App() {
                 title="에이전트의 법규·사규 — 각 에이전트가 무엇을 어떤 기준으로 평가해 다음 단계로 넘기는지를 정의. 개정 시 새 버전이 생기고 구판은 보존된다"
               >
                 📜 업무표준
+              </button>
+              <button
+                onClick={() => setShowOrgChart(true)}
+                className="text-sm font-bold text-sky-200 bg-sky-900/40 hover:bg-sky-800/60 border border-sky-700/50 px-4 py-2 rounded-lg transition-all"
+                title="부서·사용자·권한 — 부서는 기준정보라 개편하면 새 버전이 되고 구판은 이력으로 보존된다(과거 산출물의 소유 부서 해석 유지)"
+              >
+                🏢 조직·권한
               </button>
               <button
                 onClick={() => setShowCrosswalk(true)}
