@@ -1,0 +1,618 @@
+{
+  "playbook_id": "business_planning",
+  "name_ko": "경영계획 · 실적 · 시나리오 관리",
+  "description": "내년도 사업계획 수립, 부서별 승인, 월별 실적 대비 차이 분석, 손익 시나리오 비교까지를 다룹니다. 조직·계정·제품·실적·계획·승인·시뮬레이션을 한 번에 검증할 수 있어 첫 디지털트윈 파일럿으로 지정된 업무입니다(마스터 명세서 §11.1·§17).",
+  "business_type": "planning_budget",
+  "owner_department_hint": "hq",
+  "recommended_template_id": "mfg_sim",
+  "recommended_sequence": [
+    "1) 조직·계정·제품·원가센터 기준정보를 등록하거나 기존 마스터와 연결한다",
+    "2) 최근 3년 손익·매출·원가 실적을 연계하거나 파일로 등록한다",
+    "3) 계획 입력 템플릿과 부서별 승인 흐름을 만든다",
+    "4) 계획 대비 실적 차이 분석을 붙인다",
+    "5) 단가·물량·인건비·전기료·환율 가정을 조절할 수 있게 한다",
+    "6) 손익·현금흐름 결과를 시나리오별로 비교한다",
+    "7) 가정·데이터·승인·계산 버전을 Decision Ledger 에 남긴다"
+  ],
+  "risks": [
+    "실적 데이터의 계정 체계가 계획의 계정 체계와 다르면 차이 분석이 성립하지 않는다 — 계정 매핑을 먼저 확정할 것",
+    "실제(Actual)·계획(Plan)·예측(Forecast)·시나리오(Scenario)를 한 화면에서 구분 없이 표기하면 경영 판단이 오염된다(§15 비협상 조건)",
+    "외부 지표는 Gold 등급만 기준 시나리오에 쓸 수 있다. 전망·기사 기반 값으로 기준 계획을 바꾸면 안 된다(§12.2)",
+    "부서별 계획 입력 권한과 타 부서 실적 열람 권한이 분리되지 않으면 민감한 손익이 노출된다"
+  ],
+  "questions": [
+    {
+      "id": "Q_PURPOSE",
+      "stage": "purpose",
+      "question": "이 계획으로 가장 먼저 해결하고 싶은 것은 무엇입니까?",
+      "why": "목적이 정해지면 필요한 데이터의 범위가 절반으로 줄어듭니다. 계획 수립과 차이 분석은 요구 데이터가 다릅니다.",
+      "options": [
+        {
+          "value": "plan_build",
+          "label": "내년도 계획을 처음부터 수립하고 부서 승인까지 받고 싶다",
+          "description": "계획 입력·조정·승인 흐름이 중심입니다.",
+          "recommended": true
+        },
+        {
+          "value": "variance",
+          "label": "이미 있는 계획과 월별 실적의 차이를 분석하고 싶다",
+          "description": "실적 연계와 계정 매핑이 중심입니다."
+        },
+        {
+          "value": "scenario",
+          "label": "환율·원자재 같은 변화가 손익에 미치는 영향을 보고 싶다",
+          "description": "동인과 외부 지표, 시뮬레이션이 중심입니다. 필요한 동인·외부지표는 기본으로 포함됩니다."
+        }
+      ]
+    },
+    {
+      "id": "Q_SCOPE",
+      "stage": "scope",
+      "question": "계획을 어느 단위까지 관리하시겠습니까?",
+      "why": "관리 단위가 곧 필요한 기준정보를 결정합니다. 제품 단위로 내려가면 품목 마스터와 제품별 원가가 필요해집니다.",
+      "options": [
+        {
+          "value": "company",
+          "label": "전사 손익 수준",
+          "description": "가장 빨리 시작할 수 있습니다. 기준정보 부담이 가장 작습니다."
+        },
+        {
+          "value": "division",
+          "label": "사업부 · 부서 단위",
+          "description": "부서별 입력과 승인이 생깁니다. 조직·원가센터 마스터가 필요합니다.",
+          "recommended": true,
+          "unlocks_requirements": [
+            "master_cost_center"
+          ]
+        },
+        {
+          "value": "product",
+          "label": "제품 · 품목 단위",
+          "description": "가장 정밀하지만 품목 마스터와 제품별 원가가 준비되어야 합니다.",
+          "unlocks_requirements": [
+            "master_cost_center",
+            "master_product",
+            "actual_product_cost"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q_HORIZON",
+      "stage": "time",
+      "question": "계획 주기와 기간을 어떻게 잡으시겠습니까?",
+      "why": "월 단위 계획은 월 마감 실적이 있어야 차이 분석이 가능합니다. 연 단위면 부담이 작습니다.",
+      "options": [
+        {
+          "value": "monthly_1y",
+          "label": "월 단위 · 1년",
+          "description": "가장 일반적입니다. 월 마감 실적과 짝이 맞습니다.",
+          "recommended": true
+        },
+        {
+          "value": "quarterly_1y",
+          "label": "분기 단위 · 1년",
+          "description": "입력 부담이 작습니다. 차이 분석 해상도가 낮아집니다."
+        },
+        {
+          "value": "monthly_3y",
+          "label": "월 단위 · 중기 3년",
+          "description": "중기 전략용입니다. 동인 가정과 외부 지표 전망이 더 중요해집니다.",
+          "unlocks_requirements": [
+            "ext_rate",
+            "ext_wage"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q_USERS",
+      "stage": "users",
+      "question": "계획을 입력하고 승인하는 사람은 누구입니까?",
+      "why": "입력자와 승인자가 다르면 승인 단계와 권한 분리가 필요합니다. 이것이 화면 구성을 바꿉니다.",
+      "options": [
+        {
+          "value": "central",
+          "label": "경영관리팀이 모아서 직접 입력한다",
+          "description": "승인 흐름이 단순합니다. 가장 빨리 시작할 수 있습니다.",
+          "recommended": true
+        },
+        {
+          "value": "dept_input",
+          "label": "각 부서가 입력하고 경영관리팀이 취합·조정한다",
+          "description": "부서별 입력 화면과 조정·승인 단계가 필요합니다.",
+          "unlocks_requirements": [
+            "ownership_planning"
+          ]
+        },
+        {
+          "value": "dept_approve",
+          "label": "부서 입력 → 부서장 승인 → 경영진 최종 승인",
+          "description": "다단 승인과 감사 이력이 필요합니다.",
+          "unlocks_requirements": [
+            "ownership_planning",
+            "ownership_approver"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q_ACTUAL_SOURCE",
+      "stage": "data",
+      "question": "과거 실적 데이터는 현재 어디에 있습니까?",
+      "why": "원천이 정해지면 연계 방식과 신뢰도가 결정됩니다. 기본은 읽기 전용 연계입니다(§0-4).",
+      "options": [
+        {
+          "value": "erp",
+          "label": "ERP · 회계 시스템에 있다",
+          "description": "읽기 전용 조회로 연계합니다. 계정 매핑을 확인해야 합니다.",
+          "recommended": true
+        },
+        {
+          "value": "excel",
+          "label": "엑셀 파일로 관리하고 있다",
+          "description": "파일 등록으로 시작합니다. 양식 정리가 선행 작업입니다."
+        },
+        {
+          "value": "none",
+          "label": "정리된 실적 데이터가 없다",
+          "description": "계획 수립만 먼저 하고 차이 분석은 다음 단계로 미룹니다."
+        }
+      ]
+    },
+    {
+      "id": "Q_DECISION",
+      "stage": "decision",
+      "question": "이 계획으로 어떤 결정을 내리게 됩니까?",
+      "why": "결정의 종류가 필요한 정밀도를 정합니다. 투자 결정이면 현금흐름까지, 목표 배분이면 손익까지면 됩니다.",
+      "options": [
+        {
+          "value": "target",
+          "label": "부서별 목표 배분",
+          "description": "손익 계획까지면 충분합니다.",
+          "recommended": true
+        },
+        {
+          "value": "investment",
+          "label": "투자 · 채용 규모 결정",
+          "description": "현금흐름과 인건비 동인이 필요합니다.",
+          "unlocks_requirements": [
+            "actual_cashflow"
+          ]
+        },
+        {
+          "value": "pricing",
+          "label": "가격 · 수익성 개선 결정",
+          "description": "제품별 원가와 단가 동인이 필요합니다.",
+          "unlocks_requirements": [
+            "master_product",
+            "actual_product_cost"
+          ]
+        }
+      ]
+    }
+  ],
+  "data_requirements": [
+    {
+      "key": "master_org",
+      "canonical_term": "조직 · 법인",
+      "requirement_type": "master",
+      "necessity": "required",
+      "purpose": "계획과 실적을 같은 조직 축으로 묶는 기준입니다. 이것이 없으면 부서별 집계 자체가 성립하지 않습니다.",
+      "expected_grain": "법인 × 사업부 × 부서",
+      "freshness_requirement": "조직 개편 시 즉시",
+      "owner_department": "hq",
+      "source_candidates": [
+        "ERP 조직 마스터",
+        "인사 시스템",
+        "수동 등록"
+      ],
+      "readiness_dimension": "master_completeness",
+      "starter": true,
+      "gap_impact": "부서별 계획 취합과 실적 대조가 불가능합니다. 전사 합계만 볼 수 있습니다.",
+      "next_action": "기준정보 화면에서 법인·사업부·부서를 등록하거나 ERP 조직 마스터를 연계하십시오."
+    },
+    {
+      "key": "master_account",
+      "canonical_term": "계정과목 · 손익 항목",
+      "requirement_type": "master",
+      "necessity": "required",
+      "purpose": "계획 금액과 실적 금액을 같은 항목으로 비교하는 축입니다.",
+      "expected_grain": "계정 코드 × 손익 구분(매출/매출원가/판관비/영업외)",
+      "freshness_requirement": "계정 체계 변경 시",
+      "owner_department": "hq",
+      "source_candidates": [
+        "ERP 계정 마스터",
+        "회계 시스템",
+        "수동 등록"
+      ],
+      "readiness_dimension": "master_completeness",
+      "starter": true,
+      "gap_impact": "계획과 실적의 항목이 어긋나 차이 분석 숫자를 신뢰할 수 없습니다.",
+      "next_action": "계정 마스터를 등록하고, 계획용 손익 항목과의 매핑을 확정하십시오."
+    },
+    {
+      "key": "master_cost_center",
+      "canonical_term": "원가센터",
+      "requirement_type": "master",
+      "necessity": "recommended",
+      "purpose": "부서 단위 이하로 계획을 관리할 때 비용의 귀속 단위입니다. (관리 단위·입력 방식 선택에 따라 필요해지는 항목입니다.)",
+      "expected_grain": "원가센터 × 소속 부서",
+      "freshness_requirement": "조직 개편 시",
+      "owner_department": "hq",
+      "source_candidates": [
+        "ERP 원가센터 마스터"
+      ],
+      "readiness_dimension": "master_completeness",
+      "starter": true,
+      "gap_impact": "부서별 비용 계획을 실적과 대조할 수 없습니다.",
+      "next_action": "원가센터 목록과 부서 매핑을 확보하십시오."
+    },
+    {
+      "key": "master_product",
+      "canonical_term": "제품 · 품목",
+      "requirement_type": "master",
+      "necessity": "recommended",
+      "purpose": "제품 단위 계획과 제품별 수익성 분석의 기준입니다.",
+      "expected_grain": "품목 코드 × 제품군 × 단위",
+      "freshness_requirement": "신제품 등록 시",
+      "owner_department": "hq",
+      "source_candidates": [
+        "ERP 품목 마스터",
+        "PLM"
+      ],
+      "readiness_dimension": "master_completeness",
+      "starter": false,
+      "gap_impact": "제품별 물량·단가 계획과 제품 수익성 분석을 할 수 없습니다.",
+      "next_action": "품목 마스터를 연계하고 단위(UOM) 표준을 확인하십시오."
+    },
+    {
+      "key": "actual_pl_monthly",
+      "canonical_term": "월별 손익 실적",
+      "requirement_type": "actual",
+      "necessity": "required",
+      "purpose": "계획 대비 차이 분석의 기준선이며, 계획 수립 시 과거 추세의 근거입니다.",
+      "expected_grain": "월 × 법인 × 부서 × 계정",
+      "freshness_requirement": "월 마감 후 5영업일 이내",
+      "owner_department": "hq",
+      "source_candidates": [
+        "ERP 총계정원장",
+        "회계 시스템 결산 리포트",
+        "엑셀 결산 파일"
+      ],
+      "readiness_dimension": "history_linkage",
+      "starter": true,
+      "gap_impact": "차이 분석과 추세 기반 계획 수립이 불가능합니다. 계획은 가정만으로 세우게 됩니다.",
+      "next_action": "최근 3년 월별 손익을 연계하거나 결산 파일을 등록하십시오. 계정 매핑을 함께 확정하십시오."
+    },
+    {
+      "key": "actual_revenue",
+      "canonical_term": "매출 실적",
+      "requirement_type": "actual",
+      "necessity": "required",
+      "purpose": "물량과 단가로 분해할 수 있어야 매출 계획의 동인 분석이 가능합니다.",
+      "expected_grain": "월 × 제품군(또는 부서) × 수량 · 금액",
+      "freshness_requirement": "월 마감 후 5영업일 이내",
+      "owner_department": "sales",
+      "source_candidates": [
+        "ERP 판매 모듈",
+        "영업 관리 시스템"
+      ],
+      "readiness_dimension": "history_linkage",
+      "starter": true,
+      "gap_impact": "매출 계획을 물량 × 단가로 분해할 수 없어 가정 변경의 영향을 계산할 수 없습니다.",
+      "next_action": "수량과 금액이 함께 있는 매출 실적을 확보하십시오. 금액만 있으면 단가 가정이 무의미해집니다."
+    },
+    {
+      "key": "actual_product_cost",
+      "canonical_term": "제품별 제조원가 실적",
+      "requirement_type": "actual",
+      "necessity": "recommended",
+      "purpose": "제품 수익성과 원자재·에너지 가격 변동의 손익 영향을 계산하는 기준입니다.",
+      "expected_grain": "월 × 품목 × 원가요소(재료비/노무비/제조경비)",
+      "freshness_requirement": "월 마감 후 10영업일 이내",
+      "owner_department": "production",
+      "source_candidates": [
+        "ERP 원가 모듈",
+        "MES 실적 + 원가 계산"
+      ],
+      "readiness_dimension": "history_linkage",
+      "starter": false,
+      "gap_impact": "원자재·전기료 변동이 제품 원가에 미치는 영향을 계산할 수 없습니다.",
+      "next_action": "원가요소별로 분해된 제조원가 실적을 확보하십시오."
+    },
+    {
+      "key": "actual_cashflow",
+      "canonical_term": "현금흐름 실적",
+      "requirement_type": "actual",
+      "necessity": "optional",
+      "purpose": "투자·채용 결정에 필요한 현금 여력 판단의 기준선입니다.",
+      "expected_grain": "월 × 법인 × 현금흐름 구분",
+      "freshness_requirement": "월 마감 후 10영업일 이내",
+      "owner_department": "hq",
+      "source_candidates": [
+        "ERP 자금 모듈",
+        "은행 거래 명세"
+      ],
+      "readiness_dimension": "history_linkage",
+      "starter": false,
+      "gap_impact": "손익은 보이지만 현금 여력을 판단할 수 없어 투자 결정 근거가 약해집니다.",
+      "next_action": "영업·투자·재무 활동으로 구분된 현금흐름 실적을 확보하십시오."
+    },
+    {
+      "key": "driver_volume",
+      "canonical_term": "판매 물량 계획 동인",
+      "requirement_type": "driver",
+      "necessity": "required",
+      "purpose": "매출 계획을 물량과 단가로 분해하는 축의 하나입니다.",
+      "expected_grain": "월 × 제품군 × 수량",
+      "freshness_requirement": "계획 수립 주기",
+      "owner_department": "sales",
+      "source_candidates": [
+        "영업 수요예측",
+        "과거 실적 추세",
+        "수주 잔량"
+      ],
+      "readiness_dimension": "driver_coverage",
+      "starter": true,
+      "gap_impact": "매출 계획이 총액 입력이 되어 가정을 바꿔도 결과가 재계산되지 않습니다.",
+      "next_action": "제품군별 월 판매 물량 계획을 영업 부서에서 받으십시오."
+    },
+    {
+      "key": "driver_price",
+      "canonical_term": "판매 단가 계획 동인",
+      "requirement_type": "driver",
+      "necessity": "required",
+      "purpose": "단가 변경 시나리오의 입력값입니다.",
+      "expected_grain": "월 × 제품군 × 단가",
+      "freshness_requirement": "계획 수립 주기",
+      "owner_department": "sales",
+      "source_candidates": [
+        "가격 정책",
+        "과거 실적 평균 단가",
+        "계약 단가"
+      ],
+      "readiness_dimension": "driver_coverage",
+      "starter": true,
+      "gap_impact": "가격 인상·인하 시나리오를 계산할 수 없습니다.",
+      "next_action": "제품군별 계획 단가와 그 근거(가격 정책 또는 계약)를 확보하십시오."
+    },
+    {
+      "key": "driver_headcount",
+      "canonical_term": "인원 · 인건비 계획 동인",
+      "requirement_type": "driver",
+      "necessity": "recommended",
+      "purpose": "인건비는 계획 손익에서 비중이 크고 채용 결정과 직접 연결됩니다.",
+      "expected_grain": "월 × 부서 × 인원 수 · 평균 인건비",
+      "freshness_requirement": "계획 수립 주기 및 채용 계획 변경 시",
+      "owner_department": "hq",
+      "source_candidates": [
+        "인사 시스템",
+        "채용 계획",
+        "급여 실적"
+      ],
+      "readiness_dimension": "driver_coverage",
+      "starter": true,
+      "gap_impact": "인건비를 총액 가정으로만 두게 되어 채용 규모 변경의 손익 영향을 볼 수 없습니다.",
+      "next_action": "부서별 인원 계획과 평균 인건비를 확보하십시오."
+    },
+    {
+      "key": "driver_energy_usage",
+      "canonical_term": "전력 사용량 동인",
+      "requirement_type": "driver",
+      "necessity": "recommended",
+      "purpose": "전기요금 단가 변동을 제조경비로 환산하는 데 필요한 물량 축입니다(§12.7 예시 매핑).",
+      "expected_grain": "월 × 공장 × kWh",
+      "freshness_requirement": "월 마감 후",
+      "owner_department": "production",
+      "source_candidates": [
+        "에너지 관리 시스템",
+        "전력 계약 · 청구서",
+        "MES"
+      ],
+      "readiness_dimension": "driver_coverage",
+      "starter": false,
+      "gap_impact": "전기요금 인상 시나리오를 금액으로 환산할 수 없습니다(단가만 알아도 사용량이 없으면 계산 불가).",
+      "next_action": "공장별 월 전력 사용량을 확보하십시오. 전력 계약과 최근 12개월 실적이 근거가 됩니다."
+    },
+    {
+      "key": "ext_fx",
+      "canonical_term": "환율",
+      "requirement_type": "external",
+      "necessity": "required",
+      "purpose": "수입 원자재 매입단가와 수출 매출에 동시에 영향을 주는 가장 영향이 큰 외부 변수입니다.",
+      "expected_grain": "일 또는 월 평균 × 통화쌍",
+      "freshness_requirement": "월 평균 확정치는 월 마감 시점",
+      "owner_department": "hq",
+      "source_candidates": [
+        "한국은행 경제통계 공식 API",
+        "공식 고시환율 CSV"
+      ],
+      "readiness_dimension": "quality_freshness",
+      "starter": true,
+      "gap_impact": "환율 변동 시나리오를 기준 시나리오와 같은 근거로 비교할 수 없습니다.",
+      "next_action": "공식 API 또는 공식 CSV 원천을 등록하십시오. 기사·시장 전망값으로 기준 계획을 바꾸지 마십시오.",
+      "external": {
+        "grade": "gold",
+        "acceptable_latency": "1일",
+        "vintage_required": true,
+        "canonical_source_hint": "중앙은행 공식 API (공식 API → 공식 CSV 순으로 우선)"
+      }
+    },
+    {
+      "key": "ext_material",
+      "canonical_term": "주요 원자재 가격",
+      "requirement_type": "external",
+      "necessity": "required",
+      "purpose": "재료비 계획의 단가 축입니다. 원가 상승 시나리오의 핵심 입력입니다.",
+      "expected_grain": "월 × 원자재 품목 × 단가",
+      "freshness_requirement": "월 1회 이상",
+      "owner_department": "purchase",
+      "source_candidates": [
+        "공식 원자재 지수 API",
+        "거래소 공표 가격",
+        "공급사 계약 단가"
+      ],
+      "readiness_dimension": "quality_freshness",
+      "starter": true,
+      "gap_impact": "재료비 상승의 손익 영향을 계산할 수 없어 원가 시나리오가 성립하지 않습니다.",
+      "next_action": "주요 원자재 3~5종을 먼저 정하고 공식 지수 또는 계약 단가를 등록하십시오.",
+      "external": {
+        "grade": "gold",
+        "acceptable_latency": "1개월",
+        "vintage_required": true,
+        "canonical_source_hint": "공식 원자재 지수 API 또는 계약 단가(사내 확정값)"
+      }
+    },
+    {
+      "key": "ext_energy",
+      "canonical_term": "전기요금 · 에너지 비용 지수",
+      "requirement_type": "external",
+      "necessity": "required",
+      "purpose": "제조경비 중 전력비 계획의 단가 축입니다(§12.7 예시: 전력비 = 사용량 × 전기단가).",
+      "expected_grain": "월 × 요금제 × 단가",
+      "freshness_requirement": "요금 개정 시 즉시",
+      "owner_department": "production",
+      "source_candidates": [
+        "전력공사 공식 요금표",
+        "전력 계약",
+        "공식 통계 API"
+      ],
+      "readiness_dimension": "quality_freshness",
+      "starter": true,
+      "gap_impact": "전기료 인상의 원가 영향을 계산할 수 없습니다.",
+      "next_action": "적용 요금제와 공식 단가표를 등록하고 `driver_energy_usage` 와 함께 매핑하십시오.",
+      "external": {
+        "grade": "gold",
+        "acceptable_latency": "1개월",
+        "vintage_required": true,
+        "canonical_source_hint": "전력 공급사 공식 요금표 (공식 CSV/PDF 고지)"
+      }
+    },
+    {
+      "key": "ext_rate",
+      "canonical_term": "금리",
+      "requirement_type": "external",
+      "necessity": "recommended",
+      "purpose": "금융비용과 투자 판단의 할인율에 영향을 줍니다. 중기 계획에서 비중이 커집니다.",
+      "expected_grain": "월 × 기준금리 · 조달금리",
+      "freshness_requirement": "정책금리 발표 시",
+      "owner_department": "hq",
+      "source_candidates": [
+        "중앙은행 공식 API",
+        "공식 통계 CSV"
+      ],
+      "readiness_dimension": "quality_freshness",
+      "starter": false,
+      "gap_impact": "금융비용 변동과 투자 회수 판단을 계획에 반영할 수 없습니다.",
+      "next_action": "기준금리 공식 원천을 등록하고, 사내 조달금리는 재무팀 확정값으로 두십시오.",
+      "external": {
+        "grade": "gold",
+        "acceptable_latency": "1일",
+        "vintage_required": true,
+        "canonical_source_hint": "중앙은행 공식 API"
+      }
+    },
+    {
+      "key": "ext_demand_index",
+      "canonical_term": "산업 수요지수 · 판매 선행지표",
+      "requirement_type": "external",
+      "necessity": "recommended",
+      "purpose": "판매 물량 계획의 외부 근거입니다. 영업 감각만으로 세운 물량 계획을 검증합니다.",
+      "expected_grain": "월 × 산업 분류 × 지수",
+      "freshness_requirement": "발표 주기(보통 월)",
+      "owner_department": "sales",
+      "source_candidates": [
+        "공식 산업통계 API",
+        "통계청 공표 CSV",
+        "협회 공표 자료"
+      ],
+      "readiness_dimension": "quality_freshness",
+      "starter": false,
+      "gap_impact": "물량 계획의 외부 근거가 없어 낙관 편향을 검증할 수단이 없습니다.",
+      "next_action": "해당 산업의 공식 수요지수를 찾아 등록하십시오. 잠정치는 Silver 로 표시되어 전망 시나리오에만 쓰입니다.",
+      "external": {
+        "grade": "silver",
+        "acceptable_latency": "1개월",
+        "vintage_required": true,
+        "canonical_source_hint": "공식 산업통계 API (잠정치는 Silver, 확정치는 Gold)"
+      }
+    },
+    {
+      "key": "ext_wage",
+      "canonical_term": "임금 상승률",
+      "requirement_type": "external",
+      "necessity": "recommended",
+      "purpose": "인건비 계획의 증가율 가정 근거입니다.",
+      "expected_grain": "연 × 산업 · 직군 × 상승률",
+      "freshness_requirement": "연 1회 이상",
+      "owner_department": "hq",
+      "source_candidates": [
+        "공식 노동통계 API",
+        "임금 협상 결과(사내 확정)"
+      ],
+      "readiness_dimension": "quality_freshness",
+      "starter": false,
+      "gap_impact": "인건비 증가율을 근거 없는 가정으로 두게 됩니다.",
+      "next_action": "공식 노동통계와 사내 임금 협상 결과를 함께 등록하십시오(사내 확정값이 우선).",
+      "external": {
+        "grade": "gold",
+        "acceptable_latency": "3개월",
+        "vintage_required": true,
+        "canonical_source_hint": "공식 노동통계 API 또는 사내 임금 협상 확정값"
+      }
+    },
+    {
+      "key": "ownership_data",
+      "canonical_term": "데이터 책임자 지정",
+      "requirement_type": "master",
+      "necessity": "required",
+      "purpose": "각 데이터의 정의·품질·공유 범위를 승인할 사람이 있어야 데이터를 신뢰할 수 있습니다(§9.2 데이터 오너).",
+      "expected_grain": "데이터 항목 × 책임자",
+      "freshness_requirement": "담당 변경 시",
+      "owner_department": "hq",
+      "source_candidates": [
+        "조직·사용자 기준정보"
+      ],
+      "readiness_dimension": "ownership",
+      "starter": true,
+      "gap_impact": "숫자가 틀렸을 때 누구에게 물어야 하는지 알 수 없고, 품질 문제가 방치됩니다.",
+      "next_action": "기준정보·실적·동인 각각에 데이터 책임자를 지정하십시오."
+    },
+    {
+      "key": "ownership_planning",
+      "canonical_term": "부서별 계획 입력 담당자",
+      "requirement_type": "master",
+      "necessity": "recommended",
+      "purpose": "부서가 직접 입력하는 방식이면 입력 담당자가 지정되어야 흐름이 돌아갑니다. (관리 단위·입력 방식 선택에 따라 필요해지는 항목입니다.)",
+      "expected_grain": "부서 × 담당자",
+      "freshness_requirement": "담당 변경 시",
+      "owner_department": "hq",
+      "source_candidates": [
+        "조직·사용자 기준정보"
+      ],
+      "readiness_dimension": "ownership",
+      "starter": true,
+      "gap_impact": "계획 입력이 지연되고 취합 책임이 경영관리팀에 몰립니다.",
+      "next_action": "부서별 계획 입력 담당자를 지정하고 권한을 부여하십시오."
+    },
+    {
+      "key": "ownership_approver",
+      "canonical_term": "계획 승인권자",
+      "requirement_type": "master",
+      "necessity": "recommended",
+      "purpose": "다단 승인 흐름에서 각 단계의 승인권자가 정해져야 감사 이력이 성립합니다.",
+      "expected_grain": "승인 단계 × 승인권자",
+      "freshness_requirement": "조직 개편 시",
+      "owner_department": "hq",
+      "source_candidates": [
+        "조직·사용자 기준정보",
+        "결재 규정"
+      ],
+      "readiness_dimension": "ownership",
+      "starter": false,
+      "gap_impact": "승인 이력이 남지 않아 확정 계획의 근거를 사후에 설명할 수 없습니다.",
+      "next_action": "승인 단계별 권한자를 결재 규정에 맞춰 지정하십시오."
+    }
+  ]
+}
