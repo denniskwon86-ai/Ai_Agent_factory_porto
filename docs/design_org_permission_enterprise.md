@@ -788,11 +788,22 @@ def detect_conflicts(rolled, rules) -> list    # 추출 실패 시 skip, 크래�
 `nodes/universal.py`의 prompt 조립(`:89-100`)에 `reference_block` 추가(지연 임포트로 순환 방지). 이것으로 `sim_production.md`/`sim_quality.md`가 선언한 "M1/M3 기준정보 기반"이 **처음으로 사실이 된다.**
 ⚠️ **과거사례 RAG는 universal 노드에 넣지 않는다** — 유출 위험 최고 경로이고 시뮬 품질 기여가 불확실.
 
-### 🚨 F4: M1 주입 상한 12건/3000자
+### ✅ F4: M1 주입 상한 12건/3000자 — **해소(2026-07-29)**
 
 `master_data.py:28-30` + `:512-518`의 `break`. 전 부서 기준정보에 절대 부족하고 **`break`(continue 아님)라 긴 레코드 하나가 뒤를 전부 잘라낸다.**
-→ **기존 동작을 바이트 단위로 보존하는 파라미터화**: `select_for_injection(..., max_items=None, max_chars=None, skip_oversize=False)`, 기본값은 상수 그대로, `skip_oversize=True`일 때만 `continue`. `render_grounding`(`:524-529`)·`get_master_context`(`:531-547`)에 전달.
-**예산 자동 스케일(새 상태 필드 0개)**: 도메인 수 `n`으로 `min(12+8*(n-1), MASTER_INJECT_ITEMS_CAP)` → 1개면 12 그대로, 8개면 60. chars 3000 → 15000. `skip_oversize=(n>=3)`. 스캔 텍스트도 전사 모드에서 각 1500 → 3000자(`:537-542`).
+
+**실측으로 확인된 피해**(M1~M4 시드 44건 적재 후): 배터리소재는 적용 가능 30건 중 **12건만** 주입되고, 잘린 18건에 `M3-ERP-COST-MANAGEMENT`(표준원가 산식)·`M3-ERP-PRODUCTION-PLANNING-MPS`·`M3-ROUTING`·`M3-EMIS-01`·`M4-DES-*`(시뮬 확률분포)가 **전부** 포함. 3,000자 예산은 한 번도 도달하지 않아(2,196~2,538자) 두 상한이 서로 맞지 않았고, tie-break 가 코드 알파벳순이라 `RM-MHP-001`·`RM-H2SO4-001`·`WIP-*` 는 **철자 때문에** 항상 탈락했다.
+
+**채택한 해법**(당초 "파라미터화 + 예산 자동 스케일"보다 단순 — 전량이 ≈6,000자로 부담이 없으므로 스케일 계산이 불필요):
+1. **상한 없음이 기본**(`_INJECT_MAX_ITEMS = _INJECT_MAX_CHARS = None`). 적용 가능한 것은 전수 주입.
+2. `select_for_injection(..., max_items=-1, max_chars=-1, with_stats=False)` — `-1`=모듈 기본, `None`=무조건 전수, 양수=명시 상한(미리보기 UI 등). 환경변수 `MASTER_INJECT_MAX_ITEMS`/`MASTER_INJECT_MAX_CHARS` 로 운영 비상 상한.
+3. **`break` → `continue`** — 긴 레코드 하나가 뒤를 전부 잘라내지 않는다(`skip_oversize` 플래그 없이 항상).
+4. **`is_core` 를 관문에서 정렬 신호로 강등** + 3계층 우선순위(별칭 히트 → 전사 표준·산식 → 도메인 핵심). 무엇을 버릴지가 아니라 무엇을 먼저 보여줄지의 문제로 재정의.
+5. **절단 가시화** — 상한이 실제로 걸리면 주입 블록에 `[주의] … N건 중 M건만 표시 … 추정하지 말 것` 을 적고 `GET /scope-bindings/allowed` 가 `injection_capped` 를 반환.
+
+부수 발견: 시드가 문서 정식명을 그대로 별칭으로 써서 `"Mixed Hydroxide Precipitate (MHP)"` 가 단어경계 매칭에 절대 걸리지 않았고 **별칭 히트 경로 전체가 죽어 있었다**(그래서 알파벳순 절단이 그대로 노출됐다). `derive_aliases()` 로 해소.
+
+잠금 테스트: `tests/test_master_document_seed.py` — `test_all_applicable_records_are_injected`, `test_formulas_survive_injection`, `test_default_has_no_cap`, `test_explicit_cap_drops_do_not_kill_the_rest`, `test_truncation_is_visible_in_the_block`, `test_aliases_are_matchable`.
 
 ### 부수 결함
 

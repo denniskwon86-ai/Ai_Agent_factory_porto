@@ -78,13 +78,20 @@ def test_retire_is_soft(md):
 
 
 def test_alias_detection_word_boundary(md):
+    """★ [2026-07-29] 전수 주입으로 바뀌면서 `is_core` 가 관문에서 정렬 신호로 내려갔다.
+    따라서 '선정 0건'으로 오탐 부재를 측정할 수 없다 — 도메인이 어긋난 레코드를 두고
+    **별칭 히트만이 유일한 진입 경로**인 상황을 만들어 단어경계 성질을 직접 본다."""
     md.create_or_revise_record("PROC-ASSY", "process", "조립 공정",
-                               aliases=["ASSY", "조립"], domains=[], is_core=False)
-    assert md.select_for_injection("조립 라인을 검토", [])          # 히트
-    assert not md.select_for_injection("조립식 가구", [])            # '조립식' 오탐 없음
-    assert md.select_for_injection("the ASSY step", [])             # 대문자
-    assert md.select_for_injection("the assy step", [])             # 소문자(IGNORECASE)
-    assert not md.select_for_injection("passembly test", [])        # 부분문자열 오탐 없음
+                               aliases=["ASSY", "조립"], domains=["mfg"], is_core=False)
+    other = ["logistics"]                      # PROC-ASSY 의 도메인과 어긋난다
+    def hit(text):
+        return any(r["master_code"] == "PROC-ASSY"
+                   for r in md.select_for_injection(text, other))
+    assert hit("조립 라인을 검토")              # 히트
+    assert not hit("조립식 가구")               # '조립식' 오탐 없음
+    assert hit("the ASSY step")                # 대문자
+    assert hit("the assy step")                # 소문자(IGNORECASE)
+    assert not hit("passembly test")           # 부분문자열 오탐 없음
 
 
 def test_injection_priority_alias_then_core(md):

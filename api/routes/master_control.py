@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from core.master_data import master_data, MasterDataError
+from fastapi import Depends
+from api.deps import Principal, assert_can_manage_standard, current_principal
 
 router = APIRouter(prefix="/api/v1/master")
 
@@ -158,11 +160,105 @@ async def import_csv(type_id: str = Form(...), file: UploadFile = File(...)):
 class PreviewRequest(BaseModel):
     text: str
     domains: Optional[list] = None
+    scope_node_id: Optional[str] = None
+    tenant_id: str = "tenant_default"
 
 
 @router.post("/grounding/preview")
 async def grounding_preview(req: PreviewRequest):
-    block = await asyncio.to_thread(master_data.render_grounding, req.text, req.domains or [])
-    selected = await asyncio.to_thread(master_data.select_for_injection, req.text, req.domains or [])
+    """실제 주입될 블록을 그대로 보여준다. `scope_node_id` 를 주면 조직 범위 필터까지 적용해
+    **그 조직이 실제로 받게 되는 것**을 본다(R-001)."""
+    args = (req.text, req.domains or [], req.tenant_id, req.scope_node_id or "")
+    block = await asyncio.to_thread(master_data.render_grounding, *args)
+    selected, stats = await asyncio.to_thread(
+        lambda: master_data.select_for_injection(*args, with_stats=True))
     return {"status": "success", "data": {"block": block,
-                                          "matched": [r["master_code"] for r in selected]}}
+                                          "matched": [r["master_code"] for r in selected],
+                                          "stats": stats}}
+
+
+# ── [R-001 / 감사 Action 1] 문서 시드 · 조직 범위 바인딩 · 품질 점검 ────────
+class ScopeBindRequest(BaseModel):
+    master_code: str
+    scope_node_id: str
+    tenant_id: str = "tenant_default"
+    inherit_descendants: bool = True
+    master_version: Optional[int] = None
+
+
+@router.post("/scope-bindings")
+async def create_scope_binding(req: ScopeBindRequest,
+                               p: Principal = Depends(current_principal)):
+    """기준정보를 조직 범위에 적용한다(**원본 1 : 적용범위 N**).
+
+    ⚠️ 이것은 **적용 가능성**이지 열람 권한이 아니다(`DECISIONS.md` D-003·D-009).
+      사용자 권한은 ECM 이 따로 판정한다."""
+    assert_can_manage_standard(p)
+    try:
+        out = await asyncio.to_thread(
+            master_data.bind_master_to_scope, req.master_code, req.scope_node_id,
+            req.tenant_id, "REAL", req.master_version, req.inherit_descendants, "", "",
+            p.user_id or "")
+    except MasterDataError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success", "data": out}
+
+
+@router.get("/scope-bindings")
+async def list_scope_bindings(master_code: str = "", scope_node_id: str = "",
+                              tenant_id: str = "",
+                              p: Principal = Depends(current_principal)):
+    rows = await asyncio.to_thread(master_data.list_scope_bindings, master_code, scope_node_id,
+                                   tenant_id)
+    return {"status": "success", "data": rows}
+
+
+@router.get("/scope-bindings/allowed")
+async def allowed_for_scope(scope_node_id: str, tenant_id: str = "tenant_default",
+                            p: Principal = Depends(current_principal)):
+    """이 조직 범위에 적용 가능한 기준정보 코드.
+
+    주입 상한은 기본적으로 **없다**(전수 주입). 운영 비상시 환경변수로 걸었다면 그 값을 함께
+    주고, 실제로 잘린 건수는 프롬프트 블록에도 명시된다 — 조용히 잘리지 않게."""
+    from core.master_data import _INJECT_MAX_CHARS, _INJECT_MAX_ITEMS
+    codes = await asyncio.to_thread(master_data.allowed_codes_for_scope, tenant_id, scope_node_id)
+    capped = _INJECT_MAX_ITEMS is not None or _INJECT_MAX_CHARS is not None
+    return {"status": "success", "data": {
+        "scope_node_id": scope_node_id, "tenant_id": tenant_id,
+        "allowed_master_codes": sorted(codes), "allowed_count": len(codes),
+        "injection_limit_items": _INJECT_MAX_ITEMS,
+        "injection_limit_chars": _INJECT_MAX_CHARS,
+        "injection_capped": capped,
+        "note": (("⚠️ 환경변수로 주입 상한이 걸려 있어 일부가 프롬프트에 들어가지 않을 수 있습니다. "
+                  if capped else "적용 가능한 기준정보는 전량 주입됩니다(도메인이 어긋난 것만 제외). ")
+                 + "표시 순서는 별칭 히트 → 전사 표준·산식 → 도메인 핵심 순입니다."),
+    }}
+
+
+@router.get("/documents/quality")
+async def document_quality():
+    """M1~M4 문서의 **계산으로 드러나는 모순**을 점검한다.
+
+    ⚠️ 값을 고치지 않는다. 수치의 정확도는 구현 단계에서 판정할 수 없으므로(사용자 지시
+      2026-07-29), 이 목록은 **실사용 전 보정 작업의 입력**이다."""
+    from core.master_data_seed import inspect_data_quality
+    findings = await asyncio.to_thread(inspect_data_quality)
+    return {"status": "success", "data": {
+        "findings": findings, "total": len(findings),
+        "high": sum(1 for f in findings if f["severity"] == "high"),
+        "note": "값은 자동 보정되지 않습니다. 현업 확인 후 문서를 갱신하십시오.",
+    }}
+
+
+@router.post("/documents/seed")
+async def seed_documents(force: bool = False, bind_scopes: bool = True,
+                         p: Principal = Depends(current_principal)):
+    """`docs/master_data/*.json` 을 기준정보로 적재하고 ECM 조직에 바인딩한다(멱등).
+
+    `force=False` 면 이미 있는 코드는 건너뛴다 — 운영 중 사용자가 개정한 값을 시드가 되돌리면
+    안 된다(시드는 초기 공급이지 진실원본이 아니다)."""
+    assert_can_manage_standard(p)
+    from core.master_data_seed import seed_master_documents
+    report = await asyncio.to_thread(seed_master_documents, master_data, None,
+                                     "docs/master_data", bind_scopes, force)
+    return {"status": "success", "data": report}

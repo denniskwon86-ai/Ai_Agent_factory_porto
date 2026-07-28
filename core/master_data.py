@@ -16,6 +16,7 @@ import sqlite3
 import threading
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 _DB_DIR = os.path.join("data", "master")
 _DB_PATH = os.path.join(_DB_DIR, "master.db")
@@ -26,9 +27,32 @@ _TYPE_OR_DOMAIN_RE = re.compile(r"^[a-z0-9_-]{2,32}$")
 
 # 별칭 텍스트 감지 최소 길이(오탐 방지 — 1자 별칭은 텍스트 스캔 대상에서 제외; 명시 매칭엔 사용)
 _ALIAS_MIN_DETECT_LEN = 2
-# 주입 예산 (docs §4)
-_INJECT_MAX_ITEMS = 12
-_INJECT_MAX_CHARS = 3000
+# ── 주입 예산 ─────────────────────────────────────────────────────────────
+# ★ [2026-07-29 결정] **상한 없음(전수 주입)이 기본이다.**
+#
+# 종전 12건/3000자는 2026-07-22 에 토큰 폭주를 막는 가드레일로 임의로 정한 값이었고
+# (docs/design_master_data_m1.md §4), 설계 문서 스스로 결함으로 지목해 두었다
+# (design_org_permission_enterprise.md §F4: "전 부서 기준정보에 절대 부족").
+# 실측 결과 그 우려가 현실이었다 — 배터리소재는 적용 가능 30건 중 12건만 들어가고,
+# 잘린 18건에 **표준원가 산식·MPS·라우팅·배출계수·시뮬 확률분포가 전부** 포함됐다.
+# 즉 "LLM 이 산식을 지어내지 못하게 확정 주입한다"는 M1 의 존재 이유가 무력화됐다.
+# 게다가 tie-break 가 코드 알파벳순이라 **무엇이 버려지는지가 중요도가 아니라 철자**로
+# 결정됐다(RM-*/WIP-* 는 항상 탈락).
+#
+# 전량 실측: 배터리소재 30건 ≈ 6,000자, 전 문서 44건 ≈ 8,700자. 잘라낼 이유가 없다.
+# 상한은 운영 비상시에만 환경변수로 걸 수 있고, 걸리면 **반드시 눈에 보이게** 한다
+# (조용히 잘리는 것이 가장 위험하다).
+def _env_limit(name: str) -> Optional[int]:
+    raw = (os.environ.get(name) or "").strip()
+    try:
+        v = int(raw)
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+_INJECT_MAX_ITEMS = _env_limit("MASTER_INJECT_MAX_ITEMS")   # None = 전수
+_INJECT_MAX_CHARS = _env_limit("MASTER_INJECT_MAX_CHARS")   # None = 전수
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS entity_types (
@@ -624,10 +648,40 @@ class MasterData:
                 out.add(b["master_code"])
         return out
 
+    # 전사 표준·산식 계열 — 사업부 자재에 밀려 잘리면 LLM 이 산식을 지어낸다. 정렬 우선.
+    _STANDARD_TYPES = ("kpi", "finance-param", "work-center", "logistics-param",
+                       "emission-factor", "sim-param", "sensor-spec")
+
+    def _priority(self, rec: dict, alias_hit: bool) -> tuple:
+        """정렬 키. **무엇을 버릴지가 아니라 무엇을 먼저 보여줄지**를 정한다(전수 주입이므로).
+        종전에는 tie-break 가 코드 알파벳순뿐이어서 상한에 걸릴 때 `RM-`/`WIP-` 가 철자 때문에
+        항상 탈락했다 — 중요도와 무관한 기준이었다."""
+        if alias_hit:
+            tier = 0                                   # 텍스트에 실제로 등장한 것
+        elif rec.get("type_id") in self._STANDARD_TYPES:
+            tier = 1                                   # 전사 표준·산식
+        elif rec.get("is_core"):
+            tier = 2                                   # 도메인 핵심
+        else:
+            tier = 3
+        return (tier, rec["master_code"])
+
     def select_for_injection(self, text: str, domains: list,
                              tenant_id: str = "", scope_node_id: str = "",
-                             entity_mode: str = "REAL") -> list:
-        """결정론적 선정(LLM 0콜): 별칭 히트 1순위 + 도메인 핵심(is_core) 2순위. 상한 적용.
+                             entity_mode: str = "REAL",
+                             max_items: Optional[int] = -1,
+                             max_chars: Optional[int] = -1,
+                             with_stats: bool = False):
+        """결정론적 선정(LLM 0콜). **적용 가능한 것은 전부 넣는다.**
+
+        ★ [2026-07-29] 상한을 걷어냈다. 근거는 `_INJECT_MAX_ITEMS` 주석의 실측.
+          `max_items`/`max_chars` 기본값 `-1` 은 "모듈 기본(=상한 없음)을 따른다"는 뜻이고,
+          `None` 은 "무조건 전수", 양수는 명시 상한이다(미리보기 UI 등 호출자 전용).
+          상한이 걸려 실제로 잘리면 `with_stats=True` 로 몇 건이 잘렸는지 받을 수 있고
+          `render_grounding` 은 그 사실을 블록에 적는다 — 조용히 잘리지 않게.
+        ★ 선정 대상: 별칭 히트 + 전사 표준·산식 + 도메인 일치 레코드 전부.
+          종전에는 `is_core` 가 **관문**이어서 비핵심 레코드는 도메인이 맞아도 영원히
+          주입되지 않았다. 이제 `is_core` 는 정렬 신호일 뿐이다.
 
         ★ [R-001] 조직 범위 필터를 적용한다. 이것이 없으면 **A 법인 기준정보가 B 법인 프롬프트에
           섞인다**(감사 Finding 1 / Codex 교차검토). 필터 규칙:
@@ -653,26 +707,36 @@ class MasterData:
 
         recs = [r for r in recs if _in_scope(r["master_code"])]
 
-        alias_hits, core_hits = [], []
+        candidates = []
         for rec in recs:
-            if any(self._alias_hit(a, text) for a in rec.get("aliases", [])):
-                alias_hits.append(rec)
-            elif rec.get("is_core") and (not domains or (set(rec.get("domains", [])) & domains)):
-                core_hits.append(rec)
-        # tie-break: master_code ASC (캐시가 이미 master_code 정렬이라 안정적)
-        alias_hits.sort(key=lambda r: r["master_code"])
-        core_hits.sort(key=lambda r: r["master_code"])
+            hit = any(self._alias_hit(a, text) for a in rec.get("aliases", []))
+            in_domain = (not domains) or bool(set(rec.get("domains", [])) & domains)
+            if not (hit or in_domain):
+                continue          # 텍스트에도 없고 도메인도 다른 것만 제외
+            candidates.append((self._priority(rec, hit), rec))
+        candidates.sort(key=lambda t: t[0])
 
-        selected, seen, total = [], set(), 0
-        for rec in alias_hits + core_hits:
+        lim_items = _INJECT_MAX_ITEMS if max_items == -1 else max_items
+        lim_chars = _INJECT_MAX_CHARS if max_chars == -1 else max_chars
+
+        selected, seen, total, dropped = [], set(), 0, 0
+        for _, rec in candidates:
             if rec["master_code"] in seen:
                 continue
             line = self._fmt_record(rec)
-            if len(selected) >= _INJECT_MAX_ITEMS or total + len(line) > _INJECT_MAX_CHARS:
-                break
+            if lim_items is not None and len(selected) >= lim_items:
+                dropped += 1
+                continue                             # ★ break 아님 — 뒤를 전부 잘라내지 않는다
+            if lim_chars is not None and total + len(line) > lim_chars:
+                dropped += 1
+                continue                             # 긴 레코드 하나가 나머지를 죽이지 않게
             selected.append(rec)
             seen.add(rec["master_code"])
             total += len(line) + 1
+        if with_stats:
+            return selected, {"eligible": len(candidates), "injected": len(selected),
+                              "dropped": dropped, "chars": total,
+                              "limit_items": lim_items, "limit_chars": lim_chars}
         return selected
 
     _INJECT_HEADER = (
@@ -682,10 +746,16 @@ class MasterData:
 
     def render_grounding(self, text: str, domains: list, tenant_id: str = "",
                          scope_node_id: str = "", entity_mode: str = "REAL") -> str:
-        selected = self.select_for_injection(text, domains, tenant_id, scope_node_id, entity_mode)
+        selected, stats = self.select_for_injection(
+            text, domains, tenant_id, scope_node_id, entity_mode, with_stats=True)
         if not selected:
             return ""
         lines = [self._INJECT_HEADER] + [self._fmt_record(r) for r in selected]
+        if stats["dropped"]:
+            # 조용히 잘리면 LLM 도 사람도 무엇이 없는지 모른다. 반드시 적는다.
+            lines.append(f"[주의] 이 범위에 적용 가능한 기준정보 {stats['eligible']}건 중 "
+                         f"{stats['injected']}건만 표시됐다(주입 상한 설정). 표시되지 않은 "
+                         f"{stats['dropped']}건의 값은 알 수 없으므로 추정하지 말 것.")
         return "\n".join(lines)
 
     def get_master_context(self, state) -> str:
