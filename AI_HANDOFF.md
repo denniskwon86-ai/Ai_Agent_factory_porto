@@ -15,6 +15,24 @@
 
 두 문서는 목표 설계를 담고 있습니다. 현재 구현 여부는 As-Is 설계서와 최신 handoff를 우선 확인하고, 목표 기능을 이미 구현된 것으로 취급하지 마세요.
 
+> **팀 역할 규약**: [`.agents/AGENTS.md`](.agents/AGENTS.md) — 사용자·Claude Code·Codex·Antigravity 4인 팀의 역할 헌장과 겹치는 구간의 합의가 여기 있습니다. 작업 착수 전에 "이 작업이 내 영역인가"를 먼저 확인하세요.
+> **Enterprise Context 선행 규칙**: [`docs/design_enterprise_context_master.md`](docs/design_enterprise_context_master.md) — 이후 구현되는 모든 기능은 `tenant → 기업집단 → 법인 → 사업부 → 사업장/공장` 문맥과 실제/가상/경쟁사 상태를 명시적으로 가져야 합니다.
+
+---
+
+## 📮 Codex 앞 인계 — 프론트엔드 변경 통지 (2026-07-28, Claude Code)
+
+역할 규약상 UI/UX·프론트엔드는 Codex 담당인데, 백엔드 API 계약 변경 때문에 **사전 통지 없이 프론트를 직접 수정한 건이 1건** 있습니다. 되돌릴 필요는 없다고 판단했지만 검토·재설계 대상으로 남깁니다.
+
+**[frontend/src/components/TelemetryPanel.tsx](frontend/src/components/TelemetryPanel.tsx)** (커밋 `4cfb4b45a`, P0 「비용 관측」)
+
+- **왜 손댔나**: `GET /api/v1/telemetry/projects` 응답이 `string[]` → 객체 배열(`{project, project_id, owner_dept_id}`)로 바뀌어 기존 `<option>` 렌더링이 깨졌습니다. 부서 스코프를 도입하려면 이름만으로는 부족했습니다.
+- **함께 넣은 것**: 비용 KPI 타일(미산정이 있으면 `≥` 접두로 **하한**임을 표시), 비용 산정 근거 분포(무료티어/캐시적중/유료/단가일부/**미산정**을 분리 — "무료라서 0"과 "몰라서 0"을 사람이 구분해야 함), 권한 범위·제외 건수 표기, 스테일 주석 "토큰 계측은 v2 예정" 제거(토큰은 이미 수집 중).
+- **Codex 검토 요청 사항**: ① 비용 하한 표기(`≥ $4.5558`)가 경영 보고 화면에서 오해 없이 읽히는지 ② 미산정 경고의 시각적 위계가 적절한지 ③ 부서 필터 UX를 셀렉트가 아닌 다른 형태로 갈 필요가 있는지.
+- **API 계약 참고**: `/summary` 응답에 `by_cost_basis`, `by_provider`, `totals.cost_complete`, `totals.unpriced_calls`, `permission{scope, excluded_unattributed, excluded_other_dept}` 가 추가되어 있습니다.
+
+이후 백엔드 계약 변경 시에는 **먼저 통지하고 프론트 수정은 Codex 에 넘기겠습니다.**
+
 ---
 
 ## 🏁 2026-07-27 — A-1 관문 시나리오 **완주 달성 (PASS)**
