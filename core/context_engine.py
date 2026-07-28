@@ -64,6 +64,20 @@ class ContextEngine:
         ]
         if master_context:
             context_parts.append(master_context)
+        # ★ [ECM E2 / 감사 ENTERPRISE-01 Action 3] 템플릿별 기준정보 바인딩 규칙.
+        #   ⚠️ 감사 지적: 템플릿이 마스터의 어느 섹션을 근거로 써야 하는지 명시하지 않으면
+        #     **LLM 이 마스터를 무시하고 환각으로 수치를 지어낸다.** 기준정보를 주입하는 것만으로는
+        #     부족하고 "이 값들은 계산 결과이니 지어내지 말라"는 규칙이 함께 있어야 한다.
+        #   기준정보 본문(위 master_context) **바로 뒤**에 둔다 — 규칙이 대상보다 앞에 오면
+        #     무엇에 대한 규칙인지 모른다.
+        try:
+            from core.enterprise_context.profile_resolver import render_binding_block
+            _binding = render_binding_block(getattr(state, "template_id", "") or "")
+            if _binding:
+                context_parts.append(_binding)
+        except Exception as e:
+            # 바인딩 규칙 누락이 파이프라인을 멈추게 하면 안 된다(부가 지시문).
+            print(f"⚠️ [ContextEngine] 기준정보 바인딩 규칙 주입 생략: {e}")
         # [M3] 외부 실측값 병기 - 기본 off. 켠 프로젝트만 활성 연계 시스템에서 온디맨드 조회해
         # 기준값(M1) 바로 뒤에 '참고(비신뢰)'로 병기한다. lazy import 로 순환참조 회피.
         if getattr(state, "mcp_live_grounding", False):

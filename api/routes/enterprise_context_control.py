@@ -255,6 +255,65 @@ async def list_profiles(scope_node_id: str = "", industry_code: str = "", profil
             "note": "프로필 상속 병합은 ECM 로드맵 E2 에서 제공됩니다. 여기는 저장된 원본입니다."}
 
 
+# ── E2: 프로필 상속 해석 · 템플릿 바인딩 ────────────────────────────────────
+@router.get("/contexts/{scope_id}/resolved-profile")
+async def get_resolved_profile(scope_id: str, profile_kind: str = "data_profile",
+                               playbook_id: str = "",
+                               p: Principal = Depends(current_principal)):
+    """상속이 해석된 실행 프로필(§9). **E2**.
+
+    `playbook_id` 를 주면 그 플레이북이 **산업 공통 층**으로 들어간다(`DECISIONS.md` D-002).
+    응답의 `sources`(적용 순서)와 `skipped`(미승인으로 제외)를 함께 봐야 "이 값이 어디서
+    왔나"에 답할 수 있다 — 근거 없는 추천은 신뢰할 수 없다(§5.2)."""
+    from core.enterprise_context.profile_resolver import (playbook_industry_base,
+                                                          profile_resolver)
+    resolved_ref = await asyncio.to_thread(ecm_resolver.resolve_scope_ref, scope_id)
+    node_id = resolved_ref["node_id"]
+    if node_id and not await asyncio.to_thread(ecm_resolver.can_read_node, p, node_id):
+        raise HTTPException(status_code=403, detail="이 조직 범위를 볼 권한이 없습니다.")
+    if not node_id and resolved_ref["dept_id"] and not p.scope.can_read(resolved_ref["dept_id"]):
+        raise HTTPException(status_code=403, detail="이 부서 자료를 볼 권한이 없습니다.")
+
+    base = None
+    if playbook_id:
+        from core.advisor_playbook import load_playbook
+        try:
+            pb = load_playbook(playbook_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if not pb:
+            raise HTTPException(status_code=404, detail=f"플레이북을 찾을 수 없습니다: {playbook_id}")
+        if profile_kind == "data_profile":
+            base = playbook_industry_base(pb)
+    try:
+        out = await asyncio.to_thread(profile_resolver.resolve, node_id, profile_kind, base)
+    except EcmError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    out["scope_ref"] = resolved_ref
+    return {"status": "success", "data": out}
+
+
+@router.get("/templates/{template_id}/binding")
+async def get_template_binding(template_id: str, p: Principal = Depends(current_principal)):
+    """템플릿별 필수 기준정보 바인딩(감사 ENTERPRISE-01 Action 3 / `DECISIONS.md` R-002).
+
+    ⚠️ 마스터 **본문은 주지 않는다** — 그건 MDM(`master_data.get_master_context`)이 결정론적으로
+      주입한다(R-001). 여기는 "어느 섹션을 반드시 근거로 써야 하고, 그 수치를 지어내면 안 되는가"
+      라는 규칙만 준다. `prompt_block` 이 실제로 프롬프트에 들어가는 문구다."""
+    from core.enterprise_context.profile_resolver import (TEMPLATE_MASTER_BINDINGS,
+                                                          binding_for_template,
+                                                          render_binding_block)
+    b = binding_for_template(template_id)
+    if not b:
+        return {"status": "success", "data": {
+            "template_id": template_id, "bound": False,
+            "known_templates": sorted(TEMPLATE_MASTER_BINDINGS),
+            "note": "이 템플릿에는 필수 기준정보 바인딩이 등록되지 않았습니다(제약 없음)."}}
+    b.update({"template_id": template_id, "bound": True,
+              "prompt_block": render_binding_block(template_id)})
+    return {"status": "success", "data": b}
+
+
 # ── 시드 ─────────────────────────────────────────────────────────────────
 @router.post("/seed-example")
 async def seed_example(force: bool = False, p: Principal = Depends(current_principal)):
