@@ -335,6 +335,18 @@ ORG_USER_HEADER = "X-Factory-User"
 # 식별 정보가 전혀 없을 때 쓸 기본 사용자. 빈 문자열이면 익명으로 해석한다.
 ORG_DEFAULT_USER_ID = ""
 
+# ── Enterprise Context (ECM-lite) ────────────────────────────────────────
+# `docs/design_enterprise_context_master.md` §4.1 은 `tenant_id` 를 모든 기준 레코드의 공통
+# 필드로 요구한다. 전역 컨텍스트 스위처(§5.1)와 ECM 테이블(E1)은 아직 없으므로, 문맥이
+# 명시되지 않은 요청은 이 기본 테넌트로 귀속시킨다 — 단일 테넌트 운영에서 종전과 동일하게
+# 동작하고, 멀티테넌트가 도입되면 값만 실제 테넌트로 바뀐다(스키마는 이미 준비됨).
+ECM_DEFAULT_TENANT_ID = "tenant_default"
+# 문맥 헤더 3종. Phase 2 의 `ORG_USER_HEADER` 와 같은 규약 — 전역 스위처/SSO 가 오면
+# `api/deps.py` 한 곳만 바꾸면 된다.
+ECM_SCOPE_HEADER = "X-Enterprise-Scope"
+ECM_TENANT_HEADER = "X-Enterprise-Tenant"
+ECM_MODE_HEADER = "X-Entity-Mode"
+
 # ── 과거사례 RAG 방어 (Phase 5) ──────────────────────────────────────────
 # ⚠️ 최대 유출 경로였다: 전역 `project_releases` 컬렉션을 필터도 임계값도 없이 검색해
 #   상위 N건을 **모든 프롬프트에 주입**했다. 3중으로 막는다.

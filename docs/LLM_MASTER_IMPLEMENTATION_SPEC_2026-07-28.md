@@ -951,7 +951,7 @@ Global Supervisor
    · 데이터 요구사항을 **행으로도** 저장한다(`blueprint_data_requirements`) — "어느 부서가 어떤 데이터를 몇 건 못 갖췄나"를 질의해야 하고 JSON 안에 있는 것은 검색되지 않는다(§4.4 데이터 보드, M1 카탈로그 매칭 입력).
    · **권한을 처음부터 부서 스코프로 걸었다.** 나중에 얹는 비용이 이 프로젝트에서 반복적으로 컸다(Phase 4 는 21곳에 단언을 뒤늦게 주입, Phase 5 는 이미 전역 유출 상태였다). ⚠️ 상담은 이 기능과 함께 새로 생기는 데이터라 지킬 레거시가 없으므로, 프로젝트 목록과 달리 **부서 미지정(개인) 상담은 본인만**(fail-closed).
    · **차단이 아니라 가시화**: 필수 데이터 결손 상태로도 승인은 되지만 `approved_with_blocking_gaps` 로 무엇을 안고 승인했는지 남는다. 막으면 우회한다.
-   · ⚠️ 명세서 §4.5 의 `tenant_id` 는 **넣지 않았다** — §2.2 가 멀티테넌트를 미구현으로 명시하고 있어 쓰지 않는 컬럼은 오해를 만든다. 실제로 존재하는 `owner_dept_id` 를 쓴다(멱등 DDL 이라 나중 추가 안전).
+   · ⚠️ ~~명세서 §4.5 의 `tenant_id` 는 **넣지 않았다**~~ → **정정 (2026-07-28, ECM-lite)**: 최상단 선행 규칙이 상담사를 명시적 적용 대상으로 지목하므로 `tenant_id`·`enterprise_scope_id`·`entity_mode` 3키를 추가했다. "쓰지 않는 컬럼은 오해를 만든다"는 판단은 SSOT 요구가 없을 때의 것이었고, 지금은 근거가 무효다. 상세는 [`design_enterprise_context_master.md`](design_enterprise_context_master.md) §11 E1 의 "ECM-lite 선점 완료".
    · 미구현(백로그 4 = M0-d): `bootstrap-project`, `create-data-tasks`.
 3. 전역 상담 패널 UI와 선택형 질문 컴포넌트
 4. 상담 결과를 기존 프로젝트 생성·RFP 입력으로 연결

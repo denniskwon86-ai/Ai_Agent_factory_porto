@@ -27,7 +27,11 @@ from core.advisor_playbook import (Playbook, active_requirement_keys,
 #   같은 "환율 1,380원"이라도 실제값인지 전망인지 계획 가정인지 시나리오인지 구분해야 한다.
 #   ⚠️ 바이블의 4종에 **기준정보가 없다** — 기준정보는 시점값이 아니라 참조 데이터라서
 #     4종 어디에도 속하지 않는다. 섞지 않으려면 이름이 있어야 하므로 `reference` 를 더한다.
-DATA_KINDS = ("actual", "plan", "forecast", "scenario", "reference", "event")
+#   ⚠️ ECM 설계서 비협상 원칙 3 은 여기에 **경쟁사 추정치**를 더한다("실제·계획·예측·가상
+#     시나리오·경쟁사 추정치는 절대로 혼합하지 않는다"). 값의 성격이 다르므로 `competitor` 를
+#     별도 종류로 둔다 — 가상 시나리오는 `entity_mode=VIRTUAL` 로 격리되고, 경쟁사 추정치는
+#     실제 문맥의 차트에도 함께 표시될 수 있어(§7.3) 값 단위의 표지가 반드시 필요하다.
+DATA_KINDS = ("actual", "plan", "forecast", "scenario", "reference", "event", "competitor")
 
 # 요구사항 종류 → 데이터 구분의 결정론적 기본값.
 #   외부지표는 등급이 성격을 정한다(§7.2): Gold=확정 실제값, Silver=전망, Bronze=사건 후보.
@@ -150,6 +154,14 @@ class SolutionBlueprint(BaseModel):
     playbook_id: str = ""
     owner_dept_id: str = ""
     owner_user_id: str = ""
+
+    # ── [ECM-lite] 실행 문맥 ──────────────────────────────────────────────
+    # ECM 설계서 §10.2: "프로젝트는 반드시 `enterprise_scope_id` 와 `entity_mode` 를 소유한다."
+    #   Blueprint 가 프로젝트를 부트스트랩(M0-d)하므로 여기서부터 실어 넘겨야 한다. 나중에
+    #   붙이면 이미 승인된 Blueprint 들이 문맥 없는 상태로 남아 프로젝트 귀속을 못 한다.
+    tenant_id: str = ""
+    enterprise_scope_id: str = ""
+    entity_mode: str = "REAL"
 
     business: BlueprintBusiness = Field(default_factory=BlueprintBusiness)
     kpis: List[BlueprintKPI] = Field(default_factory=list)

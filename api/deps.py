@@ -18,7 +18,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 import config
 from core.org_directory import AccessScope, org_directory
@@ -135,3 +135,34 @@ def visible_filter(p: Principal, kind: str) -> Optional[set]:
     """목록 API 가 쓸 가시 자원 집합. `None` = 필터하지 말라(무제한)."""
     ids = org_directory.visible_resources(p.scope, kind)
     return None if ids is None else set(ids)
+
+
+# ── Enterprise Context (ECM-lite) ────────────────────────────────────────
+# ECM 설계서 §5.1 은 문맥을 "모든 API·SSE·LLM 호출에 전달되는 토큰"으로 정의한다.
+# ⚠️ 추출을 **여기 한 곳**으로 모으는 이유는 사용자 식별과 같다: 전역 컨텍스트 스위처(§5.1)나
+#   SSO 가 오면 이 함수 하나만 바꾸면 되고, 라우트마다 헤더를 직접 읽으면 어느 하나를
+#   빠뜨렸을 때 그 경로만 문맥 없이 실행된다(그게 곧 격리 구멍이다).
+async def current_enterprise_context(request: Request,
+                                     p: Principal = None) -> "EnterpriseContext":
+    from core.enterprise_context import build_context
+    h = request.headers
+    scope = h.get(getattr(config, "ECM_SCOPE_HEADER", "X-Enterprise-Scope"), "") or ""
+    tenant = h.get(getattr(config, "ECM_TENANT_HEADER", "X-Enterprise-Tenant"), "") or ""
+    mode = h.get(getattr(config, "ECM_MODE_HEADER", "X-Entity-Mode"), "") or ""
+    # SSE/iframe/다운로드 링크는 헤더를 붙일 수 없다(Phase 2 와 같은 이유로 쿼리도 받는다).
+    q = request.query_params
+    scope = scope or (q.get("enterprise_scope") or "")
+    mode = mode or (q.get("entity_mode") or "")
+    # 문맥이 명시되지 않으면 요청자의 소속 부서를 범위로 쓴다 — 스위처가 없는 동안 사용자에게
+    # 매번 범위 지정을 강제하면 기존 흐름이 전부 막힌다(단계적 도입).
+    fallback = ""
+    if p is not None:
+        fallback = getattr(p.scope, "primary_dept_id", "") or ""
+    return build_context(tenant_id=tenant, enterprise_scope_id=scope,
+                         entity_mode=mode, fallback_scope_id=fallback)
+
+
+async def enterprise_context(request: Request,
+                             p: Principal = Depends(current_principal)):
+    """라우트가 쓰는 의존성. `Principal` 을 함께 해석해 범위 기본값을 채운다."""
+    return await current_enterprise_context(request, p)

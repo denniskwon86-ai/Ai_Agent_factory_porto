@@ -17,11 +17,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, current_principal
+from api.deps import Principal, current_principal, enterprise_context
 from core.advisor_blueprint import assemble_blueprint
 from core.advisor_playbook import (load_playbook, list_playbooks, score_readiness,
                                    active_requirement_keys)
 from core.advisor_store import AdvisorStoreError, advisor_store
+from core.enterprise_context import (ENTITY_MODE_KO, EnterpriseContext,
+                                     EnterpriseContextError)
 
 router = APIRouter(prefix="/api/v1/advisor", tags=["Advisor"])
 
@@ -59,6 +61,51 @@ def _assert_can_write(p: Principal, owner_dept_id: str, owner_user_id: str):
         return
     if (owner_user_id or "") != p.user_id:
         raise HTTPException(status_code=403, detail="본인의 상담만 수정할 수 있습니다.")
+
+
+def _assert_can_approve(p: Principal, owner_dept_id: str, owner_user_id: str):
+    """ECM 설계서 §6 은 `APPROVE` 를 `EDIT` 와 **별개 행동**으로 둔다(주체 × 범위 × 도메인 ×
+    행동 × 상태). 초안을 쓸 수 있는 사람과 확정할 수 있는 사람은 다를 수 있다.
+
+    ⚠️ 지금은 행동 권한 축이 없어 판정이 쓰기와 같다. **분리된 호출 지점만 먼저 만든다** —
+      E2 에서 도메인·행동 매트릭스가 들어올 때 이 함수 하나만 고치면 되고, 그때 라우트를
+      다시 뒤지지 않아도 된다(Phase 4 가 라우트 21곳에 단언을 뒤늦게 주입한 일을 반복하지 않는다)."""
+    _assert_can_write(p, owner_dept_id, owner_user_id)
+
+
+def _validate_ctx(ctx: EnterpriseContext, creating: bool = False) -> EnterpriseContext:
+    try:
+        return ctx.validate(creating=creating)
+    except EnterpriseContextError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _assert_same_context(ctx: EnterpriseContext, row: Dict[str, Any]):
+    """저장된 자료의 문맥과 요청 문맥이 같은지 확인한다.
+
+    ⚠️ 설계서 수용 기준 5 — 가상 시나리오의 가정·결과가 실제 데이터와 조회에서 분리되어야 한다.
+      목록만 격리하고 단건 조회를 안 막으면 id 를 알면 넘어갈 수 있다. 권한(403)이 아니라
+      문맥 불일치(404)로 답한다 — 다른 문맥의 자료는 이 문맥에서 **존재하지 않는 것**이다.
+
+    ⚠️ **키가 없으면 통과가 아니라 차단이다(fail-closed).** 처음엔 `row.get(...)` 이 비면
+      넘겨줬는데, `get_blueprint_row` 가 신규 컬럼을 SELECT 하지 않아 다른 테넌트의 Blueprint 가
+      조용히 통과했다(테스트가 잡음). 조회부가 문맥 컬럼을 빼먹는 것은 이 프로젝트에서 반복된
+      결함 유형이라, 판정 근거가 없으면 막고 시끄럽게 실패하게 둔다."""
+    if not row.get("tenant_id"):
+        raise HTTPException(status_code=500,
+                            detail="자료의 실행 문맥을 확인할 수 없습니다(조회부가 문맥 키를 "
+                                   "가져오지 않았습니다).")
+    if row["tenant_id"] != ctx.tenant_id:
+        raise HTTPException(status_code=404, detail="현재 테넌트 문맥에 없는 자료입니다.")
+    mode = row.get("entity_mode") or ""
+    if not mode:
+        raise HTTPException(status_code=500,
+                            detail="자료의 entity_mode 를 확인할 수 없습니다.")
+    if mode != ctx.entity_mode:
+        raise HTTPException(
+            status_code=404,
+            detail=f"현재 문맥({ENTITY_MODE_KO.get(ctx.entity_mode, ctx.entity_mode)})에 없는 "
+                   f"자료입니다. 이 자료는 {ENTITY_MODE_KO.get(mode, mode)}에 속합니다.")
 
 
 def _load_consultation_or_404(consultation_id: str) -> Dict[str, Any]:
@@ -111,14 +158,17 @@ def _progress(pb, answers: Dict[str, List[str]]) -> Dict[str, Any]:
 
 @router.post("/consultations")
 async def create_consultation(req: ConsultationCreate,
-                              p: Principal = Depends(current_principal)):
+                              p: Principal = Depends(current_principal),
+                              ctx: EnterpriseContext = Depends(enterprise_context)):
     """상담 시작. 플레이북이 지정되면 첫 질문을 함께 돌려준다."""
+    _validate_ctx(ctx, creating=True)
     pb = _playbook_or_400(req.playbook_id) if req.playbook_id else None
     try:
         c = await asyncio.to_thread(
             advisor_store.create_consultation,
             user_id=p.user_id, owner_dept_id=getattr(p.scope, "primary_dept_id", "") or "",
-            scope=req.scope, playbook_id=req.playbook_id, initial_prompt=req.initial_prompt)
+            scope=req.scope, playbook_id=req.playbook_id, initial_prompt=req.initial_prompt,
+            ctx=ctx)
     except AdvisorStoreError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -142,9 +192,11 @@ class MessageIn(BaseModel):
 
 @router.post("/consultations/{consultation_id}/messages")
 async def post_message(consultation_id: str, req: MessageIn,
-                       p: Principal = Depends(current_principal)):
+                       p: Principal = Depends(current_principal),
+                       ctx: EnterpriseContext = Depends(enterprise_context)):
     """사용자 답변을 기록하고 다음 질문(또는 완료)을 돌려준다."""
     c = _load_consultation_or_404(consultation_id)
+    _assert_same_context(_validate_ctx(ctx), c)
     _assert_can_write(p, c["owner_dept_id"], c["user_id"])
     if not (req.selected_values or (req.message or "").strip()):
         raise HTTPException(status_code=400, detail="선택 또는 입력 중 하나는 있어야 합니다.")
@@ -189,15 +241,19 @@ async def post_message(consultation_id: str, req: MessageIn,
 
 
 @router.get("/consultations")
-async def get_consultations(limit: int = 50, p: Principal = Depends(current_principal)):
+async def get_consultations(limit: int = 50, p: Principal = Depends(current_principal),
+                            ctx: EnterpriseContext = Depends(enterprise_context)):
     rows = await asyncio.to_thread(advisor_store.list_consultations,
-                                   _readable_dept_ids(p), p.user_id, limit)
+                                   _readable_dept_ids(p), p.user_id, limit,
+                                   _validate_ctx(ctx))
     return {"status": "success", "data": rows}
 
 
 @router.get("/consultations/{consultation_id}")
-async def get_consultation(consultation_id: str, p: Principal = Depends(current_principal)):
+async def get_consultation(consultation_id: str, p: Principal = Depends(current_principal),
+                           ctx: EnterpriseContext = Depends(enterprise_context)):
     c = _load_consultation_or_404(consultation_id)
+    _assert_same_context(_validate_ctx(ctx), c)
     _assert_can_read(p, c["owner_dept_id"], c["user_id"])
     turns = await asyncio.to_thread(advisor_store.list_turns, consultation_id)
     answers = await asyncio.to_thread(advisor_store.collected_answers, consultation_id)
@@ -219,9 +275,11 @@ class BlueprintDraft(BaseModel):
 
 @router.post("/consultations/{consultation_id}/blueprint")
 async def draft_blueprint(consultation_id: str, req: BlueprintDraft,
-                          p: Principal = Depends(current_principal)):
+                          p: Principal = Depends(current_principal),
+                          ctx: EnterpriseContext = Depends(enterprise_context)):
     """상담 답변에서 Blueprint 초안을 **결정론적으로** 조립한다(LLM 0콜)."""
     c = _load_consultation_or_404(consultation_id)
+    _assert_same_context(_validate_ctx(ctx), c)
     _assert_can_write(p, c["owner_dept_id"], c["user_id"])
     if not c["playbook_id"]:
         raise HTTPException(status_code=400, detail="플레이북이 지정되지 않은 상담입니다.")
@@ -237,6 +295,11 @@ async def draft_blueprint(consultation_id: str, req: BlueprintDraft,
     bp.consultation_id = consultation_id
     bp.owner_dept_id = c["owner_dept_id"]
     bp.owner_user_id = c["user_id"]
+    # 문맥은 **상담에서 물려받는다**(요청 헤더가 아니라). 상담 중간에 스위처를 바꿨다고
+    # Blueprint 가 다른 문맥으로 태어나면 가정과 실제가 섞인다.
+    bp.tenant_id = c["tenant_id"]
+    bp.enterprise_scope_id = c["enterprise_scope_id"] or c["owner_dept_id"]
+    bp.entity_mode = c["entity_mode"]
     saved = await asyncio.to_thread(advisor_store.save_blueprint, bp)
     await asyncio.to_thread(advisor_store.update_consultation, consultation_id,
                             status="blueprint_drafted")
@@ -244,17 +307,21 @@ async def draft_blueprint(consultation_id: str, req: BlueprintDraft,
 
 
 @router.get("/blueprints")
-async def get_blueprints(limit: int = 50, p: Principal = Depends(current_principal)):
+async def get_blueprints(limit: int = 50, p: Principal = Depends(current_principal),
+                         ctx: EnterpriseContext = Depends(enterprise_context)):
     rows = await asyncio.to_thread(advisor_store.list_blueprints, "",
-                                    _readable_dept_ids(p), p.user_id, limit)
+                                    _readable_dept_ids(p), p.user_id, limit,
+                                    _validate_ctx(ctx))
     return {"status": "success", "data": rows}
 
 
 @router.get("/blueprints/{blueprint_id}")
-async def get_blueprint(blueprint_id: str, p: Principal = Depends(current_principal)):
+async def get_blueprint(blueprint_id: str, p: Principal = Depends(current_principal),
+                        ctx: EnterpriseContext = Depends(enterprise_context)):
     row = advisor_store.get_blueprint_row(blueprint_id)
     if not row:
         raise HTTPException(status_code=404, detail="Blueprint 를 찾을 수 없습니다.")
+    _assert_same_context(_validate_ctx(ctx), row)
     _assert_can_read(p, row["owner_dept_id"], row["owner_user_id"])
     bp = await asyncio.to_thread(advisor_store.get_blueprint, blueprint_id)
     if not bp:
@@ -273,7 +340,8 @@ class DecisionIn(BaseModel):
 
 @router.post("/blueprints/{blueprint_id}/approve")
 async def decide_blueprint(blueprint_id: str, req: DecisionIn,
-                           p: Principal = Depends(current_principal)):
+                           p: Principal = Depends(current_principal),
+                           ctx: EnterpriseContext = Depends(enterprise_context)):
     """승인 또는 반려. 승인은 **사람의 확정**이므로 출처 표시의 `confirmed` 를 켠다(§5.2).
 
     ⚠️ 필수 데이터가 결손인 상태로도 승인할 수 있게 둔다 — 데이터를 갖추기 전에 계획을 확정하는
@@ -284,7 +352,8 @@ async def decide_blueprint(blueprint_id: str, req: DecisionIn,
     row = advisor_store.get_blueprint_row(blueprint_id)
     if not row:
         raise HTTPException(status_code=404, detail="Blueprint 를 찾을 수 없습니다.")
-    _assert_can_write(p, row["owner_dept_id"], row["owner_user_id"])
+    _assert_same_context(_validate_ctx(ctx), row)
+    _assert_can_approve(p, row["owner_dept_id"], row["owner_user_id"])
     if req.decision == "rejected" and not (req.reason or "").strip():
         raise HTTPException(status_code=400, detail="반려에는 사유가 필요합니다.")
     try:
@@ -307,7 +376,8 @@ async def decide_blueprint(blueprint_id: str, req: DecisionIn,
 
 # ── 데이터 보드 롤업 (§4.4) ───────────────────────────────────────────────
 @router.get("/data-requirements/rollup")
-async def requirement_rollup(p: Principal = Depends(current_principal)):
+async def requirement_rollup(p: Principal = Depends(current_principal),
+                             ctx: EnterpriseContext = Depends(enterprise_context)):
     """"어느 부서가 어떤 데이터를 몇 건 못 갖췄나". M1 카탈로그 매칭의 입력이 된다."""
-    rows = await asyncio.to_thread(advisor_store.requirement_rollup, _readable_dept_ids(p))
+    rows = await asyncio.to_thread(advisor_store.requirement_rollup, _readable_dept_ids(p), _validate_ctx(ctx))
     return {"status": "success", "data": rows}

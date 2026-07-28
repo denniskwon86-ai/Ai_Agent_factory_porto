@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from core.advisor_blueprint import SolutionBlueprint
+from core.enterprise_context import EnterpriseContext, build_context, isolation_filter
 
 _DB_PATH = os.path.join("data", "advisor.db")
 
@@ -35,6 +36,10 @@ CREATE TABLE IF NOT EXISTS consultations (
     consultation_id TEXT PRIMARY KEY,
     user_id         TEXT DEFAULT '',
     owner_dept_id   TEXT DEFAULT '',
+    -- [ECM-lite] 문맥 3키. 설계서 최상단 선행 규칙이 상담사를 명시적 적용 대상으로 지목한다.
+    tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
+    enterprise_scope_id TEXT DEFAULT '',
+    entity_mode         TEXT NOT NULL DEFAULT 'REAL',
     scope           TEXT NOT NULL DEFAULT 'department',
     playbook_id     TEXT DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'open',
@@ -44,6 +49,7 @@ CREATE TABLE IF NOT EXISTS consultations (
     updated_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_consult_dept ON consultations(owner_dept_id, status);
+CREATE INDEX IF NOT EXISTS idx_consult_ctx ON consultations(tenant_id, entity_mode);
 
 CREATE TABLE IF NOT EXISTS consultation_turns (
     turn_id             TEXT PRIMARY KEY,
@@ -65,6 +71,11 @@ CREATE TABLE IF NOT EXISTS solution_blueprints (
     consultation_id TEXT DEFAULT '',
     owner_dept_id   TEXT DEFAULT '',
     owner_user_id   TEXT DEFAULT '',
+    -- [ECM-lite] §10.2 "프로젝트는 반드시 enterprise_scope_id 와 entity_mode 를 소유한다".
+    --   Blueprint 가 프로젝트를 부트스트랩(M0-d)하므로 여기서부터 실어 넘겨야 한다.
+    tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
+    enterprise_scope_id TEXT DEFAULT '',
+    entity_mode         TEXT NOT NULL DEFAULT 'REAL',
     title           TEXT DEFAULT '',
     business_domain TEXT DEFAULT '',
     playbook_id     TEXT DEFAULT '',
@@ -78,6 +89,7 @@ CREATE TABLE IF NOT EXISTS solution_blueprints (
     updated_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_bp_dept ON solution_blueprints(owner_dept_id, status);
+CREATE INDEX IF NOT EXISTS idx_bp_ctx ON solution_blueprints(tenant_id, entity_mode);
 CREATE INDEX IF NOT EXISTS idx_bp_consult ON solution_blueprints(consultation_id);
 
 -- 데이터 요구사항을 **행으로도** 둔다. payload_json 안에 이미 있지만, "어느 부서가 어떤 데이터를
@@ -98,6 +110,22 @@ CREATE TABLE IF NOT EXISTS blueprint_data_requirements (
 CREATE INDEX IF NOT EXISTS idx_bpreq_dept ON blueprint_data_requirements(owner_department, readiness_status);
 CREATE INDEX IF NOT EXISTS idx_bpreq_term ON blueprint_data_requirements(canonical_term);
 """
+
+
+# [ECM-lite] 기존 DB 파일에 더해야 하는 컬럼. `_migrate_columns` 가 멱등 적용한다.
+#   NOT NULL 컬럼을 ALTER 로 추가하려면 기본값이 있어야 한다(SQLite 제약) — 셋 다 있다.
+_COLUMN_MIGRATIONS = {
+    "consultations": [
+        ("tenant_id", "TEXT NOT NULL DEFAULT 'tenant_default'"),
+        ("enterprise_scope_id", "TEXT DEFAULT ''"),
+        ("entity_mode", "TEXT NOT NULL DEFAULT 'REAL'"),
+    ],
+    "solution_blueprints": [
+        ("tenant_id", "TEXT NOT NULL DEFAULT 'tenant_default'"),
+        ("enterprise_scope_id", "TEXT DEFAULT ''"),
+        ("entity_mode", "TEXT NOT NULL DEFAULT 'REAL'"),
+    ],
+}
 
 
 class AdvisorStoreError(ValueError):
@@ -126,10 +154,35 @@ class AdvisorStore:
     def _init_db(self):
         conn = self._connect()
         try:
+            # ⚠️ 순서가 중요하다: **컬럼 마이그레이션이 DDL 보다 먼저**여야 한다.
+            #   `_DDL` 에는 신규 컬럼을 참조하는 인덱스(`idx_consult_ctx`)가 있어서, 구 스키마
+            #   DB 를 열면 컬럼이 생기기 전에 인덱스 생성이 `no such column` 으로 죽는다.
+            #   구 DB 로 실제 열어보고 잡았다 — 신규 환경에서만 테스트하면 놓친다.
+            #   신규 DB 에서는 테이블이 없어 마이그레이션이 통과(no-op)하고 DDL 이 전부 만든다.
+            self._migrate_columns(conn)
             conn.executescript(_DDL)
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _migrate_columns(conn: sqlite3.Connection) -> None:
+        """이미 만들어진 테이블에 신규 컬럼을 멱등하게 더한다.
+
+        ⚠️ `CREATE TABLE IF NOT EXISTS` 는 **기존 테이블에 컬럼을 추가하지 않는다.** DDL 만
+          고치면 새 환경에서는 되고 기존 환경에서는 조용히 `no such column` 이 난다 —
+          `master_data._DDL` 이 멱등 마이그레이션이라 안심하고 넘어가기 쉬운 함정이다.
+          SQLite 는 `ADD COLUMN IF NOT EXISTS` 가 없으므로 `PRAGMA table_info` 로 확인한다."""
+        for table, columns in _COLUMN_MIGRATIONS.items():
+            try:
+                have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            except sqlite3.OperationalError:
+                continue                      # 테이블 자체가 없으면 DDL 이 만든다
+            if not have:
+                continue
+            for name, decl in columns:
+                if name not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     def _ensure_tables(self) -> bool:
         """`org_directory._ensure_tables` 와 같은 복원력 규약 — 상대 경로 DB 라 작업 디렉터리가
@@ -151,18 +204,23 @@ class AdvisorStore:
     # ── 상담 세션 ─────────────────────────────────────────────────────────
     def create_consultation(self, user_id: str = "", owner_dept_id: str = "",
                             scope: str = "department", playbook_id: str = "",
-                            initial_prompt: str = "") -> Dict[str, Any]:
+                            initial_prompt: str = "",
+                            ctx: Optional[EnterpriseContext] = None) -> Dict[str, Any]:
         if scope not in CONSULTATION_SCOPES:
             raise AdvisorStoreError(f"scope 는 {CONSULTATION_SCOPES} 중 하나여야 합니다.")
+        # 문맥이 없으면 기본 테넌트·실제 문맥으로 귀속(단계적 도입 — 스위처 도입 전 하위호환).
+        ctx = ctx or build_context(fallback_scope_id=owner_dept_id)
         cid = self._uid("cons")
         now = self._now()
         with self._lock, self._connect() as conn:
             conn.execute(
-                "INSERT INTO consultations (consultation_id, user_id, owner_dept_id, scope, "
+                "INSERT INTO consultations (consultation_id, user_id, owner_dept_id, "
+                "tenant_id, enterprise_scope_id, entity_mode, scope, "
                 "playbook_id, status, initial_prompt, summary, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,'open',?,'',?,?)",
-                (cid, user_id or "", owner_dept_id or "", scope, playbook_id or "",
-                 initial_prompt or "", now, now))
+                "VALUES (?,?,?,?,?,?,?,?,'open',?,'',?,?)",
+                (cid, user_id or "", owner_dept_id or "",
+                 ctx.tenant_id, ctx.enterprise_scope_id, ctx.entity_mode,
+                 scope, playbook_id or "", initial_prompt or "", now, now))
         return self.get_consultation(cid)
 
     def get_consultation(self, consultation_id: str) -> Optional[Dict[str, Any]]:
@@ -179,11 +237,17 @@ class AdvisorStore:
         return None
 
     def list_consultations(self, dept_ids: Optional[List[str]] = None,
-                           user_id: str = "", limit: int = 50) -> List[Dict[str, Any]]:
-        """`dept_ids=None` 이면 필터 없음(무제한 권한). 빈 리스트면 아무것도 안 보인다."""
+                           user_id: str = "", limit: int = 50,
+                           ctx: Optional[EnterpriseContext] = None) -> List[Dict[str, Any]]:
+        """`dept_ids=None` 이면 부서 필터 없음(무제한 권한). 빈 리스트면 아무것도 안 보인다.
+
+        `ctx` 가 주어지면 **문맥 격리**도 적용한다 — 다른 테넌트·다른 상태(가상/경쟁사)의
+        상담이 목록에 섞이면 안 된다(설계서 수용 기준 5)."""
         sql = "SELECT * FROM consultations"
         params: List[Any] = []
         where = []
+        for k, v in isolation_filter(ctx).items():
+            where.append(f"{k}=?"); params.append(v)
         if dept_ids is not None:
             if not dept_ids:
                 # 읽을 부서가 없으면 자기 것만(개인 상담은 부서 미지정일 수 있다)
@@ -310,13 +374,17 @@ class AdvisorStore:
         with self._lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO solution_blueprints (blueprint_id, consultation_id, owner_dept_id, "
-                "owner_user_id, title, business_domain, playbook_id, payload_json, "
+                "owner_user_id, tenant_id, enterprise_scope_id, entity_mode, "
+                "title, business_domain, playbook_id, payload_json, "
                 "readiness_score, status, approved_by, approved_at, version, created_at, "
-                "updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(blueprint_id) DO UPDATE SET payload_json=excluded.payload_json, "
+                "tenant_id=excluded.tenant_id, enterprise_scope_id=excluded.enterprise_scope_id, "
+                "entity_mode=excluded.entity_mode, "
                 "title=excluded.title, readiness_score=excluded.readiness_score, "
                 "status=excluded.status, version=excluded.version, updated_at=excluded.updated_at",
                 (bp.blueprint_id, bp.consultation_id, bp.owner_dept_id, bp.owner_user_id,
+                 bp.tenant_id or "tenant_default", bp.enterprise_scope_id, bp.entity_mode,
                  bp.title, bp.business_domain, bp.playbook_id,
                  bp.model_dump_json(), float(bp.readiness_score), bp.status,
                  bp.approved_by, bp.approved_at, int(bp.version),
@@ -355,7 +423,10 @@ class AdvisorStore:
         try:
             with self._connect() as conn:
                 r = conn.execute(
-                    "SELECT blueprint_id, consultation_id, owner_dept_id, owner_user_id, status "
+                    "SELECT blueprint_id, consultation_id, owner_dept_id, owner_user_id, status, "
+                    # [ECM-lite] 문맥 3키도 반드시 가져온다 — 이걸 빼면 `_assert_same_context` 가
+                    #   판정할 근거가 없어 **다른 문맥의 Blueprint 가 조용히 통과한다**(실측).
+                    "tenant_id, enterprise_scope_id, entity_mode "
                     "FROM solution_blueprints WHERE blueprint_id=?", (blueprint_id,)).fetchone()
             return dict(r) if r else None
         except Exception:
@@ -363,11 +434,15 @@ class AdvisorStore:
 
     def list_blueprints(self, consultation_id: str = "",
                         dept_ids: Optional[List[str]] = None,
-                        user_id: str = "", limit: int = 50) -> List[Dict[str, Any]]:
-        sql = ("SELECT blueprint_id, consultation_id, owner_dept_id, owner_user_id, title, "
+                        user_id: str = "", limit: int = 50,
+                        ctx: Optional[EnterpriseContext] = None) -> List[Dict[str, Any]]:
+        sql = ("SELECT blueprint_id, consultation_id, owner_dept_id, owner_user_id, "
+               "tenant_id, enterprise_scope_id, entity_mode, title, "
                "business_domain, playbook_id, readiness_score, status, approved_by, "
                "approved_at, version, created_at, updated_at FROM solution_blueprints")
         where, params = [], []
+        for k, v in isolation_filter(ctx).items():
+            where.append(f"{k}=?"); params.append(v)
         if consultation_id:
             where.append("consultation_id=?"); params.append(consultation_id)
         if dept_ids is not None:
@@ -423,7 +498,8 @@ class AdvisorStore:
                  blueprint_id))
         return bp
 
-    def requirement_rollup(self, dept_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    def requirement_rollup(self, dept_ids: Optional[List[str]] = None,
+                           ctx: Optional[EnterpriseContext] = None) -> List[Dict[str, Any]]:
         """"어느 부서가 어떤 데이터를 몇 건 못 갖췄나" — §4.4 데이터 보드용 질의.
 
         이 질의가 요구사항을 **행으로 따로 둔 이유**다. payload_json 안에만 있으면 검색이 안 된다."""
@@ -431,12 +507,17 @@ class AdvisorStore:
                "FROM blueprint_data_requirements r JOIN solution_blueprints b "
                "ON b.blueprint_id = r.blueprint_id")
         params: List[Any] = []
+        where = []
+        for k, v in isolation_filter(ctx).items():
+            where.append(f"b.{k}=?"); params.append(v)
         if dept_ids is not None:
             if not dept_ids:
                 return []
             marks = ",".join("?" for _ in dept_ids)
-            sql += f" WHERE b.owner_dept_id IN ({marks})"
+            where.append(f"b.owner_dept_id IN ({marks})")
             params.extend(dept_ids)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += (" GROUP BY owner_department, canonical_term, readiness_status "
                 "ORDER BY owner_department, canonical_term")
         try:

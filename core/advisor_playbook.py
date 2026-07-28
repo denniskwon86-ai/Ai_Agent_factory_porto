@@ -146,13 +146,34 @@ class DataRequirement(BaseModel):
     external: Optional[ExternalSpec] = None
 
 
+# ── ECM 프로필 상속 체인에서 플레이북의 자리 ──────────────────────────────
+# ⚠️ `design_enterprise_context_master.md` 는 플레이북을 언급하지 않는다. 그런데 §4.4 의
+#   `data_profile`/`solution_profile`/`agent_profile` 이 플레이북의 데이터 요구·추천 템플릿과
+#   정면으로 겹친다. 둘 다 존재하면 무엇이 이기는지 정해야 하므로 **여기서 못 박는다**:
+#
+#     플레이북 = §4.4 상속 체인 **최상위(산업 공통 프로필)** 의 저작 기본값
+#       → 기업집단 → 법인 → 사업부 → 사업장/공장 프로필이 순서대로 오버레이
+#       → 충돌 시 가장 하위의 **승인된** 프로필이 이긴다
+#
+#   이렇게 두는 이유: 도메인 지식(질문 문구·데이터 요구·결손 안내)은 리뷰와 이력이 필요하므로
+#   git diff 가 되는 파일에 남기고, DB(`enterprise_profiles`)는 **조직별 차이만** 담는다.
+#   플레이북을 DB 로 흡수하면 도메인 지식 변경이 코드 리뷰를 우회한다.
+#   ⚠️ 오버레이 해석(리솔버)은 아직 없다 — ECM 로드맵 E2 다. 지금은 자리와 규약만 선언한다.
+PROFILE_LAYER_INDUSTRY_COMMON = "industry_common"
+
+
 class Playbook(BaseModel):
-    """업무 유형별 상담 플레이북."""
+    """업무 유형별 상담 플레이북 = 산업 공통 프로필의 저작 기본값(위 주석 참조)."""
     playbook_id: str
     name_ko: str
     description: str = ""
     business_type: str = "planning_budget"
     owner_department_hint: str = ""
+    # ECM 상속 체인에서 이 플레이북이 놓이는 층. 지금은 전부 산업 공통이다.
+    profile_layer: str = PROFILE_LAYER_INDUSTRY_COMMON
+    # 어느 업종에 적용되는가(ECM `industry_code`). 비면 업종 무관 공통.
+    #   E2 에서 조직의 `business_profile.industry_code` 와 매칭해 후보를 좁히는 데 쓴다.
+    industry_codes: List[str] = Field(default_factory=list)
     # §4.7 — 상담 결과를 기존 파이프라인으로 넘길 때 추천할 워크플로우 템플릿
     recommended_template_id: str = ""
     questions: List[PlaybookQuestion] = Field(default_factory=list)
