@@ -30,6 +30,8 @@ _LITERAL_ROUTES = [
     "/api/v1/master/documents/quality",
     "/api/v1/catalog/assets/search?q=x",       # `/assets/{asset_id}` 에 잡아먹히기 쉽다
     "/api/v1/catalog/governance/gaps",
+    "/api/v1/glossary/terms/expand?q=x",       # `/terms/{term_id}` 에 잡아먹히기 쉽다
+    "/api/v1/glossary/match?term=x",
 ]
 
 
@@ -58,6 +60,28 @@ def test_coverage_returns_expected_shape(client):
     assert set(d) >= {"total_records", "bound_records", "exposed_records",
                       "exposed_codes", "coverage_ratio"}
     assert d["bound_records"] + d["exposed_records"] == d["total_records"]
+
+
+def test_approval_without_identity_is_401_not_a_bare_400(client):
+    """★★ 조직 강제 모드가 꺼져 있으면(기본값) `user_id` 가 비어 승인이 **아예 불가능**했다.
+
+    가짜 승인자를 만들어 넣으면 아무도 승인하지 않은 것이 승인된 것처럼 기록되므로 거절이
+    맞다. 다만 이유 없는 400 이면 사용자는 무엇을 해야 할지 모른다 — 401 + 해결 방법."""
+    t = client.post("/api/v1/glossary/terms",
+                    json={"canonical_name": "__route_test_term__"},
+                    headers={"X-User-Id": "tester"})
+    assert t.status_code in (200, 409)
+    tid = (t.json()["data"]["term_id"] if t.status_code == 200
+           else next(x["term_id"] for x in client.get("/api/v1/glossary/terms").json()["data"]
+                     if x["canonical_name"] == "__route_test_term__"))
+    try:
+        r = client.post(f"/api/v1/glossary/terms/{tid}/approve")
+        assert r.status_code == 401
+        assert "X-User-Id" in r.json()["detail"], "해결 방법을 알려줘야 한다"
+        assert client.post(f"/api/v1/glossary/terms/{tid}/approve",
+                           headers={"X-User-Id": "tester"}).status_code == 200
+    finally:
+        client.delete(f"/api/v1/glossary/terms/{tid}", headers={"X-User-Id": "tester"})
 
 
 def test_record_path_param_still_works(client):

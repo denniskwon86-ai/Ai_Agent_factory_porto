@@ -219,6 +219,47 @@ CREATE TABLE IF NOT EXISTS data_asset_fields (
 );
 CREATE INDEX IF NOT EXISTS idx_field_term ON data_asset_fields(term_id);
 CREATE INDEX IF NOT EXISTS idx_field_pii ON data_asset_fields(pii_classification);
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- [§6.3 / §14 M1] 업무 용어사전 (2026-07-29)
+--
+-- §6.1: "MDM 과 연결되나 **별도 관리**". 왜 별도인가 —
+--   MDM 은 '값'(`RM-MHP-001` 의 단가가 15,000)이고, 용어사전은 '말'(현업이 부르는 이름과 그
+--   계산 정의)이다. 같은 값을 부서마다 다르게 부르고, 같은 말을 부서마다 다르게 계산한다.
+--   §6.4 의 매칭은 **업무 용어에서 출발**하므로 이것이 없으면 상담사가 "필요하다"고 한 데이터를
+--   카탈로그에서 찾을 수 없다.
+--
+-- ⚠️ `calculation` 은 자유 서술이 아니라 **합의된 계산 정의**다. "가동률"이 부서마다 다르게
+--   계산되는 것이 제조 현장의 실제 문제이고, 여기에 적지 않으면 LLM 이 그때그때 지어낸다.
+CREATE TABLE IF NOT EXISTS business_terms (
+    term_id        TEXT PRIMARY KEY,
+    canonical_name TEXT NOT NULL,
+    definition     TEXT DEFAULT '',
+    calculation    TEXT DEFAULT '',      -- 합의된 계산 정의(있으면)
+    domain         TEXT DEFAULT '',
+    owner_dept_id  TEXT DEFAULT '',
+    master_code    TEXT DEFAULT '',      -- MDM 기준 엔터티 연결(§6.4 4단계)
+    status         TEXT NOT NULL DEFAULT 'draft',   -- draft|approved|retired
+    approved_by    TEXT DEFAULT '',
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_term_name ON business_terms(canonical_name)
+    WHERE status <> 'retired';
+CREATE INDEX IF NOT EXISTS idx_term_domain ON business_terms(domain, status);
+
+-- 동의어는 **승인 여부를 반드시 구분한다.** 미승인 동의어로 확정 매칭을 하면 "누가 이걸
+--   같은 말이라고 했나"에 답할 수 없다(§6.4: 최종 확정은 오너 또는 승인된 규칙).
+CREATE TABLE IF NOT EXISTS term_synonyms (
+    term_id     TEXT NOT NULL,
+    synonym     TEXT NOT NULL,
+    language    TEXT DEFAULT 'ko',
+    confidence  REAL DEFAULT 1.0,
+    approved_by TEXT DEFAULT '',          -- 빈 값 = 미승인(제안 상태)
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (term_id, synonym)
+);
+CREATE INDEX IF NOT EXISTS idx_syn_word ON term_synonyms(synonym);
 """
 
 
