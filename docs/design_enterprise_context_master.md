@@ -351,11 +351,59 @@ api/routes/enterprise_context_control.py
 - 첫 파일럿 조직(예: 하나의 법인–두 사업부–두 공장)을 정하고, 실제 원본 시스템과 책임자를 지정한다.
 - 실제·계획·예측·가상·경쟁사 데이터 상태와 승격 규칙을 승인한다.
 
-### E1 — 최소 Enterprise Context
+### E1 — 최소 Enterprise Context ✅ **백엔드 완료 (2026-07-28)**
 
 - `enterprise_entities`, `organization_nodes`, `organization_edges`, `enterprise_profiles`를 도입한다.
 - 전역 선택기, 범위 권한, 프로젝트 `enterprise_scope_id` 귀속을 구현한다.
 - 선택 범위를 ContextEngine, 상담사, 슈퍼바이저에 읽기 전용 문맥으로 주입한다.
+
+> #### ✅ E1 백엔드 완료 — 조직 그래프·범위 전개·권한 가시성
+>
+> 구현: `core/enterprise_context/`(패키지 전환 — `models.py` · `repository.py` · `resolver.py` ·
+> `seed.py`, 기존 `context.py` 는 그대로) · `api/routes/enterprise_context_control.py`(라우트 11) ·
+> 테스트 36건(전체 619 통과)
+>
+> **패키지 전환은 호출부 수정 0** — §10.1 이 예고한 구조로 바꾸면서 `__init__.py` 가 ECM-lite 심볼을
+> re-export 한다. `api/deps.py`·`advisor_store.py`·`advisor_control.py`·`factory_control.py` 의
+> `from core.enterprise_context import ...` 가 그대로 동작한다(기존 26건 테스트 무영향).
+>
+> | 항목 | 상태 |
+> |---|---|
+> | 4테이블 + 유효기간·승인·상태(DRAFT/ACTIVE/SUSPENDED/ARCHIVED) | ✅ |
+> | 노드 + **다중 관계 그래프**(4관계 공존), 기본 트리는 `default_parent_id` 로 분리 | ✅ |
+> | 범위 전개(운영 하위·조상·집계 범위·서비스 대상) | ✅ |
+> | 권한 가시성 — 부서 권한을 ECM 노드로 연결 | ✅ |
+> | 문맥 해석 — 부서 id 와 ECM `node_id` 를 **모두** 받는다 | ✅ |
+> | §3.3 예시 조직 시드(멱등, `source_ref='design_doc_example'`) | ✅ |
+> | 프로필 **저장·조회**와 `is_effective`(승인된 것만 상속 참여) | ✅ |
+> | 프로필 **상속 병합** | ❌ **E2** — 반쪽 병합은 "되는 것처럼 보이는데 아닌" 상태라 더 위험 |
+> | 전역 선택기 UI, 프로젝트 화면의 문맥 표시 | ❌ 다음 단계(프론트) |
+> | 복제·시나리오 | ❌ E3 |
+>
+> **핵심 결정 4건**
+> ① ★ **권한 상속은 `OPERATING_PARENT` 만 따른다.** 공유서비스·연결집계 관계는 자동 열람 권한을
+>   만들지 않는다(§6.1). 실측: 전사공통 노드의 `consolidation_scope` 2건·`shared_service_consumers`
+>   2건이 나오지만 그 사업부 상세 조회는 403 이다. 응답에 "열람 권한을 부여하지 않습니다" 를 명시하고
+>   `GET /meta` 가 `inheritable_relations: ["OPERATING_PARENT"]` 를 스스로 알려준다.
+> ② **부서 권한을 재사용한다**(§10.1 점진 이행). `scope_assignments` 를 새로 만들지 않고
+>   `organization_nodes.dept_id` 로 기존 부서에 매핑했다. 지금 새 권한 축을 만들면 Phase 1~5 에서
+>   검증된 부서 권한과 두 갈래가 되어 어긋난다. ECM 전용 권한 테이블은 **E2**.
+> ③ **부서 매핑이 없는 노드는 자체 열람 권한을 갖지 않는다**(fail-closed). 단 트리가 조각나지 않게
+>   조상은 `readable=false` 로 **경로 표시용**으로만 포함한다 — 빼면 자기 조직의 위치를 알 수 없고,
+>   열람 가능으로 표시하면 권한이 부풀려진다.
+> ④ **순환 관계 거부**(400). 사이클이 생기면 범위 전개가 무한 재귀에 빠져 서버가 멈춘다. 조회 경로에도
+>   깊이 상한(32)을 둬서 손상된 데이터로도 죽지 않게 했다.
+>
+> **가상·경쟁사 근거 강제**: 가상 조직은 `base_entity_id`(복제 원본), 경쟁사는 `evidence_ref`(공개
+> 근거) 없이 만들 수 없다(§2.1-4, §7.3). 실제/가상/경쟁사는 한 트리에 섞이지 않는다(`entity_mode` 필터).
+>
+> **실측(`ORG_ENFORCE=True`, 실제 부서·사용자)**: 같은 트리를 세 사용자가 다르게 본다 —
+> `admin` 9개 전부 / `bob`(sales) **0개**(시드는 hq·production 매핑) / `exec` 5개 열람 + `LS`·`LS MnM`
+> 은 경로 표시만. `bob` 의 문맥 선택은 403. 순환 400, 가상 근거 누락 400, 시드 재실행 skipped.
+>
+> **남은 이행 항목**: `enterprise_scope_id` 는 여전히 부서 id 를 담은 데이터가 많다.
+> `resolve_scope_ref` 가 `kind`(`ecm_node`/`department_mapped`/`department`)로 구분해 주므로,
+> 승격 대상을 식별할 수 있다. 일괄 승격은 실제 파일럿 조직 확정(E0) 이후에 한다.
 
 > #### ✅ ECM-lite 선점 완료 (2026-07-28) — 상담사(M0) 한정
 >
