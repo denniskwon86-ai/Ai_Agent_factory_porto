@@ -223,6 +223,16 @@ class BusinessGlossary:
                         f"(§6.4 4단계)")
             if set(c["matched_via"]) & set(exp["unapproved"]):
                 blockers.append("승인되지 않은 동의어로 매칭됐다 — 확정 근거로는 약하다")
+            # §6.4 5단계 「품질/최신성 확인」. 오래된 자산을 확정하면 준비도만 올라가고
+            #   실제로는 낡은 값을 쓰게 된다.
+            fresh = cat.assess_freshness(c["asset_id"])
+            c["freshness"] = fresh
+            if fresh["state"] == "stale":
+                blockers.append(f"자산이 오래됐다({fresh['why']})")
+            q = cat.latest_quality_profile(c["asset_id"])
+            c["quality"] = ({"method": q["method"], "measured_at": q["measured_at"],
+                             "completeness": q["completeness"], "validity": q["validity"]}
+                            if q else None)
             c["blockers"] = blockers
             c["confirmable"] = not blockers
         candidates.sort(key=lambda c: (len(c["blockers"]), -c["score"], c["name"]))
@@ -264,8 +274,24 @@ class BusinessGlossary:
             if not cur.rowcount:
                 raise GlossaryError(f"존재하지 않는 데이터 요구사항입니다: {blueprint_id}/{req_key}")
             conn.commit()
+
+        # ★ 확정은 **계보의 근거가 되는 사건**이다 — "이 요구사항은 이 자산으로 충족한다"고
+        #   사람이 선언한 순간이므로, 여기서 간선을 남기지 않으면 나중에 그 자산이 바뀔 때
+        #   무엇이 영향받는지 알 수 없다(§6.1: 원천→…→결정의 영향 관계).
+        edge = None
+        try:
+            from core.data_lineage import DataLineage, data_lineage
+            lin = data_lineage if (catalog is None) else DataLineage(cat.md)
+            edge = lin.add_edge("asset", asset_id, "requirement", f"{blueprint_id}/{req_key}",
+                                "confirms", evidence_ref=f"confirmed_by={confirmed_by}",
+                                origin="user")
+        except Exception as e:
+            # 계보 기록 실패가 확정을 되돌리지는 않는다. 다만 조용히 넘기지 않는다.
+            print(f"⚠️ [Glossary] 확정 계보 기록 실패(확정 자체는 완료): {e}")
+
         return {"blueprint_id": blueprint_id, "req_key": req_key, "asset_id": asset_id,
-                "readiness_status": readiness_status, "confirmed_by": confirmed_by}
+                "readiness_status": readiness_status, "confirmed_by": confirmed_by,
+                "lineage_edge_id": (edge or {}).get("edge_id", "")}
 
 
 business_glossary = BusinessGlossary()

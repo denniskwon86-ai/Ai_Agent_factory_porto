@@ -32,6 +32,8 @@ _LITERAL_ROUTES = [
     "/api/v1/catalog/governance/gaps",
     "/api/v1/glossary/terms/expand?q=x",       # `/terms/{term_id}` 에 잡아먹히기 쉽다
     "/api/v1/glossary/match?term=x",
+    "/api/v1/lineage/impact?node_type=master&node_id=x",
+    "/api/v1/lineage/edges?node_type=master&node_id=x",
 ]
 
 

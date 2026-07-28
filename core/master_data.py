@@ -260,6 +260,60 @@ CREATE TABLE IF NOT EXISTS term_synonyms (
     PRIMARY KEY (term_id, synonym)
 );
 CREATE INDEX IF NOT EXISTS idx_syn_word ON term_synonyms(synonym);
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- [§6.3 / §6.1] 데이터 품질 프로파일 (2026-07-29)
+--
+-- §6.1 이 품질에 대해 못박은 것: **"단순 LLM 평가 금지"**.
+-- 그래서 이 테이블의 핵심 컬럼은 점수가 아니라 `method` 다 —
+--   measured : 실제로 데이터를 읽어 센 값. `evidence_ref` 필수(어떤 실행의 결과인가)
+--   declared : 데이터 오너가 신고한 값. 근거는 사람이고, 틀릴 수 있음을 전제로 읽는다
+--   computed : 카탈로그 메타데이터만으로 계산한 값(최신성 등). 원본을 읽지 않았다
+-- ⚠️ 읽을 수 없는 자산의 점수를 **추정해서 채우지 않는다.** 그럴듯한 숫자가 들어가면
+--   "품질 확인함"으로 읽히고, 그게 없는 것보다 나쁘다(§16 근거 없는 수치 금지).
+CREATE TABLE IF NOT EXISTS data_quality_profiles (
+    profile_id     TEXT PRIMARY KEY,
+    asset_id       TEXT NOT NULL,
+    measured_at    TEXT NOT NULL,
+    method         TEXT NOT NULL DEFAULT 'declared',  -- measured|declared|computed
+    completeness   REAL,      -- NULL = 측정하지 않음(0.0 과 구분해야 한다)
+    validity       REAL,
+    duplicate_rate REAL,
+    freshness      REAL,
+    row_count      INTEGER,
+    evidence_ref   TEXT DEFAULT '',
+    measured_by    TEXT DEFAULT '',
+    note           TEXT DEFAULT '',
+    created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dqp_asset ON data_quality_profiles(asset_id, measured_at DESC);
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- [§6.3 / §6.1] 데이터 계보 (2026-07-29)
+--
+-- §6.1: "원천→변환→앱→보고서→**결정**의 영향 관계 — 추적성 그래프의 근거".
+-- 여기 담기는 질문은 하나다: **"이 값이 바뀌면 무엇이 틀어지나."**
+--
+-- ⚠️ `confidence` 와 `evidence_ref` 를 반드시 남긴다. 근거 없이 그은 선은 추측이고,
+--   추측으로 만든 영향 분석은 "영향 없음"을 잘못 말해서 사고를 만든다.
+--   `origin='derived'` 는 기존 데이터에서 **결정론적으로** 도출한 선이고,
+--   `origin='user'` 는 사람이 그은 선이다. LLM 이 그은 선은 지금 만들지 않는다.
+CREATE TABLE IF NOT EXISTS lineage_edges (
+    edge_id       TEXT PRIMARY KEY,
+    from_type     TEXT NOT NULL,   -- system|asset|field|master|term|requirement|blueprint|project|release
+    from_id       TEXT NOT NULL,
+    to_type       TEXT NOT NULL,
+    to_id         TEXT NOT NULL,
+    relation_type TEXT NOT NULL,   -- feeds|derives_from|references|produces|confirms
+    confidence    REAL DEFAULT 1.0,
+    evidence_ref  TEXT DEFAULT '',
+    origin        TEXT DEFAULT 'user',   -- user|derived
+    status        TEXT NOT NULL DEFAULT 'active',
+    created_at    TEXT NOT NULL,
+    UNIQUE (from_type, from_id, to_type, to_id, relation_type)
+);
+CREATE INDEX IF NOT EXISTS idx_lin_from ON lineage_edges(from_type, from_id, status);
+CREATE INDEX IF NOT EXISTS idx_lin_to ON lineage_edges(to_type, to_id, status);
 """
 
 

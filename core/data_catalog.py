@@ -32,6 +32,12 @@ SENSITIVITY = ("public", "internal", "confidential", "restricted")
 _SENS_RANK = {s: i for i, s in enumerate(SENSITIVITY)}
 PII_CLASSES = ("none", "pii", "sensitive_pii")
 REFRESH_CADENCES = ("realtime", "hourly", "daily", "weekly", "monthly", "quarterly", "adhoc")
+QUALITY_METHODS = ("measured", "declared", "computed")
+
+# 최신성 판정 기준(시간). `adhoc` 은 기대 주기 자체가 없으므로 판정 대상이 아니다 —
+#   임의의 숫자를 넣으면 근거 없는 '오래됨' 경고가 뜬다.
+_CADENCE_HOURS = {"realtime": 1, "hourly": 2, "daily": 30, "weekly": 8 * 24,
+                  "monthly": 35 * 24, "quarterly": 100 * 24, "adhoc": None}
 
 # PII 가 있으면 최소 이 등급이어야 한다. 자동 상향하지 않고 불일치로만 표시한다.
 _PII_MIN_SENSITIVITY = {"pii": "confidential", "sensitive_pii": "restricted"}
@@ -310,6 +316,97 @@ class DataCatalog:
         order = {"high": 0, "medium": 1, "low": 2}
         gaps.sort(key=lambda g: (order.get(g["severity"], 3), g["asset"], g["kind"]))
         return gaps
+
+    # ── 품질 프로파일 (§6.3 / §6.1 "단순 LLM 평가 금지") ──────────────────
+    def record_quality_profile(self, asset_id: str, method: str = "declared",
+                               completeness: float = None, validity: float = None,
+                               duplicate_rate: float = None, freshness: float = None,
+                               row_count: int = None, evidence_ref: str = "",
+                               measured_by: str = "", note: str = "",
+                               measured_at: str = "") -> dict:
+        """품질 측정치를 기록한다.
+
+        ★ 이 함수의 핵심 인자는 점수가 아니라 `method` 다. §6.1 이 "단순 LLM 평가 금지"라고
+          못박은 이유는, 읽지도 않은 데이터에 그럴듯한 점수가 붙으면 **"품질 확인함"으로 읽히기**
+          때문이다. 그래서:
+            · `measured` 는 `evidence_ref` 없이 기록할 수 없다 — 무엇을 실행해 얻은 값인가
+            · 측정하지 않은 항목은 0.0 이 아니라 **NULL** 로 둔다(0점과 미측정은 다르다)
+        """
+        if method not in QUALITY_METHODS:
+            raise DataCatalogError(f"method 는 {list(QUALITY_METHODS)} 중 하나여야 합니다.")
+        if method == "measured" and not (evidence_ref or "").strip():
+            raise DataCatalogError(
+                "measured 프로파일에는 evidence_ref 가 필수입니다 — 무엇을 실행해 얻은 값인지 "
+                "없으면 '측정했다'는 주장을 검증할 수 없습니다.")
+        for nm, v in (("completeness", completeness), ("validity", validity),
+                      ("duplicate_rate", duplicate_rate), ("freshness", freshness)):
+            if v is not None and not (0.0 <= float(v) <= 1.0):
+                raise DataCatalogError(f"{nm} 은 0.0~1.0 이어야 합니다.")
+        if not self.get_asset(asset_id, with_fields=False):
+            raise DataCatalogError(f"존재하지 않는 자산입니다: {asset_id}")
+
+        pid = f"dqp_{uuid.uuid4().hex[:12]}"
+        now = _now()
+        with self.md._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO data_quality_profiles(profile_id,asset_id,measured_at,method,"
+                "completeness,validity,duplicate_rate,freshness,row_count,evidence_ref,"
+                "measured_by,note,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (pid, asset_id, measured_at or now, method, completeness, validity,
+                 duplicate_rate, freshness, row_count, evidence_ref, measured_by, note, now))
+        return self.latest_quality_profile(asset_id)
+
+    def latest_quality_profile(self, asset_id: str) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM data_quality_profiles WHERE asset_id=? "
+                "ORDER BY measured_at DESC, created_at DESC LIMIT 1", (asset_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_quality_profiles(self, asset_id: str, limit: int = 20) -> List[dict]:
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM data_quality_profiles WHERE asset_id=? "
+                "ORDER BY measured_at DESC, created_at DESC LIMIT ?",
+                (asset_id, int(limit))).fetchall()]
+
+    def assess_freshness(self, asset_id: str, now: str = "") -> dict:
+        """최신성을 **계산한다**(추정하지 않는다).
+
+        `last_refreshed_at` 과 `refresh_cadence` 만으로 결정론적으로 판정한다 — 이 둘은 우리가
+        실제로 가진 사실이므로 계산에 근거가 있다. 둘 중 하나라도 없으면 'unknown' 이고,
+        **unknown 을 'fresh' 로 낙관하지 않는다** — 모르는 것을 좋게 치면 §6.4 의 최신성 확인이
+        형식만 남는다."""
+        a = self.get_asset(asset_id, with_fields=False)
+        if not a:
+            raise DataCatalogError(f"존재하지 않는 자산입니다: {asset_id}")
+        cadence, last = a["refresh_cadence"], a["last_refreshed_at"]
+        if not cadence or not last:
+            return {"asset_id": asset_id, "state": "unknown", "age_hours": None,
+                    "allowed_hours": _CADENCE_HOURS.get(cadence),
+                    "why": ("갱신주기 또는 마지막 갱신 시각이 없어 판정할 수 없다. "
+                            "모르는 것을 최신으로 치지 않는다.")}
+        allowed = _CADENCE_HOURS.get(cadence)
+        if allowed is None:                       # adhoc — 기준 자체가 없다
+            return {"asset_id": asset_id, "state": "unknown", "age_hours": None,
+                    "allowed_hours": None,
+                    "why": "갱신주기가 adhoc 이라 기대 주기가 없다. 최신성을 기계적으로 판정할 수 없다."}
+        try:
+            t_last = datetime.fromisoformat(last)
+            t_now = datetime.fromisoformat(now) if now else datetime.now(timezone.utc)
+            if t_last.tzinfo is None:
+                t_last = t_last.replace(tzinfo=timezone.utc)
+            if t_now.tzinfo is None:
+                t_now = t_now.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return {"asset_id": asset_id, "state": "unknown", "age_hours": None,
+                    "allowed_hours": allowed, "why": f"갱신 시각을 해석할 수 없다: {last}"}
+        age = (t_now - t_last).total_seconds() / 3600.0
+        # 주기의 2배를 넘기면 '지연'이 아니라 '오래됨'으로 본다 — 1배 초과는 흔한 지연이다.
+        state = "fresh" if age <= allowed else ("late" if age <= allowed * 2 else "stale")
+        return {"asset_id": asset_id, "state": state, "age_hours": round(age, 2),
+                "allowed_hours": allowed,
+                "why": f"마지막 갱신 후 {age:.1f}시간 경과, 기대 주기 {allowed}시간({cadence})."}
 
     # ── 검색 (§6.4 3단계 「데이터 카탈로그 후보 검색」) ────────────────────
     def search_assets(self, query: str, limit: int = 20) -> List[dict]:
