@@ -12,12 +12,16 @@
 미구현(범위 밖, 백로그 4 = M0-d): `bootstrap-project`, `create-data-tasks`.
 """
 import asyncio
+import json
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, current_principal, enterprise_context
+from api.deps import (Principal, assert_project_writable, current_principal,
+                      enterprise_context)
+from api.routes.factory_control import _safe_id
 from core.advisor_blueprint import assemble_blueprint
 from core.advisor_playbook import (load_playbook, list_playbooks, score_readiness,
                                    active_requirement_keys)
@@ -26,6 +30,11 @@ from core.enterprise_context import (ENTITY_MODE_KO, EnterpriseContext,
                                      EnterpriseContextError)
 
 router = APIRouter(prefix="/api/v1/advisor", tags=["Advisor"])
+
+
+def _write_json(path: str, data: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 # ── 권한 헬퍼 ─────────────────────────────────────────────────────────────
@@ -372,6 +381,158 @@ async def decide_blueprint(blueprint_id: str, req: DecisionIn,
                                        if bp.status == "approved" else [],
         "unverified_kpis": bp.unverified_kpis(),
     }}
+
+
+# ── Blueprint → 프로젝트 연결 (§4.7 / M0 백로그 4) ────────────────────────
+class BootstrapIn(BaseModel):
+    project_id: str
+    template_id: str = ""        # 비우면 Blueprint 의 추천 템플릿
+
+
+def _blueprint_for_action(blueprint_id: str, ctx: EnterpriseContext, p: Principal):
+    row = advisor_store.get_blueprint_row(blueprint_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Blueprint 를 찾을 수 없습니다.")
+    _assert_same_context(_validate_ctx(ctx), row)
+    _assert_can_write(p, row["owner_dept_id"], row["owner_user_id"])
+    bp = advisor_store.get_blueprint(blueprint_id)
+    if not bp:
+        raise HTTPException(status_code=500, detail="Blueprint 페이로드를 읽을 수 없습니다.")
+    return bp
+
+
+def _blueprint_brief(bp) -> str:
+    """RFP 이전 단계에 넘길 **요약**. 원문 전체가 아니다.
+
+    ECM §5.2-5 와 명세서 §10.4 가 같은 것을 요구한다 — "LLM 프롬프트에는 원문 전체가 아니라
+    필요한 범위의 승인된 프로필·카탈로그 요약만 주입한다" / "대화는 전체 로그 대신 승인된
+    Blueprint 요약과 최근 의사결정만 재사용한다". 전문을 넣으면 프롬프트 예산이 터진다."""
+    b = bp.business
+    lines = [f"[승인된 Solution Blueprint {bp.blueprint_id} · {bp.title}]",
+             f"목적: {b.objective}"]
+    if b.in_scope:
+        lines.append(f"범위: {', '.join(b.in_scope)}")
+    if b.out_of_scope:
+        # 제외 범위는 사용자가 명시적으로 고르지 않은 것이므로 '하지 말 것'의 근거가 된다.
+        lines.append(f"제외 범위(만들지 말 것): {', '.join(b.out_of_scope)}")
+    if b.decision_makers:
+        lines.append(f"이 산출물로 내릴 결정: {', '.join(b.decision_makers)}")
+    lines.append(f"데이터 준비도: {bp.readiness_score}점/100")
+    req = [r for r in bp.data_requirements if r.necessity == "required"]
+    if req:
+        lines.append("필수 데이터: " + ", ".join(
+            f"{r.canonical_term}({r.readiness_status})" for r in req[:12]))
+    gaps = bp.blocking_gaps()
+    if gaps:
+        lines.append("⚠️ 미확보 필수 데이터: " + ", ".join(g.canonical_term for g in gaps[:12])
+                     + " — 이 데이터가 없으면 해당 기능은 가정값으로만 동작한다.")
+    if bp.recommended_sequence:
+        lines.append("권장 구축 순서: " + " / ".join(bp.recommended_sequence[:7]))
+    return "\n".join(lines)
+
+
+@router.post("/blueprints/{blueprint_id}/bootstrap-project")
+async def bootstrap_project(blueprint_id: str, req: BootstrapIn,
+                            p: Principal = Depends(current_principal),
+                            ctx: EnterpriseContext = Depends(enterprise_context)):
+    """승인된 Blueprint 에서 프로젝트를 생성한다(§4.7).
+
+    ⚠️ **Clarification 을 우회하지 않는다**(§18-6). Blueprint 를 `initial_idea` 의 상위
+      입력값으로 주입할 뿐, 요구 확인 인터뷰는 그대로 돈다 — 상담은 "무엇을 만들지"를 정했고
+      Clarification 은 "어떻게 만들지"의 모호점을 없앤다. 둘은 다른 게이트다.
+
+    ⚠️ **승인 전 Blueprint 로는 만들 수 없다**(§4.2-7 "사용자가 승인하면 ... 프로젝트 초안을
+      생성한다"). 초안 상태로 프로젝트가 생기면 승인 게이트가 장식이 된다."""
+    bp = _blueprint_for_action(blueprint_id, ctx, p)
+    if bp.status != "approved":
+        raise HTTPException(status_code=409,
+                            detail=f"승인된 Blueprint 만 프로젝트로 만들 수 있습니다"
+                                   f"(현재 상태: {bp.status}).")
+    from api.routes.factory_control import provision_project
+
+    tid = (req.template_id or bp.system.template_id or "default")
+    try:
+        tid = await asyncio.to_thread(
+            provision_project, req.project_id, tid,
+            owner_dept_id=bp.owner_dept_id, owner_user_id=bp.owner_user_id,
+            # ECM §10.2 — 프로젝트는 Blueprint 의 문맥을 물려받는다. 여기서 요청 헤더를 쓰면
+            #   승인된 Blueprint 와 다른 문맥의 프로젝트가 생겨 추적이 끊긴다.
+            tenant_id=bp.tenant_id, enterprise_scope_id=bp.enterprise_scope_id,
+            entity_mode=bp.entity_mode, blueprint_id=bp.blueprint_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"잘못된 id 형식입니다: {e}")
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"존재하지 않는 템플릿입니다: {e.args[0]}")
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
+
+    # 파이프라인 첫 입력. 사용자의 원래 말(`problem`)을 앞에 두고 Blueprint 요약을 근거로 붙인다 —
+    #   순서를 바꾸면 LLM 이 요약을 사용자 발화로 오해한다.
+    idea = (bp.business.problem or bp.business.objective or "").strip()
+    initial_idea = (idea + "\n\n" + _blueprint_brief(bp)).strip()
+    ws = os.path.join("./projects", req.project_id)
+    state_path = os.path.join(ws, "latest_state.json")
+    await asyncio.to_thread(_write_json, state_path, {
+        "project_name": req.project_id,
+        "template_id": tid,
+        "initial_idea": initial_idea,
+        "blueprint_id": bp.blueprint_id,
+        "owner_dept_id": bp.owner_dept_id,
+        "owner_user_id": bp.owner_user_id,
+    })
+    return {"status": "success", "data": {
+        "project_id": req.project_id, "template_id": tid,
+        "blueprint_id": bp.blueprint_id, "entity_mode": bp.entity_mode,
+        "enterprise_scope_id": bp.enterprise_scope_id,
+        "next_step": "프로젝트 통제실에서 스프린트를 시작하면 요구 확인 인터뷰부터 진행됩니다.",
+    }}
+
+
+@router.post("/blueprints/{blueprint_id}/create-data-tasks")
+async def create_data_tasks(blueprint_id: str, project_id: str,
+                            p: Principal = Depends(current_principal),
+                            ctx: EnterpriseContext = Depends(enterprise_context)):
+    """미확보 데이터를 WBS 준비 태스크로 추가한다(§4.7 "WBS에 데이터 준비·연계·검증 태스크").
+
+    ⚠️ **기획 완료 후에 호출해야 한다.** `WBSManager.initialize_wbs` 는 파일을 통째로 다시
+      쓰므로 기획 전에 넣은 태스크는 PMO 가 WBS 를 만드는 순간 사라진다. WBS 가 없으면 409 로
+      돌려보낸다 — 조용히 만들어 두면 지워진 줄도 모른다.
+      (근본적으로는 Blueprint 요약이 기획 프롬프트에 들어가 PMO 가 처음부터 포함하게 하는 것이
+       맞고, `bootstrap-project` 가 `initial_idea` 에 필수/미확보 데이터를 실어 보낸다.
+       이 엔드포인트는 기획이 놓친 것을 사람이 보강하는 경로다.)"""
+    bp = _blueprint_for_action(blueprint_id, ctx, p)
+    _safe_id(project_id, "project_id")
+    ws = os.path.join("./projects", project_id)
+    if not os.path.isdir(ws):
+        raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+    assert_project_writable(p, project_id)
+
+    gaps = [r for r in bp.data_requirements
+            if r.necessity in ("required", "recommended") and r.readiness_status != "held"]
+    if not gaps:
+        return {"status": "success", "data": {"created": [], "message": "미확보 데이터가 없습니다."}}
+
+    from nodes.utils.wbs_manager import WBSManager
+    mgr = WBSManager(workspace_root=ws)
+    created = []
+    try:
+        for g in gaps:
+            owner = f"[{g.owner_department}] " if g.owner_department else ""
+            tid_ = await asyncio.to_thread(
+                mgr.add_data_task,
+                f"{owner}데이터 준비: {g.canonical_term}",
+                # 목표에 영향과 조치를 함께 넣는다 — 태스크만 있고 왜/무엇을 모르면 방치된다.
+                f"{g.purpose}\n\n[없으면] {g.gap_impact}\n[조치] {g.next_action}\n"
+                f"[필요 단위] {g.expected_grain or '미정'} / [최신성] {g.freshness_requirement or '미정'}\n"
+                f"[데이터 구분] {g.data_kind} / [현재 상태] {g.readiness_status}")
+            created.append({"task_id": tid_, "canonical_term": g.canonical_term,
+                            "owner_department": g.owner_department,
+                            "necessity": g.necessity, "status": g.readiness_status})
+    except FileNotFoundError:
+        raise HTTPException(status_code=409,
+                            detail="WBS가 아직 없습니다. 기획(WBS 생성)을 마친 뒤 호출하십시오 — "
+                                   "기획이 WBS를 새로 쓰면서 먼저 넣은 태스크를 지웁니다.")
+    return {"status": "success", "data": {"created": created, "project_id": project_id}}
 
 
 # ── 데이터 보드 롤업 (§4.4) ───────────────────────────────────────────────

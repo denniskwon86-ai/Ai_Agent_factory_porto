@@ -954,7 +954,15 @@ Global Supervisor
    · ⚠️ ~~명세서 §4.5 의 `tenant_id` 는 **넣지 않았다**~~ → **정정 (2026-07-28, ECM-lite)**: 최상단 선행 규칙이 상담사를 명시적 적용 대상으로 지목하므로 `tenant_id`·`enterprise_scope_id`·`entity_mode` 3키를 추가했다. "쓰지 않는 컬럼은 오해를 만든다"는 판단은 SSOT 요구가 없을 때의 것이었고, 지금은 근거가 무효다. 상세는 [`design_enterprise_context_master.md`](design_enterprise_context_master.md) §11 E1 의 "ECM-lite 선점 완료".
    · 미구현(백로그 4 = M0-d): `bootstrap-project`, `create-data-tasks`.
 3. 전역 상담 패널 UI와 선택형 질문 컴포넌트
-4. 상담 결과를 기존 프로젝트 생성·RFP 입력으로 연결
+4. ~~상담 결과를 기존 프로젝트 생성·RFP 입력으로 연결~~ ✅ **완료 (2026-07-28)** — `POST /advisor/blueprints/{id}/bootstrap-project` · `POST .../create-data-tasks` · 테스트 19건.
+   · **승인된 Blueprint 만** 프로젝트가 된다(§4.2-7). 초안으로 만들 수 있으면 승인 게이트가 장식이 된다.
+   · **Clarification 을 우회하지 않는다**(§18-6) — Blueprint 를 `initial_idea` 의 상위 입력값으로 주입할 뿐 요구 확인 인터뷰는 그대로 돈다. 상담은 "무엇을 만들지", Clarification 은 "어떻게 만들지"의 모호점 제거로 **다른 게이트**다. 사용자의 원래 말이 앞, Blueprint 요약이 뒤 — 순서를 바꾸면 LLM 이 요약을 사용자 발화로 오해한다.
+   · 프롬프트에는 **요약만** 넣는다(§10.4 / ECM §5.2-5). 목적·범위·**제외 범위(만들지 말 것)**·결정·준비도·필수/미확보 데이터·권장 순서. 전문 대비 1/3 미만임을 테스트로 고정.
+   · 프로젝트는 Blueprint 의 **소유권·ECM 문맥을 물려받는다**(요청 헤더가 아니라). 헤더를 쓰면 승인된 Blueprint 와 다른 문맥의 프로젝트가 생겨 추적이 끊긴다(ECM §10.2).
+   · `project_meta.json` + `ProjectState` 에 `blueprint_id` 추적 링크 추가(§18-7). `_ACCUMULATED_FIELDS` 에 편입 — 스프린트 사이에 유실되면 다시 채워줄 곳이 없다.
+   · `POST /projects` 와 부트스트랩이 **`provision_project()` 단일 경로**를 공유한다. 복사하면 템플릿 검증·소유권·문맥 중 하나가 한쪽에만 반영되어 조용히 어긋난다(이 프로젝트에서 세 번 반복된 결함 유형).
+   · ⚠️ `create-data-tasks` 는 **기획 완료 후에만** 동작한다(WBS 없으면 409). `initialize_wbs` 가 파일을 통째로 다시 쓰므로 기획 전에 넣은 태스크는 PMO 가 WBS 를 만드는 순간 사라진다 — 조용히 만들어 두면 지워진 줄도 모른다. 근본 경로는 `initial_idea` 의 Blueprint 요약(필수·미확보 데이터 포함)을 PMO 가 읽고 처음부터 포함하는 것이고, 이 엔드포인트는 기획이 놓친 것을 사람이 보강하는 보조 경로다.
+   · 태스크 목표에 영향·조치·필요 단위·최신성·**데이터 구분**(§7.1)을 함께 넣는다 — 태스크만 있고 왜/무엇을 모르면 방치된다.
 5. `DecisionLedgerEvent` 최소 모델과 Blueprint 승인 이력 기록
 6. ~~텔레메트리에 작업 유형·모델·비용·성공 여부 표준 필드 추가~~ ✅ **완료 (2026-07-28)** — 위 P0 표 참조. 남은 항목은 §10.3 `quality_outcomes`(게이트별 pass/fail·재시도·근본원인 분류·인간 수용) 로, 이건 §8.3 실패 원인 분류와 함께 별도 작업이다
 7. 외부 인텔리전스의 원천 등록부·지표 마스터·관측값 스키마 상세 설계

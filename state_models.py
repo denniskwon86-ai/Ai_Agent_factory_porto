@@ -102,6 +102,11 @@ class ProjectState(BaseModel):
     owner_dept_id: str = Field(default="", description="소유 부서(권한 스코프의 기준)")
     owner_user_id: str = Field(default="", description="개인 소유자(personal 가시성일 때 의미)")
     visibility: str = Field(default="dept", description="dept | company | personal")
+    # [M0-d] 이 프로젝트가 어느 Solution Blueprint 에서 나왔는가(§18-7 추적성).
+    #   ⚠️ Blueprint 를 프로젝트 생성으로 연결할 때 링크가 없으면, 나중에 "이 앱이 왜 이런
+    #     요구사항을 갖게 됐나"를 되짚을 수 없다(§1.3 기업 의도와 결정의 보존). 상담 없이 만든
+    #     프로젝트는 빈 값이다.
+    blueprint_id: str = Field(default="", description="출처 Solution Blueprint id (없으면 직접 생성)")
     initial_idea: str = Field(default="")
     master_data: str = Field(default="", description="전사 통합 환경변수 및 제약사항 (마스터 데이터)")
     # 범용 플랫폼(T2-b): 이 프로젝트가 실행될 워크플로우 템플릿 id(레지스트리/그래프/스킬 해석의 기준).

@@ -14,7 +14,8 @@ from pydantic import BaseModel
 # [Phase 2/3] 식별·권한은 라우트에서 판정하지 않는다 — api/deps.py 단일 지점이 담당한다.
 from api.deps import (Principal, assert_can_read_dept, assert_enterprise,
                       assert_project_readable, assert_project_writable,
-                      current_principal)
+                      current_principal, enterprise_context)
+from core.enterprise_context import EnterpriseContext
 from typing import Optional
 
 from core.async_orchestrator import orchestrator
@@ -87,6 +88,8 @@ _ACCUMULATED_FIELDS = [
     "domain_agents", "is_mega_project", "parent_project_id", "sub_projects_map", "shared_ledger",
     # [Phase 3] 소유권은 스프린트 사이에 유실되면 안 된다 — 누적 보존 대상에 편입.
     "owner_dept_id", "owner_user_id", "visibility",
+    # [M0-d] Blueprint 링크도 유실되면 추적성이 끊긴다(스프린트마다 다시 채워줄 곳이 없다).
+    "blueprint_id",
 ]
 
 
@@ -174,13 +177,21 @@ def _read_project_ownership(workspace_root: str) -> dict:
         "visibility": str(d.get("visibility", "dept") or "dept"),
         "nature": str(d.get("nature", "") or ""),
         "forked_from": d.get("forked_from") or {},
+        # [ECM-lite] 설계서 §10.2 "프로젝트는 반드시 enterprise_scope_id 와 entity_mode 를
+        #   소유한다". 구 프로젝트는 기본값(기본 테넌트 · 실제 문맥)으로 읽는다.
+        "tenant_id": str(d.get("tenant_id", "") or "tenant_default"),
+        "enterprise_scope_id": str(d.get("enterprise_scope_id", "") or ""),
+        "entity_mode": str(d.get("entity_mode", "") or "REAL"),
+        "blueprint_id": str(d.get("blueprint_id", "") or ""),
     }
 
 
 def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None, master_domains: list = None, mcp_live_grounding: bool = None,
                         owner_dept_id: str = None, owner_user_id: str = None,
                         visibility: str = None, nature: str = None,
-                        forked_from: dict = None) -> None:
+                        forked_from: dict = None,
+                        tenant_id: str = None, enterprise_scope_id: str = None,
+                        entity_mode: str = None, blueprint_id: str = None) -> None:
     """⚠️ 소유권 5필드도 **None 이면 보존**한다(Phase 3).
     이 함수는 템플릿만 바꾸려는 호출부가 많은데, 거기서 소유권이 초기화되면
     프로젝트가 조용히 무소속이 되어 권한 필터에서 사라진다."""
@@ -191,8 +202,11 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
         #   기존엔 master_domains/mcp_live_grounding 만 None 이면 보존하고
         #   knowledge_pack_ids 는 보존 로직이 없어 **호출부가 안 넘기면 `[]` 로 초기화**됐다.
         #   이 함수를 부르는 다른 경로(소유권 변경 등)가 지식팩 연결을 조용히 날린다.
+        # [ECM-lite] 문맥 4필드도 같은 보존 계약을 따른다 — 템플릿만 바꾸는 호출부가 문맥을
+        #   날리면 프로젝트가 조용히 문맥 미지정이 되어 격리가 풀린다(소유권과 같은 위험).
         _own_missing = any(v is None for v in
-                           (owner_dept_id, owner_user_id, visibility, nature, forked_from))
+                           (owner_dept_id, owner_user_id, visibility, nature, forked_from,
+                            tenant_id, enterprise_scope_id, entity_mode, blueprint_id))
         _prev = {}
         if (master_domains is None or mcp_live_grounding is None
                 or knowledge_pack_ids is None or _own_missing):
@@ -211,6 +225,14 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
             nature = _prev.get("nature", "")
         if forked_from is None:
             forked_from = _prev.get("forked_from", {})
+        if tenant_id is None:
+            tenant_id = _prev.get("tenant_id", "") or "tenant_default"
+        if enterprise_scope_id is None:
+            enterprise_scope_id = _prev.get("enterprise_scope_id", "")
+        if entity_mode is None:
+            entity_mode = _prev.get("entity_mode", "") or "REAL"
+        if blueprint_id is None:
+            blueprint_id = _prev.get("blueprint_id", "")
         if master_domains is None:
             master_domains = _prev.get("master_domains", [])
         if mcp_live_grounding is None:
@@ -231,6 +253,12 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                 "visibility": visibility or "dept",
                 "nature": nature or "",
                 "forked_from": forked_from or {},
+                # [ECM-lite] 실행 문맥 — 설계서 §10.2. `blueprint_id` 는 이 프로젝트가 어느
+                #   Solution Blueprint 에서 나왔는지의 추적 링크(§18-7 추적성).
+                "tenant_id": tenant_id or "tenant_default",
+                "enterprise_scope_id": enterprise_scope_id or "",
+                "entity_mode": entity_mode or "REAL",
+                "blueprint_id": blueprint_id or "",
             }, f, ensure_ascii=False, indent=2)
         _sync_project_ownership(workspace_root, owner_dept_id, owner_user_id, visibility, nature)
     except Exception as e:
@@ -385,24 +413,45 @@ async def get_projects(p: Principal = Depends(current_principal)):
             
     return {"status": "success", "data": project_list}
 
-@router.post("/projects")
-async def create_project(req: ProjectCreateRequest, p: Principal = Depends(current_principal)):
-    _safe_id(req.project_id, "project_id")  # 디스크에 안전한 id만 생성 → 이후 모든 라우트가 안전한 id를 다루도록 보장
+def provision_project(project_id: str, template_id: str = "default",
+                      output_format_id: str = "default", view_type: str = "react_app",
+                      knowledge_pack_ids: list = None, master_domains: list = None,
+                      mcp_live_grounding: bool = None,
+                      owner_dept_id: str = "", owner_user_id: str = "",
+                      tenant_id: str = None, enterprise_scope_id: str = None,
+                      entity_mode: str = None, blueprint_id: str = None) -> str:
+    """프로젝트 디렉터리와 `project_meta.json` 을 만든다. **`POST /projects` 와 상담사
+    `bootstrap-project` 가 공유하는 단일 경로**다.
+
+    ⚠️ 왜 헬퍼로 뽑는가: 상담사가 프로젝트를 만들 때 이 로직을 복사하면 템플릿 검증·소유권
+      기록·ECM 문맥 중 하나가 한쪽에만 반영되어 조용히 어긋난다. 이 프로젝트에서 반복된
+      결함 유형이라(생성 경로가 필드를 안 채워 필터가 무력화된 일이 세 번) 경로를 하나로 둔다.
+
+    반환: 확정된 template_id. 검증 실패는 `ValueError`(형식) / `KeyError`(미존재) /
+      `FileExistsError`(중복)로 올리고 라우트가 4xx 로 바꾼다 — 저장소 계층이 HTTP 를 모르게 한다."""
+    _safe_id(project_id, "project_id")   # 디스크에 안전한 id만 → 이후 모든 라우트가 안전한 id를 다룬다
     # 템플릿 id 검증(형식 + 존재). 미존재/잘못된 형식이면 거부 — 잘못된 바인딩이 조용히 default 로
     # 폴백해 사용자가 고른 워크플로우와 다르게 실행되는 혼란을 막는다.
     from core.agent_registry import _safe_tid, list_templates
-    tid = req.template_id or "default"
-    try:
-        _safe_tid(tid)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="잘못된 template_id 형식입니다.")
+    tid = template_id or "default"
+    _safe_tid(tid)                                   # 형식 오류 → ValueError
     if tid not in {t["id"] for t in list_templates()}:
-        raise HTTPException(status_code=404, detail=f"존재하지 않는 템플릿입니다: {tid}")
-
-    project_path = os.path.join("./projects", req.project_id)
+        raise KeyError(tid)                          # 미존재 → KeyError
+    project_path = os.path.join("./projects", project_id)
     if os.path.exists(project_path):
-        raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
+        raise FileExistsError(project_id)
     os.makedirs(project_path, exist_ok=True)
+    _write_project_meta(project_path, tid, output_format_id, view_type, knowledge_pack_ids,
+                        master_domains, mcp_live_grounding,
+                        owner_dept_id=owner_dept_id, owner_user_id=owner_user_id,
+                        tenant_id=tenant_id, enterprise_scope_id=enterprise_scope_id,
+                        entity_mode=entity_mode, blueprint_id=blueprint_id)
+    return tid
+
+
+@router.post("/projects")
+async def create_project(req: ProjectCreateRequest, p: Principal = Depends(current_principal),
+                         ctx: "EnterpriseContext" = Depends(enterprise_context)):
     # ★ [2026-07-28 Phase 5] 생성 시점에 **만든 사람의 소속 부서를 소유 부서로 찍는다.**
     #   ⚠️ 왜 여기가 중요한가: 프롬프트 주입 필터(`get_relevant_context`)는 프로젝트에
     #     `owner_dept_id` 가 있을 때만 부서 스코프를 건다. 소유권이 비어 있으면
@@ -412,10 +461,23 @@ async def create_project(req: ProjectCreateRequest, p: Principal = Depends(curre
     #   무소속 사용자/조직 미도입이면 `primary_dept_id` 가 빈 문자열이라 종전과 동일하게
     #     미태깅으로 남는다(하위호환 — 기존 프로젝트를 깨지 않는다).
     _own_dept = getattr(p.scope, "primary_dept_id", "") or ""
-    _write_project_meta(project_path, tid, req.output_format_id, req.view_type, req.knowledge_pack_ids, req.master_domains, req.mcp_live_grounding,
-                        owner_dept_id=_own_dept, owner_user_id=p.user_id or "")  # 프로젝트↔템플릿/포맷/지식팩/기준정보/실측토글/소유권 바인딩 영속
+    try:
+        tid = provision_project(
+            req.project_id, req.template_id or "default", req.output_format_id, req.view_type,
+            req.knowledge_pack_ids, req.master_domains, req.mcp_live_grounding,
+            owner_dept_id=_own_dept, owner_user_id=p.user_id or "",
+            tenant_id=ctx.tenant_id, enterprise_scope_id=ctx.enterprise_scope_id or _own_dept,
+            entity_mode=ctx.entity_mode)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="잘못된 template_id 형식입니다.")
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"존재하지 않는 템플릿입니다: {e.args[0]}")
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
     return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids, "master_domains": req.master_domains, "mcp_live_grounding": req.mcp_live_grounding,
-            "owner_dept_id": _own_dept, "owner_user_id": p.user_id or ""}
+            "owner_dept_id": _own_dept, "owner_user_id": p.user_id or "",
+            "tenant_id": ctx.tenant_id, "enterprise_scope_id": ctx.enterprise_scope_id or _own_dept,
+            "entity_mode": ctx.entity_mode}
 
 
 @router.put("/projects/{project_id}/knowledge")

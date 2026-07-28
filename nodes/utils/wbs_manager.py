@@ -78,6 +78,37 @@ class WBSManager:
 
         return new_task_id
 
+    def add_data_task(self, title: str, goal: str,
+                      required_agents: List[str] = None) -> str:
+        """데이터 준비·연계·검증 태스크를 WBS에 추가합니다 (명세서 §4.7 / M0 백로그 4).
+
+        ⚠️ **기획(initialize_wbs) 이후에만 호출해야 합니다.** `initialize_wbs` 는 파일을 통째로
+          다시 쓰므로, 기획 전에 넣은 태스크는 PMO 가 WBS 를 만드는 순간 사라집니다. 호출부가
+          WBS 존재를 먼저 확인하도록 여기서는 파일이 없으면 예외를 올립니다 —
+          조용히 만들어 두면 지워진 줄도 모릅니다.
+        `add_revision_task` 와 같은 append 패턴을 씁니다(TASK_DATA_* 접두어로 구분)."""
+        if not os.path.exists(self.wbs_file_path):
+            raise FileNotFoundError("WBS가 아직 없습니다(기획 완료 후 추가하십시오).")
+        if required_agents is None:
+            # 데이터 준비는 코드 생성이 아니라 조사·정의·연계 작업이다.
+            required_agents = ["Master_PM"]
+        with self._lock:
+            wbs_data = self._read_unlocked()
+            tasks = wbs_data.get("tasks", [])
+            n = sum(1 for t in tasks if str(t.get("task_id", "")).startswith("TASK_DATA_"))
+            new_task_id = f"TASK_DATA_{n + 1:02d}"
+            tasks.append({
+                "task_id": new_task_id,
+                "title": title,
+                "goal": goal,
+                "status": "TODO",
+                "required_agents": required_agents,
+            })
+            wbs_data["tasks"] = tasks
+            wbs_data["total_tasks"] = len(tasks)
+            self._write_unlocked(wbs_data)
+        return new_task_id
+
     def _read_unlocked(self) -> Dict[str, Any]:
         """FileLock을 이미 획득한 상태에서 호출. 내부 전용."""
         if not os.path.exists(self.wbs_file_path):
