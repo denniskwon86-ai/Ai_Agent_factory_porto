@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#18324d" flood-opacity=".14"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#6e8ba5"/></marker>
+    <style>.title{font-family:'Malgun Gothic','Noto Sans KR',Arial,sans-serif;font-weight:700;fill:#fff}.t1{font-size:34px}.t2{font-size:18px}.h{font-family:'Malgun Gothic','Noto Sans KR',Arial,sans-serif;font-size:22px;font-weight:700;fill:#102a43}.b{font-family:'Malgun Gothic','Noto Sans KR',Arial,sans-serif;font-size:18px;font-weight:700;fill:#17365d}.s{font-family:'Malgun Gothic','Noto Sans KR',Arial,sans-serif;font-size:15px;fill:#52677d}.w{font-family:'Malgun Gothic','Noto Sans KR',Arial,sans-serif;font-size:18px;font-weight:700;fill:#fff}</style>
+  </defs>
+  <rect width="1600" height="980" fill="#f5f8fc"/>
+  <rect width="1600" height="104" fill="#0b1f33"/>
+  <text x="70" y="52" class="title t1">AI Factory Studio · 현재 논리 아키텍처</text>
+  <text x="70" y="82" class="title t2" opacity=".78">사용자 요청부터 산출물·운영 데이터까지의 실제 처리 경로</text>
+  <rect x="1320" y="30" rx="18" width="210" height="40" fill="#2b6cb0"/><text x="1425" y="56" text-anchor="middle" class="w">CURRENT / AS-IS</text>
+  <g filter="url(#shadow)">
+    <rect x="70" y="165" width="250" height="170" rx="18" fill="#e8f2fb"/><text x="195" y="208" text-anchor="middle" class="b">React / Vite UI</text><text x="195" y="242" text-anchor="middle" class="s">프로젝트 런처·통제실</text><text x="195" y="266" text-anchor="middle" class="s">지식/MDM 관리 패널</text><text x="195" y="290" text-anchor="middle" class="s">Zustand + Preview</text>
+    <rect x="400" y="165" width="300" height="170" rx="18" fill="#edf8f0"/><text x="550" y="208" text-anchor="middle" class="b">FastAPI Control Plane</text><text x="550" y="242" text-anchor="middle" class="s">Factory · Knowledge · Master</text><text x="550" y="266" text-anchor="middle" class="s">Crosswalk · MCP · Telemetry</text><text x="550" y="290" text-anchor="middle" class="s">REST + /ws/timeline SSE</text>
+    <rect x="780" y="165" width="300" height="170" rx="18" fill="#fff1dc"/><text x="930" y="208" text-anchor="middle" class="b">Async Orchestrator</text><text x="930" y="242" text-anchor="middle" class="s">스프린트 시작·일시정지·재개</text><text x="930" y="266" text-anchor="middle" class="s">HOTL·쿼터·실패 처리</text><text x="930" y="290" text-anchor="middle" class="s">SSE 이벤트 발행</text>
+    <rect x="1160" y="165" width="370" height="170" rx="18" fill="#f0ebf8"/><text x="1345" y="208" text-anchor="middle" class="b">LangGraph Agent Pipeline</text><text x="1345" y="242" text-anchor="middle" class="s">요구사항 정제 → 기획 → 설계 → WBS</text><text x="1345" y="266" text-anchor="middle" class="s">구현 → 빌드 → 리뷰 → QA → 매뉴얼</text><text x="1345" y="290" text-anchor="middle" class="s">품질 게이트·재작업 라우팅</text>
+  </g>
+  <path d="M320 250H385M700 250H765M1080 250H1145" stroke="#6e8ba5" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="356" y="235" text-anchor="middle" class="s">REST / SSE</text><text x="735" y="235" text-anchor="middle" class="s">요청</text><text x="1110" y="235" text-anchor="middle" class="s">상태</text>
+  <g filter="url(#shadow)">
+    <rect x="70" y="420" width="460" height="240" rx="18" fill="#fff"/><rect x="70" y="420" width="460" height="50" rx="18" fill="#2474bb"/><rect x="70" y="452" width="460" height="18" fill="#2474bb"/>
+    <text x="100" y="453" class="w">LLM·문맥 구성 계층</text><text x="102" y="510" class="b">LLM Gateway</text><text x="102" y="540" class="s">다중 공급자/등급 폴백 · JSON/코드/문서 출력</text><text x="102" y="580" class="b">Context Engine</text><text x="102" y="610" class="s">프로젝트 산출물·스킬·회사 프로필·파일 문맥 결합</text>
+    <rect x="570" y="420" width="460" height="240" rx="18" fill="#fff"/><rect x="570" y="420" width="460" height="50" rx="18" fill="#148a88"/><rect x="570" y="452" width="460" height="18" fill="#148a88"/>
+    <text x="600" y="453" class="w">지식·기준·연계 계층</text><text x="602" y="510" class="b">Knowledge / M1 Master / Standards</text><text x="602" y="540" class="s">릴리스 RAG · 기준정보·별칭 · 업무표준</text><text x="602" y="580" class="b">M2 Crosswalk / M3 MCP Broker</text><text x="602" y="610" class="s">시스템 간 키 매핑 · 읽기 전용 온디맨드 참조</text>
+    <rect x="1070" y="420" width="460" height="240" rx="18" fill="#fff"/><rect x="1070" y="420" width="460" height="50" rx="18" fill="#6b4f93"/><rect x="1070" y="452" width="460" height="18" fill="#6b4f93"/>
+    <text x="1100" y="453" class="w">저장·관측·학습 계층</text><text x="1102" y="510" class="b">SQLite/Postgres Checkpoint + Workspace</text><text x="1102" y="540" class="s">LangGraph 상태 · 프로젝트 파일 · Git 산출물</text><text x="1102" y="580" class="b">Telemetry / Skill Evolution / Log</text><text x="1102" y="610" class="s">호출 비용·품질 관측 · 개선안 승인·기록</text>
+  </g>
+  <path d="M1345 335V385H300V405" fill="none" stroke="#6e8ba5" stroke-width="4" marker-end="url(#arrow)"/><path d="M1345 335V385H800V405" fill="none" stroke="#6e8ba5" stroke-width="4" marker-end="url(#arrow)"/><path d="M1345 335V385H1300V405" fill="none" stroke="#6e8ba5" stroke-width="4" marker-end="url(#arrow)"/>
+  <g filter="url(#shadow)">
+    <rect x="70" y="730" width="1460" height="150" rx="18" fill="#eaf0f7"/>
+    <text x="105" y="774" class="h">현재 경계와 해석</text>
+    <text x="105" y="813" class="s">현재 구현은 AI 에이전트로 업무 SW 산출물을 생성·검토·관리하는 Control Plane이다. 생성 앱의 운영 런타임, 전사 운영 데이터 허브, 완성형 ERP/MES 또는 결정론적 디지털트윈은 아직 이 처리 경로에 포함되지 않는다.</text>
+    <text x="105" y="847" class="s">따라서 지식·기준정보·MCP·Mega 기능은 기반/부분 구현으로 해석하며, 향후 데이터 카탈로그·권한·계보·시뮬레이션 엔진을 별도 운영 계층으로 확장해야 한다.</text>
+  </g>
+  <text x="800" y="935" text-anchor="middle" class="s">화살표는 현재 코드에서 확인된 주요 의존 방향을 요약한 것이며, 세부 API·상태·예외는 본문 정의를 따른다.</text>
+</svg>

@@ -1,0 +1,16 @@
+{
+  "name": "ai-factory-studio-document-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Factory Studio 문서 산출물 생성 도구",
+  "type": "commonjs",
+  "scripts": {
+    "render:diagrams": "node render_diagrams.js",
+    "pre-generate:as-is-docs": "npm run render:diagrams",
+    "generate:as-is-docs": "node generate_reverse_engineering_docx.js"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "docx": "^9.5.1"
+  }
+}
