@@ -347,7 +347,54 @@ write `mega/plan:382`·`start_all:430`·`DELETE:487`·`copy:550`·`sprint/start:
 
 ---
 
-## Phase 5 — LLM 프롬프트/검색 경로 권한 ★ Phase 6·7·8·10보다 먼저
+## Phase 5 — LLM 프롬프트/검색 경로 권한 ★ Phase 6·7·8·10보다 먼저 ✅ **완료 (2026-07-28)**
+
+> 구현: `core/knowledge_base.py`(`_meta_matches` 신설 · `search_similar(where=)` · `get_relevant_context` 3중 방어) ·
+> `config.py`(`RAG_PAST_CASES_ENABLED`/`_CUTOFF`) · `api/routes/factory_control.py`(소유권 배선 3곳) ·
+> `core/org_directory.py`(부서 조회 복원력) · 테스트 34건 (전체 394건 통과)
+>
+> **설계 대비 변경 3건 — 모두 "필터를 만들었는데 채워주는 쪽이 없었다"는 같은 유형**
+>
+> ① **인덱싱 배선 누락 (기능 결함, 이게 없으면 Phase 5 전체가 무의미)**
+> 설계 재사용자산 표는 "`index_release` 메타 str 통과 → `owner_dept_id`를 Chroma 메타에"로
+> 배선을 **전제만** 했고, 실제 호출부(`create_release`)는 `template_id`/`deliverable_type`
+> 둘만 넘겼다. 그 결과 **모든 청크가 `owner_dept_id=""` 로 인덱싱**되고, 방어 ①의 fail-closed
+> `$in` 필터가 **자기 부서 산출물까지 전부 배제**한다 → 오류 하나 없이 과거사례 RAG 가
+> 조용히 0건이 된다. → `create_release` 가 `_read_project_ownership()` 결과를 인덱싱 메타로
+> 넘기고, 게시 당시 소유권을 `release.json` + `ownership` 미러에도 고정한다(마이그레이션
+> 스크립트가 이미 릴리스에 이 필드를 전제하는데 생성 경로가 안 남기고 있었다).
+>
+> ② **미태깅 프로젝트 fail-open 을 생성 시점에서 막는다 (설계에 없던 항목)**
+> 방어 ①은 프로젝트에 `owner_dept_id` 가 있을 때만 필터를 건다. 없으면 `where=None` 이라
+> **전역 무필터 = 원래의 유출 경로 그대로**다. 즉 "부서 없는 프로젝트를 만들어 남의 부서
+> 산출물을 긁는" 경로가 열려 있었다. 여기서 fail-closed 로 가면 마이그레이션 전 레거시가
+> 과거사례를 한 건도 못 받아 기능이 멈추므로(Phase 3 "소유권 미기록 자원은 막지 않는다"와
+> 같은 판단), **검색이 아니라 생성 시점에** 막는다 → `create_project` 는 만든 사람의
+> `primary_dept_id` 를, `create_mega_project` 는 마스터=`hq`+`company` / 서브=`domain`(=`dept_id`)
+> 을 소유 부서로 찍는다. 마이그레이션 스크립트의 추론 규약과 같은 값이라 신규 메가에 대해
+> 그 스크립트가 할 일이 없어진다. 무소속 사용자/조직 미도입이면 종전대로 미태깅(하위호환).
+>
+> ③ **부서 조회 경로 복원력 (Phase 1 잔여 결함)**
+> `list_departments`/`get_department` 가 `has_any_department` 의 복원력 규약(`_ensure_tables`
+> 재시도 후 '조직 미도입' 간주)을 안 따라서, 조직 DB 가 없는 환경에서 **`create_mega_project`
+> 가 `no such table: departments` 로 500** 이 됐다(신규 테스트가 실측으로 노출). 그 함수는
+> 미등록 부서를 `_LEGACY_DEPARTMENTS` 로 폴백하도록 설계돼 있으므로 테이블 부재도 같은
+> '미도입'으로 흘러가야 맞다.
+>
+> **지식팩**: 설계대로 연결 시점(`PUT /projects/{id}/knowledge`)에 팩의 `owner_dept_id` 를
+> 검증하고 `assert_project_writable` 을 걸었다(설계 340행의 21곳 목록에서 빠져 있던 라우트).
+> ⚠️ 단 **팩 매니페스트에 `owner_dept_id` 필드가 아직 없어 현재는 전 팩이 통과한다** —
+> 관문만 선설치한 상태이고, 팩 소유권 기록(매니페스트 필드 + `list_packs` 필터)은 Phase 4 잔여다.
+>
+> **실측 검증**(진짜 chromadb·진짜 인덱싱 경로): 실제 Chroma 가 `$in` 을 **네이티브 지원**
+> 확인(폴백은 보험) · `where` 필터로 `['hq','quality']` 만 반환하고 `sales` 배제 ·
+> **대조군**: `where` 없이 부르면 `['hq','quality','sales']` 로 유출 재현(수정 전 동작) ·
+> `get_relevant_context` 전 경로에서 품질부 프로젝트가 품질+전사는 받고 영업은 못 받음 ·
+> 킬스위치 주입 0건.
+>
+> **미이관 (Phase 5 범위 아님)**: `GET /library/list` 부서 필터 + `_iter_releases()` 추출은
+> Phase 3 게시판 잔여, 팩 소유권은 위 Phase 4 잔여. 설계서 12행의 `participants` 개정은
+> 그 테이블이 백본 설계서 ⑤단계에 있어 **다부서 앱 착수 시점**에 한다(현 구현이 현시점 기준으론 맞다).
 
 **최대 유출 경로**: `context_engine.py:50` → `get_relevant_context`(`knowledge_base.py:401-423`) → `search_similar`(`:377-399`) → `collection.query(...)` ← 전역 `project_releases`, `where` 없음, 거리 임계값 없음.
 

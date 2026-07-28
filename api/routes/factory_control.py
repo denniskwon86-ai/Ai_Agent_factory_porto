@@ -12,8 +12,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # [Phase 2/3] 식별·권한은 라우트에서 판정하지 않는다 — api/deps.py 단일 지점이 담당한다.
-from api.deps import (Principal, assert_enterprise, assert_project_readable,
-                      assert_project_writable, current_principal)
+from api.deps import (Principal, assert_can_read_dept, assert_enterprise,
+                      assert_project_readable, assert_project_writable,
+                      current_principal)
 from typing import Optional
 
 from core.async_orchestrator import orchestrator
@@ -385,7 +386,7 @@ async def get_projects(p: Principal = Depends(current_principal)):
     return {"status": "success", "data": project_list}
 
 @router.post("/projects")
-async def create_project(req: ProjectCreateRequest):
+async def create_project(req: ProjectCreateRequest, p: Principal = Depends(current_principal)):
     _safe_id(req.project_id, "project_id")  # 디스크에 안전한 id만 생성 → 이후 모든 라우트가 안전한 id를 다루도록 보장
     # 템플릿 id 검증(형식 + 존재). 미존재/잘못된 형식이면 거부 — 잘못된 바인딩이 조용히 default 로
     # 폴백해 사용자가 고른 워크플로우와 다르게 실행되는 혼란을 막는다.
@@ -402,22 +403,46 @@ async def create_project(req: ProjectCreateRequest):
     if os.path.exists(project_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
     os.makedirs(project_path, exist_ok=True)
-    _write_project_meta(project_path, tid, req.output_format_id, req.view_type, req.knowledge_pack_ids, req.master_domains, req.mcp_live_grounding)  # 프로젝트↔템플릿/포맷/지식팩/기준정보/실측토글 바인딩 영속
-    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids, "master_domains": req.master_domains, "mcp_live_grounding": req.mcp_live_grounding}
+    # ★ [2026-07-28 Phase 5] 생성 시점에 **만든 사람의 소속 부서를 소유 부서로 찍는다.**
+    #   ⚠️ 왜 여기가 중요한가: 프롬프트 주입 필터(`get_relevant_context`)는 프로젝트에
+    #     `owner_dept_id` 가 있을 때만 부서 스코프를 건다. 소유권이 비어 있으면
+    #     **필터가 아예 걸리지 않아 전사 산출물이 그대로 주입된다**(fail-open).
+    #     즉 소유권을 안 찍으면 "부서 없는 프로젝트를 만들어 남의 부서 산출물을 긁는" 경로가
+    #     열린다. 유출은 검색 시점에 막는 것보다 **생성 시점에 소유권을 확정**하는 편이 확실하다.
+    #   무소속 사용자/조직 미도입이면 `primary_dept_id` 가 빈 문자열이라 종전과 동일하게
+    #     미태깅으로 남는다(하위호환 — 기존 프로젝트를 깨지 않는다).
+    _own_dept = getattr(p.scope, "primary_dept_id", "") or ""
+    _write_project_meta(project_path, tid, req.output_format_id, req.view_type, req.knowledge_pack_ids, req.master_domains, req.mcp_live_grounding,
+                        owner_dept_id=_own_dept, owner_user_id=p.user_id or "")  # 프로젝트↔템플릿/포맷/지식팩/기준정보/실측토글/소유권 바인딩 영속
+    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids, "master_domains": req.master_domains, "mcp_live_grounding": req.mcp_live_grounding,
+            "owner_dept_id": _own_dept, "owner_user_id": p.user_id or ""}
 
 
 @router.put("/projects/{project_id}/knowledge")
-async def update_project_knowledge(project_id: str, req: ProjectKnowledgeRequest):
+async def update_project_knowledge(project_id: str, req: ProjectKnowledgeRequest,
+                                   p: Principal = Depends(current_principal)):
     """기존 프로젝트의 지식팩 연결을 변경한다(다음 스프린트부터 반영)."""
     _safe_id(project_id, "project_id")
     workspace_root = f"./projects/{project_id}"
     if not os.path.isdir(workspace_root):
         raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+    assert_project_writable(p, project_id)
     from core.knowledge_base import knowledge_base
-    known = {p.get("pack_id") for p in knowledge_base.list_packs()}
-    invalid = [p for p in req.knowledge_pack_ids if p not in known]
+    _packs = {pk.get("pack_id"): pk for pk in knowledge_base.list_packs()}
+    invalid = [x for x in req.knowledge_pack_ids if x not in _packs]
     if invalid:
         raise HTTPException(status_code=404, detail=f"존재하지 않는 지식팩: {invalid}")
+    # ★ [2026-07-28 Phase 5] 지식팩 유출은 **연결 시점**에 막는다.
+    #   ⚠️ 왜 검색 시점이 아닌가: 팩은 프로젝트에 연결되면 `ContextEngine` 이 그 팩만
+    #     골라 검색하므로(`_read_project_packs` → `search_packs`) 검색 경로 자체는 이미 안전하다.
+    #     진짜 구멍은 **읽을 권한 없는 팩을 연결해버리는 것**이고, 그러면 그 뒤 모든 프롬프트가
+    #     합법적으로 그 팩을 참조한다. 그래서 관문은 여기 한 곳이다.
+    #   소유 부서가 미기록(`""`)인 팩은 전사 공유로 보고 통과시킨다 — Phase 3 의
+    #     "소유권 미기록 자원은 막지 않는다"와 같은 규약(하위호환).
+    for _pid in req.knowledge_pack_ids:
+        _pack_dept = str((_packs.get(_pid) or {}).get("owner_dept_id", "") or "")
+        if _pack_dept:
+            assert_can_read_dept(p, _pack_dept)
     tid, fid, vtype = _read_project_meta(workspace_root)
     _write_project_meta(workspace_root, tid, fid, vtype, req.knowledge_pack_ids, req.master_domains)
     return {"status": "success", "knowledge_pack_ids": req.knowledge_pack_ids,
@@ -428,7 +453,7 @@ class MegaProjectCreateRequest(BaseModel):
     template_id: str = "manufacturing-production" # Default master template
     
 @router.post("/projects/mega")
-async def create_mega_project(req: MegaProjectCreateRequest):
+async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depends(current_principal)):
     """메가 프로젝트 생성 (마스터 + 8개 서브 프로젝트 일괄 프로비저닝)"""
     _safe_id(req.mega_project_id, "mega_project_id")
 
@@ -448,7 +473,11 @@ async def create_mega_project(req: MegaProjectCreateRequest):
         
     # 1. 마스터 프로젝트 생성
     os.makedirs(mega_path, exist_ok=True)
-    _write_project_meta(mega_path, tid, "default", "react_app")
+    # ★ [2026-07-28 Phase 5] 메가 마스터는 전사 종합이므로 `hq` + `company`(전사 공개).
+    #   `scripts/migrate_org_ownership.py:49` 의 추론 규약과 **같은 값**을 쓴다 — 생성 시점에
+    #   찍어두면 그 마이그레이션이 신규 메가에 대해 할 일이 없어진다(멱등 유지).
+    _write_project_meta(mega_path, tid, "default", "react_app",
+                        owner_dept_id="hq", owner_user_id=p.user_id or "", visibility="company")
     
     # ★ [2026-07-27 Phase 1] 하드코딩 맵 3개(domain_agents_map / domain_templates_map /
     #   domain_ko_map)를 제거하고 **부서 기준정보**를 조회한다.
@@ -484,7 +513,10 @@ async def create_mega_project(req: MegaProjectCreateRequest):
 
         sub_tid = _cfg.get("template_id") or tid
         # 서브 프로젝트는 도메인 특화 템플릿 사용 (없으면 마스터 템플릿)
-        _write_project_meta(sub_path, sub_tid, "default", "react_app")
+        # ★ [2026-07-28 Phase 5] `domain` 이 곧 `dept_id` 다 — 서브 프로젝트의 소유 부서로 찍는다.
+        #   가시성은 기본값 `dept`: 부서 산출물은 부서 안에서만 프롬프트에 주입된다.
+        _write_project_meta(sub_path, sub_tid, "default", "react_app",
+                            owner_dept_id=domain, owner_user_id=p.user_id or "")
 
         domain_name_ko = _cfg.get("name_ko") or domain.upper()
         # 서브 프로젝트 상태 초기화
@@ -1084,6 +1116,12 @@ async def create_release(project_id: str,
     tid = s.get("template_id", "default")
     template_data = load_template(tid)
 
+    # ★ [2026-07-28 Phase 5] 게시 시점의 소유권을 릴리스에 **고정**한다.
+    #   `scripts/migrate_org_ownership.py:99-109` 가 릴리스에 이 필드가 있다고 전제하는데
+    #   생성 경로가 안 남겨서 신규 릴리스마다 마이그레이션을 다시 돌려야 했다. 또한 게시 후
+    #   프로젝트 소유권이 바뀌어도 **이미 게시된 것의 출처는 게시 당시 부서**여야 한다.
+    _rel_own = _read_project_ownership(os.path.join("./projects", project_id))
+
     wbs_tasks = []
     wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
     if os.path.exists(wbs_path):
@@ -1124,12 +1162,28 @@ async def create_release(project_id: str,
         # 종료 상태를 함께 남겨, 미해결 결함을 안고 게시된 릴리스를 사후에 식별할 수 있게 한다.
         "terminal_status": s.get("terminal_status", ""),
         "terminal_reason": s.get("terminal_reason", ""),
+        # [Phase 5] 게시 당시 소유 부서·가시성(위 `_rel_own` 주석 참조).
+        "owner_dept_id": _rel_own.get("owner_dept_id", ""),
+        "visibility": _rel_own.get("visibility", "dept"),
     }
     rel_dir = os.path.join(LIBRARY_DIR, release_id)
     os.makedirs(rel_dir, exist_ok=True)
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
         json.dump(release, f, ensure_ascii=False, indent=2)
-        
+
+    # [Phase 5] 릴리스 소유권 미러 — `assert_release_readable`(api/deps.py:129)이 이 미러를
+    #   읽는다. 안 심으면 소유권 미기록으로 간주돼 전원 통과한다. 프로젝트와 같은 규약으로,
+    #   미러 실패가 게시 자체를 막지 않도록 조용히 넘어간다(`_sync_project_ownership` 동일).
+    if _rel_own.get("owner_dept_id"):
+        try:
+            from core.org_directory import org_directory
+            org_directory.set_ownership("release", release_id,
+                                        dept_id=_rel_own.get("owner_dept_id", ""),
+                                        owner_user_id=_rel_own.get("owner_user_id", ""),
+                                        visibility=_rel_own.get("visibility", "dept"))
+        except Exception as e:
+            print(f"⚠️ 릴리스 ownership 미러 갱신 실패(무시): {e}")
+
     # 지식 베이스(RAG) 인덱싱 (백그라운드에서 실행되도록 asyncio_task 등록 등 가능하지만 여기서는 간단히 직접 호출)
     try:
         from core.knowledge_base import knowledge_base
@@ -1168,9 +1222,16 @@ async def create_release(project_id: str,
         
         metadata = {
             "template_id": release.get("template_id", "default"),
-            "deliverable_type": release.get("deliverable_type", "software_app")
+            "deliverable_type": release.get("deliverable_type", "software_app"),
+            # ★ [2026-07-28 Phase 5] **부서 필터의 유일한 공급원**.
+            #   ⚠️ 이것을 안 넘기면 `index_release`(knowledge_base.py:390)가 청크 메타를
+            #     `owner_dept_id=""` 로 심고, `get_relevant_context` 의 fail-closed `$in`
+            #     필터가 **자기 부서 산출물까지 전부 배제**한다 → 과거사례 RAG 가 오류 하나 없이
+            #     조용히 0건이 된다. 실제로 그 상태였다(설계서 재사용자산 표 870행이 전제한
+            #     배선의 나머지 절반).
+            "owner_dept_id": _rel_own.get("owner_dept_id", ""),
         }
-        
+
         # 메인 스레드 블로킹을 피하기 위해 비동기로 위임 (FastAPI BackgroundTasks도 좋으나 여기서는 asyncio)
         loop = asyncio.get_running_loop()
         loop.run_in_executor(

@@ -248,3 +248,21 @@ def test_invalid_ids_rejected(org):
     org.upsert_user("u", "사용자")
     with pytest.raises(MasterDataError):
         org.set_user_roles("u", {"ok": "superuser"})
+
+
+# ── 조회 경로 복원력 ─────────────────────────────────────────────────────
+# 조직 DB 가 없는 환경(신규 클론·시드 전·작업 디렉터리 변경)에서 부서 조회가 예외로 죽으면
+# `create_mega_project` 가 500 으로 실패한다. 그 함수는 미등록 부서를 레거시 기본값으로
+# 폴백하도록 설계돼 있으므로, **테이블 부재도 '조직 미도입'으로 흘러가야** 한다.
+def test_dept_lookup_survives_missing_schema(tmp_path):
+    d = OrgDirectory(db_path=str(tmp_path / "sub" / "gone.db"))
+    assert d.list_departments() == []
+    assert d.get_department("quality") is None
+
+
+def test_dept_lookup_survives_unwritable_path(tmp_path, monkeypatch):
+    """스키마 복구조차 실패하는 경우에도 예외를 올리지 않는다."""
+    d = OrgDirectory(db_path=str(tmp_path / "org.db"))
+    monkeypatch.setattr(d, "_ensure_tables", lambda: False)
+    assert d.list_departments() == []
+    assert d.get_department("quality") is None

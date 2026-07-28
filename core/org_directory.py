@@ -180,20 +180,40 @@ class OrgDirectory:
         return d
 
     # ── 부서 조회 ─────────────────────────────────────────────────────────
+    # ⚠️ 두 조회 모두 `has_any_department` 와 **같은 복원력 규약**을 따른다(`_ensure_tables` 주석 참조):
+    #   한 번 스키마 복구를 시도하고, 그래도 안 되면 '조직 미도입'으로 간주해 빈 값을 준다.
+    #   이게 없으면 조직 DB 가 없는 환경(신규 클론·시드 전·작업 디렉터리 변경)에서
+    #   `create_mega_project` 가 `no such table: departments` 로 **500 으로 죽는다** — 그 함수는
+    #   미등록 부서를 이미 `_LEGACY_DEPARTMENTS` 로 폴백하도록 설계돼 있으므로, 테이블 부재도
+    #   같은 '미도입'으로 흘러가야 설계 의도(하위호환 계약)와 맞는다.
     def list_departments(self, include_retired: bool = False) -> List[Dict[str, Any]]:
         sql = "SELECT * FROM departments WHERE valid_to IS NULL"
         if not include_retired:
             sql += " AND status='active'"
         sql += " ORDER BY path, dept_id"
-        with self._connect() as conn:
-            return [self._row_to_dept(r) for r in conn.execute(sql).fetchall()]
+        for attempt in (0, 1):
+            try:
+                with self._connect() as conn:
+                    return [self._row_to_dept(r) for r in conn.execute(sql).fetchall()]
+            except sqlite3.OperationalError:
+                if attempt == 0 and self._ensure_tables():
+                    continue
+                return []
+        return []
 
     def get_department(self, dept_id: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
-            r = conn.execute(
-                "SELECT * FROM departments WHERE dept_id=? AND valid_to IS NULL", (dept_id,)
-            ).fetchone()
-        return self._row_to_dept(r) if r else None
+        for attempt in (0, 1):
+            try:
+                with self._connect() as conn:
+                    r = conn.execute(
+                        "SELECT * FROM departments WHERE dept_id=? AND valid_to IS NULL", (dept_id,)
+                    ).fetchone()
+                return self._row_to_dept(r) if r else None
+            except sqlite3.OperationalError:
+                if attempt == 0 and self._ensure_tables():
+                    continue
+                return None
+        return None
 
     def get_department_history(self, dept_id: str) -> List[Dict[str, Any]]:
         """개편 이력(구판 포함) — 과거 산출물의 소유 부서를 해석하려면 이력이 필요하다."""

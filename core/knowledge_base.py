@@ -47,6 +47,37 @@ def extract_text(filename: str, raw: bytes) -> str:
             return raw.decode("utf-8", errors="ignore")
 
 
+def _meta_matches(meta: dict, where: dict) -> bool:
+    """Chroma `where` 절을 파이썬으로 흉내낸다 (엔진이 연산자를 지원하지 않을 때의 폴백).
+
+    지원: 동등 비교, `$in`, `$or`, `$and`. 그 외 연산자는 **통과시키지 않는다** —
+    필터를 이해하지 못한 채 통과시키면 그게 곧 유출이다(fail-closed)."""
+    meta = meta or {}
+    for key, cond in (where or {}).items():
+        if key == "$or":
+            if not any(_meta_matches(meta, c) for c in (cond or [])):
+                return False
+        elif key == "$and":
+            if not all(_meta_matches(meta, c) for c in (cond or [])):
+                return False
+        elif isinstance(cond, dict):
+            if "$in" in cond:
+                if meta.get(key) not in (cond.get("$in") or []):
+                    return False
+            elif "$eq" in cond:
+                if meta.get(key) != cond["$eq"]:
+                    return False
+            elif "$ne" in cond:
+                if meta.get(key) == cond["$ne"]:
+                    return False
+            else:
+                return False   # 모르는 연산자 → 안전하게 배제
+        else:
+            if meta.get(key) != cond:
+                return False
+    return True
+
+
 class KnowledgeBase:
     """
     두 계층의 지식 저장소:
@@ -353,7 +384,10 @@ class KnowledgeBase:
                     "project_id": project_id,
                     "release_id": release_id,
                     "filename": filename,
-                    "chunk_index": i
+                    "chunk_index": i,
+                    # [Phase 5] 부서 필터의 기반. 항상 존재해야 `$in` 필터가 예측 가능하게 동작한다.
+                    #   빈 값(레거시 미태깅)은 프롬프트 주입에서 제외된다(fail-closed).
+                    "owner_dept_id": str((metadata or {}).get("owner_dept_id", "") or ""),
                 }
                 if metadata:
                     doc_meta.update({k: str(v) for k, v in metadata.items() if isinstance(v, (str, int, float, bool))})
@@ -374,18 +408,32 @@ class KnowledgeBase:
             except Exception as e:
                 print(f"⚠️ [KnowledgeBase] 인덱싱 실패: {e}")
 
-    def search_similar(self, query: str, n_results: int = 5) -> list:
+    def search_similar(self, query: str, n_results: int = 5, where: dict = None) -> list:
+        """유사 문서 검색.
+
+        `where`: Chroma 메타데이터 필터(설계서 Phase 5). 하위호환을 위해 선택 인자다.
+          ⚠️ 이 필터가 없으면 전역 컬렉션을 그대로 뒤져 **다른 부서 산출물이 프롬프트에
+            섞여 들어간다.** 엔진이 `$in`/`$or` 를 지원하지 않는 경우를 대비해
+            over-fetch 후 파이썬에서 거르는 폴백을 둔다(search_packs 가 쓰는 것과 같은 패턴)."""
         if not self.collection:
             return []
 
         try:
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=n_results,
-                # ★ [2026-07-27] 거리(distance)를 함께 받아온다. 없으면 호출부가
-                #   '얼마나 관련 있는지'를 판단할 수 없어 무관한 문서를 그대로 주입하게 된다.
-                include=["documents", "metadatas", "distances"],
-            )
+            _q = {"query_texts": [query], "n_results": n_results,
+                  # ★ [2026-07-27] 거리(distance)를 함께 받아온다. 없으면 호출부가
+                  #   '얼마나 관련 있는지'를 판단할 수 없어 무관한 문서를 그대로 주입하게 된다.
+                  "include": ["documents", "metadatas", "distances"]}
+            _py_filter = None
+            if where:
+                try:
+                    results = self.collection.query(**_q, where=where)
+                except Exception:
+                    # 폴백: where 미지원/문법 불일치 → 넉넉히 뽑아 파이썬에서 거른다
+                    _q["n_results"] = max(n_results * 5, n_results)
+                    results = self.collection.query(**_q)
+                    _py_filter = where
+            else:
+                results = self.collection.query(**_q)
 
             snippets = []
             if results and results["documents"] and results["documents"][0]:
@@ -393,11 +441,15 @@ class KnowledgeBase:
                 for i in range(len(results["documents"][0])):
                     doc = results["documents"][0][i]
                     meta = results["metadatas"][0][i] if results["metadatas"] else {}
+                    if _py_filter and not _meta_matches(meta, _py_filter):
+                        continue
                     snippets.append({
                         "content": doc,
                         "metadata": meta,
                         "distance": _dists[i] if i < len(_dists) else 1.0,
                     })
+                if _py_filter:
+                    snippets = snippets[:n_results]
             return snippets
         except Exception as e:
             print(f"⚠️ [KnowledgeBase] 검색 실패: {e}")
@@ -422,9 +474,38 @@ class KnowledgeBase:
         #   ② 보안: 조직·권한을 얹는 순간 이 경로가 **부서 간 정보 유출**이 된다.
         #   같은 파일의 `get_grounding_context()` 는 화이트리스트 + RELEVANCE_CUTOFF 이중 방어가
         #   이미 검증되어 있으므로 **그 패턴을 이식한다.**
-        RELEVANCE_CUTOFF = 0.65
+        import config as _cfg
+        if not getattr(_cfg, "RAG_PAST_CASES_ENABLED", True):
+            return ""                                   # ③ 전역 킬스위치
+
+        RELEVANCE_CUTOFF = getattr(_cfg, "RAG_PAST_CASES_CUTOFF", 0.65)   # ② 거리 임계값
         _self_pid = getattr(project_state, "project_name", "") or ""
-        raw = self.search_similar(query, n_results=6)   # 필터로 줄어들 것을 감안해 넉넉히 조회
+
+        # ① Chroma where 필터 — 허용 부서는 **자기 부서 + 조상 체인**만.
+        #   ⚠️ 사람이 조회할 때는 상위→하위 상속이지만, **프롬프트 주입은 자기+조상만** 허용한다.
+        #     하위로 상속시키면 형제 부서 자료가 상위를 거쳐 들어오는 횡방향 유출이 생긴다.
+        #   레거시 미태깅(`""`)은 여기서 제외한다(fail-closed) — 프롬프트에 섞이는 것이
+        #     목록에 보이는 것보다 위험하다.
+        #
+        #   ⚠️ 비대칭 하나가 **의도적으로** 남아 있다: 청크는 미태깅이면 배제(fail-closed)인데
+        #     프로젝트가 미태깅이면 필터를 아예 걸지 않는다(fail-open). 여기서 fail-closed 로
+        #     가면 마이그레이션 전 기존 프로젝트가 과거사례를 한 건도 못 받아 기능이 통째로
+        #     멈춘다 — Phase 3 의 "소유권 미기록 자원은 막지 않는다"와 같은 판단이다.
+        #     대신 그 구멍은 **생성 시점에** 막는다: `create_project`/`create_mega_project` 가
+        #     만든 사람의 소속 부서를 소유 부서로 찍으므로(factory_control.py) 신규 프로젝트는
+        #     미태깅으로 태어나지 않는다. 즉 fail-open 이 적용되는 대상은 레거시뿐이다.
+        _where = None
+        _dept = str(getattr(project_state, "owner_dept_id", "") or "")
+        if _dept:
+            try:
+                from core.org_directory import org_directory
+                _d = org_directory.get_department(_dept)
+                _chain = [s for s in str((_d or {}).get("path", "")).split("/") if s] or [_dept]
+            except Exception:
+                _chain = [_dept]
+            _where = {"owner_dept_id": {"$in": _chain}}
+
+        raw = self.search_similar(query, n_results=6, where=_where)   # 필터로 줄어들 것을 감안해 넉넉히
         snippets = []
         for s in raw:
             if s.get("distance", 1.0) > RELEVANCE_CUTOFF:
