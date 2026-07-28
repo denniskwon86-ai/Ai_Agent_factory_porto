@@ -16,48 +16,13 @@
 - 상태: 진행 중
 - 책임 수행자 / 교차 검토자: Claude Code / 작업별 지정
 - 목표·완료 기준: 외부 세션에서 진행 중인 기능 구현과 오류 보정을 코드·테스트 증거로 완료한다.
-- 영향 범위·결정/가정: 기존 API·상태 모델·UI 계약 변경 시 팀 전체에 즉시 공유가 필요하다.
-- 증거·다음 행동: **M0 전체(a~e) + ECM-lite + ECM E1 백엔드 완료** — pytest 619. 다음은 ECM E2
-  (프로필 상속 병합 + 템플릿↔마스터 바인딩, 감사 ENTERPRISE-01 Action 1·3 반영). 상세는
-  `DECISIONS.md` D-001~D-008 과 커밋 `7b9e0a415`·`4cfb4b45a`·`11d12acda`·`92bd457e1`·`0401c2a17`·
-  `ee95b8633`·`58d2831e4`·`b2a24374e`·`fa3271f97`·`2e42968ec`.
+- 영향 범위·결정/가정: `DECISIONS.md` D-003(권한 상속은 OPERATING_PARENT 만)·D-004(부서 권한
+  재사용)·D-005(부서 id/node_id 이중 해석)에 의존한다. 되돌림 비용이 D-003 은 높다.
 
-### [ECM-E2-01] ECM E2 — 프로필 상속 병합 + 템플릿↔마스터 바인딩
-- 상태: **검토 대기**(구현·실측 완료, 통합 검토 남음 — `TEAM_PROTOCOL` §3-1 B등급)
-- 책임 수행자 / 교차 검토자: Claude Code / **Antigravity(정합성)·Codex(제품·정보구조)**
-- 목표·완료 기준: ① §4.4 프로필 상속 병합 리솔버(승인된 것만 참여, 하위 우선) ②
-  `profile_template_bindings` 로 템플릿별 필수 마스터 바인딩(감사 Action 3 — LLM 환각 차단)
-  ③ 상담사 추천이 조직 프로필에 따라 실제로 달라짐(설계서 수용 기준 3).
-- 영향 범위·결정/가정: 플레이북이 상속 체인 최상위라는 `DECISIONS.md` **D-002 에 의존**한다 —
-  이견이 있으면 착수 전에 뒤집는 것이 싸다. 감사 Action 1 은 **R-001 대안**(마스터 본문은 MDM 에
-  두고 문맥 컬럼 + 바인딩만) 으로 진행 예정이며 감사자·사용자 확인이 필요하다.
-- 증거·다음 행동: 커밋 `f893b258a` · `core/enterprise_context/profile_resolver.py` ·
-  `tests/test_ecm_e2_profile.py`(29건) · 전체 648 통과 · 설계서 §11 E2 완료 표.
-  **Codex 교차검토 완료(2026-07-28)** — R-001·D-002 모두 보완 권고를 받아 수용했다(`DECISIONS.md`
-  D-002 개정 · R-001 확정). 후속: ① D-002 보완(업종 호환성 검증·플레이북 버전/해시·프로필 스냅샷)
-  ② R-001 구현(`master_scope_bindings`). E1 독립 검토는 여전히 열려 있다.
-
-## 검토 대기
-
-### [ENTERPRISE-01] 엔터프라이즈 제조·시뮬레이션 트랙 선행 점검 (M1~M4 감사 완료)
-- 상태: 검토 대기 → **Claude Code 교차검토 완료, 반영 착수**
-- 책임 수행자 / 교차 검토자: Gemini Antigravity / Claude Code(완료), Codex, 사용자
-- 목표·완료 기준: M1~M4 기준정보와 ECM(2026-07-28) 설계 및 시나리오(D-1~D-4, E-1~E-2) 정합성 선행 감사 완료.
-- 영향 범위·결정/가정: ECM 래퍼 주입, VIRTUAL 시뮬레이션 오버레이 격리, 템플릿-마스터 1:1 바인딩 3대 해결책 제시.
-- 증거·다음 행동: 감사 보고서 [audit_report_m1_m4_enterprise_context.md](file:///C:/Users/denni/.gemini/antigravity-ide/brain/674cfd24-4b90-4e2e-8295-258d25bd5b89/audit_report_m1_m4_enterprise_context.md) 작성 완료.
-  **Claude Code 교차검토 결과**: Finding 3건·Action 3건에 대체로 동의. 대안 2건을
-  `DECISIONS.md` [R-001](마스터 본문을 프로필 payload 에 넣지 말고 MDM 에 두되 문맥 컬럼 + 바인딩만
-  — 저장소 이중화·진실원본 모호 우려)·[R-002](바인딩 단위를 시나리오 ID → **템플릿**으로 정규화)
-  로 제출. **Antigravity·사용자 확인 필요.**
-  Action 3 은 [ECM-E2-01] 에서 반영 착수, Action 2(VIRTUAL 오버레이 엔진)는 ECM 로드맵 **E3** 범위로
-  판단해 지금은 `entity_mode` 생성 차단(`DECISIONS.md` D-007)까지만 해 둔 상태다.
-
-### [ECM-E1-REVIEW] ECM E1 백엔드 교차검토 요청 (Claude Code → Antigravity / Codex)
-- 상태: 검토 대기
-- 책임 수행자 / 교차 검토자: Claude Code(완료) / **미지정 — 요청 중**
-- 목표·완료 기준: 조직 그래프·범위 전개·권한 가시성 구현이 ECM 설계서와 정합하고 회귀 위험이 없음을
-  독립 관점에서 확인한다. `TEAM_PROTOCOL.md` §1-2 대로 데이터 모델·권한·핵심 API 는 교차검토가
-  기본값이고, §2 에 따라 책임 수행자인 내가 검토자를 겸할 수 없다.
+### [IMPLEMENT-01] 현재 기능 구현·오류 보정
+- 상태: 진행 중
+- 책임 수행자 / 교차 검토자: Claude Code / 작업별 지정
+- 목표·완료 기준: 외부 세션에서 진행 중인 기능 구현과 오류 보정을 코드·테스트 증거로 완료한다.
 - 영향 범위·결정/가정: `DECISIONS.md` D-003(권한 상속은 OPERATING_PARENT 만)·D-004(부서 권한
   재사용)·D-005(부서 id/node_id 이중 해석)에 의존한다. 되돌림 비용이 D-003 은 높다.
 - 증거·다음 행동: 커밋 `2e42968ec` · `core/enterprise_context/` · `tests/test_ecm_e1.py`(36건) ·
@@ -65,6 +30,34 @@
   설계서 §11 E1 완료 표. **검토 요청 관점**: ① 공유서비스·연결집계에서 권한이 새지 않는지
   ② 부서 매핑 없는 상위 노드의 `readable=false` 경로 노출이 정보 유출인지 ③ 순환·깊이 상한이
   실제 조직 규모에서 충분한지 ④ `enterprise_scope_id` 이중 형태 공존의 회귀 위험.
+
+## 검토 대기
+
+### [CHRONICLE-01] 시스템 개발 & 비즈니스 완성 연대기 백서 작성 및 관리
+- 상태: 검토 대기
+- 책임 수행자 / 교차 검토자: Gemini Antigravity / 사용자(Supervisor) 및 전 팀원
+- 목표·완료 기준: 창세기 사상부터 결함 잔혹사(#14~#21), A-1 완주, 4인 팀 체제, ECM E1/E2 통과까지의 시스템 역사를 상세 MD 백서와 인터랙티브 HTML/PPT 웹 백서(`docs/chronicle/index.html`)로 작성 및 수립.
+- 증거·다음 행동: 상세 백서 [SYSTEM_DEVELOPMENT_CHRONICLE.md](file:///c:/WorkSpace/gemini_agent_team_verG/docs/chronicle/SYSTEM_DEVELOPMENT_CHRONICLE.md) 및 인터랙티브 웹/PPT 백서 [index.html](file:///c:/WorkSpace/gemini_agent_team_verG/docs/chronicle/index.html) 작성 완료.
+
+### [ENTERPRISE-01] 엔터프라이즈 제조·시뮬레이션 트랙 선행 점검 (M1~M4 감사 완료)
+- 상태: 검토 대기 → **Claude Code 교차검토 완료, 반영 착수**
+- 책임 수행자 / 교차 검토자: Gemini Antigravity / Claude Code(완료), Codex, 사용자
+- 목표·완료 기준: M1~M4 기준정보와 ECM(2026-07-28) 설계 및 시나리오(D-1~D-4, E-1~E-2) 정합성 선행 감사 완료.
+- 증거·다음 행동: 감사 보고서 [audit_report_m1_m4_enterprise_context.md](file:///C:/Users/denni/.gemini/antigravity-ide/brain/674cfd24-4b90-4e2e-8295-258d25bd5b89/audit_report_m1_m4_enterprise_context.md) 작성 완료. Claude Code R-001/R-002 반영 진행 중.
+
+### [MDM-SCOPE-01] R-001 기준정보 조직 범위 바인딩 (C등급 — 통합 전 검토 필요)
+- 상태: 검토 대기
+- 책임 수행자 / 교차 검토자: Claude Code(완료) / **Antigravity(정합성·데이터)·Codex(제품 영향)**
+- 목표·완료 기준: 감사 Finding 1(기준정보에 조직 문맥 없음) 해결. 본문은 MDM 에 두고
+  `master_scope_bindings` 로 **원본 1 : 적용범위 N**, 주입 경로에 범위 필터.
+- 영향 범위·결정/가정: `TEAM_PROTOCOL` §3-1 **C등급**(권한·보안 + 데이터 구조). `DECISIONS.md`
+  D-009 에 의존. 점진 도입(바인딩 없으면 전사 공통 통과)으로 회귀 위험을 낮췄다.
+- 증거·다음 행동: 커밋 `1fe965902` · `tests/test_master_scope_binding.py`(18건) · 전체 680 통과 ·
+  실측(제1공장 3 / 제2공장·동제련 2 / **LS전선 1** / 범위 미지정 3).
+  **검토 요청 관점**: ① 점진 도입 규칙("바인딩 없으면 통과")이 유출 창구가 되지 않는지
+  ② 캐시 키 분리 대신 요청별 필터를 택한 판단(Codex 권고와 다름 — 근거는 커밋 메시지)
+  ③ 상속(`inherit_descendants`)이 적용 가능성에 한정되고 열람 권한으로 비화하지 않는지
+  ④ `master_version`·`effective_*` 미구현이 지금 단계에서 허용 가능한 한계인지.
 
 ## 차단
 
