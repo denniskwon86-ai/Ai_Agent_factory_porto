@@ -275,14 +275,22 @@ async def get_resolved_profile(scope_id: str, profile_kind: str = "data_profile"
         raise HTTPException(status_code=403, detail="이 부서 자료를 볼 권한이 없습니다.")
 
     base = None
+    industry = None
     if playbook_id:
         from core.advisor_playbook import load_playbook
+        from core.enterprise_context.profile_resolver import check_industry_compatibility
         try:
             pb = load_playbook(playbook_id)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         if not pb:
             raise HTTPException(status_code=404, detail=f"플레이북을 찾을 수 없습니다: {playbook_id}")
+        # D-002 보완 ① — 업종 호환성을 **검증하되 막지 않는다**(§2.1-6: 사용자가 선택·수정할 수
+        #   있어야 한다). 신사업 진출·업종 코드 미정비 같은 정당한 예외를 차단하면 안 된다.
+        #   ⚠️ 저장소를 **명시적으로 넘긴다.** 전역을 쓰게 두면 라우트가 다른 저장소를 쓰는
+        #     구성(테스트·다중 테넌트 분리)에서 업종이 빈 값으로 나와 검증이 조용히 무력화된다.
+        industry = await asyncio.to_thread(check_industry_compatibility, pb, node_id,
+                                           ecm_repository)
         if profile_kind == "data_profile":
             base = playbook_industry_base(pb)
     try:
@@ -290,6 +298,8 @@ async def get_resolved_profile(scope_id: str, profile_kind: str = "data_profile"
     except EcmError as e:
         raise HTTPException(status_code=400, detail=str(e))
     out["scope_ref"] = resolved_ref
+    if industry is not None:
+        out["industry_compatibility"] = industry
     return {"status": "success", "data": out}
 
 

@@ -146,20 +146,34 @@ class DataRequirement(BaseModel):
     external: Optional[ExternalSpec] = None
 
 
-# ── ECM 프로필 상속 체인에서 플레이북의 자리 ──────────────────────────────
+# ── ECM 프로필 상속 체인에서 플레이북의 자리 (DECISIONS.md D-002, 2026-07-28 개정) ──────
 # ⚠️ `design_enterprise_context_master.md` 는 플레이북을 언급하지 않는다. 그런데 §4.4 의
 #   `data_profile`/`solution_profile`/`agent_profile` 이 플레이북의 데이터 요구·추천 템플릿과
 #   정면으로 겹친다. 둘 다 존재하면 무엇이 이기는지 정해야 하므로 **여기서 못 박는다**:
 #
-#     플레이북 = §4.4 상속 체인 **최상위(산업 공통 프로필)** 의 저작 기본값
-#       → 기업집단 → 법인 → 사업부 → 사업장/공장 프로필이 순서대로 오버레이
-#       → 충돌 시 가장 하위의 **승인된** 프로필이 이긴다
+#     플레이북 = **제품 소유의 업무·솔루션 기준선**
+#       필요할 때 산업 공통 데이터 프로필 조각을 제공하되, **산업 자체의 공통 프로필과
+#       동일시하지 않는다.**
 #
-#   이렇게 두는 이유: 도메인 지식(질문 문구·데이터 요구·결손 안내)은 리뷰와 이력이 필요하므로
-#   git diff 가 되는 파일에 남기고, DB(`enterprise_profiles`)는 **조직별 차이만** 담는다.
-#   플레이북을 DB 로 흡수하면 도메인 지식 변경이 코드 리뷰를 우회한다.
-#   ⚠️ 오버레이 해석(리솔버)은 아직 없다 — ECM 로드맵 E2 다. 지금은 자리와 규약만 선언한다.
+#     상속 체인:
+#       산업 공통 프로필 → **업무·솔루션 플레이북 기준선** → 기업집단 → 법인 → 사업부 → 공장
+#         → 프로젝트·시나리오 오버레이
+#       충돌 시 가장 하위의 **승인된** 프로필이 이긴다.
+#
+#   ⚠️ 초안은 "플레이북 = 산업 공통 프로필"로 등치했는데 **과도했다**(Codex 교차검토).
+#     `business_planning` 은 업무 유형이라 제조업 외 산업에도 적용되고, 반대로 한 산업 안에도
+#     경영계획·생산·품질·구매·물류 등 여러 플레이북이 존재한다. 1:1 이 아니다.
+#
+#   파일에 두는 이유는 그대로다: 도메인 지식(질문 문구·데이터 요구·결손 안내)은 리뷰·이력·테스트
+#   대상이어야 하므로 git diff 가 되는 파일에 남기고, DB(`enterprise_profiles`)는 조직별 차이만
+#   담는다. 플레이북을 DB 로 흡수하면 도메인 지식 변경이 코드 리뷰를 우회한다.
+PROFILE_LAYER_PLAYBOOK_BASELINE = "playbook_baseline"
+# 하위호환 별칭 — 기존 플레이북 JSON 의 `profile_layer` 값과 테스트를 깨지 않는다.
 PROFILE_LAYER_INDUSTRY_COMMON = "industry_common"
+PROFILE_LAYERS = (PROFILE_LAYER_PLAYBOOK_BASELINE, PROFILE_LAYER_INDUSTRY_COMMON)
+
+# 업종 무관(공통) 플레이북 표시. `industry_codes` 가 비었거나 이 값을 담으면 모든 업종에 적용된다.
+INDUSTRY_ANY = "*"
 
 
 class Playbook(BaseModel):
@@ -169,11 +183,34 @@ class Playbook(BaseModel):
     description: str = ""
     business_type: str = "planning_budget"
     owner_department_hint: str = ""
-    # ECM 상속 체인에서 이 플레이북이 놓이는 층. 지금은 전부 산업 공통이다.
-    profile_layer: str = PROFILE_LAYER_INDUSTRY_COMMON
-    # 어느 업종에 적용되는가(ECM `industry_code`). 비면 업종 무관 공통.
-    #   E2 에서 조직의 `business_profile.industry_code` 와 매칭해 후보를 좁히는 데 쓴다.
+    # ECM 상속 체인에서 이 플레이북이 놓이는 층(D-002 — 업무·솔루션 기준선).
+    profile_layer: str = PROFILE_LAYER_PLAYBOOK_BASELINE
+    # 어느 업종에 적용되는가(ECM `industry_code`). **비면 업종 무관 공통**이다.
+    #   조직의 `business_profile.industry_code` 와 검증해 맞지 않는 플레이북은 추천에서 제외한다
+    #   (D-002 보완 ① — 선언만 해두고 쓰지 않으면 아무 효과가 없다).
     industry_codes: List[str] = Field(default_factory=list)
+    # 플레이북 개정 버전. 파일 해시와 함께 "당시 어떤 기준으로 추천됐는가"의 재현 근거가 된다
+    #   (D-002 보완 ② — 버전이 없으면 플레이북이 바뀐 뒤 과거 추천을 설명할 수 없다).
+    version: int = 1
+
+    # ── 업종 호환성 (D-002 보완 ①) ────────────────────────────────────────
+    def applies_to_industry(self, industry_code: str) -> bool:
+        """이 플레이북이 해당 업종에 적용되는가.
+
+        `industry_codes` 가 비었거나 `*` 를 담으면 업종 무관 공통이다. 조직의 업종을 모르는
+        경우(빈 문자열)에도 **막지 않는다** — 업종 정보가 없다는 이유로 상담을 못 하게 하면
+        ECM 도입 전 사용자가 전부 차단된다(하위호환)."""
+        codes = [c for c in (self.industry_codes or []) if c]
+        if not codes or INDUSTRY_ANY in codes:
+            return True
+        if not industry_code:
+            return True
+        return industry_code in codes
+
+    @property
+    def is_industry_agnostic(self) -> bool:
+        codes = [c for c in (self.industry_codes or []) if c]
+        return not codes or INDUSTRY_ANY in codes
     # §4.7 — 상담 결과를 기존 파이프라인으로 넘길 때 추천할 워크플로우 템플릿
     recommended_template_id: str = ""
     questions: List[PlaybookQuestion] = Field(default_factory=list)
@@ -204,6 +241,25 @@ def _safe_id(playbook_id: str) -> str:
 
 def _path(playbook_id: str) -> str:
     return os.path.join(PLAYBOOKS_DIR, f"{_safe_id(playbook_id)}.json")
+
+
+def playbook_fingerprint(playbook_id: str) -> Dict[str, Any]:
+    """플레이북 파일의 재현 지문 — `{playbook_id, version, content_sha256}` (D-002 보완 ②).
+
+    ⚠️ **버전만으로는 부족하다.** 저자가 내용을 바꾸고 버전을 안 올리면 같은 버전이 다른 내용을
+      가리킨다. 파일 해시가 있으면 "당시 그 파일이 정확히 무엇이었나"를 되짚을 수 있다.
+      해시는 **파일 바이트 그대로** 계산한다(파싱 후 재직렬화하면 키 순서·공백에 따라 달라진다).
+    파일을 읽을 수 없으면 해시를 빈 값으로 두고 막지 않는다 — 지문 부재가 상담을 멈추게 하면 안 된다."""
+    import hashlib
+    out: Dict[str, Any] = {"playbook_id": playbook_id, "version": 0, "content_sha256": ""}
+    try:
+        with open(_path(playbook_id), "rb") as f:
+            raw = f.read()
+        out["content_sha256"] = hashlib.sha256(raw).hexdigest()
+        out["version"] = int((json.loads(raw.decode("utf-8")) or {}).get("version", 1) or 1)
+    except Exception:
+        pass
+    return out
 
 
 def load_playbook(playbook_id: str) -> Optional[Playbook]:
@@ -241,7 +297,31 @@ def list_playbooks() -> List[Dict[str, Any]]:
             "question_count": len(pb.questions),
             "requirement_count": len(pb.data_requirements),
             "recommended_template_id": pb.recommended_template_id,
+            # D-002 보완 — 업종 호환성 판단과 재현 지문을 목록에서 바로 볼 수 있게 한다.
+            "industry_codes": list(pb.industry_codes or []),
+            "industry_agnostic": pb.is_industry_agnostic,
+            "version": pb.version,
         })
+    return out
+
+
+def list_playbooks_for_industry(industry_code: str) -> List[Dict[str, Any]]:
+    """업종에 맞는 플레이북만 (D-002 보완 ①).
+
+    맞지 않는 것을 **목록에서 지우지 않고** `applies=False` 로 표시해 함께 돌려준다 —
+    사용자가 "왜 내가 아는 플레이북이 안 보이나" 하고 혼란하는 것보다, 보이되 왜 권장되지 않는지
+    아는 편이 낫다(설계서 §2.1-6 "AI 는 조직·업종을 임의로 단정하지 않는다. 사용자가 선택·수정할
+    수 있다")."""
+    out = []
+    for row in list_playbooks():
+        pb = load_playbook(row["playbook_id"])
+        applies = pb.applies_to_industry(industry_code) if pb else True
+        row = dict(row)
+        row["applies"] = applies
+        if not applies:
+            row["reason"] = (f"이 플레이북은 업종 {', '.join(pb.industry_codes)} 용입니다"
+                             f"(선택 조직 업종: {industry_code or '미지정'}).")
+        out.append(row)
     return out
 
 

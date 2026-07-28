@@ -85,15 +85,15 @@ def test_unapproved_profile_is_skipped_with_reason(stack):
     assert out["skipped"] and "승인" in out["skipped"][0]["reason"]
 
 
-def test_industry_base_is_the_bottom_layer(stack):
-    """플레이북(산업 공통)이 최상위이고 조직이 그것을 덮는다(D-002)."""
+def test_playbook_baseline_is_the_top_layer(stack):
+    """플레이북 기준선이 체인 최상위이고 조직이 그것을 덮는다(D-002, 2026-07-28 개정)."""
     repo, ids, pr = stack
     _prof(repo, ids["MNM_BATTERY"], {"freshness_days": 7})
     out = pr.resolve(ids["MNM_BATTERY"], "data_profile",
                      industry_base={"freshness_days": 30, "industry": "제련"})
     assert out["payload"]["freshness_days"] == 7, "조직이 산업 공통을 덮는다"
     assert out["payload"]["industry"] == "제련", "조직이 안 건드린 것은 산업 공통이 남는다"
-    assert out["sources"][0]["layer"] == "industry_common"
+    assert out["sources"][0]["layer"] == "playbook_baseline"
 
 
 # ── ② 리스트 교체 ────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ def test_sources_record_application_order(stack):
     out = pr.resolve(ids["BATT_PLANT_1"], "data_profile",
                      industry_base={"z": 0}, overlay={"c": 3})
     layers = [s["layer"] for s in out["sources"]]
-    assert layers[0] == "industry_common" and layers[-1] == "overlay"
+    assert layers[0] == "playbook_baseline" and layers[-1] == "overlay"
     assert out["payload"] == {"z": 0, "a": 1, "b": 2, "c": 3}
 
 
@@ -314,7 +314,7 @@ def test_api_resolved_profile_with_playbook_base(client):
     d = r.json()["data"]
     assert d["payload"]["freshness_days"] == 7
     assert d["payload"]["playbook_id"] == PB_ID, "산업 공통 층이 들어갔다"
-    assert d["sources"][0]["layer"] == "industry_common"
+    assert d["sources"][0]["layer"] == "playbook_baseline"
     assert d["scope_ref"]["kind"] == "ecm_node"
 
 
@@ -349,3 +349,165 @@ def test_api_template_binding_unknown_is_not_error(client):
     _as(app, unrestricted=True)
     d = c.get("/api/v1/enterprise-context/templates/default/binding").json()["data"]
     assert d["bound"] is False and d["known_templates"]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# D-002 보완 (Codex 교차검토 2026-07-28) — 업종 호환성 · 재현 지문 · 프로필 스냅샷
+#
+# 개정 취지: 플레이북은 '산업 공통 프로필'이 아니라 **제품 소유의 업무·솔루션 기준선**이다.
+#   `business_planning` 은 업무 유형이라 제조업 외에도 적용되고, 한 산업 안에도 여러 플레이북이
+#   있으므로 1:1 이 아니다. 그래서 ① 업종 호환성을 실제로 검증하고 ② 버전·해시로 재현 가능하게
+#   하고 ③ 실행 당시 프로필을 스냅샷으로 고정한다.
+# ══════════════════════════════════════════════════════════════════════════
+from core.advisor_playbook import (INDUSTRY_ANY, PROFILE_LAYER_PLAYBOOK_BASELINE,
+                                   list_playbooks_for_industry, playbook_fingerprint)
+from core.enterprise_context.profile_resolver import (check_industry_compatibility,
+                                                      node_industry_code)
+
+
+# ── ① 업종 호환성 ────────────────────────────────────────────────────────
+def test_industry_agnostic_playbook_applies_everywhere():
+    """`industry_codes` 가 비면 업종 무관 공통이다 — 배포된 플레이북이 그 상태다."""
+    pb = load_playbook(PB_ID)
+    assert pb.is_industry_agnostic is True
+    for code in ("C2412", "C2013", "J5821", ""):
+        assert pb.applies_to_industry(code) is True
+
+
+def test_industry_specific_playbook_filters():
+    pb = load_playbook(PB_ID)
+    pb.industry_codes = ["C2412"]                      # 제련업 전용으로 가정
+    assert pb.is_industry_agnostic is False
+    assert pb.applies_to_industry("C2412") is True
+    assert pb.applies_to_industry("J5821") is False
+    assert pb.applies_to_industry("") is True, \
+        "★ 조직 업종을 모른다는 이유로 막으면 ECM 도입 전 사용자가 전부 차단된다"
+
+
+def test_wildcard_industry_is_agnostic():
+    pb = load_playbook(PB_ID)
+    pb.industry_codes = [INDUSTRY_ANY]
+    assert pb.is_industry_agnostic is True and pb.applies_to_industry("J5821") is True
+
+
+def test_node_industry_falls_back_to_ancestor(stack, monkeypatch):
+    """★ 공장에 업종이 없어도 그 법인의 업종은 있다 — 노드 하나만 보면 검증이 무력해진다."""
+    repo, ids, pr = stack
+    import core.enterprise_context.repository as repo_mod
+    import core.enterprise_context.resolver as res_mod
+    monkeypatch.setattr(repo_mod, "ecm_repository", repo)
+    monkeypatch.setattr(res_mod, "ecm_resolver", EcmResolver(repo))
+    # 시드: 제1공장 자체 업종 C2013, 상위 LS MnM 은 C2412
+    assert node_industry_code(ids["BATT_PLANT_1"], repo) == "C2013"
+    # 공장 업종을 비우면 조상(사업부 C2013 → 법인 C2412)에서 찾아온다
+    node = repo.get_node(ids["BATT_PLANT_1"])
+    ent = repo.get_entity(node.entity_id)
+    ent.industry_code = ""
+    repo.upsert_entity(ent)
+    assert node_industry_code(ids["BATT_PLANT_1"], repo) in ("C2013", "C2412")
+
+
+def test_compatibility_warns_but_does_not_block(stack, monkeypatch):
+    """★ §2.1-6 — AI 는 업종을 임의로 단정하지 않는다. 막으면 신사업·코드 미정비를 차단한다."""
+    repo, ids, pr = stack
+    import core.enterprise_context.repository as repo_mod
+    import core.enterprise_context.resolver as res_mod
+    monkeypatch.setattr(repo_mod, "ecm_repository", repo)
+    monkeypatch.setattr(res_mod, "ecm_resolver", EcmResolver(repo))
+    pb = load_playbook(PB_ID)
+    pb.industry_codes = ["J5821"]                      # 소프트웨어업 전용으로 가정
+    r = check_industry_compatibility(pb, ids["BATT_PLANT_1"], repo)
+    assert r["compatible"] is False
+    assert r["warning"] and "그대로 진행할 수 있으나" in r["warning"]
+    assert r["organization_industry_code"] == "C2013"
+
+
+def test_playbook_list_marks_incompatible_instead_of_hiding():
+    """맞지 않는 것을 지우면 '왜 안 보이나' 하고 혼란한다 — 보이되 이유를 준다."""
+    rows = list_playbooks_for_industry("J5821")
+    assert rows and all("applies" in r for r in rows)
+    assert all(r["applies"] for r in rows), "배포 플레이북은 업종 무관이라 전부 적용"
+
+
+# ── ② 재현 지문 (버전 + 파일 해시) ────────────────────────────────────────
+def test_fingerprint_has_version_and_hash():
+    """★ 버전만으로는 부족하다 — 저자가 내용을 바꾸고 버전을 안 올리면 같은 버전이 다른 내용이다."""
+    fp = playbook_fingerprint(PB_ID)
+    assert fp["playbook_id"] == PB_ID
+    assert fp["version"] >= 1
+    assert len(fp["content_sha256"]) == 64, "SHA-256 16진 문자열"
+
+
+def test_fingerprint_changes_when_file_changes(tmp_path, monkeypatch):
+    import core.advisor_playbook as ap
+    monkeypatch.setattr(ap, "PLAYBOOKS_DIR", str(tmp_path))
+    (tmp_path / "x.json").write_text('{"playbook_id":"x","name_ko":"X","version":1}',
+                                     encoding="utf-8")
+    first = ap.playbook_fingerprint("x")
+    (tmp_path / "x.json").write_text('{"playbook_id":"x","name_ko":"X","version":2}',
+                                     encoding="utf-8")
+    second = ap.playbook_fingerprint("x")
+    assert first["content_sha256"] != second["content_sha256"]
+    assert second["version"] == 2
+
+
+def test_missing_playbook_fingerprint_is_safe():
+    """지문 부재가 상담을 멈추게 하면 안 된다."""
+    fp = playbook_fingerprint("ghost_pb")
+    assert fp["content_sha256"] == "" and fp["version"] == 0
+
+
+def test_resolved_sources_carry_fingerprint(stack):
+    """★★ `sources` 에 지문이 없으면 플레이북이 바뀐 뒤 과거 추천을 설명할 수 없다."""
+    repo, ids, pr = stack
+    pb = load_playbook(PB_ID)
+    out = pr.resolve(ids["MNM_BATTERY"], "data_profile",
+                     industry_base=playbook_industry_base(pb))
+    src = out["sources"][0]
+    assert src["layer"] == PROFILE_LAYER_PLAYBOOK_BASELINE
+    assert src["playbook_id"] == PB_ID
+    assert len(src["content_sha256"]) == 64
+    assert src["version"] >= 1
+
+
+def test_industry_base_carries_version():
+    base = playbook_industry_base(load_playbook(PB_ID))
+    assert base["playbook_version"] >= 1
+
+
+# ── ③ 프로필 스냅샷 고정 ──────────────────────────────────────────────────
+def test_blueprint_pins_profile_snapshot():
+    """★★ 플레이북은 바뀐다. 스냅샷이 없으면 6개월 뒤 '현재의' 플레이북으로 재현해 답이 달라진다."""
+    from core.advisor_blueprint import assemble_blueprint
+    pb = load_playbook(PB_ID)
+    answers = {q.id: [o.key() for o in q.options if o.recommended] for q in pb.questions}
+    bp = assemble_blueprint(pb, answers)
+    snap = bp.profile_snapshot
+    assert snap and snap["sources"][0]["playbook_id"] == PB_ID
+    assert len(snap["sources"][0]["content_sha256"]) == 64
+
+
+def test_blueprint_accepts_resolved_snapshot(stack):
+    """조직 프로필까지 해석한 결과를 그대로 고정할 수 있어야 한다."""
+    from core.advisor_blueprint import assemble_blueprint
+    repo, ids, pr = stack
+    pb = load_playbook(PB_ID)
+    _prof(repo, ids["MNM_BATTERY"], {"freshness_days": 7})
+    resolved = pr.resolve(ids["MNM_BATTERY"], "data_profile",
+                          industry_base=playbook_industry_base(pb))
+    bp = assemble_blueprint(pb, {}, profile_snapshot=resolved)
+    assert bp.profile_snapshot["payload"]["freshness_days"] == 7
+    assert bp.profile_snapshot["scope_node_id"] == ids["MNM_BATTERY"]
+
+
+# ── API ──────────────────────────────────────────────────────────────────
+def test_api_resolved_profile_reports_industry_compatibility(client):
+    app, c, repo, ids = client
+    _as(app, unrestricted=True)
+    r = c.get(f"/api/v1/enterprise-context/contexts/{ids['BATT_PLANT_1']}/resolved-profile"
+              f"?playbook_id={PB_ID}")
+    assert r.status_code == 200, r.text
+    ic = r.json()["data"]["industry_compatibility"]
+    assert ic["compatible"] is True, "배포 플레이북은 업종 무관"
+    assert ic["organization_industry_code"] == "C2013"
+    assert ic["playbook_industry_agnostic"] is True

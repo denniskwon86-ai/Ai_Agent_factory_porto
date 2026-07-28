@@ -149,8 +149,15 @@ class ProfileResolver:
         sources: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
         if industry_base:
-            sources.append({"layer": "industry_common", "scope_node_id": "",
-                            "profile_id": "", "mode": "merge"})
+            # D-002 보완 ② — 플레이북 기준선 층에 **재현 지문**(id·version·해시)을 남긴다.
+            #   지문이 없으면 플레이북이 바뀐 뒤 "당시 어떤 기준으로 추천됐는가"를 설명할 수 없다.
+            src: Dict[str, Any] = {"layer": "playbook_baseline", "scope_node_id": "",
+                                   "profile_id": "", "mode": "merge"}
+            _pid = industry_base.get("playbook_id")
+            if _pid:
+                from core.advisor_playbook import playbook_fingerprint
+                src.update(playbook_fingerprint(_pid))
+            sources.append(src)
 
         for nid in self.inheritance_chain(node_id):
             for p in self.repo.list_profiles(scope_node_id=nid, profile_kind=profile_kind):
@@ -192,6 +199,53 @@ profile_resolver = ProfileResolver()
 # ══════════════════════════════════════════════════════════════════════════
 # 플레이북 ↔ 산업 공통 프로필 연결 (DECISIONS.md D-002)
 # ══════════════════════════════════════════════════════════════════════════
+def node_industry_code(node_id: str, repo=None) -> str:
+    """노드의 업종 코드. 없으면 운영 조상에서 올라가며 찾는다(D-002 보완 ①).
+
+    ⚠️ 공장에 업종이 없어도 그 법인의 업종은 있다. 노드 하나만 보면 대부분 빈 값이 나와
+      업종 검증이 무력해진다.
+    ⚠️ **조상 탐색도 넘겨받은 `repo` 를 써야 한다.** 전역 `ecm_resolver` 를 쓰면 `repo` 인자를
+      받으면서 실제로는 다른 DB 를 보게 되어, 업종이 늘 빈 값으로 나와 검증이 조용히 무력화된다
+      (테스트가 잡았다 — 이 프로젝트에서 반복된 '인자는 받는데 안 쓰는' 유형)."""
+    from core.enterprise_context.repository import ecm_repository
+    from core.enterprise_context.resolver import EcmResolver
+    repo = repo or ecm_repository
+    node = repo.get_node(node_id) if node_id else None
+    if not node:
+        return ""
+    ent = repo.get_entity(node.entity_id)
+    if ent and ent.industry_code:
+        return ent.industry_code
+    for anc in EcmResolver(repo).ancestors(node_id, REL_OPERATING_PARENT):
+        an = repo.get_node(anc)
+        if not an:
+            continue
+        ae = repo.get_entity(an.entity_id)
+        if ae and ae.industry_code:
+            return ae.industry_code
+    return ""
+
+
+def check_industry_compatibility(pb, node_id: str, repo=None) -> Dict[str, Any]:
+    """플레이북과 조직 업종의 호환성 판정 (D-002 보완 ①).
+
+    **막지 않고 경고한다.** 설계서 §2.1-6 이 "AI 는 조직·업종을 임의로 단정하지 않는다. 프로필과
+    승인된 템플릿을 근거로 추천하고 사용자가 선택·수정할 수 있다"고 했다. 업종이 다르다는 이유로
+    차단하면 정당한 예외(신사업 진출·업종 코드 미정비)를 막는다."""
+    industry = node_industry_code(node_id, repo)
+    applies = pb.applies_to_industry(industry)
+    return {
+        "compatible": applies,
+        "organization_industry_code": industry,
+        "playbook_industry_codes": list(pb.industry_codes or []),
+        "playbook_industry_agnostic": pb.is_industry_agnostic,
+        "warning": ("" if applies else
+                    f"이 플레이북은 업종 {', '.join(pb.industry_codes)} 용인데 선택 조직의 업종은 "
+                    f"'{industry or '미지정'}'입니다. 그대로 진행할 수 있으나 추천 데이터 요구사항이 "
+                    f"현장과 맞지 않을 수 있습니다."),
+    }
+
+
 def playbook_industry_base(pb) -> Dict[str, Any]:
     """플레이북을 `data_profile` 의 **산업 공통 층**으로 변환한다.
 
@@ -202,6 +256,7 @@ def playbook_industry_base(pb) -> Dict[str, Any]:
     진실원본이므로 복사하지 않는다(복사하면 두 곳이 어긋난다)."""
     return {
         "playbook_id": pb.playbook_id,
+        "playbook_version": pb.version,
         "business_type": pb.business_type,
         "recommended_template_id": pb.recommended_template_id,
         "requirements": {r.key: {"necessity": r.necessity,

@@ -175,6 +175,13 @@ class SolutionBlueprint(BaseModel):
     readiness: Dict[str, Any] = Field(default_factory=dict)   # 산정 내역 전체(근거 보존)
     recommended_sequence: List[str] = Field(default_factory=list)
 
+    # ── [D-002 보완 ③] 실행 당시 해석된 프로필 스냅샷 ──────────────────────
+    # ⚠️ 플레이북과 조직 프로필은 **바뀐다.** 스냅샷이 없으면 6개월 뒤 "이 Blueprint 가 왜 이런
+    #   요구사항을 갖게 됐나"를 되짚을 때 **현재의** 플레이북으로 재현하게 되어 답이 달라진다.
+    #   `sources` 에 플레이북 id·version·파일 해시가 들어 있어 당시 파일을 특정할 수 있다.
+    #   조직 프로필을 안 쓴 경우(ECM 미도입)에는 빈 dict 다.
+    profile_snapshot: Dict[str, Any] = Field(default_factory=dict)
+
     status: str = "draft"                 # draft | approved | rejected
     provenance: Dict[str, Provenance] = Field(default_factory=dict)
     approved_by: str = ""
@@ -211,7 +218,8 @@ def _selected_labels(pb: Playbook, answers: Dict[str, List[str]]) -> Dict[str, L
 def assemble_blueprint(pb: Playbook, answers: Dict[str, List[str]],
                        statuses: Optional[Dict[str, str]] = None,
                        initial_prompt: str = "",
-                       free_text: Optional[Dict[str, str]] = None) -> SolutionBlueprint:
+                       free_text: Optional[Dict[str, str]] = None,
+                       profile_snapshot: Optional[Dict[str, Any]] = None) -> SolutionBlueprint:
     """플레이북 + 상담 답변 → Blueprint 초안. **LLM 0콜, 같은 입력이면 같은 결과.**
 
     `statuses`: 요구사항별 보유 상태(없으면 전부 `missing` — 모르는 것을 보유로 치지 않는다).
@@ -302,6 +310,18 @@ def assemble_blueprint(pb: Playbook, answers: Dict[str, List[str]],
             "kpis": Provenance(origin="rule", confirmed=False, note="미작성"),
         },
     )
+    # [D-002 보완 ③] 실행 당시 해석된 프로필을 고정한다. 조직 프로필을 안 쓴 경우에도 최소한
+    #   플레이북 지문은 남긴다 — 그것만으로도 "당시 어떤 기준선이었나"를 특정할 수 있다.
+    if profile_snapshot:
+        bp.profile_snapshot = dict(profile_snapshot)
+    else:
+        try:
+            from core.advisor_playbook import playbook_fingerprint
+            bp.profile_snapshot = {"sources": [{"layer": "playbook_baseline",
+                                                **playbook_fingerprint(pb.playbook_id)}]}
+        except Exception:
+            bp.profile_snapshot = {}
+
     # 자유 입력이 있으면 문제 기술에 덧붙인다(버리지 않는다 — 사용자가 쓴 것은 근거다)
     extra = [t.strip() for t in free_text.values() if (t or "").strip()]
     if extra:

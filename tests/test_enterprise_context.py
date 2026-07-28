@@ -28,7 +28,7 @@ import api.routes.advisor_control as ac
 import config
 from api.deps import Principal, current_principal
 from core.advisor_blueprint import DATA_KINDS, assemble_blueprint
-from core.advisor_playbook import PROFILE_LAYER_INDUSTRY_COMMON, load_playbook
+from core.advisor_playbook import PROFILE_LAYER_PLAYBOOK_BASELINE, load_playbook
 from core.advisor_store import AdvisorStore
 from core.enterprise_context import (CREATABLE_ENTITY_MODES, ENTITY_MODE_COMPETITOR,
                                      ENTITY_MODE_REAL, ENTITY_MODE_VIRTUAL, ENTITY_MODES,
@@ -101,11 +101,14 @@ def test_competitor_is_a_distinct_data_kind():
     assert "scenario" in DATA_KINDS
 
 
-def test_playbook_declares_industry_common_profile_layer():
-    """ECM §4.4 상속 체인의 최상위가 플레이북이라는 규약(설계서가 명시하지 않아 여기서 못 박음)."""
+def test_playbook_declares_baseline_profile_layer():
+    """D-002(2026-07-28 개정) — 플레이북은 '산업 공통 프로필'이 아니라 **업무·솔루션 기준선**이다.
+    `business_planning` 은 업무 유형이라 제조업 외 산업에도 적용되고, 한 산업 안에도 여러
+    플레이북이 있으므로 1:1 이 아니다(Codex 교차검토)."""
     pb = load_playbook(PB_ID)
-    assert pb.profile_layer == PROFILE_LAYER_INDUSTRY_COMMON
+    assert pb.profile_layer == PROFILE_LAYER_PLAYBOOK_BASELINE
     assert isinstance(pb.industry_codes, list)
+    assert pb.version >= 1, "재현 지문에 버전이 필요하다(D-002 보완 ②)"
 
 
 # ── ④ 구 스키마 마이그레이션 ──────────────────────────────────────────────
