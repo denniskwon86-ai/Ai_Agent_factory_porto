@@ -1,5 +1,7 @@
 # M2 상세 설계 — 스키마 레지스트리 + 키 크로스워크 (Schema Registry & Key Crosswalk)
 
+> **ECM 연계 확장(2026-07-28):** 크로스워크는 법인·사업부·사업장별 로컬 키와 전사 표준 키의 범위를 함께 기록해야 하며, 가상/경쟁사 문맥의 키가 실제 운영계 키 또는 연결 자격증명으로 해석되지 않게 한다. 상세 기준: [`design_enterprise_context_master.md`](design_enterprise_context_master.md).
+
 > 작성: 2026-07-22 | 상태: **설계 확정(구현 대기 — 열린 질문 a/b/c 승인 완료)** | 선행: M1(`docs/design_master_data_m1.md`, 구현 완료)
 > 후속: M3 MCP 데이터 브로커. 근거: AI_HANDOFF §2-3 로드맵("연계 축").
 

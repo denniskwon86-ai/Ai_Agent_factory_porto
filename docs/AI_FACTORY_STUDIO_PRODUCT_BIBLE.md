@@ -1,5 +1,7 @@
 # AI Factory Studio Product Bible
 
+> **Enterprise Context Master 확장(2026-07-28):** 기업집단·법인·사업부·사업장·공장·공유서비스를 단순 메뉴가 아닌 제품 실행 문맥으로 관리한다. 실제 조직뿐 아니라 신사업/증설/변경을 위한 가상 조직과 공개 근거 기반 경쟁사 참조 모델을 지원한다. 상세 기준은 [`design_enterprise_context_master.md`](design_enterprise_context_master.md)를 따른다.
+
 > 이 문서는 AI Factory Studio를 함께 만드는 모든 사람과 AI 에이전트의 공통 기준이다.  
 > 대상: 제품 오너, 개발자, 도메인 전문가, Codex, Claude Code, Gemini Antigravity 및 이후 참여하는 모든 LLM·협업자.  
 > 기준일: 2026-07-28  

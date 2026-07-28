@@ -1,5 +1,7 @@
 # 🚀 Antigravity AI Factory: 엔터프라이즈 독점적 지위(Moat) 확보 전략 보고서
 
+> **전략 보강(2026-07-28):** 제품의 방어력은 단순 생성 모델이 아니라 각 고객의 기업집단·법인·사업부·공장 문맥, 승인된 데이터·프로세스·권한·시나리오가 함께 축적되는 데서 나온다. 가상 신사업/증설 모델과 근거 기반 경쟁사 참조를 포함한 기준 설계는 [`../design_enterprise_context_master.md`](../design_enterprise_context_master.md)를 따른다.
+
 본 문서는 Antigravity AI Factory & Simulator 시스템이 범용 코딩 AI(Claude Code, Copilot 등)와 비교해 갖는 **본질적인 비교 우위(Unique Selling Proposition)**를 명확히 하고, 이를 바탕으로 엔터프라이즈 B2B 시장에서 **대체 불가능한 독점적 솔루션(Moat)**으로 도약하기 위한 핵심 발전 전략을 서술합니다.
 
 ---

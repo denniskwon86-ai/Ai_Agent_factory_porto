@@ -1,5 +1,7 @@
 # M1 상세 설계 — 경량 기준정보 저장소 (Master Data Store)
 
+> **ECM 연계 확장(2026-07-28):** M1은 품목·고객 등 기준정보뿐 아니라 Enterprise Context Master가 정의한 기업집단/법인/사업부/사업장/공장 범위, 업종·공정 프로필, 동의어, 유효기간을 참조할 수 있어야 한다. 조직 프로필은 거래 원장이 아니며 실제·가상·경쟁사 상태를 섞지 않는다. 상세 기준: [`design_enterprise_context_master.md`](design_enterprise_context_master.md).
+
 > 작성: 2026-07-18 | 개정: 2026-07-20 (설계 검토 반영) | 상태: **설계 확정, 구현 대기**
 > 배경 검토: MDM/MCP 연계 타당성 검토(AI_HANDOFF §2-3 로드맵 참조).
 > M1 은 LLM 0콜·로컬 완결이며, M2(크로스워크)·M3(MCP 브로커)의 토대가 된다.

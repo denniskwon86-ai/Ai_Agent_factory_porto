@@ -1,5 +1,7 @@
 # M3 상세 설계 — MCP 데이터 브로커 (Virtual Integration Broker)
 
+> **ECM 연계 확장(2026-07-28):** MCP 조회는 선택된 `EnterpriseContext`의 범위·도메인 권한·데이터 계약을 통과해야 한다. `VIRTUAL`과 `COMPETITOR_REFERENCE` 문맥은 외부 운영계 호출과 자격증명 사용을 기본 금지하고 승인된 스냅샷/공개 근거만 사용한다. 상세 기준: [`design_enterprise_context_master.md`](design_enterprise_context_master.md).
+
 > 작성: 2026-07-22 | 상태: **설계 확정(구현 착수 — 열린 질문 a~e 승인 완료)** | 선행: M1·M2(구현 완료)
 > 근거: AI_HANDOFF §2-3 "연계 축" 최종 단계. "전체 복제가 아니라 메타+키맵만 복제, 데이터는 MCP
 > 온디맨드 조회 + TTL 캐시(가상 통합)".

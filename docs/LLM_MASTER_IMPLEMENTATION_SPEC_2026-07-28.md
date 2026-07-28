@@ -1,5 +1,7 @@
 # AI Factory Studio — LLM 구현 마스터 명세서
 
+> **Enterprise Context Master 선행 규칙(2026-07-28):** 이후 구현되는 MDM, 카탈로그, MCP, 권한, 상담사, SW 생성기, 시뮬레이션은 `tenant → 기업집단 → 법인 → 사업부 → 사업장/공장` 문맥과 실제/가상/경쟁사 상태를 명시적으로 가져야 한다. 상세 모델·API·복제·격리 규칙은 [`design_enterprise_context_master.md`](design_enterprise_context_master.md)를 SSOT로 한다.
+
 > 문서 목적: 이 문서는 다른 LLM 또는 개발 에이전트가 별도의 대화 이력 없이도 AI Factory Studio의 제품 의도, 현재 구현 경계, 향후 기능 설계, 구현 우선순위와 완료 기준을 이해하고 일관되게 작업하도록 하는 기준 문서다.
 >
 > 기준일: 2026-07-28  
