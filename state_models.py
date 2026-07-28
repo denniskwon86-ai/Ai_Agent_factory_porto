@@ -107,6 +107,13 @@ class ProjectState(BaseModel):
     #     요구사항을 갖게 됐나"를 되짚을 수 없다(§1.3 기업 의도와 결정의 보존). 상담 없이 만든
     #     프로젝트는 빈 값이다.
     blueprint_id: str = Field(default="", description="출처 Solution Blueprint id (없으면 직접 생성)")
+    # [ECM E1/E2 · R-001] 실행 문맥. 기준정보 주입의 **범위 필터 기준**이 된다.
+    #   ⚠️ 이 값이 없으면 `master_data.get_master_context()` 가 전체 활성 기준정보를 도메인만 맞으면
+    #     주입해 A 법인 기준정보가 B 법인 프롬프트에 섞인다(감사 Finding 1). 진실원본은
+    #     `project_meta.json` 이고 여기는 주입본이다.
+    tenant_id: str = Field(default="", description="테넌트(ECM) — 비면 기본 테넌트")
+    enterprise_scope_id: str = Field(default="", description="조직 범위 — 부서 id 또는 ECM node_id")
+    entity_mode: str = Field(default="REAL", description="REAL | VIRTUAL | COMPETITOR_REFERENCE")
     initial_idea: str = Field(default="")
     master_data: str = Field(default="", description="전사 통합 환경변수 및 제약사항 (마스터 데이터)")
     # 범용 플랫폼(T2-b): 이 프로젝트가 실행될 워크플로우 템플릿 id(레지스트리/그래프/스킬 해석의 기준).

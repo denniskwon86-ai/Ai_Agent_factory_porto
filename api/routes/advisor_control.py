@@ -479,6 +479,11 @@ async def bootstrap_project(blueprint_id: str, req: BootstrapIn,
         "blueprint_id": bp.blueprint_id,
         "owner_dept_id": bp.owner_dept_id,
         "owner_user_id": bp.owner_user_id,
+        # [R-001] 실행 문맥을 상태에 심는다 — 이것이 없으면 기준정보 주입에 범위 필터가 걸리지
+        #   않아 다른 법인 기준정보가 이 프로젝트 프롬프트에 섞인다(감사 Finding 1).
+        "tenant_id": bp.tenant_id,
+        "enterprise_scope_id": bp.enterprise_scope_id or bp.owner_dept_id,
+        "entity_mode": bp.entity_mode,
     })
     # [M0-e] 승인된 설계가 실제 프로젝트로 넘어간 지점을 남긴다 — 이 링크가 없으면 나중에
     #   "이 프로젝트가 어느 승인에서 나왔나"를 프로젝트 파일 말고는 확인할 방법이 없다.

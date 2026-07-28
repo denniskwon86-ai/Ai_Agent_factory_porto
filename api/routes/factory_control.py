@@ -90,6 +90,9 @@ _ACCUMULATED_FIELDS = [
     "owner_dept_id", "owner_user_id", "visibility",
     # [M0-d] Blueprint 링크도 유실되면 추적성이 끊긴다(스프린트마다 다시 채워줄 곳이 없다).
     "blueprint_id",
+    # [ECM E1/E2 · R-001] 실행 문맥이 유실되면 기준정보 범위 필터가 풀려 다른 법인 기준정보가
+    #   프롬프트에 섞인다. 소유권과 같은 이유로 누적 보존 대상이다.
+    "tenant_id", "enterprise_scope_id", "entity_mode",
 ]
 
 
