@@ -110,6 +110,24 @@ async def create_record(req: RecordRequest):
         _domain_err(e)
 
 
+@router.get("/records/duplicates")
+async def duplicate_candidates(p: Principal = Depends(current_principal)):
+    """[§14 M1 「중복 후보」] 같은 대상을 가리키는 것으로 의심되는 기준정보 쌍.
+
+    ⚠️ 자동 병합하지 않는다 — 무엇이 정본인지는 현업 판단이고 시스템이 지우면 되돌릴 수 없다.
+      둘 다 활성이면 **두 기준값이 함께 프롬프트에 들어간다**는 점이 문제의 핵심이다.
+
+    ⚠️ **이 라우트는 반드시 `/records/{master_code}` 보다 위에 있어야 한다.** 아래에 두면
+      경로 변수가 'duplicates' 를 master_code 로 잡아 404 가 난다(실제로 그렇게 났다).
+      함수 단위 테스트로는 안 잡히는 결함이라 `tests/test_master_api_routes.py` 로 잠갔다."""
+    rows = await asyncio.to_thread(master_data.find_duplicate_candidates)
+    return {"status": "success", "data": {
+        "candidates": rows, "total": len(rows),
+        "high_confidence": sum(1 for r in rows if r["confidence"] == "high"),
+        "note": "정본을 정한 뒤 한쪽을 폐기하거나 별칭으로 흡수하십시오.",
+    }}
+
+
 @router.get("/records/{master_code}")
 async def get_record(master_code: str):
     data = await asyncio.to_thread(master_data.get_record, master_code)

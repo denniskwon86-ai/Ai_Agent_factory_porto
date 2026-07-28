@@ -637,6 +637,120 @@ class MasterData:
         self._invalidate()
         return changed
 
+    # 중복 후보 판정에서 무시할 접두사·토큰. 문서 출처 표시(M1-/M2-…)나 유형 표시는
+    #   같은 대상을 다른 이름으로 부르게 만드는 주범이라 비교 전에 벗겨낸다.
+    _DEDUP_STRIP_PREFIX = ("M1-", "M2-", "M3-", "M4-", "MX-")
+    _DEDUP_SYNONYM = {"QS": "QC", "SPEC": "QC", "FIN": "FIN", "BOM": "BOM"}
+
+    @classmethod
+    def _dedup_key(cls, code: str) -> str:
+        """비교용 정규화 코드. `M2-BOM-FG-CATHODE-001` 과 `BOM-FG-CATHODE-001` 을 같게 본다."""
+        c = (code or "").upper()
+        for p in cls._DEDUP_STRIP_PREFIX:
+            if c.startswith(p):
+                c = c[len(p):]
+                break
+        toks = [t for t in re.split(r"[-_]+", c) if t]
+        toks = [cls._DEDUP_SYNONYM.get(t, t) for t in toks]
+        return "-".join(toks)
+
+    @staticmethod
+    def _norm_name(name: str) -> str:
+        """비교용 정규화 명칭. 괄호 주석·구분자·대소문자 차이를 제거한다."""
+        n = re.sub(r"\([^)]*\)", " ", (name or ""))
+        n = re.sub(r"[^0-9A-Za-z가-힣]+", " ", n).strip().lower()
+        return re.sub(r"\s+", " ", n)
+
+    def find_duplicate_candidates(self) -> list:
+        """[§14 M1 「MDM 확장 — 중복 후보」] 같은 대상을 가리키는 것으로 **의심되는** 레코드 쌍.
+
+        ★ 왜 필요한가: 실제 개발 DB 에서 같은 대상이 두 벌로 존재했다
+          (`BOM-FG-CATHODE-001` ↔ `M2-BOM-FG-CATHODE-001`). 둘 다 활성이면 **둘 다 주입되어**
+          LLM 이 서로 다른 두 기준값을 동시에 본다. 이건 기준정보의 존재 이유를 정면으로 깬다.
+
+        ⚠️ **자동 병합하지 않는다.** 무엇이 진짜인지는 현업이 판단할 문제이고, 시스템이 골라
+          지우면 되돌릴 수 없다(품질 점검과 같은 원칙 — 처리 목록만 만든다).
+        ⚠️ LLM 0콜. 판정 근거는 코드·명칭·별칭의 **문자열 비교뿐**이다.
+        """
+        recs = self.list_records()
+        # ★ 조직 범위를 함께 본다. 접두사를 무조건 벗기면 **의도된 사업부별 분리**가 중복으로
+        #   오탐된다 — `M1-FIN-COST-STRUCTURE`(배터리소재 원가구조)와
+        #   `M2-FIN-COST-STRUCTURE`(동제련 원가구조)는 같은 이름의 다른 기준이지 중복이 아니다.
+        #   서로 다른 조직에 적용 중이면 "정본 하나로 합쳐라"가 틀린 조언이 된다.
+        scope_of = {}
+        for b in self.list_scope_bindings():
+            scope_of.setdefault(b["master_code"], set()).add(b["scope_node_id"])
+
+        by_key, by_name, by_alias = {}, {}, {}
+        for r in recs:
+            by_key.setdefault(self._dedup_key(r["master_code"]), []).append(r)
+            nm = self._norm_name(r.get("name", ""))
+            if nm:
+                by_name.setdefault(nm, []).append(r)
+            for a in (r.get("aliases") or []):
+                na = self._norm_name(a)
+                if na and na != self._norm_name(r.get("name", "")):
+                    by_alias.setdefault(na, []).append(r)
+
+        found, seen_pairs = [], set()
+
+        def _add(a, b, kind, why, confidence):
+            pair = tuple(sorted((a["master_code"], b["master_code"])))
+            if pair in seen_pairs or pair[0] == pair[1]:
+                return
+            sa, sb = scope_of.get(a["master_code"], set()), scope_of.get(b["master_code"], set())
+            # 서로 다른 조직에만 적용 중이면 의도된 분리일 가능성이 높다 — 병합을 권하지 않는다.
+            separated = bool(sa and sb and not (sa & sb))
+            if kind == "shared_alias":
+                # ★ 별칭 공유는 **레코드 중복이 아니다.** 같은 제품의 BOM 과 품질규격이 제품ID 를
+                #   공유하는 것은 정상이다. 문제는 그 별칭으로 둘을 구분할 수 없다는 것이다.
+                #   여기에 "정본을 정해 하나를 폐기하라"고 안내하면 틀린 조치를 유도한다.
+                same_type = a["type_id"] == b["type_id"]
+                confidence = "medium" if same_type else "low"
+                action = ("별칭이 대상을 특정하지 못합니다. 이 말이 텍스트에 나오면 두 레코드가 "
+                          "함께 주입됩니다. 의도한 것이면 그대로 두고, 아니면 별칭을 구체화하거나 "
+                          "한쪽에서 제거하십시오." + ("" if same_type else
+                          " 유형이 서로 달라(예: BOM ↔ 품질규격) 중복 레코드는 아닐 가능성이 높습니다."))
+            elif separated:
+                kind, confidence = "same_code_different_scope", "low"
+                why += " — 다만 **서로 다른 조직에 각각 적용 중**이라 의도된 사업부별 분리일 수 있다"
+                action = ("병합하지 마십시오. 조직별로 다른 기준이면 정상입니다. "
+                          "다만 이름이 같아 사람이 혼동하므로 명칭에 조직을 드러내는 편이 낫습니다.")
+            else:
+                action = ("현업이 정본을 정한 뒤 한쪽을 폐기(retire)하거나 별칭으로 흡수하십시오. "
+                          "둘 다 활성이고 같은 조직에 보이면 **두 기준값이 함께 프롬프트에 "
+                          "들어갑니다.**")
+            seen_pairs.add(pair)
+            found.append({
+                "kind": kind, "confidence": confidence,
+                "codes": list(pair), "why": why,
+                "types": sorted({a["type_id"], b["type_id"]}),
+                "names": {a["master_code"]: a.get("name"), b["master_code"]: b.get("name")},
+                "scopes": {a["master_code"]: sorted(sa), b["master_code"]: sorted(sb)},
+                "same_scope_overlap": sorted(sa & sb),
+                "suggested_action": action,
+            })
+
+        for key, group in by_key.items():
+            for i in range(len(group)):
+                for j in range(i + 1, len(group)):
+                    _add(group[i], group[j], "same_normalized_code",
+                         f"접두사를 제거하면 코드가 같다: '{key}'", "high")
+        for nm, group in by_name.items():
+            for i in range(len(group)):
+                for j in range(i + 1, len(group)):
+                    _add(group[i], group[j], "same_name",
+                         f"정규화 명칭이 같다: '{nm}'", "high")
+        for na, group in by_alias.items():
+            for i in range(len(group)):
+                for j in range(i + 1, len(group)):
+                    _add(group[i], group[j], "shared_alias",
+                         f"같은 별칭을 공유한다: '{na}' — 텍스트에 이 말이 나오면 둘 다 히트한다",
+                         "medium")
+        found.sort(key=lambda f: ({"high": 0, "medium": 1, "low": 2}.get(f["confidence"], 3),
+                                  f["codes"]))
+        return found
+
     def scope_coverage(self, tenant_id: str = "tenant_default") -> dict:
         """[격리 관측] **미바인딩으로 남아 전 조직에 노출되는 기준정보**를 센다.
 
