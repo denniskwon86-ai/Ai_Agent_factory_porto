@@ -183,7 +183,11 @@ class ScopeBindRequest(BaseModel):
     scope_node_id: str
     tenant_id: str = "tenant_default"
     inherit_descendants: bool = True
+    # 버전 고정 — 지정하면 개정 뒤에도 **그 버전의 값**이 주입된다("그때 그 값으로 재현").
     master_version: Optional[int] = None
+    # 적용 기간 — ISO8601. 빈 값은 무제한. 경계는 `from <= 시점 < to`.
+    effective_from: str = ""
+    effective_to: str = ""
 
 
 @router.post("/scope-bindings")
@@ -197,11 +201,29 @@ async def create_scope_binding(req: ScopeBindRequest,
     try:
         out = await asyncio.to_thread(
             master_data.bind_master_to_scope, req.master_code, req.scope_node_id,
-            req.tenant_id, "REAL", req.master_version, req.inherit_descendants, "", "",
-            p.user_id or "")
+            req.tenant_id, "REAL", req.master_version, req.inherit_descendants,
+            req.effective_from, req.effective_to, p.user_id or "")
     except MasterDataError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "success", "data": out}
+
+
+@router.delete("/scope-bindings/{binding_id}")
+async def revoke_scope_binding(binding_id: str,
+                               p: Principal = Depends(current_principal)):
+    """바인딩 해제(소프트 — `status='revoked'`).
+
+    ⚠️ 해제는 **차단이 아니다.** 그 코드에 다른 바인딩이 없으면 미바인딩 상태가 되고, 점진 도입
+      규칙에 따라 전사 공통으로 통과한다. 실제로 막으려면 레코드를 폐기해야 한다."""
+    assert_can_manage_standard(p)
+    ok = await asyncio.to_thread(master_data.unbind_master_from_scope, binding_id, p.user_id or "")
+    if not ok:
+        raise HTTPException(status_code=404, detail="활성 바인딩을 찾을 수 없습니다.")
+    return {"status": "success", "data": {
+        "binding_id": binding_id, "revoked": True,
+        "warning": ("해제는 차단이 아닙니다. 이 기준정보에 다른 바인딩이 없으면 "
+                    "전사 공통으로 통과합니다."),
+    }}
 
 
 @router.get("/scope-bindings")
@@ -215,17 +237,26 @@ async def list_scope_bindings(master_code: str = "", scope_node_id: str = "",
 
 @router.get("/scope-bindings/allowed")
 async def allowed_for_scope(scope_node_id: str, tenant_id: str = "tenant_default",
+                            as_of: str = "",
                             p: Principal = Depends(current_principal)):
     """이 조직 범위에 적용 가능한 기준정보 코드.
+
+    `as_of`(ISO8601, 미지정 시 현재)로 **그 시점 기준** 적용 범위를 본다 — 기간 바인딩을
+    등록해 놓고 언제부터 무엇이 바뀌는지 미리 확인하려면 이게 필요하다.
 
     주입 상한은 기본적으로 **없다**(전수 주입). 운영 비상시 환경변수로 걸었다면 그 값을 함께
     주고, 실제로 잘린 건수는 프롬프트 블록에도 명시된다 — 조용히 잘리지 않게."""
     from core.master_data import _INJECT_MAX_CHARS, _INJECT_MAX_ITEMS
-    codes = await asyncio.to_thread(master_data.allowed_codes_for_scope, tenant_id, scope_node_id)
+    binds = await asyncio.to_thread(master_data.bindings_for_scope, tenant_id, scope_node_id,
+                                    "REAL", as_of)
+    codes = set(binds)
     capped = _INJECT_MAX_ITEMS is not None or _INJECT_MAX_CHARS is not None
     return {"status": "success", "data": {
         "scope_node_id": scope_node_id, "tenant_id": tenant_id,
+        "as_of": as_of or "now",
         "allowed_master_codes": sorted(codes), "allowed_count": len(codes),
+        # 버전이 고정된 것만 별도로 — 현행판과 다른 값이 주입된다는 사실은 눈에 띄어야 한다.
+        "pinned_versions": {c: v for c, v in sorted(binds.items()) if v},
         "injection_limit_items": _INJECT_MAX_ITEMS,
         "injection_limit_chars": _INJECT_MAX_CHARS,
         "injection_capped": capped,

@@ -387,6 +387,23 @@ class MasterData:
         finally:
             conn.close()
 
+    def get_record_version(self, master_code: str, version: int) -> dict | None:
+        """[R-001 잔여] **특정 버전**을 꺼낸다(폐기된 구판 포함).
+
+        ★ 버전 고정 바인딩의 존재 이유다 — "그때 그 값으로 재현"하려면 개정 뒤에도 구판을
+          그대로 읽을 수 있어야 한다. 개정은 물리 삭제가 아니라 `status='retired'` 스탬프이므로
+          구판이 남아 있다(리니지 보존)."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM master_records WHERE master_code=? AND version=?",
+                (master_code, int(version))).fetchone()
+            if not row:
+                return None
+            return self._record_row(row, self._aliases_of(conn, master_code))
+        finally:
+            conn.close()
+
     def create_or_revise_record(self, master_code: str, type_id: str, name: str,
                                 attributes: dict = None, domains: list = None, aliases: list = None,
                                 is_core: bool = False, valid_from: str = None,
@@ -551,6 +568,9 @@ class MasterData:
         attr_str = ", ".join(f"{k}={v}" for k, v in attrs.items())
         alias_str = ", ".join(a for a in (rec.get("aliases") or []) if a != rec["name"])
         parts = [f"[{rec['master_code']}] {rec['name']} ({rec.get('type_name_ko', rec['type_id'])})"]
+        if rec.get("pinned_version"):
+            # 고정 버전은 현행판이 아니다. 표시하지 않으면 왜 최신값과 다른지 아무도 모른다.
+            parts.append(f"버전 v{rec['pinned_version']} 고정(현행판 아님)")
         if attr_str:
             parts.append(attr_str)
         if alias_str:
@@ -563,7 +583,13 @@ class MasterData:
                              master_version: int = None, inherit_descendants: bool = True,
                              effective_from: str = "", effective_to: str = "",
                              approved_by: str = "") -> dict:
-        """기준정보를 조직 범위에 적용한다. **원본 1 : 적용범위 N**."""
+        """기준정보를 조직 범위에 적용한다. **원본 1 : 적용범위 N**.
+
+        ⚠️ **UNIQUE 키가 `effective_from` 을 포함하므로, 기간이 같으면 새 바인딩이 아니라
+          기존 바인딩을 덮어쓴다**(upsert). 즉 "이 조직에 v1 고정을 추가한다"고 호출하면 그 조직의
+          기존 바인딩이 v1 고정으로 **바뀐다**. 기간을 달리해야 별도 행이 된다.
+          관리 UI 를 만들 때 '추가'와 '수정'이 같은 호출임을 사용자에게 드러내야 한다
+          (실제로 이 동작을 모르고 시드 바인딩을 덮어쓴 사고가 있었다)."""
         if entity_mode != "REAL":
             # 가상·경쟁사 문맥의 기준정보 적용은 ECM E3(격리 스냅샷) 이후다(D-007).
             raise MasterDataError("현재는 REAL 문맥만 바인딩할 수 있습니다(가상·경쟁사는 E3).")
@@ -591,6 +617,25 @@ class MasterData:
                  approved_by, now if approved_by else "", now, now))
         self._invalidate()      # 바인딩이 바뀌면 주입 결과가 바뀐다
         return {"binding_id": bid, "master_code": master_code, "scope_node_id": scope_node_id}
+
+    def unbind_master_from_scope(self, binding_id: str, revoked_by: str = "") -> bool:
+        """바인딩을 해제한다(소프트 — `status='revoked'`).
+
+        ★ 물리 삭제하지 않는다. "언제 무엇이 이 조직에 적용됐었나"는 감사 대상이고, 지우면
+          과거 산출물이 왜 그 값을 썼는지 설명할 수 없다(Ledger 와 같은 판단).
+        ⚠️ 해제하면 그 코드는 **다른 바인딩이 없는 경우 미바인딩 상태**가 되고, 점진 도입 규칙에
+          따라 **전사 공통으로 통과**한다. 즉 해제는 '차단'이 아니라 '통제 해제'다 — 차단하려면
+          레코드를 폐기(`retire_record`)해야 한다."""
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE master_scope_bindings SET status='revoked', updated_at=?, "
+                "approved_by=CASE WHEN ?<>'' THEN ? ELSE approved_by END "
+                "WHERE binding_id=? AND status='active'",
+                (now, revoked_by, revoked_by, binding_id))
+            changed = cur.rowcount > 0
+        self._invalidate()
+        return changed
 
     def list_scope_bindings(self, master_code: str = "", scope_node_id: str = "",
                             tenant_id: str = "") -> list:
@@ -623,30 +668,67 @@ class MasterData:
           바인딩을 하나 넣는 순간 그 레코드는 즉시 통제 대상이 된다."""
         return {r["master_code"] for r in self.list_scope_bindings()}
 
-    def allowed_codes_for_scope(self, tenant_id: str, scope_node_id: str,
-                                entity_mode: str = "REAL") -> set:
-        """이 범위에 적용 가능한 master_code 집합. 상속(`inherit_descendants`)을 해석한다."""
+    @staticmethod
+    def _in_effect(binding: dict, as_of: str) -> bool:
+        """[R-001 잔여] 바인딩의 **적용 기간**을 평가한다.
+
+        ★ 종전에는 `effective_from`/`effective_to` 를 저장만 하고 **아무도 읽지 않았다** —
+          "2026-01-01 부터 이 단가를 쓴다"고 등록해도 등록 즉시 적용됐고, 종료일이 지나도
+          계속 적용됐다. 컬럼이 있으니 동작한다고 오해하기 딱 좋은 상태였다.
+
+        규칙: 빈 문자열은 '무제한'. 경계는 `from <= as_of < to` (종료일 당일은 제외 —
+        "2026-12-31 까지"가 아니라 "2027-01-01 직전까지"로 읽는 게 기간 계산에서 덜 헷갈린다).
+        """
+        frm = (binding.get("effective_from") or "").strip()
+        to = (binding.get("effective_to") or "").strip()
+        if frm and as_of < frm:
+            return False
+        if to and as_of >= to:
+            return False
+        return True
+
+    def bindings_for_scope(self, tenant_id: str, scope_node_id: str,
+                           entity_mode: str = "REAL", as_of: str = "") -> dict:
+        """이 범위에 적용 가능한 `{master_code: 고정버전 or None}`.
+
+        상속(`inherit_descendants`)과 적용 기간(`as_of`)을 함께 해석한다.
+        같은 코드에 여러 바인딩이 걸리면 **자기 노드 > 조상** 우선이다 — 하위 조직이 상위 기준을
+        덮어쓰는 것이 정상이고, 그 반대면 사업부 특화 값을 전사 값이 밀어낸다."""
         if not scope_node_id:
-            return set()
+            return {}
+        as_of = as_of or self._now()
         # 자기 노드 + 조상(상속 허용 바인딩) 을 함께 본다. 상위에서 하위로 상속되므로,
         #   내 조상에 걸린 상속 바인딩이 나에게도 적용된다.
-        scopes = {scope_node_id}
         try:
             from core.enterprise_context.resolver import ecm_resolver
             from core.enterprise_context.models import REL_OPERATING_PARENT
             ancestors = set(ecm_resolver.ancestors(scope_node_id, REL_OPERATING_PARENT))
         except Exception:
             ancestors = set()
-        out = set()
-        for b in self.list_scope_bindings(tenant_id=tenant_id):
+        # 같은 노드·같은 코드에 기간이 겹치는 바인딩이 둘 이상일 수 있다
+        #   (UNIQUE 키가 `effective_from` 을 포함하므로 공존 가능). 순회 순서에 맡기면 어느 쪽이
+        #   이길지 비결정이 되므로 **가장 늦게 시작한 것이 이긴다**로 고정한다 — 나중 개정이
+        #   앞선 규칙을 대체한다는 것이 기간 바인딩의 상식적 해석이다.
+        rows = sorted(self.list_scope_bindings(tenant_id=tenant_id),
+                      key=lambda b: ((b.get("effective_from") or ""), b.get("binding_id") or ""))
+        own, inherited = {}, {}
+        for b in rows:
             if b.get("entity_mode", "REAL") != entity_mode:
                 continue
+            if not self._in_effect(b, as_of):
+                continue
             node = b["scope_node_id"]
-            if node in scopes:
-                out.add(b["master_code"])
+            ver = b.get("master_version")
+            if node == scope_node_id:
+                own[b["master_code"]] = ver          # 늦게 시작한 것이 앞을 덮는다
             elif node in ancestors and int(b.get("inherit_descendants", 1)):
-                out.add(b["master_code"])
-        return out
+                inherited[b["master_code"]] = ver
+        return {**inherited, **own}          # 자기 노드가 조상을 덮는다
+
+    def allowed_codes_for_scope(self, tenant_id: str, scope_node_id: str,
+                                entity_mode: str = "REAL", as_of: str = "") -> set:
+        """이 범위에 적용 가능한 master_code 집합. 상속·적용 기간을 해석한다."""
+        return set(self.bindings_for_scope(tenant_id, scope_node_id, entity_mode, as_of))
 
     # 전사 표준·산식 계열 — 사업부 자재에 밀려 잘리면 LLM 이 산식을 지어낸다. 정렬 우선.
     _STANDARD_TYPES = ("kpi", "finance-param", "work-center", "logistics-param",
@@ -671,7 +753,8 @@ class MasterData:
                              entity_mode: str = "REAL",
                              max_items: Optional[int] = -1,
                              max_chars: Optional[int] = -1,
-                             with_stats: bool = False):
+                             with_stats: bool = False,
+                             as_of: str = ""):
         """결정론적 선정(LLM 0콜). **적용 가능한 것은 전부 넣는다.**
 
         ★ [2026-07-29] 상한을 걷어냈다. 근거는 `_INJECT_MAX_ITEMS` 주석의 실측.
@@ -687,7 +770,11 @@ class MasterData:
           섞인다**(감사 Finding 1 / Codex 교차검토). 필터 규칙:
             · 바인딩이 **하나도 없는** master_code → 전사 공통으로 통과(점진 도입 하위호환)
             · 바인딩이 있는 master_code → 이 범위에 적용 가능한 것만 통과(fail-closed)
-          범위(`scope_node_id`)가 주어지지 않으면 필터하지 않는다 — ECM 미도입 흐름을 막지 않는다."""
+          범위(`scope_node_id`)가 주어지지 않으면 필터하지 않는다 — ECM 미도입 흐름을 막지 않는다.
+
+        ★ [R-001 잔여] `as_of` 로 **적용 기간**을 평가하고, 바인딩에 `master_version` 이 고정돼
+          있으면 **그 버전의 레코드**를 주입한다(현행판이 아니라). 이것이 없으면 개정 후에
+          "그때 그 값으로 재현"이 불가능하다."""
         domains = set(domains or [])
         recs = self._cached_records()
         text = text or ""
@@ -695,8 +782,9 @@ class MasterData:
         # 범위 필터 준비. 캐시는 '전체 레코드'를 담고 필터는 **요청마다** 적용하므로 캐시 오염이
         #   생기지 않는다(A 법인 요청이 B 법인 캐시를 오염시킬 수 없다).
         _bound = self._bound_codes() if scope_node_id else set()
-        _allowed = (self.allowed_codes_for_scope(tenant_id or "tenant_default", scope_node_id,
-                                                 entity_mode) if scope_node_id else set())
+        _binds = (self.bindings_for_scope(tenant_id or "tenant_default", scope_node_id,
+                                          entity_mode, as_of) if scope_node_id else {})
+        _allowed = set(_binds)
 
         def _in_scope(code: str) -> bool:
             if not scope_node_id:
@@ -706,6 +794,25 @@ class MasterData:
             return code in _allowed              # 바인딩된 것은 범위를 지킨다
 
         recs = [r for r in recs if _in_scope(r["master_code"])]
+
+        # 버전 고정 치환. 캐시(현행판)를 건드리지 않고 **이 요청에서만** 구판으로 바꾼다.
+        pinned = {c: v for c, v in _binds.items() if v}
+        if pinned:
+            swapped = []
+            for r in recs:
+                v = pinned.get(r["master_code"])
+                if v and int(r.get("version", 0)) != int(v):
+                    old = self.get_record_version(r["master_code"], int(v))
+                    if old:
+                        old = dict(old)
+                        old["pinned_version"] = int(v)
+                        swapped.append(old)
+                        continue
+                    # 고정 버전이 사라졌다면 조용히 현행판을 쓰지 않는다 — 재현성 요구가
+                    #   깨진 것이므로 눈에 띄게 남긴다.
+                    print(f"⚠️ [MasterData] 고정 버전 없음 — {r['master_code']}@{v}. 현행판으로 대체")
+                swapped.append(r)
+            recs = swapped
 
         candidates = []
         for rec in recs:
@@ -746,10 +853,10 @@ class MasterData:
 
     def render_grounding(self, text: str, domains: list, tenant_id: str = "",
                          scope_node_id: str = "", entity_mode: str = "REAL",
-                         max_chars: Optional[int] = -1) -> str:
+                         max_chars: Optional[int] = -1, as_of: str = "") -> str:
         selected, stats = self.select_for_injection(
             text, domains, tenant_id, scope_node_id, entity_mode,
-            max_chars=max_chars, with_stats=True)
+            max_chars=max_chars, with_stats=True, as_of=as_of)
         if not selected:
             return ""
         lines = [self._INJECT_HEADER] + [self._fmt_record(r) for r in selected]
