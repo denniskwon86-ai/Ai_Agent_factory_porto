@@ -140,3 +140,37 @@ def test_tech_spec_fullstack_task_keeps_all(tmp_path):
     assert "FE_SENT" in ctx
     assert "API_SENT" in ctx
     assert "DB_SENT" in ctx
+
+
+# ── 기준정보가 기술 명세를 굶기지 않는가 (2026-07-29 실측 회귀) ──────────────
+def test_master_block_cannot_starve_the_rest(tmp_path, monkeypatch):
+    """★★ 기준정보 블록이 컨텍스트 예산 전체를 삼켜 **기술 명세가 사라진 회귀**를 잠근다.
+
+    D-010 으로 주입 상한을 없앤 뒤, 도메인·조직범위가 선언되지 않은 프로젝트에서 "전수"가 곧
+    "DB 전체"가 되어 실측 70건 = 21,877자 > 예산 20,000자가 됐다. 뒤에 붙는 기술 명세가 통째로
+    잘려 **코더가 API 계약을 못 봤다.**
+
+    ⚠️ 이 테스트는 개발 DB 상태에 의존하지 않는다 — 거대한 블록을 직접 주입해 검증한다.
+      (원래 이 파일의 다른 테스트들은 실제 `data/master/master.db` 를 읽으므로, DB 가 비어 있으면
+       회귀를 못 잡는다. 그래서 별도로 잠근다.)"""
+    import core.context_engine as ce
+
+    seen = {}
+
+    class _Fat:
+        def get_master_context(self, state, max_chars=-1):
+            seen["max_chars"] = max_chars
+            block = "[기준정보] " + ("X" * 60_000)
+            # 호출자가 준 예산을 지키는 척하지 않는다 — 예산을 안 주면 다 뱉는다.
+            if isinstance(max_chars, int) and max_chars > 0:
+                return block[:max_chars]
+            return block
+
+    monkeypatch.setattr(ce, "master_data", _Fat())
+    state = _tech_spec_state(tmp_path, ["Frontend", "Backend"])
+    ctx = ContextEngine.build_core_context(state, light=True)
+
+    assert isinstance(seen.get("max_chars"), int) and seen["max_chars"] > 0, \
+        "ContextEngine 이 기준정보에 예산을 배정하지 않았다(배선 누락)"
+    assert "API_SENT" in ctx, "기준정보가 기술 명세를 밀어냈다"
+    assert "FE_SENT" in ctx and "DB_SENT" in ctx

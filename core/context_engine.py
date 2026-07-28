@@ -57,7 +57,16 @@ class ContextEngine:
         grounding = knowledge_base.get_grounding_context(state)
         # [M1] 결정론적 기준정보(Master Data) - 벡터 검색이 아닌 확정 조회로 주입되며,
         # 정형 기준(수치·명칭·단위)이므로 비정형 지식팩 그라운딩보다 '앞에' 배치한다(우선순위).
-        master_context = master_data.get_master_context(state)
+        #
+        # ★ [2026-07-29 / D-010] 기준정보에 **컨텍스트 예산의 몫을 명시적으로 배정**한다.
+        #   D-010 으로 주입 상한을 없앤 뒤, 도메인·조직범위가 선언되지 않은 프로젝트에서
+        #   "전수"가 곧 "DB 전체"가 되어 **블록 하나가 예산 20,000자를 전부 삼켰다**
+        #   (실측 70건 = 21,877자). 그 결과 뒤에 붙는 기술 명세가 `_clip` 에 통째로 잘려
+        #   **코더가 API 계약·화면 구성을 못 보는 회귀**가 발생했다(test_context_full_files).
+        #   기준정보가 중요하다는 것과 기준정보가 나머지 전부를 굶겨도 된다는 것은 다르다.
+        #   절반을 상한으로 두고, 잘리면 레코드 경계에서 끊고 그 사실을 블록에 적는다.
+        _master_budget = max(8000, int(ctx_max * 0.5))
+        master_context = master_data.get_master_context(state, max_chars=_master_budget)
 
         context_parts = [
             f" [기업 프로필 & 사용자 성향]:\n{profile_str}"

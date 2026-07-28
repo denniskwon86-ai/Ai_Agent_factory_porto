@@ -745,9 +745,11 @@ class MasterData:
     )
 
     def render_grounding(self, text: str, domains: list, tenant_id: str = "",
-                         scope_node_id: str = "", entity_mode: str = "REAL") -> str:
+                         scope_node_id: str = "", entity_mode: str = "REAL",
+                         max_chars: Optional[int] = -1) -> str:
         selected, stats = self.select_for_injection(
-            text, domains, tenant_id, scope_node_id, entity_mode, with_stats=True)
+            text, domains, tenant_id, scope_node_id, entity_mode,
+            max_chars=max_chars, with_stats=True)
         if not selected:
             return ""
         lines = [self._INJECT_HEADER] + [self._fmt_record(r) for r in selected]
@@ -758,14 +760,19 @@ class MasterData:
                          f"{stats['dropped']}건의 값은 알 수 없으므로 추정하지 말 것.")
         return "\n".join(lines)
 
-    def get_master_context(self, state) -> str:
+    def get_master_context(self, state, max_chars: Optional[int] = -1) -> str:
         """[ContextEngine 연동] 동기 함수. 프로젝트 상태에서 도메인·텍스트를 추출해 주입 블록을 만든다.
 
         ★ [R-001 / D-009] 프로젝트의 **조직 범위**를 함께 넘긴다. 이것이 없으면 전체 활성
           기준정보가 도메인만 맞으면 주입되어 **A 법인 기준정보가 B 법인 프롬프트에 섞인다**
           (감사 Finding 1). `enterprise_scope_id` 는 부서 id 일 수도 ECM node_id 일 수도 있으므로
           ECM 리솔버로 해석해 노드로 정규화한다(D-005 — 두 형태 공존).
-          범위를 알 수 없으면 필터하지 않는다 — ECM 미도입 흐름을 막지 않는다(하위호환)."""
+          범위를 알 수 없으면 필터하지 않는다 — ECM 미도입 흐름을 막지 않는다(하위호환).
+
+        ★ [2026-07-29] `max_chars` 는 **호출자의 컨텍스트 예산 중 기준정보에 허용된 몫**이다.
+          이것이 없으면 기준정보 블록 하나가 전체 컨텍스트를 삼켜 **기술 명세가 프롬프트에서
+          사라진다**(실측: 70건 = 21,877자 > 예산 20,000자 → 코더가 API 계약을 못 봤다).
+          잘릴 때는 레코드 경계에서 끊고 잘린 사실을 블록에 적는다."""
         try:
             domains = list(getattr(state, "master_domains", None) or [])
             if not domains:
@@ -789,7 +796,8 @@ class MasterData:
                     # 범위 해석 실패가 주입을 멈추게 하면 안 된다. 단 필터도 걸리지 않으므로
                     #   조용히 넘기지 말고 남긴다(감사 가능성).
                     print(f"⚠️ [MasterData] 조직 범위 해석 실패 — 범위 필터 생략: {e}")
-            return self.render_grounding(text, domains, tenant_id, scope_node_id, entity_mode)
+            return self.render_grounding(text, domains, tenant_id, scope_node_id,
+                                        entity_mode, max_chars=max_chars)
         except Exception as e:
             print(f"⚠️ [MasterData] get_master_context 실패(주입 생략): {e}")
             return ""
