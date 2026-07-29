@@ -197,3 +197,84 @@ def expand_assumptions(assumptions: List[Dict[str, Any]]) -> Tuple[List[Dict[str
         expanded.extend(rows)
         warnings.extend(warns)
     return expanded, warnings
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 외부 지표 → 동인 실연결 (§12.7 내부 KPI 영향 매핑 · §12.8 시나리오 연결)
+# ══════════════════════════════════════════════════════════════════════
+def resolve_external_change(driver_code: str, purpose: str = "scenario",
+                            baseline_value: Optional[float] = None,
+                            as_of: str = "", vintage: str = "") -> Dict[str, Any]:
+    """연결된 외부 지표의 **실제 관측값**으로 동인의 변화율을 산출한다.
+
+    ## 왜 "연결"만으로는 부족했나
+
+    지금까지 `external_code` 는 **표시**일 뿐이었다. "이 동인은 환율을 본다"고 적혀 있어도
+    실제 환율 값은 흐르지 않아, 사용자가 손으로 "+7.7%"를 계산해 넣어야 했다.
+    그러면 그 7.7% 가 **어느 시점 어느 등급의 값에서 나왔는지** 아무도 모른다.
+
+    ## 등급 정책은 여기서 다시 판정하지 않는다
+
+    §12.2 의 등급 게이트(`baseline_plan` 은 Gold 필수 등)는 `external_intelligence.
+    resolve_value()` 가 강제한다. 여기서 다시 구현하면 두 곳이 어긋나고, 한쪽만 고쳐졌을 때
+    **정책이 조용히 뚫린다.** 이 함수는 그 판정을 **그대로 물고 온다**.
+
+    ⚠️ 값을 못 쓰는 경우 `usable=False` 와 사유·다음 조치를 돌려준다. 0% 로 대체하지 않는다 —
+      0% 는 "변화 없음"이라는 **적극적 주장**이고, "모른다"와 완전히 다르다.
+    """
+    _ensure_schema()
+    conn = planning_store._connect()
+    try:
+        row = conn.execute("SELECT * FROM plan_drivers WHERE driver_code=?",
+                           (driver_code,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return {"usable": False, "driver_code": driver_code,
+                "reason": f"등록되지 않은 동인입니다: {driver_code}"}
+    d = dict(row)
+    code = (d.get("external_code") or "").strip()
+    if not code:
+        return {"usable": False, "driver_code": driver_code, "external_code": "",
+                "reason": "이 동인에는 외부 지표가 연결돼 있지 않습니다.",
+                "next_action": "`external_code` 를 지정하거나 변화율을 직접 입력하십시오."}
+
+    try:
+        from core.external_intelligence import external_intelligence as ext
+        res = ext.resolve_value(code, purpose=purpose, as_of=as_of, vintage=vintage)
+    except Exception as e:
+        return {"usable": False, "driver_code": driver_code, "external_code": code,
+                "reason": f"외부 지표 조회에 실패했습니다: {e}"}
+
+    if not res.get("allowed"):
+        # ★ 등급 미달·관측값 없음 — **0% 로 대체하지 않는다.**
+        return {"usable": False, "driver_code": driver_code, "external_code": code,
+                "purpose": purpose, "reason": res.get("reason", "값을 사용할 수 없습니다."),
+                "required_grade": res.get("required_grade"),
+                "available_grade": res.get("available_grade"),
+                "next_action": res.get("next_action", ""),
+                "note": ("0% 로 대체하지 않았습니다 — 0% 는 '변화 없음'이라는 주장이고 "
+                         "'모른다'와 다릅니다.")}
+
+    observed = float(res["value"])
+    out = {
+        "usable": True, "driver_code": driver_code, "external_code": code,
+        "purpose": purpose,
+        "observed_value": observed, "unit": res.get("unit") or d.get("unit") or "",
+        "grade": res.get("grade"), "observed_at": res.get("observed_at"),
+        "vintage": res.get("vintage"), "source_id": res.get("source_id"),
+        # 재현성: 어느 시점 발표값(vintage)으로 계산했는지가 결과에 남아야 한다.
+        "note": res.get("note", ""),
+    }
+    if baseline_value is None:
+        out["pct_change"] = None
+        out["reason"] = ("기준값(baseline_value)이 없어 변화율을 계산하지 않았습니다 — "
+                         "관측값만으로는 '무엇 대비 몇 %'인지 알 수 없습니다.")
+        return out
+    if baseline_value == 0:
+        out["pct_change"] = None
+        out["reason"] = "기준값이 0 이라 변화율을 계산할 수 없습니다."
+        return out
+    out["baseline_value"] = float(baseline_value)
+    out["pct_change"] = round((observed - baseline_value) / abs(baseline_value) * 100.0, 4)
+    return out

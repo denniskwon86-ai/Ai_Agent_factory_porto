@@ -548,3 +548,18 @@ async def rollup_check(org_id: str, period: str, value_kind: str = PLAN,
     await _scope(p, org_id, org_id)
     facts = await asyncio.to_thread(planning_store.list_facts, org_id, period, value_kind)
     return {"status": "success", "data": await asyncio.to_thread(engine.rollup_conflicts, facts)}
+
+
+@router.get("/drivers/{driver_code}/external")
+async def driver_external_value(driver_code: str, purpose: str = "scenario",
+                                baseline_value: Optional[float] = None,
+                                as_of: str = "", vintage: str = ""):
+    """연결된 외부 지표의 **실제 관측값**으로 동인 변화율을 산출한다(§12.7·§12.8).
+
+    ⚠️ 등급 정책(§12.2)은 외부 인텔리전스가 강제한다 — 여기서 다시 판정하지 않고 **물고 온다.**
+      `usable=false` 면 값을 쓸 수 없다는 뜻이고, **0% 로 대체하지 않는다**
+      (0% 는 '변화 없음'이라는 주장이고 '모른다'와 다르다).
+    `vintage` 를 주면 그 시점 발표값으로 계산한다 — 과거 계획의 재현 경로다."""
+    data = await asyncio.to_thread(drivers.resolve_external_change, driver_code,
+                                   purpose, baseline_value, as_of, vintage)
+    return {"status": "success", "data": data}

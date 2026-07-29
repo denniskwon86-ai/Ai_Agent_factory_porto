@@ -146,3 +146,88 @@ def test_external_indicator_link_is_recorded_not_auto_injected(store):
     # 연결만으로 값이 들어오지 않는다 — 파급 계수가 없으면 아무 일도 일어나지 않는다.
     rows, warns = dr.expand_driver_assumption("FX_RATE", 5.0)
     assert rows == [] and warns
+
+
+# ── 외부 지표 실연결 (§12.7 · §12.8) ────────────────────────────────────────
+class _FakeExt:
+    """외부 인텔리전스 대역 — 등급 정책의 **판정 결과**를 그대로 흉내낸다."""
+    def __init__(self, result):
+        self._r = result
+
+    def resolve_value(self, code, purpose="baseline_plan", as_of="", vintage=""):
+        return dict(self._r, indicator_code=code)
+
+
+def _patch_ext(monkeypatch, result):
+    import core.external_intelligence as ei
+    monkeypatch.setattr(ei, "external_intelligence", _FakeExt(result))
+
+
+def test_external_value_flows_into_driver(store, monkeypatch):
+    """★★ 지금까지 `external_code` 는 **표시**일 뿐이었다 — 실제 값이 흐르게 한다."""
+    dr.register_driver("FX_RATE", "환율", unit="KRW/USD", external_code="ECOS.USD_KRW")
+    _patch_ext(monkeypatch, {"allowed": True, "value": 1400.0, "unit": "KRW/USD",
+                             "grade": "gold", "observed_at": "2027-01-31",
+                             "vintage": "2027-02-01", "source_id": "ECOS", "note": "n"})
+
+    r = dr.resolve_external_change("FX_RATE", baseline_value=1300.0)
+    assert r["usable"] is True
+    assert r["pct_change"] == pytest.approx(7.6923, abs=0.001)
+    # 재현성: 어느 시점 발표값으로 계산했는지가 결과에 남는다
+    assert r["vintage"] == "2027-02-01" and r["grade"] == "gold"
+
+
+def test_grade_policy_is_not_reimplemented_here(store, monkeypatch):
+    """★★ 등급 게이트(§12.2)는 외부 인텔리전스가 강제한다 — 여기서 다시 구현하면
+    두 곳이 어긋나고 한쪽만 고쳐졌을 때 **정책이 조용히 뚫린다.**"""
+    dr.register_driver("RATE", "금리", external_code="ECOS.BASE_RATE")
+    _patch_ext(monkeypatch, {"allowed": False, "value": None, "required_grade": "gold",
+                             "available_grade": "bronze",
+                             "reason": "기준 계획에는 gold 가 필요합니다.",
+                             "next_action": "공식 원천을 등록하십시오."})
+
+    r = dr.resolve_external_change("RATE", purpose="baseline_plan", baseline_value=3.0)
+    assert r["usable"] is False
+    assert r["required_grade"] == "gold" and r["available_grade"] == "bronze"
+
+
+def test_unusable_value_is_not_replaced_with_zero(store, monkeypatch):
+    """★★ 0% 는 '변화 없음'이라는 **적극적 주장**이고 '모른다'와 완전히 다르다."""
+    dr.register_driver("RATE", "금리", external_code="ECOS.BASE_RATE")
+    _patch_ext(monkeypatch, {"allowed": False, "value": None, "reason": "관측값이 없습니다."})
+
+    r = dr.resolve_external_change("RATE", baseline_value=3.0)
+    assert r["usable"] is False
+    assert "pct_change" not in r or r.get("pct_change") is None
+    assert "0% 로 대체하지 않았습니다" in r["note"]
+
+
+def test_driver_without_external_link_says_so(store):
+    dr.register_driver("SALES_VOL", "판매량")     # external_code 없음
+    r = dr.resolve_external_change("SALES_VOL", baseline_value=100.0)
+    assert r["usable"] is False and "연결돼 있지 않습니다" in r["reason"]
+
+
+def test_without_baseline_no_pct_is_invented(store, monkeypatch):
+    """★ 관측값만으로는 '무엇 대비 몇 %'인지 알 수 없다 — 지어내지 않는다."""
+    dr.register_driver("FX_RATE", "환율", external_code="ECOS.USD_KRW")
+    _patch_ext(monkeypatch, {"allowed": True, "value": 1400.0, "unit": "KRW/USD",
+                             "grade": "gold", "observed_at": "2027-01-31",
+                             "vintage": "2027-02-01", "source_id": "ECOS"})
+    r = dr.resolve_external_change("FX_RATE")
+    assert r["usable"] is True and r["pct_change"] is None
+    assert "기준값" in r["reason"]
+
+
+def test_external_lookup_failure_is_reported(store, monkeypatch):
+    """외부 모듈 장애를 조용히 0 으로 만들지 않는다."""
+    import core.external_intelligence as ei
+    dr.register_driver("FX_RATE", "환율", external_code="X")
+
+    class _Boom:
+        def resolve_value(self, *a, **k):
+            raise RuntimeError("DB down")
+
+    monkeypatch.setattr(ei, "external_intelligence", _Boom())
+    r = dr.resolve_external_change("FX_RATE", baseline_value=1300.0)
+    assert r["usable"] is False and "조회에 실패" in r["reason"]
