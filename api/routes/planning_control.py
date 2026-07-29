@@ -256,3 +256,88 @@ async def variance(org_id: str, period: str, p: Principal = Depends(current_prin
     await _scope(p, org_id, org_id)
     data = await asyncio.to_thread(engine.variance, org_id, period)
     return {"status": "success", "data": data}
+
+
+# ── 제출·승인 흐름 (§17.2 기능 3) ─────────────────────────────────────
+# ⚠️ 승인은 상태 플래그가 아니다 — 승인 시점의 값 지문을 함께 박고, 조회 때 무결성을
+#   다시 확인한다. "승인됐다"와 "승인받은 그 값 그대로다"는 다른 질문이다.
+from core import planning_approval as approval
+
+
+class SubmitRequest(BaseModel):
+    org_id: str
+    period: str
+    value_kind: str = PLAN
+    note: Optional[str] = ""
+
+
+class ApproveRequest(BaseModel):
+    #: 자기 승인은 통제가 아니라 형식이라 기본 차단. 1인 부서면 명시적으로 연다(감사에 남는다).
+    allow_self_approval: bool = False
+
+
+class RejectRequest(BaseModel):
+    #: 사유 없는 반려는 제출자가 무엇을 고쳐야 할지 모른다.
+    reason: str
+
+
+@router.get("/submissions")
+async def list_submissions(org_id: str = "", period: str = "", status: str = ""):
+    return {"status": "success",
+            "data": await asyncio.to_thread(approval.list_submissions, org_id, period, status)}
+
+
+@router.get("/submissions/current")
+async def current_approved(org_id: str, period: str, value_kind: str = PLAN):
+    """현재 유효한 승인본 + **무결성 판정**. 없으면 data=null(빈 객체로 위장하지 않는다)."""
+    data = await asyncio.to_thread(approval.current_approved, org_id, period, value_kind)
+    return {"status": "success", "data": data}
+
+
+@router.post("/submissions")
+async def submit_plan(req: SubmitRequest, p: Principal = Depends(current_principal)):
+    await _scope(p, req.org_id, req.org_id)
+    if not p.user_id:
+        raise HTTPException(status_code=401, detail="제출자 식별 정보가 없습니다.")
+    try:
+        data = await asyncio.to_thread(approval.submit, req.org_id, req.period,
+                                       p.user_id, req.value_kind, req.note or "")
+        return {"status": "success", "data": data}
+    except PlanningError as e:
+        _err(e)
+
+
+@router.post("/submissions/{submission_id}/approve")
+async def approve_plan(submission_id: str, req: ApproveRequest = None,
+                       p: Principal = Depends(current_principal)):
+    if not p.user_id:
+        raise HTTPException(status_code=401, detail="승인자 식별 정보가 없습니다 — "
+                                                   "익명 승인은 받지 않습니다.")
+    try:
+        data = await asyncio.to_thread(approval.approve, submission_id, p.user_id,
+                                       bool(req.allow_self_approval) if req else False)
+        return {"status": "success", "data": data}
+    except PlanningError as e:
+        _err(e)
+
+
+@router.post("/submissions/{submission_id}/reject")
+async def reject_plan(submission_id: str, req: RejectRequest,
+                      p: Principal = Depends(current_principal)):
+    if not p.user_id:
+        raise HTTPException(status_code=401, detail="반려자 식별 정보가 없습니다.")
+    try:
+        data = await asyncio.to_thread(approval.reject, submission_id, p.user_id, req.reason)
+        return {"status": "success", "data": data}
+    except PlanningError as e:
+        _err(e)
+
+
+@router.get("/submissions/{submission_id}/integrity")
+async def check_integrity(submission_id: str):
+    """★ 승인 후 값이 바뀌었는지 — 상태만 보면 알 수 없다."""
+    try:
+        return {"status": "success",
+                "data": await asyncio.to_thread(approval.verify_integrity, submission_id)}
+    except PlanningError as e:
+        raise HTTPException(status_code=404, detail=str(e))
