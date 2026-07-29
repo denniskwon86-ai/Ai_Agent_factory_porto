@@ -11,6 +11,7 @@ import WorkflowStrip from './components/WorkflowStrip';
 import AgentMasterPanel from './components/AgentMasterPanel';
 import GovernanceConsole from './components/GovernanceConsole';
 import ShadowModePanel from './components/ShadowModePanel';
+import WorkspacePanel from './components/WorkspacePanel';
 import { PlanningPanel } from './components/PlanningPanel';
 import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
@@ -65,6 +66,8 @@ export default function App() {
   const [showGovernance, setShowGovernance] = useState(false);
   // Shadow Mode — 후보를 병렬 검증하고 범위를 제한해 승격(§7.3).
   const [showShadow, setShowShadow] = useState(false);
+  // 부서 워크스페이스 — 공유·복제·전사 승격 게이트(§9.3).
+  const [showWorkspace, setShowWorkspace] = useState(false);
   // [M4] 경영계획 — 결정론적 계산(LLM 0콜). 디자인 확정 후 개편 대상.
   const [showPlanning, setShowPlanning] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
@@ -204,6 +207,9 @@ export default function App() {
         {showShadow && (
           <ShadowModePanel onClose={() => setShowShadow(false)} />
         )}
+        {showWorkspace && (
+          <WorkspacePanel onClose={() => setShowWorkspace(false)} />
+        )}
         {showPlanning && (
           <PlanningPanel onClose={() => setShowPlanning(false)} />
         )}
@@ -233,6 +239,13 @@ export default function App() {
                 title="새 규칙·모델을 실제 데이터에 병렬 적용해 비교하고, 승인된 범위에서만 제한적으로 운영 적용"
               >
                 🧪 Shadow Mode
+              </button>
+              <button
+                onClick={() => setShowWorkspace(true)}
+                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
+                title="부서 앱의 공유·복제와 전사 승격 게이트 — 데이터 계약·보안·품질·소유자 승인을 모두 통과해야 승격된다"
+              >
+                🏢 워크스페이스
               </button>
               <button
                 onClick={() => setShowPlanning(true)}
@@ -695,6 +708,13 @@ export default function App() {
             >
               🧪 Shadow
             </button>
+            <button
+              onClick={() => setShowWorkspace(true)}
+              className="text-xs font-bold text-slate-200 bg-slate-800/70 hover:bg-slate-700/70 border border-slate-600/60 px-3 py-1.5 rounded-lg transition-colors"
+              title="공유·복제·전사 승격 게이트(§9.3)"
+            >
+              🏢 워크스페이스
+            </button>
             <button 
               onClick={() => setShowLogPopup(v => !v)}
               title="서버 로그 보기"
@@ -715,6 +735,9 @@ export default function App() {
         )}
         {showShadow && (
           <ShadowModePanel onClose={() => setShowShadow(false)} />
+        )}
+        {showWorkspace && (
+          <WorkspacePanel onClose={() => setShowWorkspace(false)} />
         )}
         {showPlanning && (
           <PlanningPanel onClose={() => setShowPlanning(false)} />
