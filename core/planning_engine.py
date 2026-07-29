@@ -395,3 +395,54 @@ def cash_flow_for(org_id: str, period: str, value_kind: str = PLAN) -> Dict[str,
                 "engine_version": ENGINE_VERSION}
     return {**compute_cash_flow(facts), "org_id": org_id, "period": period,
             "value_kind": value_kind}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 차원 롤업 충돌 (§17.2 기능 1 — 제품·원가센터 차원의 필연적 함정)
+# ══════════════════════════════════════════════════════════════════════
+def rollup_conflicts(facts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """**합계 행과 상세 행이 섞였는가.** 이 모델에서 가장 흔한 사고다.
+
+    제품 차원을 도입하면 같은 (조직·계정·기간)에 두 종류의 행이 생길 수 있다:
+
+    ```
+    org=BAT, 4000, 2027, product=''      , 1000   ← 전사 합계로 입력한 행
+    org=BAT, 4000, 2027, product='NCM811',  600   ← 제품별로 입력한 행
+    org=BAT, 4000, 2027, product='LFP'   ,  400
+    ```
+
+    그대로 더하면 **2000** 이 된다 — 실제 매출의 두 배다. 아무 오류도 나지 않고,
+    손익표는 그럴듯해 보이며, 아무도 눈치채지 못한다.
+
+    ⚠️ 자동으로 한쪽을 버리지 않는다. 어느 쪽이 맞는지는 **데이터를 넣은 사람만 안다** —
+      합계가 최신일 수도, 상세가 정본일 수도 있다. 우리가 할 일은 **골라주는 것이 아니라
+      들키게 하는 것**이다."""
+    groups: Dict[tuple, Dict[str, Any]] = {}
+    for f in facts:
+        key = (f.get("org_id"), f.get("account_code"), f.get("period"), f.get("value_kind"))
+        g = groups.setdefault(key, {"total": [], "detail": []})
+        has_dim = bool((f.get("product_code") or "") or (f.get("cost_center") or ""))
+        (g["detail"] if has_dim else g["total"]).append(f)
+
+    conflicts = []
+    for key, g in groups.items():
+        if g["total"] and g["detail"]:
+            t = sum(float(x.get("amount") or 0) for x in g["total"])
+            d = sum(float(x.get("amount") or 0) for x in g["detail"])
+            conflicts.append({
+                "org_id": key[0], "account_code": key[1], "period": key[2],
+                "value_kind": key[3],
+                "total_row_amount": round(t, 4),
+                "detail_sum": round(d, 4),
+                "detail_rows": len(g["detail"]),
+                "naive_sum": round(t + d, 4),
+                "matches": abs(t - d) < 0.01,
+                "why": ("합계 행과 상세 행이 같은 자리에 있습니다. 단순 합산하면 "
+                        f"{round(t + d, 4)} 가 되어 **이중 계상**입니다."),
+            })
+    return {
+        "has_conflict": bool(conflicts),
+        "conflicts": conflicts,
+        "note": ("어느 쪽이 정본인지는 데이터를 넣은 사람만 압니다 — 자동으로 고르지 않고 "
+                 "표시만 합니다. 합계 행을 지우거나 상세 행을 지워 한쪽으로 맞추십시오."),
+    }

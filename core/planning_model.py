@@ -82,6 +82,10 @@ CREATE TABLE IF NOT EXISTS plan_facts (
     amount       REAL NOT NULL,
     currency     TEXT NOT NULL DEFAULT 'KRW',
     scenario_id  TEXT DEFAULT '',          -- SCENARIO 일 때만 채워진다
+    -- ★ [§17.2 기능 1] 분석 차원. 빈 값 = 그 차원으로 나누지 않은 **합계** 행이다.
+    --   ⚠️ 합계 행과 상세 행이 섞이면 이중 계상이 된다 — `rollup_conflicts()` 가 그것을 잡는다.
+    product_code    TEXT NOT NULL DEFAULT '',
+    cost_center     TEXT NOT NULL DEFAULT '',
     version      INTEGER NOT NULL DEFAULT 1,
     source_ref   TEXT DEFAULT '',          -- 어디서 온 값인가(파일·연계·수기)
     created_at   TEXT NOT NULL,
@@ -94,6 +98,8 @@ CREATE TABLE IF NOT EXISTS plan_facts (
 );
 CREATE INDEX IF NOT EXISTS idx_fact_lookup
     ON plan_facts(org_id, period, value_kind, account_code);
+CREATE INDEX IF NOT EXISTS idx_fact_dims
+    ON plan_facts(org_id, period, value_kind, product_code, cost_center);
 CREATE INDEX IF NOT EXISTS idx_fact_scope
     ON plan_facts(tenant_id, owner_organization_id, scope_type, entity_mode);
 
@@ -169,9 +175,34 @@ class PlanningStore:
             pass
         return conn
 
+    #: 기존 DB 에 더할 컬럼(멱등). 신선한 DB 는 `_DDL` 이 이미 포함하므로 아무 일도 하지 않는다.
+    _COLUMN_MIGRATIONS = (
+        ("plan_facts", "product_code", "TEXT NOT NULL DEFAULT ''"),
+        ("plan_facts", "cost_center", "TEXT NOT NULL DEFAULT ''"),
+    )
+
+    def _migrate_columns(self, conn):
+        """차원 컬럼을 나중에 더한다.
+
+        ⚠️ 기존 행은 차원이 빈 값이 되고, 그것은 **'전사 합계 행'** 으로 해석된다.
+          이 해석을 명시하지 않으면 나중에 상세 행이 들어왔을 때 이중 계상이 조용히 생긴다."""
+        for table, col, decl in self._COLUMN_MIGRATIONS:
+            try:
+                cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            except sqlite3.Error:
+                continue                 # 테이블 없음 = 신선한 DB
+            if not cols or col in cols:
+                continue
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    print(f"⚠️ [Planning] 컬럼 추가 실패 {table}.{col}: {e}")
+
     def _init_db(self):
         conn = self._connect()
         try:
+            self._migrate_columns(conn)      # ★ _DDL 보다 먼저 — 인덱스가 새 컬럼을 참조한다
             conn.executescript(_DDL)
             conn.commit()
         finally:
@@ -215,7 +246,8 @@ class PlanningStore:
                  amount: float, currency: str = "KRW", scenario_id: str = "",
                  source_ref: str = "", owner_organization_id: str = "",
                  scope_type: str = SCOPE_ORG_PRIVATE, classification: str = "INTERNAL",
-                 tenant_id: str = "tenant_default", entity_mode: str = "REAL") -> dict:
+                 tenant_id: str = "tenant_default", entity_mode: str = "REAL",
+                 product_code: str = "", cost_center: str = "") -> dict:
         """사실 1건 기록. **`value_kind` 는 필수이고 기본값이 없다.**
 
         ⚠️ 기본값을 두면 호출자가 생각 없이 넣고, 그 순간 '실적처럼 보이는 계획'이 만들어진다.
@@ -236,7 +268,8 @@ class PlanningStore:
         if not str(period or "").strip():
             raise PlanningError("period 는 필수입니다('YYYY-MM' 또는 'YYYY').")
 
-        fid = f"{org_id}|{account_code}|{period}|{vk}|{scenario_id}"
+        # 차원이 키에 들어간다 — 안 넣으면 제품별 행이 서로를 덮어써 **마지막 값만 남는다**.
+        fid = f"{org_id}|{account_code}|{period}|{vk}|{scenario_id}|{product_code}|{cost_center}"
         conn = self._connect()
         try:
             prev = conn.execute("SELECT version FROM plan_facts WHERE fact_id=?", (fid,)).fetchone()
@@ -244,15 +277,17 @@ class PlanningStore:
             conn.execute(
                 "INSERT INTO plan_facts(fact_id,org_id,account_code,period,value_kind,amount,"
                 "currency,scenario_id,version,source_ref,created_at,tenant_id,"
-                "owner_organization_id,scope_type,classification,entity_mode) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "owner_organization_id,scope_type,classification,entity_mode,"
+                "product_code,cost_center) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(fact_id) DO UPDATE SET amount=excluded.amount, "
                 "version=excluded.version, source_ref=excluded.source_ref, "
                 "created_at=excluded.created_at",
                 (fid, org_id, account_code, period, vk, float(amount), currency or "KRW",
                  scenario_id or "", version, source_ref or "", _now(),
                  tenant_id or "tenant_default", owner_organization_id or org_id,
-                 scope_type, classification or "INTERNAL", entity_mode or "REAL"))
+                 scope_type, classification or "INTERNAL", entity_mode or "REAL",
+                 product_code or "", cost_center or ""))
             conn.commit()
             return dict(conn.execute("SELECT * FROM plan_facts WHERE fact_id=?", (fid,)).fetchone())
         finally:
@@ -260,13 +295,18 @@ class PlanningStore:
 
     def list_facts(self, org_id: str = "", period: str = "", value_kind: str = "",
                    scenario_id: str = "", scope_node_id: str = "",
-                   tenant_id: str = "", entity_mode: str = "REAL") -> List[dict]:
-        """사실 조회. 조직 범위를 주면 **M2 범위 계약**으로 걸러진다."""
+                   tenant_id: str = "", entity_mode: str = "REAL",
+                   product_code: str = "", cost_center: str = "") -> List[dict]:
+        """사실 조회. 조직 범위를 주면 **M2 범위 계약**으로 걸러진다.
+
+        ⚠️ 차원을 지정하지 않으면 **합계 행과 상세 행이 함께** 나온다. 그대로 더하면
+          이중 계상이므로, 합산 전에 `rollup_conflicts()` 로 충돌을 확인할 것."""
         sql = "SELECT * FROM plan_facts WHERE 1=1"
         args: List[Any] = []
         for col, val in (("org_id", org_id), ("period", period),
                          ("value_kind", (value_kind or "").upper()),
-                         ("scenario_id", scenario_id)):
+                         ("scenario_id", scenario_id),
+                         ("product_code", product_code), ("cost_center", cost_center)):
             if val:
                 sql += f" AND {col}=?"
                 args.append(val)

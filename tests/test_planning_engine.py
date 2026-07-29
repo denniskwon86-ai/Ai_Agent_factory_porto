@@ -335,3 +335,60 @@ def test_empty_input_does_not_produce_zero_cash_flow(store):
     """빈 입력으로 계산하면 **0 이 결과처럼 보인다.**"""
     cf = eng.cash_flow_for("NOBODY", "2027")
     assert cf["computable"] is False and cf["missing"] == ["ALL"]
+
+
+# ── 제품·원가센터 차원 (§17.2 기능 1) ───────────────────────────────────────
+def test_dimensions_do_not_overwrite_each_other(store):
+    """★★ 차원이 키에 없으면 제품별 행이 서로를 덮어써 **마지막 값만 남는다**."""
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 600.0, product_code="NCM811")
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 400.0, product_code="LFP")
+    rows = store.list_facts(org_id="MNM_BATTERY", value_kind=PLAN)
+    assert len(rows) == 2
+    assert {r["product_code"]: r["amount"] for r in rows} == {"NCM811": 600.0, "LFP": 400.0}
+
+
+def test_dimension_filter(store):
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 600.0, product_code="NCM811")
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 400.0, product_code="LFP")
+    only = store.list_facts(org_id="MNM_BATTERY", product_code="LFP")
+    assert len(only) == 1 and only[0]["amount"] == 400.0
+
+
+def test_cost_center_is_a_separate_axis(store):
+    """제품과 원가센터는 다른 축이다 — 같은 제품이 여러 원가센터에 걸릴 수 있다."""
+    store.put_fact("MNM_BATTERY", "5000", "2027", PLAN, 300.0,
+                   product_code="NCM811", cost_center="CC-101")
+    store.put_fact("MNM_BATTERY", "5000", "2027", PLAN, 200.0,
+                   product_code="NCM811", cost_center="CC-102")
+    assert len(store.list_facts(org_id="MNM_BATTERY", product_code="NCM811")) == 2
+    assert len(store.list_facts(org_id="MNM_BATTERY", cost_center="CC-101")) == 1
+
+
+def test_rollup_conflict_is_detected(store):
+    """★★ 합계 행 + 상세 행 = **이중 계상**. 아무 오류도 안 나고 손익표는 그럴듯해 보인다."""
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 1000.0)                      # 합계
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 600.0, product_code="NCM811")
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 400.0, product_code="LFP")
+
+    r = eng.rollup_conflicts(store.list_facts(org_id="MNM_BATTERY", value_kind=PLAN))
+    assert r["has_conflict"] is True
+    c = r["conflicts"][0]
+    assert c["total_row_amount"] == 1000.0 and c["detail_sum"] == 1000.0
+    assert c["naive_sum"] == 2000.0          # 단순 합산의 결과 = 실제의 두 배
+    assert c["matches"] is True              # 합계와 상세는 일치하지만 **함께 더하면 안 된다**
+
+
+def test_no_conflict_when_only_one_level_is_used(store):
+    """한쪽만 쓰면 충돌이 없다 — 경고가 남발되면 아무도 안 본다."""
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 600.0, product_code="NCM811")
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 400.0, product_code="LFP")
+    assert eng.rollup_conflicts(store.list_facts(org_id="MNM_BATTERY"))["has_conflict"] is False
+
+
+def test_conflict_is_reported_not_auto_resolved(store):
+    """★ 어느 쪽이 정본인지는 **데이터를 넣은 사람만 안다** — 골라주지 않고 들키게 한다."""
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 1000.0)
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 700.0, product_code="NCM811")
+    r = eng.rollup_conflicts(store.list_facts(org_id="MNM_BATTERY"))
+    assert r["conflicts"][0]["matches"] is False    # 값도 안 맞는다 — 더 위험한 상태
+    assert "자동으로 고르지 않고" in r["note"]

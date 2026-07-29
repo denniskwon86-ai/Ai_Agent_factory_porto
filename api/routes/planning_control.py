@@ -82,16 +82,21 @@ class FactRequest(BaseModel):
     owner_organization_id: Optional[str] = ""
     scope_type: Optional[str] = "ORG_PRIVATE"
     classification: Optional[str] = "INTERNAL"
+    #: 분석 차원. 빈 값 = 그 차원으로 나누지 않은 **합계** 행이다(상세 행과 섞이면 이중 계상).
+    product_code: Optional[str] = ""
+    cost_center: Optional[str] = ""
 
 
 @router.get("/facts")
 async def list_facts(org_id: str = "", period: str = "", value_kind: str = "",
                      scenario_id: str = "", scope_node_id: str = "",
                      tenant_id: str = "", entity_mode: str = "REAL",
+                     product_code: str = "", cost_center: str = "",
                      p: Principal = Depends(current_principal)):
     eff = await _scope(p, scope_node_id, org_id)
     data = await asyncio.to_thread(planning_store.list_facts, org_id, period, value_kind,
-                                   scenario_id, eff, tenant_id, entity_mode)
+                                   scenario_id, eff, tenant_id, entity_mode,
+                                   product_code, cost_center)
     return {"status": "success", "data": data,
             "permission": {"scope": eff or "(범위 필터 없음)"}}
 
@@ -104,7 +109,8 @@ async def put_fact(req: FactRequest, p: Principal = Depends(current_principal)):
             planning_store.put_fact, req.org_id, req.account_code, req.period,
             req.value_kind, req.amount, req.currency or "KRW", req.scenario_id or "",
             req.source_ref or "", req.owner_organization_id or "",
-            req.scope_type or "ORG_PRIVATE", req.classification or "INTERNAL")
+            req.scope_type or "ORG_PRIVATE", req.classification or "INTERNAL",
+            "tenant_default", "REAL", req.product_code or "", req.cost_center or "")
         return {"status": "success", "data": data}
     except PlanningError as e:
         _err(e)
@@ -530,3 +536,15 @@ async def backtest_series(req: BacktestSeriesRequest,
     await _scope(p, req.org_id, req.org_id)
     return {"status": "success",
             "data": await asyncio.to_thread(backtest.backtest_series, req.org_id, req.periods)}
+
+
+@router.get("/rollup-check")
+async def rollup_check(org_id: str, period: str, value_kind: str = PLAN,
+                       p: Principal = Depends(current_principal)):
+    """★ 합계 행과 상세 행이 섞였는지 점검한다(제품·원가센터 차원의 필연적 함정).
+
+    둘이 함께 있으면 단순 합산 시 **이중 계상**이다. 어느 쪽이 정본인지는 데이터를 넣은
+    사람만 알기 때문에 자동으로 고르지 않고 **표시만** 한다."""
+    await _scope(p, org_id, org_id)
+    facts = await asyncio.to_thread(planning_store.list_facts, org_id, period, value_kind)
+    return {"status": "success", "data": await asyncio.to_thread(engine.rollup_conflicts, facts)}
