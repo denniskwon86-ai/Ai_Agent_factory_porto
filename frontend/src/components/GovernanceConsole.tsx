@@ -19,6 +19,7 @@ import type {
   FlatNode,
   GovernanceGap,
   MasterCoverage,
+  SystemsCoverage,
   QualityFinding,
   ScopeCoverage,
 } from '../lib/governanceApi';
@@ -29,6 +30,7 @@ import {
   fetchExternalReadiness,
   fetchGovernanceGaps,
   fetchMasterCoverage,
+  fetchSystemsCoverage,
   fetchOrgNodes,
   fetchScopeCoverage,
 } from '../lib/governanceApi';
@@ -76,6 +78,7 @@ export default function GovernanceConsole({ onClose }: Props) {
   const [nodes, setNodes] = useState<FlatNode[]>([]);
   const [masterCov, setMasterCov] = useState<MasterCoverage | null>(null);
   const [scopeCov, setScopeCov] = useState<ScopeCoverage | null>(null);
+  const [sysCov, setSysCov] = useState<SystemsCoverage | null>(null);
   const [dups, setDups] = useState<DuplicateCandidate[]>([]);
   const [docFindings, setDocFindings] = useState<QualityFinding[]>([]);
   const [gaps, setGaps] = useState<GovernanceGap[]>([]);
@@ -92,6 +95,7 @@ export default function GovernanceConsole({ onClose }: Props) {
     const results = await Promise.allSettled([
       fetchMasterCoverage(), fetchScopeCoverage(), fetchDuplicates(), fetchDocumentQuality(),
       fetchGovernanceGaps(scope), fetchContractEvaluations(), fetchExternalReadiness(),
+      fetchSystemsCoverage(),
     ]);
     const failed: string[] = [];
     const pick = <T,>(i: number, name: string): T | null => {
@@ -114,6 +118,7 @@ export default function GovernanceConsole({ onClose }: Props) {
     setExt(ex?.indicators || []);
     setExtMeta({ blocked: ex?.blocked ?? 0, usable: ex?.usable_for_baseline ?? 0,
                  sources: ex?.approved_sources ?? 0 });
+    setSysCov(pick<SystemsCoverage>(7, '연계 시스템 커버리지'));
     if (failed.length) setErr(`불러오지 못한 항목: ${failed.join(', ')}`);
     setLoading(false);
   }, [scope]);
@@ -185,7 +190,20 @@ export default function GovernanceConsole({ onClose }: Props) {
               value={scopeCov?.unscoped ?? '—'}
               tone={scopeCov && scopeCov.unscoped > 0 ? 'text-red-400' : undefined}
             />
+            {/* 연계 시스템은 실측값이 프롬프트에 병기되므로 노출 대가가 가장 크다 */}
+            <Stat label="연계 시스템 전체" value={sysCov?.total ?? '—'} />
+            <Stat
+              label="연계 시스템 범위 미지정"
+              value={sysCov?.unscoped ?? '—'}
+              tone={sysCov && sysCov.unscoped > 0 ? 'text-red-400' : undefined}
+            />
           </div>
+          {!!sysCov?.unscoped_systems.length && (
+            <p className="mt-2 text-[11px] text-slate-400 break-all">
+              범위 미지정 연계 시스템: {sysCov.unscoped_systems.join(', ')}
+              {' '}— 이 시스템의 실측값은 모든 조직의 프롬프트에 병기될 수 있습니다.
+            </p>
+          )}
           {!!masterCov?.exposed_codes.length && (
             <p className="mt-3 text-[11px] text-slate-400 break-all">
               노출 기준정보: {masterCov.exposed_codes.slice(0, 20).join(', ')}

@@ -105,6 +105,14 @@ export const fetchGovernanceGaps = (scopeNodeId?: string) =>
 export const fetchScopeCoverage = () =>
   get<ScopeCoverage>('/api/v1/catalog/governance/coverage');
 
+// ── 연계 시스템(M2 크로스워크) 범위 커버리지 ─────────────────────────────
+// 범위 미지정 시스템의 실측값은 **모든 조직의 프롬프트**에 병기될 수 있다(MCP 실측 병기).
+// 화면 유출보다 찾기 어려운 경로라 여기서 함께 센다.
+export type SystemsCoverage = ScopeCoverage & { unscoped_systems: string[] };
+
+export const fetchSystemsCoverage = () =>
+  get<SystemsCoverage>('/api/v1/crosswalk/systems/coverage');
+
 // ── 데이터 계약 ───────────────────────────────────────────────────────────
 // `unverifiable` 은 통과가 아니라 **확인하지 못한 것**이다. 화면에서 kept 와 섞으면 안 된다.
 export type ContractEvaluation = {

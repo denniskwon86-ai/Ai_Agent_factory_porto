@@ -150,12 +150,22 @@ class MCPBroker:
                 return m["external_key"]
         return None
 
-    def resolve(self, master_code: str, system_id: str, ttl: int = None, force: bool = False) -> dict:
+    def resolve(self, master_code: str, system_id: str, ttl: int = None, force: bool = False,
+                scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL") -> dict:
         """골든 레코드의 외부 실제값을 조회(캐시 우선). 실패는 정직하게 표식(옛 캐시/골든값 대체 없음).
-        반환: {master_code, system_id, external_key, values, as_of, cached, ok, error?}."""
+        반환: {master_code, system_id, external_key, values, as_of, cached, ok, error?}.
+
+        ★ [ECM E2] 조직 범위를 주면 **보이지 않는 시스템은 조회 자체를 거부한다.**
+          캐시 조회보다 **먼저** 판정한다 — 캐시는 시스템 단위라, 판정을 뒤에 두면 다른 조직이
+          채워 둔 캐시가 그대로 흘러나간다(가장 놓치기 쉬운 유출 경로)."""
         sys = self.cw.get_system(system_id)
         if not sys:
             raise MCPError(f"등록되지 않은 시스템: {system_id}")
+        if scope_node_id or tenant_id:
+            from core.enterprise_context.scoping import is_visible
+            if not is_visible(sys, scope_node_id, tenant_id, entity_mode):
+                # '없음'과 같은 문구 — 다른 조직 시스템의 존재를 알려주지 않는다.
+                raise MCPError(f"등록되지 않은 시스템: {system_id}")
         # [(e)] 읽기 전용 + 활성 시스템만
         if sys.get("status") != "active":
             raise MCPError(f"비활성 시스템입니다(status={sys.get('status')}). 승인 매핑 후 활성화하세요.")
@@ -189,11 +199,14 @@ class MCPBroker:
         return {"master_code": master_code, "system_id": system_id, "external_key": external_key,
                 "values": values, "as_of": as_of, "cached": False, "ok": True}
 
-    def resolve_batch(self, master_codes: list, system_id: str, ttl: int = None) -> list:
+    def resolve_batch(self, master_codes: list, system_id: str, ttl: int = None,
+                      scope_node_id: str = "", tenant_id: str = "",
+                      entity_mode: str = "REAL") -> list:
         out = []
         for mc in master_codes:
             try:
-                out.append(self.resolve(mc, system_id, ttl=ttl))
+                out.append(self.resolve(mc, system_id, ttl=ttl, scope_node_id=scope_node_id,
+                                        tenant_id=tenant_id, entity_mode=entity_mode))
             except MCPError as e:
                 out.append({"master_code": mc, "system_id": system_id, "ok": False, "error": str(e)})
         return out
@@ -201,7 +214,14 @@ class MCPBroker:
     def get_live_context(self, state) -> str:
         """[ContextEngine 연동, 기본 off] 프로젝트 도메인에 해당하는 골든 레코드의 외부 실측값을
         활성 연계 시스템에서 온디맨드 조회해 '참고(비신뢰)' 블록으로 만든다. 실패/빈값은 생략.
-        M1 골든값(기준)과 별개의 '현재 실측'이며 as_of 를 명기한다."""
+        M1 골든값(기준)과 별개의 '현재 실측'이며 as_of 를 명기한다.
+
+        ★★ [2026-07-29 저녁 / ECM E2] **여기가 실재한 누출 경로였다.** 종전에는 활성 시스템을
+          전부 순회해서, 배터리소재 프로젝트의 프롬프트에 동제련 연계 시스템의 실측값이 섞여
+          들어갔다. `ProjectState` 는 이미 `tenant_id`·`enterprise_scope_id`·`entity_mode` 를
+          갖고 있었는데 이 경로가 그것을 보지 않았다 — 데이터는 있는데 **배선이 없던** 유형이다.
+          프롬프트 유출은 화면 유출보다 찾기 어렵다. 산출물에 남은 값을 보고 역추적하지 않는 한
+          아무도 모르고, 그때는 이미 다른 조직의 수치가 결과물에 인용된 뒤다."""
         try:
             # crosswalk 가 보유한 master_data 인스턴스 재사용(테스트/주입 일관 — 전역 하드코딩 회피)
             md = self.cw.md
@@ -210,8 +230,24 @@ class MCPBroker:
                      if not domains or (set(r.get("domains", [])) & domains)}
             if not codes:
                 return ""
+            # 이 프로젝트의 조직 문맥. 미지정이면 종전대로 필터하지 않는다(ECM 미도입 보존).
+            _scope_ref = str(getattr(state, "enterprise_scope_id", "") or "")
+            _tenant = str(getattr(state, "tenant_id", "") or "")
+            _mode = str(getattr(state, "entity_mode", "") or "REAL")
+            _scope = ""
+            if _scope_ref:
+                from core.enterprise_context.scoping import resolve_scope_ref
+                _scope = resolve_scope_ref(_scope_ref)   # 부서 id / ECM node_id 양쪽 수용(D-005)
+                if not _scope:
+                    # ★ 여기만 **fail-closed** 다 — 기준정보 주입(master_data)은 해석 실패 시
+                    #   필터를 생략하고 계속한다. 그쪽은 우리 기준값이라 최악이 '과다 주입'이지만,
+                    #   이쪽은 **남의 조직 실측값**이라 최악이 유출이다. 범위를 선언했는데 해석에
+                    #   실패했다면 병기를 통째로 생략한다(기본 off 인 부가 블록이라 손실도 작다).
+                    print(f"⚠️ [MCPBroker] 조직 범위 해석 실패 — 실측 병기 생략(fail-closed): {_scope_ref}")
+                    return ""
             lines = []
-            for sys in self.cw.list_systems():
+            for sys in self.cw.list_systems(scope_node_id=_scope, tenant_id=_tenant,
+                                            entity_mode=_mode):
                 if sys.get("status") != "active":
                     continue
                 sid = sys["system_id"]
@@ -219,7 +255,8 @@ class MCPBroker:
                     if m["master_code"] not in codes:
                         continue
                     try:
-                        res = self.resolve(m["master_code"], sid)
+                        res = self.resolve(m["master_code"], sid, scope_node_id=_scope,
+                                           tenant_id=_tenant, entity_mode=_mode)
                     except MCPError:
                         continue
                     if res.get("ok") and res.get("values"):

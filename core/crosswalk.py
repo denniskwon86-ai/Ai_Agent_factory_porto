@@ -47,13 +47,52 @@ class Crosswalk:
         return v
 
     # ── 연계 시스템 (external_systems) ────────────────────────────────
-    def list_systems(self) -> list:
+    def list_systems(self, scope_node_id: str = "", tenant_id: str = "",
+                     entity_mode: str = "REAL") -> list:
+        """[ECM E2] 조직 범위 가시성을 적용해 연계 시스템을 나열한다.
+
+        범위를 주지 않으면 필터하지 않는다(ECM 미도입 흐름 보존 — `scoping` 규칙 3)."""
         conn = self._connect()
         try:
-            return [dict(r) for r in conn.execute(
+            rows = [dict(r) for r in conn.execute(
                 "SELECT * FROM external_systems ORDER BY system_id").fetchall()]
         finally:
             conn.close()
+        from core.enterprise_context.scoping import filter_visible
+        return filter_visible(rows, scope_node_id, tenant_id, entity_mode)
+
+    def is_system_visible(self, system_id: str, scope_node_id: str = "",
+                          tenant_id: str = "", entity_mode: str = "REAL") -> bool:
+        """이 문맥에서 그 시스템에 접근할 수 있는가.
+
+        ★ 자식 자원(스키마·매핑·제안·MCP 조회)의 접근 판정은 **전부 이 함수 하나를 탄다.**
+          자식 테이블에 범위 키를 복제하지 않기로 한 결정(D-013 계열)의 대가로, 판정 지점을
+          하나로 모으지 않으면 어느 경로에서만 열리는 구멍이 생긴다."""
+        row = self.get_system(system_id)
+        if not row:
+            return False
+        from core.enterprise_context.scoping import is_visible
+        return is_visible(row, scope_node_id, tenant_id, entity_mode)
+
+    def require_system_visible(self, system_id: str, scope_node_id: str = "",
+                               tenant_id: str = "", entity_mode: str = "REAL"):
+        """보이지 않으면 도메인 오류. **'없음'과 같은 문구를 쓴다** — 다른 조직 시스템의
+        존재 여부까지 알려주면 그 자체가 정보 유출이다."""
+        if not self.is_system_visible(system_id, scope_node_id, tenant_id, entity_mode):
+            raise CrosswalkError(f"존재하지 않거나 접근 권한이 없는 system_id 입니다: {system_id}")
+
+    def systems_coverage(self) -> dict:
+        """범위 미지정(= 모든 조직에 노출) 시스템 수 관측 (D-014 — 점진 도입의 의무 관측)."""
+        conn = self._connect()
+        try:
+            rows = [dict(r) for r in conn.execute("SELECT * FROM external_systems").fetchall()]
+        finally:
+            conn.close()
+        from core.enterprise_context.scoping import coverage
+        cov = coverage(rows, "연계 시스템")
+        cov["unscoped_systems"] = [r["system_id"] for r in rows
+                                   if not (r.get("enterprise_scope_id") or "").strip()]
+        return cov
 
     def get_system(self, system_id: str) -> dict | None:
         conn = self._connect()
@@ -64,7 +103,9 @@ class Crosswalk:
             conn.close()
 
     def create_system(self, system_id: str, name: str, mcp_endpoint: str = "",
-                      auth_ref: str = "", scope: str = "read") -> dict:
+                      auth_ref: str = "", scope: str = "read",
+                      tenant_id: str = "tenant_default", enterprise_scope_id: str = "",
+                      entity_mode: str = "REAL") -> dict:
         self._check_system_id(system_id)
         if scope not in ("read", "read-write"):
             raise CrosswalkError("scope 는 read | read-write 여야 합니다.")
@@ -73,9 +114,11 @@ class Crosswalk:
             if conn.execute("SELECT 1 FROM external_systems WHERE system_id=?", (system_id,)).fetchone():
                 raise CrosswalkError(f"이미 존재하는 system_id 입니다: {system_id}")
             conn.execute(
-                "INSERT INTO external_systems(system_id,name,mcp_endpoint,auth_ref,scope,status,created_at) "
-                "VALUES(?,?,?,?,?, 'inactive', ?)",
-                (system_id, name or system_id, mcp_endpoint or "", auth_ref or "", scope, _now()))
+                "INSERT INTO external_systems(system_id,name,mcp_endpoint,auth_ref,scope,status,created_at,"
+                "tenant_id,enterprise_scope_id,entity_mode) "
+                "VALUES(?,?,?,?,?, 'inactive', ?,?,?,?)",
+                (system_id, name or system_id, mcp_endpoint or "", auth_ref or "", scope, _now(),
+                 tenant_id or "tenant_default", enterprise_scope_id or "", entity_mode or "REAL"))
             conn.commit()
         finally:
             conn.close()
@@ -318,6 +361,17 @@ class Crosswalk:
             conn.close()
 
     # ── 승인 / 기각 ───────────────────────────────────────────────────
+    def system_of_proposal(self, proposal_id: int) -> str:
+        """제안이 속한 시스템. 승인·기각의 범위 게이트가 이것으로 부모를 찾는다
+        (제안 테이블에 범위 키를 복제하지 않기로 한 결정의 대가)."""
+        conn = self._connect()
+        try:
+            r = conn.execute("SELECT system_id FROM crosswalk_proposals WHERE id=?",
+                             (proposal_id,)).fetchone()
+            return (r["system_id"] if r else "") or ""
+        finally:
+            conn.close()
+
     def approve_proposal(self, proposal_id: int, external_key: str = None) -> dict:
         """제안을 승인 → key_crosswalk(confirmed=1) 로 승격. external_key 를 주면 그 값으로 확정
         (인스턴스 값 지정: 'entity:field=value'). 미지정 시 제안된 포인터를 그대로 사용."""

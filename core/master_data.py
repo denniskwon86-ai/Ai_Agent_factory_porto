@@ -90,8 +90,15 @@ CREATE INDEX IF NOT EXISTS idx_alias ON aliases(alias);
 -- M2 예약 (테이블만 생성, M1 미사용)
 CREATE TABLE IF NOT EXISTS external_systems (
     system_id TEXT PRIMARY KEY, name TEXT, mcp_endpoint TEXT, auth_ref TEXT,
-    scope TEXT DEFAULT 'read', status TEXT DEFAULT 'inactive', created_at TEXT
+    scope TEXT DEFAULT 'read', status TEXT DEFAULT 'inactive', created_at TEXT,
+    -- [ECM E2] 이 연계 시스템을 소유·운영하는 조직. `scope`(read/read-write)와 이름이
+    -- 비슷하지만 전혀 다른 축이다 — 저쪽은 '쓰기 허용 여부', 이쪽은 '누구의 시스템인가'.
+    tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
+    enterprise_scope_id TEXT DEFAULT '',
+    entity_mode         TEXT NOT NULL DEFAULT 'REAL'
 );
+CREATE INDEX IF NOT EXISTS idx_extsys_scope
+    ON external_systems(tenant_id, enterprise_scope_id, entity_mode, status);
 CREATE TABLE IF NOT EXISTS key_crosswalk (
     master_code TEXT NOT NULL, system_id TEXT NOT NULL, external_key TEXT NOT NULL,
     confirmed INTEGER DEFAULT 0,
@@ -376,8 +383,16 @@ _ECM_KEYS = (
     ("enterprise_scope_id", "TEXT DEFAULT ''"),
     ("entity_mode", "TEXT NOT NULL DEFAULT 'REAL'"),
 )
+#   ★ [2026-07-29 저녁] `external_systems`(M2 연계 시스템) 추가 — **누출 경로가 실재했다.**
+#     `mcp_broker.get_live_context()` 는 활성 시스템을 **전부** 순회해 실측값을 프롬프트에
+#     붙인다. 그래서 배터리소재 프로젝트의 프롬프트에 동제련 연계 시스템의 값이 섞여 들어갔다.
+#     ⚠️ 자식 테이블(`external_schemas`·`key_crosswalk`·`crosswalk_proposals`)에는 키를
+#       **복제하지 않는다.** 그것들은 시스템 하나에 종속된 세부 정보이고, 복제하면 "이 매핑의
+#       소유 조직"에 답이 두 개가 되어 반드시 어긋난다. 자식은 부모 시스템의 범위를 상속한다.
 _COLUMN_MIGRATIONS = [
-    (t, c, d) for t in ("data_assets", "business_terms", "data_contracts") for c, d in _ECM_KEYS
+    (t, c, d)
+    for t in ("data_assets", "business_terms", "data_contracts", "external_systems")
+    for c, d in _ECM_KEYS
 ]
 
 

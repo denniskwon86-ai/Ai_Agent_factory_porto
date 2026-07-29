@@ -25,12 +25,32 @@ def _err(e: CrosswalkError):
     raise HTTPException(status_code=400, detail=msg)
 
 
+# ── [ECM E2] 조직 범위 게이트 ─────────────────────────────────────────
+# ⚠️ 자식 자원(스키마·매핑·제안)에는 범위 키를 **복제하지 않았다** — 소유 조직은 시스템 하나에만
+#   있다. 그 대가로 자식 경로의 접근 판정은 전부 이 게이트 하나를 지나야 한다. 한 경로라도
+#   빠뜨리면 그 경로만 열려 있는 구멍이 된다(그래서 라우트마다 같은 한 줄을 반복한다).
+async def _gate(system_id: str, scope_node_id: str = "", tenant_id: str = "",
+                entity_mode: str = "REAL"):
+    if not (scope_node_id or tenant_id):
+        return                      # 범위 미지정 호출 — 종전 동작(ECM 미도입 흐름 보존)
+    try:
+        await asyncio.to_thread(crosswalk.require_system_visible, system_id,
+                                scope_node_id, tenant_id, entity_mode)
+    except CrosswalkError as e:
+        # 존재하지 않는 것과 **같은 응답**이다 — 다른 조직 시스템의 존재를 알려주지 않는다.
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 # ── 시스템 ────────────────────────────────────────────────────────────
 class SystemRequest(BaseModel):
     system_id: str
     name: str = ""
     mcp_endpoint: Optional[str] = ""
     scope: Optional[str] = "read"
+    # 이 시스템을 소유·운영하는 조직(비우면 전사 공용 — coverage 로 관측된다)
+    tenant_id: Optional[str] = "tenant_default"
+    enterprise_scope_id: Optional[str] = ""
+    entity_mode: Optional[str] = "REAL"
 
 
 class SystemUpdateRequest(BaseModel):
@@ -41,22 +61,38 @@ class SystemUpdateRequest(BaseModel):
 
 
 @router.get("/systems")
-async def list_systems():
-    return {"status": "success", "data": await asyncio.to_thread(crosswalk.list_systems)}
+async def list_systems(scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL"):
+    """범위를 주면 그 조직이 볼 수 있는 시스템만. 미지정이면 전량(종전 동작)."""
+    return {"status": "success",
+            "data": await asyncio.to_thread(crosswalk.list_systems, scope_node_id,
+                                            tenant_id, entity_mode)}
+
+
+@router.get("/systems/coverage")
+async def systems_coverage():
+    """범위 미지정(= 모든 조직에 노출) 시스템 관측 (D-014).
+
+    ⚠️ 경로 변수 라우트(`/systems/{system_id}/...`)보다 **위에** 둔다 — FastAPI 는 정의 순서로
+      매칭하므로 아래에 두면 'coverage' 가 system_id 로 잡아먹힌다(실측 사고 이력)."""
+    return {"status": "success", "data": await asyncio.to_thread(crosswalk.systems_coverage)}
 
 
 @router.post("/systems")
 async def create_system(req: SystemRequest):
     try:
         data = await asyncio.to_thread(crosswalk.create_system, req.system_id, req.name,
-                                       req.mcp_endpoint or "", "", req.scope or "read")
+                                       req.mcp_endpoint or "", "", req.scope or "read",
+                                       req.tenant_id or "tenant_default",
+                                       req.enterprise_scope_id or "", req.entity_mode or "REAL")
         return {"status": "success", "data": data}
     except CrosswalkError as e:
         _err(e)
 
 
 @router.put("/systems/{system_id}")
-async def update_system(system_id: str, req: SystemUpdateRequest):
+async def update_system(system_id: str, req: SystemUpdateRequest,
+                        scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL"):
+    await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await asyncio.to_thread(crosswalk.update_system, system_id, req.name,
                                        req.mcp_endpoint, req.scope, req.status)
@@ -66,7 +102,9 @@ async def update_system(system_id: str, req: SystemUpdateRequest):
 
 
 @router.delete("/systems/{system_id}")
-async def delete_system(system_id: str):
+async def delete_system(system_id: str, scope_node_id: str = "", tenant_id: str = "",
+                        entity_mode: str = "REAL"):
+    await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     await asyncio.to_thread(crosswalk.delete_system, system_id)
     return {"status": "success"}
 
@@ -89,12 +127,16 @@ class FieldMappingRequest(BaseModel):
 
 
 @router.get("/systems/{system_id}/schema")
-async def get_schema(system_id: str):
+async def get_schema(system_id: str, scope_node_id: str = "", tenant_id: str = "",
+                     entity_mode: str = "REAL"):
+    await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     return {"status": "success", "data": await asyncio.to_thread(crosswalk.get_schema, system_id)}
 
 
 @router.post("/systems/{system_id}/schema/field")
-async def add_field(system_id: str, req: FieldRequest):
+async def add_field(system_id: str, req: FieldRequest, scope_node_id: str = "",
+                    tenant_id: str = "", entity_mode: str = "REAL"):
+    await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await asyncio.to_thread(crosswalk.add_schema_field, system_id, req.entity, req.field,
                                        req.field_type or "", req.is_key, req.mapped_type or "",
@@ -105,7 +147,9 @@ async def add_field(system_id: str, req: FieldRequest):
 
 
 @router.post("/systems/{system_id}/schema/import")
-async def import_schema(system_id: str, file: UploadFile = File(...)):
+async def import_schema(system_id: str, file: UploadFile = File(...), scope_node_id: str = "",
+                        tenant_id: str = "", entity_mode: str = "REAL"):
+    await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     raw = await file.read()
     try:
         text = raw.decode("utf-8-sig")
@@ -122,7 +166,9 @@ async def import_schema(system_id: str, file: UploadFile = File(...)):
 
 
 @router.put("/systems/{system_id}/schema/mapping")
-async def set_mapping(system_id: str, req: FieldMappingRequest):
+async def set_mapping(system_id: str, req: FieldMappingRequest, scope_node_id: str = "",
+                      tenant_id: str = "", entity_mode: str = "REAL"):
+    await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await asyncio.to_thread(crosswalk.set_field_mapping, system_id, req.entity, req.field,
                                        req.mapped_type or "", req.mapped_attr or "")
@@ -137,8 +183,10 @@ class ApproveRequest(BaseModel):
 
 
 @router.post("/systems/{system_id}/propose")
-async def propose(system_id: str, use_llm: bool = False):
+async def propose(system_id: str, use_llm: bool = False, scope_node_id: str = "",
+                  tenant_id: str = "", entity_mode: str = "REAL"):
     """매핑 초안 생성. use_llm=True 는 Flash(옵트인, 쿼터 소비)."""
+    await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await crosswalk.propose(system_id, use_llm=use_llm)
         return {"status": "success", "data": data}
@@ -147,13 +195,27 @@ async def propose(system_id: str, use_llm: bool = False):
 
 
 @router.get("/systems/{system_id}/proposals")
-async def list_proposals(system_id: str, status: Optional[str] = None):
+async def list_proposals(system_id: str, status: Optional[str] = None, scope_node_id: str = "",
+                         tenant_id: str = "", entity_mode: str = "REAL"):
+    await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     data = await asyncio.to_thread(crosswalk.list_proposals, system_id, status)
     return {"status": "success", "data": data}
 
 
+async def _gate_proposal(proposal_id: int, scope_node_id: str, tenant_id: str, entity_mode: str):
+    """제안은 시스템에 종속된다 — 부모 시스템이 안 보이면 승인·기각도 안 된다."""
+    if not (scope_node_id or tenant_id):
+        return
+    sid = await asyncio.to_thread(crosswalk.system_of_proposal, proposal_id)
+    if not sid:
+        raise HTTPException(status_code=404, detail=f"존재하지 않는 제안입니다: {proposal_id}")
+    await _gate(sid, scope_node_id, tenant_id, entity_mode)
+
+
 @router.post("/proposals/{proposal_id}/approve")
-async def approve(proposal_id: int, req: ApproveRequest = None):
+async def approve(proposal_id: int, req: ApproveRequest = None, scope_node_id: str = "",
+                  tenant_id: str = "", entity_mode: str = "REAL"):
+    await _gate_proposal(proposal_id, scope_node_id, tenant_id, entity_mode)
     try:
         ext = req.external_key if req else None
         data = await asyncio.to_thread(crosswalk.approve_proposal, proposal_id, ext)
@@ -163,7 +225,9 @@ async def approve(proposal_id: int, req: ApproveRequest = None):
 
 
 @router.post("/proposals/{proposal_id}/reject")
-async def reject(proposal_id: int):
+async def reject(proposal_id: int, scope_node_id: str = "", tenant_id: str = "",
+                 entity_mode: str = "REAL"):
+    await _gate_proposal(proposal_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await asyncio.to_thread(crosswalk.reject_proposal, proposal_id)
         return {"status": "success", "data": data}
@@ -172,5 +236,7 @@ async def reject(proposal_id: int):
 
 
 @router.get("/systems/{system_id}/mappings")
-async def list_mappings(system_id: str):
+async def list_mappings(system_id: str, scope_node_id: str = "", tenant_id: str = "",
+                       entity_mode: str = "REAL"):
+    await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     return {"status": "success", "data": await asyncio.to_thread(crosswalk.list_mappings, system_id)}
