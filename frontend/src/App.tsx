@@ -10,6 +10,7 @@ import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
 import AgentMasterPanel from './components/AgentMasterPanel';
 import GovernanceConsole from './components/GovernanceConsole';
+import ShadowModePanel from './components/ShadowModePanel';
 import { PlanningPanel } from './components/PlanningPanel';
 import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
@@ -62,6 +63,8 @@ export default function App() {
   const [showAdvisor, setShowAdvisor] = useState(false);
   // 데이터 거버넌스 콘솔 — 기능 확인용. 디자인 확정 후 개편 대상.
   const [showGovernance, setShowGovernance] = useState(false);
+  // Shadow Mode — 후보를 병렬 검증하고 범위를 제한해 승격(§7.3).
+  const [showShadow, setShowShadow] = useState(false);
   // [M4] 경영계획 — 결정론적 계산(LLM 0콜). 디자인 확정 후 개편 대상.
   const [showPlanning, setShowPlanning] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
@@ -198,6 +201,9 @@ export default function App() {
         {showGovernance && (
           <GovernanceConsole onClose={() => setShowGovernance(false)} />
         )}
+        {showShadow && (
+          <ShadowModePanel onClose={() => setShowShadow(false)} />
+        )}
         {showPlanning && (
           <PlanningPanel onClose={() => setShowPlanning(false)} />
         )}
@@ -220,6 +226,13 @@ export default function App() {
                 title="조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약 상태·외부지표 준비도를 한 화면에서 확인"
               >
                 🛡️ 데이터 거버넌스
+              </button>
+              <button
+                onClick={() => setShowShadow(true)}
+                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
+                title="새 규칙·모델을 실제 데이터에 병렬 적용해 비교하고, 승인된 범위에서만 제한적으로 운영 적용"
+              >
+                🧪 Shadow Mode
               </button>
               <button
                 onClick={() => setShowPlanning(true)}
@@ -675,6 +688,13 @@ export default function App() {
             >
               🛡️ 거버넌스
             </button>
+            <button
+              onClick={() => setShowShadow(true)}
+              className="text-xs font-bold text-slate-200 bg-slate-800/70 hover:bg-slate-700/70 border border-slate-600/60 px-3 py-1.5 rounded-lg transition-colors"
+              title="후보 병렬 검증 · 제한적 승격(§7.3)"
+            >
+              🧪 Shadow
+            </button>
             <button 
               onClick={() => setShowLogPopup(v => !v)}
               title="서버 로그 보기"
@@ -692,6 +712,9 @@ export default function App() {
         )}
         {showGovernance && (
           <GovernanceConsole onClose={() => setShowGovernance(false)} />
+        )}
+        {showShadow && (
+          <ShadowModePanel onClose={() => setShowShadow(false)} />
         )}
         {showPlanning && (
           <PlanningPanel onClose={() => setShowPlanning(false)} />
