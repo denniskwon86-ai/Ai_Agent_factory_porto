@@ -109,3 +109,87 @@ export const compareScenarios = (scenarioIds: string[], orgId: string, period: s
 export const fetchVariance = (orgId: string, period: string) =>
   get<Variance>(`/api/v1/planning/variance?org_id=${encodeURIComponent(orgId)}` +
     `&period=${encodeURIComponent(period)}`);
+
+// ── 승인 흐름 ─────────────────────────────────────────────────────────────
+export type Submission = {
+  submission_id: string; org_id: string; period: string; value_kind: string;
+  status: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
+  submitted_by: string; submitted_at: string;
+  approved_by: string; approved_at: string; approved_fingerprint: string;
+  reject_reason: string;
+};
+
+/** 승인 후 값이 바뀌었는가. **상태(APPROVED)만 보면 알 수 없다.** */
+export type Integrity = {
+  submission_id: string; status: string;
+  /** false = 승인된 제출이 아니라 판정 자체가 불가 — '이상 없음'이 아니다. */
+  verifiable: boolean;
+  intact?: boolean;
+  approved_fingerprint?: string; current_fingerprint?: string;
+  approved_by?: string; approved_at?: string;
+  message?: string; reason?: string; note?: string;
+};
+
+export const fetchSubmissions = (orgId: string, period: string) =>
+  get<Submission[]>(`/api/v1/planning/submissions?org_id=${encodeURIComponent(orgId)}` +
+    `&period=${encodeURIComponent(period)}`);
+
+export const fetchCurrentApproved = (orgId: string, period: string) =>
+  get<(Submission & { integrity: Integrity }) | null>(
+    `/api/v1/planning/submissions/current?org_id=${encodeURIComponent(orgId)}` +
+    `&period=${encodeURIComponent(period)}`);
+
+// ── 현금흐름 ──────────────────────────────────────────────────────────────
+/** `computable=false` 는 **계산하지 않은 것**이다(0 이 아니다). */
+export type CashFlow = {
+  computable: boolean;
+  missing?: string[];
+  reason?: string; note?: string;
+  net_profit?: number;
+  operating_cf?: number; investing_cf?: number; financing_cf?: number;
+  free_cash_flow?: number; net_change?: number;
+  components?: Record<string, number>;
+  pl_complete?: boolean;
+};
+
+export const fetchCashFlow = (orgId: string, period: string, valueKind: ValueKind = 'PLAN') =>
+  get<CashFlow>(`/api/v1/planning/cash-flow?org_id=${encodeURIComponent(orgId)}` +
+    `&period=${encodeURIComponent(period)}&value_kind=${valueKind}`);
+
+// ── Backtest ──────────────────────────────────────────────────────────────
+export type Backtest = {
+  measurable: boolean;
+  reason?: string; note?: string;
+  mape?: number | null;
+  /** 부호 오차 — 늘 과대추정하는 모델은 절대오차가 작아도 위험하다. */
+  bias?: number | null;
+  worst?: { account_code: string; pct_error: number } | null;
+  by_account?: {
+    account_code: string; predicted: number; actual: number;
+    error: number; pct_error: number | null;
+  }[];
+  excluded_zero_actual?: string[];
+  only_predicted?: string[]; only_actual?: string[];
+  /** true = 가정이 대상 기간 이후에 작성됨 — 그 오차는 실제 예측력이 아니다. */
+  lookahead_risk?: boolean;
+  warnings?: string[];
+};
+
+export const fetchBacktestPlan = (orgId: string, period: string) =>
+  get<Backtest>(`/api/v1/planning/backtest/plan?org_id=${encodeURIComponent(orgId)}` +
+    `&period=${encodeURIComponent(period)}`);
+
+// ── 롤업 충돌(이중 계상) ──────────────────────────────────────────────────
+export type RollupCheck = {
+  has_conflict: boolean;
+  conflicts: {
+    org_id: string; account_code: string; period: string; value_kind: string;
+    total_row_amount: number; detail_sum: number; detail_rows: number;
+    naive_sum: number; matches: boolean; why: string;
+  }[];
+  note: string;
+};
+
+export const fetchRollupCheck = (orgId: string, period: string, valueKind: ValueKind = 'PLAN') =>
+  get<RollupCheck>(`/api/v1/planning/rollup-check?org_id=${encodeURIComponent(orgId)}` +
+    `&period=${encodeURIComponent(period)}&value_kind=${valueKind}`);
