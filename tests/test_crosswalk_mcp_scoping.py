@@ -248,8 +248,11 @@ def test_api_mcp_resolve_is_gated(client, cw):
     _make_system(cw, "mes-sml", "SMELTING")
     body = {"master_code": _code("mes-sml"), "system_id": "mes-sml"}
     assert client.post("/api/v1/mcp/resolve", json=body).json()["data"]["ok"] is True
+    # ★ [2026-07-29 갱신 · M2 관문 B-1] 종전에는 409(MCPError 일괄)였다. 409 는 "자원이 있으나
+    #   상태가 맞지 않다"는 뜻이라 **존재를 알려준다** — 타 조직 자원은 존재 자체를 숨겨야 하므로
+    #   404 로 바뀌었다(§3.3 경계표). 상태 충돌(비활성·매핑 없음)은 여전히 409 다.
     r = client.post("/api/v1/mcp/resolve", json={**body, "scope_node_id": "BATTERY"})
-    assert r.status_code == 409 and "등록되지 않은 시스템" in r.json()["detail"]
+    assert r.status_code == 404 and "등록되지 않은 시스템" in r.json()["detail"]
 
 
 def test_api_mcp_health_does_not_reveal_other_org_systems(client, cw):
