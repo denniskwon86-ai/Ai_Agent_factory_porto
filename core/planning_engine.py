@@ -176,7 +176,11 @@ def run_scenario(scenario_id: str, org_id: str, period: str,
             f"기준선이 비어 있습니다({org_id}/{period}/{baseline_kind}) — "
             "기준선 없이 계산하면 0 에서 시작한 숫자가 계획처럼 보입니다.")
 
-    applied, unapplied = apply_assumptions(baseline, assumptions)
+    # ★ [§17.2 기능 5] 동인 가정을 계정 가정으로 펼친 뒤 한 경로로 합류시킨다.
+    #   두 형태를 따로 처리하면 한쪽에만 적용되는 규칙이 생긴다.
+    from core.planning_drivers import expand_assumptions
+    expanded, driver_warnings = expand_assumptions(assumptions)
+    applied, unapplied = apply_assumptions(baseline, expanded)
     accounts = _accounts_by_code()
     before = compute_pl(baseline, accounts)
     after = compute_pl(applied, accounts)
@@ -200,9 +204,14 @@ def run_scenario(scenario_id: str, org_id: str, period: str,
         },
         # ★ 적용되지 않은 가정은 결과와 함께 돌려준다 — "넣었는데 안 변했다"의 유일한 단서다.
         "unapplied_assumptions": unapplied,
+        # 동인 관련 경고(매핑 없음·미승인 계수·미지원 연산자)는 별도로 남긴다 —
+        # "동인을 넣었는데 아무것도 안 변했다"의 유일한 단서다.
+        "driver_warnings": driver_warnings,
         "assumptions_count": len(assumptions),
+        "expanded_count": len(expanded),
         "note": ("`unapplied_assumptions` 가 비어 있지 않으면 이 결과는 의도한 가정을 전부 "
-                 "반영하지 않았습니다. `unmapped` 가 비어 있지 않으면 합계에서 빠진 금액이 있습니다."),
+                 "반영하지 않았습니다. `unmapped` 가 비어 있지 않으면 합계에서 빠진 금액이 있습니다. "
+                 "`driver_warnings` 는 동인 파급 계수가 없거나 미승인임을 뜻합니다."),
     }
 
     conn = planning_store._connect()

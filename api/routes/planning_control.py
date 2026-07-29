@@ -341,3 +341,71 @@ async def check_integrity(submission_id: str):
                 "data": await asyncio.to_thread(approval.verify_integrity, submission_id)}
     except PlanningError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# ── 계획 동인 (§17.2 기능 5) ──────────────────────────────────────────
+# ⚠️ 파급 계수는 **사람이 등록하고 근거를 남긴다.** LLM·자동 회귀로 만들면 그럴듯한 가짜
+#   인과가 생기고, 그것이 경영 보고서에 "환율 때문에 원가가 이만큼 오릅니다"로 인쇄된다.
+from core import planning_drivers as drivers
+
+
+class DriverRequest(BaseModel):
+    driver_code: str
+    name: str
+    unit: Optional[str] = ""
+    category: Optional[str] = ""
+    #: §12 외부 지표 연결. **표시일 뿐 자동 주입이 아니다**(등급 정책은 외부 인텔리전스가 강제).
+    external_code: Optional[str] = ""
+    note: Optional[str] = ""
+
+
+class ImpactRequest(BaseModel):
+    account_code: str
+    #: 동인이 1% 변할 때 계정이 몇 % 변하는가.
+    elasticity: float
+    rationale: str        # 필수 — 근거 없는 계수는 창작이다
+    source: str           # 필수 — 실적회귀·업계자료·전문가판단 중 무엇인가
+
+
+@router.get("/drivers")
+async def list_drivers():
+    return {"status": "success", "data": await asyncio.to_thread(drivers.list_drivers)}
+
+
+@router.post("/drivers")
+async def register_driver(req: DriverRequest):
+    try:
+        data = await asyncio.to_thread(drivers.register_driver, req.driver_code, req.name,
+                                       req.unit or "", req.category or "",
+                                       req.external_code or "", req.note or "")
+        return {"status": "success", "data": data}
+    except PlanningError as e:
+        _err(e)
+
+
+@router.get("/drivers/{driver_code}/impacts")
+async def list_impacts(driver_code: str):
+    return {"status": "success",
+            "data": await asyncio.to_thread(drivers.impacts_of, driver_code)}
+
+
+@router.post("/drivers/{driver_code}/impacts")
+async def add_impact(driver_code: str, req: ImpactRequest,
+                     p: Principal = Depends(current_principal)):
+    """파급 계수 등록. 승인자는 인증 주체로 기록된다(익명이면 미승인 상태로 남는다)."""
+    try:
+        data = await asyncio.to_thread(drivers.add_impact, driver_code, req.account_code,
+                                       req.elasticity, req.rationale, req.source, p.user_id)
+        return {"status": "success", "data": data}
+    except PlanningError as e:
+        _err(e)
+
+
+@router.get("/drivers/{driver_code}/preview")
+async def preview_driver(driver_code: str, pct_change: float):
+    """동인 가정을 계정 단위로 **펼쳐서 미리 본다** — 시나리오에 넣기 전에 파급을 확인한다.
+
+    `warnings` 가 비어 있지 않으면 매핑이 없거나 미승인 계수가 섞여 있다는 뜻이다."""
+    rows, warns = await asyncio.to_thread(drivers.expand_driver_assumption,
+                                          driver_code, pct_change)
+    return {"status": "success", "data": {"expanded": rows, "warnings": warns}}
