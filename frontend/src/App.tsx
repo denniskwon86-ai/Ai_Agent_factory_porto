@@ -9,6 +9,7 @@ import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
 import AgentMasterPanel from './components/AgentMasterPanel';
+import GovernanceConsole from './components/GovernanceConsole';
 import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
@@ -58,6 +59,8 @@ export default function App() {
   const [showTelemetry, setShowTelemetry] = useState(false);
   // [M0] 업무·데이터 설계 상담 — §4.3 F-DA-01: 런처와 프로젝트 화면 **양쪽에서** 접근 가능해야 한다
   const [showAdvisor, setShowAdvisor] = useState(false);
+  // 데이터 거버넌스 콘솔 — 기능 확인용. 디자인 확정 후 개편 대상.
+  const [showGovernance, setShowGovernance] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
   const [showLogPopup, setShowLogPopup] = useState(false);
@@ -189,6 +192,9 @@ export default function App() {
         {showAdvisor && (
           <AdvisorPanel onClose={() => setShowAdvisor(false)} onProjectCreated={fetchProjects} />
         )}
+        {showGovernance && (
+          <GovernanceConsole onClose={() => setShowGovernance(false)} />
+        )}
         <div className="min-h-screen w-screen bg-[#0B0C10] text-gray-100 flex flex-col font-sans">
           <header className="h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-[#1F2833] flex items-center justify-between px-8 shrink-0 sticky top-0 z-10">
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
@@ -201,6 +207,13 @@ export default function App() {
                 title="무엇을 만들지 모를 때 — 선택형 대화로 필요한 데이터와 추진 순서를 정하고, 승인하면 프로젝트가 됩니다"
               >
                 🧭 업무·데이터 설계 상담
+              </button>
+              <button
+                onClick={() => setShowGovernance(true)}
+                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
+                title="조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약 상태·외부지표 준비도를 한 화면에서 확인"
+              >
+                🛡️ 데이터 거버넌스
               </button>
               <button
                 onClick={openAgentPanel}
@@ -642,6 +655,13 @@ export default function App() {
             >
               🧭 설계 상담
             </button>
+            <button
+              onClick={() => setShowGovernance(true)}
+              className="text-xs font-bold text-slate-200 bg-slate-800/70 hover:bg-slate-700/70 border border-slate-600/60 px-3 py-1.5 rounded-lg transition-colors"
+              title="조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약 상태·외부지표 준비도"
+            >
+              🛡️ 거버넌스
+            </button>
             <button 
               onClick={() => setShowLogPopup(v => !v)}
               title="서버 로그 보기"
@@ -656,6 +676,9 @@ export default function App() {
 
         {showAdvisor && (
           <AdvisorPanel onClose={() => setShowAdvisor(false)} onProjectCreated={fetchProjects} />
+        )}
+        {showGovernance && (
+          <GovernanceConsole onClose={() => setShowGovernance(false)} />
         )}
 
         {/* 전체 워크플로우 진행 스트립 */}
