@@ -413,7 +413,7 @@ def build_graph_from_registry(registry=None):
         for aid in enabled_ids:
             impl = NODE_IMPL.get(aid)
             if impl is not None:
-                workflow.add_node(aid, impl)
+                workflow.add_node(aid, _with_agent_identity(aid, impl))
         _wire_edges(workflow)
         # HOTL 중단점 = "전달된 레지스트리" 의 hotl_after(SW 노드로 한정). DEFAULT_REGISTRY 면 기존과 동일.
         interrupt_after = [a["id"] for a in enabled
@@ -422,7 +422,7 @@ def build_graph_from_registry(registry=None):
         # 범용 선형 파이프라인 - 설정만으로 새 에이전트 타입(마케팅/리서치/문서 등) 실행
         from nodes.universal import make_universal_node
         for aid in enabled_ids:
-            workflow.add_node(aid, make_universal_node(aid))
+            workflow.add_node(aid, _with_agent_identity(aid, make_universal_node(aid)))
             
         if enabled_ids:
             def route_universal(state: ProjectState, current_node_id: str) -> str:
@@ -473,6 +473,29 @@ def build_graph_from_registry(registry=None):
 
     return workflow, interrupt_after
 
+
+
+def _with_agent_identity(node_id: str, impl):
+    """노드 실행 동안 **실행 주체 이름**을 계측 컨텍스트에 세운다.
+
+    ⚠️ 왜 필요한가(2026-07-29 카나리 실측): 텔레메트리의 단계 축은 `state.current_stage` 하나뿐인데
+      그것을 채우지 않는 노드가 있어 **36콜 중 13콜이 단계 미상**으로 남았다. 폴백 4건 중 3건이
+      그 안에 있어 "어느 단계에서 폴백했는지"를 답할 수 없었다. 노드 이름은 그래프가 아는
+      사실이므로 상태가 비어도 남길 수 있다 — 축을 둘로 만들어 한쪽이 비어도 계측이 살아남게 한다.
+
+    계측이 노드 실행을 방해하면 안 되므로 세팅 실패는 삼킨다."""
+    import functools
+
+    @functools.wraps(impl)
+    async def _wrapped(state):
+        try:
+            from core.run_context import set_agent
+            set_agent(node_id)
+        except Exception:
+            pass
+        return await impl(state)
+
+    return _wrapped
 
 def _build_workflow(registry=None):
     """토폴로지 빌더 진입점 - 레지스트리 구동(build_graph_from_registry)으로 위임.

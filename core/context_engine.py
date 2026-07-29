@@ -8,6 +8,7 @@ import config
 from core.persona_learner import persona_learner
 from core.knowledge_base import knowledge_base
 from core.master_data import master_data
+from core import context_report
 
 # 디스크 walk 시 제외할 디렉터리(노이즈/대용량 방지)
 _EXCLUDE_DIRS = {".git", ".archive", "node_modules", "dist", "build", ".next",
@@ -48,6 +49,11 @@ class ContextEngine:
         ctx_max = (getattr(config, "CONTEXT_MAX_LENGTH_CODE", 200000)
                    if full_file_exts else getattr(config, "CONTEXT_MAX_LENGTH", 20000))
 
+        # ★ [2026-07-29 / A-1 카나리 계측 ③] 이번 호출의 컨텍스트 구성 보고서를 연다.
+        #   블록별 길이가 없으면 "토큰이 늘었다"까지만 알고 **무엇이 무엇을 밀어냈는지**는
+        #   알 수 없다(2026-07-29 에 기준정보가 기술 명세를 밀어낸 회귀가 정확히 그 형태였다).
+        context_report.start()
+
         profile = persona_learner.get_company_profile()
         profile_str = json.dumps(profile, ensure_ascii=False, indent=2) if profile else "학습된 프로필 없음"
 
@@ -71,6 +77,8 @@ class ContextEngine:
         context_parts = [
             f" [기업 프로필 & 사용자 성향]:\n{profile_str}"
         ]
+        context_report.add_block("profile", profile_str)
+        context_report.add_block("master_data", master_context)
         if master_context:
             context_parts.append(master_context)
         # ★ [ECM E2 / 감사 ENTERPRISE-01 Action 3] 템플릿별 기준정보 바인딩 규칙.
@@ -97,6 +105,8 @@ class ContextEngine:
                     context_parts.append(live_context)
             except Exception as e:
                 print(f"⚠️ [ContextEngine] 실측 병기 실패(생략): {e}")
+        context_report.add_block("knowledge_grounding", grounding)
+        context_report.add_block("rag_cases", rag_context)
         if grounding:
             context_parts.append(f" [도메인 참고 지식 - 반드시 정합 유지]:\n{grounding}")
         if rag_context:
@@ -112,14 +122,19 @@ class ContextEngine:
         is_planning = stage in ("PLANNING", "RFP", "PRD", "ARCHITECTURE", "TECH_SPEC", "UI_DESIGN", "CLARIFICATION")
 
         if getattr(state, "rfp_summary", "") and is_planning:
-            context_parts.append(f" [요구사항 정의서 (RFP) - 반드시 충족해야 할 기준 계약]:\n{_clip(state.rfp_summary, sm)}")
+            _rfp = _clip(state.rfp_summary, sm)
+            context_report.add_block("rfp", _rfp)
+            context_parts.append(f" [요구사항 정의서 (RFP) - 반드시 충족해야 할 기준 계약]:\n{_rfp}")
         if getattr(state, "prd_summary", "") and is_planning:
-            context_parts.append(f" [기획서 (PRD)]:\n{_clip(state.prd_summary, sm)}")
+            _prd = _clip(state.prd_summary, sm)
+            context_report.add_block("prd", _prd)
+            context_parts.append(f" [기획서 (PRD)]:\n{_prd}")
         if getattr(state, "architecture_summary", ""):
             arch = state.architecture_summary
             if not is_planning:
                 # [Context Diet] 실행 단계에선 아키텍처는 절반으로 강제 압축 (핵심만)
                 arch = _clip(arch, sm // 2)
+            context_report.add_block("architecture", arch)
             context_parts.append(f"️ [아키텍처]:\n{arch}")
             
         if getattr(state, "tech_spec_summary", ""):
@@ -164,7 +179,11 @@ class ContextEngine:
                         ts = "\n".join(filtered_ts)
                 except Exception:
                     pass
-            context_parts.append(f"️ [기술 사양 (Tech Spec)]:\n{_clip(ts, sm)}")
+            _ts_final = _clip(ts, sm)
+            # ★ 기술 명세는 밀려나면 안 되는 블록이다(코더가 API 계약을 못 보면 끝난다).
+            #   길이를 따로 남겨 다음 카나리에서 회귀를 수치로 잡는다.
+            context_report.add_block("tech_spec", _ts_final)
+            context_parts.append(f"️ [기술 사양 (Tech Spec)]:\n{_ts_final}")
 
         #  [컨텍스트 라우터] QA, Reviewer, 개발자 교차 참조를 위해 실제 파일 디스크에서 읽어오기.
         #   - 소유 파일(full_file_exts 일치): 전체 주입(절단 금지) - 재출력 시 기존 기능 보존.
@@ -248,13 +267,18 @@ class ContextEngine:
                             _emit(rel)
 
                 if owned_blocks or other_blocks:
+                    context_report.add_block("files_owned", "".join(owned_blocks))
+                    context_report.add_block("files_other", "".join(other_blocks))
                     context_parts.append("\n [현재 워크스페이스 실제 파일 상태 (Context Router)]:")
                     # 소유 파일을 먼저 배치 → 총량 절단 시에도 보존 우선
                     context_parts.extend(owned_blocks)
                     context_parts.extend(other_blocks)
 
         # 전체 컨텍스트 총량 상한 (TPM 방어)
-        return _clip("\n\n".join(context_parts), ctx_max)
+        _final = _clip("\n\n".join(context_parts), ctx_max)
+        # 절단은 사건이다 — 예산 초과 = 뒤쪽 블록(기술 명세·파일)이 잘렸다는 뜻이다.
+        context_report.finish(_final, ctx_max)
+        return _final
 
     @staticmethod
     def get_strict_json_instruction() -> str:

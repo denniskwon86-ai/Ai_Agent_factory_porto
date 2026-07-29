@@ -298,7 +298,8 @@ _LLM_CALL_LOG_PATH = os.path.join("data", "llm_call_log.jsonl")
 
 
 def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, attempts: list, ok: bool, duration_s: float,
-                  requested_tier: str = "", downgraded: bool = False, input_tokens: int = 0, output_tokens: int = 0):
+                  requested_tier: str = "", downgraded: bool = False, input_tokens: int = 0, output_tokens: int = 0,
+                  _fallback_errors: list = None):
     """LLM 호출 1건당 텔레메트리 JSONL 1줄 기록 — '모델을 바꿔도 품질 유지' 주장을
     사후에 데이터(단계별 사용 모델 x stage_scores)로 증명하기 위한 기초 계측.
     requested_tier: 호출자가 원래 요청한 티어(브레이커 강등 전). downgraded: 브레이커로 강등됐는지.
@@ -316,6 +317,14 @@ def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, atte
         # 비용은 결정론적 규칙으로 산정하고, 근거를 모르면 None + `unpriced` 로 남긴다
         # (0 으로 두면 '공짜였다'는 거짓이 된다 — core/llm_cost.py 주석 참조).
         _cost, _cost_basis = estimate_cost_usd(_used_model, input_tokens, output_tokens)
+        # ★ [2026-07-29 / 카나리 계측] 컨텍스트 구성과 실행 주체를 함께 남긴다.
+        #   ⚠️ 07-29 카나리 실측에서 **36건 중 13건(36%)이 stage 빈 값**이었다. 폴백 4건 중
+        #     3건도 그 안에 있어 "어느 단계에서 폴백했는지"를 알 수 없었다. stage 는 상태가
+        #     채워야 하는 값이라 비는 경우가 있으므로, **실행 중인 노드 이름**을 별도 축으로
+        #     남긴다(둘 중 하나는 반드시 있다).
+        from core import context_report as _cr
+        from core.run_context import current_agent as _cur_agent
+        _ctx = _cr.current()
         rec = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "project": getattr(state_obj, "project_name", "") or "",
@@ -336,6 +345,17 @@ def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, atte
             "duration_s": round(duration_s, 2),
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            # ── 계측 ①: 실행 주체 (stage 가 비어도 누가 불렀는지는 남는다)
+            "agent": _cur_agent(),
+            # ── 계측 ①: 폴백 사유 (LangChain with_fallbacks 가 삼키는 개별 실패를 콜백으로 수집)
+            "fallback_errors": _fallback_errors or [],
+            # ── 계측 ③: 컨텍스트 구성 — 블록별 길이·절단 여부·실제 주입된 지식 출처
+            "context_chars": _ctx.get("total_chars"),
+            "context_budget": _ctx.get("budget_chars"),
+            "context_clipped": _ctx.get("clipped"),
+            "context_blocks": _ctx.get("blocks") or {},
+            "knowledge_packs": _ctx.get("knowledge_packs") or [],
+            "knowledge_hits": _ctx.get("knowledge_hits") or [],
         }
         os.makedirs("data", exist_ok=True)
         with open(_LLM_CALL_LOG_PATH, "a", encoding="utf-8") as f:
@@ -772,11 +792,17 @@ class LLMGateway:
             #   → 체인 walk 전체에 asyncio.wait_for 로 하드 상한을 씌운다. TimeoutError 는 아래
             #     except 로 떨어져 기존 경로(Flash 우회 → 오류 센티넬)를 그대로 탄다.
             _deadline = getattr(config, "LLM_TOTAL_DEADLINE_SEC", 420)
+            # ★ [2026-07-29 / 계측 ①] 폴백 사유 수집기를 함께 건다. `with_fallbacks` 는 성공하면
+            #   앞선 실패를 삼키므로, 콜백으로 잡지 않으면 "왜 4개를 건너뛰었는지"가 영영 남지 않는다.
+            from core.run_context import FallbackErrorCollector, reset_fallback_errors, get_fallback_errors
+            reset_fallback_errors()
+            _fb = FallbackErrorCollector()
             response = await asyncio.wait_for(
-                llm.ainvoke(messages, config={"callbacks": [_rec]}), timeout=_deadline)
+                llm.ainvoke(messages, config={"callbacks": [_rec, _fb]}), timeout=_deadline)
             self._update_cooldowns(_rec.attempts, ok=True)   # 성공 모델은 live, 앞서 실패한 모델은 쿨다운
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, True, time.time() - _t0,
-                          requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens, output_tokens=_rec.output_tokens)
+                          requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens,
+                          output_tokens=_rec.output_tokens, _fallback_errors=get_fallback_errors())
 
             if output_mode == "code":
                 # response가 CodeOutput (Pydantic 모델)이므로 바로 JSON 변환 후 반환
@@ -798,8 +824,10 @@ class LLMGateway:
             #   ★ [2026-07-27] 오류 문자열을 넘겨 '일일 쿼터 소진'과 '일시적 실패'를 구분한다.
             #     구분 없이 전부 30분 배제하면 살아있는 모델이 실행 내내 체인에서 빠진다.
             self._update_cooldowns(_rec.attempts, ok=False, error_str=str(e))
+            from core.run_context import get_fallback_errors as _gfe
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, False, time.time() - _t0,
-                          requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens, output_tokens=_rec.output_tokens)
+                          requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens,
+                          output_tokens=_rec.output_tokens, _fallback_errors=_gfe())
             error_str = str(e)
             # [총 시간 상한 초과] asyncio.TimeoutError 는 str(e) 가 비어 있어 로그가 무용해진다.
             #   원인을 식별 가능한 문장으로 치환해 텔레메트리·배너에서 '왜 죽었는지'가 보이게 한다.
