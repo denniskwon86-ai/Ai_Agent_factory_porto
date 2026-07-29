@@ -47,6 +47,9 @@ class TermRequest(BaseModel):
     owner_dept_id: str = ""
     master_code: str = ""
     synonyms: Optional[List[str]] = None
+    tenant_id: str = "tenant_default"
+    enterprise_scope_id: str = ""
+    entity_mode: str = "REAL"
 
 
 class SynonymRequest(BaseModel):
@@ -65,21 +68,25 @@ class ConfirmRequest(BaseModel):
 
 # ── 고정 경로 (경로 변수보다 위) ──────────────────────────────────────────
 @router.get("/terms/expand")
-async def expand_term(q: str, approved_only: bool = False):
+async def expand_term(q: str, approved_only: bool = False, scope_node_id: str = "",
+                      tenant_id: str = "", entity_mode: str = "REAL"):
     """용어 → 정본명 + 동의어 확장(§6.4 1~2단계).
 
     `unapproved` 는 확장에는 썼지만 **확정 근거로는 약한** 동의어다 — 섞어서 주면 나중에
     "이 매칭의 근거가 승인된 것이었나"를 되짚을 수 없다."""
-    data = await asyncio.to_thread(business_glossary.expand, q, approved_only)
+    data = await asyncio.to_thread(business_glossary.expand, q, approved_only,
+                                   scope_node_id, tenant_id, entity_mode)
     return {"status": "success", "data": data}
 
 
 @router.get("/match")
-async def match_requirement(term: str):
+async def match_requirement(term: str, scope_node_id: str = "", tenant_id: str = "",
+                            entity_mode: str = "REAL"):
     """업무 용어 → 카탈로그 후보(§6.4 전체 흐름).
 
     ⚠️ 확정하지 않는다. 각 후보에 `blockers`(무엇이 확정을 막고 있나)와 `confirmable` 을 준다."""
-    data = await asyncio.to_thread(business_glossary.match_requirement, term)
+    data = await asyncio.to_thread(business_glossary.match_requirement, term, None,
+                                   scope_node_id, tenant_id, entity_mode)
     return {"status": "success", "data": data}
 
 
@@ -100,8 +107,11 @@ async def confirm_match(req: ConfirmRequest, p: Principal = Depends(current_prin
 
 # ── 용어 ──────────────────────────────────────────────────────────────────
 @router.get("/terms")
-async def list_terms(domain: str = "", status: str = "", include_retired: bool = False):
-    rows = await asyncio.to_thread(business_glossary.list_terms, domain, status, include_retired)
+async def list_terms(domain: str = "", status: str = "", include_retired: bool = False,
+                     scope_node_id: str = "", tenant_id: str = "",
+                     entity_mode: str = "REAL"):
+    rows = await asyncio.to_thread(business_glossary.list_terms, domain, status,
+                                   include_retired, scope_node_id, tenant_id, entity_mode)
     return {"status": "success", "data": rows}
 
 
@@ -111,7 +121,8 @@ async def create_term(req: TermRequest, p: Principal = Depends(current_principal
     try:
         out = await asyncio.to_thread(
             business_glossary.create_term, req.canonical_name, req.definition, req.calculation,
-            req.domain, req.owner_dept_id, req.master_code, req.synonyms)
+            req.domain, req.owner_dept_id, req.master_code, req.synonyms, "",
+            req.tenant_id, req.enterprise_scope_id, req.entity_mode)
     except GlossaryError as e:
         _err(e)
     return {"status": "success", "data": out}

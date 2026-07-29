@@ -68,7 +68,9 @@ class DataCatalog:
                      entity: str = "", location: str = "", owner_dept_id: str = "",
                      owner_user_id: str = "", sensitivity: str = "internal",
                      refresh_cadence: str = "", description: str = "",
-                     origin: str = "user", asset_id: str = "") -> dict:
+                     origin: str = "user", asset_id: str = "",
+                     tenant_id: str = "tenant_default", enterprise_scope_id: str = "",
+                     entity_mode: str = "REAL") -> dict:
         if not (name or "").strip():
             raise DataCatalogError("name 은 필수입니다.")
         if asset_type not in ASSET_TYPES:
@@ -97,10 +99,13 @@ class DataCatalog:
             conn.execute(
                 "INSERT INTO data_assets(asset_id,name,asset_type,system_id,entity,location,"
                 "owner_dept_id,owner_user_id,sensitivity,refresh_cadence,last_refreshed_at,"
-                "description,status,origin,created_at,updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,'',?,'active',?,?,?)",
+                "description,status,origin,tenant_id,enterprise_scope_id,entity_mode,"
+                "created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,'',?,'active',?,?,?,?,?,?)",
                 (aid, name.strip(), asset_type, system_id, entity, location, owner_dept_id,
-                 owner_user_id, sensitivity, refresh_cadence, description, origin, now, now))
+                 owner_user_id, sensitivity, refresh_cadence, description, origin,
+                 tenant_id or "tenant_default", enterprise_scope_id, entity_mode or "REAL",
+                 now, now))
         return self.get_asset(aid)
 
     def update_asset(self, asset_id: str, **fields) -> dict:
@@ -143,7 +148,13 @@ class DataCatalog:
         return out
 
     def list_assets(self, owner_dept_id: str = "", sensitivity: str = "",
-                    system_id: str = "", include_inactive: bool = False) -> List[dict]:
+                    system_id: str = "", include_inactive: bool = False,
+                    scope_node_id: str = "", tenant_id: str = "",
+                    entity_mode: str = "REAL") -> List[dict]:
+        """[ECM E2] `scope_node_id` 를 주면 그 조직에 보이는 자산만 돌려준다.
+
+        판정은 `enterprise_context.scoping` 한 곳에서만 한다 — 같은 규칙을 모듈마다 복제하면
+        반드시 어긋난다(이 프로젝트에서 겪은 유형)."""
         sql = "SELECT * FROM data_assets WHERE 1=1"
         params: List[Any] = []
         if not include_inactive:
@@ -155,7 +166,11 @@ class DataCatalog:
                 params.append(val)
         sql += " ORDER BY name"
         with self._connect() as conn:
-            return [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
+            rows = [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
+        if not scope_node_id:
+            return rows
+        from core.enterprise_context.scoping import filter_visible
+        return filter_visible(rows, scope_node_id, tenant_id, entity_mode)
 
     def retire_asset(self, asset_id: str) -> bool:
         """소프트 삭제 — 어떤 앱·보고서가 이 자산을 썼는지가 계보의 근거라 지우지 않는다."""
@@ -275,13 +290,15 @@ class DataCatalog:
         return report
 
     # ── 거버넌스 점검 ─────────────────────────────────────────────────────
-    def governance_gaps(self) -> List[dict]:
+    def governance_gaps(self, scope_node_id: str = "", tenant_id: str = "",
+                        entity_mode: str = "REAL") -> List[dict]:
         """카탈로그가 '책임·갱신·민감도'를 담지 못한 지점.
 
         ⚠️ 자동으로 채우지 않는다. 소유자를 시스템이 추측해 넣으면 **아무도 책임지지 않는 자산이
           책임자가 있는 것처럼 보인다** — 없는 것보다 나쁘다."""
         gaps: List[dict] = []
-        for a in self.list_assets():
+        for a in self.list_assets(scope_node_id=scope_node_id, tenant_id=tenant_id,
+                                 entity_mode=entity_mode):
             aid, nm = a["asset_id"], a["name"]
             if not (a["owner_dept_id"] or a["owner_user_id"]):
                 gaps.append({"kind": "no_owner", "severity": "high", "asset_id": aid, "asset": nm,
@@ -409,7 +426,8 @@ class DataCatalog:
                 "why": f"마지막 갱신 후 {age:.1f}시간 경과, 기대 주기 {allowed}시간({cadence})."}
 
     # ── 검색 (§6.4 3단계 「데이터 카탈로그 후보 검색」) ────────────────────
-    def search_assets(self, query: str, limit: int = 20) -> List[dict]:
+    def search_assets(self, query: str, limit: int = 20, scope_node_id: str = "",
+                      tenant_id: str = "", entity_mode: str = "REAL") -> List[dict]:
         """업무 용어로 후보 자산을 찾는다. **결정론적 문자열 매칭**(LLM 0콜).
 
         점수 근거를 함께 돌려준다 — 왜 이게 후보인지 모르면 데이터 오너가 확정할 수 없고,
@@ -419,7 +437,8 @@ class DataCatalog:
             return []
         tokens = [t for t in q.split() if len(t) >= 2] or [q]
         out = []
-        for a in self.list_assets():
+        for a in self.list_assets(scope_node_id=scope_node_id, tenant_id=tenant_id,
+                                  entity_mode=entity_mode):
             full = self.get_asset(a["asset_id"])
             hay_asset = _norm(f"{a['name']} {a['description']} {a['entity']} {a['location']}")
             score, why = 0, []

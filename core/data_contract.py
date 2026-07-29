@@ -61,7 +61,8 @@ class DataContracts:
     def create(self, name: str, producer_asset_id: str, consumer: str,
                schema: Dict[str, Any] = None, quality_rules: Dict[str, Any] = None,
                access_policy: Dict[str, Any] = None, contract_key: str = "",
-               note: str = "", catalog=None) -> dict:
+               note: str = "", catalog=None, tenant_id: str = "tenant_default",
+               enterprise_scope_id: str = "", entity_mode: str = "REAL") -> dict:
         from core.data_catalog import data_catalog
         cat = catalog or data_catalog
         if not (name or "").strip():
@@ -81,13 +82,16 @@ class DataContracts:
             conn.execute(
                 "INSERT INTO data_contracts(contract_id,contract_key,version,name,"
                 "producer_asset_id,consumer,schema_json,quality_rules_json,access_policy_json,"
-                "status,activated_by,activated_at,supersedes,note,created_at,updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,'draft','','',?,?,?,?)",
+                "status,activated_by,activated_at,supersedes,note,tenant_id,"
+                "enterprise_scope_id,entity_mode,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,'draft','','',?,?,?,?,?,?,?)",
                 (cid, key, prev + 1, name.strip(), producer_asset_id, consumer.strip(),
                  json.dumps(schema or {}, ensure_ascii=False),
                  json.dumps(quality_rules or {}, ensure_ascii=False),
                  json.dumps(access_policy or {}, ensure_ascii=False),
-                 f"{key}@{prev}" if prev else "", note, now, now))
+                 f"{key}@{prev}" if prev else "", note,
+                 tenant_id or "tenant_default", enterprise_scope_id, entity_mode or "REAL",
+                 now, now))
         return self.get(cid)
 
     def revise(self, contract_key: str, **kwargs) -> dict:
@@ -131,7 +135,8 @@ class DataContracts:
         return self._row(r) if r else None
 
     def list(self, producer_asset_id: str = "", consumer: str = "",
-             status: str = "", include_retired: bool = False) -> List[dict]:
+             status: str = "", include_retired: bool = False, scope_node_id: str = "",
+             tenant_id: str = "", entity_mode: str = "REAL") -> List[dict]:
         sql, params = "SELECT * FROM data_contracts WHERE 1=1", []
         if not include_retired:
             sql += " AND status<>'retired'"
@@ -141,8 +146,12 @@ class DataContracts:
                 sql += f" AND {col}=?"
                 params.append(val)
         with self._connect() as conn:
-            return [self._row(r) for r in conn.execute(
+            rows = [self._row(r) for r in conn.execute(
                 sql + " ORDER BY contract_key, version DESC", tuple(params)).fetchall()]
+        if not scope_node_id:
+            return rows
+        from core.enterprise_context.scoping import filter_visible
+        return filter_visible(rows, scope_node_id, tenant_id, entity_mode)
 
     # ── 활성화 ────────────────────────────────────────────────────────────
     def activate(self, contract_id: str, activated_by: str, catalog=None,

@@ -38,6 +38,9 @@ class ContractRequest(BaseModel):
     access_policy: Optional[Dict[str, Any]] = None
     contract_key: str = ""
     note: str = ""
+    tenant_id: str = "tenant_default"
+    enterprise_scope_id: str = ""
+    entity_mode: str = "REAL"
 
 
 class ActivateRequest(BaseModel):
@@ -74,9 +77,11 @@ async def preview_revision(req: PreviewRequest):
 
 @router.get("")
 async def list_contracts(producer_asset_id: str = "", consumer: str = "", status: str = "",
-                         include_retired: bool = False):
+                         include_retired: bool = False, scope_node_id: str = "",
+                         tenant_id: str = "", entity_mode: str = "REAL"):
     rows = await asyncio.to_thread(data_contracts.list, producer_asset_id, consumer,
-                                   status, include_retired)
+                                   status, include_retired, scope_node_id, tenant_id,
+                                   entity_mode)
     return {"status": "success", "data": rows}
 
 
@@ -86,7 +91,8 @@ async def create_contract(req: ContractRequest, p: Principal = Depends(current_p
     try:
         out = await asyncio.to_thread(
             data_contracts.create, req.name, req.producer_asset_id, req.consumer,
-            req.schema_def, req.quality_rules, req.access_policy, req.contract_key, req.note)
+            req.schema_def, req.quality_rules, req.access_policy, req.contract_key,
+            req.note, None, req.tenant_id, req.enterprise_scope_id, req.entity_mode)
     except DataContractError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "success", "data": out}

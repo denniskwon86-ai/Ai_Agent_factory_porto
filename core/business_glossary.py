@@ -54,7 +54,9 @@ class BusinessGlossary:
     # ── 용어 ──────────────────────────────────────────────────────────────
     def create_term(self, canonical_name: str, definition: str = "", calculation: str = "",
                     domain: str = "", owner_dept_id: str = "", master_code: str = "",
-                    synonyms: List[str] = None, term_id: str = "") -> dict:
+                    synonyms: List[str] = None, term_id: str = "",
+                    tenant_id: str = "tenant_default", enterprise_scope_id: str = "",
+                    entity_mode: str = "REAL") -> dict:
         if not (canonical_name or "").strip():
             raise GlossaryError("canonical_name 은 필수입니다.")
         tid = term_id or f"term_{uuid.uuid4().hex[:12]}"
@@ -66,10 +68,12 @@ class BusinessGlossary:
                 raise GlossaryError(f"이미 등록된 용어입니다: {canonical_name}")
             conn.execute(
                 "INSERT INTO business_terms(term_id,canonical_name,definition,calculation,domain,"
-                "owner_dept_id,master_code,status,approved_by,created_at,updated_at) "
-                "VALUES(?,?,?,?,?,?,?,'draft','',?,?)",
+                "owner_dept_id,master_code,status,approved_by,tenant_id,enterprise_scope_id,"
+                "entity_mode,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,'draft','',?,?,?,?,?)",
                 (tid, canonical_name.strip(), definition, calculation, domain, owner_dept_id,
-                 master_code, now, now))
+                 master_code, tenant_id or "tenant_default", enterprise_scope_id,
+                 entity_mode or "REAL", now, now))
             for s in (synonyms or []):
                 if (s or "").strip():
                     conn.execute("INSERT OR IGNORE INTO term_synonyms"
@@ -90,7 +94,10 @@ class BusinessGlossary:
         return out
 
     def list_terms(self, domain: str = "", status: str = "",
-                   include_retired: bool = False) -> List[dict]:
+                   include_retired: bool = False, scope_node_id: str = "",
+                   tenant_id: str = "", entity_mode: str = "REAL") -> List[dict]:
+        """[ECM E2] 조직 범위 필터. 같은 말을 부서마다 다르게 정의하는 것이 §6.1 이 지적한
+        실제 문제이므로, 사업부 용어가 다른 사업부에 새면 안 된다."""
         sql, params = "SELECT * FROM business_terms WHERE 1=1", []
         if not include_retired:
             sql += " AND status<>'retired'"
@@ -99,8 +106,12 @@ class BusinessGlossary:
                 sql += f" AND {col}=?"
                 params.append(val)
         with self._connect() as conn:
-            return [dict(r) for r in conn.execute(sql + " ORDER BY canonical_name",
+            rows = [dict(r) for r in conn.execute(sql + " ORDER BY canonical_name",
                                                   tuple(params)).fetchall()]
+        if not scope_node_id:
+            return rows
+        from core.enterprise_context.scoping import filter_visible
+        return filter_visible(rows, scope_node_id, tenant_id, entity_mode)
 
     def approve_term(self, term_id: str, approved_by: str) -> dict:
         """승인 = "이 정의로 전사가 같은 말을 쓴다"는 선언. 승인자를 반드시 남긴다."""
@@ -149,7 +160,8 @@ class BusinessGlossary:
         return self.get_term(term_id)
 
     # ── §6.4 1~2단계: 용어 해석 + 동의어 확장 ─────────────────────────────
-    def expand(self, text: str, approved_only: bool = False) -> dict:
+    def expand(self, text: str, approved_only: bool = False, scope_node_id: str = "",
+               tenant_id: str = "", entity_mode: str = "REAL") -> dict:
         """업무 용어를 정본명 + 동의어로 확장한다.
 
         반환의 `unapproved` 는 **확장에는 썼지만 확정 근거로는 약한** 동의어다. 섞어서 돌려주면
@@ -158,7 +170,8 @@ class BusinessGlossary:
         if not q:
             return {"query": text, "terms": [], "words": [], "unapproved": []}
         matched, words, unapproved = [], set(), set()
-        for t in self.list_terms():
+        for t in self.list_terms(scope_node_id=scope_node_id, tenant_id=tenant_id,
+                                 entity_mode=entity_mode):
             names = [(t["canonical_name"], True)]
             with self._connect() as conn:
                 syns = conn.execute(
@@ -182,7 +195,9 @@ class BusinessGlossary:
                 "unapproved": sorted(unapproved)}
 
     # ── §6.4 전체 흐름 ────────────────────────────────────────────────────
-    def match_requirement(self, canonical_term: str, catalog=None) -> dict:
+    def match_requirement(self, canonical_term: str, catalog=None,
+                          scope_node_id: str = "", tenant_id: str = "",
+                          entity_mode: str = "REAL") -> dict:
         """상담사가 "필요하다"고 한 데이터를 카탈로그에서 찾는다(§6.4).
 
         ⚠️ **확정하지 않는다.** 후보와 근거, 그리고 '무엇이 확정을 막고 있나'(`blockers`)를
@@ -190,14 +205,16 @@ class BusinessGlossary:
         from core.data_catalog import data_catalog
         cat = catalog or data_catalog
 
-        exp = self.expand(canonical_term)
+        exp = self.expand(canonical_term, scope_node_id=scope_node_id,
+                          tenant_id=tenant_id, entity_mode=entity_mode)
         # 용어가 등록돼 있지 않아도 원문으로는 찾아본다 — 용어사전이 비어 있다고 매칭이 통째로
         #   멈추면 도입 초기에 아무것도 못 한다(점진 도입).
         search_words = exp["words"] or [canonical_term]
 
         seen, candidates = {}, []
         for w in search_words:
-            for hit in cat.search_assets(w):
+            for hit in cat.search_assets(w, scope_node_id=scope_node_id,
+                                         tenant_id=tenant_id, entity_mode=entity_mode):
                 prev = seen.get(hit["asset_id"])
                 if prev:
                     prev["score"] = max(prev["score"], hit["score"])

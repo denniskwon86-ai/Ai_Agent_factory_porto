@@ -191,6 +191,9 @@ CREATE TABLE IF NOT EXISTS data_assets (
     description     TEXT DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'active',
     origin          TEXT DEFAULT 'user',      -- user|crosswalk
+    tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
+    enterprise_scope_id TEXT DEFAULT '',      -- [ECM E2] 소유 조직. 빈 값 = 전사 공용
+    entity_mode         TEXT NOT NULL DEFAULT 'REAL',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -203,6 +206,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_asset_source_active ON data_assets(system_i
     WHERE system_id <> '' AND entity <> '' AND status = 'active';
 CREATE INDEX IF NOT EXISTS idx_asset_owner ON data_assets(owner_dept_id, status);
 CREATE INDEX IF NOT EXISTS idx_asset_sens ON data_assets(sensitivity, status);
+CREATE INDEX IF NOT EXISTS idx_asset_scope ON data_assets(tenant_id, enterprise_scope_id, entity_mode, status);
 
 CREATE TABLE IF NOT EXISTS data_asset_fields (
     asset_id        TEXT NOT NULL,
@@ -241,12 +245,16 @@ CREATE TABLE IF NOT EXISTS business_terms (
     master_code    TEXT DEFAULT '',      -- MDM 기준 엔터티 연결(§6.4 4단계)
     status         TEXT NOT NULL DEFAULT 'draft',   -- draft|approved|retired
     approved_by    TEXT DEFAULT '',
+    tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
+    enterprise_scope_id TEXT DEFAULT '',      -- [ECM E2] 소유 조직. 빈 값 = 전사 공용
+    entity_mode         TEXT NOT NULL DEFAULT 'REAL',
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_term_name ON business_terms(canonical_name)
     WHERE status <> 'retired';
 CREATE INDEX IF NOT EXISTS idx_term_domain ON business_terms(domain, status);
+CREATE INDEX IF NOT EXISTS idx_term_scope ON business_terms(tenant_id, enterprise_scope_id, entity_mode, status);
 
 -- 동의어는 **승인 여부를 반드시 구분한다.** 미승인 동의어로 확정 매칭을 하면 "누가 이걸
 --   같은 말이라고 했나"에 답할 수 없다(§6.4: 최종 확정은 오너 또는 승인된 규칙).
@@ -340,13 +348,37 @@ CREATE TABLE IF NOT EXISTS data_contracts (
     activated_at        TEXT DEFAULT '',
     supersedes          TEXT DEFAULT '',
     note                TEXT DEFAULT '',
+    tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
+    enterprise_scope_id TEXT DEFAULT '',      -- [ECM E2] 소유 조직. 빈 값 = 전사 공용
+    entity_mode         TEXT NOT NULL DEFAULT 'REAL',
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL,
     UNIQUE (contract_key, version)
 );
 CREATE INDEX IF NOT EXISTS idx_contract_producer ON data_contracts(producer_asset_id, status);
 CREATE INDEX IF NOT EXISTS idx_contract_consumer ON data_contracts(consumer, status);
+CREATE INDEX IF NOT EXISTS idx_contract_scope ON data_contracts(tenant_id, enterprise_scope_id, entity_mode, status);
 """
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# [ECM E2] 기존 DB 에 더할 컬럼 (2026-07-29)
+#
+# 카탈로그·용어사전·계약은 처음에 조직 범위 없이 만들었다 — 즉 **전사 공용**이었다.
+# 기준정보는 R-001 로 격리했는데 이 셋은 안 돼 있어, 같은 누출 경로가 새로 생긴 셈이다.
+# ⚠️ 여기서는 **`master_records` 방식(별도 바인딩 테이블)을 쓰지 않는다.** 그 테이블은
+#   "원본 1 : 적용범위 N"(같은 자재 기준을 여러 법인이 함께 참조) 때문에 필요했다.
+#   자산·용어·계약은 **소유 조직이 하나**다(생산자·정의 주체가 하나). 1:N 이 아닌 것을 1:N
+#   구조로 만들면 "이 자산의 주인이 누구냐"에 답이 여러 개가 되어 책임 소재가 흐려진다.
+#   그래서 상담·Blueprint 와 같은 ECM-lite 3키(tenant_id·enterprise_scope_id·entity_mode)를 쓴다.
+_ECM_KEYS = (
+    ("tenant_id", "TEXT NOT NULL DEFAULT 'tenant_default'"),
+    ("enterprise_scope_id", "TEXT DEFAULT ''"),
+    ("entity_mode", "TEXT NOT NULL DEFAULT 'REAL'"),
+)
+_COLUMN_MIGRATIONS = [
+    (t, c, d) for t in ("data_assets", "business_terms", "data_contracts") for c, d in _ECM_KEYS
+]
 
 
 class MasterDataError(ValueError):
@@ -377,9 +409,31 @@ class MasterData:
             pass   # 파일시스템이 WAL 을 지원하지 않는 환경(일부 네트워크 드라이브)에서도 계속 동작
         return conn
 
+    def _migrate_columns(self, conn):
+        """기존 DB 에 새 컬럼을 더한다(멱등).
+
+        ★ 반드시 `executescript(_DDL)` **앞에** 돈다. `_DDL` 의 인덱스가 새 컬럼을 참조하는데
+          컬럼이 아직 없으면 `no such column` 으로 초기화 전체가 실패한다(과거 실측 사고).
+        ★ 신선한 DB 에는 테이블 자체가 없으므로 여기서는 아무것도 하지 않고, 뒤이은 `_DDL` 이
+          컬럼을 포함해 만든다 — 두 경로가 같은 상태로 수렴한다."""
+        for table, col, decl in _COLUMN_MIGRATIONS:
+            try:
+                cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            except sqlite3.Error:
+                continue                       # 테이블 없음 = 신선한 DB. _DDL 이 만든다.
+            if not cols or col in cols:
+                continue
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            except sqlite3.OperationalError as e:
+                # 동시 초기화 경쟁에서 이미 추가됐을 수 있다. 그 외는 조용히 넘기지 않는다.
+                if "duplicate column" not in str(e).lower():
+                    print(f"⚠️ [MasterData] 컬럼 추가 실패 {table}.{col}: {e}")
+
     def _init_db(self):
         conn = self._connect()
         try:
+            self._migrate_columns(conn)
             conn.executescript(_DDL)
             conn.commit()
         finally:
