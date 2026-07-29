@@ -192,3 +192,39 @@ def test_graph_nodes_are_wrapped_with_identity():
     # 실제 노드 등록은 `build_graph_from_registry` 가 한다(`_build_workflow` 는 위임 껍데기).
     src = inspect.getsource(ag.build_graph_from_registry)
     assert src.count("_with_agent_identity") >= 2, "SW·범용 두 경로 모두 래핑돼야 한다"
+
+
+# ── 사고 재발 방지: 계측 콜백이 파이프라인을 죽이지 않는가 ──────────────────
+def test_collector_satisfies_langchain_handler_interface():
+    """★★ 이 콜백의 초판이 **A-1 재카나리를 두 번 죽였다**(`run_inline` AttributeError).
+
+    상류가 무엇을 읽을지 우리가 열거할 수 있다고 가정한 것이 원인이었다. 이제 상속으로
+    충족하고, 그래도 없는 속성은 터지는 대신 무해한 기본값을 준다."""
+    cb = run_context.FallbackErrorCollector()
+
+    # 상류(LangChain)가 실제로 읽는 것들 — 하나라도 터지면 호출 전체가 죽는다.
+    for attr in ("run_inline", "raise_error", "ignore_llm", "ignore_chain", "ignore_agent",
+                 "ignore_retriever", "ignore_chat_model", "ignore_retry", "ignore_custom_event"):
+        getattr(cb, attr)          # 예외가 나지 않아야 한다
+
+    # 앞으로 상류가 추가할지 모르는 미지의 속성·훅도 터지지 않는다.
+    assert getattr(cb, "some_future_flag_we_never_heard_of") is False
+    assert cb.on_some_future_hook("x") is None
+
+
+def test_collector_is_accepted_by_langchain_callback_manager():
+    """★★ '속성이 있다'가 아니라 **상류가 실제로 받아들이는가**를 본다.
+
+    초판도 속성 테스트는 통과했을 것이다 — 정작 LangChain 내부에 넘겼을 때 터졌다."""
+    from langchain_core.callbacks import CallbackManager
+
+    cb = run_context.FallbackErrorCollector()
+    mgr = CallbackManager(handlers=[cb])        # 여기서 상류가 핸들러를 검사한다
+    assert cb in mgr.handlers
+
+
+def test_dunder_lookups_still_raise():
+    """`__getattr__` 이 dunder 까지 삼키면 copy·pickle 등이 조용히 오작동한다."""
+    cb = run_context.FallbackErrorCollector()
+    with pytest.raises(AttributeError):
+        cb.__deepcopy__

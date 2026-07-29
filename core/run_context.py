@@ -53,14 +53,30 @@ def get_fallback_errors() -> List[Dict[str, str]]:
     return list(_fallback_errors.get() or [])
 
 
-class FallbackErrorCollector:
+# ⚠️ [2026-07-29 사고] 이 콜백의 초판이 **A-1 재카나리를 두 번 죽였다.**
+#   덕 타이핑으로 두고 `__getattr__` 이 모르는 속성에 `AttributeError` 를 던지게 했는데,
+#   LangChain 내부가 `run_inline` 을 읽으면서 그대로 터졌다. 계측이 파이프라인을 죽인 것이다.
+#   ★ 교훈: **상류가 무엇을 읽을지 우리가 열거할 수 있다고 가정하면 안 된다.** 속성 이름을
+#     손으로 나열하는 방식은 상류 버전이 하나만 바뀌어도 같은 사고를 낸다.
+#   → `BaseCallbackHandler` 를 **상속**한다(있으면). 그러면 상류가 요구하는 속성은 상류가 정의한
+#     것을 그대로 쓰므로 열거할 필요가 없다. import 가 실패하는 환경에서만 덕 타이핑으로 내려간다.
+try:                                            # pragma: no cover - 상류 경로는 환경에 따라 다르다
+    from langchain_core.callbacks import BaseCallbackHandler as _BaseCB
+except Exception:                               # pragma: no cover
+    try:
+        from langchain.callbacks.base import BaseCallbackHandler as _BaseCB
+    except Exception:
+        _BaseCB = object
+
+
+class FallbackErrorCollector(_BaseCB):
     """LangChain 콜백 — 체인 walk 중 실패한 모델과 사유를 수집한다.
 
-    `BaseCallbackHandler` 를 직접 import 하지 않고 덕 타이핑으로 둔다(상류 경로 변경 내성).
-    콜백에서 예외가 나면 **LLM 호출 자체가 죽는다** — 계측이 본체를 죽이면 안 되므로 전부 삼킨다."""
+    콜백에서 예외가 나면 **LLM 호출 자체가 죽는다.** 계측이 본체를 죽이면 안 되므로
+    수집 로직은 전부 삼키고, 상류가 요구하는 인터페이스는 상속으로 충족한다."""
 
-    raise_error = False       # LangChain 이 콜백 예외를 전파하지 않게 한다
-    ignore_llm = False
+    raise_error = False       # 콜백 예외를 전파하지 않는다
+    run_inline = False        # 별도 스레드 없이 인라인 실행(상류 내부 검사)
 
     def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
         try:
@@ -75,11 +91,14 @@ class FallbackErrorCollector:
         except Exception:
             pass
 
-    # LangChain 이 호출할 수 있는 나머지 훅은 무시한다(존재하지 않으면 경고가 나는 버전 대비).
     def __getattr__(self, item):
-        def _noop(*a, **k):
-            return None
-        if item.startswith("on_") or item in ("ignore_chain", "ignore_agent", "ignore_retriever",
-                                              "ignore_chat_model", "ignore_retry", "ignore_custom_event"):
-            return _noop if item.startswith("on_") else False
-        raise AttributeError(item)
+        """상속으로도 없는 속성이 요구되면 **터지는 대신 무해한 기본값**을 준다.
+
+        ⚠️ 초판은 여기서 `AttributeError` 를 던져 카나리를 죽였다. 계측 객체가 상류에게
+          "그런 건 없다"고 답할 이유가 없다 — 모르면 '안 함/무시함'으로 답하는 것이 안전하다.
+        (`__getattr__` 은 정상 조회가 실패했을 때만 불리므로 상속분 동작을 가리지 않는다.)"""
+        if item.startswith("__"):
+            raise AttributeError(item)          # 파이썬 프로토콜(dunder)까지 삼키면 오작동한다
+        if item.startswith("on_"):
+            return lambda *a, **k: None         # 알 수 없는 훅 → 아무것도 하지 않는다
+        return False                            # ignore_*, run_inline 류 플래그 → 비활성
