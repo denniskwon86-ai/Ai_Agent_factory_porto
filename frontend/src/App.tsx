@@ -77,7 +77,7 @@ export default function App() {
 
   useEffect(() => {
     // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)
-    const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+    const API = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
     fetch(`${API}/api/v1/knowledge/packs`).then(r => r.ok ? r.json() : null)
       .then(r => { if (r?.data) setKnowledgePacks(r.data); }).catch(() => {});
   }, [showKnowledgeHub]); // 허브에서 팩을 만들고 닫으면 목록 갱신

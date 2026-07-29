@@ -129,7 +129,7 @@ interface FactoryStore {
   stopSprint: (projectId: string, taskId: string) => Promise<void>;
 }
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;

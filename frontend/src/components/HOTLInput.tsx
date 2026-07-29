@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
 export default function HOTLInput() {
   const [feedback, setFeedback] = useState("");

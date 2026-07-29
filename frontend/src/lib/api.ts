@@ -5,8 +5,17 @@
 //   빠뜨리면 그 경로만 조용히 익명으로 나간다.
 //   → fetch 를 한 번 감싸서 **코드 수정 0으로 전체를 덮는다.** 점진 리팩터링은 그 위에서 한다.
 
+// ⚠️ 기본값이 `localhost` 가 아니라 **`127.0.0.1`** 인 이유 (2026-07-29 실측):
+//   백엔드(`run.py`)는 `0.0.0.0` 에 바인딩되는데 Windows 에서 이것은 **IPv4 전용**이다.
+//   그런데 브라우저는 `localhost` 를 `::1`(IPv6)로 **먼저** 해석하므로, 서버가 정상 기동한
+//   상태에서도 **브라우저에서만 전 API 가 `Failed to fetch`** 가 된다.
+//   서버측 스크립트·카나리는 127.0.0.1 로 붙어 멀쩡하기 때문에 원인이 프론트에 있는 것처럼
+//   보이고, 프론트 코드를 아무리 봐도 답이 안 나온다.
+//   ★ 서버 바인딩을 `::` 로 바꾸면 이번엔 IPv6 전용이 되어 127.0.0.1 을 쓰는 기존 스크립트가
+//     전부 깨진다. 그래서 **주소를 명시**하는 쪽으로 해결한다.
+//   원격 백엔드를 쓸 때는 `VITE_API_BASE_URL` 로 덮어쓴다.
 export const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8080';
+  (import.meta as any).env?.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
 const USER_HEADER = 'X-Factory-User';
 const STORAGE_KEY = 'factory.actingUser';
