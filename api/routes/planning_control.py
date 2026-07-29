@@ -484,3 +484,49 @@ async def import_template():
             "천단위 구분(1,000)과 회계 음수 표기((600))를 지원합니다.",
         ],
     }}
+
+
+# ── Backtest (§17.3 파일럿 성공 기준 "과거 기간 재현") ────────────────
+# ⚠️ Backtest 의 고전적 실패는 **결과를 알고 나서 만든 가정으로 과거를 맞히는 것**이다.
+#   오차가 0 에 가깝게 나오고 사람들은 모델을 신뢰하게 된다 — 실제 미래엔 빗나간다.
+#   그래서 응답의 `lookahead_risk` 와 `warnings` 를 화면이 반드시 함께 보여줘야 한다.
+from core import planning_backtest as backtest
+
+
+class BacktestSeriesRequest(BaseModel):
+    org_id: str
+    periods: List[str]
+
+
+@router.get("/backtest/plan")
+async def backtest_plan(org_id: str, period: str, p: Principal = Depends(current_principal)):
+    """계획 vs 실적 오차. `measurable=false` 면 **재지 않은 것**이다(오차 0 이 아니다)."""
+    await _scope(p, org_id, org_id)
+    return {"status": "success",
+            "data": await asyncio.to_thread(backtest.backtest_plan, org_id, period)}
+
+
+@router.get("/backtest/scenario")
+async def backtest_scenario(scenario_id: str, org_id: str, period: str,
+                            baseline_kind: str = PLAN,
+                            p: Principal = Depends(current_principal)):
+    """시나리오를 과거 기간에 돌려 실적과 비교한다.
+
+    `lookahead_risk=true` 면 가정이 대상 기간 이후에 작성된 것이다 —
+    그 오차는 **실제 예측력이 아니다.**"""
+    await _scope(p, org_id, scenario_id)
+    return {"status": "success",
+            "data": await asyncio.to_thread(backtest.backtest_scenario, scenario_id,
+                                            org_id, period, baseline_kind)}
+
+
+@router.post("/backtest/series")
+async def backtest_series(req: BacktestSeriesRequest,
+                          p: Principal = Depends(current_principal)):
+    """여러 기간 연속 검증 — **한 해만 맞힌 것은 우연일 수 있다.**
+
+    `systematic_bias=true` 면 편향이 여러 기간에 걸쳐 같은 방향이라는 뜻이고,
+    그것은 우연이 아니라 모델의 습관이다(MAPE 가 작아도 그대로 쓰면 안 된다)."""
+    await _scope(p, req.org_id, req.org_id)
+    return {"status": "success",
+            "data": await asyncio.to_thread(backtest.backtest_series, req.org_id, req.periods)}
