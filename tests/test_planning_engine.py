@@ -255,3 +255,83 @@ def test_api_compare_exposes_same_baseline_flag(client, store):
                     json={"scenario_ids": ["a", "b"], "org_id": "MNM_BATTERY", "period": "2027"})
     assert r.status_code == 200
     assert "same_baseline" in r.json()["data"]
+
+
+# ── 현금흐름 (§17.2 기능 6) ──────────────────────────────────────────────────
+def _cf_accounts(s):
+    s.upsert_account("7100", "감가상각비", "DEPRECIATION", sign=-1)
+    s.upsert_account("7200", "운전자본증감", "WORKING_CAPITAL", sign=-1)
+    s.upsert_account("7300", "설비투자", "CAPEX", sign=-1)
+    s.upsert_account("7400", "차입금증감", "FINANCING", sign=1)
+
+
+def test_cash_flow_refuses_when_inputs_are_missing(store):
+    """★★ 이 기능의 핵심은 계산이 아니라 **거절**이다.
+
+    감가상각·운전자본·CAPEX 없이 0 으로 채우면 '영업현금흐름 = 순이익'이 되어
+    **현금이 충분한 것처럼 보인다.** 흑자도산은 정확히 그 착시에서 온다."""
+    _baseline(store)
+    cf = eng.cash_flow_for("MNM_BATTERY", "2027")
+    assert cf["computable"] is False
+    assert set(cf["missing"]) == {"DEPRECIATION", "WORKING_CAPITAL", "CAPEX"}
+    assert "흑자도산" in cf["note"]
+
+
+def test_cash_flow_names_exactly_what_is_missing(store):
+    """무엇이 없는지 이름을 대야 사용자가 채울 수 있다."""
+    _baseline(store)
+    _cf_accounts(store)
+    store.put_fact("MNM_BATTERY", "7100", "2027", PLAN, 50.0)   # 감가상각만 입력
+    cf = eng.cash_flow_for("MNM_BATTERY", "2027")
+    assert cf["computable"] is False
+    assert set(cf["missing"]) == {"WORKING_CAPITAL", "CAPEX"}
+
+
+def test_cash_flow_arithmetic(store):
+    """영업 = 순이익 + 감가상각 − 운전자본증가 / 투자 = −CAPEX / FCF = 영업 + 투자."""
+    _baseline(store)
+    _cf_accounts(store)
+    store.put_fact("MNM_BATTERY", "7100", "2027", PLAN, 50.0)    # 감가상각
+    store.put_fact("MNM_BATTERY", "7200", "2027", PLAN, 30.0)    # 운전자본 증가
+    store.put_fact("MNM_BATTERY", "7300", "2027", PLAN, 80.0)    # CAPEX
+    store.put_fact("MNM_BATTERY", "7400", "2027", PLAN, 100.0)   # 차입
+
+    cf = eng.cash_flow_for("MNM_BATTERY", "2027")
+    assert cf["computable"] is True
+    assert cf["net_profit"] == 200.0
+    assert cf["operating_cf"] == 220.0        # 200 + 50 - 30
+    assert cf["investing_cf"] == -80.0
+    assert cf["free_cash_flow"] == 140.0      # 220 - 80
+    assert cf["net_change"] == 240.0          # + 재무 100
+
+
+def test_cf_accounts_do_not_pollute_the_pl(store):
+    """★★ 감가상각은 비용이지만 현금 유출이 아니고, CAPEX 는 현금 유출이지만 당기 비용이 아니다.
+
+    두 표를 섞으면 "이익이 나는데 현금이 없다"는 현실을 설명할 수 없다.
+    그리고 현금흐름 계정을 `unmapped` 로 처리하면 누락 경고가 상시 떠서
+    **진짜 누락이 그 소음에 묻힌다.**"""
+    _baseline(store)
+    _cf_accounts(store)
+    store.put_fact("MNM_BATTERY", "7300", "2027", PLAN, 80.0)
+    pl = eng.compute_pl(store.list_facts(org_id="MNM_BATTERY", value_kind=PLAN))
+    assert pl["operating_profit"] == 200.0      # CAPEX 가 손익을 건드리지 않는다
+    assert pl["complete"] is True               # 누락 경고가 아니다
+    assert "7300" in pl["excluded_non_pl"]      # 제외됐다는 사실은 남는다
+
+
+def test_cash_flow_carries_pl_incompleteness(store):
+    """손익이 불완전하면 현금흐름도 그만큼 불완전하다 — 그 사실을 물고 간다."""
+    _baseline(store)
+    _cf_accounts(store)
+    for code, amt in (("7100", 50.0), ("7200", 30.0), ("7300", 80.0)):
+        store.put_fact("MNM_BATTERY", code, "2027", PLAN, amt)
+    store.put_fact("MNM_BATTERY", "9999", "2027", PLAN, 10.0)   # 미등록 계정
+    cf = eng.cash_flow_for("MNM_BATTERY", "2027")
+    assert cf["computable"] is True and cf["pl_complete"] is False
+
+
+def test_empty_input_does_not_produce_zero_cash_flow(store):
+    """빈 입력으로 계산하면 **0 이 결과처럼 보인다.**"""
+    cf = eng.cash_flow_for("NOBODY", "2027")
+    assert cf["computable"] is False and cf["missing"] == ["ALL"]

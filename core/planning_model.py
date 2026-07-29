@@ -50,6 +50,14 @@ SCOPE_LEGACY = "LEGACY_UNSCOPED"
 SCOPE_TYPES = (SCOPE_ORG_PRIVATE, SCOPE_ORG_SHARED, SCOPE_ENTERPRISE_SHARED,
                SCOPE_SANDBOX, SCOPE_LEGACY)
 
+# ── 계정 분류 ────────────────────────────────────────────────────────────────
+#: 손익계산서에 들어가는 분류.
+PL_CATEGORIES = ("REVENUE", "COGS", "SGA", "OTHER_INCOME", "OTHER_EXPENSE", "TAX")
+#: 현금흐름에만 쓰이는 분류. **손익에는 들어가지 않는다** —
+#  감가상각은 비용이지만 현금 유출이 아니고, CAPEX 는 현금 유출이지만 당기 비용이 아니다.
+#  이 둘을 한 표에 섞으면 "이익이 나는데 현금이 없다"는 현실을 설명할 수 없다.
+CF_CATEGORIES = ("DEPRECIATION", "WORKING_CAPITAL", "CAPEX", "FINANCING")
+
 _DDL = """
 -- 계정 체계 (§11.2 기준정보). 손익 계산의 뼈대.
 CREATE TABLE IF NOT EXISTS plan_accounts (
@@ -173,8 +181,10 @@ class PlanningStore:
     def upsert_account(self, account_code: str, name: str, category: str,
                        sign: int = 1, parent_code: str = "") -> dict:
         category = (category or "").upper()
-        if category not in ("REVENUE", "COGS", "SGA", "OTHER_INCOME", "OTHER_EXPENSE", "TAX"):
-            raise PlanningError(f"알 수 없는 계정 분류입니다: {category}")
+        if category not in PL_CATEGORIES + CF_CATEGORIES:
+            raise PlanningError(
+                f"알 수 없는 계정 분류입니다: {category}. "
+                f"손익 {PL_CATEGORIES} / 현금흐름 {CF_CATEGORIES}")
         if sign not in (1, -1):
             raise PlanningError("sign 은 +1(수익) 또는 -1(비용)이어야 합니다.")
         conn = self._connect()

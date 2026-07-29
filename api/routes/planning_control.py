@@ -409,3 +409,16 @@ async def preview_driver(driver_code: str, pct_change: float):
     rows, warns = await asyncio.to_thread(drivers.expand_driver_assumption,
                                           driver_code, pct_change)
     return {"status": "success", "data": {"expanded": rows, "warnings": warns}}
+
+
+@router.get("/cash-flow")
+async def cash_flow(org_id: str, period: str, value_kind: str = PLAN,
+                    p: Principal = Depends(current_principal)):
+    """현금흐름(간접법, §17.2 기능 6).
+
+    ⚠️ `computable=false` 면 **계산하지 않은 것**이다(0 이 아니다). `missing` 에 무엇이
+      없는지 이름이 있다. 감가상각·운전자본·CAPEX 를 0 으로 채우면 '영업현금흐름 = 순이익'이
+      되어 현금이 충분한 것처럼 보인다 — 화면은 이 구분을 반드시 표시할 것."""
+    await _scope(p, org_id, org_id)
+    data = await asyncio.to_thread(engine.cash_flow_for, org_id, period, value_kind)
+    return {"status": "success", "data": data}

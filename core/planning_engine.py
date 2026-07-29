@@ -36,8 +36,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.planning_model import (ACTUAL, ENGINE_VERSION, FORECAST, PLAN, SCENARIO,
-                                 PlanningError, planning_store)
+from core.planning_model import (ACTUAL, CF_CATEGORIES, ENGINE_VERSION, FORECAST, PLAN,
+                                 SCENARIO, PlanningError, planning_store)
 
 #: 손익 계산에서 각 분류가 이익에 기여하는 방향. 계정의 `sign` 과 곱해 최종 부호를 만든다.
 _PL_LINES = ("REVENUE", "COGS", "SGA", "OTHER_INCOME", "OTHER_EXPENSE", "TAX")
@@ -77,6 +77,7 @@ def compute_pl(facts: List[Dict[str, Any]],
     accounts = accounts if accounts is not None else _accounts_by_code()
     by_line: Dict[str, float] = {k: 0.0 for k in _PL_LINES}
     unmapped: List[Dict[str, Any]] = []
+    excluded_non_pl: List[str] = []
 
     for f in facts:
         acc = accounts.get(f.get("account_code"))
@@ -85,6 +86,12 @@ def compute_pl(facts: List[Dict[str, Any]],
                              "amount": float(f.get("amount") or 0)})
             continue
         cat = acc["category"]
+        if cat in CF_CATEGORIES:
+            # 현금흐름 전용 계정(감가상각·CAPEX·운전자본·재무)은 손익에 들어가지 않는다.
+            # ⚠️ 이것을 `unmapped` 로 처리하면 "합계에서 빠진 금액" 경고가 상시 뜨고,
+            #   그러면 진짜 누락이 그 소음에 묻힌다.
+            excluded_non_pl.append(f.get("account_code"))
+            continue
         if cat not in by_line:
             unmapped.append({"account_code": f.get("account_code"),
                              "amount": float(f.get("amount") or 0), "why": f"알 수 없는 분류 {cat}"})
@@ -105,6 +112,8 @@ def compute_pl(facts: List[Dict[str, Any]],
         "net_profit": round(net, 4),
         # ★ 매핑 실패는 결과와 같은 자리에 실어 보낸다. 별도 로그로 빼면 아무도 안 본다.
         "unmapped": unmapped,
+        # 손익 대상이 아니어서 제외된 계정(현금흐름 전용) — 누락과 구분한다.
+        "excluded_non_pl": sorted(set(excluded_non_pl)),
         "complete": not unmapped,
         "engine_version": ENGINE_VERSION,
     }
@@ -306,3 +315,83 @@ def variance(org_id: str, period: str,
         "by_account": rows,
         "engine_version": ENGINE_VERSION,
     }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 현금흐름 (§17.2 기능 6 · §11.4 가치사슬의 마지막 단계)
+# ══════════════════════════════════════════════════════════════════════
+#: 간접법 현금흐름에 반드시 필요한 항목. **하나라도 없으면 계산하지 않는다.**
+_CF_REQUIRED = ("DEPRECIATION", "WORKING_CAPITAL", "CAPEX")
+
+
+def compute_cash_flow(facts: List[Dict[str, Any]],
+                      accounts: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """간접법 현금흐름. **손익만으로는 계산할 수 없다** — 없으면 없다고 말한다.
+
+    ```
+    영업현금흐름 = 당기순이익 + 감가상각비 − 운전자본 증가
+    투자현금흐름 = −CAPEX
+    재무현금흐름 = FINANCING(차입 − 상환 − 배당)
+    ```
+
+    ⚠️ **이 함수의 핵심은 계산이 아니라 거절이다.** 감가상각·운전자본·CAPEX 가 없는데
+      0 으로 채우면 "영업현금흐름 = 순이익"이 되어 **현금이 충분한 것처럼 보인다.**
+      흑자도산은 정확히 그 착시에서 온다. 그래서 누락 항목이 있으면 `computable=false` 로
+      돌려주고 무엇이 없는지 이름을 댄다.
+
+    ⚠️ 부호 규약: `WORKING_CAPITAL` 은 **증가분**을 양수로 입력한다(운전자본이 늘면 현금은
+      줄어든다). `CAPEX` 도 지출을 양수로 입력한다. 입력자가 부호를 고민하지 않게 하고,
+      방향은 여기 산식이 정한다."""
+    accounts = accounts if accounts is not None else _accounts_by_code()
+    pl = compute_pl(facts, accounts)
+
+    buckets: Dict[str, float] = {k: 0.0 for k in CF_CATEGORIES}
+    seen: set = set()
+    for f in facts:
+        acc = accounts.get(f.get("account_code"))
+        if not acc or acc["category"] not in CF_CATEGORIES:
+            continue
+        buckets[acc["category"]] += float(f.get("amount") or 0)
+        seen.add(acc["category"])
+
+    missing = [c for c in _CF_REQUIRED if c not in seen]
+    if missing:
+        return {
+            "computable": False,
+            "missing": missing,
+            "net_profit": pl["net_profit"],
+            "reason": f"현금흐름 계산에 필요한 항목이 없습니다: {', '.join(missing)}",
+            "note": ("없는 항목을 0 으로 채우면 '영업현금흐름 = 순이익'이 되어 현금이 "
+                     "충분한 것처럼 보입니다 — 흑자도산은 그 착시에서 옵니다. "
+                     "그래서 계산하지 않았습니다."),
+            "engine_version": ENGINE_VERSION,
+        }
+
+    operating = pl["net_profit"] + buckets["DEPRECIATION"] - buckets["WORKING_CAPITAL"]
+    investing = -buckets["CAPEX"]
+    financing = buckets["FINANCING"]
+    return {
+        "computable": True,
+        "net_profit": pl["net_profit"],
+        "operating_cf": round(operating, 4),
+        "investing_cf": round(investing, 4),
+        "financing_cf": round(financing, 4),
+        "free_cash_flow": round(operating + investing, 4),
+        "net_change": round(operating + investing + financing, 4),
+        "components": {k: round(v, 4) for k, v in buckets.items()},
+        # 손익이 불완전하면 현금흐름도 그만큼 불완전하다 — 그 사실을 물고 간다.
+        "pl_complete": pl["complete"],
+        "engine_version": ENGINE_VERSION,
+    }
+
+
+def cash_flow_for(org_id: str, period: str, value_kind: str = PLAN) -> Dict[str, Any]:
+    """조직·기간의 현금흐름. 값이 없으면 **빈 계산을 하지 않는다.**"""
+    facts = planning_store.list_facts(org_id=org_id, period=period, value_kind=value_kind)
+    if not facts:
+        return {"computable": False, "missing": ["ALL"],
+                "reason": f"값이 없습니다({org_id}/{period}/{value_kind}).",
+                "note": "빈 입력으로 계산하면 0 이 결과처럼 보입니다.",
+                "engine_version": ENGINE_VERSION}
+    return {**compute_cash_flow(facts), "org_id": org_id, "period": period,
+            "value_kind": value_kind}
