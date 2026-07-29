@@ -39,3 +39,11 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch):
                             str(tmp_path / "access_audit.jsonl"), raising=False)
     except Exception:
         pass
+    try:
+        # Shadow run 은 "무엇을 승격했는가"의 근거다. 테스트가 남긴 승격 기록이 실제 목록에
+        # 섞이면 운영 판단의 근거가 오염된다 — 감사로그와 같은 이유로 격리한다.
+        from core import shadow_mode
+        monkeypatch.setattr(shadow_mode.shadow_mode, "db_path",
+                            str(tmp_path / "shadow_runs.db"), raising=False)
+    except Exception:
+        pass

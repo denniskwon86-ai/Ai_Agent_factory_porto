@@ -69,6 +69,8 @@ data/quality_outcomes.jsonl
 data/master/
 # [§12] 외부 인텔리전스 런타임 저장소(§12.3 상 별도 DB)
 data/external_intelligence.db*
+# [§7.3] Shadow Mode 런타임 저장소
+data/shadow_runs.db*
 data/external_raw/
 
 # 골든 벤치마크 스코어카드/사람점수 (런타임 계측). 골든 기준(golden/)은 A-1 완주 후 커밋 여부 재결정.
