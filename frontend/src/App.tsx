@@ -10,6 +10,7 @@ import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
 import AgentMasterPanel from './components/AgentMasterPanel';
 import GovernanceConsole from './components/GovernanceConsole';
+import { PlanningPanel } from './components/PlanningPanel';
 import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
@@ -61,6 +62,8 @@ export default function App() {
   const [showAdvisor, setShowAdvisor] = useState(false);
   // 데이터 거버넌스 콘솔 — 기능 확인용. 디자인 확정 후 개편 대상.
   const [showGovernance, setShowGovernance] = useState(false);
+  // [M4] 경영계획 — 결정론적 계산(LLM 0콜). 디자인 확정 후 개편 대상.
+  const [showPlanning, setShowPlanning] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
   const [showLogPopup, setShowLogPopup] = useState(false);
@@ -195,6 +198,9 @@ export default function App() {
         {showGovernance && (
           <GovernanceConsole onClose={() => setShowGovernance(false)} />
         )}
+        {showPlanning && (
+          <PlanningPanel onClose={() => setShowPlanning(false)} />
+        )}
         <div className="min-h-screen w-screen bg-[#0B0C10] text-gray-100 flex flex-col font-sans">
           <header className="h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-[#1F2833] flex items-center justify-between px-8 shrink-0 sticky top-0 z-10">
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
@@ -214,6 +220,13 @@ export default function App() {
                 title="조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약 상태·외부지표 준비도를 한 화면에서 확인"
               >
                 🛡️ 데이터 거버넌스
+              </button>
+              <button
+                onClick={() => setShowPlanning(true)}
+                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
+                title="계획·실적·시나리오를 동일 기준선에서 비교 (결정론적 계산, LLM 0콜)"
+              >
+                📊 경영계획
               </button>
               <button
                 onClick={openAgentPanel}
@@ -679,6 +692,9 @@ export default function App() {
         )}
         {showGovernance && (
           <GovernanceConsole onClose={() => setShowGovernance(false)} />
+        )}
+        {showPlanning && (
+          <PlanningPanel onClose={() => setShowPlanning(false)} />
         )}
 
         {/* 전체 워크플로우 진행 스트립 */}
