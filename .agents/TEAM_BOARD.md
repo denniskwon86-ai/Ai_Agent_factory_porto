@@ -126,6 +126,25 @@
   현재는 "어느 게이트에 대한 판정인지"를 추정하지 않고 stage 만 남긴다
   ④ 빌드 로그 패턴 규칙(`_BUILD_RULES`)의 오탐 — 특히 `test_harness` 와 `model_quality` 경계.
 
+### [M2-GATE-01] M2 착수 관문 정의 — 미바인딩 비노출 · 404 은폐 + 감사로그
+- 상태: **관문 정의 완료, 구현 대기** (M2 코드 변경 금지 준수 — 설계·테스트만)
+- 책임 수행자 / 교차 검토자: Claude Code(완료) / Antigravity(보안 관점)·Codex(운영 영향)
+- 목표·완료 기준: 사용자 지시 ④의 두 관문을 **실행 가능한 계기**로 고정한다.
+  `tests/test_m2_entry_gates.py` — 현재 **7 xfail(닫힌 문) + 2 통과(회귀 잠금)**.
+  `xfail(strict=True)` 라 구현되는 순간 xpass 로 뒤집혀 **관문이 열렸음을 자동 통지**한다.
+- 영향 범위·결정/가정: 설계는 `docs/design_m2_scope_contract_and_audit.md`.
+  범위 계약 7필드 + `scope_type` 5값(`ORG_PRIVATE` 기본 / `ORG_SHARED` / `ENTERPRISE_SHARED`
+  (승인 필수) / `SANDBOX` / `LEGACY_UNSCOPED`(한시·만료일 필수)).
+  **"미바인딩 = 통과" 규칙은 정확히 두 곳**에 있다(실측): `master_data.select_for_injection.
+  _in_scope`(프롬프트 주입 경로) · `scoping.is_visible`(목록·조회 가시성). 한 곳만 막으면 샌다.
+- 증거·다음 행동: **감사로그 인프라가 아직 없다**(`enterprise_context/__init__.py` 에 "(예정)
+  audit.py"만) — 거부를 404 로 바꾸면 그 순간 **아무 기록도 남지 않는 조용한 차단**이 된다.
+  404 적용 경계를 표로 고정했다(개별 자원 조회만 404 / 목록 200+필터 / 인증 401 / 형식 422 /
+  쓰기권한 403). 서버측 범위 계산은 **기존 자산 재사용**으로 가능하다
+  (`org_directory.resolve_scope` → `scoping.resolve_scope_ref` → `visible_scopes` → 교차 검증).
+  **사용자 결정 필요 4건**: LEGACY 만료일 · `classification` 등급별 정책 · 경영진 드릴다운 범위 ·
+  감사로그 보존기간/열람권한(감사로그 자체가 민감정보다).
+
 ### [CANARY-TEL-01] A-1 카나리 필수 계측 5종 — 갭 보강 (재카나리 선행)
 - 상태: **구현 완료, 재카나리 대기** (§3-1 B등급 — 계측 추가, 판정 로직 불변)
 - 책임 수행자 / 교차 검토자: Claude Code(완료) / Antigravity(카나리 실행·수치 판독)
@@ -143,6 +162,11 @@
   D-010(전수 주입) 실증도 불가능했다.
   **다음 행동**: 재카나리 시 ① 지식팩 연결 ② `master_domains` 지정 ③ 조직 범위 지정 후 실행해야
   D-010 판정이 가능하다. 계측만으로는 판정이 안 된다 — 주입 대상이 있어야 한다.
+  **판독기**: `venv\Scripts\python.exe scripts\canary_report.py <프로젝트명>` — 계측 5종을
+  읽어 Close 가능 여부를 판정한다(LLM 0콜). 1차 카나리로 검증했고 수동 분석과 같은 판정을 냈다
+  (①③④ 미충족 · ⑤ 부분). **재카나리 후 이 출력을 QUALITY-TEL-01 Close 증적으로 첨부하면 된다**
+  (단 UI 조회 증적은 별도). 판정 로직은 `tests/test_canary_report.py`(12건)로 잠갔다 —
+  특히 "빈 계측을 실패 0건(건강함)으로 읽지 않는다".
 
 ### [MDM-SEED-01] M1~M4 기준정보 시드 · 주입 경로 정상화 (2026-07-29)
 - 상태: **구현 완료, 교차검토 대기**
