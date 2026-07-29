@@ -36,6 +36,8 @@ _LITERAL_ROUTES = [
     "/api/v1/lineage/edges?node_type=master&node_id=x",
     "/api/v1/contracts/evaluate",              # `/{contract_id}` 에 잡아먹히기 쉽다
     "/api/v1/catalog/governance/coverage",
+    "/api/v1/external/readiness",
+    "/api/v1/external/indicators",
 ]
 
 

@@ -65,6 +65,9 @@ data/llm_call_log.jsonl
 
 # [M1] 기준정보 저장소 런타임 DB (골든 레코드 — 런타임 데이터, 커밋 금지)
 data/master/
+# [§12] 외부 인텔리전스 런타임 저장소(§12.3 상 별도 DB)
+data/external_intelligence.db*
+data/external_raw/
 
 # 골든 벤치마크 스코어카드/사람점수 (런타임 계측). 골든 기준(golden/)은 A-1 완주 후 커밋 여부 재결정.
 data/benchmark/
