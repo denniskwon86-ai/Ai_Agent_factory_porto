@@ -270,6 +270,12 @@ class ReleaseReadiness:
         return self._summarize(release_id, steps, proj)
 
     def _summarize(self, release_id: str, steps: List[dict], project_id: str) -> dict:
+        # ★ `GATE_STEPS` 순서로 정렬한다. §8.2 의 체인은 **진행 순서**라 의미가 있는데,
+        #   검사 코드는 같은 원천을 쓰는 것끼리 묶여 있어(테스트·수용검수가 한 블록) 추가 순서가
+        #   체인 순서와 어긋난다. 화면에 ⑤가 ④보다 먼저 나오면 체인이 잘못된 것처럼 보인다.
+        #   상수를 선언만 하고 쓰지 않으면 그 상수는 없는 것과 같다(실측으로 확인).
+        order = {s: i for i, s in enumerate(GATE_STEPS)}
+        steps = sorted(steps, key=lambda s: order.get(s["step"], len(order)))
         failed = [s["step"] for s in steps if s["state"] == "fail"]
         unver = [s["step"] for s in steps if s["state"] == "unverifiable"]
         return {

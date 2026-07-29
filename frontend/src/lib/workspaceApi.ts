@@ -95,3 +95,59 @@ export const revokeShare = (shareId: string) =>
 
 export const fetchForks = (releaseId = '') =>
   req<Fork[]>('GET', `/api/v1/workspace/forks${releaseId ? `?source_release_id=${encodeURIComponent(releaseId)}` : ''}`);
+
+// ── 운영 준비 (§8.2 / §14 M3) ────────────────────────────────────────────
+// `not_required` 는 §8.2 가 해당 종류에 요구하지 않은 단계다(Shadow Mode).
+// `unverifiable` 은 통과가 아니라 확인하지 못한 것이며 operations_ready 를 막는다.
+export type StepState = 'pass' | 'fail' | 'unverifiable' | 'not_required';
+
+export type ChecklistStep = {
+  step: string;
+  state: StepState;
+  why: string;
+  suggested_action?: string;
+};
+
+export type Checklist = {
+  release_id: string;
+  project_id: string;
+  steps: ChecklistStep[];
+  failed: string[];
+  unverifiable: string[];
+  operations_ready: boolean;
+  note: string;
+};
+
+export type RollbackResult = {
+  rollback_id: string;
+  release_id: string;
+  revoked_promotion: boolean;
+  actor: string;
+  reason: string;
+  created_at: string;
+  // ⚠️ 화면에 반드시 그대로 보여준다 — "롤백했다"가 실제보다 크게 읽히면 아무도 후속
+  //   조치를 하지 않는다.
+  limitation: string;
+};
+
+export type ChangeImpact = {
+  impacted_count: number;
+  releases: { release_id: string; depth: number; is_enterprise: boolean }[];
+  projects: { project_id: string; depth: number }[];
+  enterprise_releases: { release_id: string }[];
+  blast_radius: 'none' | 'department' | 'enterprise';
+  limitation: string;
+};
+
+export const fetchChecklist = (releaseId: string, projectId = '', liveIntegration = false) =>
+  req<Checklist>('GET', `/api/v1/readiness/checklist?release_id=${encodeURIComponent(releaseId)}`
+    + (projectId ? `&project_id=${encodeURIComponent(projectId)}` : '')
+    + (liveIntegration ? '&requires_live_integration=true' : ''));
+
+export const rollbackRelease = (releaseId: string, reason: string, toReleaseId = '') =>
+  req<RollbackResult>('POST', '/api/v1/readiness/rollback',
+                      { release_id: releaseId, reason, to_release_id: toReleaseId });
+
+export const fetchChangeImpact = (nodeType: string, nodeId: string) =>
+  req<ChangeImpact>('GET', `/api/v1/readiness/impact?node_type=${encodeURIComponent(nodeType)}`
+    + `&node_id=${encodeURIComponent(nodeId)}`);

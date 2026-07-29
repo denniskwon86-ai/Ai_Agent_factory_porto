@@ -150,6 +150,20 @@ def test_shadow_required_for_live_integration(env):
     assert _step(cl, "shadow_mode") == "unverifiable"
 
 
+def test_steps_follow_the_spec_chain_order(env):
+    """★★ §8.2 의 체인은 **진행 순서**다. 검사 코드는 같은 원천을 쓰는 것끼리 묶여 있어
+    추가 순서가 체인 순서와 어긋난다(테스트·수용검수가 한 블록) — 화면에 ⑤가 ④보다 먼저
+    나오면 체인이 잘못된 것처럼 보인다. 상수를 선언만 하고 쓰지 않으면 없는 것과 같다."""
+    from core.release_readiness import GATE_STEPS
+    rd, ws, lin, lib, qt, tp = env
+    _write_release(lib)
+    _gate(qt, tp, "PASS", accepted=True)
+    cl = rd.checklist(REL, PROJ)
+    got = [s["step"] for s in cl["steps"]]
+    assert got == [s for s in GATE_STEPS if s in got], f"체인 순서와 어긋남: {got}"
+    assert got.index("permission_contract") < got.index("acceptance")
+
+
 def test_not_required_does_not_block(env):
     """`not_required` 는 failed/unverifiable 어디에도 들어가지 않는다."""
     rd, ws, lin, lib, qt, tp = env

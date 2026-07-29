@@ -9,10 +9,13 @@
 //   ③ 통과하지 못하면 승격 버튼이 잠긴다(백엔드가 어차피 409 지만, 누르기 전에 알아야 한다)
 //   ④ 공유와 승격을 화면에서도 분리한다 — 묶어 보이면 같은 행위로 오해한다
 import { useCallback, useEffect, useState } from 'react';
-import type { Fork, Gate, GateCheck, Promotion, Share } from '../lib/workspaceApi';
+import type {
+  Checklist, ChecklistStep, Fork, Gate, GateCheck, Promotion, RollbackResult, Share,
+} from '../lib/workspaceApi';
 import {
-  createShare, fetchForks, fetchGate, fetchPromotions, fetchShares,
+  createShare, fetchChecklist, fetchForks, fetchGate, fetchPromotions, fetchShares,
   ownerApprove, promoteRelease, rejectPromotion, requestPromotion, revokeShare,
+  rollbackRelease,
 } from '../lib/workspaceApi';
 
 type Props = { onClose: () => void };
@@ -32,6 +35,24 @@ const CHECK_LABEL: Record<string, string> = {
   data_owner_approval: '데이터 오너 승인',
 };
 
+const STEP_STATE: Record<string, { label: string; cls: string }> = {
+  pass: { label: '통과', cls: 'text-emerald-400' },
+  fail: { label: '차단', cls: 'text-red-400' },
+  unverifiable: { label: '확인 불가(통과 아님)', cls: 'text-violet-300' },
+  // ★ '해당 없음'을 통과와 같은 색으로 두면 검사한 것처럼 읽힌다. 회색으로 구분한다.
+  not_required: { label: '해당 없음(§8.2)', cls: 'text-slate-500' },
+};
+
+const STEP_LABEL: Record<string, string> = {
+  artifacts: '① 코드·문서·스키마',
+  traceability: '② 요구사항 추적성',
+  tests: '③ 핵심 업무 테스트',
+  permission_contract: '④ 권한·데이터 계약',
+  acceptance: '⑤ 사용자 수용검수',
+  shadow_mode: '⑥ Shadow Mode',
+  release_approval: '⑦ 릴리스 승인',
+};
+
 const PROMO: Record<string, { label: string; cls: string }> = {
   draft: { label: '초안', cls: 'text-slate-400' },
   requested: { label: '신청됨', cls: 'text-amber-300' },
@@ -49,6 +70,10 @@ export default function WorkspacePanel({ onClose }: Props) {
   const [shares, setShares] = useState<Share[]>([]);
   const [forks, setForks] = useState<Fork[]>([]);
   const [toScope, setToScope] = useState('');
+  const [checklist, setChecklist] = useState<Checklist | null>(null);
+  const [liveIntegration, setLiveIntegration] = useState(false);
+  const [rollbackReason, setRollbackReason] = useState('');
+  const [rollbackOut, setRollbackOut] = useState<RollbackResult | null>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
@@ -61,11 +86,15 @@ export default function WorkspacePanel({ onClose }: Props) {
   const inspect = async (rid: string, pid = '') => {
     setErr(''); setMsg('');
     setReleaseId(rid); setProjectId(pid);
-    const [g, s, f] = await Promise.allSettled([fetchGate(rid, pid), fetchShares(rid),
-                                                fetchForks(rid)]);
+    setRollbackOut(null);
+    const [g, s, f, c] = await Promise.allSettled([
+      fetchGate(rid, pid), fetchShares(rid), fetchForks(rid),
+      fetchChecklist(rid, pid, liveIntegration),
+    ]);
     setGate(g.status === 'fulfilled' ? g.value : null);
     setShares(s.status === 'fulfilled' ? s.value : []);
     setForks(f.status === 'fulfilled' ? f.value : []);
+    setChecklist(c.status === 'fulfilled' ? c.value : null);
     if (g.status === 'rejected') setErr(String(g.reason));
   };
 
@@ -202,6 +231,87 @@ export default function WorkspacePanel({ onClose }: Props) {
               {current?.rejected_reason && (
                 <p className="text-[11px] text-red-300 mt-2">반려: {current.rejected_reason}</p>
               )}
+            </section>
+
+            {/* 운영 준비 (§8.2) — 게이트와 다른 질문이다: "지금 운영에 둘 준비가 됐나" */}
+            <section className="border border-slate-700 rounded-lg p-4 bg-slate-900/60">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h3 className="text-sm font-semibold">
+                  운영 준비 체크리스트 (§8.2){' '}
+                  {checklist && (
+                    <span className={checklist.operations_ready
+                      ? 'text-emerald-400' : 'text-red-400'}>
+                      {checklist.operations_ready ? '준비됨' : '미준비'}
+                    </span>
+                  )}
+                </h3>
+                <label className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                  <input type="checkbox" checked={liveIntegration}
+                    onChange={(e) => { setLiveIntegration(e.target.checked);
+                                       inspect(releaseId, projectId); }} />
+                  실운영 연계형 (Shadow Mode 요구)
+                </label>
+              </div>
+              {!checklist && <p className="text-xs text-slate-500 mt-2">
+                체크리스트를 불러오지 못했습니다.</p>}
+              {checklist && (
+                <>
+                  <ul className="mt-3 space-y-1.5">
+                    {checklist.steps.map((s2: ChecklistStep) => (
+                      <li key={s2.step} className="text-xs border border-slate-700 rounded
+                                                   px-2 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className={`${STEP_STATE[s2.state]?.cls} shrink-0`}>
+                            [{STEP_STATE[s2.state]?.label}]
+                          </span>
+                          <span className="font-medium">{STEP_LABEL[s2.step] || s2.step}</span>
+                        </div>
+                        <div className="text-slate-300 mt-0.5">{s2.why}</div>
+                        {s2.state !== 'pass' && s2.state !== 'not_required'
+                          && s2.suggested_action && (
+                          <div className="text-amber-200/90 mt-0.5">→ {s2.suggested_action}</div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-[11px] text-slate-500 mt-2">{checklist.note}</p>
+                </>
+              )}
+
+              {/* 롤백 — 한계를 반드시 함께 보여준다 */}
+              <div className="mt-4 border-t border-slate-700 pt-3">
+                <h4 className="text-xs font-semibold">운영에서 내리기(롤백)</h4>
+                <div className="flex gap-2 mt-2">
+                  <input value={rollbackReason}
+                    onChange={(e) => setRollbackReason(e.target.value)}
+                    placeholder="사유 (필수 — 없으면 같은 문제를 반복한다)"
+                    className="flex-1 bg-slate-800 border border-slate-600 rounded px-2 py-1
+                               text-xs" />
+                  <button
+                    onClick={async () => {
+                      setMsg(''); setErr('');
+                      try {
+                        setRollbackOut(await rollbackRelease(releaseId, rollbackReason));
+                        setMsg('롤백을 기록했습니다.');
+                        await inspect(releaseId, projectId);
+                        loadList();
+                      } catch (e) {
+                        setErr(String(e).replace(/^Error:\s*/, ''));
+                      }
+                    }}
+                    className="px-3 py-1 text-xs bg-red-900/70 hover:bg-red-800/70 rounded">
+                    롤백
+                  </button>
+                </div>
+                {rollbackOut && (
+                  <div className="mt-2 border border-amber-500/40 bg-amber-500/10 rounded
+                                  px-2 py-1.5 text-xs text-amber-100">
+                    {rollbackOut.revoked_promotion
+                      ? '전사 승격을 철회했습니다. ' : ''}
+                    {rollbackOut.limitation}
+                  </div>
+                )}
+              </div>
             </section>
 
             {/* ④ 공유는 승격과 분리해서 보여준다 */}
