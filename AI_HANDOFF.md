@@ -378,6 +378,23 @@ curl http://localhost:8080/api/v1/knowledge/packs   # data:[] 이면 미주입
 프론트:  cd frontend && npm run dev            # http://localhost:5173
 ```
 
+### 3-0. ⚠️ uvicorn 을 직접 띄울 때는 **듀얼스택**으로 (2026-07-29 실측)
+
+`run.py` 대신 uvicorn 을 직접 띄운다면 **`--host ::` 을 쓸 것.**
+
+```
+venv\Scripts\python.exe -m uvicorn main:app --host :: --port 8080
+```
+
+`--host 127.0.0.1` 이나 `--host 0.0.0.0` 으로 띄우면 Windows 에서 IPv4 에만 바인딩되는데,
+브라우저는 `http://localhost:8080` 을 **`::1`(IPv6)로 먼저 해석**한다. 그러면 `curl` 로는
+200 이 나오는데 **브라우저에서는 모든 API 가 `Failed to fetch`** 가 된다 — 프론트 코드를
+아무리 봐도 원인이 안 보이는 유형이라 여기 남긴다.
+
+또한 프론트 dev 포트는 **5173 을 유지할 것.** 백엔드 CORS 기본 허용 목록이
+`localhost:3000,localhost:5173,127.0.0.1:5173` 이므로(`main.py:41`) 다른 포트로 띄우면
+CORS 로 막힌다. 바꿔야 하면 `CORS_ALLOWED_ORIGINS` 환경변수를 함께 설정한다.
+
 ### 3-1. 다중 환경 동시 작업 주의 (2026-07-25 실사고)
 
 - **8080 은 단일 포트다.** 다른 PC/세션이 A-1 을 돌리는 중에 이쪽에서 백엔드를 띄우거나 내리면
