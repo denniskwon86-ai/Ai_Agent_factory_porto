@@ -151,7 +151,8 @@ class MCPBroker:
         return None
 
     def resolve(self, master_code: str, system_id: str, ttl: int = None, force: bool = False,
-                scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL") -> dict:
+                scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL",
+                actor: str = "", actor_scopes=None) -> dict:
         """골든 레코드의 외부 실제값을 조회(캐시 우선). 실패는 정직하게 표식(옛 캐시/골든값 대체 없음).
         반환: {master_code, system_id, external_key, values, as_of, cached, ok, error?}.
 
@@ -164,7 +165,16 @@ class MCPBroker:
         if scope_node_id or tenant_id:
             from core.enterprise_context.scoping import is_visible
             if not is_visible(sys, scope_node_id, tenant_id, entity_mode):
-                # '없음'과 같은 문구 — 다른 조직 시스템의 존재를 알려주지 않는다.
+                # [M2 관문 B-2] 응답은 '없음'과 같은 문구로 은폐하되, 감사로그에는 실제
+                #   대상과 요청 범위를 남긴다 — 은폐는 외부용이고 내부에는 남아야 한다.
+                try:
+                    from core.enterprise_context import audit
+                    audit.denied_scope("mcp_resource", f"{master_code}@{system_id}",
+                                       actor=actor, actor_scopes=actor_scopes,
+                                       requested_scope=scope_node_id,
+                                       detail=f"entity_mode={entity_mode}")
+                except Exception:
+                    pass
                 raise MCPError(f"등록되지 않은 시스템: {system_id}")
         # [(e)] 읽기 전용 + 활성 시스템만
         if sys.get("status") != "active":
@@ -201,12 +211,13 @@ class MCPBroker:
 
     def resolve_batch(self, master_codes: list, system_id: str, ttl: int = None,
                       scope_node_id: str = "", tenant_id: str = "",
-                      entity_mode: str = "REAL") -> list:
+                      entity_mode: str = "REAL", actor: str = "", actor_scopes=None) -> list:
         out = []
         for mc in master_codes:
             try:
                 out.append(self.resolve(mc, system_id, ttl=ttl, scope_node_id=scope_node_id,
-                                        tenant_id=tenant_id, entity_mode=entity_mode))
+                                        tenant_id=tenant_id, entity_mode=entity_mode,
+                                        actor=actor, actor_scopes=actor_scopes))
             except MCPError as e:
                 out.append({"master_code": mc, "system_id": system_id, "ok": False, "error": str(e)})
         return out

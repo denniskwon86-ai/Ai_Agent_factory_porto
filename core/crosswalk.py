@@ -75,10 +75,22 @@ class Crosswalk:
         return is_visible(row, scope_node_id, tenant_id, entity_mode)
 
     def require_system_visible(self, system_id: str, scope_node_id: str = "",
-                               tenant_id: str = "", entity_mode: str = "REAL"):
+                               tenant_id: str = "", entity_mode: str = "REAL",
+                               actor: str = "", actor_scopes=None):
         """보이지 않으면 도메인 오류. **'없음'과 같은 문구를 쓴다** — 다른 조직 시스템의
-        존재 여부까지 알려주면 그 자체가 정보 유출이다."""
+        존재 여부까지 알려주면 그 자체가 정보 유출이다.
+
+        ★ [M2 관문 B-2] 거부하는 **그 순간** 감사로그에 남긴다. 응답은 은폐하되 기록은
+          실제 대상 식별자를 담는다 — 그러지 않으면 운영자가 침해 시도를 볼 수 없다.
+          `actor` 는 라우트가 인증 주체에서 넘긴다(비면 `anonymous` 로 기록된다)."""
         if not self.is_system_visible(system_id, scope_node_id, tenant_id, entity_mode):
+            try:
+                from core.enterprise_context import audit
+                audit.denied_scope("external_system", system_id, actor=actor,
+                                   actor_scopes=actor_scopes, requested_scope=scope_node_id,
+                                   detail=f"entity_mode={entity_mode} tenant={tenant_id}")
+            except Exception:
+                pass    # 감사 기록 실패가 차단을 막지 않는다(차단은 유지된다)
             raise CrosswalkError(f"존재하지 않거나 접근 권한이 없는 system_id 입니다: {system_id}")
 
     def systems_coverage(self) -> dict:

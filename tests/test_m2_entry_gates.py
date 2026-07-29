@@ -118,12 +118,13 @@ def test_gate_a_no_scope_call_still_works():
 # ══════════════════════════════════════════════════════════════════════
 # 관문 B — 타 조직 자원 404 + 감사로그
 # ══════════════════════════════════════════════════════════════════════
-@pytest.mark.xfail(strict=True, reason=_GATE_B)
+# ✅ [2026-07-29 13:50 · Claude Code] 관문 B 3건 **열림** — xfail 을 떼고 회귀 잠금으로 승격.
+#   근거: `core/enterprise_context/audit.py` · `core/scope_guard.py` ·
+#         `api/routes/mcp_control.py`(404 경계표 적용) · `tests/test_access_audit.py`(12건)
 def test_gate_b_other_org_resource_returns_404():
     """★★ 관문 B-1: 타 조직 자원의 거부는 **존재하지 않음과 구분되지 않아야** 한다.
 
-    현재 MCP 는 409(Conflict)를 준다 — 409 는 '자원이 있으나 상태가 맞지 않다'는 뜻이라
-    존재를 알려준다."""
+    409(Conflict)는 '자원이 있으나 상태가 맞지 않다'는 뜻이라 존재를 알려준다."""
     from fastapi.testclient import TestClient
     import main
 
@@ -134,19 +135,30 @@ def test_gate_b_other_org_resource_returns_404():
     assert r.status_code == 404
 
 
-@pytest.mark.xfail(strict=True, reason=_GATE_B)
 def test_gate_b_denial_is_written_to_the_audit_log():
     """★★ 관문 B-2: 은폐는 외부용이다 — **내부에는 반드시 남는다.**
 
-    `ACCESS_DENIED_SCOPE_MISMATCH` + 실제 대상 식별자(요청 주체, 시스템/레코드 id, 요청 범위).
-    이것이 없으면 운영자는 침해 시도를 영원히 볼 수 없다."""
-    from core.enterprise_context import audit      # 아직 없는 모듈(설계: docs/design_m2_scope_contract_and_audit.md)
+    ⚠️ 거부와 기록이 **같은 순간**에 일어나는지를 본다. 처음에는 이 검증을 별도 테스트로 뒀다가
+      앞선 테스트가 실제 운영 감사로그에 남긴 기록을 보고 통과하는 일이 있었다 — 격리(conftest)와
+      함께, 한 테스트 안에서 '거부시키고 그 기록을 확인'하도록 합쳤다."""
+    from fastapi.testclient import TestClient
+    import main
+
+    from core.enterprise_context import audit
+
+    before = len(audit.recent(limit=100))
+    c = TestClient(main.app)
+    c.post("/api/v1/mcp/resolve",
+           json={"master_code": "MC-X", "system_id": "mes-smelting",
+                 "scope_node_id": "BATTERY"})
 
     events = audit.recent(limit=10)
-    assert any(e["event"] == "ACCESS_DENIED_SCOPE_MISMATCH" for e in events)
+    assert len(events) > before, "거부는 했는데 감사 기록이 남지 않았다(조용한 차단)"
+    e = events[0]
+    assert e["event"] == audit.ACCESS_DENIED_SCOPE_MISMATCH
+    assert e["resource_id"], "실제 대상 식별자가 비어 있다 — 은폐는 응답에만 적용된다"
 
 
-@pytest.mark.xfail(strict=True, reason=_GATE_B)
 def test_gate_b_mcp_does_not_trust_client_supplied_scope():
     """★★ 관문 B-4: 서버가 **인증 주체로부터** 범위를 계산해야 한다.
 

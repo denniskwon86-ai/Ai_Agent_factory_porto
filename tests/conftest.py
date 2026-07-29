@@ -31,3 +31,11 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch):
                             str(tmp_path / "llm_call_log.jsonl"), raising=False)
     except Exception:
         pass
+    try:
+        # 감사로그는 특히 중요하다 — 테스트가 남긴 거부 기록이 섞이면 "실제 침해 시도"를
+        # 세는 지표가 오염되고, 반대로 테스트는 남의 기록을 보고 통과할 수 있다(실제 발생).
+        from core.enterprise_context import audit
+        monkeypatch.setattr(audit, "_LOG_PATH",
+                            str(tmp_path / "access_audit.jsonl"), raising=False)
+    except Exception:
+        pass
