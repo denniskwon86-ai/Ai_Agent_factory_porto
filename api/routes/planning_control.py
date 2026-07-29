@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from api.deps import Principal, current_principal
 from core import planning_engine as engine
-from core.planning_model import PLAN, PlanningError, planning_store
+from core.planning_model import PLAN, VALUE_KINDS, PlanningError, planning_store
 from core.scope_guard import resolve_effective_scope
 
 router = APIRouter(prefix="/api/v1/planning", tags=["Planning"])
@@ -422,3 +422,65 @@ async def cash_flow(org_id: str, period: str, value_kind: str = PLAN,
     await _scope(p, org_id, org_id)
     data = await asyncio.to_thread(engine.cash_flow_for, org_id, period, value_kind)
     return {"status": "success", "data": data}
+
+
+# ── 실적·계획 파일 등록 (§17.2 기능 2) ────────────────────────────────
+# ⚠️ 파일 등록은 **조용히 틀리기 가장 쉬운 경로**다. 엑셀 오타 하나가 그대로 경영 보고서에
+#   들어가고 아무 오류도 나지 않는다. 그래서 먼저 검증하고 나중에 저장하며,
+#   한 행이라도 문제가 있으면 **전부 거부**한다(부분 저장 금지).
+from fastapi import File, UploadFile
+
+from core import planning_import as importer
+
+
+class ImportRowsRequest(BaseModel):
+    rows: List[dict]
+    #: 기본 False — 무엇이 들어갈지 먼저 보여준다.
+    commit: bool = False
+    source_ref: Optional[str] = ""
+
+
+@router.post("/import/rows")
+async def import_rows(req: ImportRowsRequest, p: Principal = Depends(current_principal)):
+    """행 목록 등록. `commit=false`(기본)면 **검증만** 하고 저장하지 않는다."""
+    try:
+        data = await asyncio.to_thread(importer.import_rows, req.rows, req.commit,
+                                       req.source_ref or "")
+        return {"status": "success", "data": data}
+    except PlanningError as e:
+        _err(e)
+
+
+@router.post("/import/csv")
+async def import_csv(file: UploadFile = File(...), commit: bool = False,
+                     p: Principal = Depends(current_principal)):
+    """CSV 등록. 인코딩은 UTF-8(BOM 허용) → CP949 순으로 시도한다(국내 엑셀 관례)."""
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp949", errors="replace")
+    try:
+        rows = await asyncio.to_thread(importer.parse_csv, text)
+        data = await asyncio.to_thread(importer.import_rows, rows, commit, file.filename or "")
+        return {"status": "success", "data": data}
+    except PlanningError as e:
+        _err(e)
+
+
+@router.get("/import/template")
+async def import_template():
+    """등록 양식 안내 — 열 이름을 추측하게 두면 조용히 틀린 열을 읽는다."""
+    return {"status": "success", "data": {
+        "required_columns": list(importer.REQUIRED_COLUMNS),
+        "optional_columns": list(importer.OPTIONAL_COLUMNS),
+        "value_kinds": list(VALUE_KINDS),
+        "example_csv": ("org_id,account_code,period,value_kind,amount,source_ref\n"
+                        "MNM_BATTERY,4000,2026,ACTUAL,\"1,100\",2026결산.xlsx\n"),
+        "notes": [
+            "한 행이라도 문제가 있으면 아무것도 저장하지 않습니다(부분 저장 없음).",
+            "계정은 먼저 등록해야 합니다 — 자동 생성하면 오타가 새 계정이 됩니다.",
+            "value_kind 는 비울 수 없습니다(실제·계획·예측·시나리오를 섞지 않습니다).",
+            "천단위 구분(1,000)과 회계 음수 표기((600))를 지원합니다.",
+        ],
+    }}
