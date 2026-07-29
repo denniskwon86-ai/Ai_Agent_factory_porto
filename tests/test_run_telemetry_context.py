@@ -228,3 +228,39 @@ def test_dunder_lookups_still_raise():
     cb = run_context.FallbackErrorCollector()
     with pytest.raises(AttributeError):
         cb.__deepcopy__
+
+
+# ── 지식팩 '조용한 미연결' (2026-07-29 3차 카나리 실측) ──────────────────────
+def test_missing_pack_is_reported_not_silently_skipped(tmp_path, monkeypatch):
+    """★★ 존재하지 않는 팩 id 를 조용히 건너뛰면 **'안 붙였다'와 구분되지 않는다.**
+
+    3차 카나리가 정확히 이 함정에 빠졌다 — `manufacturing-standards` 등 없는 팩을 연결하고
+    그라운딩 0건으로 완주했다. 벡터스토어는 멀쩡했고, 문제는 침묵이었다."""
+    from core.knowledge_base import knowledge_base as kb
+
+    monkeypatch.setattr(kb, "_manifest_path", lambda pid: str(tmp_path / pid / "manifest.json"))
+    context_report.start()
+    kb.search_packs(["ghost-pack", "another-ghost"], "질의")
+
+    rep = context_report.current()
+    assert rep["packs_requested"] == ["ghost-pack", "another-ghost"]
+    assert rep["packs_missing"] == ["ghost-pack", "another-ghost"]
+
+
+def test_missing_packs_are_recorded_even_without_vector_client(tmp_path, monkeypatch):
+    """★ 클라이언트가 없어도 미존재 팩은 기록돼야 한다 — 두 원인이 같은 '0건'이 되면 안 된다."""
+    from core.knowledge_base import knowledge_base as kb
+
+    monkeypatch.setattr(kb, "_manifest_path", lambda pid: str(tmp_path / pid / "manifest.json"))
+    monkeypatch.setattr(kb, "client", None)
+    context_report.start()
+    kb.search_packs(["ghost-pack"], "질의")
+    assert context_report.current()["packs_missing"] == ["ghost-pack"]
+
+
+def test_pack_id_helpers_answer_what_to_use_instead():
+    """오류 메시지는 "그럼 무엇을 써야 하는가"에 답할 수 있어야 한다."""
+    from core.knowledge_base import knowledge_base as kb
+
+    assert isinstance(kb.list_pack_ids(), list)
+    assert kb.pack_exists("definitely-not-a-real-pack") is False

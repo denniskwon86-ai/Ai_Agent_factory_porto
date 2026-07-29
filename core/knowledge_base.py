@@ -1,6 +1,10 @@
 import os
 import json
 import threading
+import io
+import re
+import zipfile
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 try:
@@ -17,8 +21,59 @@ PACKS_DIR = os.path.join("data", "knowledge_packs")
 EMBED_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 
 
+class DocumentExtractionError(ValueError):
+    """원문은 보존하되 현재 방식으로 안전하게 텍스트화할 수 없는 문서."""
+
+
+def _xml_text(raw: bytes) -> str:
+    """Office Open XML의 모든 텍스트 노드를 순서대로 읽는다. 외부 라이브러리 없이 동작한다."""
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return ""
+    return " ".join(t.text.strip() for t in root.iter() if t.text and t.text.strip())
+
+
+def _extract_docx(raw: bytes) -> str:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            names = zf.namelist()
+            parts = ["word/document.xml"]
+            parts += sorted(n for n in names if re.fullmatch(r"word/(header|footer)\d+\.xml", n))
+            text = [_xml_text(zf.read(part)) for part in parts if part in names]
+    except (zipfile.BadZipFile, KeyError) as e:
+        raise DocumentExtractionError(f"손상되었거나 DOCX 형식이 아닌 문서입니다: {e}") from e
+    return "\n\n".join(t for t in text if t)
+
+
+def _extract_pptx(raw: bytes) -> str:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            names = zf.namelist()
+            slide_re = re.compile(r"ppt/slides/slide(\d+)\.xml")
+            note_re = re.compile(r"ppt/notesSlides/notesSlide(\d+)\.xml")
+            slides = sorted(((int(m.group(1)), n) for n in names if (m := slide_re.fullmatch(n))), key=lambda x: x[0])
+            notes = {int(m.group(1)): n for n in names if (m := note_re.fullmatch(n))}
+            blocks = []
+            for number, name in slides:
+                body = _xml_text(zf.read(name))
+                note = _xml_text(zf.read(notes[number])) if number in notes else ""
+                if body or note:
+                    block = f"[[slide.{number}]]\n{body}"
+                    if note:
+                        block += f"\n[발표자 노트]\n{note}"
+                    blocks.append(block)
+    except (zipfile.BadZipFile, KeyError) as e:
+        raise DocumentExtractionError(f"손상되었거나 PPTX 형식이 아닌 문서입니다: {e}") from e
+    return "\n\n".join(blocks)
+
+
 def extract_text(filename: str, raw: bytes) -> str:
-    """업로드 파일에서 인덱싱할 텍스트를 추출한다. (.pdf 는 pypdf, 그 외 텍스트 계열은 디코드)"""
+    """업로드 파일을 안전하게 텍스트화한다.
+
+    PDF, DOCX, PPTX는 원본 구조를 읽어 페이지·슬라이드 출처를 남긴다. 구형 PPT는 바이너리
+    포맷이라 추측 추출하지 않고 변환 필요 상태로 돌려, 깨진 텍스트가 지식 근거로 쓰이지 않게 한다.
+    """
     lower = (filename or "").lower()
     if lower.endswith(".pdf"):
         try:
@@ -38,6 +93,14 @@ def extract_text(filename: str, raw: bytes) -> str:
         except Exception as e:
             print(f"⚠️ [KnowledgeBase] PDF 텍스트 추출 실패({filename}): {e}")
             return ""
+    if lower.endswith(".docx"):
+        return _extract_docx(raw)
+    if lower.endswith(".pptx"):
+        return _extract_pptx(raw)
+    if lower.endswith(".ppt"):
+        raise DocumentExtractionError(
+            "구형 .ppt는 안전한 본문 추출을 지원하지 않습니다. 원본을 보존한 채 .pptx 또는 PDF로 변환 후 등록하세요."
+        )
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
@@ -284,13 +347,44 @@ class KnowledgeBase:
         self._write_manifest(pack_id, manifest)
         return True
 
+    def list_pack_ids(self) -> list:
+        """등록된 팩 id 목록. 오류 메시지가 "그럼 무엇을 써야 하는가"에 답할 수 있어야 한다."""
+        try:
+            return sorted(d for d in os.listdir(PACKS_DIR)
+                          if os.path.exists(self._manifest_path(d)))
+        except Exception:
+            return []
+
+    def pack_exists(self, pack_id: str) -> bool:
+        return bool(pack_id) and os.path.exists(self._manifest_path(pack_id))
+
     def search_packs(self, pack_ids: list, query: str, n_total: int = 5) -> list:
         """연결된 지식팩들에서 관련 청크를 거리순으로 상위 n_total 개 반환."""
+        # ★★ [2026-07-29 카나리 실측] 존재하지 않는 팩 id 를 **조용히 건너뛰던** 경로.
+        #   3차 카나리는 `manufacturing-standards`·`battery-materials-operations` 를 연결했는데
+        #   디스크에는 `core-m3-standards` 하나뿐이었다. 그런데도 오류·경고가 하나도 없어서
+        #   "지식팩을 연결했다"고 믿은 채 **그라운딩 0건으로 완주**했고, D-010 실증이 무산됐다.
+        #   벡터스토어는 멀쩡했다 — 문제는 침묵이었다.
+        #   ⚠️ 판정을 **early return 앞**에 둔다. 뒤에 두면 클라이언트가 없을 때(또 다른 조용한
+        #     실패) 미존재 팩조차 기록되지 않아, 두 원인이 똑같이 "0건"으로 보인다.
+        missing = [pid for pid in (pack_ids or []) if not os.path.exists(self._manifest_path(pid))]
+        if missing:
+            print(f"⚠️ [KnowledgeBase] 연결된 지식팩이 존재하지 않습니다: {missing} — "
+                  f"이 팩의 지식은 **주입되지 않습니다**. 사용 가능: {self.list_pack_ids()}")
+        if pack_ids:
+            try:
+                from core import context_report
+                context_report.note_pack_request(pack_ids, missing)
+            except Exception:
+                pass
+        if pack_ids and not self.client:
+            print("⚠️ [KnowledgeBase] 벡터스토어 클라이언트가 없어 지식 검색을 수행하지 못했습니다 "
+                  "— 지식팩이 연결돼 있어도 주입은 0건입니다.")
         if not self.client or not pack_ids or not (query or "").strip():
             return []
         hits = []
         for pid in pack_ids:
-            if not os.path.exists(self._manifest_path(pid)):
+            if pid in missing:
                 continue
             try:
                 col = self._pack_collection(pid)
@@ -335,6 +429,15 @@ class KnowledgeBase:
         snippets = [s for s in snippets if s.get("distance", 1.0) <= RELEVANCE_CUTOFF]
         if not snippets:
             return ""
+
+        # ★ [2026-07-29 / 계측 ③] **실제로 주입된** 청크의 출처를 남긴다.
+        #   "지식팩을 연결했다"와 "그 지식이 프롬프트에 들어갔다"는 다르다 — 후자를 못 보면
+        #   그라운딩이 됐는지 알 수 없고, 카나리로 품질을 비교할 근거도 없다.
+        try:
+            from core import context_report
+            context_report.note_knowledge(snippets)
+        except Exception:
+            pass
 
         lines = [
             "이 프로젝트에는 사내에 등록된 도메인 참고 지식이 연결되어 있습니다. "

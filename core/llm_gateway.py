@@ -356,6 +356,9 @@ def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, atte
             "context_blocks": _ctx.get("blocks") or {},
             "knowledge_packs": _ctx.get("knowledge_packs") or [],
             "knowledge_hits": _ctx.get("knowledge_hits") or [],
+            # 요청됐으나 존재하지 않는 팩 — "안 붙였다"와 "붙였는데 없다"를 구분한다.
+            "packs_requested": _ctx.get("packs_requested") or [],
+            "packs_missing": _ctx.get("packs_missing") or [],
         }
         os.makedirs("data", exist_ok=True)
         with open(_LLM_CALL_LOG_PATH, "a", encoding="utf-8") as f:

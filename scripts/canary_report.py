@@ -117,12 +117,21 @@ def measure_3_context(calls):
     clipped = sum(1 for c in with_ctx if c.get("context_clipped"))
     packs = sorted({p for c in with_ctx for p in (c.get("knowledge_packs") or [])})
     hits = sum(len(c.get("knowledge_hits") or []) for c in with_ctx)
+    requested = sorted({p for c in with_ctx for p in (c.get("packs_requested") or [])})
+    missing = sorted({p for c in with_ctx for p in (c.get("packs_missing") or [])})
 
     lines = [f"  - 컨텍스트 계측 {len(with_ctx)}/{len(calls)}건 · 절단 발생 {clipped}건",
              "  - 블록 비중(누계): " + ", ".join(
                  f"{k} {v:,}자({_pct(v, total)})"
                  for k, v in sorted(agg.items(), key=lambda x: -x[1])),
+             f"  - 요청된 지식팩: {requested or '없음'}",
              f"  - 실제 주입된 지식팩: {packs or '없음'} (청크 {hits}건)"]
+
+    # ★ [2026-07-29] "안 붙였다"와 "붙였는데 그 id 가 없다"는 완전히 다른 문제다.
+    #   3차 카나리가 후자였고, 시스템이 침묵해 그라운딩 없이 완주했다.
+    if missing:
+        lines.append(f"      ⚠️ **존재하지 않는 지식팩** {missing} — 연결은 했으나 주입되지 않았다."
+                     f" 팩 id 를 확인하고 다시 실행할 것(설정 실수이지 RAG 장애가 아니다)")
 
     # ★ D-010 판정 재료 — 기준정보가 기술 명세를 밀어냈는가.
     master = agg.get("master_data", 0)

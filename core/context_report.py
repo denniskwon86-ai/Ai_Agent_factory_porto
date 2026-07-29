@@ -30,7 +30,8 @@ _ctx_report: ContextVar[Dict[str, Any]] = ContextVar("_ctx_report", default=None
 def start() -> Dict[str, Any]:
     """이번 호출의 컨텍스트 보고서를 연다(ContextEngine 이 조립을 시작할 때)."""
     rep: Dict[str, Any] = {"blocks": {}, "total_chars": 0, "clipped": False,
-                           "knowledge_packs": [], "knowledge_hits": []}
+                           "knowledge_packs": [], "knowledge_hits": [],
+                           "packs_requested": [], "packs_missing": []}
     _ctx_report.set(rep)
     return rep
 
@@ -41,6 +42,19 @@ def add_block(name: str, text: str) -> None:
     if rep is None or not text:
         return
     rep["blocks"][name] = rep["blocks"].get(name, 0) + len(text)
+
+
+def note_pack_request(requested: List[str], missing: List[str]) -> None:
+    """**요청된** 지식팩과 그중 **존재하지 않는** 것을 기록한다.
+
+    ★ [2026-07-29 카나리 실측] 주입된 팩만 기록하면 "팩을 안 붙였다"와 "붙였는데 그 id 가
+      존재하지 않았다"가 **똑같이 0건**으로 보인다. 3차 카나리가 정확히 후자였고, 침묵 때문에
+      그라운딩 없이 완주해 D-010 실증이 무산됐다. 판독기가 이 둘을 구분할 수 있어야 한다."""
+    rep = _ctx_report.get()
+    if rep is None:
+        return
+    rep["packs_requested"] = list(requested or [])
+    rep["packs_missing"] = list(missing or [])
 
 
 def note_knowledge(hits: List[Dict[str, Any]]) -> None:
