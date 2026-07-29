@@ -400,21 +400,28 @@ curl http://localhost:8080/api/v1/knowledge/packs   # data:[] 이면 미주입
 
 ### 2-4. 잔여 기술부채
 
-- ~~pytest 낡은 테스트 7건 현행화~~ → **해소**. 2026-07-25 기준 **전 스위트 258건 통과**(ENV-2 베이스라인)
-- **⚠️ 쿨다운이 유료 제공사까지 30분간 배제한다** (2026-07-25 텔레메트리 실측, 최우선 부채) —
-  `_update_cooldowns` 는 실패한 모델을 무조건 `MODEL_COOLDOWN_SEC`(기본 1800초) 쿨다운시킨다.
-  전 모델이 쿨다운되면 `_compose_chain` 이 **첫 모델(무료 Gemini) 하나만으로 재프로브**하므로,
-  크레딧이 남은 OpenRouter 유료 모델이 체인에서 빠진 채 무료 429 로 즉사하는 구간이 30분간 이어진다.
-  `_all_cooled(pro_chain)` 이면 Pro→Flash 강등까지 겹쳐 유료 Pro 가 더 멀어진다.
-  → **유료키로 완주를 노린다면 쿨다운 정책에서 유료 제공사를 제외하거나 쿨다운을 짧게 할 것.**
-  (`core/llm_gateway.py:383-412`, `config.MODEL_COOLDOWN_SEC`)
-- **유료 제공사(OpenRouter)가 폴백 체인의 맨 끝[4]** — 무료 4곳이 앞을 막고 있어, 무료 쿼터가
-  남아 있는 동안에는 유료 경로가 아예 실행되지 않는다. 유료 경로만 검증하려면 무료 키를 잠시
-  비우거나 체인 순서를 바꿔야 한다(체인 [0] 은 `ChatGoogleGenerativeAI` 로 하드와이어라 코드 수정 필요)
-- **langgraph 체크포인트 역직렬화 경고** — `state_models.FileMetadata` 미등록 타입.
-  현재는 동작하나 "향후 버전에서 차단" 예고 → langgraph 업그레이드 시 체크포인트 복구 불능 위험.
-  `allowed_msgpack_modules` 등록 필요
-- `scripts/api_data_loader.py:14` 실행 안내가 `.venv/Scripts/...` — PC 에 따라 `venv/`(점 없음)
+> ⚠️ **이 목록은 2026-07-29 저녁에 코드와 1:1 대조했다.** 그전까지 "최우선 부채"로 적혀 있던
+> 쿨다운 항목은 **이미 고쳐진 지 3일 지난 것**이었다. 낡은 부채 목록은 결함보다 나쁘다 —
+> 다음 사람이 고쳐진 것을 다시 고치거나, 진짜 위험한 항목을 뒤로 미룬다.
+> **여기 항목을 해소하면 반드시 이 줄을 지울 것.**
+
+- ~~pytest 낡은 테스트 7건 현행화~~ → **해소**. 2026-07-29 기준 **전 스위트 942건 통과**
+- ~~**쿨다운이 유료 제공사까지 30분간 배제한다**~~ → **해소(2026-07-26~28, 문서 반영 07-29)**.
+  `_update_cooldowns` 가 유료 모델은 `PAID_MODEL_COOLDOWN_SEC`(기본 60초)만 쿨다운하고,
+  일시적 실패는 `TRANSIENT_MODEL_COOLDOWN_SEC`(90초)로 단축한다. 전 모델 쿨다운 시
+  `_compose_chain` 은 **첫 모델이 아니라 유료 백스톱으로** 재프로브한다.
+  유료 판정은 `core/llm_cost.py::is_paid_model` 한 곳에 있다(쿨다운과 비용 산정이 같은 기준).
+- **유료 제공사(OpenRouter)가 폴백 체인의 맨 끝[4]** — 여전히 사실이나 **결함이 아니라 비용
+  정책**이다(무료를 먼저 쓴다). 문제는 유료 경로를 **의도적으로 검증할 수단이 없다**는 것 —
+  지금은 무료 키를 비우는 수밖에 없다. 유료 우선 스위치는 비용이 걸린 선택이라 사용자 결정 사항.
+- ~~**langgraph 체크포인트 역직렬화 경고**~~ → **해소(2026-07-29)**. `core/checkpoint_serde.py`
+  가 `state_models` 의 모델을 **타입 객체로** 허용목록에 등록하고, 런타임·휘발성 체크포인터가
+  모두 그것을 쓴다. 실측으로 확인한 진짜 위험은 "복구 불능"이 아니라 **plain dict 로 강등**이었다
+  — 값은 남는데 `getattr(state, "x", "")` 가 조용히 기본값을 준다. 그중 `enterprise_scope_id`
+  가 빈 문자열이 되면 **조직 범위 필터가 통째로 꺼진다**(D-016 무력화). 잠금:
+  `tests/test_checkpoint_serde.py`(대조군 포함 5건).
+- ~~`scripts/api_data_loader.py:14` 실행 안내가 `.venv/Scripts/...`~~ → **해소(2026-07-29)**.
+  두 형태가 PC 마다 다르다는 사실을 안내에 함께 적었다.
 - 저장소 비대화: `docs/reference/` 에 수십 MB 바이너리 다수(60MB PDF 포함) 커밋됨 — Git LFS 검토 여지
 - `langgraph.json` 경로(`core/agent_graph.py`) — LangGraph Studio 사용 시에만 문제
 - 스킬 제안 `prop_521c4962`(Tech_Lead) 승인/거부 결정 대기

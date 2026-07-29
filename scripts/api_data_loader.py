@@ -11,7 +11,9 @@ M1 저장소의 핵심(자재/설비/KPI 개별 골든레코드 → 별칭 감�
 - 동일 code 재-POST 는 개정(version+1)이라 멱등 재실행 가능. cleanup 으로 과거 오주입을 정리한다.
 
 전제: 백엔드가 http://localhost:8080 에서 실행 중이어야 한다(REST API 주입).
-실행: .venv/Scripts/python.exe scripts/api_data_loader.py
+실행: venv\Scripts\python.exe scripts\api_data_loader.py
+      (⚠️ PC 마다 가상환경 폴더명이 다르다 — 이 저장소의 표준은 `venv\`(점 없음)이고,
+       일부 PC 는 `.venv\` 를 쓴다. 없으면 반대쪽을 시도할 것.)
 """
 import os
 import re

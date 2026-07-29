@@ -485,7 +485,13 @@ def create_factory_graph():
     """동기 컴파일(MemorySaver) - LangGraph Studio/langgraph.json 및 단위 테스트용.
     런타임(오케스트레이터)은 재시작 내성을 위해 영속 체크포인터를 쓰는 get_runtime_app()을 사용한다."""
     workflow, interrupt_after = _build_workflow()
-    return workflow.compile(checkpointer=MemorySaver(), interrupt_after=interrupt_after)
+    # ★ [2026-07-29] 체크포인트 직렬화 허용목록을 여기서도 적용한다(휘발성이라도 동일 규칙).
+    #   두 saver 가 다른 직렬화 규칙을 쓰면 "스튜디오에서는 되는데 런타임에서는 상태가 빈" 식의
+    #   재현 불가 차이가 생긴다. 규칙은 `core/checkpoint_serde.py` 한 곳에만 둔다.
+    from core.checkpoint_serde import build_serializer
+    _serde = build_serializer()
+    _mem = MemorySaver(serde=_serde) if _serde else MemorySaver()
+    return workflow.compile(checkpointer=_mem, interrupt_after=interrupt_after)
 
 
 # 스튜디오/langgraph.json/테스트용 동기 인스턴스(휘발성). 런타임은 get_runtime_app() 사용.
@@ -506,13 +512,18 @@ _runtime_lock = asyncio.Lock()
 async def _get_runtime_saver():
     global _runtime_saver
     if _runtime_saver is None:
+        # ⚠️ 커스텀 상태 타입(state_models.*)을 등록하지 않으면 strict 직렬화에서 **복원 시
+        #   그 키가 통째로 사라진다**(예외 없이 조용히). 대기 중이던 HOTL 스프린트가 빈 상태로
+        #   재개되는 사고라, 체크포인터를 만들 때 반드시 함께 건다. 근거: core/checkpoint_serde.py
+        from core.checkpoint_serde import build_serializer
+        _serde = build_serializer()
         postgres_uri = os.environ.get("POSTGRES_URI")
         if postgres_uri:
             try:
                 import asyncpg
                 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
                 conn = await asyncpg.connect(postgres_uri)
-                _runtime_saver = AsyncPostgresSaver(conn)
+                _runtime_saver = AsyncPostgresSaver(conn, serde=_serde) if _serde else AsyncPostgresSaver(conn)
                 await _runtime_saver.setup()
                 print(" [Checkpointer] PostgreSQL 분산 DB 어댑터 연결 성공.")
             except ImportError:
@@ -523,7 +534,7 @@ async def _get_runtime_saver():
             import aiosqlite
             from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
             conn = await aiosqlite.connect(config.PIPELINE_DB_FILE, check_same_thread=False)
-            _runtime_saver = AsyncSqliteSaver(conn)
+            _runtime_saver = AsyncSqliteSaver(conn, serde=_serde) if _serde else AsyncSqliteSaver(conn)
             await _runtime_saver.setup()
             print("️ [Checkpointer] 기본 SQLite 어댑터 연결 완료.")
             
