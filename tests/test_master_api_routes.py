@@ -43,6 +43,9 @@ _LITERAL_ROUTES = [
     "/api/v1/workspace/promotions",
     "/api/v1/workspace/promotions/gate?release_id=x",  # `/{...}` 없지만 순서 회귀 방지
     "/api/v1/workspace/shares",
+    "/api/v1/readiness/checklist?release_id=x",
+    "/api/v1/readiness/impact?node_type=master&node_id=x",
+    "/api/v1/readiness/rollbacks",
 ]
 
 

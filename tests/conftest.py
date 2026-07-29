@@ -45,6 +45,11 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch):
         from core import workspace_promotion
         monkeypatch.setattr(workspace_promotion.workspace, "db_path",
                             str(tmp_path / "workspace.db"), raising=False)
+        # 운영 준비(체크리스트·롤백)도 같은 저장소를 쓴다 — 롤백 기록이 실제 이력에 섞이면
+        #   "이 릴리스가 내려간 적이 있나"의 답이 틀린다.
+        from core import release_readiness
+        monkeypatch.setattr(release_readiness.release_readiness, "db_path",
+                            str(tmp_path / "workspace.db"), raising=False)
     except Exception:
         pass
     try:

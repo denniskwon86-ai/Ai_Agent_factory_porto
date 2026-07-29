@@ -1442,6 +1442,20 @@ async def resimulate(project_id: str, req: ResimulateRequest,
 async def list_releases():
     """라이브러리에 보관된 결과물 목록(요약)."""
     os.makedirs(LIBRARY_DIR, exist_ok=True)
+
+    # ★ [M3] 승격 상태를 목록에 함께 준다. 이것이 없으면 승격이 별도 테이블에만 남아
+    #   **"이 앱이 전사 앱인가"를 라이브러리에서 알 수 없다** — 승격 게이트가 통과 기록만
+    #   만들고 아무것도 바꾸지 않는 상태가 된다(내가 M3 커밋에서 남긴 한계를 여기서 닫는다).
+    #   조회 실패가 목록을 죽이지 않게 감싼다 — 승격은 부가 정보이고 목록은 본체다.
+    _promo = {}
+    try:
+        from core.workspace_promotion import workspace
+        for pr in workspace.list_promotions():
+            if pr:
+                _promo[pr["release_id"]] = pr
+    except Exception as e:
+        print(f"⚠️ [library] 승격 상태 조회 실패(목록은 계속): {e}")
+
     items = []
     for rid in os.listdir(LIBRARY_DIR):
         rp = os.path.join(LIBRARY_DIR, rid, "release.json")
@@ -1449,13 +1463,20 @@ async def list_releases():
             try:
                 with open(rp, "r", encoding="utf-8") as f:
                     r = json.load(f)
+                _rid = r.get("release_id", rid)
+                pr = _promo.get(_rid)
                 items.append({
-                    "release_id": r.get("release_id", rid),
+                    "release_id": _rid,
                     "project_name": r.get("project_name", rid),
                     "template_id": r.get("template_id", "default"),
                     "deliverable_type": r.get("deliverable_type", "software_app"),
                     "created_at": r.get("created_at", ""),
                     "task_count": len(r.get("wbs_tasks", [])),
+                    # 승격되지 않은 것을 "dept" 로 두지 않는다 — 소유 부서와 승격 여부는
+                    #   다른 축이다. 신청조차 없으면 promotion_status 는 빈 값이다.
+                    "promotion_status": (pr or {}).get("status", ""),
+                    "is_enterprise": bool(pr and pr.get("status") == "promoted"),
+                    "promoted_at": (pr or {}).get("promoted_at", ""),
                 })
             except Exception:
                 continue
@@ -1472,9 +1493,21 @@ async def get_release(release_id: str):
         raise HTTPException(status_code=404, detail="결과물을 찾을 수 없습니다.")
     try:
         with open(rp, "r", encoding="utf-8") as f:
-            return {"status": "success", "data": json.load(f)}
+            data = json.load(f)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"결과물 읽기 오류: {str(e)}")
+    # ★ [M3] 승격 이력과 **승격 시점의 게이트 판정 스냅샷**을 함께 준다.
+    #   "지금 기준으로 다시 재면 통과할까"와 "그때 무엇을 근거로 승격했나"는 다른 질문이고,
+    #   후자에 답할 수 없으면 승인 이력이 근거가 되지 못한다.
+    try:
+        from core.workspace_promotion import workspace
+        pr = workspace.get_promotion(data.get("release_id", release_id))
+        data["promotion"] = pr
+        data["is_enterprise"] = bool(pr and pr.get("status") == "promoted")
+    except Exception as e:
+        data["promotion"] = None
+        data["promotion_error"] = str(e)
+    return {"status": "success", "data": data}
 
 
 @router.delete("/library/item/{release_id}")

@@ -244,6 +244,41 @@ def test_cannot_promote_without_request(env):
         ws.promote(REL, "kim", catalog=cat, contracts=dc, lineage=lin)
 
 
+# ── 반려(아직 안 올라감) vs 철회(올라갔다가 내려옴) ──────────────────────
+def test_reject_and_revoke_are_different_doors(env):
+    """★★ 한 함수로 뭉개면 둘 중 하나가 반드시 막힌다 — 실제로 롤백이 승격을 철회할 수
+    없었다(`reject_promotion` 이 `status<>'promoted'` 로 막아서)."""
+    ws, cat, dc, lin = env
+    ws.request_promotion(REL, DEPT, "kim", project_id="app_qc")
+    # 승격 전에는 철회할 수 없다 — 올라간 적이 없다
+    with pytest.raises(WorkspaceError) as e:
+        ws.revoke_promotion(REL, "lee", "사유")
+    assert "승격 상태가 아닙니다" in str(e.value)
+    assert "reject_promotion" in str(e.value), "올바른 문을 알려줘야 한다"
+
+
+def test_revoke_requires_actor_and_reason(env):
+    ws, *_ = env
+    with pytest.raises(WorkspaceError):
+        ws.revoke_promotion(REL, "", "사유")
+    with pytest.raises(WorkspaceError):
+        ws.revoke_promotion(REL, "lee", "")
+
+
+def test_revoke_keeps_promotion_history(env):
+    """★ 승격 이력을 지우지 않는다 — "전사에 열려 있던 기간"이 감사 대상이다."""
+    ws, cat, dc, lin = env
+    ws.request_promotion(REL, DEPT, "kim", project_id="app_qc")
+    ws.owner_approve(REL, "lee")
+    with ws._connect() as conn:
+        conn.execute("UPDATE release_promotions SET status='promoted', promoted_by='park', "
+                     "promoted_at='2026-07-29T00:00:00+00:00' WHERE release_id=?", (REL,))
+    out = ws.revoke_promotion(REL, "choi", "결과 오류")
+    assert out["status"] == "revoked"
+    assert out["promoted_by"] == "park" and out["promoted_at"], "승격 이력이 남아야 한다"
+    assert "철회 choi" in out["rejected_reason"]
+
+
 def test_full_pass_promotes_and_snapshots_the_gate(env, monkeypatch, tmp_path):
     """★ 승격 시점의 게이트 판정을 **스냅샷**으로 남긴다 — 나중에 기준이 바뀌어도
     '그때 무엇을 근거로 승격했나'가 재현돼야 한다."""

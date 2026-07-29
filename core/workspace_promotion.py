@@ -38,7 +38,10 @@ from typing import Any, Dict, List, Optional
 _DB_PATH = os.path.join("data", "workspace.db")
 
 SHARE_MODES = ("read", "fork")          # 읽기 공유 / 복제 허용
-PROMOTION_STATUS = ("draft", "requested", "approved", "rejected", "promoted")
+PROMOTION_STATUS = ("draft", "requested", "approved", "rejected", "promoted",
+                    # 철회 — 승격됐다가 내려온 상태. 반려("아직 안 올라감")와
+                    #   구분한다. 승격 이력은 남고 상태만 바뀐다.
+                    "revoked")
 #: 전사 승격에 허용되지 않는 민감도. 전사에 열면 되돌릴 수 없다.
 _BLOCKED_FOR_ENTERPRISE = ("confidential", "restricted")
 
@@ -431,6 +434,35 @@ class WorkspacePromotion:
                 "updated_at=? WHERE release_id=? AND target_scope=? AND status<>'promoted'",
                     (f"{rejected_by}: {reason}", now, release_id, target_scope)).rowcount:
                 raise WorkspaceError("반려할 승격 신청이 없습니다(또는 이미 승격됨).")
+        return self.get_promotion(release_id, target_scope)
+
+    def revoke_promotion(self, release_id: str, revoked_by: str, reason: str,
+                         target_scope: str = "enterprise") -> dict:
+        """**이미 승격된 것을 내린다**(롤백이 쓰는 문).
+
+        ⚠️ `reject_promotion` 과 다른 행위다. 반려는 *아직 승격되지 않은 신청*을 거절하는 것이고
+          (그래서 `status<>'promoted'` 로 막는다), 철회는 *이미 전사에 열린 것*을 닫는 것이다.
+          한 함수로 뭉개면 둘 중 하나가 반드시 막힌다 — 실제로 롤백이 승격을 철회할 수 없었다.
+        ⚠️ 승격 이력(`promoted_by`·`promoted_at`·`gate_snapshot`)은 **지우지 않는다.**
+          "전사에 열려 있던 기간"이 감사 대상이고, 지우면 그 사실이 사라진다."""
+        if not (revoked_by or "").strip():
+            raise WorkspaceError("revoked_by 는 필수입니다.")
+        if not (reason or "").strip():
+            raise WorkspaceError(
+                "reason 은 필수입니다 — 사유 없는 철회는 같은 문제를 반복하게 만듭니다.")
+        p = self.get_promotion(release_id, target_scope)
+        if not p:
+            raise WorkspaceError(f"승격 기록이 없습니다: {release_id}")
+        if p["status"] != "promoted":
+            raise WorkspaceError(
+                f"승격 상태가 아닙니다(현재: {p['status']}). 아직 승격되지 않은 신청은 "
+                f"`reject_promotion` 으로 반려하십시오.")
+        now = _now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE release_promotions SET status='revoked', "
+                "rejected_reason=?, updated_at=? WHERE release_id=? AND target_scope=?",
+                (f"철회 {revoked_by}: {reason}", now, release_id, target_scope))
         return self.get_promotion(release_id, target_scope)
 
     def promote(self, release_id: str, promoted_by: str, target_scope: str = "enterprise",
