@@ -10,6 +10,28 @@
 
 ## 2026-07-29 (오후)
 
+### [D-015] 실패 원인은 결정론적 근거가 있을 때만 분류한다 — 미분류는 유지한다
+- **결정**: §10.3 `quality_outcomes` 의 `root_cause_classification`(§8.3 6분류)은 **자동 판정
+  근거가 있는 경우에만** 채운다 — 생성 실패 `kind`(게이트웨이가 이미 판정), 빌드 로그 패턴,
+  심판 인프라 오류. **점수 미달(REWORK/ROLLBACK)은 자동 분류하지 않고 `unclassified` 로 남긴다.**
+  대신 어느 기준이 미달이었는지(`failed_checks`)를 사실 그대로 남기고, 사람이 사후에
+  `POST /telemetry/quality/classify` 로 분류한다(식별 필수, 원본 줄은 고치지 않고 이벤트 추가).
+  모든 분류에는 근거 규칙 id(`root_cause_rule`)를 함께 적는다.
+- **이유**: 점수 미달의 원인은 채점기가 **알 수 없는 정보**다. 그럴듯한 기본값(예: 전부
+  `model_quality`)을 넣으면 통계는 채워지지만, '요구사항이 모호해서 미달'인 건까지 모델 탓이 되어
+  **모델 교체·프롬프트 수정이라는 틀린 처방**을 유도한다. 이 프로젝트엔 오귀속이 실제 비용을
+  만든 이력이 있다 — 공급자 타임아웃 3건이 '빌드 실패'로 분류돼 개발자 재작업 예산을 태웠다.
+  **오분류의 비용이 미분류의 비용보다 크다**는 것이 그 사고의 교훈이다.
+  같은 이유로 사람 판정도 3칸(`accepted`/`revision_requested`/`no_human_decision`)으로 두고,
+  묻지 않은 것을 승인으로 합치지 않는다(`unverifiable` vs `kept` 와 동일한 원칙).
+- **영향**: 화면에 `미분류` 칸이 상시 보인다(결손의 가시화). 미분류 비율이 높게 나오는 것이
+  정상 초기 상태이며, 이를 줄이는 것은 자동 분류 규칙 추가 또는 사람의 사후 분류다.
+  실패 0건일 때 `unclassified_ratio` 는 0.0 이 아니라 **null** 이다.
+- **되돌림 비용**: 낮음 — 규칙 추가는 `_BUILD_RULES` 테이블에 줄을 더하는 일이고, 과거 로그는
+  append-only 라 재해석이 가능하다.
+- **근거**: `core/quality_telemetry.py` · `tests/test_quality_outcomes.py`(30건) ·
+  `tests/test_quality_outcomes_wiring.py`(6건) · 명세서 §8.3 / §10.3
+
 ### [D-013] 카탈로그·용어사전·계약의 조직 범위는 바인딩 테이블이 아니라 ECM-lite 3키다
 - **결정**: `data_assets`·`business_terms`·`data_contracts` 에 `tenant_id`·
   `enterprise_scope_id`·`entity_mode` 3컬럼을 둔다. `master_scope_bindings` 같은 별도 1:N

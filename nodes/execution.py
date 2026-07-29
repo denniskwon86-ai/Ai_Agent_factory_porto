@@ -351,13 +351,22 @@ def _recovery_swarm_size(is_rework: bool, retry: int) -> int:
     return 2 if retry >= 1 else 1
 
 
-def _generation_failure_update(gf: GenerationFailure, node: str) -> Dict[str, Any]:
+def _generation_failure_update(gf: GenerationFailure, node: str,
+                               _gf_state: Any = None) -> Dict[str, Any]:
     """공급자/출력계약 실패를 '빌드 실패'가 아닌 종료 상태로 승격한다.
 
     ⚠️ 핵심: `developer_retry_count` 를 **증가시키지 않는다.** 이 실패는 생성된 코드의
       결함이 아니므로, 개발자가 코드를 고칠 기회를 여기서 소모하면 안 된다.
       실측(test_a1_v4): 228.6s·420.0s·77.0s 공급자 타임아웃 3건이 그 예산을 먹었다."""
     print(f"⛔ [{node}] 생성 실패({gf.kind}) — 코드 결함이 아니므로 재작업 예산을 소모하지 않고 종결합니다.")
+    # [§10.3/§8.3] 이 실패의 원인은 이미 게이트웨이가 kind 로 판정해 뒀다 — 그대로 옮긴다.
+    #   (여기서 다시 추론하면 같은 사실에 두 개의 답이 생긴다.)
+    try:
+        from core import quality_telemetry as _qt
+        _qt.record_failure(_gf_state, gate_name=node, artifact_type="CODE",
+                           kind=gf.kind, detail=str(gf)[:400])
+    except Exception:
+        pass
     return {
         "terminal_status": gf.terminal_status,
         "terminal_reason": f"[{node}] {gf.kind}: {str(gf)[:400]}",
@@ -508,7 +517,7 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
                                         num_swarm=_recovery_swarm_size(_is_rework, _retry),
                                         cacheable=not _is_rework)
     except GenerationFailure as gf:
-        return _generation_failure_update(gf, "Frontend")
+        return _generation_failure_update(gf, "Frontend", state_obj)
     return {"frontend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_developer_be(state: Any) -> Dict[str, Any]:
@@ -538,7 +547,7 @@ async def run_developer_be(state: Any) -> Dict[str, Any]:
                                         num_swarm=_recovery_swarm_size(_is_rework, _retry),
                                         cacheable=not _is_rework)
     except GenerationFailure as gf:
-        return _generation_failure_update(gf, "Backend")
+        return _generation_failure_update(gf, "Backend", state_obj)
     return {"backend_code_summary": _safe_str(output), "build_error_log": "", "failed_node": ""}
 
 async def run_terminal_handler(state: Any) -> Dict[str, Any]:
@@ -627,6 +636,26 @@ async def run_terminal_handler(state: Any) -> Dict[str, Any]:
     }
 
 
+def _build_failed(state_obj: ProjectState, node: str, error_log: str,
+                  current_retry: int) -> Dict[str, Any]:
+    """빌드 실패 상태 업데이트 + §10.3 계측을 **한 곳에서** 만든다.
+
+    ⚠️ 이 함수를 만든 이유: 빌드 실패 반환지점이 6곳으로 흩어져 있어, 계측을 각각 붙이면
+      한 곳을 빠뜨렸을 때 그 실패 유형만 통계에서 조용히 사라진다(이 프로젝트에서 반복된
+      '배선 누락' 결함 유형). 상태 갱신과 계측을 같은 함수에 묶어 빠질 수 없게 한다."""
+    try:
+        from core import quality_telemetry as _qt
+        _qt.record_failure(state_obj, gate_name="BUILD", artifact_type="CODE",
+                           error_log=error_log or "", detail=error_log or "")
+    except Exception:
+        pass
+    out: Dict[str, Any] = {"build_status": "failed", "failed_node": node,
+                           "developer_retry_count": current_retry + 1}
+    if error_log:
+        out["build_error_log"] = error_log
+    return out
+
+
 async def run_code_builder(state: Any) -> Dict[str, Any]:
     print("️ [Headless 빌더] 파일 병합 및 원자적 디스크 저장 가동...")
     state_obj = ProjectState.model_validate(state)
@@ -671,18 +700,21 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
     #    명시적 실패 처리. 이를 빼면 FE 유실 + BE 성공 → success 커밋 → 다음 태스크에 FE 영구 손실.
     if has_fe and not fe_files:
         print(" [무결성] Frontend 요구됐으나 추출 파일 0개 → 빌드 실패(재작업).")
-        return {"build_status": "failed", "failed_node": "Frontend",
-                "build_error_log": "프론트엔드 산출물이 비어 있습니다(출력 절단/파싱 실패 의심). 기존 코드 전부 + 신규 기능을 합쳐 전체를 다시 생성하십시오.",
-                "developer_retry_count": current_retry + 1}
+        return _build_failed(state_obj, "Frontend",
+                             "프론트엔드 산출물이 비어 있습니다(출력 절단/파싱 실패 의심). 기존 코드 전부 + 신규 기능을 합쳐 전체를 다시 생성하십시오.",
+                             current_retry)
     if has_be and not be_files:
         print(" [무결성] Backend 요구됐으나 추출 파일 0개 → 빌드 실패(재작업).")
-        return {"build_status": "failed", "failed_node": "Backend",
-                "build_error_log": "백엔드 산출물이 비어 있습니다(출력 절단/파싱 실패 의심). 기존 코드 전부 + 신규 기능을 합쳐 전체를 다시 생성하십시오.",
-                "developer_retry_count": current_retry + 1}
+        return _build_failed(state_obj, "Backend",
+                             "백엔드 산출물이 비어 있습니다(출력 절단/파싱 실패 의심). 기존 코드 전부 + 신규 기능을 합쳐 전체를 다시 생성하십시오.",
+                             current_retry)
 
     if not all_files_to_write:
         if not has_coding_agent: return {"build_status": "success", "failed_node": "", "developer_retry_count": 0}
-        else: return {"build_status": "failed", "failed_node": ("Frontend" if has_fe else "Backend"), "developer_retry_count": current_retry + 1}
+        else:
+            return _build_failed(state_obj, ("Frontend" if has_fe else "Backend"),
+                                 "코딩 에이전트가 요구됐으나 기록할 파일이 하나도 추출되지 않았습니다(출력 절단/파싱 실패 의심).",
+                                 current_retry)
 
     # 파일별 개별 검사 - 전체를 이어붙여 검사하면 뒤 파일의 `from __future__ import` 가
     # "파일 선두여야 한다" SyntaxError 를 내는 등 위양성 빌드 실패가 난다(_swarm_execution 과 동일 패턴)
@@ -691,14 +723,14 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
         if fp.endswith(".py") and f.get("code", ""):
             is_be_valid, be_msg = LocalSyntaxChecker.check_python_syntax(f.get("code", ""))
             if not is_be_valid:
-                return {"build_status": "failed", "build_error_log": f"[{fp}] {be_msg}", "failed_node": "Backend", "developer_retry_count": current_retry + 1}
+                return _build_failed(state_obj, "Backend", f"[{fp}] {be_msg}", current_retry)
 
     for f in fe_files:
         fp = f.get("file_path", "")
         if fp.endswith((".tsx", ".ts", ".js", ".jsx")) and f.get("code", ""):
             is_fe_valid, fe_msg = LocalSyntaxChecker.check_javascript_syntax(f.get("code", ""))
             if not is_fe_valid:
-                return {"build_status": "failed", "build_error_log": f"[{fp}] {fe_msg}", "failed_node": "Frontend", "developer_retry_count": current_retry + 1}
+                return _build_failed(state_obj, "Frontend", f"[{fp}] {fe_msg}", current_retry)
 
     builder = CodeBuilder(workspace_root=state_obj.workspace_root)
     state_dict = state_obj.model_dump()
@@ -719,7 +751,11 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
     
     if updated_state_dict.get("build_status") == "failed":
         if not has_coding_agent: return {"build_status": "success", "developer_retry_count": 0}
-        else: return {"build_status": "failed", "failed_node": ("Frontend" if has_fe else "Backend"), "developer_retry_count": current_retry + 1}
+        else:
+            # 빌더가 남긴 오류를 그대로 계측에 넘긴다(없으면 빈 문자열 → 미분류. 지어내지 않는다).
+            return _build_failed(state_obj, ("Frontend" if has_fe else "Backend"),
+                                 str(updated_state_dict.get("build_error_log", "") or ""),
+                                 current_retry)
 
     # 🔗 [추적성 엔진] WBS 목표/스코프에서 FR-ID 추출 후 산출물 파일들과 맵핑 저장
     # 추출은 공용 추출기(traceability_manager.extract_ids)로 단일화 — 표기 정규화(FR-1→FR-001)

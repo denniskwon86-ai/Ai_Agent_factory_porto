@@ -1,10 +1,46 @@
 """core/context_engine.py — 증분 codegen 전체파일 주입 검증.
 소유 파일(full_file_exts)은 절단 없이 전체 주입되어 멀티태스크 기능 누락(회귀)을 막아야 한다.
 full_file_exts 미지정 시에는 종전과 동일하게 per_file 절단되어야 한다(비개발자 단계 회귀 방지)."""
+import pytest
+
 from state_models import ProjectState
 from core.context_engine import ContextEngine
 
 SENTINEL = "ZZZ_END_OF_FILE_SENTINEL_ZZZ"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_external_context(monkeypatch):
+    """★ [2026-07-29] 컨텍스트의 **외부 입력 세 곳을 끊는다** — 기준정보 DB·지식팩·기업 프로필.
+
+    ⚠️ 왜 필요한가(실측): 이 파일의 테스트들은 실제 `data/master/master.db` 를 읽고 있었다.
+      개발 DB 가 비어 있으면 기준정보 블록이 0자가 되어 **예산을 삼키는 회귀를 못 잡고**,
+      반대로 DB 가 커지면 무관한 이유로 파일 주입 검증이 깨진다. 어느 쪽이든 "테스트는 통과했는데
+      실제로는 깨져 있는" 상태를 만든다(2026-07-29 결함 4의 부수 발견, 인계 문서 §4-2 2-1).
+
+    이 파일이 검증하려는 것은 **파일·기술명세 주입 규칙**이지 기준정보 내용이 아니다.
+    기준정보가 예산을 삼키는 회귀는 아래 `test_master_block_cannot_starve_the_rest` 가
+    거대한 블록을 **직접 주입해** 따로 잠근다(개발 DB 상태와 무관하게)."""
+    import core.context_engine as ce
+
+    class _NoMaster:
+        def get_master_context(self, state, max_chars=-1):
+            return ""
+
+    class _NoKnowledge:
+        def get_relevant_context(self, state):
+            return ""
+
+        def get_grounding_context(self, state):
+            return ""
+
+    class _NoProfile:
+        def get_company_profile(self):
+            return {}
+
+    monkeypatch.setattr(ce, "master_data", _NoMaster())
+    monkeypatch.setattr(ce, "knowledge_base", _NoKnowledge())
+    monkeypatch.setattr(ce, "persona_learner", _NoProfile())
 
 
 def _make_state(tmp_path):

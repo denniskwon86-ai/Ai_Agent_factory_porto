@@ -20,6 +20,35 @@
 
 ---
 
+## 🧭 2026-07-29 (저녁) — 품질 결과 텔레메트리 (P0 잔여분 종결)
+
+> §10.3 이 규정한 두 축 중 `llm_calls` 만 있고 **`quality_outcomes` 는 비어 있었다.**
+> "무엇을 얼마에 불렀나"는 알았지만 **"그래서 통과했는가, 왜 실패했는가, 사람이 받아들였는가"**
+> 는 아무 데도 남지 않았다 — §8.3 의 "재시도 횟수만 늘리지 않는다"도 이 데이터 없이는
+> 근거 없는 조정이다.
+>
+> - **신규**: `core/quality_telemetry.py`(append-only JSONL, **LLM 0콜**) ·
+>   `/api/v1/telemetry/quality/{summary,raw,unclassified,classify}` ·
+>   운영 계기판 「품질 결과」 탭(`QualityOutcomesView.tsx` + `lib/qualityApi.ts`)
+> - **훅 4곳**: 게이트 판정(`scoring.score_stage` — 유일한 채점 지점) · 빌드 실패
+>   (`_build_failed` 로 6개 반환지점 단일화) · 생성 실패(`GenerationFailure.kind` 이식) ·
+>   HOTL 사람 판정(`resume_hotl`)
+> - **핵심 판단(D-015)**: **점수 미달은 자동 분류하지 않는다.** 결정론적 근거가 있는 것만
+>   §8.3 6분류로 채우고 나머지는 `unclassified` 로 남긴 뒤 사람이 사후 분류한다.
+>   오분류의 비용이 미분류보다 크다 — 공급자 타임아웃 3건이 '빌드 실패'로 분류돼 개발자
+>   재작업 예산을 태운 실측 이력이 근거다.
+> - **함께 고친 것**: 빌드 실패 경로에서 빌더가 남긴 `build_error_log` 가 **버려지고 있었다**.
+>   자가복구 재시도가 원인을 모른 채 같은 프롬프트를 다시 돌리는 상태였다(자가복구 P1 의
+>   전제가 깨져 있었음).
+> - **§4-2 2-1 동시 해소**: `test_context_full_files.py` 가 실제 `data/master/master.db` 를
+>   읽어 개발 DB 상태에 따라 회귀를 놓치던 문제 — 외부 입력 3곳(기준정보·지식팩·기업 프로필)을
+>   fixture 로 차단.
+>
+> 테스트 36건 신규(품질 30 + 배선 6). ⚠️ **브라우저 실측은 미완** — 다른 팀원이 E2E 테스트
+> 중이라 8080 을 건드리지 않았다(§3-1). 상세·검토 요청: `.agents/TEAM_BOARD.md` `QUALITY-TEL-01`.
+
+---
+
 ## 🧭 2026-07-29 — 기준정보 시드·주입 경로 정상화 (최신 세션)
 
 > ### 👉 **[docs/handoff_2026-07-29_master_seed_and_injection.md](docs/handoff_2026-07-29_master_seed_and_injection.md)**

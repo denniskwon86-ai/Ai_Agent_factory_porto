@@ -18,6 +18,24 @@ class JudgeUnavailableError(Exception):
     pass
 
 
+def _judge_unavailable(state, stage_key: str, message: str) -> JudgeUnavailableError:
+    """심판 불능을 **계측한 뒤** 예외 객체를 만들어 돌려준다(호출자가 raise 한다).
+
+    ⚠️ 이것은 §8.3 의 `외부 환경` 실패다 — 산출물의 결함이 아니다. 계측에서 이 둘이 섞이면
+      "게이트 실패율"이 공급자 장애로 부풀고, 그 숫자를 보고 프롬프트나 모델을 손대는
+      **틀린 처방**으로 이어진다."""
+    try:
+        from core import quality_telemetry as _qt
+        _qt.record_gate(state, gate_name=stage_key, artifact_type=stage_key,
+                        verdict="FAIL",
+                        root_cause=_qt.CAUSE_EXTERNAL_ENV,
+                        root_cause_rule="judge_unavailable",
+                        rework_reason=message[:600])
+    except Exception:
+        pass
+    return JudgeUnavailableError(message)
+
+
 def _load_skill(role_name: str) -> str:
     path = f"skills/{role_name}.md"
     if os.path.exists(path):
@@ -148,7 +166,8 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
         # [fail-loud] 심판 호출 실패(인프라 오류)는 산출물 결함이 아니다 — 예외로 표면화한다.
         from core.llm_gateway import is_llm_error_text
         if is_llm_error_text(raw):
-            raise JudgeUnavailableError(f"[{stage_key}] 심판 LLM 호출 실패(인프라 오류) — 채점 불가: {str(raw)[:200]}")
+            raise _judge_unavailable(state, stage_key,
+                                     f"[{stage_key}] 심판 LLM 호출 실패(인프라 오류) — 채점 불가: {str(raw)[:200]}")
 
         jdata = _parse_json(raw) or {}
         scores = jdata.get("scores", {}) or {}
@@ -161,11 +180,22 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
             raw = await gateway.aexecute(state, prompt, is_heavy=True, output_mode="json", light=True,
                                          cacheable=False)  # 재시도 채점도 캐시 금지(#19 계열)
             if is_llm_error_text(raw):
-                raise JudgeUnavailableError(f"[{stage_key}] 심판 재시도 실패(인프라 오류): {str(raw)[:200]}")
+                raise _judge_unavailable(state, stage_key,
+                                         f"[{stage_key}] 심판 재시도 실패(인프라 오류): {str(raw)[:200]}")
             jdata = _parse_json(raw) or {}
             scores = jdata.get("scores", {}) or {}
             rationale = str(jdata.get("rationale", "") or "")
             if not scores:
+                # ⚠️ 이쪽은 인프라가 아니라 **출력 계약** 실패다(호출은 됐는데 형식이 안 맞았다).
+                #   같은 예외 타입이라도 원인이 다르므로 분류를 분리한다.
+                try:
+                    from core import quality_telemetry as _qt
+                    _qt.record_gate(state, gate_name=stage_key, artifact_type=stage_key,
+                                    verdict="FAIL", root_cause=_qt.CAUSE_OUTPUT_CONTRACT,
+                                    root_cause_rule="judge_json_parse_failed_twice",
+                                    rework_reason="심판 채점 JSON 2회 연속 파싱 실패")
+                except Exception:
+                    pass
                 raise JudgeUnavailableError(f"[{stage_key}] 심판 채점 JSON 2회 연속 파싱 실패 — 판정 불가.")
         for c in llm_checks:
             try:
@@ -190,6 +220,25 @@ async def score_stage(state, stage_key: str, extra_context: str = "") -> dict:
         verdict = "REWORK"
     else:
         verdict = "PASS"
+
+    # ★ [2026-07-29 / 명세서 §10.3 `quality_outcomes`] 게이트 판정을 계측한다. **LLM 0콜.**
+    #   여기가 유일한 채점 지점이므로(기획 단계·리뷰·QA·수용검수 전부 이 함수를 탄다) 다른 곳에
+    #   같은 판정을 또 기록하면 두 통계가 어긋난다 — 계측도 SSOT 를 지킨다.
+    #   ⚠️ 점수 미달의 **원인은 여기서 분류하지 않는다**(unclassified). 어느 기준이 미달인지는
+    #     사실이지만 "왜 미달인지"는 이 함수가 알 수 있는 정보가 아니다. 지어내면 §8.3 통계가
+    #     근거가 아니라 창작이 된다 — 사람이 사후 분류할 수 있게 outcome_id 만 남긴다.
+    try:
+        from core import quality_telemetry as _qt
+        _failed = [k for k, v in per_check.items()
+                   if v < 0.5 and k not in advisory_ids]
+        _qt.record_gate(
+            state, gate_name=stage_key, artifact_type=stage_key, verdict=verdict,
+            score=round(score, 3), threshold=threshold,
+            blocking_fails=blocking_fails, failed_checks=_failed,
+            rework_reason=("미달 기준: " + ", ".join(_failed)) if _failed else "",
+        )
+    except Exception:
+        pass   # 계측 실패가 채점을 막지 않는다
 
     # 판단 근거(rationale): LLM 총평이 없으면(결정론 전용 단계) 코드 검사 결과로 한 줄 생성
     if not rationale:

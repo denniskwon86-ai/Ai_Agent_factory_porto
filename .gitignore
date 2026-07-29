@@ -62,6 +62,8 @@ data/knowledge_packs/
 
 # LLM 호출 텔레메트리(런타임 계측 데이터 — 커밋 금지)
 data/llm_call_log.jsonl
+# [§10.3] 품질 결과 텔레메트리(게이트 판정·실패 원인·사람 수용 — 런타임 계측)
+data/quality_outcomes.jsonl
 
 # [M1] 기준정보 저장소 런타임 DB (골든 레코드 — 런타임 데이터, 커밋 금지)
 data/master/

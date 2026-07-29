@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../store/useFactoryStore';
+import { QualityOutcomesView } from './QualityOutcomesView';
 
 // 운영 계기판 (Phase 4) — LLM 호출 텔레메트리 뷰어.
 // 1순위 축은 '실제 사용 모델(used)' — 이 산출물을 어느 제공사/모델이 만들었나 = 모델 불변성 실측.
@@ -11,6 +12,9 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
   const [project, setProject] = useState('');   // '' = 전역
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  // §10.3 은 텔레메트리를 `llm_calls` 와 `quality_outcomes` 두 축으로 규정한다. 같은 계기판에
+  // 두되 **한 화면에 섞지 않는다** — "얼마 썼나"와 "통과했나"는 읽는 목적이 다르다.
+  const [tab, setTab] = useState<'llm' | 'quality'>('llm');
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/v1/telemetry/projects`)
@@ -63,7 +67,15 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
         <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900 rounded-t-xl">
           <div className="flex items-center gap-3">
             <span className="text-xl">📊</span>
-            <h2 className="text-lg font-bold">운영 계기판 (LLM 텔레메트리)</h2>
+            <h2 className="text-lg font-bold">운영 계기판</h2>
+            <div className="flex rounded overflow-hidden border border-gray-700 text-xs">
+              {([['llm', 'LLM 호출'], ['quality', '품질 결과']] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setTab(k)}
+                        className={`px-3 py-1 ${tab === k ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <select
               value={project} onChange={e => setProject(e.target.value)}
               className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200"
@@ -80,7 +92,9 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="p-6 overflow-y-auto flex-1">
-          {loading ? (
+          {tab === 'quality' ? (
+            <QualityOutcomesView project={project} />
+          ) : loading ? (
             <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" /></div>
           ) : !data || t.calls === 0 ? (
             <div className="text-center py-16 text-gray-400">

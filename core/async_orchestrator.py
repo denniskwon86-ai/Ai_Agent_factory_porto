@@ -278,6 +278,19 @@ class AsyncFactoryOrchestrator:
                 persona_learner.record_interaction("hotl_feedback", feedback, project_id)
             else:
                 await langgraph_engine.aupdate_state(config, {"needs_revision": False})
+
+            # ★ [2026-07-29 / §10.3 `human_acceptance`] 사람의 수용 판정을 계측한다.
+            #   HOTL 재개는 이 시스템에서 **사람이 산출물에 대해 내리는 유일한 명시적 판정**이다
+            #   (피드백 있음 = 반려·수정요구 / 없음 = 그대로 승인). 이것을 남기지 않으면
+            #   "게이트는 통과했는데 사람은 매번 고쳐 보냈다" 같은 실제 품질 신호가 사라진다.
+            #   ⚠️ 판정이 **없는** 게이트를 승인으로 적지 않기 위해, 기록은 오직 여기서만 만든다.
+            try:
+                from core import quality_telemetry as _qt
+                _qt.record_human_decision(
+                    _qt.StateRef(current_state, workspace_root=workspace_root, task_id=task_id),
+                    gate_name="HOTL", accepted=not bool(feedback), feedback=feedback or "")
+            except Exception:
+                pass
         except Exception:
             return False
 

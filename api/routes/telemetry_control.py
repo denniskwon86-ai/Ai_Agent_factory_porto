@@ -11,7 +11,8 @@ data/llm_call_log.jsonl (게이트웨이가 호출마다 append)을 읽어 프�
 import os
 import json
 from typing import Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 # ★ [2026-07-28] Phase 4 의 단기 조치(전사 열람 권한자 전용 게이트)를 해제했다.
 #   그때는 로그 키가 `project_name` 뿐이어서 **부서로 매핑할 수단이 없어** 부서별 필터를 만들 수
@@ -198,6 +199,85 @@ async def telemetry_raw(project: str = "", limit: int = 200,
     recs = scoped["records"]
     return {"status": "success", "data": recs[-max(1, min(limit, 2000)):],
             "permission": _scope_meta(scoped)}
+
+
+# ── 품질 결과(§10.3 `quality_outcomes` / §8.3 실패 원인) ─────────────────────
+# ⚠️ 왜 `llm_calls` 와 같은 라우터에 두는가: 두 로그는 같은 식별 규약(project/project_id/
+#   owner_dept_id)을 쓰고 **같은 부서 스코프 규칙**을 타야 한다. 권한 판정을 두 곳에 두면
+#   한쪽만 고쳐졌을 때 조용히 새는 경로가 생긴다(이 프로젝트에서 실제로 겪은 유형).
+
+@router.get("/quality/summary")
+async def quality_summary(project: str = "", p: Principal = Depends(current_principal)):
+    """게이트별 통과/실패·재작업 횟수·실패 원인 분포·사람 수용 판정 집계.
+
+    ⚠️ 응답의 `unclassified_failures` 와 `human_acceptance.no_human_decision` 은
+      **좋은 소식이 아니라 결손**이다 — 각각 "원인을 아직 모른다", "사람이 판단하지 않았다"이며
+      통과·승인 쪽에 합산하면 안 된다(응답 `note` 에 같은 문구를 실어 보낸다)."""
+    from core import quality_telemetry as qt
+    events = qt.read_events(project)
+    scoped = apply_scope(events, p)
+    outcomes = qt.resolve_outcomes(scoped["records"])
+    data = qt.aggregate(outcomes)
+    data["project"] = project or "(전역)"
+    data["permission"] = _scope_meta(scoped)
+    return {"status": "success", "data": data}
+
+
+@router.get("/quality/raw")
+async def quality_raw(project: str = "", limit: int = 200,
+                      p: Principal = Depends(current_principal)):
+    """접합된 품질 결과 레코드(§10.3 한 줄 형태). 최근 것부터."""
+    from core import quality_telemetry as qt
+    scoped = apply_scope(qt.read_events(project), p)
+    outcomes = qt.resolve_outcomes(scoped["records"])
+    outcomes.sort(key=lambda r: r.get("ts") or "", reverse=True)
+    return {"status": "success", "data": outcomes[:max(1, min(limit, 2000))],
+            "permission": _scope_meta(scoped)}
+
+
+@router.get("/quality/unclassified")
+async def quality_unclassified(project: str = "", limit: int = 50,
+                               p: Principal = Depends(current_principal)):
+    """원인이 분류되지 않은 실패 목록 — 사람이 분류해야 할 작업 큐."""
+    from core import quality_telemetry as qt
+    scoped = apply_scope(qt.read_events(project), p)
+    outcomes = qt.resolve_outcomes(scoped["records"])
+    items = qt.unclassified_failures(outcomes, limit=max(1, min(limit, 500)))
+    return {"status": "success", "data": items,
+            "causes": list(qt.CAUSES),
+            "permission": _scope_meta(scoped)}
+
+
+class QualityClassifyRequest(BaseModel):
+    outcome_id: str
+    root_cause: str
+    note: str = ""
+
+
+@router.post("/quality/classify")
+async def quality_classify(req: QualityClassifyRequest,
+                           p: Principal = Depends(current_principal)):
+    """사람이 미분류 실패에 §8.3 원인을 지정한다.
+
+    **식별 없는 분류는 받지 않는다**(401). 원인 통계는 이후 모델·프롬프트·테스트 투자 방향을
+    바꾸는 근거가 되므로, 누가 그렇게 판단했는지가 값과 함께 남아야 한다 — 외부 인텔리전스
+    원천 승인에 승인자 식별을 요구한 것과 같은 이유다."""
+    from core import quality_telemetry as qt
+    if not p.user_id:
+        raise HTTPException(status_code=401, detail="분류자 식별 정보가 없습니다.")
+    if req.root_cause not in qt.ASSIGNABLE_CAUSES:
+        raise HTTPException(status_code=400,
+                            detail=f"허용되지 않은 원인 값입니다. 가능: {', '.join(qt.ASSIGNABLE_CAUSES)}")
+    # ★ 볼 수 없는 부서의 실패를 분류할 수 없다. 읽기 스코프를 그대로 쓰기 판정에 재사용한다
+    #   (조회는 되는데 쓰기만 열려 있으면 스코프가 두 벌이 되어 어긋난다).
+    visible = apply_scope(qt.read_events(), p)["records"]
+    if not any(e.get("event") == "gate" and e.get("outcome_id") == req.outcome_id for e in visible):
+        raise HTTPException(status_code=404, detail="해당 품질 결과를 찾을 수 없거나 볼 권한이 없습니다.")
+    ok = qt.record_classification(req.outcome_id, req.root_cause, actor=p.user_id, note=req.note)
+    if not ok:
+        raise HTTPException(status_code=400, detail="분류를 기록하지 못했습니다(outcome_id 확인).")
+    return {"status": "success", "data": {"outcome_id": req.outcome_id,
+                                          "root_cause": req.root_cause, "actor": p.user_id}}
 
 
 @router.get("/projects")
