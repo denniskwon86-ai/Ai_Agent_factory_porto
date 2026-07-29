@@ -71,6 +71,8 @@ data/master/
 data/external_intelligence.db*
 # [§7.3] Shadow Mode 런타임 저장소
 data/shadow_runs.db*
+# [§9 M3] 부서 워크스페이스(공유·복제·승격) 런타임 저장소
+data/workspace.db*
 data/external_raw/
 
 # 골든 벤치마크 스코어카드/사람점수 (런타임 계측). 골든 기준(golden/)은 A-1 완주 후 커밋 여부 재결정.
