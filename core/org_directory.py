@@ -520,8 +520,19 @@ class OrgDirectory:
             return scope
 
         u = self.get_user(user_id) if user_id else None
+        # ★★ [2026-07-30 실측 결함] **폐지된 사용자를 권한 판정에서 걸러야 한다.**
+        #   `list_users()` 는 `status='active'` 를 거르는데 `get_user()` 는 거르지 않는다.
+        #   그래서 폐지한 계정이 **권한을 그대로 유지**했다 — 실측: 테스트 계정 `admin` 을
+        #   폐지한 뒤에도 `resolve_scope('admin')` 이 `unrestricted=True`(전권)를 돌려줬다.
+        #   폐지가 권한을 제거하지 않으면 그것은 폐지가 아니고, 화면 목록에서만 사라져 **더
+        #   위험하다**(관리자는 정리했다고 믿는다).
+        #   ⚠️ `get_user` 쪽을 고치지 않은 이유: 이력·감사 화면은 폐지된 사용자도 읽어야 한다.
+        #     걸러야 하는 곳은 **권한 판정**이다.
+        if u and str(u.get("status", "active")) != "active":
+            print(f"ℹ️ [org] 폐지된 사용자의 접근 시도 — 권한 없음으로 처리: {user_id}")
+            u = None
         if not u:
-            # 미등록 사용자: 아무 부서도 못 읽는다(소유 자원만 별도 매칭).
+            # 미등록·폐지 사용자: 아무 부서도 못 읽는다(소유 자원만 별도 매칭).
             scope = AccessScope(user_id=user_id, display_name=user_id, unrestricted=False)
             self._scope_cache[key] = scope
             return scope

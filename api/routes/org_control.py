@@ -66,8 +66,44 @@ class RolesUpdate(BaseModel):
 # ── 조회 ─────────────────────────────────────────────────────────────────
 @router.get("/me")
 async def whoami(p: Principal = Depends(current_principal)):
-    """현재 요청자와 확정 권한 스코프. 프론트의 화면 게이팅이 이 값을 기준으로 한다."""
-    return {"status": "success", "data": p.scope.to_dict()}
+    """현재 요청자와 확정 권한 스코프. 프론트의 화면 게이팅이 이 값을 기준으로 한다.
+
+    ★ [2026-07-30] **강제 여부와 식별 상태를 함께 준다.** 권한 강제를 켠 뒤 식별되지 않은
+      사용자는 목록이 전부 비는데, 그 이유를 화면이 설명하지 못하면 사용자는 "시스템이
+      고장났다"고 판단한다 — 오늘 내내 막아 온 조용한 실패와 같은 유형이다.
+      이 값으로 화면이 "익명으로 보고 있습니다"를 말할 수 있어야 강제를 켤 수 있다."""
+    data = p.scope.to_dict()
+    identified = bool((p.user_id or "").strip())
+    try:
+        from core.org_directory import _org_enforce_effective, org_directory
+        enforced = _org_enforce_effective()
+        registered = bool(org_directory.get_user(p.user_id)) if identified else False
+        bootstrap = org_directory.is_bootstrap()
+    except Exception as e:                                       # pragma: no cover
+        enforced, registered, bootstrap = False, False, False
+        data["resolve_error"] = str(e)
+    data.update({
+        "user_id": p.user_id or "", "identified": identified,
+        "registered": registered, "org_enforced": bool(enforced),
+        "bootstrap": bool(bootstrap),
+    })
+    if enforced and not identified:
+        data["access_note"] = ("**익명으로 보고 있습니다.** 조직 권한 강제가 켜져 있어 목록이 "
+                               "비어 보입니다 — 자료가 없는 것이 아닙니다. 우측 상단에서 "
+                               "사용자를 지정하십시오.")
+    elif enforced and not registered:
+        data["access_note"] = (f"**'{p.user_id}' 는 등록되지 않은 사용자입니다.** 조직 권한 "
+                               f"강제가 켜져 있어 어떤 부서 자료도 보이지 않습니다 — 관리자에게 "
+                               f"사용자 등록·부서 배정을 요청하십시오.")
+    elif enforced and not (data.get("unrestricted") or data.get("readable_dept_ids")):
+        data["access_note"] = ("**부서가 배정되지 않았습니다.** 읽을 수 있는 부서가 없어 목록이 "
+                               "비어 보입니다 — 관리자에게 부서 배정을 요청하십시오.")
+    elif not enforced:
+        data["access_note"] = ("조직 권한 강제가 **꺼져 있습니다** — 지금은 모든 사용자가 전체를 "
+                               "봅니다(조직 범위·등급 통제가 작동하지 않습니다).")
+    else:
+        data["access_note"] = ""
+    return {"status": "success", "data": data}
 
 
 @router.get("/tree")

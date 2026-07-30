@@ -317,3 +317,136 @@ def test_api_refuses_to_enable_when_preflight_blocks(policy_env, monkeypatch):
 
     # 끄는 것은 점검 없이 허용된다 — 사고 상황에서 막히면 안 된다.
     assert c.put("/api/v1/admin/org-enforcement", json={"enabled": False}).status_code == 200
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# `/org/me` — 강제를 켠 뒤 **빈 화면의 이유**를 화면이 말할 수 있어야 한다
+# ══════════════════════════════════════════════════════════════════════════
+def _me_client(monkeypatch, *, enforced, user_id, registered, scope_kw=None):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import api.routes.org_control as oc
+    import core.org_directory as od
+    from api.deps import Principal, current_principal
+    from core.org_directory import AccessScope
+
+    monkeypatch.setattr(od, "_org_enforce_effective", lambda: enforced)
+    monkeypatch.setattr(od.org_directory, "get_user",
+                        lambda uid: {"user_id": uid} if (registered and uid) else None)
+    monkeypatch.setattr(od.org_directory, "is_bootstrap", lambda: False)
+
+    app = FastAPI()
+    app.include_router(oc.router)
+    app.dependency_overrides[current_principal] = lambda: Principal(
+        user_id=user_id, scope=AccessScope(user_id=user_id, **(scope_kw or
+                                                              {"unrestricted": False})))
+    return TestClient(app)
+
+
+def test_me_explains_why_lists_are_empty_when_anonymous(monkeypatch):
+    """★★★ 강제를 켠 뒤 익명 사용자는 목록이 전부 빈다. 그 이유를 화면이 말하지 못하면
+    사용자는 **"시스템이 고장났다"** 고 판단한다 — 오늘 내내 막아 온 조용한 실패다."""
+    c = _me_client(monkeypatch, enforced=True, user_id="", registered=False)
+    d = c.get("/api/v1/org/me").json()["data"]
+    assert d["org_enforced"] is True and d["identified"] is False
+    assert "익명으로 보고 있습니다" in d["access_note"]
+    assert "자료가 없는 것이 아닙니다" in d["access_note"], "빈 목록의 이유를 말해야 한다"
+    assert "사용자를 지정" in d["access_note"], "다음 행동이 없으면 막다른 길이다"
+
+
+def test_me_explains_unregistered_user(monkeypatch):
+    """★★ 등록되지 않은 사용자는 식별은 됐지만 아무 부서도 못 읽는다 — 다른 안내가 필요하다."""
+    c = _me_client(monkeypatch, enforced=True, user_id="ghost@ls", registered=False)
+    d = c.get("/api/v1/org/me").json()["data"]
+    assert d["identified"] is True and d["registered"] is False
+    assert "등록되지 않은 사용자입니다" in d["access_note"]
+    assert "사용자 등록·부서 배정을 요청" in d["access_note"]
+
+
+def test_me_explains_unassigned_but_registered(monkeypatch):
+    """★ 등록됐지만 부서가 없는 경우 — 요청할 것이 '부서 배정'이라고 정확히 말해야 한다."""
+    c = _me_client(monkeypatch, enforced=True, user_id="staff@ls", registered=True)
+    d = c.get("/api/v1/org/me").json()["data"]
+    assert "부서가 배정되지 않았습니다" in d["access_note"]
+
+
+def test_me_warns_when_enforcement_is_off(monkeypatch):
+    """★★ 강제가 꺼진 상태도 **말해야 한다.** 통제가 작동한다고 착각하는 것이 더 위험하다."""
+    c = _me_client(monkeypatch, enforced=False, user_id="staff@ls", registered=True,
+                   scope_kw={"unrestricted": True})
+    d = c.get("/api/v1/org/me").json()["data"]
+    assert d["org_enforced"] is False
+    assert "꺼져 있습니다" in d["access_note"] and "작동하지 않습니다" in d["access_note"]
+
+
+def test_me_is_quiet_when_everything_is_fine(monkeypatch):
+    """★ 정상 상태에서는 경고를 띄우지 않는다 — 항상 뜨는 경고는 아무도 읽지 않는다."""
+    c = _me_client(monkeypatch, enforced=True, user_id="batt@ls", registered=True,
+                   scope_kw={"unrestricted": False,
+                             "readable_dept_ids": frozenset({"production_battery"})})
+    d = c.get("/api/v1/org/me").json()["data"]
+    assert d["access_note"] == ""
+
+
+def test_retired_user_loses_all_access(tmp_path, monkeypatch):
+    """★★★ [2026-07-30 실측 결함] **폐지가 권한을 제거하지 않고 있었다.**
+
+    `list_users()` 는 `status='active'` 를 거르는데 `get_user()` 는 거르지 않아서, 폐지한 계정이
+    권한을 그대로 유지했다 — 실측: 테스트 계정 `admin` 을 폐지한 뒤에도
+    `resolve_scope('admin')` 이 `unrestricted=True`(**전권**)를 돌려줬다.
+
+    ⚠️ 이건 목록에서만 사라지기 때문에 **더 위험하다.** 관리자는 정리했다고 믿는다."""
+    import config
+    from core.org_directory import OrgDirectory
+
+    org = OrgDirectory(db_path=str(tmp_path / "org.db"))
+    org.create_department("hq", "본사")
+    org.create_department("sales", "영업", parent_id="hq")
+    org.upsert_user("boss", "관리자", primary_dept_id="hq", is_admin=True)
+    org.upsert_user("boss2", "관리자2", primary_dept_id="hq", is_admin=True)
+    org.upsert_user("staff", "직원", primary_dept_id="sales")
+
+    saved = getattr(config, "ORG_ENFORCE", False)
+    try:
+        config.ORG_ENFORCE = True
+        assert org.resolve_scope("staff").readable_dept_ids == frozenset({"sales"})
+        assert org.resolve_scope("boss").unrestricted is True
+
+        # 폐지 → 권한이 **즉시** 사라져야 한다(캐시도 무효화된다).
+        assert org.delete_user("staff") is True
+        s = org.resolve_scope("staff")
+        assert s.unrestricted is False and not s.readable_dept_ids, "폐지 후에도 부서를 읽는다"
+
+        # 폐지된 **관리자**도 전권을 잃는다. 활성 관리자(boss2)를 남겨 둔다 —
+        #   아래 테스트가 보여주듯 전원을 폐지하면 시스템이 부트스트랩으로 되돌아간다.
+        assert org.delete_user("boss") is True
+        b = org.resolve_scope("boss")
+        assert b.unrestricted is False, "폐지된 관리자가 전권을 유지한다 — 실측된 결함"
+        assert b.is_admin is False
+    finally:
+        config.ORG_ENFORCE = saved
+
+
+def test_retiring_every_user_returns_to_bootstrap(tmp_path):
+    """★★ 활성 사용자가 0명이 되면 **부트스트랩으로 되돌아간다**(전원 무제한).
+
+    잠금 방지 장치이며 의도된 동작이다 — 아무도 없는 상태에서 강제하면 첫 관리자를 만들 사람이
+    없다. 다만 **의도를 모르면 "폐지했는데 왜 다 보이나"로 읽힌다.**
+    운영에서는 활성 관리자를 최소 1명 남겨 두는 것이 전제다(그래서 사전 점검이 관리자 존재를
+    차단 조건으로 본다)."""
+    import config
+    from core.org_directory import OrgDirectory
+
+    org = OrgDirectory(db_path=str(tmp_path / "org2.db"))
+    org.create_department("hq", "본사")
+    org.upsert_user("only", "유일", primary_dept_id="hq")
+    saved = getattr(config, "ORG_ENFORCE", False)
+    try:
+        config.ORG_ENFORCE = True
+        assert org.resolve_scope("only").unrestricted is False
+        org.delete_user("only")
+        assert org.is_bootstrap() is True
+        assert org.resolve_scope("anyone").unrestricted is True, "부트스트랩 잠금 방지"
+    finally:
+        config.ORG_ENFORCE = saved
