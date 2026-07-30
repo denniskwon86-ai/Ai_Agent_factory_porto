@@ -21,7 +21,9 @@ from pydantic import BaseModel
 
 from api.deps import Principal, assert_can_edit_org, current_principal
 from core.enterprise_context import audit
-from core.scope_policy import ScopePolicyError, policy, set_legacy_deadline
+from core.org_activation import preflight
+from core.scope_policy import (ScopePolicyError, policy, set_legacy_deadline,
+                               set_org_enforce)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 
@@ -46,6 +48,13 @@ class DeadlineRequest(BaseModel):
 
 class PruneRequest(BaseModel):
     apply: bool = False                   # ★ 기본 예행 — 감사로그를 지우는 쪽으로 기울지 않는다
+
+
+class EnforceRequest(BaseModel):
+    enabled: bool
+    reason: Optional[str] = ""
+    #: 사전 점검의 `blockers` 를 무시하고 켠다. **기본은 거부**다 — 잠금 사고를 막는 문이다.
+    force: bool = False
 
 
 # ── 감사로그 (admin 전용) ─────────────────────────────────────────────────
@@ -91,6 +100,41 @@ async def get_scope_policy(p: Principal = Depends(current_principal)):
     """한시 예외 만료일 + 변경 이력(관리자 화면용)."""
     _admin(p)
     return {"status": "success", "data": await asyncio.to_thread(policy)}
+
+
+@router.get("/org-enforcement/preflight")
+async def enforcement_preflight(p: Principal = Depends(current_principal)):
+    """권한 강제를 켜면 **무엇이 어떻게 바뀌는지** 먼저 센다(켜지는 않는다).
+
+    ★ `ORG_ENFORCE` 가 꺼진 동안에는 조직 범위·등급·드릴다운 통제가 **하나도 작동하지 않는다.**
+      이 점검이 그 전환의 문이다 — 관리자 계정이 없으면 켜지 말라고 막는다(잠금 사고 방지)."""
+    _admin(p)
+    return {"status": "success", "data": await asyncio.to_thread(preflight)}
+
+
+@router.put("/org-enforcement")
+async def put_org_enforcement(req: EnforceRequest,
+                              p: Principal = Depends(current_principal)):
+    """조직 권한 강제를 켜거나 끈다 — **코드 배포 없이**, 감사와 함께.
+
+    ⚠️ 켜기 전에 사전 점검을 통과해야 한다. `blockers` 가 있으면 409 로 거부한다(잠금 방지).
+      끄는 것은 언제나 허용한다 — 사고 상황에서 되돌릴 수 없는 스위치는 되돌림 장치가 아니다."""
+    actor = _admin(p)
+    if req.enabled and not req.force:
+        pre = await asyncio.to_thread(preflight)
+        if pre["blockers"]:
+            raise HTTPException(status_code=409, detail={
+                "message": "사전 점검을 통과하지 못해 강제를 켜지 않았습니다.",
+                "blockers": pre["blockers"], "warnings": pre["warnings"],
+                "how_to_override": ("정말 켜야 한다면 `force=true` 로 요청하십시오 — 다만 "
+                                    "관리자 계정이 없는 상태로 켜면 시스템이 잠깁니다."),
+            })
+    try:
+        out = await asyncio.to_thread(set_org_enforce, req.enabled, actor, req.reason or "")
+    except ScopePolicyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    out["preflight"] = await asyncio.to_thread(preflight)
+    return {"status": "success", "data": out}
 
 
 @router.put("/scope-policy/legacy-deadline")

@@ -85,6 +85,24 @@ CREATE INDEX IF NOT EXISTS idx_own_fork ON ownership(forked_from_id);
 """
 
 
+def _org_enforce_effective() -> bool:
+    """권한 강제 여부 — **관리자가 화면에서 바꾼 값이 있으면 그것을, 없으면 코드 기본값을** 쓴다.
+
+    ★ [2026-07-30] 이 값이 False 면 `resolve_scope` 가 전원 무제한을 돌려주므로, 조직 범위·등급·
+      드릴다운 통제가 **하나도 작동하지 않는다.** 그래서 켜고 끄는 것은 배포가 아니라 관리자
+      결정이어야 한다(`core/scope_policy.set_org_enforce`).
+    ★ 호출 시점에 읽는다. 캐시하면 스위치를 켜도 재시작해야 하고, 재시작이 필요한 스위치는
+      사고 상황에서 되돌림 장치가 되지 못한다."""
+    try:
+        from core.scope_policy import org_enforce
+        v = org_enforce()
+        if v is not None:
+            return v
+    except Exception:
+        pass                          # 정책 저장소 장애 → 코드 기본값으로
+    return bool(getattr(config, "ORG_ENFORCE", False))
+
+
 @dataclass(frozen=True)
 class AccessScope:
     """한 사용자가 무엇을 읽고 쓸 수 있는가에 대한 확정 해석.
@@ -495,7 +513,7 @@ class OrgDirectory:
         #   · 사용자가 없다 = 부서만 만들고 아직 가동하지 않았다 → 여기서 강제하면 첫 관리자를
         #     만들 수 없어 시스템이 잠긴다(실측)
         #   · ORG_ENFORCE=False = 단계적 도입을 위한 안전판
-        if self.is_bootstrap() or not getattr(config, "ORG_ENFORCE", False):
+        if self.is_bootstrap() or not _org_enforce_effective():
             scope = AccessScope(user_id=user_id, display_name=user_id, unrestricted=True,
                                 can_edit_org=True, can_run_enterprise=True, can_manage_standard=True)
             self._scope_cache[key] = scope

@@ -115,14 +115,83 @@ def set_legacy_deadline(value: str, actor: str, reason: str = "") -> Dict[str, A
     }
 
 
+def org_enforce() -> Optional[bool]:
+    """조직 권한 강제 여부 — 관리자가 화면에서 바꾼 값. 설정이 없으면 `None`.
+
+    ★ [2026-07-30 실측] `ORG_ENFORCE=False` 면 `resolve_scope` 가 **전원 무제한**을 돌려준다
+      (org_directory.py:498). 즉 오늘 만든 범위·등급·드릴다운 통제가 **하나도 작동하지 않는다.**
+      그 스위치가 코드 상수라면 켜는 데 배포가 필요하고, 켰다가 문제가 생겨도 배포로만 되돌린다 —
+      운영 중 되돌릴 수 없는 스위치는 아무도 켜지 않는다.
+    ⚠️ `None`(미설정)이면 호출자는 `config.ORG_ENFORCE` 를 쓴다. 정책 파일이 없다고 강제가
+      켜지거나 꺼지면 안 된다 — 기본값의 주인은 여전히 코드다."""
+    v = _read().get("org_enforce", None)
+    return bool(v) if isinstance(v, bool) else None
+
+
+def set_org_enforce(value: bool, actor: str, reason: str = "") -> Dict[str, Any]:
+    """조직 권한 강제를 켜거나 끈다(관리자 전용 — 권한 검사는 API 계층).
+
+    ⚠️ 켜는 순간 **미배정 사용자는 아무 부서도 읽지 못한다.** 그래서 API 계층이 사전 점검
+      (`org_activation.preflight`)을 먼저 통과시키고, 관리자 계정이 없으면 거부한다 —
+      권한을 강제하는 순간 첫 관리자를 만들 사람이 없어 시스템이 잠기는 사고가 실측됐다."""
+    if not isinstance(value, bool):
+        raise ScopePolicyError(f"org_enforce 는 true/false 여야 합니다: {value!r}")
+    if not (actor or "").strip():
+        raise ScopePolicyError(
+            "변경자 식별 정보가 없습니다 — 권한 강제를 켜고 끄는 것은 시스템 전체의 접근 범위를 "
+            "바꾸는 결정입니다.")
+    doc = _read()
+    before = doc.get("org_enforce", None)
+    doc["org_enforce"] = bool(value)
+    doc.setdefault("history", []).append({
+        "field": "org_enforce", "from": before, "to": bool(value),
+        "actor": actor.strip(), "reason": reason or "",
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    })
+    doc["history"] = doc["history"][-50:]
+    _write(doc)
+
+    # 권한 스코프는 캐시된다 — 무효화하지 않으면 스위치를 켜도 **아무 일도 일어나지 않는다**
+    #   (프로세스를 재시작해야 반영되는 스위치는 되돌림 장치가 아니다).
+    try:
+        from core.org_directory import org_directory
+        org_directory._invalidate()
+    except Exception as e:
+        print(f"⚠️ [scope_policy] 권한 캐시 무효화 실패 — 재시작이 필요할 수 있습니다: {e}")
+    try:
+        from core.enterprise_context import audit
+        audit.record(audit.SCOPE_BINDING_CHANGED, resource_type="scope_policy",
+                     resource_id="org_enforce", actor=actor.strip(), outcome="allowed",
+                     reason=reason or "조직 권한 강제 전환", detail=f"{before} -> {value}")
+    except Exception as e:                                       # pragma: no cover
+        print(f"⚠️ [scope_policy] 감사 기록 실패: {e}")
+    return {
+        "org_enforce": bool(value), "previous": before, "actor": actor.strip(),
+        "note": ("권한 강제를 **켰습니다.** 이제 미배정 사용자는 부서 자료를 읽지 못하고, "
+                 "조직 범위·등급·드릴다운 통제가 실제로 작동합니다. 문제가 생기면 즉시 끌 수 "
+                 "있습니다(이 API 로)."
+                 if value else
+                 "⚠️ 권한 강제를 **껐습니다.** 전원이 무제한으로 해석되며 조직 범위·등급 통제가 "
+                 "작동하지 않습니다 — 임시 조치로만 쓰고 기한을 정하십시오."),
+    }
+
+
 def policy() -> Dict[str, Any]:
     """현재 정책 + 변경 이력(관리자 화면용)."""
     doc = _read()
     cur = legacy_deadline()
+    _enf = org_enforce()
+    try:
+        import config
+        _enf_default = bool(getattr(config, "ORG_ENFORCE", False))
+    except Exception:
+        _enf_default = False
     return {
         "legacy_grandfather_until": cur,
         "default": legacy_deadline_default(),
         "is_default": cur == legacy_deadline_default(),
+        "org_enforce": _enf if _enf is not None else _enf_default,
+        "org_enforce_source": "policy" if _enf is not None else "config default",
         "history": list(reversed(doc.get("history", [])))[:20],
         "note": ("한시 예외 만료일입니다. 이 날짜가 지나면 범위 미지정(`LEGACY_UNSCOPED`) "
                  "데이터는 조회에서 제외됩니다 — 그전에 소유 조직을 지정하거나 승인된 전사 "

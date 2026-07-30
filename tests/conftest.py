@@ -93,6 +93,18 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template):
     except Exception:
         pass
     try:
+        # ★★ [2026-07-30 실측] **범위 정책 저장소**도 격리한다.
+        #   이 파일은 `ORG_ENFORCE`·한시예외 만료일을 담고, `resolve_scope` 와 만료 판정이
+        #   **코드 기본값보다 먼저** 읽는다. 그래서 저장소에 파일이 하나 있으면
+        #   `monkeypatch.setattr(config, "ORG_ENFORCE", True)` 가 **조용히 무력화**된다
+        #   (실측: 그 상태로 test_org_directory 9건이 깨졌다 — 테스트가 코드를 검증하는 게
+        #   아니라 로컬 파일을 검증하게 된다).
+        from core import scope_policy
+        monkeypatch.setattr(scope_policy, "_POLICY_PATH",
+                            str(tmp_path / "scope_policy.json"), raising=False)
+    except Exception as e:
+        print(f"⚠️ [conftest] 범위 정책 격리 실패(테스트가 로컬 정책 파일에 좌우됨): {e}")
+    try:
         # ★★ [2026-07-30 실측] 기준정보 DB 도 격리한다 — **여기까지 막지 않아 실제로 오염됐다.**
         #   `data/master/master.db` 의 `business_terms` 35건이 전부 `__route_test_term__`
         #   였다(실제 업무 용어는 0건). `tests/test_master_api_routes.py` 가 API 라우트를

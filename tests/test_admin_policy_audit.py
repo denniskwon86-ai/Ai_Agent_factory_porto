@@ -193,3 +193,127 @@ def test_admin_routes_require_identity():
     c = TestClient(app)
     r = c.get("/api/v1/admin/audit/events")
     assert r.status_code == 401 and "사용자 식별" in r.text
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 조직 권한 강제 전환 — 이 스위치가 오늘 만든 통제의 실제 가동 스위치다
+# ══════════════════════════════════════════════════════════════════════════
+class _FakeOrg:
+    """조직 대역. `resolve_scope` 는 강제 여부에 따라 달라진다(실물과 같은 규약)."""
+
+    def __init__(self, depts, users, enforce=False):
+        self._d, self._u, self.enforce = depts, users, enforce
+
+    def list_departments(self): return self._d
+    def list_users(self): return self._u
+
+    def resolve_scope(self, uid):
+        from core.org_directory import AccessScope
+        u = next((x for x in self._u if x["user_id"] == uid), None)
+        if not self._d or not self._u or not self.enforce:
+            return AccessScope(user_id=uid, unrestricted=True)
+        if not u:
+            return AccessScope(user_id=uid, unrestricted=False)
+        if u.get("is_admin"):
+            return AccessScope(user_id=uid, unrestricted=True, is_admin=True)
+        dept = (u.get("primary_dept_id") or "").strip()
+        return AccessScope(user_id=uid, unrestricted=False,
+                           readable_dept_ids=frozenset({dept} if dept else set()))
+
+
+def test_preflight_blocks_activation_without_an_admin(policy_env):
+    """★★★ 관리자 없이 켜면 **첫 관리자를 만들 사람이 아무도 없어 시스템이 잠긴다**(실측 사고)."""
+    from core.org_activation import preflight
+    org = _FakeOrg([{"dept_id": "sales"}],
+                   [{"user_id": "staff", "display_name": "S", "is_admin": 0,
+                     "primary_dept_id": "sales"}])
+    out = preflight(org)
+    assert out["ready"] is False
+    assert any("관리자 계정이 없습니다" in b for b in out["blockers"])
+    assert "아직 켜지 마십시오" in out["note"]
+
+
+def test_preflight_warns_about_test_accounts_and_unassigned(policy_env):
+    """★★ [실측] 실 DB 의 사용자 4명이 전부 테스트 잔여물이었다(`admin`·`bob`·`exec`·`bob2`).
+
+    그 상태로 강제를 켜면 테스트가 만든 `admin` 이 **전권을 갖는다.**"""
+    from core.org_activation import preflight
+    org = _FakeOrg(
+        [{"dept_id": "sales"}],
+        [{"user_id": "admin", "display_name": "Admin", "is_admin": 1, "primary_dept_id": ""},
+         {"user_id": "bob", "display_name": "Bob", "is_admin": 0, "primary_dept_id": ""},
+         {"user_id": "hikwon@lsmnm.com", "display_name": "권희권", "is_admin": 1,
+          "primary_dept_id": "hq"}])
+    out = preflight(org)
+    assert out["ready"] is True, "관리자가 있으면 켤 수 있다"
+    assert out["test_looking"] == 2 and out["unassigned"] == 2
+    joined = " ".join(out["warnings"])
+    assert "실제 권한을 갖습니다" in joined and "아무 부서 자료도 읽지 못합니다" in joined
+    # 사용자별로 **켠 뒤 무엇을 읽는지**가 나와야 한다 — 켠 뒤에 놀라지 않게.
+    assert {r["user_id"] for r in out["users_detail"]} == {"admin", "bob", "hikwon@lsmnm.com"}
+
+
+def test_enforcement_switch_flips_and_invalidates_the_cache(policy_env, monkeypatch):
+    """★★★ 권한 스코프는 캐시된다 — 무효화하지 않으면 스위치를 켜도 **아무 일도 안 일어난다.**
+
+    재시작이 필요한 스위치는 사고 상황에서 되돌림 장치가 되지 못한다."""
+    import core.org_directory as od
+
+    calls = {"invalidated": 0}
+    monkeypatch.setattr(od.org_directory, "_invalidate",
+                        lambda: calls.__setitem__("invalidated",
+                                                  calls["invalidated"] + 1))
+    assert policy_env.org_enforce() is None, "미설정이면 None — 코드 기본값을 쓴다"
+
+    out = policy_env.set_org_enforce(True, actor="admin@ls", reason="파일럿 준비")
+    assert out["org_enforce"] is True and policy_env.org_enforce() is True
+    assert calls["invalidated"] == 1, "권한 캐시를 비우지 않았다"
+    assert "실제로 작동합니다" in out["note"]
+
+    off = policy_env.set_org_enforce(False, actor="admin@ls", reason="사고 대응")
+    assert policy_env.org_enforce() is False
+    assert "작동하지 않습니다" in off["note"], "끄는 것의 대가를 알려야 한다"
+
+
+def test_effective_enforcement_prefers_policy_over_config(policy_env, monkeypatch):
+    """★ 정책이 코드 기본값을 이긴다 — 배포 없이 켜고 끌 수 있어야 한다.
+    단 정책이 없으면 코드 기본값이다(정책 파일이 없다고 통제가 켜지거나 꺼지면 안 된다)."""
+    import config
+    from core.org_directory import _org_enforce_effective
+
+    saved = getattr(config, "ORG_ENFORCE", False)
+    try:
+        config.ORG_ENFORCE = False
+        assert _org_enforce_effective() is False          # 정책 미설정 → 코드 기본값
+        policy_env.set_org_enforce(True, actor="admin@ls")
+        assert _org_enforce_effective() is True           # 정책이 이긴다
+        config.ORG_ENFORCE = True
+        policy_env.set_org_enforce(False, actor="admin@ls")
+        assert _org_enforce_effective() is False          # 끄는 것도 정책이 이긴다
+    finally:
+        config.ORG_ENFORCE = saved
+
+
+def test_api_refuses_to_enable_when_preflight_blocks(policy_env, monkeypatch):
+    """★★ 사전 점검을 통과하지 못하면 **409 로 거부**한다 — 잠금 사고를 막는 문이다."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import api.routes.admin_control as ac
+    from api.deps import Principal, current_principal
+    from core.org_directory import AccessScope
+
+    monkeypatch.setattr(ac, "preflight",
+                        lambda: {"blockers": ["관리자 계정이 없습니다."], "warnings": []})
+    app = FastAPI()
+    app.include_router(ac.router)
+    app.dependency_overrides[current_principal] = lambda: Principal(
+        user_id="admin@ls", scope=AccessScope(unrestricted=False, can_edit_org=True))
+    c = TestClient(app)
+
+    r = c.put("/api/v1/admin/org-enforcement", json={"enabled": True})
+    assert r.status_code == 409 and "관리자 계정이 없습니다" in r.text
+    assert "force=true" in r.text, "우회 방법을 알려줘야 막다른 길이 아니다"
+
+    # 끄는 것은 점검 없이 허용된다 — 사고 상황에서 막히면 안 된다.
+    assert c.put("/api/v1/admin/org-enforcement", json={"enabled": False}).status_code == 200
