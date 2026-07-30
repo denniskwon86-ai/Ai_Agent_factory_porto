@@ -97,7 +97,9 @@ class BusinessGlossary:
                    include_retired: bool = False, scope_node_id: str = "",
                    tenant_id: str = "", entity_mode: str = "REAL",
                    # [§6-2] 등급이 낮으면 제목만 남기고 내용을 가린다(빈 값 = 가리지 않는다)
-                   viewer_clearance: str = "") -> List[dict]:
+                   viewer_clearance: str = "",
+                   # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체면 True(기본은 자기+상위만)
+                   include_descendants: bool = False) -> List[dict]:
         """[ECM E2] 조직 범위 필터. 같은 말을 부서마다 다르게 정의하는 것이 §6.1 이 지적한
         실제 문제이므로, 사업부 용어가 다른 사업부에 새면 안 된다."""
         sql, params = "SELECT * FROM business_terms WHERE 1=1", []
@@ -115,7 +117,8 @@ class BusinessGlossary:
             return rows
         from core.enterprise_context.scoping import filter_visible
         return filter_visible(rows, scope_node_id, tenant_id, entity_mode,
-                              viewer_clearance=viewer_clearance)
+                              viewer_clearance=viewer_clearance,
+                              include_descendants=include_descendants)
 
     def approve_term(self, term_id: str, approved_by: str) -> dict:
         """승인 = "이 정의로 전사가 같은 말을 쓴다"는 선언. 승인자를 반드시 남긴다."""

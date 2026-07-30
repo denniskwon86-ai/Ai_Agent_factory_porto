@@ -356,7 +356,9 @@ def contract_row(asset: dict[str, Any]) -> dict[str, Any]:
 
 
 def visible_assets(scope_node_id: str = "", viewer_clearance: str = "",
-                   registry_path: Path = REGISTRY_PATH) -> list[dict[str, Any]]:
+                   registry_path: Path = REGISTRY_PATH,
+                   # [경영진 드릴다운] 하위 조직 자산까지 볼 수 있는 주체면 True
+                   include_descendants: bool = False) -> list[dict[str, Any]]:
     """이 조직 문맥에서 보이는 자산 목록.
 
     ★ 판정은 `scoping.filter_visible` 단일 지점에 맡긴다. 여기서 다시 구현하면 카탈로그·용어
@@ -368,7 +370,8 @@ def visible_assets(scope_node_id: str = "", viewer_clearance: str = "",
         return rows
     from core.enterprise_context.scoping import filter_visible
     return filter_visible(rows, scope_node_id=scope_node_id,
-                          viewer_clearance=viewer_clearance)
+                          viewer_clearance=viewer_clearance,
+                          include_descendants=include_descendants)
 
 
 def _save(registry: dict[str, Any], registry_path: Path) -> None:

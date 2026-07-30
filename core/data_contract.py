@@ -138,7 +138,9 @@ class DataContracts:
              status: str = "", include_retired: bool = False, scope_node_id: str = "",
              tenant_id: str = "", entity_mode: str = "REAL",
              # [§6-2] 등급이 낮으면 제목만 남기고 내용을 가린다(빈 값 = 가리지 않는다)
-             viewer_clearance: str = "") -> List[dict]:
+             viewer_clearance: str = "",
+             # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체면 True(기본은 자기+상위만)
+             include_descendants: bool = False) -> List[dict]:
         sql, params = "SELECT * FROM data_contracts WHERE 1=1", []
         if not include_retired:
             sql += " AND status<>'retired'"
@@ -155,7 +157,8 @@ class DataContracts:
             return rows
         from core.enterprise_context.scoping import filter_visible
         return filter_visible(rows, scope_node_id, tenant_id, entity_mode,
-                              viewer_clearance=viewer_clearance)
+                              viewer_clearance=viewer_clearance,
+                              include_descendants=include_descendants)
 
     # ── 활성화 ────────────────────────────────────────────────────────────
     def activate(self, contract_id: str, activated_by: str, catalog=None,

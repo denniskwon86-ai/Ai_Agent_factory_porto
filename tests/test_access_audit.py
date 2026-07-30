@@ -98,7 +98,7 @@ def org(monkeypatch):
     import core.enterprise_context.scoping as sc
     monkeypatch.setattr(sc, "resolve_scope_ref", lambda ref: {
         "battery": "MNM_BATTERY", "copper": "MNM_COPPER"}.get(ref, ref))
-    monkeypatch.setattr(sc, "visible_scopes", lambda n: (
+    monkeypatch.setattr(sc, "visible_scopes", lambda n, **kw: (
         {"MNM_BATTERY", "MNM"} if n == "MNM_BATTERY"
         else {"MNM_COPPER", "MNM"} if n == "MNM_COPPER" else {n}))
 

@@ -113,9 +113,11 @@ async def list_terms(domain: str = "", status: str = "", include_retired: bool =
                      p: Principal = Depends(current_principal)):
     """용어 목록. **등급이 낮은 주체에게는 제목만** 주고 정의는 가린다(§6-2 사용자 결정)."""
     from core.enterprise_context.classification import clearance_of_scope
+    # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체인가 — 이것도 권한에서 파생한다.
+    from core.enterprise_context.scoping import may_drill_down
     rows = await asyncio.to_thread(business_glossary.list_terms, domain, status,
                                    include_retired, scope_node_id, tenant_id, entity_mode,
-                                   clearance_of_scope(p.scope))
+                                   clearance_of_scope(p.scope), may_drill_down(p.scope))
     return {"status": "success", "data": rows}
 
 

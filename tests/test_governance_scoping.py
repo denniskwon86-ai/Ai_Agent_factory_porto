@@ -253,3 +253,59 @@ def test_coverage_of_empty_set_is_full(env):
     """0 건일 때 0% 로 표시하면 새 설치가 위험해 보인다."""
     dc, _, _, _ = env
     assert coverage(dc.list_assets())["coverage_ratio"] == 1.0
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# [사용자 결정 2026-07-30] 경영진 드릴다운 — 하위 조직까지 본다
+# ══════════════════════════════════════════════════════════════════════════
+def test_executive_drilldown_opens_descendants(env):
+    """★★ [사용자 결정] "경영진이 하위 조직의 모든 걸 다 보는 게 맞다."
+
+    ⚠️ 이것은 기본 규칙의 **예외**다. 기본은 "자기 + 상위 조상"이고, 하위가 상위에 보이면
+      부서 간 격리가 무너진다 — 그래서 일반 사용자에게는 여전히 닫혀 있어야 한다."""
+    *_, ids = env
+    normal = visible_scopes(ids["LS_MNM"])
+    assert ids["MNM_BATTERY"] not in normal, "일반 사용자에게 하위가 열렸다"
+
+    exec_view = visible_scopes(ids["LS_MNM"], include_descendants=True)
+    assert ids["MNM_BATTERY"] in exec_view and ids["MNM_COPPER"] in exec_view
+    assert ids["BATT_PLANT_1"] in exec_view, "손자 노드까지 내려가야 한다"
+    # 코드 형태도 함께 들어간다 — 행이 코드로 저장돼 있으면 node_id 만으로는 매칭되지 않는다.
+    assert "MNM_BATTERY" in exec_view
+
+
+def test_drilldown_does_not_cross_legal_entities(env):
+    """★★★ 드릴다운은 **자기 노드의 하위 트리**다 — 형제 법인은 하위가 아니다.
+
+    LS MnM 경영진에게 LS전선이 열리면 그건 드릴다운이 아니라 법인 경계 붕괴다."""
+    *_, ids = env
+    exec_view = visible_scopes(ids["LS_MNM"], include_descendants=True)
+    assert ids["LS_CABLE"] not in exec_view and "LS_CABLE" not in exec_view
+    assert ids["LS_ELECTRIC"] not in exec_view
+
+
+def test_drilldown_permission_is_derived_from_scope(env):
+    """★ 권한·등급과 마찬가지로 **기존 `AccessScope` 에서 파생**한다 — 새 플래그를 만들면
+    두 곳을 관리하게 되고, 두 곳은 어긋난다."""
+    from core.enterprise_context.scoping import may_drill_down
+    from core.org_directory import AccessScope
+
+    assert may_drill_down(AccessScope(unrestricted=True)) is True
+    assert may_drill_down(AccessScope(unrestricted=False, is_executive=True)) is True
+    assert may_drill_down(AccessScope(unrestricted=False, can_run_enterprise=True)) is True
+    assert may_drill_down(AccessScope(unrestricted=False, user_id="staff@ls")) is False
+    assert may_drill_down(None) is False, "해석 실패는 닫는 쪽으로"
+
+
+def test_drilldown_reaches_subsidiary_rows(env):
+    """★★ 실제 효과 — 경영진이 사업부 자산을 본다. 이것이 안 되면 전사 화면이 빈다."""
+    dc, *_, ids = env
+    dc.create_asset("전사 표준", enterprise_scope_id=ids["LS_MNM"])
+    dc.create_asset("배터리 상세", enterprise_scope_id=ids["MNM_BATTERY"])
+
+    normal = [a["name"] for a in dc.list_assets(scope_node_id=ids["LS_MNM"])]
+    assert "배터리 상세" not in normal, "일반 사용자에게 하위 자산이 보였다"
+
+    exec_rows = [a["name"] for a in dc.list_assets(scope_node_id=ids["LS_MNM"],
+                                                  include_descendants=True)]
+    assert "전사 표준" in exec_rows and "배터리 상세" in exec_rows

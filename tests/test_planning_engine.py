@@ -199,7 +199,7 @@ def test_other_org_cannot_see_facts(store, monkeypatch):
     """★★ 조직별 손익은 새어 나가면 끝이다 — 범위 필터가 실제로 건다."""
     import core.enterprise_context.scoping as sc
     monkeypatch.setattr(sc, "visible_scopes",
-                        lambda n: {"MNM_BATTERY", "MNM"} if n == "MNM_BATTERY" else {n})
+                        lambda n, **kw: {"MNM_BATTERY", "MNM"} if n == "MNM_BATTERY" else {n})
     _baseline(store)
     assert len(store.list_facts(org_id="MNM_BATTERY", scope_node_id="MNM_BATTERY")) == 3
     assert store.list_facts(org_id="MNM_BATTERY", scope_node_id="MNM_COPPER") == []

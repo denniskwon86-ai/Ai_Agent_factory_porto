@@ -153,6 +153,77 @@ def recent(limit: int = 50, event: str = "") -> List[Dict[str, Any]]:
     return list(reversed(evs))[:max(1, limit)]
 
 
+#: [사용자 결정 2026-07-30] 감사로그 보존 기간 — **5년.**
+#: ⚠️ 자동 삭제하지 않는다. 감사로그는 "누가 무엇을 시도했나"의 유일한 근거이고, 자동 삭제는
+#:   조사 중인 사건의 증거를 지울 수 있다. `prune()` 을 사람이 부르는 구조로 두고, 기본은
+#:   예행(dry_run)이다 — 지우는 쪽으로 기울지 않는다.
+RETENTION_YEARS = 5
+
+
+def retention_report(path: str = "", today: str = "") -> Dict[str, Any]:
+    """보존 기간을 넘긴 기록이 몇 건인가 — **지우기 전에 무엇을 지우는지 본다.**
+
+    ★ 열람 권한은 **admin 전용**이다(사용자 결정). 감사로그 자체가 민감정보다 — 누가 무엇을
+      시도했는지가 그대로 담겨 있어, 열람을 열어 두면 그것이 새로운 유출 경로가 된다."""
+    evs = read_events(path)
+    cutoff = _cutoff(today)
+    old = [e for e in evs if str(e.get("ts", "")) < cutoff]
+    return {
+        "total": len(evs), "retention_years": RETENTION_YEARS,
+        "cutoff": cutoff, "expired": len(old),
+        "oldest": (min((str(e.get("ts", "")) for e in evs), default="") if evs else ""),
+        "note": (f"보존 기간 {RETENTION_YEARS}년(기준일 {cutoff} 이전)을 넘긴 기록이 "
+                 f"{len(old)}건입니다. 자동 삭제하지 않습니다 — 조사 중인 사건의 증거를 지울 수 "
+                 f"있으므로 사람이 `prune(apply=True)` 로 실행합니다."
+                 if old else
+                 f"보존 기간({RETENTION_YEARS}년)을 넘긴 기록이 없습니다."),
+    }
+
+
+def _cutoff(today: str = "") -> str:
+    """보존 경계 시각(ISO). 이보다 앞선 기록이 만료 대상이다."""
+    base = today or datetime.now().isoformat(timespec="seconds")
+    try:
+        year = int(base[:4]) - RETENTION_YEARS
+        return f"{year:04d}{base[4:]}"
+    except ValueError:                                           # pragma: no cover
+        return ""
+
+
+def prune(apply: bool = False, path: str = "", today: str = "") -> Dict[str, Any]:
+    """보존 기간을 넘긴 기록을 지운다. **기본은 예행이다.**
+
+    ⚠️ append-only 로그를 다시 쓰는 유일한 경로다. 그래서 (ㄱ) 기본이 예행이고 (ㄴ) 삭제 전에
+      원본을 `.pruned-<시각>` 으로 남긴다. 감사로그를 지우는 작업이 감사되지 않으면 그게
+      가장 큰 구멍이다 — 실행 자체를 감사로그에 남긴다."""
+    p = path or _LOG_PATH
+    rep = retention_report(p, today)
+    if not apply or not rep["expired"]:
+        rep["applied"] = False
+        return rep
+    evs = read_events(p)
+    cutoff = rep["cutoff"]
+    keep = [e for e in evs if str(e.get("ts", "")) >= cutoff]
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    try:
+        os.replace(p, f"{p}.pruned-{stamp}")                     # 원본 보존(삭제가 아니다)
+        with open(p, "w", encoding="utf-8") as f:
+            for e in keep:
+                f.write(json.dumps(e, ensure_ascii=False) + "\n")
+    except OSError as e:
+        rep.update(applied=False, error=str(e))
+        return rep
+    rep.update(applied=True, removed=rep["expired"], kept=len(keep),
+               archived_to=f"{os.path.basename(p)}.pruned-{stamp}")
+    rep["note"] = (f"{rep['expired']}건을 정리했습니다(원본은 "
+                   f"`{rep['archived_to']}` 로 보존). 남은 기록 {len(keep)}건.")
+    record(SCOPE_BINDING_CHANGED, resource_type="audit_log", resource_id="retention",
+           actor="admin", outcome="allowed",
+           reason=f"보존 기간({RETENTION_YEARS}년) 정리",
+           detail=f"removed={rep['expired']} kept={len(keep)} archive={rep['archived_to']}")
+    return rep
+
+
 def stats() -> Dict[str, Any]:
     """집계 + **기록 실패 횟수**. 실패가 0 이 아니면 이 로그는 불완전하다 —
     그 사실을 감추면 "거부가 없었다"는 거짓 안심을 준다."""

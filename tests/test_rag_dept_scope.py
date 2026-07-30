@@ -455,7 +455,7 @@ def test_search_packs_filters_by_org_scope(monkeypatch):
     등록부에서 `owner_org_id` 로 통제한 문서가 색인되는 순간 통제 밖으로 나가면 안 된다.
     세 행 모두 상위 3건에 들어오므로, 빠지는 것은 **필터가 막은 것**이다."""
     import core.enterprise_context.scoping as sc
-    monkeypatch.setattr(sc, "visible_scopes", lambda node: {"MNM_BATTERY", "LS_MNM"})
+    monkeypatch.setattr(sc, "visible_scopes", lambda node, **kw: {"MNM_BATTERY", "LS_MNM"})
     kb, _ = _pack_kb(_PACK_ROWS, monkeypatch)
 
     got = [h["content"] for h in

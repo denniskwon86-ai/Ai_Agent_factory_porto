@@ -298,7 +298,9 @@ class PlanningStore:
                    tenant_id: str = "", entity_mode: str = "REAL",
                    product_code: str = "", cost_center: str = "",
                    # [§6-2] 등급이 낮으면 제목만 남기고 내용을 가린다(빈 값 = 가리지 않는다)
-                   viewer_clearance: str = "") -> List[dict]:
+                   viewer_clearance: str = "",
+                   # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체면 True(기본은 자기+상위만)
+                   include_descendants: bool = False) -> List[dict]:
         """사실 조회. 조직 범위를 주면 **M2 범위 계약**으로 걸러진다.
 
         ⚠️ 차원을 지정하지 않으면 **합계 행과 상세 행이 함께** 나온다. 그대로 더하면
@@ -325,7 +327,8 @@ class PlanningStore:
         for r in rows:
             r["enterprise_scope_id"] = r.get("owner_organization_id") or ""
         return filter_visible(rows, scope_node_id, tenant_id, entity_mode,
-                              viewer_clearance=viewer_clearance)
+                              viewer_clearance=viewer_clearance,
+                              include_descendants=include_descendants)
 
 
 planning_store = PlanningStore()

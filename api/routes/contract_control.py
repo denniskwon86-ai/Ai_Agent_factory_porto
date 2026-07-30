@@ -82,9 +82,12 @@ async def list_contracts(producer_asset_id: str = "", consumer: str = "", status
                          p: Principal = Depends(current_principal)):
     """★ [§6-2] 등급은 주체 권한에서 파생한다 — 낮으면 제목만 보이고 내용은 가려진다."""
     from core.enterprise_context.classification import clearance_of_scope
+    # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체인가 — 이것도 권한에서 파생한다.
+    from core.enterprise_context.scoping import may_drill_down
     rows = await asyncio.to_thread(data_contracts.list, producer_asset_id, consumer,
                                    status, include_retired, scope_node_id, tenant_id,
-                                   entity_mode, clearance_of_scope(p.scope))
+                                   entity_mode, clearance_of_scope(p.scope),
+                                   may_drill_down(p.scope))
     return {"status": "success", "data": rows}
 
 

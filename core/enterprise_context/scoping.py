@@ -67,7 +67,31 @@ def _fail_closed() -> bool:
         return True                                    # 설정을 못 읽으면 안전한 쪽
 
 
-def visible_scopes(scope_node_id: str) -> Set[str]:
+def may_drill_down(scope: Any) -> bool:
+    """이 주체가 **하위 조직까지** 볼 수 있는가(경영진 드릴다운).
+
+    ★ [사용자 결정 2026-07-30] "우리 시스템은 결국 경영진을 위한 시스템이기도 하니까 경영진이
+      하위 조직의 모든 걸 다 보는 게 맞다."
+
+    ⚠️ 이것은 기본 규칙의 **예외**다. 기본은 "자기 + 상위 조상"이고, 하위가 상위에 보이면
+      부서 간 격리가 무너진다 — 그래서 일반 사용자에게는 여전히 닫혀 있다. 경영진에게만
+      내려가는 문을 연다.
+    ⚠️ 법인 경계를 넘지는 않는다. 하위는 **자기 노드의 하위 트리**이므로, LS MnM 경영진에게
+      LS전선이 열리지 않는다(형제 법인은 하위가 아니다).
+
+    권한과 등급처럼 이 판정도 **기존 `AccessScope` 에서 파생**한다 — 새 플래그를 만들면 두 곳을
+    관리하게 되고, 두 곳은 어긋난다."""
+    if scope is None:
+        return False
+    try:
+        return bool(getattr(scope, "unrestricted", False)
+                    or getattr(scope, "is_executive", False)
+                    or getattr(scope, "can_run_enterprise", False))
+    except Exception:
+        return False                                   # 해석 실패는 닫는 쪽으로
+
+
+def visible_scopes(scope_node_id: str, include_descendants: bool = False) -> Set[str]:
     """이 조직이 볼 수 있는 범위 집합 = 자기 자신 + 운영 상위 조상.
 
     조상 해석에 실패하면 **자기 자신만** 돌려준다(fail-closed). 실패를 '전부 보임'으로
@@ -93,17 +117,24 @@ def visible_scopes(scope_node_id: str) -> Set[str]:
             out.add(ref["node_id"])
         if ref.get("code"):
             out.add(ref["code"])
-        for anc in ecm_resolver.ancestors(node_id, REL_OPERATING_PARENT):
-            out.add(anc)
-            # 조상의 코드도 넣는다 — 행이 코드로 저장돼 있으면 node_id 만으로는 매칭되지 않는다.
+        related = list(ecm_resolver.ancestors(node_id, REL_OPERATING_PARENT))
+        if include_descendants:
+            # [사용자 결정 2026-07-30] 경영진 드릴다운 — 자기 노드의 **하위 트리**를 더한다.
+            #   운영 보고선(`OPERATING_PARENT`)만 따른다. 연결집계·공유서비스 관계로 내려가면
+            #   §6.1 이 금지한 "집계 범위를 권한으로 쓰는" 경로가 된다.
+            related += list(ecm_resolver.descendants(node_id, REL_OPERATING_PARENT,
+                                                     include_self=False))
+        for rel in related:
+            out.add(rel)
+            # 관련 노드의 코드도 넣는다 — 행이 코드로 저장돼 있으면 node_id 만으로는 매칭되지 않는다.
             try:
-                n = ecm_resolver.repo.get_node(anc)
+                n = ecm_resolver.repo.get_node(rel)
                 if n is not None and getattr(n, "code", ""):
                     out.add(n.code)
             except Exception:
                 pass
     except Exception as e:
-        print(f"⚠️ [scoping] 조상 해석 실패 — 자기 범위만 적용(fail-closed): {e}")
+        print(f"⚠️ [scoping] 조직 관계 해석 실패 — 자기 범위만 적용(fail-closed): {e}")
     return out
 
 
@@ -124,12 +155,26 @@ def is_legacy_unscoped(row: Dict[str, Any]) -> bool:
     return (row.get("scope_type") or "").strip().upper() == LEGACY_UNSCOPED
 
 
+def policy_deadline() -> str:
+    """전역 만료일 — **관리자가 화면에서 바꾼 값**이 있으면 그것을 쓴다(사용자 결정 2026-07-30).
+
+    ★ 호출 시점에 읽는다. 캐시하면 관리자가 바꿔도 재시작이 필요하고, 그러면 "화면에서 바꿀 수
+      있게" 만든 취지가 사라진다.
+    ★ 정책 저장소를 못 읽으면 **코드 기본값**으로 되돌아간다 — 파일이 사라졌을 때 "만료 없음"이
+      되면 한시 예외가 영구가 된다."""
+    try:
+        from core.scope_policy import legacy_deadline as _policy
+        return _policy()
+    except Exception:
+        return LEGACY_GRANDFATHER_UNTIL
+
+
 def legacy_deadline(row: Dict[str, Any]) -> str:
-    """이 행의 한시 예외 만료일. 행에 적힌 `effective_to` 가 모듈 기본값을 이긴다.
+    """이 행의 한시 예외 만료일. 행에 적힌 `effective_to` 가 전역 정책을 이긴다.
 
     ★ 행별 만료일을 우선하는 이유: 이행은 한꺼번에 끝나지 않는다. 부서마다 정리 속도가
       다른데 만료일이 하나뿐이면 **가장 느린 부서 때문에 전체를 미루게** 된다."""
-    return (row.get("effective_to") or "").strip() or LEGACY_GRANDFATHER_UNTIL
+    return (row.get("effective_to") or "").strip() or policy_deadline()
 
 
 def is_expired(row: Dict[str, Any], today: str = "") -> bool:
@@ -226,7 +271,8 @@ def is_visible(row: Dict[str, Any], scope_node_id: str, tenant_id: str = "",
 
 def filter_visible(rows: Iterable[Dict[str, Any]], scope_node_id: str = "",
                    tenant_id: str = "", entity_mode: str = "REAL",
-                   sandbox_token: str = "", viewer_clearance: str = "") -> List[Dict[str, Any]]:
+                   sandbox_token: str = "", viewer_clearance: str = "",
+                   include_descendants: bool = False) -> List[Dict[str, Any]]:
     """목록에 가시성 필터를 건다. 조상 해석은 **한 번만** 한다(행마다 리솔버를 때리지 않게).
 
     ★ 만료 판정 기준일도 한 번만 고정한다 — 목록을 훑는 중 자정을 넘기면 같은 응답 안에서
@@ -236,7 +282,8 @@ def filter_visible(rows: Iterable[Dict[str, Any]], scope_node_id: str = "",
       가린다**(행은 남는다 — "제목만 보이고 내용은 차단"). 범위 필터 **뒤에** 적용되는 것이
       중요하다: 타 조직 자원은 이미 목록에서 빠졌으므로 제목도 새지 않는다.
       주지 않으면(기본) 가리지 않는다 — 내부 파이프라인처럼 등급 개념이 없는 호출을 막지 않는다."""
-    vis = visible_scopes(scope_node_id) if scope_node_id else set()
+    vis = (visible_scopes(scope_node_id, include_descendants=include_descendants)
+           if scope_node_id else set())
     today = date.today().isoformat()
     out = [r for r in rows
            if is_visible(r, scope_node_id, tenant_id, entity_mode, vis, today,

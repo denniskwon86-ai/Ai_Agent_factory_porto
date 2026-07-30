@@ -141,9 +141,12 @@ async def list_assets(owner_dept_id: str = "", sensitivity: str = "", system_id:
       가려진 행에는 `redacted=True` 와 사유가 실려 나가므로, 화면은 "자료 없음"이 아니라
       "권한 필요"로 표시할 수 있다."""
     from core.enterprise_context.classification import clearance_of_scope
+    # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체인가 — 이것도 권한에서 파생한다.
+    from core.enterprise_context.scoping import may_drill_down
     rows = await asyncio.to_thread(data_catalog.list_assets, owner_dept_id, sensitivity,
                                    system_id, include_inactive, scope_node_id,
-                                   tenant_id, entity_mode, clearance_of_scope(p.scope))
+                                   tenant_id, entity_mode, clearance_of_scope(p.scope),
+                                   may_drill_down(p.scope))
     return {"status": "success", "data": rows}
 
 

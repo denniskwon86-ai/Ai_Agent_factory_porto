@@ -204,7 +204,9 @@ class ConnectorRegistry:
     def list_connectors(self, scope_node_id: str = "", tenant_id: str = "",
                         entity_mode: str = "REAL",
                         # [§6-2] 등급이 낮으면 제목만 남기고 내용을 가린다(빈 값 = 가리지 않는다)
-                        viewer_clearance: str = "") -> List[Dict[str, Any]]:
+                        viewer_clearance: str = "",
+                        # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체면 True(기본은 자기+상위만)
+                        include_descendants: bool = False) -> List[Dict[str, Any]]:
         conn = self._connect()
         try:
             rows = [dict(r) for r in conn.execute(
@@ -217,7 +219,8 @@ class ConnectorRegistry:
         for r in rows:
             r["enterprise_scope_id"] = r.get("owner_organization_id") or ""
         return filter_visible(rows, scope_node_id, tenant_id, entity_mode,
-                              viewer_clearance=viewer_clearance)
+                              viewer_clearance=viewer_clearance,
+                              include_descendants=include_descendants)
 
     # ── Query Contract ────────────────────────────────────────────────
     def add_contract(self, connector_id: str, query_name: str, allowed_fields: List[str],

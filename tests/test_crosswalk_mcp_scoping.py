@@ -30,7 +30,7 @@ def cw(tmp_path, monkeypatch):
     import core.enterprise_context.scoping as sc
     # BATTERY / SMELTING 은 형제, 둘 다 MNM 을 운영 상위로 둔다.
     monkeypatch.setattr(sc, "visible_scopes",
-                        lambda n: {"BATTERY", "MNM"} if n == "BATTERY"
+                        lambda n, **kw: {"BATTERY", "MNM"} if n == "BATTERY"
                         else ({"SMELTING", "MNM"} if n == "SMELTING" else {n}))
     monkeypatch.setattr(sc, "resolve_scope_ref", lambda ref: ref)
     return c

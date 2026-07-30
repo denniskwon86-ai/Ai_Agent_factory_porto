@@ -243,7 +243,7 @@ def test_successful_promotion_changes_the_note(sm):
 def test_runs_are_scope_isolated(sm, monkeypatch):
     """★ 남의 사업부 실험이 보이면 안 된다."""
     import core.enterprise_context.scoping as sc
-    monkeypatch.setattr(sc, "visible_scopes", lambda n: {n})
+    monkeypatch.setattr(sc, "visible_scopes", lambda n, **kw: {n})
     _run(sm, name="배터리 실험", enterprise_scope_id="node_batt")
     _run(sm, name="동제련 실험", enterprise_scope_id="node_copper")
     names = {r["name"] for r in sm.list_runs(scope_node_id="node_batt")}

@@ -175,7 +175,7 @@ def test_scope_filter_applies(reg, monkeypatch):
     """커넥터도 조직 자산이다 — 남의 사업부 연결을 보면 안 된다."""
     import core.enterprise_context.scoping as sc
     monkeypatch.setattr(sc, "visible_scopes",
-                        lambda n: {"BATTERY", "MNM"} if n == "BATTERY" else {n})
+                        lambda n, **kw: {"BATTERY", "MNM"} if n == "BATTERY" else {n})
     reg.register("bat-erp", "배터리 ERP", "db", owner_organization_id="BATTERY")
     reg.register("sml-erp", "제련 ERP", "db", owner_organization_id="SMELTING")
     ids = [c["connector_id"] for c in reg.list_connectors(scope_node_id="BATTERY")]
