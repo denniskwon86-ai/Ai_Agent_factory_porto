@@ -22,6 +22,20 @@ _LEGACY_DEPARTMENTS: List[Dict[str, Any]] = [
      "agents": ["Purchase_Agent"],   "domains": ["material", "bom"]},
     {"dept_id": "production",  "name_ko": "생산",     "template": "manufacturing-production",
      "agents": ["Production_Agent"], "domains": ["equipment", "bom", "simulation_node"]},
+    # ★★ [사용자 결정 2026-07-30] **생산부서는 사업부마다 각각 존재한다.**
+    #   종전에는 `production` 하나였고, ECM 은 그것을 사업부 2개(동제련·배터리소재)에 매핑했다.
+    #   그러면 `find_node_by_dept` 가 노드를 하나 고를 수밖에 없고, 시드가 같은 시각에 만들기
+    #   때문에 그 승자가 **비결정적**이었다 — 즉 정렬 tie-break 가 조직 권한을 결정했다(실측).
+    #   부서를 사업부별로 두면 매핑이 1:1 이 되어 그 모호함이 **데이터에서** 사라진다
+    #   (코드로 우회하면 그 부서는 영원히 조직 상속을 못 받는다).
+    #   `production` 은 상위(총괄)로 남기고 ECM 노드에는 매핑하지 않는다 — 매핑하면 모호함이
+    #   되살아난다.
+    {"dept_id": "production_copper",  "name_ko": "동제련 생산", "parent": "production",
+     "template": "manufacturing-production", "agents": ["Production_Agent"],
+     "domains": ["equipment", "bom", "simulation_node"]},
+    {"dept_id": "production_battery", "name_ko": "배터리소재 생산", "parent": "production",
+     "template": "manufacturing-production", "agents": ["Production_Agent"],
+     "domains": ["equipment", "bom", "simulation_node"]},
     {"dept_id": "quality",     "name_ko": "품질",     "template": "manufacturing-qc",
      "agents": ["Quality_Agent"],    "domains": ["quality_spec", "sensor_spec"]},
     {"dept_id": "logistics",   "name_ko": "물류",     "template": "manufacturing-production",
@@ -71,8 +85,11 @@ def seed_departments() -> Dict[str, Any]:
         if org_directory.get_department(d["dept_id"]):
             skipped.append(d["dept_id"])
             continue
+        # 상위 부서는 항목이 지정하면 그것을, 없으면 본사를 쓴다. `_LEGACY_DEPARTMENTS` 는
+        #   선언 순서대로 처리되므로 상위가 먼저 만들어진다(경로 계산이 상위를 요구한다).
         org_directory.create_department(
-            dept_id=d["dept_id"], name_ko=d["name_ko"], parent_id=_ROOT["dept_id"],
+            dept_id=d["dept_id"], name_ko=d["name_ko"],
+            parent_id=d.get("parent") or _ROOT["dept_id"],
             master_domains=d.get("domains", []), default_template_id=d.get("template", ""),
             domain_agents=d.get("agents", []), legacy_domain=d["dept_id"],
             aliases=[d["name_ko"]])

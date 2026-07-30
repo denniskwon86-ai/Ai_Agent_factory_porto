@@ -320,7 +320,9 @@ def test_api_resolved_profile_with_playbook_base(client):
 
 def test_api_resolved_profile_permission(client):
     app, c, repo, ids = client
-    _as(app, dept="production", readable={"production"})
+    # [사용자 결정 2026-07-30] 생산부서는 사업부마다 존재한다 — 배터리소재 사업부에 매핑된
+    #   부서는 `production_battery` 다(종전 `production` 하나는 두 사업부에 걸쳐 모호했다).
+    _as(app, dept="production_battery", readable={"production_battery"})
     ok = c.get(f"/api/v1/enterprise-context/contexts/{ids['MNM_BATTERY']}/resolved-profile")
     assert ok.status_code == 200
     denied = c.get(f"/api/v1/enterprise-context/contexts/{ids['MNM_SHARED']}/resolved-profile")

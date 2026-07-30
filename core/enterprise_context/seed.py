@@ -48,24 +48,29 @@ _TENANT = "tenant_default"
 #     연결한다(§10.1). 매핑이 없는 노드는 권한 판정에서 자체 열람 권한을 갖지 않는다.
 #
 #   ★★ [2026-07-30] **부서 매핑은 1:N 이 되면 권한을 결정할 수 없다.**
-#     종전에는 `production` 을 네 노드(사업부 2 + 공장 2)에 달아 뒀다. 그러면
+#     종전에는 `production` 하나를 네 노드(사업부 2 + 공장 2)에 달아 뒀다. 그러면
 #     `find_node_by_dept` 의 `ORDER BY updated_at DESC LIMIT 1` 승자가 조직 권한을 결정하고,
-#     시드는 네 노드를 같은 시각에 만들므로 그 승자가 **비결정적**이다 — 배터리 사용자가 동제련
-#     문맥으로 해석되거나 그 반대가 되며 오류는 나지 않는다(실측으로 확인).
-#     → 공장 2개의 매핑을 지웠다. 부서 체계에는 공장 단위 부서가 없어서(실측: `/hq/production/`
-#       하나) 그 매핑은 모호함만 늘리고 얻는 것이 없었다. 공장은 상위 사업부의 범위를 상속한다.
-#     → 남은 `production` 2건(사업부 2개)은 **의도적으로 남긴 실제 충돌**이다. 레거시 부서는
-#       하나인데 생산 사업부는 둘이므로, 어느 쪽을 뜻하는지는 **사람이 결정할 문제**다. 코드는
-#       추측하지 않고 `department_ambiguous` 로 해석을 포기하며(상속 없음),
-#       `repo.dept_mapping_conflicts()` 가 그 결정을 요구한다.
+#     시드는 네 노드를 같은 시각에 만들므로 그 승자가 **비결정적**이었다 — 배터리 사용자가 동제련
+#     문맥으로 해석되거나 그 반대가 되며 오류는 나지 않았다(실측으로 확인).
+#
+#     [사용자 결정] **생산부서는 사업부마다 각각 존재한다.** 그래서 부서 체계에
+#     `production_copper`·`production_battery` 를 두고(`core/org_seed.py`) 각 사업부에 **1:1** 로
+#     매핑한다. 모호함을 코드에서 우회하는 것과 **데이터에서 없애는 것**은 다르다 — 우회만 하면
+#     그 부서 사용자는 영원히 조직 상속을 못 받는다.
+#
+#     · 공장 2개는 매핑하지 않는다. 부서 체계에 공장 단위 부서가 없고, 공장은 상위 사업부의
+#       범위를 상속한다.
+#     · 상위 `production`(생산 총괄)도 매핑하지 않는다 — 매핑하면 1:N 모호함이 되살아난다.
 _NODES = [
     ("LS",            "LS",             "enterprise_group",      "",        "",          ""),
     ("LS_CABLE",      "LS전선",          "legal_entity",          "LS",      "C2830",     ""),
     ("LS_ELECTRIC",   "LS일렉트릭",       "legal_entity",          "LS",      "C2812",     ""),
     ("LS_MNM",        "LS MnM",         "legal_entity",          "LS",      "C2412",     ""),
     ("MNM_SHARED",    "전사공통",         "shared_service",        "LS_MNM",  "",          "hq"),
-    ("MNM_COPPER",    "동제련 사업부",     "business_division",     "LS_MNM",  "C2412",     "production"),
-    ("MNM_BATTERY",   "배터리소재 사업부",  "business_division",     "LS_MNM",  "C2013",     "production"),
+    ("MNM_COPPER",    "동제련 사업부",     "business_division",     "LS_MNM",  "C2412",
+     "production_copper"),
+    ("MNM_BATTERY",   "배터리소재 사업부",  "business_division",     "LS_MNM",  "C2013",
+     "production_battery"),
     ("BATT_PLANT_1",  "제1공장",          "site_plant",            "MNM_BATTERY", "C2013", ""),
     ("BATT_PLANT_2",  "제2공장",          "site_plant",            "MNM_BATTERY", "C2013", ""),
 ]

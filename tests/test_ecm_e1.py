@@ -130,9 +130,13 @@ def test_shared_service_grants_no_read_permission(seeded):
 
 
 def test_operating_parent_does_inherit(seeded):
-    """운영 보고선으로는 상속된다 — production 부서 권한이 매핑된 노드와 그 하위."""
+    """운영 보고선으로는 상속된다 — 사업부 생산부서 권한이 매핑된 노드와 그 하위.
+
+    [사용자 결정 2026-07-30] 생산부서는 사업부마다 존재한다. `production_battery` 는
+    배터리소재 사업부에 1:1 로 매핑되므로 그 사업부와 하위 공장이 보인다 —
+    종전처럼 `production` 하나였다면 어느 사업부가 보이는지가 tie-break 로 갈렸다."""
     repo, ids, res = seeded
-    prod = _p(dept="production", readable={"production"})
+    prod = _p(dept="production_battery", readable={"production_battery"})
     readable = res.readable_node_ids(prod)
     assert ids["MNM_BATTERY"] in readable
     assert ids["BATT_PLANT_1"] in readable and ids["BATT_PLANT_2"] in readable
@@ -142,7 +146,7 @@ def test_operating_parent_does_inherit(seeded):
 def test_unmapped_nodes_grant_nothing(seeded):
     """부서 매핑이 없는 노드(기업집단·법인)는 그 자체로 열람 권한을 주지 않는다(fail-closed)."""
     repo, ids, res = seeded
-    prod = _p(dept="production", readable={"production"})
+    prod = _p(dept="production_battery", readable={"production_battery"})
     readable = res.readable_node_ids(prod)
     assert ids["LS"] not in readable and ids["LS_MNM"] not in readable
 
@@ -157,7 +161,7 @@ def test_unrestricted_sees_all(seeded):
 def test_tree_includes_ancestors_as_path_only(seeded):
     """★ 조상을 빼면 트리가 조각나고, 열람 가능으로 표시하면 권한이 부풀려진다 — 구분해서 담는다."""
     repo, ids, res = seeded
-    roots = res.visible_tree(_p(dept="production", readable={"production"}))
+    roots = res.visible_tree(_p(dept="production_battery", readable={"production_battery"}))
     flat = {}
 
     def walk(n):
@@ -265,10 +269,10 @@ def test_virtual_nodes_do_not_appear_in_real_tree(seeded):
         base_entity_id=base.entity_id, status=STATUS_ACTIVE))
     repo.upsert_node(OrganizationNode(entity_id=v.entity_id, node_type="site_plant",
                                       name_ko="가상 제3공장", code="BATT_PLANT_3",
-                                      dept_id="production", status=STATUS_ACTIVE))
-    real = res.readable_node_ids(_p(dept="production", readable={"production"}),
+                                      dept_id="production_battery", status=STATUS_ACTIVE))
+    real = res.readable_node_ids(_p(dept="production_battery", readable={"production_battery"}),
                                  entity_mode="REAL")
-    virt = res.readable_node_ids(_p(dept="production", readable={"production"}),
+    virt = res.readable_node_ids(_p(dept="production_battery", readable={"production_battery"}),
                                  entity_mode="VIRTUAL")
     assert ids["BATT_PLANT_1"] in real and ids["BATT_PLANT_1"] not in virt
     assert len(virt) == 1, "가상 문맥에서는 가상 노드만 보인다"
@@ -281,25 +285,27 @@ def test_resolve_scope_ref_handles_both_forms(seeded):
     by_node = res.resolve_scope_ref(ids["MNM_BATTERY"])
     assert by_node["kind"] == "ecm_node" and by_node["resolved"] is True
 
-    # ★★ [2026-07-30] `production` 은 **의도적으로 모호한** 부서다 — 레거시 부서는 하나인데
-    #   생산 사업부는 둘(동제련·배터리소재)이다. 하나를 고르면 `LIMIT 1` 의 tie-break 가 조직
-    #   권한을 결정하고, 시드는 같은 시각에 만들어지므로 그 승자가 **비결정적**이다.
-    #   → 해석을 포기하고(상속 없음) 후보를 돌려준다. 결정은 사람이 한다.
-    ambiguous = res.resolve_scope_ref("production")
-    assert ambiguous["kind"] == "department_ambiguous"
-    assert ambiguous["resolved"] is False and ambiguous["node_id"] == ""
-    assert {c["code"] for c in ambiguous["candidates"]} == {"MNM_COPPER", "MNM_BATTERY"}
+    # ★★ [사용자 결정 2026-07-30] **생산부서는 사업부마다 각각 존재한다.**
+    #   종전에는 `production` 하나가 사업부 2개에 매핑돼 `LIMIT 1` tie-break 가 조직 권한을
+    #   결정했다(비결정적). 부서를 사업부별로 두어 매핑이 1:1 이 되면 그 모호함이 **데이터에서**
+    #   사라진다 — 코드 우회만 하면 그 부서 사용자는 영원히 조직 상속을 못 받는다.
+    for dept, code in (("production_copper", "MNM_COPPER"),
+                       ("production_battery", "MNM_BATTERY")):
+        r = res.resolve_scope_ref(dept)
+        assert r["kind"] == "department_mapped" and r["resolved"] is True, dept
+        assert r["node_id"] == ids[code], f"{dept} → {code} 매핑이 어긋났다"
 
-    # 1:1 로 매핑된 부서는 종전대로 노드로 승격된다(하위호환).
     by_dept = res.resolve_scope_ref("hq")
     assert by_dept["kind"] == "department_mapped" and by_dept["node_id"]
     assert by_dept["resolved"] is True, "노드로 승격 가능한 상태"
 
-    # 충돌 목록이 **고쳐야 할 일감**으로 드러난다 — 코드 우회만 하면 그 부서는 영원히
-    #   조직 상속을 못 받는다.
-    conflicts = repo.dept_mapping_conflicts()
-    assert [c["dept_id"] for c in conflicts] == ["production"]
-    assert conflicts[0]["node_count"] == 2
+    # ★ 상위 `production`(생산 총괄)은 노드에 매핑하지 않는다 — 매핑하면 1:N 모호함이 되살아난다.
+    umbrella = res.resolve_scope_ref("production")
+    assert umbrella["kind"] == "department" and umbrella["resolved"] is False
+
+    # ★★ 충돌이 **하나도 없어야** 한다. 이 목록이 비지 않으면 어딘가에서 정렬 tie-break 가
+    #   조직 권한을 결정하고 있다는 뜻이다.
+    assert repo.dept_mapping_conflicts() == []
 
     unknown = res.resolve_scope_ref("nonexistent_dept")
     assert unknown["kind"] == "department" and unknown["resolved"] is False
@@ -387,7 +393,7 @@ def test_api_tree_is_permission_filtered(client):
     _as(app, edit_org=True)
     c.post("/api/v1/enterprise-context/seed-example")
 
-    _as(app, dept="production", readable={"production"})
+    _as(app, dept="production_battery", readable={"production_battery"})
     roots = c.get("/api/v1/enterprise-context/tree").json()["data"]
     assert len(roots) == 1
     flat = []
@@ -423,7 +429,10 @@ def test_api_context_select_validates_permission(client):
     _as(app, edit_org=True)
     ids = c.post("/api/v1/enterprise-context/seed-example").json()["data"]["node_ids"]
 
-    _as(app, dept="production", readable={"production"})
+    # 상위 `production`(생산 총괄)도 읽을 수 있는 주체로 둔다 — 아래 하위호환 경로가 그 부서를
+    #   쓴다(사업부별 생산부서와 달리 총괄은 ECM 노드에 매핑되지 않는다).
+    _as(app, dept="production_battery",
+        readable={"production_battery", "production"})
     ok = c.post("/api/v1/enterprise-context/contexts/select",
                 json={"enterprise_scope_id": ids["MNM_BATTERY"]})
     assert ok.status_code == 200
