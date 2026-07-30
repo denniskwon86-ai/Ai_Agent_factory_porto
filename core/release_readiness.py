@@ -45,8 +45,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+# 라이브러리 경로는 **단일 지점**에서 온다(`core/library_paths.py`). 여기서 다시 선언하면
+#   게시(`factory_control`)·사용여부(`program_lifecycle`)와 어긋나 "존재하는 릴리스를 없다"고
+#   판정하게 된다. 값이 아니라 함수를 쓰는 이유는 그 모듈 docstring 에 있다.
+from core import library_paths
+
 _DB_PATH = os.path.join("data", "workspace.db")   # 워크스페이스와 같은 저장소(같은 수명주기)
-_LIBRARY_DIR = "library"
 
 #: §8.2 게이트 체인. 순서가 곧 진행 순서다.
 GATE_STEPS = ("artifacts", "traceability", "tests", "permission_contract",
@@ -75,7 +79,7 @@ def _now() -> str:
 
 
 def _load_release(release_id: str) -> Optional[dict]:
-    p = os.path.join(_LIBRARY_DIR, release_id, "release.json")
+    p = library_paths.release_json(release_id)
     if not os.path.exists(p):
         return None
     try:

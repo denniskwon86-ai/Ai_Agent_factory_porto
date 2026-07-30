@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core import program_lifecycle as plmod
+from core import library_paths
 from core.program_lifecycle import (ACTIVE, DEPRECATED, DISABLED,
                                     ProgramLifecycleError, ProgramLifecycle)
 
@@ -37,12 +37,12 @@ def _publish(lib, release_id):
 def pl(tmp_path, monkeypatch):
     lib = tmp_path / "library"
     lib.mkdir()
-    monkeypatch.setattr(plmod, "_LIBRARY_DIR", str(lib), raising=False)
+    # 라이브러리 경로는 단일 지점만 바꾼다(`core/library_paths`). `raising=True`(기본)로 두어
+    #   상수 이름이 바뀌면 조용히 실제 `library/` 를 보는 대신 즉시 실패하게 한다.
+    monkeypatch.setattr(library_paths, "_LIBRARY_DIR", str(lib))
     _publish(lib, "app-a")
     _publish(lib, "app-b")
-    inst = ProgramLifecycle(db_path=str(tmp_path / "pl.db"))
-    inst._lib = lib
-    return inst
+    return ProgramLifecycle(db_path=str(tmp_path / "pl.db"))
 
 
 class _NoDeps:

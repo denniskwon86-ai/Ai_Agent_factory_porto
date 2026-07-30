@@ -19,10 +19,12 @@ from core.enterprise_context import EnterpriseContext
 from typing import Optional
 
 from core.async_orchestrator import orchestrator
+# 배포된 최종 결과물 보관소의 경로는 **단일 지점**에서 온다(`core/library_paths.py`).
+#   여기서 `LIBRARY_DIR = "library"` 로 다시 선언하면 게시는 이 경로에 쓰고 사용여부 제어는
+#   다른 경로를 보는 상태가 되어, 실제 프로그램이 "존재하지 않는 프로그램"으로 거부된다.
+from core import library_paths
 
 router = APIRouter(prefix="/api/v1/factory")
-
-LIBRARY_DIR = "library"  # 배포된 최종 결과물 보관소
 
 class SprintStartRequest(BaseModel):
     task_id: str
@@ -1231,7 +1233,7 @@ async def create_release(project_id: str,
         "owner_dept_id": _rel_own.get("owner_dept_id", ""),
         "visibility": _rel_own.get("visibility", "dept"),
     }
-    rel_dir = os.path.join(LIBRARY_DIR, release_id)
+    rel_dir = library_paths.release_dir(release_id)
     os.makedirs(rel_dir, exist_ok=True)
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
         json.dump(release, f, ensure_ascii=False, indent=2)
@@ -1441,7 +1443,7 @@ async def resimulate(project_id: str, req: ResimulateRequest,
 @router.get("/library/list")
 async def list_releases():
     """라이브러리에 보관된 결과물 목록(요약)."""
-    os.makedirs(LIBRARY_DIR, exist_ok=True)
+    os.makedirs(library_paths.library_dir(), exist_ok=True)
 
     # ★ [M3] 승격 상태를 목록에 함께 준다. 이것이 없으면 승격이 별도 테이블에만 남아
     #   **"이 앱이 전사 앱인가"를 라이브러리에서 알 수 없다** — 승격 게이트가 통과 기록만
@@ -1466,8 +1468,8 @@ async def list_releases():
         print(f"⚠️ [library] 사용여부 조회 실패(목록은 계속): {e}")
 
     items = []
-    for rid in os.listdir(LIBRARY_DIR):
-        rp = os.path.join(LIBRARY_DIR, rid, "release.json")
+    for rid in os.listdir(library_paths.library_dir()):
+        rp = library_paths.release_json(rid)
         if os.path.exists(rp):
             try:
                 with open(rp, "r", encoding="utf-8") as f:
@@ -1506,7 +1508,7 @@ async def get_release(release_id: str, p: Principal = Depends(current_principal)
 
     ⚠️ 사용 중단된 프로그램은 실행 payload 를 제외하고 준다(아래 lifecycle 블록 참조)."""
     _safe_id(release_id, "release_id")  # 경로 이탈로 임의 release.json 읽기 방지
-    rp = os.path.join(LIBRARY_DIR, release_id, "release.json")
+    rp = library_paths.release_json(release_id)
     if not os.path.exists(rp):
         raise HTTPException(status_code=404, detail="결과물을 찾을 수 없습니다.")
     try:
@@ -1573,7 +1575,7 @@ async def delete_release(release_id: str, force: bool = False,
     그래도 지워야 하는 경우(오게시·시험 산출물)를 위해 `force=true` 를 남겨두되,
     **IT 관리자 + 이미 비활성 상태 + 의존 없음**을 모두 요구한다."""
     _safe_id(release_id, "release_id")  # 경로 이탈로 임의 디렉토리 삭제 방지
-    rel_dir = os.path.join(LIBRARY_DIR, release_id)
+    rel_dir = library_paths.release_dir(release_id)
     if not os.path.isdir(rel_dir):
         raise HTTPException(status_code=404, detail="결과물을 찾을 수 없습니다.")
 

@@ -28,10 +28,13 @@ PROJ = "ready_app"
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    import core.release_readiness as rr
+    # 라이브러리 경로는 단일 지점(`core/library_paths`)이다 — 여기 한 줄이 게시·운영준비·
+    #   사용여부 세 모듈 전부를 tmp 로 돌린다. `raising=True`(기본)로 두어, 상수 이름이
+    #   바뀌면 **조용히 실로그를 보는 대신 테스트가 즉시 실패**하게 한다.
+    from core import library_paths
     lib = tmp_path / "library"
     lib.mkdir()
-    monkeypatch.setattr(rr, "_LIBRARY_DIR", str(lib), raising=False)
+    monkeypatch.setattr(library_paths, "_LIBRARY_DIR", str(lib))
 
     md = MasterData(db_path=str(tmp_path / "m.db"))
     ws = WorkspacePromotion(db_path=str(tmp_path / "ws.db"))
@@ -40,11 +43,9 @@ def env(tmp_path, monkeypatch):
     import core.quality_telemetry as qt
     monkeypatch.setattr(qt, "_LOG_PATH", str(tmp_path / "q.jsonl"), raising=False)
 
-    # [사용자 결정 2026-07-30] 롤백은 이제 프로그램을 실제로 비활성화한다. 라이브러리 경로가
-    #   모듈마다 따로 선언돼 있어 여기서도 맞춰준다(안 맞추면 롤백이 "존재하지 않는 프로그램"
-    #   으로 조용히 실패한다 — 그 실패가 응답에 드러나는지도 아래에서 검증한다).
-    from core.program_lifecycle import program_lifecycle
-    monkeypatch.setattr(program_lifecycle, "library_dir", str(lib), raising=False)
+    # [사용자 결정 2026-07-30] 롤백은 이제 프로그램을 실제로 비활성화한다. 그 경로도 위
+    #   `library_paths` 패치를 따라오므로 여기서 따로 맞춰줄 것이 없다 — 모듈마다 경로를
+    #   맞춰주던 코드가 있었다면, 그건 어긋남이 남아 있다는 신호다.
     return rd, ws, DataLineage(md), lib, qt, tmp_path
 
 

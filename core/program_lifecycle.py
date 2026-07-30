@@ -43,8 +43,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+# 라이브러리 경로는 **단일 지점**에서 온다(`core/library_paths.py`). 이 모듈이 경로를 따로
+#   들고 있으면 게시된 프로그램을 "존재하지 않는다"며 제어를 거부한다 — 그러면 사고를 낸
+#   프로그램을 IT 관리자가 끌 수 없다.
+from core import library_paths
+
 _DB_PATH = os.path.join("data", "program_lifecycle.db")
-_LIBRARY_DIR = "library"
 
 ACTIVE = "active"
 DEPRECATED = "deprecated"
@@ -88,12 +92,11 @@ def _now() -> str:
 
 
 class ProgramLifecycle:
-    def __init__(self, db_path: str = None, library_dir: str = ""):
+    def __init__(self, db_path: str = None):
         self.db_path = db_path or _DB_PATH
-        # ⚠️ 라이브러리 경로가 `release_readiness` · `factory_control` 에도 각각 선언돼 있다.
-        #   세 곳이 어긋나면 이 모듈은 실제 프로그램을 "존재하지 않는다"며 제어를 거부한다 —
-        #   빈 문자열이면 모듈 상수를 **호출 시점에** 읽어, 테스트가 상수를 바꿔도 따라간다.
-        self.library_dir = library_dir or ""
+        # 라이브러리 경로 주입 인자(`library_dir`)는 제거했다 — 그 인자는 세 모듈이 경로를
+        #   각자 선언하던 시절에 테스트가 어긋남을 우회하려고 있던 것이고, 단일 지점
+        #   (`library_paths`)이 생긴 뒤로는 **우회 경로가 곧 새로운 어긋남**이다.
         self._ready = ""
 
     def _connect(self):
@@ -334,8 +337,7 @@ class ProgramLifecycle:
     def _release_exists(self, release_id: str) -> bool:
         if not release_id or any(c in release_id for c in ("/", "\\", "..")):
             return False
-        base = self.library_dir or _LIBRARY_DIR
-        return os.path.exists(os.path.join(base, release_id, "release.json"))
+        return os.path.exists(library_paths.release_json(release_id))
 
     def _audit(self, release_id: str, frm: str, to: str, actor: str, reason: str,
                dep: Dict[str, Any]) -> None:
