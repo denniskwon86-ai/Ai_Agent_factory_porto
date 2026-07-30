@@ -136,6 +136,22 @@ def test_self_approval_is_refused(sc):
         inst.approve_enterprise_shared("business_term", tid, approver="owner@ls")
 
 
+def test_self_approval_is_refused_even_when_a_custom_reason_is_given(sc):
+    """★★ [2026-07-30 브라우저 실측으로 잡은 결함] 신청자 판정을 **자유 텍스트**에 걸면,
+    호출자가 사유를 주는 순간 그 판정이 사라진다.
+
+    처음 구현은 사유 문구("전사 공용 신청")로 신청자를 찾았다. API 로 실제 호출해 보니
+    `reason` 을 주면 문구가 밀려나 신청자를 못 찾고 **자기 승인이 200 으로 통과**했다.
+    단위 테스트는 사유 없이 호출해서 통과했다 — 그래서 이 테스트는 **사유를 준다.**"""
+    inst, _, tid, _ = sc
+    inst.set_owner("business_term", tid, OWNER, actor="owner@ls")
+    inst.request_enterprise_shared("business_term", tid, actor="owner@ls",
+                                   reason="전사 표준 용어로 승격 요청")
+
+    with pytest.raises(ScopeContractError, match="자기 승인은 승인이 아닙니다"):
+        inst.approve_enterprise_shared("business_term", tid, approver="owner@ls")
+
+
 def test_approval_by_another_person_opens_enterprise_wide(sc):
     """★★ 승인된 전사 공용은 전 조직에서 보인다 — 그리고 승인자가 기록된다."""
     inst, _, tid, md = sc

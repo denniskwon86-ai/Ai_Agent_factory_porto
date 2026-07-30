@@ -399,3 +399,52 @@ def test_reference_routes_are_reachable():
     # 승인 라우트는 존재해야 한다(자산이 없으면 400 — 404 가 아니다).
     r = c.post("/api/v1/reference/assets/REF-NOPE/approve", json={})
     assert r.status_code != 404
+
+
+def test_stale_judgment_version_triggers_a_rescan(tmp_path):
+    """★★ [2026-07-30 실측] 판정 의미가 바뀌었는데 버전을 올리지 않으면, 옛 판정이 **영구히**
+    살아남는다.
+
+    브라우저로 API 를 확인하다 발견했다 — `/reference/summary` 가 `supported: 67` 을 보고하는데
+    실제로 열리는 것은 16건이었다. 저장된 1.0 파일이 확장자 기준 판정을 들고 있었기 때문이다.
+    숫자가 틀린 것에서 끝나지 않는다: 그 숫자를 보고 67건을 승인하면 "지식팩에 67건이 들어갔다"고
+    믿게 된다."""
+    import json as _json
+    from core.reference_registry import REGISTRY_VERSION, load_registry
+
+    root = tmp_path / "reference"
+    root.mkdir()
+    (root / "이름만_docx.docx").write_bytes(b"\xd0\xcf\x11\xe0 legacy")
+    target = tmp_path / "reg.json"
+
+    # 옛 버전 + 옛 판정(확장자 기준이라 SUPPORTED)으로 위조한 등록부.
+    stale = build_registry(root, target)
+    stale["registry_version"] = "1.0"
+    stale["assets"][0]["extraction_status"] = "SUPPORTED"
+    stale["assets"][0]["approval_status"] = "APPROVED"       # 사람이 넣은 결정
+    stale["assets"][0]["approved_by"] = "cdo@ls"
+    target.write_text(_json.dumps(stale, ensure_ascii=False), encoding="utf-8")
+
+    fresh = load_registry(target, reference_root=root)
+    assert fresh["registry_version"] == REGISTRY_VERSION
+    assert fresh["assets"][0]["extraction_status"] == "CONVERSION_REQUIRED", \
+        "옛 판정이 그대로 살아남았다"
+    # ★ 사람이 넣은 결정은 재스캔에도 보존된다 — 안 그러면 아무도 재스캔을 신뢰하지 않는다.
+    assert fresh["assets"][0]["approval_status"] == "APPROVED"
+    assert fresh["assets"][0]["approved_by"] == "cdo@ls"
+
+
+def test_same_version_is_not_rescanned(tmp_path):
+    """★ 매번 재스캔하면 68건 해시 계산이 반복돼 API 가 느려진다 — 버전이 같으면 그대로 쓴다."""
+    from core.reference_registry import load_registry
+
+    root = tmp_path / "reference"
+    root.mkdir()
+    (root / "메모.md").write_text("내용", encoding="utf-8")
+    target = tmp_path / "reg.json"
+    first = build_registry(root, target)
+
+    (root / "나중에추가.md").write_text("새 파일", encoding="utf-8")
+    again = load_registry(target, reference_root=root)
+    assert again["total"] if "total" in again else True
+    assert len(again["assets"]) == len(first["assets"]) == 1, "버전이 같은데 재스캔됐다"

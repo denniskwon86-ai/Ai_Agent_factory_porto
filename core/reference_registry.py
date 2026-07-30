@@ -40,7 +40,13 @@ from typing import Any
 
 REFERENCE_ROOT = Path("docs/reference")
 REGISTRY_PATH = Path("data/reference_registry.json")
-REGISTRY_VERSION = "1.0"
+#: 등록부 스키마·**판정 의미** 버전.
+#: ★ [2026-07-30] 1.0 → 1.1: `extraction_status` 를 확장자 기준에서 **내용(시그니처) 기준**으로
+#:   바꿨고, `owner_org_id` 를 `scope_code` 에서 파생시켰다. 즉 **같은 필드의 뜻이 달라졌다.**
+#:   판정 의미가 바뀌면 버전을 올려야 한다 — 그러지 않으면 1.0 파일이 옛 판정을 그대로 들고
+#:   살아남는다(실측: API 가 `supported 67` 을 계속 보고했고, 실제로 열리는 것은 16건이었다).
+#:   `load_registry()` 가 버전 불일치를 보면 **다시 스캔한다**(아래).
+REGISTRY_VERSION = "1.1"
 
 PACKS: dict[str, dict[str, Any]] = {
     "manufacturing-standards": {
@@ -224,10 +230,41 @@ def build_registry(reference_root: Path = REFERENCE_ROOT, registry_path: Path = 
     return registry
 
 
-def load_registry(registry_path: Path = REGISTRY_PATH) -> dict[str, Any]:
+def load_registry(registry_path: Path = REGISTRY_PATH,
+                  reference_root: Path = REFERENCE_ROOT) -> dict[str, Any]:
+    """등록부를 읽는다. **판정 의미가 바뀐 버전이면 다시 스캔한다.**
+
+    ★ [2026-07-30 실측] 이 재스캔이 없으면 옛 판정이 영구히 살아남는다. 브라우저로 API 를
+      확인하다 발견했다 — `/reference/summary` 가 `supported: 67` 을 보고하는데 실제로 열리는
+      것은 16건이었다. 저장된 1.0 파일이 확장자 기준 판정을 들고 있었기 때문이다.
+      숫자가 틀린 것에서 끝나지 않는다: 그 숫자를 보고 **67건을 승인**하면 "지식팩에 67건이
+      들어갔다"고 믿게 된다.
+
+    ⚠️ 재스캔은 68건의 해시를 다시 계산하므로 첫 호출이 몇 초 걸린다. 사람이 결정을 내리는
+      근거를 최신으로 만드는 값으로는 싸다 — 그리고 **한 번만** 일어난다(스캔 결과에 새 버전이
+      기록된다). 사람이 손으로 넣은 승인·소유·비고는 재스캔에도 보존된다."""
     if not registry_path.exists():
-        return build_registry(registry_path=registry_path)
-    return json.loads(registry_path.read_text(encoding="utf-8"))
+        return build_registry(reference_root=reference_root, registry_path=registry_path)
+    try:
+        doc = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"⚠️ [reference_registry] 등록부를 읽을 수 없어 다시 스캔합니다: {e}")
+        return build_registry(reference_root=reference_root, registry_path=registry_path)
+    if str(doc.get("registry_version", "")) != REGISTRY_VERSION:
+        print(f"ℹ️ [reference_registry] 등록부 판정 버전이 다릅니다"
+              f"({doc.get('registry_version')} → {REGISTRY_VERSION}) — 다시 스캔합니다. "
+              f"`extraction_status` 를 확장자가 아니라 **내용**으로 판정하므로 옛 결과를 그대로 "
+              f"쓰면 열리지 않는 파일을 '추출 가능'으로 보고합니다(승인·색인 판단의 근거가 "
+              f"틀립니다). 승인·소유·비고는 보존됩니다.")
+        try:
+            return build_registry(reference_root=reference_root, registry_path=registry_path)
+        except Exception as e:
+            # 원본 폴더가 없는 환경(배포본만 있는 경우 등)에서는 재스캔할 수 없다.
+            #   그때는 옛 등록부라도 쓰되 **그 사실을 숨기지 않는다.**
+            print(f"⚠️ [reference_registry] 재스캔 실패 — 옛 판정(v{doc.get('registry_version')})을 "
+                  f"그대로 사용합니다. `extraction_status` 를 신뢰하지 마십시오: {e}")
+            doc["stale_judgment"] = True
+    return doc
 
 
 def registry_summary(registry_path: Path = REGISTRY_PATH) -> dict[str, Any]:

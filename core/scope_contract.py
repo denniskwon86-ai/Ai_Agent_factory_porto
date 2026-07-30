@@ -279,7 +279,10 @@ class ScopeContract:
                              "approval_status": APPROVAL_PENDING, "approved_by": "",
                              "effective_from": _now()[:10]},
                             actor, self._event_scope(),
-                            reason or f"전사 공용 신청(신청자: {actor})")
+                            # 표지를 **항상** 앞에 붙인다. 호출자의 사유가 표지를 밀어내면
+                            #   신청 기록을 찾을 수 없게 된다(실측으로 확인한 결함).
+                            f"전사 공용 신청(신청자: {actor})"
+                            + (f" — {reason}" if reason else ""))
 
     def approve_enterprise_shared(self, resource_type: str, resource_id: str, approver: str,
                                   reason: str = "", requested_by: str = "") -> Dict[str, Any]:
@@ -329,13 +332,26 @@ class ScopeContract:
         """감사로그에서 이 자원의 마지막 전사 공용 신청자를 찾는다.
 
         ★ 신청자를 별도 컬럼에 두지 않은 이유: 그러면 감사로그와 두 곳에 같은 사실이 남고,
-          두 곳은 어긋난다. 감사로그가 진실원본이다(append-only)."""
+          두 곳은 어긋난다. 감사로그가 진실원본이다(append-only).
+
+        ⚠️ **[2026-07-30 브라우저 실측으로 잡은 결함]** 처음에는 사유 문구
+          ("전사 공용 신청")로 찾았다. 그런데 호출자가 `reason` 을 주면 그 문구가 사라져
+          신청자를 못 찾고, **자기 승인이 그대로 통과했다**(API 로 확인: 200). 단위 테스트는
+          사유 없이 호출해서 통과했다 — 사람이 쓰는 자유 텍스트에 보안 판정을 걸면 그 판정은
+          문구가 바뀌는 순간 사라진다.
+          → 이제 **구조적 신호**로 찾는다: 이 자원의 `approval_status` 를 `PENDING` 으로 바꾼
+            변경 이벤트(diff 는 감사 `detail` 에 남는다). 문구가 무엇이든 상태 전이는 남는다."""
         try:
             from core.enterprise_context import audit
             for e in audit.recent(limit=500):
-                if (e.get("resource_id") == resource_id
-                        and e.get("resource_type") == resource_type
-                        and "전사 공용 신청" in (e.get("reason") or "")):
+                if (e.get("resource_id") != resource_id
+                        or e.get("resource_type") != resource_type):
+                    continue
+                detail = e.get("detail") or ""
+                if "approval_status" in detail and f"'{APPROVAL_PENDING}'" in detail:
+                    return e.get("actor") or ""
+                # 하위호환: 예전 기록은 사유 문구만 갖고 있다.
+                if "전사 공용 신청" in (e.get("reason") or ""):
                     return e.get("actor") or ""
         except Exception as e:
             print(f"⚠️ [scope_contract] 신청자 조회 실패(자기 승인 검사 불가): {e}")
