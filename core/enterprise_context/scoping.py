@@ -71,14 +71,37 @@ def visible_scopes(scope_node_id: str) -> Set[str]:
     """이 조직이 볼 수 있는 범위 집합 = 자기 자신 + 운영 상위 조상.
 
     조상 해석에 실패하면 **자기 자신만** 돌려준다(fail-closed). 실패를 '전부 보임'으로
-    처리하면 리솔버 장애가 곧 전사 유출이 된다."""
+    처리하면 리솔버 장애가 곧 전사 유출이 된다.
+
+    ★ [2026-07-30] 범위는 세 형태로 저장돼 있다(D-005 의 두 형태 + 조직 코드): `node_id` ·
+      `code`(LS_MNM·MNM_BATTERY) · 부서 id. 그래서 입력을 노드로 정규화한 뒤 조상을 구하고,
+      **각 조상의 node_id 와 code 를 모두** 집합에 넣는다.
+      ⚠️ 한 형태만 넣으면 다른 형태로 저장된 행이 매칭되지 않아 **상속이 조용히 끊긴다** —
+        사업부가 전사 표준을 못 보게 되고, 오류는 어디에도 나지 않는다(실측: 참고문서 등록부
+        68건이 코드로 저장돼 조상 해석에 실패하고 있었다)."""
     if not scope_node_id:
         return set()
     out = {scope_node_id}
     try:
         from core.enterprise_context.models import REL_OPERATING_PARENT
         from core.enterprise_context.resolver import ecm_resolver
-        out |= set(ecm_resolver.ancestors(scope_node_id, REL_OPERATING_PARENT))
+        # 입력이 코드·부서 id 여도 노드로 정규화한다. 정규화 없이 조상을 물으면 빈 목록이 오고,
+        #   빈 목록은 "상위가 없다"와 "해석하지 못했다"를 구분하지 않는다.
+        ref = ecm_resolver.resolve_scope_ref(scope_node_id)
+        node_id = ref.get("node_id") or scope_node_id
+        if ref.get("node_id"):
+            out.add(ref["node_id"])
+        if ref.get("code"):
+            out.add(ref["code"])
+        for anc in ecm_resolver.ancestors(node_id, REL_OPERATING_PARENT):
+            out.add(anc)
+            # 조상의 코드도 넣는다 — 행이 코드로 저장돼 있으면 node_id 만으로는 매칭되지 않는다.
+            try:
+                n = ecm_resolver.repo.get_node(anc)
+                if n is not None and getattr(n, "code", ""):
+                    out.add(n.code)
+            except Exception:
+                pass
     except Exception as e:
         print(f"⚠️ [scoping] 조상 해석 실패 — 자기 범위만 적용(fail-closed): {e}")
     return out

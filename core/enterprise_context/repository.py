@@ -261,11 +261,29 @@ class EcmRepository:
 
     def find_node_by_dept(self, dept_id: str) -> Optional[OrganizationNode]:
         """부서 id 로 ECM 노드를 찾는다 — 기존 `enterprise_scope_id`(부서 id)를 노드로 승격하는
-        경로(ECM-lite → E1 이행). 매핑이 없으면 None 이고 호출부는 부서 체계를 그대로 쓴다."""
+        경로(ECM-lite → E1 이행). 매핑이 없으면 None 이고 호출부는 부서 체계를 그대로 쓴다.
+
+        ⚠️ 같은 `dept_id` 를 여러 노드가 공유한다(실측: `production` 을 4개 노드가 쓴다).
+          그래서 이 조회는 "대표 노드 하나"를 돌려주는 것이며 권한 판정의 1차 근거로는 약하다 —
+          `code` 로 찾는 `find_node_by_code()` 가 있으면 그쪽이 정확하다."""
         if not dept_id:
             return None
         rows = self._query("SELECT * FROM organization_nodes WHERE dept_id=? AND status=? "
                            "ORDER BY updated_at DESC LIMIT 1", (dept_id, STATUS_ACTIVE))
+        return OrganizationNode.model_validate(rows[0]) if rows else None
+
+    def find_node_by_code(self, code: str) -> Optional[OrganizationNode]:
+        """**조직 코드**(`LS_MNM`·`MNM_BATTERY` 등)로 노드를 찾는다.
+
+        ★ [2026-07-30 실측] 이 조회가 없어서 코드가 **제3의 미해석 형태**로 남아 있었다.
+          `organization_nodes.code` 에 의미 코드가 들어 있는데(LS_MNM·MNM_BATTERY·MNM_COPPER)
+          해석기는 `node_id` 와 `dept_id` 만 봤다. 그 결과 코드로 저장된 범위는 조상 해석에
+          실패해 **자기 자신만** 보게 되고(fail-closed), 사업부가 전사 표준 문서를 못 보는
+          상태가 **조용히** 만들어졌다 — 참고문서 등록부 68건이 실제로 그 상태였다."""
+        if not code:
+            return None
+        rows = self._query("SELECT * FROM organization_nodes WHERE code=? AND status=? "
+                           "ORDER BY updated_at DESC LIMIT 1", (code, STATUS_ACTIVE))
         return OrganizationNode.model_validate(rows[0]) if rows else None
 
     def list_nodes(self, tenant_id: str = "", status: str = "",

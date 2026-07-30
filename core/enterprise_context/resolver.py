@@ -174,7 +174,7 @@ class EcmResolver:
 
     # ── ③ 문맥 해석 (ECM-lite → E1 이행) ──────────────────────────────────
     def resolve_scope_ref(self, scope_ref: str) -> Dict[str, Any]:
-        """`enterprise_scope_id` 하나를 해석한다. **부서 id 와 ECM node_id 를 모두 받는다.**
+        """`enterprise_scope_id` 하나를 해석한다. **node_id · 조직 코드 · 부서 id 를 모두 받는다.**
 
         ECM-lite 단계에서 이 필드에 부서 id 를 담아 저장한 데이터가 이미 있다. E1 이 왔다고
         그것을 깨면 기존 상담·Blueprint·프로젝트의 범위가 전부 무효가 된다. 그래서 둘 다
@@ -185,7 +185,20 @@ class EcmResolver:
         node = self.repo.get_node(scope_ref)
         if node:
             return {"kind": "ecm_node", "node_id": node.node_id, "dept_id": node.dept_id,
-                    "name_ko": node.name_ko, "node_type": node.node_type, "resolved": True}
+                    "code": node.code, "name_ko": node.name_ko,
+                    "node_type": node.node_type, "resolved": True}
+        # ★ [2026-07-30] **조직 코드**도 해석한다. `organization_nodes.code` 에 의미 코드가
+        #   들어 있는데(LS_MNM·MNM_BATTERY) 여기서 보지 않아 제3의 미해석 형태로 남아 있었다.
+        #   해석되지 않으면 조상 해석이 실패해 자기 범위만 보게 되고(fail-closed), 사업부가
+        #   전사 표준을 못 보는 상태가 **조용히** 만들어진다(실측: 참고문서 68건).
+        #   dept_id 보다 **먼저** 본다 — 같은 dept_id 를 여러 노드가 공유하므로(실측: 4개 노드가
+        #   `production`) 코드가 더 정확한 근거다.
+        by_code = self.repo.find_node_by_code(scope_ref)
+        if by_code:
+            return {"kind": "ecm_code", "node_id": by_code.node_id,
+                    "dept_id": by_code.dept_id, "code": by_code.code,
+                    "name_ko": by_code.name_ko, "node_type": by_code.node_type,
+                    "resolved": True}
         mapped = self.repo.find_node_by_dept(scope_ref)
         if mapped:
             # 부서 id 인데 ECM 노드가 매핑돼 있다 → 노드로 승격 가능한 상태

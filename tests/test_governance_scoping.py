@@ -45,6 +45,44 @@ def test_visible_scopes_includes_operating_ancestors(env):
     assert ids["MNM_BATTERY"] not in visible_scopes(ids["LS_MNM"]), "하위 것이 상위에 보이면 안 된다"
 
 
+def test_visible_scopes_resolves_organization_codes_not_just_node_ids(env):
+    """★★ [2026-07-30 실측] 범위는 **세 형태**로 저장돼 있다 — `node_id` · 조직 코드
+    (`LS_MNM`·`MNM_BATTERY`) · 부서 id. 해석기가 코드를 몰라서 상속이 조용히 끊겨 있었다.
+
+    증상: 코드로 저장된 범위는 조상 해석이 실패해 **자기 자신만** 보게 된다(fail-closed).
+    오류는 어디에도 나지 않는다 — 사업부가 전사 표준을 못 보는 상태가 그냥 유지된다.
+    실측 규모: 참고문서 등록부 68건이 코드로 저장돼 있어, 각 사업부가 전사 자료 46건을
+    보지 못했다(MNM_BATTERY 6건만 · MNM_COPPER 16건만)."""
+    from core.enterprise_context.resolver import ecm_resolver
+    *_, ids = env
+
+    ref = ecm_resolver.resolve_scope_ref("MNM_BATTERY")
+    assert ref["resolved"] is True and ref["kind"] == "ecm_code"
+    assert ref["node_id"] == ids["MNM_BATTERY"]
+
+    # 코드로 물어도 조상이 따라온다 — **두 형태 모두** 집합에 들어가야 한다. 한 형태만 넣으면
+    #   다른 형태로 저장된 행이 매칭되지 않아 상속이 다시 끊긴다.
+    vis = visible_scopes("MNM_BATTERY")
+    assert "MNM_BATTERY" in vis and "LS_MNM" in vis, "코드 형태 상속이 끊겼다"
+    assert ids["MNM_BATTERY"] in vis and ids["LS_MNM"] in vis, "node_id 형태가 빠졌다"
+    assert "MNM_COPPER" not in vis, "형제 조직이 보이면 격리가 무너진 것이다"
+
+
+def test_code_stored_rows_inherit_from_the_parent(env):
+    """★★ 위 해석의 **실제 효과** — 코드로 소유가 적힌 전사 자료가 사업부에 보인다.
+
+    이것이 안 되면 전사 표준을 사업부가 못 보고, 그러면 사업부는 같은 표준을 다시 만든다."""
+    dc, *_ = env
+    dc.create_asset("전사 데이터 표준", enterprise_scope_id="LS_MNM")
+    dc.create_asset("배터리 전용 자료", enterprise_scope_id="MNM_BATTERY")
+
+    names = [a["name"] for a in dc.list_assets(scope_node_id="MNM_BATTERY")]
+    assert "전사 데이터 표준" in names, "상위 조직(코드 저장) 자료가 하위에 안 보인다"
+    assert "배터리 전용 자료" in names
+    # 반대 방향은 아니다 — 하위 것이 상위에 보이면 격리가 무너진다.
+    assert "배터리 전용 자료" not in [a["name"] for a in dc.list_assets(scope_node_id="LS_MNM")]
+
+
 def test_visible_scopes_fails_closed(monkeypatch):
     """★ 리솔버 장애를 '전부 보임'으로 처리하면 장애가 곧 전사 유출이 된다."""
     import core.enterprise_context.resolver as res_mod
