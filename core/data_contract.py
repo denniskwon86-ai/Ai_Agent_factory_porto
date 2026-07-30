@@ -136,7 +136,9 @@ class DataContracts:
 
     def list(self, producer_asset_id: str = "", consumer: str = "",
              status: str = "", include_retired: bool = False, scope_node_id: str = "",
-             tenant_id: str = "", entity_mode: str = "REAL") -> List[dict]:
+             tenant_id: str = "", entity_mode: str = "REAL",
+             # [§6-2] 등급이 낮으면 제목만 남기고 내용을 가린다(빈 값 = 가리지 않는다)
+             viewer_clearance: str = "") -> List[dict]:
         sql, params = "SELECT * FROM data_contracts WHERE 1=1", []
         if not include_retired:
             sql += " AND status<>'retired'"
@@ -148,10 +150,12 @@ class DataContracts:
         with self._connect() as conn:
             rows = [self._row(r) for r in conn.execute(
                 sql + " ORDER BY contract_key, version DESC", tuple(params)).fetchall()]
-        if not scope_node_id:
+        # 등급만 주어진 호출도 처리한다 — 범위 없이 등급만 거는 화면이 있다.
+        if not (scope_node_id or viewer_clearance):
             return rows
         from core.enterprise_context.scoping import filter_visible
-        return filter_visible(rows, scope_node_id, tenant_id, entity_mode)
+        return filter_visible(rows, scope_node_id, tenant_id, entity_mode,
+                              viewer_clearance=viewer_clearance)
 
     # ── 활성화 ────────────────────────────────────────────────────────────
     def activate(self, contract_id: str, activated_by: str, catalog=None,

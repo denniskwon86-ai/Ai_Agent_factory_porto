@@ -95,7 +95,9 @@ class BusinessGlossary:
 
     def list_terms(self, domain: str = "", status: str = "",
                    include_retired: bool = False, scope_node_id: str = "",
-                   tenant_id: str = "", entity_mode: str = "REAL") -> List[dict]:
+                   tenant_id: str = "", entity_mode: str = "REAL",
+                   # [§6-2] 등급이 낮으면 제목만 남기고 내용을 가린다(빈 값 = 가리지 않는다)
+                   viewer_clearance: str = "") -> List[dict]:
         """[ECM E2] 조직 범위 필터. 같은 말을 부서마다 다르게 정의하는 것이 §6.1 이 지적한
         실제 문제이므로, 사업부 용어가 다른 사업부에 새면 안 된다."""
         sql, params = "SELECT * FROM business_terms WHERE 1=1", []
@@ -108,10 +110,12 @@ class BusinessGlossary:
         with self._connect() as conn:
             rows = [dict(r) for r in conn.execute(sql + " ORDER BY canonical_name",
                                                   tuple(params)).fetchall()]
-        if not scope_node_id:
+        # 등급만 주어진 호출도 처리한다 — 범위 없이 등급만 거는 화면이 있다.
+        if not (scope_node_id or viewer_clearance):
             return rows
         from core.enterprise_context.scoping import filter_visible
-        return filter_visible(rows, scope_node_id, tenant_id, entity_mode)
+        return filter_visible(rows, scope_node_id, tenant_id, entity_mode,
+                              viewer_clearance=viewer_clearance)
 
     def approve_term(self, term_id: str, approved_by: str) -> dict:
         """승인 = "이 정의로 전사가 같은 말을 쓴다"는 선언. 승인자를 반드시 남긴다."""

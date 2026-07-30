@@ -48,7 +48,9 @@ class Crosswalk:
 
     # ── 연계 시스템 (external_systems) ────────────────────────────────
     def list_systems(self, scope_node_id: str = "", tenant_id: str = "",
-                     entity_mode: str = "REAL") -> list:
+                     entity_mode: str = "REAL",
+                     # [§6-2] 등급이 낮으면 제목만 남기고 내용을 가린다(빈 값 = 가리지 않는다)
+                     viewer_clearance: str = "") -> list:
         """[ECM E2] 조직 범위 가시성을 적용해 연계 시스템을 나열한다.
 
         범위를 주지 않으면 필터하지 않는다(ECM 미도입 흐름 보존 — `scoping` 규칙 3)."""
@@ -59,7 +61,8 @@ class Crosswalk:
         finally:
             conn.close()
         from core.enterprise_context.scoping import filter_visible
-        return filter_visible(rows, scope_node_id, tenant_id, entity_mode)
+        return filter_visible(rows, scope_node_id, tenant_id, entity_mode,
+                              viewer_clearance=viewer_clearance)
 
     def is_system_visible(self, system_id: str, scope_node_id: str = "",
                           tenant_id: str = "", entity_mode: str = "REAL") -> bool:

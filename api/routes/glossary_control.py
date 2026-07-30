@@ -109,9 +109,13 @@ async def confirm_match(req: ConfirmRequest, p: Principal = Depends(current_prin
 @router.get("/terms")
 async def list_terms(domain: str = "", status: str = "", include_retired: bool = False,
                      scope_node_id: str = "", tenant_id: str = "",
-                     entity_mode: str = "REAL"):
+                     entity_mode: str = "REAL",
+                     p: Principal = Depends(current_principal)):
+    """용어 목록. **등급이 낮은 주체에게는 제목만** 주고 정의는 가린다(§6-2 사용자 결정)."""
+    from core.enterprise_context.classification import clearance_of_scope
     rows = await asyncio.to_thread(business_glossary.list_terms, domain, status,
-                                   include_retired, scope_node_id, tenant_id, entity_mode)
+                                   include_retired, scope_node_id, tenant_id, entity_mode,
+                                   clearance_of_scope(p.scope))
     return {"status": "success", "data": rows}
 
 

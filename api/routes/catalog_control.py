@@ -133,10 +133,17 @@ async def sync_from_crosswalk(req: SyncRequest,
 @router.get("/assets")
 async def list_assets(owner_dept_id: str = "", sensitivity: str = "", system_id: str = "",
                       include_inactive: bool = False, scope_node_id: str = "",
-                      tenant_id: str = "", entity_mode: str = "REAL"):
+                      tenant_id: str = "", entity_mode: str = "REAL",
+                      p: Principal = Depends(current_principal)):
+    """자산 목록. **등급이 낮은 주체에게는 제목만** 주고 내용은 가린다(§6-2 사용자 결정).
+
+    ★ 등급은 주체의 권한에서 파생한다 — 권한과 등급을 두 곳에서 관리하면 어긋난다.
+      가려진 행에는 `redacted=True` 와 사유가 실려 나가므로, 화면은 "자료 없음"이 아니라
+      "권한 필요"로 표시할 수 있다."""
+    from core.enterprise_context.classification import clearance_of_scope
     rows = await asyncio.to_thread(data_catalog.list_assets, owner_dept_id, sensitivity,
                                    system_id, include_inactive, scope_node_id,
-                                   tenant_id, entity_mode)
+                                   tenant_id, entity_mode, clearance_of_scope(p.scope))
     return {"status": "success", "data": rows}
 
 

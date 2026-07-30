@@ -486,6 +486,49 @@ def indexable(registry_path: Path = REGISTRY_PATH,
     }
 
 
+def ensure_pack(pack_id: str, kb=None) -> dict[str, Any]:
+    """색인 대상 지식팩이 없으면 **선언된 정보로 만든다.**
+
+    ★ [2026-07-30 실측] 등록부는 팩 7개를 선언하는데 디스크에는 `core-m3-standards` 하나뿐이었다.
+      그 상태로 색인하면 `add_document` 가 "지식팩이 없습니다"로 전부 실패한다 — 승인까지 해
+      놓고 색인이 안 되는 막다른 길이다.
+
+    ★ 만들 때 **선언된 소유 조직(`scope_code`)을 매니페스트에 적는다.** 그래야 청크가 범위를
+      물려받고(`add_document`), 이후 사람이 직접 올리는 문서도 같은 범위로 들어간다.
+
+    ⚠️ 등급값은 **검증해서** 쓴다. `PACKS` 에는 `INTERNAL_REFERENCE` 처럼 등급 열거값이 아닌
+      값이 섞여 있는데(실측), 그것을 그대로 심으면 알 수 없는 등급이 되어 **아무에게도 내용이
+      보이지 않는다**(해석 실패는 최고 등급으로 처리하므로). 조용히 강등하지도 않는다 — 바꿨다는
+      사실을 로그로 남긴다."""
+    if kb is None:
+        from core.knowledge_base import knowledge_base as kb
+    decl = PACKS.get(pack_id, {})
+    if not kb.pack_exists(pack_id):
+        kb.create_pack(pack_id, decl.get("name") or pack_id, decl.get("description", ""))
+    manifest = kb.get_pack(pack_id) or {}
+    changed = False
+    owner = (decl.get("scope_code") or "").strip()
+    if owner and not (manifest.get("owner_org_id") or "").strip():
+        manifest["owner_org_id"] = owner
+        changed = True
+    if not (manifest.get("classification") or "").strip():
+        from core.enterprise_context.classification import (CLEARANCES,
+                                                            DEFAULT_CLASSIFICATION)
+        raw = (decl.get("classification") or "").strip().upper()
+        if raw and raw not in CLEARANCES:
+            print(f"⚠️ [reference_registry] 팩 '{pack_id}' 의 선언 등급 '{raw}' 는 정의된 "
+                  f"등급이 아닙니다(허용: {', '.join(CLEARANCES)}) — "
+                  f"'{DEFAULT_CLASSIFICATION}' 로 기록합니다. 그대로 두면 알 수 없는 등급이 되어 "
+                  f"**아무에게도 내용이 보이지 않습니다.** 의도한 등급이 있으면 PACKS 정의를 "
+                  f"고치십시오.")
+            raw = DEFAULT_CLASSIFICATION
+        manifest["classification"] = raw or DEFAULT_CLASSIFICATION
+        changed = True
+    if changed:
+        kb._write_manifest(pack_id, manifest)
+    return manifest
+
+
 def index_approved(reference_root: Path = REFERENCE_ROOT,
                    registry_path: Path = REGISTRY_PATH, dry_run: bool = True,
                    kb=None, asset_ids: list[str] | None = None,
@@ -536,6 +579,9 @@ def index_approved(reference_root: Path = REFERENCE_ROOT,
             continue
         try:
             from core.knowledge_base import extract_text
+            # 팩이 없으면 만든다(선언된 소유 조직·등급을 매니페스트에 적는다) — 승인까지 해 놓고
+            #   "지식팩이 없습니다"로 막히는 막다른 길을 없앤다.
+            ensure_pack(asset["pack_id"], kb)
             raw = path.read_bytes()
             text = extract_text(asset["filename"], raw)
             if not (text or "").strip():

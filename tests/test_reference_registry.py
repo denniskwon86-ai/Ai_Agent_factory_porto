@@ -228,6 +228,21 @@ class _FakeKB:
     def __init__(self, fail_on: str = ""):
         self.calls: list[dict] = []
         self.fail_on = fail_on
+        self.packs: dict[str, dict] = {}
+
+    # 색인 경로는 팩이 없으면 만든다(`ensure_pack`) — 실제 지식팩이 가진 API 를 대역도 갖는다.
+    def pack_exists(self, pack_id):
+        return pack_id in self.packs
+
+    def create_pack(self, pack_id, name, description=""):
+        self.packs[pack_id] = {"pack_id": pack_id, "name": name,
+                               "description": description, "documents": []}
+
+    def get_pack(self, pack_id):
+        return self.packs.get(pack_id)
+
+    def _write_manifest(self, pack_id, manifest):
+        self.packs[pack_id] = manifest
 
     def add_document(self, pack_id, filename, text, source="upload", raw=None,
                      extra_meta=None):
@@ -448,3 +463,49 @@ def test_same_version_is_not_rescanned(tmp_path):
     again = load_registry(target, reference_root=root)
     assert again["total"] if "total" in again else True
     assert len(again["assets"]) == len(first["assets"]) == 1, "버전이 같은데 재스캔됐다"
+
+
+def test_missing_pack_is_created_with_its_declared_scope(tmp_path, monkeypatch):
+    """★★ [2026-07-30 실측] 등록부는 팩 7개를 선언하는데 디스크에는 1개뿐이었다.
+
+    그 상태로 색인하면 `add_document` 가 "지식팩이 없습니다"로 전부 실패한다 — 승인까지 해 놓고
+    색인이 안 되는 막다른 길이다. 만들 때 **선언된 소유 조직을 매니페스트에 적어** 청크가 범위를
+    물려받게 한다."""
+    from core.reference_registry import ensure_pack
+
+    store = {}
+
+    class _KB:
+        def pack_exists(self, pid): return pid in store
+        def create_pack(self, pid, name, desc): store[pid] = {"pack_id": pid, "name": name,
+                                                              "description": desc,
+                                                              "documents": []}
+        def get_pack(self, pid): return store.get(pid)
+        def _write_manifest(self, pid, m): store[pid] = m
+
+    m = ensure_pack("battery-materials-operations", kb=_KB())
+    assert m["owner_org_id"] == "MNM_BATTERY", "선언된 소유 조직이 기록되지 않았다"
+    assert m["classification"] == "INTERNAL"
+    assert m["name"] == "배터리소재 운영 지식"
+
+
+def test_invalid_declared_classification_is_normalized_loudly(tmp_path, capsys):
+    """★★★ `PACKS` 의 `manufacturing-standards` 는 등급을 `INTERNAL_REFERENCE` 로 선언한다 —
+    **등급 열거값이 아니다.**
+
+    그대로 심으면 알 수 없는 등급이 되어(해석 실패는 최고 등급으로 처리한다) **아무에게도 내용이
+    보이지 않는다.** 조용히 강등해도 안 된다 — 무엇을 바꿨는지 말해야 정의를 고칠 수 있다."""
+    from core.reference_registry import ensure_pack
+
+    store = {}
+
+    class _KB:
+        def pack_exists(self, pid): return pid in store
+        def create_pack(self, pid, name, desc): store[pid] = {"pack_id": pid, "documents": []}
+        def get_pack(self, pid): return store.get(pid)
+        def _write_manifest(self, pid, m): store[pid] = m
+
+    m = ensure_pack("manufacturing-standards", kb=_KB())
+    assert m["classification"] == "INTERNAL", "유효하지 않은 등급이 그대로 심겼다"
+    out = capsys.readouterr().out
+    assert "정의된 등급이 아닙니다" in out and "아무에게도 내용이 보이지 않습니다" in out

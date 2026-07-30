@@ -139,3 +139,49 @@ def test_redaction_is_counted():
     assert "제목만" in s["note"] and "가려진 것" in s["note"]
 
     assert redaction_summary(redact_all([_asset()], CONFIDENTIAL))["note"] == ""
+
+
+# ── 목록 API 배선 (2026-07-30) ──────────────────────────────────────────────
+def test_core_list_methods_accept_and_apply_clearance(tmp_path):
+    """★★ 판정 함수만 만들고 목록에 배선하지 않으면 등급은 **장식**이다.
+
+    실측: 배선 전에는 `viewer_clearance` 를 넘기는 곳이 참고문서 등록부 하나뿐이었다 —
+    카탈로그·용어사전·계약 등 거버넌스 화면 전부가 등급을 무시했다."""
+    from core.business_glossary import BusinessGlossary
+    from core.data_catalog import DataCatalog
+    from core.master_data import MasterData
+
+    md = MasterData(db_path=str(tmp_path / "m.db"))
+    dc, g = DataCatalog(md), BusinessGlossary(md)
+    dc.create_asset("인수 검토표", enterprise_scope_id=OWNER, description="A사 가격 산정")
+    with md._connect() as conn:
+        conn.execute("UPDATE data_assets SET classification='CONFIDENTIAL'")
+
+    low = dc.list_assets(scope_node_id=OWNER, viewer_clearance=INTERNAL)
+    assert low and low[0]["name"] == "인수 검토표", "제목은 남아야 한다"
+    assert low[0]["redacted"] is True and "description" not in low[0]
+
+    high = dc.list_assets(scope_node_id=OWNER, viewer_clearance=CONFIDENTIAL)
+    assert high[0]["description"] == "A사 가격 산정" and not high[0].get("redacted")
+
+    # 등급을 주지 않으면 가리지 않는다(내부 파이프라인 호출 보호).
+    assert dc.list_assets(scope_node_id=OWNER)[0]["description"]
+
+    # 용어사전도 같은 규칙을 따른다 — 두 화면이 다른 규칙을 쓰면 어느 쪽도 신뢰할 수 없다.
+    g.create_term("전극 두께", definition="양극 코팅 두께", enterprise_scope_id=OWNER)
+    assert g.list_terms(scope_node_id=OWNER, viewer_clearance=INTERNAL)
+
+
+def test_clearance_only_call_still_filters(tmp_path):
+    """★ 범위 없이 **등급만** 거는 호출도 있다(전사 화면). 그때도 가림이 적용돼야 한다."""
+    from core.data_catalog import DataCatalog
+    from core.master_data import MasterData
+
+    md = MasterData(db_path=str(tmp_path / "m2.db"))
+    dc = DataCatalog(md)
+    dc.create_asset("대외비 자료", description="민감")
+    with md._connect() as conn:
+        conn.execute("UPDATE data_assets SET classification='CONFIDENTIAL'")
+
+    rows = dc.list_assets(viewer_clearance=INTERNAL)
+    assert rows and rows[0].get("redacted") is True, "범위 없이 등급만 준 호출이 무시됐다"

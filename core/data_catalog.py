@@ -150,7 +150,9 @@ class DataCatalog:
     def list_assets(self, owner_dept_id: str = "", sensitivity: str = "",
                     system_id: str = "", include_inactive: bool = False,
                     scope_node_id: str = "", tenant_id: str = "",
-                    entity_mode: str = "REAL") -> List[dict]:
+                    entity_mode: str = "REAL",
+                    # [§6-2] 등급이 낮으면 제목만 남기고 내용을 가린다(빈 값 = 가리지 않는다)
+                    viewer_clearance: str = "") -> List[dict]:
         """[ECM E2] `scope_node_id` 를 주면 그 조직에 보이는 자산만 돌려준다.
 
         판정은 `enterprise_context.scoping` 한 곳에서만 한다 — 같은 규칙을 모듈마다 복제하면
@@ -167,10 +169,12 @@ class DataCatalog:
         sql += " ORDER BY name"
         with self._connect() as conn:
             rows = [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
-        if not scope_node_id:
+        # 등급만 주어진 호출도 처리한다 — 범위 없이 등급만 거는 화면이 있다.
+        if not (scope_node_id or viewer_clearance):
             return rows
         from core.enterprise_context.scoping import filter_visible
-        return filter_visible(rows, scope_node_id, tenant_id, entity_mode)
+        return filter_visible(rows, scope_node_id, tenant_id, entity_mode,
+                              viewer_clearance=viewer_clearance)
 
     def retire_asset(self, asset_id: str) -> bool:
         """소프트 삭제 — 어떤 앱·보고서가 이 자산을 썼는지가 계보의 근거라 지우지 않는다."""
