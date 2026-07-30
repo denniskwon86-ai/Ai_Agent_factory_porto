@@ -281,9 +281,25 @@ def test_resolve_scope_ref_handles_both_forms(seeded):
     by_node = res.resolve_scope_ref(ids["MNM_BATTERY"])
     assert by_node["kind"] == "ecm_node" and by_node["resolved"] is True
 
-    by_dept = res.resolve_scope_ref("production")     # 시드가 매핑해 둔 부서
+    # ★★ [2026-07-30] `production` 은 **의도적으로 모호한** 부서다 — 레거시 부서는 하나인데
+    #   생산 사업부는 둘(동제련·배터리소재)이다. 하나를 고르면 `LIMIT 1` 의 tie-break 가 조직
+    #   권한을 결정하고, 시드는 같은 시각에 만들어지므로 그 승자가 **비결정적**이다.
+    #   → 해석을 포기하고(상속 없음) 후보를 돌려준다. 결정은 사람이 한다.
+    ambiguous = res.resolve_scope_ref("production")
+    assert ambiguous["kind"] == "department_ambiguous"
+    assert ambiguous["resolved"] is False and ambiguous["node_id"] == ""
+    assert {c["code"] for c in ambiguous["candidates"]} == {"MNM_COPPER", "MNM_BATTERY"}
+
+    # 1:1 로 매핑된 부서는 종전대로 노드로 승격된다(하위호환).
+    by_dept = res.resolve_scope_ref("hq")
     assert by_dept["kind"] == "department_mapped" and by_dept["node_id"]
     assert by_dept["resolved"] is True, "노드로 승격 가능한 상태"
+
+    # 충돌 목록이 **고쳐야 할 일감**으로 드러난다 — 코드 우회만 하면 그 부서는 영원히
+    #   조직 상속을 못 받는다.
+    conflicts = repo.dept_mapping_conflicts()
+    assert [c["dept_id"] for c in conflicts] == ["production"]
+    assert conflicts[0]["node_count"] == 2
 
     unknown = res.resolve_scope_ref("nonexistent_dept")
     assert unknown["kind"] == "department" and unknown["resolved"] is False

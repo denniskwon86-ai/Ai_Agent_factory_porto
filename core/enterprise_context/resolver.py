@@ -199,11 +199,27 @@ class EcmResolver:
                     "dept_id": by_code.dept_id, "code": by_code.code,
                     "name_ko": by_code.name_ko, "node_type": by_code.node_type,
                     "resolved": True}
-        mapped = self.repo.find_node_by_dept(scope_ref)
+        # ★ [2026-07-30] 부서 id 는 **여러 노드에 매달릴 수 있다.** 하나를 고르면 안 된다 —
+        #   실측에서 `production` 하나에 형제 사업부 2개(배터리·동제련)와 공장 2개가 매달려
+        #   있었고 `updated_at` 이 전부 같아 `LIMIT 1` 의 승자가 비결정적이었다. 그 상태로 한
+        #   노드를 고르면 **tie-break 가 조직 권한을 결정한다** — 배터리 사용자가 동제련 문맥으로
+        #   해석되거나 그 반대가 되고, 아무 오류도 나지 않는다.
+        candidates = self.repo.find_nodes_by_dept(scope_ref)
+        if len(candidates) > 1:
+            print(f"⚠️ [ECM] 부서 '{scope_ref}' 가 노드 {len(candidates)}개에 매핑돼 있어 "
+                  f"조직을 특정할 수 없습니다({', '.join(c.code for c in candidates)}) — "
+                  f"부서 체계로만 해석합니다(상속 없음). 노드 매핑을 1:1 로 정리하십시오.")
+            return {"kind": "department_ambiguous", "node_id": "", "dept_id": scope_ref,
+                    "code": "", "name_ko": scope_ref, "resolved": False,
+                    "candidates": [{"node_id": c.node_id, "code": c.code,
+                                    "name_ko": c.name_ko, "node_type": c.node_type}
+                                   for c in candidates]}
+        mapped = candidates[0] if candidates else None
         if mapped:
-            # 부서 id 인데 ECM 노드가 매핑돼 있다 → 노드로 승격 가능한 상태
+            # 부서 id 인데 ECM 노드가 **하나** 매핑돼 있다 → 노드로 승격 가능한 상태
             return {"kind": "department_mapped", "node_id": mapped.node_id, "dept_id": scope_ref,
-                    "name_ko": mapped.name_ko, "node_type": mapped.node_type, "resolved": True}
+                    "code": mapped.code, "name_ko": mapped.name_ko,
+                    "node_type": mapped.node_type, "resolved": True}
         # ECM 에 아직 없는 부서 — 기존 부서 체계로 계속 동작한다(하위호환)
         return {"kind": "department", "node_id": "", "dept_id": scope_ref,
                 "name_ko": scope_ref, "resolved": False}

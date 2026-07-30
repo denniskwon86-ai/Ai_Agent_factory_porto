@@ -272,6 +272,31 @@ class EcmRepository:
                            "ORDER BY updated_at DESC LIMIT 1", (dept_id, STATUS_ACTIVE))
         return OrganizationNode.model_validate(rows[0]) if rows else None
 
+    def find_nodes_by_dept(self, dept_id: str) -> List[OrganizationNode]:
+        """부서 id 에 매핑된 **모든** 활성 노드.
+
+        ★ [2026-07-30 실측] 하나를 고르는 조회(`find_node_by_dept`)만 있으면 중복 매핑이 보이지
+          않는다. 실제 데이터에서 `production` 하나에 **형제 사업부 2개(배터리·동제련) + 공장
+          2개**가 매달려 있었고 `updated_at` 이 전부 같아서 `LIMIT 1` 의 승자가 비결정적이었다 —
+          즉 어느 사업부 데이터를 보게 되는지가 tie-break 로 갈렸다."""
+        if not dept_id:
+            return []
+        rows = self._query("SELECT * FROM organization_nodes WHERE dept_id=? AND status=? "
+                           "ORDER BY updated_at DESC, node_id", (dept_id, STATUS_ACTIVE))
+        return [OrganizationNode.model_validate(r) for r in rows]
+
+    def dept_mapping_conflicts(self) -> List[Dict[str, Any]]:
+        """한 부서 id 에 여러 노드가 매달린 목록 — **데이터를 고쳐야 하는 일감**이다.
+
+        ★ 코드에서 우회(모호하면 해석 실패로 처리)하는 것과 데이터를 바로잡는 것은 다르다.
+          우회만 하면 그 부서 사용자는 영원히 조직 상속을 못 받는다."""
+        rows = self._query(
+            "SELECT dept_id, COUNT(*) AS n, GROUP_CONCAT(code) AS codes "
+            "FROM organization_nodes WHERE dept_id<>'' AND status=? "
+            "GROUP BY dept_id HAVING n > 1 ORDER BY n DESC", (STATUS_ACTIVE,))
+        return [{"dept_id": r["dept_id"], "node_count": r["n"],
+                 "codes": sorted((r["codes"] or "").split(","))} for r in rows]
+
     def find_node_by_code(self, code: str) -> Optional[OrganizationNode]:
         """**조직 코드**(`LS_MNM`·`MNM_BATTERY` 등)로 노드를 찾는다.
 
