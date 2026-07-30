@@ -474,3 +474,123 @@ def test_search_packs_fails_closed_when_scope_cannot_be_resolved(monkeypatch):
     kb, _ = _pack_kb(_PACK_ROWS, monkeypatch)
 
     assert kb.search_packs(["p1"], "질의", scope_node_id="MNM_BATTERY") == []
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# [2026-07-30] 팩 범위 소급 부여 + 파이프라인 배선
+# ══════════════════════════════════════════════════════════════════════════
+class _ScopeCol(_FakeCollection):
+    """`get`/`update` 를 지원하는 컬렉션 대역 — 소급 부여는 이 두 연산으로 이뤄진다."""
+
+    def __init__(self, metas):
+        super().__init__([])
+        self.metas = [dict(m) for m in metas]
+        self.updated = None
+
+    def get(self, include=None):
+        return {"ids": [f"c{i}" for i in range(len(self.metas))],
+                "metadatas": [dict(m) for m in self.metas]}
+
+    def update(self, ids=None, metadatas=None):
+        self.updated = {"ids": ids, "metadatas": metadatas}
+        by_id = {f"c{i}": i for i in range(len(self.metas))}
+        for mid, m in zip(ids or [], metadatas or []):
+            self.metas[by_id[mid]] = dict(m)
+
+
+def _scope_kb(metas, monkeypatch, manifest=None):
+    kb = KnowledgeBase.__new__(KnowledgeBase)
+    kb.client = object()
+    col = _ScopeCol(metas)
+    store = {"m": dict(manifest or {"pack_id": "p1", "documents": []})}
+    monkeypatch.setattr(KnowledgeBase, "_pack_collection", lambda self, pid: col)
+    monkeypatch.setattr(KnowledgeBase, "_read_manifest", lambda self, pid: store["m"])
+    monkeypatch.setattr(KnowledgeBase, "_write_manifest",
+                        lambda self, pid, m: store.update(m=m))
+    monkeypatch.setattr(KnowledgeBase, "list_pack_ids", lambda self: ["p1"])
+    return kb, col, store
+
+
+def test_scope_report_counts_what_would_disappear(monkeypatch):
+    """★★ 켜면 무엇이 사라지는가를 먼저 세지 않으면 범위 강제를 켤 수 없다(§5.3 절차)."""
+    kb, _, _ = _scope_kb([{"owner_org_id": "LS_MNM"}, {}, {}], monkeypatch)
+    rep = kb.pack_scope_report()
+    assert rep["chunks"] == 3 and rep["scoped"] == 1 and rep["unscoped"] == 2
+    assert "검색에서 제외됩니다" in rep["note"]
+    assert rep["packs"][0]["owners"] == ["LS_MNM"]
+
+
+def test_set_pack_scope_refuses_to_guess(monkeypatch):
+    """★★ 소유 조직을 추측해서 찍으면 팩의 모든 청크가 엉뚱한 조직에 열린다 — 그건 유출이다."""
+    kb, _, _ = _scope_kb([{}], monkeypatch)
+    with pytest.raises(ValueError, match="소유 조직"):
+        kb.set_pack_scope("p1", "", dry_run=False)
+
+
+def test_set_pack_scope_dry_run_changes_nothing(monkeypatch):
+    kb, col, store = _scope_kb([{}, {}], monkeypatch)
+    out = kb.set_pack_scope("p1", "LS_MNM")           # dry_run 기본
+    assert out["updated"] == 2 and col.updated is None
+    assert "owner_org_id" not in store["m"], "예행인데 매니페스트가 바뀌었다"
+
+
+def test_set_pack_scope_backfills_only_missing_and_records_the_owner(monkeypatch):
+    """★ 이미 범위가 있는 청크는 건드리지 않는다. 그리고 매니페스트에 소유를 기록해
+    **이후 업로드가 물려받게** 한다 — 그러지 않으면 같은 문제가 곧 재발한다."""
+    kb, col, store = _scope_kb([{"owner_org_id": "MNM_BATTERY"}, {}], monkeypatch)
+    out = kb.set_pack_scope("p1", "LS_MNM", dry_run=False)
+
+    assert out["updated"] == 1
+    assert col.metas[0]["owner_org_id"] == "MNM_BATTERY", "기존 범위를 덮어썼다"
+    assert col.metas[1]["owner_org_id"] == "LS_MNM"
+    assert store["m"]["owner_org_id"] == "LS_MNM"
+
+
+def test_new_upload_inherits_the_declared_pack_scope(monkeypatch, tmp_path):
+    """★★ 구멍을 막는 것과 **다시 뚫리지 않게 하는 것**은 다르다 — 새 업로드가 계속 범위
+    미기재로 쌓이면 소급 부여를 아무리 해도 같은 문제가 재발한다."""
+    import core.knowledge_base as kbm
+    kb, col, _ = _scope_kb([], monkeypatch,
+                           manifest={"pack_id": "p1", "documents": [],
+                                     "owner_org_id": "MNM_COPPER"})
+    monkeypatch.setattr(kbm, "PACKS_DIR", str(tmp_path))
+    kb.add_document("p1", "새문서.txt", "동제련 원료 수급 기준 " * 50)
+
+    metas = col.added[0]["metadatas"]
+    assert metas and all(m["owner_org_id"] == "MNM_COPPER" for m in metas)
+
+
+def test_pipeline_passes_project_scope_only_when_enforced(monkeypatch):
+    """★★ 파이프라인 배선 — 이것이 없으면 A 법인 프로젝트 프롬프트에 B 법인 참고자료가 섞인다.
+
+    ⚠️ 스위치가 꺼져 있으면 넘기지 않는다(종전 동작 보존). 켜는 것은 **데이터 이행이 끝난 뒤**의
+      결정이다 — 범위 미기재 청크가 전부 제외되기 때문이다."""
+    import config
+    import core.knowledge_base as kbm
+
+    seen = {}
+    kb = KnowledgeBase.__new__(KnowledgeBase)
+    kb.client = object()
+    monkeypatch.setattr(KnowledgeBase, "search_packs",
+                        lambda self, pids, q, n_total=5, scope_node_id="":
+                        seen.update(scope=scope_node_id) or [])
+
+    class _S:
+        knowledge_pack_ids = ["p1"]
+        initial_idea = "배터리 소재 생산계획"
+        enterprise_scope_id = "MNM_BATTERY"
+        current_stage = "PLANNING"
+
+    saved = getattr(config, "KB_SCOPE_ENFORCE", False)
+    try:
+        config.KB_SCOPE_ENFORCE = False
+        kb.get_grounding_context(_S())
+        assert seen["scope"] == "", "스위치가 꺼졌는데 범위를 넘겼다"
+
+        config.KB_SCOPE_ENFORCE = True
+        monkeypatch.setattr("core.enterprise_context.scoping.resolve_scope_ref",
+                            lambda ref: "node_batt")
+        kb.get_grounding_context(_S())
+        assert seen["scope"] == "node_batt", "켰는데 프로젝트 범위가 검색에 전달되지 않았다"
+    finally:
+        config.KB_SCOPE_ENFORCE = saved

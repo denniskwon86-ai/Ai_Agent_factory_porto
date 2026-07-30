@@ -33,9 +33,41 @@ class PackSearchRequest(BaseModel):
     n_results: int = 5
 
 
+class PackScopeRequest(BaseModel):
+    owner_org_id: str
+    dry_run: bool = True          # 소급 부여는 되돌리기 번거롭다 — 예행이 기본
+    only_missing: bool = True     # 이미 범위가 있는 청크는 건드리지 않는다
+    classification: str = ""
+
+
 @router.get("/packs")
 async def list_packs():
     return {"status": "success", "data": knowledge_base.list_packs()}
+
+
+@router.get("/scope-report")
+async def scope_report():
+    """팩별로 **조직 범위가 심긴 청크가 몇 개인지.**
+
+    ★ 이 숫자를 모르면 `KB_SCOPE_ENFORCE` 를 켤 수 없다 — 켜는 순간 범위 미기재 청크가 전부
+      검색에서 제외되므로(fail-closed), "켜면 무엇이 사라지는가"를 먼저 알아야 한다."""
+    return {"status": "success",
+            "data": await asyncio.to_thread(knowledge_base.pack_scope_report)}
+
+
+@router.post("/packs/{pack_id}/scope")
+async def set_pack_scope(pack_id: str, req: PackScopeRequest):
+    """기존 청크에 소유 조직을 소급 부여한다(재색인 없이 메타데이터만).
+
+    ⚠️ 소유 조직을 추측하지 않는다 — 잘못 찍으면 팩의 모든 청크가 엉뚱한 조직에 열린다."""
+    _safe_pack_id(pack_id)
+    try:
+        return {"status": "success",
+                "data": await asyncio.to_thread(knowledge_base.set_pack_scope, pack_id,
+                                                req.owner_org_id, req.dry_run,
+                                                req.only_missing, req.classification)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/packs")

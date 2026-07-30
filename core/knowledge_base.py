@@ -264,6 +264,94 @@ class KnowledgeBase:
     def get_pack(self, pack_id: str) -> dict:
         return self._read_manifest(pack_id)
 
+    # ── 지식팩의 조직 범위 (2026-07-30) ──────────────────────────────────
+    def pack_scope_report(self, pack_ids: list = None) -> dict:
+        """팩별로 **몇 개 청크에 조직 범위가 심겨 있는지** 센다.
+
+        ★ 이 숫자를 모르면 범위 강제(`KB_SCOPE_ENFORCE`)를 켤 수 없다. 켜는 순간 범위 미기재
+          청크가 전부 제외되므로(fail-closed), "켜면 무엇이 사라지는가"를 먼저 알아야 한다 —
+          설계서 §5.3 이 관문 A 에 요구한 절차와 같다."""
+        out, total, scoped = [], 0, 0
+        for pid in (pack_ids or self.list_pack_ids()):
+            m = self._read_manifest(pid) or {}
+            row = {"pack_id": pid, "declared_owner": m.get("owner_org_id", ""),
+                   "chunks": 0, "scoped": 0, "unscoped": 0, "owners": []}
+            col = self._pack_collection(pid) if self.client else None
+            if col is not None:
+                try:
+                    got = col.get(include=["metadatas"])
+                    metas = got.get("metadatas") or []
+                    row["chunks"] = len(metas)
+                    owners = [str((mm or {}).get("owner_org_id", "") or "") for mm in metas]
+                    row["scoped"] = sum(1 for o in owners if o)
+                    row["unscoped"] = len(owners) - row["scoped"]
+                    row["owners"] = sorted({o for o in owners if o})
+                except Exception as e:
+                    row["error"] = str(e)
+            total += row["chunks"]
+            scoped += row["scoped"]
+            out.append(row)
+        return {
+            "packs": out, "chunks": total, "scoped": scoped, "unscoped": total - scoped,
+            "note": ("범위가 심기지 않은 청크는 `KB_SCOPE_ENFORCE=True` 로 켜는 순간 "
+                     "**검색에서 제외됩니다**(fail-closed). 켜기 전에 `set_pack_scope()` 로 "
+                     "소유 조직을 지정하거나 등록부 경유로 재색인하십시오."
+                     if total - scoped else
+                     "모든 청크에 조직 범위가 심겨 있습니다 — 범위 강제를 켜도 사라지는 것이 "
+                     "없습니다."),
+        }
+
+    def set_pack_scope(self, pack_id: str, owner_org_id: str, dry_run: bool = True,
+                       only_missing: bool = True, classification: str = "") -> dict:
+        """팩의 기존 청크에 소유 조직을 **소급 부여**한다(재색인 없이 메타데이터만 갱신).
+
+        ⚠️ 소유 조직을 **추측하지 않는다.** 팩 매니페스트에는 소유 필드가 없었고(실측), 잘못
+          찍으면 641개 청크가 엉뚱한 조직에 넘어간다 — 그건 유출이다. 그래서 호출자가 반드시
+          지정한다.
+        ★ 매니페스트에도 기록해, 이후 업로드가 같은 소유를 물려받게 한다(`add_document`).
+          그러지 않으면 새 업로드가 계속 범위 미기재로 쌓여 같은 문제가 재발한다."""
+        if not (pack_id or "").strip():
+            raise ValueError("pack_id 는 필수입니다.")
+        if not (owner_org_id or "").strip():
+            raise ValueError(
+                "소유 조직(owner_org_id)을 지정하십시오 — 추측해서 찍으면 이 팩의 모든 청크가 "
+                "엉뚱한 조직에 열립니다. 팩 매니페스트에는 소유 정보가 없습니다.")
+        manifest = self._read_manifest(pack_id)
+        if not manifest:
+            raise ValueError(f"지식팩이 없습니다: {pack_id}")
+        col = self._pack_collection(pack_id) if self.client else None
+        if col is None:
+            raise ValueError("벡터스토어를 사용할 수 없어 범위를 갱신하지 못했습니다 "
+                             "— 조용히 성공으로 처리하지 않습니다.")
+        got = col.get(include=["metadatas"])
+        ids = got.get("ids") or []
+        metas = got.get("metadatas") or []
+        targets, new_metas = [], []
+        for i, mid in enumerate(ids):
+            meta = dict(metas[i] or {}) if i < len(metas) else {}
+            if only_missing and (meta.get("owner_org_id") or ""):
+                continue
+            meta["owner_org_id"] = owner_org_id.strip()
+            if classification:
+                meta["classification"] = classification
+            meta.setdefault("scope_backfilled", True)
+            targets.append(mid)
+            new_metas.append(meta)
+        if targets and not dry_run:
+            col.update(ids=targets, metadatas=new_metas)
+            manifest["owner_org_id"] = owner_org_id.strip()
+            if classification:
+                manifest["classification"] = classification
+            self._write_manifest(pack_id, manifest)
+        return {
+            "pack_id": pack_id, "owner_org_id": owner_org_id.strip(),
+            "dry_run": bool(dry_run), "updated": len(targets), "total": len(ids),
+            "note": (("[예행] 실제로 갱신하지 않았습니다. " if dry_run else "")
+                     + f"{len(targets)}/{len(ids)} 청크에 소유 조직을 부여합니다"
+                     + (" (이미 범위가 있는 청크는 건드리지 않습니다)."
+                        if only_missing else " (기존 범위도 덮어씁니다).")),
+        }
+
     def delete_pack(self, pack_id: str) -> bool:
         import shutil
         pack_dir = os.path.join(PACKS_DIR, pack_id)
@@ -307,8 +395,20 @@ class KnowledgeBase:
             _RESERVED = ("pack_id", "filename", "chunk_index", "source", "page")
             # Chroma 메타데이터는 스칼라만 받는다. 리스트·dict 를 넣으면 색인 전체가 실패하므로
             #   문자열로 눌러 담는다(조용히 빠뜨리면 범위 필터가 통하지 않는다).
+            _meta_in = dict(extra_meta or {})
+            # ★ 팩에 선언된 소유 조직을 **물려받는다**(호출자가 주지 않은 경우만).
+            #   이것이 없으면 새 업로드가 계속 범위 미기재로 쌓여, 소급 부여(`set_pack_scope`)를
+            #   해도 같은 문제가 곧 재발한다 — 구멍을 막는 것과 다시 뚫리지 않게 하는 것은 다르다.
+            if not (_meta_in.get("owner_org_id") or ""):
+                _declared = (manifest.get("owner_org_id") or "").strip()
+                if _declared:
+                    _meta_in["owner_org_id"] = _declared
+            if not (_meta_in.get("classification") or ""):
+                _cls = (manifest.get("classification") or "").strip()
+                if _cls:
+                    _meta_in["classification"] = _cls
             _extra = {k: (v if isinstance(v, (str, int, float, bool)) else str(v))
-                      for k, v in (extra_meta or {}).items()
+                      for k, v in _meta_in.items()
                       if k not in _RESERVED and v not in (None, "")}
             metas = []
             for i, ch in enumerate(chunks):
@@ -466,7 +566,25 @@ class KnowledgeBase:
         if not query.strip():
             return ""
 
-        snippets = self.search_packs(pack_ids, query, n_total=5)
+        # ★ [2026-07-30] 프로젝트의 조직 범위를 검색에 넘긴다 — 이것이 없으면 A 법인 프로젝트
+        #   프롬프트에 B 법인 참고자료가 섞인다(기준정보에서 실제로 났던 사고와 같은 경로).
+        #   ⚠️ `KB_SCOPE_ENFORCE` 로 감싼다. 켜는 순간 **범위 미기재 청구가 전부 제외**되므로
+        #     (fail-closed) 먼저 `pack_scope_report()` 로 사라질 건수를 세고 `set_pack_scope()`
+        #     로 소급 부여한 뒤 켜는 것이 순서다(설계서 §5.3 이 관문 A 에 요구한 절차와 같다).
+        _scope = ""
+        try:
+            import config
+            if getattr(config, "KB_SCOPE_ENFORCE", False):
+                from core.enterprise_context.scoping import resolve_scope_ref
+                _raw = str(getattr(project_state, "enterprise_scope_id", "") or "")
+                # 부서 id·조직 코드·node_id 어느 형태로 저장돼 있어도 해석한다(D-005 + 코드).
+                _scope = (resolve_scope_ref(_raw) or _raw) if _raw else ""
+        except Exception as e:
+            print(f"⚠️ [KnowledgeBase] 프로젝트 조직 범위 해석 실패 — 범위 필터 없이 검색하지 "
+                  f"않습니다: {e}")
+            return ""
+
+        snippets = self.search_packs(pack_ids, query, n_total=5, scope_node_id=_scope)
         # [관련성 임계값] 거리(cosine distance)가 먼 무관 지식을 '반드시 정합 유지' 지시와 함께
         # 주입하면 그라운딩이 오히려 환각을 제도화한다 → 컷오프 초과는 버리고, 남는 게 없으면 미주입
         RELEVANCE_CUTOFF = 0.65
