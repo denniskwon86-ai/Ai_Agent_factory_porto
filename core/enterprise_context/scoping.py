@@ -55,6 +55,18 @@ NOT_FOR_NEW_ROWS = (LEGACY_UNSCOPED,)
 LEGACY_GRANDFATHER_UNTIL = "2026-12-31"
 
 
+def _fail_closed() -> bool:
+    """관문 A 의 기본값을 쓰는가(§5.3 되돌림 스위치).
+
+    ★ 값을 모듈 상수로 캐시하지 않고 **호출 시점에** 읽는다 — 캐시하면 운영 중 스위치를 내려도
+      프로세스를 재시작해야 하고, 되돌릴 수 없는 되돌림 장치는 장치가 아니다."""
+    try:
+        import config
+        return bool(getattr(config, "SCOPE_FAIL_CLOSED", True))
+    except Exception:
+        return True                                    # 설정을 못 읽으면 안전한 쪽
+
+
 def visible_scopes(scope_node_id: str) -> Set[str]:
     """이 조직이 볼 수 있는 범위 집합 = 자기 자신 + 운영 상위 조상.
 
@@ -130,7 +142,7 @@ def owner_of(row: Dict[str, Any]) -> str:
 
 def is_visible(row: Dict[str, Any], scope_node_id: str, tenant_id: str = "",
                entity_mode: str = "REAL", visible: Optional[Set[str]] = None,
-               today: str = "") -> bool:
+               today: str = "", sandbox_token: str = "") -> bool:
     """레코드 한 건이 이 문맥에서 보이는가 — §2.2 의 다섯 상태를 그대로 판정한다.
 
     ★ 판정 축의 순서가 곧 규칙이다: 테넌트 → 문맥(REAL/VIRTUAL) → 범위 미지정 호출 →
@@ -158,9 +170,18 @@ def is_visible(row: Dict[str, Any], scope_node_id: str, tenant_id: str = "",
             return True
         return bool(owner) and owner in vis
     if st == SANDBOX:
-        # 가상 문맥 전용. capability token(§4.3) 없이는 열지 않는다 — 토큰 검증 경로가
-        #   붙기 전까지 fail-closed 다. "아직 안 만든 통제"를 통과로 두면 그게 곧 구멍이다.
-        return False
+        # 가상 문맥 전용. **capability token(§4.3) 이 있어야만** 열린다.
+        #   토큰이 없으면 조직 권한이 아무리 높아도 열리지 않는다 — 그것이 "권한 승급이 아니다"의
+        #   실질이다. 토큰은 REAL 데이터에 대한 권한을 한 조각도 주지 않는다.
+        if not sandbox_token:
+            return False
+        try:
+            from core.sandbox_token import sandbox_tokens
+            return sandbox_tokens.allows(sandbox_token, row, scope_node_id)
+        except Exception as e:
+            # 토큰 저장소를 못 읽으면 **열지 않는다.** 검증 장애를 통과로 두면 그게 곧 뒷문이다.
+            print(f"⚠️ [scoping] Sandbox 토큰 검증 실패 — 열지 않음(fail-closed): {e}")
+            return False
     if st == LEGACY_UNSCOPED:
         # 한시 예외 — 만료되면 비노출(§2.3-2). coverage() 가 건수와 만료를 함께 보고한다.
         return not is_expired(row, today)
@@ -168,11 +189,21 @@ def is_visible(row: Dict[str, Any], scope_node_id: str, tenant_id: str = "",
     # ── 여기부터는 ORG_PRIVATE(기본값) 또는 표시 없음 ────────────────────
     # [관문 A] 소유 조직이 비어 있으면 **아무에게도 보이지 않는다.** 빈 값은 설정 누락이지
     #   공유 의사가 아니다 — 이것을 "전사 공용"으로 읽던 것이 2026-07-29 유출 경로였다.
-    return bool(owner) and owner in vis
+    if owner:
+        return owner in vis
+    # ⚠️ 되돌림 스위치(§5.3). `SCOPE_FAIL_CLOSED=False` 면 종전 규칙("미지정 = 전사 공용")로
+    #   돌아간다 — 도입 중 현업이 막혔을 때 **코드 배포 없이** 되돌릴 수단이다.
+    #   이 분기를 타는 것은 **유출 상태**이므로 조용히 넘기지 않고 그 사실을 로그로 남긴다.
+    if not _fail_closed():
+        print("⚠️ [scoping] SCOPE_FAIL_CLOSED=False — 범위 미지정 레코드를 전사 공용으로 "
+              "통과시킵니다(관문 A 이전 규칙). 이것은 임시 조치이며 유출 경로입니다.")
+        return True
+    return False
 
 
 def filter_visible(rows: Iterable[Dict[str, Any]], scope_node_id: str = "",
-                   tenant_id: str = "", entity_mode: str = "REAL") -> List[Dict[str, Any]]:
+                   tenant_id: str = "", entity_mode: str = "REAL",
+                   sandbox_token: str = "") -> List[Dict[str, Any]]:
     """목록에 가시성 필터를 건다. 조상 해석은 **한 번만** 한다(행마다 리솔버를 때리지 않게).
 
     ★ 만료 판정 기준일도 한 번만 고정한다 — 목록을 훑는 중 자정을 넘기면 같은 응답 안에서
@@ -180,7 +211,8 @@ def filter_visible(rows: Iterable[Dict[str, Any]], scope_node_id: str = "",
     vis = visible_scopes(scope_node_id) if scope_node_id else set()
     today = date.today().isoformat()
     return [r for r in rows
-            if is_visible(r, scope_node_id, tenant_id, entity_mode, vis, today)]
+            if is_visible(r, scope_node_id, tenant_id, entity_mode, vis, today,
+                          sandbox_token)]
 
 
 def coverage(rows: Iterable[Dict[str, Any]], label: str = "레코드") -> Dict[str, Any]:

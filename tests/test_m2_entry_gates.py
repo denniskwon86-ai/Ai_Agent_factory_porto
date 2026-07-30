@@ -134,6 +134,49 @@ def test_gate_a_legacy_rows_are_grandfathered_but_counted():
     assert cov.get("legacy_grandfathered") == 1, "한시 예외 건수가 별도로 세어져야 한다"
 
 
+def test_gate_a_can_be_rolled_back_without_a_deploy():
+    """★★ [§5.3] `SCOPE_FAIL_CLOSED=False` 로 **코드 배포 없이** 종전 규칙으로 되돌아간다.
+
+    설계서가 이 스위치를 요구한 이유: "한 번에 전환하면 무엇이 안 보이게 됐는지 아무도 모른다."
+    도입 중 현업이 막히면 되돌릴 수단이 있어야 하고, **되돌릴 수 없는 되돌림 장치는 장치가
+    아니다** — 그래서 값을 캐시하지 않고 호출 시점에 읽는지까지 여기서 잠근다.
+
+    ⚠️ 단 **주입 경로에는 적용되지 않는다.** 주입은 되돌릴 수 없다(이미 LLM 이 읽고 산출물에
+      반영된다) — 화면에서 되돌릴 수 있는 것과 성질이 다르다."""
+    import config
+    from core.enterprise_context.scoping import is_visible
+
+    row = {"enterprise_scope_id": "", "tenant_id": "tenant_default", "entity_mode": "REAL"}
+    saved = getattr(config, "SCOPE_FAIL_CLOSED", True)
+    try:
+        assert is_visible(row, "BATTERY") is False, "기본값은 비노출이어야 한다"
+        config.SCOPE_FAIL_CLOSED = False
+        assert is_visible(row, "BATTERY") is True, \
+            "되돌림 스위치가 먹지 않는다 — 값을 모듈 로드 시점에 캐시했을 가능성이 크다"
+    finally:
+        config.SCOPE_FAIL_CLOSED = saved
+    assert is_visible(row, "BATTERY") is False, "복원 후 다시 비노출이어야 한다"
+
+
+def test_gate_a_rollback_switch_does_not_reopen_the_injection_path(md):
+    """★★ 되돌림 스위치로 **프롬프트 주입까지** 열리면 안 된다.
+
+    화면에서 안 보이는 것은 되돌릴 수 있지만, 프롬프트에 들어간 것은 되돌릴 수 없다 —
+    이미 LLM 이 읽고 산출물에 반영됐다. 2026-07-29 유출의 실제 피해가 그 경로였다."""
+    import config
+    md.bind_master_to_scope("MC-BOUND", "BATTERY", tenant_id="tenant_default")
+    saved = getattr(config, "SCOPE_FAIL_CLOSED", True)
+    try:
+        config.SCOPE_FAIL_CLOSED = False
+        codes = [r["master_code"] for r in
+                 md.select_for_injection("배터리", ["battery"],
+                                         tenant_id="tenant_default", scope_node_id="BATTERY")]
+        assert codes == ["MC-BOUND"], \
+            "되돌림 스위치가 미바인딩 주입을 되살렸다 — 주입은 되돌릴 수 없는 경로다"
+    finally:
+        config.SCOPE_FAIL_CLOSED = saved
+
+
 def test_gate_a_no_scope_call_still_works():
     """★ 회귀 잠금(지금도 지켜져야 함): 범위를 **주지 않는** 호출은 계속 전량을 본다.
 

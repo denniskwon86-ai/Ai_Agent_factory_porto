@@ -26,7 +26,7 @@ sys.stderr = StdoutInterceptor(sys.stderr)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import factory_control, realtime, format_control, skill_control, knowledge_control, telemetry_control, master_control, catalog_control, glossary_control, lineage_control, contract_control, external_control, benchmark_control, crosswalk_control, mcp_control, standard_control, org_control, advisor_control, ledger_control, enterprise_context_control, reference_control, planning_control, connector_control, briefing_control, shadow_control, workspace_control, readiness_control, program_control, scope_control
+from api.routes import factory_control, realtime, format_control, skill_control, knowledge_control, telemetry_control, master_control, catalog_control, glossary_control, lineage_control, contract_control, external_control, benchmark_control, crosswalk_control, mcp_control, standard_control, org_control, advisor_control, ledger_control, enterprise_context_control, reference_control, planning_control, connector_control, briefing_control, shadow_control, workspace_control, readiness_control, program_control, scope_control, sandbox_control
 
 # 슈퍼바이저 데몬 초기화 (백그라운드 이벤트 리스너 등록)
 import core.supervisor_daemon
@@ -91,6 +91,8 @@ app.include_router(readiness_control.router)
 app.include_router(program_control.router)
 # [M2 §2.1] 범위 계약 — 소유 지정·조직 공유·전사 공용 승인·한시 예외 이행
 app.include_router(scope_control.router)
+# [M2 §4.3] VIRTUAL Sandbox capability token — 권한 승급이 아닌 세션 전용 읽기 토큰
+app.include_router(sandbox_control.router)
 app.include_router(master_control.router)
 app.include_router(standard_control.router)
 app.include_router(org_control.router)
