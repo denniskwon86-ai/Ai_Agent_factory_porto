@@ -261,8 +261,16 @@ class DataContracts:
             why = (f"생산자 자산({c['producer_asset_id']})이 카탈로그에 없다." if not asset else
                    f"생산자 자산({asset['name']})이 폐기됐다 — 약속을 지킬 원천이 사라졌다.")
             findings.append({"kind": "producer_missing", "severity": "high", "why": why})
-            return {"contract_id": contract_id, "state": "breached", "findings": findings,
-                    "checked": [], "unverifiable": []}
+            # ★ [2026-07-30] 이 조기 반환이 `contract_key`·`version`·`consumer`·`note` 를
+            #   빼먹고 있었다 — **같은 함수가 두 가지 모양을 돌려주면** 소비자는 정상 경로에서만
+            #   동작하고 위반 경로에서 KeyError 로 죽는다. 하필 그 경로가 가장 알아야 하는
+            #   경로다(실측: 전사 브리핑 집계가 이 키에서 터졌다).
+            return {"contract_id": contract_id, "contract_key": c["contract_key"],
+                    "version": c["version"], "consumer": c["consumer"],
+                    "state": "breached", "findings": findings,
+                    "checked": [], "unverifiable": [],
+                    "note": ("생산자 자산이 없거나 폐기됐습니다 — 나머지 항목은 검증할 대상이 "
+                             "없어 확인하지 않았습니다.")}
 
         checked, unverifiable = [], []
 
