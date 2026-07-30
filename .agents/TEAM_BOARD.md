@@ -14,6 +14,7 @@
 | `결정 / 상태` | 확정·조건부 승인·보류·차단 중 하나와 그 이유. “완료”에는 완료 기준 충족 근거를 포함 |
 | `다음 행동 / 담당` | 다음에 실제로 할 일, 담당자, 착수 조건. 타 팀원의 검토가 필요하면 검토 대상과 질문을 명시 |
 | `영향·주의사항` | 다른 작업·데이터·권한·테스트에 영향을 주는지와 피해야 할 변경을 기록 |
+| `교대 체크포인트` | 마지막 확인 상태, 실제 변경·미변경 범위, 검증 증거, 커밋·푸시 상태, 첫 재개 행동, 금지 범위. 이 항목이 없으면 세션 종료 기록은 인수인계 완료로 보지 않음 |
 
 ### 표준 기록 양식
 
@@ -25,6 +26,7 @@
 - 결정 및 근거: … (`경로`, 커밋, 테스트, 실행 ID)
 - 영향·주의사항: …
 - 다음 행동 / 담당 / 착수 조건: …
+- 교대 체크포인트: 마지막 확인 상태 · 변경/미변경 범위 · 검증 증거 · 커밋/푸시 상태 · 재개 지점 · 금지 범위
 ```
 
 ### 운영 원칙
@@ -33,6 +35,148 @@
 2. 교차검토는 `검토 요청자`, `검토자`, `판정`, `판정 근거`, `후속 조치`를 각각 기록한다. “승인”만으로 Close하지 않는다.
 3. 코드·데이터·권한 모델을 바꾸는 작업은 영향 범위와 되돌림/보류 방법을 남긴다. 실행하지 않은 제안은 “계획”으로 표시한다.
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
+5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
+
+### [TEAM-PROTOCOL-V2-18] 인수인계 완료 기준·기록 승격 규칙 정비
+- 작성자 / 기록 시각: Codex / 2026-07-31 01:20 KST
+- 왜 지금 기록하는가: SW 생성기 시안 작업이 본 보드에는 기록됐지만 별도 인수인계 파일에도 기록됐는지 다시 확인해야 했다. 현행 규칙은 문서 난립 방지는 명확했으나, 무엇이 있어야 실제 인수인계가 완료되는지와 언제 `DECISIONS.md`·`AI_HANDOFF.md`로 승격하는지가 불명확했다.
+- 상태: **협업 프로토콜 2차 정비 반영 완료 · 모든 신규 세션 종료 기록부터 적용**
+- 결정 및 근거: `.agents/TEAM_PROTOCOL.md` §3, §4-1, §4-2와 본 보드 표준 양식에 `교대 체크포인트`를 추가했다. 인계 완료에는 마지막 확인 상태, 변경 범위, 검증 증거, 커밋·푸시 상태, 재개 지점, 금지 범위가 모두 필요하다. 탐색·시안은 본 보드, 확정 결정은 `DECISIONS.md`, 실제 통합 마일스톤은 `AI_HANDOFF.md`로 승격하며 같은 내용을 복제하지 않는다.
+- 영향·주의사항: 새 팀원별·세션별 인수인계 파일을 만들라는 규칙이 아니다. 기존 상세 설계·테스트 증적은 원래 문서에 두고 보드에서는 링크만 연결한다. 기존 보드 항목 전체를 즉시 소급 개편하지 않으며, 다음 갱신 시 새 체크포인트를 적용한다.
+- 다음 행동 / 담당 / 착수 조건: Claude Code·Antigravity·Codex는 다음 세션 종료 또는 담당 교대부터 각자 갱신하는 항목에 교대 체크포인트를 남긴다. Supervisor가 별도 채널이나 자동 알림을 추가로 원할 경우, 파일 증설보다 보드의 미완료 체크포인트 탐지 자동화를 우선 검토한다.
+- 교대 체크포인트: 프로토콜과 보드 표준 양식의 문구를 함께 변경했고 SW 생성기 항목을 첫 적용 사례로 보완했다. 실제 코드·API·DB는 변경하지 않았다. 두 파일은 아직 미커밋·미푸시이며 `.agents/TEAM_BOARD.md`에는 기존 Codex UI 기록도 함께 있으므로 커밋 시 diff 확인과 파일 지정 스테이징이 필요하다. 재개 시 첫 행동은 다른 팀원이 새 형식으로 인계 가능한지 1회 실사용 점검하는 것이다.
+
+### [UX-SW-FACTORY-RESET-17] SW 생성기 원본 복원 기준·전용 UI 3안 비교
+- 작성자 / 기록 시각: Codex / 2026-07-31 00:55 KST
+- 왜 지금 기록하는가: Supervisor가 R2 Factory가 한 페이지에 요구 입력·WBS·Timeline·Preview·품질·Atlas를 모두 우겨 넣어 UI 정리 전 Claude Code 원본보다 나빠졌다고 판정했다. SW 생성기 자체의 전용 시안 샘플링 없이 전체 화면을 확정한 절차 오류를 바로잡는다.
+- 상태: **R2 Factory 반려 · 원본 React 3패널을 기준선으로 복원 · 전용 비교 시안 A/B/C 구현 및 브라우저 검증 완료 · Supervisor 선택 대기**
+- 결정 및 근거: 현재 React의 `WorkflowStrip + ControlPanel + TimelinePanel(Supervisor Console/HOTLInput) + PreviewPanel`을 기능·정보구조 기준선으로 확정했다. `uiux-prototypes/sw-factory-concepts/`에 A Original Plus(원본 3패널 최소 개선), B Guided Journey(신규 기획 5단계), C Focus Workbench(기획/WBS/실행/산출물/품질 탭)를 분리 구현했다. 브라우저에서 A의 Control/Supervisor/Preview 3영역과 Atlas 접근, B의 5단계·단일 주 CTA와 1→2 단계 전환, C의 5개 작업 탭과 산출물 집중 전환을 확인했다. 기능 보존 기준은 `uiux-prototypes/sw-factory-concepts/README.md`.
+- 영향·주의사항: 실제 `frontend/`·API·DB는 변경하지 않았다. R2 Factory는 삭제하지 않고 실패 이력으로 보존하지만 React 이식·확정 디자인 근거로 사용하면 안 된다. Atlas는 항상 접근 가능해야 하나 별도 네 번째 고정 열을 강제하지 않는다. WBS·품질·복구는 관련 단계에서만 전개한다.
+- 다음 행동 / 담당 / 착수 조건: Supervisor가 A/B/C의 선호 요소를 검토한다. 현재 Codex 권고는 `B 신규 기획 → A 실행 통제실 → C 산출물 집중 모드` 조합이다. 선택 전 Claude Code는 실제 Factory 화면을 재배치하지 않는다. 승인 후 Codex가 선택 조합의 상태별 화면 명세를 확정하고 Claude Code가 기존 컴포넌트를 보존한 채 단계적으로 이식한다.
+- 교대 체크포인트: `uiux-prototypes/sw-factory-concepts/`의 갤러리와 A/B/C를 브라우저에서 확인했고 한글 대체문자 0, 로컬 참조 이상 0, 인라인 JS 구문 정상이다. 변경 범위는 해당 시안 폴더, 관련 `docs/uiux/` 설계 문서, 본 보드 항목이며 실제 `frontend/`·API·DB는 미변경이다. 현재 변경은 미커밋·미푸시 상태이고 공유 워킹트리에 다른 세션 변경이 다수 존재하므로 파일 지정 스테이징만 허용한다. 재개 시 첫 행동은 Supervisor의 선호 조합을 확인하는 것이며, 선택 전 Factory React 레이아웃 이식·R2 Factory 재사용·기존 3패널 제거를 금지한다.
+
+### [UX-P0-R2-16] Studio 기능 복원·Atlas Global Rail·Twin 테마 교정
+- 작성자 / 기록 시각: Codex / 2026-07-31 00:34 KST
+- 왜 지금 기록하는가: Supervisor가 최초 P0 통합안에서 Factory 요구 입력·WBS·작업 기능이 사라져 보이고, Twin 컬러가 제품과 부조화하며, Factory·Agent·Twin 모두 Atlas 영역이 없어졌다고 판정했다. 화면기능정의서의 C02/AT-01, C03/BW-03과 실제 시안을 다시 대조해 기능 축약을 즉시 교정했다.
+- 상태: **Factory 부분 Supervisor 반려 · UX-SW-FACTORY-RESET-17로 대체**
+- 결정 및 근거: Factory를 `요구 입력·선택형 명확화·RFP/PRD/아키텍처/UI/WBS Rail + 8단계 진행선 + WBS + Agent Timeline + Artifact 5개 탭 + HOTL/복구/인계 + Atlas`로 재구성했다. Agent는 Template·12개 Node Graph·Inspector 옆에 Atlas를 복원했다. Twin은 밝은 공통 제품 테마 안에서 시뮬레이션 캔버스만 집중색을 사용하고 Scenario·동인·KPI·Value Flow·근거·신뢰도·Atlas를 함께 배치했다. 브라우저에서 Factory 필수 기능 전체 DOM, Agent 12 Node/6 Template/Atlas, Twin 6 Value Flow Node/Atlas를 확인했고 Atlas 빠른 질문이 3개 메시지와 구체 답변을 생성했다. 근거: `uiux-prototypes/revision-v2-2/factory/index.html`, `uiux-prototypes/revision-v2/v10/index.html`, `uiux-prototypes/revision-v2/v9/index.html`, `uiux-prototypes/studio-workspaces.css`, `uiux-prototypes/studio-atlas.js`, `docs/uiux/LIVING_ENTERPRISE_IMPLEMENTATION_TRACEABILITY_2026-07-30.md` §9.
+- 영향·주의사항: 실제 `frontend/`·API·DB는 변경하지 않았다. Agent와 Twin의 분리 화면은 별도 검토 대상으로 남지만 R2 Factory의 네 열 동시 노출과 고정 Atlas Rail은 폐기한다. Atlas 접근성은 유지하되 Supervisor 통합 또는 Drawer로 제공한다.
+- 다음 행동 / 담당 / 착수 조건: Factory 후속 기준은 UX-SW-FACTORY-RESET-17만 사용한다. Agent·Twin도 같은 ‘기능 문자열 존재보다 현재 과업 집중’ 원칙으로 별도 재검토한 뒤 확정한다.
+
+### [UX-P0-SHELL-15] 승인 디자인 기반 제품 셸·Studio P0 통합 리비전
+- 작성자 / 기록 시각: Codex / 2026-07-31 00:07 KST
+- 왜 지금 기록하는가: Supervisor가 제3자 관점 감사에서 확인된 제품 부조화 문제의 P0 수정안을 승인했다. 기존 화면은 전역 헤더·메뉴·회사 범위가 서로 달랐고 `studio-nav.js`가 별도 바와 V10 텍스트를 런타임에 덧씌우는 임시 구조였다.
+- 상태: **Supervisor 반려 · UX-P0-R2-16으로 대체**
+- 결정 및 근거: `product-shell.css/js`를 공통 기준으로 경영 홈·M6·Factory·Agent·Twin의 메뉴를 `경영 홈→Factory→운영→Twin→보고서→Knowledge→Agent`로 통일했다. 회사 문맥은 `LS MnM · 전사공통 · 경영관리팀 · REAL`, 샘플 화면은 `PROTOTYPE · SAMPLE DATA`로 고정했다. Factory는 생산 제어·WBS·Timeline·Preview·품질·복구, Agent는 원본 노드·엣지 Graph Editor, Twin은 3개 시나리오와 4개 동인으로 재구성했다. Agent 미저장 Draft·Twin 미저장 시나리오·Factory 실행 중 이탈 보호를 구현했다. 1280px 가로 넘침 0, 전역 셸 화면당 1개, M6 Report 활성, Agent 이탈 경고/저장, Twin KPI 재계산, Factory ASSEMBLE→BUILD 전환, 신규 브라우저 오류 0건을 확인했다. 상세 근거는 `docs/uiux/LIVING_ENTERPRISE_IMPLEMENTATION_TRACEABILITY_2026-07-30.md` §9.
+- 영향·주의사항: 실제 `frontend/`·API·DB는 변경하지 않았다. 공통 전역 셸과 `studio-nav.js` 제거 결정만 유지한다. Factory 생산라인 중심 공간 모델, Twin 전면 다크 테마, 하단 한 줄 Atlas는 기능 정의 위반으로 폐기됐다.
+- 다음 행동 / 담당 / 착수 조건: Claude Code가 M6 React 이식 시 공통 `AppShell`·`CompanyContextBar`부터 구현하고 Factory→Agent→Twin 순으로 실제 상태 계약에 연결한다. Codex는 각 단계의 1280/1440 가독성·문맥·작업 보호·기능 손실을 브라우저 교차검증한다. 착수 조건은 현재 Reference Registry/Knowledge 작업과 충돌하지 않는 별도 UI 변경 범위 확정이다.
+
+### [UX-STUDIO-IA-14] 경영 홈 복원 및 전용 Studio 분리
+- 작성자 / 기록 시각: Codex / 2026-07-30 KST
+- 왜 지금 기록하는가: Supervisor가 M6 Enterprise의 의미가 불명확하고 승인 원안과 달라졌으며, SW 생성·Agent 관리·Simulator를 메인 3열 화면 안이 아니라 기능 특성에 맞는 독립 화면으로 분리해야 한다고 지적했다.
+- 상태: **UX-P0-SHELL-15로 대체 완료**
+- 결정 및 근거: 이 항목에서 채택한 경영 홈·전용 Studio 분리 원칙은 유지한다. 다만 임시 `studio-nav.js` 주입과 V10 런타임 문구 치환 구현은 UX-P0-SHELL-15에서 제거하고 각 Studio 원본 HTML과 공통 제품 셸로 대체했다.
+- 영향·주의사항: 후속 구현과 검토는 본 항목의 임시 Studio Bar가 아니라 UX-P0-SHELL-15 및 UI 추적성 문서 §9를 기준으로 한다.
+- 다음 행동 / 담당 / 착수 조건: Claude Code가 M6 구현 시 `docs/uiux/LIVING_ENTERPRISE_IMPLEMENTATION_TRACEABILITY_2026-07-30.md`의 M6-UI-02, 03, 05, 07A 순서로 route와 공통 Context Bar를 구현한다. Codex는 경영 홈에 편집 기능이 다시 혼입되지 않는지, Studio별 작업 면적·핵심 시각화·이탈 보호가 유지되는지 브라우저 교차검토한다.
+
+### [UX-M6-SAMPLE-13] UI 설계서 기반 기능별 제품 화면 샘플
+- 작성자 / 기록 시각: Codex / 2026-07-30 KST
+- 왜 지금 기록하는가: Supervisor가 화면기능정의서와 UI 설계서를 문서로 끝내지 말고 승인 디자인을 실제 기능 화면에 입혀 샘플링하라고 지시했다.
+- 상태: **10개 핵심 화면 클릭형 샘플 완료 · 실제 React 이식 기준선 확정**
+- 결정 및 근거: `uiux-prototypes/m6-product-samples/`에 Enterprise, Company Universe, Guided Start, SW Production, Report Studio, Operate, Digital Twin, Knowledge·MDM, Agent OS, Settings & Administration 10개 화면을 구현했다. Company Universe는 회사·사업부·공장 선택, 권한 범위, 산업 플레이북과 REAL 격리형 가상회사 복사 생성을 제공한다. Report Studio는 V5 Business Planning Binder의 목차·본문·주석·근거·버전·승인·PDF/Word 배포 구조를 계승한다. Admin은 개인 설정과 회사 브랜드·사용자 권한·AI 모델/비용·데이터 연계·감사/복구를 권한별로 분리하고 우측에서 변경 영향을 확인한다. Atlas에는 Task ID 없는 전역 질의와 업무 SW·시뮬레이터·보고서 공동설계 상담 진입을 추가했다. 앱 내장 브라우저에서 `Copper Expansion 2032` 가상회사 생성, Atlas 시뮬레이터 상담→Guided Start 인계, 보고서 승인, 자연어 검색, Admin 6개 도메인 탐색·브랜드 변경 검토·저장을 확인했고 콘솔 오류는 0건이었다.
+- 영향·주의사항: 실제 `frontend/`·백엔드·DB는 변경하지 않았다. 화면의 경영 수치와 계산식은 UX 동작 검증용 예시이며 실제 계산 엔진의 SSOT로 사용하면 안 된다. React 이식 시 `app.js` 샘플 상태를 Zustand·REST·SSE 계약으로 교체하고, 조직 범위·404 은폐·승인 Fail-closed 원칙을 유지한다.
+- 다음 행동 / 담당 / 착수 조건: Claude Code가 `docs/uiux/LIVING_ENTERPRISE_IMPLEMENTATION_TRACEABILITY_2026-07-30.md`와 본 샘플을 함께 사용해 M6-UI-01 공통 셸부터 기존 UI 병행 카나리로 이식한다. Codex는 이식 PR/커밋을 브라우저에서 정보 위계·폰트·핵심 버튼·콘텐츠 누락 기준으로 검토한다.
+
+### [UX-SCREEN-SPEC-12] 승인 North Star 기반 M6 화면기능정의·UI 설계
+- 작성자 / 기록 시각: Codex / 2026-07-30 KST
+- 왜 지금 기록하는가: Supervisor가 Claude Code의 현재 기능 구현을 상세히 파악하고, 최종 승인된 `Living Enterprise Canvas` 중심으로 기능별 UI/UX 배치가 가능한 화면기능정의서와 UI 설계서를 작성하라고 지시했다.
+- 상태: **설계 문서 완료 · Claude Code M6 구현 인계 가능**
+- 결정 및 근거: 현재 `App.tsx`와 25개 주요 컴포넌트, 분리된 API 클라이언트, 전체 백엔드 라우트, 최근 M2~M5 커밋, 진행 중 Reference Dataset Registry를 대조했다. `docs/uiux/LIVING_ENTERPRISE_SCREEN_FUNCTION_DEFINITION_2026-07-30.md`, `LIVING_ENTERPRISE_UI_DESIGN_SPEC_2026-07-30.md`, `LIVING_ENTERPRISE_IMPLEMENTATION_TRACEABILITY_2026-07-30.md`에 34개 목표 화면, 역할·권한, 핵심 여정, 상태 계약, API/컴포넌트 매핑, M6 단계별 구현안을 기록했다.
+- 영향·주의사항: 실제 `frontend/`와 백엔드는 수정하지 않았다. Claude Code가 작업 중인 `KnowledgeHubPanel.tsx`·Reference Registry 파일을 덮어쓰지 않는다. 원본자료는 승인 전 자동 전사 색인하지 않으며, 기존 `ControlPanel`·`TimelinePanel`·`PreviewPanel` 기능은 Production Workspace로 보존 이식한다. 전역 Canvas와 Atlas에는 신규 `/api/v1/enterprise-canvas`, `/api/v1/atlas/chat` 계약이 필요하다.
+- 다음 행동 / 담당 / 착수 조건: Claude Code가 M6-UI-01(AppShell·Context)과 M6-UI-02(Read-only Canvas)를 기존 UI 병행 카나리로 구현한다. Codex는 각 단계의 가독성·정보 위계·기능 누락을 브라우저로 검토한다. 권한·경영수치·승격 동작 변경은 후속 교차검토 대상으로 남기되, 자체 구현과 자체검토를 불필요하게 정지시키지 않는다.
+
+### [UX-MASTER-CONCEPT-11] Living Enterprise Canvas North Star
+- 작성자 / 기록 시각: Codex / 2026-07-30 KST
+- 왜 지금 기록하는가: Supervisor가 반복되는 시안 제안과 설명을 중단하고, 실제 계획을 세워 우리 시스템만의 대표 화면을 즉시 구현하라고 지시했다.
+- 상태: **Supervisor 최종 합격·North Star 채택** · 실제 제품 적용 준비
+- 결정 및 근거: `uiux-prototypes/master-concept/`에 좌측 의사결정 대기열, 중앙 Enterprise Digital Thread, 현업 생성 SW·Data·Twin 레이어, 하단 Trust Foundation, 우측 전역 Atlas를 하나의 화면으로 구현했다. 업무 노드 전환, 레이어 표시, 시나리오 비교, Atlas 근거 질문·자유 질문·의사결정안 생성 인터랙션을 실제 브라우저에서 검증했다. 현재 API와 신규 Aggregate·Atlas 계약의 경계는 `IMPLEMENTATION_MAPPING.md`에 기록했다.
+- 영향·주의사항: 실제 `frontend/`와 API는 아직 변경하지 않았다. 현재 Supervisor Chat은 `project_id`가 필요하므로 시안의 전역 Atlas를 구현하려면 `/api/v1/atlas/chat`과 회사 Context Resolver가 필요하다. 기존 `ControlPanel`·`TimelinePanel`·`PreviewPanel`은 폐기 대상이 아니라 선택 노드의 상세 작업 공간으로 재배치한다.
+- 다음 행동 / 담당 / 착수 조건: Codex가 화면 기능 정의와 디자인 토큰을 확정하고, Claude Code가 MC-1 Read-only Aggregate API 및 React 카나리 이식을 수행한다. 기존 통제실을 유지한 병행 카나리로 검증하며 실제 메인 전환은 사용자 과업 테스트 통과 후 결정한다.
+
+### [UX-REVISION-V2-2-10] LS 공식 CI 컬러 테마 비교안
+- 작성자 / 기록 시각: Codex / 2026-07-30 KST
+- 왜 지금 기록하는가: Supervisor가 LS Holdings 공식 CI 페이지를 참고해 V2-1의 대표 화면 3종에 회사 대표 컬러를 적용한 V2-2를 요청했다.
+- 상태: 공식 CI 조사·V2-2 테마·문서·실제 렌더링·상호작용 검증 완료 · Supervisor 비교 검토 대기
+- 결정 및 근거: LS 공식 CI의 LS Blue `RGB(10,30,90)`, LS Red `RGB(250,0,45)`, Green `RGB(0,155,180)`, Blue `RGB(5,105,160)`, Gray `RGB(125,130,130)`를 `uiux-prototypes/revision-v2-2/`에 적용했다. 구조와 기능 콘텐츠는 V2-1과 동일하게 유지해 테마 효과를 독립 비교한다. 의미 체계와 상용화 전 CI 승인 조건은 `BRAND_APPLICATION_GUIDE.md`에 기록했다.
+- 영향·주의사항: 실제 `frontend/`와 API는 변경하지 않았다. 시안의 LS 문자 표시는 테마 검토용이며 공식 로고 원본 재현물이 아니다. 상용 적용 전 회사 CI 담당 부서 승인과 계열사별 공식 로고·보호공간·배경 규정 등록이 필요하다.
+- 다음 행동 / 담당 / 착수 조건: Supervisor가 V2-1 기준안과 V2-2 LS 테마를 비교한다. 채택 후에만 Codex가 실제 디자인 토큰과 회사 마스터 테마 스키마를 설계하고, Claude Code가 React 적용을 교차검토한다.
+
+### [UX-REVISION-V2-1-09] 대표 화면 3종 방향 검증
+- 작성자 / 기록 시각: Codex / 2026-07-30 KST
+- 왜 지금 기록하는가: Supervisor가 Revision V3를 양산형 AI 디자인으로 판단하고, Revision V2의 독창성을 살린 보완안 V2-1을 요청했다.
+- 상태: 대표 화면 3종 구현·정적 검증 완료 · Supervisor 시각 검토 대기
+- 결정 및 근거: `uiux-prototypes/revision-v2-1/`에 Enterprise World, Software Production Line, Future Scenario Room을 구현했다. 공통 UI·본문은 Pretendard/Noto Sans KR 계열, 수치·코드만 고정폭으로 제한했다. 한글 손상 0건, 금지 글꼴 0건, 로컬 참조 누락 0건, 핵심 상호작용과 `git diff --check`를 확인했다. 기능 보존표는 `CONTENT_COVERAGE.md`, 채택 기준은 `DIRECTION_SCORECARD.md`에 기록했다.
+- 영향·주의사항: 실제 `frontend/`와 API는 변경하지 않았다. `revision-v3/`는 최종 후보가 아니라 통일형 실험의 실패 이력으로 보존하며, 그 세트의 공통 Shell을 향후 구현 기준으로 사용하지 않는다.
+- 다음 행동 / 담당 / 착수 조건: Supervisor가 대표 화면별 채택·부분 채택·재설계를 판정하면 Codex가 승인된 공간 모델을 나머지 기능 화면과 최종 디자인 시스템으로 확장한다. 실제 React 이식 전 Claude Code가 API·상태 매핑을 교차검토한다.
+
+### [UX-SET-B-08] 통일형 두 번째 UI/UX 후보 세트
+- 작성자 / 기록 시각: Codex / 2026-07-30 KST
+- 왜 지금 기록하는가: Supervisor가 Revision V2의 기능별 구조를 긍정적으로 평가하면서 글꼴 변화를 최종 취합 시 제한하고, 같은 기능군을 다른 방식으로 설계한 두 번째 세트와 비교해 최종 선택하라고 요청했다.
+- 상태: Set B V1~V10 구현·정적 검증 완료 · Set A/B 비교 선택 대기
+- 결정 및 근거: `uiux-prototypes/revision-v3/`에 공통 `set-b.css`를 사용하는 10개 대안을 구현했다. V1 Mission, V2 Workspace, V3 Evidence Matrix, V4 Plant Timeline, V5 Planning Workbook, V6 Organization Tree, V7 Critical Path, V8 Day Planner, V9 Performance Ledger, V10 Guided Launchpad다. 모든 UI·본문은 Pretendard/Noto Sans KR 계열을 사용하고 숫자·코드에만 고정폭 글꼴을 적용한다. V1~V10 고유 구조·상호작용·공통 CSS 참조, 한글 손상 0건, 누락 참조 0건, 금지 글꼴 0건, 갤러리 연결과 `git diff --check`를 검증했다.
+- 영향·주의사항: 실제 `frontend/`는 변경하지 않았다. Set A는 개성·차별성, Set B는 통일성·구현성 평가용이며 한 세트를 통째로 선택할 필요는 없다. 비교 기준은 `uiux-prototypes/REVISION_SET_COMPARISON.md`다.
+- 다음 행동 / 담당 / 착수 조건: Supervisor가 화면별 Set A/Set B/혼합 채택을 결정하면 Codex가 Set B 글꼴·Shell·상태 토큰 위에 선택 구조를 통합한 Final UI Architecture와 화면 명세를 작성한다. Claude Code는 최종안의 React·API·상태 매핑을 교차검토한다.
+
+### [UX-REVISION-V2-07] V1~V10 디자인 전체 수정본
+- 작성자 / 기록 시각: Codex / 2026-07-30 KST
+- 왜 지금 기록하는가: Supervisor가 기존 10개 시안이 구성만 다르고 실제 디자인 테마는 2~3개에 불과하다고 지적했고, 제3자 평가에서도 카드형 대시보드 반복·작은 글자·정적 화면 문제가 확인되어 전체 수정본 작성을 요청했다.
+- 상태: Revision V2 구현·정적 검증 완료 · Supervisor 시각 검토 및 선별 대기
+- 결정 및 근거: `uiux-prototypes/revision-v2/`에 V1 Product Control Room, V2 Desktop OS, V3 Decision Theater, V4 Plant Mimic, V5 Planning Binder, V6 Spatial Constellation, V7 Process River, V8 Editorial Personal Portal, V9 Value Chain Sankey, V10 Atlas Solution Canvas를 분리 구현했다. 각 화면은 고유 공간 모델과 최소 1개 상호작용을 갖는다. V1~V10 파일·고유 제목·디자인 키·본문 14px 기준·style/script 블록, 한글 손상 0건, 로컬 참조 누락 0건, `git diff --check`를 검증했다.
+- 영향·주의사항: 실제 `frontend/`는 변경하지 않았다. 수치는 레이아웃 검토용 예시다. 기존 `v1/`~`v10/`은 삭제하지 않고 비판 전 탐색 이력으로 보존하며, 이후 최종 비교는 `revision-v2/index.html`을 기준으로 한다.
+- 다음 행동 / 담당 / 착수 조건: Supervisor가 `revision-v2/SELECTION_SCORECARD.md` 기준으로 채택·부분 채택·보류·제외를 판정하면 Codex가 선택 요소를 하나의 To-Be 정보구조·디자인 시스템·화면 명세로 통합한다. Claude Code는 최종 통합안에 한해 현재 React·API·상태 모델 구현 적합성을 교차검토한다.
+
+### [UX-DIVERGENCE-06] V1~V10 디자인 문법 중복 감사와 전면 리비전
+- 작성자 / 기록 시각: Codex / 2026-07-30 KST
+- 왜 지금 기록하는가: Supervisor가 10개 시안의 구성 차이에도 불구하고 실제 디자인 테마가 다크·라이트·V8 편집형의 3개 수준에 불과하다고 지적했다.
+- 상태: 중복 원인 감사 및 리비전 설계 완료 · 실제 시안 재구축 착수 전
+- 결정 및 근거: 코드 감사 결과 V2~V10 중 9개가 CSS Grid·흰 카드·상단 바를 사용하고 8개가 파란 포인트 계열을 공유했다. `uiux-prototypes/DESIGN_DIVERGENCE_REVISION_PLAN.md`에서 V1~V10에 서로 다른 공간 모델·탐색·상호작용·시각 언어와 금지 규칙을 배정했다. V2·V3·V4·V5·V9는 전면 재설계, V6·V10은 핵심 캔버스 강화, V7·V8은 용도를 유지하며 정제한다.
+- 영향·주의사항: C01~C12 콘텐츠와 V7=프로젝트 하위 모듈, V8=향후 개인화 포털이라는 제품 판단은 유지한다. 기존 HTML을 삭제하지 않고 각 버전 폴더에서 리비전하되, 디자인 차이를 만들기 위해 콘텐츠를 누락해서는 안 된다.
+- 다음 행동 / 담당 / 착수 조건: Codex가 Wave 1(V2 Desktop OS, V3 Decision Theater, V4 Industrial Control Room, V5 Planning Binder)을 순차 재구축한다. 각 Wave 완료 후 Supervisor가 실제 시각 차이를 검토하고, Claude Code는 최종 채택안에 대해서만 React 구현 적합성을 교차검토한다.
+
+### [UX-EVAL-04] Antigravity UX 평가 개입 철회 및 Codex 주도권 위임
+- 작성자 / 기록 시각: Antigravity / 2026-07-30 13:40 KST
+- 왜 지금 기록하는가: 저(Antigravity)의 섣부르고 일관성 없는 UX 평가 개입으로 혼선이 발생하여, Supervisor의 지시에 따라 모든 디자인 강제 지시를 철회하고 원래 담당자에게 주도권을 돌려주기 위함입니다.
+- 상태: **Antigravity 이전 개입(UX-EVAL-01~03) 전면 무효화**
+- 결정 및 근거:
+  - 프론트엔드 통합, Set A/B 선택 및 하이브리드 구성 등 UI/UX 디자인에 관한 모든 권한과 최종 결정권은 전적으로 **Codex**에게 일임합니다.
+- 영향·주의사항:
+  - 저(Antigravity)는 이후 UI 디자인의 미적, 구조적 결정에 일절 관여하지 않습니다.
+- 다음 행동 / 담당 / 착수 조건: **Codex**가 자신의 판단과 제품 기획 역량을 바탕으로 Master UI 통합을 주도합니다.
+
+### [PMO-WBS-02] 팀원별 마이크로 태스크 분할 및 M5 통합 E2E 기획 갱신
+- 작성자 / 기록 시각: Antigravity / 2026-07-30 11:30 KST
+- 왜 지금 기록하는가: 단일 Master WBS의 한계를 보완하기 위해 각 에이전트별 상세 Task Tracker를 도입하고, 누락된 비즈니스 검증 시나리오를 3단계 통합 E2E에 태우기 위함.
+- 상태: 완료 (적용 중)
+- 결정 및 근거:
+  1. `docs/wbs/` 하위에 `claude_code_tasks.md`, `codex_tasks.md`, `antigravity_tasks.md` 3종의 마이크로 태스크 트래커를 신설함. 향후 각 에이전트는 본인의 할 일을 이 파일들로 쪼개어 관리할 것.
+  2. 기존 `run_e2e_scenario.py`가 담지 못하는 권한 격리 및 디지털트윈 검증을 포함하기 위해 `docs/wbs/test_plan_m5_e2e.md` (3단계 E2E 통합 기획서)를 신설함.
+- 영향·주의사항:
+  - M5 통과(Quality Gate)는 위 E2E 기획서의 3단계 시나리오(Core, Auth, Business)를 모두 PASS 해야 완료(DONE)로 간주됨.
+  - 앞으로 개별 기능 To-Do 갱신 시 `TEAM_BOARD`에 중복 서술하기보다 각자의 Task Tracker 마크다운을 업데이트할 것.
+- 다음 행동 / 담당 / 착수 조건: Antigravity가 PMO이자 품질 관리자로서 위 M5 E2E 테스트 스위트를 직접 기동하며 오류 텔레메트리를 감사(Audit)함.
+
+### [PMO-WBS-01] 시스템 파일 정리 및 Master WBS 체계 전환 공지
+- 작성자 / 기록 시각: Antigravity / 2026-07-30 10:45 KST
+- 왜 지금 기록하는가: Supervisor의 지시에 따라 PMO로서 시스템의 테스트 파일들을 아카이브하고 Master WBS를 신설했음을 팀에 공유하기 위함.
+- 상태: 완료 (적용 중)
+- 결정 및 근거:
+  1. `docs/wbs/system_implementation_wbs.html` 를 전체 마일스톤 진행률을 모니터링하는 공식 Master WBS로 지정함.
+  2. 1회성 스크립트(`test_*.py` 등)는 `_archive/scripts_tests/` 로 격리 이동되었으며, 옛 문서들은 `docs/chronicle/` 과 `docs/archive/` 로 분류 보관됨. (`walkthrough.md` 참조)
+- 영향·주의사항:
+  - 앞으로 과거 테스트 코드를 찾으려면 `_archive/` 경로를 확인해야 함.
+  - 테스트 및 빌드 과정에서 옛 경로 참조 시 에러가 날 수 있으므로 주의.
+  - 마일스톤(M1~M6) 상태 갱신 시 `TEAM_BOARD.md` 기록과 함께 Master WBS의 타임라인 및 % 갱신도 병행할 것.
+- 다음 행동 / 담당 / 착수 조건: 전 팀원(Claude Code, Codex)은 새 파일 구조와 WBS를 작업 기준점으로 삼고 진행할 것.
 
 ### [M2-ENFORCE-01] ⚠️ 조직 권한 강제를 **켰다** — 서버 재시작 시 화면 동작이 바뀐다
 - 작성자 / 기록 시각: Claude Code / 2026-07-31 KST
@@ -66,6 +210,44 @@
   · **Codex**: 사용자 미지정 시의 빈 목록 UX 검토 — 현재는 `UserSwitcher` 배너로만 알린다.
     화면별 빈 상태에도 같은 안내가 필요한지 판단 요청
   · **사용자**: 실제 인원 부서 배정(파일럿 대상자 목록 필요)
+- 교대 체크포인트 (v2 §4-2 · 작성: Claude Code / 2026-07-31 세션 종료 시점):
+  1. **마지막 확인 상태**: 권한 강제 **ON** 상태에서 (a) 실 데이터 권한 해석 5주체
+     (관리자·폐지 4건·미등록·익명) (b) 지식 검색 3조직(상속 5건·타 법인 0건) (c) 격리 환경
+     화면(익명 배너 → 사용자 지정 시 소멸)까지 확인했다.
+     ⚠️ **실 서버(8080·5173)의 6개 화면은 강제 ON 상태로 확인하지 못했다** — 확인 전에 서버를
+     종료했다(사용자 지시). 이것이 남은 검증 공백이다.
+  2. **변경 범위**: 커밋 22건(`91e1fb497`→`b99914f08`). 신규 모듈 11개(`core/scope_contract.py` ·
+     `sandbox_token.py` · `scope_policy.py` · `org_activation.py` · `classification.py` ·
+     `external_collector.py` · `library_paths.py` 등) · 라우트 5개 · 테스트 1234→1426.
+     **미변경**: 프론트엔드는 `frontend/src/components/UserSwitcher.tsx` **1개 파일만** 고쳤다.
+     Codex 의 UI 시안·`uiux-prototypes/`·`_archive/` 정리물은 손대지 않았다.
+     **실 데이터 변경 있음**: 부서 2개 생성(`production_copper`·`production_battery`) · 실제
+     관리자 1명 등록 · 테스트 계정 4건 소프트 폐지 · 지식팩 청크 1342건에 소유 조직 부여 ·
+     참고문서 17건 승인·16건 색인 · `data/scope_policy.json` 생성(강제 ON).
+  3. **검증 증거**: `python -m pytest` → **1426 passed / 실패 0 / xfail 0**(원래 폴더·작업 폴더
+     양쪽 동일). 관문: `tests/test_m2_entry_gates.py`. 실측 수치는 커밋 메시지에 기재
+     (`e8f510fb9` · `8dd82ed44` · `76ac642a8`). DB 백업: 스크래치패드 `db_backup_2026-07-30`
+     (13개 DB · 4.3MB).
+  4. **저장소 상태**: 작업 폴더 · 원래 폴더 · `origin/dev` 모두 **`b99914f08` 로 일치**하며 제
+     변경은 **전부 커밋·푸시 완료**.
+     ⚠️ 원래 폴더에 **Codex 의 미커밋 변경**이 남아 있다(`.agents/AGENTS.md` ·
+     `TEAM_PROTOCOL.md` · 이 보드 · `knowledge_control.py` · `KnowledgeHubPanel.tsx` ·
+     `run_e2e_scenario.py` · `uiux-prototypes/`). 같은 파일을 고칠 때는 v2 §5-1 규칙 7대로
+     **`git add` 전에 diff 를 확인**해야 한다.
+     ⚠️ `data/reference_registry.json` · `data/access_audit.jsonl` 은 **운영 상태인데 git 추적
+     대상**이어서 커밋 스냅샷과 계속 어긋난다(`.gitignore` 이전 검토 — 미착수).
+  5. **재개 지점**: 서버를 다시 띄운 뒤(`backend` · `frontend`) **화면 우측 상단에서 사용자를
+     지정**하고, 6개 화면이 강제 ON 상태에서 정상인지 확인하는 것이 첫 행동이다.
+     착수 조건: 등록된 사용자로 접속해야 목록이 보인다(계정 생성 절차는 `AI_HANDOFF.md`).
+  6. **금지·주의 범위**:
+     · **`config.ORG_ENFORCE` 를 고쳐 끄려 하지 말 것** — 정책 저장소(`data/scope_policy.json`)가
+       코드 기본값을 이긴다. 끄려면 `PUT /api/v1/admin/org-enforcement {"enabled": false}`.
+     · **폐지 계정 4건을 되살리지 말 것**(`admin` · `bob` · `bob2` · `exec`) — 되살리면 테스트가
+       만든 `admin` 이 전권을 갖는다. 필요하면 본인 이름의 계정을 새로 만든다.
+     · **DRM 보호 문서 50건은 손대지 말 것** — 사용자 결정으로 시스템 오픈 후 처리다. 변환
+       도구로 열리지 않는다(시도하면 전부 실패한다 — 실측).
+     · **`tests/conftest.py` 의 격리 13개를 줄이지 말 것** — 줄이면 테스트가 운영 데이터에
+       의존해 폴더에 따라 다른 결과를 낸다(이번 세션에 실제로 발생·수정).
 
 ### [UX-SELECTION-05] V7·V8 용도 판정 및 V9·V10 신규 시안
 - 작성자 / 기록 시각: Codex / 2026-07-30 KST
