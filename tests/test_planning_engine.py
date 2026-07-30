@@ -392,3 +392,22 @@ def test_conflict_is_reported_not_auto_resolved(store):
     r = eng.rollup_conflicts(store.list_facts(org_id="MNM_BATTERY"))
     assert r["conflicts"][0]["matches"] is False    # 값도 안 맞는다 — 더 위험한 상태
     assert "자동으로 고르지 않고" in r["note"]
+
+
+def test_variance_sums_duplicate_account_rows(store):
+    """★★ 같은 화면의 두 숫자가 **다른 규칙**으로 계산되면 어느 쪽도 신뢰할 수 없다.
+
+    차원(제품·원가센터) 도입 후 같은 계정이 여러 행으로 온다. 종전에는 `variance` 가
+    dict 컴프리헨션이라 **마지막 값만 남기고 나머지를 조용히 버렸다** —
+    브라우저 실측에서 '계획 영업이익 750' 과 '계정별 표 600' 이 동시에 떠 발견됐다.
+    `compute_pl` 과 동일하게 합산해야 한다(혼재 자체는 rollup_conflicts 가 경고한다)."""
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 1000.0)                       # 합계행
+    store.put_fact("MNM_BATTERY", "4000", "2027", PLAN, 600.0, product_code="NCM811") # 상세행
+    store.put_fact("MNM_BATTERY", "4000", "2027", ACTUAL, 1100.0)
+
+    v = eng.variance("MNM_BATTERY", "2027")
+    row = next(r for r in v["by_account"] if r["account_code"] == "4000")
+    # 합산값(1600)이어야 한다 — 600 이면 합계행이 조용히 사라진 것이다.
+    assert row["plan"] == 1600.0
+    # 손익 합계와 같은 규칙인지 교차 확인
+    assert v["plan"]["lines"]["REVENUE"] == 1600.0

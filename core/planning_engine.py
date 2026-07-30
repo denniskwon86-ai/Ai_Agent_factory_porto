@@ -294,8 +294,26 @@ def variance(org_id: str, period: str,
     accounts = _accounts_by_code()
     p, a = compute_pl(plan, accounts), compute_pl(act, accounts)
     rows = []
-    plan_by = {f["account_code"]: float(f["amount"]) for f in plan}
-    act_by = {f["account_code"]: float(f["amount"]) for f in act}
+    # ★★ [2026-07-30 브라우저 실측으로 발견] 이 두 줄이 dict 컴프리헨션이었다.
+    #   차원(제품·원가센터)이 도입되면서 같은 `account_code` 가 여러 행으로 온다 —
+    #   컴프리헨션은 **마지막 값만 남기고 나머지를 조용히 버린다.**
+    #
+    #   실측 결과 같은 화면에서 두 숫자가 다른 규칙으로 계산됐다:
+    #     · 계획 영업이익 750  (compute_pl 은 전 행을 합산)
+    #     · 계정별 표 4000 계획 600  (여기서 합계행 1,000 이 상세행 600 으로 덮였다)
+    #   **같은 화면의 두 숫자가 다른 규칙을 쓰면 어느 쪽도 신뢰할 수 없다.**
+    #   그래서 `compute_pl` 과 동일하게 **합산**한다. 합계행·상세행 혼재 자체는
+    #   `rollup_conflicts()` 가 별도로 경고하는 문제이고, 여기서 조용히 한쪽을 고르는 것은
+    #   그 경고보다 나쁘다 — 경고 없이 값이 사라지기 때문이다.
+    def _sum_by_account(rows_in: List[Dict[str, Any]]) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for f in rows_in:
+            code = f["account_code"]
+            out[code] = out.get(code, 0.0) + float(f["amount"])
+        return out
+
+    plan_by = _sum_by_account(plan)
+    act_by = _sum_by_account(act)
     for code in sorted(set(plan_by) | set(act_by)):
         pv, av = plan_by.get(code), act_by.get(code)
         rows.append({

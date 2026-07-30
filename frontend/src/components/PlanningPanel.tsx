@@ -45,6 +45,15 @@ export function PlanningPanel({ onClose }: { onClose: () => void }) {
   const load = async () => {
     setBusy(true);
     setErr('');
+    // ★ [2026-07-30 실측으로 발견] 계정·시나리오 목록도 **함께 다시 읽는다.**
+    //   종전에는 `useEffect([orgId])` 로만 읽어서, 다른 화면·API 로 시나리오를 만든 뒤
+    //   「계산」을 눌러도 목록이 갱신되지 않았다. 화면은 "등록된 시나리오가 없습니다" 라고
+    //   말하는데 실제로는 3건이 있었다 — 조용한 거짓말이다.
+    //   「계산」은 "지금 상태를 다시 읽는다"는 뜻이어야 한다.
+    Promise.allSettled([fetchAccounts(), fetchScenarios(orgId)]).then(([a, s]) => {
+      if (a.status === 'fulfilled') setAccounts(a.value);
+      if (s.status === 'fulfilled') setScenarios(s.value);
+    });
     // 한 쪽이 실패해도 나머지는 보여준다 — 화면이 통째로 비면 아무것도 못 본다.
     const [c, v, cfR, btR, rollR, apprR] = await Promise.allSettled([
       picked.length ? compareScenarios(picked, orgId, period) : Promise.resolve(null as any),
