@@ -13,6 +13,8 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.work_standard import (
@@ -21,6 +23,21 @@ from core.work_standard import (
     get_standard, render_standard_brief, standard_code,
 )
 from core.work_standard_seed import _JUDGING_STAGES, ensure_type, seed_from_criteria
+
+
+@pytest.fixture(autouse=True)
+def _seed_standards():
+    """★★ [2026-07-30] 이 파일의 테스트는 **자기가 쓸 표준을 스스로 시드한다.**
+
+    종전에는 시드하지 않고 조회만 했다. 그게 통과한 이유는 개발 기계의 **운영 DB**
+    (`data/master/master.db`)에 누군가 표준을 등록해 뒀기 때문이다. 그 경로는 `.gitignore`
+    대상이므로 **새로 clone 한 사람에게는 없다** — 즉 "내 기계에서만 초록"이었다
+    (실제로 conftest 에 기준정보 DB 격리를 넣자 고지문 테스트 2건이 드러났다).
+
+    ⚠️ 운영 DB 내용에 의존하는 테스트는 두 방향으로 거짓말한다: 없는 환경에서는 실패하고,
+      오염된 환경에서는 오염을 근거로 통과한다."""
+    ensure_type()
+    seed_from_criteria(force=False)
 
 
 def test_standard_code_format():
