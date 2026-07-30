@@ -385,6 +385,25 @@
 
 ### [ECM-E2-XWALK-01] 크로스워크·MCP 조직 범위 격리 (ECM E2 잔여)
 - 작성자 / 기록 시각: Claude Code / 2026-07-29 11:20 KST
+- 상태 갱신 [2026-07-30 · Claude Code]: **✅ 보류 해제 — 보정 완료.**
+  보류의 근거였던 "기본값을 전사 공용으로 둔 데이터 계약"이 **관문 A 로 폐기**되어 조건이
+  해소됐다. 보류 문구가 요구한 보정 항목과 미보정 잔여 2건을 하나씩 실측으로 확인했다:
+  - **`scope_type`·`scope_assignments`·`owner_organization_id`·승인 이력** → `external_systems`
+    실 DB 에 7필드 전부 존재 확인(`_ECM_KEYS` 마이그레이션 · 커밋 `95aa4d39e`).
+    `scope_contract` 가 `external_system` 을 자원 종류로 지원한다(소유 지정·조직 공유·전사 승인).
+  - **기본값 = 비노출(D-014 유효분)** → 미지정 시스템 행의 타 조직 가시성 `False` 실측
+    (커밋 `01d981f82` · `tests/test_crosswalk_mcp_scoping.py::test_unscoped_system_is_invisible_and_counted`).
+  - **잔여(a) MCP 가 클라이언트 전달 범위를 신뢰** → 해소. `core/scope_guard.py` 배선 +
+    `test_gate_b_mcp_does_not_trust_client_supplied_scope` 통과.
+  - **잔여(b) 거부가 409 이고 감사로그 없음** → 해소. 404 은폐 + `ACCESS_DENIED_SCOPE_MISMATCH`
+    기록, `test_gate_b_other_org_resource_returns_404` · `..._denial_is_written_to_the_audit_log` 통과.
+  - 관문: `tests/test_m2_entry_gates.py` **xfail 0**(관문 A 4건 2026-07-30 개방 · 관문 B 3건
+    2026-07-29 개방). 관련 3파일 **42건 통과**, 전체 **1419 passed**.
+  ⚠️ 남은 조건은 코드가 아니라 **운영 전환**이다: `ORG_ENFORCE`(정책 스위치)가 꺼져 있는 동안
+    `resolve_scope` 는 전원 무제한을 돌려주므로 이 격리는 **실 시스템에서 아직 작동하지 않는다.**
+    사전 점검(`/api/v1/admin/org-enforcement/preflight`)은 현재 **차단 0·경고 0**이다
+    (테스트 잔여 계정 4건 폐지 완료 · 실제 관리자 `hikwon@lsmnm.com` 등록 완료).
+  - 교차 검토 요청 유지: Antigravity(격리 실측 — 특히 강제 ON 이후 화면) · Codex(제품 영향).
 - 왜 지금 기록하는가: 구현 후 사용자 판정으로 **보류**가 확정돼 상태를 낮춘다.
   근거: 사용자 지시(2026-07-29 채팅 — "push·확장하지 않고 보류, M2 재개 시 범위 계약으로 보정")
   · 커밋 `bc3b8bbe9`
