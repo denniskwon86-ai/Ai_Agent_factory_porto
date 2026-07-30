@@ -290,12 +290,17 @@ class ReleaseReadiness:
 
     # ── 롤백 ─────────────────────────────────────────────────────────────
     def rollback(self, release_id: str, actor: str, reason: str,
-                 to_release_id: str = "", workspace_impl=None) -> dict:
+                 to_release_id: str = "", workspace_impl=None,
+                 lifecycle_impl=None, disable_program: bool = True) -> dict:
         """운영에서 내린다. **이 시스템이 할 수 있는 것만 한다.**
 
-        ⚠️ 배포된 코드를 되돌리지는 못한다. 할 수 있는 것은 ① 전사 승격 철회
-          ② 되돌릴 대상 릴리스 지정 ③ 사유·행위자 기록이다. 응답에 그 한계를 적는다 —
-          "롤백했다"는 말이 실제보다 크게 읽히면 아무도 후속 조치를 하지 않는다."""
+        [사용자 결정 2026-07-30] 배포된 코드를 되돌리지는 못하지만, **사용을 막을 수는 있다.**
+        그래서 롤백은 이제 프로그램을 `disabled` 로 내린다(삭제가 아니다 — 기록은 보존된다).
+        지우지 않는 이유: 다른 사용자가 이 프로그램을 근거로 남긴 기록이 고아가 된다.
+
+        수행하는 것: ① 사용 중단 ② 전사 승격 철회 ③ 되돌릴 대상 릴리스를 대체본으로 지정
+        ④ 사유·행위자 기록.
+        ⚠️ 여전히 못 하는 것: 이미 실행 중인 인스턴스의 되돌림, 외부 배포본 회수."""
         if not (actor or "").strip():
             raise ReadinessError("actor 는 필수입니다 — 누가 내렸는지 없으면 근거가 없습니다.")
         if not (reason or "").strip():
@@ -318,6 +323,24 @@ class ReleaseReadiness:
         except Exception as e:
             print(f"⚠️ [Readiness] 승격 철회 실패(롤백 기록은 계속): {e}")
 
+        # ★ [사용자 결정 2026-07-30] 사용을 막는다. 되돌리기가 불가능하다는 것이 "아무것도
+        #   못 한다"는 뜻은 아니다 — 더 이상 쓰이지 않게 하는 것은 할 수 있고, 그게 실질적으로
+        #   필요한 조치다. 삭제하지 않는 이유는 다른 사용자의 기록을 고아로 만들기 때문이다.
+        #   실패를 조용히 넘기지 않는다 — "롤백했는데 여전히 쓸 수 있다"가 최악이다.
+        disabled, disable_error = False, ""
+        if disable_program:
+            try:
+                from core.program_lifecycle import program_lifecycle as _pl
+                pl = lifecycle_impl or _pl
+                pl.disable(release_id, actor, f"롤백: {reason}",
+                           replacement_release_id=to_release_id,
+                           # 운영자가 이미 내리기로 결정한 상황이다. 의존 목록은 응답에 담긴다.
+                           acknowledge_dependents=True)
+                disabled = True
+            except Exception as e:
+                disable_error = str(e)
+                print(f"⚠️ [Readiness] 프로그램 사용 중단 실패: {e}")
+
         rid = f"rb_{uuid.uuid4().hex[:12]}"
         now = _now()
         with self._lock, self._connect() as conn:
@@ -328,10 +351,17 @@ class ReleaseReadiness:
         return {
             "rollback_id": rid, "release_id": release_id, "to_release_id": to_release_id,
             "revoked_promotion": revoked, "actor": actor, "reason": reason, "created_at": now,
-            "limitation": ("이 시스템은 **배포된 코드를 되돌리지 못합니다.** 수행한 것은 "
-                           + ("전사 승격 철회와 " if revoked else "")
-                           + "롤백 기록입니다. 실제 운영 환경의 되돌림은 별도로 수행하고 그 "
-                           + "결과를 확인하십시오."),
+            "program_disabled": disabled, "disable_error": disable_error,
+            "limitation": (
+                ("사용 중단 처리 완료" if disabled else
+                 f"⚠️ **사용 중단에 실패했습니다({disable_error}) — 이 프로그램은 여전히 "
+                 f"사용 가능합니다.** 수동으로 비활성화하십시오."
+                 if disable_program else "사용 중단은 요청되지 않았습니다")
+                + ("와 전사 승격 철회" if revoked else "")
+                + ". 프로그램은 **삭제하지 않았습니다** — 다른 사용자가 남긴 기록이 "
+                  "고아가 되기 때문입니다. 이 시스템은 **이미 배포된 코드 자체를 되돌리지는 "
+                  "못합니다**(실행 중 인스턴스·외부 배포본). 그 되돌림은 별도로 수행하고 "
+                  "결과를 확인하십시오."),
         }
 
     def rollback_history(self, release_id: str = "") -> List[dict]:

@@ -12,6 +12,7 @@ import AgentMasterPanel from './components/AgentMasterPanel';
 import GovernanceConsole from './components/GovernanceConsole';
 import ShadowModePanel from './components/ShadowModePanel';
 import WorkspacePanel from './components/WorkspacePanel';
+import ProgramAdminPanel from './components/ProgramAdminPanel';
 import { PlanningPanel } from './components/PlanningPanel';
 import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
@@ -43,7 +44,8 @@ export default function App() {
   const fetchReleases = useFactoryStore((state) => state.fetchReleases);
   const viewRelease = useFactoryStore((state) => state.viewRelease);
   const closeRelease = useFactoryStore((state) => state.closeRelease);
-  const deleteRelease = useFactoryStore((state) => state.deleteRelease);
+  // deleteRelease 는 더 이상 목록에서 쓰지 않는다 — 서버가 삭제를 거부하고 사용 중단을
+  //   안내한다(사용자 결정 2026-07-30). 스토어 액션 자체는 남겨둔다.
   const showAgentPanel = useFactoryStore((state) => state.showAgentPanel);
   const openAgentPanel = useFactoryStore((state) => state.openAgentPanel);
   const showFormatPanel = useFactoryStore((state) => state.showFormatPanel);
@@ -80,6 +82,8 @@ export default function App() {
   const [masterDomainsInput, setMasterDomainsInput] = useState('');
   // [M3] 외부 실측값(MCP) 병기 토글 (기본 off)
   const [mcpLiveGrounding, setMcpLiveGrounding] = useState(false);
+  // [사용자 결정 2026-07-30] 프로그램 사용여부 제어 대상 — 삭제 대신 비활성화한다.
+  const [adminProgram, setAdminProgram] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)
@@ -209,6 +213,15 @@ export default function App() {
         )}
         {showWorkspace && (
           <WorkspacePanel onClose={() => setShowWorkspace(false)} />
+        )}
+        {/* [사용자 결정 2026-07-30] 프로그램 사용여부 — 삭제 대신 비활성화 (IT 관리자) */}
+        {adminProgram && (
+          <ProgramAdminPanel
+            releaseId={adminProgram.id}
+            releaseName={adminProgram.name}
+            onClose={() => setAdminProgram(null)}
+            onChanged={fetchReleases}
+          />
         )}
         {showPlanning && (
           <PlanningPanel onClose={() => setShowPlanning(false)} />
@@ -623,21 +636,44 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6">
-                      {releases.map((rel: any) => (
-                        <div key={rel.release_id} className="bg-[#1A1A1D] border border-[#2F3640] rounded-2xl p-5 hover:border-emerald-500/60 hover:bg-[#1C2220] transition-all flex flex-col shadow-xl group">
+                      {releases.map((rel: any) => {
+                        // [사용자 결정 2026-07-30] 사용 중단된 프로그램은 실행 버튼을 열지 않는다.
+                        //   ⚠️ 화면 차단은 통제가 아니다 — 서버가 실행 payload 를 직접 막는다
+                        //   (`GET /factory/library/item/{id}`). 여기서 막는 것은 사용자가
+                        //   눌러본 뒤에야 알게 되는 일을 없애기 위한 것이다.
+                        const life = rel.lifecycle_status || 'active';
+                        const blocked = life === 'disabled';
+                        return (
+                        <div key={rel.release_id} className={`bg-[#1A1A1D] border rounded-2xl p-5 transition-all flex flex-col shadow-xl group ${blocked ? 'border-red-900/50 opacity-75' : 'border-[#2F3640] hover:border-emerald-500/60 hover:bg-[#1C2220]'}`}>
                           <div className="flex items-start justify-between mb-3 gap-2">
-                            <h3 className="text-base font-bold text-emerald-300 truncate">{rel.project_name}</h3>
+                            <h3 className={`text-base font-bold truncate ${blocked ? 'text-gray-400 line-through' : 'text-emerald-300'}`}>{rel.project_name}</h3>
                             <button
-                              onClick={() => { if (confirm(`결과물 '${rel.project_name}'을(를) 삭제하시겠습니까?`)) deleteRelease(rel.release_id); }}
-                              className="opacity-0 group-hover:opacity-100 text-xs text-red-400 hover:text-white bg-red-950/40 hover:bg-red-800 border border-red-900/50 rounded px-2 py-1 shrink-0 transition-all"
-                              title="삭제"
-                            >🗑</button>
+                              onClick={() => setAdminProgram({ id: rel.release_id, name: rel.project_name })}
+                              className="opacity-0 group-hover:opacity-100 text-xs text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-[#2F3640] rounded px-2 py-1 shrink-0 transition-all"
+                              title="사용여부 제어 (IT 관리자) — 삭제하지 않고 비활성화합니다"
+                            >⚙</button>
                           </div>
+                          {/* 사용여부를 목록에서 보여준다 — 없으면 눌러본 뒤에야 막혔음을 안다. */}
+                          {life !== 'active' && (
+                            <div className={`mb-3 text-[11px] rounded-lg px-2 py-1.5 border ${blocked ? 'bg-red-950/40 text-red-300 border-red-800/60' : 'bg-amber-900/30 text-amber-300 border-amber-700/60'}`}>
+                              <b>{blocked ? '⛔ 사용 중단' : '⚠ 중단 예고'}</b>
+                              {rel.lifecycle_reason ? ` — ${rel.lifecycle_reason}` : ''}
+                              {rel.replacement_release_id
+                                ? <div className="text-indigo-300 mt-0.5">대체: {rel.replacement_release_id}</div>
+                                : (blocked ? <div className="text-gray-400 mt-0.5">대체 프로그램 미지정 — 관리자에게 문의</div> : null)}
+                            </div>
+                          )}
                           <div className="text-[11px] text-gray-400 mb-6 bg-[#0B0C10] p-2 rounded-lg border border-[#2F3640]">
                             <div className="mb-1 text-gray-300">📅 {rel.created_at}</div>
                             <div>✓ 태스크 {rel.task_count}개 완료</div>
                           </div>
-                          {(!rel.deliverable_type || rel.deliverable_type === "software_app") ? (
+                          {blocked ? (
+                            <button
+                              disabled
+                              title="IT 관리자가 사용을 중단시켰습니다. 기록은 보존되어 있습니다."
+                              className="mt-auto w-full bg-gray-800 text-gray-500 font-bold py-2.5 rounded-xl cursor-not-allowed border border-[#2F3640]"
+                            >⛔ 사용 중단됨</button>
+                          ) : (!rel.deliverable_type || rel.deliverable_type === "software_app") ? (
                             <button
                               onClick={() => viewRelease(rel.release_id)}
                               className="mt-auto w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl transition-transform hover:scale-[1.02] shadow-lg"
@@ -649,7 +685,8 @@ export default function App() {
                             >📄 보고서 열람</button>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

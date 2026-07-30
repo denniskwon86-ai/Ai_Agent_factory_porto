@@ -390,13 +390,25 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
 
   closeRelease: () => set({ viewingRelease: null }),
 
+  // ⚠️ [사용자 결정 2026-07-30] 서버는 기본적으로 **삭제를 거부**한다(409).
+  //   배포된 프로그램을 지우면 다른 사용자가 남긴 기록이 고아가 되기 때문이며,
+  //   필요한 조치는 `POST /api/v1/programs/{id}/disable`(사용 중단)이다.
+  //   목록 화면의 삭제 버튼은 그래서 사용여부 제어(⚙)로 대체됐다. 이 함수는 남겨두되
+  //   서버의 거부 안내를 **그대로** 보여준다 — 409 의 detail 은 객체다.
   deleteRelease: async (releaseId: string) => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/library/item/${releaseId}`, { method: 'DELETE' });
       // 500(파일 잠김 등)은 사용자에게 알린다. 404(이미 삭제됨)는 목록 갱신으로 흡수.
       if (!res.ok && res.status !== 404) {
         let msg = "결과물 삭제에 실패했습니다.";
-        try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
+        try {
+          const r = await res.json();
+          const d = r?.detail;
+          // 객체를 그대로 문자열화하면 "[object Object]" 가 되어 안내가 사라진다.
+          if (d) msg = `❌ ${typeof d === 'string' ? d
+                          : [d.message, d.why, d.do_this_instead && `→ ${d.do_this_instead}`,
+                             d.if_you_really_must].filter(Boolean).join('\n\n')}`;
+        } catch { /* noop */ }
         alert(msg);
       }
       await get().fetchReleases();

@@ -39,6 +39,12 @@ def env(tmp_path, monkeypatch):
 
     import core.quality_telemetry as qt
     monkeypatch.setattr(qt, "_LOG_PATH", str(tmp_path / "q.jsonl"), raising=False)
+
+    # [사용자 결정 2026-07-30] 롤백은 이제 프로그램을 실제로 비활성화한다. 라이브러리 경로가
+    #   모듈마다 따로 선언돼 있어 여기서도 맞춰준다(안 맞추면 롤백이 "존재하지 않는 프로그램"
+    #   으로 조용히 실패한다 — 그 실패가 응답에 드러나는지도 아래에서 검증한다).
+    from core.program_lifecycle import program_lifecycle
+    monkeypatch.setattr(program_lifecycle, "library_dir", str(lib), raising=False)
     return rd, ws, DataLineage(md), lib, qt, tmp_path
 
 
@@ -211,13 +217,45 @@ def test_rollback_requires_actor_and_reason(env):
         rd.rollback(REL, "kim", "")
 
 
-def test_rollback_states_its_limitation(env):
-    """★★ "롤백했다"가 실제보다 크게 읽히면 아무도 후속 조치를 하지 않는다."""
+def test_rollback_disables_the_program_and_keeps_the_record(env):
+    """★★ [사용자 결정 2026-07-30] 되돌리지는 못해도 **사용은 막을 수 있다.**
+
+    삭제하지 않는 이유: 다른 사용자가 이 프로그램을 근거로 남긴 기록이 고아가 된다."""
+    from core.program_lifecycle import ProgramLifecycleError, program_lifecycle
     rd, ws, lin, lib, qt, tp = env
     _write_release(lib)
     out = rd.rollback(REL, "kim", "결과 오류 발견", workspace_impl=ws)
-    assert "배포된 코드를 되돌리지 못합니다" in out["limitation"]
+    assert out["program_disabled"] is True, out.get("disable_error")
     assert out["revoked_promotion"] is False
+    # 사용은 막히고, 기록은 남는다.
+    with pytest.raises(ProgramLifecycleError):
+        program_lifecycle.assert_usable(REL)
+    assert program_lifecycle.get_status(REL)["reason"].startswith("롤백:")
+
+
+def test_rollback_states_its_limitation(env):
+    """★★ "롤백했다"가 실제보다 크게 읽히면 아무도 후속 조치를 하지 않는다.
+
+    사용 중단까지 했더라도 **이미 실행 중인 인스턴스·외부 배포본**은 여전히 못 되돌린다."""
+    rd, ws, lin, lib, qt, tp = env
+    _write_release(lib)
+    out = rd.rollback(REL, "kim", "결과 오류 발견", workspace_impl=ws)
+    assert "배포된 코드 자체를 되돌리지는" in out["limitation"]
+    assert "삭제하지 않았습니다" in out["limitation"]
+
+
+def test_rollback_reports_disable_failure_instead_of_claiming_success(env, monkeypatch):
+    """★★ "롤백했는데 여전히 쓸 수 있다"가 최악이다 — 실패를 조용히 넘기지 않는다."""
+    rd, ws, lin, lib, qt, tp = env
+    _write_release(lib)
+
+    class _Broken:
+        def disable(self, *a, **k):
+            raise RuntimeError("db locked")
+    out = rd.rollback(REL, "kim", "결과 오류", workspace_impl=ws, lifecycle_impl=_Broken())
+    assert out["program_disabled"] is False
+    assert "db locked" in out["disable_error"]
+    assert "여전히 사용 가능합니다" in out["limitation"]
 
 
 def test_rollback_revokes_promotion(env):

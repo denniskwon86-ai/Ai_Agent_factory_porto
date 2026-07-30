@@ -60,3 +60,13 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch):
                             str(tmp_path / "shadow_runs.db"), raising=False)
     except Exception:
         pass
+    try:
+        # 프로그램 사용여부도 격리한다 — 테스트가 남긴 비활성화가 실제 DB 에 들어가면
+        # **실제 프로그램이 못 쓰게 된다.** 이건 오염이 아니라 사고다.
+        from core import program_lifecycle
+        monkeypatch.setattr(program_lifecycle.program_lifecycle, "db_path",
+                            str(tmp_path / "program_lifecycle.db"), raising=False)
+        monkeypatch.setattr(program_lifecycle.program_lifecycle, "_ready", "",
+                            raising=False)
+    except Exception:
+        pass

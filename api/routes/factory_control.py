@@ -1456,6 +1456,15 @@ async def list_releases():
     except Exception as e:
         print(f"⚠️ [library] 승격 상태 조회 실패(목록은 계속): {e}")
 
+    # ★ [사용자 결정 2026-07-30] 사용여부를 목록에 함께 준다. 이것이 없으면 IT 관리자가
+    #   비활성화해도 목록에서는 여전히 멀쩡해 보이고, 사용자는 눌러본 뒤에야 막혔음을 안다.
+    _life = {}
+    try:
+        from core.program_lifecycle import program_lifecycle
+        _life = {r["release_id"]: r for r in program_lifecycle.list_statuses()}
+    except Exception as e:
+        print(f"⚠️ [library] 사용여부 조회 실패(목록은 계속): {e}")
+
     items = []
     for rid in os.listdir(LIBRARY_DIR):
         rp = os.path.join(LIBRARY_DIR, rid, "release.json")
@@ -1465,7 +1474,14 @@ async def list_releases():
                     r = json.load(f)
                 _rid = r.get("release_id", rid)
                 pr = _promo.get(_rid)
+                _lf = _life.get(_rid)
                 items.append({
+                    # 미기록은 사용 가능으로 보되 `lifecycle_recorded=False` 로 구분한다 —
+                    #   추정을 관리자의 결정처럼 표시하면 감사에서 거짓이 된다.
+                    "lifecycle_status": (_lf or {}).get("status", "active"),
+                    "lifecycle_recorded": bool(_lf),
+                    "lifecycle_reason": (_lf or {}).get("reason", ""),
+                    "replacement_release_id": (_lf or {}).get("replacement_release_id", ""),
                     "release_id": _rid,
                     "project_name": r.get("project_name", rid),
                     "template_id": r.get("template_id", "default"),
@@ -1485,8 +1501,10 @@ async def list_releases():
 
 
 @router.get("/library/item/{release_id}")
-async def get_release(release_id: str):
-    """결과물 상세(재실행/프리뷰용 — frontend 코드 포함)."""
+async def get_release(release_id: str, p: Principal = Depends(current_principal)):
+    """결과물 상세(재실행/프리뷰용 — frontend 코드 포함).
+
+    ⚠️ 사용 중단된 프로그램은 실행 payload 를 제외하고 준다(아래 lifecycle 블록 참조)."""
     _safe_id(release_id, "release_id")  # 경로 이탈로 임의 release.json 읽기 방지
     rp = os.path.join(LIBRARY_DIR, release_id, "release.json")
     if not os.path.exists(rp):
@@ -1507,15 +1525,90 @@ async def get_release(release_id: str):
     except Exception as e:
         data["promotion"] = None
         data["promotion_error"] = str(e)
+
+    # ★ [사용자 결정 2026-07-30] 사용 중단된 프로그램은 **기록은 보이되 실행 payload 를 주지
+    #   않는다.** 이 경로는 "재실행/프리뷰용"이므로 코드를 그대로 주면 비활성화가 UI 표시에만
+    #   의존하게 되고, API 를 직접 부르면 그대로 쓸 수 있다 — 그건 통제가 아니다.
+    #   반대로 전체를 404 로 감추면 다른 사용자가 남긴 기록의 출처를 확인할 수 없게 된다.
+    try:
+        from core.program_lifecycle import ProgramLifecycleError, program_lifecycle
+        try:
+            data["lifecycle"] = program_lifecycle.assert_usable(
+                data.get("release_id", release_id))
+        except ProgramLifecycleError as e:
+            st = program_lifecycle.get_status(data.get("release_id", release_id))
+            for k in ("frontend_code_summary", "backend_code_summary",
+                      "artifacts", "artifact_summaries"):
+                data.pop(k, None)
+            data["lifecycle"] = {"usable": False, "status": st["status"],
+                                 "recorded": st["recorded"], "reason": str(e),
+                                 "replacement_release_id":
+                                     st.get("replacement_release_id", "")}
+            data["payload_withheld"] = (
+                "사용이 중단된 프로그램이므로 실행·프리뷰용 코드는 제공하지 않습니다. "
+                "메타데이터와 이력은 그대로 남아 있습니다(삭제된 것이 아닙니다).")
+            try:
+                from core.enterprise_context import audit
+                audit.record(audit.PROGRAM_USE_BLOCKED, resource_type="program",
+                             resource_id=release_id, actor=p.user_id or "",
+                             outcome="denied", reason="disabled",
+                             detail="library/item payload withheld")
+            except Exception:
+                pass
+    except Exception as e:
+        # 사용여부를 못 읽었으면 "사용 가능"이라고 단정하지 않는다.
+        data["lifecycle"] = {"usable": None, "status": "unknown", "reason": str(e)}
     return {"status": "success", "data": data}
 
 
 @router.delete("/library/item/{release_id}")
-async def delete_release(release_id: str):
+async def delete_release(release_id: str, force: bool = False,
+                         p: Principal = Depends(current_principal)):
+    """⚠️ 기본적으로 **삭제하지 않는다.**
+
+    [사용자 결정 2026-07-30] 이미 다른 사용자가 기록을 남긴 프로그램을 지우면 그 기록이
+    고아가 된다 — 결재 이력·감사 로그·지식팩 인덱스·파생 프로그램의 출처가 전부 끊긴다.
+    필요한 조치는 "사용 중단"이고, 그건 `POST /programs/{id}/disable` 이다.
+
+    그래도 지워야 하는 경우(오게시·시험 산출물)를 위해 `force=true` 를 남겨두되,
+    **IT 관리자 + 이미 비활성 상태 + 의존 없음**을 모두 요구한다."""
     _safe_id(release_id, "release_id")  # 경로 이탈로 임의 디렉토리 삭제 방지
     rel_dir = os.path.join(LIBRARY_DIR, release_id)
     if not os.path.isdir(rel_dir):
         raise HTTPException(status_code=404, detail="결과물을 찾을 수 없습니다.")
+
+    if not force:
+        raise HTTPException(status_code=409, detail={
+            "message": ("배포된 프로그램은 삭제하지 않습니다 — 다른 사용자가 이 프로그램을 "
+                        "근거로 남긴 기록이 고아가 됩니다."),
+            "do_this_instead": f"POST /api/v1/programs/{release_id}/disable",
+            "why": ("사용을 막는 것과 존재를 지우는 것은 다른 조치이며, 필요한 것은 전자입니다. "
+                    "비활성화하면 기록·이력은 그대로 보존됩니다."),
+            "if_you_really_must": ("IT 관리자 권한 + 이미 비활성 상태 + 의존 대상 없음을 "
+                                   "갖춘 뒤 ?force=true 로 요청하십시오."),
+        })
+
+    if not (p.scope.unrestricted or p.scope.is_admin or p.scope.can_edit_org):
+        raise HTTPException(status_code=403,
+                            detail="프로그램 삭제는 IT 관리자만 할 수 있습니다.")
+    try:
+        from core.program_lifecycle import DISABLED, program_lifecycle
+        st = program_lifecycle.get_status(release_id)
+        if st["status"] != DISABLED:
+            raise HTTPException(status_code=409, detail=(
+                f"먼저 사용을 중단시키십시오(현재: {st['status']}). 곧바로 삭제하면 "
+                f"사용 중인 프로그램이 예고 없이 사라집니다."))
+        dep = program_lifecycle.dependents(release_id)
+        if dep["count"]:
+            raise HTTPException(status_code=409, detail=(
+                f"의존 대상이 있어 삭제할 수 없습니다(영향 범위: {dep['blast_radius']}, "
+                f"{dep['count']}건). 비활성 상태로 남겨두십시오."))
+    except HTTPException:
+        raise
+    except Exception as e:
+        # 확인할 수 없으면 삭제하지 않는다 — 모르는 것을 "안전하다"로 두지 않는다.
+        raise HTTPException(status_code=500, detail=(
+            f"사용여부·의존 관계를 확인할 수 없어 삭제를 중단했습니다: {e}"))
     try:
         # delete_project와 동일하게 onexc로 Windows 잠금/읽기전용 파일 실패를 표면화한다(ignore_errors=True의 무음 실패 방지)
         shutil.rmtree(rel_dir, onexc=_on_rmtree_error)
