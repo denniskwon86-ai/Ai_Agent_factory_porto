@@ -203,16 +203,25 @@ def is_visible(row: Dict[str, Any], scope_node_id: str, tenant_id: str = "",
 
 def filter_visible(rows: Iterable[Dict[str, Any]], scope_node_id: str = "",
                    tenant_id: str = "", entity_mode: str = "REAL",
-                   sandbox_token: str = "") -> List[Dict[str, Any]]:
+                   sandbox_token: str = "", viewer_clearance: str = "") -> List[Dict[str, Any]]:
     """목록에 가시성 필터를 건다. 조상 해석은 **한 번만** 한다(행마다 리솔버를 때리지 않게).
 
     ★ 만료 판정 기준일도 한 번만 고정한다 — 목록을 훑는 중 자정을 넘기면 같은 응답 안에서
-      어떤 행은 만료 전, 어떤 행은 만료 후로 판정된다. 드물지만 그때 나온 목록은 설명할 수 없다."""
+      어떤 행은 만료 전, 어떤 행은 만료 후로 판정된다. 드물지만 그때 나온 목록은 설명할 수 없다.
+
+    ★ [§6-2 · 2026-07-30 사용자 결정] `viewer_clearance` 를 주면 **등급이 낮은 행의 내용을
+      가린다**(행은 남는다 — "제목만 보이고 내용은 차단"). 범위 필터 **뒤에** 적용되는 것이
+      중요하다: 타 조직 자원은 이미 목록에서 빠졌으므로 제목도 새지 않는다.
+      주지 않으면(기본) 가리지 않는다 — 내부 파이프라인처럼 등급 개념이 없는 호출을 막지 않는다."""
     vis = visible_scopes(scope_node_id) if scope_node_id else set()
     today = date.today().isoformat()
-    return [r for r in rows
-            if is_visible(r, scope_node_id, tenant_id, entity_mode, vis, today,
-                          sandbox_token)]
+    out = [r for r in rows
+           if is_visible(r, scope_node_id, tenant_id, entity_mode, vis, today,
+                         sandbox_token)]
+    if viewer_clearance:
+        from core.enterprise_context.classification import redact_all
+        out = redact_all(out, viewer_clearance)
+    return out
 
 
 def coverage(rows: Iterable[Dict[str, Any]], label: str = "레코드") -> Dict[str, Any]:
