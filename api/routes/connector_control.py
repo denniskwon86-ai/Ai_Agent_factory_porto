@@ -69,6 +69,28 @@ class ValidateRequest(BaseModel):
     for_prompt: bool = False
 
 
+class ExecuteRequest(BaseModel):
+    query_name: str
+    fields: List[str]
+    #: ★ §7.2 는 목적을 감사 항목으로 규정한다. 옵션으로 두면 아무도 적지 않고,
+    #:   감사로그에서 "왜"가 영구히 빠져 사후에 정당성을 판단할 수 없다.
+    purpose: str
+    params: Optional[Dict[str, Any]] = None
+    limit: int = 0
+    for_prompt: bool = False
+
+
+@router.get("/adapters")
+async def list_adapters():
+    """등록된 실행 어댑터. 비어 있으면 **어떤 조회도 실행되지 않는다**(빈 결과가 아니라 실패)."""
+    from core.connector_execution import registered_adapters
+    ids = registered_adapters()
+    return {"status": "success", "data": {"adapters": ids},
+            "note": ("어댑터가 없는 커넥터는 계약을 통과해도 조회가 실패합니다. "
+                     "빈 결과로 돌려주면 '데이터가 없다'로 오독되기 때문입니다."
+                     if not ids else "")}
+
+
 @router.get("")
 async def list_connectors(scope_node_id: str = "", tenant_id: str = "",
                           entity_mode: str = "REAL",
@@ -136,4 +158,38 @@ async def validate_request(connector_id: str, req: ValidateRequest):
     data = await asyncio.to_thread(connector_registry.validate_request, connector_id,
                                    req.query_name, req.fields, req.params or {},
                                    req.limit, req.for_prompt)
+    return {"status": "success", "data": data}
+
+
+@router.post("/{connector_id}/execute")
+async def execute_query(connector_id: str, req: ExecuteRequest,
+                        p: Principal = Depends(current_principal)):
+    """계약을 지켜 실제 조회한다 — **응답에도 계약을 적용한다**(§7.1/§7.2).
+
+    `validate` 는 요청만 본다. 원천이 요청보다 더 준 것을 그대로 흘리면 계약서는 종이 조각이므로,
+    계약에 없는 컬럼은 버리고 상한 초과 행은 자른다. 무엇을 버렸는지는 `enforcement` 에 담긴다 —
+    ⚠️ `enforcement.contract_violations_by_source` 가 비어 있지 않으면 **원천 쪽 결함**이며,
+    조용히 넘기면 그 결함은 영원히 고쳐지지 않는다."""
+    if not p.user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="요청자 식별 정보가 없습니다 — X-User-Id 를 보내십시오. "
+                   "§7.2 는 모든 조회에 요청자·목적을 감사로 남기도록 요구합니다.")
+    from core.connector_execution import ConnectorExecutionError, execute, fetch_for_prompt
+    fn = fetch_for_prompt if req.for_prompt else execute
+    try:
+        if req.for_prompt:
+            data = await asyncio.to_thread(fn, connector_id, req.query_name, req.fields,
+                                           p.user_id, req.purpose, req.params or {},
+                                           req.limit)
+        else:
+            data = await asyncio.to_thread(fn, connector_id, req.query_name, req.fields,
+                                           p.user_id, req.purpose, req.params or {},
+                                           req.limit, False)
+    except ConnectorExecutionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not data.get("executed"):
+        # 계약 위반은 거부지만 200 으로 감춘 채 빈 배열을 주면 "데이터 없음"으로 오독된다.
+        raise HTTPException(status_code=403, detail={"errors": data.get("errors", []),
+                                                    "note": data.get("note", "")})
     return {"status": "success", "data": data}
