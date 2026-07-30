@@ -33,13 +33,25 @@
 from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Set
 
-#: 명시적 전사 공용. 빈 범위를 전사 공용으로 **해석**하지 않는다 — 이 값이 적혀 있어야 한다.
+# ── §2.2 `scope_type` 열거값 ─────────────────────────────────────────────────
+#: 소유 조직 + 그 하위(운영 상속). **기본값**이며, 소유 조직이 비어 있으면 아무에게도 안 보인다.
+ORG_PRIVATE = "ORG_PRIVATE"
+#: 소유 조직 + `scope_assignments` 에 **명시된** 조직. 조직 간 공유는 목록으로만 성립한다.
+ORG_SHARED = "ORG_SHARED"
+#: 전 조직. 승인(`approval_status=APPROVED` + `approved_by`) 없이는 성립하지 않는다.
 ENTERPRISE_SHARED = "ENTERPRISE_SHARED"
-#: 관문 A 이전에 만들어진 미지정 레코드. 한시 통과 + 건수 관측 대상.
+#: 가상 문맥(Sandbox) 세션 안에서만. capability token(§4.3)이 있어야 열린다.
+SANDBOX = "SANDBOX"
+#: 관문 A 이전에 만들어진 미지정 레코드. 한시 통과 + 건수 관측 + **만료일** 대상.
 LEGACY_UNSCOPED = "LEGACY_UNSCOPED"
 
-#: 한시 예외 만료일. 지나도 자동으로 안 보이게 만들지는 않는다(운영 중 갑작스런 실명은
-#: 그 자체가 사고다) — 대신 `coverage()` 가 `legacy_expired=True` 로 보고해 결정을 강제한다.
+SCOPE_TYPES = (ORG_PRIVATE, ORG_SHARED, ENTERPRISE_SHARED, SANDBOX, LEGACY_UNSCOPED)
+#: 신규 데이터에 쓸 수 없는 값(§2.3-4). 이행용 표시를 신규 생성에 허용하면 이행이 끝나지 않는다.
+NOT_FOR_NEW_ROWS = (LEGACY_UNSCOPED,)
+
+#: 한시 예외의 기본 만료일. 행에 `effective_to` 가 있으면 **그 값이 우선**한다.
+#: ⚠️ 만료되면 비노출이다(§2.3-2). 만료를 관측만 하고 통과시키면 "한시"가 영구가 된다 —
+#:   그것이 폐기한 규칙("빈 값 = 전사 공용")이 처음 영구화된 방식이다.
 LEGACY_GRANDFATHER_UNTIL = "2026-12-31"
 
 
@@ -73,39 +85,102 @@ def is_enterprise_shared(row: Dict[str, Any]) -> bool:
 
 
 def is_legacy_unscoped(row: Dict[str, Any]) -> bool:
-    """관문 A 이전 데이터에 붙는 한시 예외 표시인가."""
+    """관문 A 이전 데이터에 붙는 한시 예외 표시인가(만료 여부는 보지 않는다)."""
     return (row.get("scope_type") or "").strip().upper() == LEGACY_UNSCOPED
 
 
+def legacy_deadline(row: Dict[str, Any]) -> str:
+    """이 행의 한시 예외 만료일. 행에 적힌 `effective_to` 가 모듈 기본값을 이긴다.
+
+    ★ 행별 만료일을 우선하는 이유: 이행은 한꺼번에 끝나지 않는다. 부서마다 정리 속도가
+      다른데 만료일이 하나뿐이면 **가장 느린 부서 때문에 전체를 미루게** 된다."""
+    return (row.get("effective_to") or "").strip() or LEGACY_GRANDFATHER_UNTIL
+
+
+def is_expired(row: Dict[str, Any], today: str = "") -> bool:
+    """한시 예외가 만료됐는가(§2.3-2 — 만료 후에는 비노출).
+
+    ⚠️ 만료를 관측만 하고 통과시키면 '한시'가 영구가 된다. 폐기한 규칙("빈 값 = 전사 공용")도
+      처음엔 한시 조치였다 — 만료를 강제하지 않은 것이 그것을 영구화했다."""
+    return (today or date.today().isoformat()) > legacy_deadline(row)
+
+
+def assigned_scopes(row: Dict[str, Any]) -> Set[str]:
+    """`ORG_SHARED` 의 공유 대상 조직 집합.
+
+    저장 형태는 콤마 구분 문자열(SQLite 컬럼) 또는 리스트(메모리 행) 둘 다 받는다 —
+    호출자가 형태를 신경 쓰면 한 곳에서 파싱을 틀리고 그 순간 공유가 조용히 풀린다."""
+    raw = row.get("scope_assignments") or ""
+    if isinstance(raw, (list, tuple, set)):
+        items = raw
+    else:
+        items = str(raw).replace("\n", ",").split(",")
+    return {str(s).strip() for s in items if str(s).strip()}
+
+
+def owner_of(row: Dict[str, Any]) -> str:
+    """데이터 책임 조직. §2.1 은 소유(`owner_organization_id`)와 적용 범위
+    (`enterprise_scope_id`)를 분리하라고 요구한다 — 소유가 적히면 그것이 1차 근거다.
+
+    ★ 둘을 한 함수로 읽는 이유: 두 컬럼이 공존하는 이행 기간에 호출자마다 다른 쪽을 보면
+      **같은 행이 화면마다 다르게 보인다.** 그 상태의 권한 판정은 아무도 신뢰하지 않는다."""
+    return ((row.get("owner_organization_id") or "").strip()
+            or (row.get("enterprise_scope_id") or "").strip())
+
+
 def is_visible(row: Dict[str, Any], scope_node_id: str, tenant_id: str = "",
-               entity_mode: str = "REAL", visible: Optional[Set[str]] = None) -> bool:
-    """레코드 한 건이 이 문맥에서 보이는가."""
+               entity_mode: str = "REAL", visible: Optional[Set[str]] = None,
+               today: str = "") -> bool:
+    """레코드 한 건이 이 문맥에서 보이는가 — §2.2 의 다섯 상태를 그대로 판정한다.
+
+    ★ 판정 축의 순서가 곧 규칙이다: 테넌트 → 문맥(REAL/VIRTUAL) → 범위 미지정 호출 →
+      `scope_type` → 소유 조직. `scope_type` 을 소유 조직보다 **먼저** 보는 이유는, 전사
+      공용·조직 공유가 "소유 조직 밖에서도 보인다"는 뜻이기 때문이다."""
     if tenant_id and (row.get("tenant_id") or "tenant_default") != tenant_id:
         return False
     if (row.get("entity_mode") or "REAL") != entity_mode:
         return False
     if not scope_node_id:
         return True                                    # 범위 미지정 호출 — 필터하지 않는다
-    owner = (row.get("enterprise_scope_id") or "").strip()
-    if owner:
-        return owner in (visible if visible is not None else visible_scopes(scope_node_id))
-    # ── 범위가 비어 있다 ─────────────────────────────────────────────────
-    # [관문 A] 여기서 True 를 돌려주던 것이 유출 경로였다. 빈 값은 **아무 말도 하지 않은
-    #   것**이고, "아무 말도 없음"을 "전 조직에 공개"로 읽으면 안 된다. 통과는 명시적으로
-    #   적힌 두 상태에만 준다.
-    if is_enterprise_shared(row):
-        return True
-    if is_legacy_unscoped(row):
-        return True                                    # 한시 예외 — coverage() 가 센다
-    return False
+
+    vis = visible if visible is not None else visible_scopes(scope_node_id)
+    st = (row.get("scope_type") or "").strip().upper()
+    owner = owner_of(row)
+
+    # ── 소유 조직 밖에서도 보이는 상태들 ────────────────────────────────
+    if st == ENTERPRISE_SHARED:
+        # 승인 없는 전사 공용을 통과시키면 승인 절차 자체가 장식이 된다.
+        return is_enterprise_shared(row)
+    if st == ORG_SHARED:
+        # 공유는 **명시된 목록**으로만 성립한다. 목록이 비면 소유 조직만 본다 —
+        #   "공유하겠다고 표시했지만 대상을 안 적었다"를 전 조직 공유로 읽으면 안 된다.
+        if assigned_scopes(row) & vis:
+            return True
+        return bool(owner) and owner in vis
+    if st == SANDBOX:
+        # 가상 문맥 전용. capability token(§4.3) 없이는 열지 않는다 — 토큰 검증 경로가
+        #   붙기 전까지 fail-closed 다. "아직 안 만든 통제"를 통과로 두면 그게 곧 구멍이다.
+        return False
+    if st == LEGACY_UNSCOPED:
+        # 한시 예외 — 만료되면 비노출(§2.3-2). coverage() 가 건수와 만료를 함께 보고한다.
+        return not is_expired(row, today)
+
+    # ── 여기부터는 ORG_PRIVATE(기본값) 또는 표시 없음 ────────────────────
+    # [관문 A] 소유 조직이 비어 있으면 **아무에게도 보이지 않는다.** 빈 값은 설정 누락이지
+    #   공유 의사가 아니다 — 이것을 "전사 공용"으로 읽던 것이 2026-07-29 유출 경로였다.
+    return bool(owner) and owner in vis
 
 
 def filter_visible(rows: Iterable[Dict[str, Any]], scope_node_id: str = "",
                    tenant_id: str = "", entity_mode: str = "REAL") -> List[Dict[str, Any]]:
-    """목록에 가시성 필터를 건다. 조상 해석은 **한 번만** 한다(행마다 리솔버를 때리지 않게)."""
+    """목록에 가시성 필터를 건다. 조상 해석은 **한 번만** 한다(행마다 리솔버를 때리지 않게).
+
+    ★ 만료 판정 기준일도 한 번만 고정한다 — 목록을 훑는 중 자정을 넘기면 같은 응답 안에서
+      어떤 행은 만료 전, 어떤 행은 만료 후로 판정된다. 드물지만 그때 나온 목록은 설명할 수 없다."""
     vis = visible_scopes(scope_node_id) if scope_node_id else set()
+    today = date.today().isoformat()
     return [r for r in rows
-            if is_visible(r, scope_node_id, tenant_id, entity_mode, vis)]
+            if is_visible(r, scope_node_id, tenant_id, entity_mode, vis, today)]
 
 
 def coverage(rows: Iterable[Dict[str, Any]], label: str = "레코드") -> Dict[str, Any]:
@@ -120,14 +195,25 @@ def coverage(rows: Iterable[Dict[str, Any]], label: str = "레코드") -> Dict[s
     시간이 흐르지 않게 한다."""
     rows = list(rows)
     total = len(rows)
-    unscoped = [r for r in rows if not (r.get("enterprise_scope_id") or "").strip()]
-    shared = [r for r in unscoped if is_enterprise_shared(r)]
-    legacy = [r for r in unscoped if is_legacy_unscoped(r)]
-    pending = [r for r in unscoped
-               if (r.get("scope_type") or "").strip().upper() == ENTERPRISE_SHARED
-               and not is_enterprise_shared(r)]
-    hidden = [r for r in unscoped if not is_enterprise_shared(r) and not is_legacy_unscoped(r)]
-    expired = date.today().isoformat() > LEGACY_GRANDFATHER_UNTIL
+    today = date.today().isoformat()
+
+    def _st(r):
+        return (r.get("scope_type") or "").strip().upper()
+
+    unscoped = [r for r in rows if not owner_of(r)]
+    shared = [r for r in rows if is_enterprise_shared(r)]
+    pending = [r for r in rows if _st(r) == ENTERPRISE_SHARED and not is_enterprise_shared(r)]
+    org_shared = [r for r in rows if _st(r) == ORG_SHARED]
+    # 공유하겠다고 표시했으나 **대상을 안 적은** 행. 소유 조직만 보게 되므로, 공유했다고
+    #   믿는 쪽과 실제 동작이 갈린다 — 조용한 미공유다.
+    org_shared_empty = [r for r in org_shared if not assigned_scopes(r)]
+    legacy_all = [r for r in rows if is_legacy_unscoped(r)]
+    legacy = [r for r in legacy_all if not is_expired(r, today)]
+    legacy_expired = [r for r in legacy_all if is_expired(r, today)]
+    sandbox = [r for r in rows if _st(r) == SANDBOX]
+    # 표시도 없고 소유도 없는 행 = 설정 누락으로 가려진 것.
+    hidden = [r for r in unscoped
+              if _st(r) not in (ENTERPRISE_SHARED, ORG_SHARED, SANDBOX, LEGACY_UNSCOPED)]
     return {
         "total": total,
         "scoped": total - len(unscoped),
@@ -136,20 +222,26 @@ def coverage(rows: Iterable[Dict[str, Any]], label: str = "레코드") -> Dict[s
         # ── 관문 A 이후의 상태별 내역 ──
         "enterprise_shared": len(shared),
         "enterprise_shared_pending": len(pending),
+        "org_shared": len(org_shared),
+        "org_shared_without_targets": len(org_shared_empty),
+        "sandbox": len(sandbox),
         "legacy_grandfathered": len(legacy),
+        "legacy_expired": len(legacy_expired),
         "hidden_unscoped": len(hidden),
         "legacy_grandfather_until": LEGACY_GRANDFATHER_UNTIL,
-        "legacy_expired": expired,
         "note": (
             f"범위가 지정되지 않은 {label} 는 **기본적으로 보이지 않습니다**(관문 A · "
             f"fail-closed). 전사 공용으로 쓰려면 `scope_type=ENTERPRISE_SHARED` + 승인 "
             f"이력이 필요하고, 그렇지 않으면 소유 조직을 지정하십시오."
-            + (f" 한시 예외 {len(legacy)}건은 {LEGACY_GRANDFATHER_UNTIL} 까지만 통과합니다."
-               if legacy else "")
-            + (" ⚠️ **한시 예외 만료일이 지났습니다** — 범위를 지정하거나 만료일을 다시 "
-               "정하십시오." if expired and legacy else "")
+            + (f" 한시 예외 {len(legacy)}건은 만료일(기본 {LEGACY_GRANDFATHER_UNTIL}) 까지만 "
+               f"통과합니다." if legacy else "")
+            + (f" ⚠️ **한시 예외 {len(legacy_expired)}건은 만료되어 이미 비노출입니다** — "
+               f"소유 조직을 지정하거나 승인된 전사 공용으로 전환하십시오."
+               if legacy_expired else "")
             + (f" ⚠️ 승인 대기 중인 전사 공용 {len(pending)}건은 보이지 않습니다."
                if pending else "")
+            + (f" ⚠️ 조직 공유 {len(org_shared_empty)}건은 **공유 대상이 비어** 소유 조직만 "
+               f"봅니다 — 공유했다고 믿는 쪽과 실제가 갈립니다." if org_shared_empty else "")
             + (f" ⚠️ 아무 표시도 없는 미지정 {len(hidden)}건은 보이지 않습니다 — 데이터가 "
                f"지워진 것이 아니라 범위 미지정으로 가려진 것입니다." if hidden else "")),
     }

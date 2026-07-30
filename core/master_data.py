@@ -400,6 +400,21 @@ _ECM_KEYS = (
     #     행까지 전부 한시 예외가 되어** 폐기한 규칙이 그대로 되살아난다. 기존 행 표시는
     #     기본값이 아니라 `_grandfather_unscoped_rows()` 가 **컬럼이 생기는 순간에만** 한다.
     ("scope_type", "TEXT NOT NULL DEFAULT ''"),
+    # ── §2.1 범위 계약 나머지 필드 (2026-07-30 · scope_assignments) ──────────
+    #   ★ 소유(`owner_organization_id`)와 적용 범위(`enterprise_scope_id`)를 **분리한다.**
+    #     "누가 책임지는가"와 "어디에 적용되는가"는 다른 질문이고, 한 칸에 합치면 전사 공용으로
+    #     전환한 순간 책임 조직이 지워진다 — 그러면 문제가 생겼을 때 물어볼 곳이 없다.
+    ("owner_organization_id", "TEXT NOT NULL DEFAULT ''"),
+    #   ORG_SHARED 의 공유 대상(콤마 구분). 빈 값이면 소유 조직만 본다 — 공유 의사 표시만으로
+    #     전 조직에 열지 않는다.
+    ("scope_assignments", "TEXT NOT NULL DEFAULT ''"),
+    ("classification", "TEXT NOT NULL DEFAULT 'INTERNAL'"),
+    #   한시 예외의 만료일이 여기 들어간다(행별 만료 — 부서마다 정리 속도가 다르다).
+    ("effective_from", "TEXT NOT NULL DEFAULT ''"),
+    ("effective_to", "TEXT NOT NULL DEFAULT ''"),
+    #   전사 공용 전환 승인 이력. `ENTERPRISE_SHARED` 는 이 두 값 없이 성립하지 않는다.
+    ("approval_status", "TEXT NOT NULL DEFAULT ''"),
+    ("approved_by", "TEXT NOT NULL DEFAULT ''"),
 )
 #   ★ [2026-07-29 저녁] `external_systems`(M2 연계 시스템) 추가 — **누출 경로가 실재했다.**
 #     `mcp_broker.get_live_context()` 는 활성 시스템을 **전부** 순회해 실측값을 프롬프트에
@@ -498,6 +513,12 @@ class MasterData:
         try:
             self._migrate_columns(conn)
             conn.executescript(_DDL)
+            # ★ 한 번 더 돈다 — **신선한 DB 를 위해서**다. 첫 호출 때는 테이블이 아직 없어
+            #   전부 건너뛰므로, `_DDL` 이 만든 표에는 `_ECM_KEYS` 의 새 컬럼이 없다. 그러면
+            #   컬럼 정의가 `_DDL` 과 `_ECM_KEYS` 두 곳에 있어야 하고, **두 곳은 반드시
+            #   어긋난다**(이 저장소가 라이브러리 경로에서 이미 겪은 유형이다).
+            #   두 번 도는 대신 선언은 한 곳(`_ECM_KEYS`)에 둔다. 두 호출 모두 멱등이다.
+            self._migrate_columns(conn)
             conn.commit()
         finally:
             conn.close()
