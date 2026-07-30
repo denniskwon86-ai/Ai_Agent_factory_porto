@@ -81,6 +81,40 @@ def is_ole2(path: Path) -> bool:
         return False
 
 
+#: OLE2 안의 이 스트림 = **암호화된 OOXML**(MS 표준 암호화 · IRM/DRM). 변환 대상이 아니다.
+_ENCRYPTED_MARKER = "EncryptedPackage".encode("utf-16-le")
+
+
+def is_encrypted_ooxml(path: Path) -> bool:
+    """암호/DRM 보호 문서인가 — **변환으로 풀리지 않는다.**
+
+    ★★ [2026-07-30 실측] `docs/reference` 의 51건을 "레거시 Office"로 오진했다. 실제로는
+      **50건이 암호화된 OOXML**(`EncryptedPackage`+`DataSpaces`)이고 1건은 보호가 걸린 `.ppt`
+      였다. 그래서 모든 변환 시도가 실패했다:
+        · LibreOffice → `Error: source file could not be loaded`
+        · Office COM → 암호/DRM 프롬프트에서 무한 대기
+      변환 목록에 넣는 것 자체가 잘못이다 — 실패가 확정된 작업으로 사람을 보낸다."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return False
+    return raw[:4] == OLE2_MAGIC and _ENCRYPTED_MARKER in raw
+
+
+def encrypted_report(root: Path) -> Dict[str, Any]:
+    """암호/DRM 보호 문서 목록 — **변환이 아니라 원본 재저장이 필요한 일감**이다."""
+    items = [p for p in sorted(Path(root).rglob("*"))
+             if p.is_file() and is_encrypted_ooxml(p)]
+    return {
+        "total": len(items),
+        "files": [str(p.relative_to(root)) for p in items],
+        "note": ("이 문서들은 **암호/DRM 으로 보호**되어 있어 자동 변환·추출이 불가능합니다"
+                 "(변환기가 파일을 열지 못합니다). 문서 소유자 또는 DRM 권한자가 보호를 해제해 "
+                 "다시 저장·업로드해야 합니다. 도구를 더 붙여서 해결되는 문제가 아닙니다."
+                 if items else "암호/DRM 보호 문서가 없습니다."),
+    }
+
+
 def detect_backend() -> Tuple[Optional[str], str]:
     """쓸 수 있는 변환기를 찾는다. 없으면 `(None, "")` — **없는데 있다고 하지 않는다.**
 
@@ -125,6 +159,11 @@ def plan(root: Path, registry_path: Optional[Path] = None) -> List[Dict[str, Any
     for p in files:
         if not p.exists() or not is_ole2(p):
             continue
+        if is_encrypted_ooxml(p):
+            # ★★ [2026-07-30 실측] 변환 대상이 **아니다.** 암호/DRM 보호 문서는 어떤 변환기로도
+            #   열리지 않는다(LibreOffice: "source file could not be loaded" · Office COM: 프롬프트
+            #   에서 무한 대기). 여기에 넣으면 사람을 실패가 확정된 작업으로 보낸다.
+            continue
         modern = _MODERN.get(p.suffix.lower())
         if not modern:
             continue
@@ -136,19 +175,73 @@ def plan(root: Path, registry_path: Optional[Path] = None) -> List[Dict[str, Any
 
 
 def convert_with_soffice(item: Dict[str, Any], soffice: str, timeout: float = 180) -> Path:
-    """LibreOffice 헤드리스 변환. 출력 파일명을 LibreOffice 가 정하므로 뒤에 옮긴다."""
+    """LibreOffice 헤드리스 변환.
+
+    ⚠️⚠️ **[2026-07-30 실측으로 잡은 데이터 사고]** 처음에는 `--outdir` 를 원본 폴더로 주고
+      `produced = src.parent / (src.stem + dst.suffix)` 를 결과로 삼았다. 그런데 원본이 이미
+      최신 확장자(`.pptx` 인데 내용은 레거시)면 **그 경로가 원본과 같다.** soffice 는 원본을
+      덮어쓰지 않으므로 `produced == src` 가 되고, 뒤이은 `produced.replace(dst)` 가
+      **원본을 `_converted` 이름으로 옮겨 버렸다.** 실제 파일 50건이 그렇게 개명됐다
+      (git 추적 파일이어서 전량 복원했다).
+
+    그래서 두 가지를 바꿨다:
+      ① 출력은 **격리된 임시 폴더**에 만든다 — 입력과 출력 경로가 겹칠 수 없게 구조로 막는다
+      ② 결과가 **실제로 최신 형식인지 검증**한다(OOXML=zip). 이 검증이 있었다면 "변환 성공
+         50건"이라는 거짓 보고가 즉시 잡혔다 — 결과를 확인하지 않는 변환은 변환이 아니다
+      ③ soffice 에게도 **실제 형식에 맞는 이름**으로 준다(확장자가 내용과 다르면 오해한다)"""
+    import tempfile
+
     src, dst = item["source"], item["target"]
+    if dst.resolve() == src.resolve():
+        raise RuntimeError("변환 대상 경로가 원본과 같습니다 — 원본을 덮어쓰지 않습니다.")
     fmt = dst.suffix.lstrip(".")
-    res = subprocess.run([soffice, "--headless", "--convert-to", fmt,
-                          "--outdir", str(src.parent), str(src)],
-                         capture_output=True, text=True, timeout=timeout)
-    produced = src.parent / (src.stem + dst.suffix)
-    if not produced.exists():
-        raise RuntimeError(f"변환 결과가 없습니다(soffice rc={res.returncode}): "
-                           f"{(res.stderr or res.stdout or '').strip()[:200]}")
-    if produced != dst:
-        produced.replace(dst)
+    with tempfile.TemporaryDirectory(prefix="soffice_") as work:
+        # 입력 사본을 **임시 폴더 안에** 실제 형식 이름으로 둔다. 원본 폴더에 숨김 파일
+        #   (`.name`)을 만들었더니 soffice 가 처리하지 못했다(rc=0 · 산출물 없음) — 실측.
+        legacy = _LEGACY_EXT.get(src.suffix.lower(), src.suffix)
+        feed = Path(work) / f"in{legacy}"
+        shutil.copyfile(src, feed)
+        outdir = str(Path(work) / "out")
+        os.makedirs(outdir, exist_ok=True)
+        # ★ 전용 프로필을 준다. LibreOffice 는 단일 인스턴스로 동작해서, 다른 soffice 가 떠 있으면
+        #   두 번째 `--convert-to` 가 **조용히 아무 것도 하지 않는다**(rc=0 · 산출물 없음).
+        #   배치 변환이 중간부터 실패하는 원인이 이것이다.
+        profile = (Path(work) / "profile").as_uri()
+        res = subprocess.run([soffice, f"-env:UserInstallation={profile}",
+                              "--headless", "--norestore", "--convert-to", fmt,
+                              "--outdir", outdir, str(feed)],
+                             capture_output=True, text=True, timeout=timeout)
+        produced = Path(outdir) / (feed.stem + dst.suffix)
+        if not produced.exists():
+            cand = [p for p in Path(outdir).iterdir() if p.suffix == dst.suffix]
+            if not cand:
+                raise RuntimeError(
+                    f"변환 결과가 없습니다(soffice rc={res.returncode}): "
+                    f"{(res.stderr or res.stdout or '').strip()[:200]}")
+            produced = cand[0]
+        _assert_modern(produced, dst.suffix)
+        shutil.move(str(produced), str(dst))
     return dst
+
+
+def _assert_modern(path: Path, suffix: str) -> None:
+    """변환 결과가 정말 최신 형식인가. **결과를 확인하지 않는 변환은 변환이 아니다.**
+
+    실측에서 soffice 가 `rc=0` 으로 성공을 보고했는데 산출물이 여전히 OLE2 였다(사실은 원본이
+    그 자리에 있었다). 성공 코드만 믿으면 "변환 50건 완료"라는 거짓 보고가 그대로 나간다."""
+    head = path.read_bytes()[:4]
+    if head == OLE2_MAGIC:
+        raise RuntimeError(
+            "변환 결과가 여전히 레거시(OLE2)입니다 — 변환되지 않았습니다"
+            "(soffice 가 원본을 그대로 돌려준 경우입니다).")
+    want = _MAGIC_EXPECT.get(suffix.lower())
+    if want and not head.startswith(want):
+        raise RuntimeError(
+            f"변환 결과의 형식이 기대와 다릅니다(머리 {head!r}, 기대 {want!r}).")
+
+
+#: 최신 형식의 기대 시그니처(OOXML 은 zip).
+_MAGIC_EXPECT = {".pptx": b"PK", ".docx": b"PK", ".xlsx": b"PK"}
 
 
 #: COM 변환 파일당 제한(초). 짧게 두는 이유는 **빨리 실패하기 위해서**다 — 실측에서 300초

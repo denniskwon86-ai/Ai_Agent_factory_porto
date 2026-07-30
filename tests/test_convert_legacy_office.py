@@ -172,3 +172,88 @@ def test_stale_temp_copies_are_cleaned_on_next_run(refs):
     stale.write_bytes(OLE2_MAGIC + b"leftover")
     run(refs, None)
     assert not stale.exists(), "잔여 임시 사본이 정리되지 않았다"
+
+
+def test_conversion_result_must_actually_be_modern(refs, tmp_path):
+    """★★★ [2026-07-30 실측 데이터 사고] **결과를 확인하지 않는 변환은 변환이 아니다.**
+
+    처음 구현은 `--outdir` 를 원본 폴더로 줬다. 원본이 이미 최신 확장자(`.pptx` 인데 내용은
+    레거시)면 soffice 출력 경로가 **원본과 같아지고**, soffice 는 원본을 덮어쓰지 않으므로
+    코드가 **원본을 `_converted` 이름으로 옮겨 버렸다.** soffice 는 `rc=0` 을 돌려줬고
+    스크립트는 "변환 50건 성공"이라고 보고했다 — 실제로는 파일 50건이 개명된 것이었다
+    (git 추적 파일이어서 전량 복원했다).
+
+    두 가지를 잠근다: 결과가 여전히 OLE2 면 실패로 처리하고, 타깃이 원본과 같으면 거부한다."""
+    from scripts.convert_legacy_office import OLE2_MAGIC as _OLE, _assert_modern
+
+    legacy_out = tmp_path / "out.pptx"
+    legacy_out.write_bytes(_OLE + b"still legacy")
+    with pytest.raises(RuntimeError, match="여전히 레거시"):
+        _assert_modern(legacy_out, ".pptx")
+
+    wrong = tmp_path / "wrong.pptx"
+    wrong.write_bytes(b"%PDF-1.7 not a pptx")
+    with pytest.raises(RuntimeError, match="형식이 기대와 다릅니다"):
+        _assert_modern(wrong, ".pptx")
+
+    ok = tmp_path / "ok.pptx"
+    ok.write_bytes(_MODERN_ZIP)
+    _assert_modern(ok, ".pptx")           # 통과해야 한다
+
+
+def test_soffice_never_writes_over_the_source(refs, monkeypatch):
+    """★★★ 원본과 타깃이 같은 경로면 **변환을 거부한다.** 이 가드가 없어서 원본이 개명됐다."""
+    from scripts.convert_legacy_office import convert_with_soffice
+
+    src = refs / "교재.pptx"
+    with pytest.raises(RuntimeError, match="원본과 같습니다"):
+        convert_with_soffice({"source": src, "target": src, "app": "powerpoint"}, "soffice")
+
+
+# ── 암호/DRM 보호 문서 (2026-07-30 실측으로 원인 재정의) ────────────────────
+_ENC = b"\xd0\xcf\x11\xe0" + b"\x00" * 40 + "EncryptedPackage".encode("utf-16-le")
+
+
+def test_encrypted_documents_are_not_conversion_targets(tmp_path):
+    """★★★ [2026-07-30 실측] 51건을 "레거시 Office"로 오진했다 — 실제로는 **50건이 암호화된
+    OOXML**(`EncryptedPackage`)이었다.
+
+    그래서 모든 변환 시도가 실패했다: LibreOffice 는 `source file could not be loaded`,
+    Office COM 은 암호 프롬프트에서 무한 대기. **변환 목록에 넣는 것 자체가 잘못**이다 —
+    실패가 확정된 작업으로 사람을 보내고, 원인(보호 해제 필요)을 가린다."""
+    from scripts.convert_legacy_office import encrypted_report, is_encrypted_ooxml, plan
+
+    root = tmp_path / "reference"
+    root.mkdir()
+    (root / "보호문서.pptx").write_bytes(_ENC)
+    (root / "진짜레거시.ppt").write_bytes(OLE2_MAGIC + b"PowerPoint Document")
+
+    assert is_encrypted_ooxml(root / "보호문서.pptx") is True
+    assert is_encrypted_ooxml(root / "진짜레거시.ppt") is False
+
+    names = [Path(i["source"]).name for i in plan(root, None)]
+    assert names == ["진짜레거시.ppt"], "암호 문서가 변환 대상에 들어갔다"
+
+    rep = encrypted_report(root)
+    assert rep["total"] == 1 and rep["files"] == ["보호문서.pptx"]
+    assert "보호를 해제해" in rep["note"], "무엇을 해야 하는지 말해야 한다"
+    assert "도구를 더 붙여서 해결되는 문제가 아닙니다" in rep["note"]
+
+
+def test_registry_marks_encrypted_separately_from_conversion(tmp_path):
+    """★★ '변환 필요'와 '암호 보호'는 **다른 조치**를 요구한다. 같은 칸에 두면 사람들이 변환을
+    반복 시도하고, 매번 실패하고, 원인을 모른다."""
+    from core.reference_registry import ENCRYPTED, build_registry, indexable, approve_asset
+
+    root = tmp_path / "reference"
+    root.mkdir()
+    (root / "보호문서.docx").write_bytes(_ENC)
+    target = tmp_path / "reg.json"
+    reg = build_registry(root, target)
+
+    assert reg["assets"][0]["extraction_status"] == ENCRYPTED
+    approve_asset(reg["assets"][0]["asset_id"], "cdo@ls", registry_path=target)
+    out = indexable(target)
+    assert out["total"] == 0
+    assert out["blocked"]["encrypted"] == 1 and out["blocked"]["conversion_required"] == 0
+    assert "변환으로 풀리지 않습니다" in out["note"]

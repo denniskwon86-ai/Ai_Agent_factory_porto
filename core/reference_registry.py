@@ -93,6 +93,9 @@ PACKS: dict[str, dict[str, Any]] = {
     },
 }
 
+#: 암호/DRM 보호 문서. **변환 대상이 아니다** — 원본에서 보호를 해제해야 한다.
+ENCRYPTED = "ENCRYPTED"
+
 PENDING_REVIEW = "PENDING_REVIEW"
 APPROVED = "APPROVED"
 REJECTED = "REJECTED"
@@ -136,6 +139,29 @@ _MAGIC = {".docx": b"PK\x03\x04", ".pptx": b"PK\x03\x04", ".xlsx": b"PK\x03\x04"
           ".pdf": b"%PDF"}
 
 
+#: OLE2 컨테이너 안에 이 스트림이 있으면 **암호화된 OOXML**이다(MS 표준 암호화 · IRM/DRM).
+#: 이름은 OLE2 디렉터리에 UTF-16LE 로 적힌다.
+_ENCRYPTED_MARKER = "EncryptedPackage".encode("utf-16-le")
+
+
+def _is_encrypted_ooxml(path: Path) -> bool:
+    """암호화된 OOXML 인가.
+
+    ★★ [2026-07-30 실측] 이 판정이 없어서 **원인을 완전히 오진했다.** `docs/reference` 의 51건을
+      "레거시 Office(OLE2)"로 보고 변환 도구를 만들었는데, 실제로는 **50건이 암호화된 OOXML**
+      (`EncryptedPackage`+`DataSpaces`)이었다. 그래서:
+        · LibreOffice → `Error: source file could not be loaded`
+        · Office COM → 암호/DRM 프롬프트에서 무한 대기
+      **변환으로는 절대 해결되지 않는다.** 원본에서 보호를 해제해 다시 저장해야 한다.
+      "변환 필요"라고 표시하면 변환을 시도하게 만들고, 그 시도는 전부 실패한다 — 틀린 원인을
+      가리키는 상태 표시는 틀린 숫자보다 나쁘다(사람을 잘못된 작업으로 보낸다)."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return False
+    return raw[:4] == b"\xd0\xcf\x11\xe0" and _ENCRYPTED_MARKER in raw
+
+
 def _extraction_status(path: Path, ext: str) -> str:
     """추출 가능 여부를 **내용으로** 판정한다(확장자만 믿지 않는다).
 
@@ -159,7 +185,12 @@ def _extraction_status(path: Path, ext: str) -> str:
             head = f.read(len(magic))
     except OSError:
         return "CONVERSION_REQUIRED"
-    return "SUPPORTED" if head == magic else "CONVERSION_REQUIRED"
+    if head == magic:
+        return "SUPPORTED"
+    # 암호화는 **변환으로 풀리지 않는다** — 다른 상태로 구분해 다른 조치를 요구한다.
+    if _is_encrypted_ooxml(path):
+        return ENCRYPTED
+    return "CONVERSION_REQUIRED"
 
 
 def _asset_id(relative_path: str) -> str:
@@ -275,6 +306,7 @@ def registry_summary(registry_path: Path = REGISTRY_PATH) -> dict[str, Any]:
         by_pack[asset["pack_id"]] = by_pack.get(asset["pack_id"], 0) + 1
     approved = [a for a in assets if a.get("approval_status") == APPROVED]
     unscoped = [a for a in assets if not _owner_of(a)]
+    encrypted = [a for a in assets if a.get("extraction_status") == ENCRYPTED]
     idx = indexable(registry_path)
     return {
         **registry.get("summary", {}), "by_pack": by_pack,
@@ -283,12 +315,16 @@ def registry_summary(registry_path: Path = REGISTRY_PATH) -> dict[str, Any]:
         #   지식팩이 비어 있는 이유를 아무도 설명할 수 없다(실측으로 확인한 상태다).
         "approved": len(approved),
         "unscoped": len(unscoped),
+        "encrypted": len(encrypted),
         "indexable": idx["total"],
         "note": ("등록은 색인이 아닙니다. 색인에는 **소유 조직 + 승인 + 추출 가능**이 모두 "
                  "필요합니다 — 색인은 되돌릴 수 없기 때문입니다(한번 프롬프트에 실려 나간 "
                  "산출물은 되돌아오지 않습니다)."
                  + (f" 승인 대기 {len(assets) - len(approved)}건은 색인되지 않습니다."
-                    if len(approved) < len(assets) else "")),
+                    if len(approved) < len(assets) else "")
+                 + (f" ⚠️ **암호/DRM 보호 {len(encrypted)}건은 자동 처리가 불가능합니다** — "
+                    f"변환 도구로도 열리지 않으므로, 문서 소유자가 보호를 해제해 다시 올려야 "
+                    f"합니다." if encrypted else "")),
     }
 
 
@@ -411,13 +447,17 @@ def indexable(registry_path: Path = REGISTRY_PATH,
     assets = load_registry(registry_path).get("assets", [])
     ready = []
     blocked = {"no_owner": 0, "not_approved": 0, "conversion_required": 0,
-               "extraction_failed": 0}
+               "encrypted": 0, "extraction_failed": 0}
     for a in assets:
         if not _owner_of(a):
             blocked["no_owner"] += 1
             continue
         if a.get("approval_status") != APPROVED:
             blocked["not_approved"] += 1
+            continue
+        if a.get("extraction_status") == ENCRYPTED:
+            # 변환과 **다른 조치**가 필요하다 — 변환 시도는 전부 실패한다.
+            blocked["encrypted"] += 1
             continue
         if a.get("extraction_status") != "SUPPORTED":
             blocked["conversion_required"] += 1
@@ -437,6 +477,9 @@ def indexable(registry_path: Path = REGISTRY_PATH,
                  + (f"소유 미지정 {blocked['no_owner']}건 · " if blocked["no_owner"] else "")
                  + (f"변환 필요 {blocked['conversion_required']}건 · "
                     if blocked["conversion_required"] else "")
+                 + (f"**암호/DRM 보호 {blocked['encrypted']}건 — 변환으로 풀리지 않습니다.** "
+                    f"원본에서 보호를 해제해 다시 저장해야 합니다(문서 소유자·DRM 권한자만 "
+                    f"가능합니다) · " if blocked["encrypted"] else "")
                  + (f"추출 실패 {blocked['extraction_failed']}건(확장자는 맞지만 실제 형식이 "
                     f"다른 파일입니다 — 변환 후 `force` 로 재시도하십시오)"
                     if blocked["extraction_failed"] else "")).rstrip(" ·"),
