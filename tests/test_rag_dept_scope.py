@@ -417,3 +417,60 @@ def test_unknown_pack_still_404(client, monkeypatch):
 
     r = c.put("/api/v1/factory/projects/P8/knowledge", json={"knowledge_pack_ids": ["ghost"]})
     assert r.status_code == 404, r.text
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# [2026-07-30] 지식팩 검색의 조직 범위 필터 — 색인에 심은 범위를 검색이 쓰는가
+# ══════════════════════════════════════════════════════════════════════════
+def _pack_kb(rows, monkeypatch, pack_id="p1"):
+    """`search_packs` 용 대역 — 팩 존재 판정과 컬렉션만 갈아끼운다."""
+    kb = KnowledgeBase.__new__(KnowledgeBase)
+    kb.client = object()
+    col = _FakeCollection(rows)
+    monkeypatch.setattr(KnowledgeBase, "_manifest_path", lambda self, pid: __file__)
+    monkeypatch.setattr(KnowledgeBase, "_pack_collection", lambda self, pid: col)
+    return kb, col
+
+
+# ⚠️ `search_packs` 는 팩당 `min(3, n_total)` 건만 가져온다. 그래서 필터를 검증할 행은
+#   **상위 3건 안에** 있어야 한다 — 거리로 이미 탈락한 행이 "필터가 막았다"로 보이면 그 테스트는
+#   아무것도 증명하지 않는다(허수 통과).
+_PACK_ROWS = [
+    ("전사 표준 문서", {"owner_org_id": "LS_MNM", "filename": "std.docx"}, 0.1),
+    ("동제련 전용 문서", {"owner_org_id": "MNM_COPPER", "filename": "cu.docx"}, 0.2),
+    ("예전 업로드", {"filename": "legacy.docx"}, 0.3),          # owner_org_id 없음
+]
+
+
+def test_search_packs_without_scope_returns_everything(monkeypatch):
+    """★ 범위를 주지 않으면 필터하지 않는다 — 종전 동작(ECM 미도입 흐름)을 깨지 않는다."""
+    kb, col = _pack_kb(_PACK_ROWS, monkeypatch)
+    assert len(kb.search_packs(["p1"], "질의", n_total=10)) == 3
+    assert col.calls[0]["n_results"] == 3, "팩당 상한(3)이 바뀌면 아래 필터 테스트도 함께 봐야 한다"
+
+
+def test_search_packs_filters_by_org_scope(monkeypatch):
+    """★★ 색인할 때 범위를 심어 두고 검색에서 쓰지 않으면 그 메타데이터는 장식이다.
+
+    등록부에서 `owner_org_id` 로 통제한 문서가 색인되는 순간 통제 밖으로 나가면 안 된다.
+    세 행 모두 상위 3건에 들어오므로, 빠지는 것은 **필터가 막은 것**이다."""
+    import core.enterprise_context.scoping as sc
+    monkeypatch.setattr(sc, "visible_scopes", lambda node: {"MNM_BATTERY", "LS_MNM"})
+    kb, _ = _pack_kb(_PACK_ROWS, monkeypatch)
+
+    got = [h["content"] for h in
+           kb.search_packs(["p1"], "질의", n_total=10, scope_node_id="MNM_BATTERY")]
+    assert got == ["전사 표준 문서"], f"범위 필터가 정확하지 않다: {got}"
+    # → 상속된 전사 문서는 통과, 형제 조직(MNM_COPPER)과 범위 미기재는 제외(fail-closed)
+
+
+def test_search_packs_fails_closed_when_scope_cannot_be_resolved(monkeypatch):
+    """★★ 범위 해석 실패를 '전부 보임'으로 처리하면 리솔버 장애가 곧 전사 유출이 된다."""
+    import core.enterprise_context.scoping as sc
+
+    def _boom(node):
+        raise RuntimeError("resolver down")
+    monkeypatch.setattr(sc, "visible_scopes", _boom)
+    kb, _ = _pack_kb(_PACK_ROWS, monkeypatch)
+
+    assert kb.search_packs(["p1"], "질의", scope_node_id="MNM_BATTERY") == []

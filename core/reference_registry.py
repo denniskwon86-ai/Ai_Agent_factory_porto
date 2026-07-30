@@ -125,6 +125,37 @@ def _classify(relative_path: str) -> tuple[str, str, list[str], str]:
     return "innovation-rnd-people", "LS_MNM", ["innovation", "rnd", "corporate"], "TRAINING_OR_GUIDE"
 
 
+#: 확장자별 파일 머리 시그니처. OOXML(docx·pptx·xlsx)은 zip 이고 PDF 는 `%PDF` 로 시작한다.
+_MAGIC = {".docx": b"PK\x03\x04", ".pptx": b"PK\x03\x04", ".xlsx": b"PK\x03\x04",
+          ".pdf": b"%PDF"}
+
+
+def _extraction_status(path: Path, ext: str) -> str:
+    """추출 가능 여부를 **내용으로** 판정한다(확장자만 믿지 않는다).
+
+    ★ [2026-07-30 실측] 종전에는 확장자만 봤다. 그 결과 실제 등록부에서 `SUPPORTED` 67건 중
+      **실제로 열리는 것은 16건**이었다 — 51건이 확장자만 `.pptx`/`.docx` 인 레거시 바이너리
+      (`.ppt`/`.doc` 를 이름만 바꾼 파일)여서 "File is not a zip file" 로 실패했다.
+
+    ⚠️ 이 과대평가는 그냥 부정확한 숫자가 아니다. 사람이 68건을 승인하고 "지식팩에 68건이
+      들어갔다"고 믿게 만든다 — 실제로는 16건이다. 그러면 답변 품질이 왜 낮은지 아무도 설명할
+      수 없다. **무엇이 없는지 정확히 아는 것이 이 모듈의 산출물**이라는 원칙에 정면으로 어긋난다.
+
+    머리 몇 바이트만 읽는다(전체 파싱은 색인 시점에 한다) — 등록 스캔은 68건을 훑는 경로이므로
+    여기서 무거워지면 스캔 자체를 아무도 돌리지 않게 된다."""
+    if ext not in _EXTRACTABLE:
+        return "CONVERSION_REQUIRED"
+    magic = _MAGIC.get(ext)
+    if not magic:
+        return "SUPPORTED"                     # txt·md·csv·json — 시그니처가 없다
+    try:
+        with path.open("rb") as f:
+            head = f.read(len(magic))
+    except OSError:
+        return "CONVERSION_REQUIRED"
+    return "SUPPORTED" if head == magic else "CONVERSION_REQUIRED"
+
+
 def _asset_id(relative_path: str) -> str:
     normalized = "".join(ch if ch.isalnum() else "-" for ch in relative_path.upper())
     normalized = "-".join(part for part in normalized.split("-") if part)
@@ -162,7 +193,8 @@ def build_registry(reference_root: Path = REFERENCE_ROOT, registry_path: Path = 
             "scope_code": previous.get("scope_code", scope_code),
             "classification": previous.get("classification", "INTERNAL"),
             "tags": previous.get("tags", tags),
-            "extraction_status": "SUPPORTED" if ext in _EXTRACTABLE else "CONVERSION_REQUIRED",
+            # 확장자가 아니라 **내용**으로 판정한다(위 `_extraction_status` 주석의 실측 참조).
+            "extraction_status": _extraction_status(path, ext),
             "ingestion_status": previous.get("ingestion_status", "REGISTERED"),
             "approval_status": previous.get("approval_status", PENDING_REVIEW),
             # ★ 소유 조직은 `scope_code` 에서 **파생**한다. 종전에는 빈 문자열이 기본이어서
@@ -323,14 +355,26 @@ def reject_asset(asset_id: str, actor: str, reason: str,
     return _set_approval(asset_id, REJECTED, actor, reason, registry_path)
 
 
-def indexable(registry_path: Path = REGISTRY_PATH) -> dict[str, Any]:
+EXTRACTION_FAILED = "EXTRACTION_FAILED"
+
+
+def indexable(registry_path: Path = REGISTRY_PATH,
+              include_failed: bool = False) -> dict[str, Any]:
     """**지금 색인할 수 있는** 자산과, 나머지가 왜 안 되는지.
 
     ★ 색인 조건이 조회 조건보다 엄격한 이유: 색인은 되돌릴 수 없다. 소유 조직·승인·추출 가능
       셋 중 하나라도 빠지면 넣지 않고, **빠진 이유를 건수로 돌려준다** — 이유를 모르면 사람은
-      "색인이 고장났다"로 결론짓는다."""
+      "색인이 고장났다"로 결론짓는다.
+
+    ★ [2026-07-30 실측] 한 번 추출에 실패한 자산은 기본적으로 제외한다(`include_failed=False`).
+      `extraction_status` 는 **확장자만 보고** 판정하는데(`.docx` → SUPPORTED) 실제 파일이 그
+      형식이 아닌 경우가 있다 — 실제 등록부의 `.docx` 파일이 zip 이 아니어서 열리지 않았다.
+      실패를 기록하지 않으면 이 함수가 계속 "1건 색인 가능"이라고 **지킬 수 없는 약속**을
+      반복하고, 운영자는 매번 같은 실패를 다시 본다."""
     assets = load_registry(registry_path).get("assets", [])
-    ready, blocked = [], {"no_owner": 0, "not_approved": 0, "conversion_required": 0}
+    ready = []
+    blocked = {"no_owner": 0, "not_approved": 0, "conversion_required": 0,
+               "extraction_failed": 0}
     for a in assets:
         if not _owner_of(a):
             blocked["no_owner"] += 1
@@ -340,6 +384,9 @@ def indexable(registry_path: Path = REGISTRY_PATH) -> dict[str, Any]:
             continue
         if a.get("extraction_status") != "SUPPORTED":
             blocked["conversion_required"] += 1
+            continue
+        if a.get("ingestion_status") == EXTRACTION_FAILED and not include_failed:
+            blocked["extraction_failed"] += 1
             continue
         ready.append({"asset_id": a["asset_id"], "relative_path": a["relative_path"],
                       "pack_id": a["pack_id"], "owner_org_id": _owner_of(a),
@@ -351,8 +398,110 @@ def indexable(registry_path: Path = REGISTRY_PATH) -> dict[str, Any]:
                  "없습니다). "
                  + (f"승인 대기 {blocked['not_approved']}건 · " if blocked["not_approved"] else "")
                  + (f"소유 미지정 {blocked['no_owner']}건 · " if blocked["no_owner"] else "")
-                 + (f"변환 필요 {blocked['conversion_required']}건"
-                    if blocked["conversion_required"] else "")).rstrip(" ·"),
+                 + (f"변환 필요 {blocked['conversion_required']}건 · "
+                    if blocked["conversion_required"] else "")
+                 + (f"추출 실패 {blocked['extraction_failed']}건(확장자는 맞지만 실제 형식이 "
+                    f"다른 파일입니다 — 변환 후 `force` 로 재시도하십시오)"
+                    if blocked["extraction_failed"] else "")).rstrip(" ·"),
+    }
+
+
+def index_approved(reference_root: Path = REFERENCE_ROOT,
+                   registry_path: Path = REGISTRY_PATH, dry_run: bool = True,
+                   kb=None, asset_ids: list[str] | None = None,
+                   force: bool = False) -> dict[str, Any]:
+    """승인된 자산을 **실제로 지식팩에 색인한다.**
+
+    ★ 이것이 없으면 승인은 아무 일도 일으키지 않는다 — "승인했는데 검색이 안 된다"가 되고,
+      사람들은 승인 절차를 신뢰하지 않게 된다.
+
+    지키는 것:
+      · **색인은 되돌릴 수 없다** — 프롬프트에 실려 나간 산출물은 지워도 돌아오지 않는다.
+        그래서 `dry_run` 이 기본이고, `indexable()` 의 세 조건(소유·승인·추출 가능)을 통과한
+        것만 넣는다.
+      · **조직 범위를 청크에 함께 심는다**(`owner_org_id`·`classification`). 이것이 없으면
+        등록부에서 통제한 문서가 색인되는 순간 통제 밖으로 나간다.
+      · **해시로 멱등**하다. 같은 내용을 다시 넣지 않고, 파일이 바뀌면(sha 변경) 다시 넣는다 —
+        `filename` 기준으로 기존 청크를 교체하므로 중복이 쌓이지 않는다.
+      · **실패를 조용히 넘기지 않는다.** 추출 실패·빈 텍스트·임베딩 오류를 자산별로 돌려준다.
+        빈 문서를 색인하면 검색은 되는데 내용이 없다 — 가장 나쁜 상태다.
+    """
+    if kb is None:
+        from core.knowledge_base import knowledge_base as kb
+    registry = load_registry(registry_path)
+    assets = {a["asset_id"]: a for a in registry.get("assets", [])}
+    # `force` 는 이전에 추출 실패한 자산도 다시 시도한다 — 파일을 변환해 올린 뒤 재시도하는
+    #   경로가 있어야 실패 기록이 영구 사망 선고가 되지 않는다.
+    ready = indexable(registry_path, include_failed=force)["items"]
+    if asset_ids:
+        want = set(asset_ids)
+        ready = [i for i in ready if i["asset_id"] in want]
+
+    indexed, skipped, failed = [], [], []
+    for item in ready:
+        asset = assets[item["asset_id"]]
+        # 이미 같은 내용이 들어가 있으면 다시 넣지 않는다(임베딩은 비용이고 시간이다).
+        if not force and asset.get("indexed_sha256") == asset.get("sha256"):
+            skipped.append({"asset_id": asset["asset_id"], "reason": "이미 색인됨(내용 동일)"})
+            continue
+        path = Path(reference_root) / asset["relative_path"]
+        if not path.exists():
+            failed.append({"asset_id": asset["asset_id"],
+                           "reason": f"원본 파일이 없습니다: {asset['relative_path']} "
+                                     f"(등록 후 이동·삭제된 경우 재스캔이 필요합니다)"})
+            continue
+        if dry_run:
+            indexed.append({"asset_id": asset["asset_id"], "pack_id": asset["pack_id"],
+                            "filename": asset["filename"], "chunks": None})
+            continue
+        try:
+            from core.knowledge_base import extract_text
+            raw = path.read_bytes()
+            text = extract_text(asset["filename"], raw)
+            if not (text or "").strip():
+                # 빈 텍스트를 넣으면 검색 결과에는 뜨는데 근거가 없다 — 넣지 않는다.
+                raise ValueError("추출된 텍스트가 비어 있습니다(스캔 PDF 등은 OCR 이 필요합니다).")
+            chunks = kb.add_document(
+                asset["pack_id"], asset["filename"], text, source="reference-registry",
+                raw=raw,
+                # ★ 조직 범위·등급을 청크마다 심는다. 색인은 통제의 끝이 아니라 통제가 따라가야
+                #   하는 지점이다.
+                extra_meta={"owner_org_id": _owner_of(asset),
+                            "classification": asset.get("classification", "INTERNAL"),
+                            "asset_id": asset["asset_id"],
+                            "sha256": asset.get("sha256", ""),
+                            "approved_by": asset.get("approved_by", "")})
+            asset["ingestion_status"] = "INDEXED"
+            asset["indexed_at"] = _now()
+            asset["indexed_sha256"] = asset.get("sha256", "")
+            asset["indexed_chunks"] = int(chunks)
+            indexed.append({"asset_id": asset["asset_id"], "pack_id": asset["pack_id"],
+                            "filename": asset["filename"], "chunks": int(chunks),
+                            "owner_org_id": _owner_of(asset)})
+        except Exception as e:
+            # ★ 실패를 **등록부에 남긴다.** 남기지 않으면 `indexable()` 이 계속 "색인 가능"이라고
+            #   지킬 수 없는 약속을 반복하고, 운영자는 매번 같은 실패를 다시 본다.
+            #   `INDEXED` 로는 절대 표시하지 않는다 — 실패한 색인을 성공으로 적으면 그 문서가
+            #   지식팩에 있다고 믿게 된다.
+            asset["ingestion_status"] = EXTRACTION_FAILED
+            asset["extraction_error"] = str(e)[:300]
+            asset["extraction_failed_at"] = _now()
+            failed.append({"asset_id": asset["asset_id"],
+                           "filename": asset["filename"], "reason": str(e)})
+    if not dry_run and (indexed or failed):
+        _save(registry, registry_path)
+    return {
+        "dry_run": bool(dry_run), "ran_at": _now(),
+        "indexed": len(indexed), "skipped": len(skipped), "failed": len(failed),
+        "items": indexed, "skipped_items": skipped, "failed_items": failed,
+        "note": (("[예행] 실제로 색인하지 않았습니다. " if dry_run else "")
+                 + f"색인 {len(indexed)}건 · 건너뜀 {len(skipped)}건 · 실패 {len(failed)}건."
+                 + (" 실패 항목은 `failed_items` 의 이유를 확인하십시오 — 빈 문서를 색인하지 "
+                    "않습니다(검색은 되는데 내용이 없는 상태가 가장 나쁩니다)."
+                    if failed else "")
+                 + (" 색인된 청크에는 `owner_org_id`·`classification` 이 함께 심겨 있어 "
+                    "검색 측에서 조직 범위로 걸러낼 수 있습니다." if indexed and not dry_run
+                    else "")),
     }
 
 

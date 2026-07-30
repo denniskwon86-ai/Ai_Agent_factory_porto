@@ -19,7 +19,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from api.deps import Principal, assert_can_manage_standard, current_principal
-from core.reference_registry import (approve_asset, build_registry, indexable, load_registry,
+from core.reference_registry import (REFERENCE_ROOT, REGISTRY_PATH, approve_asset,
+                                     build_registry, index_approved, indexable, load_registry,
                                      registry_summary, reject_asset, visible_assets)
 
 
@@ -43,6 +44,12 @@ class ApproveRequest(BaseModel):
 
 class RejectRequest(BaseModel):
     reason: str            # 사유 필수 — 없으면 같은 문서가 계속 다시 올라온다
+
+
+class IndexRequest(BaseModel):
+    dry_run: bool = True                       # ★ 색인은 되돌릴 수 없다 — 예행이 기본
+    asset_ids: Optional[list[str]] = None       # 비우면 색인 가능한 전부
+    force: bool = False                        # 내용이 같아도 다시 넣는다(임베딩 재생성)
 
 
 @router.get("/summary")
@@ -102,6 +109,24 @@ async def reject(asset_id: str, req: RejectRequest,
         return {"status": "success",
                 "data": await asyncio.to_thread(reject_asset, asset_id, _actor(p),
                                                 req.reason)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/index")
+async def index_assets(req: IndexRequest, p: Principal = Depends(current_principal)):
+    """승인된 자산을 **실제로 지식팩에 색인한다.**
+
+    ⚠️ 색인은 되돌릴 수 없다 — 프롬프트에 실려 나간 산출물은 지워도 돌아오지 않는다. 그래서
+      `dry_run=true`(기본)로 무엇이 들어갈지 먼저 보고, 조건(소유·승인·추출 가능)을 통과한
+      것만 넣는다. 청크에는 `owner_org_id`·`classification` 이 함께 심겨 검색에서 조직 범위로
+      걸러낼 수 있다."""
+    assert_can_manage_standard(p)
+    _actor(p)
+    try:
+        return {"status": "success",
+                "data": await asyncio.to_thread(index_approved, REFERENCE_ROOT, REGISTRY_PATH,
+                                                req.dry_run, None, req.asset_ids, req.force)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

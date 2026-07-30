@@ -36,10 +36,17 @@ def test_legacy_ppt_requires_safe_conversion():
 def test_reference_registry_scans_and_preserves_review_fields(tmp_path):
     root = tmp_path / "reference"
     root.mkdir()
-    (root / "배터리소재_SIOP_상세도입계획_v2.docx").write_bytes(b"docx-source")
+    # ★ 실제 OOXML(zip)로 만든다 — 확장자만 맞는 바이트는 이제 CONVERSION_REQUIRED 로 잡힌다
+    #   (아래 `test_extension_alone_does_not_mean_extractable` 가 그 판정을 검증한다).
+    (root / "배터리소재_SIOP_상세도입계획_v2.docx").write_bytes(
+        _office_zip({"word/document.xml":
+                     '<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>SIOP</w:t>'
+                     '</w:r></w:p></w:body></w:document>'}))
     training = root / "전사교육자료"
     training.mkdir()
-    (training / "16. 품질관리.pptx").write_bytes(b"pptx-source")
+    (training / "16. 품질관리.pptx").write_bytes(
+        _office_zip({"ppt/slides/slide1.xml":
+                     '<p:sld xmlns:p="p" xmlns:a="a"><a:t>품질</a:t></p:sld>'}))
     (training / "legacy.ppt").write_bytes(b"ppt-source")
     target = tmp_path / "reference_registry.json"
 
@@ -62,11 +69,39 @@ def test_reference_registry_scans_and_preserves_review_fields(tmp_path):
 def reg(tmp_path):
     root = tmp_path / "reference"
     root.mkdir()
-    (root / "배터리소재_SIOP.docx").write_bytes(b"docx")
-    (root / "제련_원료수급.docx").write_bytes(b"docx")
+    # 실제 OOXML(zip)로 만든다 — 확장자만 맞는 바이트는 CONVERSION_REQUIRED 로 잡혀 색인
+    #   대상에서 빠지므로, 승인·색인 경로를 검증하려면 열리는 파일이어야 한다.
+    (root / "배터리소재_SIOP.docx").write_bytes(_docx("배터리 SIOP"))
+    (root / "제련_원료수급.docx").write_bytes(_docx("동제련 원료"))
     (root / "legacy.ppt").write_bytes(b"ppt")
     target = tmp_path / "reference_registry.json"
     return build_registry(root, target), target
+
+
+def test_extension_alone_does_not_mean_extractable(tmp_path):
+    """★★ [2026-07-30 실측] 확장자만 보고 `SUPPORTED` 로 판정하면 현실을 4배 과대평가한다.
+
+    실제 등록부에서 `SUPPORTED` 67건 중 **열리는 것은 16건**이었다 — 51건이 확장자만
+    `.pptx`/`.docx` 인 레거시 바이너리(`.ppt`/`.doc` 를 이름만 바꾼 파일)였다.
+
+    ⚠️ 이건 부정확한 숫자가 아니라 **거짓 약속**이다. 사람이 68건을 승인하고 "지식팩에 68건이
+      들어갔다"고 믿게 되는데 실제로는 16건이고, 그러면 답변 품질이 왜 낮은지 아무도 설명할 수
+      없다."""
+    root = tmp_path / "reference"
+    root.mkdir()
+    (root / "진짜.docx").write_bytes(_docx("내용 있음"))
+    (root / "이름만_docx.docx").write_bytes(b"\xd0\xcf\x11\xe0 legacy OLE binary")
+    (root / "이름만_pdf.pdf").write_bytes(b"not a pdf at all")
+    (root / "메모.md").write_text("마크다운은 시그니처가 없다", encoding="utf-8")
+    target = tmp_path / "reg.json"
+
+    out = build_registry(root, target)
+    st = {a["filename"]: a["extraction_status"] for a in out["assets"]}
+    assert st["진짜.docx"] == "SUPPORTED"
+    assert st["이름만_docx.docx"] == "CONVERSION_REQUIRED", "레거시 바이너리가 SUPPORTED 로 잡혔다"
+    assert st["이름만_pdf.pdf"] == "CONVERSION_REQUIRED"
+    assert st["메모.md"] == "SUPPORTED", "시그니처 없는 텍스트 형식을 막으면 안 된다"
+    assert out["summary"]["supported"] == 2 and out["summary"]["conversion_required"] == 2
 
 
 def test_owner_is_derived_from_scope_code_not_left_blank(reg):
@@ -183,6 +218,175 @@ def test_summary_says_why_the_knowledge_pack_is_empty(reg):
     assert s["total"] == 3 and s["approved"] == 0 and s["indexable"] == 0
     assert s["unscoped"] == 0, "소유 파생 이후에는 미지정이 없어야 한다"
     assert "등록은 색인이 아닙니다" in s["note"]
+
+
+# ── 색인 실행 (2026-07-30) ──────────────────────────────────────────────────
+class _FakeKB:
+    """지식팩 대역. chromadb 없이도 색인 계약을 검증한다 — 메타데이터가 청크에 실리는지가
+    핵심이므로 저장소 구현이 아니라 **호출 계약**을 본다."""
+
+    def __init__(self, fail_on: str = ""):
+        self.calls: list[dict] = []
+        self.fail_on = fail_on
+
+    def add_document(self, pack_id, filename, text, source="upload", raw=None,
+                     extra_meta=None):
+        if self.fail_on and self.fail_on in filename:
+            raise ValueError("임베딩 저장소 오류(테스트)")
+        self.calls.append({"pack_id": pack_id, "filename": filename, "text": text,
+                           "source": source, "extra_meta": extra_meta or {}})
+        return 3
+
+
+def _docx(text: str) -> bytes:
+    return _office_zip({"word/document.xml":
+                        f'<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>{text}</w:t>'
+                        f'</w:r></w:p></w:body></w:document>'})
+
+
+@pytest.fixture()
+def indexed_env(tmp_path):
+    root = tmp_path / "reference"
+    root.mkdir()
+    (root / "배터리소재_SIOP.docx").write_bytes(_docx("배터리 SIOP 운영 기준"))
+    target = tmp_path / "reference_registry.json"
+    reg = build_registry(root, target)
+    from core.reference_registry import approve_asset
+    aid = reg["assets"][0]["asset_id"]
+    approve_asset(aid, "cdo@ls", registry_path=target)
+    return root, target, aid
+
+
+def test_dry_run_indexes_nothing(indexed_env):
+    """★★ 색인은 되돌릴 수 없다 — 프롬프트에 실려 나간 산출물은 지워도 돌아오지 않는다.
+    그래서 예행이 기본이다."""
+    from core.reference_registry import index_approved, load_registry
+    root, target, _ = indexed_env
+    kb = _FakeKB()
+    out = index_approved(root, target, dry_run=True, kb=kb)
+
+    assert out["indexed"] == 1 and out["dry_run"] is True and kb.calls == []
+    assert "[예행]" in out["note"]
+    assert load_registry(target)["assets"][0]["ingestion_status"] == "REGISTERED"
+
+
+def test_real_index_carries_org_scope_into_the_chunks(indexed_env):
+    """★★ 색인하면서 범위를 심지 않으면, 등록부에서 통제한 문서가 색인되는 **순간 통제 밖으로
+    나간다.** 색인은 통제의 끝이 아니라 통제가 따라가야 하는 지점이다."""
+    from core.reference_registry import index_approved, load_registry
+    root, target, _ = indexed_env
+    kb = _FakeKB()
+    out = index_approved(root, target, dry_run=False, kb=kb)
+
+    assert out["indexed"] == 1 and out["failed"] == 0
+    call = kb.calls[0]
+    assert call["pack_id"] == "battery-materials-operations"
+    assert call["source"] == "reference-registry"
+    assert "배터리 SIOP 운영 기준" in call["text"]
+    assert call["extra_meta"]["owner_org_id"] == "MNM_BATTERY"
+    assert call["extra_meta"]["classification"] == "INTERNAL"
+    assert call["extra_meta"]["approved_by"] == "cdo@ls"
+
+    asset = load_registry(target)["assets"][0]
+    assert asset["ingestion_status"] == "INDEXED" and asset["indexed_chunks"] == 3
+    assert asset["indexed_sha256"] == asset["sha256"]
+
+
+def test_reindex_is_skipped_when_content_is_unchanged(indexed_env):
+    """★ 같은 내용을 다시 넣지 않는다 — 임베딩은 비용이고 시간이다."""
+    from core.reference_registry import index_approved
+    root, target, _ = indexed_env
+    kb = _FakeKB()
+    index_approved(root, target, dry_run=False, kb=kb)
+    again = index_approved(root, target, dry_run=False, kb=kb)
+
+    assert again["indexed"] == 0 and again["skipped"] == 1
+    assert "이미 색인됨" in again["skipped_items"][0]["reason"]
+    assert len(kb.calls) == 1, "같은 내용이 두 번 색인됐다"
+
+
+def test_changed_file_is_reindexed(indexed_env):
+    """★★ 파일이 바뀌면 다시 넣는다 — 낡은 내용이 프롬프트에 계속 실리면 그게 오답의 근거가 된다."""
+    from core.reference_registry import index_approved
+    root, target, _ = indexed_env
+    kb = _FakeKB()
+    index_approved(root, target, dry_run=False, kb=kb)
+
+    (root / "배터리소재_SIOP.docx").write_bytes(_docx("개정된 SIOP 기준"))
+    build_registry(root, target)          # 재스캔 → sha256 변경(승인은 보존)
+    out = index_approved(root, target, dry_run=False, kb=kb)
+
+    assert out["indexed"] == 1 and len(kb.calls) == 2
+    assert "개정된 SIOP 기준" in kb.calls[1]["text"]
+
+
+def test_unapproved_asset_is_never_indexed(indexed_env):
+    """★★ 승인 없는 문서는 색인되지 않는다 — 색인은 승인의 결과여야 한다."""
+    from core.reference_registry import index_approved, reject_asset
+    root, target, aid = indexed_env
+    reject_asset(aid, "cdo@ls", "개인정보 포함", registry_path=target)
+    kb = _FakeKB()
+    out = index_approved(root, target, dry_run=False, kb=kb)
+    assert out["indexed"] == 0 and kb.calls == []
+
+
+def test_missing_source_file_is_reported_not_silent(indexed_env):
+    """★ 등록 후 파일이 사라졌으면 그 사실을 말한다 — 조용히 0건이면 "색인이 고장났다"가 된다."""
+    from core.reference_registry import index_approved
+    root, target, _ = indexed_env
+    (root / "배터리소재_SIOP.docx").unlink()
+    out = index_approved(root, target, dry_run=False, kb=_FakeKB())
+    assert out["failed"] == 1 and "원본 파일이 없습니다" in out["failed_items"][0]["reason"]
+
+
+def test_indexing_failure_is_recorded_and_stops_the_empty_promise(indexed_env):
+    """★★ [2026-07-30 실측] 실패를 기록하지 않으면 `indexable()` 이 계속 "색인 가능"이라고
+    **지킬 수 없는 약속**을 반복하고, 운영자는 매번 같은 실패를 다시 본다.
+
+    실제 등록부의 `.docx` 파일이 zip 이 아니어서 열리지 않았다 — `extraction_status` 는
+    **확장자만** 보고 SUPPORTED 로 판정하기 때문이다.
+    ⚠️ 그렇다고 `INDEXED` 로 적지도 않는다. 실패한 색인을 성공으로 적으면 그 문서가 지식팩에
+      있다고 믿게 된다."""
+    from core.reference_registry import index_approved, indexable, load_registry
+    root, target, _ = indexed_env
+    out = index_approved(root, target, dry_run=False, kb=_FakeKB(fail_on="배터리"))
+    assert out["indexed"] == 0 and out["failed"] == 1
+    assert "임베딩 저장소 오류" in out["failed_items"][0]["reason"]
+
+    asset = load_registry(target)["assets"][0]
+    assert asset["ingestion_status"] == "EXTRACTION_FAILED"
+    assert asset["extraction_error"] and asset["extraction_failed_at"]
+
+    idx = indexable(target)
+    assert idx["total"] == 0 and idx["blocked"]["extraction_failed"] == 1
+    assert "추출 실패 1건" in idx["note"]
+
+
+def test_force_retries_a_previously_failed_asset(indexed_env):
+    """★ 실패 기록이 **영구 사망 선고**가 되면 안 된다 — 파일을 변환해 올린 뒤 재시도할 길이
+    있어야 한다."""
+    from core.reference_registry import index_approved
+    root, target, _ = indexed_env
+    index_approved(root, target, dry_run=False, kb=_FakeKB(fail_on="배터리"))
+
+    kb = _FakeKB()          # 이번에는 성공하는 대역(=변환 후 재시도)
+    out = index_approved(root, target, dry_run=False, kb=kb, force=True)
+    assert out["indexed"] == 1 and len(kb.calls) == 1
+
+
+def test_empty_extraction_is_not_indexed(tmp_path):
+    """★★ 빈 문서를 색인하면 검색은 되는데 내용이 없다 — 가장 나쁜 상태다."""
+    from core.reference_registry import approve_asset, index_approved
+    root = tmp_path / "reference"
+    root.mkdir()
+    (root / "빈문서.txt").write_bytes(b"   \n  ")
+    target = tmp_path / "reg.json"
+    reg = build_registry(root, target)
+    approve_asset(reg["assets"][0]["asset_id"], "cdo@ls", registry_path=target)
+
+    out = index_approved(root, target, dry_run=False, kb=_FakeKB())
+    assert out["indexed"] == 0 and out["failed"] == 1
+    assert "비어 있습니다" in out["failed_items"][0]["reason"]
 
 
 def test_reference_routes_are_reachable():

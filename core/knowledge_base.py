@@ -277,8 +277,16 @@ class KnowledgeBase:
         shutil.rmtree(pack_dir, ignore_errors=True)
         return True
 
-    def add_document(self, pack_id: str, filename: str, text: str, source: str = "upload", raw: bytes = None) -> int:
-        """문서를 청킹·인덱싱하고 원본을 보존한다. 동일 파일명 재업로드 시 교체. 반환: 청크 수."""
+    def add_document(self, pack_id: str, filename: str, text: str, source: str = "upload",
+                     raw: bytes = None, extra_meta: dict = None) -> int:
+        """문서를 청킹·인덱싱하고 원본을 보존한다. 동일 파일명 재업로드 시 교체. 반환: 청크 수.
+
+        ★ [2026-07-30] `extra_meta` 는 **청크마다 함께 심는 출처·범위 정보**다. 이것이 없으면
+          색인하는 순간 조직 범위가 사라진다 — 등록부에서 `owner_org_id` 로 통제한 문서가
+          지식팩에 들어가면서 통제 밖으로 나가는 셈이다. 검색 측 필터(`search_packs(where=...)`)가
+          기댈 근거를 여기서 만든다.
+          ⚠️ 예약 키(`pack_id`·`filename`·`chunk_index`·`source`·`page`)는 덮어쓰지 않는다 —
+            출처 추적의 뼈대이므로 호출자가 바꿀 수 있게 두면 안 된다."""
         manifest = self._read_manifest(pack_id)
         if not manifest:
             raise ValueError(f"지식팩이 없습니다: {pack_id}")
@@ -296,9 +304,16 @@ class KnowledgeBase:
         chunks = self.chunk_text(text)
         if col is not None and chunks:
             import re as _re
+            _RESERVED = ("pack_id", "filename", "chunk_index", "source", "page")
+            # Chroma 메타데이터는 스칼라만 받는다. 리스트·dict 를 넣으면 색인 전체가 실패하므로
+            #   문자열로 눌러 담는다(조용히 빠뜨리면 범위 필터가 통하지 않는다).
+            _extra = {k: (v if isinstance(v, (str, int, float, bool)) else str(v))
+                      for k, v in (extra_meta or {}).items()
+                      if k not in _RESERVED and v not in (None, "")}
             metas = []
             for i, ch in enumerate(chunks):
                 m = {"pack_id": pack_id, "filename": filename, "chunk_index": i, "source": source}
+                m.update(_extra)
                 # extract_text 가 심은 페이지 마커([[p.N]])로 청크의 페이지 출처 기록
                 pm = _re.findall(r"\[\[p\.(\d+)\]\]", ch)
                 if pm:
@@ -358,8 +373,18 @@ class KnowledgeBase:
     def pack_exists(self, pack_id: str) -> bool:
         return bool(pack_id) and os.path.exists(self._manifest_path(pack_id))
 
-    def search_packs(self, pack_ids: list, query: str, n_total: int = 5) -> list:
-        """연결된 지식팩들에서 관련 청크를 거리순으로 상위 n_total 개 반환."""
+    def search_packs(self, pack_ids: list, query: str, n_total: int = 5,
+                     scope_node_id: str = "") -> list:
+        """연결된 지식팩들에서 관련 청크를 거리순으로 상위 n_total 개 반환.
+
+        ★ [2026-07-30] `scope_node_id` 를 주면 **청크에 심긴 `owner_org_id`** 로 조직 범위를
+          걸러낸다(자기 + 운영 상위 조상). 색인할 때 범위를 심어 두고 검색에서 쓰지 않으면
+          그 메타데이터는 장식이고, 등록부에서 통제한 문서가 색인되는 순간 통제 밖으로 나간다.
+
+        ⚠️ 범위를 주지 않으면 필터하지 않는다(종전 동작). 그리고 필터를 걸면 **`owner_org_id`
+          가 없는 예전 청크는 제외된다** — `$in` 은 키가 없는 문서를 통과시키지 않기 때문이다.
+          그게 fail-closed 방향이지만, 예전 업로드가 갑자기 안 보이는 것으로 읽힐 수 있으므로
+          제외 건수를 로그로 남긴다(조용한 실명을 만들지 않는다)."""
         # ★★ [2026-07-29 카나리 실측] 존재하지 않는 팩 id 를 **조용히 건너뛰던** 경로.
         #   3차 카나리는 `manufacturing-standards`·`battery-materials-operations` 를 연결했는데
         #   디스크에는 `core-m3-standards` 하나뿐이었다. 그런데도 오류·경고가 하나도 없어서
@@ -382,7 +407,17 @@ class KnowledgeBase:
                   "— 지식팩이 연결돼 있어도 주입은 0건입니다.")
         if not self.client or not pack_ids or not (query or "").strip():
             return []
-        hits = []
+        _scope_chain = []
+        if scope_node_id:
+            try:
+                from core.enterprise_context.scoping import visible_scopes
+                _scope_chain = sorted(visible_scopes(scope_node_id))
+            except Exception as e:
+                # 범위를 해석하지 못했으면 **필터 없이 넘기지 않는다** — 해석 실패를 '전부 보임'
+                #   으로 처리하면 리솔버 장애가 곧 전사 유출이 된다(scoping 과 같은 규약).
+                print(f"⚠️ [KnowledgeBase] 조직 범위 해석 실패 — 검색을 수행하지 않습니다: {e}")
+                return []
+        hits, blocked = [], 0
         for pid in pack_ids:
             if pid in missing:
                 continue
@@ -394,13 +429,22 @@ class KnowledgeBase:
                 metas = (res.get("metadatas") or [[]])[0]
                 dists = (res.get("distances") or [[]])[0]
                 for i, doc in enumerate(docs):
+                    meta = metas[i] if i < len(metas) else {}
+                    if _scope_chain and not _meta_matches(
+                            meta, {"owner_org_id": {"$in": _scope_chain}}):
+                        blocked += 1
+                        continue
                     hits.append({
-                        "content": doc,
-                        "metadata": metas[i] if i < len(metas) else {},
+                        "content": doc, "metadata": meta,
                         "distance": dists[i] if i < len(dists) else 1.0,
                     })
             except Exception as e:
                 print(f"⚠️ [KnowledgeBase] 지식팩 '{pid}' 검색 실패: {e}")
+        if blocked:
+            # 조용히 줄어들면 "관련 지식이 없다"로 읽힌다 — 그건 사실이 아니다.
+            print(f"ℹ️ [KnowledgeBase] 조직 범위 밖(또는 범위 미기재) 청크 {blocked}건을 "
+                  f"제외했습니다(범위: {scope_node_id}). 예전 업로드에는 `owner_org_id` 가 "
+                  f"없어 제외될 수 있습니다 — 등록부 경유로 재색인하면 범위가 심겁니다.")
         hits.sort(key=lambda h: h.get("distance", 1.0))
         return hits[:n_total]
 
