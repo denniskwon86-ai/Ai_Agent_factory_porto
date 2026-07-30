@@ -85,10 +85,14 @@ async def summary(scope_node_id: str = "", tenant_id: str = "", entity_mode: str
 
 @router.get("/runs")
 async def list_runs(scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL",
-                    review_status: str = ""):
+                    review_status: str = "",
+                    p: Principal = Depends(current_principal)):
+    """★ [§6-2] 등급은 주체 권한에서 파생한다 — 낮으면 제목만 보이고 내용은 가려진다."""
+    from core.enterprise_context.classification import clearance_of_scope
     return {"status": "success",
             "data": await asyncio.to_thread(shadow_mode.list_runs, scope_node_id,
-                                            tenant_id, entity_mode, review_status)}
+                                            tenant_id, entity_mode, review_status,
+                                            clearance_of_scope(p.scope))}
 
 
 @router.post("/runs")

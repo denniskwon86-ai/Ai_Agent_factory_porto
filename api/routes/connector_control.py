@@ -95,9 +95,12 @@ async def list_adapters():
 async def list_connectors(scope_node_id: str = "", tenant_id: str = "",
                           entity_mode: str = "REAL",
                           p: Principal = Depends(current_principal)):
+    # [§6-2] 등급은 주체 권한에서 파생한다 — 낮으면 제목만 보이고 내용은 가려진다.
+    from core.enterprise_context.classification import clearance_of_scope
     eff = await _scope(p, scope_node_id)
     data = await asyncio.to_thread(connector_registry.list_connectors, eff,
-                                   tenant_id, entity_mode)
+                                   tenant_id, entity_mode,
+                                   clearance_of_scope(p.scope))
     return {"status": "success", "data": data,
             "permission": {"scope": eff or "(범위 필터 없음)"}}
 

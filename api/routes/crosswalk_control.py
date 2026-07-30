@@ -7,10 +7,12 @@ core/crosswalk.py 의 시스템·스키마·제안·승인 로직을 노출한�
 import io
 import csv
 import asyncio
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List
 
+# [§6-2] 목록에 등급 가림을 적용하려면 주체가 필요하다(등급은 권한에서 파생한다).
+from api.deps import Principal, current_principal
 from core.crosswalk import crosswalk, CrosswalkError
 
 router = APIRouter(prefix="/api/v1/crosswalk")
@@ -61,11 +63,16 @@ class SystemUpdateRequest(BaseModel):
 
 
 @router.get("/systems")
-async def list_systems(scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL"):
-    """범위를 주면 그 조직이 볼 수 있는 시스템만. 미지정이면 전량(종전 동작)."""
+async def list_systems(scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL",
+                       p: Principal = Depends(current_principal)):
+    """범위를 주면 그 조직이 볼 수 있는 시스템만. 미지정이면 전량(종전 동작).
+
+    ★ [§6-2] 등급은 주체 권한에서 파생한다 — 낮으면 제목만 보이고 내용은 가려진다."""
+    from core.enterprise_context.classification import clearance_of_scope
     return {"status": "success",
             "data": await asyncio.to_thread(crosswalk.list_systems, scope_node_id,
-                                            tenant_id, entity_mode)}
+                                            tenant_id, entity_mode,
+                                            clearance_of_scope(p.scope))}
 
 
 @router.get("/systems/coverage")

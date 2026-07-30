@@ -78,10 +78,13 @@ async def preview_revision(req: PreviewRequest):
 @router.get("")
 async def list_contracts(producer_asset_id: str = "", consumer: str = "", status: str = "",
                          include_retired: bool = False, scope_node_id: str = "",
-                         tenant_id: str = "", entity_mode: str = "REAL"):
+                         tenant_id: str = "", entity_mode: str = "REAL",
+                         p: Principal = Depends(current_principal)):
+    """★ [§6-2] 등급은 주체 권한에서 파생한다 — 낮으면 제목만 보이고 내용은 가려진다."""
+    from core.enterprise_context.classification import clearance_of_scope
     rows = await asyncio.to_thread(data_contracts.list, producer_asset_id, consumer,
                                    status, include_retired, scope_node_id, tenant_id,
-                                   entity_mode)
+                                   entity_mode, clearance_of_scope(p.scope))
     return {"status": "success", "data": rows}
 
 
