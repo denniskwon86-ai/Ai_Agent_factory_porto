@@ -93,6 +93,19 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template):
     except Exception:
         pass
     try:
+        # ★★ [2026-07-31 실측] **ECM 조직도(enterprise_context.db)도 격리한다.**
+        #   이것이 없으면 테스트가 **운영 조직도에 의존**한다. 실측: 참고문서 가시성 테스트가
+        #   워크트리(조직도 0건)에서는 통과하고 원래 폴더(조직도 9건)에서는 실패했다 —
+        #   `MNM_BATTERY` 의 조상 `LS_MNM` 이 해석되면 상속으로 자산이 하나 더 보이기 때문이다.
+        #   즉 같은 코드가 **폴더에 따라 다른 결과**를 낸다(오늘 아침 업무표준 테스트와 같은 유형).
+        #   ⚠️ 조직도에 의존하는 테스트는 두 방향으로 거짓말한다: 없는 환경에서는 통제가 약해
+        #     보이고, 있는 환경에서는 상속이 끼어들어 기대와 달라진다.
+        from core.enterprise_context import repository as _ecm_repo
+        monkeypatch.setattr(_ecm_repo.ecm_repository, "db_path",
+                            str(tmp_path / "enterprise_context.db"), raising=False)
+    except Exception as e:
+        print(f"⚠️ [conftest] ECM 조직도 격리 실패(테스트가 운영 조직도에 좌우됨): {e}")
+    try:
         # ★★ [2026-07-30 실측] **범위 정책 저장소**도 격리한다.
         #   이 파일은 `ORG_ENFORCE`·한시예외 만료일을 담고, `resolve_scope` 와 만료 판정이
         #   **코드 기본값보다 먼저** 읽는다. 그래서 저장소에 파일이 하나 있으면
