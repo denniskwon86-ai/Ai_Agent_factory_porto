@@ -5,15 +5,23 @@
     ④ M2 는 「미바인딩 비노출」 회귀 테스트와
        「타 조직 자원 404 + 내부 감사로그 기록」 테스트를 통과한 뒤 착수한다.
 
-## 이 파일을 읽는 법 — `xfail` 은 실패가 아니라 **아직 열리지 않은 문**이다
+## 이 파일을 읽는 법 — **두 문 모두 열렸다. 이제 전부 회귀 잠금이다.**
 
-관문 항목은 `xfail(strict=True)` 로 표시했다. 지금은 구현이 없으므로 xfail(=예상된 미달)로
-집계되고, **구현이 되는 순간 xpass 가 되어 테스트가 빨갛게 뜬다.** 그때 이 표시를 떼면 된다.
-"아직 안 됐다"를 초록불로 위장하지 않으면서, 완료 시점을 자동으로 알려주는 유일한 방법이다.
+관문 항목은 `xfail(strict=True)` 로 표시해 뒀었다. 구현되는 순간 xpass 가 되어 빨갛게 뜨고,
+그때 표시를 떼는 방식이다 — "아직 안 됐다"를 초록불로 위장하지 않으면서 완료 시점을 자동으로
+알려주는 유일한 방법이다.
 
-⚠️ `xfail` 이 아닌 테스트도 섞여 있다. 그것은 **지금 이미 지켜져야 하는 것**이다
-   (예: 인증 실패를 404 로 바꾸지 않는다). 둘을 섞어 둔 이유는, 관문을 통과시키려다
-   멀쩡한 동작을 깨뜨리는 일이 이 저장소에서 반복됐기 때문이다.
+  · 관문 B(404 은폐 + 감사로그) — 2026-07-29 열림
+  · 관문 A(미바인딩 비노출)     — 2026-07-30 열림
+
+⚠️ **strict xfail 의 한계를 실제로 겪었다.** 관문 A-1 은 존재하지 않는 메서드를 부르고 있어서
+   AttributeError 로 xfail 됐다 — 즉 단정문이 한 번도 실행되지 않은 채 "미구현"으로 집계됐다.
+   xfail 은 미구현과 오타를 같은 색으로 칠한다. 다음에 이 방식으로 문을 만들 때는, 표시를 뗄 때
+   **단정문이 실제로 도는지**까지 확인해야 한다.
+
+⚠️ 관문을 통과시키려다 멀쩡한 동작을 깨뜨리는 일이 이 저장소에서 반복됐으므로, "지금 이미
+   지켜져야 하는 것"(예: 인증 실패를 404 로 바꾸지 않는다 · 범위 미지정 호출은 전량을 본다)을
+   같은 파일에 함께 뒀다.
 
 ## 관문 A — 미바인딩 비노출 (MDM-SCOPE-01)
 
@@ -36,8 +44,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-_GATE_A = "M2 관문 A — 미바인딩 비노출 미구현(현재는 '미바인딩 = 전사 공용'으로 통과한다)"
-_GATE_B = "M2 관문 B — 404 은폐/감사로그 미구현(현재는 409 이고 감사 기록이 없다)"
+# (관문 A·B 의 xfail 사유 상수는 두 문이 모두 열려 더 이상 쓰이지 않으므로 제거했다 —
+#  쓰이지 않는 상수를 남겨 두면 다음 사람이 "아직 닫힌 문이 있나"로 읽는다.)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -56,20 +64,43 @@ def md(tmp_path):
     return m
 
 
-@pytest.mark.xfail(strict=True, reason=_GATE_A)
+# ✅ [2026-07-30 · Claude Code] 관문 A 4건 **열림** — xfail 을 떼고 회귀 잠금으로 승격.
+#   근거: `core/enterprise_context/scoping.py`(fail-closed + 명시 상태 + 한시 예외 관측) ·
+#         `core/master_data.py::select_for_injection._in_scope`(미바인딩 비주입 + 제외 건수)
+#   ⚠️ A-1 은 **테스트 자체가 고장 나 있었다** — 존재하지 않는 `md.bind_scope()` 를 불러
+#     AttributeError 로 xfail 됐으므로, 단정문은 한 번도 실행되지 않았다. strict xfail 은
+#     "아직 안 됐다"를 알려주지만 **왜 안 됐는지는 알려주지 않는다** — 미구현과 오타를 같은
+#     색으로 칠한다. 관문을 열 때는 xfail 을 떼는 것만으로 부족하고 단정문이 실제로 도는지
+#     확인해야 한다(실제 API 는 `bind_master_to_scope`).
 def test_gate_a_unbound_master_record_is_not_injected(md, monkeypatch):
     """★★ 관문 A-1: 미바인딩 기준정보는 **어느 조직의 프롬프트에도 들어가지 않는다.**
 
     이것이 2026-07-29 에 실제로 샌 경로다 — 재시드가 바인딩을 건너뛰자 26건이 전 조직에
     노출됐고, LS전선 프롬프트에 MnM 기준정보가 들어갔다."""
-    md.bind_scope("MC-BOUND", tenant_id="tenant_default", scope_node_id="BATTERY")
+    md.bind_master_to_scope("MC-BOUND", "BATTERY", tenant_id="tenant_default")
     codes = [r["master_code"] for r in
              md.select_for_injection("배터리", ["battery"],
                                      tenant_id="tenant_default", scope_node_id="BATTERY")]
     assert codes == ["MC-BOUND"], "미바인딩 레코드가 주입 후보에 남아 있다"
 
 
-@pytest.mark.xfail(strict=True, reason=_GATE_A)
+def test_gate_a_exclusion_is_counted_not_silent(md):
+    """★★ 관문 A-1 의 짝: 막은 것을 **세지 않으면** 그라운딩이 조용히 비어버린다.
+
+    "기준정보가 없는 프로젝트"와 "바인딩을 안 한 프로젝트"는 완전히 다른 상태이고, 후자를
+    침묵으로 처리하면 LLM 은 수치를 스스로 만들어낸다 — 관문 A 가 막으려는 것은 유출이지
+    창작이 아니다."""
+    md.bind_master_to_scope("MC-BOUND", "BATTERY", tenant_id="tenant_default")
+    _, stats = md.select_for_injection("배터리", ["battery"], tenant_id="tenant_default",
+                                       scope_node_id="BATTERY", with_stats=True)
+    assert stats["excluded_unbound"] == 1, "미바인딩으로 제외된 건수가 보고되지 않는다"
+
+    # 한 건도 못 넣은 경우에도 이유가 블록에 남는다(빈 문자열로 침묵하지 않는다).
+    block = md.render_grounding("무관한 텍스트", ["nonexistent_domain"],
+                                tenant_id="tenant_default", scope_node_id="OTHER_ORG")
+    assert "추정하거나 창작하지 말 것" in block, "빈 그라운딩의 이유가 프롬프트에 없다"
+
+
 def test_gate_a_unscoped_row_is_invisible():
     """★★ 관문 A-2: 카탈로그·용어사전·계약·연계 시스템도 같은 규칙을 따른다.
 
@@ -79,7 +110,6 @@ def test_gate_a_unscoped_row_is_invisible():
     assert is_visible(row, "BATTERY") is False, "범위 미지정 레코드가 그대로 보인다"
 
 
-@pytest.mark.xfail(strict=True, reason=_GATE_A)
 def test_gate_a_enterprise_shared_requires_explicit_type_and_approval():
     """★ 관문 A-3: 전사 공용은 **빈 값의 해석**이 아니라 명시적 상태 + 승인 이력이다."""
     from core.enterprise_context.scoping import is_visible
@@ -91,7 +121,6 @@ def test_gate_a_enterprise_shared_requires_explicit_type_and_approval():
     assert is_visible(pending, "BATTERY") is False, "미승인 전사 공용이 보이면 승인 절차가 무의미하다"
 
 
-@pytest.mark.xfail(strict=True, reason=_GATE_A)
 def test_gate_a_legacy_rows_are_grandfathered_but_counted():
     """★ 관문 A-4: 레거시는 한시 정책으로 통과시키되 **반드시 세어져야** 한다.
 

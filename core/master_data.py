@@ -94,8 +94,10 @@ CREATE TABLE IF NOT EXISTS external_systems (
     -- [ECM E2] 이 연계 시스템을 소유·운영하는 조직. `scope`(read/read-write)와 이름이
     -- 비슷하지만 전혀 다른 축이다 — 저쪽은 '쓰기 허용 여부', 이쪽은 '누구의 시스템인가'.
     tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
+    -- [관문 A] 빈 값 = 비노출. `scope_type` 이 그 예외를 명시한다.
     enterprise_scope_id TEXT DEFAULT '',
-    entity_mode         TEXT NOT NULL DEFAULT 'REAL'
+    entity_mode         TEXT NOT NULL DEFAULT 'REAL',
+    scope_type          TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_extsys_scope
     ON external_systems(tenant_id, enterprise_scope_id, entity_mode, status);
@@ -199,8 +201,11 @@ CREATE TABLE IF NOT EXISTS data_assets (
     status          TEXT NOT NULL DEFAULT 'active',
     origin          TEXT DEFAULT 'user',      -- user|crosswalk
     tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
-    enterprise_scope_id TEXT DEFAULT '',      -- [ECM E2] 소유 조직. 빈 값 = 전사 공용
+    -- [관문 A · 2026-07-30] 빈 값은 전사 공용이 **아니다** — 비노출이다(fail-closed).
+    enterprise_scope_id TEXT DEFAULT '',
     entity_mode         TEXT NOT NULL DEFAULT 'REAL',
+    -- '' = 비노출 · ENTERPRISE_SHARED(+승인) = 전사 공용 · LEGACY_UNSCOPED = 한시 예외
+    scope_type          TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -253,8 +258,11 @@ CREATE TABLE IF NOT EXISTS business_terms (
     status         TEXT NOT NULL DEFAULT 'draft',   -- draft|approved|retired
     approved_by    TEXT DEFAULT '',
     tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
-    enterprise_scope_id TEXT DEFAULT '',      -- [ECM E2] 소유 조직. 빈 값 = 전사 공용
+    -- [관문 A · 2026-07-30] 빈 값은 전사 공용이 **아니다** — 비노출이다(fail-closed).
+    enterprise_scope_id TEXT DEFAULT '',
     entity_mode         TEXT NOT NULL DEFAULT 'REAL',
+    -- '' = 비노출 · ENTERPRISE_SHARED(+승인) = 전사 공용 · LEGACY_UNSCOPED = 한시 예외
+    scope_type          TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
@@ -356,8 +364,11 @@ CREATE TABLE IF NOT EXISTS data_contracts (
     supersedes          TEXT DEFAULT '',
     note                TEXT DEFAULT '',
     tenant_id           TEXT NOT NULL DEFAULT 'tenant_default',
-    enterprise_scope_id TEXT DEFAULT '',      -- [ECM E2] 소유 조직. 빈 값 = 전사 공용
+    -- [관문 A · 2026-07-30] 빈 값은 전사 공용이 **아니다** — 비노출이다(fail-closed).
+    enterprise_scope_id TEXT DEFAULT '',
     entity_mode         TEXT NOT NULL DEFAULT 'REAL',
+    -- '' = 비노출 · ENTERPRISE_SHARED(+승인) = 전사 공용 · LEGACY_UNSCOPED = 한시 예외
+    scope_type          TEXT NOT NULL DEFAULT '',
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL,
     UNIQUE (contract_key, version)
@@ -382,6 +393,13 @@ _ECM_KEYS = (
     ("tenant_id", "TEXT NOT NULL DEFAULT 'tenant_default'"),
     ("enterprise_scope_id", "TEXT DEFAULT ''"),
     ("entity_mode", "TEXT NOT NULL DEFAULT 'REAL'"),
+    # ★ [관문 A · 2026-07-30] 범위 미지정의 **의미**를 적는 칸.
+    #   관문 A 로 "빈 범위 = 전사 공용"이 폐기되어 미지정은 비노출이 됐다. 그러면 기존 데이터가
+    #   하루아침에 사라지므로 한시 예외(`LEGACY_UNSCOPED`)를 표시할 수단이 필요하다.
+    #   ⚠️ 기본값은 빈 값(=비노출)이다. `LEGACY_UNSCOPED` 를 기본값으로 두면 **앞으로 들어오는
+    #     행까지 전부 한시 예외가 되어** 폐기한 규칙이 그대로 되살아난다. 기존 행 표시는
+    #     기본값이 아니라 `_grandfather_unscoped_rows()` 가 **컬럼이 생기는 순간에만** 한다.
+    ("scope_type", "TEXT NOT NULL DEFAULT ''"),
 )
 #   ★ [2026-07-29 저녁] `external_systems`(M2 연계 시스템) 추가 — **누출 경로가 실재했다.**
 #     `mcp_broker.get_live_context()` 는 활성 시스템을 **전부** 순회해 실측값을 프롬프트에
@@ -444,6 +462,36 @@ class MasterData:
                 # 동시 초기화 경쟁에서 이미 추가됐을 수 있다. 그 외는 조용히 넘기지 않는다.
                 if "duplicate column" not in str(e).lower():
                     print(f"⚠️ [MasterData] 컬럼 추가 실패 {table}.{col}: {e}")
+                continue
+            if col == "scope_type":
+                self._grandfather_unscoped_rows(conn, table)
+
+    @staticmethod
+    def _grandfather_unscoped_rows(conn, table: str) -> int:
+        """[관문 A] `scope_type` 이 **막 생긴** 순간에만, 기존 미지정 행을 한시 예외로 표시한다.
+
+        ★ 왜 이 순간뿐인가 — 컬럼이 생기는 시점에 테이블에 있는 행은 **정의상 전부 관문 A
+          이전 데이터**다. 나중에 다시 돌리면 관문 A 이후에 들어온(=범위를 지정해야 했는데
+          안 한) 행까지 예외로 만들어, 폐기한 규칙을 되살린다. 그래서 멱등 반복이 아니라
+          **일회성**이어야 하고, 마이그레이션 분기 안에 두는 것이 그 조건을 구조로 보장한다.
+
+        ⚠️ 조용히 하지 않는다. 한시 예외는 만료일이 있는 부채이므로 몇 건을 그렇게 만들었는지
+          로그로 남긴다 — `coverage()` 의 `legacy_grandfathered` 로도 상시 관측된다."""
+        try:
+            cur = conn.execute(
+                f"UPDATE {table} SET scope_type='LEGACY_UNSCOPED' "
+                f"WHERE (enterprise_scope_id IS NULL OR enterprise_scope_id='') "
+                f"AND (scope_type IS NULL OR scope_type='')")
+            n = cur.rowcount or 0
+        except sqlite3.Error as e:
+            print(f"⚠️ [MasterData] 한시 예외 표시 실패 {table}: {e}")
+            return 0
+        if n:
+            from core.enterprise_context.scoping import LEGACY_GRANDFATHER_UNTIL
+            print(f"ℹ️ [관문 A] {table}: 범위 미지정 {n}건을 한시 예외(LEGACY_UNSCOPED)로 "
+                  f"표시했습니다 — {LEGACY_GRANDFATHER_UNTIL} 까지만 조회에 포함됩니다. "
+                  f"그전에 소유 조직을 지정하거나 승인된 전사 공용으로 전환하십시오.")
+        return n
 
     def _init_db(self):
         conn = self._connect()
@@ -1065,9 +1113,10 @@ class MasterData:
     def _bound_codes(self) -> set:
         """바인딩이 **하나라도 존재하는** master_code 집합.
 
-        ⚠️ 점진 도입의 핵심: 바인딩이 없는 레코드는 '범위 미지정 = 전사 공통'으로 종전대로
-          통과시킨다. 전부 막으면 바인딩을 넣기 전 기능이 통째로 멈춘다(Phase 3·5 와 같은 판단).
-          바인딩을 하나 넣는 순간 그 레코드는 즉시 통제 대상이 된다."""
+        ★ [관문 A · 2026-07-30] 이제 이 집합은 통과 판정에 쓰이지 않는다 — 미바인딩은
+          비노출이므로 "바인딩이 있느냐"가 아니라 "이 범위에 적용되느냐"만 본다.
+          그래도 남겨 두는 이유는 **왜 빠졌는지를 구분해 세기 위해서**다:
+          미바인딩(관리 누락) 과 타 범위 바인딩(정상 격리) 은 운영자가 할 일이 다르다."""
         return {r["master_code"] for r in self.list_scope_bindings()}
 
     @staticmethod
@@ -1168,10 +1217,13 @@ class MasterData:
           종전에는 `is_core` 가 **관문**이어서 비핵심 레코드는 도메인이 맞아도 영원히
           주입되지 않았다. 이제 `is_core` 는 정렬 신호일 뿐이다.
 
-        ★ [R-001] 조직 범위 필터를 적용한다. 이것이 없으면 **A 법인 기준정보가 B 법인 프롬프트에
-          섞인다**(감사 Finding 1 / Codex 교차검토). 필터 규칙:
-            · 바인딩이 **하나도 없는** master_code → 전사 공통으로 통과(점진 도입 하위호환)
-            · 바인딩이 있는 master_code → 이 범위에 적용 가능한 것만 통과(fail-closed)
+        ★ [R-001 / 관문 A] 조직 범위 필터를 적용한다. 이것이 없으면 **A 법인 기준정보가 B 법인
+          프롬프트에 섞인다**(감사 Finding 1 / Codex 교차검토). 필터 규칙:
+            · 이 범위에 적용 가능한 바인딩이 있는 것만 통과(fail-closed)
+            · 미바인딩은 **통과하지 않는다** — 2026-07-30 관문 A 로 종전의 "미바인딩 = 전사
+              공통" 규칙을 폐기했다. 주입은 되돌릴 수 없으므로 여기엔 한시 예외를 두지 않는다.
+              대신 `with_stats=True` 가 `excluded_unbound` 로 **몇 건이 그래서 빠졌는지**를
+              돌려주고 `render_grounding` 이 그 사실을 블록에 적는다.
           범위(`scope_node_id`)가 주어지지 않으면 필터하지 않는다 — ECM 미도입 흐름을 막지 않는다.
 
         ★ [R-001 잔여] `as_of` 로 **적용 기간**을 평가하고, 바인딩에 `master_version` 이 고정돼
@@ -1190,10 +1242,25 @@ class MasterData:
 
         def _in_scope(code: str) -> bool:
             if not scope_node_id:
-                return True                      # 범위 미지정 — 종전 동작
-            if code not in _bound:
-                return True                      # 아직 바인딩되지 않은 기준정보 = 전사 공통
-            return code in _allowed              # 바인딩된 것은 범위를 지킨다
+                return True                      # 범위 미지정 호출 — 필터하지 않는다
+            # ★ [관문 A · 2026-07-30] 미바인딩은 **통과시키지 않는다.**
+            #   종전 규칙("미바인딩 = 전사 공통")이 2026-07-29 에 실제로 샌 경로다 — 재시드가
+            #   바인딩을 건너뛰자 26건이 전 조직에 노출되고 LS전선 프롬프트에 MnM 기준정보가
+            #   들어갔다. 주입은 **되돌릴 수 없다**(이미 LLM 이 읽었고 산출물에 반영된다).
+            #   그래서 이 경로에는 한시 예외를 두지 않는다.
+            return code in _allowed
+
+        # 왜 빠졌는지를 구분해 센다 — 미바인딩(관리 누락, 사람이 조치해야 함)과 타 범위
+        #   바인딩(정상 격리, 조치 불필요)은 운영자가 할 일이 완전히 다르다.
+        _excluded_unbound = _excluded_other_scope = 0
+        if scope_node_id:
+            for r in recs:
+                if _in_scope(r["master_code"]):
+                    continue
+                if r["master_code"] in _bound:
+                    _excluded_other_scope += 1
+                else:
+                    _excluded_unbound += 1
 
         recs = [r for r in recs if _in_scope(r["master_code"])]
 
@@ -1245,7 +1312,11 @@ class MasterData:
         if with_stats:
             return selected, {"eligible": len(candidates), "injected": len(selected),
                               "dropped": dropped, "chars": total,
-                              "limit_items": lim_items, "limit_chars": lim_chars}
+                              "limit_items": lim_items, "limit_chars": lim_chars,
+                              # [관문 A] 막은 건수를 세지 않으면 그라운딩이 조용히 비어버린다 —
+                              #   "기준정보가 없다"와 "바인딩을 안 했다"는 완전히 다른 상태다.
+                              "excluded_unbound": _excluded_unbound,
+                              "excluded_other_scope": _excluded_other_scope}
         return selected
 
     _INJECT_HEADER = (
@@ -1259,9 +1330,21 @@ class MasterData:
         selected, stats = self.select_for_injection(
             text, domains, tenant_id, scope_node_id, entity_mode,
             max_chars=max_chars, with_stats=True, as_of=as_of)
+        _unbound = stats.get("excluded_unbound", 0)
         if not selected:
+            # ★ [관문 A] 한 건도 못 넣었는데 그 이유가 **바인딩 누락**이면 침묵하지 않는다.
+            #   빈 블록은 LLM 에게 "기준정보가 없는 프로젝트"로 읽히고, 그러면 모델은 수치를
+            #   스스로 만들어낸다 — 관문 A 가 막으려는 것은 유출이지 창작이 아니다.
+            if _unbound:
+                return (f"{self._INJECT_HEADER}\n[주의] 이 조직 범위에 바인딩된 기준정보가 "
+                        f"없어 한 건도 제공되지 않았다(미바인딩 {_unbound}건은 범위 통제로 "
+                        f"제외됨). 수치·명칭·단위를 **추정하거나 창작하지 말 것**이며, 필요하면 "
+                        f"기준정보 바인딩을 요청하라.")
             return ""
         lines = [self._INJECT_HEADER] + [self._fmt_record(r) for r in selected]
+        if _unbound:
+            lines.append(f"[주의] 미바인딩 기준정보 {_unbound}건은 조직 범위 통제로 제외됐다. "
+                         f"아래 목록이 이 조직에 적용되는 전부이며, 빠진 값은 추정하지 말 것.")
         if stats["dropped"]:
             # 조용히 잘리면 LLM 도 사람도 무엇이 없는지 모른다. 반드시 적는다.
             lines.append(f"[주의] 이 범위에 적용 가능한 기준정보 {stats['eligible']}건 중 "

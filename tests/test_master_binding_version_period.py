@@ -191,19 +191,28 @@ def test_unbind_is_soft_and_removes_from_scope(md):
     assert not rows, "활성 목록에서는 사라진다"
 
 
-def test_unbind_last_binding_exposes_record_company_wide(md):
-    """★★ 해제는 차단이 아니다 — 마지막 바인딩을 풀면 점진 도입 규칙에 따라 **전사 공통**이 된다.
+def test_unbind_last_binding_hides_record_everywhere(md):
+    """★★ [관문 A · 2026-07-30] 마지막 바인딩을 풀면 그 레코드는 **어디에서도 주입되지 않는다.**
 
-    이 성질을 모르면 "해제했으니 안전하다"고 오해한다. 실제로 막으려면 레코드를 폐기해야 한다."""
+    종전에는 정반대였다 — 해제하면 "미바인딩 = 전사 공통"이 되어 **전 조직에 노출**됐고,
+    그래서 "해제했으니 안전하다"는 직관이 실제로는 유출이었다. 관문 A 로 그 함정이 사라졌다.
+    이제 해제는 차단과 같은 방향으로 작동하므로 운영자의 직관과 시스템 동작이 일치한다.
+
+    ⚠️ 반대편 위험이 새로 생긴다 — 실수로 해제하면 그 기준정보가 조용히 프롬프트에서
+      사라진다. 그래서 `select_for_injection` 이 `excluded_unbound` 로 건수를 보고하고
+      `render_grounding` 이 그 사실을 블록에 적는다(여기서 함께 잠근다)."""
     m, ids = md
     b = m.bind_master_to_scope("RM-A", ids["MNM_BATTERY"])
     assert not any(r["master_code"] == "RM-A" for r in
                    m.select_for_injection("원료", ["mfg"], "tenant_default", ids["MNM_COPPER"]))
 
     m.unbind_master_from_scope(b["binding_id"])
-    assert any(r["master_code"] == "RM-A" for r in
-               m.select_for_injection("원료", ["mfg"], "tenant_default", ids["MNM_COPPER"])), \
-        "미바인딩 = 전사 공통 통과(R-001 점진 도입). 이것이 의도된 동작이다"
+    got, stats = m.select_for_injection("원료", ["mfg"], "tenant_default",
+                                        ids["MNM_BATTERY"], with_stats=True)
+    assert not any(r["master_code"] == "RM-A" for r in got), \
+        "해제된 레코드가 여전히 주입된다 — 해제가 통제로 작동하지 않는다"
+    assert stats["excluded_unbound"] >= 1, \
+        "해제로 빠진 건수가 보고되지 않는다 — 실수로 해제하면 조용히 사라진다"
 
 
 def test_overlapping_periods_resolve_deterministically(md):

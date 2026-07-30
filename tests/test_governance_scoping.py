@@ -94,11 +94,19 @@ def test_other_legal_entity_sees_nothing(env):
     assert dc.list_assets(scope_node_id=ids["LS_CABLE"]) == []
 
 
-def test_unscoped_asset_is_visible_everywhere(env):
-    """점진 도입 규칙 — 범위 미지정은 전사 공용. **의도된 동작이고 coverage 로 관측한다.**"""
+def test_unscoped_asset_is_invisible_by_default(env):
+    """★★ [관문 A · 2026-07-30] 범위 미지정 자산은 **보이지 않는다**(fail-closed).
+
+    종전 규칙("미지정 = 전사 공용")은 점진 도입 장치였지만 동시에 유출 창구였다. 빈 값은
+    **아무 말도 하지 않은 것**이고, 그것을 "전 조직에 공개"로 읽으면 안 된다.
+    전사 공용은 이제 `scope_type=ENTERPRISE_SHARED` + 승인 이력이라는 **명시적 상태**다."""
     dc, _, _, ids = env
     dc.create_asset("범위 미지정표")
-    assert any(a["name"] == "범위 미지정표" for a in dc.list_assets(scope_node_id=ids["LS_CABLE"]))
+    assert not any(a["name"] == "범위 미지정표"
+                   for a in dc.list_assets(scope_node_id=ids["LS_CABLE"])), \
+        "범위 미지정 자산이 타 조직에 그대로 보인다 — 관문 A 가 뚫렸다"
+    # 범위를 주지 않는 호출(ECM 미도입 흐름)에서는 그대로 보인다 — 데이터가 사라진 게 아니다.
+    assert any(a["name"] == "범위 미지정표" for a in dc.list_assets())
 
 
 def test_no_scope_argument_means_no_filter(env):
@@ -186,9 +194,11 @@ def test_contracts_are_isolated(env):
 
 # ── 관측: 조용한 노출을 막는다 ────────────────────────────────────────────
 def test_coverage_counts_unscoped(env):
-    """★★ 점진 도입 규칙을 유지하는 대가로 **반드시** 함께 있어야 하는 관측.
+    """★★ 미지정 건수 관측 — 이게 없어서 기준정보에서 실제 사고가 났다.
 
-    이게 없어서 기준정보에서 실제 사고가 났다."""
+    [관문 A] 세는 **목적이 바뀌었다.** 종전엔 "조용히 새는 건수"였고 지금은 "조용히 사라진
+    건수"다. 둘 다 조용하면 위험하다 — 안 보이는 이유를 모르면 사용자는 데이터가 지워진 줄
+    안다. 그래서 note 는 이제 '보이지 않는다'와 그 해소 방법을 말해야 한다."""
     dc, _, _, ids = env
     dc.create_asset("범위 있음", enterprise_scope_id=ids["MNM_BATTERY"])
     dc.create_asset("범위 없음 1")
@@ -196,7 +206,9 @@ def test_coverage_counts_unscoped(env):
     cov = coverage(dc.list_assets(), "자산")
     assert cov["total"] == 3 and cov["unscoped"] == 2
     assert cov["coverage_ratio"] == pytest.approx(1 / 3, abs=1e-4)
-    assert "모든 조직에" in cov["note"]
+    # 표시 없는 미지정은 비노출로 세어지고, 그 사실과 해소 방법이 note 에 있어야 한다.
+    assert cov["hidden_unscoped"] == 2 and cov["legacy_grandfathered"] == 0
+    assert "보이지 않습니다" in cov["note"] and "지워진 것이 아니라" in cov["note"]
 
 
 def test_coverage_of_empty_set_is_full(env):

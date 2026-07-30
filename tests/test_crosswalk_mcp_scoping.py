@@ -86,16 +86,25 @@ def test_parent_scoped_system_is_visible_to_children(cw):
     assert cw.is_system_visible("erp-group", "SMELTING") is True
 
 
-def test_unscoped_system_stays_shared_but_is_counted(cw):
-    """점진 도입(D-014): 범위 미지정은 계속 전 조직에 보이되 **반드시 세어진다**."""
+def test_unscoped_system_is_invisible_and_counted(cw):
+    """★★ [관문 A · 2026-07-30] 범위 미지정 연계 시스템은 **보이지 않고, 그래도 세어진다.**
+
+    이 경로의 위험은 특별히 크다 — `mcp_broker.get_live_context()` 는 활성 시스템을 순회해
+    **실측값을 프롬프트에 붙인다.** 그래서 미지정 시스템 하나가 곧 타 조직 운영값 유출이었다
+    (배터리소재 프로젝트 프롬프트에 동제련 연계 시스템 값이 섞인 실제 사고).
+
+    세는 것을 함께 잠그는 이유: 비노출로 바꾸면 이번엔 **연계가 조용히 끊긴다.** 운영자가
+    "왜 값이 안 붙나"에 답할 수 있어야 한다."""
     _make_system(cw, "legacy", "")
     _make_system(cw, "sap-bat", "BATTERY")
-    assert cw.is_system_visible("legacy", "SMELTING") is True
+    assert cw.is_system_visible("legacy", "SMELTING") is False, \
+        "범위 미지정 시스템이 타 조직에 보인다 — 프롬프트에 실측값이 섞인다"
 
     cov = cw.systems_coverage()
     assert cov["total"] == 2 and cov["unscoped"] == 1
     assert cov["unscoped_systems"] == ["legacy"]
-    assert "모든 조직에" in cov["note"]
+    assert cov["hidden_unscoped"] == 1
+    assert "보이지 않습니다" in cov["note"]
 
 
 def test_no_scope_means_no_filter(cw):

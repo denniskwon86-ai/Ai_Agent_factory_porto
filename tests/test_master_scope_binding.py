@@ -86,12 +86,21 @@ def test_virtual_mode_binding_blocked(md):
 
 
 # ── ③ 점진 도입: 바인딩 없으면 통과, 있으면 지킨다 ────────────────────────
-def test_unbound_record_passes_everywhere(md):
-    """★ 전부 막으면 바인딩을 넣기 전에 기능이 통째로 멈춘다(Phase 3·5 와 같은 판단)."""
+def test_unbound_record_is_not_injected_anywhere(md):
+    """★★ [관문 A · 2026-07-30] 미바인딩은 **어느 조직에도 주입되지 않는다.**
+
+    종전에는 "미바인딩 = 전사 공통"으로 통과시켰다(점진 도입). 그 규칙이 2026-07-29 에
+    실제로 샌 경로다 — 재시드가 바인딩을 건너뛰자 26건이 전 조직에 노출됐다.
+    주입은 되돌릴 수 없으므로(이미 LLM 이 읽고 산출물에 반영된다) 여기엔 한시 예외가 없다.
+
+    ⚠️ 대신 **왜 비었는지**가 보고돼야 한다 — 그것이 아래 단정문이다. 막기만 하고 세지 않으면
+      그라운딩이 조용히 비고, 모델은 수치를 스스로 만들어낸다."""
     _rec(md, "MAT-FREE", "공통자재", aliases=["공통자재"])
-    got = md.select_for_injection("공통자재 사용", ["manufacturing"],
-                                  tenant_id="t1", scope_node_id="node_any")
-    assert [r["master_code"] for r in got] == ["MAT-FREE"]
+    got, stats = md.select_for_injection("공통자재 사용", ["manufacturing"],
+                                         tenant_id="t1", scope_node_id="node_any",
+                                         with_stats=True)
+    assert got == [], "미바인딩 레코드가 주입됐다 — 관문 A 가 뚫렸다"
+    assert stats["excluded_unbound"] == 1, "미바인딩으로 제외된 건수가 보고되지 않는다"
 
 
 def test_bound_record_is_scoped(md):
@@ -149,15 +158,19 @@ def test_cache_is_not_poisoned_across_scopes(md):
 
 
 def test_binding_change_invalidates(md):
-    """바인딩이 바뀌면 주입 결과가 바뀌어야 한다(캐시가 낡으면 통제가 늦게 걸린다)."""
+    """바인딩이 바뀌면 주입 결과가 바뀌어야 한다(캐시가 낡으면 통제가 늦게 걸린다).
+
+    [관문 A] 방향이 뒤집혔다 — 종전엔 "바인딩 전엔 보이고 후엔 사라진다"였고, 이제는
+    **"바인딩 전엔 안 보이고 후에 보인다"** 다. 캐시 무효화가 검증 대상이라는 점은 같다."""
     _rec(md, "MAT-A", "가자재", aliases=["가자재"])
     before = md.select_for_injection("가자재", ["manufacturing"],
                                      tenant_id="tenant_default", scope_node_id="node_b")
-    assert [r["master_code"] for r in before] == ["MAT-A"], "바인딩 전엔 전사 공통"
-    md.bind_master_to_scope("MAT-A", "node_a")
+    assert before == [], "바인딩 전에는 어느 범위에서도 보이지 않는다(관문 A)"
+    md.bind_master_to_scope("MAT-A", "node_b")
     after = md.select_for_injection("가자재", ["manufacturing"],
                                     tenant_id="tenant_default", scope_node_id="node_b")
-    assert after == [], "바인딩 후에는 범위 밖에서 사라진다"
+    assert [r["master_code"] for r in after] == ["MAT-A"], \
+        "바인딩을 넣었는데 주입되지 않았다 — 캐시가 낡아 통제·해제가 늦게 걸린다"
 
 
 # ── ④ 상속 ───────────────────────────────────────────────────────────────
