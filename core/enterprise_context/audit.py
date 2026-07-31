@@ -63,6 +63,15 @@ CONNECTOR_QUERY_DENIED = "CONNECTOR_QUERY_DENIED"
 #   누가 언제 왜 껐는지가 남지 않으면 아무도 다시 켜지 못한다.
 PROGRAM_STATUS_CHANGED = "PROGRAM_STATUS_CHANGED"
 PROGRAM_USE_BLOCKED = "PROGRAM_USE_BLOCKED"
+# ★★★ [2026-07-31] **조직 구조·사용자 변경.** 여기까지 남기지 않아 실제로 답할 수 없는 질문이
+#   생겼다: 최상위 부서 `hq` 의 이름이 2026-07-27 23:39:53 에 "본사" → "해킹" 으로 바뀌었는데
+#   **누가 바꿨는지 알 수 없었다.** 감사로그에 조직 변경이 한 줄도 없었기 때문이다.
+#   ⚠️ 이건 다른 감사 항목보다 무겁다 — 부서·역할·조직범위는 **"누가 무엇을 볼 수 있는가"를
+#     정의하는 값**이다. 그 값의 변경 이력이 없으면 접근 기록을 아무리 남겨도 "그때 그 사람에게
+#     왜 권한이 있었는가"를 설명할 수 없다. 부서 표의 버전 이력은 *무엇이* 바뀌었는지는 알려주지만
+#     *누가* 바꿨는지는 담지 않는다.
+ORG_STRUCTURE_CHANGED = "ORG_STRUCTURE_CHANGED"   # 부서 생성·개명·이동·폐지
+ORG_USER_CHANGED = "ORG_USER_CHANGED"             # 사용자 등록·권한 플래그·역할·폐지
 
 EVENTS = (
     ACCESS_DENIED_SCOPE_MISMATCH, ACCESS_DENIED_UNAUTHENTICATED,
@@ -70,6 +79,7 @@ EVENTS = (
     SANDBOX_TOKEN_ISSUED, SANDBOX_TOKEN_USED, SANDBOX_TOKEN_EXPIRED,
     CONNECTOR_QUERY_EXECUTED, CONNECTOR_QUERY_DENIED,
     PROGRAM_STATUS_CHANGED, PROGRAM_USE_BLOCKED,
+    ORG_STRUCTURE_CHANGED, ORG_USER_CHANGED,
 )
 
 #: 식별되지 않은 주체. 빈 문자열로 두면 "기록 누락"과 구분되지 않는다.

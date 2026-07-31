@@ -7,6 +7,7 @@ interface Dept {
   dept_id: string; name_ko: string; parent_id: string; path: string; depth: number;
   master_domains: string[]; default_template_id: string; domain_agents: string[];
   legacy_domain: string; version: number; status: string; valid_from: string;
+  scope_node_id: string;          // 대응 ECM 조직 노드 — 이 값이 자료 노출 범위를 정한다
   children?: Dept[];
 }
 interface User {
@@ -89,6 +90,24 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
     await call('PUT', `/departments/${d.dept_id}`, { name_ko: name.trim() });
   };
 
+  // ★★ [2026-07-31] 부서의 **조직 범위**를 편집한다. 이 값이 비면 그 부서 사람들에게는
+  //   조직 소유 자료(지식팩·참고문서)가 **하나도 보이지 않는다**(관문 A: 미지정 = 비노출).
+  //   ⚠️ 화면에서 볼 수 없는 권한 값은 아무도 관리하지 못한다 — 값만 만들고 화면에 내지 않으면
+  //     "왜 안 보이나"의 답이 DB 안에 숨는다.
+  const setScopeNode = async (d: Dept) => {
+    const v = prompt(
+      `'${d.name_ko}' 가 대응하는 조직 노드 코드
+` +
+      `예: LS_MNM(전사) · MNM_BATTERY(배터리소재 사업부) · MNM_COPPER(동제련 사업부)
+` +
+      `※ 비우면 미지정 — 이 부서 사람들에게 조직 소유 자료가 보이지 않습니다
+` +
+      `※ 개정이므로 새 버전이 되고 구판은 이력으로 남습니다`,
+      d.scope_node_id || '');
+    if (v === null) return;
+    await call('PUT', `/departments/${d.dept_id}`, { scope_node_id: v.trim() });
+  };
+
   const moveDept = async (d: Dept) => {
     const p = prompt(`'${d.name_ko}' 를 어느 부서 밑으로 옮길까요? (비우면 최상위)\n※ 자기 하위 부서로는 옮길 수 없습니다`, d.parent_id);
     if (p === null) return;
@@ -141,11 +160,20 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
         {d.default_template_id && (
           <span className="text-[10px] text-indigo-500/80" title="기본 템플릿">{d.default_template_id}</span>
         )}
+        {/* 조직 범위 — 미지정이면 경고색으로 드러낸다. 조용히 비어 있으면 아무도 못 찾는다 */}
+        {d.scope_node_id ? (
+          <span className="text-[10px] px-1 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-700/40"
+            title="이 부서가 대응하는 조직 노드 — 자료 노출 범위를 정합니다">{d.scope_node_id}</span>
+        ) : (
+          <span className="text-[10px] px-1 rounded bg-amber-900/30 text-amber-400 border border-amber-700/40"
+            title="조직 범위 미지정 — 이 부서 사람들에게는 조직 소유 자료가 보이지 않습니다">범위 미지정</span>
+        )}
         {canEdit && (
           <span className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-1">
             <IconBtn onClick={() => addDept(d.dept_id)} title="하위 부서 추가">＋</IconBtn>
             <IconBtn onClick={() => renameDept(d)} title="개명(개정)">✎</IconBtn>
             <IconBtn onClick={() => moveDept(d)} title="상위 부서 이동">⇄</IconBtn>
+            <IconBtn onClick={() => setScopeNode(d)} title="조직 범위(ECM 노드) 지정">◎</IconBtn>
             <IconBtn onClick={() => retireDept(d)} title="폐지(soft-retire)" danger>⊘</IconBtn>
           </span>
         )}

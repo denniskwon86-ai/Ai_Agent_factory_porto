@@ -199,6 +199,28 @@ class OrgDirectory:
     def _invalidate(self):
         self._scope_cache.clear()
 
+    # ── 감사 ─────────────────────────────────────────────────────────────
+    @staticmethod
+    def _audit(event: str, resource_id: str, actor: str, reason: str,
+               detail: str = "", resource_type: str = "department") -> None:
+        """조직 변경을 감사로그에 남긴다.
+
+        ★★★ **왜 코어에서 남기는가**(라우트가 아니라). 실측된 사고가 근거다: 최상위 부서 `hq` 가
+          2026-07-27 23:39:53 에 "본사" → "해킹" 으로 바뀌었는데 **누가 바꿨는지 알 수 없었다.**
+          부서 표의 버전 이력은 *무엇이* 바뀌었는지만 담고, 감사로그에는 조직 변경이 한 줄도
+          없었다. 그리고 그 변경은 화면이 아니라 시드/스크립트 경로였을 가능성이 크다 —
+          라우트에만 기록을 붙이면 **바로 그 경로가 계속 기록되지 않는다.**
+        ⚠️ `actor` 가 비면 `anonymous` 로 남는다. 그것도 정보다 — "식별되지 않은 경로로 조직이
+          바뀌었다"는 사실 자체가 조사 대상이다. 비었다고 기록을 건너뛰지 않는다."""
+        try:
+            from core.enterprise_context import audit
+            audit.record(getattr(audit, event, event), resource_type=resource_type,
+                         resource_id=resource_id or "?", actor=actor or "",
+                         outcome="allowed", reason=reason, detail=detail)
+        except Exception as e:                                       # pragma: no cover
+            # 조용히 넘기지 않는다 — 권한을 정의하는 변경의 기록 유실은 그 자체가 사건이다.
+            print(f"⚠️ [org] 조직 변경 감사 기록 실패({resource_id}): {e}")
+
     @staticmethod
     def _check_dept_id(v: str):
         if not _TYPE_OR_DOMAIN_RE.match(v or ""):
@@ -307,7 +329,8 @@ class OrgDirectory:
     def create_department(self, dept_id: str, name_ko: str, parent_id: str = "",
                           master_domains: List[str] = None, default_template_id: str = "",
                           domain_agents: List[str] = None, legacy_domain: str = "",
-                          aliases: List[str] = None, scope_node_id: str = "") -> Dict[str, Any]:
+                          aliases: List[str] = None, scope_node_id: str = "",
+                          actor: str = "") -> Dict[str, Any]:
         self._check_dept_id(dept_id)
         if not (name_ko or "").strip():
             raise MasterDataError("name_ko 는 필수입니다.")
@@ -336,12 +359,15 @@ class OrgDirectory:
                                  (str(a).strip(), dept_id))
             conn.commit()
         self._invalidate()
+        self._audit("ORG_STRUCTURE_CHANGED", dept_id, actor, "부서 생성",
+                    f"name={name_ko} parent={parent_id or '(최상위)'} "
+                    f"scope={scope_node_id or '(미지정)'}")
         return self.get_department(dept_id)
 
     def update_department(self, dept_id: str, name_ko: str = None, parent_id: str = None,
                           master_domains: List[str] = None, default_template_id: str = None,
                           domain_agents: List[str] = None, legacy_domain: str = None,
-                          scope_node_id: str = None) -> Dict[str, Any]:
+                          scope_node_id: str = None, actor: str = "") -> Dict[str, Any]:
         """부서 개정. **새 버전**을 만들고 구판은 `valid_to` 로 닫아 이력을 보존한다.
         `parent_id` 가 바뀌면 하위 트리의 path/depth 를 일괄 갱신한다.
 
@@ -401,9 +427,21 @@ class OrgDirectory:
                     (new_path, len(old_prefix) + 1, shift, now, old_prefix + "*", dept_id))
             conn.commit()
         self._invalidate()
+        # 무엇이 바뀌었는지를 **바뀐 것만** 적는다 — 전부 적으면 변경점이 묻힌다.
+        chg = []
+        if name_ko is not None and name_ko != cur["name_ko"]:
+            chg.append(f"name: {cur['name_ko']} → {name_ko}")
+        if moving:
+            chg.append(f"parent: {cur['parent_id'] or '(최상위)'} → {new_parent or '(최상위)'}")
+        if scope_node_id is not None and scope_node_id != cur.get("scope_node_id", ""):
+            chg.append(f"scope: {cur.get('scope_node_id') or '(미지정)'} → "
+                       f"{scope_node_id or '(미지정)'}")
+        self._audit("ORG_STRUCTURE_CHANGED", dept_id, actor,
+                    f"부서 개정(v{cur['version']}→v{ver})",
+                    " / ".join(chg) or "변경 내용 없음(버전만 증가)")
         return self.get_department(dept_id)
 
-    def retire_department(self, dept_id: str) -> bool:
+    def retire_department(self, dept_id: str, actor: str = "") -> bool:
         """소프트 폐지. **물리 삭제하지 않는다** — `ownership.dept_id` 가 참조하므로
         과거 산출물의 소유 부서 해석이 깨지면 안 된다."""
         with self._lock, self._connect() as conn:
@@ -417,15 +455,19 @@ class OrgDirectory:
             conn.commit()
             ok = cur.rowcount > 0
         self._invalidate()
+        if ok:
+            self._audit("ORG_STRUCTURE_CHANGED", dept_id, actor, "부서 폐지(soft-retire)",
+                        "이 부서에 매인 사람들의 권한이 사라진다")
         return ok
 
     # ── 사용자 ────────────────────────────────────────────────────────────
     def upsert_user(self, user_id: str, display_name: str, primary_dept_id: str = "",
                     is_executive: bool = False, is_admin: bool = False,
-                    is_data_admin: bool = False) -> Dict[str, Any]:
+                    is_data_admin: bool = False, actor: str = "") -> Dict[str, Any]:
         self._check_user_id(user_id)
         if not (display_name or "").strip():
             raise MasterDataError("display_name 은 필수입니다.")
+        was = bool(self.get_user(user_id))
         with self._lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO users (user_id, display_name, primary_dept_id, is_executive, is_admin, "
@@ -437,6 +479,14 @@ class OrgDirectory:
                  int(is_data_admin), self._now()))
             conn.commit()
         self._invalidate()
+        # ⚠️ 권한 플래그는 별도로 적는다 — is_admin 부여는 **전권 부여**이고, 그 한 줄이
+        #   나중에 "왜 이 사람이 전부 볼 수 있었나"의 유일한 답이 된다.
+        flags = [n for n, v in (("executive", is_executive), ("admin", is_admin),
+                                ("data_admin", is_data_admin)) if v]
+        self._audit("ORG_USER_CHANGED", user_id, actor,
+                    ("사용자 등록·갱신" if not was else "사용자 갱신"),
+                    f"dept={primary_dept_id or '(미배정)'} "
+                    f"권한={'+'.join(flags) or '(없음)'}", resource_type="user")
         return self.get_user(user_id)
 
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -458,7 +508,8 @@ class OrgDirectory:
                 "SELECT user_id FROM users WHERE status='active' ORDER BY user_id").fetchall()]
         return [self.get_user(u) for u in ids]
 
-    def set_user_roles(self, user_id: str, roles: Dict[str, str]) -> Dict[str, Any]:
+    def set_user_roles(self, user_id: str, roles: Dict[str, str],
+                       actor: str = "") -> Dict[str, Any]:
         if not self.get_user(user_id):
             raise MasterDataError(f"사용자 '{user_id}' 가 없습니다.")
         for d, r in (roles or {}).items():
@@ -472,14 +523,22 @@ class OrgDirectory:
                              (user_id, d, r))
             conn.commit()
         self._invalidate()
+        # 역할이 곧 열람·쓰기 범위다(상위 부서 역할은 하위로 상속된다) — 변경을 남긴다.
+        self._audit("ORG_USER_CHANGED", user_id, actor, "부서 역할 변경",
+                    ", ".join(f"{d}={r}" for d, r in sorted((roles or {}).items()))
+                    or "(전부 해제 — 읽을 수 있는 부서가 없어진다)", resource_type="user")
         return self.get_user(user_id)
 
-    def delete_user(self, user_id: str) -> bool:
+    def delete_user(self, user_id: str, actor: str = "") -> bool:
         with self._lock, self._connect() as conn:
             cur = conn.execute("UPDATE users SET status='retired' WHERE user_id=?", (user_id,))
             conn.commit()
             ok = cur.rowcount > 0
         self._invalidate()
+        if ok:
+            # 폐지는 권한 회수다 — 남기지 않으면 "이 사람 계정이 왜 안 되나"에 답할 수 없다.
+            self._audit("ORG_USER_CHANGED", user_id, actor, "사용자 폐지(권한 회수)",
+                        "이후 이 계정은 미등록과 같게 처리된다", resource_type="user")
         return ok
 
     # ── 권한 해석 ─────────────────────────────────────────────────────────

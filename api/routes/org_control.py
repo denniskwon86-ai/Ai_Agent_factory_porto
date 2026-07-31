@@ -22,6 +22,17 @@ from core.org_directory import org_directory
 router = APIRouter(prefix="/api/v1/org")
 
 
+def _actor(p: Principal) -> str:
+    """감사로그에 남길 행위자.
+
+    ★ **비어 있어도 막지 않는다.** 부트스트랩(사용자 0명)에서는 익명으로 첫 관리자를 만들어야
+      하고, 여기서 401 을 내면 시스템이 잠긴다(실측). 대신 감사로그에 `anonymous` 로 남는다 —
+      "식별되지 않은 경로로 조직이 바뀌었다"는 사실 자체가 조사 대상이므로 기록은 건너뛰지 않는다.
+      실제로 이 기록이 없어서, 2026-07-27 에 최상위 부서 이름이 바뀐 사건의 행위자를 끝내
+      확인할 수 없었다."""
+    return (p.user_id or "").strip()
+
+
 def _err(e: MasterDataError):
     msg = str(e)
     if "이미 존재" in msg or "폐지할 수 없" in msg:
@@ -159,7 +170,7 @@ async def create_department(req: DeptCreate, p: Principal = Depends(current_prin
         d = await asyncio.to_thread(
             org_directory.create_department, req.dept_id, req.name_ko, req.parent_id,
             req.master_domains, req.default_template_id, req.domain_agents,
-            req.legacy_domain, req.aliases, req.scope_node_id)
+            req.legacy_domain, req.aliases, req.scope_node_id, _actor(p))
     except MasterDataError as e:
         _err(e)
     return {"status": "success", "data": d}
@@ -174,7 +185,7 @@ async def update_department(dept_id: str, req: DeptUpdate,
         d = await asyncio.to_thread(
             org_directory.update_department, dept_id, req.name_ko, req.parent_id,
             req.master_domains, req.default_template_id, req.domain_agents, req.legacy_domain,
-            req.scope_node_id)
+            req.scope_node_id, _actor(p))
     except MasterDataError as e:
         _err(e)
     return {"status": "success", "data": d}
@@ -185,7 +196,7 @@ async def retire_department(dept_id: str, p: Principal = Depends(current_princip
     """소프트 폐지. 물리 삭제하지 않는다 — ownership 이 참조하므로 과거 해석이 깨지면 안 된다."""
     assert_can_edit_org(p)
     try:
-        ok = await asyncio.to_thread(org_directory.retire_department, dept_id)
+        ok = await asyncio.to_thread(org_directory.retire_department, dept_id, _actor(p))
     except MasterDataError as e:
         _err(e)
     if not ok:
@@ -213,7 +224,7 @@ async def upsert_user(req: UserUpsert, p: Principal = Depends(current_principal)
     try:
         u = await asyncio.to_thread(
             org_directory.upsert_user, req.user_id, req.display_name, req.primary_dept_id,
-            req.is_executive, req.is_admin, req.is_data_admin)
+            req.is_executive, req.is_admin, req.is_data_admin, _actor(p))
     except MasterDataError as e:
         _err(e)
     return {"status": "success", "data": u}
@@ -224,7 +235,8 @@ async def set_roles(user_id: str, req: RolesUpdate,
                     p: Principal = Depends(current_principal)):
     assert_can_edit_org(p)
     try:
-        u = await asyncio.to_thread(org_directory.set_user_roles, user_id, req.roles)
+        u = await asyncio.to_thread(org_directory.set_user_roles, user_id, req.roles,
+                                    _actor(p))
     except MasterDataError as e:
         _err(e)
     return {"status": "success", "data": u}
@@ -233,7 +245,7 @@ async def set_roles(user_id: str, req: RolesUpdate,
 @router.delete("/users/{user_id}")
 async def delete_user(user_id: str, p: Principal = Depends(current_principal)):
     assert_can_edit_org(p)
-    ok = await asyncio.to_thread(org_directory.delete_user, user_id)
+    ok = await asyncio.to_thread(org_directory.delete_user, user_id, _actor(p))
     if not ok:
         raise HTTPException(status_code=404, detail=f"사용자 '{user_id}' 가 없습니다.")
     return {"status": "success", "data": {"user_id": user_id, "status": "retired"}}
