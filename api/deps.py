@@ -97,6 +97,50 @@ def dept_visible(p: Principal, dept_id: str) -> bool:
     return p.scope.can_read(dept_id)
 
 
+def visibility_block_reason(p: Principal) -> str:
+    """★★★ [2026-07-31 실측 결함] **자료 목록을 보여줘도 되는가.** 안 되면 그 이유를 돌려준다.
+
+    권한 강제를 켠 뒤 실서버에서 확인한 것: `/api/v1/org/me` 는 익명 사용자에게
+    "목록이 비어 보입니다"라고 안내하는데, `/api/v1/knowledge/packs` 는 **지식팩 4건을 그대로
+    돌려주고 있었다.** 조직 범위 필터가 호출자 선택(`scope_node_id` 파라미터)이었기 때문이다.
+
+    ⚠️ 이건 배너가 거짓말을 하는 것보다 나쁘다. 관문 A의 계약은 "미지정 = 비노출"인데,
+      **필터를 부르지 않으면 통제가 없다**는 뜻이었다. 통제를 호출자 선택으로 두면 새 라우트가
+      생길 때마다 구멍이 하나 생기고, 구멍은 조용하다 — 아무도 오류를 보지 못한다.
+      그래서 판정을 여기 한 곳에 두고, 목록 라우트는 이 함수를 **부르지 않으면 안 되는 것**으로
+      취급한다(리뷰에서 누락을 눈으로 찾을 수 있는 형태).
+
+    빈 문자열이면 허용이다. 강제가 꺼져 있으면 항상 허용한다(하위호환 계약).
+
+    한계(정직하게 기록): 등록·활성 사용자에게는 허용만 판단하고 **소유 조직별 행 필터는 하지
+      않는다** — `users` 에 ECM 노드 컬럼이 없어 사용자→조직범위 매핑이 아직 없다. 그 매핑은
+      "부서·사용자 배정"(업무 단계)에서 생기며, 그때 이 함수가 노드를 함께 돌려주게 바꾼다.
+      지금 실사용자는 무제한 권한 관리자 1명뿐이라 실효 노출 차이는 없다."""
+    try:
+        from core.org_directory import _org_enforce_effective, org_directory
+        if not _org_enforce_effective():
+            return ""
+    except Exception:
+        return ""                        # 강제 여부를 모르면 기존 흐름을 막지 않는다
+    if getattr(p.scope, "unrestricted", False):
+        return ""
+    uid = (p.user_id or "").strip()
+    if not uid:
+        return ("익명으로 보고 있어 자료 목록을 표시하지 않습니다 — 우측 상단에서 사용자를 "
+                "지정하십시오.")
+    try:
+        u = org_directory.get_user(uid)
+    except Exception:
+        u = None
+    if not u:
+        return f"'{uid}' 는 등록되지 않은 사용자입니다 — 관리자에게 사용자 등록을 요청하십시오."
+    if str(u.get("status", "active")) != "active":
+        return f"'{uid}' 계정은 폐지되었습니다 — 권한이 회수되어 자료가 보이지 않습니다."
+    if not (p.scope.readable_dept_ids or p.scope.can_manage_standard):
+        return f"'{uid}' 에게 배정된 부서가 없습니다 — 관리자에게 부서 배정을 요청하십시오."
+    return ""
+
+
 def _resource_readable(p: Principal, kind: str, rid: str) -> bool:
     if p.scope.unrestricted:
         return True

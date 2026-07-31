@@ -18,7 +18,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (Principal, assert_can_manage_standard, current_principal,
+                      visibility_block_reason)
 from core.reference_registry import (REFERENCE_ROOT, REGISTRY_PATH, approve_asset,
                                      build_registry, index_approved, indexable, load_registry,
                                      registry_summary, reject_asset, visible_assets)
@@ -61,8 +62,14 @@ async def get_summary():
 
 
 @router.get("/indexable")
-async def list_indexable():
-    """지금 색인할 수 있는 자산과, 나머지가 **왜** 안 되는지."""
+async def list_indexable(p: Principal = Depends(current_principal)):
+    """지금 색인할 수 있는 자산과, 나머지가 **왜** 안 되는지.
+
+    ⚠️ 이 응답은 **문서 파일명을 그대로 담는다** — 파일명 자체가 정보다(예: 특정 고객사·공정명).
+      집계만 담는 `/summary` 와 달리 목록 통제를 적용한다."""
+    reason = visibility_block_reason(p)
+    if reason:
+        return {"status": "success", "data": [], "blocked_reason": reason}
     return {"status": "success", "data": await asyncio.to_thread(indexable)}
 
 
@@ -73,7 +80,15 @@ async def list_assets(pack_id: str = "", approval_status: str = "",
     """자산 목록. `scope_node_id` 를 주면 **조직 범위 + 등급**이 적용된다.
 
     ★ 등급 판정은 주체의 권한에서 파생한다 — 등급이 낮으면 제목만 보이고 내용은 가려진다
-      (2026-07-30 결정). 범위를 주지 않으면 필터하지 않는다(ECM 미도입 흐름 보호)."""
+      (2026-07-30 결정).
+
+    ★★ [2026-07-31] 범위를 주지 않으면 필터하지 않던 계약을 **강제가 켜진 동안에는 닫는다.**
+      "호출자가 범위를 주면 통제한다"는 것은 곧 **주지 않으면 통제가 없다**는 뜻이었고,
+      프론트는 실제로 주지 않고 있었다(실측: 익명이 전 자산을 조회할 수 있었다).
+      강제가 꺼진 상태에서는 종전 그대로 둔다 — ECM 미도입 흐름의 하위호환 계약."""
+    reason = visibility_block_reason(p)
+    if reason:
+        return {"status": "success", "data": [], "blocked_reason": reason}
     if scope_node_id:
         from core.enterprise_context.classification import clearance_of_scope
         items = await asyncio.to_thread(visible_assets, scope_node_id,

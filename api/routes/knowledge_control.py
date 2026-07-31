@@ -1,9 +1,11 @@
 import asyncio
 import re
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 
+from api.deps import (Principal, assert_can_manage_standard, current_principal,
+                      visibility_block_reason)
 from core.knowledge_base import knowledge_base, extract_text
 
 router = APIRouter(prefix="/api/v1/knowledge")
@@ -41,25 +43,36 @@ class PackScopeRequest(BaseModel):
 
 
 @router.get("/packs")
-async def list_packs():
+async def list_packs(p: Principal = Depends(current_principal)):
+    """지식팩 목록. **권한 강제가 켜져 있으면 볼 자격이 없는 요청자에게는 빈 목록을 준다.**
+
+    ★ 왜 이유를 함께 주는가 — 빈 목록만 주면 화면은 "등록된 지식팩이 없습니다"라고 말하고,
+      사용자는 자료가 없다고 믿는다(실측: 익명 상태에서 실제로 그 문구가 떴다).
+      없는 것과 안 보이는 것은 **정반대의 사실**이므로 화면이 구분해 말할 수 있어야 한다."""
+    reason = visibility_block_reason(p)
+    if reason:
+        return {"status": "success", "data": [], "blocked_reason": reason}
     return {"status": "success", "data": knowledge_base.list_packs()}
 
 
 @router.get("/scope-report")
-async def scope_report():
+async def scope_report(p: Principal = Depends(current_principal)):
     """팩별로 **조직 범위가 심긴 청크가 몇 개인지.**
 
     ★ 이 숫자를 모르면 `KB_SCOPE_ENFORCE` 를 켤 수 없다 — 켜는 순간 범위 미기재 청크가 전부
       검색에서 제외되므로(fail-closed), "켜면 무엇이 사라지는가"를 먼저 알아야 한다."""
+    assert_can_manage_standard(p)      # 팩별 노출 현황은 통제 정보다 — 관리자에게만
     return {"status": "success",
             "data": await asyncio.to_thread(knowledge_base.pack_scope_report)}
 
 
 @router.post("/packs/{pack_id}/scope")
-async def set_pack_scope(pack_id: str, req: PackScopeRequest):
+async def set_pack_scope(pack_id: str, req: PackScopeRequest,
+                         p: Principal = Depends(current_principal)):
     """기존 청크에 소유 조직을 소급 부여한다(재색인 없이 메타데이터만).
 
     ⚠️ 소유 조직을 추측하지 않는다 — 잘못 찍으면 팩의 모든 청크가 엉뚱한 조직에 열린다."""
+    assert_can_manage_standard(p)
     _safe_pack_id(pack_id)
     try:
         return {"status": "success",
@@ -71,7 +84,8 @@ async def set_pack_scope(pack_id: str, req: PackScopeRequest):
 
 
 @router.post("/packs")
-async def create_pack(req: PackCreateRequest):
+async def create_pack(req: PackCreateRequest, p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     _safe_pack_id(req.pack_id)
     try:
         # 임베딩 모델 워밍업이 포함될 수 있어(첫 호출 수 초) 스레드로
@@ -82,8 +96,12 @@ async def create_pack(req: PackCreateRequest):
 
 
 @router.get("/packs/{pack_id}")
-async def get_pack(pack_id: str):
+async def get_pack(pack_id: str, p: Principal = Depends(current_principal)):
     _safe_pack_id(pack_id)
+    reason = visibility_block_reason(p)
+    if reason:
+        # 403 으로 "있지만 못 본다"를 알린다 — 404 로 감추면 관리자도 원인을 찾을 수 없다.
+        raise HTTPException(status_code=403, detail=reason)
     manifest = knowledge_base.get_pack(pack_id)
     if not manifest:
         raise HTTPException(status_code=404, detail="지식팩을 찾을 수 없습니다.")
@@ -91,7 +109,10 @@ async def get_pack(pack_id: str):
 
 
 @router.delete("/packs/{pack_id}")
-async def delete_pack(pack_id: str):
+async def delete_pack(pack_id: str, p: Principal = Depends(current_principal)):
+    # ⚠️ [2026-07-31] 여기에 권한이 없었다 — **익명 요청으로 전사 지식팩을 지울 수 있었다.**
+    #   읽기 구멍은 자료가 새는 것이고 쓰기 구멍은 자료가 사라지는 것이다. 후자가 더 무겁다.
+    assert_can_manage_standard(p)
     _safe_pack_id(pack_id)
     ok = await asyncio.to_thread(knowledge_base.delete_pack, pack_id)
     if not ok:
@@ -100,8 +121,10 @@ async def delete_pack(pack_id: str):
 
 
 @router.post("/packs/{pack_id}/documents")
-async def upload_document(pack_id: str, file: UploadFile = File(...)):
+async def upload_document(pack_id: str, file: UploadFile = File(...),
+                          p: Principal = Depends(current_principal)):
     """참고자료 업로드 → 텍스트 추출 → 청킹·인덱싱. 동일 파일명은 교체된다."""
+    assert_can_manage_standard(p)
     _safe_pack_id(pack_id)
     if not knowledge_base.get_pack(pack_id):
         raise HTTPException(status_code=404, detail="지식팩을 찾을 수 없습니다.")
@@ -133,7 +156,9 @@ async def upload_document(pack_id: str, file: UploadFile = File(...)):
 
 
 @router.delete("/packs/{pack_id}/documents/{filename}")
-async def delete_document(pack_id: str, filename: str):
+async def delete_document(pack_id: str, filename: str,
+                          p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     _safe_pack_id(pack_id)
     if not _FNAME_RE.match(filename or ""):
         raise HTTPException(status_code=400, detail="잘못된 파일명입니다.")
@@ -144,8 +169,14 @@ async def delete_document(pack_id: str, filename: str):
 
 
 @router.post("/packs/{pack_id}/search")
-async def search_pack(pack_id: str, req: PackSearchRequest):
-    """검색 품질 확인용(등록 자료가 질의에 어떻게 검색되는지 UI에서 테스트)."""
+async def search_pack(pack_id: str, req: PackSearchRequest,
+                      p: Principal = Depends(current_principal)):
+    """검색 품질 확인용(등록 자료가 질의에 어떻게 검색되는지 UI에서 테스트).
+
+    ⚠️ 목록보다 이쪽이 더 위험하다 — 목록은 제목을, 검색은 **본문 조각**을 돌려준다."""
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
     _safe_pack_id(pack_id)
     if not knowledge_base.get_pack(pack_id):
         raise HTTPException(status_code=404, detail="지식팩을 찾을 수 없습니다.")

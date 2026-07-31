@@ -80,6 +80,7 @@ export default function App() {
   const [showLogPopup, setShowLogPopup] = useState(false);
   // 신규 프로젝트에 연결할 지식팩 선택 상태
   const [knowledgePacks, setKnowledgePacks] = useState<any[]>([]);
+  const [packsBlocked, setPacksBlocked] = useState('');   // 권한으로 가려진 이유(비었으면 정상)
   const [selectedPackIds, setSelectedPackIds] = useState<string[]>([]);
   // [M1] 신규 프로젝트에 적용할 기준정보 도메인 태그(콤마구분)
   const [masterDomainsInput, setMasterDomainsInput] = useState('');
@@ -88,12 +89,27 @@ export default function App() {
   // [사용자 결정 2026-07-30] 프로그램 사용여부 제어 대상 — 삭제 대신 비활성화한다.
   const [adminProgram, setAdminProgram] = useState<{ id: string; name: string } | null>(null);
 
+  // ★★ [2026-07-31 실측 결함] 사용자를 바꾸면 권한이 바뀌므로 **목록을 다시 불러야 한다.**
+  //   `UserSwitcher` 는 전환 시 이 이벤트를 쏘면서 "목록도 권한에 따라 달라진다"고 적어 뒀지만
+  //   듣는 곳이 없었다 — 전환 후에도 **이전 사용자의 목록이 그대로 남는다.**
+  //   ⚠️ 통제가 서버에서 옳게 동작해도 화면이 옛 답을 들고 있으면 사용자에게는 같은 사고다.
+  const [actingUserRev, setActingUserRev] = useState(0);
+  useEffect(() => {
+    const h = () => setActingUserRev(v => v + 1);
+    window.addEventListener('factory:acting-user-changed', h);
+    return () => window.removeEventListener('factory:acting-user-changed', h);
+  }, []);
+
   useEffect(() => {
     // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)
     const API = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
     fetch(`${API}/api/v1/knowledge/packs`).then(r => r.ok ? r.json() : null)
-      .then(r => { if (r?.data) setKnowledgePacks(r.data); }).catch(() => {});
-  }, [showKnowledgeHub]); // 허브에서 팩을 만들고 닫으면 목록 갱신
+      .then(r => {
+        setKnowledgePacks(r?.data || []);
+        // 권한 때문에 비었으면 그 이유를 들고 있는다 — "없다"와 "안 보인다"는 정반대다.
+        setPacksBlocked(r?.blocked_reason || '');
+      }).catch(() => {});
+  }, [showKnowledgeHub, actingUserRev]); // 허브에서 팩을 만들고 닫으면·사용자를 바꾸면 갱신
 
   const isSubProject = (id: string) => projects.some(p => p.is_mega_project && id.startsWith(p.id + "_"));
 
@@ -393,9 +409,16 @@ export default function App() {
                     📚 연결할 지식팩 <span className="text-gray-600">(선택 — 등록된 도메인 자료를 참고해 산출물을 생성)</span>
                   </label>
                   {knowledgePacks.length === 0 ? (
-                    <div className="text-xs text-gray-500 bg-[#0B0C10]/60 border border-[#2F3640] rounded-xl p-3">
-                      등록된 지식팩이 없습니다. 우측 상단 <b className="text-cyan-300">📚 지식 허브</b>에서 표준·논문 등 참고자료를 먼저 등록하세요.
-                    </div>
+                    packsBlocked ? (
+                      /* 권한으로 가려진 경우 — 자료가 없다고 말하면 사용자는 등록하려 든다(잘못된 다음 행동) */
+                      <div className="text-xs text-red-300 bg-red-900/20 border border-red-800/50 rounded-xl p-3">
+                        <b>지식팩이 보이지 않습니다(자료가 없는 것이 아닙니다).</b> {packsBlocked}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-gray-500 bg-[#0B0C10]/60 border border-[#2F3640] rounded-xl p-3">
+                        등록된 지식팩이 없습니다. 우측 상단 <b className="text-cyan-300">📚 지식 허브</b>에서 표준·논문 등 참고자료를 먼저 등록하세요.
+                      </div>
+                    )
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {knowledgePacks.map((p: any) => {

@@ -322,7 +322,8 @@ def test_api_refuses_to_enable_when_preflight_blocks(policy_env, monkeypatch):
 # ══════════════════════════════════════════════════════════════════════════
 # `/org/me` — 강제를 켠 뒤 **빈 화면의 이유**를 화면이 말할 수 있어야 한다
 # ══════════════════════════════════════════════════════════════════════════
-def _me_client(monkeypatch, *, enforced, user_id, registered, scope_kw=None):
+def _me_client(monkeypatch, *, enforced, user_id, registered, scope_kw=None,
+               status="active"):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -332,8 +333,11 @@ def _me_client(monkeypatch, *, enforced, user_id, registered, scope_kw=None):
     from core.org_directory import AccessScope
 
     monkeypatch.setattr(od, "_org_enforce_effective", lambda: enforced)
+    # ★ 대역도 실물과 같은 모양을 줘야 한다 — `status` 가 없으면 폐지 판정을 검증할 수 없고,
+    #   대역이 실물과 다르면 그 테스트는 실물이 아니라 대역을 검증한다.
     monkeypatch.setattr(od.org_directory, "get_user",
-                        lambda uid: {"user_id": uid} if (registered and uid) else None)
+                        lambda uid: ({"user_id": uid, "status": status}
+                                     if (registered and uid) else None))
     monkeypatch.setattr(od.org_directory, "is_bootstrap", lambda: False)
 
     app = FastAPI()
@@ -369,6 +373,26 @@ def test_me_explains_unassigned_but_registered(monkeypatch):
     c = _me_client(monkeypatch, enforced=True, user_id="staff@ls", registered=True)
     d = c.get("/api/v1/org/me").json()["data"]
     assert "부서가 배정되지 않았습니다" in d["access_note"]
+
+
+def test_me_explains_retired_account_not_missing_dept(monkeypatch):
+    """★★★ [2026-07-31 실측 결함] **폐지 계정에게 화면이 틀린 이유를 말하고 있었다.**
+
+    실서버에서 폐지한 `admin` 으로 `/me` 를 부르니 권한은 정확히 0이었지만(고침이 동작했다)
+    안내는 "부서가 배정되지 않았습니다" 였다. 판정은 맞고 **설명이 틀린** 경우다.
+
+    ⚠️ 이 조합이 가장 고치기 어렵다: 사용자는 관리자에게 부서 배정을 요청하고, 관리자는 배정이
+      이미 되어 있는 것을 보고 시스템 오류라고 판단한다. 실제 이유(계정 폐지)는 화면 어디에도
+      없으므로 아무도 도달하지 못한다. 통제가 옳게 동작할 때조차 **설명이 틀리면 운영은 멈춘다.**
+    """
+    c = _me_client(monkeypatch, enforced=True, user_id="admin", registered=True,
+                   status="retired")
+    d = c.get("/api/v1/org/me").json()["data"]
+    assert d["retired"] is True
+    assert d["registered"] is False, "폐지는 권한 판정에서 미등록과 같게 취급한다"
+    assert "폐지되었습니다" in d["access_note"]
+    assert "부서 배정 문제가 아닙니다" in d["access_note"], "틀린 방향으로 안내하면 안 된다"
+    assert "부서가 배정되지 않았습니다" not in d["access_note"]
 
 
 def test_me_warns_when_enforcement_is_off(monkeypatch):

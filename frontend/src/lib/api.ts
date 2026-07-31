@@ -44,6 +44,43 @@ export function apiUrl(path: string): string {
   return base + (base.includes('?') ? '&' : '?') + `as_user=${encodeURIComponent(actingUser)}`;
 }
 
+// ★★★ [2026-07-31 실측 결함] **같은 백엔드를 다른 이름으로 부르면 헤더가 빠졌다.**
+//
+//   `KnowledgeHubPanel.tsx` 는 자기만의 `API_BASE_URL` 을 `http://localhost:8080` 으로
+//   선언했다(위 주석이 경고한 "8곳 중복 선언" 중 하나다). 인터셉터는 `startsWith(API_BASE_URL)`
+//   즉 `http://127.0.0.1:8080` 으로만 판정했으므로, 그 패널의 모든 호출이 **조용히 익명으로**
+//   나갔다. 목록 통제를 켠 뒤 실측한 결과: 무제한 권한 관리자로 접속했는데도 지식 허브 화면이
+//   "등록된 지식팩이 없습니다"였다(런처의 같은 목록은 4건이 보였다).
+//
+//   ⚠️ 같은 대상을 두 이름으로 부르는 것이 원인이다 — 문자열 비교는 그 둘을 다른 것으로 본다.
+//     그래서 문자열이 아니라 **origin(호스트+포트)** 으로 판정하고, 같은 포트의 루프백 별칭
+//     (`localhost` / `127.0.0.1` / `[::1]`)을 같은 백엔드로 취급한다. 중복 선언을 전부 찾아
+//     고치는 것보다 이 한 곳을 고치는 것이 안전하다(새로 생기는 중복까지 덮는다).
+//   ⚠️ 루프백에 한정한다 — 임의 호스트를 같은 것으로 보면 외부 도메인에 사용자 식별이 새어나간다.
+const _LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
+const _backendOrigins: Set<string> = (() => {
+  const set = new Set<string>();
+  try {
+    const u = new URL(API_BASE_URL);
+    set.add(u.origin);
+    if (_LOOPBACK.includes(u.hostname)) {
+      for (const h of _LOOPBACK) set.add(`${u.protocol}//${h}${u.port ? ':' + u.port : ''}`);
+    }
+  } catch {
+    // URL 파싱 실패 시엔 아무 origin 도 등록하지 않는다 — 헤더를 못 붙이는 쪽이 안전하다
+  }
+  return set;
+})();
+
+/** 이 URL 이 우리 백엔드인가(호스트 표기가 달라도 같은 것으로 본다). */
+export function isBackendUrl(url: string): boolean {
+  try {
+    return _backendOrigins.has(new URL(url, window.location.href).origin);
+  } catch {
+    return false;
+  }
+}
+
 let installed = false;
 
 /** window.fetch 를 1회 래핑해 우리 백엔드 요청에만 식별 헤더를 붙인다. */
@@ -60,7 +97,7 @@ export function installFetchInterceptor() {
         : (input as Request).url;
 
       // ⚠️ 우리 백엔드로 가는 요청에만 붙인다. 외부 도메인에 사용자 식별을 흘리면 안 된다.
-      if (actingUser && url && url.startsWith(API_BASE_URL)) {
+      if (actingUser && url && isBackendUrl(url)) {
         const headers = new Headers(
           (init && init.headers) || (input instanceof Request ? input.headers : undefined)
         );

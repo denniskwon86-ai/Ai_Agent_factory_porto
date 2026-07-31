@@ -77,20 +77,33 @@ async def whoami(p: Principal = Depends(current_principal)):
     try:
         from core.org_directory import _org_enforce_effective, org_directory
         enforced = _org_enforce_effective()
-        registered = bool(org_directory.get_user(p.user_id)) if identified else False
+        _u = org_directory.get_user(p.user_id) if identified else None
+        # ★ [2026-07-31 실측] **폐지 여부를 등록 여부와 분리한다.**
+        #   `resolve_scope` 는 status != active 를 미등록과 같게 처리해 권한을 0으로 만든다.
+        #   그런데 여기서 `get_user` 결과만 보고 "등록됨"이라고 답하면, 화면은 빈 목록의 이유를
+        #   **부서 미배정**이라고 설명한다(실측: 폐지한 `admin` 이 그 안내를 받았다).
+        #   ⚠️ 판정은 같은데 설명이 다르면 사용자는 관리자에게 "부서를 배정해 달라"고 요청하고,
+        #     관리자는 이미 배정된 것을 보고 시스템 오류로 판단한다 — 실제 이유(계정 폐지)는
+        #     아무도 보지 못한다. 권한의 단일 판정 지점과 **같은 규칙**을 화면도 써야 한다.
+        retired = bool(_u) and str(_u.get("status", "active")) != "active"
+        registered = bool(_u) and not retired
         bootstrap = org_directory.is_bootstrap()
     except Exception as e:                                       # pragma: no cover
-        enforced, registered, bootstrap = False, False, False
+        enforced, registered, bootstrap, retired = False, False, False, False
         data["resolve_error"] = str(e)
     data.update({
         "user_id": p.user_id or "", "identified": identified,
         "registered": registered, "org_enforced": bool(enforced),
-        "bootstrap": bool(bootstrap),
+        "bootstrap": bool(bootstrap), "retired": bool(retired),
     })
     if enforced and not identified:
         data["access_note"] = ("**익명으로 보고 있습니다.** 조직 권한 강제가 켜져 있어 목록이 "
                                "비어 보입니다 — 자료가 없는 것이 아닙니다. 우측 상단에서 "
                                "사용자를 지정하십시오.")
+    elif enforced and retired:
+        data["access_note"] = (f"**'{p.user_id}' 계정은 폐지되었습니다.** 권한이 회수되어 어떤 "
+                               f"자료도 보이지 않습니다 — 부서 배정 문제가 아닙니다. 계정이 다시 "
+                               f"필요하면 관리자에게 재등록을 요청하십시오.")
     elif enforced and not registered:
         data["access_note"] = (f"**'{p.user_id}' 는 등록되지 않은 사용자입니다.** 조직 권한 "
                                f"강제가 켜져 있어 어떤 부서 자료도 보이지 않습니다 — 관리자에게 "
