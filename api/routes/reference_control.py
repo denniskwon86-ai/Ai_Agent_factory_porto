@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from api.deps import (Principal, assert_can_manage_standard, current_principal,
+                      viewer_may_drill_down, viewer_scope_nodes, viewer_visible_scopes,
                       visibility_block_reason)
 from core.reference_registry import (REFERENCE_ROOT, REGISTRY_PATH, approve_asset,
                                      build_registry, index_approved, indexable, load_registry,
@@ -89,10 +90,30 @@ async def list_assets(pack_id: str = "", approval_status: str = "",
     reason = visibility_block_reason(p)
     if reason:
         return {"status": "success", "data": [], "blocked_reason": reason}
+    from core.enterprise_context.classification import clearance_of_scope
+    # ★ `visible_assets` 는 상속을 스스로 펼친다 — 그래서 **펼치지 않은** 소속 노드를 준다.
+    #   펼친 집합을 다시 펼치면 조상의 자손, 즉 형제 사업부 자료가 들어온다.
+    nodes = viewer_scope_nodes(p)
+    drill = viewer_may_drill_down(p)
     if scope_node_id:
-        from core.enterprise_context.classification import clearance_of_scope
+        # 호출자가 특정 조직을 지정했다 — 단, 자기 범위 밖을 지정해 넘겨다볼 수는 없다.
+        allowed = viewer_visible_scopes(p)
+        if allowed is not None and scope_node_id not in allowed:
+            return {"status": "success", "data": [],
+                    "blocked_reason": (f"'{scope_node_id}' 는 소속 조직 범위가 아닙니다 — "
+                                       f"다른 조직의 자료를 지정해 조회할 수 없습니다.")}
         items = await asyncio.to_thread(visible_assets, scope_node_id,
-                                        clearance_of_scope(p.scope))
+                                        clearance_of_scope(p.scope), REGISTRY_PATH, drill)
+    elif nodes is not None:
+        # 범위를 주지 않았으면 **요청자의 조직 범위**로 필터한다(종전에는 전부 반환했다).
+        clearance = clearance_of_scope(p.scope)
+        seen, items = set(), []
+        for n in sorted(nodes):
+            for a in await asyncio.to_thread(visible_assets, n, clearance,
+                                             REGISTRY_PATH, drill):
+                if a.get("asset_id") not in seen:
+                    seen.add(a.get("asset_id"))
+                    items.append(a)
     else:
         items = (await asyncio.to_thread(load_registry)).get("assets", [])
     if pack_id:

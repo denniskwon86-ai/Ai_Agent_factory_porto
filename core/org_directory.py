@@ -120,6 +120,11 @@ class AccessScope:
     can_run_enterprise: bool = False
     can_edit_org: bool = False
     can_manage_standard: bool = False
+    #: 읽기 가능한 부서들이 대응하는 **ECM 조직 노드**들. 자료(지식팩·참고문서·기준정보)의
+    #: 소유 조직은 부서가 아니라 이 노드로 적혀 있으므로, 행 단위 필터는 이 집합을 쓴다.
+    #: ⚠️ 비어 있다 = "이 사용자에 대응하는 조직 노드를 모른다"이지 "전부 볼 수 있다"가 아니다.
+    #:   판정 함수는 비어 있으면 **닫는다**(관문 A). `unrestricted` 만이 전면 통과의 근거다.
+    readable_scope_nodes: frozenset = frozenset()
 
     def can_read(self, dept_id: str) -> bool:
         return self.unrestricted or not dept_id or dept_id in self.readable_dept_ids
@@ -139,6 +144,7 @@ class AccessScope:
             "can_run_enterprise": self.can_run_enterprise,
             "can_edit_org": self.can_edit_org,
             "can_manage_standard": self.can_manage_standard,
+            "readable_scope_nodes": sorted(self.readable_scope_nodes),
         }
 
 
@@ -162,10 +168,26 @@ class OrgDirectory:
             pass
         return conn
 
+    #: 부서 표에 나중에 추가된 컬럼 — `_init_db` 가 매번 확인해 없으면 붙인다.
+    #: ★ 선언을 DDL 과 여기 두 곳에 두지 않는다. DDL 은 새 DB 를, 이 표는 기존 DB 를 담당하고,
+    #:   값의 의미는 한 곳(아래 주석)에만 적는다.
+    _ADDED_DEPT_COLUMNS = (
+        # 이 부서가 대응하는 **ECM 조직 노드**(예: LS_MNM, MNM_BATTERY).
+        # 왜 부서에 두는가 — 사용자마다 따로 적으면 같은 부서의 두 사람이 다른 조직 범위를 갖게
+        # 되고, 그 차이는 아무도 의도하지 않은 채 생긴다. 부서는 기준정보이므로 조직 범위도
+        # 부서가 들고 사용자는 **상속**한다(단일 판정 지점).
+        ("scope_node_id", "TEXT NOT NULL DEFAULT ''"),
+    )
+
     def _init_db(self):
         conn = self._connect()
         try:
             conn.executescript(_ORG_DDL)
+            have = {r[1] for r in conn.execute("PRAGMA table_info(departments)")}
+            for col, decl in self._ADDED_DEPT_COLUMNS:
+                if col not in have:
+                    conn.execute(f"ALTER TABLE departments ADD COLUMN {col} {decl}")
+                    print(f"ℹ️ [org] departments.{col} 컬럼을 추가했습니다(기존 행은 미지정).")
             conn.commit()
         finally:
             conn.close()
@@ -285,7 +307,7 @@ class OrgDirectory:
     def create_department(self, dept_id: str, name_ko: str, parent_id: str = "",
                           master_domains: List[str] = None, default_template_id: str = "",
                           domain_agents: List[str] = None, legacy_domain: str = "",
-                          aliases: List[str] = None) -> Dict[str, Any]:
+                          aliases: List[str] = None, scope_node_id: str = "") -> Dict[str, Any]:
         self._check_dept_id(dept_id)
         if not (name_ko or "").strip():
             raise MasterDataError("name_ko 는 필수입니다.")
@@ -302,11 +324,12 @@ class OrgDirectory:
             conn.execute(
                 "INSERT INTO departments (dept_id, version, name_ko, parent_id, path, depth, "
                 "master_domains, default_template_id, domain_agents, legacy_domain, "
-                "valid_from, valid_to, supersedes, status, updated_at) "
-                "VALUES (?,1,?,?,?,?,?,?,?,?,?,NULL,'','active',?)",
+                "valid_from, valid_to, supersedes, status, updated_at, scope_node_id) "
+                "VALUES (?,1,?,?,?,?,?,?,?,?,?,NULL,'','active',?,?)",
                 (dept_id, name_ko, parent_id, path, depth,
                  json.dumps(master_domains or [], ensure_ascii=False), default_template_id,
-                 json.dumps(domain_agents or [], ensure_ascii=False), legacy_domain, now, now))
+                 json.dumps(domain_agents or [], ensure_ascii=False), legacy_domain, now, now,
+                 (scope_node_id or "").strip()))
             for a in (aliases or []):
                 if str(a).strip():
                     conn.execute("INSERT OR IGNORE INTO dept_aliases (alias, dept_id) VALUES (?,?)",
@@ -317,9 +340,13 @@ class OrgDirectory:
 
     def update_department(self, dept_id: str, name_ko: str = None, parent_id: str = None,
                           master_domains: List[str] = None, default_template_id: str = None,
-                          domain_agents: List[str] = None, legacy_domain: str = None) -> Dict[str, Any]:
+                          domain_agents: List[str] = None, legacy_domain: str = None,
+                          scope_node_id: str = None) -> Dict[str, Any]:
         """부서 개정. **새 버전**을 만들고 구판은 `valid_to` 로 닫아 이력을 보존한다.
-        `parent_id` 가 바뀌면 하위 트리의 path/depth 를 일괄 갱신한다."""
+        `parent_id` 가 바뀌면 하위 트리의 path/depth 를 일괄 갱신한다.
+
+        ★ `scope_node_id`(ECM 조직 노드) 도 개정 대상이다 — 바뀌면 그 부서 사람들이 보는 자료가
+          바뀌므로, 조용히 덮지 않고 새 버전으로 남긴다("언제부터 이 부서가 이 범위였나"에 답한다)."""
         cur = self.get_department(dept_id)
         if not cur:
             raise MasterDataError(f"부서 '{dept_id}' 가 없습니다.")
@@ -352,8 +379,8 @@ class OrgDirectory:
             conn.execute(
                 "INSERT INTO departments (dept_id, version, name_ko, parent_id, path, depth, "
                 "master_domains, default_template_id, domain_agents, legacy_domain, "
-                "valid_from, valid_to, supersedes, status, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,?,'active',?)",
+                "valid_from, valid_to, supersedes, status, updated_at, scope_node_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,?,'active',?,?)",
                 (dept_id, ver,
                  cur["name_ko"] if name_ko is None else name_ko,
                  new_parent, new_path, new_depth,
@@ -361,7 +388,9 @@ class OrgDirectory:
                  cur["default_template_id"] if default_template_id is None else default_template_id,
                  json.dumps(cur["domain_agents"] if domain_agents is None else domain_agents, ensure_ascii=False),
                  cur["legacy_domain"] if legacy_domain is None else legacy_domain,
-                 now, f"{dept_id}#v{cur['version']}", now))
+                 now, f"{dept_id}#v{cur['version']}", now,
+                 (cur.get("scope_node_id", "") if scope_node_id is None
+                  else (scope_node_id or "").strip())))
 
             if moving:
                 # 하위 트리 일괄 이동 — 접두 치환. GLOB 으로 안전하게 범위를 잡는다.
@@ -559,6 +588,7 @@ class OrgDirectory:
             scope = AccessScope(
                 user_id=user_id, display_name=u["display_name"], is_executive=True,
                 is_data_admin=is_da, readable_dept_ids=all_ids, writable_dept_ids=own,
+                readable_scope_nodes=self._scope_nodes_of(all_ids),
                 primary_dept_id=u.get("primary_dept_id", ""), unrestricted=False,
                 can_run_enterprise=True, can_edit_org=False,
                 can_manage_standard=is_da)
@@ -578,10 +608,30 @@ class OrgDirectory:
         scope = AccessScope(
             user_id=user_id, display_name=u["display_name"], is_data_admin=is_da,
             readable_dept_ids=frozenset(readable), writable_dept_ids=frozenset(writable),
+            readable_scope_nodes=self._scope_nodes_of(readable),
             primary_dept_id=u.get("primary_dept_id", ""), unrestricted=False,
             can_run_enterprise=False, can_edit_org=False, can_manage_standard=is_da)
         self._scope_cache[key] = scope
         return scope
+
+    def _scope_nodes_of(self, dept_ids) -> frozenset:
+        """부서들이 대응하는 ECM 조직 노드 집합. 미지정 부서는 아무것도 보태지 않는다.
+
+        ⚠️ 미지정을 "상위 노드로 추측"하지 않는다 — 추측이 한 번 맞으면 그 뒤로는 아무도 검증하지
+          않고, 틀리면 다른 사업부 자료가 열린다. 미지정은 미지정으로 두고 화면이 말하게 한다."""
+        if not dept_ids:
+            return frozenset()
+        try:
+            with self._connect() as conn:
+                q = ",".join("?" for _ in dept_ids)
+                rows = conn.execute(
+                    f"SELECT scope_node_id FROM departments WHERE dept_id IN ({q}) "
+                    f"AND valid_to IS NULL AND status='active' AND scope_node_id <> ''",
+                    tuple(dept_ids)).fetchall()
+            return frozenset(str(r[0]).strip() for r in rows if str(r[0]).strip())
+        except Exception as e:                                       # pragma: no cover
+            print(f"⚠️ [org] 부서→조직노드 해석 실패(범위 없음으로 처리): {e}")
+            return frozenset()
 
     def _writable_from_roles(self, u: Dict[str, Any]) -> List[str]:
         """쓰기 가능 부서 = role 이 member/manager 인 부서와 그 하위. viewer 는 읽기만."""

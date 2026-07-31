@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from api.deps import (Principal, assert_can_manage_standard, current_principal,
-                      visibility_block_reason)
+                      scope_allows_owner, viewer_visible_scopes, visibility_block_reason)
 from core.knowledge_base import knowledge_base, extract_text
 
 router = APIRouter(prefix="/api/v1/knowledge")
@@ -52,7 +52,19 @@ async def list_packs(p: Principal = Depends(current_principal)):
     reason = visibility_block_reason(p)
     if reason:
         return {"status": "success", "data": [], "blocked_reason": reason}
-    return {"status": "success", "data": knowledge_base.list_packs()}
+    packs = knowledge_base.list_packs()
+    nodes = viewer_visible_scopes(p)
+    if nodes is not None:
+        shown = [k for k in packs if scope_allows_owner(nodes, k.get("owner_org_id", ""))]
+        if len(shown) < len(packs):
+            # 몇 건이 가려졌는지 말한다 — 숫자가 없으면 "이게 전부인가"를 판단할 수 없다.
+            return {"status": "success", "data": shown,
+                    "hidden_count": len(packs) - len(shown),
+                    "blocked_reason": (f"소속 조직 범위 밖의 지식팩 "
+                                       f"{len(packs) - len(shown)}건은 표시되지 않습니다."
+                                       if not shown else "")}
+        return {"status": "success", "data": shown}
+    return {"status": "success", "data": packs}
 
 
 @router.get("/scope-report")

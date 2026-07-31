@@ -39,6 +39,9 @@ class DeptCreate(BaseModel):
     domain_agents: List[str] = []
     legacy_domain: str = ""
     aliases: List[str] = []
+    #: 이 부서가 대응하는 ECM 조직 노드(예: MNM_BATTERY). 비우면 미지정 — 그 부서 사람들에게는
+    #: 조직 소유 자료가 보이지 않는다(관문 A: 미지정 = 비노출).
+    scope_node_id: str = ""
 
 
 class DeptUpdate(BaseModel):
@@ -48,6 +51,7 @@ class DeptUpdate(BaseModel):
     default_template_id: Optional[str] = None
     domain_agents: Optional[List[str]] = None
     legacy_domain: Optional[str] = None
+    scope_node_id: Optional[str] = None
 
 
 class UserUpsert(BaseModel):
@@ -155,7 +159,7 @@ async def create_department(req: DeptCreate, p: Principal = Depends(current_prin
         d = await asyncio.to_thread(
             org_directory.create_department, req.dept_id, req.name_ko, req.parent_id,
             req.master_domains, req.default_template_id, req.domain_agents,
-            req.legacy_domain, req.aliases)
+            req.legacy_domain, req.aliases, req.scope_node_id)
     except MasterDataError as e:
         _err(e)
     return {"status": "success", "data": d}
@@ -169,7 +173,8 @@ async def update_department(dept_id: str, req: DeptUpdate,
     try:
         d = await asyncio.to_thread(
             org_directory.update_department, dept_id, req.name_ko, req.parent_id,
-            req.master_domains, req.default_template_id, req.domain_agents, req.legacy_domain)
+            req.master_domains, req.default_template_id, req.domain_agents, req.legacy_domain,
+            req.scope_node_id)
     except MasterDataError as e:
         _err(e)
     return {"status": "success", "data": d}
