@@ -437,3 +437,276 @@ async def close_scenario(scenario_id: str, req: CloseIn,
     except SandboxError as e:
         _sandbox_err(e)
     return {"status": "success", "data": data}
+
+
+# ── [E3] 가정 세트 · 기준선 스냅샷 · 계산 결과 · 비교 ──────────────────────
+# ★ §8.1 이 실행 문맥 키로 못 박은 `assumption_set_id`·`baseline_snapshot_id` 의 **대상**이다.
+#   이것이 없던 동안은 키만 있고 대상이 없어서, "이 숫자가 무슨 가정으로 어떤 기준선과 비교해
+#   나왔나"에 답할 수 없었다 — 답할 수 없는 숫자는 근거가 아니라 주장이다.
+class AssumptionIn(BaseModel):
+    name: str
+    purpose: str
+    values: Dict[str, Any]
+    evidence: Dict[str, str]         # 값마다 근거 — 없으면 400(추측이 계산에 들어가면 안 된다)
+    scope_node_id: str = ""
+
+
+class AssumptionRevise(BaseModel):
+    values: Dict[str, Any]
+    evidence: Dict[str, str]
+    purpose: str = ""
+
+
+class SnapshotIn(BaseModel):
+    name: str
+    as_of: str                       # 언제 기준인가 — 없으면 비교 기준이 못 된다
+    source: str                      # 어디서 온 집계인가 — 없으면 근거가 못 된다
+    values: Dict[str, Any]
+    scope_node_id: str = ""
+    entity_mode: str = "REAL"
+
+
+class ResultIn(BaseModel):
+    scenario_id: str
+    snapshot_id: str
+    assumption_set_id: str
+    calculation_model_version: str   # 어떤 모델이 낸 숫자인가(§8.1) — 없으면 재현 불가
+    values: Dict[str, Any]
+
+
+def _si():
+    from core.enterprise_context.scenario_inputs import ScenarioInputError, scenario_inputs
+    return scenario_inputs, ScenarioInputError
+
+
+@router.post("/assumption-sets")
+async def create_assumption_set(req: AssumptionIn, p: Principal = Depends(current_principal),
+                                ctx: EnterpriseContext = Depends(enterprise_context)):
+    """가정값 묶음을 만든다(DRAFT). **가정값마다 근거가 필요하다.**"""
+    assert_can_edit_org(p)
+    si, Err = _si()
+    try:
+        d = await asyncio.to_thread(si.create_assumption_set, req.name, req.purpose, req.values,
+                                    req.evidence, req.scope_node_id, ctx.tenant_id,
+                                    (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.get("/assumption-sets")
+async def list_assumption_sets(status: str = "", scope_node_id: str = "",
+                               p: Principal = Depends(current_principal)):
+    si, _ = _si()
+    return {"status": "success",
+            "data": await asyncio.to_thread(si.list_assumption_sets, status, scope_node_id)}
+
+
+@router.post("/assumption-sets/{assumption_set_id}/approve")
+async def approve_assumption_set(assumption_set_id: str,
+                                 p: Principal = Depends(current_principal)):
+    """승인 — **승인된 가정만 계산에 쓸 수 있다.**"""
+    assert_can_edit_org(p)
+    si, Err = _si()
+    try:
+        d = await asyncio.to_thread(si.approve_assumption_set, assumption_set_id, (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.post("/assumption-sets/{assumption_set_id}/revise")
+async def revise_assumption_set(assumption_set_id: str, req: AssumptionRevise,
+                                p: Principal = Depends(current_principal)):
+    """개정 — **새 버전을 만든다.** 계산에 쓰인 가정을 제자리에서 고치면 과거 결과의 근거가 사라진다."""
+    assert_can_edit_org(p)
+    si, Err = _si()
+    try:
+        d = await asyncio.to_thread(si.revise_assumption_set, assumption_set_id, req.values,
+                                    req.evidence, (p.user_id or ""), req.purpose)
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.post("/snapshots")
+async def create_snapshot(req: SnapshotIn, p: Principal = Depends(current_principal),
+                          ctx: EnterpriseContext = Depends(enterprise_context)):
+    """기준선 집계를 스냅샷으로 고정한다(DRAFT)."""
+    assert_can_edit_org(p)
+    si, Err = _si()
+    try:
+        d = await asyncio.to_thread(si.create_snapshot, req.name, req.as_of, req.values,
+                                    req.source, req.scope_node_id, req.entity_mode,
+                                    ctx.tenant_id, (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.get("/snapshots")
+async def list_snapshots(status: str = "", entity_mode: str = "",
+                         p: Principal = Depends(current_principal)):
+    si, _ = _si()
+    return {"status": "success",
+            "data": await asyncio.to_thread(si.list_snapshots, status, entity_mode)}
+
+
+@router.post("/snapshots/{snapshot_id}/approve")
+async def approve_snapshot(snapshot_id: str, p: Principal = Depends(current_principal)):
+    assert_can_edit_org(p)
+    si, Err = _si()
+    try:
+        d = await asyncio.to_thread(si.approve_snapshot, snapshot_id, (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.post("/results")
+async def record_result(req: ResultIn, p: Principal = Depends(current_principal),
+                        ctx: EnterpriseContext = Depends(enterprise_context)):
+    """결정론적 계산 결과를 등록한다. **등록하는 순간 입력(가정·기준선)이 동결된다.**
+
+    ⚠️ 이 API 는 계산하지 않는다 — 엔진이 계산하고 결과를 여기에 남긴다(§8.2: LLM 은 계산값을
+      만들지 않는다)."""
+    assert_can_edit_org(p)
+    si, Err = _si()
+    try:
+        d = await asyncio.to_thread(si.record_result, req.scenario_id, req.snapshot_id,
+                                    req.assumption_set_id, req.calculation_model_version,
+                                    req.values, (p.user_id or ""), ctx.tenant_id)
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.get("/results")
+async def list_results(scenario_id: str = "", p: Principal = Depends(current_principal)):
+    si, _ = _si()
+    return {"status": "success", "data": await asyncio.to_thread(si.list_results, scenario_id)}
+
+
+@router.get("/results/{result_id}/comparison")
+async def result_comparison(result_id: str, p: Principal = Depends(current_principal)):
+    """결과를 기준선과 비교한다. **각 값의 상태(실제/가상)와 근거를 함께 준다.**
+
+    ★ 두 숫자를 나란히 놓는 순간 한쪽이 확정 실적이고 다른 쪽이 가정이라는 사실이 표에서
+      사라지기 쉽다(§8.1 은 그 분리를 요구한다). 응답의 `notes` 가 그것을 말한다."""
+    from core.enterprise_context.comparison import ComparisonError, compare_result
+    try:
+        d = await asyncio.to_thread(compare_result, result_id)
+    except ComparisonError as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.get("/comparisons")
+async def multi_comparison(result_ids: str, p: Principal = Depends(current_principal)):
+    """여러 결과를 나란히 본다(콤마 구분). **기준선이 다르면 거부한다** — 그 차이가 시나리오
+    차이인지 기준선 차이인지 구분할 수 없기 때문이다."""
+    from core.enterprise_context.comparison import ComparisonError, compare_results
+    ids = [x.strip() for x in (result_ids or "").split(",") if x.strip()]
+    try:
+        d = await asyncio.to_thread(compare_results, ids)
+    except ComparisonError as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+# ── [E2 잔여] 에이전트팩 바인딩 ────────────────────────────────────────────
+# ★ 부서별 평면 목록(`domain_agents`)은 전사 표준 하나를 추가할 때 모든 부서를 각각 고쳐야 하고,
+#   한 곳을 빠뜨리면 그 부서만 조용히 다른 구성으로 돈다. 바인딩 + 상속으로 바꾼다.
+class PackIn(BaseModel):
+    name: str
+    purpose: str
+    agents: List[str]
+
+
+class PackBindIn(BaseModel):
+    scope_node_id: str
+    entity_mode: str = "REAL"
+    inherit_descendants: bool = True
+    effective_from: str = ""
+    effective_to: str = ""
+
+
+def _ap():
+    from core.enterprise_context.agent_pack_binding import AgentPackError, agent_packs
+    return agent_packs, AgentPackError
+
+
+@router.post("/agent-packs")
+async def create_agent_pack(req: PackIn, p: Principal = Depends(current_principal),
+                            ctx: EnterpriseContext = Depends(enterprise_context)):
+    assert_can_edit_org(p)
+    ap, Err = _ap()
+    try:
+        d = await asyncio.to_thread(ap.create_pack, req.name, req.purpose, req.agents,
+                                    ctx.tenant_id, (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.get("/agent-packs")
+async def list_agent_packs(status: str = "", p: Principal = Depends(current_principal)):
+    ap, _ = _ap()
+    return {"status": "success", "data": await asyncio.to_thread(ap.list_packs, status)}
+
+
+@router.post("/agent-packs/{pack_id}/approve")
+async def approve_agent_pack(pack_id: str, p: Principal = Depends(current_principal)):
+    """승인 — **승인된 팩만 조직에 바인딩할 수 있다.**"""
+    assert_can_edit_org(p)
+    ap, Err = _ap()
+    try:
+        d = await asyncio.to_thread(ap.approve_pack, pack_id, (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.post("/agent-packs/{pack_id}/bind")
+async def bind_agent_pack(pack_id: str, req: PackBindIn,
+                          p: Principal = Depends(current_principal),
+                          ctx: EnterpriseContext = Depends(enterprise_context)):
+    """팩을 조직 노드에 적용한다(상속 기본 켬).
+
+    ⚠️ `master_scope_bindings` 와 같은 UNIQUE 키다 — **기간이 같으면 덮어쓴다**(추가가 아니라 수정)."""
+    assert_can_edit_org(p)
+    ap, Err = _ap()
+    try:
+        d = await asyncio.to_thread(ap.bind, pack_id, req.scope_node_id, ctx.tenant_id,
+                                    req.entity_mode, req.inherit_descendants,
+                                    req.effective_from, req.effective_to, (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.delete("/agent-pack-bindings/{binding_id}")
+async def unbind_agent_pack(binding_id: str, p: Principal = Depends(current_principal)):
+    """해제(소프트) — 물리 삭제하지 않는다. 과거 산출물이 어떤 구성으로 만들어졌는지의 근거다."""
+    assert_can_edit_org(p)
+    ap, _ = _ap()
+    ok = await asyncio.to_thread(ap.unbind, binding_id, (p.user_id or ""))
+    if not ok:
+        raise HTTPException(status_code=404, detail="바인딩을 찾을 수 없습니다.")
+    return {"status": "success", "data": {"binding_id": binding_id, "status": "revoked"}}
+
+
+@router.get("/nodes/{node_id}/agents")
+async def resolve_node_agents(node_id: str, entity_mode: str = "REAL",
+                              p: Principal = Depends(current_principal)):
+    """이 조직에서 실제로 도는 에이전트와 **그 근거**(어느 팩·어느 조직에서 상속됐는가).
+
+    ★ `skipped` 도 함께 본다 — 만료·비상속·미승인으로 빠진 것을 알아야 "왜 안 도는지"에
+      답할 수 있다. 비어 있으면 `bound=false` 와 안내 문구가 나온다(에이전트가 없는 것과
+      바인딩이 없는 것은 다르다)."""
+    ap, Err = _ap()
+    try:
+        d = await asyncio.to_thread(ap.resolve_agents, node_id, "", entity_mode)
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}

@@ -76,6 +76,14 @@ ORG_USER_CHANGED = "ORG_USER_CHANGED"             # 사용자 등록·권한 플
 #   복제해 어떤 가정으로 판단했는지**가 남아야 한다 — 남지 않으면 가상 결과의 근거를 설명할 수 없고,
 #   "이 숫자가 실제인가 가정인가"라는 질문에 답할 수 없다(비협상 3).
 VIRTUAL_SCENARIO_CHANGED = "VIRTUAL_SCENARIO_CHANGED"
+# [E3] 계산의 입력(가정 세트·기준선 스냅샷)과 출력(결과) 변경. 이것이 없으면 "이 숫자가 무슨
+#   가정으로 어떤 기준선과 비교해 나왔나"에 답할 수 없고, 답할 수 없는 숫자는 근거가 아니라
+#   주장이다 — 그런데 경영 판단에 쓰이면 그때부터 사실처럼 취급된다.
+SCENARIO_INPUT_CHANGED = "SCENARIO_INPUT_CHANGED"
+# [E2] 에이전트팩·바인딩 변경 — **어떤 조직에서 어떤 에이전트가 도는가**를 정하는 값이다.
+#   산출물이 왜 그렇게 나왔는지 설명하려면 그때의 구성을 알아야 하고, 구성 변경이 남지 않으면
+#   과거 산출물을 재현할 수도 반박할 수도 없다.
+AGENT_PACK_CHANGED = "AGENT_PACK_CHANGED"
 
 EVENTS = (
     ACCESS_DENIED_SCOPE_MISMATCH, ACCESS_DENIED_UNAUTHENTICATED,
@@ -84,6 +92,7 @@ EVENTS = (
     CONNECTOR_QUERY_EXECUTED, CONNECTOR_QUERY_DENIED,
     PROGRAM_STATUS_CHANGED, PROGRAM_USE_BLOCKED,
     ORG_STRUCTURE_CHANGED, ORG_USER_CHANGED, VIRTUAL_SCENARIO_CHANGED,
+    SCENARIO_INPUT_CHANGED, AGENT_PACK_CHANGED,
 )
 
 #: 식별되지 않은 주체. 빈 문자열로 두면 "기록 누락"과 구분되지 않는다.

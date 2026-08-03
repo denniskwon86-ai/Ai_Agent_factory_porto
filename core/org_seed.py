@@ -105,10 +105,38 @@ def resolve_department_config(domain_key: str) -> Dict[str, Any]:
     d = org_directory.get_department(domain_key)
     if not d or d.get("status") != "active":
         return {"name_ko": domain_key, "template_id": "", "agents": [], "master_domains": []}
+    agents = list(d.get("domain_agents") or [])
+    agent_source = "부서 목록(domain_agents)"
+
+    # ★★ [ECM E2 · 2026-08-03] **에이전트팩 바인딩이 있으면 그것을 쓴다.**
+    #   부서별 평면 목록(`domain_agents`)은 전사 표준 하나를 추가할 때 모든 부서를 각각 고쳐야
+    #   하고, 한 곳을 빠뜨리면 그 부서만 조용히 다른 구성으로 돈다(하드코딩 맵 3개에서 겪은 문제).
+    #   ⚠️ 판정 함수만 만들어 두고 실행 경로에서 부르지 않으면 통제가 아니라 장식이다 —
+    #     오늘 아침에 목록 API 에서 정확히 그 실패를 겪었다. 그래서 여기서 부른다.
+    #   하위호환: 바인딩이 없거나 해석에 실패하면 **기존 목록을 그대로 쓴다.** 조직 미도입·
+    #     ECM 미배선 환경에서 에이전트가 사라지면 프로젝트 생성 자체가 망가진다.
+    scope_node = (d.get("scope_node_id") or "").strip()
+    if scope_node:
+        try:
+            from core.enterprise_context.agent_pack_binding import agent_packs
+            r = agent_packs.resolve_agents(scope_node)
+            if r.get("bound"):
+                # 팩이 정한 구성이 기준이고, 부서 고유 목록은 그 뒤에 얹는다(둘 다 의도된 값이다).
+                merged = list(r["agents"])
+                for a in agents:
+                    if a not in merged:
+                        merged.append(a)
+                agents = merged
+                agent_source = f"에이전트팩 바인딩({scope_node}) + 부서 목록"
+        except Exception as e:
+            print(f"ℹ️ [org_seed] 에이전트팩 해석 실패 — 부서 목록을 그대로 씁니다: {e}")
     return {
         "name_ko": d.get("name_ko") or domain_key,
         "template_id": d.get("default_template_id") or "",
-        "agents": d.get("domain_agents") or [],
+        "agents": agents,
+        # 어디서 온 구성인지 함께 준다 — "이 에이전트가 왜 도는가"에 답할 수 있어야 한다.
+        "agent_source": agent_source,
+        "scope_node_id": scope_node,
         "master_domains": d.get("master_domains") or [],
     }
 
