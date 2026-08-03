@@ -38,6 +38,8 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from core.collaboration_store import canonical_json, collaboration_store, now_iso
+from core.collaboration_events import (PUBLICATION_REVIEW_REQUESTED, PUBLICATION_UPDATED,
+                                       collaboration_events)
 
 # ── 상태 ─────────────────────────────────────────────────────────────────────
 DRAFT = "DRAFT"
@@ -356,7 +358,9 @@ class Publication:
                     rationale=f"제외 항목 {len(redaction.get('excluded', []))}건",
                     evidence=[{"evidence_hash": h, "version_id": vid}],
                     tenant_id=p["tenant_id"], scope=p["scope_id"])
-        return self.get(publication_id, actor)
+        out = self.get(publication_id, actor)
+        self._notify(PUBLICATION_UPDATED, out, actor)
+        return out
 
     def _fail_render(self, publication_id: str, err: str, now: str) -> None:
         """★ 실패는 `DRAFT` 에 머무르고 사유를 남긴다. 상태를 올리면 빈 문서가 승인된다."""
@@ -397,7 +401,9 @@ class Publication:
                     decision=f"검토 요청 {sorted(types)}",
                     rationale=f"{p['audience']} · v{p['document_version']}",
                     tenant_id=p["tenant_id"], scope=p["scope_id"])
-        return self.get(publication_id, actor)
+        out = self.get(publication_id, actor)
+        self._notify(PUBLICATION_REVIEW_REQUESTED, out, actor)
+        return out
 
     def approve(self, publication_id: str, actor: str, review_type: str,
                 status: str = REVIEW_APPROVED, comment: str = "") -> Dict[str, Any]:
@@ -441,7 +447,9 @@ class Publication:
                     decision=f"{review_type}={status}",
                     rationale=(comment or "").strip()[:200],
                     tenant_id=p["tenant_id"], scope=p["scope_id"])
-        return self.get(publication_id, actor)
+        out = self.get(publication_id, actor)
+        self._notify(PUBLICATION_UPDATED, out, actor)
+        return out
 
     # ── 게시 ──────────────────────────────────────────────────────────────
     def publish(self, publication_id: str, actor: str, targets: List[Dict[str, str]],
@@ -512,6 +520,7 @@ class Publication:
                     rationale=f"대상 {[t.get('target') for t in targets]}",
                     tenant_id=p["tenant_id"], scope=p["scope_id"])
         out = self.get(publication_id, actor)
+        self._notify(PUBLICATION_UPDATED, out, actor)
         if failures:
             # ⚠️ 부분 실패를 성공으로 뭉개지 않는다. 어디로 안 나갔는지가 사용자가 할 일이다.
             out["note"] = (f"배포 실패 {len(failures)}건({', '.join(failures)}) — 발간 상태를 "
@@ -574,6 +583,7 @@ class Publication:
         out = self.get(publication_id, actor)
         out["note"] = ("회수했습니다. 배포 이력과 버전은 그대로 남습니다 — 이미 읽은 사람이 "
                        "무엇을 읽었는지는 지울 수 없습니다.")
+        self._notify(PUBLICATION_UPDATED, out, actor)
         return out
 
     # ── 내부 ──────────────────────────────────────────────────────────────
@@ -686,6 +696,21 @@ class Publication:
             except Exception:
                 d[dst] = {}
         return d
+
+    @staticmethod
+    def _notify(event: str, pub: Dict[str, Any], actor: str) -> None:
+        """[CL-4] 작성자·검토자에게만 알린다. **문서 본문을 싣지 않는다.**
+
+        ⚠️ 알려진 한계: 검토 **요청** 시점에는 검토자가 누구인지 이 시스템이 모른다
+          (`publication_reviews.reviewer_id` 는 판정한 뒤에 채워지고, 검토자를 지정하는
+          계약이 아직 없다). 그래서 요청 알림은 **작성자와 이미 판정한 검토자에게만** 간다.
+        ★ 모르는 수신자를 '전체'로 대체하지 않는다 — 그 순간 대외 발간 검토 요청이 전사에
+          뿌려진다. 검토자 지정 계약이 생기면 그때 수신자가 넓어진다."""
+        collaboration_events.emit(
+            event, collaboration_events.publication_recipients(pub),
+            {"id": pub["publication_id"], "status": pub["status"],
+             "at": pub["updated_at"], "title": pub["title"],
+             "actor": actor, "version": pub["document_version"]})
 
     def _audit(self, event: str, subject_id: str, actor: str, decision: str = "",
                rationale: str = "", evidence: Optional[List[Any]] = None,

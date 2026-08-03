@@ -99,10 +99,16 @@ export default function App() {
   //   ⚠️ 통제가 서버에서 옳게 동작해도 화면이 옛 답을 들고 있으면 사용자에게는 같은 사고다.
   const [actingUserRev, setActingUserRev] = useState(0);
   useEffect(() => {
-    const h = () => setActingUserRev(v => v + 1);
+    const h = () => {
+      setActingUserRev(v => v + 1);
+      // [CL-4] ★★ SSE 도 **다시 연결한다.** `?as_user=` 가 URL 에 박혀 있으므로, 재연결하지
+      //   않으면 스트림은 계속 **이전 사용자 주소**로 열려 있다 — 새 사용자의 알림은 안 오고,
+      //   이전 사용자의 알림이 이 화면으로 계속 들어온다. 두 번째가 더 나쁘다.
+      connectSSE();
+    };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
-  }, []);
+  }, [connectSSE]);
 
   useEffect(() => {
     // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)

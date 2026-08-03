@@ -131,6 +131,9 @@ interface FactoryStore {
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
+// [CL-4] 사용자 식별을 쿼리로 싣는 공용 헬퍼. 여기서 다시 구현하지 않는다.
+import { apiUrl } from '../lib/api';
+
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;
 let _sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -729,7 +732,11 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       try { _sseConn.close(); } catch (e) { /* noop */ }
       _sseConn = null;
     }
-    const eventSource = new EventSource(`${API_BASE_URL}/ws/timeline`);
+    // [CL-4] ★★ `apiUrl()` 로 만든다 — EventSource 는 헤더를 못 붙이므로 사용자 식별이
+    //   `?as_user=` 쿼리로 실려야 한다. 예전처럼 `API_BASE_URL` 만 쓰면 이 연결은 **항상
+    //   익명**이고, 서버는 익명 구독자에게 지정 수신자 이벤트를 보내지 않는다 —
+    //   즉 전달·결정·발간 알림이 브라우저에 영원히 도착하지 않는다(2026-08-04 실측).
+    const eventSource = new EventSource(apiUrl('/ws/timeline'));
     _sseConn = eventSource;
 
     eventSource.onopen = () => { set({ isConnected: true }); get().checkHotl(); };

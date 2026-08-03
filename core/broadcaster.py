@@ -13,17 +13,24 @@ class SSEBroadcaster:
     """
     def __init__(self):
         self.clients: list[asyncio.Queue] = []
+        # [CL-4] 큐 → 구독자 사용자 ID. **전역 브로드캐스트와 지정 수신자를 구분하기 위한 것.**
+        #   ⚠️ 기존 `clients` 목록은 그대로 둔다 — 지금 도는 15개 화면이 전역 이벤트에 의존한다.
+        self._client_users: dict[int, str] = {}
         self.internal_listeners = []  # 내부 파이썬 콜백 함수들 (슈퍼바이저 데몬 등)
 
     def add_internal_listener(self, callback):
         """내부 데몬용 이벤트 구독 (async callback)"""
         self.internal_listeners.append(callback)
 
-    async def subscribe(self) -> AsyncGenerator[str, None]:
-        """클라이언트(웹 브라우저) 구독 및 연결 유지"""
+    async def subscribe(self, user_id: str = "") -> AsyncGenerator[str, None]:
+        """클라이언트(웹 브라우저) 구독 및 연결 유지.
+
+        [CL-4] `user_id` 는 **지정 수신자 이벤트를 받기 위한 주소**다. 비우면 전역 이벤트만
+        받는다 — 익명 연결이 남의 결정·발간 알림을 받는 일은 없어야 한다(작업서 §CL-BE-05)."""
         # 유한 큐: 죽은/느린 클라이언트의 큐가 무한히 쌓여 메모리를 잠식하는 것 방지
         q: asyncio.Queue = asyncio.Queue(maxsize=500)
         self.clients.append(q)
+        self._client_users[id(q)] = (user_id or "").strip()
         try:
             while True:
                 try:
@@ -39,6 +46,7 @@ class SSEBroadcaster:
                 self.clients.remove(q)
             except ValueError:
                 pass
+            self._client_users.pop(id(q), None)
 
     async def broadcast(self, event_type: str, payload: Dict[str, Any]):
         """시스템 전역에서 호출되는 실시간 상태 Push 메서드"""
@@ -70,6 +78,49 @@ class SSEBroadcaster:
         # 내부 리스너 비동기 실행 (슈퍼바이저 데몬용)
         for callback in self.internal_listeners:
             asyncio.create_task(callback(event_type, payload))
+
+    # ── [CL-4] 지정 수신자 이벤트 ────────────────────────────────────────────
+    def emit_to(self, event_type: str, payload: Dict[str, Any],
+                recipients) -> int:
+        """**지정한 사용자에게만** 보낸다. 보낸 큐 수를 돌려준다.
+
+        ★★ 이것이 CL-4 의 핵심이다. 기존 `broadcast()` 는 **모두에게** 간다 — 협업 이벤트를
+          거기에 실으면 A 의 결정 요청이 B 의 화면에 뜬다(작업서 §CL-BE-05: "다른 사용자의
+          이벤트가 현재 클라이언트로 전송되는 구조라면 구현을 완료로 판정하지 않는다").
+
+        ⚠️ **수신자가 비어 있으면 아무에게도 보내지 않는다.** '비었으니 전체'로 해석하는 순간
+          권한 계산이 실패한 이벤트가 전사에 뿌려진다 — 실패는 닫히는 쪽이어야 한다.
+        ⚠️ 익명 구독자(사용자 미지정)는 **절대 받지 않는다.** 받으면 식별하지 않은 브라우저가
+          남의 알림을 읽는다.
+
+        `broadcast()` 와 달리 async 가 아니다 — `put_nowait` 만 쓰므로 동기 도메인 코드
+        (`decision_case`, `publication`)에서 이벤트 루프 없이도 부를 수 있다."""
+        targets = {str(r).strip() for r in (recipients or []) if str(r).strip()}
+        if not targets:
+            return 0
+        message = {"type": event_type, "timestamp": datetime.now().isoformat(),
+                   "payload": payload}
+        try:
+            line = f"data: {json.dumps(jsonable_encoder(message), ensure_ascii=False)}\n\n"
+        except Exception as e:
+            print(f"⚠️ [Broadcaster] 이벤트 직렬화 실패({event_type}): {e}")
+            return 0
+        sent = 0
+        for q in list(self.clients):
+            uid = self._client_users.get(id(q), "")
+            if not uid or uid not in targets:
+                continue
+            try:
+                q.put_nowait(line)
+                sent += 1
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                    q.put_nowait(line)
+                    sent += 1
+                except Exception:
+                    pass
+        return sent
 
     async def send_alert(self, message: str):
         """Slack/Teams 등 Webhook 채널로 긴급 알람 전송 (HOTL, 에러 발생 시)"""

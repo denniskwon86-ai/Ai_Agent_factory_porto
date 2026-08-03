@@ -42,6 +42,8 @@ from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from core.collaboration_store import canonical_json, collaboration_store, now_iso
+from core.collaboration_events import (DECISION_REVIEW_REQUESTED, DECISION_UPDATED,
+                                       collaboration_events)
 
 DRAFT = "DRAFT"
 REVIEW_REQUESTED = "REVIEW_REQUESTED"
@@ -374,7 +376,10 @@ class DecisionCase:
                     rationale=d["question"][:200],
                     evidence=[{"evidence_hash": d["evidence_hash"]}],
                     tenant_id=d["tenant_id"], scope=d["scope_id"])
-        return self.get(decision_id, actor, today)
+        out = self.get(decision_id, actor, today)
+        # [CL-4] **참여자에게만** 알린다. 목록에 없는 사람은 안건의 존재도 몰라야 한다.
+        self._notify(DECISION_REVIEW_REQUESTED, out, actor)
+        return out
 
     def participant_response(self, decision_id: str, user_id: str, response_status: str,
                              response: str = "", today: str = "") -> Dict[str, Any]:
@@ -401,7 +406,9 @@ class DecisionCase:
         if d["status"] == REVIEW_REQUESTED:
             self._store.execute("UPDATE decision_cases SET status=?, updated_at=? "
                                 "WHERE decision_id=?", (IN_REVIEW, now, decision_id))
-        return self.get(decision_id, user_id, today)
+        out = self.get(decision_id, user_id, today)
+        self._notify(DECISION_UPDATED, out, user_id)
+        return out
 
     def request_meeting(self, decision_id: str, actor: str, title: str, schedule: str = "",
                         channel: str = "", today: str = "") -> Dict[str, Any]:
@@ -438,6 +445,7 @@ class DecisionCase:
         out = self.get(decision_id, actor, today)
         out["note"] = ("회의 **요청**만 기록했습니다. 외부 캘린더·메시지에는 아무것도 보내지 "
                        "않았습니다 — 실제 초대는 사람이 만들어야 합니다(§3-7).")
+        self._notify(DECISION_UPDATED, out, actor)
         return out
 
     # ── 결정 ──────────────────────────────────────────────────────────────
@@ -478,7 +486,9 @@ class DecisionCase:
                                "baseline_id": d["baseline_id"],
                                "conditions": (conditions or "").strip()}],
                     tenant_id=d["tenant_id"], scope=d["scope_id"])
-        return self.get(decision_id, actor, today)
+        out = self.get(decision_id, actor, today)
+        self._notify(DECISION_UPDATED, out, actor)
+        return out
 
     def create_actions(self, decision_id: str, actor: str, actions: List[Dict[str, Any]],
                        today: str = "") -> Dict[str, Any]:
@@ -523,7 +533,9 @@ class DecisionCase:
                     decision=f"실행과제 {len(actions)}건 생성",
                     rationale=d["question"][:200],
                     tenant_id=d["tenant_id"], scope=d["scope_id"])
-        return self.get(decision_id, actor, today)
+        out = self.get(decision_id, actor, today)
+        self._notify(DECISION_UPDATED, out, actor)
+        return out
 
     def measure_effect(self, decision_id: str, actor: str, action_id: str,
                        measured_effect: str, today: str = "") -> Dict[str, Any]:
@@ -552,7 +564,9 @@ class DecisionCase:
                     rationale=f"결정 당시 기준선 {d['baseline_id'] or '(없음)'} 대비",
                     evidence=[{"action_id": action_id, "baseline_id": d["baseline_id"]}],
                     tenant_id=d["tenant_id"], scope=d["scope_id"])
-        return self.get(decision_id, actor, today)
+        out = self.get(decision_id, actor, today)
+        self._notify(DECISION_UPDATED, out, actor)
+        return out
 
     # ── 근거 변경 감지 ────────────────────────────────────────────────────
     def refresh_evidence(self, decision_id: str, new_evidence: Dict[str, Any],
@@ -643,6 +657,18 @@ class DecisionCase:
         if not d["external_created"]:
             d["note"] = "외부 캘린더에는 아직 만들어지지 않았습니다 — 사람이 만들어야 합니다."
         return d
+
+    @staticmethod
+    def _notify(event: str, case: Dict[str, Any], actor: str) -> None:
+        """[CL-4] 참여자에게만 알린다. **본문·참여자 명단을 싣지 않는다** — ID·상태·시각뿐이다.
+
+        ★ 수신자를 `participants` 에서 계산한다. `queue()` 와 같은 규칙이어야 하며, 두 곳이
+          갈라지면 알림이 목록보다 넓어진다(= 안 보이는 안건의 알림이 온다)."""
+        collaboration_events.emit(
+            event, collaboration_events.decision_recipients(case),
+            {"id": case["decision_id"], "status": case["status"],
+             "at": case["updated_at"], "title": case["question"],
+             "actor": actor, "version": case["package_version"]})
 
     def _audit(self, event: str, subject_id: str, actor: str, decision: str = "",
                rationale: str = "", evidence: Optional[List[Any]] = None,

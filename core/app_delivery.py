@@ -31,6 +31,8 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from core.collaboration_events import (APP_DELIVERY_RECEIVED, APP_DELIVERY_UPDATED,
+                                       collaboration_events)
 from core.collaboration_store import (CollaborationStoreError, canonical_json,
                                       collaboration_store, now_iso, snapshot_hash)
 
@@ -179,7 +181,10 @@ class AppDelivery:
                             evidence=[{"release_id": release_id,
                                        "manifest_fingerprint": row["manifest_fingerprint"]}],
                             tenant_id=tenant_id, scope=enterprise_scope_id)
-        return self._view(row, viewer_user_id=sender_user_id)
+        out = self._view(row, viewer_user_id=sender_user_id)
+        # [CL-4] **보낸 사람과 받는 사람 둘에게만.** 부서 전체가 아니다.
+        self._notify(APP_DELIVERY_RECEIVED, out, sender_user_id)
+        return out
 
     # ── 응답 ──────────────────────────────────────────────────────────────
     def accept(self, delivery_id: str, user_id: str, display_name: str = "",
@@ -232,6 +237,7 @@ class AppDelivery:
         out["scope_note"] = ("앱을 받았을 뿐 데이터 접근 범위는 넓어지지 않았습니다 — 앱은 "
                              "호스트 권한으로 실행되며, 원래 보이지 않던 자료는 앱에서도 "
                              "보이지 않습니다.")
+        self._notify(APP_DELIVERY_UPDATED, out, user_id)
         return out
 
     def reject(self, delivery_id: str, user_id: str, note: str = "",
@@ -251,9 +257,11 @@ class AppDelivery:
                             decision=f"{row['release_id']} 거절",
                             rationale=(note or "").strip() or "(사유 없음)",
                             tenant_id=row["tenant_id"], scope=row["enterprise_scope_id"])
-        return self._view(self._store.one(
+        out = self._view(self._store.one(
             "SELECT * FROM app_deliveries WHERE delivery_id=?", (delivery_id,)),
             viewer_user_id=user_id)
+        self._notify(APP_DELIVERY_UPDATED, out, user_id)
+        return out
 
     def revoke(self, delivery_id: str, user_id: str, reason: str = "",
                today: str = "") -> Dict[str, Any]:
@@ -277,9 +285,11 @@ class AppDelivery:
                             decision=f"{row['release_id']} 전달 회수",
                             rationale=(reason or "").strip() or "(사유 없음)",
                             tenant_id=row["tenant_id"], scope=row["enterprise_scope_id"])
-        return self._view(self._store.one(
+        out = self._view(self._store.one(
             "SELECT * FROM app_deliveries WHERE delivery_id=?", (delivery_id,)),
             viewer_user_id=user_id)
+        self._notify(APP_DELIVERY_UPDATED, out, user_id)
+        return out
 
     # ── 조회 ──────────────────────────────────────────────────────────────
     def inbox(self, user_id: str, today: str = "",
@@ -393,6 +403,15 @@ class AppDelivery:
         if eff == EXPIRED:
             d["note"] = f"{row.get('expires_at')} 에 만료됐습니다 — 보낸 사람이 다시 전달해야 합니다."
         return d
+
+    @staticmethod
+    def _notify(event: str, delivery: dict, actor: str) -> None:
+        """[CL-4] 보낸 사람·받는 사람에게만 알린다. **manifest·권한 스냅샷을 싣지 않는다.**"""
+        collaboration_events.emit(
+            event, collaboration_events.delivery_recipients(delivery),
+            {"id": delivery.get("delivery_id", ""), "status": delivery.get("status", ""),
+             "at": delivery.get("responded_at") or delivery.get("created_at", ""),
+             "title": delivery.get("release_id", ""), "actor": actor})
 
     def _ledger_append(self, event: str, subject_id: str, actor_id: str, decision: str = "",
                        rationale: str = "", evidence: Optional[List[Any]] = None,
