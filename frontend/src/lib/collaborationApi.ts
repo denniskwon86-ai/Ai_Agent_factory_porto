@@ -4,24 +4,10 @@
 //   `KnowledgeHubPanel.tsx` 가 자기 `localhost:8080` 을 선언해 인터셉터(`127.0.0.1` 기준)가
 //   식별 헤더를 못 붙였고, 그 화면의 모든 호출이 조용히 익명으로 나갔다.
 //   → 여기서는 공용 `lib/api.ts` 만 쓴다. 사용자 식별 헤더는 인터셉터가 붙인다.
-import { API_BASE_URL } from './api';
-
-async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const r = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    // ⚠️ 401 과 404 를 같은 문구로 뭉개지 않는다 — 사용자가 해야 할 일이 다르다.
-    //   401: 사용자를 지정해야 한다 / 404: 그 요청은 (내게) 없다.
-    const err = new Error(j?.detail || `요청 실패 (${r.status})`) as Error & { status?: number };
-    err.status = r.status;
-    throw err;
-  }
-  return j.data as T;
-}
+// ⚠️ 401 과 404 를 같은 문구로 뭉개지 않는다 — 사용자가 해야 할 일이 다르다.
+//   401: 사용자를 지정해야 한다 / 404: 그 요청은 (내게) 없다.
+// [CL-2] 그 규약은 의사결정 API 도 똑같이 쓰므로 `closedLoopFetch` 로 옮겼다(복사본 금지).
+import { closedLoopFetch as req } from './closedLoopFetch';
 
 /** 전달 상태. 만료는 **읽는 시점에** 판정되므로 서버가 준 값을 그대로 믿는다. */
 export type DeliveryStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'REVOKED';

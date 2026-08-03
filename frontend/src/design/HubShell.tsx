@@ -79,11 +79,15 @@ export function HubShell({
 }
 
 /** 화면 머리 — 무엇을 하는 화면인지와 현재 상태를 함께 말한다. */
+/** 상태 칩 색. **문자열을 그대로 받지 않는다** — 오타가 나면 색만 빠진 채 조용히 렌더링되고,
+ *  «위험»으로 보여야 할 상태가 회색으로 나간다. */
+export type ChipTone = 'success' | 'warn' | 'data' | 'danger' | 'muted';
+
 export function ScreenHead({ kicker, title, description, chip }: {
   kicker?: string;
   title: string;
   description?: string;
-  chip?: { label: string; tone?: 'success' | 'warn' | 'data' | 'danger' | 'muted' };
+  chip?: { label: string; tone?: ChipTone };
 }) {
   return (
     <header className="screen-head">

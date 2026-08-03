@@ -592,8 +592,13 @@ class DecisionCase:
         if not d["baseline_id"]:
             out.append({"code": "NO_BASELINE",
                         "reason": "기준선이 없습니다 — 무엇과 비교해 결정하는지 알 수 없습니다."})
-        need_info = [p["user_id"] for p in d.get("participants", [])
-                     if p.get("response_status") == RESPONSE_NEED_INFO]
+        # ⚠️ **중복을 제거한다.** 한 사람이 요청자이면서 결정자인 안건은 흔하고, 그때
+        #   `participant_response` 는 그 사용자의 모든 역할 행을 함께 갱신한다(한 사람의 의견은
+        #   하나다). 그대로 모으면 화면에 같은 이름이 두 번 찍히고 — 2026-08-04 화면 실측에서
+        #   `['hikwon@lsmnm.com', 'hikwon@lsmnm.com']` 로 나왔다 — 읽는 사람은 두 사람이
+        #   정보 부족을 답한 것으로 오해한다. 차단 사유는 **누가 몇 명인지**가 정보다.
+        need_info = sorted({p["user_id"] for p in d.get("participants", [])
+                            if p.get("response_status") == RESPONSE_NEED_INFO})
         if need_info:
             out.append({"code": "PARTICIPANT_NEEDS_INFO",
                         "reason": f"정보 부족을 답한 참여자가 있습니다: {need_info}"})

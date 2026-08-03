@@ -454,6 +454,55 @@
 .afs-scope .afs-banner.error { border-left: 4px solid var(--red); color: #96122e; background: #fdeef1; }
 .afs-scope .afs-banner b { display: block; margin-bottom: 3px; }
 
+/* ── [CL-2] 의사결정 패키지 ────────────────────────────────────────────────
+ *
+ * ★ `identity-bar` 는 장식이 아니다. 세 관점이 **같은 문서**임을 참석자가 눈으로 확인하는
+ *   자리다. 값이 갈라지면(`.broken`) 빨강으로 바뀌어야 한다 — 서로 다른 숫자를 보면서 같은
+ *   안건을 논의하는 것이 이 기능이 막으려는 사고이기 때문이다. */
+.afs-scope .identity-bar {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px;
+  margin-bottom: 14px; padding: 12px 14px;
+  border: 1px solid #b9d8de; border-radius: 8px; background: #f2fafb;
+}
+.afs-scope .identity-bar.broken { border-color: #f0a8b8; background: #fdeef1; }
+.afs-scope .identity-bar > div > span { display: block; color: var(--muted); font-size: 12px; }
+.afs-scope .identity-bar > div > b {
+  display: block; margin-top: 3px; font-size: 14px; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.afs-scope .identity-bar > p {
+  grid-column: 1 / -1; margin: 4px 0 0; color: #4d5b70; font-size: 12px; line-height: 1.5;
+}
+
+.afs-scope .section-grid { display: grid; gap: 10px; }
+.afs-scope .section-grid section {
+  padding: 12px 13px; border: 1px solid var(--line); border-radius: 8px; background: #fff;
+}
+/* ⚠️ 비어 있는 섹션을 **숨기지 않는다.** 숨기면 검토자는 그 항목이 검토됐다고 믿는다.
+ *   대신 눈에 띄게 다른 배경으로 두어 "여기는 아직 안 채웠다"가 한눈에 보이게 한다. */
+.afs-scope .section-grid section.missing { border-style: dashed; background: #fbfaf6; }
+.afs-scope .section-grid h4 {
+  display: flex; align-items: center; gap: 7px; margin: 0 0 6px; font-size: 13px;
+}
+.afs-scope .section-grid h4 em {
+  padding: 2px 7px; border-radius: 10px; color: #8a4b0e; background: #fff0dc;
+  font-size: 12px; font-style: normal; font-weight: 900;
+}
+.afs-scope .section-text { margin: 0; color: #39465a; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.afs-scope .section-missing { margin: 0; color: #8b7a55; font-size: 12px; line-height: 1.6; }
+.afs-scope .section-list { margin: 0; padding-left: 17px; color: #39465a; font-size: 12px; line-height: 1.65; }
+.afs-scope .section-list li + li { margin-top: 4px; }
+.afs-scope .section-list span { margin-right: 9px; }
+.afs-scope .section-list b { color: var(--muted); font-weight: 900; }
+.afs-scope .section-kv { display: grid; gap: 5px; margin: 0; }
+.afs-scope .section-kv > div { display: grid; grid-template-columns: minmax(90px, 25%) 1fr; gap: 9px; }
+.afs-scope .section-kv dt { color: var(--muted); font-size: 12px; font-weight: 900; }
+.afs-scope .section-kv dd { margin: 0; color: #39465a; font-size: 12px; line-height: 1.6; }
+
+.afs-scope .view-who { margin: 0 0 10px; color: var(--cyan); font-size: 12px; font-weight: 900; }
+.afs-scope .hint-line { margin: 6px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.afs-scope .hint-line b { color: #39465a; }
+
 /* ── 반응형(승인 시안 그대로) ──────────────────────────────────────────────── */
 @media (max-width: 1450px) {
   .afs-scope .hub-layout { grid-template-columns: 220px minmax(650px, 1fr) 280px; }
@@ -472,6 +521,8 @@
   .afs-scope .jarvis-rail { display: none; }
   .afs-scope .inbox-layout, .afs-scope .delivery-grid { grid-template-columns: minmax(0, 1fr); }
   .afs-scope .metric-row { grid-template-columns: repeat(2, 1fr); }
+  /* 문서 동일성 값은 좁아져도 **잘리면 안 된다** — 지문이 잘리면 같은 문서인지 확인할 수 없다. */
+  .afs-scope .identity-bar { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-height: 760px) {

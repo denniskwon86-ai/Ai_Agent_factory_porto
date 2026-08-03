@@ -37,6 +37,54 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [CL-IMPL-25] CL-2 의사결정 센터 화면 구현 — 백엔드만 있던 기능을 사람이 쓸 수 있게 만들었다
+- 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
+- 왜 지금 기록하는가: `[CL-HANDOFF-24]` 가 "그 결정 전에 진행 가능한 것"으로 지목한 **CL-2 화면**을 구현하고 실제 데이터로 폐루프 8단계를 끝까지 확인했다. 확인 중 백엔드 결함 1건을 발견해 함께 고쳤으므로 근거와 함께 남긴다.
+- 상태: **완료(기능·검증) · 스크린샷 미확보(환경 제약, 아래 명시)**
+- 결정 및 근거:
+  - 신규 `frontend/src/features/collaboration/DecisionCenter.tsx`, `frontend/src/lib/decisionApi.ts`, `frontend/src/lib/closedLoopFetch.ts`. 기존 `CollaborationHub` 의 레일에 «의사결정 센터»를 추가했다(작업서 §4 정보구조: 협업 > 의사결정 센터). 별도 모달을 하나 더 띄우지 않았다 — 전달·결정·발간은 하나의 폐루프이고, 모달이 갈라지면 사용자는 서로 다른 제품으로 읽는다.
+  - `closedLoopFetch.ts` 는 CL-1 과 CL-2 가 **같은 오류 규약**(401/404/422/400)을 쓰기 때문에 뽑아낸 공용 헬퍼다. 복사본을 두면 한쪽만 고쳐지고 같은 오류가 화면마다 다른 문구로 나온다. `collaborationApi.ts` 도 이 헬퍼를 쓰도록 바꿨다(동작 변화 없음, 422 배열 detail 처리만 개선).
+  - 화면이 보이게 만든 4가지: ① `package_version`·`evidence_hash`·세 관점 동일성을 상시 노출(`.identity-bar`) ② `missing` 섹션을 숨기지 않고 «미작성»으로 표시 ③ 결정 차단 사유를 문서 상단과 결정 버튼 옆에 **둘 다** 노출 ④ 미측정과 0 을 다른 문구·다른 칩으로 표시.
+  - 시뮬레이션 실행 목록 API 가 없다. **가짜 선택지를 만들지 않고** 그 사실을 화면이 말하게 했다(자유 입력 + 안내 문구). 진입점 §4 "Digital Twin Scenario Result → 의사결정 패키지 생성" 은 후속 과제로 남는다.
+  - CSS 는 `frontend/src/design/afs.css` 의 **`.afs-scope` 안에만** 추가했다(`.identity-bar`, `.section-*`, `.view-who`, `.hint-line`). `:root` 로 옮기지 않았다 — 기존 15개 화면 색이 동시에 바뀐다.
+  - `HubShell.tsx` 에 `ChipTone` 타입을 내보내 상태 칩 색을 문자열이 아닌 유니온으로 강제했다. 오타가 나면 «위험»이 회색으로 조용히 나가기 때문이다.
+- 발견·수정한 결함: `core/decision_case.py` `_decide_blockers()` 의 `PARTICIPANT_NEEDS_INFO` 목록이 **중복을 제거하지 않았다.** 한 사람이 요청자이자 결정자인 안건에서 `['hikwon@lsmnm.com', 'hikwon@lsmnm.com']` 로 찍혔고(실측), 읽는 사람은 두 명이 정보 부족을 답한 것으로 오해한다. `sorted(set(...))` 로 고치고 회귀 테스트 `test_need_info_blocker_lists_each_person_once` 를 추가했다.
+- 검증 증거:
+  - `venv\Scripts\python.exe -m pytest tests/ -q` → **1,721 passed / exit 0** (직전 1,720 + 신규 회귀 1). `tests/test_decision_case.py` 단독 35 passed.
+  - `npm run build --prefix frontend` → 통과(tsc -b + vite build).
+  - **실제 화면 폐루프 8단계 완주**(백엔드 8081 `backend-verify` + 프론트 5173, 사용자 `hikwon@lsmnm.com`): 안건 생성 → 세 관점 렌더링(같은 `v1`·`cf90776443d71fd1`) → 검토 요청 → «정보 부족» 응답으로 **차단 표시 확인** → «동의»로 차단 해제 → 조건부 승인 결정 → 실행과제 생성 → 효과 측정(상태 `EFFECT_MEASURED`). 콘솔 오류 0건.
+  - ⚠️ **래스터 스크린샷은 확보하지 못했다.** Browser 창이 이 환경에서 표시되지 않아(`the Browser pane is not displayed`) 캡처가 5초 타임아웃으로 실패한다 — `[CL-HANDOFF-24]` 가 기록한 것과 같은 제약이다. 위 증거는 DOM `innerText` 실측이며, "디자인이 예쁘게 보인다"는 판정 근거로 쓸 수 없다. **시각 판정은 Codex 또는 Supervisor 확인이 필요하다.**
+- 영향·주의사항: `collaborationApi.ts` 의 요청 헬퍼가 바뀌었으므로 CL-1 화면(받은 앱·내 앱·전달·보낸 요청)도 영향을 받는다 — 전체 테스트와 빌드로 확인했으나 CL-1 화면의 수동 재확인은 하지 않았다. `.afs-scope` 격리를 `:root` 로 바꾸지 말 것. `HubDialog` 의 dialog/inert/포커스트랩을 화면별로 다시 구현하지 말 것. 검증 중 `data/collaboration.db` 에 실제 안건 1건(`2공정 정련로 2호기 가동률…`)이 생성됐다 — 실측 데이터이며 삭제 전 Supervisor 확인이 필요하다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** 는 CL-3(발간 게이트) 화면·CL-4(사용자별 SSE 격리)·CL-5(카나리) 순으로 진행한다. CL-4 는 `core/broadcaster.py` 가 전체 브로드캐스트이고 사용자별 필터가 없다는 점을 먼저 해결해야 한다. **Codex** 는 이 화면의 정보 위계·시각 표현을 승인 시안 기준으로 교차검토한다(스크린샷 확보 포함). 기존 15개 화면의 `.afs-scope` 이관은 **사용자·Codex 결정 전 임의 착수 금지** 상태를 유지한다.
+- 교대 체크포인트: 변경 범위는 프론트 3개 신규 파일 + `CollaborationHub.tsx`·`HubShell.tsx`·`collaborationApi.ts`·`afs.css` 수정, 백엔드는 `core/decision_case.py` 중복 제거 1줄과 테스트 1건 추가뿐이다. DB 스키마·API 계약·권한 모델은 바꾸지 않았다. 전체 테스트 통과·빌드 통과·화면 실측 완료. 재개 첫 행동은 CL-3 발간 API(`api/routes/publication_control.py`) 계약 확인이다. 금지 범위는 시각 완료를 스크린샷 없이 선언하는 것, 예시 계정을 새로 만드는 것(`hikwon@lsmnm.com` 하나만), `.afs-scope` 를 전역으로 바꾸는 것이다.
+
+### [STRATEGY-ROADMAP-26] 외부 접근 영구 금지·기존 외부 협업 시스템 공존 원칙 확정
+- 작성자 / 기록 시각: Codex / 2026-08-03 KST
+- 왜 지금 기록하는가: Supervisor가 LPL 사례를 설명한 뒤, 이를 특정 제품 기능으로 만들거나 AI Factory Studio를 외부 참여자에게 여는 방향을 명시적으로 반대하고 “우리 제품은 업무 편의 자동화가 아니라 경영 시스템”이라고 제품 경계를 재확정했다.
+- 상태: **최종 제품 원칙 확정 · STRATEGY-ROADMAP-25의 외부 Principal/위임 화면 부분 폐기·대체 · MVA 부트스트랩 부분은 유지**
+- 결정 및 근거: AI Factory Studio에는 외부 사용자 계정·게스트 조직·파트너용 앱·입력 화면을 만들지 않는다. 상품화 시에도 고객사마다 공급사 포털·물류/통관 시스템·협력사 웹 등 외부 참여자 입력을 담당하는 기존 시스템이 있다고 전제한다. 기존 시스템이 외부 인증·입력·원본 업무 사건을 책임하고, AI Factory Studio는 읽기 전용 MCP/API/DB View/Export Query Contract로 필요한 데이터만 받아 MDM·Crosswalk·대사·CERTIFIED Snapshot을 거쳐 경영 Twin과 의사결정에 사용한다. 제품 공통 SSOT는 `docs/design_external_engagement_system_integration.md`, LPL은 LS 환경의 `docs/design_lpl_readonly_integration.md` Reference Profile이다.
+- 영향·주의사항: 제품 코어에 `LPL`, 특정 고객사 테이블·조직코드·인증 방식을 하드코딩하지 않는다. 고객별 차이는 Adapter Profile과 Query Contract로 격리하고 최소 두 개의 서로 다른 fixture가 동일 코어 계약 테스트를 통과해야 한다. 외부 시스템이 없는 고객도 외부인을 AI Factory Studio에 접속시키지 않고 내부 승인 파일 업로드 또는 고객사/ITO의 별도 외부 포털을 사용한다. 현재 MCP `fetch()`는 단일 객체용이므로 목록·cursor·증분·정정·취소를 위한 `query/changes_since`와 불변 Snapshot이 필요하다. TTL 캐시는 Twin 기준선이 아니다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code**는 외부 Principal·파트너 초대·위임 UI를 구현하지 않는다. CL-0.5/Host Runtime은 내부 사용자·내부 서비스만 대상으로 유지하고, 외부 연계 착수 시 공통 Adapter interface·Query Contract·source event version·멱등·Snapshot을 고객 독립적으로 설계한다. **Antigravity**는 LPL을 포함한 첫 환경의 공식 API/MCP/DB View/Export 가능 여부와 스키마·증분·SLA를 조사하되 결과를 범용 Profile 입력으로 정리한다. **Codex**는 내부 데이터 준비·원천 상태·stale·대사 화면만 설계하고 외부 포털 UI는 만들지 않는다.
+- 교대 체크포인트: 전략·로드맵·Product Bible·마스터 명세·구현 감사·기간계/온보딩 설계를 범용 공존 경계로 수정하고 신규 공통 SSOT와 LPL Reference Profile을 작성했다. 제품 코드·DB·테스트는 변경 또는 실행하지 않았고 커밋·푸시하지 않았다. 재개 첫 행동은 기존 Connector Registry/MCP Broker와 공통 설계의 `query/changes_since`·Snapshot 간극을 작업 패키지로 분리하는 것이다. 금지 범위는 외부 사용자 로그인/초대/조직 상속, 파트너용 앱·화면, LPL 하드코딩, Query Contract 없는 전건 조회, TTL 캐시를 공식 Actual로 사용하는 것이다.
+
+### [STRATEGY-ROADMAP-25] Antigravity 전략 평가 반영 — MVA 부트스트랩·외부 파트너 위임 접근 (**외부 접근안 폐기됨**)
+- **대체 고지:** 이 항목의 `external_party/external_principal`, 외부 로그인·위임 UI·확장점 관련 판단과 후속 행동은 모두 **STRATEGY-ROADMAP-26으로 폐기·대체**되었다. 구현 근거로 사용하면 안 된다. `Minimum Viable Actual` 부트스트랩 결정만 유효하다.
+- 작성자 / 기록 시각: Codex / 2026-08-03 KST
+- 왜 지금 기록하는가: Supervisor가 Antigravity의 독자 제품 전략 평가와 보완 의견을 전달하고, 초기 운영 데이터 확보와 관세사·포워더 등 외부 협업을 최신 전략·로드맵에 추가할 필요가 있는지 재검토하도록 요청했다.
+- 상태: **부분 폐기 — MVA 부트스트랩만 유효 · 외부 Principal/위임 접근은 STRATEGY-ROADMAP-26으로 폐기**
+- 결정 및 근거: 초기 데이터는 전체 ERP 복제가 아니라 `Minimum Viable Actual`로 정의하고 `Source Inventory → 읽기 전용 프로파일링 → 최소 RAW Snapshot → QUARANTINE → MDM/Crosswalk 표준화 → 원천 대사 → 데이터 오너 승인 → CERTIFIED baseline`을 G2 선행 관문으로 승격했다. 외부 참여자는 과거 `design_backbone_system_platform.md`의 `external/ 조직도 하위 게스트`가 아니라 별도 `external_party/external_principal`로 두며, 내부 Sponsor가 app/release/process/work-item/record/field/action·기간 제한 Grant로 위임 업무 표면만 제공한다. 최신 기준은 `docs/strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md` §4.6, `docs/roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md` G1-D/G2-D, `docs/reviews/AI_FACTORY_STUDIO_IMPLEMENTATION_GAP_AUDIT_2026-08-03.md` §3.5다.
+- 영향·주의사항: 시드·합성 데이터는 기능 검증용이며 Actual·예측 정확도 증명에 사용할 수 없다. 외부 제출은 내부 검증 전 `SUBMITTED`이고 `VERIFIED/CERTIFIED` Actual로 자동 승격하지 않는다. 외부 Principal은 조직 상속·전사 검색·Jarvis 전역 문맥·앱 주머니를 받지 않는다. 실제 외부 로그인·SSO·MFA를 첫 내부 폐루프의 블로커로 만들지 않으며 초기에는 내부 Sponsor 대리 제출로 Shadow Pilot을 완주할 수 있다. Antigravity가 언급한 `G0(A-1)`은 과거 기간계 설계의 관문이며 `test_a1_v11`로 2026-07-27 이미 해제됐다. A-1은 변경 후 회귀 카나리로 재사용하되 다음 선행 관문은 G1 안전 경계와 G2 MVA다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code**는 CL-0.5/Host Runtime/SSE 격리 설계 시 `principal_type`과 scope token이 향후 external principal을 수용하도록 확장 지점을 남기고, G2-D는 별도 작업 패키지로 Source Inventory·Snapshot·Reconciliation·Certification 계약부터 구현한다. **Antigravity**는 원료 구매 파일럿의 내부 데이터 요구 필드와 외부 공식지표 원천·갱신주기·라이선스를 교차검증한다. **Codex**는 데이터 준비 보드와 외부 위임 업무 화면의 UX를 실제 API 계약 이후 설계한다.
+- 교대 체크포인트: 전략·로드맵·구현 감사·과거 데이터 온보딩/기간계 설계 문서와 본 보드만 수정했다. 제품 코드·DB·테스트는 변경 또는 실행하지 않았고 커밋·푸시하지 않았다. 재개 첫 행동은 G1 설계에 외부 principal 확장점을 포함하고 G2-D01 Source Inventory 스키마를 현재 Connector/Catalog/Crosswalk와 대조하는 것이다. 금지 범위는 시드/합성값을 Actual로 표시하는 것, 대사 실패 데이터를 Twin 공식 기준선으로 쓰는 것, 외부인을 내부 조직에 편입해 권한을 상속시키는 것, 외부 제출을 내부 승인 없이 계산·결정에 쓰는 것이다.
+
+### [STRATEGY-ROADMAP-24] 독자 제품 전략 재정의·최종 완성 로드맵·CL-0 교차검토
+- 작성자 / 기록 시각: Codex / 2026-08-03 KST
+- 왜 지금 기록하는가: Supervisor가 Enhans의 아류가 아닌 독자 제품으로 완성하기 위해 기존 전략 문서와 Claude Code의 최신 구현을 냉정하게 재검토하고, 미비점·최종 로드맵·세부 수행계획을 남기도록 요청했다.
+- 상태: **전략·로드맵 문서 작성 완료 · CL-0 집중 테스트 통과 · CL-0.5 보강 제안 및 Claude Code 인계 필요**
+- 결정 및 근거: 제품 범주를 범용 AgentOS가 아닌 **Manufacturing Management Twin & Operational App Factory**로 고정했다. 차별화의 본체는 `실제 제조 경영 데이터 → 현업 운영 앱 → 결정론적 Twin → 의사결정 → 실행 → 효과 측정` 폐루프다. `docs/strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md`에 경쟁 중복·독자 해자·첫 수직 파일럿·포기 범위를, `docs/roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md`에 G0~G9 작업·산출물·DoD·시험·중단 조건을, `docs/reviews/AI_FACTORY_STUDIO_IMPLEMENTATION_GAP_AUDIT_2026-08-03.md`에 소스 기준 현황·엔터프라이즈 미비·CL-0 코드 감사를 기록했다. Claude Code CL-0 커밋 `a484c6f63`을 코드 기준으로 검토했고 `venv\Scripts\python.exe -m pytest tests/test_app_manifest.py tests/test_m0_end_to_end.py -q` 결과 **45 passed**를 확인했다.
+- 영향·주의사항: CL-0 방향은 승인 가능하나 현재 정규식 검사는 린트/증빙이지 런타임 보안 경계가 아니다. 전체 프로젝트 검사로 `.archive` 과거 코드가 현재 릴리스를 오염시킬 수 있고, 광범위 허용 문자열·간접 호출로 우회 가능하며, 빈 capability Manifest와 검사 차단 상태에서도 릴리스 생성이 가능하다. CL-1 전달·수락 통합 전에 **CL-0.5**로 릴리스 파일 한정 검사, archive 제외, 불완전 검사 Fail-closed, release eligibility, capability 선언-관측 diff, Manifest fingerprint를 보강해야 한다. 또한 사용자별 SSE와 Host Runtime 최소 계약이 CL-1의 선행조건이다. 기존 타 세션의 Knowledge·데이터·문서 삭제/변경은 건드리지 않았다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code**가 현재 CL-0 구현을 기준으로 G1-A(CL-0.5) 작업을 먼저 분리 설계·구현하고, G1-C 사용자별 SSE와 G1-B Host Runtime 최소 계약을 확정한 뒤 CL-1 앱 전달·수락으로 진행한다. **Codex**는 Manifest/Runtime 계약과 실제 UI의 권한·상태 표현을 교차검토한다. **Antigravity**는 원료 구매 수직 파일럿의 공신력 있는 외부지표·데이터 소스 키트를 보강한다. 권한·이벤트·런타임 계약은 통합 전 독립 검토한다.
+- 교대 체크포인트: 이번 변경은 전략·로드맵 문서, Product Bible·마스터 명세 최신 포인터, 본 보드 기록뿐이며 제품 코드는 수정하지 않았다. CL-0 집중 테스트만 실행했고 전체 테스트는 실행하지 않았다. 커밋·푸시는 하지 않았다. 재개 첫 행동은 Claude Code가 본 로드맵 §5의 G1-A 항목을 작업 패키지로 보드에 등록하는 것이다. 금지 범위는 정적 검사를 인증 강제 완료로 선언하는 것, Host Runtime 없이 생성 앱에 DB/상위 토큰을 전달하는 것, 사용자별 필터 없이 협업 SSE 이벤트를 추가하는 것, 첫 수직 폐루프보다 기능 수를 확장하는 것이다.
 ### [CL-HANDOFF-24] ⚠️ 세션 종료 인수인계 — **디자인이 제품에 적용돼 보이지 않는다(최우선)**
 - 작성자 / 기록 시각: Claude Code / 2026-08-03 KST (세션 종료)
 - 왜 지금 기록하는가: 다른 Claude Code 계정이 **이어서 작업**한다. 그리고 사용자가 실제 화면을

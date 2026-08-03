@@ -240,6 +240,24 @@ def test_participant_needing_info_blocks_decision(svc):
     assert any(b["code"] == "PARTICIPANT_NEEDS_INFO" for b in d["blockers"])
 
 
+def test_need_info_blocker_lists_each_person_once(svc):
+    """★★ 한 사람이 두 역할을 겸해도 차단 사유에 이름이 한 번만 나온다.
+
+    ⚠️ 2026-08-04 화면 실측에서 `['hikwon@lsmnm.com', 'hikwon@lsmnm.com']` 로 찍혔다.
+      한 사람이 요청자이자 결정자인 안건은 흔하고, `participant_response` 는 그 사용자의 모든
+      역할 행을 함께 갱신한다(한 사람의 의견은 하나다). 중복을 그대로 두면 읽는 사람은 두 명이
+      정보 부족을 답한 것으로 오해한다 — 차단 사유는 **누가 몇 명인지**가 정보다."""
+    c = _case(svc, created_by="kim")
+    did = c["decision_id"]
+    # kim 은 이미 요청자다. 여기서 결정자까지 겸한다.
+    svc.request_review(did, "kim", [{"user_id": "kim", "role": ROLE_DECIDER}])
+    svc.participant_response(did, "kim", RESPONSE_NEED_INFO, "정비 인력 소요를 모릅니다")
+    d = svc.get(did, "kim")
+    assert len([p for p in d["participants"] if p["user_id"] == "kim"]) == 2, "역할 두 개는 유지된다"
+    blocker = next(b for b in d["blockers"] if b["code"] == "PARTICIPANT_NEEDS_INFO")
+    assert blocker["reason"].count("kim") == 1
+
+
 def test_evidence_change_blocks_and_does_not_auto_update(svc):
     """★★★ **가장 무거운 계약.** 근거가 바뀌면 숫자를 자동 갱신하지 않고 다시 보게 만든다.
 
