@@ -76,6 +76,7 @@ async def _warmup():
 
 
 from api.routes import (app_delivery_control, decision_control,  # [CL-1, CL-2]
+                        publication_control,  # [CL-3] 대내외 발간 게이트
                         jarvis_control)  # [CL-4 선행] 기존 Supervisor 계약의 문맥 어댑터
 app.include_router(factory_control.router)
 app.include_router(format_control.router)
@@ -114,6 +115,8 @@ app.include_router(crosswalk_control.router)
 app.include_router(app_delivery_control.router)
 # [CL-2] Decision Package — 세 관점은 같은 문서의 렌더링이다(§3-5).
 app.include_router(decision_control.router)
+# [CL-3] 대내외 발간 — **대외 이중 승인 차단은 화면이 아니라 이 라우터에서 일어난다**(§CL-BE-04).
+app.include_router(publication_control.router)
 # [CL-4 선행] Jarvis 문맥 어댑터 — 두 번째 채팅 API 가 아니라 기존 엔진의 주소 변환기다(§3).
 app.include_router(jarvis_control.router)
 app.include_router(mcp_control.router)

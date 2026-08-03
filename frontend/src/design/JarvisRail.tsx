@@ -83,8 +83,10 @@ export function JarvisRail({
       {evidence.length > 0 && (
         <div className="jarvis-evidence">
           <b>참고 중인 근거</b>
-          {evidence.map((e) => (
-            <div key={e.label}><span>{e.label}</span><em>{e.value}</em></div>
+          {evidence.map((e, i) => (
+            // ⚠️ 라벨은 **데이터**다 — 같은 제목의 발간물 두 건처럼 얼마든지 겹친다.
+            //   데이터를 key 로 쓰면 React 가 항목을 뒤섞거나 빠뜨린다(2026-08-04 실측).
+            <div key={`${e.label}-${i}`}><span>{e.label}</span><em>{e.value}</em></div>
           ))}
         </div>
       )}

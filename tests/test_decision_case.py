@@ -17,6 +17,8 @@
 import pytest
 
 from core.collaboration_store import CollaborationStore
+from core.decision_ledger import EVENT_TYPES as LEDGER_EVENT_TYPES
+from core.decision_ledger import SUBJECT_TYPES as LEDGER_SUBJECT_TYPES
 from core.decision_case import (ACTIONED, DECIDED, DRAFT, EFFECT_MEASURED, EVIDENCE_CHANGED,
                                 IN_REVIEW, MEETING_REQUESTED, OUTCOME_APPROVED,
                                 OUTCOME_CONDITIONAL, RESPONSE_AGREE, RESPONSE_NEED_INFO,
@@ -35,10 +37,20 @@ EV = {"simulation": {"run_id": "res_1", "verified": True},
 
 
 class _Ledger:
+    """가짜 원장 — **실제 허용목록을 그대로 검사한다.**
+
+    ⚠️ 가짜가 진짜보다 관대하면 테스트는 통과가 아니라 가짜를 증명한다(CL-3 에서 실제로
+      그 사고가 났다: 미등록 이벤트를 가짜가 받아 주어 32건이 전부 통과했고, 화면에서 500 이
+      났다)."""
+
     def __init__(self):
         self.events = []
 
     def append(self, event_type, subject_type, subject_id, **kw):
+        assert event_type in LEDGER_EVENT_TYPES, (
+            f"`core.decision_ledger.EVENT_TYPES` 에 없는 이벤트입니다: {event_type}")
+        assert subject_type in LEDGER_SUBJECT_TYPES, (
+            f"등록되지 않은 subject_type 입니다: {subject_type}")
         self.events.append({"event": event_type, "subject_type": subject_type,
                             "subject_id": subject_id, **kw})
         return {"event_id": f"dle_{len(self.events)}"}

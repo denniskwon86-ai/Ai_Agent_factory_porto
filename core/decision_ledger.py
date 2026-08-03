@@ -80,9 +80,16 @@ EVENT_TYPES = (
     "DECISION_RECORDED",
     "DECISION_ACTION_CREATED",
     "DECISION_EFFECT_MEASURED",
+    "PUBLICATION_CREATED",
+    "PUBLICATION_RENDERED",
     "PUBLICATION_REVIEW_REQUESTED",
     "PUBLICATION_APPROVED",
+    "PUBLICATION_REJECTED",
     "PUBLICATION_PUBLISHED",
+    # ★ 게시 **실패**도 원장에 남긴다. 실패를 남기지 않으면 "왜 이 보고서가 안 나갔나"에
+    #   답할 수 없고, 다음 사람은 이미 나갔다고 믿는다(작업서 §5.1 "게시 실패를 성공으로
+    #   저장 금지"의 원장 쪽 절반이다).
+    "PUBLICATION_PUBLISH_FAILED",
     "PUBLICATION_CORRECTED",
     "PUBLICATION_WITHDRAWN",
     "CORRECTION",                  # 정정 전용 — 반드시 parent_event_id 를 가진다

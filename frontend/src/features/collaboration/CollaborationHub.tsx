@@ -19,10 +19,11 @@ import {
   collaborationApi, DELIVERY_STATUS_KO, type CapabilityManifest, type Delivery, type PocketApp,
 } from '../../lib/collaborationApi';
 import { DecisionCenter, type DecisionJarvis } from './DecisionCenter';
+import { PublicationCenter, type PublicationJarvis } from './PublicationCenter';
 
 // [CL-2] 목표 정보구조(§4)의 «의사결정 센터»를 같은 허브 안에 둔다. 별도 모달을 하나 더 띄우면
 // 사용자는 전달·결정·발간이 서로 다른 제품이라고 읽는다 — 이것들은 하나의 폐루프다.
-type View = 'inbox' | 'apps' | 'deliver' | 'sent' | 'decisions';
+type View = 'inbox' | 'apps' | 'deliver' | 'sent' | 'decisions' | 'publications';
 
 const STATUS_CHIP: Record<string, string> = {
   PENDING: 'warn', ACCEPTED: 'success', REJECTED: 'muted', EXPIRED: 'muted', REVOKED: 'danger',
@@ -91,6 +92,7 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
   // [CL-2] 의사결정 센터가 **자기가 강조 중인 객체**를 올려 준다. 허브가 추측하지 않는다 —
   //   Jarvis 가 참조하는 객체와 화면이 보여 주는 객체가 갈라지면 가장 찾기 어려운 오답이 된다.
   const [decisionCtx, setDecisionCtx] = useState<DecisionJarvis | null>(null);
+  const [pubCtx, setPubCtx] = useState<PublicationJarvis | null>(null);
   const [inbox, setInbox] = useState<Delivery[]>([]);
   const [sent, setSent] = useState<Delivery[]>([]);
   const [apps, setApps] = useState<PocketApp[]>([]);
@@ -145,10 +147,16 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     { id: 'deliver', label: '사용자에게 전달', hint: '지정한 한 사람에게', mark: '전' },
     { id: 'sent', label: '보낸 요청', hint: '응답 상태와 회수', mark: '보' },
     { id: 'decisions', label: '의사결정 센터', hint: '한 문서 · 세 관점', mark: '결' },
+    { id: 'publications', label: '대내외 발간', hint: '나가면 되돌릴 수 없다', mark: '발' },
   ];
 
   // Jarvis 문맥 — **선택된 객체**를 그대로 넘긴다. Task ID 를 사용자에게 묻지 않는다(§3-8).
   const jarvisCtx = (() => {
+    if (view === 'publications') {
+      return pubCtx
+        ? { title: pubCtx.title, desc: pubCtx.desc, ev: pubCtx.ev }
+        : { title: '대내외 발간', desc: '대외 발간은 두 승인을 모두 통과해야 나갑니다.', ev: [] };
+    }
     if (view === 'decisions') {
       return decisionCtx
         ? { title: decisionCtx.title, desc: decisionCtx.desc, ev: decisionCtx.ev }
@@ -181,7 +189,14 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
 
   // ★ [지적 4] Jarvis 가 참조하는 객체 = 화면이 강조 중인 객체. 두 값이 갈라지면 사용자는
   //   A 를 보면서 B 에 대한 답을 읽는다 — 가장 발견하기 어려운 오답이다.
-  const jarvisContext: JarvisContext = view === 'decisions' ? {
+  const jarvisContext: JarvisContext = view === 'publications' ? {
+    current_module: 'collaboration/publications',
+    selected_object_type: 'publication',
+    selected_object_id: pubCtx?.objectId || '',
+    object_snapshot: pubCtx?.snapshot || {},
+    available_actions: pubCtx?.actions || [],
+    evidence_refs: [],
+  } : view === 'decisions' ? {
     current_module: 'collaboration/decisions',
     selected_object_type: 'decision_case',
     selected_object_id: decisionCtx?.objectId || '',
@@ -245,7 +260,11 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
                 contextDescription={jarvisCtx.desc}
                 evidence={jarvisCtx.ev}
                 context={jarvisContext}
-                quickQuestions={view === 'decisions' ? [
+                quickQuestions={view === 'publications' ? [
+                  '이 보고서는 지금 왜 나갈 수 없습니까?',
+                  '대외 발간에서 무엇이 제외됩니까?',
+                  '배포가 실패한 대상이 있습니까?',
+                ] : view === 'decisions' ? [
                   '이 안건은 무엇을 승인하는 것입니까?',
                   '지금 결정할 수 없는 이유가 무엇입니까?',
                   '세 관점이 같은 근거를 보고 있습니까?',
@@ -295,6 +314,9 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
             )}
             {view === 'decisions' && (
               <DecisionCenter onJarvis={setDecisionCtx} simulationRunIds={simulationRunIds} />
+            )}
+            {view === 'publications' && (
+              <PublicationCenter onJarvis={setPubCtx} />
             )}
           </HubShell>
       </div>

@@ -37,6 +37,27 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [CL-IMPL-26] CL-3 대내외 발간 구현(백엔드+화면) — 나가기 전에 막는 것만 넣었다
+- 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
+- 왜 지금 기록하는가: CL-3 는 백엔드가 아예 없었다(`core/publication.py`·`api/routes/publication_control.py` 모두 신규). 구현하고 실제 화면으로 대외 이중 승인 게이트까지 확인했으며, **브라우저 실행이 단위 테스트가 놓친 결함 3건을 잡았으므로** 그 경위를 남긴다.
+- 상태: **완료(기능·검증) · 스크린샷 미확보(환경 제약)**
+- 결정 및 근거:
+  - 신규 `core/publication.py`(발간 상태기계·게이트·정정/회수), `api/routes/publication_control.py`(9개 경로), `tests/test_publication_control.py`(33건), `frontend/src/lib/publicationApi.ts`, `frontend/src/features/collaboration/PublicationCenter.tsx`. `main.py` 에 라우터 등록. 협업 허브 레일에 «대내외 발간» 추가.
+  - 막는 것 넷을 코드로 고정했다: ① **렌더 실패는 `DRAFT` 에 머물고 `render_error` 를 남긴다** — 상태가 올라가면 사람은 «만들어졌다»고 믿고 내용 없는 문서에 승인을 누른다. ② **EXTERNAL 은 `EXECUTIVE`+`LEGAL_DISCLOSURE` 둘 다 승인돼야 한다** — 화면 버튼이 아니라 `publish` API 가 경계다. ③ **게시 실패를 성공으로 저장하지 않는다** — 어댑터 실패·어댑터 부재·부분 실패 모두 `FAILED` 배포 기록으로 남고 상태는 `APPROVED` 에 머문다. ④ **발간 후 덮어쓰지 않는다** — 정정판은 새 발간물이고 원본은 `CORRECTED` 로 보존된다.
+  - 대외 제외 항목은 **사유와 함께** 문서에 싣는다(설계 §8.4). 조용히 빼면 다음 사람은 빠진 줄 모르고 그대로 인용한다.
+  - **다시 렌더되면 이전 승인은 삭제된다.** 승인자가 본 문서가 아니기 때문이다. 승인 완료(`APPROVED`) 후에는 렌더 자체를 막는다.
+- 브라우저 실행이 잡은 결함 3건(단위 테스트 33건은 전부 통과했었다):
+  1. **원장 이벤트 미등록** — `core/decision_ledger.py` 의 `EVENT_TYPES` 에 `PUBLICATION_CREATED`·`PUBLICATION_RENDERED`·`PUBLICATION_REJECTED`·`PUBLICATION_PUBLISH_FAILED` 가 없어 첫 발간 초안이 500 으로 죽었다. **테스트의 가짜 원장이 무엇이든 받아 줬기 때문에 33건이 전부 통과했다.** → 이벤트를 등록하고, `test_publication_control.py`·`test_decision_case.py` 의 가짜 원장이 **실제 `EVENT_TYPES`·`SUBJECT_TYPES` 를 검사**하도록 바꿨다. 가짜가 진짜보다 관대하면 테스트는 통과가 아니라 가짜를 증명한다.
+  2. **원장 실패 시 고아 행** — INSERT 뒤 원장 기록이 실패해도 발간물 행이 남았다. 원장에 없는 발간물이 DB 에 존재하면 "모든 발간 이벤트를 원장에 기록한다"는 규칙은 사실이 아니게 된다. → `create()` 에서 원장 실패 시 행을 되돌리게 고쳤다(같은 구조인 `core/decision_case.py` 도 함께). 회귀 테스트 `test_ledger_failure_leaves_no_orphan_row` 추가.
+  3. **`JarvisRail` 이 데이터를 React key 로 썼다** — `key={e.label}`. 같은 제목의 발간물 두 건에서 key 충돌이 나 항목이 뒤섞일 수 있다. → 인덱스를 붙였다. **이 파일은 공용 셸이므로 CL-1·CL-2 화면에도 영향이 있다**(개선 방향).
+- 검증 증거:
+  - `pytest tests/` → **1,754 passed / exit 0**(직전 1,721 + CL-3 33). `npm run build` 통과.
+  - **실제 화면 대외 발간 흐름 완주**(8081 + 5173, `hikwon@lsmnm.com`): 대외 초안 생성 → 게이트 3건 미통과 표시 → 문서 생성(v1, 원천 근거 지문 표시) → 검토 요청(두 필수 검토 자동 포함) → 임원 승인만 → **화면 버튼을 우회해 `POST /publish` 직접 호출 → `400 발간을 막는 조건이 있습니다: LEGAL_DISCLOSURE 검토가 «PENDING» 입니다`** → 법무 승인 → 발간 시도 → 어댑터 없음이므로 **배포 «실패» 기록 + 상태는 «승인 완료» 유지 + "발간 상태를 올리지 않았습니다" 안내**.
+  - ⚠️ 래스터 스크린샷은 이 환경에서 확보 불가(Browser 창 미표시). 위 증거는 DOM 실측이며 **시각 판정 근거가 아니다** — Codex/Supervisor 확인 필요.
+- 영향·주의사항: `core/decision_ledger.py` 의 `EVENT_TYPES` 가 늘었다(기존 이벤트는 그대로). `core/decision_case.py` 의 `create()` 에 롤백이 추가됐다 — 정상 경로는 변화 없다. `JarvisRail.tsx` 는 공용 셸이므로 CL-1·CL-2 화면 모두 영향(개선). 검증 중 `data/collaboration.db` 에 **같은 제목의 대외 발간물 2건**이 생겼다 — 하나는 위 결함 2 로 생긴 고아 행이다(원장 기록 없음, `DRAFT`). 지우지 않고 남겨 두었으니 정리 여부는 Supervisor 판단이다. 게시 어댑터는 **아직 없다** — 실제 외부 전송은 사람이 어댑터를 붙여야 한다(§3-7 준수).
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** 는 CL-4(사용자별 SSE 격리)로 진행한다. `core/broadcaster.py` 가 전체 브로드캐스트이고 사용자별 필터가 없다는 점을 먼저 해결해야 하며, 작업서 §10-11(사용자 A 이벤트가 B 에게 가지 않음)이 완료 조건이다. **Codex** 는 CL-2·CL-3 화면의 정보 위계를 승인 시안 기준으로 교차검토한다(스크린샷 확보 포함). **Antigravity** 는 발간 게이트의 실제 사내 승인 절차(임원·법무)와 대외 제외 항목 목록(`EXTERNAL_REDACT_KEYS`)이 맞는지 확인해 달라 — 목록을 **줄이려면** 법무 검토 근거가 필요하다.
+- 교대 체크포인트: 신규 5개 파일 + `main.py`·`core/decision_ledger.py`·`core/decision_case.py`·`CollaborationHub.tsx`·`JarvisRail.tsx` 수정. DB 스키마는 `collaboration.db` 에 발간 4개 표가 추가됐다(기존 표 변경 없음). 전체 테스트 통과·빌드 통과·화면 실측 완료. 재개 첫 행동은 `core/broadcaster.py` 의 구독 구조 확인이다. 금지 범위는 `EXTERNAL_REQUIRED_REVIEWS` 를 임의로 줄이는 것, 게시 어댑터 없이 «발간됨»으로 표시하는 것, 시각 완료를 스크린샷 없이 선언하는 것, 예시 계정을 새로 만드는 것이다.
+
 ### [CL-IMPL-25] CL-2 의사결정 센터 화면 구현 — 백엔드만 있던 기능을 사람이 쓸 수 있게 만들었다
 - 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
 - 왜 지금 기록하는가: `[CL-HANDOFF-24]` 가 "그 결정 전에 진행 가능한 것"으로 지목한 **CL-2 화면**을 구현하고 실제 데이터로 폐루프 8단계를 끝까지 확인했다. 확인 중 백엔드 결함 1건을 발견해 함께 고쳤으므로 근거와 함께 남긴다.

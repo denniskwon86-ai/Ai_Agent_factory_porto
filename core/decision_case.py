@@ -231,11 +231,21 @@ class DecisionCase:
         self._store.execute(
             "INSERT OR IGNORE INTO decision_participants (decision_id, user_id, role, scope_id, "
             "created_at) VALUES (?,?,?,?,?)", (did, created_by, ROLE_REQUESTER, scope_id, now))
-        self._audit("DECISION_CASE_CREATED", did, created_by,
-                    decision=question.strip()[:200],
-                    rationale=f"시뮬레이션 {simulation_run_id or '(없음)'} 기반",
-                    evidence=[{"evidence_hash": h, "baseline_id": baseline_id}],
-                    tenant_id=tenant_id, scope=scope_id)
+        # ★★ 원장 기록이 실패하면 **행을 되돌린다**(CL-3 에서 실측한 결함과 같은 구조).
+        #   원장에 없는 안건이 DB 에 남으면 "누가 무엇을 올렸나"에 답할 수 없고, 그 안건은
+        #   그대로 회의에 올라간다.
+        try:
+            self._audit("DECISION_CASE_CREATED", did, created_by,
+                        decision=question.strip()[:200],
+                        rationale=f"시뮬레이션 {simulation_run_id or '(없음)'} 기반",
+                        evidence=[{"evidence_hash": h, "baseline_id": baseline_id}],
+                        tenant_id=tenant_id, scope=scope_id)
+        except Exception:
+            self._store.executemany_tx([
+                ("DELETE FROM decision_participants WHERE decision_id=?", (did,)),
+                ("DELETE FROM decision_cases WHERE decision_id=?", (did,)),
+            ])
+            raise
         return self.get(did, created_by)
 
     # ── 조회·투영 ─────────────────────────────────────────────────────────
