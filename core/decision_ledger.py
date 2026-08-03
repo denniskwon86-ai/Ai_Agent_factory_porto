@@ -65,13 +65,37 @@ EVENT_TYPES = (
     "EXTERNAL_CONNECTION_APPROVED",
     # 파이프라인 연결
     "PROJECT_BOOTSTRAPPED",
+    # [CL-1~CL-3 · 2026-08-03] 앱 전달–의사결정–발간 폐쇄루프.
+    #   ⚠️ 운영 상태(`data/collaboration.db`)와 별도로 여기에 남기는 이유: 운영 표는 상태를
+    #     **덮어쓴다**(PENDING → ACCEPTED). 누가 언제 무엇을 수락했는지는 덮어쓸 수 없는 곳에
+    #     있어야 하고, 그것이 이 원장이다. 상태만 있으면 "왜 이 사람이 이 앱을 쓰고 있나"에
+    #     답할 수 없다.
+    "APP_DELIVERY_CREATED",
+    "APP_DELIVERY_ACCEPTED",
+    "APP_DELIVERY_REJECTED",
+    "APP_DELIVERY_REVOKED",
+    "DECISION_CASE_CREATED",
+    "DECISION_REVIEW_REQUESTED",
+    "DECISION_MEETING_REQUESTED",
+    "DECISION_RECORDED",
+    "DECISION_ACTION_CREATED",
+    "DECISION_EFFECT_MEASURED",
+    "PUBLICATION_REVIEW_REQUESTED",
+    "PUBLICATION_APPROVED",
+    "PUBLICATION_PUBLISHED",
+    "PUBLICATION_CORRECTED",
+    "PUBLICATION_WITHDRAWN",
     "CORRECTION",                  # 정정 전용 — 반드시 parent_event_id 를 가진다
 )
 
 ACTOR_TYPES = ("user", "agent", "system")
 SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  "master_record", "data_contract", "enterprise_entity", "permission",
-                 "external_connection", "wbs_task")
+                 "external_connection", "wbs_task",
+                 # [CL-1~CL-3] 폐쇄루프 주체 — 전달·결정·발간은 릴리스나 프로젝트가 아니다.
+                 #   같은 subject_type 으로 뭉개면 "이 릴리스에 무슨 일이 있었나"와 "이 전달이
+                 #   어떻게 됐나"를 구분할 수 없다.
+                 "app_delivery", "decision_case", "publication")
 
 
 class DecisionLedgerError(ValueError):

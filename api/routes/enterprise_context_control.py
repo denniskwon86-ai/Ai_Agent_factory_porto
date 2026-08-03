@@ -29,7 +29,7 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.deps import (Principal, assert_can_edit_org, current_principal, enterprise_context)
 from core.enterprise_context import (ENTITY_MODES, NODE_TYPES, PROFILE_KINDS, RELATION_TYPES,
@@ -358,10 +358,13 @@ async def seed_example(force: bool = False, p: Principal = Depends(current_princ
 # ★ 가상 조직을 만드는 문은 **여기 하나뿐이다.** `POST /entities` 는 REAL 만 받는다 —
 #   흐름(원본·목적·유효기간·복사 정책)을 안내 문구가 아니라 구조로 강제한다(§7.1).
 class CloneIn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     name_ko: str
     purpose: str                              # 목적 없는 가상 조직은 아무도 정리하지 못한다
     valid_until: str                          # YYYY-MM-DD — 만료 없는 가상 조직은 영구 조직이 된다
-    copy: Dict[str, bool] = {}                # 선택 복사 항목만(금지 항목은 요청해도 거부)
+    # ⚠️ 필드명을 `copy` 로 두면 `BaseModel.copy()` 를 가려 경고가 나고, 언젠가 그 메서드를
+    #   쓰는 코드가 조용히 깨진다. API 계약은 `copy` 로 유지하고(alias) 파이썬 쪽 이름만 바꾼다.
+    copy_options: Dict[str, bool] = Field(default_factory=dict, alias="copy")
     assumption_set_id: str = ""
     snapshot_id: str = ""
 
@@ -395,7 +398,7 @@ async def clone_entity(entity_id: str, req: CloneIn,
     try:
         data = await asyncio.to_thread(
             clone_service.clone_to_virtual, entity_id, req.name_ko, req.purpose,
-            req.valid_until, (p.user_id or ""), req.copy, ctx.tenant_id,
+            req.valid_until, (p.user_id or ""), req.copy_options, ctx.tenant_id,
             req.assumption_set_id, req.snapshot_id)
     except (SandboxError, EcmError) as e:
         _sandbox_err(e)

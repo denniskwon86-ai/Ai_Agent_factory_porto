@@ -17,6 +17,9 @@ import { PlanningPanel } from './components/PlanningPanel';
 import { BriefingPanel } from './components/BriefingPanel';
 import FormatMasterPanel from './components/FormatMasterPanel';
 import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
+// [CL-1] 협업 허브 — 앱 전달·수락·내 앱. 오버레이 boolean 을 4개 만들지 않고
+//   하나의 허브 안에서 내부 view 를 관리한다(작업서 §CL-FE-01).
+import { CollaborationHub } from './features/collaboration/CollaborationHub';
 import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
 import { MasterDataPanel } from './components/MasterDataPanel';
 import { WorkStandardPanel } from './components/WorkStandardPanel';
@@ -61,6 +64,7 @@ export default function App() {
   const [showMasterData, setShowMasterData] = useState(false);
   const [showWorkStandard, setShowWorkStandard] = useState(false);
   const [showOrgChart, setShowOrgChart] = useState(false);
+  const [showCollaboration, setShowCollaboration] = useState(false);
   const [showCrosswalk, setShowCrosswalk] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
   // [M0] 업무·데이터 설계 상담 — §4.3 F-DA-01: 런처와 프로젝트 화면 **양쪽에서** 접근 가능해야 한다
@@ -215,6 +219,13 @@ export default function App() {
         {showOrgChart && (
           <OrgChartPanel onClose={() => setShowOrgChart(false)} />
         )}
+        {showCollaboration && (
+          <CollaborationHub
+            onClose={() => setShowCollaboration(false)}
+            // 라이브러리에 있는 릴리스를 그대로 선택지로 넘긴다 — 화면이 id 를 지어내지 않는다.
+            releaseIds={releases.map((r: any) => r.release_id).filter(Boolean)}
+          />
+        )}
         {showCrosswalk && (
           <CrosswalkPanel onClose={() => setShowCrosswalk(false)} />
         )}
@@ -309,6 +320,13 @@ export default function App() {
                 title="에이전트가 스스로 제안한 스킬 개선안 승인/반려"
               >
                 🧬 AI 스킬 진화
+              </button>
+              <button
+                onClick={() => setShowCollaboration(true)}
+                className="text-sm font-bold text-indigo-200 bg-indigo-900/40 hover:bg-indigo-800/60 border border-indigo-700/50 px-4 py-2 rounded-lg transition-all"
+                title="앱 전달·수락·내 앱 — 개인 전달은 부서 공유·전사 승격과 별개이며, 수락해도 데이터 권한은 넓어지지 않습니다"
+              >
+                🤝 협업
               </button>
               <button
                 onClick={() => setShowKnowledgeHub(true)}
