@@ -162,6 +162,25 @@ class MCPBroker:
         sys = self.cw.get_system(system_id)
         if not sys:
             raise MCPError(f"등록되지 않은 시스템: {system_id}")
+        # ★★★ [ECM E3 · §8.3] **가상·경쟁사 문맥에서는 외부 운영 시스템을 부르지 않는다.**
+        #   범위 판정(`is_visible`)보다 **먼저** 막는다 — 뒤에 두면 "범위는 맞는 가상 노드"가
+        #   운영 ERP 를 읽어 버린다. 그 순간 결과는 더 이상 가정이 아니라 실제와 섞인 값이 되고,
+        #   "가상 조직은 운영계의 우회 통로가 아니다"(비협상 4)가 무너진다.
+        #   ⚠️ 감사에도 남긴다 — 가상 문맥에서 외부를 시도했다는 사실 자체가 신호다.
+        from core.enterprise_context.clone_service import SandboxError, assert_external_allowed
+        try:
+            assert_external_allowed(entity_mode, f"외부 시스템 조회({system_id})")
+        except SandboxError as e:
+            try:
+                from core.enterprise_context import audit
+                audit.record(audit.CONNECTOR_QUERY_DENIED, resource_type="mcp_resource",
+                             resource_id=f"{master_code}@{system_id}", actor=actor,
+                             actor_scopes=actor_scopes, requested_scope=scope_node_id,
+                             outcome="denied", reason="가상·경쟁사 문맥의 외부 호출 차단(§8.3)",
+                             detail=f"entity_mode={entity_mode}")
+            except Exception:
+                pass
+            raise MCPError(str(e))
         if scope_node_id or tenant_id:
             from core.enterprise_context.scoping import is_visible
             if not is_visible(sys, scope_node_id, tenant_id, entity_mode):

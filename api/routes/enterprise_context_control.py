@@ -6,8 +6,9 @@ E1 범위: 조직 트리 조회, 엔터티/노드/엣지 등록·승인, 문맥 
   · `GET /contexts/{scope_id}/resolved-profile` — **프로필 상속 해석은 E2**. E1 은 프로필을
     저장·조회만 하고 병합하지 않는다. 지금 반쪽 병합을 넣으면 "상속이 되는 것처럼 보이는데
     실제로는 아닌" 상태가 되어 더 위험하다.
-  · `POST /entities/{id}/clone`, `POST /scenarios` — 가상 조직 복제·시나리오는 **E3**.
-    격리 스냅샷·가정 세트·외부 연계 차단이 선행 조건이다(§2.1-4).
+  (E3 는 2026-07-31 에 구현했다 — 아래 `/entities/{id}/clone` · `/scenarios` 참조.
+   가상 엔터티는 **직접 생성할 수 없고 복제로만** 만들어진다: `POST /entities` 는 여전히 REAL
+   만 받고, 목적·유효기간·복사 정책이 함께 없으면 가상 조직이 생기지 않는다.)
 
 권한: 조직 트리는 부서 권한으로 필터한다(§10.1 이행 — ECM 전용 권한 테이블은 E2).
   등록·승인은 조직 편집 권한(`assert_can_edit_org`)을 요구한다 — 조직은 기준정보다.
@@ -25,6 +26,10 @@ from core.enterprise_context import (ENTITY_MODES, NODE_TYPES, PROFILE_KINDS, RE
                                      OrganizationNode, ecm_repository, ecm_resolver)
 
 router = APIRouter(prefix="/api/v1/enterprise-context", tags=["EnterpriseContext"])
+
+
+def _sandbox_err(e: Exception):
+    raise HTTPException(status_code=400, detail=str(e))
 
 
 def _tree_dict(sn) -> Dict[str, Any]:
@@ -335,3 +340,100 @@ async def seed_example(force: bool = False, p: Principal = Depends(current_princ
     from core.enterprise_context.seed import seed_example_organization
     return {"status": "success", "data": await asyncio.to_thread(seed_example_organization,
                                                                  None, force)}
+
+
+# ── [E3] 가상 기업 Sandbox ────────────────────────────────────────────────
+# ★ 가상 조직을 만드는 문은 **여기 하나뿐이다.** `POST /entities` 는 REAL 만 받는다 —
+#   흐름(원본·목적·유효기간·복사 정책)을 안내 문구가 아니라 구조로 강제한다(§7.1).
+class CloneIn(BaseModel):
+    name_ko: str
+    purpose: str                              # 목적 없는 가상 조직은 아무도 정리하지 못한다
+    valid_until: str                          # YYYY-MM-DD — 만료 없는 가상 조직은 영구 조직이 된다
+    copy: Dict[str, bool] = {}                # 선택 복사 항목만(금지 항목은 요청해도 거부)
+    assumption_set_id: str = ""
+    snapshot_id: str = ""
+
+
+class PromoteIn(BaseModel):
+    rationale: str
+
+
+class CloseIn(BaseModel):
+    reason: str = ""
+
+
+@router.get("/copy-policy")
+async def copy_policy():
+    """복제 시 무엇을 가져오고 무엇을 **절대 가져오지 않는지**(§7.1).
+
+    ★ 화면이 이 표를 그대로 보여주게 하려고 API 로 낸다 — 정책을 화면에 다시 적으면 두 곳이
+      갈라지고, 사용자는 실제로 무엇이 복사됐는지 알 수 없게 된다."""
+    from core.enterprise_context.clone_service import COPY_POLICY, NEVER_COPIED
+    return {"status": "success",
+            "data": {"selectable": COPY_POLICY, "never_copied": NEVER_COPIED}}
+
+
+@router.post("/entities/{entity_id}/clone")
+async def clone_entity(entity_id: str, req: CloneIn,
+                       p: Principal = Depends(current_principal),
+                       ctx: EnterpriseContext = Depends(enterprise_context)):
+    """실제 엔터티를 격리된 가상 시나리오로 복제한다(§9 `CLONE_TO_VIRTUAL`)."""
+    assert_can_edit_org(p)
+    from core.enterprise_context.clone_service import SandboxError, clone_service
+    try:
+        data = await asyncio.to_thread(
+            clone_service.clone_to_virtual, entity_id, req.name_ko, req.purpose,
+            req.valid_until, (p.user_id or ""), req.copy, ctx.tenant_id,
+            req.assumption_set_id, req.snapshot_id)
+    except (SandboxError, EcmError) as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": data}
+
+
+@router.get("/scenarios")
+async def list_scenarios(status: str = "", entity_id: str = "",
+                         p: Principal = Depends(current_principal)):
+    """가상 시나리오 목록. **만료 여부를 함께 준다** — 만료된 가정으로 판단하면 안 된다."""
+    from core.enterprise_context.clone_service import clone_service
+    data = await asyncio.to_thread(clone_service.list_scenarios, status, entity_id)
+    return {"status": "success", "data": data}
+
+
+@router.get("/scenarios/{scenario_id}")
+async def get_scenario(scenario_id: str, p: Principal = Depends(current_principal)):
+    from core.enterprise_context.clone_service import clone_service
+    data = await asyncio.to_thread(clone_service.get_scenario, scenario_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="시나리오를 찾을 수 없습니다.")
+    return {"status": "success", "data": data}
+
+
+@router.post("/scenarios/{scenario_id}/promote-request")
+async def promote_request(scenario_id: str, req: PromoteIn,
+                          p: Principal = Depends(current_principal)):
+    """가상 설계를 실제 조직 초안으로 **승격 요청**한다.
+
+    ⚠️ 요청까지만이다 — 실제 조직은 바뀌지 않는다(§8.3: 가상 결과를 실제 시스템에 자동 반영하지
+      않는다). 응답의 `note` 가 그것을 말한다."""
+    assert_can_edit_org(p)
+    from core.enterprise_context.clone_service import SandboxError, clone_service
+    try:
+        data = await asyncio.to_thread(clone_service.request_promotion, scenario_id,
+                                       (p.user_id or ""), req.rationale)
+    except SandboxError as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": data}
+
+
+@router.post("/scenarios/{scenario_id}/close")
+async def close_scenario(scenario_id: str, req: CloseIn,
+                         p: Principal = Depends(current_principal)):
+    """시나리오를 닫는다(삭제하지 않는다 — 어떤 가정으로 판단했는지가 감사 대상이다)."""
+    assert_can_edit_org(p)
+    from core.enterprise_context.clone_service import SandboxError, clone_service
+    try:
+        data = await asyncio.to_thread(clone_service.close_scenario, scenario_id,
+                                       (p.user_id or ""), req.reason)
+    except SandboxError as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": data}

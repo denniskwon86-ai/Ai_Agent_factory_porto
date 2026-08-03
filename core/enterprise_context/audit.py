@@ -72,6 +72,10 @@ PROGRAM_USE_BLOCKED = "PROGRAM_USE_BLOCKED"
 #     *누가* 바꿨는지는 담지 않는다.
 ORG_STRUCTURE_CHANGED = "ORG_STRUCTURE_CHANGED"   # 부서 생성·개명·이동·폐지
 ORG_USER_CHANGED = "ORG_USER_CHANGED"             # 사용자 등록·권한 플래그·역할·폐지
+# [E3] 가상 시나리오 생성·종료·승격 요청. 가상 조직은 실제 조직의 복제본이므로 **누가 무엇을
+#   복제해 어떤 가정으로 판단했는지**가 남아야 한다 — 남지 않으면 가상 결과의 근거를 설명할 수 없고,
+#   "이 숫자가 실제인가 가정인가"라는 질문에 답할 수 없다(비협상 3).
+VIRTUAL_SCENARIO_CHANGED = "VIRTUAL_SCENARIO_CHANGED"
 
 EVENTS = (
     ACCESS_DENIED_SCOPE_MISMATCH, ACCESS_DENIED_UNAUTHENTICATED,
@@ -79,7 +83,7 @@ EVENTS = (
     SANDBOX_TOKEN_ISSUED, SANDBOX_TOKEN_USED, SANDBOX_TOKEN_EXPIRED,
     CONNECTOR_QUERY_EXECUTED, CONNECTOR_QUERY_DENIED,
     PROGRAM_STATUS_CHANGED, PROGRAM_USE_BLOCKED,
-    ORG_STRUCTURE_CHANGED, ORG_USER_CHANGED,
+    ORG_STRUCTURE_CHANGED, ORG_USER_CHANGED, VIRTUAL_SCENARIO_CHANGED,
 )
 
 #: 식별되지 않은 주체. 빈 문자열로 두면 "기록 누락"과 구분되지 않는다.

@@ -915,9 +915,31 @@ class MasterData:
           기존 바인딩이 v1 고정으로 **바뀐다**. 기간을 달리해야 별도 행이 된다.
           관리 UI 를 만들 때 '추가'와 '수정'이 같은 호출임을 사용자에게 드러내야 한다
           (실제로 이 동작을 모르고 시드 바인딩을 덮어쓴 사고가 있었다)."""
-        if entity_mode != "REAL":
-            # 가상·경쟁사 문맥의 기준정보 적용은 ECM E3(격리 스냅샷) 이후다(D-007).
-            raise MasterDataError("현재는 REAL 문맥만 바인딩할 수 있습니다(가상·경쟁사는 E3).")
+        if entity_mode == "COMPETITOR_REFERENCE":
+            # 경쟁사 참조는 공개 근거만 다루는 모델이다 — 우리 기준정보를 여기에 적용하면
+            # 추정치와 자사 확정값이 섞인다(비협상 3).
+            raise MasterDataError(
+                "경쟁사 참조 문맥에는 기준정보를 바인딩할 수 없습니다 — 공개 근거와 자사 "
+                "확정값이 섞입니다.")
+        if entity_mode == "VIRTUAL":
+            # ★★ [E3 · 2026-07-31] 가상 문맥 바인딩을 연다. 단 **살아 있는 시나리오 안에서만.**
+            #   E3 전에는 전면 금지였다(격리 스냅샷·가정 세트·외부 연계 차단이 없었으므로).
+            #   이제 그 장치가 있으므로 열되, 조건을 구조로 확인한다:
+            #     · 그 노드가 실제로 가상 엔터티에 속하는가
+            #     · 그 엔터티에 **만료되지 않은** ACTIVE 시나리오가 있는가
+            #   ⚠️ 시나리오 없이 가상 노드에 바인딩하면 목적도 만료도 없는 가정값이 쌓인다 —
+            #     그것이 E3 를 선행 조건으로 걸어 둔 이유 그대로다.
+            try:
+                from core.enterprise_context.clone_service import clone_service
+                scn = clone_service.active_scenario_of_node(scope_node_id)
+            except Exception as e:
+                raise MasterDataError(f"가상 문맥 확인에 실패했습니다(바인딩 거부): {e}")
+            if not scn:
+                raise MasterDataError(
+                    f"'{scope_node_id}' 에 유효한 가상 시나리오가 없습니다 — 가상 문맥 바인딩은 "
+                    f"살아 있는 시나리오 안에서만 가능합니다(만료된 시나리오도 거부됩니다).")
+        elif entity_mode != "REAL":
+            raise MasterDataError(f"알 수 없는 entity_mode 입니다: {entity_mode}")
         if not master_code or not scope_node_id:
             raise MasterDataError("master_code 와 scope_node_id 는 필수입니다.")
         now = self._now()
