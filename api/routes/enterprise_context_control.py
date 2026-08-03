@@ -2,13 +2,25 @@
 
 E1 범위: 조직 트리 조회, 엔터티/노드/엣지 등록·승인, 문맥 선택 검증, 프로필 저장·조회, 시드.
 
-미구현(범위 밖, 설계서 로드맵 그대로):
-  · `GET /contexts/{scope_id}/resolved-profile` — **프로필 상속 해석은 E2**. E1 은 프로필을
-    저장·조회만 하고 병합하지 않는다. 지금 반쪽 병합을 넣으면 "상속이 되는 것처럼 보이는데
-    실제로는 아닌" 상태가 되어 더 위험하다.
-  (E3 는 2026-07-31 에 구현했다 — 아래 `/entities/{id}/clone` · `/scenarios` 참조.
-   가상 엔터티는 **직접 생성할 수 없고 복제로만** 만들어진다: `POST /entities` 는 여전히 REAL
-   만 받고, 목적·유효기간·복사 정책이 함께 없으면 가상 조직이 생기지 않는다.)
+현재 구현 범위(2026-08-03 기준 — 로드맵 E1~E4):
+  · **E2** `GET /contexts/{scope_id}/resolved-profile` — 프로필 상속 해석 **구현됨**
+    (`profile_resolver`). 응답의 `sources`(적용 순서)·`skipped`(미승인 제외)를 함께 봐야
+    "이 값이 어디서 왔나"에 답할 수 있다.
+    ⚠️ 이 줄은 오래 "미구현(E2)"으로 남아 있었다 — 이미 있는 기능을 없다고 적은 주석은 다음
+      사람이 같은 것을 다시 만들게 한다. 범위 주석은 코드가 바뀔 때 함께 고친다.
+  · **E2** 에이전트팩 바인딩 — `/agent-packs*` · `/nodes/{id}/agents`(상속 해석·provenance)
+  · **E3** 가상 Sandbox — `/entities/{id}/clone` · `/scenarios*` · `/copy-policy`.
+    가상 엔터티는 **직접 생성할 수 없고 복제로만** 만들어진다: `POST /entities` 는 여전히 REAL
+    만 받고, 목적·유효기간·복사 정책이 함께 없으면 가상 조직이 생기지 않는다.
+  · **E3** 가정 세트·기준선 스냅샷·계산 결과·비교 — `/assumption-sets*` · `/snapshots*` ·
+    `/results*` · `/comparisons`
+  · **E3 §7.3** 경쟁사 참조 — `/competitors*`. 경쟁사 엔터티도 전용 문으로만 만들어진다.
+  · **E3↔M4** `/run-calculation` — ECM 가정 세트로 결정론적 엔진 실행 후 결과 등록
+  · **E4** `/rollup` · `/executive-board` — 조직 트리 집계와 상태 분리 비교 보드
+
+미구현(범위 밖):
+  · 외부환경 인텔리전스를 보드의 `FORECAST` 계열로 연결 — E4 의 남은 조각.
+    지금 보드에는 계열 자리만 있고, `core/external_intelligence.py` 가 아직 이어져 있지 않다.
 
 권한: 조직 트리는 부서 권한으로 필터한다(§10.1 이행 — ECM 전용 권한 테이블은 E2).
   등록·승인은 조직 편집 권한(`assert_can_edit_org`)을 요구한다 — 조직은 기준정보다.
@@ -874,6 +886,12 @@ class BoardIn(BaseModel):
     rollups: Dict[str, Dict[str, Any]] = {}
     competitor_entity_id: str = ""
     internal_values: Dict[str, Any] = {}
+    #: [E4] 외부환경 지표를 `FORECAST` 계열로 얹는다. 등급 미달·관측 없음은 값이 아니라
+    #: `outlook.blocked` 로 올라간다(0 으로 채우지 않는다 — §12.1/§12.2).
+    outlook_indicators: List[str] = []
+    outlook_purpose: str = "scenario"      # 경영 보고용이면 official_report(gold)
+    outlook_as_of: str = ""
+    outlook_vintage: str = ""
 
 
 @router.post("/rollup")
@@ -905,9 +923,28 @@ async def executive_board(req: BoardIn, p: Principal = Depends(current_principal
         comp_rows = (await asyncio.to_thread(competitor_reference.compare_with_internal,
                                              req.competitor_entity_id,
                                              req.internal_values))["rows"]
+
+    series, meta, outlook = req.series, req.meta, None
+    if req.outlook_indicators:
+        # ★ 등급 미달·관측 없음은 계열에서 빠지고 `outlook.blocked` 로 올라온다 —
+        #   0 으로 채우면 §12.1 이 금지한 "검증 없이 전망값으로 기준을 바꾸는" 상황이 된다.
+        from core.enterprise_context.outlook_series import OutlookError, outlook_series
+        try:
+            merged = await asyncio.to_thread(
+                outlook_series.attach_to_board,
+                {"series": req.series, "meta": req.meta}, req.outlook_indicators,
+                req.outlook_purpose, req.outlook_as_of, req.outlook_vintage)
+        except OutlookError as e:
+            _sandbox_err(e)
+        series, meta, outlook = merged["series"], merged["meta"], merged["outlook"]
+
     try:
-        d = await asyncio.to_thread(build_board, req.node_id, req.series, req.meta,
+        d = await asyncio.to_thread(build_board, req.node_id, series, meta,
                                     req.rollups, viewer_may_drill_down(p), comp_rows)
     except BoardError as e:
         _sandbox_err(e)
+    if outlook is not None:
+        d["outlook"] = outlook
+        # 제외된 지표 안내를 보드 경고에 합류시킨다 — 별도 필드에만 두면 화면이 안 읽는다.
+        d["notes"] = list(d.get("notes") or []) + list(outlook.get("notes") or [])
     return {"status": "success", "data": d}
