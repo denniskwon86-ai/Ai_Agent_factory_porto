@@ -40,11 +40,11 @@
 ### [CLAUDE-CLOSED-LOOP-22] 승인 폐쇄루프 UI 정식 편입·구현 인계
 - 작성자 / 기록 시각: Codex / 2026-08-03 KST
 - 왜 지금 기록하는가: Supervisor가 앱 전달·수락·의사결정·발간 클릭형 프로토타입을 승인하고, 기존 UI/UX 시안에 정식 반영한 뒤 Claude Code가 실제 제품으로 완성할 수 있도록 업무를 정리하라고 지시했다.
-- 상태: **제품 UI 기준선 승인·3대 UI 문서 편입·Claude Code 구현 작업서 작성 완료 · 실제 React/API/DB 구현 대기**
+- 상태: **제품 UI 기준선 승인·3대 UI 문서 편입·Claude Code 구현 작업서 작성·origin/dev 푸시 완료 · 실제 React/API/DB 구현 대기**
 - 결정 및 근거: `docs/uiux/LIVING_ENTERPRISE_SCREEN_FUNCTION_DEFINITION_2026-07-30.md`에 CL-01~04와 두 폐쇄루프를, `LIVING_ENTERPRISE_UI_DESIGN_SPEC_2026-07-30.md`에 Collaboration Workflow Hub·URL·컴포넌트·검수 기준을, `LIVING_ENTERPRISE_IMPLEMENTATION_TRACEABILITY_2026-07-30.md`에 API·M6-UI-03C·회귀·완료조건을 편입했다. `docs/uiux/CLAUDE_IMPLEMENTATION_WORK_ORDER_CLOSED_LOOP_2026-08-03.md`는 현재 코드 기준 신규 DB·Router·서비스·React feature, API 목록, 상태 전이, 권한 경계, 테스트, 커밋 순서를 정의한다. 승인 화면은 `uiux-prototypes/closed-loop-product-samples/`이다.
 - 영향·주의사항: 문서·정적 프로토타입·보드만 변경했으며 `frontend/`, `api/`, `core/`, DB는 미변경이다. 개인 전달을 `workspace_shares`에 합치지 말고, 앱 수락으로 데이터 권한을 확대하지 말며, 대외 발간은 책임 임원+법무/공시 이중 게이트와 명시적 사용자 실행을 서버에서 강제한다. 세 검토서는 하나의 Decision Package projection이어야 한다.
 - 다음 행동 / 담당 / 착수 조건: Claude Code는 현재 작업트리가 정리되고 M6-UI-03C 착수가 허용되는 시점에 작업서의 CL-0(App-in-App Manifest)부터 독립 커밋 단위로 시작한다. 권한·DB/Ledger 원자성·대외 발간·사용자별 SSE는 통합 전 다른 팀원 독립 검토를 요청한다. Codex는 1280/1440 화면, 용어, Jarvis 문맥, 개인/조직 공유 구분을 교차검증한다.
-- 교대 체크포인트: 승인 프로토타입은 유지했고 화면기능정의서·UI설계서·추적성·README·구현 작업서를 갱신했다. 실제 소스·DB·테스트는 변경 또는 실행하지 않았고 커밋·푸시하지 않았다. 재개 첫 행동은 Claude Code가 작업서 §13 형식으로 보드에 착수 범위와 실제 수정 파일을 기록하는 것이다. 금지 범위는 Factory 전체 레이아웃 재설계, 개인 전달/조직 공유 통합, 권한 자동 확대, 자동 외부 발간이다.
+- 교대 체크포인트: 승인 프로토타입, V1~V10 탐색 이력, 화면기능정의서·UI설계서·추적성·README·구현 작업서를 커밋 `ae8da0887`로 `origin/dev`에 푸시했다. 실제 React/API/DB·런타임 테스트는 변경 또는 실행하지 않았다. 재개 첫 행동은 Claude Code가 `docs/uiux/CLAUDE_IMPLEMENTATION_WORK_ORDER_CLOSED_LOOP_2026-08-03.md` §13 형식으로 본 보드에 담당 패키지·실제 수정 파일·첫 테스트를 기록한 뒤 CL-0 App-in-App Manifest부터 착수하는 것이다. 금지 범위는 Factory 전체 레이아웃 재설계, 개인 전달/조직 공유 통합, 앱 수락에 의한 데이터 권한 자동 확대, 세 관점 검토서의 원본 분리, 사용자 확인 없는 자동 외부 발간이다. 공유 작업트리의 Knowledge·데이터·문서 정리 변경은 이번 커밋에서 제외했으며 각 원 담당자가 별도 처리한다.
 
 ### [UX-CLOSED-LOOP-21] 업무 협업·의사결정·발간 폐쇄루프 UI 반영
 - 작성자 / 기록 시각: Codex / 2026-08-03 KST
