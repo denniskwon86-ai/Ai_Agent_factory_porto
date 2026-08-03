@@ -12,7 +12,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../../design/HubShell';
+import { HubDialog } from '../../design/HubDialog';
 import { JarvisRail } from '../../design/JarvisRail';
+import type { JarvisContext } from '../../lib/jarvisApi';
 import {
   collaborationApi, DELIVERY_STATUS_KO, type CapabilityManifest, type Delivery, type PocketApp,
 } from '../../lib/collaborationApi';
@@ -163,23 +165,40 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     return { title: '협업', desc: '앱 전달·수락·내 앱을 한곳에서 다룹니다.', ev: [] };
   })();
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-[1440px] h-[92vh] rounded-xl overflow-hidden border border-[#24344b] flex flex-col">
-        {/* 상단 바 — 기존 앱과 이 화면의 경계. 닫기는 항상 같은 자리에 있어야 한다. */}
-        <div className="afs-scope flex items-center gap-3 px-5 py-3 border-b"
-          style={{ background: 'linear-gradient(90deg,#0a1e5a,#123166)', borderColor: '#24344b' }}>
-          <b style={{ color: '#fff', fontSize: 15 }}>협업</b>
-          <span style={{ color: '#9fb3d6', fontSize: 12 }}>
-            개인 전달은 부서 공유·전사 승격과 별개이며, 수락해도 데이터 권한은 넓어지지 않습니다
-          </span>
-          <div className="ml-auto flex items-center gap-3">
-            {busy && <span style={{ color: '#7fd7de', fontSize: 12 }}>{busy}…</span>}
-            <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>닫기</button>
-          </div>
-        </div>
+  // ★ [지적 4] Jarvis 가 참조하는 객체 = 화면이 강조 중인 객체. 두 값이 갈라지면 사용자는
+  //   A 를 보면서 B 에 대한 답을 읽는다 — 가장 발견하기 어려운 오답이다.
+  const jarvisContext: JarvisContext = {
+    current_module: `collaboration/${view}`,
+    selected_object_type: view === 'apps' ? 'app_pocket' : 'app_delivery',
+    selected_object_id: view === 'apps' ? (apps[0]?.pocket_id || '') : (selected?.delivery_id || ''),
+    object_snapshot: selected ? {
+      release_id: selected.release_id, purpose: selected.purpose, status: selected.status,
+      expires_at: selected.expires_at, sender: selected.sender_user_id,
+      capabilities: selected.manifest_snapshot?.capabilities || [],
+      auth_mode: selected.manifest_snapshot?.auth_mode,
+    } : { inbox_count: inbox.length, apps_count: apps.length, sent_count: sent.length },
+    available_actions: selected?.can_respond
+      ? ['수락', '거절', '재배정 요청'] : selected?.can_revoke ? ['회수'] : [],
+    evidence_refs: selected?.manifest_fingerprint
+      ? [{ manifest_fingerprint: selected.manifest_fingerprint }] : [],
+  };
 
-        <div className="flex-1 min-h-0">
+  return (
+    // ★ [교차검토 지적 1] 손으로 만든 `fixed div` 는 모달이 아니었다 — dialog semantics·배경
+    //   inert·포커스 트랩·Escape·포커스 복귀·스크롤 잠금이 모두 없었다. 셸 공통 기반으로 옮겼다.
+    <HubDialog label="협업 — 앱 전달·수락·내 앱" onClose={onClose}>
+      <div className="afs-dialog-bar">
+        <b>협업</b>
+        <span>개인 전달은 부서 공유·전사 승격과 별개이며, 수락해도 데이터 권한은 넓어지지 않습니다</span>
+        <div className="bar-actions">
+          {busy && <span className="busy">{busy}…</span>}
+          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="afs-dialog-body">
           <HubShell
             kicker="COLLABORATION"
             title="앱 전달과 공동 업무"
@@ -196,21 +215,18 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
               </div>
             }
             jarvis={
+              // ⚠️ [지적 3] 고정 문자열 응답을 제거했다. 실제 어댑터(`lib/jarvisApi.ts`)를 호출하고
+              //   대화는 레일 안에서 유지된다. 연결 실패는 숨기지 않고 그대로 표시한다.
               <JarvisRail
                 contextTitle={jarvisCtx.title}
                 contextDescription={jarvisCtx.desc}
                 evidence={jarvisCtx.ev}
+                context={jarvisContext}
                 quickQuestions={[
                   '이 앱은 어떤 자료를 요구합니까?',
                   '수락하면 제 권한이 넓어집니까?',
                   '이 요청은 언제 만료됩니까?',
                 ]}
-                onAsk={(q) => setFlash(
-                  q.includes('권한')
-                    ? '아니요. 앱을 수락해도 데이터 접근 범위는 넓어지지 않습니다 — 앱은 현재 사용자 권한으로 실행됩니다.'
-                    : q.includes('만료')
-                      ? (selected?.expires_at ? `${selected.expires_at} 에 만료됩니다.` : '선택된 요청이 없습니다.')
-                      : (selected ? `요구 권한은 화면 중앙의 Capability Manifest 에 표시됩니다 (${selected.release_id}).` : '선택된 요청이 없습니다.'))}
               />
             }
           >
@@ -251,9 +267,8 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
                 onRevoke={(d, r) => act('회수 중', () => collaborationApi.revoke(d.delivery_id, r))} />
             )}
           </HubShell>
-        </div>
       </div>
-    </div>
+    </HubDialog>
   );
 }
 
@@ -293,20 +308,25 @@ function InboxScreen({ list, selectedId, onSelect, onAccept, onReject, onReassig
           </div>
         ) : shown.map((d) => (
           <article key={d.delivery_id}
-            className={`request-card ${d.delivery_id === selectedId ? 'active' : ''}`}
-            onMouseEnter={() => onSelect(d.delivery_id)}>
-            <div className="request-top">
+            className={`request-card ${d.delivery_id === selectedId ? 'active' : ''}`}>
+            {/* ⚠️ [지적 4] 이전에는 `onMouseEnter` 로만 선택이 바뀌어 **키보드 사용자는 Jarvis
+                문맥을 바꿀 수 없었다.** 명시적 선택 버튼 + focus 선택으로 바꿨다. */}
+            <button type="button" className="request-select"
+              aria-pressed={d.delivery_id === selectedId}
+              onClick={() => onSelect(d.delivery_id)}
+              onFocus={() => onSelect(d.delivery_id)}>
               <span className="app-mark" aria-hidden="true">{d.release_id.slice(-2)}</span>
-              <div>
+              <span className="request-select-main">
                 <small>{d.release_version ? `v${d.release_version}` : 'RELEASE'}</small>
-                <h3>{d.release_id}</h3>
-                <p>{d.purpose}</p>
-              </div>
-              <div style={{ textAlign: 'right' }}>
+                <b>{d.release_id}</b>
+                <span className="purpose">{d.purpose}</span>
+              </span>
+              <span className="request-select-side">
                 <StatusChip status={d.status} />
-                <div><time>{(d.created_at || '').slice(0, 10)}</time></div>
-              </div>
-            </div>
+                <time>{(d.created_at || '').slice(0, 10)}</time>
+                <em>{d.delivery_id === selectedId ? '선택됨' : '선택'}</em>
+              </span>
+            </button>
 
             <div className="request-scope">
               <div><span>보낸 사람</span><b>{d.sender_user_id}</b></div>

@@ -75,7 +75,8 @@ async def _warmup():
         print(f"⚠️ [업무표준] 시드 실패(코드 기본값으로 폴백): {e}")
 
 
-from api.routes import app_delivery_control  # [CL-1]
+from api.routes import (app_delivery_control, decision_control,  # [CL-1, CL-2]
+                        jarvis_control)  # [CL-4 선행] 기존 Supervisor 계약의 문맥 어댑터
 app.include_router(factory_control.router)
 app.include_router(format_control.router)
 app.include_router(realtime.router)
@@ -111,4 +112,8 @@ app.include_router(external_control.router)
 app.include_router(crosswalk_control.router)
 # [CL-1] 개인 앱 전달 — 조직 공유·업무 배정·전사 승격과 **별도 경로**다(작업서 §3-1,2).
 app.include_router(app_delivery_control.router)
+# [CL-2] Decision Package — 세 관점은 같은 문서의 렌더링이다(§3-5).
+app.include_router(decision_control.router)
+# [CL-4 선행] Jarvis 문맥 어댑터 — 두 번째 채팅 API 가 아니라 기존 엔진의 주소 변환기다(§3).
+app.include_router(jarvis_control.router)
 app.include_router(mcp_control.router)

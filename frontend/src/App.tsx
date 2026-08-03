@@ -259,12 +259,12 @@ export default function App() {
         {showBriefing && (
           <BriefingPanel onClose={() => setShowBriefing(false)} />
         )}
-        <div className="min-h-screen w-screen bg-[#0B0C10] text-gray-100 flex flex-col font-sans">
-          <header className="h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-[#1F2833] flex items-center justify-between px-8 shrink-0 sticky top-0 z-10">
-            <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
+        <div className="min-h-screen w-full bg-[#0B0C10] text-gray-100 flex flex-col font-sans">
+          <header className="h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-[#1F2833] flex items-center justify-between gap-4 px-8 shrink-0 sticky top-0 z-10 overflow-hidden">
+            <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3 shrink-0">
               <span className="text-indigo-400">🏭 V5.2</span> Private AI Cockpit
             </h1>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 min-w-0 overflow-x-auto">
               <button
                 onClick={() => setShowAdvisor(true)}
                 className="text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 px-4 py-2 rounded-lg transition-all"
