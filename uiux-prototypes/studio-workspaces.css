@@ -1,0 +1,87 @@
+:root {
+  --studio-navy: #0a1e5a;
+  --studio-red: #fa002d;
+  --studio-cyan: #009bb4;
+  --studio-green: #0b8d82;
+  --studio-amber: #d97820;
+  --studio-ink: #172332;
+  --studio-muted: #667286;
+  --studio-line: #d8dde4;
+  --studio-soft: #f4f6f8;
+  --studio-paper: #ffffff;
+}
+
+.studio-button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #c8cfd8;
+  border-radius: 6px;
+  color: #465366;
+  background: #fff;
+  font: 800 12px var(--afs-font);
+  cursor: pointer;
+}
+.studio-button:hover { border-color: #8e9aad; color: var(--studio-navy); }
+.studio-button.primary { border-color: var(--studio-red); color: #fff; background: var(--studio-red); }
+.studio-button.navy { border-color: var(--studio-navy); color: #fff; background: var(--studio-navy); }
+.studio-button.teal { border-color: var(--studio-green); color: #fff; background: var(--studio-green); }
+.studio-button.warn { border-color: var(--studio-amber); color: #fff; background: var(--studio-amber); }
+.studio-button.wide { width: 100%; }
+
+.studio-eyebrow {
+  color: var(--studio-cyan);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .11em;
+}
+
+.studio-card {
+  border: 1px solid var(--studio-line);
+  border-radius: 8px;
+  background: var(--studio-paper);
+  box-shadow: 0 5px 18px rgba(23, 35, 50, .05);
+}
+
+.studio-atlas {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: calc(100vh - 132px);
+  overflow: hidden;
+  border-left: 1px solid #263d70;
+  color: #edf3ff;
+  background: linear-gradient(180deg, #081943 0%, #0a1e5a 52%, #07163c 100%);
+}
+.studio-atlas header { padding: 18px 17px 14px; border-bottom: 1px solid rgba(255,255,255,.14); }
+.studio-atlas-title { display: flex; align-items: center; gap: 10px; }
+.studio-atlas-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; color: #fff; background: var(--studio-red); font-size: 17px; font-weight: 950; }
+.studio-atlas-title b, .studio-atlas-title span { display: block; }
+.studio-atlas-title b { font-size: 15px; }
+.studio-atlas-title span { margin-top: 3px; color: #aebee0; font-size: 10px; }
+.studio-atlas-scope { margin-top: 12px; padding: 9px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; color: #c5d0e5; background: rgba(255,255,255,.055); font-size: 10px; line-height: 1.45; }
+.studio-atlas-scope b { color: #fff; }
+.studio-atlas-status { display: flex; align-items: center; gap: 7px; margin-top: 9px; color: #a8b7d3; font-size: 10px; }
+.studio-atlas-status i { width: 7px; height: 7px; border-radius: 50%; background: #47d7b7; box-shadow: 0 0 0 4px rgba(71,215,183,.12); }
+.studio-atlas-body { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 14px; }
+.studio-atlas-label { margin-bottom: 8px; color: #93a7cb; font-size: 9px; font-weight: 900; letter-spacing: .1em; }
+.studio-atlas-brief { padding: 12px; border-left: 3px solid #54cad7; background: rgba(255,255,255,.07); font-size: 12px; line-height: 1.55; }
+.studio-atlas-brief b { display: block; margin-bottom: 5px; color: #fff; font-size: 12px; }
+.studio-atlas-prompts { display: grid; gap: 6px; margin-top: 12px; }
+.studio-atlas-prompts button { min-height: 36px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; color: #dce5f4; background: rgba(255,255,255,.055); font: 750 11px var(--afs-font); text-align: left; cursor: pointer; }
+.studio-atlas-prompts button:hover { border-color: #4ebdcc; background: rgba(78,189,204,.12); }
+.studio-atlas-chat { flex: 1; min-height: 116px; margin-top: 12px; overflow: auto; }
+.studio-atlas-message { margin: 0 0 8px; padding: 9px 10px; border-radius: 7px; font-size: 11px; line-height: 1.5; }
+.studio-atlas-message.agent { margin-right: 18px; color: #dbe7fb; background: rgba(255,255,255,.075); }
+.studio-atlas-message.user { margin-left: 18px; color: #fff; background: rgba(0,155,180,.22); }
+.studio-atlas-compose { padding: 12px 14px 14px; border-top: 1px solid rgba(255,255,255,.13); }
+.studio-atlas-compose textarea { width: 100%; height: 62px; resize: none; padding: 9px 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 7px; outline: 0; color: #fff; background: rgba(255,255,255,.07); font: 12px/1.45 var(--afs-font); }
+.studio-atlas-compose textarea::placeholder { color: #899abb; }
+.studio-atlas-compose textarea:focus { border-color: #50c8d6; }
+.studio-atlas-compose footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.studio-atlas-compose small { color: #899abb; font-size: 9px; }
+.studio-atlas-compose button { min-height: 34px; padding: 0 12px; border: 0; border-radius: 5px; color: #fff; background: var(--studio-red); font: 850 11px var(--afs-font); cursor: pointer; }
+
+@media (max-width: 1500px) {
+  .studio-atlas { width: 290px; }
+  .studio-atlas-prompts button { font-size: 10px; }
+}

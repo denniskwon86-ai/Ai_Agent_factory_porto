@@ -1,1 +1,52 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Factory Studio · UX Prototypes</title><link rel="stylesheet" href="design-system.css"><style>.content{max-width:1180px;padding-top:52px}.intro{padding:28px;border:1px solid var(--line);border-radius:14px;background:radial-gradient(circle at 86% 0,#c9e76b19,transparent 32%),var(--surface)}.intro h1{margin:6px 0;font-size:30px;letter-spacing:-.06em}.intro p{max-width:720px;color:var(--muted);font-size:13px;line-height:1.65}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:15px}.card{display:block;padding:18px;border:1px solid var(--line);border-radius:11px;color:var(--text);background:var(--surface);text-decoration:none;transition:.18s}.card:hover{transform:translateY(-2px);border-color:#c9e76b66;background:var(--surface-2)}.card b{display:block;margin-top:9px;font-size:15px}.card p{margin:6px 0 0;color:var(--muted);font-size:11px;line-height:1.55}.letter{display:grid;place-items:center;width:25px;height:25px;border-radius:7px;color:#1d251d;background:var(--lime);font-size:10px;font-weight:900}</style></head><body><div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">AF</span>AI Factory Studio</div><span class="nav-label">Design prototypes</span><button class="nav-item active">시안 인덱스</button><div class="side-context"><small>공통 방향</small><b>Enterprise Control Plane</b><span>그래파이트 바탕 · 제한된 의미색 · 명확한 다음 행동</span></div></aside><main><header class="topbar"><div class="crumb">UX 탐색 / <b>프로토타입 모음</b></div><div class="top-actions"><span class="online"><i></i>정적 시안</span></div></header><div class="content"><section class="intro"><span class="eyebrow">AI Factory Studio UX direction</span><h1>하나의 테마, 여러 업무 모드.</h1><p>기본 색과 컴포넌트 언어는 통일하되, 상담·생성·시뮬레이션·운영·지식관리처럼 집중해야 할 일이 다른 화면은 정보 구조를 다르게 설계합니다. 아래 시안은 실제 기능을 대체하지 않는 UX 검토용 HTML입니다.</p></section><section class="grid"><a class="card" href="uiux_cockpit_concept_prototype.html"><span class="letter">A</span><b>AI Cockpit</b><p>AI 상담, 프로젝트, 슈퍼바이저를 함께 보는 기본 작업실.</p></a><a class="card" href="uiux_b_planning_studio_light.html"><span class="letter">B</span><b>Planning Studio</b><p>처음 접하는 사용자의 요구사항 정리와 새 솔루션 기획.</p></a><a class="card" href="uiux_c_digital_twin_canvas.html"><span class="letter">C</span><b>Digital Twin Canvas</b><p>공정·사업·외부 가정의 영향을 시나리오로 탐색.</p></a><a class="card" href="uiux_d_operations_grid.html"><span class="letter">D</span><b>Operations Grid</b><p>현업 담당자의 일일 운영·승인·병목 통제.</p></a><a class="card" href="e_knowledge_data_hub.html"><span class="letter">E</span><b>Knowledge & Data Hub</b><p>지식팩, MDM, 데이터 카탈로그와 계보를 한곳에서 관리.</p></a><a class="card" href="f_enterprise_context.html"><span class="letter">F</span><b>Enterprise Context</b><p>기업집단, 법인, 공장, 권한, 프로필과 가상 조직을 관리.</p></a><a class="card" href="g_agent_workflow_studio.html"><span class="letter">G</span><b>Agent Workflow Studio</b><p>업무 템플릿과 AI 에이전트 조합을 눈에 보이게 설계.</p></a><a class="card" href="h_data_connections.html"><span class="letter">H</span><b>Data Connections</b><p>외부 시스템, 데이터 계약, MCP 조회 범위와 안전성을 통제.</p></a><a class="card" href="i_release_center.html"><span class="letter">I</span><b>Release Center</b><p>생성한 SW 결과물의 품질, 실행, 게시, 재사용을 관리.</p></a><a class="card" href="j_supervisor_console.html"><span class="letter">J</span><b>Supervisor Console</b><p>자비스형 슈퍼바이저와 대화하며 전체 상황을 판단·제어.</p></a></section></div></main></div></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI Factory Studio · UI/UX 시안 갤러리</title>
+  <link rel="stylesheet" href="design-system.css">
+  <style>
+    .content{max-width:1280px;padding-top:40px}.intro{padding:27px;border:1px solid var(--line);border-radius:15px;background:radial-gradient(circle at 88% 0,#62d7e820,transparent 30%),var(--surface)}
+    .intro h1{margin:7px 0;font-size:29px;letter-spacing:-.06em}.intro p{max-width:800px;margin:0;color:var(--muted);font-size:12px;line-height:1.7}
+    .versions{display:grid;grid-template-columns:repeat(2,1fr);gap:13px;margin-top:15px}.version{display:block;padding:18px;border:1px solid var(--line);border-radius:12px;color:var(--text);background:var(--surface);text-decoration:none;transition:.18s}
+    .version:hover{transform:translateY(-2px);border-color:#c9e76b66;background:var(--surface-2)}.version small{color:var(--lime);font-size:9px;font-weight:900;letter-spacing:.1em}.version b{display:block;margin:8px 0 5px;font-size:15px}.version p{margin:0;color:var(--muted);font-size:11px;line-height:1.55}.version span{display:inline-block;margin-top:10px;padding:4px 6px;border-radius:5px;color:#c7d0dc;background:#ffffff0b;font-size:9px}
+    .version.primary{border-color:#62d7e866;background:linear-gradient(135deg,#62d7e812,var(--surface) 45%)}.version.primary small{color:#62d7e8}.version.reference{opacity:.68}.revision{display:flex;align-items:center;gap:18px;margin-top:15px;padding:20px;border:1px solid #62d7e877;border-radius:13px;color:var(--text);background:linear-gradient(120deg,#62d7e81c,#7b6ef61c);text-decoration:none}.revision div{flex:1}.revision small{color:#62d7e8;font-size:10px;font-weight:900;letter-spacing:.12em}.revision b{display:block;margin:6px 0;font-size:18px}.revision p{margin:0;color:var(--muted);font-size:12px}.revision strong{font-size:22px}.note{margin-top:14px;padding:13px;border:1px solid #f4b05e35;border-radius:9px;color:#f6d4a3;background:#f4b05e0c;font-size:10px;line-height:1.6}
+    @media(max-width:800px){.versions{grid-template-columns:1fr}.content{padding:22px}.intro h1{font-size:25px}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">AF</span>AI Factory Studio</div>
+      <span class="nav-label">UX LAB</span><button class="nav-item active">시안 갤러리</button>
+      <div class="side-context"><small>콘텐츠 기준</small><b>C01–C12 고정</b><span>디자인이 달라도 실제 제품 기능과 업무 맥락을 유지합니다.</span></div>
+    </aside>
+    <main>
+      <header class="topbar"><div class="crumb">UI/UX Lab / <b>Prototype Gallery</b></div><div class="top-actions"><span class="online"><i></i>UTF-8 정상</span></div></header>
+      <div class="content">
+        <section class="intro"><span class="eyebrow">AI Factory Studio interface explorations</span><h1>10개의 시안에서 좋은 경험을 골라<br>하나의 제품으로 조립합니다.</h1><p>V6는 전체 기능 사이트맵, V7은 주체별 진행 흐름, V8은 개인 업무 포털, V9는 전사 가치사슬 운영체계, V10은 Atlas 상담·공동설계 화면입니다. 모든 신규 시안은 회사·Atlas·SW 생성·디지털 트윈·데이터·에이전트·릴리스 기능을 유지합니다.</p></section>
+        <a class="revision" href="m6-product-samples/index.html"><div><small>IMPLEMENTATION BASELINE · M6 PRODUCT UI SAMPLES</small><b>승인 디자인을 실제 기능 7개 화면에 적용한 클릭형 제품 샘플</b><p>Enterprise, 업무상담, SW 생산, 운영승격, Digital Twin, Knowledge·MDM, Agent OS를 하나의 공통 셸과 Atlas 경험으로 검증합니다.</p></div><strong>제품 샘플 열기 →</strong></a>
+        <a class="revision" href="closed-loop-product-samples/index.html#inbox"><div><small>NEW PRODUCT FLOW · WORK COLLABORATION HUB</small><b>앱 전달부터 의사결정·보고서 발간까지 이어지는 폐쇄루프 UI</b><p>지정 사용자 앱 전달, 수신 승인과 내 앱 등록, 시뮬레이션 검토서 3종·회의 요청, 대내외 보고서 발간을 실제 클릭 흐름으로 검증합니다.</p></div><strong>협업 허브 열기 →</strong></a>
+        <a class="revision" href="master-concept/index.html"><div><small>NORTH STAR · LIVING ENTERPRISE CANVAS</small><b>우리 시스템의 기능을 하나의 살아 있는 기업 화면으로 통합한 대표안</b><p>수주부터 손익까지의 실제 업무, 현업 SW, 데이터, Digital Twin과 Atlas를 하나의 Digital Thread에서 조작합니다.</p></div><strong>대표안 열기 →</strong></a>
+        <a class="revision" href="revision-v2-2/index.html"><div><small>REFERENCE · REVISION V2-2 · LS BRAND EDITION</small><b>LS 공식 CI 컬러를 적용한 대표 화면 3종</b><p>Living Enterprise Canvas 이전의 테마 비교 실험으로 보존합니다.</p></div><strong>비교 기록 →</strong></a>
+        <a class="revision" href="revision-v2-1/index.html"><div><small>BASELINE · REVISION V2-1</small><b>AI Factory Studio의 세계관을 다시 세운 대표 화면 3종</b><p>V2-2와 동일한 구조를 가진 테마 적용 전 기준선입니다.</p></div><strong>기준안 →</strong></a>
+        <a class="revision" href="revision-v2/index.html"><div><small>EXPLORATION · FULL REVISION V2</small><b>독창적 디자인 문법을 탐색한 10개 수정본</b><p>V2-1의 출발점이며, 화면별 공간 모델과 핵심 상호작용을 선별할 때 참고합니다.</p></div><strong>열기 →</strong></a>
+        <a class="revision" href="revision-v3/index.html"><div><small>REJECTED EXPERIMENT · REVISION V3</small><b>통일성은 확인했지만 양산형 관리자 화면으로 판단한 비교 세트</b><p>글꼴 통일 원칙만 유지하며 최종 시각 후보로 사용하지 않습니다.</p></div><strong>기록 보기 →</strong></a>
+        <section class="versions">
+          <a class="version" href="v1/index.html"><small>V1 · RESTORED</small><b>Original Enterprise Control Plane</b><p>초기 A~J 다크 시안을 정상 한글과 실제 기능 기준으로 복원한 버전.</p><span>10개 기능 화면</span></a>
+          <a class="version" href="v2/index.html"><small>V2 · UNIFIED</small><b>Unified Light Workspace</b><p>밝은 작업 캔버스와 네이비 내비게이션으로 전체 제품 문법을 통일.</p><span>7개 화면</span></a>
+          <a class="version reference" href="v3/index.html"><small>V3 · REFERENCE</small><b>Decision Center</b><p>선택지·근거·영향과 큰 실행 버튼을 중앙에 둔 탐색 시안. 채택 후보에서는 제외.</p><span>참고용</span></a>
+          <a class="version reference" href="v4/index.html"><small>V4 · REFERENCE</small><b>Enterprise Command Center</b><p>경영진·운영 통제실용 다크 관제형 탐색 시안. 채택 후보에서는 제외.</p><span>참고용</span></a>
+          <a class="version" href="v5/index.html"><small>V5 · GUIDED</small><b>Guided Workbench</b><p>현업 담당자가 단계·본문·근거를 따라 판단하는 차분한 워크벤치.</p><span>C01–C12</span></a>
+          <a class="version primary" href="v6/index.html"><small>V6 · SITEMAP</small><b>Enterprise Constellation</b><p>회사를 중심으로 데이터·업무·AI 연결을 공간 지도처럼 탐색하는 전체 기능 사이트맵.</p><span>사이트맵 채택 후보</span></a>
+          <a class="version primary" href="v7/index.html"><small>V7 · PROCESS</small><b>Process River Studio</b><p>사용자·AI·데이터·경영의 책임과 진행 상태를 하나의 횡단 업무 흐름으로 표현.</p><span>프로젝트 실행 후보</span></a>
+          <a class="version primary" href="v8/index.html"><small>V8 · ROLE ADAPTIVE</small><b>Role-Adaptive Desk</b><p>권한과 역할에 맞춰 오늘의 의사결정·업무 공간·Atlas 브리핑을 편집해 주는 홈.</p><span>개인화 단계 후보</span></a>
+          <a class="version primary" href="v9/index.html"><small>V9 · VALUE CHAIN</small><b>Enterprise Value Chain OS</b><p>수주부터 손익까지 업무·데이터·시스템·AI를 전사 가치사슬 위에서 연결.</p><span>전사 운영체계 후보</span></a>
+          <a class="version primary" href="v10/index.html"><small>V10 · CONVERSATIONAL</small><b>Atlas Co-Creation Studio</b><p>사용자의 목표를 상담해 필요한 데이터·업무·에이전트와 SW 생성계획으로 즉시 변환.</p><span>첫 진입·상담 후보</span></a>
+        </section>
+        <div class="note">기존 루트의 A~J HTML 상세 파일에는 손실된 문자열이 포함되어 있어 비교용 원본으로만 보존합니다. 실제 검토는 V1 정리본과 이후 버전을 사용하십시오.</div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

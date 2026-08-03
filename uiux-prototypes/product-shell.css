@@ -1,0 +1,205 @@
+:root {
+  --afs-brand: #0a1e5a;
+  --afs-accent: #fa002d;
+  --afs-data: #009bb4;
+  --afs-ink: #101a2d;
+  --afs-line: #d8dbe1;
+  --afs-font: Pretendard, "Noto Sans KR", "Segoe UI", Arial, sans-serif;
+}
+
+html, body { min-width: 1240px !important; }
+
+.afs-product-shell {
+  position: sticky;
+  top: 0;
+  z-index: 10000;
+  display: grid;
+  grid-template-columns: 210px 270px minmax(520px, 1fr) auto;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  height: 74px;
+  padding: 0 20px;
+  color: #fff;
+  background: linear-gradient(100deg, #071747 0%, var(--afs-brand) 58%, #102f70 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, .14);
+  box-shadow: 0 4px 18px rgba(7, 23, 71, .22);
+  font-family: var(--afs-font);
+}
+
+.afs-product-shell *,
+.afs-product-shell *::before,
+.afs-product-shell *::after { box-sizing: border-box; }
+
+.afs-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  color: #fff;
+  text-decoration: none;
+}
+
+.afs-brand-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--afs-accent);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: -.04em;
+}
+
+.afs-brand-copy { min-width: 0; }
+.afs-brand-copy b,
+.afs-brand-copy small { display: block; }
+.afs-brand-copy b { font-size: 15px; letter-spacing: -.02em; white-space: nowrap; }
+.afs-brand-copy small { margin-top: 3px; color: #aebee0; font-size: 10px; font-weight: 750; letter-spacing: .09em; }
+
+.afs-context {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  margin: 11px 0;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, .17);
+  border-radius: 6px;
+  color: #fff;
+  background: rgba(255, 255, 255, .06);
+  text-align: left;
+  text-decoration: none;
+}
+
+button.afs-context { cursor: pointer; font-family: inherit; }
+.afs-context-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; color: var(--afs-brand); background: #fff; font-size: 12px; font-weight: 950; }
+.afs-context-copy { min-width: 0; }
+.afs-context-copy small,
+.afs-context-copy b { display: block; }
+.afs-context-copy small { color: #9eb0d1; font-size: 9px; font-weight: 850; letter-spacing: .08em; }
+.afs-context-copy b { margin-top: 3px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.afs-context-mode { padding: 3px 6px; border-radius: 10px; color: #b6f4ea; background: rgba(11, 141, 130, .23); font-size: 9px; font-weight: 900; }
+
+.afs-global-nav { display: flex; align-items: stretch; justify-content: center; min-width: 0; }
+.afs-global-nav a,
+.afs-global-nav button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  padding: 0 9px;
+  border: 0;
+  color: #b7c4df;
+  background: transparent;
+  font: 700 12px var(--afs-font);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.afs-global-nav a:hover,
+.afs-global-nav button:hover { color: #fff; background: rgba(255, 255, 255, .06); }
+.afs-global-nav .active { color: #fff; }
+.afs-global-nav .active::after { position: absolute; right: 20%; bottom: 0; left: 20%; height: 3px; border-radius: 3px 3px 0 0; background: var(--afs-accent); content: ""; }
+
+.afs-shell-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; white-space: nowrap; }
+.afs-sample-badge { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 1px solid rgba(255, 208, 91, .42); border-radius: 5px; color: #ffdf86; background: rgba(255, 208, 91, .08); font-size: 9px; font-weight: 900; letter-spacing: .06em; }
+.afs-icon-action,
+.afs-primary-action { display: inline-flex; align-items: center; justify-content: center; height: 38px; border-radius: 5px; font: 800 12px var(--afs-font); text-decoration: none; }
+.afs-icon-action { width: 38px; border: 1px solid rgba(255, 255, 255, .24); color: #dbe3f3; background: rgba(255, 255, 255, .05); }
+.afs-primary-action { padding: 0 13px; border: 1px solid var(--afs-accent); color: #fff; background: var(--afs-accent); }
+
+.afs-studio-context-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 58px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--afs-line);
+  background: #f8f8f5;
+  font-family: var(--afs-font);
+}
+.afs-studio-title { min-width: 205px; }
+.afs-studio-title small,
+.afs-studio-title b { display: block; }
+.afs-studio-title small { color: #6d7788; font-size: 10px; font-weight: 900; letter-spacing: .09em; }
+.afs-studio-title b { margin-top: 3px; color: var(--afs-ink); font-size: 15px; }
+.afs-work-context { min-width: 0; flex: 1; padding-left: 14px; border-left: 1px solid var(--afs-line); color: #596476; font-size: 12px; }
+.afs-work-context b { color: var(--afs-ink); }
+.afs-local-nav { display: flex; align-items: center; gap: 5px; }
+.afs-local-nav a,
+.afs-local-nav button { padding: 8px 10px; border: 1px solid transparent; border-radius: 5px; color: #596476; background: transparent; font: 750 12px var(--afs-font); text-decoration: none; }
+.afs-local-nav .active { border-color: #cfd5de; color: var(--afs-brand); background: #fff; }
+
+.afs-state-dialog {
+  width: min(460px, calc(100vw - 40px));
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  color: var(--afs-ink);
+  box-shadow: 0 26px 80px rgba(7, 23, 71, .32);
+}
+.afs-state-dialog::backdrop { background: rgba(7, 15, 35, .58); backdrop-filter: blur(3px); }
+.afs-state-dialog header { padding: 20px 22px 12px; }
+.afs-state-dialog header small { color: var(--afs-accent); font-size: 10px; font-weight: 900; letter-spacing: .1em; }
+.afs-state-dialog h2 { margin: 7px 0 0; font-size: 21px; }
+.afs-state-dialog p { margin: 0; padding: 0 22px 19px; color: #626d7e; font-size: 13px; line-height: 1.6; }
+.afs-state-dialog footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--afs-line); background: #f5f6f7; }
+.afs-state-dialog button { min-height: 38px; padding: 0 13px; border: 1px solid #cbd1da; border-radius: 5px; color: #455064; background: #fff; font: 800 12px var(--afs-font); }
+.afs-state-dialog button[data-leave] { border-color: var(--afs-accent); color: #fff; background: var(--afs-accent); }
+
+/* 통합 P0 가독성 기준: 10px 미만 메타데이터를 제외한 핵심 텍스트를 상향한다. */
+.afs-studio-page .station span,
+.afs-studio-page .station em,
+.afs-studio-page .proof-item span,
+.afs-studio-page .node .sub,
+.afs-studio-page .annotation span,
+.afs-studio-page .impacts span,
+.afs-studio-page .block footer,
+.afs-studio-page .chips span,
+.afs-studio-page .check span { font-size: 11px !important; }
+.afs-studio-page > .dock { display: none !important; }
+
+body > main.product .decision small,
+body > main.product .decision span,
+body > main.product .context-stats span,
+body > main.product .process small,
+body > main.product .process em,
+body > main.product .focus-copy p,
+body > main.product .focus-actions button,
+body > main.product .impact span,
+body > main.product .status-bar > span,
+body > main.product .atlas-head span,
+body > main.product .atlas-body > p,
+body > main.product .brief li,
+body > main.product .atlas-actions button,
+body > main.product .atlas-input input { font-size: 11px !important; }
+body > main.product .overlay-item b,
+body > main.product .layer b,
+body > main.product .layer span { font-size: 10px !important; }
+body > main.product .workspace { grid-template-columns: 252px minmax(680px, 1fr) 320px; }
+
+.afs-shell-m6 .workspace { padding-top: 0; }
+.afs-shell-m6 .left-rail,
+.afs-shell-m6 .atlas-rail { top: 74px; height: calc(100vh - 74px); }
+
+@media (max-width: 1450px) {
+  .afs-product-shell { grid-template-columns: 190px 245px minmax(470px, 1fr) auto; gap: 8px; padding-inline: 14px; }
+  .afs-global-nav a,
+  .afs-global-nav button { min-width: 60px; padding-inline: 7px; font-size: 11px; }
+  .afs-sample-badge { display: none; }
+}
+
+@media (max-width: 1280px) {
+  .afs-product-shell { grid-template-columns: 178px 235px minmax(430px, 1fr) auto; }
+  .afs-brand-copy small { display: none; }
+  .afs-global-nav a,
+  .afs-global-nav button { min-width: 54px; padding-inline: 5px; font-size: 10px; }
+  .afs-primary-action { padding-inline: 10px; font-size: 11px; }
+}

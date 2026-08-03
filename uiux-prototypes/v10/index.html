@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>V10 Atlas Co-Creation Studio</title>
+  <link rel="stylesheet" href="atlas-studio.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span>AF</span><div><b>AI Factory Studio</b><small>ATLAS CO-CREATION STUDIO · V10</small></div></div>
+    <button class="company"><i></i><div><small>현재 작업 범위</small><b>LS MnM · 전사공통 · 경영관리팀</b></div><em>전환</em></button>
+    <nav><button class="active">Atlas Studio</button><button>내 프로젝트</button><button>전체 기능</button><button>라이브러리</button></nav>
+    <div class="top-actions"><button>회사 CI 설정</button><button>알림 2</button><span>김</span></div>
+  </header>
+
+  <main class="studio">
+    <section class="conversation">
+      <header class="conversation-head">
+        <div><span class="status"><i></i>ATLAS ONLINE</span><h1>무엇을 만들거나<br>결정하고 싶으신가요?</h1><p>업무 목표를 말하면 Atlas가 필요한 데이터, 추천 업무 절차와 AI 에이전트 구성을 함께 설계합니다.</p></div>
+        <button>새 상담</button>
+      </header>
+
+      <div class="intent-grid">
+        <button><i>＋</i><b>업무용 SW 만들기</b><span>요구사항부터 릴리스까지</span></button>
+        <button><i>◇</i><b>시뮬레이션 설계</b><span>경영·생산·원가 시나리오</span></button>
+        <button><i>▤</i><b>데이터 준비 상담</b><span>필수·권장 데이터 진단</span></button>
+        <button><i>↗</i><b>회사 상태 질문</b><span>Task ID 없이 전역 질의</span></button>
+      </div>
+
+      <div class="dialog">
+        <div class="message user-message"><span>김</span><div><small>사용자 · 경영관리팀</small><p>내년도 사업계획 데이터를 생성하고 부서별 계획을 취합한 뒤, 원재료 가격이나 전기료가 바뀌었을 때 손익까지 시뮬레이션하고 싶어요. 무엇부터 하면 좋을까요?</p></div></div>
+        <div class="message atlas-message"><span>✦</span><div><small>Atlas · 회사 전체 컨텍스트 사용</small><p>현재 회사의 조직·권한과 등록된 자료를 기준으로 보면, <b>“통합 사업계획·경영 시뮬레이터”</b>로 시작하는 것이 가장 효율적입니다. 이미 활용 가능한 기준정보가 있어 처음부터 모든 데이터를 새로 준비할 필요는 없습니다.</p>
+          <div class="answer-block"><h3>제가 추천하는 시작 순서</h3><ol><li><b>계획 범위 확정</b><span>매출·구매·생산·인건비·투자·손익 중 1차 범위를 선택합니다.</span></li><li><b>보유 데이터 자동 점검</b><span>MDM·카탈로그·지식 허브와 ERP/MES 연결에서 재사용 가능한 항목을 찾습니다.</span></li><li><b>부족 데이터만 요청</b><span>데이터 오너와 양식을 지정하고, 없을 때 가능한 대체 방식도 제안합니다.</span></li><li><b>SW·Twin 동시 설계</b><span>입력·승인 업무와 시나리오 엔진이 같은 기준정보를 사용하도록 구성합니다.</span></li></ol></div>
+          <div class="quick-choices"><p>먼저 어느 수준으로 시작할까요?</p><button class="selected">핵심 손익 중심 · 추천</button><button>전 부문 통합</button><button>생산·원가 우선</button></div>
+        </div></div>
+      </div>
+
+      <div class="composer"><div class="context-chip"><i></i>회사 마스터·권한·승인 지식 사용 중</div><textarea readonly>Atlas에게 답변하거나 새로운 조건을 입력하세요</textarea><div class="composer-actions"><button>자료 첨부</button><button>선택지로 답변</button><button class="send">전송 ↑</button></div></div>
+    </section>
+
+    <section class="workbench">
+      <header class="workbench-head"><div><span>LIVE SOLUTION BRIEF</span><h2>상담 내용이 곧 실행계획이 됩니다.</h2></div><button>근거 31개 보기</button></header>
+
+      <article class="objective">
+        <small>추천 솔루션 · 상담 중 자동 구성</small><h3>통합 사업계획·경영 시뮬레이터</h3><p>부서별 계획 입력·승인, 전사 취합, 대외지표 변화와 운영 조건에 따른 손익·현금흐름 시뮬레이션</p>
+        <div class="tags"><span>경영관리</span><span>부서 협업</span><span>Digital Twin</span><span>현업 SW</span></div>
+      </article>
+
+      <article class="readiness">
+        <div class="card-head"><div><small>DATA READINESS</small><h3>데이터 준비도</h3></div><strong>72%</strong></div>
+        <div class="bar"><i style="width:72%"></i></div>
+        <div class="readiness-grid">
+          <div class="ready"><b>바로 사용 가능</b><strong>18</strong><span>조직·제품·원가·공정·회계 기준</span></div>
+          <div class="review"><b>확인 필요</b><strong>4</strong><span>판매계획·투자·인력·에너지</span></div>
+          <div class="missing"><b>신규 준비</b><strong>2</strong><span>시나리오 가정·승인 기준</span></div>
+        </div>
+        <button class="text-link">MDM·카탈로그·지식 허브 근거 확인 →</button>
+      </article>
+
+      <article class="blueprint">
+        <div class="card-head"><div><small>RECOMMENDED WORKFLOW</small><h3>추천 에이전트·업무 흐름</h3></div><span>품질·비용 최적화</span></div>
+        <div class="flow">
+          <div><i>01</i><b>명확화</b><span>RFP Analyst</span></div><em>→</em><div><i>02</i><b>기획·설계</b><span>PM·Architect</span></div><em>→</em><div><i>03</i><b>데이터</b><span>Data Steward</span></div><em>→</em><div><i>04</i><b>구현·검증</b><span>Dev·QA</span></div><em>→</em><div><i>05</i><b>운영·학습</b><span>Supervisor</span></div>
+        </div>
+        <div class="quality-row"><span>HOTL 승인 4개</span><span>자가복구 최대 3회</span><span>실패 후 진단·중단·인계</span><span>모델 비용 계측</span></div>
+      </article>
+
+      <article class="scope-trust">
+        <div><small>ENTERPRISE SCOPE</small><h3>회사·권한·연계 안전</h3><p>LS MnM 전사공통 범위 · 다른 사업회사 데이터는 존재 여부도 노출하지 않음</p></div><div class="trust-items"><span><i class="green"></i>Fail-closed</span><span><i class="green"></i>감사 기록</span><span><i class="amber"></i>MCP 1건 검토</span></div>
+      </article>
+
+      <div class="launch">
+        <div><small>NEXT ACTION</small><b>추천 범위를 선택하면 RFP 명확화 질문을 시작합니다.</b><span>선택 내용은 언제든 수정할 수 있으며, 사용자가 승인하기 전에는 구현을 시작하지 않습니다.</span></div><button>초안 저장</button><button class="primary">핵심 손익 중심으로 시작 →</button>
+      </div>
+    </section>
+  </main>
+
+  <nav class="module-dock">
+    <span>전체 제품</span><button>SW 생성기</button><button>프로젝트·V7 흐름</button><button>디지털 트윈</button><button>운영 그리드</button><button>지식·MDM</button><button>데이터·MCP</button><button>에이전트</button><button>릴리스</button><button>전사 포트폴리오</button>
+  </nav>
+</body>
+</html>

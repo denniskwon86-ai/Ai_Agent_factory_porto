@@ -2,6 +2,8 @@
 
 > **Enterprise Context Master 선행 규칙(2026-07-28):** 이후 구현되는 MDM, 카탈로그, MCP, 권한, 상담사, SW 생성기, 시뮬레이션은 `tenant → 기업집단 → 법인 → 사업부 → 사업장/공장` 문맥과 실제/가상/경쟁사 상태를 명시적으로 가져야 한다. 상세 모델·API·복제·격리 규칙은 [`design_enterprise_context_master.md`](design_enterprise_context_master.md)를 SSOT로 한다.
 
+> **앱 전달·의사결정·발간 확장안(2026-08-03):** 생성 앱의 지정 사용자 전달·수락·내 앱 등록, App-in-App 인증 상속, 시뮬레이션 기반 Decision Package·회의 요청·세 관점 검토서·대내외 발간의 상세 구현 준비안은 [`design_app_delivery_decision_publication_loop.md`](design_app_delivery_decision_publication_loop.md)를 따른다. 현재는 상세기획 상태이며 구현 완료로 간주하지 않는다.
+
 > 문서 목적: 이 문서는 다른 LLM 또는 개발 에이전트가 별도의 대화 이력 없이도 AI Factory Studio의 제품 의도, 현재 구현 경계, 향후 기능 설계, 구현 우선순위와 완료 기준을 이해하고 일관되게 작업하도록 하는 기준 문서다.
 >
 > 기준일: 2026-07-28  

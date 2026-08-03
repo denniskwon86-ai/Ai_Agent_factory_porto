@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Concept D · Transparent Orchestration</title>
+  <link rel="stylesheet" href="../common.css">
+  <style>
+    :root{--dark:#101826;--dark2:#172231;--slate:#243244}
+    body{overflow:hidden;background:#e9edf1}
+    .projectbar{display:flex;align-items:center;gap:12px;height:50px;padding:0 16px;border-bottom:1px solid var(--line);background:#fff}
+    .projectbar h1{margin:0;font-size:16px}.projectbar p{margin:0;color:var(--muted);font-size:11px}.projectbar .spacer{flex:1}.projectbar .metric{padding:6px 9px;border-left:1px solid var(--line)}
+    .projectbar .metric b,.projectbar .metric small{display:block}.projectbar .metric b{font-size:12px}.projectbar .metric small{color:var(--muted);font-size:8px}
+    .projectbar a.btn{display:inline-flex;align-items:center;text-decoration:none}
+    .global-nav a{padding:9px 11px;color:#b9c6df;font-size:11px;font-weight:800;text-decoration:none}
+    .flow-map{height:108px;padding:13px 16px;border-bottom:1px solid #29374a;color:#fff;background:var(--dark)}
+    .flow-head{display:flex;align-items:center;margin-bottom:10px}.flow-head b{font-size:11px}.flow-head span{margin-left:8px;color:#92a1b4;font-size:9px}.flow-head .spacer{flex:1}.flow-head button{padding:5px 8px;border:1px solid #ffffff20;border-radius:5px;color:#c9d5e5;background:#ffffff08;font-size:9px}
+    .stages{display:grid;grid-template-columns:repeat(8,1fr);gap:7px}.stage{position:relative;height:55px;padding:8px 8px 6px;border:1px solid #35445a;border-radius:6px;color:#9eacbe;background:#172231;text-align:left;cursor:pointer}.stage:not(:last-child):after{position:absolute;z-index:2;right:-8px;top:25px;width:8px;height:2px;background:#536178;content:""}.stage b,.stage small{display:block}.stage b{font-size:10px}.stage small{margin-top:5px;font-size:9px}.stage.done{border-color:#2d756f;color:#d9fff9;background:#17302f}.stage.done small{color:#5fd1c5}.stage.active{border-color:var(--red);color:#fff;background:#3b1722;box-shadow:inset 0 -3px var(--red)}.stage.active small{color:#ff9eaf}.stage.selected{outline:2px solid var(--cyan);outline-offset:1px}
+    .factory-grid{display:grid;grid-template-columns:270px minmax(550px,1fr) 305px;height:calc(100vh - 226px)}
+    .wbs-spine{overflow:auto;border-right:1px solid #2c394a;color:#e7eef8;background:var(--dark2)}
+    .pane-head{display:flex;align-items:center;justify-content:space-between;height:50px;padding:0 14px;border-bottom:1px solid #ffffff13}.pane-head b{font-size:12px}.pane-head span{color:#90a0b5;font-size:8px}
+    .wbs-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;padding:10px}.wbs-summary div{padding:8px;border:1px solid #ffffff10;border-radius:5px;background:#ffffff06}.wbs-summary b,.wbs-summary small{display:block}.wbs-summary b{font-size:14px}.wbs-summary small{margin-top:3px;color:#91a0b3;font-size:7px}
+    .tree-group{padding:0 10px 10px}.tree-group>header{display:flex;align-items:center;gap:7px;padding:9px 5px;color:#9facbd;font-size:9px;font-weight:900}.tree-group>header:before{width:7px;height:7px;border-radius:50%;background:var(--cyan);content:""}
+    .task{position:relative;display:grid;grid-template-columns:25px 1fr auto;gap:7px;width:100%;margin-bottom:5px;padding:8px;border:1px solid #ffffff0f;border-radius:6px;color:#d5deea;background:#ffffff04;text-align:left;cursor:pointer}.task:before{position:absolute;left:19px;top:-6px;width:1px;height:6px;background:#536178;content:""}.task i{display:grid;place-items:center;width:23px;height:23px;border-radius:5px;color:#a9b7c9;background:#2b3a4d;font-size:8px;font-style:normal}.task b,.task small{display:block}.task b{font-size:10px}.task small{margin-top:3px;color:#8291a4;font-size:8px;line-height:1.35}.task em{align-self:center;color:#8392a5;font-size:8px;font-style:normal}.task.done i{color:#d9fff9;background:#17665f}.task.live{border-color:var(--red);background:#3a1721}.task.live i{color:#fff;background:var(--red)}.task.live em{color:#ff9eb0}.task.blocked{opacity:.68}.task.selected{outline:2px solid var(--cyan)}
+    .work-surface{display:grid;grid-template-rows:auto minmax(250px,1fr) 126px;overflow:hidden;background:#f3f5f7}
+    .work-toolbar{display:flex;align-items:center;gap:7px;height:50px;padding:0 14px;border-bottom:1px solid var(--line);background:#fff}.work-toolbar b{font-size:12px}.work-toolbar span{color:var(--muted);font-size:9px}.work-toolbar .spacer{flex:1}.view-btn{padding:7px 9px;border:1px solid var(--line);border-radius:5px;color:#657184;background:#fff;font-size:9px}.view-btn.active{border-color:var(--navy);color:#fff;background:var(--navy)}
+    .current-work{overflow:auto;padding:15px}.current-card{min-height:100%;padding:18px}.current-card>header{display:flex;align-items:flex-start;gap:12px;padding-bottom:13px;border-bottom:1px solid var(--line)}.node-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:8px;color:#fff;background:var(--red);font-size:10px;font-weight:950}.current-card h2{margin:1px 0 5px;font-size:20px}.current-card header p{margin:0;color:var(--muted);font-size:10px}.current-card header .spacer{flex:1}.runtime{text-align:right}.runtime b,.runtime small{display:block}.runtime b{font-size:11px}.runtime small{margin-top:4px;color:var(--muted);font-size:8px}
+    .contract{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.contract section{padding:12px;border:1px solid var(--line);border-radius:6px;background:#f8f9fa}.contract h3{margin:0 0 8px;font-size:10px}.contract ul{margin:0;padding-left:16px;color:#566274;font-size:9px;line-height:1.65}.progress-box{margin-top:10px;padding:12px;border-left:4px solid var(--cyan);background:#edf8fa}.progress-box header{display:flex;justify-content:space-between;font-size:9px;font-weight:900}.bar{height:7px;margin:8px 0;border-radius:6px;background:#d8e1e7;overflow:hidden}.bar i{display:block;width:68%;height:100%;background:linear-gradient(90deg,var(--cyan),var(--green))}.progress-box p{margin:0;color:#5b6a79;font-size:9px}
+    .work-actions{display:flex;justify-content:space-between;align-items:center;margin-top:13px}.work-actions span{color:#748091;font-size:9px}.work-actions div{display:flex;gap:7px}
+    .platform-contract-strip{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;margin-top:11px;padding:9px 11px;border:1px solid #badadd;border-radius:6px;background:#eff9fa}.platform-contract-strip i{display:grid;place-items:center;width:25px;height:25px;border-radius:50%;color:#fff;background:var(--green);font-style:normal;font-weight:950}.platform-contract-strip b,.platform-contract-strip small{display:block}.platform-contract-strip b{font-size:11px}.platform-contract-strip small{margin-top:2px;color:#607379;font-size:10px}.platform-contract-strip em{padding:4px 7px;border-radius:10px;color:#08766c;background:#d7efec;font-size:9px;font-style:normal;font-weight:900}
+    .center-assist{display:grid;grid-template-rows:48px 1fr;border-top:1px solid #2b394c;color:#e6eef9;background:var(--dark)}
+    .user-decision{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:7px 12px;border-bottom:1px solid #ffffff18;background:#45230f}.user-decision header,.jarvis-console header{display:flex;align-items:center;gap:7px}.user-decision header b,.jarvis-console header b{font-size:10px}.user-decision header span,.jarvis-console header span{color:#dcb58d;font-size:8px}.user-decision p{margin:0;color:#f0dcc8;font-size:9px;line-height:1.35}.decision-actions{display:flex;gap:6px}.decision-actions button{height:30px;padding:0 10px;border:1px solid #ffd4a5;border-radius:5px;color:#fff;background:#a45113;font-size:9px;font-weight:900}.decision-actions .secondary{border-color:#ffffff28;background:#ffffff0c}
+    .jarvis-console{display:grid;grid-template-columns:1fr 270px;gap:12px;align-items:center;padding:8px 12px;background:linear-gradient(110deg,#0a1e5a,#102d6d)}.jarvis-copy p{margin:5px 0 0;color:#c8d6eb;font-size:9px;line-height:1.4}.jarvis-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.jarvis-actions button{height:30px;padding:0 8px;border:1px solid #ffffff25;border-radius:5px;color:#fff;background:#ffffff0b;font-size:9px;text-align:left}
+    .center-assist.no-decision{grid-template-rows:1fr}.center-assist.no-decision .user-decision{display:none}.center-assist.no-decision .jarvis-console{grid-template-columns:1fr 300px;padding-block:15px}.center-assist.no-decision .jarvis-console header span{color:#8fd9d2}
+    .state-pane{overflow:auto;border-left:1px solid var(--line);background:#fff}.state-section{padding:13px 14px;border-bottom:1px solid var(--line)}.state-section h3{display:flex;align-items:center;justify-content:space-between;margin:0 0 9px;font-size:11px}.state-section h3 span{color:var(--muted);font-size:9px;font-weight:500}.reason{padding:10px;border-left:3px solid var(--cyan);background:#eef8fa;color:#425d64;font-size:10px;line-height:1.55}.transition{display:grid;grid-template-columns:28px 1fr;gap:8px;margin-top:7px;padding:8px;border:1px solid var(--line);border-radius:6px}.transition i{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;color:#fff;background:var(--navy);font-size:9px;font-style:normal}.transition b,.transition small{display:block}.transition b{font-size:10px}.transition small{margin-top:3px;color:var(--muted);font-size:9px}
+    .event-list{display:grid;gap:7px}.event-row{display:grid;grid-template-columns:44px 9px 1fr;gap:7px;align-items:start;padding:8px;border:1px solid var(--line);border-radius:6px}.event-row time{color:#6e7a8a;font-size:8px}.event-row i{width:8px;height:8px;margin-top:1px;border-radius:50%;background:var(--green)}.event-row.live i{background:var(--red);box-shadow:0 0 0 4px #fa002d18}.event-row b,.event-row small{display:block}.event-row b{font-size:9px}.event-row small{margin-top:3px;color:var(--muted);font-size:8px;line-height:1.35}
+    /* Revision: 핵심 상호작용을 중앙 상단으로 올리고 기본 글자 크기를 확대한다. */
+    .brand{font-size:17px}.brand i{font-size:12px}.context small{font-size:10px}.context b{font-size:12px}.global-nav span,.global-nav a{font-size:12px}
+    .projectbar h1{font-size:17px}.projectbar p{font-size:12px}.projectbar .metric b{font-size:14px}.projectbar .metric small{font-size:10px}
+    .flow-head b{font-size:13px}.flow-head button{font-size:10px}.stage b{font-size:11px}.stage small{font-size:10px}
+    .pane-head b{font-size:14px}.pane-head span{font-size:10px}.wbs-summary b{font-size:16px}.wbs-summary small{font-size:10px}.tree-group>header{font-size:11px}
+    .task i{font-size:9px}.task b{font-size:11px}.task small{font-size:10px}.task em{font-size:9px}
+    .work-surface{grid-template-rows:auto minmax(0,1fr) auto}
+    .work-toolbar b{font-size:14px}.work-toolbar span{font-size:11px}.view-btn{font-size:11px}
+    .current-work{padding:12px 15px 15px}.current-card{min-height:0;padding:16px 18px}.current-card h2{font-size:21px}.current-card header p{font-size:11px}.runtime b{font-size:12px}.runtime small{font-size:10px}
+    .contract{margin-top:12px}.contract h3{font-size:12px}.contract ul{font-size:11px;line-height:1.55}.progress-box header{font-size:11px}.progress-box p{font-size:10px}.work-actions span{font-size:10px}
+    .center-assist{grid-template-rows:68px 104px;margin:0 14px 14px;border:1px solid #2b394c;border-radius:10px;overflow:hidden;box-shadow:0 8px 22px #10182624}
+    .user-decision{grid-template-columns:145px 1fr auto;gap:12px;padding:11px 14px;border-left:5px solid #ffad4a;background:linear-gradient(90deg,#4b260e,#382115)}
+    .user-decision header b,.jarvis-console header b{font-size:12px}.user-decision header span,.jarvis-console header span{padding:3px 6px;border-radius:10px;color:#fff1df;background:#ffffff15;font-size:10px}
+    .user-decision p{color:#fff1df;font-size:11px;font-weight:700}.user-decision p small{display:block;margin-top:3px;color:#deb993;font-size:10px;font-weight:500}.decision-actions button{height:38px;padding:0 14px;font-size:11px}
+    .jarvis-console{grid-template-columns:240px 1fr;gap:16px;padding:14px}.jarvis-copy p{font-size:11px}.jarvis-actions{display:grid;grid-template-columns:1fr;grid-template-rows:40px auto;gap:8px}
+    .jarvis-input{display:grid;grid-template-columns:1fr auto;gap:6px}.jarvis-input input{min-width:0;padding:0 11px;border:1px solid #ffffff35;border-radius:6px;color:#fff;background:#ffffff12;font-size:11px;outline:none}.jarvis-input input::placeholder{color:#b8c9e0}
+    .jarvis-input button,.jarvis-quick button{border:1px solid #ffffff2d;border-radius:6px;color:#fff;background:#ffffff12;font-size:10px}.jarvis-input button{padding:0 13px;font-weight:900}.jarvis-quick{display:flex;gap:6px}.jarvis-quick button{height:auto;padding:4px 8px;text-align:left}
+    .center-assist.no-decision{grid-template-rows:116px}.center-assist.no-decision .jarvis-console{grid-template-columns:250px 1fr;padding-block:16px}
+    .state-section h3{font-size:13px}.state-section h3 span{font-size:10px}.reason{font-size:11px}.transition b{font-size:11px}.transition small{font-size:10px}.event-row time{font-size:9px}.event-row b{font-size:11px}.event-row small{font-size:10px}
+    .projectbar p{font-size:13px}.projectbar .metric small{font-size:11px}.stage b{font-size:12px}.stage small{font-size:11px}
+    .pane-head b{font-size:15px}.pane-head span{font-size:11px}.tree-group>header{font-size:12px}.task b{font-size:12px}.task small{font-size:11px}.task em{font-size:10px}
+    .work-toolbar b{font-size:15px}.work-toolbar span,.view-btn{font-size:12px}.current-card header p{font-size:12px}.runtime small{font-size:11px}
+    .contract h3{font-size:13px}.contract ul{font-size:12px}.progress-box header{font-size:12px}.progress-box p,.work-actions span{font-size:11px}
+    .user-decision header b,.jarvis-console header b{font-size:13px}.user-decision header span,.jarvis-console header span{font-size:11px}.user-decision p{font-size:12px}.user-decision p small{font-size:11px}.decision-actions button{font-size:12px}
+    .jarvis-copy p{font-size:12px}.jarvis-input input{font-size:12px}.jarvis-input button,.jarvis-quick button{font-size:11px}
+    .state-section h3{font-size:14px}.state-section h3 span{font-size:11px}.reason{font-size:12px}.transition b{font-size:12px}.transition small{font-size:11px}.event-row time{font-size:10px}.event-row b{font-size:12px}.event-row small{font-size:11px}
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <div class="brand"><i>AF</i>AI Factory Studio</div>
+    <div class="context"><small>OPERATING CONTEXT</small><b>LS MnM · 경영관리팀 · AABB</b></div>
+    <div class="global-nav"><span>경영 홈</span><span class="active">Factory</span><span>운영</span><a href="../../closed-loop-product-samples/#inbox">협업</a><span>Twin</span><span>Knowledge</span><span>Agent</span></div>
+    <div class="shell-actions"><button onclick="location.href='../'">비교안 목록</button><button data-atlas-open>Jarvis</button></div>
+  </header>
+  <header class="projectbar">
+    <h1>Concept D · Transparent Orchestration</h1><p>2027 경영계획 SW · 실행 중</p><div class="spacer"></div>
+    <div class="metric"><b>5 / 12</b><small>WBS 완료</small></div><div class="metric" id="decisionMetric"><b>1</b><small>결정 대기</small></div><div class="metric"><b>₩2,840</b><small>누적 LLM 비용</small></div>
+    <a class="btn" href="../../closed-loop-product-samples/#delivery">릴리스·사용자 전달</a><button class="btn">일시정지</button><button class="btn primary">현재 작업 검토</button>
+  </header>
+  <section class="flow-map">
+    <header class="flow-head"><b>전체 제작 흐름</b><div class="spacer"></div><button>의존관계 보기</button><button>전체 기록</button></header>
+    <div class="stages">
+      <button class="stage done" data-label="요구 확인"><b>01 요구 확인</b><small>완료 · 4개 답변</small></button>
+      <button class="stage done" data-label="RFP"><b>02 RFP</b><small>승인 · v1.2</small></button>
+      <button class="stage done" data-label="기획"><b>03 기획</b><small>승인 · PRD 86점</small></button>
+      <button class="stage done" data-label="아키텍처"><b>04 아키텍처</b><small>승인 · 09:42</small></button>
+      <button class="stage done" data-label="WBS"><b>05 WBS</b><small>12개 생성</small></button>
+      <button class="stage active selected" data-label="구현"><b>06 구현</b><small>진행 · 5/12</small></button>
+      <button class="stage" data-label="검증"><b>07 검증</b><small>대기 · 구현 의존</small></button>
+      <button class="stage" data-label="Release"><b>08 Release</b><small>대기 · 검증 의존</small></button>
+    </div>
+  </section>
+  <main class="factory-grid">
+    <aside class="wbs-spine">
+      <header class="pane-head"><b>WBS · 실행 구조</b><span>전체 12 · 활성 1</span></header>
+      <section class="wbs-summary"><div><b>5</b><small>완료</small></div><div><b>1</b><small>진행</small></div><div><b>6</b><small>대기</small></div></section>
+      <section class="tree-group"><header>Foundation · 4/4 완료</header>
+        <button class="task done"><i>✓</i><span><b>WB-01 요구 계약 고정</b><small>RFP·PRD 추적성 연결</small></span><em>완료</em></button>
+        <button class="task done"><i>✓</i><span><b>WB-02 데이터 모델</b><small>조직·계정·시나리오</small></span><em>완료</em></button>
+      </section>
+      <section class="tree-group"><header>Application · 1/5 완료</header>
+        <button class="task done"><i>✓</i><span><b>WB-05 계획 입력 UI</b><small>Frontend Agent</small></span><em>완료</em></button>
+        <button class="task live selected"><i>▶</i><span><b>WB-06 조직권한 API</b><small>Backend Agent · 68%</small></span><em>진행</em></button>
+        <button class="task blocked"><i>07</i><span><b>WB-07 손익 시뮬레이션</b><small>WB-06 완료 후 시작</small></span><em>차단</em></button>
+        <button class="task blocked"><i>08</i><span><b>WB-08 보고서 화면</b><small>WB-07 완료 후 시작</small></span><em>대기</em></button>
+      </section>
+    </aside>
+    <section class="work-surface">
+      <nav class="work-toolbar"><b>현재 작업</b><span id="selectedContext">구현 단계 · WB-06</span><div class="spacer"></div><button class="view-btn active">작업</button><button class="view-btn">산출물</button><button class="view-btn">근거</button><button class="view-btn">Diff</button></nav>
+      <div class="current-work">
+        <article class="current-card card">
+          <header><div class="node-mark">BE</div><div><h2>조직 범위 권한 API 구현</h2><p>WB-06 · Backend Agent · 선행 WB-02 완료 · 후속 WB-07 차단 해제 예정</p></div><div class="spacer"></div><div class="runtime"><b>실행 08:14</b><small>Gemini Pro → Groq 대기 없음</small></div></header>
+          <div class="platform-contract-strip"><i>✓</i><span><b>App-in-App 플랫폼 계약 적용</b><small>자체 로그인·회원·보안 기능은 생성하지 않고 Platform SSO·조직 범위·감사로그를 상속합니다.</small></span><em>HOST ENFORCED</em></div>
+          <div class="contract"><section><h3>입력 계약</h3><ul><li>승인된 Architecture v1.1</li><li>조직 Master 42건 · Scope Policy v3</li><li>RFP SEC-04 · PRD AUTH-07</li></ul></section><section><h3>완료 조건</h3><ul><li>미바인딩 데이터 Fail-closed</li><li>타 조직 자원 404 은폐</li><li>감사로그와 회귀 테스트 생성</li></ul></section></div>
+          <section class="progress-box"><header><span>현재 수행 · 테스트 보강</span><span>68%</span></header><div class="bar"><i></i></div><p>API 구현과 단위 테스트 7/9 통과. 경영진 하위조직 드릴다운 정책 2건을 검증 중입니다.</p></section>
+          <footer class="work-actions"><span>다음 자동 전환: Reviewer → 통과 시 WB-07 잠금 해제</span><div><button class="btn">중간 결과 보기</button><button class="btn">Agent 작업 지시</button><button class="btn primary">사용자 검토 요청</button></div></footer>
+        </article>
+      </div>
+      <section class="center-assist" id="centerAssist">
+        <article class="user-decision" id="userDecision"><header><b>사용자 결정 대기</b><span>1건</span></header><p id="decisionPrompt">경영진의 하위 조직 기밀 데이터 조회 범위를 선택해야 합니다.<small>영향: 결정 전까지 WB-07 손익 시뮬레이션 시작 대기</small></p><div class="decision-actions" id="decisionActions"><button id="reviewDecision">결정안 검토</button></div></article>
+        <article class="jarvis-console">
+          <div class="jarvis-copy"><header><b>✦ Jarvis Console</b><span id="jarvisDecisionState">결정 대기 1건</span></header><p id="jarvisSummary">현재 작업과 전체 WBS를 함께 보며 병목과 다음 행동을 안내합니다.</p></div>
+          <div class="jarvis-actions"><div class="jarvis-input"><input aria-label="Jarvis 질문" placeholder="현재 프로젝트 전체에 대해 질문하세요"><button data-atlas-open>질문하기</button></div><div class="jarvis-quick"><button data-atlas-open>왜 WB-07이 대기 중이지?</button><button data-atlas-open>전체 일정의 위험은?</button></div></div>
+        </article>
+      </section>
+    </section>
+    <aside class="state-pane">
+      <header class="pane-head"><b>상태·실행 기록</b><span>실시간</span></header>
+      <section class="state-section"><h3>왜 지금 이 작업인가 <span>추적성</span></h3><div class="reason">WB-07 시뮬레이션은 조직별 계획 데이터를 읽습니다. WB-06 권한 계약이 통과되지 않으면 타 사업부 데이터가 섞일 수 있어 선행 작업으로 고정됐습니다.</div></section>
+      <section class="state-section"><h3>다음 전환 <span>자동 조건</span></h3><div class="transition"><i>R</i><span><b>Reviewer 품질 판정</b><small>9개 테스트 통과 시 자동 시작</small></span></div><div class="transition"><i>07</i><span><b>WB-07 잠금 해제</b><small>Reviewer PASS + 사용자 승인</small></span></div></section>
+      <section class="state-section"><h3>실시간 실행 기록 <span>최근 3건</span></h3><div class="event-list"><div class="event-row"><time>09:42</time><i></i><span><b>Architect 승인</b><small>Architecture v1.1 고정</small></span></div><div class="event-row"><time>09:48</time><i></i><span><b>WBS 생성</b><small>12개 태스크 · 의존성 16개</small></span></div><div class="event-row live"><time>10:16</time><i></i><span><b>Backend Agent</b><small>권한 테스트 7/9 통과</small></span></div></div></section>
+    </aside>
+  </main>
+  <aside class="atlas-drawer"><header><b>Jarvis · 전체 제작 비서</b><button data-atlas-close>×</button></header><div class="atlas-body"><div class="atlas-brief">현재 좌표는 구현 5/12, WB-06 진행 68%입니다. WB-06은 WB-07의 보안 선행조건이며 사용자 승인 1건이 남았습니다.</div><button>전체 흐름에서 병목을 설명해줘</button><button>완료된 산출물과 다음 산출물을 연결해줘</button><button>현재 결정을 미루면 무엇이 멈추나?</button><textarea placeholder="전체 프로젝트에 대해 질문하세요"></textarea><button class="send">전송</button></div></aside>
+  <script src="../common.js"></script>
+  <script>
+    document.querySelectorAll('.stage').forEach(button=>button.addEventListener('click',()=>{
+      document.querySelectorAll('.stage').forEach(item=>item.classList.remove('selected'));
+      button.classList.add('selected');
+      document.getElementById('selectedContext').textContent=`전체 흐름 탐색 · ${button.dataset.label}`;
+    }));
+    document.querySelectorAll('.task').forEach(button=>button.addEventListener('click',()=>{
+      document.querySelectorAll('.task').forEach(item=>item.classList.remove('selected'));
+      button.classList.add('selected');
+      document.getElementById('selectedContext').textContent=`WBS 탐색 · ${button.querySelector('b').textContent}`;
+    }));
+    document.getElementById('reviewDecision').addEventListener('click',()=>{
+      document.getElementById('decisionPrompt').textContent='경영진의 하위 조직 기밀 데이터 조회 범위를 선택하세요.';
+      const actions=document.getElementById('decisionActions');
+      actions.innerHTML='<button class="secondary" data-decision-choice>기밀 제외</button><button data-decision-choice>기밀 포함</button>';
+      actions.querySelectorAll('[data-decision-choice]').forEach(button=>button.addEventListener('click',()=>{
+        document.getElementById('centerAssist').classList.add('no-decision');
+        document.querySelector('#decisionMetric b').textContent='0';
+        document.getElementById('jarvisDecisionState').textContent='결정 대기 0건';
+        document.getElementById('jarvisSummary').textContent='현재 사용자 결정 대기는 없습니다. WB-06 테스트 완료와 Reviewer 검증을 계속 확인하고 있습니다.';
+      }));
+    });
+  </script>
+</body>
+</html>

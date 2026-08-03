@@ -1,0 +1,2 @@
+@import url("ls-theme.css");
+:root{--font-ui:Pretendard,"Noto Sans KR","Segoe UI",Arial,sans-serif;--font-data:"Cascadia Mono",Consolas,monospace;--brand:#0a1e5a;--navy:#0a1e5a;--ink:#111d39;--muted:#7d8282;--teal:#009bb4;--blue:#0569a0;--amber:#c9a75d;--red:#fa002d;font-family:var(--font-ui)}*{box-sizing:border-box}body,button,input,textarea{font-family:var(--font-ui)}.data,.metric,.code{font-family:var(--font-data)}button{cursor:pointer}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}

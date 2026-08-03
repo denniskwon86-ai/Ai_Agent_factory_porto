@@ -1,0 +1,33 @@
+:root{
+  --ls-blue:#0a1e5a;
+  --ls-red:#fa002d;
+  --ls-green:#009bb4;
+  --ls-light-blue:#0569a0;
+  --ls-gray:#7d8282;
+  --ls-ink:#111d39;
+}
+
+button:focus-visible,a:focus-visible,.node:focus-visible{outline:3px solid #fa002d66;outline-offset:3px}
+button{transition:transform .16s ease,background .16s ease,border-color .16s ease,color .16s ease}
+button:hover{transform:translateY(-1px)}
+
+/* Gallery */
+.shell{background:radial-gradient(circle at 85% 8%,#0569a038,transparent 26%),linear-gradient(145deg,#07143c,#0a1e5a 55%,#061333)!important}
+.mark{position:relative;overflow:visible;border-radius:0!important;background:transparent!important;color:#fff!important;font-size:0!important;font-style:italic;letter-spacing:-.08em}
+.mark:before{font-size:25px;content:"LS"}.mark:after{position:absolute;right:-3px;top:9px;width:15px;height:6px;background:var(--ls-red);clip-path:polygon(0 40%,100% 0,66% 100%);content:""}
+.mast>span:last-child{font-size:0!important}.mast>span:last-child:after{font-size:12px;content:"REVISION V2-2 · LS BRAND EDITION"}
+.hero{position:relative;padding-bottom:69px!important}.hero:after{position:absolute;left:0;bottom:31px;width:250px;height:7px;background:linear-gradient(90deg,#0a1e5a 0 32%,#fa002d 32% 48%,#009bb4 48% 66%,#0569a0 66% 84%,#7d8282 84%);border:1px solid #ffffff2f;border-radius:8px;content:""}
+.hero small,.concept .no,.concept strong{color:#7bc9db!important}.concept:before{background:linear-gradient(90deg,#fa002d1c,#0569a021 54%,#0a1e5a)!important}.concept:hover{border-color:#ffffff4c}.note{border-left-color:var(--ls-red)!important}
+
+/* Enterprise World */
+.world{background:radial-gradient(circle at 53% 48%,#0569a034,transparent 30%),radial-gradient(circle at 8% 88%,#fa002d12,transparent 22%),linear-gradient(145deg,#061235,#0a1e5a 55%,#050e28)!important}
+.world:before{background-image:radial-gradient(#86a4d527 .8px,transparent .8px)!important}.ci{position:relative;width:auto!important;height:auto!important;border-radius:0!important;background:transparent!important;color:#fff!important;font-size:29px!important;font-style:italic;letter-spacing:-.1em}.ci:after{position:absolute;right:-13px;top:10px;width:18px;height:7px;background:var(--ls-red);clip-path:polygon(0 45%,100% 0,68% 100%);content:""}
+.identity small{font-size:0!important}.identity small:after{font-size:10px;content:"ENTERPRISE WORLD · REVISION V2-2"}.identity small,.intro>small,.intel>small{color:#67c0d3!important}.scope-actions button.active,.enter{border-color:var(--ls-red)!important;background:var(--ls-red)!important;color:#fff!important}.company-path .selected{border-left-color:var(--ls-red)!important;color:#fff!important}
+.orbit{stroke:#6f89b134!important}.line{stroke:#5a88bd69!important}.line.data{stroke:#00a9c2a8!important}.node circle{fill:#091943!important;stroke:#4b76a3!important}.node:hover circle{stroke:#8bc2d0!important}.node.active circle{fill:#0a225e!important;stroke:var(--ls-red)!important;filter:drop-shadow(0 0 13px #fa002d55)!important}.atlas{border-color:#40709c!important;background:#07163ee8!important}.atlas i{color:var(--ls-red)!important}.capabilities{border-color:#45628b!important;background:#061536ef!important}.capabilities button.active{background:var(--ls-red)!important;color:#fff!important}
+
+/* Software Factory */
+.factory{background:linear-gradient(90deg,#0a1e5a0c 1px,transparent 1px),linear-gradient(#0a1e5a0c 1px,transparent 1px),#f4f5f7!important;background-size:28px 28px!important}.factory-head{border-bottom-color:var(--ls-blue)!important;background:#fff!important}.factory-head .brand i{position:relative;background:var(--ls-blue)!important;font-size:0!important}.factory-head .brand i:before{font-size:17px;content:"LS"}.factory-head .brand i:after{position:absolute;right:5px;top:10px;width:9px;height:4px;background:var(--ls-red);clip-path:polygon(0 45%,100% 0,68% 100%);content:""}
+.manifest,.proof{background:#f7f8fa!important}.manifest{border-right-color:#bfc7d3!important}.proof{border-left-color:#bfc7d3!important}.line-floor:before{border-color:#64718a!important;background:repeating-linear-gradient(90deg,#dce1e7 0,#dce1e7 18px,#c6ced8 18px,#c6ced8 36px)!important}.line-title small,.product small{color:var(--ls-light-blue)!important}.line-title button,.product .cube{background:var(--ls-red)!important}.station.done .machine{border-color:var(--ls-green)!important;background:#e4f5f7!important}.station.done em,.product .quality b,.proof-item .data{color:var(--ls-green)!important}.station.active .machine{border-color:var(--ls-red)!important;background:#ffe9ed!important;box-shadow:0 8px 0 #cf8d9a!important}.station.active em,.proof-item.warn .data{color:var(--ls-red)!important}.product{border-color:var(--ls-blue)!important;box-shadow:11px 11px 0 var(--ls-blue)!important}.stage-detail{border-left-color:var(--ls-red)!important}.recovery{background:var(--ls-blue)!important}.recovery button{background:#fff!important;color:var(--ls-blue)!important}.atlas-wire{border-color:#8ca0ba!important}.atlas-wire i{color:var(--ls-red)!important}
+
+/* Future Scenario Room */
+.room{background:radial-gradient(ellipse at 53% 47%,#113a6c 0,#0a1e5a 46%,#050e27 82%)!important}.ceiling,.floor{background:#061438!important}.room .brand i{color:var(--ls-red)!important}.controls,.outcomes{background:#07163ddb!important}.controls small,.outcomes small{color:#71c5d7!important}.lever input{accent-color:var(--ls-red)!important}.presets button.active{background:var(--ls-red)!important;color:#fff!important}.confidence b,.outcome.good b{color:var(--ls-green)!important}.scenario-area{fill:#fa002d16!important}.scenario-line{stroke:var(--ls-red)!important;filter:drop-shadow(0 0 8px #fa002d66)!important}.now{fill:#fff!important;stroke:var(--ls-red);stroke-width:4}.story{border-left-color:var(--ls-red)!important}.decision{border-color:#507dab!important;background:#07163df2!important}.decision small{color:#83cede!important}.decision button,.floor button.primary{background:var(--ls-red)!important;color:#fff!important}.outcome.risk b{color:#ff9b54!important}.trace{border-left-color:var(--ls-red)!important}.trace button{color:#ff647f!important}.floor button{border-color:#5278a0!important}

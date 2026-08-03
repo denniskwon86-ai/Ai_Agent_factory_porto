@@ -37,6 +37,42 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [CLAUDE-CLOSED-LOOP-22] 승인 폐쇄루프 UI 정식 편입·구현 인계
+- 작성자 / 기록 시각: Codex / 2026-08-03 KST
+- 왜 지금 기록하는가: Supervisor가 앱 전달·수락·의사결정·발간 클릭형 프로토타입을 승인하고, 기존 UI/UX 시안에 정식 반영한 뒤 Claude Code가 실제 제품으로 완성할 수 있도록 업무를 정리하라고 지시했다.
+- 상태: **제품 UI 기준선 승인·3대 UI 문서 편입·Claude Code 구현 작업서 작성 완료 · 실제 React/API/DB 구현 대기**
+- 결정 및 근거: `docs/uiux/LIVING_ENTERPRISE_SCREEN_FUNCTION_DEFINITION_2026-07-30.md`에 CL-01~04와 두 폐쇄루프를, `LIVING_ENTERPRISE_UI_DESIGN_SPEC_2026-07-30.md`에 Collaboration Workflow Hub·URL·컴포넌트·검수 기준을, `LIVING_ENTERPRISE_IMPLEMENTATION_TRACEABILITY_2026-07-30.md`에 API·M6-UI-03C·회귀·완료조건을 편입했다. `docs/uiux/CLAUDE_IMPLEMENTATION_WORK_ORDER_CLOSED_LOOP_2026-08-03.md`는 현재 코드 기준 신규 DB·Router·서비스·React feature, API 목록, 상태 전이, 권한 경계, 테스트, 커밋 순서를 정의한다. 승인 화면은 `uiux-prototypes/closed-loop-product-samples/`이다.
+- 영향·주의사항: 문서·정적 프로토타입·보드만 변경했으며 `frontend/`, `api/`, `core/`, DB는 미변경이다. 개인 전달을 `workspace_shares`에 합치지 말고, 앱 수락으로 데이터 권한을 확대하지 말며, 대외 발간은 책임 임원+법무/공시 이중 게이트와 명시적 사용자 실행을 서버에서 강제한다. 세 검토서는 하나의 Decision Package projection이어야 한다.
+- 다음 행동 / 담당 / 착수 조건: Claude Code는 현재 작업트리가 정리되고 M6-UI-03C 착수가 허용되는 시점에 작업서의 CL-0(App-in-App Manifest)부터 독립 커밋 단위로 시작한다. 권한·DB/Ledger 원자성·대외 발간·사용자별 SSE는 통합 전 다른 팀원 독립 검토를 요청한다. Codex는 1280/1440 화면, 용어, Jarvis 문맥, 개인/조직 공유 구분을 교차검증한다.
+- 교대 체크포인트: 승인 프로토타입은 유지했고 화면기능정의서·UI설계서·추적성·README·구현 작업서를 갱신했다. 실제 소스·DB·테스트는 변경 또는 실행하지 않았고 커밋·푸시하지 않았다. 재개 첫 행동은 Claude Code가 작업서 §13 형식으로 보드에 착수 범위와 실제 수정 파일을 기록하는 것이다. 금지 범위는 Factory 전체 레이아웃 재설계, 개인 전달/조직 공유 통합, 권한 자동 확대, 자동 외부 발간이다.
+
+### [UX-CLOSED-LOOP-21] 업무 협업·의사결정·발간 폐쇄루프 UI 반영
+- 작성자 / 기록 시각: Codex / 2026-08-03 KST
+- 왜 지금 기록하는가: Supervisor가 PRODUCT-CLOSED-LOOP-20의 상세기획만으로는 부족하며, 실제 UI에도 앱 전달·수신 승인·의사결정·보고서 발간 기능을 반영하라고 지시했다.
+- 상태: **클릭형 UI 샘플 구현·브라우저 검증 완료 · 실제 React/API 구현 미착수**
+- 결정 및 근거: `uiux-prototypes/closed-loop-product-samples/`에 `사용자에게 전달`, `받은 앱·내 앱`, `의사결정 센터`, `대내외 보고서 발간` 네 화면을 하나의 공통 제품 셸과 상시 Jarvis Rail로 구현했다. Factory `transparent-orchestration/index.html`에는 `릴리스·사용자 전달` 진입점과 `App-in-App 플랫폼 계약 적용`을 표시했고, M6 제품 셸과 UI 갤러리에도 진입 링크를 연결했다. 1280px 브라우저에서 네 화면을 확인하고 Factory→전달 화면 이동, 앱 승인 후 내 앱 수 증가, 검토서 3종 전환, 회의 요청 상태 변경을 확인했다. 대외 발간은 책임자 승인만으로 활성화되지 않고 법무·공시 검토까지 완료해야 `4/4 준비`와 `대외 보고서 발간`이 활성화됨을 확인했다. 상세 설계·UI 경로는 `docs/design_app_delivery_decision_publication_loop.md`에 동기화했다.
+- 영향·주의사항: 변경은 정적 UI 프로토타입·설계 문서·팀 보드에 한정되며 실제 `frontend/`, API, DB, 권한 엔진은 변경하지 않았다. UI의 사용자 이름·부서·수치·일정은 기능 검증용 샘플이다. 실제 구현에서 앱 수락이 데이터 권한을 자동 확대해서는 안 되며, 외부 발간은 사용자 확인 없는 자동 게시를 금지한다.
+- 다음 행동 / 담당 / 착수 조건: Supervisor가 UI 흐름을 검토한 뒤 Claude Code가 Phase A(App-in-App 생성 계약)와 Phase B(개인 전달·수락·내 앱)의 실제 구현 계약을 작성하고, Codex가 React 이식 시 1280/1440 가독성·Factory 연계·Jarvis 문맥·권한 영향 표현을 교차검증한다. 실제 구현 착수 전 권한 모델과 외부 발간 게이트는 다른 팀원 1명의 독립 검토가 필요하다.
+- 교대 체크포인트: 신규 정적 UI 폴더, 범용 `uiux-prototypes/preview-server.mjs`, Factory·M6·갤러리 진입점, 상세 설계 문서·본 보드를 수정했다. 정적 서버 8090에서 화면과 상호작용을 검증했으며 커밋·푸시는 하지 않았다. 재개 시 첫 행동은 `http://127.0.0.1:8090/closed-loop-product-samples/#inbox` 검토 결과를 받아 화면을 확정하는 것이다. 승인 전 실제 React/API/DB 이식과 자동 외부 발행은 금지한다.
+
+### [PRODUCT-CLOSED-LOOP-20] 앱 전달·수락과 시뮬레이션 의사결정·발간 확장안
+- 작성자 / 기록 시각: Codex / 2026-08-03 KST
+- 왜 지금 기록하는가: Supervisor가 생성 앱의 지정 사용자 전달·수락·내 앱 등록, 앱인앱 권한 상속, 시뮬레이션 기반 회의 요청·세 관점 검토서·대내외 보고 발간을 하나의 제품 흐름으로 추가 제안했다.
+- 상태: **상세기획 완료 · 구현 미착수 · 제품 방향 검토 대기**
+- 결정 및 근거: `docs/design_app_delivery_decision_publication_loop.md`에 여섯 아이디어를 `앱 생성→전달→수락→공동운영`과 `시뮬레이션→Decision Package→회의→실행→발간→학습`의 두 폐쇄루프로 구조화했다. 기존 `core/workspace_promotion.py`의 `workspace_shares`는 조직 단위 read/fork이고 개인 수락형 전달이 아니므로, 공유 계약과 `app_deliveries`·`user_app_pocket`을 분리했다. 세 검토서는 독립 원본 3개가 아니라 하나의 증거 고정형 Decision Package를 요청자·의사결정자·영향부서 관점으로 렌더링하도록 설계했다. 마스터 구현 명세 상단에 상세 문서 포인터를 추가했다.
+- 영향·주의사항: 실제 API·DB·Agent Skill·프런트엔드는 변경하지 않았다. 앱 수락이 데이터 권한을 자동 확대해서는 안 되며, 조직 공유·개인 전달·업무 배정·전사 승격을 한 상태로 합치면 안 된다. 생성 앱 자체 로그인 금지 규칙을 적용할 때 `docs/test_plan/01_scenario_catalog.md`의 앱 내부 로그인 시나리오도 호스트 역할 상속 시나리오로 함께 바꿔야 한다. 외부 캘린더·메시지·보고 발행은 사용자 확인 없는 자동 쓰기를 금지한다.
+- 다음 행동 / 담당 / 착수 조건: Supervisor가 제품 원칙과 Phase A→F 순서를 승인하면, Claude Code가 Phase A(App-in-App 생성 계약·정적 게이트)와 Phase B(지정 사용자 전달·수락·내 앱)의 상세 구현 설계/코딩을 맡고 Codex가 화면 흐름·용어·수락/Decision UX를 구체화한다. 권한·보안·Decision Package 데이터 모델은 통합 전 다른 팀원 1명의 독립 검토를 받는다.
+- 교대 체크포인트: 신규 상세 설계 문서 1개와 마스터 명세 포인터·팀 보드 기록만 추가했다. 코드·DB·테스트는 미변경·미검증이며 커밋·푸시하지 않았다. 재개 시 첫 행동은 Supervisor의 설계 판정과 Phase A 착수 여부 확인이다. 승인 전에는 앱 수락으로 Scope 권한을 자동 생성하거나 세 검토서를 서로 다른 원본으로 구현하지 않는다.
+
+### [UX-SW-FACTORY-TRANSPARENCY-19] 전체 흐름·WBS 상시 노출 기반 D안 재설계
+- 작성자 / 기록 시각: Codex / 2026-07-31 KST
+- 왜 지금 기록하는가: Supervisor가 B·C안은 현재 작업에는 집중되지만 전체 제작 단계와 다음 작업을 알기 어렵고, AI 진행상황을 다시 암묵지로 만들며, Agent 연결과 WBS 기반 실행이라는 제품 의도를 희석한다고 지적했다. Codex의 `B → C` 기본 구조 권고를 철회하고 전체 투명성을 우선하는 구조로 재설계한다.
+- 상태: **D · Transparent Orchestration 시안 구현·브라우저 검증 완료 · Supervisor 검토 대기**
+- 결정 및 근거: `uiux-prototypes/sw-factory-concepts/transparent-orchestration/`에 상단 8단계 Workflow Map, 좌측 WBS·의존관계·Agent Spine, 중앙 현재 작업·산출물 Focus Surface, 그 아래의 조건부 사용자 결정/Jarvis 상하 카드, 우측 수행 이유·다음 전환·실시간 실행 기록을 구현했다. 상호작용 카드는 화면 바닥에 붙이지 않고 좌우·하단 14px 여백과 라운드·그림자를 적용했다. 사용자 결정이 있으면 결정 행을 Jarvis 위에 표시하고, 0건이면 결정 행을 접어 확보된 높이를 현재 작업에 돌려준다. Jarvis 질문 입력창을 기본 노출했고 주요 제목 14~21px, 본문·상태 11~12px 이상으로 확대했다. 1280×720에서 가로·세로 넘침 0, 8단계·WBS·현재 작업·사용자 결정·Jarvis·판단 근거·실행 기록 동시 노출을 확인했다.
+- 영향·주의사항: 실제 `frontend/`·API·DB는 변경하지 않았다. D도 확정 UI가 아니라 구조 검증안이다. B의 선택형 요구 안내와 C의 넓은 산출물 작업면은 폐기하지 않고 D의 중앙 모드로 흡수한다. A는 기능 회귀 확인용 참고로 유지한다. Workflow 순서는 화면에 하드코딩하지 않고 실제 registry/graph를 사용해야 한다.
+- 다음 행동 / 담당 / 착수 조건: Supervisor가 D의 정보 위계와 밀도를 검토한다. 승인 또는 수정 방향이 정해지기 전 Claude Code는 Factory React 레이아웃을 이식하지 않는다. 승인 후 Codex가 신규 기획·WBS 생성·실행·HOTL·실패복구·산출물 검토의 상태별 D 화면을 확장하고 Claude Code가 기존 컴포넌트와 상태 계약을 매핑한다.
+- 교대 체크포인트: D HTML, 비교 갤러리, README, UI 설계·화면기능·추적성 문서를 수정했고 정적 JS·한글·참조 검사를 통과했다. 사용자 결정 위·Jarvis 아래 구조를 현재 작업 아래 하단부에 두고 화면 끝에 붙이지 않은 부유형 카드로 표현했다. Supervisor 피드백으로 카드 높이를 142px에서 174px로 확대했다. 결정 1건 상태는 카드 상단 532px·하단 706px·화면 바닥 여백 14px이며, 결정 0건이면 결정 행이 사라지고 Jarvis 단독 카드가 118px로 남아 현재 작업이 312px까지 확장된다. 핵심 제목 14px 이상·본문 12px 이상과 Jarvis 질문 입력창을 유지했다. 가로/세로 넘침은 0이다. 실제 제품 소스는 미변경이며 UI 산출물은 아직 미커밋·미푸시다.
+
 ### [TEAM-PROTOCOL-V2-18] 인수인계 완료 기준·기록 승격 규칙 정비
 - 작성자 / 기록 시각: Codex / 2026-07-31 01:20 KST
 - 왜 지금 기록하는가: SW 생성기 시안 작업이 본 보드에는 기록됐지만 별도 인수인계 파일에도 기록됐는지 다시 확인해야 했다. 현행 규칙은 문서 난립 방지는 명확했으나, 무엇이 있어야 실제 인수인계가 완료되는지와 언제 `DECISIONS.md`·`AI_HANDOFF.md`로 승격하는지가 불명확했다.
@@ -49,10 +85,10 @@
 ### [UX-SW-FACTORY-RESET-17] SW 생성기 원본 복원 기준·전용 UI 3안 비교
 - 작성자 / 기록 시각: Codex / 2026-07-31 00:55 KST
 - 왜 지금 기록하는가: Supervisor가 R2 Factory가 한 페이지에 요구 입력·WBS·Timeline·Preview·품질·Atlas를 모두 우겨 넣어 UI 정리 전 Claude Code 원본보다 나빠졌다고 판정했다. SW 생성기 자체의 전용 시안 샘플링 없이 전체 화면을 확정한 절차 오류를 바로잡는다.
-- 상태: **R2 Factory 반려 · 원본 React 3패널을 기준선으로 복원 · 전용 비교 시안 A/B/C 구현 및 브라우저 검증 완료 · Supervisor 선택 대기**
+- 상태: **R2 Factory 반려 · A/B/C 탐색 완료 · 기본 구조 권고는 UX-SW-FACTORY-TRANSPARENCY-19로 대체**
 - 결정 및 근거: 현재 React의 `WorkflowStrip + ControlPanel + TimelinePanel(Supervisor Console/HOTLInput) + PreviewPanel`을 기능·정보구조 기준선으로 확정했다. `uiux-prototypes/sw-factory-concepts/`에 A Original Plus(원본 3패널 최소 개선), B Guided Journey(신규 기획 5단계), C Focus Workbench(기획/WBS/실행/산출물/품질 탭)를 분리 구현했다. 브라우저에서 A의 Control/Supervisor/Preview 3영역과 Atlas 접근, B의 5단계·단일 주 CTA와 1→2 단계 전환, C의 5개 작업 탭과 산출물 집중 전환을 확인했다. 기능 보존 기준은 `uiux-prototypes/sw-factory-concepts/README.md`.
 - 영향·주의사항: 실제 `frontend/`·API·DB는 변경하지 않았다. R2 Factory는 삭제하지 않고 실패 이력으로 보존하지만 React 이식·확정 디자인 근거로 사용하면 안 된다. Atlas는 항상 접근 가능해야 하나 별도 네 번째 고정 열을 강제하지 않는다. WBS·품질·복구는 관련 단계에서만 전개한다.
-- 다음 행동 / 담당 / 착수 조건: Supervisor가 A/B/C의 선호 요소를 검토한다. 현재 Codex 권고는 `B 신규 기획 → A 실행 통제실 → C 산출물 집중 모드` 조합이다. 선택 전 Claude Code는 실제 Factory 화면을 재배치하지 않는다. 승인 후 Codex가 선택 조합의 상태별 화면 명세를 확정하고 Claude Code가 기존 컴포넌트를 보존한 채 단계적으로 이식한다.
+- 다음 행동 / 담당 / 착수 조건: A/B/C는 UX-SW-FACTORY-TRANSPARENCY-19의 D안과 비교하기 위한 탐색 자료로 유지한다. B의 선택형 안내와 C의 집중 작업면은 D 중앙 모드 후보이며, 선택 전 Claude Code는 실제 Factory 화면을 재배치하지 않는다.
 - 교대 체크포인트: `uiux-prototypes/sw-factory-concepts/`의 갤러리와 A/B/C를 브라우저에서 확인했고 한글 대체문자 0, 로컬 참조 이상 0, 인라인 JS 구문 정상이다. 변경 범위는 해당 시안 폴더, 관련 `docs/uiux/` 설계 문서, 본 보드 항목이며 실제 `frontend/`·API·DB는 미변경이다. 현재 변경은 미커밋·미푸시 상태이고 공유 워킹트리에 다른 세션 변경이 다수 존재하므로 파일 지정 스테이징만 허용한다. 재개 시 첫 행동은 Supervisor의 선호 조합을 확인하는 것이며, 선택 전 Factory React 레이아웃 이식·R2 Factory 재사용·기존 3패널 제거를 금지한다.
 
 ### [UX-P0-R2-16] Studio 기능 복원·Atlas Global Rail·Twin 테마 교정
