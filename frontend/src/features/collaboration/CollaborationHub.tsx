@@ -1,78 +1,76 @@
-// [CL-1] 협업 허브 — 사용자에게 전달 · 받은 앱 · 내 앱
+// [CL-1 · UIUX] 협업 허브 — 승인 시안(Living Enterprise Canvas) 기준선 위에서 동작하는 실제 화면
 //
-// ★ 작업서 §CL-FE-01: AppShell/Router 전환이 끝나지 않았으므로 **오버레이 boolean 4개를 만들지
-//   않는다.** 하나의 `CollaborationHub` 안에서 내부 view 상태를 관리하고, 정식 Router 병합 시
-//   `view`/`onChangeView` 를 URL adapter 로 바꾸면 이 파일 안쪽은 그대로 남는다.
-//
-// ★ 화면이 반드시 보여줘야 하는 두 가지(서버가 문구까지 준다 — 화면이 지어내지 않는다):
+// 이 화면이 반드시 보여줘야 하는 것(서버가 문구까지 준다 — 화면이 지어내지 않는다):
 //   ① 수락 후 "데이터 접근 범위는 넓어지지 않았습니다" — 없으면 사용자는 앱을 받으면 자료도
-//      보인다고 믿는다.
+//      보인다고 믿는다. 그 오해가 곧 권한 우회에 대한 잘못된 안심이다.
 //   ② 401 과 404 의 구분 — "사용자를 지정하십시오"와 "그 요청은 없습니다"는 다른 행동을 요구한다.
-import { useCallback, useEffect, useState } from 'react';
+//   ③ 앱이 요구하는 권한(Capability Manifest)과 "별도 로그인 없음" — 자체 로그인 화면을 만난
+//      순간 사용자가 이상하다고 신고할 수 있어야 한다.
+//
+// ⚠️ 브라우저 `prompt()`/`alert()` 를 쓰지 않는다. 승인 시안에 없고, 키보드 접근·스크린리더
+//   대응이 되지 않으며 스타일도 입힐 수 없다 — 화면 안 입력으로 처리한다.
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../../design/HubShell';
+import { JarvisRail } from '../../design/JarvisRail';
 import {
   collaborationApi, DELIVERY_STATUS_KO, type CapabilityManifest, type Delivery, type PocketApp,
 } from '../../lib/collaborationApi';
 
 type View = 'inbox' | 'apps' | 'deliver' | 'sent';
 
-const VIEWS: { id: View; label: string; hint: string }[] = [
-  { id: 'inbox', label: '받은 앱', hint: '나에게 전달된 앱 요청' },
-  { id: 'apps', label: '내 앱', hint: '수락해서 쓰고 있는 앱' },
-  { id: 'deliver', label: '사용자에게 전달', hint: '릴리스를 지정한 사람에게 전달' },
-  { id: 'sent', label: '보낸 요청', hint: '내가 보낸 전달과 응답 상태' },
-];
-
-const TONE: Record<string, string> = {
-  amber: 'bg-amber-900/30 text-amber-300 border-amber-700/40',
-  emerald: 'bg-emerald-900/30 text-emerald-300 border-emerald-700/40',
-  gray: 'bg-gray-800/60 text-gray-400 border-gray-700',
-  slate: 'bg-slate-800/60 text-slate-400 border-slate-600',
-  red: 'bg-red-900/30 text-red-300 border-red-700/40',
+const STATUS_CHIP: Record<string, string> = {
+  PENDING: 'warn', ACCEPTED: 'success', REJECTED: 'muted', EXPIRED: 'muted', REVOKED: 'danger',
+};
+const DOT: Record<string, string> = {
+  PENDING: 'wait', ACCEPTED: 'good', REJECTED: 'off', EXPIRED: 'off', REVOKED: 'bad',
 };
 
-function StatusBadge({ status }: { status: Delivery['status'] }) {
-  const s = DELIVERY_STATUS_KO[status] ?? { label: status, tone: 'gray' };
-  return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${TONE[s.tone]}`}>
-      {s.label}
-    </span>
-  );
+function StatusChip({ status }: { status: Delivery['status'] }) {
+  const s = DELIVERY_STATUS_KO[status] ?? { label: status };
+  return <span className={`state-chip ${STATUS_CHIP[status] || 'muted'}`}>{s.label}</span>;
 }
 
-/** 앱이 요구하는 권한을 보여준다. **비어 있으면 "요구 없음"이라고 말한다** — 빈 카드를 두면
- *  사용자는 화면이 덜 만들어진 것으로 읽고 그냥 수락한다. */
+/** 앱이 요구하는 권한. **비어 있으면 "요구 없음"이라고 말한다** — 빈 카드를 두면 사용자는
+ *  화면이 덜 만들어진 것으로 읽고 그냥 수락한다. */
 function CapabilityManifestCard({ m }: { m: CapabilityManifest }) {
-  const caps = m?.required_capabilities?.length
-    ? m.required_capabilities
-    : (m?.capabilities || []).map((c) => {
+  const caps = useMemo(() => {
+    if (m?.required_capabilities?.length) return m.required_capabilities;
+    return (m?.capabilities || []).map((c) => {
       const i = c.lastIndexOf('.');
       return i > 0 ? { resource: c.slice(0, i), actions: [c.slice(i + 1)] }
         : { resource: c, actions: [] as string[] };
     });
+  }, [m]);
+  const inherited = m?.auth_mode === 'PLATFORM_INHERITED';
   return (
-    <div className="mt-2 rounded-lg border border-[#2F3640] bg-[#0B0C10]/60 p-2.5 text-xs">
-      <div className="text-gray-400 mb-1.5">이 앱이 요구하는 것</div>
+    <div className="capability-manifest">
+      <header>
+        <b>이 앱이 요구하는 것</b>
+        <span>{inherited ? '플랫폼 인증 상속' : (m?.auth_mode || '인증 방식 미지정')}</span>
+      </header>
       {caps.length === 0 ? (
-        <div className="text-gray-500">요구하는 데이터 권한이 없습니다.</div>
+        <ul><li><i aria-hidden="true">–</i><div><b>요구하는 데이터 권한이 없습니다</b>
+          <small>이 앱은 별도 자료 접근 없이 동작합니다.</small></div></li></ul>
       ) : (
-        <ul className="space-y-1">
+        <ul>
           {caps.map((c) => (
-            <li key={c.resource} className="text-gray-300">
-              <span className="font-mono text-cyan-300">{c.resource}</span>
-              {c.actions.length > 0 && (
-                <span className="text-gray-500"> · {c.actions.join(', ')}</span>
-              )}
+            <li key={c.resource}>
+              <i aria-hidden="true">✓</i>
+              <div>
+                <b>{c.resource}</b>
+                <small>{c.actions.length ? c.actions.join(' · ') : '동작 미지정'}</small>
+              </div>
             </li>
           ))}
         </ul>
       )}
-      {/* 플랫폼 인증 상속을 화면에 드러낸다 — 사용자가 "이 앱이 따로 로그인을 요구하지 않는다"를
-          알아야 자체 로그인 화면을 만난 순간 이상하다고 신고할 수 있다. */}
-      <div className="mt-2 pt-2 border-t border-[#1F2833] text-[11px] text-gray-500">
-        인증: {m?.auth_mode === 'PLATFORM_INHERITED' ? '플랫폼 상속(별도 로그인 없음)' : (m?.auth_mode || '미지정')}
-        {m?.standalone_auth === false && ' · 자체 인증 없음'}
-      </div>
+      <footer>
+        {inherited
+          ? '별도 로그인 없이 현재 사용자·조직 권한으로 실행됩니다. 앱이 자체 로그인 화면을 띄우면 관리자에게 알려 주십시오.'
+          : '인증 방식이 확인되지 않았습니다 — 관리자에게 문의하십시오.'}
+        {m?.required_data_scopes?.length ? ` · 데이터 범위: ${m.required_data_scopes.join(', ')}` : ''}
+      </footer>
     </div>
   );
 }
@@ -89,12 +87,10 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
-
-  // 전달 폼 초안 — Draft 상태만 여기 둔다(§CL-FE-03).
-  const [form, setForm] = useState({ release_id: releaseIds[0] || '', recipient: '', purpose: '' });
+  const [selectedId, setSelectedId] = useState<string>('');
 
   const load = useCallback(async () => {
-    setBusy('불러오는 중...'); setErr(null);
+    setBusy('불러오는 중'); setErr(null);
     try {
       const [i, s, a] = await Promise.all([
         collaborationApi.inbox(), collaborationApi.outbox(), collaborationApi.myApps(),
@@ -108,9 +104,9 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
   useEffect(() => { load(); }, [load]);
 
   // ★ 사용자가 바뀌면 이전 수신함·주머니를 **즉시 폐기**한다(§CL-FE-03). 남겨 두면 다른
-  //   사용자의 목록이 화면에 그대로 남아 있고, 그것이 곧 유출이다.
+  //   사용자의 목록이 화면에 그대로 남고, 그것이 곧 유출이다.
   useEffect(() => {
-    const h = () => { setInbox([]); setSent([]); setApps([]); load(); };
+    const h = () => { setInbox([]); setSent([]); setApps([]); setSelectedId(''); load(); };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
   }, [load]);
@@ -120,275 +116,479 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     try {
       const r = await fn();
       // 서버가 준 문구를 그대로 보여준다 — 화면이 지어내면 서버 규칙과 갈라진다.
-      if (r?.scope_note) setFlash(r.scope_note);
-      else if (r?.note) setFlash(r.note);
+      setFlash(r?.scope_note || r?.note || null);
       await load();
+      return r;
     } catch (e: any) {
       setErr({ msg: e?.message || String(e), status: e?.status });
     } finally { setBusy(null); }
   };
 
   const pending = inbox.filter((d) => d.status === 'PENDING');
+  const selected = useMemo(
+    () => inbox.find((d) => d.delivery_id === selectedId) || pending[0] || inbox[0] || null,
+    [inbox, pending, selectedId]);
+
+  const items: RailItem[] = [
+    { id: 'inbox', label: '받은 앱', hint: '나에게 전달된 요청', mark: '받', count: pending.length },
+    { id: 'apps', label: '내 앱', hint: '수락해서 쓰는 앱', mark: '앱', count: apps.length },
+    { id: 'deliver', label: '사용자에게 전달', hint: '지정한 한 사람에게', mark: '전' },
+    { id: 'sent', label: '보낸 요청', hint: '응답 상태와 회수', mark: '보' },
+  ];
+
+  // Jarvis 문맥 — **선택된 객체**를 그대로 넘긴다. Task ID 를 사용자에게 묻지 않는다(§3-8).
+  const jarvisCtx = (() => {
+    if (view === 'apps') {
+      return { title: apps.length ? `내 앱 ${apps.length}개` : '내 앱 없음',
+        desc: '수락한 앱은 현재 사용자·조직 권한으로 실행됩니다.',
+        ev: apps.slice(0, 3).map((a) => ({ label: a.display_name, value: a.release_id })) };
+    }
+    if (view === 'sent') {
+      return { title: sent.length ? `보낸 요청 ${sent.length}건` : '보낸 요청 없음',
+        desc: '수락 전에는 언제든 회수할 수 있습니다.',
+        ev: sent.slice(0, 3).map((d) => ({ label: d.recipient_user_id, value: DELIVERY_STATUS_KO[d.status]?.label || d.status })) };
+    }
+    if (selected) {
+      return {
+        title: selected.release_id,
+        desc: selected.purpose,
+        ev: [
+          { label: '보낸 사람', value: selected.sender_user_id },
+          { label: '상태', value: DELIVERY_STATUS_KO[selected.status]?.label || selected.status },
+          { label: 'Manifest 지문', value: (selected.manifest_fingerprint || '').slice(0, 12) || '없음' },
+          { label: '만료', value: selected.expires_at || '없음' },
+        ],
+      };
+    }
+    return { title: '협업', desc: '앱 전달·수락·내 앱을 한곳에서 다룹니다.', ev: [] };
+  })();
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl h-[88vh] bg-[#0B0C10] border border-[#1F2833] rounded-xl flex flex-col overflow-hidden">
-        <header className="flex items-center gap-3 px-5 py-3 border-b border-[#1F2833]">
-          <h2 className="text-base font-semibold text-white">🤝 협업</h2>
-          <span className="text-xs text-gray-500">
-            앱 전달 · 수락 · 내 앱 — 개인 전달은 조직 공유·전사 승격과 별개입니다
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-[1440px] h-[92vh] rounded-xl overflow-hidden border border-[#24344b] flex flex-col">
+        {/* 상단 바 — 기존 앱과 이 화면의 경계. 닫기는 항상 같은 자리에 있어야 한다. */}
+        <div className="afs-scope flex items-center gap-3 px-5 py-3 border-b"
+          style={{ background: 'linear-gradient(90deg,#0a1e5a,#123166)', borderColor: '#24344b' }}>
+          <b style={{ color: '#fff', fontSize: 15 }}>협업</b>
+          <span style={{ color: '#9fb3d6', fontSize: 12 }}>
+            개인 전달은 부서 공유·전사 승격과 별개이며, 수락해도 데이터 권한은 넓어지지 않습니다
           </span>
-          <div className="ml-auto flex items-center gap-2">
-            {busy && <span className="text-xs text-cyan-300">{busy}</span>}
-            <button onClick={onClose}
-              className="text-xs px-2 py-1 rounded border border-[#2F3640] text-gray-400 hover:text-white">
-              닫기
-            </button>
+          <div className="ml-auto flex items-center gap-3">
+            {busy && <span style={{ color: '#7fd7de', fontSize: 12 }}>{busy}…</span>}
+            <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>닫기</button>
           </div>
-        </header>
+        </div>
 
-        <div className="flex-1 flex min-h-0">
-          {/* 238px Rail (승인 UI 구성) */}
-          <nav className="w-[238px] shrink-0 border-r border-[#1F2833] p-3 space-y-1 overflow-y-auto">
-            {VIEWS.map((v) => (
-              <button key={v.id} onClick={() => setView(v.id)}
-                className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
-                  view === v.id
-                    ? 'bg-[#1F2833] border-cyan-700/50 text-white'
-                    : 'bg-transparent border-transparent text-gray-400 hover:bg-[#141a21]'}`}>
-                <div className="text-sm flex items-center gap-2">
-                  {v.label}
-                  {v.id === 'inbox' && pending.length > 0 && (
-                    <span className="text-[10px] px-1.5 rounded-full bg-amber-900/50 text-amber-300 border border-amber-700/40">
-                      {pending.length}
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] text-gray-600 mt-0.5">{v.hint}</div>
-              </button>
-            ))}
-          </nav>
-
-          {/* 가변 작업면 */}
-          <section className="flex-1 min-w-0 overflow-y-auto p-5">
+        <div className="flex-1 min-h-0">
+          <HubShell
+            kicker="COLLABORATION"
+            title="앱 전달과 공동 업무"
+            subtitle="만든 앱을 사람에게 전달하고, 받은 앱을 내 주머니에서 실행합니다."
+            items={items} activeId={view} onSelect={(id) => setView(id as View)}
+            footer={
+              <div className="inheritance-card">
+                <span>APP-IN-APP</span>
+                <b>플랫폼 인증 상속</b>
+                <p>
+                  전달된 앱은 자체 로그인을 갖지 않습니다. 현재 사용자·조직·역할로 실행되며,
+                  수락해도 볼 수 있는 자료가 늘어나지 않습니다.
+                </p>
+              </div>
+            }
+            jarvis={
+              <JarvisRail
+                contextTitle={jarvisCtx.title}
+                contextDescription={jarvisCtx.desc}
+                evidence={jarvisCtx.ev}
+                quickQuestions={[
+                  '이 앱은 어떤 자료를 요구합니까?',
+                  '수락하면 제 권한이 넓어집니까?',
+                  '이 요청은 언제 만료됩니까?',
+                ]}
+                onAsk={(q) => setFlash(
+                  q.includes('권한')
+                    ? '아니요. 앱을 수락해도 데이터 접근 범위는 넓어지지 않습니다 — 앱은 현재 사용자 권한으로 실행됩니다.'
+                    : q.includes('만료')
+                      ? (selected?.expires_at ? `${selected.expires_at} 에 만료됩니다.` : '선택된 요청이 없습니다.')
+                      : (selected ? `요구 권한은 화면 중앙의 Capability Manifest 에 표시됩니다 (${selected.release_id}).` : '선택된 요청이 없습니다.'))}
+              />
+            }
+          >
             {err && (
-              <div className="mb-3 rounded-lg border border-red-800/50 bg-red-900/20 p-3 text-xs text-red-300">
-                {/* 401 과 404 는 사용자가 해야 할 일이 다르다 — 문구를 뭉개지 않는다. */}
-                <b>{err.status === 401 ? '사용자 지정이 필요합니다' : err.status === 404 ? '요청을 찾을 수 없습니다' : '오류'}</b>
-                <div className="mt-1 text-red-200/80">{err.msg}</div>
-              </div>
+              <Banner tone="error"
+                title={err.status === 401 ? '사용자 지정이 필요합니다'
+                  : err.status === 404 ? '요청을 찾을 수 없습니다' : '오류'}>
+                {err.msg}
+              </Banner>
             )}
-            {flash && (
-              <div className="mb-3 rounded-lg border border-cyan-800/50 bg-cyan-900/20 p-3 text-xs text-cyan-200">
-                {flash}
-              </div>
-            )}
+            {flash && <Banner tone="info">{flash}</Banner>}
 
             {view === 'inbox' && (
-              <Inbox list={inbox} onAccept={(d) => act('수락 중...', () => collaborationApi.accept(d.delivery_id))}
-                onReject={(d, n) => act('거절 중...', () => collaborationApi.reject(d.delivery_id, n))}
-                onReassign={(d, n) => act('재배정 요청 중...', () => collaborationApi.reassign(d.delivery_id, n))} />
+              <InboxScreen list={inbox} selectedId={selected?.delivery_id || ''}
+                onSelect={setSelectedId}
+                onAccept={(d) => act('수락 중', () => collaborationApi.accept(d.delivery_id))}
+                onReject={(d, n) => act('거절 중', () => collaborationApi.reject(d.delivery_id, n))}
+                onReassign={(d, n) => act('재배정 요청 중', () => collaborationApi.reassign(d.delivery_id, n))} />
             )}
             {view === 'apps' && (
-              <MyApps list={apps}
-                onPin={(a) => act('갱신 중...', () => collaborationApi.patchApp(a.pocket_id, { pinned: !a.pinned }))}
-                onRename={(a, name) => act('이름 변경 중...', () => collaborationApi.patchApp(a.pocket_id, { display_name: name }))} />
+              <AppsScreen list={apps}
+                onPin={(a) => act('갱신 중', () => collaborationApi.patchApp(a.pocket_id, { pinned: !a.pinned }))}
+                onRename={(a, n) => act('이름 변경 중', () => collaborationApi.patchApp(a.pocket_id, { display_name: n }))} />
             )}
             {view === 'deliver' && (
-              <DeliverForm form={form} setForm={setForm} releaseIds={releaseIds}
-                onSubmit={() => act('전달 중...', async () => {
-                  const r = await collaborationApi.create({
-                    release_id: form.release_id.trim(),
-                    recipient_user_id: form.recipient.trim(),
-                    purpose: form.purpose.trim(),
-                    // 중복 클릭에도 하나만 생기게 — 서버가 같은 키를 재생(replay)한다.
-                    idempotency_key: `${form.release_id}|${form.recipient}|${form.purpose}`.slice(0, 120),
-                  });
-                  setView('sent');
-                  return r;
-                })} />
+              <DeliverScreen releaseIds={releaseIds}
+                onSubmit={async (f) => {
+                  const r = await act('전달 중', () => collaborationApi.create({
+                    release_id: f.release_id, recipient_user_id: f.recipient, purpose: f.purpose,
+                    // 중복 클릭에도 하나만 생기게 — 서버가 같은 키를 재생한다.
+                    idempotency_key: `${f.release_id}|${f.recipient}|${f.purpose}`.slice(0, 120),
+                  }));
+                  if (r) setView('sent');
+                }} />
             )}
             {view === 'sent' && (
-              <Sent list={sent}
-                onRevoke={(d, r) => act('회수 중...', () => collaborationApi.revoke(d.delivery_id, r))} />
+              <SentScreen list={sent}
+                onRevoke={(d, r) => act('회수 중', () => collaborationApi.revoke(d.delivery_id, r))} />
             )}
-          </section>
+          </HubShell>
         </div>
       </div>
     </div>
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs text-gray-500 border border-[#2F3640] rounded-xl p-4">{children}</div>;
-}
-
-function Inbox({ list, onAccept, onReject, onReassign }: {
-  list: Delivery[];
+// ── 받은 앱 ──────────────────────────────────────────────────────────────────
+function InboxScreen({ list, selectedId, onSelect, onAccept, onReject, onReassign }: {
+  list: Delivery[]; selectedId: string; onSelect: (id: string) => void;
   onAccept: (d: Delivery) => void;
   onReject: (d: Delivery, note: string) => void;
   onReassign: (d: Delivery, note: string) => void;
 }) {
-  if (list.length === 0) {
-    return <Empty>받은 앱 요청이 없습니다. 다른 사용자가 앱을 전달하면 여기에 나타납니다.</Empty>;
-  }
+  const [filter, setFilter] = useState<'all' | 'pending'>('pending');
+  // 화면 안 입력 — `prompt()` 를 쓰지 않는다(키보드·스크린리더·스타일 모두 안 되기 때문).
+  const [form, setForm] = useState<{ id: string; kind: 'reject' | 'reassign'; note: string } | null>(null);
+
+  const shown = filter === 'pending' ? list.filter((d) => d.status === 'PENDING') : list;
+  const pendingCount = list.filter((d) => d.status === 'PENDING').length;
+
   return (
-    <ul className="space-y-3">
-      {list.map((d) => (
-        <li key={d.delivery_id} className="rounded-xl border border-[#2F3640] bg-[#141a21]/60 p-3.5">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm text-white font-medium">{d.release_id}</span>
-            <span className="text-[10px] text-gray-600 font-mono">{d.release_version}</span>
-            <StatusBadge status={d.status} />
-            <span className="ml-auto text-[11px] text-gray-500">
-              보낸 사람 <b className="text-gray-300">{d.sender_user_id}</b>
-            </span>
+    <>
+      <ScreenHead kicker="INBOX" title="받은 앱"
+        description="다른 사용자가 나에게 전달한 앱입니다. 수락하면 내 앱 주머니에 담기며, 데이터 접근 범위는 넓어지지 않습니다."
+        chip={{ label: pendingCount ? `응답 대기 ${pendingCount}건` : '대기 없음',
+          tone: pendingCount ? 'warn' : 'success' }} />
+
+      <Panel kicker="REQUESTS" title="전달 요청"
+        action={
+          <div className="filter-pills">
+            <button className={filter === 'pending' ? 'active' : ''} onClick={() => setFilter('pending')}>대기</button>
+            <button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>전체</button>
           </div>
-          <div className="mt-1.5 text-xs text-gray-300">{d.purpose}</div>
-          <div className="text-[11px] text-gray-600 mt-1">
-            만료 {d.expires_at}
-            {d.note && <span className="text-amber-400 ml-2">{d.note}</span>}
+        }>
+        {shown.length === 0 ? (
+          <div className="empty-note">
+            {filter === 'pending'
+              ? '응답을 기다리는 요청이 없습니다. 전체를 보려면 위의 «전체» 를 누르십시오.'
+              : '받은 앱 요청이 없습니다. 다른 사용자가 앱을 전달하면 여기에 나타납니다.'}
           </div>
-          <CapabilityManifestCard m={d.manifest_snapshot} />
-          {d.can_respond ? (
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              <button onClick={() => onAccept(d)}
-                className="text-xs px-3 py-1.5 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-emerald-200 hover:bg-emerald-900/60">
-                수락하고 내 앱에 추가
-              </button>
-              <button onClick={() => {
-                const n = prompt('거절 사유 (보낸 사람이 다시 판단할 근거가 됩니다)') || '';
-                if (n.trim()) onReject(d, n);
-              }}
-                className="text-xs px-3 py-1.5 rounded-lg border border-[#2F3640] text-gray-300 hover:bg-[#1F2833]">
-                거절
-              </button>
-              <button onClick={() => {
-                const n = prompt('담당자가 아니라면 누가 담당인지 알려주십시오') || '';
-                if (n.trim()) onReassign(d, n);
-              }}
-                className="text-xs px-3 py-1.5 rounded-lg border border-[#2F3640] text-gray-400 hover:bg-[#1F2833]">
-                담당 아님 · 재배정 요청
-              </button>
+        ) : shown.map((d) => (
+          <article key={d.delivery_id}
+            className={`request-card ${d.delivery_id === selectedId ? 'active' : ''}`}
+            onMouseEnter={() => onSelect(d.delivery_id)}>
+            <div className="request-top">
+              <span className="app-mark" aria-hidden="true">{d.release_id.slice(-2)}</span>
+              <div>
+                <small>{d.release_version ? `v${d.release_version}` : 'RELEASE'}</small>
+                <h3>{d.release_id}</h3>
+                <p>{d.purpose}</p>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <StatusChip status={d.status} />
+                <div><time>{(d.created_at || '').slice(0, 10)}</time></div>
+              </div>
             </div>
-          ) : (
-            <div className="mt-2.5 text-[11px] text-gray-500">
-              {d.responded_at ? `${d.responded_at.slice(0, 10)} 응답` : '응답할 수 없는 상태입니다'}
-              {d.response_note && ` · ${d.response_note}`}
+
+            <div className="request-scope">
+              <div><span>보낸 사람</span><b>{d.sender_user_id}</b></div>
+              <div><span>만료</span><b>{d.expires_at || '없음'}</b></div>
+              <div><span>Manifest 지문</span><b>{(d.manifest_fingerprint || '').slice(0, 12) || '없음'}</b></div>
             </div>
-          )}
-        </li>
-      ))}
-    </ul>
+
+            <div style={{ padding: '0 15px' }}>
+              <CapabilityManifestCard m={d.manifest_snapshot} />
+            </div>
+
+            {/* 권한이 넓어지지 않는다는 사실을 **수락 전에** 말한다 — 수락 후에만 말하면 늦다. */}
+            <div className="request-alert" style={{ marginTop: 12 }}>
+              <i aria-hidden="true">i</i>
+              <div>
+                <b>수락해도 볼 수 있는 자료가 늘어나지 않습니다</b>
+                <small>앱은 현재 사용자 권한으로 실행됩니다. 원래 보이지 않던 자료는 앱에서도 보이지 않습니다.</small>
+              </div>
+            </div>
+
+            {d.note && (
+              <div className="request-alert warn" style={{ marginTop: 8 }}>
+                <i aria-hidden="true">!</i><div><b>{d.note}</b></div>
+              </div>
+            )}
+
+            {d.can_respond ? (
+              <>
+                <footer>
+                  <button className="secondary-button"
+                    onClick={() => setForm({ id: d.delivery_id, kind: 'reassign', note: '' })}>
+                    담당 아님 · 재배정 요청
+                  </button>
+                  <button className="danger-ghost"
+                    onClick={() => setForm({ id: d.delivery_id, kind: 'reject', note: '' })}>
+                    거절
+                  </button>
+                  <button className="primary-button" onClick={() => onAccept(d)}>
+                    수락하고 내 앱에 추가
+                  </button>
+                </footer>
+                {form?.id === d.delivery_id && (
+                  <div style={{ padding: '0 15px 15px' }}>
+                    <label className="field-label" htmlFor={`note-${d.delivery_id}`}>
+                      {form.kind === 'reject'
+                        ? '거절 사유 (보낸 사람이 다시 판단할 근거가 됩니다)'
+                        : '누가 담당인지 알려 주십시오 (시스템이 자동 배정하지 않습니다)'}
+                    </label>
+                    <textarea id={`note-${d.delivery_id}`} className="afs-textarea" value={form.note}
+                      onChange={(e) => setForm({ ...form, note: e.target.value })} />
+                    <div style={{ display: 'flex', gap: 7, marginTop: 8, justifyContent: 'flex-end' }}>
+                      <button className="secondary-button" onClick={() => setForm(null)}>취소</button>
+                      <button className="primary-button" disabled={!form.note.trim()}
+                        onClick={() => {
+                          const n = form.note.trim();
+                          if (!n) return;
+                          if (form.kind === 'reject') onReject(d, n); else onReassign(d, n);
+                          setForm(null);
+                        }}>
+                        {form.kind === 'reject' ? '거절 보내기' : '재배정 요청 보내기'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <footer style={{ justifyContent: 'flex-start', color: 'var(--muted)', fontSize: 11 }}>
+                {d.responded_at ? `${d.responded_at.slice(0, 10)} 응답` : '응답할 수 없는 상태입니다'}
+                {d.response_note ? ` · ${d.response_note}` : ''}
+              </footer>
+            )}
+          </article>
+        ))}
+      </Panel>
+    </>
   );
 }
 
-function MyApps({ list, onPin, onRename }: {
+// ── 내 앱 ────────────────────────────────────────────────────────────────────
+function AppsScreen({ list, onPin, onRename }: {
   list: PocketApp[]; onPin: (a: PocketApp) => void; onRename: (a: PocketApp, n: string) => void;
 }) {
-  if (list.length === 0) {
-    return <Empty>수락한 앱이 없습니다. <b className="text-gray-300">받은 앱</b>에서 수락하면 여기에 담깁니다.</Empty>;
-  }
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
+  const colors = ['blue', 'green', 'orange', 'violet'];
   return (
-    <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {list.map((a) => (
-        <li key={a.pocket_id} className="rounded-xl border border-[#2F3640] bg-[#141a21]/60 p-3.5">
-          <div className="flex items-center gap-2">
-            <button onClick={() => onPin(a)} title={a.pinned ? '고정 해제' : '고정'}
-              className={`text-sm ${a.pinned ? 'text-amber-300' : 'text-gray-600 hover:text-gray-300'}`}>
-              ★
-            </button>
-            <span className="text-sm text-white">{a.display_name}</span>
-            <button onClick={() => {
-              const n = prompt('표시 이름', a.display_name) || '';
-              if (n.trim() && n !== a.display_name) onRename(a, n);
-            }} className="text-[10px] text-gray-600 hover:text-gray-300">이름 변경</button>
+    <>
+      <ScreenHead kicker="MY APPS" title="내 앱"
+        description="수락한 앱입니다. 현재 사용자·조직 권한으로 실행되며 별도 로그인이 없습니다."
+        chip={{ label: `${list.length}개`, tone: list.length ? 'success' : 'muted' }} />
+      <Panel kicker="POCKET" title="앱 주머니">
+        {list.length === 0 ? (
+          <div className="empty-note">
+            수락한 앱이 없습니다. <b>받은 앱</b>에서 요청을 수락하면 여기에 담깁니다.
           </div>
-          <div className="mt-1.5 text-[11px] text-gray-600 font-mono">{a.release_id}</div>
-          <div className="text-[11px] text-gray-500 mt-1">
-            {a.accepted_at ? `${a.accepted_at.slice(0, 10)} 수락` : ''}
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function DeliverForm({ form, setForm, releaseIds, onSubmit }: {
-  form: { release_id: string; recipient: string; purpose: string };
-  setForm: (f: any) => void;
-  releaseIds: string[];
-  onSubmit: () => void;
-}) {
-  const ready = form.release_id.trim() && form.recipient.trim() && form.purpose.trim();
-  return (
-    <div className="max-w-2xl space-y-3">
-      <div className="text-xs text-gray-500">
-        지정한 <b className="text-gray-300">한 사람</b>에게 앱을 전달합니다. 부서 공유·전사 승격과는
-        다른 경로이며, <b className="text-gray-300">수락해도 상대의 데이터 권한은 넓어지지 않습니다.</b>
-      </div>
-      <label className="block">
-        <span className="text-xs text-gray-400">릴리스</span>
-        {releaseIds.length > 0 ? (
-          <select value={form.release_id} onChange={(e) => setForm({ ...form, release_id: e.target.value })}
-            className="mt-1 w-full text-sm bg-[#141a21] border border-[#2F3640] rounded-lg px-3 py-2 text-gray-200">
-            <option value="">— 선택 —</option>
-            {releaseIds.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
         ) : (
-          <input value={form.release_id} onChange={(e) => setForm({ ...form, release_id: e.target.value })}
-            placeholder="release_id" className="mt-1 w-full text-sm bg-[#141a21] border border-[#2F3640] rounded-lg px-3 py-2 text-gray-200" />
+          <div className="app-pocket">
+            {list.map((a, idx) => (
+              <div key={a.pocket_id}>
+                <i className={colors[idx % colors.length]} aria-hidden="true">
+                  {a.display_name.slice(0, 2)}
+                </i>
+                <div>
+                  {editing?.id === a.pocket_id ? (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input className="afs-input" value={editing.name} autoFocus
+                        onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && editing.name.trim()) {
+                            onRename(a, editing.name.trim()); setEditing(null);
+                          }
+                          if (e.key === 'Escape') setEditing(null);
+                        }} />
+                      <button className="secondary-button" style={{ minHeight: 32 }}
+                        onClick={() => { if (editing.name.trim()) onRename(a, editing.name.trim()); setEditing(null); }}>
+                        저장
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <b>{a.display_name}</b>
+                      <small>{a.release_id} · {a.accepted_at ? `${a.accepted_at.slice(0, 10)} 수락` : ''}</small>
+                    </>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button className="text-button" onClick={() => setEditing({ id: a.pocket_id, name: a.display_name })}>
+                    이름 변경
+                  </button>
+                  <button className={`pin-button ${a.pinned ? 'on' : ''}`} onClick={() => onPin(a)}
+                    aria-label={a.pinned ? '고정 해제' : '고정'} title={a.pinned ? '고정 해제' : '고정'}>
+                    ★
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
-      </label>
-      <label className="block">
-        <span className="text-xs text-gray-400">받는 사람 (사용자 ID)</span>
-        <input value={form.recipient} onChange={(e) => setForm({ ...form, recipient: e.target.value })}
-          placeholder="예: hikwon@lsmnm.com"
-          className="mt-1 w-full text-sm bg-[#141a21] border border-[#2F3640] rounded-lg px-3 py-2 text-gray-200" />
-      </label>
-      <label className="block">
-        <span className="text-xs text-gray-400">전달 목적 (필수)</span>
-        <textarea value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })}
-          rows={3} placeholder="받는 사람이 수락 여부를 판단할 근거가 됩니다"
-          className="mt-1 w-full text-sm bg-[#141a21] border border-[#2F3640] rounded-lg px-3 py-2 text-gray-200" />
-      </label>
-      <button disabled={!ready} onClick={onSubmit}
-        className={`text-sm px-4 py-2 rounded-lg border ${ready
-          ? 'bg-cyan-900/40 border-cyan-700/50 text-cyan-200 hover:bg-cyan-900/60'
-          : 'border-[#2F3640] text-gray-600 cursor-not-allowed'}`}>
-        전달 요청 보내기
-      </button>
-    </div>
+      </Panel>
+    </>
   );
 }
 
-function Sent({ list, onRevoke }: { list: Delivery[]; onRevoke: (d: Delivery, r: string) => void }) {
-  if (list.length === 0) return <Empty>보낸 전달 요청이 없습니다.</Empty>;
+// ── 사용자에게 전달 ──────────────────────────────────────────────────────────
+function DeliverScreen({ releaseIds, onSubmit }: {
+  releaseIds: string[];
+  onSubmit: (f: { release_id: string; recipient: string; purpose: string }) => void;
+}) {
+  const [f, setF] = useState({ release_id: releaseIds[0] || '', recipient: '', purpose: '' });
+  const step = !f.release_id ? 0 : !f.recipient ? 1 : !f.purpose.trim() ? 2 : 3;
+  const ready = step === 3;
+  const steps = ['앱 선택', '받는 사람', '전달 목적', '전달'];
+
   return (
-    <ul className="space-y-2.5">
-      {list.map((d) => (
-        <li key={d.delivery_id} className="rounded-xl border border-[#2F3640] bg-[#141a21]/60 p-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm text-white">{d.release_id}</span>
-            <StatusBadge status={d.status} />
-            <span className="text-[11px] text-gray-500">
-              받는 사람 <b className="text-gray-300">{d.recipient_user_id}</b>
-            </span>
-            {d.can_revoke && (
-              <button onClick={() => {
-                const r = prompt('회수 사유 (받는 사람에게 남습니다)') || '';
-                if (r.trim()) onRevoke(d, r);
-              }} className="ml-auto text-[11px] px-2 py-1 rounded border border-red-800/50 text-red-300 hover:bg-red-900/30">
-                회수
-              </button>
+    <>
+      <ScreenHead kicker="DELIVER" title="사용자에게 전달"
+        description="지정한 한 사람에게 앱을 전달합니다. 부서 공유·전사 승격과는 다른 경로입니다."
+        chip={{ label: ready ? '보낼 준비 완료' : '입력 중', tone: ready ? 'success' : 'data' }} />
+
+      <ol className="step-line">
+        {steps.map((s, i) => (
+          <li key={s} className={i < step ? 'done' : i === step ? 'active' : ''}>
+            <i aria-hidden="true">{i < step ? '✓' : i + 1}</i>
+            <div><b>{s}</b><small>{i < step ? '완료' : i === step ? '진행 중' : '대기'}</small></div>
+          </li>
+        ))}
+      </ol>
+
+      <div className="delivery-grid">
+        <Panel kicker="RELEASE" title="전달할 앱" className="release-card">
+          <div style={{ paddingTop: 14 }}>
+            <label className="field-label" htmlFor="rel">릴리스</label>
+            {releaseIds.length > 0 ? (
+              <select id="rel" className="afs-select" value={f.release_id}
+                onChange={(e) => setF({ ...f, release_id: e.target.value })}>
+                <option value="">— 선택 —</option>
+                {releaseIds.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            ) : (
+              <input id="rel" className="afs-input" value={f.release_id} placeholder="release_id"
+                onChange={(e) => setF({ ...f, release_id: e.target.value })} />
             )}
+            {releaseIds.length === 0 && (
+              <div className="empty-note" style={{ margin: '10px 0 0' }}>
+                게시된 릴리스가 없습니다. 프로젝트를 완료해 릴리스를 게시하면 목록에 나타납니다.
+              </div>
+            )}
+            <div className="release-facts">
+              <div><span>전달 방식</span><b>개인</b><small>한 사람에게</small></div>
+              <div><span>인증</span><b>상속</b><small>별도 로그인 없음</small></div>
+              <div><span>권한 확대</span><b>없음</b><small>자료는 그대로</small></div>
+            </div>
           </div>
-          <div className="mt-1 text-xs text-gray-400">{d.purpose}</div>
-          {d.response_note && (
-            <div className="mt-1 text-[11px] text-amber-300">응답: {d.response_note}</div>
-          )}
-        </li>
-      ))}
-    </ul>
+        </Panel>
+
+        <Panel kicker="RECIPIENT" title="받는 사람과 목적">
+          <div style={{ padding: 18 }}>
+            <label className="field-label" htmlFor="rcp">받는 사람 (사용자 ID)</label>
+            <div className="search-field">
+              <span aria-hidden="true">🔍</span>
+              <input id="rcp" value={f.recipient} placeholder="예: hikwon@lsmnm.com"
+                onChange={(e) => setF({ ...f, recipient: e.target.value })} />
+            </div>
+
+            <label className="field-label" htmlFor="pps">전달 목적 (필수)</label>
+            <textarea id="pps" className="afs-textarea" value={f.purpose}
+              placeholder="받는 사람이 수락 여부를 판단할 근거가 됩니다"
+              onChange={(e) => setF({ ...f, purpose: e.target.value })} />
+
+            <div className="permission-summary">
+              <b>수락 시 상대에게 생기는 것</b>
+              <span>내 앱 주머니에 앱 1개</span>
+              <small>
+                데이터 접근 범위는 변하지 않습니다. 상대가 원래 볼 수 없던 자료는 이 앱에서도
+                보이지 않습니다 — 자료 권한이 필요하면 조직 권한을 별도로 부여해야 합니다.
+              </small>
+            </div>
+
+            <button className="primary-wide" disabled={!ready} onClick={() => onSubmit(f)}>
+              전달 요청 보내기
+            </button>
+          </div>
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+// ── 보낸 요청 ────────────────────────────────────────────────────────────────
+function SentScreen({ list, onRevoke }: {
+  list: Delivery[]; onRevoke: (d: Delivery, reason: string) => void;
+}) {
+  const [form, setForm] = useState<{ id: string; reason: string } | null>(null);
+  const accepted = list.filter((d) => d.status === 'ACCEPTED').length;
+  return (
+    <>
+      <ScreenHead kicker="SENT" title="보낸 요청"
+        description="내가 보낸 전달과 상대의 응답 상태입니다. 수락된 앱을 회수하면 상대 주머니에 회수 사실이 남습니다."
+        chip={{ label: `수락 ${accepted} / 전체 ${list.length}`, tone: 'data' }} />
+      <Panel kicker="OUTBOX" title="전달 이력">
+        {list.length === 0 ? (
+          <div className="empty-note">보낸 전달 요청이 없습니다.</div>
+        ) : (
+          <div className="sent-requests">
+            {list.map((d) => (
+              <div key={d.delivery_id}>
+                <i className={DOT[d.status] || 'off'} aria-hidden="true" />
+                <div>
+                  <b>{d.release_id} → {d.recipient_user_id}</b>
+                  <small>
+                    {d.purpose}
+                    {d.response_note ? ` · 응답: ${d.response_note}` : ''}
+                  </small>
+                  {form?.id === d.delivery_id && (
+                    <div style={{ marginTop: 8 }}>
+                      <label className="field-label" htmlFor={`rv-${d.delivery_id}`}>
+                        회수 사유 (받는 사람에게 남습니다)
+                      </label>
+                      <textarea id={`rv-${d.delivery_id}`} className="afs-textarea" value={form.reason}
+                        onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+                      <div style={{ display: 'flex', gap: 7, marginTop: 8 }}>
+                        <button className="secondary-button" onClick={() => setForm(null)}>취소</button>
+                        <button className="danger-ghost" disabled={!form.reason.trim()}
+                          onClick={() => { onRevoke(d, form.reason.trim()); setForm(null); }}>
+                          회수하기
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <StatusChip status={d.status} />
+                  {d.can_revoke && form?.id !== d.delivery_id && (
+                    <button className="text-button" onClick={() => setForm({ id: d.delivery_id, reason: '' })}>
+                      회수
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </>
   );
 }

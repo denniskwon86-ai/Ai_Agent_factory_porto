@@ -1,0 +1,405 @@
+/* [UIUX] AI Factory Studio 디자인 기준선 — 승인 시안(Living Enterprise Canvas) 토큰·컴포넌트
+ *
+ * 원본: uiux-prototypes/closed-loop-product-samples/styles.css
+ *       uiux-prototypes/master-concept/ADOPTION_DECISION.md (2026-07-30 Supervisor 채택)
+ *
+ * ★★ **모든 선택자를 `.afs-scope` 안에 둔다.** 이유가 하나뿐인데 무겁다:
+ *   기존 앱은 전역 다크 테마(Tailwind 유틸리티)로 돌고 있고, 지금 잘 동작한다. 승인 시안은
+ *   라이트 테마다. 토큰을 `:root` 에 두면 기존 15개 화면의 색·배경이 동시에 바뀌고, 그때부터는
+ *   "새 화면을 만드는 일"이 아니라 "되던 걸 고치는 일"이 된다.
+ *   → 새 화면만 이 스코프 안에서 그린다. 기존 화면은 준비되면 하나씩 옮긴다.
+ *
+ * ⚠️ 값을 임의로 바꾸지 않았다. 색·간격·폰트 크기는 승인 시안 그대로다. 시각 세부가 문서와
+ *   다르면 승인 프로토타입을 따르되 본문 12px 이상·키보드 접근은 UI 설계서를 우선한다(작업서 §2).
+ */
+
+.afs-scope {
+  /* LS 브랜드 — Navy 구조 + Red 는 **핵심 행동에만** 제한적으로(채택 결정 7항) */
+  --navy: #0a1e5a;
+  --navy2: #071747;
+  --red: #fa002d;
+  --cyan: #009bb4;
+  --green: #138578;
+  --orange: #d77b18;
+  --ink: #101a2d;
+  --muted: #667185;
+  --line: #d8dce3;
+  --soft: #f4f5f7;
+  --paper: #fffdf7;
+  --shadow: 0 12px 32px rgba(16, 26, 45, .10);
+
+  font-family: Pretendard, "Noto Sans KR", "Segoe UI", Arial, sans-serif;
+  color: var(--ink);
+  background: #eef1f4;
+}
+
+.afs-scope *,
+.afs-scope *::before,
+.afs-scope *::after { box-sizing: border-box; }
+
+.afs-scope button,
+.afs-scope input,
+.afs-scope textarea,
+.afs-scope select { font: inherit; }
+
+.afs-scope button { cursor: pointer; }
+
+/* 키보드 접근 — 승인 시안은 마우스 전용이었다. 요구사항(§10-2)이므로 여기서 보강한다.
+ * ⚠️ outline 을 지우지 않는다. 지우면 키보드 사용자는 자기가 어디 있는지 알 수 없다. */
+.afs-scope :focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* ── 3열 셸: 238px Rail / 가변 작업면(최소 680px) / 300px Jarvis ───────────── */
+.afs-scope .hub-layout {
+  display: grid;
+  grid-template-columns: 238px minmax(680px, 1fr) 300px;
+  min-height: 0;
+  background: #eef1f4;
+}
+
+.afs-scope .hub-layout.no-jarvis { grid-template-columns: 238px minmax(0, 1fr); }
+
+.afs-scope .module-rail {
+  overflow: auto;
+  border-right: 1px solid #24344b;
+  color: #e8eef8;
+  background: linear-gradient(180deg, #111b2a, #172438);
+}
+
+.afs-scope .module-intro { padding: 24px 20px 18px; border-bottom: 1px solid #ffffff14; }
+.afs-scope .module-intro small { color: #80cfd9; font-size: 10px; font-weight: 900; letter-spacing: .1em; }
+.afs-scope .module-intro h1 { margin: 8px 0 9px; color: #fff; font-size: 20px; line-height: 1.35; letter-spacing: -.04em; }
+.afs-scope .module-intro p { margin: 0; color: #9eacbf; font-size: 12px; line-height: 1.58; }
+
+.afs-scope .module-menu { display: grid; padding: 10px; gap: 2px; }
+.afs-scope .module-menu button {
+  display: grid; grid-template-columns: 31px 1fr auto; gap: 9px; align-items: center;
+  width: 100%; padding: 12px 9px; border: 1px solid transparent; border-radius: 7px;
+  color: #d9e2ee; background: transparent; text-align: left;
+}
+.afs-scope .module-menu button:hover { background: #ffffff08; }
+.afs-scope .module-menu button.active {
+  border-color: #3e5472; background: #22334b; box-shadow: inset 3px 0 var(--red);
+}
+.afs-scope .module-menu i {
+  display: grid; place-items: center; width: 29px; height: 29px; border-radius: 6px;
+  color: #91a4bd; background: #ffffff0a; font-size: 10px; font-style: normal; font-weight: 900;
+}
+.afs-scope .module-menu b, .afs-scope .module-menu small { display: block; }
+.afs-scope .module-menu b { font-size: 12px; }
+.afs-scope .module-menu small { margin-top: 3px; color: #8fa0b6; font-size: 10px; }
+.afs-scope .module-menu .count {
+  display: grid; place-items: center; min-width: 22px; height: 22px; border-radius: 11px;
+  color: #fff; background: var(--red); font-weight: 900; font-size: 11px;
+}
+
+/* 인증 상속 안내 — 사용자가 "이 앱은 따로 로그인하지 않는다"를 알아야, 자체 로그인 화면을
+ * 만난 순간 이상하다고 신고할 수 있다. */
+.afs-scope .inheritance-card {
+  margin: 10px; padding: 13px; border: 1px solid #286c71; border-radius: 8px; background: #0d3238;
+}
+.afs-scope .inheritance-card > span { color: #6dd4d5; font-size: 9px; font-weight: 900; letter-spacing: .09em; }
+.afs-scope .inheritance-card > b { display: block; margin-top: 5px; font-size: 13px; color: #eaffff; }
+.afs-scope .inheritance-card p { margin: 6px 0 0; color: #b5d0d1; font-size: 11px; line-height: 1.45; }
+
+.afs-scope .hub-main { min-width: 0; overflow: auto; padding: 22px 24px 40px; }
+
+/* ── 화면 머리 ─────────────────────────────────────────────────────────────── */
+.afs-scope .screen-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 17px;
+}
+.afs-scope .screen-head small { color: var(--cyan); font-size: 10px; font-weight: 950; letter-spacing: .1em; }
+.afs-scope .screen-head h2 { margin: 7px 0 6px; font-size: 24px; letter-spacing: -.05em; }
+.afs-scope .screen-head p { max-width: 760px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+.afs-scope .state-chip {
+  flex: 0 0 auto; margin-top: 3px; padding: 7px 10px; border-radius: 14px; font-size: 10px; font-weight: 900;
+}
+.afs-scope .state-chip.success { color: #0b665d; background: #dcefeb; }
+.afs-scope .state-chip.warn { color: #8a4b0e; background: #fff0dc; }
+.afs-scope .state-chip.data { color: #087184; background: #dff1f4; }
+.afs-scope .state-chip.danger { color: #b01c39; background: #ffe3e8; }
+.afs-scope .state-chip.muted { color: #56606f; background: #e8eaee; }
+
+/* ── 패널·버튼 ─────────────────────────────────────────────────────────────── */
+.afs-scope .panel {
+  border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  box-shadow: 0 4px 16px rgba(16, 26, 45, .05);
+}
+.afs-scope .panel-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 17px 18px; border-bottom: 1px solid var(--line);
+}
+.afs-scope .panel-head small { color: var(--cyan); font-size: 9px; font-weight: 950; letter-spacing: .09em; }
+.afs-scope .panel-head h3 { margin: 4px 0 0; font-size: 17px; }
+
+.afs-scope .text-button { border: 0; color: var(--navy); background: transparent; font-size: 12px; font-weight: 850; }
+.afs-scope .primary-button,
+.afs-scope .secondary-button,
+.afs-scope .danger-ghost { min-height: 38px; padding: 0 13px; border-radius: 5px; font-size: 12px; font-weight: 850; }
+.afs-scope .primary-button { border: 1px solid var(--red); color: #fff; background: var(--red); }
+.afs-scope .secondary-button { border: 1px solid #cbd1da; color: #39475c; background: #fff; }
+.afs-scope .danger-ghost { border: 1px solid #e1b2bb; color: #b01c39; background: #fff; }
+.afs-scope .primary-wide {
+  width: 100%; min-height: 44px; border: 1px solid var(--red); border-radius: 6px;
+  color: #fff; background: var(--red); font-size: 13px; font-weight: 900;
+}
+.afs-scope .primary-wide:disabled,
+.afs-scope .primary-wide.disabled {
+  border-color: #c5cad2; color: #7c8695; background: #e6e8ec; cursor: not-allowed;
+}
+.afs-scope .primary-button:disabled { border-color: #c5cad2; color: #7c8695; background: #e6e8ec; cursor: not-allowed; }
+
+/* ── 단계선 ────────────────────────────────────────────────────────────────── */
+.afs-scope .step-line { display: grid; grid-template-columns: repeat(4, 1fr); margin: 0 0 15px; padding: 0; list-style: none; }
+.afs-scope .step-line li {
+  position: relative; display: grid; grid-template-columns: 32px 1fr; gap: 9px; align-items: center;
+  padding: 10px 13px; border: 1px solid var(--line); border-right: 0; background: #fff;
+}
+.afs-scope .step-line li:first-child { border-radius: 8px 0 0 8px; }
+.afs-scope .step-line li:last-child { border-right: 1px solid var(--line); border-radius: 0 8px 8px 0; }
+.afs-scope .step-line i {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  color: #788496; background: #eef0f3; font-size: 11px; font-style: normal; font-weight: 900;
+}
+.afs-scope .step-line b, .afs-scope .step-line small { display: block; }
+.afs-scope .step-line b { font-size: 12px; }
+.afs-scope .step-line small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.afs-scope .step-line .done i { color: #fff; background: var(--green); }
+.afs-scope .step-line .active { background: #fff6f7; }
+.afs-scope .step-line .active i { color: #fff; background: var(--red); }
+
+/* ── Capability Manifest ───────────────────────────────────────────────────── */
+.afs-scope .capability-manifest {
+  margin-top: 14px; border: 1px solid #bedbdc; border-radius: 8px; background: #f1fafa;
+}
+.afs-scope .capability-manifest header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 11px 12px; border-bottom: 1px solid #cae3e4;
+}
+.afs-scope .capability-manifest header b { font-size: 12px; }
+.afs-scope .capability-manifest header span {
+  padding: 3px 6px; border-radius: 10px; color: #08786f; background: #d6efec; font-size: 10px; font-weight: 900;
+}
+.afs-scope .capability-manifest ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.afs-scope .capability-manifest li {
+  display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #dcecec;
+}
+.afs-scope .capability-manifest li:last-child { border-bottom: 0; }
+.afs-scope .capability-manifest li > i { color: var(--green); font-style: normal; font-weight: 950; }
+.afs-scope .capability-manifest li b, .afs-scope .capability-manifest li small { display: block; }
+.afs-scope .capability-manifest li b { font-size: 12px; }
+.afs-scope .capability-manifest li small { margin-top: 2px; color: #5e7377; font-size: 10px; }
+.afs-scope .capability-manifest footer {
+  padding: 10px 12px; border-top: 1px solid #cae3e4; color: #4f6b6e; font-size: 11px;
+}
+
+/* ── 전달·수신 카드 ────────────────────────────────────────────────────────── */
+.afs-scope .delivery-grid { display: grid; grid-template-columns: minmax(390px, .9fr) minmax(410px, 1.1fr); gap: 15px; }
+.afs-scope .release-card { padding: 18px; }
+.afs-scope .release-card > header { display: flex; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.afs-scope .app-mark {
+  display: grid; place-items: center; flex: 0 0 auto; width: 46px; height: 46px; border-radius: 9px;
+  color: #fff; background: linear-gradient(135deg, var(--navy), #1c59a0); font-size: 13px; font-weight: 950;
+}
+.afs-scope .app-mark.violet { background: linear-gradient(135deg, #5442a6, #8978d8); }
+.afs-scope .app-mark.green { background: linear-gradient(135deg, #0f6f64, #2fa392); }
+.afs-scope .release-card header small, .afs-scope .request-top small { color: var(--cyan); font-size: 10px; font-weight: 900; }
+.afs-scope .release-card h3 { margin: 4px 0 5px; font-size: 17px; }
+.afs-scope .release-card header p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+.afs-scope .release-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 13px; }
+.afs-scope .release-facts div { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: #f8f9fa; }
+.afs-scope .release-facts span, .afs-scope .release-facts b, .afs-scope .release-facts small { display: block; }
+.afs-scope .release-facts span { color: var(--muted); font-size: 10px; }
+.afs-scope .release-facts b { margin: 4px 0; font-size: 15px; word-break: break-all; }
+.afs-scope .release-facts small { color: #788496; font-size: 10px; }
+
+.afs-scope .search-field {
+  display: grid; grid-template-columns: 24px 1fr; align-items: center;
+  margin: 0 0 10px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #fafbfc;
+}
+.afs-scope .search-field span { color: #8490a0; }
+.afs-scope .search-field input { height: 38px; border: 0; outline: 0; background: transparent; font-size: 12px; }
+
+.afs-scope .people-list { display: grid; gap: 6px; }
+.afs-scope .person {
+  display: grid; grid-template-columns: 32px 1fr auto; gap: 8px; align-items: center;
+  width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: #fff; text-align: left;
+}
+.afs-scope .person.selected { border-color: #77bbc5; background: #f0fafb; }
+.afs-scope .person > i {
+  display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%;
+  color: #fff; background: var(--navy); font-size: 10px; font-style: normal; font-weight: 900;
+}
+.afs-scope .person b, .afs-scope .person small { display: block; }
+.afs-scope .person b { font-size: 12px; }
+.afs-scope .person small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.afs-scope .person em { color: #08786f; font-size: 10px; font-style: normal; font-weight: 900; }
+
+.afs-scope .field-label { display: block; margin-bottom: 6px; color: #536075; font-size: 11px; font-weight: 900; }
+.afs-scope .afs-input, .afs-scope .afs-textarea, .afs-scope .afs-select {
+  width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 6px;
+  color: #39465a; background: #fbfcfd; font-size: 12px; line-height: 1.5;
+}
+.afs-scope .afs-textarea { min-height: 62px; resize: vertical; }
+
+.afs-scope .permission-summary { margin: 12px 0; padding: 10px; border-left: 4px solid var(--cyan); background: #eef8fa; }
+.afs-scope .permission-summary b, .afs-scope .permission-summary span, .afs-scope .permission-summary small { display: block; }
+.afs-scope .permission-summary b { font-size: 11px; }
+.afs-scope .permission-summary span { margin-top: 4px; font-size: 12px; font-weight: 800; }
+.afs-scope .permission-summary small { margin-top: 3px; color: #60747a; font-size: 10px; line-height: 1.5; }
+
+.afs-scope .metric-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin-bottom: 14px; }
+.afs-scope .metric-row div { padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.afs-scope .metric-row span, .afs-scope .metric-row b, .afs-scope .metric-row small { display: block; }
+.afs-scope .metric-row span { color: var(--muted); font-size: 11px; }
+.afs-scope .metric-row b { margin: 5px 0 2px; font-size: 21px; }
+.afs-scope .metric-row small { color: #7b8797; font-size: 10px; }
+
+.afs-scope .inbox-layout { display: grid; grid-template-columns: minmax(500px, 1.35fr) minmax(300px, .65fr); gap: 14px; }
+.afs-scope .filter-pills { display: flex; gap: 5px; }
+.afs-scope .filter-pills button {
+  padding: 5px 9px; border: 1px solid var(--line); border-radius: 12px; color: #657184; background: #fff; font-size: 11px;
+}
+.afs-scope .filter-pills button.active { border-color: var(--navy); color: #fff; background: var(--navy); }
+
+.afs-scope .request-card { margin: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.afs-scope .request-card.active { border-color: #91b9c0; box-shadow: inset 4px 0 var(--cyan); }
+.afs-scope .request-top { display: flex; gap: 11px; padding: 15px; }
+.afs-scope .request-top > div { min-width: 0; flex: 1; }
+.afs-scope .request-top h3 { margin: 4px 0; font-size: 16px; }
+.afs-scope .request-top p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.afs-scope .request-top time { color: #7c8796; font-size: 10px; }
+.afs-scope .request-scope { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0 15px; }
+.afs-scope .request-scope div { padding: 9px; border: 1px solid var(--line); border-radius: 5px; background: #f8f9fa; }
+.afs-scope .request-scope span, .afs-scope .request-scope b { display: block; }
+.afs-scope .request-scope span { color: var(--muted); font-size: 10px; }
+.afs-scope .request-scope b { margin-top: 3px; font-size: 11px; word-break: break-all; }
+.afs-scope .request-note { margin: 11px 15px; }
+.afs-scope .request-note b { font-size: 11px; }
+.afs-scope .request-note p { margin: 4px 0 0; color: #566376; font-size: 12px; line-height: 1.5; }
+.afs-scope .request-alert {
+  display: grid; grid-template-columns: 25px 1fr; gap: 8px; margin: 0 15px;
+  padding: 9px; border: 1px solid #d5e7ec; border-radius: 6px; background: #eff8fa;
+}
+.afs-scope .request-alert.warn { border-color: #eddcc0; background: #fff7eb; }
+.afs-scope .request-alert.danger { border-color: #e8c4cc; background: #fdeff1; }
+.afs-scope .request-alert i {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  color: #fff; background: var(--cyan); font-size: 10px; font-style: normal;
+}
+.afs-scope .request-alert.warn i { background: var(--orange); }
+.afs-scope .request-alert.danger i { background: var(--red); }
+.afs-scope .request-alert b, .afs-scope .request-alert small { display: block; }
+.afs-scope .request-alert b { font-size: 11px; }
+.afs-scope .request-alert small { margin-top: 3px; color: #5e7078; font-size: 11px; line-height: 1.45; }
+.afs-scope .request-card footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; padding: 12px 15px; }
+
+/* ── 내 앱 주머니 ──────────────────────────────────────────────────────────── */
+.afs-scope .app-pocket { display: grid; gap: 6px; padding: 12px; }
+.afs-scope .app-pocket > div {
+  display: grid; grid-template-columns: 37px 1fr auto; gap: 9px; align-items: center;
+  padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: #fff;
+}
+.afs-scope .app-pocket i {
+  display: grid; place-items: center; width: 35px; height: 35px; border-radius: 7px;
+  color: #fff; font-size: 10px; font-style: normal; font-weight: 950;
+}
+.afs-scope .app-pocket i.blue { background: #2458a4; }
+.afs-scope .app-pocket i.green { background: #158074; }
+.afs-scope .app-pocket i.orange { background: #d37b1e; }
+.afs-scope .app-pocket i.violet { background: #6a54b2; }
+.afs-scope .app-pocket b, .afs-scope .app-pocket small { display: block; }
+.afs-scope .app-pocket b { font-size: 12px; }
+.afs-scope .app-pocket small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.afs-scope .pin-button { border: 0; background: transparent; color: #b9c0cb; font-size: 15px; line-height: 1; }
+.afs-scope .pin-button.on { color: var(--orange); }
+
+.afs-scope .sent-requests { margin: 0 12px; border-top: 1px solid var(--line); }
+.afs-scope .sent-requests > div { display: grid; grid-template-columns: 9px 1fr auto; gap: 7px; padding: 9px 0; align-items: start; }
+.afs-scope .sent-requests i { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; }
+.afs-scope .sent-requests i.good { background: var(--green); }
+.afs-scope .sent-requests i.wait { background: var(--orange); }
+.afs-scope .sent-requests i.bad { background: var(--red); }
+.afs-scope .sent-requests i.off { background: #9aa3af; }
+.afs-scope .sent-requests b, .afs-scope .sent-requests small { display: block; }
+.afs-scope .sent-requests b { font-size: 11px; }
+.afs-scope .sent-requests small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+
+.afs-scope .empty-note {
+  margin: 12px; padding: 18px; border: 1px dashed var(--line); border-radius: 8px;
+  color: var(--muted); background: #fafbfc; font-size: 12px; line-height: 1.6;
+}
+
+/* ── Jarvis 레일 (300px) ───────────────────────────────────────────────────── */
+.afs-scope .jarvis-rail {
+  overflow: auto; border-left: 1px solid #1e345e; color: #e6edf8;
+  background: linear-gradient(180deg, #0a1e5a, #071846);
+}
+.afs-scope .jarvis-rail > header { display: flex; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid #ffffff19; }
+.afs-scope .jarvis-orb {
+  display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  color: #fff; background: radial-gradient(circle, #59d3d4, #128596 52%, #133e79);
+  box-shadow: 0 0 22px #4ec6d06b; font-size: 13px;
+}
+.afs-scope .jarvis-rail header > div { flex: 1; }
+.afs-scope .jarvis-rail header small, .afs-scope .jarvis-rail header b { display: block; }
+.afs-scope .jarvis-rail header small { color: #91a7cf; font-size: 10px; letter-spacing: .09em; }
+.afs-scope .jarvis-rail header b { margin-top: 3px; font-size: 15px; }
+.afs-scope .online-dot { color: #83e3d8; font-size: 10px; font-weight: 900; }
+
+.afs-scope .jarvis-context { padding: 18px 16px; border-bottom: 1px solid #ffffff17; }
+.afs-scope .jarvis-context small { color: #74cbd4; font-size: 10px; font-weight: 900; }
+.afs-scope .jarvis-context h3 { margin: 8px 0; font-size: 16px; line-height: 1.4; letter-spacing: -.03em; }
+.afs-scope .jarvis-context p { margin: 0; color: #b9c6dc; font-size: 12px; line-height: 1.58; }
+
+.afs-scope .jarvis-evidence, .afs-scope .jarvis-quick { padding: 15px 16px; border-bottom: 1px solid #ffffff15; }
+.afs-scope .jarvis-evidence > b, .afs-scope .jarvis-quick > b { display: block; margin-bottom: 8px; color: #9fb0cc; font-size: 10px; }
+.afs-scope .jarvis-evidence > div { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; color: #c7d2e4; font-size: 11px; }
+.afs-scope .jarvis-evidence em { color: #82d9d2; font-style: normal; font-weight: 850; word-break: break-all; }
+.afs-scope .jarvis-quick { display: grid; gap: 6px; }
+.afs-scope .jarvis-quick button {
+  padding: 9px; border: 1px solid #ffffff1d; border-radius: 5px;
+  color: #d9e3f2; background: #ffffff08; font-size: 11px; text-align: left;
+}
+.afs-scope .jarvis-answer {
+  margin: 13px 16px; padding: 10px; border-left: 3px solid #55ced0;
+  color: #c8d6e8; background: #ffffff09; font-size: 11px; line-height: 1.55;
+}
+
+/* ── 알림(토스트) — 화면 안에 둔다(브라우저 alert/prompt 를 쓰지 않는다) ──── */
+.afs-scope .afs-banner { margin-bottom: 14px; padding: 12px 14px; border-radius: 8px; font-size: 12px; line-height: 1.55; }
+.afs-scope .afs-banner.info { border-left: 4px solid var(--cyan); color: #0d5f6d; background: #eaf7fa; }
+.afs-scope .afs-banner.warn { border-left: 4px solid var(--orange); color: #7a4a10; background: #fff6e9; }
+.afs-scope .afs-banner.error { border-left: 4px solid var(--red); color: #96122e; background: #fdeef1; }
+.afs-scope .afs-banner b { display: block; margin-bottom: 3px; }
+
+/* ── 반응형(승인 시안 그대로) ──────────────────────────────────────────────── */
+@media (max-width: 1450px) {
+  .afs-scope .hub-layout { grid-template-columns: 220px minmax(650px, 1fr) 280px; }
+  .afs-scope .hub-main { padding-inline: 18px; }
+  .afs-scope .screen-head h2 { font-size: 21px; }
+  .afs-scope .delivery-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* 1280×720 요구(§10 프론트 1) — **승인 시안은 1280 에서도 3열이다.**
+ *   ≤1450px 구간의 최소폭 합계는 220+650+280 = 1150px 이고, 모달 외곽 여백(32px)을 빼도
+ *   1280 창의 가용폭 1248px 안에 들어간다(실측 확인).
+ * ⚠️ 처음엔 1330px 이하에서 Jarvis 를 접었는데, 그것은 **승인 시안보다 좁게 판단한 것**이었다 —
+ *   시안을 임의로 줄이면 "디자인을 입혔다"고 말할 수 없다. 실제로 안 들어가는 폭에서만 접는다. */
+@media (max-width: 1180px) {
+  .afs-scope .hub-layout { grid-template-columns: 214px minmax(0, 1fr); }
+  .afs-scope .jarvis-rail { display: none; }
+  .afs-scope .inbox-layout, .afs-scope .delivery-grid { grid-template-columns: minmax(0, 1fr); }
+  .afs-scope .metric-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-height: 760px) {
+  .afs-scope .hub-main { padding-top: 16px; }
+  .afs-scope .screen-head { margin-bottom: 12px; }
+  .afs-scope .screen-head h2 { font-size: 20px; }
+  .afs-scope .jarvis-context { padding-block: 14px; }
+}
