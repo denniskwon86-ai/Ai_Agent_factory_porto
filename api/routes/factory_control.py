@@ -1233,6 +1233,37 @@ async def create_release(project_id: str,
         "owner_dept_id": _rel_own.get("owner_dept_id", ""),
         "visibility": _rel_own.get("visibility", "dept"),
     }
+    # ★★ [CL-0 · 2026-08-03] **App-in-App Capability Manifest 를 릴리스에 고정한다.**
+    #   이 릴리스가 나중에 개인에게 전달될 때(CL-1), 수신자는 "이 앱이 무엇을 요구하는가"를 보고
+    #   수락한다. 그 선언이 릴리스에 없으면 전달 화면이 보여줄 것이 없고, 결국 "그냥 수락"이 된다.
+    #   ⚠️ 능력을 추측해 채우지 않는다 — `minimal()` 은 빈 능력이며 그것이 안전한 방향이다.
+    #     그럴듯한 값을 채우면 **선언하지 않은 권한이 선언된 것으로** 남고 이후 판정의 근거가 된다.
+    #   ⚠️ 정적 인증 검사(`nodes/utils/platform_auth_checker.py`)는 게시를 막지 않고 결과를
+    #     함께 싣는다 — 이 시점에 막으면 이미 만들어진 산출물이 사라지고, 그러면 다음 사람은
+    #     검사를 끄는 쪽을 택한다. 차단은 전달(CL-1) 단계에서 한다.
+    try:
+        from core import app_manifest
+        _declared = (s.get("app_manifest") or template_data.get("app_manifest") or {})
+        release["manifest"] = app_manifest.snapshot(_declared)
+    except Exception as e:
+        print(f"⚠️ [CL-0] Manifest 생성 실패(릴리스는 계속 게시): {e}")
+        release["manifest"] = {"manifest": None, "fingerprint": "", "valid": False,
+                               "errors": [f"생성 실패: {e}"]}
+    try:
+        from nodes.utils.platform_auth_checker import scan_paths
+        _scan = scan_paths([os.path.join("projects", project_id)])
+        release["platform_auth_scan"] = {
+            "ok": _scan["ok"], "summary": _scan["summary"],
+            # 근거 줄을 그대로 싣는다 — 개발자가 반박할 수 있어야 판정이 신뢰받는다.
+            "blocking": _scan["blocking"][:20], "warnings": _scan["warnings"][:20],
+        }
+        if not _scan["ok"]:
+            print(f"⚠️ [CL-0] 생성 앱에 자체 인증 신호 {_scan['summary']['blocking']}건 — "
+                  f"전달(CL-1) 단계에서 차단된다: {release_id}")
+    except Exception as e:
+        print(f"⚠️ [CL-0] 자체 인증 정적 검사 실패(릴리스는 계속 게시): {e}")
+        release["platform_auth_scan"] = {"ok": None, "error": str(e)}
+
     rel_dir = library_paths.release_dir(release_id)
     os.makedirs(rel_dir, exist_ok=True)
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:

@@ -280,6 +280,23 @@ def test_full_flow_consultation_to_release(stack, monkeypatch):
         saved = json.load(f)
     assert saved["owner_dept_id"] == "hq" and saved["visibility"] == "dept"
 
+    # ── 8-b) [CL-0] App-in-App Manifest 가 릴리스에 **실제로** 박혔는가
+    #   ★ 이 릴리스는 나중에 개인에게 전달되고(CL-1), 수신자는 "이 앱이 무엇을 요구하는가"를
+    #     보고 수락한다. 선언이 릴리스에 없으면 전달 화면이 보여줄 것이 없고 "그냥 수락"이 된다.
+    #   ⚠️ 모듈 단위 테스트(`tests/test_app_manifest.py`)는 Manifest 자체를 검증하지만,
+    #     **게시 경로가 그것을 부르는지**는 검증하지 못한다 — 오늘 아침 목록 API 에서 겪은
+    #     "판정 함수를 만들어 두고 부르지 않은" 유형을 여기서 막는다.
+    man = saved.get("manifest") or {}
+    assert man.get("valid") is True, f"Manifest 가 유효하지 않다: {man.get('errors')}"
+    assert len(man.get("fingerprint") or "") == 32, "지문이 없으면 전달 시점과 비교할 수 없다"
+    assert man["manifest"]["auth_mode"] == "PLATFORM_INHERITED"
+    assert man["manifest"]["standalone_auth"] is False
+    assert {"local_login", "local_user_store", "jwt_issuer"} <= \
+        set(man["manifest"]["forbidden_features"])
+    # 자체 인증 정적 검사 결과도 함께 실린다(게시를 막지는 않는다 — 차단은 전달 단계)
+    scan = saved.get("platform_auth_scan") or {}
+    assert "ok" in scan, "정적 검사 결과가 릴리스에 없다"
+
     # ── 9) 결정 이력: 이 청사진에서 파생된 것이 전부 보이는가 (★ 다섯째 결함)
     hist = _data(c.get(f"/api/v1/ledger/events?blueprint_id={bid}"))
     types = {e["event_type"] for e in hist}

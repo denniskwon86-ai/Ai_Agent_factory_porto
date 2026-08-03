@@ -37,6 +37,53 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [CL-IMPL-23] 폐쇄루프 구현 착수 보고 (§13) — CL-0 App-in-App Manifest부터
+- 작성자 / 기록 시각: Claude Code / 2026-08-03 KST
+- 왜 지금 기록하는가: 작업서 §13 이 착수 시 보드 기록을 요구한다. 그리고 착수 전에 확인한
+  **재사용 자산의 실제 상태**를 남겨 둬야 이후 판단이 추측 위에 서지 않는다.
+- 상태: **착수** — 작업 ID `M6-UI-03C / PRODUCT-CLOSED-LOOP-20`, 담당 패키지 CL-0 → CL-5 순서
+- 확인한 기준 문서·프로토타입:
+  `docs/uiux/CLAUDE_IMPLEMENTATION_WORK_ORDER_CLOSED_LOOP_2026-08-03.md`(362행 전문) ·
+  `docs/design_app_delivery_decision_publication_loop.md`(915행) ·
+  `uiux-prototypes/closed-loop-product-samples/` · `master-concept/ADOPTION_DECISION.md`
+  (2026-07-30 Supervisor 채택) · 화면기능정의서 · UI 설계서 · 추적 매트릭스.
+- **착수 전 코드 실측 — 재사용 가능 여부**(추측이 아니라 확인한 것):
+  · `core/decision_ledger.py:168 append()` **있음** → 불변 감사에 그대로 쓴다(새로 만들지 않는다)
+  · `api/routes/factory_control.py:1168 create_release()` **있음** → Manifest snapshot 삽입 지점
+  · `core/workspace_promotion.py:134 share()` · `:468 promote()` **있음** → 개인 전달을 여기에
+    합치지 않는다(§3-1,2). 두 경로는 끝까지 분리한다
+  · ⚠️ **`core/broadcaster.py:15` 는 `clients: list[Queue]` 로 전체 브로드캐스트다 — 사용자별
+    필터가 없다.** 즉 CL-BE-05 가 경고한 "다른 사용자의 이벤트가 현재 클라이언트로 전송되는
+    구조"가 **현재 실재한다.** 이건 새 기능이 아니라 **기존 결함**이며, 폐쇄루프 이벤트를 지금
+    구조에 그대로 얹으면 앱 전달·결정 요청이 전 사용자에게 흘러간다.
+    → CL-4 로 미루지 않고, 이벤트를 처음 붙이는 시점에 필터를 함께 넣는다.
+- 실제 수정 예정 파일(CL-0 단계):
+  `core/app_manifest.py`(신규) · `nodes/utils/platform_auth_checker.py`(신규) ·
+  `api/routes/factory_control.py`(릴리스 생성 시 Manifest snapshot) ·
+  `tests/test_app_manifest.py`(신규).
+- 기존 기능 재사용 범위 / 신규 구현 범위:
+  · **재사용**: Decision Ledger append · `library_paths` 릴리스 경로 · `api/deps` 권한 판정
+    (`assert_*`·`visibility_block_reason`·`viewer_may_drill_down`) · `lib/api.ts` 인터셉터
+  · **신규**: Manifest schema·canonicalization·검증 · 자체 인증 생성 정적 게이트 ·
+    `collaboration.db`(CL-1 이후) · 협업 3개 라우터
+- 권한·DB·외부 쓰기 영향:
+  · CL-0 은 **권한 판정을 바꾸지 않는다.** 릴리스에 Manifest 를 덧붙이고 정적 검사를 추가할 뿐이다
+  · DB: CL-0 에서 신규 DB 없음. `release.json` 에 `manifest` 키가 추가된다(기존 키 불변)
+  · 외부 쓰기: 없음. 외부 캘린더·게시는 CL-2/CL-3 이며 §3-7 대로 사용자 확인 없이 쓰지 않는다
+- 첫 완료 조건과 테스트 명령:
+  릴리스 생성 시 Manifest snapshot 저장 + 생성물의 자체 로그인·비밀번호 저장·JWT 발급·자체
+  사용자 테이블 탐지. 일반 업무 화면의 사용자 입력 폼은 **오탐하지 않는다**(§6).
+  `venv\Scripts\python.exe -m pytest tests/test_app_manifest.py -q`
+- 영향·주의사항: 문서 불일치를 발견하면 UX 를 임의로 바꾸지 않고 코드 증거와 함께 이 보드에
+  기록한다(§13). 프로토타입 승인 여부는 다시 묻지 않는다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — CL-0 구현 → 자체검토 → 커밋.
+  §12 독립 검토 요청 대상 5건 중 CL-0 에 해당하는 것은 없다(스키마·권한·발간·SSE 는 CL-1 이후).
+  **Antigravity/Codex 검토 요청 예고**: `collaboration.db` 스키마와 Ledger 원자성은 CL-1 착수
+  시점에 보드로 요청한다 — 그 전에 기본 브랜치에 통합하지 않는다.
+- 교대 체크포인트: 이 항목은 **착수 보고**이며 아직 코드 변경 없음. 재개 시 첫 행동은
+  `core/app_manifest.py` 작성이다. 금지: `workspace_shares`·Promotion 에 개인 전달을 합치는 것 ·
+  네 가지 전달 유형을 한 enum 으로 만드는 것(§3).
+
 ### [CLAUDE-CLOSED-LOOP-22] 승인 폐쇄루프 UI 정식 편입·구현 인계
 - 작성자 / 기록 시각: Codex / 2026-08-03 KST
 - 왜 지금 기록하는가: Supervisor가 앱 전달·수락·의사결정·발간 클릭형 프로토타입을 승인하고, 기존 UI/UX 시안에 정식 반영한 뒤 Claude Code가 실제 제품으로 완성할 수 있도록 업무를 정리하라고 지시했다.
