@@ -710,3 +710,204 @@ async def resolve_node_agents(node_id: str, entity_mode: str = "REAL",
     except Err as e:
         _sandbox_err(e)
     return {"status": "success", "data": d}
+
+
+# ── [E3 §7.3] 경쟁사 참조 ──────────────────────────────────────────────────
+class CompetitorIn(BaseModel):
+    name_ko: str
+    evidence_ref: str                # 공개·승인된 근거 — 없으면 400
+    industry_code: str = ""
+    legal_name: str = ""
+
+
+class MetricIn(BaseModel):
+    metric_key: str
+    value: Any
+    source: str
+    published_at: str
+    as_of_date: str
+    confidence: str                  # HIGH | MEDIUM | LOW (숫자를 받지 않는다)
+    evidence_level: str              # 허용 4종만
+    unit: str = ""
+    note: str = ""
+
+
+class UnverifiableIn(BaseModel):
+    metric_key: str
+    as_of_date: str
+    note: str                        # 무엇을 찾아봤고 왜 없었는지
+
+
+def _cr():
+    from core.enterprise_context.competitor_reference import (CompetitorError,
+                                                              competitor_reference)
+    return competitor_reference, CompetitorError
+
+
+@router.get("/competitors/evidence-kinds")
+async def competitor_evidence_kinds():
+    """허용된 근거 종류와 신뢰도 단계(§7.3-1,2). 화면이 이 목록을 그대로 쓰게 낸다."""
+    from core.enterprise_context.competitor_reference import (CONFIDENCE, CONFIDENCE_KO,
+                                                              EVIDENCE_LEVELS,
+                                                              STALE_AFTER_DAYS)
+    return {"status": "success",
+            "data": {"evidence_levels": EVIDENCE_LEVELS,
+                     "confidence": {c: CONFIDENCE_KO[c] for c in CONFIDENCE},
+                     "stale_after_days": STALE_AFTER_DAYS}}
+
+
+@router.post("/competitors")
+async def create_competitor(req: CompetitorIn, p: Principal = Depends(current_principal),
+                            ctx: EnterpriseContext = Depends(enterprise_context)):
+    """경쟁사 참조 엔터티 생성. **이 경로가 유일한 문이다**(`POST /entities` 는 REAL 만 받는다)."""
+    assert_can_edit_org(p)
+    cr, Err = _cr()
+    try:
+        d = await asyncio.to_thread(cr.create_competitor, req.name_ko, req.evidence_ref,
+                                    req.industry_code, req.legal_name, ctx.tenant_id,
+                                    (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.post("/competitors/{entity_id}/metrics")
+async def record_competitor_metric(entity_id: str, req: MetricIn,
+                                   p: Principal = Depends(current_principal),
+                                   ctx: EnterpriseContext = Depends(enterprise_context)):
+    """경쟁사 지표 1건. **근거 5종이 모두 있어야 저장된다**(§7.3-2)."""
+    assert_can_edit_org(p)
+    cr, Err = _cr()
+    try:
+        d = await asyncio.to_thread(cr.record_metric, entity_id, req.metric_key, req.value,
+                                    req.source, req.published_at, req.as_of_date,
+                                    req.confidence, req.evidence_level, req.unit, req.note,
+                                    ctx.tenant_id, (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.post("/competitors/{entity_id}/unverifiable")
+async def mark_competitor_unverifiable(entity_id: str, req: UnverifiableIn,
+                                       p: Principal = Depends(current_principal),
+                                       ctx: EnterpriseContext = Depends(enterprise_context)):
+    """**확인 불가**를 명시적으로 기록한다(§7.3-3).
+
+    ★ 모른다고 말할 자리가 있어야 지어내지 않는다. 값을 넣을 칸이 하나뿐이면 결국 그럴듯한
+      숫자가 들어간다."""
+    assert_can_edit_org(p)
+    cr, Err = _cr()
+    try:
+        d = await asyncio.to_thread(cr.mark_unverifiable, entity_id, req.metric_key,
+                                    req.as_of_date, req.note, ctx.tenant_id, (p.user_id or ""))
+    except Err as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.get("/competitors/{entity_id}/metrics")
+async def list_competitor_metrics(entity_id: str, metric_key: str = "",
+                                  p: Principal = Depends(current_principal)):
+    cr, _ = _cr()
+    return {"status": "success",
+            "data": await asyncio.to_thread(cr.list_metrics, entity_id, metric_key)}
+
+
+@router.get("/competitors/{entity_id}/coverage")
+async def competitor_coverage(entity_id: str, expected_keys: str = "",
+                              p: Principal = Depends(current_principal)):
+    """무엇이 채워졌고 무엇이 비었는지. **확인 불가와 미조사를 구분해 센다** —
+    앞은 찾아봤고 없는 것, 뒤는 아직 안 본 것이다."""
+    cr, _ = _cr()
+    keys = [k.strip() for k in (expected_keys or "").split(",") if k.strip()]
+    return {"status": "success",
+            "data": await asyncio.to_thread(cr.coverage, entity_id, keys)}
+
+
+# ── [E3 ↔ M4] 계산 엔진 연결 ───────────────────────────────────────────────
+class RunIn(BaseModel):
+    scenario_id: str                 # ECM 가상 시나리오
+    assumption_set_id: str
+    snapshot_id: str
+    org_id: str                      # 엔진 쪽 조직 키
+    period: str
+    baseline_kind: str = "PLAN"      # ACTUAL | PLAN | FORECAST
+
+
+@router.post("/run-calculation")
+async def run_calculation(req: RunIn, p: Principal = Depends(current_principal),
+                          ctx: EnterpriseContext = Depends(enterprise_context)):
+    """ECM 가정 세트로 결정론적 엔진을 돌리고 결과를 등록한다.
+
+    ★ **ECM 가정 세트가 원본이다** — 엔진 가정은 여기서 파생된다. 손으로 옮기면 두 곳의 가정이
+      조용히 달라지고, 그때 비교표의 근거는 거짓이 된다.
+    ⚠️ 응답의 `warning`(반영되지 않은 가정·동인 경고)을 반드시 확인할 것 — 가정 12개를 넣고
+      9개만 반영된 결과도 정상처럼 보인다."""
+    assert_can_edit_org(p)
+    from core.enterprise_context.calc_bridge import CalcBridgeError, calc_bridge
+    from core.enterprise_context.scenario_inputs import ScenarioInputError
+    try:
+        d = await asyncio.to_thread(calc_bridge.run_and_record, req.scenario_id,
+                                    req.assumption_set_id, req.snapshot_id, req.org_id,
+                                    req.period, req.baseline_kind, (p.user_id or ""),
+                                    ctx.tenant_id)
+    except (CalcBridgeError, ScenarioInputError) as e:
+        _sandbox_err(e)
+    except Exception as e:            # 엔진 오류(기준선 없음 등)는 그대로 전달한다
+        raise HTTPException(status_code=400, detail=f"계산 실패: {e}")
+    return {"status": "success", "data": d}
+
+
+# ── [E4] 조직 트리 집계 · 경영진 보드 ──────────────────────────────────────
+class RollupIn(BaseModel):
+    node_id: str
+    values_by_node: Dict[str, Dict[str, Any]]
+    mode: str = "ACTUAL"
+    relation: str = "OPERATING_PARENT"
+
+
+class BoardIn(BaseModel):
+    node_id: str
+    series: Dict[str, Dict[str, Any]]
+    meta: Dict[str, Dict[str, Any]] = {}
+    rollups: Dict[str, Dict[str, Any]] = {}
+    competitor_entity_id: str = ""
+    internal_values: Dict[str, Any] = {}
+
+
+@router.post("/rollup")
+async def compute_rollup(req: RollupIn, p: Principal = Depends(current_principal)):
+    """조직 트리 집계. **무엇을 더했고 무엇이 빠졌는지 함께 준다.**
+
+    ⚠️ 이중 계상(부모 값 + 자식 값)은 합계에서 **제외**하고 `conflicts` 로 알린다 — 자동으로
+      한쪽을 고르지 않는다. 어느 쪽이 정본인지는 값을 넣은 사람만 안다."""
+    from core.enterprise_context.rollup import RollupError, rollup_service
+    try:
+        d = await asyncio.to_thread(rollup_service.rollup, req.node_id, req.values_by_node,
+                                    req.mode, req.relation)
+    except RollupError as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
+
+
+@router.post("/executive-board")
+async def executive_board(req: BoardIn, p: Principal = Depends(current_principal)):
+    """경영진 비교 보드 — 실제·계획·예측·가상·경쟁사를 한 화면에, **섞지 않고.**
+
+    ★ 하위 조직별 기여 내역은 경영진만 본다(사용자 결정 2026-07-30 ③). 판정은
+      `api/deps.viewer_may_drill_down()` 한 곳에서 온다 — 여기서 다시 판단하지 않는다."""
+    from api.deps import viewer_may_drill_down
+    from core.enterprise_context.executive_board import BoardError, build_board
+    comp_rows = []
+    if req.competitor_entity_id:
+        from core.enterprise_context.competitor_reference import competitor_reference
+        comp_rows = (await asyncio.to_thread(competitor_reference.compare_with_internal,
+                                             req.competitor_entity_id,
+                                             req.internal_values))["rows"]
+    try:
+        d = await asyncio.to_thread(build_board, req.node_id, req.series, req.meta,
+                                    req.rollups, viewer_may_drill_down(p), comp_rows)
+    except BoardError as e:
+        _sandbox_err(e)
+    return {"status": "success", "data": d}
