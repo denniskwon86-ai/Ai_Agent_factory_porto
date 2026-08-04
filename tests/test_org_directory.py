@@ -266,3 +266,64 @@ def test_dept_lookup_survives_unwritable_path(tmp_path, monkeypatch):
     monkeypatch.setattr(d, "_ensure_tables", lambda: False)
     assert d.list_departments() == []
     assert d.get_department("quality") is None
+
+# ── 폐지와 복구 ────────────────────────────────────────────────────────────
+def test_retired_user_disappears_from_list_but_row_remains(org):
+    """★★ 폐지는 «행 삭제»가 아니라 «비활성»이다 — 목록에서는 사라지지만 기록은 남는다."""
+    org.create_department("hq", "본사")
+    org.upsert_user("admin", "Admin", primary_dept_id="hq", is_admin=True)
+    assert any(u["user_id"] == "admin" for u in org.list_users())
+    org.delete_user("admin", actor="tester")
+    assert not any(u["user_id"] == "admin" for u in org.list_users())
+    assert org.get_user("admin")["status"] == "retired", "행 자체는 남아야 이력이 설명된다"
+
+
+def test_restore_user_brings_back_admin_rights(org):
+    """★★★ 폐지된 계정을 되살릴 수단이 **있어야 한다.**
+
+    ⚠️ 2026-08-04 실측: 플랫폼 `admin` 계정이 폐지 상태였고 `delete_user` 만 있고 되돌리는
+      함수가 없었다. 관리자 계정이 없는 상태는 조용히 지나간다 — 평소에는 아무 문제가 없다가,
+      권한을 고쳐야 하는 순간에 «고칠 수 있는 사람이 없다»는 것을 알게 된다.
+
+    ★ 다른 활성 사용자를 함께 둔다. 마지막 한 명을 폐지하면 **부트스트랩 모드**(활성 사용자
+      0명 → 전원 무제한)로 빠져서, 이 테스트가 검증하려는 것과 다른 규칙이 작동한다."""
+    org.create_department("hq", "본사")
+    org.upsert_user("admin", "Admin", primary_dept_id="hq", is_admin=True)
+    org.upsert_user("staff", "Staff", primary_dept_id="hq")   # 조직이 «가동 중»이 되도록
+    org.delete_user("admin", actor="tester")
+    assert org.resolve_scope("admin").unrestricted is False, "폐지된 관리자는 권한이 없다"
+
+    restored = org.restore_user("admin", actor="tester")
+    assert restored is not None and restored["status"] == "active"
+    assert org.resolve_scope("admin").unrestricted is True, "복구하면 권한도 함께 살아난다"
+
+
+def test_retiring_the_last_user_falls_back_to_bootstrap(org):
+    """★★ 마지막 사용자를 폐지하면 **부트스트랩**으로 돌아간다 — 잠김 방지 규칙이다.
+
+    ⚠️ 이 동작을 «폐지된 사용자가 전권을 얻는다»로 오해하기 쉽다(2026-08-04 내가 그렇게 읽고
+      잘못된 테스트를 썼다). 실제 규칙은 «활성 사용자가 0명이면 권한 강제가 의미 없다»이며,
+      그래서 **누구든** 무제한이 된다. 사용자가 한 명이라도 있으면 정상 강제된다."""
+    org.create_department("hq", "본사")
+    org.upsert_user("admin", "Admin", primary_dept_id="hq", is_admin=True)
+    org.delete_user("admin", actor="tester")
+    assert org.is_bootstrap() is True
+    assert org.resolve_scope("아무나").unrestricted is True, "폐지된 사람만이 아니라 전원이다"
+
+
+def test_restore_unknown_user_returns_none(org):
+    """★ 없는 사용자를 «복구했다»고 말하지 않는다."""
+    assert org.restore_user("nobody", actor="tester") is None
+
+
+def test_upsert_does_not_silently_revive_a_retired_user(org):
+    """★★★ 정보 갱신이 폐지를 조용히 되돌리면 «권한 회수»가 회수로 남지 않는다.
+
+    되살리는 일은 **별도의 의도적 행위**여야 한다(`restore_user`)."""
+    org.create_department("hq", "본사")
+    org.upsert_user("admin", "Admin", primary_dept_id="hq", is_admin=True)
+    org.upsert_user("staff", "Staff", primary_dept_id="hq")   # 부트스트랩으로 빠지지 않게
+    org.delete_user("admin", actor="tester")
+    org.upsert_user("admin", "Admin 2", primary_dept_id="hq", is_admin=True, actor="tester")
+    assert org.get_user("admin")["status"] == "retired", "upsert 로 부활하면 안 된다"
+    assert org.resolve_scope("admin").unrestricted is False

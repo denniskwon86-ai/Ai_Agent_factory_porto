@@ -541,6 +541,29 @@ class OrgDirectory:
                         "이후 이 계정은 미등록과 같게 처리된다", resource_type="user")
         return ok
 
+    def restore_user(self, user_id: str, actor: str = "") -> Optional[Dict[str, Any]]:
+        """폐지된 사용자를 다시 활성화한다.
+
+        ★★ **왜 필요한가**: `delete_user` 만 있고 되돌리는 수단이 없었다. 그래서 실수로(또는
+          정리 과정에서) 폐지된 계정은 **행이 남아 있는데도** 화면·목록·권한에서 완전히
+          사라진다. 2026-08-04 실측에서 플랫폼 `admin` 계정이 정확히 그 상태였고, 폐지 시점
+          기록조차 없었다(조직 감사 기록은 2026-07-30 부터 시작됐다).
+        ⚠️ `upsert_user` 로는 되살릴 수 없고, **되살려서도 안 된다.** 사용자 정보를 갱신하다가
+          폐지된 계정이 조용히 부활하면 «권한 회수»가 회수로 남지 않는다. 되살리는 일은
+          별도의 의도적 행위여야 하고, 그래서 이 함수는 감사에 «권한 복구»로 남는다."""
+        self._check_user_id(user_id)
+        with self._lock, self._connect() as conn:
+            cur = conn.execute("UPDATE users SET status='active' WHERE user_id=?", (user_id,))
+            conn.commit()
+            ok = cur.rowcount > 0
+        if not ok:
+            return None
+        self._invalidate()
+        self._audit("ORG_USER_CHANGED", user_id, actor, "사용자 복구(권한 재부여)",
+                    "폐지 상태에서 활성으로 되돌렸다 — 이 계정의 권한이 다시 살아난다",
+                    resource_type="user")
+        return self.get_user(user_id)
+
     # ── 권한 해석 ─────────────────────────────────────────────────────────
     def _ensure_tables(self):
         """스키마가 없으면 만든다.
