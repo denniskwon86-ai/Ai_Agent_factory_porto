@@ -16,7 +16,8 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from api.deps import Principal, current_principal
+from api.deps import (Principal, current_principal, governance_block_reason,
+                      visibility_block_reason)
 from core.enterprise_briefing import SECTIONS, enterprise_briefing
 from core.scope_guard import resolve_effective_scope
 
@@ -45,9 +46,24 @@ async def briefing(scope_node_id: str = "", tenant_id: str = "", entity_mode: st
 
     ⚠️ `complete=false` 면 **이 브리핑은 전부가 아니다.** `unavailable` 에 읽지 못한 소스가
       있고, 화면은 그것을 숨기지 말 것 — "위험 0건"과 "위험을 못 읽었다"는 다른 사실이다."""
+    # ★★★ [2026-08-04 실측] 익명이 이 화면에서 «데이터 계약 breached — 생산자 자산이 폐기됐다»
+    #   를 그대로 봤다. 5/10 에서 거버넌스 지표를 막았는데 브리핑이 같은 자료를 다시 모으므로
+    #   통제가 우회됐다. 모으는 쪽에서 다시 판정한다.
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
     eff = await _scope(p, scope_node_id)
     data = await asyncio.to_thread(enterprise_briefing.briefing, p.user_id, eff,
                                    tenant_id, entity_mode, p)
+    # ⚠️ 거버넌스 성격 섹션(전사 정비 상태·비용)은 **자격 있는 사람에게만** 담는다.
+    #   빈 배열로 조용히 비우지 않는다 — «문제 없음»으로 읽히면 5/10 에서 고친 오독이 되돌아온다.
+    gov = governance_block_reason(p)
+    if gov:
+        for _name in ("data_health", "cost"):
+            data.setdefault("sections", {})[_name] = {
+                "items": [], "count": 0, "withheld": True, "withheld_reason": gov,
+            }
+        data["withheld_sections"] = ["data_health", "cost"]
     return {"status": "success", "data": data,
             "permission": {"scope": eff or "(범위 필터 없음)", "actor": p.user_id}}
 
@@ -64,6 +80,14 @@ async def section(section: str, scope_node_id: str = "", tenant_id: str = "",
         raise HTTPException(status_code=400,
                             detail=f"알 수 없는 섹션입니다: {section}. "
                                    f"가능: {', '.join(SECTIONS)}")
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    # 부분 갱신 경로로 우회할 수 없게 같은 판정을 여기서도 한다.
+    if section in ("data_health", "cost"):
+        gov = governance_block_reason(p)
+        if gov:
+            raise HTTPException(status_code=403, detail=gov)
     eff = await _scope(p, scope_node_id)
 
     def _one():

@@ -516,3 +516,78 @@ def test_clearance_aware_lists_keep_their_design(monkeypatch):
         r = staff.get(path)
         assert r.status_code == 200, f"{path} 가 일반 사용자에게 403 이 됐다 — 등급 설계를 덮었다"
         assert not r.json().get("blocked_reason")
+
+
+# ── 브리핑: 요약 화면이 다른 통제를 우회했다(2026-08-04 이관 9/10 선행) ─────────────
+#
+# ★★★ 실측으로 익명이 전사 브리핑에서 본 것:
+#   · «데이터 계약 breached: dck_e0b536c20a v1 — 생산자 자산(QC 실적)이 폐기됐다»
+#   · «스킬 제안 검토 대기 18건»
+#
+# 5/10 에서 거버넌스 지표를 막았는데, 브리핑이 **같은 자료를 다시 모아** 보여 주므로 통제가
+# 우회됐다. ⚠️ 여러 소스를 모으는 화면은 각 소스의 통제를 반드시 다시 판정해야 한다 —
+# 그러지 않으면 통제는 원래 경로에만 걸리고 «요약» 경로로 새어 나간다.
+def _briefing_app(monkeypatch, *, enforced=True, user_id="", user=None, scope_kw=None):
+    import api.routes.briefing_control as bc
+    import core.org_directory as od
+    monkeypatch.setattr(od, "_org_enforce_effective", lambda: enforced)
+    monkeypatch.setattr(od.org_directory, "get_user", lambda uid: user)
+    # 브리핑 조립은 대역으로 고정한다 — 통제만 검사하고 집계 로직에 의존하지 않는다.
+    monkeypatch.setattr(bc.enterprise_briefing, "briefing", lambda *a, **k: {
+        "sections": {
+            "my_decisions": {"items": [{"title": "검토 대기"}], "count": 1},
+            "data_health": {"items": [{"title": "계약 위반 — 생산자 자산 폐기"}], "count": 1},
+            "cost": {"available": True, "cost_usd": 1.0},
+        },
+        "attention_count": 2,
+    })
+    app = FastAPI()
+    app.include_router(bc.router)
+    app.dependency_overrides[current_principal] = lambda: Principal(
+        user_id=user_id,
+        scope=AccessScope(user_id=user_id, **(scope_kw or {"unrestricted": False})))
+    return app
+
+
+@pytest.mark.parametrize("uid,user,why", [
+    ("", None, "익명"),
+    ("ghost@ls", None, "미등록"),
+    ("old@ls", {"user_id": "old@ls", "status": "retired"}, "폐지"),
+])
+def test_briefing_is_blocked_for_unentitled(monkeypatch, uid, user, why):
+    """자격 없는 요청자에게 전사 브리핑을 주지 않는다. 실측에서는 익명에게 전량이 나왔다."""
+    c = TestClient(_briefing_app(monkeypatch, user_id=uid, user=user))
+    assert c.get("/api/v1/briefing").status_code == 403, f"{why} 에게 브리핑이 열려 있다"
+    assert c.get("/api/v1/briefing/sections/data_health").status_code == 403
+
+
+def test_briefing_withholds_governance_sections_from_plain_users(monkeypatch):
+    """★★★ 일반 사용자에게 «전사 정비 상태»는 담지 않는다 — 5/10 통제를 브리핑이 우회하면 안 된다.
+
+    ⚠️ 빈 배열로 조용히 비우지 않는다. `withheld` 를 함께 실어 화면이 «문제 없음»과 «못 봤다»를
+      구분할 수 있게 한다 — 그 구분이 5/10 에서 고친 오독의 핵심이다."""
+    c = TestClient(_briefing_app(
+        monkeypatch, user_id="staff@ls", user={"user_id": "staff@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"})}))
+    body = c.get("/api/v1/briefing").json()["data"]
+    for name in ("data_health", "cost"):
+        sec = body["sections"][name]
+        assert sec.get("withheld") is True, f"{name} 섹션이 일반 사용자에게 그대로 나갔다"
+        assert sec.get("withheld_reason"), f"{name} 을 가린 이유가 없다"
+        assert not sec.get("items"), f"{name} 내용이 남아 있다"
+    # 내 일감(my_decisions)은 그대로 보여야 한다 — 통제가 업무를 막으면 통제가 꺼진다.
+    assert body["sections"]["my_decisions"]["count"] == 1
+    # 부분 갱신 경로로도 우회되지 않는다.
+    assert c.get("/api/v1/briefing/sections/data_health").status_code == 403
+    assert c.get("/api/v1/briefing/sections/my_decisions").status_code != 403
+
+
+def test_briefing_full_for_stewards(monkeypatch):
+    """★ 정비를 할 사람에게는 전량을 준다."""
+    c = TestClient(_briefing_app(
+        monkeypatch, user_id="da@ls", user={"user_id": "da@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "can_manage_standard": True,
+                  "readable_dept_ids": frozenset({"hq"})}))
+    body = c.get("/api/v1/briefing").json()["data"]
+    assert not body["sections"]["data_health"].get("withheld")
+    assert body["sections"]["data_health"]["count"] == 1

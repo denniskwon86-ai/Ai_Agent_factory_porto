@@ -39,6 +39,9 @@ export type CostSection = {
   unpriced_calls?: number;
   /** false 면 총액은 **하한**이다(단가 미등록 호출이 있음) — 완전한 총액으로 읽히면 예산 판단이 틀린다. */
   cost_complete?: boolean;
+  /** 권한 때문에 담지 않았다. «비용 0» 과 구분해야 한다. */
+  withheld?: boolean;
+  withheld_reason?: string;
 };
 
 export type SectionData = {
@@ -46,6 +49,11 @@ export type SectionData = {
   count: number;
   unavailable?: { source: string; error: string }[];
   complete?: boolean;
+  /** ★★ 서버가 **권한 때문에 담지 않은** 섹션. 0건과 절대 같게 쓰지 않는다 —
+   *  «해당 항목이 없습니다» 로 그리면 «문제 없음» 으로 읽히고, 그게 5/10 에서 고친 오독이다.
+   *  (2026-08-04: 익명이 브리핑으로 거버넌스 정보를 그대로 보던 구멍을 막으면서 생긴 필드) */
+  withheld?: boolean;
+  withheld_reason?: string;
 };
 
 export type Briefing = {
@@ -60,6 +68,8 @@ export type Briefing = {
   unavailable: { section: string; source: string; error: string }[];
   complete: boolean;
   note: string;
+  /** 권한 때문에 담지 않은 섹션 이름들. 화면은 이것을 **숨기지 않는다**. */
+  withheld_sections?: string[];
 };
 
 async function get<T>(path: string): Promise<{ data: T; permission?: any }> {

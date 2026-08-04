@@ -158,7 +158,9 @@
 .afs-scope .module-intro h1 { margin: 8px 0 9px; color: #fff; font-size: 20px; line-height: 1.35; letter-spacing: -.04em; }
 .afs-scope .module-intro p { margin: 0; color: var(--rail-text-muted); font-size: 12px; line-height: 1.58; }
 
-.afs-scope .module-menu { display: grid; padding: 10px; gap: 2px; }
+/* ⚠️ `align-content: start` — 항목이 적으면 그리드가 남은 높이를 나눠 가져 **버튼이 세로로
+ * 늘어난다**(항목 1개인 화면에서 실측: 레일 하나가 400px 높이가 됐다). 메뉴는 위에서부터 쌓인다. */
+.afs-scope .module-menu { display: grid; align-content: start; padding: 10px; gap: 2px; }
 .afs-scope .module-menu button {
   display: grid; grid-template-columns: 31px 1fr auto; gap: 9px; align-items: center;
   width: 100%; padding: 12px 9px; border: 1px solid transparent; border-radius: 7px;
@@ -681,6 +683,93 @@
   font: 12px/1.55 Consolas, "Noto Sans Mono CJK KR", monospace;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+
+/* ── [이관 7/10] 런처용 유틸리티 ─────────────────────────────────────────────
+ *
+ * ★★ 런처(App.tsx)는 **모달이 아니라 페이지 자체**다. 그래서 3열 셸을 씌우지 않고, 기존 마크업의
+ *   Tailwind 다크 클래스를 **의미 토큰 유틸리티**로 바꾼다.
+ *
+ * ⚠️ 왜 전역 반전(`@theme` 숫자 스케일 뒤집기)을 쓰지 않는가 — Codex 가 `51982c898` 에서 철회한
+ *   이유가 그대로 유효하다: 숫자 스케일은 «명도»만 말하고 «의미»를 말하지 않는다. `bg-emerald-600`
+ *   이 어떤 자리에서는 성공이고 어떤 자리에서는 생성 버튼인데, 기계적으로 뒤집으면 둘이 같은 색이
+ *   되어 화면이 1차 행동을 구분하지 못한다.
+ *   → 대신 **한 클래스씩 의미를 정해** 아래 유틸리티로 옮긴다. 옮기는 사람이 그 자리의 뜻을
+ *     판단하므로, 성공색과 행동색이 섞이지 않는다.
+ *
+ * ⚠️ `!important` 를 쓰지 않는다. Tailwind 클래스를 **지우고** 이 클래스를 넣는다 —
+ *   두 규칙이 겹친 채로 우선순위 싸움을 시키면 나중에 어느 쪽이 이겼는지 아무도 모른다. */
+.afs-scope.afs-page,
+.afs-scope .afs-bg-page { background: var(--surface-page); }
+.afs-scope .afs-bg-card { background: var(--surface-card); }
+.afs-scope .afs-bg-raised { background: var(--surface-raised); }
+.afs-scope .afs-bg-sunken { background: var(--surface-sunken); }
+
+.afs-scope .afs-ink { color: var(--surface-text); }
+.afs-scope .afs-muted { color: var(--surface-text-muted); }
+.afs-scope .afs-faint { color: var(--surface-text-faint); }
+
+.afs-scope .afs-border { border-color: var(--surface-border); }
+.afs-scope .afs-border-strong { border-color: var(--surface-border-strong); }
+.afs-scope .afs-hover-raise:hover { background: var(--surface-raised); }
+.afs-scope .afs-hover-border:hover { border-color: var(--surface-border-strong); }
+
+/* 1차 행동 — 구조색(Navy). 상태색과 섞지 않는다. */
+.afs-scope .afs-action {
+  color: var(--action-primary-fg); background: var(--action-primary-bg);
+  border-color: var(--action-primary-bg);
+}
+.afs-scope .afs-action:hover:not(:disabled) { background: var(--action-primary-hover); }
+.afs-scope .afs-action-fg { color: var(--action-primary-bg); }
+.afs-scope .afs-action-border { border-color: var(--action-primary-bg); }
+
+/* 메가 프로젝트 구분색 — «일반과 다른 종류»라는 뜻이 있어 유지한다(장식이 아니다). */
+.afs-scope .afs-mega { color: #fff; background: #5b4bb0; border-color: #5b4bb0; }
+.afs-scope .afs-mega:hover:not(:disabled) { background: #4b3d99; }
+.afs-scope .afs-mega-fg { color: #4b3d99; }
+.afs-scope .afs-mega-border { border-color: #b9aee8; }
+.afs-scope .afs-mega-bg { background: #f3f0fc; }
+
+/* 상태색 — 행동색과 구분한다. */
+.afs-scope .afs-danger-fg { color: var(--state-error-fg); }
+.afs-scope .afs-danger-border { border-color: #e8c4cc; }
+.afs-scope .afs-danger-bg { background: var(--state-error-bg); }
+.afs-scope .afs-success-fg { color: var(--state-success-fg); }
+.afs-scope .afs-success-border { border-color: #a9dcc6; }
+.afs-scope .afs-warn-fg { color: var(--state-warn-fg); }
+.afs-scope .afs-warn-bg { background: var(--state-warn-bg); }
+.afs-scope .afs-warn-border { border-color: #eddcc0; }
+.afs-scope .afs-info-fg { color: var(--state-info-fg); }
+.afs-scope .afs-info-bg { background: var(--state-info-bg); }
+.afs-scope .afs-info-border { border-color: #b9d8de; }
+.afs-scope .afs-success-bg { background: var(--state-success-bg); }
+
+/* 런처 상단 바 — 허브 모달의 바와 같은 구조색을 쓴다(같은 제품이라는 신호). */
+.afs-scope .afs-topbar {
+  color: #fff;
+  background: linear-gradient(90deg, var(--action-primary-bg), var(--bar-bg-to));
+  border-bottom: 1px solid var(--rail-border);
+}
+/* ⚠️ 상단 바는 **구조색(남색) 위**이다. 페이지 본문용 유틸리티가 그대로 들어오면 어두운 글자가
+ *   어두운 바에 얹혀 **글자가 사라진다**(실측: 제목 «Private AI Cockpit» 이 보이지 않았다).
+ *   그래서 바 안에서는 같은 유틸리티가 «바 위에서의 뜻»으로 다시 해석된다. */
+.afs-scope .afs-topbar .afs-ink { color: #fff; }
+.afs-scope .afs-topbar .afs-muted,
+.afs-scope .afs-topbar .afs-faint { color: var(--bar-fg-muted); }
+.afs-scope .afs-topbar .afs-bg-page,
+.afs-scope .afs-topbar .afs-bg-card,
+.afs-scope .afs-topbar .afs-bg-raised,
+.afs-scope .afs-topbar .afs-bg-sunken { background: #ffffff1a; }
+.afs-scope .afs-topbar .afs-hover-raise:hover { background: #ffffff2e; }
+.afs-scope .afs-topbar .afs-border,
+.afs-scope .afs-topbar .afs-border-strong { border-color: #ffffff33; }
+.afs-scope .afs-topbar .afs-hover-border:hover { border-color: #ffffff59; }
+/* 바 위의 행동색은 본문의 Navy 로는 보이지 않는다 — 밝은 쪽으로 뒤집는다. */
+.afs-scope .afs-topbar .afs-action-fg { color: #9ec9ff; }
+.afs-scope .afs-topbar .afs-action-border { border-color: #6f9fe0; }
+.afs-scope .afs-topbar .afs-action {
+  color: #0a1e5a; background: #dbe7ff; border-color: #dbe7ff;
+}
+.afs-scope .afs-topbar .afs-action:hover:not(:disabled) { background: #c7d9ff; }
 
 /* ── 반응형(승인 시안 그대로) ──────────────────────────────────────────────── */
 @media (max-width: 1450px) {
