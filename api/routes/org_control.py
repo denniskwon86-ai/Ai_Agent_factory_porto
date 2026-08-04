@@ -89,6 +89,8 @@ async def whoami(p: Principal = Depends(current_principal)):
       이 값으로 화면이 "익명으로 보고 있습니다"를 말할 수 있어야 강제를 켤 수 있다."""
     data = p.scope.to_dict()
     identified = bool((p.user_id or "").strip())
+    # ⚠️ try 안에서만 만들면 조회가 실패했을 때 아래 capability 계산이 NameError 로 죽는다.
+    _u = None
     try:
         from core.org_directory import _org_enforce_effective, org_directory
         enforced = _org_enforce_effective()
@@ -111,6 +113,20 @@ async def whoami(p: Principal = Depends(current_principal)):
         "registered": registered, "org_enforced": bool(enforced),
         "bootstrap": bool(bootstrap), "retired": bool(retired),
     })
+    # ★★ [D-017] 관리자 capability 를 **여기서 함께 준다.** 3단계 강제(① 메뉴 가시성
+    #   ② Route Guard ③ 서버 재검사)가 전부 같은 표를 봐야 한다 — 화면이 자기 규칙으로
+    #   메뉴를 그리면 서버가 막는 것과 화면이 숨기는 것이 서서히 갈라지고, 갈라진 그 틈이
+    #   «보이는데 안 되는» 또는 «안 보이는데 되는» 상태가 된다.
+    # ⚠️ 이 값은 **편의용**이다. 최종 권한 진실원본은 서버 API 재검사이며, 화면이 이 값을
+    #   조작해도 서버 판정은 바뀌지 않는다(D-017 «페이지 분리는 보안 자체가 아니다»).
+    try:
+        from core.admin_capability import resolve as _resolve_caps
+        _caps = _resolve_caps(p.scope, _u if identified else None)
+        data["admin"] = _caps.to_dict()
+    except Exception as e:                                       # pragma: no cover
+        # 권한 계산 실패를 «권한 있음» 으로 두지 않는다 — 실패는 닫히는 쪽이어야 한다.
+        data["admin"] = {"capabilities": [], "any_admin": False, "visible_tabs": [],
+                         "bootstrap": False, "resolve_error": str(e)}
     if enforced and not identified:
         data["access_note"] = ("**익명으로 보고 있습니다.** 조직 권한 강제가 켜져 있어 목록이 "
                                "비어 보입니다 — 자료가 없는 것이 아닙니다. 우측 상단에서 "

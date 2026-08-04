@@ -37,6 +37,96 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [ADMIN-CAP-40] D-017 P0 — 관리자 capability와 서버 권한 계약 확정
+- 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
+- 왜 지금 기록하는가: `[D-017]` 확정 기록에 «다음 구현 단계에서는 먼저 관리자 capability와 서버 권한 계약을 확정한 뒤 화면을 이관한다» 고 남겼다. 그 선행 단계를 구현했다. **화면은 아직 만들지 않았다** — 계약이 먼저다.
+- 상태: **완료(계약·회귀 테스트) · 관리자 센터 화면 미착수**
+- 구현:
+  - 신규 `core/admin_capability.py` — 설계 §4.1 권한 코드 15개 + 관리자 센터 탭 7개를 **한 곳에서** 정의한다. §4.2 역할 표(viewer/member/manager/경영진/AI 관리자/데이터 관리자/플랫폼 관리자)를 코드로 옮겼다. ★ 이 표를 여러 곳에 흩지 않는다 — 흩는 순간 «부서 manager 가 전사 공개를 할 수 있는가» 의 답이 파일마다 달라진다.
+  - `AccessScope` 확장(설계 §4.2 요구): `is_ai_admin` · `can_manage_agents` · `manageable_dept_ids` · `manageable_scope_nodes`. **확정 결과로** 남긴다 — 화면·라우트가 각자 `is_admin` 을 보고 판단하면 세 곳이 서서히 갈라진다.
+  - `users.is_ai_admin` 컬럼 + 기존 DB 마이그레이션. ⚠️ 기본값 0 이라 **마이그레이션이 아무에게도 권한을 주지 않는다** — 권한을 주는 마이그레이션은 조용히 전권을 만드는 가장 흔한 경로다.
+  - `GET /api/v1/org/me` 가 `admin` 블록(capabilities·visible_tabs·manageable_dept_ids·bootstrap)을 함께 반환한다. 3단계 강제(① 메뉴 가시성 ② Route Guard ③ 서버 재검사)가 **같은 표**를 보게 하기 위함이다. 권한 계산이 실패하면 «권한 없음» 으로 떨어진다(fail-closed).
+  - 서버 재검사 헬퍼 `require()` / `require_dept()`. `require()` 는 여러 개를 넘기면 **전부** 요구한다 — `any` 를 기본으로 두면 언젠가 넓은 쪽이 우연히 통과한다.
+- 설계 판단 두 가지:
+  - **`is_data_admin` 을 AI 관리자로 대신 쓰지 않았다**(설계 §4.2 명시). 데이터 표준 승인과 AI 행동·비용 정책 승인은 책임이 다르고, 묶으면 «이 사람이 왜 모델 정책을 바꿀 수 있었나» 에 답할 수 없다.
+  - **읽기 범위와 관리 범위를 분리했다.** 경영진은 전 부서를 읽지만 관리하지 않는다 — 두 집합을 같게 두면 열람 권한이 곧 편집 권한이 된다.
+- 만들다 잡은 결함: `resolve()` 가 부서 상속을 **다시 계산**하면서 전역 싱글턴 `org_directory` 를 붙잡았다. 다른 저장소를 보는 상황에서 하위 부서가 관리 범위에서 통째로 빠졌다(테스트가 잡았다). → 계산 지점을 `resolve_scope` 하나로 합치고 싱글턴 참조를 제거했다. 권한 계산이 «지금 어느 저장소를 보고 있는가» 에 의존하면, 그 의존이 보이지 않는 곳에서 범위를 좁히거나 넓힌다.
+- 검증:
+  - 신규 `tests/test_admin_capability.py` **18건** 통과. 고정한 계약: 부트스트랩 전면 허용을 숨기지 않음 · 경영진은 읽되 관리 못함 · manager 는 자기 부서와 하위만(형제·상위 제외) · member 는 publish 불가 · 대상 부서 미지정을 «전부 허용» 으로 읽지 않음 · 데이터 관리자에게 모델 정책 없음 · AI 관리자에게 데이터 탭 없음 · `require` 는 전부 요구 · 등록되지 않은 권한 코드 거부 · Route 표와 capability 표 일치 · **마이그레이션이 기존 사용자에게 권한을 주지 않음**.
+  - `pytest tests/` **1,795 passed / exit 0**(직전 1,773 + 22).
+  - 실데이터 확인: 플랫폼 관리자 2명 7탭 / 생산총괄(`hikwon_4`) 3탭·관리범위 `production`+하위 2개(**상속 동작**) / 라인장(`hikwon_1`) 2탭·자기 부서만 / viewer 2명 0탭·`any_admin=False`.
+  - `GET /api/v1/org/me` 인프로세스 실측: 관리자 7탭 · 부서장 3탭 · viewer 0탭 · **익명 0탭**(fail-closed).
+- 영향·주의사항: `users` 표에 컬럼 1개 추가(기본 0, 하위호환). `AccessScope` 에 필드 4개 추가(기본값 있어 기존 호출 불변). `/org/me` 응답에 `admin` 키 추가(기존 키 불변). ⚠️ **아직 아무 라우트도 `require()` 를 호출하지 않는다** — 계약만 세운 상태이고, 설계 §9 P0 의 «기존 Agent/Template/Recommend API 에 권한 검사 추가» 는 다음 작업이다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — 설계 §9 P0 순서대로 ① 기존 Agent/Template/Recommend API 에 `require()` 적용 ② 스킬 파일 경로 검증 ③ 전역 reset·default 를 플랫폼 관리자 전용으로 ④ Agent Pack 목록·상세·resolve 범위 필터와 404 은폐 ⑤ 권한 강제 모드의 미바인딩 fallback 차단 ⑥ 감사 이벤트·회귀 테스트. 그 뒤 관리자 센터 화면(§8.2 URL 표)을 이관 순서에 넣는다. **Codex** — 관리자 센터 화면은 계약이 선 뒤 시각 게이트 대상이다. **Supervisor** — 누구에게 `is_ai_admin` 을 부여할지 결정이 필요하다(지금은 **아무도 없다** — 기본값 0 이며, 그것이 안전한 출발점이다).
+- 교대 체크포인트: 변경 = `core/admin_capability.py`(신규) · `core/org_directory.py`(AccessScope 4필드·컬럼·마이그레이션·resolve_scope) · `api/routes/org_control.py`(/me 에 admin 블록) · `tests/test_admin_capability.py`(신규 18건). 미변경 = 화면·다른 라우트·DB 데이터(컬럼만 추가). 검증 = 1,795 passed · 실데이터 6계정 · /org/me 4케이스. 재개 지점 = 설계 §9 P0-1. 금지 범위 = `require()` 를 `any` 로 완화하는 것, `is_data_admin` 으로 AI 권한을 대신하는 것, 읽기 범위를 관리 범위로 흘리는 것, 마이그레이션으로 권한을 부여하는 것.
+
+### [UX-ADMIN-CENTER-39] 조직·사용자 권한 모달 폐기 방향 — 독립 관리자 센터로 승격
+- 작성자 / 기록 시각: Codex / 2026-08-04 18:14 KST
+- 왜 지금 기록하는가: Supervisor가 권한 설정 자체도 접근 권한으로 통제하려면 별도 페이지가 필요하다고 지적했다. 현재 `OrgChartPanel`은 일반 화면 위에 뜨는 모달이고 조직·사용자·역할·관리자 플래그가 한 컴포넌트에 섞여 있어 엔터프라이즈 관리 경계를 표현하기 어렵다.
+- 상태: **Supervisor 최종 승인(2026-08-04 18:17 KST) · 정보구조 확정 · 실제 React 이관 대기**
+- 결정 및 근거:
+  1. 기존 `조직·권한` 모달을 최종 화면으로 유지하지 않고 제품 최상위 독립 **관리자 센터**로 승격한다. 관리자 센터는 회사·조직, 사용자·역할, 기능·프로그램 권한, Agent 접근 권한, 데이터·MCP 권한, SSO·보안, 감사 이력을 탭/라우트로 분리한다.
+  2. Agent Governance Center는 별도 화면으로 유지한다. 관리자 센터가 `누가 생성·승인·실행할 수 있는가`를 결정하고, Agent Governance Center가 권한 범위 안에서 실제 Agent/Skill/Workflow를 운영한다.
+  3. 화면 진입 제어만으로 완료하지 않는다. 글로벌 메뉴 가시성 → Route Guard → 관리자 API 서버 재검사의 3중 계약을 적용한다. 권한 없는 타 조직 상세는 404로 은폐한다.
+  4. 상세 URL·역할별 탭·회사 설정과 개인 설정 분리는 `docs/design_agent_governance_scope_permissions_2026-08-04.md` §8을 구현 기준으로 사용한다.
+  5. Supervisor는 2026-08-04 분석안 검토 후 **동일 제품 안의 독립 전체화면 관리자 센터** 방식을 승인했다. 기존 모달 확장안과 별도 배포형 관리자 애플리케이션은 현 단계에서 채택하지 않는다.
+- 영향·주의사항: 별도 페이지를 만든다는 이유로 모든 관리자 기능을 시스템 관리자 한 명에게만 몰지 않는다. 조직 관리자·AI 관리자·데이터 관리자·감사 담당자의 capability와 관리 범위를 분리한다. 기존 UI 이관 중 `OrgChartPanel.tsx`를 부분 미화해 최종 완료 처리하지 않으며, 현재 SPA에 Router가 없으면 full-screen top-level view로 먼저 이행하되 모달 구조를 최종안으로 남기지 않는다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code**는 조직·권한 화면 이관 Wave에서 Admin Center shell과 서버 capability 계약을 먼저 구현하고 기존 `OrgChartPanel` 기능을 탭별로 옮긴다. **Codex**는 관리자/조직 manager/AI admin/DA/감사/일반 사용자 6개 역할의 화면 가시성·직접 진입·오류 상태를 설계·래스터 감사한다. Agent 권한 탭은 `[SEC-AGENT-GOV-38]` P0 서버 봉합 후 실제 API와 연결한다.
+- 교대 체크포인트: 변경 = Agent Governance 상세 설계 §8과 본 보드 기록. 미변경 = `OrgChartPanel.tsx`, App 내비게이션, API, DB. 검증 = 설계 정합성 확인만 수행, 제품 테스트 미수행. 커밋/푸시 = 미수행. 재개 첫 행동 = 구현자가 Admin Center 변경 예정 파일과 기존 UI 이관 충돌 여부를 기록. 금지 범위 = 모달 미화만으로 완료, 프론트 Route Guard만으로 권한 완료, 회사 공통 설정과 개인 설정 혼합, 관리자 권한을 단일 boolean 하나로 단순화.
+
+### [SEC-AGENT-GOV-38] 에이전트 생성기 권한 누락 — P0 봉합 후 조직 범위형 Agent Governance로 전환
+- 작성자 / 기록 시각: Codex / 2026-08-04 18:07 KST
+- 왜 지금 기록하는가: Supervisor가 조직·회사 권한 기능을 추가했지만 에이전트 생성기에는 반영되지 않았음을 발견했다. 코드 대조 결과 화면 표시만의 문제가 아니라 Agent/Template/Skill API, 전역 파일 저장소, 독립 프로젝트 실행 경로까지 조직 문맥이 끊긴 P0 권한·무결성 결함으로 확인했다.
+- 상태: **결함 확정 · 상세 설계 완료 · 현재 UI 이관과 충돌하지 않는 P0 백엔드 봉합 착수 필요**
+- 결정 및 근거:
+  1. `api/routes/factory_control.py:1666-1952`의 Agent 조회·저장·초기화, AI Pipeline/Skill 추천, Template 목록·복사·저장·삭제 API가 `current_principal`·`enterprise_context`를 받지 않는다. `core/agent_registry.py:140-309`는 전 사용자·조직이 하나의 `agents_registry.json`과 `templates/*.json`을 공유한다.
+  2. `POST /ai-recommend/skill`은 권한·ID 안전 검증·승인 과정 없이 공용 `skills/` 파일을 직접 쓴다. 일반 권한 누락보다 우선해서 막아야 할 P0 무결성 경로다.
+  3. 기존 `Agent Pack`은 에이전트 ID 목록의 조직 배치 기능일 뿐 정의·스킬·템플릿의 생성·수정·승인 권한을 대신하지 않는다. 현재 Mega 프로젝트 부서 설정에는 일부 연결됐지만 독립 프로젝트는 전역 템플릿 존재 여부만 확인한다. Pack 목록·resolve의 tenant/조직 필터와 타 조직 노드 접근 검사도 부족하다.
+  4. 최종 모델은 정의·실행 권한 분리, `미지정≠공용`, 시스템 기본 불변/복사 확장, 조직 공유 승인, REAL/VIRTUAL 데이터 권한 분리, 버전 스냅샷, 실행 도구 권한 재검사다. 상세 스키마·API·UI·테스트·이행 순서는 `docs/design_agent_governance_scope_permissions_2026-08-04.md`를 단일 구현 기준으로 사용한다.
+- 영향·주의사항: 현재 Claude Code가 수행 중인 UI 화면군 이관과 같은 `AgentMasterPanel.tsx`·`useFactoryStore.ts`를 즉시 동시 수정하지 않는다. 그러나 P0 서버 봉합은 화면 이관을 기다릴 이유가 없으며, 기존 익명/일반 사용자가 전역 Agent 자산을 수정하던 동작을 호환성으로 보존하지 않는다. `is_data_admin`을 AI 관리자로 재사용하지 말고 `is_ai_admin/can_manage_agents`를 분리한다. 권한 강제 모드에서 Pack 미바인딩·해석 실패를 `domain_agents` 전면 통과로 폴백하지 않는다.
+- 다음 행동 / 담당 / 착수 조건:
+  1. **Claude Code / 즉시 가능**: 기존 Agent·Template·Recommend API에 principal/context와 변경 권한을 붙이고, 안전 ID 검증·공용 스킬 직접 덮어쓰기 차단·감사 이벤트·회귀 테스트를 구현한다. 이 단계는 DB 모델 전환 전 P0 봉합이다.
+  2. **Claude Code / P0 후**: 범위·버전형 Agent/Skill/Workflow 저장소와 기존 파일 adapter, 독립·Mega 공통 resolver, 실행 스냅샷·도구 권한 교집합을 구현한다.
+  3. **Codex / UI Wave 3 Agent 통제소 착수 시**: Agent Governance Center의 기본 제공/전사 공용/우리 조직/내 초안/승인 대기 탭, 현재 조직 문맥, 권한 사유, 승인 흐름을 설계·감사한다.
+  4. **Antigravity / 병행 가능**: 엔터프라이즈 Agent Governance와 tool/data permission 분류를 교차검증한다.
+- 교대 체크포인트: 변경 = 신규 상세 설계 문서와 본 보드 기록만. 미변경 = Agent/Template/Skill API·DB·프론트 제품 코드·실데이터. 검증 = 코드 정적 추적 완료, 테스트 미수행. 커밋/푸시 = 미수행. 재개 첫 행동 = P0 작업자가 보드에 변경 예정 파일과 현재 UI 이관 충돌 여부를 기록한 뒤 API 권한 테스트부터 작성. 금지 범위 = UI 버튼 숨김만으로 완료 선언, 모든 에이전트 자산을 전사 공용으로 간주, 기본 파일 직접 수정 유지, 타 조직 상세 403/409로 존재 노출, 독립 프로젝트 권한 검증 누락.
+
+### [UX-SW-FACTORY-ADAPTIVE-37] Concept E 최종 채택 · Adaptive Production Studio 구현 기준 확정
+- 작성자 / 기록 시각: Codex / 2026-08-04 16:00 KST
+- 왜 지금 기록하는가: Supervisor가 Concept D의 높은 정보 밀도와 기술 통제 콘솔 인상을 재검토한 뒤, 새로 제작·실측한 Concept E를 실제 SW 생성기 반영 기준으로 승인했다. 현재 Claude Code가 데이터·권한 화면을 순차 이관하고 있으므로 같은 `App.tsx`/Factory 영역을 동시 수정하지 않고 최종 기준과 이식 계약을 먼저 고정한다.
+- 상태: **Supervisor 최종 채택 · 프로토타입 완료 · React 실제 이식은 UI Wave 4 착수 대기**
+- 결정 및 근거:
+  1. 실제 이식 기준은 `uiux-prototypes/sw-factory-concepts/adaptive-production-studio/`의 E안이다. D는 투명성 비교 기준으로 보존하지만 영구 우측 상태 열과 넓은 다크 면적은 이식하지 않는다.
+  2. 전체 Production Stage Map과 WBS Spine은 상시 노출한다. 중앙은 요구 확인·RFP·기획·아키텍처·WBS·구현·검증·Release 단계별 Adaptive Canvas로 전환한다.
+  3. 구현 단계 기본 산출물은 코드가 아니라 **실행 가능한 App-in-App SW**다. `실행 → 사용자 검토 → 구현 상세` 순서이며 코드·API·테스트·Diff는 전문 검토용이다. 보고서는 문서 Viewer로 표시한다.
+  4. 사용자 결정과 Jarvis는 중앙 하단 단일 Dock으로 통합한다. 결정 0건이면 결정 행을 접는다. 수행 이유·다음 자동 전환·Agent 이벤트는 요청형 `근거·상태 Inspector`로 제공한다.
+  5. 상세 React 매핑·ViewModel·상태·이행 게이트는 `docs/uiux/SW_FACTORY_ADAPTIVE_PRODUCTION_STUDIO_IMPLEMENTATION_SPEC_2026-08-04.md`에 확정했다.
+- 검증: 1280×720·1440×900 가로 넘침 0, 생성 앱과 Decision/Jarvis Dock 겹침 0, 요구 확인↔구현 및 실행↔검토↔구현 상세 전환, Inspector 열기/닫기, 콘솔 오류 0을 인앱 브라우저에서 확인했다.
+- 영향·주의사항: 이번 기록은 최종 디자인·구현 기준 확정이며 실제 `frontend/src` Factory 코드를 바꾼 것이 아니다. 현재 진행 중인 데이터·권한 화면 이관을 건너뛰거나 Claude Code의 공통 셸 파일을 동시에 수정하지 않는다. 예시 회사·프로젝트·수치는 디자인 샘플이며 제품 데이터가 아니다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code**는 UI 이관 Wave 4 진입 시 신규 `AdaptiveProductionStudio`를 기존 3패널과 병행 카나리로 구현하고 같은 API/SSE 상태를 비교한다. **Codex**는 ① 요구 확인 ② 구현/실행 ③ 결정 있음/없음 ④ 오류/오프라인 ⑤ 복구 실패를 1280/1440 래스터와 기능 보존 기준으로 감사한다. 착수 조건은 현재 데이터·권한 이관의 활성 파일 작업이 종료되고 Factory 변경 범위가 보드에 선언되는 것이다.
+- **Claude Code 구현 지시 — 선택사항 아님**:
+  1. Wave 4의 실제 Factory React 화면은 Concept E를 기준으로 구현한다. Concept A~D 또는 기존 3패널을 최종안으로 다시 선택하지 않는다.
+  2. 구현 시작 전 본 항목에 `작성자=Claude Code`, 착수 시각, 변경 예정 파일, 현재 활성 작업과의 충돌 여부를 기록한다.
+  3. `docs/uiux/SW_FACTORY_ADAPTIVE_PRODUCTION_STUDIO_IMPLEMENTATION_SPEC_2026-08-04.md`의 컴포넌트 경계와 완료 게이트를 작업 체크리스트로 사용한다.
+  4. 기존 Factory API·SSE·HOTL·복구·Release 기능은 삭제하지 않고 병행 카나리로 이식한다. 시각 구현을 이유로 기능을 축약하거나 Mock 데이터로 완료 처리하지 않는다.
+  5. 1280×720·1440×900 실제 데이터 캡처, 기능 회귀, 오류·오프라인·결정 0건 상태를 제출한 뒤 Codex 시각 감사와 Supervisor 최종 확인을 받는다.
+  6. 구현 중 명세와 충돌하는 기술 제약을 발견하면 임의로 D/기존 UI로 회귀하지 말고 보드에 제약·대안·영향을 기록한 뒤 조정한다.
+- 교대 체크포인트: 변경 = Concept E 프로토타입·비교 갤러리·Factory 구현 명세·UI 설계/화면정의/추적성 문서·본 보드 기록. 미변경 = 실제 Factory React/API/DB. 검증 = 2개 해상도·상호작용·콘솔 오류 0. 커밋/푸시 = 미수행. 재개 첫 행동 = Wave 4 착수 선언 후 현 Factory 상태/API 매핑 확인. 금지 범위 = D의 영구 우측 열 복원, 코드 기본 산출물화, Jarvis 중복 배치, WBS/전체 단계 숨김, 기존 3패널 선삭제.
+
+### [UIUX-CORRECTION-36] 다크 회귀 정정 — 제품 공통 라이트 셸 복구
+- 작성자 / 기록 시각: Codex / 2026-08-04 11:56 KST
+- 왜 지금 기록하는가: Supervisor가 실제 제품 화면이 다시 다크 테마로 돌아간 것을 지적하고 승인 방향으로 즉시 정정하라고 지시했다. 조사 결과 `51982c898`에서 전역 숫자 반전을 철회하면서 `App.tsx` 최상위가 `bg-gray-950`으로 남아, 신규 `.afs-scope` 화면만 라이트인 혼합 상태가 원인이었다.
+- 상태: **제품 공통 셸 코드 정정 완료 · 1280×720/1440×900 런처 래스터 확인 · 추가 기능화면 순차 감사 진행**
+- 결정 및 근거:
+  1. 제품 기본 업무 표면은 라이트로 확정한다. LS Navy는 상단 구조 바·역할 레일·AI 레일이고, 전체 다크 테마의 근거가 아니다. 이 계약을 `uiux-prototypes/master-concept/ADOPTION_DECISION.md`에 박제했다.
+  2. 전역 `@theme` 숫자 반전은 재도입하지 않았다. 신규 `frontend/src/design/product-shell.css`의 `.afs-product-shell` 안에서만 중립 표면·LS Navy·데이터/정상/주의/위험 색을 재정의한다. 스코프 밖 레거시는 하위호환 다크 값을 유지한다.
+  3. 런처, 결과물 실행, 에이전트/출력양식, Mega Boardroom, 독립 프로젝트 통제실을 제품 셸 범위에 연결했다. 공통 헤더는 `afs-product-header`로 LS Navy 구조색을 유지하고 업무 본문은 밝은 회색/흰 표면으로 복구했다.
+  4. `GlobalNav` portal은 body 아래로 렌더링되어 조상 스코프를 잃으므로 메뉴 자체에 제품 셸 클래스를 부여했다.
+- 검증: `npm run build` 통과. Edge headless 실측 이미지 `C:\tmp\afs-launcher-1280.png`, `C:\tmp\afs-launcher-1440.png`에서 LS Navy 헤더 + 라이트 업무 표면, 입력 대비, 상태 배너, 탭/빈 상태를 확인했다. 1280 상단 기능은 Network 상태 점까지 화면 안에 들어왔다.
+- 영향·주의사항: 이것은 승인 외형의 기준선 복구이며 Living Enterprise Canvas 정보구조 전체 이식 완료를 뜻하지 않는다. 기존 통제실 내부 컴포넌트는 같은 스코프 변수를 받지만 기능별 대비·코드/로그 예외를 추가 래스터로 확인해야 한다. 제품 셸을 제거하거나 `index.css`의 다크 `@theme`를 다시 제품 기본값으로 해석하지 않는다.
+- 다음 행동 / 담당 / 착수 조건: **Codex**는 통제실·Mega·에이전트·출력양식·결과물 실행을 1280/1440으로 순차 감사하고 대비 결함만 의미 토큰으로 보완한다. **Claude Code**는 신규 화면 구현 시 최상위 제품 화면을 `afs-product-shell`에 연결하고, 코드/로그 다크 예외는 명시적 클래스로 분리한다.
+- 교대 체크포인트: 변경 = `product-shell.css` 신규 · `index.css` 계약 정정 · `App.tsx` 제품 진입점 스코프 · `GlobalNav.tsx` portal 스코프 · 채택 결정/TEAM_BOARD. 검증 = frontend build exit 0 + 런처 2개 해상도 래스터. 커밋/푸시 = 미수행. 재개 첫 행동 = 실제 프로젝트가 있는 상태의 통제실 래스터. 금지 범위 = 전역 숫자 반전, 전체 다크 복귀, 새 허브만 라이트인 혼합 상태, 캡처 없이 전체 화면 완료 선언.
+
 ### [UIUX-IMPL-35] 지식 허브 감사 마감 + MDM 2/10 이관 + 기준정보 API 권한 누수 차단
 - 작성자 / 기록 시각: Codex / 2026-08-04 11:03 KST
 - 왜 지금 기록하는가: Supervisor가 `handoff_2026-08-04_uiux_migration.md`를 인계받아 코드 수정까지 마무리하라고 지시했다. MDM 실데이터 화면 감사 중 **익명 요청에도 기준정보 21개 유형·레코드가 반환되는 서버 권한 누수**를 추가 발견해, 화면만 숨기는 조치로 완료 처리하지 않고 API 계약까지 함께 닫았다.

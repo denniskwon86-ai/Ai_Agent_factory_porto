@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS users (
     is_executive INTEGER NOT NULL DEFAULT 0,
     is_admin     INTEGER NOT NULL DEFAULT 0,
     is_data_admin INTEGER NOT NULL DEFAULT 0,
+    -- [D-017 §4.2] AI 행동·비용 정책 승인자. `is_data_admin` 과 **분리한다** — 데이터 표준
+    -- 승인과 AI 정책 승인은 책임이 다르다.
+    is_ai_admin  INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL
 );
 
@@ -113,6 +116,10 @@ class AccessScope:
     is_executive: bool = False
     is_admin: bool = False
     is_data_admin: bool = False
+    #: [D-017 §4.2] AI 행동·비용 정책 승인자. **`is_data_admin` 으로 대신하지 않는다** —
+    #: 데이터 표준 승인과 AI 정책 승인은 책임이 다르고, 한 플래그로 묶으면 "이 사람이 왜
+    #: 모델 정책을 바꿀 수 있었나" 에 답할 수 없다.
+    is_ai_admin: bool = False
     readable_dept_ids: frozenset = frozenset()
     writable_dept_ids: frozenset = frozenset()
     primary_dept_id: str = ""
@@ -120,6 +127,12 @@ class AccessScope:
     can_run_enterprise: bool = False
     can_edit_org: bool = False
     can_manage_standard: bool = False
+    #: [D-017] 에이전트 정의를 승인·폐기할 수 있는가. 확정 결과로 남긴다 — 화면·라우트가
+    #: 각자 `is_admin` 을 보고 판단하면 세 곳이 서서히 갈라진다.
+    can_manage_agents: bool = False
+    #: 관리 대상 부서. ⚠️ **읽기 범위와 다르다** — 볼 수 있다고 바꿀 수 있는 것이 아니다.
+    manageable_dept_ids: frozenset = frozenset()
+    manageable_scope_nodes: frozenset = frozenset()
     #: 읽기 가능한 부서들이 대응하는 **ECM 조직 노드**들. 자료(지식팩·참고문서·기준정보)의
     #: 소유 조직은 부서가 아니라 이 노드로 적혀 있으므로, 행 단위 필터는 이 집합을 쓴다.
     #: ⚠️ 비어 있다 = "이 사용자에 대응하는 조직 노드를 모른다"이지 "전부 볼 수 있다"가 아니다.
@@ -137,6 +150,7 @@ class AccessScope:
             "user_id": self.user_id, "display_name": self.display_name,
             "is_executive": self.is_executive, "is_admin": self.is_admin,
             "is_data_admin": self.is_data_admin,
+            "is_ai_admin": self.is_ai_admin,
             "readable_dept_ids": sorted(self.readable_dept_ids),
             "writable_dept_ids": sorted(self.writable_dept_ids),
             "primary_dept_id": self.primary_dept_id,
@@ -144,6 +158,9 @@ class AccessScope:
             "can_run_enterprise": self.can_run_enterprise,
             "can_edit_org": self.can_edit_org,
             "can_manage_standard": self.can_manage_standard,
+            "can_manage_agents": self.can_manage_agents,
+            "manageable_dept_ids": sorted(self.manageable_dept_ids),
+            "manageable_scope_nodes": sorted(self.manageable_scope_nodes),
             "readable_scope_nodes": sorted(self.readable_scope_nodes),
         }
 
@@ -179,6 +196,11 @@ class OrgDirectory:
         ("scope_node_id", "TEXT NOT NULL DEFAULT ''"),
     )
 
+    #: [D-017] 사용자 표에 나중에 붙은 컬럼. 기존 DB 도 그대로 열려야 한다.
+    _ADDED_USER_COLUMNS = (
+        ("is_ai_admin", "INTEGER NOT NULL DEFAULT 0"),
+    )
+
     def _init_db(self):
         conn = self._connect()
         try:
@@ -188,6 +210,13 @@ class OrgDirectory:
                 if col not in have:
                     conn.execute(f"ALTER TABLE departments ADD COLUMN {col} {decl}")
                     print(f"ℹ️ [org] departments.{col} 컬럼을 추가했습니다(기존 행은 미지정).")
+            # ⚠️ 기본값 0 이다 — 마이그레이션이 **아무에게도 권한을 주지 않는다.** 권한을 주는
+            #   마이그레이션은 조용히 전권을 만드는 가장 흔한 경로다.
+            have_u = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+            for col, decl in self._ADDED_USER_COLUMNS:
+                if col not in have_u:
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
+                    print(f"ℹ️ [org] users.{col} 컬럼을 추가했습니다(기존 사용자는 권한 없음).")
             conn.commit()
         finally:
             conn.close()
@@ -463,7 +492,8 @@ class OrgDirectory:
     # ── 사용자 ────────────────────────────────────────────────────────────
     def upsert_user(self, user_id: str, display_name: str, primary_dept_id: str = "",
                     is_executive: bool = False, is_admin: bool = False,
-                    is_data_admin: bool = False, actor: str = "") -> Dict[str, Any]:
+                    is_data_admin: bool = False, is_ai_admin: bool = False,
+                    actor: str = "") -> Dict[str, Any]:
         self._check_user_id(user_id)
         if not (display_name or "").strip():
             raise MasterDataError("display_name 은 필수입니다.")
@@ -471,18 +501,19 @@ class OrgDirectory:
         with self._lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO users (user_id, display_name, primary_dept_id, is_executive, is_admin, "
-                "is_data_admin, status, created_at) VALUES (?,?,?,?,?,?, 'active', ?) "
+                "is_data_admin, is_ai_admin, status, created_at) VALUES (?,?,?,?,?,?,?, 'active', ?) "
                 "ON CONFLICT(user_id) DO UPDATE SET display_name=excluded.display_name, "
                 "primary_dept_id=excluded.primary_dept_id, is_executive=excluded.is_executive, "
-                "is_admin=excluded.is_admin, is_data_admin=excluded.is_data_admin",
+                "is_admin=excluded.is_admin, is_data_admin=excluded.is_data_admin, "
+                "is_ai_admin=excluded.is_ai_admin",
                 (user_id, display_name, primary_dept_id, int(is_executive), int(is_admin),
-                 int(is_data_admin), self._now()))
+                 int(is_data_admin), int(is_ai_admin), self._now()))
             conn.commit()
         self._invalidate()
         # ⚠️ 권한 플래그는 별도로 적는다 — is_admin 부여는 **전권 부여**이고, 그 한 줄이
         #   나중에 "왜 이 사람이 전부 볼 수 있었나"의 유일한 답이 된다.
         flags = [n for n, v in (("executive", is_executive), ("admin", is_admin),
-                                ("data_admin", is_data_admin)) if v]
+                                ("data_admin", is_data_admin), ("ai_admin", is_ai_admin)) if v]
         self._audit("ORG_USER_CHANGED", user_id, actor,
                     ("사용자 등록·갱신" if not was else "사용자 갱신"),
                     f"dept={primary_dept_id or '(미배정)'} "
@@ -497,7 +528,7 @@ class OrgDirectory:
             roles = conn.execute("SELECT dept_id, role FROM user_dept_roles WHERE user_id=?",
                                  (user_id,)).fetchall()
         u = dict(r)
-        for k in ("is_executive", "is_admin", "is_data_admin"):
+        for k in ("is_executive", "is_admin", "is_data_admin", "is_ai_admin"):
             u[k] = bool(u.get(k))
         u["roles"] = {x["dept_id"]: x["role"] for x in roles}
         return u
@@ -651,14 +682,26 @@ class OrgDirectory:
         is_admin = bool(u["is_admin"])
         is_exec = bool(u["is_executive"])
         is_da = bool(u["is_data_admin"])
+        # [D-017 §4.2] AI 관리자는 별도 플래그다. `is_data_admin` 으로 대신하지 않는다.
+        is_aa = bool(u.get("is_ai_admin"))
+        # 관리 대상 부서 = **manager 역할을 가진 부서와 그 하위.** 읽기 범위와 다르다 —
+        # 볼 수 있다고 바꿀 수 있는 것이 아니다(그 둘을 같게 두면 경영진이 전사를 편집한다).
+        managed = set()
+        for _d, _r in (u.get("roles") or {}).items():
+            if _r == "manager":
+                managed.add(_d)
+                managed.update(self.descendants_of(_d))
 
         # ② 시스템 관리자 → 전권
         if is_admin:
             scope = AccessScope(
                 user_id=user_id, display_name=u["display_name"], is_admin=True,
-                is_executive=is_exec, is_data_admin=is_da,
+                is_executive=is_exec, is_data_admin=is_da, is_ai_admin=is_aa,
                 primary_dept_id=u.get("primary_dept_id", ""), unrestricted=True,
-                can_run_enterprise=True, can_edit_org=True, can_manage_standard=True)
+                can_run_enterprise=True, can_edit_org=True, can_manage_standard=True,
+                # 플랫폼 관리자는 전 범위를 관리한다. 다만 «시스템 기본 정의 직접 수정» 은
+                # 자산 계층에서 따로 막는다(설계 §4.2: 복사·버전 승격만).
+                can_manage_agents=True)
             self._scope_cache[key] = scope
             return scope
 
@@ -669,11 +712,17 @@ class OrgDirectory:
             own = frozenset(self._writable_from_roles(u))
             scope = AccessScope(
                 user_id=user_id, display_name=u["display_name"], is_executive=True,
-                is_data_admin=is_da, readable_dept_ids=all_ids, writable_dept_ids=own,
+                is_data_admin=is_da, is_ai_admin=is_aa,
+                readable_dept_ids=all_ids, writable_dept_ids=own,
                 readable_scope_nodes=self._scope_nodes_of(all_ids),
                 primary_dept_id=u.get("primary_dept_id", ""), unrestricted=False,
                 can_run_enterprise=True, can_edit_org=False,
-                can_manage_standard=is_da)
+                can_manage_standard=is_da,
+                # ⚠️ 경영진은 **전 부서를 읽지만 관리하지 않는다**(설계 §4.2: 생성·승인 불가).
+                #   읽기 범위를 관리 범위로 흘리면 열람 권한이 곧 편집 권한이 된다.
+                can_manage_agents=is_aa,
+                manageable_dept_ids=frozenset(managed),
+                manageable_scope_nodes=self._scope_nodes_of(managed))
             self._scope_cache[key] = scope
             return scope
 
@@ -689,10 +738,15 @@ class OrgDirectory:
 
         scope = AccessScope(
             user_id=user_id, display_name=u["display_name"], is_data_admin=is_da,
+            is_ai_admin=is_aa,
             readable_dept_ids=frozenset(readable), writable_dept_ids=frozenset(writable),
             readable_scope_nodes=self._scope_nodes_of(readable),
             primary_dept_id=u.get("primary_dept_id", ""), unrestricted=False,
-            can_run_enterprise=False, can_edit_org=False, can_manage_standard=is_da)
+            can_run_enterprise=False, can_edit_org=False, can_manage_standard=is_da,
+            # 부서 manager 는 자기 조직 승인까지(설계 §4.2). AI 관리자도 승인 권한을 갖는다.
+            can_manage_agents=bool(managed) or is_aa,
+            manageable_dept_ids=frozenset(managed),
+            manageable_scope_nodes=self._scope_nodes_of(managed))
         self._scope_cache[key] = scope
         return scope
 
