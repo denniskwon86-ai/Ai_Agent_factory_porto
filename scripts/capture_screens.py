@@ -68,6 +68,13 @@ SHOTS = [
     ("거버넌스-계약", ADMIN, "거버넌스>데이터 계약"),
     ("거버넌스-외부지표", ADMIN, "거버넌스>외부지표 준비도"),
     ("거버넌스-보정", ADMIN, "거버넌스>보정 목록"),
+    # 이관 6/10 — 에이전트 통제소. 구성 변경은 관리자만이어야 한다.
+    ("에이전트-관리자", ADMIN, "에이전트 통제소"),
+    ("에이전트-일반", NORMAL, "에이전트 통제소"),
+    ("에이전트-익명", ANON, "에이전트 통제소"),
+    ("에이전트-상세", ADMIN, "에이전트 통제소>#RFP 분석가"),
+    ("에이전트-흐름", ADMIN, "에이전트 통제소>실행 흐름"),
+    ("에이전트-템플릿", ADMIN, "에이전트 통제소>워크플로우 템플릿"),
 ]
 
 
@@ -296,6 +303,9 @@ def measure(page: Page) -> dict:
       root.querySelectorAll('*').forEach(e => {
         const t = (e.textContent || '').trim();
         if (!t || e.children.length) return;
+        // ⚠️ 라이브러리가 넣는 **저작자 표시**는 우리 본문이 아니다(ReactFlow 어트리뷰션).
+        //   숨기는 것은 라이선스 조건에 걸리므로 지우지 않고 검사에서 제외한다.
+        if (e.closest('.react-flow__attribution')) return;
         const r = e.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return;
         if (/^[A-Z0-9 ·—–_./]{1,24}$/.test(t)) return;

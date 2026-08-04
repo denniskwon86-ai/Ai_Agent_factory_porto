@@ -30,17 +30,36 @@ export function userTerm(dict: Record<string, string>, raw: string, dictName = '
   return key;
 }
 
-/** 업무표준 단계 — 파이프라인의 각 관문. 영문 코드는 `criteria.STAGE_RUBRICS` 의 키다. */
+/** 파이프라인 단계. 영문 코드는 `criteria.STAGE_RUBRICS` 와 에이전트 레지스트리의 `stage` 다.
+ *
+ * ⚠️ 업무표준(3/10)은 8개 단계만 쓰지만 **에이전트 레지스트리는 15개**를 쓴다(6/10 실측).
+ *   사전이 좁으면 나머지가 영문 코드로 화면에 나간다 — 실제로 `CLARIFICATION` · `UI_DESIGN` 이
+ *   그렇게 노출됐다. 한 사전으로 합쳐 두면 어느 화면에서 쓰든 같은 한국어가 나온다. */
 export const STAGE_KO: Record<string, string> = {
+  CLARIFICATION: '요구 확인',
   RFP: '요구사항 정의',
   PLANNING: '사업 기획',
-  PMO: '진행 관리',
+  UI_DESIGN: '화면 설계',
+  VISION_QA: '화면 검증',
   ARCHITECTURE: '시스템 설계',
+  PMO: '진행 관리',
   TECH_SPEC: '기술 명세',
+  EXECUTION: '구현',
+  BUILD: '빌드',
   CODE_REVIEW: '코드 심사',
   QA: '품질 검증',
   SUPERVISOR: '총괄 감독',
+  MANUAL: '매뉴얼 작성',
 };
+
+/** 모델 등급. 사용자에게 «pro/flash»는 «무엇이 다른가»를 말하지 않는다. */
+export const MODEL_TIER_KO: Record<string, string> = {
+  pro: '고성능',
+  flash: '경량·빠름',
+  lite: '최소',
+};
+
+export const modelTierKo = (v: string) => userTerm(MODEL_TIER_KO, v, '모델 등급');
 
 /** 표준 분류. `regulation` 은 판정 권한이 있고 `guideline` 은 없다 — 이 차이가 핵심이다. */
 export const STANDARD_KIND_KO: Record<string, string> = {
@@ -146,6 +165,14 @@ export const FINDING_KIND_KO: Record<string, string> = {
   uom_price_scale_suspect: '단위와 단가의 배율 불일치 의심',
 };
 
+/** 파이프라인이 최종적으로 무엇을 내놓는가. 내부 값은 영문 슬러그다. */
+export const DELIVERABLE_TYPE_KO: Record<string, string> = {
+  software_app: '실행 가능한 애플리케이션',
+  document_report: '분석·보고서 문서',
+  hybrid_simulation: '복합 시뮬레이터(화면 + 보고서)',
+};
+
+export const deliverableTypeKo = (v: string) => userTerm(DELIVERABLE_TYPE_KO, v, '산출물 유형');
 export const contractStateKo = (v: string) => userTerm(CONTRACT_STATE_KO, v, '계약 상태');
 export const severityKo = (v: string) => userTerm(SEVERITY_KO, v, '심각도');
 export const dataGradeKo = (v: string) => userTerm(DATA_GRADE_KO, v, '자료 등급');

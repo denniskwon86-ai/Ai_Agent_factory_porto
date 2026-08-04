@@ -12,10 +12,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # [Phase 2/3] 식별·권한은 라우트에서 판정하지 않는다 — api/deps.py 단일 지점이 담당한다.
-from api.deps import (Principal, assert_can_read_dept, assert_enterprise,
-                      assert_project_readable, assert_project_writable,
-                      current_principal, enterprise_context)
-from core.enterprise_context import EnterpriseContext
+from api.deps import (Principal, assert_can_manage_standard, assert_can_read_dept,
+                      assert_enterprise, assert_project_readable, assert_project_writable,
+                      current_principal, enterprise_context, visibility_block_reason)
+from core.enterprise_context import EnterpriseContext, audit
 from typing import Optional
 
 from core.async_orchestrator import orchestrator
@@ -1663,16 +1663,35 @@ class AgentRegistryPayload(BaseModel):
     edges: Optional[list] = []
 
 
+
+# ★★★ [2026-08-04 이관 6/10 실측 결함] **에이전트 레지스트리에 권한 검사가 없었다.**
+#   `PUT /factory/agents` 와 `POST /factory/agents/reset` 이 익명에게 통했다.
+#   이 레지스트리는 «누가 무엇을 어떤 순서로 하는가»와 **HOTL 중단점**(전문가 개입 지점)을
+#   정한다. 중단점을 지우면 사람 확인 없이 파이프라인이 끝까지 흐른다 — 통제 회피 경로다.
+#   업무표준(3/10)이 «판정 기준»이었다면 이건 «판정하는 주체의 구성»이다.
+#
+#   ⚠️ 그리고 `reset` 은 파일을 지워 **되돌릴 수 없었다.** 실제로 권한을 확인하다 호출해
+#     레지스트리를 날렸다(그 사고 때문에 `core/agent_registry.py` 에 백업을 넣었다).
+def _assert_agent_config_readable(p: Principal):
+    """구성 조회 자격. 에이전트 구성은 사내 운영 정보다 — 익명·미등록에게 주지 않는다."""
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+
+
 @router.get("/agents")
-async def get_agent_registry():
+async def get_agent_registry(p: Principal = Depends(current_principal)):
     """에이전트 마스터 레지스트리 조회."""
+    _assert_agent_config_readable(p)
     from core.agent_registry import load_registry
     return {"status": "success", "data": load_registry()}
 
 
 @router.put("/agents")
-async def update_agent_registry(payload: AgentRegistryPayload):
+async def update_agent_registry(payload: AgentRegistryPayload,
+                                p: Principal = Depends(current_principal)):
     """제어판에서 편집한 레지스트리 저장(검증·정규화 후 영속화)."""
+    assert_can_manage_standard(p)
     from core.agent_registry import save_registry
     try:
         saved = save_registry(payload.model_dump())
@@ -1681,14 +1700,42 @@ async def update_agent_registry(payload: AgentRegistryPayload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"레지스트리 저장 오류: {str(e)}")
     # 주의: HOTL 중단점 등 실행 반영은 그래프 재컴파일(서버 재시작) 시 적용된다.
+    _hotl = len([a for a in (saved.get("agents") or []) if a.get("hotl_after")])
+    audit.record(audit.WORK_STANDARD_CHANGED, "agent_registry", "default",
+                 actor=p.user_id, outcome="allowed",
+                 detail=f"에이전트 구성 저장 — {len(saved.get('agents') or [])}개 · "
+                        f"HOTL 중단점 {_hotl}곳")
     return {"status": "success", "data": saved, "note": "HOTL 중단점 변경은 서버 재시작 후 파이프라인에 반영됩니다."}
 
 
 @router.post("/agents/reset")
-async def reset_agent_registry():
-    """레지스트리를 기본값(현재 SW 파이프라인)으로 초기화."""
+async def reset_agent_registry(p: Principal = Depends(current_principal)):
+    """레지스트리를 기본값(현재 SW 파이프라인)으로 초기화.
+
+    ⚠️ 편집해 둔 구성이 사라진다. 직전 상태는 `agents_registry.prev.json` 으로 남으므로
+      한 번의 실수는 복원으로 되돌릴 수 있다."""
+    assert_can_manage_standard(p)
     from core.agent_registry import reset_registry
-    return {"status": "success", "data": reset_registry()}
+    data = reset_registry()
+    audit.record(audit.WORK_STANDARD_CHANGED, "agent_registry", "default",
+                 actor=p.user_id, outcome="allowed",
+                 detail="에이전트 구성 초기화 — 직전 상태는 agents_registry.prev.json 에 보존")
+    return {"status": "success", "data": data,
+            "note": "직전 구성은 보존됩니다 — 되돌리려면 복원을 사용하십시오."}
+
+
+@router.post("/agents/restore")
+async def restore_agent_registry(p: Principal = Depends(current_principal)):
+    """마지막 초기화 **직전** 구성으로 되돌린다. 백업이 없으면 404."""
+    assert_can_manage_standard(p)
+    from core.agent_registry import restore_registry
+    data = restore_registry()
+    if data is None:
+        raise HTTPException(status_code=404,
+                            detail="되돌릴 직전 구성이 없습니다(초기화 기록이 없습니다).")
+    audit.record(audit.WORK_STANDARD_CHANGED, "agent_registry", "default",
+                 actor=p.user_id, outcome="allowed", detail="에이전트 구성 복원(초기화 직전 상태)")
+    return {"status": "success", "data": data}
 
 
 # ==========================================
@@ -1703,7 +1750,11 @@ class AIRecommendSkillRequest(BaseModel):
     role_description: str
 
 @router.post("/ai-recommend/pipeline")
-async def ai_recommend_pipeline(req: AIRecommendPipelineRequest):
+async def ai_recommend_pipeline(req: AIRecommendPipelineRequest,
+                                p: Principal = Depends(current_principal)):
+    # ⚠️ 이 라우트는 **LLM 을 호출한다** — 회사 비용이 나가고 속도 제한을 소모한다.
+    #   익명에게 열려 있으면 그것만으로 남용 경로다(자료를 훔치지 않아도 예산을 태운다).
+    _assert_agent_config_readable(p)
     from core.llm_gateway import gateway
     
     # 시뮬레이션 성격 판별 키워드
@@ -1856,7 +1907,9 @@ def _assemble_simulation_framework(ai_data: dict) -> dict:
     }
 
 @router.post("/ai-recommend/skill")
-async def ai_recommend_skill(req: AIRecommendSkillRequest):
+async def ai_recommend_skill(req: AIRecommendSkillRequest,
+                             p: Principal = Depends(current_principal)):
+    _assert_agent_config_readable(p)          # LLM 호출 — 익명 남용을 막는다
     from core.llm_gateway import gateway
     prompt = f"""
     사용자가 지정한 에이전트의 간략한 역할을 바탕으로, 이 에이전트가 어떤 입력을 받아 어떤 산출물을 내고, 누구에게 전달해야 하는지를 명시하는 상세 마크다운 스킬 문서를 작성해 줘.
@@ -1903,14 +1956,16 @@ class TemplateCopyRequest(BaseModel):
 
 
 @router.get("/templates")
-async def list_workflow_templates():
+async def list_workflow_templates(p: Principal = Depends(current_principal)):
     """공존하는 워크플로우 템플릿 목록(항상 default 포함)."""
+    _assert_agent_config_readable(p)
     from core.agent_registry import list_templates
     return {"status": "success", "data": list_templates()}
 
 
 @router.get("/templates/{template_id}")
-async def get_workflow_template(template_id: str):
+async def get_workflow_template(template_id: str, p: Principal = Depends(current_principal)):
+    _assert_agent_config_readable(p)
     from core.agent_registry import load_template, _safe_tid
     try:
         _safe_tid(template_id)
@@ -1920,8 +1975,10 @@ async def get_workflow_template(template_id: str):
 
 
 @router.post("/templates/copy")
-async def copy_workflow_template(req: TemplateCopyRequest):
+async def copy_workflow_template(req: TemplateCopyRequest,
+                                 p: Principal = Depends(current_principal)):
     """기존 템플릿을 복사해 새 워크플로우 생성(기존은 불변 — Copy 모델)."""
+    assert_can_manage_standard(p)
     from core.agent_registry import copy_template
     try:
         tpl = copy_template(req.src_id, req.new_id, req.new_name or "")
@@ -1931,7 +1988,9 @@ async def copy_workflow_template(req: TemplateCopyRequest):
 
 
 @router.put("/templates/{template_id}")
-async def update_workflow_template(template_id: str, payload: AgentRegistryPayload):
+async def update_workflow_template(template_id: str, payload: AgentRegistryPayload,
+                                   p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     from core.agent_registry import save_template, _safe_tid
     try:
         _safe_tid(template_id)
@@ -1944,7 +2003,9 @@ async def update_workflow_template(template_id: str, payload: AgentRegistryPaylo
 
 
 @router.delete("/templates/{template_id}")
-async def delete_workflow_template(template_id: str):
+async def delete_workflow_template(template_id: str,
+                                   p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     from core.agent_registry import delete_template, _safe_tid
     try:
         _safe_tid(template_id)

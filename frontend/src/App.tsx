@@ -244,14 +244,9 @@ export default function App() {
     }
   };
 
-  if (showAgentPanel) {
-    return (
-      <ErrorBoundary>
-        <AgentMasterPanel />
-      </ErrorBoundary>
-    );
-  }
-
+  // ⚠️ [이관 6/10] 에이전트 통제소는 이제 **모달**(`HubDialog`)이다. 종전처럼 여기서 조기
+  //   반환하면 `#root` 안에 아무것도 남지 않고, 모달은 body 로 portal 되므로 **뒤가 빈 화면**이
+  //   된다(배경 inert 처리도 대상이 사라진다). 다른 허브 화면들과 같이 런처 위에 겹쳐 띄운다.
   if (showFormatPanel) {
     return (
       <ErrorBoundary>
@@ -318,6 +313,9 @@ export default function App() {
         {showGovernance && (
           <GovernanceConsole onClose={() => setShowGovernance(false)} />
         )}
+        {/* ⚠️ 이 모달 목록은 이 파일에 **두 벌** 있다(프로젝트 없음 화면 / 있는 화면).
+            한쪽에만 추가하면 특정 상태에서만 안 열린다 — 기존 중복이며 정리 대상이다. */}
+        {showAgentPanel && <AgentMasterPanel />}
         {showShadow && (
           <ShadowModePanel onClose={() => setShowShadow(false)} />
         )}
@@ -808,6 +806,9 @@ export default function App() {
         {showGovernance && (
           <GovernanceConsole onClose={() => setShowGovernance(false)} />
         )}
+        {/* ⚠️ 이 모달 목록은 이 파일에 **두 벌** 있다(프로젝트 없음 화면 / 있는 화면).
+            한쪽에만 추가하면 특정 상태에서만 안 열린다 — 기존 중복이며 정리 대상이다. */}
+        {showAgentPanel && <AgentMasterPanel />}
         {showShadow && (
           <ShadowModePanel onClose={() => setShowShadow(false)} />
         )}

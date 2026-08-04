@@ -25,7 +25,9 @@ export type RailIconName =
   // 조직·권한(이관 4/10)
   | 'orgtree' | 'people' | 'shield'
   // 거버넌스(이관 5/10)
-  | 'alert' | 'duplicate' | 'gap' | 'contract' | 'globe';
+  | 'alert' | 'duplicate' | 'gap' | 'contract' | 'globe'
+  // 에이전트 통제소(이관 6/10)
+  | 'flow';
 
 /** 이름 → 도형. `d` 는 stroke 로 그리고, `fillDots` 는 점처럼 채운다. */
 const SHAPES: Record<RailIconName, { d: string[]; dots?: [number, number][] }> = {
@@ -77,6 +79,8 @@ const SHAPES: Record<RailIconName, { d: string[]; dots?: [number, number][] }> =
   contract: { d: ['M6 2.6h9l3.4 3.4V21.4H6V2.6z', 'M15 2.6V6h3.4', 'M8.8 11h6.4', 'M8.8 14.4h6.4', 'M8.8 17.8c1.2-1.4 2.4 1.4 3.6 0s2.4 1.4 3.6 0'] },
   // 외부지표 — 지구(사외에서 오는 값)
   globe: { d: ['M12 21a9 9 0 100-18 9 9 0 000 18z', 'M3 12h18', 'M12 3c2.6 2.6 2.6 15.4 0 18', 'M12 3c-2.6 2.6-2.6 15.4 0 18'] },
+  // 흐름 — 이어진 단계(조직도의 «갈라짐»과 달리 **가로로 흐른다**)
+  flow: { d: ['M2.6 8.4h5.6v5.6H2.6z', 'M15.8 4.2h5.6v5.6h-5.6z', 'M15.8 14.2h5.6v5.6h-5.6z', 'M8.2 11.2h4.2', 'M12.4 11.2V7h3.4', 'M12.4 11.2V17h3.4'] },
 };
 
 export function RailIcon({ name }: { name: RailIconName }) {
