@@ -14,7 +14,7 @@ from typing import Optional, List
 from core.master_data import master_data, MasterDataError
 from fastapi import Depends
 from api.deps import (Principal, assert_can_manage_standard, current_principal,
-                      viewer_visible_scopes, visibility_block_reason)
+                      hidden_envelope, viewer_visible_scopes, visibility_block_reason)
 
 router = APIRouter(prefix="/api/v1/master")
 
@@ -96,7 +96,7 @@ async def list_types(tenant_id: str = "tenant_default",
     records = await asyncio.to_thread(master_data.list_records, None, None, None, True)
     visible_type_ids = {r["type_id"] for r in records if r["master_code"] in allowed}
     shown = [row for row in rows if row["type_id"] in visible_type_ids]
-    return {"status": "success", "data": shown, "hidden_count": len(rows) - len(shown)}
+    return {"status": "success", "data": shown, **hidden_envelope(p, len(rows), len(shown))}
 
 
 @router.post("/types")
@@ -160,7 +160,7 @@ async def list_records(type_id: Optional[str] = None, q: Optional[str] = None,
     if allowed is None:
         return {"status": "success", "data": data}
     shown = [row for row in data if row["master_code"] in allowed]
-    return {"status": "success", "data": shown, "hidden_count": len(data) - len(shown)}
+    return {"status": "success", "data": shown, **hidden_envelope(p, len(data), len(shown))}
 
 
 @router.post("/records")

@@ -8,14 +8,18 @@
 //
 // ⚠️ 스타일은 `.afs-scope` 안에서만 적용된다(`afs.css` 상단 주석 참조). 기존 다크 테마 화면에
 //   토큰이 새면 15개 화면의 색이 동시에 바뀐다 — 그것부터 막았다.
+import { useEffect, useRef } from 'react';
+
 import './afs.css';
+import { RailIcon, type RailIconName } from './RailIcon';
 
 export type RailItem = {
   id: string;
   label: string;
   hint?: string;
-  /** 아이콘 자리에 넣을 짧은 글자(1~2자). 이미지 의존을 만들지 않는다. */
-  mark?: string;
+  /** 기능별 **고정 아이콘**(`RailIcon.tsx` 등록부). 자동 생성하지 않는다 —
+   *  한글 첫 글자를 쓰던 종전 방식은 「받은 앱」과 「대내외 발간」을 둘 다 «발»로 만들었다. */
+  icon: RailIconName;
   /** 대기 건수 등. 0이면 표시하지 않는다 — 항상 뜨는 배지는 읽히지 않는다. */
   count?: number;
   /** 배지가 뜻하는 것. 지정하지 않으면 중립적인 «N건»으로 읽는다. */
@@ -39,6 +43,25 @@ export function HubShell({
   jarvis?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  // ★★ 같은 화면에서 아이콘이 겹치면 아이콘은 구별에 쓸모가 없어진다(2026-08-04 «발» 충돌).
+  //   등록부로 바꾼 뒤에도 사람이 같은 이름을 두 번 적을 수 있으므로 여기서 확인한다.
+  //   ⚠️ 던지지 않는다 — 화면 전체가 사라지면 정작 무엇이 겹쳤는지 볼 수 없다. 콘솔에 남기고
+  //     캡처 스크립트가 `data-icon` 중복과 콘솔 오류를 함께 검사한다.
+  // ★★ [2026-08-04 실측] 720px 에서 레일이 스크롤될 때 **활성 항목이 화면 밖에 있었다** —
+  //   지금 보고 있는 화면이 메뉴에서 안 보이면 사용자는 자기가 어디 있는지 알 수 없다.
+  //   스크롤바를 보이게 한 것만으로는 부족했다(스크롤은 «할 수 있다»일 뿐 «되어 있다»가 아니다).
+  const activeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [activeId]);
+
+  const dupIcons = items.map((i) => i.icon)
+    .filter((v, idx, all) => all.indexOf(v) !== idx);
+  if (dupIcons.length) {
+    console.error(`[HubShell] 레일 아이콘이 겹쳤습니다: ${[...new Set(dupIcons)].join(', ')} `
+      + `— «${title}» 화면. RailIcon 등록부에서 서로 다른 아이콘을 지정하십시오.`);
+  }
+
   // ⚠️ `afs-scope` 와 `hub-layout` 을 **같은 요소에 두지 않는다.** 스타일 규칙이
   //   `.afs-scope .hub-layout`(자손 선택자)이므로 같은 요소면 매치되지 않는다 —
   //   실측에서 `display: block` 으로 떨어져 3열이 무너졌다. 스코프는 감싸는 요소가 갖는다.
@@ -55,15 +78,21 @@ export function HubShell({
         <div className="module-menu" role="tablist" aria-orientation="vertical">
           {items.map((it) => (
             <button key={it.id} role="tab" aria-selected={activeId === it.id}
+              ref={activeId === it.id ? activeRef : undefined}
               className={activeId === it.id ? 'active' : ''}
+              /* 아이콘은 `aria-hidden` 이므로 버튼이 **전체 기능명**을 말해야 한다.
+                 힌트와 대기 건수까지 넣는다 — 화면을 못 보는 사용자에게 «받은 앱»만 들리면
+                 대기 2건이 있다는 사실이 사라진다. */
+              aria-label={[it.label, it.hint, it.count ? (it.countLabel || `${it.count}건`) : '']
+                .filter(Boolean).join(' · ')}
               onClick={() => onSelect(it.id)}>
-              <i aria-hidden="true">{it.mark || it.label.slice(0, 1)}</i>
+              <RailIcon name={it.icon} />
               <span>
                 <b>{it.label}</b>
                 {it.hint && <small>{it.hint}</small>}
               </span>
               {/* 0 은 표시하지 않는다 — 항상 뜨는 숫자는 아무도 읽지 않는다. */}
-              {!!it.count && <span className="count" aria-label={it.countLabel || `${it.count}건`}>{it.count}</span>}
+              {!!it.count && <span className="count" aria-hidden="true">{it.count}</span>}
             </button>
           ))}
         </div>

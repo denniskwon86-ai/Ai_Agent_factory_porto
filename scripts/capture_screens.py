@@ -106,35 +106,196 @@ def open_panel(page: Page, path: str) -> tuple[bool, str]:
 
 
 def measure(page: Page) -> dict:
-    """캡처와 같은 시점의 사실을 함께 남긴다 — 이미지와 수치가 어긋나지 않게."""
+    """캡처와 같은 시점의 사실을 함께 남긴다 — 이미지와 수치가 어긋나지 않게.
+
+    ★★ 여기서 재는 항목은 **재승인 기준**(2026-08-04 지침)과 1:1 로 붙어 있다.
+      이전에는 «넘침 0 · 12px 미만 0» 만 재서 전부 통과했는데, 사람이 이미지를 보자마자
+      결함 6건이 나왔다. 측정이 통과하는데 제품이 아니면 그건 **재는 항목이 틀린 것**이다.
+      그래서 지적받은 결함을 각각 기계가 재는 항목으로 바꿨다."""
     return page.evaluate("""() => {
       const dlg = document.querySelector('[role="dialog"]');
       const g = el => el ? getComputedStyle(el) : null;
       const layout = dlg && dlg.querySelector('.hub-layout');
-      const card = dlg && dlg.querySelector('.hub-card, .afs-card, .panel');
+      const card = dlg && dlg.querySelector('.panel');
       const doc = document.documentElement;
+      const root = dlg || doc;
+
+      // ① 레일 아이콘 중복 — 같은 모양이 두 번 나오면 아이콘이 구별에 쓸모가 없다.
+      const icons = [...root.querySelectorAll('.module-menu [data-icon]')]
+        .map(e => e.getAttribute('data-icon'));
+      const dupIcons = [...new Set(icons.filter((v, i) => icons.indexOf(v) !== i))];
+      // 아이콘이 aria 로 읽히면 스크린리더가 두 번 말한다.
+      const iconsExposed = [...root.querySelectorAll('.module-menu [data-icon]')]
+        .filter(e => e.getAttribute('aria-hidden') !== 'true').length;
+      // 버튼이 전체 기능명을 말하는가.
+      const railButtonsWithoutLabel = [...root.querySelectorAll('.module-menu button')]
+        .filter(b => !(b.getAttribute('aria-label') || '').trim()).length;
+
+      // ② 마지막 메뉴 항목 잘림 — 잘렸는데 스크롤바도 없으면 «끝»과 구분되지 않는다.
+      const menu = root.querySelector('.module-menu');
+      let railCut = null;
+      if (menu) {
+        const items = [...menu.querySelectorAll('button')];
+        const mr = menu.getBoundingClientRect();
+        const vis = b => {
+          const r = b.getBoundingClientRect();
+          return r.top >= mr.top - 1 && r.bottom <= mr.bottom + 1;
+        };
+        const half = b => {   // 일부만 보이는 항목 = 잘린 항목
+          const r = b.getBoundingClientRect();
+          return !vis(b) && r.bottom > mr.top && r.top < mr.bottom;
+        };
+        const active = items.find(b => b.classList.contains('active'));
+        const barPx = menu.offsetWidth - menu.clientWidth;   // 실제로 자리를 차지한 스크롤바
+        railCut = {
+          항목수: items.length,
+          온전히보임: items.filter(vis).length,
+          잘린항목: items.filter(half).length,
+          // ★ 지금 보고 있는 화면이 메뉴에 안 보이면 사용자는 자기 위치를 알 수 없다.
+          활성항목보임: active ? vis(active) : null,
+          스크롤가능: menu.scrollHeight > menu.clientHeight + 1,
+          스크롤바폭: barPx,
+        };
+      }
+
+      // ②-2 하단 안내 카드도 잘릴 수 있다. 잘렸으면 스크롤바가 보여야 한다.
+      const card2 = root.querySelector('.inheritance-card');
+      const cardCut = card2 ? {
+        넘침: card2.scrollHeight > card2.clientHeight + 1,
+        스크롤바폭: card2.offsetWidth - card2.clientWidth,
+      } : null;
+
+      // ③ 한 글자 고아 줄바꿈 — 마지막 줄에 글자가 하나만 남은 문단을 **글자 단위로** 찾는다.
+      //    («다», «요», «됨» 같은 것. 종전 측정은 이걸 전혀 보지 않았다.)
+      const orphans = [];
+      root.querySelectorAll('p, small, b, dd, li, span').forEach(e => {
+        if (e.children.length) return;
+        const txt = (e.textContent || '').trim();
+        if (txt.length < 8 || !/[가-힣]/.test(txt)) return;
+        const node = e.firstChild;
+        if (!node || node.nodeType !== 3) return;
+        const rng = document.createRange();
+        const tops = [];
+        for (let i = 0; i < node.length; i++) {
+          rng.setStart(node, i); rng.setEnd(node, i + 1);
+          const r = rng.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          tops.push(Math.round(r.top));
+        }
+        if (!tops.length) return;
+        const lastTop = tops[tops.length - 1];
+        const lastLine = tops.filter(t => Math.abs(t - lastTop) <= 2).length;
+        // 줄이 둘 이상인데 마지막 줄이 한 글자면 고아다(공백 제외 기준).
+        const lineCount = new Set(tops).size;
+        if (lineCount > 1 && lastLine === 1) orphans.push(txt.slice(0, 22));
+      });
+
+      // ④ Jarvis 죽은 공간 — 로그 안 내용이 끝난 뒤 남는 빈 높이.
+      const log = root.querySelector('.jarvis-log');
+      let jarvisDead = null;
+      if (log) {
+        const lr = log.getBoundingClientRect();
+        const kids = [...log.children];
+        const bottom = kids.length ? kids[kids.length - 1].getBoundingClientRect().bottom : lr.top;
+        jarvisDead = Math.max(0, Math.round(lr.bottom - bottom));
+      }
+
+      // ⑤ 상단 바 노출 — 전체화면 작업공간이므로 뒤가 비쳐서는 안 된다.
+      let barLeak = null;
+      if (dlg) {
+        const r = dlg.getBoundingClientRect();
+        barLeak = {
+          위: Math.round(r.top), 아래: Math.round(innerHeight - r.bottom),
+          왼: Math.round(r.left), 오른: Math.round(innerWidth - r.right),
+        };
+      }
+
+      // ⑥ 배너의 «0건/0개» 오해 표현.
+      const banners = [...root.querySelectorAll('.afs-banner')].map(b => b.innerText.trim());
+      const zeroTalk = banners.filter(t => /(^|[^0-9])0\\s*(건|개)/.test(t));
+
+      // ⑦ 내부 식별자 노출 — `knowledge/packs` 처럼 «영문/영문» 슬러그가 사용자에게 보이면
+      //    뜻이 없다. 제목·문맥 자리에서만 검사한다(코드·type_id 는 실제 식별자이므로 정상).
+      const slugSpots = [...root.querySelectorAll(
+        '.jarvis-context h3, .jarvis-zero-ctx dd, .screen-head h2, .module-intro h1')];
+      const slugLeaks = slugSpots
+        .map(e => (e.textContent || '').trim())
+        .filter(t => /^[a-z0-9_]+\\/[a-z0-9_]+$/.test(t));
+
+      // 12px 미만 본문(영문 kicker·코드는 제외).
       let small = [];
-      (dlg || doc).querySelectorAll('*').forEach(e => {
+      root.querySelectorAll('*').forEach(e => {
         const t = (e.textContent || '').trim();
         if (!t || e.children.length) return;
         const r = e.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return;
         if (/^[A-Z0-9 ·—–_./]{1,24}$/.test(t)) return;
-        const fs = parseFloat(getComputedStyle(e).fontSize);
-        if (fs < 12) small.push(fs + 'px:' + t.slice(0, 14));
+        if (parseFloat(getComputedStyle(e).fontSize) < 12) small.push(t.slice(0, 14));
       });
+
       return {
         모달: !!dlg,
         열구성: layout ? g(layout).gridTemplateColumns : null,
         셸배경: layout ? g(layout).backgroundColor : null,
         카드배경: card ? g(card).backgroundColor : null,
         본문색: dlg ? g(dlg).color : null,
-        글꼴: dlg ? g(dlg).fontFamily.slice(0, 28) : null,
-        Jarvis: !!(dlg && dlg.querySelector('.hub-jarvis, .jarvis-rail')),
+        글꼴: dlg ? g(dlg).fontFamily.slice(0, 18) : null,
+        Jarvis: !!(dlg && dlg.querySelector('.jarvis-rail')),
         문서넘침: doc.scrollWidth - doc.clientWidth,
-        작은글자: small.slice(0, 5),
+        작은글자: small.slice(0, 4),
+        아이콘: icons,
+        아이콘중복: dupIcons,
+        아이콘노출: iconsExposed,
+        라벨없는버튼: railButtonsWithoutLabel,
+        레일잘림: railCut,
+        안내카드: cardCut,
+        고아줄바꿈: orphans.slice(0, 6),
+        Jarvis빈공간: jarvisDead,
+        모달바깥여백: barLeak,
+        배너: banners.map(t => t.slice(0, 46)),
+        영건표현: zeroTalk.map(t => t.slice(0, 40)),
+        슬러그노출: slugLeaks,
       };
     }""")
+
+
+# 재승인 기준(2026-08-04 지침) — 하나라도 어기면 «통과»라고 쓰지 않는다.
+def gate_failures(m: dict) -> list[str]:
+    out: list[str] = []
+    if m.get("아이콘중복"):
+        out.append(f"레일 아이콘 중복: {m['아이콘중복']}")
+    if m.get("아이콘노출"):
+        out.append(f"아이콘이 스크린리더에 읽힌다: {m['아이콘노출']}개")
+    if m.get("라벨없는버튼"):
+        out.append(f"aria-label 없는 레일 버튼 {m['라벨없는버튼']}개")
+    cut = m.get("레일잘림") or {}
+    if cut.get("활성항목보임") is False:
+        out.append("지금 보고 있는 화면이 레일에서 보이지 않는다(활성 항목이 스크롤 밖)")
+    if cut.get("잘린항목"):
+        # 일부만 보이는 항목은 «끝»과 구분되지 않는다. 스크롤바가 있어도 잘림 자체를 허용하지 않는다.
+        out.append(f"레일 항목 {cut['잘린항목']}개가 반쯤 잘려 보인다")
+    if cut.get("스크롤가능") and int(cut.get("스크롤바폭") or 0) <= 0:
+        out.append("레일이 스크롤되는데 스크롤바가 자리를 차지하지 않는다(항목이 더 있는지 알 수 없다)")
+    card = m.get("안내카드") or {}
+    if card.get("넘침") and int(card.get("스크롤바폭") or 0) <= 0:
+        out.append("하단 안내 카드가 잘렸는데 스크롤바가 없다(다 읽은 줄 안다)")
+    if m.get("고아줄바꿈"):
+        out.append(f"한 글자 고아 줄바꿈: {m['고아줄바꿈']}")
+    dead = m.get("Jarvis빈공간")
+    if isinstance(dead, int) and dead > 80:
+        out.append(f"Jarvis 로그에 빈 공간 {dead}px")
+    leak = m.get("모달바깥여백") or {}
+    if any(int(v or 0) > 0 for v in leak.values()):
+        out.append(f"모달 밖으로 배경이 비친다: {leak}")
+    if m.get("영건표현"):
+        out.append(f"배너에 «0건» 오해 표현: {m['영건표현']}")
+    if m.get("슬러그노출"):
+        out.append(f"내부 식별자가 제목·문맥에 노출: {m['슬러그노출']}")
+    if m.get("문서넘침"):
+        out.append(f"문서 가로 넘침 {m['문서넘침']}px")
+    if m.get("작은글자"):
+        out.append(f"12px 미만 본문: {m['작은글자']}")
+    return out
 
 
 def main() -> int:
@@ -147,6 +308,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     shots = [s for s in SHOTS if not args.only or args.only in s[0]]
 
+    verdicts: list[tuple[str, list[str]]] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(channel="chrome", headless=True)
         for w, h in VIEWPORTS:
@@ -167,16 +329,35 @@ def main() -> int:
                     m = measure(page)
                     path = out / f"{tag}_{w}x{h}.png"
                     page.screenshot(path=str(path))
-                    flag = "" if opened else f"  ⚠️ 이 이미지는 이 화면이 아니다 — {why}"
-                    print(f"[{w}x{h}] {tag:18s} → {path}{flag}")
+                    who = f"{tag} {w}x{h}"
+                    if not opened:
+                        verdicts.append((who, [f"이 이미지는 이 화면이 아니다 — {why}"]))
+                        print(f"[{w}x{h}] {tag:18s} → {path}  ⚠️ {why}")
+                        continue
+                    bad = gate_failures(m) if label else []      # 런처는 이관 대상이 아니다
+                    verdicts.append((who, bad))
+                    print(f"[{w}x{h}] {tag:18s} → {path}  {'✗ ' + str(len(bad)) + '건' if bad else '✓'}")
                     print(f"          {m}")
+                    for b in bad:
+                        print(f"          ✗ {b}")
                 except Exception as e:                       # 한 화면 실패가 전체를 죽이지 않게
+                    verdicts.append((f"{tag} {w}x{h}", [f"{type(e).__name__}: {e}"]))
                     print(f"[{w}x{h}] {tag:18s} ✗ 실패: {type(e).__name__}: {e}")
             if errors:
+                verdicts.append((f"콘솔 {w}x{h}", [f"콘솔 오류 {len(errors)}건: {errors[:2]}"]))
                 print(f"[{w}x{h}] 콘솔 오류 {len(errors)}건: {errors[:3]}")
             ctx.close()
         browser.close()
+
     print(f"\n캡처 위치: {out.resolve()}")
+    failed = [(w, b) for w, b in verdicts if b]
+    if failed:
+        print(f"\n=== 재승인 기준 미달 {len(failed)}건 ===")
+        for who, bad in failed:
+            for b in bad:
+                print(f"  ✗ {who}: {b}")
+        return 1
+    print(f"\n=== 재승인 기준 전 항목 통과 ({len(verdicts)}개 화면) ===")
     return 0
 
 

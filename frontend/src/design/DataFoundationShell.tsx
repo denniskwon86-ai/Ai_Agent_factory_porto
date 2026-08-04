@@ -220,6 +220,9 @@ export function VersionHistory({ rows, emptyText = '이력이 없습니다.' }: 
  */
 export function foundationJarvis(opts: {
   module: string;
+  /** 화면의 **한국어 제목**. 선택한 객체가 없을 때 문맥 제목으로 쓴다.
+   *  ⚠️ 없으면 `module` 슬러그(`knowledge/packs`)가 그대로 화면에 나갔다 — 사용자에게 뜻이 없다. */
+  moduleTitle?: string;
   objectType: string;
   selected: { id: string; title: string; meta?: string } | null;
   state: Loaded<any>;
@@ -227,7 +230,7 @@ export function foundationJarvis(opts: {
   actions: string[];
   evidence?: { label: string; value: string }[];
 }) {
-  const { module, objectType, selected, state, counts, actions, evidence } = opts;
+  const { module, moduleTitle, objectType, selected, state, counts, actions, evidence } = opts;
   const failed = state.status === 'error' || state.status === 'forbidden';
   return {
     ctx: {
@@ -237,12 +240,20 @@ export function foundationJarvis(opts: {
       object_snapshot: selected
         ? { id: selected.id, title: selected.title, meta: selected.meta || '' }
         : { load_status: state.status, ...counts },
-      available_actions: actions,
+      // ★★ [2026-08-04 실측 결함] 목록을 못 읽은 상태에서도 «할 수 있는 일: 유형 생성 · 레코드
+      //   등록»이 그대로 떴다. 익명 사용자에게 그렇게 보였고, 누르면 403 이다.
+      //   비서가 «할 수 있다»고 말한 것이 안 되면 사용자는 자기 조작을 의심한다 —
+      //   권한 문제를 조작 실수로 오해하게 만드는 것이 가장 나쁜 안내다.
+      //   ⚠️ 여기서 «권한»을 새로 판정하지 않는다. 판정은 서버가 이미 했고(403/차단 사유),
+      //     그 결과가 `state.status` 로 와 있다. 그것을 따르기만 한다.
+      available_actions: failed ? [] : actions,
       evidence_refs: [],
     },
     // 조회에 실패했으면 비서 문맥도 «없다»가 아니라 «못 읽었다»라고 말해야 한다.
+    // 슬러그를 제목으로 쓰지 않는다 — 한국어 화면 제목이 없으면 «선택 없음»이 더 정확하다.
     title: selected?.title
-      || (failed ? '조회 불가' : Object.values(counts).some((v) => v) ? module : '선택 없음'),
+      || (failed ? '조회 불가'
+        : Object.values(counts).some((v) => v) ? (moduleTitle || '선택 없음') : '선택 없음'),
     desc: failed
       ? '목록을 가져오지 못했습니다 — «0건»이 아닙니다.'
       : selected?.meta || '좌측에서 항목을 선택하면 그 자료를 문맥으로 씁니다.',

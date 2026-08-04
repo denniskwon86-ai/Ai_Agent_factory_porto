@@ -16,6 +16,8 @@ export type ApiEnvelope<T> = {
   status?: string;
   data: T;
   blocked_reason?: string;
+  /** 가려진 것이 있는가(누구에게나). 건수는 DA·관리자에게만 온다 — `api.deps.hidden_envelope`. */
+  hidden_present?: boolean;
   hidden_count?: number;
   [key: string]: unknown;
 };

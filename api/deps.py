@@ -219,6 +219,28 @@ def scope_allows_owner(scopes: Optional[frozenset], owner_org_id: str) -> bool:
     return bool(owner) and owner in scopes
 
 
+def hidden_envelope(p: Principal, total: int, shown: int) -> dict:
+    """★★ 목록이 무언가를 **가렸다**는 사실을 응답에 담는다. 건수를 줄지는 여기서만 정한다.
+
+    두 가지를 동시에 만족해야 한다.
+      ① 사용자는 "이게 전부가 아니다"를 반드시 알아야 한다. 모르면 자기가 본 목록을 전량으로
+         믿고 결정한다 — 그래서 `hidden_present` 는 **누구에게나** 준다.
+      ② 그러나 **정확한 건수는 남의 조직 자료 규모를 알려준다.** 404 Data Stealth 로 존재를
+         숨기면서 "옆 조직에 47건 있다"를 말하면 통제가 앞뒤로 어긋난다. 건수를 세어 보면
+         조직 규모·프로젝트 수를 추정할 수 있고, 그건 목록을 여는 것과 크게 다르지 않다.
+         → 정확한 건수는 **자료를 관리할 사람(DA·관리자)** 에게만 준다.
+
+    ⚠️ 이 판정을 라우트에 흩어 두지 않는다. 프론트에서 가리는 것도 답이 아니다 —
+      응답에 숫자가 들어 있으면 다른 클라이언트·스크립트에는 그대로 새어 나간다.
+      숨김은 **보내지 않는 것**이지 보여주지 않는 것이 아니다.
+    """
+    hidden = max(0, int(total) - int(shown))
+    out: dict = {"hidden_present": hidden > 0}
+    if hidden and (p.scope.unrestricted or p.scope.can_manage_standard):
+        out["hidden_count"] = hidden
+    return out
+
+
 def _resource_readable(p: Principal, kind: str, rid: str) -> bool:
     if p.scope.unrestricted:
         return True

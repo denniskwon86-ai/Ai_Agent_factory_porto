@@ -178,7 +178,41 @@ def test_master_lists_follow_scope_bindings(monkeypatch):
     types = c.get("/api/v1/master/types").json()
     assert [r["master_code"] for r in records["data"]] == ["MAT-A"]
     assert [t["type_id"] for t in types["data"]] == ["material"]
-    assert records["hidden_count"] == 1 and types["hidden_count"] == 1
+    # ★ 일반 사용자는 «가려진 것이 있다»만 안다. 정확한 건수는 타 조직 자료의 규모를 알려주므로
+    #   DA·관리자에게만 준다(`api.deps.hidden_envelope`). 아래 두 테스트가 양쪽을 지킨다.
+    assert records["hidden_present"] is True and types["hidden_present"] is True
+    assert "hidden_count" not in records, "일반 사용자에게 정확한 숨김 건수가 새어 나갔다"
+    assert "hidden_count" not in types, "일반 사용자에게 정확한 숨김 건수가 새어 나갔다"
+
+
+def test_master_hidden_count_is_given_to_data_admins(monkeypatch):
+    """DA·관리자는 정확한 숨김 건수를 받는다 — 자료를 바인딩해 고칠 사람이기 때문이다."""
+    _master_rows(monkeypatch)
+    c = TestClient(_app(
+        monkeypatch, user_id="da@ls", user={"user_id": "da@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "can_manage_standard": True,
+                  "readable_dept_ids": frozenset({"dept-a"}),
+                  "readable_scope_nodes": frozenset({"ORG-A"})}, routers=("master",)))
+    records = c.get("/api/v1/master/records").json()
+    assert records["hidden_present"] is True
+    assert records["hidden_count"] == 1, "DA 가 숨김 건수를 못 받으면 무엇을 고칠지 모른다"
+
+
+def test_master_no_hidden_rows_says_nothing_is_hidden(monkeypatch):
+    """가린 것이 없으면 `hidden_present` 는 False 다 — 이 값이 항상 True 면 아무 뜻이 없다."""
+    _master_rows(monkeypatch)
+    import api.routes.master_control as mc
+    # 이 사용자 범위(ORG-A)에 바인딩된 것만 존재하는 상황 — 즉 가릴 것이 없다.
+    monkeypatch.setattr(mc.master_data, "list_records", lambda *a, **k: [
+        {"master_code": "MAT-A", "type_id": "material", "name": "A 자재"},
+    ])
+    c = TestClient(_app(
+        monkeypatch, user_id="staff@ls", user={"user_id": "staff@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"}),
+                  "readable_scope_nodes": frozenset({"ORG-A"})}, routers=("master",)))
+    records = c.get("/api/v1/master/records").json()
+    assert [r["master_code"] for r in records["data"]] == ["MAT-A"]
+    assert records["hidden_present"] is False and "hidden_count" not in records
 
 
 def test_master_other_scope_detail_is_404_and_audited(monkeypatch):

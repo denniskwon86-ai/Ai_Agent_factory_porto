@@ -57,7 +57,14 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
-  const [visibility, setVisibility] = useState({ hiddenTypes: 0, hiddenRecords: 0 });
+  // ★★ [2026-08-04 실측 결함] 종전에는 숨김 건수를 숫자 두 개로만 들고 있었고, 배너가
+  //   "유형 14개와 레코드 0건은 표시하지 않습니다" 처럼 **한 문장으로 합성**했다. 두 가지가 틀렸다:
+  //     ① 레코드 건수는 «선택한 유형·검색 조건» 기준인데 문장은 전체처럼 읽힌다.
+  //     ② 가린 것이 없는 쪽이 «0건»으로 함께 나가서 "숨겨진 자료 없음"으로 오해된다.
+  //   → 있는 쪽만 각각 말한다. 건수는 서버가 DA·관리자에게만 주므로 `null` 이면 «있다»만 말한다.
+  const EMPTY_VIS = { typesHidden: false, typesCount: null as number | null,
+    recordsHidden: false, recordsCount: null as number | null };
+  const [visibility, setVisibility] = useState(EMPTY_VIS);
 
   const [typeForm, setTypeForm] = useState({ id: '', name: '', desc: '', schema: '' });
   const [recordForm, setRecordForm] = useState(EMPTY_RECORD);
@@ -93,7 +100,8 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
     setTypes(loading<MasterType[]>());
     try {
       const value = await masterDataApi.types();
-      setVisibility((v) => ({ ...v, hiddenTypes: value.hiddenCount }));
+      setVisibility((v) => ({ ...v, typesHidden: value.hiddenPresent,
+        typesCount: value.hiddenCount }));
       setTypes(value.blockedReason
         ? { status: 'forbidden', value: null, error: value.blockedReason, httpStatus: 403 }
         : ok(value.rows));
@@ -110,7 +118,8 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
     setRecords(loading<MasterRecord[]>());
     try {
       const value = await masterDataApi.records(typeId, query);
-      setVisibility((v) => ({ ...v, hiddenRecords: value.hiddenCount }));
+      setVisibility((v) => ({ ...v, recordsHidden: value.hiddenPresent,
+        recordsCount: value.hiddenCount }));
       setRecords(value.blockedReason
         ? { status: 'forbidden', value: null, error: value.blockedReason, httpStatus: 403 }
         : ok(value.rows));
@@ -139,7 +148,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const onUser = () => {
       setSelectedType(''); setSelectedCode(''); setDetail(ok(null));
-      setVisibility({ hiddenTypes: 0, hiddenRecords: 0 });
+      setVisibility(EMPTY_VIS);
       setTypes(loading<MasterType[]>()); setRecords(ok([])); loadTypes();
     };
     window.addEventListener('factory:acting-user-changed', onUser);
@@ -151,16 +160,18 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
   const selectedTypeData = typeRows.find((t) => t.type_id === selectedType) || null;
   const selectedRecord = detail.value;
   const railItems: RailItem[] = [
-    { id: 'catalog', label: '유형·레코드', hint: '골든 레코드 조회', mark: '목',
-      count: types.status === 'ok' ? recordRows.length : undefined },
-    { id: 'register', label: '등록·개정', hint: '구판을 보존해 개정', mark: '개' },
-    { id: 'import', label: 'CSV 일괄등록', hint: '행별 결과 확인', mark: 'CSV' },
-    { id: 'preview', label: '주입 미리보기', hint: '에이전트가 받는 값', mark: '주' },
+    { id: 'catalog', label: '유형·레코드', hint: '골든 레코드 조회', icon: 'catalog',
+      count: types.status === 'ok' ? recordRows.length : undefined,
+      countLabel: `현재 유형 레코드 ${recordRows.length}건` },
+    { id: 'register', label: '등록·개정', hint: '구판을 보존해 개정', icon: 'revise' },
+    { id: 'import', label: 'CSV 일괄등록', hint: '행별 결과 확인', icon: 'csv' },
+    { id: 'preview', label: '주입 미리보기', hint: '에이전트가 받는 값', icon: 'inject' },
   ];
 
   const jarvisState = selectedType ? records : types;
   const jarvis = foundationJarvis({
     module: `master_data/${view}`,
+    moduleTitle: MODULE[view].title,
     objectType: selectedRecord ? 'master_record' : 'master_type',
     selected: selectedRecord
       ? { id: selectedRecord.master_code, title: selectedRecord.name,
@@ -297,9 +308,23 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
         >
           {err && <Banner tone="error" title={errorTitle(err.status)}>{err.msg}</Banner>}
           {flash && <Banner tone="info">{flash}</Banner>}
-          {(visibility.hiddenTypes > 0 || visibility.hiddenRecords > 0) && (
+          {/* ⚠️ 두 문장을 합치지 않는다. 가린 것이 있는 쪽만 말하고, 레코드는 **무엇을 기준으로 센
+              것인지**(선택 유형·검색 조건)를 문장 안에 밝힌다. 종전 «유형 14개와 레코드 0건» 문장은
+              전체 기준으로 읽혀서 "숨겨진 레코드 없음"으로 오해됐다. */}
+          {visibility.typesHidden && (
             <Banner tone="warn">
-              현재 조직 범위 밖의 기준정보 유형 {visibility.hiddenTypes}개와 레코드 {visibility.hiddenRecords}건은 표시하지 않습니다.
+              {visibility.typesCount === null
+                ? '조직 범위 밖의 기준정보 유형은 표시하지 않았습니다 — 현재 조직 범위 자료만 표시 중입니다.'
+                : `조직 범위 밖의 기준정보 유형 ${visibility.typesCount}개는 표시하지 않았습니다.`}
+            </Banner>
+          )}
+          {visibility.recordsHidden && (
+            <Banner tone="warn">
+              {`현재 선택한 ‘${selectedTypeData?.name_ko || selectedType || '유형 미선택'}’ 유형과 `
+                + `검색 조건에서 조직 범위 밖 레코드`
+                + (visibility.recordsCount === null
+                  ? '는 표시하지 않았습니다 — 현재 조직 범위 자료만 표시 중입니다.'
+                  : ` ${visibility.recordsCount}건을 표시하지 않았습니다.`)}
             </Banner>
           )}
 
