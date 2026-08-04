@@ -193,7 +193,7 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     } catch (e: any) {
       // 빈 배열로 떨어뜨리지 않는다. 그 순간 «받은 앱 0건»이 되고, 그것은 사실이 아니다.
       setData(failed(e));
-      reportRequestFailure();
+      reportRequestFailure(e?.status);
     } finally { setBusy(null); }
   }, []);
 

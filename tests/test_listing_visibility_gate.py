@@ -323,3 +323,106 @@ def test_work_standard_reader_sees_list_and_admin_can_revise(monkeypatch):
     events = [a[0] for a, _ in recorded]
     assert "WORK_STANDARD_CHANGED" in events, (
         f"업무표준 개정이 감사에 남지 않았다 — 기준이 언제 바뀌었는지 설명할 수 없다: {recorded}")
+
+
+# ── 조직·사용자 명부: 읽기 라우트에 자격 검사가 **없었다**(2026-08-04 이관 4/10) ──────
+#
+# ★★★ 익명 요청 하나로 전 직원 21명의 **이름·이메일·소속 부서·관리자 여부**가 그대로 나왔다.
+#   목록이 새는 것이 아니라 **개인정보가 새는 것**이다. 명부는 조직 규모·인사 구조·권한 보유자를
+#   한 번에 알려주고, 그 조합이 표적 공격의 출발점이 된다.
+ROSTER = [
+    {"user_id": "boss@ls", "display_name": "관리자", "primary_dept_id": "hq", "is_admin": True},
+    {"user_id": "a@ls", "display_name": "가", "primary_dept_id": "dept-a"},
+    {"user_id": "b@ls", "display_name": "나", "primary_dept_id": "dept-b"},
+    {"user_id": "none@ls", "display_name": "미배정", "primary_dept_id": ""},
+]
+
+
+def _org_rows(monkeypatch):
+    import api.routes.org_control as oc
+    monkeypatch.setattr(oc.org_directory, "list_users", lambda: list(ROSTER))
+    monkeypatch.setattr(oc.org_directory, "get_tree", lambda: {"dept_id": "hq", "children": []})
+    monkeypatch.setattr(oc.org_directory, "list_departments", lambda inc=False: [{"dept_id": "hq"}])
+    return oc
+
+
+def _org_app(monkeypatch, *, enforced=True, user_id="", user=None, scope_kw=None):
+    """⚠️ 값을 **먼저 꺼내** 람다에 담는다. 람다 안에서 `kw.pop` 을 부르면 첫 호출에만 값이
+    있고 두 번째부터 기본값으로 돌아간다 — 실제로 그 실수로 테스트가 엉뚱하게 실패했다.
+
+    ⚠️ `get_user` 는 **한 번만** 패치한다. 요청자 자격 확인(`visibility_block_reason`)과 조회
+      대상 조회가 같은 함수를 쓰는 것이 실제 구조이므로, 두 곳에서 따로 패치하면 나중 것이
+      이겨서 «b@ls 를 물었는데 a@ls 가 돌아오는» 상태가 된다(그래서 403 이 200 으로 보였다)."""
+    import api.routes.org_control as oc
+    import core.org_directory as od
+    monkeypatch.setattr(od, "_org_enforce_effective", lambda: enforced)
+    monkeypatch.setattr(od.org_directory, "get_user",
+                        lambda uid: (user if (user_id and uid == user_id)
+                                     else next((u for u in ROSTER if u["user_id"] == uid), None)))
+    app = FastAPI()
+    app.include_router(oc.router)
+    app.dependency_overrides[current_principal] = lambda: Principal(
+        user_id=user_id,
+        scope=AccessScope(user_id=user_id, **(scope_kw or {"unrestricted": False})))
+    return app
+
+
+@pytest.mark.parametrize("uid,user,why", [
+    ("", None, "익명"),
+    ("ghost@ls", None, "미등록"),
+    ("old@ls", {"user_id": "old@ls", "status": "retired"}, "폐지"),
+])
+def test_org_directory_is_403_for_unentitled(monkeypatch, uid, user, why):
+    """★★★ 명부·트리·부서 목록 모두 자격을 요구한다. 실측에서는 익명에게 21명이 나왔다."""
+    _org_rows(monkeypatch)
+    c = TestClient(_org_app(monkeypatch, user_id=uid, user=user))
+    for path in ("/api/v1/org/users", "/api/v1/org/tree", "/api/v1/org/departments"):
+        assert c.get(path).status_code == 403, f"{why} 상태에서 {path} 가 열렸다"
+
+
+def test_org_users_are_filtered_to_readable_depts(monkeypatch):
+    """일반 사용자는 **자기 부서 인원 + 자기 자신**만 본다. 부서 미배정 계정은 보이지 않는다 —
+    미배정을 «전사 공개»로 읽으면 이행 기간 계정이 전원에게 노출된다."""
+    _org_rows(monkeypatch)
+    c = TestClient(_org_app(
+        monkeypatch, user_id="a@ls", user={"user_id": "a@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"})}))
+    body = c.get("/api/v1/org/users").json()
+    assert [u["user_id"] for u in body["data"]] == ["a@ls"]
+    assert body["hidden_present"] is True
+    # 전 직원 수는 조직 규모를 알려준다 — 건수도 권한을 따른다.
+    assert "hidden_count" not in body, "일반 사용자에게 전 직원 규모가 새어 나갔다"
+    # 범위 밖 개인의 권한 플래그·역할은 명부 한 줄보다 민감하다.
+    assert c.get("/api/v1/org/users/b@ls").status_code == 403
+    assert c.get("/api/v1/org/users/a@ls").status_code == 200, "자기 자신은 항상 보여야 한다"
+
+
+def test_org_admin_sees_everyone_with_exact_count(monkeypatch):
+    """★ 조직 편집 권한자는 전량을 본다 — 통제가 인사 운영을 막으면 통제가 꺼진다."""
+    _org_rows(monkeypatch)
+    c = TestClient(_org_app(
+        monkeypatch, user_id="boss@ls", user={"user_id": "boss@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "can_edit_org": True,
+                  "readable_dept_ids": frozenset({"hq"})}))
+    body = c.get("/api/v1/org/users").json()
+    assert len(body["data"]) == 4 and body["hidden_present"] is False
+    assert c.get("/api/v1/org/users/none@ls").status_code == 200
+
+
+def test_org_exact_count_rule_is_per_resource_kind(monkeypatch):
+    """★★ 정확한 건수 자격은 **자료 종류마다 다르다.** 데이터 표준 관리자(DA)에게 전 직원 명부
+    규모가 새지 않아야 하고, 그 반대도 마찬가지다."""
+    from api.deps import Principal as P, hidden_envelope
+    # ⚠️ `AccessScope.unrestricted` 의 **기본값은 True**(조직 미도입 하위호환)이다. 명시하지
+    #   않으면 무제한 권한자가 되어 이 테스트가 통과하는 것처럼 보인다 — 실제로 그렇게 새로 걸렸다.
+    da = P(user_id="da@ls", scope=AccessScope(
+        user_id="da@ls", unrestricted=False, can_manage_standard=True))
+    org = P(user_id="hr@ls", scope=AccessScope(
+        user_id="hr@ls", unrestricted=False, can_edit_org=True))
+    assert hidden_envelope(da, 10, 3, exact_for="standard").get("hidden_count") == 7
+    assert "hidden_count" not in hidden_envelope(da, 10, 3, exact_for="org")
+    assert hidden_envelope(org, 10, 3, exact_for="org").get("hidden_count") == 7
+    assert "hidden_count" not in hidden_envelope(org, 10, 3, exact_for="standard")
+    # 오타를 «건수 안 줌»으로 조용히 처리하면 관리자가 못 보는 이유를 아무도 못 찾는다.
+    with pytest.raises(ValueError):
+        hidden_envelope(org, 10, 3, exact_for="typo")

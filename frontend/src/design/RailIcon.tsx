@@ -20,8 +20,10 @@ export type RailIconName =
   | 'catalog' | 'revise' | 'csv' | 'inject'
   // 지식 허브
   | 'packs' | 'upload' | 'search' | 'sources'
-  // 업무표준(이관 3/10 에서 쓴다)
-  | 'standard' | 'checklist';
+  // 업무표준(이관 3/10)
+  | 'standard' | 'checklist'
+  // 조직·권한(이관 4/10)
+  | 'orgtree' | 'people' | 'shield';
 
 /** 이름 → 도형. `d` 는 stroke 로 그리고, `fillDots` 는 점처럼 채운다. */
 const SHAPES: Record<RailIconName, { d: string[]; dots?: [number, number][] }> = {
@@ -57,6 +59,12 @@ const SHAPES: Record<RailIconName, { d: string[]; dots?: [number, number][] }> =
   standard: { d: ['M12 3.2l2.6 1.9 3.2-.2.9 3.1 2.4 2.1-1.5 2.9.4 3.2-3.1 1-2.1 2.4-3-1.3-3 1.3-2.1-2.4-3.1-1 .4-3.2L2.9 10l2.4-2.1.9-3.1 3.2.2L12 3.2z', 'M9.2 12.2l2 2 3.6-3.8'] },
   // 점검 목록 — 체크박스 목록
   checklist: { d: ['M3.6 5.6h5v5h-5z', 'M4.8 8l1.4 1.4 2-2.4', 'M3.6 14h5v5h-5z', 'M11.6 8h8.8', 'M11.6 16.4h8.8'] },
+  // 조직도 — 위에서 아래로 갈라지는 계층(표·타일과 실루엣이 겹치지 않는다)
+  orgtree: { d: ['M9.4 3h5.2v3.6H9.4z', 'M3.2 17.4h4.6V21H3.2z', 'M9.7 17.4h4.6V21H9.7z', 'M16.2 17.4h4.6V21h-4.6z', 'M12 6.6v5.2', 'M5.5 17.4v-2.6h13v2.6', 'M12 11.8v3'] },
+  // 사용자 — 두 사람(«사용자에게 전달»의 한 사람 + 화살표와 구별된다)
+  people: { d: ['M9 10.6a3.2 3.2 0 100-6.4 3.2 3.2 0 000 6.4z', 'M2.6 20.4c0-3.5 2.9-6.4 6.4-6.4s6.4 2.9 6.4 6.4', 'M16.4 4.6a3.2 3.2 0 010 6.2', 'M18 14.4c2.1.7 3.4 2.6 3.4 5'] },
+  // 내 권한 — 방패
+  shield: { d: ['M12 3.2l7.4 2.6v5.6c0 4.2-3 7.8-7.4 9.4-4.4-1.6-7.4-5.2-7.4-9.4V5.8L12 3.2z', 'M9.2 12l2 2 3.6-3.8'] },
 };
 
 export function RailIcon({ name }: { name: RailIconName }) {

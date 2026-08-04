@@ -54,14 +54,14 @@ SHOTS = [
     ("업무표준-규정상세", ADMIN, "업무표준>#품질 검증"),
     ("업무표준-연혁", ADMIN, "업무표준>#품질 검증>개정 연혁"),
     ("업무표준-고지문", ADMIN, "업무표준>#품질 검증>에이전트 고지문"),
+    # 이관 4/10 — 조직·권한. 명부는 개인정보이므로 권한 세 갈래를 모두 본다.
+    ("조직권한-관리자", ADMIN, "조직·권한"),
+    ("조직권한-일반", NORMAL, "조직·권한"),
+    ("조직권한-익명", ANON, "조직·권한"),
+    ("조직권한-부서상세", ADMIN, "조직·권한>#마케팅"),
+    ("조직권한-사용자", ADMIN, "조직·권한>사용자"),
+    ("조직권한-내권한", NORMAL, "조직·권한>내 권한"),
 ]
-
-
-def switch_user(page: Page, uid: str) -> None:
-    """상단 바의 활동 사용자 선택을 바꾼다. 값이 없으면 익명."""
-    sel = page.locator("select").first
-    sel.select_option(value=uid)
-    page.wait_for_timeout(1200)
 
 
 def close_dialogs(page: Page) -> None:
@@ -71,6 +71,36 @@ def close_dialogs(page: Page) -> None:
             break
         btn.first.click()
         page.wait_for_timeout(300)
+
+
+def switch_user(page: Page, uid: str) -> None:
+    """활동 사용자를 바꾼다. 값이 없으면 익명.
+
+    ⚠️ 셀렉트로만 바꾸지 않는다. 사용자 명부에 자격 검사가 붙은 뒤로는 **익명 상태에서 목록이
+      비어** 셀렉트가 아예 없다(그때는 계정을 직접 입력해 진입한다). 목록에 의존하면 여기서
+      타임아웃이 나고, 그건 스크립트 문제가 아니라 «아무도 로그인할 수 없다» 는 제품 사실이다.
+    """
+    # ⚠️ 모달이 열려 있으면 `#root[inert]` 때문에 상단 바를 **클릭할 수 없다.** 셀렉트는 통과했지만
+    #   버튼은 막힌다 — 그래서 먼저 닫는다(실측: 여기서 30초 타임아웃이 났다).
+    close_dialogs(page)
+    if not uid:
+        anon = page.locator("button", has_text="익명")
+        if anon.count():
+            anon.first.click()
+            page.wait_for_timeout(1500)
+            return
+    sel = page.locator('select[aria-label="활동 사용자 선택"]')
+    if sel.count():
+        try:
+            sel.first.select_option(value=uid)
+            page.wait_for_timeout(1500)
+            return
+        except Exception:
+            pass                              # 목록에 없는 계정 — 아래 입력으로 넘어간다
+    box = page.locator('input[aria-label="활동 사용자 직접 입력"]')
+    box.first.fill(uid)
+    page.locator("button", has_text="전환").first.click()
+    page.wait_for_timeout(1800)
 
 
 def open_panel(page: Page, path: str) -> tuple[bool, str]:
@@ -352,7 +382,16 @@ def main() -> int:
                                       device_scale_factor=1)
             page = ctx.new_page()
             errors: list[str] = []
-            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            # ⚠️ «403 Forbidden» 리소스 오류는 **통제가 작동한 흔적**이다(익명이 명부를 못 받는
+            #   것이 정상이다). 그것까지 결함으로 세면 통제를 켤 때마다 게이트가 붉어지고,
+            #   그러면 사람이 게이트를 무시하기 시작한다. 그 외 오류는 그대로 잡는다.
+            def _console(m):
+                if m.type != "error":
+                    return
+                if "403" in m.text and "Failed to load resource" in m.text:
+                    return
+                errors.append(m.text)
+            page.on("console", _console)
             # ⚠️ `networkidle` 은 쓰지 않는다 — 앱이 상태를 계속 폴링해서 idle 이 오지 않는다.
             page.goto(FRONT, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_selector("select", timeout=30_000)   # 상단 바가 붙을 때까지

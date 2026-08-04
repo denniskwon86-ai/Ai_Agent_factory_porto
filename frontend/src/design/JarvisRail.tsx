@@ -65,7 +65,7 @@ export function JarvisRail({
       // 실패를 답으로 위장하지 않는다 — 무엇이 안 됐는지 그대로 말한다.
       //   ★ 그리고 그 실패를 상태 표시에 반영한다. 실패했는데 머리에 «연결»이 떠 있으면
       //     사용자는 원인을 자기 질문 탓으로 돌린다.
-      reportRequestFailure();
+      reportRequestFailure(e?.status);
       setErr(e?.status === 401
         ? '사용자를 지정해야 비서가 답할 수 있습니다.'
         : `비서 응답을 받지 못했습니다: ${e?.message || e}`);

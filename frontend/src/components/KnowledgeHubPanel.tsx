@@ -76,7 +76,7 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
         : ok(p.value.packs));
       reportRequestSuccess();
     }
-    else { setPacks(failed<Pack[]>(p.reason)); reportRequestFailure(); }
+    else { setPacks(failed<Pack[]>(p.reason)); reportRequestFailure((p.reason as any)?.status); }
     setRefSummary(r.status === 'fulfilled' ? ok(r.value) : failed<ReferenceSummary>(r.reason));
     setBusy(null);
   }, []);

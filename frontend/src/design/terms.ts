@@ -83,6 +83,25 @@ export const CHECK_TYPE_KO: Record<string, string> = {
   llm_judge: '모델 판정',
 };
 
+/** 부서 안에서의 역할. `viewer/member/manager` 는 내부 값이고 사용자에게는 «무엇을 할 수
+ *  있는가»로 읽혀야 한다. ⚠️ 빈 값은 «역할 없음»이며 «권한 없음»과 같지 않다(상위 부서에서
+ *  상속받을 수 있다) — 그래서 여기에 빈 값을 넣지 않고 화면이 따로 말한다. */
+export const DEPT_ROLE_KO: Record<string, string> = {
+  viewer: '열람',
+  member: '작업',
+  manager: '관리',
+};
+
+/** 부서·계정의 효력 상태. */
+export const ORG_STATUS_KO: Record<string, string> = {
+  active: '운영 중',
+  retired: '폐지',
+  draft: '초안',
+  superseded: '개정으로 대체(구판)',
+};
+
+export const deptRoleKo = (v: string) => userTerm(DEPT_ROLE_KO, v, '부서 역할');
+export const orgStatusKo = (v: string) => userTerm(ORG_STATUS_KO, v, '조직 상태');
 export const stageKo = (v: string) => userTerm(STAGE_KO, v, '업무표준 단계');
 export const standardKindKo = (v: string) => userTerm(STANDARD_KIND_KO, v, '표준 분류');
 export const agentKo = (v: string) => userTerm(AGENT_KO, v, '담당 에이전트');

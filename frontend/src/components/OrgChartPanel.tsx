@@ -1,348 +1,744 @@
-import { useEffect, useState } from 'react';
+// [이관 4/10] 조직·권한 — 부서는 «기준정보»다
+//
+// 개편하면 새 버전이 생기고 구판은 이력으로 보존된다(과거 산출물의 소유 부서 해석이 깨지면
+// 안 되기 때문). 폐지도 물리 삭제가 아니라 soft-retire 다.
+//
+// ★★ 이 화면에서 가장 중요한 값은 **부서의 조직 범위(`scope_node_id`)** 다. 이 값이 비면
+//   그 부서 사람들에게 조직 소유 자료(지식팩·참고문서·기준정보)가 **하나도 보이지 않는다**
+//   (관문 A: 미지정 = 비노출). 그래서 미지정을 조용히 두지 않고 경고로 세운다.
+//
+// ⚠️ 종전 구현에서 제거한 것:
+//   · `prompt()` 6곳 — 특히 **조직 범위를 prompt 로 입력**받고 있었다. 오타 하나로 부서 전체가
+//     자료를 못 보게 되는데, 브라우저 대화상자는 오타를 잡아 줄 방법이 없다. 이미 쓰이고 있는
+//     값에서 **고르게** 바꿨다(새 값도 화면 안 입력으로 넣을 수 있다).
+//   · `confirm()` 2곳 → `ConfirmInline`(키보드·스크린리더·스타일 모두 대응)
+//   · 자체 `API_BASE_URL` 선언(저장소에서 열 번째)과 직접 fetch → `lib/orgApi.ts`
+//   · 실패를 «없음»으로 쓰던 코드 — 403 상태에서도 «등록된 부서가 없습니다» 가 떴다.
+//   · `asUser` 임시 오버라이드 입력창 — 상단 바의 활동 사용자 선택이 이미 그 일을 한다.
+//     같은 일을 두 곳에서 하면 둘이 어긋나고, «지금 누구로 보고 있는가»가 두 답을 갖는다.
+//   · 사용자마다 부서 수만큼(12개) 셀렉트를 그리던 역할 편집 — 한 사용자를 골라 편집한다.
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
-const O = `${API_BASE_URL}/api/v1/org`;
+import {
+  ConfirmInline, EvidenceStrip, FormField, FoundationList, FoundationToolbar, VersionHistory,
+  useConfirm, type FoundationRow,
+} from '../design/DataFoundationShell';
+import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
+import { HubDialog } from '../design/HubDialog';
+import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
+import { DEPT_ROLE_KO, deptRoleKo, orgStatusKo } from '../design/terms';
+import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
+import { errorTitle } from '../lib/closedLoopFetch';
+import { orgApi, type Dept, type MyScope, type OrgUser } from '../lib/orgApi';
 
-interface Dept {
-  dept_id: string; name_ko: string; parent_id: string; path: string; depth: number;
-  master_domains: string[]; default_template_id: string; domain_agents: string[];
-  legacy_domain: string; version: number; status: string; valid_from: string;
-  scope_node_id: string;          // 대응 ECM 조직 노드 — 이 값이 자료 노출 범위를 정한다
-  children?: Dept[];
-}
-interface User {
-  user_id: string; display_name: string; primary_dept_id: string;
-  is_executive: boolean; is_admin: boolean; is_data_admin: boolean;
-  status: string; roles: Record<string, string>;
-}
-interface Scope {
-  user_id: string; unrestricted: boolean; can_edit_org: boolean;
-  can_run_enterprise: boolean; can_manage_standard: boolean;
-  readable_dept_ids: string[]; writable_dept_ids: string[];
-}
+type View = 'chart' | 'users' | 'history' | 'myscope';
 
-const ROLES = ['viewer', 'member', 'manager'] as const;
+const MODULE: Record<View, { kicker: string; title: string; subtitle: string; desc: string }> = {
+  chart: {
+    kicker: 'ORG CHART', title: '조직도',
+    subtitle: '부서는 기준정보입니다. 개편하면 새 버전이 됩니다.',
+    desc: '부서의 조직 범위가 자료 노출을 정합니다. 범위가 비면 그 부서에는 아무 자료도 보이지 않습니다.',
+  },
+  users: {
+    kicker: 'PEOPLE', title: '사용자',
+    subtitle: '계정의 권한과 부서 역할을 관리합니다.',
+    desc: '권한 표식은 전사 범위를 넓힙니다. 부서 역할은 그 부서 안에서만 유효하고 하위로 상속됩니다.',
+  },
+  history: {
+    kicker: 'LINEAGE', title: '개편 이력',
+    subtitle: '부서가 언제 어떻게 바뀌었는지 봅니다.',
+    desc: '구판이 보존되므로 과거 산출물의 소유 부서를 계속 해석할 수 있습니다.',
+  },
+  myscope: {
+    kicker: 'MY ACCESS', title: '내 권한',
+    subtitle: '지금 내가 무엇을 볼 수 있는지 그 근거와 함께 봅니다.',
+    desc: '«왜 안 보이는가»의 답이 여기 있습니다. 부족하면 무엇을 요청해야 하는지도 함께 적습니다.',
+  },
+};
 
-// 🏢 조직도 — 부서는 '기준정보'다. 개편하면 새 버전이 생기고 구판은 이력으로 보존된다
-// (과거 산출물의 소유 부서 해석이 깨지면 안 되기 때문). 폐지도 물리 삭제가 아니라 soft-retire.
+/** 권한 표식 — 무엇을 넓히는지 한 줄로 말한다. 표식 이름만으로는 결과를 알 수 없다. */
+const FLAGS: { key: 'is_admin' | 'is_executive' | 'is_data_admin'; label: string; what: string }[] = [
+  { key: 'is_admin', label: '관리자', what: '조직 편집·표준 관리·전사 실행 전부' },
+  { key: 'is_executive', label: '경영진', what: '전 부서 열람과 전사 실행. 조직 편집은 불가' },
+  { key: 'is_data_admin', label: '데이터 관리자', what: '표준·카탈로그 전권과 메타 전사 열람' },
+];
+
 export function OrgChartPanel({ onClose }: { onClose: () => void }) {
-  const [tree, setTree] = useState<Dept[]>([]);
-  const [flat, setFlat] = useState<Dept[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [scope, setScope] = useState<Scope | null>(null);
-  const [tab, setTab] = useState<'dept' | 'user'>('dept');
-  const [sel, setSel] = useState<string | null>(null);
-  const [hist, setHist] = useState<Dept[]>([]);
-  const [asUser, setAsUser] = useState('');
+  const [view, setView] = useState<View>('chart');
+  const [tree, setTree] = useState<Loaded<Dept[]>>(loading<Dept[]>());
+  const [flat, setFlat] = useState<Loaded<Dept[]>>(loading<Dept[]>());
+  const [users, setUsers] = useState<Loaded<OrgUser[]>>(loading<OrgUser[]>());
+  const [hidden, setHidden] = useState<{ present: boolean; count: number | null }>(
+    { present: false, count: null });
+  const [me, setMe] = useState<Loaded<MyScope | null>>(loading<MyScope | null>());
+  const [selDept, setSelDept] = useState('');
+  const [selUser, setSelUser] = useState('');
+  const [hist, setHist] = useState<Loaded<Dept[]>>(ok<Dept[]>([]));
+  const [search, setSearch] = useState('');
+  const [deptSearch, setDeptSearch] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
 
-  // [Phase 2] 평상시 식별은 전역 인터셉터(lib/api)가 붙인다. 여기 asUser 는
-  // **다른 사용자 시점을 즉석에서 확인**하기 위한 임시 오버라이드다(전역 상태를 바꾸지 않는다).
-  const H = (): HeadersInit =>
-    asUser ? { 'Content-Type': 'application/json', 'X-Factory-User': asUser }
-           : { 'Content-Type': 'application/json' };
+  // 화면 안 편집 폼 — `prompt()` 를 쓰지 않는다.
+  const [deptForm, setDeptForm] = useState({ id: '', name: '', parent: '' });
+  const [scopeDraft, setScopeDraft] = useState('');
+  const [userForm, setUserForm] = useState({ id: '', name: '' });
 
-  const load = async () => {
-    setBusy('조회 중...'); setErr(null);
+  const retire = useConfirm<Dept>();
+  const seed = useConfirm<string>();
+
+  const load = useCallback(async () => {
+    setTree(loading<Dept[]>()); setFlat(loading<Dept[]>());
+    setUsers(loading<OrgUser[]>()); setMe(loading<MyScope | null>());
+    // ⚠️ 네 조회를 **따로** 담는다. 하나가 실패했다고 나머지를 «없음»으로 만들지 않는다.
+    const [t, d, u, m] = await Promise.allSettled([
+      orgApi.tree(), orgApi.departments(), orgApi.users(), orgApi.me(),
+    ]);
+    const asLoaded = <T,>(r: PromiseSettledResult<{ rows: T[]; blockedReason: string }>) => {
+      if (r.status !== 'fulfilled') {
+        // 401/403 은 통제가 작동한 것이므로 «서버 이상»으로 세지 않는다.
+        reportRequestFailure((r.reason as any)?.status);
+        return failed<T[]>(r.reason);
+      }
+      reportRequestSuccess();
+      return r.value.blockedReason
+        ? { status: 'forbidden' as const, value: null, error: r.value.blockedReason, httpStatus: 403 }
+        : ok(r.value.rows);
+    };
+    setTree(asLoaded<Dept>(t));
+    setFlat(asLoaded<Dept>(d));
+    setUsers(asLoaded<OrgUser>(u));
+    if (u.status === 'fulfilled') {
+      setHidden({ present: u.value.hiddenPresent, count: u.value.hiddenCount });
+    } else setHidden({ present: false, count: null });
+    setMe(m.status === 'fulfilled' ? ok(m.value) : failed<MyScope | null>(m.reason));
+  }, []);
+
+  const loadHistory = useCallback(async (deptId: string) => {
+    if (!deptId) { setHist(ok<Dept[]>([])); return; }
+    setHist(loading<Dept[]>());
+    try { setHist(ok(await orgApi.deptHistory(deptId))); reportRequestSuccess(); }
+    catch (e: any) { setHist(failed<Dept[]>(e)); reportRequestFailure(e?.status); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const onUser = () => {
+      setSelDept(''); setSelUser(''); setHist(ok<Dept[]>([])); setErr(null); setFlash(null);
+      load();
+    };
+    window.addEventListener('factory:acting-user-changed', onUser);
+    return () => window.removeEventListener('factory:acting-user-changed', onUser);
+  }, [load]);
+
+  const run = async (label: string, fn: () => Promise<unknown>, success: string) => {
+    setBusy(label); setErr(null); setFlash(null);
     try {
-      const [t, d, u, m] = await Promise.all([
-        fetch(`${O}/tree`), fetch(`${O}/departments`), fetch(`${O}/users`),
-        fetch(`${O}/me`, { headers: H() }),
-      ]);
-      setTree((await t.json())?.data || []);
-      setFlat((await d.json())?.data || []);
-      setUsers((await u.json())?.data || []);
-      setScope((await m.json())?.data || null);
-    } catch (e: any) { setErr(`조회 실패: ${e?.message || e}`); }
-    finally { setBusy(null); }
-  };
-
-  useEffect(() => { load(); }, [asUser]);
-
-  const call = async (method: string, path: string, body?: any) => {
-    setBusy('처리 중...'); setErr(null);
-    try {
-      const r = await fetch(`${O}${path}`, { method, headers: H(), body: body ? JSON.stringify(body) : undefined });
-      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j?.detail || `HTTP ${r.status}`); }
+      await fn(); reportRequestSuccess(); setFlash(success);
       await load();
+      if (selDept) await loadHistory(selDept);
       return true;
-    } catch (e: any) { setErr(`${e?.message || e}`); return false; }
-    finally { setBusy(null); }
+    } catch (e: any) {
+      reportRequestFailure(e?.status); setErr({ msg: e?.message || String(e), status: e?.status });
+      return false;
+    } finally { setBusy(null); }
   };
 
-  const seed = async () => {
-    if (!confirm('코드에 하드코딩되어 있던 부서를 기준정보로 적재합니다(멱등). 기존 부서는 건드리지 않습니다.')) return;
-    await call('POST', '/seed');
+  // ── 파생 ────────────────────────────────────────────────────────────────
+  const deptRows = flat.value || [];
+  const userRows = users.value || [];
+  const scope = me.value;
+  const canEdit = Boolean(scope?.can_edit_org || scope?.unrestricted);
+  const selectedDept = deptRows.find((d) => d.dept_id === selDept) || null;
+  const selectedUser = userRows.find((u) => u.user_id === selUser) || null;
+  const unscoped = deptRows.filter((d) => !String(d.scope_node_id || '').trim());
+
+  /** 이미 쓰이고 있는 조직 범위 값. ★ 여기서 목록을 만드는 이유: 이 저장소에는 부서가 쓰는
+   *  `LS_MNM` 계열 코드와 ECM 트리의 `node_*` 해시가 **함께** 존재한다. 어느 쪽이 정본인지는
+   *  이 화면이 정할 일이 아니므로, 실제로 쓰이는 값을 그대로 제안하고 새 값도 받는다. */
+  const scopeChoices = useMemo(
+    () => [...new Set(deptRows.map((d) => String(d.scope_node_id || '').trim()).filter(Boolean))]
+      .sort(),
+    [deptRows]);
+
+  useEffect(() => { setScopeDraft(selectedDept?.scope_node_id || ''); }, [selDept, selectedDept]);
+
+  /** 부서 검색. ⚠️ 종전에는 부서 탭에 **동작하지 않는 검색창**이 놓여 있었다(빈 `onSearch`).
+   *  입력할 수 있게 생긴 칸이 아무 일도 하지 않으면 사용자는 자기가 잘못 쳤다고 생각한다. */
+  const filteredDepts = useMemo(() => {
+    const q = deptSearch.trim().toLowerCase();
+    if (!q) return deptRows;
+    return deptRows.filter((d) => `${d.name_ko} ${d.dept_id} ${d.scope_node_id || ''}`
+      .toLowerCase().includes(q));
+  }, [deptRows, deptSearch]);
+
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return userRows;
+    return userRows.filter((u) => `${u.display_name} ${u.user_id} ${u.primary_dept_id}`
+      .toLowerCase().includes(q));
+  }, [userRows, search]);
+
+  const railItems: RailItem[] = [
+    { id: 'chart', label: '조직도', hint: '부서와 조직 범위', icon: 'orgtree',
+      // 범위 미지정은 **처리해야 할 일**이다 — 이 배지는 대기 건수의 뜻과 맞다.
+      count: flat.status === 'ok' && unscoped.length ? unscoped.length : undefined,
+      countLabel: `조직 범위 미지정 부서 ${unscoped.length}개` },
+    { id: 'users', label: '사용자', hint: '권한과 부서 역할', icon: 'people' },
+    { id: 'history', label: '개편 이력', hint: '구판은 보존된다', icon: 'revise' },
+    { id: 'myscope', label: '내 권한', hint: '왜 안 보이는가', icon: 'shield' },
+  ];
+
+  // ★★ 완료 조건 ②: 권한이 있는 사람에게만 행동을 안내한다.
+  const jarvisActions = canEdit
+    ? ['부서 추가', '조직 범위 지정', '권한 표식 변경', '부서 역할 지정']
+    : [];
+  const jarvisContext = {
+    current_module: `org/${view}`,
+    selected_object_type: view === 'users' ? 'org_user' : 'org_department',
+    selected_object_id: view === 'users' ? (selectedUser?.user_id || '') : (selectedDept?.dept_id || ''),
+    object_snapshot: view === 'users'
+      ? (selectedUser ? { user_id: selectedUser.user_id, dept: selectedUser.primary_dept_id }
+        : { load_status: users.status, total: userRows.length })
+      : (selectedDept ? { dept_id: selectedDept.dept_id, scope_node_id: selectedDept.scope_node_id,
+        version: selectedDept.version }
+        : { load_status: flat.status, total: deptRows.length, unscoped: unscoped.length }),
+    available_actions: jarvisActions,
+    evidence_refs: [],
   };
+  const jarvisTitle = view === 'users'
+    ? (selectedUser ? selectedUser.display_name
+      : users.status === 'ok' ? '사용자' : '조회 불가')
+    : (selectedDept ? selectedDept.name_ko
+      : flat.status === 'ok' ? MODULE[view].title : '조회 불가');
+  const jarvisDesc = view === 'users'
+    ? (selectedUser
+      ? `${selectedUser.user_id} · ${selectedUser.primary_dept_id || '부서 미배정'}`
+      : users.status === 'ok' ? '왼쪽 목록에서 사람을 고르면 그 계정을 문맥으로 씁니다.'
+        : '사용자 명부를 가져오지 못했습니다 — «없다»가 아닙니다.')
+    : (selectedDept
+      ? `${selectedDept.dept_id} · v${selectedDept.version} · `
+        + (selectedDept.scope_node_id || '조직 범위 미지정')
+      : flat.status === 'ok'
+        ? (unscoped.length
+          ? `조직 범위가 없는 부서가 ${unscoped.length}개 있습니다 — 그 부서에는 자료가 보이지 않습니다.`
+          : '부서를 고르면 그 부서를 문맥으로 씁니다.')
+        : '조직도를 가져오지 못했습니다 — «없다»가 아닙니다.');
 
-  const addDept = async (parentId: string) => {
-    const id = prompt(`새 부서 ID (영소문자·숫자·_-, 2~32자)${parentId ? `\n상위: ${parentId}` : '\n(최상위)'}`);
-    if (!id) return;
-    const name = prompt('부서명(한글)');
-    if (!name) return;
-    await call('POST', '/departments', { dept_id: id.trim(), name_ko: name.trim(), parent_id: parentId });
-  };
+  const deptListRows: FoundationRow[] = filteredDepts.map((d) => ({
+    id: d.dept_id,
+    // ⚠️ 제목을 공백으로 들여쓰지 않는다 — 목록 아바타가 제목 앞 두 글자를 쓰므로 **빈 원**이
+    //   된다(실제로 본사만 글자가 있었고 나머지는 다 빈 원이었다).
+    //   더 나쁜 것은 그때 넣은 들여쓰기가 일반 공백이 아니라 NBSP 였다는 점이다 — 눈에도
+    //   안 보이고 `trim()` 으로도 안 잡히는 문자가 화면 결함의 원인이었다.
+    //   계층은 메타에 «상위» 로 적는다.
+    title: d.name_ko,
+    meta: `${d.dept_id} · v${d.version} · ${orgStatusKo(d.status)}`
+      + (d.parent_id
+        ? ` · 상위 ${deptRows.find((x) => x.dept_id === d.parent_id)?.name_ko || d.parent_id}`
+        : ' · 최상위'),
+    chip: String(d.scope_node_id || '').trim()
+      ? { label: d.scope_node_id, tone: 'success' }
+      // ⚠️ 미지정을 조용히 두지 않는다. 이 값이 비면 그 부서에는 자료가 하나도 안 보인다.
+      : { label: '범위 미지정', tone: 'warn' },
+  }));
 
-  const renameDept = async (d: Dept) => {
-    const name = prompt('부서명 변경 (개정 시 새 버전이 되고 구판은 이력으로 남습니다)', d.name_ko);
-    if (!name || name === d.name_ko) return;
-    await call('PUT', `/departments/${d.dept_id}`, { name_ko: name.trim() });
-  };
-
-  // ★★ [2026-07-31] 부서의 **조직 범위**를 편집한다. 이 값이 비면 그 부서 사람들에게는
-  //   조직 소유 자료(지식팩·참고문서)가 **하나도 보이지 않는다**(관문 A: 미지정 = 비노출).
-  //   ⚠️ 화면에서 볼 수 없는 권한 값은 아무도 관리하지 못한다 — 값만 만들고 화면에 내지 않으면
-  //     "왜 안 보이나"의 답이 DB 안에 숨는다.
-  const setScopeNode = async (d: Dept) => {
-    const v = prompt(
-      `'${d.name_ko}' 가 대응하는 조직 노드 코드
-` +
-      `예: LS_MNM(전사) · MNM_BATTERY(배터리소재 사업부) · MNM_COPPER(동제련 사업부)
-` +
-      `※ 비우면 미지정 — 이 부서 사람들에게 조직 소유 자료가 보이지 않습니다
-` +
-      `※ 개정이므로 새 버전이 되고 구판은 이력으로 남습니다`,
-      d.scope_node_id || '');
-    if (v === null) return;
-    await call('PUT', `/departments/${d.dept_id}`, { scope_node_id: v.trim() });
-  };
-
-  const moveDept = async (d: Dept) => {
-    const p = prompt(`'${d.name_ko}' 를 어느 부서 밑으로 옮길까요? (비우면 최상위)\n※ 자기 하위 부서로는 옮길 수 없습니다`, d.parent_id);
-    if (p === null) return;
-    await call('PUT', `/departments/${d.dept_id}`, { parent_id: p.trim() });
-  };
-
-  const retireDept = async (d: Dept) => {
-    if (!confirm(`'${d.name_ko}' 를 폐지합니다.\n물리 삭제가 아니라 soft-retire 이며, 과거 산출물의 소유 부서 해석은 유지됩니다.`)) return;
-    await call('DELETE', `/departments/${d.dept_id}`);
-  };
-
-  const showHistory = async (deptId: string) => {
-    setSel(deptId); setHist([]);
-    try {
-      const r = await fetch(`${O}/departments/${deptId}/history`);
-      if (r.ok) setHist((await r.json())?.data || []);
-    } catch { /* 이력 없음은 치명적이지 않다 */ }
-  };
-
-  const addUser = async () => {
-    const id = prompt('사용자 ID (영문·숫자·. _ - @, 1~64자)');
-    if (!id) return;
-    const name = prompt('표시 이름');
-    if (!name) return;
-    await call('POST', '/users', { user_id: id.trim(), display_name: name.trim() });
-  };
-
-  const toggleFlag = async (u: User, flag: 'is_admin' | 'is_executive' | 'is_data_admin') => {
-    await call('POST', '/users', { ...u, [flag]: !u[flag] });
-  };
-
-  const setRole = async (u: User, deptId: string, role: string) => {
-    const roles = { ...(u.roles || {}) };
-    if (role) roles[deptId] = role; else delete roles[deptId];
-    await call('PUT', `/users/${u.user_id}/roles`, { roles });
-  };
-
-  const canEdit = !!scope?.can_edit_org || !!scope?.unrestricted;
-
-  const renderNode = (d: Dept, depth = 0) => (
-    <li key={d.dept_id}>
-      <div className="flex items-center gap-2 py-1.5 group" style={{ paddingLeft: depth * 18 }}>
-        <span className="text-gray-600 text-xs">{d.children?.length ? '▾' : '·'}</span>
-        <button onClick={() => showHistory(d.dept_id)}
-          className={`text-sm ${sel === d.dept_id ? 'text-gray-100 font-semibold' : 'text-gray-300'} hover:text-gray-100`}>
-          {d.name_ko}
-        </button>
-        <span className="text-[10px] text-gray-600 font-mono">{d.dept_id}</span>
-        <span className="text-[10px] text-gray-700">v{d.version}</span>
-        {d.default_template_id && (
-          <span className="text-[10px] text-indigo-500/80" title="기본 템플릿">{d.default_template_id}</span>
-        )}
-        {/* 조직 범위 — 미지정이면 경고색으로 드러낸다. 조용히 비어 있으면 아무도 못 찾는다 */}
-        {d.scope_node_id ? (
-          <span className="text-[10px] px-1 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-700/40"
-            title="이 부서가 대응하는 조직 노드 — 자료 노출 범위를 정합니다">{d.scope_node_id}</span>
-        ) : (
-          <span className="text-[10px] px-1 rounded bg-amber-900/30 text-amber-400 border border-amber-700/40"
-            title="조직 범위 미지정 — 이 부서 사람들에게는 조직 소유 자료가 보이지 않습니다">범위 미지정</span>
-        )}
-        {canEdit && (
-          <span className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-1">
-            <IconBtn onClick={() => addDept(d.dept_id)} title="하위 부서 추가">＋</IconBtn>
-            <IconBtn onClick={() => renameDept(d)} title="개명(개정)">✎</IconBtn>
-            <IconBtn onClick={() => moveDept(d)} title="상위 부서 이동">⇄</IconBtn>
-            <IconBtn onClick={() => setScopeNode(d)} title="조직 범위(ECM 노드) 지정">◎</IconBtn>
-            <IconBtn onClick={() => retireDept(d)} title="폐지(soft-retire)" danger>⊘</IconBtn>
-          </span>
-        )}
-      </div>
-      {d.children?.length ? <ul>{d.children.map((c) => renderNode(c, depth + 1))}</ul> : null}
-    </li>
-  );
+  const userListRows: FoundationRow[] = filteredUsers.map((u) => {
+    const marks = FLAGS.filter((f) => u[f.key]).map((f) => f.label);
+    return {
+      id: u.user_id,
+      title: u.display_name || u.user_id,
+      meta: `${u.user_id} · ${u.primary_dept_id || '부서 미배정'}`
+        + (marks.length ? ` · ${marks.join('·')}` : ''),
+      chip: u.status && u.status !== 'active'
+        ? { label: orgStatusKo(u.status), tone: 'danger' }
+        : marks.length ? { label: marks[0], tone: 'data' }
+          : { label: `역할 ${Object.keys(u.roles || {}).length}개`, tone: 'muted' },
+    };
+  });
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl h-[88vh] bg-gray-950 border border-gray-700 rounded-xl flex flex-col overflow-hidden">
-        <header className="h-14 px-5 border-b border-gray-700 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold text-gray-100">🏢 조직·권한</h2>
-            <span className="text-xs text-gray-500">부서는 기준정보 — 개편하면 새 버전이 되고 구판은 이력으로 보존됩니다</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <input value={asUser} onChange={(e) => setAsUser(e.target.value)} placeholder="사용자로 보기(ID)"
-              className="px-2 py-1 text-xs bg-gray-900 border border-gray-700 rounded text-gray-300 w-40"
-              title="이 ID 로 권한을 해석해 화면을 그립니다(X-User-Id 헤더)" />
-            <button onClick={seed} disabled={!canEdit}
-              className="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-40"
-              title="코드에 하드코딩되어 있던 부서를 기준정보로 적재(멱등)">부서 시드</button>
-            <button onClick={onClose} className="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">닫기</button>
-          </div>
-        </header>
-
-        {scope && (
-          <div className="px-5 py-2 text-[11px] border-b border-gray-700 shrink-0 flex items-center gap-3 flex-wrap">
-            <span className="text-gray-500">현재 권한:</span>
-            <Badge on={scope.unrestricted} label="무제한" hint="조직 미도입/부트스트랩/강제해제 상태" />
-            <Badge on={scope.can_edit_org} label="조직편집" />
-            <Badge on={scope.can_run_enterprise} label="전사실행" />
-            <Badge on={scope.can_manage_standard} label="표준관리" />
-            {!scope.unrestricted && (
-              <span className="text-gray-600">읽기 {scope.readable_dept_ids.length}개 · 쓰기 {scope.writable_dept_ids.length}개</span>
-            )}
-          </div>
-        )}
-        {(busy || err) && (
-          <div className={`px-5 py-2 text-xs shrink-0 ${err ? 'text-red-400 bg-red-950/30' : 'text-indigo-300 bg-indigo-950/20'}`}>
-            {err || busy}
-          </div>
-        )}
-
-        <div className="flex border-b border-gray-700 shrink-0">
-          {(['dept', 'user'] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-5 py-2.5 text-xs font-semibold ${tab === t ? 'bg-gray-800 text-gray-100' : 'text-gray-500 hover:text-gray-300'}`}>
-              {t === 'dept' ? `조직도 (${flat.length})` : `사용자 (${users.length})`}
-            </button>
-          ))}
+    <HubDialog label="조직·권한 — 부서와 계정, 그리고 무엇이 보이는지" onClose={onClose}>
+      <div className="afs-dialog-bar">
+        <b>조직·권한</b>
+        <span>부서의 조직 범위가 자료 노출을 정합니다</span>
+        <div className="bar-actions">
+          {busy && <span className="busy">{busy} 중…</span>}
+          <button className="secondary-button" onClick={onClose}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
         </div>
+      </div>
 
-        <div className="flex-1 overflow-y-auto p-5 min-h-0">
-          {tab === 'dept' && (
-            <div className="flex gap-6">
-              <div className="flex-1 min-w-0">
-                {canEdit && (
-                  <button onClick={() => addDept('')} className="mb-2 text-xs text-indigo-400 hover:text-indigo-300">
-                    ＋ 최상위 부서 추가
-                  </button>
-                )}
-                {tree.length === 0 && !busy && (
-                  <p className="text-sm text-gray-600">
-                    등록된 부서가 없습니다. <b>부서 시드</b>로 기존 하드코딩 부서를 적재하거나 직접 추가하세요.
-                    <br /><span className="text-xs">부서가 없으면 권한 필터가 전부 무효(기존과 동일 동작)입니다.</span>
-                  </p>
-                )}
-                <ul>{tree.map((d) => renderNode(d))}</ul>
-              </div>
-              {hist.length > 0 && (
-                <aside className="w-72 shrink-0 border-l border-gray-700 pl-4">
-                  <h4 className="text-xs font-semibold text-gray-400 mb-2">{sel} 개편 이력</h4>
-                  <table className="w-full text-[11px]">
-                    <tbody>
-                      {hist.map((h) => (
-                        <tr key={h.version} className="border-b border-gray-700/60 text-gray-500">
-                          <td className="py-1 pr-2">v{h.version}</td>
-                          <td className="pr-2">{h.name_ko}</td>
-                          <td className={h.status === 'active' ? 'text-emerald-500' : ''}>{h.status}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p className="mt-2 text-[10px] text-gray-600 leading-relaxed">
-                    구판이 보존되므로 과거 산출물의 소유 부서를 계속 해석할 수 있습니다.
-                  </p>
-                </aside>
-              )}
+      <div className="afs-dialog-body">
+        <HubShell
+          kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
+          items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
+          footer={
+            <div className="inheritance-card">
+              <span>SCOPE</span>
+              <b>범위가 비면 아무것도 보이지 않습니다</b>
+              <p>부서에 조직 범위가 없으면 그 부서 사람들에게 조직 소유 자료가 하나도 보이지 않습니다.</p>
             </div>
+          }
+          jarvis={<JarvisRail contextTitle={jarvisTitle} contextDescription={jarvisDesc}
+            context={jarvisContext}
+            evidence={selectedDept && view !== 'users' ? [
+              { label: '부서 코드', value: selectedDept.dept_id },
+              { label: '버전', value: `v${selectedDept.version}` },
+              { label: '조직 범위', value: selectedDept.scope_node_id || '미지정' },
+            ] : selectedUser && view === 'users' ? [
+              { label: '계정', value: selectedUser.user_id },
+              { label: '소속', value: selectedUser.primary_dept_id || '미배정' },
+              { label: '상태', value: orgStatusKo(selectedUser.status || 'active') },
+            ] : []}
+            quickQuestions={[
+              '이 부서 사람들에게는 무엇이 보입니까?',
+              '조직 범위를 비워 두면 어떻게 됩니까?',
+              '이 권한 표식은 무엇을 넓힙니까?',
+            ]} />}
+        >
+          {err && <Banner tone="error" title={errorTitle(err.status)}>{err.msg}</Banner>}
+          {flash && <Banner tone="info">{flash}</Banner>}
+          {/* 서버가 만든 안내문 — «왜 안 보이는가»의 답이므로 화면 위쪽에 그대로 세운다. */}
+          {scope?.access_note && (() => {
+            // ⚠️ 서버의 안내문은 `**강조**` 마크다운을 쓴다. 그대로 그리면 화면에 별표가
+            //   보인다(실측). 렌더러를 들이지 않고 **첫 강조를 제목으로** 올린다 —
+            //   그 강조가 실제로 «무슨 일인지»를 말하는 문장이기 때문이다.
+            const m = scope.access_note.match(/^\s*\*\*(.+?)\*\*\s*(.*)$/s);
+            const plain = (s: string) => s.replace(/\*\*/g, '').trim();
+            return m
+              ? <Banner tone="warn" title={plain(m[1])}>{plain(m[2])}</Banner>
+              : <Banner tone="warn">{plain(scope.access_note)}</Banner>;
+          })()}
+          {hidden.present && view === 'users' && (
+            <Banner tone="warn">
+              {hidden.count === null
+                ? '읽을 수 있는 부서 밖의 인원은 표시하지 않았습니다 — 현재 조직 범위 인원만 표시 중입니다.'
+                : `읽을 수 있는 부서 밖의 인원 ${hidden.count}명은 표시하지 않았습니다.`}
+            </Banner>
           )}
 
-          {tab === 'user' && (
-            <div>
-              {canEdit && (
-                <button onClick={addUser} className="mb-3 text-xs text-indigo-400 hover:text-indigo-300">＋ 사용자 추가</button>
-              )}
-              {users.length === 0 && !busy && (
-                <p className="text-sm text-gray-600">
-                  등록된 사용자가 없습니다.
-                  <br /><span className="text-xs">사용자가 0명이면 권한을 강제하지 않습니다 — 첫 관리자를 만들 수 있도록 하기 위함입니다.</span>
-                </p>
-              )}
-              <div className="space-y-2">
-                {users.map((u) => (
-                  <div key={u.user_id} className="border border-gray-700 rounded p-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-gray-200">{u.display_name}</span>
-                      <span className="text-[11px] text-gray-600 font-mono">{u.user_id}</span>
-                      <span className="flex gap-1 ml-auto">
-                        <Flag on={u.is_admin} label="관리자" hint="전권(조직·표준·전사실행)"
-                          onClick={() => canEdit && toggleFlag(u, 'is_admin')} />
-                        <Flag on={u.is_executive} label="경영진" hint="전 부서 열람 + 전사 실행. 조직 편집은 불가"
-                          onClick={() => canEdit && toggleFlag(u, 'is_executive')} />
-                        <Flag on={u.is_data_admin} label="DA" hint="표준·카탈로그 전권 + 메타 전사 열람. 전사 실행은 불가"
-                          onClick={() => canEdit && toggleFlag(u, 'is_data_admin')} />
-                      </span>
+          <ScreenHead kicker={MODULE[view].kicker} title={MODULE[view].title}
+            description={MODULE[view].desc}
+            chip={flat.status !== 'ok'
+              ? flat.status === 'loading'
+                ? { label: '확인 중', tone: 'muted' }
+                : { label: flat.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
+              : unscoped.length
+                ? { label: `범위 미지정 ${unscoped.length}개`, tone: 'warn' }
+                : { label: `부서 ${deptRows.length}개`, tone: 'data' }} />
+
+          <div className="metric-row">
+            <Metric label="부서" state={flat.status}
+              value={flat.status === 'ok' ? deptRows.length : null} hint="운영 중인 부서" />
+            {/* ⚠️ 여기서 0 은 «좋다»는 뜻이다(전부 지정됨). 그래서 0 을 숨기지 않는다. */}
+            <Metric label="조직 범위 미지정" state={flat.status}
+              value={flat.status === 'ok' ? unscoped.length : null}
+              hint={unscoped.length ? '이 부서에는 자료가 보이지 않습니다' : '모든 부서에 범위가 있습니다'} />
+            <Metric label="사용자" state={users.status}
+              value={users.status === 'ok' ? userRows.length : null}
+              notes={{ empty: '표시할 인원 없음' }}
+              hint={hidden.present ? '범위 밖 인원은 제외' : '전체'} />
+            <Metric label="내 읽기 부서" state={me.status}
+              value={scope ? (scope.unrestricted ? '전체' : scope.readable_dept_ids.length) : null}
+              notes={{ loading: '권한 조회 중', error: '권한 조회 불가',
+                forbidden: '권한 조회 불가', empty: '배정된 부서 없음' }} />
+          </div>
+
+          {view === 'chart' && (
+            <>
+              <FoundationToolbar search={deptSearch} onSearch={setDeptSearch}
+                placeholder="부서명·코드·조직 범위로 찾기"
+                actions={canEdit ? (
+                  <button className="secondary-button" disabled={!!busy}
+                    onClick={() => seed.ask('all')}>부서 시드</button>
+                ) : undefined}
+                hint={flat.status !== 'ok' ? undefined
+                  : canEdit
+                    ? '개편은 새 버전이 되고 구판은 이력으로 남습니다. 폐지는 물리 삭제가 아닙니다.'
+                    : '조직 편집 권한이 없어 조회만 가능합니다 — 변경은 관리자에게 요청하십시오.'} />
+
+              <ConfirmInline open={seed.open}
+                title="코드에 하드코딩된 부서를 기준정보로 적재합니다"
+                body={<>멱등 동작이며 <b>기존 부서는 건드리지 않습니다.</b> 조직 범위는 부서별로
+                  따로 지정해야 합니다 — 시드만으로는 자료가 보이지 않습니다.</>}
+                confirmLabel="시드 실행" danger={false}
+                onConfirm={() => seed.run(() => run('부서 시드', orgApi.seedDepartments,
+                  '부서를 적재했습니다. 조직 범위는 부서별로 지정하십시오.'))}
+                onCancel={seed.cancel} />
+
+              <ConfirmInline open={retire.open}
+                title={`'${retire.target?.name_ko || ''}' 부서를 폐지합니다`}
+                body={<>물리 삭제가 아니라 폐지 표시입니다 — <b>과거 산출물의 소유 부서 해석은
+                  유지됩니다.</b> 이 부서에 배정된 사람들은 읽을 수 있는 범위를 잃습니다.</>}
+                confirmLabel="폐지"
+                onConfirm={() => retire.run((d) => run('폐지', () => orgApi.retireDept(d.dept_id),
+                  `'${d.name_ko}' 를 폐지했습니다. 구판은 이력으로 남습니다.`))}
+                onCancel={retire.cancel} />
+
+              <div className="inbox-layout">
+                <FoundationList state={flat} rows={deptListRows} selectedId={selDept}
+                  onSelect={(id) => { setSelDept(id); loadHistory(id); }} onRetry={load}
+                  kicker="DEPARTMENTS" title="부서"
+                  emptyText={<>등록된 부서가 없습니다. 부서가 없으면 조직 범위 필터가 전부
+                    무효이며 기존과 같이 동작합니다.</>} />
+
+                <Panel kicker="DEPARTMENT" title={selectedDept ? selectedDept.name_ko : '부서 상세'}>
+                  {!selDept ? (
+                    <div className="empty-note">왼쪽에서 부서를 선택하십시오.</div>
+                  ) : !selectedDept ? (
+                    <div className="empty-note">이 부서를 목록에서 찾지 못했습니다.</div>
+                  ) : (
+                    <div style={{ padding: '0 14px 14px' }}>
+                      <EvidenceStrip items={[
+                        { label: '부서 코드', value: selectedDept.dept_id },
+                        { label: '버전', value: `v${selectedDept.version}` },
+                        { label: '상태', value: orgStatusKo(selectedDept.status) },
+                      ]} note="개편은 구판을 지우지 않습니다 — 과거 산출물의 소유 부서가 유지됩니다." />
+
+                      {!String(selectedDept.scope_node_id || '').trim() && (
+                        <Banner tone="warn" title="조직 범위가 지정되지 않았습니다">
+                          이 부서에 배정된 사람들에게는 조직 소유 자료가 <b>하나도 보이지 않습니다.</b>
+                          비어 있는 것이 «전사 공개»를 뜻하지 않습니다.
+                        </Banner>
+                      )}
+
+                      {canEdit ? (
+                        <FormField label="조직 범위"
+                          hint="이미 쓰이는 값에서 고르거나 새 코드를 입력하십시오. 개정이므로 새 버전이 됩니다.">
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <select className="afs-select" style={{ maxWidth: 220 }}
+                              value={scopeChoices.includes(scopeDraft) ? scopeDraft : ''}
+                              onChange={(e) => setScopeDraft(e.target.value)}>
+                              <option value="">직접 입력 / 미지정</option>
+                              {scopeChoices.map((s) => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <input className="afs-input" style={{ maxWidth: 220 }}
+                              value={scopeDraft} onChange={(e) => setScopeDraft(e.target.value)}
+                              placeholder="예: LS_MNM" aria-label="조직 범위 코드" />
+                            <button className="primary-button" disabled={!!busy
+                              || scopeDraft.trim() === (selectedDept.scope_node_id || '')}
+                              onClick={() => run('조직 범위 지정',
+                                () => orgApi.updateDept(selectedDept.dept_id,
+                                  { scope_node_id: scopeDraft.trim() }),
+                                scopeDraft.trim()
+                                  ? `'${selectedDept.name_ko}' 의 조직 범위를 «${scopeDraft.trim()}» 로 지정했습니다.`
+                                  : `'${selectedDept.name_ko}' 의 조직 범위를 비웠습니다 — 이 부서에는 자료가 보이지 않습니다.`)}>
+                              적용
+                            </button>
+                          </div>
+                        </FormField>
+                      ) : (
+                        <p className="hint-line">
+                          조직 범위: <b>{selectedDept.scope_node_id || '미지정'}</b>
+                        </p>
+                      )}
+
+                      {canEdit && (
+                        <div style={{ display: 'flex', gap: 7, marginTop: 12, flexWrap: 'wrap' }}>
+                          <button className="danger-ghost" disabled={!!busy}
+                            onClick={() => retire.ask(selectedDept)}>부서 폐지</button>
+                        </div>
+                      )}
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {flat.map((d) => {
-                        const cur = u.roles?.[d.dept_id] || '';
-                        return (
-                          <select key={d.dept_id} value={cur} disabled={!canEdit}
-                            onChange={(e) => setRole(u, d.dept_id, e.target.value)}
-                            className={`text-[10px] px-1.5 py-0.5 rounded border bg-gray-900 disabled:opacity-40 ${
-                              cur ? 'border-indigo-700 text-indigo-300' : 'border-gray-700 text-gray-600'}`}
-                            title={`${d.name_ko} — 상위 부서 권한은 하위로 상속됩니다`}>
-                            <option value="">{d.name_ko} —</option>
-                            {ROLES.map((r) => <option key={r} value={r}>{d.name_ko} · {r}</option>)}
-                          </select>
-                        );
-                      })}
+                  )}
+                </Panel>
+              </div>
+
+              {canEdit && (
+                <Panel kicker="NEW" title="부서 추가" className="afs-mt">
+                  <div style={{ padding: 14, display: 'grid', gap: 10 }}>
+                    <FormField label="부서 코드" required
+                      hint="영소문자·숫자·_- 2~32자. 산출물의 소유 부서로 기록되므로 나중에 바꾸기 어렵습니다.">
+                      <input className="afs-input" value={deptForm.id}
+                        onChange={(e) => setDeptForm({ ...deptForm, id: e.target.value })}
+                        placeholder="예: quality" />
+                    </FormField>
+                    <FormField label="부서명" required>
+                      <input className="afs-input" value={deptForm.name}
+                        onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })}
+                        placeholder="예: 품질보증" />
+                    </FormField>
+                    <FormField label="상위 부서" hint="비우면 최상위가 됩니다.">
+                      <select className="afs-select" value={deptForm.parent}
+                        onChange={(e) => setDeptForm({ ...deptForm, parent: e.target.value })}>
+                        <option value="">(최상위)</option>
+                        {deptRows.map((d) => (
+                          <option key={d.dept_id} value={d.dept_id}>{d.name_ko} ({d.dept_id})</option>
+                        ))}
+                      </select>
+                    </FormField>
+                    <div>
+                      <button className="primary-button"
+                        disabled={!!busy || !deptForm.id.trim() || !deptForm.name.trim()}
+                        onClick={async () => {
+                          const okDone = await run('부서 추가', () => orgApi.createDept({
+                            dept_id: deptForm.id.trim(), name_ko: deptForm.name.trim(),
+                            parent_id: deptForm.parent,
+                          }), `'${deptForm.name.trim()}' 부서를 만들었습니다. 조직 범위를 지정해야 자료가 보입니다.`);
+                          if (okDone) setDeptForm({ id: '', name: '', parent: '' });
+                        }}>부서 만들기</button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
+                </Panel>
+              )}
+            </>
           )}
-        </div>
+
+          {view === 'users' && (
+            <>
+              <FoundationToolbar search={search} onSearch={setSearch}
+                placeholder="이름·계정·부서로 찾기"
+                hint={users.status !== 'ok' ? undefined
+                  : canEdit
+                    ? '권한 표식은 전사 범위를 넓힙니다. 부서 역할은 그 부서와 하위에서만 유효합니다.'
+                    : '조직 편집 권한이 없어 조회만 가능합니다 — 변경은 관리자에게 요청하십시오.'} />
+
+              <div className="inbox-layout">
+                <FoundationList state={users} rows={userListRows} selectedId={selUser}
+                  onSelect={setSelUser} onRetry={load}
+                  kicker="PEOPLE" title="사용자"
+                  emptyText={search
+                    ? <>«{search}» 와 일치하는 사람이 없습니다.</>
+                    : <>표시할 인원이 없습니다. 사용자가 0명이면 권한을 강제하지 않습니다 —
+                      첫 관리자를 만들 수 있도록 하기 위함입니다.</>} />
+
+                <Panel kicker="ACCOUNT"
+                  title={selectedUser ? (selectedUser.display_name || selectedUser.user_id) : '계정 상세'}>
+                  {!selUser ? (
+                    <div className="empty-note">왼쪽에서 사람을 선택하십시오.</div>
+                  ) : !selectedUser ? (
+                    <div className="empty-note">이 계정을 목록에서 찾지 못했습니다.</div>
+                  ) : (
+                    <div style={{ padding: '0 14px 14px' }}>
+                      <EvidenceStrip items={[
+                        { label: '계정', value: selectedUser.user_id },
+                        { label: '소속', value: selectedUser.primary_dept_id || '미배정' },
+                        { label: '상태', value: orgStatusKo(selectedUser.status || 'active') },
+                      ]} />
+
+                      <div className="section-grid" style={{ marginTop: 12 }}>
+                        <section>
+                          <h4>권한 표식</h4>
+                          {FLAGS.map((f) => (
+                            <div key={f.key} style={{ display: 'flex', alignItems: 'center',
+                              gap: 9, padding: '6px 0' }}>
+                              <button className={selectedUser[f.key] ? 'primary-button' : 'secondary-button'}
+                                disabled={!canEdit || !!busy}
+                                aria-pressed={selectedUser[f.key]}
+                                onClick={() => run(`${f.label} 변경`,
+                                  () => orgApi.upsertUser({ ...selectedUser, [f.key]: !selectedUser[f.key] }),
+                                  `${selectedUser.display_name} 의 «${f.label}» 표식을 `
+                                  + `${selectedUser[f.key] ? '해제' : '부여'}했습니다.`)}>
+                                {f.label} {selectedUser[f.key] ? '있음' : '없음'}
+                              </button>
+                              {/* 표식 이름만으로는 결과를 알 수 없다 — 무엇이 넓어지는지 함께 쓴다. */}
+                              <small style={{ color: 'var(--muted)' }}>{f.what}</small>
+                            </div>
+                          ))}
+                        </section>
+                      </div>
+
+                      <div className="section-grid" style={{ marginTop: 12 }}>
+                        <section>
+                          <h4>부서 역할<em>상위 부서 역할은 하위로 상속됩니다</em></h4>
+                          {flat.status !== 'ok' ? (
+                            <p className="section-missing">
+                              부서 목록을 가져오지 못해 역할을 표시할 수 없습니다.
+                            </p>
+                          ) : deptRows.length === 0 ? (
+                            <p className="section-missing">등록된 부서가 없습니다.</p>
+                          ) : (
+                            <div style={{ display: 'grid', gap: 6 }}>
+                              {deptRows.map((d) => {
+                                const cur = selectedUser.roles?.[d.dept_id] || '';
+                                return (
+                                  <div key={d.dept_id} style={{ display: 'grid',
+                                    gridTemplateColumns: 'minmax(0,1fr) 150px', gap: 9,
+                                    alignItems: 'center' }}>
+                                    <span className="section-text" style={{ margin: 0 }}>
+                                      {d.name_ko}
+                                      {/* 역할이 있어도 부서에 범위가 없으면 아무것도 안 보인다. */}
+                                      {!String(d.scope_node_id || '').trim() && cur
+                                        ? ' — 이 부서는 조직 범위가 없어 자료가 보이지 않습니다'
+                                        : ''}
+                                    </span>
+                                    <select className="afs-select" value={cur} disabled={!canEdit || !!busy}
+                                      aria-label={`${d.name_ko} 부서 역할`}
+                                      onChange={(e) => {
+                                        const roles = { ...(selectedUser.roles || {}) };
+                                        if (e.target.value) roles[d.dept_id] = e.target.value;
+                                        else delete roles[d.dept_id];
+                                        run('역할 지정',
+                                          () => orgApi.setRoles(selectedUser.user_id, roles),
+                                          `${selectedUser.display_name} 의 «${d.name_ko}» 역할을 `
+                                          + `${e.target.value ? deptRoleKo(e.target.value) : '해제'}로 바꿨습니다.`);
+                                      }}>
+                                      <option value="">역할 없음</option>
+                                      {Object.keys(DEPT_ROLE_KO).map((r) => (
+                                        <option key={r} value={r}>{deptRoleKo(r)}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </section>
+                      </div>
+                    </div>
+                  )}
+                </Panel>
+              </div>
+
+              {canEdit && (
+                <Panel kicker="NEW" title="사용자 추가">
+                  <div style={{ padding: 14, display: 'grid', gap: 10 }}>
+                    {/* ⚠️ 임의 계정을 만들면 실제 인원과 충돌한다. 화면이 그 사실을 먼저 말한다. */}
+                    <Banner tone="warn" title="실제 사내 계정과 같은 값을 쓰십시오">
+                      임의로 만든 계정은 나중에 실제 인원과 충돌합니다. 확인되지 않은 주소로
+                      계정을 만들지 마십시오.
+                    </Banner>
+                    <FormField label="계정" required hint="사내 메일 주소를 그대로 씁니다.">
+                      <input className="afs-input" value={userForm.id}
+                        onChange={(e) => setUserForm({ ...userForm, id: e.target.value })}
+                        placeholder="예: hikwon@lsmnm.com" />
+                    </FormField>
+                    <FormField label="표시 이름" required>
+                      <input className="afs-input" value={userForm.name}
+                        onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} />
+                    </FormField>
+                    <div>
+                      <button className="primary-button"
+                        disabled={!!busy || !userForm.id.trim() || !userForm.name.trim()}
+                        onClick={async () => {
+                          const okDone = await run('사용자 추가', () => orgApi.upsertUser({
+                            user_id: userForm.id.trim(), display_name: userForm.name.trim(),
+                          }), `'${userForm.name.trim()}' 계정을 등록했습니다. 부서 역할을 지정해야 자료가 보입니다.`);
+                          if (okDone) setUserForm({ id: '', name: '' });
+                        }}>계정 등록</button>
+                    </div>
+                  </div>
+                </Panel>
+              )}
+            </>
+          )}
+
+          {view === 'history' && (
+            <Panel kicker="LINEAGE"
+              title={selectedDept ? `${selectedDept.name_ko} 개편 이력` : '개편 이력'}>
+              {!selDept ? (
+                <div className="empty-note">
+                  «조직도» 에서 부서를 먼저 선택하십시오 — 이력은 부서별로 봅니다.
+                </div>
+              ) : hist.status !== 'ok' ? (
+                <EmptyOrError state={hist.status} error={hist.error}
+                  emptyText="이 부서의 개편 이력을 가져오지 못했습니다."
+                  onRetry={() => loadHistory(selDept)} />
+              ) : (
+                <div style={{ padding: 12 }}>
+                  <VersionHistory
+                    rows={(hist.value || []).map((h) => ({
+                      id: `v${h.version}`,
+                      version: `v${h.version}`,
+                      at: (h.valid_from || '').slice(0, 10) || '시행일 미기재',
+                      actor: h.scope_node_id || '조직 범위 미지정',
+                      summary: `${h.name_ko} · ${orgStatusKo(h.status)}`,
+                    }))}
+                    emptyText="개편 이력이 없습니다 — 아직 한 번도 개정되지 않았습니다." />
+                </div>
+              )}
+            </Panel>
+          )}
+
+          {view === 'myscope' && (
+            <Panel kicker="MY ACCESS" title="내 권한">
+              {me.status !== 'ok' || !scope ? (
+                <EmptyOrError state={me.status} error={me.error}
+                  emptyText="권한 정보를 가져오지 못했습니다." onRetry={load} />
+              ) : (
+                <div style={{ padding: 14 }}>
+                  <EvidenceStrip items={[
+                    { label: '계정', value: scope.user_id || '(익명)' },
+                    { label: '소속', value: scope.primary_dept_id || '미배정' },
+                    { label: '권한 강제', value: scope.org_enforced ? '켜짐' : '꺼짐' },
+                  ]} note={scope.org_enforced
+                    ? '조직 범위·등급 통제가 작동 중입니다.'
+                    : '통제가 꺼져 있어 지금은 모든 사용자가 전체를 봅니다.'} />
+
+                  <div className="section-grid" style={{ marginTop: 12 }}>
+                    <section>
+                      <h4>내가 가진 권한 표식</h4>
+                      {(() => {
+                        const mine = FLAGS.filter((f) => (scope as any)[f.key]);
+                        if (!mine.length) {
+                          return <p className="section-missing">
+                            특별 권한 표식이 없습니다 — 부서 역할로만 자료를 봅니다.
+                          </p>;
+                        }
+                        return <ul className="section-list">
+                          {mine.map((f) => <li key={f.key}><b>{f.label}</b> — {f.what}</li>)}
+                        </ul>;
+                      })()}
+                    </section>
+                  </div>
+
+                  <div className="section-grid" style={{ marginTop: 12 }}>
+                    <section className={scope.unrestricted || scope.readable_dept_ids.length
+                      ? '' : 'missing'}>
+                      <h4>읽을 수 있는 부서</h4>
+                      {scope.unrestricted ? (
+                        <p className="section-text">
+                          무제한 권한이므로 모든 부서를 봅니다. 조직 미도입·부트스트랩·강제 해제
+                          상태에서 이렇게 됩니다.
+                        </p>
+                      ) : scope.readable_dept_ids.length ? (
+                        <ul className="section-list">
+                          {scope.readable_dept_ids.map((id) => {
+                            const d = deptRows.find((x) => x.dept_id === id);
+                            return <li key={id}>
+                              <b>{d?.name_ko || id}</b>
+                              <span> {id}</span>
+                              {d && !String(d.scope_node_id || '').trim()
+                                && <span> — 조직 범위가 없어 자료가 보이지 않습니다</span>}
+                            </li>;
+                          })}
+                        </ul>
+                      ) : (
+                        <p className="section-missing">
+                          배정된 부서가 없습니다 — 관리자에게 부서 배정을 요청하십시오.
+                        </p>
+                      )}
+                    </section>
+                  </div>
+
+                  <div className="section-grid" style={{ marginTop: 12 }}>
+                    <section className={scope.unrestricted || scope.readable_scope_nodes.length
+                      ? '' : 'missing'}>
+                      <h4>내 조직 범위<em>자료가 보이는 범위</em></h4>
+                      {scope.unrestricted ? (
+                        <p className="section-text">전체 범위입니다.</p>
+                      ) : scope.readable_scope_nodes.length ? (
+                        <ul className="section-list">
+                          {scope.readable_scope_nodes.map((n) => <li key={n}><b>{n}</b></li>)}
+                        </ul>
+                      ) : (
+                        <p className="section-missing">
+                          조직 범위가 없습니다. 부서에 범위가 지정되지 않았거나 배정된 부서가
+                          없는 경우입니다 — 이 상태에서는 조직 소유 자료가 보이지 않습니다.
+                        </p>
+                      )}
+                    </section>
+                  </div>
+                </div>
+              )}
+            </Panel>
+          )}
+        </HubShell>
       </div>
-    </div>
-  );
-}
-
-function IconBtn({ children, onClick, title, danger }: any) {
-  return (
-    <button onClick={onClick} title={title}
-      className={`px-1.5 text-xs rounded hover:bg-gray-800 ${danger ? 'text-red-400' : 'text-gray-500'}`}>
-      {children}
-    </button>
-  );
-}
-
-function Badge({ on, label, hint }: { on: boolean; label: string; hint?: string }) {
-  return (
-    <span title={hint}
-      className={`px-1.5 py-0.5 rounded ${on ? 'bg-emerald-900/40 text-emerald-300' : 'bg-gray-800 text-gray-600'}`}>
-      {label}
-    </span>
-  );
-}
-
-function Flag({ on, label, hint, onClick }: any) {
-  return (
-    <button onClick={onClick} title={hint}
-      className={`px-1.5 py-0.5 text-[10px] rounded border ${
-        on ? 'bg-amber-900/40 text-amber-300 border-amber-700/50' : 'bg-gray-900 text-gray-600 border-gray-700'}`}>
-      {label}
-    </button>
+    </HubDialog>
   );
 }

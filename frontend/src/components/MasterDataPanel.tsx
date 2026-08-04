@@ -88,7 +88,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
       if (success) setFlash(success);
       return value;
     } catch (e: any) {
-      reportRequestFailure();
+      reportRequestFailure(e?.status);
       setErr({ msg: e?.message || String(e), status: e?.status });
       return null;
     } finally {
@@ -109,7 +109,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
       setSelectedType((current) => value.rows.some((t) => t.type_id === current)
         ? current : value.rows[0]?.type_id || '');
     } catch (e: any) {
-      setTypes(failed<MasterType[]>(e)); reportRequestFailure();
+      setTypes(failed<MasterType[]>(e)); reportRequestFailure(e?.status);
     }
   }, []);
 
@@ -126,7 +126,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
       reportRequestSuccess();
       setSelectedCode((current) => value.rows.some((r) => r.master_code === current) ? current : '');
     } catch (e: any) {
-      setRecords(failed<MasterRecord[]>(e)); reportRequestFailure();
+      setRecords(failed<MasterRecord[]>(e)); reportRequestFailure(e?.status);
     }
   }, []);
 
@@ -136,7 +136,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
       const value = await masterDataApi.record(code);
       setDetail(ok(value)); reportRequestSuccess();
     } catch (e: any) {
-      setDetail(failed<MasterRecord | null>(e)); reportRequestFailure();
+      setDetail(failed<MasterRecord | null>(e)); reportRequestFailure(e?.status);
     }
   }, []);
 

@@ -219,7 +219,19 @@ def scope_allows_owner(scopes: Optional[frozenset], owner_org_id: str) -> bool:
     return bool(owner) and owner in scopes
 
 
-def hidden_envelope(p: Principal, total: int, shown: int) -> dict:
+#: 정확한 숨김 건수를 볼 자격 — **자료 종류마다 다르다.**
+#  기준정보·업무표준은 데이터 표준 관리자(DA)가 고칠 사람이고, 조직·사용자 명부는 조직 편집
+#  권한자가 고칠 사람이다. 둘을 한 권한으로 묶으면 DA 에게 전 직원 명부 규모가 새거나,
+#  조직 관리자가 자기가 고쳐야 할 미바인딩 건수를 못 보게 된다.
+#  ⚠️ 판정을 호출부로 내보내지 않는다. 호출부는 «어떤 종류의 자료인가»만 말한다.
+_EXACT_COUNT_RULES = {
+    "standard": lambda s: bool(s.unrestricted or s.can_manage_standard),
+    "org": lambda s: bool(s.unrestricted or getattr(s, "can_edit_org", False)),
+}
+
+
+def hidden_envelope(p: Principal, total: int, shown: int,
+                    exact_for: str = "standard") -> dict:
     """★★ 목록이 무언가를 **가렸다**는 사실을 응답에 담는다. 건수를 줄지는 여기서만 정한다.
 
     두 가지를 동시에 만족해야 한다.
@@ -236,7 +248,13 @@ def hidden_envelope(p: Principal, total: int, shown: int) -> dict:
     """
     hidden = max(0, int(total) - int(shown))
     out: dict = {"hidden_present": hidden > 0}
-    if hidden and (p.scope.unrestricted or p.scope.can_manage_standard):
+    rule = _EXACT_COUNT_RULES.get(exact_for)
+    if rule is None:
+        # 오타를 조용히 «건수 안 줌»으로 처리하지 않는다 — 그러면 관리자가 못 보는 이유를
+        # 아무도 못 찾는다. 계약 위반이므로 개발 중에 터져야 한다.
+        raise ValueError(f"hidden_envelope: 모르는 자료 종류 '{exact_for}' "
+                         f"— {sorted(_EXACT_COUNT_RULES)} 중 하나여야 한다")
+    if hidden and rule(p.scope):
         out["hidden_count"] = hidden
     return out
 

@@ -89,7 +89,7 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
         ? { status: 'forbidden', value: null, error: r.blockedReason, httpStatus: 403 }
         : ok(r.rows));
     } catch (e: any) {
-      setList(failed<StandardRow[]>(e)); reportRequestFailure();
+      setList(failed<StandardRow[]>(e)); reportRequestFailure(e?.status);
     }
   }, []);
 
@@ -102,7 +102,10 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
       standardApi.detail(stage), standardApi.history(stage),
     ]);
     if (d.status === 'fulfilled') { setDetail(ok(d.value)); reportRequestSuccess(); }
-    else { setDetail(failed<StandardDetail | null>(d.reason)); reportRequestFailure(); }
+    else {
+      setDetail(failed<StandardDetail | null>(d.reason));
+      reportRequestFailure((d.reason as any)?.status);
+    }
     setHist(h.status === 'fulfilled' ? ok(h.value) : failed<HistoryRow[]>(h.reason));
   }, []);
 
@@ -192,7 +195,7 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
       await loadList();
       if (selectedStage) await loadDetail(selectedStage);
     } catch (e: any) {
-      reportRequestFailure();
+      reportRequestFailure(e?.status);
       setErr({ msg: e?.message || String(e), status: e?.status });
     } finally { setBusy(null); }
   };

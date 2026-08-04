@@ -100,7 +100,9 @@ export function FoundationList({ state, rows, selectedId, onSelect, emptyText, o
               className={`person ${r.id === selectedId ? 'selected' : ''}`}
               aria-pressed={r.id === selectedId}
               onClick={() => onSelect(r.id)}>
-              <i aria-hidden="true">{r.title.slice(0, 2)}</i>
+              {/* ⚠️ `trim()` 을 거른다. 제목이 공백으로 시작하면 아바타가 **빈 원**이 되는데
+                  아무 오류도 나지 않는다 — 조직도에서 계층을 공백으로 들여쓰다가 실제로 그랬다. */}
+              <i aria-hidden="true">{r.title.trim().slice(0, 2) || '·'}</i>
               <div style={{ minWidth: 0 }}>
                 <b style={{ whiteSpace: 'normal' }}>{r.title}</b>
                 <small>{r.meta || '정보 없음'}</small>
