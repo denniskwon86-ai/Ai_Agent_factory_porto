@@ -95,3 +95,7 @@ data/scope_policy.json
 *- ���纻.*
 
 *���纻*
+
+# 화면 캡처 산출물 — scripts/capture_screens.py 로 언제든 재생성한다(약 90초).
+# 이미지를 커밋하면 금방 낡아서 «지금 화면» 이 아닌 것을 근거로 쓰게 된다.
+docs/uiux/screenshots/

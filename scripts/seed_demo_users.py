@@ -34,6 +34,14 @@ import sys
 # `scripts/` 에서 바로 실행해도 `core` 를 찾도록 저장소 루트를 경로에 넣는다.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ⚠️ Windows 기본 콘솔(cp949)에서는 «—»·«★» 가 인코딩되지 않아 **출력에서 죽는다.**
+#   문서에 적힌 명령이 그대로 실패하면 그 문서는 지켜지지 않는다 — 여기서 한 번 막는다.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from core.org_directory import org_directory  # noqa: E402
 
 BASE = "hikwon@lsmnm.com"
