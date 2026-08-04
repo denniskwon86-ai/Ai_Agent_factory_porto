@@ -252,6 +252,52 @@ def test_scope_carries_manage_fields_separately(org):
     assert "can_manage_agents" in d and "manageable_dept_ids" in d and "is_ai_admin" in d
 
 
+# ── [P1-4] 자산 승인 범위 ─────────────────────────────────────────────────
+def test_can_manage_scope_is_separate_from_dept(org):
+    """★★ 자산 소유는 **부서 id 가 아니라 조직 범위 노드**(`owner_scope_id`)로 적힌다.
+
+    한 함수에 섞으면 부서 관리 권한이 조직 범위 승인 권한으로 번지거나 그 반대가 된다."""
+    org.upsert_user("m", "부서장", primary_dept_id="prod")
+    org.set_user_roles("m", {"prod": "manager"})
+    c = resolve(org.resolve_scope("m"), org.get_user("m"))
+    for node in c.manageable_scope_nodes:
+        assert c.can_manage_scope(node) is True
+    assert c.can_manage_scope("NO_SUCH_NODE") is False
+
+
+def test_unowned_asset_is_not_manageable(org):
+    """★★★ 소유 조직이 **비어 있는** 자산은 관리 대상이 아니다.
+
+    ⚠️ 미기재를 «누구나 관리» 로 읽으면 소유를 채우지 않는 것이 이득이 된다 — `MDM-SCOPE-01`
+      에서 «바인딩 없으면 통과» 가 유출 창구가 된 것과 같은 형태다."""
+    org.upsert_user("m", "부서장", primary_dept_id="prod")
+    org.set_user_roles("m", {"prod": "manager"})
+    c = resolve(org.resolve_scope("m"), org.get_user("m"))
+    assert c.can_manage_scope("") is False
+
+
+def test_department_manager_cannot_publish_enterprise(org):
+    """★★★ 부서 manager 는 «자기 조직 승인 가능, 전사는 승격 요청만» 이다(설계 §4.2).
+
+    한 부서장이 전 사업부가 쓰는 정의를 혼자 확정하면 그 승인은 누구도 검토하지 않은 승인이다."""
+    org.upsert_user("m", "부서장", primary_dept_id="prod")
+    org.set_user_roles("m", {"prod": "manager"})
+    c = resolve(org.resolve_scope("m"), org.get_user("m"))
+    assert c.can_publish_enterprise() is False
+
+    org.upsert_user("ai", "AI관리자", primary_dept_id="prod", is_ai_admin=True)
+    ca = resolve(org.resolve_scope("ai"), org.get_user("ai"))
+    assert ca.can_publish_enterprise() is True
+
+
+def test_ai_admin_is_not_limited_by_scope_nodes(org):
+    """AI 거버넌스 관리자는 조직 범위 제한을 받지 않는다(설계 §4.2) — 범위 노드가 비어 있어도
+    조직 자산을 승인한다. 그 사실을 못 박아 둔다: 나중에 범위 제한을 걸려면 설계 결정이 먼저다."""
+    org.upsert_user("ai", "AI관리자", primary_dept_id="prod", is_ai_admin=True)
+    c = resolve(org.resolve_scope("ai"), org.get_user("ai"))
+    assert c.can_manage_scope("ANY_NODE") is True
+
+
 def test_existing_users_get_no_new_power_after_migration(org):
     """★★★ 컬럼 추가 마이그레이션이 **아무에게도 권한을 주지 않는다.**
 

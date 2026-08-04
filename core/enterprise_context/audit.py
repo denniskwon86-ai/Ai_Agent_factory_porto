@@ -88,6 +88,11 @@ AGENT_PACK_CHANGED = "AGENT_PACK_CHANGED"
 #   **누가 어떤 근거로 넣었는지**가 남아야 한다. "확인 불가" 기록도 남긴다 — 무엇을 찾아봤는지가
 #   조사 진척의 유일한 근거다.
 COMPETITOR_REFERENCE_CHANGED = "COMPETITOR_REFERENCE_CHANGED"
+# [D-017 §7.1 / P1-4] 에이전트·워크플로우·스킬 **정의 자체**의 생성·개정·복사·승인 요청·폐기.
+#   ⚠️ `AGENT_PACK_CHANGED`(어느 조직에 어떤 팩을 배치했는가)와 구분한다. 배치는 그대로인데
+#   정의만 바뀌어 산출물이 달라지는 경우가 있고, 두 사건을 한 상수로 묶으면 감사에서
+#   «무엇이 바뀌어 결과가 달라졌는가» 를 되짚을 수 없다. 승인 자체는 `APPROVAL_GRANTED` 다.
+AGENT_ASSET_CHANGED = "AGENT_ASSET_CHANGED"
 
 EVENTS = (
     ACCESS_DENIED_SCOPE_MISMATCH, ACCESS_DENIED_UNAUTHENTICATED,
@@ -97,6 +102,7 @@ EVENTS = (
     PROGRAM_STATUS_CHANGED, PROGRAM_USE_BLOCKED,
     ORG_STRUCTURE_CHANGED, ORG_USER_CHANGED, VIRTUAL_SCENARIO_CHANGED,
     SCENARIO_INPUT_CHANGED, AGENT_PACK_CHANGED, COMPETITOR_REFERENCE_CHANGED,
+    AGENT_ASSET_CHANGED,
 )
 
 #: 식별되지 않은 주체. 빈 문자열로 두면 "기록 누락"과 구분되지 않는다.

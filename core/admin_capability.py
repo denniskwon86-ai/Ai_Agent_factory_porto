@@ -122,6 +122,31 @@ class AdminCapabilities:
             return False
         return dept_id in self.manageable_dept_ids
 
+    def can_manage_scope(self, scope_id: str) -> bool:
+        """[P1-4] 이 **ECM 조직 노드**의 자산을 승인·폐기할 수 있는가.
+
+        `can_manage_dept` 와 나눈 이유: 자산의 소유는 부서 id 가 아니라 조직 범위 노드
+        (`owner_scope_id`)로 적힌다. 한 함수에 섞으면 부서 관리 권한이 조직 범위 승인 권한으로
+        번지거나 그 반대가 된다.
+
+        ★ AI 거버넌스 관리자는 조직 범위 제한을 받지 않는다(설계 §4.2 — 조직 공개 가능,
+          전사 승인 가능). 부서 `manager` 는 `manageable_scope_nodes` 안에서만 승인한다.
+        ⚠️ 소유 조직이 **비어 있는 자산은 관리 대상이 아니다.** 미기재를 «누구나 관리» 로 읽으면
+          소유를 채우지 않는 것이 이득이 된다."""
+        if self.bootstrap or self.is_platform_admin or self.is_ai_admin:
+            return True
+        if not scope_id:
+            return False
+        return scope_id in self.manageable_scope_nodes
+
+    def can_publish_enterprise(self) -> bool:
+        """[P1-4] **전사 공개**를 승인할 수 있는가.
+
+        ⚠️ 조직 승인과 같은 판정으로 두면 안 된다. 부서 `manager` 는 «자기 조직 승인 가능,
+          전사는 승격 요청만» 이다(설계 §4.2) — 한 부서장이 전사 전체가 쓰는 정의를 혼자
+          확정하는 일이 생기면 그 승인은 누구도 검토하지 않은 승인이 된다."""
+        return bool(self.bootstrap or self.is_platform_admin or self.is_ai_admin)
+
     @property
     def any_admin(self) -> bool:
         """관리자 센터 메뉴를 **보여줄지** 정하는 값(3단계 중 ①)."""
