@@ -44,7 +44,7 @@ export default function MegaBoardroomPanel() {
   }, []);
 
   if (!state || !state.is_mega_project) {
-    return <div className="p-10 text-white text-center">Not a Mega Project</div>;
+    return <div className="p-10 text-gray-100 text-center">Not a Mega Project</div>;
   }
 
   const handleStartAll = async () => {
@@ -92,7 +92,7 @@ export default function MegaBoardroomPanel() {
           <button onClick={() => setCurrentProject(null)} className="text-sm font-bold text-purple-200 hover:text-white bg-purple-800 px-3 py-1.5 rounded transition-colors">
             ◀ 런처로 복귀
           </button>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">
             🌟 {state.project_name} <span className="text-sm font-normal text-purple-300">| 마스터 관제 보드룸</span>
           </h1>
         </div>
@@ -185,7 +185,7 @@ export default function MegaBoardroomPanel() {
                   </div>
                   
                   <div className="flex-1 mb-4">
-                    <div className="text-sm text-gray-300 mb-2">상태: <span className="font-bold text-white">{subState ? subState.factory_mode : '로딩중...'}</span></div>
+                    <div className="text-sm text-gray-300 mb-2">상태: <span className="font-bold text-gray-100">{subState ? subState.factory_mode : '로딩중...'}</span></div>
                     <div className="w-full bg-gray-700 rounded-full h-2.5 mb-2">
                       <div className="bg-blue-500 h-2.5 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
                     </div>

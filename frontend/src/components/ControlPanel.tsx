@@ -497,7 +497,7 @@ export default function ControlPanel() {
   return (
     <div className="flex flex-col h-full bg-gray-800 text-gray-200">
       <div className="p-4 border-b border-gray-700 bg-gray-900 shrink-0">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
+        <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
           ⚙️ 팩토리 제어반
           {currentTemplateData && currentTemplateData.id !== 'default' && (
             <span className="text-[10px] bg-purple-900/60 text-purple-300 border border-purple-700 px-2 py-0.5 rounded-full shadow-sm ml-2">
@@ -539,7 +539,7 @@ export default function ControlPanel() {
                 title="쿼터 회복 후, 처음부터가 아니라 중단된 지점부터 이어서 재가동합니다."
                 className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs font-bold text-white transition-colors"
               >▶️ 중단 지점부터 재가동</button>
-              <button onClick={clearSuspendedQuota} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-white transition-colors">⏸️ 알림 닫기</button>
+              <button onClick={clearSuspendedQuota} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-gray-100 transition-colors">⏸️ 알림 닫기</button>
             </div>
           </div>
         )}

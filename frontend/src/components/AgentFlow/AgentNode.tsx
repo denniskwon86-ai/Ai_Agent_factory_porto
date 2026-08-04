@@ -34,7 +34,7 @@ export default function AgentNode({ data, selected }: { data: any; selected: boo
         </div>
         
         <div>
-          <h3 className="text-sm font-bold text-white truncate" title={data.name_ko}>
+          <h3 className="text-sm font-bold text-gray-100 truncate" title={data.name_ko}>
             {data.name_ko || "Unnamed Agent"}
           </h3>
           <p className="text-[11px] font-mono text-gray-500 truncate" title={data.id}>

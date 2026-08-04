@@ -253,7 +253,7 @@ export function AdvisorPanel(
               무엇을 만들지와 어떤 데이터가 필요한지를 선택형 대화로 정하고, 승인하면 프로젝트가 됩니다
             </span>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white shrink-0">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-100 shrink-0">✕</button>
         </div>
 
         {/* 진행 단계 */}

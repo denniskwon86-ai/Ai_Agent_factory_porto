@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
 interface PackDoc { filename: string; chunks: number; source: string; added_at: string; }
 interface Pack { pack_id: string; name: string; description: string; created_at: string; documents: PackDoc[]; }
+interface ReferenceSummary { total: number; supported: number; conversion_required: number; pending_review: number; by_pack: Record<string, number>; }
 
 // 📚 지식 허브 — 도메인 참고자료(표준·논문·사내 데이터)를 지식팩으로 등록·관리하고
 // 프로젝트에 연결해 모든 에이전트 산출물의 그라운딩 기준으로 쓴다.
@@ -16,6 +17,7 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
   const [newDesc, setNewDesc] = useState('');
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<any[]>([]);
+  const [referenceSummary, setReferenceSummary] = useState<ReferenceSummary | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const fetchPacks = async () => {
@@ -29,6 +31,13 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
   };
 
   useEffect(() => { fetchPacks(); }, []);
+  const fetchReferenceSummary = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/reference/summary`);
+      if (res.ok) { const r = await res.json(); setReferenceSummary(r.data || null); }
+    } catch (e) { console.error('원본 자료 등록부 조회 실패:', e); }
+  };
+  useEffect(() => { fetchReferenceSummary(); }, []);
 
   const selectedPack = packs.find((p) => p.pack_id === selected) || null;
 
@@ -95,28 +104,37 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
     } finally { setBusy(null); }
   };
 
+  const handleReferenceScan = async () => {
+    setBusy('reference-scan');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/reference/scan`, { method: 'POST' });
+      if (!res.ok) { const r = await res.json().catch(() => ({})); alert(r?.detail || '원본 자료 재스캔 실패'); return; }
+      await fetchReferenceSummary();
+    } finally { setBusy(null); }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-5xl h-[85vh] bg-[#12141C] border border-[#2F3640] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2F3640] shrink-0">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+      <div className="w-full max-w-5xl h-[85vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 shrink-0">
+          <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
             📚 지식 허브
             <span className="text-xs text-gray-500 font-normal">— 도메인 참고자료를 등록하면 프로젝트에 연결된 모든 에이전트가 그 지식 범위 안에서 산출물을 생성합니다</span>
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl px-2">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-100 text-xl px-2">✕</button>
         </div>
 
         <div className="flex-1 flex overflow-hidden">
           {/* 좌: 팩 목록 + 생성 */}
-          <div className="w-72 border-r border-[#2F3640] flex flex-col overflow-hidden shrink-0">
-            <div className="p-4 border-b border-[#2F3640]">
+          <div className="w-72 border-r border-gray-700 flex flex-col overflow-hidden shrink-0">
+            <div className="p-4 border-b border-gray-700">
               <div className="text-xs font-bold text-gray-400 mb-2">새 지식팩</div>
               <input value={newId} onChange={(e) => setNewId(e.target.value)} placeholder="팩 ID (예: mfg_standard)"
-                className="w-full mb-1.5 bg-[#0B0C10] border border-[#2F3640] rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500" />
+                className="w-full mb-1.5 bg-gray-950 border border-gray-700 rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500" />
               <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="이름 (예: 제조 표준 지식)"
-                className="w-full mb-1.5 bg-[#0B0C10] border border-[#2F3640] rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500" />
+                className="w-full mb-1.5 bg-gray-950 border border-gray-700 rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500" />
               <input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="설명 (선택)"
-                className="w-full mb-2 bg-[#0B0C10] border border-[#2F3640] rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500" />
+                className="w-full mb-2 bg-gray-950 border border-gray-700 rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500" />
               <button onClick={handleCreate} disabled={busy !== null}
                 className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg">
                 {busy === 'create' ? '생성 중…(최초 1회 임베딩 로드)' : '+ 팩 생성'}
@@ -127,7 +145,7 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
               {packs.map((p) => (
                 <button key={p.pack_id} onClick={() => { setSelected(p.pack_id); setHits([]); }}
                   className={`w-full text-left rounded-lg p-2.5 border transition-colors ${
-                    selected === p.pack_id ? 'border-indigo-500 bg-indigo-900/30' : 'border-[#2F3640] bg-[#0B0C10] hover:border-gray-500'
+                    selected === p.pack_id ? 'border-indigo-500 bg-indigo-900/30' : 'border-gray-700 bg-gray-950 hover:border-gray-500'
                   }`}>
                   <div className="text-sm font-bold text-gray-100 truncate">{p.name}</div>
                   <div className="text-[10px] text-gray-500 font-mono">{p.pack_id} · 문서 {p.documents?.length || 0}건</div>
@@ -142,9 +160,26 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
               <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">좌측에서 지식팩을 선택하거나 새로 만드세요.</div>
             ) : (
               <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                {referenceSummary && (
+                  <div className="rounded-xl border border-cyan-800/60 bg-cyan-950/20 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-xs font-bold text-cyan-100">원본 참고자료 등록부</div>
+                        <div className="text-[11px] text-cyan-200/70 mt-1">
+                          원본 {referenceSummary.total}건 · 추출 가능 {referenceSummary.supported}건 · 변환 필요 {referenceSummary.conversion_required}건 · 검토 대기 {referenceSummary.pending_review}건
+                        </div>
+                        <div className="text-[10px] text-gray-400 mt-1">등록부는 출처·범위·분류를 관리합니다. 검토·승인 전에는 사업부 자료를 자동으로 모든 프로젝트에 연결하지 않습니다.</div>
+                      </div>
+                      <button onClick={handleReferenceScan} disabled={busy !== null}
+                        className="text-xs font-bold text-cyan-100 bg-cyan-900/50 hover:bg-cyan-800/70 border border-cyan-700/60 rounded-lg px-3 py-1.5 shrink-0">
+                        {busy === 'reference-scan' ? '재스캔 중…' : '원본 폴더 재스캔'}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-base font-bold text-white">{selectedPack.name}</h3>
+                    <h3 className="text-base font-bold text-gray-100">{selectedPack.name}</h3>
                     <p className="text-xs text-gray-400 mt-0.5">{selectedPack.description || '설명 없음'}</p>
                   </div>
                   <button onClick={() => handleDelete(selectedPack.pack_id)} disabled={busy !== null}
@@ -152,9 +187,10 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
                 </div>
 
                 {/* 업로드 */}
-                <div className="rounded-xl border border-dashed border-[#2F3640] bg-[#0B0C10]/60 p-4">
-                  <div className="text-xs font-bold text-gray-300 mb-2">참고자료 등록 (.pdf / .md / .txt / .csv / .json — 동일 파일명은 교체)</div>
-                  <input ref={fileRef} type="file" multiple accept=".pdf,.md,.txt,.csv,.json"
+                <div className="rounded-xl border border-dashed border-gray-700 bg-gray-950/60 p-4">
+                  <div className="text-xs font-bold text-gray-300 mb-2">참고자료 등록 (.pdf / .docx / .pptx / .txt / .md / .csv / .json — 동일 파일명은 교체)</div>
+                  <div className="text-[10px] text-amber-300/80 mb-2">구형 .ppt는 본문 추출 신뢰성을 보장할 수 없어 .pptx 또는 PDF로 변환한 뒤 등록합니다.</div>
+                  <input ref={fileRef} type="file" multiple accept=".pdf,.docx,.pptx,.ppt,.md,.txt,.csv,.json"
                     onChange={(e) => handleUpload(e.target.files)} disabled={busy !== null}
                     className="text-xs text-gray-400 file:mr-3 file:bg-indigo-600 file:hover:bg-indigo-500 file:text-white file:border-0 file:rounded-lg file:px-3 file:py-1.5 file:text-xs file:font-bold file:cursor-pointer" />
                   {busy === 'upload' && <div className="text-xs text-indigo-300 mt-2 animate-pulse">텍스트 추출·임베딩 인덱싱 중…</div>}
@@ -165,7 +201,7 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
                   <div className="text-xs font-bold text-gray-300 mb-2">등록된 문서 ({selectedPack.documents?.length || 0})</div>
                   <div className="space-y-1.5">
                     {(selectedPack.documents || []).map((d) => (
-                      <div key={d.filename} className="flex items-center justify-between rounded-lg border border-[#2F3640] bg-[#0B0C10] px-3 py-2">
+                      <div key={d.filename} className="flex items-center justify-between rounded-lg border border-gray-700 bg-gray-950 px-3 py-2">
                         <div className="min-w-0">
                           <div className="text-xs font-bold text-gray-200 truncate">📄 {d.filename}</div>
                           <div className="text-[10px] text-gray-500">{d.chunks} 청크 · {d.source} · {String(d.added_at).slice(0, 16)}</div>
@@ -180,18 +216,18 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
                 </div>
 
                 {/* 검색 테스트 */}
-                <div className="rounded-xl border border-[#2F3640] bg-[#0B0C10]/60 p-4">
+                <div className="rounded-xl border border-gray-700 bg-gray-950/60 p-4">
                   <div className="text-xs font-bold text-gray-300 mb-2">🔍 검색 품질 테스트 — 에이전트가 이 질의로 어떤 지식을 받게 되는지 확인</div>
                   <div className="flex gap-2">
                     <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                       placeholder="예: 재고 회전율 표준 기준"
-                      className="flex-1 bg-[#12141C] border border-[#2F3640] rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500" />
+                      className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500" />
                     <button onClick={handleSearch} disabled={busy !== null || !query.trim()}
                       className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 text-white text-xs font-bold px-4 rounded-lg">검색</button>
                   </div>
                   <div className="mt-3 space-y-2">
                     {hits.map((h, i) => (
-                      <div key={i} className="rounded-lg border border-[#2F3640] bg-[#12141C] p-2.5">
+                      <div key={i} className="rounded-lg border border-gray-700 bg-gray-900 p-2.5">
                         <div className="text-[10px] text-indigo-300 font-mono mb-1">
                           {h.metadata?.filename} · 유사도 거리 {Number(h.distance ?? 0).toFixed(3)}
                         </div>

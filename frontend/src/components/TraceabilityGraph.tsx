@@ -36,7 +36,7 @@ export default function TraceabilityGraph() {
 
   return (
     <div className="p-6 h-full overflow-y-auto bg-gray-900 text-gray-200">
-      <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+      <h2 className="text-2xl font-bold text-gray-100 mb-6 flex items-center gap-2">
         🔗 산출물 추적성 엔진 (Traceability)
       </h2>
       <div className="space-y-6">

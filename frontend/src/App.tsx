@@ -192,8 +192,8 @@ export default function App() {
         <div className="h-screen w-screen bg-gray-900 text-gray-100 flex flex-col font-sans overflow-hidden">
           <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0">
             <div className="flex items-center gap-4 min-w-0">
-              <button onClick={closeRelease} className="text-sm font-bold text-gray-400 hover:text-white bg-gray-700 px-3 py-1.5 rounded transition-colors shrink-0">◀ 라이브러리</button>
-              <h1 className="text-lg font-bold text-white truncate">
+              <button onClick={closeRelease} className="text-sm font-bold text-gray-400 hover:text-gray-100 bg-gray-700 px-3 py-1.5 rounded transition-colors shrink-0">◀ 라이브러리</button>
+              <h1 className="text-lg font-bold text-gray-100 truncate">
                 📦 결과물 실행: <span className="text-emerald-400">{viewingRelease.project_name}</span>
                 <span className="text-xs text-gray-500 font-normal ml-2">{viewingRelease.created_at}</span>
               </h1>
@@ -265,9 +265,9 @@ export default function App() {
         {showBriefing && (
           <BriefingPanel onClose={() => setShowBriefing(false)} />
         )}
-        <div className="min-h-screen w-full bg-[#0B0C10] text-gray-100 flex flex-col font-sans">
-          <header className="h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-[#1F2833] flex items-center justify-between gap-4 px-8 shrink-0 sticky top-0 z-10 overflow-hidden">
-            <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3 shrink-0">
+        <div className="min-h-screen w-full bg-gray-950 text-gray-100 flex flex-col font-sans">
+          <header className="h-16 bg-gray-950/95 backdrop-blur-md border-b border-gray-700 flex items-center justify-between gap-4 px-8 shrink-0 sticky top-0 z-10 overflow-hidden">
+            <h1 className="text-2xl font-bold tracking-tight text-gray-100 flex items-center gap-3 shrink-0">
               <span className="text-indigo-400">🏭 V5.2</span> Private AI Cockpit
             </h1>
             <div className="flex items-center gap-4 min-w-0 overflow-x-auto">
@@ -395,8 +395,8 @@ export default function App() {
             <div className="w-full max-w-6xl flex flex-col gap-8">
               
               {/* Hero Section: 신규 프로젝트 생성 */}
-              <div className="relative overflow-hidden bg-[#1A1A1D] border border-[#2F3640] rounded-2xl p-8 shadow-2xl">
-                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2 relative z-10">
+              <div className="relative overflow-hidden bg-gray-900 border border-gray-700 rounded-2xl p-8 shadow-2xl">
+                <h2 className="text-xl font-bold text-gray-100 mb-6 flex items-center gap-2 relative z-10">
                   ✨ 신규 프로젝트 개설
                 </h2>
                 <div className="flex items-end gap-6 flex-wrap relative z-10">
@@ -407,7 +407,7 @@ export default function App() {
                       value={newProjectId}
                       onChange={(e) => setNewProjectId(e.target.value)}
                       placeholder="예: smart-life-app"
-                      className="w-full bg-[#0B0C10] border border-[#2F3640] rounded-xl p-3.5 text-sm text-gray-200 focus:outline-none focus:border-indigo-500 transition-colors shadow-inner"
+                      className="w-full bg-gray-950 border border-gray-700 rounded-xl p-3.5 text-sm text-gray-200 focus:outline-none focus:border-indigo-500 transition-colors shadow-inner"
                     />
                   </div>
                   <div className="flex-[3] min-w-[250px]">
@@ -415,7 +415,7 @@ export default function App() {
                     <select
                       value={selectedTemplateId}
                       onChange={(e) => setSelectedTemplate(e.target.value)}
-                      className="w-full bg-[#0B0C10] border border-[#2F3640] rounded-xl p-3.5 text-sm text-gray-200 focus:outline-none focus:border-indigo-500 transition-colors shadow-inner"
+                      className="w-full bg-gray-950 border border-gray-700 rounded-xl p-3.5 text-sm text-gray-200 focus:outline-none focus:border-indigo-500 transition-colors shadow-inner"
                     >
                       {templates.length === 0 && <option value="default">기본 워크플로우</option>}
                       {templates.map((t) => (
@@ -439,7 +439,7 @@ export default function App() {
                         <b>지식팩이 보이지 않습니다(자료가 없는 것이 아닙니다).</b> {packsBlocked}
                       </div>
                     ) : (
-                      <div className="text-xs text-gray-500 bg-[#0B0C10]/60 border border-[#2F3640] rounded-xl p-3">
+                      <div className="text-xs text-gray-500 bg-gray-950/60 border border-gray-700 rounded-xl p-3">
                         등록된 지식팩이 없습니다. 우측 상단 <b className="text-cyan-300">📚 지식 허브</b>에서 표준·논문 등 참고자료를 먼저 등록하세요.
                       </div>
                     )
@@ -451,7 +451,7 @@ export default function App() {
                           <button key={p.pack_id} type="button"
                             onClick={() => setSelectedPackIds(prev => on ? prev.filter(x => x !== p.pack_id) : [...prev, p.pack_id])}
                             className={`text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${
-                              on ? 'bg-cyan-900/50 border-cyan-500 text-cyan-200' : 'bg-[#0B0C10] border-[#2F3640] text-gray-400 hover:border-gray-500'
+                              on ? 'bg-cyan-900/50 border-cyan-500 text-cyan-200' : 'bg-gray-950 border-gray-700 text-gray-400 hover:border-gray-500'
                             }`}
                             title={p.description || p.pack_id}
                           >
@@ -473,7 +473,7 @@ export default function App() {
                     value={masterDomainsInput}
                     onChange={(e) => setMasterDomainsInput(e.target.value)}
                     placeholder="예: manufacturing, logistics"
-                    className="w-full bg-[#0B0C10] border border-[#2F3640] rounded-xl p-3 text-sm text-gray-200 focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
+                    className="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 text-sm text-gray-200 focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
                   />
                   {/* [M3] 외부 실측값 병기 토글 (기본 off) */}
                   <label className="mt-2 flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
@@ -482,7 +482,7 @@ export default function App() {
                   </label>
                 </div>
 
-                <div className="mt-6 p-4 bg-[#0B0C10]/50 border border-[#2F3640] rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="mt-6 p-4 bg-gray-950/50 border border-gray-700 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium text-gray-300 mb-1">프로젝트 유형 선택</label>
                     <div className="flex gap-6">
@@ -536,14 +536,14 @@ export default function App() {
                 </div>
 
                 {selectedTemplateData && selectedTemplateData.description && (
-                  <div className="text-sm text-gray-300 mt-4 bg-[#0B0C10]/50 p-3 rounded-lg border border-[#2F3640] inline-block">
+                  <div className="text-sm text-gray-300 mt-4 bg-gray-950/50 p-3 rounded-lg border border-gray-700 inline-block">
                     ℹ️ {selectedTemplateData.description}
                   </div>
                 )}
               </div>
 
               {/* Tabs Section */}
-              <div className="flex items-center gap-6 border-b border-[#2F3640] pb-2">
+              <div className="flex items-center gap-6 border-b border-gray-700 pb-2">
                 <button 
                   onClick={() => setActiveTab("mega")}
                   className={`text-lg font-bold pb-2 border-b-2 transition-all ${activeTab === "mega" ? "text-purple-400 border-purple-500" : "text-gray-400 border-transparent hover:text-gray-200"}`}
@@ -575,7 +575,7 @@ export default function App() {
                   {projects.filter(p => p.is_mega_project).map((mega) => {
                     const subs = projects.filter(p => p.parent_project_id === mega.id);
                     return (
-                      <div key={mega.id} className="bg-[#1A1A1D] border border-[#2F3640] hover:border-purple-500/50 rounded-2xl p-6 shadow-2xl relative group transition-colors">
+                      <div key={mega.id} className="bg-gray-900 border border-gray-700 hover:border-purple-500/50 rounded-2xl p-6 shadow-2xl relative group transition-colors">
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex items-center gap-3">
                             <h3 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">🌟 {mega.name}</h3>
@@ -608,7 +608,7 @@ export default function App() {
                         {/* 서브 프로젝트 그리드 최적화 */}
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                           {subs.map(sub => (
-                            <div key={sub.id} className="bg-[#12141C] border border-[#2F3640] rounded-xl p-4 hover:border-indigo-500/50 hover:bg-[#161821] transition-all flex flex-col relative group/sub shadow-inner">
+                            <div key={sub.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-900 transition-all flex flex-col relative group/sub shadow-inner">
                               <div className="flex items-start justify-between mb-1">
                                 <h4 className="text-sm font-bold text-indigo-300 truncate pr-2">🔹 {sub.name}</h4>
                                 <button onClick={(e) => handleDeleteProject(sub.id, sub.name, e)} className="opacity-0 group-hover/sub:opacity-100 text-[10px] text-red-400 hover:text-red-300 transition-opacity">🗑</button>
@@ -619,7 +619,7 @@ export default function App() {
                                 </div>
                               )}
                               <span className="text-[10px] text-gray-500 font-mono mb-4">{sub.id}</span>
-                              <button onClick={() => setCurrentProject(sub.id)} className="w-full mt-auto bg-[#1F2833] hover:bg-indigo-600 text-gray-300 hover:text-white text-xs font-bold py-2 rounded-lg transition-colors border border-[#2F3640] hover:border-transparent">서브 진입</button>
+                              <button onClick={() => setCurrentProject(sub.id)} className="w-full mt-auto bg-gray-800 hover:bg-indigo-600 text-gray-300 hover:text-white text-xs font-bold py-2 rounded-lg transition-colors border border-gray-700 hover:border-transparent">서브 진입</button>
                             </div>
                           ))}
                         </div>
@@ -632,14 +632,14 @@ export default function App() {
               {activeTab === "vault" && (
                 <div className="animate-fade-in flex flex-col gap-6">
                   {projects.filter(p => !p.is_mega_project && !p.parent_project_id && !isSubProject(p.id)).length === 0 && (
-                    <div className="text-gray-500 text-center py-10 bg-[#1A1A1D] border border-[#2F3640] rounded-xl">
+                    <div className="text-gray-500 text-center py-10 bg-gray-900 border border-gray-700 rounded-xl">
                       가동 중인 독립 프로젝트가 없습니다.
                     </div>
                   )}
                   {/* 일반 프로젝트 그리드 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {projects.filter(p => !p.is_mega_project && !p.parent_project_id && !isSubProject(p.id)).map((proj) => (
-                      <div key={proj.id} className="bg-[#1A1A1D] border border-[#2F3640] hover:border-blue-500/50 hover:bg-[#1C1E26] rounded-2xl p-6 transition-all shadow-xl flex flex-col group relative">
+                      <div key={proj.id} className="bg-gray-900 border border-gray-700 hover:border-blue-500/50 hover:bg-gray-900 rounded-2xl p-6 transition-all shadow-xl flex flex-col group relative">
                         <div className="flex items-start justify-between mb-4 gap-2">
                           <div className="flex flex-col gap-1 min-w-0">
                             <h3 className="text-lg font-bold text-blue-300 truncate">{proj.name}</h3>
@@ -689,7 +689,7 @@ export default function App() {
               {activeTab === "releases" && (
                 <div className="animate-fade-in">
                   {releases.length === 0 ? (
-                    <div className="bg-[#1A1A1D] border border-dashed border-[#2F3640] rounded-2xl p-10 flex flex-col items-center justify-center text-center">
+                    <div className="bg-gray-900 border border-dashed border-gray-700 rounded-2xl p-10 flex flex-col items-center justify-center text-center">
                       <div className="text-4xl mb-4 opacity-50">📦</div>
                       <div className="text-gray-400 font-medium">아직 배포된 결과물이 없습니다.</div>
                       <div className="text-gray-500 text-sm mt-2">프로젝트 통제실에서 "최종 결과물 저장(배포)"을 완료하면 이곳에 표시됩니다.</div>
@@ -704,12 +704,12 @@ export default function App() {
                         const life = rel.lifecycle_status || 'active';
                         const blocked = life === 'disabled';
                         return (
-                        <div key={rel.release_id} className={`bg-[#1A1A1D] border rounded-2xl p-5 transition-all flex flex-col shadow-xl group ${blocked ? 'border-red-900/50 opacity-75' : 'border-[#2F3640] hover:border-emerald-500/60 hover:bg-[#1C2220]'}`}>
+                        <div key={rel.release_id} className={`bg-gray-900 border rounded-2xl p-5 transition-all flex flex-col shadow-xl group ${blocked ? 'border-red-900/50 opacity-75' : 'border-gray-700 hover:border-emerald-500/60 hover:bg-gray-900'}`}>
                           <div className="flex items-start justify-between mb-3 gap-2">
                             <h3 className={`text-base font-bold truncate ${blocked ? 'text-gray-400 line-through' : 'text-emerald-300'}`}>{rel.project_name}</h3>
                             <button
                               onClick={() => setAdminProgram({ id: rel.release_id, name: rel.project_name })}
-                              className="opacity-0 group-hover:opacity-100 text-xs text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-[#2F3640] rounded px-2 py-1 shrink-0 transition-all"
+                              className="opacity-0 group-hover:opacity-100 text-xs text-gray-300 hover:text-gray-100 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2 py-1 shrink-0 transition-all"
                               title="사용여부 제어 (IT 관리자) — 삭제하지 않고 비활성화합니다"
                             >⚙</button>
                           </div>
@@ -723,7 +723,7 @@ export default function App() {
                                 : (blocked ? <div className="text-gray-400 mt-0.5">대체 프로그램 미지정 — 관리자에게 문의</div> : null)}
                             </div>
                           )}
-                          <div className="text-[11px] text-gray-400 mb-6 bg-[#0B0C10] p-2 rounded-lg border border-[#2F3640]">
+                          <div className="text-[11px] text-gray-400 mb-6 bg-gray-950 p-2 rounded-lg border border-gray-700">
                             <div className="mb-1 text-gray-300">📅 {rel.created_at}</div>
                             <div>✓ 태스크 {rel.task_count}개 완료</div>
                           </div>
@@ -731,7 +731,7 @@ export default function App() {
                             <button
                               disabled
                               title="IT 관리자가 사용을 중단시켰습니다. 기록은 보존되어 있습니다."
-                              className="mt-auto w-full bg-gray-800 text-gray-500 font-bold py-2.5 rounded-xl cursor-not-allowed border border-[#2F3640]"
+                              className="mt-auto w-full bg-gray-800 text-gray-500 font-bold py-2.5 rounded-xl cursor-not-allowed border border-gray-700"
                             >⛔ 사용 중단됨</button>
                           ) : (!rel.deliverable_type || rel.deliverable_type === "software_app") ? (
                             <button
@@ -770,16 +770,16 @@ export default function App() {
   // 🚀 [3단 레이아웃 독립 스크롤 최적화 설계 구조 적용]
   return (
     <ErrorBoundary>
-      <div className="h-screen w-screen bg-[#0B0C10] text-gray-100 flex flex-col font-sans overflow-hidden">
-        <header className="h-14 bg-[#0B0C10]/95 backdrop-blur border-b border-[#1F2833] flex items-center justify-between px-6 shrink-0 z-20">
+      <div className="h-screen w-screen bg-gray-950 text-gray-100 flex flex-col font-sans overflow-hidden">
+        <header className="h-14 bg-gray-950/95 backdrop-blur border-b border-gray-700 flex items-center justify-between px-6 shrink-0 z-20">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setCurrentProject(null)}
-              className="text-sm font-bold text-gray-400 hover:text-white flex items-center gap-1 bg-gray-700 px-3 py-1.5 rounded transition-colors"
+              className="text-sm font-bold text-gray-400 hover:text-gray-100 flex items-center gap-1 bg-gray-700 px-3 py-1.5 rounded transition-colors"
             >
               ◀ 런처 복귀
             </button>
-            <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2 truncate max-w-xl">
+            <h1 className="text-xl font-bold tracking-tight text-gray-100 flex items-center gap-2 truncate max-w-xl">
               <span className="text-blue-400 truncate">[{projects.find(p => p.id === currentProjectId)?.name || currentProjectId}]</span> 통제실
             </h1>
           </div>

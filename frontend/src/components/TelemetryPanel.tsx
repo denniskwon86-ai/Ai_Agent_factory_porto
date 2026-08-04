@@ -88,7 +88,7 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
               ))}
             </select>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-100">✕</button>
         </div>
 
         <div className="p-6 overflow-y-auto flex-1">
@@ -161,7 +161,7 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
                       <div className="flex-1 bg-gray-900 rounded h-5 overflow-hidden border border-gray-700">
                         <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 flex items-center justify-end pr-2"
                              style={{ width: `${Math.max(6, (n / maxModel) * 100)}%` }}>
-                          <span className="text-[10px] font-bold text-white">{n}</span>
+                          <span className="text-[10px] font-bold text-gray-100">{n}</span>
                         </div>
                       </div>
                     </div>

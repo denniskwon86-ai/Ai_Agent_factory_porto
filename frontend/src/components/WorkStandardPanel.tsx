@@ -90,20 +90,20 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl h-[88vh] bg-[#0B0C10] border border-[#1F2833] rounded-xl flex flex-col overflow-hidden">
-        <header className="h-14 px-5 border-b border-[#1F2833] flex items-center justify-between shrink-0">
+      <div className="w-full max-w-6xl h-[88vh] bg-gray-950 border border-gray-700 rounded-xl flex flex-col overflow-hidden">
+        <header className="h-14 px-5 border-b border-gray-700 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold text-white">📜 업무표준 (에이전트 법규)</h2>
+            <h2 className="text-lg font-bold text-gray-100">📜 업무표준 (에이전트 법규)</h2>
             <span className="text-xs text-gray-500">
               각 에이전트가 어떤 기준으로 일하고 무엇을 확인해 넘기는지를 정의한 제도 문서
             </span>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={reseed}
-              className="px-3 py-1.5 text-xs rounded bg-[#1F2833] hover:bg-[#2b3a49] text-gray-300"
+              className="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300"
               title="코드 기본값(criteria.py)에서 전 단계를 새 버전으로 재등록">기본값 재시드</button>
             <button onClick={onClose}
-              className="px-3 py-1.5 text-xs rounded bg-[#1F2833] hover:bg-[#2b3a49] text-gray-300">닫기</button>
+              className="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">닫기</button>
           </div>
         </header>
 
@@ -115,25 +115,25 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 flex min-h-0">
           {/* 좌: 분류 탭 + 목록 */}
-          <aside className="w-80 border-r border-[#1F2833] flex flex-col shrink-0">
-            <div className="flex border-b border-[#1F2833] shrink-0">
+          <aside className="w-80 border-r border-gray-700 flex flex-col shrink-0">
+            <div className="flex border-b border-gray-700 shrink-0">
               {kinds.map((k) => (
                 <button key={k.kind} onClick={() => setTab(k.kind)} title={k.desc}
                   className={`flex-1 px-3 py-2.5 text-xs font-semibold transition-colors ${
-                    tab === k.kind ? 'bg-[#1F2833] text-white' : 'text-gray-500 hover:text-gray-300'}`}>
+                    tab === k.kind ? 'bg-gray-800 text-gray-100' : 'text-gray-500 hover:text-gray-300'}`}>
                   {k.kind === 'regulation' ? '⚖️ 규정' : '📗 지침'}
                 </button>
               ))}
             </div>
-            <p className="px-4 py-2 text-[11px] leading-relaxed text-gray-500 border-b border-[#1F2833] shrink-0">
+            <p className="px-4 py-2 text-[11px] leading-relaxed text-gray-500 border-b border-gray-700 shrink-0">
               {kinds.find((k) => k.kind === tab)?.desc}
             </p>
             <ul className="flex-1 overflow-y-auto">
               {shown.map((r) => (
                 <li key={r.master_code}>
                   <button onClick={() => openDetail(r.stage)}
-                    className={`w-full text-left px-4 py-3 border-b border-[#1F2833]/60 hover:bg-[#141a21] ${
-                      sel === r.stage ? 'bg-[#141a21]' : ''}`}>
+                    className={`w-full text-left px-4 py-3 border-b border-gray-700/60 hover:bg-gray-900 ${
+                      sel === r.stage ? 'bg-gray-900' : ''}`}>
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-semibold text-gray-200">{r.stage}</span>
                       <span className="text-[10px] text-gray-500">v{r.version}</span>
@@ -160,7 +160,7 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
               <div className="space-y-5">
                 <div>
                   <div className="flex items-baseline gap-3 flex-wrap">
-                    <h3 className="text-xl font-bold text-white">{std._meta?.master_code}</h3>
+                    <h3 className="text-xl font-bold text-gray-100">{std._meta?.master_code}</h3>
                     <span className="text-xs text-gray-500">
                       v{std._meta?.version} · {std._meta?.source === 'registered' ? '등록 표준' : '코드 기본값(미등록)'}
                     </span>
@@ -193,7 +193,7 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
                     <table className="w-full text-xs">
                       <tbody>
                         {gate.map((c) => (
-                          <tr key={c.id} className="border-b border-[#1F2833]/60">
+                          <tr key={c.id} className="border-b border-gray-700/60">
                             <td className="py-2 pr-3 align-top w-56">
                               <span className="text-gray-200 font-mono">{c.id}</span>
                               <span className="ml-1 text-gray-600">({c.weight})</span>
@@ -229,11 +229,11 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
                 <ListBlock title="⚠️ 금지 사항" items={std.must_not} danger />
 
                 {detail?.agent_brief && (
-                  <details className="border border-[#1F2833] rounded">
+                  <details className="border border-gray-700 rounded">
                     <summary className="px-3 py-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200">
                       에이전트가 실제로 받는 고지문 보기
                     </summary>
-                    <pre className="px-3 py-2 text-[11px] text-gray-400 whitespace-pre-wrap leading-relaxed border-t border-[#1F2833]">
+                    <pre className="px-3 py-2 text-[11px] text-gray-400 whitespace-pre-wrap leading-relaxed border-t border-gray-700">
                       {detail.agent_brief}
                     </pre>
                   </details>
@@ -249,7 +249,7 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
                       </thead>
                       <tbody>
                         {hist.map((h) => (
-                          <tr key={h.version} className="border-t border-[#1F2833]/60 text-gray-500">
+                          <tr key={h.version} className="border-t border-gray-700/60 text-gray-500">
                             <td className="py-1">v{h.version}</td>
                             <td>{(h.valid_from || '').slice(0, 10)}</td>
                             <td className={h.status === 'active' ? 'text-emerald-500' : ''}>{h.status}</td>

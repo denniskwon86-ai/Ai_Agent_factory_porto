@@ -69,7 +69,7 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
             <span className="text-xl">🧬</span>
             <h2 className="text-lg font-bold">스킬 진화 승인 대기열 (Skill Evolution Proposals)</h2>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-100">✕</button>
         </div>
 
         <div className="p-6 overflow-y-auto flex-1">

@@ -37,6 +37,15 @@ app = FastAPI(
     version="5.1.0"
 )
 
+
+@app.get("/api/v1/health", tags=["System"])
+async def health():
+    """[UIUX-AUDIT-29 §3] 서버 생존 확인 — **화면이 «연결»을 지어내지 않게 하기 위한 것.**
+
+    ⚠️ 이 경로는 인증도 DB 접근도 하지 않는다. 무거우면 화면이 «확인 중»에 머물고, 그러면
+      사용자는 서버가 죽은 것으로 오해한다. 판단에 필요한 최소한만 답한다."""
+    return {"status": "ok", "version": app.version}
+
 # [QA 보완] 하드코딩 배제: 운영 서버와 로컬 환경을 분리하기 위해 환경 변수 사용
 allowed_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]

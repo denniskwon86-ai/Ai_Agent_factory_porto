@@ -14,6 +14,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Banner, Panel, ScreenHead } from '../../design/HubShell';
 import { errorTitle } from '../../lib/closedLoopFetch';
+import { EmptyOrError, Metric, failed, loading, ok, type Loaded }
+  from '../../design/DataState';
+import { reportRequestFailure, reportRequestSuccess } from '../../lib/backendHealth';
 import {
   AUDIENCE_KO, PUB_STATUS_KO, PUB_TYPE_KO, REVIEW_KO, SECURITY_KO, publicationApi,
   type Audience, type Publication, type ReviewType, type SourceType,
@@ -50,7 +53,9 @@ function SectionValue({ v }: { v: any }) {
 
 export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarvis) => void }) {
   const [mode, setMode] = useState<Mode>('list');
-  const [list, setList] = useState<Publication[]>([]);
+  // [UIUX-AUDIT-29 §2] «조회 실패»와 «0건»을 구분한다 — 발간 화면에서 그 둘을 뭉개면
+  //   사용자는 «대외 발간 0건»을 보고 나간 문서가 없다고 믿는다.
+  const [list, setList] = useState<Loaded<Publication[]>>(loading<Publication[]>());
   const [current, setCurrent] = useState<Publication | null>(null);
   const [decisions, setDecisions] = useState<DecisionCase[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -66,9 +71,14 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
         publicationApi.list(),
         decisionApi.queue().catch(() => [] as DecisionCase[]),
       ]);
-      setList(ps); setDecisions(ds);
+      setList(ok(ps)); setDecisions(ds);
+      reportRequestSuccess();
     } catch (e: any) {
-      setErr({ msg: e?.message || String(e), status: e?.status });
+      // ⚠️ 빈 배열로 떨어뜨리지 않는다. 실패는 실패로 남아야 «0건»과 구분된다.
+      // ⚠️ 여기서 배너까지 띄우지 않는다(감사 §2: 중복 배너 금지). 목록 실패는 목록 자리에서
+      //   «조회 불가 + 다시 시도»로 말한다. 배너는 **행동 실패**에만 쓴다.
+      setList(failed<Publication[]>(e));
+      reportRequestFailure();
     } finally { setBusy(null); }
   }, []);
 
@@ -76,7 +86,9 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
 
   // ★ 사용자가 바뀌면 이전 사용자의 발간 목록을 즉시 폐기한다(§CL-FE-03).
   useEffect(() => {
-    const h = () => { setList([]); setDecisions([]); setCurrent(null); setMode('list'); load(); };
+    const h = () => {
+      setList(loading<Publication[]>()); setDecisions([]); setCurrent(null); setMode('list'); load();
+    };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
   }, [load]);
@@ -94,7 +106,7 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
       const p = await fn();
       setCurrent(p);
       setFlash(p?.note || null);
-      publicationApi.list().then(setList).catch(() => undefined);
+      publicationApi.list().then((v) => setList(ok(v))).catch((e) => setList(failed(e)));
       return p;
     } catch (e: any) {
       // ⚠️ 실패해도 화면을 낙관적으로 올리지 않는다. 서버 상태를 다시 읽어 **실제 상태**를 쓴다 —
@@ -105,12 +117,19 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
     } finally { setBusy(null); }
   };
 
-  const stats = useMemo(() => ({
-    total: list.length,
-    external: list.filter((p) => p.audience === 'EXTERNAL').length,
-    blocked: list.filter((p) => p.blockers?.length && p.status !== 'PUBLISHED').length,
-    failed: list.filter((p) => p.status === 'DRAFT' && p.render_error).length,
-  }), [list]);
+  const rows = list.value || [];
+  const stats = useMemo(() => {
+    if (list.status !== 'ok') {
+      return { total: null, external: null, blocked: null, failed: null } as Record<string, number | null>;
+    }
+    const v = list.value || [];
+    return {
+      total: v.length,
+      external: v.filter((p) => p.audience === 'EXTERNAL').length,
+      blocked: v.filter((p) => p.blockers?.length && p.status !== 'PUBLISHED').length,
+      failed: v.filter((p) => p.status === 'DRAFT' && p.render_error).length,
+    } as Record<string, number | null>;
+  }, [list]);
 
   useEffect(() => {
     if (!onJarvis) return;
@@ -136,14 +155,18 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
       });
     } else {
       onJarvis({
-        title: list.length ? `발간물 ${list.length}건` : '발간물 없음',
-        desc: '대외 발간은 책임 임원 승인과 법무·공시 검토를 모두 통과해야 나갑니다.',
-        ev: list.slice(0, 3).map((p) => ({
+        title: list.status !== 'ok' ? '발간물 — 조회 불가'
+          : rows.length ? `발간물 ${rows.length}건` : '발간물 없음',
+        desc: list.status !== 'ok'
+          ? '목록을 가져오지 못했습니다 — «0건»이 아닙니다.'
+          : '대외 발간은 책임 임원 승인과 법무·공시 검토를 모두 통과해야 나갑니다.',
+        ev: rows.slice(0, 3).map((p) => ({
           label: p.title.slice(0, 22), value: PUB_STATUS_KO[p.status]?.label || p.status })),
-        objectId: '', snapshot: { count: list.length }, actions: ['새 발간 초안'],
+        objectId: '', snapshot: { status: list.status, count: rows.length },
+        actions: ['새 발간 초안'],
       });
     }
-  }, [mode, current, list, onJarvis]);
+  }, [mode, current, list, rows, onJarvis]);
 
   return (
     <>
@@ -154,7 +177,8 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
       {busy && <Banner tone="info">{busy}…</Banner>}
 
       {mode === 'list' && (
-        <ListScreen list={list} stats={stats} onOpen={open} onNew={() => setMode('create')} />
+        <ListScreen list={rows} state={list} stats={stats} onOpen={open}
+          onNew={() => setMode('create')} onRetry={load} />
       )}
 
       {mode === 'create' && (
@@ -194,10 +218,11 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
 }
 
 // ── 목록 ─────────────────────────────────────────────────────────────────────
-function ListScreen({ list, stats, onOpen, onNew }: {
+function ListScreen({ list, state, stats, onOpen, onNew, onRetry }: {
   list: Publication[];
-  stats: { total: number; external: number; blocked: number; failed: number };
-  onOpen: (id: string) => void; onNew: () => void;
+  state: Loaded<Publication[]>;
+  stats: Record<string, number | null>;
+  onOpen: (id: string) => void; onNew: () => void; onRetry: () => void;
 }) {
   const [filter, setFilter] = useState<'all' | 'EXTERNAL'>('all');
   const shown = filter === 'all' ? list : list.filter((p) => p.audience === 'EXTERNAL');
@@ -206,17 +231,20 @@ function ListScreen({ list, stats, onOpen, onNew }: {
     <>
       <ScreenHead kicker="PUBLICATIONS" title="대내외 보고 발간"
         description="승인된 결정 Snapshot 에서 보고서를 만들고, 대내·대외 게이트를 통과한 것만 내보냅니다."
-        chip={{ label: stats.external ? `대외 ${stats.external}건` : '대외 없음',
-          tone: stats.external ? 'danger' : 'muted' }} />
+        chip={state.status !== 'ok'
+          ? { label: state.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
+          : { label: stats.external ? `대외 ${stats.external}건` : '대외 없음',
+            tone: stats.external ? 'danger' : 'muted' }} />
 
+      {/* ★★ [UIUX-AUDIT-29 §2] 조회 실패는 «0» 이 아니라 «— / 조회 불가» 다. 발간 화면에서
+          그 둘을 뭉개면 «대외로 나간 문서가 없다»는 잘못된 안심을 준다. */}
       <div className="metric-row">
-        <div><span>발간물</span><b>{stats.total}</b><small>초안 포함</small></div>
-        <div><span>대외 발간</span><b>{stats.external}</b><small>이중 승인 대상</small></div>
-        <div><span>게이트 미통과</span><b>{stats.blocked}</b>
-          <small>{stats.blocked ? '내보낼 수 없음' : '없음'}</small></div>
-        {/* ★ 렌더 실패를 별도 지표로 둔다 — «작성 중»에 섞이면 아무도 발견하지 못한다. */}
-        <div><span>렌더 실패</span><b>{stats.failed}</b>
-          <small>{stats.failed ? '문서가 만들어지지 않음' : '없음'}</small></div>
+        <Metric label="발간물" state={state.status} value={stats.total} hint="초안 포함" />
+        <Metric label="대외 발간" state={state.status} value={stats.external} hint="이중 승인 대상" />
+        <Metric label="게이트 미통과" state={state.status} value={stats.blocked}
+          hint={stats.blocked ? '내보낼 수 없음' : '없음'} />
+        <Metric label="렌더 실패" state={state.status} value={stats.failed}
+          hint={stats.failed ? '문서가 만들어지지 않음' : '없음'} />
       </div>
 
       <Panel kicker="LIST" title="발간물"
@@ -230,9 +258,8 @@ function ListScreen({ list, stats, onOpen, onNew }: {
           </div>
         }>
         {shown.length === 0 ? (
-          <div className="empty-note">
-            발간물이 없습니다. 결정이 끝난 안건을 원천으로 «새 발간 초안»을 만들 수 있습니다.
-          </div>
+          <EmptyOrError state={state.status} error={state.error} onRetry={onRetry}
+            emptyText="발간물이 없습니다. 결정이 끝난 안건을 원천으로 «새 발간 초안»을 만들 수 있습니다." />
         ) : (
           <div className="people-list" style={{ padding: 15 }}>
             {shown.map((p) => (

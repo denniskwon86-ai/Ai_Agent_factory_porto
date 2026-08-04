@@ -267,8 +267,8 @@ export default function AgentMasterPanel() {
       {/* 헤더 */}
       <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0 z-10 shadow-sm">
         <div className="flex items-center gap-4 min-w-0">
-          <button onClick={closeAgentPanel} className="text-sm font-bold text-gray-400 hover:text-white bg-gray-700 px-3 py-1.5 rounded transition-colors shrink-0">◀ 런처</button>
-          <h1 className="text-lg font-bold text-white truncate">⚙️ 에이전트 마스터 제어판</h1>
+          <button onClick={closeAgentPanel} className="text-sm font-bold text-gray-400 hover:text-gray-100 bg-gray-700 px-3 py-1.5 rounded transition-colors shrink-0">◀ 런처</button>
+          <h1 className="text-lg font-bold text-gray-100 truncate">⚙️ 에이전트 마스터 제어판</h1>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {dirty && <span className="text-xs text-amber-400 mr-1">● 저장 안 됨</span>}
@@ -285,7 +285,7 @@ export default function AgentMasterPanel() {
         <select
           value={editingTemplateId}
           onChange={(e) => handleSwitchTemplate(e.target.value)}
-          className="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500 outline-none min-w-[16rem]"
+          className="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 focus:border-blue-500 outline-none min-w-[16rem]"
         >
           {templates.length === 0 && <option value="default">기본 워크플로우</option>}
           {templates.map((t) => (
@@ -320,7 +320,7 @@ export default function AgentMasterPanel() {
               value={draft.pipeline_name || ""}
               onChange={(e) => updateMeta("pipeline_name", e.target.value)}
               placeholder="파이프라인 이름"
-              className="w-full bg-transparent text-white font-bold text-lg outline-none border-b border-transparent hover:border-gray-600 focus:border-blue-500 mb-2 px-1"
+              className="w-full bg-transparent text-gray-100 font-bold text-lg outline-none border-b border-transparent hover:border-gray-600 focus:border-blue-500 mb-2 px-1"
             />
             <textarea
               value={draft.description || ""}
@@ -389,14 +389,14 @@ export default function AgentMasterPanel() {
       {showAiModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl w-[500px]">
-            <h2 className="text-lg font-bold text-white mb-2">✨ AI 파이프라인 자동 구상</h2>
+            <h2 className="text-lg font-bold text-gray-100 mb-2">✨ AI 파이프라인 자동 구상</h2>
             <p className="text-xs text-gray-400 mb-4">어떤 에이전트 파이프라인을 만들고 싶으신가요? AI가 최적의 구조를 제안합니다.<br/>(기존 편집 내용이 덮어쓰기 됩니다.)</p>
             <textarea
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
               placeholder="예: 제조업 원가 분석을 위한 에이전트 구성을 만들어 줘"
               rows={4}
-              className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-white resize-none outline-none focus:border-blue-500 mb-4"
+              className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-gray-100 resize-none outline-none focus:border-blue-500 mb-4"
             />
             <div className="flex justify-end gap-2">
               <button

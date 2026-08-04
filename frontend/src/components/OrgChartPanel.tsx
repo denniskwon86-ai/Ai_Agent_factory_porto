@@ -152,7 +152,7 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
       <div className="flex items-center gap-2 py-1.5 group" style={{ paddingLeft: depth * 18 }}>
         <span className="text-gray-600 text-xs">{d.children?.length ? '▾' : '·'}</span>
         <button onClick={() => showHistory(d.dept_id)}
-          className={`text-sm ${sel === d.dept_id ? 'text-white font-semibold' : 'text-gray-300'} hover:text-white`}>
+          className={`text-sm ${sel === d.dept_id ? 'text-gray-100 font-semibold' : 'text-gray-300'} hover:text-gray-100`}>
           {d.name_ko}
         </button>
         <span className="text-[10px] text-gray-600 font-mono">{d.dept_id}</span>
@@ -184,25 +184,25 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl h-[88vh] bg-[#0B0C10] border border-[#1F2833] rounded-xl flex flex-col overflow-hidden">
-        <header className="h-14 px-5 border-b border-[#1F2833] flex items-center justify-between shrink-0">
+      <div className="w-full max-w-6xl h-[88vh] bg-gray-950 border border-gray-700 rounded-xl flex flex-col overflow-hidden">
+        <header className="h-14 px-5 border-b border-gray-700 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold text-white">🏢 조직·권한</h2>
+            <h2 className="text-lg font-bold text-gray-100">🏢 조직·권한</h2>
             <span className="text-xs text-gray-500">부서는 기준정보 — 개편하면 새 버전이 되고 구판은 이력으로 보존됩니다</span>
           </div>
           <div className="flex items-center gap-2">
             <input value={asUser} onChange={(e) => setAsUser(e.target.value)} placeholder="사용자로 보기(ID)"
-              className="px-2 py-1 text-xs bg-[#141a21] border border-[#1F2833] rounded text-gray-300 w-40"
+              className="px-2 py-1 text-xs bg-gray-900 border border-gray-700 rounded text-gray-300 w-40"
               title="이 ID 로 권한을 해석해 화면을 그립니다(X-User-Id 헤더)" />
             <button onClick={seed} disabled={!canEdit}
-              className="px-3 py-1.5 text-xs rounded bg-[#1F2833] hover:bg-[#2b3a49] text-gray-300 disabled:opacity-40"
+              className="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-40"
               title="코드에 하드코딩되어 있던 부서를 기준정보로 적재(멱등)">부서 시드</button>
-            <button onClick={onClose} className="px-3 py-1.5 text-xs rounded bg-[#1F2833] hover:bg-[#2b3a49] text-gray-300">닫기</button>
+            <button onClick={onClose} className="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">닫기</button>
           </div>
         </header>
 
         {scope && (
-          <div className="px-5 py-2 text-[11px] border-b border-[#1F2833] shrink-0 flex items-center gap-3 flex-wrap">
+          <div className="px-5 py-2 text-[11px] border-b border-gray-700 shrink-0 flex items-center gap-3 flex-wrap">
             <span className="text-gray-500">현재 권한:</span>
             <Badge on={scope.unrestricted} label="무제한" hint="조직 미도입/부트스트랩/강제해제 상태" />
             <Badge on={scope.can_edit_org} label="조직편집" />
@@ -219,10 +219,10 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        <div className="flex border-b border-[#1F2833] shrink-0">
+        <div className="flex border-b border-gray-700 shrink-0">
           {(['dept', 'user'] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-5 py-2.5 text-xs font-semibold ${tab === t ? 'bg-[#1F2833] text-white' : 'text-gray-500 hover:text-gray-300'}`}>
+              className={`px-5 py-2.5 text-xs font-semibold ${tab === t ? 'bg-gray-800 text-gray-100' : 'text-gray-500 hover:text-gray-300'}`}>
               {t === 'dept' ? `조직도 (${flat.length})` : `사용자 (${users.length})`}
             </button>
           ))}
@@ -246,12 +246,12 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
                 <ul>{tree.map((d) => renderNode(d))}</ul>
               </div>
               {hist.length > 0 && (
-                <aside className="w-72 shrink-0 border-l border-[#1F2833] pl-4">
+                <aside className="w-72 shrink-0 border-l border-gray-700 pl-4">
                   <h4 className="text-xs font-semibold text-gray-400 mb-2">{sel} 개편 이력</h4>
                   <table className="w-full text-[11px]">
                     <tbody>
                       {hist.map((h) => (
-                        <tr key={h.version} className="border-b border-[#1F2833]/60 text-gray-500">
+                        <tr key={h.version} className="border-b border-gray-700/60 text-gray-500">
                           <td className="py-1 pr-2">v{h.version}</td>
                           <td className="pr-2">{h.name_ko}</td>
                           <td className={h.status === 'active' ? 'text-emerald-500' : ''}>{h.status}</td>
@@ -280,7 +280,7 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
               )}
               <div className="space-y-2">
                 {users.map((u) => (
-                  <div key={u.user_id} className="border border-[#1F2833] rounded p-3">
+                  <div key={u.user_id} className="border border-gray-700 rounded p-3">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold text-gray-200">{u.display_name}</span>
                       <span className="text-[11px] text-gray-600 font-mono">{u.user_id}</span>
@@ -299,8 +299,8 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
                         return (
                           <select key={d.dept_id} value={cur} disabled={!canEdit}
                             onChange={(e) => setRole(u, d.dept_id, e.target.value)}
-                            className={`text-[10px] px-1.5 py-0.5 rounded border bg-[#141a21] disabled:opacity-40 ${
-                              cur ? 'border-indigo-700 text-indigo-300' : 'border-[#1F2833] text-gray-600'}`}
+                            className={`text-[10px] px-1.5 py-0.5 rounded border bg-gray-900 disabled:opacity-40 ${
+                              cur ? 'border-indigo-700 text-indigo-300' : 'border-gray-700 text-gray-600'}`}
                             title={`${d.name_ko} — 상위 부서 권한은 하위로 상속됩니다`}>
                             <option value="">{d.name_ko} —</option>
                             {ROLES.map((r) => <option key={r} value={r}>{d.name_ko} · {r}</option>)}
@@ -322,7 +322,7 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
 function IconBtn({ children, onClick, title, danger }: any) {
   return (
     <button onClick={onClick} title={title}
-      className={`px-1.5 text-xs rounded hover:bg-[#1F2833] ${danger ? 'text-red-400' : 'text-gray-500'}`}>
+      className={`px-1.5 text-xs rounded hover:bg-gray-800 ${danger ? 'text-red-400' : 'text-gray-500'}`}>
       {children}
     </button>
   );
@@ -331,7 +331,7 @@ function IconBtn({ children, onClick, title, danger }: any) {
 function Badge({ on, label, hint }: { on: boolean; label: string; hint?: string }) {
   return (
     <span title={hint}
-      className={`px-1.5 py-0.5 rounded ${on ? 'bg-emerald-900/40 text-emerald-300' : 'bg-[#1F2833] text-gray-600'}`}>
+      className={`px-1.5 py-0.5 rounded ${on ? 'bg-emerald-900/40 text-emerald-300' : 'bg-gray-800 text-gray-600'}`}>
       {label}
     </span>
   );
@@ -341,7 +341,7 @@ function Flag({ on, label, hint, onClick }: any) {
   return (
     <button onClick={onClick} title={hint}
       className={`px-1.5 py-0.5 text-[10px] rounded border ${
-        on ? 'bg-amber-900/40 text-amber-300 border-amber-700/50' : 'bg-[#141a21] text-gray-600 border-[#1F2833]'}`}>
+        on ? 'bg-amber-900/40 text-amber-300 border-amber-700/50' : 'bg-gray-900 text-gray-600 border-gray-700'}`}>
       {label}
     </button>
   );

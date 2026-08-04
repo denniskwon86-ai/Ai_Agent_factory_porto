@@ -60,7 +60,7 @@ export function UserSwitcher() {
     : scope?.can_edit_org ? { t: '관리자', c: 'text-amber-300 bg-amber-900/40 border-amber-700/50' }
     : scope?.can_run_enterprise ? { t: '경영진', c: 'text-sky-300 bg-sky-900/40 border-sky-700/50' }
     : scope?.can_manage_standard ? { t: 'DA', c: 'text-violet-300 bg-violet-900/40 border-violet-700/50' }
-    : { t: `${scope?.readable_dept_ids?.length ?? 0}개 부서`, c: 'text-gray-400 bg-[#1F2833] border-[#1F2833]' };
+    : { t: `${scope?.readable_dept_ids?.length ?? 0}개 부서`, c: 'text-gray-400 bg-gray-800 border-gray-700' };
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -68,8 +68,8 @@ export function UserSwitcher() {
         <select
           value={cur}
           onChange={(e) => change(e.target.value)}
-          className={`text-xs bg-[#141a21] border rounded px-2 py-1.5 text-gray-300 ${
-            blocked ? 'border-red-700/60' : 'border-[#1F2833]'
+          className={`text-xs bg-gray-900 border rounded px-2 py-1.5 text-gray-300 ${
+            blocked ? 'border-red-700/60' : 'border-gray-700'
           }`}
         >
           <option value="">(익명)</option>

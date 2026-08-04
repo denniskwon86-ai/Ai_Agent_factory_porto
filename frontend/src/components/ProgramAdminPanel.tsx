@@ -70,10 +70,10 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="bg-[#14151A] border border-[#2F3640] rounded-2xl w-full max-w-3xl max-h-[88vh] overflow-y-auto shadow-2xl">
-        <header className="sticky top-0 bg-[#14151A] border-b border-[#2F3640] px-6 py-4 flex items-center justify-between">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-3xl max-h-[88vh] overflow-y-auto shadow-2xl">
+        <header className="sticky top-0 bg-gray-900 border-b border-gray-700 px-6 py-4 flex items-center justify-between">
           <div className="min-w-0">
-            <h2 className="text-lg font-bold text-white truncate">
+            <h2 className="text-lg font-bold text-gray-100 truncate">
               ⚙ 프로그램 사용여부 — {releaseName || releaseId}
             </h2>
             <p className="text-[11px] text-gray-500 mt-0.5">
@@ -81,7 +81,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
             </p>
           </div>
           <button onClick={onClose}
-                  className="text-sm text-gray-400 hover:text-white bg-gray-800 px-3 py-1.5 rounded shrink-0">
+                  className="text-sm text-gray-400 hover:text-gray-100 bg-gray-800 px-3 py-1.5 rounded shrink-0">
             닫기
           </button>
         </header>
@@ -99,7 +99,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
             {!data ? (
               <div className="text-sm text-gray-500">확인하지 못했습니다.</div>
             ) : (
-              <div className="bg-[#0B0C10] border border-[#2F3640] rounded-lg p-4 space-y-2">
+              <div className="bg-gray-950 border border-gray-700 rounded-lg p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <span className={`text-xs font-bold px-2 py-1 rounded border ${BADGE[data.status]}`}>
                     {STATUS_LABEL[data.status]}
@@ -135,7 +135,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">
                 끄면 영향받는 대상
               </h3>
-              <div className="bg-[#0B0C10] border border-[#2F3640] rounded-lg p-4 text-[13px] space-y-1">
+              <div className="bg-gray-950 border border-gray-700 rounded-lg p-4 text-[13px] space-y-1">
                 <div className={dep.blast_radius === 'enterprise' ? 'text-red-300 font-bold'
                               : dep.blast_radius === 'department' ? 'text-amber-300' : 'text-gray-400'}>
                   영향 범위: {dep.blast_radius === 'enterprise' ? '전사'
@@ -168,7 +168,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
                 </label>
                 <input value={reason} onChange={(e) => setReason(e.target.value)}
                        placeholder="예: v2 로 이전, 원가 산식 오류 발견"
-                       className="w-full bg-[#0B0C10] border border-[#2F3640] rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-indigo-500 outline-none" />
+                       className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-indigo-500 outline-none" />
               </div>
               <div>
                 <label className="block text-[11px] text-gray-400 mb-1">
@@ -176,7 +176,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
                 </label>
                 <input value={replacement} onChange={(e) => setReplacement(e.target.value)}
                        placeholder="예: myapp_20260801_120000"
-                       className="w-full bg-[#0B0C10] border border-[#2F3640] rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-indigo-500 outline-none" />
+                       className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-indigo-500 outline-none" />
               </div>
               <label className="flex items-start gap-2 text-[12px] text-gray-400">
                 <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)}
@@ -220,7 +220,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
               <div className="space-y-1">
                 {data.history.map((h) => (
                   <div key={h.event_id}
-                       className="bg-[#0B0C10] border border-[#2F3640] rounded-lg px-3 py-2 text-[12px] text-gray-300">
+                       className="bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-300">
                     <span className="text-gray-500">{h.at}</span>
                     {' · '}
                     <b>{h.from_status || '(미기록)'} → {h.to_status}</b>

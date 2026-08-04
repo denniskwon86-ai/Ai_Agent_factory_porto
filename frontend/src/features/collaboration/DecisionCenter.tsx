@@ -22,6 +22,9 @@ import {
   type ViewKey, type ViewSection, type ViewsBundle,
 } from '../../lib/decisionApi';
 import { errorTitle } from '../../lib/closedLoopFetch';
+import { EmptyOrError, Metric, failed, loading, ok, type Loaded }
+  from '../../design/DataState';
+import { reportRequestFailure, reportRequestSuccess } from '../../lib/backendHealth';
 
 export type DecisionJarvis = {
   title: string; desc: string; ev: { label: string; value: string }[];
@@ -74,19 +77,31 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
   simulationRunIds?: string[];
 }) {
   const [mode, setMode] = useState<Mode>('list');
-  const [queue, setQueue] = useState<DecisionCase[]>([]);
+  // [UIUX-AUDIT-29 §2] 목록을 **상태와 함께** 들고 있는다. 배열만 두면 «조회 실패»가
+  //   «0건»과 구분되지 않는다 — 경영 화면에서 그 둘은 정반대의 뜻이다.
+  const [queue, setQueue] = useState<Loaded<DecisionCase[]>>(loading<DecisionCase[]>());
   const [current, setCurrent] = useState<DecisionCase | null>(null);
   const [views, setViews] = useState<ViewsBundle | null>(null);
   const [view, setView] = useState<ViewKey>('decider');
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  // ⚠️ `rows` 는 Jarvis 문맥 effect 의 의존성에 들어간다 — **선언이 사용처보다 앞이어야** 한다.
+  //   뒤에 두면 렌더 중 의존성 배열을 평가할 때 TDZ 오류로 화면이 통째로 죽는다.
+  const rows = queue.value || [];
 
   const loadQueue = useCallback(async () => {
     setBusy('불러오는 중'); setErr(null);
-    try { setQueue(await decisionApi.queue()); }
-    catch (e: any) { setErr({ msg: e?.message || String(e), status: e?.status }); }
-    finally { setBusy(null); }
+    setQueue((p) => (p.status === 'ok' ? p : loading<DecisionCase[]>()));
+    try {
+      setQueue(ok(await decisionApi.queue()));
+      reportRequestSuccess();
+    } catch (e: any) {
+      // ⚠️ 실패를 빈 배열로 바꾸지 않는다. 그 순간 화면은 «안건 0건»이라고 말하고,
+      //   사용자는 결정할 것이 없다고 믿는다.
+      setQueue(failed<DecisionCase[]>(e));
+      reportRequestFailure();
+    } finally { setBusy(null); }
   }, []);
 
   const open = useCallback(async (id: string) => {
@@ -108,7 +123,10 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
   // ★ 사용자가 바뀌면 이전 사용자의 안건·검토서를 **즉시 폐기**한다(§CL-FE-03). 남겨 두면 다른
   //   사용자의 결정 목록이 화면에 그대로 남고, 그것이 곧 유출이다.
   useEffect(() => {
-    const h = () => { setQueue([]); setCurrent(null); setViews(null); setMode('list'); loadQueue(); };
+    const h = () => {
+      setQueue(loading<DecisionCase[]>()); setCurrent(null); setViews(null);
+      setMode('list'); loadQueue();
+    };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
   }, [loadQueue]);
@@ -157,26 +175,36 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
       });
     } else {
       onJarvis({
-        title: queue.length ? `내 결정 ${queue.length}건` : '내 결정 없음',
-        desc: '내가 참여자로 지정된 안건만 보입니다.',
-        ev: queue.slice(0, 3).map((d) => ({
+        title: queue.status !== 'ok' ? '내 결정 — 조회 불가'
+          : rows.length ? `내 결정 ${rows.length}건` : '내 결정 없음',
+        desc: queue.status !== 'ok'
+          ? '목록을 가져오지 못했습니다 — «0건»이 아닙니다.'
+          : '내가 참여자로 지정된 안건만 보입니다.',
+        ev: rows.slice(0, 3).map((d) => ({
           label: d.question.slice(0, 24),
           value: DECISION_STATUS_KO[d.status]?.label || d.status,
         })),
         objectId: '',
-        snapshot: { queue_count: queue.length },
+        snapshot: { queue_status: queue.status, queue_count: rows.length },
         actions: ['새 안건 만들기'],
       });
     }
-  }, [mode, current, queue, onJarvis]);
+  }, [mode, current, queue, rows, onJarvis]);
 
-  const stats = useMemo(() => ({
-    total: queue.length,
-    mine: queue.filter((d) => d.my_role === 'DECIDER'
-      && ['REVIEW_REQUESTED', 'IN_REVIEW', 'MEETING_REQUESTED'].includes(d.status)).length,
-    changed: queue.filter((d) => d.status === 'EVIDENCE_CHANGED').length,
-    overdue: queue.filter((d) => d.overdue).length,
-  }), [queue]);
+  // ★ 조회에 실패했으면 지표는 숫자가 아니라 `null` 이어야 한다. 0 을 넣으면 «없다»가 된다.
+  const stats = useMemo(() => {
+    if (queue.status !== 'ok') {
+      return { total: null, mine: null, changed: null, overdue: null } as Record<string, number | null>;
+    }
+    const q = queue.value || [];
+    return {
+      total: q.length,
+      mine: q.filter((d) => d.my_role === 'DECIDER'
+        && ['REVIEW_REQUESTED', 'IN_REVIEW', 'MEETING_REQUESTED'].includes(d.status)).length,
+      changed: q.filter((d) => d.status === 'EVIDENCE_CHANGED').length,
+      overdue: q.filter((d) => d.overdue).length,
+    } as Record<string, number | null>;
+  }, [queue]);
 
   return (
     <>
@@ -190,7 +218,8 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
       {busy && <Banner tone="info">{busy}…</Banner>}
 
       {mode === 'list' && (
-        <QueueScreen list={queue} stats={stats} onOpen={open} onNew={() => setMode('create')} />
+        <QueueScreen list={rows} state={queue} stats={stats} onOpen={open}
+          onNew={() => setMode('create')} onRetry={loadQueue} />
       )}
 
       {mode === 'create' && (
@@ -226,10 +255,11 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
 }
 
 // ── 목록 ─────────────────────────────────────────────────────────────────────
-function QueueScreen({ list, stats, onOpen, onNew }: {
+function QueueScreen({ list, state, stats, onOpen, onNew, onRetry }: {
   list: DecisionCase[];
-  stats: { total: number; mine: number; changed: number; overdue: number };
-  onOpen: (id: string) => void; onNew: () => void;
+  state: Loaded<DecisionCase[]>;
+  stats: Record<string, number | null>;
+  onOpen: (id: string) => void; onNew: () => void; onRetry: () => void;
 }) {
   const [filter, setFilter] = useState<'open' | 'all'>('open');
   const CLOSED = ['DECIDED', 'ACTIONED', 'EFFECT_MEASURED', 'CANCELLED'];
@@ -239,15 +269,20 @@ function QueueScreen({ list, stats, onOpen, onNew }: {
     <>
       <ScreenHead kicker="DECISIONS" title="의사결정 센터"
         description="시뮬레이션 결과를 하나의 Decision Package 로 만들고, 요청자·의사결정자·영향부서가 같은 문서를 관점별로 봅니다."
-        chip={{ label: stats.mine ? `내가 결정할 것 ${stats.mine}건` : '내 결정 대기 없음',
-          tone: stats.mine ? 'warn' : 'success' }} />
+        chip={state.status !== 'ok'
+          ? { label: state.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
+          : { label: stats.mine ? `내가 결정할 것 ${stats.mine}건` : '내 결정 대기 없음',
+            tone: stats.mine ? 'warn' : 'success' }} />
 
+      {/* ★★ [UIUX-AUDIT-29 §2] 조회에 실패하면 «0» 이 아니라 «— / 조회 불가» 다. */}
       <div className="metric-row">
-        <div><span>내가 관여한 안건</span><b>{stats.total}</b><small>참여자로 지정된 것만</small></div>
-        <div><span>내가 결정할 것</span><b>{stats.mine}</b><small>의사결정자 역할</small></div>
-        <div><span>근거가 바뀐 안건</span><b>{stats.changed}</b>
-          <small>{stats.changed ? '결정 전 재검토 필요' : '없음'}</small></div>
-        <div><span>기한 초과</span><b>{stats.overdue}</b><small>미결 기준</small></div>
+        <Metric label="내가 관여한 안건" state={state.status} value={stats.total}
+          hint="참여자로 지정된 것만" />
+        <Metric label="내가 결정할 것" state={state.status} value={stats.mine}
+          hint="의사결정자 역할" />
+        <Metric label="근거가 바뀐 안건" state={state.status} value={stats.changed}
+          hint={stats.changed ? '결정 전 재검토 필요' : '없음'} />
+        <Metric label="기한 초과" state={state.status} value={stats.overdue} hint="미결 기준" />
       </div>
 
       <Panel kicker="QUEUE" title="내 결정 대기"
@@ -261,11 +296,10 @@ function QueueScreen({ list, stats, onOpen, onNew }: {
           </div>
         }>
         {shown.length === 0 ? (
-          <div className="empty-note">
-            {filter === 'open'
+          <EmptyOrError state={state.status} error={state.error} onRetry={onRetry}
+            emptyText={filter === 'open'
               ? '진행 중인 안건이 없습니다. 전체를 보려면 위의 «전체» 를 누르십시오.'
-              : '내가 참여자로 지정된 안건이 없습니다. 시뮬레이션 결과에서 «새 안건 만들기» 로 Decision Package 를 만들 수 있습니다.'}
-          </div>
+              : '내가 참여자로 지정된 안건이 없습니다. 시뮬레이션 결과에서 «새 안건 만들기» 로 Decision Package 를 만들 수 있습니다.'} />
         ) : (
           <div className="people-list" style={{ padding: 15 }}>
             {shown.map((d) => (

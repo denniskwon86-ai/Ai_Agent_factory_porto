@@ -154,23 +154,23 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
     } finally { setBusy(null); }
   };
 
-  const inputCls = 'w-full bg-[#0B0C10] border border-[#2F3640] rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-emerald-500';
+  const inputCls = 'w-full bg-gray-950 border border-gray-700 rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-emerald-500';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl h-[88vh] bg-[#12141C] border border-[#2F3640] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2F3640] shrink-0">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+      <div className="w-full max-w-6xl h-[88vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 shrink-0">
+          <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
             🗂 기준정보 마스터
             <span className="text-xs text-gray-500 font-normal">— 골든 레코드는 확정 조회로 모든 에이전트 프롬프트에 주입됩니다(모델 불변). 지식팩(확률적 RAG)과 상호보완</span>
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl px-2">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-100 text-xl px-2">✕</button>
         </div>
 
         <div className="flex-1 flex overflow-hidden">
           {/* 좌: 타입 목록 + 생성 */}
-          <div className="w-72 border-r border-[#2F3640] flex flex-col overflow-hidden shrink-0">
-            <div className="p-4 border-b border-[#2F3640]">
+          <div className="w-72 border-r border-gray-700 flex flex-col overflow-hidden shrink-0">
+            <div className="p-4 border-b border-gray-700">
               <div className="text-xs font-bold text-gray-400 mb-2">새 타입(온톨로지)</div>
               <input value={tId} onChange={(e) => setTId(e.target.value)} placeholder="type_id (예: process)" className={inputCls + ' mb-1.5'} />
               <input value={tName} onChange={(e) => setTName(e.target.value)} placeholder="한글명 (예: 공정)" className={inputCls + ' mb-1.5'} />
@@ -186,7 +186,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
               {types.map((t) => (
                 <button key={t.type_id} onClick={() => { setSelType(t.type_id); setPv(null); }}
                   className={`w-full text-left rounded-lg p-2.5 border transition-colors ${
-                    selType === t.type_id ? 'border-emerald-500 bg-emerald-900/30' : 'border-[#2F3640] bg-[#0B0C10] hover:border-gray-500'}`}>
+                    selType === t.type_id ? 'border-emerald-500 bg-emerald-900/30' : 'border-gray-700 bg-gray-950 hover:border-gray-500'}`}>
                   <div className="text-sm font-bold text-gray-100 truncate">{t.name_ko}</div>
                   <div className="text-[10px] text-gray-500 font-mono">{t.type_id}</div>
                 </button>
@@ -201,7 +201,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
             ) : (
               <div className="flex-1 overflow-y-auto p-5 space-y-5">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-white">{selTypeData.name_ko} <span className="text-xs text-gray-500 font-mono">({selTypeData.type_id})</span></h3>
+                  <h3 className="text-base font-bold text-gray-100">{selTypeData.name_ko} <span className="text-xs text-gray-500 font-mono">({selTypeData.type_id})</span></h3>
                   <label className="text-xs text-emerald-300 hover:text-emerald-200 cursor-pointer bg-emerald-950/40 border border-emerald-900/50 rounded-lg px-3 py-1.5">
                     📥 CSV 일괄등록
                     <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={(e) => handleCsv(e.target.files)} disabled={busy !== null} />
@@ -210,7 +210,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
                 <div className="text-[10px] text-gray-500 -mt-3">CSV 헤더: <code>master_code,name,domains,aliases,attr:&lt;속성명&gt;…</code> (domains·aliases 는 <code>;</code> 구분)</div>
 
                 {/* 레코드 생성/개정 폼 */}
-                <div className="rounded-xl border border-dashed border-[#2F3640] bg-[#0B0C10]/60 p-4 space-y-2">
+                <div className="rounded-xl border border-dashed border-gray-700 bg-gray-950/60 p-4 space-y-2">
                   <div className="text-xs font-bold text-gray-300">레코드 생성 · 개정 <span className="text-gray-500 font-normal">(동일 코드 재저장 = 개정 version+1, 구판은 이력 보존)</span></div>
                   <div className="grid grid-cols-2 gap-2">
                     <input value={rCode} onChange={(e) => setRCode(e.target.value)} placeholder="master_code (예: PROC-ASSY-01)" className={inputCls} />
@@ -242,7 +242,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
                   </div>
                   <div className="space-y-1.5">
                     {records.map((r) => (
-                      <div key={r.master_code} className="rounded-lg border border-[#2F3640] bg-[#0B0C10] px-3 py-2">
+                      <div key={r.master_code} className="rounded-lg border border-gray-700 bg-gray-950 px-3 py-2">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="text-xs font-bold text-gray-100 truncate">
@@ -260,13 +260,13 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
                         {/* 별칭 칩 */}
                         <div className="flex flex-wrap items-center gap-1 mt-1.5">
                           {(r.aliases || []).filter((a) => a !== r.name).map((a) => (
-                            <span key={a} className="text-[10px] bg-[#12141C] border border-[#2F3640] text-gray-300 rounded-full pl-2 pr-1 py-0.5 flex items-center gap-1">
+                            <span key={a} className="text-[10px] bg-gray-900 border border-gray-700 text-gray-300 rounded-full pl-2 pr-1 py-0.5 flex items-center gap-1">
                               {a}<button onClick={() => handleRemoveAlias(r.master_code, a)} className="text-gray-500 hover:text-red-400">✕</button>
                             </span>
                           ))}
                           <input value={aliasDraft[r.master_code] || ''} onChange={(e) => setAliasDraft((d) => ({ ...d, [r.master_code]: e.target.value }))}
                             onKeyDown={(e) => e.key === 'Enter' && handleAddAlias(r.master_code)}
-                            placeholder="+ 별칭" className="text-[10px] bg-transparent border-b border-[#2F3640] w-16 focus:outline-none focus:border-emerald-500 text-gray-300" />
+                            placeholder="+ 별칭" className="text-[10px] bg-transparent border-b border-gray-700 w-16 focus:outline-none focus:border-emerald-500 text-gray-300" />
                         </div>
                       </div>
                     ))}
@@ -275,7 +275,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
                 </div>
 
                 {/* 주입 미리보기 */}
-                <div className="rounded-xl border border-[#2F3640] bg-[#0B0C10]/60 p-4">
+                <div className="rounded-xl border border-gray-700 bg-gray-950/60 p-4">
                   <div className="text-xs font-bold text-gray-300 mb-2">🔍 주입 미리보기 — 이 텍스트에 실제로 주입될 기준정보 블록 확인(별칭 감지 + is_core)</div>
                   <div className="flex gap-2 mb-2">
                     <input value={pvText} onChange={(e) => setPvText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handlePreview()}
@@ -285,7 +285,7 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
                       className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white text-xs font-bold px-4 rounded-lg shrink-0">확인</button>
                   </div>
                   {pv && (
-                    <div className="rounded-lg border border-[#2F3640] bg-[#12141C] p-2.5">
+                    <div className="rounded-lg border border-gray-700 bg-gray-900 p-2.5">
                       <div className="text-[10px] text-emerald-300 font-mono mb-1">매칭: {pv.matched.length ? pv.matched.join(', ') : '(없음 — 주입 안 됨)'}</div>
                       {pv.block && <pre className="text-[11px] text-gray-300 whitespace-pre-wrap">{pv.block}</pre>}
                     </div>

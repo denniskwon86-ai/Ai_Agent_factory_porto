@@ -80,9 +80,9 @@ function SlideViewer({ rawCode }: { rawCode: string }) {
          <div className="prose max-w-none"><ManualRenderer markdown={slides[currentSlide]} /></div>
       </div>
       <div className="absolute bottom-6 flex gap-4 bg-gray-800/80 px-4 py-2 rounded-full backdrop-blur">
-         <button onClick={() => setCurrentSlide(s => Math.max(0, s - 1))} disabled={currentSlide === 0} className="text-white disabled:text-gray-500 font-bold px-3">이전</button>
+         <button onClick={() => setCurrentSlide(s => Math.max(0, s - 1))} disabled={currentSlide === 0} className="text-gray-100 disabled:text-gray-500 font-bold px-3">이전</button>
          <span className="text-gray-300 font-mono flex items-center">{currentSlide + 1} / {slides.length}</span>
-         <button onClick={() => setCurrentSlide(s => Math.min(slides.length - 1, s + 1))} disabled={currentSlide === slides.length - 1} className="text-white disabled:text-gray-500 font-bold px-3">다음</button>
+         <button onClick={() => setCurrentSlide(s => Math.min(slides.length - 1, s + 1))} disabled={currentSlide === slides.length - 1} className="text-gray-100 disabled:text-gray-500 font-bold px-3">다음</button>
       </div>
     </div>
   );
@@ -588,8 +588,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
         </div>
         {activeTab === 'PREVIEW' && (
           <div className="flex items-center gap-1 ml-auto px-2 shrink-0">
-            <button onClick={openPopout} title="독립 OS 창으로 실행" className="text-xs font-bold text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors">↗ 새 창</button>
-            <button onClick={() => setIsFullscreen(v => !v)} title={isFullscreen ? '축소 (Esc)' : '전체화면'} className="text-xs font-bold text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors">{isFullscreen ? '✕ 축소' : '⛶ 전체화면'}</button>
+            <button onClick={openPopout} title="독립 OS 창으로 실행" className="text-xs font-bold text-gray-300 hover:text-gray-100 bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors">↗ 새 창</button>
+            <button onClick={() => setIsFullscreen(v => !v)} title={isFullscreen ? '축소 (Esc)' : '전체화면'} className="text-xs font-bold text-gray-300 hover:text-gray-100 bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors">{isFullscreen ? '✕ 축소' : '⛶ 전체화면'}</button>
           </div>
         )}
       </div>

@@ -13,6 +13,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { jarvisApi, jarvisSession, type JarvisContext } from '../lib/jarvisApi';
+import { HEALTH_KO, reportRequestFailure, reportRequestSuccess, useBackendHealth }
+  from '../lib/backendHealth';
 
 export type JarvisEvidence = { label: string; value: string };
 
@@ -40,6 +42,8 @@ export function JarvisRail({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>('');
   const logRef = useRef<HTMLDivElement>(null);
+  // [UIUX-AUDIT-29 §3] 상태를 **실제 응답으로만** 바꾼다. 예전에는 서버가 죽어도 «연결»이었다.
+  const health = useBackendHealth();
 
   useEffect(() => jarvisSession.subscribe(() => setTurns(jarvisSession.turns())), []);
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [turns]);
@@ -54,8 +58,12 @@ export function JarvisRail({
       const r = await jarvisApi.ask(m, context, projectId);
       jarvisSession.push({ role: 'assistant', text: r.reply || '(빈 응답)',
         at: new Date().toISOString(), objectId: context.selected_object_id });
+      reportRequestSuccess();
     } catch (e: any) {
       // 실패를 답으로 위장하지 않는다 — 무엇이 안 됐는지 그대로 말한다.
+      //   ★ 그리고 그 실패를 상태 표시에 반영한다. 실패했는데 머리에 «연결»이 떠 있으면
+      //     사용자는 원인을 자기 질문 탓으로 돌린다.
+      reportRequestFailure();
       setErr(e?.status === 401
         ? '사용자를 지정해야 비서가 답할 수 있습니다.'
         : `비서 응답을 받지 못했습니다: ${e?.message || e}`);
@@ -70,8 +78,11 @@ export function JarvisRail({
           <small>AI FACTORY STUDIO</small>
           <b>Jarvis</b>
         </div>
-        {/* 상태를 사실대로 표시한다 — 대화 이력이 없으면 아직 아무것도 물어보지 않은 것이다. */}
-        <span className="online-dot">{busy ? '● 생각 중' : '● 연결'}</span>
+        {/* ★★ [UIUX-AUDIT-29 §3] 상태를 **사실대로** 표시한다. 서버가 없는데 «연결»이라고
+            쓰면, 답이 안 오는 이유를 사용자가 자기 질문 탓으로 돌린다. */}
+        <span className={`online-dot ${health}`} title={HEALTH_KO[health].label}>
+          ● {busy ? '생각 중' : HEALTH_KO[health].label}
+        </span>
       </header>
 
       <div className="jarvis-context">
@@ -116,6 +127,22 @@ export function JarvisRail({
         ))}
         {err && <div className="jarvis-turn error"><span>연결</span><p>{err}</p></div>}
       </div>
+
+      {/* ⚠️ 오프라인이라고 입력을 막지 않는다(감사 §3). 막으면 사용자는 무엇을 물으려 했는지
+          잊는다. 대신 «지금 보내면 실패한다»는 사실과 이유를 먼저 말한다. */}
+      {health === 'offline' && (
+        <div className="jarvis-offline">
+          <b>서버에 연결되어 있지 않습니다</b>
+          질문은 입력해 두실 수 있지만 지금 보내면 전송에 실패합니다. 임시 보관 기능은 아직
+          없습니다 — 연결이 «연결됨»으로 바뀐 뒤 보내십시오.
+        </div>
+      )}
+      {health === 'degraded' && (
+        <div className="jarvis-offline warn">
+          <b>응답이 지연되거나 일부 요청이 실패하고 있습니다</b>
+          서버는 살아 있습니다. 실패하면 다시 시도해 보십시오.
+        </div>
+      )}
 
       <div className="jarvis-input">
         <textarea value={input} onChange={(e) => setInput(e.target.value)}

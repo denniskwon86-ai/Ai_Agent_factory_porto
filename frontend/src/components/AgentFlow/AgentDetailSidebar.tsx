@@ -64,10 +64,10 @@ export default function AgentDetailSidebar({
   return (
     <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col h-full shrink-0 shadow-xl overflow-y-auto">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-850">
-        <h2 className="text-sm font-bold text-white flex items-center gap-2">
+        <h2 className="text-sm font-bold text-gray-100 flex items-center gap-2">
           <span>🛠️</span> 에이전트 상세 편집
         </h2>
-        <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-100 transition-colors">
           <X size={16} />
         </button>
       </div>
@@ -92,7 +92,7 @@ export default function AgentDetailSidebar({
           <input
             value={agent.name_ko || ""}
             onChange={(e) => updateAgent(agent.id, "name_ko", e.target.value)}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none"
+            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:border-blue-500 outline-none"
           />
         </div>
 
@@ -155,7 +155,7 @@ export default function AgentDetailSidebar({
               type="number"
               value={agent.order ?? 0}
               onChange={(e) => updateAgent(agent.id, "order", parseInt(e.target.value) || 0)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
               title="원하는 순서대로 직접 입력하세요."
             />
           </div>

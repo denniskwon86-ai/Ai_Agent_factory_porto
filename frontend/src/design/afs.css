@@ -101,7 +101,7 @@
 }
 
 .afs-scope .module-intro { padding: 24px 20px 18px; border-bottom: 1px solid #ffffff14; }
-.afs-scope .module-intro small { color: #80cfd9; font-size: 10px; font-weight: 900; letter-spacing: .1em; }
+.afs-scope .module-intro small { color: #80cfd9; font-size: 12px; font-weight: 900; letter-spacing: .1em; }
 .afs-scope .module-intro h1 { margin: 8px 0 9px; color: #fff; font-size: 20px; line-height: 1.35; letter-spacing: -.04em; }
 .afs-scope .module-intro p { margin: 0; color: #9eacbf; font-size: 12px; line-height: 1.58; }
 
@@ -117,7 +117,7 @@
 }
 .afs-scope .module-menu i {
   display: grid; place-items: center; width: 29px; height: 29px; border-radius: 6px;
-  color: #91a4bd; background: #ffffff0a; font-size: 10px; font-style: normal; font-weight: 900;
+  color: #91a4bd; background: #ffffff0a; font-size: 12px; font-style: normal; font-weight: 900;
 }
 .afs-scope .module-menu b, .afs-scope .module-menu small { display: block; }
 .afs-scope .module-menu b { font-size: 13px; }
@@ -132,7 +132,7 @@
 .afs-scope .inheritance-card {
   margin: 10px; padding: 13px; border: 1px solid #286c71; border-radius: 8px; background: #0d3238;
 }
-.afs-scope .inheritance-card > span { color: #6dd4d5; font-size: 9px; font-weight: 900; letter-spacing: .09em; }
+.afs-scope .inheritance-card > span { color: #6dd4d5; font-size: 12px; font-weight: 900; letter-spacing: .09em; }
 .afs-scope .inheritance-card > b { display: block; margin-top: 5px; font-size: 13px; color: #eaffff; }
 .afs-scope .inheritance-card p { margin: 6px 0 0; color: #b5d0d1; font-size: 12px; line-height: 1.45; }
 
@@ -142,12 +142,13 @@
 .afs-scope .screen-head {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 17px;
 }
-.afs-scope .screen-head small { color: var(--cyan); font-size: 10px; font-weight: 950; letter-spacing: .1em; }
+.afs-scope .screen-head small { color: var(--cyan); font-size: 12px; font-weight: 950; letter-spacing: .1em; }
 .afs-scope .screen-head h2 { margin: 7px 0 6px; font-size: 24px; letter-spacing: -.05em; }
 .afs-scope .screen-head p { max-width: 760px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
 
 .afs-scope .state-chip {
-  flex: 0 0 auto; margin-top: 3px; padding: 7px 10px; border-radius: 14px; font-size: 12px; font-weight: 900;
+  /* [UIUX-AUDIT-29 §4] 핵심 상태는 13px 이상 — 상태를 잘못 읽으면 행동이 달라진다. */
+  flex: 0 0 auto; margin-top: 3px; padding: 7px 11px; border-radius: 14px; font-size: 13px; font-weight: 900;
 }
 .afs-scope .state-chip.success { color: #0b665d; background: #dcefeb; }
 .afs-scope .state-chip.warn { color: #8a4b0e; background: #fff0dc; }
@@ -164,7 +165,7 @@
   display: flex; align-items: flex-start; justify-content: space-between;
   padding: 17px 18px; border-bottom: 1px solid var(--line);
 }
-.afs-scope .panel-head small { color: var(--cyan); font-size: 9px; font-weight: 950; letter-spacing: .09em; }
+.afs-scope .panel-head small { color: var(--cyan); font-size: 12px; font-weight: 950; letter-spacing: .09em; }
 .afs-scope .panel-head h3 { margin: 4px 0 0; font-size: 17px; }
 
 .afs-scope .text-button { border: 0; color: var(--navy); background: transparent; font-size: 13px; font-weight: 850; }
@@ -194,7 +195,7 @@
 .afs-scope .step-line li:last-child { border-right: 1px solid var(--line); border-radius: 0 8px 8px 0; }
 .afs-scope .step-line i {
   display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
-  color: #788496; background: #eef0f3; font-size: 11px; font-style: normal; font-weight: 900;
+  color: #788496; background: #eef0f3; font-size: 12px; font-style: normal; font-weight: 900;
 }
 .afs-scope .step-line b, .afs-scope .step-line small { display: block; }
 .afs-scope .step-line b { font-size: 12px; }
@@ -238,7 +239,7 @@
 }
 .afs-scope .app-mark.violet { background: linear-gradient(135deg, #5442a6, #8978d8); }
 .afs-scope .app-mark.green { background: linear-gradient(135deg, #0f6f64, #2fa392); }
-.afs-scope .release-card header small, .afs-scope .request-top small { color: var(--cyan); font-size: 10px; font-weight: 900; }
+.afs-scope .release-card header small, .afs-scope .request-top small { color: var(--cyan); font-size: 12px; font-weight: 900; }
 .afs-scope .release-card h3 { margin: 4px 0 5px; font-size: 17px; }
 .afs-scope .release-card header p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 
@@ -264,7 +265,7 @@
 .afs-scope .person.selected { border-color: #77bbc5; background: #f0fafb; }
 .afs-scope .person > i {
   display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%;
-  color: #fff; background: var(--navy); font-size: 10px; font-style: normal; font-weight: 900;
+  color: #fff; background: var(--navy); font-size: 12px; font-style: normal; font-weight: 900;
 }
 .afs-scope .person b, .afs-scope .person small { display: block; }
 .afs-scope .person b { font-size: 12px; }
@@ -313,7 +314,7 @@
 .afs-scope .request-select:hover { background: #f7f9fb; }
 .afs-scope .request-select[aria-pressed="true"] { background: #f0fafb; }
 .afs-scope .request-select-main { min-width: 0; display: grid; gap: 4px; }
-.afs-scope .request-select-main small { color: var(--cyan); font-size: 10px; font-weight: 900; }
+.afs-scope .request-select-main small { color: var(--cyan); font-size: 12px; font-weight: 900; }
 .afs-scope .request-select-main b { font-size: 16px; }
 .afs-scope .request-select-main .purpose { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .afs-scope .request-select-side { display: grid; gap: 4px; justify-items: end; }
@@ -339,7 +340,7 @@
 .afs-scope .request-alert.danger { border-color: #e8c4cc; background: #fdeff1; }
 .afs-scope .request-alert i {
   display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
-  color: #fff; background: var(--cyan); font-size: 10px; font-style: normal;
+  color: #fff; background: var(--cyan); font-size: 12px; font-style: normal;
 }
 .afs-scope .request-alert.warn i { background: var(--orange); }
 .afs-scope .request-alert.danger i { background: var(--red); }
@@ -356,7 +357,7 @@
 }
 .afs-scope .app-pocket i {
   display: grid; place-items: center; width: 35px; height: 35px; border-radius: 7px;
-  color: #fff; font-size: 10px; font-style: normal; font-weight: 950;
+  color: #fff; font-size: 12px; font-style: normal; font-weight: 950;
 }
 .afs-scope .app-pocket i.blue { background: #2458a4; }
 .afs-scope .app-pocket i.green { background: #158074; }
@@ -397,9 +398,23 @@
 }
 .afs-scope .jarvis-rail header > div { flex: 1; }
 .afs-scope .jarvis-rail header small, .afs-scope .jarvis-rail header b { display: block; }
-.afs-scope .jarvis-rail header small { color: #91a7cf; font-size: 11px; letter-spacing: .09em; }
+.afs-scope .jarvis-rail header small { color: #91a7cf; font-size: 12px; letter-spacing: .09em; }
 .afs-scope .jarvis-rail header b { margin-top: 3px; font-size: 15px; }
-.afs-scope .online-dot { color: #83e3d8; font-size: 11px; font-weight: 900; }
+/* [UIUX-AUDIT-29 §3] 연결 상태는 **네 가지가 서로 다른 색**이어야 한다. 하나의 색으로 두면
+ * «연결됨»과 «오프라인»이 같은 무게로 보이고, 그건 표시하지 않는 것과 같다. */
+.afs-scope .online-dot { font-size: 12px; font-weight: 900; }
+.afs-scope .online-dot.online { color: #83e3d8; }
+.afs-scope .online-dot.checking { color: #9fb0c6; }
+.afs-scope .online-dot.degraded { color: #ffc46b; }
+.afs-scope .online-dot.offline { color: #ff8fa3; }
+
+.afs-scope .jarvis-offline {
+  margin: 0 16px 10px; padding: 10px 12px; border-radius: 7px;
+  border-left: 3px solid #ff8fa3; background: #ffffff0c;
+  color: #ffd9e0; font-size: 12px; line-height: 1.55;
+}
+.afs-scope .jarvis-offline.warn { border-left-color: #ffc46b; color: #ffe6c2; }
+.afs-scope .jarvis-offline b { display: block; margin-bottom: 3px; }
 
 .afs-scope .jarvis-context { padding: 18px 16px; border-bottom: 1px solid #ffffff17; }
 /* 한글 라벨이므로 12px 이상 — 9~10px 은 영문 Kicker·비핵심 메타에만 쓴다(지적 5). */
@@ -419,7 +434,7 @@
 /* 대화 로그 — 답변을 중앙 Banner 가 아니라 **레일 안에서** 유지한다(지적 3). */
 .afs-scope .jarvis-log { padding: 12px 16px; display: grid; gap: 10px; max-height: 42vh; overflow: auto; }
 .afs-scope .jarvis-turn { display: grid; gap: 3px; }
-.afs-scope .jarvis-turn > span { color: #7fc4d8; font-size: 11px; font-weight: 900; }
+.afs-scope .jarvis-turn > span { color: #7fc4d8; font-size: 12px; font-weight: 900; }
 .afs-scope .jarvis-turn > p {
   margin: 0; padding: 9px 10px; border-radius: 6px; color: #dbe6f6; background: #ffffff0d;
   font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;

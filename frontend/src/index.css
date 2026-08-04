@@ -1,1 +1,302 @@
 @import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * [DESIGN] 승인 시안 «Living Enterprise Canvas» 를 **제품 전체에** 입힌다.
+ *   원본: uiux-prototypes/master-concept/ADOPTION_DECISION.md (2026-07-30 Supervisor 채택)
+ *   토큰: frontend/src/design/afs.css (신규 화면이 쓰는 것과 **같은 값**을 쓴다)
+ *
+ * ## 왜 컴포넌트를 고치지 않고 여기서 하는가
+ *
+ * 25개 화면이 `bg-gray-800 text-gray-400` 같은 **일관된 명도 스케일**로 쓰여 있다. 색을 화면마다
+ * 손으로 바꾸면 (a) 25개 파일이 동시에 흔들리고 (b) 절반만 옮긴 상태가 지금보다 나빠 보이며
+ * (c) 되돌릴 방법이 없다. Tailwind v4 의 `@theme` 는 그 스케일의 **값**만 바꾼다 — 클래스 이름은
+ * 그대로 두고 제품 전체가 한 번에 승인 팔레트로 바뀌고, 이 블록을 지우면 그대로 되돌아온다.
+ *
+ * ## 규칙: 명도 반전
+ *
+ * 다크에서 `900` 은 «가장 깊은 배경», `100` 은 «가장 밝은 글씨»였다. 라이트에서는 그 의미가
+ * 뒤집힌다. 그래서 스케일을 **숫자 그대로 반전**한다(50↔950, 100↔900, …). 규칙이 하나여서
+ * 예외를 외울 필요가 없고, 새로 짜는 화면도 같은 규칙 안에 있다.
+ *
+ * ⚠️ `white`/`black` 은 **건드리지 않는다.** `bg-black/70` 은 라이트에서도 모달 배경이고,
+ *   `bg-white` 는 라이트에서도 흰 카드다. 뜻이 뒤집히는 것은 `text-white` 뿐이며, 그것은
+ *   컴포넌트에서 문맥을 보고 바꾼다(강조 버튼 위는 흰색 유지, 표면 위는 잉크).
+ *
+ * ## 색상은 LS 브랜드로 모은다
+ *
+ * indigo·blue·purple·violet 은 전부 **LS Navy** 계열로, sky·teal 은 **Cyan**, emerald·green·lime 은
+ * **Green**, amber·yellow·orange 는 **Orange**, red·rose 는 **LS Red** 로 모은다.
+ * 채택 결정 7항: "LS Blue 구조와 LS Red 핵심 행동의 제한적 사용" — 강조색이 일곱 갈래로
+ * 흩어져 있으면 무엇이 «핵심 행동»인지 화면이 말하지 못한다.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+@theme {
+  /* ── 중립 스케일(반전) — 표면과 글씨 ─────────────────────────────────── */
+  --color-gray-50: #0a1220;
+  --color-gray-100: #101a2d;   /* = ink. 가장 진한 글씨 */
+  --color-gray-200: #24314a;
+  --color-gray-300: #3b4860;
+  --color-gray-400: #5a6478;   /* 가장 많이 쓰이는 보조 글씨(140곳) */
+  --color-gray-500: #667185;   /* = muted */
+  --color-gray-600: #8b95a6;
+  --color-gray-700: #e9ecf1;   /* 살짝 올라온 표면·구분선 */
+  --color-gray-800: #ffffff;   /* 패널 표면 */
+  --color-gray-900: #f4f5f7;   /* = soft */
+  --color-gray-950: #eef1f4;   /* 페이지 바탕 */
+
+  --color-slate-50: #0a1220;
+  --color-slate-100: #101a2d;
+  --color-slate-200: #24314a;
+  --color-slate-300: #3b4860;
+  --color-slate-400: #5a6478;
+  --color-slate-500: #667185;
+  --color-slate-600: #8b95a6;
+  --color-slate-700: #e7ebf0;
+  --color-slate-800: #ffffff;
+  --color-slate-900: #f2f4f7;
+  --color-slate-950: #eaeef2;
+
+  --color-zinc-100: #101a2d;
+  --color-zinc-200: #24314a;
+  --color-zinc-300: #3b4860;
+  --color-zinc-400: #5a6478;
+  --color-zinc-500: #667185;
+  --color-zinc-600: #8b95a6;
+  --color-zinc-700: #e9ecf1;
+  --color-zinc-800: #ffffff;
+  --color-zinc-900: #f4f5f7;
+  --color-zinc-950: #eef1f4;
+
+  --color-neutral-100: #101a2d;
+  --color-neutral-200: #24314a;
+  --color-neutral-300: #3b4860;
+  --color-neutral-400: #5a6478;
+  --color-neutral-500: #667185;
+  --color-neutral-600: #8b95a6;
+  --color-neutral-700: #e9ecf1;
+  --color-neutral-800: #ffffff;
+  --color-neutral-900: #f4f5f7;
+  --color-neutral-950: #eef1f4;
+
+  /* ── LS Navy — 구조·1차 행동 (indigo·blue·purple·violet 을 여기로 모은다) ── */
+  --color-indigo-50: #071747;
+  --color-indigo-100: #0a1e5a;
+  --color-indigo-200: #0d2568;
+  --color-indigo-300: #163a86;
+  --color-indigo-400: #2a56a8;
+  --color-indigo-500: #3f6cbd;
+  --color-indigo-600: #0a1e5a;   /* 1차 버튼 배경 — 반전하지 않는다(흰 글씨가 얹힌다) */
+  --color-indigo-700: #071747;   /* 1차 버튼 hover·테두리 */
+  --color-indigo-800: #dbe3f2;
+  --color-indigo-900: #e8edf7;   /* `bg-indigo-900/40` = 옅은 네이비 워시 */
+  --color-indigo-950: #f1f4fa;
+
+  --color-blue-50: #071747;
+  --color-blue-100: #0a1e5a;
+  --color-blue-200: #12306f;
+  --color-blue-300: #1c4489;
+  --color-blue-400: #2a56a8;
+  --color-blue-500: #3f6cbd;
+  --color-blue-600: #0a1e5a;
+  --color-blue-700: #071747;
+  --color-blue-800: #dbe3f2;
+  --color-blue-900: #e8edf7;
+  --color-blue-950: #f1f4fa;
+
+  --color-purple-50: #0d1440;
+  --color-purple-100: #16205e;
+  --color-purple-200: #1d2a72;
+  --color-purple-300: #2a3c92;
+  --color-purple-400: #3a51ad;
+  --color-purple-500: #4b63bd;
+  --color-purple-600: #16205e;
+  --color-purple-700: #0d1440;
+  --color-purple-800: #dfe3f4;
+  --color-purple-900: #eaedf9;
+  --color-purple-950: #f2f4fb;
+
+  --color-violet-50: #0d1440;
+  --color-violet-100: #16205e;
+  --color-violet-200: #1d2a72;
+  --color-violet-300: #2a3c92;
+  --color-violet-400: #3a51ad;
+  --color-violet-500: #4b63bd;
+  --color-violet-600: #16205e;
+  --color-violet-700: #0d1440;
+  --color-violet-800: #dfe3f4;
+  --color-violet-900: #eaedf9;
+  --color-violet-950: #f2f4fb;
+
+  /* ── Cyan — 데이터·계측 ─────────────────────────────────────────────── */
+  --color-cyan-50: #01323a;
+  --color-cyan-100: #01414c;
+  --color-cyan-200: #015968;
+  --color-cyan-300: #017185;
+  --color-cyan-400: #00849b;
+  --color-cyan-500: #009bb4;
+  --color-cyan-600: #017185;
+  --color-cyan-700: #015968;
+  --color-cyan-800: #cfe9ef;
+  --color-cyan-900: #dff1f4;
+  --color-cyan-950: #eef8fa;
+
+  --color-sky-50: #01323a;
+  --color-sky-100: #01414c;
+  --color-sky-200: #015968;
+  --color-sky-300: #017185;
+  --color-sky-400: #00849b;
+  --color-sky-500: #009bb4;
+  --color-sky-600: #017185;
+  --color-sky-700: #015968;
+  --color-sky-800: #cfe9ef;
+  --color-sky-900: #dff1f4;
+  --color-sky-950: #eef8fa;
+
+  --color-teal-50: #01323a;
+  --color-teal-100: #01414c;
+  --color-teal-200: #015968;
+  --color-teal-300: #017185;
+  --color-teal-400: #00849b;
+  --color-teal-500: #009bb4;
+  --color-teal-600: #017185;
+  --color-teal-700: #015968;
+  --color-teal-800: #cfe9ef;
+  --color-teal-900: #dff1f4;
+  --color-teal-950: #eef8fa;
+
+  /* ── Green — 정상·통과 ──────────────────────────────────────────────── */
+  --color-emerald-50: #06342f;
+  --color-emerald-100: #08453e;
+  --color-emerald-200: #0a5a51;
+  --color-emerald-300: #0b665d;
+  --color-emerald-400: #0f7267;
+  --color-emerald-500: #138578;
+  --color-emerald-600: #0b665d;
+  --color-emerald-700: #08453e;
+  --color-emerald-800: #cfe7e2;
+  --color-emerald-900: #dcefeb;
+  --color-emerald-950: #edf7f5;
+
+  --color-green-50: #06342f;
+  --color-green-100: #08453e;
+  --color-green-200: #0a5a51;
+  --color-green-300: #0b665d;
+  --color-green-400: #0f7267;
+  --color-green-500: #138578;
+  --color-green-600: #0b665d;
+  --color-green-700: #08453e;
+  --color-green-800: #cfe7e2;
+  --color-green-900: #dcefeb;
+  --color-green-950: #edf7f5;
+
+  --color-lime-50: #06342f;
+  --color-lime-100: #08453e;
+  --color-lime-200: #0a5a51;
+  --color-lime-300: #0b665d;
+  --color-lime-400: #0f7267;
+  --color-lime-500: #138578;
+  --color-lime-600: #0b665d;
+  --color-lime-700: #08453e;
+  --color-lime-800: #cfe7e2;
+  --color-lime-900: #dcefeb;
+  --color-lime-950: #edf7f5;
+
+  /* ── Orange — 주의·대기 ─────────────────────────────────────────────── */
+  --color-amber-50: #4a2905;
+  --color-amber-100: #5e3407;
+  --color-amber-200: #74400a;
+  --color-amber-300: #8a4b0e;
+  --color-amber-400: #a85d12;
+  --color-amber-500: #d77b18;
+  --color-amber-600: #8a4b0e;
+  --color-amber-700: #5e3407;
+  --color-amber-800: #fbe4c6;
+  --color-amber-900: #fff0dc;
+  --color-amber-950: #fff8ee;
+
+  --color-yellow-50: #4a2905;
+  --color-yellow-100: #5e3407;
+  --color-yellow-200: #74400a;
+  --color-yellow-300: #8a4b0e;
+  --color-yellow-400: #a85d12;
+  --color-yellow-500: #d77b18;
+  --color-yellow-600: #8a4b0e;
+  --color-yellow-700: #5e3407;
+  --color-yellow-800: #fbe4c6;
+  --color-yellow-900: #fff0dc;
+  --color-yellow-950: #fff8ee;
+
+  --color-orange-50: #4a2905;
+  --color-orange-100: #5e3407;
+  --color-orange-200: #74400a;
+  --color-orange-300: #8a4b0e;
+  --color-orange-400: #a85d12;
+  --color-orange-500: #d77b18;
+  --color-orange-600: #8a4b0e;
+  --color-orange-700: #5e3407;
+  --color-orange-800: #fbe4c6;
+  --color-orange-900: #fff0dc;
+  --color-orange-950: #fff8ee;
+
+  /* ── LS Red — **핵심 행동과 위험에만.** 넓은 면적에 쓰지 않는다(채택 결정 7항) ── */
+  --color-red-50: #5c0518;
+  --color-red-100: #7a0a20;
+  --color-red-200: #96122e;
+  --color-red-300: #b01c39;
+  --color-red-400: #d02545;
+  --color-red-500: #fa002d;
+  --color-red-600: #d1002a;   /* 위험 버튼 배경 — 흰 글씨가 얹힌다 */
+  --color-red-700: #a80022;
+  --color-red-800: #ffd6de;
+  --color-red-900: #ffe3e8;
+  --color-red-950: #fff2f4;
+
+  --color-rose-50: #5c0518;
+  --color-rose-100: #7a0a20;
+  --color-rose-200: #96122e;
+  --color-rose-300: #b01c39;
+  --color-rose-400: #d02545;
+  --color-rose-500: #fa002d;
+  --color-rose-600: #d1002a;
+  --color-rose-700: #a80022;
+  --color-rose-800: #ffd6de;
+  --color-rose-900: #ffe3e8;
+  --color-rose-950: #fff2f4;
+
+  /* ── 타이포 — 승인 시안과 같은 글꼴 ─────────────────────────────────── */
+  --font-sans: Pretendard, "Noto Sans KR", "Segoe UI", Arial, sans-serif;
+}
+
+/* ── 뜻이 뒤집히는 소수의 유틸리티만 여기서 바로잡는다 ──────────────────────
+ * ⚠️ 목록을 늘리지 말 것. 여기 있는 것은 **다크에서 «옅은 흰 겹»이었다가 라이트에서 «옅은 어두운
+ *   겹»이 되어야 하는** 것들뿐이다. 색을 하나 더 넣고 싶으면 `@theme` 에서 하는 것이 맞다. */
+.bg-white\/5 { background-color: rgba(16, 26, 45, .04); }
+.bg-white\/10 { background-color: rgba(16, 26, 45, .07); }
+.hover\:bg-white\/10:hover { background-color: rgba(16, 26, 45, .07); }
+.hover\:bg-white\/20:hover { background-color: rgba(16, 26, 45, .11); }
+.border-white\/5 { border-color: #e6e9ee; }
+.border-white\/10 { border-color: #d8dce3; }
+.divide-white\/10 > * + * { border-color: #d8dce3; }
+
+/* ── 페이지 바탕 ─────────────────────────────────────────────────────────
+ * 승인 시안의 바탕색. `body` 를 비워 두면 브라우저 기본 흰색이 새어 나와, 화면 가장자리만
+ * 다른 흰색으로 보인다(가장 눈에 띄는 «덜 만든» 신호다). */
+html, body, #root {
+  min-height: 100%;
+  color: #101a2d;
+  background: #eef1f4;
+  font-family: Pretendard, "Noto Sans KR", "Segoe UI", Arial, sans-serif;
+}
+
+/* 스크롤바까지 바꾸지 않으면 라이트 화면에 다크 스크롤바가 남는다 — 작지만 화면 전체에 있다. */
+* {
+  scrollbar-color: #c3c9d4 transparent;
+  scrollbar-width: thin;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent; border-radius: 8px;
+  background-clip: content-box; background-color: #c3c9d4;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: #a9b1c0; }

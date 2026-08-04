@@ -25,6 +25,82 @@ import { PublicationCenter, type PublicationJarvis } from './PublicationCenter';
 // 사용자는 전달·결정·발간이 서로 다른 제품이라고 읽는다 — 이것들은 하나의 폐루프다.
 type View = 'inbox' | 'apps' | 'deliver' | 'sent' | 'decisions' | 'publications';
 
+/** [UIUX-AUDIT-29 §1] **화면 문맥은 활성 모듈을 따라간다.**
+ *
+ * 감사 지적: 의사결정 센터와 발간 화면에서도 상단이 계속 «협업 — 앱 전달·수락·내 앱», «개인
+ * 전달은…», «앱 전달과 공동 업무» 였다. 사용자는 상단 문구로 «내가 지금 어디에 있는가»를
+ * 읽는다. 그것이 화면 내용과 다르면, 화면이 자기 위치를 잘못 말하는 것이다.
+ *
+ * ★ 그래서 제목·설명·좌하단 안전 카드를 **한 곳에서** 모듈별로 정의한다. 세 군데에 흩어 놓으면
+ *   하나만 고쳐지고 다시 어긋난다. */
+type ModuleContext = {
+  dialogLabel: string;
+  barTitle: string;
+  barNote: string;
+  kicker: string;
+  title: string;
+  subtitle: string;
+  /** 좌측 하단 카드 — **그 모듈에서 가장 오해하기 쉬운 통제**를 적는다. */
+  guard: { kicker: string; title: string; body: string };
+};
+
+const MODULE_CONTEXT: Record<View, ModuleContext> = {
+  inbox: {
+    dialogLabel: '협업 허브 — 받은 앱',
+    barTitle: '받은 앱',
+    barNote: '수락해도 데이터 접근 범위는 넓어지지 않습니다',
+    kicker: 'COLLABORATION', title: '받은 앱과 응답',
+    subtitle: '다른 사용자가 나에게 전달한 앱입니다. 수락하면 내 주머니에 담깁니다.',
+    guard: { kicker: 'APP-IN-APP', title: '플랫폼 인증 상속',
+      body: '전달된 앱은 자체 로그인을 갖지 않습니다. 현재 사용자·조직·역할로 실행되며, 수락해도 볼 수 있는 자료가 늘어나지 않습니다.' },
+  },
+  apps: {
+    dialogLabel: '협업 허브 — 내 앱',
+    barTitle: '내 앱',
+    barNote: '수락한 앱은 현재 사용자 권한으로 실행됩니다',
+    kicker: 'COLLABORATION', title: '내 앱 주머니',
+    subtitle: '수락한 앱을 여기서 실행합니다. 별도 로그인이 없습니다.',
+    guard: { kicker: 'APP-IN-APP', title: '플랫폼 인증 상속',
+      body: '앱은 호스트 권한으로 실행됩니다. 앱이 자체 로그인 화면을 띄우면 관리자에게 알려 주십시오.' },
+  },
+  deliver: {
+    dialogLabel: '협업 허브 — 사용자에게 전달',
+    barTitle: '사용자에게 전달',
+    barNote: '개인 전달은 부서 공유·전사 승격과 별개입니다',
+    kicker: 'COLLABORATION', title: '앱 전달',
+    subtitle: '지정한 한 사람에게 앱을 전달합니다. 부서 공유·전사 승격과는 다른 경로입니다.',
+    guard: { kicker: 'SCOPE', title: '권한은 넓어지지 않습니다',
+      body: '수락해도 상대가 원래 볼 수 없던 자료는 앱에서도 보이지 않습니다. 자료 권한이 필요하면 조직 권한을 별도로 부여해야 합니다.' },
+  },
+  sent: {
+    dialogLabel: '협업 허브 — 보낸 요청',
+    barTitle: '보낸 요청',
+    barNote: '수락 전에는 언제든 회수할 수 있습니다',
+    kicker: 'COLLABORATION', title: '보낸 전달과 응답',
+    subtitle: '내가 보낸 전달의 상태입니다. 회수하면 상대 주머니에 회수 사실이 남습니다.',
+    guard: { kicker: 'TRACE', title: '회수는 이력을 지우지 않습니다',
+      body: '회수해도 «누가 언제 무엇을 보냈는가»는 원장에 남습니다. 상태만 덮어쓰면 나중에 설명할 수 없습니다.' },
+  },
+  decisions: {
+    dialogLabel: '의사결정 센터 — 한 문서 · 세 관점',
+    barTitle: '의사결정 센터',
+    barNote: '세 관점은 같은 문서의 다른 렌더링입니다',
+    kicker: 'DECISIONS', title: '의사결정 패키지',
+    subtitle: '시뮬레이션 결과를 하나의 Package 로 만들고, 요청자·의사결정자·영향부서가 같은 문서를 관점별로 봅니다.',
+    guard: { kicker: 'ONE PACKAGE', title: '숫자를 자동으로 갱신하지 않습니다',
+      body: '검토 요청 후 근거가 바뀌면 조용히 고치지 않고 «근거 변경됨»으로 세워 사람이 다시 보게 합니다. 참석자가 읽은 문서와 결정된 문서가 달라지면 회의록이 거짓이 됩니다.' },
+  },
+  publications: {
+    dialogLabel: '대내외 발간 — 나가기 전에 막습니다',
+    barTitle: '대내외 발간',
+    barNote: '대외 발간은 임원 승인과 법무·공시 검토를 모두 통과해야 나갑니다',
+    kicker: 'PUBLICATIONS', title: '보고서 발간',
+    subtitle: '승인된 결정 Snapshot 에서 보고서를 만들고, 게이트를 통과한 것만 내보냅니다.',
+    guard: { kicker: 'GATE', title: '차단은 서버에서 합니다',
+      body: '대외 발간은 화면 버튼뿐 아니라 API 도 함께 막습니다 — 주소를 알아도 게시되지 않습니다. 게시 어댑터가 없으면 배포는 «실패»로 기록되고 상태는 올라가지 않습니다.' },
+  },
+};
+
 const STATUS_CHIP: Record<string, string> = {
   PENDING: 'warn', ACCEPTED: 'success', REJECTED: 'muted', EXPIRED: 'muted', REVOKED: 'danger',
 };
@@ -150,6 +226,10 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     { id: 'publications', label: '대내외 발간', hint: '나가면 되돌릴 수 없다', mark: '발' },
   ];
 
+  const ctx = MODULE_CONTEXT[view];
+  /** 전달 3화면(받은 앱·내 앱·전달·보낸 요청)에서만 허브 자신의 상태를 말한다. */
+  const isCollab = view !== 'decisions' && view !== 'publications';
+
   // Jarvis 문맥 — **선택된 객체**를 그대로 넘긴다. Task ID 를 사용자에게 묻지 않는다(§3-8).
   const jarvisCtx = (() => {
     if (view === 'publications') {
@@ -224,12 +304,14 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
   return (
     // ★ [교차검토 지적 1] 손으로 만든 `fixed div` 는 모달이 아니었다 — dialog semantics·배경
     //   inert·포커스 트랩·Escape·포커스 복귀·스크롤 잠금이 모두 없었다. 셸 공통 기반으로 옮겼다.
-    <HubDialog label="협업 — 앱 전달·수락·내 앱" onClose={onClose}>
+    <HubDialog label={ctx.dialogLabel} onClose={onClose}>
       <div className="afs-dialog-bar">
-        <b>협업</b>
-        <span>개인 전달은 부서 공유·전사 승격과 별개이며, 수락해도 데이터 권한은 넓어지지 않습니다</span>
+        {/* [UIUX-AUDIT-29 §1] 제목·설명이 활성 모듈을 따라간다. 고정 문구는 화면이 자기
+            위치를 잘못 말하는 것이다. */}
+        <b>{ctx.barTitle}</b>
+        <span>{ctx.barNote}</span>
         <div className="bar-actions">
-          {busy && <span className="busy">{busy}…</span>}
+          {isCollab && busy && <span className="busy">{busy}…</span>}
           <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
@@ -238,18 +320,18 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
 
       <div className="afs-dialog-body">
           <HubShell
-            kicker="COLLABORATION"
-            title="앱 전달과 공동 업무"
-            subtitle="만든 앱을 사람에게 전달하고, 받은 앱을 내 주머니에서 실행합니다."
+            kicker={ctx.kicker}
+            title={ctx.title}
+            subtitle={ctx.subtitle}
             items={items} activeId={view} onSelect={(id) => setView(id as View)}
             footer={
+              // ★ 안전 카드도 모듈을 따라간다. 의사결정·발간 화면에서 «App-in-App 인증»은
+              //   가장 중요한 통제가 아니다 — 그 자리에는 그 화면에서 가장 오해하기 쉬운
+              //   통제가 있어야 한다(감사 §1).
               <div className="inheritance-card">
-                <span>APP-IN-APP</span>
-                <b>플랫폼 인증 상속</b>
-                <p>
-                  전달된 앱은 자체 로그인을 갖지 않습니다. 현재 사용자·조직·역할로 실행되며,
-                  수락해도 볼 수 있는 자료가 늘어나지 않습니다.
-                </p>
+                <span>{ctx.guard.kicker}</span>
+                <b>{ctx.guard.title}</b>
+                <p>{ctx.guard.body}</p>
               </div>
             }
             jarvis={
@@ -276,14 +358,22 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
               />
             }
           >
-            {err && (
+            {/* [UIUX-AUDIT-29 §2] 허브의 전달 목록 오류를 **의사결정·발간 화면에서 띄우지
+                않는다.** 그 화면들은 자기 오류를 스스로 말하며, 두 배너가 겹치면 화면이
+                오류로 뒤덮이고 정작 «무엇을 해야 하는가»가 안 보인다. */}
+            {isCollab && err && (
               <Banner tone="error"
                 title={err.status === 401 ? '사용자 지정이 필요합니다'
                   : err.status === 404 ? '요청을 찾을 수 없습니다' : '오류'}>
                 {err.msg}
+                {err.status !== 401 && (
+                  <div style={{ marginTop: 10 }}>
+                    <button className="secondary-button" onClick={load}>다시 시도</button>
+                  </div>
+                )}
               </Banner>
             )}
-            {flash && <Banner tone="info">{flash}</Banner>}
+            {isCollab && flash && <Banner tone="info">{flash}</Banner>}
 
             {view === 'inbox' && (
               <InboxScreen list={inbox} selectedId={selected?.delivery_id || ''}

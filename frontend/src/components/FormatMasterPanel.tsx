@@ -72,7 +72,7 @@ export default function FormatMasterPanel() {
             </h2>
             <span className="text-xs text-gray-400">결과물 형태를 강제하는 템플릿(Harness) 중앙 제어판</span>
           </div>
-          <button onClick={closeFormatPanel} className="text-gray-400 hover:text-white px-3 py-1 rounded border border-gray-700 hover:bg-gray-800 transition-colors">
+          <button onClick={closeFormatPanel} className="text-gray-400 hover:text-gray-100 px-3 py-1 rounded border border-gray-700 hover:bg-gray-800 transition-colors">
             ✕ 닫기
           </button>
         </div>
