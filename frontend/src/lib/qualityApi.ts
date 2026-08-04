@@ -54,7 +54,7 @@ export type QualityOutcome = {
   root_cause: RootCause;
   root_cause_rule: string;
   rework_reason: string;
-  /** null = 사람 판정이 **없다**(승인 아님). */
+  /** null = 사용자 판정이 **없다**(승인 아님). */
   human_acceptance: 'accepted' | 'revision_requested' | null;
   classified_by?: string;
 };

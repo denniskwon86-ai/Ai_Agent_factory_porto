@@ -44,6 +44,9 @@ export function JarvisRail({
   const logRef = useRef<HTMLDivElement>(null);
   // [UIUX-AUDIT-29 §3] 상태를 **실제 응답으로만** 바꾼다. 예전에는 서버가 죽어도 «연결»이었다.
   const health = useBackendHealth();
+  // [UIUX-AUDIT-33 §4] 낮은 화면(≤760px)에서는 처음부터 접는다 — 로그가 설 자리가 없다.
+  const [quickOpen, setQuickOpen] = useState(false);
+  const quickCollapsed = typeof window !== 'undefined' && window.innerHeight <= 760;
 
   useEffect(() => jarvisSession.subscribe(() => setTurns(jarvisSession.turns())), []);
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [turns]);
@@ -102,13 +105,31 @@ export function JarvisRail({
         </div>
       )}
 
+      {/* ★★ [UIUX-AUDIT-33 §4] 대화가 시작되면 «바로 물어보기»를 접는다.
+          감사 실측: 1280×720 오프라인 상태에서 로그 높이가 **24px** 밖에 남지 않았다.
+          머리·문맥·근거·빠른 질문·오프라인 안내가 모두 고정 높이를 차지했기 때문이다.
+          빠른 질문은 **시작을 돕는 장치**이므로 첫 답이 오면 역할이 끝난다 — 접되 없애지는
+          않는다(다시 펼칠 수 있어야 다음 질문을 고를 수 있다). */}
       {quickQuestions.length > 0 && (
-        <div className="jarvis-quick">
-          <b>바로 물어보기</b>
-          {quickQuestions.map((q) => (
-            <button key={q} onClick={() => send(q)} disabled={busy}>{q}</button>
-          ))}
-        </div>
+        turns.length === 0 && !quickCollapsed ? (
+          <div className="jarvis-quick">
+            <b>바로 물어보기</b>
+            {quickQuestions.map((q) => (
+              <button key={q} onClick={() => send(q)} disabled={busy}>{q}</button>
+            ))}
+          </div>
+        ) : (
+          <div className="jarvis-quick collapsed">
+            <button type="button" className="jarvis-quick-toggle"
+              aria-expanded={quickOpen}
+              onClick={() => setQuickOpen((v) => !v)}>
+              바로 물어보기 {quickQuestions.length}개 {quickOpen ? '접기' : '펼치기'}
+            </button>
+            {quickOpen && quickQuestions.map((q) => (
+              <button key={q} onClick={() => send(q)} disabled={busy}>{q}</button>
+            ))}
+          </div>
+        )
       )}
 
       {/* 대화는 **이 레일 안에서** 유지된다(중앙 Banner 로 보내지 않는다). */}

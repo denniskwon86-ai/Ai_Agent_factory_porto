@@ -8,7 +8,9 @@ import {
 //
 // ⚠️ 이 화면이 지켜야 할 단 하나: **결손을 좋은 소식처럼 보여주지 않는다.**
 //   - `미분류` 는 "원인 없음(정상)"이 아니라 "아직 모른다" → 회색이 아니라 경고색, 별도 칸.
-//   - `사람 판정 없음` 은 승인이 아니다 → 승인 칸에 합치지 않고 3칸으로 나눈다.
+//   - `사용자 판정 없음` 은 승인이 아니다 → 승인 칸에 합치지 않고 3칸으로 나눈다.
+//   ⚠️ [UIUX-AUDIT-33 §3] 이름을 «사용자 승인 없음» 으로 바꾸지 않는다. 이 칸의 요점은
+//     **승인이 아니라 판정이 없다**는 것이고, 이름에 «승인»이 들어가면 다시 섞인다.
 //   운영 계기판에서 이 둘이 통과·승인으로 읽히면 화면이 거짓 보고를 하는 것과 같다.
 //
 // 디자인 시안 확정 시 교체 대상(§ 역할 규약) — 데이터는 lib/qualityApi.ts 에 분리해 두었다.
@@ -89,9 +91,9 @@ export function QualityOutcomesView({ project }: { project: string }) {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {kpi('게이트 판정', String(t.evaluations))}
         {kpi('통과율', `${passRate}%`, `통과 ${t.passed} / 실패 ${t.failed}`)}
-        {kpi('사람 승인', String(ha.accepted), `반려 ${ha.revision_requested}건`)}
+        {kpi('사용자 승인', String(ha.accepted), `반려 ${ha.revision_requested}건`)}
         {/* ★ 승인과 절대 합치지 않는다 */}
-        {kpi('사람 판정 없음', String(ha.no_human_decision), '승인이 아니라 판정이 없는 것', ha.no_human_decision > 0)}
+        {kpi('사용자 판정 없음', String(ha.no_human_decision), '승인이 아니라 판정이 없는 것', ha.no_human_decision > 0)}
         {kpi('원인 미분류 실패', String(sum.unclassified_failures),
           sum.unclassified_ratio === null ? '실패 없음' : `실패의 ${Math.round(sum.unclassified_ratio * 100)}%`,
           sum.unclassified_failures > 0)}

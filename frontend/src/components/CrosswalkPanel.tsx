@@ -9,7 +9,7 @@ interface Proposal { id: number; master_code: string; external_key: string; conf
 interface Mapping { master_code: string; external_key: string; }
 
 // 🔗 연계/크로스워크 (M2) — 외부 시스템의 키·필드를 우리 기준정보(M1 골든 레코드)와 매핑한다.
-// 매핑은 초안(제안) → 사람 승인(confirmed) 2단계. 승인된 매핑만 M3 온디맨드 조회의 주소록이 된다.
+// 매핑은 초안(제안) → 사용자 승인(confirmed) 2단계. 승인된 매핑만 M3 온디맨드 조회의 주소록이 된다.
 export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
   const [systems, setSystems] = useState<Sys[]>([]);
   const [sel, setSel] = useState<string | null>(null);
@@ -156,7 +156,7 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 shrink-0">
           <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
             🔗 연계 / 크로스워크
-            <span className="text-xs text-gray-500 font-normal">— 외부 시스템 키·필드를 기준정보와 매핑(초안→사람 승인). 승인된 매핑이 M3 온디맨드 조회의 주소록</span>
+            <span className="text-xs text-gray-500 font-normal">— 외부 시스템 키·필드를 기준정보와 매핑(초안→사용자 승인). 승인된 매핑이 M3 온디맨드 조회의 주소록</span>
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-100 text-xl px-2">✕</button>
         </div>

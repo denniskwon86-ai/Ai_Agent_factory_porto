@@ -161,7 +161,7 @@ export default function App() {
           desc: '자재·공정·설비·KPI 골든 레코드 — 확정 조회로 모든 에이전트에 주입(모델 불변)',
           onSelect: () => setShowMasterData(true) },
         { id: 'crosswalk', icon: '🔗', label: '연계/크로스워크',
-          desc: '외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사람 승인',
+          desc: '외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사용자 승인',
           onSelect: () => setShowCrosswalk(true) },
         { id: 'governance', icon: '🛡️', label: '데이터 거버넌스',
           desc: '조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약·외부지표 준비도',

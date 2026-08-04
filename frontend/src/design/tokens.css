@@ -88,4 +88,43 @@
   --module-publication: #7a2540;
   --module-governance: var(--ls-green);
   --module-factory: var(--ls-orange);
+
+  /* ── rail/* — 좌측 모듈 레일과 우측 Jarvis (구조색 위의 어두운 면) ──────
+   * ⚠️ `surface/*` 와 **다른 계열이다.** 레일은 라이트 작업면 옆의 «구조»이고, 같은 이름에
+   *   밀어 넣으면 «표면»이 두 가지 뜻을 갖는다. 다음 사람이 반드시 잘못된 쪽을 고른다. */
+  --rail-bg-top: #111b2a;
+  --rail-bg-bottom: #172438;
+  --rail-border: #24344b;
+  --rail-text: #e8eef8;
+  --rail-text-muted: #9eacbf;
+  --rail-text-dim: #8fa0b6;
+  --rail-kicker: #80cfd9;
+  --rail-item-hover: #ffffff08;
+  --rail-item-active-bg: #22334b;
+  --rail-item-active-border: #3e5472;
+  --rail-chip-bg: #ffffff0a;
+  --rail-chip-fg: #91a4bd;
+
+  --jarvis-bg-top: #0a1e5a;
+  --jarvis-bg-bottom: #071846;
+  --jarvis-border: #1e345e;
+  --jarvis-text: #e6edf8;
+  --jarvis-text-muted: #b9cbe8;
+  --jarvis-kicker: #91a7cf;
+  --jarvis-bubble: #ffffff0d;
+  --jarvis-divider: #ffffff19;
+
+  /* 상단 바 — 구조색 그라데이션 */
+  --bar-bg-from: #0a1e5a;
+  --bar-bg-to: #123166;
+  --bar-fg: #ffffff;
+  --bar-fg-muted: #b9c9e6;
+  --bar-border: #24344b;
+  --backdrop: rgba(6, 12, 26, .62);
+
+  /* 상태 표시(연결·건강) */
+  --health-online: #83e3d8;
+  --health-checking: #9fb0c6;
+  --health-degraded: #ffc46b;
+  --health-offline: #ff8fa3;
 }

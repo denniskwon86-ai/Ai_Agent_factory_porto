@@ -63,14 +63,14 @@
   position: fixed; inset: 0; z-index: 60;
   display: flex; align-items: center; justify-content: center;
   padding: 16px;
-  background: rgba(6, 12, 26, .62);
+  background: var(--backdrop);
   backdrop-filter: blur(2px);
 }
 .afs-dialog {
   display: flex; flex-direction: column;
   width: 100%; max-width: 1440px; height: 92vh; max-height: 92vh;
   overflow: hidden;
-  border: 1px solid #24344b; border-radius: 12px;
+  border: 1px solid var(--rail-border); border-radius: 12px;
   box-shadow: var(--shadow);
 }
 .afs-dialog:focus { outline: none; }   /* 상자 자체의 포커스링은 숨긴다(내부 요소가 표시한다) */
@@ -78,11 +78,11 @@
 /* 상단 바 — 닫기는 항상 같은 자리에 있어야 한다. */
 .afs-dialog-bar {
   display: flex; align-items: center; gap: 12px; flex: 0 0 auto;
-  padding: 12px 20px; border-bottom: 1px solid #24344b;
-  background: linear-gradient(90deg, #0a1e5a, #123166);
+  padding: 12px 20px; border-bottom: 1px solid var(--rail-border);
+  background: linear-gradient(90deg, var(--action-primary-bg), var(--bar-bg-to));
 }
 .afs-dialog-bar b { color: #fff; font-size: 15px; }
-.afs-dialog-bar span { color: #b9c9e6; font-size: 12px; }
+.afs-dialog-bar span { color: var(--bar-fg-muted); font-size: 12px; }
 .afs-dialog-bar .bar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .afs-dialog-bar .busy { color: #8fe0e6; font-size: 12px; }
 .afs-dialog-body { flex: 1 1 auto; min-height: 0; }
@@ -110,9 +110,9 @@
 .afs-scope .module-rail {
   display: flex; flex-direction: column; min-height: 0;
   overflow: hidden;
-  border-right: 1px solid #24344b;
-  color: #e8eef8;
-  background: linear-gradient(180deg, #111b2a, #172438);
+  border-right: 1px solid var(--rail-border);
+  color: var(--rail-text);
+  background: linear-gradient(180deg, var(--rail-bg-top), var(--rail-bg-bottom));
 }
 .afs-scope .module-rail > .module-intro { flex: 0 0 auto; }
 .afs-scope .module-rail > .inheritance-card { flex: 0 0 auto; }
@@ -126,9 +126,9 @@
 }
 
 .afs-scope .module-intro { padding: 24px 20px 18px; border-bottom: 1px solid #ffffff14; }
-.afs-scope .module-intro small { color: #80cfd9; font-size: 12px; font-weight: 900; letter-spacing: .1em; }
+.afs-scope .module-intro small { color: var(--rail-kicker); font-size: 12px; font-weight: 900; letter-spacing: .1em; }
 .afs-scope .module-intro h1 { margin: 8px 0 9px; color: #fff; font-size: 20px; line-height: 1.35; letter-spacing: -.04em; }
-.afs-scope .module-intro p { margin: 0; color: #9eacbf; font-size: 12px; line-height: 1.58; }
+.afs-scope .module-intro p { margin: 0; color: var(--rail-text-muted); font-size: 12px; line-height: 1.58; }
 
 .afs-scope .module-menu { display: grid; padding: 10px; gap: 2px; }
 .afs-scope .module-menu button {
@@ -136,17 +136,17 @@
   width: 100%; padding: 12px 9px; border: 1px solid transparent; border-radius: 7px;
   color: #d9e2ee; background: transparent; text-align: left;
 }
-.afs-scope .module-menu button:hover { background: #ffffff08; }
+.afs-scope .module-menu button:hover { background: var(--rail-item-hover); }
 .afs-scope .module-menu button.active {
-  border-color: #3e5472; background: #22334b; box-shadow: inset 3px 0 var(--red);
+  border-color: var(--rail-item-active-border); background: var(--rail-item-active-bg); box-shadow: inset 3px 0 var(--red);
 }
 .afs-scope .module-menu i {
   display: grid; place-items: center; width: 29px; height: 29px; border-radius: 6px;
-  color: #91a4bd; background: #ffffff0a; font-size: 12px; font-style: normal; font-weight: 900;
+  color: var(--rail-chip-fg); background: var(--rail-chip-bg); font-size: 12px; font-style: normal; font-weight: 900;
 }
 .afs-scope .module-menu b, .afs-scope .module-menu small { display: block; }
 .afs-scope .module-menu b { font-size: 13px; }
-.afs-scope .module-menu small { margin-top: 3px; color: #8fa0b6; font-size: 12px; }
+.afs-scope .module-menu small { margin-top: 3px; color: var(--rail-text-dim); font-size: 12px; }
 .afs-scope .module-menu .count {
   display: grid; place-items: center; min-width: 22px; height: 22px; border-radius: 11px;
   color: #fff; background: var(--red); font-weight: 900; font-size: 12px;
@@ -176,11 +176,11 @@
   /* [UIUX-AUDIT-29 §4] 핵심 상태는 13px 이상 — 상태를 잘못 읽으면 행동이 달라진다. */
   flex: 0 0 auto; margin-top: 3px; padding: 7px 11px; border-radius: 14px; font-size: 13px; font-weight: 900;
 }
-.afs-scope .state-chip.success { color: #0b665d; background: #dcefeb; }
-.afs-scope .state-chip.warn { color: #8a4b0e; background: #fff0dc; }
-.afs-scope .state-chip.data { color: #087184; background: #dff1f4; }
-.afs-scope .state-chip.danger { color: #b01c39; background: #ffe3e8; }
-.afs-scope .state-chip.muted { color: #56606f; background: #e8eaee; }
+.afs-scope .state-chip.success { color: var(--state-success-fg); background: var(--state-success-bg); }
+.afs-scope .state-chip.warn { color: var(--state-warn-fg); background: var(--state-warn-bg); }
+.afs-scope .state-chip.data { color: var(--state-info-fg); background: var(--state-info-bg); }
+.afs-scope .state-chip.danger { color: var(--state-error-fg); background: var(--state-error-bg); }
+.afs-scope .state-chip.muted { color: var(--state-unknown-fg); background: var(--state-unknown-bg); }
 
 /* ── 패널·버튼 ─────────────────────────────────────────────────────────────── */
 .afs-scope .panel {
@@ -211,17 +211,17 @@
   border: 1px solid var(--action-danger-bg);
   color: var(--action-danger-fg); background: var(--action-danger-bg);
 }
-.afs-scope .secondary-button { border: 1px solid #cbd1da; color: #39475c; background: #fff; }
-.afs-scope .danger-ghost { border: 1px solid #e1b2bb; color: #b01c39; background: #fff; }
+.afs-scope .secondary-button { border: 1px solid var(--surface-border-strong); color: #39475c; background: #fff; }
+.afs-scope .danger-ghost { border: 1px solid #e1b2bb; color: var(--state-error-fg); background: #fff; }
 .afs-scope .primary-wide {
   width: 100%; min-height: 44px; border: 1px solid var(--red); border-radius: 6px;
   color: #fff; background: var(--red); font-size: 13px; font-weight: 900;
 }
 .afs-scope .primary-wide:disabled,
 .afs-scope .primary-wide.disabled {
-  border-color: #c5cad2; color: #7c8695; background: #e6e8ec; cursor: not-allowed;
+  border-color: #c5cad2; color: var(--surface-text-faint); background: #e6e8ec; cursor: not-allowed;
 }
-.afs-scope .primary-button:disabled { border-color: #c5cad2; color: #7c8695; background: #e6e8ec; cursor: not-allowed; }
+.afs-scope .primary-button:disabled { border-color: #c5cad2; color: var(--surface-text-faint); background: #e6e8ec; cursor: not-allowed; }
 
 /* ── 단계선 ────────────────────────────────────────────────────────────────── */
 .afs-scope .step-line { display: grid; grid-template-columns: repeat(4, 1fr); margin: 0 0 15px; padding: 0; list-style: none; }
@@ -233,7 +233,7 @@
 .afs-scope .step-line li:last-child { border-right: 1px solid var(--line); border-radius: 0 8px 8px 0; }
 .afs-scope .step-line i {
   display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
-  color: #788496; background: #eef0f3; font-size: 12px; font-style: normal; font-weight: 900;
+  color: var(--surface-text-faint); background: #eef0f3; font-size: 12px; font-style: normal; font-weight: 900;
 }
 .afs-scope .step-line b, .afs-scope .step-line small { display: block; }
 .afs-scope .step-line b { font-size: 12px; }
@@ -282,11 +282,11 @@
 .afs-scope .release-card header p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 
 .afs-scope .release-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 13px; }
-.afs-scope .release-facts div { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: #f8f9fa; }
+.afs-scope .release-facts div { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); }
 .afs-scope .release-facts span, .afs-scope .release-facts b, .afs-scope .release-facts small { display: block; }
 .afs-scope .release-facts span { color: var(--muted); font-size: 12px; }
 .afs-scope .release-facts b { margin: 4px 0; font-size: 15px; word-break: break-all; }
-.afs-scope .release-facts small { color: #788496; font-size: 12px; }
+.afs-scope .release-facts small { color: var(--surface-text-faint); font-size: 12px; }
 
 .afs-scope .search-field {
   display: grid; grid-template-columns: 24px 1fr; align-items: center;
@@ -313,7 +313,7 @@
 .afs-scope .field-label { display: block; margin-bottom: 6px; color: #536075; font-size: 12px; font-weight: 900; }
 .afs-scope .afs-input, .afs-scope .afs-textarea, .afs-scope .afs-select {
   width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 6px;
-  color: #39465a; background: #fbfcfd; font-size: 12px; line-height: 1.5;
+  color: var(--action-secondary-fg); background: #fbfcfd; font-size: 12px; line-height: 1.5;
 }
 .afs-scope .afs-textarea { min-height: 62px; resize: vertical; }
 
@@ -328,7 +328,7 @@
 .afs-scope .metric-row span, .afs-scope .metric-row b, .afs-scope .metric-row small { display: block; }
 .afs-scope .metric-row span { color: var(--muted); font-size: 12px; }
 .afs-scope .metric-row b { margin: 5px 0 2px; font-size: 21px; }
-.afs-scope .metric-row small { color: #7b8797; font-size: 12px; }
+.afs-scope .metric-row small { color: var(--surface-text-faint); font-size: 12px; }
 
 .afs-scope .inbox-layout { display: grid; grid-template-columns: minmax(500px, 1.35fr) minmax(300px, .65fr); gap: 14px; }
 .afs-scope .filter-pills { display: flex; gap: 5px; }
@@ -343,7 +343,7 @@
 .afs-scope .request-top > div { min-width: 0; flex: 1; }
 .afs-scope .request-top h3 { margin: 4px 0; font-size: 16px; }
 .afs-scope .request-top p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
-.afs-scope .request-top time { color: #7c8796; font-size: 12px; }
+.afs-scope .request-top time { color: var(--surface-text-faint); font-size: 12px; }
 .afs-scope .request-select {
   display: grid; grid-template-columns: 46px 1fr auto; gap: 11px; align-items: start;
   width: 100%; padding: 15px; border: 0; border-radius: 8px 8px 0 0;
@@ -356,14 +356,14 @@
 .afs-scope .request-select-main b { font-size: 16px; }
 .afs-scope .request-select-main .purpose { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .afs-scope .request-select-side { display: grid; gap: 4px; justify-items: end; }
-.afs-scope .request-select-side time { color: #7c8796; font-size: 12px; }
+.afs-scope .request-select-side time { color: var(--surface-text-faint); font-size: 12px; }
 .afs-scope .request-select-side em {
   color: var(--navy); font-size: 12px; font-style: normal; font-weight: 900;
 }
 .afs-scope .request-select[aria-pressed="true"] .request-select-side em { color: var(--cyan); }
 
 .afs-scope .request-scope { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0 15px; }
-.afs-scope .request-scope div { padding: 9px; border: 1px solid var(--line); border-radius: 5px; background: #f8f9fa; }
+.afs-scope .request-scope div { padding: 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-raised); }
 .afs-scope .request-scope span, .afs-scope .request-scope b { display: block; }
 .afs-scope .request-scope span { color: var(--muted); font-size: 12px; }
 .afs-scope .request-scope b { margin-top: 3px; font-size: 12px; word-break: break-all; }
@@ -428,16 +428,25 @@
   /* 입력창을 **항상 같은 자리에** 둔다. 레일 전체가 스크롤되면 질문하려고 스크롤을 내려야 하고,
    * 그때 위에서 읽던 근거가 사라진다. */
   display: flex; flex-direction: column; min-height: 0;
-  overflow: hidden; border-left: 1px solid #1e345e; color: #e6edf8;
-  background: linear-gradient(180deg, #0a1e5a, #071846);
+  overflow: hidden; border-left: 1px solid var(--jarvis-border); color: var(--jarvis-text);
+  background: linear-gradient(180deg, var(--action-primary-bg), var(--jarvis-bg-bottom));
 }
 .afs-scope .jarvis-rail > header,
 .afs-scope .jarvis-context,
-.afs-scope .jarvis-evidence,
 .afs-scope .jarvis-quick,
 .afs-scope .jarvis-offline,
 .afs-scope .jarvis-input { flex: 0 0 auto; }
-.afs-scope .jarvis-rail > header { display: flex; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid #ffffff19; }
+/* 근거 목록은 **먼저 양보한다** — 대화를 읽을 수 없는 것보다 근거를 스크롤하는 편이 낫다. */
+.afs-scope .jarvis-evidence { flex: 0 1 auto; min-height: 0; max-height: 22vh; overflow-y: auto; }
+
+/* 빠른 질문 축약 — 첫 대화 후에는 한 줄 토글로 접힌다. */
+.afs-scope .jarvis-quick.collapsed { padding-block: 8px; }
+.afs-scope .jarvis-quick-toggle {
+  width: 100%; padding: 6px 9px; border: 1px dashed #ffffff2e; border-radius: 6px;
+  color: #b9cbe8; background: transparent; font-size: 12px; font-weight: 800; text-align: left;
+}
+.afs-scope .jarvis-quick-toggle:hover { background: var(--jarvis-bubble); }
+.afs-scope .jarvis-rail > header { display: flex; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid var(--jarvis-divider); }
 .afs-scope .jarvis-orb {
   display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
   color: #fff; background: radial-gradient(circle, #59d3d4, #128596 52%, #133e79);
@@ -445,22 +454,27 @@
 }
 .afs-scope .jarvis-rail header > div { flex: 1; }
 .afs-scope .jarvis-rail header small, .afs-scope .jarvis-rail header b { display: block; }
-.afs-scope .jarvis-rail header small { color: #91a7cf; font-size: 12px; letter-spacing: .09em; }
+.afs-scope .jarvis-rail header small { color: var(--jarvis-kicker); font-size: 12px; letter-spacing: .09em; }
 .afs-scope .jarvis-rail header b { margin-top: 3px; font-size: 15px; }
 /* [UIUX-AUDIT-29 §3] 연결 상태는 **네 가지가 서로 다른 색**이어야 한다. 하나의 색으로 두면
  * «연결됨»과 «오프라인»이 같은 무게로 보이고, 그건 표시하지 않는 것과 같다. */
 .afs-scope .online-dot { font-size: 12px; font-weight: 900; }
-.afs-scope .online-dot.online { color: #83e3d8; }
-.afs-scope .online-dot.checking { color: #9fb0c6; }
-.afs-scope .online-dot.degraded { color: #ffc46b; }
-.afs-scope .online-dot.offline { color: #ff8fa3; }
+.afs-scope .online-dot.online { color: var(--health-online); }
+.afs-scope .online-dot.checking { color: var(--health-checking); }
+.afs-scope .online-dot.degraded { color: var(--health-degraded); }
+.afs-scope .online-dot.offline { color: var(--health-offline); }
 
+/* 오프라인 안내는 **입력창 바로 위**에 붙인다(아래 `.jarvis-input` 앞). 로그와 입력 사이에
+ * 두면 로그가 그만큼 눌린다 — 감사에서 로그가 24px 이 된 원인 중 하나다.
+ * ⚠️ 길이를 제한한다. 안내가 3줄을 넘으면 그 자체가 대화 자리를 잡아먹는다. */
 .afs-scope .jarvis-offline {
-  margin: 0 16px 10px; padding: 10px 12px; border-radius: 7px;
-  border-left: 3px solid #ff8fa3; background: #ffffff0c;
-  color: #ffd9e0; font-size: 12px; line-height: 1.55;
+  flex: 0 0 auto;
+  margin: 0 16px 8px; padding: 9px 11px; border-radius: 7px;
+  border-left: 3px solid var(--health-offline); background: #ffffff0c;
+  color: #ffd9e0; font-size: 12px; line-height: 1.5;
+  max-height: 5.6em; overflow: auto;
 }
-.afs-scope .jarvis-offline.warn { border-left-color: #ffc46b; color: #ffe6c2; }
+.afs-scope .jarvis-offline.warn { border-left-color: var(--health-degraded); color: #ffe6c2; }
 .afs-scope .jarvis-offline b { display: block; margin-bottom: 3px; }
 
 .afs-scope .jarvis-context { padding: 18px 16px; border-bottom: 1px solid #ffffff17; }
@@ -476,11 +490,14 @@
 .afs-scope .jarvis-quick { display: grid; gap: 6px; }
 .afs-scope .jarvis-quick button {
   padding: 9px; border: 1px solid #ffffff1d; border-radius: 5px;
-  color: #d9e3f2; background: #ffffff08; font-size: 12px; text-align: left;
+  color: #d9e3f2; background: var(--rail-item-hover); font-size: 12px; text-align: left;
 }
 /* 대화 로그 — 답변을 중앙 Banner 가 아니라 **레일 안에서** 유지한다(지적 3). */
+/* ★★ [UIUX-AUDIT-33 §4] 로그가 **최소 높이를 확보**한다. 감사 실측에서 24px 까지 눌렸다 —
+ * 그 높이에서는 답을 한 줄도 읽을 수 없고, 사용자는 비서가 답하지 않았다고 판단한다.
+ * `min-height` 를 주면 위쪽 고정 블록들이 대신 줄어든다(근거 목록이 먼저 스크롤된다). */
 .afs-scope .jarvis-log {
-  flex: 1 1 auto; min-height: 0;
+  flex: 1 1 auto; min-height: 132px;
   padding: 12px 16px; display: grid; gap: 10px; align-content: start; overflow-y: auto;
   scrollbar-color: transparent transparent;
 }
@@ -490,7 +507,7 @@
 .afs-scope .jarvis-turn { display: grid; gap: 3px; }
 .afs-scope .jarvis-turn > span { color: #7fc4d8; font-size: 12px; font-weight: 900; }
 .afs-scope .jarvis-turn > p {
-  margin: 0; padding: 9px 10px; border-radius: 6px; color: #dbe6f6; background: #ffffff0d;
+  margin: 0; padding: 9px 10px; border-radius: 6px; color: #dbe6f6; background: var(--jarvis-bubble);
   font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
 }
 .afs-scope .jarvis-turn.user > p { background: #ffffff14; }
@@ -554,23 +571,33 @@
   display: flex; align-items: center; gap: 7px; margin: 0 0 6px; font-size: 13px;
 }
 .afs-scope .section-grid h4 em {
-  padding: 2px 7px; border-radius: 10px; color: #8a4b0e; background: #fff0dc;
+  padding: 2px 7px; border-radius: 10px; color: var(--state-warn-fg); background: var(--state-warn-bg);
   font-size: 12px; font-style: normal; font-weight: 900;
 }
-.afs-scope .section-text { margin: 0; color: #39465a; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.afs-scope .section-text { margin: 0; color: var(--action-secondary-fg); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .afs-scope .section-missing { margin: 0; color: #8b7a55; font-size: 12px; line-height: 1.6; }
-.afs-scope .section-list { margin: 0; padding-left: 17px; color: #39465a; font-size: 12px; line-height: 1.65; }
+.afs-scope .section-list { margin: 0; padding-left: 17px; color: var(--action-secondary-fg); font-size: 12px; line-height: 1.65; }
 .afs-scope .section-list li + li { margin-top: 4px; }
 .afs-scope .section-list span { margin-right: 9px; }
 .afs-scope .section-list b { color: var(--muted); font-weight: 900; }
 .afs-scope .section-kv { display: grid; gap: 5px; margin: 0; }
 .afs-scope .section-kv > div { display: grid; grid-template-columns: minmax(90px, 25%) 1fr; gap: 9px; }
 .afs-scope .section-kv dt { color: var(--muted); font-size: 12px; font-weight: 900; }
-.afs-scope .section-kv dd { margin: 0; color: #39465a; font-size: 12px; line-height: 1.6; }
+.afs-scope .section-kv dd { margin: 0; color: var(--action-secondary-fg); font-size: 12px; line-height: 1.6; }
 
 .afs-scope .view-who { margin: 0 0 10px; color: var(--cyan); font-size: 12px; font-weight: 900; }
 .afs-scope .hint-line { margin: 6px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.55; }
-.afs-scope .hint-line b { color: #39465a; }
+.afs-scope .hint-line b { color: var(--action-secondary-fg); }
+
+/* ── [UIUX-AUDIT-33] 데이터 기반 화면군 공용 툴바 ─────────────────────────── */
+.afs-scope .foundation-toolbar { margin-bottom: 14px; }
+.afs-scope .foundation-toolbar-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.afs-scope .foundation-toolbar-row .search-field { flex: 1 1 260px; min-width: 0; }
+.afs-scope .foundation-actions { display: flex; gap: 7px; margin-left: auto; }
+/* 선택된 목록 항목 — 승인 시안의 `.person.selected` 와 같은 표현을 쓴다. */
+.afs-scope .person.selected { border-color: #77bbc5; background: #f0fafb; }
 
 /* ── 반응형(승인 시안 그대로) ──────────────────────────────────────────────── */
 @media (max-width: 1450px) {
