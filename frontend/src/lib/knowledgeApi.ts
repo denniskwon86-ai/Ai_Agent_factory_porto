@@ -9,7 +9,7 @@
 // ★ 여기서는 공용 `closedLoopFetch` 만 쓴다. 401/404/422/400 규약이 폐루프 화면과 같아지고,
 //   실패는 **호출자에게 던진다**(삼키지 않는다 — 삼키면 화면이 «0건»으로 표시한다).
 import { API_BASE_URL } from './api';
-import { closedLoopFetch as req } from './closedLoopFetch';
+import { closedLoopEnvelopeFetch, closedLoopFetch as req } from './closedLoopFetch';
 
 export type PackDoc = {
   filename: string;
@@ -40,8 +40,21 @@ export type SearchHit = {
   metadata?: { filename?: string; [k: string]: any };
 };
 
+export type PackList = {
+  packs: Pack[];
+  blockedReason: string;
+  hiddenCount: number;
+};
+
 export const knowledgeApi = {
-  packs: () => req<Pack[]>('GET', '/api/v1/knowledge/packs'),
+  packs: async (): Promise<PackList> => {
+    const envelope = await closedLoopEnvelopeFetch<Pack[]>('GET', '/api/v1/knowledge/packs');
+    return {
+      packs: envelope.data || [],
+      blockedReason: String(envelope.blocked_reason || ''),
+      hiddenCount: Number(envelope.hidden_count || 0),
+    };
+  },
 
   createPack: (body: { pack_id: string; name: string; description: string }) =>
     req<Pack>('POST', '/api/v1/knowledge/packs', body),

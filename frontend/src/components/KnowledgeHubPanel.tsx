@@ -47,6 +47,7 @@ const MODULE = {
 export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
   const [view, setView] = useState<View>('packs');
   const [packs, setPacks] = useState<Loaded<Pack[]>>(loading<Pack[]>());
+  const [packVisibility, setPackVisibility] = useState({ blockedReason: '', hiddenCount: 0 });
   const [refSummary, setRefSummary] = useState<Loaded<ReferenceSummary>>(loading<ReferenceSummary>());
   const [selected, setSelected] = useState<string>('');
   const [search, setSearch] = useState('');
@@ -64,7 +65,13 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
     setBusy('불러오는 중'); setErr(null);
     // ⚠️ 두 조회를 **따로** 담는다. 하나가 실패했다고 다른 하나까지 «없음»으로 만들지 않는다.
     const [p, r] = await Promise.allSettled([knowledgeApi.packs(), knowledgeApi.referenceSummary()]);
-    if (p.status === 'fulfilled') { setPacks(ok(p.value)); reportRequestSuccess(); }
+    if (p.status === 'fulfilled') {
+      setPackVisibility({ blockedReason: p.value.blockedReason, hiddenCount: p.value.hiddenCount });
+      setPacks(p.value.blockedReason
+        ? { status: 'forbidden', value: null, error: p.value.blockedReason, httpStatus: 403 }
+        : ok(p.value.packs));
+      reportRequestSuccess();
+    }
     else { setPacks(failed<Pack[]>(p.reason)); reportRequestFailure(); }
     setRefSummary(r.status === 'fulfilled' ? ok(r.value) : failed<ReferenceSummary>(r.reason));
     setBusy(null);
@@ -76,6 +83,7 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const h = () => {
       setPacks(loading<Pack[]>()); setRefSummary(loading<ReferenceSummary>());
+      setPackVisibility({ blockedReason: '', hiddenCount: 0 });
       setSelected(''); setHits(ok<SearchHit[]>([])); load();
     };
     window.addEventListener('factory:acting-user-changed', h);
@@ -184,6 +192,9 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
             </Banner>
           )}
           {flash && <Banner tone="info">{flash}</Banner>}
+          {packVisibility.hiddenCount > 0 && (
+            <Banner tone="warn">조직 권한 범위 밖의 지식팩 {packVisibility.hiddenCount}건은 표시하지 않습니다.</Banner>
+          )}
 
           {view === 'packs' && (
             <PacksView
@@ -248,7 +259,9 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
       <ScreenHead kicker="KNOWLEDGE" title="지식팩"
         description="도메인 참고자료를 묶어 둡니다. 프로젝트에 연결하면 그 범위 안에서 산출물이 만들어집니다."
         chip={state.status !== 'ok'
-          ? { label: state.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
+          ? state.status === 'loading'
+            ? { label: '확인 중', tone: 'muted' }
+            : { label: state.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
           : { label: `${rows.length}개`, tone: rows.length ? 'success' : 'muted' }} />
 
       <div className="metric-row" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
@@ -307,7 +320,7 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
         </Panel>
       )}
 
-      <Panel kicker="NEW" title="새 지식팩">
+      {state.status !== 'forbidden' && <Panel kicker="NEW" title="새 지식팩">
         <div style={{ padding: 15 }}>
           <FormField label="팩 ID" required
             hint="영문·숫자·_·- 만 씁니다. 나중에 프로젝트 설정에서 이 값으로 연결합니다.">
@@ -330,7 +343,7 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
           </div>
           <p className="hint-line">최초 생성 시 임베딩 모델을 한 번 불러오므로 몇 초 걸릴 수 있습니다.</p>
         </div>
-      </Panel>
+      </Panel>}
     </>
   );
 }
@@ -481,7 +494,9 @@ function SourcesView({ state, onScan, onRetry }: any) {
       <ScreenHead kicker="SOURCES" title="원본 자료 등록부"
         description="출처·범위·분류를 관리합니다. 검토 전에는 사업부 자료를 자동으로 모든 프로젝트에 연결하지 않습니다."
         chip={state.status !== 'ok'
-          ? { label: '조회 불가', tone: 'danger' }
+          ? state.status === 'loading'
+            ? { label: '확인 중', tone: 'muted' }
+            : { label: state.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
           : { label: `${s?.total ?? 0}건`, tone: 'data' }} />
 
       <div className="metric-row">
@@ -490,7 +505,7 @@ function SourcesView({ state, onScan, onRetry }: any) {
         <Metric label="변환 필요" state={state.status} value={s?.conversion_required}
           hint={s?.conversion_required ? '.pptx·PDF 로 변환 후 등록' : '없음'} />
         <Metric label="검토 대기" state={state.status} value={s?.pending_review}
-          hint="연결 전 사람 확인 필요" />
+          hint="연결 전 사용자 확인 필요" />
       </div>
 
       <Panel kicker="SCAN" title="원본 폴더 재스캔"

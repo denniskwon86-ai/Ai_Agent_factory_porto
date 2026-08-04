@@ -340,8 +340,8 @@ export default function App() {
           <BriefingPanel onClose={() => setShowBriefing(false)} />
         )}
         <div className="min-h-screen w-full bg-gray-950 text-gray-100 flex flex-col font-sans">
-          <header className="h-16 bg-gray-950/95 backdrop-blur-md border-b border-gray-700 flex items-center justify-between gap-4 px-8 shrink-0 sticky top-0 z-10 overflow-hidden">
-            <h1 className="text-2xl font-bold tracking-tight text-gray-100 flex items-center gap-3 shrink-0">
+          <header className="h-16 bg-gray-950/95 backdrop-blur-md border-b border-gray-700 flex items-center justify-between gap-2 px-3 xl:px-5 shrink-0 sticky top-0 z-10 overflow-hidden">
+            <h1 className="text-xl 2xl:text-2xl font-bold tracking-tight text-gray-100 flex items-center gap-2 shrink-0">
               <span className="text-indigo-400">🏭 V5.2</span> Private AI Cockpit
             </h1>
             {/* ★ 사용자 전환기는 «기능»이 아니라 «지금 누구인가»다. 메뉴 안으로 숨기지 않는다 —
@@ -357,9 +357,9 @@ export default function App() {
                   <button
                     onClick={() => setShowLogPopup(v => !v)}
                     title="서버 로그 보기"
-                    className="flex items-center gap-2 bg-black/20 hover:bg-black/40 transition-colors px-3 py-1.5 rounded-full border border-white/5 cursor-pointer"
+                    className="flex items-center gap-2 bg-black/20 hover:bg-black/40 transition-colors px-1.5 2xl:px-3 py-1.5 rounded-full border border-white/5 cursor-pointer"
                   >
-                    <span className="text-xs text-gray-400 font-medium">Network</span>
+                    <span className="hidden 2xl:inline text-xs text-gray-400 font-medium">Network</span>
                     <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_8px] ${isConnected ? 'bg-green-500 shadow-green-500/50' : 'bg-red-500 shadow-red-500/50 animate-pulse'}`} />
                   </button>
                   {showLogPopup && <ServerLogPopup onClose={() => setShowLogPopup(false)} />}

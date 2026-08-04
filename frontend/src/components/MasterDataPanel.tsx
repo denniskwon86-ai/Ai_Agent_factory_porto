@@ -1,301 +1,674 @@
-import { useEffect, useRef, useState } from 'react';
+// [이관 2/10 · UIUX-AUDIT-33] 기준정보 마스터
+//
+// 자재·공정·설비·KPI 같은 느리게 변하는 기준값을 결정론적으로 관리한다. 지식 허브가
+// «관련 문서를 찾아 주는 곳»이라면 이 화면은 «같은 코드에는 같은 값을 주는 곳»이다.
+// 자체 fetch·alert·confirm·모달을 제거하고 데이터 기반 공용 계약을 그대로 사용한다.
+import { useCallback, useEffect, useState } from 'react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
-const M = `${API_BASE_URL}/api/v1/master`;
+import { HubDialog } from '../design/HubDialog';
+import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
+import {
+  ConfirmInline, EvidenceStrip, FormField, FoundationList, FoundationToolbar,
+  VersionHistory, foundationJarvis, useConfirm,
+} from '../design/DataFoundationShell';
+import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
+import { errorTitle } from '../lib/closedLoopFetch';
+import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
+import {
+  masterDataApi, type CsvImportReport, type GroundingPreview, type MasterRecord,
+  type MasterType,
+} from '../lib/masterDataApi';
 
-interface MType { type_id: string; name_ko: string; description: string; attr_schema: any; }
-interface MRecord {
-  master_code: string; type_id: string; name: string; attributes: any;
-  domains: string[]; is_core: boolean; version: number; aliases: string[];
+type View = 'catalog' | 'register' | 'import' | 'preview';
+
+const MODULE = {
+  catalog: { kicker: 'MASTER DATA', title: '기준정보', subtitle: '모델이 바뀌어도 동일하게 적용되는 골든 레코드입니다.' },
+  register: { kicker: 'REVISE', title: '등록·개정', subtitle: '같은 코드를 다시 저장하면 구판을 보존하고 새 버전을 만듭니다.' },
+  import: { kicker: 'BULK', title: 'CSV 일괄등록', subtitle: '행별 성공·실패를 분리해 결과를 남깁니다.' },
+  preview: { kicker: 'INJECTION', title: '주입 미리보기', subtitle: '실제 에이전트 프롬프트에 들어갈 기준정보 블록을 확인합니다.' },
+};
+
+const EMPTY_RECORD = {
+  code: '', name: '', domains: '', aliases: '', attrs: '', core: false,
+};
+
+function csvList(value: string): string[] {
+  return value.split(',').map((v) => v.trim()).filter(Boolean);
 }
 
-// 🗂 기준정보 마스터 — 자재·공정·설비·KPI 같은 '느리게 변하는 참조 데이터'의 단일 진실원본.
-// 여기 등록한 골든 레코드는 벡터검색이 아닌 '확정 조회'로 모든 에이전트 프롬프트에 주입된다
-// (어떤 LLM 으로 폴백돼도 기준값이 동일하게 들어가는 모델 불변성의 축).
+function jsonObject(value: string, label: string): Record<string, unknown> | undefined {
+  if (!value.trim()) return undefined;
+  const parsed = JSON.parse(value);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error(`${label}은(는) JSON 객체여야 합니다.`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export function MasterDataPanel({ onClose }: { onClose: () => void }) {
-  const [types, setTypes] = useState<MType[]>([]);
-  const [selType, setSelType] = useState<string | null>(null);
-  const [records, setRecords] = useState<MRecord[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [view, setView] = useState<View>('catalog');
+  const [types, setTypes] = useState<Loaded<MasterType[]>>(loading<MasterType[]>());
+  const [records, setRecords] = useState<Loaded<MasterRecord[]>>(ok<MasterRecord[]>([]));
+  const [detail, setDetail] = useState<Loaded<MasterRecord | null>>(ok<MasterRecord | null>(null));
+  const [selectedType, setSelectedType] = useState('');
+  const [selectedCode, setSelectedCode] = useState('');
   const [search, setSearch] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [visibility, setVisibility] = useState({ hiddenTypes: 0, hiddenRecords: 0 });
 
-  // 타입 생성 폼
-  const [tId, setTId] = useState('');
-  const [tName, setTName] = useState('');
-  const [tSchema, setTSchema] = useState('');
+  const [typeForm, setTypeForm] = useState({ id: '', name: '', desc: '', schema: '' });
+  const [recordForm, setRecordForm] = useState(EMPTY_RECORD);
+  const [aliasDraft, setAliasDraft] = useState('');
+  const [previewText, setPreviewText] = useState('');
+  const [previewDomains, setPreviewDomains] = useState('');
+  const [previewScope, setPreviewScope] = useState('');
+  const [preview, setPreview] = useState<Loaded<GroundingPreview | null>>(ok(null));
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvReport, setCsvReport] = useState<CsvImportReport | null>(null);
+  const [csvKey, setCsvKey] = useState(0);
 
-  // 레코드 생성/개정 폼
-  const [rCode, setRCode] = useState('');
-  const [rName, setRName] = useState('');
-  const [rDomains, setRDomains] = useState('');
-  const [rAliases, setRAliases] = useState('');
-  const [rAttrs, setRAttrs] = useState('');
-  const [rCore, setRCore] = useState(false);
+  const retire = useConfirm<string>();
+  const removeAlias = useConfirm<string>();
 
-  // 별칭 인라인 추가
-  const [aliasDraft, setAliasDraft] = useState<Record<string, string>>({});
-
-  // 주입 미리보기
-  const [pvText, setPvText] = useState('');
-  const [pvDomains, setPvDomains] = useState('');
-  const [pv, setPv] = useState<{ block: string; matched: string[] } | null>(null);
-
-  const fetchTypes = async () => {
+  const run = useCallback(async <T,>(label: string, fn: () => Promise<T>, success?: string) => {
+    setBusy(label); setErr(null); setFlash(null);
     try {
-      const r = await fetch(`${M}/types`);
-      if (r.ok) setTypes((await r.json()).data || []);
-    } catch (e) { console.error('타입 로드 실패:', e); }
-  };
-  const fetchRecords = async (typeId: string, q = '') => {
-    try {
-      const url = new URL(`${M}/records`);
-      url.searchParams.set('type_id', typeId);
-      if (q.trim()) url.searchParams.set('q', q.trim());
-      const r = await fetch(url.toString());
-      if (r.ok) setRecords((await r.json()).data || []);
-    } catch (e) { console.error('레코드 로드 실패:', e); }
-  };
-
-  useEffect(() => { fetchTypes(); }, []);
-  useEffect(() => { if (selType) fetchRecords(selType, search); }, [selType]); // eslint-disable-line
-
-  const selTypeData = types.find((t) => t.type_id === selType) || null;
-
-  const handleCreateType = async () => {
-    if (!tId.trim() || !tName.trim()) { alert('type_id 와 한글명을 입력하세요 (type_id: 영소문자/숫자/_/-, 2~32자).'); return; }
-    let schema: any = undefined;
-    if (tSchema.trim()) {
-      try { schema = JSON.parse(tSchema); } catch { alert('속성 스키마가 올바른 JSON 이 아닙니다.'); return; }
+      const value = await fn();
+      reportRequestSuccess();
+      if (success) setFlash(success);
+      return value;
+    } catch (e: any) {
+      reportRequestFailure();
+      setErr({ msg: e?.message || String(e), status: e?.status });
+      return null;
+    } finally {
+      setBusy(null);
     }
-    setBusy('type');
-    try {
-      const r = await fetch(`${M}/types`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type_id: tId.trim(), name_ko: tName.trim(), attr_schema: schema }),
-      });
-      if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || '타입 생성 실패'); return; }
-      setTId(''); setTName(''); setTSchema('');
-      await fetchTypes();
-      setSelType(tId.trim());
-    } finally { setBusy(null); }
-  };
+  }, []);
 
-  const handleCreateRecord = async () => {
-    if (!selType) { alert('먼저 좌측에서 타입을 선택하세요.'); return; }
-    if (!rCode.trim() || !rName.trim()) { alert('코드와 명칭을 입력하세요 (코드: 대문자/숫자로 시작, ^[A-Z0-9][A-Z0-9_-]{1,31}$).'); return; }
-    let attrs: any = undefined;
-    if (rAttrs.trim()) {
-      try { attrs = JSON.parse(rAttrs); } catch { alert('속성값이 올바른 JSON 이 아닙니다.'); return; }
+  const loadTypes = useCallback(async () => {
+    setTypes(loading<MasterType[]>());
+    try {
+      const value = await masterDataApi.types();
+      setVisibility((v) => ({ ...v, hiddenTypes: value.hiddenCount }));
+      setTypes(value.blockedReason
+        ? { status: 'forbidden', value: null, error: value.blockedReason, httpStatus: 403 }
+        : ok(value.rows));
+      reportRequestSuccess();
+      setSelectedType((current) => value.rows.some((t) => t.type_id === current)
+        ? current : value.rows[0]?.type_id || '');
+    } catch (e: any) {
+      setTypes(failed<MasterType[]>(e)); reportRequestFailure();
     }
-    setBusy('rec');
+  }, []);
+
+  const loadRecords = useCallback(async (typeId: string, query = '') => {
+    if (!typeId) { setRecords(ok<MasterRecord[]>([])); return; }
+    setRecords(loading<MasterRecord[]>());
     try {
-      const r = await fetch(`${M}/records`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          master_code: rCode.trim(), type_id: selType, name: rName.trim(), attributes: attrs,
-          domains: rDomains.split(',').map((s) => s.trim()).filter(Boolean),
-          aliases: rAliases.split(',').map((s) => s.trim()).filter(Boolean),
-          is_core: rCore,
-        }),
-      });
-      if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || '레코드 저장 실패'); return; }
-      setRCode(''); setRName(''); setRDomains(''); setRAliases(''); setRAttrs(''); setRCore(false);
-      await fetchRecords(selType, search);
-    } finally { setBusy(null); }
-  };
+      const value = await masterDataApi.records(typeId, query);
+      setVisibility((v) => ({ ...v, hiddenRecords: value.hiddenCount }));
+      setRecords(value.blockedReason
+        ? { status: 'forbidden', value: null, error: value.blockedReason, httpStatus: 403 }
+        : ok(value.rows));
+      reportRequestSuccess();
+      setSelectedCode((current) => value.rows.some((r) => r.master_code === current) ? current : '');
+    } catch (e: any) {
+      setRecords(failed<MasterRecord[]>(e)); reportRequestFailure();
+    }
+  }, []);
 
-  const handleRetire = async (code: string) => {
-    if (!selType || !confirm(`'${code}' 를 폐기(soft delete)합니다. 이력은 보존되지만 주입 대상에서 제외됩니다. 계속할까요?`)) return;
-    await fetch(`${M}/records/${encodeURIComponent(code)}`, { method: 'DELETE' });
-    await fetchRecords(selType, search);
-  };
-
-  const handleAddAlias = async (code: string) => {
-    const a = (aliasDraft[code] || '').trim();
-    if (!a || !selType) return;
-    await fetch(`${M}/records/${encodeURIComponent(code)}/aliases`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aliases: [a] }),
-    });
-    setAliasDraft((d) => ({ ...d, [code]: '' }));
-    await fetchRecords(selType, search);
-  };
-  const handleRemoveAlias = async (code: string, alias: string) => {
-    if (!selType) return;
-    await fetch(`${M}/records/${encodeURIComponent(code)}/aliases/${encodeURIComponent(alias)}`, { method: 'DELETE' });
-    await fetchRecords(selType, search);
-  };
-
-  const handleCsv = async (files: FileList | null) => {
-    if (!files || !files[0] || !selType) return;
-    setBusy('csv');
+  const selectRecord = useCallback(async (code: string) => {
+    setSelectedCode(code); setDetail(loading<MasterRecord | null>()); setAliasDraft('');
     try {
-      const form = new FormData();
-      form.append('type_id', selType);
-      form.append('file', files[0]);
-      const r = await fetch(`${M}/import/csv`, { method: 'POST', body: form });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) { alert(j.detail || 'CSV 등록 실패'); return; }
-      const d = j.data;
-      alert(`CSV 등록 완료: 성공 ${d.imported}/${d.total}${d.failed?.length ? `\n실패 ${d.failed.length}건: ` + d.failed.map((f: any) => `행${f.row}(${f.error})`).join(', ') : ''}`);
-      await fetchRecords(selType, search);
-    } finally { setBusy(null); if (fileRef.current) fileRef.current.value = ''; }
+      const value = await masterDataApi.record(code);
+      setDetail(ok(value)); reportRequestSuccess();
+    } catch (e: any) {
+      setDetail(failed<MasterRecord | null>(e)); reportRequestFailure();
+    }
+  }, []);
+
+  useEffect(() => { loadTypes(); }, [loadTypes]);
+  useEffect(() => {
+    setSearch(''); setSelectedCode(''); setDetail(ok(null)); setCsvReport(null);
+    loadRecords(selectedType);
+  }, [selectedType, loadRecords]);
+  useEffect(() => {
+    const onUser = () => {
+      setSelectedType(''); setSelectedCode(''); setDetail(ok(null));
+      setVisibility({ hiddenTypes: 0, hiddenRecords: 0 });
+      setTypes(loading<MasterType[]>()); setRecords(ok([])); loadTypes();
+    };
+    window.addEventListener('factory:acting-user-changed', onUser);
+    return () => window.removeEventListener('factory:acting-user-changed', onUser);
+  }, [loadTypes]);
+
+  const typeRows = types.value || [];
+  const recordRows = records.value || [];
+  const selectedTypeData = typeRows.find((t) => t.type_id === selectedType) || null;
+  const selectedRecord = detail.value;
+  const railItems: RailItem[] = [
+    { id: 'catalog', label: '유형·레코드', hint: '골든 레코드 조회', mark: '목',
+      count: types.status === 'ok' ? recordRows.length : undefined },
+    { id: 'register', label: '등록·개정', hint: '구판을 보존해 개정', mark: '개' },
+    { id: 'import', label: 'CSV 일괄등록', hint: '행별 결과 확인', mark: 'CSV' },
+    { id: 'preview', label: '주입 미리보기', hint: '에이전트가 받는 값', mark: '주' },
+  ];
+
+  const jarvisState = selectedType ? records : types;
+  const jarvis = foundationJarvis({
+    module: `master_data/${view}`,
+    objectType: selectedRecord ? 'master_record' : 'master_type',
+    selected: selectedRecord
+      ? { id: selectedRecord.master_code, title: selectedRecord.name,
+        meta: `${selectedRecord.master_code} · v${selectedRecord.version} · ${selectedRecord.domains.join(', ') || '도메인 미지정'}` }
+      : selectedTypeData
+        ? { id: selectedTypeData.type_id, title: selectedTypeData.name_ko,
+          meta: `${selectedTypeData.type_id} · 레코드 ${recordRows.length}건` }
+        : null,
+    state: jarvisState,
+    counts: {
+      types: types.status === 'ok' ? typeRows.length : null,
+      records: records.status === 'ok' ? recordRows.length : null,
+    },
+    actions: selectedRecord
+      ? ['별칭 관리', '개정 등록', '주입 미리보기', '폐기']
+      : ['유형 생성', '레코드 등록', 'CSV 일괄등록'],
+    evidence: selectedRecord ? [
+      { label: '코드', value: selectedRecord.master_code },
+      { label: '버전', value: `v${selectedRecord.version}` },
+      { label: '출처', value: selectedRecord.source || '미상' },
+    ] : [],
+  });
+
+  const createType = async () => {
+    if (!typeForm.id.trim() || !typeForm.name.trim()) {
+      setErr({ msg: 'type_id와 한글명을 입력하십시오.' }); return;
+    }
+    let schema: Record<string, unknown> | undefined;
+    try { schema = jsonObject(typeForm.schema, '속성 스키마'); }
+    catch (e: any) { setErr({ msg: e.message || String(e) }); return; }
+    const id = typeForm.id.trim();
+    const result = await run('유형 생성 중', () => masterDataApi.createType({
+      type_id: id, name_ko: typeForm.name.trim(), description: typeForm.desc.trim(), attr_schema: schema,
+    }), '기준정보 유형을 만들었습니다. 이제 레코드를 등록하십시오.');
+    if (result) {
+      setTypeForm({ id: '', name: '', desc: '', schema: '' });
+      await loadTypes(); setSelectedType(id);
+    }
   };
 
-  const handlePreview = async () => {
-    if (!pvText.trim()) return;
-    setBusy('preview');
-    try {
-      const r = await fetch(`${M}/grounding/preview`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: pvText, domains: pvDomains.split(',').map((s) => s.trim()).filter(Boolean) }),
-      });
-      if (r.ok) setPv((await r.json()).data);
-    } finally { setBusy(null); }
+  const saveRecord = async () => {
+    if (!selectedType) { setErr({ msg: '기준정보 유형을 먼저 선택하십시오.' }); return; }
+    if (!recordForm.code.trim() || !recordForm.name.trim()) {
+      setErr({ msg: '코드와 정식 명칭을 입력하십시오.' }); return;
+    }
+    let attrs: Record<string, unknown> | undefined;
+    try { attrs = jsonObject(recordForm.attrs, '속성값'); }
+    catch (e: any) { setErr({ msg: e.message || String(e) }); return; }
+    const code = recordForm.code.trim();
+    const result = await run('레코드 저장 중', () => masterDataApi.saveRecord({
+      master_code: code, type_id: selectedType, name: recordForm.name.trim(), attributes: attrs,
+      domains: csvList(recordForm.domains), aliases: csvList(recordForm.aliases),
+      is_core: recordForm.core,
+    }), '기준정보를 저장했습니다. 같은 코드가 있었다면 새 버전으로 개정됐습니다.');
+    if (result) {
+      setRecordForm(EMPTY_RECORD); await loadRecords(selectedType, search); await selectRecord(code);
+      setView('catalog');
+    }
   };
 
-  const inputCls = 'w-full bg-gray-950 border border-gray-700 rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-emerald-500';
+  const doRetire = async (code: string) => {
+    const done = await run('레코드 폐기 중', () => masterDataApi.retireRecord(code),
+      '현행 주입 대상에서 제외했습니다. 개정 이력은 보존됩니다.');
+    if (done !== null) {
+      setSelectedCode(''); setDetail(ok(null)); await loadRecords(selectedType, search);
+    }
+  };
+
+  const addAlias = async () => {
+    if (!selectedRecord || !aliasDraft.trim()) return;
+    const updated = await run('별칭 추가 중',
+      () => masterDataApi.addAlias(selectedRecord.master_code, aliasDraft.trim()), '별칭을 추가했습니다.');
+    if (updated) { setAliasDraft(''); setDetail(ok(updated)); await loadRecords(selectedType, search); }
+  };
+
+  const doRemoveAlias = async (alias: string) => {
+    if (!selectedRecord) return;
+    const updated = await run('별칭 제거 중',
+      () => masterDataApi.removeAlias(selectedRecord.master_code, alias), '별칭을 제거했습니다.');
+    if (updated) { setDetail(ok(updated)); await loadRecords(selectedType, search); }
+  };
+
+  const runPreview = async () => {
+    if (!previewText.trim()) return;
+    setPreview(loading<GroundingPreview | null>());
+    const result = await run('주입 계산 중',
+      () => masterDataApi.preview(previewText.trim(), csvList(previewDomains), previewScope.trim()));
+    setPreview(result ? ok(result) : failed(new Error('주입 미리보기를 가져오지 못했습니다.')));
+  };
+
+  const importCsv = async () => {
+    if (!selectedType || !csvFile) {
+      setErr({ msg: '기준정보 유형과 CSV 파일을 선택하십시오.' }); return;
+    }
+    const result = await run('CSV 등록 중', () => masterDataApi.importCsv(selectedType, csvFile));
+    if (result) {
+      setCsvReport(result); setCsvFile(null); setCsvKey((v) => v + 1);
+      setFlash(`CSV ${result.total}행 중 ${result.imported}행을 등록했습니다.`);
+      await loadRecords(selectedType, search);
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl h-[88vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 shrink-0">
-          <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
-            🗂 기준정보 마스터
-            <span className="text-xs text-gray-500 font-normal">— 골든 레코드는 확정 조회로 모든 에이전트 프롬프트에 주입됩니다(모델 불변). 지식팩(확률적 RAG)과 상호보완</span>
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-100 text-xl px-2">✕</button>
-        </div>
-
-        <div className="flex-1 flex overflow-hidden">
-          {/* 좌: 타입 목록 + 생성 */}
-          <div className="w-72 border-r border-gray-700 flex flex-col overflow-hidden shrink-0">
-            <div className="p-4 border-b border-gray-700">
-              <div className="text-xs font-bold text-gray-400 mb-2">새 타입(온톨로지)</div>
-              <input value={tId} onChange={(e) => setTId(e.target.value)} placeholder="type_id (예: process)" className={inputCls + ' mb-1.5'} />
-              <input value={tName} onChange={(e) => setTName(e.target.value)} placeholder="한글명 (예: 공정)" className={inputCls + ' mb-1.5'} />
-              <textarea value={tSchema} onChange={(e) => setTSchema(e.target.value)} rows={3}
-                placeholder={'속성 스키마 JSON (선택)\n{"표준리드타임_h":{"type":"number"}}'} className={inputCls + ' mb-2 font-mono resize-none'} />
-              <button onClick={handleCreateType} disabled={busy !== null}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg">
-                {busy === 'type' ? '생성 중…' : '+ 타입 생성'}
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-              {types.length === 0 && <div className="text-xs text-gray-500 text-center py-6">등록된 타입이 없습니다.</div>}
-              {types.map((t) => (
-                <button key={t.type_id} onClick={() => { setSelType(t.type_id); setPv(null); }}
-                  className={`w-full text-left rounded-lg p-2.5 border transition-colors ${
-                    selType === t.type_id ? 'border-emerald-500 bg-emerald-900/30' : 'border-gray-700 bg-gray-950 hover:border-gray-500'}`}>
-                  <div className="text-sm font-bold text-gray-100 truncate">{t.name_ko}</div>
-                  <div className="text-[10px] text-gray-500 font-mono">{t.type_id}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 우: 레코드 관리 + 미리보기 */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {!selTypeData ? (
-              <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">좌측에서 타입을 선택하거나 새로 만드세요.</div>
-            ) : (
-              <div className="flex-1 overflow-y-auto p-5 space-y-5">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-gray-100">{selTypeData.name_ko} <span className="text-xs text-gray-500 font-mono">({selTypeData.type_id})</span></h3>
-                  <label className="text-xs text-emerald-300 hover:text-emerald-200 cursor-pointer bg-emerald-950/40 border border-emerald-900/50 rounded-lg px-3 py-1.5">
-                    📥 CSV 일괄등록
-                    <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={(e) => handleCsv(e.target.files)} disabled={busy !== null} />
-                  </label>
-                </div>
-                <div className="text-[10px] text-gray-500 -mt-3">CSV 헤더: <code>master_code,name,domains,aliases,attr:&lt;속성명&gt;…</code> (domains·aliases 는 <code>;</code> 구분)</div>
-
-                {/* 레코드 생성/개정 폼 */}
-                <div className="rounded-xl border border-dashed border-gray-700 bg-gray-950/60 p-4 space-y-2">
-                  <div className="text-xs font-bold text-gray-300">레코드 생성 · 개정 <span className="text-gray-500 font-normal">(동일 코드 재저장 = 개정 version+1, 구판은 이력 보존)</span></div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input value={rCode} onChange={(e) => setRCode(e.target.value)} placeholder="master_code (예: PROC-ASSY-01)" className={inputCls} />
-                    <input value={rName} onChange={(e) => setRName(e.target.value)} placeholder="정식 명칭 (예: 조립 공정)" className={inputCls} />
-                    <input value={rDomains} onChange={(e) => setRDomains(e.target.value)} placeholder="도메인 태그 (콤마구분, 예: manufacturing)" className={inputCls} />
-                    <input value={rAliases} onChange={(e) => setRAliases(e.target.value)} placeholder="별칭 (콤마구분, 예: ASSY, 조립)" className={inputCls} />
-                  </div>
-                  <textarea value={rAttrs} onChange={(e) => setRAttrs(e.target.value)} rows={2}
-                    placeholder={'속성값 JSON (선택, 타입 스키마 준수) {"표준리드타임_h":72}'} className={inputCls + ' font-mono resize-none'} />
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-                      <input type="checkbox" checked={rCore} onChange={(e) => setRCore(e.target.checked)} />
-                      is_core (도메인 대표 레코드 — 별칭 미언급 시에도 우선 주입)
-                    </label>
-                    <button onClick={handleCreateRecord} disabled={busy !== null}
-                      className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white text-xs font-bold px-4 py-1.5 rounded-lg">
-                      {busy === 'rec' ? '저장 중…' : '저장'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 검색 + 레코드 목록 */}
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="text-xs font-bold text-gray-300">레코드 ({records.length})</div>
-                    <input value={search} onChange={(e) => setSearch(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && selType && fetchRecords(selType, search)}
-                      placeholder="이름·별칭 검색 (Enter)" className={inputCls + ' ml-auto max-w-[220px]'} />
-                  </div>
-                  <div className="space-y-1.5">
-                    {records.map((r) => (
-                      <div key={r.master_code} className="rounded-lg border border-gray-700 bg-gray-950 px-3 py-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="text-xs font-bold text-gray-100 truncate">
-                              <span className="font-mono text-emerald-300">{r.master_code}</span> · {r.name}
-                              {r.is_core && <span className="ml-1.5 text-[9px] bg-amber-900/50 text-amber-300 px-1.5 py-0.5 rounded">CORE</span>}
-                              <span className="ml-1 text-[9px] text-gray-500">v{r.version}</span>
-                            </div>
-                            <div className="text-[10px] text-gray-500 mt-0.5">
-                              {r.domains?.length ? `도메인: ${r.domains.join(', ')}` : '도메인 없음'}
-                              {Object.keys(r.attributes || {}).length ? ` · ${Object.entries(r.attributes).map(([k, v]) => `${k}=${v}`).join(', ')}` : ''}
-                            </div>
-                          </div>
-                          <button onClick={() => handleRetire(r.master_code)} className="text-[10px] text-red-400 hover:text-red-300 shrink-0">폐기</button>
-                        </div>
-                        {/* 별칭 칩 */}
-                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                          {(r.aliases || []).filter((a) => a !== r.name).map((a) => (
-                            <span key={a} className="text-[10px] bg-gray-900 border border-gray-700 text-gray-300 rounded-full pl-2 pr-1 py-0.5 flex items-center gap-1">
-                              {a}<button onClick={() => handleRemoveAlias(r.master_code, a)} className="text-gray-500 hover:text-red-400">✕</button>
-                            </span>
-                          ))}
-                          <input value={aliasDraft[r.master_code] || ''} onChange={(e) => setAliasDraft((d) => ({ ...d, [r.master_code]: e.target.value }))}
-                            onKeyDown={(e) => e.key === 'Enter' && handleAddAlias(r.master_code)}
-                            placeholder="+ 별칭" className="text-[10px] bg-transparent border-b border-gray-700 w-16 focus:outline-none focus:border-emerald-500 text-gray-300" />
-                        </div>
-                      </div>
-                    ))}
-                    {records.length === 0 && <div className="text-xs text-gray-500 py-3 text-center">레코드가 없습니다. 위에서 등록하세요.</div>}
-                  </div>
-                </div>
-
-                {/* 주입 미리보기 */}
-                <div className="rounded-xl border border-gray-700 bg-gray-950/60 p-4">
-                  <div className="text-xs font-bold text-gray-300 mb-2">🔍 주입 미리보기 — 이 텍스트에 실제로 주입될 기준정보 블록 확인(별칭 감지 + is_core)</div>
-                  <div className="flex gap-2 mb-2">
-                    <input value={pvText} onChange={(e) => setPvText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handlePreview()}
-                      placeholder="예: 조립 공정 리드타임을 단축한다" className={inputCls} />
-                    <input value={pvDomains} onChange={(e) => setPvDomains(e.target.value)} placeholder="도메인(콤마)" className={inputCls + ' max-w-[160px]'} />
-                    <button onClick={handlePreview} disabled={busy !== null || !pvText.trim()}
-                      className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white text-xs font-bold px-4 rounded-lg shrink-0">확인</button>
-                  </div>
-                  {pv && (
-                    <div className="rounded-lg border border-gray-700 bg-gray-900 p-2.5">
-                      <div className="text-[10px] text-emerald-300 font-mono mb-1">매칭: {pv.matched.length ? pv.matched.join(', ') : '(없음 — 주입 안 됨)'}</div>
-                      {pv.block && <pre className="text-[11px] text-gray-300 whitespace-pre-wrap">{pv.block}</pre>}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+    <HubDialog label="기준정보 마스터 — 골든 레코드와 주입 기준" onClose={onClose}>
+      <div className="afs-dialog-bar">
+        <b>기준정보 마스터</b>
+        <span>골든 레코드는 확정 조회로 모든 에이전트에 동일하게 주입됩니다</span>
+        <div className="bar-actions">
+          {busy && <span className="busy">{busy}…</span>}
+          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
         </div>
       </div>
-    </div>
+
+      <div className="afs-dialog-body">
+        <HubShell
+          kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
+          items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
+          footer={
+            <div className="inheritance-card">
+              <span>DETERMINISTIC</span>
+              <b>문서 검색이 아니라 확정값입니다</b>
+              <p>같은 코드에는 같은 값이 적용됩니다. 개정은 구판을 지우지 않고 새 버전을 만듭니다.</p>
+            </div>
+          }
+          jarvis={<JarvisRail contextTitle={jarvis.title} contextDescription={jarvis.desc}
+            evidence={jarvis.ev} context={jarvis.ctx}
+            quickQuestions={[
+              '이 기준정보는 어떤 산출물에 영향을 줍니까?',
+              '현재 별칭과 도메인 범위가 충분합니까?',
+              '이 문장에는 어떤 기준정보가 주입됩니까?',
+            ]} />}
+        >
+          {err && <Banner tone="error" title={errorTitle(err.status)}>{err.msg}</Banner>}
+          {flash && <Banner tone="info">{flash}</Banner>}
+          {(visibility.hiddenTypes > 0 || visibility.hiddenRecords > 0) && (
+            <Banner tone="warn">
+              현재 조직 범위 밖의 기준정보 유형 {visibility.hiddenTypes}개와 레코드 {visibility.hiddenRecords}건은 표시하지 않습니다.
+            </Banner>
+          )}
+
+          {view === 'catalog' && (
+            <CatalogView
+              types={types} records={records} detail={detail}
+              typeRows={typeRows} recordRows={recordRows}
+              selectedType={selectedType} setSelectedType={setSelectedType}
+              selectedCode={selectedCode} selectRecord={selectRecord}
+              search={search} setSearch={setSearch}
+              onSearch={() => loadRecords(selectedType, search)} onRetryTypes={loadTypes}
+              onRetryRecords={() => loadRecords(selectedType, search)}
+              typeForm={typeForm} setTypeForm={setTypeForm} onCreateType={createType}
+              aliasDraft={aliasDraft} setAliasDraft={setAliasDraft} onAddAlias={addAlias}
+              removeAlias={removeAlias} onRemoveAlias={doRemoveAlias}
+              retire={retire} onRetire={doRetire}
+            />
+          )}
+          {view === 'register' && (
+            <RegisterView types={typeRows} selectedType={selectedType} setSelectedType={setSelectedType}
+              form={recordForm} setForm={setRecordForm} onSave={saveRecord} />
+          )}
+          {view === 'import' && (
+            <ImportView types={typeRows} selectedType={selectedType} setSelectedType={setSelectedType}
+              file={csvFile} setFile={setCsvFile} fileKey={csvKey}
+              report={csvReport} onImport={importCsv} />
+          )}
+          {view === 'preview' && (
+            <PreviewView text={previewText} setText={setPreviewText}
+              domains={previewDomains} setDomains={setPreviewDomains}
+              scope={previewScope} setScope={setPreviewScope}
+              state={preview} onRun={runPreview} />
+          )}
+        </HubShell>
+      </div>
+    </HubDialog>
+  );
+}
+
+function CatalogView(props: any) {
+  const {
+    types, records, detail, typeRows, recordRows, selectedType, setSelectedType,
+    selectedCode, selectRecord, search, setSearch, onSearch, onRetryTypes, onRetryRecords,
+    typeForm, setTypeForm, onCreateType, aliasDraft, setAliasDraft, onAddAlias,
+    removeAlias, onRemoveAlias, retire, onRetire,
+  } = props;
+  const selected: MasterRecord | null = detail.value;
+  const core = recordRows.filter((r: MasterRecord) => r.is_core).length;
+  return (
+    <>
+      <ScreenHead kicker="MASTER DATA" title="기준정보 카탈로그"
+        description="유형을 고르고 골든 레코드의 코드·별칭·속성·개정 이력을 확인합니다."
+        chip={types.status !== 'ok'
+          ? types.status === 'loading'
+            ? { label: '확인 중', tone: 'muted' }
+            : { label: types.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
+          : { label: `${typeRows.length}개 유형`, tone: typeRows.length ? 'data' : 'muted' }} />
+
+      <div className="metric-row">
+        <Metric label="유형" state={types.status} value={types.status === 'ok' ? typeRows.length : null} />
+        <Metric label="현행 레코드" state={records.status} value={records.status === 'ok' ? recordRows.length : null} />
+        <Metric label="핵심 레코드" state={records.status} value={records.status === 'ok' ? core : null}
+          hint="별칭 미언급 시 우선 주입" />
+        <Metric label="선택 버전" state={detail.status} value={selected ? `v${selected.version}` : null}
+          hint="레코드를 선택하십시오" />
+      </div>
+
+      <FoundationToolbar search={search} onSearch={(v) => { setSearch(v); if (!v) onSearch(); }}
+        placeholder="선택한 유형의 명칭·별칭 검색"
+        actions={<>
+          <div style={{ minWidth: 220 }}>
+            <TypeSelect types={typeRows} value={selectedType} onChange={setSelectedType} />
+          </div>
+          <button className="primary-button" disabled={!selectedType} onClick={onSearch}>검색</button>
+        </>}
+        hint="코드가 아니라 정식 명칭과 별칭을 찾습니다. 유형을 바꾸면 해당 유형의 현행판만 조회합니다." />
+
+      {types.status !== 'ok' && (
+        <Panel kicker="TYPES" title="기준정보 유형을 가져오지 못했습니다">
+          <EmptyOrError state={types.status} error={types.error} onRetry={onRetryTypes}
+            emptyText="등록된 기준정보 유형이 없습니다." />
+        </Panel>
+      )}
+
+      {selectedType && (
+        <EvidenceStrip items={[
+          { label: '선택 유형', value: typeRows.find((t: MasterType) => t.type_id === selectedType)?.name_ko },
+          { label: 'type_id', value: selectedType },
+          { label: '현행 레코드', value: records.status === 'ok' ? `${recordRows.length}건` : '조회 불가' },
+        ]} note={typeRows.find((t: MasterType) => t.type_id === selectedType)?.description
+          || '유형 설명이 없습니다 — 무엇을 등록해야 하는지 다른 사용자가 판단하기 어렵습니다.'} />
+      )}
+
+      <div className="delivery-grid">
+        <FoundationList kicker="RECORDS" title="현행 골든 레코드" state={records}
+          onRetry={onRetryRecords}
+          rows={recordRows.map((r: MasterRecord) => ({
+            id: r.master_code, title: r.name,
+            meta: `${r.master_code} · v${r.version} · ${r.domains.join(', ') || '도메인 미지정'}`,
+            chip: r.is_core
+              ? { label: 'CORE', tone: 'warn' as const }
+              : { label: '현행', tone: 'success' as const },
+          }))}
+          selectedId={selectedCode} onSelect={selectRecord}
+          emptyText={selectedType
+            ? (search ? `«${search}»와 일치하는 현행 레코드가 없습니다.` : '이 유형에 현행 레코드가 없습니다.')
+            : '기준정보 유형을 먼저 선택하십시오.'} />
+
+        <Panel kicker="DETAIL" title={selected?.name || selectedCode}>
+          {!selectedCode ? (
+            <div className="empty-note">좌측에서 레코드를 선택하면 속성·별칭·개정 이력을 표시합니다.</div>
+          ) : detail.status !== 'ok' || !selected ? (
+            <EmptyOrError state={detail.status} error={detail.error}
+              onRetry={() => selectRecord(selectedCode)} emptyText="레코드를 선택하십시오." />
+          ) : (
+            <div style={{ padding: 15 }}>
+              <EvidenceStrip items={[
+                { label: '마스터 코드', value: selected.master_code },
+                { label: '현행 버전', value: `v${selected.version}` },
+                { label: '출처', value: selected.source },
+              ]} note={`적용 도메인: ${selected.domains.join(', ') || '미지정 — 주입 범위를 확인하십시오.'}`} />
+
+              <div className="section-grid">
+                <section>
+                  <h4>속성</h4>
+                  {Object.keys(selected.attributes || {}).length ? (
+                    <dl className="section-kv">
+                      {Object.entries(selected.attributes).map(([key, value]) => (
+                        <div key={key}><dt>{key}</dt><dd>
+                          {value && typeof value === 'object'
+                            ? <pre className="mdm-attribute-json">{JSON.stringify(value, null, 2)}</pre>
+                            : String(value)}
+                        </dd></div>
+                      ))}
+                    </dl>
+                  ) : <p className="section-missing">등록된 속성이 없습니다.</p>}
+                </section>
+
+                <section>
+                  <h4>동의어·유사어</h4>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                    {(selected.aliases || []).map((alias) => (
+                      <span key={alias} className="state-chip muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        {alias}
+                        {alias !== selected.name && (
+                          <button className="text-button" aria-label={`${alias} 별칭 제거`}
+                            onClick={() => removeAlias.ask(alias)}>×</button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 7 }}>
+                    <input className="afs-input" value={aliasDraft} placeholder="새 별칭"
+                      onChange={(e) => setAliasDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') onAddAlias(); }} />
+                    <button className="secondary-button" disabled={!aliasDraft.trim()} onClick={onAddAlias}>추가</button>
+                  </div>
+                  <ConfirmInline open={!!removeAlias.target}
+                    title={`«${removeAlias.target || ''}» 별칭을 제거합니다`}
+                    body="이 표현으로는 더 이상 해당 기준정보가 매칭되지 않습니다. 정식 명칭과 다른 별칭만 제거할 수 있습니다."
+                    confirmLabel="별칭 제거" onCancel={removeAlias.cancel}
+                    onConfirm={() => removeAlias.run(onRemoveAlias)} />
+                </section>
+
+                <section>
+                  <h4>개정 이력</h4>
+                  <VersionHistory rows={(selected.history || []).map((h) => ({
+                    id: `${selected.master_code}-${h.version}`,
+                    version: `v${h.version}`,
+                    at: h.updated_at || h.valid_from,
+                    actor: h.source || '출처 미상',
+                    summary: h.status === 'active' ? '현행 버전' : '보존된 구판',
+                  }))} />
+                </section>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                <button className="danger-ghost" onClick={() => retire.ask(selected.master_code)}>현행 레코드 폐기</button>
+              </div>
+              <ConfirmInline open={retire.target === selected.master_code}
+                title={`«${selected.name}» 현행판을 폐기합니다`}
+                body={<>v{selected.version}은 에이전트 주입 대상에서 제외됩니다. 물리 삭제하지 않고 이력으로 보존합니다.</>}
+                confirmLabel="현행판 폐기" onCancel={retire.cancel}
+                onConfirm={() => retire.run(onRetire)} />
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      {types.status !== 'forbidden' && <Panel kicker="NEW TYPE" title="새 기준정보 유형">
+        <div style={{ padding: 15 }}>
+          <div className="delivery-grid">
+            <FormField label="type_id" required hint="영소문자·숫자·_·- 조합, 2~32자">
+              <input className="afs-input" value={typeForm.id} placeholder="예: process"
+                onChange={(e) => setTypeForm({ ...typeForm, id: e.target.value })} />
+            </FormField>
+            <FormField label="한글명" required>
+              <input className="afs-input" value={typeForm.name} placeholder="예: 공정"
+                onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })} />
+            </FormField>
+          </div>
+          <FormField label="설명" hint="이 유형에 무엇을 등록해야 하는지 판단할 수 있게 적으십시오.">
+            <input className="afs-input" value={typeForm.desc}
+              onChange={(e) => setTypeForm({ ...typeForm, desc: e.target.value })} />
+          </FormField>
+          <FormField label="속성 스키마 JSON" hint={'예: {"표준리드타임_h":{"type":"number"}}'}>
+            <textarea className="afs-textarea" value={typeForm.schema}
+              onChange={(e) => setTypeForm({ ...typeForm, schema: e.target.value })} />
+          </FormField>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="primary-button" disabled={!typeForm.id.trim() || !typeForm.name.trim()}
+              onClick={onCreateType}>유형 만들기</button>
+          </div>
+        </div>
+      </Panel>}
+    </>
+  );
+}
+
+function TypeSelect({ types, value, onChange }: {
+  types: MasterType[]; value: string; onChange: (value: string) => void;
+}) {
+  return (
+    <select className="afs-select" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">유형을 선택하십시오</option>
+      {types.map((t) => <option key={t.type_id} value={t.type_id}>{t.name_ko} ({t.type_id})</option>)}
+    </select>
+  );
+}
+
+function RegisterView({ types, selectedType, setSelectedType, form, setForm, onSave }: any) {
+  return (
+    <>
+      <ScreenHead kicker="REVISE" title="기준정보 등록·개정"
+        description="같은 마스터 코드를 다시 저장하면 기존 현행판을 구판으로 보존하고 버전을 올립니다."
+        chip={{ label: selectedType ? '유형 선택됨' : '유형 필요', tone: selectedType ? 'data' : 'warn' }} />
+      <Panel kicker="RECORD" title="골든 레코드">
+        <div style={{ padding: 15 }}>
+          <FormField label="기준정보 유형" required>
+            <TypeSelect types={types} value={selectedType} onChange={setSelectedType} />
+          </FormField>
+          <div className="delivery-grid">
+            <FormField label="마스터 코드" required hint="대문자·숫자로 시작하고 _·- 사용 가능">
+              <input className="afs-input" value={form.code} placeholder="예: PROC-ASSY-01"
+                onChange={(e) => setForm({ ...form, code: e.target.value })} />
+            </FormField>
+            <FormField label="정식 명칭" required>
+              <input className="afs-input" value={form.name} placeholder="예: 조립 공정"
+                onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </FormField>
+          </div>
+          <div className="delivery-grid">
+            <FormField label="도메인" hint="콤마 구분. 예: manufacturing, logistics">
+              <input className="afs-input" value={form.domains}
+                onChange={(e) => setForm({ ...form, domains: e.target.value })} />
+            </FormField>
+            <FormField label="별칭" hint="콤마 구분. 정식 명칭은 자동 포함됩니다.">
+              <input className="afs-input" value={form.aliases}
+                onChange={(e) => setForm({ ...form, aliases: e.target.value })} />
+            </FormField>
+          </div>
+          <FormField label="속성값 JSON" hint={'선택한 유형의 스키마를 따라야 합니다. 예: {"표준리드타임_h":72}'}>
+            <textarea className="afs-textarea" value={form.attrs}
+              onChange={(e) => setForm({ ...form, attrs: e.target.value })} />
+          </FormField>
+          <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" checked={form.core}
+              onChange={(e) => setForm({ ...form, core: e.target.checked })} />
+            도메인 핵심 레코드 — 별칭이 직접 언급되지 않아도 우선 주입
+          </label>
+          <div className="request-alert warn" style={{ margin: '12px 0' }}>
+            <i aria-hidden="true">!</i><div><b>같은 코드는 덮어쓰지 않습니다</b>
+              <small>새 버전을 만들고 구판을 보존합니다. 코드가 같은지 저장 전에 확인하십시오.</small></div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="primary-button" disabled={!selectedType || !form.code.trim() || !form.name.trim()}
+              onClick={onSave}>저장·개정</button>
+          </div>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+function ImportView({ types, selectedType, setSelectedType, file, setFile, fileKey, report, onImport }: any) {
+  return (
+    <>
+      <ScreenHead kicker="BULK" title="CSV 일괄등록"
+        description="부분 성공을 허용하되 실패 행과 사유를 숨기지 않습니다."
+        chip={report ? { label: `${report.imported}/${report.total} 성공`, tone: report.failed.length ? 'warn' : 'success' } : undefined} />
+      <Panel kicker="UPLOAD" title="CSV 파일">
+        <div style={{ padding: 15 }}>
+          <FormField label="기준정보 유형" required>
+            <TypeSelect types={types} value={selectedType} onChange={setSelectedType} />
+          </FormField>
+          <FormField label="CSV 파일" required
+            hint="헤더: master_code,name,domains,aliases,attr:<속성명>… / domains·aliases는 ; 구분">
+            <input key={fileKey} type="file" accept=".csv" className="afs-input"
+              onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          </FormField>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="primary-button" disabled={!selectedType || !file} onClick={onImport}>CSV 등록</button>
+          </div>
+        </div>
+      </Panel>
+      {report && (
+        <Panel kicker="RESULT" title="등록 결과">
+          <div style={{ padding: 15 }}>
+            <EvidenceStrip items={[
+              { label: '전체 행', value: report.total },
+              { label: '성공', value: report.imported },
+              { label: '실패', value: report.failed.length },
+            ]} note="실패 행을 고쳐 다시 올리면 같은 코드는 새 버전으로 개정됩니다." />
+            {report.failed.length > 0 && (
+              <ul className="section-list">
+                {report.failed.map((f: any) => <li key={`${f.row}-${f.master_code || ''}`}>
+                  <b>행 {f.row}{f.master_code ? ` · ${f.master_code}` : ''}</b> {f.error}
+                </li>)}
+              </ul>
+            )}
+          </div>
+        </Panel>
+      )}
+    </>
+  );
+}
+
+function PreviewView({ text, setText, domains, setDomains, scope, setScope, state, onRun }: any) {
+  const value: GroundingPreview | null = state.value;
+  return (
+    <>
+      <ScreenHead kicker="INJECTION" title="주입 미리보기"
+        description="벡터 검색 결과가 아니라 실제 에이전트 프롬프트에 들어갈 확정 기준정보를 보여줍니다."
+        chip={value ? { label: `${value.matched.length}건 매칭`, tone: value.matched.length ? 'success' : 'muted' } : undefined} />
+      <Panel kicker="QUERY" title="업무 문장과 도메인">
+        <div style={{ padding: 15 }}>
+          <FormField label="업무 문장" required hint="별칭과 정식 명칭이 이 문장 안에서 감지됩니다.">
+            <textarea className="afs-textarea" value={text} placeholder="예: 조립 공정의 표준 리드타임을 단축한다"
+              onChange={(e) => setText(e.target.value)} />
+          </FormField>
+          <FormField label="도메인" hint="콤마 구분. 비우면 문장 매칭과 핵심 레코드를 기준으로 계산합니다.">
+            <input className="afs-input" value={domains} placeholder="예: manufacturing"
+              onChange={(e) => setDomains(e.target.value)} />
+          </FormField>
+          <FormField label="조직 범위" hint="일반 사용자는 소속 범위 안의 ECM 노드 ID를 지정해야 합니다. 관리자는 비워도 됩니다.">
+            <input className="afs-input" value={scope} placeholder="예: MNM_BATTERY"
+              onChange={(e) => setScope(e.target.value)} />
+          </FormField>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="primary-button" disabled={!text.trim()} onClick={onRun}>주입값 확인</button>
+          </div>
+        </div>
+      </Panel>
+      <Panel kicker="OUTPUT" title="에이전트가 받게 될 기준정보">
+        {state.status !== 'ok' || !value ? (
+          <EmptyOrError state={state.status} error={state.error} onRetry={onRun}
+            emptyText="업무 문장을 입력하고 «주입값 확인»을 누르십시오." />
+        ) : (
+          <div style={{ padding: 15 }}>
+            <EvidenceStrip items={[
+              { label: '매칭 수', value: value.matched.length },
+              { label: '매칭 코드', value: value.matched.join(', ') || '없음' },
+              { label: '주입 여부', value: value.block ? '주입됨' : '주입 안 됨' },
+            ]} note="매칭이 없으면 기준정보가 없는지, 별칭이 등록되지 않았는지 확인하십시오." />
+            {value.block ? <pre className="mdm-preview-block">{value.block}</pre>
+              : <div className="empty-note">이 문장에 주입되는 기준정보가 없습니다.</div>}
+          </div>
+        )}
+      </Panel>
+    </>
   );
 }

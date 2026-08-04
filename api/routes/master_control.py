@@ -13,7 +13,8 @@ from typing import Optional, List
 
 from core.master_data import master_data, MasterDataError
 from fastapi import Depends
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (Principal, assert_can_manage_standard, current_principal,
+                      viewer_visible_scopes, visibility_block_reason)
 
 router = APIRouter(prefix="/api/v1/master")
 
@@ -24,6 +25,42 @@ def _domain_err(e: MasterDataError):
     if "이미 존재" in msg or "삭제할 수 없" in msg:
         raise HTTPException(status_code=409, detail=msg)
     raise HTTPException(status_code=400, detail=msg)
+
+
+async def _visible_master_codes(p: Principal, tenant_id: str = "tenant_default"):
+    """요청자가 열람 가능한 기준정보 코드. ``None`` 은 전면 통과다.
+
+    기준정보 본문에는 조직 컬럼을 복제하지 않고 ``master_scope_bindings`` 가 적용 범위를
+    가진다. 따라서 목록도 같은 바인딩을 해석해야 한다. 이 경로를 생략하면 프롬프트 주입은
+    막혀도 UI/API 목록에서는 타 조직 기준정보가 그대로 새어 나온다.
+    """
+    reason = visibility_block_reason(p)
+    if reason:
+        return reason, frozenset()
+    scopes = viewer_visible_scopes(p)
+    if scopes is None:
+        return "", None
+    allowed = set()
+    for scope_node_id in scopes:
+        bindings = await asyncio.to_thread(
+            master_data.bindings_for_scope, tenant_id, scope_node_id, "REAL", "")
+        allowed.update(bindings)
+    return "", frozenset(allowed)
+
+
+def _record_allowed(master_code: str, allowed) -> bool:
+    return allowed is None or master_code in allowed
+
+
+def _audit_hidden_record(p: Principal, master_code: str) -> None:
+    """Data Stealth 거부는 응답에서만 숨기고 내부 감사에는 실제 코드를 남긴다."""
+    from core.enterprise_context import audit
+    actor_scopes = viewer_visible_scopes(p)
+    audit.denied_scope(
+        resource_type="master_record", resource_id=master_code,
+        actor=p.user_id, actor_scopes=actor_scopes or (),
+        detail="요청자의 조직 범위에 바인딩되지 않은 기준정보 상세 조회",
+    )
 
 
 # ── 타입(온톨로지) ────────────────────────────────────────────────────
@@ -43,12 +80,23 @@ class TypeUpdateRequest(BaseModel):
 
 
 @router.get("/types")
-async def list_types():
-    return {"status": "success", "data": await asyncio.to_thread(master_data.list_types)}
+async def list_types(tenant_id: str = "tenant_default",
+                     p: Principal = Depends(current_principal)):
+    reason, allowed = await _visible_master_codes(p, tenant_id)
+    if reason:
+        return {"status": "success", "data": [], "blocked_reason": reason}
+    rows = await asyncio.to_thread(master_data.list_types)
+    if allowed is None:
+        return {"status": "success", "data": rows}
+    records = await asyncio.to_thread(master_data.list_records, None, None, None, True)
+    visible_type_ids = {r["type_id"] for r in records if r["master_code"] in allowed}
+    shown = [row for row in rows if row["type_id"] in visible_type_ids]
+    return {"status": "success", "data": shown, "hidden_count": len(rows) - len(shown)}
 
 
 @router.post("/types")
-async def create_type(req: TypeRequest):
+async def create_type(req: TypeRequest, p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     try:
         data = await asyncio.to_thread(master_data.create_type, req.type_id, req.name_ko,
                                        req.description or "", req.attr_schema, req.relations)
@@ -58,7 +106,9 @@ async def create_type(req: TypeRequest):
 
 
 @router.put("/types/{type_id}")
-async def update_type(type_id: str, req: TypeUpdateRequest):
+async def update_type(type_id: str, req: TypeUpdateRequest,
+                      p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     try:
         data = await asyncio.to_thread(master_data.update_type, type_id, req.name_ko,
                                        req.description, req.attr_schema, req.relations)
@@ -68,7 +118,8 @@ async def update_type(type_id: str, req: TypeUpdateRequest):
 
 
 @router.delete("/types/{type_id}")
-async def delete_type(type_id: str):
+async def delete_type(type_id: str, p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     try:
         await asyncio.to_thread(master_data.delete_type, type_id)
         return {"status": "success"}
@@ -94,13 +145,22 @@ class AliasRequest(BaseModel):
 
 @router.get("/records")
 async def list_records(type_id: Optional[str] = None, q: Optional[str] = None,
-                       domain: Optional[str] = None, include_retired: bool = False):
+                       domain: Optional[str] = None, include_retired: bool = False,
+                       tenant_id: str = "tenant_default",
+                       p: Principal = Depends(current_principal)):
+    reason, allowed = await _visible_master_codes(p, tenant_id)
+    if reason:
+        return {"status": "success", "data": [], "blocked_reason": reason}
     data = await asyncio.to_thread(master_data.list_records, type_id, q, domain, include_retired)
-    return {"status": "success", "data": data}
+    if allowed is None:
+        return {"status": "success", "data": data}
+    shown = [row for row in data if row["master_code"] in allowed]
+    return {"status": "success", "data": shown, "hidden_count": len(data) - len(shown)}
 
 
 @router.post("/records")
-async def create_record(req: RecordRequest):
+async def create_record(req: RecordRequest, p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     try:
         data = await asyncio.to_thread(
             master_data.create_or_revise_record, req.master_code, req.type_id, req.name,
@@ -120,6 +180,7 @@ async def duplicate_candidates(p: Principal = Depends(current_principal)):
     ⚠️ **이 라우트는 반드시 `/records/{master_code}` 보다 위에 있어야 한다.** 아래에 두면
       경로 변수가 'duplicates' 를 master_code 로 잡아 404 가 난다(실제로 그렇게 났다).
       함수 단위 테스트로는 안 잡히는 결함이라 `tests/test_master_api_routes.py` 로 잠갔다."""
+    assert_can_manage_standard(p)
     rows = await asyncio.to_thread(master_data.find_duplicate_candidates)
     return {"status": "success", "data": {
         "candidates": rows, "total": len(rows),
@@ -129,7 +190,14 @@ async def duplicate_candidates(p: Principal = Depends(current_principal)):
 
 
 @router.get("/records/{master_code}")
-async def get_record(master_code: str):
+async def get_record(master_code: str, tenant_id: str = "tenant_default",
+                     p: Principal = Depends(current_principal)):
+    reason, allowed = await _visible_master_codes(p, tenant_id)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    if not _record_allowed(master_code, allowed):
+        _audit_hidden_record(p, master_code)
+        raise HTTPException(status_code=404, detail="존재하지 않는 기준정보입니다.")
     data = await asyncio.to_thread(master_data.get_record, master_code)
     if not data:
         raise HTTPException(status_code=404, detail="존재하지 않는 기준정보입니다.")
@@ -137,7 +205,8 @@ async def get_record(master_code: str):
 
 
 @router.delete("/records/{master_code}")
-async def delete_record(master_code: str):
+async def delete_record(master_code: str, p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     ok = await asyncio.to_thread(master_data.retire_record, master_code)
     if not ok:
         raise HTTPException(status_code=404, detail="존재하지 않는(또는 이미 폐기된) 기준정보입니다.")
@@ -145,7 +214,9 @@ async def delete_record(master_code: str):
 
 
 @router.post("/records/{master_code}/aliases")
-async def add_aliases(master_code: str, req: AliasRequest):
+async def add_aliases(master_code: str, req: AliasRequest,
+                      p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     try:
         data = await asyncio.to_thread(master_data.add_aliases, master_code, req.aliases)
         return {"status": "success", "data": data}
@@ -154,14 +225,18 @@ async def add_aliases(master_code: str, req: AliasRequest):
 
 
 @router.delete("/records/{master_code}/aliases/{alias}")
-async def remove_alias(master_code: str, alias: str):
+async def remove_alias(master_code: str, alias: str,
+                       p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     data = await asyncio.to_thread(master_data.remove_alias, master_code, alias)
     return {"status": "success", "data": data}
 
 
 # ── 일괄 등록 (CSV) ───────────────────────────────────────────────────
 @router.post("/import/csv")
-async def import_csv(type_id: str = Form(...), file: UploadFile = File(...)):
+async def import_csv(type_id: str = Form(...), file: UploadFile = File(...),
+                     p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     raw = await file.read()
     try:
         text = raw.decode("utf-8-sig")  # BOM 허용(엑셀 CSV)
@@ -183,10 +258,25 @@ class PreviewRequest(BaseModel):
 
 
 @router.post("/grounding/preview")
-async def grounding_preview(req: PreviewRequest):
+async def grounding_preview(req: PreviewRequest,
+                            p: Principal = Depends(current_principal)):
     """실제 주입될 블록을 그대로 보여준다. `scope_node_id` 를 주면 조직 범위 필터까지 적용해
     **그 조직이 실제로 받게 되는 것**을 본다(R-001)."""
-    args = (req.text, req.domains or [], req.tenant_id, req.scope_node_id or "")
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    from core.scope_guard import resolve_effective_scope
+    effective = resolve_effective_scope(p, req.scope_node_id or "")
+    if effective.denied:
+        from core.enterprise_context import audit
+        audit.denied_scope("master_grounding", req.scope_node_id or "unspecified",
+                           p.user_id, effective.allowed_scopes, req.scope_node_id,
+                           "요청 범위가 사용자 조직 범위를 벗어남")
+        raise HTTPException(status_code=404, detail="요청한 조직 범위를 찾을 수 없습니다.")
+    if not p.scope.unrestricted and not p.scope.can_manage_standard and not effective.scope_node_id:
+        raise HTTPException(status_code=422,
+                            detail="조직 범위를 지정해야 주입값을 확인할 수 있습니다.")
+    args = (req.text, req.domains or [], req.tenant_id, effective.scope_node_id)
     block = await asyncio.to_thread(master_data.render_grounding, *args)
     selected, stats = await asyncio.to_thread(
         lambda: master_data.select_for_injection(*args, with_stats=True))
@@ -234,6 +324,7 @@ async def scope_coverage(tenant_id: str = "tenant_default",
     같은 유형의 사고가 반복됐다 — 재시드가 바인딩을 건너뛰거나, 조직 코드가 어긋나거나,
     바인딩을 해제하거나, ECM 시드 전에 적재하면 그 레코드는 전사 공통으로 통과한다.
     규칙은 유지하되 **노출을 조용하지 않게** 만드는 것이 이 엔드포인트의 목적이다."""
+    assert_can_manage_standard(p)
     data = await asyncio.to_thread(master_data.scope_coverage, tenant_id)
     return {"status": "success", "data": data}
 
@@ -260,6 +351,7 @@ async def revoke_scope_binding(binding_id: str,
 async def list_scope_bindings(master_code: str = "", scope_node_id: str = "",
                               tenant_id: str = "",
                               p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
     rows = await asyncio.to_thread(master_data.list_scope_bindings, master_code, scope_node_id,
                                    tenant_id)
     return {"status": "success", "data": rows}
@@ -277,6 +369,16 @@ async def allowed_for_scope(scope_node_id: str, tenant_id: str = "tenant_default
     주입 상한은 기본적으로 **없다**(전수 주입). 운영 비상시 환경변수로 걸었다면 그 값을 함께
     주고, 실제로 잘린 건수는 프롬프트 블록에도 명시된다 — 조용히 잘리지 않게."""
     from core.master_data import _INJECT_MAX_CHARS, _INJECT_MAX_ITEMS
+    if not (p.scope.unrestricted or p.scope.can_manage_standard):
+        from core.scope_guard import resolve_effective_scope
+        effective = resolve_effective_scope(p, scope_node_id)
+        if effective.denied:
+            from core.enterprise_context import audit
+            audit.denied_scope("master_scope_binding", scope_node_id, p.user_id,
+                               effective.allowed_scopes, scope_node_id,
+                               "요청 범위가 사용자 조직 범위를 벗어남")
+            raise HTTPException(status_code=404, detail="요청한 조직 범위를 찾을 수 없습니다.")
+        scope_node_id = effective.scope_node_id
     binds = await asyncio.to_thread(master_data.bindings_for_scope, tenant_id, scope_node_id,
                                     "REAL", as_of)
     codes = set(binds)
@@ -297,11 +399,12 @@ async def allowed_for_scope(scope_node_id: str, tenant_id: str = "tenant_default
 
 
 @router.get("/documents/quality")
-async def document_quality():
+async def document_quality(p: Principal = Depends(current_principal)):
     """M1~M4 문서의 **계산으로 드러나는 모순**을 점검한다.
 
     ⚠️ 값을 고치지 않는다. 수치의 정확도는 구현 단계에서 판정할 수 없으므로(사용자 지시
       2026-07-29), 이 목록은 **실사용 전 보정 작업의 입력**이다."""
+    assert_can_manage_standard(p)
     from core.master_data_seed import inspect_data_quality
     findings = await asyncio.to_thread(inspect_data_quality)
     return {"status": "success", "data": {

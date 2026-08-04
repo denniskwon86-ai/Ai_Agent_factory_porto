@@ -37,6 +37,22 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [UIUX-IMPL-35] 지식 허브 감사 마감 + MDM 2/10 이관 + 기준정보 API 권한 누수 차단
+- 작성자 / 기록 시각: Codex / 2026-08-04 11:03 KST
+- 왜 지금 기록하는가: Supervisor가 `handoff_2026-08-04_uiux_migration.md`를 인계받아 코드 수정까지 마무리하라고 지시했다. MDM 실데이터 화면 감사 중 **익명 요청에도 기준정보 21개 유형·레코드가 반환되는 서버 권한 누수**를 추가 발견해, 화면만 숨기는 조치로 완료 처리하지 않고 API 계약까지 함께 닫았다.
+- 상세 인수인계: `docs/chronicle/handoffs/handoff_2026-08-04_uiux_mdm_codex.md`
+- 상태: **코드 이행 완료 · 프론트 빌드/정적 구문 검증 통과 · 백엔드 전체 회귀 및 1440 래스터 재감사 대기**
+- 결정 및 근거:
+  1. `frontend/src/components/MasterDataPanel.tsx`를 `HubDialog`·`HubShell`·`DataFoundationShell`·`DataState`·`JarvisRail` 기반으로 이관했다. 유형·레코드 조회, 상세/버전, 등록·개정, 별칭, 소프트 폐기, CSV, 실제 주입 미리보기 기능을 유지했고 raw `fetch`·`alert`·`confirm`·자체 모달을 제거했다.
+  2. `frontend/src/lib/masterDataApi.ts`를 신설해 기준정보 API와 타입을 한곳에 모았다. 목록 봉투의 `blocked_reason`·`hidden_count`를 보존하여 접근 불가를 0건으로 표시하지 않는다. 복합 속성은 `[object Object]`가 아니라 JSON 블록으로 표시한다.
+  3. `closedLoopFetch`에 봉투 보존형 호출을 추가하고 지식 허브 목록에 연결했다. 익명 상태에서 `data=[] + blocked_reason`이 오던 것을 정상 빈 목록으로 오인하던 결함을 수정했고, 접근 불가 시 «새 지식팩» 입력도 표시하지 않는다.
+  4. `api/routes/master_control.py`의 목록·상세·쓰기 권한을 보완했다. 목록은 `visibility_block_reason`과 ECM 가시 범위→`master_scope_bindings`를 함께 해석하고, 타 조직 상세는 404로 은폐하면서 `ACCESS_DENIED_SCOPE_MISMATCH` 감사 기록을 남긴다. 유형/레코드 생성·개정·폐기·별칭·CSV·범위 관리·품질 점검은 데이터 표준 관리자 전용이다. 주입 미리보기와 범위별 허용 코드 조회는 클라이언트가 보낸 범위를 그대로 신뢰하지 않고 서버 계산 범위와 교차 검증한다.
+  5. `tests/test_listing_visibility_gate.py`에 익명 기준정보 목록 비노출, 바인딩별 목록 필터, 타 조직 상세 404+감사, 비관리자 쓰기 차단 회귀를 추가했다.
+- 검증: `npm run build` 통과(타입 검사+Vite) · LibreOffice Python 3.12 `py_compile`로 변경 Python 2파일 구문 통과 · 대상 파일 `git diff --check` 통과. 1280 화면에서 MDM 실데이터 21개 유형·BOM 2건, 긴 유형 목록 셀렉터화, 가로 오버플로 0, 12px 미만 가시 글자 0을 확인했다. 전체 pytest는 기존 `venv`가 삭제된 Python 3.14 실행파일을 참조해 실행하지 못했다.
+- 영향·주의사항: DB 스키마와 실제 데이터는 변경하지 않았다. 조직 권한 강제 시 일반 사용자의 MDM 목록은 명시적 범위 바인딩이 있는 코드만 보인다. 새 레코드는 등록 직후 미바인딩이므로 일반 사용자에게 노출되지 않으며, 관리자가 범위를 바인딩해야 한다. `scope-bindings/allowed`도 요청 범위를 서버 권한과 교차 검증하므로 종전의 임의 조직 조회는 404가 된다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code 또는 정상 Python 환경을 가진 다음 세션**은 `pytest tests/test_listing_visibility_gate.py tests/test_master_api_routes.py tests/test_master_scope_binding.py tests/test_m2_entry_gates.py -q`를 우선 실행하고, 8081 실서버에서 관리자/일반 사용자/익명 3종 GET을 확인한다. **Codex**는 정상 서버가 올라오면 1440×900과 권한 상태 래스터를 재감사한 뒤 이관 3/10 업무표준 착수 여부를 판정한다.
+- 교대 체크포인트: 변경 = MDM 프론트/API 클라이언트·지식 목록 봉투·기준정보 권한 라우트·권한 회귀 테스트·상단 내비 압축. 미변경 = DB 스키마·기준정보 본문·업무표준 이후 화면. 검증 증거 = frontend build exit 0 · Python 구문 exit 0 · 대상 diff-check exit 0. 커밋/푸시 = 미수행(공유 작업트리에 타 세션 변경 다수 존재). 재개 첫 행동 = 정상 Python으로 위 4개 테스트 파일 실행. 금지 범위 = UI만 숨겨 권한 완료로 선언, 미바인딩을 전사 공용으로 재해석, 타 조직 상세를 403/409로 바꿔 존재를 노출, 사용자 승인 없이 DB 데이터를 정리.
+
 ### [CL-HANDOFF-34] 세션 종료 인계 — 공통 셸 4건 수정 + 지식 허브 1차 이관 (감사 제출)
 - 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
 - 왜 지금 기록하는가: Supervisor 가 «하던 작업만 마무리하고 인계» 를 지시했다. `[UIUX-AUDIT-33]` 이 요구한 **선행 4건 + 지식 허브 1차 이관** 까지가 이번 제출 범위이며, 감사가 정한 대로 여기서 멈춘다.

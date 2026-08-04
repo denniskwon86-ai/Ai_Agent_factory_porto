@@ -12,9 +12,18 @@ import { API_BASE_URL } from './api';
 
 export type ApiError = Error & { status?: number };
 
-export async function closedLoopFetch<T>(
+export type ApiEnvelope<T> = {
+  status?: string;
+  data: T;
+  blocked_reason?: string;
+  hidden_count?: number;
+  [key: string]: unknown;
+};
+
+/** `blocked_reason`처럼 data 밖의 통제 메타데이터까지 보존해야 하는 요청에 쓴다. */
+export async function closedLoopEnvelopeFetch<T>(
   method: string, path: string, body?: unknown,
-): Promise<T> {
+): Promise<ApiEnvelope<T>> {
   const r = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -31,14 +40,22 @@ export async function closedLoopFetch<T>(
     err.status = r.status;
     throw err;
   }
-  return (j as any).data as T;
+  return j as ApiEnvelope<T>;
+}
+
+export async function closedLoopFetch<T>(
+  method: string, path: string, body?: unknown,
+): Promise<T> {
+  return (await closedLoopEnvelopeFetch<T>(method, path, body)).data;
 }
 
 /** 상태 코드별 제목. **401 과 404 를 같은 문구로 뭉개지 않는다** — 사용자가 해야 할 일이 다르다. */
 export function errorTitle(status?: number): string {
   if (status === 401) return '사용자 지정이 필요합니다';
+  if (status === 403) return '접근 권한이 없습니다';
   if (status === 404) return '찾을 수 없습니다';
   if (status === 422) return '입력 형식이 올바르지 않습니다';
+  if (status === 409) return '이미 존재하거나 충돌하는 요청입니다';
   if (status === 400) return '진행할 수 없는 요청입니다';
   return '오류';
 }

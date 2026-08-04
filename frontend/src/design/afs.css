@@ -289,7 +289,7 @@
 .afs-scope .release-facts small { color: var(--surface-text-faint); font-size: 12px; }
 
 .afs-scope .search-field {
-  display: grid; grid-template-columns: 24px 1fr; align-items: center;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center;
   margin: 0 0 10px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #fafbfc;
 }
 .afs-scope .search-field span { color: #8490a0; }
@@ -306,14 +306,14 @@
   color: #fff; background: var(--navy); font-size: 12px; font-style: normal; font-weight: 900;
 }
 .afs-scope .person b, .afs-scope .person small { display: block; }
-.afs-scope .person b { font-size: 12px; }
+.afs-scope .person b { font-size: 13px; }
 .afs-scope .person small { margin-top: 3px; color: var(--muted); font-size: 12px; }
 .afs-scope .person em { color: #08786f; font-size: 12px; font-style: normal; font-weight: 900; }
 
-.afs-scope .field-label { display: block; margin-bottom: 6px; color: #536075; font-size: 12px; font-weight: 900; }
+.afs-scope .field-label { display: block; margin-bottom: 6px; color: #536075; font-size: 13px; font-weight: 900; }
 .afs-scope .afs-input, .afs-scope .afs-textarea, .afs-scope .afs-select {
   width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 6px;
-  color: var(--action-secondary-fg); background: #fbfcfd; font-size: 12px; line-height: 1.5;
+  color: var(--action-secondary-fg); background: #fbfcfd; font-size: 13px; line-height: 1.5;
 }
 .afs-scope .afs-textarea { min-height: 62px; resize: vertical; }
 
@@ -383,7 +383,7 @@
 .afs-scope .request-alert.warn i { background: var(--orange); }
 .afs-scope .request-alert.danger i { background: var(--red); }
 .afs-scope .request-alert b, .afs-scope .request-alert small { display: block; }
-.afs-scope .request-alert b { font-size: 12px; }
+.afs-scope .request-alert b { font-size: 13px; }
 .afs-scope .request-alert small { margin-top: 3px; color: #5e7078; font-size: 12px; line-height: 1.45; }
 .afs-scope .request-card footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; padding: 12px 15px; }
 
@@ -598,6 +598,21 @@
 .afs-scope .foundation-actions { display: flex; gap: 7px; margin-left: auto; }
 /* 선택된 목록 항목 — 승인 시안의 `.person.selected` 와 같은 표현을 쓴다. */
 .afs-scope .person.selected { border-color: #77bbc5; background: #f0fafb; }
+
+/* 기준정보 주입 블록은 긴 코드·값을 포함한다. 가로로 화면을 밀지 않고 블록 안에서 줄바꿈한다. */
+.afs-scope .mdm-preview-block {
+  max-width: 100%; margin: 0; padding: 13px; overflow: auto;
+  border: 1px solid var(--surface-border); border-radius: 7px;
+  color: var(--surface-text); background: var(--surface-sunken);
+  font: 12px/1.6 Consolas, "Noto Sans Mono CJK KR", monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.afs-scope .mdm-attribute-json {
+  max-width: 100%; margin: 0; padding: 7px; overflow: auto;
+  border-radius: 5px; color: var(--surface-text); background: var(--surface-sunken);
+  font: 12px/1.55 Consolas, "Noto Sans Mono CJK KR", monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
 
 /* ── 반응형(승인 시안 그대로) ──────────────────────────────────────────────── */
 @media (max-width: 1450px) {

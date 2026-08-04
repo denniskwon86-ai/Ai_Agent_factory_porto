@@ -18,6 +18,8 @@ export type RailItem = {
   mark?: string;
   /** 대기 건수 등. 0이면 표시하지 않는다 — 항상 뜨는 배지는 읽히지 않는다. */
   count?: number;
+  /** 배지가 뜻하는 것. 지정하지 않으면 중립적인 «N건»으로 읽는다. */
+  countLabel?: string;
 };
 
 export function HubShell({
@@ -61,7 +63,7 @@ export function HubShell({
                 {it.hint && <small>{it.hint}</small>}
               </span>
               {/* 0 은 표시하지 않는다 — 항상 뜨는 숫자는 아무도 읽지 않는다. */}
-              {!!it.count && <span className="count" aria-label={`${it.count}건 대기`}>{it.count}</span>}
+              {!!it.count && <span className="count" aria-label={it.countLabel || `${it.count}건`}>{it.count}</span>}
             </button>
           ))}
         </div>

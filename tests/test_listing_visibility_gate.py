@@ -42,6 +42,9 @@ def _app(monkeypatch, *, enforced=True, user_id="", user=None, scope_kw=None,
     if "reference" in routers:
         import api.routes.reference_control as rc
         app.include_router(rc.router)
+    if "master" in routers:
+        import api.routes.master_control as mc
+        app.include_router(mc.router)
     app.dependency_overrides[current_principal] = lambda: Principal(
         user_id=user_id,
         scope=AccessScope(user_id=user_id, **(scope_kw or {"unrestricted": False})))
@@ -131,3 +134,77 @@ def test_admin_can_still_write(monkeypatch):
                         user={"user_id": "hikwon@ls", "status": "active"},
                         scope_kw={"unrestricted": True}))
     assert c.delete("/api/v1/knowledge/packs/p0/documents/x.pdf").status_code == 200
+
+
+# ── 기준정보: 주입 경로뿐 아니라 목록·상세·쓰기 경로도 같은 범위를 지킨다 ─────────
+def _master_rows(monkeypatch):
+    import api.routes.master_control as mc
+    monkeypatch.setattr(mc, "viewer_visible_scopes",
+                        lambda p: None if p.scope.unrestricted else frozenset({"ORG-A"}))
+    monkeypatch.setattr(mc.master_data, "list_types", lambda: [
+        {"type_id": "material", "name_ko": "자재"},
+        {"type_id": "equipment", "name_ko": "설비"},
+    ])
+    monkeypatch.setattr(mc.master_data, "list_records", lambda *a, **k: [
+        {"master_code": "MAT-A", "type_id": "material", "name": "A 자재"},
+        {"master_code": "EQ-B", "type_id": "equipment", "name": "B 설비"},
+    ])
+    monkeypatch.setattr(mc.master_data, "get_record", lambda code: {
+        "master_code": code, "type_id": "material", "name": code,
+    })
+    monkeypatch.setattr(mc.master_data, "bindings_for_scope",
+                        lambda tenant, scope, mode, as_of: {"MAT-A": None}
+                        if scope == "ORG-A" else {})
+
+
+def test_master_lists_are_hidden_from_unentitled_callers(monkeypatch):
+    """익명 요청이 200/0건이어도 **비어 있음**으로 오인하지 않게 차단 사유를 준다."""
+    _master_rows(monkeypatch)
+    c = TestClient(_app(monkeypatch, user_id="", user=None, routers=("master",)))
+    for path in ("/api/v1/master/types", "/api/v1/master/records"):
+        body = c.get(path).json()
+        assert body["data"] == []
+        assert body.get("blocked_reason")
+
+
+def test_master_lists_follow_scope_bindings(monkeypatch):
+    """A 조직 사용자는 A에 바인딩된 기준정보와 그 유형만 본다."""
+    _master_rows(monkeypatch)
+    c = TestClient(_app(
+        monkeypatch, user_id="staff@ls", user={"user_id": "staff@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"}),
+                  "readable_scope_nodes": frozenset({"ORG-A"})}, routers=("master",)))
+    records = c.get("/api/v1/master/records").json()
+    types = c.get("/api/v1/master/types").json()
+    assert [r["master_code"] for r in records["data"]] == ["MAT-A"]
+    assert [t["type_id"] for t in types["data"]] == ["material"]
+    assert records["hidden_count"] == 1 and types["hidden_count"] == 1
+
+
+def test_master_other_scope_detail_is_404_and_audited(monkeypatch):
+    """타 조직 상세는 존재를 숨기되 감사로그에는 실제 코드를 남긴다."""
+    _master_rows(monkeypatch)
+    from core.enterprise_context import audit
+    seen = []
+    monkeypatch.setattr(audit, "denied_scope", lambda *a, **k: seen.append((a, k)) or True)
+    c = TestClient(_app(
+        monkeypatch, user_id="staff@ls", user={"user_id": "staff@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"}),
+                  "readable_scope_nodes": frozenset({"ORG-A"})}, routers=("master",)))
+    assert c.get("/api/v1/master/records/EQ-B").status_code == 404
+    assert seen and seen[0][0][1] == "EQ-B"
+
+
+def test_master_write_paths_require_data_admin(monkeypatch):
+    """익명·일반 사용자는 기준정보 생성·개정·폐기·별칭 변경을 할 수 없다."""
+    _master_rows(monkeypatch)
+    c = TestClient(_app(monkeypatch, user_id="ghost@ls", user=None, routers=("master",)))
+    assert c.post("/api/v1/master/types", json={"type_id": "x1", "name_ko": "X"}).status_code == 403
+    assert c.post("/api/v1/master/records", json={
+        "master_code": "MAT-X", "type_id": "material", "name": "X",
+    }).status_code == 403
+    assert c.delete("/api/v1/master/records/MAT-A").status_code == 403
+    assert c.post("/api/v1/master/records/MAT-A/aliases", json={"aliases": ["가"]}).status_code == 403
+    assert c.get("/api/v1/master/scope-bindings/coverage").status_code == 403
+    assert c.get("/api/v1/master/scope-bindings").status_code == 403
+    assert c.get("/api/v1/master/documents/quality").status_code == 403

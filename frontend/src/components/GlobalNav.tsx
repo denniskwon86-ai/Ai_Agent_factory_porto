@@ -94,7 +94,7 @@ export function GlobalNav({ primary, groups, right }: {
   const total = groups.reduce((n, g) => n + g.items.length, 0);
 
   return (
-    <div className="flex items-center gap-3 min-w-0">
+    <div className="flex items-center gap-2 min-w-0">
       {/* ── 1차 영역 ────────────────────────────────────────────────────── */}
       {primary.map((it, i) => (
         <button
@@ -102,8 +102,8 @@ export function GlobalNav({ primary, groups, right }: {
           onClick={it.onSelect}
           title={it.desc}
           className={i === 0
-            ? 'shrink-0 text-[13px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 px-4 py-2 rounded-lg transition-all'
-            : 'shrink-0 text-[13px] font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all'}
+            ? 'shrink-0 text-[13px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 px-2 py-2 rounded-lg transition-all'
+            : 'shrink-0 text-[13px] font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-2 rounded-lg transition-all'}
         >
           {it.icon} {it.label}
         </button>
@@ -117,7 +117,7 @@ export function GlobalNav({ primary, groups, right }: {
         aria-controls="global-nav-panel"
         aria-haspopup="true"
         title="나머지 기능을 업무 영역별로 모아 봅니다"
-        className="shrink-0 text-[13px] font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all flex items-center gap-2"
+        className="shrink-0 text-[13px] font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-2 rounded-lg transition-all flex items-center gap-2"
       >
         ☰ 전체 메뉴
         <span className="text-xs font-semibold text-gray-400">{total}</span>
