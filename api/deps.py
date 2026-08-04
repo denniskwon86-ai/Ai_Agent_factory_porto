@@ -208,6 +208,46 @@ def viewer_may_drill_down(p: Principal) -> bool:
                 or getattr(p.scope, "is_executive", False))
 
 
+#: 자료 종류별로 **정확한 숨김 건수**를 볼 자격. 종류마다 «관리할 사람» 이 다르다.
+#  ⚠️ 여기 없는 종류를 넘기면 `hidden_envelope` 가 예외를 던진다 — 오타를 조용히
+#    «건수 안 줌» 으로 처리하면 관리자가 못 보는 이유를 아무도 찾지 못한다.
+_EXACT_COUNT_RULES = {
+    "standard": lambda s: bool(s.unrestricted or s.can_manage_standard),
+    "org": lambda s: bool(s.unrestricted or getattr(s, "can_edit_org", False)),
+    # 경영계획은 재무 정보다 — «전사에 계획이 몇 건 있는가» 자체가 정보이므로 경영진과
+    # 데이터 관리자에게만 정확한 수를 준다(2026-08-05 Planning 통제).
+    "plan": lambda s: bool(s.unrestricted or getattr(s, "can_run_enterprise", False)
+                           or s.can_manage_standard),
+}
+
+
+def hidden_envelope(p: Principal, total: int, shown: int,
+                    exact_for: str = "standard") -> dict:
+    """★★ 목록이 무언가를 **가렸다**는 사실을 응답에 담는다. 건수를 줄지는 여기서만 정한다.
+
+    두 가지를 동시에 만족해야 한다.
+      ① 사용자는 "이게 전부가 아니다"를 반드시 알아야 한다. 모르면 자기가 본 목록을 전량으로
+         믿고 결정한다 — 그래서 `hidden_present` 는 **누구에게나** 준다.
+      ② 그러나 **정확한 건수는 남의 조직 자료 규모를 알려준다.** 404 Data Stealth 로 존재를
+         숨기면서 "옆 조직에 47건 있다"를 말하면 통제가 앞뒤로 어긋난다. 건수를 세어 보면
+         조직 규모·프로젝트 수를 추정할 수 있고, 그건 목록을 여는 것과 크게 다르지 않다.
+         → 정확한 건수는 **자료를 관리할 사람(DA·관리자)** 에게만 준다.
+
+    ⚠️ 이 판정을 라우트에 흩어 두지 않는다. 프론트에서 가리는 것도 답이 아니다 —
+      응답에 숫자가 들어 있으면 다른 클라이언트·스크립트에는 그대로 새어 나간다.
+      숨김은 **보내지 않는 것**이지 보여주지 않는 것이 아니다.
+    """
+    hidden = max(0, int(total) - int(shown))
+    out: dict = {"hidden_present": hidden > 0}
+    rule = _EXACT_COUNT_RULES.get(exact_for)
+    if rule is None:
+        raise ValueError(f"hidden_envelope: 모르는 자료 종류 '{exact_for}' "
+                         f"— {sorted(_EXACT_COUNT_RULES)} 중 하나여야 한다")
+    if hidden and rule(p.scope):
+        out["hidden_count"] = hidden
+    return out
+
+
 def viewer_scope_nodes(p: Principal) -> Optional[frozenset]:
     """요청자의 **소속 조직 노드**(상속을 펼치지 않은 원본). `None` 은 "필터하지 않는다".
 

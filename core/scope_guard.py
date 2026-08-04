@@ -49,23 +49,53 @@ class EffectiveScope:
 
 
 def _actor_scopes(p: Any) -> List[str]:
-    """주체의 조직 범위(ECM node) 집합. 부서 권한을 노드로 승격해 재사용한다(D-004·D-005)."""
+    """주체의 조직 범위(ECM node) 집합. 부서 권한을 노드로 승격해 재사용한다(D-004·D-005).
+
+    ★★★ [2026-08-05 실측 결함] **이 함수가 모든 사용자에게 빈 집합을 돌려주고 있었다.**
+
+    원인: 부서 id 를 `resolve_scope_ref()` 로 노드로 바꾸는 경로만 있었는데, 실측하니 그
+    리솔버가 `LS_MNM` · `MNM_BATTERY` · `production` 등 **모든 참조에 빈 문자열**을 돌려준다.
+    그래서 `for` 루프가 전부 `continue` 되고 결과가 항상 `[]` 였다.
+
+    그 결과 `resolve_effective_scope` 는 **범위를 명시하면 누구든 거부**했다(빈 집합에 속할 수
+    없으므로). 실측한 영향:
+      · `POST /planning/facts` · `/scenarios` · `/submissions` → `unrestricted` 가 아닌 **모든
+        사용자에게 404**. 즉 경영계획을 현업 담당자가 쓸 수 없고 플랫폼 관리자만 쓸 수 있었다.
+      · `GET /planning/cash-flow` · `/variance` → 같은 이유로 404.
+    ⚠️ 반대로 범위를 **명시하지 않으면** 필터 없이 통과한다(`no_scope_requested`). 즉 통제가
+      «전부 막힘 아니면 전부 열림» 으로 갈라져 있었고, 어느 쪽도 의도가 아니다.
+
+    수정: **이미 확정된 노드 집합(`AccessScope.readable_scope_nodes`)을 먼저 쓴다.** 조직
+    디렉터리가 스코프를 해석할 때 이미 계산해 들고 있는 값이고, `api.deps.viewer_visible_scopes`
+    도 같은 원천을 본다 — 그래서 두 판정이 **한 원천으로 수렴**한다. 부서 id 해석은 그 값이
+    없을 때의 폴백으로 남긴다(종전 동작 보존).
+
+    ⚠️ `visible_scopes(n)` 은 기본값이 `include_descendants=False` 다 — 자기 + 조상만 펼치고
+      **하위는 넣지 않는다.** 하향 열람은 경영진에게만 주는 규칙(사용자 결정 2026-07-30 ③)을
+      이 함수가 우회하지 않게 하려면 이 기본값을 바꾸지 말 것.
+    """
     if p is None:
         return []
     scope = getattr(p, "scope", None)
-    dept_ids = sorted(getattr(scope, "readable_dept_ids", None) or ())
-    if not dept_ids:
-        primary = getattr(scope, "primary_dept_id", "") or ""
-        dept_ids = [primary] if primary else []
     out: List[str] = []
     try:
         from core.enterprise_context.scoping import resolve_scope_ref, visible_scopes
-        for d in dept_ids:
-            node = resolve_scope_ref(d)
-            if not node:
-                continue
-            out.append(node)
-            out.extend(visible_scopes(node))
+        # ① 확정된 노드 집합(정본). 여기 값이 있으면 부서 해석을 시도하지 않는다.
+        for n in sorted(getattr(scope, "readable_scope_nodes", None) or ()):
+            out.append(n)
+            out.extend(visible_scopes(n))
+        # ② 폴백 — 노드가 비어 있을 때만 부서 id 를 노드로 승격한다(종전 경로).
+        if not out:
+            dept_ids = sorted(getattr(scope, "readable_dept_ids", None) or ())
+            if not dept_ids:
+                primary = getattr(scope, "primary_dept_id", "") or ""
+                dept_ids = [primary] if primary else []
+            for d in dept_ids:
+                node = resolve_scope_ref(d)
+                if not node:
+                    continue
+                out.append(node)
+                out.extend(visible_scopes(node))
     except Exception as e:
         # 해석 실패를 '전부 허용'으로 처리하면 리솔버 장애가 곧 전사 유출이 된다.
         print(f"⚠️ [scope_guard] 주체 범위 해석 실패 — 빈 집합으로 처리(fail-closed): {e}")

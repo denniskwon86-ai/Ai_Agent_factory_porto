@@ -46,6 +46,31 @@
 - 다음 행동 / 담당 / 착수 조건: **Supervisor + Codex**가 D1 Outcome Charter, D2 Stakeholder Map, D3 Provenance Ledger를 실제 내용으로 작성한다. **Codex**는 D4~D8 경영진 제안·반대논리·외부 안전 포트폴리오를 만든다. **Antigravity**는 목표회사·잠재고객·지원제도 조사를 보조하고, **Claude Code**는 요청 시 비기밀 제품 증거만 제공한다.
 - 교대 체크포인트: 기존 36개월/12개월 계획을 폐기하고 동일 HTML을 100일 사업 실행계획으로 전면 재작성 · `docs/business-model/index.html` 링크 유지 · 커밋/푸시 미수행 · 재개 시 HTML 가독성 검증 후 D1~D3 실전 템플릿 작성 · 금지 범위는 제품 코드 동시 수정, origin 변경, 회사 자산 귀속의 임의 확정.
 
+### [SEC-PLAN-50] 경영계획 API 통제 — 통제가 「전부 막힘 아니면 전부 열림」으로 갈라져 있었다
+- 작성자 / 기록 시각: Claude Code / 2026-08-05 KST
+- 왜 지금 기록하는가: 인수인계 `handoff_2026-08-04_uiux_migration_3to9.md` §4.1 이 지목한 «먼저 막을 것» 을 실행했다. **실측 결과가 그 기록보다 나빴고, 예상하지 못한 더 큰 결함을 하나 찾았다.** 그리고 **내가 탐침으로 데이터를 만든 사고가 두 번 있었다** — 방법 자체를 바꿔야 한다.
+- 상태: **완료(무방비 라우트 14개 봉합 + 범위 판정 고장 수정)**
+- ★★★ **① 인수인계 기록이 낡아 있었다.** 그 문서는 «지금은 0건이라 실제 유출이 없지만 통제가 없다는 사실은 그대로다» 라고 적었는데, 실측하니 **그 사이 데이터가 들어와 있었다**:
+  · 익명 `GET /accounts` → 200, **계정과목 10건** · `GET /scenarios` → 200, **시나리오 4건**
+  · 익명 `GET /submissions` → 200, **경영계획 제출물 1건**
+  · 익명 `POST /accounts` · `POST /drivers` → 200, **기준정보가 실제로 등록됐다**
+  ⚠️ 교훈: **«비어 있으니 나중에» 로 미룬 통제는 데이터가 들어오는 순간 유출이 된다.** 그 «나중» 이 언제인지 아무도 관측하지 않기 때문이다. 이번엔 하루 만에 일어났다.
+- ★★★ **② 예상 못한 더 큰 결함 — 범위 판정이 고장나 있었다.** `core/scope_guard._actor_scopes()` 가 **모든 사용자에게 빈 집합**을 돌려주고 있었다. 원인은 부서 id 를 노드로 바꾸는 `resolve_scope_ref()` 가 `LS_MNM`·`MNM_BATTERY`·`production` 등 **모든 참조에 빈 문자열**을 반환하는 것이었다(루프가 전부 `continue`). 실측한 영향:
+  · `POST /planning/facts`·`/scenarios`·`/submissions` → `unrestricted` 아닌 **모든 사용자에게 404.** 즉 **경영계획을 현업 담당자가 쓸 수 없고 플랫폼 관리자만 쓸 수 있었다.**
+  · `GET /cash-flow`·`/variance` → 같은 이유로 404. 반면 범위를 **명시하지 않으면** 필터 없이 전량 통과(`/facts` 전체 21건).
+  → 통제가 «범위를 말하면 전부 막힘, 말하지 않으면 전부 열림» 으로 갈라져 있었다. **어느 쪽도 의도가 아니다.**
+  → 수정: `_actor_scopes` 가 **이미 확정된 `AccessScope.readable_scope_nodes` 를 먼저 쓴다**(부서 id 해석은 폴백으로 남김). 이제 `scope_guard._actor_scopes` 와 `api.deps.viewer_visible_scopes` 가 **같은 원천으로 수렴**한다 — `test_scope_sources_agree` 로 잠갔다. ⚠️ `visible_scopes(n)` 의 기본값(`include_descendants=False`)을 바꾸지 말 것: 바꾸면 «하향 열람은 경영진에게만» 규칙을 이 함수가 우회한다.
+- 무엇을 봉합했는가(14개): 읽기 10개(`/accounts`·`/scenarios`·`/submissions`·`/submissions/current`·`/submissions/{id}/integrity`·`/drivers`·`/drivers/{}/impacts`·`/drivers/{}/preview`·`/drivers/{}/external`·`/import/template`) + 쓰기 4개(`POST /accounts`·`POST /drivers`·`POST /scenarios/{}/assumptions`·`POST /drivers/{}/impacts`). **인수인계 기록에 없던 것 2건도 함께**: `POST /drivers/{}/impacts` 는 `Principal` 은 있었지만 권한 검사가 없어 아무나 행을 만들 수 있었고, `POST /import/rows`·`/import/csv` 는 **행의 `org_id` 를 검증 없이 저장**해 식별된 사용자면 누구나 **남의 조직 실적을 등록**할 수 있었다(가장 큰 쓰기 구멍 — 읽기를 막아도 이 경로로 들어온 값이 그 조직의 실적이 된다).
+- 판정 방식: 판정을 라우트에 흩지 않고 헬퍼 4개(`_assert_identified`·`_only_visible_orgs`·`_hidden`·`_assert_rows_in_scope`)에만 뒀다. 자격은 자료 성격으로 갈랐다 — 전사 기준정보(계정과목·동인) 쓰기는 `assert_can_manage_standard`, 계획 본문·시나리오는 **조직 범위**(`_scope`), 가정·무결성은 **대상의 소유 조직**으로 판정한다(요청자가 보낸 값이 아니다 — 그러면 «내 조직» 이라고 주장하며 남의 것을 고칠 수 있다). 파일 등록은 **한 행이라도 범위 밖이면 전부 거부**(importer 의 «부분 저장 없음» 과 같은 규칙).
+- `api/deps.py` 에 `hidden_envelope` 도입(내 worktree 브랜치와 **동일한 형태** — 병합 시 충돌이 아니라 같은 내용이 된다). `_EXACT_COUNT_RULES` 에 `plan` 규칙 추가: 경영계획은 재무 정보이므로 **정확한 숨김 건수는 경영진·데이터 관리자에게만**(사용자 결정 2026-08-04 Data Stealth). ⚠️ dev 의 다른 라우트(`knowledge_control`·`master_control`)는 아직 `hidden_count` 를 모두에게 준다 — 그 정리는 별개 작업이다.
+- ⚠️⚠️ **내 사고 2건(보고 대상).** 통제 확인 목적으로 쓰기 엔드포인트를 불러 **실제 데이터를 만들었다**: ① `POST /accounts`·`POST /drivers` 익명 호출로 `PROBE_X` 계정과목·`PROBE_D` 동인 생성 ② 그 뒤 `unrestricted` 계정으로 `POST /facts`·`/scenarios`·`/submissions` 를 불러 fact·시나리오·제출물 각 1건 생성. **두 번 모두 «무효 payload 를 보낸다» 고 의도했으나 값이 유효했다.** 백업 후 정확히 그 행들만 삭제해 원상복구했고(첫 실측값과 일치: accounts 10 · facts 20 · scenarios 4 · submissions 1 · drivers 0), 백업은 `data/planning.db.bak_before_probe_cleanup` 에 남겨 뒀다(검증용 — 확인 후 삭제).
+  → **규칙 갱신**: 종전 규칙(«파괴적 엔드포인트는 익명으로 존재하지 않는 id / 무효 payload 로만»)은 **불충분했다.** 앞으로 쓰기 엔드포인트의 통제 확인은 **격리 DB(tmp) 또는 정식 테스트로만** 한다. 실서버 DB 를 향한 쓰기 호출은 payload 가 무효할 «예정» 이어도 하지 않는다 — 그 판단이 두 번 틀렸다. 이번 테스트 파일은 그래서 존재하지 않는 id·빈 payload 만 쓰고, 그 이유를 주석에 남겼다.
+- 검증: 신규 `tests/test_planning_control_gate.py` **33건**. `pytest tests/` **1,970 passed · 1 skipped · 실패 0 · exit 0**(기준선 1,937). ★ `scope_guard` 는 5개 라우트 파일(`briefing`·`connector`·`master`·`mcp`·`planning`)이 공유하므로 수정 후 전체 회귀를 돌려 확인했다 — 회귀 없음.
+- ★ **가장 중요한 테스트는 `test_own_scope_still_works`** 다. 통제를 조이다가 «자기 조직도 404» 가 된 상태를 «막혔으니 안전» 으로 읽으면 아무도 못 쓰는 제품이 된다. 이 파일은 막는 것과 **막지 않는 것**을 함께 잠근다.
+- 영향·주의사항: 화면 미변경. ⚠️ **통제가 넓어진 방향의 변경이 하나 있다** — `_actor_scopes` 수정으로 종전에 404 였던 «자기 범위 요청» 이 이제 통과한다. 그것이 의도된 동작이고 종전은 기능 고장이었다. ⚠️ 인수인계 미결 1번(**조직 범위 정본** — 부서는 `LS_MNM` 계열 코드, ECM 트리는 `node_*` 해시)이 이 고장의 뿌리다. 지금은 «확정된 노드 집합을 먼저 쓴다» 로 우회했지만 `resolve_scope_ref` 가 왜 아무것도 해석하지 못하는지는 **그대로 남아 있다** — 정본이 정해지지 않아 두 체계가 서로를 못 찾는 상태다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — 인수인계 §4.2 화면 이관 순서(`Telemetry(227) → ProgramAdmin(239) → Shadow(305) → …`) 또는 D-017 P3-1. **Supervisor** — 결정 3건: ① **조직 범위 정본**(위 뿌리 원인) ② 경영계획 **수립 권한**을 별도로 둘지(지금은 «시나리오를 만들 수 있는 사람이 가정도 넣는다» 로 통일) ③ `resolve_scope_ref` 가 해석하지 못하는 것이 데이터 미비인지 코드 결함인지 — 확인 후 별개 작업 필요.
+- 교대 체크포인트: 변경 = `api/routes/planning_control.py`(라우트 14개 + 헬퍼 4개) · `core/scope_guard.py`(`_actor_scopes` 원천 수정) · `api/deps.py`(`hidden_envelope`·`_EXACT_COUNT_RULES`) · `tests/test_planning_control_gate.py`(신규 33건). 미변경 = 화면, `planning_engine`·`planning_import` 내부, DB 스키마. 검증 = 1,970 passed. 재개 지점 = 화면 이관 또는 P3-1. 금지 범위 = `visible_scopes` 의 `include_descendants` 기본값을 켜는 것, `_actor_scopes` 를 부서 해석 전용으로 되돌리는 것, 범위 밖 요청에 403 을 주는 것(존재를 알린다), 자기 조직 요청이 404 가 되는 상태를 «안전» 으로 읽는 것, 실서버 DB 를 향해 쓰기 엔드포인트를 탐침하는 것.
+
 ### [SEC-P1-48] P1-5 기존 API 어댑터 전환 — 조직 워크플로우가 목록에서 통째로 사라져 있었다
 - 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
 - 왜 지금 기록하는가: **D-017 §9 P1 이 5/5 로 끝났다.** 그리고 전환 과정에서 `agent_assets.list_assets` 의 반환 모양 때문에 **P1-4 와 P1-5 양쪽에 같은 결함**이 있었다 — 그 원인을 남겨야 다음 사람이 세 번째로 밟지 않는다.

@@ -44,6 +44,72 @@ async def _scope(p: Principal, requested: str, resource_id: str = "") -> str:
     return eff.scope_node_id
 
 
+# ── [2026-08-05] 무방비 라우트 봉합 ────────────────────────────────────
+# 실측: 익명이 `GET /accounts`(계정과목 10건) · `GET /scenarios`(시나리오 4건) ·
+#   `GET /submissions`(**경영계획 제출물**)을 그대로 읽고, `POST /accounts` · `POST /drivers`
+#   로 기준정보를 **실제로 등록**할 수 있었다. 라우트에 `Principal` 의존성이 없었기 때문이다.
+# ⚠️ 인수인계 기록은 «지금은 0건이라 실제 유출이 없다» 고 적었지만 **그 사이 데이터가 들어왔다.**
+#   «비어 있으니 나중에» 로 미룬 통제는 데이터가 들어오는 순간 유출이 된다.
+
+def _assert_identified(p: Principal, what: str) -> None:
+    """익명·미등록·폐지 사용자 차단. **경영계획을 열어도 되는 주체인가**만 본다.
+
+    ★ 행 단위 필터(`_only_visible_orgs`)와 나눈 이유는 `deps.visibility_block_reason` 주석과
+      같다 — «열어도 되는가» 와 «무엇까지 보이는가» 는 다른 질문이고, 후자는 조직도를 봐야 한다.
+    ⚠️ 401 과 403 을 구분한다: 401 = «누구인지 밝히십시오», 403 = «당신에게는 권한이 없습니다».
+      뭉개면 이미 로그인한 사용자가 계속 로그인을 시도한다."""
+    from api.deps import visibility_block_reason
+    reason = visibility_block_reason(p)
+    if not reason:
+        return
+    if not (p.user_id or "").strip():
+        raise HTTPException(status_code=401, detail=f"{what}를 보려면 사용자 식별이 필요합니다.")
+    raise HTTPException(status_code=403, detail=reason)
+
+
+def _only_visible_orgs(p: Principal, rows: list, key: str = "org_id") -> tuple:
+    """조직 범위 밖 행을 걷어낸다. **판정은 `viewer_visible_scopes` 하나를 탄다.**
+
+    ⚠️ 저장소 시그니처에 범위 인자가 없는 목록(`list_submissions`·`scenarios`)을 위한 후처리다.
+      판정 자체를 여기서 다시 쓰지 않는 것이 중요하다 — 이 파일 머리말이 경고한 그대로,
+      같은 판정을 두 번 구현하면 반드시 어긋난다.
+    ⚠️ 소유 조직이 **비어 있는 행은 보이지 않는다**(`scope_allows_owner` 의 계약). 미기재를
+      «공개» 로 읽으면 이행 기간에 전 조직 자료가 새어 나간다."""
+    from api.deps import scope_allows_owner, viewer_visible_scopes
+    scopes = viewer_visible_scopes(p)
+    if scopes is None:                       # 강제 OFF · unrestricted · DA — 의도된 전면 통과
+        return rows, 0
+    kept = [r for r in rows if scope_allows_owner(scopes, str((r or {}).get(key) or ""))]
+    return kept, len(rows) - len(kept)
+
+
+async def _assert_rows_in_scope(p: Principal, rows: list) -> None:
+    """등록 행의 **모든 조직**이 요청자 범위 안인가.
+
+    ⚠️ [2026-08-05] `planning_import.import_rows` 는 행의 `org_id` 를 **검증 없이 그대로
+      저장한다.** 즉 식별된 사용자면 누구나 **남의 조직 실적·계획을 등록**할 수 있었다 —
+      읽기를 막아도 이 경로로 들어온 값이 그 조직의 실적이 되므로 통제가 성립하지 않는다.
+    ★ 하나라도 범위 밖이면 **전부 거부**한다. importer 의 «한 행이라도 문제가 있으면 아무것도
+      저장하지 않는다» 와 같은 규칙이다 — 부분 저장은 무엇이 들어갔는지 아무도 모르게 만든다.
+    ★ `commit` 여부와 무관하게 검증한다. 검증 전용 호출도 «그 조직에 무엇이 들어갈 수 있는가»
+      를 알려 주고, 무엇보다 두 경로의 판정이 다르면 반드시 어긋난다."""
+    orgs = sorted({str((r or {}).get("org_id") or "").strip() for r in (rows or [])})
+    for org in orgs:
+        if not org:
+            # 조직 없는 행은 여기서 막지 않는다 — importer 의 필수 열 검증이 사유를 말한다.
+            continue
+        await _scope(p, org, org)
+
+
+def _hidden(p: Principal, total: int, shown: int) -> dict:
+    """숨긴 건수의 노출 정책. **사실은 모두에게, 정확한 수는 자격자에게만.**
+
+    경영계획은 재무 정보다 — «전사에 계획이 몇 건 있는가» 자체가 정보이므로 정확한 수는
+    경영진·데이터 관리자에게만 준다(Data Stealth, 사용자 결정 2026-08-04)."""
+    from api.deps import hidden_envelope
+    return hidden_envelope(p, total, shown, exact_for="plan")
+
+
 # ── 계정 ──────────────────────────────────────────────────────────────
 class AccountRequest(BaseModel):
     account_code: str
@@ -54,12 +120,23 @@ class AccountRequest(BaseModel):
 
 
 @router.get("/accounts")
-async def list_accounts():
+async def list_accounts(p: Principal = Depends(current_principal)):
+    """계정과목 체계. 조직 범위가 없는 **전사 기준정보**이므로 행 필터는 없고 식별만 요구한다.
+
+    ⚠️ 익명에게 줄 이유가 없다 — 계정 체계는 그 회사가 무엇을 어떻게 관리하는지 드러낸다."""
+    _assert_identified(p, "계정과목")
     return {"status": "success", "data": await asyncio.to_thread(planning_store.list_accounts)}
 
 
 @router.post("/accounts")
-async def upsert_account(req: AccountRequest):
+async def upsert_account(req: AccountRequest, p: Principal = Depends(current_principal)):
+    """★★★ [2026-08-05 실측 결함] 익명이 계정과목을 **실제로 등록할 수 있었다.**
+
+    계정과목은 전사 기준정보다 — 한 사람이 추가하면 전 조직의 계획·실적 집계가 바뀐다.
+    그리고 `upsert` 이므로 **기존 계정을 덮어쓸 수도** 있었다(같은 코드로 이름·부호를 바꾸면
+    과거 집계의 의미가 달라진다). 그래서 기준정보 관리 권한을 요구한다."""
+    from api.deps import assert_can_manage_standard
+    assert_can_manage_standard(p)
     try:
         data = await asyncio.to_thread(planning_store.upsert_account, req.account_code,
                                        req.name, req.category, req.sign, req.parent_code or "")
@@ -143,7 +220,15 @@ class AssumptionRequest(BaseModel):
 
 
 @router.get("/scenarios")
-async def list_scenarios(org_id: str = ""):
+async def list_scenarios(org_id: str = "", p: Principal = Depends(current_principal)):
+    """★★★ [2026-08-05 실측 결함] 익명이 시나리오 4건을 그대로 읽었다.
+
+    ⚠️ 시나리오 이름과 기준(`baseline_kind`)만으로도 그 조직이 무엇을 걱정하는지 드러난다
+      («원가 급등 시나리오» 가 있다는 사실 자체가 정보다). `org_id` 필터가 **호출자 선택**
+      이었던 것이 원인이다 — 통제를 호출자에게 맡기면 그 파라미터를 빼면 전량이 나온다."""
+    _assert_identified(p, "시나리오")
+    await _scope(p, org_id, org_id)          # 요청 범위 교차 검증(거부는 404 은폐)
+
     def _q():
         conn = planning_store._connect()
         try:
@@ -151,7 +236,9 @@ async def list_scenarios(org_id: str = ""):
             return [dict(r) for r in conn.execute(sql, (org_id,) if org_id else ())]
         finally:
             conn.close()
-    return {"status": "success", "data": await asyncio.to_thread(_q)}
+    rows = await asyncio.to_thread(_q)
+    shown, _ = _only_visible_orgs(p, rows)
+    return {"status": "success", "data": shown, **_hidden(p, len(rows), len(shown))}
 
 
 @router.post("/scenarios")
@@ -182,7 +269,31 @@ async def create_scenario(req: ScenarioRequest, p: Principal = Depends(current_p
 
 
 @router.post("/scenarios/{scenario_id}/assumptions")
-async def add_assumption(scenario_id: str, req: AssumptionRequest):
+async def add_assumption(scenario_id: str, req: AssumptionRequest,
+                         p: Principal = Depends(current_principal)):
+    """★★★ [2026-08-05 실측 결함] 익명이 **계획 가정을 바꿀 수 있었다.**
+
+    가정은 시나리오 결과를 직접 움직인다 — «환율 10% 상승» 을 누가 넣었는지 모르면 그 결과로
+    쓰인 경영 보고를 되짚을 수 없다. 자격은 `POST /scenarios`(시나리오 생성)와 **같게** 둔다:
+    시나리오를 만들 수 있는 사람이 가정도 넣는다. 별도 «계획 수립 권한» 을 새로 만들지 않은
+    이유는 그것이 제품 정책이고 사용자 결정 사항이기 때문이다(인수인계 §7-2).
+    ⚠️ 대상 시나리오의 **소유 조직**으로 범위를 검증한다 — 요청자가 보낸 값이 아니다."""
+    _assert_identified(p, "계획 가정")
+
+    def _owner():
+        conn = planning_store._connect()
+        try:
+            r = conn.execute("SELECT org_id FROM scenarios WHERE scenario_id=?",
+                             (scenario_id,)).fetchone()
+            return (dict(r).get("org_id") if r else None)
+        finally:
+            conn.close()
+    owner = await asyncio.to_thread(_owner)
+    if owner is None:
+        # 없는 시나리오는 404 — 존재 여부를 알려 주지 않는다(그러면 id 를 훑어볼 수 있다).
+        raise HTTPException(status_code=404, detail="대상을 찾을 수 없습니다.")
+    await _scope(p, owner, scenario_id)
+
     if (req.operator or "").lower() not in ("pct", "delta", "set"):
         raise HTTPException(status_code=400, detail="operator 는 pct | delta | set 이어야 합니다.")
     if not (req.rationale or "").strip():
@@ -295,14 +406,30 @@ class RejectRequest(BaseModel):
 
 
 @router.get("/submissions")
-async def list_submissions(org_id: str = "", period: str = "", status: str = ""):
-    return {"status": "success",
-            "data": await asyncio.to_thread(approval.list_submissions, org_id, period, status)}
+async def list_submissions(org_id: str = "", period: str = "", status: str = "",
+                           p: Principal = Depends(current_principal)):
+    """★★★ [2026-08-05 실측 결함] **경영계획 제출물이 익명에게 노출되고 있었다.**
+
+    인수인계 기록은 «지금은 0건이라 실제 유출이 없다» 고 적었는데 그 사이 제출물이 들어왔다.
+    ⚠️ 제출 이력은 «어느 조직이 언제 무엇을 올렸고 승인됐는가» 다 — 본문 금액이 없어도 조직의
+      계획 수립 상태가 드러난다. «비어 있으니 나중에» 로 미룬 통제는 데이터가 들어오는 순간
+      유출이 된다. 그것이 이 라우트에서 실제로 일어났다."""
+    _assert_identified(p, "경영계획 제출 이력")
+    await _scope(p, org_id, org_id)
+    rows = await asyncio.to_thread(approval.list_submissions, org_id, period, status)
+    shown, _ = _only_visible_orgs(p, rows)
+    return {"status": "success", "data": shown, **_hidden(p, len(rows), len(shown))}
 
 
 @router.get("/submissions/current")
-async def current_approved(org_id: str, period: str, value_kind: str = PLAN):
-    """현재 유효한 승인본 + **무결성 판정**. 없으면 data=null(빈 객체로 위장하지 않는다)."""
+async def current_approved(org_id: str, period: str, value_kind: str = PLAN,
+                           p: Principal = Depends(current_principal)):
+    """현재 유효한 승인본 + **무결성 판정**. 없으면 data=null(빈 객체로 위장하지 않는다).
+
+    ⚠️ 이것은 **계획 본문**이다(금액 포함). 범위 밖 요청은 `_scope` 가 404 로 은폐한다 —
+      «그 조직에 승인된 계획이 있다» 는 사실조차 알려 주지 않는다."""
+    _assert_identified(p, "승인된 경영계획")
+    await _scope(p, org_id, org_id)
     data = await asyncio.to_thread(approval.current_approved, org_id, period, value_kind)
     return {"status": "success", "data": data}
 
@@ -347,8 +474,18 @@ async def reject_plan(submission_id: str, req: RejectRequest,
 
 
 @router.get("/submissions/{submission_id}/integrity")
-async def check_integrity(submission_id: str):
-    """★ 승인 후 값이 바뀌었는지 — 상태만 보면 알 수 없다."""
+async def check_integrity(submission_id: str, p: Principal = Depends(current_principal)):
+    """★ 승인 후 값이 바뀌었는지 — 상태만 보면 알 수 없다.
+
+    ⚠️ 무결성 판정은 «그 조직의 승인본이 사후 변경됐다» 는 사실을 알려 준다. 남의 조직 것을
+      들여다볼 수 있으면 그 조직의 통제 실패를 외부에서 관찰하게 된다. 대상 제출물의 **소유
+      조직**으로 범위를 검증한다."""
+    _assert_identified(p, "제출물 무결성")
+    rows = await asyncio.to_thread(approval.list_submissions, "", "", "")
+    row = next((r for r in rows if str(r.get("submission_id")) == submission_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"존재하지 않는 제출입니다: {submission_id}")
+    await _scope(p, str(row.get("org_id") or ""), submission_id)
     try:
         return {"status": "success",
                 "data": await asyncio.to_thread(approval.verify_integrity, submission_id)}
@@ -381,12 +518,20 @@ class ImpactRequest(BaseModel):
 
 
 @router.get("/drivers")
-async def list_drivers():
+async def list_drivers(p: Principal = Depends(current_principal)):
+    """계획 동인 목록. 전사 기준정보이므로 행 필터는 없고 식별만 요구한다."""
+    _assert_identified(p, "계획 동인")
     return {"status": "success", "data": await asyncio.to_thread(drivers.list_drivers)}
 
 
 @router.post("/drivers")
-async def register_driver(req: DriverRequest):
+async def register_driver(req: DriverRequest, p: Principal = Depends(current_principal)):
+    """★★★ [2026-08-05 실측 결함] 익명이 동인을 **실제로 등록할 수 있었다.**
+
+    동인은 «무엇이 계획을 움직이는가» 의 목록이고 파급 계수의 뿌리다 — 여기 등록된 동인이
+    시나리오 가정으로 쓰인다. 계정과목과 같은 전사 기준정보이므로 같은 자격을 요구한다."""
+    from api.deps import assert_can_manage_standard
+    assert_can_manage_standard(p)
     try:
         data = await asyncio.to_thread(drivers.register_driver, req.driver_code, req.name,
                                        req.unit or "", req.category or "",
@@ -397,7 +542,8 @@ async def register_driver(req: DriverRequest):
 
 
 @router.get("/drivers/{driver_code}/impacts")
-async def list_impacts(driver_code: str):
+async def list_impacts(driver_code: str, p: Principal = Depends(current_principal)):
+    _assert_identified(p, "파급 계수")
     return {"status": "success",
             "data": await asyncio.to_thread(drivers.impacts_of, driver_code)}
 
@@ -405,7 +551,13 @@ async def list_impacts(driver_code: str):
 @router.post("/drivers/{driver_code}/impacts")
 async def add_impact(driver_code: str, req: ImpactRequest,
                      p: Principal = Depends(current_principal)):
-    """파급 계수 등록. 승인자는 인증 주체로 기록된다(익명이면 미승인 상태로 남는다)."""
+    """파급 계수 등록. 승인자는 인증 주체로 기록된다.
+
+    ⚠️ [2026-08-05] `Principal` 은 있었지만 **권한 검사가 없었다** — 익명이면 «미승인» 으로
+      기록될 뿐 행은 만들어졌다. 미승인 계수도 `preview` 의 경고에 섞여 나오고, 무엇보다
+      전사 기준정보에 아무나 행을 추가할 수 있다는 사실은 그대로다."""
+    from api.deps import assert_can_manage_standard
+    assert_can_manage_standard(p)
     try:
         data = await asyncio.to_thread(drivers.add_impact, driver_code, req.account_code,
                                        req.elasticity, req.rationale, req.source, p.user_id)
@@ -415,10 +567,13 @@ async def add_impact(driver_code: str, req: ImpactRequest,
 
 
 @router.get("/drivers/{driver_code}/preview")
-async def preview_driver(driver_code: str, pct_change: float):
+async def preview_driver(driver_code: str, pct_change: float,
+                         p: Principal = Depends(current_principal)):
     """동인 가정을 계정 단위로 **펼쳐서 미리 본다** — 시나리오에 넣기 전에 파급을 확인한다.
 
-    `warnings` 가 비어 있지 않으면 매핑이 없거나 미승인 계수가 섞여 있다는 뜻이다."""
+    `warnings` 가 비어 있지 않으면 매핑이 없거나 미승인 계수가 섞여 있다는 뜻이다.
+    ⚠️ 계정별 파급을 펼쳐 보여주므로 계정 체계와 탄성치가 함께 드러난다 — 식별을 요구한다."""
+    _assert_identified(p, "동인 파급 미리보기")
     rows, warns = await asyncio.to_thread(drivers.expand_driver_assumption,
                                           driver_code, pct_change)
     return {"status": "success", "data": {"expanded": rows, "warnings": warns}}
@@ -456,6 +611,8 @@ class ImportRowsRequest(BaseModel):
 @router.post("/import/rows")
 async def import_rows(req: ImportRowsRequest, p: Principal = Depends(current_principal)):
     """행 목록 등록. `commit=false`(기본)면 **검증만** 하고 저장하지 않는다."""
+    _assert_identified(p, "실적·계획 등록")
+    await _assert_rows_in_scope(p, req.rows)
     try:
         data = await asyncio.to_thread(importer.import_rows, req.rows, req.commit,
                                        req.source_ref or "")
@@ -473,8 +630,15 @@ async def import_csv(file: UploadFile = File(...), commit: bool = False,
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = raw.decode("cp949", errors="replace")
+    _assert_identified(p, "실적·계획 등록")
     try:
         rows = await asyncio.to_thread(importer.parse_csv, text)
+    except PlanningError as e:
+        _err(e)
+    # ⚠️ 파싱 **후** 범위를 검증한다 — 파일 안의 조직을 알아야 판정할 수 있다. 검증을 저장
+    #   뒤로 미루면 그 사이에 남의 조직 실적이 들어간다.
+    await _assert_rows_in_scope(p, rows)
+    try:
         data = await asyncio.to_thread(importer.import_rows, rows, commit, file.filename or "")
         return {"status": "success", "data": data}
     except PlanningError as e:
@@ -482,8 +646,12 @@ async def import_csv(file: UploadFile = File(...), commit: bool = False,
 
 
 @router.get("/import/template")
-async def import_template():
-    """등록 양식 안내 — 열 이름을 추측하게 두면 조용히 틀린 열을 읽는다."""
+async def import_template(p: Principal = Depends(current_principal)):
+    """등록 양식 안내 — 열 이름을 추측하게 두면 조용히 틀린 열을 읽는다.
+
+    ⚠️ 예시에 실제 조직 코드(`MNM_BATTERY`)가 들어 있다. 양식 자체는 비밀이 아니지만 조직
+      코드를 익명에게 알려 줄 이유가 없다 — 다른 라우트의 404 은폐를 우회하는 단서가 된다."""
+    _assert_identified(p, "등록 양식")
     return {"status": "success", "data": {
         "required_columns": list(importer.REQUIRED_COLUMNS),
         "optional_columns": list(importer.OPTIONAL_COLUMNS),
@@ -560,13 +728,17 @@ async def rollup_check(org_id: str, period: str, value_kind: str = PLAN,
 @router.get("/drivers/{driver_code}/external")
 async def driver_external_value(driver_code: str, purpose: str = "scenario",
                                 baseline_value: Optional[float] = None,
-                                as_of: str = "", vintage: str = ""):
+                                as_of: str = "", vintage: str = "",
+                                p: Principal = Depends(current_principal)):
     """연결된 외부 지표의 **실제 관측값**으로 동인 변화율을 산출한다(§12.7·§12.8).
 
     ⚠️ 등급 정책(§12.2)은 외부 인텔리전스가 강제한다 — 여기서 다시 판정하지 않고 **물고 온다.**
       `usable=false` 면 값을 쓸 수 없다는 뜻이고, **0% 로 대체하지 않는다**
       (0% 는 '변화 없음'이라는 주장이고 '모른다'와 다르다).
-    `vintage` 를 주면 그 시점 발표값으로 계산한다 — 과거 계획의 재현 경로다."""
+    `vintage` 를 주면 그 시점 발표값으로 계산한다 — 과거 계획의 재현 경로다.
+    ⚠️ 등급 판정은 외부 인텔리전스가 하지만 **식별은 여기서 요구한다** — 익명에게는 등급을
+      매길 주체가 없어 «누구 자격으로 물고 왔는가» 에 답할 수 없다."""
+    _assert_identified(p, "외부 지표 값")
     data = await asyncio.to_thread(drivers.resolve_external_change, driver_code,
                                    purpose, baseline_value, as_of, vintage)
     return {"status": "success", "data": data}
