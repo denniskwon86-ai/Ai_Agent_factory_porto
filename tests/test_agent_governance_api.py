@@ -142,6 +142,28 @@ def test_list_omits_body_but_keeps_version_count(client):
     assert all("version_count" in i for i in items)
 
 
+def test_list_reports_real_version_count_and_runnable(client):
+    """★★★ `list_assets` 행에는 `versions`·`runnable` 이 **없다**(그 둘은 `get()` 이 붙인다).
+
+    그 사실을 모르고 `len(row.get("versions"))` 로 세면 `version_count` 가 항상 0 이 되고
+    `runnable` 은 항상 `None` 이 된다 — 화면은 그것을 «버전 없음, 실행 불가» 로 읽는다.
+    실제로 그렇게 만들었다가 P1-5 에서 같은 원인으로 조직 워크플로우가 목록에서 통째로
+    사라진 것을 발견했다. 두 값을 여기서 잠근다."""
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    client.put(f"{B}/agents/{a['asset_id']}", json={"body": {"v": 2}}, headers=H(MGR))
+    row = next(i for i in client.get(f"{B}/agents?include_files=false",
+                                     headers=H(MGR)).json()["items"]
+               if i["asset_id"] == a["asset_id"])
+    assert row["version_count"] == 2, "개정 이력이 목록에서 0 으로 보인다"
+    assert row["runnable"] is False, "개정으로 승인이 풀렸는데 실행 가능으로 보인다"
+
+    b = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    row_b = next(i for i in client.get(f"{B}/agents?include_files=false",
+                                       headers=H(MGR)).json()["items"]
+                 if i["asset_id"] == b["asset_id"])
+    assert row_b["runnable"] is True and row_b["version_count"] == 1
+
+
 def test_list_includes_file_assets_and_can_exclude_them(client):
     rows = client.get(f"{B}/agents", headers=H(ADMIN)).json()["items"]
     assert any(i["asset_id"].startswith("file:") for i in rows)

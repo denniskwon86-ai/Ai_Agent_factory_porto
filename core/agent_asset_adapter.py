@@ -58,7 +58,7 @@ from typing import Any, Dict, FrozenSet, List, Optional
 
 from core import agent_registry as _reg
 from core.agent_assets import (
-    KIND_AGENT, KIND_SKILL, KIND_WORKFLOW, KINDS,
+    KIND_AGENT, KIND_SKILL, KIND_WORKFLOW, KINDS, RUNNABLE,
     ST_APPROVED, VIS_ENTERPRISE, VIS_SYSTEM,
     AssetError, AssetNotFound, agent_assets,
 )
@@ -319,7 +319,122 @@ def get_file_asset(asset_id: str) -> Dict[str, Any]:
     raise AssetNotFound(asset_id)
 
 
-# ── 통합 조회 (P1-5 가 쓸 입구) ────────────────────────────────────────────
+# ── [P1-5] 런타임 입구 ────────────────────────────────────────────────────
+#: DB 자산 id 접두사. `agent_assets.create` 가 `as_<hex12>` 로 만든다.
+DB_PREFIX = "as_"
+
+#: 전역 기본 파이프라인(= 종전 `load_registry()`)의 파일 자산 id. 기존 `GET /agents` 가 쓴다.
+DEFAULT_WORKFLOW_ASSET_ID = f"{FILE_PREFIX}{KIND_WORKFLOW}:{_reg.DEFAULT_TEMPLATE_ID}"
+
+
+def is_db_asset_id(template_id: str) -> bool:
+    return str(template_id or "").startswith(DB_PREFIX)
+
+
+def resolve_workflow(template_id: str, require_runnable: bool = True) -> Dict[str, Any]:
+    """[P1-5] **워크플로우 정의를 얻는 단일 입구**(설계 §5.3 «런타임: DB 자산을 기존 그래프
+    입력 구조로 변환하는 adapter»).
+
+    `as_…` 면 DB 자산을, 그 밖이면 종전 파일 템플릿을 돌려준다. 두 경우 모두 `agent_registry`
+    가 쓰는 것과 **같은 registry dict** 이므로 호출부(`_build_workflow` 등)는 고칠 필요가 없다.
+
+    ★ 입구를 하나로 두는 이유: 실행 경로가 둘이 되면 한쪽만 «승인된 것만 실행» 규칙을 지키게
+      되고, 그 경로로 초안이 돈다.
+
+    ⚠️ **승인되지 않은 자산은 실행하지 않는다**(`require_runnable`). P1-1 이 «DRAFT 가 도는
+      순간 검토 단계는 형식이 된다» 를 계약으로 잡았고, 그 계약이 실제로 지켜지는 곳은 여기다.
+      조회 목적이면 `require_runnable=False` 로 부른다(게시 이력 조회 등).
+
+    ⚠️ **폴백하지 않는다.** `load_template` 은 파일이 깨졌을 때 `DEFAULT_REGISTRY` 로 떨어지는데
+      (부팅 안전), DB 자산에는 그 관대함을 주지 않는다 — 조직 워크플로우를 실행했는데 조용히
+      기본 파이프라인이 도는 것은 «다른 것이 실행됐다» 이고, 산출물을 보고도 알 수 없다."""
+    if not is_db_asset_id(template_id):
+        return _reg.load_template(template_id or _reg.DEFAULT_TEMPLATE_ID)
+
+    a = agent_assets.get(template_id)                    # 없으면 AssetNotFound
+    if a.get("kind") != KIND_WORKFLOW:
+        raise AssetError(
+            f"'{template_id}' 는 워크플로우 자산이 아닙니다({a.get('kind')}) — "
+            f"프로젝트를 실행할 수 없습니다.")
+    if require_runnable and not a.get("runnable"):
+        raise AssetError(
+            f"'{a.get('name_ko') or template_id}' 는 {a.get('status')} 상태입니다 — "
+            f"승인된 워크플로우만 실행할 수 있습니다.")
+    body = a.get("body") or {}
+    if not (body.get("agents") or []):
+        raise AssetError(
+            f"'{a.get('name_ko') or template_id}' 에 에이전트 정의가 없습니다 — "
+            f"기본 파이프라인으로 대체하지 않습니다(무엇이 실행됐는지 알 수 없게 됩니다).")
+    # 파일 로더와 같은 정규화·id 스탬프를 거친다. 그러지 않으면 스키마가 보정되지 않은 dict 가
+    # 그래프 빌더에 들어가고, 빠진 필드는 실행 중에야 드러난다.
+    reg = _reg._normalize(dict(body))
+    reg["id"] = template_id                              # 로더가 하는 일과 같다(SSOT 스탬프)
+    return reg
+
+
+def asset_visible(asset: Dict[str, Any], viewer_scopes: Optional[FrozenSet[str]],
+                  viewer_user_id: str) -> bool:
+    """이 자산이 이 요청자에게 보이는가. **가시성 판정의 단일 함수.**
+
+    ⚠️ 라우트가 각자 판정을 쓰면 목록에 없는 것이 상세로 열리거나(유출) 목록에 있는 것이
+      404 가 된다(고장). 새 API(`agent_governance`)와 기존 API(`factory_control`)가 **같은
+      함수**를 봐야 한다."""
+    return agent_assets._visible(asset, viewer_scopes, viewer_user_id)
+
+
+def workflow_summaries(viewer_scopes: Optional[FrozenSet[str]], viewer_user_id: str,
+                       include_unapproved: bool = False) -> List[Dict[str, Any]]:
+    """[P1-5] 기존 `GET /templates` 가 쓰는 목록. **응답 형태를 바꾸지 않는다** —
+    `list_templates()` 와 같은 키(`id`·`name`·`description`·`agent_count`·`builtin`)를 주고,
+    새 정보(`source`·`status`·`owner_scope_id`)는 **추가**한다. 기존 화면은 모르는 키를
+    무시하고, 새 화면은 그것을 쓴다.
+
+    ★ **승인된 조직 워크플로우만** 넣는다(기본값). 기존 화면은 `status` 를 모르므로 «목록에
+      있으면 쓸 수 있다» 고 판단한다 — 초안을 섞으면 그 화면이 초안으로 프로젝트를 만들려 한다.
+    """
+    out: List[Dict[str, Any]] = []
+    for item in _reg.list_templates():
+        d = dict(item)
+        d["source"] = (SOURCE_LEGACY if item.get("id") != _reg.DEFAULT_TEMPLATE_ID
+                       else _registry_source())
+        d["status"] = ST_APPROVED          # 파일 템플릿은 지금 실제로 실행되고 있다(P1-2 참조)
+        d["owner_scope_id"] = ""
+        d["needs_migration"] = True
+        out.append(d)
+
+    rows = agent_assets.list_assets(KIND_WORKFLOW, viewer_scopes, viewer_user_id)
+    for r in rows:
+        # ⚠️ `list_assets` 가 돌려주는 행에는 `runnable` 키가 **없다**(`get()` 만 붙인다).
+        #   `r.get("runnable")` 로 판정하면 항상 `None` 이 되어 **모든 조직 워크플로우가
+        #   목록에서 사라진다** — 실제로 그렇게 만들었다가 테스트에서 잡혔다. 실행 가능 여부는
+        #   저장소의 정의(`RUNNABLE`)로 직접 본다.
+        if not include_unapproved and r.get("status") not in RUNNABLE:
+            continue
+        # ⚠️ 행에는 `body` 도 없다(같은 이유). `r.get("body")` 로 세면 `agent_count` 가 **항상 0**
+        #   이 되고, 기존 화면은 그것을 «에이전트 0개 워크플로우» 로 보여 준다 — 0 은 거짓이다.
+        #   그래서 정의를 실제로 읽는다. 종전 `list_templates()` 도 템플릿마다 파일을 읽어
+        #   세므로 비용은 같다.
+        try:
+            body = (agent_assets.get(r["asset_id"]).get("body") or {})
+        except Exception:
+            # 방금 사라진 행은 목록에서 뺀다 — 개수를 0 으로 채워 넣지 않는다.
+            continue
+        out.append({
+            "id": r["asset_id"],
+            "name": r.get("name_ko") or r["asset_id"],
+            "description": r.get("purpose") or "",
+            "agent_count": len(body.get("agents") or []),
+            # ★ `builtin` 은 «default 인가» 를 뜻한다(P1-2 주석 참조) — 조직 자산은 아니다.
+            "builtin": False,
+            "source": "ORG",
+            "status": r.get("status"),
+            "owner_scope_id": r.get("owner_scope_id") or "",
+            "needs_migration": False,      # 승인 이력이 있는 자산이다
+        })
+    return out
+
+
+# ── 통합 조회 ─────────────────────────────────────────────────────────────
 def list_all(kind: str, viewer_scopes: Optional[FrozenSet[str]], viewer_user_id: str,
              tenant_id: str = "", include_files: bool = True,
              include_retired: bool = False) -> List[Dict[str, Any]]:
@@ -338,7 +453,7 @@ def list_all(kind: str, viewer_scopes: Optional[FrozenSet[str]], viewer_user_id:
     if not include_files:
         return rows
     files = [f for f in file_assets(kind)
-             if agent_assets._visible(f, viewer_scopes, viewer_user_id)]
+             if asset_visible(f, viewer_scopes, viewer_user_id)]
     # 파일 자산을 뒤에 둔다 — 조직이 만든 자산이 먼저 보이는 편이 «내 것부터» 라는 기대에 맞다.
     return rows + files
 

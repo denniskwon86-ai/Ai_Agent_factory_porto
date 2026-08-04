@@ -574,8 +574,13 @@ async def get_runtime_app(template_id: str = "default"):
         return cached
     async with _runtime_lock:
         if tid not in _runtime_apps:
-            from core.agent_registry import load_template
+            # [P1-5] 파일 템플릿과 조직 자산(`as_…`)을 **같은 입구**로 해석한다. 승인되지 않은
+            # 자산은 여기서 거절된다 — «DRAFT 는 실행되지 않는다» 가 실제로 지켜지는 곳이다.
+            # ⚠️ 컴파일 결과는 `tid` 로 캐시된다. 조직 자산을 개정하면 이 캐시가 낡는데, 파일
+            #   템플릿도 같은 한계다(«HOTL 중단점 변경은 서버 재시작 후 반영»). 버전 스냅샷은
+            #   P3(런타임 강제)의 일이므로 여기서 앞서가지 않는다.
+            from core.agent_asset_adapter import resolve_workflow
             saver = await _get_runtime_saver()
-            workflow, interrupt_after = _build_workflow(load_template(tid))
+            workflow, interrupt_after = _build_workflow(resolve_workflow(tid))
             _runtime_apps[tid] = workflow.compile(checkpointer=saver, interrupt_after=interrupt_after)
     return _runtime_apps[tid]

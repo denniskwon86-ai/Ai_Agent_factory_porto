@@ -46,6 +46,29 @@
 - 다음 행동 / 담당 / 착수 조건: **Supervisor + Codex**가 D1 Outcome Charter, D2 Stakeholder Map, D3 Provenance Ledger를 실제 내용으로 작성한다. **Codex**는 D4~D8 경영진 제안·반대논리·외부 안전 포트폴리오를 만든다. **Antigravity**는 목표회사·잠재고객·지원제도 조사를 보조하고, **Claude Code**는 요청 시 비기밀 제품 증거만 제공한다.
 - 교대 체크포인트: 기존 36개월/12개월 계획을 폐기하고 동일 HTML을 100일 사업 실행계획으로 전면 재작성 · `docs/business-model/index.html` 링크 유지 · 커밋/푸시 미수행 · 재개 시 HTML 가독성 검증 후 D1~D3 실전 템플릿 작성 · 금지 범위는 제품 코드 동시 수정, origin 변경, 회사 자산 귀속의 임의 확정.
 
+### [SEC-P1-48] P1-5 기존 API 어댑터 전환 — 조직 워크플로우가 목록에서 통째로 사라져 있었다
+- 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
+- 왜 지금 기록하는가: **D-017 §9 P1 이 5/5 로 끝났다.** 그리고 전환 과정에서 `agent_assets.list_assets` 의 반환 모양 때문에 **P1-4 와 P1-5 양쪽에 같은 결함**이 있었다 — 그 원인을 남겨야 다음 사람이 세 번째로 밟지 않는다.
+- 상태: **완료(P1-5) · P1 전체 완료(1~5)**
+- ★ **사용자 결정(2026-08-04)**: 부서 manager 의 하위 조직 자산 승인은 **현행 유지**다 — 하위 조직 자산은 보이지 않고(`viewer_visible_scopes` 의 «하향 열람은 경영진에게만»), 승인은 각 조직이 한다. `[SEC-P1-46]` 의 결정 요청은 이것으로 닫힌다.
+- 무엇을 바꿨는가:
+  · `core/agent_asset_adapter.resolve_workflow(tid, require_runnable=True)` — **워크플로우 정의를 얻는 단일 입구**(설계 §5.3 «런타임: DB 자산을 기존 그래프 입력 구조로 변환하는 adapter»). `as_…` 면 DB 자산, 그 밖이면 파일 템플릿. 양쪽 다 **같은 registry dict** 이므로 그래프 빌더는 고치지 않았다.
+  · `core/agent_graph.get_runtime_app()` 가 `load_template` → `resolve_workflow` 로. **실행 입구는 실측해 보니 이 한 곳이었다**(`factory_control:1230` 은 게시 시 읽기다). 그래서 «승인된 것만 실행» 이 실제로 지켜지는 지점이 하나다.
+  · `GET /agents` — 어댑터 경유. `data` 는 종전과 같은 registry dict 이고 `source`·`needs_migration`·`edit_via` 만 추가한다.
+  · `GET /templates` — 파일 템플릿 + **가시 범위 안의 승인된 조직 워크플로우**(설계 §7.1). 종전 키 5개 유지 + `source`·`status`·`owner_scope_id`·`needs_migration` 추가.
+  · `GET /templates/{id}` — `as_…` 도 받는다. 가시 범위 밖은 **404**. 판정은 새 API 와 **같은 함수**(`adapter.asset_visible`).
+  · 게시 경로는 `require_runnable=False` — 이미 실행이 끝난 것이다. 그 사이 자산이 폐기·개정됐다고 게시를 막으면 **이미 만들어진 산출물을 꺼낼 수 없다.** 해석 실패도 빈 dict 로 숨기지 않고 `unresolved_reason` 을 남긴다.
+- ★★★ **발견: `list_assets` 가 돌려주는 행에는 `body`·`versions`·`runnable` 이 없다**(그 셋은 `get()` 이 붙인다). 이 사실을 모르고 쓴 코드가 두 군데서 조용히 틀렸다.
+  ① P1-5 목록: `r.get("runnable")` 이 항상 `None` → **모든 조직 워크플로우가 목록에서 사라졌다.** 그리고 `r.get("body")` 로 센 `agent_count` 는 항상 0 이었다(0 은 거짓이다 — 기존 화면은 그것을 «에이전트 0개 워크플로우» 로 보여 준다). 정의를 실제로 읽어 센다. 종전 `list_templates()` 도 템플릿마다 파일을 읽어 세므로 비용은 같다.
+  ② **P1-4 목록도 같은 이유로 틀려 있었다**: `version_count` 가 항상 0, `runnable` 이 항상 `None`. 행이 실제로 들고 있는 `current_version`·`status` 에서 계산하도록 고치고 `test_list_reports_real_version_count_and_runnable` 로 잠갔다.
+  ⚠️ 교훈: **«키가 있을 것» 을 전제로 `.get()` 을 쓰면 없을 때 조용히 거짓값이 된다.** 특히 `0`·`None`·`False` 는 «없음» 과 «0 이다» 가 구분되지 않는다. 목록 API 를 새로 붙일 때마다 저장소가 그 키를 정말 주는지 확인해야 한다.
+- ★ **폴백하지 않는다.** 파일 로더는 깨진 파일을 `DEFAULT_REGISTRY` 로 대체하지만(부팅 안전), DB 자산에는 그 관대함을 주지 않는다 — 조직 워크플로우를 실행했는데 조용히 기본 파이프라인이 도는 것은 «다른 것이 실행됐다» 이고 산출물을 보고도 알 수 없다. `agents` 가 비었으면 예외다.
+- ★ **초안은 기존 목록에 넣지 않는다.** 기존 화면은 `status` 를 모르므로 «목록에 있으면 쓸 수 있다» 고 판단하고 초안으로 프로젝트를 만들려 한다. 새 API 는 초안도 주되 `runnable=false` 를 함께 준다.
+- 검증: 신규 `tests/test_agent_asset_runtime_switch.py` **18건** + P1-4 테스트 1건 추가. `pytest tests/` **1,937 passed · 1 skipped · 실패 0 · exit 0**(기준선 1,918). ⚠️ 자동 통과 후 실제 응답을 출력해 눈으로 확인했다 — 조직 워크플로우가 기존 목록에 `agents=15` 로 나오고 초안이 빠지는 것을 확인했다.
+- 영향·주의사항: **응답 형태 불변** — 종전 키가 하나도 사라지지 않았다. 기존 화면은 새 키를 무시한다. ⚠️ `get_runtime_app` 은 컴파일 결과를 `tid` 로 **캐시**한다. 조직 자산을 개정하면 캐시가 낡는데 파일 템플릿도 같은 한계다(«HOTL 중단점 변경은 서버 재시작 후 반영»). 버전 스냅샷은 P3 의 일이므로 앞서가지 않았다. ⚠️ **쓰기 경로는 아직 파일이다** — `POST /templates/copy`·`PUT /templates/{id}` 는 종전대로 `templates/*.json` 에 쓴다. 새 자산을 DB 로 보내려면 화면이 새 API 를 써야 하므로 P2 의 일이다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — P2(생성기 UI 통합) 또는 P3(런타임 강제). ⚠️ P2 는 화면 작업이므로 **Codex 담당 영역과 겹친다** — 착수 전에 분담 확인이 필요하다. 서버 쪽만 먼저 하려면 P3-1(독립·Mega 프로젝트가 동일한 Resolver 사용)이 지금 붙일 수 있는 다음 조각이다. **Supervisor** — 결정 대기 2건(조직 범위 정본, `is_ai_admin` 추가 부여)이 그대로다.
+- 교대 체크포인트: 변경 = `core/agent_asset_adapter.py`(런타임 입구·목록·가시성 함수) · `core/agent_graph.py`(실행 입구 1줄) · `api/routes/factory_control.py`(3라우트 + 게시 경로) · `api/routes/agent_governance.py`(`_slim` 수정) · 테스트 2파일. 미변경 = 화면, 파일 자산, DB 스키마, 쓰기 경로. 검증 = 1,937 passed. 재개 지점 = P2 또는 P3-1. 금지 범위 = 실행 입구를 `load_template` 로 되돌리는 것, DB 자산에 `DEFAULT_REGISTRY` 폴백을 주는 것, 초안을 기존 목록에 넣는 것, `list_assets` 행에서 `body`·`versions`·`runnable` 을 읽는 것, 기존 응답 키를 없애거나 이름을 바꾸는 것.
+
 ### [SEC-P1-46] P1-4 조직별 목록·복사·승인·폐기 API — 승인 권한이 열람 권한으로 승격되지 않게
 - 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
 - 왜 지금 기록하는가: `[SEC-P1-45]` 가 지정한 재개 지점(P1-4)을 구현했다. **테스트 계정을 실측하는 과정에서 조직 데이터의 사실 셋을 발견했고, 그중 둘은 P2 화면 작업자가 반드시 알아야 한다.**

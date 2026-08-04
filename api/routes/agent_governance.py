@@ -34,7 +34,7 @@ from api.deps import Principal, current_principal, require_caps, viewer_visible_
 from core import admin_capability as cap
 from core import agent_asset_adapter as adapter
 from core.agent_assets import (
-    KIND_AGENT, KIND_SKILL, KIND_WORKFLOW,
+    KIND_AGENT, KIND_SKILL, KIND_WORKFLOW, RUNNABLE,
     ST_APPROVED, ST_DRAFT, ST_RETIRED, ST_REVIEW,
     VIS_DESCENDANTS, VIS_ENTERPRISE, VIS_PERSONAL, VIS_SCOPE, VIS_SYSTEM,
     AssetError, AssetNotFound, agent_assets,
@@ -80,8 +80,11 @@ def _audit(p: Principal, event: str, asset_id: str, kind: str, outcome: str,
 # ── 판정 (이 파일의 유일한 보안 경계) ──────────────────────────────────────
 def _visible_to(p: Principal, asset: Dict[str, Any]) -> bool:
     """이 자산이 요청자에게 보이는가. **목록과 상세가 같은 함수를 쓴다** — 다르면 목록에 없는
-    것이 상세로 열리거나(유출) 목록에 있는 것이 404 가 된다(고장)."""
-    return agent_assets._visible(asset, viewer_visible_scopes(p), p.user_id or "")
+    것이 상세로 열리거나(유출) 목록에 있는 것이 404 가 된다(고장).
+
+    ⚠️ 판정 자체는 `adapter.asset_visible` 한 곳에 있다. 기존 API(`factory_control` 의
+      `/templates/{id}`)도 같은 함수를 본다 — 두 API 가 각자 판정하면 서서히 갈라진다."""
+    return adapter.asset_visible(asset, viewer_visible_scopes(p), p.user_id or "")
 
 
 def _load_visible(p: Principal, kind: str, asset_id: str) -> Dict[str, Any]:
@@ -179,9 +182,19 @@ def _assert_may_publish(p: Principal, kind: str, asset: Dict[str, Any], verb: st
 # ── 응답 모양 ─────────────────────────────────────────────────────────────
 def _slim(a: Dict[str, Any]) -> Dict[str, Any]:
     """목록용. **본문(`body`)과 버전 이력을 뺀다** — 스킬 31개 전문이 목록에 실리면 응답이
-    수십 KB 가 되고, 화면은 목록에서 본문을 쓰지 않는다."""
+    수십 KB 가 되고, 화면은 목록에서 본문을 쓰지 않는다.
+
+    ⚠️⚠️ `agent_assets.list_assets` 가 돌려주는 행에는 `body`·`versions`·`runnable` 이
+      **없다**(그 셋은 `get()` 이 붙인다). 그래서 `len(a.get("versions"))` 로 세면
+      `version_count` 가 **항상 0** 이 되고, `a.get("runnable")` 은 항상 `None` 이 된다 —
+      화면은 그것을 «버전 1개, 실행 불가» 로 읽는다. 행이 실제로 들고 있는 값
+      (`current_version`·`status`)에서 계산한다. 파일 자산은 `get()` 과 같은 모양이므로
+      `versions` 가 있고, 그때는 그 길이를 쓴다."""
     out = {k: v for k, v in a.items() if k not in ("body", "versions")}
-    out["version_count"] = len(a.get("versions") or [])
+    out["version_count"] = (len(a["versions"]) if "versions" in a
+                            else int(a.get("current_version") or 0))
+    out["runnable"] = (bool(a["runnable"]) if "runnable" in a
+                       else a.get("status") in RUNNABLE)
     return out
 
 

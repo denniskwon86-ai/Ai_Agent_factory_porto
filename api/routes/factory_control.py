@@ -1225,9 +1225,19 @@ async def create_release(project_id: str,
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"상태 읽기 오류: {str(e)}")
 
-    from core.agent_registry import load_template
+    # [P1-5] 조직 워크플로우(`as_…`)로 만든 프로젝트도 게시돼야 한다.
+    # ⚠️ `require_runnable=False` — 이미 실행이 끝난 것이다. 그 사이 자산이 폐기되거나 개정돼
+    #   초안으로 내려갔다고 게시를 막으면, **이미 만들어진 산출물을 꺼낼 수 없게** 된다.
+    from core.agent_asset_adapter import resolve_workflow
+    from core.agent_assets import AssetError, AssetNotFound
     tid = s.get("template_id", "default")
-    template_data = load_template(tid)
+    try:
+        template_data = resolve_workflow(tid, require_runnable=False)
+    except (AssetError, AssetNotFound) as e:
+        # 정의를 못 찾아도 게시 자체는 진행한다 — 산출물은 이미 있다. 다만 **무엇으로 만들었는지
+        # 모른다는 사실을 비워서 숨기지 않는다.**
+        print(f"⚠️ [publish] 워크플로우 정의를 해석하지 못했습니다({tid}): {e}")
+        template_data = {"id": tid, "agents": [], "unresolved": True, "unresolved_reason": str(e)}
 
     # ★ [2026-07-28 Phase 5] 게시 시점의 소유권을 릴리스에 **고정**한다.
     #   `scripts/migrate_org_ownership.py:99-109` 가 릴리스에 이 필드가 있다고 전제하는데
@@ -1716,8 +1726,13 @@ async def get_agent_registry(p: Principal = Depends(current_principal)):
     ⚠️ [D-017 §2.1] 예전에는 `current_principal` 의존성이 아예 없었다 — 익명·타 사업부
       사용자가 전역 구성을 그대로 읽었다."""
     _require_caps(p, AGENT_READ, resource="agent_registry", action="read")
-    from core.agent_registry import load_registry
-    return {"status": "success", "data": load_registry()}
+    # [P1-5] 어댑터를 경유한다. `data` 는 종전과 **같은 registry dict** 이고, 출처 표시만
+    # 추가한다 — 화면이 «승인 이력 없이 돌고 있는 정의» 임을 말할 수 있어야 한다.
+    from core.agent_asset_adapter import DEFAULT_WORKFLOW_ASSET_ID, get_file_asset
+    a = get_file_asset(DEFAULT_WORKFLOW_ASSET_ID)
+    return {"status": "success", "data": a["body"],
+            "source": a["source"], "needs_migration": a["needs_migration"],
+            "edit_via": a["edit_via"]}
 
 
 @router.put("/agents")
@@ -2000,21 +2015,51 @@ class TemplateCopyRequest(BaseModel):
 
 @router.get("/templates")
 async def list_workflow_templates(p: Principal = Depends(current_principal)):
-    """공존하는 워크플로우 템플릿 목록(항상 default 포함)."""
+    """공존하는 워크플로우 템플릿 목록(항상 default 포함).
+
+    [P1-5] 파일 템플릿 + **가시 범위 안의 승인된 조직 워크플로우**를 함께 준다(설계 §7.1
+    «기존 GET 목록은 사용자 가시 범위만 반환한다»). 응답 키는 종전과 같고 `source`·`status`·
+    `owner_scope_id` 가 추가된다 — 기존 화면은 모르는 키를 무시한다.
+
+    ⚠️ 승인되지 않은 조직 자산은 넣지 않는다. 기존 화면은 `status` 를 모르므로 «목록에 있으면
+      쓸 수 있다» 고 판단하고, 초안으로 프로젝트를 만들려 한다."""
     _require_caps(p, WORKFLOW_READ, resource="workflow_template", action="list")
-    from core.agent_registry import list_templates
-    return {"status": "success", "data": list_templates()}
+    from core.agent_asset_adapter import workflow_summaries
+    from api.deps import viewer_visible_scopes
+    return {"status": "success",
+            "data": workflow_summaries(viewer_visible_scopes(p), p.user_id or "")}
 
 
 @router.get("/templates/{template_id}")
 async def get_workflow_template(template_id: str,
                                 p: Principal = Depends(current_principal)):
+    """[P1-5] 파일 템플릿과 조직 워크플로우(`as_…`)를 같은 경로로 준다.
+
+    ⚠️ 조직 자산은 **가시 범위 밖이면 404** 다(설계 §7.1) — 403 은 «그 조직에 그런 워크플로우가
+      있다» 를 알려 준다. 판정은 새 API 와 **같은 함수**(`adapter.asset_visible`)를 쓴다."""
     _require_caps(p, WORKFLOW_READ, resource="workflow_template", action=template_id)
     from core.agent_registry import load_template, _safe_tid
+    # ⚠️ 저장소를 직접 import 하지 않고 **어댑터를 경유**한다 — 어댑터가 저장소 참조를 들고
+    #   있어야 조회와 판정이 한 곳에 남는다(그러지 않으면 테스트가 갈아끼운 저장소를 이 경로만
+    #   비껴가고, 나중에 저장소를 바꿀 때도 이 줄이 빠진다).
+    from core.agent_asset_adapter import asset_visible, get_any, is_db_asset_id
+    from core.agent_assets import AssetNotFound
+    from api.deps import viewer_visible_scopes
     try:
         _safe_tid(template_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if is_db_asset_id(template_id):
+        try:
+            a = get_any(template_id)
+        except AssetNotFound:
+            raise HTTPException(status_code=404, detail="요청한 워크플로우를 찾을 수 없습니다.")
+        if not asset_visible(a, viewer_visible_scopes(p), p.user_id or ""):
+            raise HTTPException(status_code=404, detail="요청한 워크플로우를 찾을 수 없습니다.")
+        # ★ `status` 를 함께 준다. 이것 없이 body 만 주면 화면은 초안을 실행 가능한 것으로 본다.
+        return {"status": "success", "data": a.get("body") or {},
+                "asset_status": a.get("status"), "runnable": a.get("runnable"),
+                "owner_scope_id": a.get("owner_scope_id") or ""}
     return {"status": "success", "data": load_template(template_id)}
 
 
