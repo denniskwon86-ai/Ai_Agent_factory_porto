@@ -1,0 +1,325 @@
+"""[D-017 §9 P1] 범위형 자산 저장소 — 에이전트·스킬·워크플로우를 **조직이 소유한다.**
+
+## 왜 필요한가 (설계 §2.1·§5.3)
+
+지금 자산은 전역 파일 하나다. `agents_registry.json` 하나를 모두가 공유하고, `templates/*.json`
+도 전역이며, `skills/*.md` 도 마찬가지다. 그래서 «누가 만들었는지 · 어느 조직 것인지 · 승인은
+받았는지 · 언제부터 유효한지» 를 물을 수 없다. 한 사람이 저장하면 전 사용자의 파이프라인이
+바뀌고, 바뀐 뒤에는 무엇이 바뀌었는지도 알 수 없다.
+
+★ 이 모듈은 그 네 가지 질문에 답할 수 있는 저장소다: **소유 조직 · 공개 범위 · 승인 상태 ·
+  버전**. 그리고 **버전을 덮어쓰지 않는다** — 새 버전을 쌓고 이전 것은 남긴다. 과거 산출물이
+  «어떤 구성으로 만들어졌는가» 에 답하려면 그때의 정의가 그대로 있어야 한다.
+
+## 파일 저장소를 지우지 않는다 (§5.3)
+
+기존 `DEFAULT_REGISTRY`·`templates/*.json`·`skills/*.md` 는 **`SYSTEM` 원본으로 읽기 전용**
+노출한다. 지우면 지금 도는 파이프라인이 멈춘다. 새로 만드는 것만 여기 들어온다.
+
+## 가시성 판정을 저장과 함께 둔 이유
+
+⚠️ 저장 계층과 판정 계층을 따로 만들면, 저장은 되는데 **아무도 못 보는** 자산이 생기거나
+  반대로 **전부 보이는** 자산이 생긴다. 오늘 아침에 «판정 함수만 만들고 실행 경로에서 부르지
+  않아» 통제가 장식이 된 사례를 이미 겪었다. 그래서 목록 조회에 가시성 필터를 **강제로** 건다
+  (`list_assets` 는 `viewer_scopes` 를 **필수 인자**로 받는다 — 빼먹을 수 없게).
+
+LLM 0콜.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, FrozenSet, List, Optional
+
+from core.master_data import _DB_PATH
+
+# ── 자산 종류 ────────────────────────────────────────────────────────────────
+KIND_AGENT = "agent"
+KIND_SKILL = "skill"
+KIND_WORKFLOW = "workflow"
+KINDS = (KIND_AGENT, KIND_SKILL, KIND_WORKFLOW)
+
+# ── 공개 범위 (설계 §5.1) ────────────────────────────────────────────────────
+#: ⚠️ 넓은 순서로 적지 않는다 — 코드가 «크면 넓다» 로 비교하기 시작하면, 새 값을 끼워 넣을 때
+#:   조용히 순서가 깨진다. 판정은 항상 명시적 분기로 한다.
+VIS_PERSONAL = "PERSONAL"        # 만든 사람만
+VIS_SCOPE = "SCOPE"              # 소유 조직만
+VIS_DESCENDANTS = "DESCENDANTS"  # 소유 조직과 그 하위
+VIS_ENTERPRISE = "ENTERPRISE"    # 전사
+VIS_SYSTEM = "SYSTEM"            # 제품 기본(읽기 전용)
+VISIBILITIES = (VIS_PERSONAL, VIS_SCOPE, VIS_DESCENDANTS, VIS_ENTERPRISE, VIS_SYSTEM)
+
+# ── 상태 (설계 §5.1) ─────────────────────────────────────────────────────────
+ST_DRAFT = "DRAFT"
+ST_REVIEW = "REVIEW"
+ST_APPROVED = "APPROVED"
+ST_RETIRED = "RETIRED"
+STATUSES = (ST_DRAFT, ST_REVIEW, ST_APPROVED, ST_RETIRED)
+
+#: 실행에 쓸 수 있는 상태. **`DRAFT` 를 여기 넣지 않는다** — 초안이 도는 순간 검토는 형식이 된다.
+RUNNABLE = (ST_APPROVED,)
+
+
+class AssetError(ValueError):
+    """정책 위반 — 라우트가 400 으로 바꾼다."""
+
+
+class AssetNotFound(LookupError):
+    """없거나 볼 수 없다 — 라우트가 **404** 로 바꾼다(존재를 알리지 않는다)."""
+
+
+_DDL = """
+CREATE TABLE IF NOT EXISTS agent_assets (
+    asset_id       TEXT PRIMARY KEY,
+    kind           TEXT NOT NULL,
+    tenant_id      TEXT NOT NULL DEFAULT 'tenant_default',
+    owner_scope_id TEXT NOT NULL DEFAULT '',
+    entity_mode    TEXT NOT NULL DEFAULT 'REAL',
+    visibility     TEXT NOT NULL DEFAULT 'PERSONAL',
+    status         TEXT NOT NULL DEFAULT 'DRAFT',
+    name_ko        TEXT NOT NULL DEFAULT '',
+    purpose        TEXT NOT NULL DEFAULT '',
+    current_version INTEGER NOT NULL DEFAULT 0,
+    created_by     TEXT NOT NULL DEFAULT '',
+    approved_by    TEXT NOT NULL DEFAULT '',
+    effective_from TEXT NOT NULL DEFAULT '',
+    effective_to   TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_asset_kind ON agent_assets(kind, status);
+CREATE INDEX IF NOT EXISTS idx_asset_scope ON agent_assets(tenant_id, owner_scope_id);
+
+-- ★ 버전은 **덮어쓰지 않고 쌓는다.** 과거 산출물이 "어떤 구성으로 만들어졌는가"에 답하려면
+--   그때의 정의가 그대로 남아 있어야 한다.
+CREATE TABLE IF NOT EXISTS agent_asset_versions (
+    version_id     TEXT PRIMARY KEY,
+    asset_id       TEXT NOT NULL,
+    version_no     INTEGER NOT NULL,
+    body_json      TEXT NOT NULL DEFAULT '{}',
+    status         TEXT NOT NULL DEFAULT 'DRAFT',
+    created_by     TEXT NOT NULL DEFAULT '',
+    approved_by    TEXT NOT NULL DEFAULT '',
+    supersedes_version INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL,
+    UNIQUE (asset_id, version_no)
+);
+CREATE INDEX IF NOT EXISTS idx_assetver ON agent_asset_versions(asset_id, version_no DESC);
+"""
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class AgentAssetStore:
+    def __init__(self, db_path: str = _DB_PATH):
+        self.db_path = db_path
+        self._lock = threading.RLock()
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA busy_timeout = 5000")
+        except Exception:
+            pass
+        return conn
+
+    def _init_db(self) -> None:
+        with self._lock, self._connect() as conn:
+            conn.executescript(_DDL)
+            conn.commit()
+
+    # ── 생성·개정 ─────────────────────────────────────────────────────────
+    def create(self, kind: str, name_ko: str, body: Dict[str, Any], created_by: str,
+               owner_scope_id: str = "", visibility: str = VIS_PERSONAL,
+               purpose: str = "", tenant_id: str = "tenant_default",
+               entity_mode: str = "REAL") -> Dict[str, Any]:
+        """자산을 만든다. **항상 `DRAFT` 로 시작한다.**
+
+        ⚠️ 만들자마자 `APPROVED` 로 두는 지름길을 만들지 않는다 — 한 번 만들면 그 경로로만
+          만들어지고, 검토 단계는 아무도 지나지 않는 문이 된다."""
+        if kind not in KINDS:
+            raise AssetError(f"kind 는 {KINDS} 중 하나여야 합니다: {kind}")
+        if not (name_ko or "").strip():
+            raise AssetError("이름(name_ko)은 필수입니다.")
+        if not (created_by or "").strip():
+            raise AssetError("작성자가 필요합니다 — 누가 만들었는지 모르는 자산은 승인할 수 없습니다.")
+        if visibility not in VISIBILITIES:
+            raise AssetError(f"visibility 는 {VISIBILITIES} 중 하나여야 합니다: {visibility}")
+        if visibility == VIS_SYSTEM:
+            raise AssetError(
+                "SYSTEM 은 제품 기본 자산의 표시이며 새로 만들 수 없습니다 — 복사해서 쓰십시오.")
+        # ★ 개인 범위가 아니면 소유 조직이 있어야 한다. 없으면 «누구 것인가» 에 답할 수 없고,
+        #   답할 수 없는 자산은 회수·폐기도 할 수 없다.
+        if visibility != VIS_PERSONAL and not (owner_scope_id or "").strip():
+            raise AssetError(
+                f"{visibility} 공개에는 소유 조직(owner_scope_id)이 필요합니다 — 소유가 없으면 "
+                f"나중에 «이 자산은 누구 책임인가» 에 답할 수 없습니다.")
+
+        aid = f"as_{uuid.uuid4().hex[:12]}"
+        now = _now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO agent_assets (asset_id, kind, tenant_id, owner_scope_id, entity_mode,"
+                " visibility, status, name_ko, purpose, current_version, created_by, created_at,"
+                " updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?)",
+                (aid, kind, tenant_id, owner_scope_id.strip(), entity_mode, visibility, ST_DRAFT,
+                 name_ko.strip(), (purpose or "").strip(), created_by, now, now))
+            conn.execute(
+                "INSERT INTO agent_asset_versions (version_id, asset_id, version_no, body_json,"
+                " status, created_by, supersedes_version, created_at) VALUES (?,?,1,?,?,?,0,?)",
+                (f"av_{uuid.uuid4().hex[:12]}", aid, json.dumps(body or {}, ensure_ascii=False),
+                 ST_DRAFT, created_by, now))
+            conn.commit()
+        return self.get(aid)
+
+    def revise(self, asset_id: str, body: Dict[str, Any], actor: str) -> Dict[str, Any]:
+        """새 버전을 **쌓는다.** 기존 버전은 그대로 둔다.
+
+        ★ 개정하면 상태가 `DRAFT` 로 내려간다 — 승인된 자산의 내용을 바꿔 놓고 승인 상태를
+          유지하면, 그 승인은 **읽지 않은 문서에 대한 승인**이 된다."""
+        a = self.get(asset_id)
+        if a["visibility"] == VIS_SYSTEM:
+            raise AssetError("제품 기본 자산은 수정할 수 없습니다 — 복사해서 쓰십시오.")
+        if a["status"] == ST_RETIRED:
+            raise AssetError("폐기된 자산은 개정할 수 없습니다 — 새로 만드십시오.")
+        nxt = int(a["current_version"]) + 1
+        now = _now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO agent_asset_versions (version_id, asset_id, version_no, body_json,"
+                " status, created_by, supersedes_version, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (f"av_{uuid.uuid4().hex[:12]}", asset_id, nxt,
+                 json.dumps(body or {}, ensure_ascii=False), ST_DRAFT, actor,
+                 int(a["current_version"]), now))
+            conn.execute(
+                "UPDATE agent_assets SET current_version=?, status=?, approved_by='', updated_at=?"
+                " WHERE asset_id=?", (nxt, ST_DRAFT, now, asset_id))
+            conn.commit()
+        return self.get(asset_id)
+
+    # ── 승인·폐기 ─────────────────────────────────────────────────────────
+    def submit(self, asset_id: str, actor: str) -> Dict[str, Any]:
+        a = self.get(asset_id)
+        if a["status"] not in (ST_DRAFT, ST_REVIEW):
+            raise AssetError(f"{a['status']} 상태에서는 검토를 요청할 수 없습니다.")
+        return self._set_status(asset_id, ST_REVIEW, actor, approved_by="")
+
+    def approve(self, asset_id: str, actor: str) -> Dict[str, Any]:
+        """승인. ⚠️ **자기가 만든 것을 자기가 승인하는 것을 막지 않는다** — 조직이 작으면 그것이
+        정상이다. 대신 `approved_by` 를 남겨 **누가 승인했는지** 항상 답할 수 있게 한다."""
+        a = self.get(asset_id)
+        if a["status"] != ST_REVIEW:
+            raise AssetError(
+                f"{a['status']} 상태에서는 승인할 수 없습니다 — 검토 요청 후에 승인합니다.")
+        return self._set_status(asset_id, ST_APPROVED, actor, approved_by=actor)
+
+    def retire(self, asset_id: str, actor: str) -> Dict[str, Any]:
+        """폐기 — **행을 지우지 않는다.** 과거 산출물이 이 자산을 가리키고 있다."""
+        a = self.get(asset_id)
+        if a["visibility"] == VIS_SYSTEM:
+            raise AssetError("제품 기본 자산은 폐기할 수 없습니다.")
+        return self._set_status(asset_id, ST_RETIRED, actor, approved_by=a.get("approved_by", ""))
+
+    def _set_status(self, asset_id: str, status: str, actor: str,
+                    approved_by: str) -> Dict[str, Any]:
+        now = _now()
+        with self._lock, self._connect() as conn:
+            conn.execute("UPDATE agent_assets SET status=?, approved_by=?, updated_at=?"
+                         " WHERE asset_id=?", (status, approved_by, now, asset_id))
+            conn.execute("UPDATE agent_asset_versions SET status=?, approved_by=?"
+                         " WHERE asset_id=? AND version_no=(SELECT current_version FROM"
+                         " agent_assets WHERE asset_id=?)",
+                         (status, approved_by, asset_id, asset_id))
+            conn.commit()
+        return self.get(asset_id)
+
+    # ── 조회 ──────────────────────────────────────────────────────────────
+    def get(self, asset_id: str, version_no: int = 0) -> Dict[str, Any]:
+        with self._connect() as conn:
+            r = conn.execute("SELECT * FROM agent_assets WHERE asset_id=?", (asset_id,)).fetchone()
+            if not r:
+                raise AssetNotFound(asset_id)
+            d = dict(r)
+            v = version_no or d["current_version"]
+            vr = conn.execute(
+                "SELECT * FROM agent_asset_versions WHERE asset_id=? AND version_no=?",
+                (asset_id, v)).fetchone()
+            hist = conn.execute(
+                "SELECT version_no, status, created_by, approved_by, created_at"
+                " FROM agent_asset_versions WHERE asset_id=? ORDER BY version_no DESC",
+                (asset_id,)).fetchall()
+        d["body"] = json.loads(vr["body_json"]) if vr else {}
+        d["version_no"] = v
+        d["versions"] = [dict(h) for h in hist]
+        d["runnable"] = d["status"] in RUNNABLE
+        return d
+
+    def list_assets(self, kind: str, viewer_scopes: Optional[FrozenSet[str]],
+                    viewer_user_id: str, tenant_id: str = "",
+                    status: str = "", include_retired: bool = False) -> List[Dict[str, Any]]:
+        """가시 범위 안의 자산 목록.
+
+        ★★ `viewer_scopes` 는 **필수 인자**다(기본값을 주지 않는다). 기본값을 두면 어느 호출부가
+          그것을 빼먹고, 그 경로만 조용히 전부 보이게 된다 — 오늘 아침 목록 API 에서 겪은 실패다.
+        · `None` = 필터하지 않는다(강제 OFF·unrestricted). 호출부가 **의도적으로** 그렇게 준 것이다.
+        · `frozenset()` = 아무 조직도 모른다 → **개인·전사·시스템 자산만** 보인다(fail-closed).
+        """
+        if kind not in KINDS:
+            raise AssetError(f"kind 는 {KINDS} 중 하나여야 합니다: {kind}")
+        sql = "SELECT * FROM agent_assets WHERE kind=?"
+        params: List[Any] = [kind]
+        if tenant_id:
+            sql += " AND tenant_id=?"
+            params.append(tenant_id)
+        if status:
+            sql += " AND status=?"
+            params.append(status)
+        elif not include_retired:
+            sql += " AND status<>?"
+            params.append(ST_RETIRED)
+        sql += " ORDER BY updated_at DESC"
+        with self._connect() as conn:
+            rows = [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
+        return [r for r in rows if self._visible(r, viewer_scopes, viewer_user_id)]
+
+    @staticmethod
+    def _visible(row: Dict[str, Any], viewer_scopes: Optional[FrozenSet[str]],
+                 viewer_user_id: str) -> bool:
+        """이 자산이 이 사람에게 보이는가.
+
+        ⚠️ 판정을 **명시적 분기**로 쓴다. 공개 범위를 «넓기 순서» 숫자로 비교하기 시작하면,
+          값을 하나 끼워 넣을 때 순서가 조용히 깨지고 그때는 아무도 알아채지 못한다."""
+        vis = row.get("visibility")
+        if vis == VIS_SYSTEM or vis == VIS_ENTERPRISE:
+            return True                       # 제품 기본·전사 공개는 누구나 본다
+        if vis == VIS_PERSONAL:
+            return bool(viewer_user_id) and row.get("created_by") == viewer_user_id
+        if viewer_scopes is None:
+            return True                       # 필터하지 않기로 한 요청
+        owner = (row.get("owner_scope_id") or "").strip()
+        if not owner:
+            # ★ 소유 조직을 모르는 조직 자산은 **보이지 않는다.** «모르니까 보여 준다» 는
+            #   판단이 한 번 통과하면, 그 뒤로는 아무도 소유를 채우지 않는다.
+            return False
+        return owner in viewer_scopes
+
+    def count_by_status(self, kind: str) -> Dict[str, int]:
+        """운영 점검용. **`0` 과 «조회 못 함» 을 구분해야 하므로** 호출부가 실패를 삼키지 말 것."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) c FROM agent_assets WHERE kind=? GROUP BY status",
+                (kind,)).fetchall()
+        out = {s: 0 for s in STATUSES}
+        for r in rows:
+            out[r["status"]] = r["c"]
+        return out
+
+
+agent_assets = AgentAssetStore()

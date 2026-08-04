@@ -589,11 +589,32 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
 
     sub_projects_map = {}
 
+    # ★★ [D-017 §9 P0-5 배선] **차단된 부서가 있으면 만들기 전에 멈춘다.**
+    #   ⚠️ 이 선검사가 없으면 P0-5 의 차단이 여기서 무력화된다: `resolve_department_config` 가
+    #     승인되지 않은 구성을 막으려고 `agents` 를 비워 돌려주는데, 아래 루프가 그 빈 목록을
+    #     «미등록 부서» 로 읽고 **레거시 기본값으로 다시 폴백**하기 때문이다.
+    #     막아 놓고 호출부에서 되돌리면 통제가 아니라 장식이다.
+    #   ★ 부서 하나만 조용히 건너뛰지 않는다 — 메가 프로젝트는 부서들이 함께 도는 것이고,
+    #     한 부서가 빠진 채 완주하면 그 산출물이 «전사 검토를 마쳤다» 는 얼굴을 하게 된다.
+    _blocked = []
+    for domain in _domains:
+        _pre = resolve_department_config(domain)
+        if _pre.get("blocked_reason"):
+            _blocked.append((domain, _pre["blocked_reason"]))
+    if _blocked:
+        raise HTTPException(
+            status_code=400,
+            detail=("승인된 에이전트 구성이 없는 부서가 있어 메가 프로젝트를 만들지 않았습니다 "
+                    f"({len(_blocked)}개).\n"
+                    + "\n".join(f"· {d}: {why}" for d, why in _blocked)))
+
     # 2. 서브 프로젝트들 생성 — 도메인별 템플릿 및 에이전트 필터 주입
     for domain in _domains:
         _cfg = resolve_department_config(domain)
         if not _cfg.get("agents") and not _cfg.get("template_id"):
             # 미등록 부서 → 이관 원천에서 기본값 확보(조직 미도입 상태의 하위호환)
+            #   ⚠️ 여기 도달했다는 것은 위 선검사를 통과했다는 뜻이다 — 즉 «차단» 이 아니라
+            #     «ECM 미배선» 이다. 그 둘을 같은 분기에서 다루면 다시 섞인다.
             _legacy = next((d for d in _LEGACY_DEPARTMENTS if d["dept_id"] == domain), {})
             _cfg = {"name_ko": _legacy.get("name_ko", domain), "agents": _legacy.get("agents", []),
                     "template_id": _legacy.get("template", "")}
