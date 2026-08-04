@@ -365,6 +365,12 @@ async def set_project_ownership(project_id: str, req: OwnershipUpdate,
 
 @router.get("/projects")
 async def get_projects(p: Principal = Depends(current_principal)):
+    # ★★ [이관 7/10] 소유권 필터(`_ownership_visible`)는 있었지만 **익명 자체가 통과**했다.
+    #   미태깅 프로젝트는 하위호환으로 «누구에게나 보이는» 상태이므로, 익명에게 목록을 주면
+    #   그 하위호환이 그대로 유출 경로가 된다. 관문 A: 미지정 = 비노출.
+    reason = visibility_block_reason(p)
+    if reason:
+        return {"status": "success", "data": [], "blocked_reason": reason}
     projects_dir = "./projects"
     os.makedirs(projects_dir, exist_ok=True)
 
@@ -457,6 +463,12 @@ def provision_project(project_id: str, template_id: str = "default",
 @router.post("/projects")
 async def create_project(req: ProjectCreateRequest, p: Principal = Depends(current_principal),
                          ctx: "EnterpriseContext" = Depends(enterprise_context)):
+    # ⚠️ 익명이 프로젝트를 만들면 `primary_dept_id` 가 비어 **소유권 없는 프로젝트**가
+    #   생긴다. 그러면 프롬프트 주입 필터가 아예 걸리지 않아(fail-open) 전사 산출물이
+    #   그대로 주입된다 — 이 함수의 주석이 경고하는 바로 그 경로다. 입구에서 막는다.
+    _reason = visibility_block_reason(p)
+    if _reason:
+        raise HTTPException(status_code=403, detail=_reason)
     # ★ [2026-07-28 Phase 5] 생성 시점에 **만든 사람의 소속 부서를 소유 부서로 찍는다.**
     #   ⚠️ 왜 여기가 중요한가: 프롬프트 주입 필터(`get_relevant_context`)는 프로젝트에
     #     `owner_dept_id` 가 있을 때만 부서 스코프를 건다. 소유권이 비어 있으면
@@ -522,6 +534,12 @@ class MegaProjectCreateRequest(BaseModel):
 @router.post("/projects/mega")
 async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depends(current_principal)):
     """메가 프로젝트 생성 (마스터 + 8개 서브 프로젝트 일괄 프로비저닝)"""
+    # ⚠️ 익명이 프로젝트를 만들면 `primary_dept_id` 가 비어 **소유권 없는 프로젝트**가
+    #   생긴다. 그러면 프롬프트 주입 필터가 아예 걸리지 않아(fail-open) 전사 산출물이
+    #   그대로 주입된다 — 이 함수의 주석이 경고하는 바로 그 경로다. 입구에서 막는다.
+    _reason = visibility_block_reason(p)
+    if _reason:
+        raise HTTPException(status_code=403, detail=_reason)
     _safe_id(req.mega_project_id, "mega_project_id")
 
     # 템플릿 존재 검증 — 미존재 템플릿으로 서브 프로젝트가 default 폴백되는 것을 방지
@@ -619,8 +637,9 @@ class MegaPlanRequest(BaseModel):
     initial_idea: str
 
 @router.post("/projects/{project_id}/mega/plan")
-async def mega_project_plan(project_id: str, req: MegaPlanRequest):
+async def mega_project_plan(project_id: str, req: MegaPlanRequest, p: Principal = Depends(current_principal)):
     """마스터 에이전트 연동: 초기 기획안을 바탕으로 master_data를 추천/생성"""
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):
@@ -667,8 +686,9 @@ async def mega_project_plan(project_id: str, req: MegaPlanRequest):
     return {"status": "success", "master_data": master_state["master_data"]}
 
 @router.post("/projects/{project_id}/mega/start_all")
-async def start_all_mega_subprojects(project_id: str):
+async def start_all_mega_subprojects(project_id: str, p: Principal = Depends(current_principal)):
     """마스터에 종속된 모든 서브 프로젝트 일괄 가동"""
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):
@@ -886,7 +906,8 @@ async def stop_sprint(project_id: str, req: SprintPauseRequest,
     return {"status": "stopped", "task_id": req.task_id}
 
 @router.post("/{project_id}/hotl/resume")
-async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
+async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal = Depends(current_principal)):
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id)
     if not success:
@@ -894,10 +915,11 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
     return {"status": "resumed", "task_id": req.task_id}
 
 @router.post("/{project_id}/sprint/resume-quota")
-async def resume_from_quota(project_id: str, req: SprintPauseRequest):
+async def resume_from_quota(project_id: str, req: SprintPauseRequest, p: Principal = Depends(current_principal)):
     """[R2] 쿼터 회복 후 SUSPENDED_QUOTA 로 동결된 스프린트를 마지막 체크포인트에서 재개.
     '처음부터 재실행'이 아니라 중단 지점부터 이어서 실행한다. 쿼터가 아직도 없으면 재개 스트림이
     다시 쿼터 소진을 만나 자연히 재동결된다(400 반환 조건: 대상이 SUSPENDED_QUOTA 상태가 아님)."""
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     success = await orchestrator.resume_from_suspend(req.task_id, project_id)
     if not success:
@@ -949,8 +971,9 @@ async def supervisor_chat(project_id: str, req: SupervisorChatRequest,
     return response
 
 @router.get("/{project_id}/hotl/check")
-async def check_hotl(project_id: str):
+async def check_hotl(project_id: str, p: Principal = Depends(current_principal)):
     """진행 중(IN_PROGRESS) 태스크가 HOTL 중단점에서 대기 중인지 조회 (SSE 이벤트 유실 복구용)."""
+    assert_project_readable(p, project_id)
     _safe_id(project_id, "project_id")
 
     if await orchestrator.is_hotl_pending("sprint_init", project_id):
@@ -979,7 +1002,8 @@ async def check_hotl(project_id: str):
     return {"status": "success", "hotl_task_id": None}
 
 @router.post("/{project_id}/sprint/revision")
-async def create_revision_task(project_id: str, req: RevisionRequest):
+async def create_revision_task(project_id: str, req: RevisionRequest, p: Principal = Depends(current_principal)):
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     
     if await orchestrator.is_hotl_pending("sprint_init", project_id):
@@ -993,7 +1017,8 @@ async def create_revision_task(project_id: str, req: RevisionRequest):
     return {"status": "success", "task_id": task_id}
 
 @router.post("/{project_id}/heal")
-async def trigger_self_healing(project_id: str, req: HealRequest):
+async def trigger_self_healing(project_id: str, req: HealRequest, p: Principal = Depends(current_principal)):
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     
     if await orchestrator.is_hotl_pending("sprint_init", project_id):
@@ -1026,9 +1051,10 @@ async def trigger_self_healing(project_id: str, req: HealRequest):
     return {"status": "healing_started", "task_id": task_id}
 
 @router.post("/{project_id}/wbs/replan")
-async def replan_wbs(project_id: str):
+async def replan_wbs(project_id: str, p: Principal = Depends(current_principal)):
     """WBS 재분할 - 기획 산출물(RFP/PRD/UI/아키텍처)을 재사용해 Master_PMO 만 재실행한다.
     WBS 분할이 실패(빈 태스크)했거나 부실할 때 기획 전체 재가동 없이 복구하는 경로."""
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     workspace_root = f"./projects/{project_id}"
     state_path = os.path.join(workspace_root, "latest_state.json")

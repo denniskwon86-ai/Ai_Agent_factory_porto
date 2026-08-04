@@ -310,7 +310,27 @@ def _resource_readable(p: Principal, kind: str, rid: str) -> bool:
     return bool(own.get("dept_id")) and own["dept_id"] in p.scope.readable_dept_ids
 
 
+def _assert_identified_for_project(p: Principal, project_id: str, verb: str):
+    """★★★ [2026-08-04 이관 7/10] 프로젝트 판정 **앞에** 관문 A 를 세운다.
+
+    아래 두 함수는 «소유권이 기록되지 않은 프로젝트는 통과»라는 하위호환을 갖고 있다
+    (`if not own: return`). 그 관대함은 **등록된 사용자 사이의** 것이어야 하는데, 익명까지
+    통과시키고 있었다. 그래서 실측에서 익명이 `POST /{id}/hotl/resume` 로 **HOTL 중단점을
+    통과**시킬 수 있었다 — 6/10 에서 «중단점을 지우려면 관리자 권한»을 막았지만, 지울 필요
+    없이 넘겨 버리면 그 통제는 없는 것과 같다.
+
+    ⚠️ 라우트마다 이 검사를 흩지 않고 **판정 함수 안**에 둔다. 그러면 이 함수를 이미 쓰는
+      모든 경로(스프린트 시작·중지·삭제·복제·릴리스·재시뮬레이션)가 함께 보호되고,
+      새 라우트가 생겨도 판정을 부르는 순간 같이 걸린다.
+    강제가 꺼져 있으면 아무것도 막지 않는다(`visibility_block_reason` 의 계약)."""
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403,
+                            detail=f"'{project_id}' 프로젝트를 {verb} 수 없습니다 — {reason}")
+
+
 def assert_project_readable(p: Principal, project_id: str):
+    _assert_identified_for_project(p, project_id, "볼")
     if not _resource_readable(p, "project", project_id):
         _deny(f"'{project_id}' 프로젝트를 볼 권한이 없습니다.")
 
@@ -318,8 +338,10 @@ def assert_project_readable(p: Principal, project_id: str):
 def assert_project_writable(p: Principal, project_id: str):
     if p.scope.unrestricted:
         return
+    _assert_identified_for_project(p, project_id, "바꿀")
     own = org_directory.get_ownership("project", project_id)
     if not own:
+        # 소유권 미기록 프로젝트에 대한 관대함 — 단, 위에서 **식별된 사용자**임을 확인했다.
         return
     if own.get("owner_user_id") and own["owner_user_id"] == p.user_id:
         return
