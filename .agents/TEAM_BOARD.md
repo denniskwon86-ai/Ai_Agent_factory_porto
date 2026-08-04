@@ -71,6 +71,16 @@
 - 다음 행동 / 담당 / 착수 조건: **Claude Code** — 인수인계 §4.2 화면 이관 순서(`Telemetry(227) → ProgramAdmin(239) → Shadow(305) → …`) 또는 D-017 P3-1. **Supervisor** — 결정 3건: ① **조직 범위 정본**(위 뿌리 원인) ② 경영계획 **수립 권한**을 별도로 둘지(지금은 «시나리오를 만들 수 있는 사람이 가정도 넣는다» 로 통일) ③ `resolve_scope_ref` 가 해석하지 못하는 것이 데이터 미비인지 코드 결함인지 — 확인 후 별개 작업 필요.
 - 교대 체크포인트: 변경 = `api/routes/planning_control.py`(라우트 14개 + 헬퍼 4개) · `core/scope_guard.py`(`_actor_scopes` 원천 수정) · `api/deps.py`(`hidden_envelope`·`_EXACT_COUNT_RULES`) · `tests/test_planning_control_gate.py`(신규 33건). 미변경 = 화면, `planning_engine`·`planning_import` 내부, DB 스키마. 검증 = 1,970 passed. 재개 지점 = 화면 이관 또는 P3-1. 금지 범위 = `visible_scopes` 의 `include_descendants` 기본값을 켜는 것, `_actor_scopes` 를 부서 해석 전용으로 되돌리는 것, 범위 밖 요청에 403 을 주는 것(존재를 알린다), 자기 조직 요청이 404 가 되는 상태를 «안전» 으로 읽는 것, 실서버 DB 를 향해 쓰기 엔드포인트를 탐침하는 것.
 
+### [SEC-SCOPE-51] D-018 조직 범위 정본 판정 — `node_id`로 통일
+- 작성자 / 기록 시각: Codex / 2026-08-05 KST
+- 왜 지금 기록하는가: `[SEC-PLAN-50]`이 Planning 통제의 근본 미결로 `LS_MNM` 계열 코드와 `node_*` ECM 식별자 중 어느 쪽이 정본인지 판정을 요청했다.
+- 상태: **결정 완료 · 구현 대기**
+- 결정 및 근거: ECM 내부 정본은 불변 `organization_nodes.node_id`로 통일한다(D-018). 실제 DB에서 `LS_MNM → node_41402723bc90`, `MNM_BATTERY → node_36c1c7c797e0`이며, 회계·재무·구매·물류 등 여러 부서가 동일 `LS_MNM` 범위에 매핑된다. 따라서 `code`는 표시·레거시 매핑용 업무키, `dept_id`는 권한 디렉터리 키이며 관계·권한의 영구 식별자가 아니다. 상세 결정은 `.agents/DECISIONS.md` `[D-018]`.
+- 추가 실측: 현재 저장소 루트에서 `resolve_scope_ref`는 코드·부서 ID·node ID를 모두 정상 해석한다. 인수인계 당시 전부 빈 값이 나온 현상은 정본 선택과 별개로 상대경로 DB 또는 실행 CWD·싱글턴 저장소 불일치 가능성이 높다. 현재 우회(`readable_scope_nodes` 우선)는 안전을 위해 유지한다.
+- 영향·주의사항: D-005의 다중 입력 수용은 하위호환으로 유지하되 신규 저장은 정규화된 node ID만 허용한다. 업무코드를 정본으로 바꾸거나 전역 `find_node_by_code(... LIMIT 1)`로 후보를 임의 선택하지 않는다. 미해석·복수 후보는 fail-closed다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code 권고** — ① ECM/master DB 경로를 프로젝트 기준 절대경로로 고정 ② tenant·entity_mode를 받는 단일 `resolve_scope_ref` 계약 ③ 기존 `departments.scope_node_id`·`enterprise_scope_id` 코드값 backfill ④ 신규 쓰기 node ID 강제 ⑤ 코드 별칭·변경이력과 범위별 유일성 검증 ⑥ 격리 DB 테스트. 제품 DB 대상 쓰기 탐침은 금지한다.
+- 교대 체크포인트: 결정문·실데이터 읽기 검증만 수행 · 제품 코드/DB 미변경 · 커밋/푸시 미수행 · `[SEC-PLAN-50]`의 우회는 제거 금지 · 구현 후 자기 조직 200/형제 조직 404/다른 CWD 동일 DB 테스트 필수.
+
 ### [SEC-P1-48] P1-5 기존 API 어댑터 전환 — 조직 워크플로우가 목록에서 통째로 사라져 있었다
 - 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
 - 왜 지금 기록하는가: **D-017 §9 P1 이 5/5 로 끝났다.** 그리고 전환 과정에서 `agent_assets.list_assets` 의 반환 모양 때문에 **P1-4 와 P1-5 양쪽에 같은 결함**이 있었다 — 그 원인을 남겨야 다음 사람이 세 번째로 밟지 않는다.
