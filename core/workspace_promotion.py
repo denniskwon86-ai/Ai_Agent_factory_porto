@@ -34,8 +34,9 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "workspace.db")
+_DB_PATH = data_path("workspace.db")
 
 SHARE_MODES = ("read", "fork")          # 읽기 공유 / 복제 허용
 PROMOTION_STATUS = ("draft", "requested", "approved", "rejected", "promoted",

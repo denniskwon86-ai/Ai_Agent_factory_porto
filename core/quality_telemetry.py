@@ -30,8 +30,9 @@ import os
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+from core.paths import data_path
 
-_LOG_PATH = os.path.join("data", "quality_outcomes.jsonl")
+_LOG_PATH = data_path("quality_outcomes.jsonl")
 
 # ── §8.3 실패 원인 분류 (이 6개가 명세가 정한 전부) ──────────────────────────
 CAUSE_MODEL_QUALITY = "model_quality"              # 모델 품질

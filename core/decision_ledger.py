@@ -38,8 +38,9 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "decision_ledger.db")
+_DB_PATH = data_path("decision_ledger.db")
 
 # ── §5.2 필수 이벤트 유형 ─────────────────────────────────────────────────
 #   명세서가 열거한 10종 + ECM §6.2 가 요구하는 문맥·복제·권한 이벤트.

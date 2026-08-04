@@ -17,8 +17,9 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+from core.paths import data_path
 
-_DB_DIR = os.path.join("data", "master")
+_DB_DIR = data_path("master")
 _DB_PATH = os.path.join(_DB_DIR, "master.db")
 
 # 검증 정규식 (docs §6)

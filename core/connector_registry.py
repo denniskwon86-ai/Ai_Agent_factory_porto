@@ -33,8 +33,9 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "connectors.db")
+_DB_PATH = data_path("connectors.db")
 
 #: 자격증명처럼 보이는 문자열. `auth_ref` 에 이런 게 들어오면 **거부**한다.
 #  ⚠️ 토큰 접두사(sk- 등)에만 "단어 시작" 제약을 건다. URL 인라인 자격증명

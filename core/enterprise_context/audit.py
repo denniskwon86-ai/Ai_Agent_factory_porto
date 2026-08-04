@@ -38,8 +38,9 @@ import os
 import threading
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
+from core.paths import data_path
 
-_LOG_PATH = os.path.join("data", "access_audit.jsonl")
+_LOG_PATH = data_path("access_audit.jsonl")
 _lock = threading.Lock()
 _write_failures = 0
 

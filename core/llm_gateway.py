@@ -16,6 +16,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from core import cache_manager
 from core.llm_cost import estimate_cost_usd, is_paid_model, provider_of
+from core.paths import data_path
 
 class QuotaExhaustedException(Exception):
     pass
@@ -294,7 +295,7 @@ class _ModelRecorder(BaseCallbackHandler):
             pass
 
 
-_LLM_CALL_LOG_PATH = os.path.join("data", "llm_call_log.jsonl")
+_LLM_CALL_LOG_PATH = data_path("llm_call_log.jsonl")
 
 
 def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, attempts: list, ok: bool, duration_s: float,

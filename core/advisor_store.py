@@ -23,8 +23,9 @@ from typing import Any, Dict, List, Optional
 
 from core.advisor_blueprint import SolutionBlueprint
 from core.enterprise_context import EnterpriseContext, build_context, isolation_filter
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "advisor.db")
+_DB_PATH = data_path("advisor.db")
 
 # 상담 범위 — §4.3 F-DA-01
 CONSULTATION_SCOPES = ("enterprise", "department", "project", "data", "simulation")

@@ -39,8 +39,9 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "collaboration.db")
+_DB_PATH = data_path("collaboration.db")
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS app_deliveries (

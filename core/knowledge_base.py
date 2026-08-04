@@ -6,14 +6,15 @@ import re
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from core.paths import data_path
 
 try:
     import chromadb
 except ImportError:
     chromadb = None
 
-CHROMA_DB_DIR = os.path.join("data", "chroma_db")
-PACKS_DIR = os.path.join("data", "knowledge_packs")
+CHROMA_DB_DIR = data_path("chroma_db")
+PACKS_DIR = data_path("knowledge_packs")
 
 # 다국어 임베딩(한국어 자료 검색 품질 확보) - 로컬 실행이라 LLM 제공사가 폴백/전환되어도
 # 검색·그라운딩 결과가 불변이다(모델 불가지성). sentence-transformers 미설치 시 Chroma 기본

@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 from state_models import ProjectState
 from criteria import DETERMINISTIC_CHECKS
+from core.paths import data_path
 
 # 대표 골든 시나리오 세트. project_id 는 카탈로그(docs/test_plan/01_scenario_catalog.md) 규칙.
 # ⚠️ C-1/D-1 의 실제 project_id 는 최초 완주 시 생성된 폴더명으로 조정(카탈로그에 suffix 미명시).
@@ -57,7 +58,7 @@ def _git_commit() -> str:
 
 class GoldenBenchmark:
     def __init__(self, root: str = None, projects_dir: str = "projects"):
-        root = root or os.path.join("data", "benchmark")
+        root = root or data_path("benchmark")
         self.root = root
         self.projects_dir = projects_dir
         self.scorecards_dir = os.path.join(root, "scorecards")

@@ -37,8 +37,9 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "external_intelligence.db")
+_DB_PATH = data_path("external_intelligence.db")
 
 SOURCE_TYPES = ("API", "CSV", "RSS", "WEB", "REPORT", "PROVIDER_API")
 # §12.4 원천 선택 우선순위 — 숫자가 작을수록 우선. 등록 시 자동 부여해 "왜 이 원천이

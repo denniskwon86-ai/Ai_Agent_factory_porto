@@ -42,8 +42,9 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "shadow_runs.db")
+_DB_PATH = data_path("shadow_runs.db")
 
 #: 후보의 종류. `planning_scenario` 만 실제 실행 어댑터가 있고 나머지는 결과 주입 방식이다.
 CANDIDATE_KINDS = ("planning_scenario", "rule", "model", "app", "other")

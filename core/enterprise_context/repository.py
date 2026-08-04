@@ -20,8 +20,9 @@ from core.enterprise_context.models import (INHERITANCE_MODES, NODE_TYPES, PROFI
                                             RELATION_TYPES, STATUS_ACTIVE, STATUSES,
                                             EcmError, EnterpriseEntity, EnterpriseProfile,
                                             OrganizationEdge, OrganizationNode)
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "enterprise_context.db")
+_DB_PATH = data_path("enterprise_context.db")
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS enterprise_entities (

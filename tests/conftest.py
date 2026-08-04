@@ -38,8 +38,31 @@ def _master_db_template(tmp_path_factory):
     return str(p)
 
 
+@pytest.fixture(scope="session")
+def _planning_db_template(tmp_path_factory):
+    """빈 경영계획 스키마를 **세션당 한 번** 만든다(기준정보와 같은 이유 — DDL 비용).
+
+    ★★ [2026-08-05] 왜 격리하는가: `data/planning.db` 는 격리 목록에 없어 **테스트가 운영
+      경영계획 DB 를 그대로 쓰고 있었다.** 계정과목·실적·시나리오·제출물이 들어 있는 파일이다.
+      실제로 통제 확인 중에 탐침 데이터가 그 DB 에 들어갔고(계정과목·동인·fact·시나리오·제출물),
+      지우고 복구해야 했다. 경로를 절대경로로 고정한 뒤에는 cwd 와 무관하게 **항상** 그 파일을
+      쓰게 되므로, 격리를 여기서 확실히 한다.
+    ⚠️ 경영계획은 «거버넌스 지표의 오염» 보다 나쁘다 — 매출·원가 전망이 담기는 표다."""
+    p = tmp_path_factory.mktemp("planning_tpl") / "planning.db"
+    from core.planning_model import PlanningStore
+    PlanningStore(db_path=str(p))        # DDL·컬럼 마이그레이션 1회
+    import sqlite3
+    conn = sqlite3.connect(str(p))
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        conn.close()
+    return str(p)
+
+
 @pytest.fixture(autouse=True)
-def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template):
+def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
+                               _planning_db_template):
     """모든 테스트의 텔레메트리 기록을 tmp 로 돌린다(개별 테스트가 다시 덮어써도 무해)."""
     try:
         from core import quality_telemetry
@@ -138,3 +161,16 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template):
         monkeypatch.setattr(_md.master_data, "_cache", None, raising=False)
     except Exception as e:
         print(f"⚠️ [conftest] 기준정보 DB 격리 실패(실 DB 오염 위험): {e}")
+    try:
+        # ★★★ [2026-08-05] **경영계획 DB 도 격리한다 — 여기까지 막지 않아 실제로 오염됐다.**
+        #   통제 확인 중 탐침 데이터가 `data/planning.db` 에 들어갔다(계정과목·동인·fact·
+        #   시나리오·제출물). 지우고 복구했지만, 애초에 테스트가 운영 DB 를 쓰지 않아야 한다.
+        #   ⚠️ 기준정보 오염보다 무겁다 — 매출·원가 전망이 담기는 표다.
+        #   `planning_approval`·`planning_drivers` 도 모두 `planning_store._connect()` 를 쓰므로
+        #   **싱글턴의 `db_path` 하나만 바꾸면 계열 전체가 격리된다.**
+        from core import planning_model as _pm
+        _pp = tmp_path / "planning.db"
+        shutil.copyfile(_planning_db_template, _pp)
+        monkeypatch.setattr(_pm.planning_store, "db_path", str(_pp), raising=False)
+    except Exception as e:
+        print(f"⚠️ [conftest] 경영계획 DB 격리 실패(실 DB 오염 위험): {e}")

@@ -13,8 +13,9 @@ import threading
 from datetime import datetime, timezone
 
 from core.crosswalk import crosswalk as _crosswalk_singleton
+from core.paths import data_path
 
-_CACHE_DB = os.path.join("data", "mcp_cache.db")
+_CACHE_DB = data_path("mcp_cache.db")
 _DEFAULT_TTL = 300  # 초
 
 _CACHE_DDL = """

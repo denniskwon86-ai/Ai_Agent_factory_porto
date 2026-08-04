@@ -240,11 +240,21 @@ def test_import_rejects_when_any_row_is_outside_scope(client):
 
 
 def test_import_allows_own_scope_validation(client):
-    """통제가 업무를 막지 않는다 — 자기 조직 행은 검증까지 통과해야 한다(`commit=False`)."""
+    """통제가 업무를 막지 않는다 — 자기 조직 행은 검증까지 통과해야 한다(`commit=False`).
+
+    ⚠️ **함정**: 이 엔드포인트는 검증이 실패해도 **200 + `ok: False`** 를 준다(어느 행이 왜
+      틀렸는지 알려주는 것이 목적이므로 맞는 설계다). 그래서 `status_code == 200` 만 보면
+      «범위 통과» 와 «검증 실패» 를 구분하지 못하고, 계정이 없는 격리 DB 에서 그 차이가 드러난다.
+      계정을 먼저 등록해 **실제로 통과하는 것**까지 확인한다."""
+    from core.planning_model import planning_store
+    planning_store.upsert_account("4000", "매출", "revenue", 1, "")
     rows = [{"org_id": "LS_MNM", "account_code": "4000", "period": "2026",
              "value_kind": "ACTUAL", "amount": "1"}]
     r = client.post(f"{B}/import/rows", json={"rows": rows, "commit": False}, headers=H(MGR))
-    assert r.status_code == 200, "자기 조직 행 검증이 막혔다"
+    assert r.status_code == 200, "자기 조직 행이 범위 검증에서 막혔다"
+    d = r.json()["data"]
+    assert d["ok"] is True, f"검증이 실패했다: {d.get('errors')}"
+    assert d["summary"]["valid"] == 1 and d["committed"] is False
 
 
 # ── 가정·무결성은 대상의 소유 조직으로 판정 ───────────────────────────────

@@ -22,10 +22,11 @@ from pydantic import BaseModel
 #     응답에 실어 보낸다 - 조용히 빼면 집계가 틀린 줄도 모르고 작아진다.
 from api.deps import Principal, current_principal
 from core.llm_cost import estimate_cost_usd, provider_of
+from core.paths import data_path
 
 router = APIRouter(prefix="/api/v1/telemetry", tags=["Telemetry"])
 
-_LOG_PATH = os.path.join("data", "llm_call_log.jsonl")
+_LOG_PATH = data_path("llm_call_log.jsonl")
 
 
 def _read_records(project: str = "") -> list:

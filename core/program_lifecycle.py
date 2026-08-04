@@ -47,8 +47,9 @@ from typing import Any, Dict, List, Optional
 #   들고 있으면 게시된 프로그램을 "존재하지 않는다"며 제어를 거부한다 — 그러면 사고를 낸
 #   프로그램을 IT 관리자가 끌 수 없다.
 from core import library_paths
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "program_lifecycle.db")
+_DB_PATH = data_path("program_lifecycle.db")
 
 ACTIVE = "active"
 DEPRECATED = "deprecated"

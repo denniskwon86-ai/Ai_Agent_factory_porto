@@ -49,8 +49,9 @@ from typing import Any, Dict, List, Optional
 #   게시(`factory_control`)·사용여부(`program_lifecycle`)와 어긋나 "존재하는 릴리스를 없다"고
 #   판정하게 된다. 값이 아니라 함수를 쓰는 이유는 그 모듈 docstring 에 있다.
 from core import library_paths
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "workspace.db")   # 워크스페이스와 같은 저장소(같은 수명주기)
+_DB_PATH = data_path("workspace.db")   # 워크스페이스와 같은 저장소(같은 수명주기)
 
 #: §8.2 게이트 체인. 순서가 곧 진행 순서다.
 GATE_STEPS = ("artifacts", "traceability", "tests", "permission_contract",

@@ -31,8 +31,9 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from core.paths import data_path
 
-_DB_PATH = os.path.join("data", "planning.db")
+_DB_PATH = data_path("planning.db")
 
 # ── 값의 성격 (§11.3) — 섞이면 안 되는 네 가지 ────────────────────────────────
 ACTUAL = "ACTUAL"        # 실제로 일어난 일

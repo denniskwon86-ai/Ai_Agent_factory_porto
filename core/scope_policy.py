@@ -26,8 +26,9 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from core.paths import data_path
 
-_POLICY_PATH = os.path.join("data", "scope_policy.json")
+_POLICY_PATH = data_path("scope_policy.json")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
