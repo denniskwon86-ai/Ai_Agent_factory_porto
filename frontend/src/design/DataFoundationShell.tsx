@@ -30,9 +30,13 @@ import { Panel } from './HubShell';
 
 // ── 검색·필터·1차 행동 한 줄 ────────────────────────────────────────────────
 export function FoundationToolbar({ search, onSearch, placeholder, filters, actions, hint }: {
-  search: string;
-  onSearch: (v: string) => void;
-  placeholder: string;
+  /** 검색을 쓰지 않는 화면은 **세 값을 모두 생략한다.**
+   *  ⚠️ 종전에는 필수였고, 검색이 없는 화면들이 `search=""` + 빈 `onSearch` 를 넘겼다.
+   *    그 결과 **입력할 수 있게 생겼지만 아무 일도 하지 않는 칸**이 놓였다(조직·권한과 거버넌스에서
+   *    같은 결함이 반복됐다). 사용자는 자기가 잘못 쳤다고 생각한다. */
+  search?: string;
+  onSearch?: (v: string) => void;
+  placeholder?: string;
   /** 분류 전환. 2~5개까지만 — 넘어가면 목록이지 필터가 아니다. */
   filters?: { id: string; label: string; active: boolean; onSelect: () => void }[];
   actions?: ReactNode;
@@ -41,14 +45,17 @@ export function FoundationToolbar({ search, onSearch, placeholder, filters, acti
   return (
     <div className="foundation-toolbar">
       <div className="foundation-toolbar-row">
-        <div className="search-field">
-          <span aria-hidden="true">🔍</span>
-          <input value={search} placeholder={placeholder} aria-label={placeholder}
-            onChange={(e) => onSearch(e.target.value)} />
-          {search && (
-            <button type="button" className="text-button" onClick={() => onSearch('')}>지우기</button>
-          )}
-        </div>
+        {onSearch && (
+          <div className="search-field">
+            <span aria-hidden="true">🔍</span>
+            <input value={search || ''} placeholder={placeholder || ''}
+              aria-label={placeholder || '검색'}
+              onChange={(e) => onSearch(e.target.value)} />
+            {search && (
+              <button type="button" className="text-button" onClick={() => onSearch('')}>지우기</button>
+            )}
+          </div>
+        )}
         {filters && filters.length > 0 && (
           <div className="filter-pills">
             {filters.map((f) => (

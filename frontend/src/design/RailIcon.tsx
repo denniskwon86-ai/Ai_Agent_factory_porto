@@ -23,7 +23,9 @@ export type RailIconName =
   // 업무표준(이관 3/10)
   | 'standard' | 'checklist'
   // 조직·권한(이관 4/10)
-  | 'orgtree' | 'people' | 'shield';
+  | 'orgtree' | 'people' | 'shield'
+  // 거버넌스(이관 5/10)
+  | 'alert' | 'duplicate' | 'gap' | 'contract' | 'globe';
 
 /** 이름 → 도형. `d` 는 stroke 로 그리고, `fillDots` 는 점처럼 채운다. */
 const SHAPES: Record<RailIconName, { d: string[]; dots?: [number, number][] }> = {
@@ -65,6 +67,16 @@ const SHAPES: Record<RailIconName, { d: string[]; dots?: [number, number][] }> =
   people: { d: ['M9 10.6a3.2 3.2 0 100-6.4 3.2 3.2 0 000 6.4z', 'M2.6 20.4c0-3.5 2.9-6.4 6.4-6.4s6.4 2.9 6.4 6.4', 'M16.4 4.6a3.2 3.2 0 010 6.2', 'M18 14.4c2.1.7 3.4 2.6 3.4 5'] },
   // 내 권한 — 방패
   shield: { d: ['M12 3.2l7.4 2.6v5.6c0 4.2-3 7.8-7.4 9.4-4.4-1.6-7.4-5.2-7.4-9.4V5.8L12 3.2z', 'M9.2 12l2 2 3.6-3.8'] },
+  // 범위 노출 — 삼각 경고(조용한 노출이 이 화면에서 가장 위험한 상태다)
+  alert: { d: ['M12 3.4L21.6 20H2.4L12 3.4z', 'M12 9.4v5'], dots: [[12, 17]] },
+  // 중복 — 겹친 두 사각형(«같은 대상이 두 벌»을 형태로 말한다)
+  duplicate: { d: ['M8.6 3.6h11.8v11.8H8.6z', 'M3.6 8.6h11.8v11.8H3.6z'] },
+  // 카탈로그 결손 — 한 칸이 비어 있는 격자
+  gap: { d: ['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13.6 13.6l5.8 5.8', 'M19.4 13.6l-5.8 5.8'] },
+  // 데이터 계약 — 서명선이 있는 문서
+  contract: { d: ['M6 2.6h9l3.4 3.4V21.4H6V2.6z', 'M15 2.6V6h3.4', 'M8.8 11h6.4', 'M8.8 14.4h6.4', 'M8.8 17.8c1.2-1.4 2.4 1.4 3.6 0s2.4 1.4 3.6 0'] },
+  // 외부지표 — 지구(사외에서 오는 값)
+  globe: { d: ['M12 21a9 9 0 100-18 9 9 0 000 18z', 'M3 12h18', 'M12 3c2.6 2.6 2.6 15.4 0 18', 'M12 3c-2.6 2.6-2.6 15.4 0 18'] },
 };
 
 export function RailIcon({ name }: { name: RailIconName }) {

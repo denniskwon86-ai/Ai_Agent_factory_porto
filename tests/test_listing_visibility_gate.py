@@ -426,3 +426,93 @@ def test_org_exact_count_rule_is_per_resource_kind(monkeypatch):
     # 오타를 «건수 안 줌»으로 조용히 처리하면 관리자가 못 보는 이유를 아무도 못 찾는다.
     with pytest.raises(ValueError):
         hidden_envelope(org, 10, 3, exact_for="typo")
+
+
+# ── 거버넌스 지표: 익명이 **취약점 지도**를 보고 있었다(2026-08-04 이관 5/10) ──────────
+#
+# ★★★ 실측으로 익명이 받아 본 것:
+#   · `/contracts/evaluate` → 위반 계약과 사유(«생산자 자산이 폐기됐다 — 약속을 지킬 원천이
+#     사라졌다»)
+#   · `/external/readiness` → 지표 6개의 필요 등급·**격차 영향**·다음 행동
+#     («물량 계획의 외부 근거가 없어 낙관 편향을 검증할 수단이 없습니다»)
+#
+# ⚠️ 자료 본문이 아니라 «집계»라서 가볍게 보기 쉽다. 그러나 거버넌스 콘솔은 정의상
+#   «무엇이 안 되어 있는가»를 모으는 화면이므로, 집계 자체가 취약점 목록이다.
+def _gov_app(monkeypatch, *, enforced=True, user_id="", user=None, scope_kw=None):
+    import api.routes.catalog_control as cc
+    import api.routes.contract_control as ctc
+    import api.routes.crosswalk_control as cwc
+    import api.routes.external_control as ec
+    import core.org_directory as od
+    monkeypatch.setattr(od, "_org_enforce_effective", lambda: enforced)
+    monkeypatch.setattr(od.org_directory, "get_user", lambda uid: user)
+    app = FastAPI()
+    for r in (cc.router, ctc.router, cwc.router, ec.router):
+        app.include_router(r)
+    app.dependency_overrides[current_principal] = lambda: Principal(
+        user_id=user_id,
+        scope=AccessScope(user_id=user_id, **(scope_kw or {"unrestricted": False})))
+    return app
+
+
+GOVERNANCE_PATHS = (
+    "/api/v1/catalog/governance/coverage",
+    "/api/v1/catalog/governance/gaps",
+    "/api/v1/contracts/evaluate",
+    "/api/v1/crosswalk/systems/coverage",
+    "/api/v1/external/readiness",
+    "/api/v1/external/indicators",
+    "/api/v1/external/sources",
+)
+
+
+@pytest.mark.parametrize("uid,user,why", [
+    ("", None, "익명"),
+    ("ghost@ls", None, "미등록"),
+    ("staff@ls", {"user_id": "staff@ls", "status": "active"}, "권한 없는 일반 사용자"),
+])
+def test_governance_metrics_require_role(monkeypatch, uid, user, why):
+    """전사 정비 상태는 데이터 관리자·조직 관리자·경영진에게만. 그 밖에는 403 + 이유."""
+    c = TestClient(_gov_app(monkeypatch, user_id=uid, user=user,
+                            scope_kw={"unrestricted": False,
+                                      "readable_dept_ids": frozenset({"dept-a"})}))
+    for path in GOVERNANCE_PATHS:
+        r = c.get(path)
+        assert r.status_code == 403, f"{why} 에게 {path} 가 열려 있다"
+        assert r.json().get("detail"), f"{path} 차단 이유가 없다"
+
+
+@pytest.mark.parametrize("role", ["can_manage_standard", "can_edit_org", "can_run_enterprise"])
+def test_governance_metrics_open_for_stewards(monkeypatch, role):
+    """★ 정비를 **할 사람**은 막지 않는다 — 통제가 정비를 막으면 정비가 멈춘다."""
+    c = TestClient(_gov_app(
+        monkeypatch, user_id="steward@ls", user={"user_id": "steward@ls", "status": "active"},
+        scope_kw={"unrestricted": False, role: True, "readable_dept_ids": frozenset({"hq"})}))
+    for path in GOVERNANCE_PATHS:
+        assert c.get(path).status_code == 200, f"{role} 에게 {path} 가 막혔다"
+
+
+def test_governance_gate_is_transparent_when_enforcement_off(monkeypatch):
+    """★★ 강제가 꺼져 있으면 아무것도 막지 않는다 — ECM 미도입 흐름의 하위호환 계약."""
+    c = TestClient(_gov_app(monkeypatch, enforced=False, user_id="", user=None))
+    for path in GOVERNANCE_PATHS:
+        assert c.get(path).status_code == 200, f"강제가 꺼졌는데 {path} 가 막혔다"
+
+
+def test_clearance_aware_lists_keep_their_design(monkeypatch):
+    """★★ 이미 **등급 기반 가림**이 있는 목록(§6-2 사용자 결정)은 403 으로 덮지 않는다.
+
+    자산·계약·연계 시스템 목록은 낮은 등급에 «제목만» 주도록 설계돼 있다. 그 설계를 지우면
+    문서화된 사용자 결정이 조용히 사라진다. 다만 익명·미등록에는 0건 + 이유로 답한다."""
+    anon = TestClient(_gov_app(monkeypatch, user_id="", user=None))
+    for path in ("/api/v1/catalog/assets", "/api/v1/contracts", "/api/v1/crosswalk/systems"):
+        b = anon.get(path).json()
+        assert b["data"] == [] and b.get("blocked_reason"), f"{path} 가 익명에게 열려 있다"
+
+    staff = TestClient(_gov_app(
+        monkeypatch, user_id="staff@ls", user={"user_id": "staff@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"})}))
+    for path in ("/api/v1/catalog/assets", "/api/v1/contracts", "/api/v1/crosswalk/systems"):
+        r = staff.get(path)
+        assert r.status_code == 200, f"{path} 가 일반 사용자에게 403 이 됐다 — 등급 설계를 덮었다"
+        assert not r.json().get("blocked_reason")

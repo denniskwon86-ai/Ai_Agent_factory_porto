@@ -11,7 +11,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (Principal, assert_can_manage_standard, assert_governance_readable,
+                      current_principal, visibility_block_reason)
 from core.data_contract import DataContractError, data_contracts
 
 router = APIRouter(prefix="/api/v1/contracts")
@@ -54,19 +55,21 @@ class PreviewRequest(BaseModel):
 
 # ── 고정 경로 (경로 변수보다 위) ──────────────────────────────────────────
 @router.get("/evaluate")
-async def evaluate_all():
+async def evaluate_all(p: Principal = Depends(current_principal)):
     """활성 계약 전부가 지금 지켜지고 있는지.
 
     ⚠️ `unverifiable` 은 **통과가 아니다** — 확인하지 못한 항목이다."""
+    assert_governance_readable(p)
     out = await asyncio.to_thread(data_contracts.evaluate_all)
     return {"status": "success", "data": out}
 
 
 @router.post("/preview-revision")
-async def preview_revision(req: PreviewRequest):
+async def preview_revision(req: PreviewRequest, p: Principal = Depends(current_principal)):
     """개정 전에 **소비자를 깨뜨리는 변경**을 가려낸다(필드 삭제·타입 변경·필수화).
 
     사람이 기억해서 챙기게 두면 반드시 놓친다."""
+    assert_governance_readable(p)
     try:
         out = await asyncio.to_thread(data_contracts.preview_revision, req.contract_key,
                                       req.schema_def)
@@ -81,6 +84,12 @@ async def list_contracts(producer_asset_id: str = "", consumer: str = "", status
                          tenant_id: str = "", entity_mode: str = "REAL",
                          p: Principal = Depends(current_principal)):
     """★ [§6-2] 등급은 주체 권한에서 파생한다 — 낮으면 제목만 보이고 내용은 가려진다."""
+    # ⚠️ 이 라우트는 이미 **등급 기반 가림**이 있다(§6-2 사용자 결정) — 낮은 등급에는
+    #   제목만 주고 내용을 가린다. 그 설계를 403 으로 덮지 않는다. 다만 익명·미등록·폐지
+    #   계정에는 아무것도 주지 않는다(관문 A). 목록형이므로 0건 + 이유로 답한다.
+    _reason = visibility_block_reason(p)
+    if _reason:
+        return {"status": "success", "data": [], "blocked_reason": _reason}
     from core.enterprise_context.classification import clearance_of_scope
     # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체인가 — 이것도 권한에서 파생한다.
     from core.enterprise_context.scoping import may_drill_down
@@ -105,7 +114,8 @@ async def create_contract(req: ContractRequest, p: Principal = Depends(current_p
 
 
 @router.get("/{contract_id}")
-async def get_contract(contract_id: str):
+async def get_contract(contract_id: str, p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
     data = await asyncio.to_thread(data_contracts.get, contract_id)
     if not data:
         raise HTTPException(status_code=404, detail="존재하지 않는 계약입니다.")
@@ -113,7 +123,8 @@ async def get_contract(contract_id: str):
 
 
 @router.get("/{contract_id}/evaluate")
-async def evaluate_contract(contract_id: str):
+async def evaluate_contract(contract_id: str, p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
     try:
         out = await asyncio.to_thread(data_contracts.evaluate, contract_id)
     except DataContractError as e:

@@ -100,6 +100,56 @@ export const ORG_STATUS_KO: Record<string, string> = {
   superseded: '개정으로 대체(구판)',
 };
 
+/** 데이터 계약의 상태. ⚠️ «확인 불가»를 «지켜짐»과 같은 것으로 읽으면 «계약 준수 중»이라는
+ *  거짓 안심이 생긴다 — 이 화면에서 가장 조심해야 하는 오독이다. */
+export const CONTRACT_STATE_KO: Record<string, string> = {
+  kept: '지켜짐',
+  at_risk: '주의',
+  breached: '위반',
+  unverifiable: '확인 불가',
+};
+
+/** 심각도. */
+export const SEVERITY_KO: Record<string, string> = {
+  high: '높음', medium: '보통', low: '낮음',
+};
+
+/** 외부 자료의 신뢰 등급. 원문(bronze/silver/gold)은 사용자에게 뜻이 약하다. */
+export const DATA_GRADE_KO: Record<string, string> = {
+  gold: '확정치(최상)',
+  silver: '잠정치(중간)',
+  bronze: '참고치(하)',
+};
+
+/** 카탈로그·품질 점검이 지적하는 결손 종류. */
+export const FINDING_KIND_KO: Record<string, string> = {
+  owner_missing: '책임자 미지정',
+  refresh_missing: '갱신 주기 미지정',
+  sensitivity_missing: '민감도 미지정',
+  producer_missing: '생산자 자산 없음',
+  freshness_unknown: '최신성 확인 불가',
+  schema_missing: '스키마 미등록',
+  scope_missing: '조직 범위 미지정',
+  duplicate_code: '코드 중복',
+  alias_conflict: '별칭 충돌',
+  same_name: '같은 명칭',
+  same_alias: '같은 별칭',
+  near_name: '유사 명칭',
+  no_source: '출처 없음',
+  stale: '오래됨',
+  low_quality: '품질 미달',
+  // ★ 아래 셋은 사전에 없던 값이다. 캡처 게이트가 콘솔 오류로 잡아 냈다(2026-08-04) —
+  //   `userTerm` 이 «모르는 값을 조용히 통과시키지 않는다»가 실제로 작동한 결과다.
+  //   뜻은 `core/master_data_seed.py` 의 생성 지점에서 확인해 옮겼다.
+  cost_exceeds_price: '원가가 판가를 초과(구조적 적자)',
+  cpk_unreachable: '공정능력이 목표에 미달(항상 품질 미달)',
+  uom_price_scale_suspect: '단위와 단가의 배율 불일치 의심',
+};
+
+export const contractStateKo = (v: string) => userTerm(CONTRACT_STATE_KO, v, '계약 상태');
+export const severityKo = (v: string) => userTerm(SEVERITY_KO, v, '심각도');
+export const dataGradeKo = (v: string) => userTerm(DATA_GRADE_KO, v, '자료 등급');
+export const findingKindKo = (v: string) => userTerm(FINDING_KIND_KO, v, '결손 종류');
 export const deptRoleKo = (v: string) => userTerm(DEPT_ROLE_KO, v, '부서 역할');
 export const orgStatusKo = (v: string) => userTerm(ORG_STATUS_KO, v, '조직 상태');
 export const stageKo = (v: string) => userTerm(STAGE_KO, v, '업무표준 단계');

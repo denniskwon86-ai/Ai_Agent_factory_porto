@@ -230,6 +230,44 @@ _EXACT_COUNT_RULES = {
 }
 
 
+def governance_block_reason(p: Principal) -> str:
+    """★★★ [2026-08-04 이관 5/10 실측 결함] **거버넌스 지표가 익명에게 열려 있었다.**
+
+    실측으로 익명이 받아 본 것:
+      · `/api/v1/contracts/evaluate` → 위반 계약 1건과 그 사유
+        («생산자 자산이 폐기됐다 — 약속을 지킬 원천이 사라졌다»)
+      · `/api/v1/external/readiness` → 지표 6개의 코드·필요 등급·**격차 영향**·다음 행동
+        («물량 계획의 외부 근거가 없어 낙관 편향을 검증할 수단이 없습니다»)
+
+    ⚠️ 이건 자료 본문이 아니라 **집계**다. 그래서 «수치일 뿐»으로 보기 쉬운데, 거버넌스 콘솔은
+      정의상 «무엇이 안 되어 있는가»를 모아 보여주는 화면이다. 즉 집계 자체가 **취약점 목록**이고,
+      익명에게 열려 있으면 어디를 파면 되는지 알려주는 지도가 된다.
+
+    자격: 데이터 표준 관리자·조직 관리자·경영진. 일반 사용자에게는 차단 이유를 말한다 —
+    이 화면은 «내 업무»가 아니라 «전사 정비 상태»를 다루므로 막아도 업무가 멈추지 않는다.
+    강제가 꺼져 있으면 아무것도 막지 않는다(하위호환 계약).
+    """
+    if not _enforced():
+        return ""
+    base = visibility_block_reason(p)
+    if base:
+        return base
+    s = p.scope
+    if (s.unrestricted or s.can_manage_standard or getattr(s, "can_edit_org", False)
+            or getattr(s, "can_run_enterprise", False)):
+        return ""
+    return ("전사 정비 상태(거버넌스) 지표는 데이터 관리자·조직 관리자·경영진에게만 표시합니다 "
+            "— 어디가 비어 있는지는 그 자체로 보호해야 하는 정보입니다.")
+
+
+def assert_governance_readable(p: Principal):
+    """거버넌스 읽기 자격. 목록형 응답은 `governance_block_reason` 으로 0건 + 이유를 주고,
+    단건·평가형 응답은 이 함수로 403 을 던진다(그쪽은 «0건»으로 표현할 형태가 없다)."""
+    reason = governance_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+
+
 def hidden_envelope(p: Principal, total: int, shown: int,
                     exact_for: str = "standard") -> dict:
     """★★ 목록이 무언가를 **가렸다**는 사실을 응답에 담는다. 건수를 줄지는 여기서만 정한다.

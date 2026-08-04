@@ -603,7 +603,10 @@
 .afs-scope .afs-banner.info { border-left: 4px solid var(--cyan); color: #0d5f6d; background: #eaf7fa; }
 .afs-scope .afs-banner.warn { border-left: 4px solid var(--orange); color: #7a4a10; background: #fff6e9; }
 .afs-scope .afs-banner.error { border-left: 4px solid var(--red); color: #96122e; background: #fdeef1; }
-.afs-scope .afs-banner b { display: block; margin-bottom: 3px; }
+/* ⚠️ **직계 자식만.** 종전에는 `.afs-banner b` 였고, 본문 안에서 한 단어를 강조하면 그 단어가
+ * 블록이 되어 줄이 끊겼다("«…» 이 아니라 / **확인하지 못한 것** / 입니다."). 배너 제목만 블록이다.
+ * `.afs-dialog-bar b` 와 같은 유형의 실수다 — 컨테이너 규칙이 내용까지 먹는 것. */
+.afs-scope .afs-banner > b { display: block; margin-bottom: 3px; }
 
 /* ── [CL-2] 의사결정 패키지 ────────────────────────────────────────────────
  *
