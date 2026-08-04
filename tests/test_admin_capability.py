@@ -20,6 +20,7 @@ from core.admin_capability import (ADMIN_AGENT_ACCESS, ADMIN_AUDIT, ADMIN_DATA_A
                                    ADMIN_ORGANIZATION, ADMIN_SECURITY, ADMIN_TABS, ADMIN_USERS,
                                    AGENT_CREATE, AGENT_EXECUTE, AGENT_PUBLISH, AGENT_READ,
                                    ALL_CAPABILITIES, MODEL_POLICY_MANAGE, SKILL_APPROVE,
+                                   SYSTEM_DEFAULT_EDIT,
                                    TAB_ROUTES, AdminCapabilityError, capabilities_for, require,
                                    require_dept, resolve)
 from core.org_directory import AccessScope, OrgDirectory
@@ -144,6 +145,34 @@ def test_ai_admin_gets_policy_but_not_data_tab(org):
     assert c.has(MODEL_POLICY_MANAGE) and c.has(SKILL_APPROVE) and c.has(ADMIN_AGENT_ACCESS)
     assert not c.has(ADMIN_DATA_ACCESS), "데이터 탭은 데이터 관리자 몫이다"
     assert not c.has(ADMIN_SECURITY), "보안 정책은 플랫폼 관리자 몫이다"
+
+
+def test_ai_admin_cannot_edit_system_default(org):
+    """★★★ [설계 §4.2 표] AI 거버넌스 관리자는 «시스템 기본 수정 **직접 수정 불가**».
+
+    ⚠️ 2026-08-04 실측으로 잡힌 설계-구현 괴리다. `admin.permissions` 로 이 판정을 대신했더니
+      AI 권한을 부여하는 순간 그 사람이 **전역 기본 레지스트리와 default 워크플로우를
+      덮어쓸 수 있게** 됐다. 승인 권한이 있다고 기본값을 고칠 수 있는 것이 아니다 —
+      승인은 «남이 만든 것을 통과시키는 일» 이고, 기본 수정은 «전 사용자의 출발점을 바꾸는 일» 이다."""
+    org.upsert_user("aa", "AI관리자", primary_dept_id="hq", is_ai_admin=True)
+    c = resolve(org.resolve_scope("aa"), org.get_user("aa"))
+    assert c.has(SKILL_APPROVE), "승인 권한은 있다"
+    assert c.has(MODEL_POLICY_MANAGE), "정책 권한도 있다"
+    assert not c.has(SYSTEM_DEFAULT_EDIT), "그러나 시스템 기본은 직접 못 고친다"
+
+
+def test_only_platform_admin_edits_system_default(org):
+    """★★ 이 권한을 가진 사람은 **플랫폼 관리자뿐**이다(설계 §4.2 표 세로줄)."""
+    org.upsert_user("root", "관리자", primary_dept_id="hq", is_admin=True)
+    org.upsert_user("m", "부서장", primary_dept_id="hq")
+    org.set_user_roles("m", {"hq": "manager"})
+    org.upsert_user("exec", "임원", primary_dept_id="hq", is_executive=True)
+    org.upsert_user("da", "데이터", primary_dept_id="hq", is_data_admin=True)
+
+    assert resolve(org.resolve_scope("root"), org.get_user("root")).has(SYSTEM_DEFAULT_EDIT)
+    for uid in ("m", "exec", "da"):
+        c = resolve(org.resolve_scope(uid), org.get_user(uid))
+        assert not c.has(SYSTEM_DEFAULT_EDIT), f"{uid} 가 시스템 기본을 고칠 수 있으면 안 된다"
 
 
 def test_platform_admin_sees_every_tab(org):

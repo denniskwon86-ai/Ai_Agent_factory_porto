@@ -48,6 +48,14 @@ SKILL_APPROVE = "skill.approve"
 
 MODEL_POLICY_MANAGE = "model.policy.manage"
 
+#: ★★ [설계 §4.2 표] **시스템 기본 정의를 직접 고치는 권한.**
+#:   표는 이렇게 되어 있다: 플랫폼 관리자 «복사·버전 승격만 가능» / AI 거버넌스 관리자
+#:   «직접 수정 불가» / 부서 manager·member·viewer «불가».
+#:   ⚠️ 이것을 `admin.permissions` 로 대신 쓰면 **AI 관리자가 전역 기본을 덮어쓴다** —
+#:     2026-08-04 실측: AI 권한을 넉넉히 부여하자 내 회귀 테스트 2건이 즉시 깨졌고,
+#:     그것이 설계와 구현이 갈라진 지점이었다. 그래서 전용 코드로 분리한다.
+SYSTEM_DEFAULT_EDIT = "system.default.edit"
+
 #: 관리자 센터 탭 접근(설계 §8.2). **탭마다 따로 둔다** — 하나로 묶으면 «조직 관리자» 가
 #: 모델 정책까지 바꿀 수 있게 되고, 그것이 D-017 이 분리하려던 바로 그 상태다.
 ADMIN_ORGANIZATION = "admin.organization"
@@ -64,7 +72,7 @@ ADMIN_TABS = (ADMIN_ORGANIZATION, ADMIN_USERS, ADMIN_PERMISSIONS, ADMIN_AGENT_AC
 ALL_CAPABILITIES = (
     AGENT_READ, AGENT_CREATE, AGENT_UPDATE, AGENT_PUBLISH, AGENT_RETIRE, AGENT_EXECUTE,
     WORKFLOW_READ, WORKFLOW_CREATE, WORKFLOW_UPDATE, WORKFLOW_PUBLISH, WORKFLOW_RETIRE,
-    WORKFLOW_BIND, SKILL_PROPOSE, SKILL_APPROVE, MODEL_POLICY_MANAGE,
+    WORKFLOW_BIND, SKILL_PROPOSE, SKILL_APPROVE, MODEL_POLICY_MANAGE, SYSTEM_DEFAULT_EDIT,
 ) + ADMIN_TABS
 
 #: 관리자 센터 URL → 필요한 capability(설계 §8.2 표). Route Guard 와 서버가 **같은 표**를 본다.
@@ -194,11 +202,13 @@ def resolve(scope, user: Dict[str, Any] | None = None) -> AdminCapabilities:
 
     caps: set = set()
     if is_platform:
-        # 플랫폼 관리자 — 전 capability. 단 «시스템 기본 정의 직접 수정» 은 자산 계층에서
-        # 별도로 막는다(설계 §4.2: 복사·버전 승격만 가능).
         caps |= set(ALL_CAPABILITIES)
     if is_ai:
         caps |= _AI_ADMIN_CAPS
+        # ★ 설계 §4.2: AI 거버넌스 관리자는 **시스템 기본 정의를 직접 수정하지 못한다.**
+        #   승인 권한이 있다고 기본값을 고칠 수 있는 것은 아니다 — 승인은 «남이 만든 것을
+        #   통과시키는 일» 이고, 기본 수정은 «전 사용자의 출발점을 바꾸는 일» 이다.
+        caps.discard(SYSTEM_DEFAULT_EDIT)
     if is_data:
         caps |= _DATA_ADMIN_CAPS
     if is_exec:

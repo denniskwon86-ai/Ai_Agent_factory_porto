@@ -37,14 +37,27 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
-### [BIZ-THREE-PATH-42] 현장 성공·3대 진로/사업화 통합 실행 로드맵 수립
-- 작성자 / 기록 시각: Codex / 2026-08-04 21:20 KST
-- 왜 지금 기록하는가: Supervisor가 내부 사내벤처, 제품 리더 이직, 독립 창업의 세 시나리오를 실제로 순서대로 실행할 수 있도록 중장기·단기 계획과 타임테이블의 통합을 요청했다.
-- 상태: **계획 수립 완료 · 실행 Gate 0 착수 대기**
-- 결정 및 근거: 첫 90일에 진로를 성급히 선택하지 않고, 12개월 동안 `작동 제품·현장 증거·권리 경계·외부 공개 가능한 합성 데모`라는 공통 줄기를 축적한 뒤 동일 Scorecard로 공식 분기한다. 36개월 단계, W1~W13 주간 계획, D1~D14 즉시 행동, 월 4~12 계획, 경로별 실행 Playbook과 G0~G5 관문을 `docs/business-model/three-path-field-success-master-roadmap.html`에 통합했다. 기존 제품 완성 로드맵(`docs/roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md`)과 차별화 전략(`docs/strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md`)을 제품 축으로 사용했다.
-- 영향·주의사항: 이 기록은 제품 코드·DB·API를 변경하지 않는다. 회사 자산·재직 중 발명·기밀의 귀속은 추정하지 않고 G0의 출처원장 및 전문가 검토 관문으로 둔다. 내부 실제 데이터룸과 외부 공개용 합성 데이터룸은 혼합하지 않는다. 내부 파일럿은 Replay → Shadow → Controlled Live 순서를 건너뛰지 않는다.
-- 다음 행동 / 담당 / 착수 조건: **Supervisor + Codex**가 D1 Strategy Baseline과 D3 Asset Provenance Ledger를 시작한다. **Claude Code**는 현재 기능 구현을 계속하며 제품 Readiness 증거만 제공한다. **Antigravity**는 공신력 데이터셋 후보와 출처 라이선스 근거를 보완한다. 사업 경로 선택은 12개월 Gate 전까지 확정하지 않는다.
-- 교대 체크포인트: HTML 신규 작성 및 `docs/business-model/index.html` 진입 링크 추가 · UTF-8/내부 앵커/diff 검사 완료 · 1280×720 실측에서 가로 넘침 0, 최소 글자 12px, 9개 섹션 확인(1440은 동일 데스크톱 CSS 규칙이며 980px 이하에서만 레이아웃 전환) · 임시 검증 서버 종료 · 커밋/푸시 미수행 · 재개 시 Gate 0 산출물 템플릿 착수 · 금지 범위는 제품 코드 동시 수정, origin 변경, 회사 자산 귀속의 임의 확정.
+### [BIZ-THREE-PATH-42] 100일 3대 진로/사업화 실행 마스터플랜
+- 작성자 / 기록 시각: Codex / 2026-08-04 21:20 KST, 21:35 KST 사용자 피드백 반영
+- 왜 지금 기록하는가: Supervisor가 초기 계획의 6~12개월 기간과 제품 실행·테스트 중심 관점을 반려하고, 실제 회사·채용시장·잠재고객을 움직여 단기간에 선택지와 협상력을 만드는 사업 행동계획을 요구했다.
+- 상태: **100일 압축계획으로 전면 대체 · 실행 Gate 0 착수 대기**
+- 결정 및 근거: 제품 완성 로드맵과 사업 실행 로드맵을 분리한다. D1~10 제안·권리·상대별 자료 준비, D11~30 실제 반응 확보, D31~60 협상 가능한 선택지 2개 형성, D61~90 조건협상·주 경로 결정, D91~100 공식 착수로 압축했다. 칭찬·관심은 신호에서 제외하고 의사결정자·날짜·예산·권한·문서가 있는 반응만 인정한다. 경로별 요구조건·철수선·Scorecard·주간 행동표는 `docs/business-model/three-path-field-success-master-roadmap.html`에 통합했다.
+- 영향·주의사항: 제품 코드·DB·API와 Claude Code의 구현 작업을 변경하지 않는다. 제품은 사업 설득 증거로만 연결한다. 회사 자산·재직 중 발명·기밀 귀속은 임의 확정하지 않고 출처원장과 전문가 검토를 선행한다. 권리 정리 전 소스 제공·실데이터 공개·유료 판매·법인화는 금지한다.
+- 다음 행동 / 담당 / 착수 조건: **Supervisor + Codex**가 D1 Outcome Charter, D2 Stakeholder Map, D3 Provenance Ledger를 실제 내용으로 작성한다. **Codex**는 D4~D8 경영진 제안·반대논리·외부 안전 포트폴리오를 만든다. **Antigravity**는 목표회사·잠재고객·지원제도 조사를 보조하고, **Claude Code**는 요청 시 비기밀 제품 증거만 제공한다.
+- 교대 체크포인트: 기존 36개월/12개월 계획을 폐기하고 동일 HTML을 100일 사업 실행계획으로 전면 재작성 · `docs/business-model/index.html` 링크 유지 · 커밋/푸시 미수행 · 재개 시 HTML 가독성 검증 후 D1~D3 실전 템플릿 작성 · 금지 범위는 제품 코드 동시 수정, origin 변경, 회사 자산 귀속의 임의 확정.
+
+### [ORG-AI-ADMIN-43] AI 거버넌스 관리자 10명 지정 — 그 과정에서 설계-구현 괴리 1건 발견
+- 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
+- 왜 지금 기록하는가: Supervisor 지시 «`is_ai_admin` 은 `hikwon@lsmnm.com` 포함해 넉넉히 지정». 부여했고, **부여하는 순간 회귀 테스트 2건이 즉시 깨지면서 설계와 구현이 갈라진 지점이 드러났다.**
+- 상태: **완료(부여·괴리 수정·회귀 테스트)**
+- 부여: `scripts/ensure_admin_accounts.py` 에 `AI_ADMINS` 목록을 두고 10명 지정 — `hikwon@lsmnm.com`(정책 결정자) · `admin`(플랫폼) · `hikwon_20`(IT) · `hikwon_4`(생산 총괄 임원) · `hikwon_12`(대외 발간 책임 임원) · `hikwon_1`(배터리소재 부서장) · `hikwon_9`(재무 — 모델 비용 한도) · `hikwon_14`(보안 — 도구 호출 정책) · `hikwon_5`(품질 게이트) · `hikwon_3`(동제련 부서장). 계정마다 **왜 필요한지**를 코드에 적었다.
+  ⚠️ **전원에게 주지 않았다.** viewer(`hikwon_17`)·격리 대조군(`hikwon_18`) 등 12명은 그대로 뒀다 — 전원이 관리자면 «막힌다» 를 증명할 대상이 사라지고, 그때부터 권한 경계는 확인할 수 없는 주장이 된다. 스크립트가 «AI 권한 없는 계정 N명» 을 함께 출력해 그 사실을 눈에 보이게 한다.
+- ★★ **발견한 설계-구현 괴리**: 설계 §4.2 표는 AI 거버넌스 관리자의 «시스템 기본 수정» 을 **«직접 수정 불가»** 로 못박았는데, 내가 그 판정을 `admin.permissions` 로 대신했다. AI 관리자가 그 탭 권한을 갖고 있으므로 — **권한을 부여하자마자 그 사람이 전역 기본 레지스트리와 `default` 워크플로우를 덮어쓸 수 있게 됐다.** 내 테스트 2건(`member 가 전역 레지스트리를 덮어쓰면 안 된다`, `manager 가 기본 워크플로우를 직접 고치면 안 된다`)이 즉시 깨져 잡혔다.
+  → 전용 권한 `system.default.edit` 을 분리하고 **플랫폼 관리자만** 갖게 했다. AI 관리자는 `resolve()` 에서 명시적으로 제거한다. ★ 승인 권한이 있다고 기본값을 고칠 수 있는 것이 아니다 — 승인은 «남이 만든 것을 통과시키는 일» 이고, 기본 수정은 «전 사용자의 출발점을 바꾸는 일» 이다.
+- 검증: 신규 회귀 2건(`test_ai_admin_cannot_edit_system_default`, `test_only_platform_admin_edits_system_default`). `pytest tests/` **1,825 passed / exit 0**. 실측 — AI 관리자 4명 표본이 모델 정책·스킬 승인·Agent 탭을 갖고(탭 3~7개), 미부여 3명은 전부 0탭.
+- 영향·주의사항: `admin` 계정이 이제 전권+AI+데이터를 모두 갖는다. 활성 전권 계정은 3개(`admin`·`hikwon`·`hikwon_20`) 그대로다. DB `users.is_ai_admin` 10행 변경(감사에 «사용자 갱신 · 권한=ai_admin» 으로 남음).
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — `resolve_department_config` 의 `blocked_reason` 배선, 그다음 P1 범위형 자산 저장소. **Supervisor** — 실제 파일럿에서는 이 10명이 현업 담당자로 대체돼야 한다(지금은 예시 계정 기반이다).
+- 교대 체크포인트: 변경 = `core/admin_capability.py`(`SYSTEM_DEFAULT_EDIT` 분리) · `api/routes/factory_control.py`(라우트 3곳 전환) · `scripts/ensure_admin_accounts.py`(AI_ADMINS) · `tests/test_admin_capability.py`(+2건) · DB 10행. 검증 = 1,825 passed. 재개 지점 = `blocked_reason` 배선. 금지 범위 = `system.default.edit` 을 AI 관리자에게 주는 것, 전원에게 AI 권한을 부여해 경계 확인 대상을 없애는 것.
 
 ### [SEC-P0-42] D-017 §9 P0 완료 — Agent Pack 범위 필터 + 미바인딩 폴백 차단
 - 작성자 / 기록 시각: Claude Code / 2026-08-04 KST

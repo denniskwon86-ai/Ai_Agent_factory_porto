@@ -38,9 +38,31 @@ PLATFORM_ADMIN_DEPT = "hq"
 #: 이 계정들은 `is_admin` 을 **가지고 있어야 한다.**
 MUST_BE_ADMIN = ["hikwon@lsmnm.com", PLATFORM_ADMIN]
 
+#: [D-017 §4.2] AI 거버넌스 관리자(`is_ai_admin`). Supervisor 지시(2026-08-04)로 넉넉히 둔다.
+#:
+#: ★ 이 권한이 하는 일: 에이전트·워크플로우 승인/폐기, **스킬 승인**, **모델 티어·비용 한도·
+#:   공급자 정책 변경**. 데이터 표준 승인(`is_data_admin`)과는 **책임이 다르다** — 묶으면
+#:   "이 사람이 왜 모델 정책을 바꿀 수 있었나" 에 답할 수 없다.
+#:
+#: ⚠️⚠️ **전원에게 주지 않는다.** viewer·격리 대조군까지 AI 관리자가 되면 권한 경계를 확인할
+#:   대상이 사라지고, 그때부터 «막힌다» 는 것을 아무도 증명할 수 없다. 아래 목록에서 빠진
+#:   계정들이 곧 **경계가 살아 있다는 증거**다(특히 `hikwon_17` viewer, `hikwon_18` 대조군).
+AI_ADMINS = [
+    ("hikwon@lsmnm.com", "Supervisor 본인 — 정책 결정자"),
+    (PLATFORM_ADMIN,     "플랫폼 관리자 — 전권 계정"),
+    ("hikwon_20@lsmnm.com", "IT 관리자 — 운영 담당"),
+    ("hikwon_4@lsmnm.com",  "생산 총괄 임원 — 현장 에이전트 승인 결정권자"),
+    ("hikwon_12@lsmnm.com", "대외 발간 책임 임원 — 대외 산출물 정책"),
+    ("hikwon_1@lsmnm.com",  "배터리소재 생산 부서장 — 현장 에이전트 요청·검토"),
+    ("hikwon_9@lsmnm.com",  "재무 부서장 — 모델 비용 한도 정책"),
+    ("hikwon_14@lsmnm.com", "보안 검토자 — 도구 호출·외부 연계 정책"),
+    ("hikwon_5@lsmnm.com",  "품질 부서장 — 산출물 품질 게이트"),
+    ("hikwon_3@lsmnm.com",  "동제련 생산 부서장 — 타 라인 대표"),
+]
+
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="플랫폼 관리자 계정 확인·복구")
+    ap = argparse.ArgumentParser(description="플랫폼·AI 관리자 계정 확인·복구")
     ap.add_argument("--apply", action="store_true",
                     help="실제로 적용한다. 없으면 무엇을 바꿀지 출력만 한다.")
     a = ap.parse_args()
@@ -96,6 +118,39 @@ def main() -> int:
         if uid == PLATFORM_ADMIN and not u.get("roles"):
             org_directory.set_user_roles(uid, {PLATFORM_ADMIN_DEPT: "manager"}, actor=ACTOR)
 
+    # ── [D-017 §4.2] AI 거버넌스 관리자 ────────────────────────────────────
+    print("\nAI 거버넌스 관리자(is_ai_admin):")
+    for uid, why in AI_ADMINS:
+        u = org_directory.get_user(uid)
+        if not u:
+            print(f"  ✗ {uid} — 계정이 없습니다(건너뜀).")
+            continue
+        if u.get("is_ai_admin"):
+            print(f"  ✓ {uid:26s} 이미 부여됨 — {why}")
+            continue
+        print(f"  · {uid:26s} 부여 — {why}")
+        changed += 1
+        if dry:
+            continue
+        org_directory.upsert_user(
+            uid, u.get("display_name") or uid,
+            primary_dept_id=u.get("primary_dept_id") or "",
+            is_executive=bool(u.get("is_executive")),
+            is_admin=bool(u.get("is_admin")),
+            is_data_admin=bool(u.get("is_data_admin")),
+            is_ai_admin=True, actor=ACTOR)
+        # ⚠️ `upsert_user` 는 역할을 건드리지 않는다. 그대로 두는 것이 맞다 —
+        #   AI 권한 부여가 부서 역할을 조용히 바꾸면 안 된다.
+
+    # ★ 경계가 살아 있는지 함께 보여 준다. 전원이 관리자면 «막힌다» 를 증명할 대상이 없다.
+    non_admin = [u for u in org_directory.list_users()
+                 if not u.get("is_ai_admin") and not u.get("is_admin")]
+    print(f"\nAI 권한 없는 계정 {len(non_admin)}명 — 이들이 «경계가 살아 있다» 는 증거다.")
+    for u in non_admin[:6]:
+        print(f"  {u['user_id']:26s} {u['display_name']}")
+    if len(non_admin) > 6:
+        print(f"  … 외 {len(non_admin) - 6}명")
+
     print()
     if changed == 0:
         print("바꿀 것이 없습니다 — 관리자 계정은 이미 정상입니다.")
@@ -106,9 +161,11 @@ def main() -> int:
 
     print("\n현재 활성 관리자:")
     for u in org_directory.list_users():
-        if u.get("is_admin"):
+        if u.get("is_admin") or u.get("is_ai_admin"):
+            flags = "".join(c for c, k in (("전권", "is_admin"), ("AI", "is_ai_admin"),
+                                           ("데이터", "is_data_admin")) if u.get(k))
             print(f"  {u['user_id']:26s} {u['display_name']:16s} "
-                  f"{u.get('primary_dept_id') or '(미배정)'}")
+                  f"{u.get('primary_dept_id') or '(미배정)':10s} {flags}")
     return 0
 
 

@@ -17,9 +17,9 @@ from api.deps import (Principal, assert_can_read_dept, assert_enterprise,
                       current_principal, enterprise_context)
 # [D-017 P0] 서버 재검사 — 화면 숨김이 아니라 여기가 유일한 보안 경계다.
 from api.deps import require_caps as _require_caps
-from core.admin_capability import (ADMIN_PERMISSIONS, AGENT_READ, AGENT_UPDATE, SKILL_PROPOSE,
-                                   WORKFLOW_CREATE, WORKFLOW_READ, WORKFLOW_RETIRE,
-                                   WORKFLOW_UPDATE)
+from core.admin_capability import (AGENT_READ, AGENT_UPDATE, SKILL_PROPOSE,
+                                   SYSTEM_DEFAULT_EDIT, WORKFLOW_CREATE, WORKFLOW_READ,
+                                   WORKFLOW_RETIRE, WORKFLOW_UPDATE)
 
 
 def _audit_registry(event: str, p: "Principal", reason: str, detail: str = "") -> None:
@@ -1707,7 +1707,7 @@ async def update_agent_registry(payload: AgentRegistryPayload,
     ★★ [D-017 §9 P0-3] 이것은 **전역 기본 정의**다. 한 사람이 저장하면 전 사용자·전 프로젝트의
       파이프라인이 바뀐다 — 그래서 플랫폼 관리자 전용이다(`ADMIN_PERMISSIONS`).
       부서 단위로 다르게 쓰고 싶으면 템플릿을 복사한다(Copy 모델)."""
-    _require_caps(p, ADMIN_PERMISSIONS, AGENT_UPDATE,
+    _require_caps(p, SYSTEM_DEFAULT_EDIT, AGENT_UPDATE,
                   resource="agent_registry", action="update")
     from core.agent_registry import save_registry
     try:
@@ -1727,7 +1727,7 @@ async def reset_agent_registry(p: Principal = Depends(current_principal)):
     """레지스트리를 기본값(현재 SW 파이프라인)으로 초기화.
 
     ★★ **되돌릴 수 없는 전역 변경**이다. 누군가의 편집이 통째로 사라지므로 플랫폼 관리자 전용."""
-    _require_caps(p, ADMIN_PERMISSIONS, AGENT_UPDATE,
+    _require_caps(p, SYSTEM_DEFAULT_EDIT, AGENT_UPDATE,
                   resource="agent_registry", action="reset")
     from core.agent_registry import reset_registry
     data = reset_registry()
@@ -2017,7 +2017,7 @@ async def update_workflow_template(template_id: str, payload: AgentRegistryPaylo
     """★ `default` 는 **시스템 기본 정의**다. 설계 §4.2 «복사·버전 승격만 가능» 에 따라
       직접 수정은 플랫폼 관리자만 할 수 있다 — 나머지는 복사해서 쓴다."""
     if str(template_id) == "default":
-        _require_caps(p, ADMIN_PERMISSIONS, WORKFLOW_UPDATE,
+        _require_caps(p, SYSTEM_DEFAULT_EDIT, WORKFLOW_UPDATE,
                       resource="workflow_template", action="update:default")
     else:
         _require_caps(p, WORKFLOW_UPDATE, resource="workflow_template",
