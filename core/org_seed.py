@@ -116,6 +116,7 @@ def resolve_department_config(domain_key: str) -> Dict[str, Any]:
     #   하위호환: 바인딩이 없거나 해석에 실패하면 **기존 목록을 그대로 쓴다.** 조직 미도입·
     #     ECM 미배선 환경에서 에이전트가 사라지면 프로젝트 생성 자체가 망가진다.
     scope_node = (d.get("scope_node_id") or "").strip()
+    blocked_reason = ""
     if scope_node:
         try:
             from core.enterprise_context.agent_pack_binding import agent_packs
@@ -128,8 +129,24 @@ def resolve_department_config(domain_key: str) -> Dict[str, Any]:
                         merged.append(a)
                 agents = merged
                 agent_source = f"에이전트팩 바인딩({scope_node}) + 부서 목록"
+            else:
+                blocked_reason = _unbound_block(scope_node, "승인된 에이전트팩 바인딩이 없습니다")
         except Exception as e:
             print(f"ℹ️ [org_seed] 에이전트팩 해석 실패 — 부서 목록을 그대로 씁니다: {e}")
+            blocked_reason = _unbound_block(scope_node, f"에이전트팩 해석 실패: {e}")
+
+    # ★★ [D-017 §9 P0-5] **권한 강제 환경에서는 폴백하지 않는다.**
+    #   ⚠️ 실측된 문제(설계 §2.4): 바인딩이 없거나 해석에 실패하면 조용히 `domain_agents` 로
+    #     떨어졌다. 조직이 «이 부서는 이 에이전트만» 이라고 정해 둔 환경에서도, 바인딩 하나가
+    #     빠지면 **승인하지 않은 구성이 그대로 실행된다.** 그리고 실행된 뒤에는 산출물에
+    #     그 흔적이 남아 되돌릴 수 없다.
+    #   ★ 다만 **조건부**다. ECM 이 배선되지 않은 부서(`scope_node_id` 없음)는 종전대로
+    #     동작한다 — 조직을 세우기도 전에 프로젝트 생성이 막히면 도입 자체가 불가능하다.
+    #     막는 것은 «ECM 을 배선해 두고 바인딩만 빠진» 경우이며, 그것은 설정 누락이지
+    #     미도입이 아니다.
+    if blocked_reason:
+        agents = []
+        agent_source = "차단됨(바인딩 없음)"
     return {
         "name_ko": d.get("name_ko") or domain_key,
         "template_id": d.get("default_template_id") or "",
@@ -137,8 +154,24 @@ def resolve_department_config(domain_key: str) -> Dict[str, Any]:
         # 어디서 온 구성인지 함께 준다 — "이 에이전트가 왜 도는가"에 답할 수 있어야 한다.
         "agent_source": agent_source,
         "scope_node_id": scope_node,
+        # 비어 있으면 정상. 차 있으면 **호출부가 실행을 멈추고 이 문구를 사용자에게 보여야 한다** —
+        # 빈 에이전트 목록을 «에이전트가 없는 부서» 로 오해하면 원인에 도달하지 못한다.
+        "blocked_reason": blocked_reason,
         "master_domains": d.get("master_domains") or [],
     }
+
+
+def _unbound_block(scope_node: str, why: str) -> str:
+    """권한 강제일 때만 차단 문구를 만든다. 꺼져 있으면 빈 문자열(= 종전 폴백 유지)."""
+    try:
+        from core.org_directory import _org_enforce_effective
+        if not _org_enforce_effective():
+            return ""
+    except Exception:
+        return ""       # 강제 여부를 모르면 **막지 않는다** — 가용성 쪽으로 기운다
+    return (f"조직 «{scope_node}» 에 {why}. 권한 강제가 켜져 있어 부서 기본 목록으로 "
+            f"대체하지 않았습니다 — 승인되지 않은 에이전트 구성이 실행되면 산출물에 흔적이 "
+            f"남고 되돌릴 수 없습니다. 관리자에게 에이전트팩 바인딩을 요청하십시오.")
 
 
 def reconcile_ownership(projects_dir: str = "projects", library_dir: str = "library") -> Dict[str, Any]:

@@ -176,12 +176,23 @@ class AgentPackStore:
             d["agents"] = []
         return d
 
-    def list_packs(self, status: str = "") -> List[Dict[str, Any]]:
-        sql, params = "SELECT pack_id FROM agent_packs", ()
+    def list_packs(self, status: str = "", tenant_id: str = "") -> List[Dict[str, Any]]:
+        """팩 목록.
+
+        ⚠️ [D-017 §2.4] 예전에는 **요청자 가시 범위나 테넌트로 필터하지 않았다** — 다른
+          테넌트의 팩 이름·목적·에이전트 구성이 그대로 보였다. `tenant_id` 를 주면 그 테넌트
+          것만 돌려준다. 주지 않으면 종전 동작이다(ECM 미도입 흐름 보존)."""
+        where, params = [], []
         if status:
-            sql += " WHERE status=?"; params = (status,)
+            where.append("status=?"); params.append(status)
+        if tenant_id:
+            where.append("tenant_id=?"); params.append(tenant_id)
+        sql = "SELECT pack_id FROM agent_packs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         with self._connect() as conn:
-            ids = [r[0] for r in conn.execute(sql + " ORDER BY created_at DESC", params).fetchall()]
+            ids = [r[0] for r in conn.execute(sql + " ORDER BY created_at DESC",
+                                              tuple(params)).fetchall()]
         return [self.get_pack(i) for i in ids]
 
     def _require_pack(self, pid: str) -> Dict[str, Any]:

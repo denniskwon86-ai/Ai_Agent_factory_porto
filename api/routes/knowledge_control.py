@@ -15,7 +15,9 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # 파일명은 확장자 포함 안전 문자만(경로 구분자·상위 이동 차단)
 _FNAME_RE = re.compile(r"^[\w가-힣 .()\[\]-]{1,128}$")
 
-INDEXABLE_EXTS = (".pdf", ".txt", ".md", ".csv", ".json")
+# DOCX/PPTX는 core.knowledge_base의 Office Open XML 추출기로 본문·표·슬라이드를 읽는다.
+# 구형 PPT는 원본 보존 뒤 안전한 변환을 요구한다(바이너리 문자열을 근거로 색인하지 않음).
+INDEXABLE_EXTS = (".pdf", ".docx", ".pptx", ".ppt", ".txt", ".md", ".csv", ".json")
 
 
 def _safe_pack_id(v: str) -> str:

@@ -37,6 +37,29 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [BIZ-THREE-PATH-42] 현장 성공·3대 진로/사업화 통합 실행 로드맵 수립
+- 작성자 / 기록 시각: Codex / 2026-08-04 21:20 KST
+- 왜 지금 기록하는가: Supervisor가 내부 사내벤처, 제품 리더 이직, 독립 창업의 세 시나리오를 실제로 순서대로 실행할 수 있도록 중장기·단기 계획과 타임테이블의 통합을 요청했다.
+- 상태: **계획 수립 완료 · 실행 Gate 0 착수 대기**
+- 결정 및 근거: 첫 90일에 진로를 성급히 선택하지 않고, 12개월 동안 `작동 제품·현장 증거·권리 경계·외부 공개 가능한 합성 데모`라는 공통 줄기를 축적한 뒤 동일 Scorecard로 공식 분기한다. 36개월 단계, W1~W13 주간 계획, D1~D14 즉시 행동, 월 4~12 계획, 경로별 실행 Playbook과 G0~G5 관문을 `docs/business-model/three-path-field-success-master-roadmap.html`에 통합했다. 기존 제품 완성 로드맵(`docs/roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md`)과 차별화 전략(`docs/strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md`)을 제품 축으로 사용했다.
+- 영향·주의사항: 이 기록은 제품 코드·DB·API를 변경하지 않는다. 회사 자산·재직 중 발명·기밀의 귀속은 추정하지 않고 G0의 출처원장 및 전문가 검토 관문으로 둔다. 내부 실제 데이터룸과 외부 공개용 합성 데이터룸은 혼합하지 않는다. 내부 파일럿은 Replay → Shadow → Controlled Live 순서를 건너뛰지 않는다.
+- 다음 행동 / 담당 / 착수 조건: **Supervisor + Codex**가 D1 Strategy Baseline과 D3 Asset Provenance Ledger를 시작한다. **Claude Code**는 현재 기능 구현을 계속하며 제품 Readiness 증거만 제공한다. **Antigravity**는 공신력 데이터셋 후보와 출처 라이선스 근거를 보완한다. 사업 경로 선택은 12개월 Gate 전까지 확정하지 않는다.
+- 교대 체크포인트: HTML 신규 작성 및 `docs/business-model/index.html` 진입 링크 추가 · UTF-8/내부 앵커/diff 검사 완료 · 1280×720 실측에서 가로 넘침 0, 최소 글자 12px, 9개 섹션 확인(1440은 동일 데스크톱 CSS 규칙이며 980px 이하에서만 레이아웃 전환) · 임시 검증 서버 종료 · 커밋/푸시 미수행 · 재개 시 Gate 0 산출물 템플릿 착수 · 금지 범위는 제품 코드 동시 수정, origin 변경, 회사 자산 귀속의 임의 확정.
+
+### [SEC-P0-42] D-017 §9 P0 완료 — Agent Pack 범위 필터 + 미바인딩 폴백 차단
+- 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
+- 왜 지금 기록하는가: `[SEC-P0-41]` 이 남긴 P0-4·P0-5 를 마쳤다. **P0 6항목이 전부 닫혔다.**
+- 상태: **완료(P0 전체) · P1 착수 전**
+- 봉합:
+  - **P0-4 Agent Pack 범위** — 팩 목록이 요청자 가시 범위·테넌트로 **전혀 필터되지 않았다**(설계 §2.4). 팩 «이름» 과 «목적» 만으로도 그 회사가 무엇을 자동화하는지 드러난다. → `list_packs(status, tenant_id)` 에 테넌트 필터를 넣고 라우트가 `ctx.tenant_id` 를 넘긴다. 응답에 `scoped` 를 함께 내 화면이 «전부 본다» 고 오해하지 않게 했다.
+  - **P0-4 노드 해석** — `GET /nodes/{id}/agents` 가 **그 노드를 볼 권한을 확인하지 않았다.** 노드 ID 만 알면 다른 사업부에서 어떤 에이전트가 도는지 읽혔다. → `_assert_node_visible()`. ★ 판정을 새로 만들지 않고 기존 `viewer_visible_scopes()` 를 썼다 — 라우트마다 판정을 두면 한 라우트만 조용히 넓어진다. 권한 밖은 **404**(403 은 그 조직의 존재를 알린다).
+  - **P0-5 미바인딩 폴백** — 바인딩이 없거나 해석 실패면 조용히 `domain_agents` 로 떨어졌다. 조직이 «이 부서는 이 에이전트만» 이라고 정해 둔 환경에서도 **승인하지 않은 구성이 실행됐고, 실행되면 산출물에 흔적이 남아 되돌릴 수 없다.** → 강제 모드에서는 대체하지 않고 `blocked_reason` 을 돌려준다.
+- 판단 하나: **폴백 차단은 조건부다.** ECM 을 배선하지 않은 부서(`scope_node_id` 없음)는 종전대로 둔다 — 거기까지 막으면 조직을 세우기 전에 프로젝트 생성이 불가능해져 도입 자체가 막힌다. 막는 것은 «배선해 두고 바인딩만 빠진» 경우이며 그것은 설정 누락이지 미도입이 아니다. 또 강제 여부를 **모르면 막지 않는다**(fail-open) — 이 판단이 틀렸을 때 최악이 «승인 안 된 구성 실행» 이지 «유출» 이 아니기 때문이다. 유출 경로(범위 필터)는 반대로 fail-closed 다. 두 기본값이 갈리는 이유를 테스트에 적어 뒀다.
+- 검증: 신규 `tests/test_agent_pack_scoping.py` **9건**. `pytest tests/` **1,823 passed / exit 0**.
+- 영향·주의사항: `list_packs` 시그니처에 선택 인자 추가(기본값 유지 — 기존 호출 불변). `resolve_department_config` 응답에 `blocked_reason` 추가 — ⚠️ **호출부가 아직 이 값을 읽지 않는다.** 지금은 에이전트 목록이 비어 나가므로, 강제 모드에서 바인딩이 빠진 부서는 «에이전트 없는 부서» 처럼 보인다. 호출부(`create_mega_project`)가 이 문구를 사용자에게 보여주도록 잇는 것이 후속이다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — ① `blocked_reason` 을 호출부에 잇기(작은 후속) ② P1 범위형 자산 저장소 착수(버전형 Agent/Skill/Workflow 테이블 → SYSTEM·LEGACY adapter → 역할·capability 해석 → 조직별 목록·복사·승인·폐기 API → 기존 `/agents`·`/templates` adapter 전환). **Supervisor** — `is_ai_admin` 부여 대상 결정이 여전히 없다(현재 0명).
+- 교대 체크포인트: 변경 = `core/enterprise_context/agent_pack_binding.py`(tenant 필터) · `api/routes/enterprise_context_control.py`(목록 필터·노드 가시성 게이트) · `core/org_seed.py`(폴백 차단) · `tests/test_agent_pack_scoping.py`(신규 9건) · `PROGRESS.md`(신규 — 진척 정본). 미변경 = 화면·자산 저장소. 검증 = 1,823 passed. 재개 지점 = `blocked_reason` 배선 또는 P1-1. 금지 범위 = ECM 미배선 부서까지 막는 것, 범위 필터를 fail-open 으로 바꾸는 것, 404 를 403 으로 바꾸는 것.
+
 ### [SEC-P0-41] D-017 §9 P0 — 에이전트·워크플로우·스킬 API 권한 봉합
 - 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
 - 왜 지금 기록하는가: `[ADMIN-CAP-40]` 에서 계약만 세우고 «아직 아무 라우트도 `require()` 를 호출하지 않는다» 고 남겼다. 설계 §9 P0 의 1·2·3·6 을 적용했다. **이제 실제로 막힌다.**

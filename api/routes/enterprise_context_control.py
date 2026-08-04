@@ -31,7 +31,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.deps import (Principal, assert_can_edit_org, current_principal, enterprise_context)
+from api.deps import (Principal, assert_can_edit_org, current_principal, enterprise_context,
+                      viewer_visible_scopes)
 from core.enterprise_context import (ENTITY_MODES, NODE_TYPES, PROFILE_KINDS, RELATION_TYPES,
                                      STATUS_ACTIVE, EcmError, EnterpriseContext,
                                      EnterpriseEntity, EnterpriseProfile, OrganizationEdge,
@@ -42,6 +43,29 @@ router = APIRouter(prefix="/api/v1/enterprise-context", tags=["EnterpriseContext
 
 def _sandbox_err(e: Exception):
     raise HTTPException(status_code=400, detail=str(e))
+
+
+def _assert_node_visible(p: Principal, node_id: str) -> None:
+    """[D-017 §9 P0-4] 이 조직 노드를 볼 수 있는가.
+
+    ★ 판정을 여기서 새로 만들지 않는다 — `viewer_visible_scopes()` 가 이미 «상향 상속은 주고
+      하향 열람은 경영진에게만» 을 한 곳에서 정한다(그 함수 주석 참조). 라우트마다 판정을
+      두면 한 라우트만 조용히 넓어진다.
+    ⚠️ 권한 밖은 **404** 다. 403 은 «그 조직이 존재한다» 를 알리고, 조직도는 그 자체가 정보다.
+    ⚠️ 빈 집합은 «전부 허용» 이 아니라 **«아무것도 허용하지 않음»** 이다(fail-closed)."""
+    allowed = viewer_visible_scopes(p)
+    if allowed is None:          # 강제 OFF · unrestricted · 표준 관리 권한 → 필터하지 않는다
+        return
+    if node_id not in allowed:
+        try:
+            from core.enterprise_context import audit
+            audit.record(audit.ACCESS_DENIED_SCOPE_MISMATCH, resource_type="scope_node",
+                         resource_id=node_id, actor=p.user_id or "", outcome="denied",
+                         reason="가시 범위 밖 조직 노드의 에이전트 구성 조회",
+                         detail=f"allowed={len(allowed)}개")
+        except Exception:
+            pass
+        raise HTTPException(status_code=404, detail="조직 노드를 찾을 수 없습니다.")
 
 
 def _tree_dict(sn) -> Dict[str, Any]:
@@ -665,9 +689,19 @@ async def create_agent_pack(req: PackIn, p: Principal = Depends(current_principa
 
 
 @router.get("/agent-packs")
-async def list_agent_packs(status: str = "", p: Principal = Depends(current_principal)):
+async def list_agent_packs(status: str = "", p: Principal = Depends(current_principal),
+                           ctx: EnterpriseContext = Depends(enterprise_context)):
+    """팩 목록.
+
+    ⚠️ [D-017 §2.4] 예전에는 요청자 가시 범위·테넌트로 **전혀 필터하지 않았다.** 다른 회사의
+      팩 이름·목적·에이전트 구성이 그대로 보였다 — 팩 이름만으로도 «저쪽이 무엇을 자동화하고
+      있는가» 가 드러난다."""
     ap, _ = _ap()
-    return {"status": "success", "data": await asyncio.to_thread(ap.list_packs, status)}
+    rows = await asyncio.to_thread(ap.list_packs, status, ctx.tenant_id or "")
+    return {"status": "success", "data": rows,
+            "tenant_id": ctx.tenant_id or "",
+            # 화면이 «전부 본다» 고 오해하지 않게 필터가 걸렸다는 사실을 함께 낸다.
+            "scoped": bool(ctx.tenant_id)}
 
 
 @router.post("/agent-packs/{pack_id}/approve")
@@ -714,11 +748,15 @@ async def unbind_agent_pack(binding_id: str, p: Principal = Depends(current_prin
 @router.get("/nodes/{node_id}/agents")
 async def resolve_node_agents(node_id: str, entity_mode: str = "REAL",
                               p: Principal = Depends(current_principal)):
+    """★★ [D-017 §2.4] **이 노드를 볼 권한부터 확인한다.** 예전에는 확인이 없어서, 노드 ID 만
+      알면 다른 사업부에서 어떤 에이전트가 도는지 그대로 읽을 수 있었다.
+    ⚠️ 권한 밖 노드는 **404** 다 — 403 은 «그 조직이 존재한다» 를 알린다."""
     """이 조직에서 실제로 도는 에이전트와 **그 근거**(어느 팩·어느 조직에서 상속됐는가).
 
     ★ `skipped` 도 함께 본다 — 만료·비상속·미승인으로 빠진 것을 알아야 "왜 안 도는지"에
       답할 수 있다. 비어 있으면 `bound=false` 와 안내 문구가 나온다(에이전트가 없는 것과
       바인딩이 없는 것은 다르다)."""
+    _assert_node_visible(p, node_id)
     ap, Err = _ap()
     try:
         d = await asyncio.to_thread(ap.resolve_agents, node_id, "", entity_mode)
