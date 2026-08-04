@@ -46,6 +46,23 @@
 - 다음 행동 / 담당 / 착수 조건: **Supervisor + Codex**가 D1 Outcome Charter, D2 Stakeholder Map, D3 Provenance Ledger를 실제 내용으로 작성한다. **Codex**는 D4~D8 경영진 제안·반대논리·외부 안전 포트폴리오를 만든다. **Antigravity**는 목표회사·잠재고객·지원제도 조사를 보조하고, **Claude Code**는 요청 시 비기밀 제품 증거만 제공한다.
 - 교대 체크포인트: 기존 36개월/12개월 계획을 폐기하고 동일 HTML을 100일 사업 실행계획으로 전면 재작성 · `docs/business-model/index.html` 링크 유지 · 커밋/푸시 미수행 · 재개 시 HTML 가독성 검증 후 D1~D3 실전 템플릿 작성 · 금지 범위는 제품 코드 동시 수정, origin 변경, 회사 자산 귀속의 임의 확정.
 
+### [SEC-P1-45] P1-2 파일 자산 SYSTEM·LEGACY 어댑터 — 「제품 원본」이라고 단정할 근거가 없었다
+- 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
+- 왜 지금 기록하는가: `[SEC-P1-44]` 가 지정한 재개 지점(P1-2)을 구현했다. **분류 기준을 정하는 과정에서 기존 코드의 사실 두 가지가 처음 판단을 뒤집었다** — 그 근거를 남겨야 다음 사람이 같은 곳에서 다시 헤매지 않는다.
+- 상태: **완료(P1-2) · P1-4·5 남음**
+- 무엇을 만들었는가: 신규 `core/agent_asset_adapter.py`. `agents_registry.json`(에이전트 15) · `templates/*.json`(워크플로우 8, `default` 포함) · `skills/*.md`(스킬 31) = **54개 파일 자산**을 `AgentAssetStore.get()` 과 **똑같은 dict 모양**으로 읽게 한다. 파일은 그대로 두고 **읽는 모양만 통일**했다 — 한 번에 DB 로 옮기면 이관이 끝나는 순간까지 파이프라인이 멈춘다.
+- ★★ **처음 판단을 뒤집은 사실 둘.** `templates/*.json` 을 «제품이 배포한 원본 = SYSTEM» 으로 분류하려 했는데 근거가 없었다.
+  ① `agent_registry.save_template()` 은 **기존 파일을 그대로 덮어쓴다**(존재 검사는 `copy_template` 에만 있다). 즉 제품 배포본과 사용자 편집 내용이 **같은 파일에 섞인다.**
+  ② `list_templates()` 의 `builtin` 플래그는 «제품 배포물인가» 가 **아니라 «`default` 인가»** 다(파일 템플릿은 전부 `False`). 이름에 속아 출처 판단에 쓰면 근거 없는 분류가 된다.
+  → 그래서 **SYSTEM 은 코드 상수(`DEFAULT_REGISTRY`)만**, 파일에서 온 것은 전부 **LEGACY**. 판단 근거: 출처를 모를 때 «모르는 것을 SYSTEM(수정 불가)으로» 두면 사용자가 자기가 만든 템플릿을 못 고쳐 **업무가 막힌다.** LEGACY 로 두면 이관 대상으로 표시되고 편집은 종전 경로로 계속된다 — 틀렸을 때의 대가가 훨씬 작다. `test_builtin_flag_is_not_used_as_a_source_signal` 로 그 플래그의 실제 의미를 못 박아 뒀다.
+- ★ **파일 자산은 `APPROVED` 인데 `approved_by` 는 비어 있다.** 지금 실제로 그 정의로 파이프라인이 돌기 때문에 `DRAFT` 로 두면 P3(런타임 강제)가 붙는 순간 전 파이프라인이 실행 불가가 된다. 그러나 없는 승인자를 지어내지 않는다 — 대신 `needs_migration=True` 와 `migration_note` 를 실어 **«승인 이력 없이 돌고 있다»** 는 사실을 그대로 노출한다. `migration_report()` 가 그 수를 센다(현재 **54건**). `[MDM-SCOPE-01]` 의 «미바인딩 레코드 수를 상시 관측한다» 와 같은 규칙이다 — 숨기면 아무도 이관하지 않는다.
+- ★ **`read_only` 를 쓰지 않고 `edit_via`(바꾸는 곳)를 준 이유**: 참·거짓 하나로는 «아무도 못 바꾼다»(SYSTEM)와 «여기서는 못 바꾼다»(LEGACY — 종전 화면에서 바꾼다)가 구분되지 않는다. 어댑터는 전부 읽기 전용이고, 쓰기 시도는 `assert_writable_here()` 가 **어디서 바꾸는지와 함께** 막는다. `AssetNotFound`(«없다»)로 두면 호출부가 자산을 다시 만들어 같은 정의가 두 벌이 된다.
+- ★ **화면에 슬러그가 나가고 있었다(자체 발견).** 스킬 이름이 `architect_skill`·`sim_purchase` 같은 파일명으로 노출됐다 — 이관 완료 조건 1(내부 슬러그 숨김) 위반. 이름 원천을 «그 스킬을 쓰는 에이전트의 `name_ko`» 로 잡되, **기본 레지스트리만 훑으면 안 된다**: `sim_*` 8개는 `mfg_sim` 템플릿 소속이라 기본에 없다. 전 템플릿을 훑어 **31개 중 30개** 해결(`sim_purchase` → 「원료구매 에이전트 규칙」). 남은 `design_system` 은 어느 에이전트도 쓰지 않는 디자인 문서라 **이름이 없는 것이 사실**이므로 슬러그를 그대로 두고 `migration_report.slug_named` 로 센다 — 「에이전트 규칙」 같은 그럴듯한 말로 덮으면 어느 스킬인지 구분조차 안 된다.
+- 검증: 신규 `tests/test_agent_asset_adapter.py` **25건**. `pytest tests/` **1,870 passed · 1 skipped · 실패 0 · exit 0**(기준선 1,846 + 25). ⚠️ 자동 통과만으로 끝내지 않고 실제 노출 값을 출력해 눈으로 확인했다 — 슬러그 노출과 SYSTEM 0건은 **그 육안 확인에서만** 드러났다.
+- 영향·주의사항: **기존 파일·라우트·화면 미변경.** 아직 어떤 라우트도 이 어댑터를 쓰지 않는다(P1-5 가 붙일 자리다). `migration_report()` 가 SYSTEM 0 / LEGACY 54 로 보고하는데, **이는 분류가 죽은 것이 아니라 «이미 누군가 손댔다» 는 사실의 보고**다 — SYSTEM 은 `agents_registry.json` 이 없는 새 설치에서만 나온다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — P1-4(조직별 목록·복사·승인·폐기 API) → P1-5(`/agents`·`/templates` 어댑터 전환, **응답 형태 불변**이 조건). **Supervisor** — 결정 대기 2건이 그대로다: 조직 범위 정본(scope code vs `node_*` 해시), `is_ai_admin` 부여 대상.
+- 교대 체크포인트: 변경 = `core/agent_asset_adapter.py`(신규) · `tests/test_agent_asset_adapter.py`(신규 25건). 미변경 = `core/agent_registry.py`, 파일 자산 자체, 라우트, 화면. 검증 = 1,870 passed. 재개 지점 = P1-4. 금지 범위 = 파일 자산에 없는 `approved_by`·`created_by`·`owner_scope_id` 를 채우는 것, `builtin` 플래그를 출처 판단에 쓰는 것, `templates/*.json` 을 SYSTEM 으로 되돌리는 것(위 근거 ①② 를 먼저 반박해야 한다), `list_all` 에 `viewer_scopes` 기본값을 주는 것, 이름을 못 찾은 스킬을 그럴듯한 말로 덮는 것.
+
 ### [SEC-P1-44] blocked_reason 배선 + P1 범위형 자산 저장소(P1-1·P1-3)
 - 작성자 / 기록 시각: Claude Code / 2026-08-04 KST
 - 왜 지금 기록하는가: P0 후속 배선과 P1 착수. **배선하다가 P0-5 차단이 호출부에서 무력화되고 있던 것을 발견했다.**
