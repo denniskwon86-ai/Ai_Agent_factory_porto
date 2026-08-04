@@ -45,6 +45,15 @@ SHOTS = [
     ("협업-관리자", ADMIN, "협업"),
     ("의사결정-관리자", ADMIN, "협업>의사결정 센터"),
     ("발간-관리자", ADMIN, "협업>대내외 발간"),
+    # 이관 3/10 — 권한 세 갈래를 모두 본다. 개정 권한은 관리자에게만 있어야 한다.
+    ("업무표준-관리자", ADMIN, "업무표준"),
+    ("업무표준-일반", NORMAL, "업무표준"),
+    ("업무표준-익명", ANON, "업무표준"),
+    ("업무표준-지침", ADMIN, "업무표준>업무지침"),
+    # `#…` = 작업면 목록에서 실제 항목을 고른다. 선택 없는 빈 화면만 찍지 않는다.
+    ("업무표준-규정상세", ADMIN, "업무표준>#품질 검증"),
+    ("업무표준-연혁", ADMIN, "업무표준>#품질 검증>개정 연혁"),
+    ("업무표준-고지문", ADMIN, "업무표준>#품질 검증>에이전트 고지문"),
 ]
 
 
@@ -93,15 +102,29 @@ def open_panel(page: Page, path: str) -> tuple[bool, str]:
         return False, f"«{first}» 를 눌렀지만 모달이 열리지 않았다"
 
     for tab in tabs:                     # 모달 안 좌측 레일로 이동
-        item = dlg.locator("button", has_text=tab)
+        # `#텍스트` 는 **작업면 목록에서 항목을 고른다**는 뜻이다.
+        # ⚠️ 선택이 없는 빈 화면만 찍으면 «실데이터가 어떻게 보이는가»를 한 번도 확인하지 못한다
+        #   (교차검토 지적: 비어 있는 상태만으로 화면 검증을 끝내면 안 된다).
+        if tab.startswith("#"):
+            want = tab[1:].strip()
+            row = dlg.locator(".hub-main button", has_text=want)
+            if row.count() == 0:
+                return False, f"작업면 목록에 «{want}» 가 없다"
+            row.first.click()
+            page.wait_for_timeout(2200)
+            continue
+        item = dlg.locator(".module-menu button", has_text=tab)
         if item.count() == 0:
             return False, f"모달 안에 «{tab}» 항목이 없다"
         item.first.click()
         page.wait_for_timeout(2000)
-        head = dlg.locator(".hub-bar, .afs-dialog-bar").first.inner_text()
-        if tab.split()[0] not in head.replace(" ", ""):
-            # 제목이 안 바뀌었으면 탭 전환이 안 된 것이다 — 찍어도 다른 화면이다
-            return False, f"«{tab}» 를 눌렀는데 제목이 «{head[:20]}» 그대로다"
+        # ⚠️ 상단 바 제목으로 판정하지 않는다. 허브마다 바가 모듈 이름을 고정으로 쓰기도 하고
+        #   활성 화면을 따라가기도 한다 — 바를 기준으로 삼으면 «전환은 됐는데 실패» 로 잘못 잡힌다
+        #   (업무표준 화면에서 실제로 그랬다). **탭이 선택됐다**는 사실 자체를 본다.
+        active = dlg.locator('.module-menu button.active, .module-menu [aria-selected="true"]')
+        got = active.first.inner_text().replace("\n", " ") if active.count() else "(없음)"
+        if tab.replace(" ", "") not in got.replace(" ", ""):
+            return False, f"«{tab}» 를 눌렀는데 활성 항목이 «{got[:24]}» 다"
     return True, ""
 
 
@@ -200,6 +223,15 @@ def measure(page: Page) -> dict:
         jarvisDead = Math.max(0, Math.round(lr.bottom - bottom));
       }
 
+      // ④-2 Jarvis 근거 목록 잘림 — «무엇에 근거해 답했나»가 잘리면 답을 검증할 수 없다.
+      //     레일 메뉴·안내 카드와 같은 유형의 결함이라 같은 방식으로 검사한다.
+      const ev = root.querySelector('.jarvis-evidence');
+      const evCut = ev ? {
+        높이: Math.round(ev.clientHeight), 내용: Math.round(ev.scrollHeight),
+        잘림: ev.scrollHeight > ev.clientHeight + 1,
+        스크롤바폭: ev.offsetWidth - ev.clientWidth,
+      } : null;
+
       // ⑤ 상단 바 노출 — 전체화면 작업공간이므로 뒤가 비쳐서는 안 된다.
       let barLeak = null;
       if (dlg) {
@@ -251,6 +283,7 @@ def measure(page: Page) -> dict:
         안내카드: cardCut,
         고아줄바꿈: orphans.slice(0, 6),
         Jarvis빈공간: jarvisDead,
+        Jarvis근거: evCut,
         모달바깥여백: barLeak,
         배너: banners.map(t => t.slice(0, 46)),
         영건표현: zeroTalk.map(t => t.slice(0, 40)),
@@ -281,6 +314,9 @@ def gate_failures(m: dict) -> list[str]:
         out.append("하단 안내 카드가 잘렸는데 스크롤바가 없다(다 읽은 줄 안다)")
     if m.get("고아줄바꿈"):
         out.append(f"한 글자 고아 줄바꿈: {m['고아줄바꿈']}")
+    evc = m.get("Jarvis근거") or {}
+    if evc.get("잘림") and int(evc.get("스크롤바폭") or 0) <= 0:
+        out.append(f"Jarvis 근거가 잘렸는데 스크롤바가 없다({evc.get('높이')}/{evc.get('내용')}px)")
     dead = m.get("Jarvis빈공간")
     if isinstance(dead, int) and dead > 80:
         out.append(f"Jarvis 로그에 빈 공간 {dead}px")

@@ -93,8 +93,11 @@
   padding: 12px 20px; border-bottom: 1px solid var(--rail-border);
   background: linear-gradient(90deg, var(--action-primary-bg), var(--bar-bg-to));
 }
-.afs-dialog-bar b { color: #fff; font-size: 15px; }
-.afs-dialog-bar span { color: var(--bar-fg-muted); font-size: 12px; }
+/* ⚠️ **직계 자식만** 대상으로 한다. 종전에는 `.afs-dialog-bar b` 였고, 그래서 바 안의 흰
+ * 버튼(`secondary-button`) 속 `<b>` 까지 흰 글씨가 되어 **글자가 사라졌다**(업무표준 화면의
+ * 닫기 «(Esc)» 가 안 보였다). 바의 색 규칙은 «바 배경 위의 글자»에만 해당한다. */
+.afs-dialog-bar > b { color: #fff; font-size: 15px; }
+.afs-dialog-bar > span { color: var(--bar-fg-muted); font-size: 12px; }
 .afs-dialog-bar .bar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .afs-dialog-bar .busy { color: #8fe0e6; font-size: 12px; }
 .afs-dialog-body { flex: 1 1 auto; min-height: 0; }
@@ -461,8 +464,12 @@
 .afs-scope .jarvis-quick,
 .afs-scope .jarvis-offline,
 .afs-scope .jarvis-input { flex: 0 0 auto; }
-/* 근거 목록은 **먼저 양보한다** — 대화를 읽을 수 없는 것보다 근거를 스크롤하는 편이 낫다. */
-.afs-scope .jarvis-evidence { flex: 0 1 auto; min-height: 0; max-height: 22vh; overflow-y: auto; }
+/* ★★ [2026-08-04 이관 3/10 실측] 근거 목록이 **30px 잘렸다**(높이 116 / 내용 146).
+ * 종전 주석은 "근거가 먼저 양보한다"였는데, 그건 근거가 2~3줄일 때의 판단이 아니었다.
+ * 근거는 «비서의 답을 무엇에 근거해 믿을 것인가»이고 3줄뿐이다 — 그걸 잘라서 로그를 264px 로
+ * 넓히는 것은 순서가 거꾸로다. 로그는 **자기 안에서 스크롤**할 수 있고 근거는 잘리면 끝이다.
+ * → 근거는 줄어들지 않는다(`flex: 0 0 auto`). 대신 아주 긴 목록은 상한 안에서 스크롤한다. */
+.afs-scope .jarvis-evidence { flex: 0 0 auto; min-height: 0; max-height: 22vh; overflow-y: auto; }
 
 /* 빠른 질문 축약 — 첫 대화 후에는 한 줄 토글로 접힌다. */
 .afs-scope .jarvis-quick.collapsed { padding-block: 8px; }
@@ -529,10 +536,10 @@
 .afs-scope .jarvis-log {
   flex: 1 1 auto; min-height: 184px;
   padding: 12px 16px; display: grid; gap: 10px; align-content: start; overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: transparent transparent; scrollbar-gutter: stable;
-}
-.afs-scope .jarvis-log:hover, .afs-scope .jarvis-log:focus-within {
-  scrollbar-color: #ffffff40 transparent;
+  /* ⚠️ 스크롤바를 hover 전까지 숨기지 않는다 — 레일 메뉴·안내 카드와 같은 규칙이다.
+   * 720px 에서 근거를 온전히 보이게 한 뒤에는 추천 질문이 로그 스크롤 아래로 내려간다.
+   * 그때 스크롤바가 없으면 «질문이 하나뿐»으로 보인다(실측). 있다는 사실은 항상 보여야 한다. */
+  scrollbar-width: thin; scrollbar-color: #ffffff4a transparent; scrollbar-gutter: stable;
 }
 
 /* 시작 상태 — 안내 · 지금 문맥 · 추천 질문. 로그 안에 있으므로 다른 영역을 밀지 않는다.

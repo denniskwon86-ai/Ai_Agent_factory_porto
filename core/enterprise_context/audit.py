@@ -88,6 +88,11 @@ AGENT_PACK_CHANGED = "AGENT_PACK_CHANGED"
 #   **누가 어떤 근거로 넣었는지**가 남아야 한다. "확인 불가" 기록도 남긴다 — 무엇을 찾아봤는지가
 #   조사 진척의 유일한 근거다.
 COMPETITOR_REFERENCE_CHANGED = "COMPETITOR_REFERENCE_CHANGED"
+# [이관 3/10] 업무표준(규정·지침) 개정. **에이전트가 따르는 법규**이므로 이후 모든 산출물의
+#   통과·반려 기준이 여기서 바뀐다. 누가 언제 무엇을 바꿨는지가 남지 않으면, 지난달 반려된
+#   산출물이 이번 달 통과한 이유를 아무도 설명할 수 없다 — 기준이 바뀐 것인지 판정이 흔들린
+#   것인지 구분되지 않는다.
+WORK_STANDARD_CHANGED = "WORK_STANDARD_CHANGED"
 
 EVENTS = (
     ACCESS_DENIED_SCOPE_MISMATCH, ACCESS_DENIED_UNAUTHENTICATED,
@@ -97,6 +102,7 @@ EVENTS = (
     PROGRAM_STATUS_CHANGED, PROGRAM_USE_BLOCKED,
     ORG_STRUCTURE_CHANGED, ORG_USER_CHANGED, VIRTUAL_SCENARIO_CHANGED,
     SCENARIO_INPUT_CHANGED, AGENT_PACK_CHANGED, COMPETITOR_REFERENCE_CHANGED,
+    WORK_STANDARD_CHANGED,
 )
 
 #: 식별되지 않은 주체. 빈 문자열로 두면 "기록 누락"과 구분되지 않는다.

@@ -45,6 +45,9 @@ def _app(monkeypatch, *, enforced=True, user_id="", user=None, scope_kw=None,
     if "master" in routers:
         import api.routes.master_control as mc
         app.include_router(mc.router)
+    if "standards" in routers:
+        import api.routes.standard_control as sc
+        app.include_router(sc.router)
     app.dependency_overrides[current_principal] = lambda: Principal(
         user_id=user_id,
         scope=AccessScope(user_id=user_id, **(scope_kw or {"unrestricted": False})))
@@ -249,3 +252,74 @@ def test_master_write_paths_require_data_admin(monkeypatch):
     assert c.get("/api/v1/master/scope-bindings/coverage").status_code == 403
     assert c.get("/api/v1/master/scope-bindings").status_code == 403
     assert c.get("/api/v1/master/documents/quality").status_code == 403
+
+
+# ── 업무표준: 라우트에 권한 검사가 **하나도 없었다**(2026-08-04 이관 3/10) ──────────
+#
+# ★★★ 익명 요청으로 `POST /api/v1/standards` 와 `POST /api/v1/standards/seed?force=true` 가
+#   그대로 통했다. 즉 **누구나 에이전트의 통과·반려 기준을 바꿀 수 있었다.**
+#   지식팩 삭제 구멍보다 파급이 넓다 — 표준이 바뀌면 이후 모든 산출물의 판정이 바뀐다.
+def _standards(monkeypatch):
+    import api.routes.standard_control as sc
+    monkeypatch.setattr(sc, "_list_all", lambda: [
+        {"master_code": "WS-RFP", "stage": "RFP", "kind": "regulation", "version": 1},
+        {"master_code": "WG-PLAN", "stage": "PLAN", "kind": "guideline", "version": 2},
+    ])
+    monkeypatch.setattr(sc, "get_standard", lambda stage: {"stage": stage, "checks": []})
+    monkeypatch.setattr(sc, "render_standard_brief", lambda stage: "고지문")
+    return sc
+
+
+def test_work_standard_list_is_blocked_for_anonymous(monkeypatch):
+    """익명에게는 0건 + 이유. **탭 메타(`/kinds`)도 같이 막는다** — 탭만 그려 주면 화면이
+    «권한 있음»처럼 보이고 목록만 비어, 사용자는 «등록된 표준이 없다»로 읽는다."""
+    _standards(monkeypatch)
+    c = TestClient(_app(monkeypatch, user_id="", user=None, routers=("standards",)))
+    for path in ("/api/v1/standards", "/api/v1/standards/kinds"):
+        body = c.get(path).json()
+        assert body["data"] == [], f"{path} 가 익명에게 자료를 줬다"
+        assert body.get("blocked_reason"), f"{path} 차단 이유가 없다 — 0건과 구분되지 않는다"
+
+
+def test_work_standard_detail_is_403_not_404(monkeypatch):
+    """상세·이력은 403 이다. 404 로 숨기지 않는다 — 업무표준은 전사 제도 문서이므로 존재가
+    비밀이 아니고, 404 로 두면 «없는 단계»와 «권한 없음»이 섞여 원인을 못 찾는다."""
+    _standards(monkeypatch)
+    c = TestClient(_app(monkeypatch, user_id="", user=None, routers=("standards",)))
+    assert c.get("/api/v1/standards/RFP").status_code == 403
+    assert c.get("/api/v1/standards/RFP/history").status_code == 403
+
+
+def test_work_standard_writes_require_data_admin(monkeypatch):
+    """★★★ 개정·재시드는 DA·관리자만. 이것이 열려 있던 것이 이 파일에 항목을 추가한 이유다."""
+    _standards(monkeypatch)
+    c = TestClient(_app(monkeypatch, user_id="ghost@ls", user=None, routers=("standards",)))
+    assert c.post("/api/v1/standards", json={"stage": "RFP"}).status_code == 403
+    assert c.post("/api/v1/standards/seed?force=true").status_code == 403
+
+
+def test_work_standard_reader_sees_list_and_admin_can_revise(monkeypatch):
+    """★ 통제가 업무를 막지 않는다. 등록된 사용자는 목록을 보고, DA 는 개정할 수 있다."""
+    sc = _standards(monkeypatch)
+    reader = TestClient(_app(
+        monkeypatch, user_id="staff@ls", user={"user_id": "staff@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"})},
+        routers=("standards",)))
+    body = reader.get("/api/v1/standards").json()
+    assert len(body["data"]) == 2 and not body.get("blocked_reason")
+    assert reader.get("/api/v1/standards/kinds").json()["data"], "탭 메타가 비었다"
+
+    # DA 의 개정은 통하고, 감사에 남는다.
+    recorded = []
+    monkeypatch.setattr(sc.audit, "record",
+                        lambda *a, **k: recorded.append((a, k)) or True)
+    monkeypatch.setattr(sc, "register_standard",
+                        lambda *a, **k: {"master_code": "WS-RFP", "version": 3})
+    da = TestClient(_app(
+        monkeypatch, user_id="da@ls", user={"user_id": "da@ls", "status": "active"},
+        scope_kw={"unrestricted": False, "can_manage_standard": True},
+        routers=("standards",)))
+    assert da.post("/api/v1/standards", json={"stage": "RFP"}).status_code == 200
+    events = [a[0] for a, _ in recorded]
+    assert "WORK_STANDARD_CHANGED" in events, (
+        f"업무표준 개정이 감사에 남지 않았다 — 기준이 언제 바뀌었는지 설명할 수 없다: {recorded}")
