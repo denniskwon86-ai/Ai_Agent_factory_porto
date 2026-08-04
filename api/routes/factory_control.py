@@ -15,6 +15,31 @@ from pydantic import BaseModel
 from api.deps import (Principal, assert_can_read_dept, assert_enterprise,
                       assert_project_readable, assert_project_writable,
                       current_principal, enterprise_context)
+# [D-017 P0] 서버 재검사 — 화면 숨김이 아니라 여기가 유일한 보안 경계다.
+from api.deps import require_caps as _require_caps
+from core.admin_capability import (ADMIN_PERMISSIONS, AGENT_READ, AGENT_UPDATE, SKILL_PROPOSE,
+                                   WORKFLOW_CREATE, WORKFLOW_READ, WORKFLOW_RETIRE,
+                                   WORKFLOW_UPDATE)
+
+
+def _audit_registry(event: str, p: "Principal", reason: str, detail: str = "") -> None:
+    """[D-017 §9 P0-6] 전역 구성 변경을 남긴다.
+
+    ★ 이 경로들은 **한 사람의 저장이 전 사용자에게 반영된다.** 기록이 없으면 "어제까지 되던
+      파이프라인이 왜 바뀌었나" 에 아무도 답할 수 없다.
+    ⚠️ 기록 실패가 요청을 죽이지 않는다 — 다만 `audit.record` 는 내부에서 실패를 센다."""
+    try:
+        from core.enterprise_context import audit
+        audit.record(getattr(audit, event, event), resource_type="agent_registry",
+                     resource_id=event, actor=p.user_id or "", outcome="allowed",
+                     reason=reason, detail=detail)
+    except Exception:
+        pass
+
+
+#: [D-017 §2.3] 스킬 파일명에 쓰는 에이전트 ID. **경로 구성에 개입할 수 없는 문자만** 허용한다.
+#: ⚠️ 예전에는 검증이 없어 `../` 나 절대경로 조각이 파일명으로 들어갈 수 있었다.
+_SAFE_AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 from core.enterprise_context import EnterpriseContext
 from typing import Optional
 
@@ -1664,15 +1689,26 @@ class AgentRegistryPayload(BaseModel):
 
 
 @router.get("/agents")
-async def get_agent_registry():
-    """에이전트 마스터 레지스트리 조회."""
+async def get_agent_registry(p: Principal = Depends(current_principal)):
+    """에이전트 마스터 레지스트리 조회.
+
+    ⚠️ [D-017 §2.1] 예전에는 `current_principal` 의존성이 아예 없었다 — 익명·타 사업부
+      사용자가 전역 구성을 그대로 읽었다."""
+    _require_caps(p, AGENT_READ, resource="agent_registry", action="read")
     from core.agent_registry import load_registry
     return {"status": "success", "data": load_registry()}
 
 
 @router.put("/agents")
-async def update_agent_registry(payload: AgentRegistryPayload):
-    """제어판에서 편집한 레지스트리 저장(검증·정규화 후 영속화)."""
+async def update_agent_registry(payload: AgentRegistryPayload,
+                                p: Principal = Depends(current_principal)):
+    """제어판에서 편집한 레지스트리 저장(검증·정규화 후 영속화).
+
+    ★★ [D-017 §9 P0-3] 이것은 **전역 기본 정의**다. 한 사람이 저장하면 전 사용자·전 프로젝트의
+      파이프라인이 바뀐다 — 그래서 플랫폼 관리자 전용이다(`ADMIN_PERMISSIONS`).
+      부서 단위로 다르게 쓰고 싶으면 템플릿을 복사한다(Copy 모델)."""
+    _require_caps(p, ADMIN_PERMISSIONS, AGENT_UPDATE,
+                  resource="agent_registry", action="update")
     from core.agent_registry import save_registry
     try:
         saved = save_registry(payload.model_dump())
@@ -1680,15 +1716,24 @@ async def update_agent_registry(payload: AgentRegistryPayload):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"레지스트리 저장 오류: {str(e)}")
+    _audit_registry("AGENT_REGISTRY_UPDATED", p, "전역 에이전트 레지스트리 저장",
+                    f"agents={len((saved or {}).get('agents') or [])}")
     # 주의: HOTL 중단점 등 실행 반영은 그래프 재컴파일(서버 재시작) 시 적용된다.
     return {"status": "success", "data": saved, "note": "HOTL 중단점 변경은 서버 재시작 후 파이프라인에 반영됩니다."}
 
 
 @router.post("/agents/reset")
-async def reset_agent_registry():
-    """레지스트리를 기본값(현재 SW 파이프라인)으로 초기화."""
+async def reset_agent_registry(p: Principal = Depends(current_principal)):
+    """레지스트리를 기본값(현재 SW 파이프라인)으로 초기화.
+
+    ★★ **되돌릴 수 없는 전역 변경**이다. 누군가의 편집이 통째로 사라지므로 플랫폼 관리자 전용."""
+    _require_caps(p, ADMIN_PERMISSIONS, AGENT_UPDATE,
+                  resource="agent_registry", action="reset")
     from core.agent_registry import reset_registry
-    return {"status": "success", "data": reset_registry()}
+    data = reset_registry()
+    _audit_registry("AGENT_REGISTRY_RESET", p, "전역 에이전트 레지스트리 초기화",
+                    "사용자 편집분이 기본값으로 대체됨")
+    return {"status": "success", "data": data}
 
 
 # ==========================================
@@ -1856,7 +1901,22 @@ def _assemble_simulation_framework(ai_data: dict) -> dict:
     }
 
 @router.post("/ai-recommend/skill")
-async def ai_recommend_skill(req: AIRecommendSkillRequest):
+async def ai_recommend_skill(req: AIRecommendSkillRequest,
+                             p: Principal = Depends(current_principal)):
+    """스킬 문서 초안 생성.
+
+    ⚠️⚠️ [D-017 §2.3] 예전 결함 세 가지를 여기서 막는다:
+      ① 권한 검사 없이 공용 `skills/` 에 직접 썼다 → `skill.propose` 를 요구한다.
+      ② `agent_id` 를 파일명에 그대로 썼다(정규식 검증 없음) → 경로 구성에 개입할 수 있었다.
+      ③ **기존 공용 스킬을 덮어썼다** → 이제 덮어쓰지 않는다. 초안은 `skills/_proposals/`
+         아래에 요청자 이름을 붙여 쓰고, 공용 반영은 `skill.approve` 를 가진 사용자가 한다.
+    ★ 초안·검토·승인·버전 전체 절차는 설계 §9 P1 이다. P0 에서는 **덮어쓰기를 막는 것**까지."""
+    _require_caps(p, SKILL_PROPOSE, resource="skill", action=f"propose:{req.agent_id}")
+    if not _SAFE_AGENT_ID.match(str(req.agent_id or "")):
+        raise HTTPException(
+            status_code=422,
+            detail=("에이전트 ID 는 영문·숫자·_·- 만 쓸 수 있습니다(64자 이내) — "
+                    "이 값이 파일 경로가 되므로 다른 문자는 허용하지 않습니다."))
     from core.llm_gateway import gateway
     prompt = f"""
     사용자가 지정한 에이전트의 간략한 역할을 바탕으로, 이 에이전트가 어떤 입력을 받아 어떤 산출물을 내고, 누구에게 전달해야 하는지를 명시하는 상세 마크다운 스킬 문서를 작성해 줘.
@@ -1883,12 +1943,27 @@ async def ai_recommend_skill(req: AIRecommendSkillRequest):
             res = match.group(1)
         data = json.loads(res)
         skill_id = f"{req.agent_id.lower()}_skill"
-        skill_path = os.path.join("skills", f"{skill_id}.md")
-        os.makedirs("skills", exist_ok=True)
-        with open(skill_path, "w", encoding="utf-8") as f:
+        # ★★ 공용 스킬을 **덮어쓰지 않는다.** 검토를 거치지 않은 LLM 출력이 전 프로젝트가
+        #   쓰는 공용 스킬을 조용히 바꾸면 안 된다 — 초안은 제안 디렉터리에 둔다.
+        proposals = os.path.join("skills", "_proposals")
+        os.makedirs(proposals, exist_ok=True)
+        actor = re.sub(r"[^A-Za-z0-9_.-]", "_", (p.user_id or "anonymous"))[:64]
+        draft_path = os.path.join(proposals, f"{skill_id}__{actor}.md")
+        with open(draft_path, "w", encoding="utf-8") as f:
             f.write(data["skill_markdown"])
+        already = os.path.exists(os.path.join("skills", f"{skill_id}.md"))
+        _audit_registry("SKILL_DRAFT_CREATED", p, f"스킬 초안 생성 {skill_id}",
+                        f"draft={draft_path} · 공용 존재={already}")
             
-        return {"status": "success", "role": data["role_expanded"], "skill": skill_id}
+        return {
+            "status": "success", "role": data["role_expanded"], "skill": skill_id,
+            "draft_path": draft_path.replace("\\", "/"),
+            # 화면이 «공용에 저장됐다» 고 오해하지 않도록 서버가 직접 말한다.
+            "published": False,
+            "note": (f"초안을 만들었습니다. 공용 스킬 «{skill_id}» 는 "
+                     + ("이미 있으며 덮어쓰지 않았습니다." if already else "아직 없습니다.")
+                     + " 공용 반영은 스킬 승인 권한을 가진 사용자가 합니다."),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"스킬 생성 실패: {str(e)}\n\n(LLM 응답: {res[:100]}...)")
 
@@ -1903,14 +1978,17 @@ class TemplateCopyRequest(BaseModel):
 
 
 @router.get("/templates")
-async def list_workflow_templates():
+async def list_workflow_templates(p: Principal = Depends(current_principal)):
     """공존하는 워크플로우 템플릿 목록(항상 default 포함)."""
+    _require_caps(p, WORKFLOW_READ, resource="workflow_template", action="list")
     from core.agent_registry import list_templates
     return {"status": "success", "data": list_templates()}
 
 
 @router.get("/templates/{template_id}")
-async def get_workflow_template(template_id: str):
+async def get_workflow_template(template_id: str,
+                                p: Principal = Depends(current_principal)):
+    _require_caps(p, WORKFLOW_READ, resource="workflow_template", action=template_id)
     from core.agent_registry import load_template, _safe_tid
     try:
         _safe_tid(template_id)
@@ -1920,18 +1998,30 @@ async def get_workflow_template(template_id: str):
 
 
 @router.post("/templates/copy")
-async def copy_workflow_template(req: TemplateCopyRequest):
+async def copy_workflow_template(req: TemplateCopyRequest,
+                                 p: Principal = Depends(current_principal)):
     """기존 템플릿을 복사해 새 워크플로우 생성(기존은 불변 — Copy 모델)."""
+    _require_caps(p, WORKFLOW_CREATE, resource="workflow_template", action="copy")
     from core.agent_registry import copy_template
     try:
         tpl = copy_template(req.src_id, req.new_id, req.new_name or "")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _audit_registry("WORKFLOW_TEMPLATE_COPIED", p, f"템플릿 복사 {req.src_id} → {req.new_id}", "")
     return {"status": "success", "template_id": req.new_id, "data": tpl}
 
 
 @router.put("/templates/{template_id}")
-async def update_workflow_template(template_id: str, payload: AgentRegistryPayload):
+async def update_workflow_template(template_id: str, payload: AgentRegistryPayload,
+                                   p: Principal = Depends(current_principal)):
+    """★ `default` 는 **시스템 기본 정의**다. 설계 §4.2 «복사·버전 승격만 가능» 에 따라
+      직접 수정은 플랫폼 관리자만 할 수 있다 — 나머지는 복사해서 쓴다."""
+    if str(template_id) == "default":
+        _require_caps(p, ADMIN_PERMISSIONS, WORKFLOW_UPDATE,
+                      resource="workflow_template", action="update:default")
+    else:
+        _require_caps(p, WORKFLOW_UPDATE, resource="workflow_template",
+                      action=f"update:{template_id}")
     from core.agent_registry import save_template, _safe_tid
     try:
         _safe_tid(template_id)
@@ -1940,15 +2030,26 @@ async def update_workflow_template(template_id: str, payload: AgentRegistryPaylo
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"템플릿 저장 오류: {str(e)}")
+    _audit_registry("WORKFLOW_TEMPLATE_UPDATED", p, f"템플릿 저장 {template_id}", "")
     return {"status": "success", "data": saved}
 
 
 @router.delete("/templates/{template_id}")
-async def delete_workflow_template(template_id: str):
+async def delete_workflow_template(template_id: str,
+                                   p: Principal = Depends(current_principal)):
+    """⚠️ 삭제는 되돌릴 수 없다 — `workflow.retire` 를 요구한다."""
+    if str(template_id) == "default":
+        # 시스템 기본 워크플로우는 지우지 않는다. 지우면 신규 프로젝트가 만들어지지 않는다.
+        raise HTTPException(status_code=400,
+                            detail="기본 워크플로우(default)는 삭제할 수 없습니다 — 복사본을 쓰십시오.")
+    _require_caps(p, WORKFLOW_RETIRE, resource="workflow_template",
+                  action=f"delete:{template_id}")
     from core.agent_registry import delete_template, _safe_tid
     try:
         _safe_tid(template_id)
         delete_template(template_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _audit_registry("WORKFLOW_TEMPLATE_DELETED", p, f"템플릿 삭제 {template_id}",
+                    "되돌릴 수 없음")
     return {"status": "success"}

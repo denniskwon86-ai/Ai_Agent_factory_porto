@@ -48,6 +48,54 @@ class Principal:
         return self.scope.unrestricted
 
 
+def capabilities_of(p: "Principal"):
+    """[D-017] 요청자의 확정 관리자 권한. **라우트는 이것만 본다.**
+
+    ★ 사용자 레코드를 함께 넘긴다 — `is_ai_admin` 과 부서 역할이 거기 있고, 그 둘이 없으면
+      capability 계산이 조용히 좁아진다."""
+    from core.admin_capability import resolve
+    u = None
+    if (p.user_id or "").strip():
+        try:
+            u = org_directory.get_user(p.user_id)
+        except Exception:
+            u = None            # 조회 실패는 **넓히지 않는다** — 실패는 닫히는 쪽이어야 한다
+    return resolve(p.scope, u)
+
+
+def require_caps(p: "Principal", *caps: str, resource: str = "", action: str = ""):
+    """서버 재검사(D-017 3단계 중 ③). 없으면 **403** 과 감사 기록.
+
+    ⚠️ 여기가 유일한 보안 경계다. 화면 메뉴 숨김과 Route Guard 는 편의이고, 이 함수만이
+      «URL 을 아는 사람» 앞에서 실제로 막는다.
+    ★ 거부를 **기록한다.** 기록하지 않으면 "누가 무엇을 시도했는가" 를 나중에 물을 수 없고,
+      권한 설계가 맞는지 확인할 근거도 남지 않는다."""
+    from core.admin_capability import AdminCapabilityError, require
+    c = capabilities_of(p)
+    try:
+        require(c, *caps)
+    except AdminCapabilityError as e:
+        try:
+            from core.enterprise_context import audit
+            audit.record(
+                audit.ACCESS_DENIED_UNAUTHENTICATED if not (p.user_id or "").strip()
+                else audit.ACCESS_DENIED_SCOPE_MISMATCH,
+                resource_type=resource or "agent_registry",
+                resource_id=action or ",".join(caps),
+                actor=p.user_id or "", outcome="denied",
+                reason=str(e), detail=f"required={sorted(caps)}")
+        except Exception:
+            pass            # 감사 실패가 거부를 성공으로 바꾸면 안 된다 — 거부는 그대로 간다
+        # ★★ 401 과 403 을 구분한다(저장소 공통 규약). 사용자가 해야 할 일이 다르다:
+        #   401 = «누구인지 밝히십시오» / 403 = «당신에게는 그 권한이 없습니다».
+        #   뭉개면 이미 로그인한 사용자가 계속 로그인을 시도하거나, 익명 사용자가 관리자에게
+        #   권한을 요청한다 — 둘 다 원인에 도달하지 못한다.
+        if not (p.user_id or "").strip():
+            raise HTTPException(status_code=401, detail="사용자 식별이 필요합니다.")
+        raise HTTPException(status_code=403, detail=str(e))
+    return c
+
+
 async def current_principal(request: Request) -> Principal:
     uid = _extract_user_id(request)
     scope = await asyncio.to_thread(org_directory.resolve_scope, uid)
