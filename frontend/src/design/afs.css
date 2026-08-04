@@ -13,24 +13,28 @@
  *   다르면 승인 프로토타입을 따르되 본문 12px 이상·키보드 접근은 UI 설계서를 우선한다(작업서 §2).
  */
 
+/* [UIUX-AUDIT-30] 색값의 원본은 `tokens.css` 의 **의미 토큰** 하나다.
+ * ⚠️ 여기에 색을 다시 적지 않는다 — 두 곳에 적으면 한쪽만 고쳐지고, 그때부터 «승인 색»이
+ *   두 개가 된다. 아래는 기존 규칙이 쓰는 짧은 이름을 의미 토큰에 **연결**만 한다. */
+@import './tokens.css';
+
 .afs-scope {
-  /* LS 브랜드 — Navy 구조 + Red 는 **핵심 행동에만** 제한적으로(채택 결정 7항) */
-  --navy: #0a1e5a;
-  --navy2: #071747;
-  --red: #fa002d;
-  --cyan: #009bb4;
-  --green: #138578;
-  --orange: #d77b18;
-  --ink: #101a2d;
-  --muted: #667185;
-  --line: #d8dce3;
-  --soft: #f4f5f7;
-  --paper: #fffdf7;
-  --shadow: 0 12px 32px rgba(16, 26, 45, .10);
+  --navy: var(--action-primary-bg);
+  --navy2: var(--action-primary-hover);
+  --red: var(--action-danger-bg);
+  --cyan: var(--state-info-fg);
+  --green: var(--state-success-fg);
+  --orange: var(--state-warn-fg);
+  --ink: var(--surface-text);
+  --muted: var(--surface-text-muted);
+  --line: var(--surface-border);
+  --soft: var(--surface-sunken);
+  --paper: var(--surface-card);
+  --shadow: var(--surface-shadow);
 
   font-family: Pretendard, "Noto Sans KR", "Segoe UI", Arial, sans-serif;
-  color: var(--ink);
-  background: #eef1f4;
+  color: var(--surface-text);
+  background: var(--surface-page);
 }
 
 .afs-scope *,
@@ -87,17 +91,38 @@
 .afs-scope .hub-layout {
   display: grid;
   grid-template-columns: 238px minmax(680px, 1fr) 300px;
-  min-height: 0;
-  background: #eef1f4;
+  /* 세 칸이 각자 자기 높이 안에서 처리하도록 그리드 자체는 넘치지 않는다. */
+  height: 100%; min-height: 0; overflow: hidden;
+  background: var(--surface-page);
 }
 
 .afs-scope .hub-layout.no-jarvis { grid-template-columns: 238px minmax(0, 1fr); }
 
+/* ★★ [UIUX-AUDIT-30 §6] **중앙이 주 스크롤이고, 좌우 레일은 머리를 고정한다.**
+ *
+ * 감사 실측: 좌·중앙·우가 각각 독립 스크롤이라 1280×720 에서 스크롤바 세 개가 동시에 보였다.
+ * 세 개를 한 문서로 합치지는 않는다(합치면 Jarvis 입력이 화면 밖으로 밀려난다). 대신
+ *   · 레일 머리(모듈 소개)와 Jarvis 입력은 **고정**하고,
+ *   · 실제로 넘칠 수 있는 부분(메뉴 목록·대화 로그)만 내부에서 스크롤하며,
+ *   · 스크롤바는 **hover/focus 일 때만** 보이게 해서 평소 시각 소음을 없앤다.
+ * ⚠️ `scrollbar-width: none` 으로 아예 숨기지 않는다 — 스크롤 가능하다는 사실 자체가
+ *   사라지면 사용자는 아래에 항목이 더 있는 줄 모른다. 그래서 hover/focus 에서 되돌아온다. */
 .afs-scope .module-rail {
-  overflow: auto;
+  display: flex; flex-direction: column; min-height: 0;
+  overflow: hidden;
   border-right: 1px solid #24344b;
   color: #e8eef8;
   background: linear-gradient(180deg, #111b2a, #172438);
+}
+.afs-scope .module-rail > .module-intro { flex: 0 0 auto; }
+.afs-scope .module-rail > .inheritance-card { flex: 0 0 auto; }
+.afs-scope .module-rail > .module-menu {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  scrollbar-color: transparent transparent;
+}
+.afs-scope .module-rail > .module-menu:hover,
+.afs-scope .module-rail > .module-menu:focus-within {
+  scrollbar-color: #ffffff40 transparent;
 }
 
 .afs-scope .module-intro { padding: 24px 20px 18px; border-bottom: 1px solid #ffffff14; }
@@ -136,7 +161,8 @@
 .afs-scope .inheritance-card > b { display: block; margin-top: 5px; font-size: 13px; color: #eaffff; }
 .afs-scope .inheritance-card p { margin: 6px 0 0; color: #b5d0d1; font-size: 12px; line-height: 1.45; }
 
-.afs-scope .hub-main { min-width: 0; overflow: auto; padding: 22px 24px 40px; }
+/* 중앙이 **주 스크롤**이다 — 사용자가 «내용을 읽는» 곳이므로 스크롤바를 숨기지 않는다. */
+.afs-scope .hub-main { min-width: 0; min-height: 0; overflow-y: auto; padding: 22px 24px 40px; }
 
 /* ── 화면 머리 ─────────────────────────────────────────────────────────────── */
 .afs-scope .screen-head {
@@ -172,7 +198,19 @@
 .afs-scope .primary-button,
 .afs-scope .secondary-button,
 .afs-scope .danger-ghost { min-height: 38px; padding: 0 13px; border-radius: 5px; font-size: 13px; font-weight: 850; }
-.afs-scope .primary-button { border: 1px solid var(--red); color: #fff; background: var(--red); }
+/* ★★ [UIUX-AUDIT-30] 1차 행동은 **구조색(Navy)** 이다. 예전에는 Red 였는데, 채택 결정 7항은
+ *   Red 를 «핵심 행동에만 제한적으로» 쓰라고 했고 화면마다 1차 버튼이 여럿이면 그 제한이
+ *   무너진다. Red 는 `danger-solid`(회수·삭제·대외 발간)에만 남긴다. */
+.afs-scope .primary-button {
+  border: 1px solid var(--action-primary-bg);
+  color: var(--action-primary-fg); background: var(--action-primary-bg);
+}
+.afs-scope .primary-button:hover:not(:disabled) { background: var(--action-primary-hover); }
+.afs-scope .danger-solid {
+  min-height: 38px; padding: 0 13px; border-radius: 5px; font-size: 13px; font-weight: 850;
+  border: 1px solid var(--action-danger-bg);
+  color: var(--action-danger-fg); background: var(--action-danger-bg);
+}
 .afs-scope .secondary-button { border: 1px solid #cbd1da; color: #39475c; background: #fff; }
 .afs-scope .danger-ghost { border: 1px solid #e1b2bb; color: #b01c39; background: #fff; }
 .afs-scope .primary-wide {
@@ -387,9 +425,18 @@
 
 /* ── Jarvis 레일 (300px) ───────────────────────────────────────────────────── */
 .afs-scope .jarvis-rail {
-  overflow: auto; border-left: 1px solid #1e345e; color: #e6edf8;
+  /* 입력창을 **항상 같은 자리에** 둔다. 레일 전체가 스크롤되면 질문하려고 스크롤을 내려야 하고,
+   * 그때 위에서 읽던 근거가 사라진다. */
+  display: flex; flex-direction: column; min-height: 0;
+  overflow: hidden; border-left: 1px solid #1e345e; color: #e6edf8;
   background: linear-gradient(180deg, #0a1e5a, #071846);
 }
+.afs-scope .jarvis-rail > header,
+.afs-scope .jarvis-context,
+.afs-scope .jarvis-evidence,
+.afs-scope .jarvis-quick,
+.afs-scope .jarvis-offline,
+.afs-scope .jarvis-input { flex: 0 0 auto; }
 .afs-scope .jarvis-rail > header { display: flex; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid #ffffff19; }
 .afs-scope .jarvis-orb {
   display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
@@ -432,7 +479,14 @@
   color: #d9e3f2; background: #ffffff08; font-size: 12px; text-align: left;
 }
 /* 대화 로그 — 답변을 중앙 Banner 가 아니라 **레일 안에서** 유지한다(지적 3). */
-.afs-scope .jarvis-log { padding: 12px 16px; display: grid; gap: 10px; max-height: 42vh; overflow: auto; }
+.afs-scope .jarvis-log {
+  flex: 1 1 auto; min-height: 0;
+  padding: 12px 16px; display: grid; gap: 10px; align-content: start; overflow-y: auto;
+  scrollbar-color: transparent transparent;
+}
+.afs-scope .jarvis-log:hover, .afs-scope .jarvis-log:focus-within {
+  scrollbar-color: #ffffff40 transparent;
+}
 .afs-scope .jarvis-turn { display: grid; gap: 3px; }
 .afs-scope .jarvis-turn > span { color: #7fc4d8; font-size: 12px; font-weight: 900; }
 .afs-scope .jarvis-turn > p {

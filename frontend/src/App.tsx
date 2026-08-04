@@ -31,6 +31,8 @@ import { AdvisorPanel } from './components/AdvisorPanel';
 import MegaBoardroomPanel from './components/MegaBoardroomPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import ServerLogPopup from './components/ServerLogPopup';
+// [UIUX-AUDIT-30 §3] 16개 동급 버튼 나열 → 1차 영역 + 영역별 전체 메뉴
+import { GlobalNav, type NavGroup, type NavItem } from './components/GlobalNav';
 
 
 export default function App() {
@@ -131,6 +133,78 @@ export default function App() {
     fetchReleases();
     fetchTemplates();
   }, [connectSSE, fetchProjects, fetchReleases, fetchTemplates]);
+
+  // ── [UIUX-AUDIT-30 §3] 글로벌 내비게이션 정의 ─────────────────────────────
+  // ★ 툴팁 문구를 그대로 `desc` 로 옮겼다. 툴팁은 키보드·터치에서 보이지 않아서, 지금까지
+  //   «이 기능이 무엇인지»는 마우스 사용자만 알 수 있었다.
+  const primaryNav: NavItem[] = [
+    { id: 'advisor', icon: '🧭', label: '업무·데이터 설계 상담',
+      desc: '무엇을 만들지 모를 때 — 선택형 대화로 필요한 데이터와 추진 순서를 정하고, 승인하면 프로젝트가 됩니다',
+      onSelect: () => setShowAdvisor(true) },
+    { id: 'collaboration', icon: '🤝', label: '협업·의사결정·발간',
+      desc: '앱 전달·수락, 의사결정 패키지, 대내외 발간을 한 곳에서 — 수락해도 데이터 권한은 넓어지지 않습니다',
+      onSelect: () => setShowCollaboration(true) },
+    { id: 'briefing', icon: '🧭', label: '전사 브리핑',
+      desc: '권한 범위 안의 전사 상태 — 내가 결정할 것·막힌 것·데이터 결손·비용 (LLM 0콜)',
+      onSelect: () => setShowBriefing(true) },
+  ];
+
+  const navGroups: NavGroup[] = [
+    {
+      title: '데이터 기반',
+      hint: '에이전트가 무엇을 근거로 답하는가를 정하는 곳입니다.',
+      items: [
+        { id: 'knowledge', icon: '📚', label: '지식 허브',
+          desc: '도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결',
+          onSelect: () => setShowKnowledgeHub(true) },
+        { id: 'master', icon: '🗂', label: '기준정보 마스터',
+          desc: '자재·공정·설비·KPI 골든 레코드 — 확정 조회로 모든 에이전트에 주입(모델 불변)',
+          onSelect: () => setShowMasterData(true) },
+        { id: 'crosswalk', icon: '🔗', label: '연계/크로스워크',
+          desc: '외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사람 승인',
+          onSelect: () => setShowCrosswalk(true) },
+        { id: 'governance', icon: '🛡️', label: '데이터 거버넌스',
+          desc: '조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약·외부지표 준비도',
+          onSelect: () => setShowGovernance(true) },
+      ],
+    },
+    {
+      title: '업무 기준과 조직',
+      hint: '누가 무엇을 어떤 기준으로 판단하는가를 정합니다.',
+      items: [
+        { id: 'standard', icon: '📜', label: '업무표준',
+          desc: '에이전트의 법규·사규 — 무엇을 어떤 기준으로 평가해 다음 단계로 넘기는지. 개정 시 구판 보존',
+          onSelect: () => setShowWorkStandard(true) },
+        { id: 'org', icon: '🏢', label: '조직·권한',
+          desc: '부서·사용자·권한 — 부서는 기준정보라 개편하면 새 버전이 되고 구판은 이력으로 남습니다',
+          onSelect: () => setShowOrgChart(true) },
+        { id: 'agents', icon: '⚙️', label: '에이전트 통제소',
+          desc: '각 에이전트의 역할·스킬·모델·순서·HOTL(전문가 개입)을 설정',
+          onSelect: openAgentPanel },
+        { id: 'skills', icon: '🧬', label: 'AI 스킬 진화',
+          desc: '에이전트가 스스로 제안한 스킬 개선안 승인/반려',
+          onSelect: () => setShowSkillEvolution(true) },
+      ],
+    },
+    {
+      title: '운영과 검증',
+      hint: '만든 것을 실제로 돌리고, 돌린 결과를 확인합니다.',
+      items: [
+        { id: 'planning', icon: '📊', label: '경영계획',
+          desc: '계획·실적·시나리오를 동일 기준선에서 비교 (결정론적 계산, LLM 0콜)',
+          onSelect: () => setShowPlanning(true) },
+        { id: 'workspace', icon: '🏢', label: '워크스페이스',
+          desc: '부서 앱의 공유·복제와 전사 승격 게이트 — 계약·보안·품질·소유자 승인을 모두 통과해야 승격',
+          onSelect: () => setShowWorkspace(true) },
+        { id: 'shadow', icon: '🧪', label: 'Shadow Mode',
+          desc: '새 규칙·모델을 실제 데이터에 병렬 적용해 비교하고, 승인된 범위에서만 제한 적용',
+          onSelect: () => setShowShadow(true) },
+        { id: 'telemetry', icon: '📈', label: 'LLM 텔레메트리',
+          desc: '실제 사용 모델·폴백·소요시간 — 모델 불변성 실측',
+          onSelect: () => setShowTelemetry(true) },
+      ],
+    },
+  ];
 
   const handleCreateProject = async () => {
     if (!newProjectId.trim()) return;
@@ -270,124 +344,28 @@ export default function App() {
             <h1 className="text-2xl font-bold tracking-tight text-gray-100 flex items-center gap-3 shrink-0">
               <span className="text-indigo-400">🏭 V5.2</span> Private AI Cockpit
             </h1>
-            <div className="flex items-center gap-4 min-w-0 overflow-x-auto">
-              <button
-                onClick={() => setShowAdvisor(true)}
-                className="text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 px-4 py-2 rounded-lg transition-all"
-                title="무엇을 만들지 모를 때 — 선택형 대화로 필요한 데이터와 추진 순서를 정하고, 승인하면 프로젝트가 됩니다"
-              >
-                🧭 업무·데이터 설계 상담
-              </button>
-              <button
-                onClick={() => setShowGovernance(true)}
-                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
-                title="조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약 상태·외부지표 준비도를 한 화면에서 확인"
-              >
-                🛡️ 데이터 거버넌스
-              </button>
-              <button
-                onClick={() => setShowShadow(true)}
-                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
-                title="새 규칙·모델을 실제 데이터에 병렬 적용해 비교하고, 승인된 범위에서만 제한적으로 운영 적용"
-              >
-                🧪 Shadow Mode
-              </button>
-              <button
-                onClick={() => setShowWorkspace(true)}
-                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
-                title="부서 앱의 공유·복제와 전사 승격 게이트 — 데이터 계약·보안·품질·소유자 승인을 모두 통과해야 승격된다"
-              >
-                🏢 워크스페이스
-              </button>
-              <button
-                onClick={() => setShowPlanning(true)}
-                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
-                title="계획·실적·시나리오를 동일 기준선에서 비교 (결정론적 계산, LLM 0콜)"
-              >
-                📊 경영계획
-              </button>
-              <button
-                onClick={() => setShowBriefing(true)}
-                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
-                title="권한 범위 안의 전사 상태 — 내가 결정할 것·막힌 것·데이터 결손·비용 (LLM 0콜)"
-              >
-                🧭 전사 브리핑
-              </button>
-              <button
-                onClick={openAgentPanel}
-                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-all"
-                title="각 에이전트의 역할·스킬·모델·순서·HOTL (전문가 개입)을 설정"
-              >
-                ⚙️ 에이전트 통제소
-              </button>
-              <button
-                onClick={() => setShowSkillEvolution(true)}
-                className="text-sm font-bold text-purple-200 bg-purple-900/40 hover:bg-purple-800/60 border border-purple-700/50 px-4 py-2 rounded-lg transition-all"
-                title="에이전트가 스스로 제안한 스킬 개선안 승인/반려"
-              >
-                🧬 AI 스킬 진화
-              </button>
-              <button
-                onClick={() => setShowCollaboration(true)}
-                className="text-sm font-bold text-indigo-200 bg-indigo-900/40 hover:bg-indigo-800/60 border border-indigo-700/50 px-4 py-2 rounded-lg transition-all"
-                title="앱 전달·수락·내 앱 — 개인 전달은 부서 공유·전사 승격과 별개이며, 수락해도 데이터 권한은 넓어지지 않습니다"
-              >
-                🤝 협업
-              </button>
-              <button
-                onClick={() => setShowKnowledgeHub(true)}
-                className="text-sm font-bold text-cyan-200 bg-cyan-900/40 hover:bg-cyan-800/60 border border-cyan-700/50 px-4 py-2 rounded-lg transition-all"
-                title="도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결"
-              >
-                📚 지식 허브
-              </button>
-              <button
-                onClick={() => setShowMasterData(true)}
-                className="text-sm font-bold text-emerald-200 bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-700/50 px-4 py-2 rounded-lg transition-all"
-                title="자재·공정·설비·KPI 기준정보(골든 레코드)를 등록 — 확정 조회로 모든 에이전트에 주입(모델 불변)"
-              >
-                🗂 기준정보 마스터
-              </button>
-              <button
-                onClick={() => setShowWorkStandard(true)}
-                className="text-sm font-bold text-amber-200 bg-amber-900/40 hover:bg-amber-800/60 border border-amber-700/50 px-4 py-2 rounded-lg transition-all"
-                title="에이전트의 법규·사규 — 각 에이전트가 무엇을 어떤 기준으로 평가해 다음 단계로 넘기는지를 정의. 개정 시 새 버전이 생기고 구판은 보존된다"
-              >
-                📜 업무표준
-              </button>
+            {/* ★ 사용자 전환기는 «기능»이 아니라 «지금 누구인가»다. 메뉴 안으로 숨기지 않는다 —
+                권한 범위가 사람마다 다르므로 상시 보여야 한다(채택 결정 6항). */}
+            <div className="flex items-center gap-3 min-w-0">
               <UserSwitcher />
-              <button
-                onClick={() => setShowOrgChart(true)}
-                className="text-sm font-bold text-sky-200 bg-sky-900/40 hover:bg-sky-800/60 border border-sky-700/50 px-4 py-2 rounded-lg transition-all"
-                title="부서·사용자·권한 — 부서는 기준정보라 개편하면 새 버전이 되고 구판은 이력으로 보존된다(과거 산출물의 소유 부서 해석 유지)"
-              >
-                🏢 조직·권한
-              </button>
-              <button
-                onClick={() => setShowCrosswalk(true)}
-                className="text-sm font-bold text-sky-200 bg-sky-900/40 hover:bg-sky-800/60 border border-sky-700/50 px-4 py-2 rounded-lg transition-all"
-                title="외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사람 승인, M3 온디맨드 조회의 주소록"
-              >
-                🔗 연계/크로스워크
-              </button>
-              <button
-                onClick={() => setShowTelemetry(true)}
-                className="text-sm font-bold text-blue-200 bg-blue-900/40 hover:bg-blue-800/60 border border-blue-700/50 px-4 py-2 rounded-lg transition-all"
-                title="LLM 호출 텔레메트리 — 실제 사용 모델·폴백·소요시간(모델 불변성 실측)"
-              >
-                📊 운영 계기판
-              </button>
-              <div className="relative">
-                <button 
-                  onClick={() => setShowLogPopup(v => !v)}
-                  title="서버 로그 보기"
-                  className="flex items-center gap-2 bg-black/20 hover:bg-black/40 transition-colors px-3 py-1.5 rounded-full border border-white/5 cursor-pointer"
-                >
-                  <span className="text-xs text-gray-400 font-medium">Network</span>
-                  <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_8px] ${isConnected ? 'bg-green-500 shadow-green-500/50' : 'bg-red-500 shadow-red-500/50 animate-pulse'}`} />
-                </button>
-                {showLogPopup && <ServerLogPopup onClose={() => setShowLogPopup(false)} />}
-              </div>
+              <GlobalNav
+              // 1차 영역 — 매일 쓰는 진입점 3개. 넘기면 다시 «나열»이 된다.
+              primary={primaryNav}
+              groups={navGroups}
+              right={
+                <div className="relative shrink-0">
+                  <button
+                    onClick={() => setShowLogPopup(v => !v)}
+                    title="서버 로그 보기"
+                    className="flex items-center gap-2 bg-black/20 hover:bg-black/40 transition-colors px-3 py-1.5 rounded-full border border-white/5 cursor-pointer"
+                  >
+                    <span className="text-xs text-gray-400 font-medium">Network</span>
+                    <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_8px] ${isConnected ? 'bg-green-500 shadow-green-500/50' : 'bg-red-500 shadow-red-500/50 animate-pulse'}`} />
+                  </button>
+                  {showLogPopup && <ServerLogPopup onClose={() => setShowLogPopup(false)} />}
+                  </div>
+                }
+              />
             </div>
           </header>
 

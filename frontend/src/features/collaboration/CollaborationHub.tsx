@@ -18,6 +18,8 @@ import type { JarvisContext } from '../../lib/jarvisApi';
 import {
   collaborationApi, DELIVERY_STATUS_KO, type CapabilityManifest, type Delivery, type PocketApp,
 } from '../../lib/collaborationApi';
+import { EmptyOrError, failed, loading, ok, type Loaded } from '../../design/DataState';
+import { reportRequestFailure, reportRequestSuccess } from '../../lib/backendHealth';
 import { DecisionCenter, type DecisionJarvis } from './DecisionCenter';
 import { PublicationCenter, type PublicationJarvis } from './PublicationCenter';
 
@@ -169,9 +171,12 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
   //   Jarvis 가 참조하는 객체와 화면이 보여 주는 객체가 갈라지면 가장 찾기 어려운 오답이 된다.
   const [decisionCtx, setDecisionCtx] = useState<DecisionJarvis | null>(null);
   const [pubCtx, setPubCtx] = useState<PublicationJarvis | null>(null);
-  const [inbox, setInbox] = useState<Delivery[]>([]);
-  const [sent, setSent] = useState<Delivery[]>([]);
-  const [apps, setApps] = useState<PocketApp[]>([]);
+  // [UIUX-AUDIT-30] CL-1 에도 «조회 실패 ≠ 0건» 계약을 적용한다. 감사 실측: API 가
+  //   실패했는데 화면은 «대기 없음» 칩과 «응답을 기다리는 요청이 없습니다» 를 함께 띄웠다 —
+  //   받는 사람은 «나에게 온 앱이 없다»로 읽는다.
+  const [data, setData] = useState<Loaded<{
+    inbox: Delivery[]; sent: Delivery[]; apps: PocketApp[];
+  }>>(loading());
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -183,9 +188,12 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
       const [i, s, a] = await Promise.all([
         collaborationApi.inbox(), collaborationApi.outbox(), collaborationApi.myApps(),
       ]);
-      setInbox(i); setSent(s); setApps(a);
+      setData(ok({ inbox: i, sent: s, apps: a }));
+      reportRequestSuccess();
     } catch (e: any) {
-      setErr({ msg: e?.message || String(e), status: e?.status });
+      // 빈 배열로 떨어뜨리지 않는다. 그 순간 «받은 앱 0건»이 되고, 그것은 사실이 아니다.
+      setData(failed(e));
+      reportRequestFailure();
     } finally { setBusy(null); }
   }, []);
 
@@ -194,7 +202,7 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
   // ★ 사용자가 바뀌면 이전 수신함·주머니를 **즉시 폐기**한다(§CL-FE-03). 남겨 두면 다른
   //   사용자의 목록이 화면에 그대로 남고, 그것이 곧 유출이다.
   useEffect(() => {
-    const h = () => { setInbox([]); setSent([]); setApps([]); setSelectedId(''); load(); };
+    const h = () => { setData(loading()); setSelectedId(''); load(); };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
   }, [load]);
@@ -212,14 +220,21 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     } finally { setBusy(null); }
   };
 
+  const okData = data.status === 'ok';
+  const inbox = data.value?.inbox || [];
+  const sent = data.value?.sent || [];
+  const apps = data.value?.apps || [];
   const pending = inbox.filter((d) => d.status === 'PENDING');
   const selected = useMemo(
     () => inbox.find((d) => d.delivery_id === selectedId) || pending[0] || inbox[0] || null,
     [inbox, pending, selectedId]);
 
   const items: RailItem[] = [
-    { id: 'inbox', label: '받은 앱', hint: '나에게 전달된 요청', mark: '받', count: pending.length },
-    { id: 'apps', label: '내 앱', hint: '수락해서 쓰는 앱', mark: '앱', count: apps.length },
+    // 조회에 실패했으면 배지 숫자를 **표시하지 않는다.** «0» 배지는 «없다»로 읽힌다.
+    { id: 'inbox', label: '받은 앱', hint: '나에게 전달된 요청', mark: '받',
+      count: okData ? pending.length : undefined },
+    { id: 'apps', label: '내 앱', hint: '수락해서 쓰는 앱', mark: '앱',
+      count: okData ? apps.length : undefined },
     { id: 'deliver', label: '사용자에게 전달', hint: '지정한 한 사람에게', mark: '전' },
     { id: 'sent', label: '보낸 요청', hint: '응답 상태와 회수', mark: '보' },
     { id: 'decisions', label: '의사결정 센터', hint: '한 문서 · 세 관점', mark: '결' },
@@ -376,14 +391,15 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
             {isCollab && flash && <Banner tone="info">{flash}</Banner>}
 
             {view === 'inbox' && (
-              <InboxScreen list={inbox} selectedId={selected?.delivery_id || ''}
+              <InboxScreen list={inbox} state={data} onRetry={load}
+                selectedId={selected?.delivery_id || ''}
                 onSelect={setSelectedId}
                 onAccept={(d) => act('수락 중', () => collaborationApi.accept(d.delivery_id))}
                 onReject={(d, n) => act('거절 중', () => collaborationApi.reject(d.delivery_id, n))}
                 onReassign={(d, n) => act('재배정 요청 중', () => collaborationApi.reassign(d.delivery_id, n))} />
             )}
             {view === 'apps' && (
-              <AppsScreen list={apps}
+              <AppsScreen list={apps} state={data} onRetry={load}
                 onPin={(a) => act('갱신 중', () => collaborationApi.patchApp(a.pocket_id, { pinned: !a.pinned }))}
                 onRename={(a, n) => act('이름 변경 중', () => collaborationApi.patchApp(a.pocket_id, { display_name: n }))} />
             )}
@@ -399,7 +415,7 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
                 }} />
             )}
             {view === 'sent' && (
-              <SentScreen list={sent}
+              <SentScreen list={sent} state={data} onRetry={load}
                 onRevoke={(d, r) => act('회수 중', () => collaborationApi.revoke(d.delivery_id, r))} />
             )}
             {view === 'decisions' && (
@@ -415,8 +431,10 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
 }
 
 // ── 받은 앱 ──────────────────────────────────────────────────────────────────
-function InboxScreen({ list, selectedId, onSelect, onAccept, onReject, onReassign }: {
-  list: Delivery[]; selectedId: string; onSelect: (id: string) => void;
+function InboxScreen({ list, state, onRetry, selectedId, onSelect, onAccept, onReject,
+  onReassign }: {
+  list: Delivery[]; state: Loaded<any>; onRetry: () => void;
+  selectedId: string; onSelect: (id: string) => void;
   onAccept: (d: Delivery) => void;
   onReject: (d: Delivery, note: string) => void;
   onReassign: (d: Delivery, note: string) => void;
@@ -432,8 +450,11 @@ function InboxScreen({ list, selectedId, onSelect, onAccept, onReject, onReassig
     <>
       <ScreenHead kicker="INBOX" title="받은 앱"
         description="다른 사용자가 나에게 전달한 앱입니다. 수락하면 내 앱 주머니에 담기며, 데이터 접근 범위는 넓어지지 않습니다."
-        chip={{ label: pendingCount ? `응답 대기 ${pendingCount}건` : '대기 없음',
-          tone: pendingCount ? 'warn' : 'success' }} />
+        chip={state.status !== 'ok'
+          // 실패했는데 «대기 없음»(초록)을 띄우지 않는다 — 감사에서 실측된 결함이다.
+          ? { label: state.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
+          : { label: pendingCount ? `응답 대기 ${pendingCount}건` : '대기 없음',
+            tone: pendingCount ? 'warn' : 'success' }} />
 
       <Panel kicker="REQUESTS" title="전달 요청"
         action={
@@ -443,11 +464,10 @@ function InboxScreen({ list, selectedId, onSelect, onAccept, onReject, onReassig
           </div>
         }>
         {shown.length === 0 ? (
-          <div className="empty-note">
-            {filter === 'pending'
+          <EmptyOrError state={state.status} error={state.error} onRetry={onRetry}
+            emptyText={filter === 'pending'
               ? '응답을 기다리는 요청이 없습니다. 전체를 보려면 위의 «전체» 를 누르십시오.'
-              : '받은 앱 요청이 없습니다. 다른 사용자가 앱을 전달하면 여기에 나타납니다.'}
-          </div>
+              : '받은 앱 요청이 없습니다. 다른 사용자가 앱을 전달하면 여기에 나타납니다.'} />
         ) : shown.map((d) => (
           <article key={d.delivery_id}
             className={`request-card ${d.delivery_id === selectedId ? 'active' : ''}`}>
@@ -548,8 +568,9 @@ function InboxScreen({ list, selectedId, onSelect, onAccept, onReject, onReassig
 }
 
 // ── 내 앱 ────────────────────────────────────────────────────────────────────
-function AppsScreen({ list, onPin, onRename }: {
-  list: PocketApp[]; onPin: (a: PocketApp) => void; onRename: (a: PocketApp, n: string) => void;
+function AppsScreen({ list, state, onRetry, onPin, onRename }: {
+  list: PocketApp[]; state: Loaded<any>; onRetry: () => void;
+  onPin: (a: PocketApp) => void; onRename: (a: PocketApp, n: string) => void;
 }) {
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const colors = ['blue', 'green', 'orange', 'violet'];
@@ -557,12 +578,13 @@ function AppsScreen({ list, onPin, onRename }: {
     <>
       <ScreenHead kicker="MY APPS" title="내 앱"
         description="수락한 앱입니다. 현재 사용자·조직 권한으로 실행되며 별도 로그인이 없습니다."
-        chip={{ label: `${list.length}개`, tone: list.length ? 'success' : 'muted' }} />
+        chip={state.status !== 'ok'
+          ? { label: '조회 불가', tone: 'danger' }
+          : { label: `${list.length}개`, tone: list.length ? 'success' : 'muted' }} />
       <Panel kicker="POCKET" title="앱 주머니">
         {list.length === 0 ? (
-          <div className="empty-note">
-            수락한 앱이 없습니다. <b>받은 앱</b>에서 요청을 수락하면 여기에 담깁니다.
-          </div>
+          <EmptyOrError state={state.status} error={state.error} onRetry={onRetry}
+            emptyText={<>수락한 앱이 없습니다. <b>받은 앱</b>에서 요청을 수락하면 여기에 담깁니다.</>} />
         ) : (
           <div className="app-pocket">
             {list.map((a, idx) => (
@@ -697,8 +719,9 @@ function DeliverScreen({ releaseIds, onSubmit }: {
 }
 
 // ── 보낸 요청 ────────────────────────────────────────────────────────────────
-function SentScreen({ list, onRevoke }: {
-  list: Delivery[]; onRevoke: (d: Delivery, reason: string) => void;
+function SentScreen({ list, state, onRetry, onRevoke }: {
+  list: Delivery[]; state: Loaded<any>; onRetry: () => void;
+  onRevoke: (d: Delivery, reason: string) => void;
 }) {
   const [form, setForm] = useState<{ id: string; reason: string } | null>(null);
   const accepted = list.filter((d) => d.status === 'ACCEPTED').length;
@@ -706,10 +729,13 @@ function SentScreen({ list, onRevoke }: {
     <>
       <ScreenHead kicker="SENT" title="보낸 요청"
         description="내가 보낸 전달과 상대의 응답 상태입니다. 수락된 앱을 회수하면 상대 주머니에 회수 사실이 남습니다."
-        chip={{ label: `수락 ${accepted} / 전체 ${list.length}`, tone: 'data' }} />
+        chip={state.status !== 'ok'
+          ? { label: '조회 불가', tone: 'danger' }
+          : { label: `수락 ${accepted} / 전체 ${list.length}`, tone: 'data' }} />
       <Panel kicker="OUTBOX" title="전달 이력">
         {list.length === 0 ? (
-          <div className="empty-note">보낸 전달 요청이 없습니다.</div>
+          <EmptyOrError state={state.status} error={state.error} onRetry={onRetry}
+            emptyText="보낸 전달 요청이 없습니다." />
         ) : (
           <div className="sent-requests">
             {list.map((d) => (

@@ -1,0 +1,91 @@
+/* [DESIGN · UIUX-AUDIT-30] 승인 시안 «Living Enterprise Canvas» 의 **의미 토큰**
+ *
+ * 원본 색값: uiux-prototypes/master-concept/ADOPTION_DECISION.md (2026-07-30 Supervisor 채택)
+ *
+ * ## 왜 «의미» 토큰인가 (숫자 스케일이 아니라)
+ *
+ * 2026-08-04 감사가 실측한 실패가 근거다. Tailwind 숫자 스케일을 반전해 제품 전체를 라이트로
+ * 바꿨더니, **일반 생성 버튼이 녹색이 되어 «성공 상태»와 «1차 행동»이 같은 색**이 됐다.
+ * 숫자는 «명도»만 말하고 «의미»를 말하지 않는다. `bg-emerald-600` 은 어떤 화면에서는 성공이고
+ * 어떤 화면에서는 생성 버튼이다 — 기계적으로 뒤집으면 화면이 무엇이 1차 행동인지 말하지 못한다.
+ *
+ * ★ 그래서 색을 **역할 이름으로** 고정한다. 화면군을 옮길 때 개발자는 «무슨 색인가»가 아니라
+ *   «이것이 1차 행동인가, 성공 상태인가»를 결정하게 된다. 그 결정은 기계가 대신할 수 없다.
+ *
+ * ## 네 계열 (감사가 지정한 구분)
+ *
+ *   surface/*  표면과 글씨 — page · card · raised · border · text · muted
+ *   action/*   사람이 누르는 것 — primary(구조·1차) · secondary · danger · quiet
+ *   state/*    시스템이 말하는 것 — success · warn · error · info · unknown
+ *   module/*   화면군 식별색 — 강조가 아니라 «어디에 있는가»를 말한다
+ *
+ * ⚠️ `action/*` 과 `state/*` 를 **섞지 않는다.** 초록 버튼을 누르면 초록 성공 배너가 뜨는 화면은,
+ *   사용자가 «성공했다»와 «누를 수 있다»를 색으로 구분할 수 없다.
+ * ⚠️ LS Red 는 **위험이거나 화면당 단 하나의 핵심 행동**에만 쓴다(채택 결정 7항).
+ *
+ * ## 적용 범위
+ *
+ * 이 파일은 토큰만 정의한다. 실제 적용은 `.afs-scope` 안에서만 일어나며(`afs.css`), 기존
+ * 화면군은 **준비된 것부터 하나씩** 그 스코프로 옮긴다. 전역 `:root` 에 두지 않는 이유는
+ * 한 번에 25개 화면을 바꾸는 일이 방금 실패했기 때문이다.
+ */
+
+.afs-scope {
+  /* ── 브랜드 원색 (승인 시안 그대로. 여기서만 정의하고 아래는 이것을 참조한다) ──── */
+  --ls-navy: #0a1e5a;
+  --ls-navy-deep: #071747;
+  --ls-red: #fa002d;
+  --ls-cyan: #009bb4;
+  --ls-green: #138578;
+  --ls-orange: #d77b18;
+
+  /* ── surface/* — 표면과 글씨 ─────────────────────────────────────────── */
+  --surface-page: #eef1f4;      /* 화면 바탕 */
+  --surface-card: #ffffff;      /* 패널·카드 */
+  --surface-raised: #f8f9fa;    /* 카드 안에서 한 단계 올라온 칸 */
+  --surface-sunken: #f4f5f7;    /* 입력·비활성 영역 */
+  --surface-border: #d8dce3;    /* 경계 — 흰 표면에서 사라지지 않을 만큼 진하게 */
+  --surface-border-strong: #cbd1da;
+  --surface-text: #101a2d;      /* 본문 */
+  --surface-text-muted: #667185;/* 보조 설명. 이보다 옅게 두지 않는다(대비 약화 지적) */
+  --surface-text-faint: #7b8797;/* 시각적 부가 정보 한정 */
+  --surface-shadow: 0 12px 32px rgba(16, 26, 45, .10);
+
+  /* ── action/* — 사람이 누르는 것 ─────────────────────────────────────── */
+  /* ★ 1차 행동은 **구조색(Navy)** 이다. 초록으로 두면 «성공»과 구분되지 않는다. */
+  --action-primary-bg: var(--ls-navy);
+  --action-primary-fg: #ffffff;
+  --action-primary-hover: var(--ls-navy-deep);
+  --action-secondary-bg: #ffffff;
+  --action-secondary-fg: #39475c;
+  --action-secondary-border: var(--surface-border-strong);
+  --action-secondary-hover: #f2f4f7;
+  /* ⚠️ danger 는 되돌릴 수 없는 행동에만(회수·삭제·대외 발간). 넓은 면적에 쓰지 않는다. */
+  --action-danger-bg: var(--ls-red);
+  --action-danger-fg: #ffffff;
+  --action-danger-quiet-fg: #b01c39;
+  --action-quiet-fg: var(--ls-navy);   /* 텍스트 버튼 */
+  --action-focus-ring: var(--ls-cyan);
+
+  /* ── state/* — 시스템이 말하는 것 ────────────────────────────────────── */
+  --state-success-fg: #0b665d;
+  --state-success-bg: #dcefeb;
+  --state-warn-fg: #8a4b0e;
+  --state-warn-bg: #fff0dc;
+  --state-error-fg: #b01c39;
+  --state-error-bg: #ffe3e8;
+  --state-info-fg: #087184;
+  --state-info-bg: #dff1f4;
+  /* ★★ «모른다»는 색이 따로 있어야 한다. 0 도 아니고 실패도 아닌 상태 —
+   *    미측정·조회 불가·계산 전이 여기 들어간다(`design/DataState.tsx`). */
+  --state-unknown-fg: #56606f;
+  --state-unknown-bg: #e8eaee;
+
+  /* ── module/* — 화면군 식별 ──────────────────────────────────────────── */
+  /* «강조»가 아니라 «어디에 있는가»다. 행동색과 겹치지 않게 채도를 낮춰 둔다. */
+  --module-collaboration: var(--ls-cyan);
+  --module-decision: var(--ls-navy);
+  --module-publication: #7a2540;
+  --module-governance: var(--ls-green);
+  --module-factory: var(--ls-orange);
+}

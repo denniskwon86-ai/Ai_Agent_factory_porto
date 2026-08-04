@@ -73,6 +73,8 @@ interface FactoryStore {
   releases: any[];
   viewingRelease: any | null;
   agentRegistry: any | null;
+  /** [UIUX-AUDIT-30 §5] 로드 실패 사유. 비어 있으면 «아직 안 왔다», 차 있으면 «못 가져왔다». */
+  agentRegistryError: string;
   showAgentPanel: boolean;
   // 워크플로우 템플릿(T2-c)
   templates: WorkflowTemplate[];
@@ -154,6 +156,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   releases: [],
   viewingRelease: null,
   agentRegistry: null,
+  agentRegistryError: '',
   showAgentPanel: false,
   templates: [],
   selectedTemplateId: 'default',
@@ -421,11 +424,21 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   },
 
   fetchAgentRegistry: async () => {
+    // ★★ [UIUX-AUDIT-30 §5] 실패를 콘솔에만 남기지 않는다. 예전에는 `agentRegistry` 가 `null`
+    //   그대로여서 화면이 «에이전트 레지스트리 로딩 중…» 을 **영원히** 띄웠다. 사용자는
+    //   기다리면 된다고 믿고, 실제로는 아무 일도 일어나지 않는다.
+    set({ agentRegistryError: '' });
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/agents`);
-      if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data }); }
-    } catch (error) {
+      if (res.ok) {
+        const r = await res.json();
+        set({ agentRegistry: r.data, agentRegistryError: '' });
+      } else {
+        set({ agentRegistryError: `서버가 ${res.status} 로 응답했습니다.` });
+      }
+    } catch (error: any) {
       console.error("에이전트 레지스트리 로드 실패:", error);
+      set({ agentRegistryError: error?.message || String(error) });
     }
   },
 

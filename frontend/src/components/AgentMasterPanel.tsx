@@ -10,6 +10,9 @@ const nodeTypes = { agentNode: AgentNode };
 
 export default function AgentMasterPanel() {
   const agentRegistry = useFactoryStore((s) => s.agentRegistry);
+  // [UIUX-AUDIT-30 5] 실패 사유와 재시도 수단이 없으면 화면은 영원히 «로딩 중»에 머문다.
+  const registryError = useFactoryStore((s) => s.agentRegistryError);
+  const fetchAgentRegistry = useFactoryStore((s) => s.fetchAgentRegistry);
   const resetAgentRegistry = useFactoryStore((s) => s.resetAgentRegistry);
   const closeAgentPanel = useFactoryStore((s) => s.closeAgentPanel);
   const templates = useFactoryStore((s) => s.templates);
@@ -174,6 +177,41 @@ export default function AgentMasterPanel() {
   }, []);
 
   if (!draft) {
+    // ★★ [UIUX-AUDIT-30 §5] «아직 안 왔다»와 «못 가져왔다»를 구분한다. 영원히 도는 로딩
+    //   표시는 «기다리면 된다»는 거짓 신호이고, 사용자는 원인에 도달하지 못한다.
+    if (registryError) {
+      return (
+        <div className="h-screen w-screen bg-gray-900 text-gray-300 flex items-center justify-center p-8">
+          <div className="max-w-lg text-center">
+            <div className="text-3xl mb-4" aria-hidden="true">⚠️</div>
+            <h2 className="text-lg font-bold text-gray-100 mb-2">
+              에이전트 설정을 가져오지 못했습니다
+            </h2>
+            <p className="text-sm text-gray-400 leading-relaxed mb-1">{registryError}</p>
+            {/* 비어 있는 화면을 «설정 없음»으로 보여주지 않는다 — 설정이 없는 것과 못 읽은
+                것은 정반대이며, 없다고 믿으면 사용자는 처음부터 다시 만들려 한다. */}
+            <p className="text-sm text-gray-500 leading-relaxed mb-6">
+              설정이 <b>없는 것이 아니라</b> 읽지 못한 것입니다. 서버가 떠 있는지 확인한 뒤
+              다시 시도하십시오.
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => fetchAgentRegistry()}
+                className="text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 px-4 py-2 rounded-lg"
+              >
+                다시 시도
+              </button>
+              <button
+                onClick={closeAgentPanel}
+                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="h-screen w-screen bg-gray-900 text-gray-300 flex items-center justify-center">
         <span className="animate-pulse">에이전트 레지스트리 로딩 중…</span>
