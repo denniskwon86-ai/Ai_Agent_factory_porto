@@ -56,8 +56,13 @@ def _audit_hidden_record(p: Principal, master_code: str) -> None:
     """Data Stealth 거부는 응답에서만 숨기고 내부 감사에는 실제 코드를 남긴다."""
     from core.enterprise_context import audit
     actor_scopes = viewer_visible_scopes(p)
+    # ⚠️ 앞의 두 인자는 **위치 인자**로 넘긴다. 저장소의 다른 호출부 전부
+    #   (`crosswalk.py:95` · `mcp_broker.py:191` · `briefing_control.py:32` ·
+    #   `connector_control.py:30`) 와 **같은 파일 아래쪽(272행)** 까지 위치 인자를 쓴다.
+    #   여기만 전부 키워드로 두면 호출 규약이 두 갈래가 되고, 감사 기록을 검사하는 쪽은 한쪽만
+    #   보게 된다 — 실제로 회귀 테스트가 그 차이로 깨졌다(2026-08-04).
     audit.denied_scope(
-        resource_type="master_record", resource_id=master_code,
+        "master_record", master_code,
         actor=p.user_id, actor_scopes=actor_scopes or (),
         detail="요청자의 조직 범위에 바인딩되지 않은 기준정보 상세 조회",
     )

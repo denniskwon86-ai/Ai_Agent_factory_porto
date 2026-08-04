@@ -192,7 +192,14 @@ def test_master_other_scope_detail_is_404_and_audited(monkeypatch):
         scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"}),
                   "readable_scope_nodes": frozenset({"ORG-A"})}, routers=("master",)))
     assert c.get("/api/v1/master/records/EQ-B").status_code == 404
-    assert seen and seen[0][0][1] == "EQ-B"
+    # ★ 검사하는 것은 **계약**이다: 감사 기록에 실제 마스터 코드가 남는가.
+    #   호출 방식(위치 인자 vs 키워드)을 검사하면 규약이 바뀔 때마다 깨지고, 그때 사람은
+    #   테스트를 고치면서 계약도 함께 무디게 만든다.
+    assert seen, "거부가 감사로그에 남지 않았다 — 404 은 응답에서만 숨기는 것이다"
+    args, kwargs = seen[0]
+    recorded = list(args) + [kwargs.get("resource_id"), kwargs.get("resource_type")]
+    assert "EQ-B" in recorded, f"실제 마스터 코드가 기록되지 않았다: {seen[0]}"
+    assert "master_record" in recorded, f"자원 종류가 기록되지 않았다: {seen[0]}"
 
 
 def test_master_write_paths_require_data_admin(monkeypatch):
