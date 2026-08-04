@@ -71,6 +71,22 @@
 - 다음 행동 / 담당 / 착수 조건: **Claude Code** — 인수인계 §4.2 화면 이관 순서(`Telemetry(227) → ProgramAdmin(239) → Shadow(305) → …`) 또는 D-017 P3-1. **Supervisor** — 결정 3건: ① **조직 범위 정본**(위 뿌리 원인) ② 경영계획 **수립 권한**을 별도로 둘지(지금은 «시나리오를 만들 수 있는 사람이 가정도 넣는다» 로 통일) ③ `resolve_scope_ref` 가 해석하지 못하는 것이 데이터 미비인지 코드 결함인지 — 확인 후 별개 작업 필요.
 - 교대 체크포인트: 변경 = `api/routes/planning_control.py`(라우트 14개 + 헬퍼 4개) · `core/scope_guard.py`(`_actor_scopes` 원천 수정) · `api/deps.py`(`hidden_envelope`·`_EXACT_COUNT_RULES`) · `tests/test_planning_control_gate.py`(신규 33건). 미변경 = 화면, `planning_engine`·`planning_import` 내부, DB 스키마. 검증 = 1,970 passed. 재개 지점 = 화면 이관 또는 P3-1. 금지 범위 = `visible_scopes` 의 `include_descendants` 기본값을 켜는 것, `_actor_scopes` 를 부서 해석 전용으로 되돌리는 것, 범위 밖 요청에 403 을 주는 것(존재를 알린다), 자기 조직 요청이 404 가 되는 상태를 «안전» 으로 읽는 것, 실서버 DB 를 향해 쓰기 엔드포인트를 탐침하는 것.
 
+### [SCOPE-PATH-52] D-018 후속 1 — 데이터 경로 절대화 · 경영계획 DB 격리 · 세션 교대
+- 작성자 / 기록 시각: Claude Code / 2026-08-05 KST
+- 왜 지금 기록하는가: `[SEC-SCOPE-51]` 이 지정한 후속 ①(경로 고정)을 구현하고 세션을 교대한다. **그리고 내가 커밋에 남긴 진단 하나를 정정한다.**
+- 상태: **완료(후속 1·9) · 후속 2~8·10 남음**
+- ★★★ **정정**: `[SEC-PLAN-50]` 과 커밋 `e61236956` 에 «`resolve_scope_ref` 가 모든 참조에 빈 문자열을 반환한다» 고 적었다. **틀렸다.** 실제 DB 에서는 정상 동작한다(`LS_MNM → node_41402723bc90`·`MNM_BATTERY → node_36c1c7c797e0`·`production_battery → node_36c1c7c797e0`). 진짜 원인은 pytest 안에서 `ecm_repository.db_path` 가 `…/pytest-of-denni/pytest-553/test_env0/enterprise_context.db`(노드 **0건**)를 가리킨 것 — **상대경로가 다른 파일을 열고 있었다.** `[SEC-SCOPE-51]` 의 추정이 정확했다. 실서버에서 실제로 해석되지 않는 것은 **어느 노드에도 매핑되지 않은 부서**(`procurement`, `organization_nodes.dept_id` 가 16건 중 3건만 채워져 있다) 하나이며 그것이 `hikwon_7` 의 소속이다. `_actor_scopes` 수정은 그대로 유효하다(매핑 누락을 우회한다) — 근거만 달라졌다.
+  ⚠️ 교훈: **«같은 함수가 환경에 따라 다른 값을 준다» 를 만나면 먼저 그 함수가 어느 파일을 보는지 찍어야 한다.** 값이 틀렸다고 보고 정본 설계를 의심해 한 단계 엉뚱한 곳을 향했다.
+- 무엇을 바꿨는가: 신규 `core/paths.py`(`PROJECT_ROOT`·`data_path()`·`project_path()`). `os.path.join("data", …)` 상대경로 **21곳**을 `data_path()` 로 전환. 기준점은 `__file__` 이다 — 작업 공간마다 자기 `data/` 를 가지므로(워크트리에도 있다) «프로세스가 어디서 떴는가» 가 아니라 «이 코드가 어느 저장소에 속하는가» 가 옳은 기준이다. **확인: 21개 경로가 전부 기존 파일을 그대로 가리킨다(존재=True) — 데이터 이전 불필요.**
+  ⚠️ 지시는 ECM·Master 두 개였으나 **같은 결함 21개를 함께 고쳤다.** 하나만 고치면 «왜 이것만» 상태가 남고 다음 사람이 나머지를 다시 찾는다. 변경 내용은 경로 계산뿐이다.
+- ★★ **경영계획 DB 를 테스트에서 격리했다.** 경로를 절대경로로 고정하면 cwd 와 무관하게 **항상** 운영 파일을 쓰므로, 격리 목록에 없던 `data/planning.db` 가 확정된 위험이 된다. 실제로 통제 확인 중 탐침 데이터가 그 DB 에 들어갔다. 기준정보 오염보다 무겁다 — 매출·원가 전망이 담기는 표다. `planning_approval`·`planning_drivers` 가 모두 `planning_store._connect()` 를 쓰므로 **싱글턴의 `db_path` 하나로 계열 전체가 격리된다.**
+- ⚠️ 격리 후 **내 테스트의 부정확함**이 드러나 함께 고쳤다: `/import/rows` 는 검증 실패에도 **200 + `ok:false`** 를 준다(어느 행이 왜 틀렸는지 알려주는 것이 목적이므로 맞는 설계다). `status_code` 만 보면 «범위 통과» 와 «검증 실패» 를 구분하지 못한다 — 계정을 먼저 등록해 실제 통과까지 확인하도록 바꿨다.
+- 검증: 전체 **1,970 passed · 1 skipped · 실패 0 · exit 0**(기준선 유지 — 경로 변경은 회귀를 내지 않았다). 전체 테스트 실행 **후** 운영 `planning.db` 를 다시 세어 실제 업무 데이터만 남았음을 확인했다(accounts 10 · facts 20 · scenarios 4 · assumptions 3 · submissions 1 · drivers 0 · 탐침 흔적 0). ECM 노드 16건도 그대로다. 탐침 정리용 백업은 확인 후 삭제했다.
+  ⚠️ 검사 함정 하나: SQL `LIKE '%__%'` 는 `_` 가 단일 문자 와일드카드여서 **모든 문자열을 잡는다**(35건 오탐). 문자열 판정은 파이썬으로 하거나 `ESCAPE` 를 단일 문자로 준다.
+- 영향·주의사항: **아직 격리되지 않은 저장소 7개** — `advisor`·`collaboration`·`connectors`·`decision_ledger`·`external_intelligence`·`benchmark`·`chroma`/`knowledge_packs`·`mcp_cache`. 각각 어느 테스트가 쓰는지 확인이 필요하므로 별개 작업으로 남긴다. ⚠️ **워크트리에서 서버를 띄우면 워크트리의 `data/` 를 본다** — 조직도가 비면 fail-closed 로 전 사용자가 아무것도 못 보고 오류는 나지 않는다. 기동 전 노드 수를 세라(16 이어야 한다).
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — D-018 후속 ②~④(`resolve_scope_ref(ref, tenant_id, entity_mode)` 계약 통합 → API 경계에서 `node_id` 정규화 → 응답에 `scope_code`·`scope_name` 동봉). 그다음 ⑤ 백필 → ⑥ 신규 쓰기 강제. **Supervisor** — 결정 5건은 인계 문서 §9 에 표로 정리했다(매핑 안 된 부서 처리 · 계획 수립 권한 · `is_ai_admin` 추가 부여 · 미기록 프로젝트 관대함 제거 시점 · `hidden_count` 를 모두에게 주는 기존 라우트 정리).
+- 교대 체크포인트: 변경 = `core/paths.py`(신규) · 상대경로 21곳 · `tests/conftest.py`(경영계획 격리) · `tests/test_planning_control_gate.py`(1건 정확화) · `AI_HANDOFF.md` 최상단 · 신규 인계 문서. 미변경 = 화면, DB 스키마, 운영 데이터. 검증 = 1,970 passed. **재개 지점 = D-018 후속 ②.** 상세 인계 = `docs/chronicle/handoffs/handoff_2026-08-05_asset_governance_and_scope.md`. 금지 범위 = `readable_scope_nodes` 우선 우회를 제거하는 것(백필 완료 전까지 유일하게 동작하는 경로다), `find_node_by_code(… LIMIT 1)` 로 후보를 임의 선택하는 것, 운영 DB 를 향해 쓰기 엔드포인트를 탐침하는 것, `core/paths.py` 의 기준점을 환경 변수로 바꾸는 것(«어느 데이터를 보는가» 가 다시 실행 환경에 좌우된다).
+
 ### [SEC-SCOPE-51] D-018 조직 범위 정본 판정 — `node_id`로 통일
 - 작성자 / 기록 시각: Codex / 2026-08-05 KST
 - 왜 지금 기록하는가: `[SEC-PLAN-50]`이 Planning 통제의 근본 미결로 `LS_MNM` 계열 코드와 `node_*` ECM 식별자 중 어느 쪽이 정본인지 판정을 요청했다.
