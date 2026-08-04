@@ -388,8 +388,13 @@ function CatalogView(props: any) {
         <Metric label="현행 레코드" state={records.status} value={records.status === 'ok' ? recordRows.length : null} />
         <Metric label="핵심 레코드" state={records.status} value={records.status === 'ok' ? core : null}
           hint="별칭 미언급 시 우선 주입" />
-        <Metric label="선택 버전" state={detail.status} value={selected ? `v${selected.version}` : null}
-          hint="레코드를 선택하십시오" />
+        {/* ⚠️ 버전은 **재는 값이 아니다.** 종전에는 지표용 기본 문구가 그대로 붙어
+            "선택 버전 — / 미측정" 이 됐다. «미측정» 은 수치·지표에만 쓴다.
+            네 상태를 각각 구분해 말한다: 조회 중 · 조회 불가 · 미지정 · 적용된 버전. */}
+        <Metric label="적용 버전" state={detail.status}
+          value={selected ? `v${selected.version}` : null}
+          notes={{ loading: '버전 정보 조회 중', error: '버전 정보 조회 불가',
+            forbidden: '버전 정보 조회 불가', empty: '적용 버전 미지정' }} />
       </div>
 
       <FoundationToolbar search={search} onSearch={(v) => { setSearch(v); if (!v) onSearch(); }}
