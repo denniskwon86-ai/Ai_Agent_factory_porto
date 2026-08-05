@@ -173,13 +173,33 @@ class EcmResolver:
         return roots
 
     # ── ③ 문맥 해석 (ECM-lite → E1 이행) ──────────────────────────────────
-    def resolve_scope_ref(self, scope_ref: str) -> Dict[str, Any]:
-        """`enterprise_scope_id` 하나를 해석한다. **node_id · 조직 코드 · 부서 id 를 모두 받는다.**
+    def resolve_scope_ref(self, scope_ref: str, tenant_id: str = "",
+                          entity_mode: str = "") -> Dict[str, Any]:
+        """[D-018 ①] `enterprise_scope_id` 하나를 **단 하나의 `node_id`** 로 해석한다.
+        **node_id · 조직 코드 · 부서 id 를 모두 받는다.**
 
         ECM-lite 단계에서 이 필드에 부서 id 를 담아 저장한 데이터가 이미 있다. E1 이 왔다고
-        그것을 깨면 기존 상담·Blueprint·프로젝트의 범위가 전부 무효가 된다. 그래서 둘 다
+        그것을 깨면 기존 상담·Blueprint·프로젝트의 범위가 전부 무효가 된다. 그래서 셋 다
         해석하고, 어느 쪽으로 해석됐는지(`kind`)를 함께 돌려준다 — 나중에 무엇을 승격해야
-        하는지 알 수 있어야 한다(`context.EnterpriseContext.scope_kind` 와 같은 취지)."""
+        하는지 알 수 있어야 한다(D-018 «입력 호환 계약» · `context.scope_kind` 와 같은 취지).
+
+        ★★★ [D-018] **정본은 `node_id` 다.** 코드와 부서 id 는 입력·표시·이행용 별칭이므로
+          여기서 `node_id` 로 정규화하고, 호출부는 그 값만 저장한다.
+        ★ `tenant_id`·`entity_mode` 는 **코드 조회를 좁히는 문맥**이다(D-018 ④ — 코드는 그
+          문맥 안에서만 유일하다). 주지 않으면 전역에서 찾고, **후보가 둘 이상이면 해석하지
+          않는다**(`code_ambiguous`) — 임의로 하나를 고르면 tie-break 가 조직 권한을 결정한다.
+        ⚠️ `node_id` 조회에는 문맥을 걸지 않는다. `node_id` 는 전역 PK 이므로 문맥으로 좁힐
+          필요가 없고, 좁히면 «맞는 id 인데 문맥이 달라 못 찾는» 상태가 생긴다.
+
+        반환 `kind` 값:
+          `ecm_node`(정본으로 들어옴) · `ecm_code`(코드 별칭) · `department_mapped`(부서 별칭) ·
+          `code_ambiguous`·`department_ambiguous`(모호 — **해석 실패**) ·
+          `code_out_of_context`(코드는 있으나 요청 문맥에 없음 — **해석 실패**) ·
+          `department`(ECM 미등록 — 부서 체계로 폴백)
+        ⚠️ 실패 셋을 나눈 이유는 **필요한 조치가 다르기 때문**이다. 모호함은 데이터를 정리해야
+          하고, 문맥 불일치는 요청이 틀렸고, 미등록은 매핑을 채워야 한다. 한 값으로 뭉개면
+          운영자가 원인을 짚을 수 없다.
+        """
         if not scope_ref:
             return {"kind": "", "node_id": "", "dept_id": "", "name_ko": "", "resolved": False}
         node = self.repo.get_node(scope_ref)
@@ -193,12 +213,37 @@ class EcmResolver:
         #   전사 표준을 못 보는 상태가 **조용히** 만들어진다(실측: 참고문서 68건).
         #   dept_id 보다 **먼저** 본다 — 같은 dept_id 를 여러 노드가 공유하므로(실측: 4개 노드가
         #   `production`) 코드가 더 정확한 근거다.
-        by_code = self.repo.find_node_by_code(scope_ref)
+        by_code = self.repo.find_nodes_by_code(scope_ref, tenant_id=tenant_id,
+                                               entity_mode=entity_mode)
+        if len(by_code) > 1:
+            # ★★★ [D-018 ②] 부서와 **같은 규칙**으로 거부한다. 종전에는 `updated_at` 최신이
+            #   이겼는데, 그것은 «최근에 고친 사람이 조직 권한을 정한다» 는 뜻이다.
+            return {"kind": "code_ambiguous", "node_id": "", "dept_id": "", "code": scope_ref,
+                    "name_ko": scope_ref, "resolved": False,
+                    "candidates": [{"node_id": c.node_id, "code": c.code,
+                                    "name_ko": c.name_ko, "node_type": c.node_type,
+                                    "tenant_id": c.tenant_id} for c in by_code]}
         if by_code:
-            return {"kind": "ecm_code", "node_id": by_code.node_id,
-                    "dept_id": by_code.dept_id, "code": by_code.code,
-                    "name_ko": by_code.name_ko, "node_type": by_code.node_type,
+            one = by_code[0]
+            return {"kind": "ecm_code", "node_id": one.node_id,
+                    "dept_id": one.dept_id, "code": one.code,
+                    "name_ko": one.name_ko, "node_type": one.node_type,
                     "resolved": True}
+        if tenant_id or entity_mode:
+            # ★★ 문맥으로 좁혀서 못 찾았을 때, **그 코드가 아예 없는 것인지 문맥이 다른 것인지**
+            #   구분한다. 둘 다 fail-closed 지만 **필요한 조치가 다르다**:
+            #     · 아예 없음 → 노드를 만들거나 매핑을 채운다
+            #     · 문맥 불일치 → 요청 문맥이 틀렸다(가상 시나리오를 실제 문맥으로 물었다)
+            #   구분하지 않으면 «ECM 에 없는 부서» 로 뭉개져 운영자가 원인을 짚을 수 없다.
+            #   ⚠️ 추가 조회는 **실패 경로에서만** 일어난다(정상 경로는 위에서 이미 반환됐다).
+            elsewhere = self.repo.find_nodes_by_code(scope_ref)
+            if elsewhere:
+                return {"kind": "code_out_of_context", "node_id": "", "dept_id": "",
+                        "code": scope_ref, "name_ko": scope_ref, "resolved": False,
+                        "requested_tenant_id": tenant_id, "requested_entity_mode": entity_mode,
+                        "candidates": [{"node_id": c.node_id, "code": c.code,
+                                        "name_ko": c.name_ko, "node_type": c.node_type,
+                                        "tenant_id": c.tenant_id} for c in elsewhere]}
         # ★ [2026-07-30] 부서 id 는 **여러 노드에 매달릴 수 있다.** 하나를 고르면 안 된다 —
         #   실측에서 `production` 하나에 형제 사업부 2개(배터리·동제련)와 공장 2개가 매달려
         #   있었고 `updated_at` 이 전부 같아 `LIMIT 1` 의 승자가 비결정적이었다. 그 상태로 한

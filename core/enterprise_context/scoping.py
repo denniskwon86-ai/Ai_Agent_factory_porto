@@ -91,7 +91,8 @@ def may_drill_down(scope: Any) -> bool:
         return False                                   # 해석 실패는 닫는 쪽으로
 
 
-def visible_scopes(scope_node_id: str, include_descendants: bool = False) -> Set[str]:
+def visible_scopes(scope_node_id: str, include_descendants: bool = False,
+                   tenant_id: str = "", entity_mode: str = "") -> Set[str]:
     """이 조직이 볼 수 있는 범위 집합 = 자기 자신 + 운영 상위 조상.
 
     조상 해석에 실패하면 **자기 자신만** 돌려준다(fail-closed). 실패를 '전부 보임'으로
@@ -102,7 +103,13 @@ def visible_scopes(scope_node_id: str, include_descendants: bool = False) -> Set
       **각 조상의 node_id 와 code 를 모두** 집합에 넣는다.
       ⚠️ 한 형태만 넣으면 다른 형태로 저장된 행이 매칭되지 않아 **상속이 조용히 끊긴다** —
         사업부가 전사 표준을 못 보게 되고, 오류는 어디에도 나지 않는다(실측: 참고문서 등록부
-        68건이 코드로 저장돼 조상 해석에 실패하고 있었다)."""
+        68건이 코드로 저장돼 조상 해석에 실패하고 있었다).
+
+    ★ [D-018 ①] `tenant_id`·`entity_mode` 는 해석 문맥이며 **그대로 리솔버에 흘린다.** 여기서
+      임의로 채우지 않는다 — 문맥을 모르는 호출부가 «REAL 이겠지» 로 채우면 가상 시나리오
+      범위가 조용히 실제 범위로 해석된다.
+    ⚠️ 백필(D-018 ⑤)이 끝나면 집합에 `code` 를 함께 넣는 부분을 걷어낼 수 있다. 그때까지는
+      코드로 저장된 기존 행이 매칭돼야 하므로 남겨 둔다."""
     if not scope_node_id:
         return set()
     out = {scope_node_id}
@@ -111,7 +118,8 @@ def visible_scopes(scope_node_id: str, include_descendants: bool = False) -> Set
         from core.enterprise_context.resolver import ecm_resolver
         # 입력이 코드·부서 id 여도 노드로 정규화한다. 정규화 없이 조상을 물으면 빈 목록이 오고,
         #   빈 목록은 "상위가 없다"와 "해석하지 못했다"를 구분하지 않는다.
-        ref = ecm_resolver.resolve_scope_ref(scope_node_id)
+        ref = ecm_resolver.resolve_scope_ref(scope_node_id, tenant_id=tenant_id,
+                                            entity_mode=entity_mode)
         node_id = ref.get("node_id") or scope_node_id
         if ref.get("node_id"):
             out.add(ref["node_id"])
@@ -358,15 +366,23 @@ def coverage(rows: Iterable[Dict[str, Any]], label: str = "레코드") -> Dict[s
     }
 
 
-def resolve_scope_ref(scope_ref: str) -> str:
-    """부서 id 든 ECM node_id 든 노드로 정규화한다(D-005 — 두 형태 공존).
+def resolve_scope_ref(scope_ref: str, tenant_id: str = "", entity_mode: str = "") -> str:
+    """[D-018 ①] 부서 id · 조직 코드 · ECM `node_id` 를 **정본 `node_id`** 로 정규화한다
+    (D-005 — 세 형태 공존은 입력 호환 계약).
 
-    해석 실패는 빈 문자열이다. 원본을 그대로 쓰면 존재하지 않는 범위에 갇혀 아무것도 안 보인다."""
+    해석 실패는 빈 문자열이다. 원본을 그대로 쓰면 존재하지 않는 범위에 갇혀 아무것도 안 보인다.
+    ⚠️ **모호한 경우(같은 코드·부서가 여러 노드에 걸림)도 빈 문자열**이다 — 하나를 고르지 않는다
+      (D-018 ②). 「없다」와 「모호하다」를 구분해야 하면 `ecm_resolver.resolve_scope_ref()` 를
+      직접 불러 `kind` 를 본다(`code_ambiguous`·`department_ambiguous`).
+    ★ 이 함수는 **문자열 하나만 돌려주는 얇은 래퍼**다. 표시용 이름·코드가 필요하면(D-018 ③)
+      리솔버를 직접 불러 `code`·`name_ko` 를 함께 받는다."""
     if not scope_ref:
         return ""
     try:
         from core.enterprise_context.resolver import ecm_resolver
-        return ecm_resolver.resolve_scope_ref(scope_ref).get("node_id", "") or ""
+        return (ecm_resolver.resolve_scope_ref(scope_ref, tenant_id=tenant_id,
+                                               entity_mode=entity_mode)
+                .get("node_id", "") or "")
     except Exception as e:
         print(f"⚠️ [scoping] 범위 해석 실패 '{scope_ref}': {e}")
         return ""

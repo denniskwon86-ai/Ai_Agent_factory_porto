@@ -71,6 +71,26 @@
 - 다음 행동 / 담당 / 착수 조건: **Claude Code** — 인수인계 §4.2 화면 이관 순서(`Telemetry(227) → ProgramAdmin(239) → Shadow(305) → …`) 또는 D-017 P3-1. **Supervisor** — 결정 3건: ① **조직 범위 정본**(위 뿌리 원인) ② 경영계획 **수립 권한**을 별도로 둘지(지금은 «시나리오를 만들 수 있는 사람이 가정도 넣는다» 로 통일) ③ `resolve_scope_ref` 가 해석하지 못하는 것이 데이터 미비인지 코드 결함인지 — 확인 후 별개 작업 필요.
 - 교대 체크포인트: 변경 = `api/routes/planning_control.py`(라우트 14개 + 헬퍼 4개) · `core/scope_guard.py`(`_actor_scopes` 원천 수정) · `api/deps.py`(`hidden_envelope`·`_EXACT_COUNT_RULES`) · `tests/test_planning_control_gate.py`(신규 33건). 미변경 = 화면, `planning_engine`·`planning_import` 내부, DB 스키마. 검증 = 1,970 passed. 재개 지점 = 화면 이관 또는 P3-1. 금지 범위 = `visible_scopes` 의 `include_descendants` 기본값을 켜는 것, `_actor_scopes` 를 부서 해석 전용으로 되돌리는 것, 범위 밖 요청에 403 을 주는 것(존재를 알린다), 자기 조직 요청이 404 가 되는 상태를 «안전» 으로 읽는 것, 실서버 DB 를 향해 쓰기 엔드포인트를 탐침하는 것.
 
+### [SCOPE-REF-53] D-018 후속 2 — 해석 계약 통합 · 「최근에 고친 사람이 이긴다」를 걷어냈다
+- 작성자 / 기록 시각: Claude Code / 2026-08-05 KST
+- 왜 지금 기록하는가: `[SEC-SCOPE-51]` 후속 ②(`resolve_scope_ref(ref, tenant_id, entity_mode)` 계약 통합)를 구현했다. **그 과정에서 실패 사유가 뭉개져 있던 것을 하나 더 찾았다.**
+- 상태: **완료(후속 2) · 후속 3~8·10 남음**
+- ★★★ **걷어낸 것: `find_node_by_code` 의 `ORDER BY updated_at DESC LIMIT 1`.** 같은 코드가 두 노드에 걸리면 «최근에 고쳐진 것» 이 이겼다. 그것은 선택이 아니라 **tie-break 가 조직 권한을 결정하는 것**이다 — 이 저장소는 부서 1:N 매핑에서 이미 같은 사고를 겪었고(`find_nodes_by_dept` 주석), **코드 경로에는 그 형태가 그대로 남아 있었다.** 지금은 후보가 둘 이상이면 해석하지 않고 후보 목록을 돌려준다(D-018 ②).
+- 무엇을 바꿨는가:
+  · `repository.find_nodes_by_code(code, tenant_id, entity_mode)` 신규 — **복수 반환이 기본**이다(`find_nodes_by_dept` 와 같은 이유: 하나를 고르는 조회만 있으면 중복이 보이지 않는다). `entity_mode` 는 `enterprise_entities` JOIN 으로 필터(`list_nodes` 와 같은 방식).
+  · `repository.find_node_by_code(...)` — 단일 보장 래퍼. 복수면 `None` + 경고.
+  · `resolver.resolve_scope_ref(ref, tenant_id="", entity_mode="")` — 문맥 인자 추가. `node_id`·코드·부서 id 를 받아 **정본 `node_id` 하나**를 돌려준다.
+  · `scoping.resolve_scope_ref(ref, tenant_id, entity_mode)`(문자열 래퍼)와 `scoping.visible_scopes(node, include_descendants, tenant_id, entity_mode)` 에 같은 문맥을 흘린다.
+- ★★ **`node_id` 조회에는 문맥을 걸지 않는다.** 전역 PK 이므로 좁힐 필요가 없고, 좁히면 «맞는 id 인데 문맥이 달라 못 찾는» 상태가 생겨 정본을 정본으로 쓸 수 없게 된다. `test_node_id_lookup_ignores_context` 로 잠갔다(일부러 틀린 문맥을 줘도 해석돼야 한다).
+- ★★★ **추가 발견: 실패 사유가 뭉개져 있었다.** `MNM_BATTERY` 를 `entity_mode=VIRTUAL` 로 물으면 `kind=department`(«ECM 에 없는 부서»)가 나왔다 — 실제로는 «코드는 있는데 그 문맥에 없다» 다. **필요한 조치가 다르다**: 미등록은 매핑을 채워야 하고, 문맥 불일치는 **요청이 틀린 것**이다. 그래서 `code_out_of_context` 를 새로 두고 후보 목록·요청 문맥을 함께 돌려준다. 이제 실패가 셋으로 갈린다 — `code_ambiguous`(데이터 정리) · `code_out_of_context`(요청 수정) · `department`(매핑 추가).
+  ⚠️ 그 추가 조회는 **실패 경로에서만** 일어난다(정상 경로는 그 앞에서 반환된다).
+- ★ **기존 관행과 상충하지 않는다.** `clone_service` 는 복제 코드에 `V{n}_` 접두사를 붙여 충돌을 **회피**한다(실측: 가상 노드 7개가 전부 접두사를 갖고 있어 코드 중복 0건). 접두사는 그대로 두고, 조회를 fail-closed 로 만든 것은 **그 관행이 깨지는 날 조용히 틀리지 않게** 하기 위해서다. `test_prefixed_clone_codes_stay_unambiguous` 가 관행 쪽도 잠근다.
+- 실측 근거(2026-08-05): 노드 16개 = REAL 9 / VIRTUAL 7. `code` 단독·`tenant+code`·`tenant+mode+code` 모두 중복 0건. `dept_id` 중복 매핑 0건(2026-07-30 의 `production` 4중 매핑은 그 뒤 정리됐다). 가상 노드는 `V3dc4_`·`V5863_`·`V8039_` 접두사를 갖고 **표시 이름은 실 노드와 같다**(`배터리소재 사업부`) — 사용자가 지적한 «가상회사에는 변형 코드가 생긴다» 가 데이터에 그대로 있다.
+- 검증: 신규 `tests/test_scope_ref_contract.py` **15건**. `pytest tests/` **1,985 passed · 1 skipped · 실패 0 · exit 0**(기준선 1,970). ⚠️ 자동 통과 후 **실제 조직도에서** 해석 결과를 출력해 눈으로 확인했다 — `code_out_of_context` 구분은 그 확인에서만 드러났다. 중복 코드는 격리 DB 에 직접 만들어 검증했다(운영 DB 쓰기 없음).
+- 영향·주의사항: 모든 인자에 기본값이 있어 **기존 호출부는 그대로 동작한다**(회귀 0). ⚠️ 그러나 기본값은 «필터 없음» 이므로 **문맥을 넘기는 것은 후속 ③④(API 경계 정규화)의 일**이다 — 지금은 계약만 서 있다. ⚠️ `visible_scopes` 가 집합에 `code` 를 함께 넣는 부분은 백필(⑤)이 끝나면 걷어낼 수 있다. 그때까지는 코드로 저장된 기존 행이 매칭돼야 하므로 남겨 둔다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — 후속 ③④: API 입력에서 세 형태를 받고 **경계에서 즉시 `node_id` 로 정규화**, 응답에 `scope_node_id`+`scope_code`+`scope_name` 동봉(리솔버가 이미 `code`·`name_ko` 를 준다). 그다음 ⑤ 백필 → ⑥ 신규 쓰기 강제. **Supervisor** — 결정 대기는 인계 문서 §9 그대로(추가 없음).
+- 교대 체크포인트: 변경 = `core/enterprise_context/repository.py`(`find_nodes_by_code` 신규·`find_node_by_code` fail-closed) · `resolver.py`(문맥 인자·`code_ambiguous`·`code_out_of_context`) · `scoping.py`(래퍼 2개에 문맥) · `tests/test_scope_ref_contract.py`(신규 15건). 미변경 = 화면, API 라우트, DB 스키마, 운영 데이터. 검증 = 1,985 passed. **재개 지점 = D-018 후속 ③④.** 금지 범위 = `LIMIT 1` 을 되살리는 것, `node_id` 조회에 문맥 필터를 거는 것, 실패 사유 셋을 하나로 합치는 것, `clone_service` 의 접두사를 없애는 것(회피와 fail-closed 는 둘 다 필요하다), 문맥 기본값을 `REAL` 로 채우는 것(가상 시나리오 범위가 조용히 실제로 해석된다).
+
 ### [SCOPE-PATH-52] D-018 후속 1 — 데이터 경로 절대화 · 경영계획 DB 격리 · 세션 교대
 - 작성자 / 기록 시각: Claude Code / 2026-08-05 KST
 - 왜 지금 기록하는가: `[SEC-SCOPE-51]` 이 지정한 후속 ①(경로 고정)을 구현하고 세션을 교대한다. **그리고 내가 커밋에 남긴 진단 하나를 정정한다.**

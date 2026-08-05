@@ -298,19 +298,57 @@ class EcmRepository:
         return [{"dept_id": r["dept_id"], "node_count": r["n"],
                  "codes": sorted((r["codes"] or "").split(","))} for r in rows]
 
-    def find_node_by_code(self, code: str) -> Optional[OrganizationNode]:
-        """**조직 코드**(`LS_MNM`·`MNM_BATTERY` 등)로 노드를 찾는다.
+    def find_nodes_by_code(self, code: str, tenant_id: str = "",
+                           entity_mode: str = "") -> List[OrganizationNode]:
+        """[D-018 ④] 조직 코드에 해당하는 **모든** 활성 노드. 문맥으로 좁힐 수 있다.
+
+        ★ 복수 반환이 기본인 이유는 `find_nodes_by_dept` 와 같다 — 하나를 고르는 조회만 있으면
+          **중복이 보이지 않는다.** 코드는 `node_id` 와 달리 유일성 제약이 없고(PK 도 UNIQUE 도
+          아니다), 조직 개편·가상 복제·회사별 코드 체계에서 겹칠 수 있다.
+        ⚠️ `entity_mode` 는 `enterprise_entities` 에 있으므로 JOIN 한다(`list_nodes` 와 같은 방식).
+          실제/가상/경쟁사가 한 트리에 섞이면 안 된다."""
+        if not code:
+            return []
+        sql = ("SELECT n.* FROM organization_nodes n "
+               "JOIN enterprise_entities e ON e.entity_id = n.entity_id "
+               "WHERE n.code=? AND n.status=?")
+        params: List[Any] = [code, STATUS_ACTIVE]
+        if tenant_id:
+            sql += " AND n.tenant_id=?"
+            params.append(tenant_id)
+        if entity_mode:
+            sql += " AND e.entity_mode=?"
+            params.append(entity_mode)
+        sql += " ORDER BY n.node_id"          # 결정적 순서(진단·비교용) — 선택 근거는 아니다
+        return [OrganizationNode.model_validate(r) for r in self._query(sql, tuple(params))]
+
+    def find_node_by_code(self, code: str, tenant_id: str = "",
+                          entity_mode: str = "") -> Optional[OrganizationNode]:
+        """**조직 코드**(`LS_MNM`·`MNM_BATTERY` 등)로 노드를 찾는다. **단일 후보만 돌려준다.**
 
         ★ [2026-07-30 실측] 이 조회가 없어서 코드가 **제3의 미해석 형태**로 남아 있었다.
           `organization_nodes.code` 에 의미 코드가 들어 있는데(LS_MNM·MNM_BATTERY·MNM_COPPER)
           해석기는 `node_id` 와 `dept_id` 만 봤다. 그 결과 코드로 저장된 범위는 조상 해석에
           실패해 **자기 자신만** 보게 되고(fail-closed), 사업부가 전사 표준 문서를 못 보는
-          상태가 **조용히** 만들어졌다 — 참고문서 등록부 68건이 실제로 그 상태였다."""
-        if not code:
+          상태가 **조용히** 만들어졌다 — 참고문서 등록부 68건이 실제로 그 상태였다.
+
+        ★★★ [2026-08-05 / D-018 ②] **`ORDER BY updated_at DESC LIMIT 1` 을 걷어냈다.**
+          종전에는 같은 코드가 둘 이상이면 «최근에 고쳐진 것» 이 이겼다. 그것은 선택이 아니라
+          **tie-break 가 조직 권한을 결정하는 것**이다 — 부서 1:N 매핑에서 이미 같은 사고를
+          겪었고(`find_nodes_by_dept` 주석), 코드에서도 같은 형태가 남아 있었다.
+          지금은 후보가 둘 이상이면 **`None` 을 돌려주고 경고를 남긴다**(fail-closed).
+        ⚠️ 호출부가 «없음» 과 «모호함» 을 구분해야 하면 `find_nodes_by_code()` 를 직접 쓴다 —
+          `resolver.resolve_scope_ref()` 가 그렇게 해서 `code_ambiguous` 를 돌려준다.
+        ★ 지금 데이터에서 코드는 유일하다(실측 2026-08-05: 16개 노드, tenant+mode+code 중복 0).
+          가상 복제가 `V{n}_원본코드` 접두사를 붙여 충돌을 **회피**하기 때문이다
+          (`clone_service` 참조). 이 변경은 그 관행이 깨지는 날 조용히 틀리지 않게 하는 것이다."""
+        rows = self.find_nodes_by_code(code, tenant_id=tenant_id, entity_mode=entity_mode)
+        if len(rows) > 1:
+            print(f"⚠️ [ECM] 조직 코드 '{code}' 가 노드 {len(rows)}개에 걸려 있어 하나를 고를 수 "
+                  f"없습니다({', '.join(r.node_id for r in rows)}) — 해석하지 않습니다"
+                  f"(tenant_id·entity_mode 로 좁히거나 코드 중복을 정리하십시오).")
             return None
-        rows = self._query("SELECT * FROM organization_nodes WHERE code=? AND status=? "
-                           "ORDER BY updated_at DESC LIMIT 1", (code, STATUS_ACTIVE))
-        return OrganizationNode.model_validate(rows[0]) if rows else None
+        return rows[0] if rows else None
 
     def list_nodes(self, tenant_id: str = "", status: str = "",
                    entity_mode: str = "") -> List[OrganizationNode]:
