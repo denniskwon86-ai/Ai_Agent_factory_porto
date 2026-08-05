@@ -259,8 +259,17 @@ def scope_meta(eff) -> dict:
 
 
 #: 자료 종류별로 **정확한 숨김 건수**를 볼 자격. 종류마다 «관리할 사람» 이 다르다.
+#  기준정보·업무표준은 데이터 표준 관리자(DA)가 고칠 사람이고, 조직·사용자 명부는 조직 편집
+#  권한자가 고칠 사람이다. 둘을 한 권한으로 묶으면 DA 에게 전 직원 명부 규모가 새거나,
+#  조직 관리자가 자기가 고쳐야 할 미바인딩 건수를 못 보게 된다.
+#  ⚠️ 판정을 호출부로 내보내지 않는다. 호출부는 «어떤 종류의 자료인가»만 말한다.
 #  ⚠️ 여기 없는 종류를 넘기면 `hidden_envelope` 가 예외를 던진다 — 오타를 조용히
 #    «건수 안 줌» 으로 처리하면 관리자가 못 보는 이유를 아무도 찾지 못한다.
+#  ★★★ [병합 2026-08-05] 이 딕셔너리와 `hidden_envelope` 는 병합 직후 **파일 안에 두 벌**
+#    존재했다. 양쪽 브랜치가 같은 것을 각자 추가했고 git 은 위치가 달라 충돌로 보지 않았다.
+#    문법도 임포트도 멀쩡했고, 뒤에 온 정의가 앞을 조용히 덮어 `plan` 규칙만 사라졌다
+#    (테스트 20건이 깨져서야 드러났다). **충돌 마커 0건 = 안전이 아니다** — 자동 병합된
+#    파일에서 «같은 이름이 두 번 정의됐는가» 를 따로 확인해야 한다.
 _EXACT_COUNT_RULES = {
     "standard": lambda s: bool(s.unrestricted or s.can_manage_standard),
     "org": lambda s: bool(s.unrestricted or getattr(s, "can_edit_org", False)),
@@ -357,17 +366,6 @@ def scope_allows_owner(scopes: Optional[frozenset], owner_org_id: str) -> bool:
     return bool(owner) and owner in scopes
 
 
-#: 정확한 숨김 건수를 볼 자격 — **자료 종류마다 다르다.**
-#  기준정보·업무표준은 데이터 표준 관리자(DA)가 고칠 사람이고, 조직·사용자 명부는 조직 편집
-#  권한자가 고칠 사람이다. 둘을 한 권한으로 묶으면 DA 에게 전 직원 명부 규모가 새거나,
-#  조직 관리자가 자기가 고쳐야 할 미바인딩 건수를 못 보게 된다.
-#  ⚠️ 판정을 호출부로 내보내지 않는다. 호출부는 «어떤 종류의 자료인가»만 말한다.
-_EXACT_COUNT_RULES = {
-    "standard": lambda s: bool(s.unrestricted or s.can_manage_standard),
-    "org": lambda s: bool(s.unrestricted or getattr(s, "can_edit_org", False)),
-}
-
-
 def governance_block_reason(p: Principal) -> str:
     """★★★ [2026-08-04 이관 5/10 실측 결함] **거버넌스 지표가 익명에게 열려 있었다.**
 
@@ -404,35 +402,6 @@ def assert_governance_readable(p: Principal):
     reason = governance_block_reason(p)
     if reason:
         raise HTTPException(status_code=403, detail=reason)
-
-
-def hidden_envelope(p: Principal, total: int, shown: int,
-                    exact_for: str = "standard") -> dict:
-    """★★ 목록이 무언가를 **가렸다**는 사실을 응답에 담는다. 건수를 줄지는 여기서만 정한다.
-
-    두 가지를 동시에 만족해야 한다.
-      ① 사용자는 "이게 전부가 아니다"를 반드시 알아야 한다. 모르면 자기가 본 목록을 전량으로
-         믿고 결정한다 — 그래서 `hidden_present` 는 **누구에게나** 준다.
-      ② 그러나 **정확한 건수는 남의 조직 자료 규모를 알려준다.** 404 Data Stealth 로 존재를
-         숨기면서 "옆 조직에 47건 있다"를 말하면 통제가 앞뒤로 어긋난다. 건수를 세어 보면
-         조직 규모·프로젝트 수를 추정할 수 있고, 그건 목록을 여는 것과 크게 다르지 않다.
-         → 정확한 건수는 **자료를 관리할 사람(DA·관리자)** 에게만 준다.
-
-    ⚠️ 이 판정을 라우트에 흩어 두지 않는다. 프론트에서 가리는 것도 답이 아니다 —
-      응답에 숫자가 들어 있으면 다른 클라이언트·스크립트에는 그대로 새어 나간다.
-      숨김은 **보내지 않는 것**이지 보여주지 않는 것이 아니다.
-    """
-    hidden = max(0, int(total) - int(shown))
-    out: dict = {"hidden_present": hidden > 0}
-    rule = _EXACT_COUNT_RULES.get(exact_for)
-    if rule is None:
-        # 오타를 조용히 «건수 안 줌»으로 처리하지 않는다 — 그러면 관리자가 못 보는 이유를
-        # 아무도 못 찾는다. 계약 위반이므로 개발 중에 터져야 한다.
-        raise ValueError(f"hidden_envelope: 모르는 자료 종류 '{exact_for}' "
-                         f"— {sorted(_EXACT_COUNT_RULES)} 중 하나여야 한다")
-    if hidden and rule(p.scope):
-        out["hidden_count"] = hidden
-    return out
 
 
 def _resource_readable(p: Principal, kind: str, rid: str) -> bool:

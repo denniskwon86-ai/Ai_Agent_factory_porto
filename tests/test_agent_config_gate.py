@@ -57,6 +57,14 @@ VALID_PAYLOAD = {
     "edges": [],
 }
 
+#: 차단으로 인정하는 상태코드. **401 과 403 은 같은 강도의 거부다** — 401 은 «누구인지
+#  모른다(인증하라)», 403 은 «알지만 자격이 없다». 익명에게는 401 이 의미상 정확하다.
+#  ★ [병합 2026-08-05] 이 파일은 403 하나만 인정하고 있었는데, 통제가 `api/deps.py` 의
+#    `require_caps` 로 통합되면서 익명 경로가 401 을 주게 됐다. 그때 이 테스트가 깨졌고,
+#    「막혔는데 테스트가 실패한다」를 「안 막혔다」로 읽으면 정반대 방향으로 고치게 된다.
+#  ⚠️ 그래서 코드**만** 넓히고, «막혔다» 의 판정은 그대로 둔다 — 200 이나 404 는 여기 없다.
+BLOCKED = (401, 403)
+
 
 # ── 읽기 ──────────────────────────────────────────────────────────────────
 @pytest.mark.parametrize("uid,user,why", [
@@ -69,15 +77,25 @@ def test_agent_config_read_is_blocked(monkeypatch, uid, user, why):
     c = TestClient(_app(monkeypatch, user_id=uid, user=user))
     for path in ("/api/v1/factory/agents", "/api/v1/factory/templates",
                  "/skills/proposals"):
-        assert c.get(path).status_code == 403, f"{why} 에게 {path} 가 열려 있다"
+        assert c.get(path).status_code in BLOCKED, f"{why} 에게 {path} 가 열려 있다"
 
 
 def test_agent_config_read_open_for_registered_user(monkeypatch):
-    """★ 등록 사용자는 구성을 본다 — 무엇으로 일하는지 못 보면 협업이 안 된다."""
+    """★ 등록 사용자는 구성을 본다 — 무엇으로 일하는지 못 보면 협업이 안 된다.
+
+    ★★ [병합 2026-08-05] 이 테스트는 «활성 사용자» 만 만들고 **부서 역할을 주지 않았다.**
+      통제가 `require_caps(AGENT_READ)` 로 바뀌자 403 이 됐고, 처음에는 «등록 사용자를 막는
+      제품 결함» 으로 보였다. 실측으로 판정했다 — **운영 DB 사용자 22명 전원이 `roles` 를
+      갖고 있다**(viewer 부터 `AGENT_READ` 를 받는다). 즉 실제 등록 사용자는 통과하고,
+      실패한 쪽은 테스트 픽스처였다. 역할을 주어 실제 형태에 맞춘다.
+    ⚠️ 남는 사실 하나: **역할이 하나도 없는 활성 사용자는 구성을 못 본다.** 지금은 그런
+      사용자가 0명이라 드러나지 않는다 — 입사 직후처럼 역할 부여 전 상태가 생기면 그 사람은
+      제품을 열자마자 빈 화면을 본다. 사용자 결정 사안으로 올렸다."""
     import core.skill_evolution as se
     monkeypatch.setattr(se.skill_evolution, "list_pending_proposals", lambda: [])
     c = TestClient(_app(
-        monkeypatch, user_id="staff@ls", user={"user_id": "staff@ls", "status": "active"},
+        monkeypatch, user_id="staff@ls",
+        user={"user_id": "staff@ls", "status": "active", "roles": {"dept-a": "viewer"}},
         scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"})}))
     assert c.get("/api/v1/factory/agents").status_code == 200
     assert c.get("/api/v1/factory/templates").status_code == 200
@@ -95,13 +113,14 @@ def test_agent_config_writes_require_data_admin(monkeypatch):
         c = TestClient(_app(
             monkeypatch, user_id=uid, user=user,
             scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"})}))
-        assert c.put("/api/v1/factory/agents", json=VALID_PAYLOAD).status_code == 403
-        assert c.post("/api/v1/factory/agents/reset").status_code == 403
-        assert c.post("/api/v1/factory/agents/restore").status_code == 403
+        assert c.put("/api/v1/factory/agents", json=VALID_PAYLOAD).status_code in BLOCKED
+        assert c.post("/api/v1/factory/agents/reset").status_code in BLOCKED
+        assert c.post("/api/v1/factory/agents/restore").status_code in BLOCKED
         assert c.post("/api/v1/factory/templates/copy",
-                      json={"src_id": "default", "new_id": "x"}).status_code == 403
-        assert c.put("/api/v1/factory/templates/x", json=VALID_PAYLOAD).status_code == 403
-        assert c.delete("/api/v1/factory/templates/x").status_code == 403
+                      json={"src_id": "default", "new_id": "x"}).status_code in BLOCKED
+        assert c.put("/api/v1/factory/templates/x",
+                     json=VALID_PAYLOAD).status_code in BLOCKED
+        assert c.delete("/api/v1/factory/templates/x").status_code in BLOCKED
 
 
 def test_skill_approval_requires_data_admin(monkeypatch):
@@ -127,25 +146,57 @@ def test_llm_recommend_is_not_open_to_anonymous(monkeypatch):
     회사 예산과 속도 제한을 태우는 남용 경로가 된다."""
     c = TestClient(_app(monkeypatch, user_id="", user=None))
     assert c.post("/api/v1/factory/ai-recommend/pipeline",
-                  json={"user_request": "x"}).status_code == 403
+                  json={"user_request": "x"}).status_code in BLOCKED
     assert c.post("/api/v1/factory/ai-recommend/skill",
                   json={"agent_id": "A", "agent_name_ko": "가",
-                        "role_description": "역할"}).status_code == 403
+                        "role_description": "역할"}).status_code in BLOCKED
 
 
-def test_data_admin_can_still_configure(monkeypatch):
-    """★ 관리자의 편집은 막지 않는다 — 통제가 운영을 막으면 통제가 꺼진다.
+def test_agent_registry_write_currently_has_no_holder(monkeypatch):
+    """★★★ [병합 2026-08-05 실측 · **사용자 결정 대기**] 지금 에이전트 레지스트리를 저장할 수
+    있는 사람이 **아무도 없다.**
 
-    ⚠️ 실제 파일을 쓰지 않게 저장 함수를 대역으로 고정한다."""
+    종전 이 테스트는 `test_data_admin_can_still_configure` 라는 이름으로 «데이터 표준 관리자는
+    계속 편집할 수 있다» 를 지켰다. 그런데 `PUT /api/v1/factory/agents` 의 통제가
+    `require_caps(AGENT_UPDATE, SYSTEM_DEFAULT_EDIT)` 로 바뀌었고, 실측 결과:
+
+      · `SYSTEM_DEFAULT_EDIT` 를 주는 역할·플래그가 **하나도 없다**
+        (`viewer`·`member`·`manager`·AI 관리자·데이터 관리자·경영진 모두 없음 —
+         설계상 플랫폼 관리자 전용이다)
+      · 운영 DB 의 플랫폼 관리자는 **0명**
+
+    → 즉 에이전트 제어판의 저장 버튼은 현재 **아무도 누를 수 없다.**
+
+    ⚠️ 그래서 이 테스트는 «올바른 설계» 가 아니라 **지금 이렇다는 사실**을 고정한다. 통제를
+      임의로 넓히지 않는 이유: `SYSTEM_DEFAULT_EDIT` 는 «전 사용자의 출발점을 바꾸는 일» 로
+      설계됐고(그래서 AI 거버넌스 관리자에게서도 일부러 뺐다), 테스트를 통과시키려고 그것을
+      데이터 관리자에게 주면 설계 판정을 테스트 편의로 뒤집는 것이 된다.
+    → 결정이 필요한 것은 **둘 중 하나**다: ① 플랫폼 관리자를 실제로 임명한다
+      ② 레지스트리 편집에 요구하는 자격을 `SYSTEM_DEFAULT_EDIT` 보다 낮춘다.
+      결정이 나면 이 테스트를 그 계약으로 되돌린다(그때 이름도 함께 바꾼다)."""
     import core.agent_registry as ar
     saved = {}
     monkeypatch.setattr(ar, "save_registry", lambda reg: saved.update(reg) or reg)
     c = TestClient(_app(
-        monkeypatch, user_id="da@ls", user={"user_id": "da@ls", "status": "active"},
+        monkeypatch, user_id="da@ls",
+        user={"user_id": "da@ls", "status": "active", "is_data_admin": True,
+              "roles": {"dept-a": "manager"}},
         scope_kw={"unrestricted": False, "can_manage_standard": True}))
     r = c.put("/api/v1/factory/agents", json=VALID_PAYLOAD)
-    assert r.status_code == 200, r.text
-    assert saved.get("agents"), "관리자 편집이 저장 함수에 도달하지 않았다"
+    assert r.status_code in BLOCKED, (
+        "데이터 관리자가 레지스트리를 저장했다 — 자격 요건이 바뀐 것이라면 위 결정 사안이 "
+        "해소된 것이고, 이 테스트를 그 계약으로 되돌려야 한다")
+    assert not saved, "차단됐는데 저장 함수에 도달했다"
+
+    # 플랫폼 관리자라면 통과한다 — «아무도 못 한다» 가 코드의 의도가 아니라 임명의 공백임을
+    # 여기서 못 박는다. 이 확인이 없으면 위 차단이 «설계대로» 인지 «망가진 것» 인지 모른다.
+    c2 = TestClient(_app(
+        monkeypatch, user_id="root@ls",
+        user={"user_id": "root@ls", "status": "active", "is_platform_admin": True},
+        scope_kw={"unrestricted": True}))
+    r2 = c2.put("/api/v1/factory/agents", json=VALID_PAYLOAD)
+    assert r2.status_code == 200, r2.text
+    assert saved.get("agents"), "플랫폼 관리자 편집이 저장 함수에 도달하지 않았다"
 
 
 # ── 초기화가 되돌릴 수 있는가 ────────────────────────────────────────────
