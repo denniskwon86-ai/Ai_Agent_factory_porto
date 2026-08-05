@@ -94,6 +94,13 @@ COMPETITOR_REFERENCE_CHANGED = "COMPETITOR_REFERENCE_CHANGED"
 #   정의만 바뀌어 산출물이 달라지는 경우가 있고, 두 사건을 한 상수로 묶으면 감사에서
 #   «무엇이 바뀌어 결과가 달라졌는가» 를 되짚을 수 없다. 승인 자체는 `APPROVAL_GRANTED` 다.
 AGENT_ASSET_CHANGED = "AGENT_ASSET_CHANGED"
+# [이관 3/10] 업무표준(규정·지침) 개정. **에이전트가 따르는 법규**이므로 이후 모든 산출물의
+#   통과·반려 기준이 여기서 바뀐다. 누가 언제 무엇을 바꿨는지가 남지 않으면, 지난달 반려된
+#   산출물이 이번 달 통과한 이유를 아무도 설명할 수 없다 — 기준이 바뀐 것인지 판정이 흔들린
+#   것인지 구분되지 않는다.
+WORK_STANDARD_CHANGED = "WORK_STANDARD_CHANGED"
+# ★ [병합 2026-08-05] 위 둘은 **서로 다른 사건**이다. 하나를 버리면 그 이벤트가 `EVENTS` 에
+#   없어 `UNKNOWN:` 으로 기록되고, 감사에서 집계되지 않는다.
 
 EVENTS = (
     ACCESS_DENIED_SCOPE_MISMATCH, ACCESS_DENIED_UNAUTHENTICATED,
@@ -103,7 +110,7 @@ EVENTS = (
     PROGRAM_STATUS_CHANGED, PROGRAM_USE_BLOCKED,
     ORG_STRUCTURE_CHANGED, ORG_USER_CHANGED, VIRTUAL_SCENARIO_CHANGED,
     SCENARIO_INPUT_CHANGED, AGENT_PACK_CHANGED, COMPETITOR_REFERENCE_CHANGED,
-    AGENT_ASSET_CHANGED,
+    AGENT_ASSET_CHANGED, WORK_STANDARD_CHANGED,
 )
 
 #: 식별되지 않은 주체. 빈 문자열로 두면 "기록 누락"과 구분되지 않는다.

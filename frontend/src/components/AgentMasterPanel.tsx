@@ -1,19 +1,70 @@
-import { useEffect, useState, useCallback } from "react";
-import { useFactoryStore, API_BASE_URL } from "../store/useFactoryStore";
-import { ReactFlow, Background, Controls, useNodesState, useEdgesState, addEdge, applyEdgeChanges } from "@xyflow/react";
-import type { Edge, Node, Connection } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import AgentNode from "./AgentFlow/AgentNode";
-import AgentDetailSidebar from "./AgentFlow/AgentDetailSidebar";
+// [이관 6/10] 에이전트 통제소 — «누가 무엇을 어떤 순서로 하는가»
+//
+// 이 화면이 정하는 것: 에이전트의 역할·모델 등급·스킬·실행 순서, 그리고 **HOTL 중단점**
+// (전문가가 반드시 확인하는 지점). 중단점을 지우면 사람 확인 없이 파이프라인이 끝까지 흐른다.
+//
+// ★★★ [2026-08-04 실측] 이 구성을 바꾸는 API 에 권한 검사가 **없었다.** 익명이
+//   `PUT /factory/agents` 와 `POST /factory/agents/reset` 을 호출할 수 있었고, 초기화는
+//   파일을 지워 **되돌릴 수 없었다.** 백엔드에 자격 검사와 백업을 넣었다(같은 커밋).
+//
+// ⚠️ 종전 구현에서 제거한 것:
+//   · `alert()` 4곳 · `confirm()` 4곳 · `prompt()` 2곳 → 화면 안 안내·확인·입력
+//     특히 새 템플릿 식별자를 `prompt()` 로 받고 있었다 — 형식 오류를 잡아 줄 자리가 없었다.
+//   · 런처를 덮는 자체 전체화면 → `HubDialog`(모달 semantics·포커스 트랩·Escape·스크롤 잠금)
+//   · 실패를 삼키던 store 액션 — 403 이어도 «템플릿 없음»으로 보였다.
+//
+// ★ 범위: **상세 편집 패널(`AgentFlow/AgentDetailSidebar`)은 그대로 재사용한다.** 12개 필드를
+//   편집하는 231줄짜리이고, 다시 만들면 필드 누락 위험이 크다. 아직 다크 스타일이며 별도 단계로
+//   옮긴다 — 여기서 «되던 것이 안 되는» 위험을 만들지 않는 편이 낫다.
+import { useCallback, useEffect, useState } from 'react';
+import { ReactFlow, Background, Controls, useNodesState, useEdgesState, addEdge, applyEdgeChanges } from '@xyflow/react';
+import type { Edge, Node, Connection } from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+
+import AgentDetailSidebar from './AgentFlow/AgentDetailSidebar';
+import AgentNode from './AgentFlow/AgentNode';
+import {
+  ConfirmInline, EvidenceStrip, FormField, FoundationList, FoundationToolbar, useConfirm,
+  type FoundationRow,
+} from '../design/DataFoundationShell';
+import { Metric, type Loaded } from '../design/DataState';
+import { HubDialog } from '../design/HubDialog';
+import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
+import { deliverableTypeKo, modelTierKo, stageKo, DELIVERABLE_TYPE_KO } from '../design/terms';
+import { actingScope, UNKNOWN_SCOPE, type ActingScope } from '../lib/actingScope';
+import { useFactoryStore, API_BASE_URL } from '../store/useFactoryStore';
 
 const nodeTypes = { agentNode: AgentNode };
 
+type View = 'agents' | 'flow' | 'templates';
+
+const MODULE: Record<View, { kicker: string; title: string; subtitle: string; desc: string }> = {
+  agents: {
+    kicker: 'AGENTS', title: '에이전트',
+    subtitle: '각 단계를 누가 맡고 무엇을 근거로 일하는지.',
+    desc: '모델 등급·스킬·역할을 정합니다. 끈 에이전트는 파이프라인에서 아예 빠집니다.',
+  },
+  flow: {
+    kicker: 'FLOW', title: '실행 흐름',
+    subtitle: '연결이 순서를 정합니다.',
+    desc: '노드를 이으면 실행 순서가 다시 계산됩니다. 사람 확인 지점에서는 확인 없이 넘어가지 않습니다.',
+  },
+  templates: {
+    kicker: 'TEMPLATES', title: '워크플로우 템플릿',
+    subtitle: '여러 벌을 두고 프로젝트마다 고릅니다.',
+    desc: '기존 템플릿은 바꾸지 않고 복사해서 새로 만듭니다 — 이미 생성된 프로젝트는 계속 동작합니다.',
+  },
+};
+
 export default function AgentMasterPanel() {
   const agentRegistry = useFactoryStore((s) => s.agentRegistry);
-  // [UIUX-AUDIT-30 5] 실패 사유와 재시도 수단이 없으면 화면은 영원히 «로딩 중»에 머문다.
   const registryError = useFactoryStore((s) => s.agentRegistryError);
+  const actionError = useFactoryStore((s) => s.agentActionError);
+  const clearActionError = useFactoryStore((s) => s.clearAgentActionError);
   const fetchAgentRegistry = useFactoryStore((s) => s.fetchAgentRegistry);
   const resetAgentRegistry = useFactoryStore((s) => s.resetAgentRegistry);
+  const restoreAgentRegistry = useFactoryStore((s) => s.restoreAgentRegistry);
   const closeAgentPanel = useFactoryStore((s) => s.closeAgentPanel);
   const templates = useFactoryStore((s) => s.templates);
   const editingTemplateId = useFactoryStore((s) => s.editingTemplateId);
@@ -22,44 +73,73 @@ export default function AgentMasterPanel() {
   const copyTemplate = useFactoryStore((s) => s.copyTemplate);
   const deleteTemplate = useFactoryStore((s) => s.deleteTemplate);
 
+  const [view, setView] = useState<View>('agents');
   const [draft, setDraft] = useState<any | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [isGeneratingPipeline, setIsGeneratingPipeline] = useState(false);
-  const [showAiModal, setShowAiModal] = useState(false);
+  const [search, setSearch] = useState('');
+  const [scope, setScope] = useState<ActingScope | null>(actingScope.peek());
+
+  // 화면 안 입력 — `prompt()` 를 쓰지 않는다.
+  const [copyForm, setCopyForm] = useState({ id: '', name: '' });
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [askAi, setAskAi] = useState(false);
+
+  const delTpl = useConfirm<string>();
+  const doReset = useConfirm<string>();
+  const switchTpl = useConfirm<string>();
+  const aiOverwrite = useConfirm<string>();
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges] = useEdgesState<Edge>([]);
 
-  const isDefault = editingTemplateId === "default";
+  const isDefault = editingTemplateId === 'default';
+  const canEdit = Boolean(scope?.canManageStandard || scope?.unrestricted);
+
+  useEffect(() => { actingScope.load().then(setScope).catch(() => setScope(UNKNOWN_SCOPE)); }, []);
+  useEffect(() => actingScope.subscribe(setScope), []);
 
   // 레지스트리 로드 시 편집 사본 초기화
+  // ⚠️ `null` 이면 편집 사본도 버린다. 남겨 두면 «못 읽었다» 는 배너와 **이전 사용자의 구성**이
+  //   같은 화면에 함께 뜬다(실측). 권한 잔상은 통제를 무력해 보이게 만든다.
   useEffect(() => {
     if (agentRegistry) {
       setDraft(JSON.parse(JSON.stringify(agentRegistry)));
       setDirty(false);
       setSelectedAgentId(null);
+    } else {
+      setDraft(null);
+      setDirty(false);
+      setSelectedAgentId(null);
     }
   }, [agentRegistry]);
+
+  // 사용자가 바뀌면 즉시 다시 읽는다 — 권한 범위가 다르다.
+  useEffect(() => {
+    const onUser = () => { fetchAgentRegistry(); };
+    window.addEventListener('factory:acting-user-changed', onUser);
+    return () => window.removeEventListener('factory:acting-user-changed', onUser);
+  }, [fetchAgentRegistry]);
 
   // draft가 변경될 때마다 React Flow 노드/엣지 초기화 동기화
   useEffect(() => {
     if (!draft || !draft.agents) return;
     const sortedAgents = [...draft.agents].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    
+
     setNodes((nds) => {
       const itemsPerRow = Math.max(3, Math.floor(window.innerWidth / 300));
       return sortedAgents.map((agent, index) => {
         const existingNode = nds.find((n) => n.id === agent.id);
-        const position = agent.position || (existingNode ? existingNode.position : { 
-          x: (index % itemsPerRow) * 280, 
-          y: 100 + Math.floor(index / itemsPerRow) * 160 
+        const position = agent.position || (existingNode ? existingNode.position : {
+          x: (index % itemsPerRow) * 280,
+          y: 100 + Math.floor(index / itemsPerRow) * 160,
         });
         return {
           id: agent.id,
-          type: "agentNode",
+          type: 'agentNode',
           position,
           data: agent,
           selected: agent.id === selectedAgentId,
@@ -68,47 +148,47 @@ export default function AgentMasterPanel() {
     });
 
     // 만약 draft.edges가 있으면 그걸 사용하고, 없으면 기존 order 기반으로 생성
-    let currentEdges: Edge[] = draft.edges || [];
+    const currentEdges: Edge[] = draft.edges || [];
     if (currentEdges.length === 0 && sortedAgents.length > 1) {
       for (let i = 0; i < sortedAgents.length - 1; i++) {
         currentEdges.push({
-          id: `e-${sortedAgents[i].id}-${sortedAgents[i+1].id}`,
+          id: `e-${sortedAgents[i].id}-${sortedAgents[i + 1].id}`,
           source: sortedAgents[i].id,
-          target: sortedAgents[i+1].id,
+          target: sortedAgents[i + 1].id,
           animated: true,
           style: { stroke: '#4b5563', strokeWidth: 2 },
         });
       }
     }
     setEdges(currentEdges);
-  }, [draft?.agents?.length, draft?.edges, selectedAgentId, editingTemplateId]); 
+  }, [draft?.agents?.length, draft?.edges, selectedAgentId, editingTemplateId]);
 
-  const updateOrderFromEdges = (currentEdges: Edge[], agents: any[]) => {
+  const updateOrderFromEdges = (currentEdges: Edge[], agentList: any[]) => {
     const inDegree: Record<string, number> = {};
     const graph: Record<string, string[]> = {};
-    agents.forEach(a => { inDegree[a.id] = 0; graph[a.id] = []; });
-    
-    currentEdges.forEach(e => {
+    agentList.forEach((a) => { inDegree[a.id] = 0; graph[a.id] = []; });
+
+    currentEdges.forEach((e) => {
       if (graph[e.source] && inDegree[e.target] !== undefined) {
         graph[e.source].push(e.target);
         inDegree[e.target] += 1;
       }
     });
 
-    const queue = agents.filter(a => inDegree[a.id] === 0).map(a => a.id);
+    const queue = agentList.filter((a) => inDegree[a.id] === 0).map((a) => a.id);
     let currentOrder = 1;
     const newOrderMap: Record<string, number> = {};
 
     while (queue.length > 0) {
       const node = queue.shift()!;
       newOrderMap[node] = currentOrder++;
-      (graph[node] || []).forEach(neighbor => {
+      (graph[node] || []).forEach((neighbor) => {
         inDegree[neighbor] -= 1;
         if (inDegree[neighbor] === 0) queue.push(neighbor);
       });
     }
 
-    agents.forEach(a => {
+    agentList.forEach((a) => {
       if (!newOrderMap[a.id]) newOrderMap[a.id] = currentOrder++;
     });
 
@@ -132,7 +212,7 @@ export default function AgentMasterPanel() {
         return nextEdges;
       });
     },
-    [setEdges]
+    [setEdges],
   );
 
   const onConnect = useCallback(
@@ -153,7 +233,7 @@ export default function AgentMasterPanel() {
         return nextEdges;
       });
     },
-    [setEdges]
+    [setEdges],
   );
 
   // 노드 드래그 종료 시 위치만 저장 (순서는 엣지가 결정)
@@ -162,7 +242,7 @@ export default function AgentMasterPanel() {
       if (!d || !d.agents) return d;
       return {
         ...d,
-        agents: d.agents.map((a: any) => a.id === node.id ? { ...a, position: node.position } : a)
+        agents: d.agents.map((a: any) => (a.id === node.id ? { ...a, position: node.position } : a)),
       };
     });
     setDirty(true);
@@ -172,56 +252,25 @@ export default function AgentMasterPanel() {
     setSelectedAgentId(node.id);
   }, []);
 
-  const onPaneClick = useCallback(() => {
-    setSelectedAgentId(null);
-  }, []);
+  const onPaneClick = useCallback(() => { setSelectedAgentId(null); }, []);
 
-  if (!draft) {
-    // ★★ [UIUX-AUDIT-30 §5] «아직 안 왔다»와 «못 가져왔다»를 구분한다. 영원히 도는 로딩
-    //   표시는 «기다리면 된다»는 거짓 신호이고, 사용자는 원인에 도달하지 못한다.
-    if (registryError) {
-      return (
-        <div className="h-screen w-screen bg-gray-900 text-gray-300 flex items-center justify-center p-8">
-          <div className="max-w-lg text-center">
-            <div className="text-3xl mb-4" aria-hidden="true">⚠️</div>
-            <h2 className="text-lg font-bold text-gray-100 mb-2">
-              에이전트 설정을 가져오지 못했습니다
-            </h2>
-            <p className="text-sm text-gray-400 leading-relaxed mb-1">{registryError}</p>
-            {/* 비어 있는 화면을 «설정 없음»으로 보여주지 않는다 — 설정이 없는 것과 못 읽은
-                것은 정반대이며, 없다고 믿으면 사용자는 처음부터 다시 만들려 한다. */}
-            <p className="text-sm text-gray-500 leading-relaxed mb-6">
-              설정이 <b>없는 것이 아니라</b> 읽지 못한 것입니다. 서버가 떠 있는지 확인한 뒤
-              다시 시도하십시오.
-            </p>
-            <div className="flex items-center justify-center gap-3">
-              <button
-                onClick={() => fetchAgentRegistry()}
-                className="text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 px-4 py-2 rounded-lg"
-              >
-                다시 시도
-              </button>
-              <button
-                onClick={closeAgentPanel}
-                className="text-sm font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg"
-              >
-                닫기
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return (
-      <div className="h-screen w-screen bg-gray-900 text-gray-300 flex items-center justify-center">
-        <span className="animate-pulse">에이전트 레지스트리 로딩 중…</span>
-      </div>
-    );
-  }
-
-  const agents: any[] = draft.agents || [];
+  // ── 파생 ────────────────────────────────────────────────────────────────
+  const agents: any[] = draft?.agents || [];
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) || null;
-  const hotlCount = agents.filter((a) => a.enabled && a.hotl_after).length;
+  const enabledAgents = agents.filter((a) => a.enabled);
+  const hotlCount = enabledAgents.filter((a) => a.hotl_after).length;
+  const filteredAgents = (() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return agents;
+    return agents.filter((a) => `${a.name_ko || ''} ${a.id} ${a.role || ''} ${a.stage || ''}`
+      .toLowerCase().includes(q));
+  })();
+
+  /** 조회 상태 — «아직 안 왔다»·«못 가져왔다»·«정상»을 구분한다. */
+  const listState: Loaded<any[]> = registryError
+    ? { status: 'error', value: null, error: registryError }
+    : draft ? { status: 'ok', value: agents } : { status: 'loading', value: null };
+  const metricState = registryError ? 'error' : draft ? 'ok' : 'loading';
 
   const updateAgent = (id: string, key: string, value: any) => {
     setDraft((d: any) => ({
@@ -237,223 +286,463 @@ export default function AgentMasterPanel() {
   };
 
   const handleSave = async () => {
-    setSaving(true);
+    setSaving(true); setFlash(null); clearActionError();
     const ok = await saveTemplateRegistry(editingTemplateId, draft);
     setSaving(false);
     if (ok) {
       setDirty(false);
-      alert(`✅ 템플릿 '${editingTemplateId}' 을(를) 저장했습니다.\n(이 템플릿으로 새로 생성하는 프로젝트부터 반영됩니다. 진행 중인 작업에는 영향 없음.)`);
+      setFlash(`템플릿 «${editingTemplateId}» 을 저장했습니다. `
+        + '이 템플릿으로 새로 만드는 프로젝트부터 반영되고, 진행 중인 작업에는 영향이 없습니다.');
     }
   };
 
-  const handleGeneratePipeline = async () => {
+  const runGeneratePipeline = async () => {
     if (!aiPrompt.trim()) return;
-    if (dirty && !confirm("저장하지 않은 변경사항이 사라집니다. 계속하시겠습니까?")) return;
-    
-    setIsGeneratingPipeline(true);
+    setAiBusy(true); setFlash(null); clearActionError();
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/ai-recommend/pipeline`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_request: aiPrompt })
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_request: aiPrompt }),
       });
-      const data = await res.json();
-      if (res.ok && data.status === "success") {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.status === 'success') {
         setDraft(data.data);
         setDirty(true);
         setSelectedAgentId(null);
-        setAiPrompt("");
-        setShowAiModal(false);
+        setAiPrompt('');
+        setAskAi(false);
+        setFlash('구상안을 편집판에 올렸습니다 — 아직 저장되지 않았습니다. 확인 후 저장하십시오.');
       } else {
-        alert(`생성 실패: ${data.detail || "알 수 없는 오류"}`);
+        // ⚠️ 실패를 `alert` 로 띄우지 않는다. 화면 안 배너로 남겨야 다시 읽을 수 있다.
+        useFactoryStore.setState({
+          agentActionError: res.status === 403
+            ? '구상 기능을 쓸 권한이 없습니다 — 우측 상단에서 사용자를 지정하십시오.'
+            : String(data?.detail || `구상에 실패했습니다(서버 ${res.status}).`),
+        });
       }
     } catch (e: any) {
-      alert(`생성 중 오류 발생: ${e.message}`);
-    } finally {
-      setIsGeneratingPipeline(false);
-    }
+      useFactoryStore.setState({ agentActionError: `구상 중 오류: ${e?.message || e}` });
+    } finally { setAiBusy(false); }
   };
 
-  const handleReset = async () => {
-    if (!confirm("기본(default) 템플릿을 출고 상태(현재 SW 파이프라인)로 초기화하시겠습니까? 저장된 커스텀 설정이 사라집니다.")) return;
-    await resetAgentRegistry();
+  const railItems: RailItem[] = [
+    { id: 'agents', label: '에이전트', hint: '역할·모델·스킬', icon: 'people' },
+    { id: 'flow', label: '실행 흐름', hint: '연결이 순서다', icon: 'flow',
+      // 사람 확인 지점은 통제다 — 몇 곳인지 항상 보여야 한다.
+      count: hotlCount || undefined, countLabel: `사람 확인 지점 ${hotlCount}곳` },
+    { id: 'templates', label: '워크플로우 템플릿', hint: '복사해서 만든다', icon: 'apps' },
+  ];
+
+  const jarvisContext = {
+    current_module: `agent_master/${view}`,
+    selected_object_type: 'agent',
+    selected_object_id: selectedAgent?.id || '',
+    object_snapshot: selectedAgent
+      ? { id: selectedAgent.id, stage: selectedAgent.stage, enabled: selectedAgent.enabled,
+        hotl_after: selectedAgent.hotl_after, model_tier: selectedAgent.model_tier }
+      : { template: editingTemplateId, agents: agents.length, hotl: hotlCount },
+    available_actions: canEdit
+      ? ['역할 수정', '모델 등급 변경', '사람 확인 지점 설정', '템플릿 복사']
+      : [],
+    evidence_refs: [],
   };
 
-  const handleSwitchTemplate = async (tid: string) => {
+  const agentRows: FoundationRow[] = filteredAgents.map((a) => ({
+    id: a.id,
+    title: a.name_ko || a.id,
+    // ⚠️ `stage` 와 `model_tier` 는 내부 코드다(`CLARIFICATION` · `pro`). 사전을 거친다 —
+    //   6/10 실측에서 그대로 노출됐다. `a.id` 는 로그·리포트의 실제 식별자이므로 그대로 둔다.
+    meta: `${a.id}${a.stage ? ` · ${stageKo(a.stage)}` : ''}`
+      + `${a.model_tier ? ` · ${modelTierKo(a.model_tier)}` : ''}`
+      + ` · 순서 ${a.order ?? '미지정'}`,
+    // ⚠️ 꺼진 에이전트를 조용히 두지 않는다 — 파이프라인에서 아예 빠진다.
+    chip: !a.enabled
+      ? { label: '꺼짐', tone: 'muted' }
+      : a.hotl_after
+        ? { label: '사람 확인', tone: 'warn' }
+        : { label: '자동', tone: 'data' },
+  }));
+
+  const templateRows: FoundationRow[] = templates.map((t: any) => ({
+    id: t.id,
+    title: t.name || t.id,
+    meta: `${t.id}${t.builtin ? ' · 기본 템플릿' : ' · 사용자 템플릿'}`,
+    chip: t.id === editingTemplateId
+      ? { label: '편집 중', tone: 'success' }
+      : t.builtin ? { label: '기본', tone: 'data' } : { label: '사용자', tone: 'muted' },
+  }));
+
+  const askSwitch = (tid: string) => {
     if (tid === editingTemplateId) return;
-    if (dirty && !confirm("저장하지 않은 변경이 있습니다. 템플릿을 전환하면 변경이 사라집니다. 계속할까요?")) return;
-    await selectEditingTemplate(tid);
-  };
-
-  const handleCopy = async () => {
-    const newId = prompt("새 템플릿 ID (영문/숫자/_/- 만):", "");
-    if (!newId || !newId.trim()) return;
-    const newName = prompt("새 템플릿 표시 이름:", "") || "";
-    const ok = await copyTemplate(editingTemplateId, newId.trim(), newName.trim());
-    if (ok) alert(`✅ 템플릿 '${newId.trim()}' 을(를) 만들었습니다. 지금부터 이 템플릿을 편집합니다.`);
-  };
-
-  const handleDelete = async () => {
-    if (isDefault) return;
-    if (!confirm(`템플릿 '${editingTemplateId}' 을(를) 삭제하시겠습니까? 복구할 수 없습니다.\n(이미 이 템플릿으로 생성된 프로젝트는 계속 동작합니다.)`)) return;
-    const ok = await deleteTemplate(editingTemplateId);
-    if (ok) alert("템플릿을 삭제했습니다. 기본(default) 템플릿으로 돌아갑니다.");
+    // 저장하지 않은 변경이 있으면 화면 안에서 확인한다(`confirm()` 을 쓰지 않는다).
+    if (dirty) { switchTpl.ask(tid); return; }
+    selectEditingTemplate(tid);
   };
 
   return (
-    <div className="h-screen w-screen bg-gray-900 text-gray-100 flex flex-col font-sans overflow-hidden">
-      {/* 헤더 */}
-      <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0 z-10 shadow-sm">
-        <div className="flex items-center gap-4 min-w-0">
-          <button onClick={closeAgentPanel} className="text-sm font-bold text-gray-400 hover:text-gray-100 bg-gray-700 px-3 py-1.5 rounded transition-colors shrink-0">◀ 런처</button>
-          <h1 className="text-lg font-bold text-gray-100 truncate">⚙️ 에이전트 마스터 제어판</h1>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {dirty && <span className="text-xs text-amber-400 mr-1">● 저장 안 됨</span>}
-          {isDefault && <button onClick={handleReset} className="text-xs font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded transition-colors">기본값 초기화</button>}
-          <button onClick={handleSave} disabled={!dirty || saving} className="text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 px-4 py-1.5 rounded transition-colors">
-            {saving ? "저장 중…" : "💾 저장"}
+    <HubDialog label="에이전트 통제소 — 누가 무엇을 어떤 순서로 하는가" onClose={closeAgentPanel}>
+      <div className="afs-dialog-bar">
+        <b>에이전트 통제소</b>
+        <span>사람 확인 지점을 지우면 확인 없이 끝까지 흐릅니다</span>
+        <div className="bar-actions">
+          {dirty && <span className="busy">저장 안 됨</span>}
+          {saving && <span className="busy">저장 중…</span>}
+          {canEdit && (
+            <button className="primary-button" disabled={!dirty || saving} onClick={handleSave}>
+              저장
+            </button>
+          )}
+          <button className="secondary-button" onClick={closeAgentPanel}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </header>
-
-      {/* 템플릿 툴바 */}
-      <div className="bg-gray-850 bg-gray-800/60 border-b border-gray-700 px-6 py-2.5 flex items-center gap-3 shrink-0 flex-wrap z-10">
-        <span className="text-xs font-bold text-gray-400 shrink-0">🧩 편집 중인 템플릿</span>
-        <select
-          value={editingTemplateId}
-          onChange={(e) => handleSwitchTemplate(e.target.value)}
-          className="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 focus:border-blue-500 outline-none min-w-[16rem]"
-        >
-          {templates.length === 0 && <option value="default">기본 워크플로우</option>}
-          {templates.map((t) => (
-            <option key={t.id} value={t.id}>{t.name || t.id}{t.builtin ? " (기본)" : ""}</option>
-          ))}
-        </select>
-        <button onClick={handleCopy} className="text-xs font-bold text-emerald-300 bg-emerald-900/40 border border-emerald-700/50 hover:bg-emerald-800/50 px-3 py-1.5 rounded transition-colors">
-          ＋ 복사해서 새 템플릿
-        </button>
-        <button onClick={() => setShowAiModal(true)} className="text-xs font-bold text-blue-300 bg-blue-900/40 border border-blue-700/50 hover:bg-blue-800/50 px-3 py-1.5 rounded transition-colors ml-2">
-          ✨ AI로 템플릿 신규 구상
-        </button>
-        <button
-          onClick={handleDelete}
-          disabled={isDefault}
-          title={isDefault ? "기본 템플릿은 삭제할 수 없습니다" : "이 템플릿 삭제"}
-          className="text-xs font-bold text-rose-300 bg-rose-900/30 border border-rose-800/50 hover:bg-rose-800/40 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded transition-colors"
-        >
-          🗑 삭제
-        </button>
-        <span className="text-xs text-gray-500 ml-auto">
-          {isDefault ? "기본 템플릿(default) — 모든 신규 프로젝트의 기본값" : `커스텀 템플릿 — id: ${editingTemplateId}`}
-        </span>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* React Flow 캔버스 */}
-        <div className="flex-1 relative bg-gray-900">
-          {/* 상단 파이프라인 메타 정보 */}
-          <div className="absolute top-4 left-4 z-10 bg-gray-800/90 backdrop-blur-md border border-gray-700 p-4 rounded-xl shadow-lg w-96">
-            <input
-              value={draft.pipeline_name || ""}
-              onChange={(e) => updateMeta("pipeline_name", e.target.value)}
-              placeholder="파이프라인 이름"
-              className="w-full bg-transparent text-gray-100 font-bold text-lg outline-none border-b border-transparent hover:border-gray-600 focus:border-blue-500 mb-2 px-1"
-            />
-            <textarea
-              value={draft.description || ""}
-              onChange={(e) => updateMeta("description", e.target.value)}
-              placeholder="파이프라인 설명"
-              rows={2}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 resize-none outline-none focus:border-blue-500 mb-2"
-            />
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs text-gray-400 whitespace-nowrap">최종 산출물 유형:</span>
-              <select
-                value={draft.deliverable_type || "software_app"}
-                onChange={(e) => updateMeta("deliverable_type", e.target.value)}
-                className="bg-gray-800 text-xs text-gray-200 border border-gray-600 rounded px-2 py-1 outline-none focus:border-blue-500 w-full"
-              >
-                <option value="software_app">소프트웨어 애플리케이션 (실행 가능)</option>
-                <option value="document_report">분석/보고서 문서 (열람 및 다운로드)</option>
-                <option value="hybrid_simulation">복합 시뮬레이터 (UI 렌더링 및 최종 보고서)</option>
-              </select>
+      <div className="afs-dialog-body">
+        <HubShell
+          kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
+          items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
+          footer={
+            <div className="inheritance-card">
+              <span>HOTL</span>
+              <b>사람 확인 지점은 통제입니다</b>
+              <p>지우면 전문가 확인 없이 파이프라인이 끝까지 흐릅니다. 변경은 서버 재시작 후 반영됩니다.</p>
             </div>
-            <div className="text-[10px] text-gray-400 px-1 flex gap-2">
-              <span>드래그앤드랍으로 실행 순서 동적 변경</span>
-              <span>•</span>
-              <span className="text-blue-400 font-bold">{agents.length} Nodes</span>
-              <span>•</span>
-              <span className="text-rose-400 font-bold">{hotlCount} HOTL (전문가 개입)</span>
-            </div>
-          </div>
-
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={handleEdgesChange}
-            onConnect={onConnect}
-            onNodeDragStop={onNodeDragStop}
-            onNodeClick={onNodeClick}
-            onPaneClick={onPaneClick}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.2 }}
-            minZoom={0.2}
-          >
-            <Background color="#374151" gap={16} />
-            <Controls className="bg-gray-800 border-gray-700 fill-white" />
-          </ReactFlow>
-        </div>
-
-        {/* 우측 상세 패널 */}
-        <div
-          className={`transition-all duration-300 ease-in-out border-l border-gray-700 bg-gray-800 flex-shrink-0 overflow-hidden ${
-            selectedAgentId ? "w-80 opacity-100" : "w-0 opacity-0 border-none"
-          }`}
+          }
+          jarvis={<JarvisRail
+            contextTitle={selectedAgent ? (selectedAgent.name_ko || selectedAgent.id)
+              : registryError ? '조회 불가' : MODULE[view].title}
+            contextDescription={selectedAgent
+              ? `${selectedAgent.id} · ${selectedAgent.stage ? stageKo(selectedAgent.stage) + ' · ' : ''}순서 ${selectedAgent.order ?? '미지정'}`
+                + `${selectedAgent.hotl_after ? ' · 사람 확인 지점' : ''}`
+              : registryError
+                ? '에이전트 구성을 가져오지 못했습니다 — «구성 없음»이 아닙니다.'
+                : `템플릿 «${editingTemplateId}» · 에이전트 ${agents.length}개 · 사람 확인 ${hotlCount}곳`}
+            context={jarvisContext}
+            evidence={selectedAgent ? [
+              { label: '에이전트', value: selectedAgent.id },
+              { label: '모델 등급', value: selectedAgent.model_tier ? modelTierKo(selectedAgent.model_tier) : '미지정' },
+              { label: '사람 확인', value: selectedAgent.hotl_after ? '있음' : '없음' },
+            ] : []}
+            quickQuestions={[
+              '이 에이전트는 무엇을 근거로 판단합니까?',
+              '사람 확인 지점을 지우면 무엇이 달라집니까?',
+              '이 순서를 바꾸면 어디에 영향이 갑니까?',
+            ]} />}
         >
-          {selectedAgent && (
-            <AgentDetailSidebar
-              agent={selectedAgent}
-              updateAgent={updateAgent}
-              onClose={() => setSelectedAgentId(null)}
-            />
+          {/* ★★ 조회 실패와 «구성 없음»을 구분한다. 없다고 믿으면 사용자는 처음부터 다시 만든다. */}
+          {registryError && (
+            <Banner tone="error" title="에이전트 구성을 가져오지 못했습니다">
+              {registryError} — 구성이 <b>없는 것이 아니라</b> 읽지 못한 것입니다.{' '}
+              <button className="text-button" onClick={() => fetchAgentRegistry()}>다시 시도</button>
+            </Banner>
           )}
-        </div>
-      </div>
+          {actionError && (
+            <Banner tone="error" title="요청을 처리하지 못했습니다">
+              {actionError}{' '}
+              <button className="text-button" onClick={clearActionError}>지우기</button>
+            </Banner>
+          )}
+          {flash && <Banner tone="info">{flash}</Banner>}
+          {!canEdit && !registryError && (
+            <Banner tone="warn" title="조회만 가능합니다">
+              에이전트 구성을 바꿀 권한이 없습니다. 이 구성은 모든 산출물이 만들어지는 방식을
+              정하므로 데이터 관리자·관리자만 편집할 수 있습니다.
+            </Banner>
+          )}
 
-      {/* AI 파이프라인 생성 모달 */}
-      {showAiModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl w-[500px]">
-            <h2 className="text-lg font-bold text-gray-100 mb-2">✨ AI 파이프라인 자동 구상</h2>
-            <p className="text-xs text-gray-400 mb-4">어떤 에이전트 파이프라인을 만들고 싶으신가요? AI가 최적의 구조를 제안합니다.<br/>(기존 편집 내용이 덮어쓰기 됩니다.)</p>
-            <textarea
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="예: 제조업 원가 분석을 위한 에이전트 구성을 만들어 줘"
-              rows={4}
-              className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm text-gray-100 resize-none outline-none focus:border-blue-500 mb-4"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowAiModal(false)}
-                className="px-4 py-2 text-sm font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleGeneratePipeline}
-                disabled={isGeneratingPipeline || !aiPrompt.trim()}
-                className="px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 rounded transition-colors"
-              >
-                {isGeneratingPipeline ? "⏳ 생성 중..." : "파이프라인 생성"}
-              </button>
-            </div>
+          <ScreenHead kicker={MODULE[view].kicker} title={MODULE[view].title}
+            description={MODULE[view].desc}
+            chip={registryError ? { label: '조회 불가', tone: 'danger' }
+              : !draft ? { label: '확인 중', tone: 'muted' }
+                : { label: `에이전트 ${agents.length}개`, tone: 'data' }} />
+
+          <div className="metric-row">
+            <Metric label="에이전트" state={metricState} value={draft ? agents.length : null}
+              notes={{ error: '조회 불가', loading: '확인 중' }} hint="이 템플릿의 구성" />
+            <Metric label="켜진 에이전트" state={metricState}
+              value={draft ? enabledAgents.length : null}
+              notes={{ error: '조회 불가', loading: '확인 중' }}
+              hint={draft && enabledAgents.length < agents.length
+                ? `${agents.length - enabledAgents.length}개는 빠집니다` : '전부 참여'} />
+            {/* ⚠️ 0 을 숨기지 않는다. 사람 확인 지점 0곳은 «통제 없음»이라는 중요한 사실이다. */}
+            <Metric label="사람 확인 지점" state={metricState} value={draft ? hotlCount : null}
+              notes={{ error: '조회 불가', loading: '확인 중' }}
+              hint={draft && hotlCount === 0 ? '확인 없이 끝까지 흐릅니다' : '전문가 개입'} />
+            <Metric label="최종 산출물" state={metricState}
+              value={draft ? deliverableTypeKo(draft.deliverable_type || 'software_app') : null}
+              notes={{ error: '조회 불가', loading: '확인 중', empty: '미지정' }} />
           </div>
-        </div>
-      )}
-    </div>
+
+          {view === 'agents' && (
+            <>
+              <FoundationToolbar search={search} onSearch={setSearch}
+                placeholder="이름·식별자·역할로 찾기"
+                hint={canEdit
+                  ? '고른 에이전트의 역할·모델·스킬을 오른쪽에서 편집합니다. 저장 전까지 반영되지 않습니다.'
+                  : undefined} />
+              <div className="inbox-layout">
+                <FoundationList state={listState} rows={agentRows}
+                  selectedId={selectedAgentId || ''} onSelect={setSelectedAgentId}
+                  onRetry={() => fetchAgentRegistry()}
+                  kicker="AGENTS" title="에이전트"
+                  emptyText={search
+                    ? <>«{search}» 와 일치하는 에이전트가 없습니다.</>
+                    : <>이 템플릿에 에이전트가 없습니다.</>} />
+
+                <Panel kicker="AGENT"
+                  title={selectedAgent ? (selectedAgent.name_ko || selectedAgent.id) : '에이전트 상세'}>
+                  {!selectedAgent ? (
+                    <div className="empty-note">왼쪽에서 에이전트를 선택하십시오.</div>
+                  ) : (
+                    <>
+                      <div style={{ padding: '0 14px' }}>
+                        <EvidenceStrip items={[
+                          { label: '식별자', value: selectedAgent.id },
+                          { label: '모델 등급', value: selectedAgent.model_tier ? modelTierKo(selectedAgent.model_tier) : '미지정' },
+                          { label: '사람 확인', value: selectedAgent.hotl_after ? '있음' : '없음' },
+                        ]} note="식별자는 로그·리포트에 같은 문자열로 남습니다 — 바꾸지 않습니다." />
+                      </div>
+                      {/* ★ 상세 편집은 기존 패널을 그대로 재사용한다(12개 필드). 아직 다크
+                          스타일이며 별도 단계로 옮긴다 — 다시 만들면 필드 누락 위험이 크다. */}
+                      <div style={{ marginTop: 12 }}>
+                        <AgentDetailSidebar
+                          agent={selectedAgent}
+                          updateAgent={canEdit ? updateAgent : () => { /* 조회 전용 */ }}
+                          onClose={() => setSelectedAgentId(null)} />
+                      </div>
+                    </>
+                  )}
+                </Panel>
+              </div>
+            </>
+          )}
+
+          {view === 'flow' && (
+            <>
+              <FoundationToolbar
+                actions={canEdit ? (
+                  <>
+                    <button className="secondary-button" disabled={aiBusy}
+                      onClick={() => (dirty ? aiOverwrite.ask('ai') : setAskAi(true))}>
+                      구상안 만들기
+                    </button>
+                    {isDefault && (
+                      <button className="danger-ghost" onClick={() => doReset.ask('default')}>
+                        기본값으로 초기화
+                      </button>
+                    )}
+                  </>
+                ) : undefined}
+                hint={canEdit
+                  ? '노드를 이으면 순서가 다시 계산됩니다. 저장 전까지 반영되지 않습니다.'
+                  : undefined} />
+
+              <ConfirmInline open={doReset.open}
+                title="기본값으로 초기화합니다"
+                body={<>편집해 둔 구성(역할·모델·순서·<b>사람 확인 지점</b>)이 사라집니다.
+                  직전 구성은 서버에 보존되므로 한 번은 되돌릴 수 있습니다.</>}
+                confirmLabel="초기화"
+                onConfirm={() => doReset.run(() => { resetAgentRegistry(); setDirty(false); })}
+                onCancel={doReset.cancel} />
+
+              <ConfirmInline open={aiOverwrite.open}
+                title="저장하지 않은 변경이 사라집니다"
+                body="구상안을 만들면 지금 편집판이 덮어써집니다. 먼저 저장하려면 취소하십시오."
+                confirmLabel="계속" danger={false}
+                onConfirm={() => aiOverwrite.run(() => setAskAi(true))}
+                onCancel={aiOverwrite.cancel} />
+
+              {askAi && (
+                <Panel kicker="DRAFT" title="어떤 구성을 만들까요">
+                  <div style={{ padding: 14 }}>
+                    <FormField label="원하는 구성"
+                      hint="구상안은 편집판에만 올라갑니다 — 저장하기 전까지 아무것도 바뀌지 않습니다.">
+                      <textarea className="afs-textarea" rows={3} value={aiPrompt}
+                        onChange={(e) => setAiPrompt(e.target.value)}
+                        placeholder="예: 제조 원가 분석을 위한 에이전트 구성을 만들어 주십시오" />
+                    </FormField>
+                    <div style={{ display: 'flex', gap: 7, justifyContent: 'flex-end' }}>
+                      <button className="secondary-button" onClick={() => setAskAi(false)}>취소</button>
+                      <button className="primary-button" disabled={aiBusy || !aiPrompt.trim()}
+                        onClick={runGeneratePipeline}>
+                        {aiBusy ? '구상 중…' : '구상안 만들기'}
+                      </button>
+                    </div>
+                  </div>
+                </Panel>
+              )}
+
+              <Panel kicker="FLOW" title="실행 흐름">
+                {registryError ? (
+                  <div className="empty-note">
+                    흐름을 그릴 구성을 가져오지 못했습니다 — «구성 없음»이 아닙니다.
+                  </div>
+                ) : !draft ? (
+                  <div className="empty-note">구성을 확인하고 있습니다…</div>
+                ) : (
+                  <div style={{ padding: 12 }}>
+                    <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+                      <FormField label="파이프라인 이름">
+                        <input className="afs-input" value={draft.pipeline_name || ''}
+                          disabled={!canEdit}
+                          onChange={(e) => updateMeta('pipeline_name', e.target.value)}
+                          placeholder="예: 소프트웨어 개발 팩토리" />
+                      </FormField>
+                      <FormField label="설명">
+                        <textarea className="afs-textarea" rows={2} value={draft.description || ''}
+                          disabled={!canEdit}
+                          onChange={(e) => updateMeta('description', e.target.value)} />
+                      </FormField>
+                      <FormField label="최종 산출물 유형"
+                        hint="파이프라인이 마지막에 무엇을 내놓는지에 따라 검수 방식이 달라집니다.">
+                        <select className="afs-select" disabled={!canEdit}
+                          value={draft.deliverable_type || 'software_app'}
+                          onChange={(e) => updateMeta('deliverable_type', e.target.value)}>
+                          {Object.entries(DELIVERABLE_TYPE_KO).map(([k, v]) => (
+                            <option key={k} value={k}>{v}</option>
+                          ))}
+                        </select>
+                      </FormField>
+                    </div>
+                    {/* ReactFlow 캔버스는 종전 그대로다 — 그래프 편집 동작을 바꾸지 않는다. */}
+                    <div style={{ height: 420, border: '1px solid var(--surface-border)',
+                      borderRadius: 8, overflow: 'hidden', background: '#0f172a' }}>
+                      <ReactFlow
+                        nodes={nodes}
+                        edges={edges}
+                        onNodesChange={onNodesChange}
+                        onEdgesChange={handleEdgesChange}
+                        onConnect={onConnect}
+                        onNodeDragStop={onNodeDragStop}
+                        onNodeClick={onNodeClick}
+                        onPaneClick={onPaneClick}
+                        nodeTypes={nodeTypes}
+                        nodesDraggable={canEdit}
+                        nodesConnectable={canEdit}
+                        fitView
+                        fitViewOptions={{ padding: 0.2 }}
+                        minZoom={0.2}
+                      >
+                        <Background color="#374151" gap={16} />
+                        <Controls className="bg-gray-800 border-gray-700 fill-white" />
+                      </ReactFlow>
+                    </div>
+                    <p className="hint-line">
+                      노드를 끌어 배치하고 이으면 실행 순서가 다시 계산됩니다.
+                      {hotlCount === 0
+                        ? ' 지금 사람 확인 지점이 없어 확인 없이 끝까지 흐릅니다.'
+                        : ` 사람 확인 지점 ${hotlCount}곳에서 멈춥니다.`}
+                    </p>
+                  </div>
+                )}
+              </Panel>
+            </>
+          )}
+
+          {view === 'templates' && (
+            <>
+              <FoundationToolbar
+                hint={canEdit
+                  ? '기존 템플릿은 바꾸지 않습니다 — 복사해서 새로 만듭니다.'
+                  : '조회만 가능합니다 — 템플릿 변경은 데이터 관리자에게 요청하십시오.'} />
+
+              <ConfirmInline open={switchTpl.open}
+                title="저장하지 않은 변경이 사라집니다"
+                body="템플릿을 전환하면 지금 편집판의 변경이 사라집니다. 먼저 저장하려면 취소하십시오."
+                confirmLabel="전환" danger={false}
+                onConfirm={() => switchTpl.run((tid) => selectEditingTemplate(tid))}
+                onCancel={switchTpl.cancel} />
+
+              <ConfirmInline open={delTpl.open}
+                title={`템플릿 «${delTpl.target || ''}» 을 삭제합니다`}
+                body={<>되돌릴 수 없습니다. <b>이미 이 템플릿으로 생성된 프로젝트는 계속
+                  동작합니다</b> — 앞으로 이 템플릿을 고를 수 없게 되는 것입니다.</>}
+                confirmLabel="삭제"
+                onConfirm={() => delTpl.run((tid) => deleteTemplate(tid))}
+                onCancel={delTpl.cancel} />
+
+              <div className="inbox-layout">
+                <FoundationList
+                  state={registryError
+                    ? { status: 'error', value: null, error: registryError }
+                    : { status: 'ok', value: templates }}
+                  rows={templateRows} selectedId={editingTemplateId}
+                  onSelect={askSwitch} onRetry={() => fetchAgentRegistry()}
+                  kicker="TEMPLATES" title="워크플로우 템플릿"
+                  emptyText={<>템플릿을 가져오지 못했거나 등록된 것이 없습니다 — 기본 템플릿으로
+                    동작합니다.</>} />
+
+                <Panel kicker="TEMPLATE" title="지금 편집 중">
+                  <div style={{ padding: 14 }}>
+                    <EvidenceStrip items={[
+                      { label: '식별자', value: editingTemplateId },
+                      { label: '구분', value: isDefault ? '기본 템플릿' : '사용자 템플릿' },
+                      { label: '에이전트', value: `${agents.length}개` },
+                    ]} note={isDefault
+                      ? '기본 템플릿은 모든 신규 프로젝트의 출발점입니다.'
+                      : '이 템플릿을 고른 프로젝트에만 적용됩니다.'} />
+
+                    {canEdit ? (
+                      <>
+                        <div style={{ marginTop: 14 }}>
+                          <FormField label="새 템플릿 식별자" required
+                            hint="영문·숫자·_- 만. 프로젝트 기록에 남으므로 나중에 바꾸기 어렵습니다.">
+                            <input className="afs-input" value={copyForm.id}
+                              onChange={(e) => setCopyForm({ ...copyForm, id: e.target.value })}
+                              placeholder="예: cost_analysis" />
+                          </FormField>
+                          <FormField label="표시 이름">
+                            <input className="afs-input" value={copyForm.name}
+                              onChange={(e) => setCopyForm({ ...copyForm, name: e.target.value })}
+                              placeholder="예: 원가 분석 파이프라인" />
+                          </FormField>
+                          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                            <button className="primary-button" disabled={!copyForm.id.trim()}
+                              onClick={async () => {
+                                const okDone = await copyTemplate(editingTemplateId,
+                                  copyForm.id.trim(), copyForm.name.trim());
+                                if (okDone) {
+                                  setFlash(`템플릿 «${copyForm.id.trim()}» 을 만들었습니다 — `
+                                    + '지금부터 이 템플릿을 편집합니다.');
+                                  setCopyForm({ id: '', name: '' });
+                                }
+                              }}>복사해서 새로 만들기</button>
+                            {!isDefault && (
+                              <button className="danger-ghost"
+                                onClick={() => delTpl.ask(editingTemplateId)}>
+                                이 템플릿 삭제
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {isDefault && (
+                          <p className="hint-line">
+                            기본 템플릿은 삭제할 수 없습니다 — 모든 신규 프로젝트가 여기서 시작합니다.
+                          </p>
+                        )}
+                        <div style={{ marginTop: 14, borderTop: '1px solid var(--surface-border)',
+                          paddingTop: 12 }}>
+                          <p className="hint-line" style={{ marginTop: 0 }}>
+                            기본값으로 초기화한 적이 있으면 <b>직전 구성</b>으로 되돌릴 수 있습니다.
+                          </p>
+                          <button className="secondary-button" onClick={async () => {
+                            const okDone = await restoreAgentRegistry();
+                            if (okDone) { setDirty(false); setFlash('초기화 직전 구성으로 되돌렸습니다.'); }
+                          }}>직전 구성으로 되돌리기</button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="hint-line">템플릿을 만들거나 삭제할 권한이 없습니다.</p>
+                    )}
+                  </div>
+                </Panel>
+              </div>
+            </>
+          )}
+        </HubShell>
+      </div>
+    </HubDialog>
   );
 }

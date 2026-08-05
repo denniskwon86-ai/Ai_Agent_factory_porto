@@ -30,9 +30,13 @@ import { Panel } from './HubShell';
 
 // ── 검색·필터·1차 행동 한 줄 ────────────────────────────────────────────────
 export function FoundationToolbar({ search, onSearch, placeholder, filters, actions, hint }: {
-  search: string;
-  onSearch: (v: string) => void;
-  placeholder: string;
+  /** 검색을 쓰지 않는 화면은 **세 값을 모두 생략한다.**
+   *  ⚠️ 종전에는 필수였고, 검색이 없는 화면들이 `search=""` + 빈 `onSearch` 를 넘겼다.
+   *    그 결과 **입력할 수 있게 생겼지만 아무 일도 하지 않는 칸**이 놓였다(조직·권한과 거버넌스에서
+   *    같은 결함이 반복됐다). 사용자는 자기가 잘못 쳤다고 생각한다. */
+  search?: string;
+  onSearch?: (v: string) => void;
+  placeholder?: string;
   /** 분류 전환. 2~5개까지만 — 넘어가면 목록이지 필터가 아니다. */
   filters?: { id: string; label: string; active: boolean; onSelect: () => void }[];
   actions?: ReactNode;
@@ -41,14 +45,17 @@ export function FoundationToolbar({ search, onSearch, placeholder, filters, acti
   return (
     <div className="foundation-toolbar">
       <div className="foundation-toolbar-row">
-        <div className="search-field">
-          <span aria-hidden="true">🔍</span>
-          <input value={search} placeholder={placeholder} aria-label={placeholder}
-            onChange={(e) => onSearch(e.target.value)} />
-          {search && (
-            <button type="button" className="text-button" onClick={() => onSearch('')}>지우기</button>
-          )}
-        </div>
+        {onSearch && (
+          <div className="search-field">
+            <span aria-hidden="true">🔍</span>
+            <input value={search || ''} placeholder={placeholder || ''}
+              aria-label={placeholder || '검색'}
+              onChange={(e) => onSearch(e.target.value)} />
+            {search && (
+              <button type="button" className="text-button" onClick={() => onSearch('')}>지우기</button>
+            )}
+          </div>
+        )}
         {filters && filters.length > 0 && (
           <div className="filter-pills">
             {filters.map((f) => (
@@ -100,7 +107,9 @@ export function FoundationList({ state, rows, selectedId, onSelect, emptyText, o
               className={`person ${r.id === selectedId ? 'selected' : ''}`}
               aria-pressed={r.id === selectedId}
               onClick={() => onSelect(r.id)}>
-              <i aria-hidden="true">{r.title.slice(0, 2)}</i>
+              {/* ⚠️ `trim()` 을 거른다. 제목이 공백으로 시작하면 아바타가 **빈 원**이 되는데
+                  아무 오류도 나지 않는다 — 조직도에서 계층을 공백으로 들여쓰다가 실제로 그랬다. */}
+              <i aria-hidden="true">{r.title.trim().slice(0, 2) || '·'}</i>
               <div style={{ minWidth: 0 }}>
                 <b style={{ whiteSpace: 'normal' }}>{r.title}</b>
                 <small>{r.meta || '정보 없음'}</small>
@@ -220,6 +229,9 @@ export function VersionHistory({ rows, emptyText = '이력이 없습니다.' }: 
  */
 export function foundationJarvis(opts: {
   module: string;
+  /** 화면의 **한국어 제목**. 선택한 객체가 없을 때 문맥 제목으로 쓴다.
+   *  ⚠️ 없으면 `module` 슬러그(`knowledge/packs`)가 그대로 화면에 나갔다 — 사용자에게 뜻이 없다. */
+  moduleTitle?: string;
   objectType: string;
   selected: { id: string; title: string; meta?: string } | null;
   state: Loaded<any>;
@@ -227,7 +239,7 @@ export function foundationJarvis(opts: {
   actions: string[];
   evidence?: { label: string; value: string }[];
 }) {
-  const { module, objectType, selected, state, counts, actions, evidence } = opts;
+  const { module, moduleTitle, objectType, selected, state, counts, actions, evidence } = opts;
   const failed = state.status === 'error' || state.status === 'forbidden';
   return {
     ctx: {
@@ -237,12 +249,20 @@ export function foundationJarvis(opts: {
       object_snapshot: selected
         ? { id: selected.id, title: selected.title, meta: selected.meta || '' }
         : { load_status: state.status, ...counts },
-      available_actions: actions,
+      // ★★ [2026-08-04 실측 결함] 목록을 못 읽은 상태에서도 «할 수 있는 일: 유형 생성 · 레코드
+      //   등록»이 그대로 떴다. 익명 사용자에게 그렇게 보였고, 누르면 403 이다.
+      //   비서가 «할 수 있다»고 말한 것이 안 되면 사용자는 자기 조작을 의심한다 —
+      //   권한 문제를 조작 실수로 오해하게 만드는 것이 가장 나쁜 안내다.
+      //   ⚠️ 여기서 «권한»을 새로 판정하지 않는다. 판정은 서버가 이미 했고(403/차단 사유),
+      //     그 결과가 `state.status` 로 와 있다. 그것을 따르기만 한다.
+      available_actions: failed ? [] : actions,
       evidence_refs: [],
     },
     // 조회에 실패했으면 비서 문맥도 «없다»가 아니라 «못 읽었다»라고 말해야 한다.
+    // 슬러그를 제목으로 쓰지 않는다 — 한국어 화면 제목이 없으면 «선택 없음»이 더 정확하다.
     title: selected?.title
-      || (failed ? '조회 불가' : Object.values(counts).some((v) => v) ? module : '선택 없음'),
+      || (failed ? '조회 불가'
+        : Object.values(counts).some((v) => v) ? (moduleTitle || '선택 없음') : '선택 없음'),
     desc: failed
       ? '목록을 가져오지 못했습니다 — «0건»이 아닙니다.'
       : selected?.meta || '좌측에서 항목을 선택하면 그 자료를 문맥으로 씁니다.',

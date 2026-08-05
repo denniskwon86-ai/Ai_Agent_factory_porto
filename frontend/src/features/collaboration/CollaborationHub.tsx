@@ -193,7 +193,7 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     } catch (e: any) {
       // 빈 배열로 떨어뜨리지 않는다. 그 순간 «받은 앱 0건»이 되고, 그것은 사실이 아니다.
       setData(failed(e));
-      reportRequestFailure();
+      reportRequestFailure(e?.status);
     } finally { setBusy(null); }
   }, []);
 
@@ -231,14 +231,14 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
 
   const items: RailItem[] = [
     // 조회에 실패했으면 배지 숫자를 **표시하지 않는다.** «0» 배지는 «없다»로 읽힌다.
-    { id: 'inbox', label: '받은 앱', hint: '나에게 전달된 요청', mark: '받',
+    { id: 'inbox', label: '받은 앱', hint: '나에게 전달된 요청', icon: 'inbox',
       count: okData ? pending.length : undefined },
-    { id: 'apps', label: '내 앱', hint: '수락해서 쓰는 앱', mark: '앱',
+    { id: 'apps', label: '내 앱', hint: '수락해서 쓰는 앱', icon: 'apps',
       count: okData ? apps.length : undefined },
-    { id: 'deliver', label: '사용자에게 전달', hint: '지정한 한 사람에게', mark: '전' },
-    { id: 'sent', label: '보낸 요청', hint: '응답 상태와 회수', mark: '보' },
-    { id: 'decisions', label: '의사결정 센터', hint: '한 문서 · 세 관점', mark: '결' },
-    { id: 'publications', label: '대내외 발간', hint: '나가면 되돌릴 수 없다', mark: '발' },
+    { id: 'deliver', label: '사용자에게 전달', hint: '지정한 한 사람에게', icon: 'deliver' },
+    { id: 'sent', label: '보낸 요청', hint: '응답 상태와 회수', icon: 'sent' },
+    { id: 'decisions', label: '의사결정 센터', hint: '한 문서 · 세 관점', icon: 'decision' },
+    { id: 'publications', label: '대내외 발간', hint: '나가면 되돌릴 수 없다', icon: 'publish' },
   ];
 
   const ctx = MODULE_CONTEXT[view];

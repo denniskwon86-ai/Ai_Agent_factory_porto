@@ -14,7 +14,8 @@ from pydantic import BaseModel
 # [Phase 2/3] 식별·권한은 라우트에서 판정하지 않는다 — api/deps.py 단일 지점이 담당한다.
 from api.deps import (Principal, assert_can_read_dept, assert_enterprise,
                       assert_project_readable, assert_project_writable,
-                      current_principal, enterprise_context)
+                      current_principal, enterprise_context,
+                      visibility_block_reason)
 # [D-017 P0] 서버 재검사 — 화면 숨김이 아니라 여기가 유일한 보안 경계다.
 from api.deps import require_caps as _require_caps
 from core.admin_capability import (AGENT_READ, AGENT_UPDATE, SKILL_PROPOSE,
@@ -390,6 +391,14 @@ async def set_project_ownership(project_id: str, req: OwnershipUpdate,
 
 @router.get("/projects")
 async def get_projects(p: Principal = Depends(current_principal)):
+    # ★★ [이관 7/10 · 병합 2026-08-05 복원] 소유권 필터(`_ownership_visible`)는 있었지만
+    #   **익명 자체가 통과**했다. 미태깅 프로젝트는 하위호환으로 «누구에게나 보이는» 상태이므로,
+    #   익명에게 목록을 주면 그 하위호환이 그대로 유출 경로가 된다. 관문 A: 미지정 = 비노출.
+    # ⚠️ 병합 검증에서 이것을 놓칠 뻔했다 — 라우트에 `current_principal` 이 **있으므로**
+    #   자동 점검은 «통제됨» 으로 셌다. 의존성이 있다는 것과 판정이 있다는 것은 다르다.
+    reason = visibility_block_reason(p)
+    if reason:
+        return {"status": "success", "data": [], "blocked_reason": reason}
     projects_dir = "./projects"
     os.makedirs(projects_dir, exist_ok=True)
 
@@ -490,6 +499,12 @@ async def create_project(req: ProjectCreateRequest, p: Principal = Depends(curre
     #     열린다. 유출은 검색 시점에 막는 것보다 **생성 시점에 소유권을 확정**하는 편이 확실하다.
     #   무소속 사용자/조직 미도입이면 `primary_dept_id` 가 빈 문자열이라 종전과 동일하게
     #     미태깅으로 남는다(하위호환 — 기존 프로젝트를 깨지 않는다).
+    # ★★★ [이관 7/10 · 병합 2026-08-05 복원] 그래서 **익명은 입구에서 막는다.** 위 주석이
+    #   경고하는 fail-open 경로를 여는 가장 쉬운 방법이 「익명으로 만들기」다 — 소유권이 빌
+    #   수밖에 없으므로 주입 필터가 아예 걸리지 않는다.
+    _reason = visibility_block_reason(p)
+    if _reason:
+        raise HTTPException(status_code=403, detail=_reason)
     _own_dept = getattr(p.scope, "primary_dept_id", "") or ""
     try:
         tid = provision_project(
@@ -547,6 +562,11 @@ class MegaProjectCreateRequest(BaseModel):
 @router.post("/projects/mega")
 async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depends(current_principal)):
     """메가 프로젝트 생성 (마스터 + 8개 서브 프로젝트 일괄 프로비저닝)"""
+    # ★★★ [이관 7/10 · 병합 2026-08-05 복원] 단건 생성과 **같은 판정**을 여기에도 둔다.
+    #   이 경로는 한 번에 9개 프로젝트를 만든다 — 단건만 막으면 우회로가 더 크다.
+    _reason = visibility_block_reason(p)
+    if _reason:
+        raise HTTPException(status_code=403, detail=_reason)
     _safe_id(req.mega_project_id, "mega_project_id")
 
     # 템플릿 존재 검증 — 미존재 템플릿으로 서브 프로젝트가 default 폴백되는 것을 방지
@@ -665,8 +685,9 @@ class MegaPlanRequest(BaseModel):
     initial_idea: str
 
 @router.post("/projects/{project_id}/mega/plan")
-async def mega_project_plan(project_id: str, req: MegaPlanRequest):
+async def mega_project_plan(project_id: str, req: MegaPlanRequest, p: Principal = Depends(current_principal)):
     """마스터 에이전트 연동: 초기 기획안을 바탕으로 master_data를 추천/생성"""
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):
@@ -713,8 +734,9 @@ async def mega_project_plan(project_id: str, req: MegaPlanRequest):
     return {"status": "success", "master_data": master_state["master_data"]}
 
 @router.post("/projects/{project_id}/mega/start_all")
-async def start_all_mega_subprojects(project_id: str):
+async def start_all_mega_subprojects(project_id: str, p: Principal = Depends(current_principal)):
     """마스터에 종속된 모든 서브 프로젝트 일괄 가동"""
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     state_path = os.path.join("projects", project_id, "latest_state.json")
     if not os.path.exists(state_path):
@@ -932,7 +954,8 @@ async def stop_sprint(project_id: str, req: SprintPauseRequest,
     return {"status": "stopped", "task_id": req.task_id}
 
 @router.post("/{project_id}/hotl/resume")
-async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
+async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal = Depends(current_principal)):
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id)
     if not success:
@@ -940,10 +963,11 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest):
     return {"status": "resumed", "task_id": req.task_id}
 
 @router.post("/{project_id}/sprint/resume-quota")
-async def resume_from_quota(project_id: str, req: SprintPauseRequest):
+async def resume_from_quota(project_id: str, req: SprintPauseRequest, p: Principal = Depends(current_principal)):
     """[R2] 쿼터 회복 후 SUSPENDED_QUOTA 로 동결된 스프린트를 마지막 체크포인트에서 재개.
     '처음부터 재실행'이 아니라 중단 지점부터 이어서 실행한다. 쿼터가 아직도 없으면 재개 스트림이
     다시 쿼터 소진을 만나 자연히 재동결된다(400 반환 조건: 대상이 SUSPENDED_QUOTA 상태가 아님)."""
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     success = await orchestrator.resume_from_suspend(req.task_id, project_id)
     if not success:
@@ -995,8 +1019,9 @@ async def supervisor_chat(project_id: str, req: SupervisorChatRequest,
     return response
 
 @router.get("/{project_id}/hotl/check")
-async def check_hotl(project_id: str):
+async def check_hotl(project_id: str, p: Principal = Depends(current_principal)):
     """진행 중(IN_PROGRESS) 태스크가 HOTL 중단점에서 대기 중인지 조회 (SSE 이벤트 유실 복구용)."""
+    assert_project_readable(p, project_id)
     _safe_id(project_id, "project_id")
 
     if await orchestrator.is_hotl_pending("sprint_init", project_id):
@@ -1025,7 +1050,8 @@ async def check_hotl(project_id: str):
     return {"status": "success", "hotl_task_id": None}
 
 @router.post("/{project_id}/sprint/revision")
-async def create_revision_task(project_id: str, req: RevisionRequest):
+async def create_revision_task(project_id: str, req: RevisionRequest, p: Principal = Depends(current_principal)):
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     
     if await orchestrator.is_hotl_pending("sprint_init", project_id):
@@ -1039,7 +1065,8 @@ async def create_revision_task(project_id: str, req: RevisionRequest):
     return {"status": "success", "task_id": task_id}
 
 @router.post("/{project_id}/heal")
-async def trigger_self_healing(project_id: str, req: HealRequest):
+async def trigger_self_healing(project_id: str, req: HealRequest, p: Principal = Depends(current_principal)):
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     
     if await orchestrator.is_hotl_pending("sprint_init", project_id):
@@ -1072,9 +1099,10 @@ async def trigger_self_healing(project_id: str, req: HealRequest):
     return {"status": "healing_started", "task_id": task_id}
 
 @router.post("/{project_id}/wbs/replan")
-async def replan_wbs(project_id: str):
+async def replan_wbs(project_id: str, p: Principal = Depends(current_principal)):
     """WBS 재분할 - 기획 산출물(RFP/PRD/UI/아키텍처)을 재사용해 Master_PMO 만 재실행한다.
     WBS 분할이 실패(빈 태스크)했거나 부실할 때 기획 전체 재가동 없이 복구하는 경로."""
+    assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     workspace_root = f"./projects/{project_id}"
     state_path = os.path.join(workspace_root, "latest_state.json")
@@ -1772,6 +1800,29 @@ async def reset_agent_registry(p: Principal = Depends(current_principal)):
     return {"status": "success", "data": data}
 
 
+@router.post("/agents/restore")
+async def restore_agent_registry(p: Principal = Depends(current_principal)):
+    """마지막 초기화 **직전** 구성으로 되돌린다. 백업이 없으면 404.
+
+    ★★★ [병합 2026-08-05] 이 경로는 **되돌릴 수단**이다. 위 `reset` 은 되돌릴 수 없는 전역
+      변경이고, 실제로 그것을 권한 탐침으로 호출해 `agents_registry.json` 을 잃은 사고가 있었다
+      (git 미추적 파일이라 복구가 불가능했다). 그 뒤 `reset_registry()` 가 직전 상태를
+      `agents_registry.prev.json` 으로 백업하고 **백업 실패 시 삭제를 거부**하게 됐고, 이
+      엔드포인트가 그 백업을 되살린다.
+    ⚠️ 자격은 `reset` 과 **같게** 둔다. 복원이 더 쉬우면 «지웠다가 되살리기» 로 통제를 우회할 수
+      있고, 더 어려우면 사고를 낸 사람이 스스로 고칠 수 없다."""
+    _require_caps(p, SYSTEM_DEFAULT_EDIT, AGENT_UPDATE,
+                  resource="agent_registry", action="restore")
+    from core.agent_registry import restore_registry
+    data = restore_registry()
+    if data is None:
+        raise HTTPException(status_code=404,
+                            detail="되돌릴 직전 구성이 없습니다(초기화 기록이 없습니다).")
+    _audit_registry("AGENT_REGISTRY_RESTORED", p, "에이전트 구성 복원(초기화 직전 상태)",
+                    "reset 으로 대체된 편집분을 되살렸다")
+    return {"status": "success", "data": data}
+
+
 # ==========================================
 # AI 추천 엔진 연동 (파이프라인 및 스킬 자동 생성)
 # ==========================================
@@ -1783,8 +1834,21 @@ class AIRecommendSkillRequest(BaseModel):
     agent_name_ko: str
     role_description: str
 
+def _assert_agent_config_readable(p: Principal):
+    """구성 조회 자격. 에이전트 구성은 사내 운영 정보다 — 익명·미등록에게 주지 않는다.
+
+    ★ [병합 2026-08-05] 이 헬퍼는 브랜치에만 있었다. 충돌을 dev 쪽으로 해결하면서
+      함께 사라졌고, 그 결과 `POST /ai-recommend/pipeline` 이 무방비로 돌아갔다.
+      그 라우트는 **LLM 을 호출한다** — 자료를 훔치지 않아도 예산을 태울 수 있다."""
+    from api.deps import visibility_block_reason
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+
+
 @router.post("/ai-recommend/pipeline")
-async def ai_recommend_pipeline(req: AIRecommendPipelineRequest):
+async def ai_recommend_pipeline(req: AIRecommendPipelineRequest, p: Principal = Depends(current_principal)):
+    _assert_agent_config_readable(p)
     from core.llm_gateway import gateway
     
     # 시뮬레이션 성격 판별 키워드

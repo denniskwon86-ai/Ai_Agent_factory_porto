@@ -259,8 +259,17 @@ def scope_meta(eff) -> dict:
 
 
 #: 자료 종류별로 **정확한 숨김 건수**를 볼 자격. 종류마다 «관리할 사람» 이 다르다.
+#  기준정보·업무표준은 데이터 표준 관리자(DA)가 고칠 사람이고, 조직·사용자 명부는 조직 편집
+#  권한자가 고칠 사람이다. 둘을 한 권한으로 묶으면 DA 에게 전 직원 명부 규모가 새거나,
+#  조직 관리자가 자기가 고쳐야 할 미바인딩 건수를 못 보게 된다.
+#  ⚠️ 판정을 호출부로 내보내지 않는다. 호출부는 «어떤 종류의 자료인가»만 말한다.
 #  ⚠️ 여기 없는 종류를 넘기면 `hidden_envelope` 가 예외를 던진다 — 오타를 조용히
 #    «건수 안 줌» 으로 처리하면 관리자가 못 보는 이유를 아무도 찾지 못한다.
+#  ★★★ [병합 2026-08-05] 이 딕셔너리와 `hidden_envelope` 는 병합 직후 **파일 안에 두 벌**
+#    존재했다. 양쪽 브랜치가 같은 것을 각자 추가했고 git 은 위치가 달라 충돌로 보지 않았다.
+#    문법도 임포트도 멀쩡했고, 뒤에 온 정의가 앞을 조용히 덮어 `plan` 규칙만 사라졌다
+#    (테스트 20건이 깨져서야 드러났다). **충돌 마커 0건 = 안전이 아니다** — 자동 병합된
+#    파일에서 «같은 이름이 두 번 정의됐는가» 를 따로 확인해야 한다.
 _EXACT_COUNT_RULES = {
     "standard": lambda s: bool(s.unrestricted or s.can_manage_standard),
     "org": lambda s: bool(s.unrestricted or getattr(s, "can_edit_org", False)),
@@ -357,6 +366,44 @@ def scope_allows_owner(scopes: Optional[frozenset], owner_org_id: str) -> bool:
     return bool(owner) and owner in scopes
 
 
+def governance_block_reason(p: Principal) -> str:
+    """★★★ [2026-08-04 이관 5/10 실측 결함] **거버넌스 지표가 익명에게 열려 있었다.**
+
+    실측으로 익명이 받아 본 것:
+      · `/api/v1/contracts/evaluate` → 위반 계약 1건과 그 사유
+        («생산자 자산이 폐기됐다 — 약속을 지킬 원천이 사라졌다»)
+      · `/api/v1/external/readiness` → 지표 6개의 코드·필요 등급·**격차 영향**·다음 행동
+        («물량 계획의 외부 근거가 없어 낙관 편향을 검증할 수단이 없습니다»)
+
+    ⚠️ 이건 자료 본문이 아니라 **집계**다. 그래서 «수치일 뿐»으로 보기 쉬운데, 거버넌스 콘솔은
+      정의상 «무엇이 안 되어 있는가»를 모아 보여주는 화면이다. 즉 집계 자체가 **취약점 목록**이고,
+      익명에게 열려 있으면 어디를 파면 되는지 알려주는 지도가 된다.
+
+    자격: 데이터 표준 관리자·조직 관리자·경영진. 일반 사용자에게는 차단 이유를 말한다 —
+    이 화면은 «내 업무»가 아니라 «전사 정비 상태»를 다루므로 막아도 업무가 멈추지 않는다.
+    강제가 꺼져 있으면 아무것도 막지 않는다(하위호환 계약).
+    """
+    if not _enforced():
+        return ""
+    base = visibility_block_reason(p)
+    if base:
+        return base
+    s = p.scope
+    if (s.unrestricted or s.can_manage_standard or getattr(s, "can_edit_org", False)
+            or getattr(s, "can_run_enterprise", False)):
+        return ""
+    return ("전사 정비 상태(거버넌스) 지표는 데이터 관리자·조직 관리자·경영진에게만 표시합니다 "
+            "— 어디가 비어 있는지는 그 자체로 보호해야 하는 정보입니다.")
+
+
+def assert_governance_readable(p: Principal):
+    """거버넌스 읽기 자격. 목록형 응답은 `governance_block_reason` 으로 0건 + 이유를 주고,
+    단건·평가형 응답은 이 함수로 403 을 던진다(그쪽은 «0건»으로 표현할 형태가 없다)."""
+    reason = governance_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+
+
 def _resource_readable(p: Principal, kind: str, rid: str) -> bool:
     if p.scope.unrestricted:
         return True
@@ -370,7 +417,27 @@ def _resource_readable(p: Principal, kind: str, rid: str) -> bool:
     return bool(own.get("dept_id")) and own["dept_id"] in p.scope.readable_dept_ids
 
 
+def _assert_identified_for_project(p: Principal, project_id: str, verb: str):
+    """★★★ [2026-08-04 이관 7/10] 프로젝트 판정 **앞에** 관문 A 를 세운다.
+
+    아래 두 함수는 «소유권이 기록되지 않은 프로젝트는 통과»라는 하위호환을 갖고 있다
+    (`if not own: return`). 그 관대함은 **등록된 사용자 사이의** 것이어야 하는데, 익명까지
+    통과시키고 있었다. 그래서 실측에서 익명이 `POST /{id}/hotl/resume` 로 **HOTL 중단점을
+    통과**시킬 수 있었다 — 6/10 에서 «중단점을 지우려면 관리자 권한»을 막았지만, 지울 필요
+    없이 넘겨 버리면 그 통제는 없는 것과 같다.
+
+    ⚠️ 라우트마다 이 검사를 흩지 않고 **판정 함수 안**에 둔다. 그러면 이 함수를 이미 쓰는
+      모든 경로(스프린트 시작·중지·삭제·복제·릴리스·재시뮬레이션)가 함께 보호되고,
+      새 라우트가 생겨도 판정을 부르는 순간 같이 걸린다.
+    강제가 꺼져 있으면 아무것도 막지 않는다(`visibility_block_reason` 의 계약)."""
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403,
+                            detail=f"'{project_id}' 프로젝트를 {verb} 수 없습니다 — {reason}")
+
+
 def assert_project_readable(p: Principal, project_id: str):
+    _assert_identified_for_project(p, project_id, "볼")
     if not _resource_readable(p, "project", project_id):
         _deny(f"'{project_id}' 프로젝트를 볼 권한이 없습니다.")
 
@@ -378,8 +445,10 @@ def assert_project_readable(p: Principal, project_id: str):
 def assert_project_writable(p: Principal, project_id: str):
     if p.scope.unrestricted:
         return
+    _assert_identified_for_project(p, project_id, "바꿀")
     own = org_directory.get_ownership("project", project_id)
     if not own:
+        # 소유권 미기록 프로젝트에 대한 관대함 — 단, 위에서 **식별된 사용자**임을 확인했다.
         return
     if own.get("owner_user_id") and own["owner_user_id"] == p.user_id:
         return

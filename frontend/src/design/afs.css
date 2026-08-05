@@ -35,6 +35,14 @@
   font-family: Pretendard, "Noto Sans KR", "Segoe UI", Arial, sans-serif;
   color: var(--surface-text);
   background: var(--surface-page);
+
+  /* ★★ [2026-08-04 실측 결함] 한국어 줄바꿈. 기본값(`normal`)은 한글을 **글자 단위**로 끊어서
+   *   "문서 검색이 아니라 확정값입니" / "다" 처럼 한 글자만 다음 줄에 남겼다. 카드마다 있었다.
+   *   `keep-all` 은 단어(어절) 안에서 끊지 않는다 — 한국어 본문의 정상 규칙이다.
+   * ⚠️ `keep-all` 만 두면 긴 코드·URL 이 카드를 밀고 나간다. 그래서 «단어 하나가 줄보다 길 때만»
+   *   끊는 `overflow-wrap: break-word` 를 함께 둔다. 둘은 짝이다. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .afs-scope *,
@@ -61,17 +69,21 @@
  * ⚠️ 배경 클릭으로 닫지 않는다 — 입력 중이던 거절 사유가 한 번의 실수로 사라진다. */
 .afs-dialog-backdrop {
   position: fixed; inset: 0; z-index: 60;
-  display: flex; align-items: center; justify-content: center;
-  padding: 16px;
+  display: flex; align-items: stretch; justify-content: center;
+  /* ★★ [2026-08-04 실측 결함] 여백을 두지 않는다. 16px 여백 + 92vh 높이 때문에 뒤의 **다크
+   *   상단 바가 위아래로 12px 씩 비쳐 보였다.** 업무 허브는 «대화상자»가 아니라 사실상 전체화면
+   *   작업공간이므로, 반쯤 걸친 배경은 의도가 아니라 사고로 읽힌다(실제로 지적을 받았다).
+   * ⚠️ `100vh` 가 아니라 `100dvh` — 모바일·축소 창에서 vh 는 주소창 높이를 포함해 넘친다. */
+  padding: 0;
   background: var(--backdrop);
   backdrop-filter: blur(2px);
 }
 .afs-dialog {
   display: flex; flex-direction: column;
-  width: 100%; max-width: 1440px; height: 92vh; max-height: 92vh;
+  width: 100%; max-width: none; height: 100dvh; max-height: 100dvh;
   overflow: hidden;
-  border: 1px solid var(--rail-border); border-radius: 12px;
-  box-shadow: var(--shadow);
+  /* 전체화면이므로 테두리·둥근 모서리·그림자를 두지 않는다 — 걸칠 바깥이 없다. */
+  border: 0; border-radius: 0;
 }
 .afs-dialog:focus { outline: none; }   /* 상자 자체의 포커스링은 숨긴다(내부 요소가 표시한다) */
 
@@ -81,8 +93,11 @@
   padding: 12px 20px; border-bottom: 1px solid var(--rail-border);
   background: linear-gradient(90deg, var(--action-primary-bg), var(--bar-bg-to));
 }
-.afs-dialog-bar b { color: #fff; font-size: 15px; }
-.afs-dialog-bar span { color: var(--bar-fg-muted); font-size: 12px; }
+/* ⚠️ **직계 자식만** 대상으로 한다. 종전에는 `.afs-dialog-bar b` 였고, 그래서 바 안의 흰
+ * 버튼(`secondary-button`) 속 `<b>` 까지 흰 글씨가 되어 **글자가 사라졌다**(업무표준 화면의
+ * 닫기 «(Esc)» 가 안 보였다). 바의 색 규칙은 «바 배경 위의 글자»에만 해당한다. */
+.afs-dialog-bar > b { color: #fff; font-size: 15px; }
+.afs-dialog-bar > span { color: var(--bar-fg-muted); font-size: 12px; }
 .afs-dialog-bar .bar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .afs-dialog-bar .busy { color: #8fe0e6; font-size: 12px; }
 .afs-dialog-body { flex: 1 1 auto; min-height: 0; }
@@ -115,14 +130,27 @@
   background: linear-gradient(180deg, var(--rail-bg-top), var(--rail-bg-bottom));
 }
 .afs-scope .module-rail > .module-intro { flex: 0 0 auto; }
-.afs-scope .module-rail > .inheritance-card { flex: 0 0 auto; }
-.afs-scope .module-rail > .module-menu {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto;
-  scrollbar-color: transparent transparent;
+/* ★★ [2026-08-04 실측 결함] 하단 안전 카드가 **메뉴를 밀어 잘랐다.** 의사결정 화면 720px 에서
+ *   마지막 항목 「대내외 발간」이 반쯤 잘려 보였고, 스크롤바는 hover 전까지 숨어 있어서
+ *   «항목이 더 있다»는 사실 자체가 보이지 않았다 — 잘림과 «끝»을 구분할 수 없었다.
+ *   → 카드는 절대 줄어들지 않게(`flex: 0 0 auto`) 두되 높이를 제한하고, 메뉴는 자기 영역 안에서
+ *     스크롤하며 **스크롤바를 항상 보이게** 한다. */
+.afs-scope .module-rail > .inheritance-card {
+  /* 안내 카드는 **메뉴가 자리를 다 가진 뒤에** 남는 만큼만 쓴다. 종전에는 이 카드가 200px 을
+   * 차지해서 720px 화면에서 6개 항목 중 4개만 보였고, **활성 항목까지 화면 밖으로 밀려났다.** */
+  flex: 0 1 auto; max-height: 26%; min-height: 0; overflow-y: auto;
+  /* 카드가 잘릴 때는 **잘렸다는 사실이 보여야** 한다 — 메뉴와 같은 규칙이다.
+   * 스크롤바가 없으면 사용자는 안내를 다 읽었다고 믿는다. */
+  scrollbar-width: thin; scrollbar-color: #ffffff40 transparent; scrollbar-gutter: stable;
 }
-.afs-scope .module-rail > .module-menu:hover,
-.afs-scope .module-rail > .module-menu:focus-within {
-  scrollbar-color: #ffffff40 transparent;
+.afs-scope .module-rail > .module-menu {
+  /* 메뉴가 먼저 자리를 갖는다 — 항목 세 개는 어떤 높이에서도 잘리지 않는다. */
+  flex: 1 1 auto; min-height: 188px; overflow-y: auto;
+  /* ⚠️ 스크롤바를 숨기지 않는다. 폭도 미리 확보한다(`stable`) — 스크롤바가 나타날 때 글자가
+   *   밀려서 레이아웃이 흔들리면 «방금 눌렀던 자리»가 이동한다. */
+  scrollbar-width: thin;
+  scrollbar-color: #ffffff5c transparent;
+  scrollbar-gutter: stable;
 }
 
 .afs-scope .module-intro { padding: 24px 20px 18px; border-bottom: 1px solid #ffffff14; }
@@ -130,7 +158,9 @@
 .afs-scope .module-intro h1 { margin: 8px 0 9px; color: #fff; font-size: 20px; line-height: 1.35; letter-spacing: -.04em; }
 .afs-scope .module-intro p { margin: 0; color: var(--rail-text-muted); font-size: 12px; line-height: 1.58; }
 
-.afs-scope .module-menu { display: grid; padding: 10px; gap: 2px; }
+/* ⚠️ `align-content: start` — 항목이 적으면 그리드가 남은 높이를 나눠 가져 **버튼이 세로로
+ * 늘어난다**(항목 1개인 화면에서 실측: 레일 하나가 400px 높이가 됐다). 메뉴는 위에서부터 쌓인다. */
+.afs-scope .module-menu { display: grid; align-content: start; padding: 10px; gap: 2px; }
 .afs-scope .module-menu button {
   display: grid; grid-template-columns: 31px 1fr auto; gap: 9px; align-items: center;
   width: 100%; padding: 12px 9px; border: 1px solid transparent; border-radius: 7px;
@@ -436,8 +466,12 @@
 .afs-scope .jarvis-quick,
 .afs-scope .jarvis-offline,
 .afs-scope .jarvis-input { flex: 0 0 auto; }
-/* 근거 목록은 **먼저 양보한다** — 대화를 읽을 수 없는 것보다 근거를 스크롤하는 편이 낫다. */
-.afs-scope .jarvis-evidence { flex: 0 1 auto; min-height: 0; max-height: 22vh; overflow-y: auto; }
+/* ★★ [2026-08-04 이관 3/10 실측] 근거 목록이 **30px 잘렸다**(높이 116 / 내용 146).
+ * 종전 주석은 "근거가 먼저 양보한다"였는데, 그건 근거가 2~3줄일 때의 판단이 아니었다.
+ * 근거는 «비서의 답을 무엇에 근거해 믿을 것인가»이고 3줄뿐이다 — 그걸 잘라서 로그를 264px 로
+ * 넓히는 것은 순서가 거꾸로다. 로그는 **자기 안에서 스크롤**할 수 있고 근거는 잘리면 끝이다.
+ * → 근거는 줄어들지 않는다(`flex: 0 0 auto`). 대신 아주 긴 목록은 상한 안에서 스크롤한다. */
+.afs-scope .jarvis-evidence { flex: 0 0 auto; min-height: 0; max-height: 22vh; overflow-y: auto; }
 
 /* 빠른 질문 축약 — 첫 대화 후에는 한 줄 토글로 접힌다. */
 .afs-scope .jarvis-quick.collapsed { padding-block: 8px; }
@@ -496,14 +530,47 @@
 /* ★★ [UIUX-AUDIT-33 §4] 로그가 **최소 높이를 확보**한다. 감사 실측에서 24px 까지 눌렸다 —
  * 그 높이에서는 답을 한 줄도 읽을 수 없고, 사용자는 비서가 답하지 않았다고 판단한다.
  * `min-height` 를 주면 위쪽 고정 블록들이 대신 줄어든다(근거 목록이 먼저 스크롤된다). */
+/* ★★ [2026-08-04 실측 결함] 로그가 **비어 있는 채로 250px 가까이** 남아 있었다. 사용자에게는
+ *   «비서가 아무것도 하지 않는 자리»로 보인다. 두 가지를 같이 고쳤다:
+ *     · 시작 상태를 로그 안에 넣어(`jarvis-zero`) 빈 영역 자체를 없앤다.
+ *     · 대화가 시작되면 최소 3턴은 읽히도록 높이를 확보한다(1280×720 에서도).
+ *   `min-height` 를 주면 위쪽 고정 블록(근거 목록)이 먼저 스크롤로 양보한다. */
 .afs-scope .jarvis-log {
-  flex: 1 1 auto; min-height: 132px;
+  flex: 1 1 auto; min-height: 184px;
   padding: 12px 16px; display: grid; gap: 10px; align-content: start; overflow-y: auto;
-  scrollbar-color: transparent transparent;
+  /* ⚠️ 스크롤바를 hover 전까지 숨기지 않는다 — 레일 메뉴·안내 카드와 같은 규칙이다.
+   * 720px 에서 근거를 온전히 보이게 한 뒤에는 추천 질문이 로그 스크롤 아래로 내려간다.
+   * 그때 스크롤바가 없으면 «질문이 하나뿐»으로 보인다(실측). 있다는 사실은 항상 보여야 한다. */
+  scrollbar-width: thin; scrollbar-color: #ffffff4a transparent; scrollbar-gutter: stable;
 }
-.afs-scope .jarvis-log:hover, .afs-scope .jarvis-log:focus-within {
-  scrollbar-color: #ffffff40 transparent;
+
+/* 시작 상태 — 안내 · 지금 문맥 · 추천 질문. 로그 안에 있으므로 다른 영역을 밀지 않는다.
+ * ⚠️ 높은 화면(1440×900)에서는 이 내용만으로 로그가 다 채워지지 않아 아래쪽에 154px 이 비었다.
+ *   빈칸을 채우려고 문구를 늘리지 않는다 — 대신 **추천 질문을 입력창 바로 위로 내려** 붙인다.
+ *   질문을 고르는 자리와 쓰는 자리가 붙어 있는 것이 읽기에도 맞다. */
+/* ⚠️ `min-height: 100%` 를 주지 않는다. 낮은 화면(720px)에서 내용이 로그보다 크면 억지로
+ *   늘어나 **추천 질문 마지막 항목이 잘렸다.** `align-content: stretch` 만으로 충분하다 —
+ *   남는 공간이 있을 때만 늘어나고, 모자라면 늘리지 않고 스크롤한다. */
+.afs-scope .jarvis-log.zero { align-content: stretch; }
+.afs-scope .jarvis-zero { display: grid; gap: 11px; grid-template-rows: auto auto 1fr; }
+.afs-scope .jarvis-zero > .jarvis-zero-quick { align-self: end; }
+.afs-scope .jarvis-zero-lead {
+  margin: 0; padding: 10px; border-left: 3px solid #55ced0;
+  color: #c8d6e8; background: #ffffff09; font-size: 12px; line-height: 1.55;
 }
+.afs-scope .jarvis-zero-ctx { display: grid; gap: 7px; margin: 0; }
+.afs-scope .jarvis-zero-ctx > div { display: grid; gap: 2px; }
+.afs-scope .jarvis-zero-ctx dt { color: #74cbd4; font-size: 12px; font-weight: 900; }
+.afs-scope .jarvis-zero-ctx dd {
+  margin: 0; color: #c7d2e4; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere;
+}
+.afs-scope .jarvis-zero-quick { display: grid; gap: 6px; }
+.afs-scope .jarvis-zero-quick > b { color: #b3c3dc; font-size: 12px; }
+.afs-scope .jarvis-zero-quick button {
+  padding: 9px; border: 1px solid #ffffff1d; border-radius: 5px;
+  color: #d9e3f2; background: var(--rail-item-hover); font-size: 12px; text-align: left;
+}
+.afs-scope .jarvis-zero-quick button:hover:not(:disabled) { background: #ffffff1f; }
 .afs-scope .jarvis-turn { display: grid; gap: 3px; }
 .afs-scope .jarvis-turn > span { color: #7fc4d8; font-size: 12px; font-weight: 900; }
 .afs-scope .jarvis-turn > p {
@@ -538,7 +605,10 @@
 .afs-scope .afs-banner.info { border-left: 4px solid var(--cyan); color: #0d5f6d; background: #eaf7fa; }
 .afs-scope .afs-banner.warn { border-left: 4px solid var(--orange); color: #7a4a10; background: #fff6e9; }
 .afs-scope .afs-banner.error { border-left: 4px solid var(--red); color: #96122e; background: #fdeef1; }
-.afs-scope .afs-banner b { display: block; margin-bottom: 3px; }
+/* ⚠️ **직계 자식만.** 종전에는 `.afs-banner b` 였고, 본문 안에서 한 단어를 강조하면 그 단어가
+ * 블록이 되어 줄이 끊겼다("«…» 이 아니라 / **확인하지 못한 것** / 입니다."). 배너 제목만 블록이다.
+ * `.afs-dialog-bar b` 와 같은 유형의 실수다 — 컨테이너 규칙이 내용까지 먹는 것. */
+.afs-scope .afs-banner > b { display: block; margin-bottom: 3px; }
 
 /* ── [CL-2] 의사결정 패키지 ────────────────────────────────────────────────
  *
@@ -614,6 +684,93 @@
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
+/* ── [이관 7/10] 런처용 유틸리티 ─────────────────────────────────────────────
+ *
+ * ★★ 런처(App.tsx)는 **모달이 아니라 페이지 자체**다. 그래서 3열 셸을 씌우지 않고, 기존 마크업의
+ *   Tailwind 다크 클래스를 **의미 토큰 유틸리티**로 바꾼다.
+ *
+ * ⚠️ 왜 전역 반전(`@theme` 숫자 스케일 뒤집기)을 쓰지 않는가 — Codex 가 `51982c898` 에서 철회한
+ *   이유가 그대로 유효하다: 숫자 스케일은 «명도»만 말하고 «의미»를 말하지 않는다. `bg-emerald-600`
+ *   이 어떤 자리에서는 성공이고 어떤 자리에서는 생성 버튼인데, 기계적으로 뒤집으면 둘이 같은 색이
+ *   되어 화면이 1차 행동을 구분하지 못한다.
+ *   → 대신 **한 클래스씩 의미를 정해** 아래 유틸리티로 옮긴다. 옮기는 사람이 그 자리의 뜻을
+ *     판단하므로, 성공색과 행동색이 섞이지 않는다.
+ *
+ * ⚠️ `!important` 를 쓰지 않는다. Tailwind 클래스를 **지우고** 이 클래스를 넣는다 —
+ *   두 규칙이 겹친 채로 우선순위 싸움을 시키면 나중에 어느 쪽이 이겼는지 아무도 모른다. */
+.afs-scope.afs-page,
+.afs-scope .afs-bg-page { background: var(--surface-page); }
+.afs-scope .afs-bg-card { background: var(--surface-card); }
+.afs-scope .afs-bg-raised { background: var(--surface-raised); }
+.afs-scope .afs-bg-sunken { background: var(--surface-sunken); }
+
+.afs-scope .afs-ink { color: var(--surface-text); }
+.afs-scope .afs-muted { color: var(--surface-text-muted); }
+.afs-scope .afs-faint { color: var(--surface-text-faint); }
+
+.afs-scope .afs-border { border-color: var(--surface-border); }
+.afs-scope .afs-border-strong { border-color: var(--surface-border-strong); }
+.afs-scope .afs-hover-raise:hover { background: var(--surface-raised); }
+.afs-scope .afs-hover-border:hover { border-color: var(--surface-border-strong); }
+
+/* 1차 행동 — 구조색(Navy). 상태색과 섞지 않는다. */
+.afs-scope .afs-action {
+  color: var(--action-primary-fg); background: var(--action-primary-bg);
+  border-color: var(--action-primary-bg);
+}
+.afs-scope .afs-action:hover:not(:disabled) { background: var(--action-primary-hover); }
+.afs-scope .afs-action-fg { color: var(--action-primary-bg); }
+.afs-scope .afs-action-border { border-color: var(--action-primary-bg); }
+
+/* 메가 프로젝트 구분색 — «일반과 다른 종류»라는 뜻이 있어 유지한다(장식이 아니다). */
+.afs-scope .afs-mega { color: #fff; background: #5b4bb0; border-color: #5b4bb0; }
+.afs-scope .afs-mega:hover:not(:disabled) { background: #4b3d99; }
+.afs-scope .afs-mega-fg { color: #4b3d99; }
+.afs-scope .afs-mega-border { border-color: #b9aee8; }
+.afs-scope .afs-mega-bg { background: #f3f0fc; }
+
+/* 상태색 — 행동색과 구분한다. */
+.afs-scope .afs-danger-fg { color: var(--state-error-fg); }
+.afs-scope .afs-danger-border { border-color: #e8c4cc; }
+.afs-scope .afs-danger-bg { background: var(--state-error-bg); }
+.afs-scope .afs-success-fg { color: var(--state-success-fg); }
+.afs-scope .afs-success-border { border-color: #a9dcc6; }
+.afs-scope .afs-warn-fg { color: var(--state-warn-fg); }
+.afs-scope .afs-warn-bg { background: var(--state-warn-bg); }
+.afs-scope .afs-warn-border { border-color: #eddcc0; }
+.afs-scope .afs-info-fg { color: var(--state-info-fg); }
+.afs-scope .afs-info-bg { background: var(--state-info-bg); }
+.afs-scope .afs-info-border { border-color: #b9d8de; }
+.afs-scope .afs-success-bg { background: var(--state-success-bg); }
+
+/* 런처 상단 바 — 허브 모달의 바와 같은 구조색을 쓴다(같은 제품이라는 신호). */
+.afs-scope .afs-topbar {
+  color: #fff;
+  background: linear-gradient(90deg, var(--action-primary-bg), var(--bar-bg-to));
+  border-bottom: 1px solid var(--rail-border);
+}
+/* ⚠️ 상단 바는 **구조색(남색) 위**이다. 페이지 본문용 유틸리티가 그대로 들어오면 어두운 글자가
+ *   어두운 바에 얹혀 **글자가 사라진다**(실측: 제목 «Private AI Cockpit» 이 보이지 않았다).
+ *   그래서 바 안에서는 같은 유틸리티가 «바 위에서의 뜻»으로 다시 해석된다. */
+.afs-scope .afs-topbar .afs-ink { color: #fff; }
+.afs-scope .afs-topbar .afs-muted,
+.afs-scope .afs-topbar .afs-faint { color: var(--bar-fg-muted); }
+.afs-scope .afs-topbar .afs-bg-page,
+.afs-scope .afs-topbar .afs-bg-card,
+.afs-scope .afs-topbar .afs-bg-raised,
+.afs-scope .afs-topbar .afs-bg-sunken { background: #ffffff1a; }
+.afs-scope .afs-topbar .afs-hover-raise:hover { background: #ffffff2e; }
+.afs-scope .afs-topbar .afs-border,
+.afs-scope .afs-topbar .afs-border-strong { border-color: #ffffff33; }
+.afs-scope .afs-topbar .afs-hover-border:hover { border-color: #ffffff59; }
+/* 바 위의 행동색은 본문의 Navy 로는 보이지 않는다 — 밝은 쪽으로 뒤집는다. */
+.afs-scope .afs-topbar .afs-action-fg { color: #9ec9ff; }
+.afs-scope .afs-topbar .afs-action-border { border-color: #6f9fe0; }
+.afs-scope .afs-topbar .afs-action {
+  color: #0a1e5a; background: #dbe7ff; border-color: #dbe7ff;
+}
+.afs-scope .afs-topbar .afs-action:hover:not(:disabled) { background: #c7d9ff; }
+
 /* ── 반응형(승인 시안 그대로) ──────────────────────────────────────────────── */
 @media (max-width: 1450px) {
   .afs-scope .hub-layout { grid-template-columns: 220px minmax(650px, 1fr) 280px; }
@@ -640,4 +797,22 @@
   .afs-scope .hub-main { padding-top: 16px; }
   .afs-scope .screen-head { margin-bottom: 12px; }
   .afs-scope .jarvis-context { padding-block: 14px; }
+
+  /* ★★ [2026-08-04 실측] 1280×720 협업 계열(항목 6개)에서 **한 항목이 반쯤 잘렸다.**
+   *   반쯤 보이는 항목은 «끝»과 구분되지 않으므로 스크롤바가 있어도 통과로 보지 않는다.
+   *   → 낮은 화면에서는 레일 머리·항목·안내 카드를 함께 압축해 **6개가 다 들어가게** 한다.
+   *   ⚠️ 글자 크기는 줄이지 않는다(12px 하한). 줄이는 것은 **여백**뿐이다 — 좁다고 글자를
+   *     작게 하면 지적받은 «12px 미만» 결함으로 되돌아간다. */
+  .afs-scope .module-intro { padding: 15px 20px 12px; }
+  .afs-scope .module-intro h1 { margin: 6px 0 6px; font-size: 18px; }
+  /* ★ 레일 머리의 설명문이 길면 그만큼 메뉴가 밀린다(의사결정 화면은 5줄이었다).
+   *   ⚠️ 이건 정보를 버리는 게 아니다 — **같은 설명이 중앙 `screen-head` 에 온전히 있다.**
+   *     둘 중 하나를 줄여야 한다면 «어디로 갈 수 있는가»(메뉴)가 «무엇인가»(설명)보다 앞선다. */
+  .afs-scope .module-intro p {
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .afs-scope .module-menu { padding: 7px; }
+  .afs-scope .module-menu button { padding: 8px 9px; }
+  .afs-scope .module-menu small { margin-top: 1px; }
+  .afs-scope .module-rail > .inheritance-card { max-height: 22%; margin: 8px; padding: 11px; }
 }

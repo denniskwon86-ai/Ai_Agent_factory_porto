@@ -47,7 +47,10 @@ const MODULE = {
 export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
   const [view, setView] = useState<View>('packs');
   const [packs, setPacks] = useState<Loaded<Pack[]>>(loading<Pack[]>());
-  const [packVisibility, setPackVisibility] = useState({ blockedReason: '', hiddenCount: 0 });
+  // 건수는 DA·관리자에게만 온다(`api.deps.hidden_envelope`) — `null` 은 «모른다»다.
+  const EMPTY_PACK_VIS = { blockedReason: '', hiddenPresent: false,
+    hiddenCount: null as number | null };
+  const [packVisibility, setPackVisibility] = useState(EMPTY_PACK_VIS);
   const [refSummary, setRefSummary] = useState<Loaded<ReferenceSummary>>(loading<ReferenceSummary>());
   const [selected, setSelected] = useState<string>('');
   const [search, setSearch] = useState('');
@@ -66,13 +69,14 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
     // ⚠️ 두 조회를 **따로** 담는다. 하나가 실패했다고 다른 하나까지 «없음»으로 만들지 않는다.
     const [p, r] = await Promise.allSettled([knowledgeApi.packs(), knowledgeApi.referenceSummary()]);
     if (p.status === 'fulfilled') {
-      setPackVisibility({ blockedReason: p.value.blockedReason, hiddenCount: p.value.hiddenCount });
+      setPackVisibility({ blockedReason: p.value.blockedReason,
+        hiddenPresent: p.value.hiddenPresent, hiddenCount: p.value.hiddenCount });
       setPacks(p.value.blockedReason
         ? { status: 'forbidden', value: null, error: p.value.blockedReason, httpStatus: 403 }
         : ok(p.value.packs));
       reportRequestSuccess();
     }
-    else { setPacks(failed<Pack[]>(p.reason)); reportRequestFailure(); }
+    else { setPacks(failed<Pack[]>(p.reason)); reportRequestFailure((p.reason as any)?.status); }
     setRefSummary(r.status === 'fulfilled' ? ok(r.value) : failed<ReferenceSummary>(r.reason));
     setBusy(null);
   }, []);
@@ -83,7 +87,7 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const h = () => {
       setPacks(loading<Pack[]>()); setRefSummary(loading<ReferenceSummary>());
-      setPackVisibility({ blockedReason: '', hiddenCount: 0 });
+      setPackVisibility(EMPTY_PACK_VIS);
       setSelected(''); setHits(ok<SearchHit[]>([])); load();
     };
     window.addEventListener('factory:acting-user-changed', h);
@@ -115,15 +119,17 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
   const docCount = pack?.documents?.length ?? 0;
 
   const items: RailItem[] = [
-    { id: 'packs', label: '지식팩', hint: '등록된 자료 묶음', mark: '팩',
-      count: packs.status === 'ok' ? rows.length : undefined },
-    { id: 'register', label: '자료 등록', hint: '파일 올리기·삭제', mark: '등' },
-    { id: 'search', label: '검색 품질 확인', hint: '에이전트가 받는 지식', mark: '검' },
-    { id: 'sources', label: '원본 등록부', hint: '출처·변환 필요', mark: '원' },
+    { id: 'packs', label: '지식팩', hint: '등록된 자료 묶음', icon: 'packs',
+      count: packs.status === 'ok' ? rows.length : undefined,
+      countLabel: `지식팩 ${rows.length}개` },
+    { id: 'register', label: '자료 등록', hint: '파일 올리기·삭제', icon: 'upload' },
+    { id: 'search', label: '검색 품질 확인', hint: '에이전트가 받는 지식', icon: 'search' },
+    { id: 'sources', label: '원본 등록부', hint: '출처·변환 필요', icon: 'sources' },
   ];
 
   const jarvis = foundationJarvis({
     module: `knowledge/${view}`,
+    moduleTitle: MODULE[view].title,
     objectType: 'knowledge_pack',
     selected: pack ? { id: pack.pack_id, title: pack.name || pack.pack_id,
       meta: `문서 ${docCount}건 · ${pack.description || '설명 없음'}` } : null,
@@ -192,8 +198,12 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
             </Banner>
           )}
           {flash && <Banner tone="info">{flash}</Banner>}
-          {packVisibility.hiddenCount > 0 && (
-            <Banner tone="warn">조직 권한 범위 밖의 지식팩 {packVisibility.hiddenCount}건은 표시하지 않습니다.</Banner>
+          {packVisibility.hiddenPresent && (
+            <Banner tone="warn">
+              {packVisibility.hiddenCount === null
+                ? '조직 권한 범위 밖의 지식팩은 표시하지 않았습니다 — 현재 조직 범위 자료만 표시 중입니다.'
+                : `조직 권한 범위 밖의 지식팩 ${packVisibility.hiddenCount}개는 표시하지 않았습니다.`}
+            </Banner>
           )}
 
           {view === 'packs' && (

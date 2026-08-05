@@ -69,7 +69,11 @@ export type CsvImportReport = {
 export type MasterList<T> = {
   rows: T[];
   blockedReason: string;
-  hiddenCount: number;
+  /** 가려진 것이 **있는가**. 누구에게나 온다 — 모르면 본 목록을 전량으로 믿는다. */
+  hiddenPresent: boolean;
+  /** 가려진 것이 **몇 건인가**. DA·관리자에게만 온다(`api.deps.hidden_envelope`).
+   *  ⚠️ `0` 과 «모른다»를 구분해야 하므로 `null` 이다. 0 으로 두면 "가린 것 없음"으로 읽힌다. */
+  hiddenCount: number | null;
 };
 
 async function listRequest<T>(path: string): Promise<MasterList<T>> {
@@ -77,7 +81,9 @@ async function listRequest<T>(path: string): Promise<MasterList<T>> {
   return {
     rows: envelope.data || [],
     blockedReason: String(envelope.blocked_reason || ''),
-    hiddenCount: Number(envelope.hidden_count || 0),
+    hiddenPresent: Boolean(envelope.hidden_present),
+    hiddenCount: envelope.hidden_count === undefined || envelope.hidden_count === null
+      ? null : Number(envelope.hidden_count),
   };
 }
 

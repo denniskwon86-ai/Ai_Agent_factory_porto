@@ -178,7 +178,7 @@ export default function AgentDetailSidebar({
               </option>
             ))}
           </select>
-          <p className="text-[10px] text-gray-500 mt-1">
+          <p className="text-xs text-gray-500 mt-1">
             * 포맷 마스터에 정의된 양식을 이 에이전트의 산출물에 강제로 적용합니다.
           </p>
         </div>

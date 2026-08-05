@@ -5,7 +5,8 @@ from pydantic import BaseModel
 from typing import Optional
 
 from api.deps import (Principal, assert_can_manage_standard, current_principal,
-                      scope_allows_owner, viewer_visible_scopes, visibility_block_reason)
+                      hidden_envelope, scope_allows_owner, viewer_visible_scopes,
+                      visibility_block_reason)
 from core.knowledge_base import knowledge_base, extract_text
 
 router = APIRouter(prefix="/api/v1/knowledge")
@@ -58,14 +59,14 @@ async def list_packs(p: Principal = Depends(current_principal)):
     nodes = viewer_visible_scopes(p)
     if nodes is not None:
         shown = [k for k in packs if scope_allows_owner(nodes, k.get("owner_org_id", ""))]
-        if len(shown) < len(packs):
-            # 몇 건이 가려졌는지 말한다 — 숫자가 없으면 "이게 전부인가"를 판단할 수 없다.
-            return {"status": "success", "data": shown,
-                    "hidden_count": len(packs) - len(shown),
-                    "blocked_reason": (f"소속 조직 범위 밖의 지식팩 "
-                                       f"{len(packs) - len(shown)}건은 표시되지 않습니다."
-                                       if not shown else "")}
-        return {"status": "success", "data": shown}
+        # 가려졌다는 **사실**은 누구에게나, 정확한 **건수**는 DA·관리자에게만(`hidden_envelope`).
+        env = hidden_envelope(p, len(packs), len(shown))
+        out = {"status": "success", "data": shown, **env}
+        if env["hidden_present"] and not shown:
+            # ⚠️ 이유 문장에 건수를 넣지 않는다. 문장은 권한과 무관하게 그대로 나가므로,
+            #   여기에 숫자를 쓰면 `hidden_count` 를 가린 것이 무의미해진다(실제로 그랬다).
+            out["blocked_reason"] = "소속 조직 범위 밖의 지식팩만 있어 표시할 것이 없습니다."
+        return out
     return {"status": "success", "data": packs}
 
 

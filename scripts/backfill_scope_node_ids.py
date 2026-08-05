@@ -45,6 +45,17 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ★★★ [D-018 ⑤ / 2026-08-05 실측] 한국어 콘솔(cp949)에서 `→`·`⚠️`·`…` 를 찍다가
+#   UnicodeEncodeError 로 죽었다. 이 스크립트에서 그것은 «출력이 깨진다» 로 끝나지 않는다 —
+#   진행 상황 print 가 표별 UPDATE **사이**에 있어서, 중간에 죽으면 앞 표는 갱신되고 뒤 표는
+#   그대로 남는다(= 부분 적용). 그 상태는 백필 전도 후도 아니어서 무엇을 되돌릴지조차 모호하다.
+#   그래서 «출력 인코딩» 을 스크립트가 스스로 고정한다 — 운영자의 콘솔 설정에 맡기지 않는다.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):      # 파이프로 리다이렉트된 경우 등
+        pass
+
 from core.enterprise_context.resolver import ecm_resolver  # noqa: E402
 from core.paths import DATA_DIR  # noqa: E402
 

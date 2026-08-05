@@ -14,7 +14,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (Principal, assert_can_manage_standard, assert_governance_readable,
+                      current_principal, visibility_block_reason)
 from core.data_catalog import DataCatalogError, data_catalog
 
 router = APIRouter(prefix="/api/v1/catalog")
@@ -74,23 +75,26 @@ class SyncRequest(BaseModel):
 # ── 고정 경로 (경로 변수보다 위) ──────────────────────────────────────────
 @router.get("/assets/search")
 async def search_assets(q: str, limit: int = 20, scope_node_id: str = "",
-                        tenant_id: str = "", entity_mode: str = "REAL"):
+                        tenant_id: str = "", entity_mode: str = "REAL",
+                        p: Principal = Depends(current_principal)):
     """업무 용어로 후보 자산을 찾는다(§6.4 3단계). 결정론적 문자열 매칭.
 
     점수 근거(`why`)와 거버넌스 준비 여부(`governance_ready`)를 함께 준다 — §6.4 는 최종 매칭
     확정을 **데이터 오너 또는 승인된 규칙**의 몫으로 못박았고, 근거 없이 후보만 던지면 확정할
     수 없다."""
+    assert_governance_readable(p)
     rows = await asyncio.to_thread(data_catalog.search_assets, q, limit, scope_node_id,
                                    tenant_id, entity_mode)
     return {"status": "success", "data": {"query": q, "results": rows, "total": len(rows)}}
 
 
 @router.get("/governance/coverage")
-async def governance_coverage(tenant_id: str = "", entity_mode: str = "REAL"):
+async def governance_coverage(tenant_id: str = "", entity_mode: str = "REAL", p: Principal = Depends(current_principal)):
     """[ECM E2] 조직 범위가 지정되지 않아 **모든 조직에 보이는** 자산 현황.
 
     점진 도입 규칙("범위 미지정 = 전사 공용")을 유지하는 대가로 반드시 함께 있어야 하는
     관측이다 — 이게 없어서 기준정보에서 실제 사고가 났다."""
+    assert_governance_readable(p)
     from core.enterprise_context.scoping import coverage
     rows = await asyncio.to_thread(data_catalog.list_assets, "", "", "", False, "",
                                    tenant_id, entity_mode)
@@ -108,6 +112,7 @@ async def governance_gaps(scope_node_id: str = "", tenant_id: str = "",
 
     ⚠️ 자동으로 채우지 않는다 — 소유자를 시스템이 추측해 넣으면 아무도 책임지지 않는 자산이
       책임자가 있는 것처럼 보인다."""
+    assert_governance_readable(p)
     rows = await asyncio.to_thread(data_catalog.governance_gaps, scope_node_id,
                                    tenant_id, entity_mode)
     return {"status": "success", "data": {
@@ -140,6 +145,12 @@ async def list_assets(owner_dept_id: str = "", sensitivity: str = "", system_id:
     ★ 등급은 주체의 권한에서 파생한다 — 권한과 등급을 두 곳에서 관리하면 어긋난다.
       가려진 행에는 `redacted=True` 와 사유가 실려 나가므로, 화면은 "자료 없음"이 아니라
       "권한 필요"로 표시할 수 있다."""
+    # ⚠️ 이 라우트는 이미 **등급 기반 가림**이 있다(§6-2 사용자 결정) — 낮은 등급에는
+    #   제목만 주고 내용을 가린다. 그 설계를 403 으로 덮지 않는다. 다만 익명·미등록·폐지
+    #   계정에는 아무것도 주지 않는다(관문 A). 목록형이므로 0건 + 이유로 답한다.
+    _reason = visibility_block_reason(p)
+    if _reason:
+        return {"status": "success", "data": [], "blocked_reason": _reason}
     from core.enterprise_context.classification import clearance_of_scope
     # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체인가 — 이것도 권한에서 파생한다.
     from core.enterprise_context.scoping import may_drill_down
@@ -165,7 +176,8 @@ async def create_asset(req: AssetRequest, p: Principal = Depends(current_princip
 
 
 @router.get("/assets/{asset_id}")
-async def get_asset(asset_id: str):
+async def get_asset(asset_id: str, p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
     data = await asyncio.to_thread(data_catalog.get_asset, asset_id)
     if not data:
         raise HTTPException(status_code=404, detail="존재하지 않는 자산입니다.")

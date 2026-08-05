@@ -1,155 +1,269 @@
-import { useState, useEffect } from 'react';
-import { API_BASE_URL } from '../store/useFactoryStore';
+// [이관 8/10] 스킬 개선안 — 에이전트가 스스로 제안한 행동 규칙을 사람이 검토하는 관문
+//
+// 에이전트가 작업 중 반복되는 실수를 인식하면 자기 프롬프트 규칙(마크다운)에 넣을 문장을 제안한다.
+// 사람이 승인하면 그 문장이 **영구적으로** 스킬 문서에 들어가고, 다음 실행부터 에이전트가 따른다.
+//
+// ★★★ 이 화면은 «관문»이다. 그래서 두 가지를 반드시 말해야 한다:
+//   ① 승인이 **무엇을 영구히 바꾸는지** — 「나중에 되돌리기」가 준비돼 있지 않다.
+//   ② 대기열이 **비었는지, 못 봤는지** — 종전 구현은 `if (res.ok)` 만 처리하고 else 를 버려서
+//      403 이어도 «제안이 없습니다» 라고 말했다. 검토해야 할 제안을 아무도 보지 못한 채
+//      «대기열이 비었다»고 믿게 되고, 그건 관문이 조용히 열린 것과 같다.
+//
+// ⚠️ 종전 구현에서 제거한 것: 자체 `fixed inset-0` 모달 · `alert()` 4곳 ·
+//   실패를 삼키던 `catch { console.error }` · 1차 행동에 쓰인 보라색(구조색 Navy 로 모았다).
+import { useCallback, useEffect, useState } from 'react';
 
-interface SkillProposal {
-  id: string;
-  agent_id: string;
-  proposed_rules: string[];
-  analysis: string;
-  created_at: string;
-  status: string;
-}
+import { ConfirmInline, EvidenceStrip, FoundationList, useConfirm, type FoundationRow }
+  from '../design/DataFoundationShell';
+import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
+import { HubDialog } from '../design/HubDialog';
+import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
+import { actingScope, UNKNOWN_SCOPE, type ActingScope } from '../lib/actingScope';
+import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
+import { errorTitle } from '../lib/closedLoopFetch';
+import { skillApi, type SkillProposal } from '../lib/skillApi';
 
 export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
-  const [proposals, setProposals] = useState<SkillProposal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [list, setList] = useState<Loaded<SkillProposal[]>>(loading<SkillProposal[]>());
+  const [selected, setSelected] = useState('');
+  const [scope, setScope] = useState<ActingScope | null>(actingScope.peek());
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
 
-  const fetchProposals = async () => {
-    setLoading(true);
+  const approve = useConfirm<SkillProposal>();
+  const reject = useConfirm<SkillProposal>();
+
+  const load = useCallback(async () => {
+    setList(loading<SkillProposal[]>());
     try {
-      const res = await fetch(`${API_BASE_URL}/skills/proposals`);
-      if (res.ok) {
-        const json = await res.json();
-        setProposals(json.data || []);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
+      const rows = await skillApi.proposals();
+      reportRequestSuccess();
+      setList(ok(rows));
+      setSelected((cur) => (rows.some((r) => r.id === cur) ? cur : rows[0]?.id || ''));
+    } catch (e: any) {
+      reportRequestFailure(e?.status);
+      // ⚠️ 403 은 «없다»가 아니라 «못 봤다»다. 상태를 구분해 담는다.
+      setList(e?.status === 403 || e?.status === 401
+        ? { status: 'forbidden', value: null, error: e?.message || '볼 권한이 없습니다.',
+          httpStatus: e.status }
+        : failed<SkillProposal[]>(e));
     }
-  };
-
-  useEffect(() => {
-    fetchProposals();
   }, []);
 
-  const handleApprove = async (id: string) => {
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { actingScope.load().then(setScope).catch(() => setScope(UNKNOWN_SCOPE)); }, []);
+  useEffect(() => actingScope.subscribe(setScope), []);
+  useEffect(() => {
+    const onUser = () => { setSelected(''); setErr(null); setFlash(null); load(); };
+    window.addEventListener('factory:acting-user-changed', onUser);
+    return () => window.removeEventListener('factory:acting-user-changed', onUser);
+  }, [load]);
+
+  const rows = list.value || [];
+  const current = rows.find((r) => r.id === selected) || null;
+  const canDecide = Boolean(scope?.canManageStandard || scope?.unrestricted);
+
+  const act = async (label: string, fn: () => Promise<unknown>, note: string) => {
+    setBusy(label); setErr(null); setFlash(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/skills/proposals/${id}/approve`, { method: 'POST' });
-      if (res.ok) {
-        alert("스킬 개선안이 승인되어 에이전트 마크다운에 반영되었습니다.");
-        fetchProposals();
-      } else {
-        alert("승인 처리 중 오류가 발생했습니다.");
-      }
-    } catch (e) {
-      console.error(e);
-      alert("네트워크 오류");
-    }
+      await fn(); reportRequestSuccess(); setFlash(note); setSelected(''); await load();
+    } catch (e: any) {
+      reportRequestFailure(e?.status);
+      setErr({ msg: e?.message || String(e), status: e?.status });
+    } finally { setBusy(null); }
   };
 
-  const handleReject = async (id: string) => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/skills/proposals/${id}/reject`, { method: 'POST' });
-      if (res.ok) {
-        fetchProposals();
-      } else {
-        alert("거부 처리 중 오류가 발생했습니다.");
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const railItems: RailItem[] = [
+    { id: 'queue', label: '승인 대기열', hint: '사람이 봐야 넘어간다', icon: 'checklist',
+      // 대기 건수는 «처리해야 할 일»이다 — 배지의 뜻과 맞는다. 0 은 표시하지 않는다.
+      count: list.status === 'ok' && rows.length ? rows.length : undefined,
+      countLabel: `검토 대기 ${rows.length}건` },
+  ];
+
+  const listRows: FoundationRow[] = rows.map((p) => ({
+    id: p.id,
+    title: p.agent_id,
+    meta: `규칙 ${p.proposed_rules?.length ?? 0}개 제안 · `
+      + `${p.created_at ? new Date(p.created_at).toLocaleString() : '등록 시각 미상'}`,
+    chip: { label: `${p.proposed_rules?.length ?? 0}개 규칙`, tone: 'warn' },
+  }));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4">
-      <div className="bg-gray-800 rounded-xl shadow-2xl border border-gray-700 w-full max-w-4xl max-h-[90vh] flex flex-col text-gray-200">
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900 rounded-t-xl">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">🧬</span>
-            <h2 className="text-lg font-bold">스킬 진화 승인 대기열 (Skill Evolution Proposals)</h2>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-100">✕</button>
-        </div>
-
-        <div className="p-6 overflow-y-auto flex-1">
-          {loading ? (
-            <div className="flex justify-center py-10">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
-            </div>
-          ) : proposals.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-gray-800/30 rounded-xl border border-gray-700/50 shadow-inner">
-              <div className="text-5xl mb-4">🧬</div>
-              <h3 className="text-xl font-bold text-gray-200 mb-2">스킬 개선 제안이 없습니다</h3>
-              <div className="max-w-lg space-y-3 text-sm text-gray-400 leading-relaxed">
-                <p>
-                  <strong>AI 스킬 진화(Skill Evolution)</strong>란 에이전트가 업무 수행 중 반복되는 실수나 
-                  사용자의 피드백을 학습하여, 스스로 자신의 프롬프트(마크다운 규칙)를 개선하는 시스템입니다.
-                </p>
-                <p className="bg-gray-900/50 p-3 rounded border border-gray-700 text-left">
-                  <span className="text-blue-400 font-bold block mb-1">💡 작동 방식</span>
-                  1. 에이전트가 작업 중 한계점이나 개선점을 스스로 인식합니다.<br/>
-                  2. 에이전트가 새로운 규칙(제안)을 이 대기열에 등록합니다.<br/>
-                  3. 사용자가 제안을 검토 후 <strong>승인</strong>하면 에이전트의 핵심 행동 규칙(마크다운)이 영구적으로 업데이트됩니다.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {proposals.map(prop => (
-                <div key={prop.id} className="bg-gray-900 border border-purple-500/30 rounded-lg p-5 shadow-lg relative overflow-hidden group">
-                  <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-purple-500 to-blue-500"></div>
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex items-center gap-3">
-                      <span className="bg-purple-900/50 text-purple-300 text-xs px-2 py-1 rounded font-mono border border-purple-500/30">
-                        {prop.agent_id}
-                      </span>
-                      <span className="text-gray-400 text-xs">
-                        {new Date(prop.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  <div className="mb-4">
-                    <h4 className="text-sm text-gray-400 mb-1">🔍 자가 반성 분석:</h4>
-                    <p className="text-sm text-gray-300 bg-gray-800 p-3 rounded-md italic border border-gray-700">
-                      "{prop.analysis}"
-                    </p>
-                  </div>
-                  
-                  <div className="mb-4">
-                    <h4 className="text-sm text-green-400 mb-2 flex items-center gap-1">
-                      <span>💡</span> 개선안 (Prompt Rule 추가 제안):
-                    </h4>
-                    <ul className="space-y-2">
-                      {prop.proposed_rules.map((rule, idx) => (
-                        <li key={idx} className="text-sm text-gray-200 bg-gray-800/80 p-2 rounded border-l-2 border-green-500 pl-3">
-                          {rule}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  
-                  <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-gray-800">
-                    <button 
-                      onClick={() => handleReject(prop.id)}
-                      className="px-4 py-1.5 rounded bg-gray-800 text-gray-300 hover:bg-red-900/50 hover:text-red-300 border border-gray-700 transition-colors text-sm"
-                    >
-                      거부 (Reject)
-                    </button>
-                    <button 
-                      onClick={() => handleApprove(prop.id)}
-                      className="px-4 py-1.5 rounded bg-purple-600 text-white hover:bg-purple-500 transition-colors text-sm shadow-lg shadow-purple-500/20"
-                    >
-                      승인 및 적용 (Approve)
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+    <HubDialog label="스킬 개선안 — 에이전트가 제안한 행동 규칙 검토" onClose={onClose}>
+      <div className="afs-dialog-bar">
+        <b>스킬 개선안</b>
+        <span>승인하면 에이전트의 행동 규칙이 영구히 바뀝니다</span>
+        <div className="bar-actions">
+          {busy && <span className="busy">{busy} 중…</span>}
+          <button className="secondary-button" onClick={onClose}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
         </div>
       </div>
-    </div>
+
+      <div className="afs-dialog-body">
+        <HubShell
+          kicker="SKILL EVOLUTION" title="승인 대기열"
+          subtitle="에이전트가 스스로 제안한 규칙입니다."
+          items={railItems} activeId="queue" onSelect={() => { /* 항목이 하나다 */ }}
+          footer={
+            <div className="inheritance-card">
+              <span>PERMANENT</span>
+              <b>승인은 영구 반영입니다</b>
+              <p>규칙이 스킬 문서에 들어가고 다음 실행부터 적용됩니다. 되돌리는 화면은 아직 없습니다.</p>
+            </div>
+          }
+          jarvis={<JarvisRail
+            contextTitle={current ? current.agent_id
+              : list.status === 'ok' ? '승인 대기열' : '조회 불가'}
+            contextDescription={current
+              ? `규칙 ${current.proposed_rules?.length ?? 0}개 제안`
+              : list.status === 'ok'
+                ? (rows.length ? `검토를 기다리는 제안 ${rows.length}건` : '검토를 기다리는 제안이 없습니다.')
+                : '대기열을 가져오지 못했습니다 — «제안 없음»이 아닙니다.'}
+            context={{
+              current_module: 'skill_evolution/queue',
+              selected_object_type: 'skill_proposal',
+              selected_object_id: current?.id || '',
+              object_snapshot: current
+                ? { agent_id: current.agent_id, rules: current.proposed_rules?.length ?? 0 }
+                : { load_status: list.status, pending: rows.length },
+              // 권한이 없으면 아무 행동도 약속하지 않는다.
+              available_actions: canDecide ? ['승인', '거부'] : [],
+              evidence_refs: [],
+            }}
+            evidence={current ? [
+              { label: '에이전트', value: current.agent_id },
+              { label: '제안 규칙', value: `${current.proposed_rules?.length ?? 0}개` },
+              { label: '등록', value: (current.created_at || '').slice(0, 10) || '미상' },
+            ] : []}
+            quickQuestions={[
+              '이 규칙을 승인하면 무엇이 달라집니까?',
+              '이 제안은 어떤 실패에서 나왔습니까?',
+              '되돌리려면 어떻게 해야 합니까?',
+            ]} />}
+        >
+          {err && <Banner tone="error" title={errorTitle(err.status)}>{err.msg}</Banner>}
+          {flash && <Banner tone="info">{flash}</Banner>}
+          {!canDecide && list.status === 'ok' && (
+            <Banner tone="warn" title="검토만 가능합니다">
+              승인·거부 권한이 없습니다. 승인은 에이전트의 행동 규칙을 <b>영구히</b> 바꾸므로
+              데이터 관리자·관리자만 할 수 있습니다.
+            </Banner>
+          )}
+
+          <ScreenHead kicker="SKILL EVOLUTION" title="승인 대기열"
+            description="에이전트가 작업 중 인식한 개선점을 규칙 문장으로 제안합니다. 승인하면 스킬 문서에 들어가고 다음 실행부터 적용됩니다."
+            chip={list.status !== 'ok'
+              ? list.status === 'loading'
+                ? { label: '확인 중', tone: 'muted' }
+                : { label: list.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
+              : rows.length
+                ? { label: `검토 대기 ${rows.length}건`, tone: 'warn' }
+                : { label: '대기 없음', tone: 'success' }} />
+
+          <div className="metric-row">
+            <Metric label="검토 대기" state={list.status}
+              value={list.status === 'ok' ? rows.length : null}
+              notes={{ forbidden: '권한 없음', error: '조회 불가', empty: '대기 없음' }}
+              hint="사람이 봐야 넘어갑니다" />
+            <Metric label="제안 규칙 합계" state={list.status}
+              value={list.status === 'ok'
+                ? rows.reduce((s, p) => s + (p.proposed_rules?.length ?? 0), 0) : null}
+              notes={{ forbidden: '권한 없음', error: '조회 불가', empty: '없음' }} />
+            <Metric label="제안한 에이전트" state={list.status}
+              value={list.status === 'ok' ? new Set(rows.map((p) => p.agent_id)).size : null}
+              notes={{ forbidden: '권한 없음', error: '조회 불가', empty: '없음' }} />
+          </div>
+
+          <ConfirmInline open={approve.open}
+            title={`«${approve.target?.agent_id || ''}» 의 개선안을 승인합니다`}
+            body={<>제안된 규칙이 에이전트의 스킬 문서에 <b>영구히</b> 들어갑니다. 다음 실행부터
+              이 에이전트가 그 규칙을 따르며, <b>되돌리는 화면은 아직 없습니다.</b></>}
+            confirmLabel="승인 및 적용" danger={false}
+            onConfirm={() => approve.run((p) => act('승인', () => skillApi.approve(p.id),
+              `«${p.agent_id}» 의 개선안을 승인했습니다 — 스킬 문서에 반영됐습니다.`))}
+            onCancel={approve.cancel} />
+
+          <ConfirmInline open={reject.open}
+            title={`«${reject.target?.agent_id || ''}» 의 개선안을 거부합니다`}
+            body={<>스킬 문서는 <b>바뀌지 않습니다.</b> 제안은 보관소로 옮겨지며, 같은 문제가
+              반복되면 에이전트가 다시 제안할 수 있습니다.</>}
+            confirmLabel="거부"
+            onConfirm={() => reject.run((p) => act('거부', () => skillApi.reject(p.id),
+              `«${p.agent_id}» 의 개선안을 거부했습니다 — 스킬 문서는 그대로입니다.`))}
+            onCancel={reject.cancel} />
+
+          <div className="inbox-layout">
+            <FoundationList state={list} rows={listRows} selectedId={selected}
+              onSelect={setSelected} onRetry={load}
+              kicker="PENDING" title="검토를 기다리는 제안"
+              emptyText={<>검토를 기다리는 제안이 없습니다. 에이전트가 작업 중 개선점을 인식하면
+                여기에 등록됩니다.</>} />
+
+            <Panel kicker="PROPOSAL" title={current ? current.agent_id : '제안 상세'}>
+              {list.status !== 'ok' ? (
+                <EmptyOrError state={list.status} error={list.error}
+                  emptyText="대기열을 가져오지 못했습니다 — «제안 없음»이 아닙니다."
+                  onRetry={load} />
+              ) : !current ? (
+                <div className="empty-note">왼쪽에서 제안을 선택하십시오.</div>
+              ) : (
+                <div style={{ padding: '0 14px 14px' }}>
+                  <EvidenceStrip items={[
+                    { label: '에이전트', value: current.agent_id },
+                    { label: '제안 규칙', value: `${current.proposed_rules?.length ?? 0}개` },
+                    { label: '등록', value: current.created_at
+                      ? new Date(current.created_at).toLocaleString() : '미상' },
+                  ]} note="제안은 에이전트가 스스로 만든 것입니다 — 사람이 확인해야 반영됩니다." />
+
+                  <div className="section-grid" style={{ marginTop: 12 }}>
+                    <section className={current.analysis ? '' : 'missing'}>
+                      <h4>에이전트의 자기 진단</h4>
+                      {current.analysis
+                        ? <p className="section-text">{current.analysis}</p>
+                        : <p className="section-missing">
+                            진단이 비어 있습니다 — 근거 없이 규칙을 넣는 것은 위험합니다.
+                          </p>}
+                    </section>
+                  </div>
+
+                  <div className="section-grid" style={{ marginTop: 12 }}>
+                    <section className={current.proposed_rules?.length ? '' : 'missing'}>
+                      <h4>추가하려는 규칙<em>승인 시 영구 반영</em></h4>
+                      {current.proposed_rules?.length ? (
+                        <ul className="section-list">
+                          {current.proposed_rules.map((rule, i) => (
+                            <li key={`${i}-${rule.slice(0, 16)}`}>{rule}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="section-missing">제안된 규칙이 없습니다 — 승인할 내용이 없습니다.</p>
+                      )}
+                    </section>
+                  </div>
+
+                  {canDecide ? (
+                    <div style={{ display: 'flex', gap: 7, marginTop: 14, justifyContent: 'flex-end' }}>
+                      <button className="danger-ghost" disabled={!!busy}
+                        onClick={() => reject.ask(current)}>거부</button>
+                      <button className="primary-button"
+                        disabled={!!busy || !current.proposed_rules?.length}
+                        onClick={() => approve.ask(current)}>승인 및 적용</button>
+                    </div>
+                  ) : (
+                    <p className="hint-line">
+                      승인·거부 권한이 없습니다 — 데이터 관리자에게 검토를 요청하십시오.
+                    </p>
+                  )}
+                </div>
+              )}
+            </Panel>
+          </div>
+        </HubShell>
+      </div>
+    </HubDialog>
   );
 }

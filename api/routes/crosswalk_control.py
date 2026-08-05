@@ -12,7 +12,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 # [§6-2] 목록에 등급 가림을 적용하려면 주체가 필요하다(등급은 권한에서 파생한다).
-from api.deps import Principal, current_principal
+from api.deps import (Principal, assert_governance_readable, current_principal,
+                      visibility_block_reason)
 from core.crosswalk import crosswalk, CrosswalkError
 
 router = APIRouter(prefix="/api/v1/crosswalk")
@@ -68,6 +69,12 @@ async def list_systems(scope_node_id: str = "", tenant_id: str = "", entity_mode
     """범위를 주면 그 조직이 볼 수 있는 시스템만. 미지정이면 전량(종전 동작).
 
     ★ [§6-2] 등급은 주체 권한에서 파생한다 — 낮으면 제목만 보이고 내용은 가려진다."""
+    # ⚠️ 이 라우트는 이미 **등급 기반 가림**이 있다(§6-2 사용자 결정) — 낮은 등급에는
+    #   제목만 주고 내용을 가린다. 그 설계를 403 으로 덮지 않는다. 다만 익명·미등록·폐지
+    #   계정에는 아무것도 주지 않는다(관문 A). 목록형이므로 0건 + 이유로 답한다.
+    _reason = visibility_block_reason(p)
+    if _reason:
+        return {"status": "success", "data": [], "blocked_reason": _reason}
     from core.enterprise_context.classification import clearance_of_scope
     # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체인가 — 이것도 권한에서 파생한다.
     from core.enterprise_context.scoping import may_drill_down
@@ -79,11 +86,12 @@ async def list_systems(scope_node_id: str = "", tenant_id: str = "", entity_mode
 
 
 @router.get("/systems/coverage")
-async def systems_coverage():
+async def systems_coverage(p: Principal = Depends(current_principal)):
     """범위 미지정(= 모든 조직에 노출) 시스템 관측 (D-014).
 
     ⚠️ 경로 변수 라우트(`/systems/{system_id}/...`)보다 **위에** 둔다 — FastAPI 는 정의 순서로
       매칭하므로 아래에 두면 'coverage' 가 system_id 로 잡아먹힌다(실측 사고 이력)."""
+    assert_governance_readable(p)
     return {"status": "success", "data": await asyncio.to_thread(crosswalk.systems_coverage)}
 
 
@@ -138,7 +146,9 @@ class FieldMappingRequest(BaseModel):
 
 @router.get("/systems/{system_id}/schema")
 async def get_schema(system_id: str, scope_node_id: str = "", tenant_id: str = "",
-                     entity_mode: str = "REAL"):
+                     entity_mode: str = "REAL",
+                     p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
     await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     return {"status": "success", "data": await asyncio.to_thread(crosswalk.get_schema, system_id)}
 
@@ -206,7 +216,9 @@ async def propose(system_id: str, use_llm: bool = False, scope_node_id: str = ""
 
 @router.get("/systems/{system_id}/proposals")
 async def list_proposals(system_id: str, status: Optional[str] = None, scope_node_id: str = "",
-                         tenant_id: str = "", entity_mode: str = "REAL"):
+                         tenant_id: str = "", entity_mode: str = "REAL",
+                         p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
     await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     data = await asyncio.to_thread(crosswalk.list_proposals, system_id, status)
     return {"status": "success", "data": data}
@@ -247,6 +259,8 @@ async def reject(proposal_id: int, scope_node_id: str = "", tenant_id: str = "",
 
 @router.get("/systems/{system_id}/mappings")
 async def list_mappings(system_id: str, scope_node_id: str = "", tenant_id: str = "",
-                       entity_mode: str = "REAL"):
+                       entity_mode: str = "REAL",
+                        p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
     await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     return {"status": "success", "data": await asyncio.to_thread(crosswalk.list_mappings, system_id)}

@@ -22,7 +22,8 @@ from typing import Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (Principal, assert_can_manage_standard, assert_governance_readable,
+                      current_principal)
 from core.external_collector import CollectorError, external_collector
 from core.external_intelligence import (ExternalIntelligenceError,
                                         external_intelligence)
@@ -86,18 +87,20 @@ class SourceCollectRequest(BaseModel):
 
 
 @router.get("/readiness")
-async def readiness():
+async def readiness(p: Principal = Depends(current_principal)):
     """어떤 외부지표가 **아직 기준 계획에 쓸 수 없는지**와 그 다음 조치."""
+    assert_governance_readable(p)
     return {"status": "success",
             "data": await asyncio.to_thread(external_intelligence.readiness_report)}
 
 
 @router.get("/collectable")
-async def collectable():
+async def collectable(p: Principal = Depends(current_principal)):
     """**지금 수집할 수 있는 원천이 있는가.** 없으면 없다고 말한다.
 
     ★ 수집기가 있는데 아무것도 안 들어오는 이유를 사람이 추측하게 두면, 다음 사람은
       "수집기가 고장났다"로 결론짓는다."""
+    assert_governance_readable(p)
     return {"status": "success",
             "data": await asyncio.to_thread(external_collector.collectable)}
 
@@ -148,13 +151,15 @@ async def seed_from_playbooks(p: Principal = Depends(current_principal)):
 
 
 @router.get("/indicators")
-async def list_indicators():
+async def list_indicators(p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
     return {"status": "success",
             "data": await asyncio.to_thread(external_intelligence.list_indicators)}
 
 
 @router.get("/sources")
-async def list_sources(enabled_only: bool = False):
+async def list_sources(enabled_only: bool = False, p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
     return {"status": "success",
             "data": await asyncio.to_thread(external_intelligence.list_sources, enabled_only)}
 
@@ -200,7 +205,8 @@ async def record_observation(req: ObservationRequest,
 
 
 @router.get("/observations/{indicator_code}")
-async def list_observations(indicator_code: str, limit: int = 50):
+async def list_observations(indicator_code: str, limit: int = 50, p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
     rows = await asyncio.to_thread(external_intelligence.list_observations,
                                    indicator_code, limit)
     return {"status": "success", "data": rows}
@@ -208,10 +214,12 @@ async def list_observations(indicator_code: str, limit: int = 50):
 
 @router.get("/value/{indicator_code}")
 async def resolve_value(indicator_code: str, purpose: str = "baseline_plan",
-                        as_of: str = "", vintage: str = ""):
+                        as_of: str = "", vintage: str = "",
+                        p: Principal = Depends(current_principal)):
     """용도에 맞는 값. **등급이 안 되면 값을 주지 않는다**(§12.2).
 
     `vintage` 를 주면 그 시점 발표값 — 과거 계획의 재현 경로다."""
+    assert_governance_readable(p)
     try:
         out = await asyncio.to_thread(external_intelligence.resolve_value, indicator_code,
                                       purpose, as_of, vintage)

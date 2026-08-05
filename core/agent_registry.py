@@ -12,7 +12,8 @@
 import json
 import os
 import re
-from typing import Any, Dict, List
+import shutil
+from typing import Any, Dict, List, Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 레지스트리 JSON 위치(루트). 서버 CWD 기준. = "default" 템플릿(SW 파이프라인)의 저장소.
@@ -168,14 +169,40 @@ def save_registry(reg: Dict[str, Any]) -> Dict[str, Any]:
     return norm
 
 
+#: 초기화 직전 상태를 남겨 두는 자리. 파일 하나만 유지한다(마지막 초기화 직전).
+REGISTRY_BACKUP_PATH = os.path.join(_ROOT, "agents_registry.prev.json")
+
+
 def reset_registry() -> Dict[str, Any]:
-    """기본 레지스트리로 초기화(파일 삭제)."""
+    """기본 레지스트리로 초기화.
+
+    ★★★ [2026-08-04 실측 사고] 종전에는 파일을 **그냥 지웠다.** 그래서 초기화 한 번으로
+      편집해 둔 에이전트 구성(역할·모델·순서·HOTL 중단점)이 **되돌릴 수 없게** 사라졌다.
+      이 파일은 git 에 커밋되지 않는 런타임 산출물이라 형상관리로도 복원되지 않는다.
+      (내가 권한 검증 중에 이 엔드포인트를 호출해 실제로 지웠고, 그래서 이 주석을 쓴다.)
+    ⚠️ 지우기 전에 직전 상태를 옆에 남긴다. 백업이 «완전한 이력»은 아니지만, 한 번의 실수를
+      되돌릴 수 있게 하는 것과 아무것도 없는 것의 차이는 크다.
+    """
+    try:
+        if os.path.exists(REGISTRY_PATH):
+            shutil.copy2(REGISTRY_PATH, REGISTRY_BACKUP_PATH)
+    except Exception as e:
+        # 백업을 못 남겼으면 **지우지 않는다.** 복구 수단이 없는 삭제는 하지 않는 편이 낫다.
+        raise RuntimeError(f"초기화 직전 백업에 실패해 중단했습니다: {e}") from e
     try:
         if os.path.exists(REGISTRY_PATH):
             os.remove(REGISTRY_PATH)
     except Exception:
         pass
     return _normalize(DEFAULT_REGISTRY)
+
+
+def restore_registry() -> Optional[Dict[str, Any]]:
+    """마지막 초기화 직전 상태로 되돌린다. 백업이 없으면 `None`."""
+    if not os.path.exists(REGISTRY_BACKUP_PATH):
+        return None
+    shutil.copy2(REGISTRY_BACKUP_PATH, REGISTRY_PATH)
+    return load_registry()
 
 
 def get_interrupt_after(default: List[str] = None) -> List[str]:

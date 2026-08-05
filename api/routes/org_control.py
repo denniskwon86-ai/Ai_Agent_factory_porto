@@ -15,7 +15,9 @@ from pydantic import BaseModel
 
 # ★ [Phase 2] 식별·권한 판정을 라우트에서 하지 않는다. `api/deps.py` 단일 지점이 담당한다.
 #   그래야 SSO 이행 시 라우트를 하나도 안 고치고 전환된다.
-from api.deps import Principal, assert_can_edit_org, current_principal
+from api.deps import (Principal, assert_can_edit_org, current_principal, hidden_envelope,
+                      visibility_block_reason)
+from core.enterprise_context import audit
 from core.master_data import MasterDataError
 from core.org_directory import org_directory
 
@@ -150,19 +152,45 @@ async def whoami(p: Principal = Depends(current_principal)):
     return {"status": "success", "data": data}
 
 
+def _assert_directory_readable(p: Principal, what: str):
+    """★★★ [2026-08-04 이관 4/10 실측 결함] 조직 읽기 라우트에 **자격 검사가 없었다.**
+    익명 요청 하나로 전 직원 21명의 **이름·이메일·소속 부서·관리자 여부**가 그대로 나왔다.
+    이건 목록이 새는 것이 아니라 **개인정보가 새는 것**이다 — 명부는 그 자체로 조직 규모·
+    인사 구조·권한 보유자를 알려주고, 그 조합은 표적 공격의 출발점이 된다.
+
+    ⚠️ 404 로 숨기지 않는다. 부서·사람의 «존재»는 비밀이 아니고(같이 일하는 사람들이다),
+      404 로 두면 «없는 부서»와 «권한 없음»이 섞여 관리자가 원인을 못 찾는다.
+    """
+    reason = visibility_block_reason(p)
+    if reason:
+        audit.record(audit.ACCESS_DENIED_UNAUTHENTICATED, "org_directory", what,
+                     actor=p.user_id, reason=reason,
+                     detail="조직·사용자 명부 조회 자격 없음")
+        raise HTTPException(status_code=403, detail=reason)
+
+
 @router.get("/tree")
-async def get_tree():
+async def get_tree(p: Principal = Depends(current_principal)):
+    """부서 트리.
+
+    ★ 결정: 트리는 자격이 있는 사용자에게 **전체**를 준다. 조직도는 사내 공개 정보이고,
+      범위로 잘라 내면 상위 조직이 사라져 트리 자체가 해석되지 않는다(부모 없는 노드가 뜬다).
+      가릴 것은 **사람**이지 회사의 구조가 아니다 — 사용자 명부는 아래에서 범위로 필터한다."""
+    _assert_directory_readable(p, "(부서 트리)")
     return {"status": "success", "data": await asyncio.to_thread(org_directory.get_tree)}
 
 
 @router.get("/departments")
-async def list_departments(include_retired: bool = False):
+async def list_departments(include_retired: bool = False,
+                           p: Principal = Depends(current_principal)):
+    _assert_directory_readable(p, "(부서 목록)")
     data = await asyncio.to_thread(org_directory.list_departments, include_retired)
     return {"status": "success", "data": data}
 
 
 @router.get("/departments/{dept_id}")
-async def get_department(dept_id: str):
+async def get_department(dept_id: str, p: Principal = Depends(current_principal)):
+    _assert_directory_readable(p, dept_id)
     d = await asyncio.to_thread(org_directory.get_department, dept_id)
     if not d:
         raise HTTPException(status_code=404, detail=f"부서 '{dept_id}' 가 없습니다.")
@@ -170,8 +198,9 @@ async def get_department(dept_id: str):
 
 
 @router.get("/departments/{dept_id}/history")
-async def dept_history(dept_id: str):
+async def dept_history(dept_id: str, p: Principal = Depends(current_principal)):
     """개편 이력 — 과거 산출물의 소유 부서를 해석하려면 구판이 필요하다."""
+    _assert_directory_readable(p, dept_id)
     data = await asyncio.to_thread(org_directory.get_department_history, dept_id)
     if not data:
         raise HTTPException(status_code=404, detail=f"부서 '{dept_id}' 이력이 없습니다.")
@@ -221,16 +250,49 @@ async def retire_department(dept_id: str, p: Principal = Depends(current_princip
 
 
 # ── 사용자 ───────────────────────────────────────────────────────────────
+def _user_in_scope(p: Principal, u: dict) -> bool:
+    """이 사용자를 명부에서 보여줄 것인가.
+
+    ⚠️ «자기 자신»은 항상 보인다 — 자기 소속·권한을 못 보면 무엇을 요청해야 할지 알 수 없다.
+      그 밖에는 **읽기 가능한 부서에 속한 사람만**. 부서가 없는 사람은 보이지 않는다:
+      미배정을 «전사 공개»로 읽으면 이행 기간에 들어온 모든 계정이 전원에게 노출된다
+      (관문 A 가 막으려던 결과와 같다)."""
+    if p.scope.unrestricted or getattr(p.scope, "can_edit_org", False):
+        return True
+    uid = (p.user_id or "").strip()
+    if uid and str(u.get("user_id", "")).strip() == uid:
+        return True
+    dept = str(u.get("primary_dept_id") or "").strip()
+    return bool(dept) and p.scope.can_read(dept)
+
+
 @router.get("/users")
-async def list_users():
-    return {"status": "success", "data": await asyncio.to_thread(org_directory.list_users)}
+async def list_users(p: Principal = Depends(current_principal)):
+    """사용자 명부. **범위 밖 인원은 주지 않는다.**
+
+    ★ 조직 편집 권한자에게는 전량과 정확한 숨김 건수를, 일반 사용자에게는 자기 부서 인원과
+      «가려진 것이 있다»는 사실만 준다(`api.deps.hidden_envelope` — 자료 종류는 `org`).
+      전 직원 수는 그 자체로 조직 규모를 알려주므로 건수도 권한을 따른다."""
+    _assert_directory_readable(p, "(사용자 명부)")
+    rows = await asyncio.to_thread(org_directory.list_users)
+    shown = [u for u in rows if _user_in_scope(p, u)]
+    return {"status": "success", "data": shown,
+            **hidden_envelope(p, len(rows), len(shown), exact_for="org")}
 
 
 @router.get("/users/{user_id}")
-async def get_user(user_id: str):
+async def get_user(user_id: str, p: Principal = Depends(current_principal)):
+    _assert_directory_readable(p, user_id)
     u = await asyncio.to_thread(org_directory.get_user, user_id)
     if not u:
         raise HTTPException(status_code=404, detail=f"사용자 '{user_id}' 가 없습니다.")
+    if not _user_in_scope(p, u):
+        # 개인의 권한 플래그·역할은 명부 한 줄보다 민감하다. 범위 밖이면 상세를 주지 않는다.
+        audit.denied_scope("org_user", user_id, actor=p.user_id,
+                           actor_scopes=sorted(p.scope.readable_dept_ids or ()),
+                           detail="읽기 가능한 부서 밖 사용자의 상세 조회")
+        raise HTTPException(status_code=403,
+                            detail="읽을 수 있는 부서 밖의 사용자입니다 — 상세를 표시하지 않습니다.")
     return {"status": "success", "data": u}
 
 
