@@ -68,6 +68,26 @@ CREATE INDEX IF NOT EXISTS idx_node_parent ON organization_nodes(default_parent_
 CREATE INDEX IF NOT EXISTS idx_node_entity ON organization_nodes(entity_id);
 CREATE INDEX IF NOT EXISTS idx_node_dept ON organization_nodes(dept_id);
 CREATE INDEX IF NOT EXISTS idx_node_ctx ON organization_nodes(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_node_code ON organization_nodes(code, status);
+
+-- [D-018 ⑦] 업무 코드의 **변경 이력과 별칭.**
+--   `code` 는 사람이 쓰는 업무키이고 조직 개편·회사별 코드 체계에 따라 **바뀔 수 있다**
+--   (`LS_MNM` → `LS_METALS`). 정본 `node_id` 는 그대로이므로 내부 관계는 안전하지만,
+--   **옛 코드로 저장된 외부 연계·문서·사람의 기억**은 그 순간 끊긴다.
+--   ⚠️ 끊긴 참조는 조용하다 — 조회가 «없음» 을 돌려주고, 그것은 «권한이 없다» 와 구분되지
+--     않는다. 그래서 옛 코드를 버리지 않고 여기 남겨 계속 해석되게 한다.
+--   ★ 별칭으로 찾은 것도 **정본 `node_id` 로 정규화**되므로 판정은 언제나 정본을 탄다.
+CREATE TABLE IF NOT EXISTS organization_node_code_aliases (
+    alias_id        TEXT PRIMARY KEY,
+    node_id         TEXT NOT NULL,
+    code            TEXT NOT NULL,            -- 과거에 쓰였던 코드
+    tenant_id       TEXT NOT NULL DEFAULT 'tenant_default',
+    replaced_by     TEXT NOT NULL DEFAULT '', -- 이 코드를 대체한 새 코드
+    reason          TEXT NOT NULL DEFAULT '', -- 왜 바뀌었는가(조직 개편·표준화 등)
+    recorded_at     TEXT NOT NULL,
+    UNIQUE (node_id, code)
+);
+CREATE INDEX IF NOT EXISTS idx_alias_code ON organization_node_code_aliases(code, tenant_id);
 
 CREATE TABLE IF NOT EXISTS organization_edges (
     edge_id         TEXT PRIMARY KEY,
@@ -240,6 +260,29 @@ class EcmRepository:
             n.node_id = self._uid("node")
         if n.default_parent_id == n.node_id:
             raise EcmError("자기 자신을 부모로 둘 수 없습니다.")
+
+        # ── [D-018 ⑦] 코드 유일성 + 변경 이력 ────────────────────────────
+        # ⚠️ DB `UNIQUE` 로 걸 수 없다: 유일성 범위가 `(tenant_id, entity_mode, code)` 인데
+        #   `entity_mode` 는 다른 표(`enterprise_entities`)에 있다. 그래서 여기서 검증한다 —
+        #   저장 시점에 막지 않으면 «조회가 fail-closed 로 거부» 만 남고, 그때는 이미 두 노드가
+        #   같은 코드를 갖고 있어 **어느 쪽을 고쳐야 하는지** 사람이 판단해야 한다.
+        prev = self.get_node(n.node_id)
+        if (n.code or "").strip():
+            mode = self._entity_mode_of(n.entity_id)
+            for other in self.find_nodes_by_code(n.code, tenant_id=n.tenant_id,
+                                                 entity_mode=mode):
+                if other.node_id != n.node_id:
+                    raise EcmError(
+                        f"조직 코드 '{n.code}' 가 이미 쓰이고 있습니다"
+                        f"(tenant={n.tenant_id} · mode={mode or '(전체)'} · "
+                        f"node={other.node_id} · {other.name_ko}). "
+                        f"코드는 그 문맥 안에서 유일해야 합니다 — 다른 코드를 쓰거나 기존 노드를 "
+                        f"고치십시오.")
+        # 코드가 바뀌면 **옛 코드를 별칭으로 남긴다**(버리지 않는다).
+        if prev and (prev.code or "").strip() and prev.code != (n.code or ""):
+            self._record_code_alias(prev.node_id, prev.code, n.tenant_id,
+                                    replaced_by=(n.code or ""), reason="code_changed")
+
         with self._lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO organization_nodes (node_id, entity_id, tenant_id, node_type, code, "
@@ -297,6 +340,56 @@ class EcmRepository:
             "GROUP BY dept_id HAVING n > 1 ORDER BY n DESC", (STATUS_ACTIVE,))
         return [{"dept_id": r["dept_id"], "node_count": r["n"],
                  "codes": sorted((r["codes"] or "").split(","))} for r in rows]
+
+    def _entity_mode_of(self, entity_id: str) -> str:
+        """이 노드가 속한 엔티티의 모드. 못 찾으면 빈 문자열(= 문맥 없이 비교)."""
+        rows = self._query("SELECT entity_mode FROM enterprise_entities WHERE entity_id=?",
+                           (entity_id,))
+        return str(rows[0].get("entity_mode") or "") if rows else ""
+
+    def _record_code_alias(self, node_id: str, code: str, tenant_id: str,
+                           replaced_by: str = "", reason: str = "") -> None:
+        """[D-018 ⑦] 옛 코드를 별칭으로 남긴다.
+
+        ⚠️ 실패를 삼키지 않는다 — 별칭을 못 남기면 그 코드로 저장된 외부 연계가 **조용히**
+          끊기고, 조회는 «없음» 을 돌려준다(«권한 없음» 과 구분되지 않는다)."""
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO organization_node_code_aliases "
+                "(alias_id, node_id, code, tenant_id, replaced_by, reason, recorded_at) "
+                "VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(node_id, code) DO UPDATE SET replaced_by=excluded.replaced_by, "
+                "reason=excluded.reason, recorded_at=excluded.recorded_at",
+                (self._uid("alias"), node_id, code, tenant_id, replaced_by, reason,
+                 self._now()))
+
+    def code_aliases_of(self, node_id: str) -> List[Dict[str, Any]]:
+        """이 노드가 과거에 쓰던 코드들(최근 순). «왜 바뀌었는가» 를 함께 준다."""
+        return self._query(
+            "SELECT code, replaced_by, reason, recorded_at FROM organization_node_code_aliases "
+            "WHERE node_id=? ORDER BY recorded_at DESC", (node_id,))
+
+    def find_nodes_by_code_alias(self, code: str, tenant_id: str = "",
+                                 entity_mode: str = "") -> List[OrganizationNode]:
+        """**옛 코드**로 노드를 찾는다. 현재 코드로 찾지 못했을 때의 두 번째 경로다.
+
+        ⚠️ 별칭이 여러 노드에 걸릴 수 있다(코드가 재사용된 경우) — 현재 코드와 **같은 규칙**으로
+          호출부가 fail-closed 처리한다. 여기서 하나를 고르지 않는다."""
+        if not code:
+            return []
+        sql = ("SELECT n.* FROM organization_node_code_aliases a "
+               "JOIN organization_nodes n ON n.node_id = a.node_id "
+               "JOIN enterprise_entities e ON e.entity_id = n.entity_id "
+               "WHERE a.code=? AND n.status=?")
+        params: List[Any] = [code, STATUS_ACTIVE]
+        if tenant_id:
+            sql += " AND n.tenant_id=?"
+            params.append(tenant_id)
+        if entity_mode:
+            sql += " AND e.entity_mode=?"
+            params.append(entity_mode)
+        sql += " ORDER BY n.node_id"
+        return [OrganizationNode.model_validate(r) for r in self._query(sql, tuple(params))]
 
     def find_nodes_by_code(self, code: str, tenant_id: str = "",
                            entity_mode: str = "") -> List[OrganizationNode]:

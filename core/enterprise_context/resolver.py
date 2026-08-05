@@ -193,7 +193,8 @@ class EcmResolver:
 
         반환 `kind` 값:
           `ecm_node`(정본으로 들어옴) · `ecm_code`(코드 별칭) · `department_mapped`(부서 별칭) ·
-          `code_ambiguous`·`department_ambiguous`(모호 — **해석 실패**) ·
+          `ecm_code_alias`(**옛 코드** — 조직 개편 전 코드로 들어옴 · `requested_code` 동봉) ·
+          `code_ambiguous`·`code_alias_ambiguous`·`department_ambiguous`(모호 — **해석 실패**) ·
           `code_out_of_context`(코드는 있으나 요청 문맥에 없음 — **해석 실패**) ·
           `department`(ECM 미등록 — 부서 체계로 폴백)
         ⚠️ 실패 셋을 나눈 이유는 **필요한 조치가 다르기 때문**이다. 모호함은 데이터를 정리해야
@@ -227,6 +228,26 @@ class EcmResolver:
             one = by_code[0]
             return {"kind": "ecm_code", "node_id": one.node_id,
                     "dept_id": one.dept_id, "code": one.code,
+                    "name_ko": one.name_ko, "node_type": one.node_type,
+                    "resolved": True}
+        # ★★★ [D-018 ⑦] **옛 코드(별칭)로도 해석한다.** 코드는 조직 개편으로 바뀌고, 그러면
+        #   옛 코드로 저장된 외부 연계·문서가 그 순간 끊긴다 — 끊긴 참조는 조용하다(조회가
+        #   «없음» 을 돌려주고 그것은 «권한 없음» 과 구분되지 않는다).
+        #   ⚠️ 현재 코드로 **못 찾았을 때만** 본다. 현재 코드가 이기지 않으면 «이름을 물려받은
+        #     새 조직» 대신 옛 조직이 해석되고, 그것은 권한을 과거로 되돌리는 일이다.
+        by_alias = self.repo.find_nodes_by_code_alias(scope_ref, tenant_id=tenant_id,
+                                                      entity_mode=entity_mode)
+        if len(by_alias) > 1:
+            return {"kind": "code_alias_ambiguous", "node_id": "", "dept_id": "",
+                    "code": scope_ref, "name_ko": scope_ref, "resolved": False,
+                    "candidates": [{"node_id": c.node_id, "code": c.code,
+                                    "name_ko": c.name_ko, "node_type": c.node_type,
+                                    "tenant_id": c.tenant_id} for c in by_alias]}
+        if by_alias:
+            one = by_alias[0]
+            return {"kind": "ecm_code_alias", "node_id": one.node_id,
+                    "dept_id": one.dept_id, "code": one.code,   # ★ **현재** 코드를 준다
+                    "requested_code": scope_ref,                # 무엇으로 물었는지도 남긴다
                     "name_ko": one.name_ko, "node_type": one.node_type,
                     "resolved": True}
         if tenant_id or entity_mode:
