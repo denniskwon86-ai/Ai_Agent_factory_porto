@@ -100,7 +100,21 @@ def seed_example_organization(repo: EcmRepository = None, force: bool = False) -
     """설계서 §3.3 예시 조직을 멱등하게 넣는다.
 
     이미 노드가 있으면 건너뛴다(`force=True` 로만 덮어씀) — 운영 중 실제 조직을 시드가 지우면
-    안 된다. 반환은 `{status, nodes, edges, node_ids}`."""
+    안 된다. 반환은 `{status, nodes, edges, node_ids}`.
+
+    ★★★ [D-018 ⑩] **기존 `node_id`·`entity_id` 를 보존한다. 재생성하지 않는다.**
+
+    `node_id` 는 조직 범위의 **정본**이고(D-018) 다른 저장소가 그 값으로 소유·권한을 기록한다
+    (`departments.scope_node_id` · `plan_facts.owner_organization_id` · 자산 `owner_scope_id` …).
+    시드가 «덮어쓰기» 를 «새로 만들기» 로 구현하면 그 참조가 **전부 끊긴다** — 조회는 «없음» 을
+    돌려주고 그것은 «권한이 없다» 와 구분되지 않는다.
+
+    ⚠️ 이 결함은 실제로 있었고 D-018 ⑦(코드 유일성)이 그것을 드러냈다: `force=True` 가 같은
+      코드로 새 노드를 만들려 해 `EcmError` 로 막혔다. **막힌 것이 다행**이다 — 종전에는 같은
+      코드의 노드가 하나 더 생기고, 그 뒤로 코드 해석이 «모호» 로 거부됐을 것이다.
+    ⚠️ 엔티티도 재사용한다. 새로 만들면 노드가 새 엔티티를 가리키고 **옛 엔티티는 고아**가 된다
+      (`entity_mode` 로 문맥을 판정하므로 고아 엔티티는 조용한 오염이다).
+    """
     repo = repo or ecm_repository
     existing = repo.list_nodes(tenant_id=_TENANT)
     if existing and not force:
@@ -108,15 +122,21 @@ def seed_example_organization(repo: EcmRepository = None, force: bool = False) -
                 "nodes": 0, "edges": 0,
                 "node_ids": {n.code: n.node_id for n in existing if n.code}}
 
+    #: 코드 → 기존 노드. `force` 로 다시 심을 때 **그 노드를 갱신**하기 위한 것이다.
+    prior = {n.code: n for n in existing if n.code}
+
     code_to_node: Dict[str, str] = {}
     n_nodes = 0
     for code, name, node_type, parent_code, industry, dept_id in _NODES:
+        was = prior.get(code)
         ent = repo.upsert_entity(EnterpriseEntity(
+            entity_id=(was.entity_id if was else ""),      # ★ 엔티티도 보존
             tenant_id=_TENANT, entity_type=node_type, entity_mode="REAL",
             legal_name=name, name_ko=name, industry_code=industry,
             status=STATUS_ACTIVE, source_ref=SEED_SOURCE_REF,
             approved_by="system", approved_at=repo._now()))
         node = repo.upsert_node(OrganizationNode(
+            node_id=(was.node_id if was else ""),           # ★★★ 정본 보존 — 재생성 금지
             entity_id=ent.entity_id, tenant_id=_TENANT, node_type=node_type,
             code=code, name_ko=name, dept_id=dept_id,
             default_parent_id=code_to_node.get(parent_code, ""),
