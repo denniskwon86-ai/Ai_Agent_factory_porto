@@ -100,7 +100,7 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
       // ⚠️ 실패를 빈 배열로 바꾸지 않는다. 그 순간 화면은 «안건 0건»이라고 말하고,
       //   사용자는 결정할 것이 없다고 믿는다.
       setQueue(failed<DecisionCase[]>(e));
-      reportRequestFailure();
+      reportRequestFailure(e?.status);
     } finally { setBusy(null); }
   }, []);
 

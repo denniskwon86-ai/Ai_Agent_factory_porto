@@ -75,6 +75,10 @@ interface FactoryStore {
   agentRegistry: any | null;
   /** [UIUX-AUDIT-30 §5] 로드 실패 사유. 비어 있으면 «아직 안 왔다», 차 있으면 «못 가져왔다». */
   agentRegistryError: string;
+  /** 저장·복사·삭제·초기화가 실패한 이유. ⚠️ 조회 실패(`agentRegistryError`)와 섞지 않는다 —
+   *  «못 읽었다»와 «못 바꿨다»는 사용자가 해야 할 다음 행동이 다르다. */
+  agentActionError: string;
+  clearAgentActionError: () => void;
   showAgentPanel: boolean;
   // 워크플로우 템플릿(T2-c)
   templates: WorkflowTemplate[];
@@ -110,6 +114,7 @@ interface FactoryStore {
   fetchAgentRegistry: () => Promise<void>;
   saveAgentRegistry: (reg: any) => Promise<boolean>;
   resetAgentRegistry: () => Promise<void>;
+  restoreAgentRegistry: () => Promise<boolean>;
   openAgentPanel: () => void;
   closeAgentPanel: () => void;
   // 템플릿 관리(T2-c)
@@ -157,6 +162,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   viewingRelease: null,
   agentRegistry: null,
   agentRegistryError: '',
+  agentActionError: '',
   showAgentPanel: false,
   templates: [],
   selectedTemplateId: 'default',
@@ -221,7 +227,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       // 백엔드 검증 실패(404 미존재 템플릿 / 400 형식 / 409 중복)는 사유를 표면화
       let msg = "프로젝트 생성에 실패했습니다. (중복된 ID일 수 있습니다)";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
-      alert(msg);
+      set({ agentActionError: msg });
       return false;
     } catch (error) {
       console.error("프로젝트 생성 실패:", error);
@@ -245,7 +251,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       }
       let msg = "메가 프로젝트 생성에 실패했습니다. (중복된 ID일 수 있습니다)";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
-      alert(msg);
+      set({ agentActionError: msg });
       return false;
     } catch (error) {
       console.error("메가 프로젝트 생성 실패:", error);
@@ -290,7 +296,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       }
       let msg = "시나리오 복제에 실패했습니다.";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
-      alert(msg);
+      set({ agentActionError: msg });
       return false;
     } catch (error) {
       console.error("프로젝트 복제 실패:", error);
@@ -423,6 +429,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
+  clearAgentActionError: () => set({ agentActionError: '' }),
+
   fetchAgentRegistry: async () => {
     // ★★ [UIUX-AUDIT-30 §5] 실패를 콘솔에만 남기지 않는다. 예전에는 `agentRegistry` 가 `null`
     //   그대로여서 화면이 «에이전트 레지스트리 로딩 중…» 을 **영원히** 띄웠다. 사용자는
@@ -434,11 +442,19 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
         const r = await res.json();
         set({ agentRegistry: r.data, agentRegistryError: '' });
       } else {
-        set({ agentRegistryError: `서버가 ${res.status} 로 응답했습니다.` });
+        // ★★★ [2026-08-04 이관 6/10 실측] **이전 사용자의 구성을 남기지 않는다.**
+        //   종전에는 오류만 담고 `agentRegistry` 를 그대로 뒀다. 그래서 관리자로 보다가
+        //   익명으로 바꾸면 «403 으로 못 읽었다» 는 배너와 **이전 사용자의 에이전트 목록**이
+        //   같은 화면에 함께 떴다. 권한 잔상은 통제가 있는데도 없는 것처럼 보이게 만든다.
+        set({
+          agentRegistry: null,
+          agentRegistryError: res.status === 403 || res.status === 401
+            ? '에이전트 구성을 볼 권한이 없습니다 — 우측 상단에서 사용자를 지정하십시오.'
+            : `서버가 ${res.status} 로 응답했습니다.`,
+        });
       }
     } catch (error: any) {
-      console.error("에이전트 레지스트리 로드 실패:", error);
-      set({ agentRegistryError: error?.message || String(error) });
+      set({ agentRegistry: null, agentRegistryError: error?.message || String(error) });
     }
   },
 
@@ -452,7 +468,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data }); return true; }
       let msg = "레지스트리 저장에 실패했습니다.";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
-      alert(msg);
+      set({ agentActionError: msg });
       return false;
     } catch (error) {
       console.error("에이전트 레지스트리 저장 실패:", error);
@@ -461,11 +477,41 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   },
 
   resetAgentRegistry: async () => {
+    set({ agentActionError: '' });
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/agents/reset`, { method: 'POST' });
-      if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data, editingTemplateId: 'default' }); }
-    } catch (error) {
-      console.error("에이전트 레지스트리 초기화 실패:", error);
+      if (res.ok) {
+        const r = await res.json();
+        set({ agentRegistry: r.data, editingTemplateId: 'default' });
+        return;
+      }
+      // ⚠️ 조용히 넘기면 사용자는 초기화가 된 줄 안다. 실패는 반드시 말한다.
+      let msg = `초기화하지 못했습니다(서버 ${res.status}).`;
+      if (res.status === 403) msg = '에이전트 구성을 초기화할 권한이 없습니다.';
+      try { const r = await res.json(); if (r?.detail) msg = String(r.detail); } catch { /* noop */ }
+      set({ agentActionError: msg });
+    } catch (error: any) {
+      set({ agentActionError: `초기화 실패: ${error?.message || error}` });
+    }
+  },
+
+  /** 마지막 초기화 **직전** 구성으로 되돌린다. 백업이 없으면 서버가 404 로 알린다. */
+  restoreAgentRegistry: async () => {
+    set({ agentActionError: '' });
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/agents/restore`, { method: 'POST' });
+      if (res.ok) {
+        const r = await res.json();
+        set({ agentRegistry: r.data, editingTemplateId: 'default' });
+        return true;
+      }
+      let msg = `되돌리지 못했습니다(서버 ${res.status}).`;
+      try { const r = await res.json(); if (r?.detail) msg = String(r.detail); } catch { /* noop */ }
+      set({ agentActionError: msg });
+      return false;
+    } catch (error: any) {
+      set({ agentActionError: `복원 실패: ${error?.message || error}` });
+      return false;
     }
   },
 
@@ -479,11 +525,18 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
 
   // ── 워크플로우 템플릿 관리(T2-c) ──────────────────────────────────────────────
   fetchTemplates: async () => {
+    // ★★ [이관 6/10] 실패를 `console.error` 로 삼키면 화면이 «템플릿 없음»으로 보인다.
+    //   백엔드에 자격 검사를 넣은 뒤로는 403 이 정상적으로 발생하므로 반드시 구분해야 한다.
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/templates`);
-      if (res.ok) { const r = await res.json(); set({ templates: r.data || [] }); }
-    } catch (error) {
-      console.error("템플릿 목록 로드 실패:", error);
+      if (res.ok) { const r = await res.json(); set({ templates: r.data || [], agentRegistryError: '' }); }
+      else {
+        set({ templates: [], agentRegistryError: res.status === 403
+          ? '워크플로우 템플릿을 볼 권한이 없습니다 — «템플릿 없음»이 아닙니다.'
+          : `템플릿 목록을 가져오지 못했습니다(서버 ${res.status}).` });
+      }
+    } catch (error: any) {
+      set({ templates: [], agentRegistryError: `템플릿 목록 조회 실패: ${error?.message || error}` });
     }
   },
 
@@ -494,9 +547,16 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     const tid = id || 'default';
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/templates/${tid}`);
-      if (res.ok) { const r = await res.json(); set({ agentRegistry: r.data, editingTemplateId: tid }); }
-    } catch (error) {
-      console.error("템플릿 로드 실패:", error);
+      if (res.ok) {
+        const r = await res.json();
+        set({ agentRegistry: r.data, editingTemplateId: tid, agentRegistryError: '' });
+      } else {
+        set({ agentRegistryError: res.status === 403
+          ? '이 템플릿을 볼 권한이 없습니다.'
+          : `템플릿을 가져오지 못했습니다(서버 ${res.status}).` });
+      }
+    } catch (error: any) {
+      set({ agentRegistryError: `템플릿 조회 실패: ${error?.message || error}` });
     }
   },
 
@@ -517,7 +577,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       }
       let msg = "템플릿 저장에 실패했습니다.";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
-      alert(msg);
+      set({ agentActionError: msg });
       return false;
     } catch (error) {
       console.error("템플릿 저장 실패:", error);
@@ -539,7 +599,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       }
       let msg = "템플릿 복사에 실패했습니다.";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
-      alert(msg);
+      set({ agentActionError: msg });
       return false;
     } catch (error) {
       console.error("템플릿 복사 실패:", error);
@@ -559,7 +619,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       }
       let msg = "템플릿 삭제에 실패했습니다.";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
-      alert(msg);
+      set({ agentActionError: msg });
       return false;
     } catch (error) {
       console.error("템플릿 삭제 실패:", error);
@@ -597,7 +657,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       }
       let msg = "포맷 저장에 실패했습니다.";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
-      alert(msg);
+      set({ agentActionError: msg });
       return false;
     } catch (error) {
       console.error("포맷 저장 실패:", error);
@@ -615,7 +675,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       }
       let msg = "포맷 삭제에 실패했습니다.";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
-      alert(msg);
+      set({ agentActionError: msg });
       return false;
     } catch (error) {
       console.error("포맷 삭제 실패:", error);

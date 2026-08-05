@@ -48,29 +48,47 @@ export function failed<T>(e: any): Loaded<T> {
   };
 }
 
+/** 상태별 보조 문구를 화면이 바꿔 쓸 수 있게 하는 자리.
+ *
+ * ★★ 기본 문구는 **수치 지표**용이다(«미측정» = 아직 재지 않았다). 그런데 같은 칸을 버전처럼
+ *   수치가 아닌 값에도 쓰다 보니 "선택 버전 — / 미측정" 이 나왔다 — 버전은 재는 것이 아니다.
+ *   ⚠️ 그렇다고 기본 문구를 바꾸지 않는다. «미측정과 0 은 다르다»는 판정은 지표 화면들이
+ *     공유하는 단일 지점이고(DecisionCenter §⑤), 여기서 바꾸면 그 화면들이 함께 틀어진다.
+ *   → 기본은 그대로 두고, 수치가 아닌 칸만 자기 언어를 넘긴다. */
+export type MetricNotes = {
+  loading?: string;
+  forbidden?: string;
+  error?: string;
+  /** 정상 조회인데 값이 없을 때. 지표에서는 «미측정», 상태값에서는 «미지정» 계열이 맞다. */
+  empty?: string;
+};
+
 /** 지표 한 칸의 표시값. **숫자만 돌려주지 않는다** — 보조 문구가 항상 함께 나온다. */
 export function metricText(state: LoadStatus, value: number | string | null | undefined,
-                           unit = ''): { text: string; note: string; muted: boolean } {
-  if (state === 'loading') return { text: '…', note: '확인 중', muted: true };
-  if (state === 'forbidden') return { text: '—', note: '접근 불가', muted: true };
-  if (state === 'error') return { text: '—', note: '조회 불가', muted: true };
+                           unit = '', notes: MetricNotes = {},
+): { text: string; note: string; muted: boolean } {
+  if (state === 'loading') return { text: '…', note: notes.loading || '확인 중', muted: true };
+  if (state === 'forbidden') return { text: '—', note: notes.forbidden || '접근 불가', muted: true };
+  if (state === 'error') return { text: '—', note: notes.error || '조회 불가', muted: true };
   if (value === null || value === undefined || value === '') {
     // ★ 값이 없는 것과 0 은 다르다. 서버가 «아직 모른다»를 준 경우다.
-    return { text: '—', note: '미측정', muted: true };
+    return { text: '—', note: notes.empty || '미측정', muted: true };
   }
   return { text: `${value}${unit}`, note: '', muted: false };
 }
 
 /** 지표 카드 한 칸. `metric-row` 안에서 쓴다. */
-export function Metric({ label, state, value, unit = '', hint }: {
+export function Metric({ label, state, value, unit = '', hint, notes }: {
   label: string;
   state: LoadStatus;
   value: number | string | null | undefined;
   unit?: string;
   /** 정상일 때의 보조 설명. 실패 시에는 실패 문구가 우선한다. */
   hint?: string;
+  /** 수치가 아닌 칸(버전·상태 등)의 상태 문구. 지정하지 않으면 지표용 기본 문구를 쓴다. */
+  notes?: MetricNotes;
 }) {
-  const m = metricText(state, value, unit);
+  const m = metricText(state, value, unit, notes);
   return (
     <div>
       <span>{label}</span>

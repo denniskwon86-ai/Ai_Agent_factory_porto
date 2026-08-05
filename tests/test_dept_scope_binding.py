@@ -204,4 +204,8 @@ def test_packs_are_filtered_by_owner_org(monkeypatch):
     r = TestClient(app).get("/api/v1/knowledge/packs").json()
 
     assert [k["pack_id"] for k in r["data"]] == ["batt"]
-    assert r["hidden_count"] == 2, "가려진 건수를 말해야 '이게 전부인가'를 판단할 수 있다"
+    # ★ 종전에는 정확한 건수(2)를 누구에게나 줬다. «이게 전부인가»는 알려야 하지만, 건수 자체는
+    #   타 조직 자료의 규모를 알려주므로 404 Data Stealth 와 앞뒤가 맞지 않는다.
+    #   → 사실은 누구에게나(`hidden_present`), 건수는 DA·관리자에게만(`api.deps.hidden_envelope`).
+    assert r["hidden_present"] is True, "가려진 것이 있다는 사실은 반드시 알려야 한다"
+    assert "hidden_count" not in r, "일반 사용자에게 타 조직 자료 규모가 새어 나갔다"

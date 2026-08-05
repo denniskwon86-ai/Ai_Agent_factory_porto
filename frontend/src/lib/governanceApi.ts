@@ -10,10 +10,20 @@
 import { API_BASE_URL } from './api';
 
 // ── 공통 ──────────────────────────────────────────────────────────────────
+// ⚠️ [2026-08-04 이관 5/10] 종전에는 상태 코드를 **버렸다**(`new Error(문구)` 만 던졌다).
+//   그래서 화면이 «권한 없음(403)»과 «서버 장애»를 구분할 수 없었고, 거버넌스 콘솔은 둘 다
+//   "불러오지 못한 항목"으로 뭉갠 뒤 각 섹션에 «후보 없음» 을 표시했다.
+//   거버넌스 화면에서 그 오독은 특히 무겁다 — «결손 없음»으로 읽히면 정비가 끝났다고 믿는다.
+export type GovernanceError = Error & { status?: number };
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${API_BASE_URL}${path}`);
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.detail || `요청 실패 (${r.status})`);
+  if (!r.ok) {
+    const e = new Error(j?.detail || `요청 실패 (${r.status})`) as GovernanceError;
+    e.status = r.status;
+    throw e;
+  }
   return j.data as T;
 }
 

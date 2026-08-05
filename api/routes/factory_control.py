@@ -1772,6 +1772,29 @@ async def reset_agent_registry(p: Principal = Depends(current_principal)):
     return {"status": "success", "data": data}
 
 
+@router.post("/agents/restore")
+async def restore_agent_registry(p: Principal = Depends(current_principal)):
+    """마지막 초기화 **직전** 구성으로 되돌린다. 백업이 없으면 404.
+
+    ★★★ [병합 2026-08-05] 이 경로는 **되돌릴 수단**이다. 위 `reset` 은 되돌릴 수 없는 전역
+      변경이고, 실제로 그것을 권한 탐침으로 호출해 `agents_registry.json` 을 잃은 사고가 있었다
+      (git 미추적 파일이라 복구가 불가능했다). 그 뒤 `reset_registry()` 가 직전 상태를
+      `agents_registry.prev.json` 으로 백업하고 **백업 실패 시 삭제를 거부**하게 됐고, 이
+      엔드포인트가 그 백업을 되살린다.
+    ⚠️ 자격은 `reset` 과 **같게** 둔다. 복원이 더 쉬우면 «지웠다가 되살리기» 로 통제를 우회할 수
+      있고, 더 어려우면 사고를 낸 사람이 스스로 고칠 수 없다."""
+    _require_caps(p, SYSTEM_DEFAULT_EDIT, AGENT_UPDATE,
+                  resource="agent_registry", action="restore")
+    from core.agent_registry import restore_registry
+    data = restore_registry()
+    if data is None:
+        raise HTTPException(status_code=404,
+                            detail="되돌릴 직전 구성이 없습니다(초기화 기록이 없습니다).")
+    _audit_registry("AGENT_REGISTRY_RESTORED", p, "에이전트 구성 복원(초기화 직전 상태)",
+                    "reset 으로 대체된 편집분을 되살렸다")
+    return {"status": "success", "data": data}
+
+
 # ==========================================
 # AI 추천 엔진 연동 (파이프라인 및 스킬 자동 생성)
 # ==========================================

@@ -66,8 +66,23 @@ function start() {
   timer = setInterval(probe, POLL_MS);
 }
 
-/** 업무 요청이 실패했음을 알린다. 서버는 살아 있는데 기능이 안 되는 경우를 잡는다. */
-export function reportRequestFailure() {
+/** 업무 요청이 실패했음을 알린다. 서버는 살아 있는데 기능이 안 되는 경우를 잡는다.
+ *
+ * ★★ [2026-08-04 이관 4/10] **권한 거부(401·403)는 실패로 세지 않는다.**
+ *   조직 명부에 자격 검사를 넣자 익명 화면에서 요청 3건이 403 이 되고, 그 때문에 Jarvis 머리가
+ *   «일시 중단»으로 바뀌며 "응답이 지연되거나 일부 요청이 실패하고 있습니다" 가 떴다.
+ *   그건 사실이 아니다 — 서버는 정상이고, **통제가 제대로 작동한 것**이다.
+ *   통제를 켤 때마다 «서버가 아프다»고 말하면 사용자는 두 가지를 구분할 수 없게 되고,
+ *   진짜 장애가 왔을 때 그 표시를 믿지 않는다.
+ *   ⚠️ 404 는 실패로 센다 — 있어야 할 자원이 없는 것은 통제가 아니라 상태 문제다.
+ *     (범위 밖 자료를 404 로 숨기는 경로는 호출부에서 이 함수를 부르지 않는다.)
+ */
+export function reportRequestFailure(status?: number) {
+  if (status === 401 || status === 403) {
+    // 서버가 «안 된다»고 분명히 답한 것이므로 살아 있다. 상태 표시는 건강 쪽으로 둔다.
+    reportRequestSuccess();
+    return;
+  }
   recentFailureAt = Date.now();
   if (current === 'online') set('degraded');
   probe();

@@ -43,7 +43,10 @@ export type SearchHit = {
 export type PackList = {
   packs: Pack[];
   blockedReason: string;
-  hiddenCount: number;
+  /** 가려진 것이 있는가(누구에게나). */
+  hiddenPresent: boolean;
+  /** 몇 건인가 — DA·관리자에게만 온다. `null` 은 «모른다»이며 0 과 다르다. */
+  hiddenCount: number | null;
 };
 
 export const knowledgeApi = {
@@ -52,7 +55,9 @@ export const knowledgeApi = {
     return {
       packs: envelope.data || [],
       blockedReason: String(envelope.blocked_reason || ''),
-      hiddenCount: Number(envelope.hidden_count || 0),
+      hiddenPresent: Boolean(envelope.hidden_present),
+      hiddenCount: envelope.hidden_count === undefined || envelope.hidden_count === null
+        ? null : Number(envelope.hidden_count),
     };
   },
 

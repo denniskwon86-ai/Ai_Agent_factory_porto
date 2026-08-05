@@ -78,7 +78,7 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
       // ⚠️ 여기서 배너까지 띄우지 않는다(감사 §2: 중복 배너 금지). 목록 실패는 목록 자리에서
       //   «조회 불가 + 다시 시도»로 말한다. 배너는 **행동 실패**에만 쓴다.
       setList(failed<Publication[]>(e));
-      reportRequestFailure();
+      reportRequestFailure(e?.status);
     } finally { setBusy(null); }
   }, []);
 

@@ -44,9 +44,8 @@ export function JarvisRail({
   const logRef = useRef<HTMLDivElement>(null);
   // [UIUX-AUDIT-29 §3] 상태를 **실제 응답으로만** 바꾼다. 예전에는 서버가 죽어도 «연결»이었다.
   const health = useBackendHealth();
-  // [UIUX-AUDIT-33 §4] 낮은 화면(≤760px)에서는 처음부터 접는다 — 로그가 설 자리가 없다.
+  // 대화가 시작된 뒤의 «바로 물어보기» 한 줄 토글 상태.
   const [quickOpen, setQuickOpen] = useState(false);
-  const quickCollapsed = typeof window !== 'undefined' && window.innerHeight <= 760;
 
   useEffect(() => jarvisSession.subscribe(() => setTurns(jarvisSession.turns())), []);
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [turns]);
@@ -66,7 +65,7 @@ export function JarvisRail({
       // 실패를 답으로 위장하지 않는다 — 무엇이 안 됐는지 그대로 말한다.
       //   ★ 그리고 그 실패를 상태 표시에 반영한다. 실패했는데 머리에 «연결»이 떠 있으면
       //     사용자는 원인을 자기 질문 탓으로 돌린다.
-      reportRequestFailure();
+      reportRequestFailure(e?.status);
       setErr(e?.status === 401
         ? '사용자를 지정해야 비서가 답할 수 있습니다.'
         : `비서 응답을 받지 못했습니다: ${e?.message || e}`);
@@ -105,39 +104,70 @@ export function JarvisRail({
         </div>
       )}
 
-      {/* ★★ [UIUX-AUDIT-33 §4] 대화가 시작되면 «바로 물어보기»를 접는다.
+      {/* ★★ [UIUX-AUDIT-33 §4] 대화가 시작되면 «바로 물어보기»를 한 줄로 접는다.
           감사 실측: 1280×720 오프라인 상태에서 로그 높이가 **24px** 밖에 남지 않았다.
           머리·문맥·근거·빠른 질문·오프라인 안내가 모두 고정 높이를 차지했기 때문이다.
-          빠른 질문은 **시작을 돕는 장치**이므로 첫 답이 오면 역할이 끝난다 — 접되 없애지는
-          않는다(다시 펼칠 수 있어야 다음 질문을 고를 수 있다). */}
-      {quickQuestions.length > 0 && (
-        turns.length === 0 && !quickCollapsed ? (
-          <div className="jarvis-quick">
-            <b>바로 물어보기</b>
-            {quickQuestions.map((q) => (
-              <button key={q} onClick={() => send(q)} disabled={busy}>{q}</button>
-            ))}
-          </div>
-        ) : (
-          <div className="jarvis-quick collapsed">
-            <button type="button" className="jarvis-quick-toggle"
-              aria-expanded={quickOpen}
-              onClick={() => setQuickOpen((v) => !v)}>
-              바로 물어보기 {quickQuestions.length}개 {quickOpen ? '접기' : '펼치기'}
-            </button>
-            {quickOpen && quickQuestions.map((q) => (
-              <button key={q} onClick={() => send(q)} disabled={busy}>{q}</button>
-            ))}
-          </div>
-        )
+
+          ★★ [2026-08-04 실측 결함] 대화가 **시작되기 전에는** 이 블록을 여기 두지 않는다.
+          고정 블록으로 두면 그 아래 로그 영역이 250px 가까이 빈 채로 남았다 — 사용자에게는
+          «비서가 아무것도 하지 않는 자리»로 보인다. 시작 전 추천 질문은 로그 안의 시작 상태로
+          내려간다(아래 `jarvis-zero`). 그러면 빈 영역이 사라지고 질문도 그대로 보인다. */}
+      {quickQuestions.length > 0 && turns.length > 0 && (
+        <div className="jarvis-quick collapsed">
+          <button type="button" className="jarvis-quick-toggle"
+            aria-expanded={quickOpen}
+            onClick={() => setQuickOpen((v) => !v)}>
+            바로 물어보기 {quickQuestions.length}개 {quickOpen ? '접기' : '펼치기'}
+          </button>
+          {quickOpen && quickQuestions.map((q) => (
+            <button key={q} onClick={() => send(q)} disabled={busy}>{q}</button>
+          ))}
+        </div>
       )}
 
       {/* 대화는 **이 레일 안에서** 유지된다(중앙 Banner 로 보내지 않는다). */}
-      <div className="jarvis-log" ref={logRef} aria-live="polite">
+      {/* `zero` 는 «아직 대화가 없다»는 뜻이다 — 그때만 시작 상태가 레일 높이를 채운다.
+          대화가 시작되면 위에서부터 쌓여야 하므로(`align-content: start`) 클래스를 뗀다. */}
+      <div className={`jarvis-log ${turns.length === 0 && !err ? 'zero' : ''}`}
+        ref={logRef} aria-live="polite">
         {turns.length === 0 && !err && (
-          <div className="jarvis-answer">
-            무엇이든 물어보십시오. 지금 선택한 객체와 회사·조직 권한 범위를 문맥으로 씁니다 —
-            별도로 ID 를 입력할 필요는 없습니다.
+          /* 시작 상태 — 빈 채로 두지 않는다. 안내 · 지금 문맥 · 추천 질문을 함께 보여준다.
+             ⚠️ 위 `jarvis-context` 가 «무엇을 보고 있는지»를 이미 말하므로 제목을 되풀이하지
+               않는다. 여기서는 **비서가 실제로 무엇을 쓸 수 있는지**(객체·할 수 있는 일)를 말한다. */
+          <div className="jarvis-zero">
+            <p className="jarvis-zero-lead">
+              무엇이든 물어보십시오. 지금 선택한 객체와 회사·조직 권한 범위를 문맥으로 씁니다 —
+              별도로 ID 를 입력할 필요는 없습니다.
+            </p>
+            <dl className="jarvis-zero-ctx">
+              {/* ⚠️ `current_module`(예: `collaboration/decisions`)은 **내부 식별자**다.
+                  화면에 그대로 내보내면 사용자에게 뜻 없는 영문 슬러그가 보인다(실측에서 그랬다).
+                  «무엇을 보고 있는가»는 위 `jarvis-context` 제목이 이미 한국어로 말한다. */}
+              <div>
+                <dt>선택한 객체</dt>
+                {/* ⚠️ `selected_object_type`(`master_type` 등)도 내부 식별자다. 괄호로 붙여 놓으면
+                    사용자에게 뜻 없는 영문이 하나 더 늘어난다. 식별자는 **id 하나**로 충분하다.
+                    선택이 없다는 것은 숨기지 않는다 — 숨기면 사용자는 객체별 답을 기대한다. */}
+                <dd>{context.selected_object_id
+                  || '없음 — 목록에서 하나를 고르면 그 객체를 기준으로 답합니다'}</dd>
+              </div>
+              {!!context.available_actions?.length && (
+                <div>
+                  <dt>여기서 할 수 있는 일</dt>
+                  <dd>{context.available_actions.join(' · ')}</dd>
+                </div>
+              )}
+            </dl>
+            {/* 낮은 화면에서도 감추지 않는다 — 이제 추천 질문은 **스크롤되는 로그 안**에 있어서
+                다른 영역을 밀지 않는다. 종전에는 고정 블록이라 720px 에서 접어야 했다. */}
+            {quickQuestions.length > 0 && (
+              <div className="jarvis-zero-quick">
+                <b>추천 질문</b>
+                {quickQuestions.map((q) => (
+                  <button key={q} onClick={() => send(q)} disabled={busy}>{q}</button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {turns.map((t, i) => (
