@@ -71,6 +71,23 @@
 - 다음 행동 / 담당 / 착수 조건: **Claude Code** — 인수인계 §4.2 화면 이관 순서(`Telemetry(227) → ProgramAdmin(239) → Shadow(305) → …`) 또는 D-017 P3-1. **Supervisor** — 결정 3건: ① **조직 범위 정본**(위 뿌리 원인) ② 경영계획 **수립 권한**을 별도로 둘지(지금은 «시나리오를 만들 수 있는 사람이 가정도 넣는다» 로 통일) ③ `resolve_scope_ref` 가 해석하지 못하는 것이 데이터 미비인지 코드 결함인지 — 확인 후 별개 작업 필요.
 - 교대 체크포인트: 변경 = `api/routes/planning_control.py`(라우트 14개 + 헬퍼 4개) · `core/scope_guard.py`(`_actor_scopes` 원천 수정) · `api/deps.py`(`hidden_envelope`·`_EXACT_COUNT_RULES`) · `tests/test_planning_control_gate.py`(신규 33건). 미변경 = 화면, `planning_engine`·`planning_import` 내부, DB 스키마. 검증 = 1,970 passed. 재개 지점 = 화면 이관 또는 P3-1. 금지 범위 = `visible_scopes` 의 `include_descendants` 기본값을 켜는 것, `_actor_scopes` 를 부서 해석 전용으로 되돌리는 것, 범위 밖 요청에 403 을 주는 것(존재를 알린다), 자기 조직 요청이 404 가 되는 상태를 «안전» 으로 읽는 것, 실서버 DB 를 향해 쓰기 엔드포인트를 탐침하는 것.
 
+### [SCOPE-WRITE-56] D-018 후속 6 — 신규 쓰기 정본 강제 · 「청소하고 다시 더러워지는」 것을 끊었다
+- 작성자 / 기록 시각: Claude Code / 2026-08-05 KST
+- 왜 지금 기록하는가: `[SEC-SCOPE-51]` 후속 ⑥(신규 쓰기 `node_id` 강제)을 구현했다. **백필만으로는 정본 통일이 끝나지 않는다** — 저장 경로가 요청 값을 그대로 넣으면 코드가 다시 들어오고, 백필은 «한 번 청소하고 다시 더러워지는» 작업이 된다.
+- 상태: **완료(후속 6) · 후속 7·8·10 남음**
+- ★★★ **발견: `_scope()` 가 정규화한 값을 버리고 있었다.** 요청 값을 정본으로 해석해 돌려주는데 라우트가 그 결과를 **판정에만 쓰고 저장은 원본(코드)으로** 했다. 증거는 실측 데이터에 있었다 — `plan_facts` 에서 `org_id='MNM_BATTERY'`(코드)와 `owner_organization_id='node_36c1…'`(정본)이 **갈라져 있었다.** 백필이 후자만 고쳤기 때문인데, 그 상태로 새 fact 를 넣으면 코드가 다시 소유가 된다.
+  ⚠️ 특히 `planning_store.put_fact` 는 `owner_organization_id` 가 비면 **`org_id` 로 채운다** — 즉 빈 값을 넘기면 코드가 소유로 저장된다. 그래서 라우트가 **항상 정규화된 값을 채워** 넘기게 했다.
+- 무엇을 바꿨는가: `agent_governance` 생성·복사(`owner_scope_id`) · `planning_control` `put_fact`·`create_scenario`(`owner_organization_id`)가 정규화된 값을 저장한다. 신규 헬퍼 `_canonical_owner`(자산) + 기존 `_scope_eff().scope_node_id`(계획).
+- ★★ **`plan_facts.org_id` 는 정규화하지 않았다.** 그것은 **`fact_id` 의 구성 요소**이고(`org_id|account|period|…`) 인덱스 3개와 화면 조회 파라미터가 그 값을 쓴다 — 바꾸면 기본키가 달라져 기존 행과 이어지지 않는다. 권한 판정은 `owner_organization_id`(정본)로 하므로 **통제는 정본을 탄다.** 두 컬럼이 다른 형태인 것은 «갈라짐» 이 아니라 **역할 분담**이다(조회 키 vs 소유·권한). 그 사실을 테스트로 못 박았다.
+- ★ **거절하지 않고 정규화한다.** D-005 입력 호환 계약이 코드·부서 id 를 계속 받기로 했으므로 저장 시점에 거절하면 이행이 끝나기 전에 화면이 멈춘다. 해석 못 한 값은 **원본을 유지**한다 — 빈 값으로 만들면 «소유 미지정» 이 되어 그 자산이 저장소 계약상 **아무에게도 보이지 않고**(«모르니까 보여 준다» 금지) 만든 사람이 자기 자산을 잃는다.
+- ★★★ **추가 발견(UX 결함): 오류 메시지가 정본 해시를 그대로 노출하고 있었다.** 백필 후 «`node_41402723bc90` 조직의 자산을 만들 권한이 없습니다» 가 나갔다 — 사용자는 **무슨 조직 때문에 막혔는지 알 수 없고** 관리자에게 무엇을 요청해야 하는지도 모른다. 신규 `_scope_label()` 로 3곳(생성·수정·승인 거부)을 «배터리소재 사업부(MNM_BATTERY)» 형태로 바꿨다. D-018 ③(표시용 값)이 응답 본문에는 적용됐지만 **오류 메시지에는 빠져 있었다** — 테스트가 그것을 잡았다(`assert "node_" not in detail`).
+- 검증: 신규 `tests/test_scope_write_canonical.py` **10건**. `pytest tests/` **2,017 passed · 1 skipped · 실패 0 · exit 0**(기준선 2,007). ★ 가장 중요한 테스트는 `test_new_writes_do_not_create_backfill_debt` 다 — 새 쓰기를 한 뒤 **백필 계획 함수를 다시 돌려** 대상이 0건임을 확인한다(격리 DB 대상). 그것이 ⑥의 목적을 직접 검증하는 형태다.
+  ⚠️ 실측으로도 확인했다: 운영 DB 에 백필 대상 **0건 유지**, 테스트 흔적 **0건**(경영계획 DB 격리가 동작한다).
+- ⚠️ **낡은 테스트 기대 2건 정정**(제품 동작은 정확하다): 복사 결과의 `owner_scope_id == "LS_MNM"` → 정본 기대로, 403 메시지에 `"LS_MNM"` 문자열 기대 → 표시용 이름 + **정본 해시 미노출** 검사로 바꿨다.
+- 영향·주의사항: 저장 형태가 바뀌므로 **화면이 `owner_scope_id` 를 그대로 표시하면 해시가 보인다.** 응답의 `scope_code`·`scope_name`(D-018 ③)을 쓰거나 목록의 표시 필드를 쓸 것 — P2 화면 작업자가 알아야 한다. ⚠️ `org_id` 로 조회하는 기존 화면은 그대로 동작한다(그 컬럼을 건드리지 않았다).
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — 후속 ⑦ **코드 별칭·변경이력 표 + tenant·mode 유일성 제약**. 지금은 코드 중복이 «조회 시점에 거부»(fail-closed)로만 막히고 **저장 시점 제약이 없다** — 같은 코드를 두 노드에 넣는 것 자체는 가능하다. 그다음 ⑩(백업·시드에서 `node_id` 보존). **Supervisor** — 결정 요청 그대로(상위 조직 경영계획 상속).
+- 교대 체크포인트: 변경 = `api/routes/agent_governance.py`(`_canonical_owner`·`_scope_label`·저장 2곳·메시지 3곳) · `api/routes/planning_control.py`(`put_fact`·`create_scenario`) · `tests/test_scope_write_canonical.py`(신규 10건) · `tests/test_agent_governance_api.py`(기대 2건). 미변경 = `org_id`, DB 스키마, 불변 이력, 화면. 검증 = 2,017 passed. **재개 지점 = D-018 후속 ⑦.** 금지 범위 = `plan_facts.org_id` 를 정규화하는 것(기본키가 깨진다), 해석 실패 시 소유를 빈 값으로 만드는 것(자산이 사라진다), 저장 시점에 별칭을 거절하는 것(D-005 호환 계약 위반), 오류 메시지에 정본 해시를 넣는 것.
+
 ### [SCOPE-FILL-55] D-018 후속 5 — 백필 완료(49건) · 백필이 결함 셋을 드러냈다
 - 작성자 / 기록 시각: Claude Code / 2026-08-05 KST
 - 왜 지금 기록하는가: `[SEC-SCOPE-51]` 후속 ⑤(기존 코드값 백필)를 완료했다. **백필 자체는 49건으로 작았지만, 그것이 숨어 있던 결함 셋을 한꺼번에 드러냈다** — 그 셋이 이 항목의 본론이다.

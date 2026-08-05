@@ -196,12 +196,22 @@ async def list_facts(org_id: str = "", period: str = "", value_kind: str = "",
 
 @router.post("/facts")
 async def put_fact(req: FactRequest, p: Principal = Depends(current_principal)):
-    await _scope(p, req.owner_organization_id or req.org_id, req.account_code)
+    """[D-018 ⑥] **소유 조직은 정본 `node_id` 로 저장한다.**
+
+    ★ `_scope()` 는 이미 요청 값을 정본으로 해석해 돌려준다 — 종전에는 그 결과를 판정에만 쓰고
+      **저장은 원본(코드)으로** 했다. 그래서 백필로 정리한 컬럼에 코드가 다시 들어왔다.
+    ⚠️ `planning_store.put_fact` 는 `owner_organization_id` 가 비면 `org_id` 로 채운다 —
+      즉 빈 값을 넘기면 **코드가 소유로 저장된다.** 그래서 항상 정규화된 값을 채워 넘긴다.
+    ⚠️ `org_id` 는 정규화하지 **않는다.** 그것은 `fact_id` 의 구성 요소이고(`org_id|account|…`)
+      인덱스 3개·화면 조회 파라미터가 그 값을 쓴다 — 바꾸면 기본키가 달라져 기존 행과 이어지지
+      않는다. 권한 판정은 `owner_organization_id`(정본)로 하므로 통제는 정본을 탄다."""
+    eff = await _scope_eff(p, req.owner_organization_id or req.org_id, req.account_code)
+    owner = eff.scope_node_id or (req.owner_organization_id or req.org_id)
     try:
         data = await asyncio.to_thread(
             planning_store.put_fact, req.org_id, req.account_code, req.period,
             req.value_kind, req.amount, req.currency or "KRW", req.scenario_id or "",
-            req.source_ref or "", req.owner_organization_id or "",
+            req.source_ref or "", owner,
             req.scope_type or "ORG_PRIVATE", req.classification or "INTERNAL",
             "tenant_default", "REAL", req.product_code or "", req.cost_center or "")
         return {"status": "success", "data": data}
@@ -252,7 +262,9 @@ async def list_scenarios(org_id: str = "", p: Principal = Depends(current_princi
 
 @router.post("/scenarios")
 async def create_scenario(req: ScenarioRequest, p: Principal = Depends(current_principal)):
-    await _scope(p, req.org_id, req.scenario_id)
+    """[D-018 ⑥] 소유 조직은 **정본**으로 저장한다(`org_id` 는 조회 키이므로 그대로 둔다)."""
+    eff = await _scope_eff(p, req.org_id, req.scenario_id)
+    owner = eff.scope_node_id or req.org_id
 
     def _ins():
         from datetime import datetime, timezone
@@ -265,7 +277,7 @@ async def create_scenario(req: ScenarioRequest, p: Principal = Depends(current_p
                 "INSERT INTO scenarios(scenario_id,name,org_id,baseline_kind,owner,created_at,"
                 "owner_organization_id) VALUES(?,?,?,?,?,?,?)",
                 (req.scenario_id, req.name, req.org_id, req.baseline_kind, req.owner or "",
-                 datetime.now(timezone.utc).isoformat(timespec="seconds"), req.org_id))
+                 datetime.now(timezone.utc).isoformat(timespec="seconds"), owner))
             conn.commit()
             return dict(conn.execute("SELECT * FROM scenarios WHERE scenario_id=?",
                                      (req.scenario_id,)).fetchone())

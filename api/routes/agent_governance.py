@@ -109,11 +109,51 @@ def _assert_may_read(p: Principal, kind: str):
     return require_caps(p, _CAPS[kind][0], resource=f"agent_asset:{kind}", action="read")
 
 
+def _scope_label(scope_id: str) -> str:
+    """[D-018 ③] 오류 메시지에 쓸 **사람이 읽는 범위 이름.**
+
+    ⚠️ 정본은 `node_41402723bc90` 같은 해시다. 그것을 메시지에 그대로 넣으면 사용자는 **무슨
+      조직인지 알 수 없고** 관리자에게 무엇을 요청해야 하는지도 모른다. 백필 후 실제로 그런
+      메시지가 나가고 있었다(테스트가 잡았다).
+    ★ 이름을 못 찾으면 원본을 보여준다 — 「(미지정)」으로 뭉개면 어느 조직 때문에 막혔는지가
+      사라진다."""
+    if not (scope_id or "").strip():
+        return "(미지정)"
+    try:
+        from core.enterprise_context.resolver import ecm_resolver
+        r = ecm_resolver.resolve_scope_ref(scope_id)
+        name, code = r.get("name_ko") or "", r.get("code") or ""
+        if name and code:
+            return f"{name}({code})"
+        return name or code or scope_id
+    except Exception:
+        return scope_id
+
+
+def _canonical_owner(owner_scope_id: str) -> str:
+    """[D-018 ⑥] **저장할 소유 조직을 정본 `node_id` 로 바꾼다.**
+
+    ⚠️ 해석하지 못하면 **원본을 그대로 둔다.** 빈 값으로 만들면 «소유 미지정» 이 되고, 저장소
+      계약상 그 자산은 **아무에게도 보이지 않는다**(«모르니까 보여 준다» 금지) — 만든 사람이
+      자기 자산을 잃는다. 해석 실패는 `needs_normalization` 으로 관측되므로 나중에 고칠 수 있다.
+    ⚠️ 여기서 거절하지 않는 이유: D-005 입력 호환 계약이 코드·부서 id 를 계속 받기로 했고,
+      거절하면 이행이 끝나기 전에 화면이 멈춘다. 정규화는 «받아서 정본으로 저장» 이다."""
+    if not (owner_scope_id or "").strip():
+        return ""
+    try:
+        from core.enterprise_context.scoping import resolve_scope_ref
+        return resolve_scope_ref(owner_scope_id) or owner_scope_id
+    except Exception:
+        return owner_scope_id
+
+
 def _assert_may_create(p: Principal, kind: str, visibility: str, owner_scope_id: str):
     """만들 수 있는 공개 범위인가.
 
     ★ 전사 공개를 **생성 시점에** 막는다. 승인만 막으면 부서 member 가 만든 초안이 전사 자산
-      목록에 «전사» 로 올라앉는다 — 실행은 안 되지만 목록은 그것을 전사 자산으로 보여 준다."""
+      목록에 «전사» 로 올라앉는다 — 실행은 안 되지만 목록은 그것을 전사 자산으로 보여 준다.
+    ★ `can_manage_scope` 는 별칭·정본을 양쪽으로 맞춰 비교한다(백필 이행기) — 여기서 다시
+      정규화하지 않는다. 저장할 값의 정규화는 `_canonical_owner` 가 담당한다."""
     c = require_caps(p, _CAPS[kind][1], resource=f"agent_asset:{kind}", action="create")
     if visibility == VIS_SYSTEM:
         raise HTTPException(
@@ -127,7 +167,7 @@ def _assert_may_create(p: Principal, kind: str, visibility: str, owner_scope_id:
     if visibility in (VIS_SCOPE, VIS_DESCENDANTS) and not c.can_manage_scope(owner_scope_id):
         raise HTTPException(
             status_code=403,
-            detail=f"'{owner_scope_id or '(미지정)'}' 조직의 자산을 만들 권한이 없습니다 — "
+            detail=f"'{_scope_label(owner_scope_id)}' 조직의 자산을 만들 권한이 없습니다 — "
                    f"관리 범위 밖입니다.")
     return c
 
@@ -152,8 +192,8 @@ def _assert_may_write(p: Principal, kind: str, asset: Dict[str, Any], verb: str)
             if (asset.get("created_by") or "") != (p.user_id or ""):
                 raise HTTPException(
                     status_code=403,
-                    detail=f"'{asset.get('owner_scope_id') or '(미지정)'}' 조직 자산을 수정할 "
-                           f"권한이 없습니다 — 관리 범위 밖입니다.")
+                    detail=f"'{_scope_label(asset.get('owner_scope_id') or '')}' 조직 자산을 "
+                           f"수정할 권한이 없습니다 — 관리 범위 밖입니다.")
     return c
 
 
@@ -172,8 +212,8 @@ def _assert_may_publish(p: Principal, kind: str, asset: Dict[str, Any], verb: st
             not c.can_manage_scope(asset.get("owner_scope_id") or ""):
         raise HTTPException(
             status_code=403,
-            detail=f"'{asset.get('owner_scope_id') or '(미지정)'}' 조직 자산을 승인·폐기할 "
-                   f"권한이 없습니다 — 관리 범위 밖입니다.")
+            detail=f"'{_scope_label(asset.get('owner_scope_id') or '')}' 조직 자산을 "
+                   f"승인·폐기할 권한이 없습니다 — 관리 범위 밖입니다.")
     if asset["visibility"] == VIS_PERSONAL and (asset.get("created_by") or "") != (p.user_id or ""):
         raise HTTPException(status_code=403, detail="다른 사람의 개인 자산은 다룰 수 없습니다.")
     return c
@@ -301,8 +341,8 @@ async def create_asset(kind_path: str, req: AssetCreate,
         raise HTTPException(status_code=401, detail="사용자 식별이 필요합니다.")
     try:
         a = agent_assets.create(kind, req.name_ko, req.body, p.user_id,
-                                owner_scope_id=req.owner_scope_id, visibility=req.visibility,
-                                purpose=req.purpose)
+                                owner_scope_id=_canonical_owner(req.owner_scope_id),
+                                visibility=req.visibility, purpose=req.purpose)
     except AssetError as e:
         raise HTTPException(status_code=400, detail=str(e))
     _audit(p, audit.AGENT_ASSET_CHANGED, a["asset_id"], kind, "allowed",
@@ -350,8 +390,8 @@ async def copy_asset(kind_path: str, asset_id: str, req: AssetCopy,
     name = (req.name_ko or "").strip() or f"{src.get('name_ko') or asset_id} 사본"
     try:
         a = agent_assets.create(kind, name, body, p.user_id,
-                                owner_scope_id=req.owner_scope_id, visibility=req.visibility,
-                                purpose=src.get("purpose") or "")
+                                owner_scope_id=_canonical_owner(req.owner_scope_id),
+                                visibility=req.visibility, purpose=src.get("purpose") or "")
     except AssetError as e:
         raise HTTPException(status_code=400, detail=str(e))
     _audit(p, audit.AGENT_ASSET_CHANGED, a["asset_id"], kind, "allowed",

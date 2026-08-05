@@ -323,7 +323,13 @@ def test_visible_but_unmanaged_asset_cannot_be_approved(client, monkeypatch):
     assert client.get(f"{B}/agents/{a['asset_id']}", headers=H(MGR)).status_code == 200, \
         "자산은 여전히 보여야 한다 — 안 보이면 이 테스트는 범위 판정을 확인하지 못한다"
     r = client.post(f"{B}/agents/{a['asset_id']}/approve", headers=H(MGR))
-    assert r.status_code == 403 and "LS_MNM" in r.json()["detail"]
+    assert r.status_code == 403
+    # ★★ [D-018 ③] 오류 메시지는 **사람이 읽는 이름**을 보여준다. 정본 해시(`node_4140…`)를
+    #   그대로 노출하면 사용자는 무슨 조직 때문에 막혔는지 알 수 없고 관리자에게 무엇을
+    #   요청해야 하는지도 모른다 — 백필 후 실제로 그런 메시지가 나가고 있었다.
+    detail = r.json()["detail"]
+    assert "LS_MNM" in detail or "LS MnM" in detail, f"조직을 식별할 수 없는 메시지: {detail}"
+    assert "node_" not in detail, f"정본 해시가 사용자에게 노출됐다: {detail}"
     assert client.post(f"{B}/agents/{a['asset_id']}/retire", headers=H(MGR)).status_code == 403
 
 
@@ -418,7 +424,10 @@ def test_file_asset_can_be_copied_into_an_org_asset(client):
     d = r.json()
     assert d["status"] == ST_DRAFT, "복사본이 승인 상태로 시작하면 검토를 건너뛴다"
     assert d["copied_from"] == "file:agent:RFP_Analyst" and d["copied_from_source"] == "LEGACY"
-    assert d["owner_scope_id"] == "LS_MNM" and d["approved_by"] == ""
+    # ★ [D-018 ⑥] 코드로 보내도 **정본 `node_id` 로 저장된다.** 그래야 백필로 정리한 컬럼에
+    #   코드가 다시 들어오지 않는다(신규 쓰기 강제).
+    assert d["owner_scope_id"].startswith("node_"),         f"소유 조직이 정본으로 저장되지 않았다: {d['owner_scope_id']}"
+    assert d["approved_by"] == ""
     assert d["body"].get("id") == "RFP_Analyst", "원본 정의가 복사돼야 한다"
 
 
