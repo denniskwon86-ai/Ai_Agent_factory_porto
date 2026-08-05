@@ -245,6 +245,11 @@ def test_gateway_logs_identity_and_cost_fields(tmp_path, monkeypatch):
     import core.llm_gateway as gw
 
     monkeypatch.chdir(tmp_path)
+    # ★ [2026-08-05] 작업공간 경로가 절대경로로 고정됐다(`core/paths.py`). cwd 만 옮기면
+    #   더 이상 격리되지 않으므로 **격리 지점을 함께 돌린다.** 이 한 줄이 없으면 테스트가
+    #   제품 `projects/` 에 프로젝트를 만든다.
+    import core.paths as _paths
+    monkeypatch.setattr(_paths, "PROJECTS_DIR", str(tmp_path / "projects"))
     monkeypatch.setattr(gw, "_LLM_CALL_LOG_PATH", str(tmp_path / "log.jsonl"))
 
     class _S:
@@ -274,6 +279,11 @@ def test_gateway_log_survives_stateless_call(tmp_path, monkeypatch):
     import core.llm_gateway as gw
 
     monkeypatch.chdir(tmp_path)
+    # ★ [2026-08-05] 작업공간 경로가 절대경로로 고정됐다(`core/paths.py`). cwd 만 옮기면
+    #   더 이상 격리되지 않으므로 **격리 지점을 함께 돌린다.** 이 한 줄이 없으면 테스트가
+    #   제품 `projects/` 에 프로젝트를 만든다.
+    import core.paths as _paths
+    monkeypatch.setattr(_paths, "PROJECTS_DIR", str(tmp_path / "projects"))
     monkeypatch.setattr(gw, "_LLM_CALL_LOG_PATH", str(tmp_path / "log.jsonl"))
     gw._log_llm_call(object(), "vision_router", "json", 0, ["cache_hit"], True, 0.0)
     rec = json.loads((tmp_path / "log.jsonl").read_text(encoding="utf-8").strip())

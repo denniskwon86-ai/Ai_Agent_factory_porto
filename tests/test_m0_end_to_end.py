@@ -51,6 +51,11 @@ def stack(tmp_path, monkeypatch):
       `ledger_control` 은 상단 import 라 그 모듈 속성도 갈아야 한다. 하나만 갈면 기록과 조회가
       **다른 DB** 를 보게 되어 "기록은 됐는데 조회는 비어 있는" 상태가 된다(실제로 겪음)."""
     monkeypatch.chdir(tmp_path)
+    # ★ [2026-08-05] 작업공간 경로가 절대경로로 고정됐다(`core/paths.py`). cwd 만 옮기면
+    #   더 이상 격리되지 않으므로 **격리 지점을 함께 돌린다.** 이 한 줄이 없으면 테스트가
+    #   제품 `projects/` 에 프로젝트를 만든다.
+    import core.paths as _paths
+    monkeypatch.setattr(_paths, "PROJECTS_DIR", str(tmp_path / "projects"))
     import core.decision_ledger as ledger_mod
 
     ledger = DecisionLedger(db_path=str(tmp_path / "ledger.db"))

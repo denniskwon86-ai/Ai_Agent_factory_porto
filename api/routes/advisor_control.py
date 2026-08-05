@@ -28,6 +28,7 @@ from core.advisor_playbook import (load_playbook, list_playbooks, score_readines
 from core.advisor_store import AdvisorStoreError, advisor_store
 from core.enterprise_context import (ENTITY_MODE_KO, EnterpriseContext,
                                      EnterpriseContextError)
+from core.paths import workspace_path
 
 router = APIRouter(prefix="/api/v1/advisor", tags=["Advisor"])
 
@@ -470,7 +471,7 @@ async def bootstrap_project(blueprint_id: str, req: BootstrapIn,
     #   순서를 바꾸면 LLM 이 요약을 사용자 발화로 오해한다.
     idea = (bp.business.problem or bp.business.objective or "").strip()
     initial_idea = (idea + "\n\n" + _blueprint_brief(bp)).strip()
-    ws = os.path.join("./projects", req.project_id)
+    ws = workspace_path(req.project_id)
     state_path = os.path.join(ws, "latest_state.json")
     await asyncio.to_thread(_write_json, state_path, {
         "project_name": req.project_id,
@@ -523,7 +524,7 @@ async def create_data_tasks(blueprint_id: str, project_id: str,
        이 엔드포인트는 기획이 놓친 것을 사람이 보강하는 경로다.)"""
     bp = _blueprint_for_action(blueprint_id, ctx, p)
     _safe_id(project_id, "project_id")
-    ws = os.path.join("./projects", project_id)
+    ws = workspace_path(project_id)
     if not os.path.isdir(ws):
         raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
     assert_project_writable(p, project_id)

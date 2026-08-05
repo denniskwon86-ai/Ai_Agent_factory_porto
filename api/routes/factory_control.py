@@ -49,6 +49,7 @@ from core.async_orchestrator import orchestrator
 #   여기서 `LIBRARY_DIR = "library"` 로 다시 선언하면 게시는 이 경로에 쓰고 사용여부 제어는
 #   다른 경로를 보는 상태가 되어, 실제 프로그램이 "존재하지 않는 프로그램"으로 거부된다.
 from core import library_paths
+from core.paths import workspace_path
 
 router = APIRouter(prefix="/api/v1/factory")
 
@@ -177,7 +178,7 @@ def _iter_visible_projects(p) -> list:
     ⚠️ `GET /projects` 와 `supervisor_chat` 이 각자 디렉터리를 훑고 있었는데, 후자는
       **권한을 전혀 보지 않고 전체 프로젝트 이름을 LLM 브리핑에 동봉**했다.
       즉 다른 부서의 프로젝트 이름이 그대로 새어나갔다. 목록 생성을 한 곳으로 모은다."""
-    root = "./projects"
+    root = workspace_path()
     out = []
     try:
         names = os.listdir(root)
@@ -375,7 +376,7 @@ async def set_project_ownership(project_id: str, req: OwnershipUpdate,
 
     진실원본은 `project_meta.json` 이며, 저장 직후 `ownership` 미러가 갱신된다."""
     _safe_id(project_id, "project_id")
-    ws = os.path.join("./projects", project_id)
+    ws = workspace_path(project_id)
     if not os.path.isdir(ws):
         raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
     assert_project_writable(p, project_id)
@@ -399,7 +400,7 @@ async def get_projects(p: Principal = Depends(current_principal)):
     reason = visibility_block_reason(p)
     if reason:
         return {"status": "success", "data": [], "blocked_reason": reason}
-    projects_dir = "./projects"
+    projects_dir = workspace_path()
     os.makedirs(projects_dir, exist_ok=True)
 
     project_list = []
@@ -476,7 +477,7 @@ def provision_project(project_id: str, template_id: str = "default",
     _safe_tid(tid)                                   # 형식 오류 → ValueError
     if tid not in {t["id"] for t in list_templates()}:
         raise KeyError(tid)                          # 미존재 → KeyError
-    project_path = os.path.join("./projects", project_id)
+    project_path = workspace_path(project_id)
     if os.path.exists(project_path):
         raise FileExistsError(project_id)
     os.makedirs(project_path, exist_ok=True)
@@ -579,7 +580,7 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
     if tid not in {t["id"] for t in list_templates()}:
         raise HTTPException(status_code=404, detail=f"존재하지 않는 템플릿입니다: {tid}")
     
-    mega_path = os.path.join("./projects", req.mega_project_id)
+    mega_path = workspace_path(req.mega_project_id)
     if os.path.exists(mega_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 메가 프로젝트 ID입니다.")
         
@@ -641,7 +642,7 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
         domain_agents = _cfg.get("agents") or []
 
         sub_id = f"{req.mega_project_id}_{domain}"
-        sub_path = os.path.join("./projects", sub_id)
+        sub_path = workspace_path(sub_id)
         os.makedirs(sub_path, exist_ok=True)
 
         sub_tid = _cfg.get("template_id") or tid
@@ -689,7 +690,7 @@ async def mega_project_plan(project_id: str, req: MegaPlanRequest, p: Principal 
     """마스터 에이전트 연동: 초기 기획안을 바탕으로 master_data를 추천/생성"""
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
-    state_path = os.path.join("projects", project_id, "latest_state.json")
+    state_path = workspace_path(project_id, "latest_state.json")
     if not os.path.exists(state_path):
         raise HTTPException(status_code=404, detail="마스터 프로젝트 상태를 찾을 수 없습니다.")
         
@@ -738,7 +739,7 @@ async def start_all_mega_subprojects(project_id: str, p: Principal = Depends(cur
     """마스터에 종속된 모든 서브 프로젝트 일괄 가동"""
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
-    state_path = os.path.join("projects", project_id, "latest_state.json")
+    state_path = workspace_path(project_id, "latest_state.json")
     if not os.path.exists(state_path):
         raise HTTPException(status_code=404, detail="마스터 프로젝트 상태를 찾을 수 없습니다.")
         
@@ -755,7 +756,7 @@ async def start_all_mega_subprojects(project_id: str, p: Principal = Depends(cur
     results = []
     import time
     for domain, sub_id in sub_map.items():
-        sub_ws = os.path.join("projects", sub_id)
+        sub_ws = workspace_path(sub_id)
         sub_state_path = os.path.join(sub_ws, "latest_state.json")
         
         try:
@@ -797,7 +798,7 @@ async def delete_project(project_id: str,
     _safe_id(project_id, "project_id")  # rmtree 대상 경로 이탈 방지(가장 파괴적인 벡터)
     assert_project_writable(p, project_id)
     
-    projects_dir = "./projects"
+    projects_dir = workspace_path()
     # 🛑 삭제 전, 해당 프로젝트와 서브 프로젝트들의 실행 중 스프린트를 취소 (좀비 스프린트 방지)
     await orchestrator.cancel_project(project_id)
     sub_projects = []
@@ -863,8 +864,8 @@ async def copy_project(project_id: str, req: ProjectCopyRequest,
     assert_project_writable(p, project_id)
     _safe_id(req.new_project_id, "new_project_id")
     
-    src_path = os.path.join("./projects", project_id)
-    dst_path = os.path.join("./projects", req.new_project_id)
+    src_path = workspace_path(project_id)
+    dst_path = workspace_path(req.new_project_id)
     
     if not os.path.exists(src_path):
         raise HTTPException(status_code=404, detail="원본 프로젝트가 없습니다.")
@@ -979,7 +980,7 @@ async def supervisor_chat(project_id: str, req: SupervisorChatRequest,
                           p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
     assert_project_readable(p, project_id)
-    state_path = os.path.join("projects", project_id, "latest_state.json")
+    state_path = workspace_path(project_id, "latest_state.json")
     state_data = {}
     if os.path.exists(state_path):
         try:
@@ -995,7 +996,7 @@ async def supervisor_chat(project_id: str, req: SupervisorChatRequest,
         st = state_data or {}
         snapshot.append(f"[현재 프로젝트 {project_id}] 단계={st.get('current_stage','?')} / 모드={st.get('factory_mode','?')} "
                         f"/ 태스크={st.get('current_sprint_task_id','없음')} / 단계점수={json.dumps(st.get('stage_scores') or {}, ensure_ascii=False)}")
-        wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
+        wbs_path = workspace_path(project_id, "00_wbs_master_plan.json")
         if os.path.exists(wbs_path):
             with open(wbs_path, "r", encoding="utf-8") as f:
                 _tasks = (json.load(f) or {}).get("tasks", [])
@@ -1030,7 +1031,7 @@ async def check_hotl(project_id: str, p: Principal = Depends(current_principal))
     # 기획(PLANNING_*) 태스크는 WBS 목록에 없으므로 latest_state 의 현재 태스크 id 로도 확인
     # - 미확인 시 기획 중 SSE 유실되면 UI/자동화가 인터뷰·RFP·WBS 게이트 대기를 영영 감지 못 한다
     try:
-        with open(os.path.join("projects", project_id, "latest_state.json"), "r", encoding="utf-8") as f:
+        with open(workspace_path(project_id, "latest_state.json"), "r", encoding="utf-8") as f:
             _cur_tid = (json.load(f) or {}).get("current_sprint_task_id") or ""
         if _cur_tid and _cur_tid != "sprint_init" and await orchestrator.is_hotl_pending(_cur_tid, project_id):
             return {"status": "success", "hotl_task_id": _cur_tid}
@@ -1134,7 +1135,7 @@ async def get_wbs_master_plan(project_id: str,
                           p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
     assert_project_readable(p, project_id)
-    wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
+    wbs_path = workspace_path(project_id, "00_wbs_master_plan.json")
     if not os.path.exists(wbs_path):
         return {"status": "not_found", "data": None}
     try:
@@ -1189,7 +1190,7 @@ async def get_supervisor_feed(project_id: str,
     """슈퍼바이저 콘솔 피드(토론·채점 내레이션) 조회 — 새로고침/재접속 복구용."""
     _safe_id(project_id, "project_id")
     assert_project_readable(p, project_id)
-    feed_path = os.path.join("projects", project_id, "supervisor_feed.json")
+    feed_path = workspace_path(project_id, "supervisor_feed.json")
     if not os.path.exists(feed_path):
         return {"status": "success", "data": []}
     try:
@@ -1204,16 +1205,16 @@ async def get_latest_state(project_id: str,
                           p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
     assert_project_readable(p, project_id)
-    state_path = os.path.join("projects", project_id, "latest_state.json")
+    state_path = workspace_path(project_id, "latest_state.json")
     if not os.path.exists(state_path):
-        tid, fid, vtype = _read_project_meta(os.path.join("projects", project_id))
+        tid, fid, vtype = _read_project_meta(workspace_path(project_id))
         return {"status": "not_found", "data": {"template_id": tid, "output_format_id": fid, "view_type": vtype}}
     try:
         with open(state_path, "r", encoding="utf-8") as f:
             state_data = json.load(f)
         # fallback to meta if missing in state
         if "output_format_id" not in state_data or not state_data["output_format_id"]:
-            _, fid, vtype = _read_project_meta(os.path.join("projects", project_id))
+            _, fid, vtype = _read_project_meta(workspace_path(project_id))
             state_data["output_format_id"] = fid
             state_data["view_type"] = vtype
         return {"status": "success", "data": state_data}
@@ -1244,7 +1245,7 @@ async def create_release(project_id: str,
     """완료된 프로젝트의 최종 결과물을 라이브러리에 스냅샷 저장(배포)."""
     _safe_id(project_id, "project_id")  # 경로 이탈 방지 + release_id가 라이브러리 라우트와 왕복 가능하도록 보장
     assert_project_writable(p, project_id)
-    state_path = os.path.join("projects", project_id, "latest_state.json")
+    state_path = workspace_path(project_id, "latest_state.json")
     if not os.path.exists(state_path):
         raise HTTPException(status_code=404, detail="저장할 결과물 상태가 없습니다.")
     try:
@@ -1271,10 +1272,10 @@ async def create_release(project_id: str,
     #   `scripts/migrate_org_ownership.py:99-109` 가 릴리스에 이 필드가 있다고 전제하는데
     #   생성 경로가 안 남겨서 신규 릴리스마다 마이그레이션을 다시 돌려야 했다. 또한 게시 후
     #   프로젝트 소유권이 바뀌어도 **이미 게시된 것의 출처는 게시 당시 부서**여야 한다.
-    _rel_own = _read_project_ownership(os.path.join("./projects", project_id))
+    _rel_own = _read_project_ownership(workspace_path(project_id))
 
     wbs_tasks = []
-    wbs_path = os.path.join("projects", project_id, "00_wbs_master_plan.json")
+    wbs_path = workspace_path(project_id, "00_wbs_master_plan.json")
     if os.path.exists(wbs_path):
         try:
             with open(wbs_path, "r", encoding="utf-8") as f:
@@ -1335,7 +1336,7 @@ async def create_release(project_id: str,
                                "errors": [f"생성 실패: {e}"]}
     try:
         from nodes.utils.platform_auth_checker import scan_paths
-        _scan = scan_paths([os.path.join("projects", project_id)])
+        _scan = scan_paths([workspace_path(project_id)])
         release["platform_auth_scan"] = {
             "ok": _scan["ok"], "summary": _scan["summary"],
             # 근거 줄을 그대로 싣는다 — 개발자가 반박할 수 있어야 판정이 신뢰받는다.
@@ -1389,7 +1390,7 @@ async def create_release(project_id: str,
                 files_content[f"{k}.md"] = v
                 
         # 워크스페이스 내 주요 파일들도 읽어서 추가 가능 (코드 등)
-        ws_path = os.path.join("projects", project_id)
+        ws_path = workspace_path(project_id)
         for root_dir, _, files in os.walk(ws_path):
             if any(exc in root_dir for exc in [".git", "node_modules", "dist", ".archive"]):
                 continue
@@ -1445,7 +1446,7 @@ async def export_project_zip(project_id: str,
     zip 내부는 project_id 를 최상위 폴더로 하는 상대경로 구조를 유지한다."""
     _safe_id(project_id, "project_id")  # 경로 이탈 방지(임의 디렉토리 압축 차단)
     assert_project_readable(p, project_id)
-    project_path = os.path.join("projects", project_id)
+    project_path = workspace_path(project_id)
     if not os.path.isdir(project_path):
         raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
 
@@ -1491,7 +1492,7 @@ async def resimulate(project_id: str, req: ResimulateRequest,
     _safe_id(project_id, "project_id")
     assert_project_writable(p, project_id)
     
-    state_path = os.path.join("projects", project_id, "latest_state.json")
+    state_path = workspace_path(project_id, "latest_state.json")
     if not os.path.exists(state_path):
         raise HTTPException(status_code=404, detail="재실행할 시뮬레이션 상태가 없습니다.")
     
@@ -1542,7 +1543,7 @@ async def resimulate(project_id: str, req: ResimulateRequest,
         json.dump(updated_state, f, ensure_ascii=False, indent=2)
     
     # 스프린트 가동 (Validator부터 시작 — 설계 건너뛰기)
-    workspace = os.path.join("projects", project_id)
+    workspace = workspace_path(project_id)
     success = await orchestrator.start_sprint(resim_task_id, updated_state, workspace)
     
     if success:

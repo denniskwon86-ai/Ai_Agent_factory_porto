@@ -51,3 +51,37 @@ def data_path(*parts: str) -> str:
 def project_path(*parts: str) -> str:
     """저장소 루트 기준 절대경로(데이터 이외 — `templates/`·`skills/` 등)."""
     return os.path.join(PROJECT_ROOT, *parts)
+
+
+#: SW 생성 프로젝트의 작업공간 뿌리. **여기에 사용자 산출물이 들어 있다.**
+PROJECTS_DIR = os.path.join(PROJECT_ROOT, "projects")
+
+
+def workspace_path(*parts: str) -> str:
+    """생성 프로젝트 작업공간 경로를 **절대경로**로 만든다.
+
+    ★★★ [2026-08-05 실측 결함] DB 경로는 이 파일로 고정했는데 **작업공간은 `"./projects"` 상대
+      경로로 남아 있었다**(35곳). 그래서 서버를 저장소 루트가 아닌 곳에서 띄우면
+      `GET /api/v1/factory/projects` 가 **다른 디렉터리를 읽는다.** 실측: 워크트리에서 백엔드를
+      기동했더니 프로젝트 목록에 실제 프로젝트 9개 대신 테스트 잔여물 1개만 나왔다.
+
+    ⚠️ 이것은 «목록이 비어 보인다» 로 끝나지 않는다. `os.makedirs(..., exist_ok=True)` 를 하는
+      경로들이 있어서 **엉뚱한 위치에 빈 작업공간을 새로 만든다.** 그 뒤 사용자가 프로젝트를
+      만들면 산출물이 그쪽에 쌓이고, 원래 위치에서 보면 «사라진» 상태가 된다. DB 에서 빈 파일이
+      열리던 것과 같은 유형이고, 이쪽은 **사용자가 만든 산출물**이라 더 아프다.
+
+    ## 테스트 격리 — **이 함수가 유일한 관문이다**
+
+    종전에 테스트들은 `monkeypatch.chdir(tmp_path)` 로 격리했다(`./projects` 가 tmp 아래에
+    생기도록). 즉 **제품 코드가 cwd 에 의존한다는 사실을 테스트가 전제**하고 있었고, 절대경로로
+    고치자 20건이 깨졌다. 그것은 격리가 잘못됐다는 뜻이 아니라 **격리 지점이 cwd 였다**는 뜻이다.
+
+    그래서 지점을 여기로 옮겼다. 호출부는 `PROJECTS_DIR` 을 값으로 복사하지 않고 이 함수를
+    부른다(`from core.paths import PROJECTS_DIR` 로 복사하면 그 순간 값이 고정돼 덮을 수 없다).
+    테스트는 다음 한 줄로 격리한다:
+
+        monkeypatch.setattr(core.paths, "PROJECTS_DIR", str(tmp_path / "projects"))
+
+    ⚠️ `chdir` 을 함께 두는 것은 무해하다 — `./library` 처럼 아직 상대경로인 곳이 남아 있다.
+    """
+    return os.path.join(PROJECTS_DIR, *parts)

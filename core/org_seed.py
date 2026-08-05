@@ -174,11 +174,19 @@ def _unbound_block(scope_node: str, why: str) -> str:
             f"남고 되돌릴 수 없습니다. 관리자에게 에이전트팩 바인딩을 요청하십시오.")
 
 
-def reconcile_ownership(projects_dir: str = "projects", library_dir: str = "library") -> Dict[str, Any]:
+def reconcile_ownership(projects_dir: str = None, library_dir: str = None) -> Dict[str, Any]:
     """파일에서 `ownership` 미러를 재구축한다.
 
     진실원본은 `project_meta.json` / `release.json` 이고 이 테이블은 **검색 가능한 인덱스**다.
-    목록 API 가 전량 디렉터리 스캔이라 거기에 부서 필터·정렬을 얹을 수 없어 미러가 필요하다."""
+    목록 API 가 전량 디렉터리 스캔이라 거기에 부서 필터·정렬을 얹을 수 없어 미러가 필요하다.
+
+    ★★ [2026-08-05] 두 기본값이 상대경로(`"projects"`·`"library"`)였다. 이 함수는 소유권 미러를
+      **재구축**하므로 잘못된 디렉터리를 읽으면 «파일이 없다» → 미러가 0건이 된다. 그리고
+      소유권 미러가 비면 목록 API 의 부서 필터가 «소유권 미기록» 으로 전부 통과시킨다
+      (하위호환 규칙). 즉 경로 하나가 틀리면 **권한 필터가 조용히 열린다.**"""
+    from core.paths import PROJECTS_DIR, project_path
+    projects_dir = projects_dir or PROJECTS_DIR
+    library_dir = library_dir or project_path("library")
     n_proj = n_rel = 0
 
     if os.path.isdir(projects_dir):

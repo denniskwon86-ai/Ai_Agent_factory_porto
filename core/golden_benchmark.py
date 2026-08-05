@@ -57,10 +57,13 @@ def _git_commit() -> str:
 
 
 class GoldenBenchmark:
-    def __init__(self, root: str = None, projects_dir: str = "projects"):
+    # ★ [2026-08-05] `projects_dir` 기본값이 상대경로였다 — 호출자가 넘기지 않으면 프로세스
+    #   cwd 를 따라간다. `root` 는 이미 `data_path()` 로 고정돼 있었는데 이쪽만 남아 있었다.
+    def __init__(self, root: str = None, projects_dir: str = None):
+        from core.paths import PROJECTS_DIR
         root = root or data_path("benchmark")
         self.root = root
-        self.projects_dir = projects_dir
+        self.projects_dir = projects_dir or PROJECTS_DIR
         self.scorecards_dir = os.path.join(root, "scorecards")
         self.golden_dir = os.path.join(root, "golden")
         self.human_dir = os.path.join(root, "human")

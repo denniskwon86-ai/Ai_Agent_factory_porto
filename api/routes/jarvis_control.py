@@ -123,7 +123,11 @@ async def ask(req: AskBody, p: Principal = Depends(current_principal)):
         from api.deps import assert_project_readable
         assert_project_readable(p, pid)
         import os
-        path = os.path.join("projects", pid, "latest_state.json")
+
+        # ★ [2026-08-05] 상대경로였다. Jarvis 가 프로젝트 상태를 못 읽으면 오류가 아니라
+        #   **덜 아는 답**이 나온다 — 그래서 아무도 눈치채지 못한다.
+        from core.paths import workspace_path
+        path = workspace_path(pid, "latest_state.json")
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:

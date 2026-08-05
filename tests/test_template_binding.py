@@ -12,6 +12,11 @@ import api.routes.factory_control as fc
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # ./projects 가 tmp 아래에 생기도록
+    # ★ [2026-08-05] 작업공간 경로가 절대경로로 고정됐다(`core/paths.py`). cwd 만 옮기면
+    #   더 이상 격리되지 않으므로 **격리 지점을 함께 돌린다.** 이 한 줄이 없으면 테스트가
+    #   제품 `projects/` 에 프로젝트를 만든다.
+    import core.paths as _paths
+    monkeypatch.setattr(_paths, "PROJECTS_DIR", str(tmp_path / "projects"))
     app = FastAPI()
     app.include_router(fc.router)
     return TestClient(app)
