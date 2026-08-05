@@ -171,11 +171,22 @@ export function ConfirmInline({ open, title, body, confirmLabel, onConfirm, onCa
   );
 }
 
-/** 확인이 필요한 행동 하나를 다루는 상태 훅. 화면마다 boolean 을 새로 만들지 않게 한다. */
+/** 확인이 필요한 행동 하나를 다루는 상태 훅. 화면마다 boolean 을 새로 만들지 않게 한다.
+ *
+ * ★★★ [2026-08-05 실측 결함] 이 훅이 `open` 을 돌려주지 않는데 사용처 8곳이 `x.open` 을 읽고
+ *   있었다(AgentMasterPanel·OrgChartPanel·SkillEvolutionPanel·WorkStandardPanel).
+ *   `ConfirmInline` 은 `if (!open) return null` 이므로 **확인창이 한 번도 열리지 않았다** —
+ *   초기화·삭제 버튼을 눌러도 아무 일이 없는 상태였다.
+ * ⚠️ `tsc` 는 이것을 TS2339 로 잡는데 `vite dev` 는 타입을 보지 않는다. 그래서 개발 중에는
+ *   화면이 정상으로 보였고 `npm run build`(= `tsc -b && vite build`)만 실패했다.
+ *   **화면이 뜬다는 것과 기능이 동작한다는 것은 다르다.** */
 export function useConfirm<T = string>() {
   const [target, setTarget] = useState<T | null>(null);
   return {
     target,
+    /** 확인 문구를 띄울지. `target` 이 정해졌다는 것과 **같은 사실**이므로 여기서 파생한다 —
+     *  별도 boolean 을 두면 둘이 어긋나고, 어긋난 쪽이 «확인 없이 실행» 이 된다. */
+    open: target !== null,
     ask: (t: T) => setTarget(t),
     cancel: () => setTarget(null),
     /** 실행 후 자동으로 닫는다 — 닫는 것을 잊으면 확인 문구가 화면에 남는다. */

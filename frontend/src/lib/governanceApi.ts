@@ -118,7 +118,13 @@ export const fetchScopeCoverage = () =>
 // ── 연계 시스템(M2 크로스워크) 범위 커버리지 ─────────────────────────────
 // 범위 미지정 시스템의 실측값은 **모든 조직의 프롬프트**에 병기될 수 있다(MCP 실측 병기).
 // 화면 유출보다 찾기 어려운 경로라 여기서 함께 센다.
-export type SystemsCoverage = ScopeCoverage & { unscoped_systems: string[] };
+// ★ [2026-08-05] `hidden_unscoped` 를 빠뜨려 화면이 TS2339 로 빌드를 깨뜨렸다. 서버는 주고
+//   있다(`core/enterprise_context/scoping.py`) — «범위가 없어 목록에서 빠진 건수» 이고,
+//   그 수를 화면이 보여주지 않으면 사용자는 자기가 본 목록을 전량으로 믿는다.
+export type SystemsCoverage = ScopeCoverage & {
+  unscoped_systems: string[];
+  hidden_unscoped?: number;
+};
 
 export const fetchSystemsCoverage = () =>
   get<SystemsCoverage>('/api/v1/crosswalk/systems/coverage');
@@ -134,6 +140,9 @@ export type ContractEvaluation = {
   findings: { kind: string; severity: string; why: string }[];
   checked: string[];
   unverifiable: { kind: string; why: string }[];
+  /** 서버가 «왜 확인하지 못했는지» 를 문장으로 붙여 준다(생산자 자산 폐기 등). 선택 필드다 —
+   *  `kept` 처럼 설명할 것이 없는 상태에서는 오지 않는다. */
+  note?: string;
 };
 
 export const fetchContractEvaluations = () =>

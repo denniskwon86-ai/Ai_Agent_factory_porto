@@ -20,14 +20,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { EvidenceStrip, FoundationToolbar } from '../design/DataFoundationShell';
-import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
+// ★ [2026-08-05] `EmptyOrError` 와 `errorTitle` 은 import 만 남고 쓰이지 않아 빌드를 깨뜨렸다
+//   (TS6133). 이 화면은 `Metric` 의 `notes` 로 빈 상태·권한없음·오류를 각각 말하고 있어서
+//   그 둘이 필요 없다 — 지운다. 다시 필요해지면 그때 가져온다.
+import { Metric, failed, loading, ok, type Loaded } from '../design/DataState';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
 import { contractStateKo, dataGradeKo, findingKindKo, severityKo } from '../design/terms';
 import { actingScope, UNKNOWN_SCOPE, type ActingScope } from '../lib/actingScope';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
-import { errorTitle } from '../lib/closedLoopFetch';
 import type {
   ContractEvaluation, DuplicateCandidate, ExternalIndicatorReadiness, FlatNode, GovernanceGap,
   MasterCoverage, QualityFinding, ScopeCoverage, SystemsCoverage,

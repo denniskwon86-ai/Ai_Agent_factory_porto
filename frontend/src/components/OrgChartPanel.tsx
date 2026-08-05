@@ -66,7 +66,6 @@ const FLAGS: { key: 'is_admin' | 'is_executive' | 'is_data_admin'; label: string
 
 export function OrgChartPanel({ onClose }: { onClose: () => void }) {
   const [view, setView] = useState<View>('chart');
-  const [tree, setTree] = useState<Loaded<Dept[]>>(loading<Dept[]>());
   const [flat, setFlat] = useState<Loaded<Dept[]>>(loading<Dept[]>());
   const [users, setUsers] = useState<Loaded<OrgUser[]>>(loading<OrgUser[]>());
   const [hidden, setHidden] = useState<{ present: boolean; count: number | null }>(
@@ -90,11 +89,15 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
   const seed = useConfirm<string>();
 
   const load = useCallback(async () => {
-    setTree(loading<Dept[]>()); setFlat(loading<Dept[]>());
+    setFlat(loading<Dept[]>());
     setUsers(loading<OrgUser[]>()); setMe(loading<MyScope | null>());
-    // ⚠️ 네 조회를 **따로** 담는다. 하나가 실패했다고 나머지를 «없음»으로 만들지 않는다.
-    const [t, d, u, m] = await Promise.allSettled([
-      orgApi.tree(), orgApi.departments(), orgApi.users(), orgApi.me(),
+    // ⚠️ 세 조회를 **따로** 담는다. 하나가 실패했다고 나머지를 «없음»으로 만들지 않는다.
+    // ★ [2026-08-05] 종전에는 `orgApi.tree()` 도 같이 불러 `tree` 상태에 담았지만 **화면에서
+    //   한 번도 읽지 않았다**(`flat` 으로 그린다). 결과를 버리는 호출이라 지웠다 — 그 호출도
+    //   권한 판정을 타므로, 쓰지 않는 조회는 실패했을 때 «이유 없는 오류» 만 늘린다.
+    //   트리 표시를 넣을 때 다시 부르면 된다.
+    const [d, u, m] = await Promise.allSettled([
+      orgApi.departments(), orgApi.users(), orgApi.me(),
     ]);
     const asLoaded = <T,>(r: PromiseSettledResult<{ rows: T[]; blockedReason: string }>) => {
       if (r.status !== 'fulfilled') {
@@ -107,7 +110,6 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
         ? { status: 'forbidden' as const, value: null, error: r.value.blockedReason, httpStatus: 403 }
         : ok(r.value.rows);
     };
-    setTree(asLoaded<Dept>(t));
     setFlat(asLoaded<Dept>(d));
     setUsers(asLoaded<OrgUser>(u));
     if (u.status === 'fulfilled') {
