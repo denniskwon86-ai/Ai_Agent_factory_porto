@@ -46,6 +46,14 @@ class EffectiveScope:
     allowed_scopes: List[str] = field(default_factory=list)   # 서버가 계산한 값
     denied: bool = False
     reason: str = ""
+    #: ★ [D-018 ③] 표시용 값. 화면은 `node_41402723bc90` 을 사람에게 보여줄 수 없으므로
+    #  정본 id 와 함께 **업무 코드와 이름**을 내려준다. 이 둘을 저장하거나 판정에 쓰지 않는다 —
+    #  판정은 `scope_node_id` 로만 한다(코드는 바뀔 수 있는 의미값이다).
+    scope_code: str = ""
+    scope_name: str = ""
+    #: 요청 값이 어떤 형태로 들어왔는가(`ecm_node`·`ecm_code`·`department_mapped` 등).
+    #  ⚠️ 이 값이 `ecm_node` 가 아니면 그 저장분은 **백필 대상**이다(D-018 ⑤).
+    ref_kind: str = ""
 
 
 def _actor_scopes(p: Any) -> List[str]:
@@ -103,35 +111,64 @@ def _actor_scopes(p: Any) -> List[str]:
     return sorted(set(out))
 
 
-def resolve_effective_scope(p: Any, requested_scope: str = "") -> EffectiveScope:
+def _describe(requested_scope: str, tenant_id: str, entity_mode: str) -> dict:
+    """[D-018 ①③] 요청 값을 **정본 `node_id` + 표시용 코드·이름**으로 해석한다.
+
+    ⚠️ 해석 실패·모호함은 `node_id` 가 비어 나온다. 그때 원본을 `node_id` 자리에 넣지 않는다 —
+      그러면 「해석된 정본」과 「해석 못 한 원본」이 같은 필드에 섞이고, 그 값이 그대로 저장되면
+      백필(D-018 ⑤)이 무엇을 고쳐야 하는지 알 수 없게 된다."""
+    try:
+        from core.enterprise_context.resolver import ecm_resolver
+        r = ecm_resolver.resolve_scope_ref(requested_scope, tenant_id=tenant_id,
+                                           entity_mode=entity_mode)
+        return {"node_id": r.get("node_id") or "", "code": r.get("code") or "",
+                "name_ko": r.get("name_ko") or "", "kind": r.get("kind") or ""}
+    except Exception as e:
+        print(f"⚠️ [scope_guard] 범위 해석 실패(원본으로 비교): {requested_scope} — {e}")
+        return {"node_id": "", "code": "", "name_ko": "", "kind": "unresolved_error"}
+
+
+def resolve_effective_scope(p: Any, requested_scope: str = "", tenant_id: str = "",
+                            entity_mode: str = "") -> EffectiveScope:
     """요청 범위를 인증 주체의 범위 안에서 교차 검증한다.
 
     - 무제한 주체(조직 미도입) → 요청을 그대로 통과(하위호환 계약)
     - 요청 없음 → 필터 없음(종전 동작). 주체의 범위로 **자동 축소하지 않는다** — 조용한
       동작 변경은 "왜 결과가 줄었는지" 아무도 모르게 만든다. 축소가 필요하면 호출부가 명시한다.
     - 요청 있음 → 주체의 가시 범위에 속할 때만 허용, 아니면 `denied`
+
+    ★ [D-018 ③④] `tenant_id`·`entity_mode` 는 **요청 값 해석에만** 쓰인다(코드는 그 문맥에서만
+      유일하다). 주체의 범위 계산에는 넣지 않는다 — 주체가 볼 수 있는 조직은 그 사람의 소속이
+      정하는 것이고, 요청 문맥이 그것을 넓히면 «문맥을 바꿔 권한을 얻는» 경로가 생긴다.
+    ★ 통과 시 `scope_code`·`scope_name`·`ref_kind` 를 함께 실어 보낸다 — 화면이 정본 해시를
+      사람에게 보여줄 수 없고(③), `ref_kind != "ecm_node"` 는 그 저장분이 백필 대상임을 뜻한다(⑤).
     """
     actor = str(getattr(p, "user_id", "") or "")
     scope = getattr(p, "scope", None)
     unrestricted = bool(getattr(scope, "unrestricted", False)) if scope is not None else True
 
     if unrestricted:
-        return EffectiveScope(scope_node_id=requested_scope or "", actor=actor,
-                              allowed_scopes=["*"], reason="unrestricted")
+        # ⚠️ 무제한 주체도 **정규화는 한다.** 통과시키는 것과 원본을 그대로 저장하는 것은 다르다 —
+        #   관리자가 코드로 보낸 값이 그대로 저장되면 백필 대상이 계속 늘어난다.
+        d = _describe(requested_scope, tenant_id, entity_mode) if requested_scope else {}
+        return EffectiveScope(scope_node_id=(d.get("node_id") or requested_scope or ""),
+                              actor=actor, allowed_scopes=["*"], reason="unrestricted",
+                              scope_code=d.get("code", ""), scope_name=d.get("name_ko", ""),
+                              ref_kind=d.get("kind", ""))
     if not requested_scope:
         return EffectiveScope(scope_node_id="", actor=actor,
                               allowed_scopes=_actor_scopes(p), reason="no_scope_requested")
 
     allowed = _actor_scopes(p)
-    requested_node = requested_scope
-    try:
-        from core.enterprise_context.scoping import resolve_scope_ref
-        requested_node = resolve_scope_ref(requested_scope) or requested_scope
-    except Exception:
-        pass
+    d = _describe(requested_scope, tenant_id, entity_mode)
+    # 해석되지 않으면 원본으로 비교한다(D-005 하위호환 — 코드로 저장된 기존 행이 아직 있다).
+    requested_node = d["node_id"] or requested_scope
 
     if requested_node in allowed:
         return EffectiveScope(scope_node_id=requested_node, actor=actor,
-                              allowed_scopes=allowed, reason="verified")
+                              allowed_scopes=allowed, reason="verified",
+                              scope_code=d["code"], scope_name=d["name_ko"],
+                              ref_kind=d["kind"])
     return EffectiveScope(scope_node_id="", actor=actor, allowed_scopes=allowed,
-                          denied=True, reason="requested_scope_not_in_actor_scopes")
+                          denied=True, reason="requested_scope_not_in_actor_scopes",
+                          ref_kind=d["kind"])

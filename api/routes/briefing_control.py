@@ -23,18 +23,16 @@ from core.scope_guard import resolve_effective_scope
 router = APIRouter(prefix="/api/v1/briefing", tags=["Briefing"])
 
 
-async def _scope(p: Principal, requested: str) -> str:
-    """요청 범위를 인증 주체 안에서 교차 검증한다(§B-4 와 같은 경로를 쓴다)."""
-    eff = await asyncio.to_thread(resolve_effective_scope, p, requested)
-    if eff.denied:
-        try:
-            from core.enterprise_context import audit
-            audit.denied_scope("briefing", requested or "(전사)", actor=eff.actor,
-                               actor_scopes=eff.allowed_scopes, requested_scope=requested,
-                               detail=eff.reason)
-        except Exception:
-            pass
-        raise HTTPException(status_code=404, detail="대상을 찾을 수 없습니다.")
+async def _scope(p: Principal, requested: str, tenant_id: str = "",
+                 entity_mode: str = "") -> str:
+    """요청 범위를 인증 주체 안에서 교차 검증한다(§B-4 와 같은 경로를 쓴다).
+
+    ★ [D-018 ③④] 판정·정규화는 `api.deps.assert_scope_allowed` **한 곳**에 있다 — 종전에는
+      이 코드가 `planning_control`·`connector_control` 에도 복제돼 있었고, 세 벌이면 문맥
+      인자를 하나에만 붙이거나 감사 이름을 한 곳만 고치는 일이 생긴다."""
+    from api.deps import assert_scope_allowed
+    eff = await assert_scope_allowed(p, requested, resource_type="briefing",
+                                    tenant_id=tenant_id, entity_mode=entity_mode)
     return eff.scope_node_id
 
 
@@ -45,11 +43,18 @@ async def briefing(scope_node_id: str = "", tenant_id: str = "", entity_mode: st
 
     ⚠️ `complete=false` 면 **이 브리핑은 전부가 아니다.** `unavailable` 에 읽지 못한 소스가
       있고, 화면은 그것을 숨기지 말 것 — "위험 0건"과 "위험을 못 읽었다"는 다른 사실이다."""
-    eff = await _scope(p, scope_node_id)
+    # ★ [D-018 ③④] 이 라우트는 `tenant_id`·`entity_mode` 를 이미 받고 있었지만 **범위 해석에
+    #   넘기지 않았다.** 코드는 그 문맥 안에서만 유일하므로, 넘기지 않으면 가상 시나리오 범위를
+    #   실제 문맥으로 해석할 수 있다.
+    from api.deps import assert_scope_allowed, scope_meta
+    _eff = await assert_scope_allowed(p, scope_node_id, resource_type="briefing",
+                                     tenant_id=tenant_id, entity_mode=entity_mode)
+    eff = _eff.scope_node_id
     data = await asyncio.to_thread(enterprise_briefing.briefing, p.user_id, eff,
                                    tenant_id, entity_mode, p)
     return {"status": "success", "data": data,
-            "permission": {"scope": eff or "(범위 필터 없음)", "actor": p.user_id}}
+            "permission": {"scope": eff or "(범위 필터 없음)", "actor": p.user_id,
+                           **scope_meta(_eff)}}
 
 
 @router.get("/sections/{section}")
@@ -64,7 +69,7 @@ async def section(section: str, scope_node_id: str = "", tenant_id: str = "",
         raise HTTPException(status_code=400,
                             detail=f"알 수 없는 섹션입니다: {section}. "
                                    f"가능: {', '.join(SECTIONS)}")
-    eff = await _scope(p, scope_node_id)
+    eff = await _scope(p, scope_node_id, tenant_id=tenant_id, entity_mode=entity_mode)
 
     def _one():
         if section == "cost":

@@ -22,17 +22,14 @@ def _err(e: ConnectorError):
     raise HTTPException(status_code=400, detail=str(e))
 
 
-async def _scope(p: Principal, requested: str, resource_id: str = "") -> str:
-    eff = await asyncio.to_thread(resolve_effective_scope, p, requested)
-    if eff.denied:
-        try:
-            from core.enterprise_context import audit
-            audit.denied_scope("connector", resource_id or requested, actor=eff.actor,
-                               actor_scopes=eff.allowed_scopes, requested_scope=requested,
-                               detail=eff.reason)
-        except Exception:
-            pass
-        raise HTTPException(status_code=404, detail="대상을 찾을 수 없습니다.")
+async def _scope(p: Principal, requested: str, resource_id: str = "",
+                 tenant_id: str = "", entity_mode: str = "") -> str:
+    """★ [D-018 ③④] 판정·정규화는 `api.deps.assert_scope_allowed` **한 곳**에 있다 —
+    종전에는 이 코드가 `planning_control`·`briefing_control` 에도 복제돼 있었다."""
+    from api.deps import assert_scope_allowed
+    eff = await assert_scope_allowed(p, requested, resource_type="connector",
+                                    resource_id=resource_id, tenant_id=tenant_id,
+                                    entity_mode=entity_mode)
     return eff.scope_node_id
 
 

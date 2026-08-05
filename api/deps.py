@@ -208,6 +208,56 @@ def viewer_may_drill_down(p: Principal) -> bool:
                 or getattr(p.scope, "is_executive", False))
 
 
+async def assert_scope_allowed(p: Principal, requested: str, *, resource_type: str,
+                               resource_id: str = "", tenant_id: str = "",
+                               entity_mode: str = ""):
+    """[D-018 ③④] **API 경계의 단일 범위 정규화 지점.**
+
+    요청으로 들어온 `node_id`·업무 코드·부서 id 를 정본 `node_id` 로 정규화하고, 주체 범위 안인지
+    교차 검증한다. 거부는 **감사에 남기고 404 로 은폐**한다(§3.3 경계표).
+
+    ★★ 왜 여기 두는가: 종전에는 같은 헬퍼(`_scope`)가 `planning_control`·`briefing_control`·
+      `connector_control` 에 **각각 복제**돼 있었다. 세 벌이면 문맥 인자를 하나에만 붙이거나
+      감사 이름을 한 곳만 고치는 일이 생기고, 그 경로만 조용히 달라진다 — 이 저장소가 목록
+      API·자산 목록에서 이미 겪은 유형이다.
+    ★ 반환값은 `EffectiveScope` 다. 호출부가 `scope_node_id`(판정·저장용)와 함께
+      `scope_code`·`scope_name`(표시용)·`ref_kind`(백필 대상 여부)를 쓸 수 있어야 한다.
+      문자열 하나만 필요하면 `.scope_node_id` 를 꺼낸다.
+    ⚠️ 판정·저장에는 **`scope_node_id` 만** 쓴다. 코드와 이름은 바뀔 수 있는 의미값이다(D-018).
+    """
+    import asyncio as _asyncio
+
+    from core.scope_guard import resolve_effective_scope
+    eff = await _asyncio.to_thread(resolve_effective_scope, p, requested, tenant_id, entity_mode)
+    if eff.denied:
+        try:
+            from core.enterprise_context import audit
+            audit.denied_scope(resource_type, resource_id or requested or "(전사)",
+                               actor=eff.actor, actor_scopes=eff.allowed_scopes,
+                               requested_scope=requested, detail=eff.reason)
+        except Exception:
+            pass            # 감사 실패가 거부를 통과로 바꾸지 않는다 — 거부는 그대로 간다
+        raise HTTPException(status_code=404, detail="대상을 찾을 수 없습니다.")
+    return eff
+
+
+def scope_meta(eff) -> dict:
+    """[D-018 ③] 응답에 실을 범위 표시 정보. **화면은 정본 해시를 사람에게 보여줄 수 없다.**
+
+    `scope_node_id` 는 판정·저장의 정본이고, `scope_code`·`scope_name` 은 표시용이다.
+    `needs_normalization` 은 그 요청이 별칭(코드·부서 id)으로 들어왔다는 뜻 — 저장분이 아직
+    정규화되지 않았음을 화면·운영자가 알 수 있게 한다(백필 진척의 관측 지점, D-018 ⑤)."""
+    kind = getattr(eff, "ref_kind", "") or ""
+    return {
+        "scope_node_id": getattr(eff, "scope_node_id", "") or "",
+        "scope_code": getattr(eff, "scope_code", "") or "",
+        "scope_name": getattr(eff, "scope_name", "") or "",
+        "scope_ref_kind": kind,
+        #: 빈 요청(전사)은 정규화할 대상이 없으므로 False 다.
+        "needs_normalization": bool(kind) and kind != "ecm_node",
+    }
+
+
 #: 자료 종류별로 **정확한 숨김 건수**를 볼 자격. 종류마다 «관리할 사람» 이 다르다.
 #  ⚠️ 여기 없는 종류를 넘기면 `hidden_envelope` 가 예외를 던진다 — 오타를 조용히
 #    «건수 안 줌» 으로 처리하면 관리자가 못 보는 이유를 아무도 찾지 못한다.

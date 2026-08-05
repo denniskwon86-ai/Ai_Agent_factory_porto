@@ -29,19 +29,24 @@ def _err(e: PlanningError):
     raise HTTPException(status_code=400, detail=str(e))
 
 
-async def _scope(p: Principal, requested: str, resource_id: str = "") -> str:
-    """요청 범위를 인증 주체 안에서 교차 검증한다. 거부는 감사 + 404 은폐."""
-    eff = await asyncio.to_thread(resolve_effective_scope, p, requested)
-    if eff.denied:
-        try:
-            from core.enterprise_context import audit
-            audit.denied_scope("plan_fact", resource_id or requested, actor=eff.actor,
-                               actor_scopes=eff.allowed_scopes, requested_scope=requested,
-                               detail=eff.reason)
-        except Exception:
-            pass
-        raise HTTPException(status_code=404, detail="대상을 찾을 수 없습니다.")
-    return eff.scope_node_id
+async def _scope(p: Principal, requested: str, resource_id: str = "",
+                 tenant_id: str = "", entity_mode: str = "") -> str:
+    """요청 범위를 인증 주체 안에서 교차 검증한다. 거부는 감사 + 404 은폐.
+
+    ★ [D-018 ③④] 판정·정규화는 `api.deps.assert_scope_allowed` **한 곳**에 있다. 이 함수는
+      그 결과에서 정본 `node_id` 만 꺼내는 얇은 래퍼다 — 종전에는 같은 코드가 이 파일과
+      `briefing_control`·`connector_control` 에 **세 벌** 복제돼 있었고, 그러면 문맥 인자를
+      하나에만 붙이거나 감사 이름을 한 곳만 고치는 일이 생긴다.
+    ⚠️ 표시용 코드·이름이 필요하면 `_scope_eff()` 를 써서 `EffectiveScope` 를 그대로 받는다."""
+    return (await _scope_eff(p, requested, resource_id, tenant_id, entity_mode)).scope_node_id
+
+
+async def _scope_eff(p: Principal, requested: str, resource_id: str = "",
+                     tenant_id: str = "", entity_mode: str = ""):
+    from api.deps import assert_scope_allowed
+    return await assert_scope_allowed(p, requested, resource_type="plan_fact",
+                                     resource_id=resource_id, tenant_id=tenant_id,
+                                     entity_mode=entity_mode)
 
 
 # ── [2026-08-05] 무방비 라우트 봉합 ────────────────────────────────────
@@ -175,14 +180,18 @@ async def list_facts(org_id: str = "", period: str = "", value_kind: str = "",
     from core.enterprise_context.classification import clearance_of_scope
     # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체인가 — 이것도 권한에서 파생한다.
     from core.enterprise_context.scoping import may_drill_down
-    eff = await _scope(p, scope_node_id, org_id)
+    # ★ [D-018 ③④] `tenant_id`·`entity_mode` 를 **범위 해석에도** 넘긴다. 종전에는 저장소
+    #   조회에만 넘기고 해석에는 넣지 않아, 코드로 들어온 범위가 문맥과 무관하게 해석됐다.
+    _eff = await _scope_eff(p, scope_node_id, org_id, tenant_id, entity_mode)
+    eff = _eff.scope_node_id
     data = await asyncio.to_thread(planning_store.list_facts, org_id, period, value_kind,
                                    scenario_id, eff, tenant_id, entity_mode,
                                    product_code, cost_center,
                                    clearance_of_scope(p.scope),
                                    may_drill_down(p.scope))
+    from api.deps import scope_meta
     return {"status": "success", "data": data,
-            "permission": {"scope": eff or "(범위 필터 없음)"}}
+            "permission": {"scope": eff or "(범위 필터 없음)", **scope_meta(_eff)}}
 
 
 @router.post("/facts")

@@ -456,16 +456,18 @@ def test_denied_scope_is_404_and_audited(client, tmp_path, monkeypatch):
     """★★ 전사 보좌에서 범위 오류의 기본값이 '전체 노출'이면 그 한 번으로 제품이 끝난다.
 
     거부는 404 로 은폐하되 감사로그에는 실제 요청 범위가 남는다."""
-    import api.routes.briefing_control as bc
     import core.scope_guard as sg
     from core.enterprise_context import audit
     monkeypatch.setattr(audit, "_LOG_PATH", str(tmp_path / "audit.jsonl"))
-    # ⚠️ 라우터가 `from ... import resolve_effective_scope` 로 **직접 import** 하므로
-    #   `core.scope_guard` 를 패치해도 라우터의 이름은 원본을 가리킨다.
-    #   실제 호출 지점(라우터 모듈)을 패치해야 한다 — 이 함정을 모르면 테스트가
-    #   조용히 통과하며 "거부가 동작한다"고 착각하게 된다.
-    monkeypatch.setattr(bc, "resolve_effective_scope",
-                        lambda p, req: sg.EffectiveScope(
+    # ★ [2026-08-05 / D-018 ③④] 패치 지점이 **한 곳으로 모였다.** 종전에는 라우터마다
+    #   `from ... import resolve_effective_scope` 로 이름을 들고 있어 **그 라우터 모듈**을
+    #   패치해야 했고(라우터가 셋이면 패치 지점도 셋), 잘못 패치하면 테스트가 조용히 통과하며
+    #   "거부가 동작한다"고 착각하게 됐다. 지금은 `api.deps.assert_scope_allowed` 가 호출
+    #   시점에 `core.scope_guard` 에서 가져오므로 **원본 모듈만 패치하면 전 경로에 걸린다.**
+    # ⚠️ 시그니처가 `(p, requested, tenant_id, entity_mode)` 로 늘었다 — `*a, **kw` 로 받는다.
+    #   인자를 고정하면 호출부가 문맥을 넘기기 시작할 때 이 테스트만 조용히 깨진다.
+    monkeypatch.setattr(sg, "resolve_effective_scope",
+                        lambda p, req="", *a, **kw: sg.EffectiveScope(
                             denied=True, actor="bob", allowed_scopes=["MNM_BATTERY"],
                             reason="requested_scope_not_in_actor_scopes"))
 

@@ -71,6 +71,27 @@
 - 다음 행동 / 담당 / 착수 조건: **Claude Code** — 인수인계 §4.2 화면 이관 순서(`Telemetry(227) → ProgramAdmin(239) → Shadow(305) → …`) 또는 D-017 P3-1. **Supervisor** — 결정 3건: ① **조직 범위 정본**(위 뿌리 원인) ② 경영계획 **수립 권한**을 별도로 둘지(지금은 «시나리오를 만들 수 있는 사람이 가정도 넣는다» 로 통일) ③ `resolve_scope_ref` 가 해석하지 못하는 것이 데이터 미비인지 코드 결함인지 — 확인 후 별개 작업 필요.
 - 교대 체크포인트: 변경 = `api/routes/planning_control.py`(라우트 14개 + 헬퍼 4개) · `core/scope_guard.py`(`_actor_scopes` 원천 수정) · `api/deps.py`(`hidden_envelope`·`_EXACT_COUNT_RULES`) · `tests/test_planning_control_gate.py`(신규 33건). 미변경 = 화면, `planning_engine`·`planning_import` 내부, DB 스키마. 검증 = 1,970 passed. 재개 지점 = 화면 이관 또는 P3-1. 금지 범위 = `visible_scopes` 의 `include_descendants` 기본값을 켜는 것, `_actor_scopes` 를 부서 해석 전용으로 되돌리는 것, 범위 밖 요청에 403 을 주는 것(존재를 알린다), 자기 조직 요청이 404 가 되는 상태를 «안전» 으로 읽는 것, 실서버 DB 를 향해 쓰기 엔드포인트를 탐침하는 것.
 
+### [SCOPE-BOUND-54] D-018 후속 3·4 — API 경계 정규화 · 같은 헬퍼가 세 벌 복제돼 있었다
+- 작성자 / 기록 시각: Claude Code / 2026-08-05 KST
+- 왜 지금 기록하는가: `[SEC-SCOPE-51]` 후속 ③④(입력 3형태 허용 → 경계에서 `node_id` 정규화 → 응답에 표시값)를 구현했다. **그 과정에서 판정 헬퍼가 세 벌 복제돼 있던 것을 찾아 하나로 모았다.**
+- 상태: **완료(후속 3·4) · 후속 5~8·10 남음**
+- ★★★ **발견: 같은 판정 헬퍼(`_scope`)가 세 라우트 파일에 복제돼 있었다** — `planning_control`·`briefing_control`·`connector_control`. 세 벌 모두 `resolve_effective_scope` → `denied` 면 감사 → 404 은폐를 **각자** 하고 있었고, 차이는 감사 자원 이름뿐이었다. ⚠️ 세 벌이면 문맥 인자를 하나에만 붙이거나 감사 이름을 한 곳만 고치는 일이 생기고, **그 경로만 조용히 달라진다** — 이 저장소가 목록 API·자산 목록에서 이미 겪은 유형이다.
+  → `api/deps.assert_scope_allowed(p, requested, *, resource_type, resource_id, tenant_id, entity_mode)` 하나로 모았다. 세 파일의 `_scope` 는 그 결과에서 `scope_node_id` 만 꺼내는 얇은 래퍼가 됐다. `test_scope_helpers_delegate_to_one_place` 가 **소스를 보고** 잠근다(동작 테스트로는 «우연히 같게 동작하는 상태» 와 «한 곳에 모인 상태» 를 구분할 수 없고, 갈라지는 순간은 새 인자가 붙을 때다).
+- ★★ **부수 효과가 좋았다: 패치 지점도 하나가 됐다.** 종전에는 라우터가 `from … import resolve_effective_scope` 로 이름을 들고 있어 테스트가 **라우터 모듈**을 패치해야 했고, 그 함정이 주석으로 기록돼 있었다(«잘못 패치하면 테스트가 조용히 통과하며 거부가 동작한다고 착각한다»). 지금은 `assert_scope_allowed` 가 호출 시점에 `core.scope_guard` 에서 가져오므로 **원본 모듈만 패치하면 전 경로에 걸린다.** `test_enterprise_briefing.py::test_denied_scope_is_404_and_audited` 를 그에 맞춰 고쳤다(낡은 함정 주석도 갱신 — 남겨 두면 다음 사람이 없어진 지점을 패치한다).
+- 무엇을 더 바꿨는가:
+  · `EffectiveScope` 에 `scope_code`·`scope_name`·`ref_kind` 추가(D-018 ③). 화면은 `node_41402723bc90` 을 사람에게 보여줄 수 없다. ⚠️ **판정·저장에는 `scope_node_id` 만** 쓴다 — 코드·이름은 바뀔 수 있는 의미값이다.
+  · `resolve_effective_scope(p, requested, tenant_id, entity_mode)` — 문맥은 **요청 값 해석에만** 쓴다. 주체 범위 계산에는 넣지 않았다: 주체가 볼 수 있는 조직은 그 사람의 소속이 정하는 것이고, 요청 문맥이 그것을 넓히면 «문맥을 바꿔 권한을 얻는» 경로가 생긴다.
+  · **무제한 주체도 정규화한다.** 통과시키는 것과 원본을 그대로 저장하는 것은 다르다 — 관리자가 코드로 보낸 값이 그대로 저장되면 백필 대상이 계속 늘어난다.
+  · `api/deps.scope_meta(eff)` — 응답에 실을 표시 정보. `needs_normalization`(요청이 별칭으로 들어왔다 = 저장분이 아직 정본이 아니다)이 **백필 진척의 관측 지점**이다(D-018 ⑤).
+  · `briefing`·`/planning/facts` 는 `tenant_id`·`entity_mode` 를 **이미 받고 있었지만 범위 해석에 넘기지 않았다** — 저장소 조회에만 쓰고 있었다. 이제 해석까지 간다.
+- 실측 확인(운영 DB, 읽기만): 코드로 요청 → `node=node_41402723bc90 code=LS_MNM name=LS MnM kind=ecm_code 백필필요=True` / 정본으로 요청 → `kind=ecm_node 백필필요=False` / 범위 없음(전사) → `백필필요=False` / 범위 밖 → **404**.
+- 검증: 신규 `tests/test_scope_boundary_normalization.py` **11건**. `pytest tests/` **1,996 passed · 1 skipped · 실패 0 · exit 0**(기준선 1,985).
+  ⚠️ **테스트가 자기 조직도를 심는다.** conftest 가 ECM 을 tmp 로 격리하므로(의도된 것 — 「조직도에 의존하는 테스트는 두 방향으로 거짓말한다」) 실제 조직도를 전제하지 않는다. 함정 둘: ① conftest 는 **경로만** 바꾸고 스키마는 만들지 않는다(쓰기는 `conn.execute` 직접 → «no such table»; 읽기만 실패 시 DDL 을 돌린다) → 조회를 한 번 걸어 테이블을 만든 뒤 심는다 ② 코드는 **실제 값**(`LS_MNM`)을 써야 한다 — 사용자 범위가 조직 디렉터리에서 그 코드로 오므로, 임의 코드를 쓰면 404 가 나고 그 404 를 「통제가 동작한다」로 오독한다.
+  ⚠️ 내 검증 방법 하나도 고쳤다: 진행 문자 카운트(`grep -oE "^[.sFExX]+"`)가 **실패 출력의 `E   assert…` 줄을 세어** 「2 E 2 F」로 오탐했다(실제 실패 1건). 이제 `^FAILED` 줄 수를 정본으로 쓴다.
+- 영향·주의사항: 세 `_scope` 의 **시그니처는 유지**했으므로 라우트 본문은 그대로다(회귀 1건은 위 패치 지점 이동 때문이고 통제가 넓어진 것이 아니다). ⚠️ 아직 **문맥을 넘기는 라우트는 둘뿐**이다(`briefing`·`/planning/facts`) — 나머지는 애초에 `entity_mode` 를 받지 않는다. 받게 만드는 것은 그 라우트의 기능 변경이므로 별개 판단이 필요하다.
+- 다음 행동 / 담당 / 착수 조건: **Claude Code** — 후속 ⑤ **백필**: `departments.scope_node_id` 와 각 저장소의 `enterprise_scope_id` 중 코드·부서 id 로 저장된 값을 `node_id` 로 승격한다. **선행 조건**: ⓐ 대상 건수를 먼저 세어 보고(`needs_normalization` 관측 지점 활용) ⓑ **되돌릴 수 있게** 원본을 남기거나 백업 후 실행 ⓒ 모호·미해석 행은 **건너뛰고 목록으로 남긴다**(임의 해석 금지). 그다음 ⑥ 신규 쓰기 `node_id` 강제. **Supervisor** — 결정 대기는 인계 문서 §9 그대로.
+- 교대 체크포인트: 변경 = `api/deps.py`(`assert_scope_allowed`·`scope_meta` 신규) · `core/scope_guard.py`(`EffectiveScope` 필드 3개·`_describe`·문맥 인자) · `api/routes/{planning,briefing,connector}_control.py`(`_scope` 위임) · `briefing`·`/facts` 문맥 배선 · `tests/test_scope_boundary_normalization.py`(신규 11건) · `tests/test_enterprise_briefing.py`(패치 지점 1건). 미변경 = DB 스키마, 저장분, 화면. 검증 = 1,996 passed. **재개 지점 = D-018 후속 ⑤(백필).** 금지 범위 = `_scope` 를 라우트별로 다시 복제하는 것, 주체 범위 계산에 요청 문맥을 넣는 것, `scope_code`·`scope_name` 을 판정·저장에 쓰는 것, 무제한 주체의 정규화를 건너뛰는 것, 진행 문자 카운트를 실패 판정에 쓰는 것.
+
 ### [SCOPE-REF-53] D-018 후속 2 — 해석 계약 통합 · 「최근에 고친 사람이 이긴다」를 걷어냈다
 - 작성자 / 기록 시각: Claude Code / 2026-08-05 KST
 - 왜 지금 기록하는가: `[SEC-SCOPE-51]` 후속 ②(`resolve_scope_ref(ref, tenant_id, entity_mode)` 계약 통합)를 구현했다. **그 과정에서 실패 사유가 뭉개져 있던 것을 하나 더 찾았다.**
