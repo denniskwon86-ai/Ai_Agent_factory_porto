@@ -172,6 +172,24 @@ export const DELIVERABLE_TYPE_KO: Record<string, string> = {
   hybrid_simulation: '복합 시뮬레이터(화면 + 보고서)',
 };
 
+/** [트랙 E] 제작 단계의 상태. `factory/factoryViewModel.ts` 의 `FactoryStageStatus` 와 1:1 이다.
+ *
+ * ⚠️ **낱말이 색을 대신한다**(구현 명세 §6: 상태를 색상만으로 표현하지 않는다). 그래서 여기
+ *   문구가 비면 색맹인 사용자에게는 모든 칸이 같아진다 — 빈 문자열을 넣지 않는다.
+ * ⚠️ «대기» 와 «차단» 을 나눈다. 순서를 기다리는 것과 선행 조건이 막힌 것은 사용자가 해야 할
+ *   일이 다르다(앞의 것은 기다리면 되고, 뒤의 것은 무엇이 막혔는지 봐야 한다). */
+export const STAGE_STATUS_KO: Record<string, string> = {
+  waiting: '대기',
+  running: '진행',
+  decision_required: '사용자 결정 대기',
+  completed: '완료',
+  reworking: '재작업',
+  failed: '실패',
+  blocked: '차단',
+  stopped: '중지',
+};
+
+export const stageStatusKo = (v: string) => userTerm(STAGE_STATUS_KO, v, '제작 단계 상태');
 export const deliverableTypeKo = (v: string) => userTerm(DELIVERABLE_TYPE_KO, v, '산출물 유형');
 export const contractStateKo = (v: string) => userTerm(CONTRACT_STATE_KO, v, '계약 상태');
 export const severityKo = (v: string) => userTerm(SEVERITY_KO, v, '심각도');

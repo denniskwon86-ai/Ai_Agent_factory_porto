@@ -5,6 +5,7 @@ import { useFactoryStore } from './store/useFactoryStore';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 
 import ControlPanel from './components/ControlPanel';
+import { AdaptiveProductionStudio } from './factory/AdaptiveProductionStudio';
 import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
@@ -81,6 +82,11 @@ export default function App() {
   const [showPlanning, setShowPlanning] = useState(false);
   // [M5] 전사 브리핑 — 권한 범위 안의 상태 집계(LLM 0콜). 디자인 확정 후 개편 대상.
   const [showBriefing, setShowBriefing] = useState(false);
+  // [트랙 E 2단계] Adaptive Production Studio — **병행 카나리**.
+  // ⚠️ 기존 3패널을 대체하지 않는다(구현 명세 §7-7: 기능 회귀·시각 게이트 통과 후 제거).
+  //   지금 신규 화면에는 Sprint 시작·정지·재개·HOTL 승인이 없으므로, 종전 통제실을 닫으면
+  //   그 기능이 사라진다. 그래서 열고 닫는 오버레이로 둔다.
+  const [showStudio, setShowStudio] = useState(false);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
   const [showLogPopup, setShowLogPopup] = useState(false);
@@ -774,6 +780,15 @@ export default function App() {
             >
               🛡️ 거버넌스
             </button>
+            {/* [트랙 E 2단계] 신규 제작 작업공간으로 들어가는 유일한 입구. 종전 화면은 그대로
+                남아 있고, 닫으면 여기로 돌아온다 — «병행 카나리»가 그 뜻이다. */}
+            <button
+              onClick={() => setShowStudio(true)}
+              className="text-xs font-bold text-orange-100 bg-orange-900/50 hover:bg-orange-800/70 border border-orange-700/60 px-3 py-1.5 rounded-lg transition-colors"
+              title="새 제작 작업공간(병행 카나리) — 전체 제작 단계와 WBS 실행 구조를 실제 상태로 봅니다. 종전 통제실은 그대로 유지됩니다."
+            >
+              🏗 새 작업공간
+            </button>
             <button
               onClick={() => setShowShadow(true)}
               className="text-xs font-bold text-slate-200 bg-slate-800/70 hover:bg-slate-700/70 border border-slate-600/60 px-3 py-1.5 rounded-lg transition-colors"
@@ -820,6 +835,12 @@ export default function App() {
         )}
         {showBriefing && (
           <BriefingPanel onClose={() => setShowBriefing(false)} />
+        )}
+        {/* [트랙 E 2단계] 프로젝트 문맥이 있는 이 화면에만 둔다 — Studio 는 «지금 만들고 있는
+            SW»를 다루므로 프로젝트가 없는 런처에서는 보여 줄 것이 없다. 위 주석이 경고한
+            «모달 목록 두 벌» 중 이쪽에만 추가한 것은 실수가 아니다. */}
+        {showStudio && (
+          <AdaptiveProductionStudio onClose={() => setShowStudio(false)} />
         )}
 
         {/* 전체 워크플로우 진행 스트립 */}

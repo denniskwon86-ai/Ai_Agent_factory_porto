@@ -1,0 +1,285 @@
+/**
+ * [트랙 E · 2단계] Adaptive Production Studio 스타일.
+ *
+ * 시각 SSOT: `uiux-prototypes/sw-factory-concepts/adaptive-production-studio/index.html`
+ * 계약: 구현 명세 §6 시각·접근성.
+ *
+ * ## 두 가지 규칙
+ *
+ * 1. **`.afs-studio` 안에서만 적용된다.** `afs.css` 가 `.afs-scope` 로 격리한 것과 같은 이유다 —
+ *    기존 15개 화면은 여전히 다크 테마이고, 전역 선택자를 쓰면 그 화면들이 예고 없이 변한다.
+ *    2단계는 «기존 화면과 병행 렌더» 이므로(§7-2) 격리가 전제다.
+ * 2. **색은 `tokens.css` 의 토큰으로 쓴다.** 프로토타입의 리터럴(`#0a1e5a`·`#fa002d`·`#d9dee5`)은
+ *    이미 `--ls-navy`·`--ls-red`·`--surface-border` 와 같은 값이다. 리터럴을 다시 적으면 토큰을
+ *    고칠 때 이 파일만 옛 색으로 남는다.
+ *
+ * ⚠️ 크기는 명세가 숫자로 못 박은 것이라 그대로 지킨다: WBS 238px, 단계 지도 86px,
+ *   가시 텍스트 최소 12px, 주요 제목 14px 이상.
+ */
+
+.afs-studio {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--surface-text);
+  background: var(--surface-page);
+  font-size: 12px;                 /* §6: 가시 텍스트 최소 12px */
+}
+
+/* ── 전체 제작 단계(Production Stage Map) ─────────────────────────────── */
+.afs-studio .stage-map {
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--surface-border);
+  background: var(--surface-raised);
+}
+.afs-studio .stage-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.afs-studio .stage-head b { font-size: 14px; }   /* §6: 주요 제목 14px 이상 */
+.afs-studio .stage-head span { color: var(--surface-text-muted); }
+.afs-studio .stage-head .spacer { flex: 1; }
+.afs-studio .stage-head button {
+  border: 0;
+  color: var(--action-quiet-fg);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+/* 단계 수가 템플릿마다 다르다 — 8칸 고정 그리드가 아니라 흐르는 그리드로 둔다.
+   ⚠️ 프로토타입은 `repeat(8,1fr)` 이지만 그것은 예시 데이터가 8단계였기 때문이다.
+     커스텀 워크플로우는 14단계도 되고 4단계도 된다. */
+.afs-studio .stages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 7px;
+}
+.afs-studio .stage {
+  position: relative;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--surface-border);
+  border-radius: 7px;
+  color: var(--surface-text-muted);
+  background: var(--surface-card);
+  text-align: left;
+  cursor: pointer;
+}
+.afs-studio .stage b,
+.afs-studio .stage small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.afs-studio .stage b { font-size: 12px; }
+.afs-studio .stage small { margin-top: 3px; font-size: 12px; }
+
+/* 상태색. **색만으로 말하지 않는다**(§6) — 각 칸의 `small` 에 상태 낱말이 함께 들어간다.
+   그래서 여기서는 «읽는 사람이 색맹이어도 정보가 남는가» 를 CSS 가 아니라 컴포넌트가 보장한다. */
+.afs-studio .stage[data-status='completed'] {
+  border-color: #a9d9d2;
+  color: var(--state-success-fg);
+  background: var(--state-success-bg);
+}
+.afs-studio .stage[data-status='running'] {
+  border-color: var(--ls-red);
+  color: var(--action-danger-quiet-fg);
+  background: var(--state-error-bg);
+  box-shadow: inset 0 -3px var(--ls-red);
+}
+.afs-studio .stage[data-status='decision_required'] {
+  border-color: #ecd2a9;
+  color: var(--state-warn-fg);
+  background: var(--state-warn-bg);
+  box-shadow: inset 0 -3px var(--ls-orange);
+}
+.afs-studio .stage[data-status='reworking'] {
+  border-color: #ecd2a9;
+  color: var(--state-warn-fg);
+  background: var(--state-warn-bg);
+}
+.afs-studio .stage[data-status='failed'],
+.afs-studio .stage[data-status='stopped'] {
+  border-color: var(--action-danger-quiet-fg);
+  color: var(--state-error-fg);
+  background: var(--state-error-bg);
+}
+.afs-studio .stage[data-status='blocked'] { opacity: .7; }
+.afs-studio .stage[aria-current='step'] { outline: 2px solid var(--ls-navy); outline-offset: 1px; }
+.afs-studio .stage:focus-visible { outline: 2px solid var(--action-focus-ring); outline-offset: 2px; }
+
+/* ── 본체: WBS 238px + 가변 Canvas (§6) ──────────────────────────────── */
+.afs-studio .studio-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: 238px minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── WBS Spine ────────────────────────────────────────────────────────── */
+.afs-studio .work-map {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--surface-border);
+  background: var(--surface-sunken);
+}
+.afs-studio .map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 13px;
+  border-bottom: 1px solid var(--surface-border);
+  background: var(--surface-card);
+}
+.afs-studio .map-head b { font-size: 14px; }
+.afs-studio .map-head span { color: var(--surface-text-muted); }
+.afs-studio .map-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 10px;
+}
+.afs-studio .map-summary div {
+  padding: 8px;
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  background: var(--surface-card);
+}
+.afs-studio .map-summary b,
+.afs-studio .map-summary small { display: block; }
+.afs-studio .map-summary b { font-size: 16px; }
+.afs-studio .map-summary small { margin-top: 2px; color: var(--surface-text-muted); }
+.afs-studio .map-section { padding: 4px 9px 10px; }
+.afs-studio .map-section > header {
+  padding: 8px 5px;
+  color: var(--surface-text-muted);
+  font-weight: 900;
+}
+.afs-studio .wbs-item {
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr) auto;
+  gap: 7px;
+  width: 100%;
+  margin-bottom: 5px;
+  padding: 8px;
+  border: 1px solid var(--surface-border);
+  border-radius: 7px;
+  color: var(--surface-text);
+  background: var(--surface-card);
+  text-align: left;
+  cursor: pointer;
+}
+.afs-studio .wbs-item i {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 6px;
+  color: #fff;
+  background: #8090a4;
+  font-size: 12px;
+  font-style: normal;
+}
+.afs-studio .wbs-item b,
+.afs-studio .wbs-item small { display: block; }
+.afs-studio .wbs-item b { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.afs-studio .wbs-item small { margin-top: 3px; color: var(--surface-text-muted); }
+.afs-studio .wbs-item em { align-self: center; color: var(--surface-text-muted); font-style: normal; }
+.afs-studio .wbs-item[data-kind='done'] i { background: var(--ls-green); }
+.afs-studio .wbs-item[data-kind='active'] { border-color: var(--ls-red); box-shadow: 0 0 0 2px rgba(250, 0, 45, .07); }
+.afs-studio .wbs-item[data-kind='active'] i { background: var(--ls-red); }
+.afs-studio .wbs-item[data-kind='blocked'] { opacity: .65; }
+.afs-studio .wbs-item[aria-current='true'] { outline: 2px solid var(--ls-navy); outline-offset: 1px; }
+.afs-studio .wbs-item:focus-visible { outline: 2px solid var(--action-focus-ring); outline-offset: 2px; }
+
+/* WBS 가 아직 없을 때. **«0개» 로 보여주지 않는다** — 아직 만들지 않은 것과 0개는 다르다. */
+.afs-studio .pre-wbs { padding: 10px; }
+.afs-studio .pre-wbs-card {
+  padding: 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+.afs-studio .pre-wbs-card h3 { margin: 0 0 6px; font-size: 14px; }
+.afs-studio .pre-wbs-card p { margin: 0; color: var(--surface-text-muted); line-height: 1.5; }
+.afs-studio .deliverable-contract { display: grid; gap: 6px; margin-top: 10px; }
+.afs-studio .deliverable-contract div {
+  padding: 8px;
+  border-radius: 6px;
+  color: var(--surface-text-muted);
+  background: var(--surface-sunken);
+}
+.afs-studio .deliverable-contract b { color: var(--ls-navy); }
+
+/* ── Canvas 자리(3단계에서 채운다) ───────────────────────────────────── */
+.afs-studio .adaptive-canvas {
+  display: grid;
+  grid-template-rows: 48px minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+  background: var(--surface-card);
+}
+.afs-studio .canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--surface-border);
+}
+.afs-studio .canvas-toolbar b { font-size: 15px; }
+.afs-studio .canvas-toolbar span { color: var(--surface-text-muted); }
+.afs-studio .canvas-toolbar .spacer { flex: 1; }
+.afs-studio .canvas-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  background: var(--surface-page);
+}
+
+/* 아직 만들지 않은 자리를 «비어 있음» 이 아니라 «다음 단계» 로 표시한다.
+   ⚠️ 빈 흰 화면을 두면 검토하는 사람이 «망가졌다» 로 읽는다. */
+.afs-studio .canvas-pending {
+  display: grid;
+  gap: 8px;
+  max-width: 640px;
+  padding: 16px;
+  border: 1px dashed var(--surface-border-strong);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+.afs-studio .canvas-pending h3 { margin: 0; font-size: 14px; }
+.afs-studio .canvas-pending p { margin: 0; color: var(--surface-text-muted); line-height: 1.55; }
+
+/* ── 적재 상태(실패·권한없음·빈 상태·계산 전을 각각) ─────────────────── */
+.afs-studio .studio-note {
+  display: grid;
+  gap: 4px;
+  margin: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--surface-border);
+  border-left-width: 4px;
+  border-radius: 7px;
+  background: var(--surface-card);
+}
+.afs-studio .studio-note b { font-size: 12px; }
+.afs-studio .studio-note p { margin: 0; color: var(--surface-text-muted); line-height: 1.5; }
+.afs-studio .studio-note[data-tone='loading'] { border-left-color: var(--state-unknown-fg); }
+.afs-studio .studio-note[data-tone='empty'] { border-left-color: var(--surface-border-strong); }
+.afs-studio .studio-note[data-tone='forbidden'] { border-left-color: var(--ls-navy); }
+.afs-studio .studio-note[data-tone='error'] { border-left-color: var(--ls-red); }
+
+/* 화면이 좁아지면 WBS 를 위로 접는다 — 238px 를 억지로 유지하면 Canvas 가 죽는다.
+   §6 은 «1280px 이상» 에 대한 계약이므로 그 아래에서는 순서를 바꾼다. */
+@media (max-width: 1279px) {
+  .afs-studio .studio-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .afs-studio .work-map { border-right: 0; border-bottom: 1px solid var(--surface-border); max-height: 34vh; }
+}
