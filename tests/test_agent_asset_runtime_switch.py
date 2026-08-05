@@ -42,7 +42,7 @@ def store(monkeypatch, tmp_path):
 
 
 @pytest.fixture()
-def client(monkeypatch, store):
+def client(monkeypatch, store, ecm_org_seed):
     import config
     from core.org_directory import org_directory
     org_directory._invalidate()

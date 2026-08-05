@@ -132,12 +132,38 @@ class AdminCapabilities:
         ★ AI 거버넌스 관리자는 조직 범위 제한을 받지 않는다(설계 §4.2 — 조직 공개 가능,
           전사 승인 가능). 부서 `manager` 는 `manageable_scope_nodes` 안에서만 승인한다.
         ⚠️ 소유 조직이 **비어 있는 자산은 관리 대상이 아니다.** 미기재를 «누구나 관리» 로 읽으면
-          소유를 채우지 않는 것이 이득이 된다."""
+          소유를 채우지 않는 것이 이득이 된다.
+
+        ★★★ [2026-08-05 / D-018 이행] **양쪽을 정본으로 맞춰 비교한다.**
+          백필(⑤)이 `departments.scope_node_id` 를 `node_*` 로 승격한 순간, 코드(`LS_MNM`)로
+          들어온 요청이 **전부 403** 이 됐다 — 관리 범위는 정본인데 입력은 별칭이었기 때문이다.
+          실측으로 조직 자산 생성이 막혔다(백필 직후 자산 거버넌스 테스트 22건 실패).
+          ⚠️ 이행기에는 **어느 쪽이 별칭인지 알 수 없다**: 백필 전이면 관리 범위가 코드이고,
+            백필 후면 입력이 코드다. 그래서 한쪽만 정규화하면 반대 상황에서 다시 막힌다.
+          ⚠️ 라우트에서 정규화하지 않는 이유: 호출부가 셋이고(생성·수정·승인), 라우트마다
+            정규화하면 또 복제가 된다 — 이 저장소가 `_scope` 헬퍼에서 이미 겪은 형태다."""
         if self.bootstrap or self.is_platform_admin or self.is_ai_admin:
             return True
         if not scope_id:
             return False
-        return scope_id in self.manageable_scope_nodes
+        if scope_id in self.manageable_scope_nodes:
+            return True
+        return self._canonical(scope_id) in {self._canonical(s)
+                                             for s in self.manageable_scope_nodes}
+
+    @staticmethod
+    def _canonical(scope_ref: str) -> str:
+        """별칭(업무 코드·부서 id)을 정본 `node_id` 로 바꾼다. 해석 못 하면 원본을 준다.
+
+        ⚠️ 원본을 그대로 돌려주는 이유: 여기서 빈 값을 주면 «해석 못 한 두 값» 이 서로 같아져
+          (빈 문자열 == 빈 문자열) **관리 권한이 우연히 통과**한다."""
+        if not scope_ref:
+            return ""
+        try:
+            from core.enterprise_context.scoping import resolve_scope_ref
+            return resolve_scope_ref(scope_ref) or scope_ref
+        except Exception:
+            return scope_ref
 
     def can_publish_enterprise(self) -> bool:
         """[P1-4] **전사 공개**를 승인할 수 있는가.

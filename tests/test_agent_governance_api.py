@@ -41,7 +41,7 @@ def H(uid: str):
 
 
 @pytest.fixture()
-def client(monkeypatch, tmp_path):
+def client(monkeypatch, tmp_path, ecm_org_seed):
     """권한 강제를 켠 앱 + **격리된 자산 DB**.
 
     ⚠️⚠️ 싱글턴을 **두 곳** 갈아끼운다. 라우트와 어댑터가 각각 `from ... import agent_assets`

@@ -29,50 +29,7 @@ def H(uid: str):
 
 
 @pytest.fixture()
-def ecm_seed():
-    """★★ 테스트가 **자기 조직도를 심는다.**
-
-    `tests/conftest.py` 는 ECM 을 tmp DB 로 격리한다(의도된 것 — 「조직도에 의존하는 테스트는
-    두 방향으로 거짓말한다: 없는 환경에서는 통제가 약해 보이고, 있는 환경에서는 상속이 끼어들어
-    기대와 달라진다」). 그래서 실제 조직도를 전제하지 않고 필요한 노드만 만든다.
-
-    ⚠️ 코드는 실제 값(`LS_MNM`·`MNM_BATTERY`)을 쓴다 — 사용자 범위(`readable_scope_nodes`)가
-      조직 디렉터리에서 그 코드로 오기 때문이다. 임의 코드를 쓰면 범위가 맞지 않아 404 가 되고,
-      그 404 를 「통제가 동작한다」로 오독하게 된다."""
-    from core.enterprise_context.models import (REL_OPERATING_PARENT, STATUS_ACTIVE,
-                                               EnterpriseEntity, OrganizationEdge,
-                                               OrganizationNode)
-    from core.enterprise_context.repository import ecm_repository as repo
-
-    # ⚠️ conftest 는 **경로만** tmp 로 바꾼다(스키마는 만들지 않는다). 쓰기는 `conn.execute` 를
-    #   직접 하므로 «no such table» 이 되고, 읽기(`_query`)만 실패 시 DDL 을 돌린다.
-    #   그래서 조회를 한 번 걸어 테이블을 만들고 시작한다.
-    repo.list_nodes()
-
-    real = repo.upsert_entity(EnterpriseEntity(name_ko="LS MnM", entity_mode="REAL",
-                                              status=STATUS_ACTIVE))
-    virt = repo.upsert_entity(EnterpriseEntity(name_ko="가상 확장", entity_mode="VIRTUAL",
-                                              base_entity_id=real.entity_id,
-                                              status=STATUS_ACTIVE))
-    top = repo.upsert_node(OrganizationNode(entity_id=real.entity_id, code="LS_MNM",
-                                            name_ko="LS MnM", status=STATUS_ACTIVE))
-    batt = repo.upsert_node(OrganizationNode(entity_id=real.entity_id, code="MNM_BATTERY",
-                                            name_ko="배터리소재 사업부",
-                                            dept_id="production_battery",
-                                            status=STATUS_ACTIVE))
-    # 가상 사본은 실제와 같은 이름·다른 코드를 갖는다(`clone_service` 의 접두사 관행).
-    vbatt = repo.upsert_node(OrganizationNode(entity_id=virt.entity_id,
-                                              code="V8039_MNM_BATTERY",
-                                              name_ko="배터리소재 사업부",
-                                              status=STATUS_ACTIVE))
-    repo.add_edge(OrganizationEdge(from_node_id=top.node_id, to_node_id=batt.node_id,
-                                   relation_type=REL_OPERATING_PARENT,
-                                   status=STATUS_ACTIVE))
-    return {"top": top, "batt": batt, "vbatt": vbatt}
-
-
-@pytest.fixture()
-def client(monkeypatch, ecm_seed):
+def client(monkeypatch, ecm_org_seed):
     import config
     from core.org_directory import org_directory
     org_directory._invalidate()
@@ -157,9 +114,9 @@ def test_code_input_is_flagged_for_backfill(client):
     assert perm["needs_normalization"] is True
 
 
-def test_node_id_input_needs_no_normalization(client, ecm_seed):
+def test_node_id_input_needs_no_normalization(client, ecm_org_seed):
     """정본으로 들어오면 백필 대상이 아니다."""
-    node = ecm_seed["top"].node_id
+    node = ecm_org_seed["LS_MNM"]
     r = client.get(f"/api/v1/planning/facts?org_id=LS_MNM&scope_node_id={node}", headers=H(MGR))
     perm = r.json()["permission"]
     assert perm["scope_node_id"] == node
@@ -208,7 +165,7 @@ def test_entity_mode_reaches_the_resolver(client):
     assert seen[0]["entity_mode"] == "REAL" and seen[0]["tenant_id"] == "tenant_default"
 
 
-def test_wrong_context_does_not_resolve_to_the_other_mode(client, ecm_seed):
+def test_wrong_context_does_not_resolve_to_the_other_mode(client, ecm_org_seed):
     """★★★ 실제 코드를 가상 문맥으로 물으면 **해석되지 않는다**(그 반대도 같다).
 
     이것이 «코드는 tenant·entity_mode 안에서만 유일하다» 의 실질적 의미다."""
@@ -220,9 +177,9 @@ def test_wrong_context_does_not_resolve_to_the_other_mode(client, ecm_seed):
     assert v["resolved"] is False and v["kind"] == "code_out_of_context"
     # 맞는 문맥에서는 각자 해석된다 — 막는 것만 확인하면 «전부 막힌 상태» 를 통과로 센다.
     assert ecm_resolver.resolve_scope_ref(
-        "MNM_BATTERY", entity_mode="REAL")["node_id"] == ecm_seed["batt"].node_id
+        "MNM_BATTERY", entity_mode="REAL")["node_id"] == ecm_org_seed["MNM_BATTERY"]
     assert ecm_resolver.resolve_scope_ref(
-        "V8039_MNM_BATTERY", entity_mode="VIRTUAL")["node_id"] == ecm_seed["vbatt"].node_id
+        "V8039_MNM_BATTERY", entity_mode="VIRTUAL")["node_id"] == ecm_org_seed["V8039_MNM_BATTERY"]
 
 
 # ── 통제가 업무를 막지 않는다 ─────────────────────────────────────────────

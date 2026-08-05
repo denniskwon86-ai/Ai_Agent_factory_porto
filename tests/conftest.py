@@ -60,6 +60,84 @@ def _planning_db_template(tmp_path_factory):
     return str(p)
 
 
+@pytest.fixture()
+def ecm_org_seed():
+    """[D-018] 격리 ECM 에 **운영 조직 코드에 대응하는 최소 노드**를 심는다(autouse 아님).
+
+    ★★★ 왜 필요한가 — **격리가 반쪽이다.** `enterprise_context.db`(ECM 조직도)는 위에서 tmp 로
+      격리하지만 `org_directory`(부서·사용자·권한)는 **운영 DB 를 그대로 읽는다.** 그래서
+      사용자의 `readable_scope_nodes` 는 실제 값인데 ECM 에는 그 노드가 없는 상태가 된다.
+
+      백필(D-018 ⑤) 전에는 그 비대칭이 드러나지 않았다: 양쪽이 다 코드(`LS_MNM`)였으니
+      코드끼리 비교돼 통과했다. 백필로 `departments.scope_node_id` 가 `node_*` 로 승격되자
+      **자산 가시성 테스트 15건이 404 로 깨졌다** — 사용자 범위는 정본인데 테스트가 만든 자산의
+      소유는 코드이고, ECM 이 비어 있어 둘을 잇는 조상·별칭 해석이 불가능했기 때문이다.
+
+    ⚠️ autouse 로 두지 않는다. 조직도가 **없는** 상태를 검증하는 테스트도 있고(미바인딩 비노출),
+      전부에 심으면 그 테스트가 조용히 의미를 잃는다.
+    ⚠️⚠️ **노드를 새로 만들지 않고 운영 조직도에서 복사한다.** 백필 전에는 새로 만들어도 됐다
+      (양쪽이 코드였으므로 코드끼리 매칭). 백필 후 `readable_scope_nodes` 는 **운영 ECM 의
+      `node_*`** 를 가리키므로, 격리 DB 에 새 id 를 만들면 **절대 매칭되지 않는다**
+      (실측: 격리 `LS_MNM`=`node_a553…` vs 운영 `departments`=`node_4140…` → 생성 403).
+      그래서 필요한 노드만 **id 째로** 복사한다.
+    ⚠️ 운영 DB 는 **읽기 전용**으로 연다. 그리고 필요한 코드가 없으면 조용히 넘기지 않고
+      그 사실이 테스트 실패로 드러나게 둔다 — skip 으로 덮으면 통제 검증이 사라진다.
+    """
+    import os
+    import sqlite3
+
+    from core.enterprise_context.models import STATUS_ACTIVE
+    from core.enterprise_context.repository import ecm_repository as repo
+    from core.paths import data_path
+
+    # conftest 는 **경로만** tmp 로 바꾼다(스키마는 만들지 않는다). 쓰기는 `conn.execute` 를
+    # 직접 하므로 «no such table» 이 되고, 읽기(`_query`)만 실패 시 DDL 을 돌린다.
+    repo.list_nodes()
+
+    src_path = data_path("enterprise_context.db")
+    if not os.path.exists(src_path):
+        return {}
+    src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
+    src.row_factory = sqlite3.Row
+    dst = sqlite3.connect(repo.db_path)
+    out = {}
+    try:
+        ents = {r["entity_id"]: dict(r) for r in src.execute(
+            "SELECT * FROM enterprise_entities")}
+        nodes = [dict(r) for r in src.execute(
+            "SELECT * FROM organization_nodes WHERE status=?", (STATUS_ACTIVE,))]
+        keep = {n["node_id"] for n in nodes}
+        # 참조되는 엔티티만 복사한다(가상 엔티티의 base 까지 함께 — 제약이 요구한다).
+        need_ents = {n["entity_id"] for n in nodes}
+        need_ents |= {ents[e]["base_entity_id"] for e in list(need_ents)
+                      if e in ents and ents[e].get("base_entity_id")}
+        for eid in need_ents:
+            e = ents.get(eid)
+            if not e:
+                continue
+            cols = ",".join(e.keys())
+            dst.execute(f"INSERT OR REPLACE INTO enterprise_entities ({cols}) "
+                        f"VALUES ({','.join('?' * len(e))})", tuple(e.values()))
+        for n in nodes:
+            cols = ",".join(n.keys())
+            dst.execute(f"INSERT OR REPLACE INTO organization_nodes ({cols}) "
+                        f"VALUES ({','.join('?' * len(n))})", tuple(n.values()))
+            out[n["code"]] = n["node_id"]
+        for r in src.execute("SELECT * FROM organization_edges WHERE status=?",
+                             (STATUS_ACTIVE,)):
+            d = dict(r)
+            if d["from_node_id"] not in keep or d["to_node_id"] not in keep:
+                continue        # 끊긴 엣지는 옮기지 않는다 — 없는 노드를 가리키면 상속이 깨진다
+            cols = ",".join(d.keys())
+            dst.execute(f"INSERT OR REPLACE INTO organization_edges ({cols}) "
+                        f"VALUES ({','.join('?' * len(d))})", tuple(d.values()))
+        dst.commit()
+    finally:
+        src.close()
+        dst.close()
+    return out
+
+
 @pytest.fixture(autouse=True)
 def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
                                _planning_db_template):
