@@ -63,8 +63,14 @@ def client(monkeypatch, ecm_org_seed):
 
 
 #: 봉합한 읽기 라우트 전부. 새 라우트를 추가하면 여기 넣어야 익명 검사에 걸린다.
+#  ★★★ [2026-08-05 병합 검증] 이 목록에 **`/facts` 가 없었다.** 그래서 익명이
+#    `GET /api/v1/planning/facts` 로 경영계획 사실 20건(금액 포함)을 받는 것을 이 파일이
+#    통과시켰다 — 라우터의 다른 GET 은 다 막혔는데 가장 민감한 하나만 열려 있었다.
+#  ⚠️ 목록을 손으로 관리하면 «새 라우트를 넣어야 한다» 는 주석이 지켜지지 않는다.
+#    그래서 아래 `test_every_planning_get_is_covered_here` 가 라우터를 읽어 누락을 잡는다.
 READ_PATHS = [
     "/accounts",
+    "/facts",
     "/scenarios",
     "/submissions",
     "/submissions/current?org_id=LS_MNM&period=2026",
@@ -74,6 +80,11 @@ READ_PATHS = [
     "/drivers/D1/preview?pct_change=5",
     "/drivers/D1/external",
     "/import/template",
+    "/variance?org_id=LS_MNM&period=2026",
+    "/cash-flow?org_id=LS_MNM&period=2026",
+    "/rollup-check?org_id=LS_MNM&period=2026",
+    "/backtest/plan?org_id=LS_MNM&period=2026",
+    "/backtest/scenario?scenario_id=x&org_id=LS_MNM&period=2026",
 ]
 
 
@@ -85,7 +96,33 @@ def test_anonymous_cannot_read_planning(client, path):
     assert r.status_code == 401, f"{path} 가 익명에게 {r.status_code} 로 열려 있다"
 
 
-@pytest.mark.parametrize("path", ["/accounts", "/scenarios", "/submissions", "/drivers"])
+def test_every_planning_get_is_covered_here(client):
+    """★★★ [2026-08-05 병합 검증에서 이 파일이 놓친 것] **`READ_PATHS` 에 빠진 GET 이 없어야 한다.**
+
+    `/facts` 가 이 목록에 없어서 익명 유출을 통과시켰다. 손으로 관리하는 목록은 «새 라우트를
+    넣어야 한다» 는 주석이 지켜지지 않으므로, 라우터를 읽어 대조한다.
+    ⚠️ 경로 파라미터가 있는 라우트는 목록 쪽이 실제 값을 채우므로 **패턴 단위**로 비교한다."""
+    import re
+
+    import api.routes.planning_control as pc
+    declared = set()
+    for r in pc.router.routes:
+        if "GET" in getattr(r, "methods", set()):
+            declared.add(r.path.replace(pc.router.prefix, "", 1) or "/")
+    covered = {re.sub(r"\?.*$", "", p) for p in READ_PATHS}
+    # 목록의 구체 값을 라우트 패턴으로 되돌린다(`/drivers/D1/impacts` → `/drivers/{...}/impacts`)
+    def matches(pattern: str) -> bool:
+        rx = re.sub(r"\{[^}]+\}", r"[^/]+", pattern)
+        return any(re.fullmatch(rx, c) for c in covered)
+
+    missing = sorted(p for p in declared if not matches(p))
+    assert not missing, (
+        f"익명 검사에서 빠진 GET 라우트가 있다: {missing} — READ_PATHS 에 넣으십시오. "
+        f"«막혔을 것» 이라는 추측이 아니라 이 목록이 근거다")
+
+
+@pytest.mark.parametrize("path", ["/accounts", "/facts", "/scenarios", "/submissions",
+                                  "/drivers"])
 def test_unregistered_user_is_refused_with_403(client, path):
     """★★ 등록되지 않은 사용자는 **403** — 식별은 됐고 권한이 없다.
 

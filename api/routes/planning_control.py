@@ -68,8 +68,23 @@ def _assert_identified(p: Principal, what: str) -> None:
     if not reason:
         return
     if not (p.user_id or "").strip():
-        raise HTTPException(status_code=401, detail=f"{what}를 보려면 사용자 식별이 필요합니다.")
+        raise HTTPException(status_code=401,
+                            detail=f"{what}{_eul(what)} 보려면 사용자 식별이 필요합니다.")
     raise HTTPException(status_code=403, detail=reason)
+
+
+def _eul(word: str) -> str:
+    """받침에 맞는 목적격 조사(을/를). 사용자에게 보이는 문구이므로 맞춘다.
+
+    ⚠️ 자료 이름을 문구에 끼워 넣는 함수가 여럿 있으면 «경영계획를» 같은 문장이 화면에 남는다.
+      틀린 조사는 기능을 막지 않지만, 통제 메시지가 어설퍼 보이면 사용자는 그 통제도 어설프다고
+      읽는다. 판정은 한 곳에 둔다."""
+    if not word:
+        return "를"
+    last = word.strip()[-1]
+    if not ("가" <= last <= "힣"):
+        return "를"                          # 한글이 아니면 판정할 근거가 없다
+    return "을" if (ord(last) - 0xAC00) % 28 else "를"
 
 
 def _only_visible_orgs(p: Principal, rows: list, key: str = "org_id") -> tuple:
@@ -140,6 +155,7 @@ async def upsert_account(req: AccountRequest, p: Principal = Depends(current_pri
     계정과목은 전사 기준정보다 — 한 사람이 추가하면 전 조직의 계획·실적 집계가 바뀐다.
     그리고 `upsert` 이므로 **기존 계정을 덮어쓸 수도** 있었다(같은 코드로 이름·부호를 바꾸면
     과거 집계의 의미가 달라진다). 그래서 기준정보 관리 권한을 요구한다."""
+    _assert_identified(p, "계정과목")
     from api.deps import assert_can_manage_standard
     assert_can_manage_standard(p)
     try:
@@ -177,6 +193,7 @@ async def list_facts(org_id: str = "", period: str = "", value_kind: str = "",
                      p: Principal = Depends(current_principal)):
     # [§6-2] 등급은 주체 권한에서 파생한다 — 낮으면 제목만 보이고 값은 가려진다.
     #   ⚠️ 경영계획 값은 특히 민감하다(사업부 손익) — 등급을 안 넘기면 전 조직이 전량을 본다.
+    _assert_identified(p, "경영계획")
     from core.enterprise_context.classification import clearance_of_scope
     # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체인가 — 이것도 권한에서 파생한다.
     from core.enterprise_context.scoping import may_drill_down
@@ -205,6 +222,7 @@ async def put_fact(req: FactRequest, p: Principal = Depends(current_principal)):
     ⚠️ `org_id` 는 정규화하지 **않는다.** 그것은 `fact_id` 의 구성 요소이고(`org_id|account|…`)
       인덱스 3개·화면 조회 파라미터가 그 값을 쓴다 — 바꾸면 기본키가 달라져 기존 행과 이어지지
       않는다. 권한 판정은 `owner_organization_id`(정본)로 하므로 통제는 정본을 탄다."""
+    _assert_identified(p, "경영계획")
     eff = await _scope_eff(p, req.owner_organization_id or req.org_id, req.account_code)
     owner = eff.scope_node_id or (req.owner_organization_id or req.org_id)
     try:
@@ -263,6 +281,7 @@ async def list_scenarios(org_id: str = "", p: Principal = Depends(current_princi
 @router.post("/scenarios")
 async def create_scenario(req: ScenarioRequest, p: Principal = Depends(current_principal)):
     """[D-018 ⑥] 소유 조직은 **정본**으로 저장한다(`org_id` 는 조회 키이므로 그대로 둔다)."""
+    _assert_identified(p, "시나리오")
     eff = await _scope_eff(p, req.org_id, req.scenario_id)
     owner = eff.scope_node_id or req.org_id
 
@@ -359,6 +378,7 @@ class RunRequest(BaseModel):
 @router.post("/scenarios/{scenario_id}/run")
 async def run_scenario(scenario_id: str, req: RunRequest,
                        p: Principal = Depends(current_principal)):
+    _assert_identified(p, "시나리오 실행")
     await _scope(p, req.org_id, scenario_id)
     try:
         data = await asyncio.to_thread(engine.run_scenario, scenario_id, req.org_id,
@@ -380,6 +400,7 @@ async def compare(req: CompareRequest, p: Principal = Depends(current_principal)
     """여러 시나리오를 **동일 기준선에서** 비교(§17.3 파일럿 성공 기준).
 
     응답의 `same_baseline` 이 false 면 그 비교는 무효다 — 화면은 그것을 숨기지 말 것."""
+    _assert_identified(p, "시나리오 비교")
     await _scope(p, req.org_id, ",".join(req.scenario_ids))
     if not req.scenario_ids:
         raise HTTPException(status_code=400, detail="비교할 시나리오가 없습니다.")
@@ -398,6 +419,7 @@ async def variance(org_id: str, period: str, p: Principal = Depends(current_prin
 
     ⚠️ 한쪽이 비어 있으면 `comparable=false` 로 돌려주고 **차이를 계산하지 않는다.**
       없는 값을 0 으로 두면 '미달'로 잘못 읽힌다."""
+    _assert_identified(p, "계획 대비 실적")
     await _scope(p, org_id, org_id)
     data = await asyncio.to_thread(engine.variance, org_id, period)
     return {"status": "success", "data": data}
@@ -457,6 +479,7 @@ async def current_approved(org_id: str, period: str, value_kind: str = PLAN,
 
 @router.post("/submissions")
 async def submit_plan(req: SubmitRequest, p: Principal = Depends(current_principal)):
+    _assert_identified(p, "계획 제출본")
     await _scope(p, req.org_id, req.org_id)
     if not p.user_id:
         raise HTTPException(status_code=401, detail="제출자 식별 정보가 없습니다.")
@@ -471,6 +494,7 @@ async def submit_plan(req: SubmitRequest, p: Principal = Depends(current_princip
 @router.post("/submissions/{submission_id}/approve")
 async def approve_plan(submission_id: str, req: ApproveRequest = None,
                        p: Principal = Depends(current_principal)):
+    _assert_identified(p, "계획 제출본 승인")
     if not p.user_id:
         raise HTTPException(status_code=401, detail="승인자 식별 정보가 없습니다 — "
                                                    "익명 승인은 받지 않습니다.")
@@ -485,6 +509,7 @@ async def approve_plan(submission_id: str, req: ApproveRequest = None,
 @router.post("/submissions/{submission_id}/reject")
 async def reject_plan(submission_id: str, req: RejectRequest,
                       p: Principal = Depends(current_principal)):
+    _assert_identified(p, "계획 제출본 반려")
     if not p.user_id:
         raise HTTPException(status_code=401, detail="반려자 식별 정보가 없습니다.")
     try:
@@ -551,6 +576,7 @@ async def register_driver(req: DriverRequest, p: Principal = Depends(current_pri
 
     동인은 «무엇이 계획을 움직이는가» 의 목록이고 파급 계수의 뿌리다 — 여기 등록된 동인이
     시나리오 가정으로 쓰인다. 계정과목과 같은 전사 기준정보이므로 같은 자격을 요구한다."""
+    _assert_identified(p, "계획 동인")
     from api.deps import assert_can_manage_standard
     assert_can_manage_standard(p)
     try:
@@ -577,6 +603,7 @@ async def add_impact(driver_code: str, req: ImpactRequest,
     ⚠️ [2026-08-05] `Principal` 은 있었지만 **권한 검사가 없었다** — 익명이면 «미승인» 으로
       기록될 뿐 행은 만들어졌다. 미승인 계수도 `preview` 의 경고에 섞여 나오고, 무엇보다
       전사 기준정보에 아무나 행을 추가할 수 있다는 사실은 그대로다."""
+    _assert_identified(p, "동인 영향")
     from api.deps import assert_can_manage_standard
     assert_can_manage_standard(p)
     try:
@@ -608,6 +635,7 @@ async def cash_flow(org_id: str, period: str, value_kind: str = PLAN,
     ⚠️ `computable=false` 면 **계산하지 않은 것**이다(0 이 아니다). `missing` 에 무엇이
       없는지 이름이 있다. 감가상각·운전자본·CAPEX 를 0 으로 채우면 '영업현금흐름 = 순이익'이
       되어 현금이 충분한 것처럼 보인다 — 화면은 이 구분을 반드시 표시할 것."""
+    _assert_identified(p, "현금흐름")
     await _scope(p, org_id, org_id)
     data = await asyncio.to_thread(engine.cash_flow_for, org_id, period, value_kind)
     return {"status": "success", "data": data}
@@ -703,6 +731,7 @@ class BacktestSeriesRequest(BaseModel):
 @router.get("/backtest/plan")
 async def backtest_plan(org_id: str, period: str, p: Principal = Depends(current_principal)):
     """계획 vs 실적 오차. `measurable=false` 면 **재지 않은 것**이다(오차 0 이 아니다)."""
+    _assert_identified(p, "계획 백테스트")
     await _scope(p, org_id, org_id)
     return {"status": "success",
             "data": await asyncio.to_thread(backtest.backtest_plan, org_id, period)}
@@ -716,6 +745,7 @@ async def backtest_scenario(scenario_id: str, org_id: str, period: str,
 
     `lookahead_risk=true` 면 가정이 대상 기간 이후에 작성된 것이다 —
     그 오차는 **실제 예측력이 아니다.**"""
+    _assert_identified(p, "시나리오 백테스트")
     await _scope(p, org_id, scenario_id)
     return {"status": "success",
             "data": await asyncio.to_thread(backtest.backtest_scenario, scenario_id,
@@ -729,6 +759,7 @@ async def backtest_series(req: BacktestSeriesRequest,
 
     `systematic_bias=true` 면 편향이 여러 기간에 걸쳐 같은 방향이라는 뜻이고,
     그것은 우연이 아니라 모델의 습관이다(MAPE 가 작아도 그대로 쓰면 안 된다)."""
+    _assert_identified(p, "백테스트 시계열")
     await _scope(p, req.org_id, req.org_id)
     return {"status": "success",
             "data": await asyncio.to_thread(backtest.backtest_series, req.org_id, req.periods)}
@@ -741,6 +772,7 @@ async def rollup_check(org_id: str, period: str, value_kind: str = PLAN,
 
     둘이 함께 있으면 단순 합산 시 **이중 계상**이다. 어느 쪽이 정본인지는 데이터를 넣은
     사람만 알기 때문에 자동으로 고르지 않고 **표시만** 한다."""
+    _assert_identified(p, "합산 검증")
     await _scope(p, org_id, org_id)
     facts = await asyncio.to_thread(planning_store.list_facts, org_id, period, value_kind)
     return {"status": "success", "data": await asyncio.to_thread(engine.rollup_conflicts, facts)}
