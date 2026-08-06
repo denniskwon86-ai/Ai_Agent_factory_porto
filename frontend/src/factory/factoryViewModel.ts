@@ -32,6 +32,8 @@
  */
 import { useMemo } from 'react';
 
+// 용어 사전은 `design/terms.ts` 하나다 — 단계명을 여기서 다시 적으면 두 벌이 된다.
+import { STAGE_KO } from '../design/terms';
 import { useFactoryStore } from '../store/useFactoryStore';
 
 import type { ProjectState } from '../store/useFactoryStore';
@@ -51,6 +53,9 @@ export interface FactoryStageVm {
   label: string;
   status: FactoryStageStatus;
   summary: string;
+  /** 이 단계를 맡은 에이전트의 표시 이름들. **여러 명일 수 있다** — `EXECUTION` 은 백엔드·
+   *  프론트엔드가 함께 쓴다. 라벨을 한 명 이름으로 두면 나머지가 화면에서 사라진다. */
+  agents: string[];
 }
 
 export interface FactoryWbsVm {
@@ -81,6 +86,36 @@ export interface FactoryEventVm {
   reason?: string;
 }
 
+/** [3단계] 요구 확인 단계의 선택형 질문 하나. 서버 `state.clarification_questions` 에서 온다. */
+export interface FactoryClarifyQuestionVm {
+  id: string;
+  question: string;
+  /** 여러 개를 고를 수 있는 질문인가. */
+  multi: boolean;
+  options: { label: string; description: string; recommended: boolean }[];
+}
+
+/** [3단계] 요구 확인 Canvas 의 재료. */
+export interface FactoryClarifyVm {
+  /** 지금 사람이 답해야 하는 상태인가(단계가 CLARIFICATION 이고 질문이 있고 아직 요약이 없다). */
+  awaiting: boolean;
+  questions: FactoryClarifyQuestionVm[];
+  /** 답변이 반영된 뒤 서버가 만든 요약. 있으면 이 단계는 지나간 것이다. */
+  summary: string;
+  /** 사용자가 처음 적어 넣은 한 줄. 질문의 «무엇을 기준으로 추천했는가» 근거다. */
+  initialIdea: string;
+}
+
+/** [3단계] 구현 단계 Canvas — 생성 SW 실행 미리보기의 재료. */
+export interface FactoryGeneratedAppVm {
+  /** 생성된 프론트엔드 코드 원문. 비어 있으면 아직 만들어진 앱이 없다. */
+  rawCode: string;
+  /** 실행할 것이 있는가. `rawCode` 유무와 같지만 화면이 그 판정을 다시 하지 않게 여기서 정한다. */
+  runnable: boolean;
+  /** 지금 만들고 있는가(스프린트 진행 중). «없다» 와 «아직» 을 구분하는 데 쓴다. */
+  building: boolean;
+}
+
 export interface FactoryStudioViewModel {
   project: { id: string; name: string; mode: string; cost: number | null };
   stages: FactoryStageVm[];
@@ -99,6 +134,10 @@ export interface FactoryStudioViewModel {
   loadReason: string;
   /** 단계 목록을 만들 근거(레지스트리/템플릿)를 갖고 있는가. 없으면 `stages` 는 비어 있다. */
   stageSourceKnown: boolean;
+  /** [3단계] 요구 확인 Canvas 재료. */
+  clarify: FactoryClarifyVm;
+  /** [3단계] 구현 Canvas 재료. */
+  generated: FactoryGeneratedAppVm;
 }
 
 /** `buildFactoryViewModel` 에 넘기는 store 스냅샷. store 타입에 의존하지 않게 **좁게** 받는다. */
@@ -132,7 +171,10 @@ export interface FactoryViewModelOptions {
 interface StageDef {
   id: string;
   label: string;
+  /** 상태 판정용 — 에이전트 **id** 소문자(서버의 `completed_agents` 와 맞춘다). */
   agents: string[];
+  /** 표시용 — 에이전트의 사람 이름. 판정에 쓰지 않는다(이름은 바뀔 수 있다). */
+  who: string[];
 }
 
 /**
@@ -153,13 +195,21 @@ function stageDefsFrom(templateData: any | null, registry: any | null): StageDef
     const rawId = String(a.id ?? '').trim();
     if (!rawId) continue;
     const stageId = String(a.stage ?? '').trim() || rawId.toUpperCase();
-    const label = String(a.name_ko ?? a.name ?? rawId).trim();
+    const who = String(a.name_ko ?? a.name ?? rawId).trim();
+    // ★ [2026-08-06 실측] 라벨을 에이전트 이름으로 두면 **한 단계에 여러 에이전트가 있을 때
+    //   나머지가 사라진다.** `EXECUTION` 은 백엔드·프론트엔드가 함께 쓰는데 화면에는 「백엔드
+    //   개발자」만 나왔다 — 프론트엔드가 그 단계에 없는 것처럼 보인다.
+    //   → 단계명은 용어 사전(`STAGE_KO`)에서, 담당 에이전트는 부가 정보로 따로 준다.
+    // ⚠️ `stageKo()` 를 쓰지 않는다. 그 함수는 사전에 없는 값에 `console.error` 를 내는데,
+    //   커스텀 템플릿의 낯선 stage 는 «오류» 가 아니라 정상이다(그때는 에이전트 이름을 쓴다).
+    const label = STAGE_KO[stageId] || who;
     const found = defs.find((d) => d.id === stageId);
     if (found) {
       // 한 단계를 여러 에이전트가 공유한다(예: backend·frontend 가 모두 EXECUTION).
       found.agents.push(rawId.toLowerCase());
+      found.who.push(who);
     } else {
-      defs.push({ id: stageId, label, agents: [rawId.toLowerCase()] });
+      defs.push({ id: stageId, label, agents: [rawId.toLowerCase()], who: [who] });
     }
   }
   return defs.length ? defs : null;
@@ -229,6 +279,54 @@ function artifactType(key: string): FactoryArtifactType {
   return 'document';
 }
 
+/**
+ * [3단계] 요구 확인 재료. `state` 의 세 필드를 그대로 읽는다 — 판정은 `HOTLInput` 이 이미
+ * 하고 있던 것과 **같은 조건**이다(단계가 CLARIFICATION · 질문 있음 · 요약 아직 없음).
+ *
+ * ⚠️ 명세 §2.2 는 «답변 준비도» 와 «권장 데이터» 도 요구하지만 **그 근거가 서버 상태에 없다.**
+ *   그래서 만들지 않는다 — 없는 지표를 화면에 채우면 그것이 곧 거짓이 된다. 셀 수 있는 것은
+ *   질문 수뿐이고, 그것만 준다.
+ */
+function toClarify(st: ProjectState | null, awaitingHuman: boolean): FactoryClarifyVm {
+  const raw = Array.isArray((st as any)?.clarification_questions)
+    ? ((st as any).clarification_questions as any[]) : [];
+  const questions: FactoryClarifyQuestionVm[] = [];
+  for (const q of raw) {
+    if (!q || typeof q !== 'object') continue;
+    const id = String(q.id ?? '').trim();
+    const question = String(q.question ?? '').trim();
+    if (!id || !question) continue;
+    const opts = Array.isArray(q.options) ? q.options : [];
+    questions.push({
+      id,
+      question,
+      multi: !!q.multi,
+      options: opts
+        .filter((o: any) => o && String(o.label ?? '').trim())
+        .map((o: any) => ({
+          label: String(o.label).trim(),
+          description: String(o.description ?? '').trim(),
+          recommended: !!o.recommended,
+        })),
+    });
+  }
+  const summary = String((st as any)?.clarification_summary || '').trim();
+  return {
+    awaiting: awaitingHuman && String(st?.current_stage || '') === 'CLARIFICATION'
+              && questions.length > 0 && !summary,
+    questions,
+    summary,
+    initialIdea: String(st?.initial_idea || '').trim(),
+  };
+}
+
+/** [3단계] 구현 Canvas 재료. `rawCode` 는 기존 `PreviewPanel` 이 받던 것과 **같은 값**이다 —
+ *  다른 소스를 쓰면 두 화면이 다른 앱을 보여 준다. */
+function toGenerated(st: ProjectState | null, running: boolean): FactoryGeneratedAppVm {
+  const rawCode = String(st?.frontend_code_summary || '');
+  return { rawCode, runnable: !!rawCode.trim(), building: running };
+}
+
 function toEvents(logs: any[], feed: any[]): FactoryEventVm[] {
   const out: FactoryEventVm[] = [];
   for (const l of [...(logs || []), ...(feed || [])]) {
@@ -280,6 +378,7 @@ export function buildFactoryViewModel(
       suspended: !!snap.isSuspendedQuota,
     }),
     summary: stageSummary(d, scores),
+    agents: d.who,
   }));
 
   // ── WBS ────────────────────────────────────────────────────────────────
@@ -380,6 +479,10 @@ export function buildFactoryViewModel(
     loadState,
     loadReason,
     stageSourceKnown: !!defs,
+    // 「사람이 답해야 하는 상태」 판정은 `HOTLInput` 과 같은 조건을 쓴다 — 두 화면이 다르게
+    // 판정하면 한쪽은 질문을 보여 주고 다른 쪽은 안 보여 준다.
+    clarify: toClarify(st, !!(st?.needs_revision || snap.hotlTaskId)),
+    generated: toGenerated(st, running),
   };
 }
 

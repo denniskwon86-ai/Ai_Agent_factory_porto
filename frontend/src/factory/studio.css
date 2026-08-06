@@ -28,6 +28,13 @@
   font-size: 12px;                 /* §6: 가시 텍스트 최소 12px */
 }
 
+/* ★★★ [2026-08-06 실측] `small` 태그는 브라우저 기본이 **부모의 80%** 다. 컨테이너가 12px 이면
+ *   `small` 은 9.6px 이 되어 §6(가시 텍스트 최소 12px)을 어긴다. 2단계 검증에서는 WBS 가 비어
+ *   있어 드러나지 않았고, 3단계에서 실제 WBS 가 들어오자 8건이 걸렸다.
+ * ⚠️ 규칙마다 `font-size` 를 적어 막는 방식은 다음에 추가되는 `small` 에서 또 빠진다. 그래서
+ *   **여기서 한 번에 되돌린다** — 개별 규칙은 필요할 때만 키운다. */
+.afs-studio small { font-size: 12px; }
+
 /* ── 전체 제작 단계(Production Stage Map) ─────────────────────────────── */
 .afs-studio .stage-map {
   padding: 10px 18px;
@@ -80,6 +87,17 @@
 }
 .afs-studio .stage b { font-size: 12px; }
 .afs-studio .stage small { margin-top: 3px; font-size: 12px; }
+/* 담당 에이전트. 상태보다 한 단계 조용하게 두되 **12px 아래로 내리지 않는다**(§6). */
+.afs-studio .stage em {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--surface-text-faint);
+  font-size: 12px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* 상태색. **색만으로 말하지 않는다**(§6) — 각 칸의 `small` 에 상태 낱말이 함께 들어간다.
    그래서 여기서는 «읽는 사람이 색맹이어도 정보가 남는가» 를 CSS 가 아니라 컴포넌트가 보장한다. */
@@ -243,6 +261,147 @@
   overflow: auto;
   padding: 12px 14px;
   background: var(--surface-page);
+}
+
+/* ── [3단계] 요구 확인 Canvas ─────────────────────────────────────────── */
+.afs-studio .clarify-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr);
+  gap: 12px;
+  align-items: start;
+}
+.afs-studio .clarify-main,
+.afs-studio .readiness {
+  padding: 16px;
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface-card);
+  box-shadow: var(--surface-shadow);
+}
+.afs-studio .clarify-main .eyebrow {
+  color: var(--ls-cyan);
+  font-size: 12px;             /* §6: 12px 미만 금지 — 프로토타입의 11px 를 올렸다 */
+  font-weight: 950;
+  letter-spacing: .1em;
+}
+.afs-studio .clarify-main h2 { margin: 6px 0 7px; font-size: 20px; }
+.afs-studio .clarify-main > p { margin: 0; color: var(--surface-text-muted); line-height: 1.55; }
+.afs-studio .question-card {
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid var(--surface-border-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+.afs-studio .question-card h3 { margin: 0 0 5px; font-size: 14px; }
+.afs-studio .question-card p { margin: 0; color: var(--surface-text-muted); }
+.afs-studio .choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+/* ⚠️ `div` 다(버튼이 아니다). 3단계는 읽기 전용이므로 **누를 수 있게 보이지 않아야 한다** —
+   커서·hover 를 주지 않는다. 4단계에서 Decision Dock 이 답변을 받는다. */
+.afs-studio .choice {
+  padding: 11px;
+  border: 1px solid var(--surface-border);
+  border-radius: 7px;
+  color: var(--surface-text);
+  background: var(--surface-card);
+}
+.afs-studio .choice b,
+.afs-studio .choice small { display: block; }
+.afs-studio .choice b { font-size: 12px; }
+.afs-studio .choice small {
+  margin-top: 4px;
+  color: var(--surface-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.afs-studio .choice.recommended {
+  border-color: var(--ls-navy);
+  box-shadow: inset 3px 0 var(--ls-navy);
+}
+/* 추천 표식은 **글자로** 준다 — 색·굵기만으로는 색을 구분하지 못하는 사용자에게 사라진다. */
+.afs-studio .rec-mark {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--ls-navy);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.afs-studio .readiness h3 { margin: 0 0 4px; font-size: 15px; }
+.afs-studio .readiness > p { margin: 0; color: var(--surface-text-muted); }
+.afs-studio .ready-score { display: flex; align-items: end; gap: 6px; margin: 14px 0; }
+.afs-studio .ready-score b { font-size: 32px; line-height: 1; }
+.afs-studio .ready-score span { padding-bottom: 4px; color: var(--surface-text-muted); }
+.afs-studio .need-list { display: grid; gap: 7px; margin-top: 13px; }
+.afs-studio .need-list div {
+  padding: 9px;
+  border-radius: 7px;
+  color: var(--surface-text-muted);
+  background: var(--surface-sunken);
+  line-height: 1.5;
+}
+.afs-studio .need-list strong { display: block; margin-bottom: 3px; color: var(--surface-text); }
+
+/* ── [3단계] 구현 Canvas — 생성 SW 실행 프레임 ────────────────────────── */
+.afs-studio .run-frame {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface-card);
+  box-shadow: var(--surface-shadow);
+}
+.afs-studio .run-frame > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--surface-border);
+}
+.afs-studio .run-frame h2 { margin: 0 0 3px; font-size: 16px; }
+.afs-studio .run-frame header p { margin: 0; color: var(--surface-text-muted); }
+.afs-studio .run-frame header .spacer { flex: 1; }
+.afs-studio .app-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--ls-red);
+  font-size: 12px;
+  font-weight: 950;
+}
+.afs-studio .status-chip {
+  padding: 5px 8px;
+  border-radius: 12px;
+  color: var(--state-success-fg);
+  background: var(--state-success-bg);
+  font-weight: 900;
+}
+/* 안쪽은 기존 `PreviewPanel`(다크 테마 + 자체 탭)이 그대로 들어온다. **그 스타일을 여기서
+   덮지 않는다** — 덮으면 종전 통제실의 같은 컴포넌트도 함께 변한다(그쪽은 다크 화면이다).
+   프레임만 라이트로 두고 경계를 명확히 한다. */
+.afs-studio .run-body {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.afs-studio .run-body > * { min-height: 0; flex: 1; }
+
+/* 좁은 화면에서는 요구 확인의 두 열을 한 열로 접는다. */
+@media (max-width: 1279px) {
+  .afs-studio .clarify-layout { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* 아직 만들지 않은 자리를 «비어 있음» 이 아니라 «다음 단계» 로 표시한다.

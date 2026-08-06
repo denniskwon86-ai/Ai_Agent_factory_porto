@@ -24,6 +24,7 @@
 import { useState } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
+import { AdaptivePhaseCanvas } from './AdaptivePhaseCanvas';
 import { useFactoryViewModel } from './factoryViewModel';
 import { ProductionStageMap } from './ProductionStageMap';
 import { WbsSpine } from './WbsSpine';
@@ -88,27 +89,24 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
               </div>
             )}
 
-            <div className="canvas-pending">
-              <h3>단계별 작업면은 다음 단계에서 연결합니다</h3>
-              <p>
-                지금 이 화면은 <b>전체 제작 단계</b>와 <b>WBS 실행 구조</b>를 실제 서버 상태로
-                보여주는 병행 카나리입니다(구현 순서 2단계). 요구 확인·구현 실행 미리보기 등
-                단계별 작업면은 3단계에서, 결정·Jarvis Dock 은 4단계, 근거·상태 Inspector 는
-                5단계에서 붙습니다.
-              </p>
-              <p>
-                기존 통제실은 그대로 있습니다 — Sprint 시작·정지·재개, HOTL 승인 같은 기능은
-                아직 종전 화면에서만 할 수 있고, <b>기능 회귀가 없다고 확인된 뒤에</b> 옮깁니다.
-              </p>
-              {shownStage && (
+            {/* [3단계] 선택과 현재가 다르면 **그 사실을 먼저 말한다.** 과거 단계의 작업면을
+                보면서 «지금 이게 돌고 있나» 를 헷갈리면 안 된다(§5). */}
+            {selectedStageId && selectedStageId !== vm.currentStageId && (
+              <div className="studio-note" data-tone="empty">
+                <b>지난 단계를 보고 있습니다</b>
                 <p>
-                  선택한 단계: <b>{shownStage.label}</b>
-                  {selectedStageId && selectedStageId !== vm.currentStageId
-                    && ' (실행 중인 단계와 다릅니다 — 보고 있을 뿐 진행이 옮겨간 것은 아닙니다)'}
+                  실행 중인 단계는 <b>{
+                    vm.stages.find((s) => s.id === vm.currentStageId)?.label || '아직 없습니다'
+                  }</b>입니다. 여기서 보는 것은 기록이며 진행이 옮겨간 것은 아닙니다.
                 </p>
-              )}
-              {selectedWbsId && <p>선택한 작업: <b>{selectedWbsId}</b></p>}
-            </div>
+              </div>
+            )}
+
+            <AdaptivePhaseCanvas
+              vm={vm}
+              shownStageId={selectedStageId || vm.currentStageId}
+              shownStageLabel={shownStage?.label || ''}
+            />
           </div>
         </section>
       </div>

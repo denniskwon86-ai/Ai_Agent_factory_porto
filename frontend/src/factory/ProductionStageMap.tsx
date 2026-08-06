@@ -49,6 +49,12 @@ function stageNote(s: FactoryStageVm): string {
   return s.summary ? `${ko} · ${s.summary}` : ko;
 }
 
+/** 담당 에이전트. **읽는 사람이 «누가 하는가» 를 알아야 한다** — 단계명만으로는 모른다.
+ *  여러 명이면 모두 적는다(`EXECUTION` 은 백엔드·프론트엔드가 함께 쓴다). */
+function stageWho(s: FactoryStageVm): string {
+  return s.agents.filter(Boolean).join(' · ');
+}
+
 export function ProductionStageMap({ vm, onSelectStage, onOpenDependencies }: ProductionStageMapProps) {
   return (
     <section className="stage-map">
@@ -86,11 +92,18 @@ export function ProductionStageMap({ vm, onSelectStage, onOpenDependencies }: Pr
                 data-status={s.status}
                 aria-current={selected ? 'step' : undefined}
                 aria-selected={selected}
-                aria-label={`${stageLabel(s, i)} — ${stageNote(s)}`}
+                aria-label={
+                  `${stageLabel(s, i)} — ${stageNote(s)}`
+                  + (stageWho(s) ? ` · 담당 ${stageWho(s)}` : '')
+                }
+                title={stageWho(s) ? `담당: ${stageWho(s)}` : undefined}
                 onClick={() => onSelectStage(s.id)}
               >
                 <b>{stageLabel(s, i)}</b>
                 <small>{stageNote(s)}</small>
+                {/* 담당은 셋째 줄에 조용히 둔다 — 상태보다 덜 급하지만 «누가 하는가» 를
+                    모르면 사용자가 물어볼 곳을 찾지 못한다. */}
+                {stageWho(s) && <em>{stageWho(s)}</em>}
               </button>
             );
           })}
