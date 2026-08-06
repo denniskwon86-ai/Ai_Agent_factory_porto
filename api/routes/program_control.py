@@ -16,11 +16,15 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, current_principal
+from api.deps import (Principal, assert_identified, current_principal)
 from core.program_lifecycle import (DEPRECATED, DISABLED, STATUSES,
                                     ProgramLifecycleError, program_lifecycle)
 
 router = APIRouter(prefix="/api/v1/programs", tags=["Programs"])
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "프로그램"
+
 
 
 def _admin(p: Principal) -> str:
@@ -55,8 +59,10 @@ class SetStatusRequest(StatusRequest):
 
 
 @router.get("")
-async def list_statuses(status: str = ""):
+async def list_statuses(status: str = "",
+        p: Principal = Depends(current_principal)):
     """사용여부가 **기록된** 프로그램 목록. 미기록 프로그램은 여기 나오지 않는다."""
+    assert_identified(p, WHAT)
     if status and status not in STATUSES:
         raise HTTPException(status_code=400,
                             detail=f"허용되지 않은 상태입니다(허용: {', '.join(STATUSES)}).")
@@ -67,8 +73,10 @@ async def list_statuses(status: str = ""):
 
 
 @router.get("/{release_id}")
-async def get_status(release_id: str):
+async def get_status(release_id: str,
+        p: Principal = Depends(current_principal)):
     """현재 사용여부 + 변경 이력 + 의존 관계. 막힌 사람도 볼 수 있어야 한다."""
+    assert_identified(p, WHAT)
     st = await asyncio.to_thread(program_lifecycle.get_status, release_id)
     st["history"] = await asyncio.to_thread(program_lifecycle.history, release_id)
     st["dependents"] = await asyncio.to_thread(program_lifecycle.dependents, release_id)
@@ -133,11 +141,13 @@ async def set_status(release_id: str, req: SetStatusRequest,
 
 
 @router.get("/{release_id}/usable")
-async def check_usable(release_id: str):
+async def check_usable(release_id: str,
+        p: Principal = Depends(current_principal)):
     """사용 가능 여부만 묻는다. 소비 화면이 실행 버튼을 열기 전에 호출한다.
 
     ⚠️ 이 판정을 **UI 만** 믿게 두면 통제가 아니다 — 실행 payload 는 서버가
       `GET /factory/library/item/{id}` 에서 직접 막는다."""
+    assert_identified(p, WHAT)
     try:
         return {"status": "success",
                 "data": await asyncio.to_thread(program_lifecycle.assert_usable,

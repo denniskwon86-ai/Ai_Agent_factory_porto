@@ -13,12 +13,16 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from api.deps import Principal, current_principal, enterprise_context
+from api.deps import (Principal, assert_identified, current_principal, enterprise_context)
 from core.decision_ledger import (ACTOR_TYPES, EVENT_TYPES, SUBJECT_TYPES,
                                   decision_ledger)
 from core.enterprise_context import EnterpriseContext
 
 router = APIRouter(prefix="/api/v1/ledger", tags=["DecisionLedger"])
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "결정 원장"
+
 
 
 def _scoped(ctx: EnterpriseContext) -> dict:
@@ -28,8 +32,10 @@ def _scoped(ctx: EnterpriseContext) -> dict:
 
 
 @router.get("/event-types")
-async def get_event_types():
+async def get_event_types(
+        p: Principal = Depends(current_principal)):
     """등록된 이벤트/주체/행위자 유형. 미등록 유형은 기록이 거부되므로 클라이언트가 알아야 한다."""
+    assert_identified(p, WHAT)
     return {"status": "success", "data": {
         "event_types": list(EVENT_TYPES), "subject_types": list(SUBJECT_TYPES),
         "actor_types": list(ACTOR_TYPES)}}

@@ -12,10 +12,17 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # [Phase 2/3] 식별·권한은 라우트에서 판정하지 않는다 — api/deps.py 단일 지점이 담당한다.
-from api.deps import (Principal, assert_can_read_dept, assert_enterprise,
-                      assert_project_readable, assert_project_writable,
-                      current_principal, enterprise_context,
-                      visibility_block_reason)
+from api.deps import (
+    Principal,
+    assert_can_read_dept,
+    assert_enterprise,
+    assert_identified,
+    assert_project_readable,
+    assert_project_writable,
+    current_principal,
+    enterprise_context,
+    visibility_block_reason,
+)
 # [D-017 P0] 서버 재검사 — 화면 숨김이 아니라 여기가 유일한 보안 경계다.
 from api.deps import require_caps as _require_caps
 from core.admin_capability import (AGENT_READ, AGENT_UPDATE, SKILL_PROPOSE,
@@ -52,6 +59,10 @@ from core import library_paths
 from core.paths import workspace_path
 
 router = APIRouter(prefix="/api/v1/factory")
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "공장 실행 기록"
+
 
 class SprintStartRequest(BaseModel):
     task_id: str
@@ -1226,8 +1237,10 @@ async def get_latest_state(project_id: str,
 # 백엔드 서버 시스템 로그 조회
 # ==========================================
 @router.get("/logs")
-async def get_system_logs():
+async def get_system_logs(
+        p: Principal = Depends(current_principal)):
     """백엔드 메모리 큐에 쌓인 최근 서버 로그를 반환합니다."""
+    assert_identified(p, WHAT)
     try:
         from core.sys_logger import get_recent_logs
         logs = get_recent_logs()
@@ -1557,8 +1570,10 @@ async def resimulate(project_id: str, req: ResimulateRequest,
         raise HTTPException(status_code=409, detail="이미 실행 중인 스프린트가 있습니다.")
 
 @router.get("/library/list")
-async def list_releases():
+async def list_releases(
+        p: Principal = Depends(current_principal)):
     """라이브러리에 보관된 결과물 목록(요약)."""
+    assert_identified(p, WHAT)
     os.makedirs(library_paths.library_dir(), exist_ok=True)
 
     # ★ [M3] 승격 상태를 목록에 함께 준다. 이것이 없으면 승격이 별도 테이블에만 남아

@@ -31,14 +31,24 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.deps import (Principal, assert_can_edit_org, current_principal, enterprise_context,
-                      viewer_visible_scopes)
+from api.deps import (
+    Principal,
+    assert_can_edit_org,
+    assert_identified,
+    current_principal,
+    enterprise_context,
+    viewer_visible_scopes,
+)
 from core.enterprise_context import (ENTITY_MODES, NODE_TYPES, PROFILE_KINDS, RELATION_TYPES,
                                      STATUS_ACTIVE, EcmError, EnterpriseContext,
                                      EnterpriseEntity, EnterpriseProfile, OrganizationEdge,
                                      OrganizationNode, ecm_repository, ecm_resolver)
 
 router = APIRouter(prefix="/api/v1/enterprise-context", tags=["EnterpriseContext"])
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "전사 컨텍스트"
+
 
 
 def _sandbox_err(e: Exception):
@@ -82,8 +92,10 @@ def _tree_dict(sn) -> Dict[str, Any]:
 
 # ── 조회 ─────────────────────────────────────────────────────────────────
 @router.get("/meta")
-async def get_meta():
+async def get_meta(
+        p: Principal = Depends(current_principal)):
     """등록 가능한 유형 목록. 미등록 값은 거부되므로 클라이언트가 알아야 한다."""
+    assert_identified(p, WHAT)
     return {"status": "success", "data": {
         "node_types": list(NODE_TYPES), "relation_types": list(RELATION_TYPES),
         "entity_modes": list(ENTITY_MODES), "profile_kinds": list(PROFILE_KINDS),
@@ -402,11 +414,13 @@ class CloseIn(BaseModel):
 
 
 @router.get("/copy-policy")
-async def copy_policy():
+async def copy_policy(
+        p: Principal = Depends(current_principal)):
     """복제 시 무엇을 가져오고 무엇을 **절대 가져오지 않는지**(§7.1).
 
     ★ 화면이 이 표를 그대로 보여주게 하려고 API 로 낸다 — 정책을 화면에 다시 적으면 두 곳이
       갈라지고, 사용자는 실제로 무엇이 복사됐는지 알 수 없게 된다."""
+    assert_identified(p, WHAT)
     from core.enterprise_context.clone_service import COPY_POLICY, NEVER_COPIED
     return {"status": "success",
             "data": {"selectable": COPY_POLICY, "never_copied": NEVER_COPIED}}
@@ -798,8 +812,10 @@ def _cr():
 
 
 @router.get("/competitors/evidence-kinds")
-async def competitor_evidence_kinds():
+async def competitor_evidence_kinds(
+        p: Principal = Depends(current_principal)):
     """허용된 근거 종류와 신뢰도 단계(§7.3-1,2). 화면이 이 목록을 그대로 쓰게 낸다."""
+    assert_identified(p, WHAT)
     from core.enterprise_context.competitor_reference import (CONFIDENCE, CONFIDENCE_KO,
                                                               EVIDENCE_LEVELS,
                                                               STALE_AFTER_DAYS)

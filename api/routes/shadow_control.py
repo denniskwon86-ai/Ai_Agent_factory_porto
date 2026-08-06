@@ -13,10 +13,19 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (
+    Principal,
+    assert_can_manage_standard,
+    assert_identified,
+    current_principal,
+)
 from core.shadow_mode import ShadowModeError, shadow_mode
 
 router = APIRouter(prefix="/api/v1/shadow")
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "섀도 실행"
+
 
 
 def _actor(p: Principal) -> str:
@@ -76,8 +85,10 @@ class PromoteRequest(BaseModel):
 
 # ── 고정 경로 (경로 변수보다 위) ──────────────────────────────────────────
 @router.get("/summary")
-async def summary(scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL"):
+async def summary(scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL",
+        p: Principal = Depends(current_principal)):
     """현황. `incomparable` 은 실패가 아니라 **판정 불가**다(같은 입력이 아니었다)."""
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(shadow_mode.summary, scope_node_id,
                                             tenant_id, entity_mode)}
@@ -113,7 +124,9 @@ async def create_run(req: RunRequest, p: Principal = Depends(current_principal))
 
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: str):
+async def get_run(run_id: str,
+        p: Principal = Depends(current_principal)):
+    assert_identified(p, WHAT)
     data = await asyncio.to_thread(shadow_mode.get, run_id)
     if not data:
         raise HTTPException(status_code=404, detail="존재하지 않는 Shadow run 입니다.")
@@ -153,8 +166,10 @@ async def run_planning_scenario(run_id: str, req: PlanningShadowRequest,
 
 
 @router.get("/runs/{run_id}/compare")
-async def compare(run_id: str):
+async def compare(run_id: str,
+        p: Principal = Depends(current_principal)):
     """3단계 — 비교. **같은 입력이 아니면 `comparable=false`** 다."""
+    assert_identified(p, WHAT)
     try:
         out = await asyncio.to_thread(shadow_mode.compare, run_id)
     except ShadowModeError as e:

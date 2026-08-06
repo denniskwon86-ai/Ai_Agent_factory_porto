@@ -18,15 +18,26 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import (Principal, assert_can_manage_standard, current_principal,
-                      viewer_may_drill_down, viewer_scope_nodes, viewer_visible_scopes,
-                      visibility_block_reason)
+from api.deps import (
+    Principal,
+    assert_can_manage_standard,
+    assert_identified,
+    current_principal,
+    viewer_may_drill_down,
+    viewer_scope_nodes,
+    viewer_visible_scopes,
+    visibility_block_reason,
+)
 from core.reference_registry import (REFERENCE_ROOT, REGISTRY_PATH, approve_asset,
                                      build_registry, index_approved, indexable, load_registry,
                                      registry_summary, reject_asset, visible_assets)
 
 
 router = APIRouter(prefix="/api/v1/reference")
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "참조 데이터"
+
 
 
 def _actor(p: Principal) -> str:
@@ -55,10 +66,12 @@ class IndexRequest(BaseModel):
 
 
 @router.get("/summary")
-async def get_summary():
+async def get_summary(
+        p: Principal = Depends(current_principal)):
     """등록 현황 + **색인 가능 건수.**
 
     등록 건수만 보여주면 "68건이 등록됐는데 지식팩이 왜 비어 있나"를 아무도 설명할 수 없다."""
+    assert_identified(p, WHAT)
     return {"status": "success", "data": await asyncio.to_thread(registry_summary)}
 
 
@@ -168,7 +181,9 @@ async def index_assets(req: IndexRequest, p: Principal = Depends(current_princip
 
 
 @router.post("/scan")
-async def scan_reference_documents():
+async def scan_reference_documents(
+        p: Principal = Depends(current_principal)):
     """원본 폴더의 신규·변경 문서를 등록부에 반영한다. 색인·LLM 호출은 수행하지 않는다."""
+    assert_identified(p, WHAT)
     registry = await asyncio.to_thread(build_registry)
     return {"status": "success", "data": registry.get("summary", {})}

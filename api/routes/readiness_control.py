@@ -11,10 +11,19 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (
+    Principal,
+    assert_can_manage_standard,
+    assert_identified,
+    current_principal,
+)
 from core.release_readiness import ReadinessError, release_readiness
 
 router = APIRouter(prefix="/api/v1/readiness")
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "도입 준비"
+
 
 
 def _actor(p: Principal) -> str:
@@ -36,11 +45,13 @@ class RollbackRequest(BaseModel):
 
 @router.get("/checklist")
 async def checklist(release_id: str, project_id: str = "",
-                    requires_live_integration: bool = False):
+                    requires_live_integration: bool = False,
+        p: Principal = Depends(current_principal)):
     """§8.2 릴리스 게이트 체인 7단계를 재조회한다.
 
     ⚠️ `unverifiable` 은 통과가 아니며 `operations_ready` 를 막는다.
       `not_required` 는 §8.2 가 해당 종류에 요구하지 않은 단계다(Shadow Mode)."""
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(release_readiness.checklist, release_id,
                                             project_id, requires_live_integration)}
@@ -61,17 +72,21 @@ async def rollback(req: RollbackRequest, p: Principal = Depends(current_principa
 
 
 @router.get("/rollbacks")
-async def rollback_history(release_id: str = ""):
+async def rollback_history(release_id: str = "",
+        p: Principal = Depends(current_principal)):
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(release_readiness.rollback_history, release_id)}
 
 
 @router.get("/impact")
-async def change_impact(node_type: str, node_id: str):
+async def change_impact(node_type: str, node_id: str,
+        p: Principal = Depends(current_principal)):
     """기준정보·계약·자산이 바뀌면 무엇이 흔들리는가(§14 M3 영향 분석).
 
     `blast_radius` 가 `enterprise` 면 **전사 승격된 앱이 영향받는다**는 뜻이다 —
     "N개 노드 영향"과는 다른 정보다."""
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(release_readiness.change_impact,
                                             node_type, node_id)}

@@ -36,9 +36,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from api.deps import Principal, current_principal
+from api.deps import (Principal, assert_identified, current_principal)
 
 router = APIRouter(prefix="/api/v1/jarvis", tags=["Jarvis"])
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "자비스 컨텍스트"
+
 
 
 class JarvisContext(BaseModel):
@@ -72,11 +76,13 @@ def _actor(p: Principal) -> str:
 
 
 @router.get("/context-contract")
-async def context_contract():
+async def context_contract(
+        p: Principal = Depends(current_principal)):
     """문맥 계약 스키마. 화면이 필드를 지어내지 않도록 서버가 알려준다.
 
     ★ 이 엔드포인트가 있는 이유: 화면 5개가 각자 다른 필드명을 쓰기 시작하면 어댑터가 문맥을
       해석하지 못하고, 그때부터 화면마다 임시 응답을 넣게 된다(지적 3 의 그 상태)."""
+    assert_identified(p, WHAT)
     return {"status": "success", "data": {
         "fields": list(JarvisContext.model_fields.keys()),
         "note": ("selected_object 는 화면이 강조 중인 객체와 같아야 합니다 — 다르면 사용자는 "

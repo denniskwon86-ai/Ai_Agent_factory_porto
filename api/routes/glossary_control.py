@@ -12,10 +12,19 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (
+    Principal,
+    assert_can_manage_standard,
+    assert_identified,
+    current_principal,
+)
 from core.business_glossary import GlossaryError, business_glossary
 
 router = APIRouter(prefix="/api/v1/glossary")
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "용어 사전"
+
 
 
 def _err(e: GlossaryError):
@@ -69,11 +78,13 @@ class ConfirmRequest(BaseModel):
 # ── 고정 경로 (경로 변수보다 위) ──────────────────────────────────────────
 @router.get("/terms/expand")
 async def expand_term(q: str, approved_only: bool = False, scope_node_id: str = "",
-                      tenant_id: str = "", entity_mode: str = "REAL"):
+                      tenant_id: str = "", entity_mode: str = "REAL",
+        p: Principal = Depends(current_principal)):
     """용어 → 정본명 + 동의어 확장(§6.4 1~2단계).
 
     `unapproved` 는 확장에는 썼지만 **확정 근거로는 약한** 동의어다 — 섞어서 주면 나중에
     "이 매칭의 근거가 승인된 것이었나"를 되짚을 수 없다."""
+    assert_identified(p, WHAT)
     data = await asyncio.to_thread(business_glossary.expand, q, approved_only,
                                    scope_node_id, tenant_id, entity_mode)
     return {"status": "success", "data": data}
@@ -81,10 +92,12 @@ async def expand_term(q: str, approved_only: bool = False, scope_node_id: str = 
 
 @router.get("/match")
 async def match_requirement(term: str, scope_node_id: str = "", tenant_id: str = "",
-                            entity_mode: str = "REAL"):
+                            entity_mode: str = "REAL",
+        p: Principal = Depends(current_principal)):
     """업무 용어 → 카탈로그 후보(§6.4 전체 흐름).
 
     ⚠️ 확정하지 않는다. 각 후보에 `blockers`(무엇이 확정을 막고 있나)와 `confirmable` 을 준다."""
+    assert_identified(p, WHAT)
     data = await asyncio.to_thread(business_glossary.match_requirement, term, None,
                                    scope_node_id, tenant_id, entity_mode)
     return {"status": "success", "data": data}
@@ -135,7 +148,9 @@ async def create_term(req: TermRequest, p: Principal = Depends(current_principal
 
 
 @router.get("/terms/{term_id}")
-async def get_term(term_id: str):
+async def get_term(term_id: str,
+        p: Principal = Depends(current_principal)):
+    assert_identified(p, WHAT)
     data = await asyncio.to_thread(business_glossary.get_term, term_id)
     if not data:
         raise HTTPException(status_code=404, detail="존재하지 않는 용어입니다.")

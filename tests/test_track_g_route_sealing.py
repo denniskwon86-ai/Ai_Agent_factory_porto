@@ -40,7 +40,38 @@ SEALED_ROUTERS = [
     ("api.routes.workspace_control", "작업공간 공유·승격"),
     ("api.routes.lineage_control", "데이터 품질·계보"),
     ("api.routes.connector_control", "커넥터"),
+    ("api.routes.enterprise_context_control", "전사 컨텍스트"),
+    ("api.routes.glossary_control", "용어 사전"),
+    ("api.routes.program_control", "프로그램"),
+    ("api.routes.readiness_control", "도입 준비"),
+    ("api.routes.shadow_control", "섀도 실행"),
+    ("api.routes.reference_control", "참조 데이터"),
+    ("api.routes.factory_control", "공장 실행 기록"),
+    ("api.routes.advisor_control", "상담 플레이북"),
+    ("api.routes.jarvis_control", "자비스 컨텍스트"),
+    ("api.routes.ledger_control", "결정 원장"),
 ]
+
+#: ★★★ **쓰기 탐침을 돌려도 되는 라우터.** 2차 검사(«식별만으로 열리는 쓰기가 없다»)는
+#: 여기 있는 것만 찌른다.
+#:
+#: ⚠️⚠️ **[2026-08-07 실제 사고] 이 목록이 없을 때 탐침이 LLM 비용을 썼다.**
+#:   16개 라우터 전체에 쓰기 탐침을 돌렸더니 `POST /factory/{pid}/supervisor/chat` ·
+#:   `/heal` · `/sprint/revision` 이 **진짜로 실행됐다** — 로그에 Gemini 호출과
+#:   「Sprint Loop Cancelled」가 찍혔다. DB 는 `tmp_path` 로 격리돼 있지만 **LLM 호출은
+#:   격리되지 않는다.** 테스트 격리를 «파일·DB» 로만 생각한 것이 틀렸다.
+#:
+#: ★ 그래서 익명 GET 탐침(1차)은 전 라우터에 돌리되, **쓰기 탐침은 명시적으로 허용한 것만**
+#:   돌린다. 라우터를 여기 올리기 전에 「이 파일의 쓰기를 눌러도 바깥으로 나가는 것이 없는가」를
+#:   한 번 답해야 한다.
+WRITE_PROBE_ROUTERS = {
+    "api.routes.benchmark_control",     # evaluate 는 use_llm_judge=False 가 기본
+    "api.routes.format_control",        # 파일 쓰기뿐
+    "api.routes.crosswalk_control",     # propose 는 use_llm=False 가 기본
+    "api.routes.workspace_control",     # DB 쓰기뿐
+    "api.routes.lineage_control",       # DB 쓰기뿐
+    "api.routes.connector_control",     # execute 는 어댑터 미등록 시 실패
+}
 
 #: **쓰지 않는 POST.** 조회인데 본문이 길어 POST 를 쓰는 라우트들 — 아래 2차 검사(«식별만으로
 #: 열리는 쓰기가 없다»)에서 제외한다.
@@ -236,6 +267,8 @@ def test_write_routes_are_not_merely_identified(client):
     viewer = {"X-Factory-User": "hikwon_17@lsmnm.com"}
     opened = []
     for module_path, label in SEALED_ROUTERS:
+        if module_path not in WRITE_PROBE_ROUTERS:
+            continue                     # 위 «쓰기 탐침을 돌려도 되는 라우터» 참조
         for method, url, body, uploads, raw in _routes(module_path):
             if method == "GET" or f"{method} {raw}" in READ_ONLY_POSTS:
                 continue

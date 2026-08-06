@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import (Principal, assert_project_writable, current_principal,
-                      enterprise_context)
+from api.deps import (Principal, assert_identified, assert_project_writable,
+                      current_principal, enterprise_context)
 from api.routes.factory_control import _safe_id
 from core.advisor_blueprint import assemble_blueprint
 from core.advisor_playbook import (load_playbook, list_playbooks, score_readiness,
@@ -31,6 +31,10 @@ from core.enterprise_context import (ENTITY_MODE_KO, EnterpriseContext,
 from core.paths import workspace_path
 
 router = APIRouter(prefix="/api/v1/advisor", tags=["Advisor"])
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "상담 플레이북"
+
 
 
 def _write_json(path: str, data: dict) -> None:
@@ -137,9 +141,11 @@ def _playbook_or_400(playbook_id: str):
 
 # ── 플레이북 목록 (상담 진입 화면) ────────────────────────────────────────
 @router.get("/playbooks")
-async def get_playbooks():
+async def get_playbooks(
+        p: Principal = Depends(current_principal)):
     """업무 유형 선택용. 플레이북은 전사 공유 저작 설정이라 부서 필터를 걸지 않는다
     (템플릿·기준정보와 같은 취급 — 설계서 Phase 4 '전사 공유로 두고 문서화')."""
+    assert_identified(p, WHAT)
     return {"status": "success", "data": await asyncio.to_thread(list_playbooks)}
 
 
