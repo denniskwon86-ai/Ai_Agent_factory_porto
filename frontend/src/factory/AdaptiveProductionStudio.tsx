@@ -30,6 +30,7 @@ import { ContextInspector } from './ContextInspector';
 import { DecisionJarvisDock } from './DecisionJarvisDock';
 import { useFactoryViewModel } from './factoryViewModel';
 import { ProductionStageMap } from './ProductionStageMap';
+import { ProjectHeader } from './ProjectHeader';
 import { WbsSpine } from './WbsSpine';
 
 import type { ClarifySelections } from './clarifyAnswers';
@@ -80,6 +81,16 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
     // 두 벌이 되고, 한쪽만 고쳐지는 날이 온다.
     <HubDialog label="SW 제작 작업공간 (Adaptive Production Studio · 병행 카나리)" onClose={onClose}>
       <div className="afs-studio">
+      {/* [§2.1 상시 노출] Project Header — 7단계(3패널 제거)의 전제다. 이것 없이 3패널을
+          지우면 사용자가 실행을 멈출 수 없다(§8 기능 게이트). */}
+      <ProjectHeader
+        vm={vm}
+        onReviewResult={() => {
+          // 「현재 결과 검토」 = 구현 단계 Canvas 로 이동. 실제 실행 미리보기가 거기 있다.
+          const impl = vm.stages.find((s) => ['EXECUTION', 'BUILD'].includes(s.id.toUpperCase()));
+          if (impl) setSelectedStageId(impl.id);
+        }}
+      />
       <ProductionStageMap
         vm={vm}
         onSelectStage={(id) => setSelectedStageId((prev) => (prev === id ? '' : id))}

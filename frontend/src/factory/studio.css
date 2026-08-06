@@ -19,7 +19,8 @@
 
 .afs-studio {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* 헤더 · 단계 지도 · 본체. 앞의 둘은 `auto` — 내용이 늘면 늘어나고, 본체가 남은 높이를 받는다. */
+  grid-template-rows: auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -34,6 +35,62 @@
  * ⚠️ 규칙마다 `font-size` 를 적어 막는 방식은 다음에 추가되는 `small` 에서 또 빠진다. 그래서
  *   **여기서 한 번에 되돌린다** — 개별 규칙은 필요할 때만 키운다. */
 .afs-studio small { font-size: 12px; }
+
+/* ── [§2.1] Project Header ────────────────────────────────────────────── */
+.afs-studio .project-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--surface-border);
+  background: var(--surface-card);
+}
+.afs-studio .project-title { min-width: 220px; }
+.afs-studio .project-title h1 { margin: 0 0 3px; font-size: 18px; }
+.afs-studio .project-title p { margin: 0; color: var(--surface-text-muted); }
+/* 상태 칩 — **낱말이 먼저**다. 점은 거들 뿐이고 색만으로 말하지 않는다(§6). */
+.afs-studio .project-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-weight: 850;
+}
+.afs-studio .project-state i { width: 8px; height: 8px; border-radius: 50%; }
+.afs-studio .project-state.on { color: #7d301f; background: #fff1ec; }
+.afs-studio .project-state.on i { background: var(--ls-red); }
+.afs-studio .project-state.off { color: var(--state-unknown-fg); background: var(--state-unknown-bg); }
+.afs-studio .project-state.off i { background: var(--surface-text-faint); }
+.afs-studio .project-head .spacer { flex: 1; }
+.afs-studio .head-metric {
+  min-width: 92px;
+  padding-left: 13px;
+  border-left: 1px solid var(--surface-border);
+}
+.afs-studio .head-metric b,
+.afs-studio .head-metric small { display: block; }
+.afs-studio .head-metric b { font-size: 14px; }
+.afs-studio .head-metric small { margin-top: 2px; color: var(--surface-text-muted); }
+.afs-studio .head-actions { display: flex; gap: 7px; }
+.afs-studio .head-actions button {
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--surface-border-strong);
+  border-radius: 6px;
+  color: var(--action-secondary-fg);
+  background: var(--surface-card);
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+}
+.afs-studio .head-actions button:hover:not(:disabled) { background: var(--action-secondary-hover); }
+.afs-studio .head-actions button:disabled { opacity: .5; cursor: default; }
+.afs-studio .head-actions .primary {
+  border-color: var(--ls-red);
+  color: #fff;
+  background: var(--ls-red);
+}
 
 /* ── 전체 제작 단계(Production Stage Map) ─────────────────────────────── */
 .afs-studio .stage-map {

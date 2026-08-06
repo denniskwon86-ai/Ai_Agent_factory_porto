@@ -167,6 +167,21 @@ export interface FactoryStudioViewModel {
   docs: Record<string, FactoryStageDocVm>;
   /** [6단계] 릴리스 목록(Release Canvas). */
   releases: { id: string; status: string; at: string }[];
+  /** [§2.1] Project Header 재료 — 실행 상태와 지표. */
+  run: FactoryRunVm;
+}
+
+/** [§2.1] Project Header — 「프로젝트명, 실행/중지 상태, WBS 완료, 사용자 결정, 누적 LLM 비용,
+ *  일시정지·현재 결과 검토」. */
+export interface FactoryRunVm {
+  /** 지금 돌고 있는가. `sprintId` 가 있거나 HOTL 대기면 «가동 중» 이다. */
+  active: boolean;
+  /** 중지 대상 태스크. 비어 있으면 중지할 것이 없다(버튼을 비활성화할 근거). */
+  sprintId: string;
+  wbsDone: number;
+  wbsTotal: number;
+  /** 사람이 읽을 실행 상태 한 줄. **색이 아니라 낱말로** 말한다(§6). */
+  label: string;
 }
 
 /** [6단계] 한 단계가 내놓은 산출물. */
@@ -603,6 +618,20 @@ export function buildFactoryViewModel(
       suspendedTaskId: snap.isSuspendedQuota ? String(snap.suspendedTaskId || '') : '',
     },
     docs: toDocs(st),
+    run: {
+      active: running,
+      sprintId: String(snap.activeSprintId || ''),
+      wbsDone: wbs.filter((t) => t.kind === 'done').length,
+      wbsTotal: wbs.length,
+      // 상태 낱말의 우선순위: 결정 대기 → 동결 → 실패 → 가동 → 대기.
+      // «결정 대기» 가 «가동» 보다 위인 이유: 사람이 손대야 멈춘 것을 «돌고 있음» 으로 보이면
+      // 사용자는 기다리기만 한다(단계 상태 판정과 같은 규칙이다).
+      label: snap.hotlTaskId ? '사용자 결정 대기'
+        : snap.isSuspendedQuota ? '쿼터 소진으로 동결'
+        : snap.lastSprintFailure ? '마지막 실행 실패'
+        : running ? '가동 중'
+        : '대기',
+    },
     releases: (snap.releases || [])
       .map((r: any) => ({
         id: String(r?.release_id ?? r?.id ?? ''),
