@@ -11,11 +11,45 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, current_principal
+from api.deps import Principal, assert_identified, current_principal, require_caps
+from core.admin_capability import ADMIN_DATA_ACCESS
 from core.connector_registry import ConnectorError, connector_registry
 from core.scope_guard import resolve_effective_scope
 
 router = APIRouter(prefix="/api/v1/connectors", tags=["Connectors"])
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "커넥터"
+
+# ── [2026-08-07 · 트랙 G] 무방비 라우트 봉합 ─────────────────────────────────
+#
+# 무방비 3개: `GET /adapters` · `GET /{id}/contracts` · `POST /{id}/validate`.
+#
+# ★★ `validate` 가 특히 그렇다. 그 docstring 이 **스스로 이유를 적어 두었다** —
+#   「하나씩 튕기면 사용자가 여러 번 시도하며 무엇이 되는지 탐색하게 되고, **그 탐색 자체가
+#   스키마 정보 유출**이다」. 거부 사유를 한 번에 다 주도록 만들어 놓고, 정작 그 응답을
+#   익명에게 열어 두었다. 즉 익명이 한 번의 호출로 계약의 전모를 받을 수 있었다.
+#   ⚠️ 위험을 알고 쓴 주석 옆에서 통제가 빠지는 것이 이 저장소가 반복한 모양이다.
+
+
+def _assert_may_write(p: Principal, action: str) -> None:
+    """★★ [2026-08-07 · 트랙 G] 커넥터를 **바꿔도 되는 주체인가.**
+
+    ## 이것은 «무방비 라우트» 목록에 없던 결함이다
+
+    이 세 라우트는 `Principal` 을 받고 있었다. 그래서 라우트 점검에서는 «통제됨» 으로 세어졌다.
+    그런데 받기만 하고 **권한을 확인하지 않았다** — viewer 계정으로 커넥터를 등록하고 활성화하고
+    Query Contract 를 추가할 수 있었다(트랙 G 게이트의 2차 검사가 잡았다: 400 = 인가를 지나
+    업무 검증까지 도달했다는 뜻이다).
+
+    ⚠️⚠️ **«주체를 받는가» 와 «권한을 보는가» 는 다른 질문이다.** 전자만 세면 절반이 초록으로
+      보이고, 그 절반은 익명 검사만으로는 영원히 드러나지 않는다.
+
+    ★ `_scope()` 도 통제가 아니다 — `owner_organization_id` 를 비우면 요청 범위가 빈 값이라
+      정규화할 대상이 없어 통과한다. 파라미터를 주지 않는 것이 가장 넓은 호출이다
+      (`/planning/facts` 유출의 두 번째 겹과 같은 구조)."""
+    assert_identified(p, WHAT)
+    require_caps(p, ADMIN_DATA_ACCESS, resource="connector", action=action)
 
 
 def _err(e: ConnectorError):
@@ -78,8 +112,9 @@ class ExecuteRequest(BaseModel):
 
 
 @router.get("/adapters")
-async def list_adapters():
+async def list_adapters(p: Principal = Depends(current_principal)):
     """등록된 실행 어댑터. 비어 있으면 **어떤 조회도 실행되지 않는다**(빈 결과가 아니라 실패)."""
+    assert_identified(p, WHAT)
     from core.connector_execution import registered_adapters
     ids = registered_adapters()
     return {"status": "success", "data": {"adapters": ids},
@@ -108,6 +143,7 @@ async def list_connectors(scope_node_id: str = "", tenant_id: str = "",
 @router.post("")
 async def register_connector(req: ConnectorRequest,
                              p: Principal = Depends(current_principal)):
+    _assert_may_write(p, "register")
     await _scope(p, req.owner_organization_id or "", req.connector_id)
     try:
         data = await asyncio.to_thread(
@@ -122,8 +158,8 @@ async def register_connector(req: ConnectorRequest,
 @router.post("/{connector_id}/activate")
 async def activate(connector_id: str, p: Principal = Depends(current_principal)):
     """활성화 — 승인된 Query Contract 가 1건 이상 있어야 하고, 승인자가 식별돼야 한다."""
-    if not p.user_id:
-        raise HTTPException(status_code=401, detail="승인자 식별 정보가 없습니다.")
+    # ⚠️ 종전에는 «식별됐는가» 만 봤다. 식별은 신원이지 권한이 아니다 — viewer 도 식별된다.
+    _assert_may_write(p, "activate")
     try:
         return {"status": "success",
                 "data": await asyncio.to_thread(connector_registry.activate,
@@ -133,7 +169,8 @@ async def activate(connector_id: str, p: Principal = Depends(current_principal))
 
 
 @router.get("/{connector_id}/contracts")
-async def list_contracts(connector_id: str):
+async def list_contracts(connector_id: str, p: Principal = Depends(current_principal)):
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(connector_registry.list_contracts, connector_id)}
 
@@ -142,6 +179,9 @@ async def list_contracts(connector_id: str):
 async def add_contract(connector_id: str, req: ContractRequest,
                        p: Principal = Depends(current_principal)):
     """Query Contract 등록. 승인자는 인증 주체로 기록된다(익명이면 미승인 상태)."""
+    # ⚠️ 「익명이면 미승인 상태」는 **기록 방식**이지 접근 통제가 아니었다. 미승인이어도
+    #   계약 자체는 등록되고 목록에 남는다 — 등록할 수 있는 사람을 먼저 정한다.
+    _assert_may_write(p, "add_contract")
     try:
         data = await asyncio.to_thread(
             connector_registry.add_contract, connector_id, req.query_name,
@@ -153,11 +193,13 @@ async def add_contract(connector_id: str, req: ContractRequest,
 
 
 @router.post("/{connector_id}/validate")
-async def validate_request(connector_id: str, req: ValidateRequest):
+async def validate_request(connector_id: str, req: ValidateRequest,
+                           p: Principal = Depends(current_principal)):
     """조회 요청이 계약을 지키는지 검증한다.
 
     ⚠️ 거부 사유를 **한 번에 전부** 돌려준다. 하나씩 튕기면 사용자가 여러 번 시도하며
       무엇이 되는지 탐색하게 되고, 그 탐색 자체가 스키마 정보 유출이다."""
+    assert_identified(p, WHAT)
     data = await asyncio.to_thread(connector_registry.validate_request, connector_id,
                                    req.query_name, req.fields, req.params or {},
                                    req.limit, req.for_prompt)

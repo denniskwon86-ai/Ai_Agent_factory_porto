@@ -12,11 +12,28 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (Principal, assert_can_manage_standard, assert_identified,
+                      current_principal)
 from core.data_catalog import DataCatalogError, data_catalog
 from core.data_lineage import LineageError, data_lineage
 
 router = APIRouter(prefix="/api/v1/lineage")
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "데이터 품질·계보"
+
+# ── [2026-08-07 · 트랙 G] 무방비 라우트 봉합 ─────────────────────────────────
+#
+# 실측: 쓰기 3개(`POST /quality` · `POST /edges` · `DELETE /edges/{id}` · `POST /derive`)는
+# 주체를 받는데 **읽기 4개에는 없었다** — `/quality/{asset}` · `/freshness/{asset}` ·
+# `/edges` · `/impact`.
+#
+# ★ 익명에게 `/impact` 가 열려 있는 것은 목록 유출과 성격이 다르다. 「이 값이 바뀌면 무엇이
+#   틀어지나」는 **자산 사이의 연결 지도**이고, 한 번의 조회로 어느 자산이 급소인지 알 수 있다.
+#   자산 이름을 몰라도 `/edges` 로 훑어 들어갈 수 있다.
+#
+# ⬜ 식별된 사용자에 대한 **범위 필터는 아직 없다**(workspace_control 과 같은 상태).
+#   봉합은 «익명이 못 본다» 까지이고, 그 이상을 완료로 세지 않는다.
 
 
 class QualityRequest(BaseModel):
@@ -61,7 +78,9 @@ async def record_quality(req: QualityRequest, p: Principal = Depends(current_pri
 
 
 @router.get("/quality/{asset_id}")
-async def quality_history(asset_id: str, limit: int = 20):
+async def quality_history(asset_id: str, limit: int = 20,
+                          p: Principal = Depends(current_principal)):
+    assert_identified(p, WHAT)
     rows = await asyncio.to_thread(data_catalog.list_quality_profiles, asset_id, limit)
     return {"status": "success", "data": {
         "asset_id": asset_id, "profiles": rows, "latest": rows[0] if rows else None,
@@ -70,8 +89,9 @@ async def quality_history(asset_id: str, limit: int = 20):
 
 
 @router.get("/freshness/{asset_id}")
-async def freshness(asset_id: str):
+async def freshness(asset_id: str, p: Principal = Depends(current_principal)):
     """최신성 판정(계산, 추정 아님). 판정 근거가 없으면 `unknown` 이고 fresh 로 낙관하지 않는다."""
+    assert_identified(p, WHAT)
     try:
         out = await asyncio.to_thread(data_catalog.assess_freshness, asset_id)
     except DataCatalogError as e:
@@ -113,18 +133,21 @@ async def derive_edges(p: Principal = Depends(current_principal)):
 
 
 @router.get("/edges")
-async def edges_of(node_type: str, node_id: str, direction: str = "both"):
+async def edges_of(node_type: str, node_id: str, direction: str = "both",
+                   p: Principal = Depends(current_principal)):
+    assert_identified(p, WHAT)
     rows = await asyncio.to_thread(data_lineage.edges_of, node_type, node_id, direction)
     return {"status": "success", "data": rows}
 
 
 @router.get("/impact")
 async def impact(node_type: str, node_id: str, direction: str = "downstream",
-                 max_depth: int = 6):
+                 max_depth: int = 6, p: Principal = Depends(current_principal)):
     """"이 값이 바뀌면 무엇이 틀어지나".
 
     ⚠️ 응답의 `limitation` 을 무시하지 말 것 — 계보는 **등록된 관계만** 알고, 영향 0건이 곧
       안전을 뜻하지 않는다."""
+    assert_identified(p, WHAT)
     try:
         out = await asyncio.to_thread(data_lineage.impact_of, node_type, node_id,
                                       direction, max_depth)

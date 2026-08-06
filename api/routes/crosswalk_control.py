@@ -12,11 +12,48 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 # [§6-2] 목록에 등급 가림을 적용하려면 주체가 필요하다(등급은 권한에서 파생한다).
-from api.deps import (Principal, assert_governance_readable, current_principal,
-                      visibility_block_reason)
+from api.deps import (Principal, assert_governance_readable, assert_identified,
+                      current_principal, require_caps, visibility_block_reason)
+from core.admin_capability import ADMIN_DATA_ACCESS
 from core.crosswalk import crosswalk, CrosswalkError
 
 router = APIRouter(prefix="/api/v1/crosswalk")
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "크로스워크"
+
+
+def _assert_may_write(p: Principal, action: str) -> None:
+    """★★ [2026-08-07 · 트랙 G] 크로스워크를 **바꿔도 되는 주체인가.**
+
+    ## 이 파일은 읽기만 막혀 있었다
+
+    실측: GET 5개는 전부 `assert_governance_readable` 을 지나는데 **쓰기 9개에는 주체 자체가
+    없었다.** 그래서 익명이 할 수 있었던 일:
+
+    - 시스템 등록·수정·**삭제**
+    - CSV 로 스키마 **일괄 등록**(`schema/import`)
+    - 필드 매핑 변경
+    - 제안 **승인·기각** — 매핑은 승인해야 유효(`confirmed=1`)해지므로, 이것이 곧
+      «어떤 외부 시스템 필드가 우리 표준의 무엇인가» 를 확정하는 행위다
+
+    ⚠️ 「읽기가 막혀 있으니 이 라우터는 통제된다」로 보였다. 읽기·쓰기를 나눠 세지 않으면
+      이 모양을 놓친다 — GET 만 훑는 점검은 여기서 초록을 준다.
+
+    ## ★★ 범위 파라미터는 통제가 아니다
+
+    `_gate()` 는 `scope_node_id`·`tenant_id` 가 **둘 다 비면 그냥 반환한다**(아래 주석의
+    «범위 미지정 호출 — 종전 동작»). 즉 **파라미터를 주지 않는 것이 가장 넓은 호출**이고,
+    `_gate` 를 부르는 쓰기 라우트들도 실제로는 아무나 통과했다. `/planning/facts` 유출의
+    두 번째 겹과 같은 구조다(`PROGRESS.md` §G).
+
+    → 그래서 이 검사는 **범위와 무관하게** 먼저 건다. 범위 게이트는 «남의 조직 것을 건드리지
+      마라» 이고, 이 검사는 «애초에 바꿀 수 있는 사람인가» 다. 둘은 다른 질문이다.
+
+    ⚠️ 읽기 쪽 `assert_governance_readable` 을 그대로 쓰지 않는다 — 볼 수 있다고 바꿀 수
+      있는 것이 아니다(`AdminCapabilities.manageable_dept_ids` 주석과 같은 이유)."""
+    assert_identified(p, WHAT)
+    require_caps(p, ADMIN_DATA_ACCESS, resource="crosswalk", action=action)
 
 
 def _err(e: CrosswalkError):
@@ -96,7 +133,8 @@ async def systems_coverage(p: Principal = Depends(current_principal)):
 
 
 @router.post("/systems")
-async def create_system(req: SystemRequest):
+async def create_system(req: SystemRequest, p: Principal = Depends(current_principal)):
+    _assert_may_write(p, "create_system")
     try:
         data = await asyncio.to_thread(crosswalk.create_system, req.system_id, req.name,
                                        req.mcp_endpoint or "", "", req.scope or "read",
@@ -109,7 +147,9 @@ async def create_system(req: SystemRequest):
 
 @router.put("/systems/{system_id}")
 async def update_system(system_id: str, req: SystemUpdateRequest,
-                        scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL"):
+                        scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL",
+                        p: Principal = Depends(current_principal)):
+    _assert_may_write(p, "update_system")
     await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await asyncio.to_thread(crosswalk.update_system, system_id, req.name,
@@ -121,7 +161,9 @@ async def update_system(system_id: str, req: SystemUpdateRequest,
 
 @router.delete("/systems/{system_id}")
 async def delete_system(system_id: str, scope_node_id: str = "", tenant_id: str = "",
-                        entity_mode: str = "REAL"):
+                        entity_mode: str = "REAL",
+                        p: Principal = Depends(current_principal)):
+    _assert_may_write(p, "delete_system")
     await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     await asyncio.to_thread(crosswalk.delete_system, system_id)
     return {"status": "success"}
@@ -155,7 +197,9 @@ async def get_schema(system_id: str, scope_node_id: str = "", tenant_id: str = "
 
 @router.post("/systems/{system_id}/schema/field")
 async def add_field(system_id: str, req: FieldRequest, scope_node_id: str = "",
-                    tenant_id: str = "", entity_mode: str = "REAL"):
+                    tenant_id: str = "", entity_mode: str = "REAL",
+                    p: Principal = Depends(current_principal)):
+    _assert_may_write(p, "add_field")
     await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await asyncio.to_thread(crosswalk.add_schema_field, system_id, req.entity, req.field,
@@ -168,7 +212,10 @@ async def add_field(system_id: str, req: FieldRequest, scope_node_id: str = "",
 
 @router.post("/systems/{system_id}/schema/import")
 async def import_schema(system_id: str, file: UploadFile = File(...), scope_node_id: str = "",
-                        tenant_id: str = "", entity_mode: str = "REAL"):
+                        tenant_id: str = "", entity_mode: str = "REAL",
+                        p: Principal = Depends(current_principal)):
+    # ⚠️ 파일을 읽기 **전에** 막는다 — 거부할 요청의 업로드 본문을 굳이 메모리에 올리지 않는다.
+    _assert_may_write(p, "import_schema")
     await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     raw = await file.read()
     try:
@@ -187,7 +234,9 @@ async def import_schema(system_id: str, file: UploadFile = File(...), scope_node
 
 @router.put("/systems/{system_id}/schema/mapping")
 async def set_mapping(system_id: str, req: FieldMappingRequest, scope_node_id: str = "",
-                      tenant_id: str = "", entity_mode: str = "REAL"):
+                      tenant_id: str = "", entity_mode: str = "REAL",
+                      p: Principal = Depends(current_principal)):
+    _assert_may_write(p, "set_mapping")
     await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await asyncio.to_thread(crosswalk.set_field_mapping, system_id, req.entity, req.field,
@@ -204,8 +253,11 @@ class ApproveRequest(BaseModel):
 
 @router.post("/systems/{system_id}/propose")
 async def propose(system_id: str, use_llm: bool = False, scope_node_id: str = "",
-                  tenant_id: str = "", entity_mode: str = "REAL"):
+                  tenant_id: str = "", entity_mode: str = "REAL",
+                  p: Principal = Depends(current_principal)):
     """매핑 초안 생성. use_llm=True 는 Flash(옵트인, 쿼터 소비)."""
+    # ⚠️ 쿼터를 태우는 경로다 — 익명이 반복 호출하면 비용이 나간다.
+    _assert_may_write(p, "propose")
     await _gate(system_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await crosswalk.propose(system_id, use_llm=use_llm)
@@ -236,7 +288,11 @@ async def _gate_proposal(proposal_id: int, scope_node_id: str, tenant_id: str, e
 
 @router.post("/proposals/{proposal_id}/approve")
 async def approve(proposal_id: int, req: ApproveRequest = None, scope_node_id: str = "",
-                  tenant_id: str = "", entity_mode: str = "REAL"):
+                  tenant_id: str = "", entity_mode: str = "REAL",
+                  p: Principal = Depends(current_principal)):
+    # ★ 승인해야 매핑이 유효(`confirmed=1`)해진다 — 이 한 줄이 «외부 필드 = 우리 표준의 무엇» 을
+    #   확정한다. 이 라우터에서 가장 되돌리기 어려운 쓰기다.
+    _assert_may_write(p, "approve_proposal")
     await _gate_proposal(proposal_id, scope_node_id, tenant_id, entity_mode)
     try:
         ext = req.external_key if req else None
@@ -248,7 +304,9 @@ async def approve(proposal_id: int, req: ApproveRequest = None, scope_node_id: s
 
 @router.post("/proposals/{proposal_id}/reject")
 async def reject(proposal_id: int, scope_node_id: str = "", tenant_id: str = "",
-                 entity_mode: str = "REAL"):
+                 entity_mode: str = "REAL",
+                 p: Principal = Depends(current_principal)):
+    _assert_may_write(p, "reject_proposal")
     await _gate_proposal(proposal_id, scope_node_id, tenant_id, entity_mode)
     try:
         data = await asyncio.to_thread(crosswalk.reject_proposal, proposal_id)

@@ -15,8 +15,27 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, assert_can_manage_standard, current_principal
+from api.deps import (Principal, assert_can_manage_standard, assert_identified,
+                      current_principal)
 from core.workspace_promotion import WorkspaceError, workspace
+
+#: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
+WHAT = "작업공간 공유·승격 기록"
+
+# ── [2026-08-07 · 트랙 G] 무방비 라우트 봉합 ─────────────────────────────────
+#
+# 실측: 쓰기 7개는 전부 `assert_can_manage_standard` 를 지나는데 **읽기 5개에는 주체가
+# 아예 없었다** — `/shares` · `/access` · `/forks` · `/promotions` · `/promotions/gate`.
+# 익명이 알 수 있었던 것: 어느 부서가 어느 릴리스를 **누구에게 열어 줬는지**, 무엇을 복제해
+# 갔는지(계보), 어떤 승격이 심사 중인지, 그리고 그 승격이 **어느 관문에서 막혔는지**.
+#
+# ⚠️ 「쓰기가 막혀 있으니 통제된다」로 보였다. `crosswalk_control` 과 정확히 **반대 모양**이며
+#   (거기는 읽기만 막혀 있었다), 둘 다 한쪽만 훑는 점검에는 초록으로 보인다.
+#
+# ⬜ **남은 구멍을 완료로 세지 않는다.** 봉합은 «익명이 못 본다» 까지다. 식별된 사용자에게는
+#   여전히 **범위 필터가 없어** 남의 부서 공유·승격 기록이 보인다. 그것은 행 단위 필터
+#   (`viewer_scope_nodes`)를 저장소까지 내려야 하는 일이라 트랙 G 범위가 아니다 —
+#   `PROGRESS.md` §G 에 남긴다.
 
 router = APIRouter(prefix="/api/v1/workspace")
 
@@ -78,7 +97,9 @@ class PromoteRequest(BaseModel):
 # ── 공유 ──────────────────────────────────────────────────────────────────
 @router.get("/shares")
 async def list_shares(release_id: str = "", to_scope: str = "",
-                      include_revoked: bool = False):
+                      include_revoked: bool = False,
+                      p: Principal = Depends(current_principal)):
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(workspace.list_shares, release_id, to_scope,
                                             include_revoked)}
@@ -107,7 +128,11 @@ async def revoke_share(share_id: str, p: Principal = Depends(current_principal))
 
 
 @router.get("/access")
-async def can_access(release_id: str, scope_node_id: str, owner_scope: str = ""):
+async def can_access(release_id: str, scope_node_id: str, owner_scope: str = "",
+                     p: Principal = Depends(current_principal)):
+    # ⚠️ 이 라우트는 «누가 무엇을 볼 수 있는가» 를 알려 준다 — 익명에게는 권한 지도 자체가
+    #   정찰 자료다(어느 릴리스가 어느 범위에 열려 있는지 훑을 수 있다).
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(workspace.can_access, release_id,
                                             scope_node_id, owner_scope)}
@@ -115,7 +140,9 @@ async def can_access(release_id: str, scope_node_id: str, owner_scope: str = "")
 
 # ── 복제 ──────────────────────────────────────────────────────────────────
 @router.get("/forks")
-async def list_forks(source_release_id: str = ""):
+async def list_forks(source_release_id: str = "",
+                     p: Principal = Depends(current_principal)):
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(workspace.list_forks, source_release_id)}
 
@@ -135,17 +162,21 @@ async def create_fork(req: ForkRequest, p: Principal = Depends(current_principal
 
 # ── 승격 게이트 ───────────────────────────────────────────────────────────
 @router.get("/promotions")
-async def list_promotions(status: str = ""):
+async def list_promotions(status: str = "",
+                          p: Principal = Depends(current_principal)):
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(workspace.list_promotions, status)}
 
 
 @router.get("/promotions/gate")
 async def evaluate_gate(release_id: str, target_scope: str = "enterprise",
-                        project_id: str = ""):
+                        project_id: str = "",
+                        p: Principal = Depends(current_principal)):
     """§9.3 네 가지(데이터 계약·보안·품질·소유자 승인)를 **실제로 조회해** 판정한다.
 
     ⚠️ `unverifiable` 은 통과가 아니라 확인하지 못한 것이며 승격을 막는다."""
+    assert_identified(p, WHAT)
     return {"status": "success",
             "data": await asyncio.to_thread(workspace.evaluate_gate, release_id,
                                             target_scope, None, None, None, project_id)}

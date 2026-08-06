@@ -36,21 +36,67 @@ from fastapi.testclient import TestClient
 SEALED_ROUTERS = [
     ("api.routes.benchmark_control", "골든 벤치마크"),
     ("api.routes.format_control", "문서 서식"),
+    ("api.routes.crosswalk_control", "크로스워크"),
+    ("api.routes.workspace_control", "작업공간 공유·승격"),
+    ("api.routes.lineage_control", "데이터 품질·계보"),
+    ("api.routes.connector_control", "커넥터"),
 ]
+
+#: **쓰지 않는 POST.** 조회인데 본문이 길어 POST 를 쓰는 라우트들 — 아래 2차 검사(«식별만으로
+#: 열리는 쓰기가 없다»)에서 제외한다.
+#:
+#: ⚠️ 자동으로 판별할 방법이 없다(핸들러가 저장소를 부르는지 정적으로 알 수 없다). 그래서
+#:   **적어서 선언하게** 한다 — 목록에 올리는 순간 「이것이 정말 읽기인가」를 한 번 답해야 하고,
+#:   새로 생기는 POST 는 기본이 «쓰기» 라 그냥 두면 검사에 걸린다. 조용히 통과하는 쪽이 기본이
+#:   되면 다음 진짜 쓰기도 같이 새어 나간다.
+READ_ONLY_POSTS = {
+    # 계약 위반 여부만 계산해 돌려준다. 저장하지 않는다.
+    "POST /api/v1/connectors/{connector_id}/validate",
+}
 
 #: 경로 파라미터에 채울 값. **존재하지 않는 id 를 쓴다** — 존재하는 것을 쓰면 404 가 «통제» 로
 #: 오독될 여지가 없어지는 대신, 익명이 실제 자원을 건드릴 수 있다.
 DUMMY = "__track_g_probe__"
 
 
-def _fill(path: str) -> str:
-    """경로 파라미터를 **이름과 무관하게** 채운다.
+def _fill(path: str, endpoint=None) -> str:
+    """경로 파라미터를 **이름과 무관하게, 타입에 맞게** 채운다.
 
     ⚠️ 처음에는 `{scenario_id}`·`{id}` 만 치환했다. 그러자 `{format_id}` 를 가진 라우트가
       «채우지 못한 파라미터» 로 실패했는데, 그건 **통제 결함이 아니라 검사 도구의 결함**이다.
-      도구 결함과 제품 결함이 같은 빨강으로 보이면 사람은 둘을 구분하지 않고 게이트를 끈다."""
+    ⚠️⚠️ 그 다음에는 `{proposal_id}` 가 `int` 인데 문자열을 넣어 422 가 났다. 그것도 도구
+      결함이다 — 그리고 **422 는 인가에 도달하지 못했다는 뜻**이므로 그대로 두면 «막혔다» 로
+      오독된다. 도구 결함과 제품 결함이 같은 빨강으로 보이면 사람은 게이트를 끈다."""
+    import inspect
     import re
-    return re.sub(r"\{[^}]+\}", DUMMY, path)
+    ann = {}
+    if endpoint is not None:
+        try:
+            ann = {n: pr.annotation for n, pr in inspect.signature(endpoint).parameters.items()}
+        except (TypeError, ValueError):
+            ann = {}
+
+    def _sub(m):
+        name = m.group(1).split(":")[0]
+        return "1" if ann.get(name) in (int, float) else DUMMY
+
+    return re.sub(r"\{([^}]+)\}", _sub, path)
+
+
+def _upload_fields(endpoint) -> list:
+    """이 라우트가 요구하는 파일 파라미터 이름들. multipart 라우트를 가려낸다.
+
+    ⚠️ JSON 만 보내면 업로드 라우트는 «파일이 없다» 로 422 를 낸다 — 인가에 도달하지 못한다."""
+    import inspect
+    from fastapi import UploadFile
+    if endpoint is None:
+        return []
+    try:
+        params = inspect.signature(endpoint).parameters
+    except (TypeError, ValueError):
+        return []
+    return [n for n, pr in params.items()
+            if pr.annotation is UploadFile or "UploadFile" in str(pr.annotation)]
 
 
 def _dummy_value(ann):
@@ -108,15 +154,27 @@ def _routes(module_path: str):
         for m in sorted(getattr(r, "methods", set()) or set()):
             if m in ("HEAD", "OPTIONS"):
                 continue
-            out.append((m, path, _dummy_body(r)))
+            ep = getattr(r, "endpoint", None)
+            out.append((m, _fill(path, ep), _dummy_body(r), _upload_fields(ep), path))
     assert out, f"{module_path} 에서 라우트를 하나도 찾지 못했다 — 검사가 헛돌고 있다"
     return out
 
 
+def _send(client, method, url, body, uploads, headers=None):
+    """인가에 **도달하는** 요청을 만든다 — multipart 라우트에는 파일을 붙인다."""
+    if method == "GET":
+        return client.request(method, url, headers=headers)
+    if uploads:
+        files = {n: ("probe.csv", b"a,b\n1,2\n", "text/csv") for n in uploads}
+        return client.request(method, url, files=files, headers=headers)
+    return client.request(method, url, json=body, headers=headers)
+
+
 def _cases():
     for module_path, label in SEALED_ROUTERS:
-        for method, path, body in _routes(module_path):
-            yield pytest.param(method, path, body, label, id=f"{method} {path}")
+        for method, url, body, uploads, raw in _routes(module_path):
+            yield pytest.param(method, url, body, uploads, label,
+                               id=f"{method} {raw}")
 
 
 @pytest.fixture()
@@ -136,17 +194,32 @@ def client(monkeypatch, ecm_org_seed):
         org_directory._invalidate()
 
 
-@pytest.mark.parametrize("method,path,body,label", list(_cases()))
-def test_anonymous_gets_nothing(client, method, path, body, label):
+@pytest.mark.parametrize("method,url,body,uploads,label", list(_cases()))
+def test_anonymous_gets_nothing(client, method, url, body, uploads, label):
     """익명 호출은 **401 또는 403** 이어야 한다.
 
-    ⚠️ 200 은 물론이고 404·409·422 도 실패로 센다 — 위 «세는 규칙» 참조."""
-    url = _fill(path)
-    r = client.request(method, url, json=None if method == "GET" else body)
+    ⚠️ 404·409·422 는 실패로 센다. 200 은 «0건 + blocked_reason» 일 때만 인정한다
+      — 위 «세는 규칙» 참조."""
+    r = _send(client, method, url, body, uploads)
     assert r.status_code != 422, (
         f"[{label}] {method} {url} 가 422 를 냈다 — 인가에 **도달하지 못했다**는 뜻이다. "
         f"`_dummy_body` 가 이 라우트의 요청 모델을 못 만든 것이므로 검사 도구를 고쳐야 한다: "
         f"{r.text[:200]}")
+    if r.status_code == 200:
+        # ★★ **200 을 통째로 면제하지 않는다 — 조건을 검사한다.**
+        #   일부 목록 라우트는 일부러 «0건 + 이유» 로 답한다(`crosswalk.list_systems` 등).
+        #   화면이 «자료가 없다» 와 «볼 수 없다» 를 구분해야 하기 때문이고, 그것은 이 저장소가
+        #   지키는 규칙(조회 실패 ≠ 0건)이다. 그 형태는 자료를 내보내지 않으므로 통제로 인정한다.
+        #   ⚠️ 다만 **면제 목록으로 두지 않는다.** 목록은 손으로 관리되고 언젠가 「이것도 예외」가
+        #     붙는다. 대신 «자료가 비어 있고 이유가 붙어 있다» 를 그때그때 확인한다 —
+        #     자료가 한 건이라도 실려 나오면 그 순간 실패한다.
+        body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        reason = str(body.get("blocked_reason") or "").strip()
+        data = body.get("data")
+        assert reason and not data, (
+            f"[{label}] {method} {url} 가 익명에게 200 을 줬다. «0건 + blocked_reason» 형태여야 "
+            f"인정하는데 blocked_reason={reason!r}, data={str(data)[:120]!r} 이다.")
+        return
     assert r.status_code in (401, 403), (
         f"[{label}] {method} {url} 가 익명에게 {r.status_code} 로 응답했다. "
         f"401/403 이 아니면 통제가 아니다 — 본문 앞부분: {r.text[:160]}")
@@ -163,12 +236,11 @@ def test_write_routes_are_not_merely_identified(client):
     viewer = {"X-Factory-User": "hikwon_17@lsmnm.com"}
     opened = []
     for module_path, label in SEALED_ROUTERS:
-        for method, path, body in _routes(module_path):
-            if method == "GET":
+        for method, url, body, uploads, raw in _routes(module_path):
+            if method == "GET" or f"{method} {raw}" in READ_ONLY_POSTS:
                 continue
-            url = _fill(path)
-            # ★ 검증을 통과하는 본문으로 보낸다 — 빈 본문의 422 는 «인가에 도달하지 못함» 이다.
-            r = client.request(method, url, json=body, headers=viewer)
+            # ★ 검증을 통과하는 본문·파일로 보낸다 — 422 는 «인가에 도달하지 못함» 이다.
+            r = _send(client, method, url, body, uploads, headers=viewer)
             # 403 이면 통제, 401 은 이 계정이 식별되지 않은 것이므로 별도 문제로 드러낸다.
             if r.status_code not in (401, 403):
                 opened.append(f"{method} {url} → {r.status_code}")
