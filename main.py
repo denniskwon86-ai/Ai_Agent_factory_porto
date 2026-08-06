@@ -47,7 +47,16 @@ async def health():
     return {"status": "ok", "version": app.version}
 
 # [QA 보완] 하드코딩 배제: 운영 서버와 로컬 환경을 분리하기 위해 환경 변수 사용
-allowed_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173")
+# ⚠️ 개발 기본값에 **5174·5175 를 포함한다.** 세션이 여럿이면 5173 이 이미 점유돼 Vite 가
+#   다음 포트로 올라가는데, 그때 모든 요청이 CORS 로 막히고 화면은 「서버가 죽었다」처럼
+#   보인다(2026-08-04 Codex 5174 · 2026-08-06 내가 5175 에서 같은 벽을 만났다).
+#   운영 환경은 `CORS_ALLOWED_ORIGINS` 로 명시 지정하므로 이 기본값이 넓어져도 영향이 없다.
+allowed_origins_env = os.getenv(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:3000,"
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:5174,http://127.0.0.1:5174,"
+    "http://localhost:5175,http://127.0.0.1:5175")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
 
 app.add_middleware(

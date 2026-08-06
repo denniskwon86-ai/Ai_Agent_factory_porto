@@ -31,6 +31,8 @@ import { DecisionJarvisDock } from './DecisionJarvisDock';
 import { useFactoryViewModel } from './factoryViewModel';
 import { ProductionStageMap } from './ProductionStageMap';
 import { ProjectHeader } from './ProjectHeader';
+// [7단계 전제] 실행 통제 — 시작·재개·복구·재분할·Release. §8 기능 게이트가 요구한다.
+import { RunControls } from './RunControls';
 import { WbsSpine } from './WbsSpine';
 
 import type { ClarifySelections } from './clarifyAnswers';
@@ -91,6 +93,9 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
           if (impl) setSelectedStageId(impl.id);
         }}
       />
+      {/* [§8 기능 게이트] 3패널을 지우려면 이 다섯 명령이 여기 있어야 한다 —
+          없으면 사용자는 실행을 **시작할 수도, 멈춘 것을 재개할 수도** 없다. */}
+      <RunControls vm={vm} />
       <ProductionStageMap
         vm={vm}
         onSelectStage={(id) => setSelectedStageId((prev) => (prev === id ? '' : id))}

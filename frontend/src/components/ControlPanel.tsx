@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
+// [트랙 E 7단계 전제] Sprint 명령의 조립·호출은 **한 곳**에서 한다. 새 Studio 와 같은
+//   함수를 부른다 — 각자 조립하면 두 화면이 서로 다른 payload 를 보내게 된다.
+import { newPlanningTaskId, replanWbs, resumeAfterQuota, startPlanning }
+  from '../factory/sprintActions';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
@@ -227,24 +231,19 @@ export default function ControlPanel() {
     if (!currentProjectId) return alert("프로젝트가 선택되지 않았습니다.");
     
     setIsStarting(true);
-    const uniquePlanningId = `PLANNING_${Date.now()}`;
+    const uniquePlanningId = newPlanningTaskId();
     setActiveSprintId(uniquePlanningId);
     
     try {
-      await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/sprint/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task_id: uniquePlanningId,
-          project_state_payload: {
-            schema_version: "5.1.0",
-            project_name: currentProjectId,
-            initial_idea: idea,
-            master_data: masterData,
-            factory_mode: "PLANNING",
-          }
-        })
-      });
+      // ★ payload 조립은 `sprintActions.buildPlanningPayload` 하나가 담당한다.
+      //   여기서 다시 적으면 새 Studio 와 스키마가 갈라진다.
+      const r = await startPlanning(currentProjectId, idea, masterData, uniquePlanningId);
+      if (!r.ok) {
+        // ⚠️ 예전에는 실패해도 «가동한 것처럼» 입력창을 비웠다. 실패를 말하고 입력을 남긴다.
+        alert(`기획 가동 실패: ${r.message}`);
+        setActiveSprintId(null);
+        return;
+      }
       // 입력창은 비우되, 접수된 요구사항은 별도 보존하여 WBS 생성 전까지 화면에 유지한다.
       setSubmittedIdea(idea);
       setIdea("");
@@ -375,17 +374,12 @@ export default function ControlPanel() {
     if (!suspendedTaskId) return alert("재가동할 보류 태스크 정보가 없습니다. 페이지를 새로고침해 주세요.");
     setIsStarting(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/sprint/resume-quota`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: suspendedTaskId })
-      });
-      if (res.ok) {
+      const r = await resumeAfterQuota(currentProjectId, suspendedTaskId);
+      if (r.ok) {
         setActiveSprintId(suspendedTaskId);
         clearSuspendedQuota();
       } else {
-        const d = await res.json().catch(() => ({} as any));
-        alert(`재가동 실패: ${d.detail || res.status}. 쿼터가 아직 회복되지 않았을 수 있습니다.`);
+        alert(`재가동 실패: ${r.message}`);
       }
     } catch (error) {
       console.error("쿼터 재가동 실패:", error);
@@ -730,11 +724,10 @@ export default function ControlPanel() {
                       if (!currentProjectId) return;
                       if (!confirm("기획 산출물(RFP/PRD/UI/아키텍처)은 유지한 채 WBS 분할만 다시 수행합니다.\n(분할이 실패했거나 태스크 구성이 마음에 들지 않을 때 사용)\n진행할까요?")) return;
                       try {
-                        const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/wbs/replan`, { method: 'POST' });
-                        const r = await res.json().catch(() => ({} as any));
-                        if (!res.ok) { alert(r?.detail || "재분할 가동 실패"); return; }
+                        const r = await replanWbs(currentProjectId);
+                        if (!r.ok) { alert(r.message); return; }
                         clearSprintData();
-                        setActiveSprintId(r.task_id);
+                        if (r.taskId) setActiveSprintId(r.taskId);
                       } catch (e) { console.error("WBS 재분할 실패:", e); }
                     }}
                     className="text-[11px] font-bold text-amber-200 bg-amber-900/50 hover:bg-amber-800/60 border border-amber-700/50 px-2.5 py-1 rounded transition-colors"
