@@ -26,6 +26,7 @@ import { useEffect, useState } from 'react';
 import { HubDialog } from '../design/HubDialog';
 import { AdaptivePhaseCanvas } from './AdaptivePhaseCanvas';
 import { defaultSelections, toggleSelection } from './clarifyAnswers';
+import { ContextInspector } from './ContextInspector';
 import { DecisionJarvisDock } from './DecisionJarvisDock';
 import { useFactoryViewModel } from './factoryViewModel';
 import { ProductionStageMap } from './ProductionStageMap';
@@ -54,6 +55,9 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
   // [4단계] 요구 확인 선택 상태를 **여기서** 갖는다. Canvas 가 고르고 Dock 이 제출하므로
   // 둘의 공통 부모가 보관해야 한다(§2.2/§2.3 분업).
   const [selections, setSelections] = useState<ClarifySelections>({});
+  // [5단계] Inspector 는 **오버레이**다. 열림 여부만 상태로 갖고, 컴포넌트는 언마운트하지
+  // 않는다 — 지우면 스크롤 위치가 맨 위로 돌아간다(§2.4).
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   // 질문이 도착·변경되면 추천안을 기본값으로 채운다. **라벨까지 확인해** 옛 선택을 버린다 —
   // 같은 id 로 질문이 재생성되면 남은 라벨이 어떤 옵션과도 맞지 않아 «선택 없음» 으로 나간다.
   const fingerprint = JSON.stringify(
@@ -79,6 +83,8 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
       <ProductionStageMap
         vm={vm}
         onSelectStage={(id) => setSelectedStageId((prev) => (prev === id ? '' : id))}
+        // [5단계] 「의존관계 보기」 — 명세 §2.4 가 지정한 두 입구 중 하나다.
+        onOpenDependencies={() => setInspectorOpen(true)}
       />
 
       <div className="studio-grid">
@@ -93,6 +99,13 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
                 && ` · ${vm.connection === 'reconnecting' ? '재연결 중' : '연결 끊김'}`}
             </span>
             <div className="spacer" />
+            {/* [5단계] 「근거·상태」 — §2.4 의 다른 입구. 영구 우측 열을 두지 않는 대신 이 버튼이
+                오버레이를 연다. */}
+            <button type="button" className="inspector-btn"
+              onClick={() => setInspectorOpen((v) => !v)}
+              aria-expanded={inspectorOpen}>
+              근거·상태
+            </button>
             <button type="button" className="secondary-button" onClick={onClose}>
               종전 통제실로 (Esc)
             </button>
@@ -138,6 +151,17 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
             shownStageLabel={shownStage?.label || ''}
           />
         </section>
+
+        {/* [5단계] Inspector 는 `studio-grid` 의 **자식이지만 grid 열이 아니다** —
+            `position: absolute` 로 Canvas 를 덮는다. 열을 하나 더 만들면 닫혀 있을 때도
+            폭을 먹고, 그것이 §2.4 가 없애라고 한 «영구 우측 상태 열» 이 된다. */}
+        <ContextInspector
+          vm={vm}
+          open={inspectorOpen}
+          onClose={() => setInspectorOpen(false)}
+          shownStageId={selectedStageId || vm.currentStageId}
+          shownStageLabel={shownStage?.label || ''}
+        />
       </div>
       </div>
     </HubDialog>

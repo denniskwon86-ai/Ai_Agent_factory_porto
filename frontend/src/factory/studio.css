@@ -142,6 +142,98 @@
   overflow: hidden;
 }
 
+/* ── [5단계] 근거·상태 Inspector ──────────────────────────────────────── */
+/* ★ **`studio-grid` 의 열이 아니다.** `position: absolute` 로 Canvas 를 덮는다 — grid 열을 하나
+ *   더 만들면 닫혀 있을 때도 폭을 먹고, 그것이 §2.4 가 없애라고 한 «영구 우측 상태 열» 이 된다.
+ * ★ **언마운트하지 않는다.** `transform` 으로 화면 밖에 두므로 열고 닫아도 스크롤 위치가 남는다
+ *   (§2.4: «열고 닫아도 선택 문맥과 스크롤 위치를 유지»). 조건부 렌더로 지우면 맨 위로 돌아간다. */
+.afs-studio .inspector {
+  position: absolute;
+  z-index: 10;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-rows: 48px minmax(0, 1fr);
+  width: 330px;
+  max-width: 92%;
+  transform: translateX(102%);
+  transition: transform .22s;
+  border-left: 1px solid var(--surface-border);
+  background: var(--surface-card);
+  box-shadow: -12px 0 32px rgba(21, 35, 60, .11);
+}
+.afs-studio .inspector.open { transform: none; }
+.afs-studio .inspector > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--surface-border);
+}
+.afs-studio .inspector > header b { font-size: 14px; }
+.afs-studio .inspector > header button {
+  border: 0;
+  background: transparent;
+  color: var(--surface-text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.afs-studio .inspector-body { min-height: 0; overflow: auto; padding: 12px; }
+.afs-studio .inspect-card {
+  margin-bottom: 9px;
+  padding: 11px;
+  border: 1px solid var(--surface-border);
+  border-radius: 7px;
+  background: var(--surface-raised);
+}
+.afs-studio .inspect-card h3 { margin: 0 0 6px; font-size: 12px; }
+.afs-studio .inspect-card p { margin: 0 0 6px; color: var(--surface-text-muted); line-height: 1.5; }
+.afs-studio .inspect-card p:last-child { margin-bottom: 0; }
+.afs-studio .inspect-card p small { display: block; margin-top: 3px; }
+/* 경고는 색만으로 말하지 않는다 — 좌측 굵은 선 + 진한 글자색을 함께 쓴다(§6). */
+.afs-studio .inspect-warn {
+  padding: 7px 9px;
+  border-left: 3px solid var(--ls-red);
+  border-radius: 4px;
+  color: var(--state-error-fg) !important;
+  background: var(--state-error-bg);
+}
+.afs-studio .inspect-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--surface-border);
+}
+.afs-studio .inspect-row:last-child { border-bottom: 0; }
+.afs-studio .inspect-row time { color: var(--surface-text-muted); font-size: 12px; }
+.afs-studio .inspect-row b,
+.afs-studio .inspect-row small { display: block; }
+.afs-studio .inspect-row b { font-size: 12px; }
+.afs-studio .inspect-row small {
+  margin-top: 2px;
+  color: var(--surface-text-muted);
+  line-height: 1.45;
+}
+.afs-studio .canvas-toolbar .inspector-btn {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--surface-border-strong);
+  border-radius: 6px;
+  color: var(--action-quiet-fg);
+  background: var(--surface-card);
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+}
+.afs-studio .canvas-toolbar .inspector-btn[aria-expanded='true'] {
+  border-color: var(--ls-navy);
+  color: #fff;
+  background: var(--ls-navy);
+}
+
 /* ── WBS Spine ────────────────────────────────────────────────────────── */
 .afs-studio .work-map {
   min-height: 0;

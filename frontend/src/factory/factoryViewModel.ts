@@ -58,12 +58,34 @@ export interface FactoryStageVm {
   agents: string[];
 }
 
+/** 작업 하나의 진행 종류. **판정은 ViewModel 에서만 한다** — 아래 `isTaskDone` 참조. */
+export type FactoryWbsKind = 'done' | 'active' | 'blocked' | 'waiting';
+
 export interface FactoryWbsVm {
   id: string;
   title: string;
   status: string;
+  /** ★★★ [2026-08-06 실측 결함] 종전에는 `WbsSpine` 이 `status` 를 보고 종류를 정하고
+   *  ViewModel 이 `blockedBy` 를 따로 계산했다. **두 판정이 갈라졌다** — ViewModel 은
+   *  `'COMPLETED'` 만 완료로 봤고 실제 데이터는 `'DONE'` 이었다. 그래서 완료된 작업과
+   *  **진행 중인 작업까지 「차단」으로** 표시됐다(화면에 「진행 0 · 차단 3」이 떴는데 실제로는
+   *  진행 1 · 차단 1 이었다). 그래서 종류를 여기서 한 번만 정한다. */
+  kind: FactoryWbsKind;
   agent?: string;
   blockedBy?: string[];
+}
+
+/** 완료 판정 — **이 함수 하나만 쓴다.** 서버가 `DONE`·`COMPLETED` 를 섞어 쓴다(실측).
+ *  ⚠️ 모르는 값을 «완료» 로 떨어뜨리지 않는다. 그쪽으로 틀리면 안 끝난 일이 끝난 것으로 보인다. */
+export function isTaskDone(status: unknown): boolean {
+  const s = String(status ?? '').trim().toUpperCase();
+  return s === 'COMPLETED' || s === 'DONE';
+}
+
+/** 진행 중 판정 — 서버 표기 차이를 한곳에서 흡수한다. */
+function isTaskActive(status: unknown): boolean {
+  const s = String(status ?? '').trim().toUpperCase();
+  return s === 'IN_PROGRESS' || s === 'RUNNING' || s === 'ACTIVE';
 }
 
 export interface FactoryDecisionVm {
@@ -138,6 +160,23 @@ export interface FactoryStudioViewModel {
   clarify: FactoryClarifyVm;
   /** [3단계] 구현 Canvas 재료. */
   generated: FactoryGeneratedAppVm;
+  /** [5단계] Inspector 재료 — 근거·상태. */
+  inspect: FactoryInspectVm;
+}
+
+/** [5단계] 근거·상태 Inspector 의 재료(명세 §2.4). */
+export interface FactoryInspectVm {
+  /** 순서상 **다음 단계**. 「다음 자동 전환」의 사실 부분이다.
+   *  ⚠️ «전환 조건» 은 서버 로직이고 화면이 알 수 없다 — 그래서 조건은 만들지 않는다. */
+  nextStage: { id: string; label: string } | null;
+  /** 지금 막혀 있는 작업과 그 이유. 「현재 작업 이유」를 사실로 말할 수 있는 유일한 근거다. */
+  blocked: { id: string; title: string; blockedBy: string[] }[];
+  /** 마지막 스프린트 실패. 없으면 `null` — «실패 0» 과 «실패 기록이 없다» 를 구분한다. */
+  failure: { taskId: string; error: string; detail: string } | null;
+  /** 자가복구 재시도 횟수. 0 이면 복구를 시도하지 않았다는 **사실**이다. */
+  healingRetries: number;
+  /** 쿼터로 동결된 작업. 사용자가 «왜 멈췄나» 를 여기서 안다. */
+  suspendedTaskId: string;
 }
 
 /** `buildFactoryViewModel` 에 넘기는 store 스냅샷. store 타입에 의존하지 않게 **좁게** 받는다. */
@@ -159,6 +198,8 @@ export interface FactorySnapshot {
   lastSprintFailure: { taskId: string; error: string; detail?: string } | null;
   isSuspendedQuota: boolean;
   suspendedTaskId: string | null;
+  /** [5단계] 자가복구 재시도 횟수. Inspector 의 «실패·복구 이력» 에 쓴다. */
+  healingRetryCount: number;
 }
 
 export interface FactoryViewModelOptions {
@@ -388,15 +429,26 @@ export function buildFactoryViewModel(
       ? (t.dependencies as unknown[]).map((d) => String(d))
       : [];
     // 차단 이유는 «끝나지 않은 선행 작업» 이다(§4: 의존관계·차단 이유 보강). 전부 끝났으면 차단이 아니다.
+    // ⚠️ 완료 판정은 `isTaskDone` **하나만** 쓴다. 종전에는 여기서 `!== 'COMPLETED'` 로 직접
+    //   비교했고 실제 데이터는 `'DONE'` 이라 **끝난 선행을 미완으로 셌다**.
     const unmet = deps.filter((d) => {
       const dep = rawTasks.find((x) => String(x?.task_id) === d);
-      return !dep || String(dep?.status || '').toUpperCase() !== 'COMPLETED';
+      return !dep || !isTaskDone(dep?.status);
     });
     const agents = Array.isArray(t?.required_agents) ? t.required_agents.map(String) : [];
+    // 종류를 **여기서** 정한다. 우선순위: 완료 → 진행 → 차단 → 대기.
+    // «완료» 가 «차단» 보다 위인 이유: 끝난 작업에 남은 의존 표시는 이력일 뿐이고, 그것을
+    // 차단으로 세면 «완료했는데 막혀 있다» 는 모순이 화면에 동시에 보인다(실측으로 그랬다).
+    // «진행» 이 «차단» 보다 위인 이유: 이미 돌고 있으면 막힌 것이 아니다.
+    const kind: FactoryWbsKind = isTaskDone(t?.status) ? 'done'
+      : isTaskActive(t?.status) ? 'active'
+      : unmet.length ? 'blocked'
+      : 'waiting';
     return {
       id: String(t?.task_id ?? ''),
       title: String(t?.title ?? ''),
       status: String(t?.status ?? ''),
+      kind,
       ...(agents.length ? { agent: agents.join(', ') } : {}),
       ...(unmet.length ? { blockedBy: unmet } : {}),
     };
@@ -483,6 +535,28 @@ export function buildFactoryViewModel(
     // 판정하면 한쪽은 질문을 보여 주고 다른 쪽은 안 보여 준다.
     clarify: toClarify(st, !!(st?.needs_revision || snap.hotlTaskId)),
     generated: toGenerated(st, running),
+    inspect: {
+      // 순서상 다음 단계 — «아직 끝나지 않은 것 중 현재 다음». 조건은 만들지 않는다.
+      nextStage: (() => {
+        const i = stages.findIndex((s) => s.id === currentStage);
+        const next = i >= 0 ? stages[i + 1] : undefined;
+        return next ? { id: next.id, label: next.label } : null;
+      })(),
+      // «무엇이 막고 있는가» 는 **시작할 수 없는 작업**만이다. 완료·진행 중인 작업을 여기 넣으면
+      // 「완료했는데 차단」 같은 모순이 화면에 보인다(2026-08-06 실측으로 그랬다).
+      blocked: wbs
+        .filter((t) => t.kind === 'blocked')
+        .map((t) => ({ id: t.id, title: t.title, blockedBy: t.blockedBy || [] })),
+      failure: snap.lastSprintFailure
+        ? {
+            taskId: String(snap.lastSprintFailure.taskId || ''),
+            error: String(snap.lastSprintFailure.error || ''),
+            detail: String(snap.lastSprintFailure.detail || ''),
+          }
+        : null,
+      healingRetries: Number(snap.healingRetryCount || 0),
+      suspendedTaskId: snap.isSuspendedQuota ? String(snap.suspendedTaskId || '') : '',
+    },
   };
 }
 
@@ -518,6 +592,7 @@ export function useFactoryViewModel(opts: FactoryViewModelOptions = {}): Factory
   const lastSprintFailure = useFactoryStore((s) => s.lastSprintFailure);
   const isSuspendedQuota = useFactoryStore((s) => s.isSuspendedQuota);
   const suspendedTaskId = useFactoryStore((s) => s.suspendedTaskId);
+  const healingRetryCount = useFactoryStore((s) => s.healingRetryCount);
 
   const { selectedStageId, selectedWbsId } = opts;
   return useMemo(
@@ -526,12 +601,13 @@ export function useFactoryViewModel(opts: FactoryViewModelOptions = {}): Factory
         state, currentProjectId, isConnected, completed_agents, activeSprintId, hotlTaskId,
         currentTemplateData, agentRegistry, agentRegistryError, wbsData, isWbsError,
         logs, supervisorFeed, releases, lastSprintFailure, isSuspendedQuota, suspendedTaskId,
+        healingRetryCount,
       },
       { selectedStageId, selectedWbsId },
     ),
     [state, currentProjectId, isConnected, completed_agents, activeSprintId, hotlTaskId,
      currentTemplateData, agentRegistry, agentRegistryError, wbsData, isWbsError,
      logs, supervisorFeed, releases, lastSprintFailure, isSuspendedQuota, suspendedTaskId,
-     selectedStageId, selectedWbsId],
+     healingRetryCount, selectedStageId, selectedWbsId],
   );
 }

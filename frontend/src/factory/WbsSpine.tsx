@@ -15,32 +15,23 @@
  */
 import { useMemo } from 'react';
 
-import type { FactoryStudioViewModel, FactoryWbsVm } from './factoryViewModel';
+import type { FactoryStudioViewModel, FactoryWbsKind, FactoryWbsVm } from './factoryViewModel';
 
 export interface WbsSpineProps {
   vm: FactoryStudioViewModel;
   onSelectTask: (taskId: string) => void;
 }
 
-type Kind = 'done' | 'active' | 'blocked' | 'waiting';
-
-/** 상태 문자열은 서버가 대문자로 준다(`COMPLETED`·`IN_PROGRESS`). 표기 차이로 오분류하지 않게
- *  정규화한 뒤 판정한다. ⚠️ 모르는 값을 «완료» 로 떨어뜨리지 않는다 — 그쪽으로 틀리면 안 끝난
- *  일이 끝난 것으로 보인다. */
-function kindOf(t: FactoryWbsVm): Kind {
-  const s = (t.status || '').toUpperCase();
-  if (s === 'COMPLETED' || s === 'DONE') return 'done';
-  if (t.blockedBy && t.blockedBy.length) return 'blocked';
-  if (s === 'IN_PROGRESS' || s === 'RUNNING' || s === 'ACTIVE') return 'active';
-  return 'waiting';
-}
-
-const KIND_KO: Record<Kind, string> = {
+/** ★★★ [2026-08-06] **여기서 종류를 판정하지 않는다.** 종전에는 이 파일이 `status` 를 보고
+ *  정하고 ViewModel 이 `blockedBy` 를 따로 계산했는데, 두 판정이 갈라져 **완료·진행 중인 작업이
+ *  「차단」으로** 표시됐다(ViewModel 은 `'COMPLETED'` 만 완료로 봤고 실제 데이터는 `'DONE'`).
+ *  판정은 `factoryViewModel` 의 `kind` 하나이고 이 컴포넌트는 그것을 **표시만** 한다. */
+const KIND_KO: Record<FactoryWbsKind, string> = {
   done: '완료', active: '진행', blocked: '차단', waiting: '대기',
 };
 
 /** 둘째 줄. 담당 Agent 와 차단 이유를 **있는 것만** 적는다(없는 것을 «미지정» 으로 채우지 않는다). */
-function note(t: FactoryWbsVm, kind: Kind): string {
+function note(t: FactoryWbsVm, kind: FactoryWbsKind): string {
   if (kind === 'blocked' && t.blockedBy?.length) {
     return `${t.blockedBy.join(', ')} 완료 후 시작`;
   }
@@ -50,7 +41,7 @@ function note(t: FactoryWbsVm, kind: Kind): string {
 export function WbsSpine({ vm, onSelectTask }: WbsSpineProps) {
   const counts = useMemo(() => {
     const c = { done: 0, active: 0, waiting: 0, blocked: 0 };
-    for (const t of vm.wbs) c[kindOf(t)] += 1;
+    for (const t of vm.wbs) c[t.kind] += 1;
     return c;
   }, [vm.wbs]);
 
@@ -109,7 +100,7 @@ export function WbsSpine({ vm, onSelectTask }: WbsSpineProps) {
       <section className="map-section">
         <header>작업 {vm.wbs.length}개 · 완료 {counts.done}</header>
         {vm.wbs.map((t) => {
-          const kind = kindOf(t);
+          const kind = t.kind;
           const sub = note(t, kind);
           const selected = vm.selectedWbsId === t.id;
           return (
