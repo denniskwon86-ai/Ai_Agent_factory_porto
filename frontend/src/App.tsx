@@ -229,13 +229,22 @@ export default function App() {
 
   const handleDeleteProject = async (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`⚠️ [경고] 프로젝트 볼트 '${name} (${id})'를 완전히 삭제하시겠습니까?\n이 작업은 물리 디스크의 모든 산출물을 지우며 복구할 수 없습니다.`)) return;
-    
+    // ★★ [2026-08-07] **문구가 서버와 같은 말을 해야 한다.**
+    //   종전 문구는 「물리 디스크의 모든 산출물을 지우며 복구할 수 없습니다」였다. 사용자 결정에
+    //   따라 이 버튼은 이제 **표시 삭제**이고 데이터는 남으며 되돌릴 수 있다 — 옛 문구를 그대로
+    //   두면 화면이 서버보다 무섭게 거짓말을 하고, 사용자는 지워도 되는 것을 안 지운다.
+    //   (실제 삭제는 관리자 전용이며 이 버튼에 없다.)
+    if (!confirm(`'${name} (${id})' 를 목록에서 내리시겠습니까?\n\n`
+      + `산출물은 지워지지 않고 그대로 보관됩니다. 관리자가 되돌릴 수 있습니다.\n`
+      + `※ 다른 부서·사용자에게 공유·전달된 프로젝트는 관리자만 내릴 수 있습니다.`)) return;
+
     const success = await deleteProject(id);
     if (success) {
-      alert("프로젝트가 안전하게 삭제되었습니다.");
+      alert("목록에서 내렸습니다. 산출물은 보관돼 있습니다.");
     } else {
-      alert("프로젝트 삭제 중 에러가 발생했습니다.");
+      // ⚠️ 「에러가 발생했습니다」로 뭉개지 않는다 — 권한 문제인지 공유된 프로젝트라서인지
+      //   서버가 죽어서인지에 따라 사용자가 할 일이 다르다. 서버 문구를 그대로 보여 준다.
+      alert(useFactoryStore.getState().projectActionError || "삭제하지 못했습니다.");
     }
   };
 

@@ -103,7 +103,14 @@ interface FactoryStore {
   createProject: (id: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean) => Promise<boolean>;
   createMegaProject: (id: string, templateId?: string) => Promise<boolean>;
   copyProject: (id: string, newId: string) => Promise<boolean>;
-  deleteProject: (id: string) => Promise<boolean>; // 🗑️ 프로젝트 완전 삭제 기능 정의
+  /** 프로젝트 삭제. 기본은 **표시 삭제**(데이터는 남는다), `purge=true` 는 실제 삭제(관리자만). */
+  deleteProject: (id: string, purge?: boolean) => Promise<boolean>;
+  /** 표시 삭제 되돌리기. */
+  restoreProject: (id: string) => Promise<boolean>;
+  /** 삭제·되돌리기가 **왜** 안 됐는지. 빈 문자열이면 문제 없음.
+   *  ⚠️ `false` 만 돌려주면 화면은 「실패」라고만 말할 수 있고, 사용자는 권한 문제인지
+   *  공유된 프로젝트라서인지 서버 문제인지 구분할 수 없다 — 셋은 할 일이 다르다. */
+  projectActionError: string;
   connectSSE: () => void;
   fetchWBS: () => Promise<void>;
   fetchLatestState: () => Promise<void>;
@@ -172,6 +179,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   editingTemplateId: 'default',
   formats: [],
   formatsError: '',
+  projectActionError: '',
   selectedFormatId: 'default',
   showFormatPanel: false,
   projects: [],
@@ -308,13 +316,22 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  // 🗑️ 백엔드 라우터 API 명세와 연동되는 프로젝트 완전 삭제 기능 구현
-  deleteProject: async (id: string) => {
+  // 🗑️ 프로젝트 삭제 (사용자 결정 2026-08-07)
+  //
+  // ★ 기본은 **표시 삭제**다 — 서버가 `project_meta.json` 에 표시만 남기고 파일은 지우지
+  //   않는다. 실제 삭제(`purge=true`)는 관리자만 할 수 있다.
+  // ⚠️ 종전에는 `res.ok` 가 아니면 `false` 만 돌려주고 **이유를 버렸다.** 그러면 화면은
+  //   「삭제 실패」라고만 말할 수 있고, 사용자는 «권한이 없어서» 인지 «공유된 프로젝트라서»
+  //   인지 «서버가 죽어서» 인지 알 수 없다 — 셋은 해야 할 일이 완전히 다르다.
+  deleteProject: async (id: string, purge = false) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects/${id}`, {
+      const q = purge ? '?purge=true' : '';
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects/${id}${q}`, {
         method: 'DELETE',
       });
+      const body = await res.json().catch(() => ({} as any));
       if (res.ok) {
+        set({ projectActionError: '' });
         await get().fetchProjects();
         if (get().currentProjectId === id) {
           // 삭제된 프로젝트의 state가 스토어에 남아 다른 화면(릴리스 보기 등)에 노출되지 않도록 함께 비운다
@@ -322,9 +339,34 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
         }
         return true;
       }
+      // 서버 문구를 그대로 보여 준다 — 화면이 지어내면 서버 규칙과 갈라진다.
+      set({ projectActionError: body?.detail
+        || (res.status === 401 ? '삭제하려면 우측 상단에서 사용자를 지정하십시오.'
+          : `삭제하지 못했습니다 (${res.status}).`) });
       return false;
     } catch (error) {
       console.error("프로젝트 삭제 실패:", error);
+      set({ projectActionError: '서버에 연결하지 못해 삭제하지 못했습니다.' });
+      return false;
+    }
+  },
+
+  /** 표시 삭제를 되돌린다. 데이터를 남겨 둔 이유가 이것이다. */
+  restoreProject: async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects/${id}/restore`,
+        { method: 'POST' });
+      const body = await res.json().catch(() => ({} as any));
+      if (res.ok) {
+        set({ projectActionError: '' });
+        await get().fetchProjects();
+        return true;
+      }
+      set({ projectActionError: body?.detail || `되돌리지 못했습니다 (${res.status}).` });
+      return false;
+    } catch (error) {
+      console.error("프로젝트 되돌리기 실패:", error);
+      set({ projectActionError: '서버에 연결하지 못해 되돌리지 못했습니다.' });
       return false;
     }
   },

@@ -402,7 +402,8 @@ async def set_project_ownership(project_id: str, req: OwnershipUpdate,
 
 
 @router.get("/projects")
-async def get_projects(p: Principal = Depends(current_principal)):
+async def get_projects(include_deleted: bool = False,
+                       p: Principal = Depends(current_principal)):
     # ★★ [이관 7/10 · 병합 2026-08-05 복원] 소유권 필터(`_ownership_visible`)는 있었지만
     #   **익명 자체가 통과**했다. 미태깅 프로젝트는 하위호환으로 «누구에게나 보이는» 상태이므로,
     #   익명에게 목록을 주면 그 하위호환이 그대로 유출 경로가 된다. 관문 A: 미지정 = 비노출.
@@ -414,6 +415,13 @@ async def get_projects(p: Principal = Depends(current_principal)):
     projects_dir = workspace_path()
     os.makedirs(projects_dir, exist_ok=True)
 
+    # [2026-08-07 사용자 결정] 표시 삭제된 프로젝트는 목록에서 뺀다 — 파일은 남아 있다.
+    # ⚠️ `include_deleted` 는 **관리자만** 쓸 수 있다. 일반 사용자에게 열어 주면 「지웠는데
+    #   그대로 보인다」가 되고, 그때 사용자는 실제 삭제를 요청하게 된다 — 남겨 두려던 이유가
+    #   사라진다. 관리자에게 필요한 이유는 되돌리기(`/restore`) 대상을 찾아야 하기 때문이다.
+    from core import project_deletion as pdel
+    show_deleted = bool(include_deleted) and pdel.is_admin(p.scope)
+
     project_list = []
     for item in os.listdir(projects_dir):
         item_path = os.path.join(projects_dir, item)
@@ -421,6 +429,9 @@ async def get_projects(p: Principal = Depends(current_principal)):
             # [Phase 3/4] 소유권 필터. 이 루프는 이미 메타 파일을 열고 있으므로 추가 I/O 는 실질 0.
             _own = _read_project_ownership(item_path)
             if not _ownership_visible(p, _own):
+                continue
+            _deleted = pdel.is_deleted(item_path)
+            if _deleted and not show_deleted:
                 continue
             wbs_path = os.path.join(item_path, "00_wbs_master_plan.json")
             project_name = item
@@ -459,9 +470,12 @@ async def get_projects(p: Principal = Depends(current_principal)):
                 "parent_project_id": parent_project_id,
                 "template_id": template_id,
                 "total_tasks": total_tasks,
-                "completed_tasks": completed_tasks
+                "completed_tasks": completed_tasks,
+                # ⚠️ 관리자가 `include_deleted=true` 로 볼 때 **어느 것이 삭제된 것인지** 화면이
+                #   구분할 수 있어야 한다. 표시가 없으면 되돌릴 대상을 고를 수 없다.
+                "deleted": _deleted,
             })
-            
+
     return {"status": "success", "data": project_list}
 
 def provision_project(project_id: str, template_id: str = "default",
@@ -804,12 +818,45 @@ async def start_all_mega_subprojects(project_id: str, p: Principal = Depends(cur
     return {"status": "success", "started_projects": results}
 
 @router.delete("/projects/{project_id}")
-async def delete_project(project_id: str,
-                          p: Principal = Depends(current_principal)):
+async def delete_project(project_id: str, purge: bool = False,
+                         reason: str = "",
+                         p: Principal = Depends(current_principal)):
+    """프로젝트 삭제 (사용자 결정 2026-08-07).
+
+    - 기본은 **표시 삭제**다 — `project_meta.json` 에 표시만 남기고 **파일은 지우지 않는다.**
+      등록자 본인이 할 수 있다. 단, 남에게 공유·전달된 프로젝트는 관리자만 할 수 있다.
+    - `?purge=true` 는 **실제 삭제**다 — 디렉터리와 체크포인트를 지운다. **관리자만.**
+
+    ★ 판정은 `core/project_deletion.classify()` 한 곳에 있다. 여기서 조건을 다시 쓰지 않는다 —
+      화면·스크립트가 같은 답을 얻어야 「버튼은 보이는데 서버는 거부한다」가 생기지 않는다.
+
+    ⚠️ 종전에는 `assert_project_writable` 하나로 **곧바로 `rmtree`** 했다. 그 함수는
+      「소유권 미기록 프로젝트는 통과」라는 읽기용 관대함을 갖고 있어서, 실측에서 **viewer
+      계정이 200 을 받았다.** 되돌릴 수 없는 삭제에 읽기용 관대함을 쓰면 안 된다."""
+    from core import project_deletion as pdel
+
     _safe_id(project_id, "project_id")  # rmtree 대상 경로 이탈 방지(가장 파괴적인 벡터)
-    assert_project_writable(p, project_id)
-    
+    assert_project_readable(p, project_id)      # 존재를 알려도 되는 사람인가 먼저
+    verdict = pdel.classify(p.scope, p.user_id, project_id)
+    try:
+        verdict.assert_hard() if purge else verdict.assert_soft()
+    except pdel.DeletionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
     projects_dir = workspace_path()
+
+    if not purge:
+        # ── 표시 삭제 — 아무것도 지우지 않는다 ──────────────────────────────
+        # ⚠️ 실행 중 스프린트는 멈춘다. 목록에서 사라진 프로젝트가 계속 돌면서 비용을 쓰면
+        #   아무도 그것을 보지 못한다(좀비 스프린트).
+        await orchestrator.cancel_project(project_id)
+        out = await asyncio.to_thread(pdel.mark_deleted,
+                                      os.path.join(projects_dir, project_id),
+                                      p.user_id or "", reason)
+        return {"status": "success", "data": {**out, "purged": False},
+                "message": "표시 삭제했습니다. 데이터는 남아 있으며 관리자가 되돌릴 수 있습니다."}
+
+    # ── 실제 삭제 (관리자만) ────────────────────────────────────────────────
     # 🛑 삭제 전, 해당 프로젝트와 서브 프로젝트들의 실행 중 스프린트를 취소 (좀비 스프린트 방지)
     await orchestrator.cancel_project(project_id)
     sub_projects = []
@@ -840,7 +887,30 @@ async def delete_project(project_id: str,
     # DB 가 무한 증식하고, 같은 id 로 재생성 시 '옛 프로젝트의 체크포인트'에 이어붙는 오염이 생긴다.
     # (실패해도 프로젝트 삭제 자체는 성공 처리 - 베스트 에포트)
     await _purge_checkpoints([project_id] + sub_projects)
-    return {"status": "success"}
+    return {"status": "success", "data": {"project_id": project_id, "purged": True,
+                                          "sub_projects": sub_projects}}
+
+
+@router.post("/projects/{project_id}/restore")
+async def restore_project(project_id: str, p: Principal = Depends(current_principal)):
+    """표시 삭제를 되돌린다. **데이터를 남겨 둔 이유가 이것이다.**
+
+    ⚠️ 되돌리기가 없으면 «표시 삭제» 는 이름만 소프트다 — 사용자는 지운 것을 되찾을 방법이
+      없고, 그러면 결국 관리자에게 실제 삭제를 요청하게 된다. 판정은 삭제와 같은 곳을 쓴다."""
+    from core import project_deletion as pdel
+
+    _safe_id(project_id, "project_id")
+    assert_project_readable(p, project_id)
+    verdict = pdel.classify(p.scope, p.user_id, project_id)
+    try:
+        verdict.assert_soft()          # 지울 수 있는 사람이 되돌릴 수도 있다
+    except pdel.DeletionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    out = await asyncio.to_thread(pdel.restore,
+                                  os.path.join(workspace_path(), project_id))
+    if not out.get("restored"):
+        raise HTTPException(status_code=404, detail="되돌릴 표시 삭제 기록이 없습니다.")
+    return {"status": "success", "data": {"project_id": project_id, "restored": True}}
 
 
 async def _purge_checkpoints(project_ids: list) -> None:
