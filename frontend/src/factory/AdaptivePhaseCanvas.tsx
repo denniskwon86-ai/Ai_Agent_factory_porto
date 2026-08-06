@@ -21,6 +21,7 @@
  */
 import { GeneratedAppRuntime } from './GeneratedAppRuntime';
 
+import type { ClarifySelections } from './clarifyAnswers';
 import type { FactoryClarifyVm, FactoryStudioViewModel } from './factoryViewModel';
 
 export interface AdaptivePhaseCanvasProps {
@@ -28,6 +29,10 @@ export interface AdaptivePhaseCanvasProps {
   /** 지금 보고 있는 단계 id(선택이 없으면 현재 단계). */
   shownStageId: string;
   shownStageLabel: string;
+  /** [4단계] 요구 확인 선택 상태. **제출은 Dock 이 한다** — 선택과 제출을 나눈 것은 §2.2/§2.3 의
+   *  분업이고, 그래서 상태는 둘의 공통 부모(Studio)가 갖는다. */
+  selections: ClarifySelections;
+  onToggleChoice: (questionId: string, label: string, multi: boolean) => void;
 }
 
 /** 이 단계가 어느 Canvas 를 쓰는가. **단계 id 로만 판정한다** — 라벨은 템플릿마다 다르다. */
@@ -43,8 +48,12 @@ function canvasKindOf(stageId: string): CanvasKind {
   return 'not_yet';
 }
 
-/** 요구 확인 Canvas. 질문·추천 이유를 보여 주고 **답변은 받지 않는다**(4단계). */
-function ClarificationCanvas({ clarify }: { clarify: FactoryClarifyVm }) {
+/** 요구 확인 Canvas. 질문·추천 이유를 보여 주고 **선택을 받는다**. 제출은 Dock 이 한다(§2.3). */
+function ClarificationCanvas({ clarify, selections, onToggle }: {
+  clarify: FactoryClarifyVm;
+  selections: ClarifySelections;
+  onToggle: (questionId: string, label: string, multi: boolean) => void;
+}) {
   // 요약이 있으면 이 단계는 지나갔다. 그때 질문 카드를 다시 띄우면 «또 답해야 하나» 로 읽힌다.
   if (clarify.summary) {
     return (
@@ -92,18 +101,30 @@ function ClarificationCanvas({ clarify }: { clarify: FactoryClarifyVm }) {
               <p>처음 적은 «{clarify.initialIdea}» 를 기준으로 추천합니다.</p>
             )}
             {q.multi && <p>여러 개를 고를 수 있는 질문입니다.</p>}
-            <div className="choice-grid">
-              {q.options.map((o) => (
-                <div
-                  className={`choice${o.recommended ? ' recommended' : ''}`}
-                  key={o.label}
-                  // ⚠️ `button` 이 아니라 `div` 다. 3단계는 읽기 전용이고, 누를 수 있게 보이면
-                  //   «눌렀는데 아무 일도 없는» 상태가 된다(그 오독을 이번 세션에 이미 한 번 겪었다).
-                >
-                  <b>{o.label}{o.recommended && <span className="rec-mark">추천</span>}</b>
-                  {o.description && <small>{o.description}</small>}
-                </div>
-              ))}
+            <div className="choice-grid" role={q.multi ? 'group' : 'radiogroup'}>
+              {q.options.map((o) => {
+                const picked = (selections[q.id] || []).includes(o.label);
+                return (
+                  // [4단계] 이제 **고를 수 있다.** 3단계에서는 `div` 로 두었다 — 제출 경로가
+                  // 없는데 누를 수 있게 보이면 «눌렀는데 아무 일도 없는» 상태가 되기 때문이다.
+                  <button
+                    type="button"
+                    className={`choice${o.recommended ? ' recommended' : ''}${picked ? ' picked' : ''}`}
+                    key={o.label}
+                    role={q.multi ? 'checkbox' : 'radio'}
+                    aria-checked={picked}
+                    onClick={() => onToggle(q.id, o.label, q.multi)}
+                  >
+                    <b>
+                      {/* 고른 것을 **글자로도** 표시한다 — 테두리·배경만으로는 색을 구분하지
+                          못하는 사용자에게 «무엇을 골랐는지» 가 사라진다(§6). */}
+                      {picked ? '✓ ' : ''}{o.label}
+                      {o.recommended && <span className="rec-mark">추천</span>}
+                    </b>
+                    {o.description && <small>{o.description}</small>}
+                  </button>
+                );
+              })}
             </div>
           </section>
         ))}
@@ -121,8 +142,8 @@ function ClarificationCanvas({ clarify }: { clarify: FactoryClarifyVm }) {
         <div className="need-list">
           <div>
             <strong>지금 할 일</strong>
-            아래 <b>사용자 결정</b> 영역에서 답변을 제출합니다. 이 화면은 질문과 추천 근거를
-            보여 주는 곳입니다.
+            여기서 답을 고르고, 아래 <b>사용자 결정 대기</b> 영역에서 제출합니다. 고르지 않은
+            질문은 추천안대로 진행됩니다.
           </div>
           <div>
             <strong>준비도 점수는 아직 없습니다</strong>
@@ -150,10 +171,16 @@ const NOT_YET_PLAN: Record<string, { what: string; where: string }> = {
   MANUAL: { what: '사용자 매뉴얼', where: '종전 통제실의 «매뉴얼» 탭' },
 };
 
-export function AdaptivePhaseCanvas({ vm, shownStageId, shownStageLabel }: AdaptivePhaseCanvasProps) {
+export function AdaptivePhaseCanvas({
+  vm, shownStageId, shownStageLabel, selections, onToggleChoice,
+}: AdaptivePhaseCanvasProps) {
   const kind = canvasKindOf(shownStageId);
 
-  if (kind === 'clarification') return <ClarificationCanvas clarify={vm.clarify} />;
+  if (kind === 'clarification') {
+    return (
+      <ClarificationCanvas clarify={vm.clarify} selections={selections} onToggle={onToggleChoice} />
+    );
+  }
   if (kind === 'implementation') return <GeneratedAppRuntime vm={vm} />;
 
   const plan = NOT_YET_PLAN[(shownStageId || '').toUpperCase()];

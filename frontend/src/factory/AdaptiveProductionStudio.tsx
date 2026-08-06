@@ -21,13 +21,17 @@
  *   선택은 화면을 보는 사람의 것이고, 실행 중인 단계(`currentStageId`)는 서버의 것이다. 둘을
  *   한 곳에 두면 «과거 단계를 눌렀는데 진행 표시가 옮겨가는» 일이 생긴다.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
 import { AdaptivePhaseCanvas } from './AdaptivePhaseCanvas';
+import { defaultSelections, toggleSelection } from './clarifyAnswers';
+import { DecisionJarvisDock } from './DecisionJarvisDock';
 import { useFactoryViewModel } from './factoryViewModel';
 import { ProductionStageMap } from './ProductionStageMap';
 import { WbsSpine } from './WbsSpine';
+
+import type { ClarifySelections } from './clarifyAnswers';
 
 import './studio.css';
 
@@ -46,6 +50,19 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
   const [selectedStageId, setSelectedStageId] = useState('');
   const [selectedWbsId, setSelectedWbsId] = useState<string | undefined>(undefined);
   const vm = useFactoryViewModel({ selectedStageId, selectedWbsId });
+
+  // [4단계] 요구 확인 선택 상태를 **여기서** 갖는다. Canvas 가 고르고 Dock 이 제출하므로
+  // 둘의 공통 부모가 보관해야 한다(§2.2/§2.3 분업).
+  const [selections, setSelections] = useState<ClarifySelections>({});
+  // 질문이 도착·변경되면 추천안을 기본값으로 채운다. **라벨까지 확인해** 옛 선택을 버린다 —
+  // 같은 id 로 질문이 재생성되면 남은 라벨이 어떤 옵션과도 맞지 않아 «선택 없음» 으로 나간다.
+  const fingerprint = JSON.stringify(
+    vm.clarify.questions.map((q) => [q.id, q.options.map((o) => o.label)]));
+  useEffect(() => {
+    if (!vm.clarify.questions.length) return;
+    setSelections((prev) => defaultSelections(vm.clarify.questions, prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fingerprint]);
 
   const noteTitle = NOTE_TITLE[vm.loadState];
   // 선택이 없으면 «현재 단계를 본다»(§5) — 선택을 현재로 덮어쓰지 않고 표시만 그렇게 한다.
@@ -106,8 +123,20 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
               vm={vm}
               shownStageId={selectedStageId || vm.currentStageId}
               shownStageLabel={shownStage?.label || ''}
+              selections={selections}
+              onToggleChoice={(qid, label, multi) => setSelections(
+                (prev) => toggleSelection(prev, { id: qid, question: '', multi }, label))}
             />
           </div>
+
+          {/* [4단계] 하단 Interaction Dock. **결정이 0건이면 Decision Dock 이 아예 렌더되지
+              않는다**(§2.3 완전 접힘) — 그 높이는 Canvas 가 가져간다. */}
+          <DecisionJarvisDock
+            vm={vm}
+            selections={selections}
+            shownStageId={selectedStageId || vm.currentStageId}
+            shownStageLabel={shownStage?.label || ''}
+          />
         </section>
       </div>
       </div>

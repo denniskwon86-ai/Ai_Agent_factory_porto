@@ -239,9 +239,11 @@
 .afs-studio .deliverable-contract b { color: var(--ls-navy); }
 
 /* ── Canvas 자리(3단계에서 채운다) ───────────────────────────────────── */
+/* 툴바 · Canvas · Dock 세 행. **Dock 은 `auto`** 다 — 결정이 0건이면 Decision Dock 이 렌더되지
+   않고, 그때 확보된 높이가 그대로 Canvas 로 간다(§2.3). 고정 높이를 주면 빈 상자가 남는다. */
 .afs-studio .adaptive-canvas {
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr) auto;
   min-width: 0;
   overflow: hidden;
   background: var(--surface-card);
@@ -399,9 +401,161 @@
 }
 .afs-studio .run-body > * { min-height: 0; flex: 1; }
 
-/* 좁은 화면에서는 요구 확인의 두 열을 한 열로 접는다. */
+/* 고른 선택지. **테두리와 함께 «✓» 글자**로도 표시한다(§6) — 색만으로는 사라진다. */
+.afs-studio .choice {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.afs-studio .choice:hover { background: var(--surface-raised); }
+.afs-studio .choice:focus-visible { outline: 2px solid var(--action-focus-ring); outline-offset: 2px; }
+.afs-studio .choice.picked {
+  border-color: var(--ls-cyan);
+  background: var(--state-info-bg);
+  box-shadow: inset 0 0 0 1px var(--ls-cyan);
+}
+
+/* ── [4단계] 하단 Interaction Dock ────────────────────────────────────── */
+.afs-studio .interaction-dock {
+  margin: 0 14px 12px;
+  border: 1px solid var(--surface-border-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: var(--surface-shadow);
+}
+
+/* 결정 대기 — 어두운 경고색 면. Jarvis(감색)와 **다른 계열**이어야 한다: 하나는 «당신이 할 일»,
+   다른 하나는 «물어볼 곳» 이고 둘을 같은 색으로 두면 사용자가 구분하지 못한다. */
+.afs-studio .decision-dock {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 12px;
+  color: #fff4e8;
+  background: linear-gradient(100deg, #4b260e, #382115);
+}
+.afs-studio .decision-dock header { display: flex; align-items: center; gap: 7px; }
+.afs-studio .decision-dock header b { font-size: 13px; }
+.afs-studio .decision-dock header span {
+  padding: 3px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .14);
+  font-size: 12px;
+}
+.afs-studio .decision-body { min-width: 0; }
+.afs-studio .decision-dock p { margin: 0; line-height: 1.45; }
+.afs-studio .decision-dock p small {
+  display: block;
+  margin-top: 3px;
+  color: #ddb98f;
+  font-size: 12px;
+}
+.afs-studio .decision-note { display: block; margin-top: 7px; }
+.afs-studio .decision-note span {
+  display: block;
+  margin-bottom: 3px;
+  color: #ddb98f;
+  font-size: 12px;
+}
+.afs-studio .decision-note input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, .24);
+  border-radius: 6px;
+  color: #fff;
+  background: rgba(255, 255, 255, .08);
+  font: inherit;
+}
+.afs-studio .decision-actions button {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #ffd4a5;
+  border-radius: 6px;
+  color: #fff;
+  background: #9c4a13;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+.afs-studio .decision-actions button:disabled { opacity: .6; cursor: default; }
+
+.afs-studio .jarvis-dock {
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  color: #eaf1fd;
+  background: linear-gradient(105deg, #0a1e5a, #153676);
+}
+.afs-studio .jarvis-head h3 { margin: 0 0 3px; font-size: 14px; }
+.afs-studio .jarvis-head p { margin: 0; color: #c6d4ea; font-size: 12px; }
+.afs-studio .jarvis-dock input {
+  height: 38px;
+  min-width: 0;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 6px;
+  color: #fff;
+  background: rgba(255, 255, 255, .07);
+  font: inherit;
+  outline: none;
+}
+.afs-studio .jarvis-dock input::placeholder { color: #c1cee2; }
+.afs-studio .jarvis-actions { display: flex; gap: 7px; }
+.afs-studio .jarvis-actions button {
+  height: 38px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 6px;
+  color: #fff;
+  background: var(--ls-red);
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+.afs-studio .jarvis-actions button.quiet {
+  border: 1px solid rgba(255, 255, 255, .28);
+  background: rgba(255, 255, 255, .08);
+  font-weight: 850;
+}
+.afs-studio .jarvis-actions button:disabled { opacity: .55; cursor: default; }
+
+/* 긴 대화 Drawer — Canvas 를 **영구히** 좁히지 않고 열고 닫는다(§2.4 와 같은 원칙). */
+.afs-studio .jarvis-drawer {
+  max-height: 34vh;
+  overflow: auto;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, .16);
+  color: #dde6f6;
+  background: #0a1730;
+}
+.afs-studio .jarvis-drawer .turn { margin-bottom: 9px; }
+.afs-studio .jarvis-drawer .turn b { display: block; margin-bottom: 2px; font-size: 12px; }
+.afs-studio .jarvis-drawer .turn.user b { color: #8fd7e6; }
+.afs-studio .jarvis-drawer .turn.assistant b { color: #ffb1a0; }
+.afs-studio .jarvis-drawer .turn p { margin: 0; line-height: 1.5; white-space: pre-wrap; }
+.afs-studio .dock-empty { margin: 0; color: #a8b6cd; }
+
+/* 실패·성공을 **같은 자리에서** 말한다. 사라지는 알림으로 두면 실패를 놓친다. */
+.afs-studio .dock-error,
+.afs-studio .dock-ok {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.afs-studio .dock-error { color: #ffd9de; background: rgba(250, 0, 45, .22); }
+.afs-studio .dock-ok { color: #d7f5ee; background: rgba(19, 133, 120, .28); }
+
+/* 좁은 화면에서는 요구 확인의 두 열을, Dock 의 세 열을 한 열로 접는다. */
 @media (max-width: 1279px) {
   .afs-studio .clarify-layout { grid-template-columns: minmax(0, 1fr); }
+  .afs-studio .decision-dock,
+  .afs-studio .jarvis-dock { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* 아직 만들지 않은 자리를 «비어 있음» 이 아니라 «다음 단계» 로 표시한다.

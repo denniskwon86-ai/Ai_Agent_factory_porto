@@ -1,4 +1,10 @@
 import { useState, useEffect } from 'react';
+// ★ [2026-08-06] 답변 직렬화·기본선택·토글을 `factory/clarifyAnswers.ts` 로 옮겼다. 그 문자열
+//   형식은 **백엔드(`RFP_Analyst`)가 파싱하는 계약**이고, 신규 Studio 의 Decision Dock 도 같은
+//   제출을 한다. 복사하면 두 벌이 되고 반드시 갈라진다 — 동작은 종전과 동일하다.
+import {
+  defaultSelections, serializeClarifyAnswers, toggleSelection,
+} from '../factory/clarifyAnswers';
 import { useFactoryStore } from '../store/useFactoryStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
@@ -35,48 +41,16 @@ export default function HOTLInput() {
   );
   useEffect(() => {
     if (!isClarification) return;
-    setSelections((prev) => {
-      const next: Record<string, string[]> = {};
-      clarQuestions.forEach((q: any) => {
-        const labels = (q.options || []).map((o: any) => o.label);
-        const kept = (prev[q.id] || []).filter((l) => labels.includes(l)); // stale 라벨 폐기
-        if (kept.length) { next[q.id] = kept; return; }
-        const rec = (q.options || []).find((o: any) => o.recommended);
-        next[q.id] = rec ? [rec.label] : [];
-      });
-      return next;
-    });
+    setSelections((prev) => defaultSelections(clarQuestions, prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClarification, questionsFingerprint]);
 
   const toggleOption = (q: any, label: string) => {
-    setSelections((prev) => {
-      const cur = prev[q.id] || [];
-      if (q.multi) {
-        return { ...prev, [q.id]: cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label] };
-      }
-      return { ...prev, [q.id]: [label] };
-    });
+    setSelections((prev) => toggleSelection(prev, q, label));
   };
 
-  // 선택 결과를 백엔드(RFP_Analyst)가 소비할 수 있는 텍스트로 직렬화
-  const serializeAnswers = () => {
-    const lines = ["[요구 확인 인터뷰 답변]"];
-    clarQuestions.forEach((q: any, i: number) => {
-      const sel = selections[q.id] || [];
-      const picked = (q.options || []).filter((o: any) => sel.includes(o.label));
-      lines.push(`${i + 1}. ${q.question}`);
-      if (picked.length) {
-        picked.forEach((o: any) => lines.push(`→ 선택: ${o.label}${o.description ? ` (${o.description})` : ''}`));
-      } else {
-        lines.push('→ 선택 없음 (전문가 추천안대로 진행)');
-      }
-    });
-    if (feedback.trim()) {
-      lines.push('', '[추가 의견]', feedback.trim());
-    }
-    return lines.join('\n');
-  };
+  // 선택 결과를 백엔드(RFP_Analyst)가 소비할 수 있는 텍스트로 직렬화 — 형식은 공용 모듈에 있다.
+  const serializeAnswers = () => serializeClarifyAnswers(clarQuestions, selections, feedback);
 
   // 지금 '무엇을' 승인하는지 + 어디서 검토하는지 안내 (HOTL 중단점 = 직전 산출 단계)
   const APPROVAL_MAP: Record<string, { what: string; where: string }> = {
