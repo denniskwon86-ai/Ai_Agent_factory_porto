@@ -20,6 +20,7 @@
  *   여기에 제출 버튼을 미리 달면 «누르면 되는데 안 되는» 상태가 생긴다.
  */
 import { GeneratedAppRuntime } from './GeneratedAppRuntime';
+import { ReleaseCanvas, StageArtifactCanvas } from './StageArtifactCanvas';
 
 import type { ClarifySelections } from './clarifyAnswers';
 import type { FactoryClarifyVm, FactoryStudioViewModel } from './factoryViewModel';
@@ -36,16 +37,88 @@ export interface AdaptivePhaseCanvasProps {
 }
 
 /** 이 단계가 어느 Canvas 를 쓰는가. **단계 id 로만 판정한다** — 라벨은 템플릿마다 다르다. */
-type CanvasKind = 'clarification' | 'implementation' | 'not_yet';
+type CanvasKind = 'clarification' | 'implementation' | 'wbs' | 'release' | 'artifact' | 'not_yet';
 
 /** 구현으로 볼 단계 id. 커스텀 템플릿이 `EXECUTION`·`BUILD` 를 쓰는 것을 실측으로 확인했다. */
 const IMPLEMENTATION_STAGES = new Set(['EXECUTION', 'BUILD', 'IMPLEMENTATION', 'CODE']);
+/** [6단계] 산출물 성격의 단계 전부. `StageArtifactCanvas` 가 세 경우를 **한 곳에서** 판정한다:
+ *  본문 있음 / 아직 없음 / **서버가 요약 필드를 아예 주지 않음**.
+ *
+ *  ★ [2026-08-06 실측] `UI_DESIGN`·`VISION_QA` 를 이 집합에서 빼 두었더니 「작업면이 아직 이
+ *    화면에 없습니다 — 올 예정입니다」로 나갔다. **그것은 거짓이다** — 서버가 그 단계 요약을
+ *    주지 않으므로 기다려도 생기지 않는다. 「아직」과 「없다」를 두 컴포넌트가 나눠 판정하면
+ *    이렇게 어긋난다. 그래서 둘도 여기 넣고 판정을 한 곳으로 모았다. */
+const ARTIFACT_STAGES = new Set([
+  'RFP', 'PLANNING', 'ARCHITECTURE', 'TECH_SPEC', 'CODE_REVIEW', 'QA', 'SUPERVISOR', 'MANUAL',
+  'UI_DESIGN', 'VISION_QA',
+]);
 
 function canvasKindOf(stageId: string): CanvasKind {
   const id = (stageId || '').toUpperCase();
   if (id === 'CLARIFICATION') return 'clarification';
   if (IMPLEMENTATION_STAGES.has(id)) return 'implementation';
+  if (id === 'PMO' || id === 'WBS') return 'wbs';
+  if (id === 'RELEASE') return 'release';
+  if (ARTIFACT_STAGES.has(id)) return 'artifact';
   return 'not_yet';
+}
+
+/** [6단계] WBS 단계 Canvas — 작업 분해·의존관계·Agent 배정. **문서가 아니라 구조**라 따로 둔다.
+ *
+ * ⚠️ 왼쪽 WBS Spine 과 같은 데이터를 쓴다(`vm.wbs`) — 다른 소스를 쓰면 두 곳의 수가 갈라진다.
+ *   Spine 은 «지금 무엇이 돌고 있나» 를 좁게 보여 주고, 여기서는 **의존관계와 배정을 펼친다.** */
+function WbsCanvas({ vm }: { vm: FactoryStudioViewModel }) {
+  if (!vm.wbs.length) {
+    return (
+      <div className="studio-note" data-tone="loading">
+        <b>작업 분해가 아직 없습니다</b>
+        <p>승인된 기획·아키텍처를 기준으로 작업을 분할하면 이 자리에 의존관계와 배정이 나타납니다.</p>
+      </div>
+    );
+  }
+  const KIND_KO: Record<string, string> = {
+    done: '완료', active: '진행', blocked: '차단', waiting: '대기',
+  };
+  return (
+    <article className="artifact-canvas">
+      <header>
+        <div>
+          <small className="eyebrow">WORK BREAKDOWN</small>
+          <h2>작업 {vm.wbs.length}개 · 의존관계와 배정</h2>
+        </div>
+      </header>
+      <div className="artifact-body">
+        <table className="wbs-table">
+          <thead>
+            <tr><th>작업</th><th>상태</th><th>담당</th><th>선행 조건</th></tr>
+          </thead>
+          <tbody>
+            {vm.wbs.map((t) => (
+              <tr key={t.id} data-kind={t.kind}>
+                <th scope="row"><b>{t.id}</b> {t.title}</th>
+                <td>{KIND_KO[t.kind] || t.kind}</td>
+                {/* 없는 것을 «미지정» 으로 채우지 않는다 — 서버가 배정을 안 남긴 것과 아무도
+                    배정되지 않은 것은 다르고, 화면은 그것을 구분할 근거가 없다. */}
+                <td>{t.agent || '—'}</td>
+                <td>
+                  {t.blockedBy?.length
+                    ? `${t.blockedBy.join(', ')} 완료 후 시작`
+                    : (t.kind === 'waiting' ? '선행 조건 없음(순서 대기)' : '—')}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <footer className="artifact-aux">
+        <b>보조 검토</b>
+        <p>
+          재분할·잠금은 아직 이 화면에 없습니다 — 종전 통제실에서 «WBS 재분할» 을 쓰십시오.
+          차단 사유는 위 표의 «선행 조건» 열이 그대로 말합니다.
+        </p>
+      </footer>
+    </article>
+  );
 }
 
 /** 요구 확인 Canvas. 질문·추천 이유를 보여 주고 **선택을 받는다**. 제출은 Dock 이 한다(§2.3). */
@@ -156,20 +229,13 @@ function ClarificationCanvas({ clarify, selections, onToggle }: {
   );
 }
 
-/** 아직 이식하지 않은 단계. **무엇이 올 것인지와 지금 어디서 보는지**를 말한다. */
-const NOT_YET_PLAN: Record<string, { what: string; where: string }> = {
-  RFP: { what: 'RFP 본문·변경점·사용자 승인', where: '종전 통제실의 «요구정의(RFP)» 탭' },
-  PLANNING: { what: '기능·업무 흐름·수용 기준과 RFP 대비 Diff', where: '종전 통제실의 «기획서» 탭' },
-  UI_DESIGN: { what: 'UI 흐름과 주요 결정', where: '종전 통제실의 «UI 디자인» 탭' },
-  VISION_QA: { what: '화면 검증 결과', where: '종전 통제실의 산출물 탭' },
-  ARCHITECTURE: { what: '구조도·데이터 계약·주요 결정', where: '종전 통제실의 «아키텍처» 탭' },
-  PMO: { what: '작업 분해·의존관계·Agent 배정', where: '왼쪽 WBS 실행 구조' },
-  TECH_SPEC: { what: '기술 설계 명세', where: '종전 통제실의 «기술사양» 탭' },
-  CODE_REVIEW: { what: '테스트·품질 게이트·결함과 수정 전후', where: '종전 통제실의 «리뷰» 탭' },
-  QA: { what: '통합 검수 판정과 근거', where: '종전 통제실의 «QA» 탭' },
-  SUPERVISOR: { what: '수용 검수 판정', where: '종전 통제실의 산출물 탭' },
-  MANUAL: { what: '사용자 매뉴얼', where: '종전 통제실의 «매뉴얼» 탭' },
-};
+/** 어느 Canvas 에도 해당하지 않는 단계 — **커스텀 워크플로우의 낯선 단계**를 위한 안내다.
+ *
+ * ★ [6단계] 기본 14단계는 이제 모두 Canvas 를 갖는다(요구 확인 · 구현 · WBS · Release ·
+ *   산출물 8종 + 서버가 요약을 주지 않는 2종). 그래서 이 표는 비어 있고, 아래 기본 문구만
+ *   남는다 — 커스텀 템플릿이 `MARKET_RESEARCH` 같은 단계를 정의하면 그때 여기로 온다.
+ * ⚠️ 항목을 미리 채워 두지 않는다. 도달하지 않는 문구는 다음 사람이 «아직 안 됐구나» 로 읽는다. */
+const NOT_YET_PLAN: Record<string, { what: string; where: string }> = {};
 
 export function AdaptivePhaseCanvas({
   vm, shownStageId, shownStageLabel, selections, onToggleChoice,
@@ -180,6 +246,11 @@ export function AdaptivePhaseCanvas({
     return (
       <ClarificationCanvas clarify={vm.clarify} selections={selections} onToggle={onToggleChoice} />
     );
+  }
+  if (kind === 'wbs') return <WbsCanvas vm={vm} />;
+  if (kind === 'release') return <ReleaseCanvas vm={vm} />;
+  if (kind === 'artifact') {
+    return <StageArtifactCanvas vm={vm} stageId={shownStageId} stageLabel={shownStageLabel} />;
   }
   if (kind === 'implementation') return <GeneratedAppRuntime vm={vm} />;
 

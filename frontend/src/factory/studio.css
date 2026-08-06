@@ -507,6 +507,96 @@
   box-shadow: inset 0 0 0 1px var(--ls-cyan);
 }
 
+/* ── [6단계] 단계별 산출물 Canvas ─────────────────────────────────────── */
+.afs-studio .artifact-canvas {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+}
+.afs-studio .artifact-canvas > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.afs-studio .artifact-canvas .eyebrow {
+  color: var(--ls-cyan);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: .1em;
+}
+.afs-studio .artifact-canvas h2 { margin: 4px 0 0; font-size: 18px; }
+/* 판정 칩 — **낱말이 먼저**다. 색은 보조이고, 색을 못 보는 사용자에게는 글자만 남는다(§6). */
+.afs-studio .verdict-chip {
+  margin-left: auto;
+  padding: 6px 11px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 900;
+}
+.afs-studio .verdict-chip.pass {
+  border-color: #a9d9d2;
+  color: var(--state-success-fg);
+  background: var(--state-success-bg);
+}
+.afs-studio .verdict-chip.fail {
+  border-color: var(--action-danger-quiet-fg);
+  color: var(--state-error-fg);
+  background: var(--state-error-bg);
+}
+.afs-studio .verdict-chip.unknown {
+  border-color: var(--surface-border-strong);
+  color: var(--state-unknown-fg);
+  background: var(--state-unknown-bg);
+}
+/* 문서 본문. 안쪽은 기존 `ManualRenderer`(Tailwind 클래스)가 그린다 — **그 스타일을 덮지
+   않는다.** 덮으면 종전 통제실의 같은 렌더러도 함께 변한다. */
+.afs-studio .artifact-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px;
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface-card);
+  box-shadow: var(--surface-shadow);
+}
+.afs-studio .artifact-aux {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--ls-cyan);
+  border-radius: 6px;
+  background: var(--surface-sunken);
+}
+.afs-studio .artifact-aux b { font-size: 12px; }
+.afs-studio .artifact-aux p { margin: 0; color: var(--surface-text-muted); line-height: 1.5; }
+
+/* WBS 표 — 의존관계와 배정을 펼친다. 넓은 표는 **자기 안에서** 가로 스크롤한다(페이지가 넘치지 않게). */
+.afs-studio .wbs-table { width: 100%; border-collapse: collapse; }
+.afs-studio .wbs-table th,
+.afs-studio .wbs-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--surface-border);
+  font-size: 12px;
+  text-align: left;
+  vertical-align: top;
+}
+.afs-studio .wbs-table thead th {
+  color: var(--surface-text-muted);
+  background: var(--surface-raised);
+  font-weight: 900;
+  white-space: nowrap;
+}
+.afs-studio .wbs-table tbody th { font-weight: 500; }
+.afs-studio .wbs-table tbody th b { margin-right: 5px; }
+.afs-studio .wbs-table td { color: var(--surface-text-muted); }
+/* 상태를 색으로만 말하지 않는다 — 표의 «상태» 열에 낱말이 이미 있고, 색은 그것을 거든다. */
+.afs-studio .wbs-table tr[data-kind='done'] td:first-of-type { color: var(--state-success-fg); font-weight: 850; }
+.afs-studio .wbs-table tr[data-kind='active'] td:first-of-type { color: var(--action-danger-quiet-fg); font-weight: 900; }
+.afs-studio .wbs-table tr[data-kind='blocked'] td:first-of-type { color: var(--state-warn-fg); font-weight: 850; }
+
 /* ── [4단계] 하단 Interaction Dock ────────────────────────────────────── */
 .afs-studio .interaction-dock {
   margin: 0 14px 12px;

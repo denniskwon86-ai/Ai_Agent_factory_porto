@@ -3,7 +3,10 @@ import { useFactoryStore } from '../store/useFactoryStore';
 import TraceabilityGraph from './TraceabilityGraph';
 
 // 마크다운을 간단히 HTML로 변환하는 경량 렌더러 (외부 라이브러리 없음)
-function ManualRenderer({ markdown }: { markdown: string }) {
+// ★ [2026-08-06] `export` 를 붙였다 — 신규 Studio 의 산출물 Canvas 가 같은 렌더러를 쓴다.
+//   복사하면 마크다운 해석 규칙이 두 벌이 되고, 그때 같은 문서가 두 화면에서 다르게 보인다.
+//   동작은 종전과 동일하다(선언만 바뀌었다).
+export function ManualRenderer({ markdown }: { markdown: string }) {
   const lines = markdown.split('\n');
   const elements: React.ReactNode[] = [];
   let key = 0;

@@ -162,6 +162,19 @@ export interface FactoryStudioViewModel {
   generated: FactoryGeneratedAppVm;
   /** [5단계] Inspector 재료 — 근거·상태. */
   inspect: FactoryInspectVm;
+  /** [6단계] 단계별 산출물 문서. 키는 stage id. **없는 단계는 키가 없다** — 빈 문자열을 넣으면
+   *  «만들어졌는데 비었다» 와 «아직 없다» 가 구분되지 않는다. */
+  docs: Record<string, FactoryStageDocVm>;
+  /** [6단계] 릴리스 목록(Release Canvas). */
+  releases: { id: string; status: string; at: string }[];
+}
+
+/** [6단계] 한 단계가 내놓은 산출물. */
+export interface FactoryStageDocVm {
+  /** 문서 본문(마크다운). 비어 있으면 아직 만들어지지 않았다. */
+  text: string;
+  /** 판정이 있는 단계만 채운다(QA·수용검수의 PASS/FAIL). 없으면 빈 문자열. */
+  verdict: string;
 }
 
 /** [5단계] 근거·상태 Inspector 의 재료(명세 §2.4). */
@@ -368,6 +381,38 @@ function toGenerated(st: ProjectState | null, running: boolean): FactoryGenerate
   return { rawCode, runnable: !!rawCode.trim(), building: running };
 }
 
+/**
+ * [6단계] 단계 id → 산출물 필드 매핑. **명세 §2.2 표를 코드로 옮긴 것**이다.
+ *
+ * ⚠️ 여기 없는 단계(`UI_DESIGN`·`VISION_QA`)는 **서버가 요약 필드를 주지 않는다.** 그것을
+ *   빈 문서로 만들어 넣지 않는다 — 화면은 «서버가 이 단계 요약을 제공하지 않는다» 고 말해야
+ *   하고, 그것과 «아직 만들어지지 않았다» 는 다른 사실이다.
+ */
+const STAGE_DOC_FIELDS: Record<string, { text: keyof ProjectState; verdict?: keyof ProjectState }> = {
+  RFP: { text: 'rfp_summary' },
+  PLANNING: { text: 'prd_summary' },
+  ARCHITECTURE: { text: 'architecture_summary' },
+  TECH_SPEC: { text: 'tech_spec_summary' },
+  CODE_REVIEW: { text: 'code_review_report_summary' },
+  QA: { text: 'qa_report_summary', verdict: 'qa_verdict' },
+  SUPERVISOR: { text: 'supervisor_report_summary', verdict: 'supervisor_verdict' },
+  MANUAL: { text: 'user_manual_summary' },
+};
+
+/** 단계별 산출물을 모은다. **값이 있는 단계만** 키를 만든다(위 주석 참조). */
+function toDocs(st: ProjectState | null): Record<string, FactoryStageDocVm> {
+  const out: Record<string, FactoryStageDocVm> = {};
+  if (!st) return out;
+  for (const [stage, f] of Object.entries(STAGE_DOC_FIELDS)) {
+    const text = String((st as any)[f.text] ?? '').trim();
+    const verdict = f.verdict ? String((st as any)[f.verdict] ?? '').trim() : '';
+    // 본문도 판정도 없으면 «아직 없다» 다 — 키를 만들지 않는다.
+    if (!text && !verdict) continue;
+    out[stage] = { text, verdict };
+  }
+  return out;
+}
+
 function toEvents(logs: any[], feed: any[]): FactoryEventVm[] {
   const out: FactoryEventVm[] = [];
   for (const l of [...(logs || []), ...(feed || [])]) {
@@ -557,6 +602,14 @@ export function buildFactoryViewModel(
       healingRetries: Number(snap.healingRetryCount || 0),
       suspendedTaskId: snap.isSuspendedQuota ? String(snap.suspendedTaskId || '') : '',
     },
+    docs: toDocs(st),
+    releases: (snap.releases || [])
+      .map((r: any) => ({
+        id: String(r?.release_id ?? r?.id ?? ''),
+        status: String(r?.status ?? ''),
+        at: String(r?.created_at ?? r?.at ?? ''),
+      }))
+      .filter((r) => r.id),
   };
 }
 
