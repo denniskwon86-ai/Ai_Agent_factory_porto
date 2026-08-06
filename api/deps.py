@@ -198,6 +198,57 @@ def visibility_block_reason(p: Principal) -> str:
     return ""
 
 
+def eul(word: str) -> str:
+    """받침에 맞는 목적격 조사(을/를). 사용자에게 보이는 문구이므로 맞춘다.
+
+    ⚠️ 자료 이름을 문구에 끼워 넣는 함수가 여럿 있으면 «경영계획를» 같은 문장이 화면에 남는다.
+      틀린 조사는 기능을 막지 않지만, 통제 메시지가 어설퍼 보이면 사용자는 그 통제도 어설프다고
+      읽는다. 판정은 한 곳에 둔다."""
+    if not word:
+        return "를"
+    last = word.strip()[-1]
+    if not ("가" <= last <= "힣"):
+        return "를"                          # 한글이 아니면 판정할 근거가 없다
+    return "을" if (ord(last) - 0xAC00) % 28 else "를"
+
+
+def assert_identified(p: Principal, what: str) -> None:
+    """★★ 익명·미등록·폐지 사용자 차단. **이 자료를 열어도 되는 주체인가**만 본다.
+
+    ## 왜 여기 있는가 (트랙 G 의 첫 단계)
+
+    이 함수는 원래 `planning_control.py` 안의 `_assert_identified` 였다. 트랙 G 는 무방비
+    라우트가 남은 **16개 파일**을 봉합하는 일인데, 그 방식이 「각 파일에 같은 헬퍼를 복사」라면
+    판정이 열일곱 벌이 된다. ⚠️ **이 저장소에서 가장 비쌌던 결함 유형이 바로 그것이다** —
+    2026-08-06 인계서가 「판정이 두 곳에 있으면 두 곳이 갈라진다」를 여덟 번 기록했다.
+
+    복사본이 갈라지는 방식은 조용하다: 한 파일에서 401/403 구분을 고쳐도 나머지 열여섯은
+    그대로 남고, 아무도 오류를 보지 못한다. 그래서 **봉합을 시작하기 전에 판정을 여기로 올린다.**
+
+    ## 무엇을 보고 무엇을 보지 않는가
+
+    ★ 행 단위 필터(`viewer_scope_nodes`)와 나눈 이유는 `visibility_block_reason` 주석과 같다 —
+      «열어도 되는가» 와 «무엇까지 보이는가» 는 다른 질문이고, 후자는 조직도(ECM)를 봐야 한다.
+
+    ⚠️ **401 과 403 을 구분한다**: 401 = «누구인지 밝히십시오», 403 = «당신에게는 권한이 없습니다».
+      뭉개면 이미 로그인한 사용자가 계속 로그인을 시도한다.
+
+    ⚠️⚠️ **이것만으로는 부족하다.** `/api/v1/planning/facts` 유출의 두 번째 겹은 «빈 범위 요청이
+      통제를 우회한다» 였다 — `org_id` 를 비우면 정규화할 대상이 없어 통과하고, 저장소로 넘어가는
+      범위도 비어 행 필터가 걸리지 않는다. **파라미터를 주지 않는 것이 가장 넓은 조회다.**
+      그러므로 이 함수를 부른 뒤에도 행 필터를 반드시 함께 건다.
+
+    :param what: 사용자에게 보일 자료 이름(예: "경영계획"). 조사는 `eul()` 이 맞춘다.
+    """
+    reason = visibility_block_reason(p)
+    if not reason:
+        return
+    if not (p.user_id or "").strip():
+        raise HTTPException(status_code=401,
+                            detail=f"{what}{eul(what)} 보려면 사용자 식별이 필요합니다.")
+    raise HTTPException(status_code=403, detail=reason)
+
+
 def viewer_may_drill_down(p: Principal) -> bool:
     """하위 조직 자료까지 볼 수 있는 주체인가 — **경영진만**(사용자 결정 2026-07-30 ③).
 

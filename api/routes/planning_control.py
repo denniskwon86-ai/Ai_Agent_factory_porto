@@ -17,7 +17,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import Principal, current_principal
+from api.deps import Principal, assert_identified, current_principal
 from core import planning_engine as engine
 from core.planning_model import PLAN, VALUE_KINDS, PlanningError, planning_store
 from core.scope_guard import resolve_effective_scope
@@ -56,35 +56,11 @@ async def _scope_eff(p: Principal, requested: str, resource_id: str = "",
 # ⚠️ 인수인계 기록은 «지금은 0건이라 실제 유출이 없다» 고 적었지만 **그 사이 데이터가 들어왔다.**
 #   «비어 있으니 나중에» 로 미룬 통제는 데이터가 들어오는 순간 유출이 된다.
 
-def _assert_identified(p: Principal, what: str) -> None:
-    """익명·미등록·폐지 사용자 차단. **경영계획을 열어도 되는 주체인가**만 본다.
-
-    ★ 행 단위 필터(`_only_visible_orgs`)와 나눈 이유는 `deps.visibility_block_reason` 주석과
-      같다 — «열어도 되는가» 와 «무엇까지 보이는가» 는 다른 질문이고, 후자는 조직도를 봐야 한다.
-    ⚠️ 401 과 403 을 구분한다: 401 = «누구인지 밝히십시오», 403 = «당신에게는 권한이 없습니다».
-      뭉개면 이미 로그인한 사용자가 계속 로그인을 시도한다."""
-    from api.deps import visibility_block_reason
-    reason = visibility_block_reason(p)
-    if not reason:
-        return
-    if not (p.user_id or "").strip():
-        raise HTTPException(status_code=401,
-                            detail=f"{what}{_eul(what)} 보려면 사용자 식별이 필요합니다.")
-    raise HTTPException(status_code=403, detail=reason)
-
-
-def _eul(word: str) -> str:
-    """받침에 맞는 목적격 조사(을/를). 사용자에게 보이는 문구이므로 맞춘다.
-
-    ⚠️ 자료 이름을 문구에 끼워 넣는 함수가 여럿 있으면 «경영계획를» 같은 문장이 화면에 남는다.
-      틀린 조사는 기능을 막지 않지만, 통제 메시지가 어설퍼 보이면 사용자는 그 통제도 어설프다고
-      읽는다. 판정은 한 곳에 둔다."""
-    if not word:
-        return "를"
-    last = word.strip()[-1]
-    if not ("가" <= last <= "힣"):
-        return "를"                          # 한글이 아니면 판정할 근거가 없다
-    return "을" if (ord(last) - 0xAC00) % 28 else "를"
+# ★ 판정은 `api/deps.py` 하나에 있다. 여기 있던 `_assert_identified`·`_eul` 을 2026-08-07 에
+#   그리로 올렸다 — 트랙 G 가 같은 봉합을 16개 파일에 더 해야 하는데, 파일마다 복사하면 판정이
+#   열일곱 벌이 되고 그중 하나만 고쳐지는 날이 온다(인계서가 여덟 번 기록한 결함 유형).
+#   이름을 남겨 두는 이유는 이 파일의 호출부 20여 곳을 건드리지 않기 위해서다.
+_assert_identified = assert_identified
 
 
 def _only_visible_orgs(p: Principal, rows: list, key: str = "org_id") -> tuple:

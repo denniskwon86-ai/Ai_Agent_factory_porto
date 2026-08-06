@@ -86,6 +86,9 @@ interface FactoryStore {
   editingTemplateId: string;    // 마스터 제어판이 현재 편집 중인 템플릿
   // 출력 포맷 마스터 (Two-Track Harness)
   formats: OutputFormat[];
+  /** 서식 목록을 **못 읽었을 때** 그 이유. 빈 문자열이면 조회에 성공한 것이다.
+   *  ⚠️ `formats.length === 0` 만 보면 «없다» 와 «못 읽었다» 가 같은 화면이 된다. */
+  formatsError: string;
   selectedFormatId: string;
   showFormatPanel: boolean;
   projects: { id: string, name: string, initial_idea?: string, is_mega_project?: boolean, parent_project_id?: string, template_id?: string, total_tasks?: number, completed_tasks?: number }[];
@@ -168,6 +171,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   selectedTemplateId: 'default',
   editingTemplateId: 'default',
   formats: [],
+  formatsError: '',
   selectedFormatId: 'default',
   showFormatPanel: false,
   projects: [],
@@ -629,11 +633,28 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
 
   // ── 출력 포맷 관리 (Two-Track Harness) ──────────────────────────────────────────────
   fetchFormats: async () => {
+    // ★★ [2026-08-07 · 트랙 G] **조회 실패를 0건으로 두지 않는다.**
+    //   서식 API 를 봉합해 익명은 401 을 받는다. 종전 코드는 `res.ok` 가 아니면 조용히
+    //   지나갔고, 그러면 화면은 이전 값(초기 `[]`)을 그대로 들고 «저장된 양식 (0)» 을 보여 준다.
+    //   ⚠️ «서식이 하나도 없다» 와 «서식을 못 읽었다» 는 사용자가 해야 할 일이 다르다 —
+    //     전자는 만들면 되고, 후자는 사용자를 지정해야 한다. 이 저장소가 반복해서 지키는 규칙이다.
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/formats`);
-      if (res.ok) { const r = await res.json(); set({ formats: r.data || [] }); }
+      if (res.ok) {
+        const r = await res.json();
+        set({ formats: r.data || [], formatsError: '' });
+        return;
+      }
+      set({
+        formatsError: res.status === 401
+          ? '서식 목록을 보려면 우측 상단에서 사용자를 지정하십시오.'
+          : res.status === 403
+            ? '이 계정에는 산출물 서식을 볼 권한이 없습니다.'
+            : `서식 목록을 불러오지 못했습니다 (${res.status}).`,
+      });
     } catch (error) {
       console.error("포맷 목록 로드 실패:", error);
+      set({ formatsError: '서버에 연결하지 못해 서식 목록을 불러오지 못했습니다.' });
     }
   },
 

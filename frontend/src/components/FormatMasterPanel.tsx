@@ -3,6 +3,7 @@ import { useFactoryStore, type OutputFormat } from "../store/useFactoryStore";
 
 export default function FormatMasterPanel() {
   const formats = useFactoryStore((s) => s.formats);
+  const formatsError = useFactoryStore((s) => s.formatsError);
   const closeFormatPanel = useFactoryStore((s) => s.closeFormatPanel);
   const saveFormat = useFactoryStore((s) => s.saveFormat);
   const deleteFormat = useFactoryStore((s) => s.deleteFormat);
@@ -81,7 +82,8 @@ export default function FormatMasterPanel() {
           {/* 좌측: 포맷 목록 */}
           <div className="w-1/3 border-r border-gray-700 bg-gray-800 flex flex-col">
             <div className="p-3 border-b border-gray-700 flex justify-between items-center">
-              <span className="text-sm font-semibold text-gray-300">저장된 양식 ({formats.length})</span>
+              {/* ⚠️ 못 읽었을 때 «(0)» 을 찍으면 머릿말 자체가 거짓말이 된다. 모르면 «?» 라고 쓴다. */}
+              <span className="text-sm font-semibold text-gray-300">저장된 양식 ({formatsError ? '?' : formats.length})</span>
               <button 
                 onClick={handleCreateNew}
                 className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded"
@@ -90,6 +92,15 @@ export default function FormatMasterPanel() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {/* ★ 못 읽은 것을 «0건» 으로 보여 주지 않는다 — 사용자가 할 일이 다르다. */}
+              {formatsError && (
+                <p role="status" className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800/60 rounded p-3 leading-relaxed">
+                  {formatsError}
+                </p>
+              )}
+              {!formatsError && formats.length === 0 && (
+                <p className="text-xs text-gray-500 p-3">저장된 양식이 없습니다 — «+ 새 양식» 으로 만드십시오.</p>
+              )}
               {formats.map((f) => (
                 <div 
                   key={f.id}
