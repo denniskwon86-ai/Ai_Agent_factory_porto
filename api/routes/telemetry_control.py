@@ -192,6 +192,28 @@ async def telemetry_summary(project: str = "", p: Principal = Depends(current_pr
     return {"status": "success", "data": data}
 
 
+@router.get("/agents")
+async def telemetry_by_agent(project: str = "", p: Principal = Depends(current_principal)):
+    """[D-017 §9 P4-1] **에이전트별** 호출·성공률·비용·폴백 집계.
+
+    ★★ 응답의 `coverage` 를 무시하지 말 것. 실측(2026-08-07) 기준 전체 호출 1,133건 중
+      실행 주체가 기록된 것은 113건(10%)이다 — 계측 축이 나중에 추가됐기 때문이다.
+      그 상태에서 에이전트별 비용만 보면 **총비용의 10%만 보이고**, 화면에는 그럴듯한 막대가
+      선다. 숫자가 있으면 사람은 그것을 전부라고 읽는다.
+
+    ⚠️ 귀속되지 않은 호출을 버리지 않고 «(미상)» 이라는 이름으로 **같은 표에** 세운다.
+      없는 것처럼 만들면 그 90%는 영원히 아무도 보지 않는다.
+    ⚠️ 단가를 모르는 호출은 비용에 더하지 않는다 — 0 으로 두면 「공짜였다」는 거짓이 된다."""
+    from core.agent_operations import aggregate_by_agent, failing_agents, top_cost_agents
+    scoped = apply_scope(_read_records(project), p)
+    data = aggregate_by_agent(scoped["records"])
+    data["top_cost"] = top_cost_agents(data)
+    data["low_success"] = failing_agents(data)
+    data["project"] = project or "(전역)"
+    data["permission"] = _scope_meta(scoped)
+    return {"status": "success", "data": data}
+
+
 @router.get("/raw")
 async def telemetry_raw(project: str = "", limit: int = 200,
                         p: Principal = Depends(current_principal)):
