@@ -66,8 +66,17 @@ async def active_tokens(mine_only: bool = True, p: Principal = Depends(current_p
 
 @router.delete("/token/{token}")
 async def revoke_token(token: str, p: Principal = Depends(current_principal)):
-    """토큰을 즉시 회수한다 — 만료를 기다리지 않고 끊을 수단이 없으면 사고에 대응할 수 없다."""
-    ok = await asyncio.to_thread(sandbox_tokens.revoke, token, (p.user_id or "").strip())
+    """토큰을 즉시 회수한다 — 만료를 기다리지 않고 끊을 수단이 없으면 사고에 대응할 수 없다.
+
+    ★ **소유자 검사를 두지 않는다(의도).** 이것은 bearer 토큰이다 — 문자열을 아는 사람은
+      이미 그 토큰을 **쓸 수** 있으므로, 회수만 막는 것은 보호가 아니라 사고 대응만 늦춘다.
+      유출된 토큰을 발견한 사람이 즉시 끊을 수 있어야 한다.
+
+    ⚠️ 다만 **식별은 요구한다**(2026-08-08 트랙 H). 종전에는 `p.user_id` 를 그대로 읽어
+      익명도 회수할 수 있었고, 그러면 감사에 `actor=unknown` 으로 남는다 —
+      「누가 이 토큰을 끊었나」에 답할 수 없는 회수는 사고 조사에서 쓸모가 없다.
+      `issue` 가 식별을 요구하는 것과 같은 이유다."""
+    ok = await asyncio.to_thread(sandbox_tokens.revoke, token, _actor(p))
     if not ok:
         # 이미 없는 토큰이다. 존재 여부를 알려 주는 것이 문제되지 않는다 — 토큰 문자열을 이미
         #   알고 있는 호출자에게만 답하는 것이고, 없다는 사실이 곧 "회수됨"이다.
