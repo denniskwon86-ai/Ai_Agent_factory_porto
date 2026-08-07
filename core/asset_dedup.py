@@ -1,17 +1,25 @@
-"""[D-017 §9 P4-4 · 절반] 자산 중복 탐지 — **LLM 0콜.**
+"""[D-017 §9 P4-4] 자산 정리 제안 — 중복 · 사용 기록 없음. **LLM 0콜.**
 
-## 왜 「미사용」이 여기 없는가
+## 「미사용」이 왜 뒤늦게 들어왔는가
 
-P4-4 는 「미사용·중복 정리 제안」이다. 그런데 **「미사용」을 판단할 근거가 없다**(2026-08-07 실측):
+착수 시점(2026-08-07 오전)에는 **「미사용」을 판단할 근거가 없었다**:
 
 · `agent_assets` 에 사용 이력 필드가 **없다**(`last_used_at`·`usage_count` 모두 없음)
 · 텔레메트리의 에이전트 축 관측률이 **8%**(89/1133)
 
 이 상태에서 「호출 0건 = 미사용」이라고 제안하면 **관측되지 않았을 뿐인 자산을 지우라고
 말하게 된다.** 그리고 제안을 받은 사람은 확인할 방법이 없다 — 화면이 「0건」이라고 하니까.
+그래서 그때는 항목을 만들지 않고 사유만 냈다(P4-4 = 0.5).
 
-★ 그래서 미사용 항목을 **만들지 않는다.** 대신 «사용 이력이 없어 제공하지 않습니다» 를
-  문장으로 낸다(`UNUSED_NOT_AVAILABLE`). ⚠️ **빈 목록으로 두면 「정리할 것이 없다」로 읽힌다.**
+★ 지금은 **관측을 만들었다**(`core/asset_usage.py`). 자산이 실제로 해석되는 두 지점에서
+  직접 기록하므로, 귀속률 8% 짜리 간접 추정에 기대지 않는다.
+
+⚠️⚠️ 그런데 관측은 **켠 시점부터** 쌓인다 — 다음 날이면 전부 「사용 기록 없음」이다.
+  그래서 `find_unused` 는 관측 기간이 짧으면 **목록을 만들지 않고** 언제부터 볼 수 있는지를
+  문장으로 낸다. **빈 목록으로 두면 「정리할 것이 없다」로 읽힌다.**
+
+⚠️ 이름을 「미사용」이 아니라 **「사용 기록 없음」** 으로 쓴다. 이 모듈이 아는 것은
+  「관측 이후 본 적이 없다」뿐이다.
 
 ## 중복은 지금 판단할 수 있다 — 내용 비교이므로 사용 이력이 필요 없다
 
@@ -119,6 +127,107 @@ def collect_items() -> Dict[str, Any]:
     return {"items": items[:MAX_ITEMS], "errors": errors}
 
 
+def find_unused(items: Optional[List[Dict[str, str]]] = None,
+                usage: Optional[Dict[str, Any]] = None,
+                days_observed: Optional[float] = None,
+                observed_since: str = "",
+                min_days: Optional[int] = None,
+                stale_days: Optional[int] = None) -> Dict[str, Any]:
+    """[P4-4 나머지 절반] 「관측 이후 사용 기록이 없는」 자산.
+
+    ★★ **«미사용» 이라고 부르지 않는다.** 이 함수가 아는 것은 「관측을 켠 뒤로 이 자산이
+      해석되는 것을 본 적이 없다」뿐이다. 관측 이전의 사용과, 기록 지점을 지나지 않는 경로의
+      사용은 여기에 없다. 그 차이를 이름에서 지우면 사람은 목록을 «지워도 되는 것» 으로 읽는다.
+
+    ⚠️⚠️ **관측 기간이 `MIN_OBSERVATION_DAYS` 에 못 미치면 목록을 만들지 않는다.**
+      관측을 켠 다음 날이면 자산 전부가 여기 오르고, 화면은 「31개 전부 정리 대상」이라고
+      말한다. 그것을 본 사람은 전부 지우고, 지운 뒤에야 그것이 「안 쓰인 것」이 아니라
+      「아직 안 본 것」이었음을 안다 — P4-2 의 부서 귀속률 0% 와 같은 함정이다.
+      그때는 목록 대신 **언제부터 볼 수 있는지**를 문장으로 낸다.
+
+    ⚠️ 빈 목록을 「정리할 것이 없다」로 읽히게 두지 않는다 — `note` 가 항상 이유를 말한다."""
+    from core.asset_usage import (
+        MIN_OBSERVATION_DAYS, STALE_AFTER_DAYS, asset_usage,
+    )
+    min_days = MIN_OBSERVATION_DAYS if min_days is None else min_days
+    stale_days = STALE_AFTER_DAYS if stale_days is None else stale_days
+
+    rows = collect_items()["items"] if items is None else items
+    if usage is None:
+        usage = asset_usage.usage_map()
+    if days_observed is None:
+        days_observed = asset_usage.days_observed()
+    observed_since = observed_since or asset_usage.observed_since()
+
+    window = {
+        "observed_since": observed_since,
+        "days_observed": round(float(days_observed), 2),
+        "min_observation_days": min_days,
+        "stale_after_days": stale_days,
+    }
+
+    if not observed_since:
+        return {"available": False, "items": [], "window": window,
+                "note": ("사용 관측이 아직 시작되지 않았습니다 — «사용 기록 없음» 판단을 "
+                         "제공하지 않습니다. **«정리할 것이 없다» 는 뜻이 아닙니다.**")}
+
+    if days_observed < min_days:
+        _left = max(0.0, min_days - days_observed)
+        return {
+            "available": False, "items": [], "window": window,
+            # ★ 「아직」임을 분명히 하고 **언제부터 볼 수 있는지**를 말한다. 그래야 사람이
+            #   이 화면을 다시 열 이유를 갖는다.
+            "note": (f"사용 관측을 시작한 지 {days_observed:.1f}일밖에 되지 않아 «사용 기록 없음» "
+                     f"목록을 만들지 않습니다(최소 {min_days}일). 지금 목록을 만들면 아직 한 번도 "
+                     f"돌지 않았을 뿐인 자산이 전부 정리 대상으로 보입니다 — 약 {_left:.1f}일 뒤에 "
+                     f"제공됩니다. **«정리할 것이 없다» 는 뜻이 아닙니다.**"),
+        }
+
+    stale_before = asset_usage.stale_before(stale_days)
+    out: List[Dict[str, Any]] = []
+    for it in rows:
+        u = usage.get(it["id"]) or {}
+        last = str(u.get("last_used_at") or "")
+        if last and last >= stale_before:
+            continue                       # 최근에 쓰였다
+        out.append({
+            "id": it["id"], "kind": it["kind"], "where": it["where"],
+            # ⚠️ 「본 적 없음」과 「오래 전에 봤음」은 다르다 — 후자는 근거가 있는 판단이고
+            #   전자는 관측 구멍일 수도 있다. 화면이 둘을 구분할 수 있어야 한다.
+            "last_used_at": last,
+            "use_count": int(u.get("use_count") or 0),
+            "basis": "never_observed" if not last else "stale",
+        })
+    out.sort(key=lambda x: (x["basis"] != "stale", x["last_used_at"] or "", x["id"]))
+
+    never = sum(1 for x in out if x["basis"] == "never_observed")
+    return {
+        "available": True,
+        "items": out,
+        "window": window,
+        "note": (
+            f"관측 시작({observed_since[:10]}) 이후 {days_observed:.0f}일간 "
+            f"{len(rows)}개 중 {len(out)}개가 최근 {stale_days}일 내 사용 기록이 없습니다"
+            f"(그중 {never}개는 관측 이후 한 번도 보이지 않았습니다). "
+            f"⚠️ 이것은 «미사용» 이 아니라 «관측되지 않음» 입니다 — 관측 이전의 사용과 "
+            f"기록 지점을 지나지 않는 경로의 사용은 여기에 잡히지 않습니다."),
+    }
+
+
+def _unused_or_reason(rows: List[Dict[str, str]]) -> Dict[str, Any]:
+    """`find_unused` 를 부르되, 실패를 **«없음» 이 아니라 «못 읽었다»** 로 낸다.
+
+    ⚠️ 관측 저장소가 죽었을 때 빈 목록을 내면 「정리할 것이 없다」로 읽힌다 —
+      `org_operations.Metric` 이 세운 규칙과 같다."""
+    try:
+        return find_unused(rows)
+    except Exception as e:
+        return {"available": False, "items": [], "window": {},
+                "note": (f"사용 관측을 읽지 못해 «사용 기록 없음» 판단을 제공하지 않습니다"
+                         f"({type(e).__name__}: {e}). "
+                         f"**«정리할 것이 없다» 는 뜻이 아닙니다.**")}
+
+
 def find_duplicates(items: Optional[List[Dict[str, str]]] = None,
                     threshold: float = SIMILAR_THRESHOLD) -> Dict[str, Any]:
     """동일·유사 묶음. **둘을 분리해서** 돌려준다(사용자 결정 2026-08-07 안 B)."""
@@ -157,7 +266,10 @@ def find_duplicates(items: Optional[List[Dict[str, str]]] = None,
         "identical": identical,
         # ★ 확신이 낮은 것 — «검토 대상». 같은 목록에 섞지 않는다.
         "similar": similar,
-        "unused": {"available": False, "note": UNUSED_NOT_AVAILABLE},
+        # [P4-4 나머지 절반] 관측이 섰으므로 이제 판단한다 — 다만 관측 기간이 짧으면
+        #   `find_unused` 가 스스로 `available=False` 와 사유를 낸다.
+        #   ⚠️ 실패해도 중복 목록까지 죽이지 않는다(중복은 사용 이력과 무관하게 유효하다).
+        "unused": _unused_or_reason(rows),
         "coverage": {
             "compared": len(rows),
             "errors": src["errors"],

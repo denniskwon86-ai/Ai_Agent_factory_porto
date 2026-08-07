@@ -232,8 +232,26 @@ def agent_meta(agent_id: str, template_id: str = DEFAULT_TEMPLATE_ID) -> dict:
 
 def agent_skill(agent_id: str, default: str = "", template_id: str = DEFAULT_TEMPLATE_ID) -> str:
     """노드의 스킬 파일명을 레지스트리에서 조회(제어판 override 반영). 미설정 시 default(현행 동작 보존).
-    template_id 가 주어지면 그 템플릿의 스킬을 해석(T2-b) - 노드가 state.template_id 를 넘긴다."""
-    return agent_meta(agent_id, template_id).get("skill") or default
+    template_id 가 주어지면 그 템플릿의 스킬을 해석(T2-b) - 노드가 state.template_id 를 넘긴다.
+
+    [P4-4] ★ **여기가 파일 스킬의 사용 관측 지점이다** — 스킬 파일이 실제로 «선택되는» 유일한
+      곳이다. 파일을 읽는 곳에서 세면 캐시·재시도로 부풀고, 노드 진입에서 세면 override 로
+      다른 스킬이 골라진 경우를 놓친다.
+    ⚠️⚠️ 키는 `asset_dedup.collect_items()` 와 **같은 규약**(스킬 **파일명**)이어야 두 목록이
+      붙는다. 이 함수가 돌려주는 값은 확장자가 없는 이름(`rfp_skill`)이고 목록은 파일명
+      (`rfp_skill.md`)을 쓴다 — 그대로 기록했더니 교집합이 **0건**이었고, 매 실행마다 쓰이는
+      스킬 31개가 전부 «사용 기록 없음» 으로 보고될 참이었다(2026-08-07 실측).
+      변환은 `asset_usage.skill_key()` 한 곳에서만 한다."""
+    skill = agent_meta(agent_id, template_id).get("skill") or default
+    if skill:
+        # ⚠️ 지연 import · 예외 삼킴 — 계측이 실행 경로를 막으면 안 된다(`agent_asset_adapter`
+        #   의 `_usage_record` 와 같은 이유). 이 함수는 노드마다 불리므로 더욱 그렇다.
+        try:
+            from core.asset_usage import record as _rec, skill_key as _key
+            _rec(_key(skill), "file_skill")
+        except Exception:
+            pass
+    return skill
 
 
 # ──────────────────────────────────────────────────────────────────────────────

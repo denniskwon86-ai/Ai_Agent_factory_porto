@@ -63,6 +63,22 @@ from core.agent_assets import (
     AssetError, AssetNotFound, agent_assets,
 )
 
+
+def _usage_record(asset_key: str, kind: str) -> None:
+    """[P4-4] 자산이 **해석된** 순간을 관측에 남긴다.
+
+    ⚠️ 지연 import 다 — `asset_usage` 를 모듈 상단에서 끌어오면 이 어댑터가 계측 모듈에
+      의존하게 되고, 계측 쪽 import 오류가 **실행 경로 전체를 막는다.** 계측은 그런 힘을
+      가지면 안 된다.
+    ⚠️ 예외를 삼킨다. 「사용을 기록하지 못했다」의 대가는 그 자산이 «사용 기록 없음» 으로
+      보이는 것뿐이고, 소비자는 관측 기간이 짧으면 애초에 목록을 만들지 않는다."""
+    try:
+        from core.asset_usage import record as _rec
+        _rec(asset_key, kind)
+    except Exception:
+        pass
+
+
 #: 파일 자산 id 의 접두사. **접두사로 출처가 보인다** — id 만 보고 «이건 파일 자산이다» 를 안다.
 #  DB 자산은 `as_…`(`agent_assets.create`)이므로 절대 겹치지 않는다.
 FILE_PREFIX = "file:"
@@ -349,7 +365,11 @@ def resolve_workflow(template_id: str, require_runnable: bool = True) -> Dict[st
       (부팅 안전), DB 자산에는 그 관대함을 주지 않는다 — 조직 워크플로우를 실행했는데 조용히
       기본 파이프라인이 도는 것은 «다른 것이 실행됐다» 이고, 산출물을 보고도 알 수 없다."""
     if not is_db_asset_id(template_id):
-        return _reg.load_template(template_id or _reg.DEFAULT_TEMPLATE_ID)
+        _tid = template_id or _reg.DEFAULT_TEMPLATE_ID
+        # [P4-4] 파일 템플릿도 「쓰이는 것」이다 — 여기서 안 세면 파일 템플릿이 전부
+        #   「사용 기록 없음」으로 보고된다(관측 구멍이 곧 오보가 된다).
+        _usage_record(_tid, "file_template")
+        return _reg.load_template(_tid)
 
     a = agent_assets.get(template_id)                    # 없으면 AssetNotFound
     if a.get("kind") != KIND_WORKFLOW:
@@ -369,6 +389,10 @@ def resolve_workflow(template_id: str, require_runnable: bool = True) -> Dict[st
     # 그래프 빌더에 들어가고, 빠진 필드는 실행 중에야 드러난다.
     reg = _reg._normalize(dict(body))
     reg["id"] = template_id                              # 로더가 하는 일과 같다(SSOT 스탬프)
+    # [P4-4] ★ **여기까지 온 것만 «쓰였다» 로 센다.** 위 가드(미승인·정의 없음)에서 막힌 것은
+    #   실행되지 않았으므로 사용이 아니다 — 거기서 세면 「승인 안 된 자산이 잘 쓰이고 있다」는
+    #   모순된 화면이 나온다.
+    _usage_record(template_id, f"asset_{KIND_WORKFLOW}")
     return reg
 
 

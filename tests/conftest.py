@@ -194,6 +194,21 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
     except Exception:
         pass
     try:
+        # ★★ [2026-08-07 P4-4] **자산 사용 관측도 격리한다.**
+        #   `agent_registry.agent_skill()` 과 `resolve_workflow()` 가 해석 시점에 기록하는데,
+        #   이 둘은 스위트 전반에서 불린다. 격리하지 않으면 **테스트가 운영 관측 기록을 만든다**
+        #   — 그러면 「이 자산이 쓰이는가」의 답이 테스트 때문에 바뀌고, P4-4 의 정리 제안이
+        #   테스트 흔적을 근거로 나온다.
+        #   ⚠️ `db_path` 만 바꾸면 안 된다: `_ready` 가 이전 경로로 캐시돼 있으면 스키마 생성을
+        #     건너뛰고, 메모리 누적(`_pending`)은 이전 테스트 것이 남는다.
+        from core import asset_usage as _au
+        monkeypatch.setattr(_au.asset_usage, "db_path",
+                            str(tmp_path / "asset_usage.db"), raising=False)
+        monkeypatch.setattr(_au.asset_usage, "_ready", "", raising=False)
+        monkeypatch.setattr(_au.asset_usage, "_pending", {}, raising=False)
+    except Exception as e:
+        print(f"⚠️ [conftest] 자산 사용 관측 격리 실패(운영 기록 오염 위험): {e}")
+    try:
         # ★★ [2026-07-31 실측] **ECM 조직도(enterprise_context.db)도 격리한다.**
         #   이것이 없으면 테스트가 **운영 조직도에 의존**한다. 실측: 참고문서 가시성 테스트가
         #   워크트리(조직도 0건)에서는 통과하고 원래 폴더(조직도 9건)에서는 실패했다 —
