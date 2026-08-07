@@ -295,3 +295,29 @@ def test_registry_matches_track_g_progress():
     assert claimed <= len(SEALED_ROUTERS), (
         f"PROGRESS.md 는 트랙 G 를 {claimed}/16 이라 하는데 실제로 봉합·검증된 라우터는 "
         f"{len(SEALED_ROUTERS)}개다. 표가 코드보다 앞서 있다.")
+
+
+def test_probe_does_not_leak_into_real_projects_dir():
+    """★★★ [2026-08-07 실측] **탐침이 실제 `projects/` 에 디렉터리를 남겼다.**
+
+    `projects/__track_g_probe__` 가 남아 있었고, 그 디렉터리 때문에
+    `test_agent_asset_adapter::test_skill_names_are_korean_not_slugs` 가 **전체 실행에서만**
+    실패했다(혼자 돌면 통과). 지우니 exit 0 이 됐다.
+
+    ⚠️ `conftest.py` 는 DB 를 `tmp_path` 로 격리하지만 **`projects/` 는 격리하지 않는다.**
+      라우트를 통해 프로젝트를 만드는 탐침은 그 사실을 알고 써야 한다.
+
+    ★ 「혼자 돌면 통과, 전체로 돌면 실패」를 보면 순서를 의심하기 전에 **«남긴 것»** 을 먼저
+      찾으라 — 이 저장소에서 두 번 다 그것이었다.
+
+    이 검사는 탐침 이름의 흔적이 남지 않았는지 본다. 남았다면 **다른 테스트를 깨뜨리기 전에**
+    여기서 걸린다."""
+    import os
+    leaked = []
+    for root in ("projects", "library"):
+        if not os.path.isdir(root):
+            continue
+        leaked += [os.path.join(root, n) for n in os.listdir(root) if DUMMY in n]
+    assert not leaked, (
+        f"탐침이 실제 작업 디렉터리에 흔적을 남겼다: {leaked} — 지우고, 그 탐침이 왜 "
+        f"인가를 통과했는지 확인할 것(막혔다면 아무것도 만들어지지 않는다).")
