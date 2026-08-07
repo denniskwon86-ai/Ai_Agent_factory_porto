@@ -1,0 +1,14 @@
+{
+  "backup_date": "2026-07-29",
+  "note": "메인스트림(비철금속/소재/자동차부품/뿌리제조) 중심 재구성에 따라 백업 격리 처리된 전자조립 및 일반 정밀기계가공 데이터",
+  "backup_data": {
+    "electronics_smt": {
+      "standard_id": "IPC_A_610_ELECTRONICS",
+      "template_id": "TMPL_SMT_ELECTRONICS_01"
+    },
+    "general_machining": {
+      "standard_id": "KS_B_0001_PRECISION",
+      "ksic_code": "C29110"
+    }
+  }
+}

@@ -8,6 +8,12 @@
 - 팀 보드 대응 항목: `.agents/TEAM_BOARD.md` `[UIUX-IMPL-35]`
 - 선행 인수인계: `docs/chronicle/handoffs/handoff_2026-08-04_uiux_migration.md`
 
+> **후속 정정 · 2026-08-04 11:56 KST:** 제품 기본 외형은 다크가 아니라
+> **라이트 업무 표면 + LS Navy 구조 헤더/레일**이다. `UIUX-CORRECTION-36`에서
+> `afs-product-shell`을 신설해 런처와 제품 진입점에 복구했다. 이 문서를 이어받을 때
+> `index.css`의 레거시 다크 `@theme`를 제품 기본값으로 해석하지 말고,
+> `frontend/src/design/product-shell.css`와 `master-concept/ADOPTION_DECISION.md`의 시각 기준선을 따른다.
+
 ---
 
 ## 1. 이번 인수인계의 결론
