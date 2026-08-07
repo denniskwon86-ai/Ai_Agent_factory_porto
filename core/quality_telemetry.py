@@ -125,6 +125,8 @@ def _identity(state_obj: Any) -> Dict[str, str]:
         "project": str(getattr(state_obj, "project_name", "") or ""),
         "project_id": pid,
         "owner_dept_id": str(getattr(state_obj, "owner_dept_id", "") or ""),
+        # [D-019] 조직 노드 병기 — `llm_call_log` 와 **같은 필드명**이어야 두 로그가 같은 축으로 붙는다.
+        "owner_scope_node_id": str(getattr(state_obj, "owner_scope_node_id", "") or ""),
         "task_id": str(getattr(state_obj, "current_sprint_task_id", "") or ""),
     }
 
@@ -144,6 +146,9 @@ class StateRef:
         self.project_name = _g("project_name")
         self.workspace_root = workspace_root or _g("workspace_root")
         self.owner_dept_id = _g("owner_dept_id")
+        # [D-019] 여기에 안 실으면 체크포인트 경로의 품질 로그만 조직 노드가 조용히 빈다 —
+        #   이 클래스가 존재하는 이유(한쪽 형태에서만 기록이 빠지는 것)를 그대로 되풀이하게 된다.
+        self.owner_scope_node_id = _g("owner_scope_node_id")
         self.current_sprint_task_id = task_id or _g("current_sprint_task_id")
         self.current_stage = _g("current_stage")
         self.supervisor_hops = 0
@@ -258,6 +263,9 @@ def record_classification(outcome_id: str, root_cause: str, actor: str, note: st
         "project": target.get("project", ""),
         "project_id": target.get("project_id", ""),
         "owner_dept_id": target.get("owner_dept_id", ""),
+        # [D-019] 원 gate 이벤트가 들고 있던 스냅샷을 **그대로 복사**한다. 여기서 다시 풀면
+        #   분류 시점의 조직으로 바뀌어, 같은 사건이 두 노드에 걸쳐 집계된다.
+        "owner_scope_node_id": target.get("owner_scope_node_id", ""),
         "root_cause": root_cause,
         "root_cause_rule": "human",
         "actor": actor,

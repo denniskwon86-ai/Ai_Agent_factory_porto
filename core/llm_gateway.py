@@ -331,6 +331,11 @@ def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, atte
             "project": getattr(state_obj, "project_name", "") or "",
             "project_id": _pid,
             "owner_dept_id": str(getattr(state_obj, "owner_dept_id", "") or ""),
+            # [D-019] 해석·롤업용 조직 노드를 **병기**한다. 위 부서 id 를 대체하는 값이 아니다 —
+            #   실측상 부서 9개가 한 노드에 매핑돼 있어 node 만 남기면 부서별 비용이 사라지고,
+            #   dept 만 남기면 조직개편 뒤 과거 비용을 해석할 수 없다. 기록 시점 스냅샷이므로
+            #   읽을 때 다시 풀지 않는다(다시 풀면 과거 비용이 소급해 움직인다).
+            "owner_scope_node_id": str(getattr(state_obj, "owner_scope_node_id", "") or ""),
             "provider": provider_of(_used_model),
             "cost_estimate_usd": _cost,
             "cost_basis": _cost_basis,

@@ -102,6 +102,15 @@ class ProjectState(BaseModel):
     owner_dept_id: str = Field(default="", description="소유 부서(권한 스코프의 기준)")
     owner_user_id: str = Field(default="", description="개인 소유자(personal 가시성일 때 의미)")
     visibility: str = Field(default="dept", description="dept | company | personal")
+    # [D-019] 위 `owner_dept_id` 가 **가리키던 조직 노드**를 기록 시점에 찍어 둔다.
+    #   ⚠️ 이것은 `owner_dept_id` 의 대체가 아니라 병기다. 실측상 활성 부서 12개 중 9개가
+    #     `node_41402723bc90`(LS_MNM) 하나에 매핑돼 있어 node 만 실으면 부서별 비용이 한 줄로
+    #     뭉치고, 반대로 dept 만 실으면 조직개편 뒤 과거 비용을 해석할 수 없다.
+    #   ⚠️ **기록 시점 스냅샷이다.** `org_directory.update_department` 가 `scope_node_id` 를
+    #     새 버전으로 개정하므로, 나중에 dept→node 를 다시 풀면 과거 비용이 소급해 움직인다.
+    #   ⚠️ `owner_dept_id` 에 node_id 를 넣지 말 것 — `knowledge_base` 의 부서 필터가
+    #     `get_department(node_id)` → None → 매칭 0건, 즉 과거사례 주입이 **조용히** 끊긴다.
+    owner_scope_node_id: str = Field(default="", description="[D-019] 기록 시점의 ECM 조직 노드(해석·롤업용)")
     # [M0-d] 이 프로젝트가 어느 Solution Blueprint 에서 나왔는가(§18-7 추적성).
     #   ⚠️ Blueprint 를 프로젝트 생성으로 연결할 때 링크가 없으면, 나중에 "이 앱이 왜 이런
     #     요구사항을 갖게 됐나"를 되짚을 수 없다(§1.3 기업 의도와 결정의 보존). 상담 없이 만든

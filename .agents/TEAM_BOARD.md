@@ -37,6 +37,24 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [ORG-ATTRIB-61] P4-2 부서 귀속률 0% — 값이 없던 게 아니라 **배선이 없었다**
+- 작성자 / 기록 시각: Claude Code / 2026-08-07 12:2x KST
+- 왜 지금 기록하는가: 원인 규명(조사 전용 세션)에서 미뤄 둔 **정본 결정(D-019)** 을 확정하고 배선까지 넣었다. 이 항목이 없으면 다음 사람이 「미상이 아직 많다」를 결함으로 보고 **추정 백필**을 하게 된다 — 그것이 이 작업에서 가장 하면 안 되는 일이다.
+- 근거: 결정 `.agents/DECISIONS.md` [D-019] · 원인 규명 `docs/chronicle/handoffs/handoff_2026-08-07_p42_dept_attribution.md` · 화면 이관 `docs/chronicle/handoffs/handoff_2026-08-07_codex_org_console_coverage.md` · 테스트 `tests/test_dept_attribution.py`(20건) · 전체 pytest 2,424 passed·1 skipped
+- 상태: **완료(백엔드)** · 화면은 **Codex 대기**
+- 결정 및 근거:
+  - ★★★ **`ProjectState.owner_dept_id` 는 읽는 곳이 3군데인데 주경로에서 채우는 곳이 0군데였다** — 비용 텔레메트리(`llm_gateway:333`) · 품질 텔레메트리(`quality_telemetry:127`) · **RAG 과거사례 부서 필터**(`knowledge_base:764`). `start_sprint` 가 권위 원본에서 4필드(`template_id`·`knowledge_pack_ids`·`master_domains`·`mcp_live_grounding`)를 주입하면서 **소유권만 빠져 있었다.** 같은 패턴으로 붙였다(`factory_control.py`).
+  - ★★ **한 축만 고르면 두 경우 다 틀린다(D-019).** 활성 부서 12개 중 **9개가 `node_41402723bc90`(LS_MnM) 하나**에 매핑돼 있어 node 만 실으면 「(미상) 한 줄」이 「LS MnM 한 줄」로 바뀔 뿐이고, dept 만 실으면 조직개편 뒤 과거 비용을 해석할 수 없다. → `owner_dept_id`(권한 주체) **유지** + `owner_scope_node_id`(기록 시점 스냅샷) **병기**. D-018 의 예외가 아니라 적용이다.
+  - ⚠️⚠️ **`owner_dept_id` 의 의미를 `node_id` 로 바꾸는 것은 텔레메트리 변경이 아니다.** `knowledge_base` 가 이 필드를 `get_department()` 의 키로 써서 `path` 조상 체인을 만든다 — node 를 넣으면 `None` → 매칭 0건, 즉 **과거사례 주입이 오류 없이 조용히 끊긴다.** 회귀 방지 테스트를 걸어 뒀다.
+  - **소급 귀속은 하지 않는다.** 1,133건 중 972건은 `project_id` 조차 없고, 161건은 대응 프로젝트의 `meta.owner_dept_id` 가 전부 비어 있어 **조인으로 되찾을 레코드가 0건**이다. 미태깅 프로젝트 53개에 부서를 **추정해 넣지 않는다** — 그것이 곧 「틀린 부서로 귀속된 비용 통계」이고, 틀린 숫자는 «미상» 보다 나쁘다. 대신 `coverage` 가 「소급 불가(972)」와 「기록 누락(161)」을 **나눠서** 낸다.
+- 영향·주의사항:
+  - `ProjectState` 필드 1개 추가(기본값 `""`) · `_ACCUMULATED_FIELDS` 편입 · 두 텔레메트리 기록부에 필드 1개 · `usage_by_org` 응답에 `scope_node_ids`·`without_org_pre_field`·`without_org_missing` 추가. **전부 추가 전용이며 기존 레코드·RAG·권한 경로는 무변경이다.**
+  - ⚠️ **화면이 아직 없다.** `frontend/src` 에서 `telemetry/orgs` 를 부르는 코드가 **0건**이라 `coverage.note` 는 API 응답에만 있다. 「소급 불가라는 사실이 화면에 남아야 한다」는 요구는 **미충족**이다.
+  - ⚠️ **`org_directory` 싱글턴의 `db_path` 는 conftest 가 격리하지 않는다**(절대경로라 `chdir` 로도 안 된다). 조직도에 의존하는 테스트는 명시적으로 돌려야 하며, 안 그러면 폴더에 따라 결과가 달라진다 — `tests/test_dept_attribution.py` 의 `org` 픽스처 참고.
+  - ⚠️ 미태깅 프로젝트는 계속 «미상» 으로 남는다. **줄어드는 것은 앞으로 쌓이는 분뿐이다** — 이것을 결함으로 오인해 백필하지 말 것.
+- 다음 행동 / 담당 / 착수 조건: **Codex** 가 거버넌스 콘솔에 조직 운영 현황을 붙인다(수용 기준 6개·금지 3개는 이관 문서에). 착수 조건 없음 — 서버는 이미 응답한다. **Claude Code** 는 트랙 B P4-3·P4-4 로 진행한다.
+- 교대 체크포인트: 마지막 확인 상태 = 전체 pytest **2,424 passed · 1 skipped**(183s). 변경 = `.agents/DECISIONS.md`(D-019) · `state_models.py` · `api/routes/factory_control.py` · `core/llm_gateway.py` · `core/quality_telemetry.py` · `core/org_operations.py` · 신규 테스트 1파일(20건) · 이관 문서 1건. 미변경 = RAG·권한 필터 계약 · 기존 로그 레코드 · `project_meta.json` 55개 · 프론트엔드 전체. 검증 증거 = 전체 스위트 · 스위트 전후 `projects/` 57개 동일(격리 확인) · `departments` 활성 12개 무변경. 커밋/푸시 = **미수행**(사용자 승인 대기 — 작업 트리에 이 세션과 무관한 미추적 문서 이동분이 섞여 있어 일괄 스테이징하지 않았다). 재개 지점 = 트랙 B P4-3. 금지 범위 = `owner_dept_id` 에 node_id 넣기 · 53개 추정 백필 · `coverage.note` 제거 · 귀속률을 0 아닌 값으로 보이게 만들기 · 운영 DB 쓰기 탐침.
+
 ### [FACTORY-STUDIO-60] SW Factory Studio 3~6단계 — 화면을 하나 더 만들 때마다 기존 화면의 거짓이 드러났다
 - 작성자 / 기록 시각: Claude Code / 2026-08-06 KST
 - 왜 지금 기록하는가: 트랙 E 를 3→6/7 로 진행하고 §2.1 Project Header 를 추가했다. 그 과정에서 **판정이 두 곳에 있어 생긴 오표시 4건**을 잡았고, 7단계(기존 3패널 제거)는 **전제 미충족**임을 표로 확정했다 — 다음 사람이 그것을 모르고 3패널을 지우면 실행 제어가 사라진다.

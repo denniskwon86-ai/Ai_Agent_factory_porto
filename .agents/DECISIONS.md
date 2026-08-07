@@ -8,6 +8,50 @@
 
 ---
 
+## 2026-08-07
+
+### [D-019] 비용·품질 로그의 조직 축은 **두 개를 함께** 싣는다 — `owner_dept_id`(권한 주체) + `owner_scope_node_id`(해석 기준)
+- **결정**: 텔레메트리 레코드(`llm_call_log.jsonl` · 품질 로그)에 조직을 실을 때
+  ① `owner_dept_id` 는 **지금 계약 그대로 `departments.dept_id`** 를 싣는다(의미를 바꾸지 않는다).
+  ② 신규 필드 `owner_scope_node_id` 에 **기록 시점의** `departments.scope_node_id` 를 병기한다.
+  화면은 `dept_id` 로 세고 `node_id` 로 롤업한다. 미해석은 빈 값으로 두고 «(미상)» 으로 드러낸다 —
+  상위 노드로 추측해 채우지 않는다.
+- **이유**: 한 축만 고르면 **두 경우 다 틀린다.**
+  - `node_id` 만 싣는 경우 — 실측상 활성 부서 12개 중 **9개(`hq`·`accounting`·`finance`·`logistics`·
+    `marketing`·`procurement`·`production`·`quality`·`sales`)가 `node_41402723bc90`(LS_MNM) 하나**에
+    매핑돼 있다. 「(미상) 한 줄」이 「LS MnM 한 줄」로 바뀔 뿐 **부서별 비용 통계는 여전히 없다.**
+    D-018 이 근거로 든 "여러 부서가 하나의 LS_MNM 범위에 매핑된다"가, 권한 판정에서는 안전한
+    성질이지만 **비용 귀속에서는 그대로 정보 손실**이 된다.
+  - `dept_id` 만 싣는 경우 — D-018 의 경고 그대로. 조직개편·개명 뒤 과거 비용을 해석할 수 없다.
+  - ⚠️ **`owner_dept_id` 의 의미를 `node_id` 로 바꾸는 것은 텔레메트리 변경이 아니다.**
+    `core/knowledge_base.py:764` 가 이 필드를 `org_directory.get_department()` 의 키로 써서 `path`
+    조상 체인을 만들고 Chroma `$in` 필터에 넣는다. `node_id` 를 넣으면 `get_department` → `None`
+    → 체인 `[node_id]` → 매칭 0건, 즉 **과거사례 주입이 오류 없이 조용히 0건**이 된다.
+    `_ownership_visible` 의 `p.scope.readable_dept_ids` 도 같은 키 계약이다. 그래서 이 필드는
+    RAG·권한과 **같은 키**로 남겨야 두 로그가 조인된다.
+  - 그러므로 이것은 D-018 의 **예외가 아니라 적용**이다 — 해석 기준 축(`node_id`)을 새로 들이되,
+    권한 주체 축(`dept_id`)을 그 자리에서 밀어내지 않는다.
+- **⚠️ `owner_scope_node_id` 는 기록 시점 스냅샷이다**: `org_directory.update_department` 가
+  `scope_node_id` 를 **새 버전으로 개정**한다(`core/org_directory.py:399`·`465`). 따라서 나중에
+  `dept_id → node_id` 를 다시 조회해 재계산하면 **과거 비용이 소급해서 움직인다.** 기록할 때 찍고,
+  읽을 때 다시 풀지 않는다.
+- **영향**: `ProjectState` 에 필드 1개 추가(기본값 `""` — `extra='forbid'` 이므로 선언 필수) ·
+  `_ACCUMULATED_FIELDS` 편입 · `start_sprint` 가 권위 원본(`project_meta.json`)에서 소유권을
+  주입(`template_id` 와 같은 패턴) · 두 텔레메트리 기록부에 필드 1개. 기존 레코드는 건드리지 않는다.
+- **소급 귀속은 하지 않는다**: 기존 1,133건 중 972건(2026-07-25~07-27)은 `project_id` 조차 없고,
+  161건은 `project_id` 가 있으나 그 프로젝트들의 `meta.owner_dept_id` 가 전부 비어 있어
+  **조인으로 되찾을 수 있는 레코드가 0건**이다. 미태깅 프로젝트 53개에 부서를 **추정해서**
+  채우지 않는다 — 그것이 곧 「틀린 부서로 귀속된 비용 통계」이고, 틀린 숫자는 «미상» 보다 나쁘다.
+  `coverage.note` 는 유지하되 두 종류(필드 도입 전 / 기록 누락)를 구분해 쓴다.
+- **되돌림 비용**: 낮음 — 추가 전용 필드이며, 빈 값이면 종전과 동일하게 «(미상)» 으로 집계된다.
+  `owner_dept_id` 의 의미를 바꾸지 않으므로 RAG·권한 경로는 무변경이다.
+- **근거**: `data/master/master.db` `departments` 실측(활성 12개 · `scope_node_id` 채워진 11개 ·
+  9개가 단일 노드) · `core/knowledge_base.py:764` 부서 필터 · `state_models.py:102` ·
+  `api/routes/factory_control.py:135`·`977` · `core/llm_gateway.py:333` ·
+  `core/quality_telemetry.py:127` · 인계 `docs/chronicle/handoffs/handoff_2026-08-07_p42_dept_attribution.md` §3 · [D-018].
+
+---
+
 ## 2026-08-05
 
 ### [D-018] ECM 조직 범위의 정본은 불변 `organization_nodes.node_id`다

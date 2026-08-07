@@ -132,7 +132,9 @@ _ACCUMULATED_FIELDS = [
     "architecture_decisions", "technical_debt", "initial_idea", "project_name",
     "domain_agents", "is_mega_project", "parent_project_id", "sub_projects_map", "shared_ledger",
     # [Phase 3] 소유권은 스프린트 사이에 유실되면 안 된다 — 누적 보존 대상에 편입.
-    "owner_dept_id", "owner_user_id", "visibility",
+    # ⚠️ 여기 있는 것은 **유실 방지**이지 최초 주입이 아니다 — 이미 채워진 값을 전제한다.
+    #   최초 주입은 `start_sprint` 가 권위 원본(`project_meta.json`)에서 한다(D-019).
+    "owner_dept_id", "owner_user_id", "visibility", "owner_scope_node_id",
     # [M0-d] Blueprint 링크도 유실되면 추적성이 끊긴다(스프린트마다 다시 채워줄 곳이 없다).
     "blueprint_id",
     # [ECM E1/E2 · R-001] 실행 문맥이 유실되면 기준정보 범위 필터가 풀려 다른 법인 기준정보가
@@ -232,6 +234,27 @@ def _read_project_ownership(workspace_root: str) -> dict:
         "entity_mode": str(d.get("entity_mode", "") or "REAL"),
         "blueprint_id": str(d.get("blueprint_id", "") or ""),
     }
+
+
+def _resolve_scope_node(dept_id: str) -> str:
+    """[D-019] 부서 → **지금 시점의** ECM 조직 노드. 못 풀면 빈 값(«미상»)이다.
+
+    ⚠️ 못 푼 것을 상위 노드로 **추측해 채우지 않는다** — 추측이 한 번 맞으면 그 뒤로 아무도
+      검증하지 않고, 틀리면 다른 사업부의 비용으로 집계된다(`org_directory._scope_nodes_of`
+      의 판단과 같다). 빈 값은 화면에서 «(미상)» 으로 드러난다.
+    ⚠️ 이 호출은 **기록 시점에 한 번**만 한다. 나중에 다시 풀면 `update_department` 가 개정한
+      새 `scope_node_id` 가 나와 과거 비용이 소급해 움직인다(D-019 스냅샷 규칙).
+    ⚠️ 조회 실패가 가동을 막지 않는다 — 조직 축은 계측이고, 계측 장애로 스프린트를 멈추지 않는다."""
+    dept_id = str(dept_id or "").strip()
+    if not dept_id:
+        return ""
+    try:
+        from core.org_directory import org_directory
+        d = org_directory.get_department(dept_id)
+        return str((d or {}).get("scope_node_id", "") or "").strip()
+    except Exception as e:
+        print(f"⚠️ [factory] 부서→조직노드 해석 실패(미상으로 기록): {dept_id}: {e}")
+        return ""
 
 
 def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None, master_domains: list = None, mcp_live_grounding: bool = None,
@@ -981,6 +1004,23 @@ async def start_sprint(project_id: str, req: SprintStartRequest,
     req.project_state_payload["master_domains"] = _read_project_master_domains(workspace_root)
     # [M3] 외부 실측값 병기 토글도 권위 원본에서 주입(기본 off)
     req.project_state_payload["mcp_live_grounding"] = _read_project_mcp_live(workspace_root)
+
+    # ── [D-019] 소유권도 같은 권위 원본에서 주입한다 ─────────────────────────────
+    #
+    # ★ 여기에 소유권만 빠져 있었다. `ProjectState.owner_dept_id` 는 **읽는 곳이 3군데인데
+    #   주경로에서 채우는 곳이 0군데**였고(비용 텔레메트리·품질 텔레메트리·RAG 부서 필터),
+    #   그래서 `llm_call_log.jsonl` 1,133건의 부서 귀속률이 **0%** 였다. 위 4줄과 같은 패턴으로
+    #   한 줄씩 붙인다 — 프론트 state 가 stale 해도 진실원본이 이긴다.
+    # ⚠️ 비어 있으면 **비운 채로** 둔다. 만든 사람을 모르는 프로젝트에 부서를 추정해 넣으면
+    #   그것이 곧 「틀린 부서로 귀속된 비용 통계」이고, 틀린 숫자는 «미상» 보다 나쁘다.
+    _own = _read_project_ownership(workspace_root)
+    req.project_state_payload["owner_dept_id"] = _own["owner_dept_id"]
+    req.project_state_payload["owner_user_id"] = _own["owner_user_id"]
+    req.project_state_payload["visibility"] = _own["visibility"]
+    # ⚠️ node 는 **지금 찍어서 싣는다**(D-019 스냅샷). 나중에 dept 로 다시 풀면 조직개편이
+    #   과거 비용을 소급해 옮긴다. dept 를 node 로 **바꾸는** 것이 아니라 병기임에 유의 —
+    #   바꾸면 `knowledge_base` 의 과거사례 주입이 오류 없이 0건이 된다.
+    req.project_state_payload["owner_scope_node_id"] = _resolve_scope_node(_own["owner_dept_id"])
 
     # ── [D-017 §9 P3-2] 이 실행이 **무엇으로 돌았는지** 남긴다 ─────────────────
     #
