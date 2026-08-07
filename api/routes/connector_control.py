@@ -225,17 +225,39 @@ async def execute_query(connector_id: str, req: ExecuteRequest,
             status_code=401,
             detail="요청자 식별 정보가 없습니다 — X-User-Id 를 보내십시오. "
                    "§7.2 는 모든 조회에 요청자·목적을 감사로 남기도록 요구합니다.")
+    # ── [D-017 §9 P3-3] 도구 접근 교집합 ───────────────────────────────────
+    #
+    # ★★ 종전에는 식별과 `admin.data_access` 만 봤다. 그래서 **A 부서 데이터 관리자가
+    #   B 부서 커넥터로 조회를 실행할 수 있었다.** 목록에서는 B 부서 것이 보이지 않으니
+    #   «통제되고 있다» 로 보였다 — 목록만 막고 실행을 열어 두면 id 를 아는 사람 앞에서
+    #   통제는 없다(이 저장소가 여러 번 확인한 형태다).
+    #
+    # ⚠️ 범위는 **요청자에게서** 온다. 요청 본문에서 받으면 호출자가 아무 범위나 적어
+    #   통과시킬 수 있다 — 통제를 호출자 선택으로 두면 통제가 아니다.
+    #
+    # ⚠️⚠️ [2026-08-07 실측] `_scope(p, "")` 을 쓰면 안 된다. 그 함수는 **빈 요청을 «전사
+    #   요청» 으로 보고 빈 문자열을 돌려준다** — 무제한 계정이든 부서 계정이든 똑같이 `''`
+    #   였고, 그래서 게이트가 한 번도 물지 않았다. 살아 있는 서버에서 다른 조직 범위로
+    #   호출해도 같은 응답이 나와 드러났다.
+    #   → 요청자에게 **보이는 범위 집합**(`viewer_scope_nodes`)을 쓴다. `None` 은 제한 없음이며
+    #     빈 집합과 다르다. 판정 자체는 `deps.scope_allows_owner` 단일 지점이 한다.
+    from api.deps import viewer_scope_nodes
     from core.connector_execution import ConnectorExecutionError, execute, fetch_for_prompt
+    from core.connector_registry import ConnectorError
     fn = fetch_for_prompt if req.for_prompt else execute
+    _gate = {"entity_mode": "REAL", "actor_scopes": viewer_scope_nodes(p)}
     try:
         if req.for_prompt:
-            data = await asyncio.to_thread(fn, connector_id, req.query_name, req.fields,
-                                           p.user_id, req.purpose, req.params or {},
-                                           req.limit)
+            data = await asyncio.to_thread(lambda: fn(
+                connector_id, req.query_name, req.fields, p.user_id, req.purpose,
+                req.params or {}, req.limit, **_gate))
         else:
-            data = await asyncio.to_thread(fn, connector_id, req.query_name, req.fields,
-                                           p.user_id, req.purpose, req.params or {},
-                                           req.limit, False)
+            data = await asyncio.to_thread(lambda: fn(
+                connector_id, req.query_name, req.fields, p.user_id, req.purpose,
+                req.params or {}, req.limit, False, **_gate))
+    except ConnectorError as e:
+        # 404 로 은폐한다 — 다른 조직 커넥터의 존재 여부를 알려주지 않는다.
+        raise HTTPException(status_code=404, detail=str(e))
     except ConnectorExecutionError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not data.get("executed"):

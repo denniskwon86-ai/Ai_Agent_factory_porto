@@ -76,13 +76,39 @@ def _audit(event: str, connector_id: str, query_name: str, actor: str, purpose: 
 
 def execute(connector_id: str, query_name: str, fields: List[str], actor: str,
             purpose: str, params: Optional[Dict[str, Any]] = None, limit: int = 0,
-            for_prompt: bool = False, registry=None) -> Dict[str, Any]:
+            for_prompt: bool = False, registry=None,
+            *, scope_node_id: str = "", tenant_id: str = "",
+            entity_mode: str = "REAL", actor_scopes=None) -> Dict[str, Any]:
     """Query Contract 를 지켜 조회하고, **응답에도 계약을 적용**한다.
 
-    반환의 `enforcement` 를 무시하지 말 것 — 원천이 계약을 어겼다는 사실이 거기 담긴다."""
+    반환의 `enforcement` 를 무시하지 말 것 — 원천이 계약을 어겼다는 사실이 거기 담긴다.
+
+    ## [D-017 §9 P3-3] 도구 접근 교집합은 **여기서** 강제한다
+
+    ★★ 라우트에만 두지 않는 이유: 실행 경로가 하나 더 생기는 순간(에이전트 런타임·배치·
+      스크립트) 그 경로만 통제 없이 돈다. 이 함수가 **모든 조회의 목** 이므로 여기 둔다.
+      크로스워크가 자식 자원 판정을 `_gate` 하나로 모은 것과 같은 이유다.
+
+    ⚠️ `scope_node_id`·`tenant_id` 를 주지 않으면 **필터하지 않는다** — ECM 미도입 흐름을
+      막지 않는다는 전 저장소 규약이다. 다만 그 사실이 응답의 `enforcement.scope_checked`
+      에 남는다. 「통제가 있었다」와 「범위를 안 줘서 통과했다」를 구분하기 위해서다.
+    """
     from core.connector_registry import connector_registry as _reg
     reg = registry or _reg
     from core.enterprise_context import audit
+
+    # ★ 계약 검증보다 **먼저** 본다. 남의 조직 커넥터에 대해 「그 쿼리는 계약에 없습니다」라고
+    #   답하면 그 자체가 존재를 알려주는 정보다.
+    #
+    # ⚠️⚠️ 판정 조건에 `actor_scopes is not None` 을 **반드시** 넣는다. 처음에는
+    #   `bool(scope_node_id or tenant_id)` 만 봤는데, 호출부가 넘기는 범위가 언제나 빈
+    #   문자열이어서(「빈 요청 = 전사 요청」) 게이트가 한 번도 물지 않았다.
+    #   요청자의 범위 집합은 «비어 있음» 과 «제한 없음(None)» 이 다르므로 그것으로 판정한다.
+    _scope_checked = bool(scope_node_id or tenant_id) or actor_scopes is not None
+    if _scope_checked and hasattr(reg, "require_connector_visible"):
+        reg.require_connector_visible(connector_id, scope_node_id, tenant_id,
+                                      entity_mode or "REAL", actor=actor,
+                                      actor_scopes=actor_scopes)
 
     if not (actor or "").strip():
         raise ConnectorExecutionError(
@@ -150,6 +176,9 @@ def execute(connector_id: str, query_name: str, fields: List[str], actor: str,
     rows = kept_rows[:eff_limit]
 
     enforcement = {
+        # ★ [P3-3] 「통제가 있었다」와 「범위를 안 줘서 통과했다」를 구분한다.
+        #   `False` 를 «안전» 으로 읽으면 안 된다 — 조직 범위 판정을 **하지 않았다**는 뜻이다.
+        "scope_checked": _scope_checked,
         "requested_fields": list(fields or []),
         "effective_fields": eff_fields,
         "removed_sensitive": v.get("removed_sensitive", []),
@@ -181,12 +210,21 @@ def execute(connector_id: str, query_name: str, fields: List[str], actor: str,
 
 def fetch_for_prompt(connector_id: str, query_name: str, fields: List[str], actor: str,
                      purpose: str, params: Optional[Dict[str, Any]] = None,
-                     limit: int = 0, registry=None) -> Dict[str, Any]:
+                     limit: int = 0, registry=None,
+                     *, scope_node_id: str = "", tenant_id: str = "",
+                     entity_mode: str = "REAL", actor_scopes=None) -> Dict[str, Any]:
     """프롬프트 주입용 조회 — 민감 필드를 제거한다(§7.2).
 
-    ⚠️ 제거는 오류가 아니지만 **말하지 않으면** LLM 도 사람도 값이 왜 없는지 모른다."""
+    ⚠️ 제거는 오류가 아니지만 **말하지 않으면** LLM 도 사람도 값이 왜 없는지 모른다.
+
+    ★★ [P3-3] 범위 인자를 **반드시 그대로 넘긴다.** 여기가 빠지면 조회 결과가 프롬프트로
+      들어가고, 프롬프트 유출은 화면 유출보다 찾기 어렵다 — 산출물에 남은 값을 역추적하지
+      않는 한 아무도 모르고, 그때는 이미 다른 조직 수치가 결과물에 인용된 뒤다
+      (`mcp_broker.get_live_context` 가 같은 경고를 적어 두었다)."""
     out = execute(connector_id, query_name, fields, actor, purpose, params, limit,
-                  for_prompt=True, registry=registry)
+                  for_prompt=True, registry=registry,
+                  scope_node_id=scope_node_id, tenant_id=tenant_id,
+                  entity_mode=entity_mode, actor_scopes=actor_scopes)
     removed = out.get("enforcement", {}).get("removed_sensitive", [])
     if removed:
         out["prompt_note"] = (f"민감 필드 {', '.join(removed)} 는 프롬프트에 전달되지 "

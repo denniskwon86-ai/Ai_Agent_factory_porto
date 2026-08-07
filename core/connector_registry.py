@@ -223,6 +223,84 @@ class ConnectorRegistry:
                               viewer_clearance=viewer_clearance,
                               include_descendants=include_descendants)
 
+    # ── [D-017 §9 P3-3] 도구 접근 교집합 ──────────────────────────────
+    def is_connector_visible(self, connector_id: str, scope_node_id: str = "",
+                             tenant_id: str = "", entity_mode: str = "REAL") -> bool:
+        """이 문맥에서 이 커넥터가 보이는가. **목록과 같은 판정을 쓴다.**
+
+        ⚠️ 여기서 필터를 다시 구현하지 않는다 — `list_connectors` 와 규칙이 갈라지면
+          「목록에는 안 보이는데 실행은 되는」 상태가 되고, 그것이 정확히 P3-3 이 막으려는
+          것이다. 그래서 목록을 그대로 불러 포함 여부만 본다."""
+        cid = (connector_id or "").strip()
+        if not cid:
+            return False
+        if not (scope_node_id or tenant_id):
+            # ECM 미도입 흐름 보존 — 범위를 선언하지 않았으면 필터하지 않는다(전 저장소 규약).
+            return bool(self.get(cid))
+        rows = self.list_connectors(scope_node_id=scope_node_id, tenant_id=tenant_id,
+                                    entity_mode=entity_mode or "REAL")
+        return any(str(r.get("connector_id")) == cid for r in rows)
+
+    def visible_to_actor(self, connector_id: str, actor_scopes) -> bool:
+        """★★ **요청자가 볼 수 있는 커넥터인가** — 「어느 범위를 요청했는가」가 아니다.
+
+        ⚠️⚠️ [2026-08-07 실측] 처음에는 `assert_scope_allowed(p, "")` 의 결과를 범위로 썼다.
+          그런데 그 함수는 **빈 요청을 «전사 요청» 으로 보고 빈 문자열을 돌려준다** — 무제한
+          계정이든 부서 계정이든 똑같이 `''` 였다. 그래서 게이트가 **한 번도 물지 않았다.**
+          살아 있는 서버에서 다른 조직 범위로 호출해도 같은 응답이 나와 드러났다.
+          「파라미터를 주지 않는 것이 가장 넓은 조회」라는 이 저장소의 반복된 함정이다.
+
+        ★ 그래서 «요청된 범위» 가 아니라 **요청자에게 보이는 범위 집합**으로 판정한다.
+          `None` 은 제한 없음이다(무제한 계정) — 빈 집합과 다르다."""
+        cid = (connector_id or "").strip()
+        if not self.get(cid):
+            return False
+        if actor_scopes is None:
+            return True                 # 무제한 — 필터하지 않는다
+
+        # ⚠️⚠️ [2026-08-07 실측] 처음에는 `scope_allows_owner(actor_scopes, owner_org_id)` 로
+        #   **생문자열을 비교**했다. 그런데 `viewer_scope_nodes` 는 ECM `node_id`
+        #   (`node_36c1c7c797e0`)를 주고 커넥터 소유는 코드(`MNM_BATTERY`)로 저장돼 있다.
+        #   그래서 범위가 있는 계정은 **자기 부서 커넥터까지 전부 막혔다.** D-018 이
+        #   「정본은 node_id 이고 코드는 해석해서 써라」로 막으려던 바로 그 실수다.
+        #
+        # ★ 그래서 비교를 여기서 하지 않고 **목록 판정(`filter_visible`)에 맡긴다.**
+        #   요청자의 범위 중 하나에서라도 보이면 보이는 것이다.
+        #   범위 개수만큼 목록을 부르지만 보통 한두 개이고, **정확한 편이 빠른 것보다 낫다** —
+        #   틀린 판정은 유출이거나 실명이다.
+        return any(self.is_connector_visible(cid, scope_node_id=str(s))
+                   for s in (actor_scopes or ()))
+
+    def require_connector_visible(self, connector_id: str, scope_node_id: str = "",
+                                  tenant_id: str = "", entity_mode: str = "REAL",
+                                  actor: str = "", actor_scopes=None) -> None:
+        """보이지 않으면 거부한다. **«없음» 과 같은 문구를 쓴다.**
+
+        ★★ [2026-08-07 실측 결함] `POST /connectors/{id}/execute` 는 요청자 식별과
+          `admin.data_access` 만 봤고, **그 커넥터가 요청자 조직의 것인지는 보지 않았다.**
+          즉 A 부서 데이터 관리자가 B 부서 커넥터로 조회를 실행할 수 있었다. 목록에서는
+          B 부서 커넥터가 보이지 않으므로 «통제되고 있다» 로 보였다 — 목록만 막고 실행을
+          열어 두면 id 를 아는 사람 앞에서 통제는 없다.
+
+        ⚠️ 다른 조직 커넥터의 **존재 여부까지 알려주지 않는다**(크로스워크와 같은 문구).
+        ★ 거부하는 그 순간 감사에 남긴다 — 거부된 시도가 침해 시도의 신호다."""
+        # ★ 두 판정을 **둘 다** 지나야 한다 — 이것이 «교집합» 이다.
+        #   ① 요청자에게 보이는가(자기 범위 집합) ② 선언된 범위에서 보이는가(문맥)
+        #   ①만 보면 문맥 전환을 무시하고, ②만 보면 «파라미터를 안 주면 통과» 가 된다.
+        ok_actor = self.visible_to_actor(connector_id, actor_scopes)
+        ok_ctx = self.is_connector_visible(connector_id, scope_node_id, tenant_id, entity_mode)
+        if ok_actor and ok_ctx:
+            return
+        try:
+            from core.enterprise_context import audit
+            audit.denied_scope("connector", connector_id, actor=actor,
+                               actor_scopes=actor_scopes, requested_scope=scope_node_id,
+                               detail=f"entity_mode={entity_mode} tenant={tenant_id}")
+        except Exception:
+            pass        # 감사 기록 실패가 차단을 막지 않는다(차단은 유지된다)
+        raise ConnectorError(
+            f"존재하지 않거나 접근 권한이 없는 connector_id 입니다: {connector_id}")
+
     # ── Query Contract ────────────────────────────────────────────────
     def add_contract(self, connector_id: str, query_name: str, allowed_fields: List[str],
                      required_params: Optional[List[str]] = None, max_rows: int = 1000,
