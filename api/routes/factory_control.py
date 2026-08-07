@@ -1055,10 +1055,26 @@ async def stop_sprint(project_id: str, req: SprintPauseRequest,
     await orchestrator.pause_sprint(req.task_id, project_id, reason="")
     return {"status": "stopped", "task_id": req.task_id}
 
+async def _assert_resumable(project_id: str) -> None:
+    """[D-017 §9 P3-4] 멈춰 있는 동안 구성이 바뀌지 않았는가.
+
+    ★★ **두 재개 경로가 같은 한 줄을 쓴다.** 한쪽만 걸면 그쪽만 통제되고, 사용자는 막힌 쪽을
+      피해 열린 쪽으로 간다 — 이 저장소가 반복해서 확인한 형태다.
+    ⚠️ 판정은 `core/resume_guard.check()` 한 곳에 있다. 여기서 조건을 다시 쓰지 않는다."""
+    from core import resume_guard
+    ws = workspace_path(project_id)
+    v = await asyncio.to_thread(resume_guard.check, ws, _read_project_template(ws))
+    if not v.ok:
+        # 409 — 요청은 정당하지만 **지금 상태와 맞지 않는다.** 403(권한)도 400(잘못된 요청)도
+        # 아니다. 사용자가 할 일은 「구성을 되돌리거나 새로 가동」이다.
+        raise HTTPException(status_code=409, detail=v.reason)
+
+
 @router.post("/{project_id}/hotl/resume")
 async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal = Depends(current_principal)):
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
+    await _assert_resumable(project_id)
     success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id)
     if not success:
         raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")
@@ -1071,6 +1087,7 @@ async def resume_from_quota(project_id: str, req: SprintPauseRequest, p: Princip
     다시 쿼터 소진을 만나 자연히 재동결된다(400 반환 조건: 대상이 SUSPENDED_QUOTA 상태가 아님)."""
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
+    await _assert_resumable(project_id)
     success = await orchestrator.resume_from_suspend(req.task_id, project_id)
     if not success:
         raise HTTPException(status_code=409, detail="쿼터 재개 대상이 아니거나(이미 실행 중/미동결) 재개에 실패했습니다.")
