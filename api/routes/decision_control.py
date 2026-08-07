@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from api.deps import Principal, current_principal
-from core.decision_case import DecisionCaseError, DecisionNotFound, decision_case
+from core.decision_case import (UNRESTRICTED, DecisionCaseError, DecisionNotFound,
+                                decision_case)
 
 router = APIRouter(tags=["Decision"])
 
@@ -27,6 +28,22 @@ def _actor(p: Principal) -> str:
             detail=("사용자 식별이 필요합니다 — 의사결정은 '누가 무엇을 결정했는가'가 기록의 "
                     "전부입니다. 우측 상단에서 사용자를 지정하십시오."))
     return uid
+
+
+def _scopes(p: Principal):
+    """이 요청자가 볼 수 있는 조직 범위. **모든 라우트가 이것을 서비스에 넘긴다.**
+
+    ★★★ [2026-08-08 실측 결함] 이 파일 머리말은 「참여자가 아닌 안건 → 404」를 규정하는데
+      **구현이 없었다.** 남남이 안건을 조회하고 뷰를 렌더하고 **참여자를 임의로 추가**하고
+      회의를 소집할 수 있었다. `publication_control` 과 같은 유형이며 같은 방식으로 막는다.
+
+    ⚠️ 무제한 주체는 `UNRESTRICTED` 센티넬로 넘긴다 — 빈 집합으로 넘기면 관리자가 자기 것
+      말고는 아무것도 못 본다. `None` 을 넘기면 서비스가 판정을 통째로 끈다."""
+    sc = getattr(p, "scope", None)
+    if sc is None or getattr(sc, "unrestricted", False):
+        return UNRESTRICTED
+    return frozenset(set(getattr(sc, "readable_dept_ids", None) or ())
+                     | set(getattr(sc, "readable_scope_nodes", None) or ()))
 
 
 def _hidden():
@@ -91,11 +108,21 @@ async def create_case(run_id: str, req: CaseCreate,
 
     ★ 세 관점 검토서를 따로 저장하지 않는다(§3-5) — 하나의 Package 를 만들고 관점별로 렌더링한다."""
     actor = _actor(p)
+    # ★★ 생성은 조회가 아니라 **새로 만드는 것**이라 `_scopes()` 를 넘기지 않는다. 대신
+    #   «내가 속하지 않은 조직 이름으로 만들 수 없다» 를 여기서 막는다 — 그러지 않으면
+    #   가시성을 막아 놓고 이 입구로 남의 부서 안건을 만들어 넣을 수 있다(발간과 같은 이유).
+    scope_id = (req.scope_id or "").strip() or (p.scope.primary_dept_id or "")
+    allowed = _scopes(p)
+    if scope_id and allowed is not UNRESTRICTED and scope_id not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"'{scope_id}' 는 볼 수 있는 조직이 아닙니다 — 자신이 속한 조직으로만 "
+                    f"안건을 만들 수 있습니다."))
     try:
         data = decision_case.create(
             question=req.question, created_by=actor, simulation_run_id=run_id,
             baseline_id=req.baseline_id, scenario_id=req.scenario_id,
-            scope_id=req.scope_id or (p.scope.primary_dept_id or ""),
+            scope_id=scope_id,
             package=req.package, evidence=req.evidence, due_at=req.due_at)
     except DecisionCaseError as e:
         _bad(e)
@@ -111,7 +138,7 @@ async def queue(p: Principal = Depends(current_principal)):
 @router.get("/api/v1/decisions/{decision_id}")
 async def get_case(decision_id: str, p: Principal = Depends(current_principal)):
     try:
-        return {"status": "success", "data": decision_case.get(decision_id, _actor(p))}
+        return {"status": "success", "data": decision_case.get(decision_id, _actor(p), viewer_scopes=_scopes(p))}
     except DecisionNotFound:
         _hidden()
 
@@ -125,7 +152,8 @@ async def generate_views(decision_id: str, p: Principal = Depends(current_princi
     actor = _actor(p)
     from core.decision_case import VIEWS
     try:
-        views = {v: decision_case.render_view(decision_id, v, actor) for v in VIEWS}
+        views = {v: decision_case.render_view(decision_id, v, actor,
+                                             viewer_scopes=_scopes(p)) for v in VIEWS}
     except DecisionNotFound:
         _hidden()
     except DecisionCaseError as e:
@@ -145,7 +173,8 @@ async def request_review(decision_id: str, req: ReviewRequest,
                          p: Principal = Depends(current_principal)):
     try:
         return {"status": "success",
-                "data": decision_case.request_review(decision_id, _actor(p), req.participants)}
+                "data": decision_case.request_review(decision_id, _actor(p), req.participants,
+                                             viewer_scopes=_scopes(p))}
     except DecisionNotFound:
         _hidden()
     except DecisionCaseError as e:
@@ -159,7 +188,8 @@ async def request_meeting(decision_id: str, req: MeetingRequest,
     try:
         return {"status": "success",
                 "data": decision_case.request_meeting(decision_id, _actor(p), req.title,
-                                                      req.schedule, req.channel)}
+                                                      req.schedule, req.channel,
+                                                      viewer_scopes=_scopes(p))}
     except DecisionNotFound:
         _hidden()
     except DecisionCaseError as e:
@@ -172,7 +202,8 @@ async def participant_response(decision_id: str, req: ResponseBody,
     try:
         return {"status": "success",
                 "data": decision_case.participant_response(
-                    decision_id, _actor(p), req.response_status, req.response)}
+                    decision_id, _actor(p), req.response_status, req.response,
+                    viewer_scopes=_scopes(p))}
     except DecisionNotFound:
         _hidden()
     except DecisionCaseError as e:
@@ -185,7 +216,8 @@ async def decide(decision_id: str, req: DecideBody, p: Principal = Depends(curre
     try:
         return {"status": "success",
                 "data": decision_case.decide(decision_id, _actor(p), req.outcome,
-                                             req.rationale, req.conditions)}
+                                             req.rationale, req.conditions,
+                                             viewer_scopes=_scopes(p))}
     except DecisionNotFound:
         _hidden()
     except DecisionCaseError as e:
@@ -198,7 +230,8 @@ async def create_actions(decision_id: str, req: ActionsBody,
     """실행과제 생성 — **담당·기한 없으면 400.**"""
     try:
         return {"status": "success",
-                "data": decision_case.create_actions(decision_id, _actor(p), req.actions)}
+                "data": decision_case.create_actions(decision_id, _actor(p), req.actions,
+                                             viewer_scopes=_scopes(p))}
     except DecisionNotFound:
         _hidden()
     except DecisionCaseError as e:
@@ -212,7 +245,8 @@ async def measure_effect(decision_id: str, req: EffectBody,
     try:
         return {"status": "success",
                 "data": decision_case.measure_effect(decision_id, _actor(p), req.action_id,
-                                                     req.measured_effect)}
+                                                     req.measured_effect,
+                                                     viewer_scopes=_scopes(p))}
     except DecisionNotFound:
         _hidden()
     except DecisionCaseError as e:

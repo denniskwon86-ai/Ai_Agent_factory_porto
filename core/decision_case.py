@@ -66,6 +66,11 @@ ROLE_DECIDER = "DECIDER"
 ROLE_AFFECTED = "AFFECTED"
 ROLES = (ROLE_REQUESTER, ROLE_DECIDER, ROLE_AFFECTED)
 
+#: 범위 제한이 없는 열람자(플랫폼 관리자·조직 미도입). **`None` 과 다르다** —
+#: `None` 은 «범위를 넘기지 않았다»(레거시)이고 이것은 «넘겼는데 전 범위»다.
+#: `core/publication.py` 와 같은 규약이다(두 곳이 다르면 한쪽만 고쳐진다).
+UNRESTRICTED = object()
+
 #: 영향부서 의견(도메인 §7.5). "정보 부족"이 1급 선택지인 것이 요점이다 —
 #: 그것이 없으면 모르는 부서가 '동의'를 누른다.
 RESPONSE_AGREE = "AGREE"
@@ -251,15 +256,54 @@ class DecisionCase:
         return self.get(did, created_by)
 
     # ── 조회·투영 ─────────────────────────────────────────────────────────
-    def get(self, decision_id: str, user_id: str = "", today: str = "") -> Dict[str, Any]:
+    def _visible(self, row: Dict[str, Any], participants: List[Dict[str, Any]],
+                 user_id: str, viewer_scopes) -> bool:
+        """이 안건이 이 사람에게 보이는가.
+
+        ★★★ [2026-08-08 실측 결함] 이 파일 머리말은 「참여자가 아닌 안건 → **404**」를
+          규정하는데 **구현이 없었다.** 격리 저장소 실측:
+
+              남남이 조회 → 성공(패키지·참여자·회의 전부) · 뷰 렌더 → 통과
+              남남이 검토요청 → 통과 · 남남이 회의소집 → 통과
+
+          특히 검토요청은 **남의 안건에 참여자를 임의로 넣는 것**이다. 결정·참여응답만
+          `my_role` 을 봤고 나머지는 `get()` 을 그냥 지났다.
+          `core/publication.py` 와 **같은 유형**이며 같은 방식으로 막는다.
+
+        판정: 작성자 · **참여자** · 안건의 조직 범위가 열람자 범위에 있음 · 무제한 주체.
+        ⚠️ 참여자를 넣은 이유: 안건은 여러 부서가 함께 보는 것이고, 참여자로 지정된 사람은
+          자기 부서 밖 안건이라도 답해야 한다. 범위만 보면 그 사람이 자기 할 일을 못 본다."""
+        if viewer_scopes is None:
+            return True                      # 하위호환 — 라우트는 항상 범위를 넘긴다
+        if viewer_scopes is UNRESTRICTED:
+            return True
+        uid = str(user_id or "").strip()
+        if uid and uid == str(row.get("created_by") or ""):
+            return True
+        if uid and any(str(p.get("user_id") or "") == uid for p in participants):
+            return True
+        scope = str(row.get("scope_id") or "").strip()
+        # ⚠️ 범위가 빈 안건은 «전사» 가 아니라 «미지정» 이다 — 작성자·참여자만 본다.
+        return bool(scope) and scope in viewer_scopes
+
+    def get(self, decision_id: str, user_id: str = "", today: str = "",
+            viewer_scopes=None) -> Dict[str, Any]:
+        """상세. **참여자·관계자가 아니면 404**(이 파일 머리말 §3-10 경계표).
+
+        ★ 이 메서드가 **단일 판정 지점**이다 — `render_view`·`request_review`·
+          `request_meeting`·`decide`·`create_actions`·`measure_effect` 가 전부 여기를 지난다."""
         self._ensure()
         row = self._store.one("SELECT * FROM decision_cases WHERE decision_id=?", (decision_id,))
         if not row:
             raise DecisionNotFound(decision_id)
-        d = self._row(row, today)
-        d["participants"] = self._store.query(
+        parts = self._store.query(
             "SELECT * FROM decision_participants WHERE decision_id=? ORDER BY role, user_id",
             (decision_id,))
+        if not self._visible(dict(row), parts, user_id, viewer_scopes):
+            # 403 이 아니라 404 — 403 은 «있지만 못 본다» 를 알려주므로 존재가 샌다.
+            raise DecisionNotFound(decision_id)
+        d = self._row(row, today)
+        d["participants"] = parts
         d["meetings"] = [self._meeting_row(m) for m in self._store.query(
             "SELECT * FROM decision_meetings WHERE decision_id=? ORDER BY created_at DESC",
             (decision_id,))]
@@ -288,7 +332,8 @@ class DecisionCase:
         return out
 
     def render_view(self, decision_id: str, view: str, user_id: str = "",
-                    today: str = "") -> Dict[str, Any]:
+                    today: str = "",
+                viewer_scopes=None) -> Dict[str, Any]:
         """관점별 **투영**. 데이터를 복제하지 않는다(§CL-BE-03).
 
         ★ 세 관점이 같은 `decision_id` · `package_version` · `evidence_hash` 를 들고 나간다 —
@@ -296,7 +341,7 @@ class DecisionCase:
           있음을 확인할 수 있어야 한다."""
         if view not in VIEWS:
             raise DecisionCaseError(f"view 는 {VIEWS} 중 하나여야 합니다: {view}")
-        d = self.get(decision_id, user_id, today)
+        d = self.get(decision_id, user_id, today, viewer_scopes)
         pkg = d["package"]
         common = {
             "decision_id": d["decision_id"], "view": view,
@@ -342,12 +387,13 @@ class DecisionCase:
 
     # ── 검토·회의 ─────────────────────────────────────────────────────────
     def request_review(self, decision_id: str, actor: str, participants: List[Dict[str, str]],
-                       today: str = "") -> Dict[str, Any]:
+                       today: str = "",
+                viewer_scopes=None) -> Dict[str, Any]:
         """참여자에게 검토를 요청한다.
 
         ⚠️ **결정자가 없으면 요청할 수 없다.** 결정자 없는 안건은 회의만 만들고 아무것도 끝내지
           못한다 — 이 저장소가 '승인자 없는 승인'에서 겪은 유형이다."""
-        d = self.get(decision_id, actor, today)
+        d = self.get(decision_id, actor, today, viewer_scopes)
         if d["status"] not in (DRAFT, REVIEW_REQUESTED, EVIDENCE_CHANGED):
             raise DecisionCaseError(f"{d['status']} 상태에서는 검토를 요청할 수 없습니다.")
         rows = []
@@ -376,18 +422,19 @@ class DecisionCase:
                     rationale=d["question"][:200],
                     evidence=[{"evidence_hash": d["evidence_hash"]}],
                     tenant_id=d["tenant_id"], scope=d["scope_id"])
-        out = self.get(decision_id, actor, today)
+        out = self.get(decision_id, actor, today, viewer_scopes)
         # [CL-4] **참여자에게만** 알린다. 목록에 없는 사람은 안건의 존재도 몰라야 한다.
         self._notify(DECISION_REVIEW_REQUESTED, out, actor)
         return out
 
     def participant_response(self, decision_id: str, user_id: str, response_status: str,
-                             response: str = "", today: str = "") -> Dict[str, Any]:
+                             response: str = "", today: str = "",
+                viewer_scopes=None) -> Dict[str, Any]:
         """영향부서·결정자의 의견을 남긴다.
 
         ⚠️ 참여자가 아니면 `DecisionNotFound` 다 — 남의 안건에 의견을 남길 수 없고, 존재도
           알리지 않는다."""
-        d = self.get(decision_id, user_id, today)
+        d = self.get(decision_id, user_id, today, viewer_scopes)
         if not d["my_role"]:
             raise DecisionNotFound(decision_id)
         if response_status not in RESPONSES:
@@ -406,17 +453,18 @@ class DecisionCase:
         if d["status"] == REVIEW_REQUESTED:
             self._store.execute("UPDATE decision_cases SET status=?, updated_at=? "
                                 "WHERE decision_id=?", (IN_REVIEW, now, decision_id))
-        out = self.get(decision_id, user_id, today)
+        out = self.get(decision_id, user_id, today, viewer_scopes)
         self._notify(DECISION_UPDATED, out, user_id)
         return out
 
     def request_meeting(self, decision_id: str, actor: str, title: str, schedule: str = "",
-                        channel: str = "", today: str = "") -> Dict[str, Any]:
+                        channel: str = "", today: str = "",
+                viewer_scopes=None) -> Dict[str, Any]:
         """회의를 **요청**한다. 외부 캘린더에 쓰지 않는다(§3-7).
 
         ★ `external_ref` 는 사람이 실제로 캘린더를 만든 뒤에만 채워진다. 시스템이 먼저 만들면
           사용자가 모르는 초대가 나가고, 그것은 되돌릴 수 없다."""
-        d = self.get(decision_id, actor, today)
+        d = self.get(decision_id, actor, today, viewer_scopes)
         if d["status"] in (DECIDED, ACTIONED, EFFECT_MEASURED, CANCELLED):
             raise DecisionCaseError(f"{d['status']} 상태에서는 회의를 요청할 수 없습니다.")
         if not (title or "").strip():
@@ -442,7 +490,7 @@ class DecisionCase:
                     rationale=f"일정 {schedule or '미정'} · 채널 {channel or '미정'}",
                     evidence=[{"meeting_id": mid, "evidence_hash": d["evidence_hash"]}],
                     tenant_id=d["tenant_id"], scope=d["scope_id"])
-        out = self.get(decision_id, actor, today)
+        out = self.get(decision_id, actor, today, viewer_scopes)
         out["note"] = ("회의 **요청**만 기록했습니다. 외부 캘린더·메시지에는 아무것도 보내지 "
                        "않았습니다 — 실제 초대는 사람이 만들어야 합니다(§3-7).")
         self._notify(DECISION_UPDATED, out, actor)
@@ -450,9 +498,10 @@ class DecisionCase:
 
     # ── 결정 ──────────────────────────────────────────────────────────────
     def decide(self, decision_id: str, actor: str, outcome: str, rationale: str,
-               conditions: str = "", today: str = "") -> Dict[str, Any]:
+               conditions: str = "", today: str = "",
+                viewer_scopes=None) -> Dict[str, Any]:
         """결정을 기록한다. **막는 조건이 있으면 막는다**(§CL-BE-03)."""
-        d = self.get(decision_id, actor, today)
+        d = self.get(decision_id, actor, today, viewer_scopes)
         if d["my_role"] != ROLE_DECIDER:
             # 결정자가 아니면 존재를 알리지 않는다(권한 경계).
             raise DecisionNotFound(decision_id)
@@ -486,17 +535,18 @@ class DecisionCase:
                                "baseline_id": d["baseline_id"],
                                "conditions": (conditions or "").strip()}],
                     tenant_id=d["tenant_id"], scope=d["scope_id"])
-        out = self.get(decision_id, actor, today)
+        out = self.get(decision_id, actor, today, viewer_scopes)
         self._notify(DECISION_UPDATED, out, actor)
         return out
 
     def create_actions(self, decision_id: str, actor: str, actions: List[Dict[str, Any]],
-                       today: str = "") -> Dict[str, Any]:
+                       today: str = "",
+                viewer_scopes=None) -> Dict[str, Any]:
         """실행과제를 만든다. **담당·기한이 없으면 만들지 않는다.**
 
         ⚠️ 담당 없는 과제는 아무도 하지 않고, 기한 없는 과제는 언제 늦었는지 알 수 없다 —
           결정이 실행으로 이어지지 않는 가장 흔한 경로다."""
-        d = self.get(decision_id, actor, today)
+        d = self.get(decision_id, actor, today, viewer_scopes)
         if d["status"] not in (DECIDED, ACTIONED):
             raise DecisionCaseError(
                 f"{d['status']} 상태에서는 실행과제를 만들 수 없습니다 — 결정 후에 만듭니다.")
@@ -533,17 +583,18 @@ class DecisionCase:
                     decision=f"실행과제 {len(actions)}건 생성",
                     rationale=d["question"][:200],
                     tenant_id=d["tenant_id"], scope=d["scope_id"])
-        out = self.get(decision_id, actor, today)
+        out = self.get(decision_id, actor, today, viewer_scopes)
         self._notify(DECISION_UPDATED, out, actor)
         return out
 
     def measure_effect(self, decision_id: str, actor: str, action_id: str,
-                       measured_effect: str, today: str = "") -> Dict[str, Any]:
+                       measured_effect: str, today: str = "",
+                viewer_scopes=None) -> Dict[str, Any]:
         """효과를 기록한다. **결정 당시 기준선과 비교한다**(§9).
 
         ⚠️ 미측정을 0 으로 표시하지 않는다 — 0 은 "효과가 없었다"이고 미측정은 "아직 모른다"다.
           두 개를 같게 표시하면 실패한 결정과 측정하지 않은 결정이 같은 색으로 보인다."""
-        d = self.get(decision_id, actor, today)
+        d = self.get(decision_id, actor, today, viewer_scopes)
         row = self._store.one("SELECT * FROM decision_actions WHERE action_id=?", (action_id,))
         if not row or row["decision_id"] != decision_id:
             raise DecisionNotFound(action_id)
@@ -564,7 +615,7 @@ class DecisionCase:
                     rationale=f"결정 당시 기준선 {d['baseline_id'] or '(없음)'} 대비",
                     evidence=[{"action_id": action_id, "baseline_id": d["baseline_id"]}],
                     tenant_id=d["tenant_id"], scope=d["scope_id"])
-        out = self.get(decision_id, actor, today)
+        out = self.get(decision_id, actor, today, viewer_scopes)
         self._notify(DECISION_UPDATED, out, actor)
         return out
 
