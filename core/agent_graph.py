@@ -569,18 +569,39 @@ async def get_runtime_app(template_id: str = "default"):
     → 서버 재시작 시에도 HOTL 대기 체크포인트가 디스크에 보존되어 스프린트 재개가 가능하다.
     → 템플릿마다 enabled/hotl_after 가 다르면 토폴로지·중단점도 그에 맞게 컴파일된다(T2-b)."""
     tid = template_id or "default"
-    cached = _runtime_apps.get(tid)
+    # ── [D-017 §9 P3-2] 캐시 키를 **구성 지문**으로 바꾼다 ────────────────────
+    #
+    # ★★ 종전에는 `tid` 하나로 캐시했고, 위 주석이 그 한계를 스스로 적어 두었다:
+    #   「조직 자산을 개정하면 이 캐시가 낡는다」·「HOTL 중단점 변경은 서버 재시작 후 반영」.
+    #   즉 **워크플로우를 고쳐 승인해도 옛 그래프가 계속 돌았다.** 사용자는 고쳤다고 믿고
+    #   산출물은 옛 구성으로 나오며, 그 차이는 어디에도 남지 않는다 — 가장 조용한 실패다.
+    #
+    # → 지문(`config_snapshot.capture`)은 «실행 결과를 바꾸는 필드» 만으로 계산된다.
+    #   구성이 실제로 달라지면 키가 달라져 새로 컴파일되고, 이름·설명만 고치면 그대로 재사용된다.
+    #
+    # ⚠️ 지문을 얻지 못하면(구성 조회 실패) **`tid` 로 되돌아간다.** 여기서 예외를 올리면
+    #   스냅샷 기능의 장애가 곧 실행 불가가 된다 — 가용성 경로는 fail-open 이다.
+    snap = None
+    try:
+        from core.config_snapshot import capture
+        snap = capture(tid)
+    except Exception as e:
+        print(f"⚠️ [agent_graph] 구성 지문 계산 실패(tid 로 캐시): {e}")
+    key = f"{tid}@{snap.fingerprint}" if (snap and snap.fingerprint) else tid
+
+    cached = _runtime_apps.get(key)
     if cached is not None:
         return cached
     async with _runtime_lock:
-        if tid not in _runtime_apps:
+        if key not in _runtime_apps:
             # [P1-5] 파일 템플릿과 조직 자산(`as_…`)을 **같은 입구**로 해석한다. 승인되지 않은
             # 자산은 여기서 거절된다 — «DRAFT 는 실행되지 않는다» 가 실제로 지켜지는 곳이다.
-            # ⚠️ 컴파일 결과는 `tid` 로 캐시된다. 조직 자산을 개정하면 이 캐시가 낡는데, 파일
-            #   템플릿도 같은 한계다(«HOTL 중단점 변경은 서버 재시작 후 반영»). 버전 스냅샷은
-            #   P3(런타임 강제)의 일이므로 여기서 앞서가지 않는다.
             from core.agent_asset_adapter import resolve_workflow
             saver = await _get_runtime_saver()
             workflow, interrupt_after = _build_workflow(resolve_workflow(tid))
-            _runtime_apps[tid] = workflow.compile(checkpointer=saver, interrupt_after=interrupt_after)
-    return _runtime_apps[tid]
+            _runtime_apps[key] = workflow.compile(checkpointer=saver, interrupt_after=interrupt_after)
+            # ⚠️ 무한 증식을 막는다. 지문이 키에 들어가므로 개정을 반복하면 항목이 쌓인다.
+            if len(_runtime_apps) > 32:
+                for stale in list(_runtime_apps)[:-16]:
+                    _runtime_apps.pop(stale, None)
+    return _runtime_apps[key]

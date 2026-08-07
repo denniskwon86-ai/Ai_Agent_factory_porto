@@ -58,7 +58,16 @@ class AsyncFactoryOrchestrator:
                     for item in os.listdir(workspace_root):
                         # .git/.archive 와 project_meta.json(템플릿 바인딩의 권위 원본, 생성 시 1회 기록)은
                         # 절대 이동 금지 - 아카이브되면 이후 모든 태스크가 'default' 템플릿으로 강등된다
-                        if item in [".git", ".archive", "project_meta.json"]:
+                        #
+                        # ★★ [2026-08-07 · P3-2 실측] `config_snapshot.json` 도 여기 들어간다.
+                        #   그것은 «무엇이 실제로 돌았는가» 의 기록이고 **산출물이 아니다.**
+                        #   빼 두지 않으면 기록이 그것을 만든 실행에 의해 아카이브로 쓸려 가고,
+                        #   그 순간 프로젝트에는 기록이 없는 것으로 보인다 — 살아 있는 서버에서
+                        #   실제로 그렇게 됐다(`.archive/<시각>/config_snapshot.json`).
+                        #   ⚠️ 이력이 목적이므로 **누적돼야** 한다. 기획을 다시 돌릴 때마다
+                        #     비워지면 「3주 전 산출물은 무엇으로 만들었나」에 답할 수 없다.
+                        if item in [".git", ".archive", "project_meta.json",
+                                    "config_snapshot.json"]:
                             continue
                         src_path = os.path.join(workspace_root, item)
                         dst_path = os.path.join(archive_dir, item)

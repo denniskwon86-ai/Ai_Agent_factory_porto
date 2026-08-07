@@ -982,6 +982,21 @@ async def start_sprint(project_id: str, req: SprintStartRequest,
     # [M3] 외부 실측값 병기 토글도 권위 원본에서 주입(기본 off)
     req.project_state_payload["mcp_live_grounding"] = _read_project_mcp_live(workspace_root)
 
+    # ── [D-017 §9 P3-2] 이 실행이 **무엇으로 돌았는지** 남긴다 ─────────────────
+    #
+    # ★ 산출물만 보고는 어느 구성이 만들었는지 되짚을 수 없었다. 그 질문은 언제나 문제가 생긴
+    #   뒤에 나오고, 그때는 이미 구성이 여러 번 바뀌어 있다. 그래서 **시작 시점에** 찍는다.
+    # ⚠️ 스냅샷 실패가 실행을 막지 않는다 — 기록 기능의 장애가 가동 불가가 되면 안 된다.
+    #   대신 실패도 «이유가 붙은 미확인» 으로 기록되므로 조용히 사라지지 않는다.
+    try:
+        from core import config_snapshot as _snap
+        _s = await asyncio.to_thread(_snap.capture,
+                                     req.project_state_payload["template_id"])
+        await asyncio.to_thread(_snap.write, workspace_root, _s)
+        req.project_state_payload["config_fingerprint"] = _s.fingerprint
+    except Exception as _e:
+        print(f"⚠️ [factory] 구성 스냅샷 기록 실패(가동은 계속): {_e}")
+
     # 신규 기획(PLANNING)은 새 출발이므로 옛 누적 산출물을 복원하지 않는다.
     # 그 외(실행/리비전) 태스크는 stale 페이로드의 빈 누적 필드를 디스크 진실원본에서 복원.
     if not (req.task_id.startswith("PLANNING") and len(req.task_id.split("_")) == 2):
@@ -1436,6 +1451,22 @@ async def create_release(project_id: str,
     except Exception as e:
         print(f"⚠️ [CL-0] 자체 인증 정적 검사 실패(릴리스는 계속 게시): {e}")
         release["platform_auth_scan"] = {"ok": None, "error": str(e)}
+
+    # ── [D-017 §9 P3-2] 릴리스에 **무엇이 만들었는지**를 함께 봉인한다 ─────────
+    #
+    # ★ 프로젝트의 스냅샷은 계속 바뀌지만 릴리스는 그 시점에 고정된다. 릴리스에 붙여 두지
+    #   않으면 「이 산출물은 어느 구성이 만들었나」를 나중에 되짚을 수 없다 — 프로젝트 쪽
+    #   기록은 그 사이 여러 번 덮였을 수 있기 때문이다.
+    # ⚠️ 읽지 못하면 **키를 비우지 않고** «미확인» 을 적는다. 키가 없으면 「옛날 릴리스라
+    #   기록이 없다」와 「이번에 못 읽었다」가 같아진다.
+    try:
+        from core import config_snapshot as _snap
+        # ⚠️ 이 함수에는 `workspace_root` 지역변수가 없다 — `workspace_path()` 단일 지점을 쓴다.
+        _cur = (_snap.read(workspace_path(project_id)) or {}).get("current")
+        release["config_snapshot"] = _cur or {
+            "resolved": False, "error": "실행 시점 구성 스냅샷을 찾지 못했습니다."}
+    except Exception as _e:
+        release["config_snapshot"] = {"resolved": False, "error": f"읽기 실패: {_e}"}
 
     rel_dir = library_paths.release_dir(release_id)
     os.makedirs(rel_dir, exist_ok=True)
