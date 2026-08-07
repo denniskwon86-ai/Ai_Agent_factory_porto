@@ -161,6 +161,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   // 전체화면(인앱 오버레이) / 새 창(독립 OS 창) 상태
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPoppedOut, setIsPoppedOut] = useState(false);
+  /** 팝업이 차단됐다는 사실. `alert()` 대신 화면에 남긴다. */
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const popupRef = useRef<Window | null>(null);
 
   const statePayload = useFactoryStore((s) => s.state);
@@ -439,8 +441,13 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   // ↗ 새 창: 독립 OS 창에 동일 샌드박스를 띄운다(싱글톤). 사용자 제스처(클릭) 안에서 호출 → 팝업 차단 회피.
   const openPopout = useCallback(() => {
     if (popupRef.current && !popupRef.current.closed) { popupRef.current.focus(); return; }
+    setPopupBlocked(false);
     const w = window.open('', 'omega_preview', 'width=1024,height=768,resizable=yes,scrollbars=yes');
-    if (!w) { alert('팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용해 주세요.'); return; }
+    // ⚠️ [이관 F 7/8] `alert()` 를 쓰지 않는다(디자인 시스템 규칙 ②). 브라우저 대화상자는
+    //   키보드·스크린리더 대응이 안 되고, 무엇보다 **무엇을 해야 하는지** 적을 자리가 없다.
+    //   차단 사실은 화면 안에 남겨 둔다 — alert 는 닫는 순간 사라져서 설정을 바꾸는 동안
+    //   사용자가 문구를 다시 볼 수 없다.
+    if (!w) { setPopupBlocked(true); return; }
     w.document.open();
     w.document.write(htmlTemplate);
     w.document.close();
@@ -472,12 +479,26 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     return () => window.clearInterval(id);
   }, [isPoppedOut, sendExecuteFiles]);
 
-  // ESC 로 전체화면 해제
+  // ESC 로 전체화면 해제 + 전체화면 동안의 접근성 처리
+  //
+  // ⚠️ [이관 F 7/8] **`HubDialog` 를 쓰지 않는다.** 그것은 `createPortal` 로 `document.body`
+  //   에 옮겨 붙이는데, 그러면 이 패널의 **iframe 이 재마운트**되어 실행 중인 생성 앱의
+  //   상태(가상 모듈 레지스트리·localStorage 핸들·postMessage 준비 상태)가 통째로 날아간다.
+  //   다른 7개 화면과 달리 여기는 «옮기면 회귀» 인 자산이다(2026-08-06 인계 §재사용 3곳).
+  //   → 셸을 옮기는 대신 **그 자리에서** 모달 의미론만 갖춘다.
+  //
+  // ⚠️ 배경 `inert` 도 걸지 않는다 — 이 패널 자신이 `#root` 안에 있어서 `#root` 를 inert 로
+  //   만들면 **자기 자신이 죽는다.** 대신 배경 스크롤을 잠그고 `aria-modal` 로 알린다.
   useEffect(() => {
     if (!isFullscreen) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFullscreen(false); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
   }, [isFullscreen]);
 
   // 언마운트 시 열린 팝업 정리
@@ -580,7 +601,13 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   }
 
   return (
-    <div className={`flex flex-col bg-gray-900 shadow-inner overflow-hidden relative ${isFullscreen ? 'fixed inset-0 z-50' : 'w-full h-full rounded-lg'}`}>
+    <div
+      // 전체화면이면 화면 전체를 덮으므로 **대화상자로 알린다** — 그러지 않으면 스크린리더에
+      // 그냥 문서 일부로 읽히고, 사용자는 배경이 아직 살아 있다고 오해한다.
+      role={isFullscreen ? 'dialog' : undefined}
+      aria-modal={isFullscreen ? true : undefined}
+      aria-label={isFullscreen ? '생성 앱 미리보기 — 전체화면 (Esc 로 축소)' : undefined}
+      className={`flex flex-col bg-gray-900 shadow-inner overflow-hidden relative ${isFullscreen ? 'fixed inset-0 z-50' : 'w-full h-full rounded-lg'}`}>
       <div className="flex items-center bg-gray-800 border-b border-gray-700 shrink-0 select-none">
         <div className="flex overflow-x-auto">
           {tabs.map((tab) => (
@@ -608,6 +635,19 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
             {/* allow-same-origin 유지 이유: 생성 앱 다수가 localStorage 를 쓰는데 opaque origin 에서는
                 SecurityError 로 프리뷰가 전부 깨져 자가치유 오발동을 유발한다. 대신 message 핸들러의
                 event.source 검증으로 스푸핑을 차단한다. */}
+            {/* ★ 팝업 차단은 사용자가 **설정을 바꾸는 동안** 계속 보여야 한다 —
+                `alert()` 는 닫는 순간 사라져서 문구를 다시 볼 수 없었다. */}
+            {popupBlocked && (
+              <div role="alert" className="absolute top-0 left-0 w-full p-3 bg-amber-50 text-amber-800 text-sm z-10 border-b border-amber-200 shadow-sm flex items-start gap-2">
+                <span aria-hidden="true">🪟</span>
+                <div className="flex-1">
+                  <strong>새 창이 차단되었습니다.</strong> 브라우저 주소창의 팝업 차단 아이콘에서
+                  이 사이트를 허용한 뒤 다시 «↗ 새 창» 을 누르십시오. 허용하지 않아도
+                  아래 미리보기는 그대로 동작합니다.
+                </div>
+                <button onClick={() => setPopupBlocked(false)} className="shrink-0 text-amber-700 hover:text-amber-900 font-bold px-1" aria-label="이 안내 닫기">✕</button>
+              </div>
+            )}
             <iframe ref={iframeRef} title="AI Factory Preview Sandbox" className="w-full h-full border-none flex-1 bg-transparent" sandbox="allow-scripts allow-same-origin" />
             {isPoppedOut && (
               <div className="absolute inset-0 bg-gray-900/95 flex flex-col items-center justify-center gap-4 z-20">
