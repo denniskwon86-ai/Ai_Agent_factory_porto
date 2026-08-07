@@ -55,6 +55,11 @@ AUDIENCE_INTERNAL = "INTERNAL"
 AUDIENCE_EXTERNAL = "EXTERNAL"
 AUDIENCES = (AUDIENCE_INTERNAL, AUDIENCE_EXTERNAL)
 
+#: 범위 제한이 없는 열람자(플랫폼 관리자·조직 미도입). **`None` 과 다르다** —
+#: `None` 은 «범위를 넘기지 않았다»(레거시)이고 이것은 «넘겼는데 전 범위»다.
+#: 둘을 한 값으로 뭉개면 「범위를 깜빡한 호출」이 관리자 권한으로 통과한다.
+UNRESTRICTED = object()
+
 #: 발간 유형(설계 §8.1).
 PUB_TYPES = ("OPERATIONAL", "MANAGEMENT", "COMPANY_WIDE", "EXTERNAL_LIMITED", "EXTERNAL_PUBLIC")
 
@@ -251,11 +256,55 @@ class Publication:
         return self.get(pid, created_by)
 
     # ── 조회 ──────────────────────────────────────────────────────────────
-    def get(self, publication_id: str, user_id: str = "") -> Dict[str, Any]:
+    @staticmethod
+    def _visible(row: Dict[str, Any], user_id: str, viewer_scopes) -> bool:
+        """이 발간물이 이 사람에게 보이는가.
+
+        ★★★ [2026-08-08 실측 결함] 종전에는 **판정이 아예 없었다.** `get()` 이 `user_id` 를
+          받고도 쓰지 않아서, 아무 상관 없는 식별 사용자가 남의 대외 발간물을 조회하고
+          승인하고 **외부로 내보낼 수 있었다.** 격리 저장소 실측:
+
+              남남이 조회 → 성공 · 남남이 법무승인 → 통과 · 남남이 경영승인 → 통과
+              남남이 대외발간 → 통과
+
+          이 저장소가 `project.release` 에 대해 쓴 말이 그대로 적용된다 —
+          **「남에게 나간다. 회수해도 이미 본 사람이 있다」.**
+
+        ⚠️ 기존 30여 건의 테스트는 **절차 게이트**(렌더→승인→발간, 대외 이중 검토)만 봤고
+          교차 사용자 접근은 한 건도 없었다. 절차가 옳아도 «누가» 가 비어 있으면 통제가 아니다.
+
+        판정:
+          · 작성자 본인 — 언제나 보인다
+          · 발간물의 조직 범위(`scope_id`)가 열람자의 범위에 있다
+          · `viewer_scopes is None` — **범위를 넘기지 않은 호출**(레거시·내부 단위 호출).
+            종전 동작을 유지한다. ⚠️ 새 호출부는 반드시 범위를 넘길 것 —
+            `tests/test_publication_visibility.py` 가 라우트 전수를 검사한다.
+        """
+        if viewer_scopes is None:
+            return True                      # 하위호환 — 라우트는 항상 범위를 넘긴다
+        if viewer_scopes is UNRESTRICTED:
+            return True
+        uid = str(user_id or "").strip()
+        if uid and uid == str(row.get("created_by") or ""):
+            return True
+        scope = str(row.get("scope_id") or "").strip()
+        # ⚠️ 범위가 비어 있는 발간물은 «전사» 가 아니라 «미지정» 이다. 작성자만 본다 —
+        #   미지정을 전사 공개로 읽으면 분류하지 않은 문서가 전부 열린다.
+        return bool(scope) and scope in viewer_scopes
+
+    def get(self, publication_id: str, user_id: str = "", viewer_scopes=None) -> Dict[str, Any]:
+        """상세. **볼 수 없으면 404**(존재를 알리지 않는다 — CL §3-10 경계표).
+
+        ★ 이 메서드가 **단일 판정 지점**이다. `render`·`approve`·`publish`·`correct`·
+          `withdraw` 가 전부 여기를 지나므로, 여기만 막으면 그 경로가 함께 닫힌다.
+          라우트마다 검사를 적으면 한 곳을 빠뜨리고 그 경로만 조용히 열린다."""
         self._ensure()
         row = self._store.one("SELECT * FROM publications WHERE publication_id=?",
                               (publication_id,))
         if not row:
+            raise PublicationNotFound(publication_id)
+        if not self._visible(dict(row), user_id, viewer_scopes):
+            # 403 이 아니라 404 다 — 403 은 «있지만 못 본다» 를 알려주므로 존재가 새어나간다.
             raise PublicationNotFound(publication_id)
         p = dict(row)
         p["versions"] = [self._version_row(v) for v in self._store.query(
@@ -273,8 +322,12 @@ class Publication:
         p["can_publish"] = not p["blockers"] and p["status"] == APPROVED
         return p
 
-    def list(self, scope_id: str = "", audience: str = "", status: str = "") -> List[Dict[str, Any]]:
-        """유형·독자·상태별 검색(설계 §10.3)."""
+    def list(self, scope_id: str = "", audience: str = "", status: str = "",
+             viewer_scopes=None, user_id: str = "") -> List[Dict[str, Any]]:
+        """유형·독자·상태별 검색(설계 §10.3).
+
+        ⚠️ 목록도 `get()` 과 **같은 판정**을 지난다. 목록만 열어 두면 제목·독자·상태가 새고,
+          그것만으로도 «어느 부서가 무엇을 대외로 내보내려 하는가» 를 알 수 있다."""
         self._ensure()
         sql = "SELECT * FROM publications WHERE 1=1"
         params: List[Any] = []
@@ -292,6 +345,8 @@ class Publication:
         out = []
         for r in rows:
             d = dict(r)
+            if not self._visible(d, user_id, viewer_scopes):
+                continue
             d["gates"] = self._gates({**d, "reviews": self._store.query(
                 "SELECT * FROM publication_reviews WHERE publication_id=?",
                 (d["publication_id"],))})
@@ -301,13 +356,13 @@ class Publication:
 
     # ── 렌더 ──────────────────────────────────────────────────────────────
     def render(self, publication_id: str, actor: str,
-               renderer: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
-               ) -> Dict[str, Any]:
+               renderer: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+               viewer_scopes=None) -> Dict[str, Any]:
         """원천에서 구조화 문서를 만든다. **실패하면 상태를 올리지 않는다.**
 
         ★ 승인 이후에는 렌더하지 않는다. 승인된 문서의 내용이 나중에 바뀌면 승인자가 본 문서와
           발간된 문서가 달라지고, 그 승인은 아무것도 보증하지 않는다."""
-        p = self.get(publication_id, actor)
+        p = self.get(publication_id, actor, viewer_scopes)
         if p["status"] in (PUBLISHED, WITHDRAWN):
             raise PublicationError(f"{p['status']} 상태에서는 다시 렌더할 수 없습니다 — "
                                    f"정정판을 만드십시오.")
@@ -370,12 +425,13 @@ class Publication:
 
     # ── 승인 게이트 ───────────────────────────────────────────────────────
     def request_approval(self, publication_id: str, actor: str,
-                         review_types: Optional[List[str]] = None) -> Dict[str, Any]:
+                         review_types: Optional[List[str]] = None,
+                viewer_scopes=None) -> Dict[str, Any]:
         """검토를 요청한다. **EXTERNAL 은 두 검토가 자동으로 포함된다.**
 
         ⚠️ 요청자가 대외 발간에서 법무 검토를 빼는 것을 허용하지 않는다 — 뺄 수 있으면 언젠가
           바쁜 날에 빠진다."""
-        p = self.get(publication_id, actor)
+        p = self.get(publication_id, actor, viewer_scopes)
         if p["status"] not in (RENDERED, REVIEW_REQUESTED):
             raise PublicationError(
                 f"{p['status']} 상태에서는 검토를 요청할 수 없습니다 — 렌더 후에 요청합니다.")
@@ -406,11 +462,12 @@ class Publication:
         return out
 
     def approve(self, publication_id: str, actor: str, review_type: str,
-                status: str = REVIEW_APPROVED, comment: str = "") -> Dict[str, Any]:
+                status: str = REVIEW_APPROVED, comment: str = "",
+                viewer_scopes=None) -> Dict[str, Any]:
         """검토자가 판정한다.
 
         ⚠️ 반려에는 사유가 필요하다 — 사유 없는 반려는 작성자가 무엇을 고쳐야 하는지 모른다."""
-        p = self.get(publication_id, actor)
+        p = self.get(publication_id, actor, viewer_scopes)
         if review_type not in REVIEW_TYPES:
             raise PublicationError(f"review_type 은 {REVIEW_TYPES} 중 하나여야 합니다.")
         if status not in (REVIEW_APPROVED, REVIEW_REJECTED):
@@ -453,8 +510,8 @@ class Publication:
 
     # ── 게시 ──────────────────────────────────────────────────────────────
     def publish(self, publication_id: str, actor: str, targets: List[Dict[str, str]],
-                adapter: Optional[Callable[[Dict[str, Any], Dict[str, str]], str]] = None
-                ) -> Dict[str, Any]:
+                adapter: Optional[Callable[[Dict[str, Any], Dict[str, str]], str]] = None,
+                viewer_scopes=None) -> Dict[str, Any]:
         """승인 완료 후 배포한다.
 
         ★★ **게시 실패를 성공으로 저장하지 않는다**(작업서 §5.1). 어댑터가 실패하면 배포 기록은
@@ -462,7 +519,7 @@ class Publication:
           믿는 것이 이 규칙이 막는 사고다.
         ⚠️ 어댑터가 없으면 게시하지 않는다. 외부 시스템에 실제로 쓰는 일은 사람이 붙인 어댑터가
           있을 때만 일어난다(§3-7)."""
-        p = self.get(publication_id, actor)
+        p = self.get(publication_id, actor, viewer_scopes)
         # ★ 게이트를 **상태 검사보다 먼저** 본다. 순서가 반대면 "APPROVED 가 아닙니다"만 나오고,
         #   정작 중요한 이유("법무 검토가 아직입니다")는 사용자에게 도달하지 않는다.
         if p["blockers"]:
@@ -528,12 +585,13 @@ class Publication:
         return out
 
     # ── 정정·회수 ─────────────────────────────────────────────────────────
-    def correct(self, publication_id: str, actor: str, reason: str) -> Dict[str, Any]:
+    def correct(self, publication_id: str, actor: str, reason: str,
+                viewer_scopes=None) -> Dict[str, Any]:
         """정정판을 만든다. **원본을 덮어쓰지 않는다**(설계 §8.2-6).
 
         ★ 새 발간물을 만들고 원본을 `CORRECTED` 로 표시한다. 원본이 사라지면 그것을 읽고 판단한
           사람이 무엇을 봤는지 아무도 말할 수 없다."""
-        p = self.get(publication_id, actor)
+        p = self.get(publication_id, actor, viewer_scopes)
         if p["status"] not in (PUBLISHED, CORRECTED):
             raise PublicationError(
                 f"{p['status']} 상태에서는 정정판을 만들 수 없습니다 — 발간된 문서만 정정합니다.")
@@ -563,12 +621,13 @@ class Publication:
                        "판단한 사람이 무엇을 봤는지 말할 수 없습니다.")
         return out
 
-    def withdraw(self, publication_id: str, actor: str, reason: str) -> Dict[str, Any]:
+    def withdraw(self, publication_id: str, actor: str, reason: str,
+                 viewer_scopes=None) -> Dict[str, Any]:
         """회수한다. **이력은 남는다.**
 
         ⚠️ 회수는 "없던 일"이 아니다. 이미 읽은 사람이 있고, 그 사람이 무엇을 읽었는지는 계속
           남아야 한다."""
-        p = self.get(publication_id, actor)
+        p = self.get(publication_id, actor, viewer_scopes)
         if p["status"] == WITHDRAWN:
             return p
         if not (reason or "").strip():
