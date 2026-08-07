@@ -126,11 +126,14 @@ export function RunControls({ vm }: RunControlsProps) {
 
   // ── Release 저장 ─────────────────────────────────────────────────────────
   const doRelease = () => guard('Release 저장 중', async () => {
-    const rid = await saveRelease(pid);
-    setNote(rid
-      ? { tone: 'ok', text: `Release 를 저장했습니다 — ${rid}` }
-      // ⚠️ 실패를 조용히 넘기지 않는다. 저장된 줄 알고 화면을 닫으면 산출물이 사라진 것으로 보인다.
-      : { tone: 'bad', text: 'Release 를 저장하지 못했습니다. 산출물이 아직 준비되지 않았거나 권한이 없습니다.' });
+    const r = await saveRelease(pid);
+    // ⚠️ `r.ok` 를 본다 — 객체는 항상 truthy 라 `if (r)` 로는 실패가 성공으로 읽힌다.
+    // ⚠️ 실패 이유를 **지어내지 않는다.** 종전에는 「산출물이 아직 준비되지 않았거나 권한이
+    //   없습니다」라고 썼는데, **백엔드를 내린 상태에서도 그 문구가 나왔다** — 사용자는 산출물과
+    //   권한을 확인하러 가고 거기엔 아무 문제가 없다(2026-08-07 오프라인 검증에서 잡혔다).
+    setNote(r.ok
+      ? { tone: 'ok', text: `Release 를 저장했습니다 — ${r.releaseId}` }
+      : { tone: 'bad', text: r.message || 'Release 를 저장하지 못했습니다.' });
   });
 
   // ── 왜 못 누르는가 ───────────────────────────────────────────────────────

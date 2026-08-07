@@ -767,11 +767,14 @@ export default function ControlPanel() {
                       ? "이 프로젝트의 최종 결과물을 라이브러리에 저장(배포)하시겠습니까?"
                       : "⚠️ 고객 수용검수를 통과하지 못한 상태입니다 — 요구가 모두 충족되지 않았습니다.\n그래도 이 결과물을 라이브러리에 저장(배포)하시겠습니까?";
                     if (!confirm(msg)) return;
-                    const rid = await saveRelease(currentProjectId);
-                    if (rid) {
+                    // ⚠️ `saveRelease` 는 이제 **이유를 담은 객체**를 돌려준다. `if (r)` 로 검사하면
+                    //   객체는 항상 truthy 라 실패해도 «저장되었습니다» 가 뜬다 — `tsc` 는 이것을
+                    //   잡지 못한다(2026-08-07 실측). 반드시 `r.ok` 를 본다.
+                    const r = await saveRelease(currentProjectId);
+                    if (r.ok) {
                       alert("✅ 최종 결과물이 라이브러리에 저장되었습니다.\n런처(프로젝트 선택) 화면의 '📦 결과물 라이브러리'에서 다시 실행/미리보기 할 수 있습니다.");
                     } else {
-                      alert("❌ 결과물 저장에 실패했습니다.");
+                      alert(`❌ 결과물 저장에 실패했습니다.\n\n${r.message}`);
                     }
                   }}
                   className={`w-full text-white font-bold py-3 rounded-lg shadow-lg transition-all border ${

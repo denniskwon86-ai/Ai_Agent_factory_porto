@@ -117,7 +117,9 @@ interface FactoryStore {
   checkHotl: () => Promise<void>;
   fetchFeed: () => Promise<void>;
   fetchReleases: () => Promise<void>;
-  saveRelease: (projectId: string) => Promise<string | null>;
+  /** 성공/실패와 **이유**를 함께 돌려준다 — `null` 하나로 뭉개면 화면이 원인을 지어낸다. */
+  saveRelease: (projectId: string) =>
+    Promise<{ ok: boolean; releaseId: string | null; message: string }>;
   viewRelease: (releaseId: string) => Promise<void>;
   closeRelease: () => void;
   deleteRelease: (releaseId: string) => Promise<void>;
@@ -420,18 +422,43 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
+  /** ★★ [2026-08-07 오프라인 검증] **실패 이유를 돌려준다.**
+   *
+   *  종전에는 네트워크 오류·403·409·500 을 전부 `null` 하나로 뭉갰고, 화면은 그것을 받아
+   *  「산출물이 아직 준비되지 않았거나 권한이 없습니다」라는 **그럴듯한 원인을 지어냈다.**
+   *  백엔드를 내린 상태에서 실측하니 서버가 죽었는데도 그 문구가 나왔다 — 사용자는 산출물과
+   *  권한을 확인하러 가고, 거기엔 아무 문제가 없다.
+   *
+   *  ⚠️ 반환 타입을 바꿨으므로 호출부 둘(`ControlPanel`·`RunControls`)을 **함께** 고쳤다.
+   *    한쪽만 고치면 그 화면만 계속 원인을 지어낸다. */
   saveRelease: async (projectId: string) => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/${projectId}/release`, { method: 'POST' });
       if (res.ok) {
         const r = await res.json();
         await get().fetchReleases();
-        return r.release_id || null;
+        return { ok: true as const, releaseId: r.release_id || null, message: '' };
       }
+      const j = await res.json().catch(() => ({} as any));
+      const detail = typeof j?.detail === 'string' ? j.detail : '';
+      return {
+        ok: false as const,
+        releaseId: null,
+        // 서버가 이유를 말했으면 **그대로** 쓴다. 없을 때만 상태 코드로 갈라 쓴다.
+        message: detail || (res.status === 403 || res.status === 401
+          ? '이 프로젝트의 릴리스를 저장할 권한이 없습니다.'
+          : res.status === 409 ? '이미 저장된 릴리스가 있거나 저장할 수 없는 상태입니다.'
+            : `서버가 저장을 거부했습니다 (${res.status}).`),
+      };
     } catch (error) {
       console.error("최종 결과물 저장 실패:", error);
+      // ⚠️ 여기는 **서버에 닿지 못한 것**이다 — 산출물·권한 문제가 아니다.
+      return {
+        ok: false as const, releaseId: null,
+        message: '서버에 연결하지 못했습니다 — 산출물이나 권한 문제가 아닙니다. '
+          + '백엔드가 떠 있는지 확인한 뒤 다시 시도하십시오.',
+      };
     }
-    return null;
   },
 
   viewRelease: async (releaseId: string) => {
