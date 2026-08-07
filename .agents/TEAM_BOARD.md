@@ -37,6 +37,25 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [CONSOLIDATE-62] 서브 세션·미커밋 작업 일괄 확정 및 푸시 — 일부러 뺀 3건이 있다
+- 작성자 / 기록 시각: Claude Code / 2026-08-07 14:4x KST
+- 왜 지금 기록하는가: Supervisor 지시로 흩어져 있던 미커밋 작업을 전부 확정하고 `origin/dev` 에 푸시했다. **일부러 뺀 3건**과 **아직 남은 워크트리 3개**는 기록하지 않으면 다음 사람이 「빠뜨렸나」로 읽고 다시 커밋하려 한다.
+- 근거: 커밋 `55064e36e`(서브 세션) · `0e4dd43fc`(병합) · `d9e1a6336`(재배치) · `7aa1c062b`(팀 산출물 63건) · 푸시 `7fac1c503..7aa1c062b`
+- 상태: **완료** · 워크트리 제거만 **권한 정책에 막혀 보류**
+- 결정 및 근거:
+  - **서브 세션(`claude/vibrant-jemison-761740`) 통합.** 에이전트 집계 `call_id`·시간창 + PMO 공급자 실패 가드(7파일 · +707). 분기점이 `643b83d4f` 라 D-019 와 겹치는 파일은 `core/llm_gateway.py` 하나였고, 같은 로그 dict 의 다른 줄이라 자동 병합됐다(둘 다 살아 있음을 확인).
+  - **문서 재배치 26건은 전부 «이름변경» 이었다.** `git status` 가 삭제 27건으로 보여 「누가 문서를 지웠나」로 읽히던 상태를 확정 커밋으로 풀었다. 내용 변경 0.
+  - ★ **클론이 깨지던 문제가 해소됐다.** `frontend/src/index.css` 가 `@import` 하는 `design/product-shell.css` 가 미추적이었다(MERGE-VERIFY-59 가 남긴 항목). 커밋 후 `npm run build` 성공·CSS 155kB 로 실제 번들 반영을 확인했다.
+  - ⚠️⚠️ **일부러 뺀 3건 — 작업 트리에 그대로 있다. 다시 커밋하지 말 것.**
+    · `agents_registry.json` — 한 번도 추적된 적 없는 런타임 로컬 파일. `core/agent_registry.py` 에 `DEFAULT_REGISTRY` 폴백이 있어 없어도 동작하고, 커밋하면 **이 PC 의 레지스트리가 전 팀 기준선**이 된다.
+    · `data/planning.db.bak_backfill_20260805_143226` / `data/collaboration.db.bak_backfill_*` — `.gitignore:35` 의 `*.db` 가 막으려던 것인데 `.bak_` 확장자라 빠져나왔다. **planning.db 는 매출·원가 전망이 담기는 표**이고 origin 은 GitHub 다 — 푸시하면 저장소 이력에 영구히 남는다. 저장소 밖 백업 위치로 옮길 것.
+- 영향·주의사항:
+  - **`nice-hawking-f8b4bf` 워크트리는 고유 내용이 0건이다.** 15개 파일 전수 대조 결과 `PreviewPanel.tsx` 차이는 줄바꿈(CRLF)뿐이고, `AdaptiveProductionStudio.tsx`·`studio.css` 는 **dev 가 오히려 앞서 있다**(`RunControls` 배선 · `run-controls` 스타일 75줄). 지워도 잃을 것이 없다.
+  - `vibrant-moore-a92165` 는 README 뿐인 고아 브랜치다(코드 없음).
+  - ⚠️ 전체 스위트 실행 중 `projects/__track_g_probe__` 가 사라졌다. 이전 세션이 흘린 **탐침 디렉터리**이며 실제 프로젝트가 아니다(`project_meta.json` 55개로 인계 문서와 동일). `test_track_g_route_sealing.py::test_probe_does_not_leak_into_real_projects_dir` 가 이것을 감시한다.
+- 다음 행동 / 담당 / 착수 조건: **Supervisor** — 워크트리 3개 제거는 `git worktree remove --force` 가 필요해 권한 정책에 막혔다. 승인하거나 직접 실행할 것(브랜치는 남으므로 되돌릴 수 있다). **Claude Code** — 트랙 B P4-3 로 진행.
+- 교대 체크포인트: 마지막 확인 상태 = 전체 pytest **2,451 passed · 1 skipped**(153s, 신규 27건 포함) · `tsc -b` exit 0 · `npm run build` 성공. 변경 = 위 커밋 4건. 미변경 = 제외 3건(작업 트리 잔류) · `projects/` 실제 프로젝트 55개. 검증 증거 = 병합 후 주 저장소 전체 스위트(워크트리 결과는 `.env` 부재로 판정 불가라 재실행) · 프론트 빌드 산출물. 커밋/푸시 = **둘 다 수행**(`7aa1c062b`). 재개 지점 = 트랙 B P4-3. 금지 범위 = 제외 3건 커밋 · `git add -A` 후 무검토 커밋 · DB 백업을 저장소에 올리기.
+
 ### [ORG-ATTRIB-61] P4-2 부서 귀속률 0% — 값이 없던 게 아니라 **배선이 없었다**
 - 작성자 / 기록 시각: Claude Code / 2026-08-07 12:2x KST
 - 왜 지금 기록하는가: 원인 규명(조사 전용 세션)에서 미뤄 둔 **정본 결정(D-019)** 을 확정하고 배선까지 넣었다. 이 항목이 없으면 다음 사람이 「미상이 아직 많다」를 결함으로 보고 **추정 백필**을 하게 된다 — 그것이 이 작업에서 가장 하면 안 되는 일이다.
@@ -53,7 +72,7 @@
   - ⚠️ **`org_directory` 싱글턴의 `db_path` 는 conftest 가 격리하지 않는다**(절대경로라 `chdir` 로도 안 된다). 조직도에 의존하는 테스트는 명시적으로 돌려야 하며, 안 그러면 폴더에 따라 결과가 달라진다 — `tests/test_dept_attribution.py` 의 `org` 픽스처 참고.
   - ⚠️ 미태깅 프로젝트는 계속 «미상» 으로 남는다. **줄어드는 것은 앞으로 쌓이는 분뿐이다** — 이것을 결함으로 오인해 백필하지 말 것.
 - 다음 행동 / 담당 / 착수 조건: **Codex** 가 거버넌스 콘솔에 조직 운영 현황을 붙인다(수용 기준 6개·금지 3개는 이관 문서에). 착수 조건 없음 — 서버는 이미 응답한다. **Claude Code** 는 트랙 B P4-3·P4-4 로 진행한다.
-- 교대 체크포인트: 마지막 확인 상태 = 전체 pytest **2,424 passed · 1 skipped**(183s). 변경 = `.agents/DECISIONS.md`(D-019) · `state_models.py` · `api/routes/factory_control.py` · `core/llm_gateway.py` · `core/quality_telemetry.py` · `core/org_operations.py` · 신규 테스트 1파일(20건) · 이관 문서 1건. 미변경 = RAG·권한 필터 계약 · 기존 로그 레코드 · `project_meta.json` 55개 · 프론트엔드 전체. 검증 증거 = 전체 스위트 · 스위트 전후 `projects/` 57개 동일(격리 확인) · `departments` 활성 12개 무변경. 커밋/푸시 = 커밋 `9fd420f18`(10파일, 사용자 승인 후 수행) · **푸시 미수행**. ⚠️ 작업 트리에 이 세션과 무관한 미추적 문서 이동분이 남아 있어 **일괄 스테이징하지 않았다** — `git add -A` 로 쓸어 담지 말 것. 재개 지점 = 트랙 B P4-3. 금지 범위 = `owner_dept_id` 에 node_id 넣기 · 53개 추정 백필 · `coverage.note` 제거 · 귀속률을 0 아닌 값으로 보이게 만들기 · 운영 DB 쓰기 탐침.
+- 교대 체크포인트: 마지막 확인 상태 = 전체 pytest **2,424 passed · 1 skipped**(183s). 변경 = `.agents/DECISIONS.md`(D-019) · `state_models.py` · `api/routes/factory_control.py` · `core/llm_gateway.py` · `core/quality_telemetry.py` · `core/org_operations.py` · 신규 테스트 1파일(20건) · 이관 문서 1건. 미변경 = RAG·권한 필터 계약 · 기존 로그 레코드 · `project_meta.json` 55개 · 프론트엔드 전체. 검증 증거 = 전체 스위트 · 스위트 전후 `projects/` 57개 동일(격리 확인) · `departments` 활성 12개 무변경. 커밋/푸시 = 커밋 `9fd420f18` · **푸시 완료**(`7aa1c062b` 시점, `origin/dev`). 재개 지점 = 트랙 B P4-3. 금지 범위 = `owner_dept_id` 에 node_id 넣기 · 53개 추정 백필 · `coverage.note` 제거 · 귀속률을 0 아닌 값으로 보이게 만들기 · 운영 DB 쓰기 탐침.
 
 ### [FACTORY-STUDIO-60] SW Factory Studio 3~6단계 — 화면을 하나 더 만들 때마다 기존 화면의 거짓이 드러났다
 - 작성자 / 기록 시각: Claude Code / 2026-08-06 KST
