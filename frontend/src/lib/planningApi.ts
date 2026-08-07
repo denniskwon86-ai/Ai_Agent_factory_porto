@@ -71,10 +71,24 @@ export type Scenario = {
   scenario_id: string; name: string; org_id: string; baseline_kind: string; status: string;
 };
 
+/** ⚠️ [이관 F 6/8] 상태 코드를 실어 던진다 — 화면이 «권한이 없어 못 봤다» 와 «서버가 죽었다»
+ *  를 구분해야 한다. `closedLoopFetch.ApiError`·`shadowApi`·`workspaceApi` 와 같은 규약이다. */
+export type ApiError = Error & { status?: number };
+
+function fail(status: number, j: any): never {
+  const d = j?.detail;
+  const msg = typeof d === 'string' ? d
+    : Array.isArray(d) ? d.map((e: any) => e?.msg || JSON.stringify(e)).join(' · ')
+      : `요청 실패 (${status})`;
+  const err = new Error(msg) as ApiError;
+  err.status = status;
+  throw err;
+}
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${API_BASE_URL}${path}`);
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.detail || `요청 실패 (${r.status})`);
+  if (!r.ok) fail(r.status, j);
   return j.data as T;
 }
 
@@ -85,7 +99,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.detail || `요청 실패 (${r.status})`);
+  if (!r.ok) fail(r.status, j);
   return j.data as T;
 }
 
