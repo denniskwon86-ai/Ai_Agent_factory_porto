@@ -134,7 +134,7 @@ export function GlobalNav({ primary, groups, right }: {
             position: 'fixed', top: pos.top, left: pos.left, width: pos.width,
             maxHeight: pos.maxH, zIndex: 70,
           }}
-          className="overflow-y-auto bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-5
+          className="afs-product-shell afs-global-menu overflow-y-auto bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-5
                      grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
         >
           {groups.map((g) => (

@@ -439,9 +439,9 @@ Factory project/mega/library API, Program lifecycle API, Briefing status.
 |---|---|---|
 | 상단 Workflow Map | WorkflowStrip + registry | 전체 단계, 현재 위치, 완료·진행·대기·차단·승인 상태 상시 노출 |
 | 좌측 WBS Spine | ControlPanel WBS | 태스크, 선후행 의존관계, 담당 Agent, 잠금·차단 이유 상시 노출 |
-| 중앙 Focus Surface | ControlPanel + PreviewPanel | 현재 입력·작업·산출물·Diff를 넓게 확대하고 실행 제어 제공 |
+| 중앙 Adaptive Canvas | ControlPanel + PreviewPanel | 현재 단계에 따라 요구 질문·문서·구조·WBS·생성 SW·검증·Release 화면으로 전환 |
 | 중앙 사용자 결정/Jarvis | HOTLInput + Supervisor Chat | 현재 작업·산출물 아래의 하단 카드에 사용자 검토·승인을 조건부 상단 행으로 표시하고 Jarvis를 그 아래 상시 제공. 화면 끝과 좌우에 여백을 두며 결정 0건이면 결정 행을 접고 확보된 높이를 현재 작업에 반환 |
-| 우측 상태·실행 기록 | TimelinePanel + SSE | 수행 이유, 다음 자동 전환, 최근 Agent 판단과 상태 전환을 시간순으로 표시 |
+| 우측 근거·상태 Inspector | TimelinePanel + SSE | 요청 시 오버레이로 열어 수행 이유, 다음 자동 전환, 최근 Agent 판단과 상태 전환을 표시. 영구 열 금지 |
 
 **신규 기획 Product Brief**
 
@@ -451,6 +451,14 @@ Factory project/mega/library API, Program lifecycle API, Briefing status.
 - WBS가 생성되기 전에는 빈 태스크 목록을 노출하지 않고, 생성 예정 단계·산출물·승인 계약을 같은 Spine 위치에 표시한다. WBS 생성 후에는 태스크·의존관계·담당 Agent로 즉시 전환한다.
 - 상단 Workflow Map은 장식용 요약이 아니라 AI 오케스트레이션의 명시적 상태 지도다. 클릭하면 해당 단계의 입력·산출물·판정·재작업 이력을 중앙에서 탐색한다.
 - 사용자는 현재 작업에 집중하면서도 전체 중 어디에 있는지, 무엇이 완료됐고 무엇이 왜 멈췄는지, 다음에 어떤 Agent와 WBS가 실행되는지를 한 화면에서 확인할 수 있어야 한다.
+
+**Adaptive Canvas와 최종 산출물**
+
+- 구현 단계의 기본 화면은 소스코드가 아니라 실행 가능한 App-in-App SW다.
+- `실행 → 사용자 검토 → 구현 상세` 순서로 제공한다. 구현 상세에서만 코드·API·테스트·Diff를 기본 노출한다.
+- 보고서 산출물은 문서 Viewer로 표시하고, 요구사항·근거·버전·검토 의견을 연결한다.
+- 생성 앱은 플랫폼 SSO·회사/조직 범위·감사로그를 상속한다. 하위 앱에 독자 로그인·회원·권한관리 기능을 만들지 않는다.
+- `selectedStage`와 실제 `currentStage`를 분리하여 과거 단계를 탐색해도 실행 상태가 바뀐 것처럼 표시하지 않는다.
 
 **Atlas/Supervisor 제공 방식**
 
@@ -469,6 +477,9 @@ Factory project/mega/library API, Program lifecycle API, Briefing status.
 
 **API**  
 Factory sprint/hotl/wbs/feed/state/revision/heal/replan/resimulate/export/traceability와 `/ws/timeline`.
+
+**채택 기준**
+Supervisor 확정 시안과 React 이식 계약은 `uiux-prototypes/sw-factory-concepts/adaptive-production-studio/` 및 `docs/uiux/SW_FACTORY_ADAPTIVE_PRODUCTION_STUDIO_IMPLEMENTATION_SPEC_2026-08-04.md`를 SSOT로 사용한다.
 
 ---
 

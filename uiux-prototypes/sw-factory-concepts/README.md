@@ -1,5 +1,8 @@
 # SW 생성기 UI 재설계 비교안
 
+> **최종 채택(2026-08-04): E · Adaptive Production Studio**
+> 실제 React 구현 계약: `docs/uiux/SW_FACTORY_ADAPTIVE_PRODUCTION_STUDIO_IMPLEMENTATION_SPEC_2026-08-04.md`
+
 ## 작성 배경
 
 기존 `WorkflowStrip + ControlPanel + TimelinePanel + PreviewPanel + HOTLInput`은 기능별 책임이 분리된 검증된 기준선이다. 2026-07-31 R2 시안은 기능을 보존한다는 이유로 요구 입력, 기획 산출물, WBS, Timeline, Preview, 품질, Atlas를 한 화면에 동시에 노출해 원본보다 복잡해졌다. R2는 확정안에서 제외한다.
@@ -24,7 +27,6 @@
 - Jarvis는 중앙에서 사용자 결정과 Agent 작업을 연결하고, 전체 Workflow와 WBS 문맥을 바탕으로 Task ID 없이 병목과 다음 행동을 설명한다.
 - 사용자 결정 대기와 Jarvis는 현재 작업·산출물 아래의 중앙 하단부에 상하로 배치하되 화면 바닥에 붙인 고정 바처럼 만들지 않는다. 좌우·하단 여백을 둔 독립 상호작용 카드로 표시하고, 결정이 0건이면 결정 행을 접어 Jarvis만 남기며 확보된 높이는 현재 작업 영역에 돌려준다.
 - 1280×720 기준 결정이 있으면 상호작용 카드는 약 170~180px, 결정이 없으면 Jarvis 단독 약 110~120px를 확보한다.
-- 1280×720 기준 결정이 있으면 상호작용 카드는 약 170~180px, 결정이 없으면 Jarvis 단독 약 110~120px를 확보한다.
 - 핵심 상태·결정·질문·작업 설명은 11px 미만으로 축소하지 않는다. 주요 제목 14px 이상, 본문과 선택 버튼 12px 이상을 기본으로 삼는다.
 - WBS 생성 전에는 빈 태스크 패널 대신 앞으로 생성될 단계와 산출물 계약을 표시한다.
 
@@ -36,5 +38,8 @@
 | B · Guided Journey | 단계별 한 화면 집중 | 초보 사용자가 무엇을 할지 가장 명확 | 신규 사용자·기획 단계 |
 | C · Focus Workbench | 중앙 탭 작업대 + Atlas Drawer | 넓은 작업면과 낮은 정보 밀도 | 산출물 검토·실행 중심 |
 | D · Transparent Orchestration | 전체 Flow + WBS + 현재 작업 + 사용자 결정/Jarvis + 실행 기록 | 진행을 암묵지로 만들지 않으면서 현재 작업도 확대 | 기본 SW 제작 통제실 |
+| **E · Adaptive Production Studio** | 밝은 전체 Flow + WBS + 단계별 Adaptive Canvas + Decision/Jarvis Dock | 투명성을 유지하면서 현재 단계와 생성 SW를 가장 크게 표현 | **최종 채택 · React 이식 기준** |
 
 2026-07-31 재검토에서 `B → C`를 기본 구조로 삼는 권고를 철회했다. B의 안내 방식과 C의 넓은 작업면은 D의 중앙 작업 모드로 흡수하되, 전체 Workflow·WBS·의존관계·Agent 상태·HOTL은 D에서 상시 노출한다. A는 기능 회귀 검사와 숙련자용 통합 관제 가능성의 참고 자료로 유지한다.
+
+2026-08-04 재검토에서는 D의 정보 밀도와 기술 통제 콘솔 인상을 해소하기 위해 E를 신설했다. E는 상단 전체 제작 단계와 좌측 WBS를 고정해 진행상황을 숨기지 않으면서, 중앙 작업면을 현재 단계에 따라 요구 구체화·문서 검토·구조 설계·생성 SW 실행·품질 검증·Release 화면으로 바꾼다. 우측 상시 상태 패널은 근거·상태 Inspector로 전환하고 Jarvis는 중앙 하단의 단일 인터페이스만 유지한다.

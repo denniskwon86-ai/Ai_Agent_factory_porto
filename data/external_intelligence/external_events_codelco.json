@@ -1,0 +1,32 @@
+{
+  "event_id": "EVT_CODELCO_SHOCK_2026",
+  "event_type": "MARKET_INTELLIGENCE",
+  "title": "Codelco 2026 생산량 쇼크 및 조달 리스크",
+  "severity": "HIGH",
+  "source_id": "SRC_GLOBAL_MINING_NEWS",
+  "observation_cutoff_date": "2026-07-29",
+  "impact_drivers": [
+    {
+      "internal_metric_id": "KPI_COPPER_CONCENTRATE_PREMIUM",
+      "direction": "INCREASE",
+      "impact_value_percent": 15.0,
+      "description": "정광 매입 프리미엄 15% 상승 예상",
+      "effective_period": "2026Q3 - 2027Q2"
+    },
+    {
+      "internal_metric_id": "KPI_TC_RC_FEE",
+      "direction": "DECREASE",
+      "impact_value_percent": -25.0,
+      "description": "제련 수수료(TC/RC) 25% 급락 예상 (마진 압박)",
+      "effective_period": "2026Q3 - 2027Q2"
+    },
+    {
+      "internal_metric_id": "OP_VOLUME_COPPER_CONCENTRATE",
+      "direction": "DECREASE",
+      "impact_value_percent": -10.0,
+      "description": "원자재 조달 물량 10% 축소 리스크",
+      "effective_period": "2026Q3 - 2026Q4"
+    }
+  ],
+  "evidence_ref": "Codelco_Market_Report_2026.md"
+}

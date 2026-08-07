@@ -1,5 +1,7 @@
 # AI Factory Studio — LLM 구현 마스터 명세서
 
+> **최신 실행 기준(2026-08-03):** 이 문서는 기능별 상세 요구사항의 기준으로 유지한다. 다만 §14의 기존 단계 순서는 이후 구현 진척과 경쟁 기준점 재검토 이전에 작성된 상위 계획이다. 최신 제품 범주·차별화 판단은 [`strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md`](strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md), 실제 착수 순서·선행조건·완료 관문은 [`roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md`](roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md)를 우선한다. 핵심 순서는 **CL-0.5/Host Runtime 안전 경계 → 원료 구매 수직 의미 모델 → 운영 앱 전달·수락 → 결정론적 Twin → 의사결정·실행·효과 폐루프 → 엔터프라이즈 제품화**이다.
+
 > **Enterprise Context Master 선행 규칙(2026-07-28):** 이후 구현되는 MDM, 카탈로그, MCP, 권한, 상담사, SW 생성기, 시뮬레이션은 `tenant → 기업집단 → 법인 → 사업부 → 사업장/공장` 문맥과 실제/가상/경쟁사 상태를 명시적으로 가져야 한다. 상세 모델·API·복제·격리 규칙은 [`design_enterprise_context_master.md`](design_enterprise_context_master.md)를 SSOT로 한다.
 
 > **앱 전달·의사결정·발간 확장안(2026-08-03):** 생성 앱의 지정 사용자 전달·수락·내 앱 등록, App-in-App 인증 상속, 시뮬레이션 기반 Decision Package·회의 요청·세 관점 검토서·대내외 발간의 상세 구현 준비안은 [`design_app_delivery_decision_publication_loop.md`](design_app_delivery_decision_publication_loop.md)를 따른다. 현재는 상세기획 상태이며 구현 완료로 간주하지 않는다.
@@ -403,6 +405,17 @@ Connector Registry
 - 기본은 최소 권한, 읽기 전용, 짧은 TTL 캐시다.
 - 원천의 민감 데이터는 모델 프롬프트로 무제한 전달하지 않는다.
 - 모든 조회에는 요청자, 목적, 데이터 범위, 시각, 결과 요약을 감사 로그로 남긴다.
+
+#### 7.2.1 외부 협업 레거시 경계 확정
+
+- 거래처·관세사·포워더·운송사는 고객사가 이미 운영하는 공급사·협력사·물류·통관 시스템에서 데이터를 입력한다고 전제한다. LS 환경의 LPL(LS Partner's Lounge)은 첫 Reference Profile이다.
+- AI Factory Studio에는 외부 사용자 계정·파트너 조직·파트너용 앱 화면을 만들지 않는다.
+- 고객사 기존 시스템은 외부 협업 System of Engagement로 유지하고 첫 연계는 읽기 전용 MCP/API/DB View/Export로 제한한다.
+- 원천키·사건 ID·버전·발생/수정/조회 시각을 보존하고 Crosswalk로 내부 표준 의미와 연결한다.
+- 목록·증분 사건은 단일 `fetch()`가 아니라 cursor 기반 `query/changes_since` 계약으로 조회한다.
+- 정정·취소·재수신은 `(system_id, source_event_id, source_version)` 멱등키로 처리한다.
+- 기존 시스템으로 쓰기는 별도 Action Contract, 사용자 확인, 감사, Shadow 검증 전에는 금지한다.
+- 특정 고객사 시스템명과 물리 필드는 Adapter Profile로 격리하고 제품 코어에 하드코딩하지 않는다.
 
 ### 7.3 Shadow Mode
 

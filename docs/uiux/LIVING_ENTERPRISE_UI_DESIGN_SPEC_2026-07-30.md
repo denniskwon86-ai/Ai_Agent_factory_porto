@@ -164,7 +164,7 @@ type EnterpriseBrandTheme = {
 
 | Studio | 좌측 | 중앙 | 작업 Inspector | Atlas 제공 방식 |
 |---|---|---|---|---|
-| Software Factory | 신규 기획에서는 요구 입력, 실행 단계에서는 Control/WBS | Supervisor Timeline 또는 현재 집중 작업 | Preview/Artifact 또는 현재 단계 보조 정보 | Supervisor Console 통합이 기본, Context Drawer 병행. 별도 네 번째 고정 열 금지 |
+| Software Factory | Production Stage Map + WBS Spine | 단계별 Adaptive Canvas. 구현 기본은 생성 SW 실행 | 요청형 근거·상태 Inspector | 중앙 하단 Decision/Jarvis 단일 Dock + 긴 대화 Drawer. 별도 고정 Rail 금지 |
 | Agent Studio | Template·추천 구성 | Agent Workflow Canvas | 선택 Agent·Workflow Health·Model·Skill·HOTL·복구 | Agent 구성·비용·품질·연결 영향 질의 |
 | Digital Twin | 기준선·시나리오 목록 | KPI + Value Flow + Scenario Result | 가정·외부동인·공식·신뢰도 | 결과 원인·불확실성·대안·보고서 생성 질의 |
 
@@ -348,15 +348,18 @@ Atlas가 긴 답변을 할 때 화면 전체를 덮지 않는다. 답변은 접�
 #### `/build/projects/:id`
 
 - Top: 실제 Graph 기반 Workflow Production Line 약 108px. 완료·진행·승인대기·재작업·실패·차단과 현재 위치를 항상 표시.
-- Body: WBS·의존관계 Spine 260~280px / 현재 작업·산출물 Focus Surface 가변 / 수행 이유·다음 전환·실행 기록 300~340px.
+- Body: WBS·의존관계 Spine 238~260px / 현재 단계에 따라 내용이 바뀌는 Adaptive Production Canvas 가변. 영구 우측 상태 열은 두지 않는다.
 - 중앙은 `현재 작업 툴바 → 현재 작업·산출물 → 사용자 상호작용 카드` 순서로 배치한다. 사용자 결정 대기와 Jarvis Console은 하단 상호작용 카드 안에서 상하로 배치하되 화면 바닥에 붙이지 않고 좌우·하단에 14px 이상의 여백을 둔다.
 - 사용자 결정이 1건 이상이면 긴급 결정 행을 Jarvis 위에 표시한다. 0건이면 결정 행을 완전히 접고 Jarvis만 남기며, 확보된 높이는 현재 작업·산출물 영역에 돌려준다. 별도의 빈 결정 카드나 화면 끝 고정 바는 표시하지 않는다.
 - 1280×720 기준 상호작용 카드는 결정 있음 170~180px, 결정 없음 110~120px를 권장한다. 결정 설명·영향·질문 입력·대표 질문이 서로 눌리지 않도록 각 행에 충분한 수직 여백을 둔다.
-- 1280×720 기준 상호작용 카드는 결정 있음 170~180px, 결정 없음 110~120px를 권장한다. 결정 설명·영향·질문 입력·대표 질문이 서로 눌리지 않도록 각 행에 충분한 수직 여백을 둔다.
-- 1280px 기준 주요 제목은 14px 이상, 상태·설명·선택 버튼은 12px 이상, 보조 메타데이터도 11px 이상을 원칙으로 한다. 전체 정보를 한 화면에 넣기 위해 8~10px 글자를 남발하지 않는다.
-- 실시간 Agent 기록은 우측 상태 영역에 시간순으로 표시하고, 전체 로그는 중앙 집중 모드로 확대한다.
-- 보고서·코드·Preview·Diff는 중앙 Focus Surface에서 전환한다. 전체 단계와 WBS를 숨기는 별도 페이지로 이동하지 않는다.
+- 1280px 기준 주요 제목은 14px 이상, 상태·설명·선택 버튼과 보조 메타데이터는 12px 이상을 원칙으로 한다. 전체 정보를 한 화면에 넣기 위해 8~10px 글자를 남발하지 않는다.
+- `근거·상태`를 누르면 우측 오버레이 Inspector에서 수행 이유·다음 전환·최근 Agent 기록을 표시한다. Inspector는 Canvas를 영구 축소하지 않으며 전체 로그는 중앙 집중 모드에서 확대한다.
+- 구현 단계의 기본 산출물은 **생성 SW 실행 미리보기**다. 사용자 검토가 그다음이며 코드·API·테스트·Diff는 `구현 상세`에서 연다.
+- 보고서 결과물은 실제 페이지 비율의 문서 Viewer로 표시한다. Markdown/JSON 원문을 기본 사용자 화면으로 사용하지 않는다.
+- 요구 확인·RFP·기획·아키텍처·WBS·구현·검증·Release는 같은 Canvas를 사용하되 각 단계 목적에 맞는 화면으로 전환한다. 전체 단계와 WBS는 계속 보인다.
 - HOTL/Quota/Failure는 본문보다 위에 sticky bar.
+
+Supervisor가 2026-08-04 채택한 세부 구현 계약은 `SW_FACTORY_ADAPTIVE_PRODUCTION_STUDIO_IMPLEMENTATION_SPEC_2026-08-04.md`를 따른다.
 
 ### 5.3 Collaboration
 

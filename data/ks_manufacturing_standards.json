@@ -1,0 +1,56 @@
+{
+  "version": "KS-ISO-STD-2026.2-MAINSTREAM",
+  "description": "LS MnM 등 비철금속/동제련/배터리소재/자동차부품 메인스트림 업종용 KS 및 ISO 표준 규격 데이터",
+  "standards": [
+    {
+      "standard_id": "KS_D_5101_COPPER",
+      "title": "동 및 동합금 봉/관/판 한국산업표준 (Copper and Copper Alloy Standards)",
+      "category": "비철금속 소재",
+      "key_directives": [
+        "전해정련 동(Electrolytic Cathode Copper) 순도 99.99% 이상 유지 필수",
+        "용탕(Molten Metal) 온도 및 산소 함량 1,150℃ ± 10℃ 제어 통제",
+        "LME(London Metal Exchange) A급 등록 브랜드 품질 기준 충족"
+      ],
+      "agent_decision_rules": {
+        "on_purity_drop": "순도가 99.95% 이하로 저하 시 전해조 전류 밀도(Current Density) 자동 감속 및 슬라임 정제 작업 발동",
+        "on_furnace_temp_anomaly": "용해로 온도 1,170℃ 초과 시 버너 밸브 자동 15% 닫힘 제어"
+      }
+    },
+    {
+      "standard_id": "ISO_14001_45001_CHEM_SAFETY",
+      "title": "환경경영 및 안전보건경영시스템 (황산/배터리소재 화학 공정)",
+      "category": "환경 & 공정안전",
+      "key_directives": [
+        "황산/아황산가스(SO2) 누출 방지 스크러버(Scrubber) 세정액 농도 실시간 측정",
+        "PSM(공정안전관리) 12대 실천 과제 및 중대재해 예방 규정 엄수"
+      ],
+      "agent_decision_rules": {
+        "on_so2_leak_warning": "SO2 감지 농도 > 2.0ppm 발생 시 해당 구역 환기 팬 100% 가동 및 비상 알람 자동 전송"
+      }
+    },
+    {
+      "standard_id": "IATF_16949_AUTOMOTIVE_PARTS",
+      "title": "자동차 산업 품질경영시스템 규격 (Automotive Quality Management)",
+      "category": "자동차 부품 소재",
+      "key_directives": [
+        "FMEA(고장형태 영향분석) 기반 공정 위험도(RPN) 관리",
+        "SPC(통계적 공정제어) 관리도 상 4개 연속 포인트 상승/하강 시 이상 징후 판정"
+      ],
+      "agent_decision_rules": {
+        "spc_rule_violation": "SPC 8개 연속 표준편차 1시그마 이탈 시 금형 정밀 점검 태스크 자동 생성"
+      }
+    },
+    {
+      "standard_id": "KS_D_8301_SURFACE_TREATMENT",
+      "title": "금속 양극산화 및 표면도금 처리 표준 (Anodizing & Electroplating Standards)",
+      "category": "뿌리 표면처리",
+      "key_directives": [
+        "도금 두께 피막 15㎛ ± 2㎛ 범위 strict 관리",
+        "도금조(Plating Tank) pH 및 화학 약품 농도 정기 자동 적정(Titration)"
+      ],
+      "agent_decision_rules": {
+        "plating_thickness_error": "피막 두께 미달 시 전기도금 정류기(Rectifier) 전압 +5% 자동 보정"
+      }
+    }
+  ]
+}

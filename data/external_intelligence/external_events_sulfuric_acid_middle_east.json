@@ -1,0 +1,18 @@
+{
+  "event_id": "EVT_SULFURIC_ACID_MIDDLE_EAST_BOOM",
+  "event_type": "BYPRODUCT_REVENUE_BOOM",
+  "title": "중동 유황 공급망 붕괴에 따른 황산 판매가 폭등 (마진 방어)",
+  "severity": "HIGH",
+  "source_id": "SRC_GLOBAL_CHEMICAL_INDEX",
+  "last_updated": "2026-07-29 18:52:58",
+  "impact_drivers": [
+    {
+      "internal_metric_id": "KPI_SULFURIC_ACID_PRICE",
+      "direction": "INCREASE",
+      "impact_value_percent": 150.0,
+      "description": "글로벌 황산 Spot 단가 150% 급등 (제련 수수료 적자 완전 상쇄)",
+      "effective_period": "2026Q1 - 2026Q4"
+    }
+  ],
+  "evidence_ref": "Sulfuric_Acid_Market_Dynamics_2026.md"
+}

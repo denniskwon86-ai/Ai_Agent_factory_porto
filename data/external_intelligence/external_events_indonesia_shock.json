@@ -1,0 +1,25 @@
+{
+  "event_id": "EVT_INDONESIA_GRASBERG_SHOCK",
+  "event_type": "SUPPLY_CHAIN_RISK",
+  "title": "인도네시아 Grasberg 광산 복구 지연 (악재)",
+  "severity": "HIGH",
+  "source_id": "SRC_GLOBAL_MINING_NEWS",
+  "observation_cutoff_date": "2026-07-29",
+  "impact_drivers": [
+    {
+      "internal_metric_id": "KPI_COPPER_CONCENTRATE_PREMIUM",
+      "direction": "INCREASE",
+      "impact_value_percent": 10.0,
+      "description": "인니발 물량 부족으로 현물(Spot) 조달 프리미엄 10% 추가 상승",
+      "effective_period": "2026Q3 - 2027Q1"
+    },
+    {
+      "internal_metric_id": "OP_LOGISTICS_COST",
+      "direction": "INCREASE",
+      "impact_value_percent": 5.0,
+      "description": "긴급 타지역 조달에 따른 해상 운임 등 물류비 5% 상승",
+      "effective_period": "2026Q3 - 2026Q4"
+    }
+  ],
+  "evidence_ref": "Global_Copper_Supply_Chain_Report_2026.md"
+}

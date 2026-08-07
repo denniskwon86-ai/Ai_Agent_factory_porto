@@ -1,0 +1,157 @@
+/*
+ * 제품 공통 셸 — Living Enterprise Canvas 기준선
+ *
+ * 2026-08-04 전역 Tailwind 숫자 반전을 철회하면서 런처·통제실은 다시 다크, 새 허브만
+ * 라이트가 되는 혼합 상태가 생겼다. 숫자 스케일을 전역에서 뒤집지 않고, 제품으로 명시한
+ * `.afs-product-shell` 안에서만 같은 유틸리티가 라이트 의미를 갖게 한다.
+ *
+ * 구조: 밝은 업무 표면 + LS Navy 헤더/레일 + LS Red 위험 행동 + 상태색 분리.
+ * 코드 편집기·로그·미리보기 샌드박스처럼 어두운 표면이 필요한 곳은 자체 스타일을 유지한다.
+ */
+.afs-product-shell {
+  color-scheme: light;
+
+  /* 중립 표면과 글자 — 전역 @theme를 바꾸지 않는 범위형 팔레트 */
+  --color-gray-50: #0a1220;
+  --color-gray-100: #101a2d;
+  --color-gray-200: #24314a;
+  --color-gray-300: #3b4860;
+  --color-gray-400: #5a6478;
+  --color-gray-500: #667185;
+  --color-gray-600: #8b95a6;
+  --color-gray-700: #e2e6ec;
+  --color-gray-800: #ffffff;
+  --color-gray-900: #f6f7f9;
+  --color-gray-950: #eef1f4;
+
+  --color-slate-50: #0a1220;
+  --color-slate-100: #101a2d;
+  --color-slate-200: #24314a;
+  --color-slate-300: #3b4860;
+  --color-slate-400: #5a6478;
+  --color-slate-500: #667185;
+  --color-slate-600: #8b95a6;
+  --color-slate-700: #e2e6ec;
+  --color-slate-800: #ffffff;
+  --color-slate-900: #f4f6f8;
+  --color-slate-950: #e9edf2;
+
+  /* LS Navy — 구조와 1차 행동 */
+  --color-indigo-50: #071747;
+  --color-indigo-100: #0a1e5a;
+  --color-indigo-200: #0d2568;
+  --color-indigo-300: #163a86;
+  --color-indigo-400: #2a56a8;
+  --color-indigo-500: #3f6cbd;
+  --color-indigo-600: #0a1e5a;
+  --color-indigo-700: #071747;
+  --color-indigo-800: #dbe3f2;
+  --color-indigo-900: #e8edf7;
+  --color-indigo-950: #f1f4fa;
+
+  --color-blue-50: #071747;
+  --color-blue-100: #0a1e5a;
+  --color-blue-200: #12306f;
+  --color-blue-300: #1c4489;
+  --color-blue-400: #2a56a8;
+  --color-blue-500: #3f6cbd;
+  --color-blue-600: #0a1e5a;
+  --color-blue-700: #071747;
+  --color-blue-800: #dbe3f2;
+  --color-blue-900: #e8edf7;
+  --color-blue-950: #f1f4fa;
+
+  --color-purple-50: #0d1440;
+  --color-purple-100: #16205e;
+  --color-purple-200: #1d2a72;
+  --color-purple-300: #2a3c92;
+  --color-purple-400: #3a51ad;
+  --color-purple-500: #4b63bd;
+  --color-purple-600: #16205e;
+  --color-purple-700: #0d1440;
+  --color-purple-800: #dfe3f4;
+  --color-purple-900: #eaedf9;
+  --color-purple-950: #f2f4fb;
+
+  /* 데이터·정상·주의·위험은 행동색과 구분한다. */
+  --color-cyan-300: #08758a;
+  --color-cyan-400: #0b8497;
+  --color-cyan-500: #0a91a6;
+  --color-cyan-600: #08788a;
+  --color-cyan-700: #075f70;
+  --color-cyan-800: #d5eff2;
+  --color-cyan-900: #e7f7f8;
+  --color-cyan-950: #f1fbfb;
+
+  --color-emerald-300: #0d765a;
+  --color-emerald-400: #11846a;
+  --color-emerald-500: #159176;
+  --color-emerald-600: #08786f;
+  --color-emerald-700: #07645d;
+  --color-emerald-800: #d4eee9;
+  --color-emerald-900: #e5f6f2;
+  --color-emerald-950: #f0fbf8;
+  --color-green-300: #246c40;
+  --color-green-400: #2f7d4d;
+  --color-green-500: #3b8d59;
+  --color-green-600: #277346;
+  --color-green-700: #1e5b37;
+  --color-green-800: #d9edde;
+  --color-green-900: #eaf6ed;
+  --color-green-950: #f3faf5;
+
+  --color-amber-300: #98550b;
+  --color-amber-400: #ad6310;
+  --color-amber-500: #c17614;
+  --color-amber-600: #a55c0d;
+  --color-amber-700: #804607;
+  --color-amber-800: #f4e2c3;
+  --color-amber-900: #fff1dc;
+  --color-amber-950: #fff8ec;
+
+  --color-red-300: #a71936;
+  --color-red-400: #bc1f40;
+  --color-red-500: #d22449;
+  --color-red-600: #c20f36;
+  --color-red-700: #97102c;
+  --color-red-800: #f2d0d8;
+  --color-red-900: #fae5e9;
+  --color-red-950: #fff1f3;
+
+  min-height: 100%;
+  color: var(--color-gray-100);
+  background: var(--color-gray-950);
+}
+
+/* 공통 헤더는 다크 테마가 아니라 LS Navy 구조 표면이다. */
+.afs-product-shell .afs-product-header {
+  color-scheme: dark;
+  color: #fff;
+  background: rgb(7 23 71 / 97%) !important;
+  border-color: rgb(255 255 255 / 14%) !important;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 5%), 0 8px 24px rgb(7 23 71 / 14%);
+}
+.afs-product-shell .afs-product-header .text-gray-100,
+.afs-product-shell .afs-product-header .text-gray-200,
+.afs-product-shell .afs-product-header .text-gray-300 { color: #f7f9ff !important; }
+.afs-product-shell .afs-product-header .text-gray-400,
+.afs-product-shell .afs-product-header .text-gray-500 { color: #b8c4dc !important; }
+.afs-product-shell .afs-product-header .text-indigo-400,
+.afs-product-shell .afs-product-header .text-blue-400 { color: #8ed9e2 !important; }
+.afs-product-shell .afs-product-header .bg-gray-700,
+.afs-product-shell .afs-product-header .bg-gray-800 { background: rgb(255 255 255 / 10%) !important; }
+.afs-product-shell .afs-product-header .border-gray-700 { border-color: rgb(255 255 255 / 14%) !important; }
+
+/* 런처의 유령 카드가 밝은 바탕에서 사라지지 않게 실제 표면으로 만든다. */
+.afs-product-shell .afs-launcher-main .bg-white\/5 { background: rgb(255 255 255 / 78%) !important; }
+.afs-product-shell .afs-launcher-main .border-white\/5 { border-color: #dfe4eb !important; }
+.afs-product-shell .afs-launcher-main .shadow-2xl,
+.afs-product-shell .afs-launcher-main .shadow-xl {
+  box-shadow: 0 12px 28px rgb(16 26 45 / 8%) !important;
+}
+.afs-product-shell input.bg-gray-950,
+.afs-product-shell select.bg-gray-950,
+.afs-product-shell textarea.bg-gray-950 { background: #fff !important; }
+
+/* portal 메뉴도 제품 셸의 일부다. body 아래로 빠져도 같은 토큰을 직접 가진다. */
+.afs-global-menu { color: var(--color-gray-100); }

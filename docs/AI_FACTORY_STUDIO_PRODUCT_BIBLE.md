@@ -1,5 +1,7 @@
 # AI Factory Studio Product Bible
 
+> **시장 기준점 재검토(2026-08-03):** AI Factory Studio는 범용 AgentOS·온톨로지·앱 빌더의 기능 경쟁을 목표로 하지 않는다. 제품 범주는 **Manufacturing Management Twin & Operational App Factory**이며, 독자성은 실제 제조 경영 데이터가 현업 앱 → 결정론적 시뮬레이션 → 의사결정 → 실행 → 효과 측정으로 순환하는 폐루프에 있다. 최신 제품 전략은 [`strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md`](strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md), 단계별 실행 순서와 완료 관문은 [`roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md`](roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md)를 따른다.
+
 > **Enterprise Context Master 확장(2026-07-28):** 기업집단·법인·사업부·사업장·공장·공유서비스를 단순 메뉴가 아닌 제품 실행 문맥으로 관리한다. 실제 조직뿐 아니라 신사업/증설/변경을 위한 가상 조직과 공개 근거 기반 경쟁사 참조 모델을 지원한다. 상세 기준은 [`design_enterprise_context_master.md`](design_enterprise_context_master.md)를 따른다.
 
 > 이 문서는 AI Factory Studio를 함께 만드는 모든 사람과 AI 에이전트의 공통 기준이다.  
@@ -153,6 +155,8 @@ Solution Blueprint와 Decision Ledger는 부가 기능이 아니라 제품의 �
 
 외부 시스템을 대체하는 것이 아니라 기존 진실 원천을 존중하며 연결한다. 기본값은 읽기 전용이고, Shadow Mode로 검증한 뒤에만 제한적 쓰기를 허용한다.
 
+거래처·관세사·포워더·운송사 등 외부 참여자는 고객사가 이미 운영하는 공급사 포털·물류/통관 시스템·협력사 웹 등 외부 협업 시스템을 계속 사용한다. AI Factory Studio를 외부에 개방하거나 같은 입력 화면을 중복 개발하지 않는다. 기존 시스템이 신원·입력·원본 업무 사건을 책임하고, 우리는 승인된 MCP/API/DB View/파일 계약으로 필요한 데이터만 받아 의미·계산·의사결정에 연결한다. LPL은 이 원칙을 적용하는 LS 환경의 Reference Profile일 뿐 제품 공통 기능이 아니다.
+
 ### 5.7 비용 대비 품질의 최적점
 
 경쟁력은 가장 비싼 모델을 가장 많이 쓰는 데 있지 않다. 최소 비용으로 승인 가능한 품질을 안정적으로 내는 데 있다.
@@ -173,6 +177,8 @@ AI Factory Studio는 다음 어느 하나로만 정의되지 않는다.
 우리의 정의는 다음과 같다.
 
 > **기업의 실제 데이터와 업무 의미를 기반으로, 현업이 필요한 운영 앱과 의사결정 모델을 생성하고, 그 결과를 전사 지식·통제·시뮬레이션 체계로 축적하는 AI-native Enterprise Operating Platform**
+
+이 제품의 본질은 자동화가 아니라 **경영**이다. 자동화·에이전트·앱 생성은 데이터를 더 정확하고 빠르게 모으기 위한 수단이고, 최종 목적은 경영자가 회사의 실제 상태·미래 전망·대안·결정·실행 효과를 통제하는 것이다. 모든 업무와 모든 사용자를 제품 안으로 흡수하는 것이 아니라, 기존 시스템의 진실 원천을 존중하면서 경영에 필요한 의미와 영향 경로를 통합한다.
 
 이 제품의 방어력은 특정 LLM 모델이나 프롬프트가 아니라 다음 자산의 축적에서 나온다.
 

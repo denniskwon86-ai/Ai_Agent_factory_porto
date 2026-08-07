@@ -168,7 +168,13 @@ def main():
     else:
         log(f"아이디어: {IDEA[:80]}")
         # 0) 프로젝트 보장
-        r = post("/projects", {"project_id": PROJECT_ID, "template_id": "default"})
+        r = post("/projects", {
+            "project_id": PROJECT_ID, 
+            "template_id": "default",
+            "enterprise_scope_id": "node_36c1c7c797e0",
+            "knowledge_pack_ids": ["manufacturing-standards", "battery-materials-operations"],
+            "master_domains": ["bom", "quality-spec", "material", "finance-param", "sensor-spec", "emission-factor"]
+        })
         log(f"프로젝트 생성: {r.status_code} ({'기존 재사용' if r.status_code in (400, 409) else '신규'})")
 
         # 1) 기획(PLANNING) — UI 와 동일 페이로드

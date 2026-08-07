@@ -1,0 +1,25 @@
+{
+  "event_id": "EVT_SULFURIC_ACID_AI_SEMICONDUCTOR",
+  "event_type": "PREMIUM_PRODUCT_BOOM",
+  "title": "AI 반도체 수요 폭발에 따른 고순도 황산 프리미엄 (이익 극대화)",
+  "severity": "HIGH",
+  "source_id": "SRC_SEMICONDUCTOR_INDUSTRY_REPORT",
+  "last_updated": "2026-07-29 18:52:58",
+  "impact_drivers": [
+    {
+      "internal_metric_id": "KPI_EG_SULFURIC_ACID_PREMIUM",
+      "direction": "INCREASE",
+      "impact_value_percent": 80.0,
+      "description": "고순도 황산(Electronic Grade) 프리미엄 단가 80% 상승",
+      "effective_period": "2026Q2 - 2028Q4"
+    },
+    {
+      "internal_metric_id": "OP_EG_SULFURIC_ACID_VOLUME",
+      "direction": "INCREASE",
+      "impact_value_percent": 40.0,
+      "description": "반도체 팹 납품 물량 40% 증가 (캐파 풀가동)",
+      "effective_period": "2026Q2 - 2028Q4"
+    }
+  ],
+  "evidence_ref": "Sulfuric_Acid_Market_Dynamics_2026.md"
+}

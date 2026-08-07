@@ -329,8 +329,15 @@ R2 Factory는 요구 입력, 기획 산출물, Workflow, WBS, Timeline, Preview,
 | B · Guided Journey | 5단계 신규 기획 + 준비도·Atlas 도움 | 처음 사용하는 현업 사용자의 요구·데이터 구체화 | `uiux-prototypes/sw-factory-concepts/guided-journey/` |
 | C · Focus Workbench | 기획/WBS/실행/산출물/품질 탭 + Atlas Drawer | 산출물·실행 집중 작업과 낮은 정보 밀도 | `uiux-prototypes/sw-factory-concepts/focus-workbench/` |
 | D · Transparent Orchestration | 전체 Workflow + WBS Spine + 현재 작업·산출물 + 중앙 하단 여백형 사용자 결정/Jarvis 상하 카드 + 우측 상태·실행 기록 | AI 진행을 암묵지로 만들지 않고 전체 연결·사용자 상호작용·현재 집중을 동시에 제공 | `uiux-prototypes/sw-factory-concepts/transparent-orchestration/` |
+| **E · Adaptive Production Studio** | 밝은 Workflow + WBS Spine + 단계별 Adaptive Canvas + Decision/Jarvis Dock + 요청형 Inspector | 진행 투명성을 유지하면서 현재 단계와 생성 SW를 가장 크게 표현 | `uiux-prototypes/sw-factory-concepts/adaptive-production-studio/` |
 
 2026-07-31 재검토에서 `B 신규 생성 → C 집중 작업`만을 기본 구조로 삼는 권고를 철회했다. 사용자는 여러 Agent와 WBS가 어떤 의존관계로 무엇을 만들고 있는지 항상 확인할 수 있어야 한다. D를 기본 작업공간 후보로 두고 B의 선택형 안내와 C의 넓은 작업면은 D의 중앙 Focus Surface 모드로 흡수한다. A는 기능 회귀 검사와 통합 관제 참고 자료로 유지한다. 기능 보존·투명한 집중 기준은 `uiux-prototypes/sw-factory-concepts/README.md`를 SSOT로 사용한다.
+
+### 10.1 Supervisor 최종 채택 · 2026-08-04
+
+Supervisor는 E를 SW 생성기 React 이식 기준으로 채택했다. D는 투명성 검토의 기준선으로 보존하지만 영구 우측 상태 열과 넓은 다크 면적은 실제 이식 대상에서 제외한다. E는 전체 단계·WBS를 상시 유지하면서 중앙을 단계별 Canvas로 전환하고, 구현 단계에서 생성 SW 실행 화면을 기본 산출물로 제공한다. Jarvis는 하단 단일 Dock, 수행 이유·다음 전환·실행 기록은 요청형 Inspector로 제공한다.
+
+상세 React 컴포넌트·ViewModel·전환·완료 게이트는 `docs/uiux/SW_FACTORY_ADAPTIVE_PRODUCTION_STUDIO_IMPLEMENTATION_SPEC_2026-08-04.md`를 따른다. 현재 데이터/권한 화면의 순차 이관과 파일 충돌을 막기 위해 Factory 실제 코드 이식은 Wave 4에서 병행 카나리로 수행한다.
 
 ## 11. 협업 폐쇄루프 승인 기준선 · 2026-08-03
 

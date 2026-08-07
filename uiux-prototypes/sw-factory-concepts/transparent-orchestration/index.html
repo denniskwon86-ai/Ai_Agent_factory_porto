@@ -25,6 +25,11 @@
     .work-surface{display:grid;grid-template-rows:auto minmax(250px,1fr) 126px;overflow:hidden;background:#f3f5f7}
     .work-toolbar{display:flex;align-items:center;gap:7px;height:50px;padding:0 14px;border-bottom:1px solid var(--line);background:#fff}.work-toolbar b{font-size:12px}.work-toolbar span{color:var(--muted);font-size:9px}.work-toolbar .spacer{flex:1}.view-btn{padding:7px 9px;border:1px solid var(--line);border-radius:5px;color:#657184;background:#fff;font-size:9px}.view-btn.active{border-color:var(--navy);color:#fff;background:var(--navy)}
     .current-work{overflow:auto;padding:15px}.current-card{min-height:100%;padding:18px}.current-card>header{display:flex;align-items:flex-start;gap:12px;padding-bottom:13px;border-bottom:1px solid var(--line)}.node-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:8px;color:#fff;background:var(--red);font-size:10px;font-weight:950}.current-card h2{margin:1px 0 5px;font-size:20px}.current-card header p{margin:0;color:var(--muted);font-size:10px}.current-card header .spacer{flex:1}.runtime{text-align:right}.runtime b,.runtime small{display:block}.runtime b{font-size:11px}.runtime small{margin-top:4px;color:var(--muted);font-size:8px}
+    .artifact-workspace{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:100%;overflow:hidden}
+    .artifact-summary{display:grid;grid-template-columns:1fr repeat(3,auto);gap:18px;align-items:center;padding:13px 15px;border-bottom:1px solid var(--line);background:#fff}.artifact-summary h2{margin:0 0 4px;font-size:18px}.artifact-summary p{margin:0;color:var(--muted);font-size:12px}.artifact-kpi{min-width:76px;padding-left:14px;border-left:1px solid var(--line)}.artifact-kpi b,.artifact-kpi small{display:block}.artifact-kpi b{font-size:16px}.artifact-kpi small{margin-top:3px;color:var(--muted);font-size:11px}
+    .artifact-browser{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:0}.artifact-list{overflow:auto;border-right:1px solid var(--line);background:#f7f8fa}.artifact-list header{display:flex;align-items:center;justify-content:space-between;padding:11px 12px;border-bottom:1px solid var(--line)}.artifact-list header b{font-size:12px}.artifact-list header span{color:var(--muted);font-size:11px}.artifact-item{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:9px;width:100%;padding:11px 12px;border:0;border-bottom:1px solid #e7eaee;color:var(--ink);background:transparent;text-align:left;cursor:pointer}.artifact-item:hover{background:#fff}.artifact-item.active{border-left:4px solid var(--red);background:#fff}.artifact-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:6px;color:#fff;background:var(--navy);font-size:10px;font-weight:900}.artifact-icon.app{background:var(--red)}.artifact-icon.doc{background:var(--green)}.artifact-icon.test{background:var(--cyan)}.artifact-item b,.artifact-item small{display:block}.artifact-item b{overflow:hidden;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.artifact-item small{margin-top:4px;color:var(--muted);font-size:11px}.artifact-item em{align-self:center;padding:3px 6px;border-radius:9px;color:#08766c;background:#dff4ef;font-size:10px;font-style:normal;font-weight:900}.artifact-item em.review{color:#996016;background:#fff0d8}
+    .artifact-preview{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-width:0;background:#fff}.artifact-preview>header{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}.artifact-preview>header div:first-child{min-width:0}.artifact-preview>header b,.artifact-preview>header small{display:block}.artifact-preview>header b{overflow:hidden;font-size:13px;text-overflow:ellipsis;white-space:nowrap}.artifact-preview>header small{margin-top:3px;color:var(--muted);font-size:11px}.artifact-preview>header .spacer{flex:1}.artifact-badge{padding:5px 8px;border-radius:12px;color:#08766c;background:#dff4ef;font-size:10px;font-weight:900}.artifact-code{overflow:auto;margin:0;padding:14px 16px;color:#dbe8f4;background:#132033;font:11px/1.65 Consolas,"SFMono-Regular",monospace;white-space:pre}.artifact-code .line-no{display:inline-block;width:28px;color:#62758d;user-select:none}.artifact-code .kw{color:#6ad5e0}.artifact-code .str{color:#f4c67a}.artifact-code .fn{color:#a6d68e}.artifact-meta{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;border-top:1px solid var(--line);background:var(--line)}.artifact-meta div{padding:9px 12px;background:#fff}.artifact-meta b,.artifact-meta small{display:block}.artifact-meta b{font-size:11px}.artifact-meta small{margin-top:3px;color:var(--muted);font-size:10px;line-height:1.35}
+    .app-preview-stage{overflow:auto;padding:12px;background:#dfe4e9}.generated-app{min-height:100%;overflow:hidden;border:1px solid #c8ced7;border-radius:8px;background:#f5f7f9;box-shadow:0 8px 24px #1723321c}.generated-app-bar{display:flex;align-items:center;gap:9px;height:42px;padding:0 11px;color:#fff;background:linear-gradient(100deg,#071747,var(--navy))}.generated-app-brand{display:grid;place-items:center;width:25px;height:25px;border-radius:6px;background:var(--red);font-size:8px;font-weight:950}.generated-app-bar b{font-size:11px}.generated-app-bar small{color:#b8c7df;font-size:9px}.generated-app-bar .spacer{flex:1}.host-badge{padding:4px 7px;border:1px solid #ffffff2b;border-radius:10px;color:#d8e5f8;font-size:8px}.generated-app-body{display:grid;grid-template-columns:122px minmax(0,1fr);min-height:270px}.generated-app-nav{padding:10px 8px;color:#d8e2ef;background:#172231}.generated-app-nav b{display:block;padding:4px 7px 9px;color:#8fa0b5;font-size:8px;letter-spacing:.08em}.generated-app-nav button{display:block;width:100%;margin-bottom:4px;padding:7px;border:0;border-radius:5px;color:#bac7d8;background:transparent;font-size:9px;text-align:left}.generated-app-nav button.active{color:#fff;background:#ffffff16;box-shadow:inset 3px 0 var(--red)}.generated-app-main{min-width:0;padding:11px}.generated-app-title{display:flex;align-items:flex-start;gap:10px}.generated-app-title h3{margin:0 0 3px;font-size:14px}.generated-app-title p{margin:0;color:var(--muted);font-size:9px}.generated-app-title .spacer{flex:1}.generated-app-title button{padding:6px 8px;border:0;border-radius:5px;color:#fff;background:var(--navy);font-size:9px}.generated-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:10px}.generated-kpis div{padding:8px;border:1px solid var(--line);border-radius:6px;background:#fff}.generated-kpis small,.generated-kpis b,.generated-kpis em{display:block}.generated-kpis small{color:var(--muted);font-size:8px}.generated-kpis b{margin-top:4px;font-size:13px}.generated-kpis em{margin-top:2px;color:var(--green);font-size:8px;font-style:normal}.generated-content{display:grid;grid-template-columns:1.15fr .85fr;gap:7px;margin-top:7px}.generated-panel{padding:9px;border:1px solid var(--line);border-radius:6px;background:#fff}.generated-panel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}.generated-panel header b{font-size:9px}.generated-panel header span{color:var(--muted);font-size:8px}.forecast-bars{display:flex;align-items:flex-end;gap:6px;height:65px;padding-top:5px}.forecast-bars i{flex:1;border-radius:3px 3px 0 0;background:linear-gradient(#1bb0c6,var(--navy))}.scenario-row{display:grid;grid-template-columns:1fr auto;gap:7px;align-items:center;padding:5px 0;border-bottom:1px solid #edf0f3;font-size:8px}.scenario-row:last-child{border:0}.scenario-row strong{font-size:9px}.app-connection-state{display:flex;align-items:center;gap:7px;padding:7px 10px;border-top:1px solid #e2c79d;color:#6f4c1a;background:#fff7e8;font-size:9px}.app-connection-state i{width:7px;height:7px;border-radius:50%;background:var(--amber)}
     .contract{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.contract section{padding:12px;border:1px solid var(--line);border-radius:6px;background:#f8f9fa}.contract h3{margin:0 0 8px;font-size:10px}.contract ul{margin:0;padding-left:16px;color:#566274;font-size:9px;line-height:1.65}.progress-box{margin-top:10px;padding:12px;border-left:4px solid var(--cyan);background:#edf8fa}.progress-box header{display:flex;justify-content:space-between;font-size:9px;font-weight:900}.bar{height:7px;margin:8px 0;border-radius:6px;background:#d8e1e7;overflow:hidden}.bar i{display:block;width:68%;height:100%;background:linear-gradient(90deg,var(--cyan),var(--green))}.progress-box p{margin:0;color:#5b6a79;font-size:9px}
     .work-actions{display:flex;justify-content:space-between;align-items:center;margin-top:13px}.work-actions span{color:#748091;font-size:9px}.work-actions div{display:flex;gap:7px}
     .platform-contract-strip{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;margin-top:11px;padding:9px 11px;border:1px solid #badadd;border-radius:6px;background:#eff9fa}.platform-contract-strip i{display:grid;place-items:center;width:25px;height:25px;border-radius:50%;color:#fff;background:var(--green);font-style:normal;font-weight:950}.platform-contract-strip b,.platform-contract-strip small{display:block}.platform-contract-strip b{font-size:11px}.platform-contract-strip small{margin-top:2px;color:#607379;font-size:10px}.platform-contract-strip em{padding:4px 7px;border-radius:10px;color:#08766c;background:#d7efec;font-size:9px;font-style:normal;font-weight:900}
@@ -103,8 +108,8 @@
       </section>
     </aside>
     <section class="work-surface">
-      <nav class="work-toolbar"><b>현재 작업</b><span id="selectedContext">구현 단계 · WB-06</span><div class="spacer"></div><button class="view-btn active">작업</button><button class="view-btn">산출물</button><button class="view-btn">근거</button><button class="view-btn">Diff</button></nav>
-      <div class="current-work">
+      <nav class="work-toolbar"><b id="workspaceTitle">현재 작업</b><span id="selectedContext">구현 단계 · WB-06</span><div class="spacer"></div><button class="view-btn active" data-work-view="work">작업</button><button class="view-btn" data-work-view="artifacts">산출물</button><button class="view-btn" data-work-view="evidence">근거</button><button class="view-btn" data-work-view="diff">Diff</button></nav>
+      <div class="current-work" data-work-panel="work">
         <article class="current-card card">
           <header><div class="node-mark">BE</div><div><h2>조직 범위 권한 API 구현</h2><p>WB-06 · Backend Agent · 선행 WB-02 완료 · 후속 WB-07 차단 해제 예정</p></div><div class="spacer"></div><div class="runtime"><b>실행 08:14</b><small>Gemini Pro → Groq 대기 없음</small></div></header>
           <div class="platform-contract-strip"><i>✓</i><span><b>App-in-App 플랫폼 계약 적용</b><small>자체 로그인·회원·보안 기능은 생성하지 않고 Platform SSO·조직 범위·감사로그를 상속합니다.</small></span><em>HOST ENFORCED</em></div>
@@ -112,6 +117,63 @@
           <section class="progress-box"><header><span>현재 수행 · 테스트 보강</span><span>68%</span></header><div class="bar"><i></i></div><p>API 구현과 단위 테스트 7/9 통과. 경영진 하위조직 드릴다운 정책 2건을 검증 중입니다.</p></section>
           <footer class="work-actions"><span>다음 자동 전환: Reviewer → 통과 시 WB-07 잠금 해제</span><div><button class="btn">중간 결과 보기</button><button class="btn">Agent 작업 지시</button><button class="btn primary">사용자 검토 요청</button></div></footer>
         </article>
+      </div>
+      <div class="current-work" data-work-panel="artifacts" hidden>
+        <section class="artifact-workspace card">
+          <header class="artifact-summary">
+            <div><h2>WB-06 산출물 패키지</h2><p>조직 범위 권한 API · 실행 중에도 생성 결과와 검증 상태를 함께 확인합니다.</p></div>
+            <div class="artifact-kpi"><b>1</b><small>실행 앱</small></div>
+            <div class="artifact-kpi"><b>5</b><small>지원 산출물</small></div>
+            <div class="artifact-kpi"><b>2</b><small>검토 필요</small></div>
+          </header>
+          <div class="artifact-browser">
+            <aside class="artifact-list">
+              <header><b>프로젝트 산출물</b><span>최신순</span></header>
+              <button class="artifact-item active" data-artifact-preview="app"><span class="artifact-icon app">APP</span><span><b>실행 앱 미리보기</b><small>통합 Build #14 · 진행본</small></span><em class="review">진행</em></button>
+              <button class="artifact-item" data-artifact-preview="source"><span class="artifact-icon">PY</span><span><b>organization_scope.py</b><small>API 라우트 · 10:16 갱신</small></span><em>검증됨</em></button>
+              <button class="artifact-item" data-artifact-preview="source"><span class="artifact-icon">PY</span><span><b>scope_policy.py</b><small>권한 정책 · 10:12 갱신</small></span><em>검증됨</em></button>
+              <button class="artifact-item" data-artifact-preview="source"><span class="artifact-icon test">T</span><span><b>test_scope_policy.py</b><small>회귀 테스트 · 7/9 통과</small></span><em class="review">검토</em></button>
+              <button class="artifact-item" data-artifact-preview="source"><span class="artifact-icon doc">API</span><span><b>organization-scope.yaml</b><small>OpenAPI 계약 · v0.8</small></span><em class="review">검토</em></button>
+              <button class="artifact-item" data-artifact-preview="source"><span class="artifact-icon doc">MD</span><span><b>권한 정책 설계서.md</b><small>설계 문서 · 근거 6건 연결</small></span><em>검증됨</em></button>
+            </aside>
+            <article class="artifact-preview" data-artifact-panel="app">
+              <header><div><b>2027 경영계획 시뮬레이터</b><small>생성 SW 통합 미리보기 · App-in-App 실행</small></div><div class="spacer"></div><span class="artifact-badge">Build #14</span><button class="btn navy">새 창에서 실행</button></header>
+              <div class="app-preview-stage">
+                <section class="generated-app">
+                  <header class="generated-app-bar"><span class="generated-app-brand">BP</span><div><b>2027 Business Plan</b><small> · LS MnM 경영관리</small></div><div class="spacer"></div><span class="host-badge">Platform SSO · 권한 상속</span></header>
+                  <div class="generated-app-body">
+                    <nav class="generated-app-nav"><b>MANAGEMENT</b><button class="active">경영계획 대시보드</button><button>부서별 계획 입력</button><button>손익 시뮬레이션</button><button>의사결정 안건</button><button>경영 보고서</button></nav>
+                    <main class="generated-app-main">
+                      <header class="generated-app-title"><div><h3>2027 경영계획 전망</h3><p>기준 시나리오 · 2026.08.04 10:16</p></div><div class="spacer"></div><button>시나리오 실행</button></header>
+                      <section class="generated-kpis"><div><small>예상 매출</small><b>₩4.82조</b><em>계획 대비 +3.2%</em></div><div><small>영업이익</small><b>₩3,740억</b><em>계획 대비 +1.8%</em></div><div><small>현금흐름</small><b>₩2,180억</b><em>안정 범위</em></div></section>
+                      <section class="generated-content">
+                        <article class="generated-panel"><header><b>분기별 손익 전망</b><span>억원</span></header><div class="forecast-bars"><i style="height:43%"></i><i style="height:58%"></i><i style="height:72%"></i><i style="height:88%"></i><i style="height:55%"></i><i style="height:78%"></i></div></article>
+                        <article class="generated-panel"><header><b>핵심 민감도</b><span>기준 대비</span></header><div class="scenario-row"><span>환율 +5%</span><strong>이익 -2.4%</strong></div><div class="scenario-row"><span>전기료 +8%</span><strong>이익 -1.7%</strong></div><div class="scenario-row"><span>판매량 +3%</span><strong>이익 +4.1%</strong></div></article>
+                      </section>
+                    </main>
+                  </div>
+                  <footer class="app-connection-state"><i></i><span>실데이터 연결 대기 · WB-06 조직 권한 API 68% 완료 후 실제 조직 데이터로 전환됩니다.</span></footer>
+                </section>
+              </div>
+              <footer class="artifact-meta"><div><b>실행 형태</b><small>플랫폼 내부 App-in-App</small></div><div><b>현재 상태</b><small>화면 5개 · API 연결 3/5</small></div><div><b>검토 초점</b><small>업무 흐름·수치 표현·권한 범위</small></div></footer>
+            </article>
+            <article class="artifact-preview" data-artifact-panel="source" hidden>
+              <header><div><b>api/routes/organization_scope.py</b><small>Backend Agent 생성 · Architecture v1.1과 연결됨</small></div><div class="spacer"></div><span class="artifact-badge">구문 통과</span><button class="btn">전체 화면</button></header>
+              <pre class="artifact-code"><span class="line-no">01</span><span class="kw">@router.get</span>(<span class="str">"/organizations/{organization_id}/resources"</span>)
+<span class="line-no">02</span><span class="kw">async def</span> <span class="fn">list_scoped_resources</span>(
+<span class="line-no">03</span>    organization_id: str,
+<span class="line-no">04</span>    actor: PlatformActor = Depends(require_actor),
+<span class="line-no">05</span>):
+<span class="line-no">06</span>    scope = await scope_service.resolve(organization_id)
+<span class="line-no">07</span>    <span class="kw">if not</span> scope.is_bound:
+<span class="line-no">08</span>        <span class="kw">raise</span> HTTPException(status_code=404)
+<span class="line-no">09</span>
+<span class="line-no">10</span>    await policy.require_access(actor, scope)
+<span class="line-no">11</span>    <span class="kw">return</span> await repository.list_for_scope(scope.id)</pre>
+              <footer class="artifact-meta"><div><b>요구사항 추적</b><small>RFP SEC-04 · PRD AUTH-07</small></div><div><b>품질 상태</b><small>구문 통과 · 보안 규칙 4/4</small></div><div><b>다음 처리</b><small>테스트 2건 통과 후 Reviewer 이관</small></div></footer>
+            </article>
+          </div>
+        </section>
       </div>
       <section class="center-assist" id="centerAssist">
         <article class="user-decision" id="userDecision"><header><b>사용자 결정 대기</b><span>1건</span></header><p id="decisionPrompt">경영진의 하위 조직 기밀 데이터 조회 범위를 선택해야 합니다.<small>영향: 결정 전까지 WB-07 손익 시뮬레이션 시작 대기</small></p><div class="decision-actions" id="decisionActions"><button id="reviewDecision">결정안 검토</button></div></article>
@@ -140,6 +202,23 @@
       document.querySelectorAll('.task').forEach(item=>item.classList.remove('selected'));
       button.classList.add('selected');
       document.getElementById('selectedContext').textContent=`WBS 탐색 · ${button.querySelector('b').textContent}`;
+    }));
+    document.querySelectorAll('[data-work-view]').forEach(button=>button.addEventListener('click',()=>{
+      const view=button.dataset.workView;
+      document.querySelectorAll('[data-work-view]').forEach(item=>item.classList.toggle('active',item===button));
+      document.querySelectorAll('[data-work-panel]').forEach(panel=>panel.hidden=panel.dataset.workPanel!==view);
+      if(view==='artifacts'){
+        document.getElementById('workspaceTitle').textContent='산출물';
+        document.getElementById('selectedContext').textContent='WB-06 · 생성 결과와 검증 상태';
+      }else if(view==='work'){
+        document.getElementById('workspaceTitle').textContent='현재 작업';
+        document.getElementById('selectedContext').textContent='구현 단계 · WB-06';
+      }
+    }));
+    document.querySelectorAll('[data-artifact-preview]').forEach(button=>button.addEventListener('click',()=>{
+      const preview=button.dataset.artifactPreview;
+      document.querySelectorAll('[data-artifact-preview]').forEach(item=>item.classList.toggle('active',item===button));
+      document.querySelectorAll('[data-artifact-panel]').forEach(panel=>panel.hidden=panel.dataset.artifactPanel!==preview);
     }));
     document.getElementById('reviewDecision').addEventListener('click',()=>{
       document.getElementById('decisionPrompt').textContent='경영진의 하위 조직 기밀 데이터 조회 범위를 선택하세요.';

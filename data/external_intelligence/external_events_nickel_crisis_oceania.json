@@ -1,0 +1,32 @@
+{
+  "event_id": "EVT_NICKEL_CRISIS_OCEANIA",
+  "event_type": "BLACK_SWAN_SHORTAGE",
+  "title": "오세아니아(호주/뉴칼레도니아) 니켈 공급망 완전 붕괴 쇼크",
+  "severity": "CRITICAL",
+  "source_id": "SRC_GLOBAL_MINING_NEWS",
+  "observation_cutoff_date": "2026-07-29",
+  "impact_drivers": [
+    {
+      "internal_metric_id": "OP_VOLUME_NICKEL_ORE",
+      "direction": "DECREASE",
+      "impact_value_percent": -30.0,
+      "description": "호주 및 뉴칼레도니아 발 니켈 정광 수급 단절로 조달 물량 30% 급감",
+      "effective_period": "2026Q3 - 2027Q2"
+    },
+    {
+      "internal_metric_id": "KPI_NICKEL_PREMIUM",
+      "direction": "INCREASE",
+      "impact_value_percent": 40.0,
+      "description": "Spot 시장 긴급 수배로 인한 니켈 조달 프리미엄 40% 폭등",
+      "effective_period": "2026Q3 - 2027Q1"
+    },
+    {
+      "internal_metric_id": "KPI_BATTERY_MATERIAL_MARGIN",
+      "direction": "DECREASE",
+      "impact_value_percent": -50.0,
+      "description": "조달 불가 및 원가 폭등으로 이차전지 소재 사업부 영업이익 50% 증발",
+      "effective_period": "2026Q3 - 2027Q1"
+    }
+  ],
+  "evidence_ref": "Global_Nickel_Crisis_Report_2026.md"
+}

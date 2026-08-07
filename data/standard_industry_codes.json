@@ -1,0 +1,88 @@
+{
+  "version": "KSIC-11-v2026.2-MAINSTREAM",
+  "description": "우리 시스템 기초 데이터(LS MnM 비철금속/동제련/배터리소재/자동차부품)와 완벽히 연동되는 주요 메인스트림 업종별 표준 운영 및 재무 벤치마크 데이터",
+  "industry_standards": [
+    {
+      "ksic_code": "C24120",
+      "industry_name": "동 제련, 정련 및 동합금 제조업",
+      "relevance_note": "LS MnM 온산공장 동제련 사업부 메인 업종",
+      "benchmark_metrics": {
+        "avg_operating_ratio_pct": 91.5,
+        "standard_cogs_ratio_pct": 89.2,
+        "standard_sg_and_a_ratio_pct": 4.8,
+        "standard_operating_margin_pct": 6.0,
+        "avg_raw_material_ratio_pct": 78.0,
+        "avg_labor_cost_ratio_pct": 8.5,
+        "standard_purity_rate_pct": 99.99,
+        "target_oee_pct": 92.0
+      },
+      "typical_constraints": {
+        "env_sulfur_dioxide_emission_ppm": "10 이하",
+        "power_consumption_kwh_per_ton": 320,
+        "inventory_turnover_target_days": 10,
+        "quality_standard": "KS D 5101 / LME Brand Registered Standard"
+      }
+    },
+    {
+      "ksic_code": "C20111",
+      "industry_name": "이차전지 및 배터리 기초 화학소재 제조업",
+      "relevance_note": "LS MnM 배터리 소재 사업부 (황산니켈/전구체) 메인 업종",
+      "benchmark_metrics": {
+        "avg_operating_ratio_pct": 86.0,
+        "standard_cogs_ratio_pct": 81.5,
+        "standard_sg_and_a_ratio_pct": 8.5,
+        "standard_operating_margin_pct": 10.0,
+        "avg_raw_material_ratio_pct": 65.0,
+        "avg_labor_cost_ratio_pct": 12.0,
+        "standard_impurity_ppm": 10,
+        "target_oee_pct": 88.0
+      },
+      "typical_constraints": {
+        "psm_safety_grade": "P등급 (최우수)",
+        "purity_tolerance_pct": "99.9% 이상",
+        "inventory_turnover_target_days": 12,
+        "quality_standard": "ISO 14001 / ISO 45001 / ISO 9001"
+      }
+    },
+    {
+      "ksic_code": "C30399",
+      "industry_name": "자동차 신품 부품 및 차체 프레스 성형 제조업",
+      "relevance_note": "소재 수급 후공정 주요 수요처 메인스트림",
+      "benchmark_metrics": {
+        "avg_operating_ratio_pct": 84.0,
+        "standard_cogs_ratio_pct": 85.0,
+        "standard_sg_and_a_ratio_pct": 9.0,
+        "standard_operating_margin_pct": 6.0,
+        "avg_raw_material_ratio_pct": 59.0,
+        "avg_labor_cost_ratio_pct": 15.5,
+        "standard_defect_rate_ppm": 250,
+        "target_oee_pct": 86.0
+      },
+      "typical_constraints": {
+        "max_weekly_overtime_hours": 12,
+        "inventory_turnover_target_days": 15,
+        "quality_standard": "IATF 16949 / ISO 9001"
+      }
+    },
+    {
+      "ksic_code": "C25922",
+      "industry_name": "금속 열처리, 도금 및 표면처리 제조업",
+      "relevance_note": "동가공 및 부품 제조의 뿌리공정 메인스트림",
+      "benchmark_metrics": {
+        "avg_operating_ratio_pct": 81.0,
+        "standard_cogs_ratio_pct": 82.0,
+        "standard_sg_and_a_ratio_pct": 10.5,
+        "standard_operating_margin_pct": 7.5,
+        "avg_raw_material_ratio_pct": 48.0,
+        "avg_labor_cost_ratio_pct": 24.0,
+        "standard_coating_thickness_um": 15,
+        "target_oee_pct": 83.0
+      },
+      "typical_constraints": {
+        "wastewater_discharge_standards": "국가 수질오염물질 배출 허용기준 엄수",
+        "inventory_turnover_target_days": 8,
+        "quality_standard": "KS D 8301 / ISO 9001"
+      }
+    }
+  ]
+}

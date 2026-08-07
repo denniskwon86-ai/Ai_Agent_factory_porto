@@ -1,0 +1,127 @@
+{
+  "version": "STD-PROCESS-2026.2-MAINSTREAM",
+  "description": "우리 시스템 기초 데이터(LS MnM 제련/배터리소재/자동차부품/뿌리공정) 맞춤형 메인스트림 공정 Routing 및 타임 스펙 템플릿 데이터",
+  "templates": [
+    {
+      "template_id": "TMPL_COPPER_SMELTING_01",
+      "template_name": "동 제련 및 전해정련 연속 공정",
+      "industry_type": "동 제련 및 동합금 제조업 (LS MnM 동제련 사업부 타입)",
+      "processes": [
+        {
+          "step_order": 1,
+          "process_code": "PRC_FLASH_SMELT_01",
+          "process_name": "동정광 자로(Flash Smelter) 용해 및 정련",
+          "std_equipment": "Flash Smelting Furnace #1",
+          "std_cycle_time_sec": 3600,
+          "std_setup_time_min": 120,
+          "std_scrap_rate_pct": 2.1,
+          "maintenance_interval_hours": 720
+        },
+        {
+          "step_order": 2,
+          "process_code": "PRC_CONVERTER_02",
+          "process_name": "전로(Converter) 조동(Blister Copper) 추출",
+          "std_equipment": "Peirce-Smith Converter",
+          "std_cycle_time_sec": 2400,
+          "std_setup_time_min": 60,
+          "std_scrap_rate_pct": 1.2,
+          "maintenance_interval_hours": 360
+        },
+        {
+          "step_order": 3,
+          "process_code": "PRC_ANODE_CAST_03",
+          "process_name": "양극판(Anode Plate) 주조 공정",
+          "std_equipment": "Twin Anode Casting Wheel",
+          "std_cycle_time_sec": 180,
+          "std_setup_time_min": 30,
+          "std_scrap_rate_pct": 0.5,
+          "maintenance_interval_hours": 168
+        },
+        {
+          "step_order": 4,
+          "process_code": "PRC_ELECTRO_REFINING_04",
+          "process_name": "전해조(Electro-refining Cell) 전기분해 정련 및 음극(Cathode) 수확",
+          "std_equipment": "Electro-refining Tankhouse",
+          "std_cycle_time_sec": 86400,
+          "std_setup_time_min": 90,
+          "std_scrap_rate_pct": 0.1,
+          "maintenance_interval_hours": 1440
+        }
+      ]
+    },
+    {
+      "template_id": "TMPL_BATTERY_NICKEL_01",
+      "template_name": "이차전지용 고순도 황산니켈 정제 공정",
+      "industry_type": "이차전지 화학소재 제조업 (LS MnM 배터리소재 사업부 타입)",
+      "processes": [
+        {
+          "step_order": 1,
+          "process_code": "PRC_LEACHING_01",
+          "process_name": "니켈 원료 산 침출(Leaching) 공정",
+          "std_equipment": "High-Pressure Autoclave",
+          "std_cycle_time_sec": 7200,
+          "std_setup_time_min": 45,
+          "std_scrap_rate_pct": 1.0,
+          "maintenance_interval_hours": 500
+        },
+        {
+          "step_order": 2,
+          "process_code": "PRC_PURIFICATION_02",
+          "process_name": "용매 추출 불순물(철/구리) 정제 공정",
+          "std_equipment": "Solvent Extraction Mixer-Settler",
+          "std_cycle_time_sec": 3600,
+          "std_setup_time_min": 30,
+          "std_scrap_rate_pct": 0.4,
+          "maintenance_interval_hours": 300
+        },
+        {
+          "step_order": 3,
+          "process_code": "PRC_CRYSTALLIZATION_03",
+          "process_name": "황산니켈 결정화(Crystallization) 및 건조",
+          "std_equipment": "Vacuum Crystallizer & Fluidized Bed Dryer",
+          "std_cycle_time_sec": 5400,
+          "std_setup_time_min": 60,
+          "std_scrap_rate_pct": 0.2,
+          "maintenance_interval_hours": 400
+        }
+      ]
+    },
+    {
+      "template_id": "TMPL_AUTO_FRAME_PRESS_01",
+      "template_name": "자동차 샤시/차체 프레스 성형 및 표면처리 라인",
+      "industry_type": "자동차 부품 및 프레스 제조업",
+      "processes": [
+        {
+          "step_order": 1,
+          "process_code": "PRC_HEAVY_PRESS_01",
+          "process_name": "1,000톤 로봇 유압 프레스 성형",
+          "std_equipment": "1,000T Automated Hydraulic Press",
+          "std_cycle_time_sec": 15,
+          "std_setup_time_min": 45,
+          "std_scrap_rate_pct": 1.1,
+          "maintenance_interval_hours": 150
+        },
+        {
+          "step_order": 2,
+          "process_code": "PRC_ROBOT_WELD_02",
+          "process_name": "로봇 스폿 용접(Spot Welding) 공정",
+          "std_equipment": "6-Axis Welding Robot Cell",
+          "std_cycle_time_sec": 25,
+          "std_setup_time_min": 15,
+          "std_scrap_rate_pct": 0.5,
+          "maintenance_interval_hours": 100
+        },
+        {
+          "step_order": 3,
+          "process_code": "PRC_ED_COATING_03",
+          "process_name": "전착도장(Electro-deposition) 및 건조",
+          "std_equipment": "Continuous ED Coating Dip Tank",
+          "std_cycle_time_sec": 120,
+          "std_setup_time_min": 30,
+          "std_scrap_rate_pct": 0.3,
+          "maintenance_interval_hours": 300
+        }
+      ]
+    }
+  ]
+}

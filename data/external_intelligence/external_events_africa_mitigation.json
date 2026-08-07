@@ -1,0 +1,25 @@
+{
+  "event_id": "EVT_AFRICA_MITIGATION",
+  "event_type": "SUPPLY_CHAIN_MITIGATION",
+  "title": "아프리카(DRC)/몽골 신규 조달처 다변화 성공 (방어/호재)",
+  "severity": "MEDIUM",
+  "source_id": "SRC_GLOBAL_MINING_NEWS",
+  "observation_cutoff_date": "2026-07-29",
+  "impact_drivers": [
+    {
+      "internal_metric_id": "KPI_COPPER_CONCENTRATE_PREMIUM",
+      "direction": "DECREASE",
+      "impact_value_percent": -8.0,
+      "description": "고품위 저원가 정광 확보로 전체 매입 프리미엄 8% 상쇄(방어)",
+      "effective_period": "2026Q4 - 2027Q4"
+    },
+    {
+      "internal_metric_id": "OP_SUPPLIER_DIVERSIFICATION_RATE",
+      "direction": "INCREASE",
+      "impact_value_percent": 15.0,
+      "description": "특정 지역(남미) 의존도 탈피, 공급선 다변화율 15% 개선",
+      "effective_period": "2026Q4 - Long Term"
+    }
+  ],
+  "evidence_ref": "Global_Copper_Supply_Chain_Report_2026.md"
+}
