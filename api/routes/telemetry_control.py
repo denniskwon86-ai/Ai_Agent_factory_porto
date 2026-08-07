@@ -8,6 +8,9 @@ data/llm_call_log.jsonl (게이트웨이가 호출마다 append)을 읽어 프�
 - 실행 중 append 되는 파일이라 마지막 줄이 부분 기록일 수 있음 → 줄 단위 파싱 실패는 skip(전체 폐기 금지).
 - 읽기 전용 — 파이프라인 append 와 충돌 없음.
 """
+# ⚠️ `asyncio` 를 빠뜨려 `/asset-hygiene` 이 500 이었다(2026-08-07 실측). 소스 문자열만
+#   확인하는 테스트는 이런 실행 오류를 잡지 못한다 — 라우트는 **실제로 호출**해 봐야 한다.
+import asyncio
 import os
 import json
 from typing import Optional
@@ -233,6 +236,27 @@ async def telemetry_by_org(project: str = "", p: Principal = Depends(current_pri
     data = collect(scoped["records"], viewer_scope_nodes(p))
     data["project"] = project or "(전역)"
     data["permission"] = _scope_meta(scoped)
+    return {"status": "success", "data": data}
+
+
+@router.get("/asset-hygiene")
+async def asset_hygiene(p: Principal = Depends(current_principal)):
+    """[D-017 §9 P4-4 · 절반] 자산 중복 — **동일과 유사를 분리해서** 낸다.
+
+    ★ 확신의 차이를 화면에서 지우면 사람은 목록 전체를 같은 무게로 읽고, 한 번 잘못 지우면
+      다시는 이 목록을 쓰지 않는다(사용자 결정 2026-08-07 안 B).
+
+    ⚠️⚠️ **「미사용」은 제공하지 않는다.** 자산에 사용 이력 필드가 없고 실행 로그의 에이전트
+      귀속률이 8% 다. 이 상태에서 「호출 0건 = 미사용」이라고 제안하면 관측되지 않았을 뿐인
+      자산을 지우라고 말하게 된다 — `unused.note` 가 그 사실을 말한다.
+      **빈 목록으로 두지 않는다**(빈 목록은 「정리할 것이 없다」로 읽힌다).
+
+    ⚠️ LLM 0콜이다(§6.1 「단순 LLM 평가 금지」). 의미 비교를 하지 않는 이유는 근거를 설명할 수
+      없는 삭제 제안은 아무도 실행하지 않기 때문이다."""
+    from api.deps import assert_governance_readable
+    from core.asset_dedup import find_duplicates
+    assert_governance_readable(p)
+    data = await asyncio.to_thread(find_duplicates)
     return {"status": "success", "data": data}
 
 

@@ -169,6 +169,26 @@ async def list_promotions(status: str = "",
             "data": await asyncio.to_thread(workspace.list_promotions, status)}
 
 
+@router.get("/promotions/recommendations")
+async def promotion_recommendations(target_scope: str = "enterprise",
+                                    p: Principal = Depends(current_principal)):
+    """[D-017 §9 P4-3] **지금 승격 신청하면 게이트를 통과할 릴리스**를 추천한다.
+
+    ★ 그 이상을 말하지 않는다 — 「좋은 자산」·「가치 있는 자산」은 사람의 판단이고, 우리가
+      가진 데이터로는 근사조차 할 수 없다.
+    ★★ 판정을 여기서 다시 하지 않는다. `evaluate_gate` 의 `promotable` 을 **그대로** 쓴다 —
+      다시 세면 화면과 실제 게이트가 다른 말을 하게 되고, 「승격 준비됨」이라던 것이 신청하면
+      막힌다. 그때 사용자는 추천을 신뢰하지 않게 된다.
+    ⚠️ `unverifiable` 을 완화하지 않는다. 게이트에서 가장 흔한 상태가 그것이므로 통과로 세면
+      거의 전부가 추천된다.
+    ⚠️ 자격은 「전사 정비 상태」 기준이다 — 어디가 비어 있는지는 그 자체로 보호 대상이다."""
+    from api.deps import assert_governance_readable
+    from core.promotion_advisor import recommend
+    assert_governance_readable(p)
+    data = await asyncio.to_thread(recommend, target_scope)
+    return {"status": "success", "data": data}
+
+
 @router.get("/promotions/gate")
 async def evaluate_gate(release_id: str, target_scope: str = "enterprise",
                         project_id: str = "",
