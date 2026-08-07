@@ -126,3 +126,38 @@ export async function replanWbs(projectId: string): Promise<SprintResult> {
 export const REPLAN_CONFIRM =
   ('기획 산출물(RFP·PRD·UI·아키텍처)은 유지한 채 WBS 분할만 다시 수행합니다. '
    + '기존 작업 목록은 사라지며 되돌릴 수 없습니다. 진행할까요?');
+
+// ── 피드백 백로그 발행 (Track 2 고객 리뷰 → WBS 추가) ────────────────────────
+/** 완료된 산출물을 보고 **수정 요구**를 내면 그것이 새 WBS 작업이 된다.
+ *
+ * ★ [2026-08-07 전환 게이트] 신규 Studio 에 이 기능이 **없어서** 승격이 막혔다.
+ *   §8 기능 게이트의 「HOTL 질문·승인·**수정 요구** 가 보존된다」에 해당한다.
+ *   ⚠️ Decision Dock 의 «승인 조건이나 수정 요청» 과 **다른 경로**다 —
+ *     그쪽은 지금 멈춰 선 HOTL 작업에 답하는 것(`/hotl/resume`)이고,
+ *     이쪽은 이미 끝난 것을 보고 **새 작업을 만드는 것**(`/sprint/revision`)이다.
+ *     같은 칸에 묶으면 사용자는 「승인했는데 왜 새 작업이 생겼나」를 묻게 된다.
+ */
+export async function publishRevisionBacklog(
+  projectId: string, feedback: string,
+): Promise<SprintResult> {
+  if (!projectId) return { ok: false, message: '프로젝트가 선택되지 않았습니다.' };
+  if (!feedback.trim()) return { ok: false, message: '수정 요구 내용을 입력하십시오.' };
+  return post(`/api/v1/factory/${encodeURIComponent(projectId)}/sprint/revision`,
+    { feedback: feedback.trim() });
+}
+
+export const REVISION_NOTE =
+  ('완료된 산출물에 대한 수정 요구를 새 WBS 작업으로 추가합니다. '
+   + '지금 멈춰 선 결정에 답하는 것이 아니라 **다음에 할 일**을 만드는 것입니다.');
+
+// ── Export (산출물 ZIP) ─────────────────────────────────────────────────────
+/** 생성된 코드·문서를 zip 으로 내려받는 주소. **fetch 하지 않고 링크로 연다** —
+ *  서버가 `Content-Disposition` 으로 파일명을 정하고, 브라우저가 그대로 저장한다.
+ *
+ *  ★ [2026-08-07 전환 게이트] §8 「Export 가 보존된다」가 신규 Studio 에서 빠져 있었다
+ *    (`StageArtifactCanvas` 가 「종전 통제실에서 하십시오」라고 스스로 적어 두었다).
+ *  ⚠️ 종전 통제실과 **같은 엔드포인트**를 쓴다 — 여기서 다른 주소를 만들면 두 화면이
+ *    다른 것을 내려받게 되고, 그때 어느 쪽이 «진짜 산출물» 인지 알 수 없다. */
+export function exportArchiveUrl(projectId: string): string {
+  return `${API_BASE_URL}/api/v1/factory/${encodeURIComponent(projectId)}/export`;
+}

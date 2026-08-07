@@ -365,6 +365,13 @@
 .afs-studio .wbs-item[data-kind='active'] { border-color: var(--ls-red); box-shadow: 0 0 0 2px rgba(250, 0, 45, .07); }
 .afs-studio .wbs-item[data-kind='active'] i { background: var(--ls-red); }
 .afs-studio .wbs-item[data-kind='blocked'] { opacity: .65; }
+/* ★ [2026-08-07 전환 게이트] «사람 대기» 는 사용자가 **지금 움직여야 하는** 유일한 줄이다.
+ *   진행(빨강)과 다른 색을 준다 — 같은 색이면 「기계가 돌고 있다」로 읽고 지나친다. */
+.afs-studio .wbs-item[data-kind='awaiting'] {
+  border-color: var(--state-warn-fg);
+  box-shadow: 0 0 0 2px rgba(176, 122, 0, .10);
+}
+.afs-studio .wbs-item[data-kind='awaiting'] i { background: var(--state-warn-fg); }
 .afs-studio .wbs-item[aria-current='true'] { outline: 2px solid var(--ls-navy); outline-offset: 1px; }
 .afs-studio .wbs-item:focus-visible { outline: 2px solid var(--action-focus-ring); outline-offset: 2px; }
 

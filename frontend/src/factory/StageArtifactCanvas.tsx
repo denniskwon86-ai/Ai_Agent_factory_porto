@@ -218,7 +218,8 @@ export function ReleaseCanvas({ vm }: { vm: FactoryStudioViewModel }) {
       <footer className="artifact-aux">
         <b>보조 검토</b>
         <p>
-          Export·회수·롤백과 권한 Manifest 는 아직 이 화면에 없습니다 — 종전 통제실의
+          산출물 ZIP 내려받기는 위 «실행 통제» 의 [산출물 ZIP] 에 있습니다.
+          회수·롤백과 권한 Manifest 는 아직 이 화면에 없습니다 — 종전 통제실의
           «결과물 라이브러리» 에서 하십시오.
         </p>
       </footer>

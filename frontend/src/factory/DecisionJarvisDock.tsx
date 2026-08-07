@@ -23,6 +23,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { jarvisApi, jarvisSession } from '../lib/jarvisApi';
+import { decisionDraft } from './decisionDraft';
 import { useFactoryStore } from '../store/useFactoryStore';
 import { serializeClarifyAnswers, unansweredCount } from './clarifyAnswers';
 
@@ -44,7 +45,15 @@ export interface DecisionJarvisDockProps {
 export function DecisionJarvisDock({
   vm, selections, shownStageId, shownStageLabel,
 }: DecisionJarvisDockProps) {
-  const [note, setNote] = useState('');
+  // ★ [7단계 전환 게이트] 작성 중이던 초안은 **화면 밖**에 있다 — Studio 를 닫았다 열어도
+  //   살아남아야 한다(기존 3패널은 언마운트되지 않아 원래 보존됐다. 여기서 잃으면 회귀다).
+  const [note, setNoteState] = useState(() => decisionDraft.get(vm.project.id));
+  const setNote = (v: string) => { setNoteState(v); decisionDraft.set(vm.project.id, v); };
+
+  // 프로젝트가 바뀌면 그 프로젝트의 초안으로 갈아 끼운다 — 한 칸을 공유하면 A 에 쓰던
+  //   승인 조건이 B 의 승인 칸에 나타난다(보존이 아니라 오입력 유도다).
+  useEffect(() => { setNoteState(decisionDraft.get(vm.project.id)); }, [vm.project.id]);
+
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
@@ -84,7 +93,10 @@ export function DecisionJarvisDock({
         const j = await r.json().catch(() => ({}));
         throw new Error(j?.detail || `서버 응답 오류 (${r.status})`);
       }
-      setNote('');
+      // 제출에 **성공했을 때만** 지운다 — 남겨 두면 이미 보낸 문장이 다시 떠서
+      //   «아직 안 보냈나» 로 읽힌다.
+      decisionDraft.clear(vm.project.id);
+      setNoteState('');
       setOk('제출했습니다 — 파이프라인이 이어서 진행합니다.');
       // 종전 화면과 **같은 방식**으로 store 를 맞춘다. 여기서 다르게 두면 두 화면의 상태 표시가
       // 갈라진다(한쪽은 «대기», 다른 쪽은 «가동 중»).

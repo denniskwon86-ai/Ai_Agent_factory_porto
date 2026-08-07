@@ -59,7 +59,7 @@ export interface FactoryStageVm {
 }
 
 /** 작업 하나의 진행 종류. **판정은 ViewModel 에서만 한다** — 아래 `isTaskDone` 참조. */
-export type FactoryWbsKind = 'done' | 'active' | 'blocked' | 'waiting';
+export type FactoryWbsKind = 'done' | 'awaiting' | 'active' | 'blocked' | 'waiting';
 
 export interface FactoryWbsVm {
   id: string;
@@ -500,7 +500,17 @@ export function buildFactoryViewModel(
     // «완료» 가 «차단» 보다 위인 이유: 끝난 작업에 남은 의존 표시는 이력일 뿐이고, 그것을
     // 차단으로 세면 «완료했는데 막혀 있다» 는 모순이 화면에 동시에 보인다(실측으로 그랬다).
     // «진행» 이 «차단» 보다 위인 이유: 이미 돌고 있으면 막힌 것이 아니다.
+    // ★★ [2026-08-07 전환 게이트] «사람을 기다리는 것» 을 «진행» 으로 표시하지 않는다.
+    //   HOTL 이 멈춰 세운 작업의 서버 상태는 여전히 `IN_PROGRESS` 다. 그것을 그대로 「진행」
+    //   으로 쓰면 사용자는 **기계가 돌고 있다**고 읽고 자기를 기다린다는 것을 모른다.
+    //   기존 3패널은 그 작업 줄에 「⚠️ HOTL(전문가 개입)」을 붙여 그것을 말하고 있었다 —
+    //   신규 화면에서 그 표시가 사라진 것이 전환 게이트의 «상태 불일치» 1건이었다.
+    //   §8 신뢰성 「실패를 실행 중으로 표시하지 않는다」와 같은 성격이다.
+    // ⚠️ 완료보다는 아래다 — 끝난 작업에 남은 HOTL 표식은 이력일 뿐이다.
+    const awaitingHuman = !!snap.hotlTaskId
+      && String(snap.hotlTaskId) === String(t?.task_id ?? '');
     const kind: FactoryWbsKind = isTaskDone(t?.status) ? 'done'
+      : awaitingHuman ? 'awaiting'
       : isTaskActive(t?.status) ? 'active'
       : unmet.length ? 'blocked'
       : 'waiting';

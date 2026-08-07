@@ -22,11 +22,12 @@ import { useFactoryStore } from '../store/useFactoryStore';
 
 import type { FactoryStudioViewModel } from './factoryViewModel';
 import {
-  REPLAN_CONFIRM, SELF_HEAL_NOTE, newPlanningTaskId, replanWbs, resumeAfterQuota, startPlanning,
+  REPLAN_CONFIRM, REVISION_NOTE, SELF_HEAL_NOTE, exportArchiveUrl, newPlanningTaskId,
+  publishRevisionBacklog, replanWbs, resumeAfterQuota, startPlanning,
   type SprintResult,
 } from './sprintActions';
 
-type Pending = null | 'start' | 'replan';
+type Pending = null | 'start' | 'replan' | 'revision';
 
 export interface RunControlsProps {
   vm: FactoryStudioViewModel;
@@ -43,6 +44,8 @@ export function RunControls({ vm }: RunControlsProps) {
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
   const [idea, setIdea] = useState('');
+  /** [전환 게이트] Track 2 수정 요구 입력. */
+  const [revision, setRevision] = useState('');
   const [masterData, setMasterData] = useState('');
 
   const pid = vm.project.id;
@@ -99,6 +102,28 @@ export function RunControls({ vm }: RunControlsProps) {
     show(r, 'WBS 분할을 다시 시작했습니다.');
   });
 
+  // ── 피드백 백로그 발행 (Track 2) ─────────────────────────────────────────
+  const doRevision = () => guard('수정 요구 발행 중', async () => {
+    const r = await publishRevisionBacklog(pid, revision);
+    setNote(r.ok
+      ? { tone: 'ok', text: '수정 요구를 새 WBS 작업으로 추가했습니다.' }
+      : { tone: 'bad', text: r.message || '수정 요구를 추가하지 못했습니다.' });
+    if (r.ok) { setRevision(''); setPending(null); }
+  });
+
+  // ── Export (산출물 ZIP) ──────────────────────────────────────────────────
+  // ⚠️ `fetch` 하지 않는다 — 서버가 `Content-Disposition` 으로 파일명을 정하므로 링크로 연다.
+  const doExport = () => {
+    if (!pid) return;
+    const a = document.createElement('a');
+    a.href = exportArchiveUrl(pid);
+    a.download = `${pid}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setNote({ tone: 'ok', text: '산출물 ZIP 내려받기를 시작했습니다.' });
+  };
+
   // ── Release 저장 ─────────────────────────────────────────────────────────
   const doRelease = () => guard('Release 저장 중', async () => {
     const rid = await saveRelease(pid);
@@ -127,6 +152,15 @@ export function RunControls({ vm }: RunControlsProps) {
     : run.active ? `지금은 «${run.label}» 상태입니다 — 멈춘 뒤에 재분할할 수 있습니다.` : '';
   const releaseWhy = run.wbsTotal === 0
     ? 'WBS 가 없어 저장할 산출물이 없습니다.' : '';
+  // ⚠️ 수정 요구는 **끝난 것이 있어야** 의미가 있다. 완료 0건이면 고칠 대상이 없다
+  //   (종전 통제실도 `doneTasks > 0` 일 때만 이 칸을 보여 준다 — 같은 조건을 쓴다).
+  const revisionWhy = !pid ? '프로젝트를 먼저 선택하십시오.'
+    : vm.wbs.filter((t) => t.kind === 'done').length === 0
+      ? '완료된 작업이 없습니다 — 고칠 대상이 아직 없습니다.'
+      : run.active ? `지금은 «${run.label}» 상태입니다 — 멈춘 뒤에 요구를 낼 수 있습니다.` : '';
+  const exportWhy = !pid ? '프로젝트를 먼저 선택하십시오.'
+    : Object.keys(vm.docs || {}).length === 0 && run.wbsTotal === 0
+      ? '아직 내려받을 산출물이 없습니다.' : '';
 
   return (
     <section className="run-controls" aria-label="실행 통제">
@@ -151,6 +185,13 @@ export function RunControls({ vm }: RunControlsProps) {
           onClick={() => setPending(pending === 'replan' ? null : 'replan')} danger />
         <Btn label="Release 저장" why={releaseWhy} busy={busy === 'Release 저장 중'}
           onClick={doRelease} hint="현재 산출물을 하나의 릴리스로 묶어 보관합니다." />
+        {/* [전환 게이트] §8 「수정 요구가 보존된다」 — 종전 통제실의 «피드백 백로그 발행» */}
+        <Btn label="수정 요구" why={revisionWhy} busy={busy === '수정 요구 발행 중'}
+          onClick={() => setPending(pending === 'revision' ? null : 'revision')}
+          hint={REVISION_NOTE} />
+        {/* [전환 게이트] §8 「Export 가 보존된다」 — 종전 통제실의 «산출물 코드 ZIP 다운로드» */}
+        <Btn label="산출물 ZIP" why={exportWhy} busy={false} onClick={doExport}
+          hint="생성된 코드·문서를 zip 으로 내려받습니다(종전 통제실과 같은 파일)." />
       </div>
 
       {/* ── 기획 가동 폼 ─────────────────────────────────────────────────── */}
@@ -173,6 +214,24 @@ export function RunControls({ vm }: RunControlsProps) {
             <button type="button" className="primary" disabled={!idea.trim() || !!busy}
               onClick={doStart}>
               {busy === '기획 가동 중' ? '가동 중…' : '기획 가동'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 수정 요구 폼 ─────────────────────────────────────────────────── */}
+      {pending === 'revision' && !revisionWhy && (
+        <div className="run-form">
+          <label className="field-label" htmlFor="rc-revision">무엇을 고쳐야 합니까 (필수)</label>
+          <textarea id="rc-revision" rows={3} value={revision}
+            placeholder="예: 변환 이력이 5개만 남는데 20개까지 보이게 해 주십시오"
+            onChange={(e) => setRevision(e.target.value)} />
+          <p className="run-hint">{REVISION_NOTE}</p>
+          <div className="run-form-actions">
+            <button type="button" onClick={() => setPending(null)}>취소</button>
+            <button type="button" className="primary" disabled={!revision.trim() || !!busy}
+              onClick={doRevision}>
+              {busy === '수정 요구 발행 중' ? '발행 중…' : 'WBS 에 추가'}
             </button>
           </div>
         </div>
