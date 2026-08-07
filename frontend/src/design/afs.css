@@ -360,6 +360,30 @@
 .afs-scope .metric-row b { margin: 5px 0 2px; font-size: 21px; }
 .afs-scope .metric-row small { color: var(--surface-text-faint); font-size: 12px; }
 
+/* ── 표 ────────────────────────────────────────────────────────────────────
+ *
+ * ★ [이관 F] 여기서 **한 번만** 정한다. 이관 대상 8화면 중 넷(운영 계기판·품질 결과·
+ *   경영계획·상담사)이 표를 쓰는데, 각자 꾸미면 같은 결정을 네 번 하고 네 번 다르게 한다.
+ *   `metric-row` 를 공용으로 둔 것과 같은 이유다.
+ *
+ * ⚠️ 본문 12px 이상(감사 UIUX-AUDIT-29 ③). 표는 «많이 넣으려고» 글자를 줄이게 되는 자리라
+ *   여기에 못을 박는다 — 종전 화면들은 10~11px 이었다.
+ * ⚠️ 가로 넘침은 표가 **자기 안에서** 처리한다. 문서를 넘치게 하면 화면 전체에 스크롤바가
+ *   생기고, 그 순간 셸의 폭 계약이 깨진다. */
+.afs-scope .afs-table-wrap { overflow-x: auto; }
+.afs-scope .afs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.afs-scope .afs-table th {
+  padding: 7px 8px; border-bottom: 1px solid var(--line);
+  color: var(--muted); font-size: 12px; font-weight: 700; text-align: left; white-space: nowrap;
+}
+.afs-scope .afs-table td {
+  padding: 7px 8px; border-bottom: 1px solid var(--line-soft, #eef1f4); color: var(--ink);
+}
+.afs-scope .afs-table tbody tr:last-child td { border-bottom: 0; }
+/* 수치 열은 오른쪽 정렬하지 않는다 — 이 표들은 열 폭이 들쭉날쭉해서 오히려 읽기 어려워진다.
+ * 대신 숫자를 고정폭으로 두어 자릿수가 눈으로 맞는다. */
+.afs-scope .afs-table .num { font-variant-numeric: tabular-nums; }
+
 .afs-scope .inbox-layout { display: grid; grid-template-columns: minmax(500px, 1.35fr) minmax(300px, .65fr); gap: 14px; }
 .afs-scope .filter-pills { display: flex; gap: 5px; }
 .afs-scope .filter-pills button {
