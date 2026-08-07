@@ -1,23 +1,61 @@
-import { useEffect, useState } from 'react';
+// [이관 F 4/8] 연계 / 크로스워크 (M2) — 외부 시스템의 키·필드를 우리 기준정보(M1 골든 레코드)와
+// 매핑한다. 매핑은 초안(제안) → 사용자 승인(confirmed) 2단계이며, **승인된 매핑만** M3 온디맨드
+// 조회의 주소록이 된다.
+//
+// ## ★★★ 이관에서 드러난 것 — 조회 실패를 «빈 목록» 으로 바꿔치기하고 있었다
+//
+//   `fetch(...).then(r => r.ok ? r.json() : { data: [] })`
+//
+// 403 도 500 도 **빈 목록**이 됐다. 이 화면에서 빈 목록은 「매핑할 것이 없다」·「승인 대기가
+// 없다」로 읽힌다. 그런데 승인 대기 제안은 **«외부 필드 = 우리 표준의 무엇» 을 확정하는**
+// 관문이다 — 못 본 것을 «없다» 로 보여주면 그 관문이 조용히 비어 보인다.
+// → 각 목록을 `Loaded<T>` 로 담고, 실패는 실패로 말한다.
+//
+// ## 자체 `API_BASE_URL` 선언을 제거했다
+//
+// `lib/api.ts` 머리말이 경고한 «8곳 중복 선언» 중 하나였다. 예전에 같은 방식으로
+// `KnowledgeHubPanel` 의 모든 호출이 **조용히 익명으로** 나갔다. 지금은 인터셉터가 origin 으로
+// 판정해 덮이지만, 남겨 두면 포트가 갈릴 때 같은 사고가 재현된다.
+//
+// ## `alert()` 7곳 · `prompt()` 1곳을 없앴다
+//
+// 디자인 시스템 규칙 ②(브라우저 대화상자 금지). 특히 승인은 `prompt()` 로 외부 키를 받고
+// 있었는데, 그 한 줄이 **무엇을 확정하는지** 설명할 자리가 없었다. 화면 안 입력으로 바꾸고
+// 확정되는 내용을 그대로 보여준다.
+//
+// ## 종전 구현에서 제거한 것
+//
+//   · 자체 `fixed inset-0` 모달(모달 semantics·포커스 트랩·Escape 없음) → `HubDialog`
+//   · 승인·기각이 **응답을 확인하지 않던 것**(fire-and-forget — 실패해도 화면은 성공처럼 굴었다)
+//   · **9~11px 글자 12곳** → 본문 12px 이상
+import { useCallback, useEffect, useState } from 'react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
-const X = `${API_BASE_URL}/api/v1/crosswalk`;
+import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
+import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
+import { HubDialog } from '../design/HubDialog';
+import { Banner, Panel, ScreenHead } from '../design/HubShell';
+import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
+import {
+  crosswalkApi, type Field, type LiveValue, type Mapping, type Proposal, type Sys,
+} from '../lib/crosswalkApi';
 
-interface Sys { system_id: string; name: string; mcp_endpoint: string; scope: string; status: string; }
-interface Field { system_id: string; entity: string; field: string; field_type: string; is_key: number; mapped_type: string; mapped_attr: string; }
-interface Proposal { id: number; master_code: string; external_key: string; confidence: number; rationale: string; status: string; }
-interface Mapping { master_code: string; external_key: string; }
+function asLoaded<T>(e: any): Loaded<T> {
+  return e?.status === 403 || e?.status === 401
+    ? { status: 'forbidden', value: null, error: e?.message || '볼 권한이 없습니다.',
+      httpStatus: e.status }
+    : failed<T>(e);
+}
 
-// 🔗 연계/크로스워크 (M2) — 외부 시스템의 키·필드를 우리 기준정보(M1 골든 레코드)와 매핑한다.
-// 매핑은 초안(제안) → 사용자 승인(confirmed) 2단계. 승인된 매핑만 M3 온디맨드 조회의 주소록이 된다.
 export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
-  const [systems, setSystems] = useState<Sys[]>([]);
+  const [systems, setSystems] = useState<Loaded<Sys[]>>(loading<Sys[]>());
   const [sel, setSel] = useState<string | null>(null);
-  const [schema, setSchema] = useState<Field[]>([]);
-  const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [mappings, setMappings] = useState<Mapping[]>([]);
-  const [liveResults, setLiveResults] = useState<Record<string, any>>({});  // [M3] 실측 조회 결과
+  const [schema, setSchema] = useState<Loaded<Field[]>>(loading<Field[]>());
+  const [proposals, setProposals] = useState<Loaded<Proposal[]>>(loading<Proposal[]>());
+  const [mappings, setMappings] = useState<Loaded<Mapping[]>>(loading<Mapping[]>());
+  const [liveResults, setLiveResults] = useState<Record<string, LiveValue>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
 
   const [sysId, setSysId] = useState('');
   const [sysName, setSysName] = useState('');
@@ -30,284 +68,477 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
   const [fMappedAttr, setFMappedAttr] = useState('');
 
   const [useLlm, setUseLlm] = useState(false);
+  /** 승인 시 확정할 외부 키. `prompt()` 를 대신한다. */
+  const [approveKey, setApproveKey] = useState('');
 
-  const fetchSystems = async () => {
-    try { const r = await fetch(`${X}/systems`); if (r.ok) setSystems((await r.json()).data || []); }
-    catch (e) { console.error('시스템 로드 실패:', e); }
-  };
-  const refreshSel = async (sid: string) => {
-    const [s, p, m] = await Promise.all([
-      fetch(`${X}/systems/${sid}/schema`).then((r) => r.ok ? r.json() : { data: [] }),
-      fetch(`${X}/systems/${sid}/proposals`).then((r) => r.ok ? r.json() : { data: [] }),
-      fetch(`${X}/systems/${sid}/mappings`).then((r) => r.ok ? r.json() : { data: [] }),
+  const confirmApprove = useConfirm<Proposal>();
+  const confirmPropose = useConfirm<true>();
+
+  const fetchSystems = useCallback(async () => {
+    setSystems(loading<Sys[]>());
+    try {
+      const rows = await crosswalkApi.systems();
+      reportRequestSuccess();
+      setSystems(ok(rows || []));
+    } catch (e: any) {
+      reportRequestFailure(e?.status);
+      setSystems(asLoaded<Sys[]>(e));
+    }
+  }, []);
+
+  const refreshSel = useCallback(async (sid: string) => {
+    setSchema(loading<Field[]>());
+    setProposals(loading<Proposal[]>());
+    setMappings(loading<Mapping[]>());
+    // ★ 셋을 **따로** 담는다. 하나가 실패해도 나머지를 «없다» 로 만들지 않는다.
+    const [s, p, m] = await Promise.allSettled([
+      crosswalkApi.schema(sid), crosswalkApi.proposals(sid), crosswalkApi.mappings(sid),
     ]);
-    setSchema(s.data || []); setProposals(p.data || []); setMappings(m.data || []);
+    setSchema(s.status === 'fulfilled' ? ok(s.value || []) : asLoaded<Field[]>(s.reason));
+    setProposals(p.status === 'fulfilled' ? ok(p.value || []) : asLoaded<Proposal[]>(p.reason));
+    setMappings(m.status === 'fulfilled' ? ok(m.value || []) : asLoaded<Mapping[]>(m.reason));
+  }, []);
+
+  useEffect(() => { fetchSystems(); }, [fetchSystems]);
+  useEffect(() => { if (sel) refreshSel(sel); }, [sel, refreshSel]);
+
+  const selSys = (systems.value || []).find((s) => s.system_id === sel) || null;
+  const pending = (proposals.value || []).filter((p) => p.status === 'pending');
+
+  /** 쓰기 한 번. **응답을 반드시 확인한다** — 종전 승인·기각은 확인하지 않았다. */
+  const act = async (tag: string, fn: () => Promise<unknown>, okMsg: string) => {
+    setBusy(tag); setErr(''); setMsg('');
+    try {
+      await fn();
+      setMsg(okMsg);
+      return true;
+    } catch (e: any) {
+      setErr(e?.message || '요청이 거절됐습니다.');
+      return false;
+    } finally {
+      setBusy(null);
+    }
   };
-
-  useEffect(() => { fetchSystems(); }, []);
-  useEffect(() => { if (sel) refreshSel(sel); }, [sel]); // eslint-disable-line
-
-  const selSys = systems.find((s) => s.system_id === sel) || null;
 
   const handleCreateSystem = async () => {
-    if (!sysId.trim()) { alert('system_id(영소문자/숫자/_/-, 2~32자)를 입력하세요.'); return; }
-    setBusy('sys');
-    try {
-      const r = await fetch(`${X}/systems`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ system_id: sysId.trim(), name: sysName.trim() || sysId.trim(), mcp_endpoint: sysEndpoint.trim() }),
-      });
-      if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || '시스템 등록 실패'); return; }
+    if (!sysId.trim()) { setErr('system_id 를 입력하십시오 (영소문자/숫자/_/-, 2~32자).'); return; }
+    const id = sysId.trim();
+    if (await act('sys', () => crosswalkApi.createSystem({
+      system_id: id, name: sysName.trim() || id, mcp_endpoint: sysEndpoint.trim(),
+    }), `시스템 «${id}» 를 등록했습니다.`)) {
       setSysId(''); setSysName(''); setSysEndpoint('');
-      await fetchSystems(); setSel(sysId.trim());
-    } finally { setBusy(null); }
+      await fetchSystems();
+      setSel(id);
+    }
   };
 
   const handleAddField = async () => {
-    if (!sel || !fEntity.trim() || !fField.trim()) { alert('엔티티와 필드명을 입력하세요.'); return; }
-    setBusy('field');
-    try {
-      const r = await fetch(`${X}/systems/${sel}/schema/field`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entity: fEntity.trim(), field: fField.trim(), field_type: fType.trim(), is_key: fIsKey, mapped_attr: fMappedAttr.trim() }),
-      });
-      if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || '필드 추가 실패'); return; }
+    if (!sel || !fEntity.trim() || !fField.trim()) {
+      setErr('엔티티와 필드명을 입력하십시오.'); return;
+    }
+    if (await act('field', () => crosswalkApi.addField(sel, {
+      entity: fEntity.trim(), field: fField.trim(), field_type: fType.trim(),
+      is_key: fIsKey, mapped_attr: fMappedAttr.trim(),
+    }), '필드를 추가했습니다.')) {
       setFEntity(''); setFField(''); setFType(''); setFIsKey(false); setFMappedAttr('');
       await refreshSel(sel);
-    } finally { setBusy(null); }
+    }
   };
 
   const handleCsv = async (files: FileList | null) => {
     if (!files || !files[0] || !sel) return;
-    setBusy('csv');
+    setBusy('csv'); setErr(''); setMsg('');
     try {
-      const form = new FormData(); form.append('file', files[0]);
-      const r = await fetch(`${X}/systems/${sel}/schema/import`, { method: 'POST', body: form });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) { alert(j.detail || 'CSV 등록 실패'); return; }
-      alert(`스키마 등록: 성공 ${j.data.imported}/${j.data.total}`);
+      const d = await crosswalkApi.importCsv(sel, files[0]);
+      // ⚠️ «성공 N/M» 을 그대로 말한다 — 일부만 들어간 것을 «등록 완료» 로 뭉치지 않는다.
+      setMsg(d.imported === d.total
+        ? `스키마 ${d.total}건을 모두 등록했습니다.`
+        : `스키마 ${d.total}건 중 ${d.imported}건만 등록됐습니다 — 나머지는 형식을 확인하십시오.`);
       await refreshSel(sel);
-    } finally { setBusy(null); }
+    } catch (e: any) {
+      setErr(e?.message || 'CSV 등록에 실패했습니다.');
+    } finally {
+      setBusy(null);
+    }
   };
 
-  const handlePropose = async () => {
+  const doPropose = async () => {
     if (!sel) return;
-    setBusy('propose');
-    try {
-      const r = await fetch(`${X}/systems/${sel}/propose?use_llm=${useLlm}`, { method: 'POST' });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) { alert(j.detail || '초안 생성 실패'); return; }
-      alert(`매핑 초안: 신규 제안 ${j.data.proposed}건 (결정론 ${j.data.deterministic}${j.data.llm_used ? ' + Flash' : ''})`);
-      await refreshSel(sel);
-    } finally { setBusy(null); }
+    if (await act('propose', () => crosswalkApi.propose(sel, useLlm).then((d) => {
+      setMsg(`매핑 초안: 신규 제안 ${d.proposed}건 (결정론 ${d.deterministic}`
+        + `${d.llm_used ? ' + Flash' : ''})`);
+    }), '')) await refreshSel(sel);
   };
 
-  const handleApprove = async (p: Proposal) => {
-    const ext = prompt('승인할 외부 키(인스턴스 값 지정 가능, 예: work_order:WO_TYPE=ASSY).\n비우면 제안된 포인터를 그대로 사용:', p.external_key);
-    if (ext === null) return;
-    await fetch(`${X}/proposals/${p.id}/approve`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ external_key: ext.trim() || null }),
-    });
-    if (sel) await refreshSel(sel);
+  const doApprove = async (p: Proposal) => {
+    if (await act('approve', () => crosswalkApi.approve(p.id, approveKey.trim() || null),
+      `«${p.master_code}» 매핑을 확정했습니다.`)) {
+      setApproveKey('');
+      if (sel) await refreshSel(sel);
+    }
   };
-  const handleReject = async (id: number) => {
-    await fetch(`${X}/proposals/${id}/reject`, { method: 'POST' });
-    if (sel) await refreshSel(sel);
+
+  const handleReject = async (p: Proposal) => {
+    if (await act('reject', () => crosswalkApi.reject(p.id), `«${p.master_code}» 제안을 기각했습니다.`)) {
+      if (sel) await refreshSel(sel);
+    }
   };
 
   const handleActivate = async () => {
-    if (!sel) return;
-    const next = selSys?.status === 'active' ? 'inactive' : 'active';
-    const r = await fetch(`${X}/systems/${sel}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }),
-    });
-    if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || '상태 변경 실패'); return; }
-    await fetchSystems();
+    if (!sel || !selSys) return;
+    const next = selSys.status === 'active' ? 'inactive' : 'active';
+    if (await act('status', () => crosswalkApi.setStatus(sel, next),
+      next === 'active' ? '활성화했습니다.' : '비활성화했습니다.')) await fetchSystems();
   };
 
-  // [M3] 승인 매핑의 외부 실측값을 온디맨드 조회(읽기전용). 시스템 비활성/미승인이면 409.
   const handleResolve = async (mc: string) => {
     if (!sel) return;
     setBusy('resolve');
     try {
-      const r = await fetch(`${API_BASE_URL}/api/v1/mcp/resolve`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ master_code: mc, system_id: sel }),
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({} as any));
-        setLiveResults((p) => ({ ...p, [mc]: { ok: false, error: d.detail || `HTTP ${r.status}` } }));
-        return;
-      }
-      const data = (await r.json()).data;
+      const data = await crosswalkApi.resolve(mc, sel);
       setLiveResults((p) => ({ ...p, [mc]: data }));
-    } catch (e) {
-      setLiveResults((p) => ({ ...p, [mc]: { ok: false, error: '요청 오류' } }));
-    } finally { setBusy(null); }
+    } catch (e: any) {
+      // ⚠️ 실측 조회 실패는 **그 매핑 칸에서** 말한다 — 전역 배너로 올리면 어느 것인지 사라진다.
+      setLiveResults((p) => ({ ...p, [mc]: { ok: false, error: e?.message || '조회 실패' } }));
+    } finally {
+      setBusy(null);
+    }
   };
 
-  const inputCls = 'w-full bg-gray-950 border border-gray-700 rounded-lg p-2 text-xs text-gray-200 focus:outline-none focus:border-sky-500';
-  const pending = proposals.filter((p) => p.status === 'pending');
-
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl h-[88vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 shrink-0">
-          <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
-            🔗 연계 / 크로스워크
-            <span className="text-xs text-gray-500 font-normal">— 외부 시스템 키·필드를 기준정보와 매핑(초안→사용자 승인). 승인된 매핑이 M3 온디맨드 조회의 주소록</span>
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-100 text-xl px-2">✕</button>
+    <HubDialog label="연계 / 크로스워크 — 외부 시스템 키를 기준정보와 매핑" onClose={onClose}>
+      <div className="afs-dialog-bar">
+        <b>연계 / 크로스워크</b>
+        <span>초안 → 사용자 승인 2단계 · 승인된 매핑만 M3 온디맨드 조회의 주소록이 됩니다</span>
+        <div className="bar-actions">
+          {busy && <span className="busy">처리 중…</span>}
+          <button className="secondary-button" onClick={onClose}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
         </div>
+      </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          {/* 좌: 시스템 목록 + 등록 */}
-          <div className="w-72 border-r border-gray-700 flex flex-col overflow-hidden shrink-0">
-            <div className="p-4 border-b border-gray-700">
-              <div className="text-xs font-bold text-gray-400 mb-2">연계 시스템 등록</div>
-              <input value={sysId} onChange={(e) => setSysId(e.target.value)} placeholder="system_id (예: sap, mes)" className={inputCls + ' mb-1.5'} />
-              <input value={sysName} onChange={(e) => setSysName(e.target.value)} placeholder="이름 (예: SAP ERP)" className={inputCls + ' mb-1.5'} />
-              <input value={sysEndpoint} onChange={(e) => setSysEndpoint(e.target.value)} placeholder="MCP endpoint (선택, M3용)" className={inputCls + ' mb-2'} />
-              <button onClick={handleCreateSystem} disabled={busy !== null}
-                className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg">
-                {busy === 'sys' ? '등록 중…' : '+ 시스템 등록'}
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-              {systems.length === 0 && <div className="text-xs text-gray-500 text-center py-6">등록된 시스템이 없습니다.</div>}
-              {systems.map((s) => (
-                <button key={s.system_id} onClick={() => setSel(s.system_id)}
-                  className={`w-full text-left rounded-lg p-2.5 border transition-colors ${
-                    sel === s.system_id ? 'border-sky-500 bg-sky-900/30' : 'border-gray-700 bg-gray-950 hover:border-gray-500'}`}>
-                  <div className="text-sm font-bold text-gray-100 truncate flex items-center gap-1.5">
-                    {s.name}
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded ${s.status === 'active' ? 'bg-green-900/50 text-green-300' : 'bg-gray-700 text-gray-400'}`}>{s.status}</span>
-                  </div>
-                  <div className="text-[10px] text-gray-500 font-mono">{s.system_id}</div>
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="afs-dialog-body">
+        <div className="hub-main">
+          <ScreenHead kicker="CROSSWALK" title="연계 / 크로스워크"
+            description="외부 시스템의 키·필드를 우리 기준정보와 잇습니다. 승인은 «외부 필드 = 우리 표준의 무엇»을 확정하는 행위입니다 — 확정된 매핑이 이후 모든 실측 조회의 주소록이 됩니다."
+            chip={systems.status === 'loading' ? { label: '확인 중', tone: 'muted' }
+              : systems.status === 'forbidden' ? { label: '권한 없음', tone: 'danger' }
+                : systems.status === 'error' ? { label: '조회 불가', tone: 'danger' }
+                  : { label: `시스템 ${(systems.value || []).length}개`, tone: 'data' }} />
 
-          {/* 우: 스키마 + 제안 + 매핑 */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {!selSys ? (
-              <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">좌측에서 시스템을 선택하거나 새로 등록하세요.</div>
-            ) : (
-              <div className="flex-1 overflow-y-auto p-5 space-y-5">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-gray-100">{selSys.name} <span className="text-xs text-gray-500 font-mono">({selSys.system_id})</span></h3>
-                  <button onClick={handleActivate}
-                    className={`text-xs font-bold rounded-lg px-3 py-1.5 border ${selSys.status === 'active' ? 'text-gray-300 bg-gray-800 border-gray-600' : 'text-green-300 bg-green-950/40 border-green-900/50'}`}>
-                    {selSys.status === 'active' ? '⏸ 비활성화' : '▶ 활성화(승인 매핑 필요)'}
+          {err && (
+            <div style={{ marginBottom: 12 }}>
+              <Banner tone="error" title="진행하지 못했습니다">
+                <span style={{ whiteSpace: 'pre-wrap' }}>{err}</span>
+              </Banner>
+            </div>
+          )}
+          {msg && <div style={{ marginBottom: 12 }}><Banner tone="info">{msg}</Banner></div>}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 300px) 1fr',
+            gap: 14, alignItems: 'start' }}>
+            {/* ── 좌: 시스템 목록 + 등록 ─────────────────────────────── */}
+            <div>
+              <Panel kicker="REGISTER" title="연계 시스템 등록">
+                <div className="panel-body">
+                  <input className="afs-input" style={{ width: '100%' }} value={sysId}
+                    onChange={(e) => setSysId(e.target.value)}
+                    placeholder="system_id (예: sap, mes)" />
+                  <input className="afs-input" style={{ width: '100%' }} value={sysName}
+                    onChange={(e) => setSysName(e.target.value)} placeholder="이름 (예: SAP ERP)" />
+                  <input className="afs-input" style={{ width: '100%' }} value={sysEndpoint}
+                    onChange={(e) => setSysEndpoint(e.target.value)}
+                    placeholder="MCP endpoint (선택, M3용)" />
+                  <button className="primary-button" style={{ width: '100%' }}
+                    onClick={handleCreateSystem} disabled={busy !== null}>
+                    {busy === 'sys' ? '등록 중…' : '+ 시스템 등록'}
                   </button>
                 </div>
+              </Panel>
 
-                {/* 외부 스키마 */}
-                <div className="rounded-xl border border-dashed border-gray-700 bg-gray-950/60 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-bold text-gray-300">외부 스키마 (조인 컬럼 정의)</div>
-                    <label className="text-[11px] text-sky-300 hover:text-sky-200 cursor-pointer">
-                      📥 CSV(entity,field,field_type,is_key,mapped_attr)
-                      <input type="file" accept=".csv" className="hidden" onChange={(e) => handleCsv(e.target.files)} disabled={busy !== null} />
-                    </label>
+              <div style={{ marginTop: 14 }}>
+                <Panel kicker="SYSTEMS" title="등록된 시스템">
+                  <div className="panel-body">
+                    {systems.status !== 'ok' ? (
+                      // ★★★ 종전에는 여기가 «등록된 시스템이 없습니다» 였다.
+                      <EmptyOrError state={systems.status} error={systems.error}
+                        emptyText="등록된 시스템이 없습니다." onRetry={fetchSystems} />
+                    ) : (systems.value || []).length === 0 ? (
+                      <p className="afs-muted" style={{ fontSize: 13 }}>등록된 시스템이 없습니다.</p>
+                    ) : (
+                      (systems.value || []).map((s) => (
+                        <button key={s.system_id} onClick={() => setSel(s.system_id)}
+                          className={`afs-border ${sel === s.system_id ? 'afs-action-border' : ''}`}
+                          style={{ display: 'block', width: '100%', textAlign: 'left',
+                            borderWidth: 1, borderStyle: 'solid', borderRadius: 8,
+                            padding: '8px 10px',
+                            background: sel === s.system_id ? 'var(--surface-raised)' : '#fff' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <b style={{ fontSize: 13, overflow: 'hidden',
+                              textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</b>
+                            <span className={`state-chip ${s.status === 'active' ? 'success' : 'muted'}`}>
+                              {s.status}
+                            </span>
+                          </span>
+                          <span className="afs-muted" style={{ display: 'block', fontSize: 12,
+                            fontFamily: 'monospace' }}>{s.system_id}</span>
+                        </button>
+                      ))
+                    )}
                   </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    <input value={fEntity} onChange={(e) => setFEntity(e.target.value)} placeholder="entity (테이블)" className={inputCls} />
-                    <input value={fField} onChange={(e) => setFField(e.target.value)} placeholder="field (필드)" className={inputCls} />
-                    <input value={fType} onChange={(e) => setFType(e.target.value)} placeholder="type(선택)" className={inputCls} />
-                    <input value={fMappedAttr} onChange={(e) => setFMappedAttr(e.target.value)} placeholder="→ 우리 속성명(선택)" className={inputCls} />
+                </Panel>
+              </div>
+            </div>
+
+            {/* ── 우: 스키마 + 제안 + 매핑 ───────────────────────────── */}
+            <div>
+              {!selSys ? (
+                <Panel>
+                  <div className="panel-body">
+                    <p className="afs-muted" style={{ fontSize: 13 }}>
+                      왼쪽에서 시스템을 선택하거나 새로 등록하십시오.
+                    </p>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer">
-                      <input type="checkbox" checked={fIsKey} onChange={(e) => setFIsKey(e.target.checked)} /> is_key(외부 기본키)
-                    </label>
-                    <button onClick={handleAddField} disabled={busy !== null} className="bg-sky-600 hover:bg-sky-500 disabled:bg-gray-700 text-white text-xs font-bold px-4 py-1.5 rounded-lg">+ 필드</button>
-                  </div>
-                  {schema.length > 0 && (
-                    <div className="text-[11px] text-gray-400 pt-1 space-y-0.5 max-h-28 overflow-y-auto">
-                      {schema.map((f) => (
-                        <div key={`${f.entity}.${f.field}`} className="font-mono">
-                          {f.is_key ? '🔑 ' : '· '}{f.entity}.{f.field}{f.field_type ? ` (${f.field_type})` : ''}{f.mapped_attr ? ` → ${f.mapped_attr}` : ''}
-                        </div>
-                      ))}
+                </Panel>
+              ) : (
+                <>
+                  <Panel kicker="SYSTEM" title={selSys.name}
+                    action={
+                      <button className={selSys.status === 'active'
+                        ? 'secondary-button' : 'primary-button'}
+                        onClick={handleActivate} disabled={busy !== null}>
+                        {selSys.status === 'active' ? '⏸ 비활성화' : '▶ 활성화(승인 매핑 필요)'}
+                      </button>}>
+                    <div className="panel-body">
+                      <p className="afs-muted" style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                        {selSys.system_id}
+                      </p>
                     </div>
-                  )}
-                </div>
+                  </Panel>
 
-                {/* 매핑 초안 */}
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="text-xs font-bold text-gray-300">매핑 제안 (pending {pending.length})</div>
-                    <label className="ml-auto flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer" title="애매한 후보를 Flash 로 추가 제안(쿼터 소비)">
-                      <input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> Flash 보강
-                    </label>
-                    <button onClick={handlePropose} disabled={busy !== null}
-                      className="bg-sky-600 hover:bg-sky-500 disabled:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg">
-                      {busy === 'propose' ? '생성 중…' : '🔎 매핑 초안 생성'}
-                    </button>
-                  </div>
-                  <div className="space-y-1.5">
-                    {pending.map((p) => (
-                      <div key={p.id} className="flex items-center justify-between rounded-lg border border-gray-700 bg-gray-950 px-3 py-2">
-                        <div className="min-w-0">
-                          <div className="text-xs text-gray-100 truncate">
-                            <span className="font-mono text-emerald-300">{p.master_code}</span> → <span className="font-mono text-sky-300">{p.external_key}</span>
-                            <span className="ml-1.5 text-[9px] text-gray-500">신뢰도 {p.confidence}</span>
+                  {/* 외부 스키마 */}
+                  <div style={{ marginTop: 14 }}>
+                    <Panel kicker="SCHEMA" title="외부 스키마 (조인 컬럼 정의)"
+                      action={
+                        <label className="secondary-button" style={{ display: 'inline-flex',
+                          alignItems: 'center', cursor: 'pointer' }}>
+                          📥 CSV 등록
+                          <input type="file" accept=".csv" style={{ display: 'none' }}
+                            disabled={busy !== null}
+                            onChange={(e) => handleCsv(e.target.files)} />
+                        </label>}>
+                      <div className="panel-body">
+                        <p className="afs-muted" style={{ fontSize: 12 }}>
+                          CSV 열: entity, field, field_type, is_key, mapped_attr
+                        </p>
+                        <div style={{ display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                          <input className="afs-input" value={fEntity}
+                            onChange={(e) => setFEntity(e.target.value)} placeholder="entity (테이블)" />
+                          <input className="afs-input" value={fField}
+                            onChange={(e) => setFField(e.target.value)} placeholder="field (필드)" />
+                          <input className="afs-input" value={fType}
+                            onChange={(e) => setFType(e.target.value)} placeholder="type (선택)" />
+                          <input className="afs-input" value={fMappedAttr}
+                            onChange={(e) => setFMappedAttr(e.target.value)}
+                            placeholder="→ 우리 속성명 (선택)" />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center',
+                          justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                          <label className="afs-ink" style={{ display: 'flex', alignItems: 'center',
+                            gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                            <input type="checkbox" checked={fIsKey}
+                              onChange={(e) => setFIsKey(e.target.checked)} />
+                            is_key (외부 기본키)
+                          </label>
+                          <button className="secondary-button" onClick={handleAddField}
+                            disabled={busy !== null}>+ 필드</button>
+                        </div>
+
+                        {schema.status !== 'ok' ? (
+                          <EmptyOrError state={schema.status} error={schema.error}
+                            emptyText="등록된 스키마가 없습니다."
+                            onRetry={() => sel && refreshSel(sel)} />
+                        ) : (schema.value || []).length > 0 && (
+                          <div style={{ maxHeight: 140, overflowY: 'auto' }}>
+                            {(schema.value || []).map((f) => (
+                              <div key={`${f.entity}.${f.field}`} className="afs-muted"
+                                style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                                {f.is_key ? '🔑 ' : '· '}{f.entity}.{f.field}
+                                {f.field_type ? ` (${f.field_type})` : ''}
+                                {f.mapped_attr ? ` → ${f.mapped_attr}` : ''}
+                              </div>
+                            ))}
                           </div>
-                          <div className="text-[10px] text-gray-500 truncate">{p.rationale}</div>
-                        </div>
-                        <div className="flex gap-1.5 shrink-0 ml-2">
-                          <button onClick={() => handleApprove(p)} className="text-[11px] text-green-300 hover:text-green-200 bg-green-950/40 border border-green-900/50 rounded px-2 py-1">승인</button>
-                          <button onClick={() => handleReject(p.id)} className="text-[11px] text-red-400 hover:text-red-300">기각</button>
-                        </div>
+                        )}
                       </div>
-                    ))}
-                    {pending.length === 0 && <div className="text-xs text-gray-500 py-2 text-center">대기 중 제안이 없습니다. 스키마 등록 후 [매핑 초안 생성].</div>}
+                    </Panel>
                   </div>
-                </div>
 
-                {/* 승인된 매핑 */}
-                <div>
-                  <div className="text-xs font-bold text-gray-300 mb-2">✅ 승인된 크로스워크 ({mappings.length}) <span className="text-gray-500 font-normal">— M3 가상 통합 주소록 · 🔄 로 외부 실측값 온디맨드 조회</span></div>
-                  <div className="space-y-1">
-                    {mappings.map((m) => {
-                      const lr = liveResults[m.master_code];
-                      return (
-                        <div key={m.master_code} className="text-[11px] bg-gray-950 border border-gray-700 rounded px-2 py-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-mono text-gray-300 truncate">
-                              <span className="text-emerald-300">{m.master_code}</span> ↔ <span className="text-sky-300">{m.external_key}</span>
-                            </div>
-                            <button onClick={() => handleResolve(m.master_code)} disabled={busy !== null}
-                              className="shrink-0 text-[10px] text-sky-300 hover:text-sky-200 bg-sky-950/40 border border-sky-900/50 rounded px-2 py-0.5">
-                              🔄 실측 조회
-                            </button>
-                          </div>
-                          {lr && (
-                            <div className="mt-1 text-[10px] pl-1">
-                              {lr.ok ? (
-                                <span className="text-gray-400">
-                                  실측: <span className="text-sky-200">{Object.entries(lr.values || {}).map(([k, v]) => `${k}=${v}`).join(', ') || '(빈값)'}</span>
-                                  <span className="opacity-60"> · as_of {String(lr.as_of || '').slice(0, 19)}{lr.cached ? ' · cache' : ''}</span>
-                                </span>
-                              ) : (
-                                <span className="text-red-400">조회 실패: {lr.error}</span>
+                  {/* 매핑 초안 */}
+                  <div style={{ marginTop: 14 }}>
+                    <Panel kicker="PROPOSALS" title={`매핑 제안 (대기 ${pending.length})`}
+                      action={
+                        <button className="secondary-button" disabled={busy !== null}
+                          onClick={() => (useLlm ? confirmPropose.ask(true) : doPropose())}>
+                          {busy === 'propose' ? '생성 중…' : '🔎 매핑 초안 생성'}
+                        </button>}>
+                      <div className="panel-body">
+                        <label className="afs-ink" style={{ display: 'flex', alignItems: 'center',
+                          gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={useLlm}
+                            onChange={(e) => setUseLlm(e.target.checked)} />
+                          {/* ⚠️ 쿼터를 쓰는 선택지는 그 사실을 화면에 적는다 — 체크박스 title 로만
+                              두면 아무도 읽지 않는다. */}
+                          Flash 보강 — 애매한 후보를 LLM 으로 추가 제안합니다
+                          <b className="afs-warn-fg">(LLM 쿼터를 소비합니다)</b>
+                        </label>
+
+                        <ConfirmInline open={confirmPropose.open}
+                          title="LLM 을 호출해 초안을 보강합니다"
+                          body={<>결정론 규칙으로 못 찾은 후보를 Flash 모델에 물어봅니다 —
+                            <b> LLM 쿼터를 소비합니다.</b> 결과는 제안일 뿐이며 승인 전에는
+                            아무것도 확정되지 않습니다.</>}
+                          confirmLabel="보강 실행" danger={false}
+                          onCancel={confirmPropose.cancel}
+                          onConfirm={() => confirmPropose.run(() => doPropose())} />
+
+                        {proposals.status !== 'ok' ? (
+                          // ★★★ 승인 대기는 관문이다 — 못 본 것을 «없다» 로 보여주면 관문이 비어 보인다.
+                          <EmptyOrError state={proposals.status} error={proposals.error}
+                            emptyText="대기 중 제안이 없습니다."
+                            onRetry={() => sel && refreshSel(sel)} />
+                        ) : pending.length === 0 ? (
+                          <p className="afs-muted" style={{ fontSize: 13 }}>
+                            대기 중 제안이 없습니다. 스키마 등록 후 [매핑 초안 생성] 을 누르십시오.
+                          </p>
+                        ) : (
+                          pending.map((p) => (
+                            <div key={p.id} className="afs-bg-sunken afs-border"
+                              style={{ borderWidth: 1, borderStyle: 'solid', borderRadius: 8,
+                                padding: '8px 12px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center',
+                                justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: 13 }}>
+                                    <span className="afs-success-fg" style={{ fontFamily: 'monospace' }}>
+                                      {p.master_code}
+                                    </span>
+                                    {' → '}
+                                    <span className="afs-info-fg" style={{ fontFamily: 'monospace' }}>
+                                      {p.external_key}
+                                    </span>
+                                    <span className="afs-muted"> · 신뢰도 {p.confidence}</span>
+                                  </div>
+                                  <div className="afs-muted" style={{ fontSize: 12 }}>{p.rationale}</div>
+                                </div>
+                                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                                  <button className="primary-button" disabled={busy !== null}
+                                    onClick={() => { setApproveKey(p.external_key); confirmApprove.ask(p); }}>
+                                    승인
+                                  </button>
+                                  <button className="secondary-button" disabled={busy !== null}
+                                    onClick={() => handleReject(p)}>기각</button>
+                                </div>
+                              </div>
+
+                              {/* ★ `prompt()` 를 대신한다 — 무엇이 확정되는지 화면 안에서 보여준다. */}
+                              {confirmApprove.open && confirmApprove.target?.id === p.id && (
+                                <>
+                                  <div style={{ marginTop: 8 }}>
+                                    <label htmlFor={`cw-key-${p.id}`} className="afs-muted"
+                                      style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>
+                                      확정할 외부 키 (인스턴스 값 지정 가능 — 예:
+                                      work_order:WO_TYPE=ASSY)
+                                    </label>
+                                    <input id={`cw-key-${p.id}`} className="afs-input"
+                                      style={{ width: '100%' }} value={approveKey}
+                                      onChange={(e) => setApproveKey(e.target.value)} />
+                                  </div>
+                                  <ConfirmInline open
+                                    title="이 매핑을 확정합니다"
+                                    body={<>
+                                      <b>{p.master_code}</b> 를 외부 키{' '}
+                                      <b>{approveKey.trim() || p.external_key}</b> 로 확정합니다.
+                                      확정된 매핑은 이후 <b>모든 실측 조회의 주소록</b>이 됩니다 —
+                                      틀리면 다른 시스템의 값을 우리 표준으로 읽게 됩니다.
+                                    </>}
+                                    confirmLabel="매핑 확정" danger={false}
+                                    onCancel={() => { confirmApprove.cancel(); setApproveKey(''); }}
+                                    onConfirm={() => confirmApprove.run((t) => doApprove(t))} />
+                                </>
                               )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {mappings.length === 0 && <div className="text-xs text-gray-500 py-2 text-center">승인된 매핑이 없습니다.</div>}
+                          ))
+                        )}
+                      </div>
+                    </Panel>
                   </div>
-                </div>
-              </div>
-            )}
+
+                  {/* 승인된 매핑 */}
+                  <div style={{ marginTop: 14 }}>
+                    <Panel kicker="CONFIRMED"
+                      title={`승인된 크로스워크 (${(mappings.value || []).length})`}
+                      action={<span className="afs-muted" style={{ fontSize: 12 }}>
+                        M3 가상 통합 주소록 — 🔄 로 외부 실측값을 온디맨드 조회합니다
+                      </span>}>
+                      <div className="panel-body">
+                        {mappings.status !== 'ok' ? (
+                          <EmptyOrError state={mappings.status} error={mappings.error}
+                            emptyText="승인된 매핑이 없습니다."
+                            onRetry={() => sel && refreshSel(sel)} />
+                        ) : (mappings.value || []).length === 0 ? (
+                          <p className="afs-muted" style={{ fontSize: 13 }}>승인된 매핑이 없습니다.</p>
+                        ) : (
+                          (mappings.value || []).map((m) => {
+                            const lr = liveResults[m.master_code];
+                            return (
+                              <div key={m.master_code} className="afs-bg-sunken afs-border"
+                                style={{ borderWidth: 1, borderStyle: 'solid', borderRadius: 8,
+                                  padding: '6px 10px', fontSize: 13 }}>
+                                <div style={{ display: 'flex', alignItems: 'center',
+                                  justifyContent: 'space-between', gap: 8 }}>
+                                  <span style={{ fontFamily: 'monospace', overflow: 'hidden',
+                                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <span className="afs-success-fg">{m.master_code}</span>
+                                    {' ↔ '}
+                                    <span className="afs-info-fg">{m.external_key}</span>
+                                  </span>
+                                  <button className="secondary-button" style={{ flexShrink: 0 }}
+                                    onClick={() => handleResolve(m.master_code)}
+                                    disabled={busy !== null}>🔄 실측 조회</button>
+                                </div>
+                                {lr && (
+                                  <div style={{ marginTop: 4, fontSize: 12 }}>
+                                    {lr.ok === false ? (
+                                      <span className="afs-danger-fg">조회 실패: {lr.error}</span>
+                                    ) : (
+                                      <span className="afs-muted">
+                                        실측:{' '}
+                                        <span className="afs-ink">
+                                          {Object.entries(lr.values || {})
+                                            .map(([k, v]) => `${k}=${v}`).join(', ') || '(빈값)'}
+                                        </span>
+                                        {' · as_of '}{String(lr.as_of || '').slice(0, 19)}
+                                        {lr.cached ? ' · cache' : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </Panel>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </HubDialog>
   );
 }
