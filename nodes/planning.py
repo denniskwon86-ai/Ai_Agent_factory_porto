@@ -4,7 +4,7 @@ import re
 import config
 from typing import Dict, Any
 from state_models import ProjectState
-from core.llm_gateway import gateway
+from core.llm_gateway import gateway, is_llm_error_text
 from core.agent_registry import agent_skill
 from nodes.utils.wbs_manager import WBSManager
 
@@ -186,14 +186,56 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
             return []
 
     output = await gateway.aexecute(state_obj, prompt, is_heavy=True, output_mode="json")
+
+    # ★★ [2026-08-07] 공급자 실패를 «모델이 WBS 를 못 짰다» 로 읽지 않는다.
+    #
+    # ⚠️⚠️ 게이트웨이는 최종 실패 시 `{"files": [], "error": "LLM UNKNOWN ERROR: ..."}` 를 돌려준다.
+    #   이것은 **유효한 JSON 이라서** 아래 `_parse_wbs_tasks` 를 그대로 통과하고 `.get("tasks")` 가
+    #   `[]` 를 낸다 — 즉 「LLM 이 죽었다」와 「모델이 빈 WBS 를 냈다」가 **구분되지 않는다.**
+    #   `is_llm_error_text` 의 독스트링이 "소비자는 반드시 이 함수로 걸러 fail-loud 처리해야
+    #   한다"고 규정하는데 이 노드만 지키지 않고 있었다.
+    #
+    # 실측(2026-07-29 `test_a1_unitconv_canary2`)이 그 대가를 보여준다 — 공급자가 죽은 상태에서
+    #   빈 WBS → 지시 강화 재호출(2배) → 기준 미달 채점 → HOTL 거부 → 재분할이 **7회** 돌았다.
+    #   LLM 호출 28줄이 그렇게 쌓였고, 프롬프트에도 모델에도 아무 문제가 없었다.
+    #   재시도를 늘리는 처방이었다면 이 루프를 더 길게 만들었을 뿐이다.
+    #
+    # → 공급자 실패면 **여기서 멈춘다.** 두 번째 호출을 태우지 않고(같은 이유로 또 죽는다),
+    #   재분할 예산을 깎지 않고(모델을 시험해 본 적이 없다), `needs_revision` 도 켜지 않는다
+    #   (그것이 자동 재분할 루프를 도는 스위치다). WBS 게이트에서 사람이 원인을 보고 판단한다.
+    if is_llm_error_text(output):
+        print(f"⛔ [Master PMO] LLM 공급자 실패 — WBS 분할을 시도하지 못했습니다. "
+              f"기준 미달이 아니므로 재분할 루프에 넣지 않습니다: {str(output)[:200]}")
+        return {
+            "needs_revision": False,      # ⚠️ True 로 두면 자동 재분할 루프가 돈다(위 실측 7회)
+            "current_stage": "PMO",
+            # 사람이 보는 문장 — 「WBS 기준 미달」과 **다른 원인**임이 드러나야 한다.
+            "supervisor_feedback": (
+                "WBS 를 생성하지 못했습니다 — 원인은 산출물 품질이 아니라 **LLM 공급자 호출 실패**입니다. "
+                "모델 응답이 오지 않아 분할을 시도할 수 없었습니다. 기존 WBS 는 덮어쓰지 않았습니다. "
+                "공급자 상태(할당량·키·네트워크)를 확인한 뒤 이 단계를 다시 실행하십시오."
+            ),
+        }
+
     wbs_tasks = _parse_wbs_tasks(_extract_code_from_ssot(output) or output)
 
     if not wbs_tasks:
         # 빈 WBS 는 치명(실행할 태스크가 없어 파이프라인이 '완료된 척' 멈춘다) → 지시 강화 후 1회 재시도
+        # (여기 도달했다면 공급자는 살아 있고 «모델이 형식을 못 맞춘» 경우다 — 지시 강화가 실제로 듣는다)
         print("⚠️ [Master PMO] WBS 태스크 0개 - 지시를 강화해 1회 재시도합니다.")
         retry_prompt = prompt + ("\n\n[ 재시도 - 직전 응답이 유효한 WBS JSON 이 아니었습니다. "
                                  "부연 설명 없이 'tasks' 배열(최소 4개 태스크)을 포함한 JSON 객체 하나만 출력하십시오.]")
         output = await gateway.aexecute(state_obj, retry_prompt, is_heavy=True, output_mode="json")
+        if is_llm_error_text(output):
+            print("⛔ [Master PMO] 재시도에서도 LLM 공급자 실패 — 재분할 루프에 넣지 않습니다.")
+            return {
+                "needs_revision": False,
+                "current_stage": "PMO",
+                "supervisor_feedback": (
+                    "WBS 를 생성하지 못했습니다 — 재시도에서도 **LLM 공급자 호출이 실패**했습니다. "
+                    "기존 WBS 는 덮어쓰지 않았습니다. 공급자 상태를 확인한 뒤 다시 실행하십시오."
+                ),
+            }
         wbs_tasks = _parse_wbs_tasks(_extract_code_from_ssot(output) or output)
 
     if state_obj.workspace_root and wbs_tasks:

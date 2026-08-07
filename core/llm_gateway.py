@@ -4,6 +4,7 @@ import re
 import time
 import asyncio
 import hashlib
+import uuid
 from datetime import datetime
 from typing import Any
 from langchain_core.callbacks import BaseCallbackHandler
@@ -300,7 +301,7 @@ _LLM_CALL_LOG_PATH = data_path("llm_call_log.jsonl")
 
 def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, attempts: list, ok: bool, duration_s: float,
                   requested_tier: str = "", downgraded: bool = False, input_tokens: int = 0, output_tokens: int = 0,
-                  _fallback_errors: list = None):
+                  _fallback_errors: list = None, call_id: str = ""):
     """LLM 호출 1건당 텔레메트리 JSONL 1줄 기록 — '모델을 바꿔도 품질 유지' 주장을
     사후에 데이터(단계별 사용 모델 x stage_scores)로 증명하기 위한 기초 계측.
     requested_tier: 호출자가 원래 요청한 티어(브레이커 강등 전). downgraded: 브레이커로 강등됐는지.
@@ -345,6 +346,15 @@ def _log_llm_call(state_obj, tier: str, output_mode: str, retry_count: int, atte
             "downgraded": bool(downgraded),
             "output_mode": output_mode,
             "retry_count": retry_count,
+            # ★★ [2026-08-07] 한 번의 «논리적 호출»을 관통하는 id — 재시도·티어우회로 갈라진
+            #   기록들이 같은 값을 갖는다. **이것 없이는 «콜 수»를 셀 수 없다.**
+            #   ⚠️ 실측(2026-07-29 카나리2): 실패한 호출 1건이 `pro(retry0)`+`flash(retry1)` 로
+            #     2줄을 남기고 성공한 호출은 1줄만 남긴다. 줄 수로 성공률을 내면 **분모가 실패
+            #     쪽으로만 부푼다** — Master_PMO 12.5% 가 6.7% 로 보였다.
+            #     `retry_count==0` 만 세는 우회도 틀린다: 재시도로 «살아난» 호출(로그 전체 5건)이
+            #     머리 기록만 보면 실패로 남는다. 그래서 순서 추론이 아니라 **id 를 심는다**
+            #     (동시 실행 시 로그가 교차하므로 순서 기반 그룹화는 실측 11건에서 이미 깨진다).
+            "call_id": call_id or "",
             "attempts": attempts,          # §10.3 `fallback_chain`
             "used": _used_model,
             "ok": ok,
@@ -705,12 +715,17 @@ class LLMGateway:
 
     async def aexecute(self, state: Any, skill_prompt: str, is_heavy: bool = True, retry_count: int = 0,
                        output_mode: str = "code", light: bool = False, full_file_exts=None,
-                       cacheable: bool = True) -> str:
+                       cacheable: bool = True, _call_id: str = "") -> str:
         """output_mode: 'code'(파일 스키마 강제 JSON) | 'json'(자유 스키마 JSON) | 'document'(자유 서술 문서).
         light=True이면 경량 컨텍스트(요약만)로 호출하여 토큰·429를 절감한다.
         full_file_exts: 개발자가 전체 재출력할 소유 파일 확장자(예: (".tsx",".ts")) - 해당 파일은
-        절단 없이 전체 주입되어 멀티태스크 기능 누락(회귀)을 차단한다(증분 codegen)."""
+        절단 없이 전체 주입되어 멀티태스크 기능 누락(회귀)을 차단한다(증분 codegen).
+
+        `_call_id`: 내부 전용. 재시도·티어우회로 자기 자신을 재귀 호출할 때 **같은 값을 물려주어**
+        갈라진 로그 줄들이 하나의 논리적 호출임을 텔레메트리가 알 수 있게 한다(호출자는 넘기지 않는다)."""
         state_obj = ProjectState.model_validate(state) if isinstance(state, dict) else state
+        # 체인의 첫 진입에서만 발급하고, 이후 재귀는 물려받은 값을 그대로 쓴다.
+        _call_id = _call_id or uuid.uuid4().hex[:12]
 
         # [텔레메트리] 호출자가 '원래 요청한' 티어를 강등 전에 보존(대시보드가 "Pro 원했으나 Flash 강등"을 구분).
         _requested_tier = "pro_router" if is_heavy else "flash_router"
@@ -784,7 +799,8 @@ class LLMGateway:
         if cached_response:
             print(f"🎯 [LLM Gateway] Exact Cache HIT! (Hash: {prompt_hash[:8]}) - LLM 호출 생략")
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, ["cache_hit"], True, 0.0,
-                          requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=0, output_tokens=0)
+                          requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=0, output_tokens=0,
+                          call_id=_call_id)
             return cached_response
 
         print(f"[GW] [LLM Gateway] LangChain 라우터 체인 실행 중... ({logical_model_name}/{output_mode})")
@@ -811,7 +827,8 @@ class LLMGateway:
             self._update_cooldowns(_rec.attempts, ok=True)   # 성공 모델은 live, 앞서 실패한 모델은 쿨다운
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, True, time.time() - _t0,
                           requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens,
-                          output_tokens=_rec.output_tokens, _fallback_errors=get_fallback_errors())
+                          output_tokens=_rec.output_tokens, _fallback_errors=get_fallback_errors(),
+                          call_id=_call_id)
 
             if output_mode == "code":
                 # response가 CodeOutput (Pydantic 모델)이므로 바로 JSON 변환 후 반환
@@ -836,7 +853,8 @@ class LLMGateway:
             from core.run_context import get_fallback_errors as _gfe
             _log_llm_call(state_obj, logical_model_name, output_mode, retry_count, _rec.attempts, False, time.time() - _t0,
                           requested_tier=_requested_tier, downgraded=_downgraded, input_tokens=_rec.input_tokens,
-                          output_tokens=_rec.output_tokens, _fallback_errors=_gfe())
+                          output_tokens=_rec.output_tokens, _fallback_errors=_gfe(),
+                          call_id=_call_id)
             error_str = str(e)
             # [총 시간 상한 초과] asyncio.TimeoutError 는 str(e) 가 비어 있어 로그가 무용해진다.
             #   원인을 식별 가능한 문장으로 치환해 텔레메트리·배너에서 '왜 죽었는지'가 보이게 한다.
@@ -852,14 +870,16 @@ class LLMGateway:
                     print(f" [LLM Gateway] 고속(Flash) 티어로 수직 강하(Cross-Tier Fallback) 하여 임무를 속행합니다!")
                     # (별도 플래그 불필요 — 방금 실패한 Pro 모델들이 쿨다운되어 다음 Pro 요청은 _all_cooled 로 자동 Flash 직행)
                     return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=retry_count + 1,
-                                               output_mode=output_mode, light=light, full_file_exts=full_file_exts)
+                                               output_mode=output_mode, light=light, full_file_exts=full_file_exts,
+                                               _call_id=_call_id)
                 else:
                     if retry_count < 3:
                         _sleep = getattr(config, "QUOTA_RETRY_SLEEP_SEC", 8)
                         print(f"[ERROR] [LLM Gateway] Flash 체인마저 할당량 초과. {_sleep}초 대기 후 재시도 (시도 {retry_count+1}/3)...")
                         await asyncio.sleep(_sleep)
                         return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=retry_count + 1,
-                                                   output_mode=output_mode, light=light, full_file_exts=full_file_exts)
+                                                   output_mode=output_mode, light=light, full_file_exts=full_file_exts,
+                                                   _call_id=_call_id)
                     else:
                         print(" [LLM Gateway] 치명적 에러: 가용한 모든 LLM API의 할당량이 고갈되었습니다.")
                         raise QuotaExhaustedException("가용한 모든 LLM API의 할당량이 고갈되었습니다.")
@@ -868,7 +888,8 @@ class LLMGateway:
                 if is_heavy and retry_count == 0:
                     print(" [LLM Gateway] 알 수 없는 오류 복구를 위해 Flash 체인으로 긴급 우회합니다.")
                     return await self.aexecute(state, skill_prompt, is_heavy=False, retry_count=1,
-                                               output_mode=output_mode, light=light, full_file_exts=full_file_exts)
+                                               output_mode=output_mode, light=light, full_file_exts=full_file_exts,
+                                               _call_id=_call_id)
                 # ★ [2026-07-27] 여기서 `{"files": []}` 센티널을 돌려주면 호출부가 이를
                 #   '산출물이 비었다' = **빌드 실패**로 오해해 개발자 재작업 예산을 소모한다.
                 #   실측(test_a1_v4): 228.6s·420.0s·77.0s 타임아웃 3건이 그렇게 예산을 먹었다.

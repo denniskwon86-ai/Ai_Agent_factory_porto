@@ -196,7 +196,8 @@ async def telemetry_summary(project: str = "", p: Principal = Depends(current_pr
 
 
 @router.get("/agents")
-async def telemetry_by_agent(project: str = "", p: Principal = Depends(current_principal)):
+async def telemetry_by_agent(project: str = "", days: int = 7,
+                             p: Principal = Depends(current_principal)):
     """[D-017 §9 P4-1] **에이전트별** 호출·성공률·비용·폴백 집계.
 
     ★★ 응답의 `coverage` 를 무시하지 말 것. 실측(2026-08-07) 기준 전체 호출 1,133건 중
@@ -204,12 +205,25 @@ async def telemetry_by_agent(project: str = "", p: Principal = Depends(current_p
       그 상태에서 에이전트별 비용만 보면 **총비용의 10%만 보이고**, 화면에는 그럴듯한 막대가
       선다. 숫자가 있으면 사람은 그것을 전부라고 읽는다.
 
+    ★★ `days` (기본 7) — **시간 창이 없어서 이 화면은 한 번 거짓말을 했다.**
+      2026-08-07 조사 실측: `Master_PMO 성공률 6.7%` 로 떠 있던 것의 실체는 2026-07-29
+      11:43~12:03 의 단일 실행 하나였고, 그 원인(계측 콜백이 파이프라인을 죽인 결함)은
+      **같은 날 12:18 에 이미 고쳐졌다**. 직후 실행은 48/48 성공이었는데도 9일 뒤 화면은
+      그 20분을 «현재» 로 보여줬다. 창이 없으면 대시보드는 사고를 상태로 바꿔 놓는다.
+      `days=0` 으로 전 기간을 볼 수 있다 — 창은 기본값이지 은폐가 아니며, 응답의 `window`
+      가 항상 「무엇을 잘랐는지」를 말한다.
+
     ⚠️ 귀속되지 않은 호출을 버리지 않고 «(미상)» 이라는 이름으로 **같은 표에** 세운다.
       없는 것처럼 만들면 그 90%는 영원히 아무도 보지 않는다.
     ⚠️ 단가를 모르는 호출은 비용에 더하지 않는다 — 0 으로 두면 「공짜였다」는 거짓이 된다."""
+    from datetime import datetime, timedelta
     from core.agent_operations import aggregate_by_agent, failing_agents, top_cost_agents
     scoped = apply_scope(_read_records(project), p)
-    data = aggregate_by_agent(scoped["records"])
+    # 정책(며칠인가)은 경계에서 정하고, 집계 함수는 «오늘» 을 모르게 둔다(테스트 결정성).
+    _since = ""
+    if days and days > 0:
+        _since = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    data = aggregate_by_agent(scoped["records"], since=_since)
     data["top_cost"] = top_cost_agents(data)
     data["low_success"] = failing_agents(data)
     data["project"] = project or "(전역)"
