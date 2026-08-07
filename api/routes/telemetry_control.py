@@ -214,6 +214,28 @@ async def telemetry_by_agent(project: str = "", p: Principal = Depends(current_p
     return {"status": "success", "data": data}
 
 
+@router.get("/orgs")
+async def telemetry_by_org(project: str = "", p: Principal = Depends(current_principal)):
+    """[D-017 §9 P4-2] 조직별 사용량·실패·승인 대기·정책 위반.
+
+    ★★ **각 칸은 «값» 이 아니라 «값 + 읽었는가» 다.** 이 화면은 정의상 «무엇이 안 되어
+      있는가» 를 모아 보여 주므로, 원천 하나를 못 읽었을 때 0 을 찍으면 가장 나쁜 방식으로
+      틀린다 — 사람은 그것을 「승인 대기 없음」·「위반 없음」으로 읽고 안심한다.
+
+    ⚠️ 「정책 위반 0」이 좋은 소식이 아닐 수 있다. 통제가 없어서 아무것도 거부되지 않았을
+      수도 있다 — 응답의 `policy_denials.note` 가 그 가능성을 말한다.
+    ⚠️ 자격은 `assert_governance_readable` 이 본다 — 이 화면은 «내 업무» 가 아니라
+      «전사 정비 상태» 이고, 어디가 비어 있는지는 그 자체로 보호 대상이다."""
+    from api.deps import assert_governance_readable, viewer_scope_nodes
+    from core.org_operations import collect
+    assert_governance_readable(p)
+    scoped = apply_scope(_read_records(project), p)
+    data = collect(scoped["records"], viewer_scope_nodes(p))
+    data["project"] = project or "(전역)"
+    data["permission"] = _scope_meta(scoped)
+    return {"status": "success", "data": data}
+
+
 @router.get("/raw")
 async def telemetry_raw(project: str = "", limit: int = 200,
                         p: Principal = Depends(current_principal)):
