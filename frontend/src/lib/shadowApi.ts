@@ -4,6 +4,11 @@
 //   재사용된다. 표현 관련 코드를 두지 않는다(문구·색·레이아웃 금지).
 import { API_BASE_URL } from './api';
 
+/** ⚠️ [이관 F 3/8] **상태 코드를 실어 던진다.** 종전에는 `new Error(detail)` 만 던져서
+ *  화면이 «권한이 없어 못 봤다» 와 «서버가 죽었다» 를 구분할 수 없었고, 그래서 둘 다
+ *  「등록된 run 이 없습니다」로 표시됐다. `closedLoopFetch.ApiError` 와 같은 규약이다. */
+export type ApiError = Error & { status?: number };
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -11,7 +16,16 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.detail || `요청 실패 (${r.status})`);
+  if (!r.ok) {
+    // 422 는 FastAPI 가 detail 을 배열로 준다 — 그대로 `[object Object]` 로 보여주지 않는다.
+    const d = (j as any)?.detail;
+    const msg = typeof d === 'string' ? d
+      : Array.isArray(d) ? d.map((e: any) => e?.msg || JSON.stringify(e)).join(' · ')
+        : `요청 실패 (${r.status})`;
+    const err = new Error(msg) as ApiError;
+    err.status = r.status;
+    throw err;
+  }
   return j.data as T;
 }
 
