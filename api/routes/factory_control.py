@@ -1919,6 +1919,10 @@ async def restore_agent_registry(p: Principal = Depends(current_principal)):
 # ==========================================
 class AIRecommendPipelineRequest(BaseModel):
     user_request: str
+    # [D-017 §9 P2-3] 어느 조직 문맥에서 설계하는가. 비우면 요청자 문맥을 쓴다.
+    scope_node_id: str = ""
+    tenant_id: str = ""
+    entity_mode: str = ""
 
 class AIRecommendSkillRequest(BaseModel):
     agent_id: str
@@ -1941,7 +1945,26 @@ def _assert_agent_config_readable(p: Principal):
 async def ai_recommend_pipeline(req: AIRecommendPipelineRequest, p: Principal = Depends(current_principal)):
     _assert_agent_config_readable(p)
     from core.llm_gateway import gateway
-    
+
+    # ── [D-017 §9 P2-3] 이 조직이 실제로 쓸 수 있는 것을 설계 입력에 넣는다 ──────────
+    #
+    # ★ 종전에는 `req.user_request` 문장 하나만 넘겼다. 그래서 추천 파이프라인이 **존재하지
+    #   않는 데이터와 접근할 수 없는 도구**를 전제로 설계됐고, 그 결과는 둘 중 하나였다 —
+    #   실행 단계에서 권한 교집합(P3-3)에 걸려 죽거나, 통제 없는 경로로 흘러 권한 밖 자원을
+    #   실제로 건드리거나. 통제를 «사후 거부» 에서 «사전 안내» 로 옮긴다.
+    #
+    # ⚠️ 범위를 여기서 판정하지 않는다. 수집기가 각 저장소의 `visible_*`/`list_*` 를 그대로
+    #   쓰고, 그것들은 이미 `filter_visible` 단일 지점을 지난다.
+    from core.agent_design_context import collect as _collect_design_ctx, to_prompt as _ctx_prompt
+    from core.enterprise_context.classification import clearance_of_scope
+    from core.enterprise_context.scoping import may_drill_down
+    _scope_id = (req.scope_node_id or "").strip() or getattr(p.scope, "primary_dept_id", "") or ""
+    _ctx = await asyncio.to_thread(
+        _collect_design_ctx, _scope_id, (req.tenant_id or "").strip(),
+        (req.entity_mode or "").strip() or "REAL",
+        clearance_of_scope(p.scope), may_drill_down(p.scope), _scope_id)
+    _ctx_block = _ctx_prompt(_ctx)
+
     # 시뮬레이션 성격 판별 키워드
     sim_keywords = ["시뮬레이션", "시뮬레이터", "simulation", "simulator", "what-if", "시나리오", "scenario"]
     is_simulation = any(kw in req.user_request.lower() for kw in sim_keywords)
@@ -1978,7 +2001,7 @@ async def ai_recommend_pipeline(req: AIRecommendPipelineRequest, p: Principal = 
 }}
 
 실행 에이전트는 3~8개 범위로, 해당 도메인의 핵심 업무 흐름에 맞게 설계하십시오.
-"""
+"""  # noqa: E501 — [P2-3] 문맥 블록은 아래 `aexecute` 직전에 **한 곳에서** 붙인다
     else:
         # 일반 워크플로우: 전체 파이프라인 생성 (기존 로직)
         prompt = f"""
@@ -2019,7 +2042,11 @@ async def ai_recommend_pipeline(req: AIRecommendPipelineRequest, p: Principal = 
     }}
     """
     llm = gateway  # 요청마다 신규 생성 금지(동기 models.list 네트워크 콜) - 싱글턴 재사용
-    res = await llm.aexecute({}, prompt, output_mode="json", light=True)
+    # ★ [P2-3] 문맥 블록을 **한 곳에서** 붙인다. 위 두 분기(시뮬레이션/일반)에 각각 끼워 넣으면
+    #   한쪽만 고쳐지는 날이 온다 — 이 저장소가 반복해서 확인한 유형이다.
+    #   ⚠️ 프롬프트 **앞**에 놓는다. 뒤에 놓으면 긴 JSON 스키마 뒤에 묻혀 모델이 덜 본다.
+    res = await llm.aexecute({}, (_ctx_block + prompt) if _ctx_block else prompt,
+                             output_mode="json", light=True)
     try:
         import re
         match = re.search(r'```(?:json)?\s*(.*?)\s*```', res, re.DOTALL)

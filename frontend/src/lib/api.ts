@@ -37,11 +37,78 @@ export function setActingUser(userId: string) {
   }
 }
 
+// ── [D-017 §9 P2-1] 전역 업무 컨텍스트 ──────────────────────────────────────
+//
+// ★★ 서버는 이미 `X-Enterprise-Tenant` · `X-Enterprise-Scope` · `X-Entity-Mode` 를 읽는다
+//   (`api/deps.current_enterprise_context`). 그런데 **화면은 하나도 보내지 않았다.**
+//   그래서 서버는 늘 「요청자의 소속 부서」로 되돌아갔고(단계적 도입 fallback), 사용자가
+//   무엇을 선택하든 조회 범위는 바뀌지 않았다 — 전환기가 있어도 아무 일도 일어나지 않는 상태다.
+//
+// ⚠️ **여기 한 곳에서만 싣는다.** 각 API 래퍼가 자기 헤더를 붙이기 시작하면 `api.ts` 머리말이
+//   경고한 그 상태(같은 백엔드를 8곳에서 다르게 부르는 것)가 컨텍스트에서 재현된다. 그때는
+//   「어떤 화면은 범위가 먹고 어떤 화면은 안 먹는」 형태가 되고, 사용자는 통제가 고장났다고
+//   읽는다. 그래서 인터셉터와 `apiUrl()` 둘 다 이 값을 본다.
+const TENANT_HEADER = 'X-Enterprise-Tenant';
+const SCOPE_HEADER = 'X-Enterprise-Scope';
+const MODE_HEADER = 'X-Entity-Mode';
+const CTX_KEY = 'factory.enterpriseContext';
+
+export interface EnterpriseContextSelection {
+  tenantId: string;
+  scopeNodeId: string;
+  /** `REAL` | `SIM` 등. 비우면 서버 기본값을 쓴다. */
+  entityMode: string;
+}
+
+const EMPTY_CTX: EnterpriseContextSelection = { tenantId: '', scopeNodeId: '', entityMode: '' };
+
+let enterpriseContext: EnterpriseContextSelection = (() => {
+  try {
+    const raw = typeof localStorage !== 'undefined' && localStorage.getItem(CTX_KEY);
+    return raw ? { ...EMPTY_CTX, ...(JSON.parse(raw) || {}) } : { ...EMPTY_CTX };
+  } catch {
+    return { ...EMPTY_CTX };
+  }
+})();
+
+export function getEnterpriseContext(): EnterpriseContextSelection {
+  return enterpriseContext;
+}
+
+/** 전역 전환기가 부른다. 부분 갱신을 허용한다(모드만 바꾸는 경우가 흔하다). */
+export function setEnterpriseContext(next: Partial<EnterpriseContextSelection>) {
+  enterpriseContext = {
+    tenantId: (next.tenantId ?? enterpriseContext.tenantId ?? '').trim(),
+    scopeNodeId: (next.scopeNodeId ?? enterpriseContext.scopeNodeId ?? '').trim(),
+    entityMode: (next.entityMode ?? enterpriseContext.entityMode ?? '').trim(),
+  };
+  try {
+    if (enterpriseContext.tenantId || enterpriseContext.scopeNodeId || enterpriseContext.entityMode) {
+      localStorage.setItem(CTX_KEY, JSON.stringify(enterpriseContext));
+    } else {
+      localStorage.removeItem(CTX_KEY);
+    }
+  } catch {
+    // localStorage 가 막힌 환경에서도 동작은 계속돼야 한다
+  }
+}
+
 // SSE(EventSource)·iframe·다운로드 링크는 헤더를 붙일 수 없다. 쿼리로 실어 보낸다.
 export function apiUrl(path: string): string {
   const base = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
-  if (!actingUser) return base;
-  return base + (base.includes('?') ? '&' : '?') + `as_user=${encodeURIComponent(actingUser)}`;
+  const parts: string[] = [];
+  if (actingUser) parts.push(`as_user=${encodeURIComponent(actingUser)}`);
+  // ⚠️ 쿼리 이름은 서버가 읽는 것과 **정확히** 같아야 한다
+  //   (`deps.current_enterprise_context`: `enterprise_scope` · `entity_mode`).
+  //   테넌트는 서버가 쿼리로는 받지 않는다 — 여기서 지어내지 않는다.
+  if (enterpriseContext.scopeNodeId) {
+    parts.push(`enterprise_scope=${encodeURIComponent(enterpriseContext.scopeNodeId)}`);
+  }
+  if (enterpriseContext.entityMode) {
+    parts.push(`entity_mode=${encodeURIComponent(enterpriseContext.entityMode)}`);
+  }
+  if (!parts.length) return base;
+  return base + (base.includes('?') ? '&' : '?') + parts.join('&');
 }
 
 // ★★★ [2026-07-31 실측 결함] **같은 백엔드를 다른 이름으로 부르면 헤더가 빠졌다.**
@@ -97,11 +164,20 @@ export function installFetchInterceptor() {
         : (input as Request).url;
 
       // ⚠️ 우리 백엔드로 가는 요청에만 붙인다. 외부 도메인에 사용자 식별을 흘리면 안 된다.
-      if (actingUser && url && isBackendUrl(url)) {
+      //   [P2-1] 업무 컨텍스트도 같은 판정 아래 둔다 — 「어느 조직의 무엇을 보고 있는가」는
+      //   사용자 식별만큼이나 밖으로 나가면 안 되는 정보다.
+      const ctx = enterpriseContext;
+      const hasCtx = !!(ctx.tenantId || ctx.scopeNodeId || ctx.entityMode);
+      if ((actingUser || hasCtx) && url && isBackendUrl(url)) {
         const headers = new Headers(
           (init && init.headers) || (input instanceof Request ? input.headers : undefined)
         );
-        if (!headers.has(USER_HEADER)) headers.set(USER_HEADER, actingUser);
+        // ★ 이미 붙어 있으면 덮어쓰지 않는다 — 호출부가 일부러 다른 범위를 지정한 경우가 있다
+        //   (예: 관리자 화면이 특정 조직을 대신 조회). 전역값이 그것을 이기면 조용히 틀어진다.
+        if (actingUser && !headers.has(USER_HEADER)) headers.set(USER_HEADER, actingUser);
+        if (ctx.tenantId && !headers.has(TENANT_HEADER)) headers.set(TENANT_HEADER, ctx.tenantId);
+        if (ctx.scopeNodeId && !headers.has(SCOPE_HEADER)) headers.set(SCOPE_HEADER, ctx.scopeNodeId);
+        if (ctx.entityMode && !headers.has(MODE_HEADER)) headers.set(MODE_HEADER, ctx.entityMode);
         return original(input as any, { ...(init || {}), headers });
       }
     } catch {
