@@ -3,6 +3,10 @@
 // ⚠️ 화면과 분리한다 — 디자인 개편 때 그대로 재사용된다(advisorApi·shadowApi 와 같은 관례).
 import { API_BASE_URL } from './api';
 
+/** ⚠️ [이관 F 5/8] 상태 코드를 실어 던진다 — 화면이 «권한이 없어 못 봤다» 와 «서버가 죽었다»
+ *  를 구분해야 한다. `closedLoopFetch.ApiError`·`shadowApi` 와 같은 규약이다. */
+export type ApiError = Error & { status?: number };
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -10,7 +14,15 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.detail || `요청 실패 (${r.status})`);
+  if (!r.ok) {
+    const d = (j as any)?.detail;
+    const msg = typeof d === 'string' ? d
+      : Array.isArray(d) ? d.map((e: any) => e?.msg || JSON.stringify(e)).join(' · ')
+        : `요청 실패 (${r.status})`;
+    const err = new Error(msg) as ApiError;
+    err.status = r.status;
+    throw err;
+  }
   return j.data as T;
 }
 
