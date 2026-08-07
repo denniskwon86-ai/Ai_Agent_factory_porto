@@ -56,6 +56,27 @@ MODEL_POLICY_MANAGE = "model.policy.manage"
 #:     그것이 설계와 구현이 갈라진 지점이었다. 그래서 전용 코드로 분리한다.
 SYSTEM_DEFAULT_EDIT = "system.default.edit"
 
+# ── 프로젝트(공장) 권한 ─────────────────────────────────────────────────────
+#
+# ★★ [2026-08-07] **이 제품의 핵심 객체에 권한 코드가 하나도 없었다.**
+#   Agent·Workflow·Skill·Model 에는 코드가 있는데, 정작 사용자가 하루 종일 만지는
+#   «프로젝트» 에는 없었다. 그래서 프로젝트 라우트 20개가 「Principal 을 받으니 통제됨」으로
+#   세어졌고, 실측에서 **viewer 가 프로젝트를 지우고·만들고·스프린트를 돌릴 수 있었다.**
+#
+# ⚠️ 왜 네 개로 나누는가 — 하나(`project.manage`)로 묶으면 「돌려만 볼 사람」에게 릴리스
+#   게시와 소유권 변경까지 딸려 간다. 반대로 라우트마다 코드를 만들면 표가 관리 불가능해진다.
+#   **되돌리기 비용이 다른 지점**에서 끊었다:
+#     · 만들기 — 되돌리기 쉽다(빈 프로젝트)
+#     · 돌리기 — 비용이 나간다(LLM). 되돌릴 수 없다
+#     · 고치기 — 남의 자료를 끌어온다(지식·기준정보 바인딩, 소유권)
+#     · 게시 — **남에게 나간다.** 여기서부터는 회수해도 이미 본 사람이 있다
+PROJECT_CREATE = "project.create"
+PROJECT_RUN = "project.run"
+PROJECT_EDIT = "project.edit"
+PROJECT_RELEASE = "project.release"
+
+PROJECT_CAPS = (PROJECT_CREATE, PROJECT_RUN, PROJECT_EDIT, PROJECT_RELEASE)
+
 #: 관리자 센터 탭 접근(설계 §8.2). **탭마다 따로 둔다** — 하나로 묶으면 «조직 관리자» 가
 #: 모델 정책까지 바꿀 수 있게 되고, 그것이 D-017 이 분리하려던 바로 그 상태다.
 ADMIN_ORGANIZATION = "admin.organization"
@@ -73,7 +94,7 @@ ALL_CAPABILITIES = (
     AGENT_READ, AGENT_CREATE, AGENT_UPDATE, AGENT_PUBLISH, AGENT_RETIRE, AGENT_EXECUTE,
     WORKFLOW_READ, WORKFLOW_CREATE, WORKFLOW_UPDATE, WORKFLOW_PUBLISH, WORKFLOW_RETIRE,
     WORKFLOW_BIND, SKILL_PROPOSE, SKILL_APPROVE, MODEL_POLICY_MANAGE, SYSTEM_DEFAULT_EDIT,
-) + ADMIN_TABS
+) + PROJECT_CAPS + ADMIN_TABS
 
 #: 관리자 센터 URL → 필요한 capability(설계 §8.2 표). Route Guard 와 서버가 **같은 표**를 본다.
 TAB_ROUTES: Dict[str, str] = {
@@ -203,15 +224,21 @@ class AdminCapabilities:
 #:   같은 질문의 답이 파일마다 달라진다.
 _ROLE_CAPS: Dict[str, FrozenSet[str]] = {
     # 부서 viewer — 승인된 것을 읽고 실행만.
+    # ⚠️ **프로젝트 권한이 하나도 없다.** 실측에서 viewer 가 프로젝트를 지우고 스프린트를
+    #   돌릴 수 있었던 것이 이 줄이 비어 있어서가 아니라, 라우트가 아무 코드도 요구하지
+    #   않았기 때문이다 — 표가 없으면 역할을 아무리 좁혀도 소용이 없다.
     "viewer": frozenset({AGENT_READ, WORKFLOW_READ, AGENT_EXECUTE}),
     # 부서 member — 개인/조직 초안까지. 승인은 «요청» 만 할 수 있으므로 publish 가 없다.
+    # 프로젝트는 **만들고 돌리고 고칠 수 있다.** 게시(`PROJECT_RELEASE`)는 남에게 나가는
+    # 일이므로 여기 없다 — Agent 에서 `publish` 를 뺀 것과 같은 기준이다.
     "member": frozenset({AGENT_READ, AGENT_CREATE, AGENT_UPDATE, AGENT_EXECUTE,
-                         WORKFLOW_READ, WORKFLOW_CREATE, SKILL_PROPOSE}),
+                         WORKFLOW_READ, WORKFLOW_CREATE, SKILL_PROPOSE,
+                         PROJECT_CREATE, PROJECT_RUN, PROJECT_EDIT}),
     # 부서 manager — 자기 조직 승인까지. 전사 공개(승격)는 «요청» 이므로 여기 없다.
     "manager": frozenset({AGENT_READ, AGENT_CREATE, AGENT_UPDATE, AGENT_PUBLISH, AGENT_RETIRE,
                           AGENT_EXECUTE, WORKFLOW_READ, WORKFLOW_CREATE, WORKFLOW_UPDATE,
                           WORKFLOW_PUBLISH, WORKFLOW_BIND, SKILL_PROPOSE,
-                          ADMIN_USERS, ADMIN_ORGANIZATION}),
+                          ADMIN_USERS, ADMIN_ORGANIZATION}) | frozenset(PROJECT_CAPS),
 }
 
 #: 경영진 — **만들지 않고 본다.** 실행과 결과 열람만(설계 §4.2).
@@ -223,7 +250,9 @@ _AI_ADMIN_CAPS = frozenset({
     WORKFLOW_READ, WORKFLOW_CREATE, WORKFLOW_UPDATE, WORKFLOW_PUBLISH, WORKFLOW_RETIRE,
     WORKFLOW_BIND, SKILL_PROPOSE, SKILL_APPROVE, MODEL_POLICY_MANAGE,
     ADMIN_AGENT_ACCESS, ADMIN_PERMISSIONS, ADMIN_AUDIT,
-})
+    # 프로젝트도 전부 — AI 거버넌스 관리자는 어느 부서의 실행이든 들여다보고 멈출 수 있어야
+    # 한다. ⚠️ 단 `SYSTEM_DEFAULT_EDIT` 은 여전히 없다(§4.2, `resolve()` 가 discard 한다).
+} | set(PROJECT_CAPS))
 
 #: 데이터 관리자 — 데이터·카탈로그·MCP 권한 탭만(설계 §8.2).
 _DATA_ADMIN_CAPS = frozenset({ADMIN_DATA_ACCESS, ADMIN_AUDIT, AGENT_READ, WORKFLOW_READ})

@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from api.deps import (Principal, assert_identified, assert_project_writable,
                       current_principal, enterprise_context)
+from core.route_authority import guard as _route_authority_guard
 from api.routes.factory_control import _safe_id
 from core.advisor_blueprint import assemble_blueprint
 from core.advisor_playbook import (load_playbook, list_playbooks, score_readiness,
@@ -30,7 +31,11 @@ from core.enterprise_context import (ENTITY_MODE_KO, EnterpriseContext,
                                      EnterpriseContextError)
 from core.paths import workspace_path
 
-router = APIRouter(prefix="/api/v1/advisor", tags=["Advisor"])
+# ★★ [2026-08-07] 권한 배정표를 **라우터에 붙인다.** 라우트마다 `require_caps` 를 적지
+#   않는 이유: 37개에 적으면 37번 빠뜨릴 기회가 생기고, 새 라우트가 생겨도 아무도
+#   알려 주지 않는다. 표는 `core/route_authority.ROUTE_CAPS` 하나뿐이며,
+#   `tests/test_route_authority_table.py` 가 표와 라우터를 **양방향으로** 대조한다.
+router = APIRouter(prefix="/api/v1/advisor", tags=["Advisor"], dependencies=[Depends(_route_authority_guard)])
 
 #: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
 WHAT = "상담 플레이북"

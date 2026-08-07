@@ -72,9 +72,15 @@ def test_execution_paths_are_blocked_for_unentitled(monkeypatch, uid, user, why)
     ⚠️ 종전에는 403 이 아니라 422(payload 검증)·404(프로젝트 없음)가 돌아왔다 —
       즉 **권한 검사를 통과해 본문까지 들어갔다.** 유효한 id 와 payload 만 있으면 통했다."""
     c = TestClient(_app(monkeypatch, user_id=uid, user=user))
+    # [2026-08-07] 권한 배정표(`core/route_authority`)가 붙으면서 **익명은 401** 이 된다.
+    # ⚠️ 이것은 통제가 약해진 것이 아니라 **이유가 정확해진 것**이다. 이 저장소의 규약이
+    #   그렇게 정해져 있다(`api/deps.require_caps` 주석): 401 = «누구인지 밝히십시오»,
+    #   403 = «당신에게는 권한이 없습니다». 뭉개면 이미 로그인한 사용자가 또 로그인한다.
+    #   미등록·폐지 계정은 **식별은 됐으므로 403 그대로**여야 하고, 아래가 그것을 지킨다.
+    ok = (401, 403) if not uid else (403,)
     for method, path, body in WRITE_PATHS + READ_PATHS:
         r = getattr(c, method)(path, json=body) if body is not None else getattr(c, method)(path)
-        assert r.status_code == 403, f"{why} 에게 {path} 가 열려 있다(→ {r.status_code})"
+        assert r.status_code in ok, f"{why} 에게 {path} 가 열려 있다(→ {r.status_code})"
 
 
 def test_hotl_resume_is_denied_for_other_departments(monkeypatch):
@@ -109,8 +115,34 @@ def test_unowned_project_stays_permissive_for_identified_users(monkeypatch):
     monkeypatch.setattr(od.org_directory, "get_ownership", lambda kind, rid: {})
     r = c.post(f"/api/v1/factory/{PROBE}/hotl/resume",
                json={"task_id": "t1", "feedback": ""})
-    # 자격은 통과하고(403 아님) 프로젝트가 없어 실행 단계에서 실패한다.
-    assert r.status_code != 403, "하위호환 계약이 조용히 바뀌었다 — 의도한 변경이면 이 주석을 고칠 것"
+    # ★★★ [2026-08-07 · 이 감지선이 울렸고, 변경은 의도한 것이다]
+    #
+    #   위 주석은 「의도한 변경이면 이 주석을 고칠 것」이라고 적어 두었다. 고친다.
+    #
+    #   **소유권 미기록 프로젝트의 관대함은 그대로 두되, 「이 사람이 프로젝트를 돌릴 수 있는
+    #   사람인가」를 앞에 세웠다**(`core/route_authority` 표 · `project.run`).
+    #   `staff@ls` 는 부서 역할이 없어 그 권한이 없다 — 그래서 이제 403 이다.
+    #
+    #   ⚠️ 두 판정은 **다른 질문**이고 둘 다 필요하다:
+    #     · 「돌릴 수 있는 사람인가」 — 역할에서 나온다(표가 답한다)
+    #     · 「이 프로젝트를 돌릴 수 있는가」 — 소유권에서 나온다(하위호환은 여기 남아 있다)
+    #   앞의 질문이 없었기 때문에 실측에서 **viewer 가 프로젝트를 지우고 돌릴 수 있었다.**
+    #
+    #   ★ 실제 사용자에게는 영향이 없다(2026-08-07 실측): manager·member 는 `project.run` 을
+    #     갖고 viewer 만 갖지 않는다. 즉 「업무하는 사람이 막히는」 변경이 아니다.
+    assert r.status_code == 403, "역할 없는 사용자에게 실행 경로가 열려 있다"
+
+    # 그리고 **역할이 있으면 종전 관대함이 그대로 유지된다** — 이것이 위 관대함의 본체다.
+    c2 = TestClient(_app(
+        monkeypatch, user_id="member@ls",
+        user={"user_id": "member@ls", "status": "active", "roles": {"dept-a": "member"}},
+        scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"}),
+                  "writable_dept_ids": frozenset()}))
+    monkeypatch.setattr(od.org_directory, "get_ownership", lambda kind, rid: {})
+    r2 = c2.post(f"/api/v1/factory/{PROBE}/hotl/resume",
+                 json={"task_id": "t1", "feedback": ""})
+    assert r2.status_code != 403, (
+        "소유권 미기록 프로젝트의 하위호환이 사라졌다 — 이행 기간 프로젝트가 깨진다")
 
 
 def test_project_list_is_blocked_for_anonymous(monkeypatch):
@@ -126,10 +158,12 @@ def test_project_creation_requires_identity(monkeypatch):
     """★★★ 익명이 프로젝트를 만들면 소유 부서가 비어 **프롬프트 주입 필터가 걸리지 않는다**
     (fail-open). 즉 «부서 없는 프로젝트를 만들어 남의 부서 산출물을 긁는» 경로가 열린다."""
     c = TestClient(_app(monkeypatch, user_id="", user=None))
+    # [2026-08-07] 익명은 이제 **401** 이다 — 위 `test_execution_paths_are_blocked_for_unentitled`
+    #   의 주석 참조. 막혔다는 사실은 같고, 사용자가 할 일(«로그인하라»)이 정확해졌다.
     assert c.post("/api/v1/factory/projects",
-                  json={"project_id": "x", "initial_idea": "y"}).status_code == 403
+                  json={"project_id": "x", "initial_idea": "y"}).status_code in (401, 403)
     assert c.post("/api/v1/factory/projects/mega",
-                  json={"mega_project_id": "x"}).status_code == 403
+                  json={"mega_project_id": "x"}).status_code in (401, 403)
 
 
 def test_gate_is_transparent_when_enforcement_off(monkeypatch):
