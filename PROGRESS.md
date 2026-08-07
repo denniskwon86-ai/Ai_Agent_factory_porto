@@ -1,7 +1,7 @@
 # 전체 진척도
 
 > 이 파일이 **진척의 단일 정본**이다. 보고할 때 숫자를 추정하지 않고 여기서 센다.
-> 갱신: 2026-08-07(E 전환 게이트) · 근거: `docs/design_agent_governance_scope_permissions_2026-08-04.md` §9 ·
+> 갱신: 2026-08-08(P2 완료기준⑤ 테스트) · 근거: `docs/design_agent_governance_scope_permissions_2026-08-04.md` §9 ·
 > `.agents/DECISIONS.md` `[D-018]` 이행 규칙 10단계 · `.agents/TEAM_BOARD.md` 이관 순서 ·
 > 코드 실측(`HubDialog` 사용 화면 수 · 라우트별 `current_principal` 유무)
 >
@@ -391,6 +391,42 @@ HOTL 중단점 6개(`Requirement_Interviewer`…`Supervisor`) · 이력 1건, �
 | 2 | Agent Governance Center 범위 탭·권한 상태·승인 흐름 | ⬜ | **Codex**(화면) |
 | 3 | AI 추천 입력에 조직 프로필·허용 데이터·도구 주입 | ✅ | 나 |
 | 4 | 관리자·manager·member·viewer·익명 화면 실측 | ⬜ | **Antigravity**(실측) |
+
+⚠️ **남은 2건은 내 몫이 아니다** — 설계 §12 가 「Codex: Agent Governance Center 정보구조·
+권한 상태 UI, 역할별 래스터 감사 / Antigravity: 교차검증」으로 배정했고, 내 몫은 「P0 서버
+봉합, P1 저장소/API, **P3 런타임·테스트**」다. 진척을 2/4 로 두는 것이 정확하다.
+
+### 완료 기준 ⑤ 는 내 몫이었고, 비어 있었다 (2026-08-08)
+
+§11-5: 「관리자·manager·member·viewer·익명, **REAL·VIRTUAL 조합 회귀 테스트가 통과**한다」.
+실측하니 **VIRTUAL × 역할 조합을 검사하는 테스트가 0건**이었다 — 두 축을 각각 검사한 파일은
+있는데(`test_agent_config_gate` 역할, `test_e3_virtual_sandbox` 모드) **교차 지점이 비었다.**
+
+→ `tests/test_role_mode_matrix.py` (36건). 지키는 계약은 하나다:
+
+    entity_mode·tenant_id 는 요청 값 «해석» 에만 쓰인다. 주체의 범위 계산에는 넣지 않는다.
+
+★★★ 왜 위험한가: 그 둘은 요청자가 **헤더로 스스로 보내는 값**이다(`X-Entity-Mode`·
+`X-Enterprise-Tenant`). 범위 계산이 그것을 본다면 viewer 가 **헤더 한 줄로** 다른 조직을
+열람한다 — 서버 코드를 고치지 않고도 통제가 무너지는 형태다.
+
+⚠️ 단언은 **부분집합(⊆)이지 상등(=)이 아니다.** 문맥에 따라 좁아지는 것은 정당하다
+(가상에서 더 막을 수 있다). 상등으로 못박으면 그 정당한 강화가 테스트를 깨고, 사람은
+테스트를 고친다.
+
+### ★★ 변이 검사가 내가 쓴 허수 검사를 잡았다
+
+두 변이를 넣었다.
+· `entity_mode` 로 범위를 넓히는 변이 → **5건 실패** ✅
+· fail-closed 를 fail-open(`return ["*"]`)으로 바꾸는 변이 → **통과해 버렸다** ❌
+
+`eff.denied` 만 봤기 때문이다. 멤버십 판정이 `"node_q" in ["*"]` 라 와일드카드를 펼치지 않아
+**결함이 있어도 denied 가 True** 였다 — 「거부됐다」는 사실은 fail-closed 의 증거가 되지
+못한다. 계약 자체(**빈 집합**)를 단언하도록 고치니 4건이 잡힌다.
+
+★ 이번 세션에서 같은 유형을 두 번 겪었다(P4-4 의 키 규약도 대역이 자기 자신과 합의했다).
+  **「테스트가 통과한다」와 「테스트가 무언가를 지킨다」는 다르다** — 변이를 한 번 넣어 보는
+  것이 그 둘을 가르는 유일한 방법이다.
 
 **P2-1 — 서버는 읽고 있었는데 화면이 보내지 않았다.**
 `api/deps.current_enterprise_context` 는 이미 `X-Enterprise-Tenant`·`X-Enterprise-Scope`·
