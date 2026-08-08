@@ -428,6 +428,38 @@ def test_org_exact_count_rule_is_per_resource_kind(monkeypatch):
         hidden_envelope(org, 10, 3, exact_for="typo")
 
 
+def test_agent_exact_count_rule_covers_ai_admin():
+    """★★★ 에이전트·스킬·워크플로우 자산의 «몇 건이 가려졌는가» 는 **AI 관리자**도 알아야 한다.
+
+    ⚠️ 이 규칙이 `org`·`standard` 만으로 돼 있으면 기능이 **아무에게도 도달하지 않는다.**
+      실측(2026-08-08 시드): AI 거버넌스 관리자 `hikwon_4@lsmnm.com` 은 `can_edit_org=False`·
+      `can_manage_standard=False` 이고 `is_ai_admin` 만 True 다. 그를 빼면 정확한 건수를 받는
+      사람은 플랫폼 관리자뿐인데, **플랫폼 관리자는 `scoped=False` 라 애초에 가려지는 것이 없다.**
+      즉 「아무도 못 받는 값」을 만들고도 테스트는 초록일 수 있다 — 그래서 자격을 여기서 못박는다.
+
+    ★ 반대 방향도 함께 잠근다. 「AI 자산의 관리자」라는 자격이 인사 명부·기준정보·경영계획의
+      **규모를 읽는 자격으로 번지면**, 어느 순간 «관리자니까 다 본다» 가 되고 그때는 각 자료의
+      정확한 건수 규칙이 있으나 마나가 된다."""
+    from api.deps import Principal as P, hidden_envelope
+    # ⚠️ `unrestricted` 기본값이 True 라 명시하지 않으면 무제한 권한자가 된다(위 테스트 참조).
+    ai = P(user_id="ai@ls", scope=AccessScope(
+        user_id="ai@ls", unrestricted=False, is_ai_admin=True))
+    assert hidden_envelope(ai, 10, 3, exact_for="agent").get("hidden_count") == 7
+    for other in ("org", "standard", "plan"):
+        assert "hidden_count" not in hidden_envelope(ai, 10, 3, exact_for=other), \
+            f"AI 관리자가 '{other}' 자료의 규모까지 본다"
+
+    # 조직 관리자·데이터 관리자도 에이전트 자산의 관리 주체다(설계 §4.2 — 조직에 배치하는 사람).
+    for kw in ({"can_edit_org": True}, {"can_manage_standard": True}):
+        p = P(user_id="x@ls", scope=AccessScope(user_id="x@ls", unrestricted=False, **kw))
+        assert hidden_envelope(p, 10, 3, exact_for="agent").get("hidden_count") == 7, kw
+
+    # ★ 부서 manager·member·viewer 는 «있다» 만 안다. 남의 조직 자산 규모는 그 자체로 정보다.
+    plain = P(user_id="m@ls", scope=AccessScope(user_id="m@ls", unrestricted=False))
+    env = hidden_envelope(plain, 10, 3, exact_for="agent")
+    assert env["hidden_present"] is True and "hidden_count" not in env
+
+
 # ── 거버넌스 지표: 익명이 **취약점 지도**를 보고 있었다(2026-08-04 이관 5/10) ──────────
 #
 # ★★★ 실측으로 익명이 받아 본 것:

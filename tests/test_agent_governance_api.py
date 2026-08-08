@@ -192,6 +192,132 @@ def test_status_filter(client):
     assert a["asset_id"] not in [i["asset_id"] for i in drafts]
 
 
+# ── 가려진 자산 (설계 §8.3 「현재 보는 범위와 숨겨진 자산 수」) ──────────────
+#
+# ★★ `scoped` 는 «걸렀다» 만 말하고 «얼마나» 를 말하지 않는다. 사용자는 3건을 보면서 그것이
+#   전부인지 30건 중 3건인지 알 수 없고, **숫자가 있으면 사람은 그것을 전부라고 읽는다**
+#   (P4-1 에서 총비용의 8%만 보이던 대시보드와 같은 유형이다).
+#
+# ⚠️ 계약은 `api.deps.hidden_envelope` 한 곳에 있다 — **존재는 누구에게나, 정확한 건수는 자료를
+#   관리할 사람에게만.** 아래는 그 계약이 이 라우트에서 실제로 지켜지는지를 본다. 규칙 자체의
+#   자격 판정은 `test_listing_visibility_gate.test_agent_exact_count_rule_covers_ai_admin`.
+#
+# 실측으로 고른 자리(2026-08-08): 플랫폼 관리자는 `scoped=False` 라 애초에 가려지는 것이 없고,
+# `hikwon_4` 만이 **걸러지면서 셀 수 있는** 유일한 계정이다. 그래서 그 계정이 규칙에서 빠지면
+# 이 기능은 아무에게도 도달하지 않는다.
+UNSEEN_ORG = "ORG_NO_ONE_MANAGES"   # 어느 시드 계정의 관리 범위에도 없는 조직
+
+
+def _hidden_assets(client, n=1, **kw):
+    """**어느 시드 계정에도 보이지 않는** 조직 자산. 무제한 권한자만 만들 수 있다."""
+    out = []
+    for _ in range(n):
+        r = _create(client, ADMIN, visibility=VIS_SCOPE, owner_scope_id=UNSEEN_ORG, **kw)
+        assert r.status_code == 200, r.text
+        out.append(r.json())
+    return out
+
+
+def test_scoped_list_says_something_is_hidden_without_leaking_how_many(client):
+    """★★★ 가려진 것이 «있다» 는 사실은 누구에게나, 건수는 아니다.
+
+    남의 조직에 에이전트가 몇 개 있는가는 **그 자체로 정보다.** 부서 manager 가 그 수를 알면
+    「우리보다 저쪽이 30개 많다」를 근거 없이 읽게 되고, 그것은 목록 API 가 할 일이 아니다."""
+    _hidden_assets(client, 2)
+    for uid in (MGR, MEMBER, VIEWER):
+        d = client.get(f"{B}/agents", headers=H(uid)).json()
+        assert d["scoped"] is True
+        assert d["hidden_present"] is True, f"{uid} 에게 목록이 전량처럼 보인다"
+        assert "hidden_count" not in d, f"{uid} 에게 남의 조직 자산 규모가 샌다"
+
+
+def test_ai_admin_sees_the_exact_hidden_count(client):
+    """★★ AI 관리자에게는 정확한 수를 준다 — 「전사에 에이전트가 몇 개인가」는 그가 답해야
+    하는 질문이고, 규모를 모르면 정비 계획을 세울 수 없다."""
+    _hidden_assets(client, 3)
+    d = client.get(f"{B}/agents", headers=H(AI_ADMIN)).json()
+    assert d["hidden_present"] is True and d["hidden_count"] == 3
+
+
+def test_unscoped_list_carries_no_hidden_envelope(client):
+    """★ 범위 필터가 걸리지 않은 목록에는 봉투를 붙이지 않는다 — 전량이므로 가려진 것이 없고,
+    거기에 «가려진 자산 0건» 을 적으면 화면이 없는 위험을 그린다."""
+    _hidden_assets(client, 2)
+    d = client.get(f"{B}/agents", headers=H(ADMIN)).json()
+    assert d["scoped"] is False
+    assert "hidden_present" not in d and "hidden_count" not in d
+
+
+def test_hidden_present_is_false_when_nothing_is_hidden(client):
+    """★★ 이 값이 **항상 True** 면 아무 뜻이 없다. 화면은 늘 「가려진 것이 있다」를 띄우고,
+    사용자는 그 문구를 배경으로 읽게 된다 — 그러면 진짜로 가려진 날에도 아무도 안 본다."""
+    _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    d = client.get(f"{B}/agents", headers=H(MGR)).json()
+    assert d["hidden_present"] is False and "hidden_count" not in d
+
+
+def test_hidden_count_uses_the_same_filters_as_the_list(client):
+    """★★★ 분모는 목록과 **같은 조건**으로 세어야 한다.
+
+    `?status=DRAFT` 로 초안을 보는 사람에게 전체 상태의 가려진 수를 주면, 그는 「초안이 그만큼
+    더 있다」로 읽는다. 필터가 좁을수록 이 거짓말은 커진다 — 조건을 두 곳에 적는 순간
+    한쪽만 고쳐지기 때문에, 여기서 두 축(`status`·`include_files`)을 함께 잠근다."""
+    _hidden_assets(client, 2)                                   # DRAFT 2건
+    _approved(client, ADMIN, visibility=VIS_SCOPE, owner_scope_id=UNSEEN_ORG)   # APPROVED 1건
+
+    whole = client.get(f"{B}/agents", headers=H(AI_ADMIN)).json()
+    assert whole["hidden_count"] == 3
+
+    drafts = client.get(f"{B}/agents?status={ST_DRAFT}", headers=H(AI_ADMIN)).json()
+    assert drafts["hidden_count"] == 2, "상태로 거른 목록에 전체 상태의 가려진 수가 붙었다"
+
+    #: ⚠️ 파일 자산은 제품 기본(SYSTEM)이라 **누구에게나 보인다.** 목록에서 뺀 것을 분모에만
+    #   남기면 「수십 건이 가려졌다」가 되고, 그 수는 조직과 아무 상관이 없다.
+    nofiles = client.get(f"{B}/agents?include_files=false", headers=H(AI_ADMIN)).json()
+    assert nofiles["hidden_count"] == 3, "목록에서 뺀 파일 자산이 «가려진 것»으로 세어졌다"
+
+
+def test_my_own_personal_draft_does_not_shrink_the_hidden_count(client):
+    """★★★ 분모와 분자의 **모집단이 같아야 한다.**
+
+    전량 조회에 요청자 신원을 넘기지 않으면 «내 개인 초안» 이 분모에서만 빠지고, 가려진 수가
+    그만큼 **조용히 줄어든다.** 화면에는 여전히 그럴듯한 숫자가 있으므로 아무도 이상을 느끼지
+    못한다 — 틀린 숫자는 숫자가 없는 것보다 나쁘다(P4-1 에서 같은 유형을 겪었다).
+
+    ⚠️ 이 결함은 목록이 «맞게» 보이는 동안에도 성립한다. 그래서 목록 내용만 보는 테스트로는
+      절대 잡히지 않는다."""
+    _hidden_assets(client, 2)
+    r = _create(client, AI_ADMIN, visibility=VIS_PERSONAL)
+    assert r.status_code == 200, r.text
+    d = client.get(f"{B}/agents", headers=H(AI_ADMIN)).json()
+    assert r.json()["asset_id"] in [i["asset_id"] for i in d["items"]], "전제가 깨졌다"
+    assert d["hidden_count"] == 2, "내 개인 초안이 분모에서만 빠져 가려진 수가 줄었다"
+
+
+def test_other_peoples_personal_drafts_are_never_counted_as_hidden(client):
+    """★★★ 개인 초안은 **가려진 것으로도 세지 않는다.**
+
+    「가려진 자산 2건」에 남의 개인 초안이 섞이면 관리자는 그것을 «요청하면 볼 수 있는 자산»
+    으로 읽는다. 그러나 개인 초안은 플랫폼 관리자에게도 보이지 않는 것이 저장소 계약이고
+    (`test_list_hides_other_peoples_personal_drafts`), 규모조차 남의 것이 아니다."""
+    _create(client, MEMBER, visibility=VIS_PERSONAL)
+    _create(client, MEMBER, visibility=VIS_PERSONAL)
+    d = client.get(f"{B}/agents", headers=H(AI_ADMIN)).json()
+    assert d["hidden_present"] is False, "남의 개인 초안이 «가려진 자산»으로 세어졌다"
+
+
+@pytest.mark.parametrize("path", ["agents", "workflows", "skills"])
+def test_hidden_envelope_is_on_every_kind(client, path):
+    """★ 종류마다 따로 적으면 한 종류에서만 빠진다 — 그리고 빠진 쪽에서 사용자는 목록을
+    전량으로 읽는다. 세 종류가 같은 계약을 쓰는지 여기서 본다."""
+    kind_kw = {"skills": {"kind_path": "skills"}, "workflows": {"kind_path": "workflows"}}
+    r = _create(client, ADMIN, visibility=VIS_SCOPE, owner_scope_id=UNSEEN_ORG,
+                **kind_kw.get(path, {}))
+    assert r.status_code == 200, r.text
+    d = client.get(f"{B}/{path}", headers=H(MGR)).json()
+    assert d["hidden_present"] is True and "hidden_count" not in d
+
+
 # ── 상세는 안 보이면 404 (설계 §7.1) ──────────────────────────────────────
 def test_invisible_asset_detail_is_404_not_403(client):
     """★★★ 다른 사람의 개인 자산은 **404** 다. 403 은 «그런 자산이 있다» 를 알려 준다."""
