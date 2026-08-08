@@ -399,13 +399,28 @@ class AgentAssetStore:
 
     def list_assets(self, kind: str, viewer_scopes: Optional[FrozenSet[str]],
                     viewer_user_id: str, tenant_id: str = "",
-                    status: str = "", include_retired: bool = False) -> List[Dict[str, Any]]:
+                    status: str = "", include_retired: bool = False,
+                    entity_mode: str = "") -> List[Dict[str, Any]]:
         """가시 범위 안의 자산 목록.
 
         ★★ `viewer_scopes` 는 **필수 인자**다(기본값을 주지 않는다). 기본값을 두면 어느 호출부가
           그것을 빼먹고, 그 경로만 조용히 전부 보이게 된다 — 오늘 아침 목록 API 에서 겪은 실패다.
         · `None` = 필터하지 않는다(강제 OFF·unrestricted). 호출부가 **의도적으로** 그렇게 준 것이다.
         · `frozenset()` = 아무 조직도 모른다 → **개인·전사·시스템 자산만** 보인다(fail-closed).
+
+        ## ★★★ `entity_mode` — 가상에서 만든 것이 실제에 섞이지 않게 한다
+
+        설계 §7.1 은 **가상 조직 = 실제 조직의 복제본**이라고 정했다. 그래서 방향이 다르다:
+
+        · `REAL` 문맥 → **`REAL` 자산만** 보인다. 연습용으로 만든 정의가 실제 실행에 섞이면
+          그것으로 만든 산출물이 실적이 된다.
+        · `VIRTUAL` 문맥 → 그 모드 자산 **＋ `REAL` 자산**. 복제본이므로 원본을 볼 수 있어야
+          하고, 그러지 않으면 가상 조직에서는 아무것도 못 만든다(복사할 원본이 없다).
+        · `""`(미지정) → 필터하지 않는다. 호출부가 문맥을 모르는 경우다.
+
+        ⚠️ 이것은 **요청 값 해석**이지 주체의 범위 계산이 아니다(`test_role_mode_matrix` 계약).
+          모드로 «더 넓게» 볼 수 있는 방향은 REAL → VIRTUAL 하나뿐이고, 가상 문맥 진입 자체가
+          별도 통제(설계 §4.3 capability token)를 지난다.
         """
         if kind not in KINDS:
             raise AssetError(f"kind 는 {KINDS} 중 하나여야 합니다: {kind}")
@@ -414,6 +429,13 @@ class AgentAssetStore:
         if tenant_id:
             sql += " AND tenant_id=?"
             params.append(tenant_id)
+        mode = (entity_mode or "").strip().upper()
+        if mode == "REAL":
+            sql += " AND entity_mode=?"
+            params.append("REAL")
+        elif mode:
+            sql += " AND entity_mode IN (?, ?)"
+            params.extend([mode, "REAL"])
         if status:
             sql += " AND status=?"
             params.append(status)

@@ -461,7 +461,7 @@ def workflow_summaries(viewer_scopes: Optional[FrozenSet[str]], viewer_user_id: 
 # ── 통합 조회 ─────────────────────────────────────────────────────────────
 def list_all(kind: str, viewer_scopes: Optional[FrozenSet[str]], viewer_user_id: str,
              tenant_id: str = "", include_files: bool = True,
-             include_retired: bool = False) -> List[Dict[str, Any]]:
+             include_retired: bool = False, entity_mode: str = "") -> List[Dict[str, Any]]:
     """DB 자산 + 파일 자산을 합쳐 돌려준다.
 
     ★ 같은 것이 양쪽에 있어도 **둘 다 보여준다.** 예를 들어 `RFP_Analyst` 를 조직 자산으로
@@ -473,7 +473,7 @@ def list_all(kind: str, viewer_scopes: Optional[FrozenSet[str]], viewer_user_id:
     """
     rows = agent_assets.list_assets(
         kind, viewer_scopes, viewer_user_id, tenant_id=tenant_id,
-        include_retired=include_retired)
+        include_retired=include_retired, entity_mode=entity_mode)
     if not include_files:
         return rows
     files = [f for f in file_assets(kind)

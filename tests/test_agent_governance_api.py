@@ -855,55 +855,50 @@ def test_viewer_is_blocked_on_everything_with_distinct_reasons(client):
     assert len({b["approve"], b["copy"]}) == 2, "승인과 복사가 같은 이유로 막혀 있다"
 
 
-# ── 테넌트 경계 — **오늘의 한계를 못박는다** ─────────────────────────────
+# ── 테넌트·모드는 이제 **문맥 축**이다 (설계 §11 완료기준 ③) ─────────────
 #
-# ★★★ 아래 테스트는 «올바른 동작» 을 지키는 것이 아니라 **틀린 동작을 고정한다.** 그래서
-#   누군가 고치면 반드시 여기가 깨지고, 그때 이 주석을 읽게 된다. 조용히 남아 있는 한계는
-#   시간이 지나면 «원래 그런 것» 이 되기 때문이다.
+# ★★★ 2026-08-08 오전에는 이 자리에 「한계를 고정하는」 테스트가 있었다 — 라우트가 `create` 에
+#   tenant·mode 를 넘기지 않아 무엇을 만들든 `tenant_default`·`REAL` 이 박혔고, 목록도 그 축을
+#   거르지 않았다. 그 테스트는 「누가 고치면 여기가 깨지고 무엇을 함께 해야 하는지 읽게 된다」
+#   고 적어 두었고, **실제로 그렇게 됐다.** 지시대로 뒤집고 `hidden_count` 도 함께 잠근다.
 #
-# ## 왜 지금 고치지 않는가 (2026-08-08 실측)
-#
-# 필터의 기준이 될 **「요청자의 테넌트」가 어디에도 없다**:
-#   · `AccessScope` 에 tenant 필드가 없다 — 사용자 레코드에도 테넌트 개념이 없다
-#   · 저장된 자산은 6건 전부 `tenant_default` 다(라우트가 `create` 에 tenant 를 넘기지 않아
-#     항상 기본값이 박힌다 — `entity_mode` 도 마찬가지다)
-#   · 헤더 `X-Enterprise-Tenant` 는 **요청자가 스스로 보내는 값**이고, 그것으로 범위를 계산하면
-#     헤더 한 줄로 남의 테넌트를 연다(`test_role_mode_matrix` 가 못박은 계약을 정면으로 깬다)
-#
-# → 「사용자에게 테넌트를 부여할 것인가」는 **설계 결정**이며 여기서 정할 수 없다. 근거 없는
-#   필터를 넣으면 막고 있다는 **착각**만 생기고, 그것이 없는 것보다 위험하다.
-#
-# ⚠️ 설계 §11 완료 기준 ③(「Agent·Skill·Workflow·Pack 이 **명시적** tenant/scope/mode 와 버전을
-#   가진다」)은 그래서 **아직 충족되지 않았다.** 컬럼은 있지만 채워지지 않는다.
-def test_tenant_is_not_a_boundary_yet_and_this_test_says_so(client):
-    """★★★ 다른 테넌트의 자산이 **목록에도 «가려진 수» 에도 섞인다** — 오늘의 한계다.
+# ⚠️⚠️ **이것은 «문맥 분리» 이지 «통제» 가 아니다.** tenant·mode 는 요청자가 헤더로 보내는
+#   값이고(`X-Enterprise-Tenant`·`X-Entity-Mode`), 사용자 레코드에 테넌트 축이 없다. 즉 헤더를
+#   바꾸면 다른 테넌트 자산을 볼 수 있다 — 「막힌다」고 말하면 안 된다.
+#   · 모드는 그래도 안전한 방향이다: REAL → VIRTUAL 로 넓히려면 가상 문맥 진입 자체가 별도
+#     통제(설계 §4.3 capability token)를 지나고, 반대 방향은 좁아지기만 한다.
+#   · 테넌트를 **통제**로 만들려면 사용자에게 테넌트를 부여해야 한다(설계 결정 · PROGRESS 참조).
+def test_assets_are_separated_by_tenant_context(client):
+    """★★ 다른 테넌트 문맥에서 만든 자산은 이 문맥의 목록에 **섞이지 않는다.**
 
-    이 테스트가 깨졌다면 누군가 테넌트 경계를 구현한 것이다. 그렇다면:
-      ① 이 테스트를 「다른 테넌트는 보이지 않는다」로 **뒤집고**
-      ② `hidden_count` 가 남의 테넌트 자산을 세지 않는지 함께 확인하고
-      ③ 위 주석의 «왜 못 고치는가» 를 지운다."""
-    #: ⚠️ 라우트가 tenant 를 받지 않으므로 **저장소를 직접** 쓴다(fixture 가 갈아끼운 격리
-    #:   저장소다 — 실제 개발 DB 에 남의 테넌트 자산을 만들지 않는다).
+    ⚠️ 통제가 아니라 분리다(위 주석). 그래도 기록만 나뉘고 조회가 안 나뉘면 「분리했다」는
+      착각이 생기고, 그 착각 위에서 사람들이 자산을 만든다."""
     from api.routes import agent_governance as _gov
     other = _gov.agent_assets.create(
         "agent", "남의 테넌트 자산", {"role": "x"}, "someone@other.com",
         owner_scope_id="LS_MNM", visibility=VIS_SCOPE, tenant_id="tenant_other")
 
     ids = [i["asset_id"] for i in client.get(f"{B}/agents", headers=H(MGR)).json()["items"]]
-    assert other["asset_id"] in ids, (
-        "테넌트 경계가 생겼다 — 이 테스트를 뒤집고 hidden_count 도 함께 확인할 것(위 주석 참조)")
+    assert other["asset_id"] not in ids, "다른 테넌트 자산이 목록에 섞인다"
 
 
-def test_created_assets_all_land_in_the_default_tenant(client):
-    """★★ 라우트가 `create` 에 tenant·entity_mode 를 **넘기지 않는다** — 무엇을 만들든 기본값이
-    박힌다. 설계 §11 완료 기준 ③ 이 요구한 «명시적 tenant/mode» 가 아직 아니라는 증거다.
+def test_hidden_count_does_not_count_other_tenants(client):
+    """★★★ 「가려진 수」에 남의 테넌트 자산이 섞이면, 관리자는 **있지도 않은 자산**을 찾으러
+    간다. 분모와 분자의 모집단은 같은 문맥이어야 한다."""
+    _hidden_assets(client, 2)                                   # 이 문맥의 조직 자산 2건
+    from api.routes import agent_governance as _gov
+    _gov.agent_assets.create("agent", "남의 테넌트", {"role": "x"}, "someone@other.com",
+                             owner_scope_id=UNSEEN_ORG, visibility=VIS_SCOPE,
+                             tenant_id="tenant_other")
+    d = client.get(f"{B}/agents", headers=H(AI_ADMIN)).json()
+    assert d["hidden_count"] == 2, "다른 테넌트 자산이 «가려진 수»에 섞였다"
 
-    ⚠️ 이것을 고칠 때는 **필터와 함께** 해야 한다. 기록만 나뉘고 조회가 안 나뉘면 「분리했다」는
-      착각이 생기고, 그 착각 위에서 사람들이 자산을 만든다."""
+
+def test_created_assets_record_the_context_they_were_made_in(client):
+    """★ [완료기준 ③] 무엇을 만들든 기본값이 박히던 상태를 못박는다 — 이제 **문맥**이 실린다."""
     a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM").json()
-    assert a["tenant_id"] == "tenant_default"
+    assert a["tenant_id"] == "tenant_default"      # 문맥 미지정 → 기본 테넌트
     assert a["entity_mode"] == "REAL"
-
 
 # ── 조직에 공개 (설계 §8.6 「조직 공개」) ─────────────────────────────────
 def test_publishing_to_org_moves_the_draft_instead_of_copying_it(client):
@@ -1020,3 +1015,71 @@ def test_author_check_holds_even_if_visibility_ever_widens(client, monkeypatch):
     r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
                     json={"owner_scope_id": "LS_MNM"}, headers=H(MGR))
     assert r.status_code == 403 and "다른 사람의 초안" in r.json()["detail"], r.text
+
+
+# ── 실행 문맥(entity_mode) — 가상이 실제에 섞이지 않는다 (설계 §7.1 · §11 완료기준 ③) ──
+def _H(uid: str, mode: str = "", tenant: str = ""):
+    h = H(uid)
+    if mode:
+        h["X-Entity-Mode"] = mode
+    if tenant:
+        h["X-Enterprise-Tenant"] = tenant
+    return h
+
+
+def test_asset_records_the_mode_it_was_created_in(client):
+    """★★★ [완료기준 ③] 자산은 **명시적 mode** 를 가진다.
+
+    종전에는 라우트가 `entity_mode` 를 넘기지 않아 무엇을 만들든 `REAL` 이 박혔다 — 화면은
+    「⚠️ VIRTUAL — 가상 문맥입니다」라고 말하면서 **실제 자산을 만들고 있었다.**"""
+    r = client.post(f"{B}/agents", json={"name_ko": "가상 초안", "body": {},
+                                         "visibility": VIS_PERSONAL},
+                    headers=_H(MGR, mode="VIRTUAL"))
+    assert r.status_code == 200, r.text
+    assert r.json()["entity_mode"] == "VIRTUAL"
+
+    real = _create(client, MGR, visibility=VIS_PERSONAL).json()
+    assert real["entity_mode"] == "REAL"
+
+
+def test_real_context_does_not_show_virtual_assets(client):
+    """★★★ 연습용으로 만든 정의가 실제 목록에 섞이면 **그것으로 만든 산출물이 실적이 된다.**"""
+    v = client.post(f"{B}/agents", json={"name_ko": "가상", "body": {},
+                                         "visibility": VIS_PERSONAL},
+                    headers=_H(MGR, mode="VIRTUAL")).json()
+    ids = [i["asset_id"] for i in client.get(f"{B}/agents", headers=_H(MGR, mode="REAL"))
+           .json()["items"]]
+    assert v["asset_id"] not in ids, "가상 자산이 실제 목록에 보인다"
+
+
+def test_virtual_context_still_sees_real_assets(client):
+    """★★ 가상 조직은 **실제 조직의 복제본**이다(설계 §7.1). 원본이 안 보이면 가상에서는
+    아무것도 만들 수 없다 — 복사할 원본이 목록에 없기 때문이다."""
+    real = _create(client, MGR, visibility=VIS_PERSONAL).json()
+    v = client.post(f"{B}/agents", json={"name_ko": "가상", "body": {},
+                                         "visibility": VIS_PERSONAL},
+                    headers=_H(MGR, mode="VIRTUAL")).json()
+    ids = [i["asset_id"] for i in client.get(f"{B}/agents", headers=_H(MGR, mode="VIRTUAL"))
+           .json()["items"]]
+    assert real["asset_id"] in ids and v["asset_id"] in ids
+
+
+def test_copy_in_virtual_context_produces_a_virtual_asset(client):
+    """★ 사본은 **복사한 문맥**의 것이다 — 실제 정의를 가상에서 복사하면 가상 자산이 된다.
+    그러지 않으면 가상에서 만든 사본이 실제 목록에 나타난다."""
+    src = _create(client, MGR, visibility=VIS_PERSONAL).json()
+    r = client.post(f"{B}/agents/{src['asset_id']}/copy", json={"visibility": VIS_PERSONAL},
+                    headers=_H(MGR, mode="VIRTUAL"))
+    assert r.status_code == 200, r.text
+    assert r.json()["entity_mode"] == "VIRTUAL"
+
+
+def test_hidden_count_is_counted_in_the_same_mode(client):
+    """★★ 분모도 **같은 모드**로 센다. 다르면 「가려진 수」에 다른 문맥의 자산이 섞여 숫자가
+    뻥튀기되고, 관리자는 있지도 않은 자산을 찾으러 간다."""
+    _hidden_assets(client, 2)                                   # REAL 조직 자산 2건
+    client.post(f"{B}/agents", json={"name_ko": "가상 조직 자산", "body": {},
+                                     "visibility": VIS_SCOPE, "owner_scope_id": UNSEEN_ORG},
+                headers=_H(ADMIN, mode="VIRTUAL"))
+    d = client.get(f"{B}/agents", headers=_H(AI_ADMIN, mode="REAL")).json()
+    assert d["hidden_count"] == 2, "다른 모드의 자산이 «가려진 수»에 섞였다"

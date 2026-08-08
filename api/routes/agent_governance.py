@@ -30,8 +30,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api.deps import (Principal, capabilities_of, current_principal, hidden_envelope,
-                      may_see_exact_count, require_caps, viewer_visible_scopes)
+from api.deps import (Principal, capabilities_of, current_principal, enterprise_context,
+                      hidden_envelope, may_see_exact_count, require_caps,
+                      viewer_visible_scopes)
 from core import admin_capability as cap
 from core import agent_asset_adapter as adapter
 from core import asset_project_usage as project_usage
@@ -426,15 +427,24 @@ async def list_assets(kind_path: str,
                       status: str = Query("", description="DRAFT·REVIEW·APPROVED·RETIRED"),
                       include_files: bool = Query(True, description="파일 자산 포함"),
                       include_retired: bool = Query(False),
-                      p: Principal = Depends(current_principal)):
+                      p: Principal = Depends(current_principal),
+                      ctx=Depends(enterprise_context)):
     """가시 범위 안의 자산 목록.
 
     ⚠️ `viewer_visible_scopes(p)` 를 그대로 넘긴다. 여기서 «모르면 전부» 로 바꾸지 않는다 —
       `frozenset()`(아무 조직도 모른다)은 저장소가 **개인·전사·시스템만** 보이게 처리한다."""
     kind = _kind_of(kind_path)
     _assert_may_read(p, kind)
+    #: ★★★ 실행 문맥의 모드로 거른다 — 가상에서 만든 정의가 실제 목록에 섞이면, 그것으로
+    #:   만든 산출물이 실적이 된다(설계 §7.1: 가상 조직 = 실제 조직의 복제본).
     rows = adapter.list_all(kind, viewer_visible_scopes(p), p.user_id or "",
-                            include_files=include_files, include_retired=include_retired)
+                            include_files=include_files, include_retired=include_retired,
+                            #: ⚠️ **테넌트는 통제가 아니라 문맥 분리다.** 요청자가 헤더로 보내는
+                            #  값이므로 이것으로 «막힌다» 고 말할 수 없다(사용자 레코드에 테넌트
+                            #  축이 없다 — PROGRESS 참조). 다만 **기록만 나뉘고 조회가 안 나뉘면**
+                            #  「분리했다」는 착각이 생기므로 기록과 같은 축으로 거른다.
+                            tenant_id=ctx.tenant_id,
+                            entity_mode=ctx.entity_mode)
     if status:
         rows = [r for r in rows if r.get("status") == status]
     #: capability 는 **한 번만** 계산해 모든 자산에 넘긴다 — 자산마다 다시 풀면 목록이 느려진다.
@@ -457,7 +467,11 @@ async def list_assets(kind_path: str,
         try:
             all_rows = adapter.list_all(kind, None, p.user_id or "",
                                         include_files=include_files,
-                                        include_retired=include_retired)
+                                        include_retired=include_retired,
+                                        tenant_id=ctx.tenant_id,
+                                        #: ⚠️ 분모도 **같은 모드**로 센다. 다르면 「가려진 수」에
+                                        #  다른 문맥의 자산이 섞여 숫자가 뻥튀기된다.
+                                        entity_mode=ctx.entity_mode)
             if status:
                 all_rows = [r for r in all_rows if r.get("status") == status]
             out.update(hidden_envelope(p, len(all_rows), len(rows), exact_for="agent"))
@@ -473,7 +487,8 @@ async def list_assets(kind_path: str,
 #:   그 404 는 「사용 현황이 없다」처럼 읽히고, 화면은 그것을 「아무도 안 쓴다」로 그린다.
 @router.get("/{kind_path}/usage")
 async def asset_usage_summary(kind_path: str,
-                              p: Principal = Depends(current_principal)):
+                              p: Principal = Depends(current_principal),
+                              ctx=Depends(enterprise_context)):
     """[설계 §8.4] 이 종류의 자산을 **쓰는 프로젝트가 몇 개인가.**
 
     ★ 목록과 **따로** 둔 이유: 프로젝트 작업공간을 훑는 일이라 목록마다 하면 목록이 느려지고,
@@ -491,7 +506,8 @@ async def asset_usage_summary(kind_path: str,
     kind = _kind_of(kind_path)
     _assert_may_read(p, kind)
     rows = adapter.list_all(kind, viewer_visible_scopes(p), p.user_id or "",
-                            include_files=True, include_retired=True)
+                            include_files=True, include_retired=True,
+                            tenant_id=ctx.tenant_id, entity_mode=ctx.entity_mode)
     #: DB 자산은 목록 행에 `body` 가 없다(본문은 버전 표에 있다). 매칭 키가 본문의 `id` 일 수
     #: 있으므로 DB 자산만 본문을 읽는다 — 파일 자산은 id 규약(`file:<kind>:<native>`)만으로
     #: 맞출 수 있고, 스킬 31개 본문을 여기서 읽으면 응답이 무거워진다.
@@ -536,16 +552,21 @@ async def get_asset(kind_path: str, asset_id: str, version_no: int = Query(0),
 # ── 생성·개정 ─────────────────────────────────────────────────────────────
 @router.post("/{kind_path}")
 async def create_asset(kind_path: str, req: AssetCreate,
-                       p: Principal = Depends(current_principal)):
+                       p: Principal = Depends(current_principal),
+                       ctx=Depends(enterprise_context)):
     kind = _kind_of(kind_path)
     _assert_may_create(p, kind, req.visibility, req.owner_scope_id)
     if not (p.user_id or "").strip():
         # 저장소도 막지만, 여기서 먼저 401 을 준다 — 저장소의 400 은 «입력이 틀렸다» 로 읽힌다.
         raise HTTPException(status_code=401, detail="사용자 식별이 필요합니다.")
     try:
+        #: ★★★ [설계 §11 완료기준 ③] 자산은 **명시적 tenant·mode** 를 가진다. 종전에는 둘 다
+        #:   넘기지 않아 무엇을 만들든 `tenant_default`·`REAL` 이 박혔다 — 가상 조직에서 만든
+        #:   정의가 실제 자산이 되고, 화면은 「⚠️ VIRTUAL」이라고 말하면서 실제를 만들었다.
         a = agent_assets.create(kind, req.name_ko, req.body, p.user_id,
                                 owner_scope_id=_canonical_owner(req.owner_scope_id),
-                                visibility=req.visibility, purpose=req.purpose)
+                                visibility=req.visibility, purpose=req.purpose,
+                                tenant_id=ctx.tenant_id, entity_mode=ctx.entity_mode)
     except AssetError as e:
         raise HTTPException(status_code=400, detail=str(e))
     _audit(p, audit.AGENT_ASSET_CHANGED, a["asset_id"], kind, "allowed",
@@ -573,7 +594,8 @@ async def revise_asset(kind_path: str, asset_id: str, req: AssetRevise,
 
 @router.post("/{kind_path}/{asset_id}/copy")
 async def copy_asset(kind_path: str, asset_id: str, req: AssetCopy,
-                     p: Principal = Depends(current_principal)):
+                     p: Principal = Depends(current_principal),
+                     ctx=Depends(enterprise_context)):
     """자산을 복사해 **새 초안**으로 만든다.
 
     ★ 파일 자산(SYSTEM·LEGACY) 복사가 이 API 의 주 용도다. 제품 기본을 직접 고칠 수 없게
@@ -592,9 +614,11 @@ async def copy_asset(kind_path: str, asset_id: str, req: AssetCopy,
         body = (adapter.get_file_asset(asset_id).get("body") or {})
     name = (req.name_ko or "").strip() or f"{src.get('name_ko') or asset_id} 사본"
     try:
+        #: ★ 사본은 **복사한 문맥**의 것이다 — 실제 정의를 가상에서 복사하면 가상 자산이 된다.
         a = agent_assets.create(kind, name, body, p.user_id,
                                 owner_scope_id=_canonical_owner(req.owner_scope_id),
-                                visibility=req.visibility, purpose=src.get("purpose") or "")
+                                visibility=req.visibility, purpose=src.get("purpose") or "",
+                                tenant_id=ctx.tenant_id, entity_mode=ctx.entity_mode)
     except AssetError as e:
         raise HTTPException(status_code=400, detail=str(e))
     _audit(p, audit.AGENT_ASSET_CHANGED, a["asset_id"], kind, "allowed",
@@ -742,10 +766,13 @@ async def promote_asset(kind_path: str, asset_id: str,
 
 # ── 설계 §7 별칭 ──────────────────────────────────────────────────────────
 @router.post("/skills/propose")
-async def propose_skill(req: AssetCreate, p: Principal = Depends(current_principal)):
+async def propose_skill(req: AssetCreate, p: Principal = Depends(current_principal),
+                        ctx=Depends(enterprise_context)):
     """설계 §7 은 스킬 초안을 `POST /skills/propose` 로 적었다. 동작은 `POST /skills` 와 같다 —
     화면 작업자가 설계 문서대로 불러도 동작해야 하므로 별칭으로 둔다.
 
     경로 세그먼트가 2개여서 위의 어느 POST 라우트와도 겹치지 않는다(`POST /{kind_path}` 는 1개,
     나머지는 3개). 그래서 등록 순서를 신경 쓸 필요가 없다."""
-    return await create_asset("skills", req, p)
+    #: ⚠️ 문맥을 **함께 넘긴다.** 파이썬 함수를 직접 부르면 FastAPI 의 의존성 주입이 일어나지
+    #:   않아 기본값(`Depends` 객체)이 그대로 들어간다 — 별칭이라서 조용히 다르게 동작한다.
+    return await create_asset("skills", req, p, ctx)
