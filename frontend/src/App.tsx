@@ -38,6 +38,7 @@ import { GlobalNav, type NavGroup, type NavItem } from './components/GlobalNav';
 import { actingScope, governanceBlockReason, type ActingScope } from './lib/actingScope';
 import { AgentGovernancePanel } from './components/AgentGovernancePanel';
 import { EnterprisePage } from './components/EnterprisePage';
+import { CompanyContextBar } from './components/CompanyContextBar';
 import { Banner } from './design/HubShell';
 import { API_BASE_URL, getSessionToken, setActingUser, setSessionToken } from './lib/api';
 
@@ -328,11 +329,17 @@ function AppShell() {
   if (!currentProjectId && space === 'enterprise') {
     return (
       <ErrorBoundary>
-        <div className="afs-scope afs-page" style={{ minHeight: '100vh' }}>
-          <header className="h-16 afs-topbar backdrop-blur-md border-b afs-border flex items-center justify-between gap-2 px-3 xl:px-5 shrink-0 sticky top-0 z-10">
-            <h1 className="text-xl font-bold tracking-tight afs-ink flex items-center gap-2 shrink-0">
-              <span className="afs-action-fg">🏭 V5.2</span> Private AI Cockpit
-            </h1>
+        <div className="afs-scope" style={{ minHeight: '100vh',
+          background: 'var(--surface-page)' }}>
+          {/* ★ [설계 §3.1] Top Bar **72px** · 구조색. ⑥ 상단 회사·사업부·공장 Context 는
+              `CompanyContextBar` 가 담당한다(§4.1). */}
+          <header style={{
+            height: 72, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 16, padding: '0 24px', position: 'sticky', top: 0, zIndex: 20,
+            background: 'linear-gradient(90deg, var(--bar-bg-from), var(--bar-bg-to))',
+            borderBottom: '1px solid var(--bar-border)', color: 'var(--bar-fg)',
+          }}>
+            <CompanyContextBar />
             <div className="flex items-center gap-3 min-w-0">
               <SessionBar />
               <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
