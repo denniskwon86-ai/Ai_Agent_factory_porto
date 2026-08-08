@@ -50,6 +50,7 @@ def client(monkeypatch, tmp_path, ecm_org_seed):
     ⚠️ `org_directory` 는 해석한 스코프를 캐시한다. 강제를 켠 캐시가 남으면 뒤에 도는 다른
       파일의 테스트가 그것을 물려받는다 — 앞뒤로 비운다."""
     import config
+    import core.paths
     from core.org_directory import org_directory
     from api.routes import agent_governance
     from core import agent_asset_adapter
@@ -59,6 +60,10 @@ def client(monkeypatch, tmp_path, ecm_org_seed):
     store = AgentAssetStore(db_path=str(tmp_path / "assets.db"))
     monkeypatch.setattr(agent_governance, "agent_assets", store)
     monkeypatch.setattr(agent_asset_adapter, "agent_assets", store)
+    #: ★★ 사용 집계는 **프로젝트 작업공간을 읽는다.** 격리하지 않으면 이 스위트가 사용자의
+    #:   실제 프로젝트를 훑고, 그 결과 단언이 환경마다 달라진다. 격리 지점은 cwd 가 아니라
+    #:   이 상수다(`core/paths.py` 머리말 — 상대경로를 절대경로로 고치며 옮긴 지점).
+    monkeypatch.setattr(core.paths, "PROJECTS_DIR", str(tmp_path / "projects"))
 
     from main import app
     try:
@@ -621,3 +626,143 @@ def test_hidden_detail_lookup_is_audited(client, monkeypatch):
     seen.clear()
     client.get(f"{B}/agents/{mine}", headers=H(MGR))
     assert any(e == audit.ACCESS_DENIED_SCOPE_MISMATCH and rid == mine for e, rid in seen)
+
+
+# ── 사용 중인 프로젝트 수 (설계 §8.4) ────────────────────────────────────
+def _snapshot(tmp_path, project: str, **current):
+    """프로젝트 작업공간에 구성 스냅샷을 만든다."""
+    import json
+    from core.config_snapshot import SNAPSHOT_FILE
+    d = tmp_path / "projects" / project
+    d.mkdir(parents=True, exist_ok=True)
+    (d / SNAPSHOT_FILE).write_text(json.dumps({"current": current}), encoding="utf-8")
+
+
+def test_usage_route_is_not_swallowed_by_the_asset_id_route(client):
+    """★★★ `/{kind_path}/{asset_id}` 가 먼저 등록돼 있으면 `/agents/usage` 가
+    `asset_id="usage"` 로 잡혀 **404** 가 된다.
+
+    그 404 는 화면에서 「사용 현황이 없다」로 읽히고, 화면은 그것을 「아무도 안 쓴다」로
+    그린다 — 라우트 등록 순서 하나가 폐기 판단을 뒤집는다."""
+    r = client.get(f"{B}/agents/usage", headers=H(ADMIN))
+    assert r.status_code == 200, "라우트가 asset_id 로 잡혔다(등록 순서)"
+    assert "usage" in r.json() and r.json()["kind"] == "agent"
+
+
+@pytest.mark.parametrize("path", ["agents", "workflows", "skills"])
+def test_usage_needs_identification(client, path):
+    assert client.get(f"{B}/{path}/usage").status_code == 401
+
+
+def test_usage_says_not_countable_when_nothing_recorded(client):
+    """★★★ 프로젝트가 구성을 기록하기 전에는 **0 이 답이 아니다.**
+
+    2026-08-08 실측 상태가 바로 이것이었다(56개 프로젝트 중 기록 0개). `countable` 없이
+    숫자만 내보내면 화면은 「전부 미사용」을 그리고, 사람은 그것을 근거로 자산을 지운다."""
+    d = client.get(f"{B}/agents/usage", headers=H(ADMIN)).json()
+    assert d["projects_observed"] == 0
+    assert all(v["countable"] is False for v in d["usage"].values())
+
+
+def test_usage_counts_projects_that_reference_the_asset(client, tmp_path):
+    _snapshot(tmp_path, "p1", template_id="default", agents=["RFP_Analyst"], skills=[])
+    _snapshot(tmp_path, "p2", template_id="default", agents=["RFP_Analyst"], skills=[])
+    d = client.get(f"{B}/agents/usage", headers=H(ADMIN)).json()
+    assert d["projects_observed"] == 2
+    hit = d["usage"].get("file:agent:RFP_Analyst")
+    assert hit and hit["project_count"] == 2 and hit["countable"] is True
+
+
+def test_project_names_go_only_to_those_who_manage_the_assets(client, tmp_path):
+    """★★ 「몇 개」와 「어느 프로젝트」는 다른 자격이다.
+
+    자산을 볼 수 있다고 해서 그것이 **어느 프로젝트에 쓰이는지**까지 알아야 하는 것은 아니다 —
+    프로젝트 이름은 그 자체로 무엇을 만들고 있는지 알려준다. 판정은 `hidden_envelope` 과
+    같은 규칙을 쓴다(`may_see_exact_count`) — 여기서 새로 만들면 두 규칙이 갈라진다."""
+    _snapshot(tmp_path, "secret_project", template_id="default", agents=["RFP_Analyst"])
+    for uid in (ADMIN, AI_ADMIN):
+        d = client.get(f"{B}/agents/usage", headers=H(uid)).json()
+        assert "projects" in d["usage"]["file:agent:RFP_Analyst"], f"{uid} 가 이름을 못 본다"
+    for uid in (MGR, MEMBER, VIEWER):
+        d = client.get(f"{B}/agents/usage", headers=H(uid)).json()
+        v = d["usage"]["file:agent:RFP_Analyst"]
+        assert "projects" not in v, f"{uid} 에게 프로젝트 이름이 샌다"
+        assert v["project_count"] == 1, "수까지 가리면 폐기 판단을 아무도 못 한다"
+
+
+# ── 전사 승격 (설계 §4.2 · §8.6) ─────────────────────────────────────────
+def test_promotion_request_does_not_widen_visibility(client):
+    """★★★ **요청은 공개가 아니다.**
+
+    요청한 순간 자산이 전사에 보이면 그것은 요청이 아니라 공개이고, 되돌릴 방법도 없다.
+    부서 manager 가 「승격 요청」을 눌렀을 때 남의 조직에 우리 정의가 노출되면 아무도 그
+    버튼을 두 번 누르지 않는다."""
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    r = client.post(f"{B}/agents/{a['asset_id']}/promote", headers=H(MGR))
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["promotion_outcome"] == "요청"
+    assert d["visibility"] == VIS_SCOPE, "요청만 했는데 전사로 공개됐다"
+    assert d["status"] == ST_APPROVED, "요청이 조직 승인을 풀어 버렸다"
+    assert d["promotion_requested_by"] == MGR and d["promotion_requested_at"]
+
+
+def test_ai_admin_promotion_reopens_review(client):
+    """★★★ 승격은 **승인을 다시 받게 한다.**
+
+    조직 승인과 전사 승인은 다른 자격이다(설계 §4.2). 조직 승인만 받은 정의가 전사 자산으로
+    «승인됨» 이 되면 **아무도 검토하지 않은 전사 자산**이 생기고, `approved_by` 는 전사 승인을
+    한 적 없는 사람을 가리킨다."""
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    d = client.post(f"{B}/agents/{a['asset_id']}/promote", headers=H(AI_ADMIN)).json()
+    assert d["promotion_outcome"] == "확정"
+    assert d["visibility"] == VIS_ENTERPRISE
+    assert d["status"] == ST_REVIEW, "전사 자산이 검토 없이 승인 상태로 올라갔다"
+    assert not d["approved_by"], "조직 승인자가 전사 승인자로 남았다"
+
+
+def test_promotion_requires_org_approval_first(client):
+    """★★ 검토되지 않은 초안이 전사 목록에 오르면 그 목록을 아무도 믿지 않게 된다."""
+    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM").json()
+    r = client.post(f"{B}/agents/{a['asset_id']}/promote", headers=H(MGR))
+    assert r.status_code == 403 and "조직 승인" in r.json()["detail"]
+
+
+def test_personal_draft_cannot_jump_straight_to_enterprise(client):
+    a = _create(client, MEMBER, visibility=VIS_PERSONAL).json()
+    r = client.post(f"{B}/agents/{a['asset_id']}/promote", headers=H(MEMBER))
+    assert r.status_code == 403
+
+
+def test_file_asset_promotion_tells_you_what_to_do_instead(client):
+    """★ 막기만 하면 사용자는 규칙을 따를 방법을 모른다 — 무엇을 하면 되는지 함께 말한다."""
+    r = client.post(f"{B}/agents/file:agent:RFP_Analyst/promote", headers=H(ADMIN))
+    assert r.status_code == 403 and "복사" in r.json()["detail"]
+
+
+def test_member_without_approval_rights_cannot_even_request(client):
+    """★ 자기 조직 자산을 승인할 수도 없는 사람이 그것을 전사로 올려 달라고 요청하는 것은
+    순서가 뒤집힌 것이다 — 조직 승인 자격을 먼저 요구한다."""
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    assert client.post(f"{B}/agents/{a['asset_id']}/promote",
+                       headers=H(MEMBER)).status_code == 403
+    assert client.post(f"{B}/agents/{a['asset_id']}/promote",
+                       headers=H(VIEWER)).status_code == 403
+
+
+def test_already_enterprise_asset_is_refused(client):
+    #: ⚠️ 전사 공개도 **소유 조직을 요구한다**(저장소 계약) — 소유가 없으면 나중에 «이 자산은
+    #:   누구 책임인가» 에 답할 수 없다. 그래서 승격 경로도 조직 자산에서만 출발한다.
+    r0 = _create(client, AI_ADMIN, visibility=VIS_ENTERPRISE, owner_scope_id="LS_MNM")
+    assert r0.status_code == 200, r0.text          # 전제가 깨지면 이유를 보여 준다
+    a = r0.json()
+    client.post(f"{B}/agents/{a['asset_id']}/submit", headers=H(AI_ADMIN))
+    client.post(f"{B}/agents/{a['asset_id']}/approve", headers=H(AI_ADMIN))
+    r = client.post(f"{B}/agents/{a['asset_id']}/promote", headers=H(AI_ADMIN))
+    assert r.status_code == 403 and "이미 전사" in r.json()["detail"]
+
+
+def test_promotion_of_invisible_asset_is_404(client):
+    """★ 안 보이는 자산에 대한 승격 시도는 **404** 다 — 403 은 «그런 자산이 있다» 를 알려준다."""
+    mine = _create(client, MEMBER, visibility=VIS_PERSONAL).json()["asset_id"]
+    assert client.post(f"{B}/agents/{mine}/promote", headers=H(MGR)).status_code == 404

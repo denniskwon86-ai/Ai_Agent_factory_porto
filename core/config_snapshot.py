@@ -56,6 +56,12 @@ class ConfigSnapshot:
     asset_status: str = ""
     #: 실행에 참여하는 에이전트 id(순서 포함)
     agents: List[str] = field(default_factory=list)
+    #: 실행에 참여하는 **스킬 파일**. ★ 지문에는 이미 들어 있었지만(`_AGENT_KEYS` 의 `skill`)
+    #: 스냅샷 **본문에는 없었다** — 그래서 「이 스킬을 쓰는 프로젝트가 몇 개인가」에 답할 수
+    #: 없었다. 지문은 «달라졌는가» 만 답하고 «무엇을 쓰는가» 는 답하지 못한다.
+    #: ⚠️ 옛 스냅샷에는 이 키가 없다. 읽는 쪽은 없음을 «스킬 0개» 로 읽지 말 것 —
+    #:   `asset_project_usage` 가 그 구분을 들고 있다.
+    skills: List[str] = field(default_factory=list)
     #: HOTL 중단점
     interrupt_after: List[str] = field(default_factory=list)
     #: 이 구성을 승인·결정한 근거. 원장(`decision_ledger`) 이벤트 id 가 있으면 그것을 쓴다.
@@ -107,12 +113,16 @@ def capture(template_id: str, *, policy_decision_id: str = "") -> ConfigSnapshot
     agents = [a.get("id") for a in shape["agents"] if a.get("id")]
     enabled = [a for a in shape["agents"] if a.get("enabled", True)]
     interrupt = [a["id"] for a in enabled if a.get("hotl_after")]
+    #: ⚠️ **끄지 않은 에이전트의 스킬만** 센다. 꺼 둔 에이전트의 스킬은 이 실행에 참여하지
+    #:   않으므로, 그것을 「쓰는 중」으로 세면 폐기하려는 사람이 없는 영향을 보고 멈춘다.
+    #: ★ 지문은 꺼진 에이전트도 포함한다(구성이 달라진 것은 사실이므로) — 두 목적이 다르다.
+    skills = sorted({str(a.get("skill")) for a in enabled if a.get("skill")})
     return ConfigSnapshot(
         template_id=tid,
         fingerprint=_digest({"template_id": tid, **shape}),
         asset_version=str(reg.get("version") or ""),
         asset_status=str(reg.get("status") or ""),
-        agents=agents, interrupt_after=interrupt,
+        agents=agents, skills=skills, interrupt_after=interrupt,
         policy_decision_id=policy_decision_id, resolved_at=now)
 
 

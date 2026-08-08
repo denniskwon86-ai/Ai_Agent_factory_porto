@@ -336,6 +336,22 @@ _EXACT_COUNT_RULES = {
 }
 
 
+def may_see_exact_count(p: Principal, exact_for: str = "standard") -> bool:
+    """이 사람에게 **자료의 정확한 규모**를 줘도 되는가.
+
+    ★ `hidden_envelope` 과 **같은 규칙**을 쓴다. 규모를 드러내는 값은 「가려진 건수」 말고도
+      있고(예: 자산이 어느 프로젝트에 쓰이는지의 목록), 그때마다 라우트가 자기 판정을 만들면
+      한쪽만 고쳐졌을 때 **한 화면에서는 막고 다른 화면에서는 새는** 상태가 된다.
+
+    ⚠️ 모르는 종류는 «안 준다» 로 조용히 처리하지 않고 **던진다** — 오타 때문에 관리자가
+      못 보게 되면 아무도 원인을 못 찾는다."""
+    rule = _EXACT_COUNT_RULES.get(exact_for)
+    if rule is None:
+        raise ValueError(f"may_see_exact_count: 모르는 자료 종류 '{exact_for}' "
+                         f"— {sorted(_EXACT_COUNT_RULES)} 중 하나여야 한다")
+    return bool(rule(p.scope))
+
+
 def hidden_envelope(p: Principal, total: int, shown: int,
                     exact_for: str = "standard") -> dict:
     """★★ 목록이 무언가를 **가렸다**는 사실을 응답에 담는다. 건수를 줄지는 여기서만 정한다.
@@ -354,11 +370,7 @@ def hidden_envelope(p: Principal, total: int, shown: int,
     """
     hidden = max(0, int(total) - int(shown))
     out: dict = {"hidden_present": hidden > 0}
-    rule = _EXACT_COUNT_RULES.get(exact_for)
-    if rule is None:
-        raise ValueError(f"hidden_envelope: 모르는 자료 종류 '{exact_for}' "
-                         f"— {sorted(_EXACT_COUNT_RULES)} 중 하나여야 한다")
-    if hidden and rule(p.scope):
+    if hidden and may_see_exact_count(p, exact_for):
         out["hidden_count"] = hidden
     return out
 

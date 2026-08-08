@@ -30,10 +30,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api.deps import (Principal, current_principal, hidden_envelope, require_caps,
-                      viewer_visible_scopes)
+from api.deps import (Principal, current_principal, hidden_envelope, may_see_exact_count,
+                      require_caps, viewer_visible_scopes)
 from core import admin_capability as cap
 from core import agent_asset_adapter as adapter
+from core import asset_project_usage as project_usage
 from core.agent_assets import (
     KIND_AGENT, KIND_SKILL, KIND_WORKFLOW, RUNNABLE,
     ST_APPROVED, ST_DRAFT, ST_RETIRED, ST_REVIEW,
@@ -336,6 +337,57 @@ async def list_assets(kind_path: str,
     return out
 
 
+#: ⚠️⚠️ **이 라우트는 `/{kind_path}/{asset_id}` 보다 먼저 등록돼야 한다.** FastAPI 는 등록
+#:   순서로 매칭하므로, 뒤에 두면 `/agents/usage` 가 `asset_id="usage"` 로 잡혀 404 가 된다.
+#:   그 404 는 「사용 현황이 없다」처럼 읽히고, 화면은 그것을 「아무도 안 쓴다」로 그린다.
+@router.get("/{kind_path}/usage")
+async def asset_usage_summary(kind_path: str,
+                              p: Principal = Depends(current_principal)):
+    """[설계 §8.4] 이 종류의 자산을 **쓰는 프로젝트가 몇 개인가.**
+
+    ★ 목록과 **따로** 둔 이유: 프로젝트 작업공간을 훑는 일이라 목록마다 하면 목록이 느려지고,
+      스캔이 실패했을 때 목록까지 함께 죽는다. 화면은 「사용 현황을 아직 못 받았다」를 별도
+      상태로 그릴 수 있어야 한다 — 목록이 있는데 사용 수만 없는 것은 정상적인 중간 상태다.
+
+    ⚠️⚠️ **`project_count` 를 혼자 읽으면 안 된다.** `axis_observed == 0` 이면 그 값은
+      「쓰이지 않는다」가 아니라 **「아직 모른다」** 이다(2026-08-08 실측: 56개 프로젝트 중
+      구성을 기록한 것이 0개). 순진하게 0 을 그리면 사용자는 전부 폐기해도 된다고 읽고,
+      지운 뒤에야 그것이 「안 쓰인 것」이 아니라 「아직 안 본 것」이었음을 안다.
+
+    ⚠️ **어느 프로젝트인지는 자산을 관리할 사람에게만** 준다 — 자산을 볼 자격과 그 자산이
+      어느 프로젝트에 쓰이는지 알 자격은 다르다. 판정은 `hidden_envelope` 과 같은 규칙을
+      쓴다(`_EXACT_COUNT_RULES["agent"]`) — 여기서 새로 만들면 두 규칙이 갈라진다."""
+    kind = _kind_of(kind_path)
+    _assert_may_read(p, kind)
+    rows = adapter.list_all(kind, viewer_visible_scopes(p), p.user_id or "",
+                            include_files=True, include_retired=True)
+    #: DB 자산은 목록 행에 `body` 가 없다(본문은 버전 표에 있다). 매칭 키가 본문의 `id` 일 수
+    #: 있으므로 DB 자산만 본문을 읽는다 — 파일 자산은 id 규약(`file:<kind>:<native>`)만으로
+    #: 맞출 수 있고, 스킬 31개 본문을 여기서 읽으면 응답이 무거워진다.
+    enriched = []
+    for r in rows:
+        if not adapter.is_file_asset(str(r.get("asset_id") or "")) and "body" not in r:
+            try:
+                r = {**r, "body": (adapter.get_any(r["asset_id"]).get("body") or {})}
+            except Exception:
+                pass            # 본문을 못 읽어도 `asset_id` 키로는 맞출 수 있다
+        enriched.append(r)
+
+    try:
+        out = project_usage.usage_for(enriched, kind)
+    except Exception as e:                                           # pragma: no cover
+        # ★ 실패를 «사용 0건» 으로 돌려주지 않는다 — 그것이 이 기능에서 가장 비싼 거짓말이다.
+        print(f"⚠️ [agent_governance] 사용 집계 실패: {e}")
+        return {"kind": kind, "available": False, "error": str(e),
+                "projects_total": 0, "projects_observed": 0, "axis_observed": 0, "usage": {}}
+
+    if not may_see_exact_count(p, "agent"):
+        for v in out["usage"].values():
+            v.pop("projects", None)
+    out["kind"] = kind
+    return out
+
+
 @router.get("/{kind_path}/{asset_id}")
 async def get_asset(kind_path: str, asset_id: str, version_no: int = Query(0),
                     p: Principal = Depends(current_principal)):
@@ -469,6 +521,50 @@ async def retire_asset(kind_path: str, asset_id: str,
         raise HTTPException(status_code=403, detail=str(e))
     _audit(p, audit.AGENT_ASSET_CHANGED, asset_id, kind, "allowed", reason="폐기")
     return out
+
+
+@router.post("/{kind_path}/{asset_id}/promote")
+async def promote_asset(kind_path: str, asset_id: str,
+                        p: Principal = Depends(current_principal)):
+    """[설계 §4.2 · §8.6] 조직 자산을 **전사 공용으로.**
+
+    ★★★ 이 경로가 없어서 **서버가 지키지 못할 말을 하고 있었다.** 전사 자산의 승인을 거부할
+      때 「부서 단위에서는 승격을 **요청할 수 있습니다**」라고 안내하는데(`_assert_may_publish`),
+      그 요청을 받는 곳이 어디에도 없었다 — 안내가 막다른 길로 끝나면 사용자는 규칙을 따를
+      방법이 없고, 결국 규칙을 우회할 방법을 찾는다.
+
+    자격에 따라 **두 가지로 갈린다.** 한 버튼이 두 일을 하는 것이 아니라, 같은 요청에 대해
+    자격이 답을 정하는 것이다:
+      · AI 거버넌스 관리자 → 승격을 **확정**한다(`visibility=ENTERPRISE`, 상태는 `REVIEW` 로
+        되돌아간다 — 전사 승인은 조직 승인과 다른 자격이므로 한 번 더 승인받아야 한다)
+      · 조직 승인자      → 승격을 **요청**한다. ⚠️ 요청은 가시성을 바꾸지 않는다.
+
+    ⚠️ 조직 승인 자격(`approve`)을 먼저 요구한다. 자기 조직 자산을 승인할 수도 없는 사람이
+      그것을 전사로 올려 달라고 요청하는 것은 순서가 뒤집힌 것이다."""
+    kind = _kind_of(kind_path)
+    a = _load_visible(p, kind, asset_id)
+    if adapter.is_file_asset(asset_id):
+        raise HTTPException(
+            status_code=403,
+            detail="제품 기본 정의는 승격 대상이 아닙니다 — 복사해서 조직 자산으로 만든 뒤 "
+                   "조직 승인을 받고 승격을 요청하십시오.")
+    try:
+        c = _assert_may_publish(p, kind, a, "approve")
+        if c.can_publish_enterprise():
+            out = agent_assets.promote(asset_id, p.user_id or "")
+            outcome, reason = "확정", "전사 승격 확정"
+        else:
+            out = agent_assets.request_promotion(asset_id, p.user_id or "")
+            outcome, reason = "요청", "전사 승격 요청"
+    except AssetError as e:
+        # ★ 400 이 아니라 403 이다. 「입력이 틀렸다」가 아니라 「지금 그 상태로는 안 된다」이고,
+        #   사용자가 할 일(조직 승인을 먼저 받는다)이 메시지에 들어 있다.
+        _audit(p, audit.AGENT_ASSET_CHANGED, asset_id, kind, "denied", reason=str(e))
+        raise HTTPException(status_code=403, detail=str(e))
+    _audit(p, audit.APPROVAL_GRANTED if outcome == "확정" else audit.AGENT_ASSET_CHANGED,
+           asset_id, kind, "allowed", reason=reason,
+           detail=f"visibility={out['visibility']} status={out['status']}")
+    return {**out, "promotion_outcome": outcome}
 
 
 # ── 설계 §7 별칭 ──────────────────────────────────────────────────────────

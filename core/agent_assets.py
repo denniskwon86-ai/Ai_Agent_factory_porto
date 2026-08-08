@@ -87,6 +87,11 @@ CREATE TABLE IF NOT EXISTS agent_assets (
     approved_by    TEXT NOT NULL DEFAULT '',
     effective_from TEXT NOT NULL DEFAULT '',
     effective_to   TEXT NOT NULL DEFAULT '',
+    -- [D-017 §8.6] 전사 승격 «요청». ⚠️ 요청은 **가시성을 바꾸지 않는다** — 요청한 순간
+    -- 남의 조직에 우리 자산이 노출되면 그것은 요청이 아니라 공개이고, 되돌릴 방법도 없다.
+    -- 실제 승격(visibility=ENTERPRISE)은 AI 거버넌스 관리자가 확정할 때 일어난다.
+    promotion_requested_by TEXT NOT NULL DEFAULT '',
+    promotion_requested_at TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
@@ -133,7 +138,25 @@ class AgentAssetStore:
     def _init_db(self) -> None:
         with self._lock, self._connect() as conn:
             conn.executescript(_DDL)
+            self._migrate(conn)
             conn.commit()
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """★★ 이미 있는 표에 컬럼을 더한다.
+
+        ⚠️ `CREATE TABLE IF NOT EXISTS` 는 **이미 존재하는 표를 바꾸지 않는다.** DDL 만 고치면
+          새 환경에서는 컬럼이 생기고 기존 환경에서는 조용히 없는 상태가 되며, 그 차이는
+          「내 개발 PC 에서는 되는데 서버에서는 안 된다」로 나타난다 — 원인을 찾기 가장 어려운
+          형태다. 그래서 실제 컬럼 목록을 읽어 없는 것만 더한다."""
+        try:
+            have = {r["name"] for r in conn.execute("PRAGMA table_info(agent_assets)")}
+        except Exception:                                            # pragma: no cover
+            return
+        for col in ("promotion_requested_by", "promotion_requested_at"):
+            if col not in have:
+                conn.execute(
+                    f"ALTER TABLE agent_assets ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
 
     # ── 생성·개정 ─────────────────────────────────────────────────────────
     def create(self, kind: str, name_ko: str, body: Dict[str, Any], created_by: str,
@@ -226,6 +249,59 @@ class AgentAssetStore:
         if a["visibility"] == VIS_SYSTEM:
             raise AssetError("제품 기본 자산은 폐기할 수 없습니다.")
         return self._set_status(asset_id, ST_RETIRED, actor, approved_by=a.get("approved_by", ""))
+
+    # ── 전사 승격 (설계 §4.2 · §8.6) ──────────────────────────────────────
+    def _assert_promotable(self, a: Dict[str, Any]) -> None:
+        """전사로 올릴 수 있는 상태인가. **요청과 확정이 같은 조건을 쓴다** — 요청은 되는데
+        확정이 안 되면 요청한 사람은 영영 답을 못 받고, 그 이유는 아무데도 안 적힌다."""
+        if a["visibility"] == VIS_ENTERPRISE:
+            raise AssetError("이미 전사 공용 자산입니다.")
+        if a["visibility"] == VIS_SYSTEM:
+            raise AssetError("제품 기본 자산은 승격 대상이 아닙니다 — 복사해서 쓰십시오.")
+        if a["visibility"] == VIS_PERSONAL:
+            raise AssetError(
+                "개인 초안은 곧바로 전사로 올릴 수 없습니다 — 조직 자산으로 만들어 조직 승인을 "
+                "받은 뒤 승격을 요청하십시오.")
+        if a["status"] != ST_APPROVED:
+            raise AssetError(
+                "조직 승인을 먼저 받아야 전사 승격을 요청할 수 있습니다 — 검토되지 않은 정의가 "
+                "전사 목록에 오르면 그 목록을 아무도 믿지 않게 됩니다.")
+
+    def request_promotion(self, asset_id: str, actor: str) -> Dict[str, Any]:
+        """전사 승격을 **요청**한다.
+
+        ⚠️⚠️ **가시성도 상태도 바꾸지 않는다.** 요청한 순간 자산이 전사에 보이면 그것은 요청이
+          아니라 공개이고, 되돌릴 방법도 없다. 요청은 「답해 달라」는 표시일 뿐이다."""
+        a = self.get(asset_id)
+        self._assert_promotable(a)
+        now = _now()
+        with self._lock, self._connect() as conn:
+            conn.execute("UPDATE agent_assets SET promotion_requested_by=?, "
+                         "promotion_requested_at=?, updated_at=? WHERE asset_id=?",
+                         (actor, now, now, asset_id))
+            conn.commit()
+        return self.get(asset_id)
+
+    def promote(self, asset_id: str, actor: str) -> Dict[str, Any]:
+        """전사 공용으로 올린다.
+
+        ★★ **상태를 `REVIEW` 로 되돌린다.** 조직 승인과 전사 승인은 다른 자격이고(설계 §4.2),
+          조직 승인만 받은 정의가 전사 자산으로 «승인됨» 이 되면 **아무도 검토하지 않은 전사
+          자산**이 생긴다. 승격 뒤 한 번 더 승인해야 `approved_by` 에 전사 승인자가 남는다."""
+        a = self.get(asset_id)
+        self._assert_promotable(a)
+        now = _now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE agent_assets SET visibility=?, status=?, approved_by='', "
+                "promotion_requested_by='', promotion_requested_at='', updated_at=? "
+                "WHERE asset_id=?", (VIS_ENTERPRISE, ST_REVIEW, now, asset_id))
+            conn.execute(
+                "UPDATE agent_asset_versions SET status=?, approved_by='' WHERE asset_id=?"
+                " AND version_no=(SELECT current_version FROM agent_assets WHERE asset_id=?)",
+                (ST_REVIEW, asset_id, asset_id))
+            conn.commit()
+        return self.get(asset_id)
 
     def _set_status(self, asset_id: str, status: str, actor: str,
                     approved_by: str) -> Dict[str, Any]:
