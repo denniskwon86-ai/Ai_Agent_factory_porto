@@ -62,12 +62,6 @@ const STATUS_TONE: Record<string, string> = {
   DRAFT: 'muted', REVIEW: 'warn', APPROVED: 'success', RETIRED: 'danger',
 };
 
-function asLoaded<T>(e: any): Loaded<T> {
-  return e?.status === 403 || e?.status === 401
-    ? { status: 'forbidden', value: null, error: e?.message || '볼 권한이 없습니다.',
-      httpStatus: e.status }
-    : failed<T>(e);
-}
 
 export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<AssetKindPath>('agents');
@@ -98,7 +92,7 @@ export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
       setCaps(ok(c));
     } catch (e: any) {
       reportRequestFailure(e?.status);
-      setCaps(asLoaded<GovCapabilities>(e));
+      setCaps(failed<GovCapabilities>(e));
     }
   }, []);
 
@@ -111,7 +105,7 @@ export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
       setList(ok(d));
     } catch (e: any) {
       reportRequestFailure(e?.status);
-      setList(asLoaded<GovList>(e));
+      setList(failed<GovList>(e));
     }
   }, [kind]);
 

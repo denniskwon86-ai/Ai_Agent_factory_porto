@@ -88,12 +88,6 @@ const PROMO: Record<string, { label: string; tone: string }> = {
   promoted: { label: '전사 승격', tone: 'success' },
 };
 
-function asLoaded<T>(e: any): Loaded<T> {
-  return e?.status === 403 || e?.status === 401
-    ? { status: 'forbidden', value: null, error: e?.message || '볼 권한이 없습니다.',
-      httpStatus: e.status }
-    : failed<T>(e);
-}
 
 export default function WorkspacePanel({ onClose }: Props) {
   const [promotions, setPromotions] = useState<Loaded<Promotion[]>>(loading<Promotion[]>());
@@ -126,7 +120,7 @@ export default function WorkspacePanel({ onClose }: Props) {
       setPromotions(ok(rows || []));
     } catch (e: any) {
       reportRequestFailure(e?.status);
-      setPromotions(asLoaded<Promotion[]>(e));
+      setPromotions(failed<Promotion[]>(e));
     }
   }, []);
 
@@ -145,10 +139,10 @@ export default function WorkspacePanel({ onClose }: Props) {
       fetchGate(rid, pid), fetchShares(rid), fetchForks(rid), fetchChecklist(rid, pid, live),
     ]);
     // ★★★ 넷을 **각각** 담는다. 종전에는 실패를 전부 «빈 배열/ null» 로 바꿨다.
-    setGate(g.status === 'fulfilled' ? ok(g.value) : asLoaded<Gate>(g.reason));
-    setShares(s.status === 'fulfilled' ? ok(s.value || []) : asLoaded<Share[]>(s.reason));
-    setForks(f.status === 'fulfilled' ? ok(f.value || []) : asLoaded<Fork[]>(f.reason));
-    setChecklist(c.status === 'fulfilled' ? ok(c.value) : asLoaded<Checklist>(c.reason));
+    setGate(g.status === 'fulfilled' ? ok(g.value) : failed<Gate>(g.reason));
+    setShares(s.status === 'fulfilled' ? ok(s.value || []) : failed<Share[]>(s.reason));
+    setForks(f.status === 'fulfilled' ? ok(f.value || []) : failed<Fork[]>(f.reason));
+    setChecklist(c.status === 'fulfilled' ? ok(c.value) : failed<Checklist>(c.reason));
   }, [liveIntegration]);
 
   const act = async (fn: () => Promise<unknown>, okMsg: string) => {

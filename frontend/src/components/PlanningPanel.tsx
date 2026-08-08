@@ -41,16 +41,10 @@ import {
 const _n = (v: number | null | undefined) =>
   v === null || v === undefined ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
-function asLoaded<T>(e: any): Loaded<T> {
-  return e?.status === 403 || e?.status === 401
-    ? { status: 'forbidden', value: null, error: e?.message || '볼 권한이 없습니다.',
-      httpStatus: e.status }
-    : failed<T>(e);
-}
 
 /** `Promise.allSettled` 결과 하나를 `Loaded<T>` 로. **실패를 빈 값으로 바꾸지 않는다.** */
 function settled<T>(r: PromiseSettledResult<T>): Loaded<T> {
-  return r.status === 'fulfilled' ? ok(r.value) : asLoaded<T>(r.reason);
+  return r.status === 'fulfilled' ? ok(r.value) : failed<T>(r.reason);
 }
 
 export function PlanningPanel({ onClose }: { onClose: () => void }) {

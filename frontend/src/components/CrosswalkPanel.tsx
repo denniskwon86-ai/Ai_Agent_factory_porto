@@ -39,12 +39,6 @@ import {
   crosswalkApi, type Field, type LiveValue, type Mapping, type Proposal, type Sys,
 } from '../lib/crosswalkApi';
 
-function asLoaded<T>(e: any): Loaded<T> {
-  return e?.status === 403 || e?.status === 401
-    ? { status: 'forbidden', value: null, error: e?.message || '볼 권한이 없습니다.',
-      httpStatus: e.status }
-    : failed<T>(e);
-}
 
 export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
   const [systems, setSystems] = useState<Loaded<Sys[]>>(loading<Sys[]>());
@@ -82,7 +76,7 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
       setSystems(ok(rows || []));
     } catch (e: any) {
       reportRequestFailure(e?.status);
-      setSystems(asLoaded<Sys[]>(e));
+      setSystems(failed<Sys[]>(e));
     }
   }, []);
 
@@ -94,9 +88,9 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
     const [s, p, m] = await Promise.allSettled([
       crosswalkApi.schema(sid), crosswalkApi.proposals(sid), crosswalkApi.mappings(sid),
     ]);
-    setSchema(s.status === 'fulfilled' ? ok(s.value || []) : asLoaded<Field[]>(s.reason));
-    setProposals(p.status === 'fulfilled' ? ok(p.value || []) : asLoaded<Proposal[]>(p.reason));
-    setMappings(m.status === 'fulfilled' ? ok(m.value || []) : asLoaded<Mapping[]>(m.reason));
+    setSchema(s.status === 'fulfilled' ? ok(s.value || []) : failed<Field[]>(s.reason));
+    setProposals(p.status === 'fulfilled' ? ok(p.value || []) : failed<Proposal[]>(p.reason));
+    setMappings(m.status === 'fulfilled' ? ok(m.value || []) : failed<Mapping[]>(m.reason));
   }, []);
 
   useEffect(() => { fetchSystems(); }, [fetchSystems]);

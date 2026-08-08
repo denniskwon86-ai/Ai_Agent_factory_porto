@@ -67,12 +67,6 @@ function fmt(v: number | null | undefined) {
 }
 
 /** 401/403 은 «없다» 가 아니라 «못 봤다» 다 — 상태를 구분해 담는다. */
-function asLoaded<T>(e: any): Loaded<T> {
-  return e?.status === 403 || e?.status === 401
-    ? { status: 'forbidden', value: null, error: e?.message || '볼 권한이 없습니다.',
-      httpStatus: e.status }
-    : failed<T>(e);
-}
 
 export default function ShadowModePanel({ onClose }: Props) {
   const [runs, setRuns] = useState<Loaded<ShadowRun[]>>(loading<ShadowRun[]>());
@@ -93,9 +87,9 @@ export default function ShadowModePanel({ onClose }: Props) {
     // ★ 둘을 **따로** 담는다. 종전에는 한 `err` 변수에 덮어써서 어느 쪽이 실패했는지 사라졌다.
     const [s, r] = await Promise.allSettled([fetchSummary(), fetchRuns()]);
     if (s.status === 'fulfilled') { reportRequestSuccess(); setSummary(ok(s.value)); }
-    else { reportRequestFailure((s.reason as any)?.status); setSummary(asLoaded<ShadowSummary>(s.reason)); }
+    else { reportRequestFailure((s.reason as any)?.status); setSummary(failed<ShadowSummary>(s.reason)); }
     if (r.status === 'fulfilled') { reportRequestSuccess(); setRuns(ok(r.value)); }
-    else { reportRequestFailure((r.reason as any)?.status); setRuns(asLoaded<ShadowRun[]>(r.reason)); }
+    else { reportRequestFailure((r.reason as any)?.status); setRuns(failed<ShadowRun[]>(r.reason)); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
