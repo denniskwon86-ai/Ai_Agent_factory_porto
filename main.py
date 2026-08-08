@@ -50,13 +50,19 @@ async def health():
 # ⚠️ 개발 기본값에 **5174·5175 를 포함한다.** 세션이 여럿이면 5173 이 이미 점유돼 Vite 가
 #   다음 포트로 올라가는데, 그때 모든 요청이 CORS 로 막히고 화면은 「서버가 죽었다」처럼
 #   보인다(2026-08-04 Codex 5174 · 2026-08-06 내가 5175 에서 같은 벽을 만났다).
+#   ★ 2026-08-08 에 **5177 에서 세 번째로** 같은 벽을 만났다 — 5173·5175 가 둘 다 다른 세션에
+#     점유된 상태였다. 세션 수가 늘면 이 목록은 계속 모자라므로 5176·5177 까지 미리 넓힌다.
+#     ⚠️ 이 벽의 증상은 «권한 오류» 가 아니라 **`Failed to fetch`** 다. 화면은 그것을
+#       「서버가 죽었다」로 그리고, 그러면 검증하던 사람이 자기 변경을 의심한다.
 #   운영 환경은 `CORS_ALLOWED_ORIGINS` 로 명시 지정하므로 이 기본값이 넓어져도 영향이 없다.
 allowed_origins_env = os.getenv(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:3000,"
     "http://localhost:5173,http://127.0.0.1:5173,"
     "http://localhost:5174,http://127.0.0.1:5174,"
-    "http://localhost:5175,http://127.0.0.1:5175")
+    "http://localhost:5175,http://127.0.0.1:5175,"
+    "http://localhost:5176,http://127.0.0.1:5176,"
+    "http://localhost:5177,http://127.0.0.1:5177")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
 
 app.add_middleware(

@@ -92,6 +92,16 @@ data/reference_registry.json
 data/access_audit.jsonl
 data/scope_policy.json
 
+# ★ 워크플로우 레지스트리(= "default" 템플릿)의 **런타임 저장본**. 한 번도 추적된 적이 없고,
+#   `core/agent_registry.load_registry()` 가 파일이 없으면 `DEFAULT_REGISTRY` 로 폴백하므로
+#   커밋하지 않아도 부팅한다. ⚠️ 오히려 커밋하면 위 세 파일과 같은 사고가 난다 — 한 환경에서
+#   에이전트 순서·HOTL 을 바꾼 것이 다른 환경의 파이프라인 정의를 덮어쓴다.
+agents_registry.json
+
+# 백필·이관 스크립트가 남기는 DB 스냅샷. 원본은 `data/*.db` 이고 이것은 되돌리기용 사본이다 —
+# 사본을 저장소에 실으면 「어느 쪽이 정본인가」가 흐려진다.
+data/*.bak_backfill_*
+
 *- ���纻.*
 
 *���纻*
