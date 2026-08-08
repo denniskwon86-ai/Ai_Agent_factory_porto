@@ -25,6 +25,15 @@ export type NavItem = {
   /** 이 기능이 무엇을 하는지 — 툴팁이 아니라 메뉴에 **본문으로** 쓴다. 툴팁은 키보드·터치에서 안 보인다. */
   desc: string;
   onSelect: () => void;
+  /** 지금 이 사람이 쓸 수 없다면 **그 이유**. 값이 있으면 비활성이 되고 이유가 본문에 붙는다.
+   *
+   *  ★★★ [2026-08-08 P2-4 역할별 실측] 설계 §10 수용 기준: **「API 403 을 버튼 클릭 후
+   *    처음 알게 되는 경로가 없어야 한다」.** 실측에서 viewer 에게 「데이터 거버넌스」가
+   *    활성으로 보였고, 눌러야 403 을 알았다. 열어 보고 나서 「권한 없음」을 읽는 것은
+   *    통제가 아니라 **헛걸음**이다.
+   *  ⚠️ 이유 없이 회색으로만 두지 않는다 — 회색 버튼만 보이면 사용자는 화면 고장으로 읽고,
+   *    진짜 이유는 아무에게도 도달하지 않는다(`factory/RunControls` 가 같은 규칙을 쓴다). */
+  disabledReason?: string;
 };
 
 export type NavGroup = { title: string; hint: string; items: NavItem[] };
@@ -143,23 +152,37 @@ export function GlobalNav({ primary, groups, right }: {
               {/* 그룹 설명을 둔다 — 이름만으로는 «왜 여기 묶였는지» 알 수 없다. */}
               <p className="text-xs text-gray-400 mb-3 leading-relaxed">{g.hint}</p>
               <div className="flex flex-col gap-1">
-                {g.items.map((it) => (
-                  <button
-                    key={it.id}
-                    role="menuitem"
-                    onClick={() => { setOpen(false); it.onSelect(); }}
-                    className="text-left px-3 py-2 rounded-lg hover:bg-white/10 focus:bg-white/10
-                               focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 transition-colors"
-                  >
-                    <span className="block text-[13px] font-semibold text-gray-100">
-                      {it.icon} {it.label}
-                    </span>
-                    {/* 설명을 본문으로 쓴다 — 툴팁은 키보드·터치 사용자에게 보이지 않는다. */}
-                    <span className="block text-xs text-gray-400 mt-0.5 leading-relaxed">
-                      {it.desc}
-                    </span>
-                  </button>
-                ))}
+                {g.items.map((it) => {
+                  const blocked = Boolean(it.disabledReason);
+                  return (
+                    <button
+                      key={it.id}
+                      role="menuitem"
+                      disabled={blocked}
+                      // ⚠️ 스크린리더에도 «왜» 를 준다 — 시각적 회색만으로는 이유가 전달되지 않는다.
+                      aria-disabled={blocked || undefined}
+                      onClick={() => { if (blocked) return; setOpen(false); it.onSelect(); }}
+                      className={`text-left px-3 py-2 rounded-lg focus:outline-none
+                                 focus-visible:ring-2 focus-visible:ring-indigo-400 transition-colors
+                                 ${blocked ? 'opacity-60 cursor-not-allowed'
+                                           : 'hover:bg-white/10 focus:bg-white/10'}`}
+                    >
+                      <span className="block text-[13px] font-semibold text-gray-100">
+                        {it.icon} {it.label}
+                      </span>
+                      {/* 설명을 본문으로 쓴다 — 툴팁은 키보드·터치 사용자에게 보이지 않는다. */}
+                      <span className="block text-xs text-gray-400 mt-0.5 leading-relaxed">
+                        {it.desc}
+                      </span>
+                      {/* ★ 못 쓰는 이유는 **누르기 전에** 같은 자리에서 읽힌다. */}
+                      {blocked && (
+                        <span className="block text-xs text-amber-300/90 mt-1 leading-relaxed">
+                          🔒 {it.disabledReason}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </section>
           ))}

@@ -136,3 +136,30 @@ def test_route_requires_governance_and_reuses_scope():
     assert "assert_governance_readable(p)" in src
     assert "apply_scope(_read_records(project), p)" in src, "범위 규칙을 다시 만들고 있다"
     assert "viewer_scope_nodes(p)" in src, "자산 가시 범위를 넘기지 않는다"
+
+
+def test_all_governance_console_routes_share_one_gate():
+    """★★★ [2026-08-08 P2-4 역할별 실측] **세 형제 화면이 갈라져 있었다.**
+
+    거버넌스 콘솔은 화면 하나가 아니라 셋이다 — 조직 운영 현황(`/orgs`) · 에이전트 집계
+    (`/agents`) · 자산 위생(`/asset-hygiene`). 셋 다 「무엇이 안 되어 있는가」를 보여 주므로
+    **같은 관문**을 지나야 한다.
+
+    ⚠️ 실측에서 `/agents` 만 `assert_governance_readable` 이 빠져 **익명에게 200** 이 나갔다
+      (형제 둘은 403). 에이전트별 비용·성공률은 「어느 에이전트가 얼마나 실패하는가」이고,
+      P4-2 가 「어디가 비어 있는지는 그 자체로 보호 대상」이라고 규정한 정보와 같은 성격이다.
+      **셋 중 하나만 열려 있으면 그 하나로 다 보인다.**
+
+    ★ 라우트마다 자격을 새로 적으면 이렇게 한 곳이 빠진다 — 이 검사는 «같은 관문을 쓰는가»
+      를 세 곳에서 한꺼번에 본다."""
+    import inspect
+
+    import api.routes.telemetry_control as tc
+    missing = [name for name, fn in (
+        ("telemetry_by_org", tc.telemetry_by_org),
+        ("telemetry_by_agent", tc.telemetry_by_agent),
+        ("asset_hygiene", tc.asset_hygiene),
+    ) if "assert_governance_readable(p)" not in inspect.getsource(fn)]
+    assert not missing, (
+        "거버넌스 콘솔 화면인데 자격 관문을 지나지 않는다 — 이 경로로 다 보인다: "
+        + ", ".join(missing))

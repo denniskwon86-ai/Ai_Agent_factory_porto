@@ -91,3 +91,31 @@ export const actingScope = {
 if (typeof window !== 'undefined') {
   window.addEventListener('factory:acting-user-changed', () => actingScope.clear());
 }
+
+// ── 거버넌스 콘솔 자격 ───────────────────────────────────────────────────────
+/** 「전사 정비 상태」 화면(거버넌스 콘솔·에이전트 집계·자산 위생)을 볼 수 있는가.
+ *  볼 수 있으면 빈 문자열, 못 보면 **그 이유**를 돌려준다.
+ *
+ * ★★★ [2026-08-08 P2-4 역할별 실측] 설계 §10 수용 기준: **「API 403 을 버튼 클릭 후 처음
+ *   알게 되는 경로가 없어야 한다」.** 실측에서 viewer 에게 「데이터 거버넌스」 메뉴가
+ *   **활성으로 보였고**, 눌러야 403 을 알았다. 열어 보고 나서 「권한 없음」을 읽는 것은
+ *   통제가 아니라 헛걸음이다.
+ *
+ * ⚠️⚠️ **서버 규칙을 다시 적지 않는다.** 판정 조건 네 개(`unrestricted`·`canManageStandard`·
+ *   `canEditOrg`·`canRunEnterprise`)와 문구는 `api/deps.governance_block_reason` 과 **같아야**
+ *   한다. 화면이 자기 규칙을 따로 만들면 「버튼은 보이는데 서버는 거부」 또는 그 반대가
+ *   생기고, 그때 사용자는 통제가 고장났다고 읽는다 — 이 저장소가 여러 번 겪은 유형이다.
+ *   서버 조건이 바뀌면 여기도 함께 고칠 것.
+ *
+ * ⚠️ 모르는 동안(`UNKNOWN_SCOPE`)에는 **막는다.** 그 짧은 순간에 «할 수 있다»고 그리면
+ *   사용자가 누르고 403 을 받는다(이 파일의 기본값이 모두 거짓인 것과 같은 이유). */
+export function governanceBlockReason(s: ActingScope | null): string {
+  if (!s) {
+    return '권한을 확인하는 중입니다 — 잠시 후 다시 시도하십시오.';
+  }
+  if (s.unrestricted || s.canManageStandard || s.canEditOrg || s.canRunEnterprise) {
+    return '';
+  }
+  return ('데이터 관리자·조직 관리자·경영진에게만 표시합니다 — 어디가 비어 있는지는 '
+          + '그 자체로 보호해야 하는 정보입니다.');
+}

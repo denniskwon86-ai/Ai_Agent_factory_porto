@@ -215,9 +215,17 @@ async def telemetry_by_agent(project: str = "", days: int = 7,
 
     ⚠️ 귀속되지 않은 호출을 버리지 않고 «(미상)» 이라는 이름으로 **같은 표에** 세운다.
       없는 것처럼 만들면 그 90%는 영원히 아무도 보지 않는다.
-    ⚠️ 단가를 모르는 호출은 비용에 더하지 않는다 — 0 으로 두면 「공짜였다」는 거짓이 된다."""
+    ⚠️ 단가를 모르는 호출은 비용에 더하지 않는다 — 0 으로 두면 「공짜였다」는 거짓이 된다.
+
+    ⚠️⚠️ **자격은 `assert_governance_readable` 이 본다** — 형제 화면(`/orgs`·`/asset-hygiene`)과
+      **같은 관문**이다. [2026-08-08 P2-4 역할별 실측] 이 한 줄이 빠져 있어서 **익명에게
+      200 이 나갔다**(형제 둘은 403). 에이전트별 비용·성공률은 「어느 에이전트가 얼마나
+      실패하는가」이고, 그것은 P4-2 가 「어디가 비어 있는지는 그 자체로 보호 대상」이라고
+      규정한 정보와 같은 성격이다. 세 화면 중 하나만 열려 있으면 그 하나로 다 보인다."""
+    from api.deps import assert_governance_readable
     from datetime import datetime, timedelta
     from core.agent_operations import aggregate_by_agent, failing_agents, top_cost_agents
+    assert_governance_readable(p)
     scoped = apply_scope(_read_records(project), p)
     # 정책(며칠인가)은 경계에서 정하고, 집계 함수는 «오늘» 을 모르게 둔다(테스트 결정성).
     _since = ""

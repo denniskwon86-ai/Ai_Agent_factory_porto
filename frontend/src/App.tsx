@@ -34,6 +34,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import ServerLogPopup from './components/ServerLogPopup';
 // [UIUX-AUDIT-30 §3] 16개 동급 버튼 나열 → 1차 영역 + 영역별 전체 메뉴
 import { GlobalNav, type NavGroup, type NavItem } from './components/GlobalNav';
+import { actingScope, governanceBlockReason, type ActingScope } from './lib/actingScope';
 
 
 export default function App() {
@@ -87,6 +88,11 @@ export default function App() {
   //   지금 신규 화면에는 Sprint 시작·정지·재개·HOTL 승인이 없으므로, 종전 통제실을 닫으면
   //   그 기능이 사라진다. 그래서 열고 닫는 오버레이로 둔다.
   const [showStudio, setShowStudio] = useState(false);
+  // [P2-4] 거버넌스 계열 메뉴를 «누르기 전에» 막기 위한 자격. 판정은 `actingScope` 한 곳에 있다.
+  const [scope, setScope] = useState<ActingScope | null>(actingScope.peek());
+  useEffect(() => { actingScope.load().then(setScope).catch(() => setScope(null)); }, []);
+  useEffect(() => actingScope.subscribe(setScope), []);
+  const govBlocked = governanceBlockReason(scope);
   const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
   const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
   const [showLogPopup, setShowLogPopup] = useState(false);
@@ -171,6 +177,8 @@ export default function App() {
           onSelect: () => setShowCrosswalk(true) },
         { id: 'governance', icon: '🛡️', label: '데이터 거버넌스',
           desc: '조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약·외부지표 준비도',
+          // ★ 서버가 403 을 줄 자리를 **누르기 전에** 말한다(설계 §10 수용 기준).
+          disabledReason: govBlocked,
           onSelect: () => setShowGovernance(true) },
       ],
     },
@@ -207,6 +215,9 @@ export default function App() {
           onSelect: () => setShowShadow(true) },
         { id: 'telemetry', icon: '📈', label: 'LLM 텔레메트리',
           desc: '실제 사용 모델·폴백·소요시간 — 모델 불변성 실측',
+          // ⚠️ 이 화면의 «품질 결과» 탭과 에이전트 집계는 거버넌스 관문을 지난다 —
+          //   `/telemetry/agents` 가 형제 둘과 갈라져 익명에게 열려 있던 것을 함께 고쳤다.
+          disabledReason: govBlocked,
           onSelect: () => setShowTelemetry(true) },
       ],
     },
