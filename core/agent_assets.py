@@ -283,6 +283,50 @@ class AgentAssetStore:
                 "조직 승인을 먼저 받아야 전사 승격을 요청할 수 있습니다 — 검토되지 않은 정의가 "
                 "전사 목록에 오르면 그 목록을 아무도 믿지 않게 됩니다.")
 
+    def assert_publishable_to_scope(self, a: Dict[str, Any]) -> None:
+        """개인 초안을 **조직 자산으로** 올릴 수 있는 상태인가."""
+        if a["visibility"] != VIS_PERSONAL:
+            raise AssetError("개인 초안만 조직에 공개할 수 있습니다 — 이미 개인 범위가 아닙니다.")
+        if a["status"] == ST_RETIRED:
+            raise AssetError("사용 중단된 자산은 공개할 수 없습니다.")
+
+    def publish_to_scope(self, asset_id: str, owner_scope_id: str, actor: str) -> Dict[str, Any]:
+        """개인 초안을 **조직 자산으로 옮긴다.**
+
+        ★★★ 이 경로가 없어서 화면이 «복사» 로 우회하고 있었고, 그 결과 **원본 개인 초안이 그대로
+          남았다.** 같은 정의가 두 벌이 되면 어느 쪽이 정본인지 아무도 모르고, 한쪽만 고쳐진
+          채로 승인된다 — `assert_writable_here` 머리말이 경고한 바로 그 상태다.
+
+        ⚠️ **승인된 개인 자산은 `REVIEW` 로 되돌린다.** 개인 자산의 «승인» 은 자기가 자기 것을
+          승인한 것이고, 조직 범위에서는 조직이 다시 답해야 한다(`promote` 와 같은 사상 —
+          범위가 넓어지면 승인을 다시 받는다). 초안이면 그대로 초안이다: 아직 제출도 하지
+          않은 것을 검토 대기로 만들면 승인자의 목록에 아무도 요청하지 않은 항목이 쌓인다."""
+        a = self.get(asset_id)
+        self.assert_publishable_to_scope(a)
+        scope = (owner_scope_id or "").strip()
+        if not scope:
+            raise AssetError(
+                "소유 조직이 필요합니다 — 소유가 없으면 나중에 «이 자산은 누구 책임인가» 에 "
+                "답할 수 없고, 저장소 계약상 그 자산은 아무에게도 보이지 않습니다.")
+        now = _now()
+        reopen = a["status"] == ST_APPROVED
+        with self._lock, self._connect() as conn:
+            if reopen:
+                conn.execute(
+                    "UPDATE agent_assets SET visibility=?, owner_scope_id=?, status=?, "
+                    "approved_by='', updated_at=? WHERE asset_id=?",
+                    (VIS_SCOPE, scope, ST_REVIEW, now, asset_id))
+                conn.execute(
+                    "UPDATE agent_asset_versions SET status=?, approved_by='' WHERE asset_id=?"
+                    " AND version_no=(SELECT current_version FROM agent_assets WHERE asset_id=?)",
+                    (ST_REVIEW, asset_id, asset_id))
+            else:
+                conn.execute(
+                    "UPDATE agent_assets SET visibility=?, owner_scope_id=?, updated_at=? "
+                    "WHERE asset_id=?", (VIS_SCOPE, scope, now, asset_id))
+            conn.commit()
+        return self.get(asset_id)
+
     def request_promotion(self, asset_id: str, actor: str) -> Dict[str, Any]:
         """전사 승격을 **요청**한다.
 

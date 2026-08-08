@@ -271,6 +271,25 @@ def _publish_block_reason(c, kind: str, asset: Dict[str, Any], uid: str, verb: s
     return ""
 
 
+def _publish_to_org_block_reason(c, kind: str, asset: Dict[str, Any], uid: str) -> str:
+    """「조직에 공개」 — 내 초안을 우리 조직 자산으로.
+
+    ⚠️ **대상 조직의 관리 범위는 여기서 보지 않는다.** 목록 시점에는 사용자가 어느 조직을
+      고를지 모르기 때문이다. 그 판정은 실행할 때 `_assert_may_create` 가 하고, 화면은 그
+      사유를 그대로 받는다 — 여기서 넘겨짚어 막으면 고를 수 있는 조직까지 막힌다."""
+    if adapter.is_file_asset(asset["asset_id"]):
+        return "제품 기본 정의는 옮길 수 없습니다 — 복사해서 조직 자산으로 만드십시오."
+    if (asset.get("created_by") or "") != uid:
+        return "다른 사람의 초안은 옮길 수 없습니다."
+    if not c.has(_CAPS[kind][1]):
+        return "자산을 만들 권한이 없습니다 — 읽기만 가능합니다."
+    try:
+        agent_assets.assert_publishable_to_scope(asset)
+    except AssetError as e:
+        return str(e)
+    return ""
+
+
 def _promote_block_reason(c, kind: str, asset: Dict[str, Any], uid: str) -> str:
     """전사 승격(요청 또는 확정). 조직 승인 자격을 먼저 요구한다."""
     if adapter.is_file_asset(asset["asset_id"]):
@@ -340,6 +359,7 @@ def _slim(a: Dict[str, Any], c=None, kind: str = "", uid: str = "") -> Dict[str,
             "submit": _submit_block_reason(c, kind, a, uid),
             "approve": _publish_block_reason(c, kind, a, uid, "approve"),
             "retire": _publish_block_reason(c, kind, a, uid, "retire"),
+            "publish_to_org": _publish_to_org_block_reason(c, kind, a, uid),
             "promote": _promote_block_reason(c, kind, a, uid),
             #: 복사는 «이 자산» 이 아니라 «새 자산» 을 만드는 일이다 — 원본이 파일 자산이어도
             #: 막히지 않는다. 오히려 그것이 기본 제공 정의를 쓰는 유일한 방법이다.
@@ -631,6 +651,48 @@ async def retire_asset(kind_path: str, asset_id: str,
         _audit(p, audit.AGENT_ASSET_CHANGED, asset_id, kind, "denied", reason=str(e))
         raise HTTPException(status_code=403, detail=str(e))
     _audit(p, audit.AGENT_ASSET_CHANGED, asset_id, kind, "allowed", reason="폐기")
+    return out
+
+
+class PublishToScope(BaseModel):
+    owner_scope_id: str = Field(..., min_length=1)
+
+
+@router.post("/{kind_path}/{asset_id}/publish-to-org")
+async def publish_asset_to_org(kind_path: str, asset_id: str, req: PublishToScope,
+                               p: Principal = Depends(current_principal)):
+    """[설계 §8.6] 내 초안을 **우리 조직 자산으로.**
+
+    ★★★ 이 경로가 없어서 화면이 «복사» 로 우회했고, **원본 개인 초안이 그대로 남았다.** 같은
+      정의가 두 벌이 되면 어느 쪽이 정본인지 아무도 모르고 한쪽만 고쳐진 채 승인된다.
+
+    ⚠️ 자격은 **생성과 같다**(`create` + 대상 조직 관리 범위). 「조직에 자산을 만들 수 있는
+      사람」과 「내 초안을 조직에 올릴 수 있는 사람」이 다르면, 같은 결과를 두 경로로 얻을 수
+      있게 되고 그중 느슨한 쪽이 실제 통제가 된다.
+    ⚠️ 남의 개인 초안은 애초에 보이지 않는다(`_load_visible` → 404). 그 위에 작성자 본인인지도
+      확인한다 — 보이는 것과 옮길 수 있는 것은 다르다."""
+    kind = _kind_of(kind_path)
+    a = _load_visible(p, kind, asset_id)
+    if adapter.is_file_asset(asset_id):
+        raise HTTPException(
+            status_code=403,
+            detail="제품 기본 정의는 옮길 수 없습니다 — 복사해서 조직 자산으로 만드십시오.")
+    #: ⚠️ **오늘은 도달하지 않는 방어선이다.** 개인 초안은 작성자에게만 보이므로 위
+    #:   `_load_visible` 이 이미 404 를 낸다. 그래도 지우지 않는다 — 가시성 규칙이 바뀌면
+    #:   (관리자가 남의 초안을 감사할 수 있게 되는 등) 그 순간 «볼 수 있으니 옮길 수도 있다» 가
+    #:   된다. 변이 검사가 「지워도 아무 테스트도 안 깨진다」고 알려 줘서
+    #:   `test_author_check_holds_even_if_visibility_ever_widens` 로 못박아 두었다.
+    if (a.get("created_by") or "") != (p.user_id or ""):
+        raise HTTPException(status_code=403, detail="다른 사람의 초안은 옮길 수 없습니다.")
+    _assert_may_create(p, kind, VIS_SCOPE, req.owner_scope_id)
+    try:
+        out = agent_assets.publish_to_scope(asset_id, _canonical_owner(req.owner_scope_id),
+                                            p.user_id or "")
+    except AssetError as e:
+        _audit(p, audit.AGENT_ASSET_CHANGED, asset_id, kind, "denied", reason=str(e))
+        raise HTTPException(status_code=403, detail=str(e))
+    _audit(p, audit.AGENT_ASSET_CHANGED, asset_id, kind, "allowed",
+           reason="조직 공개", detail=f"scope={req.owner_scope_id} status={out['status']}")
     return out
 
 

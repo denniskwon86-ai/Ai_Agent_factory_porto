@@ -79,7 +79,7 @@ export type GovAsset = {
    *  서버와 서서히 갈라져 「버튼은 보이는데 서버는 거부」가 생기고, 그때 사용자는 통제가
    *  고장났다고 읽는다(2026-08-08 감사에서 실제로 그 상태를 발견했다). */
   blocked?: { update: string; submit: string; approve: string; retire: string;
-              promote: string; copy: string };
+              publish_to_org: string; promote: string; copy: string };
 };
 
 export type GovList = {
@@ -165,6 +165,13 @@ export const agentGovApi = {
 
   retire: (kind: AssetKindPath, assetId: string) =>
     govFetch<GovAsset>('POST', `${X}/${kind}/${encodeURIComponent(assetId)}/retire`),
+
+  /** 내 초안을 **우리 조직 자산으로 옮긴다.** ⚠️ 복사가 아니라 **이동**이다 — 같은 정의가
+   *  두 벌이 되면 어느 쪽이 정본인지 아무도 모르고 한쪽만 고쳐진 채 승인된다.
+   *  승인돼 있던 개인 자산은 「승인 대기」로 되돌아간다(조직이 다시 답해야 한다). */
+  publishToOrg: (kind: AssetKindPath, assetId: string, ownerScopeId: string) =>
+    govFetch<GovAsset>('POST', `${X}/${kind}/${encodeURIComponent(assetId)}/publish-to-org`,
+      { owner_scope_id: ownerScopeId }),
 
   /** 전사 승격. **자격이 답을 정한다** — AI 거버넌스 관리자는 확정하고, 조직 승인자는
    *  요청한다. ⚠️ 요청은 가시성을 바꾸지 않는다(서버 계약). */

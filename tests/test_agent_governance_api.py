@@ -781,7 +781,8 @@ def test_list_carries_a_reason_for_every_action(client):
     row = next(i for i in client.get(f"{B}/agents?include_files=false",
                                      headers=H(MGR)).json()["items"]
                if i["asset_id"] == a["asset_id"])
-    assert set(row["blocked"]) == {"update", "submit", "approve", "retire", "promote", "copy"}
+    assert set(row["blocked"]) == {"update", "submit", "approve", "retire",
+                                   "publish_to_org", "promote", "copy"}
 
 
 def test_member_is_told_before_clicking_that_someone_elses_org_asset_is_off_limits(client):
@@ -848,4 +849,174 @@ def test_viewer_is_blocked_on_everything_with_distinct_reasons(client):
                if i["asset_id"] == a["asset_id"])
     b = row["blocked"]
     assert all(b[k] for k in ("update", "submit", "approve", "retire", "promote", "copy"))
+    #: ⚠️ `publish_to_org` 는 제외한다 — viewer 는 애초에 **자기 초안이 없다.** 남의 자산에
+    #:   대한 사유는 「다른 사람의 초안은 옮길 수 없습니다」이고 그것은 권한이 아니라 소유의
+    #:   문제다. 권한으로 막힌 것과 섞어 세면 무엇이 권한 문제인지 흐려진다.
     assert len({b["approve"], b["copy"]}) == 2, "승인과 복사가 같은 이유로 막혀 있다"
+
+
+# ── 테넌트 경계 — **오늘의 한계를 못박는다** ─────────────────────────────
+#
+# ★★★ 아래 테스트는 «올바른 동작» 을 지키는 것이 아니라 **틀린 동작을 고정한다.** 그래서
+#   누군가 고치면 반드시 여기가 깨지고, 그때 이 주석을 읽게 된다. 조용히 남아 있는 한계는
+#   시간이 지나면 «원래 그런 것» 이 되기 때문이다.
+#
+# ## 왜 지금 고치지 않는가 (2026-08-08 실측)
+#
+# 필터의 기준이 될 **「요청자의 테넌트」가 어디에도 없다**:
+#   · `AccessScope` 에 tenant 필드가 없다 — 사용자 레코드에도 테넌트 개념이 없다
+#   · 저장된 자산은 6건 전부 `tenant_default` 다(라우트가 `create` 에 tenant 를 넘기지 않아
+#     항상 기본값이 박힌다 — `entity_mode` 도 마찬가지다)
+#   · 헤더 `X-Enterprise-Tenant` 는 **요청자가 스스로 보내는 값**이고, 그것으로 범위를 계산하면
+#     헤더 한 줄로 남의 테넌트를 연다(`test_role_mode_matrix` 가 못박은 계약을 정면으로 깬다)
+#
+# → 「사용자에게 테넌트를 부여할 것인가」는 **설계 결정**이며 여기서 정할 수 없다. 근거 없는
+#   필터를 넣으면 막고 있다는 **착각**만 생기고, 그것이 없는 것보다 위험하다.
+#
+# ⚠️ 설계 §11 완료 기준 ③(「Agent·Skill·Workflow·Pack 이 **명시적** tenant/scope/mode 와 버전을
+#   가진다」)은 그래서 **아직 충족되지 않았다.** 컬럼은 있지만 채워지지 않는다.
+def test_tenant_is_not_a_boundary_yet_and_this_test_says_so(client):
+    """★★★ 다른 테넌트의 자산이 **목록에도 «가려진 수» 에도 섞인다** — 오늘의 한계다.
+
+    이 테스트가 깨졌다면 누군가 테넌트 경계를 구현한 것이다. 그렇다면:
+      ① 이 테스트를 「다른 테넌트는 보이지 않는다」로 **뒤집고**
+      ② `hidden_count` 가 남의 테넌트 자산을 세지 않는지 함께 확인하고
+      ③ 위 주석의 «왜 못 고치는가» 를 지운다."""
+    #: ⚠️ 라우트가 tenant 를 받지 않으므로 **저장소를 직접** 쓴다(fixture 가 갈아끼운 격리
+    #:   저장소다 — 실제 개발 DB 에 남의 테넌트 자산을 만들지 않는다).
+    from api.routes import agent_governance as _gov
+    other = _gov.agent_assets.create(
+        "agent", "남의 테넌트 자산", {"role": "x"}, "someone@other.com",
+        owner_scope_id="LS_MNM", visibility=VIS_SCOPE, tenant_id="tenant_other")
+
+    ids = [i["asset_id"] for i in client.get(f"{B}/agents", headers=H(MGR)).json()["items"]]
+    assert other["asset_id"] in ids, (
+        "테넌트 경계가 생겼다 — 이 테스트를 뒤집고 hidden_count 도 함께 확인할 것(위 주석 참조)")
+
+
+def test_created_assets_all_land_in_the_default_tenant(client):
+    """★★ 라우트가 `create` 에 tenant·entity_mode 를 **넘기지 않는다** — 무엇을 만들든 기본값이
+    박힌다. 설계 §11 완료 기준 ③ 이 요구한 «명시적 tenant/mode» 가 아직 아니라는 증거다.
+
+    ⚠️ 이것을 고칠 때는 **필터와 함께** 해야 한다. 기록만 나뉘고 조회가 안 나뉘면 「분리했다」는
+      착각이 생기고, 그 착각 위에서 사람들이 자산을 만든다."""
+    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM").json()
+    assert a["tenant_id"] == "tenant_default"
+    assert a["entity_mode"] == "REAL"
+
+
+# ── 조직에 공개 (설계 §8.6 「조직 공개」) ─────────────────────────────────
+def test_publishing_to_org_moves_the_draft_instead_of_copying_it(client):
+    """★★★ **복사가 아니라 이동이다.**
+
+    이 경로가 없을 때 화면은 «복사» 로 우회했고, 그 결과 **원본 개인 초안이 그대로 남았다.**
+    같은 정의가 두 벌이 되면 어느 쪽이 정본인지 아무도 모르고, 한쪽만 고쳐진 채로 승인된다."""
+    a = _create(client, MGR, visibility=VIS_PERSONAL).json()
+    r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
+                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR))
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["asset_id"] == a["asset_id"], "새 자산이 생겼다 — 이동이 아니라 복사다"
+    assert d["visibility"] == VIS_SCOPE and d["owner_scope_id"]
+
+    #: 개인 초안 목록에서 사라졌는지 — 남아 있으면 두 벌이 된 것이다.
+    mine = [i for i in client.get(f"{B}/agents", headers=H(MGR)).json()["items"]
+            if i["asset_id"] == a["asset_id"]]
+    assert len(mine) == 1 and mine[0]["visibility"] == VIS_SCOPE
+
+
+def test_publishing_an_approved_personal_asset_reopens_review(client):
+    """★★★ 개인 자산의 «승인» 은 **자기가 자기 것을 승인한 것**이다.
+
+    조직 범위로 옮기면 조직이 다시 답해야 한다 — 그러지 않으면 아무도 검토하지 않은 정의가
+    조직 자산으로 «승인됨» 이 되고, `approved_by` 는 조직 승인을 한 적 없는 사람을 가리킨다.
+    (`promote` 와 같은 사상: **범위가 넓어지면 승인을 다시 받는다.**)"""
+    a = _approved(client, MGR, visibility=VIS_PERSONAL)
+    assert a["status"] == ST_APPROVED
+    d = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
+                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR)).json()
+    assert d["status"] == ST_REVIEW, "개인 승인이 조직 승인으로 승계됐다"
+    assert not d["approved_by"]
+
+
+def test_publishing_a_draft_keeps_it_a_draft(client):
+    """★ 아직 제출도 하지 않은 초안을 «검토 대기» 로 만들면, 승인자 목록에 **아무도 요청하지
+    않은 항목**이 쌓인다 — 그러면 그 목록을 아무도 신뢰하지 않는다."""
+    a = _create(client, MGR, visibility=VIS_PERSONAL).json()
+    d = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
+                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR)).json()
+    assert d["status"] == ST_DRAFT
+
+
+def test_only_the_author_can_publish_their_own_draft(client):
+    """★★ **보이는 것과 옮길 수 있는 것은 다르다.** 남의 개인 초안은 애초에 안 보이지만(404),
+    보인다고 해서 옮길 수 있어야 하는 것도 아니다."""
+    a = _create(client, MEMBER, visibility=VIS_PERSONAL).json()
+    assert client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
+                       json={"owner_scope_id": "LS_MNM"}, headers=H(MGR)).status_code == 404
+
+
+def test_publishing_needs_the_same_rights_as_creating_there(client):
+    """★★★ 자격은 **생성과 같다.** 다르면 같은 결과를 두 경로로 얻을 수 있게 되고, 그중
+    느슨한 쪽이 실제 통제가 된다 — 부서원은 조직 자산을 만들 수 없으므로 옮길 수도 없다."""
+    a = _create(client, MEMBER, visibility=VIS_PERSONAL).json()
+    r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
+                    json={"owner_scope_id": "LS_MNM"}, headers=H(MEMBER))
+    assert r.status_code == 403 and "관리 범위" in r.json()["detail"]
+
+
+def test_org_asset_cannot_be_published_again(client):
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
+                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR))
+    assert r.status_code == 403 and "개인 초안만" in r.json()["detail"]
+
+
+def test_publish_without_owner_scope_is_refused(client):
+    """★ 소유 없는 조직 자산은 **아무에게도 보이지 않는다**(저장소 계약) — 만든 사람이 자기
+    자산을 잃는다. 빈 값을 받아 두고 나중에 «왜 안 보이지» 를 묻게 하지 않는다."""
+    a = _create(client, MGR, visibility=VIS_PERSONAL).json()
+    r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
+                    json={"owner_scope_id": ""}, headers=H(MGR))
+    assert r.status_code == 422, r.text          # 스키마가 먼저 막는다
+
+
+def test_file_asset_publish_tells_you_to_copy_instead(client):
+    r = client.post(f"{B}/agents/file:agent:RFP_Analyst/publish-to-org",
+                    json={"owner_scope_id": "LS_MNM"}, headers=H(ADMIN))
+    assert r.status_code == 403 and "복사" in r.json()["detail"]
+
+
+def test_list_carries_a_publish_reason_that_matches_the_real_answer(client):
+    """★★ §10 UI — 「조직에 공개」도 **누르기 전에** 사유가 있어야 한다."""
+    a = _create(client, MGR, visibility=VIS_PERSONAL).json()
+    row = next(i for i in client.get(f"{B}/agents?include_files=false",
+                                     headers=H(MGR)).json()["items"]
+               if i["asset_id"] == a["asset_id"])
+    assert row["blocked"]["publish_to_org"] == "", row["blocked"]
+    #: 남에게는 보이지 않으므로, 조직 자산으로 바꿔 «이미 개인이 아니다» 사유를 확인한다.
+    client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
+                json={"owner_scope_id": "LS_MNM"}, headers=H(MGR))
+    row2 = next(i for i in client.get(f"{B}/agents?include_files=false",
+                                      headers=H(MGR)).json()["items"]
+                if i["asset_id"] == a["asset_id"])
+    assert "개인 초안만" in row2["blocked"]["publish_to_org"]
+
+
+def test_author_check_holds_even_if_visibility_ever_widens(client, monkeypatch):
+    """★★★ 심층 방어 — **오늘은 도달할 수 없는 방어선**이지만 지우지 않는다.
+
+    오늘 개인 초안은 작성자에게만 보이므로(`_load_visible` → 404) 「작성자인가」 검사에 닿지
+    않는다. 그러나 가시성 규칙은 바뀔 수 있고(예: 관리자가 남의 초안을 감사할 수 있게 되는
+    설계 결정), 그때 이 검사가 없으면 **«볼 수 있으니 옮길 수도 있다»** 가 된다 —
+    보이는 것과 옮길 수 있는 것은 다르다.
+
+    ⚠️ **변이 검사가 이 방어선을 «지워도 아무 테스트도 깨지지 않는다» 고 알려 줬다.** 도달
+      불가능한 코드는 다음 정리 때 조용히 사라지고, 사라진 뒤에는 그것이 무엇을 막고 있었는지
+      아무도 모른다. 그래서 가시성을 인위적으로 넓혀 «그때가 오면» 을 여기서 재현한다."""
+    a = _create(client, MEMBER, visibility=VIS_PERSONAL).json()
+    from api.routes import agent_governance as gov
+    monkeypatch.setattr(gov, "_visible_to", lambda p, asset: True)
+    r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
+                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR))
+    assert r.status_code == 403 and "다른 사람의 초안" in r.json()["detail"], r.text

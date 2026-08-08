@@ -88,6 +88,7 @@ export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
   const confirmRetire = useConfirm<GovAsset>();
   const confirmPromote = useConfirm<GovAsset>();
   const confirmCopy = useConfirm<GovAsset>();
+  const confirmPublish = useConfirm<GovAsset>();
 
   const loadCaps = useCallback(async () => {
     setCaps(loading<GovCapabilities>());
@@ -183,7 +184,7 @@ export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
     if (!actions) return '권한을 확인하지 못했습니다.';
     const kindLevel: Record<string, boolean> = {
       update: actions.update, submit: actions.update, approve: actions.approve,
-      retire: actions.retire,
+      retire: actions.retire, publish_to_org: actions.create,
       promote: actions.approve, copy: actions.create,
     };
     if (!kindLevel[need]) {
@@ -477,11 +478,10 @@ export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
                           <GovBtn label="승인" why={approveWhy} primary busy={busy === '승인'}
                             onClick={() => confirmApprove.ask(a)} />
                         )}
-                        {/* 조직 공개 — 개인 초안을 조직 자산으로. ⚠️ 서버에 «범위 변경» 이
-                            없으므로 **복사로 만든다**. 그 사실을 확인 대화에서 밝힌다. */}
+                        {/* 조직 공개 — 내 초안을 조직 자산으로 **옮긴다**(복사가 아니다). */}
                         {a.visibility === 'PERSONAL' && a.status !== 'RETIRED' && (
-                          <GovBtn label="조직에 공개" why={why('copy', a)}
-                            busy={busy === '조직 공개'} onClick={() => confirmCopy.ask(a)} />
+                          <GovBtn label="조직에 공개" why={why('publish_to_org', a)}
+                            busy={busy === '조직 공개'} onClick={() => confirmPublish.ask(a)} />
                         )}
                         {ORG_VISIBILITIES.includes(a.visibility) && a.status !== 'RETIRED' && (
                           <GovBtn
@@ -545,34 +545,38 @@ export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
                       )}
 
                       {confirmCopy.open && confirmCopy.target?.asset_id === a.asset_id && (
-                        <ConfirmInline open danger={false}
-                          title={a.visibility === 'PERSONAL'
-                            ? '이 초안을 조직 자산으로 만듭니다' : '이 정의를 복사합니다'}
-                          body={a.visibility === 'PERSONAL' ? (
-                            <>
-                              «{a.name_ko}» 를 <b>{ctx.scopeNodeId || '현재 조직'}</b> 소유의 새
-                              자산으로 만듭니다.
-                              <br />⚠️ 서버에는 «공개 범위를 바꾸는» 경로가 없어 <b>복사로
-                              만듭니다</b> — 원본 개인 초안은 그대로 남습니다. 필요 없으면
-                              따로 사용 중단하십시오.
-                            </>
-                          ) : (
-                            <>
-                              «{a.name_ko}» 를 <b>내 개인 초안</b>으로 복사합니다. 원본은 바뀌지
-                              않으므로, 복사본을 고쳐 쓰다가 조직에 공개하면 됩니다.
-                            </>
-                          )}
-                          confirmLabel={a.visibility === 'PERSONAL' ? '조직 자산으로 만들기' : '복사'}
+                        <ConfirmInline open danger={false} title="이 정의를 복사합니다"
+                          body={<>
+                            «{a.name_ko}» 를 <b>내 개인 초안</b>으로 복사합니다. 원본은 바뀌지
+                            않으므로, 복사본을 고쳐 쓰다가 조직에 공개하면 됩니다.
+                          </>}
+                          confirmLabel="복사"
                           onCancel={confirmCopy.cancel}
-                          onConfirm={() => confirmCopy.run((t) => {
-                            const toOrg = t.visibility === 'PERSONAL';
-                            return act(toOrg ? '조직 공개' : '복사',
-                              () => agentGovApi.copy(kind, t.asset_id, toOrg
-                                ? { visibility: 'SCOPE', owner_scope_id: ctx.scopeNodeId || '' }
-                                : { visibility: 'PERSONAL' }),
-                              toOrg ? `«${t.name_ko}» 를 조직 자산으로 만들었습니다.`
-                                : `«${t.name_ko}» 를 내 초안으로 복사했습니다 — «내 초안» 탭에 있습니다.`);
-                          })} />
+                          onConfirm={() => confirmCopy.run((t) => act('복사',
+                            () => agentGovApi.copy(kind, t.asset_id, { visibility: 'PERSONAL' }),
+                            `«${t.name_ko}» 를 내 초안으로 복사했습니다 — «내 초안» 탭에 있습니다.`))} />
+                      )}
+
+                      {confirmPublish.open && confirmPublish.target?.asset_id === a.asset_id && (
+                        <ConfirmInline open danger={false} title="이 초안을 조직에 공개합니다"
+                          body={<>
+                            «{a.name_ko}» 를 <b>{ctx.scopeNodeId || '현재 조직'}</b> 소유로
+                            <b> 옮깁니다</b> — 복사가 아니므로 개인 초안 목록에서는 사라집니다.
+                            {a.status === 'APPROVED' && (
+                              <><br />⚠️ 이 자산은 승인돼 있는데, 조직에 공개하면
+                              <b> 「승인 대기」로 되돌아갑니다</b> — 개인 자산의 승인은 자기가
+                              자기 것을 승인한 것이고, 조직 범위에서는 조직이 다시 답해야 합니다.</>
+                            )}
+                            {!ctx.scopeNodeId && (
+                              <><br />⚠️ 지금 실행 문맥에 조직이 지정돼 있지 않습니다 — 서버가
+                              거절하면 그 사유가 그대로 표시됩니다.</>
+                            )}
+                          </>}
+                          confirmLabel="조직에 공개"
+                          onCancel={confirmPublish.cancel}
+                          onConfirm={() => confirmPublish.run((t) => act('조직 공개',
+                            () => agentGovApi.publishToOrg(kind, t.asset_id, ctx.scopeNodeId || ''),
+                            `«${t.name_ko}» 를 조직 자산으로 옮겼습니다.`))} />
                       )}
 
                       {confirmPromote.open && confirmPromote.target?.asset_id === a.asset_id && (
