@@ -37,6 +37,7 @@ import ServerLogPopup from './components/ServerLogPopup';
 import { GlobalNav, type NavGroup, type NavItem } from './components/GlobalNav';
 import { actingScope, governanceBlockReason, type ActingScope } from './lib/actingScope';
 import { AgentGovernancePanel } from './components/AgentGovernancePanel';
+import { EnterprisePage } from './components/EnterprisePage';
 import { Banner } from './design/HubShell';
 import { API_BASE_URL, getSessionToken, setActingUser, setSessionToken } from './lib/api';
 
@@ -66,6 +67,14 @@ function AppShell() {
   const setSelectedTemplate = useFactoryStore((state) => state.setSelectedTemplate);
   const fetchTemplates = useFactoryStore((state) => state.fetchTemplates);
 
+  // ★★★ [UI 설계서 §3.2 · §3.4] **첫 화면은 경영 홈(Decision Canvas)이다.**
+  //   Software Factory 는 거기서 들어가는 Immersive Studio 다 — 설계는 「경영 홈에서 Studio 로
+  //   이동한다」고 방향을 못박았는데, 실제로는 「신규 프로젝트 개설」 폼이 첫 화면이었다
+  //   (2026-07-28 리버스엔지니어링 AS-IS 그대로. 화면 이관은 개별 화면만 옮겼다).
+  //   ⚠️ URL 라우터가 아직 없으므로 상태로 둔다 — 설계 §3.3 은 「React Router 도입 여부와
+  //     무관하게 URL 은 새로고침·공유가 가능한 상태 계약으로 관리한다」고 했고, 그 계약은
+  //     라우터를 넣을 때 이 한 값을 URL 로 올리면 된다.
+  const [space, setSpace] = useState<'enterprise' | 'build'>('enterprise');
   const [newProjectId, setNewProjectId] = useState("");
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
@@ -314,6 +323,55 @@ function AppShell() {
     );
   }
 
+  // ★★★ [설계 §3.2] 프로젝트를 고르지 않았고 «경영 홈» 공간이면 Decision Canvas 를 그린다.
+  //   Software Factory(런처)는 그 아래 Studio 다.
+  if (!currentProjectId && space === 'enterprise') {
+    return (
+      <ErrorBoundary>
+        <div className="afs-scope afs-page" style={{ minHeight: '100vh' }}>
+          <header className="h-16 afs-topbar backdrop-blur-md border-b afs-border flex items-center justify-between gap-2 px-3 xl:px-5 shrink-0 sticky top-0 z-10">
+            <h1 className="text-xl font-bold tracking-tight afs-ink flex items-center gap-2 shrink-0">
+              <span className="afs-action-fg">🏭 V5.2</span> Private AI Cockpit
+            </h1>
+            <div className="flex items-center gap-3 min-w-0">
+              <SessionBar />
+              <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
+            </div>
+          </header>
+          <EnterprisePage
+            onOpenBuild={() => setSpace('build')}
+            onOpenMenu={(id) => {
+              if (id === 'advisor') setShowAdvisor(true);
+              else if (id === 'collaboration') setShowCollaboration(true);
+            }} />
+        </div>
+        {/* 경영 홈에서도 열 수 있어야 하는 오버레이 — 메뉴가 이 화면에도 있기 때문이다. */}
+        {showAdvisor && (
+          <AdvisorPanel onClose={() => setShowAdvisor(false)} onProjectCreated={fetchProjects} />
+        )}
+        {showCollaboration && (
+          <CollaborationHub onClose={() => setShowCollaboration(false)}
+            releaseIds={releases.map((r: any) => r.release_id).filter(Boolean)} />
+        )}
+        {showAgentGov && (
+          <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
+        )}
+        {showKnowledgeHub && (<KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />)}
+        {showMasterData && (<MasterDataPanel onClose={() => setShowMasterData(false)} />)}
+        {showWorkStandard && (<WorkStandardPanel onClose={() => setShowWorkStandard(false)} />)}
+        {showOrgChart && (<OrgChartPanel onClose={() => setShowOrgChart(false)} />)}
+        {showCrosswalk && (<CrosswalkPanel onClose={() => setShowCrosswalk(false)} />)}
+        {showTelemetry && (<TelemetryPanel onClose={() => setShowTelemetry(false)} />)}
+        {showGovernance && (<GovernanceConsole onClose={() => setShowGovernance(false)} />)}
+        {showSkillEvolution && (<SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />)}
+        {showShadow && (<ShadowModePanel onClose={() => setShowShadow(false)} />)}
+        {showWorkspace && (<WorkspacePanel onClose={() => setShowWorkspace(false)} />)}
+        {showPlanning && (<PlanningPanel onClose={() => setShowPlanning(false)} />)}
+        {showBriefing && (<BriefingPanel onClose={() => setShowBriefing(false)} />)}
+      </ErrorBoundary>
+    );
+  }
+
   if (!currentProjectId) {
     return (
       <ErrorBoundary>
@@ -384,9 +442,16 @@ function AppShell() {
         )}
         <div className="afs-scope afs-page min-h-screen w-full flex flex-col font-sans">
  <header className="h-16 afs-topbar backdrop-blur-md border-b afs-border flex items-center justify-between gap-2 px-3 xl:px-5 shrink-0 sticky top-0 z-10 overflow-hidden">
+ <div className="flex items-center gap-3 shrink-0">
+ {/* ★ [설계 §3.4] 「Studio 의 공통 상단 바에는 `경영 홈으로 돌아가기` 와 현재 회사 문맥을
+     항상 표시한다」 — 돌아갈 길이 없으면 Studio 는 앱의 끝이 되고, 사용자는 새로고침으로
+     빠져나온다. */}
+ <button className="secondary-button" onClick={() => setSpace('enterprise')}
+ style={{ whiteSpace: 'nowrap' }}>◀ 경영 홈</button>
  <h1 className="text-xl 2xl:text-2xl font-bold tracking-tight afs-ink flex items-center gap-2 shrink-0">
- <span className="afs-action-fg">🏭 V5.2</span> Private AI Cockpit
+ <span className="afs-action-fg">🏭</span> Software Factory
  </h1>
+ </div>
  {/* ★ 사용자 전환기는 «기능»이 아니라 «지금 누구인가»다. 메뉴 안으로 숨기지 않는다 —
  권한 범위가 사람마다 다르므로 상시 보여야 한다(채택 결정 6항). */}
  <div className="flex items-center gap-3 min-w-0">
