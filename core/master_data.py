@@ -503,9 +503,11 @@ class MasterData:
             print(f"⚠️ [MasterData] 한시 예외 표시 실패 {table}: {e}")
             return 0
         if n:
-            from core.enterprise_context.scoping import LEGACY_GRANDFATHER_UNTIL
+            #: ⚠️ 코드 상수가 아니라 **정책 값**을 안내한다. 관리자가 만료일을 바꿨는데 여기가
+            #:   옛 날짜를 말하면, 그 문장을 읽은 사람은 틀린 기한으로 이행 계획을 세운다.
+            from core.enterprise_context.scoping import policy_deadline
             print(f"ℹ️ [관문 A] {table}: 범위 미지정 {n}건을 한시 예외(LEGACY_UNSCOPED)로 "
-                  f"표시했습니다 — {LEGACY_GRANDFATHER_UNTIL} 까지만 조회에 포함됩니다. "
+                  f"표시했습니다 — {policy_deadline()} 까지만 조회에 포함됩니다. "
                   f"그전에 소유 조직을 지정하거나 승인된 전사 공용으로 전환하십시오.")
         return n
 

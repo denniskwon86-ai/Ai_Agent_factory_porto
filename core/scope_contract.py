@@ -363,7 +363,15 @@ class ScopeContract:
 
         ★ 이 목록이 없으면 만료일에 데이터가 한꺼번에 사라진다. "언제까지 봐주는가"를 아는 것과
           "무엇을 정리해야 하는가"를 아는 것은 다르고, 사람은 후자로만 움직인다."""
-        from core.enterprise_context.scoping import LEGACY_GRANDFATHER_UNTIL
+        #: ★★★ [2026-08-08] **코드 상수(`LEGACY_GRANDFATHER_UNTIL`)를 직접 읽지 않는다.**
+        #:   만료일의 정본은 정책 저장소이고 관리자가 화면에서 바꾼다(사용자 결정 2026-07-30).
+        #:   ⚠️ 여기가 상수를 읽고 있어서 **판정과 표시가 어긋났다**: 만료 판정(`is_expired`)은
+        #:     정책을 따르는데 화면에 적히는 기한은 코드 상수였다. 관리자가 만료일을 미루면
+        #:     사람들은 화면의 옛 날짜를 보고 일정을 잡고, 앞당기면 **적힌 날짜보다 먼저
+        #:     데이터가 사라진다.** 「언제까지 봐주는가」를 틀리게 말하는 이행 목록은
+        #:     이행을 돕는 것이 아니라 방해한다.
+        from core.enterprise_context.scoping import legacy_deadline, policy_deadline
+        default_deadline = policy_deadline()
         types = [resource_type] if resource_type else list(RESOURCES)
         items: List[Dict[str, Any]] = []
         for rt in types:
@@ -380,14 +388,17 @@ class ScopeContract:
                 items.append({
                     "resource_type": rt, "resource_id": r.get(pk, ""),
                     "name": r.get("name") or r.get("canonical_name") or r.get(pk, ""),
-                    "deadline": (r.get("effective_to") or "").strip() or LEGACY_GRANDFATHER_UNTIL,
+                    #: ★ 「행별 만료일이 전역을 이긴다」는 계산을 손으로 다시 쓰지 않는다 —
+                    #:   `legacy_deadline(row)` 이 그 규칙의 정본이고, `is_expired` 도 그것을 쓴다.
+                    #:   여기서 따로 적으면 만료 «판정» 과 화면의 «기한» 이 갈라진다.
+                    "deadline": legacy_deadline(r),
                     "expired": is_expired(r),
                 })
         items.sort(key=lambda i: (not i["expired"], i["deadline"]))
         expired = [i for i in items if i["expired"]]
         return {
             "total": len(items), "expired": len(expired), "items": items,
-            "default_deadline": LEGACY_GRANDFATHER_UNTIL,
+            "default_deadline": default_deadline,
             "note": ("한시 예외는 관문 A 이전 데이터를 위한 **이행 상태**입니다. 만료 후에는 "
                      "비노출이므로, 만료 전에 소유 조직을 지정(`set_owner`)하거나 승인된 전사 "
                      "공용으로 전환하십시오."

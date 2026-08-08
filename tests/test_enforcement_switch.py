@@ -151,3 +151,79 @@ def test_deps_does_not_read_the_config_flag_directly_anymore(policy):
     assert "ORG_ENFORCE" not in code, (
         "`current_principal` 이 코드 기본값을 다시 직접 읽는다 — `_enforced()` 를 쓸 것")
     assert "_enforced()" in code, "강제 판정이 공용 함수를 지나지 않는다"
+
+
+# ── 같은 유형 ② 만료일: **판정과 표시가 갈라져 있었다** ───────────────────
+#
+# ★★★ `ORG_ENFORCE` 와 똑같은 모양의 결함이 만료일에도 있었다(2026-08-08 훑기에서 발견).
+#   만료일의 정본도 정책 저장소이고 관리자가 화면에서 바꾼다. `scoping.policy_deadline()` 이
+#   그것을 읽는데, **두 곳이 코드 상수 `LEGACY_GRANDFATHER_UNTIL` 을 직접 읽고 있었다**:
+#     · `scope_contract.legacy_pending()` — 이행 목록의 `deadline`·`default_deadline`
+#     · `master_data` 관문 A 안내 문구
+#
+#   ⚠️ 그래서 **만료 «판정» 은 정책을 따르고 «표시» 는 코드 상수를 따랐다.** 관리자가 만료일을
+#     미루면 사람들은 화면의 옛 날짜로 일정을 잡고, 앞당기면 **적힌 날짜보다 먼저 데이터가
+#     사라진다.** 「언제까지 봐주는가」를 틀리게 말하는 이행 목록은 이행을 방해한다.
+def test_transition_list_shows_the_deadline_that_is_actually_enforced(policy, monkeypatch):
+    """★★★ 화면에 적히는 기한과 실제로 강제되는 기한은 **같아야 한다.**"""
+    write, config, mp = policy
+    from core import scope_policy
+    from core.enterprise_context.scoping import is_expired, policy_deadline
+
+    #: 정책으로 만료일을 앞당긴다 — 코드 상수(2026-12-31)와 다른 값이어야 의미가 있다.
+    import json as _json
+    path = scope_policy._POLICY_PATH
+    with open(path, "w", encoding="utf-8") as f:
+        _json.dump({"legacy_grandfather_until": "2026-01-31"}, f)
+
+    assert policy_deadline() == "2026-01-31", "정책이 만료일을 이기지 못한다"
+
+    #: 표시 쪽(이행 목록)이 같은 값을 쓰는가 — 행별 만료일이 없는 자원 기준.
+    from core.scope_contract import ScopeContract
+    from core.master_data import master_data
+    out = ScopeContract(master_data).legacy_pending()
+    assert out["default_deadline"] == "2026-01-31", (
+        "이행 목록이 코드 상수를 보여준다 — 판정은 정책을 따르는데 표시는 아니다")
+
+    #: 그리고 판정도 같은 값이어야 한다(둘이 갈라지면 데이터가 말없이 사라진다).
+    assert is_expired({"scope_type": "LEGACY_UNSCOPED"}, today="2026-02-01") is True
+    assert is_expired({"scope_type": "LEGACY_UNSCOPED"}, today="2026-01-01") is False
+
+
+def test_row_deadline_still_wins_over_the_policy(policy):
+    """★ 행에 적힌 `effective_to` 는 전역 정책을 이긴다 — 부서마다 정리 속도가 다른데 만료일이
+    하나뿐이면 **가장 느린 부서 때문에 전체를 미루게** 된다(`legacy_deadline` 머리말).
+
+    ⚠️ 이 계약을 표시 쪽이 손으로 다시 계산하고 있었다 — 이제 `legacy_deadline(row)` 한 곳을
+      쓴다. 두 곳에 적으면 한쪽만 고쳐졌을 때 목록의 기한과 실제 만료가 어긋난다."""
+    write, config, mp = policy
+    from core import scope_policy
+    from core.enterprise_context.scoping import legacy_deadline
+    import json as _json
+    with open(scope_policy._POLICY_PATH, "w", encoding="utf-8") as f:
+        _json.dump({"legacy_grandfather_until": "2026-01-31"}, f)
+
+    assert legacy_deadline({"effective_to": "2027-06-30"}) == "2027-06-30"
+    assert legacy_deadline({}) == "2026-01-31"
+
+
+def test_no_module_reads_the_deadline_constant_directly(policy):
+    """★★ 회귀 방지 — **정책이 있는 값을 코드 상수로 읽는 모듈이 다시 생기지 않는지.**
+
+    ⚠️ 상수 자체는 폴백으로 필요하므로 `scoping`·`scope_policy` 는 제외한다. 그 둘이 정본이고,
+      나머지가 상수를 직접 읽으면 그 경로만 정책을 무시한다 — 오늘 두 곳이 그랬다."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    allowed = {"scoping.py", "scope_policy.py"}
+    offenders = []
+    for p in (root / "core").rglob("*.py"):
+        if p.name in allowed:
+            continue
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        for i, line in enumerate(text.splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if "LEGACY_GRANDFATHER_UNTIL" in code:
+                offenders.append(f"{p.relative_to(root)}:{i}")
+    assert not offenders, (
+        "만료일 코드 상수를 직접 읽는 곳이 있다 — `policy_deadline()`/`legacy_deadline(row)` 를 "
+        f"쓸 것: {offenders}")
