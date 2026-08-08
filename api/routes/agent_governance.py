@@ -30,7 +30,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api.deps import Principal, current_principal, require_caps, viewer_visible_scopes
+from api.deps import (Principal, current_principal, hidden_envelope, require_caps,
+                      viewer_visible_scopes)
 from core import admin_capability as cap
 from core import agent_asset_adapter as adapter
 from core.agent_assets import (
@@ -306,7 +307,7 @@ async def list_assets(kind_path: str,
                             include_files=include_files, include_retired=include_retired)
     if status:
         rows = [r for r in rows if r.get("status") == status]
-    return {
+    out = {
         "kind": kind,
         "items": [_slim(r) for r in rows],
         "total": len(rows),
@@ -314,6 +315,25 @@ async def list_assets(kind_path: str,
         #  자기가 보는 목록이 전사 전체라고 오해한다.
         "scoped": viewer_visible_scopes(p) is not None,
     }
+    #: ★★ [설계 §8.3] 「현재 보는 범위와 **숨겨진 자산 수**」.
+    #   `scoped` 는 «걸렀다» 만 말하고 «얼마나» 를 말하지 않는다 — 사용자는 3건을 보면서
+    #   그것이 전부인지 30건 중 3건인지 알 수 없다.
+    #   ⚠️ 판정을 여기서 새로 만들지 않는다. `hidden_envelope` 이 이미 계약을 갖고 있다 —
+    #     **존재는 누구에게나, 정확한 건수는 자료를 관리할 사람에게만**(남의 조직 자산 규모는
+    #     그 자체로 정보다). 라우트마다 다시 적으면 그 규칙이 갈라진다.
+    if out["scoped"]:
+        try:
+            all_rows = adapter.list_all(kind, None, p.user_id or "",
+                                        include_files=include_files,
+                                        include_retired=include_retired)
+            if status:
+                all_rows = [r for r in all_rows if r.get("status") == status]
+            out.update(hidden_envelope(p, len(all_rows), len(rows), exact_for="agent"))
+        except Exception as e:                                       # pragma: no cover
+            # ⚠️ 세지 못한 것을 «숨김 없음» 으로 두지 않는다 — 그러면 사용자는 목록을 전량으로 읽는다.
+            print(f"⚠️ [agent_governance] 숨김 건수 계산 실패: {e}")
+            out["hidden_present"] = None
+    return out
 
 
 @router.get("/{kind_path}/{asset_id}")

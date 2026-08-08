@@ -328,6 +328,11 @@ _EXACT_COUNT_RULES = {
     # 데이터 관리자에게만 정확한 수를 준다(2026-08-05 Planning 통제).
     "plan": lambda s: bool(s.unrestricted or getattr(s, "can_run_enterprise", False)
                            or s.can_manage_standard),
+    # 에이전트·스킬·워크플로우 자산(설계 §8.3 「현재 보는 범위와 숨겨진 자산 수」).
+    # AI 관리자가 이 자료의 관리 주체이므로 조직 관리자와 함께 정확한 수를 본다 —
+    # 「전사에 에이전트가 몇 개인가」는 그들이 답해야 하는 질문이다.
+    "agent": lambda s: bool(s.unrestricted or getattr(s, "is_ai_admin", False)
+                            or getattr(s, "can_edit_org", False) or s.can_manage_standard),
 }
 
 

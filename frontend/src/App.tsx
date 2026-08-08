@@ -35,6 +35,7 @@ import ServerLogPopup from './components/ServerLogPopup';
 // [UIUX-AUDIT-30 §3] 16개 동급 버튼 나열 → 1차 영역 + 영역별 전체 메뉴
 import { GlobalNav, type NavGroup, type NavItem } from './components/GlobalNav';
 import { actingScope, governanceBlockReason, type ActingScope } from './lib/actingScope';
+import { AgentGovernancePanel } from './components/AgentGovernancePanel';
 
 
 export default function App() {
@@ -88,6 +89,8 @@ export default function App() {
   //   지금 신규 화면에는 Sprint 시작·정지·재개·HOTL 승인이 없으므로, 종전 통제실을 닫으면
   //   그 기능이 사라진다. 그래서 열고 닫는 오버레이로 둔다.
   const [showStudio, setShowStudio] = useState(false);
+  // [P2-2] Agent Governance Center — 조직 자산의 범위·권한·승인(설계 §8.3~§8.6).
+  const [showAgentGov, setShowAgentGov] = useState(false);
   // [P2-4] 거버넌스 계열 메뉴를 «누르기 전에» 막기 위한 자격. 판정은 `actingScope` 한 곳에 있다.
   const [scope, setScope] = useState<ActingScope | null>(actingScope.peek());
   useEffect(() => { actingScope.load().then(setScope).catch(() => setScope(null)); }, []);
@@ -195,6 +198,12 @@ export default function App() {
         { id: 'agents', icon: '⚙️', label: '에이전트 통제소',
           desc: '각 에이전트의 역할·스킬·모델·순서·HOTL(전문가 개입)을 설정',
           onSelect: openAgentPanel },
+        { id: 'agent-gov', icon: '🏛', label: 'Agent Governance Center',
+          desc: '조직 자산의 범위·권한·승인 — 누가 만들고 누가 승인해서 어디에 쓰이는가',
+          // ⚠️ 여기는 「내 업무」다 — viewer 도 자기 범위의 자산을 볼 수 있어야 하므로
+          //   거버넌스 콘솔(전사 정비 상태)과 달리 막지 않는다. 자격은 화면 안에서
+          //   행동 단위로 표시하고, 못 누르는 버튼마다 사유를 붙인다(§8.6).
+          onSelect: () => setShowAgentGov(true) },
         { id: 'skills', icon: '🧬', label: 'AI 스킬 진화',
           desc: '에이전트가 스스로 제안한 스킬 개선안 승인/반려',
           onSelect: () => setShowSkillEvolution(true) },
@@ -362,6 +371,13 @@ export default function App() {
         )}
         {showBriefing && (
           <BriefingPanel onClose={() => setShowBriefing(false)} />
+        )}
+        {/* [P2-2] 조직 자산은 **프로젝트가 없어도** 다루는 것이다 — 오히려 「프로젝트를 만들기
+            전에 우리 조직이 어떤 에이전트를 쓸 수 있는가」를 여기서 본다. 아래쪽 Studio 와 달리
+            런처에서 빼면 메뉴는 활성으로 보이는데 눌러도 아무 일이 없다. 그때 사용자는 권한
+            문제로 읽지 않고 **화면 고장으로 읽는다** — 위 351행 주석이 경고한 바로 그 상태다. */}
+        {showAgentGov && (
+          <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
         )}
         <div className="afs-scope afs-page min-h-screen w-full flex flex-col font-sans">
  <header className="h-16 afs-topbar backdrop-blur-md border-b afs-border flex items-center justify-between gap-2 px-3 xl:px-5 shrink-0 sticky top-0 z-10 overflow-hidden">
@@ -856,9 +872,15 @@ export default function App() {
         {showBriefing && (
           <BriefingPanel onClose={() => setShowBriefing(false)} />
         )}
+        {showAgentGov && (
+          <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
+        )}
         {/* [트랙 E 2단계] 프로젝트 문맥이 있는 이 화면에만 둔다 — Studio 는 «지금 만들고 있는
             SW»를 다루므로 프로젝트가 없는 런처에서는 보여 줄 것이 없다. 위 주석이 경고한
-            «모달 목록 두 벌» 중 이쪽에만 추가한 것은 실수가 아니다. */}
+            «모달 목록 두 벌» 중 이쪽에만 추가한 것은 실수가 아니다.
+            ⚠️ 이 면책은 **Studio 에만** 해당한다. 바로 위 `AgentGovernancePanel` 은 양쪽에
+            있어야 하므로 이 주석 아래로 내리지 말 것 — 주석이 가리키는 대상이 어긋나면
+            다음 사람이 「한쪽에만 둔 것은 의도」라고 읽는다. */}
         {showStudio && (
           <AdaptiveProductionStudio onClose={() => setShowStudio(false)} />
         )}
