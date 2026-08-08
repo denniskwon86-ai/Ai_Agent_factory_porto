@@ -101,7 +101,25 @@ async def current_principal(request: Request) -> Principal:
     scope = await asyncio.to_thread(org_directory.resolve_scope, uid)
     # 강제 모드인데 식별이 안 되면 401. 무제한(조직 미도입/부트스트랩)이면 통과시킨다 —
     # 그러지 않으면 조직을 세우기도 전에 전 API 가 막힌다.
-    if getattr(config, "ORG_ENFORCE", False) and not scope.unrestricted and not uid:
+    #
+    # ★★★ [2026-08-08 실측] **`config.ORG_ENFORCE` 를 직접 읽지 않는다.** 강제 여부의 정본은
+    #   `data/scope_policy.json` 이고 그것이 **코드 기본값을 이긴다**(2026-07-30 사용자 지시로
+    #   `org_enforce=true` 로 켜져 있다). 이 한 줄만 코드 기본값(False)을 보고 있어서, 정책이
+    #   켜졌는데도 **여기서는 익명이 통과**했다.
+    #
+    #   실제 증상: `/agent-governance/capabilities` 가 익명에게 200 을 줬다. 뒤에 `require_caps`
+    #   가 있는 라우트는 거기서 막혔지만, **이 401 에만 기대던 라우트는 열려 있었다** — 그리고
+    #   그런 라우트는 조용하다. 아무도 오류를 보지 못한다.
+    #
+    #   ⚠️⚠️ 단위 테스트가 이것을 **구조적으로 못 봤다.** 테스트는 `monkeypatch` 로
+    #   `config.ORG_ENFORCE=True` 를 직접 켜므로 이 줄이 정상 동작하는 것처럼 보이고
+    #   (`test_capabilities_needs_identification` 은 401 을 단언하며 초록이었다), 실서버는
+    #   정책 파일로 켜므로 다른 세계가 된다. **같은 뜻의 스위치를 두 곳에서 읽으면** 테스트는
+    #   그 불일치를 볼 수 없다.
+    #
+    #   ★ `_enforced()` 는 이 파일에 **이미 있었고**, 그 주석이 「판정 함수들이 모두 여기서 같은
+    #     답을 얻는다」고 못박고 있다. 새 규칙을 만든 것이 아니라 그 계약을 지키는 것이다.
+    if _enforced() and not scope.unrestricted and not uid:
         raise HTTPException(status_code=401, detail="사용자 식별 정보가 없습니다.")
     return Principal(user_id=uid, scope=scope)
 
