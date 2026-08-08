@@ -101,7 +101,9 @@ async def _warmup():
 
 from api.routes import (app_delivery_control, decision_control,  # [CL-1, CL-2]
                         publication_control,  # [CL-3] 대내외 발간 게이트
-                        jarvis_control)  # [CL-4 선행] 기존 Supervisor 계약의 문맥 어댑터
+                        jarvis_control,  # [CL-4 선행] 기존 Supervisor 계약의 문맥 어댑터
+                        auth_control,  # [2026-08-09] 로그인·세션 — 식별의 유일한 정본
+                        app_data_control)  # [트랙 I] 생성 앱 데이터 평면
 app.include_router(factory_control.router)
 app.include_router(format_control.router)
 app.include_router(realtime.router)
@@ -145,4 +147,9 @@ app.include_router(decision_control.router)
 app.include_router(publication_control.router)
 # [CL-4 선행] Jarvis 문맥 어댑터 — 두 번째 채팅 API 가 아니라 기존 엔진의 주소 변환기다(§3).
 app.include_router(jarvis_control.router)
+# [트랙 I] 생성 앱 데이터 평면 — 생성된 앱은 자기 백엔드를 갖지 않으므로(CL-0 계약) 업무
+#   데이터는 **이 라우터를 통해서만** 드나든다. 앱은 `release_id` 를 말하지 않는다(설계 §7).
+app.include_router(app_data_control.router)
 app.include_router(mcp_control.router)
+# [2026-08-09] 로그인. ⚠️ 이 라우터 자체는 인증을 요구하지 않는다(로그인이 인증의 입구다).
+app.include_router(auth_control.router)

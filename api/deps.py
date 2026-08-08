@@ -28,6 +28,20 @@ def _extract_user_id(request: Request) -> str:
     uid = getattr(request.state, "principal_user_id", "") or ""     # ① SSO 슬롯
     if uid:
         return uid
+    # ①-b 세션 토큰(2026-08-09 로그인 도입). **헤더보다 먼저 본다** — 헤더는 브라우저가 임의
+    #     값을 보낼 수 있는 값이고(아래 ②③ 주석), 세션은 서버가 발급하고 서버가 들고 있다.
+    #     즉 로그인한 사용자는 헤더로 다른 사람인 척할 수 없다.
+    #     ⚠️ 여기서 권한을 읽지 않는다 — user_id 만 얻고 권한은 `resolve_scope` 가 매 요청
+    #       다시 해석한다. 토큰에 권한을 담으면 회수해도 토큰이 사는 동안 유효해진다.
+    try:
+        tok = request.headers.get("X-Session-Token", "") or ""
+        if tok:
+            from core.auth import auth_store
+            uid = auth_store.resolve(tok)
+            if uid:
+                return uid
+    except Exception:
+        pass                    # 인증 저장소 장애가 요청을 죽이지 않는다(아래에서 익명 처리)
     if getattr(config, "ORG_TRUST_HEADER", True):
         uid = request.headers.get(getattr(config, "ORG_USER_HEADER", "X-Factory-User"), "") or ""
         # 하위호환: Phase 1 의 org_control 이 쓰던 헤더도 받아준다.
@@ -544,6 +558,35 @@ def assert_project_writable(p: Principal, project_id: str):
 def assert_release_readable(p: Principal, release_id: str):
     if not _resource_readable(p, "release", release_id):
         _deny(f"'{release_id}' 릴리스를 볼 권한이 없습니다.")
+
+
+def assert_release_writable(p: Principal, release_id: str):
+    """★ [트랙 I · 2026-08-08] 릴리스에 딸린 것을 **바꿀** 자격.
+
+    종전에는 릴리스에 `_readable` 만 있었다. 읽기만 있던 이유는 릴리스가 불변 스냅샷이었기
+    때문인데, 트랙 I 로 **생성 앱이 그 릴리스 밑에 업무 데이터를 쌓기** 시작하면서 «이 앱의
+    데이터를 바꿀 수 있는가» 라는 질문이 새로 생겼다.
+
+    ⚠️ 이 판정을 라우트에 흩지 않고 여기 두는 이유는 `_assert_identified_for_project` 와 같다 —
+      판정 함수 안에 있어야 나중에 생기는 라우트도 부르는 순간 함께 걸린다.
+
+    ★★ **식별을 먼저 요구한다.** `_resource_readable` 은 「소유권 미기록 자원은 막지 않는다」는
+      하위호환을 갖고 있어서, 그것만 쓰면 **익명이 남의 앱 데이터에 쓸 수 있다.** 트랙 H 가
+      봉합한 «식별만으로 열리는 쓰기» 를 여기서 새로 만들지 않는다.
+    강제가 꺼져 있으면 아무것도 막지 않는다(하위호환 계약)."""
+    if p.scope.unrestricted:
+        return
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403,
+                            detail=f"'{release_id}' 앱의 데이터를 바꿀 수 없습니다 — {reason}")
+    own = org_directory.get_ownership("release", release_id)
+    if not own:
+        # 소유권 미기록 릴리스에 대한 관대함 — 단, 위에서 **식별된 사용자**임을 확인했다.
+        return
+    if own.get("owner_user_id") and own["owner_user_id"] == p.user_id:
+        return
+    assert_can_write_dept(p, own.get("dept_id", ""))
 
 
 def visible_filter(p: Principal, kind: str) -> Optional[set]:

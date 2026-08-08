@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 import { useFactoryStore } from './store/useFactoryStore';
 
@@ -25,7 +25,8 @@ import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
 import { MasterDataPanel } from './components/MasterDataPanel';
 import { WorkStandardPanel } from './components/WorkStandardPanel';
 import { OrgChartPanel } from './components/OrgChartPanel';
-import { UserSwitcher } from './components/UserSwitcher';
+import { LoginPage, type LoginResult } from './components/LoginPage';
+import { SessionBar } from './components/SessionBar';
 import { CrosswalkPanel } from './components/CrosswalkPanel';
 import { TelemetryPanel } from './components/TelemetryPanel';
 import { AdvisorPanel } from './components/AdvisorPanel';
@@ -36,9 +37,11 @@ import ServerLogPopup from './components/ServerLogPopup';
 import { GlobalNav, type NavGroup, type NavItem } from './components/GlobalNav';
 import { actingScope, governanceBlockReason, type ActingScope } from './lib/actingScope';
 import { AgentGovernancePanel } from './components/AgentGovernancePanel';
+import { Banner } from './design/HubShell';
+import { API_BASE_URL, getSessionToken, setActingUser, setSessionToken } from './lib/api';
 
 
-export default function App() {
+function AppShell() {
   const connectSSE = useFactoryStore((state) => state.connectSSE);
   const isConnected = useFactoryStore((state) => state.isConnected);
   const projects = useFactoryStore((state) => state.projects);
@@ -387,7 +390,7 @@ export default function App() {
  {/* ★ 사용자 전환기는 «기능»이 아니라 «지금 누구인가»다. 메뉴 안으로 숨기지 않는다 —
  권한 범위가 사람마다 다르므로 상시 보여야 한다(채택 결정 6항). */}
  <div className="flex items-center gap-3 min-w-0">
- <UserSwitcher />
+ <SessionBar />
  <GlobalNav
  // 1차 영역 — 매일 쓰는 진입점 3개. 넘기면 다시 «나열»이 된다.
  primary={primaryNav}
@@ -916,4 +919,68 @@ export default function App() {
       </div>
     </ErrorBoundary>
   );
+}
+
+/** ★★★ [2026-08-09] **인증 게이트 — 제품에 들어오는 유일한 문.**
+ *
+ * 종전에는 문이 없었다. `actingUser` 기본값이 `'admin'` 이라 앱을 열면 관리자로 들어와졌고,
+ * 최상단 전환기로 아무 계정이나 골라 그 권한으로 볼 수 있었다.
+ *
+ * ⚠️ **세션이 살아 있는지는 서버에 묻는다**(`/auth/me`). 토큰이 localStorage 에 남아 있어도
+ *   만료됐거나 서버가 세션을 끊었을 수 있다 — 화면이 토큰의 존재만 보고 «로그인됨» 으로
+ *   판단하면, 그 뒤 모든 요청이 401 인데 사용자는 이유를 모른 채 빈 화면을 본다.
+ * ⚠️ 서버에 닿지 못한 경우를 «미인증» 과 구분한다. 백엔드가 꺼져 있는 것을 로그인 화면으로
+ *   답하면 사용자는 비밀번호를 의심한다. */
+export default function App() {
+  const [state, setState] = useState<'checking' | 'in' | 'out'>('checking');
+  const [offline, setOffline] = useState('');
+
+  const check = useCallback(async () => {
+    setOffline('');
+    if (!getSessionToken()) { setState('out'); return; }
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+        headers: { 'X-Session-Token': getSessionToken() },
+      });
+      if (r.ok) { setState('in'); return; }
+      // 401/403 = 세션이 죽었다. 토큰을 버려야 다음 새로고침에서 또 묻지 않는다.
+      setSessionToken(''); setActingUser('');
+      setState('out');
+    } catch {
+      setOffline('서버에 연결하지 못했습니다. 백엔드가 실행 중인지 확인하십시오.');
+      setState('out');
+    }
+  }, []);
+
+  useEffect(() => { check(); }, [check]);
+
+  if (state === 'checking') {
+    return (
+      <div className="afs-scope afs-page"
+        style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+        <span className="afs-muted">확인 중…</span>
+      </div>
+    );
+  }
+  if (state === 'out') {
+    return (
+      <ErrorBoundary>
+        {offline && (
+          <div style={{ position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 10, maxWidth: 520 }}>
+            <Banner tone="warn" title="서버에 연결하지 못했습니다">{offline}</Banner>
+          </div>
+        )}
+        <LoginPage onLoggedIn={(r: LoginResult) => {
+          setState('in');
+          if (r.must_change_password) {
+            // 초기 비밀번호를 쓰는 계정에는 **한 번은 반드시** 말한다.
+            window.setTimeout(() => window.alert(
+              '초기 비밀번호를 사용 중입니다 — 내 설정에서 비밀번호를 바꾸십시오.'), 400);
+          }
+        }} />
+      </ErrorBoundary>
+    );
+  }
+  return <AppShell />;
 }

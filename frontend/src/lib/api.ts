@@ -20,6 +20,36 @@ export const API_BASE_URL =
 const USER_HEADER = 'X-Factory-User';
 const STORAGE_KEY = 'factory.actingUser';
 
+// ── [2026-08-09] 세션 토큰 — **식별의 정본** ────────────────────────────────
+//
+// ★★★ 종전에는 `actingUser` 기본값이 `'admin'` 이었다. 즉 **로그인 없이 열면 관리자**였고,
+//   화면 최상단 전환기로 아무 계정이나 골라 그 권한으로 볼 수 있었다. `api/deps.py` 가
+//   「②③ 은 인증이 아니다」라고 못박아 둔 그 상태가 제품 화면에 그대로 있었다.
+//
+// 이제 로그인이 세션 토큰을 주고, 서버는 **헤더보다 토큰을 먼저** 본다. 토큰이 있으면
+// 사용자는 헤더로 다른 사람인 척할 수 없다.
+// ⚠️ `actingUser` 는 지우지 않고 **하위호환으로 남긴다** — 토큰이 없는 경로(개발 스크립트·
+//   기존 테스트)가 아직 있다. 다만 **기본값을 없앤다**: 로그인하지 않았으면 익명이다.
+const SESSION_HEADER = 'X-Session-Token';
+const SESSION_KEY = 'factory.sessionToken';
+
+let sessionToken: string =
+  (typeof localStorage !== 'undefined' && localStorage.getItem(SESSION_KEY)) || '';
+
+export function getSessionToken(): string {
+  return sessionToken;
+}
+
+export function setSessionToken(token: string) {
+  sessionToken = (token || '').trim();
+  try {
+    if (sessionToken) localStorage.setItem(SESSION_KEY, sessionToken);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // localStorage 가 막힌 환경에서도 동작은 계속돼야 한다
+  }
+}
+
 let actingUser: string =
   (typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY)) || '';
 
@@ -168,12 +198,16 @@ export function installFetchInterceptor() {
       //   사용자 식별만큼이나 밖으로 나가면 안 되는 정보다.
       const ctx = enterpriseContext;
       const hasCtx = !!(ctx.tenantId || ctx.scopeNodeId || ctx.entityMode);
-      if ((actingUser || hasCtx) && url && isBackendUrl(url)) {
+      if ((actingUser || sessionToken || hasCtx) && url && isBackendUrl(url)) {
         const headers = new Headers(
           (init && init.headers) || (input instanceof Request ? input.headers : undefined)
         );
         // ★ 이미 붙어 있으면 덮어쓰지 않는다 — 호출부가 일부러 다른 범위를 지정한 경우가 있다
         //   (예: 관리자 화면이 특정 조직을 대신 조회). 전역값이 그것을 이기면 조용히 틀어진다.
+        // ★ 세션 토큰을 먼저 싣는다 — 서버가 이것을 헤더보다 우선한다.
+        if (sessionToken && !headers.has(SESSION_HEADER)) {
+          headers.set(SESSION_HEADER, sessionToken);
+        }
         if (actingUser && !headers.has(USER_HEADER)) headers.set(USER_HEADER, actingUser);
         if (ctx.tenantId && !headers.has(TENANT_HEADER)) headers.set(TENANT_HEADER, ctx.tenantId);
         if (ctx.scopeNodeId && !headers.has(SCOPE_HEADER)) headers.set(SCOPE_HEADER, ctx.scopeNodeId);
