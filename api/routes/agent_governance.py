@@ -30,8 +30,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api.deps import (Principal, current_principal, hidden_envelope, may_see_exact_count,
-                      require_caps, viewer_visible_scopes)
+from api.deps import (Principal, capabilities_of, current_principal, hidden_envelope,
+                      may_see_exact_count, require_caps, viewer_visible_scopes)
 from core import admin_capability as cap
 from core import agent_asset_adapter as adapter
 from core import asset_project_usage as project_usage
@@ -174,55 +174,147 @@ def _assert_may_create(p: Principal, kind: str, visibility: str, owner_scope_id:
     return c
 
 
+# ── 「지금 이 자산에 이 행동을 할 수 있는가」 ─────────────────────────────
+#
+# ★★★ [§8.6 · §10 UI] 판정을 **사유 계산**과 **던지기**로 나눈다.
+#
+# 왜: 설계 §10 은 「API 403 을 버튼 클릭 후 처음 알게 되는 경로가 없어야 한다」고 못박았다.
+# 그런데 화면이 그것을 지키려면 자산마다 «내가 이걸 할 수 있는가» 를 알아야 하고, 화면이
+# 그 규칙을 다시 구현하면 **서버와 화면이 서서히 갈라진다**(「버튼은 보이는데 서버는 거부」
+# 또는 그 반대). 그때 사용자는 통제가 고장났다고 읽는다.
+#
+# → 그래서 **서버가 자산마다 답한다.** 아래 `_*_block_reason` 이 유일한 규칙이고,
+#   `_assert_may_*` 는 그것을 읽어 403 으로 바꿀 뿐이다. 목록은 같은 함수로 사유를 실어 보낸다.
+#
+# ⚠️ 목록용 판정은 `require_caps` 를 **부르지 않는다.** 그 함수는 거부를 감사에 남기므로,
+#   목록 한 번에 감사 로그가 수십 줄 쌓인다(자산 31개 × 행동 4개). capability 는 한 번만
+#   계산해 넘긴다.
+def _write_block_reason(c, kind: str, asset: Dict[str, Any], uid: str) -> str:
+    if not c.has(_CAPS[kind][2]):
+        return "이 종류의 자산을 바꿀 권한이 없습니다."
+    if adapter.is_file_asset(asset["asset_id"]):
+        try:
+            adapter.assert_writable_here(asset["asset_id"])
+        except AssetError as e:
+            return str(e)
+    if asset["visibility"] == VIS_PERSONAL:
+        return "" if (asset.get("created_by") or "") == uid else \
+            "다른 사람의 개인 자산은 수정할 수 없습니다."
+    if asset["visibility"] == VIS_ENTERPRISE and not c.can_publish_enterprise():
+        return "전사 자산은 AI 거버넌스 관리자만 수정할 수 있습니다."
+    if asset["visibility"] in (VIS_SCOPE, VIS_DESCENDANTS) \
+            and not c.can_manage_scope(asset.get("owner_scope_id") or ""):
+        # ★ 작성자 본인은 자기 초안을 계속 고칠 수 있어야 한다 — 그러지 않으면 관리자가
+        #   아닌 사람은 자기가 만든 것을 한 번 저장한 뒤 고칠 수 없다.
+        if (asset.get("created_by") or "") != uid:
+            return (f"'{_scope_label(asset.get('owner_scope_id') or '')}' 조직 자산을 "
+                    f"수정할 권한이 없습니다 — 관리 범위 밖입니다.")
+    return ""
+
+
+def _submit_block_reason(c, kind: str, asset: Dict[str, Any], uid: str) -> str:
+    """「승인 요청」. ⚠️ **개정과 다른 행동이다** — 개정은 승인된 자산에도 할 수 있지만(새 버전을
+    쌓고 승인이 풀린다) 승인 요청은 초안·검토 상태에서만 뜻이 있다. 둘을 한 사유로 묶으면
+    승인된 자산을 고칠 수 없게 되거나, 이미 승인된 것에 「승인 요청」이 열려 보인다."""
+    r = _write_block_reason(c, kind, asset, uid)
+    if r:
+        return r
+    try:
+        agent_assets.assert_submittable(asset)
+    except AssetError as e:
+        return str(e)
+    return ""
+
+
+def _publish_authz_reason(c, kind: str, asset: Dict[str, Any], uid: str, verb: str) -> str:
+    """승인·폐기의 **자격**만 본다 — 상태는 보지 않는다.
+
+    ⚠️ 둘을 갈라 두는 이유: 전사 승격은 «승인 자격» 을 요구하지만 «지금 승인 가능한 상태» 를
+      요구하지 않는다(승격은 **이미 승인된** 조직 자산에서 출발한다). 한 함수로 묶었더니
+      승격이 항상 「APPROVED 상태에서는 승인할 수 없습니다」로 막혔다."""
+    if not c.has(_CAPS[kind][3 if verb == "approve" else 4]):
+        return ("승인 권한이 없습니다 — 조직 관리자·AI 관리자가 승인합니다." if verb == "approve"
+                else "폐기 권한이 없습니다.")
+    if adapter.is_file_asset(asset["asset_id"]):
+        try:
+            adapter.assert_writable_here(asset["asset_id"])
+        except AssetError as e:
+            return str(e)
+    if asset["visibility"] == VIS_ENTERPRISE and not c.can_publish_enterprise():
+        return ("전사 공개 자산의 승인·폐기는 AI 거버넌스 관리자 권한입니다 — "
+                "부서 단위에서는 승격을 요청할 수 있습니다.")
+    if asset["visibility"] in (VIS_SCOPE, VIS_DESCENDANTS) \
+            and not c.can_manage_scope(asset.get("owner_scope_id") or ""):
+        return (f"'{_scope_label(asset.get('owner_scope_id') or '')}' 조직 자산을 "
+                f"승인·폐기할 권한이 없습니다 — 관리 범위 밖입니다.")
+    if asset["visibility"] == VIS_PERSONAL and (asset.get("created_by") or "") != uid:
+        return "다른 사람의 개인 자산은 다룰 수 없습니다."
+    return ""
+
+
+def _publish_block_reason(c, kind: str, asset: Dict[str, Any], uid: str, verb: str) -> str:
+    """승인·폐기 — 자격 **그리고** 상태.
+
+    ★★ 상태를 여기서 함께 보는 이유: 승인 자격이 있어도 이미 승인된 것은 다시 승인할 수 없고
+      폐기된 것은 또 폐기할 수 없다. 이 검사가 빠져 있어 「사유는 비었는데 서버는 403」인
+      상태가 있었다 — 2026-08-08 계약 테스트가 잡았다."""
+    r = _publish_authz_reason(c, kind, asset, uid, verb)
+    if r:
+        return r
+    try:
+        if verb == "approve":
+            agent_assets.assert_approvable(asset)
+        else:
+            agent_assets.assert_retirable(asset)
+    except AssetError as e:
+        return str(e)
+    return ""
+
+
+def _promote_block_reason(c, kind: str, asset: Dict[str, Any], uid: str) -> str:
+    """전사 승격(요청 또는 확정). 조직 승인 자격을 먼저 요구한다."""
+    if adapter.is_file_asset(asset["asset_id"]):
+        return ("제품 기본 정의는 승격 대상이 아닙니다 — 복사해서 조직 자산으로 만든 뒤 "
+                "조직 승인을 받고 승격을 요청하십시오.")
+    #: ⚠️ **자격만** 본다. 승격은 이미 승인된 자산에서 출발하므로 「지금 승인 가능한 상태인가」
+    #:   를 요구하면 항상 막힌다. 승격 자신의 상태 규칙은 바로 아래 저장소가 갖는다.
+    r = _publish_authz_reason(c, kind, asset, uid, "approve")
+    if r:
+        return r
+    try:
+        agent_assets.assert_promotable(asset)           # 상태·범위 규칙은 저장소가 갖는다
+    except AssetError as e:
+        return str(e)
+    return ""
+
+
 def _assert_may_write(p: Principal, kind: str, asset: Dict[str, Any], verb: str):
     """개정. **보이는 자산에 대한 거부는 403** 이고 사유를 말한다."""
     c = require_caps(p, _CAPS[kind][2], resource=f"agent_asset:{kind}", action=verb)
-    # 파일 자산은 여기서 바꾸는 것이 아니다 — 어디서 바꾸는지와 함께 막는다.
-    if adapter.is_file_asset(asset["asset_id"]):
-        adapter.assert_writable_here(asset["asset_id"])         # AssetError → 아래에서 403
-    if asset["visibility"] == VIS_PERSONAL:
-        if (asset.get("created_by") or "") != (p.user_id or ""):
-            raise HTTPException(status_code=403, detail="다른 사람의 개인 자산은 수정할 수 없습니다.")
-        return c
-    if asset["visibility"] == VIS_ENTERPRISE and not c.can_publish_enterprise():
-        raise HTTPException(status_code=403,
-                            detail="전사 자산은 AI 거버넌스 관리자만 수정할 수 있습니다.")
-    if asset["visibility"] in (VIS_SCOPE, VIS_DESCENDANTS):
-        if not c.can_manage_scope(asset.get("owner_scope_id") or ""):
-            # ★ 작성자 본인은 자기 초안을 계속 고칠 수 있어야 한다 — 그러지 않으면 관리자가
-            #   아닌 사람은 자기가 만든 것을 한 번 저장한 뒤 고칠 수 없다.
-            if (asset.get("created_by") or "") != (p.user_id or ""):
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"'{_scope_label(asset.get('owner_scope_id') or '')}' 조직 자산을 "
-                           f"수정할 권한이 없습니다 — 관리 범위 밖입니다.")
+    r = _write_block_reason(c, kind, asset, p.user_id or "")
+    if r:
+        raise HTTPException(status_code=403, detail=r)
     return c
 
 
-def _assert_may_publish(p: Principal, kind: str, asset: Dict[str, Any], verb: str):
-    """승인·폐기. 조직 범위와 전사 공개를 **따로** 본다(설계 §4.2)."""
+def _assert_may_publish(p: Principal, kind: str, asset: Dict[str, Any], verb: str,
+                        check_state: bool = True):
+    """승인·폐기. 조직 범위와 전사 공개를 **따로** 본다(설계 §4.2).
+
+    ⚠️ `check_state=False` 는 **전사 승격 전용**이다 — 승격은 승인 자격을 요구하지만 「지금
+      승인 가능한 상태」를 요구하지 않는다(이미 승인된 자산에서 출발한다). 상태 규칙은
+      그쪽에서 `assert_promotable` 이 따로 본다."""
     idx = 3 if verb == "approve" else 4
     c = require_caps(p, _CAPS[kind][idx], resource=f"agent_asset:{kind}", action=verb)
-    if adapter.is_file_asset(asset["asset_id"]):
-        adapter.assert_writable_here(asset["asset_id"])
-    if asset["visibility"] == VIS_ENTERPRISE and not c.can_publish_enterprise():
-        raise HTTPException(
-            status_code=403,
-            detail="전사 공개 자산의 승인·폐기는 AI 거버넌스 관리자 권한입니다 — "
-                   "부서 단위에서는 승격을 요청할 수 있습니다.")
-    if asset["visibility"] in (VIS_SCOPE, VIS_DESCENDANTS) and \
-            not c.can_manage_scope(asset.get("owner_scope_id") or ""):
-        raise HTTPException(
-            status_code=403,
-            detail=f"'{_scope_label(asset.get('owner_scope_id') or '')}' 조직 자산을 "
-                   f"승인·폐기할 권한이 없습니다 — 관리 범위 밖입니다.")
-    if asset["visibility"] == VIS_PERSONAL and (asset.get("created_by") or "") != (p.user_id or ""):
-        raise HTTPException(status_code=403, detail="다른 사람의 개인 자산은 다룰 수 없습니다.")
+    r = (_publish_block_reason if check_state else _publish_authz_reason)(
+        c, kind, asset, p.user_id or "", verb)
+    if r:
+        raise HTTPException(status_code=403, detail=r)
     return c
 
 
 # ── 응답 모양 ─────────────────────────────────────────────────────────────
-def _slim(a: Dict[str, Any]) -> Dict[str, Any]:
+def _slim(a: Dict[str, Any], c=None, kind: str = "", uid: str = "") -> Dict[str, Any]:
     """목록용. **본문(`body`)과 버전 이력을 뺀다** — 스킬 31개 전문이 목록에 실리면 응답이
     수십 KB 가 되고, 화면은 목록에서 본문을 쓰지 않는다.
 
@@ -237,6 +329,23 @@ def _slim(a: Dict[str, Any]) -> Dict[str, Any]:
                             else int(a.get("current_version") or 0))
     out["runnable"] = (bool(a["runnable"]) if "runnable" in a
                        else a.get("status") in RUNNABLE)
+    #: ★★★ [§8.6 · §10 UI] **자산마다 «지금 이걸 할 수 있는가» 를 서버가 답한다.**
+    #: 빈 문자열이면 할 수 있고, 아니면 그 문장이 곧 못 하는 이유다. 화면은 이 값을 그대로
+    #: 버튼에 붙이면 되므로 규칙을 다시 구현할 필요가 없다 — 그래야 「버튼은 보이는데 서버는
+    #: 거부」가 생기지 않는다(2026-08-08 감사에서 실제로 발견: 부서원에게 남의 조직 자산의
+    #: «승인 요청» 이 활성으로 보였고, 누르면 403 이었다).
+    if c is not None and kind:
+        out["blocked"] = {
+            "update": _write_block_reason(c, kind, a, uid),
+            "submit": _submit_block_reason(c, kind, a, uid),
+            "approve": _publish_block_reason(c, kind, a, uid, "approve"),
+            "retire": _publish_block_reason(c, kind, a, uid, "retire"),
+            "promote": _promote_block_reason(c, kind, a, uid),
+            #: 복사는 «이 자산» 이 아니라 «새 자산» 을 만드는 일이다 — 원본이 파일 자산이어도
+            #: 막히지 않는다. 오히려 그것이 기본 제공 정의를 쓰는 유일한 방법이다.
+            "copy": "" if c.has(_CAPS[kind][1])
+                    else "자산을 만들 권한이 없습니다 — 읽기만 가능합니다.",
+        }
     return out
 
 
@@ -308,9 +417,11 @@ async def list_assets(kind_path: str,
                             include_files=include_files, include_retired=include_retired)
     if status:
         rows = [r for r in rows if r.get("status") == status]
+    #: capability 는 **한 번만** 계산해 모든 자산에 넘긴다 — 자산마다 다시 풀면 목록이 느려진다.
+    c = capabilities_of(p)
     out = {
         "kind": kind,
-        "items": [_slim(r) for r in rows],
+        "items": [_slim(r, c, kind, p.user_id or "") for r in rows],
         "total": len(rows),
         #: ★ 목록이 «전부» 인지 «범위 안» 인지 화면이 알아야 한다. 이 표시가 없으면 사용자는
         #  자기가 보는 목록이 전사 전체라고 오해한다.
@@ -549,7 +660,7 @@ async def promote_asset(kind_path: str, asset_id: str,
             detail="제품 기본 정의는 승격 대상이 아닙니다 — 복사해서 조직 자산으로 만든 뒤 "
                    "조직 승인을 받고 승격을 요청하십시오.")
     try:
-        c = _assert_may_publish(p, kind, a, "approve")
+        c = _assert_may_publish(p, kind, a, "approve", check_state=False)
         if c.can_publish_enterprise():
             out = agent_assets.promote(asset_id, p.user_id or "")
             outcome, reason = "확정", "전사 승격 확정"

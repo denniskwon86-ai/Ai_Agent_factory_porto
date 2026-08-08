@@ -228,30 +228,46 @@ class AgentAssetStore:
         return self.get(asset_id)
 
     # ── 승인·폐기 ─────────────────────────────────────────────────────────
-    def submit(self, asset_id: str, actor: str) -> Dict[str, Any]:
-        a = self.get(asset_id)
+    #
+    # ★★ 상태 규칙을 `assert_*` 로 **꺼내 둔다.** 라우트가 「이 사람이 지금 이걸 할 수 있는가」를
+    #   목록에 실어 보내야 하는데(§8.6), 규칙이 실행 메서드 안에만 있으면 화면은 **눌러 봐야**
+    #   안다. 그것이 설계 §10 이 금지한 「클릭 후에야 알게 되는 403」이다.
+    #   ⚠️ 실제로 그 상태였다 — 계약 테스트가 「APPROVED 인데 사유가 비어 있다」를 잡았다.
+    def assert_submittable(self, a: Dict[str, Any]) -> None:
         if a["status"] not in (ST_DRAFT, ST_REVIEW):
             raise AssetError(f"{a['status']} 상태에서는 검토를 요청할 수 없습니다.")
+
+    def assert_approvable(self, a: Dict[str, Any]) -> None:
+        if a["status"] != ST_REVIEW:
+            raise AssetError(
+                f"{a['status']} 상태에서는 승인할 수 없습니다 — 검토 요청 후에 승인합니다.")
+
+    def assert_retirable(self, a: Dict[str, Any]) -> None:
+        if a["visibility"] == VIS_SYSTEM:
+            raise AssetError("제품 기본 자산은 폐기할 수 없습니다.")
+        if a["status"] == ST_RETIRED:
+            raise AssetError("이미 사용 중단된 자산입니다.")
+
+    def submit(self, asset_id: str, actor: str) -> Dict[str, Any]:
+        a = self.get(asset_id)
+        self.assert_submittable(a)
         return self._set_status(asset_id, ST_REVIEW, actor, approved_by="")
 
     def approve(self, asset_id: str, actor: str) -> Dict[str, Any]:
         """승인. ⚠️ **자기가 만든 것을 자기가 승인하는 것을 막지 않는다** — 조직이 작으면 그것이
         정상이다. 대신 `approved_by` 를 남겨 **누가 승인했는지** 항상 답할 수 있게 한다."""
         a = self.get(asset_id)
-        if a["status"] != ST_REVIEW:
-            raise AssetError(
-                f"{a['status']} 상태에서는 승인할 수 없습니다 — 검토 요청 후에 승인합니다.")
+        self.assert_approvable(a)
         return self._set_status(asset_id, ST_APPROVED, actor, approved_by=actor)
 
     def retire(self, asset_id: str, actor: str) -> Dict[str, Any]:
         """폐기 — **행을 지우지 않는다.** 과거 산출물이 이 자산을 가리키고 있다."""
         a = self.get(asset_id)
-        if a["visibility"] == VIS_SYSTEM:
-            raise AssetError("제품 기본 자산은 폐기할 수 없습니다.")
+        self.assert_retirable(a)
         return self._set_status(asset_id, ST_RETIRED, actor, approved_by=a.get("approved_by", ""))
 
     # ── 전사 승격 (설계 §4.2 · §8.6) ──────────────────────────────────────
-    def _assert_promotable(self, a: Dict[str, Any]) -> None:
+    def assert_promotable(self, a: Dict[str, Any]) -> None:
         """전사로 올릴 수 있는 상태인가. **요청과 확정이 같은 조건을 쓴다** — 요청은 되는데
         확정이 안 되면 요청한 사람은 영영 답을 못 받고, 그 이유는 아무데도 안 적힌다."""
         if a["visibility"] == VIS_ENTERPRISE:
@@ -273,7 +289,7 @@ class AgentAssetStore:
         ⚠️⚠️ **가시성도 상태도 바꾸지 않는다.** 요청한 순간 자산이 전사에 보이면 그것은 요청이
           아니라 공개이고, 되돌릴 방법도 없다. 요청은 「답해 달라」는 표시일 뿐이다."""
         a = self.get(asset_id)
-        self._assert_promotable(a)
+        self.assert_promotable(a)
         now = _now()
         with self._lock, self._connect() as conn:
             conn.execute("UPDATE agent_assets SET promotion_requested_by=?, "
@@ -289,7 +305,7 @@ class AgentAssetStore:
           조직 승인만 받은 정의가 전사 자산으로 «승인됨» 이 되면 **아무도 검토하지 않은 전사
           자산**이 생긴다. 승격 뒤 한 번 더 승인해야 `approved_by` 에 전사 승인자가 남는다."""
         a = self.get(asset_id)
-        self._assert_promotable(a)
+        self.assert_promotable(a)
         now = _now()
         with self._lock, self._connect() as conn:
             conn.execute(

@@ -766,3 +766,86 @@ def test_promotion_of_invisible_asset_is_404(client):
     """★ 안 보이는 자산에 대한 승격 시도는 **404** 다 — 403 은 «그런 자산이 있다» 를 알려준다."""
     mine = _create(client, MEMBER, visibility=VIS_PERSONAL).json()["asset_id"]
     assert client.post(f"{B}/agents/{mine}/promote", headers=H(MGR)).status_code == 404
+
+
+# ── 「누르기 전에 안다」 (설계 §8.6 · §10 UI) ────────────────────────────
+#
+# ★★★ 설계 §10 은 「API 403 을 **버튼 클릭 후 처음 알게 되는 경로가 없어야 한다**」고 못박았다.
+# 화면이 그것을 지키려면 자산마다 «내가 이걸 할 수 있는가» 를 알아야 하는데, 화면이 그 규칙을
+# 다시 구현하면 서버와 서서히 갈라진다. 그래서 **서버가 자산마다 답한다**(`blocked`).
+#
+# ⚠️ 2026-08-08 역할별 화면 감사에서 실제로 어긋난 상태를 발견했다: 부서원에게 남의 조직 자산의
+#   «승인 요청» 이 **활성으로** 보였고, 누르면 403 이었다. 아래 테스트가 그 유형을 막는다.
+def test_list_carries_a_reason_for_every_action(client):
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    row = next(i for i in client.get(f"{B}/agents?include_files=false",
+                                     headers=H(MGR)).json()["items"]
+               if i["asset_id"] == a["asset_id"])
+    assert set(row["blocked"]) == {"update", "submit", "approve", "retire", "promote", "copy"}
+
+
+def test_member_is_told_before_clicking_that_someone_elses_org_asset_is_off_limits(client):
+    """★★★ 감사가 잡은 바로 그 결함. 부서원에게 남의 조직 자산은 **누르기 전에** 막혀야 한다."""
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    row = next(i for i in client.get(f"{B}/agents?include_files=false",
+                                     headers=H(MEMBER)).json()["items"]
+               if i["asset_id"] == a["asset_id"])
+    assert row["blocked"]["submit"], "부서원에게 «승인 요청» 이 열려 보인다(누르면 403 이다)"
+    #: 그리고 그 사유가 **사실**인지 확인한다 — 문구만 있고 서버가 허용하면 그것도 거짓말이다.
+    assert client.post(f"{B}/agents/{a['asset_id']}/submit",
+                       headers=H(MEMBER)).status_code == 403
+
+
+@pytest.mark.parametrize("uid", [MGR, MEMBER, VIEWER, AI_ADMIN])
+def test_the_reason_and_the_real_answer_agree(client, uid):
+    """★★★ **화면이 본 사유와 서버의 실제 답이 일치해야 한다.**
+
+    이 테스트가 없으면 두 방향으로 어긋날 수 있고 둘 다 나쁘다:
+      · 사유는 비었는데 서버가 거부 → 「버튼은 보이는데 안 된다」(통제가 고장난 것으로 읽힌다)
+      · 사유는 있는데 서버는 허용   → 할 수 있는 일을 못 하게 막는다(사용자는 권한을 요청한다)
+
+    ⚠️ 행동마다 **새 자산**으로 검사한다. 한 자산에 이어서 하면 앞 행동이 상태를 바꿔
+      뒤 행동의 사유가 달라지고, 그러면 무엇을 검사했는지 알 수 없게 된다."""
+    def row_for(asset_id, who):
+        items = client.get(f"{B}/agents?include_files=false", headers=H(who)).json()["items"]
+        return next((i for i in items if i["asset_id"] == asset_id), None)
+
+    for verb, path in (("approve", "approve"), ("retire", "retire"), ("promote", "promote")):
+        a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+        r = row_for(a["asset_id"], uid)
+        if r is None:
+            continue                       # 안 보이는 자산은 애초에 버튼도 없다
+        reason = r["blocked"][verb]
+        got = client.post(f"{B}/agents/{a['asset_id']}/{path}", headers=H(uid))
+        if reason:
+            assert got.status_code in (403, 404), (
+                f"{uid} 의 {verb}: 사유(«{reason}»)가 있는데 서버는 {got.status_code} 로 허용했다")
+        else:
+            assert got.status_code == 200, (
+                f"{uid} 의 {verb}: 사유가 없는데 서버는 {got.status_code} 로 거부했다 — "
+                f"«{got.text}» 이것이 「누르고 나서야 아는 403」이다")
+
+
+def test_copy_is_never_blocked_by_the_file_asset_rule(client):
+    """★★ 「기본 제공은 복사해서 쓰십시오」라는 안내의 **도착지**가 막히면 안 된다.
+
+    종전 화면은 모든 행동에 그 문구를 붙였고, 그래서 복사 버튼 자체에 「복사해서 쓰십시오」가
+    사유로 달렸다 — 아무 데도 갈 수 없는 안내다."""
+    row = next(i for i in client.get(f"{B}/agents", headers=H(MEMBER)).json()["items"]
+               if i["asset_id"].startswith("file:"))
+    assert row["blocked"]["copy"] == "", "복사가 막혀 있으면 규칙을 따를 방법이 없다"
+    assert row["blocked"]["update"], "기본 제공 정의를 직접 고칠 수 있는 것으로 보인다"
+    r = client.post(f"{B}/agents/{row['asset_id']}/copy",
+                    json={"visibility": VIS_PERSONAL}, headers=H(MEMBER))
+    assert r.status_code == 200, r.text
+
+
+def test_viewer_is_blocked_on_everything_with_distinct_reasons(client):
+    """★ 사유가 전부 같은 문장이면 사용자는 무엇이 다른지 모른다 — 행동마다 다른 답이어야 한다."""
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    row = next(i for i in client.get(f"{B}/agents?include_files=false",
+                                     headers=H(VIEWER)).json()["items"]
+               if i["asset_id"] == a["asset_id"])
+    b = row["blocked"]
+    assert all(b[k] for k in ("update", "submit", "approve", "retire", "promote", "copy"))
+    assert len({b["approve"], b["copy"]}) == 2, "승인과 복사가 같은 이유로 막혀 있다"
