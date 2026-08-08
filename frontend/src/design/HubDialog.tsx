@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
+import { getEnterpriseContext } from '../lib/api';
 import './afs.css';
 
 /** 포커스 가능한 요소 — 숨겨진 것·disabled 는 제외한다. */
@@ -30,6 +31,45 @@ function focusables(root: HTMLElement): HTMLElement[] {
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0;
     });
+}
+
+/** ★★★ [설계 §10 UI 3항] 「현재 회사·조직·모드가 화면에서 **항상** 확인 가능하다」.
+ *
+ * ## 왜 셸에 넣는가 — 화면마다 넣으면 반드시 빠진다
+ *
+ * 2026-08-08 역할별 감사 실측: 허브 화면 11개 중 **조직·모드를 함께 보여주는 것은 Agent
+ * Governance 하나**뿐이었다(6개는 둘 다 없고, 4개는 조직만). 화면마다 각자 그리게 두면 새
+ * 화면이 생길 때마다 하나씩 빠진다 — 이 파일 머리말이 `role="dialog"` 에 대해 말한 것과
+ * **같은 이유**로 셸에 넣는다.
+ *
+ * ## ⚠️⚠️ 모드를 모르면 «가상» 을 «실제» 로 읽는다
+ *
+ * `VIRTUAL`(가상 조직/샌드박스)에서는 같은 화면이 **다른 데이터**를 보여준다. 모드 표시가
+ * 없으면 사용자는 연습용 숫자를 실적으로 읽고, 그 위에서 결정한다. 그래서 REAL 은 조용히
+ * 적고 **VIRTUAL 은 눈에 띄게** 표시한다 — 둘을 같은 무게로 그리면 경고가 되지 않는다.
+ *
+ * ⚠️ 문맥을 **읽기만** 한다. 여기서 바꾸는 수단을 주면 모달 안에서 범위를 바꾼 뒤 그 사실을
+ *   잊은 채 다른 화면으로 넘어가게 된다 — 전환은 상단 전환기 한 곳에서만 한다. */
+function ContextFooter() {
+  const ctx = getEnterpriseContext();
+  const mode = (ctx.entityMode || 'REAL').toUpperCase();
+  const virtual = mode !== 'REAL';
+  return (
+    <div className="afs-dialog-context"
+      style={{
+        display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+        padding: '6px 14px', fontSize: 12, borderTop: '1px solid var(--afs-border)',
+      }}>
+      <span className="afs-muted">실행 문맥</span>
+      <b className={virtual ? 'afs-warn-fg' : 'afs-muted'}>
+        {virtual ? `⚠️ ${mode} — 가상 문맥입니다` : 'REAL'}
+      </b>
+      <span className="afs-muted">·</span>
+      <span className="afs-muted">조직 {ctx.scopeNodeId || '미지정'}</span>
+      <span className="afs-muted">·</span>
+      <span className="afs-muted">{ctx.tenantId || 'tenant_default'}</span>
+    </div>
+  );
 }
 
 export function HubDialog({ label, onClose, children }: {
@@ -96,6 +136,7 @@ export function HubDialog({ label, onClose, children }: {
       <div ref={boxRef} className="afs-dialog" role="dialog" aria-modal="true"
         aria-label={label} tabIndex={-1}>
         {children}
+        <ContextFooter />
       </div>
     </div>,
     document.body,
