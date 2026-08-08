@@ -39,6 +39,25 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   return (j as any).data as T;
 }
 
+/** `data` 밖의 통제 메타데이터(`write_blocked`)까지 보존해야 하는 요청에 쓴다.
+ *  ⚠️ 위 `req` 는 `.data` 만 꺼내므로 그 값들이 **조용히 버려진다.** */
+async function reqEnvelope<T>(method: string, path: string, body?: unknown): Promise<any> {
+  const r = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const d = (j as any)?.detail;
+    const msg = typeof d === 'string' ? d : `요청 실패 (${r.status})`;
+    const err = new Error(msg) as ApiError;
+    err.status = r.status;
+    throw err;
+  }
+  return j;
+}
+
 // ── 타입 ─────────────────────────────────────────────────────────────────
 export type Sys = {
   system_id: string; name: string; mcp_endpoint: string; scope: string; status: string;
@@ -58,8 +77,21 @@ export type LiveValue = {
   error?: string;
 };
 
+/** 시스템 목록 + **쓰기 가능 여부.**
+ *
+ * ★★★ 서버가 「지금 이 사람이 바꿀 수 있는가」를 함께 준다(`write_blocked`). 빈 문자열이면
+ *   바꿀 수 있고, 아니면 그 문장이 곧 못 바꾸는 이유다.
+ *   ⚠️ **화면이 이 판정을 다시 만들지 말 것** — 만들면 서버와 서서히 갈라져 「버튼은 보이는데
+ *   서버는 거부」가 생긴다. 실제로 그 상태였다(2026-08-08 행동 단위 대조에서 발견). */
+export type SystemsResult = { rows: Sys[]; writeBlocked: string };
+
 export const crosswalkApi = {
   systems: () => req<Sys[]>('GET', `${X}/systems`),
+
+  systemsWithRights: async (): Promise<SystemsResult> => {
+    const j = await reqEnvelope<Sys[]>('GET', `${X}/systems`);
+    return { rows: (j.data as Sys[]) || [], writeBlocked: String(j.write_blocked || '') };
+  },
   schema: (sid: string) => req<Field[]>('GET', `${X}/systems/${sid}/schema`),
   proposals: (sid: string) => req<Proposal[]>('GET', `${X}/systems/${sid}/proposals`),
   mappings: (sid: string) => req<Mapping[]>('GET', `${X}/systems/${sid}/mappings`),

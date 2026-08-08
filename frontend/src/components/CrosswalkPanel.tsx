@@ -42,6 +42,11 @@ import {
 
 export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
   const [systems, setSystems] = useState<Loaded<Sys[]>>(loading<Sys[]>());
+  //: ★★★ 「지금 이 사람이 바꿀 수 있는가」는 **서버가 답한다**(§10 UI). 빈 문자열이면 가능.
+  //:   ⚠️ 화면이 이 판정을 다시 만들지 않는다 — 만들면 서버와 갈라져 「버튼은 보이는데 서버는
+  //:   거부」가 다시 생긴다. 2026-08-08 대조에서 실제로 그 상태를 발견했다: viewer 에게
+  //:   「+ 시스템 등록」이 **항상 활성**이었고 누르면 403 이었다.
+  const [writeBlocked, setWriteBlocked] = useState('');
   const [sel, setSel] = useState<string | null>(null);
   const [schema, setSchema] = useState<Loaded<Field[]>>(loading<Field[]>());
   const [proposals, setProposals] = useState<Loaded<Proposal[]>>(loading<Proposal[]>());
@@ -71,7 +76,8 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
   const fetchSystems = useCallback(async () => {
     setSystems(loading<Sys[]>());
     try {
-      const rows = await crosswalkApi.systems();
+      const { rows, writeBlocked: wb } = await crosswalkApi.systemsWithRights();
+      setWriteBlocked(wb);
       reportRequestSuccess();
       setSystems(ok(rows || []));
     } catch (e: any) {
@@ -245,9 +251,17 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
                     onChange={(e) => setSysEndpoint(e.target.value)}
                     placeholder="MCP endpoint (선택, M3용)" />
                   <button className="primary-button" style={{ width: '100%' }}
-                    onClick={handleCreateSystem} disabled={busy !== null}>
+                    onClick={handleCreateSystem}
+                    disabled={busy !== null || Boolean(writeBlocked)}
+                    aria-disabled={Boolean(writeBlocked) || undefined}>
                     {busy === 'sys' ? '등록 중…' : '+ 시스템 등록'}
                   </button>
+                  {/* §8.6 — 못 누르는 이유를 **항상** 들고 다닌다. 회색 버튼만 두면 사용자는
+                      화면 고장으로 읽고 진짜 이유는 아무에게도 도달하지 않는다. */}
+                  {writeBlocked && (
+                    <small className="afs-warn-fg" style={{ fontSize: 12, display: 'block',
+                      marginTop: 6 }}>🔒 {writeBlocked}</small>
+                  )}
                 </div>
               </Panel>
 

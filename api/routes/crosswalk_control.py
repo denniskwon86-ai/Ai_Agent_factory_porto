@@ -13,6 +13,7 @@ from typing import Optional, List
 
 # [§6-2] 목록에 등급 가림을 적용하려면 주체가 필요하다(등급은 권한에서 파생한다).
 from api.deps import (Principal, assert_governance_readable, assert_identified,
+                      capabilities_of,
                       current_principal, require_caps, visibility_block_reason)
 from core.admin_capability import ADMIN_DATA_ACCESS
 from core.crosswalk import crosswalk, CrosswalkError
@@ -54,6 +55,28 @@ def _assert_may_write(p: Principal, action: str) -> None:
       있는 것이 아니다(`AdminCapabilities.manageable_dept_ids` 주석과 같은 이유)."""
     assert_identified(p, WHAT)
     require_caps(p, ADMIN_DATA_ACCESS, resource="crosswalk", action=action)
+
+
+def write_block_reason(p: Principal) -> str:
+    """「지금 이 사람이 크로스워크를 **바꿀 수 있는가**」 — 못 바꾸면 그 사유.
+
+    ★★★ [2026-08-08 행동 단위 대조] 위 `_assert_may_write` 가 서버를 막은 뒤에도 **화면은
+      그것을 몰랐다.** `CrosswalkPanel` 의 「+ 시스템 등록」은 `disabled={busy !== null}` 뿐이라
+      viewer 에게 **항상 활성**이었고, 누르면 403 이었다 — 설계 §10 이 금지한 「클릭 후에야
+      알게 되는 403」이다. 트랙 G 가 서버를 봉합할 때 화면을 함께 고치지 않은 자리다.
+
+    ⚠️ `require_caps` 를 부르지 않는다. 그 함수는 **거부를 감사에 남기므로**, 목록을 열 때마다
+      감사 로그에 «거부» 가 쌓인다(실제 시도가 아닌데도). 판정만 조용히 계산한다.
+    ⚠️ 판정을 화면에 복제하지 않기 위해 **서버가 답한다** — 화면이 자기 규칙을 만들면 서버와
+      서서히 갈라져 「버튼은 보이는데 서버는 거부」가 다시 생긴다."""
+    if not (p.user_id or "").strip():
+        return "사용자 식별이 필요합니다 — 로그인해야 연계 정보를 바꿀 수 있습니다."
+    try:
+        from core.admin_capability import AdminCapabilityError, require
+        require(capabilities_of(p), ADMIN_DATA_ACCESS)
+    except Exception as e:                       # AdminCapabilityError 포함
+        return str(e) or "연계 정보를 바꿀 권한이 없습니다(데이터 관리자 전용)."
+    return ""
 
 
 def _err(e: CrosswalkError):
@@ -111,7 +134,9 @@ async def list_systems(scope_node_id: str = "", tenant_id: str = "", entity_mode
     #   계정에는 아무것도 주지 않는다(관문 A). 목록형이므로 0건 + 이유로 답한다.
     _reason = visibility_block_reason(p)
     if _reason:
-        return {"status": "success", "data": [], "blocked_reason": _reason}
+        return {"status": "success", "data": [], "blocked_reason": _reason,
+                #: ★ 화면이 **누르기 전에** 쓰기 가능 여부를 알아야 한다(§10 UI).
+                "write_blocked": write_block_reason(p)}
     from core.enterprise_context.classification import clearance_of_scope
     # [경영진 드릴다운] 하위 조직까지 볼 수 있는 주체인가 — 이것도 권한에서 파생한다.
     from core.enterprise_context.scoping import may_drill_down
@@ -119,7 +144,10 @@ async def list_systems(scope_node_id: str = "", tenant_id: str = "", entity_mode
             "data": await asyncio.to_thread(crosswalk.list_systems, scope_node_id,
                                             tenant_id, entity_mode,
                                             clearance_of_scope(p.scope),
-                                            may_drill_down(p.scope))}
+                                            may_drill_down(p.scope)),
+            #: ★ 화면이 **누르기 전에** 쓰기 가능 여부를 알아야 한다(§10 UI). 빈 문자열이면
+            #  바꿀 수 있고, 아니면 그 문장이 곧 못 바꾸는 이유다.
+            "write_blocked": write_block_reason(p)}
 
 
 @router.get("/systems/coverage")
