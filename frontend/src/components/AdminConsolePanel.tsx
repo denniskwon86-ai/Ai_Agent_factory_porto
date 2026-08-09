@@ -249,7 +249,10 @@ export function AdminConsolePanel({ onClose, me }: {
           {domain === 'brand' && (
             <>
               <ScreenHead kicker="BRAND" title="회사 · 브랜드"
-                description="상속 원천과 현재 해석값, 하위 조직의 재정의를 나란히 봅니다. 색은 저장 전에 상태색과 충돌하는지 검사합니다."
+                //: ⚠️ 「하위 조직의 재정의」라고 적어 두었다가 규칙과 어긋났다 — 브랜드는
+                //  상속만 하고 하위가 덮어쓰지 않는다(사용자 결정 2026-08-09). 3열 카드는
+                //  고쳤는데 이 설명문을 함께 못 고쳐, 화면 위아래가 서로 다른 말을 했다.
+                description="상속 원천과 현재 해석값, 하위에 그대로 적용될 값을 나란히 봅니다. 색은 저장 전에 상태색과 충돌하는지 검사합니다."
                 chip={ciConflicts.length
                   ? { label: `충돌 ${ciConflicts.length}건`, tone: 'danger' }
                   : { label: '충돌 없음', tone: 'success' }} />
