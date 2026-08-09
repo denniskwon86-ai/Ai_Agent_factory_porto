@@ -18,6 +18,69 @@ import { HEALTH_KO, reportRequestFailure, reportRequestSuccess, useBackendHealth
 
 export type JarvisEvidence = { label: string; value: string };
 
+/** [UI 설계서 §7.2 답변 패턴] 답변은 여섯 단으로 읽힌다.
+ *
+ *   핵심 답변 / 왜 그렇게 판단했는가 / 근거와 기준시각 /
+ *   부족하거나 확인하지 못한 데이터 / 선택 가능한 다음 행동 / 실행 시 영향과 승인 필요 여부
+ *
+ * 서버가 프롬프트로 이 형식을 요구하고, 여기서 머리말을 찾아 **구조로** 그린다.
+ *
+ * ## ⚠️ 형식을 못 지킨 답을 버리지 않는다
+ *
+ * LLM 은 형식을 어길 수 있다. 그때 화면이 비거나 오류를 내면 **비서가 준 답을 사용자가 못 보게
+ * 된다** — 형식은 읽기 편하자고 있는 것이지 답을 검열하자고 있는 것이 아니다. 머리말을 하나도
+ * 못 찾으면 평문 그대로 보여 준다.
+ *
+ * ## ⚠️ 「부족한 데이터」 를 강조한다
+ *
+ * 여섯 중 **④** 가 이 화면의 핵심이다. 모르는 것을 아는 것처럼 말하는 답변은 그럴듯할수록
+ * 위험하다 — 이 저장소가 화면 전체에서 «조회 실패 ≠ 0건» 으로 지켜 온 규칙과 같은 것이다.
+ */
+const ANSWER_SECTIONS = [
+  '핵심 답변',
+  '왜 그렇게 판단했는가',
+  '근거와 기준시각',
+  '부족하거나 확인하지 못한 데이터',
+  '선택 가능한 다음 행동',
+  '실행 시 영향과 승인 필요 여부',
+] as const;
+
+function parseAnswer(text: string): { label: string; body: string }[] | null {
+  const found: { label: string; at: number }[] = [];
+  for (const label of ANSWER_SECTIONS) {
+    //: 머리말은 줄 첫머리에 오고 뒤에 `:` 가 붙는다(서버가 그렇게 요구한다).
+    const m = new RegExp(`(^|\\n)\\s*${label}\\s*[:：]`).exec(text);
+    if (m) found.push({ label, at: m.index + (m[1] ? m[1].length : 0) });
+  }
+  //: 한두 개만 걸리면 형식을 지킨 것이 아니라 **우연히 그 낱말이 나온 것**일 수 있다.
+  if (found.length < 3) return null;
+  found.sort((a, b) => a.at - b.at);
+  return found.map((f, i) => {
+    const start = f.at + f.label.length;
+    const end = i + 1 < found.length ? found[i + 1].at : text.length;
+    return {
+      label: f.label,
+      body: text.slice(start, end).replace(/^\s*[:：]\s*/, '').trim(),
+    };
+  }).filter((x) => x.body);
+}
+
+function AnswerBody({ text }: { text: string }) {
+  const parts = parseAnswer(text);
+  if (!parts) return <p>{text}</p>;
+  return (
+    <div className="jarvis-answer">
+      {parts.map((s) => (
+        <section key={s.label}
+          className={s.label === '부족하거나 확인하지 못한 데이터' ? 'gap' : undefined}>
+          <h5>{s.label}</h5>
+          <p>{s.body}</p>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function JarvisRail({
   contextKicker = '현재 문맥',
   contextTitle,
@@ -173,7 +236,8 @@ export function JarvisRail({
         {turns.map((t, i) => (
           <div key={`${t.at}-${i}`} className={`jarvis-turn ${t.role}`}>
             <span>{t.role === 'user' ? '나' : 'Jarvis'}</span>
-            <p>{t.text}</p>
+            {/* 사용자 발화는 그대로 — 형식은 **비서 답변**의 계약이다(§7.2). */}
+            {t.role === 'user' ? <p>{t.text}</p> : <AnswerBody text={t.text} />}
           </div>
         ))}
         {err && <div className="jarvis-turn error"><span>연결</span><p>{err}</p></div>}

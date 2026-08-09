@@ -313,6 +313,24 @@
   padding: 10px 12px; border-top: 1px solid #cae3e4; color: #4f6b6e; font-size: 12px;
 }
 
+/* [설계 §7.2] Jarvis 답변 6단 — 머리말로 나눠 읽는다.
+   ⚠️ 「부족하거나 확인하지 못한 데이터」는 **눈에 띄어야** 한다. 모르는 것을 아는 것처럼
+      말하는 답변은 그럴듯할수록 위험하다. */
+.afs-scope .jarvis-answer { display: grid; gap: 9px; }
+.afs-scope .jarvis-answer section { display: grid; gap: 2px; }
+.afs-scope .jarvis-answer h5 {
+  margin: 0; font-size: 12px; font-weight: 900; letter-spacing: .02em; color: #7fc4d8;
+}
+.afs-scope .jarvis-answer p {
+  margin: 0; padding: 0; background: none;
+  font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+}
+.afs-scope .jarvis-answer section.gap {
+  padding: 8px 10px; border-radius: 6px;
+  border-left: 3px solid var(--state-warn-fg, #d79a00); background: #ffd08a12;
+}
+.afs-scope .jarvis-answer section.gap h5 { color: #ffd9a0; }
+
 /* [설계 §6.2] 「갱신 중」 — 값은 그대로 두고 이것만 덧붙인다(화면을 덮지 않는다). */
 .afs-scope .refreshing-badge {
   display: inline-flex; align-items: center; gap: 5px; margin-left: 8px;
@@ -886,7 +904,10 @@
 .afs-scope .jarvis-turn > span { color: #7fc4d8; font-size: 12px; font-weight: 900; }
 .afs-scope .jarvis-turn > p {
   margin: 0; padding: 9px 10px; border-radius: 6px; color: #dbe6f6; background: var(--jarvis-bubble);
-  font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  /* ★ [설계 §7.1] 「**답변 본문 14px**, 근거 12px, 질문 입력 14px」 — 12px 였다.
+     Jarvis 답변은 사용자가 읽고 **판단하는 본문**이다. §1.3 이 「본문 14px+」 를 못박은
+     이유가 그것이고, 근거·메타와 같은 크기로 두면 무엇이 답이고 무엇이 부연인지 흐려진다. */
+  font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
 }
 .afs-scope .jarvis-turn.user > p { background: #ffffff14; }
 .afs-scope .jarvis-turn.error > span { color: #ff9db0; }
@@ -897,7 +918,9 @@
 }
 .afs-scope .jarvis-input textarea {
   min-height: 60px; padding: 9px; border: 1px solid #ffffff25; border-radius: 6px;
-  color: #fff; background: #ffffff0b; font-size: 12px; resize: vertical;
+  /* ★ [설계 §7.1] 질문 입력 **14px**. 12px 였다 — 입력창이 본문보다 작으면 사용자는
+     자기가 무엇을 쓰고 있는지 확인하기 어렵고, §1.3 의 최소 글자 크기에도 어긋난다. */
+  color: #fff; background: #ffffff0b; font-size: 14px; resize: vertical;
 }
 .afs-scope .jarvis-input textarea::placeholder { color: #93a7c6; }
 .afs-scope .jarvis-input button {
