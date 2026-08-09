@@ -58,7 +58,9 @@ function ContextFooter() {
     <div className="afs-dialog-context"
       style={{
         display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
-        padding: '6px 14px', fontSize: 12, borderTop: '1px solid var(--afs-border)',
+        padding: '7px 16px', fontSize: 12,
+        borderBottom: '1px solid var(--surface-border)',
+        background: 'var(--surface-sunken)',
       }}>
       <span className="afs-muted">실행 문맥</span>
       <b className={virtual ? 'afs-warn-fg' : 'afs-muted'}>
@@ -135,8 +137,11 @@ export function HubDialog({ label, onClose, children }: {
       role="presentation">
       <div ref={boxRef} className="afs-dialog" role="dialog" aria-modal="true"
         aria-label={label} tabIndex={-1}>
-        {children}
+        {/* ★ [설계 §5.3] 「**상단** Context Bar 에는 회사·업무 범위·REAL/VIRTUAL 상태를
+            표시한다」 — 처음에는 하단에 뒀는데, 문맥은 **작업을 시작하기 전에** 읽어야
+            의미가 있다. 아래에 있으면 스크롤해야 보이고, 그때는 이미 누른 뒤다. */}
         <ContextFooter />
+        {children}
       </div>
     </div>,
     document.body,
