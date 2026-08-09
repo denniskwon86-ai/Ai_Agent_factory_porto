@@ -143,26 +143,93 @@ export function EvidenceStrip({ items, note }: {
 }
 
 // ── 되돌릴 수 없는 행동의 확인 ──────────────────────────────────────────────
-export function ConfirmInline({ open, title, body, confirmLabel, onConfirm, onCancel, danger = true }: {
+/** [UI 설계서 §6.5] 「삭제·승격·운영 중단·계획 승인·Shadow 승격은 확인 Sheet 를 사용한다.
+ *  ① 무엇이 바뀌는가 ② 영향 받는 조직·SW·데이터 ③ 되돌릴 수 있는가 ④ 필요한 승인/근거
+ *  ⑤ 사유 입력」
+ *
+ * ## ⚠️ 자유서술 `body` 만으로는 다섯이 채워지지 않았다
+ *
+ * 종전에는 `title` + `body`(자유) 뿐이었다. 그래서 화면마다 담기는 항목이 달랐다 — 어떤 곳은
+ * 영향 범위를 적고 어떤 곳은 안 적었으며, **「되돌릴 수 있는가」는 거의 어디에도 없었다.**
+ * 그런데 되돌릴 수 있는지는 사용자가 «지금 눌러도 되는가» 를 판단하는 첫 번째 근거다.
+ *
+ * 다섯을 **이름 있는 자리**로 만든다. 자리가 있으면 비어 있는 것이 보이고, 자유서술이면
+ * 빠진 것이 보이지 않는다.
+ *
+ * ⚠️ `body` 는 그대로 둔다 — 29곳을 한 번에 바꾸면 그 자체가 위험하다. 새 자리는 **선택적**
+ *   이고, 고위험 행동부터 채운다.
+ */
+export function ConfirmInline({
+  open, title, body, confirmLabel, onConfirm, onCancel, danger = true,
+  changes, affects, reversible, approval, reason,
+}: {
   open: boolean;
   title: string;
   /** **무엇이 사라지는지** 구체적으로 쓴다. "계속할까요?" 만으로는 판단할 수 없다. */
-  body: ReactNode;
+  body?: ReactNode;
   confirmLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
   danger?: boolean;
+  /** §6.5 ① 무엇이 바뀌는가. */
+  changes?: ReactNode;
+  /** §6.5 ② 영향 받는 조직·SW·데이터. **모르면 «확인되지 않음» 을 쓴다** — 빈칸은 «없음» 으로 읽힌다. */
+  affects?: ReactNode;
+  /** §6.5 ③ 되돌릴 수 있는가. */
+  reversible?: ReactNode;
+  /** §6.5 ④ 필요한 승인·근거. */
+  approval?: ReactNode;
+  /** §6.5 ⑤ 사유 입력. `required` 면 값이 빌 때 확인 버튼이 잠긴다. */
+  reason?: {
+    value: string;
+    onChange: (v: string) => void;
+    label?: ReactNode;
+    required?: boolean;
+    placeholder?: string;
+  };
 }) {
   if (!open) return null;
+  const blocked = !!reason?.required && !reason.value.trim();
+  const rows: [string, ReactNode][] = [
+    ['무엇이 바뀌는가', changes],
+    ['영향 범위', affects],
+    ['되돌릴 수 있는가', reversible],
+    ['필요한 승인·근거', approval],
+  ].filter(([, v]) => v !== undefined && v !== null) as [string, ReactNode][];
+
   return (
     <div className={`request-alert ${danger ? 'warn' : ''}`} style={{ marginTop: 10 }}>
       <i aria-hidden="true">{danger ? '!' : 'i'}</i>
       <div style={{ flex: 1 }}>
         <b>{title}</b>
-        <small>{body}</small>
+        {body && <small>{body}</small>}
+
+        {rows.length > 0 && (
+          <dl className="confirm-facts">
+            {rows.map(([k, v]) => (
+              <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
+            ))}
+          </dl>
+        )}
+
+        {reason && (
+          <div style={{ marginTop: 10 }}>
+            <label className="field-label" htmlFor={`confirm-reason-${title}`}
+              style={{ marginTop: 0 }}>
+              {reason.label
+                || <>사유 {reason.required && <b>(필수)</b>} — 이 문장이 감사 기록에 남습니다</>}
+            </label>
+            <textarea id={`confirm-reason-${title}`} className="afs-textarea"
+              value={reason.value} placeholder={reason.placeholder}
+              onChange={(e) => reason.onChange(e.target.value)} />
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 7, marginTop: 10, justifyContent: 'flex-end' }}>
           <button className="secondary-button" onClick={onCancel}>취소</button>
-          <button className={danger ? 'danger-solid' : 'primary-button'} onClick={onConfirm}>
+          <button className={danger ? 'danger-solid' : 'primary-button'}
+            disabled={blocked} onClick={onConfirm}
+            title={blocked ? '사유를 입력해야 진행할 수 있습니다.' : undefined}>
             {confirmLabel}
           </button>
         </div>

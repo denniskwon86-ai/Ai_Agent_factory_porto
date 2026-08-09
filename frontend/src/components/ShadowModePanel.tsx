@@ -369,16 +369,22 @@ export default function ShadowModePanel({ onClose }: Props) {
                               <button className="primary-button"
                                 onClick={() => confirmPromote.ask(true)}>승격</button>
                             </div>
+                            {/* ★ [설계 §6.5] Shadow 승격은 확인 Sheet 대상으로 명시된 행동이다. */}
                             <ConfirmInline open={confirmPromote.open}
                               title="이 후보를 지금 운영에 적용합니다"
-                              body={<>
-                                섀도우 결과가 <b>운영값이 됩니다</b> — 적용 범위:{' '}
-                                <b>{scopeText || '(비어 있음)'}</b>.
-                                {!scopeText && <><br />⚠️ 범위가 비어 있으면 전면 적용이 되므로
-                                  서버가 거절합니다.</>}
-                                {regressed.length > 0 && <><br />악화로 판정된 지표{' '}
-                                  {regressed.join(', ')} 를 감수한 상태입니다.</>}
-                              </>}
+                              changes={<>섀도우 결과가 <b>운영값이 됩니다.</b> 지금까지는 비교용
+                                숫자였고, 적용 후에는 실제 업무가 이 값으로 돌아갑니다.</>}
+                              affects={<>적용 범위: <b>{scopeText || '(비어 있음)'}</b>.
+                                {!scopeText && <> ⚠️ 범위가 비어 있으면 전면 적용이 되므로 서버가
+                                  거절합니다.</>}
+                                {v?.unmeasured?.length ? <> 미측정 지표 {v.unmeasured.length}개는
+                                  판정에서 제외됐습니다 — 그 축의 영향은 알 수 없습니다.</> : null}</>}
+                              reversible={<>범위를 되돌리면 적용은 멈추지만, 그 사이 이 값으로
+                                내려간 판단과 산출물은 남습니다.</>}
+                              approval={regressed.length > 0
+                                ? <>악화 지표 {regressed.join(', ')} 를 <b>감수한 상태</b>입니다
+                                  (인정 {ack.size}/{regressed.length}건).</>
+                                : '악화로 판정된 지표가 없습니다.'}
                               confirmLabel="승격"
                               onCancel={confirmPromote.cancel}
                               onConfirm={() => confirmPromote.run(() => act(

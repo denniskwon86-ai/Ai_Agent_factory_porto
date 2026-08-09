@@ -496,28 +496,41 @@ export function AdminConsolePanel({ onClose, me }: {
                         <Banner key={b} tone="error" title="먼저 해결해야 합니다">{b}</Banner>
                       ))}
 
-                      <label className="field-label" htmlFor="enf-reason">
-                        변경 사유 (<b>필수</b> — 되돌릴 때 «왜 켰는가» 를 모르면 판단할 수 없습니다)
-                      </label>
-                      <input id="enf-reason" className="afs-input" value={reason}
-                        onChange={(e) => setReason(e.target.value)} />
+                      {/* ⚠️ 사유 입력란은 **확인 Sheet 안**으로 옮겼다(§6.5 ⑤). 여기에 그대로
+                          두었더니 «사유가 없으면 버튼이 잠기고 → Sheet 가 안 열리고 → Sheet
+                          안의 사유란에 닿을 수 없는» 모순이 생겼다(실측으로 잡았다). 사유는
+                          한 곳에서만 받는다. */}
                       <div style={{ marginTop: 10 }}>
-                        <button className="primary-button" disabled={!reason.trim()}
+                        <button className="primary-button"
                           onClick={() => confirmEnforce.ask(!policy.value!.org_enforce)}>
                           {policy.value!.org_enforce ? '강제 끄기 — 검토 요청' : '강제 켜기 — 검토 요청'}
                         </button>
                       </div>
 
+                      {/* ★ [설계 §6.5] 전사에 즉시 적용되는 운영 변경 — 5요소를 전부 채운다. */}
                       <ConfirmInline open={confirmEnforce.open}
                         title={confirmEnforce.target
                           ? '조직 권한 강제를 켭니다' : '조직 권한 강제를 끕니다'}
-                        body={confirmEnforce.target ? (
+                        changes={confirmEnforce.target
+                          ? '모든 조회가 요청자의 조직 범위로 걸러집니다.'
+                          : '조직 범위 필터가 해제되고 전 조직 자료가 모두에게 열립니다.'}
+                        affects={confirmEnforce.target ? (
                           <>범위가 없는 사용자는 <b>즉시 아무 것도 볼 수 없게 됩니다.</b>
-                            {' '}지금 미배정 {pre.value?.unassigned ?? '?'}명입니다.</>
+                            {' '}지금 미배정 {pre.value?.unassigned ?? '확인 불가'}명 ·
+                            {' '}전체 {pre.value?.users ?? '확인 불가'}명.</>
                         ) : (
                           <>끄면 <b>모든 사용자가 모든 조직의 자료를 봅니다.</b> 이 상태로 남겨
                             두면 이후의 모든 범위 통제가 무력해집니다.</>
                         )}
+                        reversible={<>반대 방향으로 다시 바꾸면 됩니다 — <b>다만 그 사이 열려
+                          있던 자료를 누가 봤는지는 되돌릴 수 없습니다.</b> 두 변경 모두 이력에
+                          남습니다.</>}
+                        approval="전사 관리자 권한이 필요합니다. 감사 로그에 기록됩니다."
+                        reason={{
+                          value: reason, onChange: setReason, required: true,
+                          placeholder: '예: M2 권한 모델 가동 — 사전 점검 통과',
+                          label: <>변경 사유 <b>(필수)</b> — 되돌릴 때 «왜 켰는가» 의 근거가 됩니다</>,
+                        }}
                         confirmLabel="적용"
                         onCancel={confirmEnforce.cancel}
                         onConfirm={() => confirmEnforce.run((t) => act(

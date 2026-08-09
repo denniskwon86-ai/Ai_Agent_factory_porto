@@ -415,13 +415,24 @@ export default function WorkspacePanel({ onClose }: Props) {
                             setRejectReason('');
                           })} />
 
+                        {/* ★ [설계 §6.5] 승격은 확인 Sheet 5요소를 전부 채운다. */}
                         <ConfirmInline open={confirmPromote.open}
                           title="이 릴리스를 전사에 승격합니다"
-                          body={<>
-                            승격되면 <b>전 조직이 이 프로그램을 볼 수 있습니다.</b> 되돌려도
-                            이미 본 사람이 있습니다. 승격 시점의 게이트 판정이 스냅샷으로
-                            보관됩니다.
-                          </>}
+                          changes={<>{releaseId} 가 <b>{current?.from_scope || fromScope || '이 조직'}</b>
+                            {' '}범위에서 <b>{current?.target_scope || '전사'}</b> 범위로 올라갑니다.</>}
+                          affects={<>전 조직이 이 프로그램을 볼 수 있게 됩니다.
+                            {/* ⚠️ 아는 만큼만 적는다 — 조회 실패를 «없음» 으로 쓰지 않는다. */}
+                            {shares.status === 'ok'
+                              ? ` 현재 공유 ${(shares.value || []).length}곳`
+                              : ' 현재 공유 현황은 확인하지 못했습니다(0곳이 아닙니다)'}
+                            {forks.status === 'ok'
+                              ? ` · 복제 ${(forks.value || []).length}건이 영향을 받습니다.`
+                              : ' · 복제 현황도 확인하지 못했습니다.'}</>}
+                          reversible={<><b>사실상 되돌릴 수 없습니다.</b> 철회해도 이미 본
+                            사람이 있고, 그들이 만든 산출물은 남습니다.</>}
+                          approval={<>데이터 오너 승인 완료
+                            {current?.data_owner_approved_by ? ` (${current.data_owner_approved_by})` : ''}
+                            {' · '}승격 시점의 게이트 판정이 스냅샷으로 보관됩니다.</>}
                           confirmLabel="전사 승격"
                           onCancel={confirmPromote.cancel}
                           onConfirm={() => confirmPromote.run(() => act(
@@ -492,21 +503,34 @@ export default function WorkspacePanel({ onClose }: Props) {
                     {/* 롤백 — 한계를 반드시 함께 보여준다 */}
                     <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12 }}>
                       <h4 style={{ fontSize: 13, fontWeight: 800 }}>운영에서 내리기(롤백)</h4>
+                      {/* ⚠️ 사유 입력란을 여기에도 두었더니 **같은 값을 두 곳에서** 받게
+                          됐다(§6.5 로 Sheet 안에 옮긴 뒤에도 남아 있었다). 두 곳에 있으면
+                          어느 쪽이 실제로 전송되는지 사용자가 알 수 없다 — Sheet 한 곳에서만
+                          받는다. */}
                       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                        <input className="afs-input" style={{ flex: 1 }} value={rollbackReason}
-                          onChange={(e) => setRollbackReason(e.target.value)}
-                          placeholder="사유 (필수 — 없으면 같은 문제를 반복합니다)" />
                         <button className="danger-solid"
                           onClick={() => confirmRollback.ask(true)}>롤백</button>
                       </div>
+                      {/* ★ [§6.5] 사유를 «비어 있다» 고 경고만 하지 않고 **여기서 받는다** —
+                          경고는 읽고 그냥 누를 수 있지만, 입력 자리는 비우면 진행되지 않는다. */}
                       <ConfirmInline open={confirmRollback.open}
                         title="이 릴리스를 운영에서 내립니다"
-                        body={<>
-                          쓰고 있는 쪽은 <b>즉시</b> 막힙니다. 전사 승격 상태였다면 함께
-                          철회됩니다.
-                          {!rollbackReason.trim() && <><br />⚠️ 사유가 비어 있습니다 — 사유가
-                            없으면 같은 문제를 반복합니다.</>}
-                        </>}
+                        changes={<>{releaseId} 가 운영에서 내려갑니다. 전사 승격 상태였다면
+                          <b> 함께 철회</b>됩니다.</>}
+                        affects={<>쓰고 있는 쪽은 <b>즉시</b> 막힙니다.
+                          {shares.status === 'ok'
+                            ? ` 공유 ${(shares.value || []).length}곳이 끊깁니다.`
+                            : ' 공유 현황을 확인하지 못했습니다 — 끊기는 곳이 없다는 뜻이 아닙니다.'}</>}
+                        reversible={<>다시 배포하면 복구되지만, 그 사이 멈춘 업무는
+                          되돌아오지 않습니다.</>}
+                        approval="운영 담당 권한이 필요합니다. 사유는 감사 기록에 남습니다."
+                        reason={{
+                          value: rollbackReason,
+                          onChange: setRollbackReason,
+                          required: true,
+                          placeholder: '예: 입고 수량이 이중 계상되어 즉시 중단합니다',
+                          label: <>롤백 사유 <b>(필수)</b> — 없으면 같은 문제를 반복합니다</>,
+                        }}
                         confirmLabel="롤백"
                         onCancel={confirmRollback.cancel}
                         onConfirm={() => confirmRollback.run(async () => {
@@ -570,10 +594,11 @@ export default function WorkspacePanel({ onClose }: Props) {
                       ))
                     )}
                     <ConfirmInline open={confirmRevoke.open} title="이 공유를 회수합니다"
-                      body={<>
-                        <b>{confirmRevoke.target?.to_scope}</b> 의 접근이 끊깁니다 — 지금 쓰고
-                        있다면 그쪽은 원인을 모른 채 막힙니다.
-                      </>}
+                      changes={<>{confirmRevoke.target?.to_scope} 에 준 공유가 해제됩니다.</>}
+                      affects={<><b>{confirmRevoke.target?.to_scope}</b> 의 접근이 끊깁니다 —
+                        지금 쓰고 있다면 그쪽은 <b>원인을 모른 채</b> 막힙니다.</>}
+                      reversible="다시 공유하면 복구됩니다."
+                      approval="이 릴리스의 소유 조직 권한이 필요합니다."
                       confirmLabel="회수"
                       onCancel={confirmRevoke.cancel}
                       onConfirm={() => confirmRevoke.run((t) => act(

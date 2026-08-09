@@ -392,10 +392,18 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
                   '부서를 적재했습니다. 조직 범위는 부서별로 지정하십시오.'))}
                 onCancel={seed.cancel} />
 
+              {/* ★ [설계 §6.5] 삭제는 확인 Sheet 대상이다. */}
               <ConfirmInline open={retire.open}
                 title={`'${retire.target?.name_ko || ''}' 부서를 폐지합니다`}
-                body={<>물리 삭제가 아니라 폐지 표시입니다 — <b>과거 산출물의 소유 부서 해석은
-                  유지됩니다.</b> 이 부서에 배정된 사람들은 읽을 수 있는 범위를 잃습니다.</>}
+                changes={<>물리 삭제가 아니라 <b>폐지 표시</b>입니다 — 구판은 이력으로 남고
+                  과거 산출물의 소유 부서 해석은 유지됩니다.</>}
+                affects={<>이 부서에 배정된 사람들은 <b>읽을 수 있는 범위를 잃습니다.</b>
+                  {users.status === 'ok'
+                    ? ` 이 부서 소속 ${userRows.filter((u) => u.primary_dept_id === retire.target?.dept_id).length}명.`
+                    : ' 소속 인원을 확인하지 못했습니다(0명이 아닙니다).'}</>}
+                reversible={<>구판이 남으므로 같은 부서를 다시 만들 수 있지만, 그 사이 범위를
+                  잃은 사람들의 조회 실패는 되돌아오지 않습니다.</>}
+                approval="조직 편집 권한이 필요합니다."
                 confirmLabel="폐지"
                 onConfirm={() => retire.run((d) => run('폐지', () => orgApi.retireDept(d.dept_id),
                   `'${d.name_ko}' 를 폐지했습니다. 구판은 이력으로 남습니다.`))}

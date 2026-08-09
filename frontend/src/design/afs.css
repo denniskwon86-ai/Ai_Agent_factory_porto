@@ -313,6 +313,15 @@
   padding: 10px 12px; border-top: 1px solid #cae3e4; color: #4f6b6e; font-size: 12px;
 }
 
+/* [설계 §6.5] 확인 Sheet 5요소 — 자리를 만들어 두면 **비어 있는 것이 보인다.** */
+.afs-scope .confirm-facts { display: grid; gap: 1px; margin: 9px 0 0; }
+.afs-scope .confirm-facts > div {
+  display: grid; grid-template-columns: 118px 1fr; gap: 10px; padding: 6px 0;
+  border-top: 1px solid rgba(0, 0, 0, .08); font-size: 12px; line-height: 1.6;
+}
+.afs-scope .confirm-facts dt { font-weight: 800; opacity: .75; }
+.afs-scope .confirm-facts dd { margin: 0; }
+
 /* [설계 §5.8] 브랜드 상속 3열 diff · Shell Preview · 운영 5단계 · Change Impact. */
 .afs-scope .brand-diff {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;

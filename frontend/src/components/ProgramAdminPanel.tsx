@@ -257,17 +257,26 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
                   </button>
                 </div>
 
+                {/* ★ [설계 §6.5] 운영 중단은 확인 Sheet 대상이다. */}
                 <ConfirmInline open={confirmDisable.open}
                   title="이 프로그램을 지금 사용 중단합니다"
-                  body={<>
-                    삭제가 아니라 <b>사용만 막습니다</b> — 기록·이력은 그대로 남고 «사용 재개»로
-                    되돌릴 수 있습니다. 다만 지금 쓰고 있는 쪽은 <b>즉시</b> 막힙니다
-                    {dep ? <> (영향 {dep.count}건
+                  changes={<>삭제가 아니라 <b>사용만 막습니다</b> — 기록·이력은 그대로 남습니다.</>}
+                  affects={<>지금 쓰고 있는 쪽은 <b>즉시</b> 막힙니다
+                    {dep ? <> · 영향 {dep.count}건
                       {dep.is_enterprise ? ' · 전사 승격됨' : ''}
-                      {dep.unmeasured.length > 0 ? ' · 세지 못한 항목 있음' : ''})</> : null}.
-                    {!reason && <><br />⚠️ 사유가 비어 있습니다 — 사유가 없으면 나중에 아무도
-                      다시 켜지 못합니다(서버가 거부할 수 있습니다).</>}
-                  </>}
+                      {dep.unmeasured.length > 0
+                        ? ' · ⚠️ 세지 못한 항목이 있어 실제 영향은 더 클 수 있습니다' : ''}</>
+                      : <> · ⚠️ 영향 범위를 확인하지 못했습니다(영향이 없다는 뜻이 아닙니다)</>}.</>}
+                  reversible={<>«사용 재개» 로 되돌릴 수 있습니다 — 그 사이 멈춘 업무는
+                    되돌아오지 않습니다.</>}
+                  // ⚠️ 사유 입력란은 위 폼에 있고 **예고(schedule)와 공유**한다. Sheet 안에 또
+                  //   두면 같은 값을 두 곳에서 받게 되므로 여기서는 입력한 값을 **확인만** 한다.
+                  //   ⚠️ JSX **prop 자리**에는 `{/* */}` 주석을 넣을 수 없다 — 파서가 spread 로
+                  //     읽어 빌드가 깨진다(2026-08-09 실측. tsc 는 통과했다).
+                  approval={reason.trim()
+                    ? <>사유: «{reason.trim()}» — 감사 기록에 남습니다.</>
+                    : <b className="afs-danger-fg">사유가 비어 있습니다 — 위 «사유» 란을 채우십시오.
+                      없으면 나중에 아무도 다시 켜지 못합니다.</b>}
                   confirmLabel="사용 중단"
                   onCancel={confirmDisable.cancel}
                   onConfirm={() => confirmDisable.run(() => act(() => disableProgram(releaseId, {
