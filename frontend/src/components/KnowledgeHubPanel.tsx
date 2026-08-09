@@ -28,7 +28,7 @@ import {
   ConfirmInline, EvidenceStrip, FormField, FoundationList, FoundationToolbar,
   foundationJarvis, useConfirm,
 } from '../design/DataFoundationShell';
-import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
+import { EmptyOrError, Refreshing, Metric, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
 import { errorTitle } from '../lib/closedLoopFetch';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
 import {
@@ -66,6 +66,9 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
 
   const load = useCallback(async () => {
     setBusy('불러오는 중'); setErr(null);
+    // ★ [설계 §6.2] 재조회는 **값을 비우지 않는다** — 자료를 올리거나 지운 뒤 목록이 사라졌다
+    //   돌아오면 방금 무엇이 바뀌었는지 비교할 수 없고 스크롤 위치도 잃는다.
+    setPacks(refreshing); setRefSummary(refreshing);
     // ⚠️ 두 조회를 **따로** 담는다. 하나가 실패했다고 다른 하나까지 «없음»으로 만들지 않는다.
     const [p, r] = await Promise.allSettled([knowledgeApi.packs(), knowledgeApi.referenceSummary()]);
     if (p.status === 'fulfilled') {
@@ -86,6 +89,13 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
   // 사용자가 바뀌면 이전 사용자의 목록을 즉시 폐기한다 — 권한 범위가 다르다.
   useEffect(() => {
     const h = () => {
+    // ★ [설계 §6.2] 재조회는 **값을 비우지 않는다** — 행동 뒤 목록이 사라졌다
+    //   돌아오면 방금 무엇이 바뀌었는지 비교할 수 없고 스크롤 위치도 잃는다.
+      // ⚠️⚠️ 여기는 **`refreshing` 을 쓰면 안 되는 자리**다. 설계 §6.2 는 「재조회 중 기존
+      //   값은 유지」하라면서도 「**문맥 변경은 데이터 혼합 위험 때문에 이전 값을 즉시 비운다**」
+      //   고 따로 못박았다. 사용자 전환은 곧 **권한 범위 전환**이라, 이전 사용자의 지식팩이 한
+      //   순간이라도 남으면 «느린 화면» 이 아니라 **남의 자료를 보여 준 것**이다.
+      //   (이 줄을 §6.2 적용 대상으로 오인해 바꿨다가 되돌렸다 — 2026-08-09.)
       setPacks(loading<Pack[]>()); setRefSummary(loading<ReferenceSummary>());
       setPackVisibility(EMPTY_PACK_VIS);
       setSelected(''); setHits(ok<SearchHit[]>([])); load();
@@ -557,7 +567,8 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
   const [err, setErr] = useState('');
 
   const load = useCallback(async () => {
-    setRows(loading<ReferenceAsset[]>());
+    // §6.2 — 승인·색인 뒤 목록을 다시 읽어도 표가 사라지지 않게 한다.
+    setRows(refreshing);
     try {
       setRows(ok(await knowledgeApi.referenceAssets() || []));
     } catch (e) {

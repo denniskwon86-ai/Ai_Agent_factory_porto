@@ -28,7 +28,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
-import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
+import { EmptyOrError, Refreshing, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
 import { useLatestOnly } from '../design/useLatestOnly';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, Panel, ScreenHead } from '../design/HubShell';
@@ -86,8 +86,9 @@ export default function ShadowModePanel({ onClose }: Props) {
 
   const load = useCallback(async () => {
     setErr('');
-    setSummary(loading<ShadowSummary>());
-    setRuns(loading<ShadowRun[]>());
+    // ★ [설계 §6.2] 재조회는 **값을 비우지 않는다** — 행동 뒤 목록이 사라졌다
+    //   돌아오면 방금 무엇이 바뀌었는지 비교할 수 없고 스크롤 위치도 잃는다.
+    setSummary(refreshing); setRuns(refreshing);
     // ★ 둘을 **따로** 담는다. 종전에는 한 `err` 변수에 덮어써서 어느 쪽이 실패했는지 사라졌다.
     const [s, r] = await Promise.allSettled([fetchSummary(), fetchRuns()]);
     if (s.status === 'fulfilled') { reportRequestSuccess(); setSummary(ok(s.value)); }
@@ -142,6 +143,7 @@ export default function ShadowModePanel({ onClose }: Props) {
         <div className="bar-actions">
           {(summary.status === 'loading' || runs.status === 'loading')
             && <span className="busy">확인 중…</span>}
+          <Refreshing on={summary.refreshing || runs.refreshing} />
           <button className="secondary-button" onClick={load}>새로고침</button>
           <button className="secondary-button" onClick={onClose}>
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>

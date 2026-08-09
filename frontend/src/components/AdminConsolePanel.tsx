@@ -26,7 +26,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
 import { type RailIconName } from '../design/RailIcon';
 import { HubDialog } from '../design/HubDialog';
-import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
+import { EmptyOrError, Refreshing, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
 import {
   adminApi, type AuditStats, type EnforcePreflight, type ScopePolicy,
@@ -112,8 +112,9 @@ export function AdminConsolePanel({ onClose, me }: {
   const confirmEnforce = useConfirm<boolean>();
 
   const load = useCallback(async () => {
-    setPolicy(loading<ScopePolicy>()); setPre(loading<EnforcePreflight>());
-    setAudit(loading<AuditStats>());
+    // ★ [설계 §6.2] 재조회는 **값을 비우지 않는다.** 강제 전환 뒤 이력을 다시 읽을 때 표가
+    //   사라졌다 돌아오면 «방금 무엇이 바뀌었는지» 를 비교할 수 없다.
+    setPolicy(refreshing); setPre(refreshing); setAudit(refreshing);
     const [p, f, a] = await Promise.allSettled([
       adminApi.scopePolicy(), adminApi.enforcePreflight(), adminApi.auditStats(),
     ]);
@@ -181,6 +182,7 @@ export function AdminConsolePanel({ onClose, me }: {
       <div className="afs-dialog-bar">
         <b>환경설정 · 관리자</b>
         <span>
+          <Refreshing on={policy.refreshing || pre.refreshing || audit.refreshing} />
           {/* 설계: 개인/전사를 문구로 구분한다 — 같은 화면에서 영향 범위가 전혀 다르다. */}
           {isOrg
             ? '전사 설정입니다 — 바꾸면 이 회사의 모든 사용자에게 적용됩니다.'

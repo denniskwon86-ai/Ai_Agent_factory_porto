@@ -27,10 +27,35 @@ export type Loaded<T> = {
   /** 실패 사유. 화면이 지어내지 않고 서버 문구를 그대로 들고 있는다. */
   error?: string;
   httpStatus?: number;
+  /** [UI 설계서 §6.2] **재조회 중.** 값은 그대로 두고 «갱신 중» 만 덧붙인다. */
+  refreshing?: boolean;
 };
 
 export function loading<T>(): Loaded<T> {
   return { status: 'loading', value: null };
+}
+
+/** [UI 설계서 §6.2] 「재조회 중 **기존 값은 유지하되** 「갱신 중」 표시.」
+ *
+ * ## 왜 값을 비우면 안 되는가
+ *
+ * 이 저장소의 화면은 행동 뒤에 목록을 다시 읽는다(승인 → 재조회, 저장 → 재조회). 그때마다
+ * `loading()` 으로 값을 비우면 **읽고 있던 표가 사라졌다가 돌아온다.** 사용자는 방금 무엇이
+ * 바뀌었는지 비교할 수 없고, 목록이 길면 스크롤 위치까지 잃는다. 심하면 «지워졌나?» 로 읽는다.
+ *
+ * ## ⚠️ 회사 문맥 변경에는 쓰지 않는다
+ *
+ * 같은 §6.2 가 「**회사 문맥 변경은 데이터 혼합 위험 때문에 이전 값을 즉시 비우고** 차단
+ * skeleton 을 쓴다」고 못박았다. 조직을 바꿨는데 이전 조직의 숫자가 잠깐이라도 남아 있으면
+ * 그것은 «느린 화면» 이 아니라 **다른 조직 자료를 보여 준 것**이다. 그 경우는 `loading()` 이
+ * 맞다(이 저장소는 조직 전환에서 아예 `location.reload()` 한다).
+ *
+ * ⚠️ 첫 조회(값이 아직 없음)에는 자동으로 `loading()` 이 된다 — 보여 줄 «이전 값» 이 없는데
+ *   «갱신 중» 이라고 적으면 사용자는 무엇이 갱신되는지 알 수 없다.
+ */
+export function refreshing<T>(prev: Loaded<T> | null | undefined): Loaded<T> {
+  if (!prev || prev.value === null || prev.value === undefined) return loading<T>();
+  return { ...prev, refreshing: true };
 }
 
 export function ok<T>(value: T): Loaded<T> {
@@ -117,6 +142,22 @@ export function Metric({ label, state, value, unit = '', hint, notes }: {
 }
 
 /** 목록 자리의 빈 상태. **조회 실패를 «없습니다»로 쓰지 않는다.** */
+/** [UI 설계서 §6.2] 「재조회 중 기존 값은 유지하되 **「갱신 중」 표시**.」
+ *
+ * 값을 그대로 두는 것만으로는 부족하다 — 사용자는 «지금 보는 것이 최신인가» 를 알 수 없다.
+ * 화면마다 다른 말로 적지 않도록 한 곳에 둔다.
+ *
+ * ⚠️ 로딩 스피너로 화면을 덮지 않는다. 덮으면 값을 유지한 의미가 없다.
+ */
+export function Refreshing({ on }: { on?: boolean }) {
+  if (!on) return null;
+  return (
+    <span className="refreshing-badge" role="status" aria-live="polite">
+      <i aria-hidden="true" />갱신 중
+    </span>
+  );
+}
+
 export function EmptyOrError({ state, error, emptyText, onRetry }: {
   state: LoadStatus;
   error?: string;

@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { ConfirmInline, EvidenceStrip, FoundationList, useConfirm, type FoundationRow }
   from '../design/DataFoundationShell';
-import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
+import { EmptyOrError, Refreshing, Metric, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
@@ -36,7 +36,9 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
   const reject = useConfirm<SkillProposal>();
 
   const load = useCallback(async () => {
-    setList(loading<SkillProposal[]>());
+    // ★ [설계 §6.2] 재조회는 **값을 비우지 않는다** — 행동 뒤 목록이 사라졌다
+    //   돌아오면 방금 무엇이 바뀌었는지 비교할 수 없고 스크롤 위치도 잃는다.
+    setList(refreshing);
     try {
       const rows = await skillApi.proposals();
       reportRequestSuccess();
@@ -94,7 +96,7 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
     <HubDialog label="스킬 개선안 — 에이전트가 제안한 행동 규칙 검토" onClose={onClose}>
       <div className="afs-dialog-bar">
         <b>스킬 개선안</b>
-        <span>승인하면 에이전트의 행동 규칙이 영구히 바뀝니다</span>
+        <span>승인하면 에이전트의 행동 규칙이 영구히 바뀝니다<Refreshing on={list.refreshing} /></span>
         <div className="bar-actions">
           {busy && <span className="busy">{busy} 중…</span>}
           <button className="secondary-button" onClick={onClose}>

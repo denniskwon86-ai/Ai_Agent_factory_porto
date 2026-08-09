@@ -313,6 +313,22 @@
   padding: 10px 12px; border-top: 1px solid #cae3e4; color: #4f6b6e; font-size: 12px;
 }
 
+/* [설계 §6.2] 「갱신 중」 — 값은 그대로 두고 이것만 덧붙인다(화면을 덮지 않는다). */
+.afs-scope .refreshing-badge {
+  display: inline-flex; align-items: center; gap: 5px; margin-left: 8px;
+  padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  color: var(--muted, #5e7377); background: var(--surface-sunken, #eef1f4);
+  border: 1px solid var(--line, #d7dee4); vertical-align: middle;
+}
+.afs-scope .refreshing-badge > i {
+  width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+  animation: afs-refresh-pulse 1s ease-in-out infinite;
+}
+@keyframes afs-refresh-pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .afs-scope .refreshing-badge > i { animation: none; opacity: .7; }
+}
+
 /* [설계 §6.5] 확인 Sheet 5요소 — 자리를 만들어 두면 **비어 있는 것이 보인다.** */
 .afs-scope .confirm-facts { display: grid; gap: 1px; margin: 9px 0 0; }
 .afs-scope .confirm-facts > div {

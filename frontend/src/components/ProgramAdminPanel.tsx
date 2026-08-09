@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
-import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
+import { EmptyOrError, Refreshing, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, Panel, ScreenHead } from '../design/HubShell';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
@@ -63,7 +63,9 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
 
   const load = useCallback(async () => {
     setErr('');
-    setProg(loading<ProgramLifecycle>());
+    // ★ [설계 §6.2] 재조회는 **값을 비우지 않는다** — 행동 뒤 목록이 사라졌다
+    //   돌아오면 방금 무엇이 바뀌었는지 비교할 수 없고 스크롤 위치도 잃는다.
+    setProg(refreshing);
     try {
       const d = await fetchProgram(releaseId);
       reportRequestSuccess();
