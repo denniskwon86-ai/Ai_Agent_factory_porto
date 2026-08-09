@@ -105,16 +105,25 @@ export function GlobalNav({ primary, groups, right }: {
   return (
     <div className="flex items-center gap-2 min-w-0">
       {/* ── 1차 영역 ────────────────────────────────────────────────────── */}
+      {/* ★ [설계 §9.2] 좁은 폭에서 **라벨을 접는다.** `shrink-0` 이라 줄지 않아 1024px 에서
+          문서가 1205px 로 넘쳐 **가로 스크롤**이 생겼다(실측). 가로 스크롤은 «조금 불편» 이
+          아니라 오른쪽 내용이 화면 밖으로 나가 버리는 것이다.
+          ⚠️ 처음에 `xl`(1280)로 잡았더니 **정확히 1280px 에서 다시 넘쳤다** — 그 폭이 라벨을
+            펼치기에 딱 모자라는 경계였기 때문이다. 브레이크포인트는 «디자인 눈금» 이 아니라
+            **내용이 실제로 들어가는 폭**에서 정해야 한다. 재 보고 `2xl`(1536)로 올렸다.
+          ⚠️ 아이콘만 남으면 무슨 버튼인지 알 수 없으므로 `aria-label` 로 이름을 남긴다 —
+            보이지 않게 하는 것과 **없애는 것**은 다르다(스크린리더·키보드 사용자). */}
       {primary.map((it, i) => (
         <button
           key={it.id}
           onClick={it.onSelect}
           title={it.desc}
+          aria-label={it.label}
           className={i === 0
             ? 'shrink-0 text-[13px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 px-2 py-2 rounded-lg transition-all'
             : 'shrink-0 text-[13px] font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-2 rounded-lg transition-all'}
         >
-          {it.icon} {it.label}
+          {it.icon} <span className="hidden 2xl:inline">{it.label}</span>
         </button>
       ))}
 
@@ -126,9 +135,10 @@ export function GlobalNav({ primary, groups, right }: {
         aria-controls="global-nav-panel"
         aria-haspopup="true"
         title="나머지 기능을 업무 영역별로 모아 봅니다"
+        aria-label="전체 메뉴"
         className="shrink-0 text-[13px] font-bold text-gray-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-2 rounded-lg transition-all flex items-center gap-2"
       >
-        ☰ 전체 메뉴
+        ☰ <span className="hidden 2xl:inline">전체 메뉴</span>
         <span className="text-xs font-semibold text-gray-400">{total}</span>
       </button>
 

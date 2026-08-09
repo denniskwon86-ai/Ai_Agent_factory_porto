@@ -437,7 +437,8 @@
   box-shadow: var(--surface-shadow);
 }
 .afs-studio .clarify-main .eyebrow {
-  color: var(--ls-cyan);
+  /* [§9.1] 원색은 3.31:1 이라 글자에 못 쓴다 — 글자용 변형으로(5.06:1). */
+  color: var(--ls-cyan-fg);
   font-size: 12px;             /* §6: 12px 미만 금지 — 프로토타입의 11px 를 올렸다 */
   font-weight: 950;
   letter-spacing: .1em;
@@ -585,7 +586,7 @@
   gap: 12px;
 }
 .afs-studio .artifact-canvas .eyebrow {
-  color: var(--ls-cyan);
+  color: var(--ls-cyan-fg);   /* [§9.1] 위와 같은 이유 */
   font-size: 12px;
   font-weight: 950;
   letter-spacing: .1em;
@@ -747,7 +748,11 @@
   color: #fff;
   background: rgba(255, 255, 255, .07);
   font: inherit;
-  outline: none;
+}
+/* ★ [설계 §9.1] 「focus ring 제거 금지」 — `outline: none` 이었다. 어두운 배경이라 기본 링이
+   잘 안 보인다는 이유였겠지만, 안 보이는 것과 없는 것은 다르다. 배경에 맞는 밝은 링을 준다. */
+.afs-studio .jarvis-dock input:focus-visible {
+  outline: 2px solid #7fc4d8; outline-offset: 1px;
 }
 .afs-studio .jarvis-dock input::placeholder { color: #c1cee2; }
 .afs-studio .jarvis-actions { display: flex; gap: 7px; }

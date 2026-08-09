@@ -45,13 +45,17 @@ type QueueRow = BriefingItem & { section: string };
 
 /** §4.5 LayerOverlay — DATA·SW·TWIN. **모두 끄는 것도 허용한다.** */
 type Layer = 'DATA' | 'SW' | 'TWIN';
+//: ⚠️ [설계 §9.1 WCAG AA] **브랜드 원색을 그대로 쓰면 안 된다.** 이 칩은 켜졌을 때 색 면
+//  위에 흰 글자를 얹고, 꺼졌을 때는 그 색을 글자로 쓴다. 원색은 흰색 대비가 cyan 3.31 ·
+//  orange 3.12 로 둘 다 4.5:1 에 못 미친다(실측으로 잡았다). 면·글자 모두 어두운 변형을 쓴다 —
+//  원색은 테두리·아이콘처럼 **글자가 얹히지 않는 자리**에만 남긴다.
 const LAYERS: { id: Layer; label: string; desc: string; color: string }[] = [
   { id: 'DATA', label: 'DATA', desc: '자산·Master·지식팩·외부지표·최신성',
-    color: 'var(--ls-cyan)' },
+    color: 'var(--ls-cyan-fg)' },
   { id: 'SW', label: 'SW', desc: '프로젝트·릴리스·운영 상태·담당 Agent',
-    color: 'var(--ls-orange)' },
+    color: 'var(--ls-orange-fg)' },
   { id: 'TWIN', label: 'TWIN', desc: '시나리오·기준선·영향·Backtest',
-    color: 'var(--ls-green)' },
+    color: 'var(--ls-green-fg)' },
 ];
 
 /** §4.6 TrustFoundationStrip 의 카드 4종. 설계가 지정한 이름·핵심 정보·경고 그대로. */
@@ -208,13 +212,11 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   };
 
   return (
-    <div className="afs-scope" style={{
-      background: 'var(--surface-page)', minHeight: 'calc(100vh - 72px)',
-      display: 'grid',
-      // §3.1 Decision Rail 280 / 중앙 최소 720 / Atlas Rail 360
-      gridTemplateColumns: 'minmax(260px, 280px) minmax(0, 1fr) minmax(320px, 360px)',
-      alignItems: 'stretch',
-    }}>
+    /* ★ [설계 §3.1 · §9.2] 폭 규칙은 **인라인 style 로 쓸 수 없다** — 미디어 쿼리가 안 먹기
+       때문이다. 실측(1024px): 3열이 그대로 유지돼 문서 폭이 1206px 로 **가로 스크롤**이
+       생겼다. §9.2 는 1024~1279 구간에서 「Decision Queue 또는 Atlas 를 drawer 로 전환」
+       하라고 정했다. 클래스로 옮겨 폭 구간을 CSS 가 정하게 한다. */
+    <div className="afs-scope enterprise-canvas">
       {/* ── ① 좌 280: Decision Queue (§4.2) · surface-warm ──────────────── */}
       <aside style={{
         background: 'var(--surface-sunken)', borderRight: '1px solid var(--surface-border)',
@@ -348,18 +350,22 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                     color: 'var(--surface-text-faint)' }}>{String(i + 1).padStart(2, '0')}</span>
                   <span style={{ fontSize: 13.5, fontWeight: 600,
                     color: 'var(--surface-text)' }}>{n.name_ko || n.dept_id}</span>
+                  {/* ⚠️ [§9.1] 여기도 브랜드 원색을 **글자**에 쓰고 있었다(실측 대비 2.96~4.28).
+                      레이어 칩은 고쳤는데 노드 안은 놓쳤다 — 같은 색을 여러 자리에서 손으로
+                      적으면 한 곳만 고쳐진다. 세 자리 모두 `LAYERS` 의 색을 쓰게 해서
+                      **다음에 색이 바뀌어도 함께 따라오게** 한다. */}
                   {layers.includes('DATA') && (
-                    <span style={{ fontSize: 12, color: 'var(--ls-cyan)' }}>
+                    <span style={{ fontSize: 12, color: LAYERS[0].color }}>
                       도메인 {(n.master_domains || []).length}
                     </span>
                   )}
                   {layers.includes('SW') && (
-                    <span style={{ fontSize: 12, color: 'var(--ls-orange)' }}>
+                    <span style={{ fontSize: 12, color: LAYERS[1].color }}>
                       템플릿 {n.default_template_id ? '지정' : '미지정'}
                     </span>
                   )}
                   {layers.includes('TWIN') && (
-                    <span style={{ fontSize: 12, color: 'var(--ls-green)' }}>
+                    <span style={{ fontSize: 12, color: LAYERS[2].color }}>
                       에이전트 {(n.domain_agents || []).length}
                     </span>
                   )}

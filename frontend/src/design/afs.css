@@ -621,8 +621,19 @@
   display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center;
   margin: 0 0 10px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #fafbfc;
 }
-.afs-scope .search-field span { color: #8490a0; }
-.afs-scope .search-field input { height: 38px; border: 0; outline: 0; background: transparent; font-size: 13px; }
+/* [§9.1] `#8490a0` 은 전 배경에서 2.86~3.24 로 미달이었다. 아이콘이라도 **뜻을 나르는
+   글자**(🔍)면 대비를 지켜야 한다 — 장식이 아니다. */
+.afs-scope .search-field span { color: var(--surface-text-faint); }
+/* ★ [설계 §9.1] 「**focus ring 제거 금지**」 — `outline: 0` 이었다.
+   테두리를 감싸는 상자(`.search-field`)에 그리려고 입력의 링을 껐는데, 정작 **상자에 표시를
+   넣지 않아** 키보드로 들어와도 아무 변화가 없었다. 마우스 사용자는 자기가 어디를 눌렀는지
+   알지만 키보드 사용자는 그 자리에서 길을 잃는다. 링을 상자로 옮겨 실제로 그린다. */
+.afs-scope .search-field input {
+  height: 38px; border: 0; outline: 0; background: transparent; font-size: 13px;
+}
+.afs-scope .search-field:focus-within {
+  outline: 2px solid var(--ls-navy, #0a1e5a); outline-offset: 1px;
+}
 
 .afs-scope .people-list { display: grid; gap: 6px; }
 .afs-scope .person {
@@ -1149,4 +1160,30 @@
   .afs-scope .module-menu button { padding: 8px 9px; }
   .afs-scope .module-menu small { margin-top: 1px; }
   .afs-scope .module-rail > .inheritance-card { max-height: 22%; margin: 8px; padding: 11px; }
+}
+
+/* ── [설계 §3.1 · §9.2] 경영 홈 Decision Canvas 의 폭 규칙 ────────────────────
+   1600+      3열 전체
+   1280~1599  좌 260 / 우 320, 중앙 유동
+   1024~1279  **Atlas(우) 를 접는다** — 셋을 다 유지하면 중앙이 읽을 수 없게 좁아지고,
+              실측에서는 아예 가로 스크롤이 생겼다(문서 1206px @ 뷰포트 1024px).
+   768~1023   좌 큐도 접고 **읽기·승인 중심** 한 열로.
+   ⚠️ 접은 열을 «없앤» 것이 아니다. 큐는 아래로 내려와 계속 보이고, Atlas 는 상단
+     «전사 브리핑»·각 화면의 Jarvis 레일에서 계속 쓸 수 있다. */
+.afs-scope.enterprise-canvas {
+  background: var(--surface-page); min-height: calc(100vh - 72px);
+  display: grid; align-items: stretch;
+  grid-template-columns: minmax(260px, 280px) minmax(0, 1fr) minmax(320px, 360px);
+}
+@media (max-width: 1279px) {
+  .afs-scope.enterprise-canvas { grid-template-columns: minmax(240px, 280px) minmax(0, 1fr); }
+  /* 세 번째 열(Atlas)은 중앙 아래로 내려 **전체 폭**을 쓴다 — 지우지 않는다. */
+  .afs-scope.enterprise-canvas > :nth-child(3) { grid-column: 1 / -1; }
+}
+@media (max-width: 1023px) {
+  .afs-scope.enterprise-canvas { grid-template-columns: minmax(0, 1fr); }
+  .afs-scope.enterprise-canvas > :nth-child(1),
+  .afs-scope.enterprise-canvas > :nth-child(3) { grid-column: 1 / -1; }
+  /* 좌측 큐는 세로 스크롤 목록이 되면 화면을 다 먹는다 — 높이를 묶는다. */
+  .afs-scope.enterprise-canvas > :nth-child(1) { max-height: 46vh; overflow-y: auto; }
 }
