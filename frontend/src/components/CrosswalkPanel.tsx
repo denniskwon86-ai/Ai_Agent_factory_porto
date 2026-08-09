@@ -32,6 +32,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
 import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
+import { useLatestOnly } from '../design/useLatestOnly';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, Panel, ScreenHead } from '../design/HubShell';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
@@ -41,6 +42,8 @@ import {
 
 
 export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
+  //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
+  const claim = useLatestOnly();
   const [systems, setSystems] = useState<Loaded<Sys[]>>(loading<Sys[]>());
   //: ★★★ 「지금 이 사람이 바꿀 수 있는가」는 **서버가 답한다**(§10 UI). 빈 문자열이면 가능.
   //:   ⚠️ 화면이 이 판정을 다시 만들지 않는다 — 만들면 서버와 갈라져 「버튼은 보이는데 서버는
@@ -87,6 +90,7 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   const refreshSel = useCallback(async (sid: string) => {
+    const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
     setSchema(loading<Field[]>());
     setProposals(loading<Proposal[]>());
     setMappings(loading<Mapping[]>());
@@ -94,10 +98,13 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
     const [s, p, m] = await Promise.allSettled([
       crosswalkApi.schema(sid), crosswalkApi.proposals(sid), crosswalkApi.mappings(sid),
     ]);
+    // ★ [§6.1] 시스템을 연달아 고르면 앞의 스키마가 뒤에 도착할 수 있다 — 다른 시스템의
+    //   필드 위에 매핑을 만들게 된다.
+    if (!isCurrent()) return;
     setSchema(s.status === 'fulfilled' ? ok(s.value || []) : failed<Field[]>(s.reason));
     setProposals(p.status === 'fulfilled' ? ok(p.value || []) : failed<Proposal[]>(p.reason));
     setMappings(m.status === 'fulfilled' ? ok(m.value || []) : failed<Mapping[]>(m.reason));
-  }, []);
+  }, [claim]);
 
   useEffect(() => { fetchSystems(); }, [fetchSystems]);
   useEffect(() => { if (sel) refreshSel(sel); }, [sel, refreshSel]);

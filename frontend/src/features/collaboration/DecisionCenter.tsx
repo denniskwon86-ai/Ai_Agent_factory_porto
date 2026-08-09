@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Banner, Panel, ScreenHead } from '../../design/HubShell';
+import { useLatestOnly } from '../../design/useLatestOnly';
 import {
   decisionApi, DECISION_STATUS_KO, OUTCOME_KO, PACKAGE_FIELDS, RESPONSE_KO, ROLE_KO, VIEW_KO,
   type DecisionAction, type DecisionCase, type DecisionRole, type Outcome, type ResponseStatus,
@@ -77,6 +78,8 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
   simulationRunIds?: string[];
 }) {
   const [mode, setMode] = useState<Mode>('list');
+  //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
+  const claim = useLatestOnly();
   // [UIUX-AUDIT-29 §2] 목록을 **상태와 함께** 들고 있는다. 배열만 두면 «조회 실패»가
   //   «0건»과 구분되지 않는다 — 경영 화면에서 그 둘은 정반대의 뜻이다.
   const [queue, setQueue] = useState<Loaded<DecisionCase[]>>(loading<DecisionCase[]>());
@@ -105,18 +108,22 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
   }, []);
 
   const open = useCallback(async (id: string) => {
+    const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
     setBusy('안건을 여는 중'); setErr(null); setFlash(null);
     try {
       // 상세와 세 관점을 함께 받는다 — 관점 탭을 눌러야만 로드하면, 참석자는 "같은 문서인가"를
       // 확인하기 전에 한 관점만 읽고 회의에 들어간다.
       const [d, v] = await Promise.all([decisionApi.get(id), decisionApi.views(id)]);
+      // ★★ [§6.1] 안건을 연달아 열면 앞의 응답이 뒤에 올 수 있다. 이 화면은 «세 관점이 같은
+      //   문서인가» 를 지문으로 증명하는 자리라, 섞이면 그 증명이 통째로 거짓이 된다.
+      if (!isCurrent()) return;
       setCurrent(d); setViews(v);
       setView(d.my_role === 'AFFECTED' ? 'affected' : d.my_role === 'REQUESTER' ? 'requester' : 'decider');
       setMode('detail');
     } catch (e: any) {
       setErr({ msg: e?.message || String(e), status: e?.status });
     } finally { setBusy(null); }
-  }, []);
+  }, [claim]);
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
 

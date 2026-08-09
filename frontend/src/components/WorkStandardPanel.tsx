@@ -25,6 +25,7 @@ import {
   type FoundationRow,
 } from '../design/DataFoundationShell';
 import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
+import { useLatestOnly } from '../design/useLatestOnly';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
@@ -64,6 +65,8 @@ const MODULE: Record<View, { kicker: string; title: string; subtitle: string; de
 };
 
 export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
+  //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
+  const claim = useLatestOnly();
   const [view, setView] = useState<View>('regulation');
   const [list, setList] = useState<Loaded<StandardRow[]>>(loading<StandardRow[]>());
   const [selectedStage, setSelectedStage] = useState('');
@@ -95,12 +98,15 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
 
   const loadDetail = useCallback(async (stage: string) => {
     if (!stage) { setDetail(ok(null)); setHist(ok<HistoryRow[]>([])); return; }
+    const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
     setDetail(loading<StandardDetail | null>());
     setHist(loading<HistoryRow[]>());
     // ⚠️ 두 조회를 **따로** 담는다. 이력 조회가 실패했다고 본문까지 «없음»으로 만들지 않는다.
     const [d, h] = await Promise.allSettled([
       standardApi.detail(stage), standardApi.history(stage),
     ]);
+    // ★ [§6.1] 단계를 연달아 고르면 다른 단계의 표준 본문이 그려질 수 있다.
+    if (!isCurrent()) return;
     if (d.status === 'fulfilled') { setDetail(ok(d.value)); reportRequestSuccess(); }
     else {
       setDetail(failed<StandardDetail | null>(d.reason));

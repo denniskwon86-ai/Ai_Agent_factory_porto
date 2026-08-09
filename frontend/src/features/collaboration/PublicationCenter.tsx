@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Banner, Panel, ScreenHead } from '../../design/HubShell';
+import { useLatestOnly } from '../../design/useLatestOnly';
 import { errorTitle } from '../../lib/closedLoopFetch';
 import { EmptyOrError, Metric, failed, loading, ok, type Loaded }
   from '../../design/DataState';
@@ -52,6 +53,8 @@ function SectionValue({ v }: { v: any }) {
 }
 
 export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarvis) => void }) {
+  //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
+  const claim = useLatestOnly();
   const [mode, setMode] = useState<Mode>('list');
   // [UIUX-AUDIT-29 §2] «조회 실패»와 «0건»을 구분한다 — 발간 화면에서 그 둘을 뭉개면
   //   사용자는 «대외 발간 0건»을 보고 나간 문서가 없다고 믿는다.
@@ -94,11 +97,19 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
   }, [load]);
 
   const open = useCallback(async (id: string) => {
+    const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
     setBusy('여는 중'); setErr(null); setFlash(null);
-    try { setCurrent(await publicationApi.get(id)); setMode('detail'); }
-    catch (e: any) { setErr({ msg: e?.message || String(e), status: e?.status }); }
-    finally { setBusy(null); }
-  }, []);
+    try {
+      const p = await publicationApi.get(id);
+      // ★★ [§6.1] 발간물을 연달아 열면 앞의 응답이 뒤에 올 수 있다. 발간은 되돌릴 수 없으므로
+      //   «지금 보고 있는 문서» 와 «실제로 나갈 문서» 가 어긋나면 안 된다.
+      if (!isCurrent()) return;
+      setCurrent(p); setMode('detail');
+    } catch (e: any) {
+      if (!isCurrent()) return;
+      setErr({ msg: e?.message || String(e), status: e?.status });
+    } finally { if (isCurrent()) setBusy(null); }
+  }, [claim]);
 
   const act = async (label: string, fn: () => Promise<Publication>) => {
     setBusy(label); setErr(null); setFlash(null);

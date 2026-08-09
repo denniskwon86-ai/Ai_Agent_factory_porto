@@ -33,6 +33,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
 import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
+import { useLatestOnly } from '../design/useLatestOnly';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, Panel, ScreenHead } from '../design/HubShell';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
@@ -161,6 +162,9 @@ export default function WorkspacePanel({ onClose }: Props) {
   const [filter, setFilter] = useState<OperateFilter>({ scope: '', status: '', target: '' });
 
   // ⚠️ 되돌리기 어렵거나 남에게 영향을 주는 행동은 화면 안에서 한 번 확인한다.
+  //: [설계 §6.1] 늦게 온 응답을 버리는 표. 릴리스를 바꿔 가며 볼 때 필수다.
+  const claim = useLatestOnly();
+
   const confirmPromote = useConfirm<true>();
   const confirmRollback = useConfirm<true>();
   const confirmReject = useConfirm<true>();
@@ -182,6 +186,7 @@ export default function WorkspacePanel({ onClose }: Props) {
 
   const inspect = useCallback(async (rid: string, pid = '', live = liveIntegration) => {
     if (!rid.trim()) { setErr('release_id 를 입력하십시오.'); return; }
+    const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
     setErr(''); setMsg('');
     setReleaseId(rid); setProjectId(pid);
     setRollbackOut(null);
@@ -192,12 +197,16 @@ export default function WorkspacePanel({ onClose }: Props) {
     const [g, s, f, c] = await Promise.allSettled([
       fetchGate(rid, pid), fetchShares(rid), fetchForks(rid), fetchChecklist(rid, pid, live),
     ]);
+    // ★★ [설계 §6.1] 릴리스를 빠르게 두 번 바꾸면 **앞의 응답이 뒤에 도착**할 수 있다.
+    //   그러면 화면 제목은 새 릴리스인데 게이트 판정은 옛 릴리스의 것이 된다 — 「승격 가능」을
+    //   엉뚱한 릴리스에 대해 읽고 그대로 승격한다. 늦게 온 응답은 조용히 버린다.
+    if (!isCurrent()) return;
     // ★★★ 넷을 **각각** 담는다. 종전에는 실패를 전부 «빈 배열/ null» 로 바꿨다.
     setGate(g.status === 'fulfilled' ? ok(g.value) : failed<Gate>(g.reason));
     setShares(s.status === 'fulfilled' ? ok(s.value || []) : failed<Share[]>(s.reason));
     setForks(f.status === 'fulfilled' ? ok(f.value || []) : failed<Fork[]>(f.reason));
     setChecklist(c.status === 'fulfilled' ? ok(c.value) : failed<Checklist>(c.reason));
-  }, [liveIntegration]);
+  }, [liveIntegration, claim]);
 
   const act = async (fn: () => Promise<unknown>, okMsg: string) => {
     setMsg(''); setErr('');

@@ -24,6 +24,7 @@ import {
   useConfirm, type FoundationRow,
 } from '../design/DataFoundationShell';
 import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
+import { useLatestOnly } from '../design/useLatestOnly';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
@@ -73,6 +74,8 @@ const FLAGS: { key: 'is_admin' | 'is_executive' | 'is_data_admin'; label: string
 ];
 
 export function OrgChartPanel({ onClose }: { onClose: () => void }) {
+  //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
+  const claim = useLatestOnly();
   const [view, setView] = useState<View>('chart');
   const [flat, setFlat] = useState<Loaded<Dept[]>>(loading<Dept[]>());
   const [users, setUsers] = useState<Loaded<OrgUser[]>>(loading<OrgUser[]>());
@@ -128,10 +131,18 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
 
   const loadHistory = useCallback(async (deptId: string) => {
     if (!deptId) { setHist(ok<Dept[]>([])); return; }
+    const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
     setHist(loading<Dept[]>());
-    try { setHist(ok(await orgApi.deptHistory(deptId))); reportRequestSuccess(); }
-    catch (e: any) { setHist(failed<Dept[]>(e)); reportRequestFailure(e?.status); }
-  }, []);
+    try {
+      const rows = await orgApi.deptHistory(deptId);
+      // ★ [§6.1] 부서를 연달아 고르면 다른 부서의 개편 이력이 그려질 수 있다.
+      if (!isCurrent()) return;
+      setHist(ok(rows)); reportRequestSuccess();
+    } catch (e: any) {
+      if (!isCurrent()) return;
+      setHist(failed<Dept[]>(e)); reportRequestFailure(e?.status);
+    }
+  }, [claim]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {

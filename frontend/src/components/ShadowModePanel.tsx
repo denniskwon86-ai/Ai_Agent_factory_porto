@@ -29,6 +29,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
 import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
+import { useLatestOnly } from '../design/useLatestOnly';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, Panel, ScreenHead } from '../design/HubShell';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
@@ -69,6 +70,9 @@ function fmt(v: number | null | undefined) {
 /** 401/403 은 «없다» 가 아니라 «못 봤다» 다 — 상태를 구분해 담는다. */
 
 export default function ShadowModePanel({ onClose }: Props) {
+  //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
+  const claim = useLatestOnly();
+
   const [runs, setRuns] = useState<Loaded<ShadowRun[]>>(loading<ShadowRun[]>());
   const [summary, setSummary] = useState<Loaded<ShadowSummary>>(loading<ShadowSummary>());
   const [selected, setSelected] = useState<ShadowRun | null>(null);
@@ -95,12 +99,17 @@ export default function ShadowModePanel({ onClose }: Props) {
   useEffect(() => { load(); }, [load]);
 
   const open = async (run: ShadowRun) => {
+    const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
     setMsg(''); setErr(''); setAck(new Set()); setScopeText('');
     try {
       // 비교는 조회 시점에 다시 계산한다 — 저장된 결과만 보면 최신 기록이 반영되지 않는다.
       const v = await compareRun(run.run_id);
+      // ★★ [§6.1] 실행을 빠르게 두 번 고르면 앞의 비교가 뒤에 도착할 수 있다. 그러면 제목은
+      //   새 실행인데 **개선·악화 판정은 옛 실행의 것**이 된다 — 그 판정으로 승격한다.
+      if (!isCurrent()) return;
       setSelected({ ...run, variance: v });
     } catch (e: any) {
+      if (!isCurrent()) return;
       setSelected(run);
       // ⚠️ `String(e)` 를 그대로 찍으면 «Error: ...» 가 사용자에게 나간다.
       setErr(e?.message || '비교 결과를 계산하지 못했습니다.');

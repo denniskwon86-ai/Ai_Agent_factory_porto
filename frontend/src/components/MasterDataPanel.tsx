@@ -13,6 +13,7 @@ import {
   VersionHistory, foundationJarvis, useConfirm,
 } from '../design/DataFoundationShell';
 import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
+import { useLatestOnly } from '../design/useLatestOnly';
 import { errorTitle } from '../lib/closedLoopFetch';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
 import {
@@ -47,6 +48,8 @@ function jsonObject(value: string, label: string): Record<string, unknown> | und
 }
 
 export function MasterDataPanel({ onClose }: { onClose: () => void }) {
+  //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
+  const claim = useLatestOnly();
   const [view, setView] = useState<View>('catalog');
   const [types, setTypes] = useState<Loaded<MasterType[]>>(loading<MasterType[]>());
   const [records, setRecords] = useState<Loaded<MasterRecord[]>>(ok<MasterRecord[]>([]));
@@ -115,9 +118,13 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
 
   const loadRecords = useCallback(async (typeId: string, query = '') => {
     if (!typeId) { setRecords(ok<MasterRecord[]>([])); return; }
+    const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
     setRecords(loading<MasterRecord[]>());
     try {
       const value = await masterDataApi.records(typeId, query);
+      // ★ [§6.1] 유형을 연달아 고르거나 검색어를 빠르게 치면 앞의 결과가 뒤에 도착한다 —
+      //   기준정보는 «이 유형에 이런 코드가 있다» 를 읽는 화면이라 섞이면 그대로 틀린다.
+      if (!isCurrent()) return;
       setVisibility((v) => ({ ...v, recordsHidden: value.hiddenPresent,
         recordsCount: value.hiddenCount }));
       setRecords(value.blockedReason
