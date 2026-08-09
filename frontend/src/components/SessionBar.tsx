@@ -54,8 +54,13 @@ export function SessionBar() {
         overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
         {me ? (me.display_name || me.user_id) : '확인 중…'}
       </span>
+      {/* ⚠️ [설계 §1.3 · §11 공통] 아래 칩은 11px 였다. 10~11px 는 **해시·ID·타임스탬프 같은
+          기술 메타데이터에만** 허용된다 — 「초기 비밀번호를 쓰고 있다」는 사용자가 **행동해야
+          하는 경고**이지 메타데이터가 아니다. 가장 작게 그려 놓고 바꾸라고 할 수는 없다.
+          ⚠️ 이 주석을 `cond && (` **안쪽**에 두면 빌드가 깨진다 — 거기는 JSX 자식 자리가
+            아니라 표현식 자리다(이번 세션에서 prop 자리에 이어 두 번째로 같은 실수를 했다). */}
       {me?.must_change_password && (
-        <span className="state-chip warn" style={{ fontSize: 11 }}
+        <span className="state-chip warn" style={{ fontSize: 12 }}
           title="초기 비밀번호를 사용 중입니다 — 바꾸십시오.">초기 비밀번호</span>
       )}
       <button className="secondary-button" onClick={() => setConsole(true)}
