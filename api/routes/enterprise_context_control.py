@@ -262,6 +262,27 @@ class EdgeIn(BaseModel):
     weight: float = 1.0
 
 
+@router.get("/edges")
+async def list_edges(relation_type: str = "", p: Principal = Depends(current_principal),
+                     ctx: EnterpriseContext = Depends(enterprise_context)):
+    """[UI 설계서 §5.8 Enterprise Structure] 의미 그래프 — 소유·운영·공유·연결 관계.
+
+    ⚠️ 저장(`POST /edges`)은 있는데 **읽는 경로가 없었다.** 그래서 관계를 만들어도 어디에서도
+      볼 수 없었고, 화면은 「관계가 없다」와 「볼 방법이 없다」를 구분할 수 없었다.
+
+    ★ 설계 3항: 「권한 상속 관계는 **OPERATING_PARENT 만** 별도 강조」. 어느 관계가 권한을
+      물려주는지 화면이 판단하지 않도록 `grants_authority` 를 서버가 붙여 내려보낸다 —
+      화면이 이름으로 추측하면, 관계 종류가 늘어날 때 조용히 틀린다."""
+    rows = await asyncio.to_thread(ecm_repository.list_edges, ctx.tenant_id, relation_type)
+    out = []
+    for e in rows:
+        d = e.model_dump()
+        d["grants_authority"] = (d.get("relation_type") == "OPERATING_PARENT")
+        out.append(d)
+    return {"status": "success", "data": out,
+            "permission": {"tenant_id": ctx.tenant_id, "entity_mode": ctx.entity_mode}}
+
+
 @router.post("/edges")
 async def create_edge(req: EdgeIn, p: Principal = Depends(current_principal),
                       ctx: EnterpriseContext = Depends(enterprise_context)):

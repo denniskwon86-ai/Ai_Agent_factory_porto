@@ -117,4 +117,36 @@ export const orgApi = {
       'PUT', `${O}/users/${encodeURIComponent(userId)}/roles`, { roles }),
 
   seedDepartments: () => closedLoopEnvelopeFetch<unknown>('POST', `${O}/seed`, {}),
+
+  /** [설계 §5.8 Enterprise Structure] 의미 그래프 — 소유·운영·공유·연결 관계.
+   *
+   * ⚠️ `grants_authority` 는 **서버가 판정한 값**이다. 화면이 관계 이름으로 추측하면 관계
+   *   종류가 늘어날 때 조용히 틀린다 — 권한 상속은 OPERATING_PARENT 만이다. */
+  //: ⚠️⚠️ 봉투를 **여기서** 벗긴다. 처음에 화면이 `closedLoopEnvelopeFetch` 의 결과에서
+  //  `.rows` 를 읽었는데, 이 헬퍼가 주는 것은 `{status, data, permission}` 이다 — `.rows` 는
+  //  없으므로 `undefined → []` 가 되어 **관계 16건이 「0건」으로 그려졌다.** 서버는 200 을
+  //  주고 있었다. 조회 실패도 아니고 빈 것도 아닌, 그냥 잘못 읽은 것이다.
+  //  (같은 실수를 이 저장소에서 세 번째 했다 — 봉투는 반드시 클라이언트 계층에서 벗긴다.)
+  edges: async (): Promise<OrgList<OrgEdge>> => {
+    const e = await closedLoopEnvelopeFetch<OrgEdge[]>(
+      'GET', '/api/v1/enterprise-context/edges');
+    return { rows: e.data || [], blockedReason: String((e as any).blocked_reason || '') };
+  },
+};
+
+/** 조직 관계 한 줄.
+ *
+ * ⚠️ 필드명은 서버 응답 그대로 `from_node_id` / `to_node_id` 다. 처음에 `parent_/child_` 로
+ *   써 두었더니 타입 검사는 통과하고 **표의 두 칸이 빈칸으로** 나왔다 — 이름을 짐작하지 않고
+ *   실제 응답에서 가져온다. */
+export type OrgEdge = {
+  edge_id?: string;
+  from_node_id: string;
+  to_node_id: string;
+  relation_type: string;
+  /** 서버 판정. 권한을 물려주는 관계는 OPERATING_PARENT 하나뿐이다. */
+  grants_authority: boolean;
+  status?: string;
+  effective_from?: string;
+  effective_to?: string;
 };

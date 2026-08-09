@@ -313,6 +313,83 @@
   padding: 10px 12px; border-top: 1px solid #cae3e4; color: #4f6b6e; font-size: 12px;
 }
 
+/* [설계 §5.8] 브랜드 상속 3열 diff · Shell Preview · 운영 5단계 · Change Impact. */
+.afs-scope .brand-diff {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;
+}
+.afs-scope .brand-diff section {
+  padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--line, #d7dee4); background: var(--surface-card, #fff);
+}
+.afs-scope .brand-diff section.on { border-color: var(--ls-navy, #0a1e5a); border-width: 2px; }
+.afs-scope .brand-diff section.missing { background: var(--surface-sunken, #f4f6f8); }
+.afs-scope .brand-diff h4 { margin: 0 0 6px; font-size: 13px; }
+.afs-scope .brand-diff p { margin: 0; font-size: 12px; color: var(--muted, #5e7377); line-height: 1.6; }
+.afs-scope .brand-diff ul { margin: 8px 0 0; padding-left: 16px; font-size: 13px; line-height: 1.8; }
+.afs-scope .brand-diff code {
+  padding: 1px 5px; border-radius: 4px; background: var(--surface-sunken, #eef1f4); font-size: 12px;
+}
+
+.afs-scope .shell-preview {
+  border-radius: 8px; overflow: hidden; border: 1px solid var(--line, #d7dee4);
+}
+.afs-scope .shell-preview .sp-bar {
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px; color: #fff;
+}
+.afs-scope .shell-preview .sp-bar b { font-size: 14px; }
+.afs-scope .shell-preview .sp-bar span { font-size: 12px; opacity: .85; }
+.afs-scope .shell-preview .sp-body {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 14px 16px; background: #fff;
+}
+.afs-scope .shell-preview .sp-body button {
+  min-height: 36px; padding: 0 14px; border: 0; border-radius: 6px;
+  font-size: 13px; font-weight: 700; cursor: default;
+}
+.afs-scope .shell-preview .sp-body span {
+  padding: 4px 9px; border-radius: 10px; border: 1px solid currentColor;
+  font-size: 12px; font-weight: 700;
+}
+
+.afs-scope .ops-stages { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.afs-scope .ops-stages span {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--line, #d7dee4); background: var(--surface-sunken, #f4f6f8);
+  font-size: 12px; color: var(--muted, #5e7377);
+}
+.afs-scope .ops-stages span.done {
+  border-color: var(--ls-navy, #0a1e5a); background: var(--ls-navy, #0a1e5a); color: #fff;
+}
+.afs-scope .ops-stages i {
+  display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
+  background: rgba(0, 0, 0, .12); font-style: normal; font-size: 10px; font-weight: 900;
+}
+
+.afs-scope .change-impact { padding: 16px; display: grid; gap: 12px; align-content: start; }
+.afs-scope .change-impact h3 {
+  margin: 0; font-size: 12px; font-weight: 900; letter-spacing: .06em;
+  color: var(--muted, #5e7377);
+}
+.afs-scope .change-impact dl { display: grid; gap: 1px; margin: 0; }
+.afs-scope .change-impact dl > div {
+  padding: 8px 0; border-bottom: 1px solid var(--line, #eceff2);
+}
+.afs-scope .change-impact dt {
+  font-size: 12px; font-weight: 700; color: var(--muted, #5e7377);
+}
+.afs-scope .change-impact dd { margin: 3px 0 0; font-size: 13px; line-height: 1.6; }
+.afs-scope .change-impact .ci-note {
+  margin: 0; padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;
+  background: var(--surface-sunken, #f4f6f8); border: 1px solid var(--line, #d7dee4);
+}
+.afs-scope .change-impact .ci-note.danger {
+  border-color: var(--state-error-fg, #a3001c); color: var(--state-error-fg, #a3001c);
+}
+.afs-scope .change-impact .ci-save { display: grid; gap: 6px; }
+.afs-scope .change-impact .ci-save small {
+  font-size: 12px; line-height: 1.5; color: var(--muted, #5e7377);
+}
+
 /* [설계 §5.7 Skill Evolution] 현재 규칙 ↔ 추가 규칙을 나란히. */
 .afs-scope .rule-diff {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));

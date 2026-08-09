@@ -13,10 +13,18 @@ import { useEffect, useState } from 'react';
 
 import { API_BASE_URL, getSessionToken, setActingUser, setSessionToken } from '../lib/api';
 
-type Me = { user_id: string; display_name: string; must_change_password?: boolean };
+import { AdminConsolePanel } from './AdminConsolePanel';
+
+type Me = {
+  user_id: string; display_name: string; must_change_password?: boolean;
+  is_admin?: boolean; is_data_admin?: boolean;
+};
 
 export function SessionBar() {
   const [me, setMe] = useState<Me | null>(null);
+  //: [설계 §5.8] 「**상단 사용자 영역의 `환경설정·관리자` 에서 진입**하며 일반 업무
+  //  내비게이션과 혼합하지 않는다」 — 그래서 좌측 업무 레일이 아니라 여기서만 연다.
+  const [console_, setConsole] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -50,8 +58,13 @@ export function SessionBar() {
         <span className="state-chip warn" style={{ fontSize: 11 }}
           title="초기 비밀번호를 사용 중입니다 — 바꾸십시오.">초기 비밀번호</span>
       )}
+      <button className="secondary-button" onClick={() => setConsole(true)}
+        style={{ fontSize: 12, padding: '4px 10px' }}
+        title="개인 설정과 전사 관리 — 업무 화면과 분리되어 있습니다">환경설정 · 관리자</button>
       <button className="secondary-button" onClick={logout}
         style={{ fontSize: 12, padding: '4px 10px' }}>로그아웃</button>
+
+      {console_ && <AdminConsolePanel me={me} onClose={() => setConsole(false)} />}
     </div>
   );
 }

@@ -30,15 +30,23 @@ import { JarvisRail } from '../design/JarvisRail';
 import { DEPT_ROLE_KO, deptRoleKo, orgStatusKo } from '../design/terms';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
 import { errorTitle } from '../lib/closedLoopFetch';
-import { orgApi, type Dept, type MyScope, type OrgUser } from '../lib/orgApi';
+import { orgApi, type Dept, type MyScope, type OrgEdge, type OrgUser } from '../lib/orgApi';
 
-type View = 'chart' | 'users' | 'history' | 'myscope';
+type View = 'chart' | 'graph' | 'users' | 'history' | 'myscope';
 
 const MODULE: Record<View, { kicker: string; title: string; subtitle: string; desc: string }> = {
   chart: {
     kicker: 'ORG CHART', title: '조직도',
     subtitle: '부서는 기준정보입니다. 개편하면 새 버전이 됩니다.',
     desc: '부서의 조직 범위가 자료 노출을 정합니다. 범위가 비면 그 부서에는 아무 자료도 보이지 않습니다.',
+  },
+  //: [설계 §5.8] 「기본 트리와 **의미 그래프를 탭으로 구분**한다. 트리는 탐색, 그래프는
+  //  소유/운영/공유/연결 관계 편집에 사용한다.」 둘을 한 화면에 겹치면 «보러 왔는데 고치게»
+  //  되고, 관계 편집은 되돌리기 어렵다.
+  graph: {
+    kicker: 'STRUCTURE', title: '의미 그래프',
+    subtitle: '조직 사이의 관계입니다. 트리는 탐색용, 여기는 관계용입니다.',
+    desc: '권한 상속은 OPERATING_PARENT 만 따릅니다 — 소유·공유·연결은 권한을 물려주지 않습니다.',
   },
   users: {
     kicker: 'PEOPLE', title: '사용자',
@@ -188,6 +196,7 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
       // 범위 미지정은 **처리해야 할 일**이다 — 이 배지는 대기 건수의 뜻과 맞다.
       count: flat.status === 'ok' && unscoped.length ? unscoped.length : undefined,
       countLabel: `조직 범위 미지정 부서 ${unscoped.length}개` },
+    { id: 'graph', label: '의미 그래프', hint: '소유·운영·공유·연결', icon: 'flow' },
     { id: 'users', label: '사용자', hint: '권한과 부서 역할', icon: 'people' },
     { id: 'history', label: '개편 이력', hint: '구판은 보존된다', icon: 'revise' },
     { id: 'myscope', label: '내 권한', hint: '왜 안 보이는가', icon: 'shield' },
@@ -490,6 +499,8 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
             </>
           )}
 
+          {view === 'graph' && <StructureGraph />}
+
           {view === 'users' && (
             <>
               <FoundationToolbar search={search} onSearch={setSearch}
@@ -742,5 +753,108 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
         </HubShell>
       </div>
     </HubDialog>
+  );
+}
+
+/** [UI 설계서 §5.8 Enterprise Structure] 의미 그래프 — 소유·운영·공유·연결.
+ *
+ * ## 설계가 못박은 것
+ *
+ * 「기본 트리와 의미 그래프를 **탭으로 구분**한다. 트리는 탐색, 그래프는 소유/운영/공유/연결
+ * 관계 편집에 사용한다. **권한 상속 관계는 OPERATING_PARENT 만 별도 강조**한다.」
+ *
+ * ## ⚠️ 왜 강조가 중요한가
+ *
+ * 관계는 네 종류인데 **권한을 물려주는 것은 하나뿐**이다. 넷을 같은 무게로 그리면 관리자는
+ * 「법인이 소유하니까 그 자료도 보이겠지」로 읽고, 실제로는 보이지 않아 시스템이 고장 난
+ * 것으로 결론짓는다. 판정(`grants_authority`)은 **서버가 붙여 준 값**을 쓴다 — 여기서 관계
+ * 이름으로 추측하면 관계 종류가 늘어날 때 조용히 틀린다.
+ */
+function StructureGraph() {
+  const [rows, setRows] = useState<Loaded<OrgEdge[]>>(loading<OrgEdge[]>());
+
+  const load = useCallback(async () => {
+    setRows(loading<OrgEdge[]>());
+    try {
+      const r = await orgApi.edges();
+      setRows(ok((r.rows || []) as OrgEdge[]));
+    } catch (e) {
+      setRows(failed<OrgEdge[]>(e));
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const all = rows.value || [];
+  const authority = all.filter((e) => e.grants_authority);
+  const others = all.filter((e) => !e.grants_authority);
+
+  const group = (title: string, list: OrgEdge[], note: string, strong: boolean) => (
+    <Panel kicker={strong ? 'AUTHORITY' : 'OTHER'} title={title}
+      action={<span className={`state-chip ${strong ? 'success' : 'muted'}`}>{list.length}건</span>}>
+      <div style={{ padding: 15 }}>
+        <p className="hint-line" style={{ margin: '0 0 10px' }}>{note}</p>
+        {list.length === 0 ? (
+          <p className="afs-muted" style={{ fontSize: 13, margin: 0 }}>해당 관계가 없습니다.</p>
+        ) : (
+          <div className="afs-table-wrap">
+            <table className="afs-table">
+              <thead>
+                <tr><th>상위</th><th>관계</th><th>하위</th><th>권한 상속</th></tr>
+              </thead>
+              <tbody>
+                {list.map((e, i) => (
+                  <tr key={e.edge_id || `${e.from_node_id}-${e.to_node_id}-${i}`}>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{e.from_node_id}</td>
+                    <td>{e.relation_type}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{e.to_node_id}</td>
+                    <td className={e.grants_authority ? 'afs-success-fg' : 'afs-muted'}>
+                      {e.grants_authority ? '예 — 권한이 내려갑니다' : '아니오'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+
+  return (
+    <>
+      <ScreenHead kicker="STRUCTURE" title="의미 그래프"
+        description="조직 사이의 관계입니다. 트리는 탐색에, 이 화면은 관계 확인에 씁니다."
+        chip={rows.status !== 'ok' ? { label: '조회 불가', tone: 'danger' }
+          : { label: `관계 ${all.length}건 · 권한 상속 ${authority.length}건`, tone: 'data' }} />
+
+      {/* ★★ 상시 배너 — 네 관계 중 권한을 물려주는 것은 하나뿐이다. */}
+      <Banner tone="info" title="권한 상속은 OPERATING_PARENT 하나뿐입니다">
+        소유(LEGAL_OWNERSHIP)·공유(SHARED_SERVICE)·연결(CONSOLIDATION_SCOPE)은 관계를 기록할
+        뿐 <b>권한을 물려주지 않습니다.</b> 법인이 소유한다고 그 자료가 보이지는 않습니다 —
+        자료가 보이려면 <b>운영 상위</b>로 이어져 있어야 합니다.
+      </Banner>
+
+      {rows.status !== 'ok' ? (
+        <EmptyOrError state={rows.status} error={rows.error} onRetry={load}
+          emptyText="등록된 관계가 없습니다." />
+      ) : (
+        <>
+          {group('권한을 물려주는 관계 — 운영 상위', authority,
+            '이 관계를 따라 상위 조직의 권한이 하위로 내려갑니다.', true)}
+          <div style={{ marginTop: 14 }}>
+            {group('권한과 무관한 관계 — 소유 · 공유 · 연결', others,
+              '기록되지만 자료 노출 범위를 넓히지 않습니다.', false)}
+          </div>
+        </>
+      )}
+
+      {/* ⚠️ 편집 경로가 없다는 사실을 밝힌다 — 「고칠 수 있는데 버튼을 못 찾는 것」과
+          「아직 만들지 않은 것」은 사용자가 할 일이 다르다. */}
+      <p className="hint-line" style={{ marginTop: 12 }}>
+        관계 <b>추가</b>는 서버 경로(<code>POST /enterprise-context/edges</code>)가 있으나 이
+        화면에는 아직 편집 UI 를 두지 않았습니다 — 관계를 잘못 이으면 범위 전개가 바뀌므로
+        확인 절차를 먼저 정한 뒤 열 예정입니다.
+      </p>
+    </>
   );
 }

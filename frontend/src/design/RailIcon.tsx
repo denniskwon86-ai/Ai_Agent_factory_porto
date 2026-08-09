@@ -90,7 +90,11 @@ const SHAPES: Record<RailIconName, { d: string[]; dots?: [number, number][] }> =
 };
 
 export function RailIcon({ name }: { name: RailIconName }) {
-  const shape = SHAPES[name];
+  //: ⚠️⚠️ [2026-08-09 실측] 목록에 없는 이름이 들어오면 `shape.d` 에서 **앱 전체가 죽었다**
+  //  (`TypeError: Cannot read properties of undefined`). 타입 검사는 통과한다 — 아이콘 이름은
+  //  화면에서 문자열로 넘어오기 때문이다. 새 화면을 만들 때마다 재발할 결함이라, 이름 하나
+  //  때문에 화면 전체가 사라지지 않도록 여기서 막는다. **장식이 본문을 죽이지 않게 한다.**
+  const shape = SHAPES[name] || SHAPES.apps;
   return (
     // ⚠️ `aria-hidden` — 아이콘은 장식이다. 뜻은 버튼의 `aria-label` 이 말한다.
     //   여기서 읽히면 스크린리더가 «저울 받은 앱» 처럼 두 번 말한다.
