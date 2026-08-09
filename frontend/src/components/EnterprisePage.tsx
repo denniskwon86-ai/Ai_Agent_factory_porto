@@ -30,8 +30,8 @@ import { getEnterpriseContext } from '../lib/api';
 import {
   SECTION_LABELS, fetchBriefing, type Briefing, type BriefingItem,
 } from '../lib/briefingApi';
-import { crosswalkApi } from '../lib/crosswalkApi';
 import { orgApi, type Dept } from '../lib/orgApi';
+import { DecisionDrawer } from './DecisionDrawer';
 
 /** §4.2 상태. **색만으로 전달하지 않는다**(§2.1) — 낱말을 함께 싣는다. */
 const SEVERITY: Record<string, { label: string; fg: string; bg: string }> = {
@@ -73,6 +73,8 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   const [nodes, setNodes] = useState<Dept[]>([]);
   const [nodeNote, setNodeNote] = useState('');
   const [trust, setTrust] = useState<TrustCard[]>([]);
+  //: §5.1 Decision Drawer — 안건 하나를 끝까지 처리하는 자리(520px).
+  const [drawer, setDrawer] = useState<QueueRow | null>(null);
 
   const load = useCallback(async () => {
     setData(loading<Briefing>());
@@ -238,7 +240,9 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
               const sev = SEVERITY[r.severity] || SEVERITY.info;
               const on = selected === r;
               return (
-                <button key={`${r.ref}-${i}`} onClick={() => setSelected(r)}
+                <button key={`${r.ref}-${i}`}
+                  onClick={() => { if (selected === r) setDrawer(r); else setSelected(r); }}
+                  title="한 번 누르면 아래에 요약, 다시 누르면 상세를 엽니다"
                   style={{
                     minHeight: 84,                       // §4.2 행 높이 최소 84px
                     textAlign: 'left', padding: '12px 14px', cursor: 'pointer',
@@ -398,9 +402,16 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                     color: 'var(--surface-text)' }}>{selected.suggested_action}</div>
                 </div>
               )}
-              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono, monospace)',
-                color: 'var(--surface-text-faint)' }}>
-                {selected.ref_type ? `${selected.ref_type} · ` : ''}{selected.ref || 'ref 없음'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <button onClick={() => setDrawer(selected)} style={{
+                  height: 36, padding: '0 16px', fontSize: 13, fontWeight: 700, borderRadius: 6,
+                  cursor: 'pointer', border: '1px solid var(--ls-navy)',
+                  background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
+                }}>상세 열기</button>
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono, monospace)',
+                  color: 'var(--surface-text-faint)' }}>
+                  {selected.ref_type ? `${selected.ref_type} · ` : ''}{selected.ref || 'ref 없음'}
+                </span>
               </div>
             </div>
           )}
@@ -491,6 +502,20 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
             '시나리오로 보면 어떻게 됩니까?',
           ]} />
       </aside>
+
+      {/* §5.1 Decision Drawer — 520px · Summary→Impact→Evidence→Related→Approval→History */}
+      {drawer && (
+        <DecisionDrawer item={drawer} onClose={() => setDrawer(null)}
+          onOpenRef={(refType) => {
+            //: 참조 종류로 «어느 화면으로 가야 하는가» 를 정한다. 모르는 종류는 서랍을 닫지
+            //: 않는다 — 아무 데도 못 가면서 화면만 닫히면 사용자는 무엇이 됐는지 모른다.
+            const t = (refType || '').toLowerCase();
+            if (t.includes('release') || t.includes('promotion')) onOpenMenu('workspace');
+            else if (t.includes('contract') || t.includes('data')) onOpenMenu('governance');
+            else if (t.includes('agent') || t.includes('asset')) onOpenMenu('agentgov');
+            else onOpenMenu('briefing');
+          }} />
+      )}
     </div>
   );
 }
