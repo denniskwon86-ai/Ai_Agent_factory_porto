@@ -293,8 +293,187 @@
 .afs-scope .capability-manifest li b, .afs-scope .capability-manifest li small { display: block; }
 .afs-scope .capability-manifest li b { font-size: 12px; }
 .afs-scope .capability-manifest li small { margin-top: 2px; color: #5e7377; font-size: 12px; }
+/* [설계 §5.3] 요구 데이터 범위 · 금지 기능 — 기능 권한 목록과 **같은 무게**의 구획. */
+.afs-scope .manifest-facets {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  border-top: 1px solid #cae3e4; background: #cae3e4;
+}
+@media (max-width: 900px) { .afs-scope .manifest-facets { grid-template-columns: 1fr; } }
+.afs-scope .manifest-facets > div { padding: 10px 12px; background: #f1fafa; }
+.afs-scope .manifest-facets span {
+  display: block; color: #5e7377; font-size: 12px; font-weight: 700;
+}
+.afs-scope .manifest-facets b { display: block; margin-top: 3px; font-size: 13px; }
+.afs-scope .manifest-facets b.muted { color: #5e7377; font-weight: 600; }
+.afs-scope .manifest-facets b.danger { color: var(--state-error-fg, #a3001c); }
+.afs-scope .manifest-facets small {
+  display: block; margin-top: 4px; color: #5e7377; font-size: 12px; line-height: 1.5;
+}
 .afs-scope .capability-manifest footer {
   padding: 10px 12px; border-top: 1px solid #cae3e4; color: #4f6b6e; font-size: 12px;
+}
+
+/* [설계 §5.7 Skill Evolution] 현재 규칙 ↔ 추가 규칙을 나란히. */
+.afs-scope .rule-diff {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px; margin-top: 12px;
+}
+.afs-scope .rule-current {
+  max-height: 260px; overflow: auto; margin: 6px 0 0; padding: 10px 12px;
+  border-radius: 6px; background: var(--surface-sunken, #f4f6f8);
+  border: 1px solid var(--line, #d7dee4);
+  font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+}
+
+/* [설계 §5.7] Simulation/Validation panel — 유효성·예상 호출·모델 가용성. */
+.afs-scope .validation-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;
+}
+.afs-scope .validation-facts > div {
+  padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--line, #d7dee4); background: var(--surface-sunken, #f4f6f8);
+}
+.afs-scope .validation-facts span {
+  display: block; font-size: 12px; font-weight: 700; color: var(--muted, #5e7377);
+}
+.afs-scope .validation-facts b { display: block; margin-top: 4px; font-size: 16px; }
+.afs-scope .validation-facts small {
+  display: block; margin-top: 6px; font-size: 12px; line-height: 1.55;
+  color: var(--muted, #5e7377);
+}
+
+/* [설계 §5.6] Registry — 필터 6종 · 상세 Drawer(우 440). */
+.afs-scope .reg-filters {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px; margin-bottom: 14px;
+}
+.afs-scope .reg-filter { display: grid; gap: 4px; }
+.afs-scope .reg-filter > span {
+  font-size: 12px; font-weight: 700; color: var(--muted, #5e7377);
+}
+.afs-scope .afs-table tr.on > td { background: var(--surface-sunken, #eef3f7); }
+.afs-scope .registry-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 60;
+  width: 440px; max-width: 96vw; overflow-y: auto; padding: 18px;
+  background: var(--surface-card, #fff); border-left: 1px solid var(--line, #d7dee4);
+  box-shadow: -6px 0 24px rgba(16, 32, 48, .16);
+}
+.afs-scope .registry-drawer > header {
+  display: flex; gap: 12px; align-items: flex-start; justify-content: space-between;
+  padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line, #d7dee4);
+}
+.afs-scope .registry-drawer > header span {
+  display: block; font-size: 12px; color: var(--muted, #5e7377);
+}
+.afs-scope .registry-drawer > header b {
+  display: block; margin-top: 3px; font-size: 15px; word-break: break-all;
+}
+.afs-scope .drawer-facts { display: grid; gap: 1px; margin: 12px 0; }
+.afs-scope .drawer-facts > div {
+  display: grid; grid-template-columns: 96px 1fr; gap: 10px; padding: 7px 0;
+  border-bottom: 1px solid var(--line, #eceff2); font-size: 13px;
+}
+.afs-scope .drawer-facts dt { color: var(--muted, #5e7377); font-weight: 700; }
+.afs-scope .drawer-facts dd { margin: 0; word-break: break-all; }
+.afs-scope .drawer-actions {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;
+}
+
+/* [설계 §5.5] 기준선 불일치 차단 overlay — **결과 전체를 덮는다.**
+   배너로 «무효» 라고 적어 두면 경고는 읽히지 않고 숫자만 읽힌다. 가려야 멈춘다. */
+.afs-scope .blocking-overlay-host { position: relative; }
+.afs-scope .blocking-overlay-host.blocked > *:not(.blocking-overlay) {
+  filter: blur(2.5px); opacity: .45; pointer-events: none; user-select: none;
+}
+.afs-scope .blocking-overlay {
+  position: absolute; inset: 0; z-index: 3; display: grid; align-content: center;
+  justify-items: center; gap: 10px; padding: 20px; text-align: center; border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card, #fff) 88%, transparent);
+  border: 2px solid var(--state-error-fg, #a3001c);
+}
+.afs-scope .blocking-overlay b { font-size: 15px; color: var(--state-error-fg, #a3001c); }
+.afs-scope .blocking-overlay p {
+  max-width: 46ch; margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink, #16242b);
+}
+
+/* [설계 §5.4 `/operate/workspace`] 좌 필터 / 중앙 목록 / 우 상세. */
+.afs-scope .afs-dialog-body.operate-workspace {
+  display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 0; align-items: start;
+}
+@media (max-width: 1080px) {
+  .afs-scope .afs-dialog-body.operate-workspace { grid-template-columns: 1fr; }
+}
+.afs-scope .operate-filters {
+  position: sticky; top: 0; align-self: stretch; padding: 18px 14px; display: grid;
+  gap: 18px; align-content: start;
+  border-right: 1px solid var(--line, #d7dee4); background: var(--surface-sunken, #f4f6f8);
+}
+.afs-scope .filter-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.afs-scope .filter-title {
+  width: 100%; font-size: 12px; font-weight: 800; color: var(--muted, #5e7377);
+}
+.afs-scope .filter-chip {
+  min-height: 30px; padding: 0 10px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  border: 1px solid var(--line, #d7dee4); background: #fff; color: var(--ink, #16242b);
+}
+.afs-scope .filter-chip.on {
+  border-color: var(--ls-navy, #0a1e5a); background: var(--ls-navy, #0a1e5a); color: #fff;
+  font-weight: 700;
+}
+/* [§5.4 promotions] 상단 — 릴리스·소유 범위·목표 범위. */
+.afs-scope .promotion-head {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;
+  margin-top: 14px; padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--line, #d7dee4); background: var(--surface-sunken, #f4f6f8);
+}
+.afs-scope .promotion-head span {
+  display: block; font-size: 12px; font-weight: 700; color: var(--muted, #5e7377);
+}
+.afs-scope .promotion-head b { display: block; margin-top: 3px; font-size: 14px; }
+/* [§5.4 promotions] 우 — 영향 범위·의존 대상. */
+.afs-scope .operate-detail {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px; margin-top: 14px; align-items: start;
+}
+
+/* [설계 §5.3] PublicationPreview — **실제 보고서 페이지 비율**(A4 210:297).
+   회색 바탕 위의 흰 종이. 나가는 모양 그대로 보여 주는 것이 이 화면의 목적이다. */
+.afs-scope .publication-preview {
+  padding: 18px; border-radius: 8px; background: var(--surface-sunken, #eef1f4);
+  border: 1px solid var(--line, #d7dee4); overflow: auto; max-height: 62vh;
+}
+.afs-scope .publication-preview .page {
+  aspect-ratio: 210 / 297; width: 100%; max-width: 620px; margin: 0 auto;
+  padding: 40px 44px; box-sizing: border-box; overflow: auto;
+  background: #fff; color: #16242b; border: 1px solid #cfd8df;
+  box-shadow: 0 2px 10px rgba(16, 32, 48, .12);
+}
+.afs-scope .publication-preview .page > header {
+  padding-bottom: 14px; margin-bottom: 18px; border-bottom: 2px solid #16242b;
+}
+.afs-scope .publication-preview .page > header span {
+  display: block; font-size: 12px; font-weight: 800; letter-spacing: .06em; color: #5e7377;
+}
+.afs-scope .publication-preview .page > header h3 { margin: 6px 0 0; font-size: 18px; line-height: 1.4; }
+.afs-scope .publication-preview .page > header p { margin: 6px 0 0; font-size: 13px; color: #405058; }
+.afs-scope .publication-preview .page section { margin-bottom: 16px; }
+.afs-scope .publication-preview .page section h4 {
+  margin: 0 0 5px; font-size: 13px; color: #0a1e5a;
+}
+.afs-scope .publication-preview .page > footer {
+  margin-top: 22px; padding-top: 10px; border-top: 1px solid #dfe5ea;
+  font-size: 11px; color: #5e7377;
+}
+
+/* [설계 §5.3] MyAppPocket — 전달 출처·버전·회수 상태. */
+.afs-scope .pocket-facts { display: grid; gap: 3px; margin-top: 5px; }
+.afs-scope .pocket-facts span { color: var(--muted, #5e7377); font-size: 12px; }
+.afs-scope .pocket-facts span b { font-weight: 700; color: var(--ink, #16242b); }
+.afs-scope .pocket-facts span.warn { color: var(--state-warn-fg, #7a4a00); }
+.afs-scope .pocket-facts span.danger { color: var(--state-error-fg, #a3001c); font-weight: 700; }
+.afs-scope .pocket-caps { margin-top: 7px; }
+.afs-scope .pocket-caps > summary {
+  cursor: pointer; color: var(--muted, #5e7377); font-size: 12px; font-weight: 700;
 }
 
 /* ── 전달·수신 카드 ────────────────────────────────────────────────────────── */

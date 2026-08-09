@@ -219,9 +219,14 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
                       ? new Date(current.created_at).toLocaleString() : '미상' },
                   ]} note="제안은 에이전트가 스스로 만든 것입니다 — 사람이 확인해야 반영됩니다." />
 
+                  {/* ★ [설계 §5.7 Skill Evolution] 「제안 카드마다 **실패 근거, 현재 규칙,
+                      추가 규칙, 영향 Agent, 예상 회귀**를 나란히 표시한다」.
+                      ⚠️ 이전에는 자기 진단과 추가 규칙 둘뿐이었다. **현재 규칙을 보지 못하면
+                        추가 규칙이 기존 규칙과 충돌하는지 알 수 없고**, 충돌은 승인 뒤
+                        에이전트가 이상하게 행동할 때에야 드러난다. */}
                   <div className="section-grid" style={{ marginTop: 12 }}>
                     <section className={current.analysis ? '' : 'missing'}>
-                      <h4>에이전트의 자기 진단</h4>
+                      <h4>실패 근거<em>에이전트의 자기 진단</em></h4>
                       {current.analysis
                         ? <p className="section-text">{current.analysis}</p>
                         : <p className="section-missing">
@@ -230,7 +235,24 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
                     </section>
                   </div>
 
-                  <div className="section-grid" style={{ marginTop: 12 }}>
+                  {/* 현재 규칙 ↔ 추가 규칙을 **나란히** 둔다 — 비교가 승인 판단 그 자체다. */}
+                  <div className="rule-diff">
+                    <section className={current.current_rules_readable === false ? 'missing' : ''}>
+                      <h4>현재 규칙<em>{current.skill_file || '대상 파일 미상'}</em></h4>
+                      {current.current_rules_readable === false ? (
+                        <p className="section-missing">
+                          현재 규칙 파일을 읽지 못했습니다 — <b>규칙이 없다는 뜻이 아닙니다.</b>
+                          무엇과 합쳐지는지 모르는 상태로는 승인하지 마십시오.
+                        </p>
+                      ) : current.current_rules?.trim() ? (
+                        <pre className="rule-current">{current.current_rules}</pre>
+                      ) : (
+                        <p className="section-text">
+                          이 파일에는 아직 규칙이 없습니다 — 이 제안이 첫 규칙이 됩니다.
+                        </p>
+                      )}
+                    </section>
+
                     <section className={current.proposed_rules?.length ? '' : 'missing'}>
                       <h4>추가하려는 규칙<em>승인 시 영구 반영</em></h4>
                       {current.proposed_rules?.length ? (
@@ -241,6 +263,33 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
                         </ul>
                       ) : (
                         <p className="section-missing">제안된 규칙이 없습니다 — 승인할 내용이 없습니다.</p>
+                      )}
+                    </section>
+                  </div>
+
+                  <div className="section-grid" style={{ marginTop: 12 }}>
+                    <section className={current.affected_agents?.length ? 'missing' : ''}>
+                      <h4>영향 Agent<em>같은 스킬 파일을 쓰는 에이전트</em></h4>
+                      {current.affected_agents?.length ? (
+                        <>
+                          <p className="section-text">
+                            <b>{current.agent_id}</b> 외에{' '}
+                            <b>{current.affected_agents.join(', ')}</b> 도 같은 파일을 씁니다 —
+                            승인하면 <b>{current.affected_agents.length + 1}개 에이전트</b>의
+                            행동이 함께 바뀝니다.
+                          </p>
+                          {/* 예상 회귀 — ⚠️ 회귀를 실제로 재현해 보는 경로가 없다. 없는 수치를
+                              지어내는 대신 **무엇을 모르는지** 적는다. */}
+                          <p className="section-missing">
+                            예상 회귀: 이 시스템에는 규칙 변경을 되돌려 검증하는 경로가 아직
+                            없습니다 — 반영 뒤 위 에이전트들의 산출물을 직접 확인하십시오.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="section-text">
+                          <b>{current.agent_id}</b> 만 이 파일을 씁니다 — 다른 에이전트에는
+                          영향이 없습니다.
+                        </p>
                       )}
                     </section>
                   </div>

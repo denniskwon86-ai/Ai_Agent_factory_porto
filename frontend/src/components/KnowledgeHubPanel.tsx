@@ -32,7 +32,7 @@ import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../desig
 import { errorTitle } from '../lib/closedLoopFetch';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
 import {
-  knowledgeApi, type Pack, type ReferenceSummary, type SearchHit,
+  knowledgeApi, type Pack, type ReferenceAsset, type ReferenceSummary, type SearchHit,
 } from '../lib/knowledgeApi';
 
 type View = 'packs' | 'register' | 'search' | 'sources';
@@ -532,6 +532,241 @@ function SourcesView({ state, onScan, onRetry }: any) {
           )}
         </div>
       </Panel>
+
+      <ReferenceTable onChanged={onRetry} />
     </>
+  );
+}
+
+/** [설계 §5.6 Registry 화면 공통 · Reference Registry 특화]
+ *
+ * 필수 열 — **이름 · 범위 · 상태 · 오너 · 최신성 · 위험**.
+ * 필터 — 지식팩 · 범위 · 분류 · 확장자 · 승인 · 색인.
+ * 행 CTA 는 «상세 검토» 하나이고, **승인·색인은 Drawer 에서** 한다.
+ *
+ * ⚠️ 이 표는 서버에 이미 있던 `/reference/assets` 를 그대로 읽는다. 그동안 화면은 요약 4수치만
+ *   보여 줬고, 「검토 대기 N건」이라고 말하면서 **그 N건이 무엇인지는 어디에서도 볼 수 없었다.**
+ *   숫자를 세는 화면과 일을 할 수 있는 화면은 다르다.
+ */
+function ReferenceTable({ onChanged }: { onChanged: () => void }) {
+  const [rows, setRows] = useState<Loaded<ReferenceAsset[]>>(loading<ReferenceAsset[]>());
+  const [f, setF] = useState({ pack: '', scope: '', cls: '', ext: '', approval: '', index: '' });
+  const [openId, setOpenId] = useState('');
+  const [busy, setBusy] = useState('');
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    setRows(loading<ReferenceAsset[]>());
+    try {
+      setRows(ok(await knowledgeApi.referenceAssets() || []));
+    } catch (e) {
+      setRows(failed<ReferenceAsset[]>(e));
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const all = rows.value || [];
+  const opts = (pick: (a: ReferenceAsset) => string) =>
+    Array.from(new Set(all.map(pick).filter(Boolean))).sort();
+
+  const shown = all.filter((a) =>
+    (!f.pack || a.pack_id === f.pack)
+    && (!f.scope || a.scope_code === f.scope)
+    && (!f.cls || a.classification === f.cls)
+    && (!f.ext || a.extension === f.ext)
+    && (!f.approval || a.approval_status === f.approval)
+    && (!f.index || a.ingestion_status === f.index));
+
+  const open = all.find((a) => a.asset_id === openId) || null;
+
+  const act = async (fn: () => Promise<unknown>, label: string) => {
+    setBusy(label); setErr('');
+    try { await fn(); await load(); onChanged(); } catch (e: any) {
+      // 서버 거절 사유를 그대로 — 요약하면 무엇을 고쳐야 할지가 사라진다.
+      setErr(e?.message || '요청이 거절됐습니다.');
+    } finally { setBusy(''); }
+  };
+
+  const sel = (label: string, key: keyof typeof f, values: string[]) => (
+    <label className="reg-filter">
+      <span>{label}</span>
+      <select className="afs-select" value={f[key]}
+        onChange={(e) => setF({ ...f, [key]: e.target.value })}>
+        <option value="">전체</option>
+        {values.map((v) => <option key={v} value={v}>{v}</option>)}
+      </select>
+    </label>
+  );
+
+  /** 위험 열 — **분류와 승인 드리프트를 합친 한 낱말.** 색만으로 전달하지 않는다(§2.1). */
+  const risk = (a: ReferenceAsset) => {
+    if (a.approval_drift === 'changed') {
+      return { label: '승인 후 변경', cls: 'afs-danger-fg' };
+    }
+    if (a.approval_drift === 'unknown') {
+      return { label: '승인 시점 내용 미상', cls: 'afs-warn-fg' };
+    }
+    if (a.classification && a.classification !== 'INTERNAL') {
+      return { label: a.classification, cls: 'afs-warn-fg' };
+    }
+    if (a.extraction_status !== 'SUPPORTED') {
+      return { label: '추출 불가', cls: 'afs-warn-fg' };
+    }
+    return { label: '—', cls: 'afs-muted' };
+  };
+
+  return (
+    <Panel kicker="REGISTRY" title="원본 자산 목록"
+      action={rows.status === 'ok' && (
+        <span className="afs-muted" style={{ fontSize: 12 }}>
+          {shown.length === all.length ? `${all.length}건`
+            : `${shown.length} / ${all.length}건`}
+        </span>)}>
+      <div style={{ padding: 15 }}>
+        {/* 설계 §5.6 필터 6종 */}
+        <div className="reg-filters">
+          {sel('지식팩', 'pack', opts((a) => a.pack_id))}
+          {sel('범위', 'scope', opts((a) => a.scope_code))}
+          {sel('분류', 'cls', opts((a) => a.classification))}
+          {sel('확장자', 'ext', opts((a) => a.extension))}
+          {sel('승인', 'approval', opts((a) => a.approval_status))}
+          {sel('색인', 'index', opts((a) => a.ingestion_status))}
+        </div>
+
+        {err && <Banner tone="error" title="진행하지 못했습니다">{err}</Banner>}
+
+        {rows.status !== 'ok' ? (
+          <EmptyOrError state={rows.status} error={rows.error} onRetry={load}
+            emptyText="등록된 원본 자산이 없습니다." />
+        ) : shown.length === 0 ? (
+          <p className="afs-muted" style={{ fontSize: 13 }}>
+            {/* ⚠️ 필터 때문에 빈 것과 원래 없는 것을 구분한다. */}
+            {all.length > 0
+              ? '이 필터에 맞는 자산이 없습니다 — 필터를 «전체» 로 되돌리십시오.'
+              : '등록된 원본 자산이 없습니다.'}
+          </p>
+        ) : (
+          <div className="afs-table-wrap">
+            <table className="afs-table">
+              <thead>
+                <tr>
+                  <th>이름</th><th>범위</th><th>상태</th><th>오너</th><th>최신성</th>
+                  <th>위험</th><th />
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((a) => {
+                  const r = risk(a);
+                  return (
+                    <tr key={a.asset_id} className={openId === a.asset_id ? 'on' : ''}>
+                      <td title={a.relative_path}>{a.filename}</td>
+                      <td>{a.scope_code || '미지정'}</td>
+                      <td>
+                        {a.approval_status}
+                        <span className="afs-muted"> · {a.ingestion_status}</span>
+                      </td>
+                      <td>{a.owner_org_id || '미지정'}</td>
+                      {/* ⚠️ 「최신성」의 원천이 승인 시각뿐이다 — 파일 수정 시각을 서버가 주지
+                          않는다. 그래서 «최종 수정» 이라 쓰지 않고 무엇의 시각인지 밝힌다. */}
+                      <td>{a.approved_at
+                        ? `${a.approved_at.slice(0, 10)} 승인` : '승인 이력 없음'}</td>
+                      <td className={r.cls}>{r.label}</td>
+                      <td>
+                        {/* 설계: 행 CTA 는 «상세 검토» 하나. 승인·색인은 Drawer 에서. */}
+                        <button className="text-button"
+                          onClick={() => { setOpenId(a.asset_id); setNote(''); setErr(''); }}>
+                          상세 검토
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* 우 440 상세 Drawer */}
+        {open && (
+          <aside className="registry-drawer" role="dialog" aria-modal="false"
+            aria-label={`자산 상세: ${open.filename}`}>
+            <header>
+              <div>
+                <span>{open.pack_id || '지식팩 미지정'}</span>
+                <b>{open.filename}</b>
+              </div>
+              <button className="secondary-button" onClick={() => setOpenId('')}>닫기</button>
+            </header>
+
+            {open.approval_drift === 'changed' && (
+              <Banner tone="error" title="승인한 내용과 파일이 다릅니다">
+                이 자산은 승인 뒤 내용이 바뀌었습니다 — 지금 색인하면 <b>검토받지 않은 문서</b>가
+                사내 지식으로 들어갑니다. 다시 검토한 뒤 승인하십시오.
+              </Banner>
+            )}
+            {open.approval_drift === 'unknown' && (
+              <Banner tone="warn" title="승인 당시 내용을 확인할 수 없습니다">
+                승인 시점의 내용 해시가 기록되기 전에 승인된 자산입니다 — 바뀌었는지 «아닌지»를
+                판단할 근거가 없습니다. 필요하면 다시 승인해 기준을 남기십시오.
+              </Banner>
+            )}
+
+            <dl className="drawer-facts">
+              <div><dt>범위</dt><dd>{open.scope_code || '미지정'}</dd></div>
+              <div><dt>소유 조직</dt><dd>{open.owner_org_id || '미지정'}</dd></div>
+              <div><dt>분류</dt><dd>{open.classification}</dd></div>
+              <div><dt>추출</dt><dd>{open.extraction_status}</dd></div>
+              <div><dt>색인</dt><dd>{open.ingestion_status}</dd></div>
+              <div><dt>승인</dt>
+                <dd>{open.approval_status}
+                  {open.approved_by ? ` · ${open.approved_by}` : ''}</dd></div>
+              <div><dt>크기</dt>
+                <dd>{(open.size_bytes / 1024).toFixed(0)} KB · {open.extension}</dd></div>
+              <div><dt>내용 지문</dt>
+                <dd style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                  {open.sha256.slice(0, 16)}</dd></div>
+            </dl>
+
+            <label className="field-label" htmlFor="ref-note">
+              사유 / 메모 (반려에는 <b>필수</b> — 없으면 같은 문서가 계속 다시 올라옵니다)
+            </label>
+            <textarea id="ref-note" className="afs-textarea" value={note}
+              onChange={(e) => setNote(e.target.value)} />
+
+            <div className="drawer-actions">
+              <button className="secondary-button" disabled={!!busy}
+                onClick={() => act(() => knowledgeApi.referenceApprove(open.asset_id, note),
+                  'approve')}>
+                {busy === 'approve' ? '승인 중…' : '승인'}
+              </button>
+              <button className="danger-ghost" disabled={!!busy || !note.trim()}
+                onClick={() => act(() => knowledgeApi.referenceReject(open.asset_id, note.trim()),
+                  'reject')}>
+                반려
+              </button>
+              {/* ⚠️ 색인은 되돌릴 수 없다 — **예행이 기본**이고, 실제 색인은 따로 누른다. */}
+              <button className="secondary-button" disabled={!!busy}
+                onClick={() => act(() => knowledgeApi.referenceIndex([open.asset_id], true),
+                  'dry')}>
+                {busy === 'dry' ? '확인 중…' : '색인 예행 (넣지 않음)'}
+              </button>
+              <button className="primary-button"
+                disabled={!!busy || open.approval_status !== 'APPROVED'
+                  || open.approval_drift === 'changed'}
+                onClick={() => act(() => knowledgeApi.referenceIndex([open.asset_id], false),
+                  'index')}>
+                {busy === 'index' ? '색인 중…' : '색인'}
+              </button>
+            </div>
+            {open.approval_status !== 'APPROVED' && (
+              <p className="afs-muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+                승인되지 않은 자산은 색인할 수 없습니다 — 먼저 승인하십시오.
+              </p>
+            )}
+          </aside>
+        )}
+      </div>
+    </Panel>
   );
 }

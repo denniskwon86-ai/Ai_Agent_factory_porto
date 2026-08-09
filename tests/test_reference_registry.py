@@ -509,3 +509,95 @@ def test_invalid_declared_classification_is_normalized_loudly(tmp_path, capsys):
     assert m["classification"] == "INTERNAL", "유효하지 않은 등급이 그대로 심겼다"
     out = capsys.readouterr().out
     assert "정의된 등급이 아닙니다" in out and "아무에게도 내용이 보이지 않습니다" in out
+
+
+# ── [UI 설계서 §5.6] 「해시 변경 자산은 기존 승인과 다른 경고 상태로 표시」 ─────────
+#
+# 승인은 **그 내용**에 대한 결정이지 파일 이름에 대한 결정이 아니다. 승인 시점 해시를 남기지
+# 않으면, 승인 뒤 파일이 통째로 바뀌어도 화면은 계속 «승인됨» 을 보여 준다 — 검토받지 않은
+# 문서가 검토된 얼굴로 색인되고, 색인은 되돌릴 수 없다.
+
+def test_승인은_그_시점의_내용_해시를_남긴다(reg, tmp_path):
+    from core.reference_registry import approve_asset, load_registry
+
+    registry, target = reg
+    a = registry["assets"][0]
+    out = approve_asset(a["asset_id"], "cdo@ls", registry_path=target)
+    assert out["approved_sha256"] == a["sha256"]
+
+    saved = next(x for x in load_registry(target)["assets"] if x["asset_id"] == a["asset_id"])
+    assert saved["approved_sha256"] == a["sha256"]
+
+
+def test_반려하면_승인_해시를_지운다(reg):
+    """반려는 「이 내용을 승인하지 않았다」이다. 해시가 남으면 다음 판정이 뒤집힌다."""
+    from core.reference_registry import approve_asset, reject_asset
+
+    registry, target = reg
+    aid = registry["assets"][0]["asset_id"]
+    approve_asset(aid, "cdo@ls", registry_path=target)
+    out = reject_asset(aid, "cdo@ls", "범위 밖 자료", registry_path=target)
+    assert out["approved_sha256"] == ""
+
+
+def test_재스캔은_승인_해시를_지우지_않는다(reg, tmp_path):
+    """★★ 재스캔은 `sha256` 을 새로 계산한다 — 승인 해시까지 날리면 «승인 후 변경» 이라는
+    사실이 재스캔 한 번에 사라진다."""
+    from core.reference_registry import approve_asset, build_registry
+
+    registry, target = reg
+    root = tmp_path / "reference"
+    a = registry["assets"][0]
+    approve_asset(a["asset_id"], "cdo@ls", registry_path=target)
+
+    rescanned = build_registry(root, target)
+    same = next(x for x in rescanned["assets"] if x["asset_id"] == a["asset_id"])
+    assert same["approved_sha256"] == a["sha256"]
+
+
+def test_승인_뒤_파일이_바뀌면_경고_상태가_된다(reg, tmp_path):
+    """이 판정이 `''` 로 떨어지면 검토받지 않은 문서가 «승인됨» 으로 색인된다."""
+    from api.routes.reference_control import _with_hash_warning
+    from core.reference_registry import approve_asset, build_registry
+
+    registry, target = reg
+    root = tmp_path / "reference"
+    a = registry["assets"][0]
+    approve_asset(a["asset_id"], "cdo@ls", registry_path=target)
+
+    # 같은 이름으로 **내용만** 바꾼다 — 목록에서는 아무 것도 달라 보이지 않는다.
+    (root / a["filename"]).write_bytes(_docx("완전히 다른 내용으로 교체됐다"))
+    rescanned = build_registry(root, target)
+    changed = next(x for x in rescanned["assets"] if x["asset_id"] == a["asset_id"])
+
+    assert changed["approval_status"] == "APPROVED"       # 상태는 그대로인데
+    assert changed["sha256"] != changed["approved_sha256"]  # 내용이 다르다
+    assert _with_hash_warning(changed)["approval_drift"] == "changed"
+
+
+def test_바뀌지_않은_승인에는_경고를_붙이지_않는다(reg):
+    """⚠️ 멀쩡한 자산마다 경고가 붙으면 아무도 경고를 읽지 않는다."""
+    from api.routes.reference_control import _with_hash_warning
+    from core.reference_registry import approve_asset
+
+    registry, target = reg
+    out = approve_asset(registry["assets"][0]["asset_id"], "cdo@ls", registry_path=target)
+    assert _with_hash_warning(out)["approval_drift"] == ""
+
+
+def test_옛_승인은_변경이_아니라_확인_불가다(reg):
+    """★ 「모른다」와 「바뀌었다」는 다르다.
+
+    승인 해시 필드가 생기기 전에 승인된 자산을 «변경됨» 으로 몰면, 도입 시점에 기존 승인
+    전부가 빨간 경고가 되고 사용자는 경고 전체를 무시하기 시작한다."""
+    from api.routes.reference_control import _with_hash_warning
+
+    old = {"approval_status": "APPROVED", "sha256": "abc", "approved_sha256": ""}
+    assert _with_hash_warning(old)["approval_drift"] == "unknown"
+
+
+def test_승인되지_않은_자산에는_드리프트가_없다(reg):
+    from api.routes.reference_control import _with_hash_warning
+
+    pending = {"approval_status": "PENDING_REVIEW", "sha256": "abc", "approved_sha256": ""}
+    assert _with_hash_warning(pending)["approval_drift"] == ""

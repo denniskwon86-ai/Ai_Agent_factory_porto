@@ -16,6 +16,12 @@ export type SkillProposal = {
   analysis: string;
   created_at: string;
   status: string;
+  //: [설계 §5.7] 제안 카드 필수 — 현재 규칙 · 영향 Agent · 대상 파일.
+  skill_file?: string;
+  current_rules?: string;
+  /** ⚠️ `false` 면 «규칙 없음» 이 아니라 **읽지 못했다**는 뜻이다. 둘을 뭉치지 않는다. */
+  current_rules_readable?: boolean;
+  affected_agents?: string[];
 };
 
 export type SkillApiError = Error & { status?: number };

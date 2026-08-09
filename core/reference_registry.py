@@ -241,6 +241,9 @@ def build_registry(reference_root: Path = REFERENCE_ROOT, registry_path: Path = 
             "owner_org_id": previous.get("owner_org_id") or scope_code,
             "approved_by": previous.get("approved_by", ""),
             "approved_at": previous.get("approved_at", ""),
+            #: ⚠️ 재스캔은 `sha256` 을 **새로 계산**한다. 승인 당시 해시를 여기서 이어받지
+            #  않으면 재스캔 한 번에 「승인 후 바뀐 파일」이라는 사실이 지워진다.
+            "approved_sha256": previous.get("approved_sha256", ""),
             "notes": previous.get("notes", ""),
         })
     registry = {
@@ -403,6 +406,12 @@ def _set_approval(asset_id: str, state: str, actor: str, note: str,
     target["approval_status"] = state
     target["approved_by"] = actor.strip() if state == APPROVED else ""
     target["approved_at"] = _now() if state == APPROVED else ""
+    #: ★★ [UI 설계서 §5.6] 「**해시 변경 자산은 기존 승인과 다른 경고 상태로 표시**」.
+    #  ⚠️ 그러려면 「무엇을 승인했는가」가 남아 있어야 한다. 승인 시점의 내용 해시를 남기지
+    #    않으면, 승인 뒤 파일이 통째로 바뀌어도 화면은 계속 «승인됨» 을 보여 준다 — 검토받지
+    #    않은 문서가 검토된 얼굴로 색인되고 산출물에 실려 나간다. 승인은 **그 내용**에 대한
+    #    것이지 파일 이름에 대한 것이 아니다.
+    target["approved_sha256"] = target.get("sha256", "") if state == APPROVED else ""
     if note:
         target["notes"] = note
     registry["summary"]["pending_review"] = sum(

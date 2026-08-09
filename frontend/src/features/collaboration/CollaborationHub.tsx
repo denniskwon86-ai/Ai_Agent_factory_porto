@@ -16,7 +16,8 @@ import { HubDialog } from '../../design/HubDialog';
 import { JarvisRail } from '../../design/JarvisRail';
 import type { JarvisContext } from '../../lib/jarvisApi';
 import {
-  collaborationApi, DELIVERY_STATUS_KO, type CapabilityManifest, type Delivery, type PocketApp,
+  collaborationApi, DELIVERY_STATUS_KO, type CapabilityManifest, type Delivery,
+  type DeliveryPreflight, type PocketApp,
 } from '../../lib/collaborationApi';
 import { EmptyOrError, failed, loading, ok, type Loaded } from '../../design/DataState';
 import { reportRequestFailure, reportRequestSuccess } from '../../lib/backendHealth';
@@ -149,11 +150,39 @@ function CapabilityManifestCard({ m }: { m: CapabilityManifest }) {
           ))}
         </ul>
       )}
+      {/* ★ [설계 §5.3] 「플랫폼 인증 상속 · 기능 권한 · 요구 데이터 범위 · **금지 기능**을
+          구분한다」 — 처음에는 데이터 범위를 꼬리말에 이어 붙이고 금지 기능은 아예 그리지
+          않았다. 금지 기능은 «이 앱이 무엇을 못 하는가» 이고, 수락 판단에서 요구 권한만큼
+          중요하다. 넷을 같은 무게의 구획으로 나눈다. */}
+      <div className="manifest-facets">
+        <div>
+          <span>요구 데이터 범위</span>
+          {m?.required_data_scopes?.length
+            ? <b>{m.required_data_scopes.join(' · ')}</b>
+            : <b className="muted">요구 없음</b>}
+          {/* ⚠️ 설계: 「데이터 권한 부족은 **자동 부여 체크박스가 아니라** 별도 권한 요청
+              경로로 표시한다」 — 여기서 켜서 줄 수 있는 것은 없다고 못박는다. */}
+          <small>
+            부족한 자료 권한은 이 화면에서 부여되지 않습니다 — 조직 권한을 별도로 요청하십시오.
+          </small>
+        </div>
+        <div>
+          <span>금지 기능</span>
+          {m?.forbidden_features?.length
+            ? <b className="danger">{m.forbidden_features.join(' · ')}</b>
+            : <b className="muted">명시된 금지 기능 없음</b>}
+          <small>
+            {m?.forbidden_features?.length
+              ? '이 기능은 앱 안에서 차단됩니다.'
+              : '금지 목록이 비어 있다는 뜻이며, 무엇이든 허용된다는 뜻이 아닙니다.'}
+          </small>
+        </div>
+      </div>
+
       <footer>
         {inherited
           ? '별도 로그인 없이 현재 사용자·조직 권한으로 실행됩니다. 앱이 자체 로그인 화면을 띄우면 관리자에게 알려 주십시오.'
           : '인증 방식이 확인되지 않았습니다 — 관리자에게 문의하십시오.'}
-        {m?.required_data_scopes?.length ? ` · 데이터 범위: ${m.required_data_scopes.join(', ')}` : ''}
       </footer>
     </div>
   );
@@ -401,13 +430,18 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
             {view === 'apps' && (
               <AppsScreen list={apps} state={data} onRetry={load}
                 onPin={(a) => act('갱신 중', () => collaborationApi.patchApp(a.pocket_id, { pinned: !a.pinned }))}
-                onRename={(a, n) => act('이름 변경 중', () => collaborationApi.patchApp(a.pocket_id, { display_name: n }))} />
+                onRename={(a, n) => act('이름 변경 중', () => collaborationApi.patchApp(a.pocket_id, { display_name: n }))}
+                //: ⚠️ 앱을 실제로 띄우는 실행 경로는 아직 서버에 없다. **여는 척하지 않는다** —
+                //  열람 사실만 기록하고, 산출물이 어디 있는지 그대로 알린다.
+                onOpen={(a) => act('여는 중', () => collaborationApi.patchApp(
+                  a.pocket_id, { mark_opened: true }))} />
             )}
             {view === 'deliver' && (
               <DeliverScreen releaseIds={releaseIds}
                 onSubmit={async (f) => {
                   const r = await act('전달 중', () => collaborationApi.create({
                     release_id: f.release_id, recipient_user_id: f.recipient, purpose: f.purpose,
+                    expires_in_days: f.expires_in_days,
                     // 중복 클릭에도 하나만 생기게 — 서버가 같은 키를 재생한다.
                     idempotency_key: `${f.release_id}|${f.recipient}|${f.purpose}`.slice(0, 120),
                   }));
@@ -490,9 +524,19 @@ function InboxScreen({ list, state, onRetry, selectedId, onSelect, onAccept, onR
               </span>
             </button>
 
+            {/* [설계 §5.3] IncomingAppRequestCard 필수 표시 —
+                발신자·부서 / 앱·릴리스 / 요청 사유 / 최소 권한 / 데이터 범위 / 만료 / 감사 대상.
+                앱·릴리스와 사유는 위 선택 버튼이, 최소 권한·데이터 범위는 Manifest 카드가 든다. */}
             <div className="request-scope">
               <div><span>보낸 사람</span><b>{d.sender_user_id}</b></div>
+              {/* ⚠️ 부서를 서버가 확인하지 못했으면 «미확인» 이라고 적는다 — 빈칸으로 두면
+                  받는 사람은 부서가 없는 것으로 읽는다. */}
+              <div><span>부서</span><b>{d.sender_dept_id || '미확인'}</b></div>
               <div><span>만료</span><b>{d.expires_at || '없음'}</b></div>
+              <div><span>감사 대상</span>
+                <b>{d.manifest_snapshot?.audit_mode
+                  ? (d.manifest_snapshot.audit_mode === 'NONE' ? '아니오' : d.manifest_snapshot.audit_mode)
+                  : '미지정'}</b></div>
               <div><span>Manifest 지문</span><b>{(d.manifest_fingerprint || '').slice(0, 12) || '없음'}</b></div>
             </div>
 
@@ -517,8 +561,13 @@ function InboxScreen({ list, state, onRetry, selectedId, onSelect, onAccept, onR
 
             {d.can_respond ? (
               <>
+                {/* ★★ [설계 §5.3] 「수락·거절은 카드 하단에 나란히 두되 **수락을 무조건
+                    기본값으로 강조하지 않는다**」.
+                    ⚠️ 이전에는 수락만 채워진 주 버튼(`primary-button`)이었다. 권한을 받아들이는
+                      쪽을 시각적 기본값으로 두면 사람은 Manifest 를 읽지 않고 강조된 것을
+                      누른다 — 그것이 바로 이 카드가 막으려는 일이다. 둘을 같은 무게로 둔다. */}
                 <footer>
-                  <button className="secondary-button"
+                  <button className="text-button"
                     onClick={() => setForm({ id: d.delivery_id, kind: 'reassign', note: '' })}>
                     담당 아님 · 재배정 요청
                   </button>
@@ -526,7 +575,7 @@ function InboxScreen({ list, state, onRetry, selectedId, onSelect, onAccept, onR
                     onClick={() => setForm({ id: d.delivery_id, kind: 'reject', note: '' })}>
                     거절
                   </button>
-                  <button className="primary-button" onClick={() => onAccept(d)}>
+                  <button className="secondary-button" onClick={() => onAccept(d)}>
                     수락하고 내 앱에 추가
                   </button>
                 </footer>
@@ -568,9 +617,10 @@ function InboxScreen({ list, state, onRetry, selectedId, onSelect, onAccept, onR
 }
 
 // ── 내 앱 ────────────────────────────────────────────────────────────────────
-function AppsScreen({ list, state, onRetry, onPin, onRename }: {
+function AppsScreen({ list, state, onRetry, onPin, onRename, onOpen }: {
   list: PocketApp[]; state: Loaded<any>; onRetry: () => void;
   onPin: (a: PocketApp) => void; onRename: (a: PocketApp, n: string) => void;
+  onOpen: (a: PocketApp) => void;
 }) {
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const colors = ['blue', 'green', 'orange', 'violet'];
@@ -612,10 +662,49 @@ function AppsScreen({ list, state, onRetry, onPin, onRename }: {
                     <>
                       <b>{a.display_name}</b>
                       <small>{a.release_id} · {a.accepted_at ? `${a.accepted_at.slice(0, 10)} 수락` : ''}</small>
+                      {/* ★ [설계 §5.3] 「수락 후 MyAppPocket 에는 **실행, 세부 권한, 버전 변경,
+                          전달 출처, 회수 상태**를 표시한다」 — 이전에는 이름·수락일뿐이어서
+                          받은 사람은 누가 준 앱인지도, 회수됐는지도 알 수 없었다. */}
+                      <div className="pocket-facts">
+                        <span>전달 출처{' '}
+                          <b>{a.source_user_id || '확인 불가'}
+                            {a.source_dept_id ? ` · ${a.source_dept_id}` : ''}</b>
+                        </span>
+                        <span>버전{' '}
+                          <b>{a.accepted_version ? `v${a.accepted_version}` : '미기록'}</b>
+                        </span>
+                        {a.version_changed && (
+                          <span className="warn">
+                            ⚠️ 게시된 버전이 v{a.current_version} 로 바뀌었습니다 — 다시 전달받아야
+                            최신 앱을 씁니다.
+                          </span>
+                        )}
+                        {(a.status === 'REVOKED' || a.delivery_status === 'REVOKED') && (
+                          <span className="danger">
+                            회수됨 — 이 앱은 실행할 수 없습니다.
+                            {a.revoke_note ? ` 사유: ${a.revoke_note}` : ''}
+                          </span>
+                        )}
+                      </div>
+                      {/* 세부 권한 — 접어 둔다. 목록에서 전부 펼치면 무엇도 읽히지 않는다. */}
+                      <details className="pocket-caps">
+                        <summary>세부 권한 보기</summary>
+                        {a.manifest_snapshot
+                          ? <CapabilityManifestCard m={a.manifest_snapshot} />
+                          : <div className="empty-note" style={{ margin: '8px 0 0' }}>
+                              이 앱의 권한 기록을 찾지 못했습니다 — 전달 기록이 남아 있지 않습니다.
+                            </div>}
+                      </details>
                     </>
                   )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {/* 실행 — 회수된 앱은 누를 수 없다. 이유를 위 카드가 이미 말한다. */}
+                  <button className="secondary-button"
+                    disabled={a.status === 'REVOKED' || a.delivery_status === 'REVOKED'}
+                    onClick={() => onOpen(a)}>
+                    실행
+                  </button>
                   <button className="text-button" onClick={() => setEditing({ id: a.pocket_id, name: a.display_name })}>
                     이름 변경
                   </button>
@@ -634,14 +723,49 @@ function AppsScreen({ list, state, onRetry, onPin, onRename }: {
 }
 
 // ── 사용자에게 전달 ──────────────────────────────────────────────────────────
+/** [설계 §5.3 `/collaboration/deliver/:releaseId`]
+ *
+ * 「중앙은 **릴리스 확인 → 수신자 선택 → 권한 Manifest → 전달 검토** 4단 Wizard」.
+ *
+ * ⚠️ 첫 구현은 `앱 선택 → 받는 사람 → 전달 목적 → 전달` 이었다. 겉보기 4단이지만 **3단계가
+ *   권한이 아니라 목적 입력**이어서, 보내는 사람은 무엇을 전달하는지(요구 권한·데이터 범위·
+ *   금지 기능) 모른 채 보냈다. 조건을 못 보고 누르는 마법사는 설계의 요점을 잃는다.
+ *   서버 `preflight` 를 붙여 3단계에서 **실제 Manifest** 를 읽는다.
+ */
 function DeliverScreen({ releaseIds, onSubmit }: {
   releaseIds: string[];
-  onSubmit: (f: { release_id: string; recipient: string; purpose: string }) => void;
+  onSubmit: (f: {
+    release_id: string; recipient: string; purpose: string; expires_in_days: number;
+  }) => void;
 }) {
-  const [f, setF] = useState({ release_id: releaseIds[0] || '', recipient: '', purpose: '' });
-  const step = !f.release_id ? 0 : !f.recipient ? 1 : !f.purpose.trim() ? 2 : 3;
-  const ready = step === 3;
-  const steps = ['앱 선택', '받는 사람', '전달 목적', '전달'];
+  const [f, setF] = useState({
+    release_id: releaseIds[0] || '', recipient: '', purpose: '', expires_in_days: 14,
+  });
+  //: 3단계의 원천. 릴리스가 바뀌면 다시 읽는다.
+  const [pre, setPre] = useState<Loaded<DeliveryPreflight>>(loading<DeliveryPreflight>());
+
+  useEffect(() => {
+    const rid = f.release_id.trim();
+    if (!rid) { setPre(loading<DeliveryPreflight>()); return; }
+    let alive = true;
+    setPre(loading<DeliveryPreflight>());
+    collaborationApi.preflight(rid)
+      .then((r) => { if (alive) { setPre(ok(r)); setF((x) => ({ ...x, expires_in_days: r.default_expires_in_days || 14 })); } })
+      .catch((e) => { if (alive) setPre(failed<DeliveryPreflight>(e)); });
+    return () => { alive = false; };
+  }, [f.release_id]);
+
+  const p = pre.value;
+  //: ⚠️ 전달 가능 여부는 **서버 판정**을 그대로 쓴다 — 화면에서 다시 판단하면 두 판정이 갈린다.
+  const deliverable = pre.status === 'ok' && !!p?.deliverable;
+  const steps = ['릴리스 확인', '수신자 선택', '권한 Manifest', '전달 검토'];
+  //: 3단계(권한 Manifest)는 «읽었는가» 가 아니라 «읽을 수 있게 되었는가» 로 넘어간다 —
+  //  읽음을 체크박스로 강요하면 사람은 체크만 하고 읽지 않는다.
+  const step = !f.release_id ? 0
+    : !(f.recipient.trim() && f.purpose.trim()) ? 1
+      : pre.status !== 'ok' ? 2
+        : 3;
+  const ready = step === 3 && deliverable;
 
   return (
     <>
@@ -659,7 +783,8 @@ function DeliverScreen({ releaseIds, onSubmit }: {
       </ol>
 
       <div className="delivery-grid">
-        <Panel kicker="RELEASE" title="전달할 앱" className="release-card">
+        {/* ① 릴리스 확인 */}
+        <Panel kicker="STEP 1 · RELEASE" title="릴리스 확인" className="release-card">
           <div style={{ paddingTop: 14 }}>
             <label className="field-label" htmlFor="rel">릴리스</label>
             {releaseIds.length > 0 ? (
@@ -678,14 +803,26 @@ function DeliverScreen({ releaseIds, onSubmit }: {
               </div>
             )}
             <div className="release-facts">
+              <div><span>버전</span>
+                <b>{p?.release_version || (f.release_id ? '확인 중' : '—')}</b>
+                <small>게시된 릴리스</small></div>
               <div><span>전달 방식</span><b>개인</b><small>한 사람에게</small></div>
-              <div><span>인증</span><b>상속</b><small>별도 로그인 없음</small></div>
               <div><span>권한 확대</span><b>없음</b><small>자료는 그대로</small></div>
             </div>
+            {/* ⚠️ 차단 사유는 **누르기 전에** 보여 준다. 전에는 눌러야 알 수 있었다. */}
+            {pre.status === 'ok' && !p?.deliverable && (
+              <Banner tone="danger" title="이 릴리스는 전달할 수 없습니다"
+                text={p?.blocked_reason || '사유를 확인하지 못했습니다.'} />
+            )}
+            {pre.status === 'error' && f.release_id && (
+              <Banner tone="danger" title="릴리스를 확인하지 못했습니다"
+                text={String((pre.error as any)?.message || pre.error
+                  || '전달 조건을 읽지 못했습니다 — 0건이 아니라 조회 실패입니다.')} />
+            )}
           </div>
         </Panel>
 
-        <Panel kicker="RECIPIENT" title="받는 사람과 목적">
+        <Panel kicker="STEP 2 · RECIPIENT" title="수신자 선택">
           <div style={{ padding: 18 }}>
             <label className="field-label" htmlFor="rcp">받는 사람 (사용자 ID)</label>
             <div className="search-field">
@@ -699,18 +836,57 @@ function DeliverScreen({ releaseIds, onSubmit }: {
               placeholder="받는 사람이 수락 여부를 판단할 근거가 됩니다"
               onChange={(e) => setF({ ...f, purpose: e.target.value })} />
 
-            <div className="permission-summary">
-              <b>수락 시 상대에게 생기는 것</b>
-              <span>내 앱 주머니에 앱 1개</span>
+            <label className="field-label" htmlFor="exp">
+              만료 (1~{p?.max_expires_in_days || 90}일)
+            </label>
+            <input id="exp" className="afs-input" type="number" min={1}
+              max={p?.max_expires_in_days || 90} value={f.expires_in_days}
+              onChange={(e) => setF({ ...f, expires_in_days: Number(e.target.value) || 1 })} />
+
+            {/* ③ 권한 Manifest — 설계가 지정한 3단계. */}
+            <div style={{ marginTop: 18, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+              <div className="field-label" style={{ marginTop: 0 }}>STEP 3 · 권한 Manifest</div>
+              {pre.status === 'ok' && p?.manifest_snapshot
+                ? <CapabilityManifestCard m={p.manifest_snapshot} />
+                : (
+                  <div className="empty-note" style={{ margin: '8px 0 0' }}>
+                    {f.release_id
+                      ? (pre.status === 'error'
+                        ? '권한 Manifest 를 읽지 못했습니다 — 무엇을 전달하는지 확인할 수 없으므로 전달할 수 없습니다.'
+                        : '권한 Manifest 를 읽는 중입니다.')
+                      : '릴리스를 먼저 선택하면 이 앱이 요구하는 권한을 표시합니다.'}
+                  </div>
+                )}
+            </div>
+
+            {/* ④ 전달 검토 — 설계: 최종 CTA 는 **대상·버전·만료·영향 요약과 같은 시야**에 둔다. */}
+            <div className="permission-summary" style={{ marginTop: 16 }}>
+              <b>이 조건으로 전달합니다</b>
+              <span>
+                {f.recipient || '수신자 미지정'} · {f.release_id || '릴리스 미지정'}
+                {p?.release_version ? ` v${p.release_version}` : ''} · {f.expires_in_days}일 후 만료
+              </span>
               <small>
-                데이터 접근 범위는 변하지 않습니다. 상대가 원래 볼 수 없던 자료는 이 앱에서도
-                보이지 않습니다 — 자료 권한이 필요하면 조직 권한을 별도로 부여해야 합니다.
+                수락하면 상대의 «내 앱» 에 앱 1개가 생깁니다. 데이터 접근 범위는 변하지 않습니다 —
+                상대가 원래 볼 수 없던 자료는 이 앱에서도 보이지 않습니다.
+                {p?.manifest_fingerprint
+                  ? ` Manifest 지문 ${p.manifest_fingerprint.slice(0, 12)}.`
+                  : ''}
               </small>
             </div>
 
             <button className="primary-wide" disabled={!ready} onClick={() => onSubmit(f)}>
-              전달 요청 보내기
+              이 조건으로 사용자에게 전달
             </button>
+            {!ready && (
+              <div className="empty-note" style={{ margin: '8px 0 0' }}>
+                {step < 1 ? '릴리스를 선택하십시오.'
+                  : step < 2 ? '받는 사람과 전달 목적을 입력하십시오.'
+                    : !deliverable && pre.status === 'ok'
+                      ? '위 사유로 이 릴리스는 전달할 수 없습니다.'
+                      : '권한 Manifest 를 확인하는 중입니다.'}
+              </div>
+            )}
           </div>
         </Panel>
       </div>

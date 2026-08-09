@@ -138,7 +138,27 @@ async def list_assets(pack_id: str = "", approval_status: str = "",
         items = [a for a in items if a.get("pack_id") == pack_id]
     if approval_status:
         items = [a for a in items if a.get("approval_status") == approval_status]
-    return {"status": "success", "data": items}
+    return {"status": "success", "data": [_with_hash_warning(a) for a in items]}
+
+
+def _with_hash_warning(a: dict) -> dict:
+    """[UI 설계서 §5.6] 「해시 변경 자산은 기존 승인과 **다른 경고 상태**로 표시」.
+
+    승인 뒤 내용이 바뀐 자산은 «승인됨» 이 아니라 «승인 후 변경» 이다. 판정을 화면에 맡기면
+    화면마다 다르게 계산한다 — 여기서 한 번 판정해 내려보낸다.
+
+    ⚠️ 승인 당시 해시가 **없는** 자산(이 필드가 생기기 전에 승인된 것)은 «변경됨» 이 아니라
+      «확인 불가» 다. 둘을 뭉치면 옛 승인 전부에 경고가 붙어 아무도 경고를 읽지 않게 된다."""
+    out = dict(a)
+    if a.get("approval_status") != "APPROVED":
+        out["approval_drift"] = ""
+    elif not a.get("approved_sha256"):
+        out["approval_drift"] = "unknown"
+    elif a.get("approved_sha256") != a.get("sha256"):
+        out["approval_drift"] = "changed"
+    else:
+        out["approval_drift"] = ""
+    return out
 
 
 @router.post("/assets/{asset_id}/approve")

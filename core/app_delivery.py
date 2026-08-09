@@ -75,6 +75,53 @@ class AppDelivery:
         from core.decision_ledger import decision_ledger
         return decision_ledger
 
+    # ── 전달 전 확인 ──────────────────────────────────────────────────────
+    def preflight(self, release_id: str, release_lookup=None) -> Dict[str, Any]:
+        """전달하기 **전에** 「무엇을 전달하는가·전달할 수 있는가」를 답한다.
+
+        ## 왜 별도 경로가 필요한가 (UI 설계서 §5.3)
+
+        설계는 전달 화면 3단계를 «권한 Manifest» 로 못박았다 — 보내는 사람이 **조건을 보고**
+        마지막에 「이 조건으로 전달」을 누르는 흐름이다. 그런데 지금까지 manifest 는 `create()`
+        가 만들 때만 읽혔다. 즉 **눌러 봐야** 무엇을 보내는지 알 수 있었고, 차단 사유(자체 인증
+        코드·유효하지 않은 manifest)도 실패 응답으로만 도달했다.
+
+        ⚠️ `create()` 와 **같은 차단 규칙**을 쓴다. 여기서 규칙을 다시 쓰면 「미리보기는 통과인데
+          보내면 실패」 하는 화면이 만들어진다 — 이 저장소가 반복해서 고쳐 온 결함이다.
+        """
+        rel = (release_lookup or _default_release_lookup)(release_id)
+        if not rel:
+            raise NotFoundOrHidden(release_id)
+        man = rel.get("manifest") or {}
+        block = self._delivery_block_reason(rel)
+        snap = man.get("manifest") or {}
+        return {
+            "release_id": release_id,
+            "release_version": str(rel.get("version") or rel.get("release_version") or ""),
+            "manifest_snapshot": snap,
+            "manifest_fingerprint": str(man.get("fingerprint") or ""),
+            #: 차단 사유가 있으면 화면은 **전달 버튼을 열지 않고 이 문장을 보여 준다.**
+            "deliverable": not block,
+            "blocked_reason": block,
+            "default_expires_in_days": DEFAULT_EXPIRY_DAYS,
+            "max_expires_in_days": MAX_EXPIRY_DAYS,
+        }
+
+    @staticmethod
+    def _delivery_block_reason(rel: Dict[str, Any]) -> str:
+        """전달을 막는 사유. 없으면 빈 문자열. **`create()` 와 `preflight()` 의 단일 지점.**"""
+        scan = rel.get("platform_auth_scan") or {}
+        if scan.get("ok") is False:
+            n = (scan.get("summary") or {}).get("blocking", "?")
+            return (f"이 앱에는 자체 인증 코드가 {n}건 있어 전달할 수 없습니다 — 앱은 호스트 인증을 "
+                    f"상속해야 합니다. 로그인 화면 대신 현재 사용자·조직·역할을 표시하도록 고친 뒤 "
+                    f"다시 게시하십시오.")
+        man = rel.get("manifest") or {}
+        if man.get("valid") is False:
+            return (f"이 앱의 Capability Manifest 가 유효하지 않아 전달할 수 없습니다: "
+                    f"{man.get('errors')} — 수신자가 무엇을 수락하는지 알 수 없습니다.")
+        return ""
+
     # ── 생성 ──────────────────────────────────────────────────────────────
     def create(self, release_id: str, sender_user_id: str, recipient_user_id: str,
                purpose: str = "", expires_in_days: int = DEFAULT_EXPIRY_DAYS,
@@ -114,18 +161,12 @@ class AppDelivery:
             raise NotFoundOrHidden(release_id)
 
         # ★ CL-0 정적 검사 결과를 **여기서** 확인한다(게시 때가 아니라 전달 때).
-        scan = rel.get("platform_auth_scan") or {}
-        if scan.get("ok") is False:
-            n = (scan.get("summary") or {}).get("blocking", "?")
-            raise AppDeliveryError(
-                f"이 앱에는 자체 인증 코드가 {n}건 있어 전달할 수 없습니다 — 앱은 호스트 인증을 "
-                f"상속해야 합니다. 로그인 화면 대신 현재 사용자·조직·역할을 표시하도록 고친 뒤 "
-                f"다시 게시하십시오.")
+        #   ⚠️ 사유 문구는 `_delivery_block_reason` 한 곳에서만 만든다 — 미리보기(`preflight`)와
+        #     실제 전달이 **다른 판정을 내리면** 사용자는 통과한 줄 알고 눌렀다가 실패한다.
+        block = self._delivery_block_reason(rel)
+        if block:
+            raise AppDeliveryError(block)
         man = rel.get("manifest") or {}
-        if man.get("valid") is False:
-            raise AppDeliveryError(
-                f"이 앱의 Capability Manifest 가 유효하지 않아 전달할 수 없습니다: "
-                f"{man.get('errors')} — 수신자가 무엇을 수락하는지 알 수 없습니다.")
 
         key = (idempotency_key or "").strip()
         if key:
@@ -317,13 +358,55 @@ class AppDelivery:
             raise NotFoundOrHidden(delivery_id)
         return self._view(row, viewer_user_id=user_id, today=today)
 
-    def my_apps(self, user_id: str, include_revoked: bool = False) -> List[Dict[str, Any]]:
+    def my_apps(self, user_id: str, include_revoked: bool = False,
+                release_lookup=None) -> List[Dict[str, Any]]:
+        """[UI 설계서 §5.3] MyAppPocket 은 「실행, 세부 권한, **버전 변경**, 전달 출처, 회수
+        상태」를 표시한다.
+
+        ⚠️ 처음에는 주머니 행만 돌려줬고 화면에는 이름·수락일뿐이었다 — 받은 사람은 **누가 준
+          앱인지, 무슨 권한을 쓰는지, 회수됐는지** 알 수 없었다. 주머니는 `delivery_id` 를 들고
+          있으므로 **새 컬럼 없이 조인**으로 전부 채울 수 있다.
+
+        ⚠️ 조인에 실패한 행(전달 기록이 지워진 경우)도 **버린다면 앱이 조용히 사라진다.** 남기되
+          출처를 «확인 불가» 로 표시할 수 있게 빈 값을 준다."""
+        import json as _json
+
         sql = "SELECT * FROM user_app_pocket WHERE user_id=?"
         params: tuple = (user_id,)
         if not include_revoked:
             sql += " AND status='ACTIVE'"
         rows = self._store.query(sql + " ORDER BY pinned DESC, updated_at DESC", params)
-        return rows
+
+        lookup = release_lookup or _default_release_lookup
+        current_versions: Dict[str, str] = {}
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            dl = self._store.one("SELECT * FROM app_deliveries WHERE delivery_id=?",
+                                 (d.get("delivery_id") or "",)) or {}
+            d["source_user_id"] = dl.get("sender_user_id") or ""
+            d["source_dept_id"] = self._dept_of(d["source_user_id"])
+            d["purpose"] = dl.get("purpose") or ""
+            d["accepted_version"] = str(dl.get("release_version") or "")
+            #: 회수 상태 — 주머니 상태와 전달 상태가 **둘 다** 있어야 「왜 못 쓰는가」가 설명된다.
+            d["delivery_status"] = dl.get("status") or ""
+            d["revoke_note"] = dl.get("response_note") or ""
+            try:
+                d["manifest_snapshot"] = _json.loads(dl.get("manifest_snapshot") or "{}")
+            except Exception:
+                d["manifest_snapshot"] = {}
+
+            rid = d.get("release_id") or ""
+            if rid not in current_versions:
+                rel = lookup(rid) or {}
+                current_versions[rid] = str(rel.get("version") or rel.get("release_version") or "")
+            cur = current_versions[rid]
+            d["current_version"] = cur
+            #: ⚠️ 현재 버전을 못 읽었으면 «바뀌었다» 고 말하지 않는다 — 모르는 것과 같지 않은
+            #  것은 다르다. 둘을 뭉치면 멀쩡한 앱에 매번 «버전 변경» 이 붙는다.
+            d["version_changed"] = bool(cur and d["accepted_version"] and cur != d["accepted_version"])
+            out.append(d)
+        return out
 
     def update_pocket(self, pocket_id: str, user_id: str, display_name: Optional[str] = None,
                       pinned: Optional[bool] = None,
@@ -400,9 +483,30 @@ class AppDelivery:
         d["can_respond"] = (d["role"] == "recipient" and eff == PENDING)
         d["can_revoke"] = (d["role"] == "sender" and eff in (PENDING, ACCEPTED))
         d["replayed"] = bool(replayed)
+        #: ★ [UI 설계서 §5.3] IncomingAppRequestCard 는 「발신자·**부서**」를 표시한다.
+        #  ⚠️ 조회에 실패하면 **빈 문자열**을 준다 — 화면이 «미확인» 이라고 말할 수 있게. 여기서
+        #    ID 를 부서인 척 채우면 받는 사람은 엉뚱한 조직에서 온 요청으로 읽는다.
+        d["sender_dept_id"] = self._dept_of(row.get("sender_user_id") or "")
         if eff == EXPIRED:
             d["note"] = f"{row.get('expires_at')} 에 만료됐습니다 — 보낸 사람이 다시 전달해야 합니다."
         return d
+
+    @staticmethod
+    def _dept_of(user_id: str) -> str:
+        """사용자의 소속 부서. **모르면 빈 문자열** — 지어내지 않는다.
+
+        ⚠️ 조직도 조회가 실패해도 전달 목록 자체는 보여야 한다. 부서 하나 때문에 목록 전체를
+          오류로 만들면 사용자는 받은 요청을 아예 볼 수 없게 된다."""
+        if not user_id:
+            return ""
+        try:
+            from core.org_directory import org_directory
+            u = org_directory.get_user(user_id) or {}
+            if isinstance(u, dict):
+                return str(u.get("primary_dept_id") or u.get("dept_id") or "")
+            return str(getattr(u, "primary_dept_id", "") or "")
+        except Exception:
+            return ""
 
     @staticmethod
     def _notify(event: str, delivery: dict, actor: str) -> None:

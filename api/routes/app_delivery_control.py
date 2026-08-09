@@ -111,6 +111,20 @@ async def outbox(p: Principal = Depends(current_principal)):
     return {"status": "success", "data": app_delivery.outbox(_actor(p))}
 
 
+#: ⚠️ **`/{delivery_id}` 보다 먼저** 선언한다. FastAPI 는 선언 순서로 매칭하므로 뒤에 두면
+#  `preflight` 가 delivery_id 로 먹혀 404 가 된다(같은 실수를 자산 usage 경로에서 이미 했다).
+@router.get("/api/v1/app-deliveries/preflight")
+async def preflight(release_id: str, p: Principal = Depends(current_principal)):
+    """[UI 설계서 §5.3] 전달 화면 3단계 «권한 Manifest» 의 원천.
+
+    보내는 사람이 **누르기 전에** 무엇을 전달하는지(인증 방식·기능 권한·데이터 범위·금지 기능)와
+    전달할 수 있는지를 본다. 판정은 실제 전달과 같은 함수를 쓴다."""
+    try:
+        return {"status": "success", "data": app_delivery.preflight(release_id)}
+    except NotFoundOrHidden as e:
+        _hidden(e)
+
+
 @router.get("/api/v1/app-deliveries/{delivery_id}")
 async def get_delivery(delivery_id: str, p: Principal = Depends(current_principal)):
     """상세. **당사자가 아니면 404** — URL 을 직접 입력해도 존재가 드러나지 않는다."""

@@ -436,13 +436,33 @@ function DocumentPanel({ doc, excluded, version, external }: {
               </div>
             )}
 
-            <div className="section-grid">
-              {(doc.sections || []).map((s: any) => (
-                <section key={s.key}>
-                  <h4>{s.key}</h4>
-                  <SectionValue v={s.value} />
-                </section>
-              ))}
+            {/* ★ [설계 §5.3] 「중앙은 **실제 보고서 페이지 비율의** `PublicationPreview`」.
+                ⚠️ 이전에는 섹션을 격자로 늘어놓았다. 그러면 내용은 다 보이지만 «대외로 나갔을
+                  때 어떤 문서인가» 는 끝내 보이지 않는다 — 발간은 되돌릴 수 없으므로 나가는
+                  모양 그대로 확인시키는 것이 이 화면의 존재 이유다. A4 비율 종이로 그린다. */}
+            <div className="publication-preview" role="document"
+              aria-label="발간 문서 미리보기">
+              <div className="page">
+                <header>
+                  <span>{external ? '대외 발간본' : '대내 보고본'}</span>
+                  <h3>{doc.header?.question || '제목 없음'}</h3>
+                  <p>
+                    결정 결과 <b>{doc.header?.outcome || '미결'}</b>
+                    {version ? ` · v${version.version_no}` : ''}
+                  </p>
+                </header>
+                {(doc.sections || []).length === 0
+                  ? <p className="empty-note">본문 항목이 없습니다.</p>
+                  : (doc.sections || []).map((s: any) => (
+                    <section key={s.key}>
+                      <h4>{s.key}</h4>
+                      <SectionValue v={s.value} />
+                    </section>
+                  ))}
+                <footer>
+                  근거 지문 {(version?.evidence_hash || '').slice(0, 16) || '없음'}
+                </footer>
+              </div>
             </div>
           </>
         )}

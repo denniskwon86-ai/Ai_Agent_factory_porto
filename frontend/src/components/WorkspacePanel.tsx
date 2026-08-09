@@ -88,6 +88,58 @@ const PROMO: Record<string, { label: string; tone: string }> = {
   promoted: { label: '전사 승격', tone: 'success' },
 };
 
+/** [설계 §5.4 `/operate/workspace`] 좌측 필터의 세 축. */
+type OperateFilter = { scope: string; status: string; target: string };
+
+/** 좌측 필터 컬럼 — 부서(소유 범위) · 상태 · 유형(목표 범위).
+ *
+ * ⚠️ **선택지는 실제 데이터에서 만든다.** 상태 목록을 여기에 손으로 적으면 서버가 새 상태를
+ *   추가했을 때 그 항목은 필터에서 영영 빠지고, 사용자는 「그런 건이 없다」로 읽는다.
+ *   상태만은 `PROMO` 순서를 따르되 **데이터에 있는 것만** 노출한다.
+ *
+ * ⚠️ 목록을 못 읽었을 때 필터를 「없음」으로 그리지 않는다 — 조회 실패와 0건은 다르다. */
+function OperateFilters({ rows, filter, onChange }: {
+  rows: Promotion[]; filter: OperateFilter; onChange: (f: OperateFilter) => void;
+}) {
+  const uniq = (pick: (p: Promotion) => string) =>
+    Array.from(new Set(rows.map(pick).filter(Boolean))).sort();
+  const scopes = uniq((p) => p.from_scope);
+  const targets = uniq((p) => p.target_scope);
+  const present = new Set(rows.map((p) => p.status));
+  const statuses = Object.keys(PROMO).filter((s) => present.has(s as Promotion['status']));
+
+  const group = (title: string, key: keyof OperateFilter, opts: string[],
+                 label: (v: string) => string) => (
+    <div className="filter-group">
+      <div className="filter-title">{title}</div>
+      {opts.length === 0 ? (
+        <p className="afs-muted" style={{ fontSize: 12, margin: 0 }}>
+          목록에 값이 없습니다.
+        </p>
+      ) : (
+        <>
+          <button className={`filter-chip ${filter[key] === '' ? 'on' : ''}`}
+            onClick={() => onChange({ ...filter, [key]: '' })}>전체</button>
+          {opts.map((v) => (
+            <button key={v} className={`filter-chip ${filter[key] === v ? 'on' : ''}`}
+              onClick={() => onChange({ ...filter, [key]: filter[key] === v ? '' : v })}>
+              {label(v)}
+            </button>
+          ))}
+        </>
+      )}
+    </div>
+  );
+
+  return (
+    <aside className="operate-filters" aria-label="필터">
+      {group('부서 (소유 범위)', 'scope', scopes, (v) => v)}
+      {group('상태', 'status', statuses, (v) => PROMO[v]?.label || v)}
+      {group('유형 (목표 범위)', 'target', targets, (v) => v)}
+    </aside>
+  );
+}
+
 
 export default function WorkspacePanel({ onClose }: Props) {
   const [promotions, setPromotions] = useState<Loaded<Promotion[]>>(loading<Promotion[]>());
@@ -105,6 +157,8 @@ export default function WorkspacePanel({ onClose }: Props) {
   const [rollbackOut, setRollbackOut] = useState<RollbackResult | null>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  //: [설계 §5.4] 좌측 필터 — 부서(소유 범위) / 상태 / 유형(목표 범위).
+  const [filter, setFilter] = useState<OperateFilter>({ scope: '', status: '', target: '' });
 
   // ⚠️ 되돌리기 어렵거나 남에게 영향을 주는 행동은 화면 안에서 한 번 확인한다.
   const confirmPromote = useConfirm<true>();
@@ -161,6 +215,24 @@ export default function WorkspacePanel({ onClose }: Props) {
   const g = gate?.value;
   const cl = checklist.value;
   const current = (promotions.value || []).find((p) => p.release_id === releaseId);
+  //: 좌측 필터가 걸러 낸 중앙 목록. **선택된 릴리스는 필터와 무관하게 우측에 그대로 남는다** —
+  //  보고 있던 상세가 필터 한 번에 사라지면 사용자는 화면이 고장 난 것으로 읽는다.
+  /** [설계 §5.4] **지금 눌러야 할 것 하나.** 상태가 다음에 요구하는 행동을 주 CTA 로 삼는다.
+   *
+   * ⚠️ 게이트를 통과하지 못했으면 «승격» 을 주 CTA 로 두지 않는다 — 강조된 버튼이 눌리지
+   *   않으면 사용자는 화면 고장으로 읽는다. 그때 할 일은 막힌 항목을 고치는 것이다. */
+  const primaryCta: 'request' | 'approve' | 'promote' | '' = (() => {
+    const st = current?.status;
+    if (st === 'promoted') return '';
+    if (st === 'approved') return g?.promotable ? 'promote' : '';
+    if (st === 'requested') return 'approve';
+    return 'request';   // 없음 · draft · rejected
+  })();
+
+  const shownPromotions = (promotions.value || []).filter((p) =>
+    (!filter.scope || p.from_scope === filter.scope)
+    && (!filter.status || p.status === filter.status)
+    && (!filter.target || p.target_scope === filter.target));
 
   return (
     <HubDialog label="부서 워크스페이스 — 공유·복제·전사 승격" onClose={onClose}>
@@ -174,7 +246,13 @@ export default function WorkspacePanel({ onClose }: Props) {
         </div>
       </div>
 
-      <div className="afs-dialog-body">
+      {/* ★ [UI 설계서 §5.4 `/operate/workspace`] 「좌: 부서/상태/유형 필터 · 중앙: 프로그램·
+          릴리스 목록 · 우: 선택 자산 상세와 공유/승격 흐름」.
+          ⚠️ 이전에는 전부 한 줄(단일 컬럼)이었다. 그러면 목록을 찾으려고 스크롤하고, 상세를
+            보려고 또 스크롤한다 — 「어느 릴리스를 보고 있는가」가 화면에서 사라진다. */}
+      <div className="afs-dialog-body operate-workspace">
+        <OperateFilters rows={promotions.value || []} filter={filter} onChange={setFilter} />
+
         <div className="hub-main">
           <ScreenHead kicker="WORKSPACE" title="공유 · 복제 · 전사 승격"
             description="이 화면의 목적은 승격 버튼이 아니라 «왜 막혔는지»입니다. 확인하지 못한 항목은 통과가 아니며 승격을 막습니다."
@@ -208,9 +286,17 @@ export default function WorkspacePanel({ onClose }: Props) {
                 // ★ 신청 목록을 못 읽었으면 «신청이 없다» 로 보이지 않게 한다.
                 <EmptyOrError state={promotions.status} error={promotions.error}
                   emptyText="승격 신청 기록이 없습니다." onRetry={loadList} />
-              ) : (promotions.value || []).length > 0 && (
+              ) : shownPromotions.length === 0 ? (
+                //: ⚠️ 필터 때문에 비었는지, 원래 없는지를 **구분해서** 말한다. 뭉치면 사용자는
+                //  자기가 켜 둔 필터를 잊고 「승격 신청이 없다」로 읽는다.
+                <p className="afs-muted" style={{ fontSize: 13 }}>
+                  {(promotions.value || []).length > 0
+                    ? '이 필터에 맞는 릴리스가 없습니다 — 왼쪽에서 «전체» 를 누르면 다시 보입니다.'
+                    : '승격 신청 기록이 없습니다.'}
+                </p>
+              ) : (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {(promotions.value || []).map((p) => (
+                  {shownPromotions.map((p) => (
                     <button key={p.promotion_id} className="secondary-button"
                       onClick={() => inspect(p.release_id, p.project_id)}>
                       {p.release_id}{' '}
@@ -226,6 +312,20 @@ export default function WorkspacePanel({ onClose }: Props) {
 
           {gate && (
             <>
+              {/* ★ [설계 §5.4 promotions] 「상단: 릴리스·**소유 범위·목표 범위**」.
+                  승격은 «어디서 어디로» 가 전부인데, 그동안 화면 어디에도 없었다. */}
+              <div className="promotion-head">
+                <div><span>릴리스</span><b>{releaseId || '미선택'}</b></div>
+                <div><span>소유 범위</span>
+                  <b>{current?.from_scope || fromScope || '미지정'}</b></div>
+                <div><span>목표 범위</span>
+                  <b>{current?.target_scope || '전사'}</b></div>
+                <div><span>상태</span>
+                  <b className={`state-chip ${PROMO[current?.status || '']?.tone || 'muted'}`}>
+                    {current ? (PROMO[current.status]?.label || current.status) : '신청 없음'}
+                  </b></div>
+              </div>
+
               {/* ── ① 게이트 — 왜 막혔는지가 이 화면의 목적이다 ──────── */}
               <div style={{ marginTop: 14 }}>
                 <Panel kicker="GATE" title="전사 승격 게이트 (§9.3)"
@@ -257,21 +357,35 @@ export default function WorkspacePanel({ onClose }: Props) {
                         ))}
                         <p className="afs-muted" style={{ fontSize: 12 }}>{g!.note}</p>
 
+                        {/* ★★ [설계 §5.4] 「하단: 신청/오너 승인/반려/승격 버튼. **현재 상태에
+                            맞는 하나의 주 CTA 만 강조**」.
+                            ⚠️ 이전에는 상태와 무관하게 «전사 승격» 만 채워진 주 버튼이었다.
+                              초안 상태에서도 승격이 강조되니, 사용자는 신청을 건너뛰고 승격을
+                              눌렀다가 거절당한다 — 다음에 무엇을 해야 하는지를 버튼이 알려
+                              주지 못하면 네 개를 차례로 눌러 보게 된다. */}
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <button className="secondary-button"
+                          <button className={primaryCta === 'request' ? 'primary-button' : 'secondary-button'}
                             onClick={() => act(() => requestPromotion({
                               release_id: releaseId, from_scope: fromScope || 'unknown',
                               project_id: projectId,
-                            }), '승격을 신청했습니다.')}>승격 신청</button>
-                          <button className="secondary-button"
+                            }), '승격을 신청했습니다.')}>
+                            {current?.status === 'rejected' ? '고쳐서 다시 신청' : '승격 신청'}
+                          </button>
+                          <button className={primaryCta === 'approve' ? 'primary-button' : 'secondary-button'}
                             onClick={() => act(() => ownerApprove(releaseId),
                               '데이터 오너가 승인했습니다.')}>데이터 오너 승인</button>
                           <button className="secondary-button"
                             onClick={() => confirmReject.ask(true)}>반려</button>
                           {/* ③ 통과 못 하면 잠근다 — 백엔드가 409 를 주지만 누르기 전에 알아야 한다 */}
-                          <button className="primary-button" disabled={!g!.promotable}
+                          <button className={primaryCta === 'promote' ? 'primary-button' : 'secondary-button'}
+                            disabled={!g!.promotable}
                             onClick={() => confirmPromote.ask(true)}>전사 승격</button>
                         </div>
+                        {current?.status === 'promoted' && (
+                          <p className="afs-muted" style={{ fontSize: 12 }}>
+                            이미 전사 승격된 릴리스입니다 — 지금 눌러야 할 것이 없습니다.
+                          </p>
+                        )}
 
                         {/* ★ 반려 사유가 하드코딩('검토 결과 보류')이었다 — 신청자는 무엇을
                             고쳐야 하는지 영영 알 수 없었다. */}
@@ -408,9 +522,10 @@ export default function WorkspacePanel({ onClose }: Props) {
                 </Panel>
               </div>
 
-              {/* ── ④ 공유는 승격과 분리해서 보여준다 ─────────────────── */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-                gap: 14, marginTop: 14, alignItems: 'start' }}>
+              {/* ── ④ 공유는 승격과 분리해서 보여준다 ───────────────────
+                  [설계 §5.4 promotions] 「우: **영향 범위·의존 대상**·승인 이력」 —
+                  공유는 지금 누가 쓰고 있는가(영향 범위), 포크는 무엇이 딸려 있는가(의존)다. */}
+              <div className="operate-detail">
                 <Panel kicker="SHARE" title="부서 공유"
                   action={<span className="afs-muted" style={{ fontSize: 12 }}>승격이 아닙니다</span>}>
                   <div className="panel-body">

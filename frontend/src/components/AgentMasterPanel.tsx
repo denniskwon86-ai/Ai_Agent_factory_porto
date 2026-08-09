@@ -37,6 +37,119 @@ import { useFactoryStore, API_BASE_URL } from '../store/useFactoryStore';
 
 const nodeTypes = { agentNode: AgentNode };
 
+/** [UI 설계서 §5.7] 하단 Simulation/Validation panel —
+ *  **그래프 유효성 · 예상 호출 · 모델 가용성.**
+ *
+ * ## 왜 저장 전에 보여야 하는가
+ *
+ * 순환이 있는 그래프는 저장은 되지만 실행되지 않는다. 시작점이 없어도 마찬가지다. 실행하다
+ * 실패하면 사용자는 「어느 에이전트가 문제인가」를 로그에서 찾아야 하는데, 이 화면은 그것을
+ * **저장 전에** 알 수 있는 유일한 자리다.
+ *
+ * ## ⚠️ 모델 가용성은 지어내지 않는다
+ *
+ * 설계는 「모델 가용성」을 요구하지만 이 저장소에는 **공급자 연결 상태를 묻는 경로가 없다.**
+ * 그래서 「티어별로 몇 개가 걸려 있는가」까지만 사실대로 적고, 실제 연결 여부는 **확인할 수
+ * 없다고 말한다.** 초록 불을 켜 두면 사용자는 확인된 것으로 읽는다. */
+function FlowValidationPanel({ agents, edges, hotlCount }: {
+  agents: any[]; edges: any[]; hotlCount: number;
+}) {
+  const ids = new Set(agents.map((a) => a.id));
+  //: 켜진 에이전트끼리의 연결만 센다 — 꺼진 노드로 가는 연결은 실행되지 않는다.
+  const live = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+
+  //: 순환 검출 — 위상 정렬로 다 빠지지 않으면 남은 것이 순환에 속한다.
+  const indeg: Record<string, number> = {};
+  const next: Record<string, string[]> = {};
+  agents.forEach((a) => { indeg[a.id] = 0; next[a.id] = []; });
+  live.forEach((e) => { next[e.source].push(e.target); indeg[e.target] += 1; });
+  const queue = agents.filter((a) => indeg[a.id] === 0).map((a) => a.id);
+  const order: string[] = [];
+  while (queue.length) {
+    const n = queue.shift()!;
+    order.push(n);
+    next[n].forEach((m) => { if (--indeg[m] === 0) queue.push(m); });
+  }
+  const cyclic = agents.length - order.length;
+
+  const linked = new Set(live.flatMap((e) => [e.source, e.target]));
+  //: 고립 노드 — 에이전트가 둘 이상일 때만 문제다. 하나뿐이면 이을 상대가 없다.
+  const isolated = agents.length > 1 ? agents.filter((a) => !linked.has(a.id)) : [];
+  const starts = agents.filter((a) => !live.some((e) => e.target === a.id));
+
+  const tiers: Record<string, number> = {};
+  agents.forEach((a) => {
+    const t = a.model_tier || 'pro';
+    tiers[t] = (tiers[t] || 0) + 1;
+  });
+
+  const problems: { title: string; detail: string }[] = [];
+  if (agents.length === 0) {
+    problems.push({ title: '켜진 에이전트가 없습니다',
+      detail: '이 구성으로는 아무 것도 실행되지 않습니다.' });
+  }
+  if (cyclic > 0) {
+    problems.push({ title: `연결이 순환합니다 (${cyclic}개 노드)`,
+      detail: '순환이 있으면 실행 순서를 정할 수 없어 파이프라인이 시작되지 않습니다. '
+        + '되돌아오는 연결을 끊으십시오.' });
+  }
+  if (agents.length > 0 && starts.length === 0) {
+    problems.push({ title: '시작점이 없습니다',
+      detail: '들어오는 연결이 없는 에이전트가 하나도 없습니다 — 어디서 시작할지 정할 수 없습니다.' });
+  }
+  if (isolated.length > 0) {
+    problems.push({ title: `연결되지 않은 에이전트 ${isolated.length}개`,
+      detail: `${isolated.map((a) => a.name_ko || a.id).join(', ')} — 켜져 있지만 흐름에 없어 `
+        + '실행되지 않습니다.' });
+  }
+
+  return (
+    <Panel kicker="VALIDATION" title="구성 점검 — 저장 전에 확인합니다"
+      action={<span className={`state-chip ${problems.length ? 'danger' : 'success'}`}>
+        {problems.length ? `문제 ${problems.length}건` : '실행 가능'}
+      </span>}>
+      <div style={{ padding: 15 }}>
+        <div className="validation-facts">
+          <div>
+            <span>그래프 유효성</span>
+            <b className={problems.length ? 'afs-danger-fg' : 'afs-success-fg'}>
+              {problems.length ? '실행할 수 없습니다' : '이상 없음'}
+            </b>
+            <small>에이전트 {agents.length} · 연결 {live.length} · 시작점 {starts.length}</small>
+          </div>
+          <div>
+            <span>예상 호출</span>
+            <b>{agents.length}회</b>
+            {/* ⚠️ 재시도·분기까지 세지 않는다 — 「최소」임을 밝힌다. 정확한 수처럼 적으면
+                비용 예측이 어긋난다. */}
+            <small>
+              켜진 에이전트당 1회 기준의 <b>최소</b>값입니다. 재시도·분기는 포함하지 않았습니다.
+              사람 확인 {hotlCount}곳에서 멈춥니다.
+            </small>
+          </div>
+          <div>
+            <span>모델 가용성</span>
+            <b>{Object.entries(tiers).map(([t, n]) => `${t} ${n}`).join(' · ') || '없음'}</b>
+            {/* ⚠️ 연결 여부를 묻는 경로가 없다 — 초록 불을 켜지 않는다. */}
+            <small>
+              티어별 배정 현황입니다. 공급자 연결이 실제로 살아 있는지 확인하는 경로가 아직
+              없어, 이 화면은 <b>가용 여부를 보증하지 않습니다.</b>
+            </small>
+          </div>
+        </div>
+
+        {problems.length > 0 && (
+          <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+            {problems.map((p) => (
+              <Banner key={p.title} tone="error" title={p.title}>{p.detail}</Banner>
+            ))}
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 type View = 'agents' | 'flow' | 'templates';
 
 const MODULE: Record<View, { kicker: string; title: string; subtitle: string; desc: string }> = {
@@ -638,6 +751,10 @@ export default function AgentMasterPanel() {
                   </div>
                 )}
               </Panel>
+
+              {/* ★ [설계 §5.7] 「하단 Simulation/Validation panel: **그래프 유효성, 예상 호출,
+                  모델 가용성**」 — 저장하기 전에 이 구성이 실제로 돌아가는지 본다. */}
+              <FlowValidationPanel agents={enabledAgents} edges={edges} hotlCount={hotlCount} />
             </>
           )}
 

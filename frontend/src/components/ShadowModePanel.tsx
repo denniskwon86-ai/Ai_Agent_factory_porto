@@ -259,9 +259,15 @@ export default function ShadowModePanel({ onClose }: Props) {
                       <>
                         <div className="afs-table-wrap">
                           <table className="afs-table">
+                            {/* ★ [설계 §5.4 `/operate/shadow/:runId`] 「**좌 baseline, 우
+                                candidate, 중앙 delta**」 — 차이를 두 값 **사이**에 둔다.
+                                끝에 두면 「얼마나 바뀌었나」를 읽으려고 시선이 표를 가로질러
+                                왕복하고, 그러다 기준선과 후보를 헷갈린다. */}
                             <thead>
                               <tr>
-                                <th>지표</th><th>기준선</th><th>후보</th><th>차이</th><th>판정</th>
+                                <th>지표</th><th>기준선</th><th>차이</th><th>후보</th><th>판정</th>
+                                {regressed.length > 0 && selected.review_status === 'pending_review'
+                                  && <th>악화 인지</th>}
                               </tr>
                             </thead>
                             <tbody>
@@ -269,14 +275,36 @@ export default function ShadowModePanel({ onClose }: Props) {
                                 <tr key={m.metric}>
                                   <td style={{ fontFamily: 'monospace' }}>{m.metric}</td>
                                   <td className="num">{fmt(m.baseline)}</td>
-                                  <td className="num">{fmt(m.candidate)}</td>
                                   {/* ② 미측정에 차이값을 쓰지 않는다 — 0 으로 보이면 «변화 없음» 이 된다 */}
                                   <td className="num">
                                     {m.verdict === 'unmeasured' ? '—' : fmt(m.delta)}
                                   </td>
+                                  <td className="num">{fmt(m.candidate)}</td>
                                   <td className={VERDICT[m.verdict]?.cls}>
                                     {VERDICT[m.verdict]?.label}
                                   </td>
+                                  {/* ★★ [설계 §5.4] 「악화 항목 인지 체크는 **지표와 같은 행**」.
+                                      ⚠️ 이전에는 표 아래에 지표 이름만 늘어놓은 체크박스가
+                                        따로 있었다. 그러면 «무엇이 얼마나 나빠졌는지» 를 보지
+                                        않고 이름만 보고 체크한다 — 인지 체크의 목적이 정확히
+                                        그 반대다. 숫자 옆에서 체크하게 한다. */}
+                                  {regressed.length > 0 && selected.review_status === 'pending_review' && (
+                                    <td>
+                                      {m.verdict === 'regressed' ? (
+                                        <label style={{ display: 'flex', alignItems: 'center',
+                                          gap: 6, fontSize: 13 }}>
+                                          <input type="checkbox" checked={ack.has(m.metric)}
+                                            onChange={(e) => {
+                                              const n = new Set(ack);
+                                              if (e.target.checked) n.add(m.metric);
+                                              else n.delete(m.metric);
+                                              setAck(n);
+                                            }} />
+                                          <span>감수한다</span>
+                                        </label>
+                                      ) : <span className="afs-muted">—</span>}
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>
@@ -293,26 +321,13 @@ export default function ShadowModePanel({ onClose }: Props) {
                           <div>
                             <h4 style={{ fontSize: 13, fontWeight: 800 }}>검토 (§7.3 4단계)</h4>
                             {regressed.length > 0 && (
-                              <>
-                                {/* ④ 백엔드가 거절하는 이유를 미리 보여준다 */}
-                                <p className="afs-danger-fg" style={{ fontSize: 13 }}>
-                                  악화된 지표를 인정해야 승인할 수 있습니다 — 모르고 승격하는 것과
-                                  알고 승격하는 것은 다릅니다.
-                                </p>
-                                {regressed.map((m) => (
-                                  <label key={m} className="afs-ink" style={{ display: 'flex',
-                                    alignItems: 'center', gap: 8, fontSize: 13, marginTop: 4 }}>
-                                    <input type="checkbox" checked={ack.has(m)}
-                                      onChange={(e) => {
-                                        const n = new Set(ack);
-                                        if (e.target.checked) n.add(m); else n.delete(m);
-                                        setAck(n);
-                                      }} />
-                                    <span style={{ fontFamily: 'monospace' }}>{m}</span>
-                                    <span>악화를 감수한다</span>
-                                  </label>
-                                ))}
-                              </>
+                              // ④ 백엔드가 거절하는 이유를 미리 보여준다.
+                              //   체크박스 자체는 **위 비교표의 해당 행**에 있다(설계 §5.4).
+                              <p className="afs-danger-fg" style={{ fontSize: 13 }}>
+                                악화 {regressed.length}건을 인정해야 승인할 수 있습니다
+                                (인정 {ack.size}건) — 위 비교표에서 해당 지표의 «감수한다» 를
+                                체크하십시오. 모르고 승격하는 것과 알고 승격하는 것은 다릅니다.
+                              </p>
                             )}
                             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                               <button className="primary-button" disabled={!allAcked}

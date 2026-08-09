@@ -34,6 +34,30 @@ export type ReferenceSummary = {
   by_pack: Record<string, number>;
 };
 
+/** [설계 §5.6] Registry 표 한 행. 필수 열 — 이름·범위·상태·오너·최신성·위험. */
+export type ReferenceAsset = {
+  asset_id: string;
+  filename: string;
+  relative_path: string;
+  extension: string;
+  size_bytes: number;
+  sha256: string;
+  pack_id: string;
+  scope_code: string;
+  classification: string;
+  extraction_status: string;
+  ingestion_status: string;
+  approval_status: string;
+  owner_org_id: string;
+  approved_by: string;
+  approved_at: string;
+  approved_sha256?: string;
+  /** 서버 판정 — `''`(정상) · `changed`(승인 후 변경) · `unknown`(승인 당시 해시 없음). */
+  approval_drift?: '' | 'changed' | 'unknown';
+  notes?: string;
+  tags?: string[];
+};
+
 export type SearchHit = {
   content: string;
   distance: number;
@@ -79,6 +103,23 @@ export const knowledgeApi = {
   referenceSummary: () => req<ReferenceSummary>('GET', '/api/v1/reference/summary'),
 
   referenceScan: () => req<unknown>('POST', '/api/v1/reference/scan'),
+
+  /** [설계 §5.6] Registry 표의 원천. 서버에 이미 있던 경로인데 화면이 쓰지 않아, 사용자는
+   *  「검토 대기 N건」이라는 **숫자만 보고 그것이 무엇인지는 볼 수 없었다.** */
+  referenceAssets: () => req<ReferenceAsset[]>('GET', '/api/v1/reference/assets'),
+
+  referenceApprove: (assetId: string, note = '') =>
+    req<ReferenceAsset>('POST',
+      `/api/v1/reference/assets/${encodeURIComponent(assetId)}/approve`, { note }),
+
+  referenceReject: (assetId: string, reason: string) =>
+    req<ReferenceAsset>('POST',
+      `/api/v1/reference/assets/${encodeURIComponent(assetId)}/reject`, { reason }),
+
+  /** ⚠️ `dry_run` 기본값은 **예행**이다 — 색인은 되돌릴 수 없다(서버 주석과 같은 이유). */
+  referenceIndex: (assetIds: string[], dryRun = true) =>
+    req<any>('POST', '/api/v1/reference/index',
+      { asset_ids: assetIds, dry_run: dryRun, force: false }),
 
   /** 파일 업로드만 `FormData` 라 별도다. **`Content-Type` 을 직접 지정하지 않는다** —
    *  지정하면 boundary 가 빠져 서버가 본문을 파싱하지 못한다. */

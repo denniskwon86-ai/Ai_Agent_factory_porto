@@ -253,12 +253,25 @@ export function PlanningPanel({ onClose }: { onClose: () => void }) {
                     </p>
                   ) : (
                     <>
-                      {/* ★ 기준선이 다르면 그 비교는 무효다 — 숫자보다 먼저 말한다 */}
-                      {!cmpV.same_baseline && (
-                        <Banner tone="error" title="서로 다른 기준선에서 계산되었습니다">
-                          <b>이 비교는 무효입니다.</b> 같은 기준선으로 다시 실행하십시오.
-                        </Banner>
-                      )}
+                      {/* ★★ [설계 §5.5] 「같은 기준선이 아니면 **전체 결과 위에 차단 overlay**,
+                          다시 계산 CTA 제공」.
+                          ⚠️ 이전에는 배너로 «무효입니다» 라고 적기만 하고 표는 그대로 읽혔다.
+                            경고는 읽히지 않고 숫자는 읽힌다 — 무효한 비교를 판단 근거로 쓰는
+                            일을 배너가 막지 못한다. 물리적으로 가린 뒤, 걷어내는 행동(다시
+                            계산)을 같은 자리에 둔다. */}
+                      <div className={`blocking-overlay-host${cmpV.same_baseline ? '' : ' blocked'}`}>
+                        {!cmpV.same_baseline && (
+                          <div className="blocking-overlay" role="alert">
+                            <b>서로 다른 기준선에서 계산되었습니다</b>
+                            <p>
+                              이 비교는 무효입니다 — 기준선이 다르면 «차이» 는 시나리오 차이가
+                              아니라 기준선 차이입니다. 같은 기준선으로 다시 계산하십시오.
+                            </p>
+                            <button className="primary-button" onClick={load}>
+                              같은 기준선으로 다시 계산
+                            </button>
+                          </div>
+                        )}
                       <div className="afs-table-wrap">
                         <table className="afs-table">
                           <thead>
@@ -296,6 +309,7 @@ export function PlanningPanel({ onClose }: { onClose: () => void }) {
                           </tbody>
                         </table>
                       </div>
+                      </div>{/* /blocking-overlay-host */}
                       <p className="afs-muted" style={{ fontSize: 12 }}>
                         엔진 {cmpV.engine_version} · 기준선 {cmpV.baseline_kind} ·
                         같은 지문 = 같은 입력. 「미적용 가정」이 있으면 의도한 가정이 전부

@@ -309,3 +309,110 @@ def test_import_does_not_create_the_database(tmp_path, monkeypatch):
     assert not os.path.exists(path), "생성자에서 DB 를 만들면 안 된다"
     s.ensure_schema()
     assert os.path.exists(path)
+
+
+# ── [UI 설계서 §5.3] 전달 전 확인 · 주머니 표시 ─────────────────────────────
+#
+# 설계는 전달 화면 3단계를 «권한 Manifest» 로, 주머니를 「실행·세부 권한·버전 변경·전달 출처·
+# 회수 상태」로 못박았다. 둘 다 **누르기 전에·수락한 뒤에** 무엇을 쥐고 있는지 알게 하는 장치다.
+# 여기서 고정하지 않으면 화면은 다시 «이름과 날짜만 있는 목록» 으로 돌아간다.
+
+def test_preflight_은_전달_전에_manifest_와_버전을_준다(svc):
+    """3단계가 읽을 것이 실제로 온다. 이것이 없으면 사용자는 조건을 못 보고 전달한다."""
+    r = svc.preflight("REL_OK", release_lookup=_lookup())
+    assert r["deliverable"] is True
+    assert r["blocked_reason"] == ""
+    assert r["release_version"] == "1.0"
+    assert r["manifest_snapshot"]["auth_mode"] == "PLATFORM_INHERITED"
+    assert r["manifest_fingerprint"] == "f" * 32
+
+
+def test_preflight_과_create_는_같은_차단_사유를_쓴다(svc):
+    """★★ 미리보기가 통과라고 했는데 전달이 실패하면 사용자는 화면을 못 믿는다.
+
+    ⚠️ 사유 **문구까지** 같아야 한다 — 다르면 두 곳에서 따로 쓰고 있다는 뜻이고, 한쪽만
+      고치는 일이 반드시 생긴다(이 저장소가 `ORG_ENFORCE`·기한 상수에서 이미 겪었다)."""
+    bad = json.loads(json.dumps(RELEASE))
+    bad["platform_auth_scan"] = {"ok": False, "summary": {"blocking": 3}}
+
+    pre = svc.preflight("REL_OK", release_lookup=_lookup(bad))
+    assert pre["deliverable"] is False
+    assert "자체 인증 코드가 3건" in pre["blocked_reason"]
+
+    with pytest.raises(AppDeliveryError) as e:
+        _created(svc, release_lookup=_lookup(bad))
+    assert str(e.value) == pre["blocked_reason"]
+
+
+def test_preflight_은_manifest_가_유효하지_않으면_막는다(svc):
+    bad = json.loads(json.dumps(RELEASE))
+    bad["manifest"]["valid"] = False
+    r = svc.preflight("REL_OK", release_lookup=_lookup(bad))
+    assert r["deliverable"] is False
+    assert "Capability Manifest" in r["blocked_reason"]
+
+
+def test_preflight_은_없는_릴리스를_은폐한다(svc):
+    """존재 여부가 새면 릴리스 ID 를 훑어 목록을 만들 수 있다."""
+    with pytest.raises(NotFoundOrHidden):
+        svc.preflight("REL_NONE", release_lookup=_lookup())
+
+
+def test_받은_요청은_발신자_부서를_함께_싣는다(svc):
+    """§5.3 IncomingAppRequestCard 는 「발신자·**부서**」를 표시한다.
+
+    ⚠️ 조직도를 못 읽어도 키는 있어야 한다 — 없으면 화면이 `undefined` 를 그린다."""
+    d = _created(svc)
+    row = svc.get(d["delivery_id"], "lee")
+    assert "sender_dept_id" in row
+
+
+def test_주머니는_전달_출처와_권한과_회수_상태를_싣는다(svc):
+    """§5.3 MyAppPocket 5항목의 원천. 조인이 끊기면 사용자는 누가 준 앱인지 모른다."""
+    d = _created(svc)
+    svc.accept(d["delivery_id"], "lee")
+
+    apps = svc.my_apps("lee", release_lookup=_lookup())
+    assert len(apps) == 1
+    a = apps[0]
+    assert a["source_user_id"] == "kim"
+    assert a["accepted_version"] == "1.0"
+    assert a["manifest_snapshot"]["capabilities"] == ["arrival.update"]
+    assert a["version_changed"] is False
+
+
+def test_게시_버전이_바뀌면_주머니가_알린다(svc):
+    """받은 사람은 **낡은 앱을 쓰고 있다는 사실**을 알아야 한다."""
+    d = _created(svc)
+    svc.accept(d["delivery_id"], "lee")
+
+    newer = json.loads(json.dumps(RELEASE))
+    newer["version"] = "2.0"
+    a = svc.my_apps("lee", release_lookup=_lookup(newer))[0]
+    assert a["version_changed"] is True
+    assert a["current_version"] == "2.0"
+    assert a["accepted_version"] == "1.0"
+
+
+def test_현재_버전을_못_읽으면_바뀌었다고_말하지_않는다(svc):
+    """★ 「모른다」와 「달라졌다」는 다르다.
+
+    ⚠️ 릴리스를 못 읽었을 때 `version_changed=True` 로 떨어지면 멀쩡한 앱마다 «버전이
+      바뀌었습니다» 경고가 붙고, 사용자는 곧 그 경고를 전부 무시하게 된다."""
+    d = _created(svc)
+    svc.accept(d["delivery_id"], "lee")
+    a = svc.my_apps("lee", release_lookup=lambda rid: None)[0]
+    assert a["version_changed"] is False
+    assert a["current_version"] == ""
+
+
+def test_회수된_앱도_사유와_함께_남는다(svc):
+    """회수를 **목록에서 지우면** 받은 사람은 앱이 사라진 이유를 영영 모른다."""
+    d = _created(svc)
+    svc.accept(d["delivery_id"], "lee")
+    svc.revoke(d["delivery_id"], "kim", reason="담당이 바뀌었습니다")
+
+    apps = svc.my_apps("lee", include_revoked=True, release_lookup=_lookup())
+    assert len(apps) == 1
+    assert apps[0]["delivery_status"] == REVOKED
+    assert "담당이 바뀌었습니다" in apps[0]["revoke_note"]

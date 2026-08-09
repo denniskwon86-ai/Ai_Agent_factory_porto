@@ -29,6 +29,8 @@ export type Delivery = {
   release_id: string;
   release_version: string;
   sender_user_id: string;
+  /** [§5.3] 발신자 소속 부서. **서버가 확인하지 못하면 빈 문자열** — 화면이 «미확인» 을 적는다. */
+  sender_dept_id?: string;
   recipient_user_id: string;
   purpose: string;
   status: DeliveryStatus;
@@ -61,10 +63,37 @@ export type PocketApp = {
   pinned: number;
   accepted_at: string;
   last_opened_at: string;
+  //: [§5.3] MyAppPocket 필수 표시 — 전달 출처 / 세부 권한 / 버전 변경 / 회수 상태.
+  //  서버가 `delivery_id` 로 조인해 채운다. 조인이 안 되면 빈 값이며 화면이 «확인 불가» 를 적는다.
+  source_user_id?: string;
+  source_dept_id?: string;
+  purpose?: string;
+  accepted_version?: string;
+  current_version?: string;
+  version_changed?: boolean;
+  delivery_status?: DeliveryStatus | '';
+  revoke_note?: string;
+  manifest_snapshot?: CapabilityManifest;
+};
+
+/** [설계 §5.3] 전달 3단계 «권한 Manifest» 가 읽는 것. */
+export type DeliveryPreflight = {
+  release_id: string;
+  release_version: string;
+  manifest_snapshot: CapabilityManifest;
+  manifest_fingerprint: string;
+  deliverable: boolean;
+  blocked_reason: string;
+  default_expires_in_days: number;
+  max_expires_in_days: number;
 };
 
 export const collaborationApi = {
   // ── 전달 ────────────────────────────────────────────────────────────────
+  /** 전달 **전에** 조건을 읽는다. 실패 사유를 누른 뒤가 아니라 누르기 전에 보여 준다. */
+  preflight: (releaseId: string) => req<DeliveryPreflight>(
+    'GET', `/api/v1/app-deliveries/preflight?release_id=${encodeURIComponent(releaseId)}`),
+
   create: (body: {
     release_id: string; recipient_user_id: string; purpose: string;
     expires_in_days?: number; idempotency_key?: string;
