@@ -48,6 +48,11 @@ DEFAULT_PASSWORD = "pass:"
 #: 세션 수명. 짧으면 작업 중 튕기고, 길면 자리를 비운 화면이 계속 열려 있다.
 SESSION_HOURS = 12
 
+#: [P0-1B] SSE 티켓 수명. 짧을수록 좋지만 **너무 짧으면 느린 회선에서 연결 전에 죽는다.**
+SSE_TICKET_SECONDS = 30
+#: 티켓 청중(audience). 세션 토큰과 **용도가 다르다** — 티켓으로 일반 API 를 부를 수 없다.
+SSE_AUDIENCE = "sse"
+
 _ITERATIONS = 120_000
 
 _DDL = """
@@ -64,6 +69,27 @@ CREATE TABLE IF NOT EXISTS auth_session (
     expires_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_session_user ON auth_session(user_id);
+
+-- ★★★ [P0-1B] SSE 접속표.
+--
+-- EventSource 는 헤더를 붙일 수 없어 지금까지 `?as_user=` 로 «누구인지» 를 말했다. 그것은
+-- 인증이 아니라 **자기 신고**였고, 다른 사람 ID 를 적으면 그 사람으로 구독됐다.
+--
+-- ⚠️ **원문을 저장하지 않는다.** 티켓은 URL 로 오가므로 접근 로그·리퍼러·브라우저 히스토리에
+--   남을 수 있다. 저장소까지 원문을 두면 유출면이 하나 더 늘어난다 — 해시만 둔다.
+-- ⚠️ **프로세스 메모리에 두지 않는다.** 워커가 둘이면 A 워커가 발급한 티켓을 B 워커가 모르고,
+--   반대로 «이미 쓴 티켓» 을 다른 워커가 다시 받아 준다. DB 한 곳에서 원자적으로 소비한다.
+CREATE TABLE IF NOT EXISTS auth_sse_ticket (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    session_id  TEXT NOT NULL,
+    tenant_id   TEXT NOT NULL DEFAULT '',
+    audience    TEXT NOT NULL DEFAULT 'sse',
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    consumed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_expires ON auth_sse_ticket(expires_at);
 """
 
 
@@ -178,6 +204,71 @@ class AuthStore:
             return str(r["user_id"])
         except Exception:
             return ""                   # 인증 저장소 장애를 «인증됨» 으로 바꾸지 않는다
+
+    # ── [P0-1B] SSE 접속표 ────────────────────────────────────────────────
+    @staticmethod
+    def _ticket_hash(raw: str) -> str:
+        """티켓 원문 → 저장용 해시.
+
+        ⚠️ 비밀번호가 아니므로 pbkdf2 를 쓰지 않는다. 티켓은 **256비트 난수**이고 30초만 산다 —
+          사전 공격 대상이 아니다. 대신 **소비 경로가 빨라야** 한다(연결마다 1회)."""
+        return hashlib.sha256((raw or "").encode("utf-8")).hexdigest()
+
+    def issue_sse_ticket(self, user_id: str, session_token: str,
+                         tenant_id: str = "") -> Dict[str, Any]:
+        """SSE 1회용 티켓 발급. **원문은 여기서 한 번만 돌려준다.**
+
+        ⚠️ `user_id` 를 호출자가 정하게 두지 않는다 — 라우트가 **세션에서 확인한 값**만 넘긴다.
+          그렇지 않으면 티켓 발급 자체가 새로운 사칭 경로가 된다."""
+        uid = (user_id or "").strip()
+        if not uid:
+            raise ValueError("세션에서 확인된 사용자 없이 티켓을 발급할 수 없습니다.")
+        raw = secrets.token_urlsafe(32)          # 256비트
+        now = _now()
+        exp = now + timedelta(seconds=SSE_TICKET_SECONDS)
+        self._init()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO auth_sse_ticket (token_hash, user_id, session_id, tenant_id, "
+                "audience, created_at, expires_at) VALUES (?,?,?,?,?,?,?)",
+                (self._ticket_hash(raw), uid, self._ticket_hash(session_token or ""),
+                 (tenant_id or "").strip(), SSE_AUDIENCE, _iso(now), _iso(exp)))
+            #: 만료된 표는 그때그때 치운다 — 배치에 맡기면 그 배치가 멈춘 동안 쌓인다.
+            conn.execute("DELETE FROM auth_sse_ticket WHERE expires_at < ?", (_iso(now),))
+            conn.commit()
+        return {"ticket": raw, "expires_at": _iso(exp),
+                "expires_in": SSE_TICKET_SECONDS, "audience": SSE_AUDIENCE}
+
+    def consume_sse_ticket(self, raw: str) -> str:
+        """티켓 → user_id. 실패하면 빈 문자열. **성공은 정확히 한 번만 일어난다.**
+
+        ★★ 원자성: `UPDATE ... WHERE consumed_at=''` 한 문장으로 소비를 표시하고 **바뀐 행 수**로
+          판정한다. 「읽고 → 확인하고 → 쓰기」로 나누면 두 요청이 그 사이를 통과해 **같은 표로
+          둘 다 연결**된다(다중 워커에서는 더 쉽게 일어난다).
+
+        ⚠️ 실패 사유를 나누지 않는다 — 없음·만료·이미 씀 모두 빈 문자열이다. 호출자가 할 일은
+          어느 쪽이든 «새 티켓을 받아 다시 연결» 하나뿐이다."""
+        t = (raw or "").strip()
+        if not t:
+            return ""
+        h = self._ticket_hash(t)
+        now = _iso(_now())
+        try:
+            self._init()
+            with self._lock, self._connect() as conn:
+                cur = conn.execute(
+                    "UPDATE auth_sse_ticket SET consumed_at=? "
+                    "WHERE token_hash=? AND consumed_at='' AND expires_at>=? AND audience=?",
+                    (now, h, now, SSE_AUDIENCE))
+                if cur.rowcount != 1:
+                    conn.commit()
+                    return ""
+                r = conn.execute("SELECT user_id FROM auth_sse_ticket WHERE token_hash=?",
+                                 (h,)).fetchone()
+                conn.commit()
+            return str(r["user_id"]) if r else ""
+        except Exception:
+            return ""                   # 저장소 장애를 «인증됨» 으로 바꾸지 않는다
 
     def destroy(self, token: str) -> None:
         try:

@@ -111,7 +111,7 @@ interface FactoryStore {
    *  ⚠️ `false` 만 돌려주면 화면은 「실패」라고만 말할 수 있고, 사용자는 권한 문제인지
    *  공유된 프로젝트라서인지 서버 문제인지 구분할 수 없다 — 셋은 할 일이 다르다. */
   projectActionError: string;
-  connectSSE: () => void;
+  connectSSE: () => void | Promise<void>;
   fetchWBS: () => Promise<void>;
   fetchLatestState: () => Promise<void>;
   checkHotl: () => Promise<void>;
@@ -151,7 +151,7 @@ interface FactoryStore {
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
 // [CL-4] 사용자 식별을 쿼리로 싣는 공용 헬퍼. 여기서 다시 구현하지 않는다.
-import { apiUrl } from '../lib/api';
+import { getSessionToken, apiUrl } from '../lib/api';
 
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;
@@ -887,7 +887,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  connectSSE: () => {
+  connectSSE: async () => {
     // 대기 중인 재연결 타이머 취소(수동/재연결 경합으로 인한 이중 연결 방지)
     if (_sseReconnectTimer) { clearTimeout(_sseReconnectTimer); _sseReconnectTimer = null; }
     // 기존 연결이 있으면 닫아 중복 수신 방지 (멱등)
@@ -895,11 +895,34 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       try { _sseConn.close(); } catch (e) { /* noop */ }
       _sseConn = null;
     }
-    // [CL-4] ★★ `apiUrl()` 로 만든다 — EventSource 는 헤더를 못 붙이므로 사용자 식별이
-    //   `?as_user=` 쿼리로 실려야 한다. 예전처럼 `API_BASE_URL` 만 쓰면 이 연결은 **항상
-    //   익명**이고, 서버는 익명 구독자에게 지정 수신자 이벤트를 보내지 않는다 —
-    //   즉 전달·결정·발간 알림이 브라우저에 영원히 도착하지 않는다(2026-08-04 실측).
-    const eventSource = new EventSource(apiUrl('/ws/timeline'));
+    // ★★★ [P0-1B] `?as_user=` 를 버리고 **1회용 접속표**로 바꿨다.
+    //
+    // 종전 주석은 「EventSource 는 헤더를 못 붙이므로 `as_user` 쿼리로 식별한다」였다. 그것은
+    // 인증이 아니라 **자기 신고**였고, 다른 사람 ID 를 적으면 그 사람 알림을 받을 수 있었다.
+    // 이제 세션 토큰으로 표를 받아(헤더가 붙는 평범한 POST) 그 표로만 연결한다.
+    //
+    // ⚠️ 표는 **연결할 때마다 새로 받는다.** 재사용하면 서버가 거절한다(1회 소비).
+    // ⚠️ 발급에 실패하면 **연결하지 않는다** — `as_user` 로 되돌아가면 그것이 곧 우회로다.
+    let ticket = '';
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/v1/auth/sse-ticket`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': getSessionToken() },
+      });
+      if (!r.ok) throw new Error(`ticket ${r.status}`);
+      ticket = ((await r.json())?.data?.ticket) || '';
+    } catch (e) {
+      // 로그인 전이거나 세션이 끊긴 상태다. 조용히 익명 연결하지 않는다.
+      set({ isConnected: false });
+      if (!_sseReconnectTimer) {
+        _sseReconnectTimer = setTimeout(() => { _sseReconnectTimer = null; get().connectSSE(); }, 5000);
+      }
+      return;
+    }
+    if (!ticket) { set({ isConnected: false }); return; }
+
+    const eventSource = new EventSource(
+      `${API_BASE_URL}/ws/timeline?ticket=${encodeURIComponent(ticket)}`);
     _sseConn = eventSource;
 
     eventSource.onopen = () => { set({ isConnected: true }); get().checkHotl(); };

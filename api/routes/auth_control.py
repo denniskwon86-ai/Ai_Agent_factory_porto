@@ -108,6 +108,37 @@ async def me(p: Principal = Depends(current_principal)):
     }
 
 
+@router.post("/sse-ticket")
+async def issue_sse_ticket(request: Request):
+    """[P0-1B] SSE 1회용 접속표 발급.
+
+    ## ★★★ 왜 `current_principal` 을 쓰지 않는가
+
+    `current_principal` 은 `ORG_TRUST_HEADER` 가 켜져 있는 동안 **`X-Factory-User` 헤더와
+    `?as_user=` 쿼리를 그대로 믿는다.** 그 상태에서 이 라우트가 `current_principal` 을 쓰면
+    공격자가 `as_user=관리자` 로 **티켓까지 발급받아** 관리자로 구독할 수 있다 — 우회로를
+    막으려고 만든 장치가 새 우회로가 된다.
+
+    그래서 여기서는 **세션 토큰만** 본다. 헤더·쿼리 신원은 쳐다보지 않는다.
+
+    ⚠️ 요청자가 `user_id` 나 `scope` 를 **지정하지 않는다.** 서버가 세션에서 정한다 —
+      호출자가 정하게 두면 그것이 곧 사칭이다."""
+    tok = (request.headers.get(SESSION_HEADER, "") or "").strip()
+    if not tok:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    uid = auth_store.resolve(tok)
+    if not uid:
+        raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인하십시오.")
+    if not _known_user(uid):
+        raise HTTPException(status_code=401, detail="등록되지 않은 사용자입니다.")
+
+    #: 테넌트는 문맥 헤더에서 참고만 한다 — 티켓의 신원은 어디까지나 세션이 정한다.
+    tenant = (request.headers.get("X-Tenant-Id", "") or "").strip()
+    t = auth_store.issue_sse_ticket(uid, tok, tenant)
+    #: ⚠️ 응답에만 원문을 싣고 로그에는 남기지 않는다(저장소에는 해시만 있다).
+    return {"status": "success", "data": t}
+
+
 class PasswordChange(BaseModel):
     current_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=5)
