@@ -163,6 +163,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   const [isPoppedOut, setIsPoppedOut] = useState(false);
   /** 팝업이 차단됐다는 사실. `alert()` 대신 화면에 남긴다. */
   const [popupBlocked, setPopupBlocked] = useState(false);
+  //: [P0-1A] 생성 앱이 실데이터를 부르려다 격리에 막힌 사실. **빈 화면으로 두지 않는다.**
+  const [dataBlocked, setDataBlocked] = useState(false);
   const popupRef = useRef<Window | null>(null);
 
   const statePayload = useFactoryStore((s) => s.state);
@@ -189,6 +191,14 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
       <head>
         <meta charset="UTF-8" />
         <title>AI Factory Preview</title>
+        <!-- ★★★ [P0-1A] CSP — **CORS 에 기대지 않는다.**
+             opaque origin(=allow-same-origin 제거) 이어도 생성 코드는 외부로 전송을 시도할 수
+             있다. 그래서 네트워크를 CSP 로 끊는다. connect-src 'none' 이 핵심이다.
+             ⚠️ script-src 에 CDN 두 곳을 명시적으로 연다 — 지금 Preview 는 tailwind·react·
+               babel·lucide 를 CDN 에서 받아 동작하며, 이것을 막으면 미리보기 자체가 죽는다.
+               'unsafe-eval' 은 Babel standalone 이 new Function 을 쓰기 때문이다.
+               **스크립트 출처는 열되 데이터 전송로는 닫는다** 가 이 정책의 요지다. -->
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com; style-src 'unsafe-inline' https://cdn.tailwindcss.com; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; base-uri 'none';" />
         <script src="https://cdn.tailwindcss.com"></script>
         <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
         <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -204,6 +214,70 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
         <div id="root"><div class="loader">컴포넌트 렌더링 대기 중...</div></div>
 
         <script>
+          // ★★★ [P0-1A] 격리 shim — **이 블록이 없으면 격리가 제품을 망가뜨린다.**
+          //
+          // «allow-same-origin« 을 떼면 문서는 opaque origin 이 되고, 그 순간
+          //   ① «window.localStorage« 접근이 **SecurityError** 를 던진다
+          //   ② 생성 앱 다수가 localStorage 를 쓰므로 미리보기가 통째로 깨진다
+          //   ③ 깨진 오류가 «PREVIEW_ERROR« 로 부모에 올라가 **자가치유(LLM)가 오발동**한다
+          // 코드 주석이 «allow-same-origin« 을 유지한 이유로 정확히 이것을 적어 두었다.
+          //
+          // 그래서 **메모리 기반 저장소**로 갈아끼운다. 앱 입장에서는 그대로 동작하고,
+          // 부모의 진짜 localStorage(세션 토큰이 있는 곳)에는 닿지 못한다 — 목적 달성.
+          (function () {
+            var mem = {};
+            var shim = {
+              getItem: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+              setItem: function (k, v) { mem[String(k)] = String(v); },
+              removeItem: function (k) { delete mem[String(k)]; },
+              clear: function () { mem = {}; },
+              key: function (i) { var ks = Object.keys(mem); return i < ks.length ? ks[i] : null; }
+            };
+            Object.defineProperty(shim, 'length', { get: function () { return Object.keys(mem).length; } });
+            var needed = false;
+            try { window.localStorage.getItem('__afs_probe__'); } catch (e) { needed = true; }
+            if (needed) {
+              try {
+                Object.defineProperty(window, 'localStorage', { value: shim, configurable: true });
+                Object.defineProperty(window, 'sessionStorage', { value: shim, configurable: true });
+              } catch (e) { /* 정의 실패해도 아래 네트워크 차단은 유효하다 */ }
+            }
+          })();
+
+          // ★★ [P0-1A] 실데이터 연결 차단을 **조용히** 하지 않는다.
+          //   CSP 가 이미 막지만, 그때 앱이 받는 것은 알 수 없는 TypeError 뿐이고 화면은
+          //   빈 채로 남는다. 여기서 가로채 **왜 비었는지**를 부모에 알린다.
+          //   ⚠️ «PREVIEW_ERROR« 로 보내지 않는다 — 그것은 자가치유(LLM)를 깨운다. 격리는
+          //     고칠 결함이 아니라 **의도된 상태**다.
+          (function () {
+            function notifyBlocked(kind, target) {
+              try {
+                (window.opener || window.parent).postMessage(
+                  { type: 'AFS_DATA_BLOCKED', kind: kind, target: String(target).slice(0, 200) }, '*');
+              } catch (e) { /* 알림 실패가 앱을 죽이지 않는다 */ }
+            }
+            var MSG = '안전 격리 중이므로 실데이터는 연결되지 않습니다. Host Runtime 적용 후 지원됩니다.';
+            window.fetch = function (input) {
+              notifyBlocked('fetch', (input && input.url) || input);
+              return Promise.reject(new TypeError(MSG));
+            };
+            var OrigXHR = window.XMLHttpRequest;
+            if (OrigXHR) {
+              window.XMLHttpRequest = function () {
+                var x = new OrigXHR();
+                var open = x.open;
+                x.open = function (m, u) { notifyBlocked('xhr', u); return open.apply(x, arguments); };
+                return x;
+              };
+            }
+            if (window.WebSocket) {
+              window.WebSocket = function (u) { notifyBlocked('websocket', u); throw new Error(MSG); };
+            }
+            if (navigator && navigator.sendBeacon) {
+              navigator.sendBeacon = function (u) { notifyBlocked('beacon', u); return false; };
+            }
+          })();
+
           window.onerror = function(msg) {
             (window.opener || window.parent).postMessage({ type: 'PREVIEW_ERROR', message: msg }, '*');
             return false;
@@ -440,6 +514,13 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
 
   // ↗ 새 창: 독립 OS 창에 동일 샌드박스를 띄운다(싱글톤). 사용자 제스처(클릭) 안에서 호출 → 팝업 차단 회피.
   const openPopout = useCallback(() => {
+    // ★★★ [P0-1A] **비활성화됨.** `window.open('')` + `document.write()` 는 새 창을 부모와
+    //   **같은 출처**로 만든다. 그러면 생성 코드가 `window.opener` 를 통해 부모 DOM·세션에
+    //   접근할 수 있다 — iframe 의 `allow-same-origin` 을 떼도 이 경로가 열려 있으면 소용없다.
+    //   버튼은 숨기지 않고 **잠그고 사유를 보여 준다**(숨기면 사용자는 기능이 사라진 줄 안다).
+    //   I-3 Host Runtime Bridge 완성 후 **별도 격리 Origin** 으로 정식 복구한다.
+    return;
+    // eslint-disable-next-line no-unreachable
     if (popupRef.current && !popupRef.current.closed) { popupRef.current.focus(); return; }
     setPopupBlocked(false);
     const w = window.open('', 'omega_preview', 'width=1024,height=768,resizable=yes,scrollbars=yes');
@@ -527,13 +608,44 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
 
   // IFRAME_READY 수신 → 즉시 전송 (타이밍 경쟁 해소)
   useEffect(() => {
+    /** ★★ [P0-1A] postMessage 계약.
+     *
+     * ⚠️ `allow-same-origin` 을 떼면 iframe 의 `event.origin` 은 문자열 `"null"` 이 된다.
+     *   그러므로 **origin 으로는 아무것도 판별할 수 없다** — 어떤 악성 프레임도 같은 값을
+     *   갖는다. 신뢰의 근거는 오직 **`event.source` 객체 동일성**이다.
+     * ⚠️ 미등록 타입·형식 위반은 조용히 버리지 않고 콘솔에 남긴다 — 조용히 버리면 계약이
+     *   깨졌을 때 아무도 모른다. */
+    const ALLOWED = new Set(['PREVIEW_ERROR', 'IFRAME_READY', 'AFS_DATA_BLOCKED']);
+    const MAX_LEN = 4000;   // payload 크기 상한 — 거대한 문자열로 부모를 밀어내지 못하게
+
     const handleMessage = (event: MessageEvent) => {
-      // 신뢰 소스 검증: 우리 프리뷰 iframe/팝업이 보낸 메시지만 처리 - 임베드된 임의 콘텐츠가
-      // PREVIEW_ERROR 를 스푸핑해 /heal 호출·경고를 유발하는 것 차단
-      const trusted =
-        event.source === iframeRef.current?.contentWindow ||
-        (popupRef.current && !popupRef.current.closed && event.source === popupRef.current);
-      if (!trusted) return;
+      // ① 소스 동일성 — 우리 iframe 이 보낸 것만 받는다(팝아웃은 P0-1A 로 비활성화됨)
+      if (event.source !== iframeRef.current?.contentWindow) return;
+
+      const d: any = event.data;
+      // ② 형태 검증
+      if (!d || typeof d !== 'object' || typeof d.type !== 'string') return;
+      // ③ 타입 화이트리스트
+      if (!ALLOWED.has(d.type)) {
+        console.warn('[Preview] 미등록 메시지 타입을 버렸습니다:', String(d.type).slice(0, 40));
+        return;
+      }
+      // ④ 스키마·크기
+      if (d.message !== undefined && (typeof d.message !== 'string' || d.message.length > MAX_LEN)) {
+        console.warn('[Preview] message 스키마 위반 — 버립니다.');
+        return;
+      }
+      if (d.target !== undefined && (typeof d.target !== 'string' || d.target.length > 512)) {
+        console.warn('[Preview] target 스키마 위반 — 버립니다.');
+        return;
+      }
+
+      // ★ 격리로 인한 데이터 차단은 **결함이 아니라 의도된 상태**다.
+      //   자가치유(LLM)를 깨우지 않고 화면에 사유만 남긴다.
+      if (d.type === 'AFS_DATA_BLOCKED') {
+        setDataBlocked(true);
+        return;
+      }
       if (event.data?.type === 'PREVIEW_ERROR') {
         setError(event.data.message);
         // 릴리스/결과물 프리뷰 보기 모드에서는 자가치유(/heal) 트리거 금지
@@ -618,7 +730,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
         </div>
         {activeTab === 'PREVIEW' && (
           <div className="flex items-center gap-1 ml-auto px-2 shrink-0">
-            <button onClick={openPopout} title="독립 OS 창으로 실행" className="text-xs font-bold text-gray-300 hover:text-gray-100 bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors">↗ 새 창</button>
+            {/* ★ [P0-1A] 새 창은 **잠그되 숨기지 않는다.** 숨기면 사용자는 기능이 사라진 줄
+                알고, 잠그면 «왜 지금 못 쓰는가» 를 그 자리에서 읽는다. */}
+            <button onClick={openPopout} disabled
+              title="안전 격리 중입니다 — 새 창은 부모 창과 같은 출처를 갖게 되어 생성 앱이 세션에 접근할 수 있습니다. Host Runtime 적용 후 별도 격리 창으로 지원됩니다."
+              className="text-xs font-bold text-gray-500 bg-gray-800 px-2.5 py-1 rounded cursor-not-allowed opacity-60">↗ 새 창 <span className="opacity-70">(격리 중)</span></button>
             <button onClick={() => setIsFullscreen(v => !v)} title={isFullscreen ? '축소 (Esc)' : '전체화면'} className="text-xs font-bold text-gray-300 hover:text-gray-100 bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors">{isFullscreen ? '✕ 축소' : '⛶ 전체화면'}</button>
           </div>
         )}
@@ -632,11 +748,38 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
           <>
             {isLoading && (<div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center z-20"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div><span className="text-gray-600 font-medium animate-pulse text-sm">에이전트가 코드를 컴파일하는 중입니다...</span></div>)}
             {error && !isLoading && (<div className="absolute top-0 left-0 w-full p-3 bg-red-50 text-red-600 text-sm z-10 border-b border-red-200 shadow-sm flex items-start gap-2"><span>🚨</span><div className="flex-1 overflow-hidden overflow-ellipsis"><strong>렌더링 에러:</strong> {error}</div></div>)}
-            {/* allow-same-origin 유지 이유: 생성 앱 다수가 localStorage 를 쓰는데 opaque origin 에서는
-                SecurityError 로 프리뷰가 전부 깨져 자가치유 오발동을 유발한다. 대신 message 핸들러의
-                event.source 검증으로 스푸핑을 차단한다. */}
+            {/* ★★★ [P0-1A · 2026-08-09] `allow-same-origin` 을 **제거했다.**
+                종전 주석은 「생성 앱이 localStorage 를 쓰는데 opaque origin 에서는 SecurityError 로
+                프리뷰가 깨지고 자가치유가 오발동한다」를 유지 이유로 들었다. 그 진단은 옳았지만
+                결론이 틀렸다 — `allow-scripts` 와 함께 주면 **sandbox 가 무력화되어** iframe 안
+                코드가 `parent.localStorage` 의 **세션 토큰을 읽을 수 있다.** LLM 이 생성한 코드에
+                그 권한을 주고 있었다.
+                깨짐 문제는 격리를 포기하는 대신 **템플릿의 storage shim 으로** 해결했다(메모리
+                기반). 앱은 그대로 동작하고 부모 저장소에는 닿지 못한다. */}
             {/* ★ 팝업 차단은 사용자가 **설정을 바꾸는 동안** 계속 보여야 한다 —
                 `alert()` 는 닫는 순간 사라져서 문구를 다시 볼 수 없었다. */}
+            {/* ★ [P0-1A] 「안전 미리보기」 상태를 **항상** 보여 준다. 사용자가 데이터가 안 보이는
+                이유를 화면에서 알 수 있어야 한다 — 조용한 빈 화면은 허용하지 않는다. */}
+            <div className="absolute top-0 left-0 w-full px-3 py-1.5 bg-slate-800/90 text-slate-100 text-[12px] z-10 flex items-center gap-2">
+              <span aria-hidden="true">🔒</span>
+              <b>안전 미리보기</b>
+              <span className="opacity-80">· 실데이터 연결 제한</span>
+              <span className="ml-auto opacity-70">Host Runtime 적용 후 지원됩니다</span>
+            </div>
+
+            {dataBlocked && (
+              <div role="status" className="absolute top-[30px] left-0 w-full p-3 bg-sky-50 text-sky-900 text-sm z-10 border-b border-sky-200 flex items-start gap-2">
+                <span aria-hidden="true">ℹ️</span>
+                <div className="flex-1">
+                  <strong>이 앱이 실데이터를 불러오려 했습니다.</strong> 안전 격리 중이므로 실데이터는
+                  연결되지 않습니다. Host Runtime 적용 후 지원됩니다.
+                  <br />
+                  <span className="opacity-80">앱에 포함된 샘플 데이터와 화면 조작은 그대로 확인하실 수 있습니다.</span>
+                </div>
+                <button onClick={() => setDataBlocked(false)} className="shrink-0 text-sky-700 hover:text-sky-900 font-bold px-1" aria-label="이 안내 닫기">✕</button>
+              </div>
+            )}
+
             {popupBlocked && (
               <div role="alert" className="absolute top-0 left-0 w-full p-3 bg-amber-50 text-amber-800 text-sm z-10 border-b border-amber-200 shadow-sm flex items-start gap-2">
                 <span aria-hidden="true">🪟</span>
@@ -648,7 +791,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
                 <button onClick={() => setPopupBlocked(false)} className="shrink-0 text-amber-700 hover:text-amber-900 font-bold px-1" aria-label="이 안내 닫기">✕</button>
               </div>
             )}
-            <iframe ref={iframeRef} title="AI Factory Preview Sandbox" className="w-full h-full border-none flex-1 bg-transparent" sandbox="allow-scripts allow-same-origin" />
+            <iframe ref={iframeRef} title="AI Factory Preview Sandbox" className="w-full h-full border-none flex-1 bg-transparent" sandbox="allow-scripts" />
             {isPoppedOut && (
               <div className="absolute inset-0 bg-gray-900/95 flex flex-col items-center justify-center gap-4 z-20">
                 <div className="text-5xl">🪟</div>
