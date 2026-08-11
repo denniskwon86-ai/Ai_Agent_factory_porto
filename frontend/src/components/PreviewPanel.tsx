@@ -165,6 +165,16 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   const [popupBlocked, setPopupBlocked] = useState(false);
   //: [P0-1A] 생성 앱이 실데이터를 부르려다 격리에 막힌 사실. **빈 화면으로 두지 않는다.**
   const [dataBlocked, setDataBlocked] = useState(false);
+  //: [P0-1A 보정] 자가복구를 **사람이** 누를 수 있게 제안만 한다(자동 호출 금지 — LLM 비용).
+  const [healOffered, setHealOffered] = useState(false);
+  const [healRequested, setHealRequested] = useState(false);
+  /** ★ [P0-1A 보정] Preview 세션 경계.
+   *
+   * ⚠️ 이것은 **생성 코드를 신뢰하게 만드는 수단이 아니다**(같은 문서 안이라 코드가 읽을 수
+   *   있다). 목적은 하나다 — **이전 iframe 이 뒤늦게 보낸 메시지를 구별해 버리는 것.**
+   *   재로딩 직후 옛 프레임의 `PREVIEW_ERROR` 가 도착하면 이미 고쳐진 오류를 다시 띄우고,
+   *   사용자가 그것을 보고 자가복구를 누르면 LLM 비용이 헛되이 나간다. */
+  const previewSidRef = useRef<string>('');
   const popupRef = useRef<Window | null>(null);
 
   const statePayload = useFactoryStore((s) => s.state);
@@ -225,21 +235,26 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
           // 그래서 **메모리 기반 저장소**로 갈아끼운다. 앱 입장에서는 그대로 동작하고,
           // 부모의 진짜 localStorage(세션 토큰이 있는 곳)에는 닿지 못한다 — 목적 달성.
           (function () {
-            var mem = {};
-            var shim = {
-              getItem: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
-              setItem: function (k, v) { mem[String(k)] = String(v); },
-              removeItem: function (k) { delete mem[String(k)]; },
-              clear: function () { mem = {}; },
-              key: function (i) { var ks = Object.keys(mem); return i < ks.length ? ks[i] : null; }
-            };
-            Object.defineProperty(shim, 'length', { get: function () { return Object.keys(mem).length; } });
+            // ⚠️ local 과 session 은 **서로 다른 저장소**다. 하나의 객체를 공유하면 앱이
+            //   sessionStorage 에 쓴 값이 localStorage 에서 읽히는 «없는 동작» 이 생긴다.
+            function makeStore() {
+              var mem = {};
+              var st = {
+                getItem: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+                setItem: function (k, v) { mem[String(k)] = String(v); },
+                removeItem: function (k) { delete mem[String(k)]; },
+                clear: function () { mem = {}; },
+                key: function (i) { var ks = Object.keys(mem); return i < ks.length ? ks[i] : null; }
+              };
+              Object.defineProperty(st, 'length', { get: function () { return Object.keys(mem).length; } });
+              return st;
+            }
             var needed = false;
             try { window.localStorage.getItem('__afs_probe__'); } catch (e) { needed = true; }
             if (needed) {
               try {
-                Object.defineProperty(window, 'localStorage', { value: shim, configurable: true });
-                Object.defineProperty(window, 'sessionStorage', { value: shim, configurable: true });
+                Object.defineProperty(window, 'localStorage', { value: makeStore(), configurable: true });
+                Object.defineProperty(window, 'sessionStorage', { value: makeStore(), configurable: true });
               } catch (e) { /* 정의 실패해도 아래 네트워크 차단은 유효하다 */ }
             }
           })();
@@ -253,7 +268,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
             function notifyBlocked(kind, target) {
               try {
                 (window.opener || window.parent).postMessage(
-                  { type: 'AFS_DATA_BLOCKED', kind: kind, target: String(target).slice(0, 200) }, '*');
+                  { type: 'AFS_DATA_BLOCKED', sid: '__AFS_SID__', kind: kind, target: String(target).slice(0, 200) }, '*');
               } catch (e) { /* 알림 실패가 앱을 죽이지 않는다 */ }
             }
             var MSG = '안전 격리 중이므로 실데이터는 연결되지 않습니다. Host Runtime 적용 후 지원됩니다.';
@@ -279,7 +294,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
           })();
 
           window.onerror = function(msg) {
-            (window.opener || window.parent).postMessage({ type: 'PREVIEW_ERROR', message: msg }, '*');
+            (window.opener || window.parent).postMessage({ type: 'PREVIEW_ERROR', sid: '__AFS_SID__', message: msg }, '*');
             return false;
           };
 
@@ -288,7 +303,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
               setTimeout(notifyReady, 50);
               return;
             }
-            (window.opener || window.parent).postMessage({ type: 'IFRAME_READY' }, '*');
+            (window.opener || window.parent).postMessage({ type: 'IFRAME_READY', sid: '__AFS_SID__' }, '*');
           }
           notifyReady();
 
@@ -462,7 +477,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
                 document.getElementById('root').innerHTML =
                   '<div style="background:#fee2e2;color:#b91c1c;padding:20px;margin:10px;border-radius:8px;border:1px solid #f87171;">' +
                   '<h3 style="margin-top:0;">🚨 렌더링 에러</h3><pre style="white-space:pre-wrap;font-size:13px;">' + err.message + '</pre></div>';
-                (window.opener || window.parent).postMessage({ type: 'PREVIEW_ERROR', message: err.message }, '*');
+                (window.opener || window.parent).postMessage({ type: 'PREVIEW_ERROR', sid: '__AFS_SID__', message: err.message }, '*');
               }
             }
           });
@@ -530,7 +545,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     //   사용자가 문구를 다시 볼 수 없다.
     if (!w) { setPopupBlocked(true); return; }
     w.document.open();
-    w.document.write(htmlTemplate);
+    w.document.write(htmlTemplate.replace(/__AFS_SID__/g, previewSidRef.current));
     w.document.close();
     popupRef.current = w;
     // 새 타깃(팝업) 준비 대기 → 팝업이 IFRAME_READY 를 보내면 핸들러가 pending 파일을 전송
@@ -590,7 +605,10 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     if (iframeRef.current && activeTab === 'PREVIEW') {
       isIframeReadyRef.current = false;
       setIsIframeReady(false);
-      iframeRef.current.srcdoc = htmlTemplate;
+      // 새 Preview 세션 — 매 로딩마다 새 ID 를 발급해 옛 프레임 메시지를 끊는다.
+      previewSidRef.current = (crypto as any)?.randomUUID?.()
+        || `sid_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      iframeRef.current.srcdoc = htmlTemplate.replace(/__AFS_SID__/g, previewSidRef.current);
     }
   }, [activeTab]);
 
@@ -603,6 +621,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     pendingFilesRef.current = files;
     setError(null);
 
+    // ⚠️ 새 코드를 실행할 때마다 이전 화면의 오류·차단·복구 제안을 지운다 —
+    //   남겨 두면 이미 고쳐진 오류에 대해 자가복구를 다시 누르게 된다.
+    setError(null); setDataBlocked(false); setHealOffered(false); setHealRequested(false);
     if (isIframeReadyRef.current) sendExecuteFiles(files);
   }, [rawCode, isLoading, activeTab, isIframeReady, extractCodeFiles, sendExecuteFiles]);
 
@@ -630,6 +651,28 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
         console.warn('[Preview] 미등록 메시지 타입을 버렸습니다:', String(d.type).slice(0, 40));
         return;
       }
+      // ④ Preview 세션 경계 — 이전 iframe 이 뒤늦게 보낸 메시지를 버린다
+      if (previewSidRef.current && d.sid !== previewSidRef.current) {
+        console.warn('[Preview] 지난 Preview 세션의 메시지를 버렸습니다.');
+        return;
+      }
+      // ⑤ 허용하지 않은 필드가 붙어 오면 계약 위반이다
+      const FIELDS: Record<string, string[]> = {
+        PREVIEW_ERROR: ['type', 'sid', 'message'],
+        IFRAME_READY: ['type', 'sid'],
+        AFS_DATA_BLOCKED: ['type', 'sid', 'kind', 'target'],
+      };
+      const extra = Object.keys(d).filter((k) => !FIELDS[d.type].includes(k));
+      if (extra.length) {
+        console.warn('[Preview] 계약에 없는 필드를 버렸습니다:', extra.slice(0, 5).join(','));
+        return;
+      }
+      // ⑥ kind 는 정해진 넷 중 하나여야 한다
+      if (d.type === 'AFS_DATA_BLOCKED'
+          && !['fetch', 'xhr', 'websocket', 'beacon'].includes(d.kind)) {
+        console.warn('[Preview] 알 수 없는 차단 종류를 버렸습니다:', String(d.kind).slice(0, 20));
+        return;
+      }
       // ④ 스키마·크기
       if (d.message !== undefined && (typeof d.message !== 'string' || d.message.length > MAX_LEN)) {
         console.warn('[Preview] message 스키마 위반 — 버립니다.');
@@ -647,12 +690,17 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
         return;
       }
       if (event.data?.type === 'PREVIEW_ERROR') {
+        // ★★★ [P0-1A 보정] **자동 자가치유를 호출하지 않는다.**
+        //
+        // `event.source` 검증은 「우리 iframe 에서 왔다」만 증명한다. 그런데 **그 iframe 안에서
+        // 도는 코드가 바로 신뢰할 수 없는 대상**(LLM 생성물)이다. 생성 코드가 직접
+        // `postMessage({type:'PREVIEW_ERROR'})` 를 보내거나 오류를 반복해서 던지면
+        // **LLM 호출과 비용이 무한히 발생**한다. 종전에는 그것이 자동으로 일어났다.
+        //
+        // 이제 오류는 화면에 보여 주고 **사람이 「자가복구 요청」을 눌러야** 나간다.
+        // 향후 Host Runtime 의 «신뢰된 검증 결과» 가 생기면 그것만 자동 트리거로 쓴다.
         setError(event.data.message);
-        // 릴리스/결과물 프리뷰 보기 모드에서는 자가치유(/heal) 트리거 금지
-        // — 옛 결과물의 렌더 에러가 무관한 현재 작업 프로젝트의 실제 빌드를 오염시키는 것 방지
-        if (isConnectedRef.current && event.data.message && !releaseRef.current) {
-          triggerSelfHealing(event.data.message);
-        }
+        setHealOffered(isConnectedRef.current && !!event.data.message && !releaseRef.current);
       } else if (event.data?.type === 'IFRAME_READY') {
         isIframeReadyRef.current = true;
         setIsIframeReady(true);
@@ -747,7 +795,31 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
           docs?.view_type === 'mermaid' ? <MermaidViewer rawCode={rawCode} /> :
           <>
             {isLoading && (<div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center z-20"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div><span className="text-gray-600 font-medium animate-pulse text-sm">에이전트가 코드를 컴파일하는 중입니다...</span></div>)}
-            {error && !isLoading && (<div className="absolute top-0 left-0 w-full p-3 bg-red-50 text-red-600 text-sm z-10 border-b border-red-200 shadow-sm flex items-start gap-2"><span>🚨</span><div className="flex-1 overflow-hidden overflow-ellipsis"><strong>렌더링 에러:</strong> {error}</div></div>)}
+            {error && !isLoading && (
+              <div className="absolute top-[30px] left-0 w-full p-3 bg-red-50 text-red-600 text-sm z-10 border-b border-red-200 shadow-sm flex items-start gap-2">
+                <span aria-hidden="true">🚨</span>
+                <div className="flex-1 overflow-hidden">
+                  <strong>렌더링 에러:</strong> {error}
+                  {/* ★★ [P0-1A 보정] 자가복구는 **사람이 누른다.** 자동으로 걸면 생성 코드가
+                      오류를 반복해 던지는 것만으로 LLM 비용이 무한히 나간다. */}
+                  {healOffered && !healRequested && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        onClick={() => { setHealRequested(true); triggerSelfHealing(error); }}
+                        className="text-xs font-bold text-white bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded transition-colors">
+                        자가복구 요청
+                      </button>
+                      <span className="text-[12px] text-red-500 opacity-90">
+                        AI 가 코드를 고쳐 다시 시도합니다 — <b>LLM 비용이 발생</b>합니다.
+                      </span>
+                    </div>
+                  )}
+                  {healRequested && (
+                    <div className="mt-2 text-[12px] text-red-500">자가복구를 요청했습니다.</div>
+                  )}
+                </div>
+              </div>
+            )}
             {/* ★★★ [P0-1A · 2026-08-09] `allow-same-origin` 을 **제거했다.**
                 종전 주석은 「생성 앱이 localStorage 를 쓰는데 opaque origin 에서는 SecurityError 로
                 프리뷰가 깨지고 자가치유가 오발동한다」를 유지 이유로 들었다. 그 진단은 옳았지만
