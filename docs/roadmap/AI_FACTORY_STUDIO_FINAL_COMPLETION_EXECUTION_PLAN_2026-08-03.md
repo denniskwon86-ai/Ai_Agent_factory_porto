@@ -99,7 +99,15 @@
 | **E0-0** | HEAD 가 미추적 모듈을 import 해 **깨끗한 checkout 에서 백엔드가 뜨지 않음** | ✅ 완료(`290688ba5`) |
 | **E0-1A** | Preview iframe 이 `allow-scripts`+`allow-same-origin` → **생성 코드가 부모 세션 토큰을 읽을 수 있음** | ◑ 부분 — CDN 로컬화 남음 |
 | **E0-1B** | `?as_user=` 자기 신고로 **남의 SSE 알림을 구독** 가능 | ✅ 완료(`730ce8738`) |
-| **E0-1C** | `ORG_TRUST_HEADER=True` → **헤더 한 줄로 관리자 API 조회** | ⬜ 다음 |
+| **E0-1C** | `ORG_TRUST_HEADER=True` → **헤더 한 줄로 관리자 API 조회** | ✅ 완료(2026-08-09) |
+
+> **E0-1C 로 바뀐 것** — `config.ORG_TRUST_HEADER` 기본값을 False 로 내렸다. 지우지 않고
+> 환경변수(`AFS_DEV_TRUST_HEADER=1`)로만 켜지는 개발용 스위치로 남겼다. 기존 테스트
+> 34개 파일이 그 헤더로 사용자를 지정했으므로, 승인된 3분류대로 갈랐다 —
+> 일반 기능은 `tests/plugin_test_auth.py` 의 `dependency_overrides`, 인증·권한은 실제
+> 세션(`@pytest.mark.real_auth`), 레거시 스위치는 그 테스트에서만 True.
+> ⚠️ 그 과정에서 **인증 저장소(`data/auth.db`) 가 테스트에서 격리되지 않고 있던 것**을
+> 함께 발견해 닫았다 — 로그인 도입 이후 테스트가 실제 계정 DB 에 세션을 쓰고 있었다.
 
 ### E0 완료 정의
 

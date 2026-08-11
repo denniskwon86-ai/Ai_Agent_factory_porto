@@ -108,6 +108,11 @@ def test_identified_user_passes_even_under_enforcement(policy):
     「로그인하라」는 답만 반복해서 받는다 — 이미 로그인했는데."""
     write, config, mp = policy
     mp.setattr(config, "ORG_ENFORCE", False, raising=False)
+    # ⚠️ [P0-1C] 이 테스트가 보려는 것은 «강제가 익명만 막는가» 이고, 신원을 어떻게 얻는지는
+    #   곁가지다. 헤더 신뢰 기본값이 False 로 내려갔으므로 **이 테스트에서만** 되켠다
+    #   (승인된 3분류의 셋째 칸: 레거시 스위치 테스트). `_app()` 은 자체 앱이라 플러그인의
+    #   principal override 가 닿지 않는다 — 그래서 override 대신 스위치로 해결한다.
+    mp.setattr(config, "ORG_TRUST_HEADER", True, raising=False)
     write(True)
     r = _app().get("/probe", headers={"X-Factory-User": "hikwon@lsmnm.com"})
     assert r.status_code == 200 and r.json()["user_id"] == "hikwon@lsmnm.com"

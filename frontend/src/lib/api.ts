@@ -18,6 +18,20 @@ export const API_BASE_URL =
   (import.meta as any).env?.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
 const USER_HEADER = 'X-Factory-User';
+
+// ★★★ [P0-1C · 2026-08-09] 서버가 이 헤더를 **더 이상 믿지 않는다**(`config.ORG_TRUST_HEADER`
+//   기본값 false). 그러므로 기본적으로 **보내지도 않는다.**
+//
+//   보내도 서버가 무시하니 «무해» 하다고 볼 수도 있지만, 남겨 두면 두 가지가 나빠진다.
+//     ① 개발자가 네트워크 탭에서 이 헤더를 보고 «식별은 이걸로 되는구나» 라고 읽는다 —
+//        그 오해가 다음 라우트에서 헤더를 다시 신뢰하게 만든다.
+//     ② 서버 스위치가 실수로 켜지는 날, 화면이 이미 헤더를 싣고 있으면 **그날 바로** 뚫린다.
+//   즉 이 한 줄은 서버 쪽 실수의 «폭발 반경» 을 줄인다.
+//
+//   ⚠️ 개발 모드에서만 켠다. 서버의 `AFS_DEV_TRUST_HEADER` 와 **짝** 이다 — 한쪽만 켜면
+//     안 되고, 둘 다 꺼진 것이 운영 상태다.
+const DEV_TRUST_HEADER =
+  ((import.meta as any).env?.VITE_DEV_TRUST_HEADER || '') === '1';
 const STORAGE_KEY = 'factory.actingUser';
 
 // ── [2026-08-09] 세션 토큰 — **식별의 정본** ────────────────────────────────
@@ -127,7 +141,9 @@ export function setEnterpriseContext(next: Partial<EnterpriseContextSelection>) 
 export function apiUrl(path: string): string {
   const base = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
   const parts: string[] = [];
-  if (actingUser) parts.push(`as_user=${encodeURIComponent(actingUser)}`);
+  // ⚠️ [P0-1C] `as_user` 를 더는 싣지 않는다. 서버가 읽지 않고(스위치 꺼짐), SSE 는 1회용
+  //   접속표로 갔다(P0-1B). 남겨 두면 **다운로드 URL 이 접근 로그에 사용자 id 를 흘린다.**
+  if (DEV_TRUST_HEADER && actingUser) parts.push(`as_user=${encodeURIComponent(actingUser)}`);
   // ⚠️ 쿼리 이름은 서버가 읽는 것과 **정확히** 같아야 한다
   //   (`deps.current_enterprise_context`: `enterprise_scope` · `entity_mode`).
   //   테넌트는 서버가 쿼리로는 받지 않는다 — 여기서 지어내지 않는다.
@@ -208,7 +224,11 @@ export function installFetchInterceptor() {
         if (sessionToken && !headers.has(SESSION_HEADER)) {
           headers.set(SESSION_HEADER, sessionToken);
         }
-        if (actingUser && !headers.has(USER_HEADER)) headers.set(USER_HEADER, actingUser);
+        // ⚠️ 개발 모드에서만 싣는다(위 `DEV_TRUST_HEADER` 주석). 운영에서는 세션 토큰만이
+        //   신원이고, 그래서 이 줄은 실행되지 않는다.
+        if (DEV_TRUST_HEADER && actingUser && !headers.has(USER_HEADER)) {
+          headers.set(USER_HEADER, actingUser);
+        }
         if (ctx.tenantId && !headers.has(TENANT_HEADER)) headers.set(TENANT_HEADER, ctx.tenantId);
         if (ctx.scopeNodeId && !headers.has(SCOPE_HEADER)) headers.set(SCOPE_HEADER, ctx.scopeNodeId);
         if (ctx.entityMode && !headers.has(MODE_HEADER)) headers.set(MODE_HEADER, ctx.entityMode);

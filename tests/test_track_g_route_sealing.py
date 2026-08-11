@@ -32,6 +32,11 @@
 import pytest
 from fastapi.testclient import TestClient
 
+#: ★★ [P0-1C] 이 파일은 **「당신이 누구인지 모른다」고 답하는가** 를 본다. 즉 인증 경로 자체다.
+#  `tests/plugin_test_auth.py` 의 principal override 가 걸리면 익명 요청에도 신원이 생겨
+#  봉인이 뚫린 것을 **못 본다** — 실제로 이 마커를 붙이기 전 2건이 그렇게 통과했다.
+pytestmark = pytest.mark.real_auth
+
 #: (모듈 경로, 사람이 읽는 이름). 트랙 G 진행에 따라 늘어난다 — 16개가 목표다.
 SEALED_ROUTERS = [
     ("api.routes.benchmark_control", "골든 벤치마크"),

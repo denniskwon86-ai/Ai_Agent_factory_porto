@@ -356,7 +356,10 @@ def test_me_explains_why_lists_are_empty_when_anonymous(monkeypatch):
     assert d["org_enforced"] is True and d["identified"] is False
     assert "익명으로 보고 있습니다" in d["access_note"]
     assert "자료가 없는 것이 아닙니다" in d["access_note"], "빈 목록의 이유를 말해야 한다"
-    assert "사용자를 지정" in d["access_note"], "다음 행동이 없으면 막다른 길이다"
+    # ⚠️ [P0-1C] 종전 안내는 «우측 상단에서 사용자를 지정하십시오» 였다. 그 전환기는 로그인
+    #   도입으로 사라졌고 헤더 신뢰도 껐다 — 지금 할 수 있는 행동은 로그인뿐이다. 이 테스트가
+    #   보는 것은 **다음 행동을 말하는가** 이므로, 그 행동의 이름만 바뀐 것이다.
+    assert "로그인" in d["access_note"], "다음 행동이 없으면 막다른 길이다"
 
 
 def test_me_explains_unregistered_user(monkeypatch):

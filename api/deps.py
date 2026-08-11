@@ -42,7 +42,12 @@ def _extract_user_id(request: Request) -> str:
                 return uid
     except Exception:
         pass                    # 인증 저장소 장애가 요청을 죽이지 않는다(아래에서 익명 처리)
-    if getattr(config, "ORG_TRUST_HEADER", True):
+    # ★★★ [P0-1C · 2026-08-09] 이 블록은 **기본적으로 실행되지 않는다.**
+    #   `config.ORG_TRUST_HEADER` 기본값이 False 로 내려갔다(그 이유는 config.py 주석 참조).
+    #   즉 ②③ 은 «개발 모드에서만 열리는 문» 이고, 운영에서는 위의 ①·①-b 만이 신원의 출처다.
+    #   ⚠️ 기본값을 `True` 로 되돌리지 말 것 — `getattr` 의 세 번째 인자도 False 로 맞춘다.
+    #     여기만 True 로 남으면 `config` 에서 이름이 사라지는 날 통제가 조용히 되살아난다.
+    if getattr(config, "ORG_TRUST_HEADER", False):
         uid = request.headers.get(getattr(config, "ORG_USER_HEADER", "X-Factory-User"), "") or ""
         # 하위호환: Phase 1 의 org_control 이 쓰던 헤더도 받아준다.
         uid = uid or (request.headers.get("X-User-Id", "") or "")

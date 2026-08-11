@@ -130,9 +130,11 @@ async def whoami(p: Principal = Depends(current_principal)):
         data["admin"] = {"capabilities": [], "any_admin": False, "visible_tabs": [],
                          "bootstrap": False, "resolve_error": str(e)}
     if enforced and not identified:
+        # ⚠️ [P0-1C] 종전 안내는 «우측 상단에서 사용자를 지정하십시오» 였다. 그 전환기는
+        #   로그인 도입으로 사라졌고, 헤더 신뢰도 껐다 — 지금 할 수 있는 일은 로그인뿐이다.
+        #   없는 조작을 가리키는 안내는 사용자를 그 자리에 묶어 둔다.
         data["access_note"] = ("**익명으로 보고 있습니다.** 조직 권한 강제가 켜져 있어 목록이 "
-                               "비어 보입니다 — 자료가 없는 것이 아닙니다. 우측 상단에서 "
-                               "사용자를 지정하십시오.")
+                               "비어 보입니다 — 자료가 없는 것이 아닙니다. 로그인하십시오.")
     elif enforced and retired:
         data["access_note"] = (f"**'{p.user_id}' 계정은 폐지되었습니다.** 권한이 회수되어 어떤 "
                                f"자료도 보이지 않습니다 — 부서 배정 문제가 아닙니다. 계정이 다시 "

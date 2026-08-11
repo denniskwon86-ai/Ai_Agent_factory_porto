@@ -79,7 +79,8 @@ export const fetchUnclassifiedFailures = (project?: string) =>
 export const fetchQualityRaw = (project?: string) =>
   get<QualityOutcome[]>(q('/api/v1/telemetry/quality/raw', project));
 
-/** 사후 분류. 식별(X-Factory-User)이 없으면 서버가 401 로 거절한다 — 익명 분류는 받지 않는다. */
+/** 사후 분류. 식별(로그인 세션)이 없으면 서버가 401 로 거절한다 — 익명 분류는 받지 않는다.
+ *  ⚠️ [P0-1C] 종전에는 `X-Factory-User` 라고 적혀 있었다. 그 헤더로는 이제 신원이 서지 않는다. */
 export async function classifyFailure(outcomeId: string, rootCause: RootCause, note = '') {
   const r = await fetch(`${API_BASE_URL}/api/v1/telemetry/quality/classify`, {
     method: 'POST',

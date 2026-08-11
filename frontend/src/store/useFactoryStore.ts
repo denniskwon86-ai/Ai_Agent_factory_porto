@@ -151,7 +151,9 @@ interface FactoryStore {
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
 // [CL-4] 사용자 식별을 쿼리로 싣는 공용 헬퍼. 여기서 다시 구현하지 않는다.
-import { getSessionToken, apiUrl } from '../lib/api';
+//: [P0-1C] `apiUrl` 은 더 이상 쓰지 않는다 — 마지막 사용처였던 SSE 가 1회용 접속표로
+//  옮겨 갔다(P0-1B). 남겨 두면 «쿼리로 신원을 싣는 방법이 아직 있다» 로 읽힌다.
+import { getSessionToken } from '../lib/api';
 
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;

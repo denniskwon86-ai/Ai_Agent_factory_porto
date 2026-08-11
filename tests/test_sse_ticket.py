@@ -21,6 +21,10 @@ from fastapi.testclient import TestClient
 import config
 from core.auth import SSE_TICKET_SECONDS, AuthStore
 
+#: ★★ [P0-1C] 이 파일은 **인증 경로 자체**를 검증한다. principal override 를 받으면 실제
+#  인증 연결 결함을 숨기게 되므로 전 테스트에서 override 를 끈다(승인된 3분류의 둘째 칸).
+pytestmark = pytest.mark.real_auth
+
 
 @pytest.fixture
 def store(tmp_path):
@@ -133,13 +137,19 @@ def test_인증_없이는_티켓을_받지_못한다(client):
     assert c.post("/api/v1/auth/sse-ticket").status_code == 401
 
 
-def test_헤더_사칭으로는_티켓을_받지_못한다(client):
+def test_헤더_사칭으로는_티켓을_받지_못한다(client, monkeypatch):
     """★★★ 이 테스트가 이 파일의 존재 이유다.
 
     `ORG_TRUST_HEADER` 가 켜져 있어도 티켓 발급은 **세션 토큰만** 본다. 이것이 뚫리면
-    `as_user` 를 막은 의미가 사라진다 — 티켓이 새로운 우회로가 되기 때문이다."""
+    `as_user` 를 막은 의미가 사라진다 — 티켓이 새로운 우회로가 되기 때문이다.
+
+    ⚠️ [P0-1C] 종전에는 `assert config.ORG_TRUST_HEADER is True` 로 **전제를 확인만** 했다.
+      그 기본값이 False 로 내려가자 이 테스트는 «전제가 깨졌다» 며 실패했다 — 그런데 정작
+      확인하려던 계약(티켓은 세션만 본다)은 그대로 유효하다. 전제를 기다리지 말고 **이
+      테스트가 최악의 조건을 스스로 만든다.** `monkeypatch` 라 이 테스트 밖으로 새지 않는다.
+    ★ 이렇게 두면 나중에 누가 스위치를 되켜도 이 계약은 계속 검증된다."""
     c, _ = client
-    assert config.ORG_TRUST_HEADER is True, "이 테스트는 헤더 신뢰가 켜진 상태를 전제한다"
+    monkeypatch.setattr(config, "ORG_TRUST_HEADER", True, raising=False)
 
     r1 = c.post("/api/v1/auth/sse-ticket", headers={"X-Factory-User": "hikwon@lsmnm.com"})
     assert r1.status_code == 401, "헤더 사칭으로 티켓이 발급됐습니다."

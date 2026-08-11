@@ -4,7 +4,9 @@
 //   개편할 예정이므로, 그때 이 파일은 **그대로 재사용**되어야 한다. 따라서 여기에는 표현 관련
 //   코드를 절대 두지 않는다(문구·색·레이아웃 금지, 데이터 형태와 호출만).
 //
-// 인증: `installFetchInterceptor` 가 `X-Factory-User` 를 자동으로 붙인다(lib/api.ts).
+// 인증: `installFetchInterceptor` 가 **세션 토큰**(`X-Session-Token`)을 자동으로 붙인다
+//   (lib/api.ts). ⚠️ [P0-1C] 종전에는 `X-Factory-User` 라고 적혀 있었다 — 그 헤더는 서버가
+//   더 이상 믿지 않으며 개발 모드에서만 실린다.
 // ECM 문맥 헤더(X-Enterprise-Scope 등)는 전역 컨텍스트 스위처가 생기면 인터셉터에 추가한다 —
 //   지금은 백엔드가 요청자의 소속 부서를 기본 범위로 쓴다(ECM-lite 단계적 도입).
 import { API_BASE_URL } from './api';
