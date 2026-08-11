@@ -534,24 +534,17 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     //   접근할 수 있다 — iframe 의 `allow-same-origin` 을 떼도 이 경로가 열려 있으면 소용없다.
     //   버튼은 숨기지 않고 **잠그고 사유를 보여 준다**(숨기면 사용자는 기능이 사라진 줄 안다).
     //   I-3 Host Runtime Bridge 완성 후 **별도 격리 Origin** 으로 정식 복구한다.
-    return;
-    // eslint-disable-next-line no-unreachable
-    if (popupRef.current && !popupRef.current.closed) { popupRef.current.focus(); return; }
-    setPopupBlocked(false);
-    const w = window.open('', 'omega_preview', 'width=1024,height=768,resizable=yes,scrollbars=yes');
-    // ⚠️ [이관 F 7/8] `alert()` 를 쓰지 않는다(디자인 시스템 규칙 ②). 브라우저 대화상자는
-    //   키보드·스크린리더 대응이 안 되고, 무엇보다 **무엇을 해야 하는지** 적을 자리가 없다.
-    //   차단 사실은 화면 안에 남겨 둔다 — alert 는 닫는 순간 사라져서 설정을 바꾸는 동안
-    //   사용자가 문구를 다시 볼 수 없다.
-    if (!w) { setPopupBlocked(true); return; }
-    w.document.open();
-    w.document.write(htmlTemplate.replace(/__AFS_SID__/g, previewSidRef.current));
-    w.document.close();
-    popupRef.current = w;
-    // 새 타깃(팝업) 준비 대기 → 팝업이 IFRAME_READY 를 보내면 핸들러가 pending 파일을 전송
-    isIframeReadyRef.current = false;
-    setIsPoppedOut(true);
-  }, [htmlTemplate]);
+    //
+    // ⚠️⚠️ 종전에는 `return;` 한 줄만 앞에 두고 `window.open` + `document.write` 본문을
+    //   **그대로 남겨 두었다.** 두 가지가 나빴다.
+    //     ① `return` 한 줄만 지우면 구멍이 그대로 되살아난다 — 「왜 막았는지」를 모르는
+    //        사람에게는 그것이 가장 자연스러운 복구 방법으로 보인다.
+    //     ② 도달 불가 코드도 타입 검사는 받는데, 그 자리에서는 흐름 분석이 좁혀 주지 않아
+    //        `tsc -b` 가 TS18047 5건으로 깨졌다(`npx tsc -p tsconfig.json` 은 솔루션 파일이라
+    //        0개 파일을 검사하고 조용히 통과해서, 커밋 시점에 이것을 못 봤다).
+    //   복구할 때는 위 설명대로 **격리 Origin 을 먼저 만들고** 새로 쓴다. 되살릴 코드가
+    //   아니므로 남겨 두지 않는다.
+  }, []);
 
   // 팝업 닫고 메인(iframe)으로 복귀
   const closePopout = useCallback(() => {
