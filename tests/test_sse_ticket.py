@@ -163,3 +163,70 @@ def test_오류_응답에_티켓이_되실리지_않는다(client):
     r = c.get(f"/ws/timeline?ticket={secret}")
     assert r.status_code == 401
     assert secret not in r.text
+
+
+# ── [P0-1B 보정] 재감사에서 지적된 세 건 ────────────────────────────────────
+
+def test_요청자가_보낸_테넌트를_티켓에_싣지_않는다(client):
+    """★★ 「요청자가 scope 를 지정하지 않는다」는 계약.
+
+    ⚠️ 종전에는 `X-Tenant-Id` 헤더를 그대로 티켓에 저장했다. 그러면 공격자가 헤더 하나로
+      **다른 테넌트 범위의 표**를 받는다 — 계약이 그 자리에서 깨진다.
+    ⚠️ tenant 는 아직 서버 권한 모델과 연결되지 않았다(G1-C). 모르는 것을 헤더로 채우는 것보다
+      **비워 두는 것**이 옳다 — 채워 두면 다음 사람이 「테넌트 경계가 있다」고 믿는다."""
+    c, store = client
+    lg = c.post("/api/v1/auth/login",
+                json={"user_id": "hikwon@lsmnm.com", "password": "pass:"})
+    assert lg.status_code == 200
+    tok = lg.json()["data"]["token"]
+
+    r = c.post("/api/v1/auth/sse-ticket",
+               headers={"X-Session-Token": tok, "X-Tenant-Id": "other-tenant"})
+    assert r.status_code == 200
+
+    with store._connect() as conn:
+        rows = conn.execute("SELECT tenant_id FROM auth_sse_ticket").fetchall()
+    assert rows, "티켓이 저장되지 않았습니다."
+    assert all(r0["tenant_id"] == "" for r0 in rows), (
+        "요청 헤더의 테넌트가 티켓에 저장됐습니다 — 요청자가 scope 를 지정한 셈입니다.")
+
+
+def test_접근_로그에서_티켓이_가려진다():
+    """★★ 티켓은 URL 로 오간다 — `uvicorn.access` 의 request line 에 그대로 남는다.
+
+    ⚠️ 응답의 `Referrer-Policy` 는 **브라우저가 다음 요청에 참조자를 싣지 않게** 할 뿐,
+      서버가 자기 로그에 적는 것은 막지 못한다. 둘을 혼동하면 가린 줄 알고 넘어간다."""
+    import io as _io
+    import logging
+
+    from core.log_redaction import install, redact
+
+    assert redact("GET /ws/timeline?ticket=SECRET HTTP/1.1") == "GET /ws/timeline?ticket=*** HTTP/1.1"
+    #: 키는 남긴다 — 무엇이 가려졌는지 보여야 조사할 수 있다.
+    assert "ticket=" in redact("?ticket=SECRET")
+
+    install()
+    buf = _io.StringIO()
+    h = logging.StreamHandler(buf)
+    h.setFormatter(logging.Formatter("%(message)s"))
+    lg = logging.getLogger("uvicorn.access")
+    lg.addHandler(h)
+    lg.setLevel(logging.INFO)
+    install()                     # 핸들러에도 걸린다(여러 번 호출해도 안전)
+    try:
+        # uvicorn.access 는 %s 포맷 + **인자 튜플**로 넘긴다 — msg 만 손보면 URL 이 샌다.
+        lg.info('%s - "%s %s HTTP/1.1" %d', "127.0.0.1", "GET",
+                "/ws/timeline?ticket=LEAKME", 200)
+        out = buf.getvalue()
+    finally:
+        lg.removeHandler(h)
+    assert "LEAKME" not in out, f"접근 로그에 티켓 원문이 남았습니다: {out}"
+    assert "ticket=***" in out
+
+
+def test_세션_토큰_계열도_함께_가린다():
+    """티켓만 가리면 다음에 추가되는 비밀값이 또 샌다."""
+    from core.log_redaction import redact
+
+    for k in ("token", "session", "password", "api_key"):
+        assert f"{k}=***" in redact(f"/x?{k}=VALUE"), f"{k} 가 가려지지 않았습니다."

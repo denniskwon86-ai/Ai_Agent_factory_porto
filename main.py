@@ -31,6 +31,14 @@ from api.routes import factory_control, realtime, format_control, skill_control,
 # 슈퍼바이저 데몬 초기화 (백그라운드 이벤트 리스너 등록)
 import core.supervisor_daemon
 
+# ★★★ [P0-1B 보정] 접근 로그에서 비밀값을 가린다.
+#   SSE 접속표는 URL 로 오가므로 `uvicorn.access` 의 request line 에 그대로 남는다.
+#   응답의 `Referrer-Policy` 는 브라우저 참조자만 막을 뿐 **서버 로그는 가리지 못한다.**
+#   ⚠️ 앱 생성 **전에** 걸어야 uvicorn 이 로거를 잡기 전에 필터가 붙는다.
+from core.log_redaction import install as _install_log_redaction
+
+_install_log_redaction()
+
 app = FastAPI(
     title="V5.0 AI Factory Studio API",
     description="범용 자율형 소프트웨어 팩토리 플랫폼 관제용 비동기 API",

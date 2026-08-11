@@ -132,9 +132,14 @@ async def issue_sse_ticket(request: Request):
     if not _known_user(uid):
         raise HTTPException(status_code=401, detail="등록되지 않은 사용자입니다.")
 
-    #: 테넌트는 문맥 헤더에서 참고만 한다 — 티켓의 신원은 어디까지나 세션이 정한다.
-    tenant = (request.headers.get("X-Tenant-Id", "") or "").strip()
-    t = auth_store.issue_sse_ticket(uid, tok, tenant)
+    #: ⚠️⚠️ **요청 헤더의 `X-Tenant-Id` 를 쓰지 않는다.** 종전에는 그것을 받아 티켓에 저장했는데,
+    #  그러면 「요청자가 scope 를 지정하지 않는다」는 계약이 그 자리에서 깨진다 — 공격자가
+    #  헤더 하나로 다른 테넌트 범위의 표를 받게 된다.
+    #
+    #  tenant·scope 는 **인증된 사용자·세션·서버 문맥**에서 나와야 한다. 아직 그 연결이 없으므로
+    #  **빈 값으로 둔다**(G1-C 미구현). 모르는 것을 헤더로 채우는 것보다 비워 두는 것이 옳다 —
+    #  채워 두면 다음 사람이 「테넌트 경계가 있다」고 믿는다.
+    t = auth_store.issue_sse_ticket(uid, tok, tenant_id="")
     #: ⚠️ 응답에만 원문을 싣고 로그에는 남기지 않는다(저장소에는 해시만 있다).
     return {"status": "success", "data": t}
 

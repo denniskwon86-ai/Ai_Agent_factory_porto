@@ -155,6 +155,15 @@ import { getSessionToken, apiUrl } from '../lib/api';
 
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;
+/** ★★ [P0-1B 보정] SSE 연결 세대.
+ *
+ * 티켓 발급이 **비동기**가 되면서, 표를 기다리는 사이에 다른 `connectSSE()` 가 들어올 수 있다
+ * (사용자 전환 · 재연결 타이머 · 수동 연결이 겹친다). 그러면 두 호출이 각각 표를 받아 각각
+ * `EventSource` 를 만들고, **앞의 것이 `_sseConn` 에서 밀려나 추적되지 않는 고아 연결**이
+ * 된다 — 닫히지도 않고 이벤트는 계속 받는다.
+ *
+ * 그래서 시도마다 번호를 매기고, 표를 받아 온 뒤 **자기가 아직 최신인지** 확인한다. */
+let _sseGeneration = 0;
 let _sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useFactoryStore = create<FactoryStore>()((set, get) => ({
@@ -903,6 +912,12 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     //
     // ⚠️ 표는 **연결할 때마다 새로 받는다.** 재사용하면 서버가 거절한다(1회 소비).
     // ⚠️ 발급에 실패하면 **연결하지 않는다** — `as_user` 로 되돌아가면 그것이 곧 우회로다.
+    const myGen = ++_sseGeneration;
+
+    // ⚠️ 세션이 없으면 **아예 시도하지 않는다.** 로그인 전에 5초마다 발급 API 를 두드리면
+    //   서버 로그가 401 로 뒤덮이고, 정작 진짜 문제가 묻힌다. 로그인하면 화면이 다시 부른다.
+    if (!getSessionToken()) { set({ isConnected: false }); return; }
+
     let ticket = '';
     try {
       const r = await fetch(`${API_BASE_URL}/api/v1/auth/sse-ticket`, {
@@ -912,13 +927,18 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       if (!r.ok) throw new Error(`ticket ${r.status}`);
       ticket = ((await r.json())?.data?.ticket) || '';
     } catch (e) {
-      // 로그인 전이거나 세션이 끊긴 상태다. 조용히 익명 연결하지 않는다.
+      // 세션이 끊겼거나 서버가 죽었다. 조용히 익명 연결하지 않는다.
+      if (myGen !== _sseGeneration) return;        // 더 새 시도가 있으면 물러난다
       set({ isConnected: false });
       if (!_sseReconnectTimer) {
         _sseReconnectTimer = setTimeout(() => { _sseReconnectTimer = null; get().connectSSE(); }, 5000);
       }
       return;
     }
+
+    // ★ 표를 받아 오는 사이에 더 새 시도가 시작됐다면 **여기서 멈춘다.**
+    //   그대로 진행하면 고아 EventSource 가 생긴다(닫히지 않고 이벤트는 계속 받는다).
+    if (myGen !== _sseGeneration) return;
     if (!ticket) { set({ isConnected: false }); return; }
 
     const eventSource = new EventSource(
