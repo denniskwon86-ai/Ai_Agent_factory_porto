@@ -769,7 +769,10 @@ class Publication:
             event, collaboration_events.publication_recipients(pub),
             {"id": pub["publication_id"], "status": pub["status"],
              "at": pub["updated_at"], "title": pub["title"],
-             "actor": actor, "version": pub["document_version"]})
+             "actor": actor, "version": pub["document_version"]},
+            #: ★ [G1-C1.4] 라우팅 문맥은 **payload 와 다른 통로**로 간다 — 브라우저로 나가지
+            #  않고 서버 안에서만 「어느 테넌트·범위의 알림인가」를 판정하는 데 쓴다.
+            routing_context=collaboration_events.routing_context(pub))
 
     def _audit(self, event: str, subject_id: str, actor: str, decision: str = "",
                rationale: str = "", evidence: Optional[List[Any]] = None,

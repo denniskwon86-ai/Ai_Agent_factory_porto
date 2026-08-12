@@ -543,7 +543,10 @@ class AppDelivery:
             event, collaboration_events.delivery_recipients(delivery),
             {"id": delivery.get("delivery_id", ""), "status": delivery.get("status", ""),
              "at": delivery.get("responded_at") or delivery.get("created_at", ""),
-             "title": delivery.get("release_id", ""), "actor": actor})
+             "title": delivery.get("release_id", ""), "actor": actor},
+            #: ★ [G1-C1.4] 라우팅 문맥은 **payload 와 다른 통로**로 간다 — 브라우저로 나가지
+            #  않고 서버 안에서만 「어느 테넌트·범위의 알림인가」를 판정하는 데 쓴다.
+            routing_context=collaboration_events.routing_context(delivery))
 
     def _ledger_append(self, event: str, subject_id: str, actor_id: str, decision: str = "",
                        rationale: str = "", evidence: Optional[List[Any]] = None,

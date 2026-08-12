@@ -268,7 +268,12 @@ def test_결정_요청은_프로젝트_밖_사람에게도_간다(bus):
     async def scenario():
         await _subscribe(bus, "b@x")      # D2 사람 — P_A 를 볼 수 없다
         q = _queue_of(bus, 0)
-        sent = bus.emit_to("DECISION_REQUESTED", {"project_id": "P_A"}, ["b@x"])
+        #: ⚠️ [G1-C1.4] 판정 근거는 **payload 가 아니라 `routing_context`** 다. payload 의
+        #  `project_id` 는 브라우저로 나가기 전에 `_clean()` 이 지우므로 실서비스에서는
+        #  판정 지점에 도달하지 않는다 — 그것을 근거로 삼은 테스트는 거짓 초록이었다.
+        sent = bus.emit_to("DECISION_REQUESTED", {"id": "dec_1"}, ["b@x"],
+                           routing_context={"tenant_id": "tenant_default",
+                                            "entity_mode": "REAL", "project_id": "P_A"})
         assert sent == 1 and _types(q) == ["DECISION_REQUESTED"]
 
     _run(scenario())
@@ -345,7 +350,10 @@ def test_결정_요청도_다른_테넌트_창으로는_가지_않는다(bus):
         q_here, q_there = _queue_of(bus, 0), _queue_of(bus, 1)
 
         # P_A 는 tenant_default(메타에 tenant 없음 → 기본값). 같은 테넌트 창에만 가야 한다.
-        sent = bus.emit_to("DECISION_REQUESTED", {"project_id": "P_OTHER_TENANT"}, ["b@x"])
+        sent = bus.emit_to("DECISION_REQUESTED", {"id": "dec_1"}, ["b@x"],
+                           routing_context={"tenant_id": "tenant_default",
+                                            "entity_mode": "REAL",
+                                            "project_id": "P_OTHER_TENANT"})
         assert _types(q_there) == ["DECISION_REQUESTED"], "제 테넌트 창에도 안 갔다 — 고장이다"
         assert _types(q_here) == [], "다른 테넌트 창으로 결정 요청이 갔다"
         assert sent == 1
@@ -358,7 +366,9 @@ def test_프로젝트_없는_알림은_테넌트로_막지_않는다(bus):
     async def scenario():
         await _subscribe_ctx(bus, "b@x", tenant_id="tenant_default", entity_mode="REAL")
         q = _queue_of(bus, 0)
-        assert bus.emit_to("DECISION_REQUESTED", {"id": "dec_1"}, ["b@x"]) == 1
+        assert bus.emit_to("DECISION_REQUESTED", {"id": "dec_1"}, ["b@x"],
+                           routing_context={"tenant_id": "tenant_default",
+                                            "entity_mode": "REAL"}) == 1
         assert _types(q) == ["DECISION_REQUESTED"]
 
     _run(scenario())

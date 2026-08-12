@@ -66,22 +66,69 @@ class CollaborationEvents:
         from core.broadcaster import factory_broadcaster
         return factory_broadcaster
 
+    @staticmethod
+    def routing_context(record: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """[G1-C1.4] 도메인 레코드에서 **서버 내부 라우팅 문맥**을 만든다.
+
+        ## 왜 payload 에 넣으면 안 되는가
+
+        1차 구현은 `emit_to` 가 `payload["project_id"]` 를 읽어 테넌트를 판정하게 했다.
+        **그런데 그 키는 브라우저로 나가기 전에 `_clean()` 이 지운다**(`ALLOWED_KEYS` 에 없다).
+        즉 판정에 쓰려던 값이 판정 지점에 도달하기 전에 사라졌고, 실서비스에서는 언제나
+        「근거 없음」이었다. 그런데도 테스트는 초록이었다 — 테스트가 `CollaborationEvents` 를
+        건너뛰고 `bus.emit_to()` 를 직접 불렀기 때문이다.
+
+        ★★★ 그래서 **두 통로를 분리한다.**
+            · `payload`         브라우저로 나간다. 최소 정보만(`ALLOWED_KEYS`).
+            · `routing_context` 서버 안에서만 쓴다. **직렬화하지 않는다.**
+
+        ⚠️ 라우팅 정보를 payload 에 넣으면 두 문제가 동시에 생긴다 — 판정 근거가 사라지거나
+          (지금처럼), 아니면 조직 문맥이 브라우저로 새어 나간다. 둘 다 피하려면 통로가 달라야 한다."""
+        r = record or {}
+        tenant = str(r.get("tenant_id", "") or "").strip()
+        scope = str(r.get("enterprise_scope_id", "") or r.get("scope_id", "") or "").strip()
+        mode = str(r.get("entity_mode", "") or "").strip()
+        if not mode and scope:
+            #: 레코드에 실행 모드가 없으면 **그 조직 노드에서** 가져온다. 지어내지 않는다.
+            try:
+                from core.enterprise_context.repository import ecm_repository as repo
+                mode = repo.node_entity_mode(scope) or ""
+                if not mode:
+                    node = repo.find_node_by_code(scope) or repo.find_node_by_dept(scope)
+                    mode = repo.node_entity_mode(node.node_id) if node else ""
+            except Exception:
+                mode = ""
+        return {"tenant_id": tenant, "scope_node_id": scope, "entity_mode": mode,
+                "project_id": str(r.get("project_id", "") or "").strip()}
+
     def emit(self, event_type: str, recipients: Iterable[str],
-             payload: Optional[Dict[str, Any]] = None) -> int:
+             payload: Optional[Dict[str, Any]] = None,
+             routing_context: Optional[Dict[str, Any]] = None) -> int:
         """지정 수신자에게 알림 1건. 보낸 큐 수를 돌려준다.
 
         ⚠️ 발신자 자신을 수신자에서 빼지 않는다 — 여러 창을 띄운 사용자가 자기 행동의 결과를
-          다른 창에서 못 보면 그것도 버그다. 대신 **본인이 아닌 사람은 절대 넣지 않는다.**"""
+          다른 창에서 못 보면 그것도 버그다. 대신 **본인이 아닌 사람은 절대 넣지 않는다.**
+
+        ⚠️⚠️ [G1-C1.4] `routing_context` 에 테넌트가 없으면 **보내지 않는다.** 같은 사람이
+          여러 테넌트 창에 접속해 있을 수 있고, 테넌트를 모르면 어느 창에 보내야 하는지 알 수
+          없다. 「모르니 전부에게」는 격리를 없애는 것과 같다. 대신 실패로 세어 드러낸다."""
         if event_type not in EVENTS:
             # 목록 밖 이름은 화면이 모른다. 조용히 보내면 아무 일도 안 일어나고 원인도 안 남는다.
             self.failures += 1
             self.last = {"event": event_type, "sent": 0, "error": "unknown_event_type"}
             return 0
+        ctx = dict(routing_context or {})
+        if not str(ctx.get("tenant_id", "") or "").strip():
+            self.failures += 1
+            self.last = {"event": event_type, "sent": 0, "error": "missing_routing_tenant"}
+            print(f"⚠️ [CollaborationEvents] '{event_type}' 에 라우팅 테넌트가 없어 **보내지 "
+                  f"않았습니다**(G1-C1.4). 도메인이 `routing_context` 를 넘기는지 확인하십시오.")
+            return 0
         targets = sorted({str(r).strip() for r in (recipients or []) if str(r).strip()})
         body = self._clean(payload or {})
         body["kind"] = body.get("kind") or event_type
         try:
-            sent = self._broadcaster.emit_to(event_type, body, targets)
+            sent = self._broadcaster.emit_to(event_type, body, targets, routing_context=ctx)
         except Exception as e:
             # 알림 실패가 결정·발간을 취소시키면 부가 기능이 본업을 망가뜨린다.
             self.failures += 1

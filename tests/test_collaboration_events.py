@@ -27,6 +27,11 @@ from core.collaboration_events import (APP_DELIVERY_RECEIVED, DECISION_REVIEW_RE
                                        DECISION_UPDATED, EVENTS, CollaborationEvents)
 
 
+#: ★ [G1-C1.4] 서버 내부 라우팅 문맥. **payload 와 다른 통로**로 간다 — 브라우저로 나가지
+#: 않고 「어느 테넌트·범위의 알림인가」를 판정하는 데만 쓴다.
+RC = {"tenant_id": "tenant_default", "scope_node_id": "", "entity_mode": "REAL"}
+
+
 class _FakeClient:
     """구독자 한 명 = 큐 하나. 실제 `subscribe()` 와 같은 구조로 등록한다."""
 
@@ -75,7 +80,8 @@ def test_event_reaches_only_the_named_user(b, ev):
     """★★★ 작업서 §10-11 — A 의 이벤트가 B 에게 가지 않는다."""
     a = _FakeClient(b, "kim")
     other = _FakeClient(b, "lee")
-    sent = ev.emit(DECISION_REVIEW_REQUESTED, ["kim"], {"id": "dec_1", "status": "REVIEW_REQUESTED"})
+    sent = ev.emit(DECISION_REVIEW_REQUESTED, ["kim"],
+                   {"id": "dec_1", "status": "REVIEW_REQUESTED"}, routing_context=RC)
     assert sent == 1
     assert len(a.drain()) == 1
     assert other.drain() == [], "다른 사용자에게 배달되면 그것이 유출이다"
@@ -87,7 +93,7 @@ def test_anonymous_client_never_receives_targeted_events(b, ev):
     ⚠️ 익명 연결이 받으면 로그인하지 않은 창이 남의 알림을 읽는다."""
     anon = _FakeClient(b, "")
     named = _FakeClient(b, "kim")
-    ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_1"})
+    ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_1"}, routing_context=RC)
     assert anon.drain() == []
     assert len(named.drain()) == 1
 
@@ -98,14 +104,14 @@ def test_empty_recipients_go_to_nobody(b, ev):
     ⚠️ '비었으니 전체'로 해석하는 순간, 권한 계산이 실패한 이벤트가 전사에 뿌려진다.
       실패는 닫히는 쪽이어야 한다."""
     c1, c2 = _FakeClient(b, "kim"), _FakeClient(b, "lee")
-    assert ev.emit(DECISION_UPDATED, [], {"id": "dec_1"}) == 0
+    assert ev.emit(DECISION_UPDATED, [], {"id": "dec_1"}, routing_context=RC) == 0
     assert c1.drain() == [] and c2.drain() == []
 
 
 def test_blank_recipient_ids_are_dropped(b, ev):
     """★ 빈 문자열·공백은 수신자가 아니다 — 빈 `user_id` 로 저장된 참여자가 있을 수 있다."""
     anon = _FakeClient(b, "")
-    assert ev.emit(DECISION_UPDATED, ["", "   ", None], {"id": "dec_1"}) == 0
+    assert ev.emit(DECISION_UPDATED, ["", "   ", None], {"id": "dec_1"}, routing_context=RC) == 0
     assert anon.drain() == []
 
 
@@ -168,7 +174,7 @@ def test_payload_drops_document_body_and_participant_list(b, ev):
         "package": {"financial_impact": "연 12억"},      # 실려서는 안 된다
         "participants": ["kim", "lee", "park"],           # 실려서는 안 된다
         "evidence": {"secret": 1},
-    })
+    }, routing_context=RC)
     line = c.drain()[0]
     assert "dec_1" in line and "DECIDED" in line
     assert "12억" not in line, "문서 본문이 알림으로 새면 안 된다"
@@ -179,7 +185,7 @@ def test_payload_drops_document_body_and_participant_list(b, ev):
 def test_title_is_truncated(b, ev):
     """★ 제목도 내용이다 — 결정 문장 전체를 실으면 사실상 문서를 보낸 것이다."""
     c = _FakeClient(b, "kim")
-    ev.emit(DECISION_UPDATED, ["kim"], {"id": "d", "title": "가" * 500})
+    ev.emit(DECISION_UPDATED, ["kim"], {"id": "d", "title": "가" * 500}, routing_context=RC)
     assert "가" * 200 not in c.drain()[0]
 
 
@@ -188,7 +194,7 @@ def test_unknown_event_type_is_not_sent(b, ev):
 
     ⚠️ 조용히 보내면 화면은 아무 일도 하지 않고, 원인도 남지 않는다."""
     c = _FakeClient(b, "kim")
-    assert ev.emit("SOMETHING_ELSE", ["kim"], {"id": "x"}) == 0
+    assert ev.emit("SOMETHING_ELSE", ["kim"], {"id": "x"}, routing_context=RC) == 0
     assert c.drain() == []
     assert ev.failures == 1
 
@@ -197,7 +203,7 @@ def test_all_declared_events_are_deliverable(b, ev):
     """★ 작업서 §CL-BE-05 가 요구한 6개 이벤트가 모두 실제로 배달된다."""
     c = _FakeClient(b, "kim")
     for e in EVENTS:
-        assert ev.emit(e, ["kim"], {"id": "x"}) == 1
+        assert ev.emit(e, ["kim"], {"id": "x"}, routing_context=RC) == 1
     assert len(c.drain()) == len(EVENTS)
 
 
@@ -212,7 +218,7 @@ def test_broadcaster_failure_does_not_raise_but_is_counted(ev):
             raise RuntimeError("큐 오류")
 
     ev._broadcaster_override = _Broken()
-    assert ev.emit(APP_DELIVERY_RECEIVED, ["kim"], {"id": "x"}) == 0
+    assert ev.emit(APP_DELIVERY_RECEIVED, ["kim"], {"id": "x"}, routing_context=RC) == 0
     assert ev.failures == 1
     assert "큐 오류" in ev.last["error"]
 
@@ -254,12 +260,12 @@ def test_폐지된_계정에는_열린_연결로도_알림이_가지_않는다(b
     ★ 그래서 **보낼 때마다** 계정이 살아 있는지 다시 본다."""
     from core.org_directory import org_directory
     c = _FakeClient(b, "kim")
-    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_1"}) == 1, "처음에는 가야 한다"
+    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_1"}, routing_context=RC) == 1, "처음에는 가야 한다"
     assert len(c.drain()) == 1
 
     monkeypatch.setattr(org_directory, "get_user",
                         lambda uid: {"user_id": uid, "status": "retired"})
-    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_2"}) == 0, "폐지 계정에 알림이 갔다"
+    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_2"}, routing_context=RC) == 0, "폐지 계정에 알림이 갔다"
     assert c.drain() == []
 
 
@@ -285,11 +291,11 @@ def test_로그아웃하면_이미_열린_SSE_로도_알림이_가지_않는다(
     c = _FakeClient(b, "kim")
     b._client_ctx[id(c.q)]["session_id"] = store._ticket_hash(sess["token"])
 
-    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_1"}) == 1, "로그인 중에는 가야 한다"
+    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_1"}, routing_context=RC) == 1, "로그인 중에는 가야 한다"
     assert len(c.drain()) == 1
 
     store.destroy(sess["token"])          # ← 로그아웃
-    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_2"}) == 0, "로그아웃 후에도 알림이 갔다"
+    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_2"}, routing_context=RC) == 0, "로그아웃 후에도 알림이 갔다"
     assert c.drain() == []
 
 

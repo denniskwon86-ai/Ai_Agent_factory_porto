@@ -3,7 +3,7 @@ import json
 import os
 import urllib.request
 from datetime import datetime
-from typing import AsyncGenerator, Dict, Any
+from typing import AsyncGenerator, Dict, Any, Optional
 from fastapi.encoders import jsonable_encoder  #  Pydantic 객체를 안전하게 변환하는 만능 인코더 추가
 
 class SSEBroadcaster:
@@ -123,7 +123,10 @@ class SSEBroadcaster:
         ⚠️ `scope_node_id` 는 **권한이 아니라 «지금 무엇을 보기로 했는가»** 다. 비어 있으면
           「전체」를 고른 것이므로 좁히지 않는다 — 여기서 막으면 범위를 안 고른 사람이
           아무것도 못 본다. 권한 경계는 `ownership_visible` 이 따로 지킨다."""
-        own = own or {}
+        if own is None:
+            # ⚠️ [G1-C1.4] 자원 문맥이 없으면 **차단한다.** 종전에는 `own or {}` 로 빈 사전을
+            #   만들었고, 빈 값은 모든 비교를 통과해 fail-open 이었다.
+            return False
         c_tenant = str(ctx.get("tenant_id", "") or "")
         c_mode = str(ctx.get("entity_mode", "") or "")
         if not c_tenant or not c_mode:
@@ -216,7 +219,7 @@ class SSEBroadcaster:
 
     # ── [CL-4] 지정 수신자 이벤트 ────────────────────────────────────────────
     def emit_to(self, event_type: str, payload: Dict[str, Any],
-                recipients) -> int:
+                recipients, routing_context: Optional[Dict[str, Any]] = None) -> int:
         """**지정한 사용자에게만** 보낸다. 보낸 큐 수를 돌려준다.
 
         ★★ 이것이 CL-4 의 핵심이다. 기존 `broadcast()` 는 **모두에게** 간다 — 협업 이벤트를
@@ -247,16 +250,33 @@ class SSEBroadcaster:
         except Exception as e:
             print(f"⚠️ [Broadcaster] 이벤트 직렬화 실패({event_type}): {e}")
             return 0
-        #: 이 알림이 어느 문맥의 것인가. 프로젝트가 적혀 있을 때만 알 수 있다.
-        own_ctx = None
-        pid = str((payload or {}).get("project_id") or "").strip() if isinstance(payload, dict) else ""
-        if pid:
+        # ★★★ [G1-C1.4] 판정 근거는 **`routing_context`** 다 — payload 가 아니다.
+        #
+        #   1차 구현은 `payload["project_id"]` 를 읽었다. 그런데 그 키는 브라우저로 나가기 전에
+        #   `CollaborationEvents._clean()` 이 지운다(`ALLOWED_KEYS` 에 없다). 즉 **판정에 쓰려던
+        #   값이 판정 지점에 도달하기 전에 사라졌고**, 실서비스에서는 언제나 「근거 없음」이었다.
+        #   그런데도 테스트는 초록이었다 — 테스트가 `CollaborationEvents` 를 건너뛰고 이 함수를
+        #   직접 불렀기 때문이다. **테스트가 실제 배선을 타지 않으면 그 초록은 거짓이다.**
+        #
+        #   ⚠️ `routing_context` 는 **직렬화하지 않는다.** 조직 문맥이 브라우저로 새면 안 된다.
+        own_ctx = routing_context if isinstance(routing_context, dict) else None
+        if own_ctx is None:
+            if event_type not in self._warned_unclassified:
+                self._warned_unclassified.add(event_type)
+                print(f"⚠️ [Broadcaster] '{event_type}' 지정 수신자 이벤트에 routing_context 가 "
+                      f"없어 **아무에게도 보내지 않았습니다**(G1-C1.4).")
+            return 0
+        if str(own_ctx.get("project_id", "") or "").strip():
+            # 프로젝트가 걸린 알림은 **그 프로젝트의 문맥**이 정본이다(레코드보다 구체적이다).
             try:
                 from core.paths import workspace_path
                 from core.project_visibility import read_project_ownership
-                own_ctx = read_project_ownership(workspace_path(pid))
-            except Exception:
-                own_ctx = None
+                own_ctx = read_project_ownership(workspace_path(own_ctx["project_id"]))
+            except Exception as e:
+                # ⚠️ 소유권을 못 읽으면 **보내지 않는다.** 종전에는 `None` 으로 두었고,
+                #   빈 문맥은 비교를 통과해 fail-open 이었다.
+                print(f"⚠️ [Broadcaster] '{event_type}' 소유권 판독 실패 — 보내지 않습니다: {e}")
+                return 0
         sent = 0
         for q in list(self.clients):
             uid = self._client_users.get(id(q), "")

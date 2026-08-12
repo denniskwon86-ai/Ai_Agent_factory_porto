@@ -719,7 +719,10 @@ class DecisionCase:
             event, collaboration_events.decision_recipients(case),
             {"id": case["decision_id"], "status": case["status"],
              "at": case["updated_at"], "title": case["question"],
-             "actor": actor, "version": case["package_version"]})
+             "actor": actor, "version": case["package_version"]},
+            #: ★ [G1-C1.4] 라우팅 문맥은 **payload 와 다른 통로**로 간다 — 브라우저로 나가지
+            #  않고 서버 안에서만 「어느 테넌트·범위의 알림인가」를 판정하는 데 쓴다.
+            routing_context=collaboration_events.routing_context(case))
 
     def _audit(self, event: str, subject_id: str, actor: str, decision: str = "",
                rationale: str = "", evidence: Optional[List[Any]] = None,
