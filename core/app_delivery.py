@@ -109,15 +109,43 @@ class AppDelivery:
 
     @staticmethod
     def _delivery_block_reason(rel: Dict[str, Any]) -> str:
-        """전달을 막는 사유. 없으면 빈 문자열. **`create()` 와 `preflight()` 의 단일 지점.**"""
-        scan = rel.get("platform_auth_scan") or {}
+        """전달을 막는 사유. 없으면 빈 문자열. **`create()` 와 `preflight()` 의 단일 지점.**
+
+        ★★★ [G1-A · 2026-08-12] **`is False` 가 아니라 `is not True` 로 본다.**
+
+        종전에는 `ok is False` 만 막았다. 그래서 이런 상태가 통과했다 —
+
+            정적 검사가 예외로 실패  →  `platform_auth_scan = {"ok": None, ...}`
+                                     →  `ok is False` 가 아니므로 차단 안 됨
+                                     →  **안전을 확인하지 못한 앱이 남에게 전달됨**
+
+        게시 단계는 일부러 막지 않는다(이미 만든 산출물이 사라지면 다음 사람은 검사를 끄는 쪽을
+        택한다). 그 대신 **전달이 유일한 관문**이라고 이 파일 머리말에 적어 두었는데, 그 관문이
+        「모른다」를 「괜찮다」로 읽고 있었다. 검사하지 못한 것을 통과로 읽으면 게이트는 장식이다.
+
+        ⚠️ 이 변경으로 **이 커밋 이전에 만들어진 릴리스**는 검사 결과가 없어 전달이 막힐 수 있다.
+          그것이 옳다 — 확인된 적이 없는 것이다. 메시지에 «다시 게시하십시오» 를 적어 사용자가
+          할 일을 알게 한다.
+        ⚠️ 「검사하지 못했다」와 「검사에 걸렸다」를 **다른 문장으로** 답한다. 뭉개면 개발자가
+          있지도 않은 자체 인증 코드를 찾는다."""
+        scan = rel.get("platform_auth_scan")
+        if not isinstance(scan, dict) or "ok" not in scan:
+            return ("이 릴리스에는 자체 인증 정적 검사 결과가 없어 전달할 수 없습니다 — 검사한 적이 "
+                    "없는 것과 검사를 통과한 것은 다릅니다. 프로젝트를 다시 게시하십시오.")
         if scan.get("ok") is False:
             n = (scan.get("summary") or {}).get("blocking", "?")
             return (f"이 앱에는 자체 인증 코드가 {n}건 있어 전달할 수 없습니다 — 앱은 호스트 인증을 "
                     f"상속해야 합니다. 로그인 화면 대신 현재 사용자·조직·역할을 표시하도록 고친 뒤 "
                     f"다시 게시하십시오.")
-        man = rel.get("manifest") or {}
-        if man.get("valid") is False:
+        if scan.get("ok") is not True:
+            return (f"자체 인증 정적 검사를 마치지 못해 전달할 수 없습니다"
+                    f"({scan.get('error') or '사유 미기록'}) — 검사하지 못한 것을 통과로 두면 "
+                    f"게이트가 장식이 됩니다. 프로젝트를 다시 게시하십시오.")
+        man = rel.get("manifest")
+        if not isinstance(man, dict) or "valid" not in man:
+            return ("이 릴리스에는 Capability Manifest 판정 결과가 없어 전달할 수 없습니다 — "
+                    "수신자가 무엇을 수락하는지 알 수 없습니다. 프로젝트를 다시 게시하십시오.")
+        if man.get("valid") is not True:
             return (f"이 앱의 Capability Manifest 가 유효하지 않아 전달할 수 없습니다: "
                     f"{man.get('errors')} — 수신자가 무엇을 수락하는지 알 수 없습니다.")
         return ""

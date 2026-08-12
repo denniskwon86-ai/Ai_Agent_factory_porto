@@ -103,6 +103,56 @@ def test_app_with_local_auth_cannot_be_delivered(svc):
         _created(svc, release_lookup=_lookup(bad))
 
 
+# ── ★★★ [G1-A · 2026-08-12] 「검사하지 못했다」를 「괜찮다」로 읽지 않는다 ──────
+#
+# 종전 게이트는 `ok is False` 만 막았다. 그래서 이런 상태가 통과했다 —
+#     정적 검사가 예외로 실패 → `{"ok": None}` → 차단 안 됨 → 안전 미확인 앱이 전달됨
+# 게시 단계는 일부러 막지 않으므로 **전달이 유일한 관문**인데, 그 관문이 「모른다」를
+# 통과시키고 있었다. 아래 네 가지는 전부 «확인된 적 없음» 이므로 차단이어야 한다.
+
+@pytest.mark.parametrize("scan,why", [
+    ({"ok": None, "error": "검사기 예외"}, "검사가 예외로 실패한 경우"),
+    ({"error": "결과 누락"}, "`ok` 키 자체가 없는 경우"),
+    ({}, "검사 결과가 빈 사전인 경우"),
+    (None, "검사 결과가 아예 없는 경우"),
+])
+def test_검사하지_못한_앱은_전달되지_않는다(svc, scan, why):
+    bad = dict(RELEASE)
+    if scan is None:
+        bad.pop("platform_auth_scan", None)
+    else:
+        bad["platform_auth_scan"] = scan
+    with pytest.raises(AppDeliveryError) as e:
+        _created(svc, release_lookup=_lookup(bad))
+    #: ★ 사유가 «자체 인증 코드가 있다» 로 나오면 안 된다 — 그것은 다른 상태이고, 개발자가
+    #  있지도 않은 코드를 찾게 된다. 「검사하지 못했다」와 「검사에 걸렸다」는 다른 말이다.
+    assert "자체 인증 코드가" not in str(e.value), f"{why}: 사유가 뒤바뀌었다"
+    assert "다시 게시" in str(e.value), f"{why}: 사용자가 할 일이 적혀 있지 않다"
+
+
+@pytest.mark.parametrize("man", [
+    {"valid": None, "errors": []},
+    {"errors": ["판정 못 함"]},
+    {},
+    None,
+])
+def test_Manifest_판정이_없으면_전달되지_않는다(svc, man):
+    """⚠️ `valid is False` 만 보면 **판정 자체가 없는 릴리스**가 통과한다."""
+    bad = dict(RELEASE)
+    if man is None:
+        bad.pop("manifest", None)
+    else:
+        bad["manifest"] = man
+    with pytest.raises(AppDeliveryError, match="Manifest"):
+        _created(svc, release_lookup=_lookup(bad))
+
+
+def test_통과한_앱은_그대로_전달된다(svc):
+    """★ 대조군 — 위 차단이 「전부 막는 것」이 되면 그것은 통제가 아니라 고장이다."""
+    d = _created(svc)
+    assert d["delivery_id"]
+
+
 def test_invalid_manifest_cannot_be_delivered(svc):
     """★★ Manifest 가 유효하지 않으면 **수신자가 무엇을 수락하는지 알 수 없다.**"""
     bad = dict(RELEASE)

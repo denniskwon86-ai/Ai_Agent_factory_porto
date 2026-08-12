@@ -145,6 +145,20 @@ def scan_paths(paths: List[str]) -> Dict[str, Any]:
     }
 
 
+#: 검사 대상에서 빼는 디렉터리. **`.archive` 가 핵심이다** — 지난 릴리스의 코드가 그대로
+#: 남아 있어서, 이미 고친 결함이 새 릴리스를 계속 막는다(G1-A02).
+_SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv", "dist", "build",
+              ".archive", ".backup", ".tmp", "tmp", ".cache", ".pytest_cache")
+
+#: 임시·백업 파일 이름 규칙. 편집기가 남긴 사본이 릴리스를 막으면 안 된다.
+_TEMP_SUFFIXES = (".bak", ".orig", ".rej", ".tmp", ".swp", "~")
+
+
+def _is_temp(name: str) -> bool:
+    low = name.lower()
+    return low.startswith(("~$", ".#")) or low.endswith(_TEMP_SUFFIXES)
+
+
 def _iter_files(path: str):
     if os.path.isfile(path):
         if path.lower().endswith(_EXTS):
@@ -153,10 +167,16 @@ def _iter_files(path: str):
     if not os.path.isdir(path):
         return
     for root, dirs, files in os.walk(path):
-        dirs[:] = [d for d in dirs
-                   if d not in ("node_modules", ".git", "__pycache__", "venv", "dist", "build")]
+        # ★★★ [G1-A02] **이전 산출물과 임시 파일은 검사하지 않는다.**
+        #
+        #   `.archive` 에는 지난 릴리스의 코드가 그대로 남아 있다. 그것까지 검사하면
+        #   **이미 고친 결함이 계속 새 릴리스를 막는다.** 개발자는 원인을 못 찾고, 결국
+        #   검사를 끄는 쪽을 택한다 — 꺼진 검사는 없는 것과 같다.
+        #   ⚠️ 이것은 검사를 느슨하게 하는 것이 아니라 **대상을 지금 릴리스로 좁히는 것**이다.
+        #     지금 내보내는 파일에 자체 인증이 있으면 그대로 걸린다.
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
         for name in files:
-            if name.lower().endswith(_EXTS):
+            if name.lower().endswith(_EXTS) and not _is_temp(name):
                 yield os.path.join(root, name)
 
 
