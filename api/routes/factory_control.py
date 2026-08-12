@@ -172,11 +172,15 @@ def _ownership_visible(p, own: dict) -> bool:
     ★★ [G1-C] **규칙 본체는 `core/project_visibility.py` 에 있다.** 여기 두면 SSE 브로드캐스터가
       같은 질문에 따로 답하게 되고, 그러면 「목록에는 안 보이는 프로젝트의 진행 이벤트가
       실시간으로 흘러드는」 상태가 만들어진다. 그 어긋남은 조용하다.
-      `api/deps._enforced` 가 같은 이유로 이미 한 곳에 모여 있다."""
+      `api/deps._enforced` 가 같은 이유로 이미 한 곳에 모여 있다.
+
+    ⚠️⚠️ [G1-C1.1] 종전에는 예외를 `return True` 로 삼켰다. 「하위호환이 우선」이라는 원본의
+      판단을 그대로 옮긴 것인데, **보안 판정에서는 그 보수성이 방향을 거꾸로 잡은 것**이다.
+      열람 실패는 화면이 비는 것으로 끝나지만, 판정 실패를 공개로 답하면 그 순간 통제가 없다."""
     try:
         return _pv.ownership_visible(p.scope, p.user_id, own)
     except Exception:
-        return True                       # 판정 불가는 하위호환 쪽으로 — 원본 계약 그대로
+        return False                      # 판정 실패는 **차단** 쪽으로
 
 
 def _iter_visible_projects(p) -> list:

@@ -30,6 +30,11 @@ NODE_TYPES = (
     "site_plant",              # 사업장·공장
     "facility",                # 설비·라인·창고
     "functional_department",   # 구매·생산·품질·물류·판매 등 기능 부서
+    # ★★ [G1-C1.1] 검증 샌드박스. 과거 시험 산출물을 **실제 부서에 추정 배정하지 않기 위한**
+    #   전용 격벽이다. 이것이 유형으로 없으면 시험 데이터를 `shared_service` 나 `hq` 같은 실제
+    #   조직에 넣게 되고, 그 순간 시험 산출물이 조직 자산·경영 데이터처럼 검색되고 집계된다.
+    #   ⚠️ 이 유형의 자료는 경영 브리핑·실적·지식 승격·CERTIFIED 기준선에서 **제외**한다.
+    "validation_sandbox",      # 검증 샌드박스(VIRTUAL) — 시험·회귀 산출물 전용
 )
 
 # ⚠️ `business_division`/`functional_department`/`site_plant` 는 **하나의 법인 아래에만 있어야

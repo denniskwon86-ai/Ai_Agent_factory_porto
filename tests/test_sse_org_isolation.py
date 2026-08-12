@@ -29,9 +29,11 @@ from core.broadcaster import SSEBroadcaster
 class _Scope:
     """`AccessScope` 를 흉내 낸다 — 판정에 쓰이는 세 필드만 있으면 된다."""
 
-    def __init__(self, depts, unrestricted=False):
+    def __init__(self, depts, unrestricted=False, is_admin=False):
         self.readable_dept_ids = frozenset(depts)
         self.unrestricted = unrestricted
+        #: 플랫폼 관리자 — `LEGACY_UNBOUND`(마이그레이션 대상)를 볼 수 있는 유일한 일반 경로.
+        self.is_admin = is_admin
 
 
 #: 프로젝트 P_A 는 D1 소속, P_B 는 D2 소속.
@@ -49,6 +51,7 @@ SCOPES = {
     "a@x": _Scope({"D1"}),
     "b@x": _Scope({"D2"}),
     "boss@x": _Scope(set(), unrestricted=True),
+    "plat@x": _Scope(set(), is_admin=True),      # 플랫폼 관리자(무제한은 아님)
 }
 
 
@@ -156,13 +159,19 @@ def test_전사공개_프로젝트는_다른_조직도_받는다(bus):
     _run(scenario())
 
 
-def test_소유권_미기록_프로젝트는_막지_않는다(bus):
-    """마이그레이션 전 프로젝트까지 막으면 기능이 통째로 멈춘다(하위호환 계약)."""
+def test_소유권_미기록_프로젝트는_관리자에게만_간다(bus):
+    """★★★ [G1-C1.1] 종전 계약은 「미기록도 막지 않는다(하위호환)」였다.
+
+    실측이 그 대가를 보여 줬다 — 61개 중 **53개가 미기록**이어서, 하위호환이 통제의 예외가
+    아니라 **통제의 기본값**이 되어 있었다. 이제 마이그레이션 대상은 플랫폼 관리자만 받는다.
+    ★ 완전히 끊지 않는 이유: 관리자에게는 보여야 무엇을 마이그레이션할지 알 수 있다."""
     async def scenario():
-        await _subscribe(bus, "a@x")
-        q = _queue_of(bus, 0)
+        await _subscribe(bus, "a@x")        # 일반 사용자
+        await _subscribe(bus, "plat@x")     # 플랫폼 관리자
+        qa, qp = _queue_of(bus, 0), _queue_of(bus, 1)
         await bus.broadcast("WBS_UPDATED", {"project_id": "P_LEGACY"})
-        assert _types(q) == ["WBS_UPDATED"]
+        assert _types(qa) == [], "미기록 프로젝트 이벤트가 일반 사용자에게 갔다"
+        assert _types(qp) == ["WBS_UPDATED"], "관리자에게도 안 가면 부채를 못 본다"
 
     _run(scenario())
 

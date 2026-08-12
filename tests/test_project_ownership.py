@@ -19,6 +19,7 @@ from api.deps import Principal
 from api.routes.factory_control import (_ownership_visible, _read_project_meta,
                                         _read_project_ownership, _write_project_meta)
 from core.org_directory import AccessScope
+import core.project_visibility as pv
 
 
 def _p(**kw):
@@ -59,15 +60,33 @@ def test_knowledge_packs_still_preserved(tmp_path):
 
 
 def test_read_ownership_of_missing_file_is_safe(tmp_path):
+    """★★ [G1-C1.1] 메타가 없으면 **판독 실패(INVALID)** 로 답한다.
+
+    종전 계약은 「누락도 빈 소유권으로 읽어 안전하게 넘어간다」였다. 그 «안전» 이 문제였다 —
+    빈 소유권은 곧 「미기록 = 공개」로 흘러가서, **손상되거나 없는 메타가 열린 문**이 됐다.
+    실측에서 61개 중 1개가 정확히 이 상태였다(`__audit_probe__`).
+    ★ 예외를 던지지 않는다는 계약은 그대로다 — 목록 루프가 한 건 때문에 죽으면 안 된다."""
     own = _read_project_ownership(str(tmp_path / "nope"))
-    assert own["owner_dept_id"] == "" and own["visibility"] == "dept"
+    assert own["binding_state"] == pv.INVALID
+    assert "project_meta.json" in own["binding_reason"]
 
 
 # ── 목록 가시성 ──────────────────────────────────────────────────────────
-def test_unrecorded_ownership_is_visible(tmp_path):
-    """마이그레이션 전 기존 프로젝트가 사라지면 안 된다."""
+def test_unrecorded_ownership_is_restricted_not_open(tmp_path):
+    """★★★ [G1-C1.1] 종전 계약은 **「마이그레이션 전 기존 프로젝트가 사라지면 안 된다」** 였다.
+
+    하위호환을 위한 판단이었지만, 실측이 그 대가를 보여 줬다 — 61개 중 **53개가 미기록**이라
+    「목록 61 대 54」로 보고한 격리가 실제로는 7개에서만 일어나고 있었다. 즉 하위호환이
+    **통제의 예외가 아니라 통제의 기본값**이 되어 있었다.
+
+    이제 미기록은 «마이그레이션 대상(LEGACY_UNBOUND)» 이고 **플랫폼 관리자만** 본다.
+    ⚠️ 사라지게 두지 않는 이유: 관리자에게는 보여야 무엇을 마이그레이션할지 알 수 있다."""
     p = _p(unrestricted=False, readable_dept_ids=frozenset({"sales"}))
-    assert _ownership_visible(p, {"owner_dept_id": "", "owner_user_id": "", "visibility": "dept"})
+    own = {"owner_dept_id": "", "owner_user_id": "", "visibility": "dept"}
+    assert not _ownership_visible(p, own), "미기록 프로젝트가 일반 사용자에게 보인다"
+
+    admin = _p(unrestricted=False, readable_dept_ids=frozenset(), is_admin=True)
+    assert _ownership_visible(admin, own), "관리자에게도 안 보이면 마이그레이션 대상을 못 찾는다"
 
 
 def test_unrestricted_sees_everything(tmp_path):

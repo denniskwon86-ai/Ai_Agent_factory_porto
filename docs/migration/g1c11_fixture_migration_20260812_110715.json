@@ -1,0 +1,447 @@
+{
+  "applied_at": "20260812_110715",
+  "sandbox_node_id": "node_a50a1553d4d3",
+  "before": {
+    "MEGA_02_accounting": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "MEGA_02_finance": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "MEGA_02_logistics": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "MEGA_02_procurement": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "MEGA_02_production": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "MEGA_02_quality": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false,
+      "owner_dept_id": "quality",
+      "owner_user_id": "",
+      "visibility": "dept",
+      "nature": "",
+      "forked_from": {}
+    },
+    "MEGA_02_sales": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false,
+      "owner_dept_id": "sales",
+      "owner_user_id": "",
+      "visibility": "dept",
+      "nature": "",
+      "forked_from": {}
+    },
+    "__audit_probe__": null,
+    "scenario-01-enterprise-ai": {
+      "template_id": "manufacturing-cost-analysis",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false,
+      "owner_dept_id": "hq",
+      "owner_user_id": "admin",
+      "visibility": "dept",
+      "nature": "",
+      "forked_from": {},
+      "tenant_id": "tenant_default",
+      "enterprise_scope_id": "hq",
+      "entity_mode": "REAL",
+      "blueprint_id": ""
+    },
+    "scenario-02-security-audit": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false,
+      "owner_dept_id": "hq",
+      "owner_user_id": "admin",
+      "visibility": "dept",
+      "nature": "",
+      "forked_from": {},
+      "tenant_id": "tenant_default",
+      "enterprise_scope_id": "hq",
+      "entity_mode": "REAL",
+      "blueprint_id": ""
+    },
+    "scenario-03-closed-loop": {
+      "template_id": "content-marketing",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false,
+      "owner_dept_id": "hq",
+      "owner_user_id": "admin",
+      "visibility": "dept",
+      "nature": "",
+      "forked_from": {},
+      "tenant_id": "tenant_default",
+      "enterprise_scope_id": "hq",
+      "entity_mode": "REAL",
+      "blueprint_id": ""
+    },
+    "test_a1_unitconv": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_unitconv_canary1": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false,
+      "owner_dept_id": "",
+      "owner_user_id": "",
+      "visibility": "dept",
+      "nature": "",
+      "forked_from": {},
+      "tenant_id": "tenant_default",
+      "enterprise_scope_id": "",
+      "entity_mode": "REAL",
+      "blueprint_id": ""
+    },
+    "test_a1_unitconv_canary2": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [
+        "manufacturing-standards",
+        "battery-materials-operations"
+      ],
+      "master_domains": [
+        "bom",
+        "quality-spec",
+        "material",
+        "finance-param",
+        "sensor-spec",
+        "emission-factor"
+      ],
+      "mcp_live_grounding": false,
+      "owner_dept_id": "",
+      "owner_user_id": "",
+      "visibility": "dept",
+      "nature": "",
+      "forked_from": {},
+      "tenant_id": "tenant_default",
+      "enterprise_scope_id": "",
+      "entity_mode": "REAL",
+      "blueprint_id": ""
+    },
+    "test_a1_unitconv_canary3": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [
+        "manufacturing-standards",
+        "battery-materials-operations"
+      ],
+      "master_domains": [
+        "bom",
+        "quality-spec",
+        "material",
+        "finance-param",
+        "sensor-spec",
+        "emission-factor"
+      ],
+      "mcp_live_grounding": false,
+      "owner_dept_id": "",
+      "owner_user_id": "",
+      "visibility": "dept",
+      "nature": "",
+      "forked_from": {},
+      "tenant_id": "tenant_default",
+      "enterprise_scope_id": "",
+      "entity_mode": "REAL",
+      "blueprint_id": ""
+    },
+    "test_a1_v10": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v11": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v12": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v13": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v14": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v2": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v3": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v4": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v5": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v6": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v7": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v8": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_a1_v9": {
+      "template_id": "default",
+      "output_format_id": "default",
+      "view_type": "react_app",
+      "knowledge_pack_ids": [],
+      "master_domains": [],
+      "mcp_live_grounding": false
+    },
+    "test_mega_001_accounting": {
+      "template_id": "manufacturing-cost-analysis",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_001_finance": {
+      "template_id": "manufacturing-cost-analysis",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_001_logistics": {
+      "template_id": "manufacturing-production",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_001_marketing": {
+      "template_id": "content-marketing",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_001_procurement": {
+      "template_id": "manufacturing-cost-analysis",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_001_production": {
+      "template_id": "manufacturing-production",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_001_quality": {
+      "template_id": "manufacturing-qc",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_001_sales": {
+      "template_id": "manufacturing-market-forecast",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_01": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_01_accounting": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_01_finance": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_01_logistics": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_01_marketing": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_01_procurement": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_01_production": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_01_quality": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_01_sales": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_02_accounting": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_02_finance": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_02_logistics": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_02_marketing": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_02_procurement": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_02_quality": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_02_sales": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_03_accounting": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_03_finance": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_03_logistics": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_03_marketing": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_03_procurement": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_03_quality": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    },
+    "test_mega_03_sales": {
+      "template_id": "mfg_sim",
+      "output_format_id": "default",
+      "view_type": "react_app"
+    }
+  }
+}

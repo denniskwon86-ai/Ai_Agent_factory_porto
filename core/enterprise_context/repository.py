@@ -191,7 +191,15 @@ class EcmRepository:
         if not e.name_ko:
             raise EcmError("name_ko 는 필수입니다.")
         # 가상·경쟁사는 원본 또는 근거가 있어야 한다 (§2.1-4, §7.3)
-        if e.entity_mode == "VIRTUAL" and not e.base_entity_id:
+        #
+        # ★★ [G1-C1.1] **검증 샌드박스만 예외다.** 이 규칙의 목적은 §7.1 계보 — 「이 가상 조직이
+        #   어느 실제 조직에서 나왔는가」를 잃지 않는 것이다. 그런데 검증 샌드박스는 **어떤 실제
+        #   조직도 본뜬 것이 아니다.** 과거 시험 산출물을 담아 두는 격벽일 뿐이다.
+        #   ⚠️ 여기서 아무 실제 법인이나 `base_entity_id` 로 적으면 **거짓 계보**가 생기고,
+        #     나중에 「이 가상 조직은 LS MnM 의 복제본」이라는 잘못된 답이 집계에 섞인다.
+        #     없는 원본을 지어내는 것보다 유형을 좁혀 예외로 두는 편이 정직하다.
+        if (e.entity_mode == "VIRTUAL" and not e.base_entity_id
+                and e.entity_type != "validation_sandbox"):
             raise EcmError("가상 조직은 복제 원본(base_entity_id)이 있어야 합니다.")
         if e.entity_mode == "COMPETITOR_REFERENCE" and not e.evidence_ref:
             raise EcmError("경쟁사 모델은 공개·승인된 근거(evidence_ref)가 있어야 합니다.")
