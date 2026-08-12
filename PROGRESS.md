@@ -81,8 +81,27 @@
 | lucide 아이콘 SVG | 그려짐 | 그려짐 |
 | Tailwind `font-bold` | 적용됨 | 적용됨 |
 
-실앱 실측 — srcDoc 4.25MB, `<script src=>` **0개**, CSP 에 호스트 **0개**, 벤더는
+실앱 실측 — srcDoc 4.16MB, `<script src=>` **0개**, CSP 에 호스트 **0개**, 벤더는
 우리 출처(`/preview-vendor/*`)에서만 200, `IFRAME_READY` 수신.
+
+**화면 증거**(`docs/uiux/screenshots/e0_1a_*.png`). ⚠️ 이 디렉터리는 `.gitignore` 대상이라
+저장소에 없다 — **이미지 대신 만드는 방법을 남긴다.**
+`venv/Scripts/python.exe scripts/capture_e0_1a_evidence.py`
+(프론트 5175 · 백엔드 8080 이 떠 있어야 한다)
+
+| 파일 | 무엇을 보여 주는가 |
+|---|---|
+| `e0_1a_preview_sandbox_iframe.png` | 생성 앱(단위 변환기)이 **CDN 없이 그대로 렌더**된다 |
+| `e0_1a_preview_sandbox_1440x900.png` | Studio 안에서 본 같은 화면 |
+| `e0_1a_probe_csp_on.png` | 제품과 같은 CSP — 외부 `<script src>` **차단됨** |
+| `e0_1a_probe_csp_off.png` | **대조군**(CSP 만 뺌) — 같은 요청이 **로드됨** |
+
+⚠️ 대조군이 없으면 「차단됨」은 아무것도 증명하지 않는다 — 네트워크가 없어도 같은 답이
+  나온다. 그래서 두 장을 **쌍으로** 남긴다.
+
+⚠️ 첫 캡처는 `demo-todo-app` 을 열어 「컴포넌트 렌더링 대기 중」만 찍혔다. 그 프로젝트에는
+  `frontend_code_summary` 가 **없다** — 미리보기가 깨진 것이 아니라 그릴 코드가 없었다.
+  증거를 고를 때 «비어 있는 대상» 을 쓰면 멀쩡한 것을 고장으로 보고하게 된다.
 
 ★ 부모 문서에 주입되던 `cdn.jsdelivr.net` mermaid 도 함께 지웠다 — iframe 안보다 이쪽이
   더 위험하다. 부모에는 세션 토큰이 있고 주입된 코드가 그 전부에 닿는다.
