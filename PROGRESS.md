@@ -51,6 +51,34 @@
 > 앞으로 G1-A(6) · G1-B(7) · G1-D(8) 를 올리면 분모는 다시 크게 늘어난다.
 > **이것은 후퇴가 아니라 분모가 솔직해지는 것이다**([[count-what-user-can-do]] 와 같은 교훈).
 
+### G1-C2 — 과거 릴리스·승격 오염 격리 (2026-08-12)
+
+프로젝트 메타는 G1-C1.1 에서 샌드박스로 옮겼는데 **릴리스와 승격은 그대로였다.**
+
+| 대상 | 적용 전 | 적용 후 |
+|---|---|---|
+| 승격 `requested` | 2건(`test_a1_unitconv_canary1` · `ui_demo_app`) | **0건** |
+| 승격 `approved` | 1건(`probe_app`) | **0건** |
+| 승격 `quarantined` | 0건 | **3건** |
+| 활성 공유 | 1건 — `LS_MNM → MNM_COPPER`(실제 법인 간) | **0건** |
+| 릴리스 조직 문맥 | 3건 전부 빈 값 | `AFS_TEST_SANDBOX` · VIRTUAL · SANDBOX |
+| 복제 소유 범위 | `node_copper_demo` 2건 | 샌드박스 |
+
+★ **브리핑에서 사라졌다.** `enterprise_briefing._promotions()` 는 `requested`·`approved` 만
+  조회하므로, `quarantined` 는 경영 화면에 뜨지 않는다. 앞선 화면 판독에서 실제로
+  「전사 승격 승인 대기: test_a1_unitconv_canary1」이 떠 있었다 — 그것이 이 오염이었다.
+
+⚠️⚠️ **`node_batt_demo` · `node_copper_demo` 는 ECM 에 존재하지 않는 노드였다.** 즉 승격·공유가
+  「없는 조직」을 가리키고 있었고, 빈 문맥을 기본값으로 읽는 코드에서 그것은
+  `tenant_default/REAL` 이 된다 — 시험 자료가 **실제 조직 항목처럼** 집계되는 경로다.
+
+· `PROMOTION_STATUS` 에 `quarantined` 를 추가했다. `rejected`(사람이 검토해 반려)로 쓰지 않은
+  이유 — 여기서 일어난 일은 「애초에 승격 절차에 있어서는 안 되는 자료였다」이고, 뭉개면
+  나중에 «누가 왜 반려했나» 에 답할 수 없다.
+· 릴리스에 `knowledge_tier=SYNTHETIC_TEST` · `knowledge_promotable=false` 를 박아 지식 승격에서
+  뺀다. 앱 전달·앱 주머니·프로그램 라이프사이클·Chroma 색인은 **비어 있어** 오염이 없었다.
+· 되돌림: `docs/migration/g1c2_release_quarantine_*.json`. 재실행 멱등(대상 0건).
+
 > ### ⚠️ 정정 — 「P0 전체 완료」는 사실이 아니었다 (2026-08-12 재감사)
 >
 > `emit_to` 테넌트 격리를 «완료» 로 보고했는데, **실서비스 경로에서 작동하지 않았다.**

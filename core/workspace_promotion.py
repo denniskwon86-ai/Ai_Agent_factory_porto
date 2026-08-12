@@ -42,7 +42,12 @@ SHARE_MODES = ("read", "fork")          # 읽기 공유 / 복제 허용
 PROMOTION_STATUS = ("draft", "requested", "approved", "rejected", "promoted",
                     # 철회 — 승격됐다가 내려온 상태. 반려("아직 안 올라감")와
                     #   구분한다. 승격 이력은 남고 상태만 바뀐다.
-                    "revoked")
+                    "revoked",
+                    # ★★ [G1-C2] 격리 — **애초에 승격 절차에 있어서는 안 되는 자료**였다.
+                    #   `rejected` 로 쓰지 않는 이유: 그것은 「사람이 검토해서 반려했다」는 뜻이고,
+                    #   여기서 일어난 일은 「검증 샌드박스 산출물이 실제 조직 대기열에 섞여
+                    #   있었다」다. 둘을 뭉개면 나중에 «누가 왜 반려했나» 에 답할 수 없다.
+                    "quarantined")
 #: 전사 승격에 허용되지 않는 민감도. 전사에 열면 되돌릴 수 없다.
 _BLOCKED_FOR_ENTERPRISE = ("confidential", "restricted")
 
