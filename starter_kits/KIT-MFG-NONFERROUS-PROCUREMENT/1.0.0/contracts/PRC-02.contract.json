@@ -1,0 +1,206 @@
+{
+  "dataset_id": "PRC-02",
+  "dataset_name": "구매주문·납기 일정",
+  "contract_version": "1.0.0",
+  "status": "APPROVED_FOR_DEMO",
+  "scope": {
+    "tenant_required": true,
+    "scope_required": true,
+    "allowed_scope_types": [
+      "ENTERPRISE_GROUP",
+      "LEGAL_ENTITY",
+      "BUSINESS_DIVISION",
+      "PLANT",
+      "DEPARTMENT"
+    ]
+  },
+  "classification": {
+    "data_class": "SYNTHETIC",
+    "data_origin": "SYNTHETIC",
+    "not_for_management_decision": true
+  },
+  "business_keys": [
+    "po_line_id"
+  ],
+  "dependencies": [
+    "PRC-01"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "record_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 record_id"
+      },
+      {
+        "name": "tenant_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 tenant_id"
+      },
+      {
+        "name": "scope_node_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 scope_node_id"
+      },
+      {
+        "name": "data_class",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 data_class"
+      },
+      {
+        "name": "business_data_kind",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 business_data_kind"
+      },
+      {
+        "name": "data_origin",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 data_origin"
+      },
+      {
+        "name": "quality_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 quality_status"
+      },
+      {
+        "name": "certification_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 certification_status"
+      },
+      {
+        "name": "as_of_date",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 as_of_date"
+      },
+      {
+        "name": "lineage_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 lineage_id"
+      },
+      {
+        "name": "po_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 po_id"
+      },
+      {
+        "name": "po_line_id",
+        "type": "string",
+        "required": true,
+        "business_key": true,
+        "description": "구매주문·납기 일정의 po_line_id"
+      },
+      {
+        "name": "contract_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 contract_id"
+      },
+      {
+        "name": "supplier_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 supplier_id"
+      },
+      {
+        "name": "material_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 material_id"
+      },
+      {
+        "name": "order_date",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 order_date"
+      },
+      {
+        "name": "due_date",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 due_date"
+      },
+      {
+        "name": "order_quantity",
+        "type": "number",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 order_quantity"
+      },
+      {
+        "name": "quantity_uom",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 quantity_uom"
+      },
+      {
+        "name": "unit_price",
+        "type": "number",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 unit_price"
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 currency"
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매주문·납기 일정의 status"
+      }
+    ]
+  },
+  "quality": {
+    "required_common_fields": [
+      "record_id",
+      "tenant_id",
+      "scope_node_id",
+      "data_class",
+      "business_data_kind",
+      "data_origin",
+      "quality_status",
+      "certification_status",
+      "as_of_date",
+      "lineage_id"
+    ],
+    "fail_closed_on_scope_missing": true,
+    "quarantine_on_reference_failure": true
+  },
+  "lineage": {
+    "generator": "scripts/generate_sample_company_starter_kit.py",
+    "kit_version": "1.0.0"
+  }
+}

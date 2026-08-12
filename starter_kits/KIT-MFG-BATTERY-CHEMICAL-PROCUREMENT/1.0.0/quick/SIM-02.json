@@ -1,0 +1,13 @@
+{
+  "dataset_id": "SIM-02",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "scenario_id": "SCENARIO_LITHIUM_SPIKE_40",
+      "name": "리튬가 40% 급등 + 전력비 15% 인상 시나리오",
+      "lithium_price_multiplier": 1.4,
+      "power_cost_multiplier": 1.15
+    }
+  ]
+}

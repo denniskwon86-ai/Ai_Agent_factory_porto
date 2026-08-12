@@ -1,0 +1,58 @@
+{
+  "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+  "version": "1.0.0",
+  "data_class": "SYNTHETIC",
+  "purpose": "등록 전 QUARANTINE 분류와 사유 집계 검증",
+  "must_not_enter_certified_demo": true,
+  "expected_total": 50,
+  "expected_by_reason": [
+    {
+      "reason_code": "UNMAPPED_SOURCE_CODE",
+      "source_dataset_id": "MDM-01",
+      "expected_count": 5,
+      "description": "원천 품목 코드가 Crosswalk에 없음"
+    },
+    {
+      "reason_code": "DUPLICATE_MILESTONE",
+      "source_dataset_id": "LOG-03",
+      "expected_count": 3,
+      "description": "동일 선적·사건·시각의 중복"
+    },
+    {
+      "reason_code": "CUSTOMS_CORRECTION",
+      "source_dataset_id": "LOG-04",
+      "expected_count": 4,
+      "description": "통관 정정본의 선행 버전 연결 필요"
+    },
+    {
+      "reason_code": "LATE_ACTUAL",
+      "source_dataset_id": "MFG-02",
+      "expected_count": 8,
+      "description": "마감 이후 도착한 생산 실적"
+    },
+    {
+      "reason_code": "UOM_MISMATCH_CANDIDATE",
+      "source_dataset_id": "PRC-02",
+      "expected_count": 2,
+      "description": "계약 단위와 발주 단위 불일치"
+    },
+    {
+      "reason_code": "QUALITY_HOLD_STOCK",
+      "source_dataset_id": "INV-01",
+      "expected_count": 6,
+      "description": "품질 보류 재고의 가용 재고 제외 필요"
+    },
+    {
+      "reason_code": "PRODUCTION_VARIANCE",
+      "source_dataset_id": "MFG-02",
+      "expected_count": 10,
+      "description": "계획 대비 생산 편차 임계치 초과"
+    },
+    {
+      "reason_code": "PARTNER_NOT_SUBMITTED",
+      "source_dataset_id": "LOG-01",
+      "expected_count": 12,
+      "description": "파트너 필수 제출 미완료"
+    }
+  ]
+}

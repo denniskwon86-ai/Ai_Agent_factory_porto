@@ -1,0 +1,21 @@
+{
+  "dataset_id": "MDM-06",
+  "profile": "quick",
+  "count": 2,
+  "items": [
+    {
+      "routing_id": "RT_CALCINATION",
+      "plant_code": "PLANT_BC_121",
+      "eq_code": "EQ_KILN_01",
+      "name": "소성 킬른 1호기",
+      "capacity_ton_day": 50.0
+    },
+    {
+      "routing_id": "RT_PRECIPITATION",
+      "plant_code": "PLANT_BC_221",
+      "eq_code": "EQ_REACTOR_01",
+      "name": "공침 반응기 1호기",
+      "capacity_ton_day": 80.0
+    }
+  ]
+}

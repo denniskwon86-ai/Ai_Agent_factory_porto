@@ -1,0 +1,37 @@
+{
+  "dataset_id": "FND-03",
+  "profile": "full",
+  "count": 6,
+  "items": [
+    {
+      "currency": "USD",
+      "name": "US Dollar",
+      "symbol": "$"
+    },
+    {
+      "currency": "KRW",
+      "name": "Korean Won",
+      "symbol": "₩"
+    },
+    {
+      "currency": "EUR",
+      "name": "Euro",
+      "symbol": "€"
+    },
+    {
+      "unit": "MT",
+      "name": "Metric Ton",
+      "type": "WEIGHT"
+    },
+    {
+      "unit": "KG",
+      "name": "Kilogram",
+      "type": "WEIGHT"
+    },
+    {
+      "unit": "KWH",
+      "name": "Kilowatt Hour",
+      "type": "ENERGY"
+    }
+  ]
+}

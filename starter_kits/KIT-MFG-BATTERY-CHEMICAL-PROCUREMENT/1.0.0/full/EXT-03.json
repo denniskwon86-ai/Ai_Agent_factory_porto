@@ -1,0 +1,12 @@
+{
+  "dataset_id": "EXT-03",
+  "profile": "full",
+  "count": 1,
+  "items": [
+    {
+      "date_key": "2026-08-11",
+      "industrial_power_krw_kwh": 142.5,
+      "lng_import_krw_ton": 850000
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "dataset_id": "SLS-01",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "so_no": "SO-LGES-202608-01",
+      "customer_code": "CUST_LGES",
+      "item_code": "FG_CAM_NCM811",
+      "order_qty_mt": 1000,
+      "unit_price_usd": 41500,
+      "delivery_date": "2026-08-25"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "dataset_id": "MFG-03",
+  "profile": "full",
+  "count": 1,
+  "items": [
+    {
+      "log_id": "EQ-LOG-01",
+      "eq_code": "EQ_KILN_01",
+      "run_hours": 23.5,
+      "downtime_hours": 0.5,
+      "power_kwh": 48000,
+      "temp_c": 850
+    }
+  ]
+}

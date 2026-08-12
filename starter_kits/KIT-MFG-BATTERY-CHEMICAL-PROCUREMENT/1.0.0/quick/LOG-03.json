@@ -1,0 +1,19 @@
+{
+  "dataset_id": "LOG-03",
+  "profile": "quick",
+  "count": 2,
+  "items": [
+    {
+      "milestone_id": "MS-001",
+      "vessel_id": "VSL_PACIFIC_CHEM_01",
+      "event_type": "DEPARTURE",
+      "event_date": "2026-08-03T10:00:00Z"
+    },
+    {
+      "milestone_id": "MS-002",
+      "vessel_id": "VSL_PACIFIC_CHEM_01",
+      "event_type": "ARRIVAL_ESTIMATED",
+      "event_date": "2026-08-15T14:00:00Z"
+    }
+  ]
+}

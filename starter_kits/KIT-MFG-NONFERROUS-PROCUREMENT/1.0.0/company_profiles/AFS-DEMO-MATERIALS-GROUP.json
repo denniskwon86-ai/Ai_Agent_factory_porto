@@ -1,0 +1,41 @@
+{
+  "data_class": "SYNTHETIC",
+  "data_origin": "SYNTHETIC",
+  "entity_mode": "VIRTUAL",
+  "certification_status": "CERTIFIED_FOR_DEMO",
+  "not_for_management_decision": true,
+  "currency": "KRW",
+  "timezone": "Asia/Seoul",
+  "company_profile_id": "AFS-DEMO-MATERIALS-GROUP",
+  "company_name": "AFS 데모소재그룹",
+  "profile_role": "BASE_SAMPLE_COMPANY",
+  "source_profile_id": "",
+  "industry_code": "C24",
+  "industry_name": "비철금속·배터리소재 제조",
+  "purpose": "Starter Kit 기준회사와 원료 구매 폐루프 체험",
+  "valid_until": "9999-12-31",
+  "organization_blueprint": [
+    "기업집단",
+    "제련법인",
+    "첨단소재법인",
+    "사업부",
+    "공장",
+    "기능부서"
+  ],
+  "products": [
+    "전기동",
+    "고순도 황산니켈",
+    "배터리급 수산화리튬",
+    "귀금속 부산물"
+  ],
+  "recommended_apps": [
+    "APP-01",
+    "APP-02",
+    "APP-03",
+    "APP-04",
+    "APP-05"
+  ],
+  "default_assumptions": {
+    "baseline": "BASELINE-DEMO-1.0"
+  }
+}

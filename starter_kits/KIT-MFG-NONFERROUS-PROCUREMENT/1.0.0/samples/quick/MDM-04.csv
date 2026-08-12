@@ -1,0 +1,4 @@
+﻿record_id,tenant_id,scope_node_id,data_class,business_data_kind,data_origin,quality_status,certification_status,as_of_date,lineage_id,location_id,site_id,location_name,storage_type,capacity_quantity,capacity_uom,active
+mdm-04-73c8fcf8cc57,tenant-afs-demo-materials,plant-afs-smelting-01,SYNTHETIC,REFERENCE,SYNTHETIC,PASS,CERTIFIED_FOR_DEMO,2026-08-11,lin-51f9b366db7d,LOC-P1-RAW,plant-afs-smelting-01,원료창고,RAW,80000,TON,True
+mdm-04-bf339b3bc3c5,tenant-afs-demo-materials,plant-afs-battery-02,SYNTHETIC,REFERENCE,SYNTHETIC,PASS,CERTIFIED_FOR_DEMO,2026-08-11,lin-a87b8ad4c311,LOC-P2-RAW,plant-afs-battery-02,원료창고,RAW,45000,TON,True
+mdm-04-2ceb1dc3201c,tenant-afs-demo-materials,plant-afs-battery-02,SYNTHETIC,REFERENCE,SYNTHETIC,PASS,CERTIFIED_FOR_DEMO,2026-08-11,lin-b4fd90e89082,LOC-P2-FG,plant-afs-battery-02,제품창고,FINISHED,22000,TON,True

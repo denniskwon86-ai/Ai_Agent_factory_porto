@@ -1,0 +1,15 @@
+{
+  "dataset_id": "FIN-02",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "claim_id": "AP-VND-001",
+      "party_code": "VND_AUS_LITHIUM",
+      "type": "AP",
+      "amount_usd": 27500000,
+      "due_date": "2026-09-10",
+      "status": "UNPAID"
+    }
+  ]
+}

@@ -1,0 +1,2445 @@
+{
+  "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+  "version": "1.0.0",
+  "validated_at": "2026-08-12T14:21:28+00:00",
+  "status": "PASS",
+  "summary": {
+    "checks": 405,
+    "passed": 405,
+    "failed": 0,
+    "quick_rows": 13585,
+    "full_rows": 155508
+  },
+  "checks": [
+    {
+      "check": "manifest:kit_id",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "manifest:version",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "manifest:35개",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "count=35"
+    },
+    {
+      "check": "manifest:SYNTHETIC",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:35개 데이터 파일",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "files=35, empty=[]"
+    },
+    {
+      "check": "quick:FND-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:FND-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:FND-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=7, unique=7"
+    },
+    {
+      "check": "quick:FND-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:FND-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:FND-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:FND-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=8, unique=8"
+    },
+    {
+      "check": "quick:FND-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:FND-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:FND-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:FND-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=186, unique=186"
+    },
+    {
+      "check": "quick:FND-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MDM-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MDM-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MDM-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=30, unique=30"
+    },
+    {
+      "check": "quick:MDM-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MDM-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MDM-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MDM-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=10, unique=10"
+    },
+    {
+      "check": "quick:MDM-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MDM-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MDM-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MDM-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=8, unique=8"
+    },
+    {
+      "check": "quick:MDM-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MDM-04:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MDM-04:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MDM-04:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=3, unique=3"
+    },
+    {
+      "check": "quick:MDM-04:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MDM-05:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MDM-05:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MDM-05:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=15, unique=15"
+    },
+    {
+      "check": "quick:MDM-05:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MDM-06:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MDM-06:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MDM-06:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=12, unique=12"
+    },
+    {
+      "check": "quick:MDM-06:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MDM-07:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MDM-07:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MDM-07:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=30, unique=30"
+    },
+    {
+      "check": "quick:MDM-07:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MDM-08:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MDM-08:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MDM-08:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=23, unique=23"
+    },
+    {
+      "check": "quick:MDM-08:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:PRC-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:PRC-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:PRC-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=20, unique=20"
+    },
+    {
+      "check": "quick:PRC-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:PRC-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:PRC-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:PRC-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=200, unique=200"
+    },
+    {
+      "check": "quick:PRC-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:LOG-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:LOG-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:LOG-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=200, unique=200"
+    },
+    {
+      "check": "quick:LOG-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:LOG-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:LOG-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:LOG-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=120, unique=120"
+    },
+    {
+      "check": "quick:LOG-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:LOG-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:LOG-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:LOG-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=720, unique=720"
+    },
+    {
+      "check": "quick:LOG-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:LOG-04:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:LOG-04:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:LOG-04:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=120, unique=120"
+    },
+    {
+      "check": "quick:LOG-04:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:LOG-05:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:LOG-05:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:LOG-05:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=240, unique=240"
+    },
+    {
+      "check": "quick:LOG-05:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:INV-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:INV-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:INV-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=540, unique=540"
+    },
+    {
+      "check": "quick:INV-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:INV-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:INV-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:INV-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=5000, unique=5000"
+    },
+    {
+      "check": "quick:INV-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MFG-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MFG-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MFG-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=500, unique=500"
+    },
+    {
+      "check": "quick:MFG-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MFG-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MFG-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MFG-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=650, unique=650"
+    },
+    {
+      "check": "quick:MFG-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:MFG-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:MFG-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:MFG-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=144, unique=144"
+    },
+    {
+      "check": "quick:MFG-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:QLT-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:QLT-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:QLT-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=1500, unique=1500"
+    },
+    {
+      "check": "quick:QLT-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:SLS-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:SLS-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:SLS-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=300, unique=300"
+    },
+    {
+      "check": "quick:SLS-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:FIN-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:FIN-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:FIN-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=144, unique=144"
+    },
+    {
+      "check": "quick:FIN-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:FIN-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:FIN-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:FIN-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=420, unique=420"
+    },
+    {
+      "check": "quick:FIN-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:FIN-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:FIN-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:FIN-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=1800, unique=1800"
+    },
+    {
+      "check": "quick:FIN-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:EXT-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:EXT-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:EXT-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=180, unique=180"
+    },
+    {
+      "check": "quick:EXT-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:EXT-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:EXT-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:EXT-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=240, unique=240"
+    },
+    {
+      "check": "quick:EXT-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:EXT-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:EXT-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:EXT-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=180, unique=180"
+    },
+    {
+      "check": "quick:EXT-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:KNW-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:KNW-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:KNW-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=10, unique=10"
+    },
+    {
+      "check": "quick:KNW-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:SIM-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:SIM-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:SIM-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=12, unique=12"
+    },
+    {
+      "check": "quick:SIM-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:SIM-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:SIM-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:SIM-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=10, unique=10"
+    },
+    {
+      "check": "quick:SIM-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:DEC-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:DEC-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:DEC-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=3, unique=3"
+    },
+    {
+      "check": "quick:DEC-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:조직부모참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:조직순환없음",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "cyclic=[]"
+    },
+    {
+      "check": "quick:BOM품목참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:판매고객품목참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:계약공급사품목참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:PO계약참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:계약량소진",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "over=[]"
+    },
+    {
+      "check": "quick:선적PO참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:선적수량",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:물류사건순서",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:통관선적참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:운송선적위치참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:생산계획참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "quick:생산수율대사",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:재고월말대사",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:재무차대대사",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "quick:APAR원천참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "quick:시나리오10개",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "count=10"
+    },
+    {
+      "check": "quick:결정샘플3개",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "count=3"
+    },
+    {
+      "check": "full:35개 데이터 파일",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "files=35, empty=[]"
+    },
+    {
+      "check": "full:FND-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:FND-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:FND-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=15, unique=15"
+    },
+    {
+      "check": "full:FND-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:FND-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:FND-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:FND-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=24, unique=24"
+    },
+    {
+      "check": "full:FND-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:FND-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:FND-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:FND-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=1101, unique=1101"
+    },
+    {
+      "check": "full:FND-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MDM-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MDM-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MDM-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=220, unique=220"
+    },
+    {
+      "check": "full:MDM-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MDM-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MDM-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MDM-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=40, unique=40"
+    },
+    {
+      "check": "full:MDM-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MDM-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MDM-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MDM-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=24, unique=24"
+    },
+    {
+      "check": "full:MDM-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MDM-04:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MDM-04:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MDM-04:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=8, unique=8"
+    },
+    {
+      "check": "full:MDM-04:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MDM-05:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MDM-05:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MDM-05:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=34, unique=34"
+    },
+    {
+      "check": "full:MDM-05:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MDM-06:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MDM-06:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MDM-06:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=48, unique=48"
+    },
+    {
+      "check": "full:MDM-06:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MDM-07:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MDM-07:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MDM-07:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=80, unique=80"
+    },
+    {
+      "check": "full:MDM-07:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MDM-08:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MDM-08:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MDM-08:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=43, unique=43"
+    },
+    {
+      "check": "full:MDM-08:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:PRC-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:PRC-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:PRC-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=100, unique=100"
+    },
+    {
+      "check": "full:PRC-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:PRC-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:PRC-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:PRC-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=1800, unique=1800"
+    },
+    {
+      "check": "full:PRC-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:LOG-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:LOG-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:LOG-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=1800, unique=1800"
+    },
+    {
+      "check": "full:LOG-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:LOG-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:LOG-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:LOG-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=1200, unique=1200"
+    },
+    {
+      "check": "full:LOG-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:LOG-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:LOG-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:LOG-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=7200, unique=7200"
+    },
+    {
+      "check": "full:LOG-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:LOG-04:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:LOG-04:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:LOG-04:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=1200, unique=1200"
+    },
+    {
+      "check": "full:LOG-04:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:LOG-05:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:LOG-05:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:LOG-05:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=2400, unique=2400"
+    },
+    {
+      "check": "full:LOG-05:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:INV-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:INV-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:INV-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=55440, unique=55440"
+    },
+    {
+      "check": "full:INV-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:INV-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:INV-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:INV-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=30000, unique=30000"
+    },
+    {
+      "check": "full:INV-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MFG-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MFG-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MFG-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=6000, unique=6000"
+    },
+    {
+      "check": "full:MFG-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MFG-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MFG-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MFG-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=8000, unique=8000"
+    },
+    {
+      "check": "full:MFG-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:MFG-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:MFG-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:MFG-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=576, unique=576"
+    },
+    {
+      "check": "full:MFG-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:QLT-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:QLT-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:QLT-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=12000, unique=12000"
+    },
+    {
+      "check": "full:QLT-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:SLS-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:SLS-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:SLS-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=2500, unique=2500"
+    },
+    {
+      "check": "full:SLS-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:FIN-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:FIN-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:FIN-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=4320, unique=4320"
+    },
+    {
+      "check": "full:FIN-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:FIN-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:FIN-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:FIN-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=3700, unique=3700"
+    },
+    {
+      "check": "full:FIN-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:FIN-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:FIN-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:FIN-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=15000, unique=15000"
+    },
+    {
+      "check": "full:FIN-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:EXT-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:EXT-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:EXT-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=180, unique=180"
+    },
+    {
+      "check": "full:EXT-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:EXT-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:EXT-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:EXT-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=240, unique=240"
+    },
+    {
+      "check": "full:EXT-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:EXT-03:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:EXT-03:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:EXT-03:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=180, unique=180"
+    },
+    {
+      "check": "full:EXT-03:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:KNW-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:KNW-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:KNW-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=10, unique=10"
+    },
+    {
+      "check": "full:KNW-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:SIM-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:SIM-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:SIM-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=12, unique=12"
+    },
+    {
+      "check": "full:SIM-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:SIM-02:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:SIM-02:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:SIM-02:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=10, unique=10"
+    },
+    {
+      "check": "full:SIM-02:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:DEC-01:공통필드",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:DEC-01:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:DEC-01:record_id고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "rows=3, unique=3"
+    },
+    {
+      "check": "full:DEC-01:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:조직부모참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:조직순환없음",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "cyclic=[]"
+    },
+    {
+      "check": "full:BOM품목참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:판매고객품목참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:계약공급사품목참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:PO계약참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:계약량소진",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "over=[]"
+    },
+    {
+      "check": "full:선적PO참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:선적수량",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:물류사건순서",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:통관선적참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:운송선적위치참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:생산계획참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "full:생산수율대사",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:재고월말대사",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:재무차대대사",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "bad=[]"
+    },
+    {
+      "check": "full:APAR원천참조",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "missing=[]"
+    },
+    {
+      "check": "full:시나리오10개",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "count=10"
+    },
+    {
+      "check": "full:결정샘플3개",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "count=3"
+    },
+    {
+      "check": "계약:35개",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "count=35"
+    },
+    {
+      "check": "계약:DEC-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:DEC-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:EXT-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:EXT-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:EXT-02.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:EXT-02.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:EXT-03.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:EXT-03.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FIN-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FIN-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FIN-02.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FIN-02.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FIN-03.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FIN-03.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FND-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FND-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FND-02.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FND-02.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FND-03.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:FND-03.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:INV-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:INV-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:INV-02.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:INV-02.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:KNW-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:KNW-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-02.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-02.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-03.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-03.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-04.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-04.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-05.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:LOG-05.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-02.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-02.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-03.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-03.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-04.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-04.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-05.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-05.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-06.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-06.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-07.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-07.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-08.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MDM-08.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MFG-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MFG-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MFG-02.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MFG-02.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MFG-03.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:MFG-03.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:PRC-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:PRC-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:PRC-02.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:PRC-02.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:QLT-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:QLT-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:SIM-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:SIM-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:SIM-02.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:SIM-02.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:SLS-01.contract:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "계약:SLS-01.contract:scope필수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "가상회사:6개",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "count=6"
+    },
+    {
+      "check": "가상회사:ID고유",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "가상회사:합성격리",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "가상회사:추가5개원본",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "가상회사:목적·조직·가정",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "격리:manifest존재",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "격리:candidates존재",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    },
+    {
+      "check": "격리:예상총건수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "actual=50 expected=50"
+    },
+    {
+      "check": "격리:사유별건수",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "actual={'UNMAPPED_SOURCE_CODE': 5, 'DUPLICATE_MILESTONE': 3, 'CUSTOMS_CORRECTION': 4, 'LATE_ACTUAL': 8, 'UOM_MISMATCH_CANDIDATE': 2, 'QUALITY_HOLD_STOCK': 6, 'PRODUCTION_VARIANCE': 10, 'PARTNER_NOT_SUBMITTED': 12} expected={'UNMAPPED_SOURCE_CODE': 5, 'DUPLICATE_MILESTONE': 3, 'CUSTOMS_CORRECTION': 4, 'LATE_ACTUAL': 8, 'UOM_MISMATCH_CANDIDATE': 2, 'QUALITY_HOLD_STOCK': 6, 'PRODUCTION_VARIANCE': 10, 'PARTNER_NOT_SUBMITTED': 12}"
+    },
+    {
+      "check": "격리:합성표시",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": ""
+    }
+  ]
+}

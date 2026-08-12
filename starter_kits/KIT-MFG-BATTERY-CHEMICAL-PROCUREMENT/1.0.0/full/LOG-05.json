@@ -1,0 +1,15 @@
+{
+  "dataset_id": "LOG-05",
+  "profile": "full",
+  "count": 1,
+  "items": [
+    {
+      "transport_id": "TR-POHANG-001",
+      "bl_no": "BL-PH-20260801",
+      "truck_no": "경북80바1234",
+      "origin": "포항항 4부두",
+      "dest": "PLANT_BC_121 창고",
+      "status": "DELIVERED"
+    }
+  ]
+}

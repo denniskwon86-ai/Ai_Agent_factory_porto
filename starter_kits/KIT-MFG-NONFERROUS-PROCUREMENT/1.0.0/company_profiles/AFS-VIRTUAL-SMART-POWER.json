@@ -1,0 +1,41 @@
+{
+  "data_class": "SYNTHETIC",
+  "data_origin": "SYNTHETIC",
+  "entity_mode": "VIRTUAL",
+  "certification_status": "CERTIFIED_FOR_DEMO",
+  "not_for_management_decision": true,
+  "currency": "KRW",
+  "timezone": "Asia/Seoul",
+  "company_profile_id": "AFS-VIRTUAL-SMART-POWER",
+  "company_name": "AFS 스마트 전력기기 신규법인안",
+  "profile_role": "VIRTUAL_ADJACENT_BUSINESS",
+  "source_profile_id": "AFS-DEMO-MATERIALS-GROUP",
+  "industry_code": "C2812",
+  "industry_name": "전기회로 개폐·보호장치 제조",
+  "purpose": "전력기기 사업 진출과 자동화 투자·고용·품질·납기 효과 검증",
+  "valid_until": "2032-12-31",
+  "organization_blueprint": [
+    "스마트전력기기법인",
+    "영업설계",
+    "부품조달",
+    "조립공장",
+    "품질보증"
+  ],
+  "products": [
+    "스마트 배전반",
+    "산업용 차단기",
+    "설비 예지센서 패키지"
+  ],
+  "recommended_apps": [
+    "APP-03",
+    "APP-04",
+    "APP-05"
+  ],
+  "default_assumptions": {
+    "order_growth_pct": 18.0,
+    "automation_productivity_pct": 20.0,
+    "defect_reduction_pct": 15.0,
+    "workforce_change_pct": 8.0,
+    "capex_krw_billion": 95.0
+  }
+}

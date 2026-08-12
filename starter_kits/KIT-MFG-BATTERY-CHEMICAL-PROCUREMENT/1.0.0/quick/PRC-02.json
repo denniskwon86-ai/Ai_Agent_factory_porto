@@ -1,0 +1,15 @@
+{
+  "dataset_id": "PRC-02",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "po_no": "PO-BC-202608-01",
+      "contract_no": "CT-2026-LITHIUM-01",
+      "order_date": "2026-08-01",
+      "item_code": "RM_LITHIUM_HYD",
+      "qty_mt": 1000,
+      "price_usd_mt": 27500
+    }
+  ]
+}

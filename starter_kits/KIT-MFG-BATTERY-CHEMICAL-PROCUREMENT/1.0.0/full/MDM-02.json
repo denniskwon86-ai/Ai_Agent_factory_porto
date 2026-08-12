@@ -1,0 +1,25 @@
+{
+  "dataset_id": "MDM-02",
+  "profile": "full",
+  "count": 3,
+  "items": [
+    {
+      "vendor_code": "VND_AUS_LITHIUM",
+      "vendor_name": "Pilbara Minerals Australia",
+      "country": "AU",
+      "incoterms": "CIF"
+    },
+    {
+      "vendor_code": "VND_CHL_SQM",
+      "vendor_name": "SQM Chile S.A.",
+      "country": "CL",
+      "incoterms": "FOB"
+    },
+    {
+      "vendor_code": "VND_IDN_NICKEL",
+      "vendor_name": "PT Indonesia Nickel",
+      "country": "ID",
+      "incoterms": "CIF"
+    }
+  ]
+}

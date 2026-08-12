@@ -1,0 +1,230 @@
+{
+  "dataset_id": "PRC-01",
+  "dataset_name": "구매계약·가격조건",
+  "contract_version": "1.0.0",
+  "status": "APPROVED_FOR_DEMO",
+  "scope": {
+    "tenant_required": true,
+    "scope_required": true,
+    "allowed_scope_types": [
+      "ENTERPRISE_GROUP",
+      "LEGAL_ENTITY",
+      "BUSINESS_DIVISION",
+      "PLANT",
+      "DEPARTMENT"
+    ]
+  },
+  "classification": {
+    "data_class": "SYNTHETIC",
+    "data_origin": "SYNTHETIC",
+    "not_for_management_decision": true
+  },
+  "business_keys": [
+    "contract_id"
+  ],
+  "dependencies": [
+    "MDM-01",
+    "MDM-02",
+    "MDM-08",
+    "EXT-02"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "record_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 record_id"
+      },
+      {
+        "name": "tenant_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 tenant_id"
+      },
+      {
+        "name": "scope_node_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 scope_node_id"
+      },
+      {
+        "name": "data_class",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 data_class"
+      },
+      {
+        "name": "business_data_kind",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 business_data_kind"
+      },
+      {
+        "name": "data_origin",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 data_origin"
+      },
+      {
+        "name": "quality_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 quality_status"
+      },
+      {
+        "name": "certification_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 certification_status"
+      },
+      {
+        "name": "as_of_date",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 as_of_date"
+      },
+      {
+        "name": "lineage_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "구매계약·가격조건의 lineage_id"
+      },
+      {
+        "name": "contract_id",
+        "type": "string",
+        "required": true,
+        "business_key": true,
+        "description": "구매계약·가격조건의 contract_id"
+      },
+      {
+        "name": "supplier_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 supplier_id"
+      },
+      {
+        "name": "material_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 material_id"
+      },
+      {
+        "name": "contract_quantity",
+        "type": "integer",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 contract_quantity"
+      },
+      {
+        "name": "ordered_quantity",
+        "type": "number",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 ordered_quantity"
+      },
+      {
+        "name": "quantity_uom",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 quantity_uom"
+      },
+      {
+        "name": "benchmark_code",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 benchmark_code"
+      },
+      {
+        "name": "benchmark_price",
+        "type": "number",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 benchmark_price"
+      },
+      {
+        "name": "premium_rate",
+        "type": "number",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 premium_rate"
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 currency"
+      },
+      {
+        "name": "incoterm",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 incoterm"
+      },
+      {
+        "name": "payment_terms",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 payment_terms"
+      },
+      {
+        "name": "valid_from",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 valid_from"
+      },
+      {
+        "name": "valid_to",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 valid_to"
+      },
+      {
+        "name": "price_formula",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "구매계약·가격조건의 price_formula"
+      }
+    ]
+  },
+  "quality": {
+    "required_common_fields": [
+      "record_id",
+      "tenant_id",
+      "scope_node_id",
+      "data_class",
+      "business_data_kind",
+      "data_origin",
+      "quality_status",
+      "certification_status",
+      "as_of_date",
+      "lineage_id"
+    ],
+    "fail_closed_on_scope_missing": true,
+    "quarantine_on_reference_failure": true
+  },
+  "lineage": {
+    "generator": "scripts/generate_sample_company_starter_kit.py",
+    "kit_version": "1.0.0"
+  }
+}

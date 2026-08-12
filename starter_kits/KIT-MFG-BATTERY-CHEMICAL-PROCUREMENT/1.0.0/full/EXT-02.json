@@ -1,0 +1,13 @@
+{
+  "dataset_id": "EXT-02",
+  "profile": "full",
+  "count": 1,
+  "items": [
+    {
+      "date_key": "2026-08-11",
+      "lithium_fastmarkets_usd_mt": 28500,
+      "nickel_lme_usd_mt": 16800,
+      "cobalt_lme_usd_mt": 32500
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "dataset_id": "FND-01",
+  "profile": "full",
+  "count": 9,
+  "items": [
+    {
+      "org_id": "ORG_BC_000",
+      "org_name": "AFS 배터리케미컬",
+      "org_type": "GROUP",
+      "parent_id": null
+    },
+    {
+      "org_id": "ORG_BC_100",
+      "org_name": "AFS 케미컬 주식회사",
+      "org_type": "LEGAL_ENTITY",
+      "parent_id": "ORG_BC_000"
+    },
+    {
+      "org_id": "ORG_BC_110",
+      "org_name": "전사공통",
+      "org_type": "DEPT",
+      "parent_id": "ORG_BC_100"
+    },
+    {
+      "org_id": "ORG_BC_120",
+      "org_name": "양극재사업부",
+      "org_type": "DIVISION",
+      "parent_id": "ORG_BC_100"
+    },
+    {
+      "org_id": "PLANT_BC_121",
+      "org_name": "포항 제1공장",
+      "org_type": "PLANT",
+      "parent_id": "ORG_BC_120"
+    },
+    {
+      "org_id": "ORG_BC_200",
+      "org_name": "AFS 넥스트에너지 주식회사",
+      "org_type": "LEGAL_ENTITY",
+      "parent_id": "ORG_BC_000"
+    },
+    {
+      "org_id": "ORG_BC_210",
+      "org_name": "전구체사업부",
+      "org_type": "DIVISION",
+      "parent_id": "ORG_BC_200"
+    },
+    {
+      "org_id": "PLANT_BC_221",
+      "org_name": "광양 제2공장",
+      "org_type": "PLANT",
+      "parent_id": "ORG_BC_210"
+    },
+    {
+      "org_id": "PLANT_BC_222",
+      "org_name": "새만금 증설 제3공장",
+      "org_type": "VIRTUAL_PLANT",
+      "parent_id": "ORG_BC_210"
+    }
+  ]
+}

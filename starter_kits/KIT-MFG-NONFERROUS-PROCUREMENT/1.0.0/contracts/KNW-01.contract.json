@@ -1,0 +1,199 @@
+{
+  "dataset_id": "KNW-01",
+  "dataset_name": "표준서·계약·규정·연구자료",
+  "contract_version": "1.0.0",
+  "status": "APPROVED_FOR_DEMO",
+  "scope": {
+    "tenant_required": true,
+    "scope_required": true,
+    "allowed_scope_types": [
+      "ENTERPRISE_GROUP",
+      "LEGAL_ENTITY",
+      "BUSINESS_DIVISION",
+      "PLANT",
+      "DEPARTMENT"
+    ]
+  },
+  "classification": {
+    "data_class": "SYNTHETIC",
+    "data_origin": "SYNTHETIC",
+    "not_for_management_decision": true
+  },
+  "business_keys": [
+    "document_id"
+  ],
+  "dependencies": [
+    "FND-01"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "record_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 record_id"
+      },
+      {
+        "name": "tenant_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 tenant_id"
+      },
+      {
+        "name": "scope_node_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 scope_node_id"
+      },
+      {
+        "name": "data_class",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 data_class"
+      },
+      {
+        "name": "business_data_kind",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 business_data_kind"
+      },
+      {
+        "name": "data_origin",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 data_origin"
+      },
+      {
+        "name": "quality_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 quality_status"
+      },
+      {
+        "name": "certification_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 certification_status"
+      },
+      {
+        "name": "as_of_date",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 as_of_date"
+      },
+      {
+        "name": "lineage_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 lineage_id"
+      },
+      {
+        "name": "document_id",
+        "type": "string",
+        "required": true,
+        "business_key": true,
+        "description": "표준서·계약·규정·연구자료의 document_id"
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 title"
+      },
+      {
+        "name": "document_type",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 document_type"
+      },
+      {
+        "name": "classification",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 classification"
+      },
+      {
+        "name": "owner_org_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 owner_org_id"
+      },
+      {
+        "name": "effective_from",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 effective_from"
+      },
+      {
+        "name": "effective_to",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 effective_to"
+      },
+      {
+        "name": "approval_status",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 approval_status"
+      },
+      {
+        "name": "source_ref",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 source_ref"
+      },
+      {
+        "name": "checksum",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 checksum"
+      },
+      {
+        "name": "rag_eligible",
+        "type": "boolean",
+        "required": false,
+        "business_key": false,
+        "description": "표준서·계약·규정·연구자료의 rag_eligible"
+      }
+    ]
+  },
+  "quality": {
+    "required_common_fields": [
+      "record_id",
+      "tenant_id",
+      "scope_node_id",
+      "data_class",
+      "business_data_kind",
+      "data_origin",
+      "quality_status",
+      "certification_status",
+      "as_of_date",
+      "lineage_id"
+    ],
+    "fail_closed_on_scope_missing": true,
+    "quarantine_on_reference_failure": true
+  },
+  "lineage": {
+    "generator": "scripts/generate_sample_company_starter_kit.py",
+    "kit_version": "1.0.0"
+  }
+}

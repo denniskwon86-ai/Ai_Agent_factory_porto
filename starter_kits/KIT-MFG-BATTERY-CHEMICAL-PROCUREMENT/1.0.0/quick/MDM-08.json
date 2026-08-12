@@ -1,0 +1,13 @@
+{
+  "dataset_id": "MDM-08",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "term_id": "TERM_LME_INDEX",
+      "incoterms": "CIF",
+      "price_formula": "Fastmarkets_LiOH_Spot + $500/MT",
+      "payment_days": 30
+    }
+  ]
+}

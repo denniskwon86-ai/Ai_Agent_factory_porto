@@ -1,0 +1,40 @@
+{
+  "data_class": "SYNTHETIC",
+  "data_origin": "SYNTHETIC",
+  "entity_mode": "VIRTUAL",
+  "certification_status": "CERTIFIED_FOR_DEMO",
+  "not_for_management_decision": true,
+  "currency": "KRW",
+  "timezone": "Asia/Seoul",
+  "company_profile_id": "AFS-VIRTUAL-SUBSEA-CABLE-NA",
+  "company_name": "AFS 북미 해저케이블 생산법인안",
+  "profile_role": "VIRTUAL_OVERSEAS_ENTITY",
+  "source_profile_id": "AFS-DEMO-MATERIALS-GROUP",
+  "industry_code": "C2830",
+  "industry_name": "절연선·케이블 제조",
+  "purpose": "북미 해상풍력용 해저케이블 현지생산의 수주·구리·투자·물류 영향 검증",
+  "valid_until": "2032-12-31",
+  "organization_blueprint": [
+    "북미 생산법인",
+    "프로젝트영업",
+    "해저케이블공장",
+    "항만출하센터"
+  ],
+  "products": [
+    "HVDC 해저케이블",
+    "해상풍력 Array Cable",
+    "접속재"
+  ],
+  "recommended_apps": [
+    "APP-01",
+    "APP-03",
+    "APP-04"
+  ],
+  "default_assumptions": {
+    "annual_capacity_km": 1800,
+    "copper_price_change_pct": 10.0,
+    "capex_krw_billion": 820.0,
+    "local_content_pct": 55.0,
+    "order_backlog_krw_billion": 1400.0
+  }
+}

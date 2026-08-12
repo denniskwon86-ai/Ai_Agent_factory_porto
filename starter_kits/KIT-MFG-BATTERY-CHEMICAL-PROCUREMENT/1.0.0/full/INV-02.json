@@ -1,0 +1,15 @@
+{
+  "dataset_id": "INV-02",
+  "profile": "full",
+  "count": 1,
+  "items": [
+    {
+      "txn_id": "TXN_INV_001",
+      "lot_no": "LOT_LiOH_20260810_A",
+      "item_code": "RM_LITHIUM_HYD",
+      "txn_type": "INBOUND",
+      "qty_mt": 1000.0,
+      "txn_date": "2026-08-10"
+    }
+  ]
+}

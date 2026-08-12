@@ -1,0 +1,12 @@
+{
+  "dataset_id": "SIM-01",
+  "profile": "full",
+  "count": 1,
+  "items": [
+    {
+      "formula_id": "FORMULA_NCM_MARGIN",
+      "name": "양극재 마진 시뮬레이션 수식",
+      "expr": "Sales_Revenue - (Lithium_Cost + Nickel_Cost + Power_Cost + Fixed_Cost)"
+    }
+  ]
+}

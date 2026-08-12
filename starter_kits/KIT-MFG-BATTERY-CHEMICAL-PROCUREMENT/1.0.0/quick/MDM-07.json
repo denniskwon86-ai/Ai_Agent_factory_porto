@@ -1,0 +1,22 @@
+{
+  "dataset_id": "MDM-07",
+  "profile": "quick",
+  "count": 3,
+  "items": [
+    {
+      "account_code": "ACC_5010",
+      "account_name": "원재료비(수산화리튬/니켈)",
+      "category": "COGS"
+    },
+    {
+      "account_code": "ACC_5020",
+      "account_name": "전력 및 소성 스팀비",
+      "category": "COGS"
+    },
+    {
+      "account_code": "ACC_4010",
+      "account_name": "양극재 매출",
+      "category": "REVENUE"
+    }
+  ]
+}

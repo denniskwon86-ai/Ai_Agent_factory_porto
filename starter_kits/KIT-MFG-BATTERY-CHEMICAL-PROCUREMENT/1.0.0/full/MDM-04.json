@@ -1,0 +1,25 @@
+{
+  "dataset_id": "MDM-04",
+  "profile": "full",
+  "count": 3,
+  "items": [
+    {
+      "location_id": "LOC_POHANG_RAW",
+      "plant_code": "PLANT_BC_121",
+      "name": "포항 제1공장 수산화리튬 전용창고",
+      "is_hazmat": true
+    },
+    {
+      "location_id": "LOC_POHANG_FG",
+      "plant_code": "PLANT_BC_121",
+      "name": "포항 제1공장 양극재 완제품창고",
+      "is_hazmat": false
+    },
+    {
+      "location_id": "LOC_GWANGYANG_TANK",
+      "plant_code": "PLANT_BC_221",
+      "name": "광양 제2공장 액상 전구체 탱크터미널",
+      "is_hazmat": true
+    }
+  ]
+}

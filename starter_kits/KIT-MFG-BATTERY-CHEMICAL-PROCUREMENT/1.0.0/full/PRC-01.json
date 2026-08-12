@@ -1,0 +1,14 @@
+{
+  "dataset_id": "PRC-01",
+  "profile": "full",
+  "count": 1,
+  "items": [
+    {
+      "contract_no": "CT-2026-LITHIUM-01",
+      "vendor_code": "VND_AUS_LITHIUM",
+      "item_code": "RM_LITHIUM_HYD",
+      "annual_qty_mt": 12000,
+      "formula": "Fastmarkets_Spot * 0.95"
+    }
+  ]
+}

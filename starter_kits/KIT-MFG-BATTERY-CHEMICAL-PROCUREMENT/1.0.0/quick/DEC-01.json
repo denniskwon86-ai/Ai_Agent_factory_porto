@@ -1,0 +1,13 @@
+{
+  "dataset_id": "DEC-01",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "decision_id": "DEC-2026-BC-01",
+      "title": "호주 수산화리튬 3년 장기계약(LTA) 체결 및 가격 연동 수식 승인",
+      "status": "APPROVED",
+      "approver": "CEO"
+    }
+  ]
+}

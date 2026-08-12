@@ -1,0 +1,14 @@
+{
+  "dataset_id": "MFG-01",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "plan_id": "MP-202608-NCM",
+      "plant_code": "PLANT_BC_121",
+      "item_code": "FG_CAM_NCM811",
+      "plan_qty_mt": 1500.0,
+      "plan_month": "2026-08"
+    }
+  ]
+}

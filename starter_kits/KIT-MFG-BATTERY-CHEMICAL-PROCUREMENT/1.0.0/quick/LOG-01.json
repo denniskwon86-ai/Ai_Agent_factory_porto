@@ -1,0 +1,14 @@
+{
+  "dataset_id": "LOG-01",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "event_id": "EVT_LOG_001",
+      "po_no": "PO-BC-202608-01",
+      "vendor_code": "VND_AUS_LITHIUM",
+      "status": "COA_SUBMITTED",
+      "purity_pct": 99.65
+    }
+  ]
+}

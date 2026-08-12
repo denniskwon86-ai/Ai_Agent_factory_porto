@@ -1,0 +1,14 @@
+{
+  "kit_id": "KIT-MFG-BATTERY-CHEMICAL-PROCUREMENT",
+  "version": "1.0.0",
+  "company_name": "AFS 배터리케미컬",
+  "data_classification": "SYNTHETIC",
+  "industry": "이차전지 양극재·전구체 및 화학 제조",
+  "primary_loop": "수산화리튬/황산니켈 조달 -> 소성 수율 & 에너지 -> 양극재 출하 -> 경영 손익 시뮬레이션",
+  "dataset_count": 35,
+  "supported_profiles": [
+    "quick",
+    "full"
+  ],
+  "created_at": "2026-08-11T16:20:04.137085"
+}

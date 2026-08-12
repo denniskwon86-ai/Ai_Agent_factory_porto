@@ -1,0 +1,15 @@
+{
+  "dataset_id": "MFG-02",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "actual_id": "ACT-20260810-01",
+      "plan_id": "MP-202608-NCM",
+      "item_code": "FG_CAM_NCM811",
+      "actual_qty_mt": 48.5,
+      "input_lithium_mt": 13.8,
+      "actual_yield_pct": 92.8
+    }
+  ]
+}

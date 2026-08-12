@@ -1,0 +1,15 @@
+{
+  "dataset_id": "FIN-01",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "cost_id": "COST-202607-NCM",
+      "item_code": "FG_CAM_NCM811",
+      "period": "2026-07",
+      "unit_cost_krw": 48500000,
+      "raw_material_pct": 74.5,
+      "energy_cost_pct": 11.2
+    }
+  ]
+}

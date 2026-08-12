@@ -1,0 +1,22 @@
+{
+  "dataset_id": "MDM-03",
+  "profile": "quick",
+  "count": 3,
+  "items": [
+    {
+      "customer_code": "CUST_LGES",
+      "customer_name": "LG 에너지솔루션",
+      "country": "KR"
+    },
+    {
+      "customer_code": "CUST_SDI",
+      "customer_name": "삼성SDI",
+      "country": "KR"
+    },
+    {
+      "customer_code": "CUST_SKON",
+      "customer_name": "SK온",
+      "country": "KR"
+    }
+  ]
+}

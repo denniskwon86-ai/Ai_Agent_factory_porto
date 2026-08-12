@@ -1,0 +1,14 @@
+{
+  "dataset_id": "QLT-01",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "test_id": "QC-20260810-99",
+      "lot_no": "LOT_LiOH_20260810_A",
+      "purity_pct": 99.68,
+      "fe_ppm": 4.2,
+      "status": "PASSED"
+    }
+  ]
+}

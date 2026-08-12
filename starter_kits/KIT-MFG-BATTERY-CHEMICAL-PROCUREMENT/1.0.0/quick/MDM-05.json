@@ -1,0 +1,21 @@
+{
+  "dataset_id": "MDM-05",
+  "profile": "quick",
+  "count": 2,
+  "items": [
+    {
+      "bom_id": "BOM_NCM811",
+      "parent_item": "FG_CAM_NCM811",
+      "child_item": "IP_PRECURSOR_NCM",
+      "qty_per_unit": 0.95,
+      "unit": "MT"
+    },
+    {
+      "bom_id": "BOM_NCM811",
+      "parent_item": "FG_CAM_NCM811",
+      "child_item": "RM_LITHIUM_HYD",
+      "qty_per_unit": 0.28,
+      "unit": "MT"
+    }
+  ]
+}

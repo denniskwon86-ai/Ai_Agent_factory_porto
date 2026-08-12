@@ -1,0 +1,12 @@
+{
+  "dataset_id": "KNW-01",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "doc_id": "DOC_SOP_LITHIUM_HANDLING",
+      "title": "수산화리튬 조해성 차단 및 안전 보관 표준지침",
+      "category": "SOP"
+    }
+  ]
+}

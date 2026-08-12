@@ -1,0 +1,14 @@
+{
+  "dataset_id": "FIN-03",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "period": "2026-07",
+      "revenue_krw": 52000000000,
+      "cogs_krw": 44200000000,
+      "operating_profit_krw": 5400000000,
+      "op_margin_pct": 10.38
+    }
+  ]
+}

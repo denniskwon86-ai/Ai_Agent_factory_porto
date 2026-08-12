@@ -1,0 +1,194 @@
+{
+  "dataset_id": "INV-01",
+  "dataset_name": "재고 스냅샷",
+  "contract_version": "1.0.0",
+  "status": "APPROVED_FOR_DEMO",
+  "scope": {
+    "tenant_required": true,
+    "scope_required": true,
+    "allowed_scope_types": [
+      "ENTERPRISE_GROUP",
+      "LEGAL_ENTITY",
+      "BUSINESS_DIVISION",
+      "PLANT",
+      "DEPARTMENT"
+    ]
+  },
+  "classification": {
+    "data_class": "SYNTHETIC",
+    "data_origin": "SYNTHETIC",
+    "not_for_management_decision": true
+  },
+  "business_keys": [
+    "snapshot_id"
+  ],
+  "dependencies": [
+    "INV-02",
+    "MDM-01",
+    "MDM-04"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "record_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 record_id"
+      },
+      {
+        "name": "tenant_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 tenant_id"
+      },
+      {
+        "name": "scope_node_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 scope_node_id"
+      },
+      {
+        "name": "data_class",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 data_class"
+      },
+      {
+        "name": "business_data_kind",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 business_data_kind"
+      },
+      {
+        "name": "data_origin",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 data_origin"
+      },
+      {
+        "name": "quality_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 quality_status"
+      },
+      {
+        "name": "certification_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 certification_status"
+      },
+      {
+        "name": "as_of_date",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 as_of_date"
+      },
+      {
+        "name": "lineage_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "재고 스냅샷의 lineage_id"
+      },
+      {
+        "name": "snapshot_id",
+        "type": "string",
+        "required": true,
+        "business_key": true,
+        "description": "재고 스냅샷의 snapshot_id"
+      },
+      {
+        "name": "snapshot_date",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "재고 스냅샷의 snapshot_date"
+      },
+      {
+        "name": "location_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "재고 스냅샷의 location_id"
+      },
+      {
+        "name": "material_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "재고 스냅샷의 material_id"
+      },
+      {
+        "name": "lot_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "재고 스냅샷의 lot_id"
+      },
+      {
+        "name": "unrestricted_quantity",
+        "type": "number",
+        "required": false,
+        "business_key": false,
+        "description": "재고 스냅샷의 unrestricted_quantity"
+      },
+      {
+        "name": "quality_quantity",
+        "type": "number",
+        "required": false,
+        "business_key": false,
+        "description": "재고 스냅샷의 quality_quantity"
+      },
+      {
+        "name": "blocked_quantity",
+        "type": "number",
+        "required": false,
+        "business_key": false,
+        "description": "재고 스냅샷의 blocked_quantity"
+      },
+      {
+        "name": "safety_stock_quantity",
+        "type": "number",
+        "required": false,
+        "business_key": false,
+        "description": "재고 스냅샷의 safety_stock_quantity"
+      },
+      {
+        "name": "quantity_uom",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "재고 스냅샷의 quantity_uom"
+      }
+    ]
+  },
+  "quality": {
+    "required_common_fields": [
+      "record_id",
+      "tenant_id",
+      "scope_node_id",
+      "data_class",
+      "business_data_kind",
+      "data_origin",
+      "quality_status",
+      "certification_status",
+      "as_of_date",
+      "lineage_id"
+    ],
+    "fail_closed_on_scope_missing": true,
+    "quarantine_on_reference_failure": true
+  },
+  "lineage": {
+    "generator": "scripts/generate_sample_company_starter_kit.py",
+    "kit_version": "1.0.0"
+  }
+}

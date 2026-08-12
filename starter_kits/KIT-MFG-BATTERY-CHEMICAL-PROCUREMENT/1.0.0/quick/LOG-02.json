@@ -1,0 +1,14 @@
+{
+  "dataset_id": "LOG-02",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "vessel_id": "VSL_PACIFIC_CHEM_01",
+      "vessel_name": "Pacific Chemist",
+      "pol": "Port Hedland AU",
+      "pod": "Pohang KR",
+      "bl_no": "BL-PH-20260801"
+    }
+  ]
+}

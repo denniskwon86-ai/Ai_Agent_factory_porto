@@ -1,0 +1,14 @@
+{
+  "dataset_id": "INV-01",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "snapshot_date": "2026-08-11",
+      "location_id": "LOC_POHANG_RAW",
+      "item_code": "RM_LITHIUM_HYD",
+      "qty_mt": 850.5,
+      "safety_stock_mt": 300.0
+    }
+  ]
+}

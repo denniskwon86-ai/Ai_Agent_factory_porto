@@ -1,0 +1,14 @@
+{
+  "dataset_id": "LOG-04",
+  "profile": "quick",
+  "count": 1,
+  "items": [
+    {
+      "customs_id": "CUST-POHANG-2026-88",
+      "bl_no": "BL-PH-20260801",
+      "hazmat_decl_no": "HM-2026-9912",
+      "duty_amount_krw": 45000000,
+      "status": "CLEARED"
+    }
+  ]
+}

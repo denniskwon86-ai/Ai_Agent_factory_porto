@@ -1,0 +1,42 @@
+{
+  "dataset_id": "MDM-01",
+  "profile": "full",
+  "count": 5,
+  "items": [
+    {
+      "item_code": "RM_LITHIUM_HYD",
+      "item_name": "수산화리튬 (LiOH)",
+      "category": "RAW_MATERIAL",
+      "unit": "MT",
+      "std_cost_usd": 28000
+    },
+    {
+      "item_code": "RM_NICKEL_SUL",
+      "item_name": "황산니켈 (NiSO4)",
+      "category": "RAW_MATERIAL",
+      "unit": "MT",
+      "std_cost_usd": 16500
+    },
+    {
+      "item_code": "RM_COBALT_SUL",
+      "item_name": "황산코발트 (CoSO4)",
+      "category": "RAW_MATERIAL",
+      "unit": "MT",
+      "std_cost_usd": 32000
+    },
+    {
+      "item_code": "IP_PRECURSOR_NCM",
+      "item_name": "NCM811 전구체",
+      "category": "INTERMEDIATE",
+      "unit": "MT",
+      "std_cost_usd": 18500
+    },
+    {
+      "item_code": "FG_CAM_NCM811",
+      "item_name": "NCM811 양극재",
+      "category": "FINISHED_GOODS",
+      "unit": "MT",
+      "std_cost_usd": 42000
+    }
+  ]
+}

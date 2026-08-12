@@ -1,0 +1,31 @@
+{
+  "dataset_id": "FND-02",
+  "profile": "quick",
+  "count": 4,
+  "items": [
+    {
+      "user_id": "USR_BC_01",
+      "name": "김화학",
+      "role": "PURCHASING_DIRECTOR",
+      "org_id": "ORG_BC_110"
+    },
+    {
+      "user_id": "USR_BC_02",
+      "name": "이생산",
+      "role": "PLANT_MANAGER",
+      "org_id": "PLANT_BC_121"
+    },
+    {
+      "user_id": "USR_BC_03",
+      "name": "박재무",
+      "role": "CFO",
+      "org_id": "ORG_BC_110"
+    },
+    {
+      "user_id": "USR_BC_04",
+      "name": "최품질",
+      "role": "QA_MANAGER",
+      "org_id": "PLANT_BC_121"
+    }
+  ]
+}
