@@ -1,0 +1,197 @@
+{
+  "metadata": {
+    "version": "0.2.1",
+    "decision_state": "TEAM_RECOMMENDED",
+    "decision_label": "팀 권장안",
+    "generated_on": "2026-08-12",
+    "final_approval_required": true,
+    "final_approver": "제품 책임자",
+    "purpose": "사용자 용어, 기술 표준명, 과거 검색 별칭의 전환 정책을 코드 밖에서 관리"
+  },
+  "policy": [
+    "실제 사용자 화면에서는 권장 사용자 용어를 우선한다.",
+    "WBS·RFP·PRD처럼 업계에서 널리 통용되는 표준 약어는 억지로 한글로 대체하지 않는다. 최초 노출에서는 약어와 뜻을 병기하고, 같은 화면의 반복 노출에서는 약어만 사용한다.",
+    "표준 약어가 현재 산출물의 실제 의미와 다르면 쉬운 말로 덮지 않고 산출물 정의부터 바로잡는다. 특히 RFP는 대외 제안요청서와 내부 요구사항 기준 문서를 구분한다.",
+    "기술 설명·API·코드 문서에서는 현재 용어와 기술 표준명을 병기할 수 있다.",
+    "Scope, Governance, Sandbox처럼 뜻이 넓은 단어는 단독으로 노출하지 않고 대상과 목적을 함께 적는다.",
+    "과거 별칭은 검색과 인수인계를 위해 보존하되 신규 UI에는 노출하지 않는다.",
+    "팀 권장안은 신규 화면과 문서의 기본값으로 사용하되 API·DB·코드 식별자는 별도 마이그레이션 승인 없이 바꾸지 않는다."
+  ],
+  "status_definitions": {
+    "권장안": "신규 사용자 화면과 설명 문서에 우선 적용할 팀 권장 표현",
+    "현행 유지": "현재 표현과 의미 경계가 적절해 그대로 사용하는 용어",
+    "표준 약어 유지": "업계에서 통용되는 약어를 유지하되 최초 노출·도움말에서 전체 뜻과 이 시스템에서의 의미를 병기하는 용어",
+    "기술 전용": "API·코드·운영자 문서에 유지하고 일반 사용자 UI에는 쉬운 표현으로 바꾸는 용어",
+    "과거 별칭": "검색·이력·인수인계 목적으로만 보존하는 과거 표현"
+  },
+  "term_overrides": {
+    "FLOW-01": {
+      "user": "RFP",
+      "english": "Request for Proposal",
+      "tech": "rfp",
+      "status": "표준 약어 유지",
+      "definition": "AI Factory Studio에서 RFP는 사용자의 요구를 검증 가능한 형태로 확정해 후속 기획·설계·구현·검증의 기준으로 사용하는 요구사항 계약 문서입니다. 일반적인 대외 발주의 제안요청서와 역할이 다를 수 있으므로 두 문서를 같은 것으로 오인하지 않습니다.",
+      "guidance": "화면 제목과 반복 표시는 'RFP'를 유지합니다. 최초 진입·도움말에서는 현재 내부 산출물을 'RFP(요구사항 정의서)'로 설명하고, 외부 공급자에게 제안을 요청하는 문서일 때만 'RFP(제안요청서)'라고 표시합니다."
+    },
+    "FLOW-03": {
+      "user": "PRD",
+      "english": "Product Requirements Document",
+      "tech": "prd",
+      "status": "표준 약어 유지",
+      "definition": "RFP에서 확정한 요구를 제품 기능·사용 흐름·수용 기준으로 구체화한 제품 요구사항 문서입니다.",
+      "guidance": "화면 제목과 반복 표시는 'PRD'를 유지하고 최초 노출에서는 'PRD(제품 요구사항 정의서)'로 병기합니다. 버튼은 'PRD 검토', 'PRD 승인'처럼 행동을 명확히 표시합니다."
+    },
+    "FLOW-07": {
+      "user": "WBS",
+      "english": "Work Breakdown Structure",
+      "tech": "wbs",
+      "status": "표준 약어 유지",
+      "definition": "프로젝트 목표와 산출물을 실행 가능한 작업 단위로 계층적으로 분해한 작업분해구조입니다.",
+      "guidance": "화면 제목과 반복 표시는 'WBS'를 유지하고 최초 노출에서는 'WBS(작업분해구조)'로 병기합니다. 행동 버튼은 'WBS 작성 시작', 'WBS 검토', 'WBS 승인'처럼 사용자의 다음 행동을 함께 표시합니다."
+    },
+    "PROD-20": {
+      "user": "프로젝트 보관함",
+      "english": "Project Archive",
+      "tech": "vault",
+      "status": "과거 별칭",
+      "definition": "완료·중단·보관된 앱 제작 프로젝트와 산출물을 다시 찾는 보관 영역입니다.",
+      "guidance": "신규 UI에서는 '프로젝트 보관함'을 사용하고 Vault는 과거 검색 별칭으로만 유지합니다."
+    },
+    "ORG-12": {
+      "user": "접근 범위",
+      "english": "Authorization Scope",
+      "tech": "scope",
+      "status": "권장안",
+      "definition": "사용자가 특정 회사·조직·데이터·기능에 접근할 수 있는 경계를 뜻합니다.",
+      "guidance": "Scope를 단독 노출하지 말고 '조직 접근 범위', '데이터 접근 범위', '작업 범위'처럼 대상을 명시합니다."
+    },
+    "KNOW-09": {
+      "user": "관계 기반 지식 검색",
+      "english": "Graph-based Knowledge Retrieval",
+      "tech": "graph_rag",
+      "status": "기술 전용",
+      "definition": "문서 유사도뿐 아니라 회사·공정·설비·지표·의사결정 간 관계를 따라 근거를 찾는 검색 방식입니다.",
+      "guidance": "일반 사용자에게는 '관계 기반 지식 검색'으로 설명하고 Graph RAG는 기술 설계에서만 병기합니다."
+    },
+    "FLOW-31": {
+      "user": "코드 품질 검토 에이전트",
+      "english": "Code Quality Reviewer",
+      "tech": "reviewer",
+      "status": "권장안",
+      "definition": "생성 코드의 요구사항 충족, 회귀 위험, 구조와 품질을 검토하고 재작업 여부를 제안하는 에이전트입니다.",
+      "guidance": "사용자 화면에서는 역할을 드러내는 전체 명칭을 사용하고 Reviewer는 실행 로그·코드에서만 사용합니다."
+    },
+    "FLOW-32": {
+      "user": "품질 검증 에이전트",
+      "english": "Quality Assurance Agent",
+      "tech": "qa",
+      "status": "권장안",
+      "definition": "테스트·보안 검사·기동 검사 등 결정론적 검증 결과를 종합해 산출물의 품질 상태를 판정하는 에이전트입니다.",
+      "guidance": "QA 약어는 기술 문맥에서 유지하고 사용자 화면에서는 '품질 검증 에이전트'로 표시합니다."
+    },
+    "FLOW-33": {
+      "user": "파이프라인 품질 감독 에이전트",
+      "english": "Pipeline Quality Supervisor",
+      "tech": "supervisor",
+      "status": "권장안",
+      "definition": "앱 생성 파이프라인의 품질 판정과 재작업·중단·승격 경로를 감독하는 내부 에이전트입니다.",
+      "guidance": "제품 비서 Jarvis와 혼동하지 않도록 반드시 '파이프라인 품질 감독' 역할을 붙여 표시합니다."
+    },
+    "RUN-12": {
+      "user": "문맥 기반 권한 제어",
+      "english": "Attribute-Based Access Control",
+      "tech": "abac",
+      "status": "기술 전용",
+      "definition": "사용자 역할뿐 아니라 회사·조직·데이터 등급·행동·현재 문맥의 속성을 함께 평가하는 권한 제어 방식입니다.",
+      "guidance": "일반 사용자 UI에는 '문맥 기반 권한 제어'로 설명하고 ABAC는 보안 설계와 관리자 도움말에서만 병기합니다."
+    },
+    "RUN-17": {
+      "user": "격리 실행환경",
+      "english": "Isolated Runtime",
+      "tech": "sandbox",
+      "status": "기술 전용",
+      "definition": "생성 코드·가상회사·시나리오가 운영 데이터와 권한에 직접 영향을 주지 않도록 분리해 실행하는 환경입니다.",
+      "guidance": "UI에서는 목적에 맞게 '미리보기 격리환경', '가상회사 검증환경', '시뮬레이션 실험환경'으로 구체화합니다."
+    },
+    "TWIN-01": {
+      "user": "디지털트윈(상위 개념)",
+      "english": "Digital Twin",
+      "tech": "digital_twin",
+      "status": "기술 전용",
+      "definition": "현실의 대상·상태·관계·변화를 데이터와 계산 모델로 재현하는 상위 기술 개념입니다.",
+      "guidance": "제품 소개와 사용자 화면에서는 범용어보다 '제조 경영 디지털트윈'을 우선 사용합니다."
+    },
+    "DEC-22": {
+      "user": "통합 프로젝트 관제",
+      "english": "Multi-Project Control",
+      "tech": "boardroom",
+      "status": "과거 별칭",
+      "definition": "여러 앱 제작 프로젝트의 상태·의존성·결정 대기를 한 화면에서 조정하는 관제 기능입니다.",
+      "guidance": "Boardroom은 과거 검색 별칭으로만 유지하고 신규 UI에는 '통합 프로젝트 관제'를 사용합니다."
+    },
+    "ASST-04": {
+      "user": "Jarvis",
+      "english": "Enterprise AI Assistant",
+      "tech": "global_supervisor",
+      "status": "과거 별칭",
+      "definition": "프로젝트 Task ID 없이 현재 사용자·회사·조직·선택 객체의 문맥을 이해하고 안내·조회·제어를 중개하는 전역 AI 비서입니다.",
+      "guidance": "신규 제품 UI에는 Jarvis를 사용합니다. Global Supervisor는 과거 내부 명칭으로만 검색 가능하게 보존합니다."
+    },
+    "ASST-10": {
+      "user": "경영 브리핑 에이전트",
+      "english": "Enterprise Briefing Agent",
+      "tech": "enterprise_briefing_agent",
+      "status": "기술 전용",
+      "definition": "전사 실적·전망·위험·의사결정 대기를 근거와 함께 경영진 브리핑으로 구성하는 전문 에이전트입니다.",
+      "guidance": "사용자는 Jarvis의 '경영 브리핑' 기능으로 접하고, 개별 에이전트 이름은 관리·설계 화면에서만 노출합니다."
+    },
+    "INT-09": {
+      "user": "외부 참여 시스템 연계 경계",
+      "english": "External Engagement Integration Boundary",
+      "tech": "external_engagement_boundary",
+      "status": "권장안",
+      "definition": "외부 거래처·통관사·운송사가 입력하는 기존 시스템의 데이터를 연계하되 경영 시스템 자체는 외부에 개방하지 않는 경계 원칙입니다.",
+      "guidance": "특정 LPL 제품에 종속시키지 말고 회사별 외부 참여 시스템을 Connector·MCP로 연계하는 공통 원칙으로 사용합니다."
+    },
+    "INT-10": {
+      "user": "외부 참여자 업무 시스템(예: LPL)",
+      "english": "External Engagement System Example: LPL",
+      "tech": "lpl_example",
+      "status": "기술 전용",
+      "definition": "거래처·통관사·운송사 등 외부 참여자가 필요한 데이터를 입력하는 특정 회사의 기존 시스템 사례입니다.",
+      "guidance": "제품 공통 기능명으로 사용하지 않습니다. 외부 참여 시스템 연계 경계를 설명하는 회사별 사례로만 기록합니다."
+    },
+    "INT-19": {
+      "user": "공식 외부정보 수집",
+      "english": "Official External Data Collection",
+      "tech": "web_crawling",
+      "status": "기술 전용",
+      "definition": "정부·공공기관·공식 통계·신뢰 가능한 원천에서 외부환경 지표를 정기 수집하고 출처·기준시점·개정 이력을 함께 보존하는 기능입니다.",
+      "guidance": "공식 API·공개 파일·검증된 발표자료를 우선하고 웹 크롤링은 다른 수단이 없을 때만 사용합니다."
+    },
+    "OPS-01": {
+      "user": "정책·통제 체계",
+      "english": "Governance",
+      "tech": "governance",
+      "status": "권장안",
+      "definition": "데이터·앱·에이전트·권한·릴리스의 책임자, 승인 규칙, 변경 이력과 예외 처리를 정하는 통제 체계입니다.",
+      "guidance": "Governance를 단독 메뉴로 쓰지 말고 '데이터 거버넌스', '앱 통제', '에이전트 자산 통제'처럼 대상을 명시합니다."
+    },
+    "OPS-23": {
+      "user": "품질 평가 점수",
+      "english": "Quality Evaluation Score",
+      "tech": "quality_score",
+      "status": "권장안",
+      "definition": "결정론적 검사, AI 평가, 사용자 검토 결과를 구분해 보여 주는 산출물 품질 지표입니다.",
+      "guidance": "단일 숫자만 제시하지 말고 결정론적 근거·AI 판단·사용자 판단의 구성과 미측정 상태를 함께 표시합니다."
+    },
+    "UI-14": {
+      "user": "운영 계측",
+      "english": "Operations Telemetry",
+      "tech": "telemetry",
+      "status": "권장안",
+      "definition": "모델 사용량·비용·지연·오류·품질 결과와 시스템 상태를 수집해 운영자가 확인하는 기능입니다.",
+      "guidance": "일반 사용자 메뉴는 목적에 따라 '사용 모델·비용 현황' 또는 '품질 결과'로 구체화하고 관리자 화면에서만 '운영 계측'을 사용합니다."
+    }
+  }
+}

@@ -1,0 +1,122 @@
+.afs-scope .terminology-bar { min-height: 68px; }
+.afs-scope .terminology-bar > div:first-child { display: grid; gap: 4px; }
+.afs-scope .terminology-bar > div:first-child > b { color: #fff; font-size: 17px; }
+.afs-scope .terminology-bar > div:first-child > span { color: var(--bar-fg-muted); font-size: 12px; }
+
+.afs-scope .terminology-page {
+  overflow-y: auto;
+  padding: 26px clamp(22px, 4vw, 62px) 56px;
+  background:
+    radial-gradient(circle at 92% 2%, rgba(26, 138, 149, .10), transparent 26rem),
+    var(--surface-page);
+}
+
+.afs-scope .terminology-intro {
+  display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; align-items: end;
+  max-width: 1500px; margin: 0 auto 22px;
+}
+.afs-scope .terminology-intro small { color: var(--cyan); font-size: 12px; font-weight: 900; letter-spacing: .12em; }
+.afs-scope .terminology-intro h1 { margin: 8px 0 8px; font-size: clamp(25px, 2.6vw, 38px); line-height: 1.18; letter-spacing: -.05em; }
+.afs-scope .terminology-intro > div > p { max-width: 880px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+.afs-scope .terminology-intro aside { padding: 17px 18px; border-left: 4px solid var(--orange); background: var(--surface-card); box-shadow: 0 8px 26px rgba(16, 26, 45, .07); }
+.afs-scope .terminology-intro aside b { display: block; margin-bottom: 6px; font-size: 14px; }
+.afs-scope .terminology-intro aside p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+.afs-scope .terminology-summary {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  max-width: 1500px; margin: 0 auto 20px; border: 1px solid var(--line); border-radius: 12px;
+  overflow: hidden; background: var(--surface-card);
+}
+.afs-scope .terminology-summary > div { display: grid; gap: 2px; padding: 15px; border-right: 1px solid var(--line); }
+.afs-scope .terminology-summary > div:last-child { border-right: 0; }
+.afs-scope .terminology-summary strong { font-size: 21px; color: var(--action-primary-bg); }
+.afs-scope .terminology-summary span { color: var(--muted); font-size: 12px; }
+
+.afs-scope .terminology-tabs { display: flex; max-width: 1500px; margin: 0 auto 16px; border-bottom: 1px solid var(--line); }
+.afs-scope .terminology-tabs button { padding: 12px 18px; border: 0; border-bottom: 3px solid transparent; color: var(--muted); background: transparent; font-size: 13px; font-weight: 800; }
+.afs-scope .terminology-tabs button.active { border-bottom-color: var(--action-primary-bg); color: var(--action-primary-bg); }
+
+.afs-scope .terminology-dictionary, .afs-scope .conflict-grid, .afs-scope .terminology-guide { max-width: 1500px; margin: 0 auto; }
+.afs-scope .term-controls {
+  display: grid; grid-template-columns: minmax(280px, 1fr) 250px 180px auto; gap: 12px; align-items: end;
+  position: sticky; top: -26px; z-index: 3; padding: 14px; border: 1px solid var(--line);
+  background: rgba(255,255,255,.96); box-shadow: 0 7px 22px rgba(16, 26, 45, .08);
+}
+.afs-scope .term-controls label { display: grid; gap: 5px; }
+.afs-scope .term-controls label span { color: var(--muted); font-size: 12px; font-weight: 800; }
+.afs-scope .term-controls input, .afs-scope .term-controls select { height: 40px; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #fff; font-size: 13px; }
+.afs-scope .term-controls > strong { min-width: 86px; padding: 10px 12px; text-align: center; color: var(--action-primary-bg); font-size: 13px; }
+
+.afs-scope .term-list { display: grid; gap: 8px; margin-top: 12px; }
+.afs-scope .term-row {
+  display: grid; grid-template-columns: 86px minmax(160px, .85fr) 28px minmax(190px, 1fr) minmax(230px, 1.25fr) 90px;
+  gap: 14px; align-items: center; padding: 15px 16px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface-card); box-shadow: 0 3px 12px rgba(16, 26, 45, .035);
+}
+.afs-scope .term-row small { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.afs-scope .term-row b { display: block; font-size: 14px; line-height: 1.4; }
+.afs-scope .term-row span, .afs-scope .term-row p { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.afs-scope .term-row p { margin: 5px 0 0; }
+.afs-scope .term-row code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }
+.afs-scope .term-row-id { display: grid; gap: 6px; }
+.afs-scope .term-row-id code { color: var(--action-primary-bg); font-weight: 900; }
+.afs-scope .term-row-id span { width: fit-content; padding: 3px 6px; border-radius: 4px; background: var(--surface-sunken); font-weight: 800; }
+.afs-scope .term-arrow { color: var(--cyan); font-size: 20px; font-weight: 900; text-align: center; }
+.afs-scope .term-recommended b { color: var(--action-primary-bg); }
+.afs-scope .term-technical code { display: inline-block; padding: 4px 7px; border-radius: 5px; color: #194b56; background: #e9f5f5; }
+
+.afs-scope .term-detail { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 10px; }
+.afs-scope .term-detail summary { width: fit-content; color: var(--action-primary-bg); cursor: pointer; font-size: 12px; font-weight: 900; }
+.afs-scope .term-detail[open] summary { margin-bottom: 11px; }
+.afs-scope .term-detail > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 18px; padding: 13px 14px; border-radius: 8px; background: var(--surface-sunken); }
+.afs-scope .term-detail section { min-width: 0; }
+.afs-scope .term-detail section small { color: var(--action-primary-bg); }
+.afs-scope .term-detail section p { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.55; }
+.afs-scope .term-detail section code { display: block; overflow-wrap: anywhere; color: var(--muted); }
+
+.afs-scope .term-status { display: inline-flex; justify-content: center; align-items: center; min-height: 28px; padding: 5px 8px; border-radius: 14px; font-size: 12px; font-weight: 900; text-align: center; }
+.afs-scope .term-status.recommended { color: var(--state-success-fg); background: var(--state-success-bg); }
+.afs-scope .term-status.accepted { color: var(--state-info-fg); background: var(--state-info-bg); }
+.afs-scope .term-status.standard { color: #174a63; background: #e5f4f8; }
+.afs-scope .term-status.technical { color: #4c4d83; background: #eeeefe; }
+.afs-scope .term-status.review { color: var(--state-warn-fg); background: var(--state-warn-bg); }
+.afs-scope .term-status.legacy { color: var(--state-unknown-fg); background: var(--state-unknown-bg); }
+.afs-scope .term-empty { display: grid; gap: 5px; place-items: center; min-height: 180px; border: 1px dashed var(--line); color: var(--muted); background: var(--surface-card); }
+
+.afs-scope .conflict-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.afs-scope .conflict-card { display: flex; flex-direction: column; min-height: 270px; padding: 18px; border: 1px solid var(--line); border-top: 4px solid var(--action-primary-bg); background: var(--surface-card); box-shadow: 0 5px 17px rgba(16, 26, 45, .05); }
+.afs-scope .conflict-priority { color: var(--cyan); font-size: 12px; font-weight: 950; letter-spacing: .08em; }
+.afs-scope .conflict-card h3 { min-height: 48px; margin: 8px 0 14px; font-size: 16px; line-height: 1.45; }
+.afs-scope .conflict-card dl { display: grid; gap: 13px; margin: 0 0 16px; }
+.afs-scope .conflict-card dt { margin-bottom: 4px; color: var(--muted); font-size: 12px; font-weight: 800; }
+.afs-scope .conflict-card dd { margin: 0; font-size: 13px; line-height: 1.55; }
+.afs-scope .conflict-card .term-status { width: fit-content; margin-top: auto; }
+
+.afs-scope .terminology-guide { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.afs-scope .terminology-guide article { display: grid; grid-template-columns: 44px 1fr; align-items: center; min-height: 90px; padding: 16px; border: 1px solid var(--line); background: var(--surface-card); }
+.afs-scope .terminology-guide article > span { color: var(--cyan); font-size: 20px; font-weight: 950; }
+.afs-scope .terminology-guide article p { margin: 0; font-size: 14px; line-height: 1.6; }
+.afs-scope .terminology-source { grid-column: 1 / -1; display: grid; gap: 7px; padding: 20px; border-left: 5px solid var(--action-primary-bg); background: var(--surface-sunken); }
+.afs-scope .terminology-source small { color: var(--muted); font-size: 12px; font-weight: 800; }
+.afs-scope .terminology-source b, .afs-scope .terminology-source code { font-size: 13px; }
+.afs-scope .terminology-source p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+
+@media (max-width: 1180px) {
+  .afs-scope .terminology-summary { grid-template-columns: repeat(4, 1fr); }
+  .afs-scope .terminology-summary > div:nth-child(4n) { border-right: 0; }
+  .afs-scope .term-row { grid-template-columns: 78px minmax(140px, .8fr) 22px minmax(170px, 1fr) minmax(210px, 1fr); }
+  .afs-scope .term-row > .term-status { grid-column: 5; justify-self: end; }
+  .afs-scope .conflict-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .afs-scope .terminology-intro { grid-template-columns: 1fr; }
+  .afs-scope .term-controls { grid-template-columns: 1fr 1fr; position: static; }
+  .afs-scope .term-row { grid-template-columns: 86px 1fr; }
+  .afs-scope .term-arrow { display: none; }
+  .afs-scope .term-row > .term-status { grid-column: auto; justify-self: start; }
+  .afs-scope .term-detail { grid-column: 1 / -1; }
+  .afs-scope .term-detail > div { grid-template-columns: 1fr; }
+  .afs-scope .conflict-grid, .afs-scope .terminology-guide { grid-template-columns: 1fr; }
+  .afs-scope .terminology-source { grid-column: 1; }
+}
