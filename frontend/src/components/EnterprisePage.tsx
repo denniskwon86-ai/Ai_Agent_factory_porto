@@ -386,7 +386,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
 
         {/* Decision Focus */}
         <section style={{ ...card, minHeight: 180 }}>
-          <div style={{ fontSize: 11, letterSpacing: '.08em',
+          <div style={{ fontSize: 12, letterSpacing: '.08em',
             color: 'var(--surface-text-faint)', fontFamily: 'var(--font-mono, monospace)' }}>
             DECISION FOCUS
           </div>
@@ -425,7 +425,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
 
         {/* ── ④ Trust Foundation (§4.6) — 숫자보다 «상태의 완전성» 을 먼저 ── */}
         <section>
-          <div style={{ fontSize: 11, letterSpacing: '.08em', marginBottom: 8,
+          <div style={{ fontSize: 12, letterSpacing: '.08em', marginBottom: 8,
             color: 'var(--surface-text-faint)', fontFamily: 'var(--font-mono, monospace)' }}>
             TRUST FOUNDATION
           </div>
@@ -454,7 +454,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
               </div>
             ))}
           </div>
-          <div style={{ fontSize: 11, marginTop: 8, fontFamily: 'var(--font-mono, monospace)',
+          <div style={{ fontSize: 12, marginTop: 8, fontFamily: 'var(--font-mono, monospace)',
             color: 'var(--surface-text-faint)' }}>
             기준시각 {d?.generated_at ? new Date(d.generated_at).toLocaleString() : '—'}
             {' · '}실행 문맥 {ctx.entityMode || 'REAL'} · {ctx.scopeNodeId || '조직 미지정'}

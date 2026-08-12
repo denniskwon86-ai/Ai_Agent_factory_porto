@@ -30,6 +30,7 @@ FRONT = "http://localhost:5173"
 ADMIN = "hikwon@lsmnm.com"
 NORMAL = "hikwon_16@lsmnm.com"
 ANON = ""
+DEFAULT_PASSWORD = "pass:"
 
 VIEWPORTS = [(1280, 720), (1440, 900)]
 
@@ -37,10 +38,10 @@ VIEWPORTS = [(1280, 720), (1440, 900)]
 # 경로는 `>` 로 나눈다. 첫 조각은 전체 메뉴에서 여는 화면, 그 뒤는 모달 안 좌측 레일 항목.
 # 의사결정 센터·대내외 발간은 독립 화면이 아니라 협업 모달의 탭이므로 반드시 두 단계다.
 SHOTS = [
-    ("런처-미이관", ADMIN, ""),          # 대비용 — 아직 다크로 남아 있는 화면
+    ("로그인-미인증", ANON, ""),
+    ("경영홈-관리자", ADMIN, ""),
     ("기준정보-관리자", ADMIN, "기준정보 마스터"),
     ("기준정보-일반", NORMAL, "기준정보 마스터"),
-    ("기준정보-익명", ANON, "기준정보 마스터"),
     ("지식허브-관리자", ADMIN, "지식 허브"),
     ("협업-관리자", ADMIN, "협업"),
     ("의사결정-관리자", ADMIN, "협업>의사결정 센터"),
@@ -48,7 +49,6 @@ SHOTS = [
     # 이관 3/10 — 권한 세 갈래를 모두 본다. 개정 권한은 관리자에게만 있어야 한다.
     ("업무표준-관리자", ADMIN, "업무표준"),
     ("업무표준-일반", NORMAL, "업무표준"),
-    ("업무표준-익명", ANON, "업무표준"),
     ("업무표준-지침", ADMIN, "업무표준>업무지침"),
     # `#…` = 작업면 목록에서 실제 항목을 고른다. 선택 없는 빈 화면만 찍지 않는다.
     ("업무표준-규정상세", ADMIN, "업무표준>#품질 검증"),
@@ -57,32 +57,27 @@ SHOTS = [
     # 이관 4/10 — 조직·권한. 명부는 개인정보이므로 권한 세 갈래를 모두 본다.
     ("조직권한-관리자", ADMIN, "조직·권한"),
     ("조직권한-일반", NORMAL, "조직·권한"),
-    ("조직권한-익명", ANON, "조직·권한"),
     ("조직권한-부서상세", ADMIN, "조직·권한>#마케팅"),
     ("조직권한-사용자", ADMIN, "조직·권한>사용자"),
     ("조직권한-내권한", NORMAL, "조직·권한>내 권한"),
     # 이관 5/10 — 거버넌스. «0건»과 «못 봤다»의 구분이 이 화면의 전부이므로 권한 세 갈래를 본다.
     ("거버넌스-관리자", ADMIN, "거버넌스"),
     ("거버넌스-일반", NORMAL, "거버넌스"),
-    ("거버넌스-익명", ANON, "거버넌스"),
     ("거버넌스-계약", ADMIN, "거버넌스>데이터 계약"),
     ("거버넌스-외부지표", ADMIN, "거버넌스>외부지표 준비도"),
     ("거버넌스-보정", ADMIN, "거버넌스>보정 목록"),
     # 이관 6/10 — 에이전트 통제소. 구성 변경은 관리자만이어야 한다.
     ("에이전트-관리자", ADMIN, "에이전트 통제소"),
     ("에이전트-일반", NORMAL, "에이전트 통제소"),
-    ("에이전트-익명", ANON, "에이전트 통제소"),
     ("에이전트-상세", ADMIN, "에이전트 통제소>#RFP 분석가"),
     ("에이전트-흐름", ADMIN, "에이전트 통제소>실행 흐름"),
     ("에이전트-템플릿", ADMIN, "에이전트 통제소>워크플로우 템플릿"),
     # 이관 8/10 — 스킬 개선안. 승인은 에이전트 행동 규칙을 영구히 바꾸므로 권한을 본다.
     ("스킬개선안-관리자", ADMIN, "스킬 진화"),
     ("스킬개선안-일반", NORMAL, "스킬 진화"),
-    ("스킬개선안-익명", ANON, "스킬 진화"),
     # 이관 9/10 — 전사 브리핑. 요약 화면이 다른 통제를 우회하지 않는지 본다.
     ("브리핑-관리자", ADMIN, "전사 브리핑"),
     ("브리핑-일반", NORMAL, "전사 브리핑"),
-    ("브리핑-익명", ANON, "전사 브리핑"),
     ("브리핑-데이터상태", ADMIN, "전사 브리핑>데이터 상태"),
     ("브리핑-비용", ADMIN, "전사 브리핑>비용"),
     ("브리핑-일반-데이터상태", NORMAL, "전사 브리핑>데이터 상태"),
@@ -98,34 +93,25 @@ def close_dialogs(page: Page) -> None:
         page.wait_for_timeout(300)
 
 
-def switch_user(page: Page, uid: str) -> None:
-    """활동 사용자를 바꾼다. 값이 없으면 익명.
+def login_as(page: Page, uid: str) -> None:
+    """현재 세션을 끝내고 지정 계정으로 로그인한다. 값이 없으면 로그인 화면에 머문다.
 
-    ⚠️ 셀렉트로만 바꾸지 않는다. 사용자 명부에 자격 검사가 붙은 뒤로는 **익명 상태에서 목록이
-      비어** 셀렉트가 아예 없다(그때는 계정을 직접 입력해 진입한다). 목록에 의존하면 여기서
-      타임아웃이 나고, 그건 스크립트 문제가 아니라 «아무도 로그인할 수 없다» 는 제품 사실이다.
+    2026-08-09 이후 사용자 전환 셀렉트는 제거됐고 로그인 세션이 제품의 유일한 진입점이다.
+    캡처가 옛 전환기를 찾으면 화면 구현은 정상이어도 30초 뒤 실패하므로 실제 인증 계약을 따른다.
+    미인증 사용자는 업무 화면을 볼 수 없으므로 권한별 패널 캡처가 아니라 로그인 화면 1장만 남긴다.
     """
-    # ⚠️ 모달이 열려 있으면 `#root[inert]` 때문에 상단 바를 **클릭할 수 없다.** 셀렉트는 통과했지만
-    #   버튼은 막힌다 — 그래서 먼저 닫는다(실측: 여기서 30초 타임아웃이 났다).
     close_dialogs(page)
+    logout = page.get_by_role("button", name="로그아웃")
+    if logout.count():
+        logout.first.click()
+        page.get_by_role("button", name="로그인").wait_for(timeout=15_000)
     if not uid:
-        anon = page.locator("button", has_text="익명")
-        if anon.count():
-            anon.first.click()
-            page.wait_for_timeout(1500)
-            return
-    sel = page.locator('select[aria-label="활동 사용자 선택"]')
-    if sel.count():
-        try:
-            sel.first.select_option(value=uid)
-            page.wait_for_timeout(1500)
-            return
-        except Exception:
-            pass                              # 목록에 없는 계정 — 아래 입력으로 넘어간다
-    box = page.locator('input[aria-label="활동 사용자 직접 입력"]')
-    box.first.fill(uid)
-    page.locator("button", has_text="전환").first.click()
-    page.wait_for_timeout(1800)
+        return
+    page.get_by_label("아이디").fill(uid)
+    page.get_by_label("비밀번호").fill(DEFAULT_PASSWORD)
+    page.get_by_role("button", name="로그인").click()
+    page.get_by_role("button", name="로그아웃").wait_for(timeout=20_000)
+    page.wait_for_timeout(1500)
 
 
 def open_panel(page: Page, path: str) -> tuple[bool, str]:
@@ -420,15 +406,20 @@ def main() -> int:
                     return
                 errors.append(m.text)
             page.on("console", _console)
+            # 네이티브 alert/confirm 은 화면 전체를 막는다. 자동으로 닫되 결함으로 남긴다.
+            page.on("dialog", lambda d: (errors.append(f"네이티브 대화상자: {d.message}"), d.dismiss()))
             # ⚠️ `networkidle` 은 쓰지 않는다 — 앱이 상태를 계속 폴링해서 idle 이 오지 않는다.
             page.goto(FRONT, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_selector("select", timeout=30_000)   # 상단 바가 붙을 때까지
-            page.wait_for_timeout(2500)                        # 첫 데이터 로딩
+            page.get_by_role("button", name="로그인").wait_for(timeout=30_000)
 
             for tag, uid, label in shots:
                 try:
-                    switch_user(page, uid)
-                    opened, why = open_panel(page, label)
+                    login_as(page, uid)
+                    if uid:
+                        opened, why = open_panel(page, label)
+                    else:
+                        opened = page.get_by_role("button", name="로그인").count() == 1
+                        why = "" if opened else "미인증 로그인 화면이 아니다"
                     m = measure(page)
                     path = out / f"{tag}_{w}x{h}.png"
                     page.screenshot(path=str(path))

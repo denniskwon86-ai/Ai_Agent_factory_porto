@@ -3,9 +3,9 @@
 // ## 설계가 못박은 것
 //
 // · 상단: `새 업무 만들기` 와 **진행 상태 필터**
-// · 본문: **진행 중 / 내 프로젝트 / Mega / Releases / Archive**
+// · 본문: **미완료 / 내 프로젝트 / Mega / Releases / Archive**
 // · 프로젝트 **카드 최소 320px, 최대 3열**
-// · 카드 **주 CTA 는 `열기`**, 보조 메뉴에 복제·삭제·관리
+// · 카드 **주 CTA 는 `열기`**, 보조 메뉴에 목록에서 내리기·관리
 //
 // ## 왜 다시 만드는가
 //
@@ -27,7 +27,7 @@ type Project = {
 type Bucket = 'active' | 'mine' | 'mega' | 'releases' | 'archive';
 
 const BUCKETS: { id: Bucket; label: string; hint: string }[] = [
-  { id: 'active', label: '진행 중', hint: '지금 돌고 있는 작업' },
+  { id: 'active', label: '미완료', hint: '완료되지 않았거나 진행률을 아직 집계하지 못한 작업' },
   { id: 'mine', label: '내 프로젝트', hint: '내가 만든 독립 프로젝트' },
   { id: 'mega', label: 'Mega', hint: '여러 프로젝트를 묶어 운영하는 상위 단위' },
   { id: 'releases', label: 'Releases', hint: '완성되어 전달 가능한 결과물' },
@@ -148,7 +148,7 @@ export function BuildPage({
 
       <p style={{ fontSize: 12, color: 'var(--surface-text-faint)', margin: 0 }}>
         {BUCKETS.find((b) => b.id === bucket)?.hint}
-        {bucket === 'active' && ' — 서버가 진행 상태를 따로 주지 않아 «완료되지 않은 것»으로 봅니다.'}
+        {bucket === 'active' && ' — 서버가 실행 상태를 제공하지 않은 항목은 «진행률 집계 전»으로 구분합니다.'}
       </p>
 
       {/* ── 본문: 카드 최소 320px · 최대 3열 (§5.2) ───────────────────── */}
@@ -233,7 +233,7 @@ export function BuildPage({
                   </div>
                 </div>
 
-                {/* §5.2 주 CTA 는 «열기» · 보조에 복제·삭제·관리 */}
+                {/* §5.2 주 CTA 는 «열기». 이 동작은 삭제가 아니라 목록 비노출이므로 이름도 사실대로 쓴다. */}
                 <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
                   <button onClick={() => onOpenProject(p.id)} style={{
                     height: 36, padding: '0 18px', fontSize: 13, fontWeight: 700, borderRadius: 6,
@@ -245,7 +245,7 @@ export function BuildPage({
                     border: '1px solid var(--action-secondary-border)',
                     background: 'var(--action-secondary-bg)',
                     color: 'var(--action-danger-quiet-fg)',
-                  }}>삭제</button>
+                  }}>목록에서 내리기</button>
                 </div>
               </div>
             );

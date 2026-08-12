@@ -41,7 +41,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 /** `data` 밖의 통제 메타데이터(`write_blocked`)까지 보존해야 하는 요청에 쓴다.
  *  ⚠️ 위 `req` 는 `.data` 만 꺼내므로 그 값들이 **조용히 버려진다.** */
-async function reqEnvelope<T>(method: string, path: string, body?: unknown): Promise<any> {
+async function reqEnvelope(method: string, path: string, body?: unknown): Promise<any> {
   const r = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -89,7 +89,7 @@ export const crosswalkApi = {
   systems: () => req<Sys[]>('GET', `${X}/systems`),
 
   systemsWithRights: async (): Promise<SystemsResult> => {
-    const j = await reqEnvelope<Sys[]>('GET', `${X}/systems`);
+    const j = await reqEnvelope('GET', `${X}/systems`);
     return { rows: (j.data as Sys[]) || [], writeBlocked: String(j.write_blocked || '') };
   },
   schema: (sid: string) => req<Field[]>('GET', `${X}/systems/${sid}/schema`),

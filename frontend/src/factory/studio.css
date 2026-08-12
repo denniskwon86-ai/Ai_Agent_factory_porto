@@ -19,8 +19,10 @@
 
 .afs-studio {
   display: grid;
-  /* 헤더 · 단계 지도 · 본체. 앞의 둘은 `auto` — 내용이 늘면 늘어나고, 본체가 남은 높이를 받는다. */
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /* 프로젝트 헤더 · 실행 통제 · 단계 지도 · 본체. 앞의 셋은 내용 높이, 본체가 남은 높이를 받는다.
+   * 실제 자식은 네 개인데 행을 세 개만 선언하면 마지막 본체가 암시적 행으로 밀리며 단계 지도와
+   * 겹칠 수 있다. 전체 제작 단계를 항상 보인다는 Studio의 핵심 계약이므로 명시적으로 고정한다. */
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -365,7 +367,7 @@
 .afs-studio .wbs-item[data-kind='active'] { border-color: var(--ls-red); box-shadow: 0 0 0 2px rgba(250, 0, 45, .07); }
 .afs-studio .wbs-item[data-kind='active'] i { background: var(--ls-red); }
 .afs-studio .wbs-item[data-kind='blocked'] { opacity: .65; }
-/* ★ [2026-08-07 전환 게이트] «사람 대기» 는 사용자가 **지금 움직여야 하는** 유일한 줄이다.
+/* ★ [2026-08-07 전환 게이트] «사용자 대기» 는 사용자가 **지금 움직여야 하는** 유일한 줄이다.
  *   진행(빨강)과 다른 색을 준다 — 같은 색이면 「기계가 돌고 있다」로 읽고 지나친다. */
 .afs-studio .wbs-item[data-kind='awaiting'] {
   border-color: var(--state-warn-fg);
@@ -807,6 +809,7 @@
   .afs-studio .clarify-layout { grid-template-columns: minmax(0, 1fr); }
   .afs-studio .decision-dock,
   .afs-studio .jarvis-dock { grid-template-columns: minmax(0, 1fr); }
+  .afs-studio .run-buttons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* 아직 만들지 않은 자리를 «비어 있음» 이 아니라 «다음 단계» 로 표시한다.
@@ -873,10 +876,14 @@
 .afs-studio .run-note.bad { color: var(--state-error-fg); background: var(--state-error-bg); }
 
 .afs-studio .run-buttons {
-  display: flex; flex-wrap: wrap; gap: 7px; padding: 10px 12px;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 7px;
+  padding: 10px 12px;
 }
 .afs-studio .run-buttons button {
   display: grid; gap: 2px; text-align: left;
+  min-width: 0;
   min-height: 36px; padding: 6px 11px;
   border: 1px solid var(--surface-border-strong); border-radius: 6px;
   color: var(--action-secondary-fg); background: var(--action-secondary-bg);
@@ -892,8 +899,16 @@
 .afs-studio .run-buttons button:disabled { opacity: .78; cursor: not-allowed; }
 /* 비활성 이유 — 12px 아래로 내려가지 않는다(§6). */
 .afs-studio .run-buttons button em {
-  font-size: 12px; font-style: normal; font-weight: 600;
-  color: var(--surface-text-muted); max-width: 30ch; white-space: normal;
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--surface-text-muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .afs-studio .run-form { padding: 0 12px 12px; display: grid; gap: 6px; }

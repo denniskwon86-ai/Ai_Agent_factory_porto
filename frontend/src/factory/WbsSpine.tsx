@@ -27,9 +27,9 @@ export interface WbsSpineProps {
  *  「차단」으로** 표시됐다(ViewModel 은 `'COMPLETED'` 만 완료로 봤고 실제 데이터는 `'DONE'`).
  *  판정은 `factoryViewModel` 의 `kind` 하나이고 이 컴포넌트는 그것을 **표시만** 한다. */
 const KIND_KO: Record<FactoryWbsKind, string> = {
-  // ⚠️ «사람 대기» 와 «진행» 을 가른다 — 전자는 **내가** 움직여야 하고 후자는 기다리면 된다.
+  // ⚠️ «사용자 대기» 와 «진행» 을 가른다 — 전자는 **내가** 움직여야 하고 후자는 기다리면 된다.
   //   사용자가 해야 할 일이 다르므로 같은 낱말로 묶으면 안 된다.
-  done: '완료', awaiting: '사람 대기', active: '진행', blocked: '차단', waiting: '대기',
+  done: '완료', awaiting: '사용자 대기', active: '진행', blocked: '차단', waiting: '대기',
 };
 
 /** 둘째 줄. 담당 Agent 와 차단 이유를 **있는 것만** 적는다(없는 것을 «미지정» 으로 채우지 않는다). */
@@ -95,9 +95,9 @@ export function WbsSpine({ vm, onSelectTask }: WbsSpineProps) {
 
       <div className="map-summary">
         <div><b>{counts.done}</b><small>완료</small></div>
-        {/* ⚠️ «사람 대기» 를 «진행» 에 합치지 않는다 — 사용자가 해야 할 일이 다르다.
+        {/* ⚠️ «사용자 대기» 를 «진행» 에 합치지 않는다 — 사용자가 해야 할 일이 다르다.
             합계에서도 빠뜨리지 않는다(빠지면 완료+진행+대기 ≠ 전체가 되어 표가 거짓이 된다). */}
-        <div><b>{counts.awaiting}</b><small>사람 대기</small></div>
+        <div><b>{counts.awaiting}</b><small>사용자 대기</small></div>
         <div><b>{counts.active}</b><small>진행</small></div>
         {/* 대기와 차단을 한 칸에 합치되 **차단 수를 숨기지 않는다** — 차단은 사람이 볼 것이 있다. */}
         <div>

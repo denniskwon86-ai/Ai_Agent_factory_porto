@@ -811,13 +811,15 @@ function DeliverScreen({ releaseIds, onSubmit }: {
             </div>
             {/* ⚠️ 차단 사유는 **누르기 전에** 보여 준다. 전에는 눌러야 알 수 있었다. */}
             {pre.status === 'ok' && !p?.deliverable && (
-              <Banner tone="danger" title="이 릴리스는 전달할 수 없습니다"
-                text={p?.blocked_reason || '사유를 확인하지 못했습니다.'} />
+              <Banner tone="error" title="이 릴리스는 전달할 수 없습니다">
+                {p?.blocked_reason || '사유를 확인하지 못했습니다.'}
+              </Banner>
             )}
             {pre.status === 'error' && f.release_id && (
-              <Banner tone="danger" title="릴리스를 확인하지 못했습니다"
-                text={String((pre.error as any)?.message || pre.error
-                  || '전달 조건을 읽지 못했습니다 — 0건이 아니라 조회 실패입니다.')} />
+              <Banner tone="error" title="릴리스를 확인하지 못했습니다">
+                {String((pre.error as any)?.message || pre.error
+                  || '전달 조건을 읽지 못했습니다 — 0건이 아니라 조회 실패입니다.')}
+              </Banner>
             )}
           </div>
         </Panel>

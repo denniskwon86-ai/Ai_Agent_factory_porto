@@ -28,7 +28,7 @@ import {
   ConfirmInline, EvidenceStrip, FormField, FoundationList, FoundationToolbar,
   foundationJarvis, useConfirm,
 } from '../design/DataFoundationShell';
-import { EmptyOrError, Refreshing, Metric, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
+import { EmptyOrError, Metric, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
 import { errorTitle } from '../lib/closedLoopFetch';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
 import {
