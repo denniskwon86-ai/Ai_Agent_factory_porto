@@ -105,7 +105,9 @@ def scan_projects(projects_dir: Optional[str] = None) -> Dict[str, Any]:
         projects_dir = workspace_path()
 
     out: Dict[str, Any] = {"available": True, "error": "", "projects_total": 0,
-                           "projects_observed": 0, "records_skills": 0, "by_project": {}}
+                           "projects_observed": 0, "records_skills": 0,
+                           #: [G1-C1.1] 검증 샌드박스라서 뺀 개수. 0 이 아니면 화면이 밝힌다.
+                           "projects_sandbox_excluded": 0, "by_project": {}}
     try:
         names = sorted(n for n in os.listdir(projects_dir)
                        if os.path.isdir(os.path.join(projects_dir, n)))
@@ -119,6 +121,23 @@ def scan_projects(projects_dir: Optional[str] = None) -> Dict[str, Any]:
 
     out["projects_total"] = len(names)
     for name in names:
+        # ★★★ [G1-C1.1] **검증 샌드박스는 세지 않는다.**
+        #
+        #   이 집계는 「이 자산을 쓰는 프로젝트가 몇 개인가」이고, 그 답으로 자산을 폐기할지
+        #   전사로 승격할지 정한다. 시험 산출물이 분자에 섞이면 **아무도 안 쓰는 자산이
+        #   «59개 프로젝트에서 사용 중»** 으로 보여 폐기가 영원히 막힌다. 반대로 분모에만
+        #   섞이면 실제 사용률이 실제보다 낮게 보인다. 어느 쪽이든 사람이 그 수치를 보고
+        #   결정한다.
+        #
+        #   ⚠️ 조용히 빼지 않는다 — 뺀 개수를 응답에 남긴다. 「왜 어제보다 프로젝트가
+        #     줄었나」에 답할 수 있어야 한다.
+        try:
+            from core.project_visibility import is_sandbox, read_project_ownership
+            if is_sandbox(read_project_ownership(os.path.join(projects_dir, name))):
+                out["projects_sandbox_excluded"] = out.get("projects_sandbox_excluded", 0) + 1
+                continue
+        except Exception:
+            pass                 # 판정 실패가 집계를 멈추지 않는다 — 세는 쪽으로 둔다
         path = os.path.join(projects_dir, name, SNAPSHOT_FILE)
         if not os.path.exists(path):
             continue

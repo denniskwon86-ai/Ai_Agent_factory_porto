@@ -314,3 +314,36 @@ def test_문맥_없는_옛_구독은_막지_않는다(bus):
         assert _types(q) == ["WBS_UPDATED"]
 
     _run(scenario())
+
+
+def test_결정_요청도_다른_테넌트_창으로는_가지_않는다(bus):
+    """★★ [G1-C1.1] `emit_to` 에 프로젝트 필터는 걸지 않지만 **테넌트는 건다.**
+
+    같은 사람이 여러 문맥으로 접속해 있을 수 있고, 테넌트는 「보안·계약·데이터 격리 최상위
+    경계」다. 승인자가 그 프로젝트 부서 밖에 있는 것은 정상이지만, **다른 테넌트에 있는 것은
+    정상이 아니다.**
+    ⚠️ 판정 근거(`project_id`)가 없는 알림은 대조하지 않는다 — 근거 없이 막으면 결정 요청이
+      조용히 사라진다."""
+    async def scenario():
+        await _subscribe_ctx(bus, "b@x", tenant_id="tenant_default", entity_mode="REAL")
+        await _subscribe_ctx(bus, "b@x", tenant_id="tenant_other", entity_mode="REAL")
+        q_here, q_there = _queue_of(bus, 0), _queue_of(bus, 1)
+
+        # P_A 는 tenant_default(메타에 tenant 없음 → 기본값). 같은 테넌트 창에만 가야 한다.
+        sent = bus.emit_to("DECISION_REQUESTED", {"project_id": "P_OTHER_TENANT"}, ["b@x"])
+        assert _types(q_there) == ["DECISION_REQUESTED"], "제 테넌트 창에도 안 갔다 — 고장이다"
+        assert _types(q_here) == [], "다른 테넌트 창으로 결정 요청이 갔다"
+        assert sent == 1
+
+    _run(scenario())
+
+
+def test_프로젝트_없는_알림은_테넌트로_막지_않는다(bus):
+    """대부분의 협업 알림은 프로젝트에 매이지 않는다. 근거 없이 막으면 알림이 사라진다."""
+    async def scenario():
+        await _subscribe_ctx(bus, "b@x", tenant_id="tenant_default", entity_mode="REAL")
+        q = _queue_of(bus, 0)
+        assert bus.emit_to("DECISION_REQUESTED", {"id": "dec_1"}, ["b@x"]) == 1
+        assert _types(q) == ["DECISION_REQUESTED"]
+
+    _run(scenario())

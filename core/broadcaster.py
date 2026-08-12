@@ -229,6 +229,16 @@ class SSEBroadcaster:
         except Exception as e:
             print(f"⚠️ [Broadcaster] 이벤트 직렬화 실패({event_type}): {e}")
             return 0
+        #: 이 알림이 어느 문맥의 것인가. 프로젝트가 적혀 있을 때만 알 수 있다.
+        own_ctx = None
+        pid = str((payload or {}).get("project_id") or "").strip() if isinstance(payload, dict) else ""
+        if pid:
+            try:
+                from core.paths import workspace_path
+                from core.project_visibility import read_project_ownership
+                own_ctx = read_project_ownership(workspace_path(pid))
+            except Exception:
+                own_ctx = None
         sent = 0
         for q in list(self.clients):
             uid = self._client_users.get(id(q), "")
@@ -239,6 +249,12 @@ class SSEBroadcaster:
             #   이미 열린 스트림으로는 결정·발간 알림이 계속 간다.
             #   ⚠️ 프로젝트 필터는 여기 걸지 않는다 — 승인자는 대개 그 프로젝트 밖에 있다.
             if not self._recipient_still_valid(uid, self._client_ctx.get(id(q), {})):
+                continue
+            # ★★ [G1-C1.1] **다른 테넌트 창으로는 보내지 않는다.** 같은 사람이 여러 문맥으로
+            #   접속해 있을 수 있고, 테넌트는 「보안·계약·데이터 격리 최상위 경계」다.
+            #   ⚠️ 판정 근거(`project_id`)가 없으면 대조하지 않는다 — 알림 대부분은 프로젝트에
+            #     매이지 않고, 근거 없이 막으면 결정 요청이 사라진다.
+            if not self._context_matches(self._client_ctx.get(id(q), {}), own_ctx):
                 continue
             try:
                 q.put_nowait(line)
