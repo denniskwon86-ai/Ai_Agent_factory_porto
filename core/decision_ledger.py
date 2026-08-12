@@ -93,6 +93,15 @@ EVENT_TYPES = (
     "PUBLICATION_PUBLISH_FAILED",
     "PUBLICATION_CORRECTED",
     "PUBLICATION_WITHDRAWN",
+    # [트랙 I · 2026-08-08] 생성 앱 데이터 평면.
+    #   ⚠️ **레코드 1건마다 원장 1건을 쓰지 않는다.** 업무 앱은 레코드를 대량으로 만든다 —
+    #     하루 수천 건이 들어오면 «왜 이 결정을 했는가» 의 이력이 데이터 로그에 파묻힌다.
+    #     → 데이터셋의 **구조 변경**(생성·스키마·폐지)만 여기에 남기고, 레코드 단위 변경은
+    #       `app_records` 자신의 `created_by`/`updated_by`/`deleted_by` 로 귀속을 남긴다.
+    #     이 구분은 `tests/test_app_data_plane.py` 가 고정한다.
+    "APP_DATASET_CREATED",
+    "APP_DATASET_SCHEMA_CHANGED",
+    "APP_DATASET_RETIRED",
     "CORRECTION",                  # 정정 전용 — 반드시 parent_event_id 를 가진다
 )
 
@@ -103,7 +112,11 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  # [CL-1~CL-3] 폐쇄루프 주체 — 전달·결정·발간은 릴리스나 프로젝트가 아니다.
                  #   같은 subject_type 으로 뭉개면 "이 릴리스에 무슨 일이 있었나"와 "이 전달이
                  #   어떻게 됐나"를 구분할 수 없다.
-                 "app_delivery", "decision_case", "publication")
+                 "app_delivery", "decision_case", "publication",
+                 # [트랙 I] 생성 앱이 쌓는 업무 데이터의 그릇. 릴리스와 구분한다 —
+                 #   «이 릴리스가 어떻게 됐나» 와 «이 앱의 데이터에 무슨 일이 있었나» 는
+                 #   다른 질문이고, 뭉개면 둘 다 답할 수 없다.
+                 "app_dataset")
 
 
 class DecisionLedgerError(ValueError):

@@ -267,3 +267,17 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         monkeypatch.setattr(_pm.planning_store, "db_path", str(_pp), raising=False)
     except Exception as e:
         print(f"⚠️ [conftest] 경영계획 DB 격리 실패(실 DB 오염 위험): {e}")
+    try:
+        # ★★★ [2026-08-08 트랙 I] **생성 앱 데이터 평면도 격리한다.**
+        #   `app_data_service` 는 싱글턴이고 라우트가 그것을 쓴다 — 기준정보(`master.db`)가
+        #   실제로 오염된 것과 **같은 구조**다(라우트 테스트 → 싱글턴 → 실 DB).
+        #   ⚠️ 여기 담기는 것은 업무 데이터다. 오염되면 «이 앱에 데이터가 있다» 는 판단이
+        #     거짓이 되고, 그 판단으로 앱의 사용 여부를 결정하게 된다.
+        #   스키마 템플릿을 복사하지 않는다 — `ensure_schema()` 가 첫 접근에서 만들고,
+        #   표가 2개뿐이라 DDL 비용이 무시할 수준이다(master 는 40여 개라 복사가 필요했다).
+        from core import app_data as _ad
+        monkeypatch.setattr(_ad.app_data_service._store, "db_path",
+                            str(tmp_path / "app_data.db"), raising=False)
+        monkeypatch.setattr(_ad.app_data_service._store, "_ready", "", raising=False)
+    except Exception as e:
+        print(f"⚠️ [conftest] 앱 데이터 평면 격리 실패(실 DB 오염 위험): {e}")
