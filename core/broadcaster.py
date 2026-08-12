@@ -26,7 +26,16 @@ class SSEBroadcaster:
         """클라이언트(웹 브라우저) 구독 및 연결 유지.
 
         [CL-4] `user_id` 는 **지정 수신자 이벤트를 받기 위한 주소**다. 비우면 전역 이벤트만
-        받는다 — 익명 연결이 남의 결정·발간 알림을 받는 일은 없어야 한다(작업서 §CL-BE-05)."""
+        받는다 — 익명 연결이 남의 결정·발간 알림을 받는 일은 없어야 한다(작업서 §CL-BE-05).
+
+        ★★ [G1-C01] 「인증 principal 과 허용 scope 를 등록한다」에 대해 — **scope 는 여기서
+          굳히지 않는다.** 등록하는 것은 `user_id` 하나이고, 권한은 이벤트를 보낼 때마다
+          `org_directory.resolve_scope` 로 다시 해석한다.
+
+          구독 시점의 scope 를 들고 있으면 코드는 더 짧아지지만, 이 연결은 최대 12시간 산다.
+          그 사이 사람을 다른 부서로 옮기거나 계정을 폐지해도 **이미 열린 스트림으로는 옛
+          권한이 계속 흐른다.** 그것은 화면을 새로고침해야만 사라지는 종류의 유출이고,
+          아무도 그것을 보지 못한다. `api/deps` 가 세션 토큰에 권한을 담지 않는 이유와 같다."""
         # 유한 큐: 죽은/느린 클라이언트의 큐가 무한히 쌓여 메모리를 잠식하는 것 방지
         q: asyncio.Queue = asyncio.Queue(maxsize=500)
         self.clients.append(q)
@@ -48,8 +57,82 @@ class SSEBroadcaster:
                 pass
             self._client_users.pop(id(q), None)
 
+    # ── [G1-C] 조직·프로젝트 격리 ────────────────────────────────────────────
+    #: 분류를 못 붙인 이벤트를 **한 번만** 경고한다. 매 이벤트 찍으면 로그가 묻히고,
+    #: 아예 안 찍으면 사라진 이벤트를 아무도 모른다.
+    _warned_unclassified: set = set()
+
+    #: 「이 이벤트는 정말로 전사 공통이다」를 **적어서** 밝히는 표식. 지금은 쓰는 곳이 없다.
+    #: ⚠️ 새 이벤트를 만들면서 이 값을 붙이는 것은 «필터를 끄는 것» 이다. 붙이기 전에
+    #:   그 이벤트에 남의 조직 정보가 실려 있지 않은지 확인해야 한다.
+    GLOBAL_MARKER = "_broadcast_scope"
+
+    def _resolve_target(self, event_type: str, payload: Dict[str, Any]):
+        """이 이벤트를 누구에게 보낼지 판정할 재료를 만든다.
+
+        돌려주는 것: `(전사공통인가, 소유권정보 or None)`.
+        소유권 정보가 `None` 이면 **아무에게도 보내지 않는다.**
+
+        ★ 소유권 파일을 **이벤트당 한 번만** 읽는다. 구독자마다 읽으면 접속자 수만큼
+          파일 I/O 가 늘고, 이벤트는 노드가 끝날 때마다 나온다."""
+        d = payload if isinstance(payload, dict) else {}
+        if str(d.get(self.GLOBAL_MARKER, "")).strip() == "global":
+            return True, None
+        pid = str(d.get("project_id") or "").strip()
+        if not pid:
+            # ⚠️ **분류가 없으면 보내지 않는다.** 「분류를 못 붙였으니 전체에게」로 해석하는
+            #   순간 G1-C 가 무의미해진다 — 실패는 닫히는 쪽이어야 한다.
+            #   지금 실제 호출처는 전부 `project_id` 를 싣는다(오케스트레이터 12 · VisionQA ·
+            #   토론). 그러므로 이 경고가 뜬다는 것은 **새로 생긴 경로가 분류를 빠뜨렸다**는 뜻이다.
+            if event_type not in self._warned_unclassified:
+                self._warned_unclassified.add(event_type)
+                print(f"⚠️ [Broadcaster] '{event_type}' 이벤트에 project_id 가 없어 "
+                      f"**아무에게도 보내지 않았습니다**(G1-C). 이벤트에 project_id 를 싣거나, "
+                      f"정말 전사 공통이면 payload['{self.GLOBAL_MARKER}']='global' 을 명시하십시오.")
+            return False, None
+        try:
+            from core.paths import workspace_path
+            from core.project_visibility import read_project_ownership
+            return False, read_project_ownership(workspace_path(pid))
+        except Exception as e:                                   # pragma: no cover
+            print(f"⚠️ [Broadcaster] '{event_type}' 소유권 판독 실패({pid}): {e} — 보내지 않습니다.")
+            return False, None
+
+    def _may_receive(self, user_id: str, is_global: bool, own) -> bool:
+        """이 구독자가 이 이벤트를 받아도 되는가.
+
+        ⚠️ 권한을 **보낼 때마다 다시 해석한다.** 구독 시점에 굳혀 두면 SSE 연결이 살아 있는
+          동안(최대 12시간) 회수한 권한이 계속 유효하다 — `api/deps` 가 세션 토큰에 권한을
+          담지 않는 이유와 같다. `resolve_scope` 는 캐시되고 조직 쓰기 때 무효화된다."""
+        uid = (user_id or "").strip()
+        if not uid:
+            # 익명 구독자는 전사 공통 이벤트만 받는다. E0-1B 이후 티켓이 신원을 요구하므로
+            # 실제로는 여기 오지 않지만, 규칙을 코드에 남겨 둔다.
+            return is_global
+        if is_global:
+            return True
+        if own is None:
+            return False
+        try:
+            from core.org_directory import org_directory
+            from core.project_visibility import ownership_visible
+            return ownership_visible(org_directory.resolve_scope(uid), uid, own)
+        except Exception:
+            return False                 # 판정 실패가 노출로 이어지지 않는다
+
     async def broadcast(self, event_type: str, payload: Dict[str, Any]):
-        """시스템 전역에서 호출되는 실시간 상태 Push 메서드"""
+        """시스템 전역에서 호출되는 실시간 상태 Push 메서드.
+
+        ★★★ [G1-C · 2026-08-09] 이름은 `broadcast` 지만 **더 이상 모두에게 가지 않는다.**
+          종전에는 연결된 모든 큐에 그대로 넣었다. 그래서 다른 사업부의 프로젝트가 어느
+          단계에 있고 무엇이 실패했는지가 **그 프로젝트를 목록에서 볼 수도 없는 사람의
+          화면에 실시간으로 흘렀다.** `NODE_COMPLETED` 는 `state` 전체를 싣는다.
+
+          이름을 바꾸지 않는 이유: 호출처 17곳의 의미는 그대로 「진행 상황을 알린다」이고,
+          바뀐 것은 **누가 받는가** 뿐이다. 대신 이 주석을 남긴다.
+
+        ⚠️ 내부 리스너(슈퍼바이저 데몬)는 **거르지 않는다.** 그것은 사용자 화면이 아니라
+          서버 자신이며, 걸러 버리면 감독이 자기 공장을 못 본다."""
         message = {
             "type": event_type,
             "timestamp": datetime.now().isoformat(),
@@ -64,8 +147,13 @@ class SSEBroadcaster:
             print(f"⚠️ [Broadcaster] 이벤트 직렬화 실패({event_type}): {e}")
             return
 
+        # [G1-C] 보낼 대상 판정 재료를 **한 번만** 만든다(구독자 수와 무관한 비용).
+        is_global, own = self._resolve_target(event_type, payload)
+
         # SSE 클라이언트 전송 - 가득 찬 큐(느린/죽은 클라이언트)는 가장 오래된 이벤트를 버리고 최신 유지
         for q in list(self.clients):
+            if not self._may_receive(self._client_users.get(id(q), ""), is_global, own):
+                continue
             try:
                 q.put_nowait(line)
             except asyncio.QueueFull:
@@ -94,7 +182,14 @@ class SSEBroadcaster:
           남의 알림을 읽는다.
 
         `broadcast()` 와 달리 async 가 아니다 — `put_nowait` 만 쓰므로 동기 도메인 코드
-        (`decision_case`, `publication`)에서 이벤트 루프 없이도 부를 수 있다."""
+        (`decision_case`, `publication`)에서 이벤트 루프 없이도 부를 수 있다.
+
+        ⚠️ [G1-C] **여기에는 프로젝트 필터를 걸지 않는다.** 수신자를 이미 도메인이 계산했고,
+          그 계산의 요점이 「이 프로젝트 밖에 있는 사람에게도 결정을 요청한다」이기 때문이다
+          — 승인자·데이터 오너는 대개 그 프로젝트의 부서 소속이 아니다. 여기에 프로젝트
+          가시성을 겹쳐 걸면 **결정 요청이 결정권자에게 도달하지 못한다.**
+          `broadcast()` 의 필터는 «분류 없이 모두에게 가던 것» 을 막는 것이고, 이쪽은 애초에
+          분류해서 보내는 경로다. 둘의 목적이 다르다."""
         targets = {str(r).strip() for r in (recipients or []) if str(r).strip()}
         if not targets:
             return 0

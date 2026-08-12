@@ -57,6 +57,7 @@ from core.async_orchestrator import orchestrator
 #   여기서 `LIBRARY_DIR = "library"` 로 다시 선언하면 게시는 이 경로에 쓰고 사용여부 제어는
 #   다른 경로를 보는 상태가 되어, 실제 프로그램이 "존재하지 않는 프로그램"으로 거부된다.
 from core import library_paths
+from core import project_visibility as _pv
 from core.paths import workspace_path
 
 # ★★ [2026-08-07] 권한 배정표를 **라우터에 붙인다.** 라우트마다 `require_caps` 를 적지
@@ -149,10 +150,6 @@ def _is_empty(v) -> bool:
 
 # 프로젝트↔워크플로우 템플릿 바인딩(T2-b) — 프로젝트 폴더에 영속해, 새로고침/HOTL 재개로
 # 프론트 state 가 stale 해져도 모든 태스크가 같은 템플릿으로 실행되도록 보장한다.
-def _project_meta_path(workspace_root: str) -> str:
-    return os.path.join(workspace_root, "project_meta.json")
-
-
 def _read_project_meta(workspace_root: str) -> tuple[str, str, str]:
     try:
         with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
@@ -170,24 +167,16 @@ def _read_project_template(workspace_root: str) -> str:
 
 
 def _ownership_visible(p, own: dict) -> bool:
-    """이 소유권 정보를 가진 자원이 요청자에게 보이는가 (예외를 던지지 않는 목록 필터용).
+    """이 소유권 정보를 가진 자원이 요청자에게 보이는가.
 
-    ⚠️ 소유권이 **미기록**인 자원은 막지 않는다. 마이그레이션 전 기존 프로젝트가
-      전부 안 보이게 되면 기능이 통째로 멈춘다 — 하위호환이 우선이다."""
+    ★★ [G1-C] **규칙 본체는 `core/project_visibility.py` 에 있다.** 여기 두면 SSE 브로드캐스터가
+      같은 질문에 따로 답하게 되고, 그러면 「목록에는 안 보이는 프로젝트의 진행 이벤트가
+      실시간으로 흘러드는」 상태가 만들어진다. 그 어긋남은 조용하다.
+      `api/deps._enforced` 가 같은 이유로 이미 한 곳에 모여 있다."""
     try:
-        if p is None or p.scope.unrestricted:
-            return True
+        return _pv.ownership_visible(p.scope, p.user_id, own)
     except Exception:
-        return True
-    dept = (own or {}).get("owner_dept_id", "")
-    vis = (own or {}).get("visibility", "dept")
-    if not dept and not (own or {}).get("owner_user_id"):
-        return True                       # 미기록 = 무소속 → 하위호환
-    if vis == "company":
-        return True
-    if (own or {}).get("owner_user_id") and own["owner_user_id"] == p.user_id:
-        return True
-    return bool(dept) and dept in p.scope.readable_dept_ids
+        return True                       # 판정 불가는 하위호환 쪽으로 — 원본 계약 그대로
 
 
 def _iter_visible_projects(p) -> list:
@@ -211,29 +200,13 @@ def _iter_visible_projects(p) -> list:
     return out
 
 
-def _read_project_ownership(workspace_root: str) -> dict:
-    """소유권 필드만 별도로 읽는다 (설계서 Phase 3).
-
-    ⚠️ `_read_project_meta` 의 3-튜플 반환은 **바꾸지 않는다** — 호출부가 많아 시그니처를
-      건드리면 전 경로가 깨진다. `_read_project_packs` 와 같은 패턴으로 따로 뽑는다."""
-    try:
-        with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
-            d = json.load(f) or {}
-    except Exception:
-        d = {}
-    return {
-        "owner_dept_id": str(d.get("owner_dept_id", "") or ""),
-        "owner_user_id": str(d.get("owner_user_id", "") or ""),
-        "visibility": str(d.get("visibility", "dept") or "dept"),
-        "nature": str(d.get("nature", "") or ""),
-        "forked_from": d.get("forked_from") or {},
-        # [ECM-lite] 설계서 §10.2 "프로젝트는 반드시 enterprise_scope_id 와 entity_mode 를
-        #   소유한다". 구 프로젝트는 기본값(기본 테넌트 · 실제 문맥)으로 읽는다.
-        "tenant_id": str(d.get("tenant_id", "") or "tenant_default"),
-        "enterprise_scope_id": str(d.get("enterprise_scope_id", "") or ""),
-        "entity_mode": str(d.get("entity_mode", "") or "REAL"),
-        "blueprint_id": str(d.get("blueprint_id", "") or ""),
-    }
+#: ★★ [G1-C] 본체는 `core/project_visibility.py` 로 옮겼다. 이름은 남긴다 —
+#:   테스트가 `monkeypatch.setattr(fc, "_read_project_ownership", ...)` 로 이 이름을 갈아끼우고,
+#:   이 모듈의 호출부는 모듈 전역을 통해 부르므로 그 대체가 그대로 먹는다.
+#:   ⚠️ 그 monkeypatch 는 **브로드캐스터에는 닿지 않는다**(다른 모듈에서 직접 부른다).
+#:     SSE 격리를 시험하려면 `core.project_visibility` 쪽을 갈아끼워야 한다.
+_read_project_ownership = _pv.read_project_ownership
+_project_meta_path = _pv.project_meta_path
 
 
 def _resolve_scope_node(dept_id: str) -> str:

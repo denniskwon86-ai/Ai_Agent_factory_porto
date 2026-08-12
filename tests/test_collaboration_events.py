@@ -91,10 +91,33 @@ def test_blank_recipient_ids_are_dropped(b, ev):
     assert anon.drain() == []
 
 
-def test_global_broadcast_still_reaches_everyone(b):
-    """★ 기존 전역 브로드캐스트는 그대로다 — 지금 도는 15개 화면이 여기에 의존한다."""
+def test_분류없는_브로드캐스트는_더는_모두에게_가지_않는다(b, capsys):
+    """★★★ [G1-C] 이 자리에 있던 계약은 **「기존 전역 브로드캐스트는 그대로다 — 지금 도는
+    15개 화면이 여기에 의존한다」** 였다. 그것이 곧 결함이었다.
+
+    `broadcast()` 가 연결된 모두에게 가는 동안, 다른 사업부 프로젝트의 진행·실패가 그
+    프로젝트를 **목록에서 볼 수도 없는 사람의 화면으로** 흘렀다(`NODE_COMPLETED` 는 `state`
+    전체를 싣는다). 신원은 E0-1B·E0-1C 에서 닫았지만 「봐도 되는가」는 아무도 묻지 않았다.
+
+    ⚠️ 「15개 화면이 의존한다」는 근거를 실제로 세어 확인했다 — 프런트가 듣는 이벤트는
+      `WBS_UPDATED` · `NODE_COMPLETED` · `SPRINT_*` · `HOTL_PAUSED` · `AGENT_ACTIVITY` ·
+      `QUOTA_EXHAUSTED` **8종이고 전부 `project_id` 를 싣는다.** 분류 없이 오는 이벤트에
+      의존하는 화면은 없었다. `FACTORY_PROGRESS` 는 이 테스트 안에만 있는 이름이다.
+
+    ★ 조용히 버리지 않는다. 새 이벤트를 만들며 분류를 빠뜨린 사람이 원인을 찾을 수 있어야 한다."""
     c1, c2 = _FakeClient(b, "kim"), _FakeClient(b, "")
     asyncio.run(b.broadcast("FACTORY_PROGRESS", {"step": 3}))
+    assert c1.drain() == [] and c2.drain() == [], "분류 없는 이벤트가 배달됐다"
+    assert "FACTORY_PROGRESS" in capsys.readouterr().out, "조용히 버렸다 — 경고가 없다"
+
+
+def test_전사공통_표식을_붙이면_모두에게_간다(b):
+    """정말 전사 공통인 것은 **적어서** 밝힌다 — 익명 구독자에게도 간다.
+
+    ⚠️ 이 표식을 붙이는 것은 «필터를 끄는 것» 이다. 붙이기 전에 그 payload 에 남의 조직
+      정보가 실려 있지 않은지 확인해야 한다."""
+    c1, c2 = _FakeClient(b, "kim"), _FakeClient(b, "")
+    asyncio.run(b.broadcast("SYSTEM_NOTICE", {"_broadcast_scope": "global", "msg": "점검"}))
     assert len(c1.drain()) == 1 and len(c2.drain()) == 1
 
 
