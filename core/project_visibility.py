@@ -27,6 +27,17 @@ G1-C 로 **SSE 이벤트도 같은 질문을 하게 되면서** 사정이 달라
   방향을 거꾸로 잡은 것**이다. 열람 실패는 화면이 비는 것으로 끝나지만, 판정 실패를 공개로
   답하면 그 순간 통제가 없다.
 
+## ★★★ [G1-C3] 두 축을 나누고 **AND 로 묶는다**
+
+    최종 가시성 = authorization_visible(권한)  AND  context_visible(지금 고른 문맥)
+
+권한은 「볼 수 있는가」이고 문맥은 「지금 무엇을 보기로 했는가」다. 둘을 한 함수에 섞으면
+어느 쪽 때문에 안 보이는지 말할 수 없고, 그러면 화면은 «0건» 만 보여 준다 —
+사용자는 자료가 없는 것인지 권한이 없는 것인지 문맥이 어긋난 것인지 알 수 없다.
+
+목록·상세·수정·SSE 가 **모두 이 함수**를 부른다. 하나라도 다른 규칙을 쓰면
+「목록엔 보이는데 이벤트는 안 오는」 또는 그 반대의 어긋남이 생기고, 그것은 조용하다.
+
 ## `private` 는 정식 상태다
 
 `visibility="private"` 는 **소유자 본인과 플랫폼 관리자만** 본다. 검증 샌드박스로 옮긴 과거
@@ -219,6 +230,112 @@ def ownership_visible(scope, user_id: str, own: Optional[Dict[str, Any]]) -> boo
         return bool(dept) and dept in scope.readable_dept_ids
     except Exception:
         return False
+
+
+#: 실행 모드. `SANDBOX` 는 `VIRTUAL` 안의 특수한 경우로 두지 않고 **별도 값**으로 다룬다 —
+#: 「가상 회사 시뮬레이션」과 「우리 시험 산출물」은 목적이 다르고, 섞으면 시뮬레이션 결과에
+#: 시험 부산물이 들어간다.
+ENTITY_MODES = ("REAL", "VIRTUAL", "SANDBOX")
+
+#: 문맥 판정 결과. 왜 안 보이는지 화면이 **다르게 말할 수 있어야** 한다.
+CTX_OK = "OK"
+CTX_TENANT_MISMATCH = "TENANT_MISMATCH"
+CTX_MODE_MISMATCH = "MODE_MISMATCH"
+CTX_SCOPE_OUTSIDE = "SCOPE_OUTSIDE"
+CTX_RESOURCE_UNBOUND = "RESOURCE_UNBOUND"
+CTX_CONTEXT_MISSING = "CONTEXT_MISSING"
+CTX_LOOKUP_FAILED = "LOOKUP_FAILED"
+
+
+def authorization_visible(scope, user_id: str, own: Optional[Dict[str, Any]]) -> bool:
+    """축 ①: **이 사람이 이 자원에 접근할 권한이 있는가.** 문맥은 보지 않는다."""
+    return ownership_visible(scope, user_id, own)
+
+
+def context_visible(ctx: Optional[Dict[str, Any]],
+                    own: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
+    """축 ②: **지금 고른 회사·조직·실행 문맥과 맞는가.** 권한은 보지 않는다.
+
+    돌려주는 것: `(보이는가, 사유)`. 사유를 함께 주는 이유 — 화면이 「0건」과 「문맥 점검
+    필요」를 다르게 말해야 한다. 같은 화면으로 뭉개면 사용자는 통제를 고장으로 읽는다.
+
+    ## 규칙 (D-014 「범위 미지정은 전사 공용이 아니라 비노출」)
+
+    · 문맥의 테넌트·실행모드가 없으면 **판정 불가 → 비노출.**
+    · 자원의 테넌트·실행모드·범위가 비어 있어도 **비노출.** 종전에는 빈 값이 모든 비교를
+      통과했는데, 그것이 곧 「미지정 = 전사 공용」이었다.
+    · 고른 범위가 비면 좁히지 않는다 — 같은 테넌트·같은 모드 안에서 권한이 닿는 전체.
+    · 고른 범위가 있으면 자원이 **그 노드이거나 운영 계층상 하위**여야 한다.
+    · ECM 계층 조회 실패·순환·끊어진 참조는 **비노출**로 두고 점검 대상으로 보고한다.
+    · `visibility="company"` 는 전 세계 공개가 아니라 **같은 테넌트·같은 모드 안에서만** 공개다.
+
+    ⚠️⚠️ 이 함수는 `scope_covers` 와 다르다. `scope_covers` 는 「좁히기」만 하고 실패 시
+      통과시켰다(화면 편의). 여기서는 **경계**이므로 실패가 통과가 되면 안 된다."""
+    if not isinstance(own, dict) or not own:
+        return False, CTX_RESOURCE_UNBOUND
+    c = ctx or {}
+    c_tenant = str(c.get("tenant_id", "") or "").strip()
+    c_mode = str(c.get("entity_mode", "") or "").strip()
+    c_scope = str(c.get("scope_node_id", "") or c.get("enterprise_scope_id", "") or "").strip()
+    if not c_tenant or not c_mode:
+        return False, CTX_CONTEXT_MISSING
+
+    r_tenant = str(own.get("tenant_id", "") or "").strip()
+    r_mode = str(own.get("entity_mode", "") or "").strip()
+    r_scope = str(own.get("enterprise_scope_id", "") or "").strip()
+    if not r_tenant or not r_mode or not r_scope:
+        # D-014 — 미지정을 전사 공용으로 읽지 않는다.
+        return False, CTX_RESOURCE_UNBOUND
+    if r_tenant != c_tenant:
+        return False, CTX_TENANT_MISMATCH
+    if r_mode != c_mode:
+        return False, CTX_MODE_MISMATCH
+    if not c_scope:
+        return True, CTX_OK              # 「전체」를 고름 — 테넌트·모드 안에서 좁히지 않는다
+    if c_scope == r_scope:
+        return True, CTX_OK
+    ok, failed = _scope_is_ancestor(c_scope, r_scope)
+    if failed:
+        return False, CTX_LOOKUP_FAILED
+    return (True, CTX_OK) if ok else (False, CTX_SCOPE_OUTSIDE)
+
+
+def _scope_is_ancestor(ancestor: str, node: str) -> Tuple[bool, bool]:
+    """`ancestor` 가 `node` 의 운영 계층 상위인가. 돌려주는 것: `(맞는가, 조회실패인가)`.
+
+    ⚠️ 조회 실패를 «맞다» 로도 «아니다» 로도 뭉개지 않는다 — 호출부가 「점검 필요」를 따로
+      말할 수 있어야 한다. 순환 관계는 깊이 제한으로 끊고 실패로 세지 않는다."""
+    try:
+        from core.enterprise_context.models import REL_OPERATING_PARENT
+        from core.enterprise_context.repository import ecm_repository as repo
+        seen, frontier = {node}, [node]
+        for _ in range(_SCOPE_MAX_DEPTH):
+            nxt = []
+            for n in frontier:
+                for parent in repo.parents(n, REL_OPERATING_PARENT) or []:
+                    if parent == ancestor:
+                        return True, False
+                    if parent not in seen:
+                        seen.add(parent)
+                        nxt.append(parent)
+            if not nxt:
+                break
+            frontier = nxt
+        return False, False
+    except Exception:
+        return False, True
+
+
+def project_visible(scope, user_id: str, ctx: Optional[Dict[str, Any]],
+                    own: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
+    """★★★ [G1-C3] **정본 판정.** 목록·상세·수정·SSE 가 전부 이것을 부른다.
+
+    돌려주는 것: `(보이는가, 사유)`. 권한에서 막히면 `"UNAUTHORIZED"`, 문맥에서 막히면
+    위의 `CTX_*` 중 하나다 — 둘을 구분해야 화면이 「없음」·「접근 불가」·「문맥 점검 필요」를
+    다르게 말할 수 있다."""
+    if not authorization_visible(scope, user_id, own):
+        return False, "UNAUTHORIZED"
+    return context_visible(ctx, own)
 
 
 def user_can_see_project(user_id: str, project_id: str) -> bool:

@@ -51,6 +51,27 @@
 > 앞으로 G1-A(6) · G1-B(7) · G1-D(8) 를 올리면 분모는 다시 크게 늘어난다.
 > **이것은 후퇴가 아니라 분모가 솔직해지는 것이다**([[count-what-user-can-do]] 와 같은 교훈).
 
+### G1-C3 — 통합 가시성 판정기 (2026-08-12) · **판정기만 완성 · 배선 미착수**
+
+권한 축과 문맥 축을 나누고 AND 로 묶는 정본 판정기를 `core/project_visibility.py` 에 넣었다.
+
+    project_visible = authorization_visible(권한)  AND  context_visible(지금 고른 문맥)
+
+둘을 섞으면 **어느 쪽 때문에 안 보이는지 말할 수 없다** — 화면은 «0건» 만 보여 주고 사용자는
+자료가 없는 것인지 권한이 없는 것인지 문맥이 어긋난 것인지 알 수 없다. 그래서 사유를 함께
+돌려준다(`TENANT_MISMATCH` · `MODE_MISMATCH` · `SCOPE_OUTSIDE` · `RESOURCE_UNBOUND` ·
+`CONTEXT_MISSING` · `LOOKUP_FAILED` · `UNAUTHORIZED`).
+
+D-014 「범위 미지정은 전사 공용이 아니라 비노출」을 전부 fail-closed 로 맞췄다 — 종전에는
+자원의 테넌트·모드·범위가 비면 **모든 검사를 통과**했고 ECM 판독 실패도 통과였다.
+
+⚠️⚠️ **아직 아무도 이 함수를 부르지 않는다.** 목록·상세·수정·SSE 배선이 남았고, 그 전에
+  문맥 범위를 `assert_scope_allowed`/`resolve_effective_scope` 로 **정규화**해야 한다
+  (문맥은 부서 코드, 자원은 노드 id 라서 그냥 비교하면 전부 어긋난다).
+⚠️ 변이 검사 미수행. 착수 중 중단됐고 그 과정에서 테넌트 검사 한 줄이 삭제됐다가 복구됐다.
+
+→ 인수인계: `docs/handoff/G1C3_UNIFIED_VISIBILITY_HANDOFF_2026-08-12.md`
+
 ### G1-C2 — 과거 릴리스·승격 오염 격리 (2026-08-12)
 
 프로젝트 메타는 G1-C1.1 에서 샌드박스로 옮겼는데 **릴리스와 승격은 그대로였다.**
