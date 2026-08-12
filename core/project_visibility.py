@@ -50,6 +50,22 @@ INVALID = "INVALID"
 SANDBOX_SCOPE_CODE = "AFS_TEST_SANDBOX"
 SANDBOX_ENTITY_MODE = "VIRTUAL"
 SANDBOX_NODE_TYPE = "validation_sandbox"
+#: 소유를 유도할 수 없는 시험 산출물의 **임시 관리 책임자**. 실제 작성자를 뜻하지 않는다.
+#: ⚠️ 승인된 예시 계정 하나만 쓴다 — 임의 계정을 만들면 실제 인원과 충돌한다.
+SANDBOX_CUSTODIAN = "hikwon@lsmnm.com"
+
+
+def sandbox_scope_id() -> str:
+    """검증 샌드박스 조직 노드의 실제 `node_id`. 없으면 빈 문자열.
+
+    ⚠️ 여기서 노드를 **만들지 않는다.** 조회 실패를 「없으니 만들자」로 바꾸면, 어쩌다 한 번
+      DB 를 못 읽은 순간에 중복 노드가 생긴다. 노드 생성은 마이그레이션 스크립트의 일이다."""
+    try:
+        from core.enterprise_context.repository import ecm_repository as repo
+        node = repo.find_node_by_code(SANDBOX_SCOPE_CODE, tenant_id="tenant_default")
+        return node.node_id if node else ""
+    except Exception:
+        return ""
 
 
 def project_meta_path(workspace_root: str) -> str:

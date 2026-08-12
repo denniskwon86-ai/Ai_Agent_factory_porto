@@ -38,13 +38,19 @@ async def subscribe_timeline(ticket: str = Query("", description="POST /auth/sse
 
     ⚠️ 표를 **응답 본문·오류 메시지에 되싣지 않는다.** 티켓은 URL 로 오가므로 접근 로그에 남을
       수 있고, 오류 메시지에까지 실으면 유출면이 하나 더 늘어난다."""
-    user_id = auth_store.consume_sse_ticket(ticket)
-    if not user_id:
+    ctx = auth_store.consume_sse_ticket(ticket)
+    if not ctx or not ctx.get("user_id"):
         # 없음·만료·이미 씀을 구분하지 않는다 — 사용자가 할 일은 어느 쪽이든 같다.
         raise HTTPException(status_code=401,
                             detail="실시간 연결 표가 유효하지 않습니다. 다시 연결하십시오.")
+    #: ★★ [G1-C1.1] 신원뿐 아니라 **실행 문맥**을 그대로 넘긴다. 이 값들은 발급 시점에 서버가
+    #  해석해 표에 묶어 둔 것이고, 화면이 바꿔 신고할 수 없다.
     return StreamingResponse(
-        factory_broadcaster.subscribe(user_id=user_id),
+        factory_broadcaster.subscribe(
+            user_id=ctx["user_id"],
+            tenant_id=ctx.get("tenant_id", ""),
+            entity_mode=ctx.get("entity_mode", ""),
+            session_id=ctx.get("session_id", "")),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -84,6 +84,11 @@ CREATE TABLE IF NOT EXISTS auth_sse_ticket (
     user_id     TEXT NOT NULL,
     session_id  TEXT NOT NULL,
     tenant_id   TEXT NOT NULL DEFAULT '',
+    -- ★★ [G1-C1.1] 실행 문맥을 표에 **함께 묶는다.** 신원만으로는 부족하다 —
+    --   같은 사람이라도 어느 테넌트·어느 조직 범위·REAL 인지 VIRTUAL 인지에 따라
+    --   받아야 할 이벤트가 다르다. 구독 뒤에 화면이 문맥을 바꿔 신고하면 그것이 곧 우회로다.
+    scope_node_id TEXT NOT NULL DEFAULT '',
+    entity_mode   TEXT NOT NULL DEFAULT '',
     audience    TEXT NOT NULL DEFAULT 'sse',
     created_at  TEXT NOT NULL,
     expires_at  TEXT NOT NULL,
@@ -123,6 +128,14 @@ class AuthStore:
             return
         with self._lock, self._connect() as conn:
             conn.executescript(_DDL)
+            # ⚠️ `CREATE TABLE IF NOT EXISTS` 는 **이미 있는 표에 새 컬럼을 넣어 주지 않는다.**
+            #   G1-C1.1 이전에 만들어진 DB 는 문맥 컬럼이 없으므로 여기서 채운다(멱등).
+            for col, ddl in (("scope_node_id", "TEXT NOT NULL DEFAULT ''"),
+                             ("entity_mode", "TEXT NOT NULL DEFAULT ''")):
+                try:
+                    conn.execute(f"ALTER TABLE auth_sse_ticket ADD COLUMN {col} {ddl}")
+                except Exception:
+                    pass                 # 이미 있으면 그만이다
             conn.commit()
         self._ready = self.db_path
 
@@ -215,7 +228,8 @@ class AuthStore:
         return hashlib.sha256((raw or "").encode("utf-8")).hexdigest()
 
     def issue_sse_ticket(self, user_id: str, session_token: str,
-                         tenant_id: str = "") -> Dict[str, Any]:
+                         tenant_id: str = "", scope_node_id: str = "",
+                         entity_mode: str = "") -> Dict[str, Any]:
         """SSE 1회용 티켓 발급. **원문은 여기서 한 번만 돌려준다.**
 
         ⚠️ `user_id` 를 호출자가 정하게 두지 않는다 — 라우트가 **세션에서 확인한 값**만 넘긴다.
@@ -230,17 +244,24 @@ class AuthStore:
         with self._lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO auth_sse_ticket (token_hash, user_id, session_id, tenant_id, "
-                "audience, created_at, expires_at) VALUES (?,?,?,?,?,?,?)",
+                "scope_node_id, entity_mode, audience, created_at, expires_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 (self._ticket_hash(raw), uid, self._ticket_hash(session_token or ""),
-                 (tenant_id or "").strip(), SSE_AUDIENCE, _iso(now), _iso(exp)))
+                 (tenant_id or "").strip(), (scope_node_id or "").strip(),
+                 (entity_mode or "").strip(), SSE_AUDIENCE, _iso(now), _iso(exp)))
             #: 만료된 표는 그때그때 치운다 — 배치에 맡기면 그 배치가 멈춘 동안 쌓인다.
             conn.execute("DELETE FROM auth_sse_ticket WHERE expires_at < ?", (_iso(now),))
             conn.commit()
         return {"ticket": raw, "expires_at": _iso(exp),
                 "expires_in": SSE_TICKET_SECONDS, "audience": SSE_AUDIENCE}
 
-    def consume_sse_ticket(self, raw: str) -> str:
-        """티켓 → user_id. 실패하면 빈 문자열. **성공은 정확히 한 번만 일어난다.**
+    def consume_sse_ticket(self, raw: str) -> Dict[str, str]:
+        """티켓 → **실행 문맥**. 실패하면 빈 사전. **성공은 정확히 한 번만 일어난다.**
+
+        ★★ [G1-C1.1] 종전에는 `user_id` 문자열만 돌려줬다. 신원만으로는 이벤트를 가를 수 없다 —
+          같은 사람이라도 어느 테넌트·어느 조직 범위·REAL 인지 VIRTUAL 인지에 따라 받아야 할
+          것이 다르다. 그 문맥을 **발급 시점에 표에 묶어** 두고 여기서 함께 돌려준다.
+          화면이 구독 뒤에 문맥을 바꿔 신고할 수 있으면 그것이 곧 우회로다.
 
         ★★ 원자성: `UPDATE ... WHERE consumed_at=''` 한 문장으로 소비를 표시하고 **바뀐 행 수**로
           판정한다. 「읽고 → 확인하고 → 쓰기」로 나누면 두 요청이 그 사이를 통과해 **같은 표로
@@ -250,7 +271,7 @@ class AuthStore:
           어느 쪽이든 «새 티켓을 받아 다시 연결» 하나뿐이다."""
         t = (raw or "").strip()
         if not t:
-            return ""
+            return {}
         h = self._ticket_hash(t)
         now = _iso(_now())
         try:
@@ -262,13 +283,20 @@ class AuthStore:
                     (now, h, now, SSE_AUDIENCE))
                 if cur.rowcount != 1:
                     conn.commit()
-                    return ""
-                r = conn.execute("SELECT user_id FROM auth_sse_ticket WHERE token_hash=?",
-                                 (h,)).fetchone()
+                    return {}
+                r = conn.execute(
+                    "SELECT user_id, tenant_id, scope_node_id, entity_mode, session_id "
+                    "FROM auth_sse_ticket WHERE token_hash=?", (h,)).fetchone()
                 conn.commit()
-            return str(r["user_id"]) if r else ""
+            if not r:
+                return {}
+            return {"user_id": str(r["user_id"] or ""),
+                    "tenant_id": str(r["tenant_id"] or ""),
+                    "scope_node_id": str(r["scope_node_id"] or ""),
+                    "entity_mode": str(r["entity_mode"] or ""),
+                    "session_id": str(r["session_id"] or "")}
         except Exception:
-            return ""                   # 저장소 장애를 «인증됨» 으로 바꾸지 않는다
+            return {}                   # 저장소 장애를 «인증됨» 으로 바꾸지 않는다
 
     def destroy(self, token: str) -> None:
         try:

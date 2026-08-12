@@ -36,8 +36,10 @@ def store(tmp_path):
 def test_티켓은_한_번만_소비된다(store):
     """★★ 재사용이 되면 표를 훔친 사람이 계속 구독할 수 있다."""
     t = store.issue_sse_ticket("kim", "sess-1")
-    assert store.consume_sse_ticket(t["ticket"]) == "kim"
-    assert store.consume_sse_ticket(t["ticket"]) == ""      # 두 번째는 실패
+    #: ★ [G1-C1.1] 소비 결과가 **문맥 사전**이 됐다. 신원만으로는 이벤트를 가를 수 없어
+    #  테넌트·조직범위·실행모드를 발급 시점에 표에 묶어 함께 돌려준다.
+    assert store.consume_sse_ticket(t["ticket"])["user_id"] == "kim"
+    assert store.consume_sse_ticket(t["ticket"]) == {}      # 두 번째는 실패
 
 
 def test_동시_소비는_정확히_하나만_성공한다(tmp_path):
@@ -75,7 +77,9 @@ def test_동시_소비는_정확히_하나만_성공한다(tmp_path):
     for th in ths:
         th.join()
 
-    assert sorted(results) == ["", "kim"], (
+    #: [G1-C1.1] 결과가 문맥 사전이 됐으므로 «성공한 소비» 를 사용자 id 로 센다.
+    succeeded = [r.get("user_id") for r in results if r]
+    assert succeeded == ["kim"] and len(results) == 2, (
         f"동시 소비 결과가 {results} — 정확히 하나만 성공해야 한다. "
         f"둘 다 성공했다면 소비가 원자적이지 않다(읽고→확인→쓰기 구조).")
 
@@ -92,13 +96,13 @@ def test_만료된_티켓은_거부된다(store, monkeypatch):
         return real_now() + timedelta(seconds=SSE_TICKET_SECONDS + 5)
 
     monkeypatch.setattr(auth_mod, "_now", later)
-    assert store.consume_sse_ticket(t) == ""
+    assert store.consume_sse_ticket(t) == {}
 
 
 def test_위조_티켓은_거부된다(store):
     store.issue_sse_ticket("kim", "sess-1")
-    assert store.consume_sse_ticket("아무렇게나-만든-값") == ""
-    assert store.consume_sse_ticket("") == ""
+    assert store.consume_sse_ticket("아무렇게나-만든-값") == {}
+    assert store.consume_sse_ticket("") == {}
 
 
 def test_저장소에_원문이_남지_않는다(store):
@@ -182,8 +186,11 @@ def test_요청자가_보낸_테넌트를_티켓에_싣지_않는다(client):
 
     ⚠️ 종전에는 `X-Tenant-Id` 헤더를 그대로 티켓에 저장했다. 그러면 공격자가 헤더 하나로
       **다른 테넌트 범위의 표**를 받는다 — 계약이 그 자리에서 깨진다.
-    ⚠️ tenant 는 아직 서버 권한 모델과 연결되지 않았다(G1-C). 모르는 것을 헤더로 채우는 것보다
-      **비워 두는 것**이 옳다 — 채워 두면 다음 사람이 「테넌트 경계가 있다」고 믿는다."""
+    ★★ [G1-C1.1] 이제 서버가 **자기 조직 정보에서** 테넌트·조직범위·실행모드를 해석해 티켓에
+      묶는다. 종전 계약은 「연결이 없으니 비워 둔다」였다 — 그 상태에서는 티켓에 문맥이 없어
+      브로드캐스터가 테넌트 경계를 대조할 수 없었다.
+    ⚠️ 바뀐 것은 **누가 채우는가** 뿐이다. 요청 헤더는 여전히 쳐다보지 않는다 — 그것이 이
+      테스트가 지키는 계약이다."""
     c, store = client
     lg = c.post("/api/v1/auth/login",
                 json={"user_id": "hikwon@lsmnm.com", "password": "pass:"})
@@ -195,10 +202,18 @@ def test_요청자가_보낸_테넌트를_티켓에_싣지_않는다(client):
     assert r.status_code == 200
 
     with store._connect() as conn:
-        rows = conn.execute("SELECT tenant_id FROM auth_sse_ticket").fetchall()
+        rows = conn.execute(
+            "SELECT tenant_id, entity_mode FROM auth_sse_ticket").fetchall()
     assert rows, "티켓이 저장되지 않았습니다."
-    assert all(r0["tenant_id"] == "" for r0 in rows), (
+    assert all(r0["tenant_id"] != "other-tenant" for r0 in rows), (
         "요청 헤더의 테넌트가 티켓에 저장됐습니다 — 요청자가 scope 를 지정한 셈입니다.")
+    #: ★ 「헤더를 안 쓴다」만 확인하면 **서버가 아무것도 안 채워도 통과**한다. 문맥이 실제로
+    #  실렸는지 함께 본다 — 비어 있으면 브로드캐스터가 테넌트 경계를 대조할 수 없다.
+    import config
+    assert all(r0["tenant_id"] == config.ECM_DEFAULT_TENANT_ID for r0 in rows), (
+        "서버가 해석한 테넌트가 티켓에 실리지 않았습니다.")
+    assert all((r0["entity_mode"] or "") for r0 in rows), (
+        "실행 모드(REAL/VIRTUAL)가 비어 있습니다 — 샌드박스 자료와 실제 자료를 가를 수 없습니다.")
 
 
 def test_접근_로그에서_티켓이_가려진다():

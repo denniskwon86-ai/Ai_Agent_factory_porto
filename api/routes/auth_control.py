@@ -108,6 +108,35 @@ async def me(p: Principal = Depends(current_principal)):
     }
 
 
+def _subscription_context(user_id: str) -> dict:
+    """[G1-C1.1] 이 사용자의 **실행 문맥**을 서버가 해석한다 — 요청이 보낸 값은 쓰지 않는다.
+
+    · `tenant_id`      어느 독립 환경인가. 기본 테넌트 단일 운영이면 그 값이다.
+    · `scope_node_id`  어느 조직 범위인가(주 부서 → ECM 노드).
+    · `entity_mode`    REAL 인가 VIRTUAL 인가. 검증 샌드박스 자료와 실제 자료를 가른다.
+
+    ⚠️ 해석 실패를 **그럴듯한 기본값으로 덮지 않는다.** 빈 값이면 「모른다」는 뜻이고,
+      브로드캐스터는 모르는 문맥을 «전부 통과» 로 읽지 않는다."""
+    ctx = {"tenant_id": "", "scope_node_id": "", "entity_mode": ""}
+    try:
+        import config
+        from core.org_directory import org_directory
+        ctx["tenant_id"] = str(getattr(config, "ECM_DEFAULT_TENANT_ID", "") or "")
+        scope = org_directory.resolve_scope(user_id)
+        dept = str(getattr(scope, "primary_dept_id", "") or "")
+        if dept:
+            from core.enterprise_context.repository import ecm_repository as repo
+            node = repo.find_node_by_dept(dept)
+            if node:
+                ctx["scope_node_id"] = node.node_id
+                ctx["entity_mode"] = repo.node_entity_mode(node.node_id) or ""
+        #: 조직 노드를 못 찾아도 실제 문맥에서 일하는 것은 분명하다 — 시험 문맥으로 두지 않는다.
+        ctx["entity_mode"] = ctx["entity_mode"] or "REAL"
+    except Exception as e:                                        # pragma: no cover
+        print(f"⚠️ [auth] 구독 문맥 해석 실패(빈 값으로 둡니다): {e}")
+    return ctx
+
+
 @router.post("/sse-ticket")
 async def issue_sse_ticket(request: Request):
     """[P0-1B] SSE 1회용 접속표 발급.
@@ -136,10 +165,18 @@ async def issue_sse_ticket(request: Request):
     #  그러면 「요청자가 scope 를 지정하지 않는다」는 계약이 그 자리에서 깨진다 — 공격자가
     #  헤더 하나로 다른 테넌트 범위의 표를 받게 된다.
     #
-    #  tenant·scope 는 **인증된 사용자·세션·서버 문맥**에서 나와야 한다. 아직 그 연결이 없으므로
-    #  **빈 값으로 둔다**(G1-C 미구현). 모르는 것을 헤더로 채우는 것보다 비워 두는 것이 옳다 —
-    #  채워 두면 다음 사람이 「테넌트 경계가 있다」고 믿는다.
-    t = auth_store.issue_sse_ticket(uid, tok, tenant_id="")
+    #  tenant·scope 는 **인증된 사용자·세션·서버 문맥**에서 나와야 한다.
+    #
+    #  ★★★ [G1-C1.1] 그 연결을 이제 만든다. 값은 **서버가 조직 정보에서 해석**한다 —
+    #    요청이 무엇을 보내든 쳐다보지 않는다. 이렇게 해야 「요청자가 scope 를 지정하지
+    #    않는다」는 계약이 실제로 지켜진다.
+    #  ⚠️ 해석에 실패하면 **빈 값으로 둔다.** 모르는 것을 그럴듯한 기본값으로 채우면 다음
+    #    사람이 「테넌트 경계가 있다」고 믿는다 — 없는 통제를 있다고 믿는 것이 없는 것보다 나쁘다.
+    ctx = _subscription_context(uid)
+    t = auth_store.issue_sse_ticket(uid, tok,
+                                    tenant_id=ctx["tenant_id"],
+                                    scope_node_id=ctx["scope_node_id"],
+                                    entity_mode=ctx["entity_mode"])
     #: ⚠️ 응답에만 원문을 싣고 로그에는 남기지 않는다(저장소에는 해시만 있다).
     return {"status": "success", "data": t}
 

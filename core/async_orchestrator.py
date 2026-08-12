@@ -8,6 +8,48 @@ from typing import Optional, Dict, Any
 
 from core.agent_graph import get_runtime_app
 from core.broadcaster import factory_broadcaster
+
+def _node_completed_payload(project_id: str, task_id: str, node_name: str,
+                            state_data, full_state) -> dict:
+    """★★★ [G1-C1.1] `NODE_COMPLETED` 에서 **상태 전체를 빼낸다.**
+
+    종전에는 `{"node": ..., "state": state_data, "project_id": ...}` 로 **노드 산출 상태를
+    통째로** 실어 보냈다. 조직 격리가 걸린 뒤에도 문제가 남는다 —
+
+      · 그 프로젝트를 볼 수 있는 **부서 안의 모든 열람자**에게 코드·산출물·피드백 원문이
+        실시간으로 밀린다. 「목록을 볼 수 있다」와 「모든 중간 산출물을 실시간으로 받는다」는
+        같은 권한이 아니다.
+      · SSE 큐는 클라이언트당 500개다. 큰 상태를 매 노드마다 밀면 느린 클라이언트의 큐가
+        금세 차서 **오래된 이벤트부터 버려진다** — 정작 필요한 완료 신호가 사라진다.
+
+    그래서 «무엇이 바뀌었는가» 만 보내고, 상세는 화면이 `/state/latest` 로 가져간다.
+    그 경로에는 **권한 검사가 붙어 있다** — 이벤트에 실어 보내면 그 검사를 건너뛴다.
+
+    ⚠️ `state_version` 은 화면이 **중복 조회를 걸러내는** 데 쓴다. 없으면 노드가 끝날 때마다
+      전체 상태를 다시 받아 오히려 느려진다."""
+    changed = []
+    try:
+        if isinstance(state_data, dict):
+            changed = sorted(str(k) for k in state_data.keys())
+    except Exception:
+        changed = []
+    version = ""
+    try:
+        import hashlib
+        import json as _json
+        blob = _json.dumps(full_state, ensure_ascii=False, sort_keys=True, default=str)
+        version = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        pass                     # 판본을 못 만들어도 완료 신호 자체는 보내야 한다
+    return {
+        "project_id": project_id,
+        "task_id": task_id,
+        "node": node_name,
+        "status": "completed",
+        "changed_fields": changed,
+        "state_version": version,
+    }
+
 from nodes.utils.wbs_manager import WBSManager
 from core.persona_learner import persona_learner
 from core.llm_gateway import QuotaExhaustedException
@@ -242,7 +284,9 @@ class AsyncFactoryOrchestrator:
                     full_state = snapshot.values
                     await self._save_latest_state(full_state, workspace_root)
 
-                    await factory_broadcaster.broadcast("NODE_COMPLETED", {"node": node_name, "state": state_data, "project_id": pid})
+                    await factory_broadcaster.broadcast(
+                        "NODE_COMPLETED", _node_completed_payload(pid, task_id, node_name,
+                                                                 state_data, full_state))
 
             await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)
         except asyncio.CancelledError:
@@ -320,7 +364,9 @@ class AsyncFactoryOrchestrator:
                     full_state = snapshot.values
                     await self._save_latest_state(full_state, workspace_root)
 
-                    await factory_broadcaster.broadcast("NODE_COMPLETED", {"node": node_name, "state": state_data, "project_id": pid})
+                    await factory_broadcaster.broadcast(
+                        "NODE_COMPLETED", _node_completed_payload(pid, task_id, node_name,
+                                                                 state_data, full_state))
 
             await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)
         except asyncio.CancelledError:

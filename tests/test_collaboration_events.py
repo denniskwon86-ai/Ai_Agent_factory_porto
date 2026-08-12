@@ -43,7 +43,17 @@ class _FakeClient:
 
 
 @pytest.fixture
-def b():
+def b(monkeypatch):
+    """브로드캐스터 + **합성 사용자를 활성 계정으로 세운다.**
+
+    ⚠️ [G1-C1.1] `emit_to` 가 「지금도 유효한 계정인가」를 확인하게 되면서, 이 파일의 가짜
+      사용자(`kim`·`lee`)가 조직도에 없어 전부 차단됐다. 그 검사 자체는 옳다 — 계정을 폐지해도
+      이미 열린 스트림으로 알림이 계속 가던 것을 막는다. 여기서는 **배달 규칙**을 보는 것이
+      목적이므로 계정 조회만 세워 준다(폐지 차단은 아래 전용 테스트가 본다)."""
+    from core.org_directory import org_directory
+    monkeypatch.setattr(org_directory, "is_bootstrap", lambda: False)
+    monkeypatch.setattr(org_directory, "get_user",
+                        lambda uid: {"user_id": uid, "status": "active"} if uid else None)
     return SSEBroadcaster()
 
 
@@ -226,3 +236,20 @@ def test_publication_recipients_are_author_and_known_reviewers(ev):
                        {"review_type": "LEGAL_DISCLOSURE", "reviewer_id": ""}]}
     r = [x for x in ev.publication_recipients(pub) if x]
     assert set(r) == {"kim", "boss"}
+
+
+def test_폐지된_계정에는_열린_연결로도_알림이_가지_않는다(b, ev, monkeypatch):
+    """★★★ [G1-C1.1] 수신자는 도메인이 계산하지만 그것은 **«그때» 의 판단**이다.
+
+    SSE 연결은 최대 12시간 살아 있다. 그 사이 계정을 폐지해도 이미 열린 스트림으로는 결정·발간
+    알림이 계속 갔다 — 화면을 새로고침해야만 멈추는 종류의 유출이고, 아무도 그것을 보지 못한다.
+    ★ 그래서 **보낼 때마다** 계정이 살아 있는지 다시 본다."""
+    from core.org_directory import org_directory
+    c = _FakeClient(b, "kim")
+    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_1"}) == 1, "처음에는 가야 한다"
+    assert len(c.drain()) == 1
+
+    monkeypatch.setattr(org_directory, "get_user",
+                        lambda uid: {"user_id": uid, "status": "retired"})
+    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_2"}) == 0, "폐지 계정에 알림이 갔다"
+    assert c.drain() == []

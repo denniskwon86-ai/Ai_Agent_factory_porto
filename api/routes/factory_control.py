@@ -234,6 +234,20 @@ def _resolve_scope_node(dept_id: str) -> str:
         return ""
 
 
+class ProjectOwnershipRequired(ValueError):
+    """[G1-C1.1] 소유 범위 없이 프로젝트를 만들려 했다 — 라우트가 4xx 로 바꾼다."""
+
+
+def _is_test_runtime() -> bool:
+    """지금 테스트가 도는 중인가.
+
+    ★ 테스트가 만드는 프로젝트에는 검증 샌드박스 문맥을 자동 주입한다. 막아 버리면 스위트가
+      통째로 멈추고, 실제 부서를 주면 시험 산출물이 조직 자산처럼 집계된다.
+    ⚠️ `PYTEST_CURRENT_TEST` 는 pytest 가 **테스트 실행 중에만** 넣는 값이다. 수집 단계나
+      운영에서는 없다 — 그래서 이것을 운영 우회로로 쓸 수 없다."""
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
 def _write_project_meta(workspace_root: str, template_id: str, output_format_id: str = "default", view_type: str = "react_app", knowledge_pack_ids: list = None, master_domains: list = None, mcp_live_grounding: bool = None,
                         owner_dept_id: str = None, owner_user_id: str = None,
                         visibility: str = None, nature: str = None,
@@ -287,6 +301,30 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
             mcp_live_grounding = _prev.get("mcp_live_grounding", False)
         if knowledge_pack_ids is None:
             knowledge_pack_ids = _prev.get("knowledge_pack_ids", [])
+
+        # ★★★ [G1-C1.1] **미바인딩 프로젝트를 새로 만들지 못하게 한다.**
+        #
+        #   실측에서 61개 중 53개가 소유권 미기록이었다. 그것들은 「예외적으로 남은 과거
+        #   자료」가 아니라 **지금도 계속 만들어지고 있던 것**이다 — 막지 않으면 방금 끝낸
+        #   마이그레이션이 다음 주에 다시 필요해진다.
+        #
+        #   ⚠️ 테스트가 만드는 프로젝트까지 막으면 스위트가 통째로 멈춘다. 그래서 테스트
+        #     경로에는 **검증 샌드박스 문맥을 자동 주입**한다. 실제 부서를 주지 않는 것이
+        #     요점이다 — 시험 산출물이 조직 자산처럼 집계되면 안 된다.
+        if not (owner_dept_id or owner_user_id or enterprise_scope_id):
+            if _is_test_runtime():
+                owner_user_id = _pv.SANDBOX_CUSTODIAN
+                enterprise_scope_id = _pv.sandbox_scope_id()
+                entity_mode = _pv.SANDBOX_ENTITY_MODE
+                visibility = "private"
+                nature = nature or "test_fixture"
+            else:
+                # Fail-closed. 「일단 만들고 나중에 채우자」가 53개를 만들었다.
+                raise ProjectOwnershipRequired(
+                    "프로젝트에 소유 범위가 없습니다. owner_dept_id · owner_user_id · "
+                    "enterprise_scope_id 중 최소 하나가 필요합니다 — 소유 없는 프로젝트는 "
+                    "권한 필터에서 «미기록» 이 되어 통제 밖에 놓입니다.")
+
         with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
             json.dump({
                 "template_id": template_id or "default",
@@ -309,6 +347,11 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                 "blueprint_id": blueprint_id or "",
             }, f, ensure_ascii=False, indent=2)
         _sync_project_ownership(workspace_root, owner_dept_id, owner_user_id, visibility, nature)
+    except ProjectOwnershipRequired:
+        # ⚠️ **삼키지 않는다.** 아래 `except Exception` 이 이것까지 잡으면 메타가 안 써지고
+        #   콘솔 한 줄만 남는다 — 사용자는 만들어졌다고 믿는 프로젝트를 아무도 못 보게 된다.
+        #   라우트가 이것을 4xx 로 바꿔 «무엇이 없어서 못 만들었는지» 를 말해야 한다.
+        raise
     except Exception as e:
         print(f"⚠️ project_meta 저장 실패: {e}")
 

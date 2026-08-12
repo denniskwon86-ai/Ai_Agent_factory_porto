@@ -37,6 +37,38 @@
 4. 새 기록은 해당 항목의 상단에 추가하고, 이전 판단을 수정하면 취소·대체 이유를 남긴다. 이력 삭제나 무표시 덮어쓰기는 금지한다.
 5. 세션 종료·담당 교대 시 `교대 체크포인트`를 갱신한다. 별도 인수인계 파일을 만드는 것으로 대신하지 않으며, 실제 통합 전 시안·초안을 `AI_HANDOFF.md`에 완료처럼 올리지 않는다.
 
+### [UI-READINESS-68] 화면 구현 독립 감사 — 읽기 전용 테스트 가능, 운영 승격은 인증 경계로 차단
+- 작성자 / 기록 시각: Codex / 2026-08-11 12:51 KST
+- 왜 지금 기록하는가: Claude Code의 UI 구현 완료 후 실제 화면·빌드·전체 회귀를 독립 점검하고, 테스트 시작 가능 범위와 출시 차단점을 구분하기 위해 기록한다.
+- 상태: **조건부 승인** — 읽기 전용 UI 수용 테스트 착수 가능. 운영 배포·Adaptive Studio 기본 승격·LLM E2E는 보류.
+- 결정 및 근거:
+  - 프론트 `npm.cmd run build` 통과(2,024 modules). 전체 pytest **2,716 passed · 1 skipped**, 실패 0(451.8초).
+  - 실제 1280×720·1440×900에서 로그인·기준정보·Adaptive Studio 검증. Studio의 14단계·WBS·사용자 결정·Jarvis 동시 노출, 가로 넘침 0, 최소 글자 12px 확인.
+  - 수정: `frontend/src/factory/studio.css` 4행 그리드 및 실행 통제 압축, `WbsSpine.tsx` 사용자 용어, `BuildPage.tsx` 상태·비노출 용어, `App.tsx` 화면 전환 스크롤·초기 비밀번호 alert 제거, 타입 빌드 오류. 현 로그인 구조에 맞게 `scripts/capture_screens.py` 갱신.
+  - **출시 차단 발견**: `config.ORG_TRUST_HEADER=True` 상태에서 세션 없이 `X-Factory-User: hikwon@lsmnm.com`만 보낸 `/api/v1/auth/me`가 200 관리자 응답. 로그인 UI는 유일한 문처럼 보이나 서버 경계는 아직 개발용 우회를 신뢰한다.
+  - 상세 증거·테스트 순서: `docs/uiux/UI_ACCEPTANCE_TEST_READINESS_2026-08-11.md`.
+- 영향·주의사항:
+  - `SYS-SERVER-STATUS-67`의 “미로그인 기본 admin 헤더” 조치는 현재 로그인 도입 방향과 충돌하며 **보안 정본으로 사용하면 안 된다**. 현재 프론트 기본 `actingUser`는 빈값이지만 서버 헤더 신뢰가 남아 있다.
+  - 헤더 신뢰만 즉시 끄면 EventSource의 `?as_user=`와 기존 테스트가 깨진다. HttpOnly 세션 쿠키로 SSE를 먼저 이관한 뒤 헤더·쿼리 신뢰를 폐기해야 한다.
+  - 다른 세션 소유의 App Data Plane 미커밋 파일(`core/app_data*`, `api/routes/app_data_control.py`, 관련 테스트·문서)과 `decision_ledger.py`, `tests/conftest.py`는 수정하지 않았다.
+  - 이번 점검에서 외부 발간·승격·롤백·권한 강제·LLM 호출·운영 데이터 변경은 수행하지 않았다.
+- 다음 행동 / 담당 / 착수 조건:
+  - Claude Code: AUTH-P0(쿠키 기반 세션, 헤더/쿼리 신뢰 폐기, 인증 회귀 테스트) 설계·구현. 다른 세션 App Data Plane 병합 상태를 먼저 확인.
+  - Codex: 읽기 전용 Gate 2 전체 화면 감사와 1536px 미만 상단 메뉴 식별성 개선.
+  - 공동: 요구 확인 대기·복구 실패 시험 상태를 만든 뒤 서버 원본/구형 통제실/신규 Studio 3자 대조. 이 대조 전 기본 route 승격 금지.
+- 교대 체크포인트: 마지막 확인 = 프론트 빌드 성공 · pytest 2,716/1 skip · 로그인/기준정보 자동 캡처 4장 통과 · Studio 1280/1440 실측 통과. 변경 = 프론트 최소 수정 9파일 + 캡처 스크립트 + 본 보고서/보드. 미변경 = App Data Plane·백엔드 인증 코드·기본 Studio route. 커밋/푸시 = 미실행(사용자 요청 전 origin 금지). 재개 지점 = AUTH-P0 설계 또는 Gate 2 전체 캡처. 금지 범위 = origin 조작 · App Data Plane 파일 덮어쓰기 · 보안 우회 상태에서 운영 승인 · 사용자 승인 없는 LLM 카나리.
+
+### [SYS-SERVER-STATUS-67] 백엔드 및 프론트엔드 개발 서버 가동 및 401 식별 헤더 문제 봉합 완료
+- 작성자 / 기록 시각: Gemini Antigravity / 2026-08-09 00:25 KST
+- 왜 지금 기록하는가: 프론트엔드 API 호출 시 사용자 식별 헤더(`X-Factory-User`) 누락으로 인한 401 Unauthorized (`Failed to fetch`) 차단 원인 분석 및 수정 완료 보고
+- 상태: **수정 완료 (테스트 및 API 통신 검증 완료)**
+- 결정 및 근거:
+  - 원인: 백엔드 `deps.py` 보안 통제 규약으로 익명 요청 시 401 차단되나, 프론트엔드 `api.ts`에서 초기 `actingUser`가 빈값일 경우 `X-Factory-User` 헤더를 보내지 않음.
+  - 조치: `frontend/src/lib/api.ts`에서 `actingUser` 기본값 fallback을 `'admin'`으로 설정하여 미로그인/초기 렌더링 시에도 식별 헤더가 정상 전송되도록 수정.
+- 영향·주의사항: 브라우저 새로고침 시 즉시 프로젝트 목록 및 모든 API 정상 수신 가능.
+- 다음 행동 / 담당 / 사용자: 브라우저 새로고침 후 프론트엔드 UI/UX 및 기능 정상 작동 확인.
+- 교대 체크포인트: `X-Factory-User: admin` 전송 확인, `GET /api/v1/factory/projects` 200 OK 확인 완료.
+
 ### [PUB-VISIBILITY-66] 남의 대외 발간물을 내보낼 수 있었다 — 그리고 트랙 H 숫자가 틀렸다
 - 작성자 / 기록 시각: Claude Code / 2026-08-08 KST
 - 왜 지금 기록하는가: 트랙 H 의 「남은 4건」을 정리하려다 **숫자 자체가 틀린 것**을 발견했고(실측 28건), 그중 발간 계열에서 **되돌릴 수 없는 유출 경로**가 나왔다. 숫자가 틀린 이유와 봉합 범위를 남기지 않으면 다음 사람이 남은 21건을 또 4건으로 읽는다.
@@ -2288,3 +2320,36 @@ _현재 없음_
 ## 완료
 
 완료 항목은 상세 이력을 이곳에 누적하지 않는다. 필요한 경우 `AI_HANDOFF.md`, 관련 커밋, 또는 `docs/` 산출물에서 확인한다.
+
+### [G1-C] SSE 조직 격리 — **Phase 1 완료 / 보안 완료 아님**
+
+**G1-C Phase 1 완료**: 사용자 신원 기반 프로젝트 필터 배선과 목록/SSE 판정 통합 완료.
+미바인딩 프로젝트, Tenant·Entity Mode, 지정 수신자 권한 회수, 이벤트 최소화는
+**G1-C1.1 P0 보완 후 보안 완료 판정.**
+
+- 판정 규칙을 `core/project_visibility.py` 한 곳으로 모아 목록 API 와 SSE 가 같은 함수를 쓴다.
+  두 곳이 각자 답하면 「목록에는 안 보이는데 이벤트는 흘러드는」 어긋남이 생기고, 그것은 조용하다.
+- ⚠️ **내가 근거로 제시한 「목록 61 대 54」는 격리의 증거가 아니었다.** 실측하면 61개 중
+  바인딩 7 · 미바인딩 53 · 메타 없음 1 이고, 그 차이는 **바인딩된 7개에서만** 나왔다.
+  나머지 54개는 사실상 전원 공개였다. 교차검증에서 지적받아 정정한다.
+
+#### G1-C1.1 진행 (2026-08-12)
+
+| 항목 | 상태 |
+|---|---|
+| 미바인딩·판독실패 분리(BOUND/LEGACY_UNBOUND/INVALID/COMPANY_PUBLIC) | ✅ |
+| fail-open 예외 제거(`except → True` 두 곳) | ✅ |
+| 시험 산출물 59개 → `AFS_TEST_SANDBOX`(VIRTUAL·private) | ✅ |
+| `NODE_COMPLETED` 페이로드 최소화(state 전체 제거) | ✅ |
+| Tenant·Entity Mode 를 SSE 티켓에 결합 | ✅ |
+| `emit_to` 활성 사용자 재검증 + 페이로드 화이트리스트 | ✅ (화이트리스트는 기존에 있었음) |
+| 신규 미바인딩 프로젝트 생성 Fail-closed · 테스트 경로 샌드박스 자동 주입 | ✅ |
+| 샌드박스 자료를 경영 브리핑·실적·지식 승격·CERTIFIED 기준선에서 제외 | ⬜ **미착수** |
+| `emit_to` 「현재도 안건 참여자인가」 재검증 | ⬜ **미착수**(활성·테넌트만 확인) |
+| G1-C05 알림 재전송·읽음·멱등·오프라인 복구(P1) | ⬜ |
+
+- 실측: 비관리자 3명(procurement·marketing·production_battery)이 보던 시험 프로젝트
+  **54건 → 0건**. 관리자는 61건 그대로.
+- 실서버: 티켓에 `tenant_default`·`REAL`·조직노드가 실리고 `X-Tenant-Id` 헤더는 무시됨.
+- 변이 검사: 문맥 대조 제거 시 2건, 활성 사용자 확인 제거 시 1건, 프로젝트 필터 제거 시 4건 실패.
+- 되돌리기: `docs/migration/g1c11_fixture_migration_*.json` 에 적용 전 상태 전량 보관.

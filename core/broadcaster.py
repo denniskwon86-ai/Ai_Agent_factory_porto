@@ -16,13 +16,16 @@ class SSEBroadcaster:
         # [CL-4] 큐 → 구독자 사용자 ID. **전역 브로드캐스트와 지정 수신자를 구분하기 위한 것.**
         #   ⚠️ 기존 `clients` 목록은 그대로 둔다 — 지금 도는 15개 화면이 전역 이벤트에 의존한다.
         self._client_users: dict[int, str] = {}
+        #: [G1-C1.1] 큐 → 구독 문맥(테넌트·실행모드·세션). 신원만으로는 이벤트를 가를 수 없다.
+        self._client_ctx: dict[int, dict] = {}
         self.internal_listeners = []  # 내부 파이썬 콜백 함수들 (슈퍼바이저 데몬 등)
 
     def add_internal_listener(self, callback):
         """내부 데몬용 이벤트 구독 (async callback)"""
         self.internal_listeners.append(callback)
 
-    async def subscribe(self, user_id: str = "") -> AsyncGenerator[str, None]:
+    async def subscribe(self, user_id: str = "", tenant_id: str = "",
+                        entity_mode: str = "", session_id: str = "") -> AsyncGenerator[str, None]:
         """클라이언트(웹 브라우저) 구독 및 연결 유지.
 
         [CL-4] `user_id` 는 **지정 수신자 이벤트를 받기 위한 주소**다. 비우면 전역 이벤트만
@@ -40,6 +43,9 @@ class SSEBroadcaster:
         q: asyncio.Queue = asyncio.Queue(maxsize=500)
         self.clients.append(q)
         self._client_users[id(q)] = (user_id or "").strip()
+        self._client_ctx[id(q)] = {"tenant_id": (tenant_id or "").strip(),
+                                   "entity_mode": (entity_mode or "").strip(),
+                                   "session_id": (session_id or "").strip()}
         try:
             while True:
                 try:
@@ -56,6 +62,7 @@ class SSEBroadcaster:
             except ValueError:
                 pass
             self._client_users.pop(id(q), None)
+            self._client_ctx.pop(id(q), None)
 
     # ── [G1-C] 조직·프로젝트 격리 ────────────────────────────────────────────
     #: 분류를 못 붙인 이벤트를 **한 번만** 경고한다. 매 이벤트 찍으면 로그가 묻히고,
@@ -98,7 +105,26 @@ class SSEBroadcaster:
             print(f"⚠️ [Broadcaster] '{event_type}' 소유권 판독 실패({pid}): {e} — 보내지 않습니다.")
             return False, None
 
-    def _may_receive(self, user_id: str, is_global: bool, own) -> bool:
+    @staticmethod
+    def _context_matches(ctx: dict, own) -> bool:
+        """구독 문맥과 자원 문맥이 같은가 (테넌트 · REAL/VIRTUAL).
+
+        ★★ [G1-C1.1] 조직 권한만으로는 부족하다. `visibility="company"` 는 **테넌트를 넘어**
+          통과할 수 있고, 검증 샌드박스(VIRTUAL) 자료가 실제 문맥(REAL) 화면에 섞이면
+          시험 산출물이 실제 진행 상황처럼 보인다.
+
+        ⚠️ 구독 문맥이 **비어 있으면 대조하지 않는다**(하위호환). 종전 티켓에는 이 값이 없어서
+          다 막으면 이미 열린 연결이 전부 끊긴다. 대신 새 티켓은 항상 값을 싣는다."""
+        own = own or {}
+        c_tenant = str(ctx.get("tenant_id", "") or "")
+        c_mode = str(ctx.get("entity_mode", "") or "")
+        if c_tenant and str(own.get("tenant_id", "") or "") not in ("", c_tenant):
+            return False
+        if c_mode and str(own.get("entity_mode", "") or "") not in ("", c_mode):
+            return False
+        return True
+
+    def _may_receive(self, user_id: str, is_global: bool, own, ctx: dict = None) -> bool:
         """이 구독자가 이 이벤트를 받아도 되는가.
 
         ⚠️ 권한을 **보낼 때마다 다시 해석한다.** 구독 시점에 굳혀 두면 SSE 연결이 살아 있는
@@ -112,6 +138,8 @@ class SSEBroadcaster:
         if is_global:
             return True
         if own is None:
+            return False
+        if not self._context_matches(ctx or {}, own):
             return False
         try:
             from core.org_directory import org_directory
@@ -152,7 +180,8 @@ class SSEBroadcaster:
 
         # SSE 클라이언트 전송 - 가득 찬 큐(느린/죽은 클라이언트)는 가장 오래된 이벤트를 버리고 최신 유지
         for q in list(self.clients):
-            if not self._may_receive(self._client_users.get(id(q), ""), is_global, own):
+            if not self._may_receive(self._client_users.get(id(q), ""), is_global, own,
+                                     self._client_ctx.get(id(q), {})):
                 continue
             try:
                 q.put_nowait(line)
@@ -205,6 +234,12 @@ class SSEBroadcaster:
             uid = self._client_users.get(id(q), "")
             if not uid or uid not in targets:
                 continue
+            # ★★ [G1-C1.1] **지금도 유효한 계정인가.** 수신자는 도메인이 계산했지만 그것은
+            #   «그때» 의 판단이다. SSE 연결은 최대 12시간 살아 있어서, 그 사이 계정을 폐지해도
+            #   이미 열린 스트림으로는 결정·발간 알림이 계속 간다.
+            #   ⚠️ 프로젝트 필터는 여기 걸지 않는다 — 승인자는 대개 그 프로젝트 밖에 있다.
+            if not self._recipient_still_valid(uid, self._client_ctx.get(id(q), {})):
+                continue
             try:
                 q.put_nowait(line)
                 sent += 1
@@ -216,6 +251,27 @@ class SSEBroadcaster:
                 except Exception:
                     pass
         return sent
+
+    @staticmethod
+    def _recipient_still_valid(user_id: str, ctx: dict) -> bool:
+        """폐지되지 않은 계정인가. 실패하면 **보내지 않는다.**
+
+        ⚠️ 「조회 실패니까 일단 보낸다」로 두면, 인증 저장소가 흔들리는 순간이 곧 알림 유출
+          구간이 된다. 알림 한 건을 놓치는 쪽이 낫다 — 사용자는 화면을 새로고침하면 본다."""
+        try:
+            from core.org_directory import org_directory
+            # ⚠️ **조직을 도입하기 전에는 막지 않는다.** 부서·사용자가 없는 환경에서 이 검사를
+            #   그대로 적용하면 «아무도 유효하지 않다» 가 되어 알림이 전부 사라진다. 그것은
+            #   통제가 아니라 고장이다 — `AccessScope` 주석이 못박은 저장소 공통 계약이다.
+            if org_directory.is_bootstrap():
+                return True
+            u = org_directory.get_user(user_id)
+            if not u:
+                return False
+            status = u.get("status", "active") if isinstance(u, dict) else getattr(u, "status", "active")
+            return str(status) == "active"
+        except Exception:
+            return False
 
     async def send_alert(self, message: str):
         """Slack/Teams 등 Webhook 채널로 긴급 알람 전송 (HOTL, 에러 발생 시)"""

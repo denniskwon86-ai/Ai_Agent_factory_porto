@@ -45,6 +45,11 @@ OWNERSHIP = {
     #: 소유자 본인은 부서가 바뀌어도 계속 보이므로, 회수 검증에는 이쪽을 써야 한다.
     "P_D1_OTHER": {"owner_dept_id": "D1", "owner_user_id": "z@x", "visibility": "dept"},
     "P_LEGACY": {},          # 마이그레이션 전 — 소유권 미기록
+    #: [G1-C1.1] 문맥 경계 검증용. 조직 권한은 통과해도 테넌트·실행모드가 다르면 막혀야 한다.
+    "P_OTHER_TENANT": {"owner_dept_id": "D1", "owner_user_id": "z@x", "visibility": "dept",
+                       "tenant_id": "tenant_other", "entity_mode": "REAL"},
+    "P_SANDBOX": {"owner_dept_id": "D1", "owner_user_id": "z@x", "visibility": "dept",
+                  "tenant_id": "tenant_default", "entity_mode": "VIRTUAL"},
 }
 
 SCOPES = {
@@ -70,6 +75,10 @@ def bus(monkeypatch):
                         lambda ws: dict(OWNERSHIP.get(str(ws).split("/")[-1], {})))
     monkeypatch.setattr(org_directory, "resolve_scope",
                         lambda uid="": SCOPES.get(uid, _Scope(set())))
+    #: [G1-C1.1] `emit_to` 가 계정 유효성을 확인한다 — 합성 사용자를 활성으로 세워 준다.
+    monkeypatch.setattr(org_directory, "is_bootstrap", lambda: False)
+    monkeypatch.setattr(org_directory, "get_user",
+                        lambda uid: {"user_id": uid, "status": "active"} if uid else None)
     return SSEBroadcaster()
 
 
@@ -252,5 +261,56 @@ def test_결정_요청은_프로젝트_밖_사람에게도_간다(bus):
         q = _queue_of(bus, 0)
         sent = bus.emit_to("DECISION_REQUESTED", {"project_id": "P_A"}, ["b@x"])
         assert sent == 1 and _types(q) == ["DECISION_REQUESTED"]
+
+    _run(scenario())
+
+
+# ── 문맥 경계: 조직 권한을 통과해도 테넌트·실행모드가 다르면 막는다 ────────
+
+async def _subscribe_ctx(bus, user_id, tenant_id="", entity_mode=""):
+    agen = bus.subscribe(user_id=user_id, tenant_id=tenant_id, entity_mode=entity_mode)
+    asyncio.ensure_future(agen.asend(None))
+    await asyncio.sleep(0.05)
+    return agen
+
+
+def test_다른_테넌트_프로젝트는_조직권한이_있어도_막힌다(bus):
+    """★★★ [G1-C1.1] 부서 권한만 보면 통과한다 — `D1` 사람이 `D1` 소유 프로젝트를 본다.
+
+    그런데 그 프로젝트는 **다른 테넌트**의 것이다. 테넌트는 「보안·계약·데이터 격리 최상위
+    경계」이고, 부서 이름이 우연히 같다고 넘어가면 그 경계가 이름 충돌 하나로 무너진다."""
+    async def scenario():
+        await _subscribe_ctx(bus, "a@x", tenant_id="tenant_default", entity_mode="REAL")
+        q = _queue_of(bus, 0)
+        await bus.broadcast("WBS_UPDATED", {"project_id": "P_D1_OTHER"})
+        assert _types(q) == ["WBS_UPDATED"], "같은 테넌트 이벤트가 안 왔다 — 대조군이 죽었다"
+        await bus.broadcast("WBS_UPDATED", {"project_id": "P_OTHER_TENANT"})
+        assert _types(q) == [], "다른 테넌트 프로젝트 이벤트가 배달됐다"
+
+    _run(scenario())
+
+
+def test_실제_문맥_구독자는_샌드박스_이벤트를_받지_않는다(bus):
+    """★★ 검증 샌드박스(VIRTUAL) 자료가 실제 문맥(REAL) 화면에 섞이면, 시험 산출물의 진행이
+    **실제 업무 진행처럼** 보인다. 그 화면을 보고 사람이 판단한다."""
+    async def scenario():
+        await _subscribe_ctx(bus, "a@x", tenant_id="tenant_default", entity_mode="REAL")
+        await _subscribe_ctx(bus, "a@x", tenant_id="tenant_default", entity_mode="VIRTUAL")
+        q_real, q_virtual = _queue_of(bus, 0), _queue_of(bus, 1)
+        await bus.broadcast("WBS_UPDATED", {"project_id": "P_SANDBOX"})
+        assert _types(q_real) == [], "REAL 구독자에게 샌드박스 이벤트가 갔다"
+        assert _types(q_virtual) == ["WBS_UPDATED"], "VIRTUAL 구독자에게도 안 갔다 — 고장이다"
+
+    _run(scenario())
+
+
+def test_문맥_없는_옛_구독은_막지_않는다(bus):
+    """⚠️ G1-C1.1 이전 티켓에는 문맥이 없다. 다 막으면 **이미 열린 연결이 전부 끊긴다** —
+    통제가 아니라 장애다. 새 티켓은 항상 문맥을 싣는다."""
+    async def scenario():
+        await _subscribe_ctx(bus, "a@x")     # 문맥 없음(옛 티켓)
+        q = _queue_of(bus, 0)
+        await bus.broadcast("WBS_UPDATED", {"project_id": "P_D1_OTHER"})
+        assert _types(q) == ["WBS_UPDATED"]
 
     _run(scenario())

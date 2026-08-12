@@ -47,11 +47,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.project_visibility import (BOUND, COMPANY_PUBLIC, INVALID, LEGACY_UNBOUND,
                                      SANDBOX_ENTITY_MODE, SANDBOX_NODE_TYPE,
-                                     SANDBOX_SCOPE_CODE, is_sandbox,
-                                     project_meta_path, read_project_ownership)
+                                     SANDBOX_CUSTODIAN, SANDBOX_SCOPE_CODE,
+                                     is_sandbox, project_meta_path, read_project_ownership)
 
-#: 임시 관리 책임자. **승인된 예시 계정 하나만 쓴다** — 임의 계정을 만들면 실제 인원과 충돌한다.
-CUSTODIAN = "hikwon@lsmnm.com"
+#: 임시 관리 책임자. 정의는 `core/project_visibility` 에 있다 — 프로젝트 생성 경로도 같은
+#: 값을 써야 하므로 두 곳에 적지 않는다.
+CUSTODIAN = SANDBOX_CUSTODIAN
 
 #: 검증 샌드박스로 묶을 이름 규칙. Mega 부모와 모든 하위 프로젝트를 포함한다.
 FIXTURE_PATTERNS = (

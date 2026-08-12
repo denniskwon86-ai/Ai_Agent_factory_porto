@@ -168,6 +168,13 @@ let _sseConn: EventSource | null = null;
 let _sseGeneration = 0;
 let _sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** ★ [G1-C1.1] 마지막으로 받아 온 상태 판본. `NODE_COMPLETED` 가 같은 판본을 다시 알리면
+ *  조회하지 않는다 — 서버가 상태 전체를 밀어 주지 않게 되면서, 그 대신 화면이 가져와야
+ *  하는데 매 노드마다 전부 다시 받으면 종전보다 느려진다.
+ *  ⚠️ 프로젝트를 바꾸면 반드시 비운다. 안 비우면 새 프로젝트의 첫 판본이 «이미 가진 것» 으로
+ *    읽혀 **첫 갱신을 통째로 건너뛴다.** */
+let _lastStateVersion = '';
+
 export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   state: null,
   logs: [],
@@ -205,6 +212,9 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   setActiveSprintId: (id) => set({ activeSprintId: id }),
 
   setCurrentProject: (id) => {
+    //: ⚠️ [G1-C1.1] 상태 판본을 **반드시 비운다.** 남겨 두면 새 프로젝트의 첫
+    //   `NODE_COMPLETED` 판본이 «이미 가진 것» 으로 읽혀 첫 갱신을 통째로 건너뛴다.
+    _lastStateVersion = '';
     set({
       currentProjectId: id, state: null, wbsData: null, logs: [],
       completed_agents: [], currentActivity: null, lastSprintFailure: null, supervisorFeed: [], healingRetryCount: 0, activeSprintId: null, hotlTaskId: null, currentTemplateData: null
@@ -967,9 +977,22 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
         // 로그는 상한(500)을 두고 누적 - 장시간 세션에서 무제한 메모리 증가 방지
         const logs = [...prev.logs, logEntry].slice(-500);
         if (data.type === 'NODE_COMPLETED') {
+          // ★★★ [G1-C1.1] 종전에는 `data.payload.state` 를 그대로 병합했다. 서버가 노드
+          //   산출 상태를 **통째로** 실어 보냈기 때문이다. 이제 이벤트는 «무엇이 바뀌었는가»
+          //   만 싣고(`changed_fields` · `state_version`), 상세는 **권한 검사가 붙은**
+          //   `/state/latest` 로 가져온다. 이벤트에 실어 보내면 그 검사를 건너뛴다.
+          //
+          // ⚠️ `state_version` 으로 중복 조회를 거른다 — 노드가 끝날 때마다 전체 상태를
+          //   다시 받으면 오히려 느려진다. 판본이 같으면 이미 가진 것이다.
+          const version = String(data.payload?.state_version || '');
+          if (version && version !== _lastStateVersion) {
+            _lastStateVersion = version;
+            // ⚠️ 여기서 await 하지 않는다 — 이 함수는 이벤트 축소(reducer)이고, 안에서
+            //   네트워크를 기다리면 뒤따르는 이벤트 처리가 밀린다.
+            void useFactoryStore.getState().fetchLatestState();
+          }
           return {
             logs,
-            state: { ...(prev.state || {}), ...data.payload.state } as ProjectState,
             completed_agents: [...prev.completed_agents, data.payload.node]
           };
         }
