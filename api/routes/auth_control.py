@@ -130,37 +130,20 @@ def _subscription_context(user_id: str, requested_scope_node_id: str = "") -> di
 
     ⚠️⚠️ 확정하지 못하면 **예외를 던진다.** 종전에는 빈 값으로 두고 넘어갔는데, 브로드캐스터가
       빈 문맥을 「대조하지 않음」으로 처리하므로 그것이 곧 fail-open 이었다. 표를 못 만드는 것이
-      경계가 없는 표를 만드는 것보다 낫다."""
-    import config
-    from core.enterprise_context.repository import ecm_repository as repo
-    from core.org_directory import org_directory
+      경계가 없는 표를 만드는 것보다 낫다.
 
-    tenant = str(getattr(config, "ECM_DEFAULT_TENANT_ID", "") or "").strip()
-    if not tenant:
-        raise ContextUnavailable("테넌트를 확정할 수 없습니다.")
-
-    scope = org_directory.resolve_scope(user_id)
-    want = (requested_scope_node_id or "").strip()
-    node_id = ""
-    if want:
-        allowed = set(getattr(scope, "readable_scope_nodes", frozenset()) or frozenset())
-        if not (getattr(scope, "unrestricted", False) or want in allowed):
-            # 고를 수 없는 범위를 고른 것 — 조용히 기본값으로 바꾸지 않는다. 조용히 바꾸면
-            # 사용자는 A 를 골랐다고 믿으면서 B 의 숫자를 본다.
-            raise PermissionError(want)
-        node_id = want
-    else:
-        dept = str(getattr(scope, "primary_dept_id", "") or "")
-        if dept:
-            node = repo.find_node_by_dept(dept)
-            node_id = node.node_id if node else ""
-
-    mode = ""
-    if node_id:
-        mode = repo.node_entity_mode(node_id) or ""
-    #: 조직 노드를 못 찾아도 **실제 문맥에서 일하는 것은 분명하다** — 시험 문맥으로 두지 않는다.
-    mode = mode or "REAL"
-    return {"tenant_id": tenant, "scope_node_id": node_id, "entity_mode": mode}
+    ★★★ [G1-C3 · 2026-08-13] **계산 본체를 `core.project_visibility` 로 옮겼다.**
+      여기 두면 HTTP 라우트가 같은 질문에 따로 답하게 되고, 그 비대칭이 곧 「목록에는 보이는데
+      이벤트는 안 오는」 상태다 — G1-C3 가 고치려는 결함 자체다. 이 함수는 이제 **예외 종류만**
+      이 파일의 규약(`ContextUnavailable`)으로 바꾸는 얇은 껍데기다."""
+    from core.project_visibility import (ViewingContextUnavailable, ViewingScopeDenied,
+                                         resolve_viewing_context)
+    try:
+        return resolve_viewing_context(user_id, requested_scope_node_id)
+    except ViewingScopeDenied as e:
+        raise PermissionError(str(e))              # 라우트가 403 으로 바꾼다
+    except ViewingContextUnavailable as e:
+        raise ContextUnavailable(str(e))           # 라우트가 503 으로 바꾼다
 
 
 @router.post("/sse-ticket")

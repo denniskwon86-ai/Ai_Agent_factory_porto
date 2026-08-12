@@ -201,11 +201,34 @@ def test_is_deleted_is_false_when_meta_unreadable(tmp_path):
 # ⚠️ 정책 모듈만 초록이고 라우트가 옛 판정을 그대로 쓰면 아무것도 달라지지 않는다.
 #   실측 결함이 «viewer 가 DELETE 로 200» 이었으므로 **그 호출을 그대로 재현**한다.
 @pytest.fixture()
-def client(monkeypatch, ecm_org_seed):
+def client(monkeypatch, tmp_path, ecm_org_seed):
+    """★★ [G1-C3 · 2026-08-13] 탐침 프로젝트를 **실제로 만든다.**
+
+    종전에는 존재하지 않는 id 로 불렀고, 그때는 `assert_project_writable` 의 「소유권 미기록은
+    통과」 관대함 덕에 판정이 `pdel.classify` 까지 흘러 403 이 나왔다. 그런데 G1-C3 가
+    `assert_project_readable` 에 **문맥 축**을 넣으면서 «메타를 못 읽음 → 404» 가 먼저 걸린다.
+
+    ⚠️ 여기서 단언을 `in (403, 404)` 로 느슨하게 바꾸면 **테스트가 권한 축을 더 이상 확인하지
+      않게 된다** — 존재하지 않아서 막히는 것과 권한이 없어서 막히는 것은 다른 사실이고,
+      이 파일이 잠그려는 것은 후자다. 그래서 조건을 만들어 권한 경로를 그대로 태운다.
+
+    ⚠️ `core.paths.PROJECTS_DIR` 로 격리한다. 이 한 줄이 없으면 테스트가 **제품 `projects/` 에**
+      탐침 디렉터리를 만든다(저장소에서 실제로 겪은 사고)."""
+    import json
     import config
+    import core.paths
     from core.org_directory import org_directory
     org_directory._invalidate()
     monkeypatch.setattr(config, "ORG_ENFORCE", True, raising=False)
+    proj_root = tmp_path / "projects"
+    (proj_root / "__deletion_probe__").mkdir(parents=True)
+    #: 문맥 축을 통과할 만큼만 채운다 — 테넌트·실행모드·소유 범위(D-014: 하나라도 비면 비노출).
+    (proj_root / "__deletion_probe__" / "project_meta.json").write_text(
+        json.dumps({"template_id": "default", "owner_dept_id": "hq", "visibility": "dept",
+                    "tenant_id": "tenant_default", "entity_mode": "REAL",
+                    "enterprise_scope_id": "node_probe"}, ensure_ascii=False),
+        encoding="utf-8")
+    monkeypatch.setattr(core.paths, "PROJECTS_DIR", str(proj_root), raising=False)
     from main import app
     from fastapi.testclient import TestClient
     try:

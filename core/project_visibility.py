@@ -247,6 +247,82 @@ CTX_CONTEXT_MISSING = "CONTEXT_MISSING"
 CTX_LOOKUP_FAILED = "LOOKUP_FAILED"
 
 
+class ViewingContextUnavailable(RuntimeError):
+    """실행 문맥을 확정하지 못했다 — 호출부가 **503** 으로 바꾼다.
+
+    ⚠️ 빈 문맥으로 넘어가지 않는다. 문맥 없는 조회는 경계 없는 조회이고, `context_visible` 은
+      그것을 `CONTEXT_MISSING` 으로 **전부 차단**한다 — 사용자에게는 「고장」으로 보인다.
+      확정하지 못했다는 사실을 그대로 말하는 편이 낫다."""
+
+
+class ViewingScopeDenied(PermissionError):
+    """고를 수 없는 조직 범위를 골랐다 — 호출부가 **404 로 은폐**하고 감사에 남긴다."""
+
+
+def resolve_viewing_context(user_id: str, requested_scope_node_id: str = "") -> Dict[str, str]:
+    """★★★ [G1-C3] **「지금 무엇을 보기로 했는가」를 확정하는 단 하나의 지점.**
+
+    돌려주는 것: `{"tenant_id", "scope_node_id", "entity_mode"}` — `context_visible` 이 그대로 먹는다.
+
+    ## 왜 여기에 두는가
+
+    이 계산은 원래 `api/routes/auth_control._subscription_context` 안에 있었고 **SSE 티켓만**
+    썼다. 그래서 HTTP 라우트는 문맥을 아예 보지 않았고, 그 비대칭이 G1-C3 가 고치려는 결함
+    자체다 — 「목록에는 보이는데 이벤트는 안 오는」 상태. 두 경로가 **같은 함수**를 불러야
+    비대칭이 다시 생기지 않는다.
+
+    ## 요청받되, 서버가 검증한다
+
+    · 사용자가 **명시적으로 고른** 범위는 「그 사람이 읽을 수 있는가」를 확인하고 통과한 것만 쓴다.
+      고를 수 없는 범위면 조용히 기본값으로 바꾸지 않고 거부한다 — 조용히 바꾸면 사용자는
+      A 를 골랐다고 믿으면서 B 의 숫자를 본다.
+    · 실행 모드는 **그 노드의 실체**가 정한다. 요청이 정하게 두면 가상 자료를 실제 문맥으로
+      끌어올 수 있다.
+
+    ## ⚠️⚠️ 고르지 않았으면 **좁히지 않는다** (2026-08-13 실측으로 바꾼 규칙)
+
+    종전 구현은 아무것도 고르지 않은 사람의 범위를 **주 부서에서 추측해 채웠다.** 실측해 보니
+    그것이 조용히 자료를 지우고 있었다.
+
+        관리자(hikwon@lsmnm.com) 의 주 부서 `hq` → `MNM_SHARED`(전사공통 노드)
+        그런데 `smart-life-app` 은 그 **상위 법인**(`LS_MNM`) 소속이다
+        → 하위에서 상위는 안 보이므로(D-003) 관리자에게 `SCOPE_OUTSIDE` 로 사라진다
+
+    사용자는 그 범위를 **고른 적이 없다.** 서버가 추측한 값 때문에 자료가 사라지면 그것은
+    통제가 아니라 고장으로 읽힌다. 「고른 범위가 비면 좁히지 않는다」는 `context_visible` 의
+    규칙을 여기서도 지킨다 — 권한 경계는 `authorization_visible` 이 따로 지키므로 넓어지지
+    않는다(같은 테넌트·같은 실행 모드 안에서 **권한이 닿는 만큼**).
+
+    ⚠️ 부서 추측을 되살리지 말 것. 되살리면 「내 프로젝트가 안 보인다」가 다시 시작된다."""
+    import config
+    from core.enterprise_context.repository import ecm_repository as repo
+    from core.org_directory import org_directory
+
+    tenant = str(getattr(config, "ECM_DEFAULT_TENANT_ID", "") or "").strip()
+    if not tenant:
+        raise ViewingContextUnavailable("테넌트를 확정할 수 없습니다.")
+
+    want = (requested_scope_node_id or "").strip()
+    node_id = ""
+    if want:
+        scope = org_directory.resolve_scope((user_id or "").strip())
+        allowed = set(getattr(scope, "readable_scope_nodes", frozenset()) or frozenset())
+        if not (getattr(scope, "unrestricted", False) or want in allowed):
+            raise ViewingScopeDenied(want)
+        node_id = want
+
+    mode = ""
+    if node_id:
+        try:
+            mode = repo.node_entity_mode(node_id) or ""
+        except Exception:
+            # ⚠️ 모드를 못 읽었다고 REAL 로 단정하면 가상 노드를 실제 문맥으로 읽는다.
+            raise ViewingContextUnavailable(f"조직 노드의 실행 모드를 읽지 못했습니다: {node_id}")
+    #: 아무것도 고르지 않았으면 **실제 문맥에서 일하는 것이 분명하다** — 시험 문맥으로 두지 않는다.
+    mode = mode or "REAL"
+    return {"tenant_id": tenant, "scope_node_id": node_id, "entity_mode": mode}
+
+
 def authorization_visible(scope, user_id: str, own: Optional[Dict[str, Any]]) -> bool:
     """축 ①: **이 사람이 이 자원에 접근할 권한이 있는가.** 문맥은 보지 않는다."""
     return ownership_visible(scope, user_id, own)
@@ -292,6 +368,57 @@ def context_visible(ctx: Optional[Dict[str, Any]],
         return False, CTX_MODE_MISMATCH
     if not c_scope:
         return True, CTX_OK              # 「전체」를 고름 — 테넌트·모드 안에서 좁히지 않는다
+    if c_scope == r_scope:
+        return True, CTX_OK
+    ok, failed = _scope_is_ancestor(c_scope, r_scope)
+    if failed:
+        return False, CTX_LOOKUP_FAILED
+    return (True, CTX_OK) if ok else (False, CTX_SCOPE_OUTSIDE)
+
+
+def notification_context_visible(ctx: Optional[Dict[str, Any]],
+                                 own: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
+    """**지정 수신자 알림**(`emit_to`)의 문맥 경계. `context_visible` 보다 약하고, 의도적이다.
+
+    ## 왜 규칙이 다른가 — 자원의 성격이 다르다
+
+    프로젝트 이벤트는 **반드시** 소유 조직을 갖는다(실측 61/61). 그러나 결정 요청·발간 알림
+    대부분은 **프로젝트에 매이지 않는다** — 승인자·데이터 오너는 대개 그 프로젝트 밖에 있고,
+    그것이 `emit_to` 가 존재하는 이유다. 그런 알림에 조직 범위를 요구하면 「근거가 없다」는
+    이유로 **결정 요청이 결정권자에게 도달하지 못한다.** 통제가 아니라 고장이다.
+
+    그래서 여기서는 **테넌트와 실행 모드까지만** 경계로 삼는다.
+
+    · 테넌트는 「보안·계약·데이터 격리 최상위 경계」다 — 넘으면 안 된다.
+    · 실행 모드가 다르면 시험 알림이 실제 화면에 뜬다.
+    · 조직 범위는 **양쪽이 다 있을 때만** 좁힌다. 알림 쪽에 없는 것은 정상이다.
+
+    ⚠️ 이것을 `context_visible` 대신 프로젝트 이벤트에 쓰지 말 것. 그러면 범위 없는 프로젝트가
+      전부 통과하고, 그것이 D-014 가 금지한 「미지정 = 전사 공용」이다."""
+    if not isinstance(own, dict) or not own:
+        return False, CTX_RESOURCE_UNBOUND
+    c = ctx or {}
+    c_tenant = str(c.get("tenant_id", "") or "").strip()
+    c_mode = str(c.get("entity_mode", "") or "").strip()
+    if not c_tenant or not c_mode:
+        return False, CTX_CONTEXT_MISSING
+
+    r_tenant = str(own.get("tenant_id", "") or "").strip()
+    r_mode = str(own.get("entity_mode", "") or "").strip()
+    if not r_tenant or not r_mode:
+        # ⚠️ 알림에 조직 범위가 없는 것은 정상이지만, **테넌트·실행 모드가 없는 것은 아니다.**
+        #   그 둘은 도메인이 `routing_context` 에 반드시 싣는다. 없으면 판정 근거가 없는 것이고,
+        #   근거 없는 배달은 곧 「모두에게」다.
+        return False, CTX_RESOURCE_UNBOUND
+    if r_tenant != c_tenant:
+        return False, CTX_TENANT_MISMATCH
+    if r_mode != c_mode:
+        return False, CTX_MODE_MISMATCH
+
+    c_scope = str(c.get("scope_node_id", "") or "").strip()
+    r_scope = str(own.get("enterprise_scope_id", "") or "").strip()
+    if not c_scope or not r_scope:
+        return True, CTX_OK              # 한쪽이라도 없으면 좁히지 않는다
     if c_scope == r_scope:
         return True, CTX_OK
     ok, failed = _scope_is_ancestor(c_scope, r_scope)

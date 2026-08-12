@@ -61,6 +61,11 @@ class Principal:
     """현재 요청자와 그 확정 권한. 라우트는 이 객체만 보면 된다."""
     user_id: str
     scope: AccessScope
+    #: ★★★ [G1-C3] 화면이 **고른** 조직 범위. 이것은 «요청» 이지 «권한» 이 아니다 —
+    #  검증은 `viewing_context()` 가 하고, 그 전에는 아무 판정에도 쓰지 않는다.
+    #  ⚠️ 여기서 검증까지 해 버리면 문맥을 전혀 쓰지 않는 라우트까지 ECM 조회를 하게 되고,
+    #    조직도 조회 장애가 **전 API 장애**가 된다.
+    requested_scope_node_id: str = ""
 
     @property
     def unrestricted(self) -> bool:
@@ -140,7 +145,12 @@ async def current_principal(request: Request) -> Principal:
     #     답을 얻는다」고 못박고 있다. 새 규칙을 만든 것이 아니라 그 계약을 지키는 것이다.
     if _enforced() and not scope.unrestricted and not uid:
         raise HTTPException(status_code=401, detail="사용자 식별 정보가 없습니다.")
-    return Principal(user_id=uid, scope=scope)
+    #: [G1-C3] 화면이 고른 조직 범위를 **실어만 둔다**(검증은 `viewing_context`).
+    #  헤더를 못 붙이는 경로(iframe·다운로드 링크)를 위해 쿼리도 받는다 —
+    #  `current_enterprise_context` 가 같은 두 자리를 읽는다.
+    want = (request.headers.get(getattr(config, "ECM_SCOPE_HEADER", "X-Enterprise-Scope"), "")
+            or request.query_params.get("enterprise_scope", "") or "").strip()
+    return Principal(user_id=uid, scope=scope, requested_scope_node_id=want)
 
 
 # ── 권한 단언 헬퍼 ────────────────────────────────────────────────────────
@@ -541,13 +551,82 @@ def _assert_identified_for_project(p: Principal, project_id: str, verb: str):
                             detail=f"'{project_id}' 프로젝트를 {verb} 수 없습니다 — {reason}")
 
 
+def viewing_context(p: Principal) -> dict:
+    """★★★ [G1-C3] **검증된 «지금 보는 문맥».** 판정에 쓰는 문맥은 전부 여기서 나온다.
+
+    실패를 HTTP 로 바꾸는 규칙(설계 `design_m2_scope_contract_and_audit.md` §3.3 경계표):
+
+    · 고를 수 없는 범위를 골랐다 → **404 은폐.** 403 은 「그 조직이 존재한다」를 알려 준다.
+    · 문맥을 확정하지 못했다 → **503.** 빈 문맥으로 넘어가면 `context_visible` 이 전부 막고,
+      사용자에게는 「고장」으로 보인다. 확정하지 못했다고 말하는 편이 낫다.
+
+    ⚠️ **은폐는 응답이지 기록이 아니다** — 404 로 돌려주더라도 감사에는 실제 대상과
+      요청값·서버 계산값을 **둘 다** 남긴다. 하나만 남기면 정상 조회와 권한 상승 시도가
+      같은 모양이 된다(§3.2)."""
+    from core.project_visibility import (ViewingContextUnavailable, ViewingScopeDenied,
+                                         resolve_viewing_context)
+    want = (p.requested_scope_node_id or "").strip()
+    try:
+        return resolve_viewing_context(p.user_id, want)
+    except ViewingScopeDenied:
+        try:
+            from core.enterprise_context import audit
+            audit.record(event="ACCESS_DENIED_SCOPE_MISMATCH", resource_type="scope_node",
+                         resource_id=want, actor=p.user_id,
+                         actor_scopes=getattr(p.scope, "readable_scope_nodes", ()) or (),
+                         requested_scope=want, outcome="denied", reason="scope_not_selectable")
+        except Exception:
+            pass                       # 감사 실패가 요청을 죽이지 않는다(감사 모듈이 자체 계수)
+        raise HTTPException(status_code=404, detail="요청한 조직 범위를 찾을 수 없습니다.")
+    except ViewingContextUnavailable as e:
+        raise HTTPException(status_code=503, detail=f"실행 문맥을 확정하지 못했습니다: {e}")
+
+
+def project_context_reason(p: Principal, project_id: str) -> str:
+    """이 프로젝트가 **지금 보는 문맥** 안에 있는가. 있으면 `""`, 아니면 `CTX_*` 사유.
+
+    ★ 권한 축은 보지 않는다 — 그쪽은 `_resource_readable` 이 답한다. 두 축을 나눠 두어야
+      화면이 「접근 불가」와 「문맥 점검 필요」를 **다르게** 말할 수 있다.
+
+    ⚠️ 강제가 꺼져 있으면 아무것도 막지 않는다 — 이 파일의 다른 판정과 같은 계약이다.
+      조직을 세우기 전에는 모든 필터가 no-op 이어야 한다."""
+    if not _enforced():
+        return ""
+    from core.paths import workspace_path
+    from core.project_visibility import context_visible, read_project_ownership
+    try:
+        own = read_project_ownership(workspace_path(project_id))
+    except Exception:
+        # ⚠️ 판독 실패를 «통과» 로 답하지 않는다. `ownership_visible` 이 1차 구현에서
+        #   정확히 그렇게 틀렸고, 그 순간 통제가 사라진다.
+        return "RESOURCE_UNBOUND"
+    ok, why = context_visible(viewing_context(p), own)
+    return "" if ok else why
+
+
 def assert_project_readable(p: Principal, project_id: str):
     _assert_identified_for_project(p, project_id, "볼")
     if not _resource_readable(p, "project", project_id):
         _deny(f"'{project_id}' 프로젝트를 볼 권한이 없습니다.")
+    # ★★★ [G1-C3] 권한이 있어도 **지금 고른 문맥 밖이면** 보이지 않는다.
+    #   ⚠️ 여기에 두는 이유는 `_assert_identified_for_project` 와 같다 — 판정 함수 안에 있어야
+    #     이 함수를 이미 쓰는 모든 경로(상세·상태·WBS·피드·내보내기)가 함께 걸리고,
+    #     나중에 생기는 라우트도 판정을 부르는 순간 같이 걸린다.
+    reason = project_context_reason(p, project_id)
+    if reason:
+        # 존재를 알리지 않는다(§3.3) — 다만 사유는 남긴다.
+        raise HTTPException(status_code=404,
+                            detail=f"프로젝트를 찾을 수 없습니다. ({reason})")
 
 
 def assert_project_writable(p: Principal, project_id: str):
+    # ★★★ [G1-C3] 문맥 검사는 **무제한 권한자보다 먼저** 온다. 「전권」과 「지금 보는 범위」는
+    #   다른 축이고, 관리자가 A 회사를 보면서 B 회사 프로젝트를 실행시키면 그것은 권한 문제가
+    #   아니라 **사고**다. 판정기의 `test_무제한_권한자도_다른_테넌트는_못_본다` 와 같은 규칙.
+    reason = project_context_reason(p, project_id)
+    if reason:
+        raise HTTPException(status_code=404,
+                            detail=f"프로젝트를 찾을 수 없습니다. ({reason})")
     if p.scope.unrestricted:
         return
     _assert_identified_for_project(p, project_id, "바꿀")

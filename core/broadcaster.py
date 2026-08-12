@@ -122,25 +122,39 @@ class SSEBroadcaster:
 
         ⚠️ `scope_node_id` 는 **권한이 아니라 «지금 무엇을 보기로 했는가»** 다. 비어 있으면
           「전체」를 고른 것이므로 좁히지 않는다 — 여기서 막으면 범위를 안 고른 사람이
-          아무것도 못 본다. 권한 경계는 `ownership_visible` 이 따로 지킨다."""
-        if own is None:
-            # ⚠️ [G1-C1.4] 자원 문맥이 없으면 **차단한다.** 종전에는 `own or {}` 로 빈 사전을
-            #   만들었고, 빈 값은 모든 비교를 통과해 fail-open 이었다.
-            return False
-        c_tenant = str(ctx.get("tenant_id", "") or "")
-        c_mode = str(ctx.get("entity_mode", "") or "")
-        if not c_tenant or not c_mode:
-            return False                 # 문맥 없는 구독 = 경계를 확인할 수 없음 = 차단
-        if str(own.get("tenant_id", "") or "") not in ("", c_tenant):
-            return False
-        if str(own.get("entity_mode", "") or "") not in ("", c_mode):
-            return False
+          아무것도 못 본다. 권한 경계는 `ownership_visible` 이 따로 지킨다.
+
+        ★★★ [G1-C3 · 2026-08-13] **자체 비교를 버리고 정본 판정기를 부른다.**
+
+        여기 있던 손수 만든 비교는 목록 API 의 판정과 **이미 갈라져 있었다.** 실측으로 확인한
+        차이 하나 — 자원의 테넌트·실행 모드가 **비어 있으면 통과**시키고 있었다
+        (`str(...) not in ("", c_tenant)`). 같은 조건을 `context_visible` 은 D-014 에 따라
+        `RESOURCE_UNBOUND` 로 **차단**한다. 즉 「목록에서는 미지정이라 안 보이는 프로젝트의
+        이벤트가 실시간으로는 흘러드는」 상태였고, 그 어긋남은 조용하다.
+
+        ⚠️ 여기서 다시 손수 비교하지 말 것. 판정이 두 곳에 있으면 반드시 갈라진다 —
+          이 파일에서만 두 번째다."""
         try:
-            from core.project_visibility import scope_covers
-            return scope_covers(str(ctx.get("scope_node_id", "") or ""),
-                                str(own.get("enterprise_scope_id", "") or ""))
+            from core.project_visibility import context_visible
+            ok, _why = context_visible(ctx, own)
+            return bool(ok)
         except Exception:
-            return True                  # 범위 좁히기 실패는 권한 경계가 아니다(위 주석 참조)
+            return False                 # 판정 실패는 **차단** 쪽으로(노출은 되돌릴 수 없다)
+
+    @staticmethod
+    def _notification_context_matches(ctx: dict, own) -> bool:
+        """지정 수신자 알림(`emit_to`)의 문맥 경계 — **테넌트·실행 모드까지만.**
+
+        ⚠️ 프로젝트 이벤트와 규칙이 다르다. 결정 요청·발간 알림은 프로젝트에 매이지 않는 것이
+          정상이고(승인자는 대개 그 프로젝트 밖에 있다), 여기에 조직 범위를 요구하면
+          **결정 요청이 결정권자에게 도달하지 못한다.** 근거는 `project_visibility` 의
+          `notification_context_visible` 주석에 있다."""
+        try:
+            from core.project_visibility import notification_context_visible
+            ok, _why = notification_context_visible(ctx, own)
+            return bool(ok)
+        except Exception:
+            return False
 
     def _may_receive(self, user_id: str, is_global: bool, own, ctx: dict = None) -> bool:
         """이 구독자가 이 이벤트를 받아도 되는가.
@@ -292,7 +306,10 @@ class SSEBroadcaster:
             #   접속해 있을 수 있고, 테넌트는 「보안·계약·데이터 격리 최상위 경계」다.
             #   ⚠️ 판정 근거(`project_id`)가 없으면 대조하지 않는다 — 알림 대부분은 프로젝트에
             #     매이지 않고, 근거 없이 막으면 결정 요청이 사라진다.
-            if not self._context_matches(self._client_ctx.get(id(q), {}), own_ctx):
+            # ★★ [G1-C3] 프로젝트 이벤트와 **다른 판정기**를 부른다. 지정 알림은 조직 범위가
+            #   없는 것이 정상이므로 `context_visible` 을 쓰면 결정 요청이 통째로 사라진다.
+            #   ⚠️ 규칙 본체는 `core/project_visibility` 에 있다 — 여기서 손수 비교하지 말 것.
+            if not self._notification_context_matches(self._client_ctx.get(id(q), {}), own_ctx):
                 continue
             try:
                 q.put_nowait(line)

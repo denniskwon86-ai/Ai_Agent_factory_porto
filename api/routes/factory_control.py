@@ -21,6 +21,7 @@ from api.deps import (
     assert_project_writable,
     current_principal,
     enterprise_context,
+    viewing_context,
     visibility_block_reason,
 )
 from core.route_authority import guard as _route_authority_guard
@@ -183,25 +184,67 @@ def _ownership_visible(p, own: dict) -> bool:
         return False                      # 판정 실패는 **차단** 쪽으로
 
 
+#: ★★★ [G1-C3] 「문맥이 어긋났다」와 「문맥을 못 읽었다」는 다른 사실이다.
+#:   앞은 **정상 격리**(다른 회사·다른 실행 모드·고른 범위 밖)이고, 뒤는 **고쳐야 할 결함**이다.
+#:   한 숫자로 뭉치면 사용자는 정상 격리를 고장으로 읽고, 진짜 결함은 그 속에 묻힌다.
+_CTX_NEEDS_ATTENTION = (_pv.CTX_RESOURCE_UNBOUND, _pv.CTX_CONTEXT_MISSING, _pv.CTX_LOOKUP_FAILED)
+
+
+def _visible_projects_with_reasons(p, ctx: dict):
+    """(보이는 id 목록, 사유별 차단 건수). **목록·요약·브리핑이 전부 이것을 쓴다.**
+
+    ⚠️ 권한 축에서 막힌 것(`UNAUTHORIZED`)은 세지 않는다 — 그 자원의 **존재 자체**를 알리지
+      않아야 하고(§3.3), 건수는 「몇 건이 있는지」를 알려 주는 값이다."""
+    from collections import Counter
+    root = workspace_path()
+    out, blocked = [], Counter()
+    try:
+        names = os.listdir(root)
+    except Exception:
+        return out, blocked
+    for item in sorted(names):
+        item_path = os.path.join(root, item)
+        if not os.path.isdir(item_path):
+            continue
+        try:
+            ok, why = _pv.project_visible(p.scope, p.user_id, ctx,
+                                          _read_project_ownership(item_path))
+        except Exception:
+            ok, why = False, _pv.CTX_LOOKUP_FAILED     # 판정 실패는 **차단** 쪽으로
+        if ok:
+            out.append(item)
+        elif why != "UNAUTHORIZED":
+            blocked[why] += 1
+    return out, blocked
+
+
+def _blocked_envelope(blocked) -> dict:
+    """화면이 「0건」·「접근 불가」·「문맥 점검 필요」를 다르게 말하도록 실어 보내는 봉투."""
+    total = int(sum(blocked.values()))
+    attention = int(sum(v for k, v in blocked.items() if k in _CTX_NEEDS_ATTENTION))
+    return {
+        "context_blocked_count": total,
+        # ★ 정상 격리와 점검 대상을 **나눠서** 준다. 화면이 문구를 달리해야 한다.
+        "context_needs_attention": attention,
+        "context_blocked_reasons": {k: int(v) for k, v in blocked.items()},
+    }
+
+
 def _iter_visible_projects(p) -> list:
     """요청자에게 보이는 프로젝트 id 목록 (설계서 Phase 4 공용 헬퍼).
 
     ⚠️ `GET /projects` 와 `supervisor_chat` 이 각자 디렉터리를 훑고 있었는데, 후자는
       **권한을 전혀 보지 않고 전체 프로젝트 이름을 LLM 브리핑에 동봉**했다.
-      즉 다른 부서의 프로젝트 이름이 그대로 새어나갔다. 목록 생성을 한 곳으로 모은다."""
-    root = workspace_path()
-    out = []
+      즉 다른 부서의 프로젝트 이름이 그대로 새어나갔다. 목록 생성을 한 곳으로 모은다.
+
+    ★★ [G1-C3] 이제 **문맥 축까지** 함께 본다. 목록과 브리핑이 다른 규칙을 쓰면 「목록에는
+      없는 프로젝트가 요약에는 나오는」 어긋남이 생기고, 그것은 조용하다."""
     try:
-        names = os.listdir(root)
-    except Exception:
-        return out
-    for item in names:
-        item_path = os.path.join(root, item)
-        if not os.path.isdir(item_path):
-            continue
-        if _ownership_visible(p, _read_project_ownership(item_path)):
-            out.append(item)
-    return out
+        ctx = viewing_context(p)
+    except HTTPException:
+        return []                      # 문맥을 확정 못 하면 **아무것도 싣지 않는다**
+    ids, _ = _visible_projects_with_reasons(p, ctx)
+    return ids
 
 
 #: ★★ [G1-C] 본체는 `core/project_visibility.py` 로 옮겼다. 이름은 남긴다 —
@@ -470,13 +513,28 @@ async def get_projects(include_deleted: bool = False,
     from core import project_deletion as pdel
     show_deleted = bool(include_deleted) and pdel.is_admin(p.scope)
 
+    # ★★★ [G1-C3] **문맥을 한 번만 확정하고 루프에 들고 들어간다.**
+    #   ⚠️ 항목마다 다시 풀면 조회 비용이 N 배가 되고, 더 나쁘게는 루프 도중 조직도가 바뀌면
+    #     같은 목록 안에서 서로 다른 기준으로 판정된 행이 섞인다.
+    ctx = viewing_context(p)          # 고를 수 없는 범위 → 404 은폐 · 확정 불가 → 503
+    from collections import Counter
+    blocked = Counter()
+
     project_list = []
     for item in os.listdir(projects_dir):
         item_path = os.path.join(projects_dir, item)
         if os.path.isdir(item_path):
             # [Phase 3/4] 소유권 필터. 이 루프는 이미 메타 파일을 열고 있으므로 추가 I/O 는 실질 0.
             _own = _read_project_ownership(item_path)
-            if not _ownership_visible(p, _own):
+            # ★ 권한 축 AND 문맥 축. 두 축을 나눠 두어야 **왜** 안 보이는지 말할 수 있다.
+            try:
+                _ok, _why = _pv.project_visible(p.scope, p.user_id, ctx, _own)
+            except Exception:
+                _ok, _why = False, _pv.CTX_LOOKUP_FAILED      # 판정 실패는 차단 쪽으로
+            if not _ok:
+                # ⚠️ 권한 축에서 막힌 것은 **세지 않는다** — 건수 자체가 존재를 알린다(§3.3).
+                if _why != "UNAUTHORIZED":
+                    blocked[_why] += 1
                 continue
             _deleted = pdel.is_deleted(item_path)
             if _deleted and not show_deleted:
@@ -524,7 +582,11 @@ async def get_projects(include_deleted: bool = False,
                 "deleted": _deleted,
             })
 
-    return {"status": "success", "data": project_list}
+    # ★★★ [G1-C3 · 화면 오류 계약] 「0건」과 「문맥 밖이라 안 보인다」와 「못 읽었다」를
+    #   **다르게 말할 수 있게** 건수를 함께 싣는다. 이것이 없으면 사용자는 사라진 자료를
+    #   고장으로 읽고, 실측에서 그 수가 59건이었다(검증 샌드박스로 격리한 시험 산출물).
+    return {"status": "success", "data": project_list,
+            "viewing_context": ctx, **_blocked_envelope(blocked)}
 
 def provision_project(project_id: str, template_id: str = "default",
                       output_format_id: str = "default", view_type: str = "react_app",

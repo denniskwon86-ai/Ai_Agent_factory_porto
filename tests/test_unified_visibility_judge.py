@@ -74,6 +74,21 @@ def test_전사공개도_다른_테넌트로는_넘어가지_않는다():
     assert not ok and why == pv.CTX_TENANT_MISMATCH
 
 
+@pytest.mark.parametrize("own", [None, {}, [], "", 0])
+def test_자원_정보_자체가_없으면_판정하지_않고_막는다(own):
+    """★★ [변이 검사로 드러난 구멍 · 2026-08-12] 이 경우를 **아무 테스트도 보지 않았다.**
+
+    ⚠️ 「자원 정보 없음」 차단을 통째로 지워도 21건이 전부 초록이었다. 즉 그 줄은 **테스트가
+      지키지 않는 코드**였다. 실제로 지우면 `own.get` 이 `AttributeError` 를 내는데, 예외를
+      삼키는 호출부에서는 그것이 곧 «판정 실패 = 통과» 가 된다 — `ownership_visible` 이
+      1차 구현에서 정확히 그렇게 틀렸다.
+
+    ★ 배선 후에는 `context_visible` 이 **단독으로도** 불린다(목록은 권한 축을 먼저 거르지만,
+      사유별 집계는 문맥 축만 따로 센다). 그러므로 이 함수는 혼자서도 안전해야 한다."""
+    ok, why = pv.context_visible(_ctx(), own)
+    assert not ok and why == pv.CTX_RESOURCE_UNBOUND
+
+
 # ── 조직 계층: 위에서 아래는 보이고, 아래에서 위·형제는 안 보인다 ──────────
 
 def _fake_parents(monkeypatch, edges):
@@ -165,3 +180,90 @@ def test_무제한_권한자도_다른_테넌트는_못_본다():
     ok, why = pv.project_visible(_Scope(unrestricted=True), "boss@x",
                                  _ctx(tenant_id="T2"), _own())
     assert not ok and why == pv.CTX_TENANT_MISMATCH
+
+
+# ── 문맥 정규화: 「지금 무엇을 보기로 했는가」를 확정하는 단일 지점 ──────────
+#
+# ★★★ [G1-C3 · 2026-08-13] 이 계산은 원래 `auth_control._subscription_context` 안에 있었고
+#   **SSE 티켓만** 썼다. HTTP 라우트는 문맥을 아예 보지 않았고, 그 비대칭이 G1-C3 가 고치려는
+#   결함 자체다. 두 경로가 같은 함수를 부르는지를 여기서 잠근다.
+
+class _FakeScope:
+    def __init__(self, nodes=(), unrestricted=False, primary_dept_id=""):
+        self.readable_scope_nodes = frozenset(nodes)
+        self.unrestricted = unrestricted
+        self.primary_dept_id = primary_dept_id
+
+
+def _wire(monkeypatch, scope, *, tenant="tenant_default", modes=None, dept_node=None):
+    """`resolve_viewing_context` 가 지연 임포트하는 세 곳을 갈아끼운다."""
+    import config
+    from core.enterprise_context import repository as repo_mod
+    from core import org_directory as od_mod
+    monkeypatch.setattr(config, "ECM_DEFAULT_TENANT_ID", tenant, raising=False)
+    monkeypatch.setattr(od_mod.org_directory, "resolve_scope", lambda uid: scope, raising=False)
+    monkeypatch.setattr(repo_mod.ecm_repository, "node_entity_mode",
+                        lambda nid: (modes or {}).get(nid, ""), raising=False)
+    # 부서→노드 해석이 **불려서는 안 된다**는 것을 감시한다(아래 테스트가 이것을 확인한다).
+    called = []
+
+    def _spy(dept):
+        called.append(dept)
+        return type("N", (), {"node_id": dept_node})() if dept_node else None
+
+    monkeypatch.setattr(repo_mod.ecm_repository, "find_node_by_dept", _spy, raising=False)
+    return called
+
+
+def test_고르지_않으면_주부서로_좁히지_않는다(monkeypatch):
+    """★★★ [2026-08-13 실측으로 바꾼 규칙] 사용자가 **고른 적 없는** 범위로 좁히지 않는다.
+
+    실측: 관리자의 주 부서 `hq` → `MNM_SHARED`(전사공통 노드). 그런데 `smart-life-app` 은 그
+    **상위 법인**(`LS_MNM`) 소속이라, 부서로 좁히는 순간 관리자에게서 `SCOPE_OUTSIDE` 로
+    사라졌다. 사용자는 그 범위를 고른 적이 없다 — 서버가 추측한 값 때문에 자료가 사라지면
+    그것은 통제가 아니라 **고장**으로 읽힌다.
+
+    ⚠️ 넓어지지 않는다. 권한 경계는 `authorization_visible` 이 따로 지키고, 여기서 남는 것은
+      「같은 테넌트·같은 실행 모드 안에서 권한이 닿는 만큼」이다."""
+    called = _wire(monkeypatch, _FakeScope(primary_dept_id="hq"), dept_node="node_shared")
+    ctx = pv.resolve_viewing_context("a@x", "")
+    assert ctx["scope_node_id"] == "", "고른 적 없는 범위로 좁혔다"
+    assert ctx["entity_mode"] == "REAL" and ctx["tenant_id"] == "tenant_default"
+    assert called == [], f"부서→노드 추측을 되살렸다: {called}"
+
+
+def test_고를_수_없는_범위는_거부한다(monkeypatch):
+    """조용히 기본값으로 바꾸지 않는다 — 바꾸면 사용자는 A 를 골랐다고 믿으며 B 를 본다."""
+    _wire(monkeypatch, _FakeScope(nodes={"node_ok"}))
+    with pytest.raises(pv.ViewingScopeDenied):
+        pv.resolve_viewing_context("a@x", "node_other")
+
+
+def test_고른_범위가_권한_안이면_통과하고_모드는_노드가_정한다(monkeypatch):
+    """⚠️ 실행 모드를 **요청이 정하게 두지 않는다.** 그러면 가상 자료를 실제 문맥으로 끌어온다."""
+    _wire(monkeypatch, _FakeScope(nodes={"node_v"}), modes={"node_v": "VIRTUAL"})
+    ctx = pv.resolve_viewing_context("a@x", "node_v")
+    assert ctx["scope_node_id"] == "node_v" and ctx["entity_mode"] == "VIRTUAL"
+
+
+def test_무제한_권한자는_어떤_노드든_고를_수_있다(monkeypatch):
+    _wire(monkeypatch, _FakeScope(unrestricted=True), modes={"node_x": "REAL"})
+    assert pv.resolve_viewing_context("boss@x", "node_x")["scope_node_id"] == "node_x"
+
+
+def test_테넌트를_확정_못하면_빈_문맥으로_넘어가지_않는다(monkeypatch):
+    """⚠️ 빈 문맥은 `context_visible` 이 전부 차단한다 — 사용자에게는 「고장」으로 보인다.
+    확정하지 못했다는 사실을 그대로 말하는 편이 낫다(503)."""
+    _wire(monkeypatch, _FakeScope(unrestricted=True), tenant="")
+    with pytest.raises(pv.ViewingContextUnavailable):
+        pv.resolve_viewing_context("boss@x", "")
+
+
+def test_SSE_티켓과_HTTP_가_같은_함수를_쓴다(monkeypatch):
+    """★★ 두 경로가 갈라지면 「목록에는 보이는데 이벤트는 안 오는」 상태가 다시 생긴다.
+    `auth_control._subscription_context` 는 예외 종류만 바꾸는 껍데기여야 한다."""
+    from api.routes import auth_control as ac
+    _wire(monkeypatch, _FakeScope(nodes={"node_ok"}), modes={"node_ok": "REAL"})
+    assert ac._subscription_context("a@x", "node_ok") == pv.resolve_viewing_context("a@x", "node_ok")
+    with pytest.raises(PermissionError):
+        ac._subscription_context("a@x", "node_nope")

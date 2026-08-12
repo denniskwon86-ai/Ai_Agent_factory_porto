@@ -317,10 +317,14 @@ def test_로그아웃하면_공장_진행_이벤트도_끊긴다(tmp_path, monke
     import core.paths as paths
     import core.project_visibility as pv
     monkeypatch.setattr(paths, "workspace_path", lambda *p: "/".join(p), raising=False)
+    #: ⚠️ [G1-C3 · 2026-08-13] `enterprise_scope_id` 를 **비워 두지 않는다.** 이 테스트의 주제는
+    #  로그아웃이지 범위가 아니지만, 빈 범위는 D-014 상 `RESOURCE_UNBOUND`(비노출)라 첫 단언이
+    #  로그아웃과 **무관한 이유로** 실패한다. 실측상 운영 프로젝트 61/61 이 이 값을 갖는다 —
+    #  픽스처가 현실에 없는 상태였다.
     monkeypatch.setattr(pv, "read_project_ownership",
                         lambda ws: {"owner_dept_id": "D1", "owner_user_id": "kim",
                                     "visibility": "dept", "tenant_id": "tenant_default",
-                                    "entity_mode": "REAL", "enterprise_scope_id": ""})
+                                    "entity_mode": "REAL", "enterprise_scope_id": "node_d1"})
 
     sess = store.create_session("kim")
     b = SSEBroadcaster()

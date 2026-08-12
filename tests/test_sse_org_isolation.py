@@ -36,20 +36,29 @@ class _Scope:
         self.is_admin = is_admin
 
 
+#: ★★ [G1-C3 · 2026-08-13] **실데이터와 같은 모양으로 채운다.**
+#:   종전 픽스처는 `tenant_id`·`entity_mode`·`enterprise_scope_id` 를 생략했다. 그런데 실측하면
+#:   운영 프로젝트 **61개 전부**가 세 필드를 갖는다 — 즉 생략한 픽스처는 「현실에 없는 상태」였다.
+#:   이 파일 `_subscribe` 의 주석이 구독 문맥에 대해 같은 말을 하고 있다: 「비워 두면 현실에 없는
+#:   상태를 테스트하게 되고, 그 상태가 통과하도록 코드를 맞추면 그것이 곧 fail-open 이다.」
+#:   자원 쪽에도 같은 규칙을 적용한다.
+def _own(dept, user, visibility="dept", *, tenant="tenant_default", mode="REAL", node="node_d1"):
+    return {"owner_dept_id": dept, "owner_user_id": user, "visibility": visibility,
+            "tenant_id": tenant, "entity_mode": mode, "enterprise_scope_id": node}
+
+
 #: 프로젝트 P_A 는 D1 소속, P_B 는 D2 소속.
 OWNERSHIP = {
-    "P_A": {"owner_dept_id": "D1", "owner_user_id": "a@x", "visibility": "dept"},
-    "P_B": {"owner_dept_id": "D2", "owner_user_id": "b@x", "visibility": "dept"},
-    "P_OPEN": {"owner_dept_id": "D2", "owner_user_id": "b@x", "visibility": "company"},
+    "P_A": _own("D1", "a@x"),
+    "P_B": _own("D2", "b@x", node="node_d2"),
+    "P_OPEN": _own("D2", "b@x", "company", node="node_d2"),
     #: D1 소속이지만 **내 것은 아닌** 프로젝트. 부서 권한으로만 보인다 —
     #: 소유자 본인은 부서가 바뀌어도 계속 보이므로, 회수 검증에는 이쪽을 써야 한다.
-    "P_D1_OTHER": {"owner_dept_id": "D1", "owner_user_id": "z@x", "visibility": "dept"},
+    "P_D1_OTHER": _own("D1", "z@x"),
     "P_LEGACY": {},          # 마이그레이션 전 — 소유권 미기록
     #: [G1-C1.1] 문맥 경계 검증용. 조직 권한은 통과해도 테넌트·실행모드가 다르면 막혀야 한다.
-    "P_OTHER_TENANT": {"owner_dept_id": "D1", "owner_user_id": "z@x", "visibility": "dept",
-                       "tenant_id": "tenant_other", "entity_mode": "REAL"},
-    "P_SANDBOX": {"owner_dept_id": "D1", "owner_user_id": "z@x", "visibility": "dept",
-                  "tenant_id": "tenant_default", "entity_mode": "VIRTUAL"},
+    "P_OTHER_TENANT": _own("D1", "z@x", tenant="tenant_other"),
+    "P_SANDBOX": _own("D1", "z@x", mode="VIRTUAL"),
 }
 
 SCOPES = {
@@ -177,19 +186,31 @@ def test_전사공개_프로젝트는_다른_조직도_받는다(bus):
     _run(scenario())
 
 
-def test_소유권_미기록_프로젝트는_관리자에게만_간다(bus):
-    """★★★ [G1-C1.1] 종전 계약은 「미기록도 막지 않는다(하위호환)」였다.
+def test_소유권_미기록_프로젝트는_아무에게도_실시간으로_가지_않는다(bus):
+    """★★★ [G1-C1.1 → G1-C3 개정 · 2026-08-13] 종전 계약은 「미기록도 막지 않는다」였고,
+    G1-C1.1 이 그것을 「**플랫폼 관리자에게만** 간다」로 좁혔다. 이제 한 걸음 더 간다.
 
-    실측이 그 대가를 보여 줬다 — 61개 중 **53개가 미기록**이어서, 하위호환이 통제의 예외가
-    아니라 **통제의 기본값**이 되어 있었다. 이제 마이그레이션 대상은 플랫폼 관리자만 받는다.
-    ★ 완전히 끊지 않는 이유: 관리자에게는 보여야 무엇을 마이그레이션할지 알 수 있다."""
+    ## 왜 관리자에게도 끊는가 — 목록과 같은 답을 줘야 하기 때문이다
+
+    G1-C3 배선 후 **목록 API 는 미기록 프로젝트를 관리자에게도 보여주지 않는다**
+    (`context_visible` → `RESOURCE_UNBOUND`, D-014 「미지정은 전사 공용이 아니라 비노출」).
+    그 상태에서 SSE 만 관리자에게 보내면, **목록에 없는 프로젝트의 이벤트가 실시간으로
+    흘러드는** 상태가 된다 — G1-C3 가 없애려고 만들어진 바로 그 비대칭이다.
+
+    ## 그러면 관리자는 부채를 어떻게 보는가
+
+    실시간 스트림이 아니라 **집계**로 본다. `GET /projects` 응답이
+    `context_needs_attention` 과 `context_blocked_reasons` 를 함께 싣는다 — 「몇 건이 왜
+    안 보이는가」가 거기 있고, 그것이 마이그레이션 대상 목록의 근거가 된다.
+    ⚠️ 부채를 **이벤트로** 알리면 그 프로젝트가 살아 움직일 때만 보인다. 멈춰 있는 부채는
+      영영 안 보인다 — 집계가 더 맞는 도구다."""
     async def scenario():
         await _subscribe(bus, "a@x")        # 일반 사용자
         await _subscribe(bus, "plat@x")     # 플랫폼 관리자
         qa, qp = _queue_of(bus, 0), _queue_of(bus, 1)
         await bus.broadcast("WBS_UPDATED", {"project_id": "P_LEGACY"})
         assert _types(qa) == [], "미기록 프로젝트 이벤트가 일반 사용자에게 갔다"
-        assert _types(qp) == ["WBS_UPDATED"], "관리자에게도 안 가면 부채를 못 본다"
+        assert _types(qp) == [], "미기록 프로젝트가 목록엔 없는데 이벤트만 관리자에게 갔다"
 
     _run(scenario())
 
