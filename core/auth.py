@@ -52,6 +52,10 @@ SESSION_HOURS = 12
 SSE_TICKET_SECONDS = 30
 #: 티켓 청중(audience). 세션 토큰과 **용도가 다르다** — 티켓으로 일반 API 를 부를 수 없다.
 SSE_AUDIENCE = "sse"
+#: [G1-C1.2] SSE 문맥 규약 판본. 티켓에 봉인하고 소비 때 대조한다.
+#: ⚠️ 문맥 필드를 늘리거나 뜻을 바꾸면 **반드시 올린다** — 안 올리면 옛 규약으로 발급된 표가
+#:   새 규약인 척 통과하고, 그 표에는 지금 필요한 값이 없다.
+SSE_CONTEXT_VERSION = "g1c12"
 
 _ITERATIONS = 120_000
 
@@ -66,8 +70,13 @@ CREATE TABLE IF NOT EXISTS auth_session (
     token       TEXT PRIMARY KEY,
     user_id     TEXT NOT NULL,
     created_at  TEXT NOT NULL,
-    expires_at  TEXT NOT NULL
+    expires_at  TEXT NOT NULL,
+    -- ★★ [G1-C1.3] SSE 티켓에는 세션 **해시**가 봉인된다. 이벤트를 보낼 때마다 「그 세션이
+    --   아직 살아 있는가」를 물어야 하는데, 원문 토큰으로만 찾을 수 있으면 전 세션을 훑어야
+    --   한다. 조회용 해시를 함께 둔다.
+    token_hash  TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS idx_session_hash ON auth_session(token_hash);
 CREATE INDEX IF NOT EXISTS idx_session_user ON auth_session(user_id);
 
 -- ★★★ [P0-1B] SSE 접속표.
@@ -89,6 +98,9 @@ CREATE TABLE IF NOT EXISTS auth_sse_ticket (
     --   받아야 할 이벤트가 다르다. 구독 뒤에 화면이 문맥을 바꿔 신고하면 그것이 곧 우회로다.
     scope_node_id TEXT NOT NULL DEFAULT '',
     entity_mode   TEXT NOT NULL DEFAULT '',
+    -- ★★ [G1-C1.2] 이 표를 발급할 때의 문맥 규약 판본. 규약이 바뀌면 옛 표는 거절한다 —
+    --   호환을 남기면 «문맥 없는 구형 티켓» 이 영원히 통하는 우회로가 된다.
+    context_version TEXT NOT NULL DEFAULT '',
     audience    TEXT NOT NULL DEFAULT 'sse',
     created_at  TEXT NOT NULL,
     expires_at  TEXT NOT NULL,
@@ -131,11 +143,16 @@ class AuthStore:
             # ⚠️ `CREATE TABLE IF NOT EXISTS` 는 **이미 있는 표에 새 컬럼을 넣어 주지 않는다.**
             #   G1-C1.1 이전에 만들어진 DB 는 문맥 컬럼이 없으므로 여기서 채운다(멱등).
             for col, ddl in (("scope_node_id", "TEXT NOT NULL DEFAULT ''"),
-                             ("entity_mode", "TEXT NOT NULL DEFAULT ''")):
+                             ("entity_mode", "TEXT NOT NULL DEFAULT ''"),
+                             ("context_version", "TEXT NOT NULL DEFAULT ''")):
                 try:
                     conn.execute(f"ALTER TABLE auth_sse_ticket ADD COLUMN {col} {ddl}")
                 except Exception:
                     pass                 # 이미 있으면 그만이다
+            try:
+                conn.execute("ALTER TABLE auth_session ADD COLUMN token_hash TEXT NOT NULL DEFAULT ''")
+            except Exception:
+                pass
             conn.commit()
         self._ready = self.db_path
 
@@ -191,8 +208,10 @@ class AuthStore:
         exp = now + timedelta(hours=SESSION_HOURS)
         self._init()
         with self._lock, self._connect() as conn:
-            conn.execute("INSERT INTO auth_session (token, user_id, created_at, expires_at) "
-                         "VALUES (?,?,?,?)", (token, uid, _iso(now), _iso(exp)))
+            #: [G1-C1.3] 조회용 해시를 함께 적는다 — SSE 가 «이 세션이 살아 있는가» 를 묻는다.
+            conn.execute("INSERT INTO auth_session (token, user_id, created_at, expires_at, "
+                         "token_hash) VALUES (?,?,?,?,?)",
+                         (token, uid, _iso(now), _iso(exp), self._ticket_hash(token)))
             conn.commit()
         return {"token": token, "user_id": uid, "expires_at": _iso(exp)}
 
@@ -244,11 +263,12 @@ class AuthStore:
         with self._lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO auth_sse_ticket (token_hash, user_id, session_id, tenant_id, "
-                "scope_node_id, entity_mode, audience, created_at, expires_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "scope_node_id, entity_mode, context_version, audience, created_at, expires_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (self._ticket_hash(raw), uid, self._ticket_hash(session_token or ""),
                  (tenant_id or "").strip(), (scope_node_id or "").strip(),
-                 (entity_mode or "").strip(), SSE_AUDIENCE, _iso(now), _iso(exp)))
+                 (entity_mode or "").strip(), SSE_CONTEXT_VERSION,
+                 SSE_AUDIENCE, _iso(now), _iso(exp)))
             #: 만료된 표는 그때그때 치운다 — 배치에 맡기면 그 배치가 멈춘 동안 쌓인다.
             conn.execute("DELETE FROM auth_sse_ticket WHERE expires_at < ?", (_iso(now),))
             conn.commit()
@@ -285,18 +305,46 @@ class AuthStore:
                     conn.commit()
                     return {}
                 r = conn.execute(
-                    "SELECT user_id, tenant_id, scope_node_id, entity_mode, session_id "
-                    "FROM auth_sse_ticket WHERE token_hash=?", (h,)).fetchone()
+                    "SELECT user_id, tenant_id, scope_node_id, entity_mode, session_id, "
+                    "context_version FROM auth_sse_ticket WHERE token_hash=?", (h,)).fetchone()
                 conn.commit()
             if not r:
+                return {}
+            # ⚠️ [G1-C1.2] 규약 판본이 다르면 **거절한다.** 옛 표에는 지금 필요한 문맥이 없고,
+            #   「없으면 통과」로 두면 그것이 영구 우회로가 된다. 화면은 새 표를 받으면 된다.
+            if str(r["context_version"] or "") != SSE_CONTEXT_VERSION:
                 return {}
             return {"user_id": str(r["user_id"] or ""),
                     "tenant_id": str(r["tenant_id"] or ""),
                     "scope_node_id": str(r["scope_node_id"] or ""),
                     "entity_mode": str(r["entity_mode"] or ""),
-                    "session_id": str(r["session_id"] or "")}
+                    "session_id": str(r["session_id"] or ""),
+                    "context_version": str(r["context_version"] or "")}
         except Exception:
             return {}                   # 저장소 장애를 «인증됨» 으로 바꾸지 않는다
+
+    def session_alive_by_hash(self, session_hash: str) -> bool:
+        """[G1-C1.3] **이 세션이 아직 살아 있는가.** 티켓에 봉인된 해시로 묻는다.
+
+        ★★ SSE 는 한 번 열리면 최대 12시간 산다. 그래서 로그아웃·비밀번호 변경·관리자의 세션
+          강제 폐기가 **이미 열린 스트림에는 닿지 않았다** — 사용자는 로그아웃했다고 믿는데
+          그 브라우저는 계속 이벤트를 받는다. 「나갔다」와 「안 보인다」가 다르면 그것은 유출이다.
+
+        ⚠️ 원문 토큰이 아니라 **해시**로 묻는다. 티켓 표에는 해시만 있고, 그것으로 충분하다.
+        ⚠️ 조회 실패를 «살아 있다» 로 답하지 않는다 — 저장소가 흔들리는 순간이 곧 유출 구간이 된다."""
+        h = (session_hash or "").strip()
+        if not h:
+            return False
+        try:
+            self._init()
+            now = _iso(_now())
+            with self._lock, self._connect() as conn:
+                r = conn.execute(
+                    "SELECT 1 FROM auth_session WHERE token_hash=? AND expires_at>=?",
+                    (h, now)).fetchone()
+            return bool(r)
+        except Exception:
+            return False
 
     def destroy(self, token: str) -> None:
         try:

@@ -153,7 +153,7 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0
 // [CL-4] 사용자 식별을 쿼리로 싣는 공용 헬퍼. 여기서 다시 구현하지 않는다.
 //: [P0-1C] `apiUrl` 은 더 이상 쓰지 않는다 — 마지막 사용처였던 SSE 가 1회용 접속표로
 //  옮겨 갔다(P0-1B). 남겨 두면 «쿼리로 신원을 싣는 방법이 아직 있다» 로 읽힌다.
-import { getSessionToken } from '../lib/api';
+import { getEnterpriseContext, getSessionToken } from '../lib/api';
 
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;
@@ -932,9 +932,16 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
 
     let ticket = '';
     try {
+      // ★★★ [G1-C1.2] 화면이 **고른 조직 범위**를 함께 보낸다.
+      //   종전에는 아무것도 보내지 않았고, 서버가 «주 부서» 로 추정했다. 그래서 여러 계열사
+      //   권한을 가진 사람이 A 회사를 골라도 B 회사 이벤트가 오고, 가상회사 문맥을 골라도
+      //   REAL 로 연결됐다 — **회사 선택기와 실시간 데이터 범위가 어긋났다.**
+      //   ⚠️ 서버는 이 값을 그대로 믿지 않는다. 「그 사용자가 읽을 수 있는 범위인가」를 확인하고
+      //     통과한 것만 티켓에 봉인한다(403 이면 고를 수 없는 범위를 고른 것이다).
       const r = await fetch(`${API_BASE_URL}/api/v1/auth/sse-ticket`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Session-Token': getSessionToken() },
+        body: JSON.stringify({ scope_node_id: getEnterpriseContext().scopeNodeId || '' }),
       });
       if (!r.ok) throw new Error(`ticket ${r.status}`);
       ticket = ((await r.json())?.data?.ticket) || '';

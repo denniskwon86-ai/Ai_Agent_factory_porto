@@ -108,33 +108,59 @@ async def me(p: Principal = Depends(current_principal)):
     }
 
 
-def _subscription_context(user_id: str) -> dict:
-    """[G1-C1.1] 이 사용자의 **실행 문맥**을 서버가 해석한다 — 요청이 보낸 값은 쓰지 않는다.
+class ContextUnavailable(RuntimeError):
+    """[G1-C1.2] 실행 문맥을 확정하지 못했다 — 라우트가 **503** 으로 바꾼다."""
 
-    · `tenant_id`      어느 독립 환경인가. 기본 테넌트 단일 운영이면 그 값이다.
-    · `scope_node_id`  어느 조직 범위인가(주 부서 → ECM 노드).
-    · `entity_mode`    REAL 인가 VIRTUAL 인가. 검증 샌드박스 자료와 실제 자료를 가른다.
 
-    ⚠️ 해석 실패를 **그럴듯한 기본값으로 덮지 않는다.** 빈 값이면 「모른다」는 뜻이고,
-      브로드캐스터는 모르는 문맥을 «전부 통과» 로 읽지 않는다."""
-    ctx = {"tenant_id": "", "scope_node_id": "", "entity_mode": ""}
-    try:
-        import config
-        from core.org_directory import org_directory
-        ctx["tenant_id"] = str(getattr(config, "ECM_DEFAULT_TENANT_ID", "") or "")
-        scope = org_directory.resolve_scope(user_id)
+def _subscription_context(user_id: str, requested_scope_node_id: str = "") -> dict:
+    """[G1-C1.2] 구독에 봉인할 **실행 문맥**을 확정한다.
+
+    · `tenant_id`      어느 독립 환경인가.
+    · `scope_node_id`  화면에서 **사용자가 고른** 조직 범위. 없으면 주 부서로 떨어진다.
+    · `entity_mode`    REAL 인가 VIRTUAL 인가 — 그 노드의 실체가 정한다.
+
+    ## 요청받되, 서버가 검증해서 봉인한다
+
+    ★★ 종전에는 요청을 아예 무시하고 **주 부서로 추정**했다. 그래서 여러 계열사 권한을 가진
+      사람이 A 회사를 골라도 B 회사 이벤트가 오고, 가상회사 문맥을 골라도 REAL 로 연결됐다 —
+      **회사 선택기와 실시간 데이터 범위가 어긋났다.**
+
+    ⚠️ 요청값을 **그대로 믿지 않는다.** 「그 사용자가 읽을 수 있는 범위인가」를 확인하고
+      통과한 것만 봉인한다. 요청받는 것 자체가 위험한 것이 아니라, 검증 없이 믿는 것이 위험하다.
+
+    ⚠️⚠️ 확정하지 못하면 **예외를 던진다.** 종전에는 빈 값으로 두고 넘어갔는데, 브로드캐스터가
+      빈 문맥을 「대조하지 않음」으로 처리하므로 그것이 곧 fail-open 이었다. 표를 못 만드는 것이
+      경계가 없는 표를 만드는 것보다 낫다."""
+    import config
+    from core.enterprise_context.repository import ecm_repository as repo
+    from core.org_directory import org_directory
+
+    tenant = str(getattr(config, "ECM_DEFAULT_TENANT_ID", "") or "").strip()
+    if not tenant:
+        raise ContextUnavailable("테넌트를 확정할 수 없습니다.")
+
+    scope = org_directory.resolve_scope(user_id)
+    want = (requested_scope_node_id or "").strip()
+    node_id = ""
+    if want:
+        allowed = set(getattr(scope, "readable_scope_nodes", frozenset()) or frozenset())
+        if not (getattr(scope, "unrestricted", False) or want in allowed):
+            # 고를 수 없는 범위를 고른 것 — 조용히 기본값으로 바꾸지 않는다. 조용히 바꾸면
+            # 사용자는 A 를 골랐다고 믿으면서 B 의 숫자를 본다.
+            raise PermissionError(want)
+        node_id = want
+    else:
         dept = str(getattr(scope, "primary_dept_id", "") or "")
         if dept:
-            from core.enterprise_context.repository import ecm_repository as repo
             node = repo.find_node_by_dept(dept)
-            if node:
-                ctx["scope_node_id"] = node.node_id
-                ctx["entity_mode"] = repo.node_entity_mode(node.node_id) or ""
-        #: 조직 노드를 못 찾아도 실제 문맥에서 일하는 것은 분명하다 — 시험 문맥으로 두지 않는다.
-        ctx["entity_mode"] = ctx["entity_mode"] or "REAL"
-    except Exception as e:                                        # pragma: no cover
-        print(f"⚠️ [auth] 구독 문맥 해석 실패(빈 값으로 둡니다): {e}")
-    return ctx
+            node_id = node.node_id if node else ""
+
+    mode = ""
+    if node_id:
+        mode = repo.node_entity_mode(node_id) or ""
+    #: 조직 노드를 못 찾아도 **실제 문맥에서 일하는 것은 분명하다** — 시험 문맥으로 두지 않는다.
+    mode = mode or "REAL"
+    return {"tenant_id": tenant, "scope_node_id": node_id, "entity_mode": mode}
 
 
 @router.post("/sse-ticket")
@@ -172,11 +198,29 @@ async def issue_sse_ticket(request: Request):
     #    않는다」는 계약이 실제로 지켜진다.
     #  ⚠️ 해석에 실패하면 **빈 값으로 둔다.** 모르는 것을 그럴듯한 기본값으로 채우면 다음
     #    사람이 「테넌트 경계가 있다」고 믿는다 — 없는 통제를 있다고 믿는 것이 없는 것보다 나쁘다.
-    ctx = _subscription_context(uid)
+    #: 화면이 고른 조직 범위를 **요청으로 받되** 아래에서 검증한다.
+    want = ""
+    try:
+        body = await request.json()
+        want = str((body or {}).get("scope_node_id") or "").strip()
+    except Exception:
+        want = ""                    # 본문이 없거나 JSON 이 아니면 «전체» 로 본다
+    try:
+        ctx = _subscription_context(uid, want)
+    except PermissionError as e:
+        raise HTTPException(status_code=403,
+                            detail=f"그 조직 범위를 볼 권한이 없습니다: {e}")
+    except ContextUnavailable as e:
+        # ⚠️ 문맥 없는 표를 만들지 않는다 — 그런 표는 경계 없이 열린 연결이 된다.
+        raise HTTPException(status_code=503, detail=f"실행 문맥을 확정하지 못했습니다: {e}")
+    except Exception as e:                                        # pragma: no cover
+        raise HTTPException(status_code=503, detail=f"실행 문맥 해석에 실패했습니다: {e}")
     t = auth_store.issue_sse_ticket(uid, tok,
                                     tenant_id=ctx["tenant_id"],
                                     scope_node_id=ctx["scope_node_id"],
                                     entity_mode=ctx["entity_mode"])
+    #: 화면이 「지금 어느 범위로 듣고 있는가」를 알 수 있게 되돌려 준다(값은 서버가 정한 것).
+    t = dict(t); t["scope_node_id"] = ctx["scope_node_id"]; t["entity_mode"] = ctx["entity_mode"]
     #: ⚠️ 응답에만 원문을 싣고 로그에는 남기지 않는다(저장소에는 해시만 있다).
     return {"status": "success", "data": t}
 

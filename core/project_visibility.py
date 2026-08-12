@@ -68,6 +68,54 @@ def sandbox_scope_id() -> str:
         return ""
 
 
+#: 선택 범위가 하위 조직을 덮는지 볼 때 거슬러 올라갈 최대 깊이. `config.ORG_MAX_DEPTH` 와
+#: 같은 뜻이며, 순환 관계가 있어도 여기서 멈춘다.
+_SCOPE_MAX_DEPTH = 8
+
+
+def scope_covers(selected_node_id: str, resource_node_id: str) -> bool:
+    """사용자가 **화면에서 고른 조직 범위**가 이 자원의 범위를 덮는가.
+
+    ★★ [G1-C1.2] 권한(`readable_dept_ids`)과 **다른 축**이다. 권한은 「볼 수 있는가」이고
+      이것은 「지금 무엇을 보기로 했는가」다. 여러 계열사 권한을 가진 사람이 A 회사를 골랐다면
+      B 회사 이벤트는 **권한이 있어도** 오면 안 된다 — 회사 선택기와 실시간 데이터 범위가
+      어긋나면 사용자는 자기가 보는 숫자가 어느 회사 것인지 알 수 없다.
+
+    · 고른 범위가 없으면(`""`) 좁히지 않는다 — 「전체」를 고른 것과 같다.
+    · 자원에 범위가 없으면 좁히지 않는다 — 옛 자원을 지금 판정으로 지우지 않는다.
+    · 같으면 덮는다. 다르면 **자원에서 위로 거슬러 올라가** 고른 노드가 조상인지 본다.
+
+    ⚠️ 권한 상속과 같은 관계(`OPERATING_PARENT`)만 따른다. 공유서비스·연결집계 관계로
+      올라가면 「전사 재무조직이 모든 상세 데이터를 본다」가 되고, 그것은 ECM §6.1 이 명시적으로
+      막은 것이다."""
+    sel = (selected_node_id or "").strip()
+    res = (resource_node_id or "").strip()
+    if not sel or not res or sel == res:
+        return True
+    try:
+        from core.enterprise_context.models import REL_OPERATING_PARENT
+        from core.enterprise_context.repository import ecm_repository as repo
+        seen, frontier = {res}, [res]
+        for _ in range(_SCOPE_MAX_DEPTH):
+            nxt = []
+            for node in frontier:
+                for parent in repo.parents(node, REL_OPERATING_PARENT) or []:
+                    if parent == sel:
+                        return True
+                    if parent not in seen:
+                        seen.add(parent)
+                        nxt.append(parent)
+            if not nxt:
+                break
+            frontier = nxt
+        return False
+    except Exception:
+        # ⚠️ 조상 판정에 실패하면 **좁히지 않는다.** 이 축은 «권한» 이 아니라 «지금 보는 범위»
+        #   이고, 판정 실패로 화면을 비우면 사용자는 통제가 아니라 고장으로 읽는다.
+        #   권한 경계는 `ownership_visible` 이 따로 지킨다.
+        return True
+
+
 def project_meta_path(workspace_root: str) -> str:
     return os.path.join(workspace_root, "project_meta.json")
 

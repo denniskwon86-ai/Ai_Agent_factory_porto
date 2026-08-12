@@ -135,6 +135,15 @@ export function setEnterpriseContext(next: Partial<EnterpriseContextSelection>) 
   } catch {
     // localStorage 가 막힌 환경에서도 동작은 계속돼야 한다
   }
+  // ★★★ [G1-C1.2] **범위를 바꾸면 실시간 연결도 다시 맺어야 한다.**
+  //   SSE 티켓에는 발급 시점의 조직 범위가 **봉인**돼 있다. 화면만 A 회사로 바꾸고 스트림을
+  //   그대로 두면, 목록은 A 인데 실시간 이벤트는 계속 B 로 흐른다 — 사용자는 자기가 보는
+  //   숫자가 어느 회사 것인지 알 수 없다. 그 어긋남은 새로고침해야만 사라진다.
+  try {
+    window.dispatchEvent(new CustomEvent('factory:enterprise-context-changed'));
+  } catch {
+    // 이벤트를 못 쏘는 환경(테스트 등)에서도 컨텍스트 저장 자체는 성공해야 한다
+  }
 }
 
 // SSE(EventSource)·iframe·다운로드 링크는 헤더를 붙일 수 없다. 쿼리로 실어 보낸다.

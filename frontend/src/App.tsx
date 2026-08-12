@@ -22,10 +22,11 @@ import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 //   하나의 허브 안에서 내부 view 를 관리한다(작업서 §CL-FE-01).
 import { CollaborationHub } from './features/collaboration/CollaborationHub';
 import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
+import { TerminologyGlossaryPanel } from './components/TerminologyGlossaryPanel';
 import { MasterDataPanel } from './components/MasterDataPanel';
 import { WorkStandardPanel } from './components/WorkStandardPanel';
 import { OrgChartPanel } from './components/OrgChartPanel';
-import { LoginPage, type LoginResult } from './components/LoginPage';
+import { LoginPage } from './components/LoginPage';
 import { SessionBar } from './components/SessionBar';
 import { CrosswalkPanel } from './components/CrosswalkPanel';
 import { TelemetryPanel } from './components/TelemetryPanel';
@@ -66,8 +67,6 @@ function AppShell() {
   const openAgentPanel = useFactoryStore((state) => state.openAgentPanel);
   const showFormatPanel = useFactoryStore((state) => state.showFormatPanel);
   const templates = useFactoryStore((state) => state.templates);
-  const selectedTemplateId = useFactoryStore((state) => state.selectedTemplateId);
-  const setSelectedTemplate = useFactoryStore((state) => state.setSelectedTemplate);
   const fetchTemplates = useFactoryStore((state) => state.fetchTemplates);
 
   // ★★★ [UI 설계서 §3.2 · §3.4] **첫 화면은 경영 홈(Decision Canvas)이다.**
@@ -78,11 +77,17 @@ function AppShell() {
   //     무관하게 URL 은 새로고침·공유가 가능한 상태 계약으로 관리한다」고 했고, 그 계약은
   //     라우터를 넣을 때 이 한 값을 URL 로 올리면 된다.
   const [space, setSpace] = useState<'enterprise' | 'build'>('enterprise');
+  // 경영 홈 → Factory, 목록 → 프로젝트처럼 화면 문맥이 바뀔 때 이전 화면의 스크롤 위치를
+  // 가져오면 핵심 행동과 헤더가 화면 밖에서 시작한다. 새 화면은 항상 문서 맨 위에서 시작한다.
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [space, currentProjectId]);
   // §5.2 «새 업무 만들기» — 생성은 목록면에서 분리된 별도 흐름이다(설계 `/build/start`).
   const [buildStart, setBuildStart] = useState(false);
-  const [newProjectId, setNewProjectId] = useState("");
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
+  // 기술·제품 용어 전환 사전 — 사용자 권장 용어와 현재 기술 용어를 함께 확인하는 임시 페이지.
+  const [showTerminology, setShowTerminology] = useState(false);
   const [showMasterData, setShowMasterData] = useState(false);
   const [showWorkStandard, setShowWorkStandard] = useState(false);
   const [showOrgChart, setShowOrgChart] = useState(false);
@@ -113,17 +118,10 @@ function AppShell() {
   useEffect(() => { actingScope.load().then(setScope).catch(() => setScope(null)); }, []);
   useEffect(() => actingScope.subscribe(setScope), []);
   const govBlocked = governanceBlockReason(scope);
-  const [activeTab, setActiveTab] = useState<"mega" | "vault" | "releases">("mega");
-  const [projectType, setProjectType] = useState<"independent" | "mega">("independent");
   const [showLogPopup, setShowLogPopup] = useState(false);
   // 신규 프로젝트에 연결할 지식팩 선택 상태
   const [knowledgePacks, setKnowledgePacks] = useState<any[]>([]);
   const [packsBlocked, setPacksBlocked] = useState('');   // 권한으로 가려진 이유(비었으면 정상)
-  const [selectedPackIds, setSelectedPackIds] = useState<string[]>([]);
-  // [M1] 신규 프로젝트에 적용할 기준정보 도메인 태그(콤마구분)
-  const [masterDomainsInput, setMasterDomainsInput] = useState('');
-  // [M3] 외부 실측값(MCP) 병기 토글 (기본 off)
-  const [mcpLiveGrounding, setMcpLiveGrounding] = useState(false);
   // [사용자 결정 2026-07-30] 프로그램 사용여부 제어 대상 — 삭제 대신 비활성화한다.
   const [adminProgram, setAdminProgram] = useState<{ id: string; name: string } | null>(null);
 
@@ -135,13 +133,26 @@ function AppShell() {
   useEffect(() => {
     const h = () => {
       setActingUserRev(v => v + 1);
-      // [CL-4] ★★ SSE 도 **다시 연결한다.** `?as_user=` 가 URL 에 박혀 있으므로, 재연결하지
-      //   않으면 스트림은 계속 **이전 사용자 주소**로 열려 있다 — 새 사용자의 알림은 안 오고,
-      //   이전 사용자의 알림이 이 화면으로 계속 들어온다. 두 번째가 더 나쁘다.
+      // [CL-4] ★★ SSE 도 **다시 연결한다.**
+      //   ⚠️ [P0-1C] 종전 이유는 「`?as_user=` 가 URL 에 박혀 있어서」였다. 그 쿼리는 사라졌고
+      //     이제 1회용 접속표로 연결한다(P0-1B). 그래도 **재연결은 여전히 필요하다** — 표는
+      //     발급 시점의 세션으로 사용자를 확정하므로, 사용자가 바뀌면 열려 있는 스트림은
+      //     계속 **이전 사용자의 스트림**이다. 새 사용자의 알림은 안 오고 이전 사용자의
+      //     알림이 이 화면으로 들어온다. 두 번째가 더 나쁘다.
       connectSSE();
     };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
+  }, [connectSSE]);
+
+  // ★★★ [G1-C1.2] 회사·사업부를 바꾸면 **SSE 를 다시 맺는다.**
+  //   티켓에 조직 범위가 봉인돼 있어서, 스트림을 그대로 두면 목록은 A 인데 실시간 이벤트는
+  //   계속 B 로 흐른다. 회사 선택기와 실시간 데이터 범위가 어긋나면 사용자는 자기가 보는
+  //   숫자가 어느 회사 것인지 알 수 없다 — 경영 화면에서 그것은 오답보다 나쁘다.
+  useEffect(() => {
+    const h = () => { connectSSE(); };
+    window.addEventListener('factory:enterprise-context-changed', h);
+    return () => window.removeEventListener('factory:enterprise-context-changed', h);
   }, [connectSSE]);
 
   useEffect(() => {
@@ -154,10 +165,6 @@ function AppShell() {
         setPacksBlocked(r?.blocked_reason || '');
       }).catch(() => {});
   }, [showKnowledgeHub, actingUserRev]); // 허브에서 팩을 만들고 닫으면·사용자를 바꾸면 갱신
-
-  const isSubProject = (id: string) => projects.some(p => p.is_mega_project && id.startsWith(p.id + "_"));
-
-  const selectedTemplateData = templates.find((t: any) => t.id === selectedTemplateId);
 
   useEffect(() => {
     connectSSE();
@@ -189,6 +196,9 @@ function AppShell() {
         { id: 'knowledge', icon: '📚', label: '지식 허브',
           desc: '도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결',
           onSelect: () => setShowKnowledgeHub(true) },
+        { id: 'terminology', icon: '📖', label: '기술·제품 용어집',
+          desc: '현재 용어·권장 사용자 용어·기술 표준명을 함께 보는 전환 사전',
+          onSelect: () => setShowTerminology(true) },
         { id: 'master', icon: '🗂', label: '기준정보 마스터',
           desc: '자재·공정·설비·KPI 골든 레코드 — 확정 조회로 모든 에이전트에 주입(모델 불변)',
           onSelect: () => setShowMasterData(true) },
@@ -249,19 +259,6 @@ function AppShell() {
     },
   ];
 
-  const handleCreateProject = async () => {
-    if (!newProjectId.trim()) return;
-    const masterDomains = masterDomainsInput.split(',').map((s) => s.trim()).filter(Boolean);
-    const success = await createProject(newProjectId.trim(), selectedTemplateId, selectedPackIds, masterDomains, mcpLiveGrounding);
-    if (success) {
-      setNewProjectId("");
-      setSelectedPackIds([]);
-      setMasterDomainsInput("");
-      setMcpLiveGrounding(false);
-      setCurrentProject(newProjectId.trim());
-    }
-  };
-
   const isMegaProject = projects.find(p => p.id === currentProjectId)?.is_mega_project === true;
 
   const handleDeleteProject = async (id: string, name: string, e: React.MouseEvent) => {
@@ -282,17 +279,6 @@ function AppShell() {
       // ⚠️ 「에러가 발생했습니다」로 뭉개지 않는다 — 권한 문제인지 공유된 프로젝트라서인지
       //   서버가 죽어서인지에 따라 사용자가 할 일이 다르다. 서버 문구를 그대로 보여 준다.
       alert(useFactoryStore.getState().projectActionError || "삭제하지 못했습니다.");
-    }
-  };
-
-  const copyProject = useFactoryStore((s) => s.copyProject);
-  const handleCopyProject = async (id: string, name: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newId = prompt(`'${name}' 시나리오를 복제합니다.\n새로운 프로젝트 ID를 입력하세요 (영문/숫자/하이픈):`, `${id}-copy`);
-    if (!newId || !newId.trim()) return;
-    const success = await copyProject(id, newId.trim());
-    if (success) {
-      alert("시나리오가 성공적으로 복제되었습니다.");
     }
   };
 
@@ -368,6 +354,7 @@ function AppShell() {
           <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
         )}
         {showKnowledgeHub && (<KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />)}
+        {showTerminology && (<TerminologyGlossaryPanel onClose={() => setShowTerminology(false)} />)}
         {showMasterData && (<MasterDataPanel onClose={() => setShowMasterData(false)} />)}
         {showWorkStandard && (<WorkStandardPanel onClose={() => setShowWorkStandard(false)} />)}
         {showOrgChart && (<OrgChartPanel onClose={() => setShowOrgChart(false)} />)}
@@ -391,6 +378,9 @@ function AppShell() {
         )}
         {showKnowledgeHub && (
           <KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />
+        )}
+        {showTerminology && (
+          <TerminologyGlossaryPanel onClose={() => setShowTerminology(false)} />
         )}
         {showMasterData && (
           <MasterDataPanel onClose={() => setShowMasterData(false)} />
@@ -724,13 +714,10 @@ export default function App() {
             <Banner tone="warn" title="서버에 연결하지 못했습니다">{offline}</Banner>
           </div>
         )}
-        <LoginPage onLoggedIn={(r: LoginResult) => {
+        <LoginPage onLoggedIn={() => {
           setState('in');
-          if (r.must_change_password) {
-            // 초기 비밀번호를 쓰는 계정에는 **한 번은 반드시** 말한다.
-            window.setTimeout(() => window.alert(
-              '초기 비밀번호를 사용 중입니다 — 내 설정에서 비밀번호를 바꾸십시오.'), 400);
-          }
+          // 초기 비밀번호 상태는 로그인 뒤 상단 SessionBar가 지속적으로 보여 주고 바로 옆
+          // 「환경설정 · 관리자」에서 변경한다. 네이티브 alert는 첫 화면 전체를 막으므로 쓰지 않는다.
         }} />
       </ErrorBoundary>
     );

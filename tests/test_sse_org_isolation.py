@@ -79,6 +79,11 @@ def bus(monkeypatch):
     monkeypatch.setattr(org_directory, "is_bootstrap", lambda: False)
     monkeypatch.setattr(org_directory, "get_user",
                         lambda uid: {"user_id": uid, "status": "active"} if uid else None)
+    #: [G1-C1.3] 이벤트마다 «이 세션이 살아 있는가» 를 묻는다. 이 파일은 **조직 격리**를 보는
+    #  곳이므로 세션은 살아 있다고 세운다 — 로그아웃 차단은
+    #  `test_collaboration_events.py` 의 전용 테스트가 실제 저장소로 본다.
+    from core.auth import auth_store
+    monkeypatch.setattr(auth_store, "session_alive_by_hash", lambda h: True)
     return SSEBroadcaster()
 
 
@@ -100,8 +105,12 @@ async def _subscribe(bus, user_id: str):
     """`subscribe()` 를 큐 등록 단계까지만 돌린다.
 
     ⚠️ 제너레이터를 끝까지 소비하면 15초 ping 을 기다린다. 우리가 볼 것은 «큐에 들어갔는가»
-      이므로 큐를 직접 읽는다."""
-    agen = bus.subscribe(user_id=user_id)
+      이므로 큐를 직접 읽는다.
+
+    ★★ [G1-C1.2] **문맥을 함께 준다.** 운영에서는 티켓이 `context_version` 과 함께 문맥을
+      봉인하므로 문맥 없는 구독이 존재할 수 없다. 여기서 비워 두면 「현실에 없는 상태」를
+      테스트하게 되고, 그 상태가 통과하도록 코드를 맞추면 그것이 곧 fail-open 이다."""
+    agen = bus.subscribe(user_id=user_id, tenant_id="tenant_default", entity_mode="REAL")
     task = asyncio.ensure_future(agen.asend(None))
     await asyncio.sleep(0.05)            # 큐가 self.clients 에 붙을 틈
     return agen, task
@@ -267,8 +276,10 @@ def test_결정_요청은_프로젝트_밖_사람에게도_간다(bus):
 
 # ── 문맥 경계: 조직 권한을 통과해도 테넌트·실행모드가 다르면 막는다 ────────
 
-async def _subscribe_ctx(bus, user_id, tenant_id="", entity_mode=""):
-    agen = bus.subscribe(user_id=user_id, tenant_id=tenant_id, entity_mode=entity_mode)
+async def _subscribe_ctx(bus, user_id, tenant_id="tenant_default", entity_mode="REAL",
+                         scope_node_id=""):
+    agen = bus.subscribe(user_id=user_id, tenant_id=tenant_id, entity_mode=entity_mode,
+                         scope_node_id=scope_node_id)
     asyncio.ensure_future(agen.asend(None))
     await asyncio.sleep(0.05)
     return agen
@@ -304,14 +315,18 @@ def test_실제_문맥_구독자는_샌드박스_이벤트를_받지_않는다(b
     _run(scenario())
 
 
-def test_문맥_없는_옛_구독은_막지_않는다(bus):
-    """⚠️ G1-C1.1 이전 티켓에는 문맥이 없다. 다 막으면 **이미 열린 연결이 전부 끊긴다** —
-    통제가 아니라 장애다. 새 티켓은 항상 문맥을 싣는다."""
+def test_문맥_없는_구독은_아무것도_받지_못한다(bus):
+    """★★★ [G1-C1.2] 종전 계약은 **「문맥 없는 옛 구독은 막지 않는다」** 였다. 하위호환을 위한
+    판단이었지만, 그것이 곧 fail-open 이었다 — **문맥을 못 만든 연결이 오히려 경계 없이 전부
+    받았다.** 통제가 가장 필요한 연결이 통제를 안 받은 것이다.
+
+    이제 티켓에 `context_version` 을 봉인하고 옛 표를 거절하므로, 살아 있는 구독은 반드시
+    문맥을 갖는다. 문맥이 없다는 것은 「호환」이 아니라 **경계를 확인할 수 없다**는 뜻이다."""
     async def scenario():
-        await _subscribe_ctx(bus, "a@x")     # 문맥 없음(옛 티켓)
+        await _subscribe_ctx(bus, "a@x", tenant_id="", entity_mode="")
         q = _queue_of(bus, 0)
         await bus.broadcast("WBS_UPDATED", {"project_id": "P_D1_OTHER"})
-        assert _types(q) == ["WBS_UPDATED"]
+        assert _types(q) == [], "문맥 없는 구독이 이벤트를 받았다"
 
     _run(scenario())
 

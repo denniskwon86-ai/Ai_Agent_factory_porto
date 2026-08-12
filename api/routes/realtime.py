@@ -49,6 +49,7 @@ async def subscribe_timeline(ticket: str = Query("", description="POST /auth/sse
         factory_broadcaster.subscribe(
             user_id=ctx["user_id"],
             tenant_id=ctx.get("tenant_id", ""),
+            scope_node_id=ctx.get("scope_node_id", ""),
             entity_mode=ctx.get("entity_mode", ""),
             session_id=ctx.get("session_id", "")),
         media_type="text/event-stream",

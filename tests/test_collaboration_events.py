@@ -34,6 +34,10 @@ class _FakeClient:
         self.q: asyncio.Queue = asyncio.Queue(maxsize=100)
         b.clients.append(self.q)
         b._client_users[id(self.q)] = user_id
+        #: ★ [G1-C1.2] 운영에서는 티켓이 문맥을 봉인하므로 문맥 없는 구독이 없다.
+        #  비워 두면 «현실에 없는 상태» 를 시험하게 된다.
+        b._client_ctx[id(self.q)] = {"tenant_id": "tenant_default", "scope_node_id": "",
+                                     "entity_mode": "REAL", "session_id": "sess-hash"}
 
     def drain(self):
         out = []
@@ -50,10 +54,14 @@ def b(monkeypatch):
       사용자(`kim`·`lee`)가 조직도에 없어 전부 차단됐다. 그 검사 자체는 옳다 — 계정을 폐지해도
       이미 열린 스트림으로 알림이 계속 가던 것을 막는다. 여기서는 **배달 규칙**을 보는 것이
       목적이므로 계정 조회만 세워 준다(폐지 차단은 아래 전용 테스트가 본다)."""
+    from core.auth import auth_store
     from core.org_directory import org_directory
     monkeypatch.setattr(org_directory, "is_bootstrap", lambda: False)
     monkeypatch.setattr(org_directory, "get_user",
                         lambda uid: {"user_id": uid, "status": "active"} if uid else None)
+    #: [G1-C1.3] 이벤트마다 «이 세션이 살아 있는가» 를 묻는다. 합성 구독을 살아 있게 세운다
+    #  (로그아웃 차단은 아래 전용 테스트가 실제 저장소로 본다).
+    monkeypatch.setattr(auth_store, "session_alive_by_hash", lambda h: True)
     return SSEBroadcaster()
 
 
@@ -253,3 +261,69 @@ def test_폐지된_계정에는_열린_연결로도_알림이_가지_않는다(b
                         lambda uid: {"user_id": uid, "status": "retired"})
     assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_2"}) == 0, "폐지 계정에 알림이 갔다"
     assert c.drain() == []
+
+
+def test_로그아웃하면_이미_열린_SSE_로도_알림이_가지_않는다(tmp_path, monkeypatch):
+    """★★★ [G1-C1.3] SSE 는 한 번 열리면 최대 12시간 산다. 그래서 로그아웃·비밀번호 변경·
+    관리자의 세션 강제 폐기가 **이미 열린 스트림에는 닿지 않았다.**
+
+    사용자는 나갔다고 믿는데 그 브라우저는 계속 알림을 받는다 — 「나갔다」와 「안 보인다」가
+    다르면 그것은 유출이다. 여기서는 **실제 저장소**로 확인한다(스텁 없이)."""
+    from core.auth import AuthStore
+    from core.collaboration_events import CollaborationEvents
+    from core.org_directory import org_directory
+
+    store = AuthStore(db_path=str(tmp_path / "auth.db"))
+    monkeypatch.setattr("core.auth.auth_store", store)
+    monkeypatch.setattr(org_directory, "is_bootstrap", lambda: False)
+    monkeypatch.setattr(org_directory, "get_user",
+                        lambda uid: {"user_id": uid, "status": "active"})
+
+    sess = store.create_session("kim")
+    b = SSEBroadcaster()
+    ev = CollaborationEvents(broadcaster=b)
+    c = _FakeClient(b, "kim")
+    b._client_ctx[id(c.q)]["session_id"] = store._ticket_hash(sess["token"])
+
+    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_1"}) == 1, "로그인 중에는 가야 한다"
+    assert len(c.drain()) == 1
+
+    store.destroy(sess["token"])          # ← 로그아웃
+    assert ev.emit(DECISION_UPDATED, ["kim"], {"id": "dec_2"}) == 0, "로그아웃 후에도 알림이 갔다"
+    assert c.drain() == []
+
+
+def test_로그아웃하면_공장_진행_이벤트도_끊긴다(tmp_path, monkeypatch):
+    """★★★ [G1-C1.3] 알림(`emit_to`)뿐 아니라 **진행 이벤트(`broadcast`)도** 끊겨야 한다.
+
+    ⚠️ 처음에는 `emit_to` 쪽만 시험했는데, 변이 검사에서 **broadcast 경로의 세션 검사를
+      지워도 아무 테스트도 깨지지 않았다.** 두 경로는 다른 함수를 지나므로 한쪽만 보면
+      나머지 절반은 통제가 없는 것과 같다 — 로그아웃한 창에 공장 상태가 계속 흐른다."""
+    from core.auth import AuthStore
+    from core.org_directory import org_directory
+
+    store = AuthStore(db_path=str(tmp_path / "auth.db"))
+    monkeypatch.setattr("core.auth.auth_store", store)
+    monkeypatch.setattr(org_directory, "is_bootstrap", lambda: False)
+    monkeypatch.setattr(org_directory, "resolve_scope",
+                        lambda uid="": type("S", (), {"unrestricted": True, "is_admin": True,
+                                                      "readable_dept_ids": frozenset()})())
+    import core.paths as paths
+    import core.project_visibility as pv
+    monkeypatch.setattr(paths, "workspace_path", lambda *p: "/".join(p), raising=False)
+    monkeypatch.setattr(pv, "read_project_ownership",
+                        lambda ws: {"owner_dept_id": "D1", "owner_user_id": "kim",
+                                    "visibility": "dept", "tenant_id": "tenant_default",
+                                    "entity_mode": "REAL", "enterprise_scope_id": ""})
+
+    sess = store.create_session("kim")
+    b = SSEBroadcaster()
+    c = _FakeClient(b, "kim")
+    b._client_ctx[id(c.q)]["session_id"] = store._ticket_hash(sess["token"])
+
+    asyncio.run(b.broadcast("WBS_UPDATED", {"project_id": "P_A"}))
+    assert len(c.drain()) == 1, "로그인 중에는 진행 이벤트가 와야 한다"
+
+    store.destroy(sess["token"])          # ← 로그아웃
+    asyncio.run(b.broadcast("WBS_UPDATED", {"project_id": "P_A"}))
+    assert c.drain() == [], "로그아웃 후에도 공장 진행 이벤트가 흘렀다"

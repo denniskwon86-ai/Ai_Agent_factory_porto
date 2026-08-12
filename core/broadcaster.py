@@ -25,7 +25,8 @@ class SSEBroadcaster:
         self.internal_listeners.append(callback)
 
     async def subscribe(self, user_id: str = "", tenant_id: str = "",
-                        entity_mode: str = "", session_id: str = "") -> AsyncGenerator[str, None]:
+                        scope_node_id: str = "", entity_mode: str = "",
+                        session_id: str = "") -> AsyncGenerator[str, None]:
         """클라이언트(웹 브라우저) 구독 및 연결 유지.
 
         [CL-4] `user_id` 는 **지정 수신자 이벤트를 받기 위한 주소**다. 비우면 전역 이벤트만
@@ -44,6 +45,7 @@ class SSEBroadcaster:
         self.clients.append(q)
         self._client_users[id(q)] = (user_id or "").strip()
         self._client_ctx[id(q)] = {"tenant_id": (tenant_id or "").strip(),
+                                   "scope_node_id": (scope_node_id or "").strip(),
                                    "entity_mode": (entity_mode or "").strip(),
                                    "session_id": (session_id or "").strip()}
         try:
@@ -107,22 +109,35 @@ class SSEBroadcaster:
 
     @staticmethod
     def _context_matches(ctx: dict, own) -> bool:
-        """구독 문맥과 자원 문맥이 같은가 (테넌트 · REAL/VIRTUAL).
+        """구독 문맥과 자원 문맥이 같은가 (테넌트 · 조직범위 · REAL/VIRTUAL).
 
         ★★ [G1-C1.1] 조직 권한만으로는 부족하다. `visibility="company"` 는 **테넌트를 넘어**
           통과할 수 있고, 검증 샌드박스(VIRTUAL) 자료가 실제 문맥(REAL) 화면에 섞이면
           시험 산출물이 실제 진행 상황처럼 보인다.
 
-        ⚠️ 구독 문맥이 **비어 있으면 대조하지 않는다**(하위호환). 종전 티켓에는 이 값이 없어서
-          다 막으면 이미 열린 연결이 전부 끊긴다. 대신 새 티켓은 항상 값을 싣는다."""
+        ★★★ [G1-C1.2] **문맥이 없는 구독은 이제 아무것도 못 받는다.** 종전에는 「비어 있으면
+          대조하지 않는다」였고, 그것이 곧 fail-open 이었다 — 문맥을 못 만든 연결이 오히려
+          경계 없이 전부 받았다. 티켓에 `context_version` 을 봉인하고 옛 표를 거절하므로,
+          살아 있는 구독은 **반드시** 테넌트와 실행 모드를 갖는다.
+
+        ⚠️ `scope_node_id` 는 **권한이 아니라 «지금 무엇을 보기로 했는가»** 다. 비어 있으면
+          「전체」를 고른 것이므로 좁히지 않는다 — 여기서 막으면 범위를 안 고른 사람이
+          아무것도 못 본다. 권한 경계는 `ownership_visible` 이 따로 지킨다."""
         own = own or {}
         c_tenant = str(ctx.get("tenant_id", "") or "")
         c_mode = str(ctx.get("entity_mode", "") or "")
-        if c_tenant and str(own.get("tenant_id", "") or "") not in ("", c_tenant):
+        if not c_tenant or not c_mode:
+            return False                 # 문맥 없는 구독 = 경계를 확인할 수 없음 = 차단
+        if str(own.get("tenant_id", "") or "") not in ("", c_tenant):
             return False
-        if c_mode and str(own.get("entity_mode", "") or "") not in ("", c_mode):
+        if str(own.get("entity_mode", "") or "") not in ("", c_mode):
             return False
-        return True
+        try:
+            from core.project_visibility import scope_covers
+            return scope_covers(str(ctx.get("scope_node_id", "") or ""),
+                                str(own.get("enterprise_scope_id", "") or ""))
+        except Exception:
+            return True                  # 범위 좁히기 실패는 권한 경계가 아니다(위 주석 참조)
 
     def _may_receive(self, user_id: str, is_global: bool, own, ctx: dict = None) -> bool:
         """이 구독자가 이 이벤트를 받아도 되는가.
@@ -140,6 +155,9 @@ class SSEBroadcaster:
         if own is None:
             return False
         if not self._context_matches(ctx or {}, own):
+            return False
+        # [G1-C1.3] 진행 이벤트도 마찬가지다 — 로그아웃한 창에 공장 상태가 계속 흐르면 안 된다.
+        if not self._session_alive(ctx or {}):
             return False
         try:
             from core.org_directory import org_directory
@@ -269,11 +287,32 @@ class SSEBroadcaster:
         return sent
 
     @staticmethod
+    def _session_alive(ctx: dict) -> bool:
+        """이 구독의 세션이 아직 살아 있는가.
+
+        ⚠️ 봉인된 세션 해시가 없으면 **살아 있다고 답하지 않는다.** 없다는 것은 확인할 수 없다는
+          뜻이고, 확인할 수 없는 것을 통과로 두면 이 검사도 장식이 된다."""
+        try:
+            from core.auth import auth_store
+            return bool(auth_store.session_alive_by_hash(
+                str((ctx or {}).get("session_id", "") or "")))
+        except Exception:
+            return False
+
+    @staticmethod
     def _recipient_still_valid(user_id: str, ctx: dict) -> bool:
         """폐지되지 않은 계정인가. 실패하면 **보내지 않는다.**
 
         ⚠️ 「조회 실패니까 일단 보낸다」로 두면, 인증 저장소가 흔들리는 순간이 곧 알림 유출
           구간이 된다. 알림 한 건을 놓치는 쪽이 낫다 — 사용자는 화면을 새로고침하면 본다."""
+        # ★★★ [G1-C1.3] **로그아웃한 세션에는 보내지 않는다.**
+        #   SSE 는 한 번 열리면 최대 12시간 산다. 그래서 로그아웃·비밀번호 변경·관리자의 세션
+        #   강제 폐기가 **이미 열린 스트림에는 닿지 않았다** — 사용자는 나갔다고 믿는데 그
+        #   브라우저는 계속 알림을 받는다. 「나갔다」와 「안 보인다」가 다르면 그것은 유출이다.
+        #   ⚠️ 티켓에 세션 해시가 없으면(옛 구독) 이 검사를 건너뛰지 **않는다** — 없다는 것은
+        #     확인할 수 없다는 뜻이고, 확인할 수 없는 것을 통과로 두면 이것도 장식이 된다.
+        if not SSEBroadcaster._session_alive(ctx or {}):
+            return False
         try:
             from core.org_directory import org_directory
             # ⚠️ **조직을 도입하기 전에는 막지 않는다.** 부서·사용자가 없는 환경에서 이 검사를
