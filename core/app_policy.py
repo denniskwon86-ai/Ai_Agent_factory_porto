@@ -66,6 +66,10 @@ INVALID = "INVALID"        # 판독 실패 — 언제나 차단
 #: (권한 밖 자원의 존재를 알리면 안 되는 경우가 있다).
 DENY_UNIDENTIFIED = "UNIDENTIFIED"
 DENY_NO_SUBJECT = "NO_SUBJECT"
+#: ★ [rev.3] 주체 자체가 자료를 볼 수 없는 상태 — 폐지된 계정 · 미등록 사용자 · 부서 미배정.
+#:   기존 `api/deps.visibility_block_reason` 이 쓰기 경로에서만 보던 축인데, PDP 에 없으면
+#:   **폐지된 계정이 PDP 로는 통과**한다(동등성 대조에서 실제로 드러났다).
+DENY_PRINCIPAL_BLOCKED = "PRINCIPAL_BLOCKED"
 DENY_TOKEN_EXPIRED = "TOKEN_EXPIRED"
 DENY_TOKEN_ACTOR_MISMATCH = "TOKEN_ACTOR_MISMATCH"   # 다른 사람의 토큰
 DENY_TOKEN_SESSION_MISMATCH = "TOKEN_SESSION_MISMATCH"  # 다른 세션에서 재사용
@@ -114,6 +118,11 @@ class Subject:
     · `scope`      조직 권한(`AccessScope` 호환).
     · `ctx`        지금 고른 실행 문맥(`tenant_id`·`entity_mode`·`scope_node_id`).
     · `session_id` 지금 로그인한 세션의 해시. **토큰 재사용 차단의 축**이다.
+    · `blocked_reason` 주체가 아예 자료를 볼 수 없는 상태의 사유(빈 문자열이면 정상).
+      ⚠️ **여기서 계산하지 않는다.** 「등록된 사용자인가·계정이 살아 있는가·부서가 있는가」는
+        조직 저장소를 봐야 하고, 그 판정은 `api/deps.visibility_block_reason` 하나에 있다.
+        PDP 는 `scope` 를 받는 것과 **같은 방식으로** 그 결과를 받아 쓴다 — 두 곳에서 계산하면
+        조용히 갈라진다.
     · `via`        `session` | `app_token`.
     · `token`      앱 증명일 때의 내용(`app_capability_token.resolve()` 결과).
 
@@ -123,6 +132,7 @@ class Subject:
     scope: Any = None
     ctx: Optional[Dict[str, Any]] = None
     session_id: str = ""
+    blocked_reason: str = ""
     via: str = "session"
     token: Optional[Dict[str, Any]] = None
 
@@ -339,6 +349,11 @@ def decide(subject: Subject, resource: ResourceScope, action: str,
     if not uid:
         return _deny(DENY_UNIDENTIFIED,
                      "누가 하는 요청인지 확인할 수 없습니다. 로그인이 필요합니다.")
+
+    # ①-b 주체가 아예 자료를 볼 수 없는 상태인가 (폐지 계정·미등록·부서 미배정)
+    #     ⚠️ 이 축이 없으면 **폐지된 계정이 PDP 로 통과**한다 — 기존 쓰기 판정보다 느슨해진다.
+    if (subject.blocked_reason or "").strip():
+        return _deny(DENY_PRINCIPAL_BLOCKED, subject.blocked_reason.strip())
 
     # ② 자원 상태
     if (resource.status or "active") != "active":
