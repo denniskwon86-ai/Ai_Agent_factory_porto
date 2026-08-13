@@ -24,8 +24,8 @@ M2 는 **"우리 기준정보(M1 골든 레코드) ↔ 외부 연계 시스템�
    데이터 오염이므로). M1 의 "기준정보만 마스터" 원칙과 동일 계열의 안전장치.
 2. **M2 는 메타데이터만 저장.** 실제 트랜잭션/대량 데이터는 저장 금지(M3 온디맨드). external_schemas 에
    담는 건 "필드가 존재한다"는 사실이지 그 값이 아니다.
-3. **온톨로지 재사용.** 외부 스키마 필드는 가능하면 M1 `entity_types` 의 오브젝트 타입에 정렬한다
-   (시스템을 새로 만들지 않는다 — G2/M1 과 공용).
+3. **온톨로지 타입 시드 재사용.** 외부 스키마 필드는 가능하면 M1 `entity_types`의 기준정보 유형에 정렬하고,
+   이를 G2 제조 경영 온톨로지의 오브젝트 타입 후보로 재사용한다. `entity_types`만으로 온톨로지가 완성된 것으로 간주하거나 별도 타입 시스템을 만들지 않는다.
 4. **비신뢰 입력 취급.** 외부 스키마 텍스트·필드명은 프롬프트 인젝션 방어 대상(자료로만, 지시 금지).
 
 ## 2. 데이터 모델 — `data/master/master.db` 확장
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS crosswalk_proposals (
 ```
 [1] 시스템 등록      → external_systems INSERT (status=inactive)
 [2] 스키마 수집      → external_schemas INSERT (CSV 업로드 또는 수기; 후일 M3 introspect)
-[3] 매핑 초안 생성   → (Flash 1콜, 온톨로지 스키마 제약) master_records/aliases ↔ external_schemas
+[3] 매핑 초안 생성   → (Flash 1콜, MDM 유형·온톨로지 타입 제약) master_records/aliases ↔ external_schemas
                         유사도·별칭·타입 정렬로 후보 산출 → crosswalk_proposals (status=pending)
 [4] 사람 검토·승인   → 승인: key_crosswalk UPSERT(confirmed=1) + proposal.status=approved
                         기각: proposal.status=rejected (이력 보존)
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS crosswalk_proposals (
 ```
 
 - **[3] 초안 생성의 결정론 뼈대 + LLM 보강**: 1차로 **별칭/이름 정확·부분 일치(LLM 0콜)** 로 후보를
-  뽑고(M1 별칭 감지 재사용), 애매한 것만 Flash 로 판정(온톨로지 entity_types 제약 JSON 강제, 자유생성
+  뽑고(M1 별칭 감지 재사용), 애매한 것만 Flash 로 판정(MDM `entity_types`와 승인된 온톨로지 타입 제약 JSON 강제, 자유생성
   금지). → 쿼터 절약 + 환각 억제.
 - **[4] 승인 게이트**는 지식허브 3단계·스킬 진화 패널과 동일 UX 패턴(제안 목록 → 승인/기각).
 
@@ -132,7 +132,7 @@ confidence 0~1 / 승인은 confirmed=1 유일(동일 master_code+system_id 재�
    M2 를 LLM 0콜인 M1 과 파일로 격리.
 3. `api/routes/crosswalk_control.py` + main.py 등록
 4. propose 초안기: 결정론(별칭/이름 일치, LLM 0콜) 1차 + **[(b) 확정] Flash 판정은 옵트인 토글**
-   (온톨로지 entity_types 제약 JSON 강제; 기본 off, 완주·쿼터 절약 기조). 애매한 후보만 Flash.
+   (MDM 유형·승인된 온톨로지 타입 제약 JSON 강제; 기본 off, 완주·쿼터 절약 기조). 애매한 후보만 Flash.
 5. UI 탭(기준정보 마스터 패널 내 "🔗 연계/크로스워크")
 6. 테스트: 시스템/스키마 CRUD → propose → approve/reject → mappings, 승인 전 미사용 보장.
    `external_key` 형식·`mapped_attr` 대응 검증 포함.

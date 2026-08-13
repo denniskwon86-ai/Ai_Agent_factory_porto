@@ -4,7 +4,7 @@
 > 목적: 제품 문서·UI·API·코드에서 사용하는 기술 요소의 명칭을 하나의 언어 체계로 재정의하기 위한 1차 Inventory  
 > 범위: Product Bible, 독자 제품 전략, 최종 로드맵, LLM 구현 명세, UI 추적 문서, Starter Kit 규격, 현재 `core/`, `api/routes/`, `nodes/`, `frontend/src/`  
 
-> **생성 산출물(2026-08-12)**  
+> **생성 산출물(최종 갱신 2026-08-13)**
 > - Excel 전환 사전: `docs/architecture/AI_FACTORY_STUDIO_TECHNOLOGY_TERMINOLOGY_DICTIONARY_2026-08-12.xlsx`  
 > - 시스템 임시 화면: 전역 메뉴 → 데이터 기반 → **기술·제품 용어집**  
 > - 단일 데이터 원천: `data/terminology/technology_terminology_glossary.json`  
@@ -145,6 +145,8 @@
 | KNOW-12 | JIT Context | TECH | 필요한 파일·서명만 주입하는 구현 최적화 용어 |
 | KNOW-13 | Context Report | TECH | 모델 주입 내역 설명 보고서인지 사용자 보고서인지 |
 | KNOW-14 | Persona Learner | TECH | 회사 특성 학습·사용자 개인화와 구분 |
+| KNOW-15 | Manufacturing Management Ontology / 제조 경영 온톨로지 | PLANNED | 경영 의미 모델의 기술 정식명; MDM·카탈로그·Graph RAG·계산 그래프와 책임 경계 고정 |
+| KNOW-16 | 경영 의미 모델 | PRODUCT | 사용자·사업 설명용 표현과 기술 정식명 `제조 경영 온톨로지`의 병기 규칙 |
 
 ## 6. AI 에이전트·모델·워크플로우 구성
 
@@ -453,7 +455,7 @@
 | 10 | `Baseline / Snapshot / Version / Checkpoint` | 데이터·계산·실행 재개의 기준 상태를 분리 |
 | 11 | `ACTUAL / SYNTHETIC / business_data_kind / data_origin` | 합성 실적형 데이터가 실제값으로 오인되지 않도록 이름과 표시 확정 |
 | 12 | `App Manifest / Capability Manifest / Data Contract / Scope Contract` | 선언서·데이터 계약·권한 계약의 포함 관계 확정 |
-| 13 | `Graph / Agent Graph / Calculation Graph / Traceability Graph / Graph RAG` | 다섯 종류 그래프를 목적별 고유명으로 고정 |
+| 13 | `Ontology / Knowledge Graph / Graph RAG / Agent Graph / Calculation Graph / Traceability Graph` | 의미 스키마·관계 인스턴스·검색·실행·계산·추적 그래프를 목적별 고유명으로 고정 |
 | 14 | `Governance / Admin / Program Admin / Agent Governance` | 관리자 화면과 정책 체계의 메뉴 구조 확정 |
 | 15 | `Enterprise / Enterprise Canvas / Cockpit / Boardroom` | 첫 화면·경영진 화면·다중 프로젝트 화면을 분리 |
 
@@ -478,7 +480,7 @@
 
 ## 17. 현재 산출물과 운영 상태 (2026-08-12)
 
-이 인벤토리의 347개 용어는 전환 사전 v0.2.1로 생성되어 있습니다.
+이 인벤토리의 349개 용어는 전환 사전 v0.3.0으로 생성되어 있습니다.
 
 | 산출물 | 경로 | 역할 |
 |---|---|---|
@@ -491,7 +493,7 @@
 
 현재 상태는 다음과 같습니다.
 
-- 전체 용어: **347개**
+- 전체 용어: **349개**
 - P0 충돌 권장안: **15개**
 - `검토 필요`: **0개**
 - `대체 용어 검토 중`: **0개**

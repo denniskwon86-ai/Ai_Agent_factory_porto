@@ -1,6 +1,8 @@
 # 🌐 Antigravity AI Factory 고도화 분석 보고서
 
 > **설계 보강(2026-07-28):** 온톨로지·출처·샌드박스·이벤트 연합은 모든 기업을 한 덩어리로 취급해서는 안 된다. Enterprise Context Master가 조직 범위, 실제/가상/경쟁사 상태, 프로필과 권한의 공통 기준이 된다. 상세 설계: [`../design_enterprise_context_master.md`](../design_enterprise_context_master.md).
+>
+> **용어 범위 정정(2026-08-13):** 이 제안서의 `지식 온톨로지`는 요구사항→설계→코드→테스트를 연결하는 **추적성 그래프** 성격이 강하다. 제품의 공통 의미 계층인 **제조 경영 온톨로지**(`회사 구조→조직 책임→업무 사건→KPI→재무 영향`)와 동일한 것으로 구현하지 않는다. 두 그래프는 근거 ID로 연결하되 저장 목적과 관계 유형을 분리한다. 정식 정의는 Product Bible §4.2와 최신 전략 §4.1을 따른다.
 **작성자:** Palantir AI Program Expert Persona
 **목적:** 현재 Multi-Agent 소프트웨어 팩토리 시스템의 아키텍처 한계를 분석하고, 엔터프라이즈급(Enterprise-grade) 강건성, 데이터 온톨로지(Ontology), 그리고 휴먼-머신 공생(Human-Machine Symbiosis) 관점에서의 고도화 방안 제언.
 

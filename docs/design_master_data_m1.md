@@ -21,7 +21,7 @@
 
 **원칙** (위반 시 MDM 실패 패턴에 빠짐):
 1. **기준정보만 마스터한다.** 트랜잭션 데이터(재고 수량, 주문 등)는 절대 저장하지 않는다 — 그것은 M3에서 소스 시스템(System of Record)에 온디맨드 조회.
-2. **온톨로지와 한 몸**: `entity_types` 가 곧 온톨로지 오브젝트 타입이다. GraphRAG G2 의 스키마 제약 추출도 이 타입 정의를 참조한다(시스템 2개 만들지 않음).
+2. **온톨로지의 타입 시드로 재사용**: `entity_types`는 MDM의 기준정보 유형이자 제조 경영 온톨로지 오브젝트 타입의 입력 원천이다. 그러나 `entity_types` 자체가 완성형 온톨로지는 아니다. G2 온톨로지 런타임과 Graph RAG의 스키마 제약 추출이 이 정의를 참조해 중복 타입 체계를 만들지 않는다.
 3. **별칭(alias) 우선**: 개체 매칭 난제의 절반은 별칭 관리로 미리 푼다. 모든 레코드는 별칭 목록을 가진다.
 4. **버전/유효기간**: 표준은 개정된다. 레코드는 개정 계보를 가지며 구판은 검색에서 제외되고 보존된다.
 
@@ -34,13 +34,13 @@
 > API 경로에서는 `asyncio.to_thread` 불필요(비동기 드라이버), 동기 호출부(ContextEngine)는 별도 동기 커넥션.
 
 ```sql
--- 온톨로지 오브젝트 타입 (= 기준정보 분류)
+-- 기준정보 유형 (= 제조 경영 온톨로지 오브젝트 타입의 시드)
 CREATE TABLE IF NOT EXISTS entity_types (
     type_id     TEXT PRIMARY KEY,          -- 예: 'process', 'equipment', 'material', 'kpi', 'unit', 'partner'
     name_ko     TEXT NOT NULL,             -- 예: '공정'
     description TEXT DEFAULT '',
     attr_schema TEXT DEFAULT '{}',         -- JSON: 속성 정의 {"속성명": {"type": "number|string|enum", "unit": "...", "required": bool}}
-    relations   TEXT DEFAULT '[]',         -- JSON: 허용 관계 타입 [{"name":"선행한다","target":"process"}] (G2 온톨로지 공용)
+    relations   TEXT DEFAULT '[]',         -- JSON: 허용 관계 후보 [{"name":"선행한다","target":"process"}]. 관계 인스턴스·근거·기간·범위·승인은 G2 온톨로지 런타임에서 관리
     created_at  TEXT NOT NULL
 );
 
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS key_crosswalk (      -- 마스터 코드 ↔ 외부 �
 
 모든 id 파라미터는 기존 `_safe_id` 패턴으로 검증. 응답 봉투는 기존 관례 `{"status": "success", "data": ...}`.
 
-### 3-1. 타입(온톨로지)
+### 3-1. 기준정보 유형(온톨로지 타입 시드)
 | 메서드 | 경로 | 본문 | 설명 |
 |---|---|---|---|
 | GET | `/types` | — | 타입 목록 |

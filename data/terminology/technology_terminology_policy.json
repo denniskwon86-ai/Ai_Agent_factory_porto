@@ -1,9 +1,9 @@
 {
   "metadata": {
-    "version": "0.2.1",
+    "version": "0.3.0",
     "decision_state": "TEAM_RECOMMENDED",
     "decision_label": "팀 권장안",
-    "generated_on": "2026-08-12",
+    "generated_on": "2026-08-13",
     "final_approval_required": true,
     "final_approver": "제품 책임자",
     "purpose": "사용자 용어, 기술 표준명, 과거 검색 별칭의 전환 정책을 코드 밖에서 관리"
@@ -72,6 +72,22 @@
       "status": "기술 전용",
       "definition": "문서 유사도뿐 아니라 회사·공정·설비·지표·의사결정 간 관계를 따라 근거를 찾는 검색 방식입니다.",
       "guidance": "일반 사용자에게는 '관계 기반 지식 검색'으로 설명하고 Graph RAG는 기술 설계에서만 병기합니다."
+    },
+    "KNOW-15": {
+      "user": "기업 경영 의미지도",
+      "english": "Manufacturing Management Ontology",
+      "tech": "management_ontology",
+      "status": "권장안",
+      "definition": "회사 구조, 조직 책임, 가치사슬, 업무 사건, 공정·자원, KPI, 정책, 재무 영향과 의사결정의 의미 및 관계 제약을 공통으로 정의하는 제조 경영 온톨로지입니다.",
+      "guidance": "일반 사용자에게는 '기업 경영 의미지도'로 설명하고, 제품·사업 문서에는 '제조 경영 온톨로지(경영 의미 모델)', 기술 설계에는 'Manufacturing Management Ontology'를 병기합니다. MDM·데이터 카탈로그·Graph RAG·계산 그래프를 대체하는 말로 사용하지 않습니다."
+    },
+    "KNOW-16": {
+      "user": "기업 경영 의미지도",
+      "english": "Manufacturing Management Ontology",
+      "tech": "management_ontology",
+      "status": "권장안",
+      "definition": "경영 의미 모델은 제조 경영 온톨로지를 제품·사업 관점에서 설명하는 표현입니다. 별도의 중복 모델이나 저장소를 뜻하지 않습니다.",
+      "guidance": "사업 제안과 사용자 설명에서는 '경영 의미 모델' 또는 '기업 경영 의미지도'를 사용할 수 있으나, 상세 설계에서는 제조 경영 온톨로지와 동일한 개념임을 최초 한 번 병기합니다."
     },
     "FLOW-31": {
       "user": "코드 품질 검토 에이전트",

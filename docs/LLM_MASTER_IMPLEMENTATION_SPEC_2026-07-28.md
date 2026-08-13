@@ -1,6 +1,6 @@
 # AI Factory Studio — LLM 구현 마스터 명세서
 
-> **최신 실행 기준(2026-08-03):** 이 문서는 기능별 상세 요구사항의 기준으로 유지한다. 다만 §14의 기존 단계 순서는 이후 구현 진척과 경쟁 기준점 재검토 이전에 작성된 상위 계획이다. 최신 제품 범주·차별화 판단은 [`strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md`](strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md), 실제 착수 순서·선행조건·완료 관문은 [`roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md`](roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md)를 우선한다. 핵심 순서는 **CL-0.5/Host Runtime 안전 경계 → 원료 구매 수직 의미 모델 → 운영 앱 전달·수락 → 결정론적 Twin → 의사결정·실행·효과 폐루프 → 엔터프라이즈 제품화**이다.
+> **최신 실행 기준(2026-08-03, 용어 보강 2026-08-13):** 이 문서는 기능별 상세 요구사항의 기준으로 유지한다. 다만 §14의 기존 단계 순서는 이후 구현 진척과 경쟁 기준점 재검토 이전에 작성된 상위 계획이다. 최신 제품 범주·차별화 판단은 [`strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md`](strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md), 실제 착수 순서·선행조건·완료 관문은 [`roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md`](roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md)를 우선한다. 핵심 순서는 **CL-0.5/Host Runtime 안전 경계 → 원료 구매 수직 제조 경영 온톨로지(경영 의미 모델) → 운영 앱 전달·수락 → 결정론적 Twin → 의사결정·실행·효과 폐루프 → 엔터프라이즈 제품화**이다.
 
 > **Enterprise Context Master 선행 규칙(2026-07-28):** 이후 구현되는 MDM, 카탈로그, MCP, 권한, 상담사, SW 생성기, 시뮬레이션은 `tenant → 기업집단 → 법인 → 사업부 → 사업장/공장` 문맥과 실제/가상/경쟁사 상태를 명시적으로 가져야 한다. 상세 모델·API·복제·격리 규칙은 [`design_enterprise_context_master.md`](design_enterprise_context_master.md)를 SSOT로 한다.
 
@@ -117,7 +117,7 @@ AI Factory Studio는 다음 흐름을 제공하는 기업 운영 플랫폼을 �
 │ - 목표, KPI, 범위, 가정, 승인, 근거, 데이터 요구사항, 변경 이력           │
 ├───────────────────────────────────────────────────────────────────────┤
 │ 데이터 기반 계층                                                        │
-│ MDM → 데이터 카탈로그 → 품질·계보 → 데이터 계약 → 권한/동의              │
+│ MDM → 데이터 카탈로그 → 품질·계보·계약 → 제조 경영 온톨로지 → 권한       │
 ├───────────────────────────────────────────────────────────────────────┤
 │ 연계 계층                                                               │
 │ 파일/DB/API/MCP 읽기 연계 → 캐시/정규화 → Shadow Mode → 제한적 쓰기      │
@@ -137,6 +137,8 @@ AI Factory Studio는 다음 흐름을 제공하는 기업 운영 플랫폼을 �
 | Decision Ledger | 결정·가정·승인·근거의 불변 이력 | 임의 수정으로 이력 삭제 |
 | MDM | 전사 공통 식별자와 표준 값 | 모든 거래 데이터를 MDM에 넣기 |
 | 카탈로그 | 데이터 자산의 메타데이터·책임·발견 | 데이터 원천 그 자체를 대체 |
+| 제조 경영 온톨로지 | 개체·업무 사건·조직 책임·KPI·정책·영향 관계의 의미와 제약 | MDM·카탈로그를 대체하거나 LLM이 관계를 무승인 확정 |
+| Graph RAG | 온톨로지·지식 그래프의 관계를 따라 근거와 영향 경로 탐색 | 공식 관계·권한 판정·수치 계산을 대체 |
 | 데이터 계약 | 앱/시스템 간 입출력·품질·권한 약속 | 계약 없는 직접 테이블 결합 |
 | Shadow Mode | 실제 데이터에서 새 규칙의 무해한 병렬 검증 | 검증 없이 운영 쓰기 |
 | 시뮬레이션 엔진 | 재현 가능한 수치 계산과 비교 | LLM 출력값을 계산 결과로 확정 |
@@ -334,7 +336,7 @@ decision_ledger_events
 
 ---
 
-## 6. 기능 3 — MDM, 데이터 카탈로그, 품질, 계보, 데이터 계약
+## 6. 기능 3 — MDM, 데이터 카탈로그, 제조 경영 온톨로지, 품질, 계보, 데이터 계약
 
 ### 6.1 개념 구분
 
@@ -346,6 +348,27 @@ decision_ledger_events
 | 데이터 품질 | 완전성·중복·유효성·최신성·정합성 | 단순 LLM 평가 금지 |
 | 데이터 계보 | 원천→변환→앱→보고서→결정의 영향 관계 | 추적성 그래프의 근거 |
 | 데이터 계약 | 시스템/앱 간 필드·형식·권한·SLA 약속 | 직접 DB 결합의 대안 |
+| 제조 경영 온톨로지 | 공식 개체·업무 사건·조직 책임·정책·KPI·재무 영향의 의미 관계와 제약 | MDM·카탈로그·용어사전을 연결하지만 대체하지 않음 |
+| Graph RAG | 승인된 관계를 따라 근거·관련 지식·영향 경로 후보를 탐색 | 온톨로지·권한·계산 그래프를 대체 불가 |
+
+#### 6.1.1 정식 용어와 구현 경계
+
+- 기술 정식 명칭: **제조 경영 온톨로지(Manufacturing Management Ontology)**
+- 제품·사업 설명: **경영 의미 모델**
+- 사용자 화면 설명: **기업 경영 의미지도**
+- `entity_types`와 타입별 `relations`는 온톨로지의 타입·허용 관계 시드이며, 완성형 온톨로지 저장소나 런타임이 아니다.
+- 온톨로지에는 관계 인스턴스뿐 아니라 조직 범위, 유효기간, 버전, 출처, 신뢰도, 승인 상태가 필요하다.
+- 지식 그래프는 온톨로지를 따라 생성된 개체·관계 인스턴스이고, Graph RAG는 그것을 검색하는 방식이다.
+- 공식 금액·물량은 온톨로지나 LLM이 계산하지 않고 버전 관리된 결정론적 계산 그래프가 산출한다.
+
+```text
+MDM·카탈로그·용어·Crosswalk·계보
+  → 제조 경영 온톨로지(의미·관계·제약)
+  → 지식 그래프(승인된 관계 인스턴스·근거)
+  → Graph RAG(관계 기반 탐색)
+  → 계산 그래프(승인 수식 계산)
+  → 앱·시뮬레이션·경영 의사결정
+```
 
 ### 6.2 우선 도메인
 
@@ -366,6 +389,8 @@ data_quality_profiles(profile_id, asset_id, measured_at, completeness, freshness
 lineage_edges(id, from_type, from_id, to_type, to_id, relation_type, confidence, evidence_ref)
 data_contracts(contract_id, producer, consumer, version, schema_json, quality_rules_json, access_policy_json, status)
 ```
+
+위 엔터티는 온톨로지 입력 자산이다. 온톨로지의 물리 스키마와 서비스 계약은 최신 로드맵의 G2-C에서 확정하며, 이 문서만 보고 별도 그래프 저장소를 중복 구축하지 않는다.
 
 ### 6.4 데이터 준비도 연계 규칙
 
@@ -1007,7 +1032,7 @@ Global Supervisor
 - 실제·계획·예측·시나리오 데이터를 혼합 표기하지 않는다.
 - 민감 데이터와 권한 밖 데이터는 LLM 문맥에 넣지 않는다.
 - 외부 시스템 쓰기, 릴리스, 영향이 큰 승인에는 사용자 확인과 감사 로그를 강제한다.
-- 데이터 카탈로그와 MDM을 Graph RAG로 대체하지 않는다. Graph RAG는 이들 위에서 근거 탐색을 강화하는 보조 계층이다.
+- 데이터 카탈로그와 MDM을 제조 경영 온톨로지나 Graph RAG로 대체하지 않는다. 온톨로지는 의미·관계 계층이고 Graph RAG는 그 위에서 근거 탐색을 강화하는 검색 방식이다.
 - MCP를 데이터 모델 또는 권한 모델로 오해하지 않는다. MCP는 연결 방식이다.
 - 생성 앱의 Preview를 운영 환경으로 오해하지 않는다.
 - 디지털트윈 수치는 재현 가능해야 하며, 입력 스냅샷·엔진 버전·가정·출력을 함께 보존해야 한다.

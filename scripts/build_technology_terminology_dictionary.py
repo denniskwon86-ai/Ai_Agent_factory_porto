@@ -219,7 +219,7 @@ P0_RESOLUTIONS = {
     10: "Baseline=비교 기준선, Snapshot=시점 데이터, Version=개정본, Checkpoint=실행 재개 지점",
     11: "ACTUAL은 업무 종류, SYNTHETIC은 출처. 두 축을 동시에 표시해 합성값의 실제값 오인을 차단",
     12: "App Manifest=앱 전체 선언, Capability Manifest=행동 권한, Data Contract=데이터 규약, Scope Contract=범위 규약",
-    13: "Agent/Calculation/Traceability/Knowledge Graph를 목적별 고유명으로 사용하고 ‘Graph’ 단독 사용 금지",
+    13: "Ontology=의미·관계 제약, Knowledge Graph=관계 인스턴스, Graph RAG=검색, Agent Graph=실행, Calculation Graph=계산, Traceability Graph=추적으로 분리하고 ‘Graph’ 단독 사용 금지",
     14: "Governance=정책·통제, Administration=운영 설정, Program Admin=앱 운영, Agent Governance=에이전트 자산 통제",
     15: "Enterprise Management Hub=첫 화면, Executive Cockpit=경영진 화면, Mega Boardroom=통합 프로젝트 관제",
 }
@@ -469,7 +469,7 @@ def write_xlsx(payload: dict[str, Any]) -> None:
 
 
 def validate(payload: dict[str, Any]) -> None:
-    assert len(payload["entries"]) == 347, f"용어 수 불일치: {len(payload['entries'])}"
+    assert len(payload["entries"]) == 349, f"용어 수 불일치: {len(payload['entries'])}"
     assert len(payload["p0_conflicts"]) == 15, f"P0 충돌 수 불일치: {len(payload['p0_conflicts'])}"
     ids = [e["id"] for e in payload["entries"]]
     assert len(ids) == len(set(ids)), "중복 ID가 있습니다."
@@ -478,7 +478,7 @@ def validate(payload: dict[str, Any]) -> None:
     assert not any(e["recommended_user_term"] == "대체 용어 검토 중" for e in payload["entries"]), "미정 대체어가 남아 있습니다."
     wb = load_workbook(XLSX, read_only=False, data_only=False)
     assert wb.sheetnames == ["용어사전", "P0_충돌", "분류기준", "사용지침", "변경대상", "표준약어"]
-    assert wb["용어사전"].max_row == 348
+    assert wb["용어사전"].max_row == 350
     assert wb["P0_충돌"].max_row == 16
     assert wb["표준약어"].max_row == 4
     wb.close()
