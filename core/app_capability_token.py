@@ -40,6 +40,7 @@ LLM 0콜.
 """
 from __future__ import annotations
 
+import hashlib
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
@@ -56,6 +57,18 @@ MAX_TTL_MINUTES = 60
 PREFIX = "app_"
 #: 감사·목록에 남기는 앞자리 길이. 전문은 발급 응답에서 **단 한 번만** 나간다.
 _FINGERPRINT = 12
+
+
+def token_hash(raw: str) -> str:
+    """토큰 원문 → 저장용 해시.
+
+    ★★★ [rev.2 · 교차검토 지적 5] 초판은 **원문을 메모리 키와 레코드에 그대로** 들고 있었다.
+      프로세스 덤프·디버거·예외 출력 어디에서든 그것이 새면 곧 권한이다. 저장은 해시로 하고
+      원문은 발급 응답에서 한 번만 나간다(`core/auth._ticket_hash` 와 같은 판단).
+
+    ⚠️ 비밀번호가 아니므로 pbkdf2 를 쓰지 않는다 — 192비트 난수이고 최대 60분 산다.
+      대신 조회 경로가 빨라야 한다(요청마다 1회)."""
+    return hashlib.sha256((raw or "").encode("utf-8")).hexdigest()
 
 
 class AppTokenError(ValueError):
@@ -79,7 +92,7 @@ class AppCapabilityTokenStore:
         self._lock = threading.RLock()
 
     # ── 발급 ──────────────────────────────────────────────────────────────
-    def issue(self, *, actor: str, app_id: str, release_id: str,
+    def issue(self, *, actor: str, session_id: str, app_id: str, release_id: str,
               capabilities: Tuple[str, ...] = (READ,),
               tenant_id: str = "", entity_mode: str = "",
               scope_node_id: str = "", ttl_minutes: int = DEFAULT_TTL_MINUTES,
@@ -99,6 +112,13 @@ class AppCapabilityTokenStore:
                 "그것이 정확히 이 토큰이 막으려는 상태입니다.")
         if not app_id:
             raise AppTokenError("app_id 가 필요합니다 — 어느 앱인지 없는 증명은 증명이 아닙니다.")
+        #: ★★★ [rev.2] **세션에 묶는다.** 없으면 로그아웃·재로그인 후에도 같은 토큰이 통하고,
+        #:   그것이 「다른 세션에서 재사용」 경로다(교차검토 지적 2).
+        session_id = (session_id or "").strip()
+        if not session_id:
+            raise AppTokenError(
+                "session_id 가 필요합니다 — 세션에 묶이지 않은 증명은 로그아웃 뒤에도 살아 "
+                "있고, 그것은 회수할 수 없는 권한입니다.")
 
         caps = tuple(dict.fromkeys(str(c).strip() for c in (capabilities or ()) if str(c).strip()))
         if not caps:
@@ -114,10 +134,16 @@ class AppCapabilityTokenStore:
         #   빈 값이 통과하는 순간 경계가 사라진다(나쁨). 만들 때 막는 편이 확실하다.
         tenant_id = (tenant_id or "").strip()
         entity_mode = (entity_mode or "").strip()
+        scope_node_id = (scope_node_id or "").strip()
         if not tenant_id or not entity_mode:
             raise AppTokenError(
                 "tenant_id 와 entity_mode 가 필요합니다 — 실행 문맥 없는 토큰은 경계를 확인할 "
                 "수 없습니다(D-014).")
+        #: ⚠️ [rev.2] 범위 공란을 허용하지 않는다. 빈 범위 토큰은 판정에서 «좁히지 않음» 이 되어
+        #:   사실상 전 조직으로 통한다 — 교차검토 지적 1·3.
+        if not scope_node_id:
+            raise AppTokenError(
+                "scope_node_id 가 필요합니다 — 범위 없는 증명은 «전 조직 허용» 이 됩니다.")
 
         try:
             ttl = int(ttl_minutes)
@@ -133,15 +159,16 @@ class AppCapabilityTokenStore:
         now = _now()
         token = f"{PREFIX}{secrets.token_urlsafe(24)}"
         rec = {
-            "token": token,
+            #: ⚠️ **원문을 넣지 않는다.** 해시만 보관한다.
             "fingerprint": token[:_FINGERPRINT],
             "actor": actor,
+            "session_id": session_id,
             "app_id": app_id,
             "release_id": release_id,
             "capabilities": caps,
             "tenant_id": tenant_id,
             "entity_mode": entity_mode,
-            "scope_node_id": (scope_node_id or "").strip(),
+            "scope_node_id": scope_node_id,
             "issued_at": now.isoformat(),
             "expires_at": (now + timedelta(minutes=ttl)).isoformat(),
             "ttl_minutes": ttl,
@@ -150,11 +177,14 @@ class AppCapabilityTokenStore:
             "revoked": False,
         }
         with self._lock:
-            self._tokens[token] = rec
+            self._tokens[token_hash(token)] = rec
         self._audit("APP_TOKEN_ISSUED", rec,
                     reason=purpose or "생성 앱 데이터 접근 증명 발급",
                     detail=f"ttl={ttl}m release={release_id} caps={list(caps)}")
-        return dict(rec)
+        #: 전문은 **여기서만** 나간다. 저장소에는 해시만 있다.
+        out = dict(rec)
+        out["token"] = token
+        return out
 
     # ── 사용 ──────────────────────────────────────────────────────────────
     def resolve(self, token: str, *, quiet: bool = False) -> Optional[Dict[str, Any]]:
@@ -167,7 +197,7 @@ class AppCapabilityTokenStore:
         if not tok:
             return None
         with self._lock:
-            rec = self._tokens.get(tok)
+            rec = self._tokens.get(token_hash(tok))
             if rec is None:
                 return None
             if rec.get("revoked"):
@@ -178,20 +208,48 @@ class AppCapabilityTokenStore:
             out = dict(rec)
         out["expired"] = expired
         out.pop("token", None)              # ⚠️ 판정 경로에 전문을 들고 다니지 않는다
-        if expired and not quiet:
-            self._audit("APP_TOKEN_EXPIRED", out, outcome="denied",
-                        reason="만료된 앱 토큰 사용 시도")
+        if not quiet:
+            if expired:
+                self._audit("APP_TOKEN_EXPIRED", out, outcome="denied",
+                            reason="만료된 앱 토큰 사용 시도")
+            else:
+                #: ★★★ [rev.2 · 교차검토 지적 5] **성공 사용을 남긴다.**
+                #:   발급과 거부만 남기면 「그 증명으로 실제로 무엇을 했나」에 답할 수 없고,
+                #:   유출 조사에서 가장 필요한 것이 바로 그 기록이다.
+                self._audit("APP_TOKEN_USED", out,
+                            reason="앱 데이터 접근 증명 사용",
+                            detail=f"release={out.get('release_id','')} "
+                                   f"use_count={out.get('use_count')}")
         return out
 
     def revoke(self, token: str, actor: str = "") -> bool:
         with self._lock:
-            rec = self._tokens.get((token or "").strip())
+            rec = self._tokens.get(token_hash((token or "").strip()))
             if rec is None or rec.get("revoked"):
                 return False
             rec["revoked"] = True
             snapshot = dict(rec)
         self._audit("APP_TOKEN_REVOKED", snapshot, reason=f"회수: {actor or '미상'}")
         return True
+
+    def revoke_session(self, session_id: str, actor: str = "") -> int:
+        """★ [rev.2] **세션이 끝나면 그 세션의 증명도 끝난다.**
+
+        로그아웃했는데 앱 증명이 살아 있으면 「회수할 수 없는 권한」이 남는다 —
+        `auth.destroy_all_for` 와 짝을 이루는 쪽이다."""
+        sid = (session_id or "").strip()
+        if not sid:
+            return 0
+        killed = []
+        with self._lock:
+            for rec in self._tokens.values():
+                if rec.get("session_id") == sid and not rec.get("revoked"):
+                    rec["revoked"] = True
+                    killed.append(dict(rec))
+        for rec in killed:
+            self._audit("APP_TOKEN_REVOKED", rec,
+                        reason=f"세션 종료로 회수: {actor or '미상'}")
+        return len(killed)
 
     def active(self, actor: str = "") -> List[Dict[str, Any]]:
         """살아 있는 토큰 목록. ⚠️ **전문은 절대 싣지 않는다** — 지문만."""
@@ -205,9 +263,7 @@ class AppCapabilityTokenStore:
                     continue
                 if actor and rec["actor"] != actor:
                     continue
-                view = dict(rec)
-                view.pop("token", None)
-                out.append(view)
+                out.append(dict(rec))       # 저장소에 전문이 없으므로 지울 것도 없다
         return sorted(out, key=lambda r: r["issued_at"])
 
     def purge_expired(self) -> int:

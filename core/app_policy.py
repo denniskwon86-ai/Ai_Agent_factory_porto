@@ -1,4 +1,4 @@
-"""★★★ [G1-B04] 생성 앱 데이터 접근의 **정책 결정점(PDP)** — 판정은 여기 한 곳에서 한다.
+"""★★★ [G1-B04] 자원 접근의 **정책 결정점(PDP)** — 판정은 여기 한 곳에서 한다.
 
 ## 왜 `assert_*` 로 충분하지 않았나
 
@@ -7,29 +7,37 @@
 
 1. **왜 막혔는지 호출부가 쓸 수 없다.** 던져진 문구를 파싱할 수는 없고, 그래서 화면은
    「권한 없음」과 「문맥 밖」과 「토큰이 다른 앱 것」을 같은 말로 뭉갠다.
-2. **주체가 사람뿐이다.** G1-B 는 **앱이 자기 토큰으로** 부르는 경로를 새로 만든다
-   (`app_capability_token`). 그때 판정 대상은 `Principal` 이 아니다.
+2. **주체가 사람뿐이다.** G1-B 는 **앱이 자기 증명으로** 부르는 경로를 새로 만든다.
 
-그래서 «판정» 을 «강제» 에서 분리한다 — 이 모듈은 **답을 돌려주고**, 라우트가 그 답을 HTTP 로
-바꾼다. 로드맵 G1-B04 「데이터 읽기·쓰기·업무 액션별 정책 결정점」이 이것이다.
+그래서 «판정» 을 «강제» 에서 분리한다 — 이 모듈은 **답을 돌려주고**, 라우트가 HTTP 로 바꾼다.
 
-## 의존 방향
+## ★★★ [rev.2 · 2026-08-13] 계약을 둘로 나눈다
 
-⚠️ `core/` 는 `api/` 를 import 하지 않는다. 그래서 이 함수는 `Principal` 이 아니라 **이미
-  해석된 원시값**(scope 객체 · user_id · 문맥 dict)을 받는다 — `project_visibility.
-  ownership_visible(scope, user_id, own)` 이 같은 이유로 같은 모양이다.
-  라우트가 어댑터 노릇을 한다.
+교차검토 `[G1-B-P0-REVIEW-75]` 의 지적: 초판의 `Resource` 는 `app_class`·`release_id`·
+매니페스트 capability 가 섞인 **앱 전용 구조**였다. 그것을 G2 온톨로지가 재사용하면
+정책 모델이 다시 꼬인다.
 
-★ 이 계약은 나중에 온톨로지의 `ResourceScope` 가 얹힐 자리이기도 하다(설계
-  `design_manufacturing_management_ontology_2026-08-13.md` §5). 그래서 자원 종류를
-  `AppResource` 하나로 못 박지 않고 «판정에 필요한 사실» 만 받는다.
+    ResourceScope      범용 — tenant · entity_mode · scope_node_id · owner · binding_state
+    AppResourceFacts   앱 전용 — app_id · release_id · app_class · manifest · capabilities
+
+온톨로지는 `ResourceScope` 만 채우고 `AppResourceFacts` 를 넘기지 않는다. 앱 전용 규칙은
+`app_facts` 가 있을 때만 돈다.
 
 ## 교집합이 실제 권한이다
 
-    요청자 권한 ∩ 지금 고른 문맥 ∩ 토큰 capability ∩ 매니페스트 선언 ∩ 자원 정책(app_class)
+    요청자 권한 ∩ 지금 고른 문맥 ∩ 자원 범위 ∩ 토큰 전수 대조 ∩ 매니페스트 선언 ∩ 자원 정책
 
 설계 `design_agent_governance_scope_permissions_2026-08-04.md` §6.4 가 도구 호출에 대해
 같은 식을 못박았다. 하나라도 비면 **거부**다 — «대부분 통과했으니 통과» 는 없다.
+
+## ⚠️ 이 파일이 되돌리면 안 되는 것 (rev.2 에서 고친 fail-open 들)
+
+- **미바인딩 자원을 통과시키지 않는다.** 초판은 `owner_dept_id` 가 비면 식별된 사용자에게
+  허용했다(기존 릴리스 판정의 관대함을 승계). 신규 Host Runtime 자원에서 그것은 D-014 위반이다.
+  레거시 호환은 `binding_state=LEGACY` 로 **명시**해야만 열린다.
+- **앱 토큰의 READ 도 매니페스트 선언을 요구한다.** 초판은 읽기를 면제했다.
+- **토큰은 전수 대조한다** — actor · app_id · release_id · tenant · entity_mode · scope · capability.
+  하나라도 안 보면 그 축으로 재사용이 열린다.
 
 LLM 0콜.
 """
@@ -45,20 +53,31 @@ DELETE = "delete"
 MANAGE = "manage"                     # 스키마 변경·데이터셋 폐기
 ACTIONS = (READ, WRITE, DELETE, MANAGE)
 
-#: 쓰기로 취급하는 액션. 「읽기만 허용」 토큰이 무엇을 막는지 한 곳에서 정한다.
+#: 쓰기로 취급하는 액션. 「읽기만 허용」이 무엇을 막는지 한 곳에서 정한다.
 _MUTATING = (WRITE, DELETE, MANAGE)
 
-#: 거부 사유 코드. **화면에 그대로 내보내지 않는다** — 사유의 노출 범위는 호출부가 정한다
+#: 자원의 범위 바인딩 상태. `project_visibility` 와 **같은 낱말**을 쓴다 — 같은 개념에
+#: 다른 이름을 붙이면 두 곳을 대조할 때마다 번역이 필요하다.
+BOUND = "BOUND"
+LEGACY = "LEGACY"          # 마이그레이션 대상 — **명시해야만** 관대함이 적용된다
+INVALID = "INVALID"        # 판독 실패 — 언제나 차단
+
+#: 거부 사유 코드. **화면에 그대로 내보내지 않는다** — 노출 범위는 호출부가 정한다
 #: (권한 밖 자원의 존재를 알리면 안 되는 경우가 있다).
-DENY_UNIDENTIFIED = "UNIDENTIFIED"           # 누구인지 모른다
-DENY_NO_SUBJECT = "NO_SUBJECT"               # 판정할 주체 자체가 없다
+DENY_UNIDENTIFIED = "UNIDENTIFIED"
+DENY_NO_SUBJECT = "NO_SUBJECT"
 DENY_TOKEN_EXPIRED = "TOKEN_EXPIRED"
+DENY_TOKEN_ACTOR_MISMATCH = "TOKEN_ACTOR_MISMATCH"   # 다른 사람의 토큰
+DENY_TOKEN_SESSION_MISMATCH = "TOKEN_SESSION_MISMATCH"  # 다른 세션에서 재사용
 DENY_TOKEN_APP_MISMATCH = "TOKEN_APP_MISMATCH"       # 남의 앱 데이터를 요청했다
-DENY_TOKEN_CAPABILITY = "TOKEN_CAPABILITY"           # 토큰이 그 행동을 담고 있지 않다
-DENY_MANIFEST_CAPABILITY = "MANIFEST_CAPABILITY"     # 앱이 선언하지 않은 행동
-DENY_CONTEXT = "CONTEXT_MISMATCH"                    # 테넌트·실행 모드가 다르다
+DENY_TOKEN_CONTEXT_MISMATCH = "TOKEN_CONTEXT_MISMATCH"  # 다른 회사·실행 문맥에서 재사용
+DENY_TOKEN_SCOPE_MISMATCH = "TOKEN_SCOPE_MISMATCH"   # 토큰이 묶인 조직 범위 밖
+DENY_TOKEN_CAPABILITY = "TOKEN_CAPABILITY"
+DENY_MANIFEST_CAPABILITY = "MANIFEST_CAPABILITY"
+DENY_CONTEXT = "CONTEXT_MISMATCH"                    # 요청 문맥 ↔ 자원 문맥
+DENY_UNBOUND = "RESOURCE_UNBOUND"                    # 자원에 범위가 없다(D-014)
 DENY_SCOPE = "SCOPE_DENIED"                          # 조직 권한 밖
-DENY_PERSONAL = "PERSONAL_OWNER_ONLY"                # 개인 앱은 만든 사람만
+DENY_PERSONAL = "PERSONAL_OWNER_ONLY"
 DENY_RETIRED = "RESOURCE_RETIRED"
 DENY_UNKNOWN_ACTION = "UNKNOWN_ACTION"
 ALLOW = "OK"
@@ -75,7 +94,7 @@ class PolicyDecision:
     message: str = ""
     obligations: Tuple[str, ...] = field(default_factory=tuple)
 
-    def __bool__(self) -> bool:            # `if decide(...):` 로 쓸 수 있게
+    def __bool__(self) -> bool:
         return self.allowed
 
 
@@ -89,103 +108,233 @@ def _allow(*obligations: str) -> PolicyDecision:
 
 @dataclass(frozen=True)
 class Subject:
-    """판정 대상. 사람일 수도 있고 **앱 토큰**일 수도 있다.
+    """판정 대상. 사람일 수도 있고 **앱 증명**일 수도 있다.
 
-    · `user_id`   최종 책임 주체. 앱 토큰도 «누구를 대신해» 도는지 반드시 갖는다.
-    · `scope`     조직 권한(`AccessScope` 호환 — `unrestricted`·`readable_dept_ids` 등).
-    · `ctx`       지금 고른 실행 문맥(`tenant_id`·`entity_mode`·`scope_node_id`).
-    · `via`       `session` | `app_token`.
-    · `token`     앱 토큰일 때의 발급 내용(§`app_capability_token`).
+    · `user_id`    최종 책임 주체.
+    · `scope`      조직 권한(`AccessScope` 호환).
+    · `ctx`        지금 고른 실행 문맥(`tenant_id`·`entity_mode`·`scope_node_id`).
+    · `session_id` 지금 로그인한 세션의 해시. **토큰 재사용 차단의 축**이다.
+    · `via`        `session` | `app_token`.
+    · `token`      앱 증명일 때의 내용(`app_capability_token.resolve()` 결과).
 
-    ⚠️ **앱 토큰은 사람 권한을 넘을 수 없다.** 그래서 토큰 경로에서도 `scope` 를 함께 받아
+    ⚠️ **앱 증명은 사람 권한을 넘을 수 없다.** 그래서 토큰 경로에서도 `scope` 를 함께 받아
       교집합을 낸다 — 토큰만 보고 판정하면 회수된 권한이 토큰 수명 동안 살아 있다."""
     user_id: str = ""
     scope: Any = None
     ctx: Optional[Dict[str, Any]] = None
+    session_id: str = ""
     via: str = "session"
     token: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
-class Resource:
-    """판정 대상 자원. «판정에 필요한 사실» 만 담는다 — 저장소 행을 그대로 넘기지 않는다.
+class ResourceScope:
+    """★ **범용** 자원 범위 계약. 앱·온톨로지·그 밖의 자원이 공유한다.
 
-    ⚠️ 행을 그대로 넘기면 저장소 스키마가 바뀔 때마다 판정이 조용히 달라진다."""
-    kind: str = "dataset"              # dataset | record
-    release_id: str = ""
-    dataset_id: str = ""
-    app_class: str = ""                # personal | departmental | enterprise
-    owner_user_id: str = ""            # personal 앱의 소유자
-    owner_dept_id: str = ""
+    ⚠️ 여기에 앱 전용 개념(`release_id`·`app_class`)을 넣지 말 것 — 넣는 순간 온톨로지가
+      이 계약을 쓸 수 없게 되고, 그러면 정책 모델이 둘로 갈린다(교차검토 지적).
+
+    · `binding_state` 가 `BOUND` 가 아니면 **원칙적으로 차단**이다. `LEGACY` 는 마이그레이션
+      대상임을 **명시**했을 때만 관대함이 적용된다 — 빈 값을 관대함으로 읽지 않는다."""
     tenant_id: str = ""
     entity_mode: str = ""
     scope_node_id: str = ""
+    owner_user_id: str = ""
+    owner_dept_id: str = ""
+    binding_state: str = BOUND
     status: str = "active"
-    #: 매니페스트가 **선언한** capability. 빈 튜플이면 «선언 없음» 이고, 그것은 «전부 허용» 이
-    #: 아니라 «데이터 행동을 선언하지 않은 앱» 이다(§4 참조).
+
+
+@dataclass(frozen=True)
+class AppResourceFacts:
+    """앱 전용 정책 사실. **온톨로지는 이것을 넘기지 않는다.**
+
+    · `declared_capabilities` 매니페스트가 선언한 행동. 빈 튜플은 «전부 허용» 이 아니라
+      «데이터 행동을 선언하지 않은 앱» 이다.
+    · `legacy_mode` **명시적** 하위호환. 켜면 미선언 READ 를 허용한다 — 켜지 않으면 막힌다.
+      ⚠️ 기본값을 `True` 로 되돌리지 말 것. 그 순간 CL-0 감사 지적 D 가 되살아난다."""
+    app_id: str = ""
+    release_id: str = ""
+    app_class: str = ""                # personal | departmental | enterprise
+    manifest_fingerprint: str = ""
     declared_capabilities: Tuple[str, ...] = field(default_factory=tuple)
+    manifest_version: str = ""
+    legacy_mode: bool = False
 
 
-def _ctx_ok(subject: Subject, res: Resource) -> bool:
-    """테넌트·실행 모드가 맞는가.
+# ── 축별 판정 ─────────────────────────────────────────────────────────────
 
-    ⚠️ 문맥이나 자원 쪽 값이 **비어 있으면 통과시키지 않는다** — D-014 「미지정은 전사 공용이
-      아니라 비노출」. `project_visibility.context_visible` 과 같은 규칙이다.
-      다만 조직 범위 좁히기는 여기서 하지 않는다(권한 축이 `_scope_ok` 로 따로 있다)."""
+def _ctx_ok(subject: Subject, res: ResourceScope) -> bool:
+    """요청 문맥과 자원 문맥의 테넌트·실행 모드가 맞는가.
+
+    ⚠️ 어느 쪽이든 **비어 있으면 통과시키지 않는다** — D-014 「미지정은 전사 공용이 아니라
+      비노출」. `project_visibility.context_visible` 과 같은 규칙이다."""
     c = subject.ctx or {}
     c_tenant = str(c.get("tenant_id", "") or "").strip()
     c_mode = str(c.get("entity_mode", "") or "").strip()
     r_tenant = str(res.tenant_id or "").strip()
     r_mode = str(res.entity_mode or "").strip()
-    if not c_tenant or not c_mode:
-        return False
-    if not r_tenant or not r_mode:
+    if not c_tenant or not c_mode or not r_tenant or not r_mode:
         return False
     return r_tenant == c_tenant and r_mode == c_mode
 
 
-def _scope_ok(subject: Subject, res: Resource, action: str) -> bool:
-    """조직 권한. `api/deps` 의 릴리스 판정과 **같은 결론**을 내야 한다.
+def _scope_covers(selected: str, resource_node: str) -> Tuple[bool, bool]:
+    """고른 조직 범위가 자원의 범위를 덮는가. `(덮는가, 조회실패인가)`.
 
-    ⚠️ 여기서 더 느슨해지면 PDP 를 도입하는 것만으로 통제가 약해진다. 그래서 규칙을 그대로 옮긴다:
-      · 무제한이면 통과(조직 미도입·플랫폼 관리자 하위호환 계약)
-      · 소유자 본인이면 통과
-      · 그 외에는 부서 권한 — 읽기는 `readable_dept_ids`, 쓰기는 `writable_dept_ids`"""
+    ★ 계층 탐색은 **G1 에서 확정한 primitive 를 그대로 쓴다** — 운영 상속(`OPERATING_PARENT`)만
+      따르는 규칙(D-003)을 여기서 다시 구현하면 판정이 두 곳이 된다.
+    ⚠️ 조회 실패를 «덮는다» 로 뭉개지 않는다 — 보안 경계에서 실패는 차단 쪽이어야 한다."""
+    sel = (selected or "").strip()
+    res = (resource_node or "").strip()
+    if not sel:
+        return True, False           # 「전체」를 고름 — 좁히지 않는다(권한 축이 따로 있다)
+    if not res:
+        return False, False          # 자원에 범위가 없다 — D-014 로 위에서 이미 막힌다
+    if sel == res:
+        return True, False
+    try:
+        from core.project_visibility import _scope_is_ancestor
+        return _scope_is_ancestor(sel, res)
+    except Exception:
+        return False, True
+
+
+def _scope_ok(subject: Subject, res: ResourceScope, action: str) -> Tuple[bool, str]:
+    """조직 권한. `(허용, 사유)` — 거부 사유를 나눠야 화면이 다르게 말할 수 있다.
+
+    순서: ① 자원 바인딩 → ② 고른 범위가 덮는가 → ③ 부서 권한.
+    ⚠️ ①을 뒤로 미루면 미바인딩 자원이 «권한 없음» 으로 보고돼 마이그레이션 대상이 안 드러난다."""
+    # ① 자원이 범위를 갖고 있는가 (D-014)
+    state = (res.binding_state or BOUND).strip()
+    if state == INVALID:
+        return False, DENY_UNBOUND
+    if state != LEGACY and not (res.scope_node_id or "").strip():
+        # ★★★ [rev.2] 초판은 `owner_dept_id` 가 비면 통과시켰다. 신규 Host Runtime 자원에서
+        #   그것은 fail-open 이다 — 범위 없는 자원은 «전사 공용» 이 아니라 «비노출» 이다.
+        return False, DENY_UNBOUND
+
     scope = subject.scope
     if scope is None:
-        return False
+        return False, DENY_SCOPE
     try:
-        if bool(getattr(scope, "unrestricted", False)):
-            return True
+        unrestricted = bool(getattr(scope, "unrestricted", False))
     except Exception:
-        return False                    # 권한 객체가 이상하면 차단
+        return False, DENY_SCOPE          # 권한 객체가 이상하면 차단
+
+    # ② 지금 고른 조직 범위가 자원을 덮는가 (문맥 축)
+    #    ⚠️ 무제한 권한자도 여기서 면제되지 않는다 — 「전권」과 「지금 보는 범위」는 다른 축이다.
+    c = subject.ctx or {}
+    covers, lookup_failed = _scope_covers(str(c.get("scope_node_id", "") or ""),
+                                          res.scope_node_id)
+    if lookup_failed or not covers:
+        return False, DENY_SCOPE
+
+    # ③ 부서 권한
+    if unrestricted:
+        return True, ALLOW
     uid = (subject.user_id or "").strip()
     if uid and res.owner_user_id and res.owner_user_id == uid:
-        return True
+        return True, ALLOW
     dept = (res.owner_dept_id or "").strip()
     if not dept:
-        # ⚠️ 소유권 미기록 자원의 관대함은 **식별된 사용자에게만** 준다(`assert_release_writable`
-        #   의 판단 그대로). 식별 검사는 `decide()` 앞단에서 이미 했다.
-        return True
+        # 여기 도달하려면 `scope_node_id` 는 있고 부서만 없는 것이다. 레거시로 **명시**된
+        # 경우에만 통과시킨다 — 빈 값을 관대함으로 읽지 않는다.
+        return (True, ALLOW) if state == LEGACY else (False, DENY_UNBOUND)
     try:
-        if action in _MUTATING:
-            return dept in getattr(scope, "writable_dept_ids", frozenset())
-        return dept in getattr(scope, "readable_dept_ids", frozenset())
+        allowed = (getattr(scope, "writable_dept_ids", frozenset()) if action in _MUTATING
+                   else getattr(scope, "readable_dept_ids", frozenset()))
+        return (dept in allowed), (ALLOW if dept in allowed else DENY_SCOPE)
     except Exception:
-        return False
+        return False, DENY_SCOPE
 
 
-def decide(subject: Subject, resource: Resource, action: str) -> PolicyDecision:
+def _token_ok(subject: Subject, res: ResourceScope,
+              app: Optional[AppResourceFacts], action: str) -> Tuple[bool, str, str]:
+    """★★★ [rev.2] 앱 증명 **전수 대조.** `(통과, 사유, 문구)`.
+
+    초판은 `release_id` 와 capability 두 축만 봤다. 나머지 축(actor·session·app_id·tenant·
+    entity_mode·scope)은 **저장만 되고 판정에 쓰이지 않았고**, 안 보는 축마다 재사용 경로가
+    하나씩 열려 있었다 — 다른 사람의 토큰, 다른 세션, 다른 회사 문맥."""
+    tok = subject.token or {}
+    if not tok:
+        return False, DENY_NO_SUBJECT, "앱 증명 내용이 없습니다."
+    if tok.get("expired"):
+        return False, DENY_TOKEN_EXPIRED, "앱 접근 증명이 만료됐습니다. 다시 여십시오."
+
+    # ① 누구의 증명인가 — 다른 사람의 토큰을 주워 쓸 수 없다
+    if str(tok.get("actor", "")) != str(subject.user_id or ""):
+        return False, DENY_TOKEN_ACTOR_MISMATCH, "다른 사용자의 앱 접근 증명입니다."
+
+    # ② 어느 세션의 증명인가 — 로그아웃·재로그인 후 재사용을 막는다
+    #    ⚠️ 토큰에 세션이 없으면 통과시키지 않는다. «옛 토큰이라 세션이 없다» 를 허용하면
+    #      그것이 곧 우회로다.
+    tok_sid = str(tok.get("session_id", "") or "")
+    if not tok_sid or tok_sid != str(subject.session_id or ""):
+        return False, DENY_TOKEN_SESSION_MISMATCH, "다른 로그인 세션의 증명입니다."
+
+    # ③ 어느 앱인가 — release 와 app_id 를 **둘 다** 본다
+    if app is None:
+        return False, DENY_TOKEN_APP_MISMATCH, "앱 정보가 없는 요청입니다."
+    if str(tok.get("release_id", "")) != str(app.release_id or ""):
+        return False, DENY_TOKEN_APP_MISMATCH, "이 앱의 데이터가 아닙니다."
+    if str(tok.get("app_id", "")) != str(app.app_id or ""):
+        return False, DENY_TOKEN_APP_MISMATCH, "이 앱의 데이터가 아닙니다."
+
+    # ④ 어느 회사·실행 문맥의 증명인가 — 문맥을 바꿔 재사용하는 경로를 막는다
+    c = subject.ctx or {}
+    if (str(tok.get("tenant_id", "")) != str(c.get("tenant_id", "") or "")
+            or str(tok.get("entity_mode", "")) != str(c.get("entity_mode", "") or "")):
+        return False, DENY_TOKEN_CONTEXT_MISMATCH, "다른 회사·실행 문맥의 증명입니다."
+    if str(tok.get("tenant_id", "")) != str(res.tenant_id or ""):
+        return False, DENY_TOKEN_CONTEXT_MISMATCH, "다른 회사 문맥의 자료입니다."
+
+    # ⑤ 어느 조직 범위로 묶인 증명인가
+    tok_scope = str(tok.get("scope_node_id", "") or "")
+    if tok_scope:
+        covers, failed = _scope_covers(tok_scope, res.scope_node_id)
+        if failed or not covers:
+            return False, DENY_TOKEN_SCOPE_MISMATCH, "이 증명이 묶인 조직 범위 밖입니다."
+
+    # ⑥ 그 행동을 담고 있는가
+    if action not in tuple(tok.get("capabilities") or ()):
+        return False, DENY_TOKEN_CAPABILITY, f"이 앱에는 «{action}» 권한이 부여되지 않았습니다."
+    return True, ALLOW, ""
+
+
+def _manifest_ok(app: AppResourceFacts, action: str) -> Tuple[bool, str]:
+    """매니페스트 선언. `(통과, 문구)`.
+
+    ★★★ [rev.2] **읽기도 선언을 요구한다.** 초판은 READ 를 면제했는데, 그러면 «선언하지 않은
+      앱이 데이터를 읽는» 경로가 남는다 — CL-0 감사 지적 D(빈 capability 매니페스트가 정상
+      통과)와 같은 구멍이다.
+    ⚠️ 기존 앱 호환은 `legacy_mode=True` 로 **명시**했을 때만이다."""
+    declared = tuple(app.declared_capabilities or ())
+    if not declared:
+        if app.legacy_mode and action == READ:
+            return True, ""
+        return False, "이 앱은 다룰 데이터 행동을 선언하지 않았습니다."
+    if action not in declared:
+        return False, f"이 앱은 «{action}» 을 선언하지 않았습니다."
+    return True, ""
+
+
+# ── 단일 판정 ─────────────────────────────────────────────────────────────
+
+def decide(subject: Subject, resource: ResourceScope, action: str,
+           app: Optional[AppResourceFacts] = None) -> PolicyDecision:
     """★★★ **단일 판정.** 앱 데이터의 읽기·쓰기·업무 액션이 전부 여기를 지난다.
 
+    `app` 이 `None` 이면 **범용 자원**으로 판정한다(온톨로지가 그렇게 쓴다).
+
     순서가 규칙이다 — **좁은 것부터** 본다. 넓은 검사를 먼저 통과시키면 거부 사유가
-    「권한 없음」으로 뭉개져서 진짜 원인(예: 남의 앱 토큰)이 보이지 않는다."""
+    「권한 없음」으로 뭉개져서 진짜 원인(예: 남의 앱 증명)이 보이지 않는다."""
     if action not in ACTIONS:
         return _deny(DENY_UNKNOWN_ACTION, f"알 수 없는 행동입니다: {action}")
-    if subject is None:
-        return _deny(DENY_NO_SUBJECT, "판정할 주체가 없습니다.")
+    if subject is None or resource is None:
+        return _deny(DENY_NO_SUBJECT, "판정할 주체 또는 자원이 없습니다.")
 
-    # ① 식별 — 쓰기는 예외 없이 요구한다(트랙 H 가 봉합한 «식별만으로 열리는 쓰기» 의 반대편).
+    # ① 식별 — 읽기까지 요구한다. 누구인지 모르는 접근은 추적이 불가능하다.
     uid = (subject.user_id or "").strip()
     if not uid:
         return _deny(DENY_UNIDENTIFIED,
@@ -193,51 +342,39 @@ def decide(subject: Subject, resource: Resource, action: str) -> PolicyDecision:
 
     # ② 자원 상태
     if (resource.status or "active") != "active":
-        return _deny(DENY_RETIRED, "이 데이터셋은 사용 중단됐습니다.")
+        return _deny(DENY_RETIRED, "이 자원은 사용 중단됐습니다.")
 
-    # ③ 앱 토큰 경로 — **가장 좁은 검사부터**
+    # ③ 앱 증명 전수 대조 — 가장 좁은 검사
     if subject.via == "app_token":
-        tok = subject.token or {}
-        if not tok:
-            return _deny(DENY_NO_SUBJECT, "앱 토큰 내용이 없습니다.")
-        if tok.get("expired"):
-            return _deny(DENY_TOKEN_EXPIRED, "앱 접근 권한이 만료됐습니다. 다시 여십시오.")
-        # ★★★ 이 한 줄이 「앱이 남의 데이터를 읽는」 경로를 원천 차단한다(설계 §7-4).
-        if str(tok.get("release_id", "")) != str(resource.release_id or ""):
-            return _deny(DENY_TOKEN_APP_MISMATCH,
-                         "이 앱의 데이터가 아닙니다.")
-        caps = tuple(tok.get("capabilities") or ())
-        if action not in caps:
-            return _deny(DENY_TOKEN_CAPABILITY,
-                         f"이 앱에는 «{action}» 권한이 부여되지 않았습니다.")
+        ok, reason, msg = _token_ok(subject, resource, app, action)
+        if not ok:
+            return _deny(reason, msg)
 
-    # ④ 매니페스트 선언 — 앱이 «하겠다고 말한 것» 밖은 하지 못한다
-    #    ⚠️ 선언이 **비어 있으면 쓰기를 막는다.** 「선언 안 했으니 전부 허용」은 CL-0 이
-    #      막으려던 것 자체다(빈 capability 매니페스트가 정상으로 통과하던 감사 지적 D).
-    if action in _MUTATING and subject.via == "app_token":
-        declared = tuple(resource.declared_capabilities or ())
-        if not declared:
-            return _deny(DENY_MANIFEST_CAPABILITY,
-                         "이 앱은 데이터를 바꾸겠다고 선언하지 않았습니다.")
-        if action not in declared:
-            return _deny(DENY_MANIFEST_CAPABILITY,
-                         f"이 앱은 «{action}» 을 선언하지 않았습니다.")
+    # ④ 매니페스트 선언 — 앱 경로에서만. 앱이 «하겠다고 말한 것» 밖은 하지 못한다.
+    if app is not None and subject.via == "app_token":
+        ok, msg = _manifest_ok(app, action)
+        if not ok:
+            return _deny(DENY_MANIFEST_CAPABILITY, msg)
 
     # ⑤ 실행 문맥 — 「전권」과 「지금 보는 범위」는 다른 축이다
     if not _ctx_ok(subject, resource):
         return _deny(DENY_CONTEXT, "지금 선택한 회사·실행 문맥의 자료가 아닙니다.")
 
-    # ⑥ 조직 권한
-    if not _scope_ok(subject, resource, action):
+    # ⑥ 자원 바인딩 + 조직 범위 + 부서 권한
+    ok, reason = _scope_ok(subject, resource, action)
+    if not ok:
+        if reason == DENY_UNBOUND:
+            return _deny(DENY_UNBOUND,
+                         "이 자료에 소유 조직이 기록되어 있지 않습니다 — 점검이 필요합니다.")
         return _deny(DENY_SCOPE, "이 자료에 대한 권한이 없습니다.")
 
     # ⑦ 개인 앱 — 만든 사람만(설계 §5-1). 부서로 열면 개인 도구가 부서 공유물이 된다.
-    #    ⚠️ 무제한 권한자도 **여기서는 통과시키지 않는다.** 「관리자니까 남의 개인 메모를 본다」는
-    #      권한 문제가 아니라 신뢰 문제다.
-    if (resource.app_class or "") == "personal":
+    #    ⚠️ 무제한 권한자도 통과시키지 않는다 — 권한 문제가 아니라 신뢰 문제다.
+    if app is not None and (app.app_class or "") == "personal":
         owner = (resource.owner_user_id or "").strip()
         if owner and owner != uid:
             return _deny(DENY_PERSONAL, "개인용 앱의 데이터는 만든 사람만 볼 수 있습니다.")
 
-    # 허용 — 쓰기에는 **기록 의무**를 함께 돌려준다.
-    return _allow("audit") if action in _MUTATING else _allow()
+    # 허용 — **모든 판정에 기록 의무**를 돌려준다. 쓰기만 남기면 「누가 무엇을 읽었나」에
+    # 답할 수 없고, 그것이 곧 유출 조사가 불가능한 상태다.
+    return _allow("audit")
