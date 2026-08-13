@@ -21,6 +21,8 @@
 ⚠️ 식별되지 않은 요청의 쓰기는 401 이다. 트랙 H 가 「식별만으로 열리는 쓰기」 65건을
   봉합했는데 여기서 「식별조차 없는 쓰기」를 새로 만들면 그 작업이 무효가 된다.
 """
+import json
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -43,6 +45,138 @@ def _actor(p: Principal) -> str:
             detail=("앱 데이터를 쓰려면 사용자 식별이 필요합니다. 누가 입력했는지 남지 않는 "
                     "업무 데이터는 나중에 «이 값이 왜 이런가» 에 답할 수 없습니다."))
     return uid
+
+
+# ── [G1-B P0] 이중 판정 어댑터 ────────────────────────────────────────────
+#
+# ★★★ 기존 `assert_release_*` 가 **강제**하고, 신규 PDP 는 **관측만** 한다. 어긋남이 0 임을
+#   종단으로 확인한 뒤에야 원자적으로 전환한다(교차검토 [G1-B-P0-REVIEW-75]).
+#
+# ⚠️⚠️ **범위·소유·문맥을 요청 본문에서 읽지 않는다.** `POST /datasets` 는 `owner_dept_id`·
+#   `scope_node_id` 를 클라이언트에서 받는데, 그 값을 판정 입력으로 쓰면 **클라이언트가 자기
+#   권한을 정하는** 상승 경로가 된다. 서버는 **릴리스**에서 유도한다(`release.json` 이
+#   `tenant_id`·`enterprise_scope_id`·`entity_mode`·소유자를 전부 갖고 있다).
+
+def _release_scope(release_id: str) -> "app_policy.ResourceScope":
+    """릴리스에서 **서버가 직접** 자원 범위를 만든다.
+
+    ## ★★★ 두 원천을 나눠 쓴다 (shadow 가 실제 완화를 잡아서 고친 것)
+
+    | 축 | 원천 | 왜 |
+    |---|---|---|
+    | 소유(부서·사용자) | **`ownership` 미러** | 기존 `assert_release_*` 가 보는 바로 그 값 |
+    | 문맥(테넌트·실행모드·조직범위) | **`release.json`** | 미러에 그 컬럼이 없다 |
+
+    ⚠️⚠️ 소유 축까지 파일에서 읽었더니 **shadow 에서 「기존 거부 / PDP 허용」이 나왔다.**
+      `release.json`(진실원본)과 `ownership`(검색용 미러)은 **어긋날 수 있고**, 그래서
+      `POST /api/v1/org/reconcile` 이 존재한다. 어긋난 순간 PDP 가 더 느슨해지면 전환 자체가
+      권한 확대가 된다. **이행 기간에는 기존 판정과 같은 값을 봐야** 동등성이 성립한다.
+
+    ★ 미러가 정본이라는 뜻은 아니다. 정본은 파일이고, 드리프트는 `reconcile` 로 고친다.
+      여기서 미러를 쓰는 것은 **동등성 증명을 위한 이행 조치**다 — 전환이 끝나고 파일을
+      단일 원천으로 삼으려면 그때 드리프트를 먼저 0 으로 만들어야 한다.
+
+    ⚠️ 판독 실패는 `INVALID` 다 — «못 읽었으니 통과» 로 두면 그 순간 통제가 없다
+      (`ownership_visible` 1차 구현이 정확히 그렇게 틀렸다)."""
+    from core import app_policy
+    rid = str(release_id or "")
+    try:
+        #: ★ 경로를 다시 선언하지 않는다 — 정본은 `core/library_paths` 하나다
+        #:   (`factory_control` 이 같은 이유로 그것만 쓴다).
+        from core import library_paths
+        path = os.path.join(library_paths.release_dir(rid), "release.json")
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if not isinstance(d, dict):
+            raise ValueError("release.json 최상위가 객체가 아닙니다.")
+    except Exception:
+        return app_policy.ResourceScope(binding_state=app_policy.INVALID)
+
+    #: 소유 축은 기존 판정과 **같은 값**을 본다. 미러가 없으면 파일로 떨어진다 —
+    #: 그때는 기존도 「미기록은 막지 않는다」로 통과하므로 방향이 어긋나지 않는다.
+    own_dept = str(d.get("owner_dept_id", "") or "")
+    own_user = str(d.get("owner_user_id", "") or "")
+    try:
+        from core.org_directory import org_directory
+        mirror = org_directory.get_ownership("release", rid)
+        if mirror:
+            own_dept = str(mirror.get("dept_id", "") or "")
+            own_user = str(mirror.get("owner_user_id", "") or "")
+    except Exception:
+        pass                     # 미러 조회 실패는 파일 값을 쓴다(둘 다 없으면 아래에서 막힌다)
+
+    return app_policy.ResourceScope(
+        tenant_id=str(d.get("tenant_id", "") or ""),
+        entity_mode=str(d.get("entity_mode", "") or ""),
+        scope_node_id=str(d.get("enterprise_scope_id", "") or ""),
+        owner_user_id=own_user,
+        owner_dept_id=own_dept,
+        binding_state=app_policy.BOUND)
+
+
+def _shadow_check(p: Principal, action: str, release_id: str,
+                  ds: Optional[Dict[str, Any]] = None) -> None:
+    """신규 PDP 를 **판정만** 하고 결과를 관측기에 넘긴다. 절대 막지 않는다.
+
+    ⚠️ 관측 장애가 기능 장애가 되면 안 된다 — 모든 예외를 삼키되 **세어서 드러낸다**."""
+    from core import app_policy
+    from core.policy_shadow import policy_shadow
+    try:
+        from api.deps import viewing_context, visibility_block_reason
+        try:
+            ctx = viewing_context(p)
+        except HTTPException:
+            #: 문맥을 확정하지 못하면 PDP 는 거부한다 — 그것이 옳고, 여기서는 **강화**로 세인다.
+            ctx = {}
+        res = _release_scope(release_id)
+        if ds is not None:
+            res = app_policy.ResourceScope(
+                tenant_id=res.tenant_id, entity_mode=res.entity_mode,
+                scope_node_id=res.scope_node_id, owner_user_id=res.owner_user_id,
+                owner_dept_id=res.owner_dept_id, binding_state=res.binding_state,
+                #: 데이터셋의 «폐기» 는 자원 상태다. 릴리스가 아니라 데이터셋이 갖는다.
+                status="retired" if (ds.get("retired_at") or "") else "active")
+        subject = app_policy.Subject(
+            user_id=(p.user_id or ""), scope=p.scope, ctx=ctx,
+            #: ★ 동등성 하니스가 증명한 계약 — 이 값을 빠뜨리면 PDP 가 기존보다 느슨해진다.
+            blocked_reason=visibility_block_reason(p), via="session")
+        facts = app_policy.AppResourceFacts(
+            release_id=str(release_id or ""),
+            app_class=str((ds or {}).get("app_class", "") or ""))
+        d = app_policy.decide(subject, res, action, app=facts if ds is not None else None)
+        return d
+    except Exception as e:                                   # pragma: no cover
+        policy_shadow.error(f"{action} {release_id}: {e}")
+        return None
+
+
+def _enforce(p: Principal, action: str, release_id: str,
+             ds: Optional[Dict[str, Any]] = None, path: str = "") -> None:
+    """**기존 판정이 강제한다.** 신규 PDP 는 같은 요청에서 나란히 돌려 어긋남만 센다.
+
+    ★ 순서가 중요하다 — PDP 를 **먼저** 판정하고(부작용 없음) 그다음 기존을 강제한다.
+      기존이 예외를 던져도 관측이 남아야 「기존 거부 / PDP 허용」 칸을 볼 수 있다."""
+    from core import app_policy
+    from core.policy_shadow import policy_shadow
+    decision = _shadow_check(p, action, release_id, ds)
+    mutating = action in (app_policy.WRITE, app_policy.DELETE, app_policy.MANAGE)
+
+    def _record(old_ok: bool) -> None:
+        if decision is None:
+            return                                  # 관측 실패는 이미 세었다
+        policy_shadow.observe(path=path or "appdata", action=action, old_allowed=old_ok,
+                              new_allowed=decision.allowed, new_reason=decision.reason,
+                              actor=(p.user_id or ""), resource_id=str(release_id or ""))
+
+    try:
+        if mutating:
+            assert_release_writable(p, release_id)
+        else:
+            assert_release_readable(p, release_id)
+    except HTTPException:
+        _record(False)
+        raise
+    _record(True)
 
 
 def _require_dataset(dataset_id: str) -> Dict[str, Any]:
@@ -114,7 +248,7 @@ class RecordWrite(BaseModel):
 @router.post("/datasets")
 async def create_dataset(req: DatasetCreate, p: Principal = Depends(current_principal)):
     actor = _actor(p)
-    assert_release_writable(p, req.release_id)
+    _enforce(p, "manage", req.release_id, path="POST /datasets")
     try:
         ds = app_data_service.create_dataset(
             req.release_id, req.name, req.schema_def, actor_id=actor,
@@ -134,7 +268,7 @@ async def create_dataset(req: DatasetCreate, p: Principal = Depends(current_prin
 async def list_datasets(release_id: str = Query(..., description="어느 앱의 데이터셋인가"),
                         include_retired: bool = False,
                         p: Principal = Depends(current_principal)):
-    assert_release_readable(p, release_id)
+    _enforce(p, "read", release_id, path="GET /datasets")
     rows = app_data_service.list_datasets(release_id, include_retired=include_retired)
     out = []
     for ds in rows:
@@ -150,7 +284,7 @@ async def list_datasets(release_id: str = Query(..., description="어느 앱의 
 async def get_dataset_by_name(release_id: str = Query(...), name: str = Query(...),
                               p: Principal = Depends(current_principal)):
     """★ 브리지가 쓰는 경로 — 앱은 이름만 말하고 `release_id` 는 부모가 붙인다."""
-    assert_release_readable(p, release_id)
+    _enforce(p, "read", release_id, path="GET /datasets/by-name")
     ds = app_data_service.find_dataset(release_id, name)
     if not ds:
         raise HTTPException(status_code=404, detail=f"데이터셋을 찾을 수 없습니다: {name}")
@@ -162,7 +296,7 @@ async def get_dataset_by_name(release_id: str = Query(...), name: str = Query(..
 @router.get("/datasets/{dataset_id}")
 async def get_dataset(dataset_id: str, p: Principal = Depends(current_principal)):
     ds = _require_dataset(dataset_id)
-    assert_release_readable(p, ds["release_id"])
+    _enforce(p, "read", ds["release_id"], ds, path="GET /datasets/{id}")
     _assert_personal_owner(ds, p)
     ds["record_count"] = app_data_service.count_records(dataset_id)
     return ds
@@ -173,7 +307,7 @@ async def update_schema(dataset_id: str, req: SchemaUpdate,
                         p: Principal = Depends(current_principal)):
     ds = _require_dataset(dataset_id)
     actor = _actor(p)
-    assert_release_writable(p, ds["release_id"])
+    _enforce(p, "manage", ds["release_id"], ds, path="PUT /datasets/{id}/schema")
     _assert_personal_owner(ds, p)
     try:
         out = app_data_service.update_schema(dataset_id, req.schema_def, actor_id=actor)
@@ -198,7 +332,7 @@ async def retire_dataset(dataset_id: str, p: Principal = Depends(current_princip
     """폐지. **레코드는 지우지 않는다**(설계 §4-2)."""
     ds = _require_dataset(dataset_id)
     actor = _actor(p)
-    assert_release_writable(p, ds["release_id"])
+    _enforce(p, "manage", ds["release_id"], ds, path="DELETE /datasets/{id}")
     _assert_personal_owner(ds, p)
     try:
         out = app_data_service.retire_dataset(dataset_id, actor_id=actor)
@@ -218,7 +352,7 @@ async def list_records(dataset_id: str, limit: int = 200, offset: int = 0,
                        include_deleted: bool = False,
                        p: Principal = Depends(current_principal)):
     ds = _require_dataset(dataset_id)
-    assert_release_readable(p, ds["release_id"])
+    _enforce(p, "read", ds["release_id"], ds, path="GET /records")
     _assert_personal_owner(ds, p)
     # `personal` 앱은 자기 것만 — 데이터셋 소유자와 레코드 작성자가 다를 수 있다.
     creator = ""
@@ -240,7 +374,7 @@ async def create_record(dataset_id: str, req: RecordWrite,
                         p: Principal = Depends(current_principal)):
     ds = _require_dataset(dataset_id)
     actor = _actor(p)
-    assert_release_writable(p, ds["release_id"])
+    _enforce(p, "write", ds["release_id"], ds, path="POST /records")
     _assert_personal_owner(ds, p)
     try:
         return app_data_service.create_record(dataset_id, req.payload, actor_id=actor)
@@ -256,7 +390,7 @@ async def update_record(record_id: str, req: RecordWrite,
         raise HTTPException(status_code=404, detail="레코드를 찾을 수 없습니다.")
     ds = _require_dataset(rec["dataset_id"])
     actor = _actor(p)
-    assert_release_writable(p, ds["release_id"])
+    _enforce(p, "write", ds["release_id"], ds, path="PUT /records/{id}")
     _assert_personal_owner(ds, p, row_creator=rec.get("created_by", ""))
     try:
         return app_data_service.update_record(record_id, req.payload, actor_id=actor)
@@ -272,7 +406,7 @@ async def delete_record(record_id: str, p: Principal = Depends(current_principal
         raise HTTPException(status_code=404, detail="레코드를 찾을 수 없습니다.")
     ds = _require_dataset(rec["dataset_id"])
     actor = _actor(p)
-    assert_release_writable(p, ds["release_id"])
+    _enforce(p, "delete", ds["release_id"], ds, path="DELETE /records/{id}")
     _assert_personal_owner(ds, p, row_creator=rec.get("created_by", ""))
     try:
         return app_data_service.delete_record(record_id, actor_id=actor)
