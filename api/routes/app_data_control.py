@@ -173,10 +173,45 @@ def _enforce(p: Principal, action: str, release_id: str,
             assert_release_writable(p, release_id)
         else:
             assert_release_readable(p, release_id)
-    except HTTPException:
+    except HTTPException as e:
         _record(False)
+        _audit_denied(p, action, release_id, ds, path, e, decision)
         raise
     _record(True)
+
+
+def _audit_denied(p: Principal, action: str, release_id: str,
+                  ds: Optional[Dict[str, Any]], path: str,
+                  exc: HTTPException, decision) -> None:
+    """★★★ [G1-B05] **거부를 남긴다.** 앱 데이터 거부는 지금까지 아무 데도 기록되지 않았다.
+
+    `api/deps._deny` 는 `HTTPException` 을 던질 뿐이고, 그래서 「누가 어느 앱 데이터에
+    접근하려다 막혔는가」에 아무도 답할 수 없었다 — 거부된 시도가 침해 신호인데 그것이
+    조용했다(`core/enterprise_context/audit` 모듈이 존재하는 이유가 그것이다).
+
+    ⚠️ **허용은 전건 기록하지 않는다.** 그러면 로그가 폭증해 정작 봐야 할 거부가 묻힌다
+      (`audit.py` 가 「정상 조회 전건은 기록하지 않는다」로 못박은 규약). 허용 쪽은
+      `policy_shadow` 가 세고, 구조 변경은 `decision_ledger` 가 남긴다.
+    ⚠️ 기록 실패가 거부를 성공으로 바꾸지 않는다 — 삼키되 요청은 그대로 막힌다."""
+    try:
+        from core.enterprise_context import audit
+        uid = (p.user_id or "").strip()
+        audit.record(
+            event=(audit.ACCESS_DENIED_UNAUTHENTICATED if not uid
+                   else audit.ACCESS_DENIED_SCOPE_MISMATCH),
+            resource_type="app_dataset" if ds else "release",
+            #: ⚠️ 은폐는 응답이지 기록이 아니다 — 실제 대상을 남긴다(설계 §3.2).
+            resource_id=str((ds or {}).get("dataset_id") or release_id or ""),
+            actor=uid,
+            actor_scopes=getattr(p.scope, "readable_dept_ids", ()) or (),
+            outcome="denied",
+            reason=f"{action} 거부 (HTTP {exc.status_code})",
+            #: PDP 사유를 함께 남긴다 — 이행 기간에 «두 판정이 무엇을 달리 봤는가» 를
+            #: 사후에 되짚을 수 있는 유일한 기록이다.
+            detail=f"path={path} release={release_id} "
+                   f"pdp={(decision.reason if decision is not None else 'n/a')}")
+    except Exception:
+        pass
 
 
 def _require_dataset(dataset_id: str) -> Dict[str, Any]:
