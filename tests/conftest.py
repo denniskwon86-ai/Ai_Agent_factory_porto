@@ -281,3 +281,15 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         monkeypatch.setattr(_ad.app_data_service._store, "_ready", "", raising=False)
     except Exception as e:
         print(f"⚠️ [conftest] 앱 데이터 평면 격리 실패(실 DB 오염 위험): {e}")
+    try:
+        # ★★★ [2026-08-13 G1-B05] **이중 판정 관측 기록도 격리한다.**
+        #   이 표는 「기존 판정을 신규 PDP 로 갈아도 되는가」의 **유일한 근거**다. 테스트가
+        #   남긴 표본이 섞이면 실제로는 눌러 보지 않은 시나리오가 «덮였다» 로 읽히고,
+        #   그 위조된 근거로 접근 통제를 통째로 갈아 끼우게 된다 — 오염 중 가장 나쁜 종류다.
+        #   ⚠️ `_ready` 를 함께 비운다: 이전 경로로 캐시돼 있으면 스키마 생성을 건너뛴다.
+        from core import policy_shadow as _ps
+        monkeypatch.setattr(_ps.policy_shadow, "db_path",
+                            str(tmp_path / "policy_shadow.db"), raising=False)
+        monkeypatch.setattr(_ps.policy_shadow, "_ready", "", raising=False)
+    except Exception as e:
+        print(f"⚠️ [conftest] 이중 판정 관측 격리 실패(전환 근거 오염 위험): {e}")

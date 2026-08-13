@@ -146,8 +146,25 @@ def _shadow_check(p: Principal, action: str, release_id: str,
         d = app_policy.decide(subject, res, action, app=facts if ds is not None else None)
         return d
     except Exception as e:                                   # pragma: no cover
-        policy_shadow.error(f"{action} {release_id}: {e}")
+        #: ⚠️⚠️ 예외 **메시지를 넘기지 않는다.** 예외는 자주 입력값을 그대로 문자열에 담고
+        #:   (`ValueError(f"…{payload}…")`), 그러면 업무 데이터가 텔레메트리로 흘러든다.
+        #:   남기는 것은 «어디서 · 무슨 종류» 까지다.
+        policy_shadow.error(action=action, exc_type=type(e).__name__)
         return None
+
+
+#: ★★ [G1-B05] 라우트 → **SDK 작업**. 전환 게이트가 「여섯 작업을 허용·거부 양쪽으로 눌러
+#:   봤는가」를 세려면 관측에 그 이름이 실려야 한다.
+#: ⚠️ 앱이 부를 수 없는 라우트(콘솔·생성기용)는 여기 없다 — 빈 문자열이 되고 작업 표본으로
+#:   세지 않는다. 「관리 화면에서 눌러 봤으니 덮였다」가 되면 게이트가 무의미해진다.
+_PATH_OP: Dict[str, str] = {
+    "GET /datasets/by-name": "data.schema",
+    "GET /records": "data.list",
+    "GET /records/{id}": "data.get",
+    "POST /records": "data.create",
+    "PUT /records/{id}": "data.update",
+    "DELETE /records/{id}": "data.remove",
+}
 
 
 def _enforce(p: Principal, action: str, release_id: str,
@@ -166,7 +183,8 @@ def _enforce(p: Principal, action: str, release_id: str,
             return                                  # 관측 실패는 이미 세었다
         policy_shadow.observe(path=path or "appdata", action=action, old_allowed=old_ok,
                               new_allowed=decision.allowed, new_reason=decision.reason,
-                              actor=(p.user_id or ""), resource_id=str(release_id or ""))
+                              actor=(p.user_id or ""), resource_id=str(release_id or ""),
+                              op=_PATH_OP.get(path, ""))
 
     try:
         if mutating:

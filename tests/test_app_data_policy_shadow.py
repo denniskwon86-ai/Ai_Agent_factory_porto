@@ -156,11 +156,21 @@ def test_관측이_터져도_요청은_살아_있다(client, monkeypatch):
     assert _stats()["error"] >= 1, "관측 실패를 세지 않았다 — 조용히 유실됐다"
 
 
-def test_전환_판정은_한_값으로_읽는다(client):
-    """★ 여러 숫자를 사람이 보고 해석하게 두면 판단이 갈린다."""
+def test_전환_판정은_한_값으로_읽되_한_번_눌러본_것으로_열리지_않는다(client):
+    """★★★ 여러 숫자를 사람이 보고 해석하게 두면 판단이 갈린다 — 그래서 판정은 한 값이다.
+
+    ⚠️ 그러나 그 한 값이 «어긋남 0» 이면 **읽기 한 건**으로 열린다. 교차검토 B05 지적:
+
+    > 읽기 요청 한 건만 일치해도 `safe_to_switch=True` 가 될 수 있습니다.
+    > 이것은 전환 게이트로 부족합니다.
+
+    실제로 위험한 칸(만료·다른 앱·다른 조직·문맥 불일치)은 눌러 보지 않으면 표본이 아예
+    생기지 않고, **표본이 없는 것은 «안전» 이 아니라 «모름»** 이다."""
     client.get("/api/v1/appdata/datasets", params={"release_id": "rel_ok"}, headers=H)
     s = _stats()
-    assert s["safe_to_switch"] is (s["looser"] == 0 and s["error"] == 0 and s["total"] > 0)
+    assert s["total"] >= 1 and s["looser"] == 0 and s["error"] == 0
+    assert s["safe_to_switch"] is False, "한 번 눌러 본 것으로 전환 게이트가 열렸다"
+    assert s["blockers"], "막았는데 이유를 말하지 않는다"
 
 
 # ── ④ [G1-B05] 거부가 감사에 남는가 ───────────────────────────────────────
