@@ -92,6 +92,17 @@ interface FactoryStore {
   selectedFormatId: string;
   showFormatPanel: boolean;
   projects: { id: string, name: string, initial_idea?: string, is_mega_project?: boolean, parent_project_id?: string, template_id?: string, total_tasks?: number, completed_tasks?: number }[];
+  //: ★★★ [G1-C3] 「몇 건 보이는가」만으로는 부족하다. 조회 실패·권한 없음·문맥 밖·정말 0건이
+  //:   화면에서 **서로 다른 상태**여야 한다(설계 §6.4 「조회 실패를 0으로 대체하지 않는다」).
+  projectsLoad: 'loading' | 'ok' | 'failed' | 'forbidden';
+  projectsError: string;
+  //: 지금 어느 회사·조직·실행 모드로 보고 있는가. 표시하지 못하면 사용자는 자기가 보는
+  //: 숫자가 어느 문맥의 것인지 알 수 없다(설계 §11 공통 체크리스트).
+  viewingContext: { tenant_id?: string; scope_node_id?: string; entity_mode?: string } | null;
+  //: ⚠️ `null` 은 «서버가 알려 주지 않았다» 이고 `0` 은 «가려진 것이 없다» 다. 뭉개지 말 것.
+  contextBlocked: number | null;
+  contextNeedsAttention: number | null;
+  contextBlockedReasons: Record<string, number> | null;
   currentProjectId: string | null;
   healingRetryCount: number;
   activeSprintId: string | null;
@@ -203,6 +214,12 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   selectedFormatId: 'default',
   showFormatPanel: false,
   projects: [],
+  projectsLoad: 'loading',
+  projectsError: '',
+  viewingContext: null,
+  contextBlocked: null,
+  contextNeedsAttention: null,
+  contextBlockedReasons: null,
   currentProjectId: null,
   healingRetryCount: 0,
   activeSprintId: null,
@@ -228,16 +245,41 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   },
 
   fetchProjects: async () => {
+    // ★★★ [G1-C3] 서버는 이제 「무엇이 보이는가」와 **「왜 안 보이는가」**를 함께 준다.
+    //   봉투를 버리면 화면은 사라진 자료를 «0건» 으로 그리고, 그것이 이 배선이 막으려던
+    //   상태 그대로다(실측: 관리자에게 59건이 실행 문맥 격리로 빠진다).
+    // ⚠️ 종전에는 실패도 `console.error` 로 끝나 **조회 실패와 «프로젝트 없음» 이 같은 화면**
+    //   이었다. 트랙 F 가 8개 화면에서 고친 것과 같은 유형이다.
+    set({ projectsLoad: 'loading', projectsError: '' });
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects`);
-      if (res.ok) {
-        const result = await res.json();
-        if (result.status === "success") {
-          set({ projects: result.data });
-        }
+      if (!res.ok) {
+        let msg = `목록을 불러오지 못했습니다 (HTTP ${res.status}).`;
+        try { const r = await res.json(); if (r?.detail) msg = String(r.detail); } catch { /* noop */ }
+        set({ projectsLoad: res.status === 401 || res.status === 403 ? 'forbidden' : 'failed',
+              projectsError: msg });
+        return;
       }
+      const result = await res.json();
+      if (result.status !== "success") {
+        set({ projectsLoad: 'failed', projectsError: '서버가 성공을 알리지 않았습니다.' });
+        return;
+      }
+      set({
+        projects: result.data,
+        projectsLoad: 'ok',
+        projectsError: '',
+        viewingContext: result.viewing_context ?? null,
+        // ⚠️ `?? null` 이다. `?? 0` 으로 두면 **옛 서버(값을 안 주는)** 와 «가려진 것이 없다» 가
+        //   구분되지 않는다 — 화면이 「없음」이라고 단정하게 된다.
+        contextBlocked: result.context_blocked_count ?? null,
+        contextNeedsAttention: result.context_needs_attention ?? null,
+        contextBlockedReasons: result.context_blocked_reasons ?? null,
+      });
     } catch (error) {
       console.error("프로젝트 목록 로드 실패:", error);
+      set({ projectsLoad: 'failed',
+            projectsError: '서버에 연결하지 못했습니다. 백엔드가 떠 있는지 확인하십시오.' });
     }
   },
 

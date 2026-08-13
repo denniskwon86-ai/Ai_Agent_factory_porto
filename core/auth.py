@@ -139,20 +139,30 @@ class AuthStore:
         if self._ready == self.db_path:
             return
         with self._lock, self._connect() as conn:
-            conn.executescript(_DDL)
-            # ⚠️ `CREATE TABLE IF NOT EXISTS` 는 **이미 있는 표에 새 컬럼을 넣어 주지 않는다.**
-            #   G1-C1.1 이전에 만들어진 DB 는 문맥 컬럼이 없으므로 여기서 채운다(멱등).
-            for col, ddl in (("scope_node_id", "TEXT NOT NULL DEFAULT ''"),
-                             ("entity_mode", "TEXT NOT NULL DEFAULT ''"),
-                             ("context_version", "TEXT NOT NULL DEFAULT ''")):
+            # ★★★ [2026-08-13 실측 회귀 수정] **컬럼 보강을 `executescript` 보다 먼저** 한다.
+            #
+            #   ⚠️ `CREATE TABLE IF NOT EXISTS` 는 이미 있는 표에 새 컬럼을 넣어 주지 않는다.
+            #     그런데 `_DDL` 안에는 그 새 컬럼을 쓰는 **인덱스 생성**이 함께 들어 있다
+            #     (`idx_session_hash ON auth_session(token_hash)`). 순서가 뒤였을 때 실제로
+            #     일어난 일: 옛 DB 에서 그 인덱스 문이 `no such column: token_hash` 로 죽고,
+            #     `executescript` 전체가 예외로 끝나 **뒤의 ALTER 에 영원히 도달하지 못했다.**
+            #     즉 보강 코드는 있는데 실행되지 않았고, `_init()` 이 매번 터져
+            #     **로그인이 500** 이었다(2026-08-12 `3641a02e9` 이후 계속).
+            #
+            #   ★ 새 DB 에서는 이 ALTER 들이 «표가 없다» 로 조용히 실패하고, 바로 아래
+            #     `executescript` 가 처음부터 옳은 스키마로 만든다 — 양쪽 다 성립한다.
+            #   ⚠️ 순서를 되돌리지 말 것. 되돌리면 **기존 DB 를 쓰는 모든 환경에서 로그인이
+            #     죽는다** — 그리고 새로 만든 DB 로 도는 테스트는 그것을 절대 못 본다.
+            for table, col, ddl in (
+                    ("auth_sse_ticket", "scope_node_id", "TEXT NOT NULL DEFAULT ''"),
+                    ("auth_sse_ticket", "entity_mode", "TEXT NOT NULL DEFAULT ''"),
+                    ("auth_sse_ticket", "context_version", "TEXT NOT NULL DEFAULT ''"),
+                    ("auth_session", "token_hash", "TEXT NOT NULL DEFAULT ''")):
                 try:
-                    conn.execute(f"ALTER TABLE auth_sse_ticket ADD COLUMN {col} {ddl}")
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
                 except Exception:
-                    pass                 # 이미 있으면 그만이다
-            try:
-                conn.execute("ALTER TABLE auth_session ADD COLUMN token_hash TEXT NOT NULL DEFAULT ''")
-            except Exception:
-                pass
+                    pass                 # 표가 없거나(새 DB) 이미 있으면(재기동) 그만이다
+            conn.executescript(_DDL)
             conn.commit()
         self._ready = self.db_path
 

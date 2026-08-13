@@ -36,6 +36,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sqlite3
@@ -83,11 +84,93 @@ EXCLUDED = [
 ]
 
 
+#: ★★★ [2026-08-13 추가] **프로젝트 소유권은 DB 가 아니라 파일이 진실원본이다**
+#:   (설계서 Phase 3 — `project_meta.json`). 그래서 표만 훑던 이 스크립트가 그동안
+#:   프로젝트를 한 건도 보지 못했다.
+#:
+#:   ⚠️ 실측으로 드러난 대가(2026-08-13): `demo-todo-app` 의 `enterprise_scope_id` 가
+#:     `hq`(부서 코드)였다. 61개 중 **유일한** 비정본인데, 사용자가 조직 범위를 **고르는 순간**
+#:     노드 id 와 비교되지 않아 `SCOPE_OUTSIDE` 로 사라진다. 실제 응답:
+#:
+#:         고르지 않음        → 보임 2건
+#:         hq(MNM_SHARED) 고름 → 보임 0건  (SCOPE_OUTSIDE 2)
+#:
+#:   ⚠️ 런타임에서 코드를 노드로 풀어 «때우지» 않는다 — 그러면 판정이 두 곳이 되고,
+#:     목록마다 ECM 조회가 붙는다. 저장분을 정본으로 올리는 것이 D-018 의 답이다.
+PROJECT_META_FIELD = "enterprise_scope_id"
+
+
 def _resolve(value: str):
     """값 하나를 정본으로 해석한다. `(node_id, 사유)` — `node_id` 가 비면 건너뛴다."""
     r = ecm_resolver.resolve_scope_ref(value)
     node = r.get("node_id") or ""
     return node, r.get("kind") or ""
+
+
+def _plan_projects():
+    """`projects/*/project_meta.json` 의 조직 범위 계획(읽기만).
+
+    표와 같은 규칙을 따른다 — 이미 `node_*` 면 손대지 않고(멱등), 해석 실패는 건너뛰되
+    **목록으로 남긴다**(임의로 하나를 고르지 않는다). 값을 지우지도 않는다."""
+    from core.paths import PROJECTS_DIR
+    if not os.path.isdir(PROJECTS_DIR):
+        return None, f"프로젝트 디렉터리가 없습니다: {PROJECTS_DIR}"
+    plan, skipped, already, total = [], [], 0, 0
+    for name in sorted(os.listdir(PROJECTS_DIR)):
+        meta = os.path.join(PROJECTS_DIR, name, "project_meta.json")
+        if not os.path.isfile(meta):
+            continue
+        try:
+            with open(meta, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception as e:
+            skipped.append({"value": name, "rows": 1, "reason": f"판독 실패: {e}"})
+            continue
+        v = str((d or {}).get(PROJECT_META_FIELD, "") or "").strip()
+        if not v:
+            continue                       # 빈 값은 백필 대상이 아니다(문맥 점검 대상이다)
+        total += 1
+        if v.startswith("node_"):
+            already += 1
+            continue
+        node, kind = _resolve(v)
+        if not node:
+            skipped.append({"value": f"{name}: {v}", "rows": 1,
+                            "reason": kind or "unresolved"})
+            continue
+        plan.append({"path": meta, "project": name, "old": v, "new": node, "kind": kind,
+                     "rows": 1})
+    return {"path": PROJECTS_DIR, "table": "projects/*", "col": PROJECT_META_FIELD,
+            "plan": plan, "skipped": skipped, "already": already, "total": total,
+            "is_files": True}, ""
+
+
+def _apply_projects(item, ts: str) -> int:
+    """계획을 적용한다. **파일마다 백업**하고, 그 자리에서 값 하나만 바꾼다.
+
+    ⚠️ 파일 전체를 다시 쓰지 않고 그 키만 교체한다 — 다른 세션이 넣은 필드를 잃지 않기 위해
+      읽은 dict 를 그대로 쓰되, **읽은 뒤 값이 바뀌었으면 건너뛴다**(계획과 실제 대조)."""
+    done = 0
+    for ch in item["plan"]:
+        try:
+            with open(ch["path"], "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception as e:
+            print(f"    ⚠️ {ch['project']}: 다시 읽지 못해 건너뜀 — {e}")
+            continue
+        cur = str((d or {}).get(PROJECT_META_FIELD, "") or "").strip()
+        if cur != ch["old"]:
+            print(f"    ⚠️ {ch['project']}: 계획 '{ch['old']}' · 실제 '{cur}' — "
+                  f"그 사이 값이 바뀌었다. 건너뛴다.")
+            continue
+        bak = f"{ch['path']}.bak_backfill_{ts}"
+        if not os.path.exists(bak):
+            shutil.copyfile(ch["path"], bak)
+        d[PROJECT_META_FIELD] = ch["new"]
+        with open(ch["path"], "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+        done += 1
+    return done
 
 
 def _plan_for(db_rel: str, table: str, col: str):
@@ -175,6 +258,12 @@ def main() -> int:
             errors.append(f"{db_rel}:{table}.{col} — {err}")
             continue
         items.append(item)
+    #: 프로젝트 소유권은 **파일**이 진실원본이다(설계서 Phase 3). 표만 훑으면 못 본다.
+    pitem, perr = _plan_projects()
+    if perr:
+        errors.append(f"projects/*/project_meta.json — {perr}")
+    else:
+        items.append(pitem)
 
     changed = skipped_total = 0
     by_value: defaultdict = defaultdict(int)
@@ -215,7 +304,7 @@ def main() -> int:
     print("적용 중…")
     applied = 0
     for it in items:
-        n = _apply(it, ts)
+        n = _apply_projects(it, ts) if it.get("is_files") else _apply(it, ts)
         if n:
             print(f"  {os.path.basename(it['path'])}:{it['table']}.{it['col']} — {n}건 갱신")
             applied += n

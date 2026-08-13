@@ -18,6 +18,97 @@
 // ⚠️ §2.4 간격: 화면 24~32 · 카드 내부 16~20 · gap 16 · 버튼 r6 · 카드 r8.
 import { useMemo, useState } from 'react';
 
+import { useFactoryStore } from '../store/useFactoryStore';
+
+//: 문맥 축에서 막힌 사유를 사람 말로. **정상 격리**와 **점검 대상**을 다르게 말한다.
+const CTX_KO: Record<string, string> = {
+  TENANT_MISMATCH: '다른 회사 문맥의 자료',
+  MODE_MISMATCH: '다른 실행 문맥(가상·검증 샌드박스)',
+  SCOPE_OUTSIDE: '선택한 조직 범위 밖',
+  RESOURCE_UNBOUND: '⚠️ 소유 조직이 기록되지 않음 — 점검 필요',
+  CONTEXT_MISSING: '⚠️ 실행 문맥을 확정하지 못함 — 점검 필요',
+  LOOKUP_FAILED: '⚠️ 조직 계층을 읽지 못함 — 점검 필요',
+};
+
+const MODE_KO: Record<string, string> = {
+  REAL: '실제 운영', VIRTUAL: '가상', SANDBOX: '검증 샌드박스',
+};
+
+/** ★★★ [G1-C3] **「왜 안 보이는가」를 화면이 말한다.**
+ *
+ * 서버는 목록과 함께 `viewing_context`·`context_blocked_count`·사유별 집계를 준다. 그것을
+ * 그리지 않으면 **격리된 자료가 그냥 「0건」으로 보이고**, 사용자는 통제를 고장으로 읽는다.
+ * 실측(2026-08-13, 관리자): 보임 2건 · 차단 **59건**(전부 다른 실행 문맥). 즉 이 안내가 없으면
+ * 화면은 「프로젝트가 두 개뿐인 제품」처럼 보인다.
+ *
+ * ⚠️ 조회 실패를 «0건» 으로 그리지 않는다(§6.4). 트랙 F 가 8개 화면에서 고친 결함 유형이며,
+ *   여기서 다시 만들지 않는다.
+ * ⚠️ 서버가 값을 안 주면(`null`) **아무 말도 하지 않는다** — 「가려진 것 없음」이라고 단정하면
+ *   옛 서버에 붙었을 때 거짓말이 된다. */
+function ProjectVisibilityNotice() {
+  const load = useFactoryStore((s) => s.projectsLoad);
+  const err = useFactoryStore((s) => s.projectsError);
+  const ctx = useFactoryStore((s) => s.viewingContext);
+  const blocked = useFactoryStore((s) => s.contextBlocked);
+  const attention = useFactoryStore((s) => s.contextNeedsAttention);
+  const reasons = useFactoryStore((s) => s.contextBlockedReasons);
+  const refetch = useFactoryStore((s) => s.fetchProjects);
+
+  const box = (tone: 'error' | 'warn' | 'info', body: React.ReactNode) => (
+    <div style={{
+      border: `1px solid var(--${tone === 'error' ? 'state-danger' : tone === 'warn' ? 'state-warn' : 'surface-border'})`,
+      background: 'var(--surface-card)', color: 'var(--surface-text)',
+      borderRadius: 8, padding: '12px 16px', fontSize: 13, lineHeight: 1.6,
+    }}>{body}</div>
+  );
+
+  if (load === 'loading') return null;                 // 로딩은 목록 자리가 이미 말한다
+  if (load === 'forbidden') {
+    return box('error', <><b>목록을 볼 권한이 없습니다.</b>{' '}
+      <span style={{ opacity: .85 }}>{err}</span>{' '}
+      <span style={{ opacity: .7 }}>— 자료가 없는 것이 아닙니다.</span></>);
+  }
+  if (load === 'failed') {
+    return box('error', <>
+      <b>목록을 불러오지 못했습니다 — 「0건」이 아닙니다.</b>{' '}
+      <span style={{ opacity: .85 }}>{err}</span>{' '}
+      <button onClick={() => { void refetch(); }} style={{
+        marginLeft: 8, height: 30, padding: '0 12px', fontSize: 13, borderRadius: 6,
+        cursor: 'pointer', border: '1px solid var(--surface-border)',
+        background: 'var(--surface-page)', color: 'var(--surface-text)',
+      }}>다시 시도</button></>);
+  }
+
+  const modeKo = MODE_KO[String(ctx?.entity_mode || '')] || ctx?.entity_mode || '';
+  const scopeTxt = ctx?.scope_node_id ? `조직 범위 ${ctx.scope_node_id}` : '조직 범위 전체';
+  const hasBlocked = typeof blocked === 'number' && blocked > 0;
+  const needsFix = typeof attention === 'number' && attention > 0;
+
+  if (!ctx && !hasBlocked) return null;                // 서버가 아무것도 알려 주지 않았다
+
+  return box(needsFix ? 'warn' : 'info', <>
+    {ctx && (
+      <div style={{ fontSize: 12, opacity: .8 }}>
+        지금 보는 문맥 — <b>{modeKo}</b> · {scopeTxt}
+        {ctx.tenant_id ? ` · ${ctx.tenant_id}` : ''}
+      </div>
+    )}
+    {hasBlocked && (
+      <div style={{ marginTop: ctx ? 6 : 0 }}>
+        이 문맥 밖이라 <b>{blocked}건</b>을 목록에서 제외했습니다
+        {needsFix ? <> — 그중 <b style={{ color: 'var(--state-warn)' }}>{attention}건은 점검이 필요</b>합니다</> : null}.
+        {reasons && (
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12, opacity: .9 }}>
+            {Object.entries(reasons).map(([k, n]) => (
+              <li key={k}>{CTX_KO[k] || k} — {n}건</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )}
+  </>);
+}
+
 type Project = {
   id: string; name?: string; initial_idea?: string;
   is_mega_project?: boolean; parent_project_id?: string;
@@ -107,6 +198,8 @@ export function BuildPage({
       background: 'var(--surface-page)', minHeight: 'calc(100vh - 72px)', padding: 24,
       display: 'flex', flexDirection: 'column', gap: 16,
     }}>
+      <ProjectVisibilityNotice />
+
       {/* ── 상단: 새 업무 만들기 + 진행 상태 필터 (§5.2) ─────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 16, flexWrap: 'wrap' }}>

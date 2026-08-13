@@ -255,3 +255,92 @@ def test_세션_토큰_계열도_함께_가린다():
 
     for k in ("token", "session", "password", "api_key"):
         assert f"{k}=***" in redact(f"/x?{k}=VALUE"), f"{k} 가 가려지지 않았습니다."
+
+
+# ── 스키마 이행: **옛 DB 로도 기동한다** ──────────────────────────────────────
+#
+# ★★★ [2026-08-13 실서버 실측으로 발견] 이 파일의 다른 테스트는 전부 **새 tmp DB** 를 쓴다.
+#   그래서 「기존 DB 를 열었을 때」를 **구조적으로 볼 수 없었다** — 그 사이 로그인은 운영에서
+#   500 으로 죽어 있었다(2026-08-12 `3641a02e9` 이후). 단위 초록이 실측을 대신하지 못한
+#   전형적인 사례이고, 그것을 여기서 잠근다.
+
+#: G1-C1.3 **이전** 스키마 — `auth_session.token_hash` 가 없다.
+_OLD_DDL = """
+CREATE TABLE IF NOT EXISTS auth_credential (
+    user_id     TEXT PRIMARY KEY,
+    salt        TEXT NOT NULL,
+    hash        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auth_session (
+    token       TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_user ON auth_session(user_id);
+CREATE TABLE IF NOT EXISTS auth_sse_ticket (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    session_id  TEXT NOT NULL,
+    tenant_id   TEXT NOT NULL DEFAULT '',
+    audience    TEXT NOT NULL DEFAULT 'sse',
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    consumed_at TEXT NOT NULL DEFAULT ''
+);
+"""
+
+
+def test_옛_스키마_DB_에서도_로그인이_된다(tmp_path):
+    """★★★ 실서버 회귀 — `no such column: token_hash` 로 `_init()` 이 통째로 죽었다.
+
+    원인은 **순서**였다. 컬럼 보강(`ALTER`) 코드는 있었는데 `executescript` **뒤**에 있었고,
+    그 스크립트 안의 `CREATE INDEX ... (token_hash)` 가 먼저 죽어 보강에 도달하지 못했다.
+    즉 «고치는 코드가 있는데 실행되지 않는» 상태였고, 새 DB 로만 도는 테스트는 이것을
+    영원히 못 본다.
+
+    ⚠️ 이 테스트가 지키는 것은 「로그인이 된다」가 아니라 **「기존 DB 를 열 수 있다」** 다.
+      스키마에 컬럼을 더할 때마다 이 경로가 다시 깨질 수 있다."""
+    import sqlite3
+
+    from core.auth import AuthStore
+
+    p = tmp_path / "auth.db"
+    conn = sqlite3.connect(str(p))
+    conn.executescript(_OLD_DDL)
+    conn.commit()
+    conn.close()
+
+    store = AuthStore(db_path=str(p))
+    store.set_password("hikwon@lsmnm.com", "pw12345")     # `_init()` 이 여기서 돈다
+    assert store.verify("hikwon@lsmnm.com", "pw12345"), "옛 DB 에서 로그인이 되지 않는다"
+
+    #: 보강이 실제로 일어났는지 — 인덱스가 서야 SSE 세션 확인이 동작한다.
+    conn = sqlite3.connect(str(p))
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(auth_session)")}
+    idx = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='auth_session'")}
+    conn.close()
+    assert "token_hash" in cols, "컬럼 보강이 일어나지 않았다"
+    assert "idx_session_hash" in idx, "해시 인덱스가 서지 않았다 — 세션 확인이 전수 훑기가 된다"
+
+
+def test_새_DB_도_같은_경로로_정상_생성된다(tmp_path):
+    """⚠️ 대조군. 보강을 앞으로 옮겼으므로 **새 DB 에서는 ALTER 가 전부 실패한다** —
+    그 실패가 조용히 삼켜지고 뒤의 `executescript` 가 옳은 스키마를 만드는지 확인한다.
+    이 짝이 없으면 「옛 DB 만 고치고 새 DB 를 깨뜨린」 상태도 초록이 된다."""
+    import sqlite3
+
+    from core.auth import AuthStore
+
+    p = tmp_path / "fresh.db"
+    store = AuthStore(db_path=str(p))
+    store.set_password("hikwon@lsmnm.com", "pw12345")
+    assert store.verify("hikwon@lsmnm.com", "pw12345")
+    conn = sqlite3.connect(str(p))
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(auth_session)")}
+    tcols = {r[1] for r in conn.execute("PRAGMA table_info(auth_sse_ticket)")}
+    conn.close()
+    assert "token_hash" in cols
+    assert {"scope_node_id", "entity_mode", "context_version"} <= tcols
