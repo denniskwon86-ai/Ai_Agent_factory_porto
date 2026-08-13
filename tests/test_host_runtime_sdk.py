@@ -145,12 +145,24 @@ def test_만료는_다시_열면_된다는_뜻으로_따로_말한다():
     assert sdk.app_error_code(ap.DENY_TOKEN_EXPIRED) == sdk.ERR_EXPIRED
 
 
-def test_앱_오류_코드는_넷뿐이다():
-    """⚠️ 코드가 늘면 그만큼 사유가 새어나간다. 앱이 할 수 있는 일은 넷뿐이므로
-    코드도 넷이면 충분하다 — 늘리려면 «앱이 그것으로 무엇을 다르게 하는가» 에 답해야 한다."""
-    assert len(sdk.APP_ERROR_CODES) == 4
+def test_앱_오류_코드는_다섯뿐이다():
+    """⚠️ 코드가 늘면 그만큼 사유가 새어나간다. 늘리려면 «앱이 그것으로 무엇을 다르게
+    하는가» 에 답해야 한다 — 넷은 판정 결과이고, 다섯째는 **전달 실패**다(뜻이 다르다:
+    「막혔다」가 아니라 「알 수 없다」이고, 앱이 할 일은 재시도다)."""
+    assert len(sdk.APP_ERROR_CODES) == 5
     mapped = set(sdk._ERROR_MAP.values()) | {sdk.app_error_code("모르는사유")}
     assert mapped <= set(sdk.APP_ERROR_CODES)
+
+
+def test_판정_거부는_절대_재시도_코드로_접히지_않는다():
+    """★★★ 「막혔다」가 「재시도하라」가 되면 앱은 거부당한 쓰기를 무한히 다시 보낸다.
+
+    반대로 「알 수 없다」가 「없다」가 되면 앱은 **서버에 있는 레코드를 화면에서 지운다.**
+    두 축은 섞이면 안 된다."""
+    assert sdk.ERR_UNAVAILABLE not in sdk.DENY_ERROR_CODES
+    reasons = [v for k, v in vars(ap).items() if k.startswith("DENY_")]
+    for r in reasons + ["모르는사유", ""]:
+        assert sdk.app_error_code(r) in sdk.DENY_ERROR_CODES
 
 
 def test_모든_PDP_사유가_코드로_접힌다():

@@ -117,7 +117,20 @@ ERR_FORBIDDEN = "FORBIDDEN"        # 이 앱에 그 행동이 허용되지 않�
 ERR_EXPIRED = "EXPIRED"            # 다시 열면 된다
 ERR_INVALID = "INVALID"            # 요청이 계약에 맞지 않는다(앱 코드 문제)
 
-APP_ERROR_CODES: Tuple[str, ...] = (ERR_NOT_FOUND, ERR_FORBIDDEN, ERR_EXPIRED, ERR_INVALID)
+#: ★★★ **판정이 아니라 전달의 실패.** 시간 초과·부모가 서버에 닿지 못함·응답 과대.
+#:
+#: ⚠️⚠️ 이것을 `NOT_FOUND` 로 접으면 안 된다. 「응답이 없었다」를 「없다」로 읽으면 앱은
+#:   **화면에서 그 레코드를 지운다.** 쓰기였다면 더 나쁘다 — 서버에는 만들어졌는데 앱은
+#:   실패로 알고 다시 만든다. 그래서 이 코드의 뜻은 **「결과를 알 수 없다」** 이고,
+#:   앱이 할 일은 «지우기» 가 아니라 **같은 멱등키로 재시도** 다.
+ERR_UNAVAILABLE = "UNAVAILABLE"
+
+APP_ERROR_CODES: Tuple[str, ...] = (ERR_NOT_FOUND, ERR_FORBIDDEN, ERR_EXPIRED, ERR_INVALID,
+                                    ERR_UNAVAILABLE)
+
+#: ★ 판정 거부가 접힐 수 있는 코드는 **이 넷뿐**이다. 거부가 `UNAVAILABLE` 로 접히면
+#:   「막혔다」가 「재시도하라」가 되고, 앱은 거부당한 쓰기를 무한히 다시 보낸다.
+DENY_ERROR_CODES: Tuple[str, ...] = (ERR_NOT_FOUND, ERR_FORBIDDEN, ERR_EXPIRED, ERR_INVALID)
 
 #: PDP 사유 → 앱에게 보일 코드. **여기 없는 사유는 전부 `NOT_FOUND`** 로 접힌다
 #: (기본값이 «가장 적게 말하는 것» 이어야 새 사유가 생겨도 새는 일이 없다).
