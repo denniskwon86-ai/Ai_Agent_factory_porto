@@ -47,8 +47,11 @@ RELEASES = {
     "rel_canary": ["orders.read", "orders.create", "orders.delete"],
     #: 읽기만 선언 — 「선언 밖은 못 한다」
     "rel_canary_ro": ["orders.read"],
-    #: 같은 사용자가 볼 수 있는 **다른 앱** — 증명 교차 사용 대조군
-    "rel_canary_other": ["orders.read"],
+    #: ★★★ 같은 사용자가 볼 수 있는 **다른 앱** — 공격자 역할.
+    #: ⚠️ [교차검토 87] 읽기만 주면 쓰기 주입이 403 인 것이 «귀속 격리» 가 아니라 **단순
+    #:   권한 거부**다. 그것으로는 아무것도 증명하지 못한다. B 에도 쓰기·삭제를 준다 —
+    #:   「할 수 있는데도 남의 것에는 못 닿는다」여야 격리다.
+    "rel_canary_other": ["orders.read", "orders.create", "orders.delete"],
 }
 
 

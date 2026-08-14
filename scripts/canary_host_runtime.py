@@ -27,6 +27,8 @@ import time
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 R = "/api/v1/appdata/runtime"
 
 #: 게이트가 요구하는 여섯 부정 시나리오 → **그것을 만들 방법**.
@@ -68,8 +70,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8083")
     ap.add_argument("--seed", required=True, help="씨앗 스크립트가 출력한 JSON")
+    ap.add_argument("--run", default="canary_4", help="AFS_SHADOW_RUN 과 같은 값이어야 한다")
     ap.add_argument("--wait-expiry", action="store_true",
-                    help="만료 시나리오를 위해 65초 기다린다(워크트리 TTL=1분 전제)")
+                    help="만료 시나리오를 위해 실제로 기다린다")
+    #: ★★★ 기본값이 **실제 만료(15분)+여유** 인 이유: 워크트리의 TTL 상수를 낮추면 구조
+    #:   지문이 운영 코드와 달라져 **그 증거가 운영에서 무효**가 된다(그것이 지문의 목적이다).
+    #:   빠르게 돌리려면 낮출 수 있지만, 그때 나온 증거는 그 코드에만 유효하다.
+    ap.add_argument("--expiry-wait", type=int, default=16 * 60,
+                    help="만료 대기 초. 기본은 실제 TTL(15분)+여유")
     args = ap.parse_args()
     seed = json.loads(args.seed)
     wait_expiry = args.wait_expiry
@@ -111,6 +119,11 @@ def main():
     st, other = http("POST", f"{R}/proof", {"release_id": "rel_canary_other"})
     proof_other = other["data"]["token"] if st == 200 else ""
     step("다른 앱 증명 발급", st == 200, f"HTTP {st}")
+    #: ★ 대조군 — 공격자 앱이 **자기 데이터셋에는** 쓸 수 있어야 한다. 그렇지 않으면
+    #:   아래 주입 시험이 「권한이 없어서 막혔다」와 구분되지 않는다.
+    st_w, _own = http("POST", f"{R}/datasets/orders/records", {"payload": {"qty": 7}},
+                      proof=proof_other)
+    step("공격자 앱은 자기 데이터에는 쓸 수 있다(대조군)", st_w == 200, f"HTTP {st_w}")
 
     print("── 여섯 작업 · 허용 ─────────────────────────────────")
     st, _ = http("GET", f"{R}/datasets/orders/schema", proof=proof)
@@ -178,35 +191,52 @@ def main():
          f"A={len(rows_a)}건(sentinel {len(mine)}) · B={len(rows_b)}건(sentinel {len(theirs)})")
     structure["교차 앱 블랙박스 시험 통과"] = isolated
 
-    #: ③-b 식별자 주입 — 「남의 앱을 말해 보기」. 어느 자리로도 통하지 않아야 한다.
+    #: ③-b 식별자 주입 — **B 는 쓰기·삭제를 가진 채로** 남의 앱을 말해 본다.
+    #: ⚠️ [교차검토 87] B 가 읽기 전용이면 주입이 403 인 것은 «귀속 격리» 가 아니라 단순
+    #:   권한 거부다. 「할 수 있는데도 남의 것에는 못 닿는다」여야 격리다.
     sid_rec = (sentinel.get("data") or {}).get("record_id", "")
     injections = [
-        ("본문", lambda: http("POST", f"{R}/datasets/orders/records",
-                              {"payload": {"qty": 1}, "release_id": "rel_canary",
-                               "app_id": "proj_canary"}, proof=proof_other)),
-        ("payload 안", lambda: http("POST", f"{R}/datasets/orders/records",
-                                    {"payload": {"qty": 1, "release_id": "rel_canary"}},
-                                    proof=proof_other)),
-        ("질의", lambda: http("GET",
-                             f"{R}/datasets/orders/records?release_id=rel_canary",
-                             proof=proof_other)),
-        ("남의 레코드 id", lambda: http("GET", f"{R}/datasets/orders/records/{sid_rec}",
-                                    proof=proof_other)),
+        ("본문에 릴리스", lambda: http("POST", f"{R}/datasets/orders/records",
+                                   {"payload": {"qty": 1}, "release_id": "rel_canary",
+                                    "app_id": "proj_canary"}, proof=proof_other)),
+        ("payload 안 릴리스", lambda: http("POST", f"{R}/datasets/orders/records",
+                                       {"payload": {"qty": 1, "release_id": "rel_canary"}},
+                                       proof=proof_other)),
+        ("질의 문자열", lambda: http("GET", f"{R}/datasets/orders/records?release_id=rel_canary",
+                                proof=proof_other)),
+        ("남의 레코드 읽기", lambda: http("GET", f"{R}/datasets/orders/records/{sid_rec}",
+                                   proof=proof_other)),
+        ("남의 레코드 수정", lambda: http("PUT", f"{R}/datasets/orders/records/{sid_rec}",
+                                   {"payload": {"qty": 1}}, proof=proof_other)),
+        ("남의 레코드 삭제", lambda: http("DELETE", f"{R}/datasets/orders/records/{sid_rec}",
+                                   proof=proof_other)),
     ]
+    #: ⚠️ sentinel 이 그대로인 것만으로는 부족하다 — 주입된 **생성**이 A 에 성공하면
+    #:   sentinel 은 멀쩡한 채 **새 행이 하나 늘어난다.** 총량도 함께 본다.
+    before_n = len(rows_a)
     injected = []
     for label, call in injections:
         st_i, body_i = call()
-        leaked = False
-        if st_i == 200:
-            txt = json.dumps(body_i, ensure_ascii=False)
-            leaked = "4242" in txt or "rel_canary\"" in txt
+        leaked = st_i == 200 and "4242" in json.dumps(body_i, ensure_ascii=False)
         injected.append((label, st_i, leaked))
+
+    #: ★★★ 상태코드만 보지 않는다. **A 의 sentinel 이 그대로인지** 본다 —
+    #:   「404 를 주고 지우기는 했다」를 놓치지 않기 위해서다.
+    st_after, after = http("GET", f"{R}/datasets/orders/records", proof=proof)
+    rows_after = (after.get("data") or {}).get("records") or []
+    still = [r for r in rows_after
+             if (r.get("payload") or {}).get("qty") == 4242 and not r.get("deleted")]
+    intact = (st_after == 200 and len(still) == len(mine)
+              and len([r for r in rows_after if not r.get("deleted")]) == before_n)
     no_leak = not any(l for _n, _s, l in injected)
-    step("식별자 주입으로 남의 앱에 닿지 못한다", no_leak,
-         " · ".join(f"{n}:HTTP{s}{'(누설)' if l else ''}" for n, s, l in injected))
+    step("공격자(쓰기 가능)가 식별자 주입으로 남의 앱에 닿지 못한다", no_leak and intact,
+         " · ".join(f"{n}:{s}{'(누설)' if l else ''}" for n, s, l in injected)
+         + f" · A sentinel {len(still)}/{len(mine)}"
+         + f" · A 총 {len([r for r in rows_after if not r.get('deleted')])}/{before_n}건"
+         + ("" if intact else " ← 변조됨"))
     structure["요청에 app_id·release_id 입력이 없다"] = no_leak
-    structure["데이터셋은 증명의 릴리스에 귀속된다"] = no_leak
-    structure["레코드는 해결된 데이터셋에 귀속된다"] = no_leak
+    structure["데이터셋은 증명의 릴리스에 귀속된다"] = no_leak and intact
+    structure["레코드는 해결된 데이터셋에 귀속된다"] = no_leak and intact
 
     #: ④ 다른 조직 범위
     #: ⚠️ 화면이 고른 범위를 바꾸는 것만으로는 **문맥 축**에서 먼저 걸린다(문맥을 확정하지
@@ -252,8 +282,8 @@ def main():
     if wait_expiry:
         st, fresh = http("POST", f"{R}/proof", {"release_id": "rel_canary"})
         if st == 200:
-            print("  … 만료를 기다린다(65초)")
-            time.sleep(65)
+            print(f"  … 만료를 기다린다({args.expiry_wait}초)")
+            time.sleep(args.expiry_wait)
             st, _ = http("GET", f"{R}/datasets/orders/records", proof=fresh["data"]["token"])
             step("만료된 증명 → 차단", st == 401, f"HTTP {st}")
         else:
@@ -278,7 +308,38 @@ def main():
     print(f"\n결과: {len(results) - len(bad)}/{len(results)} 통과")
     if bad:
         print("실패: " + ", ".join(bad))
-    return 1 if bad else 0
+
+    # ── 구조 증거 기록 + 최종 판정 ────────────────────────────────────────
+    #
+    # ★★★ [교차검토 87] 이 둘을 **드라이버 안에서** 한다. 밖에서 손으로 기록하면
+    #   「게이트가 열렸다」가 **사람의 절차**에 달리게 되고, 그 절차는 언젠가 빠진다.
+    # ⚠️ 그래서 이 스크립트는 **워크트리 안에서** 돌아야 한다 — `core.policy_shadow` 가
+    #   그 사본의 DB 를 가리켜야 기록과 판정이 같은 곳을 본다.
+    from core.paths import PROJECT_ROOT
+    from core.policy_shadow import policy_shadow
+    if os.path.basename(PROJECT_ROOT) != "canary_wt":
+        print(f"\n⚠️ 격리 워크트리가 아닙니다({PROJECT_ROOT}) — 기록·판정을 생략합니다.")
+        return 1 if bad else 0
+
+    for name, ok in structure.items():
+        policy_shadow.record_structure(args.run, name, bool(ok))
+    g = policy_shadow.switch_gate(args.run)
+
+    print("\n── 전환 게이트 ──────────────────────────────────────")
+    print("safe_to_switch:", g["safe_to_switch"])
+    print("counts:", json.dumps(g["counts"], ensure_ascii=False))
+    print("scenarios:", json.dumps(g["scenario_coverage"], ensure_ascii=False))
+    print("structure:", json.dumps(g["structure"], ensure_ascii=False))
+    print("code_hash:", g["structure_hash"])
+    for b in g["blockers"]:
+        print("BLOCK:", b)
+    print("\nGATE " + json.dumps(
+        {"safe_to_switch": g["safe_to_switch"], "run": args.run,
+         "counts": g["counts"], "structure": g["structure"],
+         "code_hash": g["structure_hash"]}, ensure_ascii=False))
+
+    #: 하나라도 어긋나면 **실패로 끝낸다** — 초록이 아닌 것을 초록으로 읽지 않게.
+    return 0 if (not bad and g["safe_to_switch"]) else 1
 
 
 if __name__ == "__main__":

@@ -190,10 +190,17 @@ STRUCTURAL_INVARIANTS: Tuple[str, ...] = (
 )
 
 #: 구조 증거가 묶이는 코드. 이 파일들이 바뀌면 지문이 달라지고 옛 증거는 무효가 된다.
+#: ⚠️⚠️ [교차검토 87] 초판은 라우터·증명유도·SDK 셋뿐이었다. 그러면 **실제 데이터 귀속**
+#:   (`app_data.find_dataset`·레코드↔데이터셋)과 **판정**(PDP)과 **증거 산출**(이 파일)이
+#:   바뀌어도 옛 증거가 계속 유효해 보인다 — 불변식이 서 있는 바닥을 빼놓은 셈이었다.
 STRUCTURE_SOURCES: Tuple[str, ...] = (
-    "api/routes/app_data_runtime.py",
-    "core/app_proof.py",
-    "core/host_runtime_sdk.py",
+    "api/routes/app_data_runtime.py",   # 경로·순서·귀속 확인
+    "core/app_proof.py",                # 릴리스·매니페스트 유도
+    "core/host_runtime_sdk.py",         # 앱에게 여는 표면
+    "core/app_data.py",                 # 데이터셋·레코드 귀속의 실제 구현
+    "core/app_policy.py",               # 정책 결정점
+    "core/app_capability_token.py",     # 증명 발급·대조
+    "core/policy_shadow.py",            # 증거를 만드는 곳(이 파일)
 )
 
 
