@@ -201,6 +201,11 @@ STRUCTURE_SOURCES: Tuple[str, ...] = (
     "core/app_policy.py",               # 정책 결정점
     "core/app_capability_token.py",     # 증명 발급·대조
     "core/policy_shadow.py",            # 증거를 만드는 곳(이 파일)
+    #: ★★★ [교차검토 88] **증거를 «만드는 절차» 자체도 지문에 든다.**
+    #:   빠져 있으면 카나리 드라이버를 약화시켜도(시나리오를 빼거나, 대조군을 지우거나,
+    #:   sentinel 검사를 느슨하게 해도) **기존 구조 증거가 그대로 유효**하다.
+    #:   즉 「무엇을 증명했는가」가 아니라 「증명했다고 적힌 줄」만 남는다.
+    "scripts/canary_host_runtime.py",   # 구조 불변식을 실제로 눌러 보는 절차
 )
 
 

@@ -15,6 +15,8 @@
 4. **설명되지 않은 강화**도 막는다 — 권한 확대만 사고인 것이 아니다.
 5. **업무 데이터와 토큰 전문이 텔레메트리에 남지 않는다.**
 """
+from pathlib import Path
+
 import pytest
 
 from core import app_policy as ap
@@ -408,3 +410,75 @@ def test_실패한_구조_증거는_통과로_세지_않는다(obs):
     g = obs.switch_gate()
     assert g["safe_to_switch"] is False
     assert g["structure"][STRUCTURAL_INVARIANTS[0]] == "실패"
+
+
+# ── ⑪ [교차검토 88] 증거를 «만드는 절차» 도 지문에 든다 ────────────────────
+
+def test_카나리_드라이버가_지문_대상에_들어_있다():
+    """★★★ 드라이버가 빠져 있으면 **그것을 약화시켜도 기존 구조 증거가 유효하게 남는다.**
+
+    시나리오를 하나 빼거나, 대조군을 지우거나, sentinel 검사를 느슨하게 해도 게이트는
+    「통과」라고 말한다 — 즉 「무엇을 증명했는가」가 아니라 **「증명했다고 적힌 줄」** 만
+    남는다. 구조 증거는 판정으로 관측되지 않으므로, 그것을 만드는 절차가 곧 증거의 근거다."""
+    from core.policy_shadow import STRUCTURE_SOURCES
+    assert "scripts/canary_host_runtime.py" in STRUCTURE_SOURCES
+
+
+@pytest.mark.parametrize("rel", [
+    "scripts/canary_host_runtime.py",
+    "api/routes/app_data_runtime.py",
+    "core/app_data.py",
+    "core/app_policy.py",
+    "core/app_capability_token.py",
+])
+def test_대상_파일이_바뀌면_지문이_바뀐다(tmp_path, monkeypatch, rel):
+    """★★ 목록에 이름만 올려 두고 **실제로 읽지 않으면** 그 결속은 없는 것과 같다.
+    파일마다 한 글자를 바꿔 지문이 실제로 흔들리는지 본다."""
+    import shutil
+
+    import core.paths as paths
+    import core.policy_shadow as ps
+    from core.paths import PROJECT_ROOT
+
+    #: 저장소 사본을 만들어 그 안에서만 바꾼다 — 운영 파일은 건드리지 않는다.
+    root = tmp_path / "repo"
+    for src in ps.STRUCTURE_SOURCES:
+        dst = root / src
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(Path(PROJECT_ROOT) / src, dst)
+    monkeypatch.setattr(paths, "PROJECT_ROOT", str(root))
+    monkeypatch.setattr(paths, "DATA_DIR", str(root / "data"))
+
+    before = ps.structure_hash()
+    assert before, "사본에서 지문을 읽지 못했다 — 이 시험이 무의미해졌다"
+    target = root / rel
+    target.write_text(target.read_text("utf-8") + "\n# MUT\n", encoding="utf-8")
+    assert ps.structure_hash() != before, f"{rel} 이 바뀌었는데 지문이 그대로다"
+
+
+def test_줄바꿈이_달라도_같은_지문이다(tmp_path, monkeypatch):
+    """★★★ git 체크아웃이 CRLF 로 바꿔 놓으면 내용이 같은데도 지문이 달라진다. 그러면
+    격리 사본에서 만든 증거가 운영에서 **언제나 무효**가 되고 — 그 무효는 「코드가 바뀌었다」는
+    정상 신호와 **구분되지 않는다.**
+
+    실측으로 겪은 결함이다(같은 커밋의 본체와 워크트리가 다른 지문을 냈다)."""
+    import shutil
+
+    import core.paths as paths
+    import core.policy_shadow as ps
+    from core.paths import PROJECT_ROOT
+
+    lf, crlf = tmp_path / "lf", tmp_path / "crlf"
+    for root in (lf, crlf):
+        for src in ps.STRUCTURE_SOURCES:
+            dst = root / src
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(Path(PROJECT_ROOT) / src, dst)
+            raw = dst.read_bytes().replace(b"\x0d\x0a", b"\x0a")
+            dst.write_bytes(raw.replace(b"\x0a", b"\x0d\x0a") if root is crlf else raw)
+
+    monkeypatch.setattr(paths, "PROJECT_ROOT", str(lf))
+    a = ps.structure_hash()
+    monkeypatch.setattr(paths, "PROJECT_ROOT", str(crlf))
+    b = ps.structure_hash()
+    assert a and a == b, f"줄바꿈만 다른데 지문이 갈렸다: {a} vs {b}"
