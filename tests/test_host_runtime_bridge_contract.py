@@ -196,6 +196,11 @@ def test_증명이_없으면_아예_부르지_않는다(bridge):
     assert "if (!proof) return { status: 0, json: null };" in bridge
 
 
+def test_브리지가_증명_결속_응답의_HTTP_캐시를_쓰지_않는다(bridge):
+    """이전 410을 새 증명에 재사용하면 «목록에서 다시 열기»가 영구 실패한다."""
+    assert "cache: 'no-store'" in bridge
+
+
 def test_세대가_바뀌면_증명을_버린다(bridge):
     """⚠️ 프레임이 바뀌면 «지금 그 앱을 열고 있다» 는 사실도 새로 세워야 한다."""
     m = re.search(r"function resetGeneration\(\) \{(.*?)\n  \}", bridge, re.S)

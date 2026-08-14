@@ -136,7 +136,7 @@ export function BuildPage({
   projects: Project[];
   releases: any[];
   onOpenProject: (id: string) => void;
-  onOpenRelease: (r: any) => void;
+  onOpenRelease: (releaseId: string) => void;
   onNewWork: () => void;
   onManageRelease: (r: any) => void;
   onDeleteProject: (id: string) => void;
@@ -265,7 +265,7 @@ export function BuildPage({
                   {r.created_at || ''}
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-                  <button onClick={() => onOpenRelease(r)} style={{
+                  <button onClick={() => onOpenRelease(String(r.release_id || ''))} style={{
                     height: 36, padding: '0 16px', fontSize: 13, fontWeight: 700, borderRadius: 6,
                     cursor: 'pointer', border: '1px solid var(--ls-navy)',
                     background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',

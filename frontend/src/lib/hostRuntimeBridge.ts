@@ -50,7 +50,7 @@ const PROOF_HEADER = 'X-App-Proof';
 
 /** ⚠️ 켜는 조건 ①. 없으면 **꺼짐**이다 — 기본값이 켜짐이면 「끄는 것을 잊었다」가 사고가 된다. */
 export const HOST_RUNTIME_FLAG: boolean =
-  ((import.meta as any)?.env?.VITE_AFS_HOST_RUNTIME ?? '') === '1';
+  ((import.meta as any).env?.VITE_AFS_HOST_RUNTIME ?? '') === '1';
 
 export interface BridgeDeps {
   /** 우리 프레임. **동일성 비교**의 대상이다(§`event.origin` 은 경계가 아니다). */
@@ -180,7 +180,11 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const init: RequestInit = { method, signal: ctrl.signal };
+      //: ★★★ 증명에 묶인 응답은 URL 만으로 재사용할 수 없다. 브라우저 캐시가 이전 증명의
+      //:   410 을 새 증명에도 돌려주면, 사용자가 앱을 다시 열어도 서버 호출 없이 계속
+      //:   «앱 정의 변경» 으로 막힌다. 서버도 no-store 를 강제하지만 클라이언트에서도
+      //:   명시해 중간 캐시·개발 프록시의 잘못된 재사용을 막는다.
+      const init: RequestInit = { method, signal: ctrl.signal, cache: 'no-store' };
       if (opt.withProof !== false) {
         //: ⚠️ 증명이 없으면 **부르지 않는다.** 「증명 없이 한 번 시도해 보고 안 되면」은
         //:   서버가 폴백을 갖고 있을 때만 뜻이 있는데, 서버는 폴백을 갖지 않는다.

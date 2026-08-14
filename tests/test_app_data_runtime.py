@@ -133,6 +133,19 @@ def _mkds(c, name="orders", release_id="rel_ok", app_class=""):
     return r.json()
 
 
+def test_런타임_응답은_성공과_거부_모두_저장되지_않는다(client):
+    """증명·세션·조직 문맥에 따라 답이 달라지는 GET을 URL 캐시로 재사용하면 안 된다.
+
+    특히 이전 증명의 410이 저장되면 새 증명을 발급하고 앱을 다시 열어도 브라우저가 서버를
+    부르지 않은 채 계속 «앱 정의 변경»으로 답한다. 오류 응답까지 함께 잠근다.
+    """
+    issued = _proof(client)
+    denied = client.get(f"{R}/datasets/orders/schema", headers=H_USER)
+    for response in (issued, denied):
+        assert response.headers.get("cache-control") == "no-store"
+        assert response.headers.get("pragma") == "no-cache"
+
+
 # ── ① 증명 없이는 아무것도 열리지 않는다 ──────────────────────────────────
 
 def test_증명이_없으면_세션으로_내려가지_않는다(client):
@@ -505,6 +518,8 @@ def test_매니페스트가_바뀌면_기존_증명이_막힌다(client):
     #: ★ 410 = 「이 판은 사라졌다」. 만료(401)와 **다른 상태**여야 부모가 다르게 행동한다 —
     #:   만료는 재발급으로 풀리지만 선언 변경은 **프레임을 버려야** 한다.
     assert r.status_code == 410, f"바뀐 앱에 옛 증명이 통했다: {r.status_code}"
+    assert r.headers.get("cache-control") == "no-store", \
+        "이 410이 캐시되면 새 증명을 받아 다시 열어도 이전 오류가 되살아난다"
     #: 서버는 새 증명을 내준다(사용자가 앱을 다시 열면 그것으로 돈다). 낡은 코드에 그것을
     #: 주지 않는 책임은 **브리지**에 있고, 그 계약은 `test_host_runtime_bridge_contract` 가 본다.
     assert client.get(f"{R}/datasets/orders/records",

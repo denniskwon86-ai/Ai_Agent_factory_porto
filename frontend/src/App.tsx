@@ -505,7 +505,7 @@ function AppShell() {
             projects={projects as any}
             releases={releases}
             onOpenProject={(id) => setCurrentProject(id)}
-            onOpenRelease={(r) => viewRelease(r)}
+            onOpenRelease={(releaseId) => viewRelease(releaseId)}
             onNewWork={() => setBuildStart(true)}
             onManageRelease={(r) => setAdminProgram({ id: r.release_id, name: r.project_name || r.release_id })}
             onDeleteProject={(id) => {

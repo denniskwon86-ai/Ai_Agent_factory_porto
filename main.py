@@ -81,6 +81,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def _host_runtime_no_store(request, call_next):
+    """앱 증명에 결속된 응답을 브라우저·프록시가 재사용하지 못하게 한다.
+
+    Host Runtime GET은 URL이 같아도 ``X-App-Proof``와 현재 세션·조직 문맥에 따라 답이
+    달라진다. 특히 이전 증명의 410을 캐시하면 새 증명을 발급받고 앱을 다시 열어도 서버에
+    닿지 않은 채 계속 «앱 정의 변경»으로 보인다. 성공·거부·오류 모두 저장 금지한다.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/api/v1/appdata/runtime"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
 @app.on_event("startup")
 async def _warmup():
     """기동 시 기본 그래프·체크포인터를 미리 컴파일 - 재시작 직후 첫 API 호출이
