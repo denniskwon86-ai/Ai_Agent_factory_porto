@@ -12,6 +12,8 @@ import json
 import os
 import sys
 
+from pathlib import Path
+
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -477,3 +479,107 @@ def test_retiring_every_user_returns_to_bootstrap(tmp_path):
         assert org.resolve_scope("anyone").unrestricted is True, "부트스트랩 잠금 방지"
     finally:
         config.ORG_ENFORCE = saved
+
+
+# ══ [G1-B 6] 앱 데이터 판정 전환 — 운영 경로에 실제로 연결됐는가 ══════════
+
+def _admin_client(monkeypatch, *, can_edit=True, uid="admin@ls"):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import api.routes.admin_control as ac
+    from api.deps import Principal, current_principal
+    from core.org_directory import AccessScope
+
+    app = FastAPI()
+    app.include_router(ac.router)
+    app.dependency_overrides[current_principal] = lambda: Principal(
+        user_id=uid, scope=AccessScope(unrestricted=False, can_edit_org=can_edit))
+    return TestClient(app)
+
+
+def test_정책_조회에_전환_상태와_출처가_실린다(monkeypatch, tmp_path):
+    """★★★ 값만 주면 그것이 **관리자가 정한 것**인지 **코드 기본값**인지 구분되지 않는다.
+    그러면 화면이 「누가 이렇게 해 뒀나」에 답하지 못한다."""
+    import core.scope_policy as sp
+    monkeypatch.setattr(sp, "_POLICY_PATH", str(tmp_path / "p.json"), raising=False)
+    c = _admin_client(monkeypatch)
+    d = c.get("/api/v1/admin/scope-policy").json()["data"]
+    assert d["app_pdp_enforce"] is True
+    assert d["app_pdp_enforce_source"] == "code default"
+
+    r = c.put("/api/v1/admin/app-pdp-enforcement",
+              json={"enabled": False, "reason": "카나리 회귀 확인"})
+    assert r.status_code == 200, r.text
+    d2 = c.get("/api/v1/admin/scope-policy").json()["data"]
+    assert d2["app_pdp_enforce"] is False
+    assert d2["app_pdp_enforce_source"] == "policy", "관리자가 정했는데 출처가 기본값이다"
+
+
+def test_사유_없는_롤백은_거부된다(monkeypatch, tmp_path):
+    """★★★ 롤백은 통제를 **넓히는** 방향이다. 이유가 남지 않으면 그 롤백은 영구가 된다.
+
+    ★ 켜는 것은 사유 없이도 된다 — 닫는 방향이라 되돌릴 이유를 물을 필요가 없다."""
+    import core.scope_policy as sp
+    monkeypatch.setattr(sp, "_POLICY_PATH", str(tmp_path / "p.json"), raising=False)
+    c = _admin_client(monkeypatch)
+    r = c.put("/api/v1/admin/app-pdp-enforcement", json={"enabled": False})
+    assert r.status_code == 400 and "사유" in r.text, r.text
+    assert c.put("/api/v1/admin/app-pdp-enforcement",
+                 json={"enabled": True}).status_code == 200
+
+
+def test_일반_사용자는_전환_스위치를_만질_수_없다(monkeypatch, tmp_path):
+    """⚠️ 이 스위치는 **앱 데이터를 누가 지키는가** 를 바꾼다. 관리자 전용이 아니면
+    그것은 스위치가 아니라 뒷문이다."""
+    import core.scope_policy as sp
+    monkeypatch.setattr(sp, "_POLICY_PATH", str(tmp_path / "p.json"), raising=False)
+    c = _admin_client(monkeypatch, can_edit=False)
+    r = c.put("/api/v1/admin/app-pdp-enforcement",
+              json={"enabled": False, "reason": "몰래"})
+    assert r.status_code == 403, f"관리자가 아닌데 통과했다: {r.status_code}"
+    assert sp.app_pdp_enforce() is True, "거부됐는데 값이 바뀌었다"
+
+
+def test_전환_변경이_이력과_감사에_남는다(monkeypatch, tmp_path):
+    """⚠️ 「정책 파일 한 줄로 롤백」과 「롤백 사유 필수」가 **동시에 성립**하려면 변경이
+    이 경로로만 들어와야 한다 — 그래야 행위자·사유·시각이 남는다."""
+    import core.scope_policy as sp
+    from core.enterprise_context import audit
+    monkeypatch.setattr(sp, "_POLICY_PATH", str(tmp_path / "p.json"), raising=False)
+    seen = []
+    #: ⚠️  의 첫 인자는 **위치인자**()다.  만 받는 스텁을 쓰면
+    #:   TypeError 가 나고 그것이 호출부  에 삼켜져 «감사에 안 남았다» 로 보인다 —
+    #:   실제로 그렇게 걸렸다. 스텁도 제품 서명을 따라야 한다.
+    monkeypatch.setattr(audit, "record",
+                        lambda *a, **kw: seen.append({**kw, "event": a[0] if a else kw.get("event")})
+                        or True)
+
+    c = _admin_client(monkeypatch)
+    c.put("/api/v1/admin/app-pdp-enforcement",
+          json={"enabled": False, "reason": "장애 대응"})
+    hist = [h for h in sp.policy()["history"] if h["field"] == "app_pdp_enforce"]
+    assert hist and hist[0]["actor"] == "admin@ls" and hist[0]["reason"] == "장애 대응"
+    assert any(k.get("resource_id") == "app_pdp_enforce" for k in seen), "감사에 남지 않았다"
+
+
+def test_조직_권한_전환_요청_필드가_프런트와_맞는다(monkeypatch, tmp_path):
+    """★★★ 프런트는 `enforce`, 서버는 `enabled` 였다 — 화면에서 눌러도 **422** 만 났다.
+
+    ⚠️ 이름이 다른 것은 조용히 깨진다(pydantic 이 모르는 필드를 버리고 필수가 없다고 답한다).
+      그래서 «프런트가 실제로 보내는 몸통» 을 그대로 넣어 본다."""
+    import re
+
+    import core.scope_policy as sp
+    monkeypatch.setattr(sp, "_POLICY_PATH", str(tmp_path / "p.json"), raising=False)
+    src = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib"
+           / "adminApi.ts").read_text("utf-8")
+    m = re.search(r"'/api/v1/admin/org-enforcement',\s*\{([^}]*)\}", src)
+    assert m, "프런트 호출을 찾지 못했다"
+    fields = {f.strip().split(":")[0].strip() for f in m.group(1).split(",") if f.strip()}
+    assert "enabled" in fields, f"프런트가 서버와 다른 이름을 보낸다: {fields}"
+
+    c = _admin_client(monkeypatch)
+    body = {k: (False if k == "enabled" else "화면에서 끔") for k in fields}
+    r = c.put("/api/v1/admin/org-enforcement", json=body)
+    assert r.status_code == 200, f"화면이 보내는 몸통이 거부됐다: {r.status_code} {r.text[:150]}"

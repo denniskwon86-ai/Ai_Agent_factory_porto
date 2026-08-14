@@ -22,8 +22,8 @@ from pydantic import BaseModel
 from api.deps import Principal, assert_can_edit_org, current_principal
 from core.enterprise_context import audit
 from core.org_activation import preflight
-from core.scope_policy import (ScopePolicyError, policy, set_legacy_deadline,
-                               set_org_enforce)
+from core.scope_policy import (ScopePolicyError, policy, set_app_pdp_enforce,
+                               set_legacy_deadline, set_org_enforce)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 
@@ -48,6 +48,16 @@ class DeadlineRequest(BaseModel):
 
 class PruneRequest(BaseModel):
     apply: bool = False                   # ★ 기본 예행 — 감사로그를 지우는 쪽으로 기울지 않는다
+
+
+class AppPdpRequest(BaseModel):
+    """앱 데이터 판정 전환/롤백.
+
+    ⚠️ `enabled` 라는 이름을 `org-enforcement` 와 **같게** 쓴다. 비슷한 두 API 가 서로 다른
+      필드명을 쓰면 화면이 반드시 하나를 틀리고, 그 틀림은 422 로만 드러난다(실제로 조직
+      권한 전환에서 그렇게 났다 — 프런트는 `enforce`, 서버는 `enabled` 였다)."""
+    enabled: bool
+    reason: Optional[str] = ""
 
 
 class EnforceRequest(BaseModel):
@@ -134,6 +144,29 @@ async def put_org_enforcement(req: EnforceRequest,
     except ScopePolicyError as e:
         raise HTTPException(status_code=400, detail=str(e))
     out["preflight"] = await asyncio.to_thread(preflight)
+    return {"status": "success", "data": out}
+
+
+@router.put("/app-pdp-enforcement")
+async def put_app_pdp_enforcement(req: AppPdpRequest,
+                                  p: Principal = Depends(current_principal)):
+    """★★★ [G1-B 6] 앱 데이터를 **어느 판정기가 지키는가** 를 바꾼다 — 배포 없이, 감사와 함께.
+
+    ## 왜 API 가 필요한가 (교차검토 89 ③)
+
+    스위치가 정책 파일에만 있으면 **파일을 직접 고쳐** 행위자·사유·이력·감사를 전부 우회할 수
+    있다. 그러면 「정책 파일 한 줄로 롤백」과 「롤백 사유 필수」가 **동시에 성립하지 않는다** —
+    후자는 이 경로로 들어올 때만 강제되기 때문이다.
+
+    ⚠️ 되돌리면 통제가 **넓어진다**(기존 판정은 앱 증명·매니페스트·실행 문맥을 보지 않는다).
+      그래서 끌 때는 사유를 요구한다. 켜는 것은 사유 없이도 되지만 이력은 남는다.
+    ★ 켜는 데 사전 점검을 두지 않는 이유: 이 전환은 **닫는 방향**이라 잠금 사고를 만들지
+      않는다. 되돌리는 쪽이 위험한 방향이고, 그쪽에 사유를 건다."""
+    actor = _admin(p)
+    try:
+        out = await asyncio.to_thread(set_app_pdp_enforce, req.enabled, actor, req.reason or "")
+    except ScopePolicyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"status": "success", "data": out}
 
 

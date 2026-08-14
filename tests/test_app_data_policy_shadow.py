@@ -330,3 +330,65 @@ def test_스위치는_한_곳에서만_읽는다():
     assert len(reads) == 1, f"스위치를 여러 곳에서 읽는다: {reads}"
     import config
     assert not hasattr(config, "APP_PDP_ENFORCE"), "코드 상수로도 같은 스위치가 생겼다"
+
+
+# ── ⑥ [교차검토 89] 관측자의 장애 · 판정 불가 · 운영 경로 ─────────────────
+
+def test_기존_판정기가_죽어도_PDP_강제는_요청을_살린다(client, monkeypatch):
+    """★★★ PDP 강제 상태에서 기존 판정기는 **관측자**다. 관측자의 장애가 기능 장애가 되면
+    안 된다.
+
+    ⚠️ 첫 판은 `HTTPException` 만 잡아서, 기존 판정기가 `RuntimeError` 를 내면 **PDP 가
+      정상적으로 허용했더라도** 스위치 분기에 닿기 전에 요청이 500 으로 죽었다."""
+    import api.routes.app_data_control as route_mod
+    from core.policy_shadow import policy_shadow
+    policy_shadow.reset()
+
+    def _boom(*a, **k):
+        raise RuntimeError("기존 판정기 폭발")
+    monkeypatch.setattr(route_mod, "assert_release_readable", _boom)
+
+    r = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_ok"}, headers=H)
+    assert r.status_code == 200, f"관측자의 장애가 요청을 죽였다: {r.status_code} {r.text[:120]}"
+    #: ⚠️ 그래도 **세어서 드러낸다** — 조용한 유실 금지.
+    assert _stats()["error"] >= 1, "관측자 장애를 세지 않았다"
+
+
+def test_롤백_상태에서_기존_판정기가_죽으면_막는다(client, monkeypatch):
+    """★★★ 롤백하면 기존 판정이 **강제자**다. 강제자가 죽으면 통과시킬 수 없다 —
+    「판정을 못 했다」는 «허용» 이 아니라 «모른다» 이고, 방향은 언제나 닫는 쪽이다."""
+    import api.routes.app_data_control as route_mod
+    from core import scope_policy
+    monkeypatch.setattr(scope_policy, "app_pdp_enforce", lambda: False)
+
+    def _boom(*a, **k):
+        raise RuntimeError("기존 판정기 폭발")
+    monkeypatch.setattr(route_mod, "assert_release_readable", _boom)
+
+    r = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_ok"}, headers=H)
+    assert r.status_code == 503, f"강제자가 죽었는데 통과했다: {r.status_code}"
+
+
+def test_보조_읽기_판정이_실패하면_판정불가로_답한다(client, monkeypatch):
+    """★★★ 쓰기 거부가 403 인지 404 인지 가르려고 읽기를 한 번 더 묻는다. 그 보조 판정이
+    실패하면 **404 가 아니다** — 404 는 「없다」인데 여기서 참인 것은 「모른다」다.
+
+    ⚠️ 뭉개면 사용자는 자원이 사라졌다고 읽고, 장애는 조용히 묻힌다."""
+    import api.routes.app_data_control as route_mod
+    from core import app_policy
+    from core.org_directory import org_directory
+    #: 남의 부서 자원 → 쓰기 거부(은폐 사유). 그 뒤 보조 읽기 판정만 죽인다.
+    monkeypatch.setattr(org_directory, "get_ownership",
+                        lambda kind, rid: {"dept_id": "sales", "owner_user_id": ""})
+    real = route_mod._shadow_check
+
+    def _peek_dies(p, action, release_id, ds=None):
+        if action == app_policy.READ:
+            return None
+        return real(p, action, release_id, ds)
+    monkeypatch.setattr(route_mod, "_shadow_check", _peek_dies)
+
+    r = client.post("/api/v1/appdata/datasets", headers=H, json={
+        "release_id": "rel_ok", "name": "x",
+        "schema": {"fields": [{"name": "qty", "type": "number"}]}})
+    assert r.status_code == 503, f"판정 불가가 «없음» 으로 위장됐다: {r.status_code}"

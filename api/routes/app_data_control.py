@@ -197,8 +197,17 @@ def _enforce(p: Principal, action: str, release_id: str,
     decision = _shadow_check(p, action, release_id, ds)
     mutating = action in (app_policy.WRITE, app_policy.DELETE, app_policy.MANAGE)
 
-    def _old_verdict() -> Tuple[bool, Optional[HTTPException]]:
-        """기존 판정을 **던지지 않고** 물어본다."""
+    def _old_verdict() -> Tuple[Optional[bool], Optional[HTTPException]]:
+        """기존 판정을 **던지지 않고** 물어본다. `(허용?, 거부예외)`.
+
+        ★★★ [교차검토 89 ①] 첫 판은 `HTTPException` 만 잡았다. 그러면 기존 판정기가
+          `RuntimeError`·DB 오류를 내는 순간 **PDP 가 정상적으로 허용했더라도** 스위치 분기에
+          닿기 전에 요청이 500 으로 죽었다.
+
+        ⚠️ PDP 강제 상태에서 기존 판정기는 **관측자**다. 관측자의 장애가 기능 장애가 되면
+          안 된다 — 그것이 이 저장소의 관통 규약이고, `_shadow_check` 도 같은 규약을 따른다.
+        ★ 「모른다」를 `None` 으로 돌려준다. `False`(거부)와 **다른 사실**이기 때문이다 —
+          롤백 상태에서 그 둘을 뭉개면 「판정 못 함」이 「거부」로 조용히 바뀐다."""
         try:
             if mutating:
                 assert_release_writable(p, release_id)
@@ -207,10 +216,16 @@ def _enforce(p: Principal, action: str, release_id: str,
             return True, None
         except HTTPException as e:
             return False, e
+        except Exception as e:
+            #: 관측자의 장애는 **세어서 드러낸다**(조용한 유실 금지).
+            policy_shadow.error(action=action, exc_type=type(e).__name__)
+            return None, None
 
     old_ok, old_exc = _old_verdict()
 
-    if decision is not None:
+    #: ⚠️ 기존 판정을 **모르면** 어긋남을 세지 않는다. 모르는 값을 `False` 로 채우면
+    #:   그 순간 「기존 거부 · PDP 허용」= `looser` 가 되고, 전환 근거 표가 거짓이 된다.
+    if decision is not None and old_ok is not None:
         policy_shadow.observe(path=path or "appdata", action=action, old_allowed=old_ok,
                               new_allowed=decision.allowed, new_reason=decision.reason,
                               actor=(p.user_id or ""), resource_id=str(release_id or ""),
@@ -241,7 +256,17 @@ def _enforce(p: Principal, action: str, release_id: str,
                 status = 404
                 if mutating:
                     peek = _shadow_check(p, app_policy.READ, release_id, ds)
-                    if peek is not None and peek.allowed:
+                    #: ★★★ [교차검토 89 ②] 보조 판정이 **실패하면 404 가 아니다.**
+                    #:   404 는 「없다」인데 여기서 참인 것은 「모른다」다 — 그 둘을 뭉개면
+                    #:   사용자는 자원이 사라졌다고 읽고, 장애는 조용히 묻힌다.
+                    if peek is None:
+                        exc = HTTPException(
+                            status_code=503,
+                            detail="접근 판정을 수행하지 못했습니다. 잠시 후 다시 시도해 "
+                                   "주십시오.")
+                        _audit_denied(p, action, release_id, ds, path, exc, decision)
+                        raise exc
+                    if peek.allowed:
                         status = 403
             exc = HTTPException(
                 status_code=status,
@@ -251,6 +276,15 @@ def _enforce(p: Principal, action: str, release_id: str,
         return
 
     #: 롤백 경로 — 기존 판정이 강제한다(전환 이전과 같은 동작).
+    #: ⚠️⚠️ 여기서는 기존 판정이 **강제자**이므로 그것이 죽으면 통과시킬 수 없다.
+    #:   「판정을 못 했다」는 «허용» 이 아니라 «모른다» 이고, 모르는 것을 통과시키면
+    #:   통제가 없는 것과 같다 — 방향은 언제나 닫는 쪽이다.
+    if old_ok is None:
+        exc = HTTPException(status_code=503,
+                            detail="접근 판정을 수행하지 못했습니다. 잠시 후 다시 시도해 "
+                                   "주십시오.")
+        _audit_denied(p, action, release_id, ds, path, exc, decision)
+        raise exc
     if not old_ok and old_exc is not None:
         _audit_denied(p, action, release_id, ds, path, old_exc, decision)
         raise old_exc

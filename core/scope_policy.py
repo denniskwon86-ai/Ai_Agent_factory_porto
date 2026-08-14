@@ -264,6 +264,12 @@ def policy() -> Dict[str, Any]:
         "is_default": cur == legacy_deadline_default(),
         "org_enforce": _enf if _enf is not None else _enf_default,
         "org_enforce_source": "policy" if _enf is not None else "config default",
+        #: ★★★ [G1-B 6] 앱 데이터 판정 전환 상태. **출처를 함께 준다** — 「지금 값이 무엇인가」
+        #:   만 알면 그것이 관리자가 정한 것인지 코드 기본값인지 구분되지 않고, 그러면 화면이
+        #:   「누가 이렇게 해 뒀나」에 답하지 못한다(`org_enforce` 와 같은 규약).
+        "app_pdp_enforce": app_pdp_enforce(),
+        "app_pdp_enforce_source": ("policy" if isinstance(doc.get("app_pdp_enforce"), bool)
+                                   else "code default"),
         "history": list(reversed(doc.get("history", [])))[:20],
         "note": ("한시 예외 만료일입니다. 이 날짜가 지나면 범위 미지정(`LEGACY_UNSCOPED`) "
                  "데이터는 조회에서 제외됩니다 — 그전에 소유 조직을 지정하거나 승인된 전사 "
