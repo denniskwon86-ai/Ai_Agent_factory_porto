@@ -102,6 +102,22 @@ ROWS = [
     {},
 ]
 
+#: ★★★ [교차검토 84·85] 브리지의 «다음에 무엇을 할까» 판단. **실제로 돌려서** 본다.
+#:   이 판단이 틀렸을 때 낡은 앱이 새 증명으로 계속 돌았다 — 소스 검사로는 못 잡던 칸이다.
+STEPS = [
+    {"ok": True},                                        # 성공 → 그대로 돌려준다
+    {"ok": False, "code": "NOT_FOUND"},                  # 다른 거부 → 그대로
+    {"ok": False, "code": "FORBIDDEN"},
+    {"ok": False, "code": "UNAVAILABLE"},
+    {"ok": False, "code": "EXPIRED"},                    # 만료 → 재발급
+    {"ok": False, "code": "EXPIRED", "stale": False},
+    {"ok": False, "code": "EXPIRED", "stale": True},     # 선언 변경 → 프레임을 버린다
+    {"ok": True, "stale": True},                         # 성공이면 stale 이어도 그대로
+]
+
+#: HTTP 상태 → 앱 오류. ⚠️ 5xx·0·410 이 «없다» 로 접히면 앱이 서버에 있는 것을 지운다.
+STATUSES = [200, 400, 401, 403, 404, 409, 410, 422, 500, 502, 503, 0]
+
 RESPONSES = [
     {"sid": SID, "request_id": "r1", "ok": True, "data": {"records": []}},
     {"sid": SID, "request_id": "r2", "ok": True, "data": None},
@@ -121,9 +137,10 @@ def js():
         path = os.path.join(tmp, "cases.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"cursors": CURSORS, "pages": PAGES, "requests": REQUESTS,
-                       "rows": ROWS, "responses": RESPONSES}, f, ensure_ascii=False)
-        r = subprocess.run([node, RUNNER, TS_WIRE, path], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace")
+                       "rows": ROWS, "responses": RESPONSES, "steps": STEPS,
+                       "statuses": STATUSES}, f, ensure_ascii=False)
+        r = subprocess.run([node, RUNNER, TS_WIRE, path], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace")
         assert r.returncode == 0, f"프론트 계약을 실행하지 못했습니다:\n{r.stderr[-1500:]}"
         return json.loads(r.stdout)
 
@@ -180,3 +197,30 @@ def test_응답_봉투가_두_구현에서_같다(js):
                                     data=r.get("data"), error_code=r.get("error_code", ""))
                 for r in RESPONSES]
     assert js["responses"] == expected
+
+
+# ── ④ 브리지 판단(실행형) ─────────────────────────────────────────────────
+
+def test_다음_단계_판단이_실제로_돌아간다(js):
+    """★★★ [교차검토 84·85] **소스 검사가 아니라 실행이다.**
+
+    낡은 앱이 새 증명으로 계속 돌던 결함은 바로 이 판단에 있었다 — 만료와 「선언 변경」을
+    가르지 않았다. 그 갈림을 여기서 돌려 본다."""
+    from core.host_runtime_sdk import ERR_EXPIRED
+    expected = []
+    for c in STEPS:
+        if c.get("ok") or c.get("code") != ERR_EXPIRED:
+            expected.append("return")
+        else:
+            expected.append("stale" if c.get("stale") else "reissue")
+    assert js["steps"] == expected, list(zip(js["steps"], expected))
+    #: 대조군 — 세 갈래가 **전부** 나와야 한다. 한 갈래만 나오면 이 시험은 헛돈다.
+    assert set(js["steps"]) == {"return", "reissue", "stale"}
+
+
+def test_상태_접힘이_실제로_돌아간다(js):
+    """⚠️ 410(앱 선언 변경)은 앱에게 만료와 같은 말이고, 5xx·0 은 **「없다」가 아니다.**"""
+    want = {200: "UNAVAILABLE", 400: "INVALID", 401: "EXPIRED", 403: "FORBIDDEN",
+            404: "NOT_FOUND", 409: "UNAVAILABLE", 410: "EXPIRED", 422: "INVALID",
+            500: "UNAVAILABLE", 502: "UNAVAILABLE", 503: "UNAVAILABLE", 0: "UNAVAILABLE"}
+    assert js["statuses"] == [want[n] for n in STATUSES]

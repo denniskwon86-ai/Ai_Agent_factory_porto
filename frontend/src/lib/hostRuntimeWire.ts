@@ -258,3 +258,19 @@ export function buildResponse(
 export function idempotencySlot(sid: string, op: string, dataset: string, key: string): string {
   return [sid, op, dataset, key].join('');
 }
+
+
+/** ★★★ 한 응답을 보고 **다음에 무엇을 할지** 정한다. 순수 함수로 뽑아 둔 이유는 하나 —
+ *  이 판단이 틀렸을 때 결속이 통째로 우회됐기 때문이다(교차검토 84). 소스 검사가 아니라
+ *  **실제로 돌려서** 확인할 수 있어야 한다(`tests/js/host_runtime_wire_runner.mjs`).
+ *
+ *  ⚠️ 만료와 «선언 변경» 을 여기서 가른다. 둘 다 앱에게는 `EXPIRED` 지만
+ *    앞은 재발급으로 풀리고 뒤는 **프레임을 버려야** 한다. */
+export const STEP_RETURN = 'return';
+export const STEP_STALE = 'stale';
+export const STEP_REISSUE = 'reissue';
+
+export function nextStep(r: { ok: boolean; code?: string; stale?: boolean }): string {
+  if (r.ok || r.code !== ERR_EXPIRED) return STEP_RETURN;
+  return r.stale ? STEP_STALE : STEP_REISSUE;
+}

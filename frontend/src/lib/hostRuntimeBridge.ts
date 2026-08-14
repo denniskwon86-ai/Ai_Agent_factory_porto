@@ -33,7 +33,7 @@ import { apiFetch } from './api';
 import {
   DATASET_PUBLIC_FIELDS, ERR_INVALID, ERR_NOT_FOUND, ERR_UNAVAILABLE, IGNORED_FROM_APP,
   ERR_EXPIRED, MAX_CALLS_PER_MINUTE, MAX_INFLIGHT, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES,
-  MSG_HELLO, STATUS_STALE_APP,
+  MSG_HELLO, STATUS_STALE_APP, STEP_RETURN, STEP_STALE, nextStep,
   MSG_INIT, MSG_REQ, MUTATING_OPS, REQUEST_TIMEOUT_MS, SDK_VERSION, VERDICT_DROP,
   VERDICT_OK, buildResponse, encodeCursor, errorCodeForStatus, idempotencySlot,
   normalizePage, projectDataset, projectRecord, validateRequest,
@@ -288,11 +288,15 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
   async function runWithProof(msg: any): Promise<{ ok: boolean; data?: unknown; code?: string }> {
     if (!proof && !(await fetchProof())) return { ok: false, code: ERR_UNAVAILABLE };
     const first = await run(msg);
-    if (first.ok || first.code !== ERR_EXPIRED) return first;
+    const step = nextStep(first);
+    if (step === STEP_RETURN) return first;
     //: ★★★ 앱 선언이 바뀐 것은 **재발급으로 풀리지 않는다.** 새 증명을 주면 옛 코드가
     //:   그것으로 계속 돈다 — 화면에 알리고 프레임을 버린다.
-    if (first.stale) {
+    if (step === STEP_STALE) {
       staleApp = true;
+      //: ⚠️ 들고 있던 증명도 **즉시 버린다.** 남겨 두면 진행 중인 다른 호출들이 그것으로
+      //:   계속 서버를 두드려 410 과 거부 감사가 쌓인다 — 아무 소용도 없이.
+      proof = '';
       deps.onActivity?.({
         op: String(msg.op || ''), ok: false, errorCode: ERR_EXPIRED, staleApp: true,
         message: '앱 정의가 바뀌었습니다. 목록에서 이 앱을 다시 열어 주십시오.',

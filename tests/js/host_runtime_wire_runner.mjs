@@ -24,6 +24,10 @@ const out = {
   }),
   datasets: cases.rows.map((r) => wire.projectDataset(r)),
   records: cases.rows.map((r) => wire.projectRecord(r)),
+  //: ★ 「다음에 무엇을 할까」 판단도 **실제로 돌린다.** 이 판단이 틀렸을 때 낡은 앱이
+  //:   새 증명으로 계속 돌았다 — 소스 검사로는 못 잡던 칸이다(교차검토 84).
+  steps: cases.steps.map((c) => wire.nextStep(c)),
+  statuses: cases.statuses.map((n) => wire.errorCodeForStatus(n)),
   responses: cases.responses.map(
     (r) => wire.buildResponse(r.sid, r.request_id, r.ok, r.data, r.error_code || ''),
   ),

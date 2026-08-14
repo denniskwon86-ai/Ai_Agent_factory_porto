@@ -346,7 +346,7 @@ def test_재발급은_Preview_수명이_아니라_요청마다_한_번이다(bri
     #: ⚠️⚠️ **이름이 아니라 «조건» 을 못박는다.** 종전 시험은 `reissued` 라는 **이름**이
     #:   없는지만 봤고, 그래서 다른 이름으로 같은 전역 플래그를 두면 그대로 통과했다
     #:   (변이 검사에서 생존했다). 재시도 여부는 **이번 응답(`first`)만** 보고 정해져야 한다.
-    assert "if (first.ok || first.code !== ERR_EXPIRED) return first;" in body, \
+    assert "const step = nextStep(first);" in body and "step === STEP_RETURN" in body, \
         "재시도 조건이 이번 요청의 결과 말고 다른 상태에 달려 있다"
     assert "withinBudget()" in body, "재발급이 호출 예산을 쓰지 않는다 — 폭주를 막지 못한다"
     assert body.count("fetchProof()") == 2, "한 요청에서 재발급을 한 번만 해야 한다"
@@ -389,13 +389,18 @@ def test_앱_선언이_바뀌면_재발급하지_않는다(bridge):
     assert m, "재발급 경로를 찾지 못했다"
     body = m.group(0)
     #: 낡은 앱이면 재발급 앞에서 되돌아가야 한다.
-    stale_at = body.index("first.stale")
+    stale_at = body.index("step === STEP_STALE")
     reissue_at = body.index("fetchProof()", body.index("const first"))
     assert stale_at < reissue_at, "선언 변경을 확인하기 전에 재발급한다"
     assert "staleApp = true" in body
     #: ⚠️ 내부 표시만 세우고 **화면에 알리지 않으면** 사용자는 앱이 조용히 멈춘 것으로 본다.
     #:   변이 검사에서 이 칸이 비어 있었다 — 알림을 지워도 초록이었다.
     assert "staleApp: true" in body, "낡은 앱을 화면에 알리지 않는다"
+
+    #: ★★★ [교차검토 85] 들고 있던 증명도 **즉시 버린다.** 남겨 두면 진행 중인 다른
+    #:   호출들이 그것으로 계속 서버를 두드려 410 과 거부 감사가 쌓인다 — 아무 소용도 없이.
+    stale_block = body[body.index("step === STEP_STALE"):]
+    assert "proof = '';" in stale_block[:stale_block.index("return first;")],         "낡은 앱을 확인하고도 증명을 들고 있다 — 반복 410 과 거부 감사가 쌓인다"
 
     #: 발급 함수 자체도 막는다 — 프레임 재생성 시 악수→발급이 돌기 때문이다.
     f = re.search(r"async function fetchProof.*?\n  \}", bridge, re.S)
@@ -429,7 +434,14 @@ def test_성공하면_이전_오류_문구를_지운다():
     assert m, "브리지 훅을 찾지 못했다"
     ok_branch = m.group(1)[:m.group(1).index("if (info.message)")]
     assert "setBridgeNote(" in ok_branch, "성공했는데 이전 문구를 그대로 둔다"
-    assert "setNeedsScope(false)" in ok_branch and "setStaleApp(false)" in ok_branch
+    assert "setNeedsScope(false)" in ok_branch
+    #: ★★★ [교차검토 85] 성공이 **`staleApp` 을 풀면 안 된다.** 병렬로 나가 있던 다른
+    #:   호출의 «늦은 성공» 이 도착하면 방금 세운 안내가 지워지고, 사용자는 낡은 판이
+    #:   계속 도는 것을 모른 채 쓰게 된다. 해제는 **새 릴리스를 열 때만** 한다.
+    assert "setStaleApp(false)" not in ok_branch, \
+        "늦은 성공 하나가 낡은 앱 안내를 지운다"
+    assert re.search(r"bridgeRef\.current = b;.*?setStaleApp\(false\)", src, re.S), \
+        "새 릴리스를 열 때 낡은 앱 표시가 풀리지 않는다"
     #: ⚠️ 화면이 «낡은 앱» 을 실제로 **읽는지**도 본다. 브리지가 보내도 화면이 버리면
     #:   사용자는 앱이 조용히 멈춘 것으로 보고, 새로고침만 반복한다.
     assert "info.staleApp" in m.group(1), "화면이 낡은 앱 알림을 읽지 않는다"

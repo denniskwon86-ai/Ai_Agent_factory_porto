@@ -859,7 +859,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
           //: ⚠️ 성공했는데 옛 오류 문구가 남아 있으면 사용자는 **아직 안 된다고 읽는다.**
           //   범위를 고르고 나서도 「조직을 선택하십시오」가 그대로 떠 있던 결함이다.
           setNeedsScope(false);
-          setStaleApp(false);
+          //: ⚠️⚠️ **`staleApp` 은 여기서 풀지 않는다.** 병렬로 나가 있던 다른 호출의 «늦은
+          //   성공» 이 도착하면 방금 세운 안내가 지워지고, 사용자는 낡은 판이 계속 도는
+          //   것을 모른 채 쓰게 된다. 해제는 **새 릴리스를 열 때만** 한다(아래 effect).
           setBridgeNote(bridgeStatusKo(true, true));
           return;
         }
