@@ -48,6 +48,9 @@ def _res(**kw):
 
 def _facts(**kw):
     base = dict(app_id="app_1", release_id="rel_1", app_class="departmental",
+                #: ★ [2026-08-14] 증명은 발급 당시의 **매니페스트 지문·판**에도 묶인다.
+                #:   기본값을 채워 두고, 「어긋나면 막힌다」는 별도 시험에서 본다.
+                manifest_fingerprint="fp_1", manifest_version="1.0",
                 declared_capabilities=(ap.READ, ap.WRITE, ap.DELETE, ap.MANAGE))
     base.update(kw)
     return ap.AppResourceFacts(**base)
@@ -64,6 +67,7 @@ def _app(**kw):
     """앱 증명 주체. 기본은 **전수 대조를 전부 통과하는** 값."""
     tok = dict(actor="u@x", session_id="sess_1", app_id="app_1", release_id="rel_1",
                tenant_id="tenant_default", entity_mode="REAL", scope_node_id="node_hq",
+               manifest_fingerprint="fp_1", manifest_version="1.0",
                capabilities=(ap.READ, ap.WRITE, ap.DELETE, ap.MANAGE), expired=False)
     tok.update(kw.pop("token", {}))
     base = dict(user_id="u@x", scope=_Scope(read={"hq"}, write={"hq"}), ctx=_ctx(),
@@ -363,3 +367,44 @@ def test_사유가_서로_겹치지_않는다(monkeypatch):
         ap.decide(_user(), _res(status="retired"), ap.READ).reason,
     }
     assert len(reasons) == 13, f"사유가 겹친다: {sorted(reasons)}"
+
+
+# ── [2026-08-14] 증명은 «그때 그 앱» 에 묶인다 ────────────────────────────
+
+def test_매니페스트가_바뀌면_기존_증명이_막힌다():
+    """★★★ capability 선언만 매번 다시 읽으면 **같은 권한을 유지한 채 내용이 바뀐**
+    매니페스트가 기존 증명을 무효화하지 못한다. 지문·판을 함께 묶어야 「이 증명은 그때 그
+    앱에 대한 것」이 된다.
+
+    ★ 앱에게는 `EXPIRED` 로 보인다 — 부모가 새 증명을 받으면 곧바로 풀리는 상태이고,
+      숨길 이유가 없다(그 앱 자신의 사실이다)."""
+    import core.host_runtime_sdk as sdk
+    d = ap.decide(_app(), _res(), ap.READ, app=_facts(manifest_fingerprint="fp_2"))
+    assert not d.allowed and d.reason == ap.DENY_TOKEN_MANIFEST_MISMATCH
+    assert sdk.app_error_code(d.reason) == sdk.ERR_EXPIRED
+
+    d2 = ap.decide(_app(), _res(), ap.READ, app=_facts(manifest_version="2.0"))
+    assert not d2.allowed and d2.reason == ap.DENY_TOKEN_MANIFEST_MISMATCH
+
+
+def test_지문이_없는_증명은_통과하지_못한다():
+    """⚠️ 「옛 증명이라 지문이 없다」를 허용하면 그것이 곧 우회로다 — 세션 축과 같은 판단."""
+    d = ap.decide(_app(token={"manifest_fingerprint": ""}), _res(), ap.READ, app=_facts())
+    assert not d.allowed and d.reason == ap.DENY_TOKEN_MANIFEST_MISMATCH
+
+
+def test_양쪽_다_빈_지문도_통과하지_못한다():
+    """★★★ **여기가 진짜 칸이다.** 한쪽만 비면 «다르다» 로 걸리지만, **둘 다 비면 같다** —
+    그래서 「빈 값을 통과시키지 않는다」는 별도 규칙이 있어야 한다.
+
+    매니페스트가 없는 옛 릴리스는 지문이 빈 채로 유도되므로, 이 규칙이 없으면 **선언 없는
+    앱의 증명이 그대로 통한다.** 변이 검사에서 이 칸이 비어 있는 것이 드러났다."""
+    d = ap.decide(_app(token={"manifest_fingerprint": "", "manifest_version": ""}),
+                  _res(), ap.READ,
+                  app=_facts(manifest_fingerprint="", manifest_version=""))
+    assert not d.allowed and d.reason == ap.DENY_TOKEN_MANIFEST_MISMATCH
+
+
+def test_같은_매니페스트면_통과한다():
+    """★ 대조군 — 이것이 없으면 「무조건 거부」도 위 시험을 통과한다."""
+    assert ap.decide(_app(), _res(), ap.READ, app=_facts()).allowed

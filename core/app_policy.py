@@ -76,6 +76,9 @@ DENY_TOKEN_SESSION_MISMATCH = "TOKEN_SESSION_MISMATCH"  # 다른 세션에서 �
 DENY_TOKEN_APP_MISMATCH = "TOKEN_APP_MISMATCH"       # 남의 앱 데이터를 요청했다
 DENY_TOKEN_CONTEXT_MISMATCH = "TOKEN_CONTEXT_MISMATCH"  # 다른 회사·실행 문맥에서 재사용
 DENY_TOKEN_SCOPE_MISMATCH = "TOKEN_SCOPE_MISMATCH"   # 토큰이 묶인 조직 범위 밖
+#: ★★★ 증명 발급 당시의 앱 선언과 지금의 선언이 다르다 — **앱이 바뀌었다.**
+#:   ⚠️ capability 만 비교하면 «같은 권한을 유지한 채 내용이 바뀐 매니페스트» 를 놓친다.
+DENY_TOKEN_MANIFEST_MISMATCH = "TOKEN_MANIFEST_MISMATCH"
 DENY_TOKEN_CAPABILITY = "TOKEN_CAPABILITY"
 DENY_MANIFEST_CAPABILITY = "MANIFEST_CAPABILITY"
 DENY_CONTEXT = "CONTEXT_MISMATCH"                    # 요청 문맥 ↔ 자원 문맥
@@ -290,6 +293,17 @@ def _token_ok(subject: Subject, res: ResourceScope,
         return False, DENY_TOKEN_APP_MISMATCH, "이 앱의 데이터가 아닙니다."
     if str(tok.get("app_id", "")) != str(app.app_id or ""):
         return False, DENY_TOKEN_APP_MISMATCH, "이 앱의 데이터가 아닙니다."
+
+    # ③-b 그 앱의 **어느 판**인가 — 발급 당시의 선언과 지금의 선언이 같아야 한다
+    #     ⚠️ 빈 값을 통과시키지 않는다. 「옛 증명이라 지문이 없다」를 허용하면 그것이 곧
+    #       우회로다(세션 축과 같은 판단).
+    tok_fp = str(tok.get("manifest_fingerprint", "") or "")
+    tok_mv = str(tok.get("manifest_version", "") or "")
+    if (not tok_fp
+            or tok_fp != str(app.manifest_fingerprint or "")
+            or tok_mv != str(app.manifest_version or "")):
+        return (False, DENY_TOKEN_MANIFEST_MISMATCH,
+                "앱 선언이 발급 이후 바뀌었습니다. 앱을 다시 여십시오.")
 
     # ④ 어느 회사·실행 문맥의 증명인가 — 문맥을 바꿔 재사용하는 경로를 막는다
     c = subject.ctx or {}

@@ -194,17 +194,6 @@ def test_증명이_없으면_아예_부르지_않는다(bridge):
     assert "if (!proof) return { status: 0, json: null };" in bridge
 
 
-def test_만료_재발급은_한_번뿐이다(bridge):
-    """★★ 교차검토 계약 (7). 만료가 아닌 이유로 계속 거부되는 상황에서 재발급을 반복하면
-    그것이 곧 **서버를 두드리는 앱**이다."""
-    assert "let reissued = false" in bridge
-    m = re.search(r"async function runWithProof.*?\n  \}", bridge, re.S)
-    assert m, "재발급 경로를 찾지 못했다"
-    body = m.group(0)
-    assert "|| reissued" in body, "재발급 횟수를 세지 않는다"
-    assert body.count("fetchProof()") == 2, "재발급 시도가 한 번이 아니다"
-
-
 def test_세대가_바뀌면_증명을_버린다(bridge):
     """⚠️ 프레임이 바뀌면 «지금 그 앱을 열고 있다» 는 사실도 새로 세워야 한다."""
     m = re.search(r"function resetGeneration\(\) \{(.*?)\n  \}", bridge, re.S)
@@ -338,3 +327,46 @@ def test_재시도용_멱등키를_오류에_실어_준다():
     body = src[src.index("function autoKey"):]
     body = body[:body.index("\n            }")]
     assert "JSON.stringify" not in body, "내용으로 키를 만들면 정상 중복 입력이 사라진다"
+
+
+# ── ⑥ [교차검토 83] 재발급 범위와 화면 전달 ──────────────────────────────
+
+def test_재발급은_Preview_수명이_아니라_요청마다_한_번이다(bridge):
+    """★★★ 지적 4 — 종전에는 재발급 횟수를 **Preview 수명 전체**로 셌다. 그러면 두 번째
+    정상 만료부터 앱이 **영구적으로 실패**한다. 증명은 15분짜리이므로 조금만 오래 열어 두면
+    반드시 도달하는 상태다.
+
+    「루프를 막는다」와 「한 번 쓰고 버린다」는 다른 말이고, 종전 코드는 뒤쪽이었다.
+    ★ 폭주는 여전히 막힌다: 재발급도 호출 예산을 쓰고, 한 요청은 재시도를 한 번만 한다."""
+    m = re.search(r"async function runWithProof.*?\n  \}", bridge, re.S)
+    assert m, "재발급 경로를 찾지 못했다"
+    body = m.group(0)
+    #: ⚠️⚠️ **이름이 아니라 «조건» 을 못박는다.** 종전 시험은 `reissued` 라는 **이름**이
+    #:   없는지만 봤고, 그래서 다른 이름으로 같은 전역 플래그를 두면 그대로 통과했다
+    #:   (변이 검사에서 생존했다). 재시도 여부는 **이번 응답(`first`)만** 보고 정해져야 한다.
+    assert "if (first.ok || first.code !== ERR_EXPIRED) return first;" in body, \
+        "재시도 조건이 이번 요청의 결과 말고 다른 상태에 달려 있다"
+    assert "withinBudget()" in body, "재발급이 호출 예산을 쓰지 않는다 — 폭주를 막지 못한다"
+    assert body.count("fetchProof()") == 2, "한 요청에서 재발급을 한 번만 해야 한다"
+
+
+def test_서버가_사용자에게_할_말을_화면으로_올린다(bridge):
+    """★★★ 지적 5 — 서버는 409 와 정확한 안내를 돌려주는데 화면이 그것을 버리면 사용자는
+    **일반 연결 실패**만 본다. 조직 범위를 고르면 되는 상황인데 아무도 그것을 모른다."""
+    assert "needsScope" in bridge and "r.json?.detail" in bridge
+    m = re.search(r"async function fetchProof.*?\n  \}", bridge, re.S)
+    assert m and "onActivity" in m.group(0)
+
+
+def test_화면이_안내와_재시도를_함께_준다():
+    """⚠️ 안내만 하고 다시 시도할 방법을 주지 않으면 사용자는 새로고침하는 수밖에 없다.
+
+    ⚠️⚠️ 주석을 뺀 **코드만** 본다. 종전에는 「다시 시도할 방법을」이라고 적어 둔 주석이
+      검사를 통과시켰다 — 단추를 지워도 초록이었다(변이 검사에서 생존했다)."""
+    src = "\n".join(l for l in TSX_PREVIEW.read_text("utf-8").splitlines()
+                    if not l.strip().startswith(("//", "*", "/*", "#:")))
+    assert "onActivity:" in src, "브리지 훅이 화면에 연결되지 않았다"
+    assert "needsScope" in src
+    assert re.search(r"<button[\s\S]*?>\s*다시 시도\s*</button>", src), "재시도 단추가 없다"
+    #: 서버 문장은 부모 화면에만 간다 — iframe 으로 넘기지 않는다.
+    assert "info.message" in src

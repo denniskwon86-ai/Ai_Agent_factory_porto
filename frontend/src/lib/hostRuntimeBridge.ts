@@ -63,7 +63,13 @@ export interface BridgeDeps {
   /** 시험 주입용. 기본은 실제 `apiFetch`. */
   fetchImpl?: (path: string, init?: RequestInit) => Promise<Response>;
   /** 브리지가 무엇을 했는지 화면이 알 수 있게 하는 훅(선택). */
-  onActivity?: (info: { op: string; ok: boolean; errorCode?: string }) => void;
+  onActivity?: (info: {
+    op: string; ok: boolean; errorCode?: string;
+    /** 부모 화면에 그대로 보여 줄 문장(서버가 사용자에게 할 말을 준 경우에만). */
+    message?: string;
+    /** 사용자가 조직 범위를 골라야 하는 상태인가. */
+    needsScope?: boolean;
+  }) => void;
 }
 
 interface Pending { at: number; }
@@ -83,8 +89,6 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
   /** ★★★ 앱 증명. **이 변수 말고 어디에도 두지 않는다** — iframe·localStorage·로그 금지.
    *  ⚠️ 세대가 바뀌면 버린다(아래 `resetGeneration`). */
   let proof = '';
-  /** 만료 시 **한 번만** 재발급한다. ⚠️ 무한 재발급 루프는 서버를 두드리는 앱이 된다. */
-  let reissued = false;
   const inflight = new Set<string>();
   const pending = new Map<string, Pending>();
   /** 멱등 자리 → 직전 결과. ⚠️ 「정확히 한 번」이 아니다 — **한 세대 안의 중복**만 막는다. */
@@ -94,7 +98,6 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
   function resetGeneration() {
     //: ⚠️ 증명도 버린다. 프레임이 바뀌면 «지금 그 앱을 열고 있다» 는 사실도 새로 세워야 한다.
     proof = '';
-    reissued = false;
     idem = new Map();
     inflight.clear();
     pending.clear();
@@ -141,10 +144,18 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
     const r = await call('POST', `${RUNTIME}/proof`, { release_id: deps.releaseId },
                          { withProof: false });
     if (r.status !== 200 || !r.json?.data?.token) {
+      //: ★ 서버가 «사용자가 할 일이 있다» 고 말한 경우(조직 범위 미선택 = 409)는 그 문장을
+      //:   그대로 화면에 올린다. 「연결 실패」로 뭉개면 사용자는 원인을 알 수 없다.
       //: ⚠️ 실패 사유를 앱에게 옮기지 않는다. 화면(부모)에는 남긴다 — 사용자가 조직 범위를
       //:   골라야 하는 경우가 있고, 그때 「데이터가 없다」로 보이면 아무도 원인을 모른다.
-      deps.onActivity?.({ op: 'proof', ok: false,
-                          errorCode: String(r.json?.detail || r.status) });
+      deps.onActivity?.({
+        op: 'proof', ok: false,
+        errorCode: String(r.status),
+        //: ⚠️ 서버 문장을 그대로 쓰되 **부모 화면에만** 간다 — iframe 에는 가지 않는다.
+        message: (r.status === 409 && typeof r.json?.detail === 'string')
+          ? r.json.detail : '',
+        needsScope: r.status === 409,
+      });
       return false;
     }
     proof = String(r.json.data.token);
@@ -248,17 +259,21 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
     return { ok: false, code: ERR_INVALID };
   }
 
-  /** 증명을 갖춘 상태로 한 요청을 처리한다. **만료는 딱 한 번** 재발급하고 재시도한다.
+  /** 증명을 갖춘 상태로 한 요청을 처리한다. **요청마다 최대 한 번** 재발급하고 재시도한다.
    *
-   * ⚠️ 무한 재발급 루프를 만들지 않는다 — 만료가 아닌 이유로 계속 거부되는 상황에서
-   *   재발급을 반복하면 그것이 곧 서버를 두드리는 앱이다(교차검토 계약 7). */
+   * ⚠️⚠️ [2026-08-14 교차검토 지적 4] 종전에는 재발급 횟수를 **Preview 수명 전체**로 셌다.
+   *   그러면 두 번째 정상 만료부터 앱이 **영구적으로 실패**한다 — 15분짜리 증명이므로
+   *   조금만 오래 열어 두면 반드시 도달하는 상태다. 「루프를 막는다」와 「한 번 쓰고 버린다」는
+   *   다른 말이었고, 종전 코드는 뒤쪽이었다.
+   * ★ 그래도 폭주는 막힌다: 재발급도 호출 예산(`withinBudget`)을 쓰고, 한 요청은 재시도를
+   *   한 번만 한다 — 즉 실패가 계속돼도 **요청 수에 비례**할 뿐 스스로 증식하지 않는다. */
   async function runWithProof(msg: any): Promise<{ ok: boolean; data?: unknown; code?: string }> {
     if (!proof && !(await fetchProof())) return { ok: false, code: ERR_UNAVAILABLE };
     const first = await run(msg);
-    if (first.ok || first.code !== ERR_EXPIRED || reissued) return first;
-    reissued = true;
+    if (first.ok || first.code !== ERR_EXPIRED) return first;
+    //: 만료·앱 선언 변경 — 둘 다 «다시 열면 된다» 이고, 부모가 대신 다시 연다.
     proof = '';
-    if (!(await fetchProof())) return { ok: false, code: ERR_EXPIRED };
+    if (!withinBudget() || !(await fetchProof())) return { ok: false, code: ERR_EXPIRED };
     return run(msg);
   }
 

@@ -104,7 +104,11 @@ def _require_proof(request: Request, p: Principal) -> Dict[str, Any]:
     if not raw:
         raise _fail(sdk.ERR_FORBIDDEN, audit_reason="앱 증명 없음", actor=(p.user_id or ""),
                     path=str(request.url.path))
-    rec = app_capability_tokens.resolve(raw)
+    #: ★★★ [교차검토 지적 3] `quiet=True` — **해석 단계에서 «사용됨» 을 남기지 않는다.**
+    #:   해석은 「토큰이 존재한다」까지만 증명하고 그 뒤에 PDP 가 거부할 수 있다. 먼저
+    #:   기록하면 보안 감사에서 「데이터를 만졌다」와 「만지려다 막혔다」가 같은 줄이 되고,
+    #:   카나리 증거도 왜곡된다. 성공 사용은 `_judge` 가 허용을 확정한 뒤 남긴다.
+    rec = app_capability_tokens.resolve(raw, quiet=True)
     if rec is None:
         #: 없는 증명과 회수된 증명을 구분하지 않는다.
         raise _fail(sdk.ERR_FORBIDDEN, audit_reason="앱 증명을 확인할 수 없음",
@@ -136,7 +140,11 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str, path: s
             tenant_id=res.tenant_id, entity_mode=res.entity_mode,
             scope_node_id=res.scope_node_id, owner_user_id=res.owner_user_id,
             owner_dept_id=res.owner_dept_id, binding_state=res.binding_state,
-            status="retired" if (dataset.get("retired_at") or "") else "active")
+            #: ⚠️⚠️ **덮어쓰지 않는다.** 종전에는 여기서 데이터셋 상태만 넣어 `resource_scope`
+            #:   가 판정한 «프로그램 사용 중단» 을 지웠고, 그래서 관리자가 끈 프로그램이
+            #:   계속 돌았다. 둘 중 **하나라도** 중단이면 중단이다.
+            status=("retired" if ((dataset.get("retired_at") or "")
+                                  or res.status != "active") else "active"))
     facts = app_proof.app_facts(rel, release_id)
     subject = app_policy.Subject(
         user_id=(p.user_id or ""), scope=p.scope, ctx=ctx,
@@ -167,6 +175,11 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str, path: s
         raise _fail(sdk.app_error_code(decision.reason),
                     audit_reason=decision.reason, actor=(p.user_id or ""),
                     target=release_id, path=path)
+    #: ★ **허용이 확정된 뒤** 성공 사용을 남긴다(§`record_use`).
+    try:
+        app_capability_tokens.record_use(proof)
+    except Exception:
+        pass
 
 
 def _dataset(proof: Dict[str, Any], name: str) -> Dict[str, Any]:
@@ -276,6 +289,10 @@ async def issue_proof(req: ProofRequest, p: Principal = Depends(current_principa
             tenant_id=str(ctx.get("tenant_id", "") or ""),
             entity_mode=str(ctx.get("entity_mode", "") or ""),
             scope_node_id=str(ctx.get("scope_node_id", "") or ""),
+            #: ★★★ 발급 시점의 앱 선언을 **봉인**한다. capability 만 비교하면 «같은 권한을
+            #:   유지한 채 내용이 바뀐 매니페스트» 가 기존 증명을 무효화하지 못한다.
+            manifest_fingerprint=facts.manifest_fingerprint,
+            manifest_version=facts.manifest_version,
             purpose="Host Runtime 데이터 평면")
     except AppTokenError as e:
         #: 발급 계약 위반은 앱 코드 문제가 아니라 **자료 상태** 문제다(문맥·범위 공란 등).

@@ -96,7 +96,8 @@ class AppCapabilityTokenStore:
               capabilities: Tuple[str, ...] = (READ,),
               tenant_id: str = "", entity_mode: str = "",
               scope_node_id: str = "", ttl_minutes: int = DEFAULT_TTL_MINUTES,
-              purpose: str = "") -> Dict[str, Any]:
+              purpose: str = "", manifest_fingerprint: str = "",
+              manifest_version: str = "") -> Dict[str, Any]:
         """토큰 발급. 반환에 **전문(`token`)이 들어 있는 유일한 곳**이다.
 
         ⚠️ 호출부는 이 값을 로그·목록·오류 메시지에 다시 싣지 않는다."""
@@ -169,6 +170,12 @@ class AppCapabilityTokenStore:
             "tenant_id": tenant_id,
             "entity_mode": entity_mode,
             "scope_node_id": scope_node_id,
+            #: ★★★ [2026-08-14 교차검토 지적 2] **발급 시점의 매니페스트를 봉인한다.**
+            #:   capability 선언은 요청마다 다시 읽지만, 그것만으로는 «같은 capability 를
+            #:   유지한 채 내용이 바뀐 매니페스트» 가 기존 증명을 무효화하지 못한다.
+            #:   지문·판을 함께 묶어야 「이 증명은 **그때 그 앱**에 대한 것」이 된다.
+            "manifest_fingerprint": (manifest_fingerprint or "").strip(),
+            "manifest_version": (manifest_version or "").strip(),
             "issued_at": now.isoformat(),
             "expires_at": (now + timedelta(minutes=ttl)).isoformat(),
             "ttl_minutes": ttl,
@@ -213,14 +220,26 @@ class AppCapabilityTokenStore:
                 self._audit("APP_TOKEN_EXPIRED", out, outcome="denied",
                             reason="만료된 앱 토큰 사용 시도")
             else:
-                #: ★★★ [rev.2 · 교차검토 지적 5] **성공 사용을 남긴다.**
-                #:   발급과 거부만 남기면 「그 증명으로 실제로 무엇을 했나」에 답할 수 없고,
-                #:   유출 조사에서 가장 필요한 것이 바로 그 기록이다.
-                self._audit("APP_TOKEN_USED", out,
-                            reason="앱 데이터 접근 증명 사용",
-                            detail=f"release={out.get('release_id','')} "
-                                   f"use_count={out.get('use_count')}")
+                self.record_use(out)
         return out
+
+    def record_use(self, rec: Dict[str, Any]) -> None:
+        """★★★ **성공 사용을 남긴다 — 다만 «판정이 끝난 뒤» 에.**
+
+        발급과 거부만 남기면 「그 증명으로 실제로 무엇을 했나」에 답할 수 없고, 유출 조사에서
+        가장 필요한 것이 바로 그 기록이다.
+
+        ⚠️⚠️ [2026-08-14 교차검토 지적 3] 그런데 종전에는 `resolve()` 가 **해석에 성공한 순간**
+          이것을 남겼다. 해석은 「토큰이 존재한다」까지만 증명하고 그 뒤에 PDP 가 거부할 수
+          있다 — 즉 **거부된 요청도 「사용됨」으로 먼저 기록**됐다. 그러면 보안 감사에서
+          「이 증명으로 데이터를 만졌다」와 「만지려다 막혔다」가 같은 줄이 되고, 카나리 증거도
+          왜곡된다.
+          그래서 런타임 경로는 `resolve(quiet=True)` 로 해석만 하고, **허용이 확정된 뒤**
+          이 함수를 부른다."""
+        self._audit("APP_TOKEN_USED", rec,
+                    reason="앱 데이터 접근 증명 사용",
+                    detail=f"release={rec.get('release_id','')} "
+                           f"use_count={rec.get('use_count')}")
 
     def revoke(self, token: str, actor: str = "") -> bool:
         with self._lock:

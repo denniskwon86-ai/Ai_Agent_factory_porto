@@ -27,7 +27,9 @@ def store():
 def _issue(store, **kw):
     base = dict(actor="u@x", session_id="sess_1", app_id="app_1", release_id="rel_1",
                 capabilities=(READ, WRITE), tenant_id="tenant_default", entity_mode="REAL",
-                scope_node_id="node_hq")
+                scope_node_id="node_hq",
+                #: ★ [2026-08-14] 발급 시점의 앱 선언을 봉인한다 — 판정이 이 값을 대조한다.
+                manifest_fingerprint="fp_1", manifest_version="1.0")
     base.update(kw)
     return store.issue(**base)
 
@@ -173,6 +175,7 @@ def test_판정기가_이_토큰을_그대로_먹는다(store):
     res = ap.ResourceScope(tenant_id="tenant_default", entity_mode="REAL",
                            scope_node_id="node_hq", owner_dept_id="hq")
     facts = ap.AppResourceFacts(app_id="app_1", release_id="rel_1",
+                                manifest_fingerprint="fp_1", manifest_version="1.0",
                                 declared_capabilities=(READ, WRITE))
     assert ap.decide(subject, res, READ, app=facts).allowed
     # 다른 릴리스면 막힌다 — 이 증명이 존재하는 이유다.
@@ -259,3 +262,24 @@ def test_세션_회수도_감사에_남는다(store, monkeypatch):
     _issue(store, session_id="sess_A")
     store.revoke_session("sess_A", actor="u@x")
     assert [k["event"] for k in seen] == ["APP_TOKEN_ISSUED", "APP_TOKEN_REVOKED"]
+
+
+def test_발급이_매니페스트를_봉인한다(store):
+    """★★★ 「이 증명은 **그때 그 앱**에 대한 것」이 되려면 지문·판이 레코드에 남아야 한다."""
+    rec = _issue(store)
+    assert rec["manifest_fingerprint"] == "fp_1" and rec["manifest_version"] == "1.0"
+    assert store.resolve(rec["token"])["manifest_fingerprint"] == "fp_1"
+
+
+def test_성공_사용_기록은_해석이_아니라_판정_뒤에_남긴다(store, monkeypatch):
+    """★★★ [교차검토 지적 3] 해석은 「토큰이 존재한다」까지만 증명한다. 그 뒤 PDP 가 거부할
+    수 있는데, 해석 단계에서 «사용됨» 을 남기면 보안 감사에서 **「데이터를 만졌다」와
+    「만지려다 막혔다」가 같은 줄**이 된다."""
+    from core.enterprise_context import audit
+    seen = []
+    monkeypatch.setattr(audit, "record", lambda **kw: seen.append(kw.get("event")) or True)
+    rec = _issue(store)
+    store.resolve(rec["token"], quiet=True)
+    assert "APP_TOKEN_USED" not in seen, "해석만 했는데 «사용됨» 이 남았다"
+    store.record_use(store.resolve(rec["token"], quiet=True))
+    assert "APP_TOKEN_USED" in seen, "판정 뒤에도 사용 기록이 남지 않는다"

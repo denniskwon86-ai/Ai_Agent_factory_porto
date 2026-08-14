@@ -456,3 +456,89 @@ def test_릴리스를_못_읽으면_판정_불가로_떨어진다():
     from core import app_policy
     from core.app_proof import resource_scope
     assert resource_scope(None, "rel_x").binding_state == app_policy.INVALID
+
+
+# ── ⑩ [교차검토 83] 카나리 전에 닫아야 했던 다섯 ─────────────────────────
+
+def test_증명_발급_뒤_프로그램을_끄면_다음_호출이_막힌다(client):
+    """★★★ 지적 1 — 관리자가 「이 프로그램 쓰지 마라」를 기록했는데 **이미 발급된 증명으로
+    데이터 접근이 계속되면**, 관리자는 껐다고 믿는데 앱은 돌고 있다."""
+    from core.program_lifecycle import program_lifecycle
+    _mkds(client)
+    tok = _tok(client)
+    h = _h(tok)
+    assert client.get(f"{R}/datasets/orders/records", headers=h).status_code == 200
+
+    program_lifecycle.set_status("rel_ok", "disabled", actor="admin", reason="검증")
+    r = client.get(f"{R}/datasets/orders/records", headers=h)
+    assert r.status_code == 404, f"끈 프로그램이 계속 돈다: {r.status_code}"
+    #: 새 증명도 나가지 않는다.
+    assert _proof(client, "rel_ok").status_code == 404
+
+
+def test_사용_중단_예고는_막지_않는다(client):
+    """★ 대조군 — 예고(`deprecated`)는 경고이지 차단이 아니다. 막아 버리면 이관 기간에
+    업무가 멈춘다."""
+    from core.program_lifecycle import program_lifecycle
+    _mkds(client)
+    tok = _tok(client)
+    program_lifecycle.set_status("rel_ok", "deprecated", actor="admin", reason="이관 예정")
+    assert client.get(f"{R}/datasets/orders/records", headers=_h(tok)).status_code == 200
+
+
+def test_매니페스트가_바뀌면_기존_증명이_막힌다(client):
+    """★★★ 지적 2 — capability 선언만 다시 읽으면 **같은 권한을 유지한 채 내용이 바뀐**
+    매니페스트가 기존 증명을 무효화하지 못한다.
+
+    ★ 앱에게는 `EXPIRED`(401) 로 보인다 — 부모가 새 증명을 받으면 곧바로 풀리는 상태다."""
+    _mkds(client)
+    tok = _tok(client)
+    assert client.get(f"{R}/datasets/orders/records", headers=_h(tok)).status_code == 200
+
+    #: 같은 capability 를 유지한 채 지문만 바꾼다.
+    path = client.lib / "rel_ok" / "release.json"
+    d = json.loads(path.read_text(encoding="utf-8"))
+    d["manifest"]["fingerprint"] = "fp_changed"
+    path.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    r = client.get(f"{R}/datasets/orders/records", headers=_h(tok))
+    assert r.status_code == 401, f"바뀐 앱에 옛 증명이 통했다: {r.status_code}"
+    #: 새로 받으면 곧바로 풀린다 — 「다시 열면 된다」가 사실이어야 한다.
+    assert client.get(f"{R}/datasets/orders/records",
+                      headers=_h(_tok(client))).status_code == 200
+
+
+def test_거부된_요청은_성공_사용으로_기록되지_않는다(client, monkeypatch):
+    """★★★ 지적 3 — 해석은 「토큰이 존재한다」까지만 증명한다. 먼저 기록하면 보안 감사에서
+    **「데이터를 만졌다」와 「만지려다 막혔다」가 같은 줄**이 되고 카나리 증거도 왜곡된다."""
+    from core.enterprise_context import audit
+    _mkds(client, "orders", "rel_readonly")
+    tok = _tok(client, "rel_readonly")
+    seen = []
+    monkeypatch.setattr(audit, "record", lambda **kw: seen.append(kw.get("event")) or True)
+
+    #: 매니페스트가 선언하지 않은 쓰기 → PDP 거부
+    r = client.post(f"{R}/datasets/orders/records", headers=_h(tok), json={"payload": {"qty": 1}})
+    assert r.status_code == 403, r.text
+    assert "APP_TOKEN_USED" not in seen, f"거부됐는데 «사용됨» 이 남았다: {seen}"
+
+    #: 대조군 — 허용되는 요청에서는 남아야 한다(안 남기면 유출 조사를 못 한다).
+    seen.clear()
+    assert client.get(f"{R}/datasets/orders/records", headers=_h(tok)).status_code == 200
+    assert "APP_TOKEN_USED" in seen, "허용됐는데 사용 기록이 없다"
+
+
+def test_사용여부를_묻지_못하면_막는다(client, monkeypatch):
+    """★★★ 보안·안전 경계에서 「못 물어봤으니 통과」는 **통제가 없는 것과 같다.**
+
+    ⚠️ 이 저장소가 `ownership_visible` 1차 구현에서 정확히 그렇게 틀렸다."""
+    from core import program_lifecycle as pl
+    _mkds(client)
+    tok = _tok(client)
+    assert client.get(f"{R}/datasets/orders/records", headers=_h(tok)).status_code == 200
+
+    def _boom(release_id):
+        raise RuntimeError("사용여부 저장소 장애")
+    monkeypatch.setattr(pl.program_lifecycle, "get_status", _boom)
+    r = client.get(f"{R}/datasets/orders/records", headers=_h(tok))
+    assert r.status_code == 404, f"사용여부를 못 물었는데 통과했다: {r.status_code}"

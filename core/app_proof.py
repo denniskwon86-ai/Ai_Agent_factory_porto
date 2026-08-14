@@ -101,6 +101,24 @@ def read_release(release_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def program_usable(release_id: str) -> bool:
+    """★★★ [2026-08-14 교차검토 지적 1] **IT 관리자가 끈 프로그램은 계속 돌지 않는다.**
+
+    `program_lifecycle` 은 관리자가 「이 프로그램 쓰지 마라」를 기록하는 곳이다. 그런데 그
+    상태가 런타임 판정에 전달되지 않으면, **이미 발급된 증명으로 데이터 접근이 계속된다** —
+    관리자는 껐다고 믿는데 앱은 돌고 있다.
+
+    ⚠️ 조회 실패는 **사용 불가**로 본다. 보안·안전 경계에서 「못 물어봤으니 통과」는
+      통제가 없는 것과 같다(이 저장소가 `ownership_visible` 1차 구현에서 겪은 결함).
+    ★ `deprecated`(사용 중단 «예고»)는 막지 않는다 — 예고는 경고이지 차단이 아니고,
+      막아 버리면 이관 기간에 업무가 멈춘다."""
+    try:
+        from core.program_lifecycle import DISABLED, program_lifecycle
+        return str(program_lifecycle.get_status(str(release_id or "")).get("status", "")) != DISABLED
+    except Exception:
+        return False
+
+
 def resource_scope(release: Optional[Dict[str, Any]], release_id: str) -> app_policy.ResourceScope:
     """릴리스 → **범용 자원 범위**.
 
@@ -125,7 +143,11 @@ def resource_scope(release: Optional[Dict[str, Any]], release_id: str) -> app_po
         scope_node_id=str(release.get("enterprise_scope_id", "") or ""),
         owner_user_id=own_user,
         owner_dept_id=own_dept,
-        binding_state=app_policy.BOUND)
+        binding_state=app_policy.BOUND,
+        #: ★ 사용 중단된 프로그램의 자원은 «사용 중단» 상태로 본다 — 판정기가 이미 그 축을
+        #:   갖고 있으므로(`DENY_RETIRED`) 새 규칙을 만들지 않는다. 발급 시점과 요청 시점
+        #:   **양쪽**에서 이 함수를 지나므로, 증명 발급 뒤에 꺼도 다음 호출에서 막힌다.
+        status="active" if program_usable(release_id) else "retired")
 
 
 def app_facts(release: Optional[Dict[str, Any]], release_id: str) -> app_policy.AppResourceFacts:

@@ -252,6 +252,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
    *   「무엇에 대한 권한인가」가 비어 있는 요청이 된다. */
   const bridgeRef = useRef<HostBridge | null>(null);
   const [bridgeNote, setBridgeNote] = useState<string>('');
+  /** 사용자가 조직 범위를 골라야 하는 상태. **재시도 단추를 함께 준다** — 안내만 하고
+   *  다시 시도할 방법을 주지 않으면 사용자는 화면을 새로고침하는 수밖에 없다. */
+  const [needsScope, setNeedsScope] = useState(false);
 
   const statePayload = useFactoryStore((s) => s.state);
   // release(라이브러리 결과물)가 주어지면 문서 탭은 그 스냅샷에서 읽는다. 그렇지 않으면 현재 프로젝트 state.
@@ -844,8 +847,18 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
       getSid: () => previewSidRef.current,
       releaseId: rid,
       appId: String(release?.app_id || release?.project_id || ''),
+      //: ★★★ [2026-08-14] 서버가 «사용자가 할 일이 있다» 고 말하면 그 문장을 화면에 올린다.
+      //   ⚠️ 종전에는 이 훅을 연결하지 않아, 조직 범위를 고르지 않은 사용자가 **일반 연결
+      //     실패**만 보고 원인을 알 수 없었다(교차검토 지적 5). 서버는 409 와 정확한 안내를
+      //     돌려주고 있었는데 화면이 그것을 버리고 있었다.
+      onActivity: (info) => {
+        if (info.ok) { setNeedsScope(false); return; }
+        if (info.message) setBridgeNote(info.message);
+        if (info.needsScope) setNeedsScope(true);
+      },
     });
     bridgeRef.current = b;
+    setNeedsScope(false);
     setBridgeNote(bridgeStatusKo(b.enabled, !!rid));
     return () => { bridgeRef.current = null; };
   }, [release]);
@@ -1090,6 +1103,32 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
                 {bridgeNote || '앱은 승인된 데이터셋에만 접근합니다'}
               </span>
             </div>
+
+            {needsScope && (
+              <div role="status" className="absolute top-[30px] left-0 w-full p-3 bg-amber-50 text-amber-900 text-sm z-10 border-b border-amber-200 flex items-start gap-2">
+                <span aria-hidden="true">🏢</span>
+                <div className="flex-1">
+                  <strong>조직을 선택해야 데이터에 연결됩니다.</strong>
+                  <br />
+                  <span className="opacity-80">{bridgeNote}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    //: ★ 다시 시도는 «프레임 다시 열기» 다 — 증명·캐시를 버리고 처음부터 한다.
+                    setNeedsScope(false);
+                    bridgeRef.current?.resetGeneration();
+                    if (iframeRef.current && vendorScripts) {
+                      previewSidRef.current = (crypto as any)?.randomUUID?.()
+                        || `sid_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+                      iframeRef.current.srcdoc = htmlTemplate.replace(
+                        /__AFS_SID__/g, previewSidRef.current);
+                    }
+                  }}
+                  className="shrink-0 px-2 py-1 rounded bg-amber-600 text-white text-xs font-bold hover:bg-amber-700">
+                  다시 시도
+                </button>
+              </div>
+            )}
 
             {dataBlocked && (
               <div role="status" className="absolute top-[30px] left-0 w-full p-3 bg-sky-50 text-sky-900 text-sm z-10 border-b border-sky-200 flex items-start gap-2">

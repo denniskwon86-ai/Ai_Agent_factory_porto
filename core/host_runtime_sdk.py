@@ -36,6 +36,7 @@ from __future__ import annotations
 from typing import Dict, Tuple
 
 from core.app_policy import (DELETE, DENY_MANIFEST_CAPABILITY, DENY_PERSONAL,
+                             DENY_TOKEN_MANIFEST_MISMATCH,
                              DENY_PRINCIPAL_BLOCKED, DENY_RETIRED, DENY_TOKEN_APP_MISMATCH,
                              DENY_TOKEN_CAPABILITY, DENY_TOKEN_EXPIRED, DENY_UNIDENTIFIED,
                              MANAGE, READ, WRITE)
@@ -136,6 +137,9 @@ DENY_ERROR_CODES: Tuple[str, ...] = (ERR_NOT_FOUND, ERR_FORBIDDEN, ERR_EXPIRED, 
 #: (기본값이 «가장 적게 말하는 것» 이어야 새 사유가 생겨도 새는 일이 없다).
 _ERROR_MAP: Dict[str, str] = {
     DENY_TOKEN_EXPIRED: ERR_EXPIRED,
+    #: ★ 앱 선언이 바뀐 것도 «다시 열면 된다» 다 — 부모가 새 증명을 받으면 곧바로 풀린다.
+    #:   숨길 이유가 없다: **그 앱 자신의 사실**이고, 알려 줘야 화면이 스스로 회복한다.
+    DENY_TOKEN_MANIFEST_MISMATCH: ERR_EXPIRED,
     #: 「이 앱에 그 권한이 없다」는 **앱 자신에 대한 사실**이라 알려도 새지 않는다 —
     #: 오히려 알려 줘야 개발자가 매니페스트를 고친다.
     DENY_TOKEN_CAPABILITY: ERR_FORBIDDEN,
