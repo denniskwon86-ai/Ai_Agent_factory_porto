@@ -23,7 +23,7 @@
 """
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -169,33 +169,99 @@ _PATH_OP: Dict[str, str] = {
 
 def _enforce(p: Principal, action: str, release_id: str,
              ds: Optional[Dict[str, Any]] = None, path: str = "") -> None:
-    """**기존 판정이 강제한다.** 신규 PDP 는 같은 요청에서 나란히 돌려 어긋남만 센다.
+    """★★★ [G1-B 6] **원자적 전환.** 어느 판정기가 강제하는지는 정책 스위치 하나가 정한다.
 
-    ★ 순서가 중요하다 — PDP 를 **먼저** 판정하고(부작용 없음) 그다음 기존을 강제한다.
-      기존이 예외를 던져도 관측이 남아야 「기존 거부 / PDP 허용」 칸을 볼 수 있다."""
+        `scope_policy.app_pdp_enforce()`  True(기본) → 신규 PDP 가 강제
+                                          False      → 기존 판정이 강제(롤백)
+
+    ## ⚠️⚠️ 어느 쪽이 강제하든 **두 판정을 모두 계산하고 기록한다**
+
+    전환했다고 관측을 끄면 **되돌릴 근거가 사라진다.** 전환 뒤에 어긋남이 생겨도 아무도
+    그것을 세지 않으면, 「되돌려야 하는가」를 감으로 답하게 된다. 그래서 이 함수는 전환
+    전후로 **같은 모양**이다 — 바뀌는 것은 「누가 예외를 던지는가」뿐이다.
+
+    ★ 기록의 뜻도 그대로다: `old_allowed` 는 언제나 **기존 판정**, `new_allowed` 는 언제나
+      **PDP** 다. 강제자가 바뀌었다고 이 두 이름이 뒤바뀌면 `looser`(권한이 넓어지는 칸)의
+      의미가 뒤집히고, 그 순간 게이트 표가 통째로 거짓이 된다.
+
+    ## 왜 기존 판정을 «지우지» 않는가
+
+    지우면 되돌릴 수 없다. 롤백은 배포가 아니라 **정책 파일 한 줄**이어야 한다 —
+    운영 중에 되돌릴 수 없는 전환은 아무도 승인하지 않는다(`org_enforce` 와 같은 판단).
+    """
     from core import app_policy
+    from core import scope_policy
     from core.policy_shadow import policy_shadow
+
+    #: PDP 를 **먼저** 판정한다(부작용 없음). 그래야 기존 판정이 예외를 던져도 관측이 남는다.
     decision = _shadow_check(p, action, release_id, ds)
     mutating = action in (app_policy.WRITE, app_policy.DELETE, app_policy.MANAGE)
 
-    def _record(old_ok: bool) -> None:
-        if decision is None:
-            return                                  # 관측 실패는 이미 세었다
+    def _old_verdict() -> Tuple[bool, Optional[HTTPException]]:
+        """기존 판정을 **던지지 않고** 물어본다."""
+        try:
+            if mutating:
+                assert_release_writable(p, release_id)
+            else:
+                assert_release_readable(p, release_id)
+            return True, None
+        except HTTPException as e:
+            return False, e
+
+    old_ok, old_exc = _old_verdict()
+
+    if decision is not None:
         policy_shadow.observe(path=path or "appdata", action=action, old_allowed=old_ok,
                               new_allowed=decision.allowed, new_reason=decision.reason,
                               actor=(p.user_id or ""), resource_id=str(release_id or ""),
                               op=_PATH_OP.get(path, ""))
 
-    try:
-        if mutating:
-            assert_release_writable(p, release_id)
-        else:
-            assert_release_readable(p, release_id)
-    except HTTPException as e:
-        _record(False)
-        _audit_denied(p, action, release_id, ds, path, e, decision)
-        raise
-    _record(True)
+    if scope_policy.app_pdp_enforce():
+        #: ⚠️ 관측이 실패해 판정이 없으면(`None`) **막는다.** 「판정기가 죽었으니 통과」는
+        #:   통제가 없는 것과 같다 — 전환의 방향은 언제나 닫는 쪽이다.
+        if decision is None:
+            exc = HTTPException(status_code=503,
+                                detail="접근 판정을 수행하지 못했습니다. 잠시 후 다시 시도해 "
+                                       "주십시오.")
+            _audit_denied(p, action, release_id, ds, path, exc, None)
+            raise exc
+        if not decision.allowed:
+            #: 관리 API 는 **사람의 표면**이다. 앱 경로처럼 고정 문장으로 접지 않고,
+            #: 설계 §3.3 은폐 경계표를 그대로 쓴다:
+            #:
+            #:     볼 수 없는 자원        → 404 (존재를 알리지 않는다)
+            #:     볼 수는 있으나 쓰기만 → 403 (「왜 안 되는지」를 말해야 고칠 수 있다)
+            #:
+            #: ★ 그 둘을 가르려면 **읽기로 한 번 더 물어본다.** 읽기도 막히면 그 사람에게
+            #:   그 자원은 «없는 것» 이고, 읽기가 되면 «있는데 못 바꾸는 것» 이다.
+            #: ⚠️ 여기서 뭉개면 둘 중 하나가 반드시 틀린다 — 403 으로 뭉개면 존재가 새고,
+            #:   404 로 뭉개면 권한을 고칠 방법을 아무도 모른다.
+            status = 403
+            if decision.reason in _CONCEAL:
+                status = 404
+                if mutating:
+                    peek = _shadow_check(p, app_policy.READ, release_id, ds)
+                    if peek is not None and peek.allowed:
+                        status = 403
+            exc = HTTPException(
+                status_code=status,
+                detail=decision.message or "이 자료에 대한 권한이 없습니다.")
+            _audit_denied(p, action, release_id, ds, path, exc, decision)
+            raise exc
+        return
+
+    #: 롤백 경로 — 기존 판정이 강제한다(전환 이전과 같은 동작).
+    if not old_ok and old_exc is not None:
+        _audit_denied(p, action, release_id, ds, path, old_exc, decision)
+        raise old_exc
+
+
+#: 존재를 숨겨야 하는 사유 — 「그 자원이 있다」가 새면 안 되는 것들.
+#: ★ 기존 판정(`api/deps`)이 쓰던 은폐 경계표와 같은 규칙이다(설계 §3.3).
+_CONCEAL = frozenset({
+    "SCOPE_DENIED", "CONTEXT_MISMATCH", "RESOURCE_UNBOUND", "RESOURCE_RETIRED",
+    "TOKEN_APP_MISMATCH", "TOKEN_SCOPE_MISMATCH", "TOKEN_CONTEXT_MISMATCH",
+})
 
 
 def _audit_denied(p: Principal, action: str, release_id: str,

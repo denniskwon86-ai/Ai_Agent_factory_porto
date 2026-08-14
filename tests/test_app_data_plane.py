@@ -268,6 +268,36 @@ def client(tmp_path, monkeypatch):
     owners = {"REL_OK": {"dept_id": "hq", "owner_user_id": ""},
               "REL_SIBLING": {"dept_id": "hq", "owner_user_id": ""},   # 같은 부서의 다른 앱
               "REL_OTHER": {"dept_id": "finance", "owner_user_id": ""}}
+
+    # ★★★ [G1-B 6] **릴리스를 디스크에 만든다.**
+    #
+    # 전환 뒤에는 관리 API 도 정책 결정점이 강제하고, 그 판정은 `release.json` 에서 자원의
+    # 테넌트·실행모드·조직범위를 읽는다. 파일이 없으면 판독 실패 = `INVALID` = 차단이다
+    # (그것이 옳다 — 「못 읽었으니 통과」로 두면 그 순간 통제가 없다).
+    #
+    # ⚠️ 종전 하니스에는 릴리스가 **아예 없었다.** 그래서 전환하는 순간 전부 거부됐는데,
+    #   그것은 통제가 틀린 것이 아니라 **하니스가 제품과 다른 세계**였다는 뜻이다.
+    import json as _json
+
+    from core import library_paths as _lp
+    _lib = tmp_path / "library"
+    for _rid, _own in owners.items():
+        _d = _lib / _rid
+        _d.mkdir(parents=True, exist_ok=True)
+        (_d / "release.json").write_text(_json.dumps({
+            "release_id": _rid, "project_id": f"proj_{_rid}",
+            "tenant_id": "tenant_default", "entity_mode": "REAL",
+            "enterprise_scope_id": "node_hq",
+            "owner_user_id": _own["owner_user_id"], "owner_dept_id": _own["dept_id"],
+            "visibility": "dept"}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(_lp, "release_dir", lambda rid: str(_lib / str(rid)), raising=False)
+
+    # ★ 실행 문맥. 화면이 고르는 값이고, 제품에서는 언제나 있다(서버가 기본값을 채운다).
+    #   ⚠️ 비우면 `_ctx_ok` 가 막는다 — D-014 「미지정은 전사 공용이 아니라 비노출」.
+    monkeypatch.setattr(deps, "viewing_context",
+                        lambda _p: {"tenant_id": "tenant_default", "entity_mode": "REAL",
+                                    "scope_node_id": "node_hq"}, raising=False)
+
     monkeypatch.setattr(deps.org_directory, "get_ownership",
                         lambda kind, rid: owners.get(rid) if kind == "release" else None,
                         raising=False)
@@ -386,9 +416,15 @@ def test_없는_레코드와_남의_레코드는_같은_답을_준다(client):
 
 
 def test_cannot_write_to_another_department_app(client):
-    """★★ 남의 부서 앱의 데이터에 쓸 수 없다."""
+    """★★ 남의 부서 앱의 데이터에 쓸 수 없다.
+
+    ⚠️ [G1-B 6 전환] **403 → 404 로 바뀌었다.** 이 사용자는 그 릴리스를 **읽지도 못한다** —
+      그런데 403 은 「거기 뭔가 있고 네 권한이 모자란다」고 말한다. 설계 §3.3 은폐 경계표는
+      «볼 수 없는 자원은 404» 다. 종전 403 이 존재를 흘리고 있었고, 전환이 그것을 닫았다.
+    ★ 「볼 수는 있으나 쓰기만 불가」는 여전히 403 이다 —
+       가 그 축을 지킨다."""
     r = _mkds(client, release_id="REL_OTHER")
-    assert r.status_code == 403
+    assert r.status_code == 404
 
 
 def test_can_read_but_not_write_when_only_readable(client):
@@ -467,9 +503,12 @@ def test_by_name_lookup_does_not_leak_across_releases(client):
 
 
 def test_cannot_read_another_department_app(client):
-    """부서 통제는 그것대로 따로 확인한다(위 테스트와 겹치지 않게)."""
+    """부서 통제는 그것대로 따로 확인한다(위 테스트와 겹치지 않게).
+
+    ⚠️ [G1-B 6 전환] 403 → 404. 볼 수 없는 자원의 **존재를 알리지 않는다**(설계 §3.3
+      은폐 경계표). 종전 403 은 「거기 뭔가 있다」를 흘리고 있었다."""
     assert client.get(
-        "/api/v1/appdata/datasets?release_id=REL_OTHER").status_code == 403
+        "/api/v1/appdata/datasets?release_id=REL_OTHER").status_code == 404
 
 
 def test_record_list_exposes_truncation(client):

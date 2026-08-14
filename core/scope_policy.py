@@ -177,6 +177,77 @@ def set_org_enforce(value: bool, actor: str, reason: str = "") -> Dict[str, Any]
     }
 
 
+
+# ── [G1-B 6] 앱 데이터 판정 전환 ──────────────────────────────────────────
+#
+# ★★★ **원자적 전환의 스위치.** 관리 API(`/api/v1/appdata/*`)에서 어느 판정기가 «강제»
+#   하는가를 정한다. 어느 쪽이 강제하든 **다른 쪽은 항상 관측**된다 — 전환 뒤에도 어긋남을
+#   계속 세야 되돌릴 근거가 생긴다.
+#
+# ⚠️⚠️ 스위치를 **여기 하나에만** 둔다. 같은 뜻의 스위치가 코드 상수와 정책 파일 두 곳에
+#   있으면 테스트는 그 불일치를 **구조적으로 볼 수 없다** — 이 저장소가 `ORG_ENFORCE` 로
+#   정확히 그렇게 다쳤다(테스트는 상수를 켜고, 실서버는 파일을 읽었다).
+#
+# ★ 기본값은 **PDP 강제**다. [G1-B 4] 격리 카나리가 여섯 작업 허용·거부와 부정 시나리오
+#   다섯, 구조 불변식 다섯을 증거 해시와 함께 통과시켰고(`canary_5`), 그 판정으로 전환이
+#   승인됐다. 되돌리려면 이 파일에 `app_pdp_enforce: false` 를 쓴다 — **배포 없이** 된다.
+
+#: 코드 기본값. ⚠️ 이 값을 `False` 로 되돌리는 것은 «전환 취소» 이고, 그것은 코드가 아니라
+#:   운영 결정이다 — 정책 파일로 하라(그래야 이유와 시각이 남는다).
+APP_PDP_ENFORCE_DEFAULT = True
+
+
+def app_pdp_enforce() -> bool:
+    """앱 데이터 관리 API 에서 **신규 정책 결정점이 강제하는가.**
+
+    `False` 면 기존 판정(`assert_release_*`)이 강제하고 PDP 는 관측만 한다(전환 이전 상태).
+    ⚠️ 어느 쪽이든 **두 판정을 모두 계산하고 기록한다.** 관측을 끄면 되돌릴 근거가 사라진다."""
+    v = _read().get("app_pdp_enforce", None)
+    return bool(v) if isinstance(v, bool) else APP_PDP_ENFORCE_DEFAULT
+
+
+def set_app_pdp_enforce(value: bool, actor: str, reason: str = "") -> Dict[str, Any]:
+    """전환·롤백. **운영 중에 되돌릴 수 있어야** 그것이 스위치다.
+
+    ⚠️ 되돌리면 통제가 **넓어진다**(기존 판정은 앱 증명·매니페스트·문맥을 보지 않는다).
+      그래서 사유를 요구하고 감사에 남긴다 — 「왜 되돌렸는가」에 답할 수 없으면 그 롤백은
+      영구가 된다."""
+    if not isinstance(value, bool):
+        raise ScopePolicyError(f"app_pdp_enforce 는 true/false 여야 합니다: {value!r}")
+    if not (actor or "").strip():
+        raise ScopePolicyError(
+            "변경자 식별 정보가 없습니다 — 어느 판정기가 앱 데이터를 지키는지 바꾸는 결정입니다.")
+    if not value and not (reason or "").strip():
+        raise ScopePolicyError(
+            "되돌리려면 사유가 필요합니다 — 롤백은 통제를 넓히는 방향이고, 이유가 남지 않으면 "
+            "그 롤백은 영구가 됩니다.")
+    doc = _read()
+    before = doc.get("app_pdp_enforce", None)
+    doc["app_pdp_enforce"] = bool(value)
+    doc.setdefault("history", []).append({
+        "field": "app_pdp_enforce", "from": before, "to": bool(value),
+        "actor": actor.strip(), "reason": reason or "",
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    })
+    doc["history"] = doc["history"][-50:]
+    _write(doc)
+    try:
+        from core.enterprise_context import audit
+        audit.record(audit.SCOPE_BINDING_CHANGED, resource_type="scope_policy",
+                     resource_id="app_pdp_enforce", actor=actor.strip(),
+                     outcome="allowed", reason=reason or "앱 데이터 판정 전환",
+                     detail=f"{before} -> {value}")
+    except Exception as e:                                       # pragma: no cover
+        print(f"⚠️ [scope_policy] 감사 기록 실패: {e}")
+    return {
+        "app_pdp_enforce": bool(value), "previous": before, "actor": actor.strip(),
+        "note": ("신규 정책 결정점이 **강제합니다.** 앱 증명·매니페스트·실행 문맥까지 판정에 "
+                 "들어갑니다. 기존 판정은 계속 관측되므로 어긋남이 생기면 드러납니다."
+                 if value else
+                 "⚠️ 기존 판정으로 **되돌렸습니다.** 앱 증명·매니페스트·문맥 축이 관리 API 에서 "
+                 "빠지므로 통제가 넓어집니다 — 임시 조치로만 쓰고 기한을 정하십시오."),
+    }
+
 def policy() -> Dict[str, Any]:
     """현재 정책 + 변경 이력(관리자 화면용)."""
     doc = _read()

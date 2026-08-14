@@ -109,14 +109,17 @@ def test_쓰기_경로에서도_어긋남이_없다(client):
 
 
 def test_거부되는_요청에서도_어긋남이_없다(client, monkeypatch):
-    """★ 기존이 거부하는 칸에서 PDP 가 허용하면 그것이 전환 금지 사유다."""
+    """★ 기존이 거부하는 칸에서 PDP 가 허용하면 그것이 전환 금지 사유다.
+
+    ⚠️ [G1-B 6 전환] 응답이 **403 → 404** 로 바뀌었다. 이 사용자는 그 릴리스를 읽지도
+      못하므로 «존재를 알리지 않는» 쪽이 맞다(설계 §3.3). 관측의 뜻은 그대로다."""
     from core.org_directory import org_directory
-    #: 남의 부서 자원으로 만든다 — 기존 판정이 거부한다.
+    #: 남의 부서 자원으로 만든다 — 두 판정 모두 거부한다.
     monkeypatch.setattr(org_directory, "get_ownership",
                         lambda kind, rid: {"dept_id": "sales", "owner_user_id": "",
                                            "visibility": "dept"})
     r = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_ok"}, headers=H)
-    assert r.status_code == 403, f"기존 판정이 막지 않았다: {r.status_code}"
+    assert r.status_code == 404, f"막히지 않았다: {r.status_code}"
     s = _stats()
     assert s["looser"] == 0, f"기존 거부 · PDP 허용: {s['recent']}"
 
@@ -132,8 +135,10 @@ def test_강화가_실제로_관측된다(client):
     policy_shadow.reset()
     #: 존재하지 않는 릴리스 → `release.json` 판독 실패 → PDP 는 `INVALID` 로 거부.
     #: 기존 판정은 소유권 미러만 보므로 **허용**한다 → 강화 칸.
+    #: ⚠️ [G1-B 6 전환] 이제 그 강화가 **실제로 막는다**(종전에는 관측만 됐다).
+    #:   그것이 전환의 뜻이다 — 「예상된 강화」는 곧 「이제부터 실제로 닫히는 칸」이다.
     r = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_missing"}, headers=H)
-    assert r.status_code == 200, "기존 판정이 막았다면 이 칸은 강화 대조가 되지 않는다"
+    assert r.status_code == 404, f"강화가 강제되지 않았다: {r.status_code}"
     s = _stats()
     assert s["stricter"] >= 1, "강화가 하나도 관측되지 않았다 — 관측이 헛돌고 있다"
     assert s["looser"] == 0
@@ -152,7 +157,11 @@ def test_관측이_터져도_요청은_살아_있다(client, monkeypatch):
     monkeypatch.setattr(route_mod, "_release_scope", _boom)
 
     r = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_ok"}, headers=H)
-    assert r.status_code == 200, "관측 실패가 요청을 죽였다"
+    #: ★★★ [G1-B 6 전환] **판정기가 죽으면 막는다(503).** 종전에는 기존 판정이 강제했으므로
+    #:   관측이 터져도 200 이었다. 이제 PDP 가 강제하므로 「판정을 못 했다」는 곧 «모른다» 이고,
+    #:   모르는 것을 통과시키면 통제가 없는 것과 같다 — 전환의 방향은 언제나 닫는 쪽이다.
+    #: ⚠️ 그래도 **세어서 드러낸다** — 조용한 유실은 여전히 금지다.
+    assert r.status_code == 503, f"판정 실패가 통과했다: {r.status_code}"
     assert _stats()["error"] >= 1, "관측 실패를 세지 않았다 — 조용히 유실됐다"
 
 
@@ -201,7 +210,7 @@ def test_거부는_감사에_남고_허용은_전건_기록하지_않는다(clie
                         lambda kind, rid: {"dept_id": "sales", "owner_user_id": "",
                                            "visibility": "dept"})
     r = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_ok"}, headers=H)
-    assert r.status_code == 403
+    assert r.status_code == 404          # [G1-B 6] 볼 수 없는 자원은 존재를 알리지 않는다
     denied = [k for k in seen if k.get("outcome") == "denied"]
     assert denied, "거부가 감사에 남지 않았다 — 침해 시도가 조용하다"
     assert len(seen) > allowed_records, "거부 기록이 추가되지 않았다"
@@ -263,3 +272,61 @@ def test_감사_기록이_실패해도_거부는_그대로_막힌다(monkeypatch
     #: 예외가 새어 나오면 라우트가 500 이 되고, 그러면 «막혔다» 가 «고장» 으로 바뀐다.
     route_mod._audit_denied(Principal(user_id="u@x", scope=_S()), "read", "rel_1",
                             None, "GET /datasets", HTTPException(403, "거부"), None)
+
+
+# ── ⑤ [G1-B 6] 전환과 롤백 ────────────────────────────────────────────────
+
+def test_전환하면_PDP_가_강제한다(client):
+    """★★★ 기본값은 **PDP 강제**다. 격리 카나리(`canary_5`)가 여섯 작업 허용·거부와 부정
+    시나리오 다섯, 구조 불변식 다섯을 증거 해시와 함께 통과시킨 뒤 승인된 전환이다."""
+    from core import scope_policy
+    assert scope_policy.app_pdp_enforce() is True
+    #: 판독 불가 릴리스 — 기존 판정은 통과시키고 PDP 는 막는다. 즉 **PDP 가 강제한다**는 증거.
+    r = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_missing"}, headers=H)
+    assert r.status_code == 404
+
+
+def test_롤백하면_기존_판정이_강제하고_관측은_계속된다(client, monkeypatch):
+    """★★★ 되돌리는 것은 **배포가 아니라 정책 파일 한 줄**이어야 한다 — 운영 중에 되돌릴
+    수 없는 전환은 아무도 승인하지 않는다.
+
+    ⚠️ 그리고 되돌려도 **관측은 계속된다.** 전환 뒤에 관측을 끄면 「되돌려야 하는가」를
+      감으로 답하게 되고, 되돌린 뒤에는 「다시 전환해도 되는가」를 답할 수 없다."""
+    from core import scope_policy
+    from core.policy_shadow import policy_shadow
+    monkeypatch.setattr(scope_policy, "app_pdp_enforce", lambda: False)
+    policy_shadow.reset()
+
+    #: 기존 판정은 소유권 미러만 보므로 판독 불가 릴리스를 **통과시킨다**(전환 이전 동작).
+    r = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_missing"}, headers=H)
+    assert r.status_code == 200, f"롤백했는데 기존 동작이 아니다: {r.status_code}"
+
+    s = _stats()
+    assert s["total"] >= 1, "롤백하니 관측이 멈췄다 — 되돌릴 근거가 사라진다"
+    assert s["stricter"] >= 1, "PDP 가 더 엄격한 칸이 기록되지 않았다"
+
+
+def test_롤백에는_사유가_필요하다():
+    """⚠️ 롤백은 통제를 **넓히는** 방향이다. 이유가 남지 않으면 그 롤백은 영구가 된다."""
+    from core import scope_policy
+    with pytest.raises(scope_policy.ScopePolicyError, match="사유"):
+        scope_policy.set_app_pdp_enforce(False, actor="admin")
+    with pytest.raises(scope_policy.ScopePolicyError, match="변경자"):
+        scope_policy.set_app_pdp_enforce(True, actor="")
+
+
+def test_스위치는_한_곳에서만_읽는다():
+    """★★★ 같은 뜻의 스위치가 두 곳에 있으면 테스트는 그 불일치를 **구조적으로 볼 수 없다** —
+    이 저장소가 `ORG_ENFORCE` 로 정확히 그렇게 다쳤다(테스트는 상수를 켜고 실서버는 파일을
+    읽었다)."""
+    import inspect
+
+    import api.routes.app_data_control as adc
+    #: ⚠️ 문서 문자열의 언급은 세지 않는다 — 세면 «설명을 적었다» 는 이유로 시험이 빨개진다.
+    #: 문서 문자열의 언급은 세지 않는다 — 세면 «설명을 적었다» 는 이유로 시험이 빨개진다.
+    NEEDLE = "scope_policy.app_pdp_enforce()"
+    reads = [l for l in inspect.getsource(adc).splitlines()
+             if NEEDLE in l and l.strip().startswith(("if ", "return ", "enforce"))]
+    assert len(reads) == 1, f"스위치를 여러 곳에서 읽는다: {reads}"
+    import config
+    assert not hasattr(config, "APP_PDP_ENFORCE"), "코드 상수로도 같은 스위치가 생겼다"

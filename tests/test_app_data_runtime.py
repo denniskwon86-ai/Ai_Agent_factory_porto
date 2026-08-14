@@ -743,3 +743,49 @@ def test_판정이_데이터셋을_모른_채_끝난다():
     assert "dataset" not in sig.parameters, "판정이 데이터셋을 알고 있다"
     src = inspect.getsource(rt.get_schema)
     assert src.index("_judge(") < src.index("_dataset("), "데이터셋을 판정보다 먼저 푼다"
+
+
+# ── ⑭ [G1-B 6] 전환 후 — 관리 API 세션 폴백이 앱 경로로 되살아나지 않았는가 ──
+
+def test_런타임_경로는_전환_뒤에도_증명을_요구한다(client):
+    """★★★ 전환은 **관리 API 의 강제자**를 바꾼 것이지, 앱 경로의 요구를 낮춘 것이 아니다.
+
+    ⚠️ 「이제 PDP 가 어디서나 강제하니 앱 경로도 세션으로 충분하다」는 말이 언젠가 나온다.
+      그 순간 앱은 **헤더 하나를 생략해** 사람의 넓은 권한으로 데이터를 만진다."""
+    _mkds(client)
+    r = client.get(f"{R}/datasets/orders/records", headers=H_USER)   # 증명 없음
+    assert r.status_code == 403, f"증명 없이 통과했다: {r.status_code}"
+
+
+def test_앱_증명은_관리_API_를_열지_못한다(client):
+    """★★★ 반대 방향도 막는다. 앱 증명이 **사람의 표면**을 여는 열쇠가 되면, 앱은 데이터셋
+    생성·스키마 변경·폐기까지 하게 된다 — 그것은 사람의 결정이다.
+
+    ⚠️ 관리 API 는 `X-App-Proof` 를 **읽지 않는다.** 읽기 시작하면 그때부터 두 표면의
+      경계가 사라진다."""
+    import inspect
+
+    import api.routes.app_data_control as adc
+    src = inspect.getsource(adc)
+    assert "X-App-Proof" not in src, "관리 API 가 앱 증명을 읽는다"
+    assert "app_capability_token" not in src, "관리 API 가 앱 증명 저장소를 만진다"
+
+    #: 그리고 실제로도 열리지 않는다 — 증명만 있고 세션이 없으면 관리 API 는 401 이다.
+    _mkds(client)
+    tok = _tok(client)
+    r = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_ok"},
+                   headers={"X-App-Proof": tok})
+    assert r.status_code in (401, 403, 404), f"앱 증명만으로 관리 API 가 열렸다: {r.status_code}"
+
+
+def test_전환_뒤에도_두_판정이_함께_관측된다(client):
+    """★★★ 전환했다고 관측을 끄면 **되돌릴 근거가 사라진다.** 전환 뒤에 어긋남이 생겨도
+    아무도 세지 않으면 「되돌려야 하는가」를 감으로 답하게 된다."""
+    from core.policy_shadow import policy_shadow
+    policy_shadow.reset()
+    _mkds(client)
+    assert client.get("/api/v1/appdata/datasets", params={"release_id": "rel_ok"},
+                      headers=H_USER).status_code == 200
+    g = policy_shadow.switch_gate()
+    assert g["counts"]["total"] >= 1, "전환 뒤 관측이 멈췄다"
+    assert g["counts"]["looser"] == 0
