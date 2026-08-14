@@ -145,6 +145,16 @@ class AppCapabilityTokenStore:
         if not scope_node_id:
             raise AppTokenError(
                 "scope_node_id 가 필요합니다 — 범위 없는 증명은 «전 조직 허용» 이 됩니다.")
+        #: ★★★ [2026-08-14 교차검토 84] **지문·판을 비운 채 발급하지 않는다.**
+        #:   판정은 「양쪽 다 비면 같다」를 막으려고 빈 값을 거부하는데, 발급이 빈 값을 만들면
+        #:   그 증명은 **태어나자마자 아무 데도 못 쓰는** 것이 된다(그리고 왜인지 아무도 모른다).
+        #:   막을 곳은 만드는 자리다.
+        manifest_fingerprint = (manifest_fingerprint or "").strip()
+        manifest_version = (manifest_version or "").strip()
+        if not manifest_fingerprint or not manifest_version:
+            raise AppTokenError(
+                "manifest_fingerprint 와 manifest_version 이 필요합니다 — 앱 선언에 묶이지 "
+                "않은 증명은 «그때 그 앱» 을 가리키지 못하고, 선언이 바뀌어도 그대로 통합니다.")
 
         try:
             ttl = int(ttl_minutes)
@@ -174,8 +184,8 @@ class AppCapabilityTokenStore:
             #:   capability 선언은 요청마다 다시 읽지만, 그것만으로는 «같은 capability 를
             #:   유지한 채 내용이 바뀐 매니페스트» 가 기존 증명을 무효화하지 못한다.
             #:   지문·판을 함께 묶어야 「이 증명은 **그때 그 앱**에 대한 것」이 된다.
-            "manifest_fingerprint": (manifest_fingerprint or "").strip(),
-            "manifest_version": (manifest_version or "").strip(),
+            "manifest_fingerprint": manifest_fingerprint,
+            "manifest_version": manifest_version,
             "issued_at": now.isoformat(),
             "expires_at": (now + timedelta(minutes=ttl)).isoformat(),
             "ttl_minutes": ttl,

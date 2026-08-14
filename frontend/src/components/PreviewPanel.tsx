@@ -255,6 +255,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   /** 사용자가 조직 범위를 골라야 하는 상태. **재시도 단추를 함께 준다** — 안내만 하고
    *  다시 시도할 방법을 주지 않으면 사용자는 화면을 새로고침하는 수밖에 없다. */
   const [needsScope, setNeedsScope] = useState(false);
+  /** 앱 정의가 바뀌어 지금 도는 코드가 낡았다. ⚠️ 프레임 재생성으로는 풀리지 않는다 —
+   *  같은 코드가 새 증명을 받을 뿐이다. 사용자가 목록에서 다시 열어야 한다. */
+  const [staleApp, setStaleApp] = useState(false);
 
   const statePayload = useFactoryStore((s) => s.state);
   // release(라이브러리 결과물)가 주어지면 문서 탭은 그 스냅샷에서 읽는다. 그렇지 않으면 현재 프로젝트 state.
@@ -852,13 +855,24 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
       //     실패**만 보고 원인을 알 수 없었다(교차검토 지적 5). 서버는 409 와 정확한 안내를
       //     돌려주고 있었는데 화면이 그것을 버리고 있었다.
       onActivity: (info) => {
-        if (info.ok) { setNeedsScope(false); return; }
+        if (info.ok) {
+          //: ⚠️ 성공했는데 옛 오류 문구가 남아 있으면 사용자는 **아직 안 된다고 읽는다.**
+          //   범위를 고르고 나서도 「조직을 선택하십시오」가 그대로 떠 있던 결함이다.
+          setNeedsScope(false);
+          setStaleApp(false);
+          setBridgeNote(bridgeStatusKo(true, true));
+          return;
+        }
         if (info.message) setBridgeNote(info.message);
         if (info.needsScope) setNeedsScope(true);
+        //: ★★★ 앱 정의가 바뀌었다 — 프레임을 다시 만들어도 **같은 낡은 코드**가 돈다.
+        //   그래서 「다시 시도」가 아니라 «목록에서 다시 열라» 고 말한다.
+        if (info.staleApp) { setStaleApp(true); setNeedsScope(false); }
       },
     });
     bridgeRef.current = b;
     setNeedsScope(false);
+    setStaleApp(false);
     setBridgeNote(bridgeStatusKo(b.enabled, !!rid));
     return () => { bridgeRef.current = null; };
   }, [release]);
@@ -1103,6 +1117,21 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
                 {bridgeNote || '앱은 승인된 데이터셋에만 접근합니다'}
               </span>
             </div>
+
+            {staleApp && (
+              <div role="alert" className="absolute top-[30px] left-0 w-full p-3 bg-rose-50 text-rose-900 text-sm z-10 border-b border-rose-200 flex items-start gap-2">
+                <span aria-hidden="true">🔄</span>
+                <div className="flex-1">
+                  <strong>앱 정의가 바뀌었습니다.</strong> 지금 열려 있는 것은 이전 판이라
+                  데이터에 연결하지 않습니다.
+                  <br />
+                  <span className="opacity-80">
+                    목록에서 이 앱을 다시 열어 주십시오 — 여기서 다시 시도해도 같은 이전 판이
+                    실행됩니다.
+                  </span>
+                </div>
+              </div>
+            )}
 
             {needsScope && (
               <div role="status" className="absolute top-[30px] left-0 w-full p-3 bg-amber-50 text-amber-900 text-sm z-10 border-b border-amber-200 flex items-start gap-2">

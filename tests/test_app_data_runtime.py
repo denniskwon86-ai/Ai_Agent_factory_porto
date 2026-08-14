@@ -502,8 +502,11 @@ def test_매니페스트가_바뀌면_기존_증명이_막힌다(client):
     path.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
 
     r = client.get(f"{R}/datasets/orders/records", headers=_h(tok))
-    assert r.status_code == 401, f"바뀐 앱에 옛 증명이 통했다: {r.status_code}"
-    #: 새로 받으면 곧바로 풀린다 — 「다시 열면 된다」가 사실이어야 한다.
+    #: ★ 410 = 「이 판은 사라졌다」. 만료(401)와 **다른 상태**여야 부모가 다르게 행동한다 —
+    #:   만료는 재발급으로 풀리지만 선언 변경은 **프레임을 버려야** 한다.
+    assert r.status_code == 410, f"바뀐 앱에 옛 증명이 통했다: {r.status_code}"
+    #: 서버는 새 증명을 내준다(사용자가 앱을 다시 열면 그것으로 돈다). 낡은 코드에 그것을
+    #: 주지 않는 책임은 **브리지**에 있고, 그 계약은 `test_host_runtime_bridge_contract` 가 본다.
     assert client.get(f"{R}/datasets/orders/records",
                       headers=_h(_tok(client))).status_code == 200
 
@@ -542,3 +545,70 @@ def test_사용여부를_묻지_못하면_막는다(client, monkeypatch):
     monkeypatch.setattr(pl.program_lifecycle, "get_status", _boom)
     r = client.get(f"{R}/datasets/orders/records", headers=_h(tok))
     assert r.status_code == 404, f"사용여부를 못 물었는데 통과했다: {r.status_code}"
+
+
+# ── ⑪ [교차검토 84] 매니페스트 결속이 실질적으로 서는가 ──────────────────
+
+def test_매니페스트_불일치는_만료와_다른_상태로_구분된다(client):
+    """★★★ 둘 다 앱에게는 `EXPIRED` 로 보이지만 **부모가 할 일이 다르다**.
+
+    · 만료      → 새 증명을 받아 **같은 프레임**을 계속 쓴다.
+    · 선언 변경 → 지금 도는 코드가 **낡은 코드**다. 새 증명을 주면 「옛 앱이 새 증명으로
+                  계속 도는」 상태가 되고, 그것이 결속을 우회하는 길이다.
+
+    상태코드가 같으면 브리지가 그 둘을 **구분할 방법이 없다.**"""
+    from core import host_runtime_wire as wire
+    _mkds(client)
+    tok = _tok(client)
+    path = client.lib / "rel_ok" / "release.json"
+    d = json.loads(path.read_text(encoding="utf-8"))
+    d["manifest"]["fingerprint"] = "fp_changed"
+    path.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    r = client.get(f"{R}/datasets/orders/records", headers=_h(tok))
+    assert r.status_code == 410, f"만료와 같은 상태로 답했다: {r.status_code}"
+    #: ⚠️ 사유는 여전히 새지 않는다 — 고정 문장뿐이다.
+    assert r.json()["detail"] in wire.ERROR_MESSAGE_KO.values()
+
+
+def test_빈_지문으로는_증명을_발급할_수_없다(client):
+    """★★★ 판정은 「양쪽 다 비면 같다」를 막으려고 빈 값을 거부한다. 그런데 발급이 빈 값을
+    만들면 그 증명은 **태어나자마자 아무 데도 못 쓰는** 것이 되고, 왜인지 아무도 모른다.
+    막을 곳은 만드는 자리다."""
+    from core.app_capability_token import AppCapabilityTokenStore, AppTokenError
+    store = AppCapabilityTokenStore()
+    for kw in ({"manifest_fingerprint": "", "manifest_version": "1.0"},
+               {"manifest_fingerprint": "fp", "manifest_version": ""},
+               {}):
+        with pytest.raises(AppTokenError):
+            store.issue(actor="u@x", session_id="s1", app_id="a1", release_id="r1",
+                        capabilities=("read",), tenant_id="t", entity_mode="REAL",
+                        scope_node_id="node_hq", **kw)
+
+
+def test_매니페스트가_없는_릴리스에는_증명이_나가지_않는다(client):
+    """⚠️ 지문을 유도할 수 없는 릴리스는 **증명 자체가 성립하지 않는다.**"""
+    d = client.lib / "rel_nomanifest"
+    d.mkdir()
+    (d / "release.json").write_text(json.dumps({
+        "release_id": "rel_nomanifest", "project_id": "p", "tenant_id": "tenant_default",
+        "entity_mode": "REAL", "enterprise_scope_id": "node_hq", "owner_dept_id": "hq"},
+        ensure_ascii=False), encoding="utf-8")
+    assert _proof(client, "rel_nomanifest").status_code == 404
+
+
+@pytest.mark.parametrize("status", ["disabled", "quarantined"])
+def test_허용목록에_없는_사용여부는_전부_막는다(client, status):
+    """★★★ 종전에는 `status != disabled` 였다. 그러면 **나중에 생기는 상태가 자동으로
+    허용**된다 — 새 상태를 만드는 사람은 대개 「막으려고」 만드는데 그 순간 여기가 열려 있다."""
+    from core import program_lifecycle as pl
+    _mkds(client)
+    tok = _tok(client)
+    monkey = {"release_id": "rel_ok", "status": status, "recorded": True}
+    orig = pl.program_lifecycle.get_status
+    pl.program_lifecycle.get_status = lambda rid: (monkey if rid == "rel_ok" else orig(rid))
+    try:
+        r = client.get(f"{R}/datasets/orders/records", headers=_h(tok))
+        assert r.status_code == 404, f"«{status}» 가 통과했다"
+    finally:
+        pl.program_lifecycle.get_status = orig

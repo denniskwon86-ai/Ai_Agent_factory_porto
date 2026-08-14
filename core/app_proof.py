@@ -111,10 +111,15 @@ def program_usable(release_id: str) -> bool:
     ⚠️ 조회 실패는 **사용 불가**로 본다. 보안·안전 경계에서 「못 물어봤으니 통과」는
       통제가 없는 것과 같다(이 저장소가 `ownership_visible` 1차 구현에서 겪은 결함).
     ★ `deprecated`(사용 중단 «예고»)는 막지 않는다 — 예고는 경고이지 차단이 아니고,
-      막아 버리면 이관 기간에 업무가 멈춘다."""
+      막아 버리면 이관 기간에 업무가 멈춘다.
+
+    ⚠️⚠️ **허용목록으로 본다.** 종전에는 `status != DISABLED` 였는데, 그러면 나중에 생기는
+      상태(`quarantined`·`suspended` 같은 것)가 **자동으로 허용**된다. 새 상태를 만드는
+      사람은 대개 「막으려고」 만드는데 그 순간 여기가 열려 있다."""
     try:
-        from core.program_lifecycle import DISABLED, program_lifecycle
-        return str(program_lifecycle.get_status(str(release_id or "")).get("status", "")) != DISABLED
+        from core.program_lifecycle import ACTIVE, DEPRECATED, program_lifecycle
+        st = str(program_lifecycle.get_status(str(release_id or "")).get("status", ""))
+        return st in (ACTIVE, DEPRECATED)
     except Exception:
         return False
 

@@ -138,7 +138,9 @@ def test_HTTP_상태_접힘이_존재를_새게_하지_않는다(ts):
     body = body[:body.index("\n}")]
     assert "status === 404) return ERR_NOT_FOUND" in body
     assert "status === 403) return ERR_FORBIDDEN" in body
-    assert "status === 401) return ERR_EXPIRED" in body
+    #: ★ 401(만료)과 410(앱 선언 변경)이 **같은 앱 오류**로 접힌다 — 앱이 할 일은 같다.
+    #:   다르게 행동하는 것은 부모이고, 그 구분은 상태코드로 한다.
+    assert "status === 401 || status === STATUS_STALE_APP) return ERR_EXPIRED" in body
     #: 마지막 줄(기본값)이 UNAVAILABLE 이어야 한다 — 여기가 요점이다.
     assert body.rstrip().endswith("return ERR_UNAVAILABLE;")
 
@@ -370,3 +372,65 @@ def test_화면이_안내와_재시도를_함께_준다():
     assert re.search(r"<button[\s\S]*?>\s*다시 시도\s*</button>", src), "재시도 단추가 없다"
     #: 서버 문장은 부모 화면에만 간다 — iframe 으로 넘기지 않는다.
     assert "info.message" in src
+
+
+# ── ⑦ [교차검토 84] 낡은 앱이 새 증명으로 살아남지 않는다 ───────────────
+
+def test_앱_선언이_바뀌면_재발급하지_않는다(bridge):
+    """★★★ **이것이 결속을 우회하던 전체 흐름이다.**
+
+    매니페스트 불일치를 일반 만료처럼 다루면 부모가 새 증명을 받아 오고, **기존 iframe 이
+    그대로 계속 실행**된다. 즉 「그때 그 앱에 묶는다」가 무의미해진다.
+
+    ⚠️ 프레임만 다시 만드는 것으로도 부족하다 — 같은 낡은 코드가 새 증명을 받을 뿐이다.
+      그래서 표시(`staleApp`)는 `resetGeneration()` 으로 지워지지 않고, 사용자가 목록에서
+      앱을 다시 열어야 새 브리지(=새 릴리스)가 만들어진다."""
+    m = re.search(r"async function runWithProof.*?\n  \}", bridge, re.S)
+    assert m, "재발급 경로를 찾지 못했다"
+    body = m.group(0)
+    #: 낡은 앱이면 재발급 앞에서 되돌아가야 한다.
+    stale_at = body.index("first.stale")
+    reissue_at = body.index("fetchProof()", body.index("const first"))
+    assert stale_at < reissue_at, "선언 변경을 확인하기 전에 재발급한다"
+    assert "staleApp = true" in body
+    #: ⚠️ 내부 표시만 세우고 **화면에 알리지 않으면** 사용자는 앱이 조용히 멈춘 것으로 본다.
+    #:   변이 검사에서 이 칸이 비어 있었다 — 알림을 지워도 초록이었다.
+    assert "staleApp: true" in body, "낡은 앱을 화면에 알리지 않는다"
+
+    #: 발급 함수 자체도 막는다 — 프레임 재생성 시 악수→발급이 돌기 때문이다.
+    f = re.search(r"async function fetchProof.*?\n  \}", bridge, re.S)
+    assert f and "if (staleApp) return false;" in f.group(0), \
+        "낡은 앱에 새 증명이 나갈 수 있다 — 프레임을 다시 만들면 옛 앱이 되살아난다"
+
+    #: ⚠️ 세대 초기화가 이 표시를 지우면 안 된다.
+    g = re.search(r"function resetGeneration\(\) \{(.*?)\n  \}", bridge, re.S)
+    assert g and "staleApp" not in g.group(1), \
+        "프레임을 다시 만들면 낡은 앱 표시가 사라진다 — 그 순간 옛 코드가 되살아난다"
+
+
+def test_서버와_브리지가_같은_상태코드를_본다(bridge):
+    """⚠️ 「앱 선언이 바뀌었다」를 서버는 410 으로, 브리지는 다른 숫자로 보면 그 통제는 없다."""
+    from core import host_runtime_wire as pywire
+    assert "STATUS_STALE_APP" in bridge
+    ts = TS_WIRE.read_text("utf-8")
+    m = re.search(r"export const STATUS_STALE_APP = (\d+);", ts)
+    assert m and int(m.group(1)) == 410
+    #: 서버 쪽 숫자도 같은지 본다(라우터가 그 값을 쓴다).
+    rt = (FRONTEND.parents[1] / "api" / "routes" / "app_data_runtime.py").read_text("utf-8")
+    assert "status=(410 if decision.reason == app_policy.DENY_TOKEN_MANIFEST_MISMATCH" in rt
+    assert pywire  # 계약 모듈이 살아 있다는 확인
+
+
+def test_성공하면_이전_오류_문구를_지운다():
+    """⚠️ 범위를 고르고 나서도 「조직을 선택하십시오」가 그대로 떠 있으면 사용자는
+    **아직 안 된다고 읽는다.**"""
+    src = TSX_PREVIEW.read_text("utf-8")
+    m = re.search(r"onActivity: \(info\) => \{(.*?)\n      \},", src, re.S)
+    assert m, "브리지 훅을 찾지 못했다"
+    ok_branch = m.group(1)[:m.group(1).index("if (info.message)")]
+    assert "setBridgeNote(" in ok_branch, "성공했는데 이전 문구를 그대로 둔다"
+    assert "setNeedsScope(false)" in ok_branch and "setStaleApp(false)" in ok_branch
+    #: ⚠️ 화면이 «낡은 앱» 을 실제로 **읽는지**도 본다. 브리지가 보내도 화면이 버리면
+    #:   사용자는 앱이 조용히 멈춘 것으로 보고, 새로고침만 반복한다.
+    assert "info.staleApp" in m.group(1), "화면이 낡은 앱 알림을 읽지 않는다"
+    assert re.search(r"staleApp && \(", src), "낡은 앱 안내가 화면에 없다"

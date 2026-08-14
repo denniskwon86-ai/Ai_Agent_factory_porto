@@ -108,9 +108,16 @@ export const ERROR_MESSAGE_KO: Record<string, string> = {
   [ERR_UNAVAILABLE]: '지금 결과를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
 };
 
+/** ★★★ 「이 앱의 판은 사라졌다」. 만료와 **다른 상태코드**여야 부모가 다르게 행동한다 —
+ *  만료는 새 증명으로 같은 프레임을 계속 쓰지만, 선언 변경은 **지금 도는 코드가 낡은 것**이라
+ *  새 증명을 주면 「옛 앱이 새 증명으로 계속 도는」 상태가 된다. */
+export const STATUS_STALE_APP = 410;
+
 /** HTTP 상태 → 앱 오류 코드. ⚠️ 5xx·0 은 **`NOT_FOUND` 가 아니다**(§ERR_UNAVAILABLE). */
 export function errorCodeForStatus(status: number): string {
-  if (status === 401) return ERR_EXPIRED;
+  //: ★ 410 = 앱 선언이 바뀌었다. **앱에게는** 「다시 열면 된다」와 같은 말이지만, 부모는
+  //:   재발급이 아니라 프레임 재생성을 해야 한다(`STATUS_STALE_APP`).
+  if (status === 401 || status === STATUS_STALE_APP) return ERR_EXPIRED;
   if (status === 403) return ERR_FORBIDDEN;
   if (status === 404) return ERR_NOT_FOUND;
   if (status === 400 || status === 422) return ERR_INVALID;

@@ -33,7 +33,7 @@ import { apiFetch } from './api';
 import {
   DATASET_PUBLIC_FIELDS, ERR_INVALID, ERR_NOT_FOUND, ERR_UNAVAILABLE, IGNORED_FROM_APP,
   ERR_EXPIRED, MAX_CALLS_PER_MINUTE, MAX_INFLIGHT, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES,
-  MSG_HELLO,
+  MSG_HELLO, STATUS_STALE_APP,
   MSG_INIT, MSG_REQ, MUTATING_OPS, REQUEST_TIMEOUT_MS, SDK_VERSION, VERDICT_DROP,
   VERDICT_OK, buildResponse, encodeCursor, errorCodeForStatus, idempotencySlot,
   normalizePage, projectDataset, projectRecord, validateRequest,
@@ -65,6 +65,8 @@ export interface BridgeDeps {
   /** 브리지가 무엇을 했는지 화면이 알 수 있게 하는 훅(선택). */
   onActivity?: (info: {
     op: string; ok: boolean; errorCode?: string;
+    /** 앱 정의가 바뀌어 **지금 도는 코드가 낡았다**. 프레임을 다시 만들어도 소용없다. */
+    staleApp?: boolean;
     /** 부모 화면에 그대로 보여 줄 문장(서버가 사용자에게 할 말을 준 경우에만). */
     message?: string;
     /** 사용자가 조직 범위를 골라야 하는 상태인가. */
@@ -89,6 +91,12 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
   /** ★★★ 앱 증명. **이 변수 말고 어디에도 두지 않는다** — iframe·localStorage·로그 금지.
    *  ⚠️ 세대가 바뀌면 버린다(아래 `resetGeneration`). */
   let proof = '';
+  /** ★★★ 앱 선언이 바뀌었다 = **지금 도는 코드가 낡았다.**
+   *
+   *  ⚠️⚠️ 이 표시는 `resetGeneration()` 으로 지워지지 않는다. 프레임만 다시 만들면 **같은
+   *    낡은 코드**가 새 증명을 받아 계속 돌고, 그것이 매니페스트 결속을 우회하는 길이다.
+   *    사용자가 목록에서 앱을 **다시 열어야** 새 브리지(=새 릴리스)가 만들어진다. */
+  let staleApp = false;
   const inflight = new Set<string>();
   const pending = new Map<string, Pending>();
   /** 멱등 자리 → 직전 결과. ⚠️ 「정확히 한 번」이 아니다 — **한 세대 안의 중복**만 막는다. */
@@ -141,6 +149,9 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
 
   /** 앱 증명을 받아 온다. **서버가 사실을 정한다** — 여기서 보내는 것은 릴리스뿐이다. */
   async function fetchProof(): Promise<boolean> {
+    //: ⚠️ 낡은 코드에는 새 증명을 주지 않는다. 여기서 막지 않으면 프레임을 다시 만드는
+    //:   순간 악수→발급이 돌아 **옛 앱이 되살아난다.**
+    if (staleApp) return false;
     const r = await call('POST', `${RUNTIME}/proof`, { release_id: deps.releaseId },
                          { withProof: false });
     if (r.status !== 200 || !r.json?.data?.token) {
@@ -205,22 +216,29 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
     try { return JSON.stringify(data).length > MAX_RESPONSE_BYTES; } catch { return true; }
   }
 
-  async function run(msg: any): Promise<{ ok: boolean; data?: unknown; code?: string }> {
+  async function run(msg: any): Promise<{
+    ok: boolean; data?: unknown; code?: string; stale?: boolean;
+  }> {
     const op = msg.op as Op;
     //: ★★★ 데이터셋을 **이름으로** 부른다. 릴리스는 서버가 증명에서 읽는다 —
     //:   브리지가 id 를 들고 다니지 않으므로 «남의 id 를 실어 보내는» 경로 자체가 없다.
     const base = `${RUNTIME}/datasets/${encodeURIComponent(String(msg.dataset || ''))}`;
     const rid = encodeURIComponent(String(msg.record_id || ''));
 
+    //: 실패 응답을 한 곳에서 만든다 — 자리마다 손으로 쓰면 `stale` 을 빠뜨리는 곳이 생긴다.
+    const _err = (status: number) => ({
+      ok: false, code: errorCodeForStatus(status), stale: status === STATUS_STALE_APP,
+    });
+
     if (op === 'data.schema') {
       const r = await call('GET', `${base}/schema`);
-      if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
+      if (r.status !== 200) return _err(r.status);
       return { ok: true, data: projectDataset(r.json?.data) };
     }
     if (op === 'data.list') {
       const { limit, offset } = normalizePage(msg.page);
       const r = await call('GET', `${base}/records?limit=${limit}&offset=${offset}`);
-      if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
+      if (r.status !== 200) return _err(r.status);
       const rows = Array.isArray(r.json?.data?.records)
         ? r.json.data.records.map(projectRecord) : [];
       const total = Number(r.json?.data?.total ?? rows.length);
@@ -238,22 +256,22 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
     }
     if (op === 'data.get') {
       const r = await call('GET', `${base}/records/${rid}`);
-      if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
+      if (r.status !== 200) return _err(r.status);
       return { ok: true, data: projectRecord(r.json?.data) };
     }
     if (op === 'data.create') {
       const r = await call('POST', `${base}/records`, { payload: stripIgnored(msg.payload) });
-      if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
+      if (r.status !== 200) return _err(r.status);
       return { ok: true, data: projectRecord(r.json?.data) };
     }
     if (op === 'data.update') {
       const r = await call('PUT', `${base}/records/${rid}`, { payload: stripIgnored(msg.payload) });
-      if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
+      if (r.status !== 200) return _err(r.status);
       return { ok: true, data: projectRecord(r.json?.data) };
     }
     if (op === 'data.remove') {
       const r = await call('DELETE', `${base}/records/${rid}`);
-      if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
+      if (r.status !== 200) return _err(r.status);
       return { ok: true, data: projectRecord(r.json?.data) };
     }
     return { ok: false, code: ERR_INVALID };
@@ -271,7 +289,16 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
     if (!proof && !(await fetchProof())) return { ok: false, code: ERR_UNAVAILABLE };
     const first = await run(msg);
     if (first.ok || first.code !== ERR_EXPIRED) return first;
-    //: 만료·앱 선언 변경 — 둘 다 «다시 열면 된다» 이고, 부모가 대신 다시 연다.
+    //: ★★★ 앱 선언이 바뀐 것은 **재발급으로 풀리지 않는다.** 새 증명을 주면 옛 코드가
+    //:   그것으로 계속 돈다 — 화면에 알리고 프레임을 버린다.
+    if (first.stale) {
+      staleApp = true;
+      deps.onActivity?.({
+        op: String(msg.op || ''), ok: false, errorCode: ERR_EXPIRED, staleApp: true,
+        message: '앱 정의가 바뀌었습니다. 목록에서 이 앱을 다시 열어 주십시오.',
+      });
+      return first;
+    }
     proof = '';
     if (!withinBudget() || !(await fetchProof())) return { ok: false, code: ERR_EXPIRED };
     return run(msg);

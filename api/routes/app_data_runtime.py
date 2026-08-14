@@ -71,7 +71,7 @@ class RecordWrite(BaseModel):
 
 # ── 공통 ──────────────────────────────────────────────────────────────────
 def _fail(code: str, *, audit_reason: str = "", actor: str = "", target: str = "",
-          path: str = "") -> HTTPException:
+          path: str = "", status: int = 0) -> HTTPException:
     """앱에게는 **고정 문장**만, 감사에는 **실제 사유**를 남긴다.
 
     ★★★ 교차검토 계약 (8) — 「정확한 거부 사유는 서버 감사에만 남기고 iframe 에는 SDK 고정
@@ -90,7 +90,7 @@ def _fail(code: str, *, audit_reason: str = "", actor: str = "", target: str = "
                 detail=f"path={path} reason={audit_reason}")
         except Exception:
             pass
-    return HTTPException(status_code=_STATUS.get(code, 403),
+    return HTTPException(status_code=status or _STATUS.get(code, 403),
                          detail=wire.ERROR_MESSAGE_KO.get(code, wire.ERROR_MESSAGE_KO[
                              sdk.ERR_NOT_FOUND]))
 
@@ -172,9 +172,19 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str, path: s
         policy_shadow.error(action=action, exc_type=type(e).__name__)
 
     if not decision.allowed:
+        #: ★★★ [2026-08-14 교차검토 84] **앱 선언이 바뀐 것은 «만료» 가 아니다.**
+        #
+        #  둘 다 앱에게는 `EXPIRED` 로 보이지만 **부모가 할 일이 다르다**:
+        #    · 만료      → 새 증명을 받아 **같은 프레임**을 계속 쓴다.
+        #    · 선언 변경 → 지금 도는 코드가 **낡은 코드**다. 새 증명을 주면 «옛 앱이 새
+        #                  증명으로 계속 도는» 상태가 되고, 그것이 결속을 우회하는 길이다.
+        #  그래서 상태코드를 나눈다 — 410 은 「이 판은 사라졌다」이고, 브리지는 그것을 보면
+        #  재발급하지 않고 **프레임을 버린다.**
         raise _fail(sdk.app_error_code(decision.reason),
                     audit_reason=decision.reason, actor=(p.user_id or ""),
-                    target=release_id, path=path)
+                    target=release_id, path=path,
+                    status=(410 if decision.reason == app_policy.DENY_TOKEN_MANIFEST_MISMATCH
+                            else 0))
     #: ★ **허용이 확정된 뒤** 성공 사용을 남긴다(§`record_use`).
     try:
         app_capability_tokens.record_use(proof)
