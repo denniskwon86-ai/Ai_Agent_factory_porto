@@ -58,11 +58,13 @@ async function post(path: string, body?: unknown): Promise<SprintResult> {
 // ── Sprint 시작 ─────────────────────────────────────────────────────────────
 /** 기획 가동 payload. **여기가 유일한 조립 지점이다.**
  *
- *  ⚠️ `schema_version`·`factory_mode` 를 호출부에서 다시 적지 않는다. 적는 순간 두 화면이
- *    갈라지기 시작한다. */
+ *  ⚠️ `factory_mode` 를 호출부에서 다시 적지 않는다. 적는 순간 두 화면이 갈라지기 시작한다.
+ *
+ *  ⚠️⚠️ `schema_version` 은 **보내지 않는다.** 상태 스키마는 서버가 정한다 — 오래 열어 둔
+ *    브라우저가 옛 버전을 다시 실어 보내면 서버 상태를 **다운그레이드**하게 되고, 그때
+ *    화면은 아무 오류도 내지 않는다. */
 export function buildPlanningPayload(projectId: string, idea: string, masterData: string) {
   return {
-    schema_version: '5.1.0',
     project_name: projectId,
     initial_idea: idea,
     master_data: masterData,

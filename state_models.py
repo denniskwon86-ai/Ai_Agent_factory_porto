@@ -1,10 +1,29 @@
 from __future__ import annotations
-from typing import Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal, Tuple
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from datetime import datetime, timezone
 
+#: ★★★ 파이프라인 상태 계약의 버전. **문자열을 다른 곳에 적지 않는다** — 반복하면
+#: 한 곳만 고치는 날이 오고, 그때 두 값이 갈라진다.
+#:
+#: ⚠️ `main.py` 의 FastAPI `version=` 은 **다른 계약**이다(API 버전). 같은 숫자로 묶으면
+#:   이후 한쪽만 올릴 수 없게 된다.
+#: ⚠️ `app_runtime_contract.SCHEMA_VERSION`(계약 문서 형식)과도 다른 것이다.
+PROJECT_STATE_SCHEMA_VERSION = "5.2.0"
+
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_version(raw: Any) -> Optional[Tuple[int, int, int]]:
+    """`X.Y.Z` → 튜플. 모양이 아니면 `None`(패턴 검증이 그 자리에서 말하게 둔다)."""
+    parts = str(raw or "").strip().split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        return tuple(int(p) for p in parts)  # type: ignore[return-value]
+    except ValueError:
+        return None
 
 class GitInfo(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -93,7 +112,8 @@ class FeedbackItem(BaseModel):
 
 class ProjectState(BaseModel):
     model_config = ConfigDict(extra='forbid', from_attributes=True)
-    schema_version: str = Field(default="5.1.0", pattern=r"^\d+\.\d+\.\d+$")
+    schema_version: str = Field(default=PROJECT_STATE_SCHEMA_VERSION,
+                                pattern=r"^\d+\.\d+\.\d+$")
     project_name: str = Field(default="New Project")
 
     # ── 소유권 (설계서 Phase 3) ──────────────────────────────────────────
@@ -250,6 +270,48 @@ class ProjectState(BaseModel):
     supervisor_feedback: str = Field(default="")
     criteria_log: List[Dict] = Field(default_factory=list)
 
+    # ── [I-4] App Runtime Contract (5.2.0) ──────────────────────────────
+    # ⚠️ `extra='forbid'` 이므로 여기에 선언하지 않으면 Compiler 가 계약을 산출해도
+    #   상태가 그것을 **조용히 버린다**.
+    # ★ 계약 **원문은 workspace 파일이 정본**이고 여기에는 요약·상태·지문만 둔다 —
+    #   원문을 상태에 실으면 체크포인터가 매 단계 그것을 복사하고, 커지는 상태는 재개를
+    #   느리게 만든다(그리고 언젠가 잘린다).
+    capability_intents: List[Dict[str, Any]] = Field(default_factory=list)
+    app_runtime_contract_status: str = Field(default="")      # DRAFT|COMPILED|APPROVED
+    app_runtime_contract_fingerprint: str = Field(default="")
+    app_runtime_contract_summary: str = Field(default="")     # 사람이 읽는 요약
+    unsupported_requirements: List[Dict[str, Any]] = Field(default_factory=list)
+    approved_contract_fingerprint: str = Field(default="")    # 게이트가 비교하는 값
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_schema_version(cls, data):
+        """★★★ 지연 마이그레이션 — 읽을 때 승격한다(기존 파일을 일괄 재작성하지 않는다).
+
+        · **버전 없음** → 구버전으로 간주해 승격한다. 「구버전이라 계약 필드가 없는 상태」와
+          「신버전인데 데이터셋 0개인 정상 계약 상태」는 **전혀 다른 사실**이고, 버전을
+          기록해야 그 둘이 구분된다.
+        · 새 필드는 선언된 기본값이 채운다(여기서 채워 넣지 않는다 — 기본값이 두 곳이 된다).
+        · ⚠️⚠️ **미래 버전은 조용히 읽지 않는다.** 모르는 계약을 추측해 읽으면 그 추측이 곧
+          데이터 손상이다 — 필드 하나를 잘못 해석한 상태가 저장되면 원본은 사라진다."""
+        if not isinstance(data, dict):
+            return data
+        raw = data.get("schema_version")
+        current = _parse_version(PROJECT_STATE_SCHEMA_VERSION)
+        if raw is None or not str(raw).strip():
+            data["schema_version"] = PROJECT_STATE_SCHEMA_VERSION
+            return data
+        parsed = _parse_version(raw)
+        if parsed is None:
+            return data  # 모양이 아니다 → 패턴 검증이 명확히 거부한다
+        if parsed > current:  # type: ignore[operator]
+            raise ValueError(
+                f"상태 스키마 {raw} 는 이 빌드({PROJECT_STATE_SCHEMA_VERSION})보다 새 계약입니다 "
+                f"— 추측해 읽지 않습니다. 최신 빌드로 열어 주십시오.")
+        if parsed < current:  # type: ignore[operator]
+            data["schema_version"] = PROJECT_STATE_SCHEMA_VERSION
+        return data
+
     @model_validator(mode="before")
     @classmethod
     def _coerce_none_collections(cls, data):
@@ -257,7 +319,8 @@ class ProjectState(BaseModel):
         if isinstance(data, dict):
             none_to_list = ("architecture_decisions", "technical_debt", "human_feedback_queue",
                             "criteria_log", "current_required_agents", "clarification_questions",
-                            "knowledge_pack_ids", "master_domains")
+                            "knowledge_pack_ids", "master_domains",
+                            "capability_intents", "unsupported_requirements")
             none_to_dict = ("file_index", "agent_memories", "stage_attempt_counts",
                             "stage_scores", "debate_rounds_used", "artifacts", "artifact_summaries")
             for k in none_to_list:

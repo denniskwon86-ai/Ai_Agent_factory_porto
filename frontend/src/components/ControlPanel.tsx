@@ -301,7 +301,9 @@ export default function ControlPanel() {
           task_id: taskId,
           project_state_payload: {
             ...(state || {}),
-            schema_version: "5.1.0",
+            // ⚠️ schema_version 은 싣지 않는다 — 상태 스키마는 서버가 정한다.
+            //   옛 화면이 옛 버전을 되돌려 보내면 서버 상태가 조용히 다운그레이드된다.
+            schema_version: undefined,
             project_name: wbsData?.project_name || currentProjectId,
             current_sprint_task_id: taskId,
             factory_mode: taskId.startsWith('TASK_REV_') ? "REVISION" : "EXECUTION",
@@ -339,8 +341,8 @@ export default function ControlPanel() {
           task_id: targetTask.task_id,
           project_state_payload: {
             ...(state || {}),
-            schema_version: "5.1.0",
-
+            // ⚠️ schema_version 은 싣지 않는다(위와 같은 이유) — 서버가 정한다.
+            schema_version: undefined,
             project_name: wbsData.project_name || currentProjectId,
             current_sprint_task_id: targetTask.task_id,
             factory_mode: targetTask.task_id.startsWith('TASK_REV_') ? "REVISION" : "EXECUTION",

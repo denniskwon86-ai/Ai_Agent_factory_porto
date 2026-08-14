@@ -182,7 +182,8 @@ def main():
         r = post(f"/{PROJECT_ID}/sprint/start", {
             "task_id": planning_id,
             "project_state_payload": {
-                "schema_version": "5.1.0",
+                # ⚠️ schema_version 은 보내지 않는다 — UI 와 동일하게 서버가 정한다.
+                #   여기에 버전을 적으면 시나리오가 옛 버전을 고정해 마이그레이션 결함을 덮는다.
                 "project_name": PROJECT_ID,
                 "initial_idea": IDEA,
                 "master_data": "",

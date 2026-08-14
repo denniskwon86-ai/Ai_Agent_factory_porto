@@ -1,6 +1,6 @@
 # [I-4] Host Runtime 생성기 연동 — 인수인계
 
-**작성 2026-08-15 · 상태: 설계 승인 완료 · 1단계 착수 승인 · 코드 미착수**
+**작성 2026-08-15 · 상태: 설계 rev.3 승인 · **1단계 완료** · 2~8단계 미착수**
 
 이 문서 하나만 읽고 이어받을 수 있게 적는다. 무엇이 끝났고, **무엇이 아직 안 됐고**,
 어디서부터 손대야 하는지.
@@ -16,15 +16,32 @@
 
 ```
 G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게이트 ✅  [6] 전환 ✅
-[7] I-4 ── 설계 rev.3 승인 ✅  ·  구현 1단계 착수 승인 ✅  ·  코드 0줄
+[7] I-4 ── 설계 rev.3 ✅  ·  1단계 ✅  ·  2~8단계 미착수
 ```
 
-**다음에 할 일: 설계서 §20 의 1단계.** 그 안에 `ProjectState` 5.1.0 → **5.2.0** 승격이
-포함된다(§20-0). 순서를 바꾸지 않는다 — 2 없이 3 을 하면 지문이 가리킬 대상이 불안정하고,
-6 없이 7 을 하면 승격할 후보가 없다.
+**다음에 할 일: 설계서 §20 의 2단계** — 데이터셋 안정 식별자 · 릴리스 바인딩 ·
+데이터셋별 Runtime 판정. 순서를 바꾸지 않는다: 2 없이 3 을 하면 지문이 가리킬 대상이
+불안정하고, 6 없이 7 을 하면 승격할 후보가 없다.
 
 ⚠️ **각 단계는 그 단계까지의 회귀를 갖고 커밋한다.** 여덟 단계를 모아서 한 번에 올리면
 어느 단계가 깨졌는지 아무도 못 찾는다.
+
+### 1단계에서 실제로 만들어진 것 (2026-08-15)
+
+| 파일 | 무엇 |
+|---|---|
+| `core/app_runtime_contract.py` | 계약 정본 — 결정표 · JSON Schema · 조건부 규칙 · 의미 지문 |
+| `core/host_contract_compiler.py` | 초안 → 계약(비-LLM · **던지지 않는다**) |
+| `state_models.py` | `PROJECT_STATE_SCHEMA_VERSION = "5.2.0"` · 지연 마이그레이션 · 계약 필드 6 |
+| `tests/test_app_runtime_contract.py` (69) | 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 |
+| `tests/test_project_state_schema_5_2.py` (18) | 회귀 일곱 + 소스 검사 둘 |
+
+**변이 검사 27/27.** 전체 스위트 **3,320 passed · 1 skipped** · `tsc -b` 초록.
+실측: 실제 `latest_state.json` **58개 전부** `5.2.0` 으로 승격(읽기 전용 확인, 실패 0).
+
+⚠️ 2단계로 넘어가기 전에 알아야 할 것: `arc.validate()` 는 **저장된 계약에도** 같은 규칙을
+건다. 컴파일 경로에만 검사를 두면 파일로 들어온 계약이 아무것도 통과하지 못한 채 통과한다
+(변이 검사에서 실제로 그 구멍이 잡혔다).
 
 ---
 
@@ -98,10 +115,10 @@ CREATE UNIQUE INDEX ... ON app_datasets(release_id, name);
 설계 §18 이 `app_datasets` / `app_dataset_versions` / `app_release_dataset_bindings` 로
 쪼개고 `app_records` 는 **안정적인 dataset_id** 에 남긴다.
 
-### 2-4. `ProjectState` 는 `extra='forbid'` 다
+### 2-4. `ProjectState` 는 `extra='forbid'` 다  ✅ 1단계에서 닫음
 
 `state_models.py:95`. 필드를 선언하지 않으면 Compiler 가 계약을 산출해도 **상태가 조용히
-버린다.** 1단계에서 여섯 필드를 더한다(설계 §11).
+버린다.** 여섯 필드를 더했다(설계 §11) — 앞으로 계약에 필드가 늘면 **여기도 함께** 는다.
 
 ### 2-5. 증명은 **매니페스트 지문만** 봉인한다
 
@@ -131,18 +148,21 @@ projects/**/latest_state.json  58개
 
 **두 경우 모두** 회귀로 잠근다.
 
-### 해야 할 일
+### 한 것 (전부 ✅)
 
-1. **버전 상수화** — `state_models.py` 에 `PROJECT_STATE_SCHEMA_VERSION = "5.2.0"` 를 두고
+1. **버전 상수화** — `state_models.py` 에 `PROJECT_STATE_SCHEMA_VERSION = "5.2.0"`,
    `schema_version` 기본값도 그것을 쓴다. ⚠️ 문자열을 반복하면 한 곳만 고치는 날이 온다.
-2. **지연 마이그레이션** — `model_validator(mode="before")` 에서
+2. **지연 마이그레이션** — `_migrate_schema_version` (`model_validator(mode="before")`)
 
    ```
-   버전 없음 / 5.1.0  → 계약 필드 기본값 보완 → schema_version = 5.2.0
-   5.2.0             → 그대로 검증
-   5.2.0 초과        → 명확한 ValidationError (조용히 읽지 않는다)
+   버전 없음 / 현재보다 낮은 버전  → schema_version = 5.2.0 (필드 기본값이 보완)
+   5.2.0                          → 그대로 검증
+   5.2.0 초과                     → 명확한 ValidationError
+   X.Y.Z 모양이 아님              → 패턴 검증이 그 자리에서 거부
    ```
 
+   ★ 「5.1.0 목록」이 아니라 **「현재보다 낮으면 승격」**으로 구현했다 — 목록을 쓰면
+   `5.0.x` 같은 더 오래된 상태가 조용히 빠진다.
    ⚠️⚠️ **미래 버전을 추측해 읽지 않는다.** 모르는 계약을 읽으면 그 추측이 곧 데이터 손상이다.
 3. **새 필드 여섯** (기본값 안전하게)
 
@@ -161,27 +181,37 @@ projects/**/latest_state.json  58개
 
 | 위치 | 무엇인가 | 조치 |
 |---|---|---|
-| `frontend/src/components/ControlPanel.tsx:304` | 상태 스키마 | 요청에서 **제거** |
-| `frontend/src/components/ControlPanel.tsx:342` | 상태 스키마 | 요청에서 **제거** |
-| `frontend/src/factory/sprintActions.ts:65` | 상태 스키마 | 요청에서 **제거** |
-| `run_e2e_scenario.py:185` | 상태 스키마 | 서버 값 사용 |
-| **`main.py:45` `version="5.1.0"`** | **FastAPI 앱 버전** | ⚠️ **건드리지 않는다** |
+| `ControlPanel.tsx:304` | 상태 스키마 | ✅ `schema_version: undefined` 로 제거 |
+| `ControlPanel.tsx:342` | 상태 스키마 | ✅ 같음 |
+| `sprintActions.ts:65` | 상태 스키마 | ✅ 키 자체를 뺌 |
+| `run_e2e_scenario.py:185` | 상태 스키마 | ✅ 보내지 않음 |
+| **`main.py:45` `version="5.1.0"`** | **FastAPI 앱 버전** | ⚠️ **손대지 않았다** |
 
 ⚠️⚠️ 마지막 줄이 함정이다. 같은 문자열이라 함께 고치고 싶어지는데, 그러면 **API 버전과 상태
 스키마가 한 숫자에 묶인다** — 이후 한쪽만 올릴 수 없게 된다.
+`test_api_version_is_not_coupled_to_state_schema` 가 그 결합을 막는다.
 
-★ 서버가 버전을 부여하게 하는 이유: 오래 열린 브라우저가 `5.1.0` 을 다시 보내 상태를
-**다운그레이드**하는 경로를 없앤다. `sprint/start` 에서도 서버 값이 클라이언트 값을 이긴다.
+★ `ControlPanel` 에서 키를 지우지 않고 `undefined` 를 쓴 이유: 그 자리는
+`...(state || {})` 로 **디스크에서 읽은 옛 상태를 펼치는** 자리다. `GET /state/latest` 는
+파일을 그대로 돌려주므로(모델을 지나지 않는다) 거기에 `5.1.0` 이 들어 있다. `undefined` 로
+덮어야 그 값이 **되돌아가지 않는다**(`JSON.stringify` 가 키를 버린다).
 
-### 3-2. 1단계 필수 회귀 일곱
+### 3-2. 1단계 필수 회귀 일곱 — 전부 ✅
 
-· 버전 없는 기존 상태 → `5.2.0` 으로 로드
-· `5.1.0` 상태 → 신규 필드 기본값과 함께 `5.2.0` 으로 승격
-· 신규 계약 필드의 JSON 저장·재로드
-· 체크포인트 직렬화·역직렬화 후 필드 보존
-· 오래된 프런트가 `5.1.0` 을 보내도 **서버 상태가 다운그레이드되지 않음**
-· `6.0.0` 같은 미래 버전은 **명확하게 거부**
-· 기존 진행 프로젝트가 **신규 I-4 노드에 강제 진입하지 않음**
+`tests/test_project_state_schema_5_2.py` (18 tests)
+
+| 회귀 | 시험 |
+|---|---|
+| 버전 없는 상태 → `5.2.0` | `test_state_without_version_is_promoted` |
+| `5.1.0` → 필드 기본값과 함께 승격 | `test_state_510_promoted_with_default_contract_fields` |
+| 신규 필드 JSON 저장·재로드 | `test_contract_fields_survive_json_roundtrip` |
+| 체크포인트 직렬화·역직렬화 | `test_checkpoint_roundtrip_preserves_contract_fields` |
+| 옛 프런트가 보낸 `5.1.0` → 다운그레이드 없음 | `test_stale_client_payload_cannot_downgrade` |
+| 미래 버전 명확 거부 | `test_future_version_is_rejected` |
+| 신규 노드 강제 진입 없음 | `test_contract_fields_do_not_change_routing` · `test_no_i4_node_is_wired_yet` |
+
+여기에 소스 검사 둘을 더했다: 프런트가 버전 문자열을 **싣지 않는지**(주석 제외하고 본다),
+`main.py` 가 상태 스키마 상수를 **API 버전으로 쓰지 않는지**.
 
 ### 3-3. 혼동하면 안 되는 세 버전
 
@@ -196,8 +226,8 @@ projects/**/latest_state.json  58개
 ## 4. 남은 순서 (설계서 §20)
 
 ```
-1. 계약 JSON Schema · Compiler · 상태 필드          ← 여기부터 (승인됨)
-2. 데이터셋 안정 식별자 · 릴리스 바인딩 · 데이터셋별 Runtime 판정
+1. 계약 JSON Schema · Compiler · 상태 필드          ✅ 2026-08-15
+2. 데이터셋 안정 식별자 · 릴리스 바인딩 · 데이터셋별 Runtime 판정   ← 여기부터
 3. Proof 의 계약 지문 결속
 4. Tech Lead / WBS(artifact_kind) / Contract Review Gate 연결
 5. Typed SDK Adapter 와 정적 검사
@@ -230,6 +260,12 @@ projects/**/latest_state.json  58개
    격리 **뒤에** 만든 인스턴스가 운영 파일을 잡았다). 백업:
    `data/app_data.db.bak_test_pollution_20260813_114845`.
    ★ 카나리는 `git worktree` 사본에서 돌린다 — 격리가 규율이 아니라 **구조**가 된다.
+   ⚠️ **아직 새고 있다**: 전체 스위트를 돌리면 `data/decision_ledger.db`·`data/llm_cache.db`
+   mtime 이 움직인다. 개별 스위트로는 재현되지 않는다 — 어느 시험인지 미특정(§6-7).
+8. **1단계에서 새로 겪은 것 — 변이 검사가 「검사가 한쪽 경로에만 있다」를 잡아냈다.**
+   사용자 결정 규칙이 컴파일러에만 있고 `validate()` 에는 시험이 없어, 규칙을 통째로
+   지워도 초록이었다. 계약은 **파일로도 들어온다**(릴리스 스냅샷·손편집) — 검사는 두 경로
+   모두에서 시험해야 한다.
 
 ---
 
@@ -237,12 +273,14 @@ projects/**/latest_state.json  58개
 
 | # | 항목 | 메모 |
 |---|---|---|
-| 1 | **I-4 구현 전체** | 설계만 승인됨. 1단계부터 |
+| 1 | **I-4 2~8단계** | 1단계는 끝났다. 다음은 데이터셋 안정 식별자 |
 | 2 | `app_pdp_enforce` 관리자 **카드** | API 는 있고 화면이 없다. 현재값·출처·영향·사유·이력 함께 표시 |
 | 3 | 서버 쪽 **멱등키 저장** | 지금은 한 세대 안의 중복만 막는다 |
 | 4 | 레코드 **판(version) 컬럼** | 없어서 계약이 `version` 을 **거부**한다 |
 | 5 | `_release_scope` 의 미러 의존 | 전환이 끝났으므로 파일을 단일 원천으로 삼을 수 있다 — 다만 드리프트를 먼저 0 으로 |
 | 6 | G2 온톨로지 구현 | I-4 가 만드는 계약의 `ontology_entity_type` 이 그 입력이다 |
+| 7 | **시험이 `data/*.db` 에 쓴다** | 전체 스위트 후 `decision_ledger.db`·`llm_cache.db` mtime 변동. 개별 스위트로는 재현 안 됨 — 범인 미특정. 2026-08-13 오염과 같은 부류 |
+| 8 | 계약 원문의 **저장 위치 배선** | `<workspace>/contracts/app_runtime_contract.json` 읽기·쓰기는 4단계에서 붙인다(1단계 컴파일러는 순수 함수) |
 
 ---
 
@@ -259,9 +297,12 @@ projects/**/latest_state.json  58개
 | `tests/test_policy_shadow_gate.py` (47) | 전환 게이트 · 구조 지문 |
 | `tests/test_host_runtime_sdk.py` / `_wire.py` / `_bridge_contract.py` / `_wire_parity.py` | 계약 · 실행 대조 |
 | `tests/test_admin_policy_audit.py` (30) | 정책 API · 전환 스위치 |
+| `tests/test_app_runtime_contract.py` (69) | **[1단계]** 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 |
+| `tests/test_project_state_schema_5_2.py` (18) | **[1단계]** 5.2.0 마이그레이션 · 소스 검사 |
 | `scripts/canary_host_runtime{,_seed}.py` | 격리 카나리(드라이버가 스스로 판정) |
 
-**변이 검사 누적 88/88.** 전체 스위트 **3,233 passed · 1 skipped**(2026-08-15).
+**변이 검사 누적 115/115**(G1-B 88 + 1단계 27). 전체 스위트 **3,320 passed · 1 skipped**
+(2026-08-15) · `tsc -b` 초록.
 
 ⚠️ 카나리를 다시 돌리려면: 워크트리 생성 → 씨앗 → 서버(별도 포트, `AFS_SHADOW_RUN`) →
 드라이버(`--seed-file`, `--run`, `--wait-expiry`). 드라이버가 기록·판정까지 하고
