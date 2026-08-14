@@ -86,19 +86,23 @@ def test_생성앱_iframe_에_sandbox_가_반드시_있다():
 def test_앱에게_건너갈_수_있는_코드에_자격증명_수단이_없다(needle):
     """★★ 값이 아니라 **가져오는 수단**을 막는다. 값은 이름을 바꿀 수 있지만 수단은 그렇지 않다.
 
-    ⚠️ 부모 화면이 그 수단을 쓰는 것 자체는 정상이다(부모가 자기 자격으로 서버를 부른다).
-      금지되는 것은 **iframe 안으로 들어가는 코드**에 그것이 있는 것이다. 두 코드가 같은
-      파일에 있으므로, 여기서는 «iframe 을 만드는 파일에서 그 이름이 srcDoc 조립 문자열 안에
-      들어가는지» 를 본다."""
+    ## ⚠️ 2026-08-14 — 이 검사에 구멍이 있었다
+
+    종전 조건은 «그 줄에 백틱이나 `srcDoc` 이 있을 때만» 이었다. 그런데 srcDoc 은 **여러 줄
+    짜리 템플릿 리터럴**이고, 그 안쪽 줄에는 백틱이 없다 — 즉 iframe 본문 한가운데에
+    자격증명을 넣어도 이 시험은 **통과했다.** I-3 브리지가 그 본문에 100줄 넘게 들어오면서
+    구멍이 넓어졌다.
+
+    지금은 **파일 전체**를 본다. iframe 을 만드는 파일들이 실제로 이 이름들을 하나도 쓰지
+    않는다는 것을 확인했으므로(실측 0건), 더 좁힐 이유가 없다 — 부모 코드가 자격증명이
+    필요해지면 그때는 **별도 모듈로 옮기는 것**이 옳다(그 파일은 iframe 을 만들지 않는다)."""
     for f in _iframe_files():
-        for line in f.read_text("utf-8").splitlines():
+        for i, line in enumerate(f.read_text("utf-8").splitlines(), 1):
             stripped = line.strip()
             if stripped.startswith(("//", "*", "/*")):
                 continue                       # 주석은 실행되지 않는다
-            #: srcDoc 조립은 템플릿 문자열로 만들어진다. 그 안에 자격증명 수단이 들어가면
-            #: 그대로 앱 코드가 된다.
-            if needle in line and ("`" in line or "srcDoc" in line):
-                pytest.fail(f"{f.name}: iframe 페이로드 조립 줄에 «{needle}» 이 있다 — {stripped[:120]}")
+            if needle in line:
+                pytest.fail(f"{f.name}:{i} 에 «{needle}» 이 있다 — {stripped[:120]}")
 
 
 def test_생성앱은_부모_localStorage_에_닿지_못한다():

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 import TraceabilityGraph from './TraceabilityGraph';
+import { createHostBridge, bridgeStatusKo, type HostBridge } from '../lib/hostRuntimeBridge';
 
 // 마크다운을 간단히 HTML로 변환하는 경량 렌더러 (외부 라이브러리 없음)
 // ★ [2026-08-06] `export` 를 붙였다 — 신규 Studio 의 산출물 Canvas 가 같은 렌더러를 쓴다.
@@ -243,6 +244,15 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
   const previewSidRef = useRef<string>('');
   const popupRef = useRef<Window | null>(null);
 
+  /** ★★★ [I-3] Host Runtime 브리지. **기본은 꺼짐**이다.
+   *
+   * 두 조건이 모두 참일 때만 켜진다 — `VITE_AFS_HOST_RUNTIME='1'` **그리고** 릴리스가 있다.
+   * ⚠️ 릴리스가 없는 미리보기(생성 중인 코드)는 데이터 평면에 접근할 수 없다. 붙일
+   *   `release_id` 가 없으면 서버가 무엇을 판정할지 정할 수 없고, 그 상태에서 열면
+   *   「무엇에 대한 권한인가」가 비어 있는 요청이 된다. */
+  const bridgeRef = useRef<HostBridge | null>(null);
+  const [bridgeNote, setBridgeNote] = useState<string>('');
+
   const statePayload = useFactoryStore((s) => s.state);
   // release(라이브러리 결과물)가 주어지면 문서 탭은 그 스냅샷에서 읽는다. 그렇지 않으면 현재 프로젝트 state.
   const docs: any = release ?? statePayload;
@@ -371,6 +381,140 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
             if (navigator && navigator.sendBeacon) {
               navigator.sendBeacon = function (u) { notifyBlocked('beacon', u); return false; };
             }
+          })();
+
+          // ★★★ [I-3] Host Runtime 브리지 — **앱 쪽 절반.**
+          //
+          // 계약 정본은 «core/host_runtime_wire.py» 이고 부모 쪽 절반은
+          // «lib/hostRuntimeBridge.ts« 다. 여기서 표면을 늘리지 않는다.
+          //
+          // 앱이 보는 것: afs.version · afs.ready · afs.context{app_id,release_id} ·
+          //               afs.data.{schema,list,get,create,update,remove}
+          // 앱이 보지 못하는 것: 사용자 · 토큰 · 세션 · 임의 fetch/sql · 부모 저장소.
+          //
+          // ⚠️ «sid« 는 자격증명이 아니다. srcdoc 에 박혀 있어 이 코드가 읽을 수 있고,
+          //   그래서 비밀이 될 수 없다. 하는 일은 하나 — 세대가 바뀌면 옛 프레임의 늦은
+          //   메시지를 부모가 버리는 것.
+          (function () {
+            var SID = '__AFS_SID__';
+            var pending = {};
+            var seq = 0;
+            var initialized = false;
+            var readyResolve, readyReject;
+            var ready = new Promise(function (res, rej) { readyResolve = res; readyReject = rej; });
+            //: 부모가 «init« 으로 채운다. 그 전에는 비어 있다.
+            var ctx = { app_id: '', release_id: '' };
+
+            function post(m) { try { window.parent.postMessage(m, '*'); } catch (e) {} }
+            function newId() {
+              seq += 1;
+              return 'r' + seq + '_' + Math.random().toString(36).slice(2, 8);
+            }
+            function mkErr(code, key) {
+              var MSGS = {
+                NOT_FOUND: '요청한 데이터를 찾을 수 없습니다.',
+                FORBIDDEN: '이 앱에는 그 작업이 허용되어 있지 않습니다.',
+                EXPIRED: '연결이 만료되었습니다. 앱을 다시 열어 주세요.',
+                INVALID: '요청 형식이 올바르지 않습니다.',
+                UNAVAILABLE: '지금 결과를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+              };
+              var e = new Error(MSGS[code] || MSGS.UNAVAILABLE);
+              e.code = code || 'UNAVAILABLE';
+              //: ★ 재시도용 멱등키를 오류에 실어 준다. 이 키로 다시 부르면 중복 쓰기가
+              //:   생기지 않는다 — 키 없이 재시도하면 **계약이 스스로 중복을 만든다.**
+              if (key) e.retryKey = key;
+              return e;
+            }
+
+            function callOp(op, args, idemKey) {
+              return new Promise(function (resolve, reject) {
+                var id = newId();
+                var msg = { type: 'afs.req', sid: SID, request_id: id, op: op };
+                for (var k in args) {
+                  if (Object.prototype.hasOwnProperty.call(args, k) && args[k] !== undefined) {
+                    msg[k] = args[k];
+                  }
+                }
+                //: ⚠️ 응답이 오지 않으면 **영원히 매달린다** — 앱은 로딩 화면에서 멈춘다.
+                var timer = setTimeout(function () {
+                  delete pending[id];
+                  reject(mkErr('UNAVAILABLE', idemKey));
+                }, 15000);
+                pending[id] = { resolve: resolve, reject: reject, timer: timer, key: idemKey };
+                post(msg);
+              });
+            }
+
+            //: ★ 키를 «내용으로» 만들지 않는다. 그러면 일부러 같은 값을 두 번 넣는 정상
+            //:   입력이 조용히 하나로 합쳐진다. 호출마다 새로 만들고, 실패 시 그 키를
+            //:   오류에 실어 재시도가 같은 키를 쓰게 한다.
+            function autoKey(given) {
+              if (typeof given === 'string' && given) return given;
+              return 'k_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+            }
+
+            window.addEventListener('message', function (e) {
+              //: ① 부모가 보낸 것만 받는다.
+              if (e.source !== window.parent) return;
+              var d = e.data;
+              if (!d || typeof d !== 'object') return;
+              if (d.sid !== SID) return;                    //: ② 우리 세대만
+
+              if (d.type === 'afs.init') {
+                if (d.ok === false) {
+                  initialized = true;
+                  readyReject(mkErr(d.error_code || 'UNAVAILABLE'));
+                  return;
+                }
+                if (d.context && typeof d.context === 'object') {
+                  ctx.app_id = String(d.context.app_id || '');
+                  ctx.release_id = String(d.context.release_id || '');
+                }
+                initialized = true;
+                readyResolve({ version: d.version, context: ctx });
+                return;
+              }
+              if (d.type !== 'afs.res') return;
+              var p = pending[d.request_id];
+              if (!p) return;                               //: ③ 시간 초과로 사라진 약속
+              delete pending[d.request_id];
+              clearTimeout(p.timer);
+              if (d.ok) p.resolve(d.data);
+              else p.reject(mkErr(d.error_code, p.key));
+            });
+
+            //: ★ **앱이 먼저 말한다.** 부모는 프레임이 언제 듣기 시작하는지 모른다 —
+            //:   부모가 먼저 던지면 그 첫 메시지가 자주 유실되고 «ready« 가 영원히 걸린다.
+            post({ type: 'afs.hello', request_id: newId(), min_version: 1 });
+            setTimeout(function () {
+              if (!initialized) {
+                initialized = true;
+                readyReject(mkErr('UNAVAILABLE'));
+              }
+            }, 5000);
+
+            window.afs = {
+              version: 1,
+              ready: ready,
+              context: ctx,
+              data: {
+                schema: function (name) { return callOp('data.schema', { dataset: name }); },
+                list: function (name, page) { return callOp('data.list', { dataset: name, page: page }); },
+                get: function (name, recordId) { return callOp('data.get', { dataset: name, record_id: recordId }); },
+                create: function (name, payload, opt) {
+                  var k = autoKey(opt && opt.idempotencyKey);
+                  return callOp('data.create', { dataset: name, payload: payload, idempotency_key: k }, k);
+                },
+                update: function (name, recordId, payload, opt) {
+                  var k = autoKey(opt && opt.idempotencyKey);
+                  return callOp('data.update', { dataset: name, record_id: recordId, payload: payload, idempotency_key: k }, k);
+                },
+                remove: function (name, recordId, opt) {
+                  var k = autoKey(opt && opt.idempotencyKey);
+                  return callOp('data.remove', { dataset: name, record_id: recordId, idempotency_key: k }, k);
+                }
+              }
+            };
           })();
 
           window.onerror = function(msg) {
@@ -691,6 +835,24 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     //   넣으면 같은 뜻의 값이 둘이 되어 나중에 한쪽만 바뀌는 날 프레임이 두 번 재로딩된다.
   }, [activeTab, vendorScripts]);
 
+  // ★ [I-3] 브리지를 릴리스마다 새로 만든다. 세대(sid)는 `getSid` 로 **그때그때** 읽는다 —
+  //   값으로 복사하면 프레임을 다시 만든 뒤에도 옛 세대를 들고 있게 된다.
+  useEffect(() => {
+    const rid = String(release?.release_id || '');
+    const b = createHostBridge({
+      getFrame: () => iframeRef.current?.contentWindow ?? null,
+      getSid: () => previewSidRef.current,
+      releaseId: rid,
+      appId: String(release?.app_id || release?.project_id || ''),
+    });
+    bridgeRef.current = b;
+    setBridgeNote(bridgeStatusKo(b.enabled, !!rid));
+    return () => { bridgeRef.current = null; };
+  }, [release]);
+
+  // 세대가 바뀌면 브리지의 캐시·진행 중 요청·멱등 기록을 버린다.
+  useEffect(() => { bridgeRef.current?.resetGeneration(); }, [isIframeReady]);
+
   // rawCode 변경 → 파일 추출 → 캐시 저장 → 준비됐으면 즉시 전송
   useEffect(() => {
     if (!rawCode || isLoading || activeTab !== 'PREVIEW') return;
@@ -721,6 +883,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
     const handleMessage = (event: MessageEvent) => {
       // ① 소스 동일성 — 우리 iframe 이 보낸 것만 받는다(팝아웃은 P0-1A 로 비활성화됨)
       if (event.source !== iframeRef.current?.contentWindow) return;
+
+      // ★★★ [I-3] Host Runtime 브리지가 먼저 본다. `afs.*` 봉투만 가져가고 나머지는 흘린다.
+      //   ⚠️ 브리지도 소스 동일성을 **자기 안에서 다시** 본다 — 이 파일의 검사에 기대지
+      //     않는다. 호출 순서가 바뀌는 날 경계가 사라지면 안 된다.
+      if (bridgeRef.current?.handle(event)) return;
 
       const d: any = event.data;
       // ② 형태 검증
@@ -914,8 +1081,14 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
             <div className="absolute top-0 left-0 w-full px-3 py-1.5 bg-slate-800/90 text-slate-100 text-[12px] z-10 flex items-center gap-2">
               <span aria-hidden="true">🔒</span>
               <b>안전 미리보기</b>
-              <span className="opacity-80">· 실데이터 연결 제한</span>
-              <span className="ml-auto opacity-70">Host Runtime 적용 후 지원됩니다</span>
+              {/* ★ [I-3] 브리지가 켜졌는데도 「연결 제한」이라고 쓰면 그것이 곧 거짓말이다.
+                    상태를 한 곳에서 읽어 그대로 쓴다(`bridgeStatusKo`). */}
+              <span className="opacity-80">
+                {bridgeNote ? '· 실데이터 연결 제한' : '· Host Runtime 연결됨'}
+              </span>
+              <span className="ml-auto opacity-70">
+                {bridgeNote || '앱은 승인된 데이터셋에만 접근합니다'}
+              </span>
             </div>
 
             {dataBlocked && (
