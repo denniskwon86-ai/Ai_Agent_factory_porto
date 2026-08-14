@@ -69,7 +69,10 @@ class Http:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8083")
-    ap.add_argument("--seed", required=True, help="씨앗 스크립트가 출력한 JSON")
+    ap.add_argument("--seed", default="", help="씨앗 스크립트가 출력한 JSON")
+    #: ⚠️ 셸 변수로 넘기면 따옴표·인코딩에서 조용히 빈 문자열이 된다(실제로 그렇게 두 번
+    #:   헛돌았다). 파일 경로가 안전하다.
+    ap.add_argument("--seed-file", default="", help="씨앗 JSON 파일 경로")
     ap.add_argument("--run", default="canary_4", help="AFS_SHADOW_RUN 과 같은 값이어야 한다")
     ap.add_argument("--wait-expiry", action="store_true",
                     help="만료 시나리오를 위해 실제로 기다린다")
@@ -79,7 +82,13 @@ def main():
     ap.add_argument("--expiry-wait", type=int, default=16 * 60,
                     help="만료 대기 초. 기본은 실제 TTL(15분)+여유")
     args = ap.parse_args()
-    seed = json.loads(args.seed)
+    if args.seed_file:
+        with open(args.seed_file, "r", encoding="utf-8") as f:
+            seed = json.load(f)
+    elif args.seed.strip():
+        seed = json.loads(args.seed)
+    else:
+        raise SystemExit("--seed 또는 --seed-file 이 필요합니다(빈 값으로 돌면 헛돕니다).")
     wait_expiry = args.wait_expiry
 
     http = Http(args.base, seed["session_me"], seed["scope"], seed["mode"])

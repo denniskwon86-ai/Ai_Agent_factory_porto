@@ -131,7 +131,16 @@ def main():
         "session_other": s_other["token"],
         "releases": list(RELEASES),
     }
-    print(json.dumps(out, ensure_ascii=False))
+    #: ⚠️ **stdout 으로 흘리지 않는다.** 저장소 초기화가 stdout 에 안내문을 찍는 경우가 있고
+    #:   (실제로 «departments.scope_node_id 컬럼을 추가했습니다» 가 섞였다), 그러면 이 JSON 을
+    #:   읽는 쪽이 조용히 깨진다. 경로를 받아 **파일로 직접** 쓴다.
+    target = sys.argv[1] if len(sys.argv) > 1 else ""
+    if target:
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False)
+        print("SEEDED " + target)
+    else:
+        print(json.dumps(out, ensure_ascii=False))
 
 
 if __name__ == "__main__":

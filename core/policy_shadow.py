@@ -204,6 +204,11 @@ STRUCTURE_SOURCES: Tuple[str, ...] = (
 )
 
 
+#: 줄바꿈 상수. 소스에 직접 이스케이프를 쓰면 편집 도구를 거치며 깨진다.
+CRLF = b"\x0d\x0a"
+LF = b"\x0a"
+
+
 def structure_hash() -> str:
     """구조 불변식을 구현하는 코드의 지문.
 
@@ -215,7 +220,11 @@ def structure_hash() -> str:
     try:
         for rel in STRUCTURE_SOURCES:
             with open(project_path(*rel.split("/")), "rb") as f:
-                h.update(f.read())
+                #: ⚠️⚠️ **줄바꿈을 정규화한다.** git 체크아웃이 CRLF 로 바꿔 놓으면 내용이
+                #:   같은데도 지문이 달라지고, 그러면 격리 사본에서 만든 증거가 운영에서
+                #:   **언제나 무효**가 된다 — 결속이 아니라 잡음이 된다(실측: 같은 커밋의
+                #:   워크트리와 본체가 다른 지문을 냈다).
+                h.update(f.read().replace(CRLF, LF))
     except Exception:
         return ""
     return h.hexdigest()[:16]
