@@ -1,247 +1,548 @@
-# [I-4] 생성기 ↔ Host Runtime 연동 — 상세 설계
+# [I-4] 생성기 ↔ Host Runtime 연동 — 상세 설계 **rev.2**
 
-**작성 2026-08-15 · 상태: 설계(교차검토 대기) · 코드 변경 0건**
+**작성 2026-08-15 · rev.2 2026-08-15 · 상태: 설계(교차검토 대기) · 코드 변경 0건**
 
-선행: `docs/design_app_data_plane_2026-08-08.md`(데이터 평면) ·
-`docs/handoff/G1B_P0_APP_RUNTIME_HANDOFF_2026-08-14.md`(런타임 보안) ·
-`[G1-B-CANARY-REVIEW-89]` 완료 판정.
+선행: `docs/design_app_data_plane_2026-08-08.md` ·
+`docs/handoff/G1B_P0_APP_RUNTIME_HANDOFF_2026-08-14.md` · `[G1-B-CANARY-REVIEW-89]` 완료 판정.
+개정 근거: 교차검토 `[G1-B-I4-DESIGN-REVIEW-90]`.
 
 > ⚠️ 이 문서는 **설계서다.** 교차검토 승인 전까지 생성 파이프라인 코드를 바꾸지 않는다.
 
 ---
 
-## 0. 한 줄 요약과, 흔히 잘못 잡는 범위
+## 0. rev.1 의 전제가 틀렸다 — 실측으로 확인한 것
 
-생성기는 이제 **자체 인증·자체 저장소·자체 데이터 CRUD 백엔드를 만들지 않고**, 데이터는
-`window.afs.data` 로만 다룬다.
+rev.1 은 「`Tech_Lead.hotl_after=True` 하나면 계약이 코드보다 먼저 온다」고 적었다.
+**그것은 사실이 아니다.**
 
-★★★ **「FastAPI 를 전부 없앤다」로 설계하지 않는다.** 교체 대상은 셋뿐이다:
-
-| 교체한다 | 그대로 둔다 |
-|---|---|
-| 자체 인증·세션·권한 | 화면·상호작용·표시 로직 |
-| 자체 데이터 저장소(테이블·ORM) | 계산·시뮬레이션(→ G4 계산 그래프) |
-| 데이터 CRUD 엔드포인트 | 업무 액션(→ 향후 Host Action 계약) |
-
-⚠️ 이 구분을 흐리면 두 가지가 동시에 망가진다. 하나는 **계산을 데이터 SDK 로 밀어 넣는 것**
-(`afs.data` 는 저장소이지 계산기가 아니다), 다른 하나는 **업무 액션을 CRUD 로 위장하는 것**
-(승인·발주·통보는 레코드 쓰기가 아니라 결정이고, 그것은 원장과 승인 흐름을 지나야 한다).
-
----
-
-## 1. 지원 능력 판정표 — LLM 이 매번 다르게 판단하지 않게
-
-★ **결정표를 코드 상수로 둔다.** 표가 없으면 같은 요구에 대해 어제와 오늘의 판단이 달라지고,
-그 차이는 릴리스가 나온 뒤에야 드러난다.
-
-| 요구 능력 | I-4 처리 | 근거 |
-|---|---|---|
-| 앱 데이터 조회·등록·수정·삭제 | **`window.afs.data`** | 데이터 평면 계약 |
-| 자체 로그인·권한·세션 | **생성 금지** — Host 상속 | `app_manifest` CL-0 |
-| 직접 App Data API 호출 | **생성 금지** | 브리지 전용 경로 계약 |
-| 브라우저 토큰·자격증명 저장 | **생성 금지** | B02 |
-| 파일 업로드 | **지원 대기** | 데이터 평면에 바이너리 없음 |
-| 외부 API·MCP 직접 호출 | **지원 대기** — 향후 Host 중개 | CSP `connect-src 'none'` |
-| 집계·복합 질의 | **범위 명시**(아래 §1-1), 초과 시 대기 | `data.list` 는 단일 데이터셋·페이지 |
-| 백그라운드 작업 | **지원 대기** | 앱은 프레임 수명 안에서만 산다 |
-| 경영 시뮬레이션 계산 | **`afs.data` 아님 — G4 계산 그래프** | 승인된 계산기만 수치를 낸다 |
-| 기타 서버 로직 | **임의 FastAPI 생성 금지** — Host Action 계약 필요 | 아래 §1-2 |
-
-### 1-1. 「집계·복합 질의」의 지원 경계를 숫자로 못박는다
-
-⚠️ 「집계는 지원한다/안 한다」로 두면 그 경계가 사람마다 다르다. 지금 데이터 평면이 실제로
-할 수 있는 것은 이것뿐이다:
-
-    한 데이터셋 · 페이지 단위(`limit ≤ 100`) · 서버 정렬 고정(생성 역순) · 필터 없음
-
-따라서 **앱이 받아 가서 화면에서 계산하는 집계**는 지원한다(합계·평균·그룹 표시).
-**서버가 계산해야 하는 집계**는 지원 대기다:
-
-· 조인 · 데이터셋 간 집계 · 전체 스캔이 필요한 통계 · 정렬/필터 조건 지정
-· 페이지 상한을 넘는 전수 집계(`total` 이 상한보다 크면 그 화면은 «부분» 이다)
-
-★ 판정 규칙: **「상한 안에서 화면이 계산할 수 있는가」** 가 참이면 지원, 아니면 대기.
-⚠️ 「일단 다 받아서 계산한다」를 허용하지 않는다 — 그것은 상한을 무의미하게 만들고,
-  데이터가 늘어난 날 조용히 틀린 합계를 보여준다(이 저장소가 «조용한 거짓말» 이라 부르는 것).
-
-### 1-2. 왜 「기타 서버 로직」에 Host Action 계약이 필요한가
-
-앱이 서버 로직을 원하는 이유는 대개 셋이다 — **권한이 필요한 작업**(승인·발주),
-**다른 시스템 호출**(ERP·메일), **오래 걸리는 계산**. 셋 다 임의 FastAPI 로 만들면
-그 순간 **판정·감사·원장 밖**에서 업무가 일어난다.
-
-그래서 이것들은 I-4 범위가 아니라 **후속 Runtime 확장**이다. I-4 는 그 요구를 만나면
-「지원 대기」로 표시하고 릴리스하지 않는다 — 몰래 만들지 않는 것이 이 단계의 성과다.
-
----
-
-## 2. 생성 순서 변경 — 선언이 코드보다 먼저
-
-### 지금 (실측, `core/agent_registry.DEFAULT_REGISTRY`)
-
-    CLARIFICATION → RFP → PLANNING → UI_DESIGN → VISION_QA → ARCHITECTURE → PMO
-    → TECH_SPEC → EXECUTION(Backend·Frontend) → BUILD → CODE_REVIEW → QA
-    → SUPERVISOR → MANUAL
-    그리고 **릴리스 시점에** `app_manifest.snapshot()` 이 붙는다
-    (`api/routes/factory_control.py:1572`)
-
-⚠️⚠️ **매니페스트가 맨 마지막에 붙는다.** 즉 지금은 「코드가 무엇을 하는지 보고 선언을
-만드는」 순서다. 그러면 선언은 코드를 **설명**할 뿐 **제약**하지 못한다 — 무엇을 만들든
-그에 맞는 선언이 뒤따라 붙는다.
-
-### 바꿀 순서
-
-    요구사항(RFP·PLANNING)
-      → ① 지원 능력 판정            [신규·비-LLM]
-      → ② Capability Manifest 초안   [신규]
-      → ③ Dataset Contract 초안      [신규]
-      → ④ 사용자 검토 게이트         [기존 HOTL 재사용]
-      → 코드 생성(EXECUTION)
-      → ⑤ 정적 적격성 검사           [기존 checker 확장]
-      → Preview → Release
-
-★ ②③ 이 확정된 뒤에야 코드가 생성되므로 **「선언에 없는 것은 코드에도 없다」** 가 성립한다.
-⑤ 는 그 성립을 **검사**하는 것이지 만들어 내는 것이 아니다.
-
-### 파이프라인에 어떻게 얹는가 (영향 범위)
-
-두 가지 방식이 있고, **후자를 제안한다.**
-
-| | 새 에이전트 3개를 추가 | 기존 단계에 산출물을 얹음 |
-|---|---|---|
-| 순서 | `DEFAULT_REGISTRY.agents` 에 3개 삽입, 이후 `order` 재번호 | 변경 없음 |
-| 위험 | `agent_graph` 노드 이름·`interrupt_after`·`completed_agents` 순서 전제가 전부 흔들린다 | 없음 |
-| 이력 | 기존 프로젝트의 진행 상태가 새 순서와 어긋난다 | 그대로 |
-
-★ **제안: `Tech_Lead`(TECH_SPEC) 단계의 산출물로 «능력 판정 + Manifest + Dataset Contract»
-를 추가하고, 그 직후 HOTL 게이트를 켠다.**
-
-· `Tech_Lead` 는 이미 「기술 사양·인터페이스 상세 설계」이고 **코드 생성 직전**이다 —
-  선언이 있어야 할 자리가 정확히 거기다.
-· `hotl_after` 를 `True` 로 바꾸는 것만으로 ④ 검토 게이트가 생긴다(이미 있는 장치다).
-· 노드 이름·개수·순서가 그대로이므로 진행 중인 프로젝트가 깨지지 않는다.
-
-⚠️ 그래도 **`hotl_after` 변경은 파이프라인 동작 변경**이다. 교차검토 승인 후에 손댄다.
-
----
-
-## 3. 「지원 대기」 UX — 코드 생성 후 오류로 알리지 않는다
-
-★★★ 지원하지 않는 기능을 **코드를 다 만든 뒤** 오류로 알리면, 사용자는 「만들어졌는데 왜
-안 되나」를 묻게 되고 그때는 이미 되돌리기 비싸다. 세 자리에서 **먼저** 드러낸다:
-
-| 자리 | 무엇을 보여주는가 |
-|---|---|
-| 요구사항 분석(RFP) | 「이 요구 중 넷은 지금 데이터 평면으로 못 한다」 + 각각의 이유 |
-| 작업계획(PMO/WBS) | 해당 작업을 **«지원 대기»로 표시**하고 WBS 에서 빼거나 축소안을 제시 |
-| 사용자 검토 게이트 | 「축소해서 진행」/「후속 Runtime 확장을 기다림」 중 **선택하게** 한다 |
-
-⚠️ 선택 전에는 **릴리스하지 않는다.** 「일단 만들고 나중에」로 두면 그 앱은 반쯤 도는 상태로
-현업에 나가고, 그 상태가 곧 「Host Runtime 은 못 쓰겠다」는 평판이 된다.
-
-★ 문구 규칙: **「불가능」이 아니라 「지원 대기」** 다. 실제로 후속 확장 계획이 있고,
-「안 된다」로 적으면 사용자는 다른 방법(=우회로)을 찾는다.
-
----
-
-## 4. 생성 코드 금지 규칙 — 기존 검사기를 확장한다
-
-`nodes/utils/platform_auth_checker.py` 가 이미 여섯 신호를 잡는다(실측):
-
-    local_login_form · local_login_route · password_storage · jwt_issuer ·
-    local_user_store (block) · auth_library (warn)
-
-**추가할 신호 다섯:**
-
-| 신호 | 무엇을 잡는가 | 심각도 |
-|---|---|---|
-| `token_in_browser_store` | `localStorage`/`sessionStorage` 에 토큰·자격증명 저장 | block |
-| `direct_appdata_call` | `/api/v1/appdata` 직접 호출 | block |
-| `generic_host_fetch` | 호스트를 향한 범용 `fetch`/`XHR`/`WebSocket` | block |
-| `app_local_db` | 앱 전용 DB·권한 테이블(`CREATE TABLE ... permission/role`) | block |
-| `undeclared_dataset` | **Manifest 에 없는** 데이터셋 이름·작업 사용 | block |
-
-★ 마지막 하나가 §2 의 순서 변경이 없으면 **불가능하다** — 비교할 선언이 없기 때문이다.
-  그래서 ⑤ 는 ②③ 에 의존한다.
-
-⚠️ **검사기의 어려운 부분은 「무엇을 잡을까」가 아니라 「무엇을 놓아줄까」다**(그 파일의 머리말이
-  이미 못박았다). 오탐이 늘면 개발자는 검사기를 끄고, **끈 검사기는 없는 것과 같다.**
-  그래서 새 신호에도 허용 문맥을 함께 정의한다 — 예: 앱이 **자기 화면 상태**를 `localStorage`
-  에 두는 것은 정상이고(브리지가 가짜 저장소로 갈아끼운다), 잡을 것은 **토큰·자격증명**이다.
-
-### 언제 막는가
-
-현행은 **릴리스를 막지 않고 결과만 싣는다**(`factory_control:1571` 주석: 「이 시점에 막으면
-이미 만들어진 산출물이 사라지고, 그러면 다음 사람은 검사를 끄는 쪽을 택한다」).
-
-★ 그 판단을 유지한다. 다만 I-4 에서는 **차단 지점이 하나 앞으로 온다**:
-
-    정적 검사 실패 → 릴리스는 되지만 `requires_host_runtime` 을 만족하지 못한 것으로 기록
-                  → **Host Runtime 이 그 앱에 증명을 발급하지 않는다**
-
-즉 「게시는 되지만 데이터에 연결되지 않는다」. 산출물은 남고 통제는 선다.
-
----
-
-## 5. 기존 앱 호환 — 일괄 변환하지 않는다
-
-· **자동 변환 없음.** 기존 앱을 기계가 고치면 그 결과를 아무도 검수하지 않는다.
-· **신규 생성 앱부터** 적용하고, 첫 몇 개는 카나리로 본다.
-· 릴리스에 두 필드를 기록한다:
-
-```json
-{ "runtime_contract_version": 1, "requires_host_runtime": true }
+```python
+# core/agent_graph.py:100  _route_to_first_assigned()
+if include_design:
+    if include_architect and _has_role(agents, "Architect", ...): return "Architect"
+    if _has_role(agents, "Tech_Lead", ...):                       return "Tech_Lead"
+if _has_role(agents, "Backend", ...):  return "Backend"      # ← 여기로 바로 간다
 ```
 
-· 그 필드가 없거나 `false` 인 릴리스는 **레거시**로 분류하고 화면에 그렇게 표시한다.
-· ⚠️⚠️ **Host Runtime 미활성 시 구식 API 로 폴백하지 않는다.** 폴백을 두면 「증명 없이도
-  도는 길」이 살아 있게 되고, 그 길은 반드시 쓰인다. 대신 **사용 불가 사유를 표시**한다
-  (브리지가 이미 그렇게 한다 — 조직 범위 미선택·앱 정의 변경 안내와 같은 자리).
+실행 태스크의 `required_agents` 에 Tech_Lead 가 없으면 **설계 단계를 건너뛰고 코드 생성으로
+진입한다.** 즉 rev.1 안대로 하면 **일부 앱은 계약 없이 만들어진다** — 그리고 그런 앱일수록
+「간단해 보여서」 배정이 생략된 앱이다.
 
-★ `runtime_contract_version` 을 두는 이유: 계약이 바뀌면(예: `version` 필드가 서버에서
-  검사되기 시작하면) **어느 앱이 어느 계약으로 만들어졌는지** 알아야 한다. 없으면 전수
-  재생성 말고는 방법이 없다.
+★★★ 그래서 결론이 바뀐다:
+
+> **Tech Lead 가 계약을 «초안» 하고, 시스템이 계약을 «결정론적으로 컴파일·강제» 하며,
+> 검증된 후보만 활성 릴리스로 «승격» 한다.**
+
+세 동사가 각각 다른 주체다. 하나로 뭉치면 그 지점이 우회로가 된다.
+
+### 함께 확인한 두 가지 (rev.2 가 고치는 것)
+
+| 실측 | 무엇이 문제인가 |
+|---|---|
+| `core/app_proof.py:manifest_actions()` 가 capability 를 **전역 합집합**으로 평탄화 | `orders.read` + `secrets.update` 선언이 **`orders` 에도 write** 를 연다 |
+| `state_models.py:95` `ProjectState(extra='forbid')`, 계약 필드 없음 | Tech Lead 가 계약을 산출해도 **상태를 통과하지 못한다** |
 
 ---
 
-## 6. 완료 관문 — 이 흐름 전체가 한 번에 통과해야 한다
+## 1. 능력 상태 다섯 — 「지원 대기」와 「허용되지 않음」은 다른 말이다
+
+⚠️⚠️ 자체 로그인·직접 API 호출을 「지원 대기」로 적으면 사용자는 **언젠가 열린다고 읽는다.**
+그리고 그때까지 우회로를 찾는다. 그 둘은 영원히 열리지 않는다.
+
+| 상태 | 사용자 표시 | 뜻 |
+|---|---|---|
+| `SUPPORTED` | 지원됨 | 지금 만들 수 있다 |
+| `CONDITIONAL` | 조건부 지원 | 범위 안에서만(§1-2) |
+| `HOST_SERVICE_REQUIRED` | Host 기능 필요 | 앱이 아니라 **플랫폼이** 해야 한다 |
+| `NOT_YET_SUPPORTED` | 지원 대기 | 계획에 있고 아직 없다 |
+| `PROHIBITED` | 플랫폼 정책상 허용되지 않음 | **열 계획이 없다** |
+
+### 1-1. 결정표 (닫힌 목록 — 코드 상수)
+
+| 요구 능력 | 상태 | 근거 |
+|---|---|---|
+| 앱 데이터 조회·등록·수정·삭제 | `SUPPORTED` | `window.afs.data` |
+| 자체 로그인·권한·세션 | **`PROHIBITED`** | 회사 권한 체계 밖에서 인증하게 된다 |
+| 직접 App Data API 호출 | **`PROHIBITED`** | 증명 경계를 우회한다 |
+| 브라우저 토큰·자격증명 저장 | **`PROHIBITED`** | B02 |
+| 앱 전용 DB·권한 테이블 | **`PROHIBITED`** | 판정이 두 곳이 된다 |
+| 집계·복합 질의 | `CONDITIONAL` | §1-2 의 경계 안에서 |
+| 파일 업로드 | `NOT_YET_SUPPORTED` | 데이터 평면에 바이너리 없음 |
+| 백그라운드 작업 | `NOT_YET_SUPPORTED` | 앱은 프레임 수명 안에서만 산다 |
+| 외부 API·MCP 호출 | `HOST_SERVICE_REQUIRED` | CSP `connect-src 'none'` · Host 중개 |
+| 업무 액션(승인·발주·통보) | `HOST_SERVICE_REQUIRED` | 원장·승인 흐름을 지나야 한다 |
+| 경영 시뮬레이션 계산 | `HOST_SERVICE_REQUIRED` | **G4 계산 그래프** — `afs.data` 아님 |
+| 그 밖의 서버 로직 | `HOST_SERVICE_REQUIRED` | 임의 FastAPI 생성 금지 |
+| **표에 없는 것** | **`NOT_YET_SUPPORTED`** | ⚠️ 아래 |
+
+⚠️⚠️ **모르는 intent 를 자동 허용하지 않는다.** 표에 없으면 `NOT_YET_SUPPORTED` 로 떨어지고
+사용자 선택을 받는다 — 「모르니까 되겠지」가 곧 통제 없는 기능이다.
+
+### 1-2. `CONDITIONAL` 의 경계를 숫자로
+
+지금 데이터 평면이 **실제로** 할 수 있는 것:
+
+    한 데이터셋 · 페이지 단위(limit ≤ 100) · 정렬 고정(생성 역순) · 필터 없음
+
+· 지원: **상한 안에서 화면이 계산하는** 집계(합계·평균·그룹 표시)
+· 대기: 조인 · 데이터셋 간 집계 · 전체 스캔 통계 · 정렬/필터 지정 ·
+  `total` 이 상한을 넘는 전수 집계
+
+⚠️ 「일단 다 받아서 계산한다」를 허용하지 않는다 — 데이터가 늘어난 날 **조용히 틀린 합계**를
+보여준다. 그때 화면은 아무 오류도 내지 않는다.
+
+---
+
+## 2. 누가 무엇을 정하는가 — LLM 은 요구를 읽되 지원 여부를 정하지 않는다
+
+| 주체 | 하는 일 | 하지 않는 일 |
+|---|---|---|
+| **LLM**(Tech Lead) | 자연어 요구 → `capability_intents` 구조화, 데이터셋·필드 **초안** | 지원 여부 판정 · 지문 계산 · 어댑터 생성 |
+| **Compiler**(비-LLM) | 결정표로 상태 판정 · 계약 검증·정규화 · 의미 지문 · typed 어댑터 생성 | 없는 요구를 지어내기 |
+| **사용자** | 축소 / 대기 / Host 기능 확장 중 **선택** | — |
+
+★ 판정을 LLM 에서 떼어 내는 이유: 같은 요구에 대해 어제와 오늘의 답이 달라지면 그 차이는
+**릴리스가 나온 뒤에야** 드러난다. 결정표는 두 번 물어도 같은 답을 준다.
+
+---
+
+## 3. 파이프라인 — Tech Lead 필수화 + 결정론적 컴파일러
+
+```text
+RFP / PMO
+  └─ 요구 능력 «의도» 만 구조화 (capability_intents)          [기존 LLM 노드]
+        │
+I-4 대상 실행 태스크
+  └─ Tech_Lead 를 **필수 역할로 정규화**                      [배정 규칙 변경]
+        └─ Manifest · Dataset 초안                            [기존 LLM 노드]
+        │
+HostContractCompiler                                          [신규 · 비-LLM]
+  ├─ 결정표로 지원 상태 판정
+  ├─ 계약 검증·정규화 (JSON Schema)
+  ├─ 의미 지문(semantic_fingerprint) 생성
+  └─ Typed SDK Adapter 생성 (src/generated/afs-contract.ts)
+        │
+ContractReviewGate                                            [신규 · 비-LLM]
+  ├─ 최초 계약 또는 **지문 변경** → 사용자 검토
+  └─ 지문 불변 → 자동 통과
+        │
+Backend / Frontend → CodeBuilder → 정적 검사 → …
+```
+
+### 왜 새 LLM 에이전트를 만들지 않는가
+
+에이전트가 늘면 토큰·시간·실패 지점이 함께 는다. 그리고 **판정은 LLM 이 할 일이 아니다**(§2).
+두 신규 노드는 전부 **비-LLM 시스템 노드**다(`CodeBuilder` 와 같은 부류: `llm: False`).
+
+### Tech Lead 필수화의 범위
+
+⚠️ **모든 태스크가 아니라 «I-4 대상» 태스크만.** 문서 작성·리팩터링 태스크까지 계약을
+요구하면 파이프라인이 무거워지고, 무거워지면 사람이 끄는 길을 찾는다.
+
+판정 기준: **그 태스크가 앱 데이터를 다루는가**(= Frontend/Backend 산출물이 데이터 CRUD 를
+포함하는가). PMO 가 WBS 를 만들 때 `capability_intents` 를 보고 표시한다.
+
+### 기존 프로젝트에 끼워 넣지 않는다
+
+`host_runtime_contract_v1` 이 활성화된 **신규 워크플로우부터** 적용한다.
+⚠️ 진행 중 프로젝트에 노드를 삽입하면 `completed_agents` 순서 전제와 체크포인터 상태가
+어긋난다 — 그 결함은 재개할 때에야 드러나고, 그때는 원인을 찾기 어렵다.
+
+---
+
+## 4. 계약의 네 계층 — 「어디가 정본인가」를 하나로 답하지 않는다
+
+⚠️ rev.1 은 `release.json` 과 `app_datasets` 중 **하나를 고르려** 했다. 그 질문 자체가
+틀렸다 — 둘은 책임이 다르다.
+
+| 계층 | 위치 | 책임 | 바뀌면 |
+|---|---|---|---|
+| **설계 정본** | `<workspace>/contracts/app_runtime_contract.json` | 승인 전후의 계약 원문 | 지문이 바뀐다 → 재승인 |
+| **승인 증거** | `decision_ledger` | **누가 어떤 지문을 승인했는가** | 추가만 된다(불변) |
+| **릴리스 봉인** | `release.json` | 그 릴리스가 쓴 계약 스냅샷 | 릴리스마다 고정 |
+| **런타임 투영** | `app_datasets` 표 | 승인된 계약의 **물질화** | 계약을 따라간다 |
+
+★★★ `app_datasets` 는 **정본이 아니라 투영본**이다. 그래서:
+
+· I-4 릴리스에서는 관리자도 **계약 밖 데이터셋을 만들 수 없다** → `409`
+· 바꾸려면 **계약 개정 → 재승인 → 재물질화** 순서를 지나야 한다
+· 레거시 릴리스만 **명시적 예외 모드**로 구분한다(`requires_host_runtime: false`)
+
+⚠️ 「관리자니까 예외」를 두지 않는다. 예외가 있으면 계약은 설명서가 되고, 설명서는 곧 낡는다.
+
+---
+
+## 5. Dataset Contract — 버전형 JSON Schema
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "afs://contracts/app_runtime_contract/1.0",
+  "title": "App Runtime Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_id", "revision", "project_id",
+               "runtime_contract_version", "status", "app_class",
+               "capability_intents", "manifest", "datasets",
+               "unsupported_requirements", "semantic_fingerprint", "approval"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "contract_id": {"type": "string", "pattern": "^contract_[a-z0-9]{12}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "project_id": {"type": "string"},
+    "task_id": {"type": "string"},
+    "runtime_contract_version": {"type": "integer", "enum": [1]},
+    "status": {"enum": ["DRAFT", "COMPILED", "APPROVED", "SUPERSEDED"]},
+    "app_class": {"enum": ["personal", "departmental", "enterprise"]},
+
+    "capability_intents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["intent_id", "requirement_ref", "capability", "status"],
+        "properties": {
+          "intent_id": {"type": "string"},
+          "requirement_ref": {"type": "string"},
+          "capability": {"type": "string"},
+          "status": {"enum": ["SUPPORTED", "CONDITIONAL", "HOST_SERVICE_REQUIRED",
+                              "NOT_YET_SUPPORTED", "PROHIBITED"]},
+          "reason": {"type": "string"},
+          "user_decision": {"enum": ["", "REDUCE", "WAIT", "REQUEST_HOST_FEATURE"]}
+        }
+      }
+    },
+
+    "manifest": {"type": "object"},
+
+    "datasets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "label", "purpose", "allowed_actions", "fields"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+          "label": {"type": "string"},
+          "purpose": {"type": "string", "minLength": 1},
+          "allowed_actions": {
+            "type": "array", "minItems": 1, "uniqueItems": true,
+            "items": {"enum": ["read", "create", "update", "delete"]}
+          },
+          "ontology_entity_type": {"type": "string"},
+          "knowledge_eligibility": {
+            "enum": ["OPERATIONAL_UNVERIFIED", "OPERATIONAL_VERIFIED",
+                     "REFERENCE_CANDIDATE", "NOT_ELIGIBLE"]
+          },
+          "fields": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "type", "required", "classification"],
+              "properties": {
+                "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+                "type": {"enum": ["string", "text", "number", "boolean", "date"]},
+                "required": {"type": "boolean"},
+                "label": {"type": "string"},
+                "business_term_id": {"type": "string"},
+                "semantic_role": {
+                  "enum": ["", "identifier", "event_time", "quantity", "amount",
+                           "status", "party", "location", "note"]
+                },
+                "unit": {"type": "string"},
+                "classification": {"enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"]},
+                "master_reference": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "unsupported_requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["requirement_ref", "status", "user_decision"],
+        "properties": {
+          "requirement_ref": {"type": "string"},
+          "status": {"enum": ["HOST_SERVICE_REQUIRED", "NOT_YET_SUPPORTED", "PROHIBITED"]},
+          "reason": {"type": "string"},
+          "user_decision": {"enum": ["REDUCE", "WAIT", "REQUEST_HOST_FEATURE"]}
+        }
+      }
+    },
+
+    "semantic_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["PENDING", "APPROVED", "REJECTED"]},
+        "approved_by": {"type": "string"},
+        "approved_at": {"type": "string"},
+        "decision_ledger_id": {"type": "string"}
+      }
+    }
+  }
+}
+```
+
+### 왜 `business_term_id`·`unit`·`classification` 이 **필수 수준**인가
+
+⚠️ 이 셋이 없으면 현업 앱의 데이터가 중앙에 쌓여도 **G2 온톨로지와 전사 시뮬레이션에서 쓸 수
+없다.** 「도착일」이라는 컬럼이 무슨 사건의 시각인지, 「수량」이 톤인지 개인지, 그 값을
+누구에게 보여도 되는지를 나중에 사람이 추측하게 된다 — 그리고 추측한 숫자로 경영 판단을 한다.
+
+★ 다만 `business_term_id`·`master_reference` 는 **비어 있을 수 있다**(용어가 아직 없을 수
+있다). 대신 `classification` 은 **필수**다 — 등급 없는 데이터는 공유 판단을 할 수 없다.
+
+### 의미 지문(`semantic_fingerprint`)에 들어가는 것
+
+```
+app_class · 각 데이터셋의 (name, allowed_actions, ontology_entity_type)
+         · 각 필드의 (name, type, required, unit, classification, semantic_role)
+         · capability_intents 의 (capability, status, user_decision)
+```
+
+⚠️ **들어가지 않는 것**: `label`·`purpose`·`reason` 같은 설명 문구. 문구를 다듬었다고
+재승인을 요구하면 사람이 게이트를 습관으로 통과시킨다.
+
+---
+
+## 6. 데이터셋별 `allowed_actions` — 런타임에서 강제한다
+
+### 지금 무엇이 틀렸나 (실측)
+
+`core/app_proof.manifest_actions()` 는 매니페스트의 모든 capability 를
+`read/write/delete/manage` 의 **전역 합집합**으로 평탄화한다. 따라서
+
+```
+orders.read
+secrets.update
+```
+
+를 선언하면 증명에는 **전역 `read + write`** 가 들어가고, 판정은 `orders` 에 대한 write 를
+막을 근거가 없다. **데이터셋별 권한이 아니었다.**
+
+### 두 단계 판정
+
+```
+1차 — 데이터셋을 알기 전:  증명 · 릴리스 · 앱 · 조직 · 세션 · 문맥 · 전역 capability
+       (현행 `_judge`. 열거 오라클을 막으려고 데이터셋보다 먼저 끝난다)
+2차 — 자기 릴리스의 데이터셋을 이름으로 해석한 뒤:
+       그 데이터셋의 계약상 `allowed_actions` 에 이번 행동이 있는가
+```
+
+★ 순서를 바꾸지 않는다. 1차를 데이터셋 뒤로 옮기면 **만료·타인 증명으로 이름을 열거**할 수
+있게 된다([교차검토 86] 에서 실제로 열렸던 구멍이다).
+
+⚠️ 2차 거부는 **그 앱 자신의 사실**이므로 `FORBIDDEN` 으로 알린다 — 숨기면 개발자가
+계약을 고칠 방법을 모른다. 반면 **계약에 없는 이름**은 `NOT_FOUND` 다(존재를 알리지 않는다).
+
+### 필수 회귀
+
+· `orders.read` 만 선언한 앱이 `orders.update` **불가**
+· `secrets.update` 선언이 **`orders.update` 를 열지 않는다**(전역 합집합 회귀 방지)
+· 계약에 없는 데이터셋 이름 → **404**
+· 동적으로 조립한 데이터셋 이름으로 계약을 **우회할 수 없다**
+· 계약 개정으로 `allowed_actions` 가 줄면 **기존 증명이 즉시 막힌다**(지문 결속과 같은 축)
+
+---
+
+## 7. 생명주기 — Preview 와 Release 의 순서를 확정한다
+
+rev.1 은 §2 에서 `Preview → Release`, §6 에서 `Release → Preview` 라고 적었다. **모순이다.**
+그리고 현행 Host Runtime 증명은 `release_id` 를 요구하므로 **릴리스 없이 실제 Runtime
+Preview 를 돌릴 수 없다.**
+
+```
+DRAFT → CONTRACT_APPROVED → RELEASE_CANDIDATE → PREVIEW_APPROVED → ACTIVE
+                                   ↓ (정적 검사 실패)
+                              QUARANTINED
+```
+
+### 상태 전이표
+
+| 현재 | 사건 | 다음 | 가드(성립해야 넘어간다) |
+|---|---|---|---|
+| `DRAFT` | 컴파일 성공 | `DRAFT` | JSON Schema 통과 · 지문 생성 |
+| `DRAFT` | 사용자 승인 | `CONTRACT_APPROVED` | 지원 대기 항목마다 `user_decision` 존재 · 원장 기록 |
+| `CONTRACT_APPROVED` | 코드 생성·빌드 | `RELEASE_CANDIDATE` | 계약 지문 불변 |
+| `RELEASE_CANDIDATE` | 정적 검사 **실패** | `QUARANTINED` | — |
+| `RELEASE_CANDIDATE` | 정적 검사 통과 | `RELEASE_CANDIDATE` | 금지 신호 0건 · 미선언 데이터셋 0건 |
+| `RELEASE_CANDIDATE` | Preview 종단 통과 | `PREVIEW_APPROVED` | 여섯 작업 성공 · 부정 시나리오 차단 |
+| `PREVIEW_APPROVED` | 승격 | `ACTIVE` | **코드 해시·계약 지문이 후보와 동일** |
+| `QUARANTINED` | 재생성 | `DRAFT` | — |
+| `ACTIVE` | 계약 개정 | `DRAFT`(새 revision) | 옛 릴리스는 그대로 남는다 |
+
+### `RELEASE_CANDIDATE` 는 활성 릴리스가 아니다
+
+· 활성 라이브러리에 **노출되지 않는다** · 전달·앱 주머니 등록 **불가**
+· **Preview 전용 격리 데이터**와 **Preview 전용 증명**만 쓴다
+  (증명에 `purpose="preview"` 를 박고, 그 증명은 후보 릴리스에만 유효하다)
+
+⚠️⚠️ **승격은 «같은 것» 임을 확인하고 한다.** 후보와 활성의 코드 해시나 계약 지문이 다르면
+거부한다 — 「Preview 에서 본 것」과 「현업이 쓰는 것」이 다르면 그 검증은 아무 뜻이 없다.
+
+---
+
+## 8. 게이트는 하나 — 지문이 바뀔 때만 연다
+
+| 자리 | 무엇을 |
+|---|---|
+| 기존 RFP 게이트 | 지원 상태 **예비 안내**(이 요구 중 넷은 지금 못 한다) |
+| 기존 PMO 게이트 | WBS 에서 **지원 대기 작업 확인** |
+| **신규 Contract Review Gate** | **최종 계약 승인** |
+
+여는 조건 — 아래 중 하나라도 참일 때만:
+
+· 최초 계약 · capability 변경 · 데이터셋/필드/`allowed_actions` 변경
+· 조직 범위·데이터 등급 변경 · 지원 대기 항목의 처리 방향 변경
+
+⚠️ **단순 코드 재작업으로 지문이 같으면 다시 열지 않는다.** 매번 멈추면 사람은 내용을 읽지
+않고 통과 버튼을 누르게 되고, 그 순간 게이트는 장식이 된다.
+
+---
+
+## 9. 정적 검사 — 게시와 산출물 보존을 분리한다
+
+rev.1 의 「게시는 되지만 증명이 안 나간다」는 **기각한다.** 현업은 게시된 앱을 **쓸 수 있는
+제품**으로 읽는다. 게시 뒤 데이터가 안 붙으면 그것은 보안 통제가 아니라 **고장 난 제품**이고,
+그 평판은 Host Runtime 전체에 붙는다.
+
+```
+코드 생성 완료 → RELEASE_CANDIDATE
+  ├─ 검사 실패 → QUARANTINED (산출물·근거 보존, 활성 노출 없음)
+  └─ 검사 통과 → Preview 승인 → ACTIVE 로 원자적 승격
+```
+
+★ 「검사 실패로 산출물이 사라진다」는 걱정은 **후보를 보존**하면 풀린다. 보존을 위해
+**활성 게시를 허용할 이유는 없다.**
+
+### 검사 신호 — 기존 여섯에 다섯을 더한다
+
+현행 `nodes/utils/platform_auth_checker.py` 가 이미 잡는 것(실측):
+`local_login_form` · `local_login_route` · `password_storage` · `jwt_issuer` ·
+`local_user_store`(block) · `auth_library`(warn)
+
+| 추가 신호 | 잡는 것 | 심각도 |
+|---|---|---|
+| `token_in_browser_store` | 브라우저 저장소에 **토큰·자격증명** | block |
+| `direct_appdata_call` | `/api/v1/appdata` 직접 호출 | block |
+| `generic_host_fetch` | 호스트를 향한 범용 `fetch`/XHR/WebSocket | block |
+| `app_local_db` | 앱 전용 DB·권한 테이블 | block |
+| `undeclared_dataset` | **어댑터를 거치지 않은** `window.afs.data.*` 직접 호출 | block |
+
+⚠️ **검사기의 어려운 부분은 「무엇을 잡을까」가 아니라 「무엇을 놓아줄까」다**(그 파일 머리말이
+이미 못박았다). 오탐이 늘면 검사기는 꺼지고, 꺼진 검사기는 없는 것과 같다.
+예: 앱이 **자기 화면 상태**를 `localStorage` 에 두는 것은 정상이다(브리지가 가짜 저장소로
+갈아끼운다) — 잡을 것은 **토큰·자격증명**이다.
+
+---
+
+## 10. Typed SDK Adapter — LLM 이 데이터셋 문자열을 쓰지 않게
+
+Compiler 가 **결정론적으로** 생성한다:
+
+```ts
+// src/generated/afs-contract.ts   ⚠️ 자동 생성 — 손으로 고치지 않는다
+export const materialArrivals = {
+  list:   (page?: { limit?: number; cursor?: string }) =>
+            window.afs.data.list('material_arrivals', page),
+  get:    (recordId: string) => window.afs.data.get('material_arrivals', recordId),
+  create: (payload: MaterialArrival) =>
+            window.afs.data.create('material_arrivals', payload),
+  // ⚠️ 계약의 allowed_actions 에 'delete' 가 없으므로 remove 는 **생성되지 않는다**
+};
+```
+
+LLM 은 이 어댑터만 `import` 한다. 직접 `window.afs.data.*` 를 부르면 §9 의
+`undeclared_dataset` 이 잡는다.
+
+★★★ 이렇게 하면 **미선언 데이터셋 · 동적 이름 · 오탈자 · 허용되지 않은 update/delete** 를
+정규식 추정이 아니라 **구조적으로** 막는다. 없는 함수는 타입 검사에서 먼저 걸린다.
+그리고 LLM 이 쓸 코드가 줄어 토큰과 실패 확률이 함께 준다.
+
+⚠️ 어댑터는 **두 번째 그물**이다. 서버의 2차 판정(§6)이 첫 번째다 — 어댑터만 믿으면
+브라우저에서 고쳐 부르는 순간 통제가 없다.
+
+---
+
+## 11. `ProjectState` 에 계약 필드를 더한다
+
+`state_models.py:95` 는 `extra='forbid'` 다. 필드를 선언하지 않으면 Tech Lead 가 계약을
+산출해도 **상태가 그것을 버린다**(그리고 조용히 버린다).
+
+```python
+capability_intents: List[Dict[str, Any]] = Field(default_factory=list)
+app_runtime_contract_status: str = Field(default="")        # DRAFT|COMPILED|APPROVED
+app_runtime_contract_fingerprint: str = Field(default="")
+app_runtime_contract_summary: str = Field(default="")       # 사람이 읽는 요약
+unsupported_requirements: List[Dict[str, Any]] = Field(default_factory=list)
+approved_contract_fingerprint: str = Field(default="")      # 게이트가 비교하는 값
+```
+
+★ **계약 원문은 workspace 파일이 정본**이고 상태에는 **요약·상태·지문만** 둔다.
+⚠️ 원문을 상태에 넣으면 체크포인터가 매 단계 그것을 복사하고, 커지는 상태는 재개를 느리게
+만든다(그리고 언젠가 잘린다).
+
+---
+
+## 12. 온톨로지·업무용어 매핑 — 왜 지금 넣는가
+
+I-4 로 만든 앱의 데이터가 중앙에 쌓이는 것이 G2 의 입력이다. 그런데 매핑을 **나중에** 붙이면
+그때는 이미 수십 개 앱이 각자 다른 이름으로 같은 것을 부르고 있다.
+
+· `ontology_entity_type` — 이 데이터셋이 온톨로지의 어느 객체 유형인가(비어 있을 수 있다)
+· `business_term_id` — 이 필드가 어느 표준 용어인가(마스터 데이터의 용어집)
+· `semantic_role` — 사건 시각인가 수량인가 상태인가(닫힌 목록)
+· `unit` — 톤인가 개인가(수량·금액에는 사실상 필수)
+· `classification` — 등급(**필수**)
+· `master_reference` — 코드 값이 어느 기준정보를 참조하는가
+
+⚠️ 강제 수준을 낮게 잡는다: **`classification` 만 필수**, 나머지는 비어도 계약이 성립한다.
+전부 필수로 하면 Tech Lead 가 값을 **지어낸다** — 그러면 없느니만 못하다.
+
+---
+
+## 13. 완료 관문
 
 ```
 자연어 요구 입력
- → 지원 능력 판정(지원 대기 항목이 있으면 사용자 선택)
- → Manifest · Dataset Contract 선행 생성 · 사용자 검토 통과
- → 앱 코드 생성
- → 정적 검사: 자체 인증 0건 · 직접 API 호출 0건 · 미선언 데이터셋 0건
- → Release (`runtime_contract_version` · `requires_host_runtime` 기록)
- → Preview 에서 `window.afs.ready` 성립
- → schema · list · get · create · update · remove 여섯 작업 성공
- → 다른 앱 · 다른 조직 · 다른 세션 접근 차단
- → 로그아웃 · Manifest 변경 · 프로그램 중단이 **즉시** 반영
+ → capability_intents 구조화(LLM)
+ → 결정표 판정(Compiler) · 지원 대기 항목마다 사용자 선택
+ → Manifest · Dataset Contract 컴파일 · 지문 생성
+ → Contract Review Gate 승인(원장 기록)
+ → typed 어댑터 생성 → 앱 코드 생성
+ → 정적 검사: 자체 인증 0 · 직접 API 호출 0 · 미선언 데이터셋 0
+ → RELEASE_CANDIDATE
+ → Preview 에서 window.afs 준비 · 여섯 작업 성공
+ → 다른 앱 · 다른 조직 · 다른 세션 차단
+ → 로그아웃 · Manifest 변경 · 프로그램 중단 **즉시** 반영
+ → 코드 해시·계약 지문 동일 확인 → ACTIVE 승격
 ```
 
-★ 마지막 세 줄은 이미 [4] 격리 카나리와 브라우저 카나리가 증명한 것이다 —
-I-4 는 그 위에 **「생성기가 그런 앱을 만들어 내는가」** 를 얹는다.
-
-⚠️ 관문을 **하나의 종단 실행**으로 본다. 단계별로 따로 초록을 모으면 「각 조각은 되는데
-  이어 붙이면 안 되는」 상태를 놓친다 — 이 저장소가 반복해 겪은 유형이다.
+⚠️ **하나의 종단 실행으로 본다.** 단계별로 따로 초록을 모으면 「각 조각은 되는데 이어 붙이면
+안 되는」 상태를 놓친다 — 이 저장소가 반복해 겪은 유형이다.
 
 ---
 
-## 7. 열려 있는 결정 — 교차검토에서 확정할 것
+## 14. 남은 결정 · 하지 않는 것
 
-1. **파이프라인 얹는 방식**: §2 의 「Tech_Lead 산출물 확장」안을 채택하는가, 새 에이전트를
-   추가하는가. (전자를 제안한다 — 노드 순서 전제를 건드리지 않는다.)
-2. **Dataset Contract 의 정본 위치**: 릴리스 문서 안(`release.json`)인가, `app_datasets`
-   테이블인가. 지금 데이터셋은 **런타임에** 관리 API 로 만들어진다 — 계약과 실물이 갈릴 수
-   있다. 「계약에 없는 데이터셋을 만들면 어떻게 되는가」를 정해야 한다.
-3. **`hotl_after` 를 켜는 자리**: Tech_Lead 직후 하나면 되는가, PMO 직후에도 필요한가.
-   (게이트가 많으면 사람이 통과 버튼을 습관으로 누른다.)
-4. **정적 검사 실패의 효력**: §4 의 「게시는 되지만 증명이 안 나간다」로 충분한가,
-   아니면 게시 자체를 막는가.
+**교차검토에서 확정할 것**
 
----
+1. `RELEASE_CANDIDATE` 의 **Preview 전용 격리 데이터**를 어디에 두는가 — 별도 데이터셋
+   네임스페이스인가, 별도 AppData DB 인가. (후자가 깨끗하지만 운영 부담이 있다.)
+2. 계약 개정 시 **기존 레코드**를 어떻게 하는가 — 필드가 사라지면 값은 남지만 화면에서
+   사라진다(`update_schema` 가 이미 그렇게 경고한다). 마이그레이션을 계약에 넣을 것인가.
+3. `HOST_SERVICE_REQUIRED` 목록의 **우선순위** — 외부 API 중개와 업무 액션 중 무엇을 먼저
+   여는가. (I-4 범위 밖이지만 사용자에게 「언제쯤」을 말하려면 필요하다.)
 
-## 8. 이 설계가 하지 않는 것 (명시)
+**이 설계가 하지 않는 것**
 
-· 기존 앱 일괄 변환 · 계산/업무 액션의 Host 중개(후속) · 파일 업로드 · 백그라운드 작업
-· `app_pdp_enforce` 관리자 카드(후속 UI 보완 — [6] 판정에서 차단 사항 아님으로 확인)
+· 기존 앱 일괄 변환 · 파일 업로드 · 백그라운드 작업 · 계산/업무 액션의 Host 중개(후속)
+· `app_pdp_enforce` 관리자 카드(후속 UI — [6] 판정에서 차단 사항 아님으로 확인)
