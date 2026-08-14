@@ -78,7 +78,18 @@ async def login(req: LoginRequest):
 async def logout(request: Request):
     """로그아웃. 토큰이 없거나 이미 죽었어도 **성공으로 답한다** — 사용자가 할 일은 끝났고,
     실패를 알려 봤자 다시 누르는 것 말고 할 수 있는 일이 없다."""
-    auth_store.destroy(request.headers.get(SESSION_HEADER, "") or "")
+    tok = request.headers.get(SESSION_HEADER, "") or ""
+    #: ★★★ [G1-B 3.5] **앱 증명을 함께 회수한다.** 세션만 지우면 그 세션으로 발급된 앱
+    #:   증명이 만료(최대 60분)까지 살아 있고, 그동안 생성 앱은 데이터를 계속 만질 수 있다 —
+    #:   사용자는 「로그아웃했다」고 믿는데.
+    #: ⚠️ 세션을 지우기 **전에** 회수한다. 먼저 지우면 해시는 남아 있지만 「그 세션이 있었다」는
+    #:   사실을 잃고, 회수가 실패해도 아무도 모른다.
+    try:
+        from core.app_capability_token import app_capability_tokens
+        app_capability_tokens.revoke_session(auth_store.session_hash(tok), actor="logout")
+    except Exception:
+        pass                      # 회수 실패가 로그아웃을 막지 않는다(아래에서 세션은 지운다)
+    auth_store.destroy(tok)
     return {"status": "success", "data": {"ok": True}}
 
 

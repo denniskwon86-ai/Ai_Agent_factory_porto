@@ -111,7 +111,8 @@ from api.routes import (app_delivery_control, decision_control,  # [CL-1, CL-2]
                         publication_control,  # [CL-3] 대내외 발간 게이트
                         jarvis_control,  # [CL-4 선행] 기존 Supervisor 계약의 문맥 어댑터
                         auth_control,  # [2026-08-09] 로그인·세션 — 식별의 유일한 정본
-                        app_data_control)  # [트랙 I] 생성 앱 데이터 평면
+                        app_data_control,  # [트랙 I] 생성 앱 데이터 평면
+                        app_data_runtime)  # [G1-B 3.5] Host Runtime 전용(앱 증명 필수)
 app.include_router(factory_control.router)
 app.include_router(format_control.router)
 app.include_router(realtime.router)
@@ -158,6 +159,10 @@ app.include_router(jarvis_control.router)
 # [트랙 I] 생성 앱 데이터 평면 — 생성된 앱은 자기 백엔드를 갖지 않으므로(CL-0 계약) 업무
 #   데이터는 **이 라우터를 통해서만** 드나든다. 앱은 `release_id` 를 말하지 않는다(설계 §7).
 app.include_router(app_data_control.router)
+# ★★★ [G1-B 3.5] Host Runtime 전용 데이터 평면. **앱 증명이 없으면 세션으로 내려가지
+#   않고 차단한다.** 같은 라우터에서 폴백을 허용하면 앱이 헤더 하나를 생략해 사람의 넓은
+#   권한으로 데이터를 만질 수 있다(교차검토 [G1-B-I3-REVIEW-82]).
+app.include_router(app_data_runtime.router)
 app.include_router(mcp_control.router)
 # [2026-08-09] 로그인. ⚠️ 이 라우터 자체는 인증을 요구하지 않는다(로그인이 인증의 입구다).
 app.include_router(auth_control.router)

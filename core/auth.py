@@ -248,6 +248,14 @@ class AuthStore:
             return ""                   # 인증 저장소 장애를 «인증됨» 으로 바꾸지 않는다
 
     # ── [P0-1B] SSE 접속표 ────────────────────────────────────────────────
+    def session_hash(self, session_token: str) -> str:
+        """세션 토큰 → `auth_session.token_hash` 와 **같은 값**.
+
+        ★ [G1-B 3.5] 앱 증명을 세션에 묶는 축이다. 같은 함수를 쓰는 것이 요점이다 —
+          다른 함수로 만들면 로그아웃이 지운 행과 증명이 가리키는 세션이 **다른 것**이 되고,
+          그러면 회수가 조용히 실패한다."""
+        return self._ticket_hash(session_token)
+
     @staticmethod
     def _ticket_hash(raw: str) -> str:
         """티켓 원문 → 저장용 해시.

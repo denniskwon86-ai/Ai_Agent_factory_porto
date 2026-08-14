@@ -66,6 +66,16 @@ class Principal:
     #  ⚠️ 여기서 검증까지 해 버리면 문맥을 전혀 쓰지 않는 라우트까지 ECM 조회를 하게 되고,
     #    조직도 조회 장애가 **전 API 장애**가 된다.
     requested_scope_node_id: str = ""
+    #: ★★★ [G1-B 3.5] 지금 로그인한 **세션의 해시**(`sha256(session_token)`).
+    #
+    #  앱 증명(`app_capability_token`)을 이 값에 묶는다. 묶지 않으면 로그아웃·재로그인 뒤에도
+    #  같은 증명이 통하고, 그것은 **회수할 수 없는 권한**이다.
+    #  ⚠️ **원문을 담지 않는다.** 해시만 담는 이유는 이 객체가 로그·예외·응답 어디로든 갈 수
+    #    있기 때문이다 — 원문이 한 번이라도 새면 그것이 곧 로그인이다.
+    #  ★ 값이 `auth_session.token_hash` 와 **같은 함수**로 만들어진다. 그래서 로그아웃이 그
+    #    행을 지우면 `session_alive_by_hash()` 가 곧바로 거짓이 되고, 증명 회수의 기준점이
+    #    한 곳으로 모인다.
+    session_id: str = ""
 
     @property
     def unrestricted(self) -> bool:
@@ -150,7 +160,24 @@ async def current_principal(request: Request) -> Principal:
     #  `current_enterprise_context` 가 같은 두 자리를 읽는다.
     want = (request.headers.get(getattr(config, "ECM_SCOPE_HEADER", "X-Enterprise-Scope"), "")
             or request.query_params.get("enterprise_scope", "") or "").strip()
-    return Principal(user_id=uid, scope=scope, requested_scope_node_id=want)
+    return Principal(user_id=uid, scope=scope, requested_scope_node_id=want,
+                     session_id=_session_hash(request))
+
+
+def _session_hash(request: Request) -> str:
+    """세션 토큰 → **해시**. 앱 증명을 묶을 축이다(§`Principal.session_id`).
+
+    ⚠️ 원문을 돌려주지 않는다. 그리고 세션이 없으면 **빈 문자열**이다 — 그때는 앱 증명을
+      발급할 수도, 대조할 수도 없다(그것이 옳다: 세션 없는 증명은 회수 불가능한 권한이다)."""
+    try:
+        tok = (request.headers.get("X-Session-Token", "") or "").strip()
+        if not tok:
+            return ""
+        from core.auth import auth_store
+        return auth_store.session_hash(tok)
+    except Exception:
+        #: ⚠️ 실패를 «세션 없음» 으로 떨어뜨린다 — 임의 값을 만들면 그 값에 증명이 묶인다.
+        return ""
 
 
 # ── 권한 단언 헬퍼 ────────────────────────────────────────────────────────

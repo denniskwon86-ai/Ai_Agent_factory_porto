@@ -1,0 +1,458 @@
+"""★★★ [G1-B 3.5] Host Runtime 전용 데이터 평면 — **증명 없이는 아무것도 열리지 않는다.**
+
+교차검토 `[G1-B-I3-REVIEW-82]` 의 여덟 계약을 하나씩 잠근다.
+
+1. 세션 인증된 부모만 증명을 발급받는다.
+2. 서버가 release·app·Manifest·문맥·capability 를 **직접 산출**한다(클라이언트 입력 금지).
+3. 전문은 발급 응답에서 한 번만 나가고 목록·감사에 남지 않는다.
+4. **증명 누락 시 session 으로 폴백하지 않는다.**
+5. 요청마다 사용자·세션·앱·릴리스·문맥·조직·Manifest 를 전수 대조한다.
+6. 로그아웃 시 그 세션의 증명을 회수한다.
+7. 만료는 «다시 열면 된다» 로 따로 말한다(부모가 한 번만 재발급).
+8. 정확한 사유는 감사에만, 앱에는 SDK 고정 오류로 접힌다.
+
+⚠️ 이 파일은 **실제 라우터**를 태운다. 판정 함수 단위 시험은 「실제 배선을 타지 않으면 그
+  초록은 거짓이다」를 막지 못한다 — 이 저장소가 반복해 다친 유형이다.
+"""
+import json
+
+import pytest
+
+from core import app_policy as ap
+
+H_USER = {"X-Factory-User": "u@x", "X-Session-Token": "sess_raw_1",
+          #: ★ 조직 범위를 고른 상태. 고르지 않으면 증명이 나가지 않는다(별도 시험).
+          "X-Enterprise-Scope": "node_hq"}
+#: 세션 없는 요청(같은 사람, 헤더 신원만) — 증명 발급이 막혀야 한다.
+H_NO_SESSION = {"X-Factory-User": "u@x"}
+
+
+@pytest.fixture()
+def client(monkeypatch, tmp_path):
+    """실제 앱 + 격리된 라이브러리·앱데이터·증명 저장소."""
+    import config
+    import core.library_paths as library_paths
+    from core.app_capability_token import app_capability_tokens
+    from core.org_directory import org_directory
+    from core.policy_shadow import policy_shadow
+
+    lib = tmp_path / "library"
+    lib.mkdir()
+
+    def _mk(rid, *, caps, project="proj_a", scope="node_hq", dept="hq", tenant="tenant_default"):
+        d = lib / rid
+        d.mkdir()
+        (d / "release.json").write_text(json.dumps({
+            "release_id": rid, "project_id": project, "tenant_id": tenant,
+            "entity_mode": "REAL", "enterprise_scope_id": scope,
+            "owner_user_id": "", "owner_dept_id": dept, "visibility": "dept",
+            "manifest": {"fingerprint": "fp_" + rid, "valid": True, "manifest": {
+                "version": "1.0", "app_class": "departmental",
+                "capabilities": caps, "required_capabilities": []}},
+        }, ensure_ascii=False), encoding="utf-8")
+
+    #: 읽기·쓰기·삭제를 선언한 앱
+    _mk("rel_ok", caps=["orders.read", "orders.create", "orders.delete"])
+    #: 읽기만 선언한 앱 — 「선언 밖은 못 한다」의 대조군
+    _mk("rel_readonly", caps=["orders.read"])
+    #: 아무것도 선언하지 않은 앱
+    _mk("rel_silent", caps=[])
+    #: 같은 사용자가 볼 수 있는 **다른 앱** — 증명 교차 사용 대조군
+    _mk("rel_other", caps=["orders.read"], project="proj_b")
+
+    monkeypatch.setattr(library_paths, "release_dir",
+                        lambda rid: str(lib / str(rid)), raising=False)
+    monkeypatch.setattr(config, "ORG_ENFORCE", True, raising=False)
+    monkeypatch.setattr(config, "ORG_TRUST_HEADER", True, raising=False)
+
+    class _Scope:
+        readable_dept_ids = frozenset({"hq"})
+        writable_dept_ids = frozenset({"hq"})
+        unrestricted = False
+        can_manage_standard = False
+        primary_dept_id = "hq"
+        readable_scope_nodes = frozenset({"node_hq"})
+
+        def can_read(self, d):
+            return d in self.readable_dept_ids
+
+        def can_write(self, d):
+            return d in self.writable_dept_ids
+
+    monkeypatch.setattr(org_directory, "resolve_scope", lambda uid="": _Scope())
+    monkeypatch.setattr(org_directory, "is_bootstrap", lambda: False)
+    monkeypatch.setattr(org_directory, "get_user",
+                        lambda uid: {"user_id": uid, "status": "active"} if uid else None)
+    monkeypatch.setattr(org_directory, "get_ownership",
+                        lambda kind, rid: {"dept_id": "hq", "owner_user_id": "",
+                                           "visibility": "dept"})
+
+    #: ★★ 세션은 **실제 경로**로 만든다 — `X-Session-Token` 헤더를 보내면 `api.deps._session_hash`
+    #:   가 `auth_store.session_hash()` 로 해시를 만든다.
+    #:   ⚠️ 처음에는 `_session_hash` 를 스텁으로 갈아끼웠는데 **먹지 않았고**, 그 사실이
+    #:     「세션 없음」으로 조용히 떨어져 전 시험이 401 이 됐다. 스텁을 고치는 대신
+    #:     실제 배선을 태운다 — 하니스가 제품과 다른 세계를 만들면 그 초록은 거짓이다.
+
+    app_capability_tokens._tokens.clear()
+    policy_shadow.reset()
+
+    from fastapi.testclient import TestClient
+    from main import app
+    c = TestClient(app)
+    c.lib = lib
+    return c
+
+
+R = "/api/v1/appdata/runtime"
+
+
+def _proof(c, release_id="rel_ok", headers=None):
+    r = c.post(f"{R}/proof", json={"release_id": release_id}, headers=headers or H_USER)
+    return r
+
+
+def _tok(c, release_id="rel_ok"):
+    r = _proof(c, release_id)
+    assert r.status_code == 200, r.text
+    return r.json()["data"]["token"]
+
+
+def _h(tok, extra=None):
+    out = dict(H_USER)
+    out["X-App-Proof"] = tok
+    out.update(extra or {})
+    return out
+
+
+def _mkds(c, name="orders", release_id="rel_ok", app_class=""):
+    """관리 API 로 데이터셋을 만든다 — 런타임 API 는 데이터셋을 만들지 않는다."""
+    r = c.post("/api/v1/appdata/datasets", headers=H_USER, json={
+        "release_id": release_id, "name": name, "app_class": app_class,
+        "schema": {"fields": [{"name": "qty", "type": "number"}]}})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+# ── ① 증명 없이는 아무것도 열리지 않는다 ──────────────────────────────────
+
+def test_증명이_없으면_세션으로_내려가지_않는다(client):
+    """★★★ 교차검토 계약 (4). 폴백을 허용하면 앱은 **헤더 하나를 생략해서** 사람의 넓은
+    권한으로 데이터를 만질 수 있다 — 그것이 이 라우터가 따로 있는 이유 전부다.
+
+    ⚠️ 대조군을 함께 본다: 같은 사용자가 **관리 API 로는** 같은 데이터를 읽는다.
+      그것이 없으면 이 시험은 「권한이 없어서 막혔다」와 구분되지 않는다."""
+    _mkds(client)
+    ok = client.get("/api/v1/appdata/datasets", params={"release_id": "rel_ok"}, headers=H_USER)
+    assert ok.status_code == 200, f"관리 API 도 막혔다 — 대조가 안 된다: {ok.text}"
+
+    for r in (client.get(f"{R}/datasets/orders/schema", headers=H_USER),
+              client.get(f"{R}/datasets/orders/records", headers=H_USER),
+              client.post(f"{R}/datasets/orders/records", headers=H_USER,
+                          json={"payload": {"qty": 1}})):
+        assert r.status_code == 403, f"증명 없이 통과했다: {r.status_code} {r.text[:120]}"
+
+
+def test_알_수_없는_증명은_있는_증명과_같은_답을_준다(client):
+    """★ 「그런 증명은 없다」와 「회수됐다」를 구분해 말하면 그 차이가 곧 정보다."""
+    _mkds(client)
+    a = client.get(f"{R}/datasets/orders/schema", headers=_h("app_no_such_token"))
+    b = client.get(f"{R}/datasets/orders/schema", headers=H_USER)
+    assert a.status_code == b.status_code == 403
+    assert a.json() == b.json()
+
+
+# ── ② 서버가 사실을 산출한다 ──────────────────────────────────────────────
+
+def test_발급_요청은_릴리스만_받는다(client):
+    """★★★ 교차검토 계약 (2). `capabilities` 를 받을 수 있으면 증명은 «사실» 이 아니라
+    «부르는 쪽이 원한다고 말한 권한» 이 된다."""
+    r = client.post(f"{R}/proof", headers=H_USER, json={
+        "release_id": "rel_ok", "capabilities": ["manage"], "scope_node_id": "node_전사",
+        "tenant_id": "tenant_다른회사"})
+    assert r.status_code == 200, r.text
+    #: 보낸 값이 무시됐는가 — `manage` 는 선언에도 없고 권한에도 없다.
+    assert "manage" not in r.json()["data"]["capabilities"]
+
+
+def test_capability_는_사용자_권한과_매니페스트_선언의_교집합이다(client):
+    """★★★ ① 을 빼면 권한을 회수해도 증명 수명 동안 살아 있고, ② 를 빼면 선언하지 않은
+    앱이 데이터를 만진다. 둘 다 이 저장소에서 한 번씩 열려 있던 구멍이다."""
+    caps = json.loads(_proof(client, "rel_ok").text)["data"]["capabilities"]
+    assert set(caps) == {"read", "write", "delete"}, caps
+
+    #: 매니페스트가 읽기만 선언한 앱 — 쓰기는 사람이 할 수 있어도 담기지 않는다.
+    caps2 = json.loads(_proof(client, "rel_readonly").text)["data"]["capabilities"]
+    assert caps2 == ["read"], caps2
+
+
+def test_사용자_권한이_없으면_교집합이_비고_발급되지_않는다(client, monkeypatch):
+    """⚠️ 빈 권한 증명은 «전부 허용» 으로 오해되기 쉽다. 만들지 않는다."""
+    from core.org_directory import org_directory
+    monkeypatch.setattr(org_directory, "get_ownership",
+                        lambda kind, rid: {"dept_id": "sales", "owner_user_id": ""})
+    r = _proof(client, "rel_ok")
+    assert r.status_code == 404, r.text
+
+
+def test_선언하지_않은_앱에는_증명이_나가지_않는다(client):
+    """★ 「선언이 없는 앱」과 「권한이 없는 릴리스」를 **구분하지 않는다** — 후자를 구분해
+    말하면 남의 릴리스의 존재가 샌다."""
+    a = _proof(client, "rel_silent")
+    assert a.status_code == 404
+    b = client.post(f"{R}/proof", headers=H_USER, json={"release_id": "rel_missing"})
+    assert b.status_code == 404 and a.json() == b.json()
+
+
+def test_세션이_없으면_증명을_발급하지_않는다(client):
+    """★★★ 세션에 묶이지 않은 증명은 로그아웃 뒤에도 살아 있다 — **회수할 수 없는 권한**이다."""
+    r = client.post(f"{R}/proof", json={"release_id": "rel_ok"}, headers=H_NO_SESSION)
+    assert r.status_code == 401, r.text
+
+
+# ── ③ 전문은 한 번만 나간다 ───────────────────────────────────────────────
+
+def test_증명_전문은_저장소와_목록_어디에도_없다(client):
+    from core.app_capability_token import app_capability_tokens
+    tok = _tok(client)
+    assert tok
+    assert all(tok not in str(row) for row in app_capability_tokens.active())
+    resolved = app_capability_tokens.resolve(tok)
+    assert "token" not in resolved and tok not in str(resolved)
+
+
+def test_발급_응답에_문맥_비밀이_실리지_않는다(client):
+    """⚠️ 부모가 이미 아는 값만 돌려준다. 세션 해시·소유자·부서를 실으면 그것이 로그로 간다."""
+    d = json.loads(_proof(client).text)["data"]
+    assert set(d) == {"token", "expires_at", "capabilities", "app_id", "release_id",
+                      "manifest_fingerprint"}
+
+
+# ── ④ 전수 대조 ───────────────────────────────────────────────────────────
+
+def test_다른_앱의_증명으로는_읽지_못한다(client):
+    """★★★ 혼동된 대리인의 마지막 관문 — 사용자는 두 앱을 다 볼 수 있다(대조군)."""
+    _mkds(client, "orders", "rel_ok")
+    _mkds(client, "orders", "rel_other")
+    good = _tok(client, "rel_ok")
+    other = _tok(client, "rel_other")
+    assert client.get(f"{R}/datasets/orders/schema", headers=_h(good)).status_code == 200
+    #: 남의 앱 증명으로 부르면 그 앱의 데이터셋으로 해석되므로, 이름이 같아도 **다른 자원**이다.
+    #: 그리고 어느 쪽이든 존재를 알려 주지 않는다.
+    r = client.get(f"{R}/datasets/no_such_name/schema", headers=_h(other))
+    assert r.status_code == 404
+
+
+def test_다른_세션의_증명은_거부된다(client):
+    """★★ 로그아웃·재로그인 뒤 재사용 경로."""
+    _mkds(client)
+    tok = _tok(client)
+    assert client.get(f"{R}/datasets/orders/schema", headers=_h(tok)).status_code == 200
+    #: 다른 세션 = 다른 세션 토큰. 실제 경로 그대로다.
+    r = client.get(f"{R}/datasets/orders/schema",
+                   headers={**_h(tok), "X-Session-Token": "sess_raw_2"})
+    assert r.status_code == 404, f"다른 세션에서 통했다: {r.status_code}"
+
+
+def test_다른_사용자의_증명은_거부된다(client):
+    _mkds(client)
+    tok = _tok(client)
+    r = client.get(f"{R}/datasets/orders/schema",
+                   headers={"X-Factory-User": "other@x", "X-Session-Token": "sess_raw_1",
+                            "X-App-Proof": tok})
+    assert r.status_code == 404
+
+
+def test_선언하지_않은_행동은_증명이_있어도_막힌다(client):
+    """★★ 매니페스트가 읽기만 선언한 앱은 **쓰기를 하지 못한다** — 사람이 쓸 수 있어도."""
+    _mkds(client, "orders", "rel_readonly")
+    tok = _tok(client, "rel_readonly")
+    assert client.get(f"{R}/datasets/orders/records", headers=_h(tok)).status_code == 200
+    r = client.post(f"{R}/datasets/orders/records", headers=_h(tok), json={"payload": {"qty": 1}})
+    assert r.status_code == 403, r.text
+
+
+# ── ⑤ 로그아웃 회수 ───────────────────────────────────────────────────────
+
+def test_로그아웃하면_그_세션의_증명이_회수된다(client):
+    """★★★ 세션만 지우면 앱 증명이 만료(최대 60분)까지 살아 있고, 그동안 생성 앱은 데이터를
+    계속 만질 수 있다 — 사용자는 「로그아웃했다」고 믿는데."""
+    from core.app_capability_token import app_capability_tokens
+    from core.auth import auth_store
+    _mkds(client)
+    tok = _tok(client)
+    assert client.get(f"{R}/datasets/orders/schema", headers=_h(tok)).status_code == 200
+
+    #: ⚠️ 해시 함수를 스텁으로 갈아끼우지 않는다. 그러면 회수 대상 세션과 증명이 가리키는
+    #:   세션이 **다른 값**이 되어, 회수가 실패해도 시험은 통과한다(실제로 그렇게 걸렸다).
+    #:   로그아웃은 `auth_store.session_hash()` 로 세션을 찾는다 — 발급 때와 같은 함수다.
+    r = client.post("/api/v1/auth/logout", headers={"X-Session-Token": "sess_raw_1"})
+    assert r.status_code == 200, r.text
+
+    assert app_capability_tokens.resolve(tok) is None, "로그아웃 뒤에도 증명이 살아 있다"
+    assert client.get(f"{R}/datasets/orders/schema", headers=_h(tok)).status_code == 403
+
+
+# ── ⑥ 사유가 앱에게 새지 않는다 ───────────────────────────────────────────
+
+def test_거부_응답은_고정_문장뿐이다(client):
+    """★★★ 교차검토 계약 (8). 사유를 그대로 돌려주면 「어느 조직 범위 밖」·「남의 앱」 같은
+    사실이 새어나가고, 그것은 **볼 수 없는 자원이 존재한다**는 정보다."""
+    from core import host_runtime_wire as wire
+    _mkds(client)
+    r = client.get(f"{R}/datasets/orders/schema", headers=H_USER)
+    detail = r.json().get("detail", "")
+    assert detail in wire.ERROR_MESSAGE_KO.values(), detail
+    for leak in ("scope", "node_", "dept", "tenant", "TOKEN_", "release"):
+        assert leak not in detail
+
+
+def test_거부는_감사에_실제_사유로_남는다(client, monkeypatch):
+    """⚠️ 은폐는 **응답**이지 기록이 아니다. 기록까지 뭉개면 추적이 불가능해진다."""
+    from core.enterprise_context import audit
+    seen = []
+    monkeypatch.setattr(audit, "record", lambda **kw: seen.append(kw) or True)
+    _mkds(client)
+    client.get(f"{R}/datasets/orders/schema", headers=H_USER)
+    denied = [k for k in seen if k.get("outcome") == "denied"]
+    assert denied, "런타임 거부가 감사에 남지 않았다"
+    assert "앱 증명 없음" in denied[-1].get("detail", "")
+
+
+# ── ⑦ 응답 투영 ───────────────────────────────────────────────────────────
+
+def test_런타임_응답에_조직_계정_필드가_없다(client):
+    """★★★ 브리지도 깎지만 그것은 **두 번째 그물**이다. 첫 번째가 서버에 있어야 브리지
+    결함 하나가 곧 유출이 되지 않는다."""
+    from core import host_runtime_wire as wire
+    _mkds(client)
+    tok = _tok(client)
+    made = client.post(f"{R}/datasets/orders/records", headers=_h(tok),
+                       json={"payload": {"qty": 3}})
+    assert made.status_code == 200, made.text
+    rec = made.json()["data"]
+    assert set(rec) <= set(wire.RECORD_PUBLIC_FIELDS), rec
+    schema = client.get(f"{R}/datasets/orders/schema", headers=_h(tok)).json()["data"]
+    assert set(schema) <= set(wire.DATASET_PUBLIC_FIELDS), schema
+    #: ⚠️ **응답을 만드는 자리마다** 본다. 한 자리만 확인하면 나머지가 그대로 새고,
+    #:   변이 검사에서 실제로 `data.get` 자리가 생존했다.
+    got = client.get(f"{R}/datasets/orders/records/{rec['record_id']}",
+                     headers=_h(tok)).json()["data"]
+    listed = client.get(f"{R}/datasets/orders/records", headers=_h(tok)).json()["data"]["records"]
+    assert listed and set(listed[0]) <= set(wire.RECORD_PUBLIC_FIELDS), listed[:1]
+    upd = client.put(f"{R}/datasets/orders/records/{rec['record_id']}", headers=_h(tok),
+                     json={"payload": {"qty": 5}}).json()["data"]
+    rem = client.delete(f"{R}/datasets/orders/records/{rec['record_id']}",
+                        headers=_h(tok)).json()["data"]
+    for row in (rec, schema, got, listed[0], upd, rem):
+        assert set(row) <= (set(wire.RECORD_PUBLIC_FIELDS) | set(wire.DATASET_PUBLIC_FIELDS)), row
+        for k in row:
+            assert k not in wire.FORBIDDEN_IN_RESPONSE
+
+
+def test_앱이_보낸_권한_필드는_서버에서도_지워진다(client):
+    """⚠️ 브리지가 지우지만 서버가 다시 지운다 — 브리지 결함 하나가 곧 권한 입력이 되지 않게."""
+    _mkds(client)
+    tok = _tok(client)
+    r = client.post(f"{R}/datasets/orders/records", headers=_h(tok),
+                    json={"payload": {"qty": 1, "release_id": "rel_other", "actor": "admin"}})
+    #: 선언되지 않은 필드는 스키마 검증이 막는다 — 즉 «지워졌다» 는 것이 400 으로 드러나지
+    #: 않고 정상 생성으로 나타난다.
+    assert r.status_code == 200, r.text
+    assert set(r.json()["data"]["payload"]) == {"qty"}
+
+
+# ── ⑧ 여섯 작업이 전부 배선돼 있다 ────────────────────────────────────────
+
+def test_여섯_작업이_전부_돈다(client):
+    """★ 대조군 — 하나라도 안 돌면 [4] 카나리가 그 칸의 표본을 만들 수 없다."""
+    from core.policy_shadow import policy_shadow
+    _mkds(client)
+    tok = _tok(client)
+    h = _h(tok)
+    assert client.get(f"{R}/datasets/orders/schema", headers=h).status_code == 200
+    made = client.post(f"{R}/datasets/orders/records", headers=h, json={"payload": {"qty": 1}})
+    assert made.status_code == 200, made.text
+    rid = made.json()["data"]["record_id"]
+    assert client.get(f"{R}/datasets/orders/records", headers=h).status_code == 200
+    assert client.get(f"{R}/datasets/orders/records/{rid}", headers=h).status_code == 200
+    assert client.put(f"{R}/datasets/orders/records/{rid}", headers=h,
+                      json={"payload": {"qty": 2}}).status_code == 200
+    assert client.delete(f"{R}/datasets/orders/records/{rid}", headers=h).status_code == 200
+
+    #: ★★ 그리고 그 여섯이 **전환 게이트의 표본으로 쌓였는지** 본다 — 돌기만 하고 관측이
+    #:   안 되면 카나리가 「눌러 봤다」를 증명하지 못한다.
+    cov = policy_shadow.switch_gate()["op_coverage"]
+    for op in ("data.schema", "data.list", "data.get", "data.create", "data.update",
+               "data.remove"):
+        assert cov[op]["allow"] >= 1, f"{op} 허용 표본이 없다: {cov}"
+
+
+def test_다른_데이터셋의_레코드에는_런타임에서도_닿지_못한다(client):
+    _mkds(client, "orders")
+    _mkds(client, "notes")
+    tok = _tok(client)
+    h = _h(tok)
+    made = client.post(f"{R}/datasets/notes/records", headers=h, json={"payload": {"qty": 1}})
+    rid = made.json()["data"]["record_id"]
+    assert client.get(f"{R}/datasets/orders/records/{rid}", headers=h).status_code == 404
+    assert client.put(f"{R}/datasets/orders/records/{rid}", headers=h,
+                      json={"payload": {"qty": 9}}).status_code == 404
+
+
+def test_조직_범위를_고르지_않으면_증명이_나가지_않는다(client):
+    """★★★ 「범위 없는 증명」은 판정에서 «좁히지 않음» 이 되어 사실상 전 조직으로 통한다.
+
+    ⚠️ 이 거부만은 **고정 문장으로 접지 않는다.** 부르는 쪽이 iframe 이 아니라 부모 화면이고,
+      사용자가 할 일이 분명히 있다 — 범위를 고르면 된다. 「찾을 수 없습니다」로 접으면
+      사용자는 앱이 고장 났다고 읽는다.
+    ★ 존재 누설이 아니다: 「내가 범위를 안 골랐다」는 **자기 자신의 상태**다."""
+    h = {k: v for k, v in H_USER.items() if k != "X-Enterprise-Scope"}
+    r = client.post(f"{R}/proof", json={"release_id": "rel_ok"}, headers=h)
+    assert r.status_code == 409, r.text
+    assert "조직 범위" in r.json()["detail"]
+
+
+# ── ⑨ 매니페스트 → 정책 행동 (서버 산출의 핵심 표) ────────────────────────
+
+def test_모르는_낱말은_아무_행동도_열지_않는다():
+    """★★★ 매니페스트의 capability 는 **업무 낱말**이고 정책 행동은 넷뿐이다. 그 사이를 잇는
+    표가 없으면 누군가 코드 안에서 즉석으로 잇게 되고, 그때부터 「어느 선언이 무엇을
+    여는가」에 아무도 답하지 못한다.
+
+    ⚠️ 「비슷하니까 읽기겠지」로 넓히면 **그 추측이 곧 권한**이다."""
+    from core.app_proof import manifest_actions
+    assert manifest_actions({"capabilities": ["orders.훔치기", "orders.exfiltrate"]}) == ()
+    #: 동작이 없는 선언도 아무것도 열지 않는다(`app_manifest` 와 같은 규칙).
+    assert manifest_actions({"capabilities": ["orders"]}) == ()
+    assert manifest_actions(None) == () and manifest_actions("문자열") == ()
+
+
+def test_두_표기를_모두_읽는다():
+    """★ 평면 문자열과 구조화 목록 — `app_manifest` 가 둘 다 저장하므로 둘 다 읽어야 한다."""
+    from core.app_proof import manifest_actions
+    assert manifest_actions({"capabilities": ["orders.read", "orders.create"]}) == ("read", "write")
+    assert manifest_actions({"required_capabilities": [
+        {"resource": "orders", "actions": ["update", "delete"]}]}) == ("write", "delete")
+
+
+def test_행동_표는_정책_행동만_가리킨다():
+    """⚠️ 표가 없는 행동을 가리키면 그 선언은 영원히 아무것도 열지 못하고, 아무도 이유를 모른다."""
+    from core.app_policy import ACTIONS
+    from core.app_proof import MANIFEST_ACTION_WORDS
+    assert set(MANIFEST_ACTION_WORDS.values()) <= set(ACTIONS)
+
+
+def test_매니페스트가_없는_옛_릴리스는_빈_선언이다():
+    """★ 그러면 판정이 막는다 — 그것이 옳다(선언하지 않은 앱은 데이터를 만지지 못한다).
+    ⚠️ `legacy_mode` 를 기본으로 켜지 않는다: 켜는 것은 사람이 명시하는 일이다."""
+    from core.app_proof import app_facts
+    f = app_facts({"project_id": "p1"}, "rel_x")
+    assert f.declared_capabilities == () and f.legacy_mode is False
+    assert f.app_id == "p1" and f.release_id == "rel_x"
+
+
+def test_릴리스를_못_읽으면_판정_불가로_떨어진다():
+    """⚠️ 「못 읽었으니 통과」로 두면 그 순간 통제가 없다."""
+    from core import app_policy
+    from core.app_proof import resource_scope
+    assert resource_scope(None, "rel_x").binding_state == app_policy.INVALID

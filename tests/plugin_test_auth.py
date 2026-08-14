@@ -69,7 +69,7 @@ def _principal_override(request):
 
     import config
     from fastapi import HTTPException
-    from api.deps import Principal, _enforced, current_principal
+    from api.deps import Principal, _enforced, _session_hash, current_principal
     from main import app
 
     def _override(request_obj: Request) -> Principal:
@@ -96,7 +96,23 @@ def _principal_override(request):
         #  일반 기능 파일 안에 그런 테스트가 섞여 있어서 실제로 1건이 그렇게 무력화됐다.
         if _enforced() and not scope.unrestricted and not uid:
             raise HTTPException(status_code=401, detail="사용자 식별 정보가 없습니다.")
-        return Principal(user_id=uid, scope=scope)
+        #: ★★★ [2026-08-14] **세션 해시도 운영과 같은 함수로 만든다.**
+        #
+        #  종전에는 이 줄이 없어서 override 가 만든 principal 의 `session_id` 가 **언제나 비어
+        #  있었다.** 그러면 세션에 묶인 통제(앱 증명 발급·재사용 차단)는 테스트에서 **한 번도
+        #  참인 적이 없고**, 그 사실이 「세션 없음」이라는 정상 거부처럼 보여 조용히 지나간다 —
+        #  실제로 그 상태로 런타임 시험 전부가 401 이었고, 원인을 찾는 데 여러 번 헛짚었다.
+        #
+        #  ⚠️ 이 파일의 머리말이 경고한 바로 그 함정이다: 「override 가 실서버와 다른 세계를
+        #    만들지 않게」. principal 에 필드가 늘면 **여기도 함께 늘려야** 한다.
+        #: ⚠️ `requested_scope_node_id` 도 같은 이유로 빠져 있었다. 이것이 비면 화면이 고른
+        #:   조직 범위가 **테스트에서는 언제나 «미지정»** 이 되고, 범위에 달린 통제는
+        #:   전부 「미지정이라 막혔다」로만 관측된다.
+        want = (request_obj.headers.get(
+                    getattr(config, "ECM_SCOPE_HEADER", "X-Enterprise-Scope"), "")
+                or request_obj.query_params.get("enterprise_scope", "") or "").strip()
+        return Principal(user_id=uid, scope=scope, requested_scope_node_id=want,
+                         session_id=_session_hash(request_obj))
 
     app.dependency_overrides[current_principal] = _override
     try:

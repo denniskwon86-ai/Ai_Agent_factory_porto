@@ -32,14 +32,21 @@
 import { apiFetch } from './api';
 import {
   DATASET_PUBLIC_FIELDS, ERR_INVALID, ERR_NOT_FOUND, ERR_UNAVAILABLE, IGNORED_FROM_APP,
-  MAX_CALLS_PER_MINUTE, MAX_INFLIGHT, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, MSG_HELLO,
+  ERR_EXPIRED, MAX_CALLS_PER_MINUTE, MAX_INFLIGHT, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES,
+  MSG_HELLO,
   MSG_INIT, MSG_REQ, MUTATING_OPS, REQUEST_TIMEOUT_MS, SDK_VERSION, VERDICT_DROP,
   VERDICT_OK, buildResponse, encodeCursor, errorCodeForStatus, idempotencySlot,
   normalizePage, projectDataset, projectRecord, validateRequest,
 } from './hostRuntimeWire';
 import type { Op } from './hostRuntimeWire';
 
-const APPDATA = '/api/v1/appdata';
+//: ★★★ [G1-B 3.5] **전용 경로만 쓴다.** 관리 API(`/api/v1/appdata/*`)는 사람의 표면이고,
+//:   거기에 「증명 없으면 세션으로」 폴백을 두면 앱이 **헤더 하나를 생략해** 사람의 넓은
+//:   권한으로 데이터를 만질 수 있다(교차검토 [G1-B-I3-REVIEW-82]).
+const RUNTIME = '/api/v1/appdata/runtime';
+//: 앱 증명을 싣는 헤더. ⚠️ 이 값은 **이 모듈의 메모리에만** 있다 — iframe·localStorage·로그
+//:   어디에도 가지 않는다.
+const PROOF_HEADER = 'X-App-Proof';
 
 /** ⚠️ 켜는 조건 ①. 없으면 **꺼짐**이다 — 기본값이 켜짐이면 「끄는 것을 잊었다」가 사고가 된다. */
 export const HOST_RUNTIME_FLAG: boolean =
@@ -73,9 +80,11 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
   const enabled = HOST_RUNTIME_FLAG && !!(deps.releaseId || '').trim();
   const fetchImpl = deps.fetchImpl || apiFetch;
 
-  /** 이름 → 데이터셋 id.
-   *  ★ **이름 해석 캐시이지 권한 캐시가 아니다.** 매 호출 서버가 다시 판정한다. */
-  let datasetIds = new Map<string, string>();
+  /** ★★★ 앱 증명. **이 변수 말고 어디에도 두지 않는다** — iframe·localStorage·로그 금지.
+   *  ⚠️ 세대가 바뀌면 버린다(아래 `resetGeneration`). */
+  let proof = '';
+  /** 만료 시 **한 번만** 재발급한다. ⚠️ 무한 재발급 루프는 서버를 두드리는 앱이 된다. */
+  let reissued = false;
   const inflight = new Set<string>();
   const pending = new Map<string, Pending>();
   /** 멱등 자리 → 직전 결과. ⚠️ 「정확히 한 번」이 아니다 — **한 세대 안의 중복**만 막는다. */
@@ -83,7 +92,9 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
   let callTimes: number[] = [];
 
   function resetGeneration() {
-    datasetIds = new Map();
+    //: ⚠️ 증명도 버린다. 프레임이 바뀌면 «지금 그 앱을 열고 있다» 는 사실도 새로 세워야 한다.
+    proof = '';
+    reissued = false;
     idem = new Map();
     inflight.clear();
     pending.clear();
@@ -125,20 +136,45 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
     return true;
   }
 
-  async function call(method: string, path: string, body?: unknown): Promise<{
+  /** 앱 증명을 받아 온다. **서버가 사실을 정한다** — 여기서 보내는 것은 릴리스뿐이다. */
+  async function fetchProof(): Promise<boolean> {
+    const r = await call('POST', `${RUNTIME}/proof`, { release_id: deps.releaseId },
+                         { withProof: false });
+    if (r.status !== 200 || !r.json?.data?.token) {
+      //: ⚠️ 실패 사유를 앱에게 옮기지 않는다. 화면(부모)에는 남긴다 — 사용자가 조직 범위를
+      //:   골라야 하는 경우가 있고, 그때 「데이터가 없다」로 보이면 아무도 원인을 모른다.
+      deps.onActivity?.({ op: 'proof', ok: false,
+                          errorCode: String(r.json?.detail || r.status) });
+      return false;
+    }
+    proof = String(r.json.data.token);
+    return true;
+  }
+
+  async function call(method: string, path: string, body?: unknown,
+                      opt: { withProof?: boolean } = {}): Promise<{
     status: number; json: any;
   }> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
     try {
       const init: RequestInit = { method, signal: ctrl.signal };
+      if (opt.withProof !== false) {
+        //: ⚠️ 증명이 없으면 **부르지 않는다.** 「증명 없이 한 번 시도해 보고 안 되면」은
+        //:   서버가 폴백을 갖고 있을 때만 뜻이 있는데, 서버는 폴백을 갖지 않는다.
+        if (!proof) return { status: 0, json: null };
+        (init as any).headers = { [PROOF_HEADER]: proof };
+      }
       if (body !== undefined) {
         const text = JSON.stringify(body);
         //: ⚠️ 서버 레코드 상한(512KB)과 정합해야 한다 — 어긋나면 「서버가 허용하는 값을 앱이
         //:   보낼 수 없는」 구간이 생기고, 사용자에게는 그 관계가 어디에도 보이지 않는다.
         if (text.length > MAX_REQUEST_BYTES) return { status: 413, json: null };
         init.body = text;
-        init.headers = { 'Content-Type': 'application/json' };
+        //: ⚠️ 덮어쓰지 않는다 — 여기서 `=` 를 쓰면 위에서 붙인 증명 헤더가 사라지고,
+        //:   그러면 모든 쓰기가 「증명 없음」으로 막힌다.
+        init.headers = { ...((init as any).headers || {}),
+                         'Content-Type': 'application/json' };
       }
       const r = await fetchImpl(path, init);
       let json: any = null;
@@ -153,23 +189,6 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
     }
   }
 
-  /** 데이터셋 «이름» → id. ⚠️ 실패는 그대로 앱 코드로 접힌다(존재를 구분해 주지 않는다). */
-  async function resolveDataset(name: string): Promise<{ id: string; code: string; row: any }> {
-    const cached = datasetIds.get(name);
-    const q = `${APPDATA}/datasets/by-name?release_id=${encodeURIComponent(deps.releaseId)}`
-      + `&name=${encodeURIComponent(name)}`;
-    const r = await call('GET', q);
-    if (r.status !== 200 || !r.json || !r.json.dataset_id) {
-      //: ⚠️ 해석에 실패하면 캐시를 **믿지 않는다.** 남아 있는 id 로 계속 부르면 권한이
-      //:   바뀐 뒤에도 옛 대상을 가리키게 된다(서버가 다시 막지만, 캐시가 진실인 척한다).
-      datasetIds.delete(name);
-      return { id: '', code: errorCodeForStatus(r.status), row: null };
-    }
-    datasetIds.set(name, r.json.dataset_id);
-    if (cached && cached !== r.json.dataset_id) datasetIds.set(name, r.json.dataset_id);
-    return { id: r.json.dataset_id, code: '', row: r.json };
-  }
-
   /** 응답이 상한을 넘으면 **잘라서 주지 않는다** — 자르면 조용한 거짓말이 된다. */
   function tooLarge(data: unknown): boolean {
     try { return JSON.stringify(data).length > MAX_RESPONSE_BYTES; } catch { return true; }
@@ -177,19 +196,23 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
 
   async function run(msg: any): Promise<{ ok: boolean; data?: unknown; code?: string }> {
     const op = msg.op as Op;
-    const ds = await resolveDataset(String(msg.dataset || ''));
-    if (!ds.id) return { ok: false, code: ds.code || ERR_NOT_FOUND };
-    const base = `${APPDATA}/datasets/${encodeURIComponent(ds.id)}`;
+    //: ★★★ 데이터셋을 **이름으로** 부른다. 릴리스는 서버가 증명에서 읽는다 —
+    //:   브리지가 id 를 들고 다니지 않으므로 «남의 id 를 실어 보내는» 경로 자체가 없다.
+    const base = `${RUNTIME}/datasets/${encodeURIComponent(String(msg.dataset || ''))}`;
+    const rid = encodeURIComponent(String(msg.record_id || ''));
 
     if (op === 'data.schema') {
-      return { ok: true, data: projectDataset(ds.row) };
+      const r = await call('GET', `${base}/schema`);
+      if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
+      return { ok: true, data: projectDataset(r.json?.data) };
     }
     if (op === 'data.list') {
       const { limit, offset } = normalizePage(msg.page);
       const r = await call('GET', `${base}/records?limit=${limit}&offset=${offset}`);
       if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
-      const rows = Array.isArray(r.json?.records) ? r.json.records.map(projectRecord) : [];
-      const total = Number(r.json?.total ?? rows.length);
+      const rows = Array.isArray(r.json?.data?.records)
+        ? r.json.data.records.map(projectRecord) : [];
+      const total = Number(r.json?.data?.total ?? rows.length);
       const nextOffset = offset + rows.length;
       const data = {
         records: rows,
@@ -202,28 +225,41 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
       }
       return { ok: true, data };
     }
-    const rid = encodeURIComponent(String(msg.record_id || ''));
     if (op === 'data.get') {
       const r = await call('GET', `${base}/records/${rid}`);
       if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
-      return { ok: true, data: projectRecord(r.json) };
+      return { ok: true, data: projectRecord(r.json?.data) };
     }
     if (op === 'data.create') {
       const r = await call('POST', `${base}/records`, { payload: stripIgnored(msg.payload) });
       if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
-      return { ok: true, data: projectRecord(r.json) };
+      return { ok: true, data: projectRecord(r.json?.data) };
     }
     if (op === 'data.update') {
       const r = await call('PUT', `${base}/records/${rid}`, { payload: stripIgnored(msg.payload) });
       if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
-      return { ok: true, data: projectRecord(r.json) };
+      return { ok: true, data: projectRecord(r.json?.data) };
     }
     if (op === 'data.remove') {
       const r = await call('DELETE', `${base}/records/${rid}`);
       if (r.status !== 200) return { ok: false, code: errorCodeForStatus(r.status) };
-      return { ok: true, data: projectRecord(r.json) };
+      return { ok: true, data: projectRecord(r.json?.data) };
     }
     return { ok: false, code: ERR_INVALID };
+  }
+
+  /** 증명을 갖춘 상태로 한 요청을 처리한다. **만료는 딱 한 번** 재발급하고 재시도한다.
+   *
+   * ⚠️ 무한 재발급 루프를 만들지 않는다 — 만료가 아닌 이유로 계속 거부되는 상황에서
+   *   재발급을 반복하면 그것이 곧 서버를 두드리는 앱이다(교차검토 계약 7). */
+  async function runWithProof(msg: any): Promise<{ ok: boolean; data?: unknown; code?: string }> {
+    if (!proof && !(await fetchProof())) return { ok: false, code: ERR_UNAVAILABLE };
+    const first = await run(msg);
+    if (first.ok || first.code !== ERR_EXPIRED || reissued) return first;
+    reissued = true;
+    proof = '';
+    if (!(await fetchProof())) return { ok: false, code: ERR_EXPIRED };
+    return run(msg);
   }
 
   function handle(event: MessageEvent): boolean {
@@ -297,7 +333,7 @@ export function createHostBridge(deps: BridgeDeps): HostBridge {
 
     inflight.add(requestId);
     pending.set(requestId, { at: Date.now() });
-    run(d)
+    runWithProof(d)
       .then((out) => {
         const body = reply(requestId, out.ok, out.data, out.code);
         if (slot && out.ok) idem.set(slot, { at: Date.now(), body });

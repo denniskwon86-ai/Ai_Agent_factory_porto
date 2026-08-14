@@ -187,11 +187,14 @@ def test_설명되지_않은_강화는_막는다(obs):
     """★★★ 권한 확대만 사고가 아니다. 예상하지 않은 사유로 강화되면 **전환하는 순간
     지금 되던 일이 안 되게 된다** — 그리고 그 원인을 아무도 모른다."""
     _fill(obs)
+    #: ⚠️ 예시로 **아직 없는 사유**를 쓴다. 실재하는 코드를 쓰면 그것이 예상 목록에 추가되는
+    #:   날 이 시험이 조용히 무의미해진다(실제로 `TOKEN_CAPABILITY` 로 그렇게 됐다 —
+    #:   앱 증명 축이 예정된 강화가 되면서 이 칸이 «설명됨» 으로 바뀌었다).
     obs.observe(path="p", action="read", old_allowed=True, new_allowed=False,
-                new_reason=ap.DENY_TOKEN_CAPABILITY, op="data.list")
+                new_reason="AAA_없는_사유", op="data.list")
     g = obs.switch_gate()
     assert g["safe_to_switch"] is False
-    assert ap.DENY_TOKEN_CAPABILITY in g["unexplained_stricter"]
+    assert g["unexplained_stricter"], "설명되지 않은 강화를 하나도 세지 않았다"
 
 
 def test_예상된_강화는_막지_않는다(obs):
@@ -208,10 +211,33 @@ def test_예상된_강화는_막지_않는다(obs):
     assert g["safe_to_switch"] is True, g["blockers"]
 
 
-def test_판독_실패로_인한_강화는_설명된_것으로_센다(obs):
-    """`_release_scope` 는 `release.json` 판독 실패에 `binding_state=INVALID` 를 준다.
-    그 사유는 `DENY_*` 코드가 아니라 `UNKNOWN` 이 되는데, **의도된 fail-closed** 다."""
-    assert UNKNOWN_REASON in EXPLAINED_STRICTER
+def test_모르는_사유는_설명된_강화로_치지_않는다(obs):
+    """★★★ 새 거부 코드가 `KNOWN_REASONS` 등록 없이 생기면 `UNKNOWN` 으로 저장된다.
+    그것까지 «설명됨» 으로 두면 이 검사가 **잡을 것이 하나도 남지 않는다.**
+
+    ⚠️ 릴리스 판독 실패(`binding_state=INVALID`)는 `UNKNOWN` 이 아니라 `DENY_UNBOUND` 로
+      나온다 — 판정기에서 확인했다. 그래서 `UNKNOWN` 을 넣을 이유가 없다."""
+    assert UNKNOWN_REASON not in EXPLAINED_STRICTER
+    _fill(obs)
+    obs.observe(path="p", action="read", old_allowed=True, new_allowed=False,
+                new_reason="DENY_새로_생긴_코드", op="data.list")
+    g = obs.switch_gate()
+    assert g["safe_to_switch"] is False
+    assert UNKNOWN_REASON in g["unexplained_stricter"]
+
+
+def test_앱_증명_축의_강화는_예정된_것이다(obs):
+    """★★ 런타임 경로에서 기존 판정은 사람만 보고 PDP 는 증명까지 본다. 만료·다른 세션·
+    다른 앱은 전부 강화로 나오는데, 그것이 이 전환의 **목적**이다 — 「설명되지 않은 강화」로
+    세면 게이트가 영원히 닫힌다."""
+    _fill(obs)
+    for r in (ap.DENY_TOKEN_EXPIRED, ap.DENY_TOKEN_SESSION_MISMATCH,
+              ap.DENY_TOKEN_APP_MISMATCH, ap.DENY_MANIFEST_CAPABILITY):
+        obs.observe(path="p", action="read", old_allowed=True, new_allowed=False,
+                    new_reason=r, op="data.list")
+    g = obs.switch_gate()
+    assert g["unexplained_stricter"] == []
+    assert g["safe_to_switch"] is True, g["blockers"]
 
 
 # ── ⑥ 느슨함·관측 실패는 그대로 막는다 ───────────────────────────────────

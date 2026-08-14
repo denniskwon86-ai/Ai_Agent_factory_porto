@@ -150,17 +150,24 @@ REQUIRED_SCENARIOS: Dict[str, Tuple[str, ...]] = {
 #: **예상된 강화**의 사유. 여기 없는 사유로 강화가 나면 그것은 «설명되지 않은 강화» 이고,
 #: 전환하면 **지금 되던 일이 안 되게 된다.** 권한 확대만 사고인 것이 아니다.
 EXPLAINED_STRICTER: Tuple[str, ...] = (
-    DENY_UNBOUND,               # D-014 — 범위 없는 자원은 비노출
+    DENY_UNBOUND,               # D-014 — 범위 없는 자원은 비노출 (릴리스 판독 실패도 여기다)
     DENY_CONTEXT,               # 지금 고른 문맥과 자원 문맥이 다르다
     DENY_SCOPE,                 # 조직 권한 밖
     DENY_PRINCIPAL_BLOCKED,     # 계정 상태
     DENY_UNIDENTIFIED, DENY_NO_SUBJECT,
     DENY_RETIRED, DENY_PERSONAL,
-    UNKNOWN_REASON,             # `release.json` 판독 실패(INVALID) 등 — 아래 주석 참조
+    #: ★★★ [G1-B 3.5] **앱 증명 축은 예정된 강화다.** 런타임 경로(`/appdata/runtime/*`)에서
+    #:   기존 판정은 사람만 보므로 허용하고, PDP 는 증명까지 본다 — 만료·다른 세션·다른 앱·
+    #:   다른 조직·문맥 불일치가 전부 여기로 나온다. 그것이 이 전환의 **목적**이므로
+    #:   「설명되지 않은 강화」로 세면 게이트가 영원히 닫힌다.
+    DENY_TOKEN_EXPIRED, DENY_TOKEN_ACTOR_MISMATCH, DENY_TOKEN_SESSION_MISMATCH,
+    DENY_TOKEN_APP_MISMATCH, DENY_TOKEN_CONTEXT_MISMATCH, DENY_TOKEN_SCOPE_MISMATCH,
+    DENY_TOKEN_CAPABILITY, DENY_MANIFEST_CAPABILITY,
 )
-#: ⚠️ `UNKNOWN_REASON` 을 예상 목록에 넣은 이유: `_release_scope` 는 릴리스 판독에 실패하면
-#:   `binding_state=INVALID` 를 주고 PDP 는 그것을 막는다. 그 사유는 `DENY_*` 코드가 아니다.
-#:   이것은 **의도된 fail-closed** 이므로 설명된 강화로 센다.
+#: ⚠️⚠️ `UNKNOWN_REASON` 은 **일부러 넣지 않았다.** 새 거부 코드가 `KNOWN_REASONS` 에 등록되지
+#:   않은 채 생기면 `UNKNOWN` 으로 저장되는데, 그것까지 «설명됨» 으로 두면 이 검사가 잡을 것이
+#:   하나도 남지 않는다. 이 목록에 이름을 더하는 것은 **검토 결정**이다.
+#: ★ 릴리스 판독 실패(`binding_state=INVALID`)는 `DENY_UNBOUND` 로 나온다 — 확인했다.
 
 #: 게이트가 요구하는 최소 표본. 한두 건으로 「덮였다」고 말하지 않는다.
 MIN_TOTAL = 24

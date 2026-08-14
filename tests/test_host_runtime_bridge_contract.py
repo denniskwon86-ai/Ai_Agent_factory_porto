@@ -168,8 +168,47 @@ def test_브리지가_스스로_소스_동일성을_본다(bridge):
 def test_브리지가_토큰을_다루지_않는다(bridge):
     """★★ 자격증명은 전역 인터셉터가 붙인다. 브리지가 토큰을 읽는 순간 그것을 로그·응답에
     찍는 코드가 언젠가 생긴다."""
+    #: ⚠️ 주석은 뺀다. 「여기 두지 않는다」고 **적어 두는 것**까지 금지하면 그 이유를 적을
+    #:   자리가 없어지고, 그러면 다음 사람이 왜 없는지 모른다.
+    code = "\n".join(l for l in bridge.splitlines()
+                     if not l.strip().startswith(("//", "*", "/*")))
     for needle in ("getSessionToken", "X-Session-Token", "localStorage", "Authorization"):
-        assert needle not in bridge, f"브리지가 «{needle}» 을 다룬다"
+        assert needle not in code, f"브리지가 «{needle}» 을 다룬다"
+
+
+def test_브리지는_전용_런타임_경로만_부른다(bridge):
+    """★★★ [G1-B 3.5] 관리 API 는 **사람의 표면**이다. 브리지가 그쪽을 부르면 「증명 없으면
+    세션으로」 폴백을 넣고 싶어지고, 그 순간 앱이 **헤더 하나를 생략해** 사람의 넓은 권한으로
+    데이터를 만질 수 있다."""
+    code = "\n".join(l for l in bridge.splitlines()
+                     if not l.strip().startswith(("//", "*", "/*")))
+    assert "'/api/v1/appdata/runtime'" in code
+    #: 관리 경로 문자열이 코드에 남아 있으면 안 된다.
+    assert "/api/v1/appdata/datasets" not in code, "관리 API 를 부르고 있다"
+    assert "X-App-Proof" in code
+
+
+def test_증명이_없으면_아예_부르지_않는다(bridge):
+    """⚠️ 「증명 없이 한 번 시도해 보고 안 되면」은 서버가 폴백을 가질 때만 뜻이 있는데,
+    서버는 폴백을 갖지 않는다 — 그 시도는 요청 하나를 낭비하고 감사에 거부를 남길 뿐이다."""
+    assert "if (!proof) return { status: 0, json: null };" in bridge
+
+
+def test_만료_재발급은_한_번뿐이다(bridge):
+    """★★ 교차검토 계약 (7). 만료가 아닌 이유로 계속 거부되는 상황에서 재발급을 반복하면
+    그것이 곧 **서버를 두드리는 앱**이다."""
+    assert "let reissued = false" in bridge
+    m = re.search(r"async function runWithProof.*?\n  \}", bridge, re.S)
+    assert m, "재발급 경로를 찾지 못했다"
+    body = m.group(0)
+    assert "|| reissued" in body, "재발급 횟수를 세지 않는다"
+    assert body.count("fetchProof()") == 2, "재발급 시도가 한 번이 아니다"
+
+
+def test_세대가_바뀌면_증명을_버린다(bridge):
+    """⚠️ 프레임이 바뀌면 «지금 그 앱을 열고 있다» 는 사실도 새로 세워야 한다."""
+    m = re.search(r"function resetGeneration\(\) \{(.*?)\n  \}", bridge, re.S)
+    assert m and "proof = ''" in m.group(1), "세대 초기화가 증명을 버리지 않는다"
 
 
 def test_브리지가_응답을_투영해서만_돌려준다(bridge):
