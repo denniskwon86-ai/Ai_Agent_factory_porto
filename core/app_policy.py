@@ -87,6 +87,11 @@ DENY_SCOPE = "SCOPE_DENIED"                          # 조직 권한 밖
 DENY_PERSONAL = "PERSONAL_OWNER_ONLY"
 DENY_RETIRED = "RESOURCE_RETIRED"
 DENY_UNKNOWN_ACTION = "UNKNOWN_ACTION"
+#: ★★★ [I-4 2단계] 계약이 **이 데이터셋에 대해** 이 행동을 주지 않았다.
+#:   ⚠️ `DENY_TOKEN_CAPABILITY`(전역 권한 없음)와 다른 사유다 — 전역으로는 있는데
+#:     이 데이터셋에만 없는 경우이고, 그것이 정확히 이 통제가 존재하는 이유다.
+#:     하나로 뭉개면 「왜 막혔나」에 답할 수 없고, 개발자는 계약 대신 증명을 의심한다.
+DENY_DATASET_ACTION = "DATASET_ACTION_NOT_CONTRACTED"
 ALLOW = "OK"
 
 

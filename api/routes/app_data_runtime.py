@@ -216,6 +216,47 @@ def _assert_active(ds: Dict[str, Any]) -> None:
                     target=str(ds.get("dataset_id", "")))
 
 
+def _assert_contract_action(proof: Dict[str, Any], ds: Dict[str, Any], need: str, *,
+                            p: Principal, path: str) -> None:
+    """★★★ [I-4 2단계] **2차 판정 — 이 데이터셋에 이 행동이 계약돼 있는가.**
+
+    ## 왜 1차만으로는 부족한가 (실측)
+
+    `app_proof.manifest_actions()` 는 매니페스트의 모든 capability 를
+    `read/write/delete/manage` 의 **전역 합집합**으로 평탄화한다. 그래서
+
+        orders.read + secrets.update  →  전역 read + write
+
+    가 되고, 1차 판정에는 `orders` 에 대한 write 를 막을 근거가 **없다.**
+    데이터셋별 권한이 아니었던 것이다.
+
+    ## ⚠️ 순서를 바꾸지 않는다
+
+    이 검사는 **1차(`_judge`) 뒤**다. 1차를 데이터셋 뒤로 옮기면 만료·타인 증명으로
+    **데이터셋 이름을 열거**할 수 있게 된다(교차검토 86 에서 실제로 열렸던 구멍).
+
+    ## 거부는 숨기지 않는다
+
+    ⚠️ 여기서의 거부는 **그 앱 자신의 계약**에 대한 사실이므로 `FORBIDDEN` 으로 알린다 —
+      숨기면 개발자가 무엇을 고쳐야 하는지 모른 채 이름을 의심한다. 반면 **계약에 없는
+      이름**은 `_dataset()` 이 `NOT_FOUND` 로 답한다(존재를 알리지 않는다)."""
+    allowed = app_data_service.allowed_actions(
+        str(proof.get("release_id", "") or ""), str(ds.get("dataset_id", "") or ""))
+    if allowed is None:
+        #: 계약 이전(레거시) 결속 — 2차 판정이 없다.
+        #:
+        #: ⚠️ 「모르니까 허용」이 아니다. 결속 표에 **`contract_bound=0` 이라고 적혀 있고**,
+        #:   `app_data_service.contract_coverage()` 로 릴리스별 적용률을 언제든 셀 수 있다.
+        #:   ★ 여기서 텔레메트리를 흘리지 않는 이유: `policy_shadow` 의 행 수는 전환 게이트의
+        #:     **분모**다(`MIN_TOTAL`). 레거시 통과를 거기에 쌓으면 표본이 없는 게이트가
+        #:     표본이 있는 것처럼 보이고, `error` 로 세면 게이트가 통째로 막힌다.
+        return
+    if need not in allowed:
+        raise _fail(sdk.ERR_FORBIDDEN,
+                    audit_reason=f"{app_policy.DENY_DATASET_ACTION}:{need}",
+                    actor=(p.user_id or ""), target=str(ds.get("dataset_id", "")), path=path)
+
+
 def _record_in(dataset_id: str, record_id: str) -> Dict[str, Any]:
     """레코드가 **그** 데이터셋의 것인지 확인한다(혼동된 대리인 차단과 같은 규칙)."""
     rec = app_data_service.get_record(str(record_id or ""))
@@ -345,6 +386,7 @@ async def get_schema(name: str, request: Request, p: Principal = Depends(current
     _judge(p, proof, app_policy.READ, op="data.schema", path="GET /records/schema")
     ds = _dataset(proof, name)
     _assert_active(ds)
+    _assert_contract_action(proof, ds, "read", p=p, path="GET /records/schema")
     _personal_ok(ds, p)
     ds["record_count"] = app_data_service.count_records(ds["dataset_id"])
     return {"status": "success", "data": wire.project_dataset(ds)}
@@ -357,6 +399,7 @@ async def list_records(name: str, request: Request, limit: int = Query(50), offs
     _judge(p, proof, app_policy.READ, op="data.list", path="GET /records")
     ds = _dataset(proof, name)
     _assert_active(ds)
+    _assert_contract_action(proof, ds, "read", p=p, path="GET /records")
     _personal_ok(ds, p)
     creator = (p.user_id or "") if (ds.get("app_class") or "") == "personal" else ""
     rows, total = app_data_service.list_records(
@@ -375,6 +418,7 @@ async def get_record(name: str, record_id: str, request: Request,
     _judge(p, proof, app_policy.READ, op="data.get", path="GET /records/{id}")
     ds = _dataset(proof, name)
     _assert_active(ds)
+    _assert_contract_action(proof, ds, "read", p=p, path="GET /records/{id}")
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     return {"status": "success", "data": wire.project_record(rec)}
@@ -388,6 +432,7 @@ async def create_record(name: str, req: RecordWrite, request: Request,
     _judge(p, proof, app_policy.WRITE, op="data.create", path="POST /records")
     ds = _dataset(proof, name)
     _assert_active(ds)
+    _assert_contract_action(proof, ds, "create", p=p, path="POST /records")
     _personal_ok(ds, p)
     try:
         #: ⚠️ 앱이 보낸 권한 관련 필드를 **지운다**(검증이 아니라 삭제). 브리지도 지우지만
@@ -408,6 +453,7 @@ async def update_record(name: str, record_id: str, req: RecordWrite, request: Re
     _judge(p, proof, app_policy.WRITE, op="data.update", path="PUT /records/{id}")
     ds = _dataset(proof, name)
     _assert_active(ds)
+    _assert_contract_action(proof, ds, "update", p=p, path="PUT /records/{id}")
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:
@@ -427,6 +473,7 @@ async def delete_record(name: str, record_id: str, request: Request,
     _judge(p, proof, app_policy.DELETE, op="data.remove", path="DELETE /records/{id}")
     ds = _dataset(proof, name)
     _assert_active(ds)
+    _assert_contract_action(proof, ds, "delete", p=p, path="DELETE /records/{id}")
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:

@@ -1,6 +1,6 @@
 # [I-4] Host Runtime 생성기 연동 — 인수인계
 
-**작성 2026-08-15 · 상태: 설계 rev.3 승인 · **1단계 완료** · 2~8단계 미착수**
+**작성 2026-08-15 · 상태: 설계 rev.3 승인 · **1·2단계 완료** · 3~8단계 미착수**
 
 이 문서 하나만 읽고 이어받을 수 있게 적는다. 무엇이 끝났고, **무엇이 아직 안 됐고**,
 어디서부터 손대야 하는지.
@@ -16,17 +16,16 @@
 
 ```
 G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게이트 ✅  [6] 전환 ✅
-[7] I-4 ── 설계 rev.3 ✅  ·  1단계 ✅  ·  2~8단계 미착수
+[7] I-4 ── 설계 rev.3 ✅  ·  1단계 ✅  ·  2단계 ✅  ·  3~8단계 미착수
 ```
 
-**다음에 할 일: 설계서 §20 의 2단계** — 데이터셋 안정 식별자 · 릴리스 바인딩 ·
-데이터셋별 Runtime 판정. 순서를 바꾸지 않는다: 2 없이 3 을 하면 지문이 가리킬 대상이
-불안정하고, 6 없이 7 을 하면 승격할 후보가 없다.
+**다음에 할 일: 설계서 §20 의 3단계** — 계약 지문을 **증명에 봉인**한다(§16).
+순서를 바꾸지 않는다: 6 없이 7 을 하면 승격할 후보가 없다.
 
 ⚠️ **각 단계는 그 단계까지의 회귀를 갖고 커밋한다.** 여덟 단계를 모아서 한 번에 올리면
 어느 단계가 깨졌는지 아무도 못 찾는다.
 
-### 1단계에서 실제로 만들어진 것 (2026-08-15)
+### 1단계 (2026-08-15)
 
 | 파일 | 무엇 |
 |---|---|
@@ -36,12 +35,47 @@ G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게�
 | `tests/test_app_runtime_contract.py` (69) | 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 |
 | `tests/test_project_state_schema_5_2.py` (18) | 회귀 일곱 + 소스 검사 둘 |
 
-**변이 검사 27/27.** 전체 스위트 **3,320 passed · 1 skipped** · `tsc -b` 초록.
-실측: 실제 `latest_state.json` **58개 전부** `5.2.0` 으로 승격(읽기 전용 확인, 실패 0).
+**변이 27/27.** 실측: 실제 `latest_state.json` **58개 전부** `5.2.0` 승격(읽기 전용, 실패 0).
 
-⚠️ 2단계로 넘어가기 전에 알아야 할 것: `arc.validate()` 는 **저장된 계약에도** 같은 규칙을
-건다. 컴파일 경로에만 검사를 두면 파일로 들어온 계약이 아무것도 통과하지 못한 채 통과한다
-(변이 검사에서 실제로 그 구멍이 잡혔다).
+⚠️ `arc.validate()` 는 **저장된 계약에도** 같은 규칙을 건다. 컴파일 경로에만 검사를 두면
+파일로 들어온 계약이 아무것도 통과하지 못한 채 통과한다(변이 검사에서 잡힌 실제 구멍).
+
+### 2단계 (2026-08-15)
+
+| 파일 | 무엇 |
+|---|---|
+| `core/app_data_store.py` | `app_dataset_versions` · `app_release_dataset_bindings` · `app_id`/`dataset_key` 열 · **재실행 가능한 백필** |
+| `core/app_data.py` | `bind_release` · `allowed_actions` · `adopt_dataset` · `contract_coverage` · `find_dataset` 가 결속을 지난다 |
+| `api/routes/app_data_runtime.py` | `_assert_contract_action` — **6개 경로 전부**에 2차 판정 |
+| `core/app_policy.py` | `DENY_DATASET_ACTION` (전역 권한 없음과 **다른 사유**) |
+| `tests/test_app_dataset_binding.py` (32) | 승계 · 2차 판정 · 마이그레이션 |
+
+**변이 22/22.** 전체 스위트 **3,352 passed · 1 skipped**.
+
+**실측**: 운영 백업(`app_data.db.bak_test_pollution_20260813_114845`, 옛 13열 스키마 ·
+결속표 없음)의 **사본**에 마이그레이션을 돌려 확인 — 데이터셋 보존 · 이름 조회 OK ·
+`dataset_key` 백필 · 결속 `contract_bound=0` · 원본 파일 지문 불변.
+⚠️ 원본에는 돌리지 않았다(운영 DB 쓰기 금지).
+
+#### ★★★ 2단계에서 반드시 알아야 할 세 값
+
+`allowed_actions(release, dataset)` 가 돌려주는 값은 **셋이고 셋 다 다른 뜻**이다:
+
+| 값 | 뜻 | 런타임 |
+|---|---|---|
+| `None` | 계약이 말한 적 없다(레거시 결속) | 2차 판정 **없음** |
+| `()` | 계약이 «아무 행동도 허용 안 함» 이라 말했다 | **전부 막힘** |
+| `("read",…)` | 그 목록만 | 목록 밖은 403 |
+
+⚠️ `None` 과 `()` 를 뭉개면 **계약이 잠근 데이터셋이 열리거나, 계약 이전 앱이 통째로
+멈춘다.** 둘 다 조용하다. 변이 검사가 이 둘을 각각 잡는다.
+
+#### ⚠️ 지금 `contract_bound=1` 을 만드는 제품 경로가 없다
+
+메커니즘과 강제는 있고, **계약을 물질화하는 쪽이 아직 없다**(4단계에서 붙는다).
+그래서 현재 운영 적용률은 0 이다 — `app_data_service.contract_coverage()` 로 언제든
+셀 수 있게 해 뒀다. ★ 세지 못하면 「계약을 도입했다」와 「계약이 적용되고 있다」를
+구분할 수 없고, **적용률 0% 인 채로 초록인 상태**가 가장 위험하다.
 
 ---
 
@@ -88,7 +122,7 @@ if _has_role(agents, "Backend", ...): return "Backend"   # ← 배정 없으면 
 진입한다.** 그래서 `hotl_after=True` 하나로는 계약을 강제할 수 없고, **결정론적 Compiler
 노드와 필수화**가 함께 있어야 한다(설계 §3, §15).
 
-### 2-2. ★★★ 지금 권한은 «데이터셋별» 이 아니다
+### 2-2. 권한이 «데이터셋별» 이 아니었다  ✅ 2단계에서 닫음
 
 `core/app_proof.manifest_actions()` 가 매니페스트 capability 를 `read/write/delete/manage`
 **전역 합집합**으로 평탄화한다. 즉
@@ -97,11 +131,12 @@ if _has_role(agents, "Backend", ...): return "Backend"   # ← 배정 없으면 
 orders.read + secrets.update  →  전역 read + write  →  orders 에도 write 가 열린다
 ```
 
-I-4 는 데이터셋별 `allowed_actions` 를 **2단계 판정**으로 강제한다(설계 §6).
+이제 `_assert_contract_action` 이 **1차 판정 뒤**에 데이터셋별 `allowed_actions` 로 자른다.
 ⚠️ 1차(증명·릴리스·조직·세션)를 **데이터셋 뒤로 옮기지 않는다** — 그 순서에서 만료·타인
 증명으로 **데이터셋 이름을 열거**할 수 있었다(교차검토 86 에서 실제로 열렸다).
+★ 매니페스트의 전역 합집합은 **그대로 둔다** — 1차는 여전히 그것을 본다. 2차가 좁힐 뿐이다.
 
-### 2-3. ★★★ 새 릴리스가 나오면 현업 데이터가 안 보인다
+### 2-3. 새 릴리스가 나오면 현업 데이터가 안 보였다  ✅ 2단계에서 닫음
 
 ```sql
 -- core/app_data_store.py:42
@@ -110,10 +145,11 @@ CREATE TABLE IF NOT EXISTS app_datasets ( dataset_id TEXT PRIMARY KEY,
 CREATE UNIQUE INDEX ... ON app_datasets(release_id, name);
 ```
 
-데이터셋이 릴리스에 직접 묶여 있고 `find_dataset()`(`core/app_data.py:255`)이
-`WHERE release_id=? AND name=?` 로 범위를 잡는다. **앱을 한 번 개정하면 그 이름의 데이터셋을 못 찾고 새로 만든다** → 레코드 승계 실패.
-설계 §18 이 `app_datasets` / `app_dataset_versions` / `app_release_dataset_bindings` 로
-쪼개고 `app_records` 는 **안정적인 dataset_id** 에 남긴다.
+종전에는 데이터셋이 릴리스에 직접 묶여 있고 `find_dataset()` 이 `WHERE release_id=? AND
+name=?` 로 범위를 잡았다. **앱을 한 번 개정하면 그 이름의 데이터셋을 못 찾고 새로 만들었다**
+→ 레코드 승계 실패. 화면에는 오류가 아니라 «데이터 0건» 이 떴다.
+이제 `find_dataset()` 은 **결속(binding)을 지나** 찾고, `adopt_dataset(app_id, dataset_key,
+새 release)` 가 같은 데이터셋을 이어받는다 — `app_records.dataset_id` 는 그대로다.
 
 ### 2-4. `ProjectState` 는 `extra='forbid'` 다  ✅ 1단계에서 닫음
 
@@ -227,8 +263,8 @@ projects/**/latest_state.json  58개
 
 ```
 1. 계약 JSON Schema · Compiler · 상태 필드          ✅ 2026-08-15
-2. 데이터셋 안정 식별자 · 릴리스 바인딩 · 데이터셋별 Runtime 판정   ← 여기부터
-3. Proof 의 계약 지문 결속
+2. 데이터셋 안정 식별자 · 릴리스 바인딩 · 데이터셋별 Runtime 판정  ✅ 2026-08-15
+3. Proof 의 계약 지문 결속                          ← 여기부터
 4. Tech Lead / WBS(artifact_kind) / Contract Review Gate 연결
 5. Typed SDK Adapter 와 정적 검사
 6. Release Candidate · Preview DB · Preview Proof
@@ -273,7 +309,7 @@ projects/**/latest_state.json  58개
 
 | # | 항목 | 메모 |
 |---|---|---|
-| 1 | **I-4 2~8단계** | 1단계는 끝났다. 다음은 데이터셋 안정 식별자 |
+| 1 | **I-4 3~8단계** | 1·2단계는 끝났다. 다음은 Proof 의 계약 지문 봉인 |
 | 2 | `app_pdp_enforce` 관리자 **카드** | API 는 있고 화면이 없다. 현재값·출처·영향·사유·이력 함께 표시 |
 | 3 | 서버 쪽 **멱등키 저장** | 지금은 한 세대 안의 중복만 막는다 |
 | 4 | 레코드 **판(version) 컬럼** | 없어서 계약이 `version` 을 **거부**한다 |
@@ -281,6 +317,8 @@ projects/**/latest_state.json  58개
 | 6 | G2 온톨로지 구현 | I-4 가 만드는 계약의 `ontology_entity_type` 이 그 입력이다 |
 | 7 | **시험이 `data/*.db` 에 쓴다** | 전체 스위트 후 `decision_ledger.db`·`llm_cache.db` mtime 변동. 개별 스위트로는 재현 안 됨 — 범인 미특정. 2026-08-13 오염과 같은 부류 |
 | 8 | 계약 원문의 **저장 위치 배선** | `<workspace>/contracts/app_runtime_contract.json` 읽기·쓰기는 4단계에서 붙인다(1단계 컴파일러는 순수 함수) |
+| 9 | **계약 물질화 경로 없음** | `contract_bound=1` 을 만드는 제품 코드가 아직 없다 → 운영 적용률 0. 4단계에서 붙는다 |
+| 10 | 관리 API 가 계약 밖 데이터셋을 만든다 | §4 의 `409` 는 6~7단계 몫 |
 
 ---
 
@@ -299,10 +337,11 @@ projects/**/latest_state.json  58개
 | `tests/test_admin_policy_audit.py` (30) | 정책 API · 전환 스위치 |
 | `tests/test_app_runtime_contract.py` (69) | **[1단계]** 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 |
 | `tests/test_project_state_schema_5_2.py` (18) | **[1단계]** 5.2.0 마이그레이션 · 소스 검사 |
+| `tests/test_app_dataset_binding.py` (32) | **[2단계]** 레코드 승계 · 데이터셋별 2차 판정 · 마이그레이션 |
 | `scripts/canary_host_runtime{,_seed}.py` | 격리 카나리(드라이버가 스스로 판정) |
 
-**변이 검사 누적 115/115**(G1-B 88 + 1단계 27). 전체 스위트 **3,320 passed · 1 skipped**
-(2026-08-15) · `tsc -b` 초록.
+**변이 검사 누적 137/137**(G1-B 88 + 1단계 27 + 2단계 22). 전체 스위트
+**3,352 passed · 1 skipped**(2026-08-15) · `tsc -b` 초록.
 
 ⚠️ 카나리를 다시 돌리려면: 워크트리 생성 → 씨앗 → 서버(별도 포트, `AFS_SHADOW_RUN`) →
 드라이버(`--seed-file`, `--run`, `--wait-expiry`). 드라이버가 기록·판정까지 하고

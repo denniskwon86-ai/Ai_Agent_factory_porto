@@ -76,7 +76,58 @@ CREATE TABLE IF NOT EXISTS app_records (
 CREATE INDEX IF NOT EXISTS idx_app_records_dataset
     ON app_records(dataset_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_app_records_creator ON app_records(created_by);
+
+-- ★★★ [I-4 2단계] 데이터셋을 릴리스에서 떼어 낸다.
+--
+-- 종전에는 `app_datasets.release_id` 가 곧 소속이었다. 그래서 **앱을 한 번 개정하면**
+-- `find_dataset(새 release, 같은 이름)` 이 아무것도 못 찾고 새 데이터셋을 만들었다 —
+-- 즉 **현업이 쌓은 레코드가 승계되지 않았다.** 화면에는 오류가 아니라 «데이터 0건» 이
+-- 뜬다. 그것이 이 저장소에서 가장 조용한 종류의 사고다.
+--
+-- 이제 데이터셋은 **앱**에 속하고, 릴리스는 «어느 판을 쓰는가» 만 가리킨다(bindings).
+-- `app_records.dataset_id` 는 릴리스를 넘어 그대로 살아남는다.
+
+CREATE TABLE IF NOT EXISTS app_dataset_versions (
+    version_id        TEXT PRIMARY KEY,
+    dataset_id        TEXT NOT NULL,
+    contract_revision INTEGER NOT NULL DEFAULT 0,
+    schema_json       TEXT NOT NULL DEFAULT '{}',
+    created_at        TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (dataset_id) REFERENCES app_datasets(dataset_id)
+);
+-- 한 데이터셋의 한 계약 판은 하나다 — 둘이면 어느 스키마로 검증할지 알 수 없다.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_dataset_versions_rev
+    ON app_dataset_versions(dataset_id, contract_revision);
+
+CREATE TABLE IF NOT EXISTS app_release_dataset_bindings (
+    binding_id      TEXT PRIMARY KEY,
+    release_id      TEXT NOT NULL,
+    dataset_id      TEXT NOT NULL,
+    version_id      TEXT NOT NULL DEFAULT '',
+    -- 쉼표로 이은 계약상 허용 행동(read,create,update,delete).
+    -- ⚠️ 빈 문자열과 «행동 없음» 은 다른 뜻이므로 `contract_bound` 로 가른다.
+    allowed_actions TEXT NOT NULL DEFAULT '',
+    -- 0 = 계약 이전(레거시) 릴리스 · 1 = 계약이 이 데이터셋의 행동을 정했다
+    contract_bound  INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (dataset_id) REFERENCES app_datasets(dataset_id)
+);
+-- 한 릴리스가 같은 데이터셋을 두 번 가리키면 어느 판·어느 권한인지 알 수 없다.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_bindings_release_dataset
+    ON app_release_dataset_bindings(release_id, dataset_id);
+CREATE INDEX IF NOT EXISTS idx_app_bindings_dataset
+    ON app_release_dataset_bindings(dataset_id);
 """
+
+#: 나중에 더한 열 — `CREATE TABLE IF NOT EXISTS` 로는 기존 표에 붙지 않는다.
+#: (열 이름, 선언). ⚠️ `ALTER TABLE ADD COLUMN` 은 재실행 가능하지 않으므로 있는지 먼저 본다.
+_ADDED_COLUMNS = (
+    # 앱의 안정 식별자. 릴리스가 바뀌어도 같다 — 데이터셋의 실제 소속이다.
+    ("app_datasets", "app_id", "TEXT NOT NULL DEFAULT ''"),
+    # 계약상 불변 키. ⚠️ ACTIVE 이후 변경 불가 — 바꿀 수 있게 하면 「이름이 같은 다른 것」과
+    # 「이름이 다른 같은 것」을 구분할 방법이 사라진다.
+    ("app_datasets", "dataset_key", "TEXT NOT NULL DEFAULT ''"),
+)
 
 
 class AppDataStore:
@@ -107,10 +158,44 @@ class AppDataStore:
             conn = self._connect()
             try:
                 conn.executescript(_DDL)
+                self._add_missing_columns(conn)
+                self._backfill_bindings(conn)
                 conn.commit()
             finally:
                 conn.close()
             self._ready = self.db_path
+
+    @staticmethod
+    def _add_missing_columns(conn: sqlite3.Connection) -> None:
+        """나중에 더한 열을 붙인다. **있으면 건너뛴다**(재실행 가능해야 한다)."""
+        for table, column, decl in _ADDED_COLUMNS:
+            have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if column not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+    @staticmethod
+    def _backfill_bindings(conn: sqlite3.Connection) -> None:
+        """기존 데이터셋을 새 구조로 **옮기지 않고 잇는다.**
+
+        ★ 기존 행을 다시 쓰지 않는다 — `release_id` 열은 그대로 두고, 그 값으로 결속을
+          만들어 준다. 그래야 마이그레이션이 실패해도 원본이 남는다.
+
+        ⚠️⚠️ 만들어지는 결속은 **`contract_bound=0`**(계약 이전)이다. `1` 로 채우면
+          「계약이 이 행동들만 허용했다」는 거짓 사실이 생기고, 그 뒤로 판정은 그 거짓을
+          근거로 삼는다. 레거시는 **레거시라고 적는다.**"""
+        conn.execute(
+            "UPDATE app_datasets SET dataset_key=name WHERE dataset_key=''")
+        conn.execute(
+            "INSERT INTO app_release_dataset_bindings "
+            "  (binding_id, release_id, dataset_id, version_id, allowed_actions, "
+            "   contract_bound, created_at) "
+            "SELECT 'bind_legacy_' || d.dataset_id, d.release_id, d.dataset_id, '', '', 0, "
+            "       COALESCE(NULLIF(d.created_at, ''), '') "
+            "  FROM app_datasets d "
+            " WHERE d.release_id <> '' "
+            "   AND NOT EXISTS (SELECT 1 FROM app_release_dataset_bindings b "
+            "                    WHERE b.release_id = d.release_id "
+            "                      AND b.dataset_id = d.dataset_id)")
 
     # ── 낮은 수준 접근 ────────────────────────────────────────────────────
     def query(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
