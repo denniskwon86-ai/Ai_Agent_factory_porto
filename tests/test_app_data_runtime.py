@@ -612,3 +612,64 @@ def test_허용목록에_없는_사용여부는_전부_막는다(client, status)
         assert r.status_code == 404, f"«{status}» 가 통과했다"
     finally:
         pl.program_lifecycle.get_status = orig
+
+
+# ── ⑫ [카나리 실측] 만료가 «판정에 도달» 하는가 ──────────────────────────
+
+def test_만료된_증명도_판정을_거쳐_표본이_된다(client):
+    """★★★ [2026-08-14 격리 카나리 실측] 종전에는 만료를 **문 앞에서** 401 로 끊었다.
+
+    밖에서 보이는 결과는 같지만 그 요청은 **판정에 도달하지 못했고**, 그래서 전환 게이트의
+    「만료된 증명」 표본이 **영원히 0** 이었다 — 실제로 만료를 태워 보고도 게이트는
+    「눌러 보지 않았다」고 말했다.
+
+    ★ `resolve()` 가 만료를 `None` 이 아니라 `expired=True` 로 돌려주는 이유가 이것이다:
+      「그런 증명이 없다」와 「만료됐다」는 **판정기가 구분해야** 하는 사실이다."""
+    from core.app_capability_token import app_capability_tokens, token_hash
+    from core.policy_shadow import policy_shadow
+    from datetime import datetime, timedelta, timezone
+
+    _mkds(client)
+    tok = _tok(client)
+    policy_shadow.reset()
+
+    #: 시간을 기다리지 않고 만료시킨다(저장 키는 해시다).
+    with app_capability_tokens._lock:
+        app_capability_tokens._tokens[token_hash(tok)]["expires_at"] = (
+            datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+
+    r = client.get(f"{R}/datasets/orders/records", headers=_h(tok))
+    assert r.status_code == 401, f"만료가 401 이 아니다: {r.status_code}"
+    g = policy_shadow.switch_gate()
+    assert g["scenario_coverage"]["만료된 증명"] >= 1, \
+        f"만료를 태웠는데 게이트 표본이 0 이다: {g['scenario_coverage']}"
+    assert ap.DENY_TOKEN_EXPIRED in g["reasons_seen"]
+
+
+def test_다른_앱_사유는_런타임_경로에서_구조로_막혀_있다(client):
+    """★★★ [카나리 실측] **`TOKEN_APP_MISMATCH` 는 런타임 경로에서 판정으로 재현되지 않는다.**
+
+    서버가 자원을 **증명 자체에서** 유도하므로 `tok.release_id == app.release_id` 가 언제나
+    참이다. 즉 이 사유는 판정이 아니라 **구조로** 막혀 있다 — 앱은 남의 릴리스를 «말할
+    방법이 없다».
+
+    ⚠️ 그래서 전환 게이트의 「다른 앱의 데이터」 표본은 이 경로에서 **영원히 0** 이다.
+      그 사실을 여기 적어 둔다 — 게이트가 닫혀 있는 이유가 「안 눌러 봤다」가 아니라
+      「누를 수 없다」임을 다음 사람이 알아야 한다.
+    ★ 대신 결과를 확인한다: 남의 앱 증명으로는 이 앱 데이터가 **보이지 않는다.**"""
+    import inspect
+
+    import api.routes.app_data_runtime as rt
+    src = inspect.getsource(rt._judge)
+    #: 자원 사실을 증명의 release_id 로 만든다 — 요청이 릴리스를 말하지 않는다.
+    assert 'release_id = str(proof.get("release_id"' in src
+    assert "app_proof.app_facts(rel, release_id)" in src
+
+    _mkds(client, "orders", "rel_ok")
+    _mkds(client, "orders", "rel_other")
+    mine = _tok(client, "rel_ok")
+    theirs = _tok(client, "rel_other")
+    client.post(f"{R}/datasets/orders/records", headers=_h(mine), json={"payload": {"qty": 7}})
+    seen = client.get(f"{R}/datasets/orders/records", headers=_h(theirs))
+    assert seen.status_code == 200
+    assert seen.json()["data"]["records"] == [], "남의 앱 증명으로 이 앱 데이터가 보인다"

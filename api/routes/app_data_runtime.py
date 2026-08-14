@@ -113,10 +113,15 @@ def _require_proof(request: Request, p: Principal) -> Dict[str, Any]:
         #: 없는 증명과 회수된 증명을 구분하지 않는다.
         raise _fail(sdk.ERR_FORBIDDEN, audit_reason="앱 증명을 확인할 수 없음",
                     actor=(p.user_id or ""), path=str(request.url.path))
-    if rec.get("expired"):
-        #: ★ 만료만은 따로 말한다 — 부모가 **한 번** 재발급하면 되는 상태다.
-        raise _fail(sdk.ERR_EXPIRED, audit_reason="앱 증명 만료", actor=(p.user_id or ""),
-                    path=str(request.url.path))
+    #: ★★★ [2026-08-14 카나리 실측] **만료를 여기서 되돌려보내지 않는다.**
+    #
+    #  종전에는 문 앞에서 401 로 끊었다. 밖에서 보이는 결과는 같지만 그 요청은 **판정에
+    #  도달하지 못했고**, 그래서 전환 게이트의 「만료된 증명」 표본이 **영원히 0** 이었다 —
+    #  실제로 만료를 태워 보고도 게이트는 「눌러 보지 않았다」고 말했다.
+    #
+    #  ★ `resolve()` 가 만료를 `None` 이 아니라 `expired=True` 로 돌려주는 이유가 바로
+    #    이것이다: 「그런 증명이 없다」와 「만료됐다」는 **판정기가 구분해야** 하는 사실이다.
+    #    여기서 가로채면 그 설계가 무의미해진다.
     return rec
 
 
