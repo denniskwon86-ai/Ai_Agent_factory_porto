@@ -143,7 +143,6 @@ REQUIRED_SCENARIOS: Dict[str, Tuple[str, ...]] = {
     "만료된 증명": (DENY_TOKEN_EXPIRED,),
     "다른 세션에서 재사용": (DENY_TOKEN_SESSION_MISMATCH,),
     "다른 사용자의 증명": (DENY_TOKEN_ACTOR_MISMATCH,),
-    "다른 앱의 데이터": (DENY_TOKEN_APP_MISMATCH,),
     "다른 조직 범위": (DENY_TOKEN_SCOPE_MISMATCH, DENY_SCOPE),
     "문맥 불일치": (DENY_TOKEN_CONTEXT_MISMATCH, DENY_CONTEXT),
 }
@@ -170,6 +169,51 @@ EXPLAINED_STRICTER: Tuple[str, ...] = (
 #:   하나도 남지 않는다. 이 목록에 이름을 더하는 것은 **검토 결정**이다.
 #: ★ 릴리스 판독 실패(`binding_state=INVALID`)는 `DENY_UNBOUND` 로 나온다 — 확인했다.
 
+#: ★★★ [2026-08-14 격리 카나리 실측 · 교차검토 86] **구조 불변식** — 판정으로 관측되지
+#:   않는 통제.
+#:
+#: 「다른 앱의 데이터」(`TOKEN_APP_MISMATCH`)는 런타임 경로에서 **영원히 0** 이다. 서버가
+#: 자원을 증명 자체에서 유도하므로 `tok.release_id == app.release_id` 가 언제나 참이고,
+#: 앱은 남의 릴리스를 **말할 방법이 없다.**
+#:
+#: ⚠️ 그것은 통제가 없다는 뜻이 아니라 **관측이 그 통제를 못 센다**는 뜻이다. 그래서 동적
+#:   거부와 구조 불변식을 **나눈다** — 섞으면 「눌러 봤다」와 「누를 수 없다」가 같은 0 이 되고,
+#:   그 0 을 보고 사람이 게이트를 끄게 된다.
+#: ⚠️⚠️ 증거는 **코드 지문에 묶인다**(§`structure_hash`). 구현이 바뀌면 옛 증거는 그 순간
+#:   무효다 — 「그때는 그랬다」가 전환 근거가 되면 안 된다.
+STRUCTURAL_INVARIANTS: Tuple[str, ...] = (
+    "요청에 app_id·release_id 입력이 없다",
+    "릴리스는 증명에서만 유도된다",
+    "데이터셋은 증명의 릴리스에 귀속된다",
+    "레코드는 해결된 데이터셋에 귀속된다",
+    "교차 앱 블랙박스 시험 통과",
+)
+
+#: 구조 증거가 묶이는 코드. 이 파일들이 바뀌면 지문이 달라지고 옛 증거는 무효가 된다.
+STRUCTURE_SOURCES: Tuple[str, ...] = (
+    "api/routes/app_data_runtime.py",
+    "core/app_proof.py",
+    "core/host_runtime_sdk.py",
+)
+
+
+def structure_hash() -> str:
+    """구조 불변식을 구현하는 코드의 지문.
+
+    ⚠️ 읽지 못하면 **빈 문자열**이다 — 빈 지문은 어떤 증거와도 맞지 않으므로 게이트가
+      닫힌 채로 있다(「못 읽었으니 통과」의 반대)."""
+    import hashlib
+    from core.paths import project_path
+    h = hashlib.sha256()
+    try:
+        for rel in STRUCTURE_SOURCES:
+            with open(project_path(*rel.split("/")), "rb") as f:
+                h.update(f.read())
+    except Exception:
+        return ""
+    return h.hexdigest()[:16]
+
+
 #: 게이트가 요구하는 최소 표본. 한두 건으로 「덮였다」고 말하지 않는다.
 MIN_TOTAL = 24
 
@@ -191,6 +235,15 @@ CREATE TABLE IF NOT EXISTS shadow_observations (
 );
 CREATE INDEX IF NOT EXISTS idx_shadow_kind ON shadow_observations(kind);
 CREATE INDEX IF NOT EXISTS idx_shadow_run ON shadow_observations(run_label);
+
+CREATE TABLE IF NOT EXISTS shadow_structure (
+    run_label   TEXT NOT NULL,
+    invariant   TEXT NOT NULL,
+    code_hash   TEXT NOT NULL,
+    passed      INTEGER NOT NULL,
+    at          TEXT NOT NULL,
+    PRIMARY KEY (run_label, invariant)
+);
 """
 
 
@@ -315,6 +368,57 @@ class _ShadowObserver:
             del self._recent[:-_KEEP]
         self._persist(row)
 
+    # ── 구조 증거 ─────────────────────────────────────────────────────────
+    def record_structure(self, run_label: str, invariant: str, passed: bool) -> None:
+        """구조 불변식 검증 결과를 **지금 코드의 지문과 함께** 남긴다.
+
+        ⚠️ 지문을 함께 적는 것이 요점이다. 구현이 바뀌면 그 증거는 **자동으로 무효**가 된다 —
+          「그때는 그랬다」가 전환 근거가 되면 안 된다."""
+        #: ⚠️ 이름을 «청소» 하지 않고 **닫힌 목록에 있는지** 본다. 청소하면 가운뎃점 같은
+        #:   글자가 지워져 저장된 이름이 목록과 달라지고, 증거가 **영원히 안 맞는다**
+        #:   (실제로 그렇게 걸렸다 — 게이트가 이유 없이 닫혀 있었다).
+        if invariant not in STRUCTURAL_INVARIANTS:
+            return
+        try:
+            self._init_db()
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO shadow_structure "
+                    "(run_label, invariant, code_hash, passed, at) VALUES (?,?,?,?,?)",
+                    (_scrub(run_label, 48), invariant, structure_hash(),
+                     1 if passed else 0,
+                     datetime.now(timezone.utc).isoformat(timespec="seconds")))
+                conn.commit()
+        except Exception:
+            with self._lock:
+                self._counts["persist_failed"] += 1
+
+    def structure_evidence(self, run_label: str = "") -> Dict[str, Any]:
+        """구조 증거 현황. **지금 코드 지문과 맞는 것만** 센다."""
+        want = structure_hash()
+        out = {name: "없음" for name in STRUCTURAL_INVARIANTS}
+        if not want:
+            return out                    # 지문을 못 읽으면 아무 증거도 인정하지 않는다
+        try:
+            self._init_db()
+            with self._connect() as conn:
+                sql = "SELECT invariant, code_hash, passed FROM shadow_structure"
+                rows = (conn.execute(sql + " WHERE run_label=?", (run_label,)) if run_label
+                        else conn.execute(sql)).fetchall()
+        except Exception:
+            return out
+        for r in rows:
+            name = r["invariant"]
+            if name not in out:
+                continue
+            if r["code_hash"] != want:
+                out[name] = "코드가 바뀌어 무효"
+            elif not r["passed"]:
+                out[name] = "실패"
+            else:
+                out[name] = "통과"
+        return out
+
     # ── 집계 ──────────────────────────────────────────────────────────────
     def _rows(self, run_label: str = "") -> List[Dict[str, Any]]:
         try:
@@ -382,6 +486,7 @@ class _ShadowObserver:
 
         unexplained = sorted({r["reason"] for r in rows
                               if r["kind"] == STRICTER and r["reason"] not in EXPLAINED_STRICTER})
+        structure = self.structure_evidence(run_label)
 
         blockers: List[str] = []
         if counts["total"] < MIN_TOTAL:
@@ -411,6 +516,15 @@ class _ShadowObserver:
             blockers.append(
                 "설명되지 않은 강화: " + ", ".join(unexplained) +
                 " — 전환하면 지금 되던 일이 안 되게 됩니다(권한 확대만 사고가 아닙니다).")
+        #: ★★★ 구조 불변식은 **판정으로 관측되지 않는다.** 그래서 따로 요구한다 —
+        #:   섞으면 「눌러 봤다」와 「누를 수 없다」가 같은 0 이 되고, 그 0 을 보고 사람이
+        #:   게이트를 끈다.
+        bad_struct = [f"{n}({v})" for n, v in structure.items() if v != "통과"]
+        if bad_struct:
+            blockers.append(
+                "구조 불변식 증거가 없습니다: " + ", ".join(bad_struct) +
+                " — 이 통제들은 판정으로 관측되지 않으므로 «눌러 본 표본» 이 아니라 "
+                "«지금 코드에서 성립함» 을 보여야 합니다.")
         if self._counts.get("persist_failed"):
             blockers.append(
                 f"관측 기록이 {self._counts['persist_failed']}건 저장되지 않았습니다 — "
@@ -423,6 +537,8 @@ class _ShadowObserver:
             "op_coverage": op_coverage,
             "scenario_coverage": scenario_coverage,
             "unexplained_stricter": unexplained,
+            "structure": structure,
+            "structure_hash": structure_hash(),
             "reasons_seen": sorted(seen_reasons),
             "run_label": run_label,
         }
@@ -436,6 +552,7 @@ class _ShadowObserver:
             self._init_db()
             with self._connect() as conn:
                 conn.execute("DELETE FROM shadow_observations")
+                conn.execute("DELETE FROM shadow_structure")
                 conn.commit()
         except Exception:
             pass

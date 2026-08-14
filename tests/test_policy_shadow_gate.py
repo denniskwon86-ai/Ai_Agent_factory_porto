@@ -19,7 +19,8 @@ import pytest
 
 from core import app_policy as ap
 from core.policy_shadow import (EXPLAINED_STRICTER, MIN_TOTAL, REQUIRED_OPS,
-                                REQUIRED_SCENARIOS, UNKNOWN_REASON, _ShadowObserver)
+                                REQUIRED_SCENARIOS, STRUCTURAL_INVARIANTS, UNKNOWN_REASON,
+                                _ShadowObserver)
 
 
 @pytest.fixture()
@@ -29,8 +30,11 @@ def obs(tmp_path):
     return _ShadowObserver(db_path=str(tmp_path / "shadow.db"))
 
 
-def _fill(o, *, ops=REQUIRED_OPS, scenarios=True, n=6):
-    """게이트를 열 수 있는 **최소한의 온전한 표본**을 만든다."""
+def _fill(o, *, ops=REQUIRED_OPS, scenarios=True, n=6, structure=True):
+    """게이트를 열 수 있는 **최소한의 온전한 표본**을 만든다.
+
+    ★ 구조 불변식 증거도 함께 세운다 — 그것 없이는 게이트가 열리지 않는 것이 정상이고,
+      그 «정상» 을 별도 시험이 확인한다(`test_구조_증거가_없으면_막는다`)."""
     for op in ops:
         for _ in range(n):
             o.observe(path="p", action="read", old_allowed=True, new_allowed=True, op=op)
@@ -43,6 +47,9 @@ def _fill(o, *, ops=REQUIRED_OPS, scenarios=True, n=6):
         for reasons in REQUIRED_SCENARIOS.values():
             o.observe(path="p", action="read", old_allowed=False, new_allowed=False,
                       new_reason=reasons[0], op="data.list")
+    if structure:
+        for name in STRUCTURAL_INVARIANTS:
+            o.record_structure("", name, True)
 
 
 # ── ① 재시작 뒤에도 남는다 ────────────────────────────────────────────────
@@ -146,7 +153,7 @@ def test_앱이_부를_수_없는_라우트는_작업_표본이_아니다(obs):
 
 @pytest.mark.parametrize("scenario", list(REQUIRED_SCENARIOS))
 def test_부정_시나리오가_빠지면_막는다(obs, scenario):
-    """★★★ 만료·재사용·다른 사용자·다른 앱·다른 조직·문맥 불일치 —
+    """★★★ 만료·재사용·다른 사용자·다른 조직·문맥 불일치 —
     이 칸들은 눌러 보지 않으면 표본이 아예 생기지 않는다. **없는 것은 «안전» 이 아니라 «모름»**."""
     _fill(obs, scenarios=False)
     for name, reasons in REQUIRED_SCENARIOS.items():
@@ -165,9 +172,9 @@ def test_시나리오_라벨은_PDP_사유에서만_나온다(obs):
 
     ⚠️ 그리고 모르는 문자열은 사유로 저장되지 않는다 — `UNKNOWN` 이 된다."""
     obs.observe(path="p", action="read", old_allowed=False, new_allowed=False,
-                new_reason="다른 앱의 데이터", op="data.list")     # 시나리오 «이름» 을 넣어 본다
+                new_reason="만료된 증명", op="data.list")     # 시나리오 «이름» 을 넣어 본다
     g = obs.switch_gate()
-    assert g["scenario_coverage"]["다른 앱의 데이터"] == 0, "이름만으로 시나리오가 덮였다"
+    assert g["scenario_coverage"]["만료된 증명"] == 0, "이름만으로 시나리오가 덮였다"
     assert g["reasons_seen"] == [UNKNOWN_REASON]
 
 
@@ -340,3 +347,64 @@ def test_카나리_회차를_구분해_셀_수_있다(obs, monkeypatch):
     obs.observe(path="p", action="read", old_allowed=True, new_allowed=True, op="data.list")
     assert obs.switch_gate()["counts"]["total"] == 2
     assert obs.switch_gate("canary_1")["counts"]["total"] == 1
+
+
+# ── ⑩ [교차검토 86] 구조 불변식 — 판정으로 관측되지 않는 통제 ───────────
+
+def test_구조_불변식_이름은_닫힌_목록이다(obs):
+    """⚠️ 목록에 없는 이름으로 증거를 세울 수 없다 — 그러면 «내가 만든 이름» 으로 게이트를
+    통과시킬 수 있다."""
+    obs.record_structure("", "내가 지은 불변식", True)
+    assert obs.structure_evidence() == {n: "없음" for n in STRUCTURAL_INVARIANTS}
+
+
+def test_구조_증거가_없으면_막는다(obs):
+    """★★★ 「다른 앱의 데이터」는 런타임 경로에서 **영원히 0** 이다 — 서버가 자원을 증명에서
+    유도하므로 앱이 남의 릴리스를 말할 방법이 없다.
+
+    ⚠️ 그것을 동적 시나리오에 두면 「눌러 봤다」와 「누를 수 없다」가 **같은 0** 이 되고,
+      그 0 을 보고 사람이 게이트를 끈다. 그래서 축을 나눈다."""
+    assert "다른 앱의 데이터" not in REQUIRED_SCENARIOS
+    _fill(obs, structure=False)
+    g = obs.switch_gate()
+    assert g["safe_to_switch"] is False
+    assert any("구조 불변식" in b for b in g["blockers"]), g["blockers"]
+
+
+def test_구조_증거가_모두_있으면_열린다(obs):
+    """★ 대조군 — 이것이 없으면 「무조건 닫힘」인 게이트도 위 시험을 통과한다."""
+    _fill(obs)
+    g = obs.switch_gate()
+    assert g["safe_to_switch"] is True, g["blockers"]
+    assert set(g["structure"].values()) == {"통과"}
+
+
+def test_코드가_바뀌면_구조_증거가_무효가_된다(obs, monkeypatch):
+    """★★★ 「그때는 그랬다」가 전환 근거가 되면 안 된다. 구현이 바뀌면 옛 증거는 그 순간
+    무효다 — 그래서 증거를 **코드 지문**에 묶는다."""
+    _fill(obs)
+    assert obs.switch_gate()["safe_to_switch"] is True
+
+    import core.policy_shadow as ps
+    monkeypatch.setattr(ps, "structure_hash", lambda: "다른지문")
+    g = obs.switch_gate()
+    assert g["safe_to_switch"] is False
+    assert all(v == "코드가 바뀌어 무효" for v in g["structure"].values()), g["structure"]
+
+
+def test_지문을_읽지_못하면_아무_증거도_인정하지_않는다(obs, monkeypatch):
+    """⚠️ 「못 읽었으니 통과」의 반대. 지문이 없으면 게이트는 닫힌 채로 있다."""
+    _fill(obs)
+    import core.policy_shadow as ps
+    monkeypatch.setattr(ps, "structure_hash", lambda: "")
+    g = obs.switch_gate()
+    assert g["safe_to_switch"] is False
+    assert set(g["structure"].values()) == {"없음"}
+
+
+def test_실패한_구조_증거는_통과로_세지_않는다(obs):
+    _fill(obs)
+    obs.record_structure("", STRUCTURAL_INVARIANTS[0], False)
+    g = obs.switch_gate()
+    assert g["safe_to_switch"] is False
+    assert g["structure"][STRUCTURAL_INVARIANTS[0]] == "실패"

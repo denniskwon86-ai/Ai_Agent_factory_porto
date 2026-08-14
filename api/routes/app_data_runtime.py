@@ -125,12 +125,21 @@ def _require_proof(request: Request, p: Principal) -> Dict[str, Any]:
     return rec
 
 
-def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str, path: str,
-           dataset: Optional[Dict[str, Any]] = None) -> None:
+def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str,
+           path: str) -> None:
     """★★★ **정책 결정점이 강제한다.** 기존 판정은 나란히 돌려 관측만 한다.
 
     관측이 있어야 [5] 전환 게이트의 「여섯 작업 × 허용·거부」와 부정 시나리오 표본이 쌓인다.
-    ⚠️ 관측 실패가 요청을 죽이지 않는다 — 다만 **세어서** 드러낸다."""
+    ⚠️ 관측 실패가 요청을 죽이지 않는다 — 다만 **세어서** 드러낸다.
+
+    ## ★★★ [2026-08-14 교차검토 86 ①] **이 함수는 데이터셋보다 먼저 돈다**
+
+    종전에는 `_dataset()` 으로 이름을 먼저 풀고 그 결과를 판정에 넘겼다. 그러면 증명이
+    만료됐을 때 **있는 이름은 401, 없는 이름은 404** 가 되어, 만료된 증명 하나로
+    **데이터셋 이름을 열거**할 수 있었다. 관측 표본을 만들려다 경계를 약화시킨 것이다.
+
+    ⚠️ 그래서 판정은 **데이터셋을 모른 채** 끝난다. 자원 상태(폐지된 데이터셋)는 판정
+      이후 `_assert_active()` 가 따로 본다 — 그때는 이미 증명이 유효함이 확정돼 있다."""
     from core.policy_shadow import policy_shadow
 
     release_id = str(proof.get("release_id", "") or "")
@@ -139,17 +148,8 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str, path: s
     except HTTPException:
         ctx = {}
     rel = app_proof.read_release(release_id)
+    #: 프로그램 사용 중단(`program_usable`)은 `resource_scope` 안에서 이미 반영된다.
     res = app_proof.resource_scope(rel, release_id)
-    if dataset is not None:
-        res = app_policy.ResourceScope(
-            tenant_id=res.tenant_id, entity_mode=res.entity_mode,
-            scope_node_id=res.scope_node_id, owner_user_id=res.owner_user_id,
-            owner_dept_id=res.owner_dept_id, binding_state=res.binding_state,
-            #: ⚠️⚠️ **덮어쓰지 않는다.** 종전에는 여기서 데이터셋 상태만 넣어 `resource_scope`
-            #:   가 판정한 «프로그램 사용 중단» 을 지웠고, 그래서 관리자가 끈 프로그램이
-            #:   계속 돌았다. 둘 중 **하나라도** 중단이면 중단이다.
-            status=("retired" if ((dataset.get("retired_at") or "")
-                                  or res.status != "active") else "active"))
     facts = app_proof.app_facts(rel, release_id)
     subject = app_policy.Subject(
         user_id=(p.user_id or ""), scope=p.scope, ctx=ctx,
@@ -203,6 +203,17 @@ def _dataset(proof: Dict[str, Any], name: str) -> Dict[str, Any]:
     if not ds:
         raise _fail(sdk.ERR_NOT_FOUND)
     return ds
+
+
+def _assert_active(ds: Dict[str, Any]) -> None:
+    """폐지된 데이터셋은 없는 것으로 답한다.
+
+    ★ 판정(`_judge`)이 아니라 여기서 보는 이유: 판정은 **데이터셋을 알기 전에** 끝나야
+      한다(§`_judge` — 열거 오라클). 그리고 이 시점에는 증명이 유효함이 이미 확정돼 있으므로
+      「있다/없다」를 구분해 말해도 새는 것이 없다 — **그 앱 자신의 데이터셋**이다."""
+    if (ds.get("retired_at") or ""):
+        raise _fail(sdk.ERR_NOT_FOUND, audit_reason=app_policy.DENY_RETIRED,
+                    target=str(ds.get("dataset_id", "")))
 
 
 def _record_in(dataset_id: str, record_id: str) -> Dict[str, Any]:
@@ -331,8 +342,9 @@ async def issue_proof(req: ProofRequest, p: Principal = Depends(current_principa
 @router.get("/datasets/{name}/schema")
 async def get_schema(name: str, request: Request, p: Principal = Depends(current_principal)):
     proof = _require_proof(request, p)
+    _judge(p, proof, app_policy.READ, op="data.schema", path="GET /records/schema")
     ds = _dataset(proof, name)
-    _judge(p, proof, app_policy.READ, op="data.schema", path="GET /records/schema", dataset=ds)
+    _assert_active(ds)
     _personal_ok(ds, p)
     ds["record_count"] = app_data_service.count_records(ds["dataset_id"])
     return {"status": "success", "data": wire.project_dataset(ds)}
@@ -342,8 +354,9 @@ async def get_schema(name: str, request: Request, p: Principal = Depends(current
 async def list_records(name: str, request: Request, limit: int = Query(50), offset: int = Query(0),
                        p: Principal = Depends(current_principal)):
     proof = _require_proof(request, p)
+    _judge(p, proof, app_policy.READ, op="data.list", path="GET /records")
     ds = _dataset(proof, name)
-    _judge(p, proof, app_policy.READ, op="data.list", path="GET /records", dataset=ds)
+    _assert_active(ds)
     _personal_ok(ds, p)
     creator = (p.user_id or "") if (ds.get("app_class") or "") == "personal" else ""
     rows, total = app_data_service.list_records(
@@ -359,8 +372,9 @@ async def list_records(name: str, request: Request, limit: int = Query(50), offs
 async def get_record(name: str, record_id: str, request: Request,
                      p: Principal = Depends(current_principal)):
     proof = _require_proof(request, p)
+    _judge(p, proof, app_policy.READ, op="data.get", path="GET /records/{id}")
     ds = _dataset(proof, name)
-    _judge(p, proof, app_policy.READ, op="data.get", path="GET /records/{id}", dataset=ds)
+    _assert_active(ds)
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     return {"status": "success", "data": wire.project_record(rec)}
@@ -371,8 +385,9 @@ async def create_record(name: str, req: RecordWrite, request: Request,
                         p: Principal = Depends(current_principal)):
     proof = _require_proof(request, p)
     actor = _actor(p)
+    _judge(p, proof, app_policy.WRITE, op="data.create", path="POST /records")
     ds = _dataset(proof, name)
-    _judge(p, proof, app_policy.WRITE, op="data.create", path="POST /records", dataset=ds)
+    _assert_active(ds)
     _personal_ok(ds, p)
     try:
         #: ⚠️ 앱이 보낸 권한 관련 필드를 **지운다**(검증이 아니라 삭제). 브리지도 지우지만
@@ -390,8 +405,9 @@ async def update_record(name: str, record_id: str, req: RecordWrite, request: Re
                         p: Principal = Depends(current_principal)):
     proof = _require_proof(request, p)
     actor = _actor(p)
+    _judge(p, proof, app_policy.WRITE, op="data.update", path="PUT /records/{id}")
     ds = _dataset(proof, name)
-    _judge(p, proof, app_policy.WRITE, op="data.update", path="PUT /records/{id}", dataset=ds)
+    _assert_active(ds)
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:
@@ -408,8 +424,9 @@ async def delete_record(name: str, record_id: str, request: Request,
                         p: Principal = Depends(current_principal)):
     proof = _require_proof(request, p)
     actor = _actor(p)
+    _judge(p, proof, app_policy.DELETE, op="data.remove", path="DELETE /records/{id}")
     ds = _dataset(proof, name)
-    _judge(p, proof, app_policy.DELETE, op="data.remove", path="DELETE /records/{id}", dataset=ds)
+    _assert_active(ds)
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:

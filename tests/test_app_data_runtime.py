@@ -673,3 +673,58 @@ def test_다른_앱_사유는_런타임_경로에서_구조로_막혀_있다(cli
     seen = client.get(f"{R}/datasets/orders/records", headers=_h(theirs))
     assert seen.status_code == 200
     assert seen.json()["data"]["records"] == [], "남의 앱 증명으로 이 앱 데이터가 보인다"
+
+
+# ── ⑬ [교차검토 86] 만료 증명으로 이름을 열거할 수 없다 ─────────────────
+
+def test_만료된_증명으로_데이터셋_이름을_열거할_수_없다(client):
+    """★★★ **P0.** 만료 증명을 판정보다 **데이터셋 조회에 먼저** 넘기면,
+    있는 이름은 401 · 없는 이름은 404 가 되어 **이름을 하나씩 확인할 수 있다.**
+
+    관측 표본을 만들려다(만료를 판정에 태우려다) 경계를 약화시킨 회귀였다 —
+    「관측을 위해 통제를 늦춘다」는 언제나 이 모양이 된다.
+
+    ⚠️ 두 답이 **완전히 같아야** 한다. 상태코드만 같고 본문이 다르면 그것도 오라클이다."""
+    from core.app_capability_token import app_capability_tokens, token_hash
+    from datetime import datetime, timedelta, timezone
+
+    _mkds(client, "orders")
+    tok = _tok(client)
+    with app_capability_tokens._lock:
+        app_capability_tokens._tokens[token_hash(tok)]["expires_at"] = (
+            datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+
+    exists = client.get(f"{R}/datasets/orders/records", headers=_h(tok))
+    absent = client.get(f"{R}/datasets/no_such_dataset/records", headers=_h(tok))
+    assert exists.status_code == absent.status_code == 401, \
+        f"있는 이름 {exists.status_code} · 없는 이름 {absent.status_code} — 열거된다"
+    assert exists.json() == absent.json(), "본문이 달라 이름이 새어나간다"
+
+
+@pytest.mark.parametrize("proof_kind", ["other_user", "other_session"])
+def test_거부되는_증명은_모두_이름을_열거할_수_없다(client, proof_kind):
+    """★ 만료만 막고 끝내지 않는다 — **거부되는 모든 축**에서 같아야 한다.
+    한 축만 고치면 다음 사고는 다른 축에서 난다."""
+    _mkds(client, "orders")
+    tok = _tok(client)
+    if proof_kind == "other_user":
+        h = {"X-Factory-User": "stranger@x", "X-Session-Token": "sess_raw_1",
+             "X-Enterprise-Scope": "node_hq", "X-App-Proof": tok}
+    else:
+        h = {**_h(tok), "X-Session-Token": "sess_raw_9"}
+    a = client.get(f"{R}/datasets/orders/records", headers=h)
+    b = client.get(f"{R}/datasets/no_such_dataset/records", headers=h)
+    assert a.status_code == b.status_code and a.json() == b.json(), \
+        f"{proof_kind}: {a.status_code} vs {b.status_code} — 이름이 새어나간다"
+
+
+def test_판정이_데이터셋을_모른_채_끝난다():
+    """★★ 구조로 못박는다. 판정 함수가 데이터셋을 인자로 받으면 **언젠가 다시** 조회가
+    앞으로 온다 — 받을 수 없게 두는 편이 확실하다."""
+    import inspect
+
+    import api.routes.app_data_runtime as rt
+    sig = inspect.signature(rt._judge)
+    assert "dataset" not in sig.parameters, "판정이 데이터셋을 알고 있다"
+    src = inspect.getsource(rt.get_schema)
+    assert src.index("_judge(") < src.index("_dataset("), "데이터셋을 판정보다 먼저 푼다"

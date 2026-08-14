@@ -76,6 +76,8 @@ def main():
 
     http = Http(args.base, seed["session_me"], seed["scope"], seed["mode"])
     results = []
+    #: 구조 불변식 — 판정으로 관측되지 않는 통제. 결과를 게이트에 **코드 지문과 함께** 남긴다.
+    structure = {}
 
     def step(name, ok, detail=""):
         results.append({"name": name, "ok": bool(ok), "detail": detail})
@@ -155,15 +157,56 @@ def main():
                  session=seed["session_me_2"])
     step("다른 세션에서 재사용 → 차단", st == 404, f"HTTP {st}")
 
-    #: ③ 다른 앱의 데이터
-    #: ⚠️⚠️ **이 시나리오는 런타임 경로에서 «판정으로» 재현되지 않는다.** 서버가 자원을
-    #:   증명 자체에서 유도하므로 `tok.release_id == app.release_id` 가 **언제나 참**이다.
-    #:   즉 `TOKEN_APP_MISMATCH` 는 판정이 아니라 **구조로** 막혀 있다.
-    #:   여기서는 「남의 앱 증명으로는 이 앱 데이터가 보이지 않는다」를 결과로 확인한다.
-    st, body_o = http("GET", f"{R}/datasets/orders/records", proof=proof_other)
-    seen = len((body_o.get("data") or {}).get("records") or []) if st == 200 else -1
-    step("다른 앱 증명으로는 이 앱 데이터가 보이지 않는다", st == 200 and seen == 0,
-         f"HTTP {st} records={seen}")
+    #: ③ 교차 앱 격리 — **살아 있는 sentinel 로** 본다(구조 불변식 증거)
+    #:
+    #: ⚠️⚠️ [교차검토 86 ②] 종전에는 A 에서 만든 레코드를 **지운 뒤** B 에서 0건인지 봤다.
+    #:   비교 대상이 이미 없으므로 그 0 은 **격리를 증명하지 못한다** — 무엇을 해도 0 이다.
+    #:   이제 A 에 sentinel 을 **남겨 두고**, 같은 순간 A 는 보이고 B 는 안 보이는지 본다.
+    st, sentinel = http("POST", f"{R}/datasets/orders/records",
+                        {"payload": {"qty": 4242}}, proof=proof)
+    ok_made = st == 200
+    st_a, list_a = http("GET", f"{R}/datasets/orders/records", proof=proof)
+    st_b, list_b = http("GET", f"{R}/datasets/orders/records", proof=proof_other)
+    rows_a = (list_a.get("data") or {}).get("records") or []
+    rows_b = (list_b.get("data") or {}).get("records") or []
+    mine = [r for r in rows_a if (r.get("payload") or {}).get("qty") == 4242]
+    theirs = [r for r in rows_b if (r.get("payload") or {}).get("qty") == 4242]
+    #: ⚠️ 「정확히 1건」이 아니라 「A 에 살아 있고 B 에는 없다」가 성질이다 — 여러 번 돌리면
+    #:   sentinel 이 쌓이는데, 그것 때문에 격리 시험이 빨개지면 사람이 시험을 지운다.
+    isolated = ok_made and st_a == 200 and st_b == 200 and len(mine) >= 1 and not theirs
+    step("교차 앱 격리(살아 있는 sentinel)", isolated,
+         f"A={len(rows_a)}건(sentinel {len(mine)}) · B={len(rows_b)}건(sentinel {len(theirs)})")
+    structure["교차 앱 블랙박스 시험 통과"] = isolated
+
+    #: ③-b 식별자 주입 — 「남의 앱을 말해 보기」. 어느 자리로도 통하지 않아야 한다.
+    sid_rec = (sentinel.get("data") or {}).get("record_id", "")
+    injections = [
+        ("본문", lambda: http("POST", f"{R}/datasets/orders/records",
+                              {"payload": {"qty": 1}, "release_id": "rel_canary",
+                               "app_id": "proj_canary"}, proof=proof_other)),
+        ("payload 안", lambda: http("POST", f"{R}/datasets/orders/records",
+                                    {"payload": {"qty": 1, "release_id": "rel_canary"}},
+                                    proof=proof_other)),
+        ("질의", lambda: http("GET",
+                             f"{R}/datasets/orders/records?release_id=rel_canary",
+                             proof=proof_other)),
+        ("남의 레코드 id", lambda: http("GET", f"{R}/datasets/orders/records/{sid_rec}",
+                                    proof=proof_other)),
+    ]
+    injected = []
+    for label, call in injections:
+        st_i, body_i = call()
+        leaked = False
+        if st_i == 200:
+            txt = json.dumps(body_i, ensure_ascii=False)
+            leaked = "4242" in txt or "rel_canary\"" in txt
+        injected.append((label, st_i, leaked))
+    no_leak = not any(l for _n, _s, l in injected)
+    step("식별자 주입으로 남의 앱에 닿지 못한다", no_leak,
+         " · ".join(f"{n}:HTTP{s}{'(누설)' if l else ''}" for n, s, l in injected))
+    structure["요청에 app_id·release_id 입력이 없다"] = no_leak
+    structure["데이터셋은 증명의 릴리스에 귀속된다"] = no_leak
+    structure["레코드는 해결된 데이터셋에 귀속된다"] = no_leak
 
     #: ④ 다른 조직 범위
     #: ⚠️ 화면이 고른 범위를 바꾸는 것만으로는 **문맥 축**에서 먼저 걸린다(문맥을 확정하지
@@ -219,6 +262,16 @@ def main():
     #: ⑦ 증명 없음 — 세션으로 내려가지 않는다
     st, _ = http("GET", f"{R}/datasets/orders/records")
     step("증명 없음 → 세션 폴백 없음", st == 403, f"HTTP {st}")
+
+    #: ★ 「릴리스는 증명에서만 유도된다」 — 요청 어디에도 릴리스를 싣지 않았는데 이 앱의
+    #:   데이터가 정상으로 오갔다는 사실 자체가 그 증거다.
+    structure["릴리스는 증명에서만 유도된다"] = all(
+        r["ok"] for r in results if r["name"].startswith("data.") and "허용" in r["name"])
+
+    print("-- 구조 불변식 -----------------------------------")
+    for _name, _ok in structure.items():
+        print(("  OK  " if _ok else "  실패 ") + _name)
+    print("STRUCTURE " + json.dumps(structure, ensure_ascii=False))
 
     print("\n" + json.dumps({"steps": results}, ensure_ascii=False))
     bad = [r["name"] for r in results if not r["ok"]]
