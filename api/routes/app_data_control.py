@@ -435,13 +435,44 @@ async def create_record(dataset_id: str, req: RecordWrite,
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.put("/records/{record_id}")
-async def update_record(record_id: str, req: RecordWrite,
-                        p: Principal = Depends(current_principal)):
+def _require_record_in(dataset_id: str, record_id: str) -> Dict[str, Any]:
+    """★★★ [G1-B01-B] **레코드가 «그» 데이터셋의 것인지 확인한다.**
+
+    ## 왜 경로에 데이터셋이 있어야 하는가
+
+    종전 경로는 `PUT /records/{record_id}` 였다 — **데이터셋을 말하지 않는다.** 그래서 앱이
+    자기가 이름 붙인 데이터셋이 아니라 **아무 레코드 id** 를 가리킬 수 있었고, 현행 판정
+    (`assert_release_*`)은 **사용자 기준**이라 그 사용자가 볼 수 있는 다른 앱의 레코드면
+    통과한다 — 앱 A 가 사용자를 대리해 앱 B 의 데이터를 고치는
+    **혼동된 대리인(confused deputy)** 이다.
+
+    ★ 신규 PDP 는 앱 증명의 `release_id` 대조로 이것을 막는다. 그러나 **브리지는 전환
+      전에도 안전해야 하므로** 경로 자체를 데이터셋에 매는 것이 정답이다. 판정기 교체를
+      기다리는 통제는 통제가 아니다.
+
+    ⚠️ 어긋나면 **404** 다. 403 으로 답하면 「그 레코드는 있는데 여기 것이 아니다」가 되어
+      **다른 데이터셋의 존재가 새어나간다**(설계 §3.3 은폐 경계표와 같은 규칙)."""
     rec = app_data_service.get_record(record_id)
-    if not rec:
+    if not rec or str(rec.get("dataset_id") or "") != str(dataset_id or ""):
         raise HTTPException(status_code=404, detail="레코드를 찾을 수 없습니다.")
-    ds = _require_dataset(rec["dataset_id"])
+    return rec
+
+
+@router.get("/datasets/{dataset_id}/records/{record_id}")
+async def get_record(dataset_id: str, record_id: str,
+                     p: Principal = Depends(current_principal)):
+    ds = _require_dataset(dataset_id)
+    rec = _require_record_in(dataset_id, record_id)
+    _enforce(p, "read", ds["release_id"], ds, path="GET /records/{id}")
+    _assert_personal_owner(ds, p, row_creator=rec.get("created_by", ""))
+    return rec
+
+
+@router.put("/datasets/{dataset_id}/records/{record_id}")
+async def update_record(dataset_id: str, record_id: str, req: RecordWrite,
+                        p: Principal = Depends(current_principal)):
+    ds = _require_dataset(dataset_id)
+    rec = _require_record_in(dataset_id, record_id)
     actor = _actor(p)
     _enforce(p, "write", ds["release_id"], ds, path="PUT /records/{id}")
     _assert_personal_owner(ds, p, row_creator=rec.get("created_by", ""))
@@ -451,13 +482,12 @@ async def update_record(record_id: str, req: RecordWrite,
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.delete("/records/{record_id}")
-async def delete_record(record_id: str, p: Principal = Depends(current_principal)):
+@router.delete("/datasets/{dataset_id}/records/{record_id}")
+async def delete_record(dataset_id: str, record_id: str,
+                        p: Principal = Depends(current_principal)):
     """논리 삭제. 물리 삭제는 제공하지 않는다(설계 §4-2)."""
-    rec = app_data_service.get_record(record_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="레코드를 찾을 수 없습니다.")
-    ds = _require_dataset(rec["dataset_id"])
+    ds = _require_dataset(dataset_id)
+    rec = _require_record_in(dataset_id, record_id)
     actor = _actor(p)
     _enforce(p, "delete", ds["release_id"], ds, path="DELETE /records/{id}")
     _assert_personal_owner(ds, p, row_creator=rec.get("created_by", ""))
@@ -465,3 +495,10 @@ async def delete_record(record_id: str, p: Principal = Depends(current_principal
         return app_data_service.delete_record(record_id, actor_id=actor)
     except AppDataError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# ⚠️⚠️ **데이터셋을 말하지 않는 레코드 경로(`/records/{record_id}`)는 두지 않는다.**
+#   위 §`_require_record_in` 의 이유로 그 모양은 **안전하게 만들 수 없다** — 호출자가
+#   데이터셋을 말하지 않으므로 소속을 대조할 대상이 없다.
+#   ★ 제품 코드에 호출자가 없었다(프론트·생성기 전수 확인, 2026-08-14). 시험 둘만 쓰고
+#     있었고 함께 옮겼다. 「쓰는 데가 없지만 남겨 둔다」는 것은 **다음 사람이 그 경로를
+#     쓰도록 남겨 두는 것**이다.

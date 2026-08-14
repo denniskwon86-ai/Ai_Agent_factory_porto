@@ -163,15 +163,35 @@ def test_version_은_받아서_무시하지_않고_거부한다():
     assert "version" in why
 
 
-def test_아직_없는_레코드_경로를_계약이_드러낸다():
-    """★★★ 지금 서버에는 `PUT /records/{id}` 처럼 **데이터셋을 말하지 않는** 경로가 있다.
-    브리지가 그것을 쓰면 앱 A 가 사용자를 대리해 앱 B 의 레코드를 고칠 수 있다
-    (혼동된 대리인). 계약은 데이터셋에 매인 경로만 알고, 없는 것은 «없다» 고 적는다."""
-    for op in wire.ROUTES_OWED:
-        assert "{dataset_id}" in wire.SERVER_ROUTES[op][1]
+def test_모든_레코드_경로가_데이터셋에_매여_있다():
+    """★★★ 데이터셋을 말하지 않는 경로(`PUT /records/{id}`)를 브리지가 쓰면 앱 A 가
+    사용자를 대리해 앱 B 의 레코드를 고칠 수 있다(혼동된 대리인) — 현행 판정은
+    **사용자 기준**이라 그 사용자가 볼 수 있는 레코드면 통과한다."""
     for op, (_m, path) in wire.SERVER_ROUTES.items():
         if op != "data.schema":
             assert "{dataset_id}" in path, f"{op} 경로가 데이터셋에 매여 있지 않다"
+
+
+def test_계약이_가리키는_경로가_실제로_서버에_있다():
+    """★★★ **계약과 배선을 대조한다.** 이 저장소가 반복해 다친 유형이 「시험이 실제 배선을
+    타지 않아 초록이 거짓인」 경우다 — 계약에만 있고 서버에 없는 경로는 브리지 구현자를
+    데이터셋 없는 우회로로 몰아넣는다."""
+    from main import app
+    have = {(m, r.path) for r in app.routes
+            for m in (getattr(r, "methods", None) or ())}
+    for op, (method, path) in wire.SERVER_ROUTES.items():
+        real = path.replace("{record_id}", "{record_id}")
+        assert (method, real) in have, f"{op} 경로가 서버에 없다: {method} {real}"
+
+
+@pytest.mark.parametrize("shape", list(wire.FORBIDDEN_ROUTE_SHAPES))
+def test_데이터셋을_말하지_않는_레코드_경로는_되살아나지_않는다(shape):
+    """⚠️ 「쓰는 데가 없지만 남겨 둔다」는 것은 **다음 사람이 그 경로를 쓰도록 남겨 두는 것**
+    이다. 그 모양은 안전하게 만들 수 없다 — 호출자가 데이터셋을 말하지 않으므로 소속을
+    대조할 대상이 없다."""
+    from main import app
+    bad = [r.path for r in app.routes if getattr(r, "path", "").startswith(shape)]
+    assert not bad, f"데이터셋 없는 레코드 경로가 다시 생겼다: {bad}"
 
 
 # ── ⑥ 응답은 허용목록으로 깎인다 ──────────────────────────────────────────

@@ -325,13 +325,64 @@ def test_anonymous_write_is_blocked_on_every_write_route(client):
     calls = [
         client.post(f"/api/v1/appdata/datasets/{ds['dataset_id']}/records",
                     json={"payload": _row()}),
-        client.put(f"/api/v1/appdata/records/{rec['record_id']}", json={"payload": {"qty": 1}}),
-        client.delete(f"/api/v1/appdata/records/{rec['record_id']}"),
+        client.put(f"/api/v1/appdata/datasets/{ds['dataset_id']}/records/{rec['record_id']}",
+                   json={"payload": {"qty": 1}}),
+        client.delete(f"/api/v1/appdata/datasets/{ds['dataset_id']}/records/{rec['record_id']}"),
         client.put(f"/api/v1/appdata/datasets/{ds['dataset_id']}/schema",
                    json={"schema": SCHEMA}),
         client.delete(f"/api/v1/appdata/datasets/{ds['dataset_id']}"),
     ]
     assert [r.status_code for r in calls] == [401] * 5
+
+
+def test_다른_데이터셋의_레코드에는_닿지_못한다(client):
+    """★★★ [G1-B01-B] **혼동된 대리인(confused deputy)** 을 경로 모양으로 막는다.
+
+    종전 경로는 `PUT /records/{record_id}` 였다 — 데이터셋을 말하지 않는다. 그래서 앱이
+    자기 데이터셋이 아니라 **아무 레코드 id** 를 가리킬 수 있었고, 현행 판정은
+    **사용자 기준**이라 그 사용자가 볼 수 있는 다른 앱의 레코드면 통과한다.
+    즉 앱 A 가 사용자를 대리해 앱 B 의 데이터를 고칠 수 있었다.
+
+    ⚠️ 어긋난 소속은 **404** 다. 403 이면 「그 레코드는 있는데 여기 것이 아니다」가 되어
+      다른 데이터셋의 존재가 새어나간다."""
+    a = _mkds(client, release_id="REL_OK", name="a_rows").json()
+    b = _mkds(client, release_id="REL_SIBLING", name="b_rows").json()
+    base = "/api/v1/appdata/datasets"
+    rec_b = client.post(f"{base}/{b['dataset_id']}/records", json={"payload": _row()}).json()
+
+    #: ★ 대조군 — 사용자는 **두 앱을 다 볼 수 있다**(같은 부서). 그래서 「사용자 기준」
+    #:   판정만으로는 아래가 막히지 않는다. 이 줄이 없으면 이 시험은 «권한이 없어서 404»
+    #:   와 구분되지 않는다.
+    ok = client.get(f"{base}/{b['dataset_id']}/records/{rec_b['record_id']}")
+    assert ok.status_code == 200, f"제 데이터셋으로도 못 읽는다 — 대조가 안 된다: {ok.text}"
+
+    #: 앱 A 의 데이터셋을 통해서는 닿지 못한다.
+    rid = rec_b["record_id"]
+    calls = [
+        client.get(f"{base}/{a['dataset_id']}/records/{rid}"),
+        client.put(f"{base}/{a['dataset_id']}/records/{rid}", json={"payload": {"qty": 9}}),
+        client.delete(f"{base}/{a['dataset_id']}/records/{rid}"),
+    ]
+    assert [r.status_code for r in calls] == [404, 404, 404], \
+        [(r.status_code, r.text[:80]) for r in calls]
+
+    #: ⚠️ 그리고 **실제로 바뀌지 않았는지** 본다. 상태코드만 보면 「404 를 주고 쓰기는 했다」
+    #:   를 놓친다.
+    assert client.svc.get_record(rid)["payload"]["qty"] == _row()["qty"]
+    assert not client.svc.get_record(rid)["deleted_at"]
+
+
+def test_없는_레코드와_남의_레코드는_같은_답을_준다(client):
+    """★ 두 답이 다르면 그 차이가 곧 «그 id 는 존재한다» 는 신호다."""
+    a = _mkds(client, release_id="REL_OK", name="a_rows").json()
+    b = _mkds(client, release_id="REL_SIBLING", name="b_rows").json()
+    base = "/api/v1/appdata/datasets"
+    rec_b = client.post(f"{base}/{b['dataset_id']}/records", json={"payload": _row()}).json()
+
+    absent = client.get(f"{base}/{a['dataset_id']}/records/rec_없는것")
+    foreign = client.get(f"{base}/{a['dataset_id']}/records/{rec_b['record_id']}")
+    assert absent.status_code == foreign.status_code == 404
+    assert absent.json() == foreign.json(), "없는 것과 남의 것이 다른 답을 준다"
 
 
 def test_cannot_write_to_another_department_app(client):
@@ -369,8 +420,9 @@ def test_record_writes_are_not_audited_to_the_ledger(client):
     client.ledger.clear()
     rec = client.post(f"/api/v1/appdata/datasets/{ds['dataset_id']}/records",
                       json={"payload": _row()}).json()
-    client.put(f"/api/v1/appdata/records/{rec['record_id']}", json={"payload": {"qty": 3}})
-    client.delete(f"/api/v1/appdata/records/{rec['record_id']}")
+    client.put(f"/api/v1/appdata/datasets/{ds['dataset_id']}/records/{rec['record_id']}",
+               json={"payload": {"qty": 3}})
+    client.delete(f"/api/v1/appdata/datasets/{ds['dataset_id']}/records/{rec['record_id']}")
     assert client.ledger == []                       # 원장에는 없고
     row = client.svc.get_record(rec["record_id"])
     assert row["created_by"] == "kim" and row["deleted_by"] == "kim"   # 레코드에는 있다
