@@ -438,7 +438,9 @@ async def create_record(name: str, req: RecordWrite, request: Request,
         #: ⚠️ 앱이 보낸 권한 관련 필드를 **지운다**(검증이 아니라 삭제). 브리지도 지우지만
         #:   서버가 다시 지운다 — 브리지 결함 하나가 곧 권한 입력이 되지 않게.
         out = app_data_service.create_record(
-            ds["dataset_id"], sdk.sanitize_request(req.payload), actor_id=actor)
+            ds["dataset_id"], sdk.sanitize_request(req.payload), actor_id=actor,
+            #: ★ 이 릴리스가 결속한 스키마 판으로 검증한다 — 마스터가 아니다.
+            release_id=str(proof.get("release_id", "") or ""))
     except AppDataError as e:
         raise _fail(sdk.ERR_INVALID, audit_reason=str(e)[:120], actor=actor,
                     target=ds["dataset_id"], path="POST /records")
@@ -458,7 +460,8 @@ async def update_record(name: str, record_id: str, req: RecordWrite, request: Re
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:
         out = app_data_service.update_record(
-            record_id, sdk.sanitize_request(req.payload), actor_id=actor)
+            record_id, sdk.sanitize_request(req.payload), actor_id=actor,
+            release_id=str(proof.get("release_id", "") or ""))
     except AppDataError as e:
         raise _fail(sdk.ERR_INVALID, audit_reason=str(e)[:120], actor=actor,
                     target=ds["dataset_id"], path="PUT /records/{id}")

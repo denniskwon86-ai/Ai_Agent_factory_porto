@@ -173,7 +173,33 @@ def test_coverage_counts_bound_and_legacy(svc):
     svc.create_dataset("rel_1", "a", _schema(), actor_id="u@x", allowed_actions=["read"])
     svc.create_dataset("rel_1", "b", _schema(), actor_id="u@x")
     cov = svc.contract_coverage("rel_1")
-    assert cov == {"bound": 1, "legacy": 1, "total": 2}
+    assert cov["bound"] == 1 and cov["legacy"] == 1 and cov["materialized"] == 2
+
+
+def test_coverage_denominator_is_the_declaration(svc):
+    """★★★ 결속 행만 세면 **계약이 열 개를 선언했는데 하나만 물질화된 상태**가
+    「1/1 = 100%」로 보인다 — 가장 위험한 거짓 초록이다."""
+    svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x", allowed_actions=["read"])
+    cov = svc.contract_coverage("rel_1", declared=["orders", "arrivals", "invoices"])
+    assert cov["declared"] == 3
+    assert cov["materialized"] == 1
+    assert cov["missing"] == ["arrivals", "invoices"]     # 선언됐는데 없는 것
+    assert cov["undeclared"] == []
+
+
+def test_coverage_reports_bindings_outside_the_contract(svc):
+    """계약에 없는데 결속돼 있는 것도 드러낸다 — §4 의 「계약 밖 데이터셋」 이 그것이다."""
+    svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x", allowed_actions=["read"])
+    svc.create_dataset("rel_1", "shadow", _schema(), actor_id="u@x")
+    cov = svc.contract_coverage("rel_1", declared=["orders"])
+    assert cov["undeclared"] == ["shadow"]
+
+
+def test_unknown_declaration_is_not_reported_as_zero(svc):
+    """⚠️ 모르는 값을 0 으로 적지 않는다. 「선언이 없다」와 「선언을 모른다」는 다르다."""
+    svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x", allowed_actions=["read"])
+    cov = svc.contract_coverage("rel_1")
+    assert cov["declared"] is None and cov["missing"] is None
 
 
 def test_list_datasets_follows_bindings(svc):
@@ -182,6 +208,340 @@ def test_list_datasets_follows_bindings(svc):
     assert [d["dataset_id"] for d in svc.list_datasets("rel_v2")] == []
     svc.adopt_dataset("app_o", "ds_o", "rel_v2", allowed_actions=["read"])
     assert [d["dataset_id"] for d in svc.list_datasets("rel_v2")] == [ds["dataset_id"]]
+
+
+# ── [2.1 보정] 결속된 스키마 판이 실제로 쓰인다 ───────────────────────────
+def _schema_v2():
+    return {"fields": [{"name": "qty", "type": "number"},
+                       {"name": "memo", "type": "string"}]}
+
+
+def test_two_releases_validate_with_their_own_schema(svc):
+    """★★★ **2.1 보정의 이유 전부.**
+
+    ⚠️ 종전에는 `version_id` 를 저장만 하고 검증은 데이터셋 마스터의 단일 `schema_json`
+      으로 했다. 그래서 v1·v2 가 서로 다른 판을 가리켜도 **둘 다 마지막에 저장된 스키마
+      하나**를 썼다 — 판을 기록만 하고 쓰지 않는 상태이고, 그것은 판이 없는 것과 같다."""
+    ds = svc.create_dataset("rel_v1", "orders", _schema(), actor_id="u@x",
+                            app_id="app_o", dataset_key="ds_o", allowed_actions=["read", "create"],
+                            contract_revision=1)
+    svc.adopt_dataset("app_o", "ds_o", "rel_v2", allowed_actions=["read", "create"],
+                      schema=_schema_v2(), contract_revision=2)
+
+    #: v2 에만 있는 필드 — v2 로는 되고 v1 로는 거부된다.
+    ok = svc.create_record(ds["dataset_id"], {"qty": 1, "memo": "메모"},
+                           actor_id="u@x", release_id="rel_v2")
+    assert ok["payload"]["memo"] == "메모"
+    with pytest.raises(AppDataError) as e:
+        svc.create_record(ds["dataset_id"], {"qty": 1, "memo": "메모"},
+                          actor_id="u@x", release_id="rel_v1")
+    assert "memo" in str(e.value)
+
+    #: 두 릴리스의 스키마 조회 결과가 실제로 다르다.
+    v1 = svc.find_dataset("rel_v1", "orders")
+    v2 = svc.find_dataset("rel_v2", "orders")
+    assert {f["name"] for f in v1["schema"]["fields"]} == {"qty"}
+    assert {f["name"] for f in v2["schema"]["fields"]} == {"qty", "memo"}
+    assert v1["contract_revision"] == 1 and v2["contract_revision"] == 2
+    assert v1["schema_fingerprint"] != v2["schema_fingerprint"]
+
+
+def test_update_record_also_uses_the_bound_schema(svc):
+    ds = svc.create_dataset("rel_v1", "orders", _schema(), actor_id="u@x",
+                            app_id="app_o", dataset_key="ds_o", allowed_actions=["read", "create"],
+                            contract_revision=1)
+    svc.adopt_dataset("app_o", "ds_o", "rel_v2", allowed_actions=["read", "create"],
+                      schema=_schema_v2(), contract_revision=2)
+    rec = svc.create_record(ds["dataset_id"], {"qty": 1}, actor_id="u@x", release_id="rel_v1")
+    with pytest.raises(AppDataError):
+        svc.update_record(rec["record_id"], {"memo": "x"}, actor_id="u@x", release_id="rel_v1")
+    out = svc.update_record(rec["record_id"], {"memo": "x"}, actor_id="u@x", release_id="rel_v2")
+    assert out["payload"]["memo"] == "x"
+
+
+def test_console_cannot_edit_a_contracted_schema(svc):
+    """⚠️ 관리 API 의 전역 스키마 변경과 릴리스별 계약 판은 **다른 경로**다.
+    섞으면 승인된 revision 의 내용이 콘솔에서 바뀌고, 승인 원장은 그것을 모른다."""
+    bound = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                               allowed_actions=["read"], contract_revision=1)
+    with pytest.raises(AppDataError) as e:
+        svc.update_schema(bound["dataset_id"], _schema_v2(), actor_id="u@x")
+    assert "계약" in str(e.value)
+
+    #: 레거시(계약 이전) 데이터셋은 종전대로 콘솔에서 바꿀 수 있다 — 대조군.
+    legacy = svc.create_dataset("rel_1", "notes", _schema(), actor_id="u@x")
+    out = svc.update_schema(legacy["dataset_id"], _schema_v2(), actor_id="u@x")
+    assert out["added_fields"] == ["memo"]
+
+
+# ── [2.1 보정] 계약 판은 불변이다 ─────────────────────────────────────────
+def test_same_revision_with_a_different_schema_is_refused(svc):
+    """★★★ 덮어쓰게 두면 **이미 승인된 revision 의 의미가 나중에 바뀐다** —
+    승인 원장은 「revision 1 을 승인했다」고 하는데 그 내용이 달라져 있고,
+    3단계에서 봉인할 계약 지문의 역사도 함께 변조된다."""
+    ds = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                            allowed_actions=["read"], contract_revision=1)
+    with pytest.raises(AppDataError) as e:
+        svc.bind_release("rel_2", ds["dataset_id"], allowed_actions=["read"],
+                         schema=_schema_v2(), contract_revision=1)
+    assert "revision" in str(e.value) and "새 revision" in str(e.value)
+
+
+def test_same_revision_with_the_same_schema_is_idempotent(svc):
+    ds = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                            allowed_actions=["read"], contract_revision=1)
+    first = svc.binding_for("rel_1", ds["dataset_id"])["version_id"]
+    #: 같은 내용을 다시 결속해도 판이 늘지 않는다 — 재실행이 가능해야 한다.
+    again = svc.bind_release("rel_3", ds["dataset_id"], allowed_actions=["read"],
+                             schema=_schema(), contract_revision=1)
+    assert again["version_id"] == first
+    n = svc._store.scalar("SELECT COUNT(*) FROM app_dataset_versions WHERE dataset_id=?",
+                          (ds["dataset_id"],))
+    assert n == 1
+
+
+def test_a_new_revision_is_the_way_to_change_a_schema(svc):
+    ds = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                            allowed_actions=["read"], contract_revision=1)
+    svc.bind_release("rel_2", ds["dataset_id"], allowed_actions=["read"],
+                     schema=_schema_v2(), contract_revision=2)
+    revs = [r["contract_revision"] for r in svc._store.query(
+        "SELECT contract_revision FROM app_dataset_versions WHERE dataset_id=? "
+        "ORDER BY contract_revision", (ds["dataset_id"],))]
+    assert revs == [1, 2]
+
+
+def test_schema_fingerprint_covers_the_stored_artifact_exactly(svc):
+    """★ 이 지문은 «의미» 지문이 아니라 **판 지문**이다 — 「저장된 판이 승인된 그것과
+    같은가」에 답한다. 그래서 **필드 순서까지** 들어간다.
+
+    ⚠️ 순서를 빼면 「승인된 판과 저장된 판이 다른데 지문은 같은」 구간이 생기고, 그 구간이
+      바로 불변성이 지켜지지 않는 곳이다. 화면 순서를 바꾸려면 새 revision 을 낸다.
+    (요구가 바뀐 것인지 판단하는 «의미» 지문은 `app_runtime_contract.semantic_fingerprint`
+     이고 그쪽은 설명 문구를 뺀다 — 두 지문은 서로 다른 질문에 답한다.)"""
+    from core.app_data import schema_fingerprint
+    a = {"fields": [{"name": "qty", "type": "number"}, {"name": "memo", "type": "string"}]}
+    b = {"fields": [{"name": "memo", "type": "string"}, {"name": "qty", "type": "number"}]}
+    assert schema_fingerprint(a) != schema_fingerprint(b)
+    assert schema_fingerprint(a) == schema_fingerprint(dict(a))   # 같은 내용은 같은 지문
+    assert schema_fingerprint(a) != schema_fingerprint(_schema())
+
+
+def test_reordering_fields_needs_a_new_revision(svc):
+    ds = svc.create_dataset("rel_1", "orders", _schema_v2(), actor_id="u@x",
+                            allowed_actions=["read"], contract_revision=1)
+    flipped = {"fields": list(reversed(_schema_v2()["fields"]))}
+    with pytest.raises(AppDataError):
+        svc.bind_release("rel_2", ds["dataset_id"], allowed_actions=["read"],
+                         schema=flipped, contract_revision=1)
+    svc.bind_release("rel_2", ds["dataset_id"], allowed_actions=["read"],
+                     schema=flipped, contract_revision=2)   # 새 판이면 된다
+    assert svc.find_dataset("rel_2", "orders")["contract_revision"] == 2
+
+
+# ── [2.1 보정] 유일성은 DB 가 지킨다 ──────────────────────────────────────
+def test_duplicate_dataset_key_in_one_app_is_blocked_by_the_db(svc):
+    """⚠️ 응용 계층의 「조회 후 INSERT」 는 워커가 둘이면 깨진다 — DB 가 막아야 한다."""
+    import sqlite3
+    svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                       app_id="app_o", dataset_key="ds_o")
+    assert svc._store.integrity_problems() == []
+    with pytest.raises(sqlite3.IntegrityError):
+        svc._store.execute(
+            "INSERT INTO app_datasets (dataset_id, tenant_id, release_id, name, app_id, "
+            "dataset_key, created_by, created_at, updated_at, retired_at) "
+            "VALUES ('ds_dup','tenant_default','rel_9','orders2','app_o','ds_o','u','','','')")
+
+
+def test_legacy_empty_app_id_does_not_collide(svc):
+    """★ 레거시(`app_id=''`)는 유일성 대상에서 뺀다 —
+    ⚠️ 넣으면 앱 식별자가 없는 옛 데이터셋들이 서로 충돌해 마이그레이션이 통째로 멈춘다."""
+    a = svc.create_dataset("rel_a", "orders", _schema(), actor_id="u@x")
+    b = svc.create_dataset("rel_b", "orders", _schema(), actor_id="u@x")
+    assert a["app_id"] == b["app_id"] == "" and a["dataset_key"] == b["dataset_key"] == "orders"
+    assert svc._store.integrity_problems() == []
+    #: 그리고 그 둘은 자동으로 합쳐지지 않는다.
+    assert svc.adopt_dataset("", "orders", "rel_c") is None
+
+
+def test_two_datasets_cannot_share_a_runtime_name_in_one_release(svc):
+    """앱은 이름으로만 부른다 — 한 릴리스에 같은 이름이 둘이면 답할 수 없다."""
+    other = svc.create_dataset("rel_x", "orders", _schema(), actor_id="u@x",
+                               app_id="app_x", dataset_key="ds_x")
+    svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                       app_id="app_o", dataset_key="ds_o")
+    with pytest.raises(AppDataError) as e:
+        svc.bind_release("rel_1", other["dataset_id"], runtime_name="orders")
+    assert "orders" in str(e.value)
+
+
+def test_ambiguous_adoption_refuses_instead_of_picking_one(svc, monkeypatch):
+    """★★★ **첫 행을 고르지 않는다.** 그 선택은 임의이고 조용하며,
+    고른 쪽이 틀렸다면 현업 레코드가 통째로 다른 데이터셋에 붙는다."""
+    svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                       app_id="app_o", dataset_key="ds_o")
+    #: 유일성 인덱스를 우회해 중복을 심는다(과거 데이터에 이미 중복이 있는 상황을 흉내).
+    svc._store.execute("DROP INDEX IF EXISTS idx_app_datasets_app_key")
+    svc._store.execute(
+        "INSERT INTO app_datasets (dataset_id, tenant_id, release_id, name, app_id, "
+        "dataset_key, created_by, created_at, updated_at, retired_at) "
+        "VALUES ('ds_dup','tenant_default','rel_2','orders','app_o','ds_o','u','','','')")
+    with pytest.raises(AppDataError) as e:
+        svc.adopt_dataset("app_o", "ds_o", "rel_3")
+    assert "고를 수 없습니다" in str(e.value)
+
+
+# ── [2.1 보정] 생성·판·결속은 하나의 트랜잭션 ────────────────────────────
+def test_a_failed_binding_rolls_back_the_dataset(svc, monkeypatch):
+    """⚠️ 나뉘어 있으면 **고아 데이터셋**이 남는다 — 아무 릴리스도 가리키지 않으므로
+    이름으로 찾히지 않고, 다음 요청이 **또 만든다.**"""
+    import core.app_data as ad
+    real = ad.AppDataService._bind_in_tx
+
+    def _boom(self, conn, *a, **kw):
+        raise RuntimeError("결속 실패")
+
+    monkeypatch.setattr(ad.AppDataService, "_bind_in_tx", _boom)
+    with pytest.raises(RuntimeError):
+        svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                           allowed_actions=["read"])
+    monkeypatch.setattr(ad.AppDataService, "_bind_in_tx", real)
+
+    assert svc._store.scalar("SELECT COUNT(*) FROM app_datasets") == 0
+    assert svc._store.scalar("SELECT COUNT(*) FROM app_release_dataset_bindings") == 0
+    assert svc._store.scalar("SELECT COUNT(*) FROM app_dataset_versions") == 0
+    #: 그리고 같은 이름으로 다시 만들 수 있다(고아가 막고 있지 않다).
+    assert svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x")["name"] == "orders"
+
+
+def test_a_failed_version_rolls_back_the_binding(svc):
+    """revision 충돌로 결속이 실패하면 **그 결속도 남지 않는다.**"""
+    ds = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                            allowed_actions=["read"], contract_revision=1)
+    before = svc._store.scalar("SELECT COUNT(*) FROM app_release_dataset_bindings")
+    with pytest.raises(AppDataError):
+        svc.bind_release("rel_2", ds["dataset_id"], allowed_actions=["read"],
+                         schema=_schema_v2(), contract_revision=1)   # 같은 revision, 다른 스키마
+    assert svc._store.scalar("SELECT COUNT(*) FROM app_release_dataset_bindings") == before
+    assert svc.binding_for("rel_2", ds["dataset_id"]) is None
+
+
+# ── [2.1 보정] 물질화 지문 ────────────────────────────────────────────────
+def test_materialization_fingerprint_moves_when_bindings_move(svc):
+    """★★★ 계약 원문 지문과 **다른 사실**이다 — 계약서가 승인된 것과 DB 가 그대로
+    물질화된 것은 별개다. 원문만 봉인하면 「계약서는 승인됐지만 결속이 다른 상태」를
+    잡을 수 없다."""
+    ds = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                            allowed_actions=["read", "create"], contract_revision=1)
+    base = svc.materialization_fingerprint("rel_1")
+    assert len(base) == 16
+
+    svc.bind_release("rel_1", ds["dataset_id"], allowed_actions=["read"])   # 권한 축소
+    narrowed = svc.materialization_fingerprint("rel_1")
+    assert narrowed != base
+
+    svc.bind_release("rel_1", ds["dataset_id"], allowed_actions=["read"],
+                     schema=_schema_v2(), contract_revision=2)              # 판 교체
+    reschemed = svc.materialization_fingerprint("rel_1")
+    assert reschemed != narrowed
+
+    svc.create_dataset("rel_1", "extra", _schema(), actor_id="u@x", allowed_actions=["read"])
+    assert svc.materialization_fingerprint("rel_1") != reschemed
+
+
+def test_materialization_fingerprint_is_stable_and_per_release(svc):
+    svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x", allowed_actions=["read"])
+    a = svc.materialization_fingerprint("rel_1")
+    assert a == svc.materialization_fingerprint("rel_1")     # 부작용 없음
+    assert a != svc.materialization_fingerprint("rel_2")     # 릴리스마다 다르다
+
+
+def test_materialization_fingerprint_ignores_creation_order(svc, monkeypatch, tmp_path):
+    """⚠️ 행 순서에 흔들리면 **같은 상태가 다른 지문**을 갖는다 — 그러면
+    「물질화가 바뀌었다」는 판정이 거짓 경보를 내고, 곧 아무도 그것을 믿지 않는다."""
+    svc.create_dataset("rel_1", "aaa", _schema(), actor_id="u@x", allowed_actions=["read"])
+    svc.create_dataset("rel_1", "zzz", _schema(), actor_id="u@x", allowed_actions=["create"])
+    forward = svc.materialization_fingerprint("rel_1")
+
+    #: 같은 상태를 **반대 순서로** 만든 다른 DB.
+    monkeypatch.setattr(svc._store, "db_path", str(tmp_path / "other.db"), raising=False)
+    monkeypatch.setattr(svc._store, "_ready", "", raising=False)
+    svc.create_dataset("rel_1", "zzz", _schema(), actor_id="u@x", allowed_actions=["create"])
+    svc.create_dataset("rel_1", "aaa", _schema(), actor_id="u@x", allowed_actions=["read"])
+    assert svc.materialization_fingerprint("rel_1") == forward
+
+
+# ── [2.1 보정] 유일성 실패를 드러낸다 ─────────────────────────────────────
+def test_preexisting_duplicates_are_reported_not_swallowed(monkeypatch, tmp_path):
+    """★ 인덱스가 **없는 채로 도는 것**과 **없다는 사실을 모르는 채 도는 것**은 다르다.
+
+    ⚠️ 후자에서는 중복이 계속 생겨도 아무도 모르고, `adopt_dataset` 이 「둘 중 하나」를
+      임의로 고르는 상태가 굳어진다."""
+    import sqlite3
+    db = tmp_path / "dup.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("""
+        CREATE TABLE app_datasets (
+            dataset_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
+            release_id TEXT NOT NULL, name TEXT NOT NULL, label TEXT NOT NULL DEFAULT '',
+            schema_json TEXT NOT NULL DEFAULT '{}', app_class TEXT NOT NULL DEFAULT '',
+            owner_dept_id TEXT NOT NULL DEFAULT '', scope_node_id TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT '', retired_at TEXT NOT NULL DEFAULT '',
+            app_id TEXT NOT NULL DEFAULT '', dataset_key TEXT NOT NULL DEFAULT '');
+        CREATE TABLE app_records (
+            record_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}', created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT '', updated_by TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT '', deleted_by TEXT NOT NULL DEFAULT '',
+            deleted_at TEXT NOT NULL DEFAULT '');
+        INSERT INTO app_datasets (dataset_id, release_id, name, app_id, dataset_key)
+             VALUES ('ds_1', 'rel_a', 'orders', 'app_o', 'ds_o'),
+                    ('ds_2', 'rel_b', 'orders', 'app_o', 'ds_o');
+    """)
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(app_data_service._store, "db_path", str(db), raising=False)
+    monkeypatch.setattr(app_data_service._store, "_ready", "", raising=False)
+    problems = app_data_service._store.integrity_problems()
+    assert problems, "중복이 있는데 유일성 실패가 보고되지 않았다"
+    assert any("idx_app_datasets_app_key" in p for p in problems), problems
+    #: 그리고 그 상태에서 승계는 **거부**된다 — 임의로 하나를 고르지 않는다.
+    with pytest.raises(AppDataError):
+        app_data_service.adopt_dataset("app_o", "ds_o", "rel_c")
+
+
+def test_duplicate_runtime_name_in_a_release_is_blocked_by_the_db(svc):
+    """응용 계층의 `clash` 검사를 **우회해도** DB 가 막는다 —
+    ⚠️ 워커가 둘이면 「없다」를 동시에 보고 둘 다 INSERT 한다."""
+    import sqlite3
+    a = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                           app_id="app_a", dataset_key="ds_a")
+    b = svc.create_dataset("rel_2", "orders", _schema(), actor_id="u@x",
+                           app_id="app_b", dataset_key="ds_b")
+    assert svc._store.integrity_problems() == []
+    with pytest.raises(sqlite3.IntegrityError):
+        svc._store.execute(
+            "INSERT INTO app_release_dataset_bindings (binding_id, release_id, dataset_id, "
+            "version_id, runtime_name, allowed_actions, contract_bound, created_at) "
+            "VALUES ('bind_dup','rel_1',?,'','orders','',0,'')", (b["dataset_id"],))
+    assert a["dataset_id"] != b["dataset_id"]
+
+
+def test_the_binding_name_is_what_the_app_calls(svc):
+    """★ 런타임 이름은 **결속에 봉인**된다 — 데이터셋 마스터의 `name` 이 아니다.
+
+    ⚠️ 마스터를 따라가게 두면, 이름을 고치는 경로가 하나라도 생기는 날 **이미 결속된
+      릴리스의 호출 이름이 함께 바뀐다.** 그 앱은 어제까지 되던 호출이 오늘 404 가 된다."""
+    ds = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                            app_id="app_o", dataset_key="ds_o", allowed_actions=["read"])
+    svc.bind_release("rel_2", ds["dataset_id"], allowed_actions=["read"],
+                     runtime_name="purchase_orders")
+    assert svc.find_dataset("rel_2", "purchase_orders")["dataset_id"] == ds["dataset_id"]
+    #: 마스터 이름으로는 그 릴리스에서 찾히지 않는다 — 결속이 정본이다.
+    assert svc.find_dataset("rel_2", "orders") is None
+    assert svc.find_dataset("rel_1", "orders")["dataset_id"] == ds["dataset_id"]
 
 
 # ── 마이그레이션 ──────────────────────────────────────────────────────────
@@ -232,6 +592,50 @@ def test_legacy_rows_are_linked_not_rewritten(monkeypatch, tmp_path):
     # 원본 열을 지우지 않았다 — 마이그레이션이 실패해도 되돌릴 수 있어야 한다.
     assert app_data_service._store.one(
         "SELECT release_id FROM app_datasets WHERE dataset_id='ds_old'")["release_id"] == "rel_old"
+
+
+def test_legacy_identity_report_separates_the_five_cases(svc):
+    """★★★ 「앱을 개정해도 데이터가 유지된다」는 **신규 계약 데이터셋에만** 참이다.
+
+    ⚠️⚠️ 이름이 같다는 이유로 자동 연결하지 않는다 — 서로 다른 앱이 `orders` 를 쓰는 것은
+      흔하고, 잘못 이으면 **남의 앱 레코드가 이 앱에 보인다.** 보고만 하고 고치지 않는다."""
+    #: ① 앱 식별자가 있는 것 — 이미 승계 가능
+    svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                       app_id="app_o", dataset_key="ds_o", allowed_actions=["read"])
+    #: ② 레거시인데 이름이 유일 — 앱을 특정할 수 있다
+    svc.create_dataset("rel_2", "invoices", _schema(), actor_id="u@x")
+    #: ③ 레거시이고 같은 이름이 여럿 — 후보가 여럿이라 모호하다
+    svc.create_dataset("rel_3", "notes", _schema(), actor_id="u@x")
+    svc.create_dataset("rel_4", "notes", _schema(), actor_id="u@x")
+    #: ④ 결속이 없는 고아
+    svc._store.execute(
+        "INSERT INTO app_datasets (dataset_id, tenant_id, release_id, name, dataset_key, "
+        "created_by, created_at, updated_at, retired_at) "
+        "VALUES ('ds_orphan','tenant_default','','stray','stray','u','','','')")
+
+    rep = svc.legacy_identity_report()
+    names = {k: {i["name"] for i in v["items"]} for k, v in rep.items()}
+    assert names["succeeded"] == {"orders"}
+    assert names["recoverable"] == {"invoices"}
+    assert names["ambiguous"] == {"notes"}
+    assert names["unbindable"] == {"stray"}
+    assert rep["ambiguous"]["count"] == 2
+    assert rep["quarantined"]["count"] == 0
+    #: 보고가 무엇도 고치지 않았다.
+    assert svc.find_dataset("rel_3", "notes")["dataset_id"] != \
+        svc.find_dataset("rel_4", "notes")["dataset_id"]
+
+
+def test_legacy_report_quarantines_duplicate_keys(svc):
+    svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                       app_id="app_o", dataset_key="ds_o")
+    svc._store.execute("DROP INDEX IF EXISTS idx_app_datasets_app_key")
+    svc._store.execute(
+        "INSERT INTO app_datasets (dataset_id, tenant_id, release_id, name, app_id, "
+        "dataset_key, created_by, created_at, updated_at, retired_at) "
+        "VALUES ('ds_dup','tenant_default','rel_2','orders','app_o','ds_o','u','','','')")
+    rep = svc.legacy_identity_report()
+    assert rep["quarantined"]["count"] == 2 and rep["succeeded"]["count"] == 0
 
 
 def test_migration_is_rerunnable(monkeypatch, tmp_path):
@@ -293,6 +697,9 @@ def client(monkeypatch, tmp_path):
     #:   그래도 계약이 `orders` 에 주지 않았으면 `orders` 는 못 쓴다.
     _mk("rel_wide", caps=["orders.read", "secrets.create", "secrets.update", "secrets.delete"])
     _mk("rel_legacy", caps=["orders.read", "orders.create", "orders.update", "orders.delete"])
+    #: 같은 앱의 두 판 — 서로 다른 스키마를 결속한다.
+    _mk("rel_v1", caps=["orders.read", "orders.create", "orders.update"])
+    _mk("rel_v2", caps=["orders.read", "orders.create", "orders.update"])
 
     monkeypatch.setattr(library_paths, "release_dir", lambda rid: str(lib / str(rid)),
                         raising=False)
@@ -360,6 +767,44 @@ def test_contract_beats_the_global_union(client):
     #: 읽기는 여전히 된다 — 「전부 거부」로 초록이 되는 시험이 아니다.
     assert client.get(f"{R}/datasets/orders/records/{rec['record_id']}",
                       headers=h).status_code == 200
+
+
+def test_runtime_writes_use_the_bound_schema_not_the_master(client):
+    """★★★ **2.1 보정 ①의 종단 회귀.**
+
+    ⚠️ 서비스 계층만 시험하면 「라우트가 릴리스를 안 넘긴다」를 못 잡는다. 그 상태에서는
+      v1 과 v2 가 서로 다른 판을 가리켜도 **둘 다 마지막에 저장된 스키마 하나**로 검증된다.
+      실제 배선을 타지 않은 초록은 거짓이다."""
+    ds = app_data_service.create_dataset(
+        "rel_v1", "orders", _schema(), actor_id="u@x", app_id="app_o", dataset_key="ds_o",
+        allowed_actions=["read", "create", "update"], contract_revision=1)
+    app_data_service.adopt_dataset(
+        "app_o", "ds_o", "rel_v2", allowed_actions=["read", "create", "update"],
+        schema={"fields": [{"name": "qty", "type": "number"},
+                           {"name": "memo", "type": "string"}]}, contract_revision=2)
+
+    h1, h2 = _h(client, "rel_v1"), _h(client, "rel_v2")
+    body = {"payload": {"qty": 1, "memo": "메모"}}
+    #: v2 는 `memo` 를 안다.
+    r2 = client.post(f"{R}/datasets/orders/records", headers=h2, json=body)
+    assert r2.status_code == 200, r2.text
+    #: v1 은 모른다 — 같은 데이터셋인데 판이 다르다.
+    assert client.post(f"{R}/datasets/orders/records", headers=h1, json=body).status_code == 400
+
+    #: 수정도 같은 규칙이다.
+    rid = r2.json()["data"]["record_id"]
+    assert client.put(f"{R}/datasets/orders/records/{rid}", headers=h1,
+                      json={"payload": {"memo": "바꿈"}}).status_code == 400
+    assert client.put(f"{R}/datasets/orders/records/{rid}", headers=h2,
+                      json={"payload": {"memo": "바꿈"}}).status_code == 200
+
+    #: 스키마 조회도 판을 따라간다.
+    f1 = client.get(f"{R}/datasets/orders/schema", headers=h1).json()["data"]
+    f2 = client.get(f"{R}/datasets/orders/schema", headers=h2).json()["data"]
+    assert {f["name"] for f in f1["schema"]["fields"]} == {"qty"}
+    assert {f["name"] for f in f2["schema"]["fields"]} == {"qty", "memo"}
+    #: ★ 그리고 레코드는 하나의 데이터셋에 쌓인다 — 판이 갈려도 데이터는 승계된다.
+    assert app_data_service.count_records(ds["dataset_id"]) == 1
 
 
 def test_create_and_update_are_separate_grants(client):

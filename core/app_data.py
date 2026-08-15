@@ -18,6 +18,7 @@ LLM 0콜.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
@@ -91,6 +92,28 @@ def _now() -> str:
 
 def _nid(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def _load_schema(raw: Any) -> Dict[str, Any]:
+    """저장된 스키마를 읽는다.
+
+    ⚠️ 못 읽으면 **빈 것으로 두지 않는다** — 빈 스키마는 «필드가 없는 앱» 으로 읽히고,
+      그 상태에서 쓰기를 시도하면 전부 「선언되지 않은 필드」로 거부된다. 원인이 파싱
+      실패라는 것을 드러낸다."""
+    try:
+        return json.loads(raw or "{}")
+    except Exception:
+        return {"fields": [], "unreadable": True}
+
+
+def schema_fingerprint(schema: Any) -> str:
+    """정규화된 스키마의 지문(sha256 앞 16자).
+
+    ★ 계약 판이 **바뀌지 않았음**을 증명하는 값이다. 키 순서에 흔들리면 같은 내용이 다른
+      지문을 갖고, 그러면 「판이 바뀌었다」는 판정이 거짓이 되어 아무도 믿지 않게 된다."""
+    norm = normalize_schema(schema)
+    body = json.dumps(norm, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
 
 
 # ── 스키마 ────────────────────────────────────────────────────────────────
@@ -255,33 +278,44 @@ class AppDataService:
             raise AppDataError("데이터셋 생성에는 주체(actor_id)가 필요합니다.")
 
         norm = normalize_schema(schema)
-        if self.find_dataset(release_id, name):
-            raise AppDataError(f"같은 이름의 데이터셋이 이미 있습니다: {name}")
-        n = self._store.scalar(
-            "SELECT COUNT(*) FROM app_release_dataset_bindings b "
-            "  JOIN app_datasets d ON d.dataset_id = b.dataset_id "
-            " WHERE b.release_id=? AND d.retired_at=''", (release_id,)) or 0
-        if n >= MAX_DATASETS_PER_RELEASE:
-            raise AppDataError(f"앱당 데이터셋은 최대 {MAX_DATASETS_PER_RELEASE}개입니다.")
-
+        app_id = (app_id or "").strip()
+        dataset_key = (dataset_key or name).strip()
         did = _nid("ds")
         ts = _now()
-        self._store.execute(
-            "INSERT INTO app_datasets (dataset_id, tenant_id, release_id, name, label, "
-            "schema_json, app_class, owner_dept_id, scope_node_id, created_by, created_at, "
-            "updated_at, retired_at, app_id, dataset_key) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'',?,?)",
-            (did, tenant_id, release_id, name, (label or name).strip(),
-             json.dumps(norm, ensure_ascii=False), app_class, owner_dept_id, scope_node_id,
-             actor_id, ts, ts, (app_id or "").strip(), (dataset_key or name).strip()))
-        self.bind_release(release_id, did, allowed_actions=allowed_actions,
-                          schema=norm, contract_revision=contract_revision)
+
+        #: ★★★ 생성·판·결속·허용행동을 **하나의 트랜잭션**으로. 나뉘면 결속에 실패했을 때
+        #:   아무 릴리스도 가리키지 않는 **고아 데이터셋**이 남고, 그것은 이름으로 찾히지
+        #:   않으므로 다음 요청이 **또 만든다.**
+        with self._store.transaction() as conn:
+            if self._store.row(conn,
+                               "SELECT 1 FROM app_release_dataset_bindings "
+                               " WHERE release_id=? AND runtime_name=?", (release_id, name)):
+                raise AppDataError(f"같은 이름의 데이터셋이 이미 있습니다: {name}")
+            n = len(self._store.rows(
+                conn,
+                "SELECT 1 FROM app_release_dataset_bindings b "
+                "  JOIN app_datasets d ON d.dataset_id = b.dataset_id "
+                " WHERE b.release_id=? AND d.retired_at=''", (release_id,)))
+            if n >= MAX_DATASETS_PER_RELEASE:
+                raise AppDataError(f"앱당 데이터셋은 최대 {MAX_DATASETS_PER_RELEASE}개입니다.")
+            conn.execute(
+                "INSERT INTO app_datasets (dataset_id, tenant_id, release_id, name, label, "
+                "schema_json, app_class, owner_dept_id, scope_node_id, created_by, created_at, "
+                "updated_at, retired_at, app_id, dataset_key) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'',?,?)",
+                (did, tenant_id, release_id, name, (label or name).strip(),
+                 json.dumps(norm, ensure_ascii=False), app_class, owner_dept_id, scope_node_id,
+                 actor_id, ts, ts, app_id, dataset_key))
+            self._bind_in_tx(conn, release_id, did, runtime_name=name,
+                             allowed_actions=allowed_actions, schema=norm,
+                             contract_revision=contract_revision)
         return self.get_dataset(did)  # type: ignore[return-value]
 
     # 릴리스 결속 ------------------------------------------------------
     def bind_release(self, release_id: str, dataset_id: str, *,
                      allowed_actions: Optional[Sequence[str]] = None,
-                     schema: Any = None, contract_revision: int = 0) -> Dict[str, Any]:
+                     schema: Any = None, contract_revision: int = 0,
+                     runtime_name: str = "") -> Dict[str, Any]:
         """이 릴리스가 이 데이터셋의 **어느 판을 어떤 권한으로** 쓰는지 적는다.
 
         ★ 같은 (릴리스, 데이터셋) 을 다시 결속하면 덮어쓴다 — 계약 개정으로
@@ -291,44 +325,89 @@ class AppDataService:
         dataset_id = (dataset_id or "").strip()
         if not release_id or not dataset_id:
             raise AppDataError("결속에는 release_id 와 dataset_id 가 필요합니다.")
-        bound = allowed_actions is not None
-        acts = normalize_actions(allowed_actions) if bound else ()
-        version_id = ""
-        if schema is not None:
-            version_id = self._ensure_version(dataset_id, schema, contract_revision)
-        ts = _now()
-        prev = self.binding_for(release_id, dataset_id)
-        if prev:
-            self._store.execute(
-                "UPDATE app_release_dataset_bindings SET allowed_actions=?, contract_bound=?, "
-                "version_id=? WHERE release_id=? AND dataset_id=?",
-                (",".join(acts), 1 if bound else 0, version_id or prev.get("version_id", ""),
-                 release_id, dataset_id))
-        else:
-            self._store.execute(
-                "INSERT INTO app_release_dataset_bindings (binding_id, release_id, dataset_id, "
-                "version_id, allowed_actions, contract_bound, created_at) VALUES (?,?,?,?,?,?,?)",
-                (_nid("bind"), release_id, dataset_id, version_id, ",".join(acts),
-                 1 if bound else 0, ts))
+        with self._store.transaction() as conn:
+            self._bind_in_tx(conn, release_id, dataset_id, runtime_name=runtime_name,
+                             allowed_actions=allowed_actions, schema=schema,
+                             contract_revision=contract_revision)
         return self.binding_for(release_id, dataset_id)  # type: ignore[return-value]
 
-    def _ensure_version(self, dataset_id: str, schema: Any, contract_revision: int) -> str:
-        """계약 판별 스키마를 남긴다. 같은 (데이터셋, revision) 은 하나다."""
+    def _bind_in_tx(self, conn, release_id: str, dataset_id: str, *, runtime_name: str,
+                    allowed_actions: Optional[Sequence[str]], schema: Any,
+                    contract_revision: int) -> None:
+        """결속의 실체. **트랜잭션 안에서만** 부른다."""
+        bound = allowed_actions is not None
+        acts = normalize_actions(allowed_actions) if bound else ()
+        prev = self._store.row(
+            conn, "SELECT * FROM app_release_dataset_bindings WHERE release_id=? AND dataset_id=?",
+            (release_id, dataset_id))
+        if not runtime_name:
+            #: 이름은 결속에 봉인된다. 기존 결속이 있으면 그 이름을 지키고, 없으면
+            #: 데이터셋 마스터에서 한 번 가져온다.
+            runtime_name = str((prev or {}).get("runtime_name") or "")
+        if not runtime_name:
+            master = self._store.row(
+                conn, "SELECT name FROM app_datasets WHERE dataset_id=?", (dataset_id,))
+            if not master:
+                raise AppDataError("결속할 데이터셋이 없습니다.")
+            runtime_name = str(master["name"])
+
+        version_id = str((prev or {}).get("version_id") or "")
+        if schema is not None:
+            version_id = self._ensure_version_in_tx(conn, dataset_id, schema, contract_revision)
+
+        clash = self._store.row(
+            conn, "SELECT dataset_id FROM app_release_dataset_bindings "
+                  " WHERE release_id=? AND runtime_name=? AND dataset_id<>?",
+            (release_id, runtime_name, dataset_id))
+        if clash:
+            raise AppDataError(
+                f"이 릴리스에는 이미 «{runtime_name}» 이라는 다른 데이터셋이 결속돼 있습니다 "
+                f"({clash['dataset_id']}) — 앱은 이름으로만 부르므로 둘이면 답할 수 없습니다.")
+
+        if prev:
+            conn.execute(
+                "UPDATE app_release_dataset_bindings SET allowed_actions=?, contract_bound=?, "
+                "version_id=?, runtime_name=? WHERE release_id=? AND dataset_id=?",
+                (",".join(acts), 1 if bound else 0, version_id, runtime_name,
+                 release_id, dataset_id))
+        else:
+            conn.execute(
+                "INSERT INTO app_release_dataset_bindings (binding_id, release_id, dataset_id, "
+                "version_id, runtime_name, allowed_actions, contract_bound, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (_nid("bind"), release_id, dataset_id, version_id, runtime_name,
+                 ",".join(acts), 1 if bound else 0, _now()))
+
+    def _ensure_version_in_tx(self, conn, dataset_id: str, schema: Any,
+                              contract_revision: int) -> str:
+        """계약 판을 남긴다. **판은 불변이다.**
+
+        ★★★ 같은 `(dataset_id, contract_revision)` 에 **다른 스키마**가 들어오면 거부한다.
+          덮어쓰게 두면 **이미 승인된 revision 의 의미가 나중에 바뀐다** — 승인 원장은
+          「revision 3 을 승인했다」고 말하는데 revision 3 의 내용은 그 뒤에 달라져 있고,
+          3단계에서 봉인할 계약 지문의 역사도 함께 변조된다.
+
+        · 같은 정규화 스키마 → **멱등 성공**(재실행 가능해야 한다)
+        · 다른 스키마       → **충돌 거부**. 바꾸려면 새 revision 을 발급한다."""
         norm = normalize_schema(schema)
-        row = self._store.one(
-            "SELECT version_id FROM app_dataset_versions WHERE dataset_id=? AND contract_revision=?",
+        fp = schema_fingerprint(norm)
+        row = self._store.row(
+            conn, "SELECT version_id, schema_fingerprint FROM app_dataset_versions "
+                  " WHERE dataset_id=? AND contract_revision=?",
             (dataset_id, int(contract_revision)))
         if row:
-            self._store.execute(
-                "UPDATE app_dataset_versions SET schema_json=? WHERE version_id=?",
-                (json.dumps(norm, ensure_ascii=False), row["version_id"]))
+            if str(row["schema_fingerprint"] or "") != fp:
+                raise AppDataError(
+                    f"계약 revision {contract_revision} 의 스키마가 이미 다른 내용으로 "
+                    f"확정돼 있습니다(기록 {row['schema_fingerprint'] or '(지문 없음)'} · "
+                    f"요청 {fp}) — 승인된 판은 바뀌지 않습니다. 새 revision 을 발급하십시오.")
             return str(row["version_id"])
         vid = _nid("dsv")
-        self._store.execute(
+        conn.execute(
             "INSERT INTO app_dataset_versions (version_id, dataset_id, contract_revision, "
-            "schema_json, created_at) VALUES (?,?,?,?,?)",
+            "schema_json, schema_fingerprint, created_at) VALUES (?,?,?,?,?,?)",
             (vid, dataset_id, int(contract_revision),
-             json.dumps(norm, ensure_ascii=False), _now()))
+             json.dumps(norm, ensure_ascii=False), fp, _now()))
         return vid
 
     def binding_for(self, release_id: str, dataset_id: str) -> Optional[Dict[str, Any]]:
@@ -359,17 +438,116 @@ class AppDataService:
             return None
         return b["allowed_actions"]
 
-    def contract_coverage(self, release_id: str = "") -> Dict[str, int]:
+    def contract_coverage(self, release_id: str = "",
+                          declared: Optional[Sequence[str]] = None) -> Dict[str, Any]:
         """계약이 **실제로 몇 개의 데이터셋을 잠그고 있는가.**
 
-        ★ 이 숫자를 셀 수 없으면 「계약을 도입했다」와 「계약이 적용되고 있다」를 구분할 수
-          없다. 적용률 0% 인 채로 초록인 상태가 가장 위험하다."""
-        sql = ("SELECT contract_bound AS b, COUNT(*) AS n FROM app_release_dataset_bindings"
-               + (" WHERE release_id=?" if release_id else "") + " GROUP BY contract_bound")
-        rows = self._store.query(sql, ((release_id.strip(),) if release_id else ()))
-        bound = sum(int(r["n"]) for r in rows if int(r["b"] or 0))
-        legacy = sum(int(r["n"]) for r in rows if not int(r["b"] or 0))
-        return {"bound": bound, "legacy": legacy, "total": bound + legacy}
+        ★★★ 분모는 **결속 행 수가 아니라 «선언»** 이다. 결속만 세면 계약이 열 개를
+          선언했는데 하나만 물질화된 상태가 **「1/1 = 100%」** 로 보인다 — 가장 위험한
+          거짓 초록이다. 그래서 분모를 `선언 → 물질화 → 결속` 셋으로 나눠 돌려준다.
+
+        `declared` 는 계약이 선언한 데이터셋 이름들이다(계약 저장은 4단계이므로 지금은
+        호출자가 넘긴다). 넘기지 않으면 `declared`·`missing` 은 `None` 이다 —
+        ⚠️ 모르는 값을 0 으로 적지 않는다. 0 은 「선언이 없다」는 **사실**이고, 그것은
+          「선언을 모른다」와 다르다."""
+        rel = (release_id or "").strip()
+        rows = self._store.query(
+            "SELECT contract_bound AS b, runtime_name AS n FROM app_release_dataset_bindings"
+            + (" WHERE release_id=?" if rel else ""), ((rel,) if rel else ()))
+        bound = sum(1 for r in rows if int(r["b"] or 0))
+        legacy = sum(1 for r in rows if not int(r["b"] or 0))
+        out: Dict[str, Any] = {
+            "materialized": bound + legacy,   # 결속된 데이터셋(= 실제로 존재하는 것)
+            "bound": bound,                   # 그중 계약이 행동을 정한 것
+            "legacy": legacy,                 # 계약 이전
+            "total": bound + legacy,          # 하위호환 이름
+            "declared": None, "missing": None, "undeclared": None,
+        }
+        if declared is not None:
+            want = {str(d).strip() for d in declared if str(d).strip()}
+            have = {str(r["n"] or "") for r in rows}
+            out["declared"] = len(want)
+            out["missing"] = sorted(want - have)      # 선언됐는데 물질화되지 않은 것
+            out["undeclared"] = sorted(have - want)   # 계약에 없는데 결속돼 있는 것
+        return out
+
+    def legacy_identity_report(self) -> Dict[str, Any]:
+        """★★★ **레거시 데이터셋의 앱 식별자를 어디까지 복원할 수 있는가.**
+
+        마이그레이션은 `dataset_key=name` 만 채우고 `app_id` 는 **비워 둔다.** 그래서
+        「앱을 개정해도 데이터가 유지된다」는 **신규 계약 데이터셋에만** 참이다. 기존 운영
+        데이터는 아직 아니다 — 그 사실을 숫자로 드러내지 않으면 4단계에서 「다 됐다」고
+        읽게 된다.
+
+        ⚠️⚠️ **이름이 같다는 이유로 자동 연결하지 않는다.** 서로 다른 앱이 `orders` 라는
+          이름을 쓰는 것은 흔한 일이고, 잘못 이으면 **남의 앱 레코드가 이 앱에 보인다.**
+          그래서 이 함수는 **보고만 하고 아무것도 고치지 않는다.**
+
+        돌려주는 다섯 갈래:
+
+            recoverable   릴리스가 하나뿐이라 앱을 특정할 수 있다
+            ambiguous     같은 이름이 여러 릴리스에 있어 후보가 여럿이다
+            unbindable    결속이 없다(어느 릴리스도 가리키지 않는 고아)
+            succeeded     이미 `app_id` 가 있다(계약 경로로 만들어진 것)
+            quarantined   같은 (app_id, dataset_key) 가 둘 이상 — 승계 불가
+        """
+        rows = self._store.query(
+            "SELECT d.dataset_id, d.name, d.app_id, d.dataset_key, "
+            "       (SELECT COUNT(*) FROM app_release_dataset_bindings b "
+            "          WHERE b.dataset_id = d.dataset_id) AS binds "
+            "  FROM app_datasets d WHERE d.retired_at=''")
+        by_key: Dict[Tuple[str, str], List[str]] = {}
+        for r in rows:
+            if str(r["app_id"] or ""):
+                by_key.setdefault((str(r["app_id"]), str(r["dataset_key"] or "")), []).append(
+                    str(r["dataset_id"]))
+        dup = {k for k, v in by_key.items() if len(v) > 1}
+
+        out: Dict[str, List[Dict[str, Any]]] = {
+            "recoverable": [], "ambiguous": [], "unbindable": [],
+            "succeeded": [], "quarantined": []}
+        #: 같은 이름을 쓰는 데이터셋이 여럿이면 이름만으로는 앱을 특정할 수 없다.
+        name_count: Dict[str, int] = {}
+        for r in rows:
+            if not str(r["app_id"] or ""):
+                name_count[str(r["name"])] = name_count.get(str(r["name"]), 0) + 1
+
+        for r in rows:
+            item = {"dataset_id": str(r["dataset_id"]), "name": str(r["name"]),
+                    "dataset_key": str(r["dataset_key"] or "")}
+            app_id = str(r["app_id"] or "")
+            if app_id:
+                bucket = "quarantined" if (app_id, item["dataset_key"]) in dup else "succeeded"
+            elif not int(r["binds"] or 0):
+                bucket = "unbindable"
+            elif name_count.get(item["name"], 0) > 1:
+                bucket = "ambiguous"
+            else:
+                bucket = "recoverable"
+            out[bucket].append(item)
+        return {k: {"count": len(v), "items": v} for k, v in out.items()}
+
+    def materialization_fingerprint(self, release_id: str) -> str:
+        """★★★ **DB 결속 상태의 지문** — 계약 원문의 지문과 **다른 것**이다.
+
+        계약서가 승인된 것과 DB 가 그대로 물질화된 것은 별개의 사실이다. 원문 지문만
+        봉인하면 **「계약서는 승인됐지만 결속이 다른 상태」**를 잡을 수 없다 — 그때 앱은
+        승인받은 계약과 다른 권한·다른 스키마로 돈다.
+
+        들어가는 것: 각 결속의 `(런타임 이름, 데이터셋 키, 스키마 지문, 허용 행동)` 정렬본.
+        ⚠️ 라벨·생성시각 같은 설명값은 넣지 않는다(§의미 지문과 같은 이유)."""
+        rows = self._store.query(
+            "SELECT b.runtime_name AS n, b.allowed_actions AS a, b.contract_bound AS c, "
+            "       d.dataset_key AS k, COALESCE(v.schema_fingerprint,'') AS f "
+            "  FROM app_release_dataset_bindings b "
+            "  JOIN app_datasets d ON d.dataset_id = b.dataset_id "
+            "  LEFT JOIN app_dataset_versions v ON v.version_id = b.version_id "
+            " WHERE b.release_id=?", ((release_id or "").strip(),))
+        material = sorted(
+            [str(r["n"] or ""), str(r["k"] or ""), str(r["f"] or ""),
+             str(r["a"] or ""), "1" if int(r["c"] or 0) else "0"] for r in rows)
+        body = json.dumps(material, ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
 
     def adopt_dataset(self, app_id: str, dataset_key: str, release_id: str, *,
                       allowed_actions: Optional[Sequence[str]] = None,
@@ -386,15 +564,28 @@ class AppDataService:
         dataset_key = (dataset_key or "").strip()
         if not app_id or not dataset_key:
             return None
-        row = self._store.one(
-            "SELECT * FROM app_datasets WHERE app_id=? AND dataset_key=? AND retired_at='' "
-            "ORDER BY created_at ASC LIMIT 1", (app_id, dataset_key))
-        if not row:
-            return None
-        self.bind_release(release_id, str(row["dataset_id"]),
-                          allowed_actions=allowed_actions, schema=schema,
-                          contract_revision=contract_revision)
-        return self.get_dataset(str(row["dataset_id"]))
+        with self._store.transaction() as conn:
+            rows = self._store.rows(
+                conn, "SELECT dataset_id, name FROM app_datasets "
+                      " WHERE app_id=? AND dataset_key=? AND retired_at=''",
+                (app_id, dataset_key))
+            if not rows:
+                return None
+            if len(rows) > 1:
+                #: ★★★ **첫 행을 고르지 않는다.** 그 선택은 임의이고 조용하며, 고른 쪽이
+                #:   틀렸다면 현업 레코드가 통째로 다른 데이터셋에 붙는다.
+                #:   유일성 인덱스가 있으면 여기 오지 않는다 — 오면 그 인덱스가 걸리지
+                #:   못한 상태라는 뜻이고, 그 사실이 드러나야 한다.
+                raise AppDataError(
+                    f"앱 {app_id} 에 «{dataset_key}» 가 {len(rows)}개 있습니다 "
+                    f"({[r['dataset_id'] for r in rows]}) — 어느 것을 이어받을지 "
+                    f"고를 수 없습니다. 중복을 먼저 정리해야 합니다.")
+            did = str(rows[0]["dataset_id"])
+            self._bind_in_tx(conn, (release_id or "").strip(), did,
+                             runtime_name=str(rows[0]["name"]),
+                             allowed_actions=allowed_actions, schema=schema,
+                             contract_revision=contract_revision)
+        return self.get_dataset(did)
 
     def get_dataset(self, dataset_id: str) -> Optional[Dict[str, Any]]:
         row = self._store.one("SELECT * FROM app_datasets WHERE dataset_id=?", (dataset_id,))
@@ -406,15 +597,35 @@ class AppDataService:
         `release_id` 는 호스트가 붙인다 — 앱이 자기 릴리스를 말하게 하면 남의 앱 데이터를
         요청할 수 있다.
 
-        ★★★ [I-4 2단계] 이제 **결속(binding)을 지나** 찾는다. 종전처럼
+        ★★★ [I-4 2단계] **결속(binding)을 지나** 찾는다. 종전처럼
         `app_datasets.release_id` 를 직접 보면 앱을 개정한 순간 같은 이름의 데이터셋을
-        못 찾고 새로 만들어, **현업이 쌓은 레코드가 승계되지 않는다.**"""
+        못 찾고 새로 만들어, **현업이 쌓은 레코드가 승계되지 않는다.**
+
+        ★★★ [2.1 보정] 돌려주는 `schema` 는 **이 릴리스가 결속한 판**이다.
+        ⚠️ 데이터셋 마스터의 `schema_json` 을 그대로 주면, 릴리스 v1·v2 가 서로 다른 판을
+          가리켜도 **둘 다 마지막에 저장된 스키마 하나**로 검증된다. 즉 판을 기록만 하고
+          쓰지 않는 상태였고, 그것은 판이 없는 것과 같다."""
         row = self._store.one(
-            "SELECT d.* FROM app_datasets d "
+            "SELECT d.*, b.version_id AS _bound_version_id, b.runtime_name AS _runtime_name "
+            "  FROM app_datasets d "
             "  JOIN app_release_dataset_bindings b ON b.dataset_id = d.dataset_id "
-            " WHERE b.release_id=? AND d.name=?",
+            " WHERE b.release_id=? AND b.runtime_name=?",
             ((release_id or "").strip(), (name or "").strip()))
-        return self._dataset_view(row) if row else None
+        if not row:
+            return None
+        vid = str(row.pop("_bound_version_id", "") or "")
+        row.pop("_runtime_name", None)
+        out = self._dataset_view(row)
+        out["bound_version_id"] = vid
+        if vid:
+            ver = self._store.one(
+                "SELECT schema_json, contract_revision, schema_fingerprint "
+                "  FROM app_dataset_versions WHERE version_id=?", (vid,))
+            if ver:
+                out["schema"] = _load_schema(ver["schema_json"])
+                out["contract_revision"] = int(ver["contract_revision"] or 0)
+                out["schema_fingerprint"] = str(ver["schema_fingerprint"] or "")
+        return out
 
     def list_datasets(self, release_id: str = "", include_retired: bool = False
                       ) -> List[Dict[str, Any]]:
@@ -442,6 +653,18 @@ class AppDataService:
             raise AppDataError("데이터셋을 찾을 수 없습니다.")
         if not (actor_id or "").strip():
             raise AppDataError("스키마 변경에는 주체(actor_id)가 필요합니다.")
+        #: ★★★ [2.1 보정] **계약이 정한 데이터셋은 여기서 바꾸지 않는다.**
+        #:
+        #: ⚠️ 관리 API 의 전역 스키마 변경과 릴리스별 계약 판은 **다른 경로**다. 둘을
+        #:   섞으면 「승인된 계약 revision 의 내용이 콘솔에서 바뀌는」 상태가 되고,
+        #:   승인 원장은 그 변경을 모른다. 계약을 고치려면 계약을 개정해야 한다.
+        bound = self._store.scalar(
+            "SELECT COUNT(*) FROM app_release_dataset_bindings "
+            " WHERE dataset_id=? AND contract_bound=1", (dataset_id,)) or 0
+        if bound:
+            raise AppDataError(
+                f"이 데이터셋은 계약이 정합니다(결속 {bound}건) — 콘솔에서 스키마를 바꿀 수 "
+                f"없습니다. 계약을 개정하고 새 revision 으로 결속하십시오.")
         norm = normalize_schema(schema)
         before = {f["name"] for f in ds["schema"]["fields"]}
         after = {f["name"] for f in norm["fields"]}
@@ -470,8 +693,14 @@ class AppDataService:
         return self.get_dataset(dataset_id)  # type: ignore[return-value]
 
     # 레코드 -----------------------------------------------------------
-    def create_record(self, dataset_id: str, payload: Any, *, actor_id: str) -> Dict[str, Any]:
-        ds = self._require_active(dataset_id)
+    def create_record(self, dataset_id: str, payload: Any, *, actor_id: str,
+                      release_id: str = "") -> Dict[str, Any]:
+        """★★★ [2.1 보정] `release_id` 를 주면 **그 릴리스가 결속한 판**으로 검증한다.
+
+        ⚠️ 주지 않으면 데이터셋 마스터 스키마를 쓴다(콘솔·관리 경로). 런타임은 **반드시**
+          넘긴다 — 넘기지 않으면 v1 과 v2 가 서로 다른 판을 가리켜도 둘 다 마지막에
+          저장된 스키마 하나로 검증되고, 판을 기록만 하고 쓰지 않는 상태가 된다."""
+        ds = self._require_active(dataset_id, release_id=release_id)
         if not (actor_id or "").strip():
             raise AppDataError("레코드 생성에는 주체(actor_id)가 필요합니다.")
         clean = validate_payload(ds["schema"], payload)
@@ -518,7 +747,9 @@ class AppDataService:
             f"LIMIT ? OFFSET ?", tuple(params) + (limit, offset))
         return [self._record_view(r) for r in rows], int(total)
 
-    def update_record(self, record_id: str, payload: Any, *, actor_id: str) -> Dict[str, Any]:
+    def update_record(self, record_id: str, payload: Any, *, actor_id: str,
+                      release_id: str = "") -> Dict[str, Any]:
+        """`release_id` 의 뜻은 `create_record` 와 같다 — 결속된 판으로 검증한다."""
         row = self._store.one("SELECT * FROM app_records WHERE record_id=?", (record_id,))
         if not row:
             raise AppDataError("레코드를 찾을 수 없습니다.")
@@ -526,7 +757,7 @@ class AppDataService:
             raise AppDataError("삭제된 레코드는 수정할 수 없습니다.")
         if not (actor_id or "").strip():
             raise AppDataError("레코드 수정에는 주체(actor_id)가 필요합니다.")
-        ds = self._require_active(row["dataset_id"])
+        ds = self._require_active(row["dataset_id"], release_id=release_id)
         current = json.loads(row["payload_json"] or "{}")
         patch = validate_payload(ds["schema"], payload, partial=True)
         current.update(patch)
@@ -559,24 +790,34 @@ class AppDataService:
             (dataset_id,)) or 0)
 
     # 내부 -------------------------------------------------------------
-    def _require_active(self, dataset_id: str) -> Dict[str, Any]:
+    def _require_active(self, dataset_id: str, *, release_id: str = "") -> Dict[str, Any]:
+        """살아 있는 데이터셋 + **이 릴리스가 쓰는 스키마 판**.
+
+        ★ 판 해석을 여기 한 곳에 둔다. 호출부가 스키마를 골라 넘기게 하면 언젠가 한
+          호출부가 «마스터» 를 넘기고, 그 경로만 계약 밖 필드를 받게 된다."""
         ds = self.get_dataset(dataset_id)
         if not ds:
             raise AppDataError("데이터셋을 찾을 수 없습니다.")
         if ds["retired_at"]:
             raise AppDataError("폐지된 데이터셋에는 쓸 수 없습니다.")
+        rel = (release_id or "").strip()
+        if rel:
+            b = self.binding_for(rel, dataset_id)
+            vid = str((b or {}).get("version_id") or "")
+            if vid:
+                ver = self._store.one(
+                    "SELECT schema_json, contract_revision, schema_fingerprint "
+                    "  FROM app_dataset_versions WHERE version_id=?", (vid,))
+                if ver:
+                    ds["schema"] = _load_schema(ver["schema_json"])
+                    ds["contract_revision"] = int(ver["contract_revision"] or 0)
+                    ds["schema_fingerprint"] = str(ver["schema_fingerprint"] or "")
         return ds
 
     @staticmethod
     def _dataset_view(row: Dict[str, Any]) -> Dict[str, Any]:
         out = dict(row)
-        try:
-            out["schema"] = json.loads(out.pop("schema_json", "") or "{}")
-        except Exception:
-            # 스키마를 못 읽으면 **빈 것으로 두지 않는다** — 빈 스키마는 «필드가 없는 앱» 으로
-            # 읽히고, 그 상태에서 쓰기를 시도하면 전부 「선언되지 않은 필드」로 거부된다.
-            # 원인이 파싱 실패라는 것을 드러낸다.
-            out["schema"] = {"fields": [], "unreadable": True}
+        out["schema"] = _load_schema(out.pop("schema_json", ""))
         return out
 
     @staticmethod
