@@ -31,7 +31,7 @@
 
 LLM 0콜.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -39,7 +39,7 @@ from pydantic import BaseModel
 from api.deps import Principal, current_principal, viewing_context, visibility_block_reason
 from core import app_policy, app_proof, host_runtime_sdk as sdk, host_runtime_wire as wire
 from core.app_capability_token import AppTokenError, app_capability_tokens
-from core.app_data import AppDataError, app_data_service
+from core.app_data import AppDataError, AppDataIntegrityError, app_data_service
 
 router = APIRouter(prefix="/api/v1/appdata/runtime")
 
@@ -198,11 +198,23 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str,
 
 
 def _dataset(proof: Dict[str, Any], name: str) -> Dict[str, Any]:
-    """데이터셋 «이름» → 행. **릴리스는 증명에서 나온다 — 요청이 말하지 않는다.**"""
-    ds = app_data_service.find_dataset(str(proof.get("release_id", "") or ""), str(name or ""))
+    """데이터셋 «이름» → 행. **릴리스는 증명에서 나온다 — 요청이 말하지 않는다.**
+
+    ★★★ [2.1b] 결속·판 판독 실패는 `503` 이다. ⚠️ `404`(없다)나 `400`(입력이 틀렸다)로
+      접으면 **서버 상태 이상이 사용자 실수처럼 보이고**, 깨진 결속은 아무도 모른 채 남는다."""
+    rel = str(proof.get("release_id", "") or "")
+    try:
+        ds = app_data_service.find_dataset(rel, str(name or ""))
+    except AppDataIntegrityError as e:
+        raise _fail(sdk.ERR_UNAVAILABLE, audit_reason=f"무결성: {str(e)[:100]}", target=rel)
     if not ds:
         raise _fail(sdk.ERR_NOT_FOUND)
     return ds
+
+
+def _fields_of(ds: Dict[str, Any]) -> Tuple[str, ...]:
+    """이 릴리스의 판이 아는 필드 — 응답 투영에 쓴다."""
+    return wire.schema_field_names(ds.get("schema"))
 
 
 def _assert_active(ds: Dict[str, Any]) -> None:
@@ -408,7 +420,8 @@ async def list_records(name: str, request: Request, limit: int = Query(50), offs
     #: ★ 총계를 함께 준다 — 화면이 `len(rows)` 를 «전부» 로 읽으면 상한에 걸린 순간
     #:   사용자는 「우리 데이터는 N건」으로 믿는다.
     return {"status": "success", "data": {
-        "records": [wire.project_record(r) for r in rows], "total": int(total)}}
+        "records": [wire.project_record(r, _fields_of(ds)) for r in rows],
+        "total": int(total)}}
 
 
 @router.get("/datasets/{name}/records/{record_id}")
@@ -421,7 +434,7 @@ async def get_record(name: str, record_id: str, request: Request,
     _assert_contract_action(proof, ds, "read", p=p, path="GET /records/{id}")
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
-    return {"status": "success", "data": wire.project_record(rec)}
+    return {"status": "success", "data": wire.project_record(rec, _fields_of(ds))}
 
 
 @router.post("/datasets/{name}/records")
@@ -441,10 +454,14 @@ async def create_record(name: str, req: RecordWrite, request: Request,
             ds["dataset_id"], sdk.sanitize_request(req.payload), actor_id=actor,
             #: ★ 이 릴리스가 결속한 스키마 판으로 검증한다 — 마스터가 아니다.
             release_id=str(proof.get("release_id", "") or ""))
+    except AppDataIntegrityError as e:
+        #: ⚠️ 서버 상태 이상은 400 이 아니다 — 사용자가 값을 고쳐도 낫지 않는다.
+        raise _fail(sdk.ERR_UNAVAILABLE, audit_reason=f"무결성: {str(e)[:100]}",
+                    actor=actor, target=ds["dataset_id"], path="POST /records")
     except AppDataError as e:
         raise _fail(sdk.ERR_INVALID, audit_reason=str(e)[:120], actor=actor,
                     target=ds["dataset_id"], path="POST /records")
-    return {"status": "success", "data": wire.project_record(out)}
+    return {"status": "success", "data": wire.project_record(out, _fields_of(ds))}
 
 
 @router.put("/datasets/{name}/records/{record_id}")
@@ -462,10 +479,14 @@ async def update_record(name: str, record_id: str, req: RecordWrite, request: Re
         out = app_data_service.update_record(
             record_id, sdk.sanitize_request(req.payload), actor_id=actor,
             release_id=str(proof.get("release_id", "") or ""))
+    except AppDataIntegrityError as e:
+        #: ⚠️ 서버 상태 이상은 400 이 아니다 — 사용자가 값을 고쳐도 낫지 않는다.
+        raise _fail(sdk.ERR_UNAVAILABLE, audit_reason=f"무결성: {str(e)[:100]}",
+                    actor=actor, target=ds["dataset_id"], path="PUT /records/{id}")
     except AppDataError as e:
         raise _fail(sdk.ERR_INVALID, audit_reason=str(e)[:120], actor=actor,
                     target=ds["dataset_id"], path="PUT /records/{id}")
-    return {"status": "success", "data": wire.project_record(out)}
+    return {"status": "success", "data": wire.project_record(out, _fields_of(ds))}
 
 
 @router.delete("/datasets/{name}/records/{record_id}")
@@ -481,7 +502,11 @@ async def delete_record(name: str, record_id: str, request: Request,
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:
         out = app_data_service.delete_record(record_id, actor_id=actor)
+    except AppDataIntegrityError as e:
+        #: ⚠️ 서버 상태 이상은 400 이 아니다 — 사용자가 값을 고쳐도 낫지 않는다.
+        raise _fail(sdk.ERR_UNAVAILABLE, audit_reason=f"무결성: {str(e)[:100]}",
+                    actor=actor, target=ds["dataset_id"], path="DELETE /records/{id}")
     except AppDataError as e:
         raise _fail(sdk.ERR_INVALID, audit_reason=str(e)[:120], actor=actor,
                     target=ds["dataset_id"], path="DELETE /records/{id}")
-    return {"status": "success", "data": wire.project_record(out)}
+    return {"status": "success", "data": wire.project_record(out, _fields_of(ds))}

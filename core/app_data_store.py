@@ -160,6 +160,16 @@ _UNIQUE_INDEXES = (
 )
 
 
+#: 판 지문 백필 훅. 도메인 계층(`core.app_data`)이 import 시점에 등록한다.
+#: ⚠️ 저장소가 스키마 정규화 규칙을 알면 두 곳이 그것을 알게 된다 — 그러면 언젠가 갈라진다.
+_VERSION_FP_HOOK = None
+
+
+def set_version_fingerprint_hook(fn) -> None:
+    global _VERSION_FP_HOOK
+    _VERSION_FP_HOOK = fn
+
+
 class AppDataStore:
     def __init__(self, db_path: str = _DB_PATH):
         self.db_path = db_path
@@ -198,6 +208,12 @@ class AppDataStore:
             finally:
                 conn.close()
             self._ready = self.db_path
+        #: ★ 판 지문 백필은 **스키마 정규화**를 알아야 하므로 도메인 계층이 준다
+        #:   (`core.app_data` 가 등록한다). 여기서 하면 저장소가 도메인을 알게 된다.
+        #: ⚠️ `_ready` 를 세운 **뒤**에 부른다 — 훅이 다시 `ensure_schema()` 를 부르므로
+        #:   먼저 부르면 무한 재귀다.
+        if _VERSION_FP_HOOK is not None:
+            _VERSION_FP_HOOK(self)
 
     def integrity_problems(self) -> List[str]:
         """유일성 인덱스를 걸지 못한 이유들. **비어 있어야 정상**이다.

@@ -1,6 +1,6 @@
 # [I-4] Host Runtime 생성기 연동 — 인수인계
 
-**작성 2026-08-15 · 상태: 설계 rev.3 승인 · **1단계·2단계+2.1 보정 완료** · 3~8단계 미착수**
+**작성 2026-08-15 · 상태: 설계 rev.3 승인 · **1단계·2단계(+2.1·2.1b) 완료** · 3~8단계 미착수**
 
 이 문서 하나만 읽고 이어받을 수 있게 적는다. 무엇이 끝났고, **무엇이 아직 안 됐고**,
 어디서부터 손대야 하는지.
@@ -16,7 +16,7 @@
 
 ```
 G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게이트 ✅  [6] 전환 ✅
-[7] I-4 ── 설계 rev.3 ✅  ·  1단계 ✅  ·  2단계+2.1 보정 ✅  ·  3~8단계 미착수
+[7] I-4 ── 설계 rev.3 ✅  ·  1단계 ✅  ·  2단계+2.1+2.1b ✅  ·  3~8단계 미착수
 ```
 
 **다음에 할 일: 설계서 §20 의 3단계** — 계약 지문을 **증명에 봉인**한다(§16).
@@ -48,7 +48,7 @@ G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게�
 | `core/app_data.py` | `bind_release` · `allowed_actions` · `adopt_dataset` · `contract_coverage` · `find_dataset` 가 결속을 지난다 |
 | `api/routes/app_data_runtime.py` | `_assert_contract_action` — **6개 경로 전부**에 2차 판정 |
 | `core/app_policy.py` | `DENY_DATASET_ACTION` (전역 권한 없음과 **다른 사유**) |
-| `tests/test_app_dataset_binding.py` (58) | 승계 · 2차 판정 · 결속 판 · revision 불변 · 유일성 · 원자성 |
+| `tests/test_app_dataset_binding.py` (79) | 승계 · 2차 판정 · 결속 판 · revision 불변 · 유일성 · 원자성 · **테넌트 격리** · **fail-closed** |
 
 **변이 22/22.** 전체 스위트 **3,352 passed · 1 skipped**.
 
@@ -64,19 +64,59 @@ G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게�
 | 4 | 생성과 결속이 **별도 커밋**이라 고아 데이터셋·경쟁이 가능했다 | `AppDataStore.transaction()`(`BEGIN IMMEDIATE`) — 생성·판·결속·허용행동이 **한 트랜잭션** |
 
 **변이 20/20** (1회차 5건 생존 · 전부 시험이 약한 것이었다).
-전체 스위트 **3,378 passed · 1 skipped**.
+
+### 2.1b 보정 (2026-08-15 · 교차검토 94 — P0 2건)
+
+⚠️⚠️ 2.1 은 **새 구조에 새 구멍을 만들었다.** 교차검토가 임시 DB 에서 실제로 재현했고,
+내가 같은 방법으로 다시 재현했다:
+
+```text
+source_tenant: TENANT_A
+rel_tenant_b 가 TENANT_A 데이터셋을 결속: True
+2차 판정: ('read','create','update','delete')
+```
+
+| # | 무엇이 틀렸나 | 무엇을 했나 |
+|---|---|---|
+| **P0-1** | DB 유일성은 `(tenant, app_id, dataset_key)` 인데 **승계 조회에 tenant 가 없었다.** `bind_release` 도 데이터셋↔릴리스의 테넌트·앱을 대조하지 않았다 | `adopt_dataset(dataset_key, release_id)` — **app·tenant 는 서버가 릴리스에서 산출**(호출자가 못 넘긴다) · `_assert_bindable` 이 모든 결속에서 정체를 대조 |
+| **P0-2** | 결속·판을 못 찾으면 **조용히 마스터 스키마로 후퇴**했다. 「결속 없음」·「판 미지정」·「판 행 없음」이 한 모양이었다 | `_apply_bound_schema` 가 다섯 상태를 나눈다 · 무결성 오류는 **`503`**(`AppDataIntegrityError` 는 `AppDataError` 를 **상속하지 않는다**) |
+| P1-1 | `schema_fingerprint` 열은 기본값 `''` 인데 **백필이 없었다** — 같은 판을 다시 결속하면 충돌 | `backfill_version_fingerprints()` · 마이그레이션이 자동 호출 · 폭이 다른 옛 지문도 재계산 · 판독 불가는 `UNREADABLE` 로 **격리** |
+| P1-2 | v2 가 선택 필드를 저장하면 **v1 이 기존 필드조차 못 고쳤다** · 조회에 투영 없음 | 아는 필드만 검증 · **미래 필드 보존** · 구버전이 미래 필드를 **쓰면** 거부 · 응답을 결속 판으로 투영 |
+| P1-3 | 유일성 인덱스 실패 후에도 계속 동작 | `_assert_ready()` 가 계약 경로를 막고 `readiness()` 가 `NOT_READY` 를 알린다 · 조회가 중복이면 **거부** |
+| P1-4 | `recoverable` 은 이름 유일성에만 근거 | **`single_candidate_unverified`** 로 개명 · `bound_releases` 근거를 함께 싣는다 |
+
+★ 함께 닫은 것: **계약 결속에는 스키마 판이 필수**다 — 없이 만들 수 있으면 그 행은 정상
+경로로 생기고 나중에 무결성 오류로만 드러난다.
+
+★ **지문 폭**: 증명에 봉인될 값은 축약하지 않는다 — `materialization_fingerprint` ·
+`schema_fingerprint` 는 **전체 sha256(64자)**, 표시는 `short_fingerprint()`.
+(계약 원문의 `semantic_fingerprint` 는 계약 문서 스키마가 16자로 못박고 있어 **3단계에서
+함께** 넓힌다.)
+
+**변이 26/26** (1회차 3건 생존 — 둘은 시험 구멍, 하나는 **중복 분기**라 시험 대신 **삭제**).
+전체 스위트 **3,398 passed · 1 skipped**.
 
 **실측**: 운영 백업(`app_data.db.bak_test_pollution_20260813_114845` — 옛 13열 스키마 ·
-결속표 없음)의 **사본**에 마이그레이션을 두 번(2단계·2.1) 돌려 확인했다:
+결속표 없음)의 **사본**에 마이그레이션을 세 번(2단계·2.1·2.1b) 돌려 확인했다:
 데이터셋 보존 · 이름 조회 OK · `dataset_key`·`runtime_name` 백필 · `contract_bound=0` ·
-유일성 문제 0 · 레거시 보고 `recoverable=1` · 물질화 지문 산출 · **원본 파일 지문 불변**.
+`readiness=READY` · 지문 백필 0건(대상 없음) · 레거시 보고
+`single_candidate_unverified=1`(근거 `bound_releases=['rel_ok']`) · **원본 파일 지문 불변**.
 ⚠️ 원본에는 돌리지 않았다(운영 DB 쓰기 금지).
+⚠️ 이 사본에는 **`app_dataset_versions` 행이 0건**이라 지문 백필 경로는 실측으로 확인하지
+못했다 — 그 경로는 회귀 넷(`backfill`·축약본 재계산·판독 불가 격리·자동 호출)이 잠근다.
 
 #### ⚠️ 레거시는 아직 승계되지 않는다 — 숫자로 드러낸다
 
 「앱을 개정해도 데이터가 유지된다」는 **신규 계약 데이터셋에만** 참이다. 마이그레이션은
 `dataset_key=name` 만 채우고 `app_id` 는 **비워 둔다**. `legacy_identity_report()` 가
-다섯으로 나눈다: `recoverable` · `ambiguous` · `unbindable` · `succeeded` · `quarantined`.
+다섯으로 나눈다: **`single_candidate_unverified`** · `ambiguous` · `unbindable` ·
+`succeeded` · `quarantined`.
+
+⚠️⚠️ 첫 갈래를 `recoverable` 이라고 부르지 않는다 — **`orders` 라는 이름이 하나뿐이라는
+사실은 그 앱의 정체를 증명하지 않는다.** 복원하려면 결속된 `release_id` ·
+`release.json.project_id` · tenant/entity/scope 일치 · 소유 조직 · 복수 릴리스 후보 여부를
+함께 봐야 한다. 「복원 가능」이라고 부르는 순간 다음 사람이 그것을 **자동 복원해도 되는
+목록**으로 읽는다.
 
 ⚠️⚠️ **이름이 같다는 이유로 자동 연결하지 않는다.** 서로 다른 앱이 `orders` 를 쓰는 것은
 흔하고, 잘못 이으면 **남의 앱 레코드가 이 앱에 보인다.** 보고만 하고 고치지 않는다 —
@@ -87,7 +127,7 @@ G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게�
 | 지문 | 사실 | 상태 |
 |---|---|---|
 | `runtime_contract_fingerprint` | 승인된 계약 원문 | 계산 있음(1단계) |
-| `materialization_fingerprint` | **실제 DB 결속 상태** | 계산 있음(2.1) · **봉인·`410` 강제는 3단계** |
+| `materialization_fingerprint` | **실제 DB 결속 상태** | 계산 있음(2.1b · 전체 sha256) · **봉인·`410` 강제는 3단계** |
 
 ⚠️ 원문 지문만 봉인하면 **「계약서는 승인됐지만 결속이 다른 상태」**를 못 잡는다.
 어느 쪽이 달라져도 일반 만료가 아니라 **`410` + 프레임 폐기**다 — 만료로 다루면 브리지가
@@ -378,11 +418,11 @@ projects/**/latest_state.json  58개
 | `tests/test_admin_policy_audit.py` (30) | 정책 API · 전환 스위치 |
 | `tests/test_app_runtime_contract.py` (69) | **[1단계]** 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 |
 | `tests/test_project_state_schema_5_2.py` (18) | **[1단계]** 5.2.0 마이그레이션 · 소스 검사 |
-| `tests/test_app_dataset_binding.py` (58) | **[2단계+2.1]** 승계 · 2차 판정 · 결속 판 · revision 불변 · 유일성 · 원자성 |
+| `tests/test_app_dataset_binding.py` (79) | **[2단계+2.1+2.1b]** 승계 · 2차 판정 · 결속 판 · 불변 · 유일성 · 원자성 · 테넌트 격리 · fail-closed |
 | `scripts/canary_host_runtime{,_seed}.py` | 격리 카나리(드라이버가 스스로 판정) |
 
-**변이 검사 누적 157/157**(G1-B 88 + 1단계 27 + 2단계 22 + 2.1 보정 20).
-전체 스위트 **3,378 passed · 1 skipped**(2026-08-15) · `tsc -b` 초록.
+**변이 검사 누적 183/183**(G1-B 88 + 1단계 27 + 2단계 22 + 2.1 보정 20 + 2.1b 26).
+전체 스위트 **3,398 passed · 1 skipped**(2026-08-15) · `tsc -b` 초록.
 
 ⚠️ 카나리를 다시 돌리려면: 워크트리 생성 → 씨앗 → 서버(별도 포트, `AFS_SHADOW_RUN`) →
 드라이버(`--seed-file`, `--run`, `--wait-expiry`). 드라이버가 기록·판정까지 하고

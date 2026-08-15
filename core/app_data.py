@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from core import app_data_store as app_data_store_module
 from core.app_data_store import AppDataStore, app_data_store
 
 # ── 한계값 ────────────────────────────────────────────────────────────────
@@ -68,6 +69,31 @@ class AppDataError(ValueError):
     """검증 실패 — 라우트가 4xx 로 바꾼다."""
 
 
+class AppDataIntegrityError(RuntimeError):
+    """★★★ **서버 상태가 이상하다** — 요청이 틀린 것이 아니다.
+
+    ⚠️⚠️ `AppDataError` 를 **상속하지 않는다.** 상속하면 라우트의 `except AppDataError` 가
+      이것을 잡아 `400` 으로 접고, 화면에는 「입력이 잘못됐습니다」가 뜬다. 사용자는 값을
+      고치며 시간을 쓰고, **깨진 결속은 아무도 모른 채 남는다.** 이것은 `503` 이다."""
+
+
+def release_identity(release_id: str) -> Optional[Tuple[str, str]]:
+    """릴리스 → **(tenant_id, app_id)**. 읽지 못하면 `None`.
+
+    ★★★ 이 값은 **서버가 정한다.** 호출자가 tenant·app 을 넘기게 두면 그 값 하나로
+      **다른 회사의 데이터셋을 자기 릴리스에 결속**할 수 있다(실측으로 재현된 P0).
+    ★ `app_id` 는 릴리스의 `project_id` 다 — `app_proof.app_facts` 와 같은 규칙이다.
+      두 곳이 다른 답을 내면 판정과 결속이 서로 다른 앱을 가리키게 된다."""
+    try:
+        from core import app_proof
+        rel = app_proof.read_release(str(release_id or "").strip())
+    except Exception:
+        return None
+    if not isinstance(rel, dict) or not rel:
+        return None
+    return (str(rel.get("tenant_id", "") or ""), str(rel.get("project_id", "") or ""))
+
+
 def normalize_actions(actions: Any) -> Tuple[str, ...]:
     """행동 목록을 **선언 순서가 아니라 고정 순서**로 정규화한다.
 
@@ -106,14 +132,31 @@ def _load_schema(raw: Any) -> Dict[str, Any]:
         return {"fields": [], "unreadable": True}
 
 
+#: ★★★ **권한 결속용 지문의 폭.** 전체 sha256(64자 = 256비트) 이다.
+#: ⚠️ 16자(64비트) 축약은 화면 표시에는 충분해도 **증명에 봉인되는 값**으로는 좁다.
+#:   표시용 짧은 지문(`short_fingerprint`)과 결속용 지문을 나눠 두면, UI 계약을 깨지 않고도
+#:   보안 축을 넓게 유지할 수 있다.
+FINGERPRINT_HEX_LEN = 64
+SHORT_FINGERPRINT_HEX_LEN = 12
+
+#: 판독 불가 판의 표식. ⚠️ 지문 자리를 비워 두면 백필이 매번 다시 시도하고, 그 판은
+#:   「아직 백필 안 됨」과 구분되지 않는다. 격리는 **기록**돼야 한다.
+_UNREADABLE_FP = "UNREADABLE"
+
+
+def short_fingerprint(full: str) -> str:
+    """사람에게 보여 줄 짧은 형태. **판정에 쓰지 않는다.**"""
+    return str(full or "")[:SHORT_FINGERPRINT_HEX_LEN]
+
+
 def schema_fingerprint(schema: Any) -> str:
-    """정규화된 스키마의 지문(sha256 앞 16자).
+    """정규화된 스키마의 지문(전체 sha256).
 
     ★ 계약 판이 **바뀌지 않았음**을 증명하는 값이다. 키 순서에 흔들리면 같은 내용이 다른
       지문을 갖고, 그러면 「판이 바뀌었다」는 판정이 거짓이 되어 아무도 믿지 않게 된다."""
     norm = normalize_schema(schema)
     body = json.dumps(norm, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 # ── 스키마 ────────────────────────────────────────────────────────────────
@@ -278,8 +321,18 @@ class AppDataService:
             raise AppDataError("데이터셋 생성에는 주체(actor_id)가 필요합니다.")
 
         norm = normalize_schema(schema)
+        #: ★★★ tenant·app 은 **서버가 릴리스에서 산출**한다. 호출자 값은 릴리스를 읽지
+        #:   못할 때의 폴백일 뿐이다 — 그렇게 하지 않으면 값 하나로 남의 앱이 된다.
+        ident = release_identity(release_id)
+        if ident is not None:
+            rel_tenant, rel_app = ident
+            if rel_tenant:
+                tenant_id = rel_tenant
+            if rel_app:
+                app_id = rel_app
         app_id = (app_id or "").strip()
         dataset_key = (dataset_key or name).strip()
+        self._assert_ready()
         did = _nid("ds")
         ts = _now()
 
@@ -331,10 +384,105 @@ class AppDataService:
                              contract_revision=contract_revision)
         return self.binding_for(release_id, dataset_id)  # type: ignore[return-value]
 
+    def _assert_ready(self) -> None:
+        """★★★ **무결성 문제가 있으면 계약 경로를 열지 않는다.**
+
+        ⚠️ 유일성 인덱스를 걸지 못한 상태에서 계속 만들고 결속하면 중복이 더 쌓이고,
+          그때부터 조회는 「둘 중 하나」를 고르게 된다. 기록만 하고 계속 도는 것은
+          **문제를 키우면서 조용해지는** 방향이다."""
+        problems = self._store.integrity_problems()
+        if problems:
+            raise AppDataIntegrityError(
+                "데이터 무결성 문제가 있어 데이터셋을 만들거나 결속할 수 없습니다: "
+                + " / ".join(problems))
+
+    def readiness(self) -> Dict[str, Any]:
+        """health·관리 화면이 읽는 값. `READY` 가 아니면 계약 물질화를 하지 않는다."""
+        problems = self._store.integrity_problems()
+        return {"status": "READY" if not problems else "NOT_READY", "problems": problems}
+
+    def backfill_version_fingerprints(self) -> int:
+        """기존 판 행의 지문을 채운다. **재실행 가능**하고 몇 건을 고쳤는지 돌려준다.
+
+        ⚠️ 열은 기본값 `''` 로 붙으므로, 백필이 없으면 **내용이 같은 판을 다시 결속할 때**
+          `'' != 새 지문` 이라 «다른 스키마» 로 오해해 충돌 거부가 난다.
+        ⚠️ 폭이 달라진 옛 지문(축약본)도 다시 계산한다 — 그대로 두면 정상 판이 영원히
+          지문 불일치로 읽힌다.
+        ★ 파싱 불가 행은 **고치지 않고 격리 표시**한다. 추측해 채우면 그 추측이 곧
+          「이 판은 이것이었다」는 거짓 기록이 된다."""
+        rows = self._store.query(
+            "SELECT version_id, schema_json, schema_fingerprint FROM app_dataset_versions")
+        fixed = 0
+        for r in rows:
+            cur = str(r["schema_fingerprint"] or "")
+            if cur and len(cur) == FINGERPRINT_HEX_LEN:
+                continue
+            schema = _load_schema(r["schema_json"])
+            if schema.get("unreadable"):
+                if cur != _UNREADABLE_FP:
+                    self._store.execute(
+                        "UPDATE app_dataset_versions SET schema_fingerprint=? WHERE version_id=?",
+                        (_UNREADABLE_FP, r["version_id"]))
+                    fixed += 1
+                continue
+            self._store.execute(
+                "UPDATE app_dataset_versions SET schema_fingerprint=? WHERE version_id=?",
+                (schema_fingerprint(schema), r["version_id"]))
+            fixed += 1
+        return fixed
+
+    def _assert_bindable(self, conn, release_id: str, dataset_id: str) -> None:
+        """★★★ **이 데이터셋이 이 릴리스의 것인가.**
+
+        실측으로 재현된 P0: `adopt_dataset` 이 `app_id`·`dataset_key` 만으로 찾았고
+        `tenant_id` 를 보지 않아, **다른 회사의 데이터셋을 자기 릴리스에 결속**할 수 있었다.
+        결속되면 Runtime 1차 판정은 릴리스만 보므로 그대로 데이터에 닿는다.
+
+        네 경우로 닫는다:
+
+        | 릴리스 정체 | 데이터셋 정체 | 결과 |
+        |---|---|---|
+        | 안다 | 안다 | tenant·app 이 **모두** 같아야 한다 |
+        | 안다 | 모른다(레거시) | **거부** — 이름만으로 잇지 않는다 |
+        | 모른다 | 안다 | **거부** — 정체 있는 것을 정체 불명에 붙이지 않는다 |
+        | 모른다 | 모른다 | 허용(레거시 ↔ 레거시) |
+        """
+        ds = self._store.row(
+            conn, "SELECT tenant_id, app_id FROM app_datasets WHERE dataset_id=?", (dataset_id,))
+        if not ds:
+            raise AppDataError("결속할 데이터셋이 없습니다.")
+        ds_tenant = str(ds["tenant_id"] or "")
+        ds_app = str(ds["app_id"] or "")
+        ident = release_identity(release_id)
+
+        rel_tenant, rel_app = ident if ident is not None else ("", "")
+
+        #: ⚠️ **릴리스를 못 읽는 것**과 **릴리스가 앱을 말하지 않는 것**은 둘 다 «앱 미상» 이다.
+        #:   옛 릴리스에는 `project_id` 가 없다 — 그것을 「앱이 다르다」로 읽으면 돌던 앱이
+        #:   통째로 멈춘다. 반대로 정체 있는 데이터셋을 앱 미상 릴리스에 붙이면 그 순간
+        #:   소속이 사라진다. 그래서 **양쪽이 같은 앎의 수준일 때만** 통과시킨다.
+        if bool(ds_app) != bool(rel_app):
+            if ds_app:
+                raise AppDataError(
+                    f"릴리스 {release_id} 가 어느 앱인지 말하지 않습니다 — 앱 {ds_app} 의 "
+                    f"데이터셋을 붙일 수 없습니다.")
+            raise AppDataError(
+                f"이 데이터셋에는 앱 식별자가 없습니다(레거시) — 릴리스 {release_id}"
+                f"(앱 {rel_app})에 자동으로 이을 수 없습니다. "
+                f"legacy_identity_report() 로 확인한 뒤 사람이 결정해야 합니다.")
+        if ds_app and ds_app != rel_app:
+            raise AppDataError(
+                f"다른 앱의 데이터셋입니다(데이터셋 {ds_app} · 릴리스 {rel_app}).")
+        if rel_tenant and ds_tenant and ds_tenant != rel_tenant:
+            #: ⚠️ 여기가 실제로 뚫렸던 자리다.
+            raise AppDataError(
+                f"다른 테넌트의 데이터셋입니다(데이터셋 {ds_tenant} · 릴리스 {rel_tenant}).")
+
     def _bind_in_tx(self, conn, release_id: str, dataset_id: str, *, runtime_name: str,
                     allowed_actions: Optional[Sequence[str]], schema: Any,
                     contract_revision: int) -> None:
         """결속의 실체. **트랜잭션 안에서만** 부른다."""
+        self._assert_bindable(conn, release_id, dataset_id)
         bound = allowed_actions is not None
         acts = normalize_actions(allowed_actions) if bound else ()
         prev = self._store.row(
@@ -354,6 +502,14 @@ class AppDataService:
         version_id = str((prev or {}).get("version_id") or "")
         if schema is not None:
             version_id = self._ensure_version_in_tx(conn, dataset_id, schema, contract_revision)
+
+        if bound and not version_id:
+            #: ★★★ **계약 결속에는 판이 있어야 한다.** 없이 만들 수 있게 두면 「계약이
+            #:   정했다는데 어느 스키마인지 모르는」 행이 정상 경로로 생기고, 그것은 나중에
+            #:   무결성 오류로만 드러난다 — 만들 때 막는 편이 훨씬 싸다.
+            raise AppDataError(
+                "계약 결속에는 스키마 판이 필요합니다 — schema 와 contract_revision 을 "
+                "함께 주십시오.")
 
         clash = self._store.row(
             conn, "SELECT dataset_id FROM app_release_dataset_bindings "
@@ -485,11 +641,17 @@ class AppDataService:
 
         돌려주는 다섯 갈래:
 
-            recoverable   릴리스가 하나뿐이라 앱을 특정할 수 있다
-            ambiguous     같은 이름이 여러 릴리스에 있어 후보가 여럿이다
+            single_candidate_unverified  후보가 하나뿐이다 — **정체가 증명된 것은 아니다**
+            ambiguous     같은 이름이 여럿이라 후보가 여럿이다
             unbindable    결속이 없다(어느 릴리스도 가리키지 않는 고아)
             succeeded     이미 `app_id` 가 있다(계약 경로로 만들어진 것)
             quarantined   같은 (app_id, dataset_key) 가 둘 이상 — 승계 불가
+
+        ⚠️⚠️ 첫 갈래를 `recoverable` 이라고 부르지 않는다. **`orders` 라는 이름이 하나뿐이라는
+          사실은 그 앱의 정체를 증명하지 않는다.** 복원하려면 기존 결속의 `release_id` ·
+          `release.json.project_id` · tenant/entity/scope 일치 · 소유 조직 · 복수 릴리스 후보
+          여부를 함께 봐야 한다. 이름을 「복원 가능」이라고 부르는 순간 다음 사람이 그것을
+          자동 복원해도 되는 목록으로 읽는다.
         """
         rows = self._store.query(
             "SELECT d.dataset_id, d.name, d.app_id, d.dataset_key, "
@@ -504,7 +666,7 @@ class AppDataService:
         dup = {k for k, v in by_key.items() if len(v) > 1}
 
         out: Dict[str, List[Dict[str, Any]]] = {
-            "recoverable": [], "ambiguous": [], "unbindable": [],
+            "single_candidate_unverified": [], "ambiguous": [], "unbindable": [],
             "succeeded": [], "quarantined": []}
         #: 같은 이름을 쓰는 데이터셋이 여럿이면 이름만으로는 앱을 특정할 수 없다.
         name_count: Dict[str, int] = {}
@@ -514,7 +676,11 @@ class AppDataService:
 
         for r in rows:
             item = {"dataset_id": str(r["dataset_id"]), "name": str(r["name"]),
-                    "dataset_key": str(r["dataset_key"] or "")}
+                    "dataset_key": str(r["dataset_key"] or ""),
+                    #: ★ 근거를 함께 싣는다 — 이름만 보고 잇지 못하게.
+                    "bound_releases": [str(x["release_id"]) for x in self._store.query(
+                        "SELECT release_id FROM app_release_dataset_bindings "
+                        " WHERE dataset_id=? ORDER BY release_id", (str(r["dataset_id"]),))]}
             app_id = str(r["app_id"] or "")
             if app_id:
                 bucket = "quarantined" if (app_id, item["dataset_key"]) in dup else "succeeded"
@@ -523,7 +689,7 @@ class AppDataService:
             elif name_count.get(item["name"], 0) > 1:
                 bucket = "ambiguous"
             else:
-                bucket = "recoverable"
+                bucket = "single_candidate_unverified"
             out[bucket].append(item)
         return {k: {"count": len(v), "items": v} for k, v in out.items()}
 
@@ -547,9 +713,11 @@ class AppDataService:
             [str(r["n"] or ""), str(r["k"] or ""), str(r["f"] or ""),
              str(r["a"] or ""), "1" if int(r["c"] or 0) else "0"] for r in rows)
         body = json.dumps(material, ensure_ascii=False, separators=(",", ":"))
-        return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+        #: ⚠️ **축약하지 않는다.** 이 값은 3단계에서 증명에 봉인된다 — 화면에 보일 때만
+        #:   `short_fingerprint()` 로 줄인다.
+        return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
-    def adopt_dataset(self, app_id: str, dataset_key: str, release_id: str, *,
+    def adopt_dataset(self, dataset_key: str, release_id: str, *,
                       allowed_actions: Optional[Sequence[str]] = None,
                       schema: Any = None, contract_revision: int = 0
                       ) -> Optional[Dict[str, Any]]:
@@ -558,20 +726,29 @@ class AppDataService:
         ★★★ 이것이 「앱을 개정하면 현업 데이터가 안 보인다」를 고치는 지점이다.
           레코드는 `dataset_id` 에 매여 있고 그 id 는 릴리스를 넘어 그대로다.
 
-        ⚠️ `app_id` 나 `dataset_key` 가 비면 **아무것도 이어받지 않는다** — 빈 값으로
-          맞추면 서로 다른 앱의 데이터셋이 하나로 묶인다."""
-        app_id = (app_id or "").strip()
+        ★★★ **앱과 테넌트는 인자가 아니라 릴리스에서 나온다.** 호출자가 `app_id` 를
+          넘기게 두면 그 값 하나로 **다른 회사의 데이터셋을 자기 릴리스에 결속**할 수
+          있었다(실측 재현). 릴리스를 읽지 못하면 **아무것도 이어받지 않는다** —
+          정체를 모르는 채 하는 승계가 정확히 그 사고다."""
         dataset_key = (dataset_key or "").strip()
-        if not app_id or not dataset_key:
+        if not dataset_key:
             return None
+        #: ⚠️ 「릴리스를 못 읽었다」와 「릴리스가 앱을 말하지 않는다」는 **여기서는 같은 결론**
+        #:   이다 — 어느 쪽이든 앱을 모르므로 승계하지 않는다. 두 분기로 나눠 두면 한쪽에만
+        #:   시험이 붙고 다른 쪽은 조용히 썩는다.
+        ident = release_identity(release_id)
+        if not ident or not ident[1]:
+            return None
+        tenant_id, app_id = ident
+        self._assert_ready()
         with self._store.transaction() as conn:
             rows = self._store.rows(
                 conn, "SELECT dataset_id, name FROM app_datasets "
-                      " WHERE app_id=? AND dataset_key=? AND retired_at=''",
-                (app_id, dataset_key))
+                      " WHERE tenant_id=? AND app_id=? AND dataset_key=? AND retired_at=''",
+                (tenant_id, app_id, dataset_key))
             if not rows:
                 return None
-            if len(rows) > 1:
+            if len(rows) > 1:  # noqa: SIM102 - 아래 주석이 이 분기의 이유다
                 #: ★★★ **첫 행을 고르지 않는다.** 그 선택은 임의이고 조용하며, 고른 쪽이
                 #:   틀렸다면 현업 레코드가 통째로 다른 데이터셋에 붙는다.
                 #:   유일성 인덱스가 있으면 여기 오지 않는다 — 오면 그 인덱스가 걸리지
@@ -605,27 +782,70 @@ class AppDataService:
         ⚠️ 데이터셋 마스터의 `schema_json` 을 그대로 주면, 릴리스 v1·v2 가 서로 다른 판을
           가리켜도 **둘 다 마지막에 저장된 스키마 하나**로 검증된다. 즉 판을 기록만 하고
           쓰지 않는 상태였고, 그것은 판이 없는 것과 같다."""
-        row = self._store.one(
-            "SELECT d.*, b.version_id AS _bound_version_id, b.runtime_name AS _runtime_name "
-            "  FROM app_datasets d "
+        rel = (release_id or "").strip()
+        rows = self._store.query(
+            "SELECT d.* FROM app_datasets d "
             "  JOIN app_release_dataset_bindings b ON b.dataset_id = d.dataset_id "
-            " WHERE b.release_id=? AND b.runtime_name=?",
-            ((release_id or "").strip(), (name or "").strip()))
-        if not row:
+            " WHERE b.release_id=? AND b.runtime_name=?", (rel, (name or "").strip()))
+        if not rows:
             return None
-        vid = str(row.pop("_bound_version_id", "") or "")
-        row.pop("_runtime_name", None)
-        out = self._dataset_view(row)
-        out["bound_version_id"] = vid
-        if vid:
-            ver = self._store.one(
-                "SELECT schema_json, contract_revision, schema_fingerprint "
-                "  FROM app_dataset_versions WHERE version_id=?", (vid,))
-            if ver:
-                out["schema"] = _load_schema(ver["schema_json"])
-                out["contract_revision"] = int(ver["contract_revision"] or 0)
-                out["schema_fingerprint"] = str(ver["schema_fingerprint"] or "")
+        if len(rows) > 1:
+            #: ⚠️ 유일성 인덱스가 걸리지 못한 상태에서만 올 수 있다. **첫 행을 고르지
+            #:   않는다** — 그 선택은 임의이고, 고른 쪽이 틀리면 남의 데이터를 보여 준다.
+            raise AppDataIntegrityError(
+                f"릴리스 {rel} 에 «{name}» 이 {len(rows)}개 결속돼 있습니다 — "
+                f"어느 것인지 판정할 수 없습니다.")
+        out = self._dataset_view(rows[0])
+        self._apply_bound_schema(out, rel)
         return out
+
+    def _apply_bound_schema(self, ds: Dict[str, Any], release_id: str) -> None:
+        """★★★ **결속·판 판독은 fail-closed 다.**
+
+        ⚠️⚠️ 종전에는 결속이나 판을 못 찾으면 **조용히 마스터 `schema_json` 으로 후퇴**했다.
+          그러면 다음 넷이 한 모양이 된다 — 그리고 그중 셋은 **서버 상태 이상**이다:
+
+        | 상태 | 처리 |
+        |---|---|
+        | `contract_bound=0` (명시적 레거시) | 마스터 스키마 허용 |
+        | 결속 없음 | **차단** |
+        | `contract_bound=1` 인데 `version_id` 없음 | **무결성 오류** |
+        | 판 행 없음 · 파싱 실패 · 지문 불일치 | **무결성 오류** |
+
+        ★ 무결성 오류는 `400`(요청이 틀렸다)이 아니라 `503`(서버가 이상하다)이다.
+          400 으로 접으면 사용자가 값을 고치며 시간을 쓰고, 깨진 결속은 그대로 남는다."""
+        rel = (release_id or "").strip()
+        if not rel:
+            return                      # 릴리스를 말하지 않은 관리 경로 — 마스터를 쓴다
+        did = str(ds.get("dataset_id", ""))
+        b = self.binding_for(rel, did)
+        if b is None:
+            raise AppDataIntegrityError(
+                f"릴리스 {rel} 에 데이터셋 {did} 의 결속이 없습니다.")
+        ds["bound_version_id"] = str(b.get("version_id") or "")
+        ds["contract_bound"] = bool(b["contract_bound"])
+        if not b["contract_bound"]:
+            return                      # 명시적 레거시 — 마스터 스키마가 정본이다
+        vid = str(b.get("version_id") or "")
+        if not vid:
+            raise AppDataIntegrityError(
+                f"계약 결속인데 스키마 판이 지정돼 있지 않습니다(릴리스 {rel} · {did}).")
+        ver = self._store.one(
+            "SELECT schema_json, contract_revision, schema_fingerprint "
+            "  FROM app_dataset_versions WHERE version_id=?", (vid,))
+        if not ver:
+            raise AppDataIntegrityError(f"스키마 판 {vid} 이 없습니다(릴리스 {rel} · {did}).")
+        schema = _load_schema(ver["schema_json"])
+        if schema.get("unreadable"):
+            raise AppDataIntegrityError(f"스키마 판 {vid} 을 읽을 수 없습니다.")
+        stored_fp = str(ver["schema_fingerprint"] or "")
+        if stored_fp and stored_fp != schema_fingerprint(schema):
+            raise AppDataIntegrityError(
+                f"스키마 판 {vid} 의 지문이 내용과 다릅니다 — 저장된 판이 변조됐거나 "
+                f"백필이 끝나지 않았습니다.")
+        ds["schema"] = schema
+        ds["contract_revision"] = int(ver["contract_revision"] or 0)
+        ds["schema_fingerprint"] = stored_fp
 
     def list_datasets(self, release_id: str = "", include_retired: bool = False
                       ) -> List[Dict[str, Any]]:
@@ -759,11 +979,27 @@ class AppDataService:
             raise AppDataError("레코드 수정에는 주체(actor_id)가 필요합니다.")
         ds = self._require_active(row["dataset_id"], release_id=release_id)
         current = json.loads(row["payload_json"] or "{}")
+        #: ★★★ [2.1b] **구버전 앱이 신버전 레코드를 못 고치는 문제.**
+        #:
+        #: v2 가 선택 필드 `memo` 를 저장한 뒤, v1 이 `qty` 만 고치려 해도 전체 payload 를
+        #: v1 스키마로 재검증하면 `memo` 가 «선언에 없는 필드» 로 거부됐다. 그러면 판을
+        #: 올린 순간 **구버전 화면의 수정이 통째로 죽는다** — 그리고 그 오류 문구는
+        #: 사용자가 건드리지도 않은 필드를 가리킨다.
+        #:
+        #: 규칙 셋:
+        #:   · 이 판이 아는 필드만 검증한다
+        #:   · 저장돼 있던 **미래 필드는 건드리지 않고 보존**한다
+        #:   · ⚠️ 구버전이 미래 필드를 **보내면** 거부한다(`validate_payload` 가 한다) —
+        #:     모르는 필드를 쓰게 두면 그 판의 계약이 의미를 잃는다
+        known = {f["name"] for f in (ds["schema"].get("fields") or [])}
+        future = {k: v for k, v in current.items() if k not in known}
         patch = validate_payload(ds["schema"], payload, partial=True)
-        current.update(patch)
+        mine = {k: v for k, v in current.items() if k in known}
+        mine.update(patch)
         # 부분 수정이어도 **필수 항목이 비면 안 된다** — 부분 경로로 필수를 우회할 수 있으면
         # 그 제약은 없는 것과 같다.
-        merged = validate_payload(ds["schema"], current)
+        merged = validate_payload(ds["schema"], mine)
+        merged.update(future)
         self._store.execute(
             "UPDATE app_records SET payload_json=?, updated_by=?, updated_at=? "
             "WHERE record_id=?",
@@ -800,18 +1036,7 @@ class AppDataService:
             raise AppDataError("데이터셋을 찾을 수 없습니다.")
         if ds["retired_at"]:
             raise AppDataError("폐지된 데이터셋에는 쓸 수 없습니다.")
-        rel = (release_id or "").strip()
-        if rel:
-            b = self.binding_for(rel, dataset_id)
-            vid = str((b or {}).get("version_id") or "")
-            if vid:
-                ver = self._store.one(
-                    "SELECT schema_json, contract_revision, schema_fingerprint "
-                    "  FROM app_dataset_versions WHERE version_id=?", (vid,))
-                if ver:
-                    ds["schema"] = _load_schema(ver["schema_json"])
-                    ds["contract_revision"] = int(ver["contract_revision"] or 0)
-                    ds["schema_fingerprint"] = str(ver["schema_fingerprint"] or "")
+        self._apply_bound_schema(ds, release_id)
         return ds
 
     @staticmethod
@@ -833,3 +1058,8 @@ class AppDataService:
 
 
 app_data_service = AppDataService()
+
+#: 스키마 정규화를 아는 쪽이 판 지문 백필을 한다 — 저장소가 도메인 규칙을 알면
+#: 그 규칙이 두 곳에 생기고, 언젠가 갈라진다.
+app_data_store_module.set_version_fingerprint_hook(
+    lambda store: AppDataService(store=store).backfill_version_fingerprints())

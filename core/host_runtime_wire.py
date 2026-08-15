@@ -225,11 +225,30 @@ def project_dataset(row: Any) -> Dict[str, Any]:
     return {k: row[k] for k in DATASET_PUBLIC_FIELDS if k in row}
 
 
-def project_record(row: Any) -> Dict[str, Any]:
-    """레코드 응답을 **허용목록으로 깎는다.**"""
+def project_record(row: Any, fields: Optional[Container[str]] = None) -> Dict[str, Any]:
+    """레코드 응답을 **허용목록으로 깎는다.**
+
+    ★★★ `fields` 를 주면 `payload` 를 **그 릴리스가 결속한 판의 필드로 투영**한다.
+
+    ⚠️ 투영하지 않으면 구버전 앱이 **자기 판에 없는 필드**를 응답으로 받는다. 그 앱의
+      화면은 그것을 모르므로 조용히 버리는데, 사용자는 그 화면을 «전부» 로 읽는다.
+      그리고 그 앱이 레코드를 되돌려 보내면 모르는 필드가 함께 실려 온다.
+    ⚠️ `fields=None` 은 «투영하지 않는다» 이지 «필드가 없다» 가 아니다 — 빈 집합과
+      구분한다(빈 집합이면 payload 는 비워진다)."""
     if not isinstance(row, dict):
         return {}
-    return {k: row[k] for k in RECORD_PUBLIC_FIELDS if k in row}
+    out = {k: row[k] for k in RECORD_PUBLIC_FIELDS if k in row}
+    if fields is not None and isinstance(out.get("payload"), dict):
+        out["payload"] = {k: v for k, v in out["payload"].items() if k in fields}
+    return out
+
+
+def schema_field_names(schema: Any) -> Tuple[str, ...]:
+    """스키마 → 필드 이름들. 투영에 쓴다."""
+    if not isinstance(schema, dict):
+        return ()
+    return tuple(str(f.get("name", "")) for f in (schema.get("fields") or [])
+                 if isinstance(f, dict) and f.get("name"))
 
 
 # ── 요청 판정 ─────────────────────────────────────────────────────────────
