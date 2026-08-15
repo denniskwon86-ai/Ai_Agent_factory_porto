@@ -14,16 +14,18 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from tests import org_seed
+
 from core import agent_registry as reg
 from core.agent_assets import (AgentAssetStore, AssetError, AssetNotFound, KIND_AGENT,
                                KIND_WORKFLOW, VIS_PERSONAL, VIS_SCOPE)
 
 B = "/api/v1/factory"
 
-ADMIN = "hikwon@lsmnm.com"
-AI_ADMIN = "hikwon_4@lsmnm.com"     # LS_MNM·MNM_BATTERY·MNM_COPPER
-MGR = "hikwon_7@lsmnm.com"          # 관리·읽기 = LS_MNM 만
-MEMBER = "hikwon_2@lsmnm.com"       # 읽기 = MNM_BATTERY
+ADMIN = org_seed.ADMIN
+AI_ADMIN = org_seed.AI_ADMIN     # 전 조직 관리
+MGR = org_seed.MANAGER_A          # 관리·읽기 = t_alpha 만
+MEMBER = org_seed.MEMBER_A       # 읽기 = t_alpha
 
 
 def H(uid):
@@ -42,7 +44,7 @@ def store(monkeypatch, tmp_path):
 
 
 @pytest.fixture()
-def client(monkeypatch, store, ecm_org_seed):
+def client(monkeypatch, store, ecm_org_seed, seeded_org):
     import config
     from core.org_directory import org_directory
     org_directory._invalidate()
@@ -54,15 +56,18 @@ def client(monkeypatch, store, ecm_org_seed):
         org_directory._invalidate()
 
 
-def _wf(store, name="조직 워크플로우", scope="LS_MNM", approve=True, body=None):
+def _wf(store, name="조직 워크플로우", scope=None, approve=True, body=None):
     """조직 워크플로우 자산 하나. 기본은 승인까지 마친다."""
+    #: ⚠️ 저장소를 직접 부르면 API 의 «범위 정본화» 를 지나지 않는다 — 정본 노드 id 로 넣는다.
+    #: 조직이 심어지지 않은 시험(저장소만 쓰는 것)에서는 부서 id 그대로 둔다.
+    scope = org_seed.NODES.get(scope or org_seed.DEPT_A, scope or org_seed.DEPT_A)
     base = reg.load_template(reg.DEFAULT_TEMPLATE_ID)
     a = store.create(KIND_WORKFLOW, name, body if body is not None else dict(base),
-                     "hikwon_4@lsmnm.com", owner_scope_id=scope, visibility=VIS_SCOPE,
+                     org_seed.AI_ADMIN, owner_scope_id=scope, visibility=VIS_SCOPE,
                      purpose="테스트용")
     if approve:
-        store.submit(a["asset_id"], "hikwon_4@lsmnm.com")
-        store.approve(a["asset_id"], "hikwon_4@lsmnm.com")
+        store.submit(a["asset_id"], org_seed.AI_ADMIN)
+        store.approve(a["asset_id"], org_seed.AI_ADMIN)
     return store.get(a["asset_id"])
 
 
@@ -166,12 +171,12 @@ def test_get_templates_keeps_legacy_keys(client, store):
 
 def test_get_templates_includes_approved_org_workflow(client, store):
     """★★ P1-4 로 만든 조직 워크플로우가 **기존 화면에도 보인다** — 안 보이면 만들어도 쓸 수 없다."""
-    a = _wf(store, scope="LS_MNM")
+    a = _wf(store, scope=org_seed.DEPT_A)
     items = client.get(f"{B}/templates", headers=H(MGR)).json()["data"]
     row = next((i for i in items if i["id"] == a["asset_id"]), None)
     assert row is not None
     assert row["source"] == "ORG" and row["builtin"] is False
-    assert row["agent_count"] > 0 and row["owner_scope_id"] == "LS_MNM"
+    assert row["agent_count"] > 0 and row["owner_scope_id"] == org_seed.NODES[org_seed.DEPT_A]
 
 
 def test_get_templates_excludes_unapproved_org_workflow(client, store):
@@ -189,15 +194,15 @@ def test_get_templates_is_scoped(client, store):
 
     `hikwon_7` 의 읽기 범위는 `LS_MNM` 하나이고 하향 열람은 경영진에게만 준다 — 그래서
     `MNM_BATTERY` 조직 워크플로우는 목록에 없다."""
-    other = _wf(store, name="배터리 전용", scope="MNM_BATTERY")
-    mine = _wf(store, name="본부 것", scope="LS_MNM")
+    other = _wf(store, name="배터리 전용", scope=org_seed.DEPT_B)
+    mine = _wf(store, name="본부 것", scope=org_seed.DEPT_A)
     ids = [i["id"] for i in client.get(f"{B}/templates", headers=H(MGR)).json()["data"]]
     assert mine["asset_id"] in ids
     assert other["asset_id"] not in ids, "다른 조직 워크플로우가 목록에 새어 나왔다"
 
 
 def test_org_workflow_detail_is_readable_by_its_scope(client, store):
-    a = _wf(store, scope="LS_MNM")
+    a = _wf(store, scope=org_seed.DEPT_A)
     r = client.get(f"{B}/templates/{a['asset_id']}", headers=H(MGR))
     assert r.status_code == 200
     d = r.json()
@@ -208,7 +213,7 @@ def test_org_workflow_detail_is_readable_by_its_scope(client, store):
 
 def test_org_workflow_detail_is_404_outside_scope(client, store):
     """★★★ 가시 범위 밖은 **404** 다 — 403 은 «그 조직에 그런 워크플로우가 있다» 를 알려 준다."""
-    a = _wf(store, scope="MNM_BATTERY")
+    a = _wf(store, scope=org_seed.DEPT_B)
     assert client.get(f"{B}/templates/{a['asset_id']}", headers=H(MGR)).status_code == 404
 
 
@@ -218,16 +223,19 @@ def test_org_workflow_detail_404_for_missing_id(client):
 
 def test_new_and_old_api_agree_on_visibility(client, store):
     """★★★ 두 API 가 **같은 판정 함수**를 본다. 갈라지면 한쪽에 없는 것이 다른 쪽에서 열린다."""
-    a = _wf(store, scope="MNM_BATTERY")
+    a = _wf(store, scope=org_seed.DEPT_B)
     old = client.get(f"{B}/templates/{a['asset_id']}", headers=H(MGR)).status_code
     new = client.get(f"/api/v1/agent-governance/workflows/{a['asset_id']}",
                      headers=H(MGR)).status_code
     assert old == new == 404
 
-    old2 = client.get(f"{B}/templates/{a['asset_id']}", headers=H(MEMBER)).status_code
+    #: ★ 그 조직의 구성원에게는 **양쪽 다** 보여야 한다 — 자산은 t_beta 에 있으므로
+    #:   t_beta 구성원으로 본다(MEMBER 는 t_alpha 라 위에서 못 보는 쪽이다).
+    beta = org_seed.MEMBER_B
+    old2 = client.get(f"{B}/templates/{a['asset_id']}", headers=H(beta)).status_code
     new2 = client.get(f"/api/v1/agent-governance/workflows/{a['asset_id']}",
-                      headers=H(MEMBER)).status_code
-    assert old2 == new2 == 200, "member 의 읽기 범위는 MNM_BATTERY 다 — 양쪽 다 보여야 한다"
+                      headers=H(beta)).status_code
+    assert old2 == new2 == 200, "그 조직 구성원에게는 양쪽 다 보여야 한다"
 
 
 def test_legacy_template_id_validation_still_applies(client):

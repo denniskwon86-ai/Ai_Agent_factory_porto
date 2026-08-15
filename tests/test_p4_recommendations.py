@@ -8,6 +8,8 @@
 """
 import pytest
 
+from tests import org_seed
+
 from core import asset_dedup as dd
 from core import promotion_advisor as pa
 
@@ -200,7 +202,7 @@ def test_hygiene_route_requires_governance():
 #   **소스 문자열 검사는 배선을 확인하지만 실행을 확인하지 못한다.**
 #   그래서 두 라우트를 실제로 호출한다.
 @pytest.fixture()
-def client(monkeypatch, ecm_org_seed):
+def client(monkeypatch, ecm_org_seed, seeded_org):
     import config
     from core.org_directory import org_directory
     org_directory._invalidate()
@@ -221,7 +223,7 @@ def test_routes_actually_run(client, url):
     """★ 200 이 아니어도 좋다 — **500 이 아니어야** 한다.
 
     권한 때문에 403 이 나는 것은 통제가 작동한 것이고, 500 은 코드가 깨진 것이다."""
-    r = client.get(url, headers={"X-Factory-User": "hikwon@lsmnm.com"})
+    r = client.get(url, headers={"X-Factory-User": org_seed.ADMIN})
     assert r.status_code != 500, f"{url} 가 500 이다: {r.text[:300]}"
     assert r.status_code in (200, 401, 403), f"{url} → {r.status_code}: {r.text[:200]}"
 
@@ -232,5 +234,5 @@ def test_routes_actually_run(client, url):
 ])
 def test_routes_are_closed_to_viewer(client, url):
     """자격은 「전사 정비 상태」 기준이다 — 어디가 비어 있는지는 그 자체로 보호 대상이다."""
-    r = client.get(url, headers={"X-Factory-User": "hikwon_17@lsmnm.com"})
+    r = client.get(url, headers={"X-Factory-User": org_seed.VIEWER_A})
     assert r.status_code == 403, f"{url} 가 viewer 에게 {r.status_code} 다"

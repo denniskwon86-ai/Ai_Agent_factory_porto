@@ -41,7 +41,7 @@ def store(tmp_path):
 
 
 @pytest.fixture
-def client(store, tmp_path, monkeypatch):
+def client(store, tmp_path, monkeypatch, seeded_org):
     monkeypatch.chdir(tmp_path)                 # ./projects 가 tmp 아래에 생기도록
     # ★ [2026-08-05] 작업공간 경로가 절대경로로 고정됐다(`core/paths.py`). cwd 만 옮기면
     #   더 이상 격리되지 않으므로 **격리 지점을 함께 돌린다.** 이 한 줄이 없으면 테스트가

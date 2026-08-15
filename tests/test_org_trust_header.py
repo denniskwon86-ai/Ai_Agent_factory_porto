@@ -28,6 +28,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from tests import org_seed
+
 #: 이 파일 전체가 인증 경로 자체를 본다 — principal override 를 받지 않는다.
 pytestmark = pytest.mark.real_auth
 
@@ -35,19 +37,25 @@ pytestmark = pytest.mark.real_auth
 ADMIN_URL = "/api/v1/admin/scope-policy"
 ME_URL = "/api/v1/org/me"
 
-#: 조직도에 실재하는 계정. 새 계정을 만들지 않는다 — 실제 인원 데이터와 충돌한다.
-USER_A = "hikwon_7@lsmnm.com"
-USER_B = "hikwon_2@lsmnm.com"
+#: ★★★ **시험 전용 합성 계정**(`tests/org_seed.py`).
+#: ⚠️ 예전에는 운영 조직도의 실존 계정을 적었다. 그러면 두 가지가 깨진다 —
+#:   ① 깨끗한 checkout 에는 그 계정이 없어 조직이 «부트스트랩»(전원 무제한)이 되고,
+#:      경계 시험이 **아무것도 검증하지 못한 채** 통과하거나 뒤집힌다(2026-08-15 실측 255건).
+#:   ② 실존 인물의 권한이 시험 기대값으로 못박혀, 조직도가 바뀌면 시험이 조용히 다른 것을 본다.
+USER_A = org_seed.MEMBER_A
+USER_B = org_seed.MEMBER_B
 
 
 @pytest.fixture()
-def client(monkeypatch, ecm_org_seed):
+def client(monkeypatch, ecm_org_seed, seeded_org):
     """권한 강제를 켠 앱. 헤더 신뢰는 **운영 기본값(꺼짐)** 그대로 둔다.
 
     ⚠️ 앞뒤로 스코프 캐시를 비운다 — 강제를 켠 캐시가 남으면 뒤에 도는 다른 파일이 그것을
       물려받는다(`test_track_g_route_sealing.py` 가 같은 이유로 같은 일을 한다)."""
     import config
     from core.org_directory import org_directory
+    #: ⚠️ 조직도가 비어 있으면 `is_bootstrap()` 이 **전원 무제한**을 돌려주므로
+    #:   강제를 켜도 401 이 나오지 않는다 — `seeded_org` 가 그것을 심는다.
     org_directory._invalidate()
     monkeypatch.setattr(config, "ORG_ENFORCE", True, raising=False)
     from main import app

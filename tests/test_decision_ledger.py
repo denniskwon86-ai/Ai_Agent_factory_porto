@@ -264,7 +264,7 @@ def test_ledger_failure_is_not_swallowed(wired, monkeypatch):
 
 # ── API ──────────────────────────────────────────────────────────────────
 @pytest.fixture
-def client(wired, tmp_path, monkeypatch):
+def client(wired, tmp_path, monkeypatch, seeded_org):
     store, ledger = wired
     monkeypatch.chdir(tmp_path)
     # ★ [2026-08-05] 작업공간 경로가 절대경로로 고정됐다(`core/paths.py`). cwd 만 옮기면

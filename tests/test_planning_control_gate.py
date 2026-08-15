@@ -25,21 +25,36 @@
 ## 계정은 실측해서 골랐다
 
 · `hikwon@lsmnm.com`    — `unrestricted=True`(전면 통과)
-· `hikwon_4@lsmnm.com`  — 범위 `LS_MNM`·`MNM_BATTERY`·`MNM_COPPER`
-· `hikwon_7@lsmnm.com`  — 범위 `LS_MNM` 하나
-· `hikwon_2@lsmnm.com`  — 범위 `MNM_BATTERY` 하나, 기준정보 권한 없음
-· `hikwon_17@lsmnm.com` — viewer(범위 `LS_MNM`)
+· `org_seed.EXEC`       — 임원, 전사 열람
+· `org_seed.MANAGER_A`  — 범위 `t_alpha` 하나(잎)
+· `org_seed.MEMBER_A`   — 범위 `t_alpha` 하나, 기준정보 권한 없음
+· `org_seed.VIEWER_A`   — viewer(범위 `t_alpha`)
 """
 import pytest
 from fastapi.testclient import TestClient
 
+from tests import org_seed
+
 B = "/api/v1/planning"
 
-ADMIN = "hikwon@lsmnm.com"
-WIDE = "hikwon_4@lsmnm.com"
-MGR = "hikwon_7@lsmnm.com"        # LS_MNM
-MEMBER = "hikwon_2@lsmnm.com"     # MNM_BATTERY
-VIEWER = "hikwon_17@lsmnm.com"
+#: ★★★ **시험 전용 합성 계정·조직**(`tests/org_seed.py`).
+#:
+#: ⚠️⚠️ 예전에는 운영 조직도의 실존 계정·코드를 적었다. 깨끗한 checkout 에는 그것이 없어
+#:   조직이 «부트스트랩»(전원 무제한)이 되고, 이 파일 33건이 **아무것도 검증하지 못했다.**
+#:
+#: 조직 모양은 운영과 같은 «루트 하나 + 형제 둘» 이다:
+#:     t_root ─┬─ t_alpha
+#:             └─ t_beta
+ORG_ROOT = org_seed.DEPT_ROOT     # 옛 t_root 자리 — 최상위
+ORG_A = org_seed.DEPT_A           # 옛 t_alpha 자리
+ORG_B = org_seed.DEPT_B           # 옛 t_beta 자리 — A 의 **형제**
+
+ADMIN = org_seed.ADMIN                 # 전권
+WIDE = org_seed.EXEC                   # 전사 열람(임원)
+MGR = org_seed.MANAGER_A               # 관리 범위 = t_alpha 하나(잎)
+#: ⚠️ 루트 관리자가 아니다 — 루트면 하위가 다 보여 「형제를 못 본다」를 시험할 수 없다.
+MEMBER = org_seed.MEMBER_A             # 범위 t_alpha 하나 — t_beta 는 **형제라 못 본다**
+VIEWER = org_seed.VIEWER_A             # viewer(t_alpha)
 NOBODY = "nobody@example.com"
 
 
@@ -48,7 +63,7 @@ def H(uid: str):
 
 
 @pytest.fixture()
-def client(monkeypatch, ecm_org_seed):
+def client(monkeypatch, ecm_org_seed, seeded_org):
     """권한 강제를 켠 앱. ⚠️ 앞뒤로 스코프 캐시를 비운다 — 강제를 켠 캐시가 남으면 뒤에 도는
     다른 파일의 테스트가 그것을 물려받는다."""
     import config
@@ -73,18 +88,18 @@ READ_PATHS = [
     "/facts",
     "/scenarios",
     "/submissions",
-    "/submissions/current?org_id=LS_MNM&period=2026",
+    "/submissions/current?org_id=t_root&period=2026",
     "/submissions/x/integrity",
     "/drivers",
     "/drivers/D1/impacts",
     "/drivers/D1/preview?pct_change=5",
     "/drivers/D1/external",
     "/import/template",
-    "/variance?org_id=LS_MNM&period=2026",
-    "/cash-flow?org_id=LS_MNM&period=2026",
-    "/rollup-check?org_id=LS_MNM&period=2026",
-    "/backtest/plan?org_id=LS_MNM&period=2026",
-    "/backtest/scenario?scenario_id=x&org_id=LS_MNM&period=2026",
+    "/variance?org_id=t_root&period=2026",
+    "/cash-flow?org_id=t_root&period=2026",
+    "/rollup-check?org_id=t_root&period=2026",
+    "/backtest/plan?org_id=t_root&period=2026",
+    "/backtest/scenario?scenario_id=x&org_id=t_root&period=2026",
 ]
 
 
@@ -171,8 +186,8 @@ def test_other_orgs_plan_is_hidden_as_404(client):
 
     ⚠️ **형제·하위** 조직만 여기서 검증한다. 상위 조직은 `visible_scopes` 가 조상을 항상
       포함하므로(상속) 다른 이야기다 — `test_parent_scope_is_inherited_upward` 참조."""
-    for uid, org in ((MGR, "MNM_BATTERY"),        # 하위 — 하향 열람은 경영진에게만
-                     (MEMBER, "MNM_COPPER")):     # 형제
+    for uid, org in ((MGR, "t_beta"),         # 형제 — 관리자여도 옆 조직은 못 본다
+                     (MEMBER, "t_beta")):     # 형제
         for path in (f"/submissions?org_id={org}",
                      f"/submissions/current?org_id={org}&period=2026",
                      f"/scenarios?org_id={org}"):
@@ -181,7 +196,7 @@ def test_other_orgs_plan_is_hidden_as_404(client):
 
 
 def test_parent_scope_is_inherited_upward(client):
-    """★★★ **상위 조직 범위는 상속된다** — 하위 부서원이 `LS_MNM` 범위를 요청하면 통과한다.
+    """★★★ **상위 조직 범위는 상속된다** — 하위 부서원이 `t_root` 범위를 요청하면 통과한다.
 
     `visible_scopes` 가 «자기 자신 + 운영 상위 조상» 을 주기 때문이고, 그것이 사업부가 전사
     표준을 볼 수 있게 하는 경로다(«상속이지 승급이 아니다» — `api/deps.py` 주석).
@@ -193,7 +208,7 @@ def test_parent_scope_is_inherited_upward(client):
     ★ 이 동작은 백필(D-018 ⑤) 후에 **처음 실제로 관측됐다.** 그 전에는 테스트 환경의 ECM 이
       비어 조상 해석이 실패했고, 그래서 이 경로가 404 로 보였다(«통제가 동작한다» 로 오독).
     """
-    r = client.get(f"{B}/submissions?org_id=LS_MNM", headers=H(MEMBER))
+    r = client.get(f"{B}/submissions?org_id=t_root", headers=H(MEMBER))
     assert r.status_code == 200, "상위 조직 범위 상속이 끊겼다 — 사업부가 전사 표준을 못 본다"
 
 
@@ -203,7 +218,7 @@ def test_own_scope_still_works(client):
     ⚠️ 이 테스트가 이 파일에서 가장 중요하다. `_actor_scopes` 가 빈 집합을 돌려주던 동안
       자기 조직 요청도 404 였다 — 통제를 조이다가 기능을 끈 상태였고, 그것을 «막혔으니 안전»
       으로 읽으면 아무도 못 쓰는 제품이 된다."""
-    for uid, org in ((MGR, "LS_MNM"), (MEMBER, "MNM_BATTERY"), (WIDE, "MNM_COPPER")):
+    for uid, org in ((MGR, "t_root"), (MEMBER, "t_alpha"), (WIDE, "t_beta")):
         for path in (f"/submissions?org_id={org}",
                      f"/submissions/current?org_id={org}&period=2026",
                      f"/scenarios?org_id={org}",
@@ -250,7 +265,7 @@ def test_unrestricted_actor_passes_through(client):
     p = Principal(user_id=ADMIN, scope=org_directory.resolve_scope(ADMIN))
     assert viewer_visible_scopes(p) is None, "무제한 주체에게 목록 필터가 걸렸다"
     # 어느 범위를 물어도 거부되지 않는다 — 목록에 없는 범위여도 그렇다.
-    for req in ("MNM_COPPER", "MNM_BATTERY", "__no_such_scope__"):
+    for req in ("t_beta", "t_alpha", "__no_such_scope__"):
         assert resolve_effective_scope(p, req).denied is False, f"{req} 가 거부됐다"
     assert client.get(f"{B}/submissions", headers=H(ADMIN)).status_code == 200
 
@@ -290,11 +305,11 @@ def test_import_rejects_rows_outside_scope(client):
     즉 식별된 사용자면 누구나 **남의 조직 실적·계획을 등록**할 수 있었다 — 읽기를 막아도 이
     경로로 들어온 값이 그 조직의 실적이 되므로 통제가 성립하지 않는다.
     ⚠️ `commit=False`(검증만)에서도 막는다. 두 경로의 판정이 다르면 반드시 어긋난다."""
-    rows = [{"org_id": "MNM_BATTERY", "account_code": "4000", "period": "2026",
+    rows = [{"org_id": "t_beta", "account_code": "4000", "period": "2026",
              "value_kind": "ACTUAL", "amount": "1"}]
     for commit in (False, True):
         r = client.post(f"{B}/import/rows", json={"rows": rows, "commit": commit},
-                        headers=H(MGR))            # MGR 범위는 LS_MNM 뿐
+                        headers=H(MGR))            # MGR 범위는 t_alpha 뿐
         assert r.status_code == 404, f"commit={commit} 에서 범위 밖 행이 통과했다"
 
 
@@ -302,9 +317,9 @@ def test_import_rejects_when_any_row_is_outside_scope(client):
     """★★ 한 행이라도 범위 밖이면 **전부 거부**한다 — importer 의 «부분 저장 없음» 과 같은 규칙.
 
     부분 허용은 무엇이 들어갔는지 아무도 모르게 만든다."""
-    rows = [{"org_id": "LS_MNM", "account_code": "4000", "period": "2026",
+    rows = [{"org_id": "t_alpha", "account_code": "4000", "period": "2026",
              "value_kind": "ACTUAL", "amount": "1"},
-            {"org_id": "MNM_COPPER", "account_code": "4000", "period": "2026",
+            {"org_id": "t_beta", "account_code": "4000", "period": "2026",
              "value_kind": "ACTUAL", "amount": "1"}]
     r = client.post(f"{B}/import/rows", json={"rows": rows, "commit": False}, headers=H(MGR))
     assert r.status_code == 404
@@ -319,7 +334,7 @@ def test_import_allows_own_scope_validation(client):
       계정을 먼저 등록해 **실제로 통과하는 것**까지 확인한다."""
     from core.planning_model import planning_store
     planning_store.upsert_account("4000", "매출", "revenue", 1, "")
-    rows = [{"org_id": "LS_MNM", "account_code": "4000", "period": "2026",
+    rows = [{"org_id": "t_alpha", "account_code": "4000", "period": "2026",
              "value_kind": "ACTUAL", "amount": "1"}]
     r = client.post(f"{B}/import/rows", json={"rows": rows, "commit": False}, headers=H(MGR))
     assert r.status_code == 200, "자기 조직 행이 범위 검증에서 막혔다"

@@ -21,9 +21,11 @@ import shutil
 import pytest
 from fastapi.testclient import TestClient
 
+from tests import org_seed
+
 
 @pytest.fixture()
-def client(monkeypatch):
+def client(monkeypatch, seeded_org):
     """권한 강제를 켠 상태의 앱. **끄면 이 테스트는 아무것도 증명하지 못한다.**
 
     ⚠️⚠️ `org_directory` 는 해석한 스코프를 **캐시한다.** 강제를 켠 상태로 만든 캐시가 남으면
@@ -78,14 +80,14 @@ def test_member_can_read_but_cannot_overwrite_global(client):
 
     ★ 전역 저장은 한 사람의 클릭이 전 사용자·전 프로젝트의 파이프라인을 바꾼다 —
       그래서 설계 §9 P0-3 은 플랫폼 관리자 전용으로 못 박았다."""
-    r = client.get("/api/v1/factory/agents", headers=_as("hikwon_1@lsmnm.com"))
+    r = client.get("/api/v1/factory/agents", headers=_as(org_seed.AI_ADMIN))
     assert r.status_code == 200, "부서 member 는 읽을 수 있어야 한다"
 
     body = (r.json() or {}).get("data") or {}
-    w = client.put("/api/v1/factory/agents", json=body, headers=_as("hikwon_1@lsmnm.com"))
+    w = client.put("/api/v1/factory/agents", json=body, headers=_as(org_seed.AI_ADMIN))
     assert w.status_code == 403, "member 가 전역 레지스트리를 덮어쓰면 안 된다"
 
-    z = client.post("/api/v1/factory/agents/reset", headers=_as("hikwon_1@lsmnm.com"))
+    z = client.post("/api/v1/factory/agents/reset", headers=_as(org_seed.AI_ADMIN))
     assert z.status_code == 403, "member 가 전역 초기화를 하면 안 된다"
 
 
@@ -93,12 +95,12 @@ def test_viewer_cannot_create_workflow(client):
     """★★ viewer 는 워크플로우를 만들 수 없다(설계 §4.2)."""
     r = client.post("/api/v1/factory/templates/copy",
                     json={"src_id": "default", "new_id": "viewer_try", "new_name": "x"},
-                    headers=_as("hikwon_17@lsmnm.com"))
+                    headers=_as(org_seed.VIEWER_A))
     assert r.status_code == 403
 
 
 def test_platform_admin_can_read_global(client):
-    r = client.get("/api/v1/factory/agents", headers=_as("hikwon@lsmnm.com"))
+    r = client.get("/api/v1/factory/agents", headers=_as(org_seed.ADMIN))
     assert r.status_code == 200
 
 
@@ -107,7 +109,7 @@ def test_default_template_cannot_be_deleted(client):
     """★★★ 기본 워크플로우를 지우면 **신규 프로젝트가 만들어지지 않는다.**
 
     권한과 무관하게 막는다 — 관리자라도 «지울 수 있는 것» 과 «지워도 되는 것» 은 다르다."""
-    r = client.delete("/api/v1/factory/templates/default", headers=_as("hikwon@lsmnm.com"))
+    r = client.delete("/api/v1/factory/templates/default", headers=_as(org_seed.ADMIN))
     assert r.status_code == 400
     assert "복사본" in (r.json() or {}).get("detail", "")
 
@@ -116,7 +118,7 @@ def test_manager_cannot_edit_default_template(client):
     """★★ `default` 는 시스템 기본 정의다. 부서 manager 는 복사해서 쓴다."""
     body = {"agents": [], "version": 1}
     r = client.put("/api/v1/factory/templates/default", json=body,
-                   headers=_as("hikwon_4@lsmnm.com"))
+                   headers=_as(org_seed.AI_ADMIN))
     assert r.status_code in (403, 422), "manager 가 기본 워크플로우를 직접 고치면 안 된다"
 
 
@@ -126,7 +128,7 @@ def test_skill_generation_requires_permission(client):
     r = client.post("/api/v1/factory/ai-recommend/skill",
                     json={"agent_id": "planner", "agent_name_ko": "기획",
                           "role_description": "x"},
-                    headers=_as("hikwon_17@lsmnm.com"))
+                    headers=_as(org_seed.VIEWER_A))
     assert r.status_code == 403, "viewer 는 스킬 초안을 만들 수 없다"
 
 
@@ -142,7 +144,7 @@ def test_skill_agent_id_is_validated_before_llm(client, bad_id):
     r = client.post("/api/v1/factory/ai-recommend/skill",
                     json={"agent_id": bad_id, "agent_name_ko": "테스트",
                           "role_description": "x"},
-                    headers=_as("hikwon_1@lsmnm.com"))
+                    headers=_as(org_seed.AI_ADMIN))
     assert r.status_code == 422, f"«{bad_id}» 가 파일명으로 통과했다"
 
 
@@ -151,6 +153,9 @@ def test_skill_draft_does_not_overwrite_published(client, monkeypatch, tmp_path)
 
     ⚠️ 예전에는 `skills/<id>.md` 에 바로 썼다 — 전 프로젝트가 쓰는 스킬이 한 번의 클릭으로
       조용히 바뀌었고, 되돌릴 방법도 없었다."""
+    #: ⚠️ 경로는 **상대경로 그대로** 둔다 — 라우트가 `os.path.join("skills", …)` 로 쓰므로
+    #:   여기서 격리 경로로 바꾸면 라우트가 «공용 스킬 없음» 으로 보고 시험 의도가 사라진다.
+    #:   (공용 파일은 `finally` 에서 지운다.)
     os.makedirs("skills", exist_ok=True)
     published = os.path.join("skills", "canaryskill_skill.md")
     original = "원본 공용 스킬 — 덮어쓰이면 안 된다"
@@ -160,15 +165,22 @@ def test_skill_draft_does_not_overwrite_published(client, monkeypatch, tmp_path)
     async def _fake(_self, _state, _prompt, output_mode="json", light=True):
         return '{"role_expanded": "역할", "skill_markdown": "LLM 이 만든 새 내용"}'
 
-    from core.llm_gateway import LLMGateway
+    from core.llm_gateway import LLMGateway, _LazyGateway
     monkeypatch.setattr(LLMGateway, "aexecute", _fake, raising=False)
+    #: ★★★ **게이트웨이 «생성» 도 막는다.** `aexecute` 만 갈아끼우면 `_LazyGateway._instance()`
+    #:   가 진짜 `LLMGateway()` 를 만들고, 그 생성자가 `GOOGLE_API_KEY` 를 요구한다.
+    #: ⚠️ 키는 Git 에 없다 — 그래서 이 시험은 **깨끗한 checkout 에서만** 죽었고, 실패 모습은
+    #:   「권한 통제가 깨졌다」였지만 원인은 환경 의존이었다. 이 시험이 확인하려는 것은
+    #:   「검토 없는 LLM 출력이 공용 스킬을 덮지 않는다」뿐이고 진짜 모델은 필요 없다.
+    monkeypatch.setattr(LLMGateway, "__init__", lambda self, *a, **kw: None, raising=False)
+    monkeypatch.setattr(_LazyGateway, "_inst", None, raising=False)  # 캐시된 진짜 인스턴스 무시
 
     draft_dir = os.path.join("skills", "_proposals")
     try:
         r = client.post("/api/v1/factory/ai-recommend/skill",
                         json={"agent_id": "canaryskill", "agent_name_ko": "카나리",
                               "role_description": "x"},
-                        headers=_as("hikwon_1@lsmnm.com"))
+                        headers=_as(org_seed.AI_ADMIN))
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["published"] is False
@@ -187,7 +199,7 @@ def test_denied_access_is_recorded(client):
     """★★ 거부를 **기록한다.** 기록이 없으면 «누가 무엇을 시도했는가» 를 물을 수 없다."""
     from core.enterprise_context import audit
     before = len(audit.tail(200)) if hasattr(audit, "tail") else None
-    client.post("/api/v1/factory/agents/reset", headers=_as("hikwon_17@lsmnm.com"))
+    client.post("/api/v1/factory/agents/reset", headers=_as(org_seed.VIEWER_A))
     if before is None:
         pytest.skip("감사 조회 헬퍼가 없어 기록 내용을 확인하지 못한다")
     after = audit.tail(200)

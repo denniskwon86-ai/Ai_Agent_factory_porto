@@ -14,7 +14,7 @@
 ## 그리고 표가 실제로 붙어 있는지
 
 표만 있고 라우터에 의존성이 없으면 아무 일도 일어나지 않는다. 마지막 테스트가
-`hikwon_17@lsmnm.com`(viewer)으로 실제 호출해 **403 이 나오는지** 본다 —
+시험 계정(viewer)으로 실제 호출해 **403 이 나오는지** 본다 —
 표를 읽었다는 유일한 증거다.
 
 ⚠️⚠️ **LLM 을 태우는 라우트는 찌르지 않는다.** 2026-08-07 에 그렇게 해서 실제로 Gemini
@@ -23,6 +23,8 @@
 """
 import pytest
 from fastapi.testclient import TestClient
+
+from tests import org_seed
 
 from core import route_authority as ra
 
@@ -107,7 +109,7 @@ def test_exempt_entries_carry_a_reason():
 
 # ── ③ 표가 실제로 붙어 있는가 ───────────────────────────────────────────────
 @pytest.fixture()
-def client(monkeypatch, ecm_org_seed):
+def client(monkeypatch, ecm_org_seed, seeded_org):
     import config
     from core.org_directory import org_directory
     org_directory._invalidate()
@@ -133,9 +135,9 @@ SAFE_PROBES = [
 def test_viewer_is_blocked_by_the_table(client, method, url, body):
     """★★★ 봉합 전 실측: 이 호출들이 viewer 에게 **200** 이었다.
 
-    `hikwon_17@lsmnm.com` 은 viewer 이며 `_ROLE_CAPS` 상 `project.*` 를 하나도 갖지 않는다."""
+    시험 계정 은 viewer 이며 `_ROLE_CAPS` 상 `project.*` 를 하나도 갖지 않는다."""
     r = client.request(method, url, json=body,
-                       headers={"X-Factory-User": "hikwon_17@lsmnm.com"})
+                       headers={"X-Factory-User": org_seed.VIEWER_A})
     assert r.status_code == 403, (
         f"viewer 에게 {method} {url} 가 {r.status_code} 로 열려 있다 — 표가 붙지 않았거나 "
         f"권한 배정이 비어 있다: {r.text[:200]}")

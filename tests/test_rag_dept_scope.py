@@ -279,7 +279,7 @@ def test_index_release_without_dept_is_untagged():
 
 # ── ④-b 배선: 게시 라우트가 소유 부서를 넘기는가 (★ 회귀 방지) ────────────
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, seeded_org):
     monkeypatch.chdir(tmp_path)          # ./projects, ./library 가 tmp 아래에 생기도록
     # ★ [2026-08-05] 작업공간 경로가 절대경로로 고정됐다(`core/paths.py`). cwd 만 옮기면
     #   더 이상 격리되지 않으므로 **격리 지점을 함께 돌린다.** 이 한 줄이 없으면 테스트가

@@ -42,11 +42,15 @@ def _app():
 
 
 @pytest.fixture()
-def policy(monkeypatch, tmp_path, ecm_org_seed):
+def policy(monkeypatch, tmp_path, ecm_org_seed, seeded_org):
     """정책 파일을 tmp 로 격리하고 «쓰는» 헬퍼를 준다.
 
     ⚠️ `conftest` 가 이미 `_POLICY_PATH` 를 격리하지만, 여기서는 **값을 직접 써야** 하므로
-      경로를 다시 잡고 캐시를 비운다(`resolve_scope` 는 해석 결과를 캐시한다)."""
+      경로를 다시 잡고 캐시를 비운다(`resolve_scope` 는 해석 결과를 캐시한다).
+
+    ⚠️⚠️ `seeded_org` 가 필요하다 — 조직이 0건이면 `is_bootstrap()` 이 **전원 무제한**을
+      돌려주므로, 강제를 켜도 401 이 나오지 않는다. 그러면 이 파일은 「스위치가 동작한다」를
+      확인하지 못한 채 통과하거나 뒤집힌다."""
     import config
     from core import scope_policy
     from core.org_directory import org_directory

@@ -32,6 +32,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from tests import org_seed
+
 #: ★★ [P0-1C] 이 파일은 **「당신이 누구인지 모른다」고 답하는가** 를 본다. 즉 인증 경로 자체다.
 #  `tests/plugin_test_auth.py` 의 principal override 가 걸리면 익명 요청에도 신원이 생겨
 #  봉인이 뚫린 것을 **못 본다** — 실제로 이 마커를 붙이기 전 2건이 그렇게 통과했다.
@@ -214,7 +216,7 @@ def _cases():
 
 
 @pytest.fixture()
-def client(monkeypatch, ecm_org_seed):
+def client(monkeypatch, ecm_org_seed, seeded_org):
     """권한 강제를 켠 앱.
 
     ⚠️ 앞뒤로 스코프 캐시를 비운다 — 강제를 켠 캐시가 남으면 뒤에 도는 다른 파일의 테스트가
@@ -267,9 +269,12 @@ def test_write_routes_are_not_merely_identified(client):
     익명 차단은 «누구인지 모르는 사람» 만 막는다. 등록된 일반 사용자가 골든 기준을 승격시킬 수
     있으면 봉합이 절반만 된 것이다 — 그리고 그 절반은 익명 검사만으로는 **영원히 보이지 않는다.**
 
-    `hikwon_17@lsmnm.com` 은 viewer 다(`test_planning_control_gate` 가 실측해 고른 계정).
+    ★★★ 열람자는 **시험 전용 합성 계정**이다(`tests/org_seed.py`).
+    ⚠️ 예전에는 운영 조직도의 실존 계정(`hikwon_17@lsmnm.com`)을 적었다 — 깨끗한 checkout 에는
+      그 계정이 없어 조직이 «부트스트랩»(전원 무제한)이 되고, 이 시험은 **아무것도 검증하지
+      못한 채** 통과했다(2026-08-15 실측).
     이 계정으로 쓰기가 되면 실패다."""
-    viewer = {"X-Factory-User": "hikwon_17@lsmnm.com"}
+    viewer = {"X-Factory-User": org_seed.VIEWER_A}
     opened = []
     for module_path, label in SEALED_ROUTERS:
         if module_path not in WRITE_PROBE_ROUTERS:

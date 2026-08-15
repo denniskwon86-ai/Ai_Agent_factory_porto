@@ -7,7 +7,7 @@
 ## 봉합 전 실측 결함
 
 ```
-viewer(hikwon_17@lsmnm.com) → DELETE /api/v1/factory/projects/{id} → 200
+viewer(시험 계정) → DELETE /api/v1/factory/projects/{id} → 200
 ```
 
 읽기 전용 계정이 프로젝트를 **rmtree** 로 지울 수 있었다. 원인은 `assert_project_writable`
@@ -27,6 +27,8 @@ import json
 import os
 
 import pytest
+
+from tests import org_seed
 
 from core import project_deletion as pdel
 
@@ -201,7 +203,7 @@ def test_is_deleted_is_false_when_meta_unreadable(tmp_path):
 # ⚠️ 정책 모듈만 초록이고 라우트가 옛 판정을 그대로 쓰면 아무것도 달라지지 않는다.
 #   실측 결함이 «viewer 가 DELETE 로 200» 이었으므로 **그 호출을 그대로 재현**한다.
 @pytest.fixture()
-def client(monkeypatch, tmp_path, ecm_org_seed):
+def client(monkeypatch, tmp_path, ecm_org_seed, seeded_org):
     """★★ [G1-C3 · 2026-08-13] 탐침 프로젝트를 **실제로 만든다.**
 
     종전에는 존재하지 않는 id 로 불렀고, 그때는 `assert_project_writable` 의 「소유권 미기록은
@@ -240,13 +242,13 @@ def client(monkeypatch, tmp_path, ecm_org_seed):
 def test_route_blocks_viewer_delete(client):
     """★ 봉합 전 실측: 이 호출이 **200** 이었다."""
     r = client.request("DELETE", "/api/v1/factory/projects/__deletion_probe__",
-                       headers={"X-Factory-User": "hikwon_17@lsmnm.com"})
+                       headers={"X-Factory-User": org_seed.VIEWER_A})
     assert r.status_code == 403, f"viewer 삭제가 {r.status_code} 로 통과했다: {r.text[:200]}"
 
 
 def test_route_blocks_viewer_purge(client):
     r = client.request("DELETE", "/api/v1/factory/projects/__deletion_probe__?purge=true",
-                       headers={"X-Factory-User": "hikwon_17@lsmnm.com"})
+                       headers={"X-Factory-User": org_seed.VIEWER_A})
     assert r.status_code == 403, f"viewer 실제 삭제가 {r.status_code} 로 통과했다"
 
 

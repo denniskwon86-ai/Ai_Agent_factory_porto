@@ -18,6 +18,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from tests import org_seed
+
 import config
 from core.auth import SSE_TICKET_SECONDS, AuthStore
 
@@ -123,7 +125,7 @@ def test_사용자_없이는_발급하지_않는다(store):
 # ── 라우트 계약 ──────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, seeded_org):
     import core.auth as auth_mod
     from main import app
 
@@ -155,10 +157,10 @@ def test_헤더_사칭으로는_티켓을_받지_못한다(client, monkeypatch):
     c, _ = client
     monkeypatch.setattr(config, "ORG_TRUST_HEADER", True, raising=False)
 
-    r1 = c.post("/api/v1/auth/sse-ticket", headers={"X-Factory-User": "hikwon@lsmnm.com"})
+    r1 = c.post("/api/v1/auth/sse-ticket", headers={"X-Factory-User": org_seed.ADMIN})
     assert r1.status_code == 401, "헤더 사칭으로 티켓이 발급됐습니다."
 
-    r2 = c.post("/api/v1/auth/sse-ticket?as_user=hikwon@lsmnm.com")
+    r2 = c.post("/api/v1/auth/sse-ticket?as_user=시험 계정")
     assert r2.status_code == 401, "as_user 쿼리로 티켓이 발급됐습니다."
 
 
@@ -166,7 +168,7 @@ def test_SSE_는_티켓_없이_열리지_않는다(client):
     """⚠️ 실패해도 `as_user` 로 폴백하지 않는다 — 폴백은 곧 우회로다."""
     c, _ = client
     assert c.get("/ws/timeline").status_code == 401
-    assert c.get("/ws/timeline?as_user=hikwon@lsmnm.com").status_code == 401
+    assert c.get("/ws/timeline?as_user=시험 계정").status_code == 401
     assert c.get("/ws/timeline?ticket=위조").status_code == 401
 
 
@@ -193,7 +195,7 @@ def test_요청자가_보낸_테넌트를_티켓에_싣지_않는다(client):
       테스트가 지키는 계약이다."""
     c, store = client
     lg = c.post("/api/v1/auth/login",
-                json={"user_id": "hikwon@lsmnm.com", "password": "pass:"})
+                json={"user_id": org_seed.ADMIN, "password": "pass:"})
     assert lg.status_code == 200
     tok = lg.json()["data"]["token"]
 
@@ -313,8 +315,8 @@ def test_옛_스키마_DB_에서도_로그인이_된다(tmp_path):
     conn.close()
 
     store = AuthStore(db_path=str(p))
-    store.set_password("hikwon@lsmnm.com", "pw12345")     # `_init()` 이 여기서 돈다
-    assert store.verify("hikwon@lsmnm.com", "pw12345"), "옛 DB 에서 로그인이 되지 않는다"
+    store.set_password(org_seed.ADMIN, "pw12345")     # `_init()` 이 여기서 돈다
+    assert store.verify(org_seed.ADMIN, "pw12345"), "옛 DB 에서 로그인이 되지 않는다"
 
     #: 보강이 실제로 일어났는지 — 인덱스가 서야 SSE 세션 확인이 동작한다.
     conn = sqlite3.connect(str(p))
@@ -336,8 +338,8 @@ def test_새_DB_도_같은_경로로_정상_생성된다(tmp_path):
 
     p = tmp_path / "fresh.db"
     store = AuthStore(db_path=str(p))
-    store.set_password("hikwon@lsmnm.com", "pw12345")
-    assert store.verify("hikwon@lsmnm.com", "pw12345")
+    store.set_password(org_seed.ADMIN, "pw12345")
+    assert store.verify(org_seed.ADMIN, "pw12345")
     conn = sqlite3.connect(str(p))
     cols = {r[1] for r in conn.execute("PRAGMA table_info(auth_session)")}
     tcols = {r[1] for r in conn.execute("PRAGMA table_info(auth_sse_ticket)")}

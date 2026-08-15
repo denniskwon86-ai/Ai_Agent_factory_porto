@@ -19,9 +19,15 @@
 import pytest
 from fastapi.testclient import TestClient
 
-ADMIN = "hikwon@lsmnm.com"
-MGR = "hikwon_7@lsmnm.com"        # 읽기·관리 = LS_MNM
-MEMBER = "hikwon_2@lsmnm.com"     # 읽기 = MNM_BATTERY
+from tests import org_seed
+
+#: ★★★ **시험 전용 합성 계정·조직**(`tests/org_seed.py`).
+#: ⚠️ 예전에는 운영 조직도와 **운영 ECM 사본**(`ecm_org_seed`)에 기댔다. 깨끗한 checkout 에는
+#:   둘 다 없어 이 파일이 마지막까지 남은 환경 의존이었다 — 다른 파일이 전부 초록이 된 뒤에야
+#:   드러났다.
+ADMIN = org_seed.ADMIN
+MGR = org_seed.MANAGER_A          # 읽기·관리 = t_alpha
+MEMBER = org_seed.MEMBER_B        # 읽기 = t_beta
 
 
 def H(uid: str):
@@ -29,7 +35,7 @@ def H(uid: str):
 
 
 @pytest.fixture()
-def client(monkeypatch, ecm_org_seed):
+def client(monkeypatch, seeded_org):
     import config
     from core.org_directory import org_directory
     org_directory._invalidate()
@@ -65,7 +71,7 @@ def test_patching_the_origin_module_affects_every_route(client, monkeypatch, tmp
     import core.scope_guard as sg
     monkeypatch.setattr(sg, "resolve_effective_scope",
                         lambda p, req="", *a, **kw: sg.EffectiveScope(
-                            denied=True, actor="x", allowed_scopes=["MNM_BATTERY"],
+                            denied=True, actor="x", allowed_scopes=["t_beta"],
                             reason="requested_scope_not_in_actor_scopes"))
     # 서로 다른 세 라우터가 **모두** 막힌다.
     assert client.get("/api/v1/briefing?scope_node_id=MNM_COPPER",
@@ -83,7 +89,7 @@ def test_denial_is_still_audited(client, monkeypatch, tmp_path):
     monkeypatch.setattr(audit, "_LOG_PATH", str(tmp_path / "audit.jsonl"))
     monkeypatch.setattr(sg, "resolve_effective_scope",
                         lambda p, req="", *a, **kw: sg.EffectiveScope(
-                            denied=True, actor="bob", allowed_scopes=["MNM_BATTERY"],
+                            denied=True, actor="bob", allowed_scopes=["t_beta"],
                             reason="requested_scope_not_in_actor_scopes"))
     client.get("/api/v1/planning/submissions?org_id=MNM_COPPER", headers=H(MGR))
     e = audit.recent(1)[0]
@@ -95,29 +101,29 @@ def test_denial_is_still_audited(client, monkeypatch, tmp_path):
 # ── 응답에 정본 + 표시용 값 (D-018 ③) ────────────────────────────────────
 def test_response_carries_node_id_and_display_fields(client):
     """★★★ 화면은 `node_41402723bc90` 을 사람에게 보여줄 수 없다. 정본과 표시값을 함께 준다."""
-    r = client.get("/api/v1/planning/facts?org_id=LS_MNM&scope_node_id=LS_MNM",
+    r = client.get("/api/v1/planning/facts?org_id=t_alpha&scope_node_id=t_alpha",
                    headers=H(MGR))
     assert r.status_code == 200
     perm = r.json()["permission"]
     assert perm["scope_node_id"].startswith("node_"), \
         f"정본으로 정규화되지 않았다: {perm['scope_node_id']}"
-    assert perm["scope_code"] == "LS_MNM", "표시용 업무 코드가 없다"
+    assert perm["scope_code"] == "t_alpha", "표시용 업무 코드가 없다"
     assert perm["scope_name"], "표시용 이름이 없다"
 
 
 def test_code_input_is_flagged_for_backfill(client):
     """★★ 코드로 들어온 요청은 `needs_normalization=True` 다 — 그 저장분이 아직 정본이 아니라는
     뜻이고, 백필(D-018 ⑤) 진척을 관측하는 지점이다."""
-    r = client.get("/api/v1/planning/facts?org_id=LS_MNM&scope_node_id=LS_MNM", headers=H(MGR))
+    r = client.get("/api/v1/planning/facts?org_id=t_alpha&scope_node_id=t_alpha", headers=H(MGR))
     perm = r.json()["permission"]
     assert perm["scope_ref_kind"] == "ecm_code"
     assert perm["needs_normalization"] is True
 
 
-def test_node_id_input_needs_no_normalization(client, ecm_org_seed):
+def test_node_id_input_needs_no_normalization(client, seeded_org):
     """정본으로 들어오면 백필 대상이 아니다."""
-    node = ecm_org_seed["LS_MNM"]
-    r = client.get(f"/api/v1/planning/facts?org_id=LS_MNM&scope_node_id={node}", headers=H(MGR))
+    node = org_seed.NODES[org_seed.DEPT_A]
+    r = client.get(f"/api/v1/planning/facts?org_id=t_alpha&scope_node_id={node}", headers=H(MGR))
     perm = r.json()["permission"]
     assert perm["scope_node_id"] == node
     assert perm["scope_ref_kind"] == "ecm_node" and perm["needs_normalization"] is False
@@ -125,10 +131,10 @@ def test_node_id_input_needs_no_normalization(client, ecm_org_seed):
 
 def test_briefing_also_reports_scope_meta(client):
     """브리핑도 같은 메타를 준다 — 라우트마다 응답 모양이 다르면 화면이 분기해야 한다."""
-    r = client.get("/api/v1/briefing?scope_node_id=LS_MNM", headers=H(MGR))
+    r = client.get("/api/v1/briefing?scope_node_id=t_alpha", headers=H(MGR))
     assert r.status_code == 200
     perm = r.json()["permission"]
-    assert perm["scope_node_id"].startswith("node_") and perm["scope_code"] == "LS_MNM"
+    assert perm["scope_node_id"].startswith("node_") and perm["scope_code"] == "t_alpha"
 
 
 def test_empty_scope_is_not_flagged(client):
@@ -159,27 +165,27 @@ def test_entity_mode_reaches_the_resolver(client):
     import pytest as _pytest
     with _pytest.MonkeyPatch.context() as mp:
         mp.setattr(sg, "resolve_effective_scope", spy)
-        client.get("/api/v1/briefing?scope_node_id=LS_MNM&entity_mode=REAL"
+        client.get("/api/v1/briefing?scope_node_id=t_alpha&entity_mode=REAL"
                    "&tenant_id=tenant_default", headers=H(MGR))
     assert seen, "범위 해석이 호출되지 않았다"
     assert seen[0]["entity_mode"] == "REAL" and seen[0]["tenant_id"] == "tenant_default"
 
 
-def test_wrong_context_does_not_resolve_to_the_other_mode(client, ecm_org_seed):
+def test_wrong_context_does_not_resolve_to_the_other_mode(client, seeded_org):
     """★★★ 실제 코드를 가상 문맥으로 물으면 **해석되지 않는다**(그 반대도 같다).
 
     이것이 «코드는 tenant·entity_mode 안에서만 유일하다» 의 실질적 의미다."""
     from core.enterprise_context.resolver import ecm_resolver
-    r = ecm_resolver.resolve_scope_ref("MNM_BATTERY", entity_mode="VIRTUAL")
+    r = ecm_resolver.resolve_scope_ref("t_beta", entity_mode="VIRTUAL")
     assert r["resolved"] is False and r["kind"] == "code_out_of_context"
     # 반대 방향: 가상 코드를 실제 문맥으로
-    v = ecm_resolver.resolve_scope_ref("V8039_MNM_BATTERY", entity_mode="REAL")
+    v = ecm_resolver.resolve_scope_ref("v_t_beta", entity_mode="REAL")
     assert v["resolved"] is False and v["kind"] == "code_out_of_context"
     # 맞는 문맥에서는 각자 해석된다 — 막는 것만 확인하면 «전부 막힌 상태» 를 통과로 센다.
     assert ecm_resolver.resolve_scope_ref(
-        "MNM_BATTERY", entity_mode="REAL")["node_id"] == ecm_org_seed["MNM_BATTERY"]
+        "t_beta", entity_mode="REAL")["node_id"] == org_seed.NODES[org_seed.DEPT_B]
     assert ecm_resolver.resolve_scope_ref(
-        "V8039_MNM_BATTERY", entity_mode="VIRTUAL")["node_id"] == ecm_org_seed["V8039_MNM_BATTERY"]
+        "v_t_beta", entity_mode="VIRTUAL")["node_id"] == org_seed.NODES[org_seed.VIRTUAL_CODE_B]
 
 
 # ── 통제가 업무를 막지 않는다 ─────────────────────────────────────────────
@@ -188,7 +194,7 @@ def test_own_scope_still_passes_after_normalization(client):
 
     ⚠️ 이 테스트가 이 파일에서 가장 중요하다 — 앞선 세션에서 범위 판정을 조이다가 «자기 조직도
       404» 가 된 적이 있고, 그 상태를 «막혔으니 안전» 으로 읽으면 아무도 못 쓰는 제품이 된다."""
-    for uid, org in ((MGR, "LS_MNM"), (MEMBER, "MNM_BATTERY")):
+    for uid, org in ((MGR, "t_alpha"), (MEMBER, "t_beta")):
         for path in (f"/api/v1/planning/submissions?org_id={org}",
                      f"/api/v1/planning/facts?org_id={org}&scope_node_id={org}",
                      f"/api/v1/briefing?scope_node_id={org}"):

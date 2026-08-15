@@ -17,23 +17,29 @@
 
   · `hikwon@lsmnm.com`    — 플랫폼 관리자(전부 가능)
   · `hikwon_4@lsmnm.com`  — AI 거버넌스 관리자(조직 범위 제한 없음, 전사 승인 가능)
-  · `hikwon_7@lsmnm.com`  — 부서 manager. 관리 범위는 **`LS_MNM` 하나**, `is_ai_admin=False`
+  · `org_seed.MANAGER_A`  — 부서 manager. 관리 범위는 **`t_alpha` 하나**, `is_ai_admin=False`
   · `hikwon_2@lsmnm.com`  — 부서 member. 관리 범위 없음, 승인·폐기 capability 없음
   · `hikwon_17@lsmnm.com` — viewer. 읽기만
 """
 import pytest
 from fastapi.testclient import TestClient
 
+from tests import org_seed
+
 from core.agent_assets import (AgentAssetStore, ST_APPROVED, ST_DRAFT, ST_RETIRED, ST_REVIEW,
                                VIS_ENTERPRISE, VIS_PERSONAL, VIS_SCOPE, VIS_SYSTEM)
 
 B = "/api/v1/agent-governance"
 
-ADMIN = "hikwon@lsmnm.com"        # 플랫폼 관리자
-AI_ADMIN = "hikwon_4@lsmnm.com"   # AI 거버넌스 관리자 (LS_MNM·MNM_BATTERY·MNM_COPPER)
-MGR = "hikwon_7@lsmnm.com"        # 부서 manager, 관리 범위 = LS_MNM 만
-MEMBER = "hikwon_2@lsmnm.com"     # 부서 member, 관리 범위 없음
-VIEWER = "hikwon_17@lsmnm.com"    # viewer
+#: ★★★ **시험 전용 합성 계정**(`tests/org_seed.py`).
+#: ⚠️⚠️ 예전에는 운영 조직도의 실존 계정을 적었다. 깨끗한 checkout 에는 그 계정이 없어
+#:   조직이 «부트스트랩»(전원 무제한)이 되고, 이 파일 41건이 **아무것도 검증하지 못한 채**
+#:   뒤집혔다(2026-08-15 실측). 기대 권한의 정본은 이제 `org_seed.USERS` 표다.
+ADMIN = org_seed.ADMIN            # 플랫폼 관리자(전권)
+AI_ADMIN = org_seed.AI_ADMIN      # AI 거버넌스 관리자
+MGR = org_seed.MANAGER_A          # 부서 manager — 관리 범위는 t_alpha 하나
+MEMBER = org_seed.MEMBER_A        # 부서 member — 관리 범위 없음
+VIEWER = org_seed.VIEWER_A        # viewer — 읽기만
 
 
 def H(uid: str):
@@ -41,7 +47,7 @@ def H(uid: str):
 
 
 @pytest.fixture()
-def client(monkeypatch, tmp_path, ecm_org_seed):
+def client(monkeypatch, tmp_path, ecm_org_seed, seeded_org):
     """권한 강제를 켠 앱 + **격리된 자산 DB**.
 
     ⚠️⚠️ 싱글턴을 **두 곳** 갈아끼운다. 라우트와 어댑터가 각각 `from ... import agent_assets`
@@ -80,7 +86,11 @@ def _create(client, uid, kind_path="agents", **kw):
 
 def _approved(client, uid, **kw):
     """생성 → 검토 요청 → 승인까지 마친 자산."""
-    a = _create(client, uid, **kw).json()
+    r = _create(client, uid, **kw)
+    a = r.json()
+    #: ⚠️ 생성이 막혔는데 `KeyError` 로만 드러나면 «왜 막혔는지» 를 알 수 없다 —
+    #:   권한·범위·검증 어느 쪽인지 응답이 말하게 한다.
+    assert "asset_id" in a, f"자산 생성 실패 HTTP {r.status_code}: {r.text[:300]}"
     aid = a["asset_id"]
     client.post(f"{B}/agents/{aid}/submit", headers=H(uid))
     client.post(f"{B}/agents/{aid}/approve", headers=H(uid))
@@ -154,7 +164,7 @@ def test_list_reports_real_version_count_and_runnable(client):
     `runnable` 은 항상 `None` 이 된다 — 화면은 그것을 «버전 없음, 실행 불가» 로 읽는다.
     실제로 그렇게 만들었다가 P1-5 에서 같은 원인으로 조직 워크플로우가 목록에서 통째로
     사라진 것을 발견했다. 두 값을 여기서 잠근다."""
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     client.put(f"{B}/agents/{a['asset_id']}", json={"body": {"v": 2}}, headers=H(MGR))
     row = next(i for i in client.get(f"{B}/agents?include_files=false",
                                      headers=H(MGR)).json()["items"]
@@ -162,7 +172,7 @@ def test_list_reports_real_version_count_and_runnable(client):
     assert row["version_count"] == 2, "개정 이력이 목록에서 0 으로 보인다"
     assert row["runnable"] is False, "개정으로 승인이 풀렸는데 실행 가능으로 보인다"
 
-    b = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    b = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     row_b = next(i for i in client.get(f"{B}/agents?include_files=false",
                                        headers=H(MGR)).json()["items"]
                  if i["asset_id"] == b["asset_id"])
@@ -190,7 +200,7 @@ def test_list_hides_other_peoples_personal_drafts(client):
 
 
 def test_status_filter(client):
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     got = client.get(f"{B}/agents?status={ST_APPROVED}", headers=H(MGR)).json()["items"]
     assert a["asset_id"] in [i["asset_id"] for i in got]
     drafts = client.get(f"{B}/agents?status={ST_DRAFT}", headers=H(MGR)).json()["items"]
@@ -256,7 +266,7 @@ def test_unscoped_list_carries_no_hidden_envelope(client):
 def test_hidden_present_is_false_when_nothing_is_hidden(client):
     """★★ 이 값이 **항상 True** 면 아무 뜻이 없다. 화면은 늘 「가려진 것이 있다」를 띄우고,
     사용자는 그 문구를 배경으로 읽게 된다 — 그러면 진짜로 가려진 날에도 아무도 안 본다."""
-    _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     d = client.get(f"{B}/agents", headers=H(MGR)).json()
     assert d["hidden_present"] is False and "hidden_count" not in d
 
@@ -348,14 +358,15 @@ def test_viewer_cannot_create(client):
 def test_member_can_create_personal_but_not_org_asset(client):
     """★★ 관리 범위가 없는 부서원은 **개인 초안까지만** 만든다."""
     assert _create(client, MEMBER, visibility=VIS_PERSONAL).status_code == 200
-    r = _create(client, MEMBER, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    r = _create(client, MEMBER, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     assert r.status_code == 403 and "관리 범위" in r.json()["detail"]
 
 
 def test_manager_cannot_create_outside_managed_scope(client):
-    """★★★ 부서 manager 의 관리 범위는 `LS_MNM` 하나다. 다른 조직 자산을 만들 수 없다."""
-    r = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="MNM_BATTERY")
-    assert r.status_code == 403 and "MNM_BATTERY" in r.json()["detail"]
+    """★★★ 부서 manager 의 관리 범위는 자기 부서 하나다. 다른 조직 자산을 만들 수 없다."""
+    r = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_B)
+    #: 문구는 ECM 코드(대문자)를 쓴다 — 대소문자로 갈리지 않게 본다.
+    assert r.status_code == 403 and org_seed.DEPT_B in r.json()["detail"].lower()
 
 
 def test_enterprise_visibility_is_blocked_at_creation(client):
@@ -364,15 +375,15 @@ def test_enterprise_visibility_is_blocked_at_creation(client):
     승인만 막으면 부서원이 만든 초안이 목록에 «전사» 로 올라앉는다 — 실행은 안 되지만 목록은
     그것을 전사 자산으로 보여 주고, 사람은 목록을 믿는다."""
     for uid in (MGR, MEMBER):
-        r = _create(client, uid, visibility=VIS_ENTERPRISE, owner_scope_id="LS_MNM")
+        r = _create(client, uid, visibility=VIS_ENTERPRISE, owner_scope_id=org_seed.DEPT_A)
         assert r.status_code == 403 and "전사" in r.json()["detail"]
-    ok = _create(client, AI_ADMIN, visibility=VIS_ENTERPRISE, owner_scope_id="LS_MNM")
+    ok = _create(client, AI_ADMIN, visibility=VIS_ENTERPRISE, owner_scope_id=org_seed.DEPT_A)
     assert ok.status_code == 200, "AI 거버넌스 관리자는 전사 자산을 만들 수 있다"
 
 
 def test_system_visibility_cannot_be_created(client):
     """★★ SYSTEM 은 제품 기본 자산의 **표시**이며 만들 수 없다 — 복사해서 쓴다."""
-    r = _create(client, ADMIN, visibility=VIS_SYSTEM, owner_scope_id="LS_MNM")
+    r = _create(client, ADMIN, visibility=VIS_SYSTEM, owner_scope_id=org_seed.DEPT_A)
     assert r.status_code == 403 and "복사" in r.json()["detail"]
 
 
@@ -387,20 +398,20 @@ def test_skills_propose_alias_works(client):
 # ── 승인 흐름 ─────────────────────────────────────────────────────────────
 def test_draft_cannot_be_approved_without_review(client):
     """★★ 검토 요청을 거치지 않은 초안은 승인되지 않는다 — 지름길이 있으면 검토는 형식이 된다."""
-    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM").json()
+    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A).json()
     r = client.post(f"{B}/agents/{a['asset_id']}/approve", headers=H(MGR))
     assert r.status_code == 403 and "검토 요청" in r.json()["detail"]
 
 
 def test_approve_records_who_approved_it(client):
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     assert a["status"] == ST_APPROVED and a["approved_by"] == MGR and a["runnable"] is True
 
 
 def test_revision_drops_approval(client):
     """★★★ 개정하면 승인이 풀린다 — 내용이 바뀐 뒤에도 승인이 남으면 그 승인은
     **읽지 않은 문서에 대한 승인**이다."""
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     r = client.put(f"{B}/agents/{a['asset_id']}", json={"body": {"role": "바뀜"}}, headers=H(MGR))
     d = r.json()
     assert d["status"] == ST_DRAFT and d["approved_by"] == "" and d["runnable"] is False
@@ -410,10 +421,10 @@ def test_revision_drops_approval(client):
 def test_other_orgs_asset_is_invisible_so_approval_is_404(client):
     """★★★ 다른 조직 자산은 애초에 **보이지 않는다** — 승인 시도는 403 이 아니라 **404** 다.
 
-    실측(2026-08-04): `hikwon_7` 의 읽기 범위는 `LS_MNM` 하나이고 `MNM_BATTERY` 는 그 하위지만
+    실측(2026-08-04): 부서 manager 의 읽기 범위는 자기 부서 하나이고, 형제 부서는
     **하향 열람은 경영진에게만** 준다(`viewer_visible_scopes`). 그러니 존재를 알리지 않는 것이
-    맞다. 403 을 주면 «MNM_BATTERY 에 그런 자산이 있다» 를 알려 준다."""
-    a = _create(client, AI_ADMIN, visibility=VIS_SCOPE, owner_scope_id="MNM_BATTERY").json()
+    맞다. 403 을 주면 «옆 조직에 그런 자산이 있다» 를 알려 준다."""
+    a = _create(client, AI_ADMIN, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_B).json()
     client.post(f"{B}/agents/{a['asset_id']}/submit", headers=H(AI_ADMIN))
     assert client.post(f"{B}/agents/{a['asset_id']}/approve", headers=H(MGR)).status_code == 404
     assert client.get(f"{B}/agents/{a['asset_id']}", headers=H(MGR)).status_code == 404
@@ -448,7 +459,7 @@ def test_visible_but_unmanaged_asset_cannot_be_approved(client, monkeypatch):
 
     이 경계가 없으면 «볼 수 있으면 승인할 수 있다» 가 되고, 그것은 열람 권한이 승인 권한으로
     승격되는 것이다."""
-    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM").json()
+    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A).json()
     client.post(f"{B}/agents/{a['asset_id']}/submit", headers=H(MGR))
     _narrow_manage_scope(monkeypatch, MGR)
     assert client.get(f"{B}/agents/{a['asset_id']}", headers=H(MGR)).status_code == 200, \
@@ -459,14 +470,15 @@ def test_visible_but_unmanaged_asset_cannot_be_approved(client, monkeypatch):
     #   그대로 노출하면 사용자는 무슨 조직 때문에 막혔는지 알 수 없고 관리자에게 무엇을
     #   요청해야 하는지도 모른다 — 백필 후 실제로 그런 메시지가 나가고 있었다.
     detail = r.json()["detail"]
-    assert "LS_MNM" in detail or "LS MnM" in detail, f"조직을 식별할 수 없는 메시지: {detail}"
+    #: ⚠️ 문구는 ECM 코드(대문자)를 쓴다 — 조직이 **식별되는지**만 본다.
+    assert org_seed.DEPT_A in detail.lower(), f"조직을 식별할 수 없는 메시지: {detail}"
     assert "node_" not in detail, f"정본 해시가 사용자에게 노출됐다: {detail}"
     assert client.post(f"{B}/agents/{a['asset_id']}/retire", headers=H(MGR)).status_code == 403
 
 
 def test_manager_cannot_approve_enterprise_asset(client):
     """★★★ 전사 공개 자산의 승인은 부서 manager 의 자격이 아니다(설계 §4.2 «승격 요청만»)."""
-    a = _create(client, AI_ADMIN, visibility=VIS_ENTERPRISE, owner_scope_id="LS_MNM").json()
+    a = _create(client, AI_ADMIN, visibility=VIS_ENTERPRISE, owner_scope_id=org_seed.DEPT_A).json()
     client.post(f"{B}/agents/{a['asset_id']}/submit", headers=H(AI_ADMIN))
     r = client.post(f"{B}/agents/{a['asset_id']}/approve", headers=H(MGR))
     assert r.status_code == 403 and "전사" in r.json()["detail"]
@@ -475,10 +487,9 @@ def test_manager_cannot_approve_enterprise_asset(client):
 def test_member_cannot_approve_or_retire(client):
     """부서 member 는 승인·폐기 capability 자체가 없다.
 
-    ⚠️ 자산은 **member 에게 보이는 조직**(`MNM_BATTERY` — 실측한 읽기 범위)에 둔다. 안 보이는
-      조직에 두면 404 가 나고, 그러면 이 테스트는 «capability 가 없어서 막혔다» 를 확인하지
-      못한 채 통과한다."""
-    a = _create(client, AI_ADMIN, visibility=VIS_SCOPE, owner_scope_id="MNM_BATTERY").json()
+    ⚠️ 자산은 **member 에게 보이는 조직**(자기 부서)에 둔다. 안 보이는 조직에 두면 404 가
+      나고, 그러면 이 테스트는 «capability 가 없어서 막혔다» 를 확인하지 못한 채 통과한다."""
+    a = _create(client, AI_ADMIN, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A).json()
     client.post(f"{B}/agents/{a['asset_id']}/submit", headers=H(AI_ADMIN))
     assert client.get(f"{B}/agents/{a['asset_id']}", headers=H(MEMBER)).status_code == 200, \
         "member 에게 보이는 자산이어야 한다"
@@ -488,7 +499,7 @@ def test_member_cannot_approve_or_retire(client):
 
 def test_member_cannot_revise_org_asset(client):
     """member 는 자기 조직 자산도 **고칠 수 없다** — 볼 수 있다고 바꿀 수 있는 것이 아니다."""
-    a = _create(client, AI_ADMIN, visibility=VIS_SCOPE, owner_scope_id="MNM_BATTERY").json()
+    a = _create(client, AI_ADMIN, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A).json()
     r = client.put(f"{B}/agents/{a['asset_id']}", json={"body": {}}, headers=H(MEMBER))
     assert r.status_code == 403 and "관리 범위" in r.json()["detail"]
 
@@ -510,7 +521,7 @@ def test_cannot_revise_someone_elses_personal_asset(client):
 
 def test_retire_keeps_the_row_and_hides_it_from_default_list(client):
     """★★ 폐기는 행을 지우지 않는다 — 과거 산출물이 이 자산을 가리키고 있다."""
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     aid = a["asset_id"]
     r = client.post(f"{B}/agents/{aid}/retire", headers=H(MGR))
     assert r.status_code == 200 and r.json()["status"] == ST_RETIRED
@@ -539,18 +550,24 @@ def test_file_asset_cannot_be_revised_here(client):
     assert r.status_code == 403 and "에이전트 통제소" in r.json()["detail"]
 
 
-def test_file_asset_detail_shows_migration_state(client):
-    """★ 파일 자산은 `APPROVED` 이지만 **승인자가 없다** — 그 사실이 상세에 드러나야 한다."""
+def test_file_asset_detail_shows_migration_state(client, file_backed_registry):
+    """★ 파일 자산은 `APPROVED` 이지만 **승인자가 없다** — 그 사실이 상세에 드러나야 한다.
+
+    ⚠️ `LEGACY` 는 «레지스트리가 파일에서 왔다» 는 뜻이다. 그 파일은 Git 에 없으므로
+      `file_backed_registry` 로 **명시**한다 — 예전에는 앞선 시험이 남긴 파일에 기댔다."""
     d = client.get(f"{B}/agents/file:agent:RFP_Analyst", headers=H(MGR)).json()
     assert d["source"] == "LEGACY" and d["status"] == ST_APPROVED
     assert d["approved_by"] == "" and d["needs_migration"] is True
     assert d["edit_via"] == "에이전트 통제소"
 
 
-def test_file_asset_can_be_copied_into_an_org_asset(client):
-    """★★★ 복사는 막지 않는다 — 막으면 «제품 기본은 복사해서 쓰십시오» 를 따를 방법이 없다."""
+def test_file_asset_can_be_copied_into_an_org_asset(client, file_backed_registry):
+    """★★★ 복사는 막지 않는다 — 막으면 «제품 기본은 복사해서 쓰십시오» 를 따를 방법이 없다.
+
+    ⚠️  가  이려면 레지스트리가 **파일에서 와야** 한다 —
+      그 사실을 fixture 로 명시한다(앞선 시험이 남긴 파일에 기대지 않는다)."""
     r = client.post(f"{B}/agents/file:agent:RFP_Analyst/copy",
-                    json={"visibility": VIS_SCOPE, "owner_scope_id": "LS_MNM"}, headers=H(MGR))
+                    json={"visibility": VIS_SCOPE, "owner_scope_id": org_seed.DEPT_A}, headers=H(MGR))
     assert r.status_code == 200
     d = r.json()
     assert d["status"] == ST_DRAFT, "복사본이 승인 상태로 시작하면 검토를 건너뛴다"
@@ -583,9 +600,10 @@ def test_copy_requires_being_able_to_read_the_source(client):
 def test_copy_target_scope_is_checked(client):
     """복사도 **생성**이다 — 만들 수 없는 범위로는 복사할 수 없다."""
     r = client.post(f"{B}/agents/file:agent:RFP_Analyst/copy",
-                    json={"visibility": VIS_SCOPE, "owner_scope_id": "MNM_BATTERY"},
+                    json={"visibility": VIS_SCOPE, "owner_scope_id": org_seed.DEPT_B},
                     headers=H(MGR))
-    assert r.status_code == 403 and "MNM_BATTERY" in r.json()["detail"]
+    #: 문구는 ECM 코드(대문자)를 쓴다 — 대소문자로 갈리지 않게 본다.
+    assert r.status_code == 403 and org_seed.DEPT_B in r.json()["detail"].lower()
 
 
 def test_viewer_cannot_copy(client):
@@ -605,7 +623,7 @@ def test_changes_and_denials_are_audited(client, monkeypatch):
     monkeypatch.setattr(audit, "record",
                         lambda event, **kw: seen.append((event, kw.get("outcome"))) or True)
 
-    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM").json()
+    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A).json()
     client.post(f"{B}/agents/{a['asset_id']}/submit", headers=H(MGR))
     client.post(f"{B}/agents/{a['asset_id']}/approve", headers=H(MGR))
     client.post(f"{B}/agents/{a['asset_id']}/retire", headers=H(MEMBER))     # 거부
@@ -697,7 +715,7 @@ def test_promotion_request_does_not_widen_visibility(client):
     요청한 순간 자산이 전사에 보이면 그것은 요청이 아니라 공개이고, 되돌릴 방법도 없다.
     부서 manager 가 「승격 요청」을 눌렀을 때 남의 조직에 우리 정의가 노출되면 아무도 그
     버튼을 두 번 누르지 않는다."""
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     r = client.post(f"{B}/agents/{a['asset_id']}/promote", headers=H(MGR))
     assert r.status_code == 200, r.text
     d = r.json()
@@ -713,7 +731,7 @@ def test_ai_admin_promotion_reopens_review(client):
     조직 승인과 전사 승인은 다른 자격이다(설계 §4.2). 조직 승인만 받은 정의가 전사 자산으로
     «승인됨» 이 되면 **아무도 검토하지 않은 전사 자산**이 생기고, `approved_by` 는 전사 승인을
     한 적 없는 사람을 가리킨다."""
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     d = client.post(f"{B}/agents/{a['asset_id']}/promote", headers=H(AI_ADMIN)).json()
     assert d["promotion_outcome"] == "확정"
     assert d["visibility"] == VIS_ENTERPRISE
@@ -723,7 +741,7 @@ def test_ai_admin_promotion_reopens_review(client):
 
 def test_promotion_requires_org_approval_first(client):
     """★★ 검토되지 않은 초안이 전사 목록에 오르면 그 목록을 아무도 믿지 않게 된다."""
-    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM").json()
+    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A).json()
     r = client.post(f"{B}/agents/{a['asset_id']}/promote", headers=H(MGR))
     assert r.status_code == 403 and "조직 승인" in r.json()["detail"]
 
@@ -743,7 +761,7 @@ def test_file_asset_promotion_tells_you_what_to_do_instead(client):
 def test_member_without_approval_rights_cannot_even_request(client):
     """★ 자기 조직 자산을 승인할 수도 없는 사람이 그것을 전사로 올려 달라고 요청하는 것은
     순서가 뒤집힌 것이다 — 조직 승인 자격을 먼저 요구한다."""
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     assert client.post(f"{B}/agents/{a['asset_id']}/promote",
                        headers=H(MEMBER)).status_code == 403
     assert client.post(f"{B}/agents/{a['asset_id']}/promote",
@@ -753,7 +771,7 @@ def test_member_without_approval_rights_cannot_even_request(client):
 def test_already_enterprise_asset_is_refused(client):
     #: ⚠️ 전사 공개도 **소유 조직을 요구한다**(저장소 계약) — 소유가 없으면 나중에 «이 자산은
     #:   누구 책임인가» 에 답할 수 없다. 그래서 승격 경로도 조직 자산에서만 출발한다.
-    r0 = _create(client, AI_ADMIN, visibility=VIS_ENTERPRISE, owner_scope_id="LS_MNM")
+    r0 = _create(client, AI_ADMIN, visibility=VIS_ENTERPRISE, owner_scope_id=org_seed.DEPT_A)
     assert r0.status_code == 200, r0.text          # 전제가 깨지면 이유를 보여 준다
     a = r0.json()
     client.post(f"{B}/agents/{a['asset_id']}/submit", headers=H(AI_ADMIN))
@@ -777,7 +795,7 @@ def test_promotion_of_invisible_asset_is_404(client):
 # ⚠️ 2026-08-08 역할별 화면 감사에서 실제로 어긋난 상태를 발견했다: 부서원에게 남의 조직 자산의
 #   «승인 요청» 이 **활성으로** 보였고, 누르면 403 이었다. 아래 테스트가 그 유형을 막는다.
 def test_list_carries_a_reason_for_every_action(client):
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     row = next(i for i in client.get(f"{B}/agents?include_files=false",
                                      headers=H(MGR)).json()["items"]
                if i["asset_id"] == a["asset_id"])
@@ -787,7 +805,7 @@ def test_list_carries_a_reason_for_every_action(client):
 
 def test_member_is_told_before_clicking_that_someone_elses_org_asset_is_off_limits(client):
     """★★★ 감사가 잡은 바로 그 결함. 부서원에게 남의 조직 자산은 **누르기 전에** 막혀야 한다."""
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     row = next(i for i in client.get(f"{B}/agents?include_files=false",
                                      headers=H(MEMBER)).json()["items"]
                if i["asset_id"] == a["asset_id"])
@@ -812,7 +830,7 @@ def test_the_reason_and_the_real_answer_agree(client, uid):
         return next((i for i in items if i["asset_id"] == asset_id), None)
 
     for verb, path in (("approve", "approve"), ("retire", "retire"), ("promote", "promote")):
-        a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+        a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
         r = row_for(a["asset_id"], uid)
         if r is None:
             continue                       # 안 보이는 자산은 애초에 버튼도 없다
@@ -843,7 +861,7 @@ def test_copy_is_never_blocked_by_the_file_asset_rule(client):
 
 def test_viewer_is_blocked_on_everything_with_distinct_reasons(client):
     """★ 사유가 전부 같은 문장이면 사용자는 무엇이 다른지 모른다 — 행동마다 다른 답이어야 한다."""
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     row = next(i for i in client.get(f"{B}/agents?include_files=false",
                                      headers=H(VIEWER)).json()["items"]
                if i["asset_id"] == a["asset_id"])
@@ -876,7 +894,7 @@ def test_assets_are_separated_by_tenant_context(client):
     from api.routes import agent_governance as _gov
     other = _gov.agent_assets.create(
         "agent", "남의 테넌트 자산", {"role": "x"}, "someone@other.com",
-        owner_scope_id="LS_MNM", visibility=VIS_SCOPE, tenant_id="tenant_other")
+        owner_scope_id=org_seed.DEPT_A, visibility=VIS_SCOPE, tenant_id="tenant_other")
 
     ids = [i["asset_id"] for i in client.get(f"{B}/agents", headers=H(MGR)).json()["items"]]
     assert other["asset_id"] not in ids, "다른 테넌트 자산이 목록에 섞인다"
@@ -896,7 +914,7 @@ def test_hidden_count_does_not_count_other_tenants(client):
 
 def test_created_assets_record_the_context_they_were_made_in(client):
     """★ [완료기준 ③] 무엇을 만들든 기본값이 박히던 상태를 못박는다 — 이제 **문맥**이 실린다."""
-    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM").json()
+    a = _create(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A).json()
     assert a["tenant_id"] == "tenant_default"      # 문맥 미지정 → 기본 테넌트
     assert a["entity_mode"] == "REAL"
 
@@ -908,7 +926,7 @@ def test_publishing_to_org_moves_the_draft_instead_of_copying_it(client):
     같은 정의가 두 벌이 되면 어느 쪽이 정본인지 아무도 모르고, 한쪽만 고쳐진 채로 승인된다."""
     a = _create(client, MGR, visibility=VIS_PERSONAL).json()
     r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
-                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR))
+                    json={"owner_scope_id": org_seed.DEPT_A}, headers=H(MGR))
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["asset_id"] == a["asset_id"], "새 자산이 생겼다 — 이동이 아니라 복사다"
@@ -929,7 +947,7 @@ def test_publishing_an_approved_personal_asset_reopens_review(client):
     a = _approved(client, MGR, visibility=VIS_PERSONAL)
     assert a["status"] == ST_APPROVED
     d = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
-                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR)).json()
+                    json={"owner_scope_id": org_seed.DEPT_A}, headers=H(MGR)).json()
     assert d["status"] == ST_REVIEW, "개인 승인이 조직 승인으로 승계됐다"
     assert not d["approved_by"]
 
@@ -939,7 +957,7 @@ def test_publishing_a_draft_keeps_it_a_draft(client):
     않은 항목**이 쌓인다 — 그러면 그 목록을 아무도 신뢰하지 않는다."""
     a = _create(client, MGR, visibility=VIS_PERSONAL).json()
     d = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
-                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR)).json()
+                    json={"owner_scope_id": org_seed.DEPT_A}, headers=H(MGR)).json()
     assert d["status"] == ST_DRAFT
 
 
@@ -948,7 +966,7 @@ def test_only_the_author_can_publish_their_own_draft(client):
     보인다고 해서 옮길 수 있어야 하는 것도 아니다."""
     a = _create(client, MEMBER, visibility=VIS_PERSONAL).json()
     assert client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
-                       json={"owner_scope_id": "LS_MNM"}, headers=H(MGR)).status_code == 404
+                       json={"owner_scope_id": org_seed.DEPT_A}, headers=H(MGR)).status_code == 404
 
 
 def test_publishing_needs_the_same_rights_as_creating_there(client):
@@ -956,14 +974,14 @@ def test_publishing_needs_the_same_rights_as_creating_there(client):
     느슨한 쪽이 실제 통제가 된다 — 부서원은 조직 자산을 만들 수 없으므로 옮길 수도 없다."""
     a = _create(client, MEMBER, visibility=VIS_PERSONAL).json()
     r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
-                    json={"owner_scope_id": "LS_MNM"}, headers=H(MEMBER))
+                    json={"owner_scope_id": org_seed.DEPT_A}, headers=H(MEMBER))
     assert r.status_code == 403 and "관리 범위" in r.json()["detail"]
 
 
 def test_org_asset_cannot_be_published_again(client):
-    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id="LS_MNM")
+    a = _approved(client, MGR, visibility=VIS_SCOPE, owner_scope_id=org_seed.DEPT_A)
     r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
-                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR))
+                    json={"owner_scope_id": org_seed.DEPT_A}, headers=H(MGR))
     assert r.status_code == 403 and "개인 초안만" in r.json()["detail"]
 
 
@@ -978,7 +996,7 @@ def test_publish_without_owner_scope_is_refused(client):
 
 def test_file_asset_publish_tells_you_to_copy_instead(client):
     r = client.post(f"{B}/agents/file:agent:RFP_Analyst/publish-to-org",
-                    json={"owner_scope_id": "LS_MNM"}, headers=H(ADMIN))
+                    json={"owner_scope_id": org_seed.DEPT_A}, headers=H(ADMIN))
     assert r.status_code == 403 and "복사" in r.json()["detail"]
 
 
@@ -991,7 +1009,7 @@ def test_list_carries_a_publish_reason_that_matches_the_real_answer(client):
     assert row["blocked"]["publish_to_org"] == "", row["blocked"]
     #: 남에게는 보이지 않으므로, 조직 자산으로 바꿔 «이미 개인이 아니다» 사유를 확인한다.
     client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
-                json={"owner_scope_id": "LS_MNM"}, headers=H(MGR))
+                json={"owner_scope_id": org_seed.DEPT_A}, headers=H(MGR))
     row2 = next(i for i in client.get(f"{B}/agents?include_files=false",
                                       headers=H(MGR)).json()["items"]
                 if i["asset_id"] == a["asset_id"])
@@ -1013,7 +1031,7 @@ def test_author_check_holds_even_if_visibility_ever_widens(client, monkeypatch):
     from api.routes import agent_governance as gov
     monkeypatch.setattr(gov, "_visible_to", lambda p, asset: True)
     r = client.post(f"{B}/agents/{a['asset_id']}/publish-to-org",
-                    json={"owner_scope_id": "LS_MNM"}, headers=H(MGR))
+                    json={"owner_scope_id": org_seed.DEPT_A}, headers=H(MGR))
     assert r.status_code == 403 and "다른 사람의 초안" in r.json()["detail"], r.text
 
 
