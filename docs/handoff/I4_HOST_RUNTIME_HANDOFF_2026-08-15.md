@@ -127,7 +127,7 @@ rel_tenant_b 가 TENANT_A 데이터셋을 결속: True
 · **기업 Actual 의 AFS Native 폴백 차단** — `ROLE_SOURCE_MATRIX[ENTERPRISE_ACTUAL]` 에
   `AFS_NATIVE` 가 **없다**. 회사의 확정 실적을 AFS 화면에서 받겠다는 선언이 곧 이중 입력이다
 · **미분류 레거시의 자동 Actual 승격 금지** — `data_role_for()` 는 레거시에 `None` 을
-  돌려주고 `is_official_actual()` 은 **명시 선언만** 참으로 본다
+  돌려주고 `is_declared_enterprise_actual()` 은 **명시 선언만** 참으로 본다(2.2a 에서 개명)
 
 ⚠️⚠️ **모르는 출처를 `AFS_NATIVE` 로 떨어뜨리지 않는다.** 그 폴백 하나가 곧 이중 입력 앱을
 만든다 — 변이 검사 1번이 정확히 그것이다.
