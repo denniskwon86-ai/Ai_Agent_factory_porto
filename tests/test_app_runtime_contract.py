@@ -26,6 +26,10 @@ def _draft(**over):
             "name": "arrivals", "label": "입고", "purpose": "자재 입고를 기록한다",
             "allowed_actions": ["read", "create"],
             "ontology_entity_type": "ArrivalEvent",
+            #: [BDR-1] 이 데이터가 무엇이고 어디서 오는가 — 없으면 계약이 성립하지 않는다.
+            "data_role": "NATIVE_SUPPLEMENT",
+            "source_intent": "AFS_NATIVE",
+            "duplicate_entry_policy": "ALLOW_SUPPLEMENT_ONLY",
             "fields": [
                 {"name": "qty", "type": "number", "required": True,
                  "classification": "INTERNAL", "semantic_role": "quantity", "unit": "ton"},
@@ -424,6 +428,241 @@ def test_compiled_contract_passes_the_validator():
 def test_summary_carries_no_secret_and_names_the_datasets():
     s = arc.summarize(_compiled())
     assert "arrivals" in s and "데이터셋 1개" in s
+
+
+# ── 9. [BDR-1 / I-4 2.2] 출처·역할·중복입력 ───────────────────────────────
+#
+# ★★★ 무엇을 막으려는가: 계약이 «이 데이터가 어디서 오는가» 를 말하지 않으면 생성기는
+#   **모든 것을 입력 화면으로 만든다.** 그러면 현업은 ERP 에 이미 있는 값을 한 번 더 손으로
+#   넣고, 두 값이 갈라진 뒤에야 그 사실이 드러난다.
+
+def test_the_three_meaning_fields_are_required():
+    """⚠️ 선택으로 두면 빠진 계약이 「모르니까 입력 화면」으로 처리된다."""
+    for missing in ("data_role", "source_intent", "duplicate_entry_policy"):
+        d = _draft()
+        d["datasets"][0].pop(missing)
+        r = compile_contract(d, project_id="P1")
+        assert not r.ok, missing
+        assert any(missing in e for e in r.errors), (missing, r.errors)
+
+
+@pytest.mark.parametrize("intent,want", [
+    (arc.AFS_NATIVE, arc.SUPPORTED),
+    (arc.ENTERPRISE_READ, arc.HOST_SERVICE_REQUIRED),
+    (arc.EXTERNAL_REFERENCE, arc.HOST_SERVICE_REQUIRED),
+    (arc.DERIVED_READ, arc.HOST_SERVICE_REQUIRED),
+])
+def test_source_intent_decision_table(intent, want):
+    status, why = arc.decide_source_intent(intent)
+    assert status == want and why
+    assert arc.materializable(intent) is (want == arc.SUPPORTED)
+
+
+@pytest.mark.parametrize("unknown", ["", None, "MAGIC_SOURCE", "afs_native", "  "])
+def test_unknown_source_intent_does_not_fall_back_to_native(unknown):
+    """★★★ ⚠️⚠️ **모르는 출처를 `AFS_NATIVE` 로 떨어뜨리지 않는다.**
+    그 폴백 하나가 곧 이중 입력 앱을 만든다."""
+    status, _ = arc.decide_source_intent(unknown)
+    assert status == arc.NOT_YET_SUPPORTED
+    assert not arc.materializable(unknown)
+
+
+def test_only_afs_native_is_materializable_today():
+    materializable = [i for i in arc.SOURCE_INTENTS if arc.materializable(i)]
+    assert materializable == [arc.AFS_NATIVE]
+
+
+@pytest.mark.parametrize("intent", [arc.ENTERPRISE_READ, arc.EXTERNAL_REFERENCE,
+                                    arc.DERIVED_READ])
+def test_non_native_sources_cannot_be_compiled_yet(intent):
+    """지금 물질화되는 것은 `AFS_NATIVE` 뿐이다 — 나머지는 Host 기능이 먼저 있어야 한다."""
+    d = _draft()
+    d["datasets"][0].update({"source_intent": intent, "allowed_actions": ["read"],
+                             "data_role": (arc.ENTERPRISE_ACTUAL if intent == arc.ENTERPRISE_READ
+                                           else arc.DERIVED_RESULT if intent == arc.DERIVED_READ
+                                           else arc.OPERATIONAL_FORECAST),
+                             "duplicate_entry_policy": arc.DENY_IF_AUTHORITATIVE_SOURCE_EXISTS})
+    r = compile_contract(d, project_id="P1")
+    assert not r.ok
+    assert any("Host 기능 필요" in e for e in r.errors), r.errors
+
+
+def test_enterprise_read_cannot_have_input_actions():
+    """★★★ ①번 게이트 — 기존 시스템에서 읽는 데이터에 **입력 화면을 만들지 않는다.**"""
+    for write in ("create", "update", "delete"):
+        d = _draft()
+        d["datasets"][0].update({
+            "source_intent": arc.ENTERPRISE_READ, "data_role": arc.ENTERPRISE_ACTUAL,
+            "duplicate_entry_policy": arc.DENY_IF_AUTHORITATIVE_SOURCE_EXISTS,
+            "allowed_actions": ["read", write]})
+        r = compile_contract(d, project_id="P1")
+        assert not r.ok, write
+        assert any("입력 화면" in e for e in r.errors), (write, r.errors)
+
+
+def test_stored_contract_with_enterprise_read_writes_is_invalid():
+    """★★★ **컴파일 경로에만 두면 잡히지 않는다.**
+
+    ⚠️ Compiler 는 `ENTERPRISE_READ` 를 「아직 물질화 불가」로 먼저 막으므로, 이중 입력
+      게이트 ①은 그 경로에서 **한 번도 실행되지 않는다.** 계약은 파일로도 들어오고
+      (릴리스 스냅샷·workspace 원문) 그때는 Compiler 를 지나지 않는다."""
+    c = _compiled()
+    c["datasets"][0].update({"source_intent": arc.ENTERPRISE_READ,
+                             "data_role": arc.ENTERPRISE_ACTUAL,
+                             "duplicate_entry_policy": arc.NO_DUPLICATE_CHECK_REQUIRED,
+                             "allowed_actions": ["read", "create"]})
+    c["semantic_fingerprint"] = arc.semantic_fingerprint(c)   # 지문은 맞춰 둔다
+    errs = arc.validate(c)
+    assert any(arc.DUPLICATE_ENTRY_MESSAGE in e for e in errs), errs
+    #: 읽기만이면 이 규칙은 걸리지 않는다 — 전부 거부하는 검사는 통제를 증명하지 않는다.
+    #: (매니페스트도 함께 좁혀야 한다: 계약이 read 만 주면 매니페스트도 read 만 가진다.)
+    c["datasets"][0]["allowed_actions"] = ["read"]
+    c["manifest"] = app_manifest.build(capabilities=["arrivals.read"],
+                                       app_class="departmental")
+    c["semantic_fingerprint"] = arc.semantic_fingerprint(c)
+    assert arc.validate(c) == []
+
+
+def test_enterprise_actual_cannot_be_afs_native():
+    """★★★ **기업 Actual 의 AFS Native 폴백 차단** — 가장 위험한 조합이다.
+
+    ⚠️ 회사의 확정 실적을 AFS 화면에서 받겠다는 선언은 곧 이중 입력이고,
+      두 값이 갈라진 뒤에야 드러난다."""
+    d = _draft()
+    d["datasets"][0].update({"data_role": arc.ENTERPRISE_ACTUAL,
+                             "source_intent": arc.AFS_NATIVE,
+                             "allowed_actions": ["read"]})
+    r = compile_contract(d, project_id="P1")
+    assert not r.ok
+    assert any("이중 입력" in e for e in r.errors), r.errors
+    assert arc.AFS_NATIVE not in arc.ROLE_SOURCE_MATRIX[arc.ENTERPRISE_ACTUAL]
+
+
+def test_deny_if_authoritative_source_exists_blocks_writes():
+    """②번 게이트 — 정책이 «권위 원천이 있으면 금지» 인데 입력이 생기면 그 정책은 글자다."""
+    d = _draft()
+    d["datasets"][0].update({
+        "duplicate_entry_policy": arc.DENY_IF_AUTHORITATIVE_SOURCE_EXISTS,
+        "allowed_actions": ["read", "create"]})
+    r = compile_contract(d, project_id="P1")
+    assert not r.ok and any("중복입력 정책" in e for e in r.errors)
+
+
+def test_role_and_source_must_say_the_same_thing():
+    """⑤번 게이트 — 역할과 출처가 서로 다른 말을 하면 안 된다.
+
+    ★ 여기서는 **물질화 가능한 출처끼리** 어긋뜨린다. `ENTERPRISE_READ` 를 쓰면 Compiler 의
+      출처 결정표가 먼저 막아 이 규칙을 시험하지 못한다."""
+    d = _draft()
+    #: 계산 결과(`DERIVED_RESULT`)를 사람이 입력하겠다는 선언 — 결정론이 깨진다.
+    d["datasets"][0].update({"data_role": arc.DERIVED_RESULT,
+                             "source_intent": arc.AFS_NATIVE,
+                             "duplicate_entry_policy": arc.NO_DUPLICATE_CHECK_REQUIRED,
+                             "allowed_actions": ["read", "create"]})
+    r = compile_contract(d, project_id="P1")
+    assert not r.ok
+    assert any("역할" in e and "DERIVED_RESULT" in e for e in r.errors), r.errors
+
+
+def test_supplement_only_policy_belongs_to_supplement_data():
+    d = _draft()
+    d["datasets"][0].update({"data_role": arc.SCENARIO_INPUT,
+                             "duplicate_entry_policy": arc.ALLOW_SUPPLEMENT_ONLY})
+    r = compile_contract(d, project_id="P1")
+    assert not r.ok and any("보완만 허용" in e for e in r.errors)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda d: d["datasets"][0].update({"data_role": arc.SCENARIO_INPUT,
+                                       "duplicate_entry_policy": arc.NO_DUPLICATE_CHECK_REQUIRED}),
+    lambda d: d["datasets"][0].__setitem__("duplicate_entry_policy",
+                                           arc.NO_DUPLICATE_CHECK_REQUIRED),
+    lambda d: d["datasets"][0].__setitem__("enterprise_contract_key", "PRC-02"),
+    lambda d: d["datasets"][0].__setitem__("required_freshness", "P1D"),
+])
+def test_meaning_changes_move_the_fingerprint(mutate):
+    """★★★ 「기존 시스템에서 읽는다」가 「화면에서 받는다」로 바뀌는 것은 설명 문구가
+    아니라 **업무 자체의 변경**이다 — 재승인 대상이어야 한다."""
+    base = _compiled()["semantic_fingerprint"]
+    d = _draft()
+    mutate(d)
+    r = compile_contract(d, project_id="P1", task_id="T1")
+    assert r.ok, r.errors
+    assert r.fingerprint != base
+
+
+def test_each_meaning_field_moves_the_fingerprint_on_its_own():
+    """★★★ 한 필드씩 따로 확인한다.
+
+    ⚠️ 두 필드를 함께 바꾸는 시험만 있으면 **하나가 지문에서 빠져도 초록**이다 — 다른
+      하나가 지문을 움직여 주기 때문이다(변이 검사에서 실제로 그 구멍이 잡혔다).
+    ★ `source_intent` 는 `AFS_NATIVE` 말고는 컴파일되지 않으므로 **지문 함수를 직접** 부른다."""
+    base = _compiled()
+    ds = base["datasets"][0]
+    for field, other in (("data_role", arc.OPERATIONAL_FORECAST),
+                         ("source_intent", arc.ENTERPRISE_READ),
+                         ("duplicate_entry_policy", arc.NO_DUPLICATE_CHECK_REQUIRED),
+                         ("enterprise_contract_key", "PRC-02"),
+                         ("required_freshness", "P1D")):
+        moved = copy.deepcopy(base)
+        moved["datasets"][0][field] = other
+        assert arc.semantic_fingerprint(moved) != arc.semantic_fingerprint(base), field
+    assert ds["data_role"] == arc.NATIVE_SUPPLEMENT     # 기준값이 바뀌지 않았다
+
+
+def test_changing_the_source_intent_resets_approval():
+    """출처가 바뀌면 이전 승인은 그대로 이어지지 않는다."""
+    prev = _approved_previous()
+    d = _draft()
+    d["datasets"][0].update({"data_role": arc.OPERATIONAL_FORECAST,
+                             "source_intent": arc.AFS_NATIVE,
+                             "duplicate_entry_policy": arc.NO_DUPLICATE_CHECK_REQUIRED})
+    r = compile_contract(d, project_id="P1", task_id="T1", previous=prev)
+    assert r.ok and r.fingerprint_changed
+    assert r.contract["approval"] == {"status": "PENDING"}
+
+
+def test_unclassified_is_never_official_actual():
+    """★★★ **미분류 레거시의 자동 Actual 승격 금지.**
+
+    ⚠️⚠️ 「역할이 안 적혀 있으니 실적이겠지」는 추측이고, 그 추측 위에서 경영 보고가
+      만들어진다."""
+    assert arc.is_official_actual({"name": "x"}) is False
+    assert arc.is_official_actual({"name": "x", "data_role": ""}) is False
+    assert arc.is_official_actual({"name": "x", "data_role": arc.NATIVE_SUPPLEMENT}) is False
+    assert arc.is_official_actual(None) is False
+    assert arc.is_official_actual({"name": "x", "data_role": arc.ENTERPRISE_ACTUAL}) is True
+
+
+def test_freshness_must_be_comparable():
+    """⚠️ 신선도 요구를 자유 문장으로 두면 비교할 수 없다 — 「하루」와 「1일」이 다른 값이 된다."""
+    for bad in ("하루", "1D", "P", "1일", "P1X"):
+        d = _draft()
+        d["datasets"][0]["required_freshness"] = bad
+        assert not compile_contract(d, project_id="P1").ok, bad
+    for good in ("P1D", "PT6H", "P1M", "P1DT12H"):
+        d = _draft()
+        d["datasets"][0]["required_freshness"] = good
+        assert compile_contract(d, project_id="P1").ok, good
+
+
+def test_block_message_speaks_to_the_business_not_the_machine():
+    """차단 문구는 현업이 **다음에 무엇을 할지** 알 수 있어야 한다.
+    ⚠️ 「ENTERPRISE_READ 이므로 create 가 금지됩니다」는 아무것도 알려 주지 않는다."""
+    msg = arc.DUPLICATE_ENTRY_MESSAGE
+    assert "데이터 연결" in msg and "입력 화면을 만들지 않습니다" in msg
+    for jargon in ("ENTERPRISE_READ", "AFS_NATIVE", "allowed_actions", "create"):
+        assert jargon not in msg
+
+
+def test_a_clean_native_supplement_contract_still_compiles():
+    """★ 대조군 — 막기만 하는 게이트는 통제를 증명하지 않는다."""
+    r = compile_contract(_draft(), project_id="P1")
+    assert r.ok, r.errors
+    ds = r.contract["datasets"][0]
+    assert ds["source_intent"] == arc.AFS_NATIVE
+    assert ds["data_role"] == arc.NATIVE_SUPPLEMENT
+    assert "create" in ds["allowed_actions"]
 
 
 # ── 8. 버전 계약 ──────────────────────────────────────────────────────────

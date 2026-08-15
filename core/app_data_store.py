@@ -136,6 +136,11 @@ _ADDED_COLUMNS = (
     ("app_datasets", "dataset_key", "TEXT NOT NULL DEFAULT ''"),
     ("app_release_dataset_bindings", "runtime_name", "TEXT NOT NULL DEFAULT ''"),
     ("app_dataset_versions", "schema_fingerprint", "TEXT NOT NULL DEFAULT ''"),
+    # ★★★ [BDR-1] 계약의 «무엇인가·어디서 오는가» 를 물질화본이 함께 들고 있는다.
+    # ⚠️ 빈 문자열은 «미분류» 다 — 그리고 미분류는 **공식 실적이 아니다.**
+    #   「안 적혀 있으니 실적이겠지」는 추측이고, 그 추측 위에서 경영 보고가 만들어진다.
+    ("app_release_dataset_bindings", "data_role", "TEXT NOT NULL DEFAULT ''"),
+    ("app_release_dataset_bindings", "source_intent", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: ★★★ **유일성은 코드가 아니라 DB 가 지킨다.**

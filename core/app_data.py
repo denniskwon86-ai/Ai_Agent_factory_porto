@@ -64,6 +64,18 @@ RESERVED_FIELD_NAMES = frozenset({
 #:   대신 `tests/test_app_dataset_binding.py` 가 두 목록의 동일성을 잠근다.
 DATASET_ACTIONS: Tuple[str, ...] = ("read", "create", "update", "delete")
 
+# ── [BDR-1] 물질화본이 들고 있는 계약 의미 ────────────────────────────────
+#: ⚠️ `core.app_runtime_contract` 를 import 하지 않는다(순환 참조 — 계약이 데이터 평면
+#:   상한을 읽는다). 값은 `tests/test_app_dataset_binding.py` 가 두 목록의 동일성을 잠근다.
+ENTERPRISE_ACTUAL = "ENTERPRISE_ACTUAL"
+DATA_ROLES: Tuple[str, ...] = (ENTERPRISE_ACTUAL, "OPERATIONAL_PLAN", "OPERATIONAL_FORECAST",
+                               "NATIVE_SUPPLEMENT", "SCENARIO_INPUT", "DERIVED_RESULT")
+AFS_NATIVE = "AFS_NATIVE"
+SOURCE_INTENTS: Tuple[str, ...] = (AFS_NATIVE, "ENTERPRISE_READ", "EXTERNAL_REFERENCE",
+                                   "DERIVED_READ")
+#: 쓰기 행동 — 있으면 «입력 화면이 생긴다» 는 뜻이다.
+WRITE_ACTIONS: Tuple[str, ...] = ("create", "update", "delete")
+
 
 class AppDataError(ValueError):
     """검증 실패 — 라우트가 4xx 로 바꾼다."""
@@ -110,6 +122,33 @@ def normalize_actions(actions: Any) -> Tuple[str, ...]:
         raise AppDataError(f"알 수 없는 행동입니다: {unknown} — "
                            f"가능한 것은 {list(DATASET_ACTIONS)} 입니다.")
     return tuple(a for a in DATASET_ACTIONS if a in got)
+
+
+def validate_binding_meaning(data_role: str, source_intent: str,
+                             actions: Sequence[str]) -> List[str]:
+    """★★★ [BDR-1] 물질화되는 결속의 «무엇인가·어디서 오는가» 를 검사한다.
+
+    계약이 이미 같은 규칙을 걸지만(`app_runtime_contract.duplicate_entry_errors`),
+    **물질화는 계약을 지나지 않고도 일어날 수 있다**(관리 경로·복구 스크립트·다음 단계의
+    코드). 그때 이 검사가 없으면 계약이 막은 조합이 DB 에는 그대로 들어간다.
+
+    ⚠️⚠️ 특히 **`AFS_NATIVE` 가 아닌 출처에 쓰기 행동을 주지 않는다** — 그것이 곧
+      「기존 시스템에 있는 값을 화면에서 또 받는」 앱이다."""
+    errs: List[str] = []
+    if data_role not in DATA_ROLES:
+        errs.append(f"알 수 없는 데이터 역할입니다: {data_role or '(없음)'} — "
+                    f"가능한 것은 {list(DATA_ROLES)} 입니다.")
+    if source_intent not in SOURCE_INTENTS:
+        errs.append(f"알 수 없는 데이터 출처입니다: {source_intent or '(없음)'} — "
+                    f"가능한 것은 {list(SOURCE_INTENTS)} 입니다.")
+    writes = sorted(set(actions) & set(WRITE_ACTIONS))
+    if writes and source_intent and source_intent != AFS_NATIVE:
+        errs.append(f"출처가 {source_intent} 인데 {writes} 가 열려 있습니다 — "
+                    f"기존 원천이 있는 데이터에 입력 화면을 만들지 않습니다.")
+    if data_role == ENTERPRISE_ACTUAL and source_intent == AFS_NATIVE:
+        errs.append("회사의 확정 실적을 AFS 입력으로 받을 수 없습니다 — 이중 입력이 되고, "
+                    "두 값이 갈라진 뒤에야 드러납니다.")
+    return errs
 
 
 def _now() -> str:
@@ -299,7 +338,8 @@ class AppDataService:
                        tenant_id: str = "tenant_default",
                        app_id: str = "", dataset_key: str = "",
                        allowed_actions: Optional[Sequence[str]] = None,
-                       contract_revision: int = 0) -> Dict[str, Any]:
+                       contract_revision: int = 0, data_role: str = "",
+                       source_intent: str = "") -> Dict[str, Any]:
         """데이터셋을 만들고 **이 릴리스에 결속**한다.
 
         ★ `allowed_actions` 를 주면 계약 결속(`contract_bound=1`)이 되고, 런타임 2차 판정이
@@ -361,14 +401,16 @@ class AppDataService:
                  actor_id, ts, ts, app_id, dataset_key))
             self._bind_in_tx(conn, release_id, did, runtime_name=name,
                              allowed_actions=allowed_actions, schema=norm,
-                             contract_revision=contract_revision)
+                             contract_revision=contract_revision,
+                             data_role=data_role, source_intent=source_intent)
         return self.get_dataset(did)  # type: ignore[return-value]
 
     # 릴리스 결속 ------------------------------------------------------
     def bind_release(self, release_id: str, dataset_id: str, *,
                      allowed_actions: Optional[Sequence[str]] = None,
                      schema: Any = None, contract_revision: int = 0,
-                     runtime_name: str = "") -> Dict[str, Any]:
+                     runtime_name: str = "", data_role: str = "",
+                     source_intent: str = "") -> Dict[str, Any]:
         """이 릴리스가 이 데이터셋의 **어느 판을 어떤 권한으로** 쓰는지 적는다.
 
         ★ 같은 (릴리스, 데이터셋) 을 다시 결속하면 덮어쓴다 — 계약 개정으로
@@ -381,7 +423,8 @@ class AppDataService:
         with self._store.transaction() as conn:
             self._bind_in_tx(conn, release_id, dataset_id, runtime_name=runtime_name,
                              allowed_actions=allowed_actions, schema=schema,
-                             contract_revision=contract_revision)
+                             contract_revision=contract_revision,
+                             data_role=data_role, source_intent=source_intent)
         return self.binding_for(release_id, dataset_id)  # type: ignore[return-value]
 
     def _assert_ready(self) -> None:
@@ -480,11 +523,25 @@ class AppDataService:
 
     def _bind_in_tx(self, conn, release_id: str, dataset_id: str, *, runtime_name: str,
                     allowed_actions: Optional[Sequence[str]], schema: Any,
-                    contract_revision: int) -> None:
+                    contract_revision: int, data_role: str = "",
+                    source_intent: str = "") -> None:
         """결속의 실체. **트랜잭션 안에서만** 부른다."""
         self._assert_bindable(conn, release_id, dataset_id)
         bound = allowed_actions is not None
         acts = normalize_actions(allowed_actions) if bound else ()
+        data_role = (data_role or "").strip()
+        source_intent = (source_intent or "").strip()
+        if bound:
+            #: ★★★ [BDR-1] 계약 결속이면 «무엇인가·어디서 오는가» 를 **반드시** 들고 온다.
+            #: ⚠️⚠️ 비워 두면 그 데이터셋은 미분류로 물질화되고, 미분류는 나중에 누군가
+            #:   「적혀 있지 않으니 실적이겠지」로 읽는다. 그 추측 위에서 경영 보고가 만들어진다.
+            errs = validate_binding_meaning(data_role, source_intent, acts)
+            if errs:
+                raise AppDataError(" / ".join(errs))
+        elif data_role or source_intent:
+            raise AppDataError(
+                "레거시 결속에는 역할·출처를 적지 않습니다 — 계약이 말한 적 없는 것을 "
+                "적으면 그 값이 곧 근거 없는 사실이 됩니다.")
         prev = self._store.row(
             conn, "SELECT * FROM app_release_dataset_bindings WHERE release_id=? AND dataset_id=?",
             (release_id, dataset_id))
@@ -523,16 +580,17 @@ class AppDataService:
         if prev:
             conn.execute(
                 "UPDATE app_release_dataset_bindings SET allowed_actions=?, contract_bound=?, "
-                "version_id=?, runtime_name=? WHERE release_id=? AND dataset_id=?",
+                "version_id=?, runtime_name=?, data_role=?, source_intent=? "
+                " WHERE release_id=? AND dataset_id=?",
                 (",".join(acts), 1 if bound else 0, version_id, runtime_name,
-                 release_id, dataset_id))
+                 data_role, source_intent, release_id, dataset_id))
         else:
             conn.execute(
                 "INSERT INTO app_release_dataset_bindings (binding_id, release_id, dataset_id, "
-                "version_id, runtime_name, allowed_actions, contract_bound, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
+                "version_id, runtime_name, allowed_actions, contract_bound, created_at, "
+                "data_role, source_intent) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (_nid("bind"), release_id, dataset_id, version_id, runtime_name,
-                 ",".join(acts), 1 if bound else 0, _now()))
+                 ",".join(acts), 1 if bound else 0, _now(), data_role, source_intent))
 
     def _ensure_version_in_tx(self, conn, dataset_id: str, schema: Any,
                               contract_revision: int) -> str:
@@ -576,7 +634,23 @@ class AppDataService:
         out["contract_bound"] = bool(row.get("contract_bound"))
         out["allowed_actions"] = tuple(
             a for a in str(row.get("allowed_actions") or "").split(",") if a)
+        out["data_role"] = str(row.get("data_role") or "")
+        out["source_intent"] = str(row.get("source_intent") or "")
         return out
+
+    def data_role_for(self, release_id: str, dataset_id: str) -> Optional[str]:
+        """이 릴리스에서 이 데이터셋의 **역할**. 계약이 말한 적 없으면 `None`.
+
+        ⚠️⚠️ `None` 은 «미분류» 이고 **공식 실적이 아니다.** 「적혀 있지 않으니 실적이겠지」로
+          읽는 순간 레거시 데이터가 경영 보고에 실적으로 들어간다."""
+        b = self.binding_for(release_id, dataset_id)
+        if not b or not b["contract_bound"]:
+            return None
+        return b["data_role"] or None
+
+    def is_official_actual(self, release_id: str, dataset_id: str) -> bool:
+        """★★★ **명시적으로 선언된 기업 실적만** 참이다 — 미분류는 절대 승격되지 않는다."""
+        return self.data_role_for(release_id, dataset_id) == ENTERPRISE_ACTUAL
 
     def allowed_actions(self, release_id: str, dataset_id: str) -> Optional[Tuple[str, ...]]:
         """이 릴리스에서 이 데이터셋에 허용된 행동.
@@ -704,14 +778,19 @@ class AppDataService:
         ⚠️ 라벨·생성시각 같은 설명값은 넣지 않는다(§의미 지문과 같은 이유)."""
         rows = self._store.query(
             "SELECT b.runtime_name AS n, b.allowed_actions AS a, b.contract_bound AS c, "
+            "       b.data_role AS dr, b.source_intent AS si, "
             "       d.dataset_key AS k, COALESCE(v.schema_fingerprint,'') AS f "
             "  FROM app_release_dataset_bindings b "
             "  JOIN app_datasets d ON d.dataset_id = b.dataset_id "
             "  LEFT JOIN app_dataset_versions v ON v.version_id = b.version_id "
             " WHERE b.release_id=?", ((release_id or "").strip(),))
+        #: ★★★ [BDR-1] 역할·출처도 물질화의 일부다 — 빠지면 3단계 봉인이
+        #:   **「출처가 바뀐 앱」을 통과시킨다**(읽기 전용이던 데이터가 입력 대상이 돼도
+        #:   지문이 그대로다).
         material = sorted(
             [str(r["n"] or ""), str(r["k"] or ""), str(r["f"] or ""),
-             str(r["a"] or ""), "1" if int(r["c"] or 0) else "0"] for r in rows)
+             str(r["a"] or ""), "1" if int(r["c"] or 0) else "0",
+             str(r["dr"] or ""), str(r["si"] or "")] for r in rows)
         body = json.dumps(material, ensure_ascii=False, separators=(",", ":"))
         #: ⚠️ **축약하지 않는다.** 이 값은 3단계에서 증명에 봉인된다 — 화면에 보일 때만
         #:   `short_fingerprint()` 로 줄인다.
@@ -719,7 +798,8 @@ class AppDataService:
 
     def adopt_dataset(self, dataset_key: str, release_id: str, *,
                       allowed_actions: Optional[Sequence[str]] = None,
-                      schema: Any = None, contract_revision: int = 0
+                      schema: Any = None, contract_revision: int = 0,
+                      data_role: str = "", source_intent: str = ""
                       ) -> Optional[Dict[str, Any]]:
         """새 릴리스가 **같은 앱의 기존 데이터셋을 이어받는다.**
 
@@ -761,7 +841,8 @@ class AppDataService:
             self._bind_in_tx(conn, (release_id or "").strip(), did,
                              runtime_name=str(rows[0]["name"]),
                              allowed_actions=allowed_actions, schema=schema,
-                             contract_revision=contract_revision)
+                             contract_revision=contract_revision,
+                             data_role=data_role, source_intent=source_intent)
         return self.get_dataset(did)
 
     def get_dataset(self, dataset_id: str) -> Optional[Dict[str, Any]]:

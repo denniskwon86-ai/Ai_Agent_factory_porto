@@ -1,6 +1,13 @@
 # [I-4] Host Runtime 생성기 연동 — 인수인계
 
-**작성 2026-08-15 · 상태: 설계 rev.3 승인 · **1단계·2단계(+2.1·2.1b) 완료** · 3~8단계 미착수**
+**작성 2026-08-15 · 상태: 설계 rev.3 승인 · **1·2(+2.1·2.1b)·2.2(BDR-1) 완료** · 3~8단계 미착수**
+
+> **2026-08-15 Codex·Supervisor 제품 설계 보정:** 3단계에 바로 착수하지 않는다. 먼저
+> `docs/architecture/BUSINESS_DATA_BINDING_RUNTIME_DETAILED_DESIGN_2026-08-15.md` §6과
+> `docs/handoff/BUSINESS_DATA_BINDING_RUNTIME_TEAM_HANDOFF_2026-08-15.md`의 **BDR-1을
+> I-4 2.2 보강으로 구현**한다. `source_intent`·`data_role`·`duplicate_entry_policy`가 계약
+> 의미에 들어간 뒤 3단계에서 원문 지문과 물질화 지문을 봉인해야 지문·승인 계약을 두 번
+> 바꾸지 않는다. 기존 권위 원천이 있는 데이터를 `AFS_NATIVE` 입력으로 조용히 폴백하지 않는다.
 
 이 문서 하나만 읽고 이어받을 수 있게 적는다. 무엇이 끝났고, **무엇이 아직 안 됐고**,
 어디서부터 손대야 하는지.
@@ -16,11 +23,14 @@
 
 ```
 G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게이트 ✅  [6] 전환 ✅
-[7] I-4 ── 설계 rev.3 ✅  ·  1단계 ✅  ·  2단계+2.1+2.1b ✅  ·  3~8단계 미착수
+[7] I-4 ── 설계 rev.3 ✅  ·  1단계 ✅  ·  2단계+2.1+2.1b ✅  ·  2.2(BDR-1) ✅  ·  3~8단계 미착수
 ```
 
-**다음에 할 일: 설계서 §20 의 3단계** — 계약 지문을 **증명에 봉인**한다(§16).
-순서를 바꾸지 않는다: 6 없이 7 을 하면 승격할 후보가 없다.
+**다음에 할 일: 설계서 §20 의 3단계** — 확장된 계약 원문 지문과 물질화 지문을
+**함께 증명에 봉인**하고, 어느 하나라도 달라지면 `410` 으로 기존 프레임을 폐기한다(§16-1).
+2.2(BDR-1)로 의미 계약이 완결됐으므로 지문·승인 계약을 두 번 바꾸지 않는다.
+
+순서: `2.1b ✅ → 2.2(BDR-1) ✅ → 3단계`.
 
 ⚠️ **각 단계는 그 단계까지의 회귀를 갖고 커밋한다.** 여덟 단계를 모아서 한 번에 올리면
 어느 단계가 깨졌는지 아무도 못 찾는다.
@@ -32,7 +42,7 @@ G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게�
 | `core/app_runtime_contract.py` | 계약 정본 — 결정표 · JSON Schema · 조건부 규칙 · 의미 지문 |
 | `core/host_contract_compiler.py` | 초안 → 계약(비-LLM · **던지지 않는다**) |
 | `state_models.py` | `PROJECT_STATE_SCHEMA_VERSION = "5.2.0"` · 지연 마이그레이션 · 계약 필드 6 |
-| `tests/test_app_runtime_contract.py` (69) | 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 |
+| `tests/test_app_runtime_contract.py` (91) | 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 · **[2.2] 출처·역할·중복입력** |
 | `tests/test_project_state_schema_5_2.py` (18) | 회귀 일곱 + 소스 검사 둘 |
 
 **변이 27/27.** 실측: 실제 `latest_state.json` **58개 전부** `5.2.0` 승격(읽기 전용, 실패 0).
@@ -48,7 +58,7 @@ G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게�
 | `core/app_data.py` | `bind_release` · `allowed_actions` · `adopt_dataset` · `contract_coverage` · `find_dataset` 가 결속을 지난다 |
 | `api/routes/app_data_runtime.py` | `_assert_contract_action` — **6개 경로 전부**에 2차 판정 |
 | `core/app_policy.py` | `DENY_DATASET_ACTION` (전역 권한 없음과 **다른 사유**) |
-| `tests/test_app_dataset_binding.py` (79) | 승계 · 2차 판정 · 결속 판 · revision 불변 · 유일성 · 원자성 · **테넌트 격리** · **fail-closed** |
+| `tests/test_app_dataset_binding.py` (87) | 승계 · 2차 판정 · 결속 판 · revision 불변 · 유일성 · 원자성 · **테넌트 격리** · **fail-closed** |
 
 **변이 22/22.** 전체 스위트 **3,352 passed · 1 skipped**.
 
@@ -95,6 +105,46 @@ rel_tenant_b 가 TENANT_A 데이터셋을 결속: True
 
 **변이 26/26** (1회차 3건 생존 — 둘은 시험 구멍, 하나는 **중복 분기**라 시험 대신 **삭제**).
 전체 스위트 **3,398 passed · 1 skipped**.
+
+### 2.2 / BDR-1 (2026-08-15 · 데이터 출처·역할·중복입력 계약)
+
+★★★ **무엇을 막는가**: 계약이 «이 데이터가 어디서 오는가» 를 말하지 않으면 생성기는
+**모든 것을 입력 화면으로 만든다.** 그러면 현업은 ERP 에 이미 있는 값을 한 번 더 손으로
+넣고, **두 값이 갈라진 뒤에야** 그 사실이 드러난다.
+
+| 무엇 | 어디 |
+|---|---|
+| Dataset 에 `data_role`·`source_intent`·`duplicate_entry_policy` **필수** + `enterprise_contract_key`·`required_freshness` 선택 | `core/app_runtime_contract.py` |
+| 출처 결정표 — **`AFS_NATIVE` 만 물질화**, 나머지는 `HOST_SERVICE_REQUIRED` | 같음 |
+| Zero Duplicate Entry Gate — 계약으로 판정 가능한 ①②⑤ | `duplicate_entry_errors()` |
+| 역할 × 출처 닫힌 표 | `ROLE_SOURCE_MATRIX` |
+| 물질화본이 의미를 들고 있는다(결속 열 둘 + 검증) | `core/app_data.py` · `app_data_store.py` |
+| 의미 다섯 필드를 **계약 지문**에, 역할·출처를 **물질화 지문**에 | `semantic_material()` · `materialization_fingerprint()` |
+
+**닫은 다섯 (교차검토가 지정한 것)**
+
+· `source_intent` · `data_role` · `duplicate_entry_policy` 를 계약 의미에 넣음
+· **기업 Actual 의 AFS Native 폴백 차단** — `ROLE_SOURCE_MATRIX[ENTERPRISE_ACTUAL]` 에
+  `AFS_NATIVE` 가 **없다**. 회사의 확정 실적을 AFS 화면에서 받겠다는 선언이 곧 이중 입력이다
+· **미분류 레거시의 자동 Actual 승격 금지** — `data_role_for()` 는 레거시에 `None` 을
+  돌려주고 `is_official_actual()` 은 **명시 선언만** 참으로 본다
+
+⚠️⚠️ **모르는 출처를 `AFS_NATIVE` 로 떨어뜨리지 않는다.** 그 폴백 하나가 곧 이중 입력 앱을
+만든다 — 변이 검사 1번이 정확히 그것이다.
+
+★ 차단 문구는 기술 용어를 쓰지 않는다. 「`source_intent=ENTERPRISE_READ` 이므로 `create`
+금지」는 현업에게 **다음에 무엇을 할지** 알려 주지 않는다.
+
+**변이 28/28** (1회차 3건 생존).
+⚠️ 그중 하나가 중요한 종류였다: **이중 입력 게이트 ①은 컴파일 경로에서 한 번도 실행되지
+않는다** — Compiler 가 `ENTERPRISE_READ` 를 「아직 물질화 불가」로 **먼저** 막기 때문이다.
+그 규칙은 **저장된 계약**(릴리스 스냅샷·workspace 원문)에서만 의미가 있고, 그쪽 시험이
+없어서 규칙을 통째로 지워도 초록이었다. 나머지 둘은 지문 시험이 두 필드를 함께 바꿔
+**하나가 지문에서 빠져도 다른 하나가 덮어 주던** 경우다.
+
+전체 스위트 **3,429 passed · 1 skipped**.
+**실측**: 운영 백업 사본에 마이그레이션 재실행 — 레거시 결속은 `data_role=''` ·
+`is_official_actual()=False`(즉 **미분류는 실적이 아니다**) · `readiness=READY` · 원본 불변.
 
 **실측**: 운영 백업(`app_data.db.bak_test_pollution_20260813_114845` — 옛 13열 스키마 ·
 결속표 없음)의 **사본**에 마이그레이션을 세 번(2단계·2.1·2.1b) 돌려 확인했다:
@@ -418,11 +468,11 @@ projects/**/latest_state.json  58개
 | `tests/test_admin_policy_audit.py` (30) | 정책 API · 전환 스위치 |
 | `tests/test_app_runtime_contract.py` (69) | **[1단계]** 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 |
 | `tests/test_project_state_schema_5_2.py` (18) | **[1단계]** 5.2.0 마이그레이션 · 소스 검사 |
-| `tests/test_app_dataset_binding.py` (79) | **[2단계+2.1+2.1b]** 승계 · 2차 판정 · 결속 판 · 불변 · 유일성 · 원자성 · 테넌트 격리 · fail-closed |
+| `tests/test_app_dataset_binding.py` (87) | **[2단계+2.1+2.1b]** 승계 · 2차 판정 · 결속 판 · 불변 · 유일성 · 원자성 · 테넌트 격리 · fail-closed |
 | `scripts/canary_host_runtime{,_seed}.py` | 격리 카나리(드라이버가 스스로 판정) |
 
-**변이 검사 누적 183/183**(G1-B 88 + 1단계 27 + 2단계 22 + 2.1 보정 20 + 2.1b 26).
-전체 스위트 **3,398 passed · 1 skipped**(2026-08-15) · `tsc -b` 초록.
+**변이 검사 누적 211/211**(G1-B 88 + 1단계 27 + 2단계 22 + 2.1 보정 20 + 2.1b 26 + 2.2 28).
+전체 스위트 **3,429 passed · 1 skipped**(2026-08-15) · `tsc -b` 초록.
 
 ⚠️ 카나리를 다시 돌리려면: 워크트리 생성 → 씨앗 → 서버(별도 포트, `AFS_SHADOW_RUN`) →
 드라이버(`--seed-file`, `--run`, `--wait-expiry`). 드라이버가 기록·판정까지 하고

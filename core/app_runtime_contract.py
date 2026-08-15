@@ -142,6 +142,85 @@ KNOWLEDGE_ELIGIBILITY: Tuple[str, ...] = ("OPERATIONAL_UNVERIFIED", "OPERATIONAL
 #: 단위 없는 수량은 나중에 합산될 때 **조용히 틀린다**(톤과 개를 더한다).
 UNIT_REQUIRED_ROLES: Tuple[str, ...] = ("quantity", "amount")
 
+# ── [BDR-1 / I-4 2.2] 데이터 출처·역할·중복입력 ────────────────────────────
+#
+# ★★★ 왜 이것이 계약에 들어가야 하는가
+#
+# 지금 Dataset Contract 는 `name`·`purpose`·`allowed_actions`·`fields` 뿐이다. 그래서
+# **앱이 다룰 데이터가 이미 회사에 있는 것인지, AFS 에서 새로 받는 것인지 구분할 수 없다.**
+# 구분하지 못하면 생성기는 모든 것을 입력 화면으로 만든다 — 그리고 현업은 ERP 에 이미
+# 있는 값을 **한 번 더 손으로 넣는다.** 그 이중 입력은 조용하고, 두 값이 갈라진 뒤에야
+# 드러나며, 그때는 어느 쪽이 맞는지 아무도 모른다.
+
+#: 이 데이터가 **무엇인가**. ⚠️ 섞으면 시나리오 값이 공식 실적으로 보고된다.
+ENTERPRISE_ACTUAL = "ENTERPRISE_ACTUAL"      # 회사에서 실제 발생·확정된 것
+OPERATIONAL_PLAN = "OPERATIONAL_PLAN"        # 승인된 계획
+OPERATIONAL_FORECAST = "OPERATIONAL_FORECAST"  # 전망 — ⚠️ Actual 로 승격 불가
+NATIVE_SUPPLEMENT = "NATIVE_SUPPLEMENT"      # 원천 결손을 AFS 에서 보완
+SCENARIO_INPUT = "SCENARIO_INPUT"            # 사용자가 바꾼 가정
+DERIVED_RESULT = "DERIVED_RESULT"            # 결정론적 계산 결과
+
+DATA_ROLES: Tuple[str, ...] = (ENTERPRISE_ACTUAL, OPERATIONAL_PLAN, OPERATIONAL_FORECAST,
+                               NATIVE_SUPPLEMENT, SCENARIO_INPUT, DERIVED_RESULT)
+
+#: 이 데이터가 **어디서 오는가**.
+AFS_NATIVE = "AFS_NATIVE"                    # AFS 에서 입력받는다
+ENTERPRISE_READ = "ENTERPRISE_READ"          # 기존 회사 시스템에서 읽는다
+EXTERNAL_REFERENCE = "EXTERNAL_REFERENCE"    # 외부 공표 지표
+DERIVED_READ = "DERIVED_READ"                # 계산 서비스가 만든다
+
+SOURCE_INTENTS: Tuple[str, ...] = (AFS_NATIVE, ENTERPRISE_READ, EXTERNAL_REFERENCE, DERIVED_READ)
+
+#: ★★★ 출처별 현재 지원 상태(§6.3). **`AFS_NATIVE` 만 지금 물질화된다.**
+#: ⚠️⚠️ 나머지를 `AFS_NATIVE` 로 **조용히 폴백하지 않는다** — 그 폴백이 곧 이중 입력이다.
+SOURCE_INTENT_DECISION: Dict[str, Tuple[str, str]] = {
+    AFS_NATIVE:         (SUPPORTED, "window.afs.data 로 입력받는다"),
+    ENTERPRISE_READ:    (HOST_SERVICE_REQUIRED,
+                         "기존 회사 시스템에서 가져오도록 정의돼 있습니다 — 입력 화면을 "
+                         "만들지 않습니다. 먼저 데이터 연결·준비에서 원천을 연결하십시오."),
+    EXTERNAL_REFERENCE: (HOST_SERVICE_REQUIRED,
+                         "외부 공표 지표는 Host 외부지표 서비스가 가져옵니다 — 앱이 직접 "
+                         "호출하지 않습니다."),
+    DERIVED_READ:       (HOST_SERVICE_REQUIRED,
+                         "계산 결과는 Host 계산 서비스가 만듭니다 — 앱이 임의로 계산·저장하지 "
+                         "않습니다."),
+}
+
+#: 중복 입력 정책.
+DENY_IF_AUTHORITATIVE_SOURCE_EXISTS = "DENY_IF_AUTHORITATIVE_SOURCE_EXISTS"
+ALLOW_SUPPLEMENT_ONLY = "ALLOW_SUPPLEMENT_ONLY"
+NO_DUPLICATE_CHECK_REQUIRED = "NO_DUPLICATE_CHECK_REQUIRED"
+
+DUPLICATE_ENTRY_POLICIES: Tuple[str, ...] = (DENY_IF_AUTHORITATIVE_SOURCE_EXISTS,
+                                             ALLOW_SUPPLEMENT_ONLY,
+                                             NO_DUPLICATE_CHECK_REQUIRED)
+
+#: ★★★ 역할 × 출처 — **어떤 조합이 말이 되는가**(닫힌 표).
+#:
+#: ⚠️⚠️ `ENTERPRISE_ACTUAL` 에 `AFS_NATIVE` 가 **없는 것**이 이 표의 핵심이다. 회사의 확정
+#:   실적을 AFS 화면에서 받겠다는 선언은 곧 **이중 입력**이고, 두 값이 갈라진 뒤에야
+#:   드러난다.
+ROLE_SOURCE_MATRIX: Dict[str, Tuple[str, ...]] = {
+    ENTERPRISE_ACTUAL:     (ENTERPRISE_READ,),
+    OPERATIONAL_PLAN:      (ENTERPRISE_READ, AFS_NATIVE),
+    OPERATIONAL_FORECAST:  (EXTERNAL_REFERENCE, DERIVED_READ, AFS_NATIVE),
+    NATIVE_SUPPLEMENT:     (AFS_NATIVE,),
+    SCENARIO_INPUT:        (AFS_NATIVE,),
+    DERIVED_RESULT:        (DERIVED_READ,),
+}
+
+#: 쓰기 행동. ⚠️ 이 셋 중 하나라도 있으면 «입력 화면이 생긴다» 는 뜻이다.
+WRITE_ACTIONS: Tuple[str, ...] = ("create", "update", "delete")
+
+#: 사용자에게 보여 줄 차단 문구. ★ 기술 용어를 쓰지 않는다 —
+#: 「ENTERPRISE_READ 이므로 create 가 금지됩니다」는 현업에게 아무것도 알려 주지 않는다.
+DUPLICATE_ENTRY_MESSAGE = (
+    "이 데이터는 기존 회사 시스템에서 가져오도록 정의되어 있어 새 입력 화면을 만들지 "
+    "않습니다. 먼저 ‘데이터 연결·준비’에서 원천을 연결하거나 검증 파일을 등록해 주십시오.")
+
+#: ISO-8601 기간(`P1D`·`PT6H`…). 신선도 요구를 자유 문장으로 두면 비교할 수 없다.
+FRESHNESS_PATTERN = r"^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?$"
+
 NAME_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 CONTRACT_ID_PATTERN = r"^contract_[a-z0-9]{12}$"
 FINGERPRINT_PATTERN = r"^[0-9a-f]{16}$"
@@ -169,7 +248,11 @@ _FIELD_SCHEMA: Dict[str, Any] = {
 _DATASET_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["name", "label", "purpose", "allowed_actions", "fields"],
+    #: ⚠️ [BDR-1] `data_role`·`source_intent`·`duplicate_entry_policy` 는 **필수**다.
+    #:   선택으로 두면 빠진 계약이 「모르니까 입력 화면」으로 처리되고, 그것이 정확히
+    #:   막으려던 이중 입력이다. 빠뜨린 초안은 `DRAFT` 로 남고 사람이 정한다.
+    "required": ["name", "label", "purpose", "allowed_actions", "fields",
+                 "data_role", "source_intent", "duplicate_entry_policy"],
     "properties": {
         "name": {"type": "string", "pattern": NAME_PATTERN},
         "label": {"type": "string"},
@@ -178,6 +261,12 @@ _DATASET_SCHEMA: Dict[str, Any] = {
                             "items": {"enum": list(ACTIONS)}},
         "ontology_entity_type": {"type": "string"},
         "knowledge_eligibility": {"enum": list(KNOWLEDGE_ELIGIBILITY)},
+        "data_role": {"enum": list(DATA_ROLES)},
+        "source_intent": {"enum": list(SOURCE_INTENTS)},
+        "duplicate_entry_policy": {"enum": list(DUPLICATE_ENTRY_POLICIES)},
+        #: 회사 Data Contract 의 키(`PRC-02` 등). 아직 없을 수 있으므로 선택이다.
+        "enterprise_contract_key": {"type": "string"},
+        "required_freshness": {"type": "string", "pattern": FRESHNESS_PATTERN},
         "fields": {"type": "array", "minItems": 1, "items": _FIELD_SCHEMA},
     },
 }
@@ -263,6 +352,76 @@ def decide(capability: Any) -> Tuple[str, str]:
     return hit
 
 
+def decide_source_intent(source_intent: Any) -> Tuple[str, str]:
+    """출처 의도 → (지원 상태, 사용자에게 할 말).
+
+    ⚠️⚠️ **모르는 출처를 `AFS_NATIVE` 로 떨어뜨리지 않는다.** 그 폴백 하나가 곧
+      「기존 시스템에 있는 값을 화면에서 또 받는」 앱을 만든다."""
+    key = str(source_intent or "").strip()
+    hit = SOURCE_INTENT_DECISION.get(key)
+    if hit is None:
+        return (NOT_YET_SUPPORTED,
+                "알 수 없는 데이터 출처입니다 — 어디서 오는지 정해야 만들 수 있습니다.")
+    return hit
+
+
+def materializable(source_intent: Any) -> bool:
+    """지금 **실제로 데이터셋을 만들 수 있는가.** `AFS_NATIVE` 만 참이다."""
+    return decide_source_intent(source_intent)[0] == SUPPORTED
+
+
+def is_official_actual(dataset: Any) -> bool:
+    """이 데이터셋이 **공식 실적**인가.
+
+    ★★★ 명시적으로 `ENTERPRISE_ACTUAL` 이라고 선언된 것만 참이다.
+    ⚠️⚠️ **미분류를 Actual 로 승격하지 않는다.** 「역할이 안 적혀 있으니 실적이겠지」는
+      추측이고, 그 추측 위에서 경영 보고가 만들어진다."""
+    return isinstance(dataset, dict) and str(dataset.get("data_role", "")) == ENTERPRISE_ACTUAL
+
+
+def duplicate_entry_errors(dataset: Any) -> List[str]:
+    """★★★ **Zero Duplicate Entry Gate**(§6.4) — 계약 하나로 판정 가능한 조건들.
+
+    현업의 이중 입력을 막는 **첫 번째 제품 게이트**다. 여기서 막지 못하면 그 앱은
+    「ERP 에 있는 값을 한 번 더 받는 화면」을 갖고 배포된다."""
+    if not isinstance(dataset, dict):
+        return ["데이터셋이 객체가 아닙니다."]
+    name = str(dataset.get("name", "?"))
+    role = str(dataset.get("data_role", ""))
+    intent = str(dataset.get("source_intent", ""))
+    policy = str(dataset.get("duplicate_entry_policy", ""))
+    actions = {str(a) for a in (dataset.get("allowed_actions") or [])}
+    writes = sorted(actions & set(WRITE_ACTIONS))
+    errs: List[str] = []
+
+    # ① 기업 읽기 데이터셋에 입력·수정·삭제가 있다
+    if intent and intent != AFS_NATIVE and writes:
+        errs.append(f"{name}: 이 데이터는 {intent} 로 선언됐는데 {writes} 가 열려 있습니다 — "
+                    f"{DUPLICATE_ENTRY_MESSAGE}")
+
+    # ② 권위 원천이 있으면 입력을 만들지 않는다
+    if policy == DENY_IF_AUTHORITATIVE_SOURCE_EXISTS and writes:
+        errs.append(f"{name}: 중복입력 정책이 «권위 원천이 있으면 금지» 인데 {writes} 가 "
+                    f"열려 있습니다 — 입력 화면이 생기면 그 정책은 글자로만 남습니다.")
+
+    # ⑤ 역할과 출처가 서로 다른 말을 한다
+    allowed_sources = ROLE_SOURCE_MATRIX.get(role)
+    if role and intent and allowed_sources is not None and intent not in allowed_sources:
+        extra = ""
+        if role == ENTERPRISE_ACTUAL and intent == AFS_NATIVE:
+            #: ⚠️ 가장 위험한 조합이라 따로 말한다.
+            extra = (" — 회사의 확정 실적을 AFS 화면에서 받겠다는 뜻이 되고, 그것이 곧 "
+                     "이중 입력입니다. 두 값이 갈라진 뒤에야 드러납니다.")
+        errs.append(f"{name}: 역할 {role} 에는 출처 {list(allowed_sources)} 만 맞습니다"
+                    f"(선언 {intent}){extra}")
+
+    # 보완 전용 정책은 보완 역할에만 붙는다
+    if policy == ALLOW_SUPPLEMENT_ONLY and role and role != NATIVE_SUPPLEMENT:
+        errs.append(f"{name}: 중복입력 정책이 «보완만 허용» 인데 역할이 {role} 입니다 — "
+                    f"보완이 아닌 데이터에 그 정책을 붙이면 아무것도 막지 못합니다.")
+    return errs
+
+
 def is_buildable(status: Any) -> bool:
     """이 상태의 요구를 지금 만들 수 있는가."""
     return str(status or "") in BUILDABLE
@@ -295,6 +454,14 @@ def semantic_material(contract: Dict[str, Any]) -> Dict[str, Any]:
             "name": str(d.get("name", "")),
             "allowed_actions": sorted({str(a) for a in (d.get("allowed_actions") or [])}),
             "ontology_entity_type": str(d.get("ontology_entity_type", "")),
+            #: ★★★ [BDR-1] 출처·역할·중복입력은 **의미**다. 이것이 바뀌면 앱이 다루는 것이
+            #:   달라진다 — 「기존 시스템에서 읽는다」가 「화면에서 받는다」로 바뀌는 것은
+            #:   설명 문구가 아니라 업무 자체의 변경이고, **재승인 대상**이다.
+            "data_role": str(d.get("data_role", "")),
+            "source_intent": str(d.get("source_intent", "")),
+            "duplicate_entry_policy": str(d.get("duplicate_entry_policy", "")),
+            "enterprise_contract_key": str(d.get("enterprise_contract_key", "")),
+            "required_freshness": str(d.get("required_freshness", "")),
             "fields": sorted(
                 ({"name": str(f.get("name", "")), "type": str(f.get("type", "")),
                   "required": bool(f.get("required", False)), "unit": str(f.get("unit", "")),
@@ -360,10 +527,11 @@ def conditional_errors(contract: Any) -> List[str]:
     # 2. 매니페스트 ↔ 계약 일치 — 선언된 데이터셋·행동이 서로를 벗어나지 않는가
     errs.extend(_manifest_contract_mismatch(contract))
 
-    # 3. 수량·금액에는 단위가 필요하다
+    # 3. 수량·금액에는 단위가 필요하다 + [BDR-1] 이중 입력 게이트
     for ds in (contract.get("datasets") or []):
         if not isinstance(ds, dict):
             continue
+        errs.extend(duplicate_entry_errors(ds))
         dsname = str(ds.get("name", "?"))
         for f in (ds.get("fields") or []):
             if not isinstance(f, dict):

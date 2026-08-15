@@ -39,6 +39,30 @@ RELEASES = {
 }
 
 
+#: [BDR-1] 계약 결속에는 «무엇인가·어디서 오는가» 가 필수다. 대부분의 시험은 그것을
+#: 시험 대상으로 삼지 않으므로 기본값을 채운다 — ⚠️ **호출자가 적으면 덮어쓰지 않는다**
+#: (의미 검증을 시험하는 쪽이 잘못된 값을 넣을 수 있어야 한다).
+DEFAULT_MEANING = {"data_role": "NATIVE_SUPPLEMENT", "source_intent": "AFS_NATIVE"}
+
+
+@pytest.fixture(autouse=True)
+def _meaning_defaults(monkeypatch):
+    """계약 결속 호출에 의미 기본값을 채우는 얇은 껍데기."""
+    import core.app_data as ad
+    for name in ("create_dataset", "bind_release", "adopt_dataset"):
+        real = getattr(ad.AppDataService, name)
+
+        def _wrap(real=real):
+            def inner(self, *a, **kw):
+                if kw.get("allowed_actions") is not None:
+                    for k, v in DEFAULT_MEANING.items():
+                        kw.setdefault(k, v)
+                return real(self, *a, **kw)
+            return inner
+
+        monkeypatch.setattr(ad.AppDataService, name, _wrap())
+
+
 @pytest.fixture()
 def svc(monkeypatch, tmp_path):
     """격리된 app_data DB 위의 서비스 + **서버가 아는 릴리스 정체**."""
@@ -857,6 +881,114 @@ def test_read_projection_hides_fields_the_release_does_not_know():
     #: `None` 은 «투영하지 않는다» 이지 «필드가 없다» 가 아니다.
     assert wire.project_record(row)["payload"] == {"qty": 1, "memo": "미래 필드"}
     assert wire.project_record(row, ())["payload"] == {}
+
+
+# ── [BDR-1 / 2.2] 물질화본이 의미를 들고 있는다 ──────────────────────────
+def test_binding_meaning_lists_match_the_contract_module():
+    """⚠️ 두 목록이 갈라지면 계약이 허용한 역할·출처를 물질화가 모르거나 그 반대가 된다."""
+    from core import app_data as ad, app_runtime_contract as arc
+    assert ad.DATA_ROLES == arc.DATA_ROLES
+    assert ad.SOURCE_INTENTS == arc.SOURCE_INTENTS
+    assert ad.WRITE_ACTIONS == arc.WRITE_ACTIONS
+    assert ad.ENTERPRISE_ACTUAL == arc.ENTERPRISE_ACTUAL
+    assert ad.AFS_NATIVE == arc.AFS_NATIVE
+
+
+def test_contract_binding_must_declare_its_meaning(svc):
+    """★★★ 계약 결속에는 «무엇인가·어디서 오는가» 가 **필수**다.
+
+    ⚠️⚠️ 비워 두면 그 데이터셋은 미분류로 물질화되고, 나중에 누군가 「적혀 있지 않으니
+      실적이겠지」로 읽는다."""
+    with pytest.raises(AppDataError) as e:
+        app_data_service.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                                        allowed_actions=["read"], contract_revision=1,
+                                        data_role="", source_intent="")
+    assert "역할" in str(e.value) or "출처" in str(e.value)
+
+
+def test_enterprise_read_never_gets_write_actions_in_the_db(svc):
+    """★★★ **입력 화면 차단은 계약에서 끝나지 않는다.**
+
+    물질화는 계약을 지나지 않고도 일어날 수 있다(관리 경로·복구 스크립트). 그때
+    이 검사가 없으면 계약이 막은 조합이 DB 에는 그대로 들어간다."""
+    for write in ("create", "update", "delete"):
+        with pytest.raises(AppDataError) as e:
+            svc.create_dataset("rel_1", f"src_{write}", _schema(), actor_id="u@x",
+                               allowed_actions=["read", write], contract_revision=1,
+                               data_role="ENTERPRISE_ACTUAL", source_intent="ENTERPRISE_READ")
+        assert "입력 화면" in str(e.value), write
+    #: 읽기만이면 통과한다 — 막기만 하는 게이트는 통제를 증명하지 않는다.
+    ok = svc.create_dataset("rel_1", "purchases", _schema(), actor_id="u@x",
+                            allowed_actions=["read"], contract_revision=1,
+                            data_role="ENTERPRISE_ACTUAL", source_intent="ENTERPRISE_READ")
+    assert svc.allowed_actions("rel_1", ok["dataset_id"]) == ("read",)
+
+
+def test_enterprise_actual_cannot_be_materialized_as_afs_native(svc):
+    """★★★ **기업 Actual 의 AFS Native 폴백 차단** — DB 쪽에서도 막는다."""
+    with pytest.raises(AppDataError) as e:
+        svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                           allowed_actions=["read"], contract_revision=1,
+                           data_role="ENTERPRISE_ACTUAL", source_intent="AFS_NATIVE")
+    assert "이중 입력" in str(e.value)
+
+
+def test_unknown_meaning_is_refused_not_defaulted(svc):
+    """⚠️⚠️ 모르는 값을 `AFS_NATIVE`·`NATIVE_SUPPLEMENT` 로 채워 넣지 않는다."""
+    for role, intent in (("MAGIC_ROLE", "AFS_NATIVE"), ("NATIVE_SUPPLEMENT", "MAGIC_SOURCE")):
+        with pytest.raises(AppDataError):
+            svc.create_dataset("rel_1", f"x_{role}_{intent}", _schema(), actor_id="u@x",
+                               allowed_actions=["read"], contract_revision=1,
+                               data_role=role, source_intent=intent)
+
+
+def test_legacy_binding_must_not_carry_meaning(svc):
+    """계약이 말한 적 없는 것을 적으면 **그 값이 곧 근거 없는 사실**이 된다."""
+    with pytest.raises(AppDataError) as e:
+        app_data_service.create_dataset("legacy_1", "orders", _schema(), actor_id="u@x",
+                                        data_role="ENTERPRISE_ACTUAL")
+    assert "레거시" in str(e.value)
+
+
+def test_unclassified_legacy_is_never_official_actual(svc):
+    """★★★ **미분류 레거시의 자동 Actual 승격 금지.**
+
+    ⚠️⚠️ 「역할이 안 적혀 있으니 실적이겠지」는 추측이고, 그 추측 위에서 경영 보고가
+      만들어진다."""
+    legacy = svc.create_dataset("legacy_1", "orders", _schema(), actor_id="u@x")
+    assert svc.data_role_for("legacy_1", legacy["dataset_id"]) is None
+    assert svc.is_official_actual("legacy_1", legacy["dataset_id"]) is False
+
+    actual = svc.create_dataset("rel_1", "purchases", _schema(), actor_id="u@x",
+                                allowed_actions=["read"], contract_revision=1,
+                                data_role="ENTERPRISE_ACTUAL", source_intent="ENTERPRISE_READ")
+    assert svc.is_official_actual("rel_1", actual["dataset_id"]) is True
+    #: 다른 릴리스에서는 그 사실이 성립하지 않는다 — 결속마다 따로 답한다.
+    assert svc.is_official_actual("rel_2", actual["dataset_id"]) is False
+
+    supplement = svc.create_dataset("rel_1", "notes", _schema(), actor_id="u@x",
+                                    allowed_actions=["read", "create"], contract_revision=1)
+    assert svc.is_official_actual("rel_1", supplement["dataset_id"]) is False
+
+
+def test_narrowing_meaning_is_reflected_on_rebinding(svc):
+    ds = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                            allowed_actions=["read", "create"], contract_revision=1)
+    assert svc.data_role_for("rel_1", ds["dataset_id"]) == "NATIVE_SUPPLEMENT"
+    svc.bind_release("rel_1", ds["dataset_id"], allowed_actions=["read"],
+                     data_role="OPERATIONAL_FORECAST", source_intent="AFS_NATIVE")
+    assert svc.data_role_for("rel_1", ds["dataset_id"]) == "OPERATIONAL_FORECAST"
+
+
+def test_meaning_moves_the_materialization_fingerprint(svc):
+    """계약 의미가 바뀌면 물질화 지문도 움직여야 한다 —
+    ⚠️ 안 움직이면 3단계 봉인이 「출처가 바뀐 앱」을 통과시킨다."""
+    ds = svc.create_dataset("rel_1", "orders", _schema(), actor_id="u@x",
+                            allowed_actions=["read"], contract_revision=1)
+    base = svc.materialization_fingerprint("rel_1")
+    svc.bind_release("rel_1", ds["dataset_id"], allowed_actions=["read"],
+                     data_role="OPERATIONAL_FORECAST", source_intent="AFS_NATIVE")
+    assert svc.materialization_fingerprint("rel_1") != base
 
 
 # ── 마이그레이션 ──────────────────────────────────────────────────────────

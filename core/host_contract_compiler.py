@@ -137,10 +137,22 @@ def _compile_datasets(draft: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List
                                 if a in {str(x) for x in (raw.get("allowed_actions") or [])}],
             "fields": [],
         }
-        for k in ("ontology_entity_type", "knowledge_eligibility"):
+        #: [BDR-1] 출처·역할·중복입력은 **정규화만** 한다 — 없으면 지어내지 않는다.
+        #: ⚠️⚠️ 빠졌을 때 `AFS_NATIVE` 를 채워 넣으면 그 순간 「기존 시스템에 있는 값을
+        #:   화면에서 또 받는」 앱이 된다. 빠진 것은 빠진 채로 스키마가 거부한다.
+        for k in ("data_role", "source_intent", "duplicate_entry_policy",
+                  "ontology_entity_type", "knowledge_eligibility",
+                  "enterprise_contract_key", "required_freshness"):
             v = str(raw.get(k, "")).strip()
             if v:
                 ds[k] = v
+
+        #: ★★★ 출처 결정표(§6.3). **지금 물질화되는 것은 `AFS_NATIVE` 뿐이다.**
+        intent = str(ds.get("source_intent", ""))
+        if intent and not arc.materializable(intent):
+            status, why = arc.decide_source_intent(intent)
+            errors.append(
+                f"{name or '?'}: {arc.STATUS_LABEL.get(status, status)} — {why}")
         unknown = [a for a in {str(x) for x in (raw.get("allowed_actions") or [])}
                    if a not in arc.ACTIONS]
         if unknown:
