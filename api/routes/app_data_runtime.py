@@ -31,13 +31,15 @@
 
 LLM 0콜.
 """
+import dataclasses
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from api.deps import Principal, current_principal, viewing_context, visibility_block_reason
-from core import app_policy, app_proof, host_runtime_sdk as sdk, host_runtime_wire as wire
+from core import (app_contract_gate, app_policy, app_proof, host_runtime_sdk as sdk,
+                  host_runtime_wire as wire)
 from core.app_capability_token import AppTokenError, app_capability_tokens
 from core.app_data import AppDataError, AppDataIntegrityError, app_data_service
 
@@ -45,6 +47,13 @@ router = APIRouter(prefix="/api/v1/appdata/runtime")
 
 #: 앱 증명을 싣는 헤더. ⚠️ 이 값은 **부모 창의 메모리에만** 있다 — iframe 에 건너가지 않는다.
 PROOF_HEADER = "X-App-Proof"
+
+#: ★★★ 「이 판은 사라졌다」로 답할 사유들 — `410` 이고 **재발급으로 되살아나지 않는다.**
+#: ⚠️ 만료(`401`)와 나누는 이유: 만료는 새 증명을 받아 **같은 프레임**을 계속 쓰지만,
+#:   여기는 지금 도는 코드가 **낡은 코드**다. 새 증명을 주면 옛 앱이 새 증명으로 계속 돈다.
+_STALE_APP_REASONS = (app_policy.DENY_TOKEN_MANIFEST_MISMATCH,
+                      app_policy.DENY_TOKEN_CONTRACT_MISMATCH,
+                      app_policy.DENY_TOKEN_MATERIALIZATION_MISMATCH)
 
 #: HTTP 상태로 접는 표. ★ 존재를 숨기는 코드는 404 다.
 _STATUS = {
@@ -151,6 +160,12 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str,
     #: 프로그램 사용 중단(`program_usable`)은 `resource_scope` 안에서 이미 반영된다.
     res = app_proof.resource_scope(rel, release_id)
     facts = app_proof.app_facts(rel, release_id)
+    #: ★★★ [I-4 3단계] **지금의** 계약·물질화 지문을 산출해 판정에 넘긴다.
+    #:   ⚠️ 발급 때 한 번 보고 마는 것이 아니다 — 계약이 개정되거나 결속이 달라지면
+    #:     **다음 요청에서** 그 프레임이 죽어야 한다.
+    c_fp, m_fp = app_contract_gate.sealed_pair(rel, release_id)
+    facts = dataclasses.replace(facts, contract_fingerprint=c_fp,
+                                materialization_fingerprint=m_fp)
     subject = app_policy.Subject(
         user_id=(p.user_id or ""), scope=p.scope, ctx=ctx,
         session_id=(p.session_id or ""),
@@ -188,8 +203,9 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str,
         raise _fail(sdk.app_error_code(decision.reason),
                     audit_reason=decision.reason, actor=(p.user_id or ""),
                     target=release_id, path=path,
-                    status=(410 if decision.reason == app_policy.DENY_TOKEN_MANIFEST_MISMATCH
-                            else 0))
+                    #: ★ 계약·물질화 변경도 «이 판은 사라졌다» 이므로 410 이다 —
+                    #:   재발급으로 되살리면 **옛 코드가 새 증명으로 계속 돈다.**
+                    status=(410 if decision.reason in _STALE_APP_REASONS else 0))
     #: ★ **허용이 확정된 뒤** 성공 사용을 남긴다(§`record_use`).
     try:
         app_capability_tokens.record_use(proof)
@@ -361,6 +377,20 @@ async def issue_proof(req: ProofRequest, p: Principal = Depends(current_principa
                                   else "사용자 권한 없음"),
                     actor=uid, target=release_id, path="POST /runtime/proof")
 
+    #: ★★★ [I-4 3단계] **발급 전 일치 게이트.**
+    #
+    #  두 지문을 봉인하면 «발급 뒤의 변경» 은 잡는다. 그러나 **처음부터 계약과 DB 결속이
+    #  다른 상태**에는 아무 말도 하지 않는다 — 그 상태에서 나간 증명은 어긋남을 정상으로
+    #  못박고, 이후 모든 대조가 그 어긋남을 기준으로 삼는다.
+    #
+    #  ⚠️ 봉인은 「그때와 같은가」에 답할 뿐 **「그때가 옳았는가」에는 답하지 않는다.**
+    gate = app_contract_gate.evaluate(rel, release_id)
+    if not gate.ok:
+        #: ⚠️ 사유를 앱에게 그대로 주지 않는다 — 감사에만 남긴다(다른 거부와 같은 규칙).
+        raise _fail(sdk.ERR_NOT_FOUND,
+                    audit_reason=f"계약↔물질화 불일치: {' / '.join(gate.reasons)[:160]}",
+                    actor=uid, target=release_id, path="POST /runtime/proof")
+
     try:
         rec = app_capability_tokens.issue(
             actor=uid, session_id=p.session_id,
@@ -372,6 +402,10 @@ async def issue_proof(req: ProofRequest, p: Principal = Depends(current_principa
             #:   유지한 채 내용이 바뀐 매니페스트» 가 기존 증명을 무효화하지 못한다.
             manifest_fingerprint=facts.manifest_fingerprint,
             manifest_version=facts.manifest_version,
+            #: ★★★ 계약 원문과 물질화를 **함께** 봉인한다(설계 §16-1). 어느 하나라도
+            #:   달라지면 그 판은 사라진 것이고, 브리지는 프레임을 버린다.
+            contract_fingerprint=gate.contract_fingerprint,
+            materialization_fingerprint=gate.materialization_fingerprint,
             purpose="Host Runtime 데이터 평면")
     except AppTokenError as e:
         #: 발급 계약 위반은 앱 코드 문제가 아니라 **자료 상태** 문제다(문맥·범위 공란 등).

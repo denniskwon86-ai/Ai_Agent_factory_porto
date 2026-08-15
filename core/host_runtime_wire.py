@@ -49,6 +49,11 @@ from core.host_runtime_sdk import (APP_ERROR_CODES, ENVELOPE_KEY, ERR_EXPIRED, E
 
 WIRE_VERSION = 1
 
+#: ★★★ 「이 판은 사라졌다」 — 앱 선언·계약 원문·DB 물질화 중 하나가 바뀌었다.
+#: ⚠️ 만료(401)와 **다른 숫자**여야 한다. 같으면 브리지가 재발급하고, 그러면
+#:   **옛 코드가 새 증명으로 계속 돈다.** TS 쪽 `STATUS_STALE_APP` 과 짝이다.
+STATUS_STALE_APP = 410
+
 # ── 메시지 종류 ───────────────────────────────────────────────────────────
 MSG_HELLO = f"{ENVELOPE_KEY}.hello"     # 앱 → 부모 (앱이 먼저 말한다)
 MSG_INIT = f"{ENVELOPE_KEY}.init"       # 부모 → 앱

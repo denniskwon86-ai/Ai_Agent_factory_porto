@@ -176,7 +176,9 @@ SOURCE_INTENT_DECISION: Dict[str, Tuple[str, str]] = {
 
 NAME_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 CONTRACT_ID_PATTERN = r"^contract_[a-z0-9]{12}$"
-FINGERPRINT_PATTERN = r"^[0-9a-f]{16}$"
+#: ★★★ [I-4 3단계] 이 값은 **증명에 봉인된다** — 64비트 축약은 권한 결속에
+#: 좁다. 화면에는 `app_data.short_fingerprint()` 로 줄여 보여 준다.
+FINGERPRINT_PATTERN = r"^[0-9a-f]{64}$"
 
 # ── 5. JSON Schema ────────────────────────────────────────────────────────
 _FIELD_SCHEMA: Dict[str, Any] = {
@@ -208,9 +210,17 @@ _DATASET_SCHEMA: Dict[str, Any] = {
                  "data_role", "source_intent", "duplicate_entry_policy"],
     "properties": {
         "name": {"type": "string", "pattern": NAME_PATTERN},
+        #: ★★★ [§18] **불변 식별자.** `name` 은 앱이 부르는 이름이고 이것은 데이터셋의
+        #:   정체다. 둘을 하나로 두면 이름을 바꾸는 날 «이름이 같은 다른 것» 과 «이름이
+        #:   다른 같은 것» 을 구분할 방법이 사라진다. 비우면 `name` 을 쓴다.
+        "dataset_key": {"type": "string", "pattern": NAME_PATTERN},
         "label": {"type": "string"},
         "purpose": {"type": "string", "minLength": 1},
-        "allowed_actions": {"type": "array", "minItems": 1, "uniqueItems": True,
+        #: ⚠️ `minItems` 가 **0** 이다. 빈 목록은 «선언을 빠뜨렸다» 가 아니라 계약이
+        #:   **«아무 행동도 허용하지 않는다» 고 말한 것**이다(2단계의 세 값 중 하나).
+        #:   1로 막으면 계약은 그 사실을 표현할 수 없고, 그러면 그 상태는 계약 밖 경로로만
+        #:   만들어진다 — 계약이 설명할 수 없는 상태가 DB 에 생긴다.
+        "allowed_actions": {"type": "array", "minItems": 0, "uniqueItems": True,
                             "items": {"enum": list(ACTIONS)}},
         "ontology_entity_type": {"type": "string"},
         "knowledge_eligibility": {"enum": list(KNOWLEDGE_ELIGIBILITY)},
@@ -385,6 +395,8 @@ def semantic_material(contract: Dict[str, Any]) -> Dict[str, Any]:
         d = ds if isinstance(ds, dict) else {}
         datasets.append({
             "name": str(d.get("name", "")),
+            #: 정체가 바뀌면 그것은 다른 데이터셋이다 — 지문이 움직여야 한다.
+            "dataset_key": str(d.get("dataset_key", "") or d.get("name", "")),
             "allowed_actions": sorted({str(a) for a in (d.get("allowed_actions") or [])}),
             "ontology_entity_type": str(d.get("ontology_entity_type", "")),
             #: ★★★ [BDR-1] 출처·역할·중복입력은 **의미**다. 이것이 바뀌면 앱이 다루는 것이
@@ -416,9 +428,11 @@ def semantic_material(contract: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def semantic_fingerprint(contract: Dict[str, Any]) -> str:
-    """의미 지문(sha256 앞 16자). **이 값이 바뀔 때만** 재승인이 필요하다."""
+    """의미 지문(전체 sha256). **이 값이 바뀔 때만** 재승인이 필요하다.
+
+    ⚠️ 축약하지 않는다 — 3단계부터 이 값이 증명에 봉인된다."""
     return hashlib.sha256(
-        canonical_json(semantic_material(contract)).encode("utf-8")).hexdigest()[:16]
+        canonical_json(semantic_material(contract)).encode("utf-8")).hexdigest()
 
 
 def contract_id_for(project_id: Any, task_id: Any = "") -> str:

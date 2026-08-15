@@ -1285,7 +1285,64 @@ def client(monkeypatch, tmp_path):
 
     from fastapi.testclient import TestClient
     from main import app
-    return TestClient(app)
+    c = TestClient(app)
+    c.lib = lib
+    return c
+
+
+def _sync_contract(c, release_id):
+    """★★★ [3단계] 릴리스의 **승인 계약 스냅샷**을 지금 물질화와 맞춘다.
+
+    3단계부터 증명 발급 전에 계약↔물질화를 데이터셋별로 대조하므로, 결속만 만들고
+    계약이 없으면 **발급 자체가 막힌다**(그것이 옳다 — 아무도 승인하지 않은 권한이다).
+    이 도우미는 4단계 물질화가 할 일을 시험에서 대신한다.
+
+    ⚠️ 시험이 **먼저 결속을 만들고 나중에 계약을 맞추는** 순서인 것에 주의한다. 제품은
+      반대다(계약 → 물질화). 그 방향은 4단계에서 실제 코드로 온다."""
+    from core.app_data import app_data_service
+    rows = app_data_service._store.query(
+        "SELECT b.runtime_name AS name, b.allowed_actions AS actions, b.data_role AS role, "
+        "       b.source_intent AS intent, b.contract_bound AS bound, "
+        "       d.dataset_key AS key, d.schema_json AS schema_json, v.schema_json AS ver_schema "
+        "  FROM app_release_dataset_bindings b "
+        "  JOIN app_datasets d ON d.dataset_id = b.dataset_id "
+        "  LEFT JOIN app_dataset_versions v ON v.version_id = b.version_id "
+        " WHERE b.release_id=?", (release_id,))
+    datasets = []
+    for r in rows:
+        if not int(r["bound"] or 0):
+            continue
+        schema = json.loads(r["ver_schema"] or r["schema_json"] or "{}")
+        datasets.append({
+            "name": r["name"], "label": r["name"], "purpose": "시험용",
+            "allowed_actions": [a for a in (r["actions"] or "").split(",") if a],
+            "dataset_key": r["key"],
+            "data_role": r["role"], "source_intent": r["intent"],
+            "duplicate_entry_policy": "NO_DUPLICATE_CHECK_REQUIRED",
+            "fields": [{"name": f["name"], "type": f["type"], "required": f["required"],
+                        "label": f.get("label", f["name"]), "classification": "INTERNAL"}
+                       for f in (schema.get("fields") or [])],
+        })
+    contract = {
+        "schema_version": "1.0", "contract_id": "contract_000000000001", "revision": 1,
+        "project_id": "proj_a", "runtime_contract_version": 1, "status": "APPROVED",
+        "app_class": "departmental", "capability_intents": [],
+        "manifest": {}, "datasets": datasets, "unsupported_requirements": [],
+        "semantic_fingerprint": "", "approval": {
+            "status": "APPROVED", "approved_by": "hikwon@lsmnm.com",
+            "approved_at": "2026-08-15T00:00:00Z", "decision_ledger_id": "L1"},
+    }
+    path = c.lib / release_id / "release.json"
+    rel = json.loads(path.read_text(encoding="utf-8"))
+    #: 매니페스트는 계약에서 유도한다(계약↔매니페스트 일치 규칙).
+    from core import app_manifest, app_runtime_contract as arc
+    contract["manifest"] = app_manifest.build(
+        capabilities=[{"resource": d["name"], "actions": d["allowed_actions"]} for d in datasets],
+        app_class="departmental")
+    contract["semantic_fingerprint"] = arc.semantic_fingerprint(contract)
+    rel["runtime_contract"] = contract
+    path.write_text(json.dumps(rel, ensure_ascii=False), encoding="utf-8")
+    return contract
 
 
 def _h(c, release_id):
@@ -1304,6 +1361,7 @@ def test_contract_beats_the_global_union(client):
     계약이 `orders` 에 `read` 만 줬다면 `orders` 쓰기는 막혀야 한다."""
     ds = app_data_service.create_dataset(
         "rel_wide", "orders", _schema(), actor_id="u@x", allowed_actions=["read"])
+    _sync_contract(client, "rel_wide")
     h = _h(client, "rel_wide")
 
     assert client.get(f"{R}/datasets/orders/records", headers=h).status_code == 200
@@ -1336,6 +1394,8 @@ def test_runtime_writes_use_the_bound_schema_not_the_master(client):
         schema={"fields": [{"name": "qty", "type": "number"},
                            {"name": "memo", "type": "string"}]}, contract_revision=2)
 
+    _sync_contract(client, "rel_v1")
+    _sync_contract(client, "rel_v2")
     h1, h2 = _h(client, "rel_v1"), _h(client, "rel_v2")
     body = {"payload": {"qty": 1, "memo": "메모"}}
     #: v2 는 `memo` 를 안다.
@@ -1368,13 +1428,18 @@ def test_broken_binding_answers_503_not_400_or_404(client):
     ds = app_data_service.create_dataset(
         "rel_wide", "orders", _schema(), actor_id="u@x", dataset_key="ds_o",
         allowed_actions=["read", "create"], contract_revision=1)
+    _sync_contract(client, "rel_wide")
     h = _h(client, "rel_wide")
     assert client.get(f"{R}/datasets/orders/records", headers=h).status_code == 200
 
-    #: 판을 가리키는 곳만 깨뜨린다 — 데이터셋도 결속도 그대로 있다.
+    #: ★ **물질화 지문이 움직이지 않는** 방식으로 깨뜨린다 — 저장된 판의 본문만 망가뜨리고
+    #:   지문 열은 그대로 둔다.
+    #: ⚠️ `version_id` 를 바꾸면 그것은 «깨진 것» 이 아니라 «달라진 것» 이고, 그때는 410
+    #:   (판이 사라졌다)이 맞다. 503 은 **바뀌지 않았는데 읽을 수 없는** 경우다.
     app_data_service._store.execute(
-        "UPDATE app_release_dataset_bindings SET version_id='dsv_gone' "
-        " WHERE release_id='rel_wide' AND dataset_id=?", (ds["dataset_id"],))
+        "UPDATE app_dataset_versions SET schema_json='{{broken' WHERE version_id="
+        "  (SELECT version_id FROM app_release_dataset_bindings "
+        "    WHERE release_id='rel_wide' AND dataset_id=?)", (ds["dataset_id"],))
     for r in (client.get(f"{R}/datasets/orders/records", headers=h),
               client.get(f"{R}/datasets/orders/schema", headers=h),
               client.post(f"{R}/datasets/orders/records", headers=h,
@@ -1391,6 +1456,8 @@ def test_runtime_read_is_projected_to_the_bound_schema(client):
         "ds_o", "rel_v2", allowed_actions=["read", "create", "update"],
         schema={"fields": [{"name": "qty", "type": "number"},
                            {"name": "memo", "type": "string"}]}, contract_revision=2)
+    _sync_contract(client, "rel_v1")
+    _sync_contract(client, "rel_v2")
     h1, h2 = _h(client, "rel_v1"), _h(client, "rel_v2")
     rid = client.post(f"{R}/datasets/orders/records", headers=h2,
                       json={"payload": {"qty": 1, "memo": "미래 필드"}}).json()["data"]["record_id"]
@@ -1413,6 +1480,7 @@ def test_create_and_update_are_separate_grants(client):
     ⚠️ 정책 축(WRITE)에서 유도하면 이 둘이 한 덩어리가 된다."""
     ds = app_data_service.create_dataset(
         "rel_wide", "orders", _schema(), actor_id="u@x", allowed_actions=["read", "create"])
+    _sync_contract(client, "rel_wide")
     h = _h(client, "rel_wide")
     r = client.post(f"{R}/datasets/orders/records", headers=h, json={"payload": {"qty": 1}})
     assert r.status_code == 200, r.text
@@ -1431,6 +1499,7 @@ def test_schema_read_needs_read_specifically(client):
     #: 읽기만 준 데이터셋 — 스키마가 보인다(대조군).
     app_data_service.create_dataset("rel_wide", "orders", _schema(), actor_id="u@x",
                                     allowed_actions=["read"])
+    _sync_contract(client, "rel_wide")
     h = _h(client, "rel_wide")
     assert client.get(f"{R}/datasets/secrets/schema", headers=h).status_code == 403
     assert client.get(f"{R}/datasets/orders/schema", headers=h).status_code == 200
@@ -1441,6 +1510,7 @@ def test_unknown_dataset_name_is_not_found_not_forbidden(client):
     (계약에 있으나 행동이 없는 것은 403. 그 둘은 다른 사실이다.)"""
     app_data_service.create_dataset("rel_wide", "orders", _schema(), actor_id="u@x",
                                     allowed_actions=["read"])
+    _sync_contract(client, "rel_wide")
     h = _h(client, "rel_wide")
     assert client.get(f"{R}/datasets/nosuch/records", headers=h).status_code == 404
     assert client.get(f"{R}/datasets/orders/records", headers=h).status_code == 200
@@ -1456,31 +1526,49 @@ def test_crafted_names_cannot_reach_another_dataset(client, crafted):
                                     allowed_actions=["read"])
     app_data_service.create_dataset("rel_wide", "secrets", _schema(), actor_id="u@x",
                                     allowed_actions=[])
+    _sync_contract(client, "rel_wide")
     h = _h(client, "rel_wide")
     r = client.post(f"{R}/datasets/{crafted}/records", headers=h, json={"payload": {"qty": 1}})
     assert r.status_code in (403, 404, 405), (crafted, r.status_code)
 
 
-def test_narrowing_the_contract_blocks_an_existing_proof(client):
-    """★ 계약 개정으로 행동이 줄면 **이미 발급된 증명이 즉시 막힌다.**
+def test_narrowing_the_contract_discards_the_running_frame(client):
+    """★★★ [3단계] 계약 개정으로 행동이 줄면 **이미 도는 프레임이 폐기된다.**
 
-    ⚠️ 증명 수명이 남았다고 옛 권한을 계속 주면, 권한 회수가 최대 TTL 만큼 늦는다."""
+    2단계까지는 좁아진 행동이 `403` 으로 막혔다. 3단계부터는 물질화 지문이 움직이므로
+    **`410`** 이다 — 더 강한 보증이다: 그 앱은 이미 **다른 계약 위에서 도는 앱**이고,
+    새 증명을 주면 옛 코드가 새 권한으로 계속 돈다.
+
+    ⚠️ 증명 수명이 남았다고 옛 권한을 계속 주면 권한 회수가 최대 TTL 만큼 늦는다."""
     ds = app_data_service.create_dataset(
         "rel_wide", "orders", _schema(), actor_id="u@x", allowed_actions=["read", "create"])
+    _sync_contract(client, "rel_wide")
     h = _h(client, "rel_wide")
     assert client.post(f"{R}/datasets/orders/records", headers=h,
                        json={"payload": {"qty": 1}}).status_code == 200
 
     app_data_service.bind_release("rel_wide", ds["dataset_id"], allowed_actions=["read"])
+    #: 쓰기도 읽기도 **둘 다** 410 이다 — 이 판 자체가 사라졌다.
     assert client.post(f"{R}/datasets/orders/records", headers=h,
-                       json={"payload": {"qty": 2}}).status_code == 403
-    assert client.get(f"{R}/datasets/orders/records", headers=h).status_code == 200
+                       json={"payload": {"qty": 2}}).status_code == 410
+    assert client.get(f"{R}/datasets/orders/records", headers=h).status_code == 410
+
+    #: ★★★ **새 증명을 받아도 옛 증명은 되살아나지 않는다.**
+    #:   ⚠️ 그러지 않으면 부모가 재발급 한 번으로 낡은 프레임을 계속 쓸 수 있다.
+    _sync_contract(client, "rel_wide")
+    h2 = _h(client, "rel_wide")
+    assert client.get(f"{R}/datasets/orders/records", headers=h2).status_code == 200
+    assert client.get(f"{R}/datasets/orders/records", headers=h).status_code == 410
+    #: 그리고 새 증명으로도 좁아진 권한은 그대로다.
+    assert client.post(f"{R}/datasets/orders/records", headers=h2,
+                       json={"payload": {"qty": 3}}).status_code == 403
 
 
 def test_legacy_release_keeps_working(client):
     """⚠️ 계약 이전 릴리스를 2차 판정으로 막으면 **돌던 앱이 통째로 멈춘다.**
     「계약이 말한 적 없음」과 「계약이 금지함」은 다른 사실이다."""
     app_data_service.create_dataset("rel_legacy", "orders", _schema(), actor_id="u@x")
+    #: ⚠️ 계약을 만들지 않는다 — 레거시 릴리스는 «계약이 없는» 상태 그대로여야 한다.
     h = _h(client, "rel_legacy")
     assert client.get(f"{R}/datasets/orders/records", headers=h).status_code == 200
     r = client.post(f"{R}/datasets/orders/records", headers=h, json={"payload": {"qty": 1}})
@@ -1505,6 +1593,7 @@ def test_denial_reason_is_audited_not_returned(client):
     """정확한 사유는 감사에만 남고 앱에는 고정 문구가 간다."""
     app_data_service.create_dataset("rel_wide", "orders", _schema(), actor_id="u@x",
                                     allowed_actions=["read"])
+    _sync_contract(client, "rel_wide")
     h = _h(client, "rel_wide")
     seen = []
     from core.enterprise_context import audit

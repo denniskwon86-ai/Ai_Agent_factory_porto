@@ -206,7 +206,8 @@ def test_identical_requirements_are_deduplicated():
 def test_fingerprint_is_stable_and_16_hex():
     c = _compiled()
     fp = c["semantic_fingerprint"]
-    assert len(fp) == 16 and all(ch in "0123456789abcdef" for ch in fp)
+    #: ⚠️ 증명에 봉인되는 값이므로 축약하지 않는다(64비트는 권한 결속에 좁다).
+    assert len(fp) == 64 and all(ch in "0123456789abcdef" for ch in fp)
     assert arc.semantic_fingerprint(c) == fp
 
 

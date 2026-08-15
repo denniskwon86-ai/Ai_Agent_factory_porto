@@ -29,7 +29,9 @@ def _issue(store, **kw):
                 capabilities=(READ, WRITE), tenant_id="tenant_default", entity_mode="REAL",
                 scope_node_id="node_hq",
                 #: ★ [2026-08-14] 발급 시점의 앱 선언을 봉인한다 — 판정이 이 값을 대조한다.
-                manifest_fingerprint="fp_1", manifest_version="1.0")
+                manifest_fingerprint="fp_1", manifest_version="1.0",
+                #: ★ [I-4 3단계] 계약 원문·물질화도 함께 봉인된다.
+                contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1")
     base.update(kw)
     return store.issue(**base)
 
@@ -176,6 +178,8 @@ def test_판정기가_이_토큰을_그대로_먹는다(store):
                            scope_node_id="node_hq", owner_dept_id="hq")
     facts = ap.AppResourceFacts(app_id="app_1", release_id="rel_1",
                                 manifest_fingerprint="fp_1", manifest_version="1.0",
+                                contract_fingerprint="cfp_1",
+                                materialization_fingerprint="mfp_1",
                                 declared_capabilities=(READ, WRITE))
     assert ap.decide(subject, res, READ, app=facts).allowed
     # 다른 릴리스면 막힌다 — 이 증명이 존재하는 이유다.

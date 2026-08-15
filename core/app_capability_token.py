@@ -97,7 +97,8 @@ class AppCapabilityTokenStore:
               tenant_id: str = "", entity_mode: str = "",
               scope_node_id: str = "", ttl_minutes: int = DEFAULT_TTL_MINUTES,
               purpose: str = "", manifest_fingerprint: str = "",
-              manifest_version: str = "") -> Dict[str, Any]:
+              manifest_version: str = "", contract_fingerprint: str = "",
+              materialization_fingerprint: str = "") -> Dict[str, Any]:
         """토큰 발급. 반환에 **전문(`token`)이 들어 있는 유일한 곳**이다.
 
         ⚠️ 호출부는 이 값을 로그·목록·오류 메시지에 다시 싣지 않는다."""
@@ -155,6 +156,18 @@ class AppCapabilityTokenStore:
             raise AppTokenError(
                 "manifest_fingerprint 와 manifest_version 이 필요합니다 — 앱 선언에 묶이지 "
                 "않은 증명은 «그때 그 앱» 을 가리키지 못하고, 선언이 바뀌어도 그대로 통합니다.")
+        #: ★★★ [I-4 3단계] **계약 원문과 물질화를 함께 봉인한다.**
+        #:   ⚠️ 원문만 봉인하면 「계약서는 승인됐지만 결속이 다른 상태」를 못 잡고,
+        #:     물질화만 봉인하면 「같은 결속인데 계약이 개정된 상태」를 놓친다.
+        #:   ⚠️⚠️ 빈 값을 허용하지 않는다 — 계약이 없는 릴리스도 **표식**(`no-contract`)을
+        #:     싣는다. 비워 두면 판정이 「양쪽 다 비었으니 같다」로 통과하고, 계약이 나중에
+        #:     생겨도 이미 도는 앱이 그대로 살아남는다.
+        contract_fingerprint = (contract_fingerprint or "").strip()
+        materialization_fingerprint = (materialization_fingerprint or "").strip()
+        if not contract_fingerprint or not materialization_fingerprint:
+            raise AppTokenError(
+                "contract_fingerprint 와 materialization_fingerprint 가 필요합니다 — "
+                "계약·물질화에 묶이지 않은 증명은 그 둘이 바뀌어도 그대로 통합니다.")
 
         try:
             ttl = int(ttl_minutes)
@@ -186,6 +199,8 @@ class AppCapabilityTokenStore:
             #:   지문·판을 함께 묶어야 「이 증명은 **그때 그 앱**에 대한 것」이 된다.
             "manifest_fingerprint": manifest_fingerprint,
             "manifest_version": manifest_version,
+            "contract_fingerprint": contract_fingerprint,
+            "materialization_fingerprint": materialization_fingerprint,
             "issued_at": now.isoformat(),
             "expires_at": (now + timedelta(minutes=ttl)).isoformat(),
             "ttl_minutes": ttl,

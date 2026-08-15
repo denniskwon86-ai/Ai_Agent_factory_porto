@@ -51,6 +51,8 @@ def _facts(**kw):
                 #: ★ [2026-08-14] 증명은 발급 당시의 **매니페스트 지문·판**에도 묶인다.
                 #:   기본값을 채워 두고, 「어긋나면 막힌다」는 별도 시험에서 본다.
                 manifest_fingerprint="fp_1", manifest_version="1.0",
+                #: ★ [I-4 3단계] 계약 원문·물질화 지문도 요청마다 대조한다.
+                contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1",
                 declared_capabilities=(ap.READ, ap.WRITE, ap.DELETE, ap.MANAGE))
     base.update(kw)
     return ap.AppResourceFacts(**base)
@@ -68,6 +70,7 @@ def _app(**kw):
     tok = dict(actor="u@x", session_id="sess_1", app_id="app_1", release_id="rel_1",
                tenant_id="tenant_default", entity_mode="REAL", scope_node_id="node_hq",
                manifest_fingerprint="fp_1", manifest_version="1.0",
+               contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1",
                capabilities=(ap.READ, ap.WRITE, ap.DELETE, ap.MANAGE), expired=False)
     tok.update(kw.pop("token", {}))
     base = dict(user_id="u@x", scope=_Scope(read={"hq"}, write={"hq"}), ctx=_ctx(),

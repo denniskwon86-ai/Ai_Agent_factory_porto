@@ -4,7 +4,8 @@
 > 작성자: Codex  
 > 작성 시각: 2026-08-15 15:17 KST  
 > 대상: Supervisor · Claude Code · Gemini Antigravity · Codex 및 후속 팀원/LLM  
-> 상태: 상세설계 완료 · 제품 코드 미구현 · I-4 진행 작업과 충돌 방지 필요  
+> 상태: 상세설계 완료 · **BDR-1(=I-4 2.2/2.2a) 구현 완료 · BDR-2~7 미착수**  
+> ⚠️ 2026-08-15 갱신: 이 문서가 「즉시 할 일」로 적은 BDR-1 은 끝났다. 계약 Schema·Compiler 결정표·이중 입력 게이트·물질화 검증·두 지문 봉인(I-4 3단계)까지 커밋돼 있다.  
 > 정본 설계: `docs/architecture/BUSINESS_DATA_BINDING_RUNTIME_DETAILED_DESIGN_2026-08-15.md`  
 > 기계 계약: `docs/architecture/business_data_binding_contract_v1.schema.json`  
 > 예시 Profile: `docs/architecture/first_vertical_data_binding_profile_v1.example.json`
@@ -53,20 +54,20 @@ Supervisor가 확정한 제품 방향은 다음과 같다.
 
 ## 2. 현재 저장소 상태와 충돌 주의
 
-최종 재확인 기준 HEAD는 `cd6d539fa`다. Claude Code가 I-4 2.1b까지 원자 커밋했고, `docs/handoff/I4_HOST_RUNTIME_HANDOFF_2026-08-15.md` 기준 **3~8단계는 미착수**다. 인계 작성 중 수정되던 I-4 제품 소스는 현재 깨끗해졌으며, 공유 `.agents/TEAM_BOARD.md`와 여러 문서·산출물만 다른 팀원 변경과 함께 미커밋 상태다.
+이 문서를 처음 쓴 시점의 기준 HEAD는 `cd6d539fa`(I-4 2.1b)였다. ⚠️ **그 뒤로 옮겨졌다** — 2.2(BDR-1) · 2.2a · 3단계가 차례로 커밋됐고, `docs/handoff/I4_HOST_RUNTIME_HANDOFF_2026-08-15.md` 기준 **4~8단계가 미착수**다. 인계 작성 중 수정되던 I-4 제품 소스는 현재 깨끗해졌으며, 공유 `.agents/TEAM_BOARD.md`와 여러 문서·산출물만 다른 팀원 변경과 함께 미커밋 상태다.
 
 이 최신 상태는 BDR-1을 넣기 가장 저렴한 시점이다. I-4 3단계는 계약 지문과 물질화 지문을 증명에 봉인하므로, 그 전에 `source_intent`, `data_role`, `duplicate_entry_policy`를 계약 의미에 넣어야 한다.
 
 ### 금지
 
 - 다른 세션이 I-4 3단계를 다시 시작했는지 `git status`와 최신 인수인계부터 확인한다.
-- I-4 3단계 계약 지문 봉인을 먼저 완료한 뒤 `source_intent`를 넣어 지문·승인을 두 번 바꾸지 않는다.
+- ~~I-4 3단계 계약 지문 봉인을 먼저 완료한 뒤 `source_intent`를 넣지 않는다.~~ **(해소됨 — 2.2 → 2.2a → 3단계 순서로 진행해 지문을 한 번만 바꿨다.)**
 - 다른 팀원의 작업을 되돌리거나 선택적으로 import해 깨진 HEAD를 숨기지 않는다.
 - origin push는 사용자 명시 지시 없이 하지 않는다.
 
 ### 안전한 적용 시점
 
-1. `cd6d539fa` 이후 다른 세션의 I-4 변경이 없는지 확인
+1. 최신 I-4 인수인계에서 **어느 단계까지 끝났는지** 먼저 확인한다(이 문서보다 그쪽이 새롭다)
 2. **BDR-1을 I-4 2.2 보강으로 별도 커밋**
 3. 계약 Schema·Compiler·승인 초기화·레거시 분류 회귀 확인
 4. I-4 3단계에서 확장된 계약 지문과 물질화 지문을 함께 증명에 봉인
@@ -97,9 +98,10 @@ Supervisor가 확정한 제품 방향은 다음과 같다.
 
 ### 4.1 Claude Code — 주 구현
 
-#### 즉시 할 일: BDR-1
+#### ✅ 완료: BDR-1 (I-4 2.2 · 2.2a)
 
-I-4 3단계보다 먼저 **2.2 보강**으로 다음을 수행한다.
+⚠️ 아래는 **한 일의 목록**이다. 다시 하지 않는다.
+판정·상수는 `core/business_data_semantics.py` 한 곳에 있고 계약 계층과 물질화 계층이 같은 함수를 부른다(2.2a — 두 곳에 적었더니 세 조합이 갈라졌다).
 
 1. `core/app_runtime_contract.py`
    - Dataset Schema에 `data_role`, `source_intent`, `duplicate_entry_policy` 추가

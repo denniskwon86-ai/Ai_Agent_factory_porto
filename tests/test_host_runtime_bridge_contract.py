@@ -427,7 +427,16 @@ def test_서버와_브리지가_같은_상태코드를_본다(bridge):
     assert m and int(m.group(1)) == 410
     #: 서버 쪽 숫자도 같은지 본다(라우터가 그 값을 쓴다).
     rt = (FRONTEND.parents[1] / "api" / "routes" / "app_data_runtime.py").read_text("utf-8")
-    assert "status=(410 if decision.reason == app_policy.DENY_TOKEN_MANIFEST_MISMATCH" in rt
+    assert "status=(410 if decision.reason in _STALE_APP_REASONS" in rt
+    #: ★★★ [I-4 3단계] 「이 판은 사라졌다」로 답할 사유가 **셋**이다 — 앱 선언·계약 원문·
+    #:   DB 물질화. ⚠️ 하나라도 빠지면 그 축이 바뀌어도 낡은 프레임이 계속 돈다.
+    from api.routes import app_data_runtime as rt_mod
+    from core import app_policy
+    assert set(rt_mod._STALE_APP_REASONS) == {
+        app_policy.DENY_TOKEN_MANIFEST_MISMATCH,
+        app_policy.DENY_TOKEN_CONTRACT_MISMATCH,
+        app_policy.DENY_TOKEN_MATERIALIZATION_MISMATCH,
+    }
     assert pywire  # 계약 모듈이 살아 있다는 확인
 
 

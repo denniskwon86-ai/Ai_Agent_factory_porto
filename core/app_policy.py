@@ -79,6 +79,12 @@ DENY_TOKEN_SCOPE_MISMATCH = "TOKEN_SCOPE_MISMATCH"   # 토큰이 묶인 조직 �
 #: ★★★ 증명 발급 당시의 앱 선언과 지금의 선언이 다르다 — **앱이 바뀌었다.**
 #:   ⚠️ capability 만 비교하면 «같은 권한을 유지한 채 내용이 바뀐 매니페스트» 를 놓친다.
 DENY_TOKEN_MANIFEST_MISMATCH = "TOKEN_MANIFEST_MISMATCH"
+#: ★★★ [I-4 3단계] 승인된 **계약 원문**이 발급 이후 바뀌었다.
+DENY_TOKEN_CONTRACT_MISMATCH = "TOKEN_CONTRACT_MISMATCH"
+#: ★★★ [I-4 3단계] **DB 물질화**가 발급 이후 바뀌었다.
+#:   ⚠️ 계약 원문과 **다른 사유**다 — 「계약서는 그대로인데 결속이 달라진」 경우이고,
+#:     그때 앱은 승인받은 것과 다른 권한·다른 스키마로 돈다.
+DENY_TOKEN_MATERIALIZATION_MISMATCH = "TOKEN_MATERIALIZATION_MISMATCH"
 DENY_TOKEN_CAPABILITY = "TOKEN_CAPABILITY"
 DENY_MANIFEST_CAPABILITY = "MANIFEST_CAPABILITY"
 DENY_CONTEXT = "CONTEXT_MISMATCH"                    # 요청 문맥 ↔ 자원 문맥
@@ -178,6 +184,9 @@ class AppResourceFacts:
     declared_capabilities: Tuple[str, ...] = field(default_factory=tuple)
     manifest_version: str = ""
     legacy_mode: bool = False
+    #: [I-4 3단계] 지금의 계약 원문·물질화 지문. 서버가 요청마다 산출한다.
+    contract_fingerprint: str = ""
+    materialization_fingerprint: str = ""
 
 
 # ── 축별 판정 ─────────────────────────────────────────────────────────────
@@ -309,6 +318,18 @@ def _token_ok(subject: Subject, res: ResourceScope,
             or tok_mv != str(app.manifest_version or "")):
         return (False, DENY_TOKEN_MANIFEST_MISMATCH,
                 "앱 선언이 발급 이후 바뀌었습니다. 앱을 다시 여십시오.")
+
+    # ③-c [I-4 3단계] **계약 원문과 물질화** — 어느 하나라도 바뀌면 그 판은 사라진 것이다
+    #     ⚠️ 두 사유를 나누는 이유: 「계약이 개정됐다」와 「DB 결속이 달라졌다」는 사람이
+    #       할 일이 다르다. 하나로 뭉개면 무엇을 고쳐야 하는지 알 수 없다.
+    tok_cfp = str(tok.get("contract_fingerprint", "") or "")
+    if not tok_cfp or tok_cfp != str(app.contract_fingerprint or ""):
+        return (False, DENY_TOKEN_CONTRACT_MISMATCH,
+                "앱의 데이터 계약이 발급 이후 바뀌었습니다. 앱을 다시 여십시오.")
+    tok_mfp = str(tok.get("materialization_fingerprint", "") or "")
+    if not tok_mfp or tok_mfp != str(app.materialization_fingerprint or ""):
+        return (False, DENY_TOKEN_MATERIALIZATION_MISMATCH,
+                "앱의 데이터 구성이 발급 이후 바뀌었습니다. 앱을 다시 여십시오.")
 
     # ④ 어느 회사·실행 문맥의 증명인가 — 문맥을 바꿔 재사용하는 경로를 막는다
     c = subject.ctx or {}
