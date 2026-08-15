@@ -13,6 +13,7 @@
 개별 테스트가 자기 것을 monkeypatch 하는 것으로는 부족하다 — 계측을 의식하지 않는 테스트가
 문제이기 때문이다. 그래서 **전역 autouse** 로 막는다.
 """
+import os
 import shutil
 
 import pytest
@@ -252,8 +253,27 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         shutil.copyfile(_master_db_template, _p)
         monkeypatch.setattr(_md.master_data, "db_path", str(_p), raising=False)
         monkeypatch.setattr(_md.master_data, "_cache", None, raising=False)
+        # ★★★ [2026-08-15 실측] **조직 디렉터리도 같은 파일을 쓴다 — 그런데 격리에서
+        #   빠져 있었다.** `org_directory` 는 `master_data` 와 **다른 싱글턴**이고 자기
+        #   `db_path` 를 갖는다(기본값이 운영 `master.db`). 그래서 테스트가 **운영 사용자·
+        #   부서를 그대로 읽었다.**
+        #
+        #   ⚠️⚠️ 그 결과 같은 커밋이 폴더에 따라 다른 답을 냈다: 내 작업트리는 사용자 22·
+        #     부서 12 라 권한 강제가 살아 있었고, 깨끗한 checkout 은 0·0 이라
+        #     `is_bootstrap()` 이 **전원 무제한**을 돌려줘 경계 시험 255건이 무너졌다.
+        #     즉 「전체 통과」가 **코드가 아니라 내 폴더의 데이터**를 증명하고 있었다.
+        #
+        #   ⚠️ 오염 위험도 함께 있었다 — 조직 API 를 부르는 테스트는 **운영 조직도에 사용자를
+        #     쓸 수 있었다.** 실제 인원이 담긴 표다.
+        #
+        #   ★ 격리하면 기본 상태는 «조직 0» 이다. 권한 경계를 시험하려면 `seeded_org`
+        #     fixture 로 **명시해 심는다** — 조직이 없는 상태 자체를 시험하는 것도 있으므로
+        #     autouse 로 심지 않는다.
+        from core.org_directory import org_directory as _org
+        monkeypatch.setattr(_org, "db_path", str(_p), raising=False)
+        monkeypatch.setattr(_org, "_scope_cache", {}, raising=False)
     except Exception as e:
-        print(f"⚠️ [conftest] 기준정보 DB 격리 실패(실 DB 오염 위험): {e}")
+        print(f"⚠️ [conftest] 기준정보·조직 DB 격리 실패(실 DB 오염 위험): {e}")
     try:
         # ★★★ [2026-08-05] **경영계획 DB 도 격리한다 — 여기까지 막지 않아 실제로 오염됐다.**
         #   통제 확인 중 탐침 데이터가 `data/planning.db` 에 들어갔다(계정과목·동인·fact·
@@ -282,6 +302,64 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
     except Exception as e:
         print(f"⚠️ [conftest] 앱 데이터 평면 격리 실패(실 DB 오염 위험): {e}")
     try:
+        # ★★★ [2026-08-15 P0-C] **작업 디렉터리 쓰기도 격리한다 — DB 만 막고 있었다.**
+        #
+        #  실측: 전체 회귀 뒤 실제 작업트리에 다음이 남았다.
+        #    projects/__track_g_probe__ · projects/__audit_probe__
+        #    skills/_proposals/ · templates/viewer_try.json · agents_registry.prev.json
+        #    templates/output_formats.json 의 끝 개행 변경
+        #
+        #  ⚠️⚠️ 이건 지저분함이 아니다. `projects/__track_g_probe__` 하나 때문에
+        #    `test_agent_asset_adapter` 가 **전체 실행에서만** 실패한 적이 있다(혼자 돌면 통과).
+        #    「혼자 돌면 통과, 전체로 돌면 실패」의 원인은 순서가 아니라 **남긴 것**이었다.
+        #  ⚠️ 그리고 `projects/` 에는 **사용자 산출물**이 들어 있다. 테스트가 그 옆에 쓰는 것은
+        #    오염이고, 지우는 코드가 하나라도 잘못 겨누면 사고다.
+        #
+        #  ★ 지우는 방식이 아니라 **생산 경로 자체를 tmp 로 주입**한다 — 지우는 방식은
+        #    「무엇을 지울지」를 매번 맞혀야 하고, 한 번 빗나가면 남거나 남의 것을 지운다.
+        from core import paths as _paths
+        monkeypatch.setattr(_paths, "PROJECTS_DIR", str(tmp_path / "projects"), raising=False)
+        from core import library_paths as _lp
+        monkeypatch.setattr(_lp, "_LIBRARY_DIR", str(tmp_path / "library"), raising=False)
+        #: ★★★ 템플릿·스킬은 **읽기용 제품 데이터**다(Git 에 있다). 비우면 시험이 다른
+        #:   세계를 보게 된다 — 실측: 파일 자산의 `source` 가 `LEGACY` → `SYSTEM` 으로 바뀌어
+        #:   마이그레이션 상태 시험이 깨졌다.
+        #: ★ 그래서 **사본을 주입**한다: 읽기는 진짜 내용을 보고, 쓰기는 tmp 로 간다.
+        from core import agent_registry as _ar
+        _tpl = tmp_path / "templates"
+        if os.path.isdir(_ar.TEMPLATES_DIR):
+            shutil.copytree(_ar.TEMPLATES_DIR, _tpl, dirs_exist_ok=True)
+        else:                                      # pragma: no cover - 방어
+            _tpl.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(_ar, "TEMPLATES_DIR", str(_tpl), raising=False)
+        #: ★★★ **레지스트리 본체도 격리한다.**
+        #:   `agents_registry.json` 은 **Git 에 없다**(코드 기본값 `DEFAULT_REGISTRY` 가 정본).
+        #:   그런데 `save_registry()` 를 부르는 시험이 저장소 루트에 그 파일을 만들고,
+        #:   `agent_asset_adapter._registry_source()` 는 **파일 존재 여부**로 `LEGACY`/`SYSTEM`
+        #:   을 가른다.
+        #:   ⚠️⚠️ 그래서 「앞선 시험이 파일을 만들었는가」가 뒤 시험의 기대값을 바꿨다 —
+        #:     내 트리에서는 있었고 깨끗한 checkout 에는 없었다. 또 하나의 환경 의존이다.
+        #:   ★ 있으면 사본을 주고, 없으면 없는 채로 둔다 — 어느 쪽이든 **시험이 명시**한다
+        #:     (`file_backed_registry` fixture).
+        _reg_path = tmp_path / "agents_registry.json"
+        if os.path.exists(_ar.REGISTRY_PATH):
+            shutil.copyfile(_ar.REGISTRY_PATH, _reg_path)
+        monkeypatch.setattr(_ar, "REGISTRY_PATH", str(_reg_path), raising=False)
+        #: 백업본은 **순수 쓰기 대상**이라 사본이 필요 없다.
+        monkeypatch.setattr(_ar, "REGISTRY_BACKUP_PATH",
+                            str(tmp_path / "agents_registry.prev.json"), raising=False)
+        from core import skill_evolution as _se
+        _sk = tmp_path / "skills"
+        if os.path.isdir(_se.SKILLS_DIR):
+            shutil.copytree(_se.SKILLS_DIR, _sk, dirs_exist_ok=True)
+        else:                                      # pragma: no cover - 방어
+            _sk.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(_se, "SKILLS_DIR", str(_sk), raising=False)
+        monkeypatch.setattr(_se, "PROPOSALS_DIR", str(tmp_path / "skill_proposals"),
+                            raising=False)
+    except Exception as e:
+        print(f"⚠️ [conftest] 작업 디렉터리 격리 실패(실제 산출물 오염 위험): {e}")
+    try:
         # ★★★ [2026-08-13 G1-B05] **이중 판정 관측 기록도 격리한다.**
         #   이 표는 「기존 판정을 신규 PDP 로 갈아도 되는가」의 **유일한 근거**다. 테스트가
         #   남긴 표본이 섞이면 실제로는 눌러 보지 않은 시나리오가 «덮였다» 로 읽히고,
@@ -293,3 +371,93 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         monkeypatch.setattr(_ps.policy_shadow, "_ready", "", raising=False)
     except Exception as e:
         print(f"⚠️ [conftest] 이중 판정 관측 격리 실패(전환 근거 오염 위험): {e}")
+
+
+# ── [P0-A/B] 조직·강제 상태를 **명시**하는 fixture ────────────────────────
+#
+# ★★★ 왜 autouse 가 아닌가: 「조직이 아직 없다」는 상태 자체를 시험하는 것들이 있다
+#   (부트스트랩 잠금 방지·미바인딩 비노출). 전부에 심으면 그 시험들이 조용히 의미를 잃는다.
+
+@pytest.fixture()
+def seeded_org(monkeypatch):
+    """★★★ **테스트 전용 조직도**를 격리 저장소에 심는다.
+
+    ⚠️ 이것 없이 권한 경계를 시험하면 `is_bootstrap()` 이 전원 무제한을 돌려주므로
+      **막히는지 확인하려는 그 통제가 애초에 꺼져 있다.**
+
+    돌려주는 값에는 부서·사용자 목록과 신원 상수가 들어 있다 —
+    시험이 `hikwon_17@lsmnm.com` 같은 **실존 계정을 적지 않게** 하기 위해서다."""
+    from core.enterprise_context.repository import ecm_repository
+    from core.org_directory import org_directory
+    from tests import org_seed
+    org_seed.seed(org_directory)
+    #: ⚠️ ECM 노드까지 심어야 부서가 «범위에 묶인» 상태가 된다. 비우면 D-014 로 **모든 쓰기가
+    #:   막히고**, 시험은 「권한 없음」과 「범위 없음」을 구분하지 못한 채 빨강이 된다.
+    org_seed.seed_ecm(ecm_repository, org_directory)
+    org_directory._invalidate()
+    return org_seed
+
+
+@pytest.fixture()
+def enforced_org(seeded_org, monkeypatch, tmp_path):
+    """조직도 + **권한 강제 ON**.
+
+    ★★★ 강제를 **정책 파일**로 켠다. `config.ORG_ENFORCE` 를 직접 monkeypatch 하면
+      제품이 실제로 읽는 경로(`scope_policy`)를 지나지 않아, 시험과 실서버가 **다른 세계**가
+      된다 — `api/deps.current_principal` 의 주석이 그 사고를 그대로 적어 두었다.
+
+    ⚠️ 정책 파일은 conftest 가 이미 `tmp_path` 로 격리했다. 여기서 **값을 명시**하지 않으면
+      코드 기본값 `False` 로 떨어지고, 그때 경계 시험은 전부 무제한 모드에서 통과한다."""
+    import json
+
+    from core import scope_policy
+    path = tmp_path / "scope_policy.json"
+    body = {}
+    if path.exists():
+        try:
+            body = json.loads(path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            body = {}
+    body["org_enforce"] = True
+    path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(scope_policy, "_POLICY_PATH", str(path), raising=False)
+    assert scope_policy.org_enforce() is True, "강제를 켰는데 정책이 읽히지 않는다"
+    from core.org_directory import org_directory
+    org_directory._invalidate()
+    return seeded_org
+
+
+@pytest.fixture()
+def empty_org_bootstrap():
+    """★★★ **조직 0건**을 «의도적으로» 선언한다.
+
+    ⚠️⚠️ 이 상태에서는 `is_bootstrap()` 이 **전원 무제한**을 돌려준다. 그것 자체는 옳다 —
+      조직을 세우기도 전에 권한을 강제하면 첫 관리자를 만들 사람이 아무도 없어 잠긴다.
+
+    ★★★ 그러나 **일반 권한 시험에 이 상태가 섞이면 그 시험은 아무것도 검증하지 못한다.**
+      막히는지 보려는 통제가 애초에 꺼져 있고, 시험은 초록이다. 2026-08-15 에 정확히 그
+      일이 있었다(깨끗한 checkout 255건).
+
+    그래서 이 fixture 는 **부트스트랩 자체를 검증하는 시험만** 쓴다. 조직이 필요한 시험은
+    `seeded_org`(조직·권한 경계) 또는 `enforced_org`(강제 정책)를 **명시적으로** 고른다 —
+    셋 중 하나를 고르지 않은 권한 시험은 「무엇을 전제하는지 아무도 모르는」 시험이다."""
+    from core.org_directory import org_directory
+    org_directory._invalidate()
+    assert org_directory.is_bootstrap(), (
+        "조직이 남아 있다 — 이 fixture 는 «조직 0건» 을 전제한다. 격리가 새고 있는지 확인할 것")
+    return org_directory
+
+
+@pytest.fixture()
+def file_backed_registry():
+    """★★★ 레지스트리를 **파일에서 온 것**(`LEGACY`)으로 만든다.
+
+    `agent_asset_adapter._registry_source()` 는 `agents_registry.json` 의 **존재 여부**로
+    `LEGACY`/`SYSTEM` 을 가른다. 그 파일은 Git 에 없으므로 기본은 `SYSTEM` 이다.
+
+    ⚠️ 예전에는 이것을 선언하지 않았고, **앞선 시험이 남긴 파일**이 뒤 시험의 기대값을
+      정했다. 그래서 같은 커밋이 폴더에 따라 다른 답을 냈다 — 무엇을 전제하는지 적는다."""
+    from core import agent_registry as _ar
+    _ar.save_registry(_ar.load_registry())
+    assert os.path.exists(_ar.REGISTRY_PATH)
+    return _ar.REGISTRY_PATH
