@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "afs://contracts/business_data_binding/1.0",
+  "title": "AI Factory Studio Business Data Binding Contract",
+  "description": "데이터 키트 계약을 회사·조직 문맥의 실제 원천과 결속하고 공식 Snapshot 사용 조건을 정의한다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "kit",
+    "context",
+    "datasets"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "profile_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$"
+    },
+    "kit": {
+      "$ref": "#/$defs/kitRef"
+    },
+    "context": {
+      "$ref": "#/$defs/resourceContext"
+    },
+    "datasets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/datasetContract"
+      }
+    }
+  },
+  "$defs": {
+    "kitRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kit_id", "version", "template_fingerprint"],
+      "properties": {
+        "kit_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,63}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "template_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16,64}$"
+        }
+      }
+    },
+    "resourceContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "scope_node_id", "entity_mode"],
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope_node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entity_mode": {
+          "enum": ["REAL", "VIRTUAL", "COMPETITOR", "SANDBOX"]
+        }
+      }
+    },
+    "datasetContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_contract_key",
+        "version",
+        "name",
+        "required_level",
+        "business_uses",
+        "allowed_source_modes",
+        "preferred_source_mode",
+        "minimum_quality_grade",
+        "maximum_age",
+        "duplicate_entry_policy",
+        "missing_data_policy",
+        "fields",
+        "source_binding"
+      ],
+      "properties": {
+        "dataset_contract_key": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}-[0-9]{2}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_level": {
+          "enum": ["REQUIRED", "RECOMMENDED", "OPTIONAL"]
+        },
+        "business_uses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "allowed_source_modes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/providerType"
+          }
+        },
+        "preferred_source_mode": {
+          "$ref": "#/$defs/providerType"
+        },
+        "minimum_quality_grade": {
+          "enum": ["A", "B", "C", "D"]
+        },
+        "maximum_age": {
+          "type": "string",
+          "pattern": "^P(?!$)(?:[0-9]+D)?(?:T(?:[0-9]+H)?(?:[0-9]+M)?)?$"
+        },
+        "duplicate_entry_policy": {
+          "enum": [
+            "DENY_IF_AUTHORITATIVE_SOURCE_EXISTS",
+            "ALLOW_SUPPLEMENT_ONLY",
+            "NO_DUPLICATE_CHECK_REQUIRED"
+          ]
+        },
+        "missing_data_policy": {
+          "enum": [
+            "BLOCK_OFFICIAL_RESULT",
+            "USE_LAST_CERTIFIED",
+            "RANGE_ESTIMATE",
+            "MANUAL_SUPPLEMENT",
+            "NOT_REQUIRED_FOR_THIS_SCOPE"
+          ]
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/fieldContract"
+          }
+        },
+        "source_binding": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sourceBinding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "fieldContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field_id",
+        "name",
+        "label",
+        "type",
+        "required",
+        "data_role",
+        "classification"
+      ],
+      "properties": {
+        "field_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,63}$"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": ["string", "text", "number", "boolean", "date", "datetime"]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "semantic_role": {
+          "enum": [
+            "",
+            "identifier",
+            "event_time",
+            "quantity",
+            "amount",
+            "status",
+            "party",
+            "location",
+            "note"
+          ]
+        },
+        "data_role": {
+          "enum": [
+            "ACTUAL",
+            "PLAN",
+            "FORECAST",
+            "SUPPLEMENT",
+            "SCENARIO",
+            "REFERENCE",
+            "DERIVED_RESULT"
+          ]
+        },
+        "unit": {
+          "type": "string"
+        },
+        "business_term_id": {
+          "type": "string"
+        },
+        "master_reference": {
+          "type": "string"
+        },
+        "classification": {
+          "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"]
+        },
+        "quality_rules": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "providerType": {
+      "enum": [
+        "CONNECTOR_QUERY",
+        "FILE_SNAPSHOT",
+        "AFS_NATIVE",
+        "DERIVED",
+        "EXTERNAL_REFERENCE"
+      ]
+    },
+    "sourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binding_id",
+        "provider_type",
+        "provider_ref",
+        "authoritative_role",
+        "write_policy",
+        "refresh_mode",
+        "integration_level",
+        "freshness_sla",
+        "status"
+      ],
+      "properties": {
+        "binding_id": {
+          "type": "string",
+          "pattern": "^binding_[a-z0-9_]{4,64}$"
+        },
+        "provider_type": {
+          "$ref": "#/$defs/providerType"
+        },
+        "provider_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "query_contract_id": {
+          "type": "string"
+        },
+        "authoritative_role": {
+          "enum": [
+            "ACTUAL",
+            "PLAN",
+            "FORECAST",
+            "SUPPLEMENT",
+            "SCENARIO",
+            "REFERENCE",
+            "DERIVED_RESULT"
+          ]
+        },
+        "write_policy": {
+          "enum": ["READ_ONLY", "AFS_NATIVE_WRITE", "DERIVED_ONLY"]
+        },
+        "refresh_mode": {
+          "enum": ["MANUAL", "SCHEDULED", "ON_DEMAND", "EVENT"]
+        },
+        "integration_level": {
+          "enum": ["L0", "L1", "L2", "L3"]
+        },
+        "freshness_sla": {
+          "type": "string",
+          "pattern": "^P(?!$)(?:[0-9]+D)?(?:T(?:[0-9]+H)?(?:[0-9]+M)?)?$"
+        },
+        "status": {
+          "enum": [
+            "DRAFT",
+            "VALIDATED",
+            "APPROVED",
+            "ACTIVE",
+            "STALE",
+            "BLOCKED",
+            "RETIRED"
+          ]
+        },
+        "binding_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16,64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provider_type": {
+                "const": "CONNECTOR_QUERY"
+              }
+            },
+            "required": ["provider_type"]
+          },
+          "then": {
+            "required": ["query_contract_id"],
+            "properties": {
+              "write_policy": {
+                "const": "READ_ONLY"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider_type": {
+                "const": "AFS_NATIVE"
+              }
+            },
+            "required": ["provider_type"]
+          },
+          "then": {
+            "properties": {
+              "write_policy": {
+                "const": "AFS_NATIVE_WRITE"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider_type": {
+                "enum": ["FILE_SNAPSHOT", "EXTERNAL_REFERENCE"]
+              }
+            },
+            "required": ["provider_type"]
+          },
+          "then": {
+            "properties": {
+              "write_policy": {
+                "const": "READ_ONLY"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider_type": {
+                "const": "DERIVED"
+              }
+            },
+            "required": ["provider_type"]
+          },
+          "then": {
+            "properties": {
+              "write_policy": {
+                "const": "DERIVED_ONLY"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

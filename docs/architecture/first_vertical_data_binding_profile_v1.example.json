@@ -1,0 +1,238 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "mnm_copper_procurement_minimum_decision_data",
+  "kit": {
+    "kit_id": "afs_materials_procurement_v1",
+    "version": 1,
+    "template_fingerprint": "1111111111111111"
+  },
+  "context": {
+    "tenant_id": "tenant_default",
+    "scope_node_id": "MNM_COPPER",
+    "entity_mode": "REAL"
+  },
+  "datasets": [
+    {
+      "dataset_contract_key": "PRC-02",
+      "version": 1,
+      "name": "구매주문·납기 일정",
+      "required_level": "REQUIRED",
+      "business_uses": [
+        "원료 도입계획",
+        "입고 전망",
+        "현금흐름"
+      ],
+      "allowed_source_modes": [
+        "CONNECTOR_QUERY",
+        "FILE_SNAPSHOT"
+      ],
+      "preferred_source_mode": "FILE_SNAPSHOT",
+      "minimum_quality_grade": "B",
+      "maximum_age": "P1D",
+      "duplicate_entry_policy": "DENY_IF_AUTHORITATIVE_SOURCE_EXISTS",
+      "missing_data_policy": "USE_LAST_CERTIFIED",
+      "fields": [
+        {
+          "field_id": "po_id",
+          "name": "po_id",
+          "label": "구매주문 번호",
+          "type": "string",
+          "required": true,
+          "semantic_role": "identifier",
+          "data_role": "ACTUAL",
+          "business_term_id": "term_purchase_order",
+          "master_reference": "",
+          "classification": "INTERNAL",
+          "quality_rules": [
+            "not_blank",
+            "unique_with_line_id"
+          ]
+        },
+        {
+          "field_id": "due_date",
+          "name": "due_date",
+          "label": "납기일",
+          "type": "date",
+          "required": true,
+          "semantic_role": "event_time",
+          "data_role": "ACTUAL",
+          "business_term_id": "term_due_date",
+          "master_reference": "",
+          "classification": "INTERNAL",
+          "quality_rules": [
+            "not_before_order_date"
+          ]
+        },
+        {
+          "field_id": "quantity",
+          "name": "quantity",
+          "label": "주문 수량",
+          "type": "number",
+          "required": true,
+          "semantic_role": "quantity",
+          "data_role": "ACTUAL",
+          "unit": "TON",
+          "business_term_id": "term_order_quantity",
+          "master_reference": "material_uom",
+          "classification": "INTERNAL",
+          "quality_rules": [
+            "greater_than_zero",
+            "contract_quantity_not_exceeded"
+          ]
+        }
+      ],
+      "source_binding": {
+        "binding_id": "binding_prc02_monthly_file",
+        "provider_type": "FILE_SNAPSHOT",
+        "provider_ref": "data_asset_po_monthly_extract",
+        "authoritative_role": "ACTUAL",
+        "write_policy": "READ_ONLY",
+        "refresh_mode": "MANUAL",
+        "integration_level": "L0",
+        "freshness_sla": "P1D",
+        "status": "DRAFT"
+      }
+    },
+    {
+      "dataset_contract_key": "LOG-03",
+      "version": 1,
+      "name": "선적 Milestone",
+      "required_level": "REQUIRED",
+      "business_uses": [
+        "도입 지연 감지",
+        "재고 부족 영향",
+        "생산계획 영향"
+      ],
+      "allowed_source_modes": [
+        "CONNECTOR_QUERY",
+        "FILE_SNAPSHOT"
+      ],
+      "preferred_source_mode": "CONNECTOR_QUERY",
+      "minimum_quality_grade": "B",
+      "maximum_age": "P1D",
+      "duplicate_entry_policy": "DENY_IF_AUTHORITATIVE_SOURCE_EXISTS",
+      "missing_data_policy": "MANUAL_SUPPLEMENT",
+      "fields": [
+        {
+          "field_id": "shipment_id",
+          "name": "shipment_id",
+          "label": "선적 식별자",
+          "type": "string",
+          "required": true,
+          "semantic_role": "identifier",
+          "data_role": "ACTUAL",
+          "business_term_id": "term_shipment",
+          "master_reference": "",
+          "classification": "INTERNAL",
+          "quality_rules": [
+            "not_blank"
+          ]
+        },
+        {
+          "field_id": "event_type",
+          "name": "event_type",
+          "label": "이벤트 유형",
+          "type": "string",
+          "required": true,
+          "semantic_role": "status",
+          "data_role": "ACTUAL",
+          "business_term_id": "term_shipment_event",
+          "master_reference": "shipment_event_type",
+          "classification": "INTERNAL",
+          "quality_rules": [
+            "crosswalk_required"
+          ]
+        },
+        {
+          "field_id": "actual_at",
+          "name": "actual_at",
+          "label": "실제 발생 시각",
+          "type": "datetime",
+          "required": false,
+          "semantic_role": "event_time",
+          "data_role": "ACTUAL",
+          "business_term_id": "term_actual_at",
+          "master_reference": "",
+          "classification": "INTERNAL",
+          "quality_rules": [
+            "milestone_order_valid"
+          ]
+        }
+      ],
+      "source_binding": {
+        "binding_id": "binding_log03_partner_portal",
+        "provider_type": "CONNECTOR_QUERY",
+        "provider_ref": "connector_partner_portal_reference",
+        "query_contract_id": "shipment_milestone",
+        "authoritative_role": "ACTUAL",
+        "write_policy": "READ_ONLY",
+        "refresh_mode": "SCHEDULED",
+        "integration_level": "L2",
+        "freshness_sla": "P1D",
+        "status": "DRAFT"
+      }
+    },
+    {
+      "dataset_contract_key": "SIM-02",
+      "version": 1,
+      "name": "시나리오 가정",
+      "required_level": "RECOMMENDED",
+      "business_uses": [
+        "환율 변화 시나리오",
+        "도입 지연 시나리오"
+      ],
+      "allowed_source_modes": [
+        "AFS_NATIVE"
+      ],
+      "preferred_source_mode": "AFS_NATIVE",
+      "minimum_quality_grade": "C",
+      "maximum_age": "P30D",
+      "duplicate_entry_policy": "NO_DUPLICATE_CHECK_REQUIRED",
+      "missing_data_policy": "RANGE_ESTIMATE",
+      "fields": [
+        {
+          "field_id": "scenario_id",
+          "name": "scenario_id",
+          "label": "시나리오 식별자",
+          "type": "string",
+          "required": true,
+          "semantic_role": "identifier",
+          "data_role": "SCENARIO",
+          "business_term_id": "term_scenario",
+          "master_reference": "",
+          "classification": "INTERNAL",
+          "quality_rules": [
+            "not_blank"
+          ]
+        },
+        {
+          "field_id": "delay_days",
+          "name": "delay_days",
+          "label": "도입 지연 일수",
+          "type": "number",
+          "required": true,
+          "semantic_role": "quantity",
+          "data_role": "SCENARIO",
+          "unit": "DAY",
+          "business_term_id": "term_delay_days",
+          "master_reference": "duration_uom",
+          "classification": "INTERNAL",
+          "quality_rules": [
+            "greater_than_or_equal_zero"
+          ]
+        }
+      ],
+      "source_binding": {
+        "binding_id": "binding_sim02_afs_native",
+        "provider_type": "AFS_NATIVE",
+        "provider_ref": "app_dataset_scenario_inputs",
+        "authoritative_role": "SCENARIO",
+        "write_policy": "AFS_NATIVE_WRITE",
+        "refresh_mode": "ON_DEMAND",
+        "integration_level": "L0",
+        "freshness_sla": "P30D",
+        "status": "DRAFT"
+      }
+    }
+  ]
+}
