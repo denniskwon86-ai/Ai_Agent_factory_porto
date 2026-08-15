@@ -884,14 +884,116 @@ def test_read_projection_hides_fields_the_release_does_not_know():
 
 
 # ── [BDR-1 / 2.2] 물질화본이 의미를 들고 있는다 ──────────────────────────
-def test_binding_meaning_lists_match_the_contract_module():
-    """⚠️ 두 목록이 갈라지면 계약이 허용한 역할·출처를 물질화가 모르거나 그 반대가 된다."""
+def test_both_layers_share_the_same_objects_not_copies():
+    """★★★ [2.2a] 두 계층이 **같은 객체**를 본다 — 값이 같은 사본이 아니다.
+
+    ⚠️ 사본이면 한쪽만 갱신되는 날이 오고, 그 사이에 만들어진 잘못된 결속은 3단계에서
+      **정상으로 봉인된다.** 봉인은 「그때와 같은가」에 답할 뿐 「옳은가」에는 답하지 않는다."""
     from core import app_data as ad, app_runtime_contract as arc
-    assert ad.DATA_ROLES == arc.DATA_ROLES
-    assert ad.SOURCE_INTENTS == arc.SOURCE_INTENTS
-    assert ad.WRITE_ACTIONS == arc.WRITE_ACTIONS
-    assert ad.ENTERPRISE_ACTUAL == arc.ENTERPRISE_ACTUAL
-    assert ad.AFS_NATIVE == arc.AFS_NATIVE
+    from core import business_data_semantics as bds
+    for name in ("DATA_ROLES", "SOURCE_INTENTS", "WRITE_ACTIONS", "ROLE_SOURCE_MATRIX",
+                 "ENTERPRISE_ACTUAL", "AFS_NATIVE"):
+        src = getattr(bds, name)
+        assert getattr(arc, name) is src, name
+        if hasattr(ad, name):
+            assert getattr(ad, name) is src, name
+
+
+def test_the_role_source_table_itself_is_pinned():
+    """★★★ 표를 **글자로** 고정한다.
+
+    ⚠️ 두 계층 대조만 있으면 그 시험은 표를 **표 자신으로** 검증한다 — 표를 넓히면
+      양쪽이 함께 넓어져 초록이다(변이 검사에서 실제로 살아남았다). 어떤 조합이 옳은가는
+      **결정**이므로 여기 적어 둔다. 바꾸려면 이 목록을 함께 고쳐야 하고, 그 diff 가 리뷰에
+      보인다."""
+    from core import business_data_semantics as bds
+    assert bds.ROLE_SOURCE_MATRIX == {
+        #: ⚠️⚠️ 여기에 AFS_NATIVE 가 없는 것이 표의 핵심이다 — 회사 확정 실적을 화면에서
+        #:   받겠다는 선언은 곧 이중 입력이다.
+        "ENTERPRISE_ACTUAL":    ("ENTERPRISE_READ",),
+        "OPERATIONAL_PLAN":     ("ENTERPRISE_READ", "AFS_NATIVE"),
+        "OPERATIONAL_FORECAST": ("EXTERNAL_REFERENCE", "DERIVED_READ", "AFS_NATIVE"),
+        "NATIVE_SUPPLEMENT":    ("AFS_NATIVE",),
+        "SCENARIO_INPUT":       ("AFS_NATIVE",),
+        #: 계산 결과를 사람이 입력하면 결정론이 깨진다.
+        "DERIVED_RESULT":       ("DERIVED_READ",),
+    }
+    assert set(bds.ROLE_SOURCE_MATRIX) == set(bds.DATA_ROLES)
+
+
+@pytest.mark.parametrize("role", [
+    "ENTERPRISE_ACTUAL", "OPERATIONAL_PLAN", "OPERATIONAL_FORECAST",
+    "NATIVE_SUPPLEMENT", "SCENARIO_INPUT", "DERIVED_RESULT"])
+@pytest.mark.parametrize("intent", [
+    "AFS_NATIVE", "ENTERPRISE_READ", "EXTERNAL_REFERENCE", "DERIVED_READ"])
+def test_every_role_source_pair_gets_the_same_verdict_in_both_layers(role, intent):
+    """★★★ **24 조합 전수** — 계약 계층과 물질화 계층의 답이 한 칸도 다르면 안 된다.
+
+    ⚠️ 2.2 초판에서는 물질화가 표의 **일부만** 봐서 아래 셋이 계약에서는 막히고 DB 에는
+      들어갔다(실측 재현):
+
+          DERIVED_RESULT + AFS_NATIVE
+          NATIVE_SUPPLEMENT + ENTERPRISE_READ
+          SCENARIO_INPUT + DERIVED_READ
+    """
+    from core import app_runtime_contract as arc
+    from core import business_data_semantics as bds
+    from core.app_data import validate_binding_meaning
+
+    actions = ["read"]
+    contract_errs = arc.duplicate_entry_errors({
+        "name": "x", "data_role": role, "source_intent": intent,
+        "duplicate_entry_policy": bds.NO_DUPLICATE_CHECK_REQUIRED,
+        "allowed_actions": actions})
+    binding_errs = validate_binding_meaning(role, intent, actions)
+
+    expected_ok = intent in bds.ROLE_SOURCE_MATRIX[role]
+    assert bool(contract_errs) is (not expected_ok), (role, intent, contract_errs)
+    assert bool(binding_errs) is (not expected_ok), (role, intent, binding_errs)
+
+
+@pytest.mark.parametrize("role,intent", [
+    ("DERIVED_RESULT", "AFS_NATIVE"),
+    ("NATIVE_SUPPLEMENT", "ENTERPRISE_READ"),
+    ("SCENARIO_INPUT", "DERIVED_READ"),
+])
+def test_the_three_gaps_found_in_review_are_closed(role, intent):
+    """교차검토가 지목한 셋을 이름으로 못박는다 — 다시 열리면 여기서 잡힌다."""
+    from core.app_data import validate_binding_meaning
+    assert validate_binding_meaning(role, intent, ["read"]), (role, intent)
+
+
+def test_the_gap_is_closed_through_the_real_write_path(svc):
+    """★ 함수 단위가 아니라 **실제 생성 경로**로도 막히는지 본다."""
+    with pytest.raises(AppDataError) as e:
+        svc.create_dataset("rel_1", "calc", _schema(), actor_id="u@x",
+                           allowed_actions=["read"], contract_revision=1,
+                           data_role="DERIVED_RESULT", source_intent="AFS_NATIVE")
+    assert "역할" in str(e.value)
+    assert svc.find_dataset("rel_1", "calc") is None
+
+
+#: ★★★ 껍데기를 씌우기 **전의** 진짜 함수. 모듈 import 시점에 잡는다.
+#: ⚠️ 아래 시험이 없으면 「제품 경로가 의미를 요구한다」는 사실을 **fixture 가 대신
+#:   증명**하게 된다 — fixture 가 기본값을 넣어 주므로 제품이 요구를 잃어도 초록이다.
+import core.app_data as _ad_module
+_REAL_CREATE_DATASET = _ad_module.AppDataService.create_dataset
+
+
+def test_the_product_path_itself_requires_meaning(svc):
+    """★★★ **fixture 를 벗기고** 제품 함수를 직접 부른다.
+
+    이 파일의 autouse fixture 는 계약 결속 호출에 `NATIVE_SUPPLEMENT + AFS_NATIVE` 를
+    채워 준다(대부분의 시험이 그것을 시험 대상으로 삼지 않으므로). ⚠️ 그 편의가
+    **제품 경로의 누락을 가릴 수 있다** — 그래서 여기서는 껍데기를 지나지 않는다.
+
+    ⚠️ 4단계(계약 물질화)에서는 fixture 없이 **Compiler → 물질화 종단** 시험이 필요하다.
+      지금은 물질화 경로 자체가 없어서 그 시험을 쓸 수 없다."""
+    with pytest.raises(AppDataError) as e:
+        _REAL_CREATE_DATASET(svc, "rel_1", "orders", _schema(), actor_id="u@x",
+                             allowed_actions=["read"], contract_revision=1)
+    assert "역할" in str(e.value) or "출처" in str(e.value)
+    assert svc.find_dataset("rel_1", "orders") is None
 
 
 def test_contract_binding_must_declare_its_meaning(svc):
@@ -950,25 +1052,25 @@ def test_legacy_binding_must_not_carry_meaning(svc):
     assert "레거시" in str(e.value)
 
 
-def test_unclassified_legacy_is_never_official_actual(svc):
+def test_unclassified_legacy_is_never_declared_actual(svc):
     """★★★ **미분류 레거시의 자동 Actual 승격 금지.**
 
     ⚠️⚠️ 「역할이 안 적혀 있으니 실적이겠지」는 추측이고, 그 추측 위에서 경영 보고가
       만들어진다."""
     legacy = svc.create_dataset("legacy_1", "orders", _schema(), actor_id="u@x")
     assert svc.data_role_for("legacy_1", legacy["dataset_id"]) is None
-    assert svc.is_official_actual("legacy_1", legacy["dataset_id"]) is False
+    assert svc.is_declared_enterprise_actual("legacy_1", legacy["dataset_id"]) is False
 
     actual = svc.create_dataset("rel_1", "purchases", _schema(), actor_id="u@x",
                                 allowed_actions=["read"], contract_revision=1,
                                 data_role="ENTERPRISE_ACTUAL", source_intent="ENTERPRISE_READ")
-    assert svc.is_official_actual("rel_1", actual["dataset_id"]) is True
+    assert svc.is_declared_enterprise_actual("rel_1", actual["dataset_id"]) is True
     #: 다른 릴리스에서는 그 사실이 성립하지 않는다 — 결속마다 따로 답한다.
-    assert svc.is_official_actual("rel_2", actual["dataset_id"]) is False
+    assert svc.is_declared_enterprise_actual("rel_2", actual["dataset_id"]) is False
 
     supplement = svc.create_dataset("rel_1", "notes", _schema(), actor_id="u@x",
                                     allowed_actions=["read", "create"], contract_revision=1)
-    assert svc.is_official_actual("rel_1", supplement["dataset_id"]) is False
+    assert svc.is_declared_enterprise_actual("rel_1", supplement["dataset_id"]) is False
 
 
 def test_narrowing_meaning_is_reflected_on_rebinding(svc):

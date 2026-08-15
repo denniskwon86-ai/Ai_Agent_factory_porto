@@ -1,6 +1,6 @@
 # [I-4] Host Runtime 생성기 연동 — 인수인계
 
-**작성 2026-08-15 · 상태: 설계 rev.3 승인 · **1·2(+2.1·2.1b)·2.2(BDR-1) 완료** · 3~8단계 미착수**
+**작성 2026-08-15 · 상태: 설계 rev.3 승인 · **1·2(+2.1·2.1b)·2.2(+2.2a) 완료** · 3~8단계 미착수**
 
 > **2026-08-15 Codex·Supervisor 제품 설계 보정:** 3단계에 바로 착수하지 않는다. 먼저
 > `docs/architecture/BUSINESS_DATA_BINDING_RUNTIME_DETAILED_DESIGN_2026-08-15.md` §6과
@@ -23,14 +23,14 @@
 
 ```
 G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게이트 ✅  [6] 전환 ✅
-[7] I-4 ── 설계 rev.3 ✅  ·  1단계 ✅  ·  2단계+2.1+2.1b ✅  ·  2.2(BDR-1) ✅  ·  3~8단계 미착수
+[7] I-4 ── 설계 rev.3 ✅  ·  1단계 ✅  ·  2+2.1+2.1b ✅  ·  2.2(BDR-1)+2.2a ✅  ·  3~8 미착수
 ```
 
 **다음에 할 일: 설계서 §20 의 3단계** — 확장된 계약 원문 지문과 물질화 지문을
 **함께 증명에 봉인**하고, 어느 하나라도 달라지면 `410` 으로 기존 프레임을 폐기한다(§16-1).
 2.2(BDR-1)로 의미 계약이 완결됐으므로 지문·승인 계약을 두 번 바꾸지 않는다.
 
-순서: `2.1b ✅ → 2.2(BDR-1) ✅ → 3단계`.
+순서: `2.1b ✅ → 2.2(BDR-1) ✅ → 2.2a ✅ → 3단계`.
 
 ⚠️ **각 단계는 그 단계까지의 회귀를 갖고 커밋한다.** 여덟 단계를 모아서 한 번에 올리면
 어느 단계가 깨졌는지 아무도 못 찾는다.
@@ -42,7 +42,7 @@ G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게�
 | `core/app_runtime_contract.py` | 계약 정본 — 결정표 · JSON Schema · 조건부 규칙 · 의미 지문 |
 | `core/host_contract_compiler.py` | 초안 → 계약(비-LLM · **던지지 않는다**) |
 | `state_models.py` | `PROJECT_STATE_SCHEMA_VERSION = "5.2.0"` · 지연 마이그레이션 · 계약 필드 6 |
-| `tests/test_app_runtime_contract.py` (91) | 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 · **[2.2] 출처·역할·중복입력** |
+| `tests/test_app_runtime_contract.py` (92) | 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 · **[2.2] 출처·역할·중복입력** |
 | `tests/test_project_state_schema_5_2.py` (18) | 회귀 일곱 + 소스 검사 둘 |
 
 **변이 27/27.** 실측: 실제 `latest_state.json` **58개 전부** `5.2.0` 승격(읽기 전용, 실패 0).
@@ -58,7 +58,7 @@ G1-B P0 ✅  I-3 브리지 ✅  3.5 앱 증명 ✅  [4] 카나리 ✅  [5] 게�
 | `core/app_data.py` | `bind_release` · `allowed_actions` · `adopt_dataset` · `contract_coverage` · `find_dataset` 가 결속을 지난다 |
 | `api/routes/app_data_runtime.py` | `_assert_contract_action` — **6개 경로 전부**에 2차 판정 |
 | `core/app_policy.py` | `DENY_DATASET_ACTION` (전역 권한 없음과 **다른 사유**) |
-| `tests/test_app_dataset_binding.py` (87) | 승계 · 2차 판정 · 결속 판 · revision 불변 · 유일성 · 원자성 · **테넌트 격리** · **fail-closed** |
+| `tests/test_app_dataset_binding.py` (117) | 승계 · 2차 판정 · 결속 판 · revision 불변 · 유일성 · 원자성 · **테넌트 격리** · **fail-closed** |
 
 **변이 22/22.** 전체 스위트 **3,352 passed · 1 skipped**.
 
@@ -142,9 +142,47 @@ rel_tenant_b 가 TENANT_A 데이터셋을 결속: True
 없어서 규칙을 통째로 지워도 초록이었다. 나머지 둘은 지문 시험이 두 필드를 함께 바꿔
 **하나가 지문에서 빠져도 다른 하나가 덮어 주던** 경우다.
 
-전체 스위트 **3,429 passed · 1 skipped**.
 **실측**: 운영 백업 사본에 마이그레이션 재실행 — 레거시 결속은 `data_role=''` ·
-`is_official_actual()=False`(즉 **미분류는 실적이 아니다**) · `readiness=READY` · 원본 불변.
+**미분류는 실적이 아니다** · `readiness=READY` · 원본 불변.
+
+### 2.2a 보정 (2026-08-15 · 교차검토 95)
+
+⚠️⚠️ 2.2 는 **같은 규칙을 두 곳에 적었다.** 계약 계층은 역할×출처 표 **전체**를 봤고
+물질화 계층은 **두 가지만** 봤다. 그래서 아래가 계약에서는 막히고 DB 에는 들어갔다(재현):
+
+```text
+DERIVED_RESULT   + AFS_NATIVE       계약=막음 · 물질화=통과
+NATIVE_SUPPLEMENT + ENTERPRISE_READ 계약=막음 · 물질화=통과
+SCENARIO_INPUT   + DERIVED_READ     계약=막음 · 물질화=통과
+```
+
+★★★ 그렇게 들어간 상태는 3단계에서 **정상으로 봉인된다** — 봉인은 「그때와 같은가」에
+답할 뿐 **「옳은가」에는 답하지 않는다.**
+
+| # | 무엇 |
+|---|---|
+| 1 | **`core/business_data_semantics.py`** — 상수·판정이 여기 하나뿐이다. 아무것도 import 하지 않아 두 계층이 모두 부를 수 있다(계약 → wire → app_data 의존 때문에 서로는 못 부른다). 계약·물질화 양쪽이 **재수출**만 한다 |
+| 2 | **24 조합 전수 회귀** + 표 자체를 **글자로 고정** |
+| 3 | `is_official_actual` → **`is_declared_enterprise_actual`** |
+| 4 | `required_freshness` 에서 **월·년 금지** |
+| 5 | BDR 정본 문서 넷을 **별도 문서 커밋**으로 추적 |
+
+⚠️ ③의 이유: 정본 설계상 **공식 실적**은 선언 + 승인된 Source Binding + 대사 완료 +
+Data Owner 인증 + 유효한 CERTIFIED Snapshot 을 **모두** 요구하고, 뒤의 넷은 아직 없다
+(BDR-2~3). 선언 하나를 「공식 실적」이라 부르면 **다음 사람은 코드를 읽지 않고 이름을 믿는다.**
+
+⚠️ ④의 이유: `P1M` 은 28~31일, `P1Y` 는 365 또는 366일이다. 그 값으로 최신성을 비교하면
+**같은 데이터가 기준일에 따라 신선하기도, 낡기도 한다** — 그리고 그 차이는 월말·윤년에만
+드러난다. 한 달이 필요하면 `P30D` 처럼 세어서 적는다.
+
+**변이 31/31.** ⚠️ 그중 하나가 중요했다: 24 조합 전수 시험은 기댓값을 **표 자신에서**
+가져오므로 표를 넓히면 양쪽이 함께 넓어져 **초록**이다. 두 계층의 «일치» 는 증명해도
+표의 «옳음» 은 증명하지 못한다 — 그래서 표를 글자로 고정하는 시험을 따로 뒀다.
+
+★ fixture 가 계약 결속에 의미 기본값을 채워 주므로, **껍데기를 벗기고 제품 함수를 직접
+부르는** 시험을 뒀다. ⚠️ 4단계에서는 fixture 없이 **Compiler → 물질화 종단** 시험이 필요하다.
+
+전체 스위트 **3,460 passed · 1 skipped**.
 
 **실측**: 운영 백업(`app_data.db.bak_test_pollution_20260813_114845` — 옛 13열 스키마 ·
 결속표 없음)의 **사본**에 마이그레이션을 세 번(2단계·2.1·2.1b) 돌려 확인했다:
@@ -468,11 +506,11 @@ projects/**/latest_state.json  58개
 | `tests/test_admin_policy_audit.py` (30) | 정책 API · 전환 스위치 |
 | `tests/test_app_runtime_contract.py` (69) | **[1단계]** 결정표 · 지문 · 승인 초기화 · 매니페스트 대조 |
 | `tests/test_project_state_schema_5_2.py` (18) | **[1단계]** 5.2.0 마이그레이션 · 소스 검사 |
-| `tests/test_app_dataset_binding.py` (87) | **[2단계+2.1+2.1b]** 승계 · 2차 판정 · 결속 판 · 불변 · 유일성 · 원자성 · 테넌트 격리 · fail-closed |
+| `tests/test_app_dataset_binding.py` (117) | **[2단계+2.1+2.1b]** 승계 · 2차 판정 · 결속 판 · 불변 · 유일성 · 원자성 · 테넌트 격리 · fail-closed |
 | `scripts/canary_host_runtime{,_seed}.py` | 격리 카나리(드라이버가 스스로 판정) |
 
-**변이 검사 누적 211/211**(G1-B 88 + 1단계 27 + 2단계 22 + 2.1 보정 20 + 2.1b 26 + 2.2 28).
-전체 스위트 **3,429 passed · 1 skipped**(2026-08-15) · `tsc -b` 초록.
+**변이 검사 누적 214/214**(G1-B 88 + 1단계 27 + 2단계 22 + 2.1 20 + 2.1b 26 + 2.2/2.2a 31).
+전체 스위트 **3,460 passed · 1 skipped**(2026-08-15) · `tsc -b` 초록.
 
 ⚠️ 카나리를 다시 돌리려면: 워크트리 생성 → 씨앗 → 서버(별도 포트, `AFS_SHADOW_RUN`) →
 드라이버(`--seed-file`, `--run`, `--wait-expiry`). 드라이버가 기록·판정까지 하고

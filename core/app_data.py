@@ -65,16 +65,12 @@ RESERVED_FIELD_NAMES = frozenset({
 DATASET_ACTIONS: Tuple[str, ...] = ("read", "create", "update", "delete")
 
 # ── [BDR-1] 물질화본이 들고 있는 계약 의미 ────────────────────────────────
-#: ⚠️ `core.app_runtime_contract` 를 import 하지 않는다(순환 참조 — 계약이 데이터 평면
-#:   상한을 읽는다). 값은 `tests/test_app_dataset_binding.py` 가 두 목록의 동일성을 잠근다.
-ENTERPRISE_ACTUAL = "ENTERPRISE_ACTUAL"
-DATA_ROLES: Tuple[str, ...] = (ENTERPRISE_ACTUAL, "OPERATIONAL_PLAN", "OPERATIONAL_FORECAST",
-                               "NATIVE_SUPPLEMENT", "SCENARIO_INPUT", "DERIVED_RESULT")
-AFS_NATIVE = "AFS_NATIVE"
-SOURCE_INTENTS: Tuple[str, ...] = (AFS_NATIVE, "ENTERPRISE_READ", "EXTERNAL_REFERENCE",
-                                   "DERIVED_READ")
-#: 쓰기 행동 — 있으면 «입력 화면이 생긴다» 는 뜻이다.
-WRITE_ACTIONS: Tuple[str, ...] = ("create", "update", "delete")
+#: ★★★ 값도 판정도 **`core.business_data_semantics` 한 곳**에서 온다.
+#: ⚠️ 여기에 다시 적으면 계약 계층과 갈라지고, 갈라진 사이에 만들어진 잘못된 결속이
+#:   3단계에서 정상으로 봉인된다. (그 모듈은 아무것도 import 하지 않아 순환이 없다.)
+from core.business_data_semantics import (  # noqa: E402
+    AFS_NATIVE, DATA_ROLES, ENTERPRISE_ACTUAL, SOURCE_INTENTS, WRITE_ACTIONS,
+    is_declared_enterprise_actual, role_source_errors)
 
 
 class AppDataError(ValueError):
@@ -134,21 +130,9 @@ def validate_binding_meaning(data_role: str, source_intent: str,
 
     ⚠️⚠️ 특히 **`AFS_NATIVE` 가 아닌 출처에 쓰기 행동을 주지 않는다** — 그것이 곧
       「기존 시스템에 있는 값을 화면에서 또 받는」 앱이다."""
-    errs: List[str] = []
-    if data_role not in DATA_ROLES:
-        errs.append(f"알 수 없는 데이터 역할입니다: {data_role or '(없음)'} — "
-                    f"가능한 것은 {list(DATA_ROLES)} 입니다.")
-    if source_intent not in SOURCE_INTENTS:
-        errs.append(f"알 수 없는 데이터 출처입니다: {source_intent or '(없음)'} — "
-                    f"가능한 것은 {list(SOURCE_INTENTS)} 입니다.")
-    writes = sorted(set(actions) & set(WRITE_ACTIONS))
-    if writes and source_intent and source_intent != AFS_NATIVE:
-        errs.append(f"출처가 {source_intent} 인데 {writes} 가 열려 있습니다 — "
-                    f"기존 원천이 있는 데이터에 입력 화면을 만들지 않습니다.")
-    if data_role == ENTERPRISE_ACTUAL and source_intent == AFS_NATIVE:
-        errs.append("회사의 확정 실적을 AFS 입력으로 받을 수 없습니다 — 이중 입력이 되고, "
-                    "두 값이 갈라진 뒤에야 드러납니다.")
-    return errs
+    #: ★★★ **계약 계층과 같은 판정기**를 부른다. 여기서 규칙을 다시 적으면 두 계층이
+    #:   갈라지고, 갈라진 사이에 들어온 결속은 3단계에서 정상으로 봉인된다.
+    return role_source_errors(data_role, source_intent, actions)
 
 
 def _now() -> str:
@@ -648,9 +632,16 @@ class AppDataService:
             return None
         return b["data_role"] or None
 
-    def is_official_actual(self, release_id: str, dataset_id: str) -> bool:
-        """★★★ **명시적으로 선언된 기업 실적만** 참이다 — 미분류는 절대 승격되지 않는다."""
-        return self.data_role_for(release_id, dataset_id) == ENTERPRISE_ACTUAL
+    def is_declared_enterprise_actual(self, release_id: str, dataset_id: str) -> bool:
+        """이 결속이 **기업 실적이라고 «선언» 됐는가.**
+
+        ★★★ 이름이 «선언» 에서 멈춘다. 정본 설계상 **공식 실적**은 선언 + 승인된 Source
+          Binding + 대사 완료 + Data Owner 인증 + 유효한 CERTIFIED Snapshot 을 모두
+          요구하고, 뒤의 넷은 **아직 없다**(BDR-2~3).
+        ⚠️⚠️ 지금 이것을 `is_official_actual` 이라고 부르면 선언 하나가 공식 실적처럼
+          읽히고, 다음 사람은 코드를 읽지 않고 **이름을 믿는다.**
+        ⚠️ 미분류(레거시)는 언제나 거짓이다."""
+        return is_declared_enterprise_actual(self.data_role_for(release_id, dataset_id) or "")
 
     def allowed_actions(self, release_id: str, dataset_id: str) -> Optional[Tuple[str, ...]]:
         """이 릴리스에서 이 데이터셋에 허용된 행동.

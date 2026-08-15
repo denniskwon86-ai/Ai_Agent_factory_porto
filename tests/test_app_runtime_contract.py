@@ -622,25 +622,42 @@ def test_changing_the_source_intent_resets_approval():
     assert r.contract["approval"] == {"status": "PENDING"}
 
 
-def test_unclassified_is_never_official_actual():
+def test_unclassified_is_never_declared_enterprise_actual():
     """★★★ **미분류 레거시의 자동 Actual 승격 금지.**
 
     ⚠️⚠️ 「역할이 안 적혀 있으니 실적이겠지」는 추측이고, 그 추측 위에서 경영 보고가
       만들어진다."""
-    assert arc.is_official_actual({"name": "x"}) is False
-    assert arc.is_official_actual({"name": "x", "data_role": ""}) is False
-    assert arc.is_official_actual({"name": "x", "data_role": arc.NATIVE_SUPPLEMENT}) is False
-    assert arc.is_official_actual(None) is False
-    assert arc.is_official_actual({"name": "x", "data_role": arc.ENTERPRISE_ACTUAL}) is True
+    f = arc.is_declared_enterprise_actual_dataset
+    assert f({"name": "x"}) is False
+    assert f({"name": "x", "data_role": ""}) is False
+    assert f({"name": "x", "data_role": arc.NATIVE_SUPPLEMENT}) is False
+    assert f(None) is False
+    assert f({"name": "x", "data_role": arc.ENTERPRISE_ACTUAL}) is True
+
+
+def test_the_name_stops_at_declared():
+    """★★★ 이름이 «선언» 에서 멈춘다.
+
+    정본 설계상 **공식 실적**은 선언 + 승인된 Source Binding + 대사 완료 + Data Owner
+    인증 + 유효한 CERTIFIED Snapshot 을 모두 요구하고, 뒤의 넷은 **아직 없다**(BDR-2~3).
+    ⚠️⚠️ 지금 `is_official_actual` 이라고 부르면 선언 하나가 공식 실적처럼 읽히고,
+      다음 사람은 코드를 읽지 않고 **이름을 믿는다.**"""
+    assert not hasattr(arc, "is_official_actual")
+    from core import app_data, business_data_semantics
+    assert not hasattr(app_data.app_data_service, "is_official_actual")
+    assert hasattr(business_data_semantics, "is_declared_enterprise_actual")
 
 
 def test_freshness_must_be_comparable():
     """⚠️ 신선도 요구를 자유 문장으로 두면 비교할 수 없다 — 「하루」와 「1일」이 다른 값이 된다."""
-    for bad in ("하루", "1D", "P", "1일", "P1X"):
+    #: ⚠️⚠️ 월·년은 **고정 길이가 아니다** — `P1M` 은 28~31일, `P1Y` 는 365 또는 366일이다.
+    #:   그 값으로 최신성을 비교하면 같은 데이터가 기준일에 따라 신선하기도, 낡기도 한다.
+    #:   그리고 그 차이는 월말·윤년에만 드러난다.
+    for bad in ("하루", "1D", "P", "1일", "P1X", "P1M", "P1Y", "P1Y6M"):
         d = _draft()
         d["datasets"][0]["required_freshness"] = bad
         assert not compile_contract(d, project_id="P1").ok, bad
-    for good in ("P1D", "PT6H", "P1M", "P1DT12H"):
+    for good in ("P1D", "PT6H", "P1DT12H", "P2W", "PT30M", "P7D"):
         d = _draft()
         d["datasets"][0]["required_freshness"] = good
         assert compile_contract(d, project_id="P1").ok, good
