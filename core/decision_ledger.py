@@ -185,10 +185,34 @@ def _compute_hash(row: Dict[str, Any], prev_hash: str) -> str:
 
 
 class DecisionLedger:
-    def __init__(self, db_path: str = _DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        """⚠️⚠️ 기본 경로를 **호출 시점에** 해석하고, **파일은 아직 열지 않는다.**
+
+        세 가지가 함께 있어야 격리가 성립한다(2026-08-17 실측 사고):
+
+        ① 예전 시그니처는 `db_path: str = _DB_PATH` 였다. 파이썬은 기본 인자를
+           **모듈을 읽을 때 한 번** 평가하므로, 나중에 `_DB_PATH` 를 임시 경로로
+           바꿔도 굳어 버린 옛 값이 쓰인다.
+        ② `db_path or _DB_PATH` 도 안 된다. **빈 문자열이 운영 원장으로 떨어진다** —
+           경로 계산이 빈 값을 낸 바로 그때 운영 파일이 열린다. `None` 만 「지정하지
+           않음」으로 인정한다. 빈 문자열은 **잘못된 값**이고, 잘못된 값의 올바른
+           결말은 폴백이 아니라 실패다.
+        ③ 예전에는 여기서 `_init_db()` 를 불렀다. 모듈 끝의 전역 싱글턴이 **import
+           되는 순간** 운영 파일을 만들고 열었다 — autouse fixture 는 그보다 **늦다.**
+           수집 단계에서 이미 늦은 것이다. 그래서 실제 사용 직전까지 미룬다."""
+        self.db_path = _DB_PATH if db_path is None else db_path
         self._lock = threading.Lock()
-        self._init_db()
+        #: 어떤 경로로 스키마를 준비했는지. `db_path` 가 나중에 바뀌면(격리) 다시 준비한다.
+        self._prepared_for: Optional[str] = None
+
+    def _ready(self) -> None:
+        """첫 사용 직전에 스키마를 준비한다. **`__init__` 에서 부르지 않는다.**
+
+        ⚠️ import 시점에 파일을 만들면 「테스트가 시작되기 전에 이미 운영 파일을
+          건드린 상태」가 된다. 그 뒤에 무엇을 격리해도 늦다."""
+        if self._prepared_for != self.db_path:
+            self._init_db()
+            self._prepared_for = self.db_path
 
     # ── 인프라 (master_data.py 와 동일 규약) ──────────────────────────────
     def _connect(self) -> sqlite3.Connection:
@@ -237,6 +261,7 @@ class DecisionLedger:
         ⚠️ **기록 실패는 삼키지 않는다.** 텔레메트리는 부가 기능이라 실패를 삼켰지만, Ledger 는
           "왜 이 결정을 했는가"의 유일한 근거다. 조용히 누락되면 승인 이력이 없는 승인이 생긴다.
           호출부가 감사 실패를 인지하고 판단할 수 있도록 예외를 올린다."""
+        self._ready()
         if event_type not in EVENT_TYPES:
             raise DecisionLedgerError(f"등록되지 않은 event_type 입니다: {event_type}")
         if subject_type not in SUBJECT_TYPES:
@@ -317,6 +342,7 @@ class DecisionLedger:
         return d
 
     def get_event(self, event_id: str) -> Optional[Dict[str, Any]]:
+        self._ready()
         for attempt in (0, 1):
             try:
                 with self._connect() as conn:
@@ -335,6 +361,7 @@ class DecisionLedger:
                     event_type: str = "", project_id: str = "", blueprint_id: str = "",
                     tenant_id: str = "", entity_mode: str = "",
                     limit: int = 100) -> List[Dict[str, Any]]:
+        self._ready()
         sql = "SELECT * FROM decision_ledger_events"
         where, params = [], []
         for col, val in (("subject_type", subject_type), ("subject_id", subject_id),
@@ -360,12 +387,14 @@ class DecisionLedger:
         return []
 
     def subject_history(self, subject_type: str, subject_id: str) -> List[Dict[str, Any]]:
+        self._ready()
         """한 대상의 결정 이력(오래된 것부터). "왜 이렇게 됐나"에 답하는 기본 조회."""
         rows = self.list_events(subject_type=subject_type, subject_id=subject_id, limit=1000)
         return sorted(rows, key=lambda r: r["seq"])
 
     # ── 변조 탐지 ─────────────────────────────────────────────────────────
     def verify_chain(self) -> Dict[str, Any]:
+        self._ready()
         """해시 체인을 재계산해 불일치를 찾는다.
 
         ⚠️ **한계**: 이것은 DB 파일 직접 조작을 *막지* 못한다. 탐지만 한다. 중간 이벤트를 고치면

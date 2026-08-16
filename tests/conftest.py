@@ -15,8 +15,40 @@
 """
 import os
 import shutil
+import tempfile
 
 import pytest
+
+# ════════════════════════════════════════════════════════════════════════════
+# ★★★ [2026-08-17 사고] 결정 원장은 **수집이 시작되기 전에** 돌려놓는다.
+#
+# ⚠️⚠️ autouse fixture 는 늦다. pytest 가 시험 모듈을 **수집**하며 `core.decision_ledger`
+#   를 import 하는 순간 전역 싱글턴이 만들어지고, 그때 이미 운영 파일이 열린다 —
+#   fixture 는 그 뒤에 돈다. 그래서 격리 지점을 **conftest 모듈 최상단**으로 올린다.
+#   conftest 는 시험 모듈보다 먼저 import 된다.
+#
+# ★ 이것은 «세션 기본값» 이다. 시험마다의 격리는 아래 autouse fixture 가 `tmp_path` 로
+#   더 좁게 다시 건다. 두 겹인 이유: fixture 를 어떤 경로로든 우회해도 **운영 파일로는
+#   떨어지지 않게** 하기 위해서다.
+# ⚠️ `mkdtemp` 는 지우지 않는다 — 세션 중 아무 때나 열릴 수 있고, 지우는 시점을 정확히
+#   맞추려다 실패하면 그 순간 운영 경로로 돌아간다. OS 임시 폴더 정리에 맡긴다.
+_LEDGER_SESSION_DIR = tempfile.mkdtemp(prefix="afs_ledger_session_")
+
+try:
+    from core import decision_ledger as _dl_boot
+    from tests.ledger_isolation import isolation_path_error as _path_error_boot
+
+    _boot_db = os.path.join(_LEDGER_SESSION_DIR, "decision_ledger.db")
+    _boot_why = _path_error_boot(_boot_db)
+    if _boot_why:
+        raise RuntimeError(_boot_why)
+    _dl_boot._DB_PATH = _boot_db
+    _dl_boot.decision_ledger.db_path = _boot_db
+except Exception as _boot_err:      # pragma: no cover - 여기서 죽으면 수집 자체가 멈춘다
+    # ⚠️ 삼키지 않는다. 격리에 실패한 채 수집이 계속되면 **첫 시험이 운영 원장에 쓴다.**
+    raise RuntimeError(
+        f"[conftest] 결정 원장 수집 시점 격리에 실패했습니다 — 시험을 시작하지 않습니다: "
+        f"{_boot_err}") from _boot_err
 
 
 @pytest.fixture(scope="session")
@@ -380,6 +412,38 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         monkeypatch.setattr(_ps.policy_shadow, "_ready", "", raising=False)
     except Exception as e:
         isolation_failed("이중 판정 관측", e)
+    try:
+        # ★★★ [2026-08-17 사고] **결정 원장을 격리한다.**
+        #
+        # ⚠️⚠️ 이 항목이 여기 «없었다». 그래서 원장에 쓰는 모든 시험이 운영
+        #   `data/decision_ledger.db` 에 직접 썼다 — 실측 결과 11,627행 중 99.64%가
+        #   시험 계정 패턴이었다. Git 미추적 파일이라 status 오염 검사에도, 지문
+        #   감시 목록에도 잡히지 않았다. **감시하지 않는 것은 격리되지 않는다.**
+        #
+        # 세 곳을 **모두** 바꾼다. 하나라도 빠지면 격리한 줄 알고 운영에 쓴다:
+        #   ① `_DB_PATH` — 이후 새로 만들어지는 인스턴스의 기본값
+        #   ② 전역 싱글턴 `decision_ledger.db_path` — 이미 만들어진 객체
+        #   ③ `_ready` 성격의 캐시가 없으므로 ②로 충분하지만, 소비자 모듈이
+        #      `from core.decision_ledger import decision_ledger` 로 **별칭을 이미
+        #      들고 있어도** ②가 같은 객체를 가리키므로 함께 따라온다.
+        # ⚠️ 생성자 기본 인자를 `_DB_PATH` 로 «굳혀» 두면 ①이 무력해진다 —
+        #   파이썬은 기본 인자를 모듈 로딩 때 한 번 평가한다. 그래서 생성자를
+        #   `db_path or _DB_PATH` 로 바꿨다(`core/decision_ledger.py`).
+        from core import decision_ledger as _dl
+        _ledger_db = tmp_path / "decision_ledger.db"
+        monkeypatch.setattr(_dl, "_DB_PATH", str(_ledger_db), raising=False)
+        monkeypatch.setattr(_dl.decision_ledger, "db_path", str(_ledger_db), raising=False)
+        #: ★ 격리가 «진짜로» 임시 경로인지 여기서 확인한다. 운영 `data/` 아래로
+        #:   해석되면 그 순간 멈춘다 — 경로 계산이 틀린 채 계속 가면 그것이 곧
+        #:   이번 사고의 재발이다.
+        #: ⚠️ 판정은 `tests/ledger_isolation.py` 에 둔다. conftest 안에만 두면
+        #:   **시험이 그 규칙을 부를 수 없고**, 규칙을 지워도 아무것도 안 깨진다.
+        from tests.ledger_isolation import isolation_path_error
+        _why = isolation_path_error(str(_ledger_db))
+        if _why:
+            raise RuntimeError(_why)
+    except Exception as e:
+        isolation_failed("결정 원장", e)
 
 
 # ── [P0-A/B] 조직·강제 상태를 **명시**하는 fixture ────────────────────────
@@ -470,3 +534,28 @@ def file_backed_registry():
     _ar.save_registry(_ar.load_registry())
     assert os.path.exists(_ar.REGISTRY_PATH)
     return _ar.REGISTRY_PATH
+
+
+# ── [2026-08-17 사고 · P0-L2] 세션 전체를 감시한다 ──────────────────────
+@pytest.fixture(scope="session", autouse=True)
+def _live_ledger_must_not_move():
+    """세션 **시작과 끝**에 운영 원장의 논리적 상태를 대조한다.
+
+    ★★★ 개별 시험의 앞뒤만 보면 «격리 fixture 가 걸리지 않은 시험»과 «수집 단계의
+      쓰기» 를 못 잡는다. 이번 사고의 두 번째 원인이 정확히 수집 단계였다.
+
+    ⚠️ 실패해도 시험을 되돌릴 수는 없다 — 이미 쓴 뒤다. 그래도 **알리는 것**이
+      모르는 것보다 낫다. 모르면 다음 사람이 그 오염 위에 또 쌓는다.
+    """
+    from tests.ledger_isolation import live_sentinel, live_side_files
+
+    before, files_before = live_sentinel(), live_side_files()
+    yield
+    after, files_after = live_sentinel(), live_side_files()
+    assert after == before, (
+        f"⛔ 이 시험 세션이 **운영 결정 원장을 바꿨습니다.**\n"
+        f"   전: {before}\n   후: {after}\n"
+        f"   격리를 타지 않은 경로가 있습니다 — 무엇이 썼는지 찾아야 합니다.")
+    assert files_after == files_before, (
+        f"⛔ 이 시험 세션이 운영 원장의 WAL/SHM 파일을 만들었거나 지웠습니다.\n"
+        f"   전: {files_before}\n   후: {files_after}")
