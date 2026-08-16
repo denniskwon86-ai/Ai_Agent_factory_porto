@@ -206,7 +206,12 @@ _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)
 
 
 @pytest.fixture()
-def client(log):
+def client(log, seeded_org):
+    """품질 API를 조직이 구성된 정상 운영 문맥에서 검증한다.
+
+    이 라우트가 현재 조직 범위를 판정하지 않는다는 이유로 조직 0건 부트스트랩에 기대면,
+    향후 범위 통제를 추가했을 때 인증·권한 회귀가 거짓 초록이 된다.
+    """
     from fastapi.testclient import TestClient
     import main
     return TestClient(main.app)
@@ -242,12 +247,14 @@ def test_classify_requires_identity_and_scope(client, log):
     finally:
         config.ORG_DEFAULT_USER_ID = _saved
 
+    from tests import org_seed
+    actor = org_seed.MEMBER_A
     r = client.post("/api/v1/telemetry/quality/classify", json=body,
-                    headers={"X-Factory-User": "tester"})
+                    headers={"X-Factory-User": actor})
     assert r.status_code == 200, r.text
     assert client.post("/api/v1/telemetry/quality/classify",
                        json={"outcome_id": "nope", "root_cause": "model_quality"},
-                       headers={"X-Factory-User": "tester"}).status_code == 404
+                       headers={"X-Factory-User": actor}).status_code == 404
     assert client.post("/api/v1/telemetry/quality/classify",
                        json={"outcome_id": oid, "root_cause": "made_up"},
-                       headers={"X-Factory-User": "tester"}).status_code == 400
+                       headers={"X-Factory-User": actor}).status_code == 400

@@ -142,27 +142,36 @@ def ecm_org_seed():
 @pytest.fixture(autouse=True)
 def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
                                _planning_db_template):
-    """모든 테스트의 텔레메트리 기록을 tmp 로 돌린다(개별 테스트가 다시 덮어써도 무해)."""
+    """모든 테스트의 런타임 쓰기를 tmp 로 돌린다.
+
+    격리 실패는 경고가 아니라 테스트 중단이다. 계속 진행하면 테스트가 운영 DB나 사용자
+    산출물에 쓰면서도 초록이 될 수 있고, 바로 그 fail-open 때문에 clean checkout과 작업
+    폴더가 서로 다른 것을 검증했던 사고가 다시 발생한다.
+    """
+    def isolation_failed(area, exc):
+        pytest.fail(f"[conftest] {area} 격리 실패 — 테스트를 실행하지 않음: {exc}",
+                    pytrace=False)
+
     try:
         from core import quality_telemetry
         monkeypatch.setattr(quality_telemetry, "_LOG_PATH",
                             str(tmp_path / "quality_outcomes.jsonl"), raising=False)
-    except Exception:
-        pass
+    except Exception as e:
+        isolation_failed("품질 텔레메트리", e)
     try:
         import core.llm_gateway as gw
         monkeypatch.setattr(gw, "_LLM_CALL_LOG_PATH",
                             str(tmp_path / "llm_call_log.jsonl"), raising=False)
-    except Exception:
-        pass
+    except Exception as e:
+        isolation_failed("LLM 호출 로그", e)
     try:
         # 감사로그는 특히 중요하다 — 테스트가 남긴 거부 기록이 섞이면 "실제 침해 시도"를
         # 세는 지표가 오염되고, 반대로 테스트는 남의 기록을 보고 통과할 수 있다(실제 발생).
         from core.enterprise_context import audit
         monkeypatch.setattr(audit, "_LOG_PATH",
                             str(tmp_path / "access_audit.jsonl"), raising=False)
-    except Exception:
-        pass
+    except Exception as e:
+        isolation_failed("접근 감사 로그", e)
     try:
         # 승격 기록도 같은 이유로 격리한다 — 테스트가 남긴 전사 승격이 실제 목록에 섞이면
         # "이 앱이 전사 앱인가"의 답이 틀린다.
@@ -174,16 +183,16 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         from core import release_readiness
         monkeypatch.setattr(release_readiness.release_readiness, "db_path",
                             str(tmp_path / "workspace.db"), raising=False)
-    except Exception:
-        pass
+    except Exception as e:
+        isolation_failed("승격·릴리스 준비 저장소", e)
     try:
         # Shadow run 은 "무엇을 승격했는가"의 근거다. 테스트가 남긴 승격 기록이 실제 목록에
         # 섞이면 운영 판단의 근거가 오염된다 — 감사로그와 같은 이유로 격리한다.
         from core import shadow_mode
         monkeypatch.setattr(shadow_mode.shadow_mode, "db_path",
                             str(tmp_path / "shadow_runs.db"), raising=False)
-    except Exception:
-        pass
+    except Exception as e:
+        isolation_failed("Shadow Run 저장소", e)
     try:
         # 프로그램 사용여부도 격리한다 — 테스트가 남긴 비활성화가 실제 DB 에 들어가면
         # **실제 프로그램이 못 쓰게 된다.** 이건 오염이 아니라 사고다.
@@ -192,8 +201,8 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
                             str(tmp_path / "program_lifecycle.db"), raising=False)
         monkeypatch.setattr(program_lifecycle.program_lifecycle, "_ready", "",
                             raising=False)
-    except Exception:
-        pass
+    except Exception as e:
+        isolation_failed("프로그램 생명주기 저장소", e)
     try:
         # ★★ [2026-08-07 P4-4] **자산 사용 관측도 격리한다.**
         #   `agent_registry.agent_skill()` 과 `resolve_workflow()` 가 해석 시점에 기록하는데,
@@ -208,7 +217,7 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         monkeypatch.setattr(_au.asset_usage, "_ready", "", raising=False)
         monkeypatch.setattr(_au.asset_usage, "_pending", {}, raising=False)
     except Exception as e:
-        print(f"⚠️ [conftest] 자산 사용 관측 격리 실패(운영 기록 오염 위험): {e}")
+        isolation_failed("자산 사용 관측", e)
     try:
         # ★★ [2026-07-31 실측] **ECM 조직도(enterprise_context.db)도 격리한다.**
         #   이것이 없으면 테스트가 **운영 조직도에 의존**한다. 실측: 참고문서 가시성 테스트가
@@ -221,7 +230,7 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         monkeypatch.setattr(_ecm_repo.ecm_repository, "db_path",
                             str(tmp_path / "enterprise_context.db"), raising=False)
     except Exception as e:
-        print(f"⚠️ [conftest] ECM 조직도 격리 실패(테스트가 운영 조직도에 좌우됨): {e}")
+        isolation_failed("ECM 조직도", e)
     try:
         # ★★ [2026-07-30 실측] **범위 정책 저장소**도 격리한다.
         #   이 파일은 `ORG_ENFORCE`·한시예외 만료일을 담고, `resolve_scope` 와 만료 판정이
@@ -233,7 +242,7 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         monkeypatch.setattr(scope_policy, "_POLICY_PATH",
                             str(tmp_path / "scope_policy.json"), raising=False)
     except Exception as e:
-        print(f"⚠️ [conftest] 범위 정책 격리 실패(테스트가 로컬 정책 파일에 좌우됨): {e}")
+        isolation_failed("범위 정책", e)
     try:
         # ★★ [2026-07-30 실측] 기준정보 DB 도 격리한다 — **여기까지 막지 않아 실제로 오염됐다.**
         #   `data/master/master.db` 의 `business_terms` 35건이 전부 `__route_test_term__`
@@ -273,7 +282,7 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         monkeypatch.setattr(_org, "db_path", str(_p), raising=False)
         monkeypatch.setattr(_org, "_scope_cache", {}, raising=False)
     except Exception as e:
-        print(f"⚠️ [conftest] 기준정보·조직 DB 격리 실패(실 DB 오염 위험): {e}")
+        isolation_failed("기준정보·조직 DB", e)
     try:
         # ★★★ [2026-08-05] **경영계획 DB 도 격리한다 — 여기까지 막지 않아 실제로 오염됐다.**
         #   통제 확인 중 탐침 데이터가 `data/planning.db` 에 들어갔다(계정과목·동인·fact·
@@ -286,7 +295,7 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         shutil.copyfile(_planning_db_template, _pp)
         monkeypatch.setattr(_pm.planning_store, "db_path", str(_pp), raising=False)
     except Exception as e:
-        print(f"⚠️ [conftest] 경영계획 DB 격리 실패(실 DB 오염 위험): {e}")
+        isolation_failed("경영계획 DB", e)
     try:
         # ★★★ [2026-08-08 트랙 I] **생성 앱 데이터 평면도 격리한다.**
         #   `app_data_service` 는 싱글턴이고 라우트가 그것을 쓴다 — 기준정보(`master.db`)가
@@ -300,7 +309,7 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
                             str(tmp_path / "app_data.db"), raising=False)
         monkeypatch.setattr(_ad.app_data_service._store, "_ready", "", raising=False)
     except Exception as e:
-        print(f"⚠️ [conftest] 앱 데이터 평면 격리 실패(실 DB 오염 위험): {e}")
+        isolation_failed("앱 데이터 평면", e)
     try:
         # ★★★ [2026-08-15 P0-C] **작업 디렉터리 쓰기도 격리한다 — DB 만 막고 있었다.**
         #
@@ -358,7 +367,7 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         monkeypatch.setattr(_se, "PROPOSALS_DIR", str(tmp_path / "skill_proposals"),
                             raising=False)
     except Exception as e:
-        print(f"⚠️ [conftest] 작업 디렉터리 격리 실패(실제 산출물 오염 위험): {e}")
+        isolation_failed("작업 디렉터리", e)
     try:
         # ★★★ [2026-08-13 G1-B05] **이중 판정 관측 기록도 격리한다.**
         #   이 표는 「기존 판정을 신규 PDP 로 갈아도 되는가」의 **유일한 근거**다. 테스트가
@@ -370,7 +379,7 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
                             str(tmp_path / "policy_shadow.db"), raising=False)
         monkeypatch.setattr(_ps.policy_shadow, "_ready", "", raising=False)
     except Exception as e:
-        print(f"⚠️ [conftest] 이중 판정 관측 격리 실패(전환 근거 오염 위험): {e}")
+        isolation_failed("이중 판정 관측", e)
 
 
 # ── [P0-A/B] 조직·강제 상태를 **명시**하는 fixture ────────────────────────
