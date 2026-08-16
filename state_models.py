@@ -282,6 +282,15 @@ class ProjectState(BaseModel):
     app_runtime_contract_summary: str = Field(default="")     # 사람이 읽는 요약
     unsupported_requirements: List[Dict[str, Any]] = Field(default_factory=list)
     approved_contract_fingerprint: str = Field(default="")    # 게이트가 비교하는 값
+    # ★★★ [I-4 §3] 계약 절차의 **영속 opt-in.** `""`(적용 안 함) 또는 `"v1"`.
+    #
+    # ⚠️⚠️ **기본값을 절대 `"v1"` 으로 두지 않는다.** 여기서 기본을 켜면 이미 돌고
+    #   있는 모든 프로젝트가 상태를 읽는 순간 새 절차를 타고, 그 어긋남은 «재개할
+    #   때에야» 드러난다 — 원인을 찾기 가장 어려운 시점이다.
+    # ★ 값은 `project_meta.json` 이 정본이고 `start_sprint` 가 주입한다. 프론트가
+    #   보낸 값을 믿지 않는다 — 오래 열린 브라우저가 상태를 바꾸는 경로를 만들지
+    #   않는다(`schema_version` 을 서버가 부여하는 것과 같은 이유).
+    runtime_contract_profile: str = Field(default="")
 
     @model_validator(mode="before")
     @classmethod

@@ -155,6 +155,19 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
         "각 태스크에는 투입될 에이전트 명단(`required_agents`)을 반드시 포함하십시오. "
         "아키텍처 설계는 기획 단계에서 이미 확정되었으므로 `required_agents`에 `Architect`를 절대 배정하지 마십시오."
     )
+    # ★ [I-4 §15] 산출물 종류를 태스크마다 **선언**하게 한다.
+    #
+    # ⚠️ 이 값이 없어도 파이프라인은 멈추지 않는다 — `wbs_artifact_kind` 가 판독 불가를
+    #   `APP`(계약 필수)으로 떨어뜨리기 때문이다. 즉 **모델을 믿고 통제를 맡기지 않는다.**
+    #   그런데도 프롬프트에서 요구하는 이유는, 선언된 값과 떨어진 값을 구분해야
+    #   「기획이 REPORT 라고 판단했다」와 「읽을 수 없어 APP 이 됐다」가 갈리기 때문이다.
+    #   후자가 쌓이면 그것은 앱의 결함이 아니라 **이 프롬프트의 결함**이다.
+    prompt += (
+        "\n\n[ 산출물 종류]: 각 태스크에 `artifact_kind` 를 다음 중 하나로 정확히 표기하십시오 — "
+        "`APP`(사용자가 실행하는 앱), `SIMULATOR`(시뮬레이터), `REPORT`(보고서), "
+        "`DOCUMENT`(문서·데이터 정의), `LIBRARY`(재사용 모듈). "
+        "목록에 없는 값이나 빈 값은 `APP` 으로 간주되어 런타임 계약 승인 절차를 거치게 됩니다."
+    )
 
     # WBS 게이트에서 사용자가 피드백을 줬으면(재분할 루프) 그 내용을 반영해 다시 분할한다.
     _fb_items = getattr(state_obj, "human_feedback_queue", []) or []
@@ -240,7 +253,16 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
 
     if state_obj.workspace_root and wbs_tasks:
         wbs_mgr = WBSManager(state_obj.workspace_root)
-        wbs_mgr.initialize_wbs(state_obj.project_name, wbs_tasks)
+        # ★★★ [I-4 4단계 P0-1] **반환값을 받아 쓴다.**
+        #
+        # ⚠️ 예전에는 반환을 버리고 아래에서 `wbs_tasks[0]` 을 다시 읽었다. 정규화는
+        #   새 dict 를 만들므로 원본에는 반영되지 않고, 그래서 **파일에는 `Tech_Lead`
+        #   가 있는데 실행 상태(`current_required_agents`)에는 없는** 상태가 됐다.
+        #   최초 실행이 계약을 건너뛰는 경로가 정확히 거기였다 — 정규화를 넣어 놓고
+        #   그 결과를 안 쓰는 것이 가장 알아채기 어려운 형태의 무력화다.
+        wbs_tasks = wbs_mgr.initialize_wbs(
+            state_obj.project_name, wbs_tasks,
+            runtime_contract_profile=getattr(state_obj, "runtime_contract_profile", ""))
         print(f"[OK] WBS 초기화 완료: 총 {len(wbs_tasks)}개의 태스크가 스케줄링되었습니다.")
     elif not wbs_tasks:
         # 빈 WBS 로 기존 파일을 덮어쓰지 않는다 - 게이트에서 사용자가 피드백(재분할)으로 복구 가능

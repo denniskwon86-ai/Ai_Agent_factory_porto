@@ -102,6 +102,15 @@ EVENT_TYPES = (
     "APP_DATASET_CREATED",
     "APP_DATASET_SCHEMA_CHANGED",
     "APP_DATASET_RETIRED",
+    # [I-4 4단계 · 설계 §3·§13] App Runtime Contract 검토 게이트.
+    #   ⚠️ **자동 통과는 여기에 남기지 않는다.** 지문이 바뀌지 않아 사람을 부르지 않은
+    #     일까지 «승인» 으로 쌓으면, 원장에서 승인 건수를 세는 순간 실제보다 많아지고
+    #     그 숫자가 「우리는 계약을 N번 검토했다」로 읽힌다.
+    #   `subject_id` 는 **계약 지문**이다 — 프로젝트가 아니라 «어느 계약을 승인했는가»
+    #     가 남아야 하고, 지문이 바뀌면 그것은 다른 계약이다.
+    "APP_CONTRACT_REVIEW_REQUESTED",
+    "APP_CONTRACT_APPROVED",
+    "APP_CONTRACT_REJECTED",
     "CORRECTION",                  # 정정 전용 — 반드시 parent_event_id 를 가진다
 )
 
@@ -116,7 +125,10 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  # [트랙 I] 생성 앱이 쌓는 업무 데이터의 그릇. 릴리스와 구분한다 —
                  #   «이 릴리스가 어떻게 됐나» 와 «이 앱의 데이터에 무슨 일이 있었나» 는
                  #   다른 질문이고, 뭉개면 둘 다 답할 수 없다.
-                 "app_dataset")
+                 "app_dataset",
+                 # [I-4 4단계] 계약은 릴리스도 데이터셋도 아니다 — «이 릴리스가 어떻게
+                 #   됐나» 와 «이 계약이 언제 어떤 지문으로 승인됐나» 는 다른 질문이다.
+                 "app_contract")
 
 
 class DecisionLedgerError(ValueError):

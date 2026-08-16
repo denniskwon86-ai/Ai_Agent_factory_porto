@@ -255,6 +255,8 @@ def _iter_visible_projects(p) -> list:
 _read_project_ownership = _pv.read_project_ownership
 _project_meta_path = _pv.project_meta_path
 
+from core import wbs_artifact_kind as _ak   # [I-4 §3] 계약 프로필 상수
+
 
 def _resolve_scope_node(dept_id: str) -> str:
     """[D-019] 부서 → **지금 시점의** ECM 조직 노드. 못 풀면 빈 값(«미상»)이다.
@@ -296,7 +298,8 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                         visibility: str = None, nature: str = None,
                         forked_from: dict = None,
                         tenant_id: str = None, enterprise_scope_id: str = None,
-                        entity_mode: str = None, blueprint_id: str = None) -> None:
+                        entity_mode: str = None, blueprint_id: str = None,
+                        runtime_contract_profile: str = None) -> None:
     """⚠️ 소유권 5필드도 **None 이면 보존**한다(Phase 3).
     이 함수는 템플릿만 바꾸려는 호출부가 많은데, 거기서 소유권이 초기화되면
     프로젝트가 조용히 무소속이 되어 권한 필터에서 사라진다."""
@@ -311,7 +314,11 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
         #   날리면 프로젝트가 조용히 문맥 미지정이 되어 격리가 풀린다(소유권과 같은 위험).
         _own_missing = any(v is None for v in
                            (owner_dept_id, owner_user_id, visibility, nature, forked_from,
-                            tenant_id, enterprise_scope_id, entity_mode, blueprint_id))
+                            tenant_id, enterprise_scope_id, entity_mode, blueprint_id,
+                            # [I-4 §3] 계약 프로필도 같은 보존 계약을 따른다 — 템플릿만
+                            #   바꾸는 호출부가 이것을 날리면 진행 중이던 계약 절차가
+                            #   조용히 꺼지고, 그 프로젝트는 계약 없이 계속 돈다.
+                            runtime_contract_profile))
         _prev = {}
         if (master_domains is None or mcp_live_grounding is None
                 or knowledge_pack_ids is None or _own_missing):
@@ -338,6 +345,11 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
             entity_mode = _prev.get("entity_mode", "") or "REAL"
         if blueprint_id is None:
             blueprint_id = _prev.get("blueprint_id", "")
+        if runtime_contract_profile is None:
+            # ★★★ 기존 파일에 키가 없으면 `""` — **절대 `v1` 로 채우지 않는다.**
+            #   여기서 기본을 켜면 이미 돌고 있는 모든 프로젝트가 소급해서 계약 절차를
+            #   타고, 그 어긋남은 재개할 때에야 드러난다([I-4 §3]).
+            runtime_contract_profile = _prev.get("runtime_contract_profile", "") or ""
         if master_domains is None:
             master_domains = _prev.get("master_domains", [])
         if mcp_live_grounding is None:
@@ -388,6 +400,8 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                 "enterprise_scope_id": enterprise_scope_id or "",
                 "entity_mode": entity_mode or "REAL",
                 "blueprint_id": blueprint_id or "",
+                # [I-4 §3] 계약 절차의 영속 opt-in. 신규 생성 경로만 `"v1"` 을 넘긴다.
+                "runtime_contract_profile": runtime_contract_profile or "",
             }, f, ensure_ascii=False, indent=2)
         _sync_project_ownership(workspace_root, owner_dept_id, owner_user_id, visibility, nature)
     except ProjectOwnershipRequired:
@@ -437,6 +451,22 @@ def _read_project_master_domains(workspace_root: str) -> list:
         return [d for d in doms if isinstance(d, str)]
     except Exception:
         return []
+
+
+def _read_project_runtime_contract_profile(workspace_root: str) -> str:
+    """[I-4 §3] 이 프로젝트가 계약 절차를 켰는가(`project_meta.json`). 기본 `""`.
+
+    ⚠️⚠️ **판독 실패도 `""` 다.** 다른 fail-closed 자리와 반대 방향인 것이 의도다 —
+      메타를 못 읽었다고 계약 절차를 켜면, 파일이 손상된 **기존** 프로젝트가 재개하는
+      순간 새 절차를 타고 체크포인터가 어긋난다. 계약이 필요한 신규 프로젝트는 생성
+      경로에서 값을 명시하므로 이 경로로 «잃어버릴» 일이 없다.
+    ★ 목록 밖 값도 `""` 로 떨어뜨린다 — 알 수 없는 프로필로 도는 프로젝트를 만들지 않는다."""
+    try:
+        with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
+            raw = (json.load(f) or {}).get("runtime_contract_profile", "")
+    except Exception:
+        return ""
+    return _ak.PROFILE_V1 if _ak.profile_enforces_contract(raw) else ""
 
 
 def _read_project_mcp_live(workspace_root: str) -> bool:
@@ -620,7 +650,11 @@ def provision_project(project_id: str, template_id: str = "default",
                         master_domains, mcp_live_grounding,
                         owner_dept_id=owner_dept_id, owner_user_id=owner_user_id,
                         tenant_id=tenant_id, enterprise_scope_id=enterprise_scope_id,
-                        entity_mode=entity_mode, blueprint_id=blueprint_id)
+                        entity_mode=entity_mode, blueprint_id=blueprint_id,
+                        # ★ [I-4 §3] **신규 프로젝트만** 계약 절차를 켠다. 생성 경로가
+                        #   하나로 모여 있는 덕에 여기 한 줄이 경계 전부다 — 갱신 경로는
+                        #   `None` 으로 두어 기존 값을 보존한다.
+                        runtime_contract_profile=_ak.PROFILE_V1)
     return tid
 
 
@@ -725,7 +759,8 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
     #   `scripts/migrate_org_ownership.py:49` 의 추론 규약과 **같은 값**을 쓴다 — 생성 시점에
     #   찍어두면 그 마이그레이션이 신규 메가에 대해 할 일이 없어진다(멱등 유지).
     _write_project_meta(mega_path, tid, "default", "react_app",
-                        owner_dept_id="hq", owner_user_id=p.user_id or "", visibility="company")
+                        owner_dept_id="hq", owner_user_id=p.user_id or "", visibility="company",
+                        runtime_contract_profile=_ak.PROFILE_V1)   # 신규 생성 경로
     
     # ★ [2026-07-27 Phase 1] 하드코딩 맵 3개(domain_agents_map / domain_templates_map /
     #   domain_ko_map)를 제거하고 **부서 기준정보**를 조회한다.
@@ -785,7 +820,8 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
         # ★ [2026-07-28 Phase 5] `domain` 이 곧 `dept_id` 다 — 서브 프로젝트의 소유 부서로 찍는다.
         #   가시성은 기본값 `dept`: 부서 산출물은 부서 안에서만 프롬프트에 주입된다.
         _write_project_meta(sub_path, sub_tid, "default", "react_app",
-                            owner_dept_id=domain, owner_user_id=p.user_id or "")
+                            owner_dept_id=domain, owner_user_id=p.user_id or "",
+                            runtime_contract_profile=_ak.PROFILE_V1)   # 신규 생성 경로
 
         domain_name_ko = _cfg.get("name_ko") or domain.upper()
         # 서브 프로젝트 상태 초기화
@@ -1086,6 +1122,14 @@ async def start_sprint(project_id: str, req: SprintStartRequest,
     req.project_state_payload["master_domains"] = _read_project_master_domains(workspace_root)
     # [M3] 외부 실측값 병기 토글도 권위 원본에서 주입(기본 off)
     req.project_state_payload["mcp_live_grounding"] = _read_project_mcp_live(workspace_root)
+    # ★★★ [I-4 §3] 계약 프로필도 **권위 원본에서** 주입한다 — 프론트가 보낸 값은 버린다.
+    #
+    # ⚠️ 이 한 줄이 「신규 워크플로우부터」의 경계 전부다. 클라이언트가 실어 보낸
+    #   `runtime_contract_profile` 을 그대로 쓰면, 오래 열린 브라우저나 손으로 만든 요청이
+    #   **진행 중 프로젝트에 계약 절차를 켤 수 있다.** 그 어긋남은 재개할 때에야 드러난다.
+    #   `schema_version` 을 서버가 부여하는 것과 같은 이유다.
+    req.project_state_payload["runtime_contract_profile"] = \
+        _read_project_runtime_contract_profile(workspace_root)
 
     # ── [D-019] 소유권도 같은 권위 원본에서 주입한다 ─────────────────────────────
     #
