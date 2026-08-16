@@ -45,20 +45,44 @@ def test_legacy_meta_without_the_key_reads_as_off(tmp_path):
     assert fc._read_project_runtime_contract_profile(str(tmp_path)) == ""
 
 
-def test_unreadable_meta_reads_as_off(tmp_path):
-    """⚠️ 다른 fail-closed 자리와 **반대 방향**이다. 손상된 메타를 켜짐으로 읽으면
-    고장난 기존 프로젝트가 재개하는 순간 새 절차를 탄다 — 가장 나쁜 조합이다."""
-    (tmp_path / "project_meta.json").write_text("{망가진 JSON", encoding="utf-8")
-    assert fc._read_project_runtime_contract_profile(str(tmp_path)) == ""
-    assert fc._read_project_runtime_contract_profile(str(tmp_path / "없는폴더")) == ""
+# ── 세 상태 ──────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("body,state", [
+    (json.dumps({"template_id": "default"}), ak.LEGACY_OFF),          # 키가 없는 옛 메타
+    (json.dumps({"runtime_contract_profile": ""}), ak.LEGACY_OFF),    # 명시적 비활성
+    (json.dumps({"runtime_contract_profile": "v1"}), ak.V1_ON),
+    (json.dumps({"runtime_contract_profile": " V1 "}), ak.V1_ON),
+    (json.dumps({"runtime_contract_profile": "v2"}), ak.UNREADABLE),  # 미지원 값
+    (json.dumps({"runtime_contract_profile": None}), ak.UNREADABLE),  # 형식 오류
+    (json.dumps({"runtime_contract_profile": 1}), ak.UNREADABLE),
+    (json.dumps(["목록이 왔다"]), ak.UNREADABLE),                      # 최상위가 객체가 아니다
+    ("{망가진 JSON", ak.UNREADABLE),                                   # 파일 손상
+])
+def test_profile_is_read_as_three_states(tmp_path, body, state):
+    """★★★ 「적용 안 함」과 「읽지 못함」은 **다른 사실**이다.
+
+    ⚠️ 둘을 모두 `""` 로 읽으면 신규 `v1` 프로젝트의 메타가 손상되기만 해도
+      레거시로 오인되어 계약 통제가 조용히 꺼진다 — **파일 하나를 깨뜨리는 것이
+      우회로**가 되고, 그 상태는 오류를 내지 않으므로 아무도 모른다."""
+    (tmp_path / "project_meta.json").write_text(body, encoding="utf-8")
+    assert fc._read_project_contract_profile_state(str(tmp_path)) == state
 
 
-@pytest.mark.parametrize("raw", ["v2", "V1.0", "1", True, {"v": 1}, "  "])
-def test_unknown_profile_value_reads_as_off(tmp_path, raw):
-    """알 수 없는 프로필로 도는 프로젝트를 만들지 않는다."""
-    (tmp_path / "project_meta.json").write_text(
-        json.dumps({"runtime_contract_profile": raw}), encoding="utf-8")
-    assert fc._read_project_runtime_contract_profile(str(tmp_path)) == ""
+def test_missing_meta_is_unreadable_not_legacy(tmp_path):
+    """⚠️ 메타가 **없는 것**도 판독 실패다. 모든 생성 경로가 메타를 쓰도록
+    fail-closed 된 뒤이므로, 메타가 없다는 것은 「옛날 프로젝트」가 아니라
+    「무언가 잘못됐다」는 뜻이다 — 그리고 파일을 지우는 것이 통제를 끄는 가장
+    간단한 방법이 되면 안 된다."""
+    assert fc._read_project_contract_profile_state(str(tmp_path)) == ak.UNREADABLE
+    assert fc._read_project_contract_profile_state(str(tmp_path / "없는폴더")) == ak.UNREADABLE
+
+
+def test_unreadable_profile_does_not_become_a_value(tmp_path):
+    """판독 실패는 `""` 라는 **답**이 되어서는 안 된다 — 호출부가 먼저 막아야 한다."""
+    (tmp_path / "project_meta.json").write_text("{망가진", encoding="utf-8")
+    assert fc._read_project_runtime_contract_profile(str(tmp_path)) == ""   # 값 자체는 빈 값
+    with pytest.raises(Exception) as e:
+        fc._assert_contract_profile_readable(str(tmp_path), "P")
+    assert getattr(e.value, "status_code", None) == 503
 
 
 # ── 보존 계약 ────────────────────────────────────────────────────────────
@@ -143,6 +167,71 @@ def test_client_supplied_profile_is_discarded(client, tmp_path):
     assert r.status_code == 200, r.text
     assert seen.get("runtime_contract_profile") == "", (
         "클라이언트가 보낸 v1 이 살아남았다 — 진행 중 프로젝트가 소급 적용된다")
+
+
+def test_corrupted_project_cannot_start_a_sprint(client, tmp_path):
+    """★★★ 손상된 메타로는 **가동하지 않는다.**
+
+    ⚠️ 이것을 막지 않으면 신규 `v1` 프로젝트의 메타를 깨뜨리는 것만으로 계약 통제가
+      꺼진 채 실행된다. 「레거시 미적용」은 허용하되 「판독 실패」는 허용하지 않는다."""
+    r = client.post("/api/v1/factory/projects", json={"project_id": "P3"})
+    assert r.status_code == 200, r.text
+    (tmp_path / "projects" / "P3" / "project_meta.json").write_text("{깨짐", encoding="utf-8")
+
+    started = {}
+
+    async def _capture(task_id, payload, ws_root):
+        started["yes"] = True
+
+    import unittest.mock as _mock
+    with _mock.patch.object(fc.orchestrator, "start_sprint", _capture):
+        r = client.post("/api/v1/factory/P3/sprint/start",
+                        json={"task_id": "PLANNING_1",
+                              "project_state_payload": {"project_name": "P3"}})
+    assert r.status_code == 503, r.text
+    assert not started, "막았다고 하면서 실행이 시작됐다"
+
+
+def test_corrupted_project_cannot_resume_either(client, tmp_path):
+    """⚠️ 시작만 막으면 **재개가 열린 쪽**이 되고, 사용자는 막힌 쪽을 피해 그리로 간다."""
+    r = client.post("/api/v1/factory/projects", json={"project_id": "P4"})
+    assert r.status_code == 200, r.text
+    (tmp_path / "projects" / "P4" / "project_meta.json").write_text("{깨짐", encoding="utf-8")
+
+    resumed = {}
+
+    async def _capture(task_id, feedback, project_id):
+        resumed["yes"] = True
+        return True
+
+    import unittest.mock as _mock
+    with _mock.patch.object(fc.orchestrator, "resume_hotl", _capture):
+        r = client.post("/api/v1/factory/P4/hotl/resume",
+                        json={"task_id": "PLANNING_1", "feedback": ""})
+    assert r.status_code == 503, r.text
+    assert not resumed
+
+
+def test_legacy_project_still_starts(client, tmp_path):
+    """★ 판독 실패만 막는다 — **레거시는 그대로 돈다.** 여기가 깨지면 이번 보정이
+    「모든 옛 프로젝트를 세운 것」이 된다."""
+    ws = tmp_path / "projects" / "OLD"
+    ws.mkdir(parents=True)
+    (ws / "project_meta.json").write_text(
+        json.dumps({"template_id": "default", "owner_user_id": "u"}), encoding="utf-8")
+
+    seen = {}
+
+    async def _capture(task_id, payload, ws_root):
+        seen.update(payload)
+
+    import unittest.mock as _mock
+    with _mock.patch.object(fc.orchestrator, "start_sprint", _capture):
+        r = client.post("/api/v1/factory/OLD/sprint/start",
+                        json={"task_id": "PLANNING_1",
+                              "project_state_payload": {"project_name": "OLD"}})
+    assert r.status_code == 200, r.text
+    assert seen.get("runtime_contract_profile") == ""
 
 
 def test_server_injects_v1_for_a_project_that_has_it(client, tmp_path):

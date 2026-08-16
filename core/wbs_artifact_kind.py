@@ -65,6 +65,43 @@ PROFILE_KEY = "runtime_contract_profile"
 RUNTIME_CONTRACT_PROFILES: Tuple[str, ...] = (PROFILE_NONE, PROFILE_V1)
 
 
+#: ── 프로필 판독의 **세 상태** ────────────────────────────────────────────
+#: ⚠️⚠️ 셋을 둘로 뭉개면 통제가 새어 나간다. 예전에는 「없음·손상·모르는 값」을 모두
+#:   `""` 로 읽었고, 그래서 **신규 `v1` 프로젝트의 메타가 손상되면 레거시로 오인되어
+#:   계약 통제가 조용히 꺼졌다.** 파일 하나를 깨뜨리는 것이 우회로였다.
+#: ★ 「레거시 미적용」은 허용하되 「판독 실패」는 허용하지 않는다 — 둘은 다른 사실이다.
+LEGACY_OFF = "LEGACY_OFF"    # 파일은 정상, 프로필 키가 없거나 명시적 비활성
+V1_ON = "V1_ON"              # 명시적 `v1`
+UNREADABLE = "UNREADABLE"    # 파일 손상 · 형식 오류 · 미지원 값
+
+PROFILE_STATES: Tuple[str, ...] = (LEGACY_OFF, V1_ON, UNREADABLE)
+
+
+def classify_profile(raw: Any, *, meta_readable: bool = True,
+                     key_present: bool = True) -> str:
+    """프로필 원값을 세 상태 중 하나로 판정한다.
+
+    · `meta_readable=False` — 메타 파일 자체를 읽지 못했다 → `UNREADABLE`
+    · `key_present=False` — 옛 메타에는 이 키가 아예 없다 → `LEGACY_OFF`
+    · `""` — 우리가 「적용 안 함」으로 기록한 값 → `LEGACY_OFF`
+    · `"v1"` — `V1_ON`
+    · 그 밖 전부(`None`·숫자·`"v2"`·객체) → `UNREADABLE`
+
+    ⚠️ 마지막 줄이 핵심이다. 모르는 값을 `LEGACY_OFF` 로 떨어뜨리면 오타 하나가
+      통제를 끄는 스위치가 된다 — 그리고 그 오타는 아무 오류도 내지 않는다."""
+    if not meta_readable:
+        return UNREADABLE
+    if not key_present:
+        return LEGACY_OFF
+    if isinstance(raw, str):
+        value = raw.strip().lower()
+        if value == "":
+            return LEGACY_OFF
+        if value == PROFILE_V1:
+            return V1_ON
+    return UNREADABLE
+
+
 def profile_enforces_contract(profile: Any) -> bool:
     """이 프로필이 계약 절차를 강제하는가.
 

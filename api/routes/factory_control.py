@@ -453,20 +453,57 @@ def _read_project_master_domains(workspace_root: str) -> list:
         return []
 
 
-def _read_project_runtime_contract_profile(workspace_root: str) -> str:
-    """[I-4 §3] 이 프로젝트가 계약 절차를 켰는가(`project_meta.json`). 기본 `""`.
+def _read_project_contract_profile_state(workspace_root: str) -> str:
+    """[I-4 §3] 이 프로젝트의 계약 프로필을 **세 상태**로 판독한다.
 
-    ⚠️⚠️ **판독 실패도 `""` 다.** 다른 fail-closed 자리와 반대 방향인 것이 의도다 —
-      메타를 못 읽었다고 계약 절차를 켜면, 파일이 손상된 **기존** 프로젝트가 재개하는
-      순간 새 절차를 타고 체크포인터가 어긋난다. 계약이 필요한 신규 프로젝트는 생성
-      경로에서 값을 명시하므로 이 경로로 «잃어버릴» 일이 없다.
-    ★ 목록 밖 값도 `""` 로 떨어뜨린다 — 알 수 없는 프로필로 도는 프로젝트를 만들지 않는다."""
+    ★★★ 「적용 안 함」과 「읽지 못함」을 구분하는 것이 이 함수의 전부다.
+
+    ⚠️⚠️ 예전에는 둘을 모두 `""` 로 읽었다. 그러면 **신규 `v1` 프로젝트의 메타가
+      손상되기만 해도 레거시로 오인되어 계약 통제가 조용히 꺼진다** — 파일 하나를
+      깨뜨리는 것이 우회로가 된다. 그런데 그 상태는 오류를 내지 않으므로 아무도
+      모른다. 판독 실패는 통제를 끄는 근거가 될 수 없다.
+    ⚠️ 메타 파일이 **없는 것**도 판독 실패로 본다. 지금은 모든 생성 경로가 메타를
+      쓰고(`ProjectOwnershipRequired` 로 fail-closed), 그래서 메타가 없다는 것은
+      「옛날 프로젝트」가 아니라 「무언가 잘못됐다」는 뜻이다."""
+    path = _project_meta_path(workspace_root)
+    if not os.path.exists(path):
+        return _ak.UNREADABLE
     try:
-        with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
-            raw = (json.load(f) or {}).get("runtime_contract_profile", "")
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return _ak.UNREADABLE
     except Exception:
-        return ""
-    return _ak.PROFILE_V1 if _ak.profile_enforces_contract(raw) else ""
+        return _ak.UNREADABLE
+    key = "runtime_contract_profile"
+    return _ak.classify_profile(data.get(key),
+                                key_present=(key in data))
+
+
+def _read_project_runtime_contract_profile(workspace_root: str) -> str:
+    """상태에 실을 프로필 값(`""` 또는 `"v1"`).
+
+    ⚠️ **판독 실패를 여기서 답으로 만들지 않는다.** 호출부는 먼저
+      `_assert_contract_profile_readable` 로 막아야 하고, 이 함수는 그 뒤에 부른다 —
+      막지 않은 채 이 값을 쓰면 손상된 `v1` 프로젝트가 `""` 로 돌아간다."""
+    return (_ak.PROFILE_V1
+            if _read_project_contract_profile_state(workspace_root) == _ak.V1_ON else "")
+
+
+def _assert_contract_profile_readable(workspace_root: str, project_id: str) -> None:
+    """판독할 수 없는 프로필로는 **가동하지 않는다.**
+
+    ★ 503 을 쓴다 — 클라이언트가 잘못 보낸 것이 아니라 **우리가 저장한 것이 깨진**
+      상태다. 앱 데이터 결속이 깨졌을 때 `AppDataIntegrityError` 를 503 으로 돌린
+      [I-4 2.1b] 와 같은 판단이다. 4xx 로 돌리면 사용자가 요청을 고쳐 보려 한다."""
+    if _read_project_contract_profile_state(workspace_root) != _ak.UNREADABLE:
+        return
+    raise HTTPException(
+        status_code=503,
+        detail=(f"프로젝트 «{project_id}» 의 `project_meta.json` 을 읽을 수 없어 "
+                f"가동하지 않았습니다 — 런타임 계약 프로필을 판정할 수 없습니다.\n"
+                f"⚠️ 이 상태로 진행하면 계약이 필요한 프로젝트가 «레거시» 로 오인되어 "
+                f"통제 없이 실행됩니다. 메타 파일을 복구한 뒤 다시 시도하십시오."))
 
 
 def _read_project_mcp_live(workspace_root: str) -> bool:
@@ -1128,6 +1165,9 @@ async def start_sprint(project_id: str, req: SprintStartRequest,
     #   `runtime_contract_profile` 을 그대로 쓰면, 오래 열린 브라우저나 손으로 만든 요청이
     #   **진행 중 프로젝트에 계약 절차를 켤 수 있다.** 그 어긋남은 재개할 때에야 드러난다.
     #   `schema_version` 을 서버가 부여하는 것과 같은 이유다.
+    # ⚠️ **판독 실패면 여기서 멈춘다.** 아래 한 줄은 `V1_ON` 이 아니면 `""` 를 주므로,
+    #   막지 않으면 손상된 `v1` 프로젝트가 레거시로 위장해 통제 없이 돈다.
+    _assert_contract_profile_readable(workspace_root, project_id)
     req.project_state_payload["runtime_contract_profile"] = \
         _read_project_runtime_contract_profile(workspace_root)
 
@@ -1229,6 +1269,9 @@ async def _assert_resumable(project_id: str) -> None:
     ⚠️ 판정은 `core/resume_guard.check()` 한 곳에 있다. 여기서 조건을 다시 쓰지 않는다."""
     from core import resume_guard
     ws = workspace_path(project_id)
+    # ★ [I-4 4c-0] 재개도 같은 문을 지난다. 시작만 막으면 **재개가 열린 쪽**이 되고,
+    #   사용자는 막힌 쪽을 피해 그리로 간다 — 바로 위 독스트링이 말하는 형태 그대로다.
+    _assert_contract_profile_readable(ws, project_id)
     v = await asyncio.to_thread(resume_guard.check, ws, _read_project_template(ws))
     if not v.ok:
         # 409 — 요청은 정당하지만 **지금 상태와 맞지 않는다.** 403(권한)도 400(잘못된 요청)도
