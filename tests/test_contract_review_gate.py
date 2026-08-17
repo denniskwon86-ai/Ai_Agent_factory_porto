@@ -209,45 +209,31 @@ def test_rejection_clears_the_approved_fingerprint():
 
 
 # ── 원장 ─────────────────────────────────────────────────────────────────
-def test_auto_pass_is_not_written_to_the_ledger():
-    """⚠️ 사람이 판단하지 않은 일을 승인으로 쌓으면 승인 건수가 실제보다 많아진다."""
-    calls = []
-
-    class _Spy:
-        def append(self, **kw):
-            calls.append(kw)
-            return {"event_id": "e1"}
-
-    assert gate.record_decision(_Spy(), _ev(), project_id="p1") is None
-    assert calls == []
-
-
-@pytest.mark.parametrize("approved,event,actor", [
-    (None, "APP_CONTRACT_REVIEW_REQUESTED", "system"),
-    (True, "APP_CONTRACT_APPROVED", "user"),
-    (False, "APP_CONTRACT_REJECTED", "user"),
+#: ⚠️ 이 절은 **스파이 객체를 쓰지 않는다.** [4c-2] 에서 검사와 기록이 한
+#:   트랜잭션이 되면서, 가짜 원장으로는 「이미 결정된 요청인가」를 볼 수 없게 됐다.
+#:   진짜 원장(conftest 가 tmp 로 격리)을 쓴다 — 아래 `ledger` fixture.
+@pytest.mark.parametrize("verdict_kw", [
+    {},                                 # AUTO_PASS
+    {"compiled_fingerprint": ""},       # BLOCKED
+    {"requires_contract": False},       # NOT_APPLICABLE
 ])
-def test_review_outcomes_are_recorded_against_the_fingerprint(approved, event, actor):
-    calls = []
+def test_only_a_review_can_be_recorded(verdict_kw):
+    """⚠️ 사람이 판단하지 않은 일을 승인으로 쌓으면 원장에서 승인 건수를 세는 순간
+    실제보다 많아지고, 그 숫자는 「우리는 계약을 N번 검토했다」로 읽힌다.
 
-    class _Spy:
-        def append(self, **kw):
-            calls.append(kw)
-            return {"event_id": "e1"}
+    ★ 예전에는 「조용히 `None` 을 돌려준다」였다. 지금은 **거부한다** — 부를 일이
+      없는 자리에서 불렸다는 것 자체가 호출부의 결함이고, 조용히 넘기면 그 결함이
+      남는다."""
+    class _NoLedger:
+        def transaction(self):          # 여기까지 오면 안 된다
+            raise AssertionError("원장을 건드렸다")
 
-    d = _ev(compiled_fingerprint=FP_B, approved_fingerprint=FP_A)
-    gate.record_decision(_Spy(), d, project_id="p1", task_id="WBS-001",
-                         actor_id="t_admin@test.invalid", approved=approved)
-    assert len(calls) == 1
-    kw = calls[0]
-    assert kw["event_type"] == event
-    assert kw["subject_type"] == "app_contract"
-    assert kw["subject_id"] == FP_B, "«어느 계약을 승인했는가» 가 남아야 한다"
-    assert kw["actor_type"] == actor
-    # 「무엇에서 무엇으로」 가 복원돼야 한다
-    ev = kw["evidence_refs"][0]
-    assert ev["previous_approved_fingerprint"] == FP_A
-    assert ev["task_id"] == "WBS-001"
+    with pytest.raises(gate.ReviewRequestError):
+        gate.record_decision(_NoLedger(), gate.evaluate(
+            **{"requires_contract": True, "compiled_fingerprint": FP_A,
+               "approved_fingerprint": FP_A, "contract_status": gate.APPROVED,
+               **verdict_kw}),
+            project_id="p1", request_event_id="dle_x", approved=True)
 
 
 # ── WBS 와 잇는 자리 ─────────────────────────────────────────────────────
@@ -290,16 +276,232 @@ def test_project_with_contract_artifacts_but_no_contract_is_blocked():
     assert d.verdict == gate.BLOCKED
 
 
-def test_ledger_accepts_the_new_event_and_subject_types():
-    """★ 두 번째 진입 경로 — 상수만 맞춰 두고 원장에 등록하지 않으면, 실제 기록은
-    `DecisionLedgerError` 로 죽는다. 스파이 객체만 시험하면 그것을 못 잡는다."""
-    from core.decision_ledger import EVENT_TYPES, SUBJECT_TYPES, DecisionLedger
+# ── [4c-2] 검토 요청 이벤트 ─────────────────────────────────────────────
+#: 이 절이 전제하는 것: conftest 가 `decision_ledger.db` 를 `tmp_path` 로 격리한다.
+#: 원장이 정본이므로 **스파이 객체로는 이 절을 시험할 수 없다** — 진짜 원장을 쓴다.
+import pytest as _pytest
+
+
+@_pytest.fixture
+def ledger():
+    from core.decision_ledger import DecisionLedger
+    return DecisionLedger()
+
+
+def _review(fp=FP_B, prev=FP_A):
+    return _ev(compiled_fingerprint=fp, approved_fingerprint=prev)
+
+
+def test_review_request_is_created_once(ledger):
+    ev1, made1 = gate.ensure_review_request(ledger, _review(), project_id="p1",
+                                            task_ids=["A", "B"])
+    ev2, made2 = gate.ensure_review_request(ledger, _review(), project_id="p1",
+                                            task_ids=["A", "B"])
+    assert made1 is True and made2 is False
+    assert ev1["event_id"] == ev2["event_id"]
+    assert ev1["subject_id"] == FP_B
+    assert ev1["evidence_refs"][0]["task_ids"] == ["A", "B"]
+
+
+def test_open_request_is_found_from_the_ledger_not_the_state(ledger):
+    """★★★ 상태를 **한 번도 저장하지 않았어도** 두 번째 호출이 같은 요청을 찾는다.
+
+    ⚠️ 체크포인트 저장이 실패하면 상태의 `contract_review_request_event_id` 는 비어
+      있다. 그때 상태만 보고 판정하면 요청이 두 건 생기고, 승인이 어느 쪽에 붙었는지
+      아무도 답할 수 없다."""
+    ev1, _ = gate.ensure_review_request(ledger, _review(), project_id="p1")
+    #: 상태는 잃어버렸다고 치자 — 원장에는 남아 있다.
+    ev2, made = gate.ensure_review_request(ledger, _review(), project_id="p1")
+    assert made is False and ev2["event_id"] == ev1["event_id"]
+
+
+def test_a_different_fingerprint_gets_its_own_request(ledger):
+    """⚠️ 지문이 다르면 **다른 계약**이다. 옛 요청을 재사용하면 사람이 A 를 보고
+    승인한 기록이 B 의 승인이 된다."""
+    a, _ = gate.ensure_review_request(ledger, _review(fp=FP_A, prev=""), project_id="p1")
+    b, made = gate.ensure_review_request(ledger, _review(fp=FP_B, prev=FP_A), project_id="p1")
+    assert made is True and a["event_id"] != b["event_id"]
+
+
+def test_another_project_gets_its_own_request(ledger):
+    a, _ = gate.ensure_review_request(ledger, _review(), project_id="p1")
+    b, made = gate.ensure_review_request(ledger, _review(), project_id="p2")
+    assert made is True and a["event_id"] != b["event_id"]
+
+
+def test_a_decided_request_does_not_block_a_new_one(ledger):
+    """★ 반려된 뒤 같은 계약을 다시 올릴 수 있어야 한다 — 「열린」 요청만 막는다."""
+    ev, _ = gate.ensure_review_request(ledger, _review(), project_id="p1")
+    gate.record_decision(ledger, _review(), project_id="p1", approved=False,
+                         actor_id=ADMIN, request_event_id=ev["event_id"])
+    again, made = gate.ensure_review_request(ledger, _review(), project_id="p1")
+    assert made is True and again["event_id"] != ev["event_id"]
+
+
+@_pytest.mark.parametrize("verdict_kw", [
+    {"compiled_fingerprint": ""},              # BLOCKED
+    {},                                        # AUTO_PASS
+    {"requires_contract": False},              # NOT_APPLICABLE
+])
+def test_only_a_review_creates_a_request(ledger, verdict_kw):
+    with _pytest.raises(gate.ReviewRequestError):
+        gate.ensure_review_request(ledger, _ev(**verdict_kw), project_id="p1")
+
+
+def test_concurrent_requests_do_not_duplicate(ledger):
+    """★★★ 조회와 기록 사이에 틈이 있으면 재시작이 겹칠 때 요청이 두 건 생긴다."""
+    import threading
+
+    made = []
+    barrier = threading.Barrier(4)
+
+    def _go():
+        barrier.wait()
+        try:
+            made.append(gate.ensure_review_request(ledger, _review(), project_id="p1"))
+        except Exception as e:      # 실패도 기록해 조용히 사라지지 않게 한다
+            made.append(e)
+
+    threads = [threading.Thread(target=_go) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert all(not isinstance(m, Exception) for m in made), made
+    ids = {m[0]["event_id"] for m in made}
+    assert len(ids) == 1, f"동시 요청이 {len(ids)} 건의 요청을 만들었다"
+    assert sum(1 for m in made if m[1]) == 1, "새로 만든 것은 한 번뿐이어야 한다"
+
+
+# ── [4c-2] 결정 가능성 검사 ─────────────────────────────────────────────
+ADMIN = "t_admin@test.invalid"
+
+
+def test_decidable_requires_all_four_conditions(ledger):
+    ev, _ = gate.ensure_review_request(ledger, _review(), project_id="p1")
+
+    # ① 정상
+    assert gate.assert_decidable(ledger, ev["event_id"], project_id="p1",
+                                 compiled_fingerprint=FP_B)["event_id"] == ev["event_id"]
+
+    # ② 없는 요청
+    with _pytest.raises(gate.ReviewRequestError):
+        gate.assert_decidable(ledger, "dle_없음", project_id="p1",
+                              compiled_fingerprint=FP_B)
+
+    # ③ 다른 프로젝트
+    with _pytest.raises(gate.ReviewRequestError):
+        gate.assert_decidable(ledger, ev["event_id"], project_id="p2",
+                              compiled_fingerprint=FP_B)
+
+    # ④ 요청 이후 계약이 바뀌었다 — 그 승인은 지금 계약을 본 승인이 아니다
+    with _pytest.raises(gate.ReviewRequestError) as e:
+        gate.assert_decidable(ledger, ev["event_id"], project_id="p1",
+                              compiled_fingerprint=FP_A)
+    assert "다릅니다" in str(e.value)
+
+
+def test_a_non_request_event_cannot_be_a_parent(ledger):
+    """⚠️ 아무 이벤트나 부모로 삼으면 승인이 엉뚱한 것에 붙는다.
+
+    ⚠️⚠️ 이 시험은 원래 **엉뚱한 이유로 초록**이었다(변이 검사에서 드러났다).
+      `subject_type` 이 다른 이벤트는 조회 자체에 안 걸려 「존재하지 않는 요청」으로
+      막혔고, 정작 **이벤트 종류 검사는 한 번도 실행되지 않았다.** 그래서 같은
+      `app_contract` 주체를 가진 «승인» 이벤트를 부모로 삼아 본다 — 그것이 종류
+      검사가 유일하게 발동하는 자리다."""
+    # ① 주체가 아예 다른 이벤트 — 조회에 안 걸린다
+    other = ledger.append(event_type="WBS_APPROVED", subject_type="wbs_task",
+                          subject_id="T1", project_id="p1")
+    with _pytest.raises(gate.ReviewRequestError) as e1:
+        gate.assert_decidable(ledger, other["event_id"], project_id="p1",
+                              compiled_fingerprint=FP_B)
+    assert "존재하지 않는" in str(e1.value)
+
+    # ② ★ 같은 주체(app_contract)의 «승인» 이벤트를 부모로 — 종류 검사가 막아야 한다
+    req, _ = gate.ensure_review_request(ledger, _review(), project_id="p1")
+    approved = gate.record_decision(ledger, _review(), project_id="p1",
+                                    request_event_id=req["event_id"], approved=True,
+                                    actor_id=ADMIN)
+    with _pytest.raises(gate.ReviewRequestError) as e2:
+        gate.assert_decidable(ledger, approved["event_id"], project_id="p1",
+                              compiled_fingerprint=FP_B)
+    assert "검토 요청 이벤트가 아닙니다" in str(e2.value)
+
+
+def test_an_empty_request_id_says_so(ledger):
+    """⚠️ 「요청을 지정하지 않았다」와 「없는 요청이다」는 사용자가 할 일이 다르다.
+    둘을 같은 문장으로 뭉개면 화면이 무엇을 고치라고 말할 수 없다."""
+    gate.ensure_review_request(ledger, _review(), project_id="p1")
+    with _pytest.raises(gate.ReviewRequestError) as e:
+        gate.assert_decidable(ledger, "", project_id="p1", compiled_fingerprint=FP_B)
+    assert "지정되지 않았습니다" in str(e.value)
+
+
+def test_the_earliest_open_request_wins(ledger):
+    """★★★ 열린 요청이 둘이면 **가장 처음 것**이 정본이다.
+
+    ⚠️ 지금 코드는 중복을 막지만, 이 규칙이 없으면 «막기 전에 생긴» 중복이나 손으로
+      들어간 기록 앞에서 재시작마다 다른 요청을 집는다 — 그러면 승인이 어느 쪽에
+      붙었는지 아무도 답할 수 없다.
+    ★ 그래서 중복 상태를 **직접 만들어** 확인한다. `ensure_review_request` 로는
+      만들 수 없으므로(그것이 막는다) 원장에 그대로 넣는다."""
+    made = []
+    for _ in range(2):
+        made.append(ledger.append(
+            event_type=gate.EVENT_REVIEW_REQUESTED, subject_type=gate.SUBJECT_TYPE,
+            subject_id=FP_B, actor_type="system", project_id="p1"))
+    assert made[0]["event_id"] != made[1]["event_id"]
+
+    picked, created = gate.ensure_review_request(ledger, _review(), project_id="p1")
+    assert created is False
+    assert picked["event_id"] == made[0]["event_id"], "가장 처음 열린 요청이어야 한다"
+
+
+@_pytest.mark.parametrize("first,second", [(True, True), (True, False),
+                                           (False, True), (False, False)])
+def test_a_request_cannot_be_decided_twice(ledger, first, second):
+    ev, _ = gate.ensure_review_request(ledger, _review(), project_id="p1")
+    gate.record_decision(ledger, _review(), project_id="p1", approved=first,
+                         actor_id=ADMIN, request_event_id=ev["event_id"])
+    with _pytest.raises(gate.ReviewRequestError):
+        gate.assert_decidable(ledger, ev["event_id"], project_id="p1",
+                              compiled_fingerprint=FP_B)
+    with _pytest.raises(gate.ReviewRequestError):
+        gate.record_decision(ledger, _review(), project_id="p1", approved=second,
+                             actor_id=ADMIN, request_event_id=ev["event_id"])
+
+
+def test_decision_is_linked_to_its_request(ledger):
+    """★ 원장이 SSOT 이려면 **요청과 결정이 이어져** 있어야 한다 — 그래야 그래프
+    재개가 실패해도 결정을 복구할 수 있다."""
+    ev, _ = gate.ensure_review_request(ledger, _review(), project_id="p1")
+    row = gate.record_decision(ledger, _review(), project_id="p1", approved=True,
+                               actor_id=ADMIN, request_event_id=ev["event_id"])
+    assert row["parent_event_id"] == ev["event_id"]
+    assert row["event_type"] == gate.EVENT_APPROVED
+
+
+def test_ledger_accepts_the_new_event_and_subject_types(ledger):
+    """★ 상수만 맞춰 두고 원장에 등록하지 않으면 실제 기록이 `DecisionLedgerError`
+    로 죽는다 — 값 목록과 실제 기록 **두 곳**을 함께 본다."""
+    from core.decision_ledger import EVENT_TYPES, SUBJECT_TYPES
 
     assert {gate.EVENT_REVIEW_REQUESTED, gate.EVENT_APPROVED,
             gate.EVENT_REJECTED} <= set(EVENT_TYPES)
     assert gate.SUBJECT_TYPE in SUBJECT_TYPES
 
-    d = _ev(compiled_fingerprint=FP_B, approved_fingerprint=FP_A)
-    row = gate.record_decision(DecisionLedger(), d, project_id="p1",
-                               actor_id="t_admin@test.invalid", approved=True)
+    d = _review()
+    req, _ = gate.ensure_review_request(ledger, d, project_id="p1", task_ids=["WBS-001"])
+    row = gate.record_decision(ledger, d, project_id="p1",
+                               request_event_id=req["event_id"], approved=True,
+                               actor_id=ADMIN, task_id="WBS-001")
     assert row and row.get("event_id")
+    assert row["event_type"] == gate.EVENT_APPROVED
+    assert row["subject_type"] == "app_contract"
+    assert row["subject_id"] == FP_B, "«어느 계약을 승인했는가» 가 남아야 한다"
+    assert row["actor_type"] == "user"
+    # 「무엇에서 무엇으로」 가 복원돼야 한다
+    ev = row["evidence_refs"][0]
+    assert ev["previous_approved_fingerprint"] == FP_A
+    assert ev["task_id"] == "WBS-001"

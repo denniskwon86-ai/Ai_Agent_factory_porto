@@ -370,3 +370,34 @@ def test_api_bootstrap_records_project_event(client):
     e = events[0]
     assert e["blueprint_id"] == bp.blueprint_id
     assert e["output_version_refs"][0]["project_id"] == "P_LEDGER"
+
+
+# ── [I-4 4c-2] 조회와 기록을 한 트랜잭션으로 ────────────────────────────
+def test_transaction_holds_the_instance_lock():
+    """★★★ `transaction()` 은 **인스턴스 락을 잡아야** 한다.
+
+    ⚠️ 이 규칙은 동작으로 안정적으로 관찰되지 않는다. 락을 빼도 SQLite 자신의
+      파일 잠금이 쓰기를 직렬화해서, 「조회 → 판단 → 기록」 사이의 틈은 **가끔만**
+      벌어진다. 그 가끔을 잡으려고 스레드를 늘리면 시험이 느려지고 불안정해진다 —
+      불안정한 시험은 결국 꺼지고, 꺼진 시험은 없는 것과 같다.
+    ★ 그래서 **구조**를 잠근다. 락이 사라지면 여기서 즉시 드러난다.
+    ⚠️ `append` 안에서 `transaction()` 을 부르면 같은 락을 두 번 잡아 교착한다 —
+      그래서 트랜잭션 안에서는 `txn.append` 를 쓴다(그 규칙도 함께 고정한다)."""
+    import ast
+    import inspect
+
+    from core import decision_ledger as dl
+
+    src = inspect.getsource(dl.DecisionLedger.transaction)
+    tree = ast.parse(inspect.cleandoc(src))
+    withs = [n for n in ast.walk(tree) if isinstance(n, ast.With)]
+    assert withs, "transaction 이 with 문을 쓰지 않는다"
+    locked = any(
+        isinstance(item.context_expr, ast.Attribute) and item.context_expr.attr == "_lock"
+        for w in withs for item in w.items)
+    assert locked, "transaction() 이 인스턴스 락을 잡지 않는다 — 조회와 기록 사이가 벌어진다"
+
+    # `append` 와 `_insert` 가 같은 체인 계산을 쓰는지(두 벌이면 해시가 갈린다)
+    assert "self._insert(" in inspect.getsource(dl.DecisionLedger.append)
+    assert "self._ledger._insert(" in inspect.getsource(dl._LedgerTransaction.append)
+    assert "self._ledger._build_row(" in inspect.getsource(dl._LedgerTransaction.append)

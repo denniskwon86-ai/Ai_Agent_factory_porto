@@ -689,7 +689,7 @@ def test_three_versions_are_distinct_contracts():
     from state_models import PROJECT_STATE_SCHEMA_VERSION
     assert arc.SCHEMA_VERSION == "1.0"                  # 계약 문서 형식
     assert arc.RUNTIME_CONTRACT_VERSION == 1            # 앱↔Host 런타임 계약 세대
-    assert PROJECT_STATE_SCHEMA_VERSION == "5.2.0"      # 파이프라인 상태
+    assert PROJECT_STATE_SCHEMA_VERSION == "5.3.0"      # 파이프라인 상태(4c-2 에서 승격)
     assert arc.SCHEMA_VERSION != PROJECT_STATE_SCHEMA_VERSION
 
 

@@ -184,42 +184,160 @@ def state_updates_for_rejection(decision: GateDecision) -> Dict[str, str]:
             "app_runtime_contract_status": COMPILED}
 
 
+class ReviewRequestError(ValueError):
+    """검토 요청·결정을 만들 수 없다. 라우트가 4xx/409 로 바꾼다."""
+
+
+def _open_request(txn: Any, project_id: str, fingerprint: str) -> Optional[Dict[str, Any]]:
+    """이 프로젝트·이 지문에 대해 **아직 결정되지 않은** 검토 요청을 찾는다.
+
+    ★ 「열린」의 정의는 **원장으로만** 판정한다 — 승인·반려 자식 이벤트가 없는
+      요청이 열린 요청이다.
+    ⚠️ 상태 필드(`contract_review_request_event_id`)는 **캐시**다. 상태만 보면
+      체크포인트 저장이 실패했을 때 「요청이 없다」로 읽혀 두 번째 요청이 생기고,
+      그러면 승인이 어느 쪽에 붙었는지 아무도 답할 수 없다."""
+    for ev in txn.find_events(event_type=EVENT_REVIEW_REQUESTED,
+                              project_id=project_id,
+                              subject_type=SUBJECT_TYPE, subject_id=fingerprint):
+        kinds = set(txn.child_event_types(ev.get("event_id", "")))
+        if not (kinds & {EVENT_APPROVED, EVENT_REJECTED}):
+            return ev
+    return None
+
+
+def ensure_review_request(ledger: Any, decision: GateDecision, *,
+                          project_id: str, task_ids: Any = (),
+                          tenant_id: str = "tenant_default",
+                          enterprise_scope_id: str = "",
+                          entity_mode: str = "REAL") -> Tuple[Dict[str, Any], bool]:
+    """검토 요청 이벤트를 **한 건만** 보장한다. `(이벤트, 새로 만들었는가)`.
+
+    ★★★ 조회와 기록이 **하나의 락·트랜잭션** 안에서 일어난다. 그 사이에 틈이 있으면
+      재시작이 겹치거나 동시 요청이 들어올 때 같은 요청이 두 건 생긴다.
+
+    ⚠️ 「같은 요청」의 기준은 `project_id + 계약 지문` 이다. 지문이 다르면 **다른
+      계약**이므로 옛 요청을 재사용하지 않는다 — 재사용하면 사람이 A 를 보고 승인한
+      기록이 B 의 승인이 된다.
+    ⚠️ 기록에 실패하면 **예외가 그대로 올라간다.** 요청 없이 게이트를 지나면 승인
+      이력이 없는 승인이 생긴다."""
+    if decision.verdict != REVIEW_REQUIRED:
+        raise ReviewRequestError(
+            f"«{decision.verdict}» 판정으로는 검토 요청을 만들지 않습니다 — 사람이 볼 것이 "
+            f"없습니다. 사유: {decision.reason}")
+    fp = decision.compiled_fingerprint
+    if not fp:
+        raise ReviewRequestError("검토할 계약 지문이 없습니다.")
+
+    ids = [str(t) for t in (task_ids or [])]
+    with ledger.transaction() as txn:
+        existing = _open_request(txn, project_id, fp)
+        if existing:
+            #: ★ 체크포인트 저장이 실패했어도 여기서 **다시 찾아 재사용**한다.
+            return existing, False
+        ev = txn.append(
+            event_type=EVENT_REVIEW_REQUESTED, subject_type=SUBJECT_TYPE, subject_id=fp,
+            actor_type="system", decision="검토 요청",
+            rationale=decision.reason,
+            evidence_refs=[{"compiled_fingerprint": fp,
+                            "previous_approved_fingerprint": decision.approved_fingerprint,
+                            "task_ids": ids}],
+            project_id=project_id, tenant_id=tenant_id,
+            enterprise_scope_id=enterprise_scope_id, entity_mode=entity_mode)
+    return ev, True
+
+
+def assert_decidable(ledger: Any, request_event_id: str, *,
+                     project_id: str, compiled_fingerprint: str) -> Dict[str, Any]:
+    """이 요청에 지금 승인·반려를 붙일 수 있는가. 부모 이벤트를 돌려준다.
+
+    네 가지를 **모두** 본다. 하나라도 빼면 그것이 우회로가 된다:
+
+      1. 이벤트가 `APP_CONTRACT_REVIEW_REQUESTED` 인가
+         — 아무 이벤트나 부모로 삼으면 승인이 엉뚱한 것에 붙는다.
+      2. 같은 프로젝트인가 — 남의 프로젝트 요청으로 내 계약을 승인할 수 없다.
+      3. 같은 계약 지문인가 — **요청 이후 계약이 바뀌었으면 그 승인은 다른 것을
+         본 승인**이다. 이것이 「사람이 A 를 보고 B 를 승인하는」 경로를 막는 유일한 검사다.
+      4. 아직 승인·반려 자식이 없는가 — 두 번째 결정은 409 다.
+
+    ⚠️ 클라이언트가 보낸 지문을 믿지 않는다. `compiled_fingerprint` 는 **서버가**
+      체크포인트에서 파생해 넘겨야 한다."""
+    with ledger.transaction() as txn:
+        return _decidable_in_txn(txn, request_event_id, project_id=project_id,
+                                 compiled_fingerprint=compiled_fingerprint)
+
+
+def _decidable_in_txn(txn: Any, request_event_id: str, *, project_id: str,
+                      compiled_fingerprint: str) -> Dict[str, Any]:
+    """위 네 검사의 **본체**. 트랜잭션 안에서만 부른다.
+
+    ⚠️ 검사와 기록이 다른 트랜잭션이면, 두 사람이 동시에 승인 버튼을 눌렀을 때
+      **둘 다 검사를 통과**하고 결정이 두 건 붙는다. 그래서 `record_decision` 은
+      이 함수를 자기 트랜잭션 안에서 다시 부른다."""
+    if not request_event_id:
+        raise ReviewRequestError("결정할 검토 요청이 지정되지 않았습니다.")
+    rows = txn.find_events(subject_type=SUBJECT_TYPE, limit=100000)
+    ev = next((r for r in rows if r.get("event_id") == request_event_id), None)
+    if ev is None:
+        raise ReviewRequestError(f"존재하지 않는 검토 요청입니다: {request_event_id}")
+    if ev.get("event_type") != EVENT_REVIEW_REQUESTED:
+        raise ReviewRequestError(
+            f"검토 요청 이벤트가 아닙니다({ev.get('event_type')}) — 승인은 검토 요청에만 "
+            f"붙습니다.")
+    if str(ev.get("project_id", "")) != str(project_id):
+        raise ReviewRequestError("다른 프로젝트의 검토 요청입니다.")
+    if str(ev.get("subject_id", "")) != str(compiled_fingerprint or ""):
+        raise ReviewRequestError(
+            f"요청 당시 계약과 현재 계약이 다릅니다(요청 {str(ev.get('subject_id'))[:12]}… "
+            f"→ 현재 {str(compiled_fingerprint or '')[:12]}…) — 그 승인은 지금 계약을 "
+            f"본 승인이 아닙니다. 다시 검토해야 합니다.")
+    decided = set(txn.child_event_types(request_event_id)) & {EVENT_APPROVED, EVENT_REJECTED}
+    if decided:
+        raise ReviewRequestError(
+            f"이미 결정된 검토 요청입니다({sorted(decided)[0]}) — 같은 요청에 두 번째 "
+            f"결정을 붙이지 않습니다.")
+    return ev
+
+
 def record_decision(ledger: Any, decision: GateDecision, *,
-                    project_id: str, task_id: str = "",
-                    actor_id: str = "", approved: Optional[bool] = None,
-                    rationale: str = "") -> Optional[Dict[str, Any]]:
-    """게이트 결과를 원장에 남긴다. 남길 것이 없으면 `None`.
+                    project_id: str, request_event_id: str, approved: bool,
+                    actor_id: str = "", rationale: str = "", task_id: str = "",
+                    tenant_id: str = "tenant_default", enterprise_scope_id: str = "",
+                    entity_mode: str = "REAL") -> Dict[str, Any]:
+    """사람의 승인·반려를 원장에 남긴다. **요청 이벤트에 이어 붙인다.**
 
-    ⚠️ **자동 통과는 원장에 남기지 않는다.** 사람이 판단하지 않은 일을 「승인」으로
-      쌓으면, 원장에서 승인 건수를 세는 순간 실제보다 많아진다 — 그리고 그 숫자는
-      「우리는 계약을 N번 검토했다」로 읽힌다.
-    ⚠️ 기록 실패는 삼키지 않는다(`DecisionLedger.append` 의 규칙 그대로) — 승인
-      이력이 없는 승인이 생기면 그것은 승인이 아니다."""
-    if not decision.needs_human:
-        return None
+    ★★★ 검사와 기록이 **한 트랜잭션**이다. 나누면 두 사람이 동시에 눌렀을 때 둘 다
+      검사를 통과하고 결정이 두 건 붙는다 — 그러면 「승인됐나 반려됐나」에 원장이
+      두 답을 준다.
 
-    if approved is None:
-        event = EVENT_REVIEW_REQUESTED
-        verdict_text = "검토 요청"
-    else:
-        event = EVENT_APPROVED if approved else EVENT_REJECTED
-        verdict_text = "승인" if approved else "반려"
+    ⚠️ **자동 통과는 여기로 오지 않는다.** 사람이 판단하지 않은 일을 승인으로 쌓으면
+      원장에서 승인 건수를 세는 순간 실제보다 많아지고, 그 숫자는 「우리는 계약을
+      N번 검토했다」로 읽힌다.
+    ⚠️ 기록 실패는 삼키지 않는다 — 승인 이력이 없는 승인은 승인이 아니다."""
+    if decision.verdict != REVIEW_REQUIRED:
+        raise ReviewRequestError(
+            f"«{decision.verdict}» 판정에는 결정을 붙이지 않습니다. 사유: {decision.reason}")
 
-    return ledger.append(
-        event_type=event,
-        subject_type=SUBJECT_TYPE,
-        subject_id=decision.compiled_fingerprint,
-        actor_type="user" if approved is not None else "system",
-        actor_id=actor_id,
-        decision=verdict_text,
-        rationale=rationale or decision.reason,
-        #: 승인 이전 지문도 함께 남긴다 — 「무엇에서 무엇으로 바뀐 승인인가」가
-        #: 지문 하나만으로는 복원되지 않는다.
-        evidence_refs=[{"compiled_fingerprint": decision.compiled_fingerprint,
-                        "previous_approved_fingerprint": decision.approved_fingerprint,
-                        "task_id": task_id}],
-        project_id=project_id,
-    )
+    with ledger.transaction() as txn:
+        _decidable_in_txn(txn, request_event_id, project_id=project_id,
+                          compiled_fingerprint=decision.compiled_fingerprint)
+        return txn.append(
+            event_type=EVENT_APPROVED if approved else EVENT_REJECTED,
+            subject_type=SUBJECT_TYPE,
+            subject_id=decision.compiled_fingerprint,
+            actor_type="user",
+            actor_id=actor_id,
+            decision="승인" if approved else "반려",
+            rationale=rationale or decision.reason,
+            #: 승인 이전 지문도 함께 남긴다 — 「무엇에서 무엇으로 바뀐 승인인가」가
+            #: 지문 하나만으로는 복원되지 않는다.
+            evidence_refs=[{"compiled_fingerprint": decision.compiled_fingerprint,
+                            "previous_approved_fingerprint": decision.approved_fingerprint,
+                            "task_id": task_id}],
+            #: ★ 이 한 줄이 「요청과 결정의 연결」이다. 없으면 승인이 무엇을 본
+            #:   승인인지 원장만으로는 복원되지 않는다.
+            parent_event_id=request_event_id,
+            project_id=project_id, tenant_id=tenant_id,
+            enterprise_scope_id=enterprise_scope_id, entity_mode=entity_mode)
 
 
 def evaluate_project(tasks: Any, state: Any) -> Tuple[GateDecision, List[str]]:

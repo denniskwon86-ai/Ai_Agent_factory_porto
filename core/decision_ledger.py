@@ -30,6 +30,7 @@ Ledger 는 그 답을 담는 곳이다.
 (ECM §6.2 는 조직 문맥 변경·프로필 변경·복제·권한부여·외부 연결·시나리오 실행도 대상으로 지정).
 인프라 규약은 `master_data.py`·`advisor_store.py` 와 동일하다(멱등 DDL + WAL + 스레드 락).
 """
+import contextlib
 import hashlib
 import json
 import os
@@ -262,6 +263,42 @@ class DecisionLedger:
           "왜 이 결정을 했는가"의 유일한 근거다. 조용히 누락되면 승인 이력이 없는 승인이 생긴다.
           호출부가 감사 실패를 인지하고 판단할 수 있도록 예외를 올린다."""
         self._ready()
+        row = self._build_row(
+            event_type=event_type, subject_type=subject_type, subject_id=subject_id,
+            actor_type=actor_type, actor_id=actor_id, decision=decision,
+            rationale=rationale, evidence_refs=evidence_refs,
+            input_version_refs=input_version_refs, output_version_refs=output_version_refs,
+            parent_event_id=parent_event_id, tenant_id=tenant_id,
+            enterprise_scope_id=enterprise_scope_id, entity_mode=entity_mode,
+            project_id=project_id, blueprint_id=blueprint_id)
+        # ⚠️ `db_path` 가 상대 경로라 **작업 디렉터리가 바뀌면 다른 파일을 가리킨다**(테스트가 tmp
+        #   로 chdir 하는 경우, 서비스가 다른 cwd 로 기동되는 경우). 그 파일에는 테이블이 없어
+        #   `no such table` 이 난다 — `org_directory._ensure_tables` 에서 실측된 것과 같은 문제다.
+        #   한 번 스키마를 만들고 재시도한다. 그래도 실패하면 **예외를 올린다**(삼키지 않는다) —
+        #   감사 기록 누락은 호출부가 알아야 한다.
+        for attempt in (0, 1):
+            try:
+                with self._lock, self._connect() as conn:
+                    self._insert(conn, row)
+                return self._to_public(row)
+            except sqlite3.OperationalError:
+                if attempt == 0 and self._ensure_tables():
+                    continue
+                raise
+        raise DecisionLedgerError("감사 기록에 실패했습니다.")   # 도달 불가(방어)
+
+    def _build_row(self, event_type: str, subject_type: str, subject_id: str,
+                   actor_type: str = "system", actor_id: str = "",
+                   decision: str = "", rationale: str = "",
+                   evidence_refs: Optional[List[Any]] = None,
+                   input_version_refs: Optional[List[Any]] = None,
+                   output_version_refs: Optional[List[Any]] = None,
+                   parent_event_id: str = "",
+                   tenant_id: str = "tenant_default", enterprise_scope_id: str = "",
+                   entity_mode: str = "REAL",
+                   project_id: str = "", blueprint_id: str = "") -> Dict[str, Any]:
+        """검증 + 행 구성. **`append` 와 `transaction()` 이 같은 이 함수를 쓴다** —
+        두 벌이면 트랜잭션 경로만 검증이 느슨해지는 날이 온다."""
         if event_type not in EVENT_TYPES:
             raise DecisionLedgerError(f"등록되지 않은 event_type 입니다: {event_type}")
         if subject_type not in SUBJECT_TYPES:
@@ -297,35 +334,45 @@ class DecisionLedger:
             "parent_event_id": parent_event_id or "",
             "created_at": self._now(),
         }
-        # ⚠️ `db_path` 가 상대 경로라 **작업 디렉터리가 바뀌면 다른 파일을 가리킨다**(테스트가 tmp
-        #   로 chdir 하는 경우, 서비스가 다른 cwd 로 기동되는 경우). 그 파일에는 테이블이 없어
-        #   `no such table` 이 난다 — `org_directory._ensure_tables` 에서 실측된 것과 같은 문제다.
-        #   한 번 스키마를 만들고 재시도한다. 그래도 실패하면 **예외를 올린다**(삼키지 않는다) —
-        #   감사 기록 누락은 호출부가 알아야 한다.
-        for attempt in (0, 1):
-            try:
-                with self._lock, self._connect() as conn:
-                    if parent_event_id and not conn.execute(
-                            "SELECT 1 FROM decision_ledger_events WHERE event_id=?",
-                            (parent_event_id,)).fetchone():
-                        raise DecisionLedgerError(
-                            f"존재하지 않는 parent_event_id 입니다: {parent_event_id}")
-                    last = conn.execute("SELECT seq, event_hash FROM decision_ledger_events "
-                                        "ORDER BY seq DESC LIMIT 1").fetchone()
-                    row["seq"] = (int(last["seq"]) + 1) if last else 1
-                    row["prev_hash"] = last["event_hash"] if last else ""
-                    row["event_hash"] = _compute_hash(row, row["prev_hash"])
-                    cols = ", ".join(row.keys())
-                    marks = ", ".join("?" for _ in row)
-                    conn.execute(
-                        f"INSERT INTO decision_ledger_events ({cols}) VALUES ({marks})",
-                        tuple(row.values()))
-                return self._to_public(row)
-            except sqlite3.OperationalError:
-                if attempt == 0 and self._ensure_tables():
-                    continue
-                raise
-        raise DecisionLedgerError("감사 기록에 실패했습니다.")   # 도달 불가(방어)
+        return row
+
+    def _insert(self, conn: sqlite3.Connection, row: Dict[str, Any]) -> Dict[str, Any]:
+        """체인 계산 + INSERT. **락을 이미 쥔 상태**에서 호출한다.
+
+        ⚠️ `append` 와 `transaction()` 이 **같은 이 함수**를 쓴다. 두 벌로 만들면
+          한쪽만 고쳐지는 날 체인 해시가 갈리고, 그때 `verify_chain` 은 「누군가
+          장부를 고쳤다」고 말한다 — 실제로는 우리가 두 번 구현했을 뿐인데."""
+        parent_event_id = row.get("parent_event_id") or ""
+        if parent_event_id and not conn.execute(
+                "SELECT 1 FROM decision_ledger_events WHERE event_id=?",
+                (parent_event_id,)).fetchone():
+            raise DecisionLedgerError(
+                f"존재하지 않는 parent_event_id 입니다: {parent_event_id}")
+        last = conn.execute("SELECT seq, event_hash FROM decision_ledger_events "
+                            "ORDER BY seq DESC LIMIT 1").fetchone()
+        row["seq"] = (int(last["seq"]) + 1) if last else 1
+        row["prev_hash"] = last["event_hash"] if last else ""
+        row["event_hash"] = _compute_hash(row, row["prev_hash"])
+        cols = ", ".join(row.keys())
+        marks = ", ".join("?" for _ in row)
+        conn.execute(f"INSERT INTO decision_ledger_events ({cols}) VALUES ({marks})",
+                     tuple(row.values()))
+        return row
+
+    # ── 조회와 기록을 한 트랜잭션으로 ────────────────────────────────────
+    @contextlib.contextmanager
+    def transaction(self):
+        """**조회 → 판단 → 기록**을 하나의 락·트랜잭션 안에서 한다.
+
+        ★★★ 「열린 요청이 있으면 새로 만들지 않는다」 같은 규칙은 조회와 기록 사이에
+          틈이 있으면 지켜지지 않는다. 재시작이 겹치거나 두 요청이 동시에 오면 그
+          틈에서 **같은 요청이 두 건** 생기고, 그러면 승인이 어느 쪽에 붙었는지
+          아무도 답할 수 없다.
+        ⚠️ 블록 안에서는 `append` 를 부르지 않는다(같은 락을 다시 잡아 교착한다) —
+          `txn.append(...)` 를 쓴다."""
+        self._ready()
+        with self._lock, self._connect() as conn:
+            yield _LedgerTransaction(self, conn)
 
     # ── 조회 ──────────────────────────────────────────────────────────────
     @staticmethod
@@ -415,6 +462,54 @@ class DecisionLedger:
         return {"ok": not broken, "checked": len(rows), "broken": broken,
                 "hash_version": _HASH_VERSION,
                 "limitation": "직접 DB 조작을 막지는 못하며 불일치 탐지만 가능합니다."}
+
+
+class _LedgerTransaction:
+    """`DecisionLedger.transaction()` 안에서만 산다.
+
+    ★ 어휘를 **원장의 말**로 유지한다 — 「열린 계약 검토 요청」 같은 도메인 개념을
+      여기에 넣지 않는다. 그러면 원장이 계약을 알게 되고, 다음 도메인이 생길 때
+      또 하나가 들어온다. 조합은 호출부가 한다."""
+
+    def __init__(self, ledger: "DecisionLedger", conn: sqlite3.Connection):
+        self._ledger = ledger
+        self._conn = conn
+
+    def find_events(self, *, event_type: str = "", project_id: str = "",
+                    subject_type: str = "", subject_id: str = "",
+                    limit: int = 100) -> List[Dict[str, Any]]:
+        """조건에 맞는 이벤트를 **오래된 순**으로 돌려준다.
+
+        ⚠️ 오래된 순인 것이 중요하다 — 「가장 처음 열린 요청」이 정본이어야 재시작이
+          겹쳐도 같은 답이 나온다."""
+        where, params = [], []
+        for col, val in (("event_type", event_type), ("project_id", project_id),
+                         ("subject_type", subject_type), ("subject_id", subject_id)):
+            if val:
+                where.append(f"{col}=?")
+                params.append(val)
+        sql = "SELECT * FROM decision_ledger_events"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY seq ASC LIMIT ?"
+        params.append(int(limit))
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
+        return [self._ledger._to_public(dict(r)) for r in rows]
+
+    def child_event_types(self, parent_event_id: str) -> List[str]:
+        """이 이벤트를 부모로 삼는 자식들의 `event_type` 목록."""
+        if not parent_event_id:
+            return []
+        rows = self._conn.execute(
+            "SELECT event_type FROM decision_ledger_events WHERE parent_event_id=? "
+            "ORDER BY seq ASC", (parent_event_id,)).fetchall()
+        return [str(r["event_type"]) for r in rows]
+
+    def append(self, **kwargs) -> Dict[str, Any]:
+        """`DecisionLedger.append` 와 **같은 검증·같은 체인**으로 기록한다."""
+        row = self._ledger._build_row(**kwargs)
+        self._ledger._insert(self._conn, row)
+        return self._ledger._to_public(row)
 
 
 decision_ledger = DecisionLedger()

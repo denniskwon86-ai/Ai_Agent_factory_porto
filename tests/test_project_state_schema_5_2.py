@@ -1,4 +1,8 @@
-"""[I-4 1단계] `ProjectState.schema_version` 5.1.0 → 5.2.0 지연 마이그레이션 회귀.
+"""[I-4 1단계·4c-2] `ProjectState.schema_version` 지연 마이그레이션 회귀.
+
+⚠️ 현재 정본은 **5.3.0** 이다(4c-2 에서 `contract_review_request_event_id` 를 더하며
+  올렸다). 아래 리터럴은 «지금 이 빌드가 무엇을 정본으로 삼는가» 를 손으로 못 박는
+  것이므로 상수로 바꾸지 않는다 — 상수를 읽으면 버전이 바뀌어도 늘 통과한다.
 
 ## 왜 버전을 올렸나
 
@@ -26,20 +30,20 @@ CONTRACT_FIELDS = ("capability_intents", "app_runtime_contract_status",
 # ── 1. 버전 없는 기존 상태 (실측 42개) ──────────────────────────────────────
 def test_state_without_version_is_promoted():
     s = ProjectState(**{"project_name": "구버전", "rfp_summary": "지난 스프린트"})
-    assert s.schema_version == PROJECT_STATE_SCHEMA_VERSION == "5.2.0"
+    assert s.schema_version == PROJECT_STATE_SCHEMA_VERSION == "5.3.0"
     assert s.rfp_summary == "지난 스프린트"  # 승격이 기존 값을 건드리지 않는다
 
 
 def test_state_with_null_version_is_promoted():
     # 부분 저장/직렬화 사고로 null 이 들어온 경우까지 승격 대상이다.
-    assert ProjectState(**{"schema_version": None}).schema_version == "5.2.0"
-    assert ProjectState(**{"schema_version": "  "}).schema_version == "5.2.0"
+    assert ProjectState(**{"schema_version": None}).schema_version == "5.3.0"
+    assert ProjectState(**{"schema_version": "  "}).schema_version == "5.3.0"
 
 
 # ── 2. 5.1.0 상태 (실측 16개) ───────────────────────────────────────────────
 def test_state_510_promoted_with_default_contract_fields():
     s = ProjectState(**{"schema_version": "5.1.0", "project_name": "구계약"})
-    assert s.schema_version == "5.2.0"
+    assert s.schema_version == "5.3.0"
     assert s.capability_intents == []
     assert s.unsupported_requirements == []
     for f in CONTRACT_FIELDS:
@@ -50,8 +54,8 @@ def test_state_510_promoted_with_default_contract_fields():
 
 def test_older_than_510_also_promoted():
     # 명시 목록이 아니라 「현재보다 낮으면 승격」이므로 더 오래된 상태도 열린다.
-    assert ProjectState(**{"schema_version": "5.0.0"}).schema_version == "5.2.0"
-    assert ProjectState(**{"schema_version": "4.9.9"}).schema_version == "5.2.0"
+    assert ProjectState(**{"schema_version": "5.0.0"}).schema_version == "5.3.0"
+    assert ProjectState(**{"schema_version": "4.9.9"}).schema_version == "5.3.0"
 
 
 # ── 3. 신규 계약 필드의 JSON 저장·재로드 ────────────────────────────────────
@@ -71,17 +75,17 @@ def test_contract_fields_survive_json_roundtrip(tmp_path):
     p.write_text(json.dumps(s.model_dump(), ensure_ascii=False), encoding="utf-8")
 
     back = ProjectState(**json.loads(p.read_text(encoding="utf-8")))
-    assert back.schema_version == "5.2.0"
+    assert back.schema_version == "5.3.0"
     assert back.capability_intents[0]["capability"] == "app_data.read"
     assert back.app_runtime_contract_fingerprint == "0123456789abcdef"
     assert back.unsupported_requirements[0]["user_decision"] == "REDUCE"
 
 
 def test_saved_state_records_the_new_version():
-    # ★ 저장이 일어날 때 5.2.0 이 기록돼야 한다 — 기록되지 않으면 다음 로드가 다시
+    # ★ 저장이 일어날 때 5.3.0 이 기록돼야 한다 — 기록되지 않으면 다음 로드가 다시
     #   「버전 없음」으로 보이고, 두 사실을 구분하려던 목적이 사라진다.
     dumped = ProjectState(**{"schema_version": "5.1.0"}).model_dump()
-    assert dumped["schema_version"] == "5.2.0"
+    assert dumped["schema_version"] == "5.3.0"
     for f in CONTRACT_FIELDS:
         assert f in dumped
 
@@ -115,7 +119,7 @@ def test_stale_client_payload_cannot_downgrade():
                         approved_contract_fingerprint="feedfacefeedface").model_dump()
     stale_payload = dict(disk, schema_version="5.1.0")   # 옛 화면이 보낸 것
     merged = ProjectState(**stale_payload)
-    assert merged.schema_version == "5.2.0"
+    assert merged.schema_version == "5.3.0"
     # 승격이 계약 상태를 지우지도 않는다 — 지우면 승인이 사라진 것처럼 보인다.
     assert merged.approved_contract_fingerprint == "feedfacefeedface"
 
@@ -152,7 +156,7 @@ def test_api_version_is_not_coupled_to_state_schema():
 
 
 # ── 6. 미래 버전은 명확하게 거부한다 ────────────────────────────────────────
-@pytest.mark.parametrize("future", ["5.2.1", "5.3.0", "6.0.0", "10.0.0"])
+@pytest.mark.parametrize("future", ["5.3.1", "5.4.0", "6.0.0", "10.0.0"])
 def test_future_version_is_rejected(future):
     """⚠️⚠️ 모르는 계약을 추측해 읽으면 그 추측이 곧 데이터 손상이다 —
     필드 하나를 잘못 해석한 상태가 저장되면 원본은 사라진다."""
@@ -197,3 +201,26 @@ def test_no_i4_node_is_wired_yet():
     src = inspect.getsource(agent_graph)
     for node in ("HostContractCompiler", "ContractReviewGate"):
         assert node not in src, f"{node} 가 1단계에서 그래프에 붙었다 — 순서는 4단계다."
+
+
+# ── 5.2.0 → 5.3.0 (I-4 4c-2) ───────────────────────────────────────────────
+def test_52_state_is_promoted_with_a_safe_default_request_id():
+    """★ 5.2 로 저장된 체크포인트는 **열린 검토 요청이 없는 상태**로 승격된다.
+
+    ⚠️ 여기서 아무 값이나 채워 넣으면 그 프로젝트는 «존재하지 않는 요청을 가진»
+      상태가 되고, 원장 조회가 빈손으로 돌아온다."""
+    s = ProjectState(**{"schema_version": "5.2.0", "project_name": "구계약"})
+    assert s.schema_version == "5.3.0"
+    assert s.contract_review_request_event_id == ""
+    assert s.runtime_contract_profile == "", "소급 적용도 없어야 한다"
+
+
+def test_client_cannot_pin_the_request_event_id_through_a_stale_payload():
+    """⚠️ 이 값은 **캐시**다. 정본은 원장이므로, 클라이언트가 실어 보낸 값이 그대로
+    상태가 되더라도 판정은 원장에서 다시 한다 — 그래서 이 시험은 「막힌다」가 아니라
+    「믿지 않는다」를 고정한다. 서버 주입 경로는 `sprint/start` 회귀가 지킨다."""
+    s = ProjectState(**{"schema_version": "5.2.0",
+                        "contract_review_request_event_id": "dle_남의것"})
+    assert s.contract_review_request_event_id == "dle_남의것"   # 상태에는 들어간다
+    # 그러나 게이트는 이 값을 근거로 쓰지 않는다(원장 조회가 정본) —
+    # `test_contract_review_gate.py::test_open_request_is_found_from_the_ledger_not_the_state`

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 #: ⚠️ `main.py` 의 FastAPI `version=` 은 **다른 계약**이다(API 버전). 같은 숫자로 묶으면
 #:   이후 한쪽만 올릴 수 없게 된다.
 #: ⚠️ `app_runtime_contract.SCHEMA_VERSION`(계약 문서 형식)과도 다른 것이다.
-PROJECT_STATE_SCHEMA_VERSION = "5.2.0"
+PROJECT_STATE_SCHEMA_VERSION = "5.3.0"
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -291,6 +291,13 @@ class ProjectState(BaseModel):
     #   보낸 값을 믿지 않는다 — 오래 열린 브라우저가 상태를 바꾸는 경로를 만들지
     #   않는다(`schema_version` 을 서버가 부여하는 것과 같은 이유).
     runtime_contract_profile: str = Field(default="")
+    # ★ [I-4 4c-2] 열린 계약 검토 요청의 이벤트 id — **캐시다.**
+    #
+    # ⚠️⚠️ 정본은 Decision Ledger 다. 이 값만 보고 「요청이 있다/없다」를 판정하면,
+    #   체크포인트 저장이 실패한 순간 요청이 두 건 생기고 승인이 어느 쪽에 붙었는지
+    #   아무도 답할 수 없다. 판정은 언제나 원장에서 다시 찾는다.
+    # ⚠️ 클라이언트가 이 값을 정하지 못한다 — 서버가 부여한다(`schema_version` 과 같다).
+    contract_review_request_event_id: str = Field(default="")
 
     @model_validator(mode="before")
     @classmethod
