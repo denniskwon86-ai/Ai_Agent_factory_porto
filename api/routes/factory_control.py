@@ -27,7 +27,7 @@ from api.deps import (
 from core.route_authority import guard as _route_authority_guard
 # [D-017 P0] 서버 재검사 — 화면 숨김이 아니라 여기가 유일한 보안 경계다.
 from api.deps import require_caps as _require_caps
-from core.admin_capability import (AGENT_READ, AGENT_UPDATE, SKILL_PROPOSE,
+from core.admin_capability import (AGENT_READ, AGENT_UPDATE, PROJECT_RUN, SKILL_PROPOSE,
                                    SYSTEM_DEFAULT_EDIT, WORKFLOW_CREATE, WORKFLOW_READ,
                                    WORKFLOW_RETIRE, WORKFLOW_UPDATE)
 
@@ -81,6 +81,18 @@ class HOTLResumeRequest(BaseModel):
 
 class RevisionRequest(BaseModel):
     feedback: str
+
+
+class ContractDecisionRequest(BaseModel):
+    """[I-4 4c-3] 계약 검토 결정.
+
+    ★★★ **받는 것이 이 셋뿐인 것이 요점이다.** 계약 지문·승인 지문·사용자 id·
+      테넌트·범위는 전부 **서버가 파생한다** — 클라이언트가 지문을 실어 보낼 수
+      있으면 「사람이 A 를 보고 B 를 승인하는」 경로가 열린다."""
+    task_id: str
+    request_event_id: str
+    decision: str                      # APPROVE | REJECT
+    rationale: str = ""
 
 class SupervisorChatRequest(BaseModel):
     task_id: Optional[str] = ""  # 자비스 모드: 태스크 없이도(유휴 상태 포함) 시스템 전체에 대해 대화 가능
@@ -1279,11 +1291,134 @@ async def _assert_resumable(project_id: str) -> None:
         raise HTTPException(status_code=409, detail=v.reason)
 
 
+# ══ [I-4 4c-3·4c-4] 계약 검토 전용 결정 경로 ═════════════════════════════
+#
+# ⚠️⚠️ 왜 전용 경로인가 — 일반 `/hotl/resume` 은 **빈 피드백을 사실상 승인으로**
+#   다룬다(피드백이 있으면 재작업, 없으면 그대로 진행). 계약 검토를 그 경로로
+#   통과시키면 «승인» 이 원장에 남지 않고, 누가 무엇을 보고 승인했는지 답할 수
+#   없다. 그리고 그것은 승인이 아니다.
+# ★ 원장이 SSOT 다. API 가 원장을 **먼저** 기록하고 그 뒤에 그래프 상태를 갱신한다 —
+#   그래야 재개가 실패해도 결정이 사라지지 않는다.
+
+_DECISION_APPROVE = "APPROVE"
+_DECISION_REJECT = "REJECT"
+
+
+async def _contract_review_context(project_id: str, task_id: str):
+    """`(게이트 판정, 체크포인트 계약 상태)`. **서버가 파생한다.**"""
+    from core import contract_review_gate as _gate
+
+    state = await orchestrator.read_contract_state(task_id, project_id)
+    decision = _gate.evaluate_state(state, requires_contract=True)
+    return decision, state
+
+
+@router.get("/{project_id}/contract-review/pending")
+async def contract_review_pending(project_id: str, task_id: str,
+                                  p: Principal = Depends(current_principal)):
+    """이 태스크에 사람이 볼 계약 검토가 있는가.
+
+    ⚠️ 읽기지만 **쓰기 권한**을 요구한다 — 이 화면은 승인 버튼을 띄우는 자리이고,
+      볼 수 없는 사람에게 「승인할 것이 있다」를 알릴 이유가 없다."""
+    _safe_id(project_id, "project_id")
+    assert_project_writable(p, project_id)
+    #: ⚠️ 읽기 라우트는 `ROUTE_CAPS` 표에 없다(그 표는 쓰기 전용이다). 그러니 여기서
+    #:   **직접** 요구한다 — 표에 없다는 이유로 권한이 없어지면 안 된다.
+    _require_caps(p, PROJECT_RUN, resource="project", action=f"contract_review:{project_id}")
+    from core import contract_review_gate as _gate
+    from core.decision_ledger import decision_ledger
+
+    decision, state = await _contract_review_context(project_id, task_id)
+    if decision.verdict != _gate.REVIEW_REQUIRED:
+        return {"status": "success",
+                "data": {"pending": False, "verdict": decision.verdict,
+                         "reason": decision.reason}}
+    #: 열린 요청이 있으면 그것을 알려 준다. 없으면 «아직 요청이 만들어지지 않았다» —
+    #: 그래프가 게이트에 닿기 전이다. 여기서 만들지 않는다(만드는 곳은 노드 하나여야 한다).
+    open_req = None
+    with decision_ledger.transaction() as txn:
+        open_req = _gate._open_request(txn, project_id, decision.compiled_fingerprint)
+    return {"status": "success",
+            "data": {"pending": True, "verdict": decision.verdict,
+                     "reason": decision.reason,
+                     "compiled_fingerprint": decision.compiled_fingerprint,
+                     "previous_approved_fingerprint": decision.approved_fingerprint,
+                     "request_event_id": (open_req or {}).get("event_id", ""),
+                     "requested_at": (open_req or {}).get("created_at", "")}}
+
+
+@router.post("/{project_id}/contract-review/decision")
+async def contract_review_decision(project_id: str, req: ContractDecisionRequest,
+                                   p: Principal = Depends(current_principal)):
+    """계약 검토 승인·반려. **원장을 먼저 기록하고** 상태를 갱신한다."""
+    _safe_id(project_id, "project_id")
+    assert_project_writable(p, project_id)
+    from core import contract_review_gate as _gate
+    from core.decision_ledger import decision_ledger
+
+    verdict = (req.decision or "").strip().upper()
+    if verdict not in (_DECISION_APPROVE, _DECISION_REJECT):
+        raise HTTPException(
+            status_code=422,
+            detail=f"decision 은 {_DECISION_APPROVE} 또는 {_DECISION_REJECT} 여야 합니다.")
+
+    decision, _state = await _contract_review_context(project_id, req.task_id)
+    if decision.verdict != _gate.REVIEW_REQUIRED:
+        # ⚠️ 「지금 볼 것이 없다」는 요청 오류가 아니라 **상태 불일치**다 → 409.
+        raise HTTPException(
+            status_code=409,
+            detail=f"지금 이 태스크에는 결정할 계약 검토가 없습니다({decision.verdict}). "
+                   f"{decision.reason}")
+
+    approved = verdict == _DECISION_APPROVE
+    try:
+        row = _gate.record_decision(
+            decision_ledger, decision, project_id=project_id,
+            request_event_id=req.request_event_id, approved=approved,
+            actor_id=p.user_id or "", rationale=req.rationale, task_id=req.task_id,
+            tenant_id=getattr(p, "tenant_id", "") or "tenant_default",
+            enterprise_scope_id=getattr(p, "enterprise_scope_id", "") or "")
+    except _gate.ReviewRequestError as e:
+        # 이미 결정됐거나 · 남의 요청이거나 · 요청 이후 계약이 바뀌었다 — 전부 409 다.
+        raise HTTPException(status_code=409, detail=str(e))
+
+    updates = (_gate.state_updates_for_approval(decision) if approved
+               else _gate.state_updates_for_rejection(decision))
+    updates["contract_review_request_event_id"] = "" if approved else req.request_event_id
+    applied = await orchestrator.apply_contract_decision(req.task_id, project_id, updates)
+    #: ⚠️ 상태 반영이 실패해도 **결정은 이미 원장에 있다.** 되돌리지 않는다(되돌릴 수도
+    #:   없다 — 원장은 추가만 된다). 대신 그 사실을 응답에 담아 화면이 재시도를
+    #:   안내하게 한다. 「승인했는데 안 됐다」를 조용히 넘기면 두 번 승인하게 된다.
+    return {"status": "success",
+            "data": {"decision": verdict, "event_id": row.get("event_id", ""),
+                     "request_event_id": req.request_event_id,
+                     "contract_fingerprint": decision.compiled_fingerprint,
+                     "state_applied": applied,
+                     "note": ("" if applied else
+                              "결정은 기록됐지만 파이프라인 상태 반영에 실패했습니다 — "
+                              "다시 승인하지 마십시오. 재개를 다시 시도하십시오.")}}
+
+
 @router.post("/{project_id}/hotl/resume")
 async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal = Depends(current_principal)):
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
     await _assert_resumable(project_id)
+    # ★★★ [4c-4] 계약 검토 대기 중에는 **일반 재개를 막는다.**
+    #
+    # ⚠️ 이 경로는 빈 피드백을 사실상 승인으로 다룬다. 막지 않으면 계약 승인이
+    #   원장에 남지 않은 채 파이프라인이 지나가고, 「누가 무엇을 보고 승인했는가」에
+    #   답할 수 없다 — 그리고 답할 수 없는 승인은 승인이 아니다.
+    # ★ 일반 산출물 HOTL 은 그대로 둔다. 계약 검토일 때만 닫는다.
+    from core import contract_review_gate as _gate
+
+    _decision, _ = await _contract_review_context(project_id, req.task_id)
+    if _decision.verdict == _gate.REVIEW_REQUIRED:
+        raise HTTPException(
+            status_code=409,
+            detail=("계약 검토 대기 중입니다 — 일반 재개로는 통과할 수 없습니다. "
+                    "`POST /{project_id}/contract-review/decision` 으로 승인 또는 "
+                    "반려하십시오. 빈 피드백을 승인으로 해석하지 않습니다."))
     success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id)
     if not success:
         raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")

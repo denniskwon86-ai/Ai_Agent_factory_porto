@@ -78,6 +78,12 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     #   경로로 중단점을 넘길 수 있었고, 그때 「중단점을 지우려면 관리자 권한」이라는 통제는
     #   지울 필요 없이 우회됐다(`api/deps._assert_identified_for_project` 주석).
     f"POST {F}/{{project_id}}/hotl/resume": (PROJECT_RUN,),
+    # ★ [I-4 4c-3] 계약 검토 결정도 파이프라인을 진행시킨다 — 같은 권한이다.
+    #   ⚠️ 짝인 `GET .../contract-review/pending` 은 이 표에 넣지 않는다. 이 표는
+    #     **쓰기 라우트 전용**이고(회귀가 라우터와 대조한다), 읽기 쪽 권한은 핸들러가
+    #     `require_caps(PROJECT_RUN)` 로 직접 요구한다 — 승인할 수 없는 사람에게
+    #     「승인할 것이 있다」를 알릴 이유가 없다.
+    f"POST {F}/{{project_id}}/contract-review/decision": (PROJECT_RUN,),
     # 감독관 대화도 LLM 을 태운다 — 「채팅이니까」로 열어 두면 비용 통제에 구멍이 난다.
     f"POST {F}/{{project_id}}/supervisor/chat": (PROJECT_RUN,),
     f"POST {F}/ai-recommend/pipeline": (PROJECT_RUN,),

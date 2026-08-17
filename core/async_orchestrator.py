@@ -272,6 +272,52 @@ class AsyncFactoryOrchestrator:
         except Exception:
             return False
 
+    async def read_contract_state(self, task_id: str, project_id: str) -> Dict[str, Any]:
+        """[I-4 4c-3] **서버가** 체크포인트에서 계약 상태를 파생한다.
+
+        ★★★ 클라이언트가 보낸 지문·승인 상태를 믿지 않는다. 승인 요청 본문에는
+          `request_event_id`·`decision`·`rationale` 만 담기고, 「지금 계약이 무엇인가」
+          는 오직 여기서 나온다 — 그래야 「사람이 A 를 보고 B 를 승인하는」 경로가
+          만들어지지 않는다.
+
+        ⚠️ 없는 스레드·읽기 실패는 **빈 dict** 로 돌려준다. 여기서 추측한 기본값을
+          채우면 그 추측이 곧 승인 근거가 된다."""
+        try:
+            engine = await get_runtime_app()
+            snapshot = await engine.aget_state(
+                {"configurable": {"thread_id": _thread(project_id, task_id)}})
+            values = getattr(snapshot, "values", None)
+            if not values:
+                return {}
+            get = (values.get if isinstance(values, dict)
+                   else lambda k, d="": getattr(values, k, d))
+            return {
+                "app_runtime_contract_fingerprint": get("app_runtime_contract_fingerprint", ""),
+                "approved_contract_fingerprint": get("approved_contract_fingerprint", ""),
+                "app_runtime_contract_status": get("app_runtime_contract_status", ""),
+                "contract_review_request_event_id": get("contract_review_request_event_id", ""),
+                "runtime_contract_profile": get("runtime_contract_profile", ""),
+            }
+        except Exception as e:
+            print(f"⚠️ [Orchestrator] 계약 상태 조회 실패({project_id}/{task_id}): {e}")
+            return {}
+
+    async def apply_contract_decision(self, task_id: str, project_id: str,
+                                      updates: Dict[str, Any]) -> bool:
+        """원장에 남은 결정을 **체크포인트 상태에 반영**한다.
+
+        ⚠️ 이 반영이 실패해도 **결정 자체는 사라지지 않는다** — 원장이 SSOT 이고
+          여기는 투영이다. 그래서 실패를 삼키지 않고 돌려주되, 호출부는 이미 기록된
+          승인을 되돌리지 않는다(되돌릴 수도 없다. 원장은 추가만 된다)."""
+        try:
+            engine = await get_runtime_app()
+            await engine.aupdate_state(
+                {"configurable": {"thread_id": _thread(project_id, task_id)}}, updates)
+            return True
+        except Exception as e:
+            print(f"⚠️ [Orchestrator] 계약 결정 상태 반영 실패({project_id}/{task_id}): {e}")
+            return False
+
     async def _run_sprint_loop(self, config: dict, state_dict: dict, task_id: str, workspace_root: str):
         pid = _pid(workspace_root)
         # T2-b: 이 프로젝트의 워크플로우 템플릿 그래프로 실행(스킬/토폴로지/HOTL 게이트가 템플릿별)
