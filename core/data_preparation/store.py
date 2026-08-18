@@ -91,16 +91,32 @@ CREATE TABLE IF NOT EXISTS dataset_snapshots (
     snapshot_id     TEXT PRIMARY KEY,
     binding_id      TEXT NOT NULL,
     instance_id     TEXT NOT NULL,
+    dataset_contract_key TEXT NOT NULL DEFAULT '',
+    state           TEXT NOT NULL DEFAULT 'RAW',
+    -- ★★★ 원본은 **불변 RAW 영역**에 두고 여기에는 경로와 지문만 남긴다.
+    --   ⚠️ 본문을 표에 넣으면 UPDATE 로 고칠 수 있게 되고, 그러면 「우리가 인증한
+    --     그 파일」이 무엇이었는지 답할 수 없다.
+    raw_path        TEXT NOT NULL DEFAULT '',
+    checksum        TEXT NOT NULL DEFAULT '',
+    byte_size       INTEGER NOT NULL DEFAULT 0,
     row_count       INTEGER NOT NULL DEFAULT 0,
+    schema_json     TEXT NOT NULL DEFAULT '[]',
+    profile_json    TEXT NOT NULL DEFAULT '{}',
+    control_total_json TEXT NOT NULL DEFAULT '{}',
+    quarantine_json TEXT NOT NULL DEFAULT '{}',
+    data_kind       TEXT NOT NULL DEFAULT 'DEMO/SYNTHETIC',
     content_fingerprint TEXT NOT NULL DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'active',
     tenant_id       TEXT NOT NULL,
     scope_node_id   TEXT NOT NULL,
     entity_mode     TEXT NOT NULL,
+    created_by      TEXT NOT NULL DEFAULT '',
+    certified_at    TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_snapshot_binding ON dataset_snapshots(binding_id);
+CREATE INDEX IF NOT EXISTS idx_snapshot_state ON dataset_snapshots(instance_id, state);
 
 CREATE TABLE IF NOT EXISTS readiness_evaluations (
     evaluation_id   TEXT PRIMARY KEY,
@@ -367,12 +383,102 @@ class DataPreparationStore:
                                (binding_id,)).fetchone()
         return self._public(dict(out))
 
+    # ── Dataset Snapshot ─────────────────────────────────────────────────
+    def create_snapshot(self, **fields: Any) -> Dict[str, Any]:
+        """Snapshot 한 건을 만든다. **상태는 언제나 `RAW` 로 시작한다.**
+
+        ⚠️ 호출부가 상태를 정하게 두면 「파싱도 안 했는데 인증됨」이 만들어진다."""
+        m.assert_context(fields.get("tenant_id"), fields.get("scope_node_id"),
+                         fields.get("entity_mode"))
+        kind = str(fields.get("data_kind") or m.DATA_KIND_DEMO)
+        if kind not in m.DATA_KINDS:
+            raise m.DataPreparationError(
+                f"data_kind 는 {list(m.DATA_KINDS)} 중 하나여야 합니다.")
+        now = _now()
+        row = {
+            "snapshot_id": f"ds_{uuid.uuid4().hex[:14]}",
+            "binding_id": str(fields.get("binding_id", "")),
+            "instance_id": str(fields.get("instance_id", "")),
+            "dataset_contract_key": str(fields.get("dataset_contract_key", "")),
+            "state": m.RAW,
+            "raw_path": str(fields.get("raw_path", "")),
+            "checksum": str(fields.get("checksum", "")),
+            "byte_size": int(fields.get("byte_size", 0) or 0),
+            "row_count": int(fields.get("row_count", 0) or 0),
+            "schema_json": json.dumps(fields.get("schema") or [], ensure_ascii=False,
+                                      sort_keys=True),
+            "profile_json": "{}", "control_total_json": "{}", "quarantine_json": "{}",
+            "data_kind": kind,
+            "content_fingerprint": str(fields.get("content_fingerprint", "")),
+            "status": "active",
+            "tenant_id": str(fields.get("tenant_id", "")),
+            "scope_node_id": str(fields.get("scope_node_id", "")),
+            "entity_mode": str(fields.get("entity_mode", "")),
+            "created_by": str(fields.get("created_by", "")),
+            "certified_at": "", "created_at": now, "updated_at": now,
+        }
+        with self.transaction() as conn:
+            cols = ", ".join(row)
+            conn.execute(f"INSERT INTO dataset_snapshots ({cols}) VALUES "
+                         f"({', '.join('?' * len(row))})", tuple(row.values()))
+        return self._public(row)
+
+    def get_snapshot(self, snapshot_id: str) -> Optional[Dict[str, Any]]:
+        with self.transaction() as conn:
+            r = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                             (snapshot_id,)).fetchone()
+        return self._public(dict(r)) if r else None
+
+    def list_snapshots(self, instance_id: str) -> List[Dict[str, Any]]:
+        with self.transaction() as conn:
+            rows = conn.execute("SELECT * FROM dataset_snapshots WHERE instance_id=? "
+                                "ORDER BY created_at ASC", (instance_id,)).fetchall()
+        return [self._public(dict(r)) for r in rows]
+
+    def advance_snapshot(self, snapshot_id: str, target: str,
+                         **payload: Any) -> Dict[str, Any]:
+        """Snapshot 을 다음 단계로 옮긴다.
+
+        ★★★ **인증 뒤에는 원문도 본문도 바꾸지 않는다.** `raw_path`·`checksum`·
+          `row_count` 는 여기서 아예 손대지 않는다 — 갱신하는 것은 그 단계가 «새로
+          알아낸 것»(프로파일·대사·격리)뿐이다.
+        ⚠️ 인증 뒤 수정을 허용하면 「우리가 인증한 그 숫자」가 무엇이었는지 아무도
+          답할 수 없다. 정정은 **새 Snapshot** 이다."""
+        now = _now()
+        with self.transaction() as conn:
+            cur = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                               (snapshot_id,)).fetchone()
+            if cur is None:
+                raise m.DataPreparationError(f"존재하지 않는 Snapshot 입니다: {snapshot_id}")
+            m.assert_snapshot_transition(cur["state"], target)
+
+            sets = ["state=?", "updated_at=?"]
+            args: List[Any] = [target, now]
+            for key, col in (("profile", "profile_json"),
+                             ("control_total", "control_total_json"),
+                             ("quarantine", "quarantine_json")):
+                if key in payload:
+                    sets.append(f"{col}=?")
+                    args.append(json.dumps(payload[key] or {}, ensure_ascii=False,
+                                           sort_keys=True))
+            if target == m.DEMO_CERTIFIED:
+                sets.append("certified_at=?")
+                args.append(now)
+            args.append(snapshot_id)
+            conn.execute(f"UPDATE dataset_snapshots SET {', '.join(sets)} "
+                         f"WHERE snapshot_id=?", tuple(args))
+            out = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                               (snapshot_id,)).fetchone()
+        return self._public(dict(out))
+
     # ── 공통 ─────────────────────────────────────────────────────────────
     @staticmethod
     def _public(row: Dict[str, Any]) -> Dict[str, Any]:
         d = dict(row)
         for key, target in (("profile_json", "profile"), ("config_json", "config"),
-                            ("detail_json", "detail")):
+                            ("detail_json", "detail"), ("schema_json", "schema"),
+                            ("control_total_json", "control_total"),
+                            ("quarantine_json", "quarantine")):
             if key in d:
                 try:
                     d[target] = json.loads(d.pop(key) or "{}")

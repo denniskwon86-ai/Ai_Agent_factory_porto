@@ -113,3 +113,63 @@ def provider_supported(provider: Any) -> bool:
 def provider_materializable(provider: Any) -> bool:
     """지금 **실제로 데이터가 흐르는가.** 목록에 있는 것과 되는 것은 다르다."""
     return str(provider or "") in MATERIALIZABLE_PROVIDERS
+
+
+# ── [BDR-3] Dataset Snapshot 파이프라인 ──────────────────────────────────
+#
+# ```text
+# RAW → PROFILED → STANDARDIZED → RECONCILED → CERTIFIED | QUARANTINED | REVOKED
+# ```
+RAW = "RAW"
+PROFILED = "PROFILED"
+STANDARDIZED = "STANDARDIZED"
+RECONCILED = "RECONCILED"
+DEMO_CERTIFIED = "DEMO_CERTIFIED"
+QUARANTINED = "QUARANTINED"
+REVOKED = "REVOKED"
+
+SNAPSHOT_STATES: Tuple[str, ...] = (RAW, PROFILED, STANDARDIZED, RECONCILED,
+                                    DEMO_CERTIFIED, QUARANTINED, REVOKED)
+
+#: ★★★ **인증 뒤에는 앞으로 못 간다.** 정정은 새 Snapshot 을 만든다.
+#:
+#: ⚠️ 인증된 것을 고칠 수 있게 두면 「우리가 인증한 그 숫자」가 무엇이었는지 아무도
+#:   답할 수 없다 — 보고서에 실린 값과 지금 표의 값이 달라도 알아챌 방법이 없다.
+#: ⚠️ 격리(`QUARANTINED`)에서는 되돌아가지 않는다. 고친 파일은 **새 Snapshot** 이다 —
+#:   같은 Snapshot 을 고쳐 통과시키면 「무엇이 왜 격리됐는가」의 이력이 지워진다.
+SNAPSHOT_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
+    RAW: (PROFILED, QUARANTINED),
+    PROFILED: (STANDARDIZED, QUARANTINED),
+    STANDARDIZED: (RECONCILED, QUARANTINED),
+    RECONCILED: (DEMO_CERTIFIED, QUARANTINED),
+    DEMO_CERTIFIED: (REVOKED,),
+    QUARANTINED: (),
+    REVOKED: (),
+}
+
+#: 데이터의 성격. **시연용 합성 데이터와 실제 업무 데이터를 절대 섞지 않는다.**
+#:
+#: ⚠️⚠️ 실제 Data Owner 가 없는 상태에서 `CERTIFIED ACTUAL` 을 주장하면, 그 숫자를
+#:   본 사람은 그것이 검증된 실적이라고 믿는다. 시연 자료로 경영 판단을 하게 되는
+#:   경로가 바로 거기서 열린다.
+DATA_KIND_DEMO = "DEMO/SYNTHETIC"
+DATA_KIND_REAL = "REAL"
+DATA_KINDS: Tuple[str, ...] = (DATA_KIND_DEMO, DATA_KIND_REAL)
+
+
+def can_snapshot_transition(current: Any, target: Any) -> bool:
+    return str(target or "") in SNAPSHOT_TRANSITIONS.get(str(current or ""), ())
+
+
+def assert_snapshot_transition(current: Any, target: Any) -> None:
+    """허용되지 않으면 `StateConflict`. **인증 뒤 수정은 여기서 막힌다.**"""
+    cur, tgt = str(current or ""), str(target or "")
+    if cur not in SNAPSHOT_TRANSITIONS:
+        raise StateConflict(f"알 수 없는 현재 상태입니다: {cur or '(없음)'}")
+    if tgt not in SNAPSHOT_STATES:
+        raise StateConflict(f"알 수 없는 목표 상태입니다: {tgt or '(없음)'}")
+    if not can_snapshot_transition(cur, tgt):
+        allowed = SNAPSHOT_TRANSITIONS[cur]
+        raise StateConflict(
+            f"«{cur}» 에서 «{tgt}» 로 갈 수 없습니다 — 가능한 다음 상태: "
+            f"{', '.join(allowed) if allowed else '(없음. 정정은 새 Snapshot 을 만듭니다)'}")

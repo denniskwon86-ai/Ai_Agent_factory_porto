@@ -15,13 +15,15 @@
 """
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from api.deps import Principal, current_principal, require_caps, viewing_context
 from core.admin_capability import PROJECT_CREATE, PROJECT_RUN
-from core.data_preparation import kit_registry, models as m, source_binding
+from core.data_preparation import (kit_registry, models as m, snapshot_service,
+                                   source_binding)
 from core.data_preparation.store import data_preparation_store as store
+from core.paths import data_path
 from core.route_authority import guard as _route_authority_guard
 
 #: ★ 권한은 **표**(`core/route_authority.ROUTE_CAPS`)가 지킨다 — 라우트마다 적으면
@@ -97,6 +99,35 @@ def _instance_or_404(p: Principal, instance_id: str) -> Dict[str, Any]:
                reason="not_found_or_out_of_scope",
                detail=f"exists={bool(row)}")
         raise HTTPException(status_code=404, detail="키트 인스턴스를 찾을 수 없습니다.")
+    return row
+
+
+#: RAW 원본 보관 뿌리. **DB 밖**이다 — 표에 본문을 넣으면 UPDATE 로 고칠 수 있게 되고,
+#: 그러면 「우리가 인증한 그 파일」이 무엇이었는지 답할 수 없다.
+def _raw_root() -> str:
+    return data_path("data_preparation")
+
+
+#: ⚠️ 상한이 없으면 파일 하나가 프로세스 메모리를 먹는다. 「업로드가 느리다」로 보이고
+#:   원인은 한참 뒤에야 드러난다.
+MAX_UPLOAD_BYTES = 32 * 1024 * 1024
+
+
+def _snapshot_or_404(p: Principal, snapshot_id: str) -> Dict[str, Any]:
+    """Snapshot 을 **보이는 범위 안에서만** 찾는다.
+
+    ★★★ 범위 판정을 여기서 새로 쓰지 않고 **인스턴스에게 묻는다** — 판정이 둘이
+      되면 반드시 갈라지고, 갈린 날 어느 쪽이 옳은지 아무도 모른다.
+    ⚠️ Snapshot 행에도 `tenant_id`·`scope_node_id` 가 있지만 그것으로 판정하지
+      않는다. 그 값들은 만들 때 복사된 사본이고, 조직이 옮겨지면 **낡는다**."""
+    row = store.get_snapshot(snapshot_id)
+    if not row:
+        #: 없는 것과 못 보는 것을 같은 문장으로 답한다
+        raise HTTPException(status_code=404, detail="데이터 Snapshot 을 찾을 수 없습니다.")
+    try:
+        _instance_or_404(p, str(row.get("instance_id", "")))
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="데이터 Snapshot 을 찾을 수 없습니다.")
     return row
 
 
@@ -239,3 +270,65 @@ async def decide_binding(binding_id: str, req: BindingDecisionRequest,
            resource_id=binding_id, actor=p.user_id or "", outcome="allowed",
            detail=f"state={row.get('state')}")
     return {"status": "success", "data": row}
+
+
+# ── 데이터 Snapshot ──────────────────────────────────────────────────────
+@router.post("/bindings/{binding_id}/snapshots")
+async def upload_snapshot(binding_id: str, file: UploadFile = File(...),
+                          p: Principal = Depends(current_principal)):
+    """파일 하나를 올려 `RAW` Snapshot 을 만든다.
+
+    ★★★ **파싱에 실패하면 아무것도 남기지 않는다.** 「0행 Snapshot」이 남으면 그것은
+      「데이터가 없다」로 읽히고, 그 위에서 돌아간 계산은 합계 0 을 낸다 — 그리고
+      아무도 그것을 고장으로 보지 않는다. 그래서 실패는 **422** 이지 200 이 아니다."""
+    require_caps(p, PROJECT_RUN, resource="data_preparation",
+                 action=f"snapshots:upload:{binding_id}")
+    binding = _binding_or_404(p, binding_id)
+
+    payload = await file.read()
+    if len(payload) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"파일이 너무 큽니다({len(payload)} 바이트) — "
+                   f"{MAX_UPLOAD_BYTES} 바이트까지 받습니다.")
+    try:
+        row = snapshot_service.ingest(
+            store, binding=binding, payload=payload,
+            file_name=str(file.filename or ""), workspace_root=_raw_root(),
+            created_by=p.user_id or "")
+    except m.DataPreparationError as e:
+        #: ⚠️ 사유를 뭉개지 않는다 — 「올라가지 않는다」만 남으면 사용자는 파일이
+        #:   아니라 시스템을 의심한다.
+        _audit("DATA_REQUIREMENT_ACCEPTED", resource_id=binding_id,
+               actor=p.user_id or "", outcome="denied", reason=str(e)[:200])
+        raise HTTPException(status_code=422, detail=str(e))
+
+    _audit("DATA_REQUIREMENT_ACCEPTED", resource_id=row["snapshot_id"],
+           actor=p.user_id or "", outcome="allowed",
+           detail=f"rows={row.get('row_count')} checksum={row.get('checksum', '')[:12]}")
+    return {"status": "success",
+            "data": {**row, "display_label": snapshot_service.display_label(row)}}
+
+
+@router.get("/instances/{instance_id}/snapshots")
+async def list_snapshots(instance_id: str, p: Principal = Depends(current_principal)):
+    require_caps(p, PROJECT_RUN, resource="data_preparation",
+                 action=f"snapshots:list:{instance_id}")
+    _instance_or_404(p, instance_id)
+    rows = store.list_snapshots(instance_id)
+    return {"status": "success",
+            "data": {"snapshots": [
+                {**r, "display_label": snapshot_service.display_label(r)} for r in rows]}}
+
+
+@router.get("/snapshots/{snapshot_id}")
+async def get_snapshot(snapshot_id: str, p: Principal = Depends(current_principal)):
+    """Snapshot 한 건. **화면 표시 문구를 서버가 준다.**
+
+    ⚠️ 「시연용 합성 데이터」 표시를 화면마다 각자 붙이게 두면 한 화면에서 빠지고,
+      그 화면의 숫자는 실적으로 읽힌다."""
+    require_caps(p, PROJECT_RUN, resource="data_preparation",
+                 action=f"snapshots:get:{snapshot_id}")
+    row = _snapshot_or_404(p, snapshot_id)
+    return {"status": "success",
+            "data": {**row, "display_label": snapshot_service.display_label(row)}}

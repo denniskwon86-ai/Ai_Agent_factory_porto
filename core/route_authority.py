@@ -91,6 +91,9 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "POST /api/v1/data-preparation/instances": (PROJECT_CREATE,),
     "POST /api/v1/data-preparation/instances/{instance_id}/bindings": (PROJECT_RUN,),
     "POST /api/v1/data-preparation/bindings/{binding_id}/decision": (PROJECT_RUN,),
+    #   ★ [BDR-3] 파일 적재도 운영이다 — 「올리기만 하는 것」이 아니라 그 파일이
+    #     이후 계산의 원천이 된다.
+    "POST /api/v1/data-preparation/bindings/{binding_id}/snapshots": (PROJECT_RUN,),
     # 감독관 대화도 LLM 을 태운다 — 「채팅이니까」로 열어 두면 비용 통제에 구멍이 난다.
     f"POST {F}/{{project_id}}/supervisor/chat": (PROJECT_RUN,),
     f"POST {F}/ai-recommend/pipeline": (PROJECT_RUN,),
