@@ -84,6 +84,13 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     #     `require_caps(PROJECT_RUN)` 로 직접 요구한다 — 승인할 수 없는 사람에게
     #     「승인할 것이 있다」를 알릴 이유가 없다.
     f"POST {F}/{{project_id}}/contract-review/decision": (PROJECT_RUN,),
+
+    # ── [BDR-2] 업무 데이터 준비 ────────────────────────────────────────
+    #   ★ 키트를 조직에 «적용» 하는 것은 자원을 만드는 일이다 → `PROJECT_CREATE`.
+    #     결속을 붙이고 상태를 옮기는 것은 운영이다 → `PROJECT_RUN`.
+    "POST /api/v1/data-preparation/instances": (PROJECT_CREATE,),
+    "POST /api/v1/data-preparation/instances/{instance_id}/bindings": (PROJECT_RUN,),
+    "POST /api/v1/data-preparation/bindings/{binding_id}/decision": (PROJECT_RUN,),
     # 감독관 대화도 LLM 을 태운다 — 「채팅이니까」로 열어 두면 비용 통제에 구멍이 난다.
     f"POST {F}/{{project_id}}/supervisor/chat": (PROJECT_RUN,),
     f"POST {F}/ai-recommend/pipeline": (PROJECT_RUN,),

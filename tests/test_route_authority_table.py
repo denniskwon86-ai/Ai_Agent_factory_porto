@@ -37,6 +37,9 @@ GUARDED_MODULES = [
     "api.routes.reference_control",
     "api.routes.enterprise_context_control",
     "api.routes.jarvis_control",
+    #: [BDR-2] 새 라우터는 **만들 때 함께** 표에 넣는다 — 나중에 넣으면 그 사이에
+    #: 추가된 라우트가 권한 없이 열린다.
+    "api.routes.data_preparation_control",
 ]
 
 #: 다른 곳에 이미 판정이 있는 쓰기 라우트를 찾는 표식. `route_authority.EXEMPT` 와 함께 쓴다.

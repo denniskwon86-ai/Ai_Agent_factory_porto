@@ -1,0 +1,57 @@
+{
+  "kit_id": "afs_materials_procurement_v1",
+  "version": "1.0.0",
+  "name": "원료 구매·도입 경영 키트",
+  "mode": "DEMO/SYNTHETIC",
+  "summary": "원료 구매·도입 업무를 시연하기 위한 최소 데이터 키트. 실제 업무 데이터가 아니다.",
+  "datasets": [
+    {
+      "dataset_contract_key": "material_arrivals",
+      "label": "원료 입고",
+      "purpose": "언제 무엇이 얼마나 들어왔는가",
+      "data_role": "ENTERPRISE_ACTUAL",
+      "fields": [
+        {"name": "arrived_at", "type": "datetime", "required": true,
+         "semantic_role": "EVENT_TIME", "classification": "INTERNAL"},
+        {"name": "material_code", "type": "string", "required": true,
+         "classification": "INTERNAL", "master_reference": "material"},
+        {"name": "quantity", "type": "number", "required": true,
+         "semantic_role": "QUANTITY", "unit": "ton", "classification": "INTERNAL"},
+        {"name": "lot_no", "type": "string", "required": false,
+         "classification": "INTERNAL"}
+      ]
+    },
+    {
+      "dataset_contract_key": "purchase_orders",
+      "label": "구매 발주",
+      "purpose": "무엇을 얼마에 언제 사기로 했는가",
+      "data_role": "ENTERPRISE_ACTUAL",
+      "fields": [
+        {"name": "ordered_at", "type": "datetime", "required": true,
+         "semantic_role": "EVENT_TIME", "classification": "INTERNAL"},
+        {"name": "material_code", "type": "string", "required": true,
+         "classification": "INTERNAL", "master_reference": "material"},
+        {"name": "quantity", "type": "number", "required": true,
+         "semantic_role": "QUANTITY", "unit": "ton", "classification": "INTERNAL"},
+        {"name": "unit_price", "type": "number", "required": true,
+         "semantic_role": "AMOUNT", "unit": "KRW", "classification": "CONFIDENTIAL"},
+        {"name": "supplier_code", "type": "string", "required": true,
+         "classification": "INTERNAL", "master_reference": "supplier"}
+      ]
+    },
+    {
+      "dataset_contract_key": "supplier_master",
+      "label": "공급사 기준정보",
+      "purpose": "공급사 코드가 무엇을 가리키는가",
+      "data_role": "ENTERPRISE_ACTUAL",
+      "fields": [
+        {"name": "supplier_code", "type": "string", "required": true,
+         "classification": "INTERNAL"},
+        {"name": "supplier_name", "type": "string", "required": true,
+         "classification": "INTERNAL"},
+        {"name": "country", "type": "string", "required": false,
+         "classification": "PUBLIC"}
+      ]
+    }
+  ]
+}

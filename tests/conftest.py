@@ -444,6 +444,22 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
             raise RuntimeError(_why)
     except Exception as e:
         isolation_failed("결정 원장", e)
+    try:
+        # ★★★ [BDR-2] 업무 데이터 준비 저장소도 **처음부터** 격리한다.
+        #
+        # ⚠️ 결정 원장은 격리 목록에 없어서 11,633행이 오염됐다. 새 저장소를 만들 때
+        #   격리를 나중으로 미루면 같은 일이 반복된다 — 목록에 넣는 것이 저장소를
+        #   만드는 일의 일부다.
+        # ⚠️ 여기도 **두 곳**을 바꾼다: 모듈 기본값과 이미 만들어진 전역 싱글턴.
+        from core.data_preparation import store as _dp
+        _dp_db = tmp_path / "data_preparation.db"
+        monkeypatch.setattr(_dp, "_DB_PATH", str(_dp_db), raising=False)
+        monkeypatch.setattr(_dp.data_preparation_store, "db_path", str(_dp_db),
+                            raising=False)
+        monkeypatch.setattr(_dp.data_preparation_store, "_prepared_for", None,
+                            raising=False)
+    except Exception as e:
+        isolation_failed("업무 데이터 준비 저장소", e)
 
 
 # ── [P0-A/B] 조직·강제 상태를 **명시**하는 fixture ────────────────────────

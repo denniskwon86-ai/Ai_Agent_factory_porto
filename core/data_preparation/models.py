@@ -1,0 +1,115 @@
+"""[BDR-201] 값 목록과 상태 전이 — **판정이 아니라 어휘**를 두는 곳.
+
+⚠️⚠️ 이 모듈은 아무것도 import 하지 않는다. 상태 전이 규칙이 저장 계층과 API 계층에
+  각각 구현되면 두 곳이 반드시 갈라진다([I-4 2.2a] 에서 실제로 겪었다). 전이를 묻는
+  질문은 전부 여기로 온다.
+"""
+from typing import Any, Dict, Tuple
+
+# ── Source Binding 상태 ──────────────────────────────────────────────────
+#
+# ```text
+# DRAFT → VALIDATED → APPROVED → ACTIVE → RETIRED
+#                   ↘ BLOCKED
+# ```
+DRAFT = "DRAFT"
+VALIDATED = "VALIDATED"
+APPROVED = "APPROVED"
+ACTIVE = "ACTIVE"
+RETIRED = "RETIRED"
+BLOCKED = "BLOCKED"
+
+BINDING_STATES: Tuple[str, ...] = (DRAFT, VALIDATED, APPROVED, ACTIVE, RETIRED, BLOCKED)
+
+#: 어느 상태에서 어디로 갈 수 있는가. **여기 없는 전이는 없는 전이다.**
+#:
+#: ★ `BLOCKED` 에서 `DRAFT` 로 돌아갈 수 있다 — 막힌 후보를 고쳐 다시 낼 수 있어야
+#:   한다. 돌아갈 길이 없으면 사람들은 새 후보를 만들고, 그러면 「무엇이 왜 막혔는가」의
+#:   이력이 끊긴다.
+#: ⚠️ `RETIRED` 에서는 어디로도 가지 않는다. 되살리려면 새 후보를 만든다 — 되살린
+#:   결속은 「언제부터 다시 쓰였나」가 흐려진다.
+BINDING_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
+    DRAFT: (VALIDATED, BLOCKED),
+    VALIDATED: (APPROVED, BLOCKED, DRAFT),
+    APPROVED: (ACTIVE, BLOCKED, DRAFT),
+    ACTIVE: (RETIRED,),
+    BLOCKED: (DRAFT,),
+    RETIRED: (),
+}
+
+#: 지원 Provider. `CONNECTOR_QUERY` 는 **계약과 화면 자리만** 두고 아직 안 만든다.
+PROVIDER_FILE_SNAPSHOT = "FILE_SNAPSHOT"
+PROVIDER_AFS_NATIVE = "AFS_NATIVE"
+PROVIDER_CONNECTOR_QUERY = "CONNECTOR_QUERY"
+
+PROVIDERS: Tuple[str, ...] = (PROVIDER_FILE_SNAPSHOT, PROVIDER_AFS_NATIVE,
+                              PROVIDER_CONNECTOR_QUERY)
+#: MVP 에서 **실제로 물질화되는** Provider.
+#: ⚠️ 「목록에 있으니 된다」가 아니다 — 있는 것과 되는 것을 구분하지 않으면 시연에서
+#:   「선택은 되는데 아무 일도 안 일어나는」 화면이 나온다.
+MATERIALIZABLE_PROVIDERS: Tuple[str, ...] = (PROVIDER_FILE_SNAPSHOT, PROVIDER_AFS_NATIVE)
+
+#: 실행 문맥. 운영 자원은 셋 다 **명시**해야 만들어진다(공용 기본값 금지).
+ENTITY_MODES: Tuple[str, ...] = ("REAL", "VIRTUAL", "COMPETITOR_REFERENCE")
+
+#: 키트 모드 — 시연용 합성 데이터와 실제 업무 데이터를 **섞지 않는다.**
+KIT_MODE_DEMO = "DEMO/SYNTHETIC"
+KIT_MODE_REAL = "REAL"
+KIT_MODES: Tuple[str, ...] = (KIT_MODE_DEMO, KIT_MODE_REAL)
+
+
+class DataPreparationError(ValueError):
+    """검증 실패 — 라우트가 4xx 로 바꾼다."""
+
+
+class StateConflict(DataPreparationError):
+    """지금 상태에서 할 수 없는 일 — 라우트가 **409** 로 바꾼다."""
+
+
+def can_transition(current: Any, target: Any) -> bool:
+    """이 전이가 허용되는가. **모르는 상태는 허용하지 않는다.**"""
+    return str(target or "") in BINDING_TRANSITIONS.get(str(current or ""), ())
+
+
+def assert_transition(current: Any, target: Any) -> None:
+    """허용되지 않으면 `StateConflict`. 사유에 **가능한 다음 상태**를 담는다 —
+    막기만 하고 갈 곳을 안 알려 주면 사용자는 아무 버튼이나 누른다."""
+    cur, tgt = str(current or ""), str(target or "")
+    if cur not in BINDING_TRANSITIONS:
+        raise StateConflict(f"알 수 없는 현재 상태입니다: {cur or '(없음)'}")
+    if tgt not in BINDING_STATES:
+        raise StateConflict(f"알 수 없는 목표 상태입니다: {tgt or '(없음)'}")
+    if not can_transition(cur, tgt):
+        allowed = BINDING_TRANSITIONS[cur]
+        raise StateConflict(
+            f"«{cur}» 에서 «{tgt}» 로 갈 수 없습니다 — 가능한 다음 상태: "
+            f"{', '.join(allowed) if allowed else '(없음. 종료 상태입니다)'}")
+
+
+def assert_context(tenant_id: Any, scope_node_id: Any, entity_mode: Any) -> None:
+    """운영 자원의 **실행 문맥 세 값**을 강제한다.
+
+    ★★★ 미지정 공용 기본값을 두지 않는다. 「비어 있으면 전사」 같은 기본값은 한 번
+      새면 되돌릴 수 없다 — 그 자원이 어느 조직 것이었는지 아무도 모르게 되기 때문이다.
+    ⚠️ `tenant_id` 는 서버가 문맥에서 파생한다(요청 본문에서 받지 않는다). 여기서는
+      «파생에 실패한 채로 저장되지 않는가» 만 본다."""
+    if not str(tenant_id or "").strip():
+        raise DataPreparationError("tenant 를 확정하지 못했습니다 — 문맥 없이 만들지 않습니다.")
+    if not str(scope_node_id or "").strip():
+        raise DataPreparationError(
+            "scope_node_id 가 필요합니다 — 조직 범위 없는 자원은 권한 필터에서 «미기록» 이 "
+            "되어 통제 밖에 놓입니다.")
+    mode = str(entity_mode or "").strip()
+    if mode not in ENTITY_MODES:
+        raise DataPreparationError(
+            f"entity_mode 는 {list(ENTITY_MODES)} 중 하나여야 합니다(현재 {mode or '(없음)'}) — "
+            f"실제 데이터와 가상 시나리오를 섞으면 둘 다 못 쓴다.")
+
+
+def provider_supported(provider: Any) -> bool:
+    return str(provider or "") in PROVIDERS
+
+
+def provider_materializable(provider: Any) -> bool:
+    """지금 **실제로 데이터가 흐르는가.** 목록에 있는 것과 되는 것은 다르다."""
+    return str(provider or "") in MATERIALIZABLE_PROVIDERS
