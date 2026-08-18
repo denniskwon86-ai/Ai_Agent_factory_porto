@@ -203,6 +203,11 @@ class ProjectState(BaseModel):
         "REJECTED_ACCEPTANCE",          # 수용검수 반려
         "SUSPENDED_QUOTA",              # 할당량 소진 — 회복 후 재개 가능
         "SUSPENDED_PROVIDER",           # 공급자 타임아웃/네트워크 — 코드 결함 아님
+        # ★ [I-4 4c-6] 계약이 없거나 합산이 막혀 빌드로 넘어갈 수 없다.
+        #   ⚠️ `FAILED_GENERATION_CONTRACT`(구조화 출력 절단)와 **다른 것**이다. 뭉개면
+        #     「모델이 형식을 못 맞췄다」와 「사람이 계약을 정해야 한다」가 같은 화면이
+        #     되고, 사용자는 재시도만 반복한다.
+        "CONTRACT_BLOCKED",
         "CANCELLED",
     ] = Field(default="")
     terminal_reason: str = Field(default="")     # 사람이 읽을 종결 사유

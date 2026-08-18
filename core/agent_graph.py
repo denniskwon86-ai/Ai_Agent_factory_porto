@@ -139,11 +139,52 @@ def route_from_architect(state: ProjectState) -> str:
         if not _has_role(_get_required_agents(state), "Tech_Lead", "테크") \
         else "Tech_Lead"
 
-def route_from_tech_lead(state: ProjectState) -> str:
+def _contract_profile_on(state: ProjectState) -> bool:
+    """[I-4 4c-6] 이 프로젝트가 계약 절차를 타는가.
+
+    ★★★ **소급 적용의 경계가 이 함수 하나다.** 기존 프로젝트는 전부 `""` 이므로
+      계약 노드에 **닿지 않는다** — 닿지 않으므로 `completed_agents` 도 체크포인트
+      스키마도 그대로다. 진행 중 프로젝트에 노드를 삽입하면 재개할 때에야 어긋남이
+      드러나고, 그때는 원인을 찾기 어렵다(설계 §3).
+    ⚠️ 판정은 `wbs_artifact_kind.profile_enforces_contract` 하나를 쓴다 — 여기서
+      다시 쓰면 두 정의가 갈린다."""
+    from core.wbs_artifact_kind import profile_enforces_contract
+    return profile_enforces_contract(getattr(state, "runtime_contract_profile", ""))
+
+
+def _after_contract(state: ProjectState) -> str:
+    """계약을 지난 뒤 가던 곳 — **예전 `route_from_tech_lead` 의 본문 그대로**다."""
     agents = _get_required_agents(state)
     if _has_role(agents, "Backend", "백엔드"): return "Backend"
     if _has_role(agents, "Frontend", "프론트"): return "Frontend"
     return "CodeBuilder"
+
+
+def route_from_tech_lead(state: ProjectState) -> str:
+    # ★ 계약 프로필이 켜진 프로젝트만 컴파일러로 간다. 나머지는 예전 그대로.
+    if _contract_profile_on(state):
+        return "HostContractCompiler"
+    return _after_contract(state)
+
+
+def route_from_contract_compiler(state: ProjectState) -> str:
+    """컴파일 실패는 **게이트로 보내지 않는다** — 볼 계약이 없다."""
+    if not (getattr(state, "app_runtime_contract_fingerprint", "") or "").strip():
+        return "TerminalHandler"
+    return "ContractReviewGate"
+
+
+def route_from_contract_gate(state: ProjectState) -> str:
+    """게이트 판정 → 다음 노드.
+
+    ⚠️ 판정을 여기서 다시 계산하지 않는다. 노드가 이미 계산했고, 두 번 계산하면
+      그 사이에 상태가 바뀌었을 때 **노드가 연 요청과 라우터가 본 판정이 갈린다.**
+      노드가 남긴 자취(`contract_review_request_event_id` · `terminal_status`)를 읽는다."""
+    if _terminated(state):
+        return "TerminalHandler"
+    if (getattr(state, "contract_review_request_event_id", "") or "").strip():
+        return "ContractReviewPending"
+    return _after_contract(state)
 
 def _terminated(state: ProjectState) -> bool:
     """이미 업무 종료 상태가 부여됐는가.
@@ -369,7 +410,28 @@ def _wire_edges(workflow):
     workflow.add_edge("WBS_Approved", END)
 
     workflow.add_conditional_edges("Architect", route_from_architect, {"Master_PMO": "Master_PMO", "Tech_Lead": "Tech_Lead", "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
-    workflow.add_conditional_edges("Tech_Lead", route_from_tech_lead, {"Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
+    # ── [I-4 4c-6] 계약 컴파일·검토 ─────────────────────────────────────
+    #
+    # ⚠️ 이 두 노드는 **레지스트리에 넣지 않는다.** 넣으면 모든 프로젝트의 노드
+    #   목록이 바뀌고, `agents_registry.json` 은 Git 에 없어 환경마다 다른 상태가
+    #   된다. `WBS_Approved`·`TerminalHandler` 와 같은 방식으로 여기서 붙인다.
+    # ★ 라우팅이 `runtime_contract_profile` 로 갈리므로 레거시는 이 노드에 닿지 않는다.
+    from nodes.contract import (run_contract_review_gate, run_contract_review_pending,
+                                run_host_contract_compiler)
+    workflow.add_node("HostContractCompiler", run_host_contract_compiler)
+    workflow.add_node("ContractReviewGate", run_contract_review_gate)
+    workflow.add_node("ContractReviewPending", run_contract_review_pending)
+    workflow.add_conditional_edges("Tech_Lead", route_from_tech_lead, {
+        "HostContractCompiler": "HostContractCompiler",
+        "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
+    workflow.add_conditional_edges("HostContractCompiler", route_from_contract_compiler, {
+        "ContractReviewGate": "ContractReviewGate", "TerminalHandler": "TerminalHandler"})
+    workflow.add_conditional_edges("ContractReviewGate", route_from_contract_gate, {
+        "ContractReviewPending": "ContractReviewPending", "TerminalHandler": "TerminalHandler",
+        "Backend": "Backend", "Frontend": "Frontend", "CodeBuilder": "CodeBuilder"})
+    #: ★ 대기는 **END 로 끝낸다.** 승인은 전용 API 가 원장에 남기고(그 편이 SSOT 다),
+    #:   그 뒤 다시 가동하면 컴파일러부터 다시 돌아 지문이 같음을 확인하고 지나간다.
+    workflow.add_edge("ContractReviewPending", END)
     # ★ [2026-07-27] 업무 종결 노드 — 실패를 '조용한 END' 로 흘리지 않고 롤백·실패 번들·종료 상태를 남긴다.
     workflow.add_node("TerminalHandler", run_terminal_handler)
     workflow.add_edge("TerminalHandler", END)

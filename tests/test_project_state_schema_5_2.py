@@ -194,13 +194,28 @@ def test_contract_fields_do_not_change_routing():
     assert agent_graph.route_from_tech_lead(with_contract) == agent_graph.route_from_tech_lead(plain)
 
 
-def test_no_i4_node_is_wired_yet():
-    """1단계에서 그래프에 신규 노드가 붙지 않았음을 못박는다(순서를 지킨다)."""
+def test_i4_nodes_are_wired_only_behind_the_profile():
+    """★ 1단계에서는 「아직 붙지 않았음」을 못 박던 자리다 — **그 순서가 도착했다**
+    (4c-6). 지우지 않고 **반대 방향으로 뒤집는다.**
+
+    ⚠️ 감시를 그냥 지우면 「순서를 지켰다」는 기록도 함께 사라지고, 다음에 누가
+      순서를 어겨도 아무것도 말해 주지 않는다. 이제 지켜야 할 것은 「붙지 않았다」가
+      아니라 **「프로필 뒤에만 붙었다」**다.
+    ★ 배선 자체의 회귀는 `tests/test_contract_graph_wiring.py` 가 본다. 여기서는
+      **소급 적용이 없다는 것**만 확인한다."""
     import inspect
+
     from core import agent_graph
+
     src = inspect.getsource(agent_graph)
     for node in ("HostContractCompiler", "ContractReviewGate"):
-        assert node not in src, f"{node} 가 1단계에서 그래프에 붙었다 — 순서는 4단계다."
+        assert node in src, f"{node} 가 4단계에서도 붙지 않았다."
+    assert "_contract_profile_on" in src, "계약 노드가 프로필 없이 무조건 붙었다"
+
+    #: 프로필이 꺼진 상태(= 기존 모든 프로젝트)는 계약 노드에 닿지 않는다
+    st = ProjectState(project_name="구", current_required_agents=["Tech_Lead", "Backend"])
+    assert st.runtime_contract_profile == ""
+    assert agent_graph.route_from_tech_lead(st) == "Backend"
 
 
 # ── 5.2.0 → 5.3.0 (I-4 4c-2) ───────────────────────────────────────────────
