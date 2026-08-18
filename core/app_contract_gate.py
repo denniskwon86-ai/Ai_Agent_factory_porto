@@ -184,6 +184,49 @@ def _schema_fp(dataset: Dict[str, Any]) -> str:
         return ""
 
 
+def release_contract_profile(release: Any) -> str:
+    """[I-4 4c-7] 이 릴리스가 **계약 절차를 켠 프로젝트**에서 나왔는가.
+
+    ⚠️ 판독 실패·미지정은 `""` 다 — 여기서 켜면 계약 이전에 만든 모든 릴리스가
+      즉시 막힌다. 소급하지 않는 경계는 `runtime_contract_profile` 하나뿐이고,
+      그 값을 릴리스가 **자기 안에 들고 있어야** 나중에 프로젝트 메타가 바뀌어도
+      「이 판이 어떤 규칙으로 만들어졌는가」가 흔들리지 않는다."""
+    from core.wbs_artifact_kind import PROFILE_V1, profile_enforces_contract
+
+    if not isinstance(release, dict):
+        return ""
+    raw = release.get("runtime_contract_profile", "")
+    return PROFILE_V1 if profile_enforces_contract(raw) else ""
+
+
+def is_executable_app_in_app(release: Any) -> bool:
+    """이 릴리스가 **사용자가 실행하는 App-in-App** 인가.
+
+    ★★★ [설계 §15 · 4c-7] `artifact_kind` 는 기획이 **선언**한 값이라, 유효하지만
+      틀릴 수 있다 — LLM 이 실행 앱을 `REPORT` 로 분류하면 그 태스크는 계약 대상에서
+      빠지고, 만들어진 앱은 계약 없이 데이터를 만진다. 분류를 믿지 않고 **결과물**을
+      본다.
+
+    ⚠️ 판독할 수 없으면 **실행 가능한 것으로 본다.** 「모르면 면제」는 곧 우회로이고,
+      여기서 잘못 면제하면 승인 없는 앱이 열린다."""
+    if not isinstance(release, dict):
+        return True
+    #: 명시적 예외 모드(설계 §4) — 사람이 「이것은 Host 런타임을 쓰지 않는다」고 적은 판.
+    if release.get("requires_host_runtime") is False:
+        return False
+    kind = str(release.get("artifact_kind", "") or "").strip().upper()
+    if kind in ("REPORT", "DOCUMENT", "LIBRARY"):
+        #: ⚠️ 선언만으로 면제하지 않는다. 실행 산출물의 흔적이 있으면 **선언이 틀린 것**이다.
+        snap = release.get("manifest") or {}
+        man = snap.get("manifest") if isinstance(snap, dict) else None
+        if (man or {}).get("capabilities"):
+            return True
+        if str(release.get("view_type", "") or "").strip():
+            return True
+        return False
+    return True
+
+
 def evaluate(release: Any, release_id: str) -> GateVerdict:
     """★★★ **발급해도 되는가.** 던지지 않는다 — 호출부가 HTTP 로 바꾼다."""
     rid = (release_id or "").strip()
@@ -210,6 +253,19 @@ def evaluate(release: Any, release_id: str) -> GateVerdict:
                 ok=False, materialization_fingerprint=mat_fp,
                 reasons=[f"승인된 계약이 없는데 계약 결속이 있습니다: {rogue} — "
                          f"아무도 승인하지 않은 권한이 열려 있습니다."])
+        #: ★★★ [4c-7] **실행 가능한 앱은 레거시 면제를 받을 수 없다.**
+        #
+        #  유효하지만 잘못 분류된 `REPORT` 가 실행 가능한 App-in-App 으로 만들어지면
+        #  계약이 아예 없는 릴리스가 된다 — 그러면 아래 레거시 경로로 조용히 열린다.
+        #  ⚠️ 그 앱은 계약도 승인도 없이 데이터를 만지고, 아무 오류도 나지 않는다.
+        #  ★ 다만 **계약 이전에 만든 판**까지 막으면 기존 앱이 전부 멈춘다. 그래서
+        #    경계는 릴리스가 들고 있는 `runtime_contract_profile` 이다(4c-0 과 같은 규칙).
+        if release_contract_profile(release) and is_executable_app_in_app(release):
+            return GateVerdict(
+                ok=False, materialization_fingerprint=mat_fp,
+                reasons=["실행 가능한 앱인데 승인된 런타임 계약이 없습니다 — "
+                         "산출물 분류(`artifact_kind`)가 무엇이든, 사용자가 실행하는 "
+                         "App-in-App 은 계약을 지나야 합니다."])
         #: 레거시(계약 이전) 릴리스는 그대로 연다 — 「없다」와 「어긋난다」는 다른 사실이다.
         return GateVerdict(ok=True, contract_fingerprint=NO_CONTRACT,
                            materialization_fingerprint=mat_fp, legacy=True)

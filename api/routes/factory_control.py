@@ -1829,6 +1829,15 @@ async def create_release(project_id: str,
     except Exception as _e:
         release["config_snapshot"] = {"resolved": False, "error": f"읽기 실패: {_e}"}
 
+    # ── [I-4 4c-7] 이 판이 **어떤 규칙으로 만들어졌는지**를 릴리스에 봉인한다 ──
+    #
+    # ★★★ 프로젝트 메타는 나중에 바뀔 수 있다. 릴리스가 프로필을 자기 안에 들고
+    #   있어야 「이 판이 계약 절차를 지나야 했는가」가 흔들리지 않는다.
+    # ⚠️ 판독 실패는 `""`(레거시)다 — 여기서 켜면 계약 이전에 만든 모든 판이 즉시
+    #   막힌다. 소급하지 않는 경계는 4c-0 과 같은 규칙을 쓴다.
+    release["runtime_contract_profile"] = _read_project_runtime_contract_profile(
+        workspace_path(project_id))
+
     rel_dir = library_paths.release_dir(release_id)
     os.makedirs(rel_dir, exist_ok=True)
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
