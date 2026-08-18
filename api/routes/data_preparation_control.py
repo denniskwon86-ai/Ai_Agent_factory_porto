@@ -20,8 +20,8 @@ from pydantic import BaseModel
 
 from api.deps import Principal, current_principal, require_caps, viewing_context
 from core.admin_capability import PROJECT_CREATE, PROJECT_RUN
-from core.data_preparation import (kit_registry, models as m, snapshot_service,
-                                   source_binding)
+from core.data_preparation import (kit_registry, models as m, readiness,
+                                   snapshot_service, source_binding)
 from core.data_preparation.store import data_preparation_store as store
 from core.paths import data_path
 from core.route_authority import guard as _route_authority_guard
@@ -67,6 +67,13 @@ def _audit(event: str, *, resource_id: str, actor: str, outcome: str,
                      reason=reason, detail=detail)
     except Exception:
         pass
+
+
+def _now_iso() -> str:
+    """판정 시각. ★ 한 번만 읽어 **판정 전체에 같은 값**을 쓴다 — 데이터셋마다 새로
+    읽으면 같은 요청 안에서 어떤 것은 만료, 어떤 것은 아님이 될 수 있다."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _ctx(p: Principal) -> Dict[str, Any]:
@@ -332,3 +339,56 @@ async def get_snapshot(snapshot_id: str, p: Principal = Depends(current_principa
     row = _snapshot_or_404(p, snapshot_id)
     return {"status": "success",
             "data": {**row, "display_label": snapshot_service.display_label(row)}}
+
+
+# ── 준비도 ───────────────────────────────────────────────────────────────
+#: ★ 인증판이 이보다 오래되면 `STALE`. **정책값이지 상수가 아니다** — 키트가
+#:   `max_age_days` 를 선언하면 그쪽을 쓴다.
+DEFAULT_MAX_AGE_DAYS = 30.0
+
+
+@router.get("/instances/{instance_id}/readiness")
+async def get_readiness(instance_id: str, p: Principal = Depends(current_principal)):
+    """「지금 무엇까지 믿고 만들 수 있는가」. **결정론적이다** — 같은 입력이면 같은 답.
+
+    ★★★ 권한 밖 결속·판의 **존재도 개수도** 응답에 넣지 않는다. 인스턴스가 보이지
+      않으면 그 앞에서 404 로 끝나고, 보이면 그 안의 것은 전부 같은 범위다.
+    ⚠️ 준비되지 않은 데이터를 0건으로 채우지 않는다 — 0건은 「없다」이고 여기서
+      말해야 하는 것은 「아직 아니다」다."""
+    require_caps(p, PROJECT_RUN, resource="data_preparation",
+                 action=f"readiness:get:{instance_id}")
+    inst = _instance_or_404(p, instance_id)
+
+    kit = kit_registry.resolve(store, inst["kit_id"], inst["version"])
+    if not kit:
+        #: ⚠️ 키트를 못 읽으면 **판정하지 않는다.** 빈 요구사항으로 판정하면 아무
+        #:   데이터도 없는 인스턴스가 「전부 준비됨」으로 나온다.
+        raise HTTPException(
+            status_code=503,
+            detail="이 인스턴스가 적용한 키트 판본을 읽을 수 없어 준비도를 판정할 수 "
+                   "없습니다.")
+
+    keys = kit_registry.dataset_keys(kit.get("profile"))
+    bindings = {k: store.active_binding(instance_id, k) for k in keys}
+    snapshots: Dict[str, List[Dict[str, Any]]] = {k: [] for k in keys}
+    for row in store.list_snapshots(instance_id):
+        key = str(row.get("dataset_contract_key") or "")
+        if key in snapshots:
+            snapshots[key].append(row)
+
+    profile = kit.get("profile") or {}
+    max_age = profile.get("max_age_days", DEFAULT_MAX_AGE_DAYS)
+    try:
+        result = readiness.evaluate_instance(
+            contract_keys=keys, bindings=bindings, snapshots=snapshots,
+            outputs=kit_registry.outputs(profile), now=_now_iso(),
+            max_age_days=float(max_age) if max_age is not None else None,
+            scope={"tenant_id": inst["tenant_id"], "scope_node_id": inst["scope_node_id"],
+                   "entity_mode": inst["entity_mode"]})
+    except m.DataPreparationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return {"status": "success",
+            "data": {**result, "kit_id": inst["kit_id"], "version": inst["version"],
+                     "instance_id": instance_id,
+                     "data_kind": str(kit.get("mode") or "")}}

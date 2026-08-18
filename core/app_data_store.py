@@ -141,6 +141,12 @@ _ADDED_COLUMNS = (
     #   「안 적혀 있으니 실적이겠지」는 추측이고, 그 추측 위에서 경영 보고가 만들어진다.
     ("app_release_dataset_bindings", "data_role", "TEXT NOT NULL DEFAULT ''"),
     ("app_release_dataset_bindings", "source_intent", "TEXT NOT NULL DEFAULT ''"),
+    # ★★★ [BDR-6] 이 데이터셋이 **어느 업무 데이터 계약**에서 오는가.
+    # ⚠️ `source_intent` 가 「사내 실적」이라고 말해도, «어느 표인가» 를 적지 않으면
+    #   Dispatch 는 갈 곳이 없다. 그때 **우리 DB 로 폴백하지 않는다** — 폴백하면 사내
+    #   시스템에서 와야 할 숫자를 빈 표에서 읽고 앱은 그것을 「0건」으로 그린다.
+    ("app_release_dataset_bindings", "enterprise_contract_key", "TEXT NOT NULL DEFAULT ''"),
+    ("app_release_dataset_bindings", "kit_instance_id", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: ★★★ **유일성은 코드가 아니라 DB 가 지킨다.**

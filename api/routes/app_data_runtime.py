@@ -38,8 +38,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from api.deps import Principal, current_principal, viewing_context, visibility_block_reason
-from core import (app_contract_gate, app_policy, app_proof, host_runtime_sdk as sdk,
-                  host_runtime_wire as wire)
+from core import (app_contract_gate, app_policy, app_proof, host_runtime_provider as prov,
+                  host_runtime_sdk as sdk, host_runtime_wire as wire)
 from core.app_capability_token import AppTokenError, app_capability_tokens
 from core.app_data import AppDataError, AppDataIntegrityError, app_data_service
 
@@ -285,6 +285,115 @@ def _assert_contract_action(proof: Dict[str, Any], ds: Dict[str, Any], need: str
                     actor=(p.user_id or ""), target=str(ds.get("dataset_id", "")), path=path)
 
 
+# ── [BDR-6] Provider Dispatch ────────────────────────────────────────────
+#
+# ★★★ 앱 표면은 바뀌지 않는다. 같은 `window.afs.data.list` 가 우리 DB를 읽을 수도,
+#   승인된 파일 판을 읽을 수도 있다 — **앱은 어느 쪽인지 모른다.**
+#
+# ⚠️⚠️ 여기서 «못 읽음» 을 «없음» 으로 접지 않는다. 접으면 앱이 화면에서 그 표를
+#   지우고, 사용자는 데이터가 삭제됐다고 읽는다.
+
+
+def _dispatch(proof: Dict[str, Any], ds: Dict[str, Any], *, allow_stale: bool = False
+              ) -> "prov.Resolution":
+    """이 요청이 어디로 가는지 **매 요청 정한다.**
+
+    ★ 한 번 통과한 것을 기억해 두지 않는다 — 그 사이에 종료된 결속이 계속 살아 있게 된다."""
+    from datetime import datetime, timezone
+
+    rel = str(proof.get("release_id", "") or "")
+    binding = app_data_service.binding_for(rel, str(ds.get("dataset_id", "") or "")) or {}
+    intent = str(binding.get("source_intent") or "")
+    if not intent:
+        #: 계약 이전(레거시) 결속 — 종전대로 우리 DB 다.
+        #: ⚠️ 이것은 **폴백이 아니다.** 「출처를 말한 적 없는 옛 결속」이라는 사실이
+        #:   결속 표에 `source_intent=''` 로 적혀 있고, 그 뜻은 Native 하나뿐이었다.
+        return prov.Resolution(prov.NATIVE, "", None, None, False, "")
+
+    key = str(binding.get("enterprise_contract_key") or "")
+    instance_id = str(binding.get("kit_instance_id") or "")
+    dp_binding = None
+    snapshots: List[Dict[str, Any]] = []
+    if key and instance_id:
+        try:
+            from core.data_preparation.store import data_preparation_store as dp_store
+
+            dp_binding = dp_store.active_binding(instance_id, key)
+            snapshots = [r for r in dp_store.list_snapshots(instance_id)
+                         if str(r.get("dataset_contract_key") or "") == key]
+        except Exception as e:
+            #: ⚠️ 원천 저장소 장애를 **빈 목록으로 바꾸지 않는다.** 빈 목록은 「없다」로
+            #:   읽히고, 「없다」는 화면에서 0건이 된다.
+            raise _fail(sdk.ERR_UNAVAILABLE, audit_reason=f"원천 판독 실패: {str(e)[:100]}",
+                        target=str(ds.get("dataset_id", "")))
+
+    try:
+        return prov.resolve(source_intent=intent, dataset_contract_key=key,
+                            binding=dp_binding, snapshots=snapshots,
+                            now=datetime.now(timezone.utc).isoformat(),
+                            #: ★★★ 범위는 **증명에 봉인된 값**으로 대조한다 — 요청도
+                            #:   결속 표도 아니다. 결속 표의 `kit_instance_id` 가 잘못
+                            #:   적혀 있으면 다른 조직의 판을 읽게 되고, 그 화면은
+                            #:   오류를 내지 않는다.
+                            scope={"tenant_id": str(proof.get("tenant_id", "") or ""),
+                                   "scope_node_id": str(proof.get("scope_node_id", "") or ""),
+                                   "entity_mode": str(proof.get("entity_mode", "") or "")},
+                            allow_stale=allow_stale)
+    except prov.ProviderError as e:
+        #: ★ 사유는 **감사에만** 남기고 앱에는 코드만 준다 — 사유에는 그 사람이 볼 수
+        #:   없는 조직의 내부 상태(승인 전·격리)가 들어 있다.
+        raise _fail(e.app_code, audit_reason=f"dispatch:{e.reason}",
+                    target=str(ds.get("dataset_id", "")))
+
+
+def _assert_native_write(res: "prov.Resolution", ds: Dict[str, Any], *, path: str) -> None:
+    """★★★ **Native 밖에는 쓰지 않는다.**
+
+    ⚠️ 파일 판·사내 시스템·계산 결과에 앱이 쓰면 그것은 원천과 갈라진 사본이 되고,
+      갈라진 사실은 아무도 모른다. L3 write-back 은 별도 Command Contract·승인·멱등·
+      보상이 필요하며 이 설계 범위 밖이다."""
+    try:
+        prov.assert_writable(res.provider)
+    except prov.ProviderError as e:
+        raise _fail(e.app_code, audit_reason=e.reason,
+                    target=str(ds.get("dataset_id", "")), path=path)
+
+
+def _serve_snapshot(res: "prov.Resolution", *, limit: int = 0, offset: int = 0,
+                    record_id: str = "") -> Dict[str, Any]:
+    """승인된 판을 읽어 돌려준다. **RAW 지문을 먼저 대조한다.**
+
+    ⚠️ 대조 없이 읽으면 「우리가 인증한 그 파일」이라는 전제가 조용히 깨진 채로
+      숫자가 나간다."""
+    from core.data_preparation import snapshot_service as ss
+
+    snap = res.snapshot or {}
+    path = str(snap.get("raw_path") or "")
+    if not path or not ss.verify_raw(path, str(snap.get("checksum") or "")):
+        raise _fail(sdk.ERR_UNAVAILABLE, audit_reason="RAW_CHECKSUM_MISMATCH",
+                    target=str(snap.get("snapshot_id") or ""))
+    try:
+        with open(path, "rb") as f:
+            parsed = ss.parse_csv(f.read())
+    except (OSError, ss.IngestError) as e:
+        raise _fail(sdk.ERR_UNAVAILABLE, audit_reason=f"판 판독 실패: {str(e)[:100]}",
+                    target=str(snap.get("snapshot_id") or ""))
+
+    meta = prov.public_meta(res)
+    if record_id:
+        #: 판에는 우리 레코드 id 가 없다 — 행 번호로 부른다.
+        try:
+            idx = int(record_id)
+        except (TypeError, ValueError):
+            raise _fail(sdk.ERR_NOT_FOUND)
+        if idx < 0 or idx >= len(parsed.rows):
+            raise _fail(sdk.ERR_NOT_FOUND)
+        return {**meta, "record": parsed.rows[idx]}
+
+    rows, total = prov.snapshot_rows(parsed.rows, limit=limit, offset=offset)
+    return {**meta, "records": rows, "total": total}
+
+
 def _record_in(dataset_id: str, record_id: str) -> Dict[str, Any]:
     """레코드가 **그** 데이터셋의 것인지 확인한다(혼동된 대리인 차단과 같은 규칙)."""
     rec = app_data_service.get_record(str(record_id or ""))
@@ -434,6 +543,15 @@ async def get_schema(name: str, request: Request, p: Principal = Depends(current
     _assert_active(ds)
     _assert_contract_action(proof, ds, "read", p=p, path="GET /records/schema")
     _personal_ok(ds, p)
+    #: ⚠️ 스키마 조회도 Dispatch 를 지난다 — 지나지 않으면 준비되지 않은 원천의
+    #:   데이터셋이 «스키마는 보이는데 행은 없는» 상태로 보이고, 앱은 0건으로 그린다.
+    res = _dispatch(proof, ds)
+    if res.provider != prov.NATIVE:
+        served = _serve_snapshot(res, limit=1, offset=0)
+        ds["record_count"] = int(served["total"])
+        return {"status": "success", "data": {**wire.project_dataset(ds),
+                                              "as_of": served["as_of"],
+                                              "stale": served["stale"]}}
     ds["record_count"] = app_data_service.count_records(ds["dataset_id"])
     return {"status": "success", "data": wire.project_dataset(ds)}
 
@@ -447,6 +565,19 @@ async def list_records(name: str, request: Request, limit: int = Query(50), offs
     _assert_active(ds)
     _assert_contract_action(proof, ds, "read", p=p, path="GET /records")
     _personal_ok(ds, p)
+    #: ★★★ [BDR-6] 여기서 «어디서 읽을지» 가 정해진다. 앱은 이 분기를 보지 못한다.
+    res = _dispatch(proof, ds)
+    if res.provider != prov.NATIVE:
+        served = _serve_snapshot(
+            res, limit=max(1, min(int(limit or 50), wire.MAX_PAGE_LIMIT)),
+            offset=max(0, int(offset or 0)))
+        fields = _fields_of(ds)
+        return {"status": "success", "data": {
+            "records": [wire.project_record(r, fields) for r in served["records"]],
+            "total": int(served["total"]),
+            #: ★ 「언제 것인가」를 함께 준다 — 없으면 사용자는 지금 것으로 읽는다.
+            "as_of": served["as_of"], "stale": served["stale"]}}
+
     creator = (p.user_id or "") if (ds.get("app_class") or "") == "personal" else ""
     rows, total = app_data_service.list_records(
         ds["dataset_id"], limit=max(1, min(int(limit or 50), wire.MAX_PAGE_LIMIT)),
@@ -466,6 +597,12 @@ async def get_record(name: str, record_id: str, request: Request,
     ds = _dataset(proof, name)
     _assert_active(ds)
     _assert_contract_action(proof, ds, "read", p=p, path="GET /records/{id}")
+    res = _dispatch(proof, ds)
+    if res.provider != prov.NATIVE:
+        served = _serve_snapshot(res, record_id=record_id)
+        return {"status": "success", "data": {
+            **wire.project_record(served["record"], _fields_of(ds)),
+            "as_of": served["as_of"], "stale": served["stale"]}}
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     return {"status": "success", "data": wire.project_record(rec, _fields_of(ds))}
@@ -480,6 +617,9 @@ async def create_record(name: str, req: RecordWrite, request: Request,
     ds = _dataset(proof, name)
     _assert_active(ds)
     _assert_contract_action(proof, ds, "create", p=p, path="POST /records")
+    #: ★★★ [BDR-6] **Native 밖에는 쓰지 않는다.** 여기서 막지 않으면 앱이 판 위에
+    #:   사본을 만들고, 그 사본은 원천과 갈라진 채 아무도 모르게 남는다.
+    _assert_native_write(_dispatch(proof, ds), ds, path="POST /records")
     _personal_ok(ds, p)
     try:
         #: ⚠️ 앱이 보낸 권한 관련 필드를 **지운다**(검증이 아니라 삭제). 브리지도 지우지만
@@ -507,6 +647,9 @@ async def update_record(name: str, record_id: str, req: RecordWrite, request: Re
     ds = _dataset(proof, name)
     _assert_active(ds)
     _assert_contract_action(proof, ds, "update", p=p, path="PUT /records/{id}")
+    #: ★★★ [BDR-6] **Native 밖에는 쓰지 않는다.** 여기서 막지 않으면 앱이 판 위에
+    #:   사본을 만들고, 그 사본은 원천과 갈라진 채 아무도 모르게 남는다.
+    _assert_native_write(_dispatch(proof, ds), ds, path="PUT /records/{id}")
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:
@@ -532,6 +675,9 @@ async def delete_record(name: str, record_id: str, request: Request,
     ds = _dataset(proof, name)
     _assert_active(ds)
     _assert_contract_action(proof, ds, "delete", p=p, path="DELETE /records/{id}")
+    #: ★★★ [BDR-6] **Native 밖에는 쓰지 않는다.** 여기서 막지 않으면 앱이 판 위에
+    #:   사본을 만들고, 그 사본은 원천과 갈라진 채 아무도 모르게 남는다.
+    _assert_native_write(_dispatch(proof, ds), ds, path="DELETE /records/{id}")
     rec = _record_in(ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:

@@ -53,5 +53,16 @@
          "classification": "PUBLIC"}
       ]
     }
+  ],
+  "outputs": [
+    {"output": "입고 현황 보고",
+     "purpose": "이번 달 자재가 얼마나 들어왔는가",
+     "requires": ["material_arrivals"]},
+    {"output": "구매 이행 현황",
+     "purpose": "주문한 것 중 무엇이 아직 안 왔는가",
+     "requires": ["purchase_orders", "material_arrivals"]},
+    {"output": "공급사별 납기 준수율",
+     "purpose": "어느 공급사가 약속을 지키는가",
+     "requires": ["purchase_orders", "material_arrivals", "supplier_master"]}
   ]
 }

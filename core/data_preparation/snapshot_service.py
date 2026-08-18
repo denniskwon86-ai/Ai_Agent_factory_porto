@@ -224,7 +224,8 @@ def standardize(store: Any, snapshot_id: str, rows: List[Dict[str, str]], *,
     if unmapped or bad_units:
         return store.advance_snapshot(
             snapshot_id, m.QUARANTINED,
-            quarantine={"reason": "미매핑 코드 또는 단위 불일치",
+            quarantine={"kind": m.QUARANTINE_QUALITY,
+                        "reason": "미매핑 코드 또는 단위 불일치",
                         "unmapped": unmapped[:50], "unmapped_count": len(unmapped),
                         "unit_errors": bad_units[:50], "unit_error_count": len(bad_units)})
     return store.advance_snapshot(snapshot_id, m.STANDARDIZED)
@@ -276,7 +277,8 @@ def reconcile(store: Any, snapshot_id: str, rows: List[Dict[str, str]],
         return store.advance_snapshot(
             snapshot_id, m.QUARANTINED,
             control_total=result,
-            quarantine={"reason": "원천 합계 대사 불일치",
+            quarantine={"kind": m.QUARANTINE_RECONCILIATION,
+                        "reason": "원천 합계 대사 불일치",
                         "mismatches": result["mismatches"]})
     return store.advance_snapshot(snapshot_id, m.RECONCILED, control_total=result)
 

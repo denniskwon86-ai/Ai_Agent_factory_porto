@@ -113,6 +113,26 @@ def load_profile(path: str) -> LoadedKit:
                 f"{os.path.basename(path)}: 모든 데이터셋에 `dataset_contract_key` 가 "
                 f"있어야 합니다 — 그것이 결속이 가리키는 이름입니다.")
 
+    #: ★★★ 산출물이 **없는 데이터셋을 요구하면** 키트를 등록하지 않는다.
+    #: ⚠️ 「모르는 이름은 건너뛴다」로 두면 오타 하나가 요구사항을 지우고, 그 산출물은
+    #:   준비도 판정에서 **늘 AVAILABLE** 이 된다 — 아무 데이터 없이도.
+    keys = {str(ds.get("dataset_contract_key", "")).strip() for ds in datasets}
+    for spec in (profile.get("outputs") or []):
+        if not isinstance(spec, dict) or not str(spec.get("output", "")).strip():
+            raise KitLoadError(
+                f"{os.path.basename(path)}: 모든 산출물에 `output` 이름이 있어야 합니다.")
+        needs = spec.get("requires")
+        if not isinstance(needs, list) or not needs:
+            raise KitLoadError(
+                f"{os.path.basename(path)}: 산출물 «{spec.get('output')}» 이 요구하는 "
+                f"데이터가 없습니다 — 아무것도 요구하지 않는 산출물은 데이터가 하나도 "
+                f"없어도 «가능» 으로 보입니다.")
+        unknown = sorted({str(k).strip() for k in needs} - keys)
+        if unknown:
+            raise KitLoadError(
+                f"{os.path.basename(path)}: 산출물 «{spec.get('output')}» 이 이 키트에 "
+                f"없는 데이터를 요구합니다: {unknown}")
+
     return LoadedKit(kit_id=kit_id, version=version, name=name, mode=mode,
                      source_path=os.path.basename(path),
                      fingerprint=file_fingerprint(path), profile=profile)
@@ -151,6 +171,17 @@ def dataset_keys(profile: Any) -> List[str]:
     return sorted({str(d.get("dataset_contract_key", "")).strip()
                    for d in (profile.get("datasets") or [])
                    if isinstance(d, dict) and str(d.get("dataset_contract_key", "")).strip()})
+
+
+def outputs(profile: Any) -> List[Dict[str, Any]]:
+    """이 키트가 만들 수 있다고 선언한 산출물들. **이름순으로 돌려준다.**
+
+    ⚠️ 선언이 없으면 **빈 목록**이다 — 「전부 가능」이 아니다. 산출물을 선언하지 않은
+      키트는 「무엇이 막혔는지」에 답할 수 없고, 답할 수 없음을 그대로 보여야 한다."""
+    if not isinstance(profile, dict):
+        return []
+    return sorted([o for o in (profile.get("outputs") or []) if isinstance(o, dict)],
+                  key=lambda o: str(o.get("output", "")))
 
 
 def resolve(store: Any, kit_id: str, version: str) -> Optional[Dict[str, Any]]:

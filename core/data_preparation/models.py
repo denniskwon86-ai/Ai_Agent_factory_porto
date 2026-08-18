@@ -152,6 +152,12 @@ SNAPSHOT_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
 #: ⚠️⚠️ 실제 Data Owner 가 없는 상태에서 `CERTIFIED ACTUAL` 을 주장하면, 그 숫자를
 #:   본 사람은 그것이 검증된 실적이라고 믿는다. 시연 자료로 경영 판단을 하게 되는
 #:   경로가 바로 거기서 열린다.
+#: ★★★ 격리 «사유» 는 사람이 읽는 문장이고, 격리 «종류» 는 **기계가 읽는 코드**다.
+#: ⚠️ 문장으로 분기하면 문구를 다듬는 순간 판정이 조용히 바뀐다 — 시험은 그대로 통과한다.
+QUARANTINE_QUALITY = "QUALITY"                  # 미매핑 코드·단위 불일치
+QUARANTINE_RECONCILIATION = "RECONCILIATION"    # 원천 합계·행 수 대사 실패
+QUARANTINE_KINDS: Tuple[str, ...] = (QUARANTINE_QUALITY, QUARANTINE_RECONCILIATION)
+
 DATA_KIND_DEMO = "DEMO/SYNTHETIC"
 DATA_KIND_REAL = "REAL"
 DATA_KINDS: Tuple[str, ...] = (DATA_KIND_DEMO, DATA_KIND_REAL)

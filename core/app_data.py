@@ -620,6 +620,10 @@ class AppDataService:
             a for a in str(row.get("allowed_actions") or "").split(",") if a)
         out["data_role"] = str(row.get("data_role") or "")
         out["source_intent"] = str(row.get("source_intent") or "")
+        #: ★ [BDR-6] «어느 업무 데이터 계약인가». 빈 문자열은 **미지정**이고, 미지정인
+        #:   비-Native 결속은 Dispatch 가 거부한다(우리 DB 로 폴백하지 않는다).
+        out["enterprise_contract_key"] = str(row.get("enterprise_contract_key") or "")
+        out["kit_instance_id"] = str(row.get("kit_instance_id") or "")
         return out
 
     def data_role_for(self, release_id: str, dataset_id: str) -> Optional[str]:
