@@ -87,6 +87,31 @@ def _summary(contract: Dict[str, Any], required: List[str]) -> str:
             + (f"({names}{more})" if datasets else "(데이터셋 0개 — 그 선언 자체가 통제다)"))
 
 
+def adapter_path(workspace_root: str) -> str:
+    from core.typed_sdk_adapter import ADAPTER_PATH
+    return os.path.join(workspace_root or ".", *ADAPTER_PATH.split("/"))
+
+
+def _write_adapter(workspace_root: str, contract: Dict[str, Any]) -> str:
+    """어댑터를 쓰고 **사람이 읽을 한 줄**을 돌려준다. 던지지 않는다.
+
+    ⚠️ 승인되지 않은 계약이면 만들지 않는다 — 그리고 그 사실을 말한다. 아무 말 없이
+      건너뛰면 「생성이 실패했다」와 「아직 승인 전이다」가 같은 모양이 된다."""
+    from core import typed_sdk_adapter
+
+    result = typed_sdk_adapter.generate(contract)
+    if not result.ok:
+        return f"어댑터 미생성({result.reason})"
+    path = adapter_path(workspace_root)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(result.source)
+    except Exception as e:                                # pragma: no cover - 방어
+        return f"어댑터 기록 실패({e})"
+    return f"어댑터 {len(result.dataset_names)}개 데이터셋"
+
+
 async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
     """WBS 의 계약 대상 태스크 초안을 **프로젝트 계약 하나**로 컴파일한다.
 
@@ -123,8 +148,18 @@ async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
         json.dump(contract, f, ensure_ascii=False, indent=2)
 
     fp = str(contract.get("semantic_fingerprint", ""))
+
+    #: ── [I-4 5a] Typed SDK Adapter ─────────────────────────────────────
+    #:
+    #: ⚠️ **승인 전에는 만들지 않는다.** 만들면 앱 코드가 승인 전 계약에 맞춰
+    #:   작성되고, 계약이 바뀌면 코드가 통째로 어긋난다. 승인 직후 재컴파일에서
+    #:   나온다(지문이 같으면 컴파일러가 승인을 이어 준다).
+    #: ⚠️ 어댑터 생성 실패가 계약 컴파일을 되돌리지 않는다 — 계약은 이미 정본이고,
+    #:   어댑터는 그 투영이다. 다만 **조용히 넘기지 않는다.**
+    adapter_note = _write_adapter(ws, contract)
+
     print(f"[OK] [HostContractCompiler] 계약 컴파일 — 지문 {fp[:12]}… · "
-          f"대상 태스크 {len(agg.included_task_ids)}개")
+          f"대상 태스크 {len(agg.included_task_ids)}개" + (f" · {adapter_note}" if adapter_note else ""))
     return {
         "app_runtime_contract_status": str(contract.get("status", "COMPILED")),
         "app_runtime_contract_fingerprint": fp,
