@@ -435,3 +435,134 @@ def test_certified_snapshots_are_named_for_people(client):
     for r in rows:
         assert r["label"] and r["label"] != r["dataset_contract_key"], (
             f"계약키가 그대로 이름칸에 들어 있다: {r['dataset_contract_key']}")
+
+
+def test_base_values_come_from_the_certified_file_not_from_the_user(client):
+    """★★★ 화면이 7칸을 전부 사람에게 받고 있었다 — 그중 셋은 이미 인증된 판 안에 있다.
+
+    ⚠️ 이 시험은 **실제 RAW 파일**을 지난다. 저장소가 원본을 보관하지 않거나 checksum
+      대조가 빠지면 여기서 걸린다 — 단위 시험만으로는 그것을 볼 수 없다."""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    b = _data(client.post(
+        f"/api/v1/data-preparation/instances/{inst['instance_id']}/bindings",
+        headers=H, json={"dataset_contract_key": "material_arrivals",
+                         "provider": "FILE_SNAPSHOT",
+                         "config": {"file_name": "a.csv", "column_map": {"a": "A"}}}),
+        "결속")
+    for action in ("validate", "approve", "activate"):
+        client.post(f"/api/v1/data-preparation/bindings/{b['binding_id']}/decision",
+                    headers=H, json={"action": action})
+    snap = _data(client.post(
+        f"/api/v1/data-preparation/bindings/{b['binding_id']}/snapshots", headers=H,
+        files={"file": ("a.csv", CSV, "text/csv")}), "판")
+    _data(client.post(
+        f"/api/v1/data-preparation/snapshots/{snap['snapshot_id']}/certify",
+        headers=H, json={"control": CONTROL}), "인증")
+
+    got = _data(client.post("/api/v1/baseline/base-values", headers=H, json={
+        "instance_id": inst["instance_id"],
+        "snapshot_ids": [snap["snapshot_id"]]}), "기준값")
+    by = {f["key"]: f for f in got["fields"]}
+
+    #: ★ CSV 는 120 + 80 = 200 이고 08-01 ~ 08-05 는 5일이다.
+    assert by["production_qty"]["value"] == 200.0
+    assert by["period_days"]["value"] == 5.0
+    assert by["production_qty"]["derived_from"] == [snap["snapshot_id"]], (
+        "어느 판에서 뽑았는지가 안 남았다")
+
+    #: ★★★ 계약에 없는 것은 **0이 아니라 없음**이다.
+    for k in ("ending_cash", "operating_profit", "power_cost"):
+        assert by[k]["value"] is None, f"{k} 를 지어냈다"
+        assert by[k]["reason"].strip()
+    assert got["manual_count"] >= 4
+
+
+def test_base_values_refuse_when_the_stored_original_changed(client, tmp_path):
+    """★★★ 보관된 원본이 인증 당시와 다르면 **그 판에서 값을 뽑지 않는다.**
+
+    ⚠️ checksum 대조 없이 읽으면 「인증한 판에서 뽑았다」는 말이 거짓이 될 수 있다."""
+    import os
+
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    b = _data(client.post(
+        f"/api/v1/data-preparation/instances/{inst['instance_id']}/bindings",
+        headers=H, json={"dataset_contract_key": "material_arrivals",
+                         "provider": "FILE_SNAPSHOT",
+                         "config": {"file_name": "a.csv", "column_map": {"a": "A"}}}),
+        "결속")
+    for action in ("validate", "approve", "activate"):
+        client.post(f"/api/v1/data-preparation/bindings/{b['binding_id']}/decision",
+                    headers=H, json={"action": action})
+    snap = _data(client.post(
+        f"/api/v1/data-preparation/bindings/{b['binding_id']}/snapshots", headers=H,
+        files={"file": ("a.csv", CSV, "text/csv")}), "판")
+    _data(client.post(
+        f"/api/v1/data-preparation/snapshots/{snap['snapshot_id']}/certify",
+        headers=H, json={"control": CONTROL}), "인증")
+
+    #: ★ 대조군 — 손대기 전에는 뽑힌다. 이것이 없으면 「원래 안 되는 것」을 통제로 읽는다.
+    ok = client.post("/api/v1/baseline/base-values", headers=H, json={
+        "instance_id": inst["instance_id"], "snapshot_ids": [snap["snapshot_id"]]})
+    assert ok.status_code == 200, ok.text[:200]
+
+    full = _data(client.get(
+        f"/api/v1/data-preparation/snapshots/{snap['snapshot_id']}", headers=H), "판")
+    path = full["raw_path"]
+    assert os.path.exists(path), f"원본이 보관돼 있지 않다: {path}"
+    with open(path, "ab") as f:
+        f.write(b"2026-08-09,M3,999,L-999\n")     # ⚠️ 보관된 원본을 바꾼다
+
+    r = client.post("/api/v1/baseline/base-values", headers=H, json={
+        "instance_id": inst["instance_id"], "snapshot_ids": [snap["snapshot_id"]]})
+    assert r.status_code == 409, "바뀐 원본에서 값을 뽑았다: " + r.text[:200]
+    assert "인증 당시와 다릅니다" in r.text
+
+
+def test_the_reason_for_a_missing_dataset_names_it_for_people(client):
+    """★★★ 유도 실패 사유는 **사용자 화면에 그대로 나간다.**
+
+    ⚠️ 「«purchase_orders» 의 인증된 판이 없습니다」는 경영 화면의 문장이 아니다 —
+      읽는 사람은 그것이 무엇인지 모른 채 넘긴다(설계 §12). 동선 스크립트가 실제로
+      이것을 잡았다(2026-08-19)."""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    b = _data(client.post(
+        f"/api/v1/data-preparation/instances/{inst['instance_id']}/bindings",
+        headers=H, json={"dataset_contract_key": "material_arrivals",
+                         "provider": "FILE_SNAPSHOT",
+                         "config": {"file_name": "a.csv", "column_map": {"a": "A"}}}),
+        "결속")
+    for action in ("validate", "approve", "activate"):
+        client.post(f"/api/v1/data-preparation/bindings/{b['binding_id']}/decision",
+                    headers=H, json={"action": action})
+    snap = _data(client.post(
+        f"/api/v1/data-preparation/bindings/{b['binding_id']}/snapshots", headers=H,
+        files={"file": ("a.csv", CSV, "text/csv")}), "판")
+    _data(client.post(
+        f"/api/v1/data-preparation/snapshots/{snap['snapshot_id']}/certify",
+        headers=H, json={"control": CONTROL}), "인증")
+
+    got = _data(client.post("/api/v1/baseline/base-values", headers=H, json={
+        "instance_id": inst["instance_id"],
+        "snapshot_ids": [snap["snapshot_id"]]}), "기준값")
+    reasons = " ".join(f["reason"] for f in got["fields"])
+    for key in ("purchase_orders", "material_arrivals", "supplier_master"):
+        assert key not in reasons, f"계약키가 사유 문장에 나왔다: {key} / {reasons[:200]}"
+    #: ★ 대신 **계약이 선언한 이름**이 있어야 한다.
+    #: ⚠️ 이름을 시험에 손으로 적지 않는다 — 계약이 이름을 바꾸면 시험이 조용히
+    #:   다른 것을 검증하게 된다(실제로 「구매주문」이라 적었다가 계약의 「구매 발주」와
+    #:   어긋났다).
+    kit = _data(client.get(
+        f"/api/v1/data-preparation/kits/{kr.DEMO_KIT_ID}/versions/1.0.0", headers=H),
+        "키트")
+    want = [d["label"] for d in (kit.get("profile") or {}).get("datasets", [])
+            if d["dataset_contract_key"] == "purchase_orders"][0]
+    assert want and want in reasons, f"계약이 선언한 이름 «{want}» 이 사유에 없다: {reasons[:200]}"

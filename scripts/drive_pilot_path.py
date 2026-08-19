@@ -14,7 +14,7 @@
 ## 무엇을 확인하는가
 
     ① 기준선 고르개에 인스턴스가 뜨고, 인증된 판을 고를 수 있는가
-    ② 기준값·가정을 **이름표 있는 칸**으로 채울 수 있는가
+    ② 기준값이 **인증된 판에서 뽑히는가**(그리고 나머지는 이름표 있는 칸으로 받는가)
     ③ 시뮬레이션이 숫자와 **지문**을 내는가
     ④ 안건이 만들어지고, 근거의 계보가 **사람이 읽는 이름**으로 나오는가
 
@@ -108,7 +108,24 @@ def run(page: Page, shots: Path | None) -> int:
     page.wait_for_timeout(400)
     _shot(page, shots, "동선_01_기준선")
 
-    # ── ② 기준값·가정 ───────────────────────────────────────────────────
+    # ── ② 기준값 — 먼저 «판에서 뽑기» 를 눌러 본다 ──────────────────────
+    #: ★★★ 사람이 7칸을 손으로 채우는 것과, 인증된 판에서 뽑히는 것은 다른 제품이다.
+    fill_btn = dlg.locator("button", has_text="고른 판에서 채우기").first
+    if fill_btn.count() == 0:
+        print("✗ ② 「고른 판에서 채우기」가 없다 — 있는 값을 사람에게 다시 묻고 있다")
+        return 1
+    fill_btn.click()
+    page.wait_for_timeout(2500)
+    picked = dlg.locator("text=판에서 뽑음").count()
+    print(f"· ② 판에서 뽑힌 칸 {picked}개")
+    if picked == 0:
+        print("✗ ② 아무 칸도 뽑히지 않았다 — 화면이 말한 사유:")
+        _echo(dlg.inner_text(), ("없습니다", "숫자가", "찾을 수", "다릅니다"))
+        _shot(page, shots, "동선_02_유도실패")
+        return 1
+    _shot(page, shots, "동선_02_기준값유도")
+
+    #: 나머지(재무 3칸 등)는 사람이 채운다 — 그 사실 자체가 이 화면의 답이다.
     if not (_fill(dlg, BASE, "②") and _fill(dlg, DRIVERS, "②")):
         return 1
     page.wait_for_timeout(300)
@@ -163,6 +180,13 @@ def run(page: Page, shots: Path | None) -> int:
         print("✗ ④ 고를 수 있는 판이 없다")
         return 1
     boxes.first.check()
+    page.wait_for_timeout(800)
+    fill_btn = dlg.locator("button", has_text="고른 판에서 채우기").first
+    if fill_btn.count() == 0:
+        print("✗ ④ 「고른 판에서 채우기」가 없다")
+        return 1
+    fill_btn.click()
+    page.wait_for_timeout(2500)
     if not (_fill(dlg, BASE, "④") and _fill(dlg, DRIVERS, "④")):
         return 1
     page.wait_for_timeout(400)

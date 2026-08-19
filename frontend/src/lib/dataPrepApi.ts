@@ -237,6 +237,23 @@ export async function createDecision(payload: {
 
 // ★ 기준선을 함께 보내면 **그 기준선으로** 근거를 잇는다. 보내지 않으면 근거를
 //   «확인하지 않은» 것이지 «없는» 것이 아니다 — 응답의 `evidence_checked` 가 가른다.
+// ★ 인증된 판에서 뽑을 수 있는 기준값. ⚠️ 뽑을 수 없는 칸은 `value: null` 로
+//   오고 `reason` 이 왜인지 말한다 — 0 이 오지 않는다.
+export async function deriveBaseValues(instanceId: string, snapshotIds: string[]) {
+  return unwrap<{
+    fields: { key: string; value: number | null; source: string; reason: string;
+              derived_from: string[] }[];
+    derived_count: number; manual_count: number; note: string;
+  }>(
+    await apiFetch(`${BASELINE}/base-values`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instance_id: instanceId, snapshot_ids: snapshotIds }),
+    }),
+    '기준값',
+  );
+}
+
 export async function getImpactPath(
   start: string, end: string, instanceId = '', snapshotIds: string[] = [],
 ) {

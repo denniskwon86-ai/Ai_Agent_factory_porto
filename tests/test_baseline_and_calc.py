@@ -12,6 +12,7 @@
 """
 import pytest
 
+from core import base_values as bv
 from core import baseline_build as bb
 from core import calc_graph as cg
 from core import ontology_path as op
@@ -391,3 +392,94 @@ def test_the_briefing_names_missing_steps_for_people():
     #: ★ 계약키가 그대로 나오면 실패다.
     assert "purchase_orders" not in line[0], f"계약키가 브리핑에 나왔다: {line[0]}"
     assert "구매주문" in line[0], f"사람이 읽는 이름이 없다: {line[0]}"
+
+
+# ── 기준값 유도 ─────────────────────────────────────────────────────────
+def _arrivals(*, qty=("120", "80", "95"), dates=("2026-08-01", "2026-08-05", "2026-08-11")):
+    return [{"arrived_at": d, "material_code": "M1", "quantity": q, "lot_no": "L"}
+            for d, q in zip(dates, qty)]
+
+
+ORDERS = [{"ordered_at": "2026-07-20", "material_code": "M1", "quantity": "200",
+           "unit_price": "15000"},
+          {"ordered_at": "2026-07-28", "material_code": "M2", "quantity": "120",
+           "unit_price": "22000"}]
+
+
+def _derive(**rows):
+    return {f.key: f for f in bv.derive(
+        rows_by_dataset=rows,
+        snapshot_by_dataset={k: f"ds_{k}" for k in rows})}
+
+
+def test_what_the_certified_data_can_answer_is_answered():
+    """★★★ 이미 올려서 인증까지 마친 판 안에 있는 값을 다시 묻지 않는다."""
+    got = _derive(material_arrivals=_arrivals(), purchase_orders=ORDERS)
+    assert got["production_qty"].value == 295.0          # 120+80+95
+    assert got["purchase_payment"].value == 5_640_000.0  # 200*15000 + 120*22000
+    assert got["period_days"].value == 11.0              # 08-01 ~ 08-11, 양 끝 포함
+    for k in ("production_qty", "purchase_payment", "period_days"):
+        assert got[k].source == bv.SOURCE_DERIVED
+        assert got[k].derived_from and got[k].derived_from[0].startswith("ds_")
+
+
+def test_what_the_contract_does_not_have_is_not_filled_with_zero():
+    """★★★ 「못 만든다」와 「0이다」는 다른 사실이다.
+
+    ⚠️ 0으로 채우면 결과가 완성돼 보이고, 그 표는 회의에 올라간다."""
+    got = _derive(material_arrivals=_arrivals(), purchase_orders=ORDERS)
+    for k in ("ending_cash", "operating_profit", "power_cost", "ending_inventory"):
+        assert got[k].value is None, f"{k} 를 지어냈다: {got[k].value}"
+        assert got[k].source == bv.SOURCE_NOT_DERIVABLE
+        #: ★ 사유가 있어야 사용자가 «무엇을 더 연결하면 되는지» 안다.
+        assert got[k].reason.strip(), f"{k} 에 사유가 없다"
+
+
+def test_a_dataset_missing_from_the_baseline_is_said_so():
+    """⚠️ 판이 없는데 0으로 채우면 「데이터가 없다」가 「0이다」로 둔갑한다."""
+    got = _derive(material_arrivals=_arrivals())
+    assert got["purchase_payment"].value is None
+    assert "purchase_orders" in got["purchase_payment"].reason
+
+
+@pytest.mark.parametrize("bad", ["", "미정", "1,2,3x"])
+def test_one_non_numeric_row_stops_the_whole_sum(bad):
+    """★★★ 그 행만 빼고 더하면 **「전체 합계」라고 적힌 부분 합계**가 나온다.
+
+    ⚠️ 그 숫자는 그럴듯하고, 아무도 그것을 고장으로 보지 않는다."""
+    rows = _arrivals()
+    rows[1]["quantity"] = bad
+    got = _derive(material_arrivals=rows)
+    assert got["production_qty"].value is None, "일부만 더한 합계가 나왔다"
+    assert "숫자가 아닙니다" in got["production_qty"].reason
+
+
+def test_a_missing_column_is_named():
+    """⚠️ 「못 뽑았다」만 남으면 사용자는 파일이 아니라 시스템을 의심한다."""
+    rows = [{"arrived_at": "2026-08-01", "material_code": "M1"}]
+    got = _derive(material_arrivals=rows)
+    assert got["production_qty"].value is None
+    assert "quantity" in got["production_qty"].reason
+
+
+def test_the_period_is_days_not_row_count():
+    """★★★ 「몇 건인가」가 아니라 「며칠치인가」다 — 섞으면 하루당 값이 통째로 어긋난다."""
+    rows = _arrivals(qty=("1", "1", "1"),
+                     dates=("2026-08-01", "2026-08-01", "2026-08-01"))
+    got = _derive(material_arrivals=rows)
+    assert got["production_qty"].value == 3.0
+    assert got["period_days"].value == 1.0, "행 수를 기간으로 셌다"
+
+
+def test_the_field_list_matches_what_the_calculator_requires():
+    """★★★ 두 목록이 갈라지면 화면은 채웠는데 서버는 「없다」고 답한다."""
+    assert set(bv.FIELD_KEYS) == set(BASE)
+
+
+def test_the_summary_says_how_many_a_person_must_still_fill():
+    got = bv.summary(bv.derive(
+        rows_by_dataset={"material_arrivals": _arrivals(), "purchase_orders": ORDERS},
+        snapshot_by_dataset={"material_arrivals": "ds_1", "purchase_orders": "ds_2"}))
+    assert got["derived_count"] == 3
+    assert got["manual_count"] == 4
+    assert got["derived_count"] + got["manual_count"] == len(bv.FIELD_KEYS)

@@ -5,6 +5,7 @@ import { Panel } from '../design/HubShell';
 import { createDecision, DataPrepError, getImpactPath } from '../lib/dataPrepApi';
 import { BASE_FIELDS, DRIVER_FIELDS, num } from '../lib/calcFields';
 import { BaselinePicker, type BaselineChoice } from './BaselinePicker';
+import { BaseValueFields } from './BaseValueFields';
 
 // [Wave G 11.4 / Wave H] 의사결정 안건 — 파일럿 동선 9·12칸.
 //
@@ -198,25 +199,7 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
           </div>
           <BaselinePicker value={pick} onChange={setPick} />
 
-          <h4 style={{ margin: '12px 0 8px', fontSize: 15 }}>기준값</h4>
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-            gap: 10, marginBottom: 12,
-          }}>
-            {/* ★★★ 이름표를 단 칸으로 받는다 — 순서로 받으면 한 칸 밀려도 오류가
-                나지 않고, 그 표는 그럴듯하다. */}
-            {BASE_FIELDS.map((f) => (
-              <label key={f.key} style={{ fontSize: 13, color: '#374151' }}>
-                {f.label} <span style={{ color: '#6b7280' }}>({f.unit})</span>
-                <input value={base[f.key] || ''} inputMode="decimal"
-                  onChange={(e) => setBase({ ...base, [f.key]: e.target.value })}
-                  style={{
-                    display: 'block', width: '100%', marginTop: 4, padding: '8px 10px',
-                    border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14,
-                  }} />
-              </label>
-            ))}
-          </div>
+          <BaseValueFields pick={pick} values={base} onChange={setBase} />
 
           <h4 style={{ margin: '12px 0 8px', fontSize: 15 }}>가정</h4>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>

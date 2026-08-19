@@ -7,6 +7,7 @@ import {
   BASE_FIELDS, DRIVER_FIELDS as DRIVERS, num,
 } from '../lib/calcFields';
 import { BaselinePicker, type BaselineChoice } from './BaselinePicker';
+import { BaseValueFields } from './BaseValueFields';
 
 // [G4 / Wave H] 시나리오 시뮬레이션 화면 — 파일럿 동선 10~11칸.
 //
@@ -84,29 +85,8 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
       }}>
         <Panel className="afs-fill">
           <BaselinePicker value={pick} onChange={setPick} />
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
-            {/* ★ 왜 명시해야 하는지를 화면이 말한다 — 이유를 모르면 사용자는
-                「왜 자동으로 안 되나」로 읽는다. */}
-            판을 직접 고정합니다. 「최신」을 가리키면 한 달 뒤 같은 보고서가 다른 답을 냅니다.
-          </div>
 
-          <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>기준값</h4>
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-            gap: 10, marginBottom: 16,
-          }}>
-            {BASE_FIELDS.map((f) => (
-              <label key={f.key} style={{ fontSize: 13 }}>
-                {f.label} <span style={{ color: '#6b7280' }}>({f.unit})</span>
-                <input value={base[f.key] || ''} inputMode="decimal"
-                  onChange={(e) => setBase({ ...base, [f.key]: e.target.value })}
-                  style={{
-                    width: '100%', marginTop: 4, padding: '6px 8px',
-                    border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14,
-                  }} />
-              </label>
-            ))}
-          </div>
+          <BaseValueFields pick={pick} values={base} onChange={setBase} />
 
           <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>가정</h4>
           <div style={{
