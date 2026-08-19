@@ -15,7 +15,8 @@ import {
 
 // 상태별 표시. ★ **색만으로 구분하지 않는다**(설계 §12 UI 규칙) — 이름표와 기호를
 // 함께 단다. 색각 이상·흑백 인쇄·저조도 화면에서 색은 사라진다.
-const STATE_VIEW: Record<DatasetState, { label: string; mark: string; tone: string }> = {
+const STATE_VIEW: Record<DatasetState,
+  { label: string; mark: string; tone: string }> = {
   NOT_CONFIGURED:        { label: '원천 미지정',   mark: '○', tone: '#6b7280' },
   SOURCE_CONFIGURED:     { label: '파일 대기',     mark: '◔', tone: '#6b7280' },
   DATA_AVAILABLE:        { label: '검사 대기',     mark: '◑', tone: '#b45309' },
@@ -47,7 +48,16 @@ function DatasetRow({ row }: { row: DatasetReadiness }) {
   };
   return (
     <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-      <td style={{ padding: '10px 8px', fontSize: 14 }}>{row.dataset_contract_key}</td>
+      <td style={{ padding: '10px 8px', fontSize: 14 }}>
+        {/* ★ 사람이 읽는 이름이 먼저다(설계 §12). 이름이 없으면 계약 이름을 그대로
+            쓰되, 있으면 계약 이름은 아래에 작게 남긴다 — 문의할 때 필요하다. */}
+        {row.label ? (
+          <>
+            <div>{row.label}</div>
+            <div style={{ fontSize: 12, color: '#6b7280' }}>{row.dataset_contract_key}</div>
+          </>
+        ) : row.dataset_contract_key}
+      </td>
       <td style={{ padding: '10px 8px', fontSize: 14, color: v.tone, whiteSpace: 'nowrap' }}>
         <span aria-hidden style={{ marginRight: 6 }}>{v.mark}</span>{v.label}
       </td>

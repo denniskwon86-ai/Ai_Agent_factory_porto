@@ -96,7 +96,14 @@ def _fingerprint(baseline_fp: str, assumptions: Dict[str, float]) -> str:
     """계산 지문 = 기준선 + 가정 + 산식 판.
 
     ★★★ 셋 중 하나라도 다르면 다른 지문이어야 한다 — 그래야 「이 숫자는 무엇으로
-      만들었나」에 답할 수 있다."""
+      만들었나」에 답할 수 있다.
+
+    ⚠️ **`sort_keys=True` 는 지금 시험으로 관측되지 않는다**(2026-08-19 변이 검사).
+      바깥 키는 코드에 박힌 세 개 그대로이고, `assumptions` 는 이미 `sorted()` 로
+      쌓기 때문에 꺼도 같은 문자열이 나온다. 그래도 남긴다 — 나중에 키가 하나
+      늘거나 `assumptions` 를 다른 곳에서 만들어 넣는 순간, 이것이 없으면 **같은
+      입력이 실행마다 다른 지문**을 내기 시작하고 그 고장은 조용하다.
+      없는 시험을 지어내 초록으로 덮지 않는다."""
     body = json.dumps({"baseline": baseline_fp, "calc": CALC_VERSION,
                        "assumptions": {k: round(assumptions[k], 6)
                                        for k in sorted(assumptions)}},

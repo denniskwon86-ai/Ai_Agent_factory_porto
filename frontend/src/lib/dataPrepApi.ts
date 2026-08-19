@@ -23,6 +23,11 @@ export type DatasetState =
 export type OutputState = 'AVAILABLE' | 'AVAILABLE_WITH_WARNING' | 'BLOCKED';
 
 export interface DatasetReadiness {
+  /** 계약이 선언한 사람이 읽는 이름. **없을 수 있다** — 없으면 화면이 계약
+   *  이름을 그대로 쓴다(계약 이름을 여기 복사하지 않는다). */
+  label?: string;
+  /** 이 데이터가 무엇에 쓰이는지. 없을 수 있다. */
+  purpose?: string;
   dataset_contract_key: string;
   state: DatasetState;
   next_action: string;
@@ -93,6 +98,12 @@ const BASE = '/api/v1/data-preparation';
 
 export async function listKits() {
   return unwrap<{ kits: any[] }>(await apiFetch(`${BASE}/kits`), '데이터 키트 목록');
+}
+
+// ★ 사용자에게 `ki_…` 를 타이핑하라고 요구하지 않기 위한 목록.
+export async function listInstances() {
+  return unwrap<{ instances: any[] }>(
+    await apiFetch(`${BASE}/instances`), '키트 인스턴스 목록');
 }
 
 export async function getInstance(instanceId: string) {

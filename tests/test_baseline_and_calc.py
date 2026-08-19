@@ -35,6 +35,15 @@ def test_the_same_set_gives_the_same_fingerprint():
     assert bb.fingerprint_for(["a"]) != bb.fingerprint_for(["a", "b"])
 
 
+def test_the_fingerprint_is_the_set_itself_not_how_many():
+    """★★★ 개수만 담으면 **다른 판 두 개**가 같은 기준선으로 통과한다.
+
+    ⚠️ 그러면 「같은 지문 = 같은 근거」라는 약속이 거짓이 되고, 두 회의가 서로 다른
+      숫자를 같은 이름으로 부른다."""
+    assert bb.fingerprint_for(["ds_a", "ds_b"]) != bb.fingerprint_for(["ds_c", "ds_d"])
+    assert bb.fingerprint_for(["ds_a"]) != bb.fingerprint_for(["ds_z"])
+
+
 def test_a_baseline_pins_ids_not_a_latest_pointer():
     b = bb.build([_snap("ds_2"), _snap("ds_1")], scope=SCOPE)
     assert b.snapshot_ids == ["ds_1", "ds_2"], "집합이 정렬돼 고정되지 않았다"
@@ -203,6 +212,28 @@ def test_a_missing_base_value_is_not_filled_with_zero(missing):
     base = {k: v for k, v in BASE.items() if k != missing}
     with pytest.raises(cg.CalcError):
         cg.simulate(_B(), base, {})
+
+
+def test_a_non_numeric_assumption_is_refused_not_read_as_zero():
+    """★★★ 숫자가 아닌 가정을 0으로 읽으면 **「가정하지 않음」과 「0으로 가정」**이
+      같아진다 — 화면은 그 둘을 구분해 보여 줄 수 없고, 결과는 그럴듯하다."""
+    for bad in ("열흘", None, [], {"v": 1}):
+        with pytest.raises(cg.CalcError) as e:
+            cg.normalize_assumptions({"lead_time_days": bad})
+        assert "숫자가 아닙니다" in str(e.value), f"{bad!r} 가 조용히 통과했다"
+
+
+def test_a_zero_length_period_is_refused_not_divided_by():
+    """★★★ 기간이 0이면 **하루당 값을 낼 수 없다.**
+
+    ⚠️ 여기서 막지 않으면 0으로 나누거나(폭발) 0으로 채운다(조용한 거짓말). 둘 다
+      회의에 올라가는 숫자다."""
+    base = dict(BASE)
+    for bad in (0.0, -1.0):
+        base["period_days"] = bad
+        with pytest.raises(cg.CalcError) as e:
+            cg.simulate(_B(), base, {"lead_time_days": 1.0})
+        assert "기간" in str(e.value), f"period_days={bad} 가 통과했다"
 
 
 def test_an_unknown_driver_is_refused_not_ignored():

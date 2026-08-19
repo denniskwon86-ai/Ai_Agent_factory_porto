@@ -173,6 +173,29 @@ def dataset_keys(profile: Any) -> List[str]:
                    if isinstance(d, dict) and str(d.get("dataset_contract_key", "")).strip()})
 
 
+def dataset_labels(profile: Any) -> Dict[str, Dict[str, str]]:
+    """계약 이름 → 사람이 읽는 이름·쓰임새.
+
+    ★★★ 설계 §12: 기술 ID 를 앞세우지 않는다. 그런데 이름은 **계약과 함께** 산다 —
+      화면마다 제 나름의 번역표를 두면 같은 데이터가 화면마다 다른 이름으로 불린다.
+      그래서 여기서 한 번 꺼내 모든 응답에 실어 보낸다.
+
+    ⚠️ 이름이 선언되지 않았으면 **비워 둔다**. 계약 이름을 그대로 이름칸에 복사하면
+      화면은 「이름이 없다」와 「이름이 계약 이름과 같다」를 구분할 수 없다."""
+    if not isinstance(profile, dict):
+        return {}
+    out: Dict[str, Dict[str, str]] = {}
+    for d in (profile.get("datasets") or []):
+        if not isinstance(d, dict):
+            continue
+        key = str(d.get("dataset_contract_key", "")).strip()
+        if not key:
+            continue
+        out[key] = {"label": str(d.get("label", "") or "").strip(),
+                    "purpose": str(d.get("purpose", "") or "").strip()}
+    return out
+
+
 def outputs(profile: Any) -> List[Dict[str, Any]]:
     """이 키트가 만들 수 있다고 선언한 산출물들. **이름순으로 돌려준다.**
 

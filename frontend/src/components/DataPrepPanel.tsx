@@ -6,8 +6,8 @@ import { HubDialog } from '../design/HubDialog';
 import { Panel } from '../design/HubShell';
 import { DataReadinessBoard } from './DataReadinessBoard';
 import {
-  certifySnapshot, DataPrepError, getInstance, listKits, listSnapshots,
-  uploadSnapshot,
+  certifySnapshot, DataPrepError, getInstance, listInstances, listKits,
+  listSnapshots, uploadSnapshot,
 } from '../lib/dataPrepApi';
 
 // [BDR-2·3·5 / Wave H] 업무 데이터 준비 패널.
@@ -44,9 +44,17 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
   const [kits, setKits] = useState<any[] | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [instanceId, setInstanceId] = useState('');
+  //: `null` = 아직 못 읽음, `[]` = 정말 0건. ⚠️ 둘을 같은 화면으로 그리면 사용자가
+  //:   원인을 데이터에서 찾는다.
+  const [instances, setInstances] = useState<any[] | null>(null);
   const [instance, setInstance] = useState<any | null>(null);
   const [snapshots, setSnapshots] = useState<any[]>([]);
   const [busy, setBusy] = useState('');
+  //: 계약 이름 → 사람이 읽는 이름. ⚠️ 화면이 제 나름의 번역표를 만들지 않는다 —
+  //:   서버가 계약과 함께 준 것만 쓴다(없으면 계약 이름 그대로).
+  const labelOf = (key: string) =>
+    (instance?.required_datasets || []).find(
+      (d: any) => d.dataset_contract_key === key)?.label || key;
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
@@ -56,6 +64,10 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
         const err = e as DataPrepError;
         setError({ message: err?.message || '', status: err?.status || 0 });
       });
+    //: ⚠️ 목록 실패가 키트 화면까지 막지 않는다 — 실패는 목록 자리에만 남긴다.
+    listInstances()
+      .then((d) => setInstances(d.instances || []))
+      .catch(() => setInstances(null));
   }, []);
 
   async function openInstance(id: string) {
@@ -156,11 +168,52 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
               )}
 
               <h4 style={{ margin: '16px 0 8px', fontSize: 15 }}>키트 인스턴스 열기</h4>
+
+              {/* ★★★ 먼저 «이미 있는 것» 을 보여 준다. id 를 외워 오라고 하지 않는다. */}
+              {instances === null ? (
+                <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
+                  인스턴스 목록을 지금 확인하지 못했습니다 — 아래에 id 를 직접 넣어
+                  열 수 있습니다.
+                </div>
+              ) : instances.length === 0 ? (
+                <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
+                  이 조직 범위에 적용된 업무키트가 아직 없습니다.
+                </div>
+              ) : (
+                <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 12px' }}>
+                  {instances.map((it: any) => (
+                    <li key={it.instance_id} style={{ marginBottom: 6 }}>
+                      {/* ★ 줄 전체가 하나의 누를 곳이다 — 이름 옆에 작은 «열기» 를
+                          따로 두면 누를 곳이 이름과 어긋난다. */}
+                      <button
+                        onClick={() => { setInstanceId(it.instance_id);
+                                         openInstance(it.instance_id); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                          textAlign: 'left', padding: '10px 12px',
+                          border: '1px solid #e5e7eb', borderRadius: 6,
+                          background: '#fff', cursor: 'pointer', fontSize: 14,
+                          fontFamily: 'inherit', color: 'inherit',
+                        }}>
+                        <span style={{ flex: 1 }}>
+                          {/* 사람이 읽는 이름이 먼저다(설계 §12). */}
+                          <strong>{it.label || it.kit_id}</strong>
+                          <span style={{ color: '#6b7280', marginLeft: 8, fontSize: 12 }}>
+                            {it.scope_node_id} · {it.entity_mode} · {it.instance_id}
+                          </span>
+                        </span>
+                        <span style={{ color: '#2563eb', fontSize: 13 }}>열기</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                 <input
                   value={instanceId}
                   onChange={(e) => setInstanceId(e.target.value)}
-                  placeholder="ki_ 로 시작하는 인스턴스 id"
+                  placeholder="목록에 없는 인스턴스 id 를 직접 넣습니다(선택)"
                   style={{
                     flex: 1, padding: '8px 10px', border: '1px solid #d1d5db',
                     borderRadius: 6, fontSize: 14,
@@ -199,7 +252,12 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                       <tbody>
                         {(instance.bindings || []).map((b: any) => (
                           <tr key={b.binding_id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                            <td style={{ padding: 8, fontSize: 14 }}>{b.dataset_contract_key}</td>
+                            <td style={{ padding: 8, fontSize: 14 }}>
+                              {labelOf(b.dataset_contract_key)}
+                              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                                {b.dataset_contract_key}
+                              </div>
+                            </td>
                             <td style={{ padding: 8, fontSize: 14 }}>
                               {b.state}
                               {b.blocked_reason && (
@@ -223,6 +281,30 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                             </td>
                           </tr>
                         ))}
+                        {/* ★★★ 계약이 요구하는데 **아직 연결되지 않은** 것도 한 줄로
+                            남긴다. 연결된 것만 보이면 화면은 「다 됐다」처럼 보인다. */}
+                        {(instance.required_datasets || [])
+                          .filter((d: any) => !d.bound)
+                          .map((d: any) => (
+                            <tr key={d.dataset_contract_key}
+                                style={{ borderBottom: '1px solid #e5e7eb' }}>
+                              <td style={{ padding: 8, fontSize: 14 }}>
+                                {d.label || d.dataset_contract_key}
+                                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                                  {d.dataset_contract_key}
+                                </div>
+                              </td>
+                              <td style={{ padding: 8, fontSize: 14, color: '#b45309' }}>
+                                원천 미지정
+                                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                                  이 데이터를 어디서 가져올지 아직 고르지 않았습니다.
+                                </div>
+                              </td>
+                              <td style={{ padding: 8, fontSize: 13, color: '#6b7280' }}>
+                                원천을 고른 뒤 올릴 수 있습니다.
+                              </td>
+                            </tr>
+                          ))}
                       </tbody>
                     </table>
                   )}
@@ -233,7 +315,7 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                       <ul style={{ paddingLeft: 18, margin: '0 0 16px' }}>
                         {snapshots.map((s) => (
                           <li key={s.snapshot_id} style={{ fontSize: 14, marginBottom: 8 }}>
-                            {s.dataset_contract_key} · {s.state} · {s.row_count}행
+                            {labelOf(s.dataset_contract_key)} · {s.state} · {s.row_count}행
                             {/* ★ 성격 표시는 서버가 준 문구를 그대로 쓴다 — 화면마다
                                 각자 붙이면 한 화면에서 빠진다. */}
                             <div style={{ fontSize: 12, color: '#6b7280' }}>

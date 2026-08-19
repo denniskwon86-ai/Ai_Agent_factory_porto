@@ -88,6 +88,17 @@ def _visible_scopes(p: Principal) -> List[str]:
     return [str(x) for x in (getattr(p.scope, "readable_scope_nodes", ()) or ()) if str(x)]
 
 
+def _all_scopes() -> List[str]:
+    """무제한 주체 전용 — 지금 저장소에 있는 모든 범위 노드.
+
+    ⚠️ 이것을 일반 경로에서 쓰면 범위 통제가 사라진다. `unrestricted` 분기에서만
+      부른다."""
+    with store.transaction() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT scope_node_id FROM kit_instances").fetchall()
+    return [str(r[0]) for r in rows if str(r[0] or "")]
+
+
 def _instance_or_404(p: Principal, instance_id: str) -> Dict[str, Any]:
     """인스턴스를 **보이는 범위 안에서만** 찾는다.
 
@@ -209,16 +220,42 @@ async def create_instance(req: InstanceCreateRequest,
     return {"status": "success", "data": row}
 
 
+@router.get("/instances")
+async def list_instances(p: Principal = Depends(current_principal)):
+    """이 조직·문맥에서 **내가 볼 수 있는** 키트 인스턴스들.
+
+    ★★★ 이 목록이 없으면 화면은 사용자에게 `ki_…` 를 «타이핑하라» 고 요구한다.
+      기능은 도는데 사람이 시작할 수 없는 화면이 되고, 그것은 도는 것이 아니다.
+
+    ⚠️ 범위 밖은 **개수조차** 세지 않는다 — `store.list_instances` 가 보이는 범위만
+      묻고, 범위가 비면 빈 목록을 돌려준다(「비었으니 전부」가 아니다)."""
+    require_caps(p, PROJECT_RUN, resource="data_preparation", action="instances:list")
+    ctx = _ctx(p)
+    scopes = _all_scopes() if p.scope.unrestricted else _visible_scopes(p)
+    rows = store.list_instances(tenant_id=str(ctx.get("tenant_id", "")),
+                                entity_mode=str(ctx.get("entity_mode", "")),
+                                scope_node_ids=scopes)
+    return {"status": "success", "data": {"instances": rows}}
+
+
 @router.get("/instances/{instance_id}")
 async def get_instance(instance_id: str, p: Principal = Depends(current_principal)):
     require_caps(p, PROJECT_RUN, resource="data_preparation",
                  action=f"instances:get:{instance_id}")
     row = _instance_or_404(p, instance_id)
     kit = kit_registry.resolve(store, row["kit_id"], row["version"])
-    keys = kit_registry.dataset_keys((kit or {}).get("profile"))
+    profile = (kit or {}).get("profile")
+    keys = kit_registry.dataset_keys(profile)
+    labels = kit_registry.dataset_labels(profile)
+    #: ★★★ 계약이 요구하는 **전부**를 돌려준다 — 결속이 없는 것도 이름과 함께.
+    #:   결속된 것만 보내면 화면은 「빠진 데이터」를 그릴 재료가 없고, 사용자는
+    #:   무엇을 더 연결해야 하는지 이 화면에서 알 수 없다.
+    bindings = store.list_bindings(instance_id)
+    bound = {str(b.get("dataset_contract_key", "")) for b in bindings}
+    required = [{"dataset_contract_key": k, "bound": k in bound, **labels.get(k, {})}
+                for k in keys]
     return {"status": "success",
-            "data": {**row,
-                     "bindings": store.list_bindings(instance_id),
+            "data": {**row, "bindings": bindings, "required_datasets": required,
                      "coverage": source_binding.coverage(store, instance_id, keys)}}
 
 
@@ -388,8 +425,14 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
     except m.DataPreparationError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    #: ★ 이름을 함께 싣는다 — 화면이 `material_arrivals` 를 그대로 사람에게 보여
+    #:   주지 않도록. 이름은 계약과 함께 살아야 화면마다 달라지지 않는다.
+    labels = kit_registry.dataset_labels(profile)
+    datasets = [{**d, **labels.get(str(d.get("dataset_contract_key", "")), {})}
+                for d in (result.get("datasets") or [])]
     return {"status": "success",
-            "data": {**result, "kit_id": inst["kit_id"], "version": inst["version"],
+            "data": {**result, "datasets": datasets,
+                     "kit_id": inst["kit_id"], "version": inst["version"],
                      "instance_id": instance_id,
                      "data_kind": str(kit.get("mode") or "")}}
 

@@ -42,6 +42,8 @@ SHOTS = [
     ("경영홈-관리자", ADMIN, ""),
     #: [Wave H] 업무 데이터 준비 — 파일럿 동선 2~4칸
     ("업무데이터준비-관리자", ADMIN, "업무 데이터 준비"),
+    #: ★ 목록만 찍으면 «열 수 있다» 만 본 것이다. 실제로 열어 준비도 보드를 본다.
+    ("업무데이터준비-준비도", ADMIN, "업무 데이터 준비>#파일럿 시연"),
     ("시나리오-관리자", ADMIN, "시나리오 시뮬레이션"),
     ("의사결정안건-관리자", ADMIN, "의사결정 안건"),
     ("기준정보-관리자", ADMIN, "기준정보 마스터"),
@@ -153,6 +155,10 @@ def open_panel(page: Page, path: str) -> tuple[bool, str]:
         if tab.startswith("#"):
             want = tab[1:].strip()
             row = dlg.locator(".hub-main button", has_text=want)
+            #: ⚠️ `HubShell` 을 거치지 않고 `HubDialog` 안에 바로 작업면을 그리는 화면이
+            #:   있다(업무 데이터 준비). 그때는 `.hub-main` 이 없으므로 모달 전체를 본다.
+            if row.count() == 0:
+                row = dlg.locator("button", has_text=want)
             if row.count() == 0:
                 return False, f"작업면 목록에 «{want}» 가 없다"
             row.first.click()

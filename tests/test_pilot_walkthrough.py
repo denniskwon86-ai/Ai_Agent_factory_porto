@@ -245,3 +245,106 @@ def test_a_baseline_cannot_be_built_from_another_orgs_snapshot(client):
     r = client.post("/api/v1/baseline/builds", headers=H, json={
         "instance_id": inst["instance_id"], "snapshot_ids": ["ds_남의판"]})
     assert r.status_code == 404, r.text
+
+
+def test_an_empty_snapshot_list_is_refused_not_treated_as_latest(client):
+    """★★★ 「알아서 최신으로」는 **재현할 수 없는 기준선**을 만든다.
+
+    ⚠️ 빈 목록을 받아 주면 그 기준선은 다음 주에 다른 숫자를 낸다. 같은 이름으로
+      다른 답을 내는 것이 재현성 주장 전체를 무너뜨린다."""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    for payload in ([], ["", "  "]):
+        r = client.post("/api/v1/baseline/builds", headers=H, json={
+            "instance_id": inst["instance_id"], "snapshot_ids": payload})
+        assert r.status_code == 422, f"빈 목록 {payload!r} 이 받아들여졌다: {r.text[:200]}"
+        assert "snapshot_ids" in r.text
+
+
+def test_an_instance_outside_my_scope_is_not_opened(client, monkeypatch):
+    """★★★ 볼 수 없는 범위의 인스턴스는 **열리지 않는다.**
+
+    ⚠️ 「없다」와 「못 본다」를 같은 404 로 답한다 — 다르게 답하면 그 응답이
+      「그 조직에 그런 자원이 있다」를 알려 주는 신호가 된다.
+
+    ★★★ **이 시험만 `ADMIN` 을 쓰지 않는다.** 이 파일의 나머지는 전권 관리자로 도는데,
+      전권 관리자는 `scope.unrestricted` 라 **범위 판정 자체를 지나지 않는다** — 그
+      신원으로 「막히는가」를 물으면 통제가 꺼진 채 초록이 뜬다(2026-08-19 변이 검사가
+      이것을 잡았다: 범위 비교를 통째로 없애도 관통 시험이 전부 통과했다)."""
+    other = {"X-Factory-User": org_seed.MEMBER_B}
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    iid = inst["instance_id"]
+
+    #: 같은 사용자가 **다른 범위**로 옮겨 간 상황. 인스턴스는 그대로 있다.
+    monkeypatch.setattr(dp, "_visible_scopes", lambda p: ["n_다른조직"])
+    monkeypatch.setattr(bc, "_visible_scopes", lambda p: ["n_다른조직"], raising=False)
+
+    r = client.post("/api/v1/baseline/builds", headers=other, json={
+        "instance_id": iid, "snapshot_ids": ["ds_아무거나"]})
+    assert r.status_code == 404, "범위 밖 인스턴스가 열렸다: " + r.text[:200]
+    #: ⚠️ 사유가 「그 판이 없다」로 나오면 **인스턴스의 존재가 새어 나간다.**
+    assert "인스턴스" in r.text, "존재를 시인하는 사유가 돌아왔다: " + r.text[:200]
+    assert "ds_아무거나" not in r.text, "찾던 판 id 를 되돌려 주며 존재를 시인했다"
+
+    #: 준비도도 같은 답이어야 한다 — 한쪽 문만 잠그면 옆문으로 들어온다.
+    assert client.get(f"/api/v1/data-preparation/instances/{iid}/readiness",
+                      headers=other).status_code == 404
+
+    #: 목록에서는 **개수조차** 세지 않는다.
+    listed = _data(client.get("/api/v1/data-preparation/instances", headers=other), "목록")
+    assert [i for i in listed["instances"] if i["instance_id"] == iid] == []
+
+    #: ★ 대조군 — 같은 요청을 **원래 범위**로 하면 404 가 아니다. 이것이 없으면
+    #:   「전부 404」인 고장을 통제로 착각한다(2026-08-09 사고와 같은 종류).
+    ok = client.post("/api/v1/baseline/builds", headers=H, json={
+        "instance_id": iid, "snapshot_ids": ["ds_아무거나"]})
+    assert ok.status_code == 404 and "Snapshot" in ok.text or "판" in ok.text, (
+        "원래 범위에서도 인스턴스를 못 찾는다 — 시험이 통제가 아니라 고장을 보고 있다: "
+        + ok.text[:200])
+
+
+def test_the_instance_list_lets_a_user_start_without_typing_an_id(client):
+    """★★★ 이 목록이 없으면 화면은 사용자에게 `ki_…` 를 «타이핑하라» 고 요구한다.
+
+    기능이 도는 것과 사람이 시작할 수 있는 것은 다르다."""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0", "label": "파일럿 시연",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    listed = _data(client.get("/api/v1/data-preparation/instances", headers=H), "목록")
+    mine = [i for i in listed["instances"] if i["instance_id"] == inst["instance_id"]]
+    assert mine, "방금 만든 인스턴스가 목록에 없다"
+    #: ★ 사람이 읽는 이름이 함께 와야 화면이 id 를 앞세우지 않을 수 있다.
+    assert mine[0]["label"] == "파일럿 시연"
+
+
+def test_every_required_dataset_is_named_even_when_it_has_no_source(client):
+    """★★★ 결속된 것만 보내면 화면은 「빠진 데이터」를 그릴 재료가 없다.
+
+    ⚠️ 그러면 원천을 하나도 안 고른 인스턴스가 「연결할 것이 없다」처럼 보인다."""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    got = _data(client.get(
+        f"/api/v1/data-preparation/instances/{inst['instance_id']}", headers=H), "인스턴스")
+
+    req = got["required_datasets"]
+    assert req, "계약이 요구하는 데이터셋이 하나도 오지 않았다"
+    assert all(not d["bound"] for d in req), "결속이 없는데 bound 가 참이다"
+    arrivals = [d for d in req if d["dataset_contract_key"] == "material_arrivals"]
+    assert arrivals, "material_arrivals 가 요구 목록에 없다"
+    #: ★ 이름이 계약 이름과 **달라야** 화면이 §12(기술 ID 를 앞세우지 않는다)를 지킬 수 있다.
+    assert arrivals[0]["label"] and arrivals[0]["label"] != "material_arrivals"
+
+    #: 준비도 응답도 같은 이름을 실어 보낸다 — 화면마다 다른 이름이 되지 않도록.
+    ready = _data(client.get(
+        f"/api/v1/data-preparation/instances/{inst['instance_id']}/readiness",
+        headers=H), "준비도")
+    by_key = {d["dataset_contract_key"]: d for d in ready["datasets"]}
+    assert by_key["material_arrivals"]["label"] == arrivals[0]["label"]
