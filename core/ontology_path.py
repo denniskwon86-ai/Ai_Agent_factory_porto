@@ -136,6 +136,18 @@ def trace(start: Any, end: Any, *, baseline: Any = None,
         #: ★ 근거가 빠진 칸을 **드러낸다** — 화면이 「이 경로는 아직 다 설명되지
         #:   않는다」를 말할 수 있어야 한다.
         "missing_evidence": sorted(set(missing)),
+        #: ★★★ 사람이 읽는 이름으로도 준다. 계약키(`purchase_orders`)를 그대로
+        #:   경영진 화면에 내보내면 §12 위반이고, 무엇이 빠졌는지도 안 읽힌다.
+        "missing_steps": [{"key": st["key"], "label": st["label"],
+                           "dataset_key": st["dataset_key"]}
+                          for st in steps
+                          if st["dataset_key"] and not st["snapshot_id"]],
+        #: ★★★ **「근거를 확인했다」와 「아직 안 봤다」는 다르다.**
+        #:   기준선 없이 부르면 모든 칸이 「근거 없음」으로 보이는데, 그것을 그대로
+        #:   경고로 그리면 화면은 아직 고르지도 않은 사용자에게 「근거가 없다」고
+        #:   말한다 — 그리고 같은 화면 아래의 안건은 그 판을 근거로 쓴다.
+        #:   한 화면에 서로 다른 두 답이 뜨는 것이 이 갈래의 이유다.
+        "evidence_checked": snapshot_index is not None,
         "complete": not missing,
         "baseline_fingerprint": str(getattr(baseline, "fingerprint", "") or ""),
         "data_kind": str(getattr(baseline, "data_kind", "") or ""),

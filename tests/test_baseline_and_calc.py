@@ -378,3 +378,16 @@ def test_the_briefing_numbers_come_from_the_table_not_prose():
     rows = {r["key"]: r for v in pkg.views for r in v["highlights"]}
     text = "\n".join(dpkg.briefing_lines(pkg))
     assert f"{rows['purchase_payment']['delta']:+,.0f}" in text
+
+
+def test_the_briefing_names_missing_steps_for_people():
+    """★★★ 「근거가 없는 단계: purchase_orders」 는 경영 브리핑의 문장이 아니다.
+
+    ⚠️ 읽는 사람이 그것이 무엇인지 모르면 「빠진 것이 있다」는 사실만 남고 무엇을
+      채워야 하는지는 남지 않는다 — 그러면 아무도 채우지 않는다."""
+    pkg = _pkg(path=op.trace("purchase_order", "cash_pl", snapshot_index={}))
+    line = [x for x in dpkg.briefing_lines(pkg) if "근거가 없는 단계" in x]
+    assert line, "빠진 단계를 브리핑이 숨겼다"
+    #: ★ 계약키가 그대로 나오면 실패다.
+    assert "purchase_orders" not in line[0], f"계약키가 브리핑에 나왔다: {line[0]}"
+    assert "구매주문" in line[0], f"사람이 읽는 이름이 없다: {line[0]}"

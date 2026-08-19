@@ -79,7 +79,11 @@ CREATE TABLE IF NOT EXISTS program_status(
     replacement_release_id TEXT NOT NULL DEFAULT '',
     changed_by TEXT NOT NULL DEFAULT '',
     changed_at TEXT NOT NULL DEFAULT '',
-    dependents_at_change TEXT NOT NULL DEFAULT '{}'
+    dependents_at_change TEXT NOT NULL DEFAULT '{}',
+    -- ★★★ 이 상태가 «어느 업무 데이터 위에서» 정해졌는가.
+    --   빈 문자열은 「봉인하지 않음」이고, 그것은 「데이터를 안 쓴다」와 다르다 —
+    --   후자는 NOT_APPLICABLE 로 적는다.
+    data_fingerprint TEXT NOT NULL DEFAULT ''
 );
 -- append-only. 상태 변경 이력은 지우지 않는다 — "언제부터 못 쓰게 됐나"에 답해야 한다.
 CREATE TABLE IF NOT EXISTS program_status_history(
@@ -91,7 +95,8 @@ CREATE TABLE IF NOT EXISTS program_status_history(
     replacement_release_id TEXT NOT NULL DEFAULT '',
     actor TEXT NOT NULL DEFAULT '',
     at TEXT NOT NULL DEFAULT '',
-    dependents TEXT NOT NULL DEFAULT '{}'
+    dependents TEXT NOT NULL DEFAULT '{}',
+    data_fingerprint TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_pl_hist ON program_status_history(release_id, at);
 """
@@ -122,6 +127,14 @@ class ProgramLifecycle:
         # 경로가 런타임에 바뀌면(테스트 격리) DDL 을 다시 돌려야 한다 — 안 하면 "no such table".
         if self._ready != self.db_path:
             conn.executescript(_DDL)
+            #: ⚠️ 이미 만들어진 DB 에는 `CREATE TABLE IF NOT EXISTS` 가 컬럼을 더해
+            #:   주지 않는다. 없으면 여기서 붙인다 — 없는 채로 두면 봉인이 조용히
+            #:   버려지고, 「봉인했다」는 기록만 남는다.
+            for table in ("program_status", "program_status_history"):
+                cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+                if cols and "data_fingerprint" not in cols:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN "
+                                 f"data_fingerprint TEXT NOT NULL DEFAULT ''")
             conn.commit()
             self._ready = self.db_path
         return conn
@@ -248,8 +261,14 @@ class ProgramLifecycle:
     # ── 변경 ──────────────────────────────────────────────────────────
     def set_status(self, release_id: str, status: str, actor: str, reason: str = "",
                    replacement_release_id: str = "",
-                   acknowledge_dependents: bool = False) -> Dict[str, Any]:
-        """사용여부를 바꾼다. IT 관리자 권한 검사는 **API 계층**에서 한다."""
+                   acknowledge_dependents: bool = False,
+                   data_fingerprint: str = "") -> Dict[str, Any]:
+        """사용여부를 바꾼다. IT 관리자 권한 검사는 **API 계층**에서 한다.
+
+        ★★★ `data_fingerprint` 는 이 결정이 **어느 업무 데이터 위에서** 내려졌는지다.
+          운영 승격 뒤에 원천 데이터가 바뀌면, 도는 앱은 «승인받은 것과 다른 숫자» 를
+          그리기 시작한다. 그 순간 아무 오류도 나지 않는다 — 그래서 승인 시점의
+          데이터 집합을 여기 못박아 두고, 나중에 대조할 수 있게 한다."""
         if status not in STATUSES:
             raise ProgramLifecycleError(
                 f"허용되지 않은 상태입니다: {status} (허용: {', '.join(STATUSES)})")
@@ -306,21 +325,25 @@ class ProgramLifecycle:
         try:
             conn.execute(
                 "INSERT INTO program_status(release_id,status,reason,"
-                "replacement_release_id,changed_by,changed_at,dependents_at_change) "
-                "VALUES(?,?,?,?,?,?,?) ON CONFLICT(release_id) DO UPDATE SET "
+                "replacement_release_id,changed_by,changed_at,dependents_at_change,"
+                "data_fingerprint) "
+                "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(release_id) DO UPDATE SET "
                 "status=excluded.status, reason=excluded.reason, "
                 "replacement_release_id=excluded.replacement_release_id, "
                 "changed_by=excluded.changed_by, changed_at=excluded.changed_at, "
-                "dependents_at_change=excluded.dependents_at_change",
+                "dependents_at_change=excluded.dependents_at_change, "
+                "data_fingerprint=excluded.data_fingerprint",
                 (release_id, status, reason or "", replacement_release_id or "",
-                 actor, _now(), json.dumps(dep, ensure_ascii=False)))
+                 actor, _now(), json.dumps(dep, ensure_ascii=False),
+                 str(data_fingerprint or "")))
             conn.execute(
                 "INSERT INTO program_status_history(event_id,release_id,from_status,"
-                "to_status,reason,replacement_release_id,actor,at,dependents) "
-                "VALUES(?,?,?,?,?,?,?,?,?)",
+                "to_status,reason,replacement_release_id,actor,at,dependents,"
+                "data_fingerprint) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex[:16], release_id, prev["status"], status, reason or "",
                  replacement_release_id or "", actor, _now(),
-                 json.dumps(dep, ensure_ascii=False)))
+                 json.dumps(dep, ensure_ascii=False), str(data_fingerprint or "")))
             conn.commit()
         finally:
             conn.close()

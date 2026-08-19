@@ -112,6 +112,10 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
         #: 온톨로지 경로가 있으면 **계보**로 붙인다(없으면 없다고 적는다).
         "impact_path": (path or {}).get("path", []),
         "missing_evidence": (path or {}).get("missing_evidence", []),
+        #: ★★★ 같은 사실을 **사람이 읽는 이름**으로도 싣는다(설계 §12).
+        #:   `purchase_orders` 를 경영 브리핑에 그대로 내보내면 읽는 사람은 그것이
+        #:   무엇인지 모른 채 「모르는 게 있구나」로만 넘긴다.
+        "missing_steps": (path or {}).get("missing_steps", []),
     }
     #: ★ 안건의 «질문» 은 가장 크게 움직인 결과에서 뽑는다 — 지어내지 않는다.
     moved = sorted((r for r in rows if r["delta"]), key=lambda r: -abs(r["delta"]))
@@ -142,5 +146,10 @@ def briefing_lines(pkg: Package) -> List[str]:
     if pkg.evidence["missing_evidence"]:
         #: ⚠️ 근거가 빠진 칸을 브리핑에서 숨기지 않는다 — 숨기면 그 보고는 «전부
         #:   설명된 것» 으로 읽힌다.
-        out.append(f"⚠️ 근거가 없는 단계: {', '.join(pkg.evidence['missing_evidence'])}")
+        #: ★ 이름이 있으면 이름으로 말한다. 없으면 계약키라도 적는다 — 「빠진 것이
+        #:   있다」는 사실이 이름 유무보다 먼저다.
+        named = [str(st.get("label") or st.get("dataset_key") or "")
+                 for st in (pkg.evidence.get("missing_steps") or [])]
+        out.append("⚠️ 근거가 없는 단계: "
+                   + ", ".join(named or pkg.evidence["missing_evidence"]))
     return out

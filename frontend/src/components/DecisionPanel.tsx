@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { HubDialog } from '../design/HubDialog';
 import { Panel } from '../design/HubShell';
 import { createDecision, DataPrepError, getImpactPath } from '../lib/dataPrepApi';
+import { BASE_FIELDS, DRIVER_FIELDS, num } from '../lib/calcFields';
+import { BaselinePicker, type BaselineChoice } from './BaselinePicker';
 
 // [Wave G 11.4 / Wave H] 의사결정 안건 — 파일럿 동선 9·12칸.
 //
@@ -26,23 +28,26 @@ const CHAIN = [
   { key: 'cash_pl', label: '현금·손익' },
 ];
 
-const BASE_FIELDS = ['production_qty', 'ending_inventory', 'purchase_payment',
-  'ending_cash', 'operating_profit', 'power_cost', 'period_days'];
 
-function ImpactPath({ from, to }: { from: string; to: string }) {
+
+function ImpactPath({ from, to, pick }: {
+  from: string; to: string; pick: BaselineChoice;
+}) {
   const [data, setData] = useState<any | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     setErr(null);
-    getImpactPath(from, to)
+    getImpactPath(from, to, pick.instanceId, pick.snapshotIds)
       .then((d) => { if (alive) setData(d); })
       .catch((e: unknown) => {
         if (alive) setErr((e as DataPrepError)?.message || '경로를 읽지 못했습니다.');
       });
     return () => { alive = false; };
-  }, [from, to]);
+    //: ⚠️ 고른 판이 바뀌면 다시 잇는다 — 안 그러면 위쪽 경고와 아래쪽 안건이
+    //:   서로 다른 기준선을 말한다.
+  }, [from, to, pick.instanceId, pick.snapshotIds.join(',')]);
 
   if (err) return <div style={{ fontSize: 13, color: '#b91c1c' }}>{err}</div>;
   if (!data) return <div style={{ fontSize: 13, color: '#6b7280' }}>경로 확인 중…</div>;
@@ -64,11 +69,23 @@ function ImpactPath({ from, to }: { from: string; to: string }) {
           </span>
         ))}
       </div>
-      {/* ★★★ 근거가 빠진 칸을 **드러낸다.** 숨기면 「전부 근거가 있다」로 보인다. */}
-      {(data.missing_evidence || []).length > 0 && (
+      {/* ★★★ 「아직 안 봤다」와 「근거가 없다」를 **다르게** 말한다.
+          섞으면 고르지도 않은 사용자에게 「근거가 없다」고 말하게 되고, 같은 화면
+          아래의 안건은 그 판을 근거로 쓴다 — 한 화면에 두 답이 뜬다. */}
+      {!data.evidence_checked ? (
+        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+          아래에서 기준선을 고르면 각 단계가 어느 데이터 판에 서 있는지 표시합니다.
+        </div>
+      ) : (data.missing_steps || []).length > 0 ? (
         <div style={{ fontSize: 12, color: '#b45309', marginTop: 6 }}>
-          ⚠️ 근거가 없는 단계: {data.missing_evidence.join(', ')} — 이 경로는 아직 다
+          {/* ★ 계약키가 아니라 **사람이 읽는 단계 이름**으로 말한다(설계 §12). */}
+          ⚠️ 아직 근거가 없는 단계:{' '}
+          {data.missing_steps.map((s: any) => s.label).join(' · ')} — 이 경로는 아직 다
           설명되지 않습니다.
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: '#15803d', marginTop: 6 }}>
+          이 경로의 모든 단계가 고른 기준선 위에 서 있습니다.
         </div>
       )}
     </div>
@@ -77,11 +94,14 @@ function ImpactPath({ from, to }: { from: string; to: string }) {
 
 export function DecisionPanel({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({
-    instanceId: '', snapshotIds: '', title: '', owner: '', due: '',
-    from: 'purchase_order', to: 'cash_pl',
+    title: '', owner: '', due: '', from: 'purchase_order', to: 'cash_pl',
   });
-  const [base, setBase] = useState('');
-  const [drivers, setDrivers] = useState({ fx_rate_pct: '', lead_time_days: '', power_price_pct: '' });
+  //: * id 를 타이핑하게 하지 않는다 — 고르개가 목록에서 집어 준다.
+  const [pick, setPick] = useState<BaselineChoice>({ instanceId: '', snapshotIds: [] });
+  //: ★★★ 기준값을 **이름으로** 받는다. 순서로 받으면 한 칸 밀려도 오류가 나지 않고,
+  //:   「기말현금」 자리의 「영업이익」이 그럴듯한 표가 되어 회의에 올라간다.
+  const [base, setBase] = useState<Record<string, string>>({});
+  const [drivers, setDrivers] = useState<Record<string, string>>({});
   const [pkg, setPkg] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,33 +110,36 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
   const blocked = !form.title.trim() ? '안건 제목이 필요합니다.'
     : !form.owner.trim() ? '실행 책임자가 필요합니다 — 없는 안건은 「검토하겠습니다」로 끝납니다.'
       : !form.due.trim() ? '기한이 필요합니다 — 기한 없는 결정은 결정이 아닙니다.'
-        : !form.instanceId.trim() || !form.snapshotIds.trim()
-          ? '기준선(인스턴스·Snapshot)을 지정해 주십시오.'
+      : !pick.instanceId || pick.snapshotIds.length === 0
+        ? '기준선으로 쓸 업무키트와 인증된 데이터 판을 고르십시오.'
+        : BASE_FIELDS.some((f) => num(base[f.key] || '') === null)
+          ? '기준값을 모두 채워 주십시오 — 빈 칸을 0으로 채우면 결과가 완성돼 보입니다.'
           : '';
 
   async function run() {
     setError(null);
     setPkg(null);
-    const nums = base.split(/[\s,]+/).filter(Boolean).map(Number);
-    if (nums.length !== BASE_FIELDS.length || nums.some((n) => !Number.isFinite(n))) {
-      // ⚠️ 빈 값을 0으로 채우지 않는다 — 그러면 결과가 완성돼 보인다.
-      setError(`기준값 ${BASE_FIELDS.length}개를 순서대로 넣어 주십시오`
-        + '(생산량 · 기말재고 · 구매지급 · 기말현금 · 영업이익 · 전력비 · 기간).');
-      return;
-    }
     const baseValues: Record<string, number> = {};
-    BASE_FIELDS.forEach((k, i) => { baseValues[k] = nums[i]; });
+    for (const f of BASE_FIELDS) {
+      const n = num(base[f.key] || '');
+      if (n === null) {
+        // ⚠️ 빈 값을 0으로 채우지 않는다 — 그러면 결과가 완성돼 보인다.
+        setError(`기준값 «${f.label}» 이 비었습니다 — 빈 칸을 0으로 채우지 않습니다.`);
+        return;
+      }
+      baseValues[f.key] = n;
+    }
     const assumptions: Record<string, number> = {};
-    for (const [k, v] of Object.entries(drivers)) {
-      const n = Number(v);
-      if (v.trim() && Number.isFinite(n)) assumptions[k] = n;
+    for (const d of DRIVER_FIELDS) {
+      const n = num(drivers[d.key] || '');
+      if (n !== null) assumptions[d.key] = n;
     }
 
     setBusy(true);
     try {
       setPkg(await createDecision({
-        instance_id: form.instanceId.trim(),
-        snapshot_ids: form.snapshotIds.split(/[\s,]+/).filter(Boolean),
+        instance_id: pick.instanceId,
+        snapshot_ids: pick.snapshotIds,
         base_values: baseValues, assumptions,
         title: form.title.trim(), owner: form.owner.trim(), due: form.due.trim(),
         path_from: form.from, path_to: form.to,
@@ -150,7 +173,7 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
       }}>
         <Panel className="afs-fill">
           <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>영향 경로</h4>
-          <ImpactPath from={form.from} to={form.to} />
+          <ImpactPath from={form.from} to={form.to} pick={pick} />
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
             {(['from', 'to'] as const).map((side) => (
               <label key={side} style={{ fontSize: 13 }}>
@@ -173,22 +196,42 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
             {field('owner', '실행 책임자')}
             {field('due', '기한 (예: 2026-08-30)')}
           </div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            {field('instanceId', '키트 인스턴스 id')}
-            {field('snapshotIds', 'Snapshot id (공백/쉼표)', 2)}
+          <BaselinePicker value={pick} onChange={setPick} />
+
+          <h4 style={{ margin: '12px 0 8px', fontSize: 15 }}>기준값</h4>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+            gap: 10, marginBottom: 12,
+          }}>
+            {/* ★★★ 이름표를 단 칸으로 받는다 — 순서로 받으면 한 칸 밀려도 오류가
+                나지 않고, 그 표는 그럴듯하다. */}
+            {BASE_FIELDS.map((f) => (
+              <label key={f.key} style={{ fontSize: 13, color: '#374151' }}>
+                {f.label} <span style={{ color: '#6b7280' }}>({f.unit})</span>
+                <input value={base[f.key] || ''} inputMode="decimal"
+                  onChange={(e) => setBase({ ...base, [f.key]: e.target.value })}
+                  style={{
+                    display: 'block', width: '100%', marginTop: 4, padding: '8px 10px',
+                    border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14,
+                  }} />
+              </label>
+            ))}
           </div>
-          <input value={base} onChange={(e) => setBase(e.target.value)}
-            placeholder="기준값 7개를 순서대로: 생산량 기말재고 구매지급 기말현금 영업이익 전력비 기간"
-            style={{
-              width: '100%', padding: '8px 10px', border: '1px solid #d1d5db',
-              borderRadius: 6, fontSize: 14, marginBottom: 8,
-            }} />
+
+          <h4 style={{ margin: '12px 0 8px', fontSize: 15 }}>가정</h4>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            {(Object.keys(drivers) as (keyof typeof drivers)[]).map((k) => (
-              <input key={k} value={drivers[k]} placeholder={
-                k === 'fx_rate_pct' ? '환율 %' : k === 'lead_time_days' ? '도입 지연 일' : '전력단가 %'}
-                onChange={(e) => setDrivers({ ...drivers, [k]: e.target.value })}
-                style={{ flex: 1, padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14 }} />
+            {DRIVER_FIELDS.map((d) => (
+              <label key={d.key} style={{ flex: 1, fontSize: 13, color: '#374151' }}>
+                {d.label} <span style={{ color: '#6b7280' }}>({d.unit})</span>
+                <input value={drivers[d.key] || ''} inputMode="decimal" placeholder="0"
+                  onChange={(e) => setDrivers({ ...drivers, [d.key]: e.target.value })}
+                  style={{
+                    display: 'block', width: '100%', marginTop: 4, padding: '8px 10px',
+                    border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14,
+                  }} />
+                {/* * 이 숫자가 무엇을 움직이는지 옆에 적는다. */}
+                <span style={{ fontSize: 12, color: '#6b7280' }}>{d.hint}</span>
+              </label>
             ))}
           </div>
 

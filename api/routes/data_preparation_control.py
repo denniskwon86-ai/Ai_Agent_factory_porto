@@ -358,11 +358,18 @@ async def upload_snapshot(binding_id: str, file: UploadFile = File(...),
 async def list_snapshots(instance_id: str, p: Principal = Depends(current_principal)):
     require_caps(p, PROJECT_RUN, resource="data_preparation",
                  action=f"snapshots:list:{instance_id}")
-    _instance_or_404(p, instance_id)
+    inst = _instance_or_404(p, instance_id)
     rows = store.list_snapshots(instance_id)
+    #: ★ 계약이 선언한 이름을 함께 싣는다 — 화면이 `material_arrivals` 를 그대로
+    #:   사람에게 보여 주지 않도록(설계 §12). 키트를 못 읽으면 이름칸은 **비운다**;
+    #:   계약키를 이름칸에 복사하면 화면은 「이름이 없다」를 알 수 없다.
+    kit = kit_registry.resolve(store, inst["kit_id"], inst["version"])
+    labels = kit_registry.dataset_labels((kit or {}).get("profile"))
     return {"status": "success",
             "data": {"snapshots": [
-                {**r, "display_label": snapshot_service.display_label(r)} for r in rows]}}
+                {**r, "display_label": snapshot_service.display_label(r),
+                 **labels.get(str(r.get("dataset_contract_key", "")), {})}
+                for r in rows]}}
 
 
 @router.get("/snapshots/{snapshot_id}")

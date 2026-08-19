@@ -11,7 +11,7 @@
 """
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.deps import Principal, current_principal, require_caps, viewing_context
@@ -149,11 +149,23 @@ async def create_decision(req: DecisionRequest,
 
 @router.get("/impact-path")
 async def impact_path(start: str = "purchase_order", end: str = "cash_pl",
+                      instance_id: str = "",
+                      snapshot_ids: List[str] = Query(default=[]),
                       p: Principal = Depends(current_principal)):
-    """온톨로지 경로 하나. **수치는 없다** — 그것은 시뮬레이션이 답한다."""
+    """온톨로지 경로 하나. **수치는 없다** — 그것은 시뮬레이션이 답한다.
+
+    ★★★ 기준선을 함께 주면 **그 기준선으로** 근거를 잇는다. 주지 않으면 근거를
+      «확인하지 않은» 것이지 «없는» 것이 아니다 — 응답의 `evidence_checked` 가
+      그 둘을 가른다. 이것을 섞으면 한 화면에서 위쪽은 「근거 없음」, 아래쪽 안건은
+      그 판을 근거로 쓰는 상태가 된다(2026-08-19 화면에서 실제로 그랬다)."""
     require_caps(p, PROJECT_RUN, resource="baseline", action="impact-path")
+    index = None
+    if instance_id:
+        #: ⚠️ 범위 밖 인스턴스로 경로를 채워 주지 않는다 — 여기서도 같은 404 다.
+        _instance_or_404(p, instance_id)
+        index = _snapshot_index(instance_id, [str(x) for x in (snapshot_ids or [])])
     try:
-        return {"status": "success", "data": op.trace(start, end)}
+        return {"status": "success", "data": op.trace(start, end, snapshot_index=index)}
     except op.OntologyError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

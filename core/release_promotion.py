@@ -187,6 +187,39 @@ class _NotApplicable:
 NOT_APPLICABLE = _NotApplicable()
 
 
+#: ★ 「이 앱은 업무 데이터를 쓰지 않는다」를 **봉인값에도** 그대로 적는다.
+#: ⚠️ 빈 문자열로 적으면 「봉인하지 않았다」와 구분되지 않는다.
+DATA_NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+def data_fingerprint(readiness_state: Any) -> str:
+    """이 승격이 **어느 데이터 판 위에서** 일어났는가.
+
+    ★★★ 승격 검사는 「지금 준비됐는가」에 답한다. 그런데 승격 뒤에 원천이 바뀌면
+      도는 앱은 «승인받은 것과 다른 숫자» 를 그리기 시작하고, **아무 오류도 나지
+      않는다.** 그래서 승인 시점의 판 집합을 여기서 못박는다 — 나중에 「그때 그
+      데이터가 맞나」에 답할 수 있어야 하기 때문이다.
+
+    ⚠️ 지문은 `baseline_build.fingerprint_for` 를 그대로 쓴다. 여기서 따로 계산하면
+      같은 판 집합이 두 곳에서 다른 값을 내고, 대조가 곧 거짓말이 된다.
+    ⚠️ 준비되지 않은 데이터셋의 판은 **넣지 않는다** — 승격이 선 근거는 준비된 것뿐이다.
+    """
+    from core.baseline_build import fingerprint_for
+    from core.data_preparation import readiness as rd
+
+    if readiness_state is NOT_APPLICABLE:
+        return DATA_NOT_APPLICABLE
+    if not readiness_state:
+        #: 「확인하지 못했다」는 봉인할 것이 없다. 검사(`_check_readiness`)가 이미
+        #: 막지만, 여기서도 빈 값을 지어내지 않는다.
+        return ""
+    ids = [str(d.get("snapshot_id") or "")
+           for d in (readiness_state.get("datasets") or [])
+           if str(d.get("state") or "") in rd.OFFICIAL_STATES
+           and str(d.get("snapshot_id") or "")]
+    return fingerprint_for(ids) if ids else ""
+
+
 def run_checks(*, release: Any, release_id: str, lifecycle: Any,
                code_paths: Optional[List[str]] = None,
                readiness_state: Any = None, plane: Any = None) -> Verdict:
@@ -245,7 +278,12 @@ def promote(*, release: Any, release_id: str, lifecycle: Any, actor: str,
 
     from core.program_lifecycle import ACTIVE
 
+    #: ★★★ **무엇 위에서 올렸는지를 함께 못박는다.** 검사만 하고 지나가면 「그때
+    #:   준비돼 있었다」는 말은 남지만 「그때 무엇이었나」는 남지 않는다.
+    sealed = data_fingerprint(readiness_state)
     row = lifecycle.set_status(release_id, ACTIVE, actor=actor,
-                               reason=reason or "Preview 확인 후 운영 승격")
+                               reason=reason or "Preview 확인 후 운영 승격",
+                               data_fingerprint=sealed)
     return {"release_id": release_id, "status": ACTIVE,
+            "data_fingerprint": sealed,
             "checks": [c._asdict() for c in verdict.checks], "lifecycle": row}

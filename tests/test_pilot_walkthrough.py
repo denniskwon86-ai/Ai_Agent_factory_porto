@@ -348,3 +348,90 @@ def test_every_required_dataset_is_named_even_when_it_has_no_source(client):
         headers=H), "준비도")
     by_key = {d["dataset_contract_key"]: d for d in ready["datasets"]}
     assert by_key["material_arrivals"]["label"] == arrivals[0]["label"]
+
+
+def test_the_impact_path_says_unchecked_instead_of_missing(client):
+    """★★★ 「아직 안 봤다」와 「근거가 없다」는 **다른 말**이다.
+
+    ⚠️ 섞으면 화면 위쪽은 「근거 없음」이라 하고 같은 화면 아래의 안건은 그 판을
+      근거로 쓴다 — 한 화면에 두 답이 뜬다(2026-08-19 실제로 그랬다)."""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    iid = inst["instance_id"]
+
+    #: ① 기준선 없이 물으면 — 확인하지 않은 것이다.
+    bare = _data(client.get(
+        "/api/v1/baseline/impact-path?start=purchase_order&end=cash_pl",
+        headers=H), "경로")
+    assert bare["evidence_checked"] is False, "기준선 없이도 「확인했다」고 답한다"
+
+    #: ② 기준선을 주면 — 그 기준선으로 잇는다.
+    b = _data(client.post(
+        f"/api/v1/data-preparation/instances/{iid}/bindings", headers=H, json={
+            "dataset_contract_key": "material_arrivals",
+            "provider": "FILE_SNAPSHOT",
+            "config": {"file_name": "a.csv", "column_map": {"a": "A"}}}), "결속")
+    for action in ("validate", "approve", "activate"):
+        client.post(f"/api/v1/data-preparation/bindings/{b['binding_id']}/decision",
+                    headers=H, json={"action": action})
+    snap = _data(client.post(
+        f"/api/v1/data-preparation/bindings/{b['binding_id']}/snapshots", headers=H,
+        files={"file": ("a.csv", CSV, "text/csv")}), "판")
+    _data(client.post(
+        f"/api/v1/data-preparation/snapshots/{snap['snapshot_id']}/certify",
+        headers=H, json={"control": CONTROL}), "인증")
+
+    got = _data(client.get(
+        "/api/v1/baseline/impact-path?start=purchase_order&end=cash_pl"
+        f"&instance_id={iid}&snapshot_ids={snap['snapshot_id']}", headers=H), "경로")
+    assert got["evidence_checked"] is True
+    #: ★ 근거가 붙은 칸은 「없는 단계」에서 빠져야 한다 — 안건이 쓰는 판과 같은 답.
+    assert "material_arrivals" not in got["missing_evidence"], (
+        "안건은 근거로 쓰는 판을 경로는 「근거 없음」이라 한다")
+    #: ★ 남은 것은 **사람이 읽는 이름**으로도 온다(설계 §12).
+    assert got["missing_steps"], "아직 근거가 없는 단계가 있어야 하는데 비었다"
+    for st in got["missing_steps"]:
+        assert st["label"] and st["label"] != st["dataset_key"], (
+            f"계약키가 그대로 이름칸에 들어 있다: {st}")
+
+
+def test_the_impact_path_does_not_borrow_another_scopes_baseline(client):
+    """★★★ 범위 밖 인스턴스로 경로를 채워 주지 않는다 — 여기서도 같은 404 다."""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    r = client.get("/api/v1/baseline/impact-path?start=purchase_order&end=cash_pl"
+                   f"&instance_id={inst['instance_id']}",
+                   headers={"X-Factory-User": org_seed.MEMBER_B})
+    assert r.status_code == 404, "범위 밖 기준선으로 경로가 채워졌다: " + r.text[:200]
+
+
+def test_certified_snapshots_are_named_for_people(client):
+    """★★★ 기준선 고르개가 `material_arrivals` 를 그대로 보여 주면 §12 위반이다."""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    b = _data(client.post(
+        f"/api/v1/data-preparation/instances/{inst['instance_id']}/bindings",
+        headers=H, json={"dataset_contract_key": "material_arrivals",
+                         "provider": "FILE_SNAPSHOT",
+                         "config": {"file_name": "a.csv", "column_map": {"a": "A"}}}),
+        "결속")
+    for action in ("validate", "approve", "activate"):
+        client.post(f"/api/v1/data-preparation/bindings/{b['binding_id']}/decision",
+                    headers=H, json={"action": action})
+    _data(client.post(
+        f"/api/v1/data-preparation/bindings/{b['binding_id']}/snapshots", headers=H,
+        files={"file": ("a.csv", CSV, "text/csv")}), "판")
+
+    rows = _data(client.get(
+        f"/api/v1/data-preparation/instances/{inst['instance_id']}/snapshots",
+        headers=H), "판 목록")["snapshots"]
+    assert rows, "판이 하나도 없다"
+    for r in rows:
+        assert r["label"] and r["label"] != r["dataset_contract_key"], (
+            f"계약키가 그대로 이름칸에 들어 있다: {r['dataset_contract_key']}")

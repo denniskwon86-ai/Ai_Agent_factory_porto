@@ -235,7 +235,15 @@ export async function createDecision(payload: {
   );
 }
 
-export async function getImpactPath(start: string, end: string) {
-  const q = new URLSearchParams({ start, end }).toString();
-  return unwrap<any>(await apiFetch(`${BASELINE}/impact-path?${q}`), '영향 경로');
+// ★ 기준선을 함께 보내면 **그 기준선으로** 근거를 잇는다. 보내지 않으면 근거를
+//   «확인하지 않은» 것이지 «없는» 것이 아니다 — 응답의 `evidence_checked` 가 가른다.
+export async function getImpactPath(
+  start: string, end: string, instanceId = '', snapshotIds: string[] = [],
+) {
+  const q = new URLSearchParams({ start, end });
+  if (instanceId) {
+    q.set('instance_id', instanceId);
+    for (const s of snapshotIds) q.append('snapshot_ids', s);
+  }
+  return unwrap<any>(await apiFetch(`${BASELINE}/impact-path?${q.toString()}`), '영향 경로');
 }

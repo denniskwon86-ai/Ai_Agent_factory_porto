@@ -30,10 +30,15 @@ class _Lifecycle:
             raise RuntimeError("상태 저장소가 응답하지 않습니다")
         return {"release_id": release_id, "status": self._status}
 
-    def set_status(self, release_id, status, actor="", reason=""):
+    def set_status(self, release_id, status, actor="", reason="",
+                   data_fingerprint=""):
+        #: ★ 봉인값도 함께 기록한다 — 대역이 이 인자를 버리면 「봉인했다」는 결과만
+        #:   남고 저장소에는 아무것도 안 남는 상태를 시험이 못 잡는다.
         self.calls.append((release_id, status, actor, reason))
+        self.sealed = data_fingerprint
         self._status = status
-        return {"release_id": release_id, "status": status}
+        return {"release_id": release_id, "status": status,
+                "data_fingerprint": data_fingerprint}
 
 
 def _release(**kw):
@@ -500,3 +505,77 @@ def test_another_projects_release_is_not_promotable(promo):
     r = promo.post("/api/v1/factory/P_other/releases/rel_p/promote",
                    json={"no_business_data": True}, headers=H)
     assert r.status_code == 404, r.text
+
+
+
+# ── ⑤ 승격은 «무엇 위에서 올렸는지» 를 봉인한다 ─────────────────────────
+def _ready(*snapshot_ids):
+    """준비된 데이터셋들. ★ 판 id 가 곧 봉인 대상이다."""
+    from core.data_preparation import readiness as rd
+    return {"status": rd.INSTANCE_READY,
+            "datasets": [{"dataset_contract_key": f"k{i}", "state": rd.READY,
+                          "snapshot_id": sid}
+                         for i, sid in enumerate(snapshot_ids)]}
+
+
+def test_the_same_data_seals_to_the_same_value():
+    """★★★ 순서가 달라도 같은 집합이면 같은 봉인값이어야 한다 — 아니면 「그때 그
+    데이터가 맞나」에 답할 수 없다."""
+    assert rp.data_fingerprint(_ready("ds_b", "ds_a")) == \
+        rp.data_fingerprint(_ready("ds_a", "ds_b"))
+
+
+def test_different_data_seals_differently():
+    """⚠️ 개수만 같고 내용이 다른 두 집합이 같은 값을 내면 봉인은 아무것도 막지 못한다."""
+    assert rp.data_fingerprint(_ready("ds_a", "ds_b")) != \
+        rp.data_fingerprint(_ready("ds_c", "ds_d"))
+
+
+def test_only_ready_datasets_are_sealed():
+    """★★★ 승격이 선 근거는 **준비된 것뿐**이다.
+
+    ⚠️ 격리·인증대기 판까지 봉인에 넣으면, 나중에 그 판이 통과했을 때 봉인값이
+      그대로여서 「같은 데이터다」로 읽힌다."""
+    from core.data_preparation import readiness as rd
+    mixed = _ready("ds_a")
+    mixed["datasets"].append({"dataset_contract_key": "k9",
+                              "state": rd.QUALITY_FAILED,
+                              "snapshot_id": "ds_격리"})
+    assert rp.data_fingerprint(mixed) == rp.data_fingerprint(_ready("ds_a"))
+
+
+def test_no_business_data_is_sealed_as_such_not_as_blank():
+    """★★★ 「데이터를 안 쓴다」와 「봉인하지 않았다」는 **다른 사실**이다.
+
+    ⚠️ 둘 다 빈 문자열이면 감사에서 구분할 수 없고, 확인 못 한 승격이 면제된 승격처럼
+      보인다."""
+    assert rp.data_fingerprint(rp.NOT_APPLICABLE) == rp.DATA_NOT_APPLICABLE
+    assert rp.data_fingerprint(None) == ""
+    assert rp.DATA_NOT_APPLICABLE != ""
+
+
+def test_promotion_writes_the_seal_to_the_store(monkeypatch):
+    """★★★ 결과에만 있고 저장소에 안 남으면, 다음 주에 대조할 것이 없다."""
+    lc, out = _promote(monkeypatch, readiness=_ready("ds_a", "ds_b"))
+    expected = rp.data_fingerprint(_ready("ds_a", "ds_b"))
+    assert out["data_fingerprint"] == expected
+    assert getattr(lc, "sealed", None) == expected, "봉인값이 저장소로 넘어가지 않았다"
+
+
+def test_the_seal_survives_a_round_trip_through_the_real_store(tmp_path):
+    """★★★ 대역이 아니라 **진짜 저장소**로 한 번 왕복한다.
+
+    ⚠️ 컬럼을 안 만들었거나 마이그레이션이 빠지면 봉인은 조용히 버려진다 — 대역
+      시험만으로는 그것을 볼 수 없다(이 저장소에서 실제로 두 번 겪은 종류다)."""
+    import core.program_lifecycle as pl
+
+    lc = pl.ProgramLifecycle(db_path=str(tmp_path / "pl.db"))
+    monkey = lc._release_exists
+    lc._release_exists = lambda rid: True                      # 라이브러리 없이 시험
+    try:
+        lc.set_status("rel_seal", ACTIVE, actor="u@x", reason="시험",
+                      data_fingerprint="fp_봉인")
+        got = lc.get_status("rel_seal")
+    finally:
+        lc._release_exists = monkey
+    assert got.get("data_fingerprint") == "fp_봉인", f"봉인값이 사라졌다: {got}"

@@ -3,6 +3,10 @@ import { useState } from 'react';
 import { HubDialog } from '../design/HubDialog';
 import { Panel } from '../design/HubShell';
 import { DataPrepError, simulate } from '../lib/dataPrepApi';
+import {
+  BASE_FIELDS, DRIVER_FIELDS as DRIVERS, num,
+} from '../lib/calcFields';
+import { BaselinePicker, type BaselineChoice } from './BaselinePicker';
 
 // [G4 / Wave H] 시나리오 시뮬레이션 화면 — 파일럿 동선 10~11칸.
 //
@@ -14,34 +18,9 @@ import { DataPrepError, simulate } from '../lib/dataPrepApi';
 //   ③ **비율만 크게 보여주지 않는다.** 작은 기준값에서 «+300%» 가 나오고, 그것이
 //      회의에서 실제 규모보다 크게 읽힌다. 값과 비율을 함께 둔다.
 
-// ★ Driver 이름·단위는 서버(`core/calc_graph.DRIVERS`)와 **같아야** 한다.
-const DRIVERS: { key: string; label: string; unit: string; hint: string }[] = [
-  { key: 'fx_rate_pct', label: '환율', unit: '%', hint: '오르면 수입 원료 대금이 늘어납니다' },
-  { key: 'lead_time_days', label: '도입 지연', unit: '일', hint: '늦어진 만큼 생산이 줄어듭니다' },
-  { key: 'power_price_pct', label: '전력단가', unit: '%', hint: '생산량에 비례해 원가에 붙습니다' },
-];
-
-// 기준값 — 사용자가 회사 실적에서 채운다. ⚠️ 기본값을 «그럴듯한 숫자» 로 채우지
-// 않는다. 채우면 사용자가 그것을 자기 회사 값으로 착각한 채 회의에 들고 간다.
-const BASE_FIELDS: { key: string; label: string; unit: string }[] = [
-  { key: 'production_qty', label: '생산량', unit: 'ton' },
-  { key: 'ending_inventory', label: '기말재고', unit: 'ton' },
-  { key: 'purchase_payment', label: '구매지급', unit: '원' },
-  { key: 'ending_cash', label: '기말현금', unit: '원' },
-  { key: 'operating_profit', label: '영업이익', unit: '원' },
-  { key: 'power_cost', label: '전력비', unit: '원' },
-  { key: 'period_days', label: '기간', unit: '일' },
-];
-
-function num(v: string): number | null {
-  if (!v.trim()) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
 export function ScenarioPanel({ onClose }: { onClose: () => void }) {
-  const [instanceId, setInstanceId] = useState('');
-  const [snapshotIds, setSnapshotIds] = useState('');
+  //: ★ id 를 타이핑하게 하지 않는다 — 고르개가 목록에서 집어 준다.
+  const [pick, setPick] = useState<BaselineChoice>({ instanceId: '', snapshotIds: [] });
   const [base, setBase] = useState<Record<string, string>>({});
   const [drivers, setDrivers] = useState<Record<string, string>>({});
   const [result, setResult] = useState<any | null>(null);
@@ -52,8 +31,8 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
     setError(null);
     setResult(null);
 
-    const ids = snapshotIds.split(/[\s,]+/).filter(Boolean);
-    if (!instanceId.trim() || ids.length === 0) {
+    const ids = pick.snapshotIds;
+    if (!pick.instanceId || ids.length === 0) {
       // ★★★ 서버가 막을 자리를 **누르기 전에** 말한다.
       setError('키트 인스턴스와 Snapshot ID 를 지정해 주십시오 — 「최신으로 알아서」는 '
         + '재현할 수 없는 숫자를 만듭니다.');
@@ -80,7 +59,7 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
 
     setBusy(true);
     try {
-      setResult(await simulate(instanceId.trim(), ids, baseValues, assumptions));
+      setResult(await simulate(pick.instanceId, ids, baseValues, assumptions));
     } catch (e) {
       const err = e as DataPrepError;
       setError(err?.message || '시뮬레이션을 돌리지 못했습니다.');
@@ -104,15 +83,7 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
         overflow: 'auto', padding: 18, display: 'flex', flexDirection: 'column',
       }}>
         <Panel className="afs-fill">
-          <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>기준선</h4>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-            <input value={instanceId} onChange={(e) => setInstanceId(e.target.value)}
-              placeholder="키트 인스턴스 id"
-              style={{ flex: 1, padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6 }} />
-            <input value={snapshotIds} onChange={(e) => setSnapshotIds(e.target.value)}
-              placeholder="Snapshot id (공백/쉼표로 여러 개)"
-              style={{ flex: 2, padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6 }} />
-          </div>
+          <BaselinePicker value={pick} onChange={setPick} />
           <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
             {/* ★ 왜 명시해야 하는지를 화면이 말한다 — 이유를 모르면 사용자는
                 「왜 자동으로 안 되나」로 읽는다. */}
