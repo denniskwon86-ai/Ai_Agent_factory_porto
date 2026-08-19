@@ -1,0 +1,247 @@
+"""★★★ [파일럿] 12칸 동선을 **실제 데이터로** 한 번 관통한다.
+
+## 왜 이 파일이 필요한가
+
+지금까지 확인된 것은 「각 화면이 열린다」였다. 「동선이 돈다」는 아직이었고, 그 차이가
+이 세션에서 **다섯 번** 사고를 냈다 — 물질화기·`candidate` 상태·진짜 코드 미태움·
+라우터 미등록·본문 배경 없음. 전부 「만들었는데 그것이 실제로 도는 것을 본 적이
+없다」였다.
+
+이 파일은 **사용자가 누르는 순서 그대로** API 를 부른다. 중간의 어느 배선이 빠지면
+여기서 멈춘다.
+
+```text
+① 키트 목록          → ② 인스턴스 만들기      → ③ 원천 결속·활성
+④ CSV 등록           → ⑤ 품질·대사·인증        → ⑥ 준비도 보드
+⑦ 기준선 고정        → ⑧ 영향 경로            → ⑨ 시뮬레이션
+⑩ 의사결정 안건
+```
+
+⚠️ **운영 저장소를 쓰지 않는다.** conftest 가 모든 DB 를 `tmp_path` 로 돌린다.
+"""
+import io
+import json
+
+import pytest
+
+import api.routes.baseline_control as bc
+import api.routes.data_preparation_control as dp
+from core.data_preparation import kit_registry as kr
+from tests import org_seed
+
+CSV = (
+    "arrived_at,material_code,quantity,lot_no\n"
+    "2026-08-01,M1,120,L-001\n"
+    "2026-08-05,M2,80,L-002\n"
+).encode("utf-8")
+
+#: 원천이 말한 값 — 이것과 대사해서 「잘린 파일」을 잡는다.
+CONTROL = {"row_count": 2, "sums": {"quantity": 200}}
+
+BASE_VALUES = {
+    "production_qty": 1000.0, "ending_inventory": 200.0,
+    "purchase_payment": 5_000_000.0, "ending_cash": 30_000_000.0,
+    "operating_profit": 4_000_000.0, "power_cost": 800_000.0,
+    "period_days": 30.0,
+}
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch, enforced_org):
+    """실제 라우터 둘 + 격리 저장소. ⚠️ 운영 경로는 하나도 쓰지 않는다."""
+    import config
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(config, "ORG_TRUST_HEADER", True, raising=False)
+    monkeypatch.setattr(dp, "_raw_root", lambda: str(tmp_path / "raw"))
+    ctx = {"tenant_id": "tenant_default", "entity_mode": "REAL"}
+    monkeypatch.setattr(dp, "_ctx", lambda p: ctx)
+    monkeypatch.setattr(dp, "_visible_scopes", lambda p: ["n_pilot"])
+    monkeypatch.setattr(bc, "viewing_context", lambda p: ctx, raising=False)
+
+    app = FastAPI()
+    app.include_router(dp.router)
+    app.include_router(bc.router)
+    return TestClient(app)
+
+
+H = {"X-Factory-User": org_seed.ADMIN}
+
+
+def _seed_kits(client):
+    """키트를 등록한다 — **목록을 여는 것이 곧 등록**이다(`register_all` 은 멱등).
+
+    ⚠️ 이 한 줄을 빼면 인스턴스 만들기가 404 로 막힌다. 실제 사용자도 화면을 열면서
+      같은 순서를 지나므로, 시험이 그 순서를 건너뛰면 «시험에서만 되는» 상태가 된다."""
+    r = client.get("/api/v1/data-preparation/kits", headers=H)
+    assert r.status_code == 200, r.text
+
+
+def _data(r, step):
+    """응답 봉투를 벗긴다. ⚠️ 실패를 그대로 드러낸다 — 어느 칸에서 멈췄는지가 요점이다."""
+    assert r.status_code == 200, f"{step} 에서 멈췄다: {r.status_code} {r.text[:300]}"
+    return r.json()["data"]
+
+
+def test_the_pilot_walkthrough_runs_end_to_end(client, tmp_path):
+    """★★★ **12칸을 실제 데이터로 관통한다.**
+
+    ⚠️ 이 시험이 초록이라는 것은 「각 조각이 있다」가 아니라 **「이어져 있다」**는 뜻이다."""
+    # ── ① 키트 목록 ─────────────────────────────────────────────────────
+    kits = _data(client.get("/api/v1/data-preparation/kits", headers=H), "① 키트 목록")
+    assert any(k["kit_id"] == kr.DEMO_KIT_ID for k in kits["kits"]), \
+        "시연 키트가 목록에 없다"
+
+    # ── ② 인스턴스 만들기 ───────────────────────────────────────────────
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL",
+        "label": "파일럿"}), "② 인스턴스 만들기")
+    iid = inst["instance_id"]
+
+    # ── ③ 원천 결속 → 활성 ──────────────────────────────────────────────
+    binding = _data(client.post(
+        f"/api/v1/data-preparation/instances/{iid}/bindings", headers=H, json={
+            "dataset_contract_key": "material_arrivals",
+            "provider": "FILE_SNAPSHOT",
+            "config": {"file_name": "arrivals.csv", "column_map": {"a": "A"}}}),
+        "③ 결속 만들기")
+    bid = binding["binding_id"]
+    for action in ("VALIDATE", "APPROVE", "ACTIVATE"):
+        state = _data(client.post(
+            f"/api/v1/data-preparation/bindings/{bid}/decision",
+            headers=H, json={"action": action}), f"③ 결속 {action}")
+    assert state["state"] == "ACTIVE", state
+
+    # ── ④ CSV 등록 ──────────────────────────────────────────────────────
+    snap = _data(client.post(
+        f"/api/v1/data-preparation/bindings/{bid}/snapshots", headers=H,
+        files={"file": ("arrivals.csv", CSV, "text/csv")}), "④ CSV 등록")
+    assert snap["row_count"] == 2, snap
+    assert snap["state"] == "RAW"
+    sid = snap["snapshot_id"]
+
+    # ── ⑤ 품질·대사·인증 ────────────────────────────────────────────────
+    certified = _data(client.post(
+        f"/api/v1/data-preparation/snapshots/{sid}/certify", headers=H,
+        json={"control": CONTROL}), "⑤ 인증")
+    assert certified["state"] == "DEMO_CERTIFIED", certified
+    #: ★ 성격 표시가 서버에서 온다 — 화면이 각자 붙이지 않는다.
+    assert "DEMO/SYNTHETIC" in certified["display_label"]
+
+    # ── ⑥ 준비도 보드 ───────────────────────────────────────────────────
+    ready = _data(client.get(
+        f"/api/v1/data-preparation/instances/{iid}/readiness", headers=H), "⑥ 준비도")
+    states = {d["dataset_contract_key"]: d["state"] for d in ready["datasets"]}
+    assert states["material_arrivals"] == "READY", states
+    #: ⚠️ 나머지 둘은 아직 원천이 없다 — **0건이 아니라 「아직 아니다」** 로 나와야 한다.
+    assert states["purchase_orders"] == "NOT_CONFIGURED"
+    assert ready["status"] == "PARTIAL", ready["status"]
+    #: 이 데이터 하나만 요구하는 산출물은 이제 가능해야 한다
+    assert "입고 현황 보고" in ready["available_outputs"], ready["available_outputs"]
+    #: 나머지를 요구하는 것은 막히고, **다음 행동과 책임자**가 붙어 있어야 한다
+    blocked = {o["output"]: o for o in ready["blocked_outputs"]}
+    assert "구매 이행 현황" in blocked
+    assert blocked["구매 이행 현황"]["next_action"]
+    assert blocked["구매 이행 현황"]["responsible_role"]
+
+    # ── ⑦ 기준선 고정 ───────────────────────────────────────────────────
+    baseline = _data(client.post("/api/v1/baseline/builds", headers=H, json={
+        "instance_id": iid, "snapshot_ids": [sid], "label": "파일럿 기준선"}),
+        "⑦ 기준선")
+    assert baseline["snapshot_ids"] == [sid]
+    assert baseline["fingerprint"]
+    assert "실적이 아닙니다" in baseline["display_label"]
+
+    # ── ⑧ 영향 경로 ─────────────────────────────────────────────────────
+    path = _data(client.get(
+        "/api/v1/baseline/impact-path?start=purchase_order&end=cash_pl", headers=H),
+        "⑧ 영향 경로")
+    assert [n["key"] for n in path["path"]][0] == "purchase_order"
+    #: ⚠️ 근거가 없는 칸이 **드러나야** 한다 — 숨기면 「전부 설명됐다」로 보인다.
+    assert path["complete"] is False and path["missing_evidence"]
+
+    # ── ⑨ 시뮬레이션 ────────────────────────────────────────────────────
+    sim = _data(client.post("/api/v1/baseline/simulate", headers=H, json={
+        "instance_id": iid, "snapshot_ids": [sid],
+        "base_values": BASE_VALUES,
+        "assumptions": {"fx_rate_pct": 10, "lead_time_days": 14,
+                        "power_price_pct": 12}}), "⑨ 시뮬레이션")
+    by = {r["key"]: r for r in sim["compare"]}
+    #: 환율 +10% → 구매지급 +10%
+    assert by["purchase_payment"]["delta_pct"] == 10.0, by["purchase_payment"]
+    #: 도입 지연 14일 / 30일 → 생산량이 줄어야 한다
+    assert by["production_qty"]["delta"] < 0, by["production_qty"]
+    #: 같은 입력이면 같은 지문 — **재현성**
+    again = _data(client.post("/api/v1/baseline/simulate", headers=H, json={
+        "instance_id": iid, "snapshot_ids": [sid],
+        "base_values": BASE_VALUES,
+        "assumptions": {"fx_rate_pct": 10, "lead_time_days": 14,
+                        "power_price_pct": 12}}), "⑨ 재현성")
+    assert again["scenario"]["fingerprint"] == sim["scenario"]["fingerprint"]
+
+    # ── ⑩ 의사결정 안건 ─────────────────────────────────────────────────
+    pkg = _data(client.post("/api/v1/baseline/decisions", headers=H, json={
+        "instance_id": iid, "snapshot_ids": [sid],
+        "base_values": BASE_VALUES,
+        "assumptions": {"fx_rate_pct": 10, "lead_time_days": 14},
+        "title": "환율·도입 지연 대응", "owner": "구매팀장", "due": "2026-08-30",
+        "path_from": "purchase_order", "path_to": "cash_pl"}), "⑩ 의사결정")
+    assert [v["view"] for v in pkg["views"]] == ["요청자", "의사결정자", "영향부서"]
+    assert pkg["owner"] == "구매팀장" and pkg["due"] == "2026-08-30"
+    #: ★★★ 계보가 붙어 있어야 한다 — 다음 회의에서 같은 숫자를 다시 만들 수 있게.
+    assert pkg["evidence"]["snapshot_ids"] == [sid]
+    assert pkg["evidence"]["baseline_fingerprint"] == baseline["fingerprint"]
+    assert pkg["evidence"]["calc_version"]
+    #: 브리핑이 성격을 먼저 말한다
+    assert "DEMO/SYNTHETIC" in pkg["briefing"][0]
+
+
+def test_a_truncated_file_stops_the_walkthrough_at_certification(client):
+    """★★★ **잘린 파일은 인증되지 않는다** — 동선이 거기서 멈춰야 한다.
+
+    ⚠️ 통과하면 그 위의 기준선·시뮬레이션·안건이 전부 잘린 데이터로 만들어지고,
+      아무도 그것을 고장으로 보지 않는다."""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    b = _data(client.post(
+        f"/api/v1/data-preparation/instances/{inst['instance_id']}/bindings",
+        headers=H, json={"dataset_contract_key": "material_arrivals",
+                         "provider": "FILE_SNAPSHOT",
+                         "config": {"file_name": "a.csv", "column_map": {"a": "A"}}}),
+        "결속")
+    for action in ("VALIDATE", "APPROVE", "ACTIVATE"):
+        client.post(f"/api/v1/data-preparation/bindings/{b['binding_id']}/decision",
+                    headers=H, json={"action": action})
+    snap = _data(client.post(
+        f"/api/v1/data-preparation/bindings/{b['binding_id']}/snapshots", headers=H,
+        files={"file": ("a.csv", CSV, "text/csv")}), "등록")
+
+    #: 원천은 5행이라고 말하는데 파일에는 2행뿐이다 — **잘렸다**
+    out = _data(client.post(
+        f"/api/v1/data-preparation/snapshots/{snap['snapshot_id']}/certify",
+        headers=H, json={"control": {"row_count": 5}}), "인증 시도")
+    assert out["state"] == "QUARANTINED", out
+    assert "잘렸" in json.dumps(out.get("quarantine") or {}, ensure_ascii=False)
+
+    #: ★ 그리고 그 판으로는 기준선을 만들 수 없다
+    r = client.post("/api/v1/baseline/builds", headers=H, json={
+        "instance_id": inst["instance_id"],
+        "snapshot_ids": [snap["snapshot_id"]]})
+    assert r.status_code == 409, "격리된 판으로 기준선이 만들어졌다: " + r.text[:200]
+
+
+def test_a_baseline_cannot_be_built_from_another_orgs_snapshot(client):
+    """★★★ 남의 판 id 를 섞어 보내는 경로를 막는다.
+
+    ⚠️ 섞이면 그 합계는 **아무 회사의 숫자도 아니다.**"""
+    _seed_kits(client)
+    inst = _data(client.post("/api/v1/data-preparation/instances", headers=H, json={
+        "kit_id": kr.DEMO_KIT_ID, "version": "1.0.0",
+        "scope_node_id": "n_pilot", "entity_mode": "REAL"}), "인스턴스")
+    r = client.post("/api/v1/baseline/builds", headers=H, json={
+        "instance_id": inst["instance_id"], "snapshot_ids": ["ds_남의판"]})
+    assert r.status_code == 404, r.text
