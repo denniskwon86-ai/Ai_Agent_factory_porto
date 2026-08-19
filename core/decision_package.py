@@ -1,0 +1,146 @@
+"""[Wave G 11.4] 의사결정 패키지 — **숫자에서 «누가 무엇을 언제» 까지.**
+
+시뮬레이션 결과 하나가 회의 안건이 되려면 세 가지가 더 필요하다.
+
+★★★ ① **3관점 검토서.** 요청자·의사결정자·영향부서는 **같은 숫자를 다르게 읽는다.**
+  한 장으로 뭉치면 각자 자기에게 필요한 것을 못 찾고, 회의가 「자료를 다시 보내
+  주세요」로 끝난다.
+★★★ ② **실행 책임자와 기한.** 없으면 「검토하겠습니다」로 끝나고 아무 일도 안 난다.
+★★★ ③ **근거의 계보.** 어느 기준선 · 어느 산식 판 · 어떤 가정에서 나온 숫자인가.
+  ⚠️ 이것이 없으면 다음 회의에서 같은 숫자를 다시 만들 수 없고, 그러면 결정을
+    되짚을 수도 없다.
+
+## LLM 이 여기서 숫자를 만들지 않는다
+
+문장은 **표에서 조립**한다. 그럴듯한 요약을 생성하면 그 요약이 원본과 갈라지고,
+사람은 요약만 읽는다.
+"""
+from typing import Any, Dict, List, NamedTuple, Optional
+
+from core import calc_graph as cg
+
+#: ★ 3관점 — **닫힌 목록.** 관점이 늘면 화면과 문서가 함께 늘어야 한다.
+VIEW_REQUESTER = "요청자"
+VIEW_DECIDER = "의사결정자"
+VIEW_AFFECTED = "영향부서"
+VIEWS = (VIEW_REQUESTER, VIEW_DECIDER, VIEW_AFFECTED)
+
+#: 관점마다 **먼저 보는 것**이 다르다. 순서가 곧 그 사람의 관심사다.
+_FOCUS: Dict[str, List[str]] = {
+    VIEW_REQUESTER: ["production_qty", "ending_inventory", "purchase_payment"],
+    VIEW_DECIDER: ["operating_profit", "ending_cash", "purchase_payment"],
+    VIEW_AFFECTED: ["production_qty", "ending_inventory", "operating_profit"],
+}
+_QUESTION: Dict[str, str] = {
+    VIEW_REQUESTER: "요청한 변화가 실제로 무엇을 바꾸는가",
+    VIEW_DECIDER: "지금 결정하지 않으면 무엇을 잃는가",
+    VIEW_AFFECTED: "우리 부서의 일이 어떻게 달라지는가",
+}
+
+
+class DecisionError(Exception):
+    """안건을 만들 수 없다."""
+
+
+class Package(NamedTuple):
+    title: str
+    question: str
+    owner: str
+    due: str
+    evidence: Dict[str, Any]
+    views: List[Dict[str, Any]]
+    data_kind: str
+
+    def public(self) -> Dict[str, Any]:
+        return {"title": self.title, "question": self.question, "owner": self.owner,
+                "due": self.due, "evidence": dict(self.evidence),
+                "views": list(self.views), "data_kind": self.data_kind,
+                "display_label": _label(self.data_kind)}
+
+
+def _label(data_kind: Any) -> str:
+    from core.baseline_build import display_label
+
+    return display_label(data_kind)
+
+
+def _view(name: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """한 관점의 검토서. **같은 표에서 다른 순서로** 뽑는다.
+
+    ⚠️ 관점마다 다른 숫자를 만들지 않는다 — 그러면 회의에서 「어느 게 맞습니까」가
+      나오고, 그 순간 자료 전체의 신뢰가 무너진다."""
+    by_key = {r["key"]: r for r in rows}
+    focus = [by_key[k] for k in _FOCUS[name] if k in by_key]
+    #: 관심 밖 항목도 **버리지 않는다** — 접어 둘 뿐이다(숨기면 나중에 「왜 안 보여
+    #: 줬냐」가 된다).
+    rest = [r for r in rows if r["key"] not in _FOCUS[name]]
+    return {"view": name, "question": _QUESTION[name],
+            "highlights": focus, "others": rest}
+
+
+def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
+          baseline: Any = None, path: Optional[Dict[str, Any]] = None) -> Package:
+    """시뮬레이션 두 판 → 회의 안건 하나.
+
+    ⚠️ 책임자·기한이 없으면 만들지 않는다. 없는 안건은 「검토하겠습니다」로 끝나고
+      아무 일도 안 난다 — 그것은 의사결정이 아니다."""
+    if not str(title or "").strip():
+        raise DecisionError("안건 제목이 필요합니다.")
+    if not str(owner or "").strip():
+        raise DecisionError(
+            "실행 책임자가 필요합니다 — 없는 안건은 「검토하겠습니다」로 끝납니다.")
+    if not str(due or "").strip():
+        raise DecisionError("기한이 필요합니다 — 기한 없는 결정은 결정이 아닙니다.")
+    if base is None or scenario is None:
+        raise DecisionError("기준과 시나리오가 모두 필요합니다.")
+    if base.baseline_fingerprint != scenario.baseline_fingerprint:
+        #: ★★★ 다른 기준선으로 만든 두 결과를 나란히 놓으면, 그 차이는 **가정 때문이
+        #:   아니라 데이터 때문**일 수 있다. 그리고 화면은 그것을 구분해 주지 않는다.
+        raise DecisionError(
+            "기준선이 다른 두 결과를 비교하지 않습니다 — 그 차이가 가정 때문인지 "
+            "데이터 때문인지 구분할 수 없습니다.")
+
+    rows = cg.compare(base, scenario)
+    evidence = {
+        "baseline_fingerprint": base.baseline_fingerprint,
+        "baseline_id": str(getattr(baseline, "build_id", "") or ""),
+        "snapshot_ids": list(getattr(baseline, "snapshot_ids", []) or []),
+        "as_of": str(getattr(baseline, "as_of", "") or ""),
+        "calc_version": base.calc_version,
+        "assumptions": dict(scenario.assumptions),
+        "result_fingerprint": scenario.fingerprint,
+        #: 온톨로지 경로가 있으면 **계보**로 붙인다(없으면 없다고 적는다).
+        "impact_path": (path or {}).get("path", []),
+        "missing_evidence": (path or {}).get("missing_evidence", []),
+    }
+    #: ★ 안건의 «질문» 은 가장 크게 움직인 결과에서 뽑는다 — 지어내지 않는다.
+    moved = sorted((r for r in rows if r["delta"]), key=lambda r: -abs(r["delta"]))
+    question = (f"{moved[0]['label']}이(가) {moved[0]['delta']:+,.0f}"
+                f"{moved[0]['unit']} 변합니다 — 지금 무엇을 결정해야 합니까?"
+                if moved else "가정을 바꿔도 결과가 변하지 않습니다 — 확인이 필요합니다.")
+
+    return Package(title=str(title).strip(), question=question,
+                   owner=str(owner).strip(), due=str(due).strip(),
+                   evidence=evidence, views=[_view(v, rows) for v in VIEWS],
+                   data_kind=str(base.data_kind or ""))
+
+
+def briefing_lines(pkg: Package) -> List[str]:
+    """경영 브리핑 본문. **표에서 조립한다 — 생성하지 않는다.**
+
+    ⚠️ 그럴듯한 요약을 만들면 그 요약이 원본과 갈라지고, 사람은 요약만 읽는다."""
+    out = [f"[{_label(pkg.data_kind)}]", pkg.title, pkg.question, ""]
+    decider = [v for v in pkg.views if v["view"] == VIEW_DECIDER][0]
+    for row in decider["highlights"]:
+        pct = "" if row["delta_pct"] is None else f" ({row['delta_pct']:+.1f}%)"
+        out.append(f"· {row['label']}: {row['base']:,.0f} → {row['scenario']:,.0f}"
+                   f"{row['unit']} · {row['delta']:+,.0f}{pct}")
+    out += ["", f"실행 책임자: {pkg.owner} · 기한: {pkg.due}",
+            f"근거: 기준선 {pkg.evidence['baseline_fingerprint'][:12]} · "
+            f"산식 {pkg.evidence['calc_version']} · "
+            f"기준시점 {pkg.evidence['as_of'] or '(없음)'}"]
+    if pkg.evidence["missing_evidence"]:
+        #: ⚠️ 근거가 빠진 칸을 브리핑에서 숨기지 않는다 — 숨기면 그 보고는 «전부
+        #:   설명된 것» 으로 읽힌다.
+        out.append(f"⚠️ 근거가 없는 단계: {', '.join(pkg.evidence['missing_evidence'])}")
+    return out

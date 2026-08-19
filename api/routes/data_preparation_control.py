@@ -392,3 +392,65 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
             "data": {**result, "kit_id": inst["kit_id"], "version": inst["version"],
                      "instance_id": instance_id,
                      "data_kind": str(kit.get("mode") or "")}}
+
+
+class PipelineRequest(BaseModel):
+    """판 하나를 인증까지 돌린다.
+
+    ★ `control` 은 **원천이 말한 값**이다(행 수·합계). 이것이 없으면 「잘린 파일」을
+      잡을 방법이 없다 — 그래서 선택이 아니라 요청의 일부다.
+    ⚠️ 비워서 보내도 받는다. 다만 그때는 대사가 «건너뛴 것» 이고, 그 사실이 판에
+      남는다(조용히 통과시키지 않는다)."""
+    control: Dict[str, Any] = {}
+    code_columns: Dict[str, List[str]] = {}
+    unit_columns: Dict[str, str] = {}
+    expected_units: Dict[str, str] = {}
+
+
+@router.post("/snapshots/{snapshot_id}/certify")
+async def certify_snapshot(snapshot_id: str, req: PipelineRequest,
+                           p: Principal = Depends(current_principal)):
+    """[BDR-3] 올라온 판을 **프로파일 → 표준화 → 대사 → 시연 인증**까지 돌린다.
+
+    ★★★ 어느 단계에서 격리되면 **거기서 멈춘다** — 격리된 판을 인증하지 않는다.
+    ⚠️ 이 인증은 «시연용 합성 데이터로서 검증되었다» 이지 실적 인증이 아니다.
+      `REAL` 데이터에는 붙지 않는다(`snapshot_service.certify_demo` 가 막는다)."""
+    require_caps(p, PROJECT_RUN, resource="data_preparation",
+                 action=f"snapshots:certify:{snapshot_id}")
+    row = _snapshot_or_404(p, snapshot_id)
+
+    #: 원문을 다시 읽어 행을 만든다 — 판정은 **보관된 그 파일**로 한다.
+    raw_path = str(row.get("raw_path") or "")
+    if not raw_path or not snapshot_service.verify_raw(
+            raw_path, str(row.get("checksum") or "")):
+        #: ⚠️ 「그때 그 파일」이라는 전제가 깨졌다 — 숫자를 내보내지 않는다.
+        raise HTTPException(
+            status_code=409,
+            detail="보관된 원본이 등록 당시와 다릅니다 — 이 판은 인증할 수 없습니다.")
+    try:
+        with open(raw_path, "rb") as f:
+            parsed = snapshot_service.parse_csv(f.read())
+    except (OSError, m.DataPreparationError) as e:
+        raise HTTPException(status_code=503,
+                            detail=f"원본을 읽을 수 없습니다: {str(e)[:120]}")
+
+    try:
+        out = snapshot_service.run_pipeline(
+            store, snapshot_id, parsed.rows, parsed.columns,
+            control=req.control or {}, code_columns=req.code_columns or {},
+            unit_columns=req.unit_columns or {},
+            expected_units=req.expected_units or {})
+    except m.StateConflict as e:
+        #: 「지금 상태에서 할 수 없는 일」 — 이미 인증됐거나 격리된 판이다.
+        raise HTTPException(status_code=409, detail=str(e))
+    except m.DataPreparationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    _audit("DATA_CONTRACT_PUBLISHED" if out.get("state") == m.DEMO_CERTIFIED
+           else "DATA_REQUIREMENT_ACCEPTED",
+           resource_id=snapshot_id, actor=p.user_id or "",
+           outcome="allowed" if out.get("state") == m.DEMO_CERTIFIED else "denied",
+           detail=f"state={out.get('state')}")
+    return {"status": "success",
+            "data": {**out,
+                     "display_label": snapshot_service.display_label(out)}}

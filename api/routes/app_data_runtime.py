@@ -164,7 +164,10 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str,
     #: ★★★ [I-4 3단계] **지금의** 계약·물질화 지문을 산출해 판정에 넘긴다.
     #:   ⚠️ 발급 때 한 번 보고 마는 것이 아니다 — 계약이 개정되거나 결속이 달라지면
     #:     **다음 요청에서** 그 프레임이 죽어야 한다.
-    c_fp, m_fp = app_contract_gate.sealed_pair(rel, release_id)
+    #: ★★★ [F-3] **그 증명이 만질 평면**으로 지문을 낸다. Preview 증명인데
+    #:   운영 평면의 지문을 대조하면 첫 요청부터 「이 판은 사라졌다」가 된다.
+    c_fp, m_fp = app_contract_gate.sealed_pair(
+        rel, release_id, plane=app_preview.app_data_for(_audience_of(proof)))
     facts = dataclasses.replace(facts, contract_fingerprint=c_fp,
                                 materialization_fingerprint=m_fp)
     subject = app_policy.Subject(
@@ -238,7 +241,11 @@ def _audience_of(proof: Dict[str, Any]) -> str:
     rid = str(proof.get("release_id", "") or "")
     now_audience = app_preview.audience_for_state(_release_state(rid))
     if not now_audience:
-        raise _fail(sdk.ERR_UNAVAILABLE, audit_reason="릴리스 상태를 읽을 수 없음",
+        #: ⚠️⚠️ **404 다(은폐).** 끈 프로그램·격리된 판·못 읽은 상태를 503 으로 답하면
+        #:   「그것이 존재하는데 서버가 아프다」를 알려 주는 셈이 된다. 기존 계약은
+        #:   「없거나 못 보거나」를 같은 404 로 답하는 것이고, 여기서만 다르게 답하면
+        #:   그 차이가 곧 신호다.
+        raise _fail(sdk.ERR_NOT_FOUND, audit_reason="사용할 수 없는 릴리스 상태",
                     target=rid)
     try:
         app_preview.assert_audience_match(sealed=proof.get("audience"),
@@ -541,13 +548,6 @@ async def issue_proof(req: ProofRequest, p: Principal = Depends(current_principa
     #  못박고, 이후 모든 대조가 그 어긋남을 기준으로 삼는다.
     #
     #  ⚠️ 봉인은 「그때와 같은가」에 답할 뿐 **「그때가 옳았는가」에는 답하지 않는다.**
-    gate = app_contract_gate.evaluate(rel, release_id)
-    if not gate.ok:
-        #: ⚠️ 사유를 앱에게 그대로 주지 않는다 — 감사에만 남긴다(다른 거부와 같은 규칙).
-        raise _fail(sdk.ERR_NOT_FOUND,
-                    audit_reason=f"계약↔물질화 불일치: {' / '.join(gate.reasons)[:160]}",
-                    actor=uid, target=release_id, path="POST /runtime/proof")
-
     #: ★★★ [I-4 6] **청중은 릴리스 상태가 정한다.** 요청이 고르게 두면 후보 판에
     #:   운영 증명을 달라고 할 수 있고, 그것이 곧 검토되지 않은 코드의 운영 접근이다.
     audience = app_preview.audience_for_state(_release_state(release_id))
@@ -562,6 +562,16 @@ async def issue_proof(req: ProofRequest, p: Principal = Depends(current_principa
         except app_preview.PreviewBoundaryError as e:
             raise _fail(sdk.ERR_FORBIDDEN, audit_reason=str(e)[:160], actor=uid,
                         target=release_id, path="POST /runtime/proof")
+
+    #: ★★★ [F-3] 발급 시점에도 **그 청중의 평면**을 본다 — 후보 판은 Preview
+    #:   평면에 물질화되므로, 운영 평면을 보면 「물질화되지 않았습니다」로 막힌다.
+    gate = app_contract_gate.evaluate(
+        rel, release_id, plane=app_preview.app_data_for(audience))
+    if not gate.ok:
+        #: ⚠️ 사유를 앱에게 그대로 주지 않는다 — 감사에만 남긴다(다른 거부와 같은 규칙).
+        raise _fail(sdk.ERR_NOT_FOUND,
+                    audit_reason=f"계약↔물질화 불일치: {' / '.join(gate.reasons)[:160]}",
+                    actor=uid, target=release_id, path="POST /runtime/proof")
 
     try:
         rec = app_capability_tokens.issue(

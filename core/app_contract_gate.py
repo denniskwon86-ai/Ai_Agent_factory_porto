@@ -109,9 +109,20 @@ def _contract_datasets(contract: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _materialized(release_id: str) -> Dict[str, Dict[str, Any]]:
+def _plane(plane: Any = None):
+    """물질화를 읽을 **데이터 평면**. 안 주면 운영이다.
+
+    ★★★ [F-3] Preview 증명은 Preview 평면을 만진다(F-1). 그런데 게이트가 늘 운영
+      평면을 보면, 후보 판을 Preview 에 물질화한 순간 「계약에 있는 데이터셋이
+      물질화되지 않았습니다」로 막힌다 — **종단 카나리가 그 자리에서 멈춰 드러났다.**
+    ⚠️ 기본값을 운영으로 두는 이유: 이 함수를 부르는 옛 경로들이 전부 운영이고,
+      기본을 바꾸면 그것들이 조용히 Preview 를 보게 된다."""
+    return plane if plane is not None else app_data_service
+
+
+def _materialized(release_id: str, plane: Any = None) -> Dict[str, Dict[str, Any]]:
     """이 릴리스의 **계약 결속**들을 런타임 이름으로 모은다(레거시 결속은 따로 센다)."""
-    rows = app_data_service._store.query(
+    rows = _plane(plane)._store.query(
         "SELECT b.runtime_name AS name, b.allowed_actions AS actions, b.contract_bound AS bound, "
         "       b.data_role AS data_role, b.source_intent AS source_intent, "
         "       d.dataset_key AS dataset_key, COALESCE(v.schema_fingerprint,'') AS schema_fp "
@@ -227,19 +238,21 @@ def is_executable_app_in_app(release: Any) -> bool:
     return True
 
 
-def evaluate(release: Any, release_id: str) -> GateVerdict:
-    """★★★ **발급해도 되는가.** 던지지 않는다 — 호출부가 HTTP 로 바꾼다."""
+def evaluate(release: Any, release_id: str, plane: Any = None) -> GateVerdict:
+    """★★★ **발급해도 되는가.** 던지지 않는다 — 호출부가 HTTP 로 바꾼다.
+
+    ★ [F-3] `plane` 은 **그 증명이 만질 데이터 평면**이다. 안 주면 운영을 본다."""
     rid = (release_id or "").strip()
     contract = release_contract(release)
 
     try:
-        bound = _materialized(rid)
+        bound = _materialized(rid, plane)
     except Exception as e:
         #: ⚠️ 물질화를 못 읽으면 **발급하지 않는다.** 「모르니까 통과」가 곧 승인 없는 권한이다.
         return GateVerdict(ok=False, reasons=[f"물질화 상태를 읽을 수 없습니다: {str(e)[:80]}"])
 
     try:
-        mat_fp = app_data_service.materialization_fingerprint(rid)
+        mat_fp = _plane(plane).materialization_fingerprint(rid)
     except Exception as e:
         return GateVerdict(ok=False, reasons=[f"물질화 지문을 만들 수 없습니다: {str(e)[:80]}"])
 
@@ -288,10 +301,13 @@ def evaluate(release: Any, release_id: str) -> GateVerdict:
     return GateVerdict(ok=True, contract_fingerprint=fp, materialization_fingerprint=mat_fp)
 
 
-def sealed_pair(release: Any, release_id: str) -> Tuple[str, str]:
-    """요청마다 다시 계산하는 **지금의** 두 지문. 증명에 봉인된 값과 대조한다."""
+def sealed_pair(release: Any, release_id: str, plane: Any = None) -> Tuple[str, str]:
+    """요청마다 다시 계산하는 **지금의** 두 지문. 증명에 봉인된 값과 대조한다.
+
+    ⚠️ [F-3] 봉인할 때와 **같은 평면**을 봐야 한다. 다르면 Preview 증명이 첫 요청부터
+      「이 판은 사라졌다」가 된다."""
     try:
-        mat = app_data_service.materialization_fingerprint(str(release_id or "").strip())
+        mat = _plane(plane).materialization_fingerprint(str(release_id or "").strip())
     except Exception:
         mat = UNREADABLE
     return contract_fingerprint(release), mat

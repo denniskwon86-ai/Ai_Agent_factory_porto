@@ -79,15 +79,20 @@ def _check_state(release_id: str, lifecycle: Any) -> Check:
     return Check(CHECK_STATE, True)
 
 
-def _check_contract(release: Any, release_id: str) -> Check:
+def _check_contract(release: Any, release_id: str, plane: Any = None) -> Check:
     """계약 원문과 물질화가 **지금도** 맞는가.
 
     ★ 승인 시점이 아니라 **승격 시점**에 본다 — 그 사이에 계약이 개정되거나 결속이
-      바뀌었을 수 있고, 그때 올리면 「승인받은 것과 다른 판」이 운영이 된다."""
+      바뀌었을 수 있고, 그때 올리면 「승인받은 것과 다른 판」이 운영이 된다.
+
+    ★★★ [F-3] `plane` 은 **그 판이 지금 사는 평면**이다. 후보는 Preview 평면에
+      물질화돼 있으므로(F-1·F-2), 운영 평면으로 대조하면 「계약에 있는 데이터셋이
+      물질화되지 않았습니다」로 **모든 승격이 막힌다** — 종단 카나리가 그 자리에서
+      멈춰 드러났다."""
     from core import app_contract_gate
 
     try:
-        v = app_contract_gate.evaluate(release, release_id)
+        v = app_contract_gate.evaluate(release, release_id, plane=plane)
     except Exception as e:
         return Check(CHECK_CONTRACT, False, f"판정할 수 없습니다: {str(e)[:100]}")
     if not v.ok:
@@ -184,14 +189,14 @@ NOT_APPLICABLE = _NotApplicable()
 
 def run_checks(*, release: Any, release_id: str, lifecycle: Any,
                code_paths: Optional[List[str]] = None,
-               readiness_state: Any = None) -> Verdict:
+               readiness_state: Any = None, plane: Any = None) -> Verdict:
     """다섯 가지를 **전부** 본다. 하나라도 어긋나면 승격하지 않는다.
 
     ★ 첫 실패에서 멈추지 않는다 — 사용자가 같은 화면을 다섯 번 보게 하지 않으려면
       한 번에 다 알려 줘야 한다."""
     checks = [
         _check_state(release_id, lifecycle),
-        _check_contract(release, release_id),
+        _check_contract(release, release_id, plane),
         _check_static(code_paths),
         _check_review(release),
         _check_readiness(readiness_state),
@@ -203,7 +208,8 @@ def run_checks(*, release: Any, release_id: str, lifecycle: Any,
 
 def promote(*, release: Any, release_id: str, lifecycle: Any, actor: str,
             code_paths: Optional[List[str]] = None,
-            readiness_state: Any = None, reason: str = "") -> Dict[str, Any]:
+            readiness_state: Any = None, reason: str = "", plane: Any = None,
+            on_promote: Any = None) -> Dict[str, Any]:
     """후보 → 운영. **검사가 전부 통과할 때만 상태를 바꾼다.**
 
     ★★★ 검사와 전이를 나눈 이유가 ②·③ 이다 — 검사에서 던지면 상태는 손대지 않았고,
@@ -218,9 +224,24 @@ def promote(*, release: Any, release_id: str, lifecycle: Any, actor: str,
             "감사 대상이 될 수 없습니다.")
 
     verdict = run_checks(release=release, release_id=release_id, lifecycle=lifecycle,
-                         code_paths=code_paths, readiness_state=readiness_state)
+                         code_paths=code_paths, readiness_state=readiness_state,
+                         plane=plane)
     if not verdict.ok:
         raise PromotionError(verdict.summary())
+
+    #: ★★★ [I-4 7 / F-3] **승격과 바인딩 전환의 원자성.**
+    #:
+    #: 후보는 Preview 평면에 물질화돼 있다. 운영으로 올린다는 것은 「그 계약을 운영
+    #: 평면에도 물질화한다」는 뜻이고, 그 일이 실패하면 **상태를 바꾸지 않는다** —
+    #: 그러지 않으면 「운영이라고 적혀 있는데 읽을 데이터가 없는 판」이 생긴다.
+    #:
+    #: ⚠️ 상태 전이보다 **먼저** 한다. 순서를 바꾸면 물질화 실패가 이미 운영이 된 판을
+    #:   남기고, 그 판은 첫 요청부터 「물질화되지 않았습니다」로 막힌다.
+    if on_promote is not None:
+        try:
+            on_promote()
+        except Exception as e:
+            raise PromotionError(f"운영 평면 물질화에 실패했습니다: {str(e)[:200]}")
 
     from core.program_lifecycle import ACTIVE
 

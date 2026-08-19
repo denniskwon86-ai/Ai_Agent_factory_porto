@@ -127,8 +127,16 @@ from api.routes import (app_delivery_control, decision_control,  # [CL-1, CL-2]
                         jarvis_control,  # [CL-4 선행] 기존 Supervisor 계약의 문맥 어댑터
                         auth_control,  # [2026-08-09] 로그인·세션 — 식별의 유일한 정본
                         app_data_control,  # [트랙 I] 생성 앱 데이터 평면
-                        app_data_runtime)  # [G1-B 3.5] Host Runtime 전용(앱 증명 필수)
+                        app_data_runtime,  # [G1-B 3.5] Host Runtime 전용(앱 증명 필수)
+                        # ⚠️ [2026-08-19] 아래 둘은 **만들어 놓고 등록되지 않았다.**
+                        #   라우터가 앱에 붙지 않으면 그 기능은 «시험에서만» 존재한다.
+                        data_preparation_control,  # [BDR-2·3·5] 업무 데이터 준비
+                        baseline_control)  # [BDR-7 / G2·G4] 기준선·시뮬레이션·의사결정
 app.include_router(factory_control.router)
+# [BDR-2·3·5] 업무 데이터 준비 — 키트 적용·원천 결속·Snapshot·준비도
+app.include_router(data_preparation_control.router)
+# [BDR-7 / G2·G4] 기준선 고정 · 영향 경로 · 최소 시뮬레이션 · 의사결정 안건
+app.include_router(baseline_control.router)
 app.include_router(format_control.router)
 app.include_router(realtime.router)
 app.include_router(skill_control.router)

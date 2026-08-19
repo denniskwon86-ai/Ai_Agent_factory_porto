@@ -369,7 +369,10 @@ def test_an_unreadable_release_state_stops_requests_too(rt, monkeypatch):
     #: 증명을 받은 뒤 상태를 못 읽게 된다
     monkeypatch.setattr(ard, "_release_state", lambda rid: "", raising=False)
     r = rt.get(R + "/datasets/memo/records", headers={**H_USER, "X-App-Proof": tok})
-    assert r.status_code == 503,         "상태를 못 읽는데 요청이 통과했다: " + str(r.status_code)
+    #: ⚠️ **404 다(은폐).** 「쓸 수 없는 상태」를 503 으로 답하면 「그것이 존재하는데
+    #:   서버가 아프다」를 알려 주는 셈이다 — 끈 프로그램·격리된 판과 같은 규칙으로
+    #:   「없거나 못 보거나」를 한 답으로 돌려준다.
+    assert r.status_code == 404,         "상태를 못 읽는데 요청이 통과했다: " + str(r.status_code)
 
 
 def test_an_unreadable_release_state_issues_nothing(rt, monkeypatch):

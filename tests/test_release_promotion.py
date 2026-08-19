@@ -53,8 +53,9 @@ def _release(**kw):
 def _ok_checks(monkeypatch, *, contract=True, static=True):
     """관심 없는 검사를 통과로 고정한다 — **한 번에 하나만** 어긋내기 위해서."""
     monkeypatch.setattr(rp, "_check_contract",
-                        lambda release, rid: rp.Check(rp.CHECK_CONTRACT, contract,
-                                                      "" if contract else "어긋남"))
+                        lambda release, rid, plane=None: rp.Check(
+                            rp.CHECK_CONTRACT, contract,
+                            "" if contract else "어긋남"))
     monkeypatch.setattr(rp, "_check_static",
                         lambda paths: rp.Check(rp.CHECK_STATIC, static,
                                                "" if static else "차단 신호"))
@@ -296,7 +297,7 @@ def test_the_contract_check_actually_reads_the_gate(monkeypatch):
     from core import app_contract_gate
 
     monkeypatch.setattr(app_contract_gate, "evaluate",
-                        lambda release, rid: app_contract_gate.GateVerdict(
+                        lambda release, rid, plane=None: app_contract_gate.GateVerdict(
                             ok=False, reasons=["계약에 없는 결속이 있습니다: ['x']"]))
     c = rp._check_contract(_release(), "rel_1")
     assert not c.ok
@@ -307,7 +308,7 @@ def test_a_gate_that_raises_is_not_a_pass(monkeypatch):
     """★★★ 「판정할 수 없었다」를 통과로 세면 게이트가 장식이 된다."""
     from core import app_contract_gate
 
-    def _boom(release, rid):
+    def _boom(release, rid, plane=None):
         raise RuntimeError("결속 표를 읽을 수 없습니다")
 
     monkeypatch.setattr(app_contract_gate, "evaluate", _boom)
@@ -320,7 +321,8 @@ def test_a_clean_gate_passes(monkeypatch):
     from core import app_contract_gate
 
     monkeypatch.setattr(app_contract_gate, "evaluate",
-                        lambda release, rid: app_contract_gate.GateVerdict(ok=True))
+                        lambda release, rid, plane=None:
+                            app_contract_gate.GateVerdict(ok=True))
     assert rp._check_contract(_release(), "rel_1").ok
 
 

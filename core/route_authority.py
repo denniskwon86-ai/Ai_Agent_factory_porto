@@ -101,6 +101,15 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     #   ★ [BDR-3] 파일 적재도 운영이다 — 「올리기만 하는 것」이 아니라 그 파일이
     #     이후 계산의 원천이 된다.
     "POST /api/v1/data-preparation/bindings/{binding_id}/snapshots": (PROJECT_RUN,),
+    #   ★ 인증은 «이 판을 공식으로 쓴다» 는 선언이다 — 운영 권한을 요구한다.
+    "POST /api/v1/data-preparation/snapshots/{snapshot_id}/certify": (PROJECT_RUN,),
+
+    # ── [BDR-7 / G2·G4] 기준선·시뮬레이션·의사결정 ──────────────────────
+    #   ★ 기준선을 «고정» 하는 것과 그 위에서 계산하는 것은 둘 다 운영이다.
+    #   ⚠️ `GET /impact-path` 는 읽기라 표에 넣지 않는다(표는 쓰기 전용).
+    "POST /api/v1/baseline/builds": (PROJECT_RUN,),
+    "POST /api/v1/baseline/simulate": (PROJECT_RUN,),
+    "POST /api/v1/baseline/decisions": (PROJECT_RUN,),
     # 감독관 대화도 LLM 을 태운다 — 「채팅이니까」로 열어 두면 비용 통제에 구멍이 난다.
     f"POST {F}/{{project_id}}/supervisor/chat": (PROJECT_RUN,),
     f"POST {F}/ai-recommend/pipeline": (PROJECT_RUN,),

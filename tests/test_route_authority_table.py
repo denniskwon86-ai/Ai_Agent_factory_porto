@@ -40,6 +40,8 @@ GUARDED_MODULES = [
     #: [BDR-2] 새 라우터는 **만들 때 함께** 표에 넣는다 — 나중에 넣으면 그 사이에
     #: 추가된 라우트가 권한 없이 열린다.
     "api.routes.data_preparation_control",
+    #: [BDR-7 / G2·G4] 기준선·시뮬레이션·의사결정 — 운영으로 쓰는 계산 경로다.
+    "api.routes.baseline_control",
 ]
 
 #: 다른 곳에 이미 판정이 있는 쓰기 라우트를 찾는 표식. `route_authority.EXEMPT` 와 함께 쓴다.

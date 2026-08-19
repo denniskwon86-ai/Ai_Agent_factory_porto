@@ -1704,6 +1704,50 @@ async def get_system_logs(
 # 결과물 라이브러리 (배포/최종 결과물 저장 + 보관 + 재실행)
 # ==========================================
 
+def _candidate_plane(release_id: str):
+    """이 판이 **지금 사는 데이터 평면**.
+
+    ★★★ [F-3] 후보는 Preview 평면에 물질화돼 있다. 승격 검사를 운영 평면으로 하면
+      「계약에 있는 데이터셋이 물질화되지 않았습니다」로 **모든 승격이 막힌다** —
+      종단 카나리가 그 자리에서 멈춰 드러났다."""
+    from core import app_preview
+    from core.program_lifecycle import program_lifecycle
+
+    try:
+        st = str(program_lifecycle.get_status(release_id).get("status", ""))
+    except Exception:
+        st = ""
+    audience = app_preview.audience_for_state(st)
+    #: ⚠️ 모르는 상태면 **평면을 고르지 않는다** — 상태 검사가 어차피 막는다.
+    return app_preview.app_data_for(audience) if audience else None
+
+
+def _promotion_materializer(release: Dict[str, Any], release_id: str, actor: str,
+                            ctx: Dict[str, Any]):
+    """승격과 **같은 트랜잭션 의미**로 운영 평면에 물질화하는 일감.
+
+    ⚠️ 승격은 「상태만 바꾸는 일」이 아니다. 운영으로 올린다는 것은 그 계약을 운영
+      평면에도 물질화한다는 뜻이고, 그것이 실패하면 상태를 바꾸지 않아야 한다 —
+      그러지 않으면 「운영이라고 적혀 있는데 읽을 데이터가 없는 판」이 생긴다."""
+    from core import app_contract_gate, app_preview, contract_materializer as cm
+    from core.data_preparation.store import data_preparation_store
+
+    contract = app_contract_gate.release_contract(release)
+    if not contract:
+        return None                       # 계약 없는 판은 물질화할 것이 없다
+
+    def _run():
+        cm.materialize(contract, release_id=release_id, actor_id=actor,
+                       store=data_preparation_store,
+                       app_data=app_preview.app_data_for(
+                           app_preview.AUDIENCE_OPERATIONAL),
+                       tenant_id=str(ctx.get("tenant_id", "") or ""),
+                       scope_node_id=str(ctx.get("scope_node_id", "") or ""),
+                       entity_mode=str(ctx.get("entity_mode", "") or ""))
+
+    return _run
+
+
 def _release_code_paths(release_id: str) -> List[str]:
     """이 릴리스의 생성 코드가 어디 있는가. **없으면 빈 목록**이다.
 
@@ -2916,7 +2960,11 @@ async def promote_release(project_id: str, release_id: str, req: PromoteRequest,
         out = release_promotion.promote(
             release=release, release_id=release_id, lifecycle=program_lifecycle,
             actor=(p.user_id or ""), code_paths=_release_code_paths(release_id),
-            readiness_state=readiness_state, reason=req.reason)
+            readiness_state=readiness_state, reason=req.reason,
+            #: ★★★ [F-3] 검사는 **후보가 사는 평면**으로, 물질화는 **운영 평면**에.
+            plane=_candidate_plane(release_id),
+            on_promote=_promotion_materializer(release, release_id,
+                                               p.user_id or "", viewing_context(p)))
     except release_promotion.PromotionError as e:
         #: ⚠️ 「지금 상태에서 할 수 없는 일」은 409 다 — 422 로 주면 사용자가 요청을
         #:   고쳐 보려 하는데, 고칠 것은 요청이 아니라 판의 상태다.
@@ -2960,6 +3008,7 @@ async def promotion_check(project_id: str, release_id: str, no_business_data: bo
     verdict = release_promotion.run_checks(
         release=release, release_id=release_id, lifecycle=program_lifecycle,
         code_paths=_release_code_paths(release_id),
+        plane=_candidate_plane(release_id),
         readiness_state=(release_promotion.NOT_APPLICABLE if no_business_data
                          else _release_readiness_state(release)))
     return {"status": "success",

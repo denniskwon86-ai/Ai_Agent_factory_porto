@@ -94,9 +94,9 @@ class _Bound(dict):
 @pytest.fixture
 def no_bindings(monkeypatch):
     """물질화는 비어 있다 — 계약 유무만 보이게 한다."""
-    monkeypatch.setattr(cg, "_materialized", lambda rid: {})
+    monkeypatch.setattr(cg, "_materialized", lambda rid, plane=None: {})
     monkeypatch.setattr(cg.app_data_service, "materialization_fingerprint",
-                        lambda rid: "m" * 64, raising=False)
+                        lambda rid, plane=None: "m" * 64, raising=False)
 
 
 def test_a_v1_executable_release_without_a_contract_is_blocked(no_bindings):
@@ -130,7 +130,7 @@ def test_the_explicit_exception_mode_opens_even_under_v1(no_bindings):
 def test_a_rogue_binding_still_blocks_before_the_new_rule(no_bindings, monkeypatch):
     """⚠️ 「계약은 없는데 결속은 있다」가 먼저다 — 그것은 **물질화가 승인보다 앞선**
     상태이고, 새 규칙과 다른 사실이다. 두 사유가 섞이면 원인을 못 찾는다."""
-    monkeypatch.setattr(cg, "_materialized", lambda rid: {"production": {"bound": 1}})
+    monkeypatch.setattr(cg, "_materialized", lambda rid, plane=None: {"production": {"bound": 1}})
     v = cg.evaluate(_release(runtime_contract_profile=""), "rel_1")
     assert v.ok is False
     assert "승인된 계약이 없는데 계약 결속이 있습니다" in " ".join(v.reasons)
