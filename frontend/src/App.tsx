@@ -39,6 +39,12 @@ import { GlobalNav, type NavGroup, type NavItem } from './components/GlobalNav';
 import { actingScope, governanceBlockReason, type ActingScope } from './lib/actingScope';
 import { AgentGovernancePanel } from './components/AgentGovernancePanel';
 import { EnterprisePage } from './components/EnterprisePage';
+// [BDR-5 / Wave H] 데이터 준비 보드 — 「지금 무엇까지 믿고 만들 수 있는가」
+import { DataPrepPanel } from './components/DataPrepPanel';
+// [G4 / Wave H] 시나리오 시뮬레이션 — 고정된 기준선 위에서만 계산한다
+import { ScenarioPanel } from './components/ScenarioPanel';
+// [Wave G 11.4] 의사결정 안건 — 3관점 검토서·책임자·기한·근거 계보
+import { DecisionPanel } from './components/DecisionPanel';
 import { CompanyContextBar } from './components/CompanyContextBar';
 import { BuildPage } from './components/BuildPage';
 import { BuildStartDialog } from './components/BuildStartDialog';
@@ -86,6 +92,9 @@ function AppShell() {
   const [buildStart, setBuildStart] = useState(false);
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
+  const [showDataPrep, setShowDataPrep] = useState(false);
+  const [showScenario, setShowScenario] = useState(false);
+  const [showDecisionPkg, setShowDecisionPkg] = useState(false);
   // 기술·제품 용어 전환 사전 — 사용자 권장 용어와 현재 기술 용어를 함께 확인하는 임시 페이지.
   const [showTerminology, setShowTerminology] = useState(false);
   const [showMasterData, setShowMasterData] = useState(false);
@@ -202,6 +211,15 @@ function AppShell() {
         { id: 'master', icon: '🗂', label: '기준정보 마스터',
           desc: '자재·공정·설비·KPI 골든 레코드 — 확정 조회로 모든 에이전트에 주입(모델 불변)',
           onSelect: () => setShowMasterData(true) },
+        { id: 'dataprep', icon: '📥', label: '업무 데이터 준비',
+          desc: '업무키트 적용 · 원천 결속 · 파일 판 인증 · 준비 상태 보드',
+          onSelect: () => setShowDataPrep(true) },
+        { id: 'scenario', icon: '📈', label: '시나리오 시뮬레이션',
+          desc: '환율·도입 지연·전력단가 → 생산량·재고·현금·손익 (고정 기준선 기준)',
+          onSelect: () => setShowScenario(true) },
+        { id: 'decision-pkg', icon: '🧭', label: '의사결정 안건',
+          desc: '영향 경로 · 3관점 검토서 · 실행 책임자와 기한 · 근거 계보',
+          onSelect: () => setShowDecisionPkg(true) },
         { id: 'crosswalk', icon: '🔗', label: '연계/크로스워크',
           desc: '외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사용자 승인',
           onSelect: () => setShowCrosswalk(true) },
@@ -353,6 +371,9 @@ function AppShell() {
         {showAgentGov && (
           <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
         )}
+        {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
+        {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
+        {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
         {showKnowledgeHub && (<KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />)}
         {showTerminology && (<TerminologyGlossaryPanel onClose={() => setShowTerminology(false)} />)}
         {showMasterData && (<MasterDataPanel onClose={() => setShowMasterData(false)} />)}
@@ -376,6 +397,9 @@ function AppShell() {
         {showSkillEvolution && (
           <SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />
         )}
+        {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
+        {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
+        {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
         {showKnowledgeHub && (
           <KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />
         )}

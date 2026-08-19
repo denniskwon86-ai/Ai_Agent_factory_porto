@@ -1187,3 +1187,7 @@
   /* 좌측 큐는 세로 스크롤 목록이 되면 화면을 다 먹는다 — 높이를 묶는다. */
   .afs-scope.enterprise-canvas > :nth-child(1) { max-height: 46vh; overflow-y: auto; }
 }
+
+/* [Wave H] 모달 본문을 세로로 채우는 카드. 내용이 짧아도 카드가 영역을 덮는다 —
+   ⚠️ 덮지 않으면 남은 자리로 뒤 화면이 비치고, 사용자는 「덜 그려졌다」로 읽는다. */
+.afs-dialog-body > .panel.afs-fill { flex: 1 1 auto; min-height: 0; }
