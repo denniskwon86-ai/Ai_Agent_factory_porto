@@ -51,7 +51,7 @@ def _audit_registry(event: str, p: "Principal", reason: str, detail: str = "") -
 #: ⚠️ 예전에는 검증이 없어 `../` 나 절대경로 조각이 파일명으로 들어갈 수 있었다.
 _SAFE_AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 from core.enterprise_context import EnterpriseContext
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from core.async_orchestrator import orchestrator
 # 배포된 최종 결과물 보관소의 경로는 **단일 지점**에서 온다(`core/library_paths.py`).
@@ -1704,6 +1704,72 @@ async def get_system_logs(
 # 결과물 라이브러리 (배포/최종 결과물 저장 + 보관 + 재실행)
 # ==========================================
 
+def _release_code_paths(release_id: str) -> List[str]:
+    """이 릴리스의 생성 코드가 어디 있는가. **없으면 빈 목록**이다.
+
+    ⚠️ 없는 것을 「검사할 것이 없으니 통과」로 바꾸지 않는다 — 그 판단은
+      `release_promotion._check_static` 이 «보지 못한 것은 통과가 아니다» 로 한다."""
+    from core import library_paths
+
+    root = library_paths.release_dir(release_id)
+    return [root] if os.path.isdir(root) else []
+
+
+def _release_readiness_state(release: Dict[str, Any]) -> Any:
+    """이 릴리스가 읽는 업무 데이터의 준비도. **판정하지 않고 조회만 한다.**
+
+    ⚠️ 물질화가 남긴 Kit Instance 를 통해 묻는다. 물질화 기록이 없으면 `None` —
+      그리고 `None` 은 「확인하지 못했다」이지 「해당 없음」이 아니다."""
+    mat = release.get("contract_materialization") or {}
+    if not isinstance(mat, dict) or mat.get("state") != "MATERIALIZED":
+        return None
+    if not (mat.get("sources") or {}):
+        #: 계약이 업무 데이터를 하나도 안 쓴다 — 물질화가 그렇게 말했다.
+        from core import release_promotion
+        return release_promotion.NOT_APPLICABLE
+
+    from core.data_preparation import kit_registry, readiness as rd
+    from core.data_preparation.store import data_preparation_store as store
+
+    #: 물질화가 못 박은 인스턴스들 — 하나라도 준비 안 됐으면 승격하지 않는다.
+    states = []
+    for instance_id in sorted({str(v) for v in (mat.get("instances") or {}).values()
+                               if str(v)}):
+        inst = store.get_instance(instance_id)
+        if not inst:
+            return None
+        kit = kit_registry.resolve(store, inst["kit_id"], inst["version"])
+        if not kit:
+            return None
+        keys = kit_registry.dataset_keys(kit.get("profile"))
+        snapshots: Dict[str, List[Dict[str, Any]]] = {k: [] for k in keys}
+        for row in store.list_snapshots(instance_id):
+            key = str(row.get("dataset_contract_key") or "")
+            if key in snapshots:
+                snapshots[key].append(row)
+        states.append(rd.evaluate_instance(
+            contract_keys=keys,
+            bindings={k: store.active_binding(instance_id, k) for k in keys},
+            snapshots=snapshots, outputs=kit_registry.outputs(kit.get("profile")),
+            now=_now_iso_utc(),
+            scope={"tenant_id": inst["tenant_id"],
+                   "scope_node_id": inst["scope_node_id"],
+                   "entity_mode": inst["entity_mode"]}))
+    if not states:
+        return None
+    #: ★ 가장 나쁜 것을 돌려준다 — 하나라도 준비 안 됐으면 준비 안 된 것이다.
+    from core.data_preparation import readiness as _rd
+    for st in states:
+        if st["status"] != _rd.INSTANCE_READY:
+            return st
+    return states[0]
+
+
+def _now_iso_utc() -> str:
+    from datetime import timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _materialize_contract_for_release(project_id: str, release_id: str, *,
                                       actor_id: str, profile: str,
                                       ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -1755,7 +1821,11 @@ def _materialize_contract_for_release(project_id: str, release_id: str, *,
     return {"state": "MATERIALIZED", "detail": "",
             "datasets": [d.get("name", "") for d in out.datasets],
             "sources": {r.name: r.enterprise_contract_key
-                        for r in out.resolved if r.enterprise_contract_key}}
+                        for r in out.resolved if r.enterprise_contract_key},
+            #: ★ [F-2] 승격이 «이 데이터가 지금 준비돼 있는가» 를 물으려면 어느
+            #:   인스턴스인지 알아야 한다. 물질화가 못 박은 값을 그대로 남긴다.
+            "instances": {r.name: r.kit_instance_id
+                          for r in out.resolved if r.kit_instance_id}}
 
 
 @router.post("/{project_id}/release")
@@ -1903,6 +1973,28 @@ async def create_release(project_id: str,
     # ★★★ 릴리스 파일을 **먼저** 쓴다 — 물질화는 `release_id` 로 릴리스를 읽어
     #   테넌트·앱을 확인한다(`app_data.release_identity`). 순서를 바꾸면 자기
     #   릴리스를 못 찾아 아무것도 이어받지 못한다.
+    # ── [Wave F-2] 새 판은 **후보로 태어난다** ─────────────────────────────
+    #
+    # ★★★ 사람이 Preview 로 확인한 뒤에야 운영이 된다. 그전까지 이 판은 Preview
+    #   평면(`data/app_data_preview.db`)만 만지고 운영 데이터에 닿지 않는다(F-1).
+    #
+    # ⚠️ **기존 릴리스는 그대로다.** `program_lifecycle.get_status()` 는 기록이 없으면
+    #   `active` + `recorded=False` 를 주므로, 이 줄이 생기기 전에 게시된 판들은
+    #   아무 영향을 받지 않는다(비소급 경계 — 4c-0 과 같은 규칙).
+    #
+    # ⚠️ 상태 기록 실패가 게시를 막지 않는다. 산출물은 이미 만들어져 있고 못 꺼내게
+    #   하는 것이 더 큰 손해다. 다만 **삼키지도 않는다** — 릴리스에 그 사실을 남겨
+    #   화면이 「이 판은 후보로 기록되지 않았다」를 보여 줄 수 있게 한다.
+    try:
+        from core.program_lifecycle import CANDIDATE, program_lifecycle
+        program_lifecycle.set_status(
+            release_id, CANDIDATE, actor=(p.user_id or "system"),
+            reason="게시된 새 판 — Preview 확인 후 승격 대상")
+        release["lifecycle_state"] = CANDIDATE
+    except Exception as e:
+        release["lifecycle_state"] = ""
+        release["lifecycle_state_error"] = str(e)[:300]
+
     release["contract_materialization"] = _materialize_contract_for_release(
         project_id, release_id, actor_id=(p.user_id or ""),
         profile=str(release.get("runtime_contract_profile", "") or ""),
@@ -2771,3 +2863,105 @@ async def delete_workflow_template(template_id: str,
     _audit_registry("WORKFLOW_TEMPLATE_DELETED", p, f"템플릿 삭제 {template_id}",
                     "되돌릴 수 없음")
     return {"status": "success"}
+
+
+class PromoteRequest(BaseModel):
+    """승격 요청. ★ `status` 를 받지 않는다 — 목적지는 하나(ACTIVE)뿐이고, 받으면
+    「후보로 되돌리기」·「폐기」가 같은 문으로 들어온다."""
+    reason: str = ""
+    #: ⚠️ 이 앱이 업무 데이터를 쓰지 않는다면 **명시**해야 한다. 비워 두면 «확인하지
+    #:   못함» 이고, 그것은 통과가 아니다.
+    no_business_data: bool = False
+
+
+@router.post("/{project_id}/releases/{release_id}/promote")
+async def promote_release(project_id: str, release_id: str, req: PromoteRequest,
+                          p: Principal = Depends(current_principal)):
+    """[I-4 7] 후보 판을 **운영으로 올린다.**
+
+    ★★★ 승격 시점에 다섯 가지를 다시 본다 — 계약↔물질화 · 정적 인증 검사 · 계약 승인 ·
+      릴리스 상태 · 데이터 준비도. 승인은 «그때» 의 사실이고, 그 뒤에 계약이 개정되거나
+      원천 인증이 회수될 수 있다.
+
+    ⚠️ 하나라도 어긋나면 **아무것도 바꾸지 않는다.** 부분 승격은 「운영이라고 적혀
+      있는데 계약과 다른 판」을 만들고, 그 상태는 오류를 내지 않는다.
+    ⚠️ 실패해도 **이전 ACTIVE 는 그대로다** — 새 판을 올리려다 실패했다고 이미 도는
+      앱이 멈추면, 승격을 시도하는 것 자체가 위험한 일이 되고 아무도 안 하게 된다."""
+    _safe_id(project_id, "project_id")
+    _safe_id(release_id, "release_id")
+    assert_project_writable(p, project_id)
+
+    from core import library_paths, release_promotion
+    from core.program_lifecycle import program_lifecycle
+
+    rel_path = os.path.join(library_paths.release_dir(release_id), "release.json")
+    if not os.path.exists(rel_path):
+        raise HTTPException(status_code=404, detail="릴리스를 찾을 수 없습니다.")
+    try:
+        with open(rel_path, "r", encoding="utf-8") as f:
+            release = json.load(f)
+    except Exception as e:
+        #: ⚠️ 판독 실패는 «없다» 가 아니다 — 서버 상태 이상이고 사용자가 고칠 수 없다.
+        raise HTTPException(status_code=503,
+                            detail=f"릴리스를 읽을 수 없습니다: {str(e)[:120]}")
+
+    #: 이 릴리스가 실제로 그 프로젝트의 것인지 — 경로만으로 남의 판을 올리지 못하게.
+    if str(release.get("project_id", "")) != project_id:
+        raise HTTPException(status_code=404, detail="릴리스를 찾을 수 없습니다.")
+
+    readiness_state = (release_promotion.NOT_APPLICABLE if req.no_business_data
+                       else _release_readiness_state(release))
+
+    try:
+        out = release_promotion.promote(
+            release=release, release_id=release_id, lifecycle=program_lifecycle,
+            actor=(p.user_id or ""), code_paths=_release_code_paths(release_id),
+            readiness_state=readiness_state, reason=req.reason)
+    except release_promotion.PromotionError as e:
+        #: ⚠️ 「지금 상태에서 할 수 없는 일」은 409 다 — 422 로 주면 사용자가 요청을
+        #:   고쳐 보려 하는데, 고칠 것은 요청이 아니라 판의 상태다.
+        raise HTTPException(status_code=409, detail=str(e))
+
+    #: 승격 사실을 릴리스에도 남긴다 — 「언제 운영이 됐나」는 파일이 답해야 한다.
+    release["lifecycle_state"] = out["status"]
+    release["promoted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    release["promoted_by"] = p.user_id or ""
+    try:
+        with open(rel_path, "w", encoding="utf-8") as f:
+            json.dump(release, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        #: 상태는 이미 바뀌었다 — 되돌리지 않는다(원장과 같은 규칙). 대신 그 사실을 알린다.
+        out["release_file_error"] = str(e)[:200]
+
+    return {"status": "success", "data": out}
+
+
+@router.get("/{project_id}/releases/{release_id}/promotion-check")
+async def promotion_check(project_id: str, release_id: str, no_business_data: bool = False,
+                          p: Principal = Depends(current_principal)):
+    """승격하면 무엇이 막히는가 — **바꾸지 않고 본다.**
+
+    ★ 사람이 「눌러 보고 실패」를 겪지 않게 한다. 같은 검사를 같은 순서로 돌린다."""
+    _safe_id(project_id, "project_id")
+    _safe_id(release_id, "release_id")
+    assert_project_readable(p, project_id)
+
+    from core import library_paths, release_promotion
+    from core.program_lifecycle import program_lifecycle
+
+    rel_path = os.path.join(library_paths.release_dir(release_id), "release.json")
+    if not os.path.exists(rel_path):
+        raise HTTPException(status_code=404, detail="릴리스를 찾을 수 없습니다.")
+    with open(rel_path, "r", encoding="utf-8") as f:
+        release = json.load(f)
+    if str(release.get("project_id", "")) != project_id:
+        raise HTTPException(status_code=404, detail="릴리스를 찾을 수 없습니다.")
+
+    verdict = release_promotion.run_checks(
+        release=release, release_id=release_id, lifecycle=program_lifecycle,
+        code_paths=_release_code_paths(release_id),
+        readiness_state=(release_promotion.NOT_APPLICABLE if no_business_data
+                         else _release_readiness_state(release)))
+    return {"status": "success",
+            "data": {"ok": verdict.ok,
+                     "checks": [c._asdict() for c in verdict.checks]}}

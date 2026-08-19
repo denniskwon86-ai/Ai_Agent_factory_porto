@@ -85,6 +85,13 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     #     「승인할 것이 있다」를 알릴 이유가 없다.
     f"POST {F}/{{project_id}}/contract-review/decision": (PROJECT_RUN,),
 
+    # ── [I-4 7 / Wave F-2] 후보 판을 **운영으로 올린다** ────────────────
+    #   ★★★ 이것은 «만들기» 가 아니라 «운영에 내보내기» 다. 이 순간부터 그 앱은
+    #     실제 조직 데이터를 만지므로, 프로젝트를 굴릴 수 있는 권한을 요구한다.
+    #   ⚠️ 사전 확인(`GET .../promotion-check`)은 읽기라 표에 넣지 않는다 —
+    #     표는 쓰기 전용이고, 그쪽은 핸들러가 직접 `assert_project_readable` 한다.
+    f"POST {F}/{{project_id}}/releases/{{release_id}}/promote": (PROJECT_RUN,),
+
     # ── [BDR-2] 업무 데이터 준비 ────────────────────────────────────────
     #   ★ 키트를 조직에 «적용» 하는 것은 자원을 만드는 일이다 → `PROJECT_CREATE`.
     #     결속을 붙이고 상태를 옮기는 것은 운영이다 → `PROJECT_RUN`.
