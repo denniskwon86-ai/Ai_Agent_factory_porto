@@ -69,7 +69,7 @@ export interface InstanceReadiness {
 //
 // ⚠️⚠️ 서버는 `{status, data}` 로 답한다. 봉투째 읽으면 필드가 전부 `undefined` 가
 //   되고, 화면은 **빈 값을 «데이터 없음» 으로** 그린다. 그 화면은 오류를 내지 않는다.
-async function unwrap<T>(res: Response, what: string): Promise<T> {
+export async function unwrap<T>(res: Response, what: string): Promise<T> {
   if (!res.ok) {
     let detail = '';
     try {

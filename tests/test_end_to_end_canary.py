@@ -119,8 +119,12 @@ def canary(monkeypatch, tmp_path):
 
     monkeypatch.setattr(org_directory, "resolve_scope", lambda uid="": _Scope())
     monkeypatch.setattr(org_directory, "is_bootstrap", lambda: False)
+    #: ★ 부서 역할을 준다 — 승격은 `project.run` 을 요구한다(관리자 플래그가 아니라
+    #:   **역할**에서 나온다). 이것이 없으면 승격 시험이 403 으로 막히고, 그 403 을
+    #:   「통제가 잘 돈다」로 읽으면 승격 경로를 한 번도 지나지 않은 채 초록이 뜬다.
     monkeypatch.setattr(org_directory, "get_user",
-                        lambda uid: {"user_id": uid, "status": "active"} if uid else None)
+                        lambda uid: {"user_id": uid, "status": "active",
+                                     "roles": {"hq": "member"}} if uid else None)
     monkeypatch.setattr(org_directory, "get_ownership",
                         lambda kind, rid: {"dept_id": "hq", "owner_user_id": "",
                                            "visibility": "dept"})
@@ -133,6 +137,26 @@ def canary(monkeypatch, tmp_path):
     c.lib = lib
     c.raw = str(tmp_path / "raw")
     return c
+
+
+def _write_project_meta(mode=MODE):
+    """프로젝트가 **문맥에 묶여 있다**는 사실을 파일로 남긴다.
+
+    ⚠️ 이것이 없으면 승격 라우트가 `RESOURCE_UNBOUND` 로 404 를 낸다 — 그리고 그 404 를
+      「통제가 잘 돈다」로 읽으면 승격 경로를 **한 번도 지나지 않은 채** 초록이 뜬다.
+    ★ 제품이 게시 때 만드는 것과 같은 모양이다(설계 §10.2)."""
+    import os
+
+    from core.paths import workspace_path
+
+    root = workspace_path(PROJECT)
+    os.makedirs(root, exist_ok=True)
+    with open(os.path.join(root, "project_meta.json"), "w", encoding="utf-8") as f:
+        json.dump({"owner_dept_id": "hq", "owner_user_id": "", "visibility": "dept",
+                   "tenant_id": TENANT, "enterprise_scope_id": SCOPE,
+                   "entity_mode": mode, "ownership_basis": "declared"},
+                  f, ensure_ascii=False)
+    return root
 
 
 def _write_release(client, *, mode=MODE, contract=None):
@@ -618,3 +642,82 @@ def test_an_empty_slot_does_not_collapse_to_an_empty_set(canary, dp):
     assert got != fingerprint_for([]), (
         "판이 없는 자리를 지문에서 뺐다 — 「결속은 있는데 판이 없다」가 "
         "「결속이 하나도 없다」와 같은 값이 됐다")
+
+
+# ── 승격 화면이 필요로 하는 것 ──────────────────────────────────────────
+def test_the_library_list_carries_what_the_promotion_screen_needs(canary, dp):
+    """★★★ 승격 화면은 `/{project_id}/releases/{release_id}/promote` 를 부른다.
+
+    ⚠️ 목록이 `project_id` 를 안 주면 화면은 사용자에게 **id 를 타이핑하라**고 요구하게
+      된다 — 이번 세션에서 세 화면이 같은 이유로 쓸 수 없었다.
+    ⚠️ `data_fingerprint` 는 「어느 데이터 위에서 운영이 됐나」의 답이다. 목록에 없으면
+      승격한 뒤 그 값을 어디서도 볼 수 없다."""
+    _write_project_meta()
+    _write_release(canary, contract=_contract())
+    program_lifecycle.set_status(REL, CANDIDATE, actor="u@x", reason="카나리")
+
+    r = canary.get("/api/v1/factory/library/list", headers=H)
+    assert r.status_code == 200, r.text[:200]
+    rows = [x for x in r.json()["data"] if x["release_id"] == REL]
+    assert rows, "방금 만든 릴리스가 목록에 없다"
+    it = rows[0]
+    assert it["project_id"] == PROJECT, f"project_id 가 없다: {it.get('project_id')!r}"
+    assert it["lifecycle_status"] == CANDIDATE
+    assert it["lifecycle_recorded"] is True
+    #: ★ 아직 승격 전이므로 봉인값은 **비어 있다** — 「봉인하지 않음」이다.
+    assert it["data_fingerprint"] == ""
+
+
+def test_the_promotion_screen_can_see_why_it_is_blocked(canary, dp):
+    """★★★ 「눌러 보고 실패」를 겪지 않게 한다 — 같은 검사를 **바꾸지 않고** 미리 돌린다.
+
+    ⚠️ 사전 점검이 승격과 다른 검사를 돌리면, 화면은 초록인데 눌러서 막힌다."""
+    _write_project_meta()
+    _write_release(canary, contract=_contract())
+    #: 후보로 기록하지 **않는다** — 상태 검사가 막아야 한다.
+    r = canary.get(f"/api/v1/factory/{PROJECT}/releases/{REL}"
+                   f"/promotion-check?no_business_data=true", headers=H)
+    assert r.status_code == 200, r.text[:200]
+    got = r.json()["data"]
+    assert got["ok"] is False, "후보가 아닌 판을 «올려도 된다» 고 답했다"
+    names = {c["name"]: c for c in got["checks"]}
+    assert set(names) == set(rp.CHECK_NAMES), "사전 점검이 다른 검사를 돌린다"
+    assert names[rp.CHECK_STATE]["ok"] is False
+    assert names[rp.CHECK_STATE]["reason"].strip(), "막힌 사유가 비었다"
+
+    #: ★ 대조군 — 후보로 기록하면 상태 검사는 통과한다. 없으면 「전부 빨강」인 고장을
+    #:   통제로 읽는다.
+    program_lifecycle.set_status(REL, CANDIDATE, actor="u@x", reason="카나리")
+    again = canary.get(f"/api/v1/factory/{PROJECT}/releases/{REL}"
+                       f"/promotion-check?no_business_data=true",
+                       headers=H).json()["data"]
+    assert {c["name"]: c["ok"] for c in again["checks"]}[rp.CHECK_STATE] is True
+
+
+def test_promoting_through_the_route_seals_the_data_fingerprint(canary, dp):
+    """★★★ 승격이 **저장소에** 봉인값을 남기고, 목록이 그것을 돌려준다.
+
+    ⚠️ 결과에만 있고 목록에 안 나오면, 나중에 「그때 어느 데이터였나」를 볼 곳이 없다."""
+    _write_project_meta()
+    contract = _contract()
+    #: ★ 물질화는 «활성 원천» 을 요구한다 — 업무키트를 적용하고 판을 인증해 둔다.
+    _step_source(dp, canary.raw, mode=MODE)
+    _write_release(canary, contract=contract)
+    #: ★ 후보는 **Preview 평면**에 물질화돼 있다(F-1). 그 상태여야 계약↔물질화가 맞는다.
+    _step_materialize(dp, contract, mode=MODE, audience=ap.AUDIENCE_PREVIEW)
+    program_lifecycle.set_status(REL, CANDIDATE, actor="u@x", reason="카나리")
+
+    r = canary.post(f"/api/v1/factory/{PROJECT}/releases/{REL}/promote",
+                    headers=H,
+                    json={"reason": "미리보기 확인 완료", "no_business_data": True})
+    assert r.status_code == 200, r.text[:300]
+    out = r.json()["data"]
+    assert out["status"] == ACTIVE
+    #: ★★★ 「데이터를 안 쓴다」는 **표식**이지 빈 값이 아니다.
+    assert out["data_fingerprint"] == rp.DATA_NOT_APPLICABLE, out
+
+    rows = [x for x in canary.get("/api/v1/factory/library/list", headers=H).json()["data"]
+            if x["release_id"] == REL]
+    assert rows[0]["lifecycle_status"] == ACTIVE
+    assert rows[0]["data_fingerprint"] == rp.DATA_NOT_APPLICABLE, (
+        "승격 결과에는 있는데 목록에는 없다 — 나중에 볼 곳이 없다")

@@ -45,6 +45,8 @@ import { DataPrepPanel } from './components/DataPrepPanel';
 import { ScenarioPanel } from './components/ScenarioPanel';
 // [Wave G 11.4] 의사결정 안건 — 3관점 검토서·책임자·기한·근거 계보
 import { DecisionPanel } from './components/DecisionPanel';
+// [I-4 7 / Wave H-4] 운영 승격 — 후보를 운영으로 올리는 단 하나의 문
+import { ReleasePromotionPanel } from './components/ReleasePromotionPanel';
 import { CompanyContextBar } from './components/CompanyContextBar';
 import { BuildPage } from './components/BuildPage';
 import { BuildStartDialog } from './components/BuildStartDialog';
@@ -95,6 +97,7 @@ function AppShell() {
   const [showDataPrep, setShowDataPrep] = useState(false);
   const [showScenario, setShowScenario] = useState(false);
   const [showDecisionPkg, setShowDecisionPkg] = useState(false);
+  const [showPromotion, setShowPromotion] = useState(false);
   // 기술·제품 용어 전환 사전 — 사용자 권장 용어와 현재 기술 용어를 함께 확인하는 임시 페이지.
   const [showTerminology, setShowTerminology] = useState(false);
   const [showMasterData, setShowMasterData] = useState(false);
@@ -220,6 +223,9 @@ function AppShell() {
         { id: 'decision-pkg', icon: '🧭', label: '의사결정 안건',
           desc: '영향 경로 · 3관점 검토서 · 실행 책임자와 기한 · 근거 계보',
           onSelect: () => setShowDecisionPkg(true) },
+        { id: 'promotion', icon: '🚀', label: '운영 승격',
+          desc: '후보 판을 운영으로 — 계약·물질화·정적검사·승인·데이터 준비도 다섯 검사',
+          onSelect: () => setShowPromotion(true) },
         { id: 'crosswalk', icon: '🔗', label: '연계/크로스워크',
           desc: '외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사용자 승인',
           onSelect: () => setShowCrosswalk(true) },
@@ -374,6 +380,9 @@ function AppShell() {
         {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
         {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
         {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
+        {showPromotion && (
+          <ReleasePromotionPanel onClose={() => setShowPromotion(false)} />
+        )}
         {showKnowledgeHub && (<KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />)}
         {showTerminology && (<TerminologyGlossaryPanel onClose={() => setShowTerminology(false)} />)}
         {showMasterData && (<MasterDataPanel onClose={() => setShowMasterData(false)} />)}
@@ -400,6 +409,9 @@ function AppShell() {
         {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
         {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
         {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
+        {showPromotion && (
+          <ReleasePromotionPanel onClose={() => setShowPromotion(false)} />
+        )}
         {showKnowledgeHub && (
           <KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />
         )}

@@ -2296,6 +2296,13 @@ async def list_releases(
                     "lifecycle_recorded": bool(_lf),
                     "lifecycle_reason": (_lf or {}).get("reason", ""),
                     "replacement_release_id": (_lf or {}).get("replacement_release_id", ""),
+                    #: ★★★ 승격 화면이 `/{project_id}/releases/{release_id}/promote` 를
+                    #:   부르려면 **프로젝트 id 가 필요하다.** 이것이 없으면 화면은
+                    #:   사용자에게 id 를 타이핑하라고 요구하게 된다.
+                    "project_id": r.get("project_id", ""),
+                    #: ★ [§4.2/§4.5③] 이 판이 **어느 업무 데이터 위에서** 운영이 됐는가.
+                    #:   빈 값은 「봉인하지 않음」이고 `NOT_APPLICABLE` 은 「데이터를 안 씀」이다.
+                    "data_fingerprint": (_lf or {}).get("data_fingerprint", ""),
                     "release_id": _rid,
                     "project_name": r.get("project_name", rid),
                     "template_id": r.get("template_id", "default"),

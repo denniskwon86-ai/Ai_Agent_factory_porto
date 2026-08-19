@@ -116,8 +116,55 @@ def _seed_org() -> None:
     print(f"· 조직·사용자 {ADMIN}")
 
 
+PROJECT = "proj_pilot"
+RELEASE = "rel_pilot"
+
+
+def _seed_candidate_release() -> None:
+    """게시가 만들어 놓는 것 — 프로젝트 메타 · 릴리스 파일 · **후보 상태**.
+
+    ★★★ 「운영 승격」 화면은 후보가 있어야 무엇이든 보여 줄 수 있다. 0건 화면만 찍으면
+      다섯 검사가 사람이 읽을 만하게 나오는지 **한 번도 보지 못한 채** 끝난다.
+
+    ⚠️ 여기서 검사를 통과시키려 하지 않는다. 물질화도 계약 승인도 하지 않은 판이라
+      화면은 **막힌 이유들**을 보여 줄 것이고, 그것이 이 화면의 본래 일이다."""
+    import json
+
+    from core import library_paths
+    from core.paths import workspace_path
+    from core.program_lifecycle import CANDIDATE, program_lifecycle
+
+    root = workspace_path(PROJECT)
+    os.makedirs(root, exist_ok=True)
+    with open(os.path.join(root, "project_meta.json"), "w", encoding="utf-8") as f:
+        json.dump({"owner_dept_id": DEPT, "owner_user_id": "", "visibility": "dept",
+                   "tenant_id": TENANT, "enterprise_scope_id": SCOPE,
+                   "entity_mode": MODE, "ownership_basis": "declared"},
+                  f, ensure_ascii=False)
+
+    rel_dir = library_paths.release_dir(RELEASE)
+    os.makedirs(rel_dir, exist_ok=True)
+    with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "release_id": RELEASE, "project_id": PROJECT, "tenant_id": TENANT,
+            "entity_mode": MODE, "enterprise_scope_id": SCOPE,
+            "project_name": "원료 입고 현황 앱 (파일럿)",
+            "owner_user_id": "", "owner_dept_id": DEPT, "visibility": "dept",
+            "artifact_kind": "APP", "runtime_contract_profile": "v1",
+            "created_at": "2026-08-19T06:00:00+00:00",
+            "manifest": {"fingerprint": "fp_pilot", "valid": True, "manifest": {
+                "version": "1.0", "app_class": "departmental",
+                "capabilities": ["arrivals.read"], "required_capabilities": []}},
+        }, f, ensure_ascii=False)
+
+    program_lifecycle.set_status(RELEASE, CANDIDATE, actor="pilot",
+                                 reason="파일럿 시연용 후보")
+    print(f"· 후보 릴리스 {RELEASE} (프로젝트 {PROJECT})")
+
+
 def main() -> int:
     _seed_org()
+    _seed_candidate_release()
     raw_root = os.path.join(PROJECT_ROOT, "data", "data_preparation")
     kr.register_all(store)
     kit = kr.resolve(store, kr.DEMO_KIT_ID, "1.0.0")
@@ -169,6 +216,7 @@ def main() -> int:
     print(f"  기준선용 판 : {s1['snapshot_id']}")
     print("  준비도 보드에 네 가지 상태가 함께 보여야 합니다 —")
     print("    READY(입고) · 검사 대기(구매주문) · 격리(잘린 판) · 원천 미지정(공급사)")
+    print(f"  승격 화면 후보 : {RELEASE} — 다섯 검사에서 «막힌 이유» 가 보여야 합니다")
     return 0
 
 
