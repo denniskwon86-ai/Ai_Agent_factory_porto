@@ -212,15 +212,22 @@ def test_a_zero_limit_does_not_return_everything():
 # ── [BDR-6] 실제 배선 ────────────────────────────────────────────────────
 #
 # ⚠️ 판정 함수 단위 시험만으로는 「실제 배선을 타지 않으면 그 초록은 거짓이다」를 막지
-#   못한다 — 이 저장소가 반복해 다친 유형이다. 여기서는 **진짜 라우터**를 태운다.
+#   못한다. 여기서는 **진짜 라우터**를 태우고, 데이터셋은 **계약이 만든다**.
+#
+# ★★★ [Wave F-0] 릴리스가 승인된 계약을 들고 있다. 그래야 물질화가 정당하고, 계약과
+#   결속이 어긋나면 증명 발급이 막힌다 — 그 대조가 이 절의 전제다.
 import json                                                          # noqa: E402
 
+from core import app_runtime_contract as arc                         # noqa: E402
+from core import contract_materializer as cm                         # noqa: E402
 from core.data_preparation import snapshot_service as ss             # noqa: E402
-from core.data_preparation.store import DataPreparationStore         # noqa: E402
+from core.data_preparation import source_binding as sb               # noqa: E402
 
 H_USER = {"X-Factory-User": "u@x", "X-Session-Token": "sess_raw_1",
           "X-Enterprise-Scope": "node_hq"}
 R = "/api/v1/appdata/runtime"
+TENANT, SCOPE, MODE = "tenant_default", "node_hq", "REAL"
+CONTRACT_KEY = "arrivals"
 
 ENTERPRISE_CSV = (
     "arrived_at,material_code,quantity\n"
@@ -231,10 +238,54 @@ ENTERPRISE_CSV = (
 SOURCE_ROWS = [{"arrived_at": "2026-01-05", "material_code": "M1", "quantity": "10"},
                {"arrived_at": "2026-01-06", "material_code": "M2", "quantity": "5"}]
 
+_FIELDS = [{"name": "quantity", "type": "number", "required": False,
+            "classification": "INTERNAL"}]
+
+#: ★★★ **하나의 계약**을 릴리스와 물질화가 함께 쓴다 — 따로 적으면 반드시 갈라지고,
+#:   갈린 순간 게이트가 증명 발급을 막는다(그것이 이 시험을 처음 빨갛게 만든 것이다).
+#:
+#: ★★★ 그리고 그 계약을 **실제 컴파일러로 만든다.** 손으로 적으면 스키마가 요구하는
+#:   것을 빠뜨리고(실측: `runtime_contract_version`·`purpose`), 그 계약은 게이트에서
+#:   「읽을 수 없습니다」로 막힌다 — 시험만 아는 계약 모양이 생기는 것도 같은 병이다.
+def _build_contract():
+    from core.host_contract_compiler import compile_contract
+
+    draft = {
+        "app_class": "departmental",
+        "datasets": [
+            {"name": "arrivals", "purpose": "자재가 얼마나 들어왔는가",
+             "allowed_actions": ["read"], "data_role": arc.ENTERPRISE_ACTUAL,
+             "source_intent": arc.ENTERPRISE_READ,
+             "enterprise_contract_key": CONTRACT_KEY,
+             "duplicate_entry_policy": arc.DENY_IF_AUTHORITATIVE_SOURCE_EXISTS,
+             "fields": _FIELDS},
+            {"name": "memo", "purpose": "원천에 없는 대응 메모",
+             "allowed_actions": ["read", "create"],
+             "data_role": arc.NATIVE_SUPPLEMENT, "source_intent": arc.AFS_NATIVE,
+             "duplicate_entry_policy": arc.NO_DUPLICATE_CHECK_REQUIRED,
+             "fields": _FIELDS},
+        ]}
+    r = compile_contract(draft, project_id="proj_a")
+    assert r.ok, r.errors
+    c = dict(r.contract)
+    c["status"] = arc.STATUS_APPROVED
+    #: ⚠️ 승인 블록의 필드 이름은 스키마가 정한다(`approved_by`·`approved_at`).
+    #:   임의 이름을 넣으면 계약이 통째로 「읽을 수 없습니다」가 된다.
+    #: ⚠️ `decision_ledger_id` 도 필수다 — **승인에는 결정 원장 id 가 남아야 한다.**
+    #:   그것이 없으면 「누가 언제 승인했나」에 답할 수 없고, 계약은 승인되지 않은 것과
+    #:   같아진다.
+    c["approval"] = {"status": "APPROVED", "approved_by": "u@x",
+                     "approved_at": "2026-08-18T00:00:00Z",
+                     "decision_ledger_id": "evt_test_approval"}
+    return c
+
+
+CONTRACT = _build_contract()
+
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    """실제 앱 + 격리된 라이브러리·앱데이터·증명 저장소."""
+    """실제 앱 + 격리 저장소. **릴리스가 승인된 계약을 들고 있다.**"""
     import config
     import core.library_paths as library_paths
     from core.app_capability_token import app_capability_tokens
@@ -242,16 +293,17 @@ def client(monkeypatch, tmp_path):
     from core.policy_shadow import policy_shadow
 
     lib = tmp_path / "library"
-    lib.mkdir()
-    (lib / "rel_ok").mkdir()
+    (lib / "rel_ok").mkdir(parents=True)
     (lib / "rel_ok" / "release.json").write_text(json.dumps({
-        "release_id": "rel_ok", "project_id": "proj_a", "tenant_id": "tenant_default",
-        "entity_mode": "REAL", "enterprise_scope_id": "node_hq",
+        "release_id": "rel_ok", "project_id": "proj_a", "tenant_id": TENANT,
+        "entity_mode": MODE, "enterprise_scope_id": SCOPE,
         "owner_user_id": "", "owner_dept_id": "hq", "visibility": "dept",
+        "runtime_contract_profile": "v1",
+        #: ★ 릴리스에 봉인된 계약 — 게이트는 이것과 물질화를 대조한다.
+        "runtime_contract": CONTRACT,
         "manifest": {"fingerprint": "fp_rel_ok", "valid": True, "manifest": {
             "version": "1.0", "app_class": "departmental",
-            "capabilities": ["arrivals.read", "arrivals.create", "arrivals.update",
-                             "arrivals.delete", "memo.read", "memo.create"],
+            "capabilities": ["arrivals.read", "memo.read", "memo.create"],
             "required_capabilities": []}},
     }, ensure_ascii=False), encoding="utf-8")
 
@@ -293,9 +345,9 @@ def client(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def dp(tmp_path):
-    """업무 데이터 저장소. ⚠️ conftest 가 이미 경로를 격리한다 — 여기서는 그 싱글턴을
-    그대로 쓴다(라우터가 import 하는 것과 **같은 객체**여야 한다)."""
+def dp():
+    """업무 데이터 저장소. ⚠️ conftest 가 경로를 격리한다 — 라우터가 import 하는 것과
+    **같은 객체**여야 하므로 여기서 새로 만들지 않는다."""
     from core.data_preparation.store import data_preparation_store
 
     return data_preparation_store
@@ -311,67 +363,62 @@ def _h(tok):
     return {**H_USER, "X-App-Proof": tok}
 
 
-def _mkds(c, name, fields):
-    r = c.post("/api/v1/appdata/datasets", headers=H_USER, json={
-        "release_id": "rel_ok", "name": name, "schema": {"fields": fields}})
-    assert r.status_code == 200, r.text
-    return r.json()
-
-
-def _wire(name, *, intent, key="", instance_id=""):
-    """이 데이터셋의 출처를 결속 표에 적는다.
-
-    ⚠️ 지금은 시험이 직접 적는다 — 계약 컴파일러가 이 열을 채우는 배선은 다음 Wave 다.
-      **그 사실을 숨기지 않는다**: 여기서 초록이라고 해서 사용자가 이 경로를 쓸 수 있는
-      것은 아니다."""
-    from core.app_data import app_data_service
-
-    ds = app_data_service.find_dataset("rel_ok", name)
-    assert ds, name + " 을 못 찾았다"
-    app_data_service._store.execute(
-        "UPDATE app_release_dataset_bindings SET source_intent=?, "
-        "enterprise_contract_key=?, kit_instance_id=? "
-        "WHERE release_id=? AND dataset_id=?",
-        (intent, key, instance_id, "rel_ok", ds["dataset_id"]))
-    return ds
-
-
-def _certified_source(dp, raw_root, payload=ENTERPRISE_CSV):
-    """승인된 파일 판 하나. 계약키는 `arrivals`."""
-    from core.data_preparation import source_binding as sb
-
+def _source(dp, raw_root, *, scope=SCOPE, tenant=TENANT, mode=MODE, certify=True):
+    """그 계약키를 제공하는 원천 하나 — 필요하면 인증판까지."""
     inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
-                              tenant_id="tenant_default", scope_node_id="node_hq",
-                              entity_mode="REAL")
+                              tenant_id=tenant, scope_node_id=scope, entity_mode=mode)
     b = dp.create_binding(instance_id=inst["instance_id"],
-                          dataset_contract_key="arrivals",
+                          dataset_contract_key=CONTRACT_KEY,
                           provider=m.PROVIDER_FILE_SNAPSHOT,
                           config={"file_name": "a.csv", "column_map": {"a": "A"}},
-                          tenant_id="tenant_default", scope_node_id="node_hq",
-                          entity_mode="REAL")
+                          tenant_id=tenant, scope_node_id=scope, entity_mode=mode)
     for step in ("validate", "approve", "activate"):
         getattr(sb, step)(dp, b["binding_id"])
-    snap = ss.ingest(dp, binding=dp.get_binding(b["binding_id"]), payload=payload,
+    if not certify:
+        return inst, b, None
+    snap = ss.ingest(dp, binding=dp.get_binding(b["binding_id"]), payload=ENTERPRISE_CSV,
                      file_name="a.csv", workspace_root=raw_root)
     out = ss.run_pipeline(dp, snap["snapshot_id"], SOURCE_ROWS,
                           ["arrived_at", "material_code", "quantity"],
                           control={"row_count": 2, "sums": {"quantity": 15}})
     assert out["state"] == m.DEMO_CERTIFIED, out
-    return inst, out
+    return inst, b, out
 
 
-def _bound(client, dp, name="arrivals"):
-    inst, snap = _certified_source(dp, client.raw_root)
-    _mkds(client, name, [{"name": "quantity", "type": "number"},
-                         {"name": "material_code", "type": "string"}])
-    _wire(name, intent="ENTERPRISE_READ", key="arrivals",
-          instance_id=inst["instance_id"])
-    return inst, snap
+def _materialize(**kw):
+    """**실제 물질화 경로.** 결속 표를 직접 쓰지 않는다.
+
+    ★★★ 시험이 표를 직접 UPDATE 하면 「계약이 그 값을 채우지 않는다」를 영원히 못
+      잡는다 — Wave E 가 실제로 그렇게 통과했다."""
+    from core.app_data import app_data_service
+    from core.data_preparation.store import data_preparation_store
+
+    return cm.materialize(CONTRACT, release_id="rel_ok", actor_id="u@x",
+                          store=data_preparation_store, app_data=app_data_service,
+                          tenant_id=kw.get("tenant", TENANT),
+                          scope_node_id=kw.get("scope", SCOPE),
+                          entity_mode=kw.get("mode", MODE))
+
+
+def _ready(client, dp, **kw):
+    """원천 → 물질화까지 끝난 상태."""
+    inst, b, snap = _source(dp, client.raw_root, **kw)
+    _materialize()
+    return inst, b, snap
+
+
+def test_the_contract_is_what_creates_the_datasets(client, dp):
+    """★★★ [Wave F-0] **승인이 무언가를 만든다.** 관리 API 로 만들지 않는다."""
+    from core.app_data import app_data_service
+
+    _ready(client, dp)
+    names = {d["name"] for d in app_data_service.list_datasets("rel_ok")}
+    assert names == {"arrivals", "memo"}
 
 
 def test_the_same_sdk_call_reads_a_file_snapshot(client, dp):
     """★★★ Gate E — **같은 표면**으로 파일 판을 읽는다. 앱은 어느 쪽인지 모른다."""
-    _bound(client, dp)
+    _ready(client, dp)
     r = client.get(R + "/datasets/arrivals/records", headers=_h(_tok(client)))
     assert r.status_code == 200, r.text
     data = r.json()["data"]
@@ -382,10 +429,9 @@ def test_the_same_sdk_call_reads_a_file_snapshot(client, dp):
 
 def test_the_same_sdk_call_writes_native_supplement(client, dp):
     """⚠️ 대조군 — 위 시험이 「전부 막힘」으로도 통과하지 않게 한다."""
-    _mkds(client, "memo", [{"name": "note", "type": "string"}])
-    _wire("memo", intent="AFS_NATIVE")
+    _ready(client, dp)
     r = client.post(R + "/datasets/memo/records", headers=_h(_tok(client)),
-                    json={"payload": {"note": "확인함"}})
+                    json={"payload": {"quantity": 1}})
     assert r.status_code == 200, r.text
 
 
@@ -398,7 +444,7 @@ def test_writing_to_enterprise_data_is_blocked(client, dp, method, path, body):
     """★★★ Gate E — **기업/파일 데이터 write 차단.**
 
     ⚠️ 파일 판 위의 사본은 원천과 갈라지고, 갈라진 사실은 아무도 모른다."""
-    _bound(client, dp)
+    _ready(client, dp)
     kw = {"headers": _h(_tok(client))}
     if body is not None:
         kw["json"] = body
@@ -406,69 +452,25 @@ def test_writing_to_enterprise_data_is_blocked(client, dp, method, path, body):
     assert r.status_code == 403, method + " 이 통과했다: " + r.text[:160]
 
 
-def test_an_unready_source_is_not_an_empty_table(client, dp):
+def test_a_source_that_breaks_after_the_app_was_made_is_not_an_empty_table(client, dp):
     """★★★ Gate E — **장애·만료·승인 전 상태 오독 0.**
 
-    ⚠️ 인증 전 판을 0건으로 답하면 앱은 「데이터가 없다」를 그리고, 그 화면 위에서
-      합계 0인 보고서가 만들어진다."""
-    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
-                              tenant_id="tenant_default", scope_node_id="node_hq",
-                              entity_mode="REAL")
-    _mkds(client, "arrivals", [{"name": "quantity", "type": "number"}])
-    _wire("arrivals", intent="ENTERPRISE_READ", key="arrivals",
-          instance_id=inst["instance_id"])
+    ★ [Wave F-0] 이제 원천이 없으면 앱이 **아예 만들어지지 않는다.** 그래서 현실적인
+      상황은 「만든 뒤 깨진다」다 — 인증판이 회수되거나 결속이 종료되는 경우.
+    ⚠️ 그때 0건으로 답하면 앱은 「데이터가 없다」를 그리고, 그 화면 위에서 합계 0인
+      보고서가 만들어진다."""
+    inst, b, snap = _ready(client, dp)
+    #: 인증을 회수한다 — 판은 있지만 더는 공식이 아니다
+    dp.advance_snapshot(snap["snapshot_id"], m.REVOKED)
 
     r = client.get(R + "/datasets/arrivals/records", headers=_h(_tok(client)))
-    assert r.status_code != 200, "준비 안 된 원천을 200 으로 답했다"
-    assert "records" not in r.text, "빈 목록이 나갔다"
-    #: ★★★ **404 여서는 안 된다.** 404 는 앱에게 「그런 것은 없다」이고, 앱은 화면에서
-    #:   그 표를 **지운다**. 「지금은 못 읽는다」는 503 이고, 앱이 할 일은 지우기가
-    #:   아니라 다시 묻기다.
     assert r.status_code == 503, "「아직 아니다」가 「없다」로 답해졌다: " + str(r.status_code)
-
-
-def test_a_source_scope_mismatch_is_unreadable_not_missing(client, dp):
-    """★★★ 범위가 어긋난 원천도 **못 읽음(503)** 이지 「없음(404)」이 아니다.
-
-    ⚠️ 여기서 404 를 주면 앱이 표를 지우고, 사용자는 「데이터가 삭제됐다」로 읽는다.
-    ★ 열거 경로가 아니라서 존재가 새지 않는다 — 앱은 `kit_instance_id` 를 고르지
-      못한다(요청이 아니라 결속 표에서 나온다)."""
-    from core.data_preparation import source_binding as sb
-
-    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
-                              tenant_id="tenant_default", scope_node_id="node_다른곳",
-                              entity_mode="REAL")
-    b = dp.create_binding(instance_id=inst["instance_id"],
-                          dataset_contract_key="arrivals",
-                          provider=m.PROVIDER_FILE_SNAPSHOT,
-                          config={"file_name": "a.csv", "column_map": {"a": "A"}},
-                          tenant_id="tenant_default", scope_node_id="node_다른곳",
-                          entity_mode="REAL")
-    for step in ("validate", "approve", "activate"):
-        getattr(sb, step)(dp, b["binding_id"])
-
-    #: ★★★ **인증까지 끝낸 판**을 만든다. 그러지 않으면 「판이 없어서 503」과
-    #:   「범위가 달라서 503」이 구별되지 않고, 이 시험은 범위 검사를 지워도 통과한다
-    #:   (실제로 처음에 그렇게 통과했다 — 조용한 거짓말).
-    snap = ss.ingest(dp, binding=dp.get_binding(b["binding_id"]), payload=ENTERPRISE_CSV,
-                     file_name="a.csv", workspace_root=client.raw_root)
-    out = ss.run_pipeline(dp, snap["snapshot_id"], SOURCE_ROWS,
-                          ["arrived_at", "material_code", "quantity"],
-                          control={"row_count": 2, "sums": {"quantity": 15}})
-    assert out["state"] == m.DEMO_CERTIFIED, "대조군이 준비되지 않았다"
-
-    _mkds(client, "arrivals", [{"name": "quantity", "type": "number"}])
-    _wire("arrivals", intent="ENTERPRISE_READ", key="arrivals",
-          instance_id=inst["instance_id"])
-
-    r = client.get(R + "/datasets/arrivals/records", headers=_h(_tok(client)))
-    assert r.status_code == 503, "타 범위의 인증판을 그대로 읽었다: " + str(r.status_code)
-    assert "node_다른곳" not in r.text, "범위 식별자가 앱까지 갔다"
+    assert "records" not in r.text, "빈 목록이 나갔다"
 
 
 def test_a_tampered_raw_file_stops_the_read(client, dp):
     """★★★ 「우리가 인증한 그 파일」이라는 전제가 깨지면 **읽지 않는다.**"""
-    _, snap = _bound(client, dp)
+    _, _, snap = _ready(client, dp)
     with open(snap["raw_path"], "ab") as f:
         f.write(b"2026-01-07,M3,99\n")
 
@@ -476,50 +478,9 @@ def test_a_tampered_raw_file_stops_the_read(client, dp):
     assert r.status_code != 200, "변조된 원본을 그대로 읽었다"
 
 
-@pytest.mark.parametrize("field,value", [
-    ("tenant_id", "tenant_other"),
-    ("scope_node_id", "node_다른곳"),
-    ("entity_mode", "VIRTUAL"),
-])
-def test_each_scope_field_is_compared_against_the_proof(client, dp, field, value):
-    """★★★ 범위 세 필드를 **하나씩** 어긋내 본다.
-
-    ⚠️ 셋을 한꺼번에만 시험하면, 판정이 그중 하나만 보고 있어도 통과한다. 그리고
-      실제로 그랬다 — `tenant_id` 만 결속 표에서 가져오도록 바꾼 변이가 살아남았다.
-    ★ 비교 기준은 **증명에 봉인된 값**이지 결속 표가 아니다. 결속 표끼리 비교하면
-      자기 자신과 비교하는 것이라 언제나 통과한다."""
-    from core.data_preparation import source_binding as sb
-
-    ctx = {"tenant_id": "tenant_default", "scope_node_id": "node_hq",
-           "entity_mode": "REAL"}
-    ctx[field] = value
-
-    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f", **ctx)
-    b = dp.create_binding(instance_id=inst["instance_id"],
-                          dataset_contract_key="arrivals",
-                          provider=m.PROVIDER_FILE_SNAPSHOT,
-                          config={"file_name": "a.csv", "column_map": {"a": "A"}}, **ctx)
-    for step in ("validate", "approve", "activate"):
-        getattr(sb, step)(dp, b["binding_id"])
-    snap = ss.ingest(dp, binding=dp.get_binding(b["binding_id"]), payload=ENTERPRISE_CSV,
-                     file_name="a.csv", workspace_root=client.raw_root)
-    out = ss.run_pipeline(dp, snap["snapshot_id"], SOURCE_ROWS,
-                          ["arrived_at", "material_code", "quantity"],
-                          control={"row_count": 2, "sums": {"quantity": 15}})
-    assert out["state"] == m.DEMO_CERTIFIED, "대조군이 준비되지 않았다"
-
-    _mkds(client, "arrivals", [{"name": "quantity", "type": "number"}])
-    _wire("arrivals", intent="ENTERPRISE_READ", key="arrivals",
-          instance_id=inst["instance_id"])
-
-    r = client.get(R + "/datasets/arrivals/records", headers=_h(_tok(client)))
-    assert r.status_code == 503, field + " 가 어긋났는데 읽혔다: " + str(r.status_code)
-    assert value not in r.text, "범위 식별자가 앱까지 갔다"
-
-
 def test_the_response_never_names_the_provider(client, dp):
     """★★★ Gate E — 출처 종류·내부 식별자가 앱에 나가지 않는다."""
-    inst, snap = _bound(client, dp)
+    inst, _, snap = _ready(client, dp)
     body = client.get(R + "/datasets/arrivals/records",
                       headers=_h(_tok(client))).text
     for leaked in ("FILE_SNAPSHOT", "AFS_NATIVE", "raw_path",
@@ -530,46 +491,50 @@ def test_the_response_never_names_the_provider(client, dp):
 def test_a_source_store_failure_is_reported_as_a_store_failure(client, dp, monkeypatch):
     """★★★ 원천 저장소 장애를 **결속이 없는 것**으로 바꾸지 않는다.
 
-    ⚠️ 둘 다 앱에게는 같은 코드로 접히지만, **운영자에게는 전혀 다른 사실**이다.
-      「원천을 고르세요」와 「저장소가 죽었다」를 같은 기록으로 남기면 아무도 고치러
-      가지 않는다. 변이 검사가 실제로 이 자리를 뚫었다 — 응답만 보면 구별되지 않는다."""
+    ⚠️ 둘 다 앱에게는 같은 코드로 접히지만, **운영자에게는 전혀 다른 사실**이다."""
     from core.data_preparation.store import data_preparation_store as store
     from core.enterprise_context import audit
 
-    _bound(client, dp)
+    _ready(client, dp)
+    tok = _tok(client)
 
     def _boom(*a, **k):
         raise RuntimeError("디스크가 응답하지 않습니다")
 
     monkeypatch.setattr(store, "active_binding", _boom, raising=False)
-
     seen = []
     monkeypatch.setattr(audit, "record",
                         lambda **kw: seen.append(kw.get("detail", "")), raising=False)
 
-    r = client.get(R + "/datasets/arrivals/records", headers=_h(_tok(client)))
+    r = client.get(R + "/datasets/arrivals/records", headers=_h(tok))
     assert r.status_code != 200, "장애 중에 200 을 답했다"
     assert any("원천 판독 실패" in d for d in seen), \
         "저장소 장애가 «결속 없음» 으로 기록됐다: " + repr(seen)
 
 
 def test_the_error_body_never_carries_the_readiness_reason(client, dp):
-    """★★★ 거부 **사유**는 감사에만 남고 앱에는 고정 문장만 간다.
-
-    ⚠️ 사유에는 그 사람이 볼 수 없는 조직 내부 상태(승인 전·격리·대사 실패)가 들어
-      있다. 앱 화면에 뜨는 순간 그것이 새어나간다."""
-    from core.enterprise_context import audit
-
-    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
-                              tenant_id="tenant_default", scope_node_id="node_hq",
-                              entity_mode="REAL")
-    _mkds(client, "arrivals", [{"name": "quantity", "type": "number"}])
-    _wire("arrivals", intent="ENTERPRISE_READ", key="arrivals",
-          instance_id=inst["instance_id"])
+    """★★★ 거부 **사유**는 감사에만 남고 앱에는 고정 문장만 간다."""
+    _, _, snap = _ready(client, dp)
+    dp.advance_snapshot(snap["snapshot_id"], m.REVOKED)
 
     r = client.get(R + "/datasets/arrivals/records", headers=_h(_tok(client)))
     assert r.status_code != 200
     for leaked in ("SOURCE_CONFIGURED", "NOT_CONFIGURED", "APPROVAL_PENDING",
-                   "QUARANTINED", "dispatch:"):
+                   "QUARANTINED", "UNAVAILABLE", "dispatch:"):
         assert leaked not in r.text, "«" + leaked + "» 이 앱 화면까지 갔다"
-    assert audit is not None      # 감사 모듈이 사라지면 이 시험의 전제가 깨진다
+
+
+@pytest.mark.parametrize("field,value", [
+    ("tenant", "tenant_other"), ("scope", "node_다른곳"), ("mode", "VIRTUAL"),
+])
+def test_an_app_cannot_be_made_against_a_source_in_another_scope(client, dp, field, value):
+    """★★★ 범위 세 필드를 **하나씩** 어긋내 본다.
+
+    ★ [Wave F-0] 이제 이것은 **물질화에서** 막힌다 — 그 편이 낫다. 만들어진 뒤
+      런타임에서 막히면 사용자는 앱이 고장 났다고 생각한다.
+    ⚠️ 셋을 한꺼번에만 시험하면 판정이 그중 하나만 봐도 통과한다(Wave E 실측)."""
+    _source(dp, client.raw_root, **{field: value})
+    with pytest.raises(cm.MaterializeError) as e:
+        _materialize()
+    assert "arrivals" in str(e.value)
+    assert value not in str(e.value), "범위 식별자가 사유에 실렸다"

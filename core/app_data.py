@@ -69,8 +69,8 @@ DATASET_ACTIONS: Tuple[str, ...] = ("read", "create", "update", "delete")
 #: ⚠️ 여기에 다시 적으면 계약 계층과 갈라지고, 갈라진 사이에 만들어진 잘못된 결속이
 #:   3단계에서 정상으로 봉인된다. (그 모듈은 아무것도 import 하지 않아 순환이 없다.)
 from core.business_data_semantics import (  # noqa: E402
-    AFS_NATIVE, DATA_ROLES, ENTERPRISE_ACTUAL, SOURCE_INTENTS, WRITE_ACTIONS,
-    is_declared_enterprise_actual, role_source_errors)
+    AFS_NATIVE, DATA_ROLES, ENTERPRISE_ACTUAL, ENTERPRISE_READ, SOURCE_INTENTS,
+    WRITE_ACTIONS, is_declared_enterprise_actual, role_source_errors)
 
 
 class AppDataError(ValueError):
@@ -323,7 +323,8 @@ class AppDataService:
                        app_id: str = "", dataset_key: str = "",
                        allowed_actions: Optional[Sequence[str]] = None,
                        contract_revision: int = 0, data_role: str = "",
-                       source_intent: str = "") -> Dict[str, Any]:
+                       source_intent: str = "", enterprise_contract_key: str = "",
+                       kit_instance_id: str = "") -> Dict[str, Any]:
         """데이터셋을 만들고 **이 릴리스에 결속**한다.
 
         ★ `allowed_actions` 를 주면 계약 결속(`contract_bound=1`)이 되고, 런타임 2차 판정이
@@ -386,7 +387,9 @@ class AppDataService:
             self._bind_in_tx(conn, release_id, did, runtime_name=name,
                              allowed_actions=allowed_actions, schema=norm,
                              contract_revision=contract_revision,
-                             data_role=data_role, source_intent=source_intent)
+                             data_role=data_role, source_intent=source_intent,
+                             enterprise_contract_key=enterprise_contract_key,
+                             kit_instance_id=kit_instance_id)
         return self.get_dataset(did)  # type: ignore[return-value]
 
     # 릴리스 결속 ------------------------------------------------------
@@ -394,7 +397,8 @@ class AppDataService:
                      allowed_actions: Optional[Sequence[str]] = None,
                      schema: Any = None, contract_revision: int = 0,
                      runtime_name: str = "", data_role: str = "",
-                     source_intent: str = "") -> Dict[str, Any]:
+                     source_intent: str = "", enterprise_contract_key: str = "",
+                     kit_instance_id: str = "") -> Dict[str, Any]:
         """이 릴리스가 이 데이터셋의 **어느 판을 어떤 권한으로** 쓰는지 적는다.
 
         ★ 같은 (릴리스, 데이터셋) 을 다시 결속하면 덮어쓴다 — 계약 개정으로
@@ -408,7 +412,9 @@ class AppDataService:
             self._bind_in_tx(conn, release_id, dataset_id, runtime_name=runtime_name,
                              allowed_actions=allowed_actions, schema=schema,
                              contract_revision=contract_revision,
-                             data_role=data_role, source_intent=source_intent)
+                             data_role=data_role, source_intent=source_intent,
+                             enterprise_contract_key=enterprise_contract_key,
+                             kit_instance_id=kit_instance_id)
         return self.binding_for(release_id, dataset_id)  # type: ignore[return-value]
 
     def _assert_ready(self) -> None:
@@ -508,7 +514,8 @@ class AppDataService:
     def _bind_in_tx(self, conn, release_id: str, dataset_id: str, *, runtime_name: str,
                     allowed_actions: Optional[Sequence[str]], schema: Any,
                     contract_revision: int, data_role: str = "",
-                    source_intent: str = "") -> None:
+                    source_intent: str = "", enterprise_contract_key: str = "",
+                    kit_instance_id: str = "") -> None:
         """결속의 실체. **트랜잭션 안에서만** 부른다."""
         self._assert_bindable(conn, release_id, dataset_id)
         bound = allowed_actions is not None
@@ -526,6 +533,26 @@ class AppDataService:
             raise AppDataError(
                 "레거시 결속에는 역할·출처를 적지 않습니다 — 계약이 말한 적 없는 것을 "
                 "적으면 그 값이 곧 근거 없는 사실이 됩니다.")
+        enterprise_contract_key = (enterprise_contract_key or "").strip()
+        kit_instance_id = (kit_instance_id or "").strip()
+        #: ★★★ [Wave F-0] 사내 원천은 **어느 표에서 · 어느 조직의 어느 판으로** 오는지
+        #:   둘 다 있어야 한다. 하나만 있으면 Dispatch 는 갈 곳을 모르고, 그때
+        #:   **우리 DB 로 폴백하지 않는다** — 앱은 그 표를 영원히 못 읽는다.
+        #: ⚠️ 그 실패를 런타임까지 미루지 않고 여기서 막는다.
+        if source_intent == ENTERPRISE_READ and not (enterprise_contract_key
+                                                     and kit_instance_id):
+            raise AppDataError(
+                f"출처가 {ENTERPRISE_READ} 인 결속에는 업무 데이터 계약키와 그것을 "
+                f"제공하는 Kit Instance 가 모두 필요합니다"
+                f"(계약키 {enterprise_contract_key or '(없음)'} · "
+                f"인스턴스 {kit_instance_id or '(없음)'}).")
+        #: ⚠️ 반대도 막는다 — 우리 DB 에서 오는데 업무 계약키가 붙어 있으면 그 값은
+        #:   «적혀 있으나 아무도 안 보는» 사실이 되고, 다음 사람이 그것을 근거로 읽는다.
+        if source_intent != ENTERPRISE_READ and (enterprise_contract_key
+                                                 or kit_instance_id):
+            raise AppDataError(
+                f"출처가 {source_intent or '(없음)'} 인데 업무 데이터 결속 정보가 "
+                f"적혀 있습니다 — 둘 중 하나가 틀렸습니다.")
         prev = self._store.row(
             conn, "SELECT * FROM app_release_dataset_bindings WHERE release_id=? AND dataset_id=?",
             (release_id, dataset_id))
@@ -564,17 +591,21 @@ class AppDataService:
         if prev:
             conn.execute(
                 "UPDATE app_release_dataset_bindings SET allowed_actions=?, contract_bound=?, "
-                "version_id=?, runtime_name=?, data_role=?, source_intent=? "
+                "version_id=?, runtime_name=?, data_role=?, source_intent=?, "
+                "enterprise_contract_key=?, kit_instance_id=? "
                 " WHERE release_id=? AND dataset_id=?",
                 (",".join(acts), 1 if bound else 0, version_id, runtime_name,
-                 data_role, source_intent, release_id, dataset_id))
+                 data_role, source_intent, enterprise_contract_key, kit_instance_id,
+                 release_id, dataset_id))
         else:
             conn.execute(
                 "INSERT INTO app_release_dataset_bindings (binding_id, release_id, dataset_id, "
                 "version_id, runtime_name, allowed_actions, contract_bound, created_at, "
-                "data_role, source_intent) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "data_role, source_intent, enterprise_contract_key, kit_instance_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (_nid("bind"), release_id, dataset_id, version_id, runtime_name,
-                 ",".join(acts), 1 if bound else 0, _now(), data_role, source_intent))
+                 ",".join(acts), 1 if bound else 0, _now(), data_role, source_intent,
+                 enterprise_contract_key, kit_instance_id))
 
     def _ensure_version_in_tx(self, conn, dataset_id: str, schema: Any,
                               contract_revision: int) -> str:
@@ -794,7 +825,8 @@ class AppDataService:
     def adopt_dataset(self, dataset_key: str, release_id: str, *,
                       allowed_actions: Optional[Sequence[str]] = None,
                       schema: Any = None, contract_revision: int = 0,
-                      data_role: str = "", source_intent: str = ""
+                      data_role: str = "", source_intent: str = "",
+                      enterprise_contract_key: str = "", kit_instance_id: str = ""
                       ) -> Optional[Dict[str, Any]]:
         """새 릴리스가 **같은 앱의 기존 데이터셋을 이어받는다.**
 
@@ -834,6 +866,8 @@ class AppDataService:
                     f"고를 수 없습니다. 중복을 먼저 정리해야 합니다.")
             did = str(rows[0]["dataset_id"])
             self._bind_in_tx(conn, (release_id or "").strip(), did,
+                             enterprise_contract_key=enterprise_contract_key,
+                             kit_instance_id=kit_instance_id,
                              runtime_name=str(rows[0]["name"]),
                              allowed_actions=allowed_actions, schema=schema,
                              contract_revision=contract_revision,

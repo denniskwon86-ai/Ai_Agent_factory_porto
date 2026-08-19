@@ -131,6 +131,9 @@ ALLOWED_USER_DECISIONS: Dict[str, Tuple[str, ...]] = {
 
 # ── 닫힌 목록들 ────────────────────────────────────────────────────────────
 CONTRACT_STATUSES: Tuple[str, ...] = ("DRAFT", "COMPILED", "APPROVED", "SUPERSEDED")
+#: ★ 이름으로 부른다 — 문자열을 여기저기 적으면 오타 하나가 **판정하지 않음**이 된다.
+#: ⚠️ 튜플에서 풀어 쓴다: 목록이 바뀌면 여기서 **즉시 깨진다**(조용히 어긋나지 않는다).
+STATUS_DRAFT, STATUS_COMPILED, STATUS_APPROVED, STATUS_SUPERSEDED = CONTRACT_STATUSES
 APPROVAL_STATUSES: Tuple[str, ...] = ("PENDING", "APPROVED", "REJECTED")
 FIELD_TYPES: Tuple[str, ...] = ("string", "text", "number", "boolean", "date")
 ACTIONS: Tuple[str, ...] = ("read", "create", "update", "delete")
@@ -165,7 +168,16 @@ from core.business_data_semantics import (  # noqa: E402  (문서 순서를 지�
 #: ⚠️⚠️ 나머지를 `AFS_NATIVE` 로 **조용히 폴백하지 않는다** — 그 폴백이 곧 이중 입력이다.
 SOURCE_INTENT_DECISION: Dict[str, Tuple[str, str]] = {
     AFS_NATIVE:         (SUPPORTED, "window.afs.data 로 입력받는다"),
-    ENTERPRISE_READ:    (HOST_SERVICE_REQUIRED, DUPLICATE_ENTRY_MESSAGE),
+    #: ★★★ [Wave F-0] `HOST_SERVICE_REQUIRED` → `SUPPORTED`. **그 Host 서비스를 실제로
+    #:   만들었기 때문이다** — BDR-5·6(`core/host_runtime_provider.py`)이 승인된 파일
+    #:   Snapshot 을 `window.afs.data.*` 뒤에서 읽어 준다.
+    #: ⚠️ 「곧 될 것」이라서 여는 것이 아니다. 아래 둘은 여전히 없으므로 **그대로 둔다** —
+    #:   여기서 함께 열면 앱이 빈 응답을 정상으로 받는다.
+    #: ⚠️ 읽기만 열린다. 쓰기는 `business_data_semantics.role_source_errors` 가 별도
+    #:   계층에서 계속 막는다(이중 입력 금지). 두 곳이 같은 규칙을 갖지 않게 한다.
+    ENTERPRISE_READ:    (SUPPORTED,
+                         "승인된 파일 Snapshot 을 Host Runtime 이 읽어 줍니다 — 앱이 "
+                         "원천을 직접 호출하지 않고, 화면에서 다시 입력받지도 않습니다."),
     EXTERNAL_REFERENCE: (HOST_SERVICE_REQUIRED,
                          "외부 공표 지표는 Host 외부지표 서비스가 가져옵니다 — 앱이 직접 "
                          "호출하지 않습니다."),
@@ -329,7 +341,10 @@ def decide_source_intent(source_intent: Any) -> Tuple[str, str]:
 
 
 def materializable(source_intent: Any) -> bool:
-    """지금 **실제로 데이터셋을 만들 수 있는가.** `AFS_NATIVE` 만 참이다."""
+    """지금 **실제로 데이터셋을 만들 수 있는가.**
+
+    ★ [Wave F-0] `AFS_NATIVE` 와 `ENTERPRISE_READ` 둘이다 — 후자는 승인된 파일
+      Snapshot 을 Host Runtime 이 읽어 준다. 나머지는 아직 없다."""
     return decide_source_intent(source_intent)[0] == SUPPORTED
 
 

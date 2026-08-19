@@ -449,7 +449,10 @@ def test_the_three_meaning_fields_are_required():
 
 @pytest.mark.parametrize("intent,want", [
     (arc.AFS_NATIVE, arc.SUPPORTED),
-    (arc.ENTERPRISE_READ, arc.HOST_SERVICE_REQUIRED),
+    #: ★ [Wave F-0] `HOST_SERVICE_REQUIRED` → `SUPPORTED`. **그 Host 서비스를 실제로
+    #:   만들었기 때문이다**(BDR-6 `core/host_runtime_provider.py`).
+    (arc.ENTERPRISE_READ, arc.SUPPORTED),
+    #: ⚠️ 아래 둘은 그대로다 — 「곧 될 것」을 열면 앱이 빈 응답을 정상으로 받는다.
     (arc.EXTERNAL_REFERENCE, arc.HOST_SERVICE_REQUIRED),
     (arc.DERIVED_READ, arc.HOST_SERVICE_REQUIRED),
 ])
@@ -468,19 +471,29 @@ def test_unknown_source_intent_does_not_fall_back_to_native(unknown):
     assert not arc.materializable(unknown)
 
 
-def test_only_afs_native_is_materializable_today():
+def test_only_sources_with_a_real_host_service_are_materializable():
+    """★★★ 물질화 가능 목록은 **실제로 읽어 줄 수 있는 것**과 정확히 같아야 한다.
+
+    ⚠️ 「곧 될 것」을 여기 넣는 순간 앱이 빈 응답을 정상으로 받고, 그 화면은 오류를
+      내지 않는다. 이 목록이 늘어날 때는 **그것을 읽어 주는 코드가 먼저** 있어야 한다.
+    ★ [Wave F-0] `ENTERPRISE_READ` 가 늘었다 — 승인된 파일 Snapshot 을 Host Runtime 이
+      읽어 준다(`core/host_runtime_provider.SERVING_PROVIDERS`)."""
+    from core import host_runtime_provider as hrp
+
     materializable = [i for i in arc.SOURCE_INTENTS if arc.materializable(i)]
-    assert materializable == [arc.AFS_NATIVE]
+    assert materializable == [arc.AFS_NATIVE, arc.ENTERPRISE_READ]
+    #: ★★★ 계약 계층과 런타임 계층이 **같은 것**을 말해야 한다 — 갈라지면 계약은
+    #:   허용하는데 런타임이 못 읽거나, 그 반대가 된다.
+    assert {hrp.provider_for_intent(i) for i in materializable} \
+        == set(hrp.SERVING_PROVIDERS)
 
 
-@pytest.mark.parametrize("intent", [arc.ENTERPRISE_READ, arc.EXTERNAL_REFERENCE,
-                                    arc.DERIVED_READ])
-def test_non_native_sources_cannot_be_compiled_yet(intent):
-    """지금 물질화되는 것은 `AFS_NATIVE` 뿐이다 — 나머지는 Host 기능이 먼저 있어야 한다."""
+@pytest.mark.parametrize("intent", [arc.EXTERNAL_REFERENCE, arc.DERIVED_READ])
+def test_sources_without_a_host_service_still_cannot_be_compiled(intent):
+    """읽어 줄 코드가 없는 출처는 계약에서 막는다 — **만들어져도 읽히지 않기 때문이다.**"""
     d = _draft()
     d["datasets"][0].update({"source_intent": intent, "allowed_actions": ["read"],
-                             "data_role": (arc.ENTERPRISE_ACTUAL if intent == arc.ENTERPRISE_READ
-                                           else arc.DERIVED_RESULT if intent == arc.DERIVED_READ
+                             "data_role": (arc.DERIVED_RESULT if intent == arc.DERIVED_READ
                                            else arc.OPERATIONAL_FORECAST),
                              "duplicate_entry_policy": arc.DENY_IF_AUTHORITATIVE_SOURCE_EXISTS})
     r = compile_contract(d, project_id="P1")
@@ -488,13 +501,42 @@ def test_non_native_sources_cannot_be_compiled_yet(intent):
     assert any("Host 기능 필요" in e for e in r.errors), r.errors
 
 
+def test_an_enterprise_source_compiles_once_it_names_which_table_it_comes_from():
+    """★★★ [Wave F-0] 대조군 — 위 시험이 「전부 막힘」으로도 통과하지 않게 한다.
+
+    ⚠️ 계약키가 없으면 여전히 막힌다. 그것이 없으면 그 데이터셋은 **런타임에서 영원히
+      읽을 수 없고**, 실패가 만드는 자리가 아니라 쓰는 자리에서 드러난다."""
+    d = _draft()
+    d["datasets"][0].update({
+        "source_intent": arc.ENTERPRISE_READ, "data_role": arc.ENTERPRISE_ACTUAL,
+        "duplicate_entry_policy": arc.DENY_IF_AUTHORITATIVE_SOURCE_EXISTS,
+        "allowed_actions": ["read"]})
+
+    without = compile_contract(d, project_id="P1")
+    assert not without.ok
+    assert any("enterprise_contract_key" in e for e in without.errors), without.errors
+
+    d["datasets"][0]["enterprise_contract_key"] = "purchase_orders"
+    with_key = compile_contract(d, project_id="P1")
+    assert with_key.ok, with_key.errors
+    assert with_key.contract["datasets"][0]["enterprise_contract_key"] == "purchase_orders"
+
+
 def test_enterprise_read_cannot_have_input_actions():
-    """★★★ ①번 게이트 — 기존 시스템에서 읽는 데이터에 **입력 화면을 만들지 않는다.**"""
+    """★★★ ①번 게이트 — 기존 시스템에서 읽는 데이터에 **입력 화면을 만들지 않는다.**
+
+    ⚠️⚠️ [Wave F-0 실측] 이 시험은 **잘못된 이유로 통과하고 있었다.** 컴파일러가
+      `ENTERPRISE_READ` 를 「아직 물질화 불가」로 먼저 막았고, 그 안내문에 마침
+      「입력 화면」이라는 말이 들어 있었다 — 게이트가 아니라 **문구가** 통과시켰다.
+      출처를 열자 그 우연한 방벽이 사라졌고, 그제서야 컴파일러에 이 게이트가 실제로
+      없다는 사실이 드러났다(`role_source_errors` 를 부르지 않고 있었다).
+    ★ 그래서 여기서는 **계약키를 채운다** — 다른 오류가 이 게이트를 다시 가리지 않게."""
     for write in ("create", "update", "delete"):
         d = _draft()
         d["datasets"][0].update({
             "source_intent": arc.ENTERPRISE_READ, "data_role": arc.ENTERPRISE_ACTUAL,
             "duplicate_entry_policy": arc.DENY_IF_AUTHORITATIVE_SOURCE_EXISTS,
+            "enterprise_contract_key": "purchase_orders",
             "allowed_actions": ["read", write]})
         r = compile_contract(d, project_id="P1")
         assert not r.ok, write

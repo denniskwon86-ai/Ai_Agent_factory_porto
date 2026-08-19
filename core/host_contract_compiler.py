@@ -153,6 +153,29 @@ def _compile_datasets(draft: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List
             status, why = arc.decide_source_intent(intent)
             errors.append(
                 f"{name or '?'}: {arc.STATUS_LABEL.get(status, status)} — {why}")
+        #: ★★★ [Wave F-0] **이중 입력 게이트를 여기서 실제로 돌린다.**
+        #:
+        #: ⚠️⚠️ 그전까지 이 게이트는 컴파일 경로에서 **한 번도 실행되지 않았다.**
+        #:   `ENTERPRISE_READ` 가 「아직 물질화 불가」로 먼저 막혔고, 그 안내문에 마침
+        #:   「입력 화면」이라는 말이 들어 있어서 시험이 통과했다 — 게이트가 아니라
+        #:   **문구가 통과시키고 있었다.** 출처를 열자 그 우연한 방벽이 사라졌다.
+        #: ★ `role_source_errors` 하나만 부른다 — 규칙을 여기에 다시 적으면 두 판정이
+        #:   갈라지고, 갈린 사이에 만들어진 결속이 3단계에서 정상으로 봉인된다.
+        role = str(ds.get("data_role", ""))
+        if intent and role:
+            errors.extend(f"{name or '?'}: {e}"
+                          for e in arc.role_source_errors(role, intent,
+                                                          ds["allowed_actions"]))
+
+        #: ★★★ [Wave F-0] 사내 원천이라고 말했으면 **어느 표인지도 말해야 한다.**
+        #: ⚠️ 이 검사가 없으면 계약은 조용히 통과하고, 그 데이터셋은 **런타임에서
+        #:   영원히 「읽을 수 없음」** 이 된다. 만들 때 아무 말이 없다가 쓸 때 실패하면
+        #:   사용자는 자기 파일을 의심한다 — 실패는 만드는 자리로 옮긴다.
+        if intent == arc.ENTERPRISE_READ and not str(ds.get("enterprise_contract_key", "")):
+            errors.append(
+                f"{name or '?'}: 출처가 {arc.ENTERPRISE_READ} 인데 어느 업무 데이터에서 "
+                f"오는지(`enterprise_contract_key`)가 없습니다 — 원천을 특정하지 않으면 "
+                f"이 데이터는 만들어져도 읽히지 않습니다.")
         unknown = [a for a in {str(x) for x in (raw.get("allowed_actions") or [])}
                    if a not in arc.ACTIONS]
         if unknown:

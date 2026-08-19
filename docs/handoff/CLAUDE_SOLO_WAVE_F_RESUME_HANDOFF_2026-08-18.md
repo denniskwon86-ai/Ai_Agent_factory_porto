@@ -1,7 +1,7 @@
 # Claude Code 단독 실행 — Wave F 재개 인수인계
 
-> 작성자: Claude Code / 2026-08-18 23:10 KST
-> 대상: **다른 Claude Code 세션(다른 계정 포함)** 이 이 저장소를 이어받아 Wave F 부터 계속한다.
+> 작성자: Claude Code / 2026-08-18 23:10 KST (F-0 완료 반영 2026-08-19 01:40 KST)
+> 대상: **다른 Claude Code 세션(다른 계정 포함)** 이 이 저장소를 이어받아 Wave F-1 부터 계속한다.
 > 상위 정본: [`CLAUDE_SOLO_I4_BDR_MVP_EXECUTION_HANDOFF_2026-08-16.md`](CLAUDE_SOLO_I4_BDR_MVP_EXECUTION_HANDOFF_2026-08-16.md)
 > — **이 문서는 그것을 대체하지 않는다.** 상위 정본이 «무엇을 만드는가» 이고, 이 문서는
 > «지금 어디까지 왔고, 다음에 손대면 어디가 부서지는가» 다.
@@ -11,11 +11,12 @@
 ## 0. 30초 요약
 
 ```text
-Wave A~E 완료.  다음은 Wave F (I-4 6 · 7 · 8).
-전체 회귀 4,024건 통과 · 실패 0.
-로컬 커밋 8건이 origin/dev 보다 앞서 있었고, 이 문서와 함께 push 했다.
+Wave A~E 완료 · Wave F-0(계약 물질화) 완료.  다음은 F-1 (I-4 6 Preview DB).
+전체 회귀 4,055건 통과 · 실패 0.
 
-⚠️ Wave F 를 시작하기 전에 반드시 읽을 것: §4(지금 «없는» 것) · §6(이 세션이 실제로 다친 자리)
+⚠️ F-1 을 시작하기 전에 반드시 읽을 것:
+   §4.1(F-0 이 무엇이었는지 — 원래 기술이 틀렸다) · §4.1b(잘못된 이유로 통과하던 시험)
+   §4.2(아직 «없는» 것) · §6(이 세션이 실제로 다친 자리)
 ```
 
 ---
@@ -26,8 +27,8 @@ Wave A~E 완료.  다음은 Wave F (I-4 6 · 7 · 8).
 2. **파이썬**: `venv/Scripts/python.exe` (Python 3.14). 시스템 파이썬을 쓰지 않는다.
 3. `.agents/AGENTS.md` 를 읽는다 — 역할 SSOT. 내 담당은 **백엔드 설계·구현·검증**이다.
 4. `.agents/TEAM_BOARD.md` 의 **최상단 항목**을 읽는다.
-   `[BDR-WAVE-E-20260818-01]` 이 이 세션의 마지막 기록이다.
-   ⚠️ 이 파일은 **커밋돼 있지 않을 수 있다** — §7 참조.
+   `[BDR-WAVE-F0-20260819-01]` 이 마지막 기록이다.
+   ⚠️ 이 파일은 **커밋돼 있지 않다** — 남의 미커밋 작업이 얹혀 있다(§7.1).
 5. 상위 정본의 §10(Wave F)·§14(커밋 규율)를 읽는다.
 6. 전체 회귀를 한 번 돌려 기준선을 확인한다(§5).
 
@@ -47,6 +48,8 @@ Wave A~E 완료.  다음은 Wave F (I-4 6 · 7 · 8).
 | `345acdb77` | BDR-2 — Kit Instance · Source Binding (ACTIVE 유일성은 DB 부분 유일 인덱스) |
 | `a73860799` | BDR-3 — L0 파일 Snapshot MVP |
 | `ca162d167` | **BDR-5·6** — 결정론적 준비도 · Provider Dispatch |
+| `0e32906db` | 이 인계 문서 |
+| `(F-0)` | **Wave F-0** — 계약 물질화(§4.1). 승인이 실제로 데이터셋을 만든다 |
 
 ### Wave E 가 만든 것 (`ca162d167`)
 
@@ -103,11 +106,18 @@ DERIVED_READ           → DERIVED               → NOT_YET_SUPPORTED (503)
 
 **쓰기는 `AFS_NATIVE` 하나뿐**이다(`WRITABLE_PROVIDERS`). 나머지는 403.
 
+★ [F-0] `source_intent`·`enterprise_contract_key`·`kit_instance_id` 는 **계약 물질화가
+  채운다**(`core/contract_materializer.py`). 시험이 결속 표를 직접 UPDATE 하던 방식은
+  걷어냈다 — 그 방식으로는 「계약이 그 값을 채우지 않는다」를 영원히 못 잡는다.
+
 ### 3.3 실패는 404 가 아니라 503 이다
 
 ⚠️ Dispatch 실패에 404 를 주면 앱은 「그런 것은 없다」로 읽고 **화면에서 그 표를 지운다.**
 「지금은 못 읽는다」는 503 이고, 앱이 할 일은 지우기가 아니라 다시 묻기다.
-`tests/test_provider_dispatch.py::test_an_unready_source_is_not_an_empty_table` 이 못 박는다.
+`tests/test_provider_dispatch.py::test_a_source_that_breaks_after_the_app_was_made_is_not_an_empty_table`
+이 못 박는다.
+⚠️ [F-0] 이름이 바뀐 이유: 이제 **원천이 없으면 앱이 아예 만들어지지 않으므로**,
+  현실적인 상황은 「만든 뒤 인증이 회수된다」다.
 
 ### 3.4 범위는 «증명에 봉인된 값» 으로 대조한다
 
@@ -119,26 +129,64 @@ DERIVED_READ           → DERIVED               → NOT_YET_SUPPORTED (503)
 
 ## 4. 지금 «없는» 것 — Wave F 선행 과제
 
-### 4.1 ⚠️ 계약 컴파일러가 `enterprise_contract_key` 를 채우지 않는다 (필수 선행)
+### 4.1 ~~계약 컴파일러가 `enterprise_contract_key` 를 채우지 않는다~~ → **완료(F-0)**
 
-`app_release_dataset_bindings` 에 `enterprise_contract_key` · `kit_instance_id` 열은
-**만들었지만, 그것을 채우는 제품 경로가 없다.** 지금은 시험이 직접 UPDATE 한다
-(`tests/test_provider_dispatch.py::_wire` — 주석에 명시돼 있다).
+> ⚠️ **이 절의 원래 기술은 틀렸다.** 「두 열을 안 넘긴다」로 적었는데, 실제로는
+> **승인된 계약을 데이터셋으로 만드는 단계 자체가 운영 코드에 없었다.**
+> 그 사실은 다음으로 확인됐다 — `create_dataset`/`bind_release`/`adopt_dataset` 에
+> `allowed_actions` 를 넘기는 곳이 **시험뿐**이었고, 운영 `app_data.db` 에는
+> `app_release_dataset_bindings` 표가 **존재조차 하지 않았다**(계약 경로를 지난
+> 릴리스가 한 건도 없다는 뜻). 승인 뒤 하는 일은 타입 어댑터 파일 쓰기 하나였다.
+>
+> **그 상태는 오류를 내지 않았다.** 봉인은 「그때와 같은가」에 답할 뿐 「무언가
+> 생겼는가」에는 답하지 않는다. 60/60 프로젝트가 LEGACY_OFF 였던 이유가 이것이다.
 
-**뜻**: Dispatch 는 작동하지만, **사용자가 화면에서 앱 데이터셋을 사내 원천에 연결할
-방법이 아직 없다.** 이 상태로 Wave F 를 끝내면 「시험에서만 도는 기능」이 남는다.
+**F-0 에서 만든 것**
 
-**해야 할 일**(Wave F I-4 7 과 함께):
+| 무엇 | 어디 |
+|---|---|
+| 계약 물질화기 | `core/contract_materializer.py` (신규) |
+| 게시 경로 배선 | `api/routes/factory_control.py::_materialize_contract_for_release` |
+| 결속 표까지 두 열 전달 | `core/app_data.py` — `create_dataset`/`bind_release`/`adopt_dataset`/`_bind_in_tx` |
+| `ENTERPRISE_READ` 지원 개방 | `core/app_runtime_contract.SOURCE_INTENT_DECISION` |
+| 계약키 필수 검증 | `core/host_contract_compiler._compile_datasets` |
+| 시험 | `tests/test_contract_materializer.py` (35건) |
 
-```text
-업무키트 계약 컴파일 → 데이터셋 물질화 → 결속 메타데이터 주입 → Dispatch
-```
+**설계 판단 셋 — 바꾸기 전에 읽을 것**
 
-이 네 칸을 관통하는 **종단 계약 시험**을 반드시 함께 쓴다. 시험이 열을 직접 쓰는 지금
-방식으로는 배선 누락을 잡지 못한다.
+★★★ ① **전부 아니면 아무것도.** `plan()` 이 먼저 전부 해석하고 그 뒤에야 쓴다.
+  다섯 중 셋만 만들어지면 앱은 둘을 「없는 것」으로 보고 화면에서 지운다.
 
-관련 코드: `core/project_contract_aggregator.py`, `nodes/contract.py`,
-`core/app_data.py::adopt_dataset` / `bind_dataset`.
+★★★ ② **Kit Instance 를 못 박는다.** 물질화 시점에 (tenant, scope, entity_mode,
+  계약키) 로 해석해 `kit_instance_id` 를 적는다. 매 요청 해석하면 앱이 보는 원천이
+  조용히 바뀐다. 못 박은 값은 Dispatch 가 **매 요청 범위 대조**한다(§3.4) — 못 박기와
+  대조는 **둘 다** 있어야 한다. 못 박기만 하면 낡고, 대조만 하면 흔들린다.
+
+★★★ ③ **애매하면 만들지 않는다.** 후보 0개는 「그 데이터를 줄 원천이 이 조직에
+  없다」, 2개 이상은 「어느 것인지 우리가 정할 일이 아니다」. 「첫 번째를 고른다」는
+  임의이고 **조용하다.**
+
+**부수 효과 — 알고 있어야 할 것**
+
+⚠️ **원천이 준비되지 않으면 앱이 아예 만들어지지 않는다.** 게시 시점에 활성 원천이
+  없으면 물질화가 실패하고 `contract_materialization.state = "FAILED"` 로 릴리스에
+  기록된다(게시 자체는 막지 않는다 — 산출물은 이미 있고, 못 꺼내게 하는 것이 더 큰
+  손해다). 이것은 의도된 동작이다: 만들어진 뒤 런타임에서 막히면 사용자는 앱이
+  고장 났다고 생각한다.
+
+### 4.1b ⚠️⚠️ F-0 에서 드러난 «잘못된 이유로 통과하던 시험»
+
+`test_enterprise_read_cannot_have_input_actions`(이중 입력 게이트 ①)는 **게이트가
+아니라 문구 때문에** 통과하고 있었다. 컴파일러가 `ENTERPRISE_READ` 를 「아직 물질화
+불가」로 먼저 막았고, 그 안내문에 마침 「입력 화면」이라는 말이 들어 있었다.
+옆 시험(`test_stored_contract_with_enterprise_read_writes_is_invalid`)의 주석이
+그 사실을 이미 적어 뒀지만, 아무도 그것이 **이 시험을 무력화한다**는 뜻으로 읽지 않았다.
+
+출처를 열자 우연한 방벽이 사라졌고, 컴파일러가 `role_source_errors` 를 **부르지
+않고 있다**는 사실이 드러났다. 지금은 부른다.
+
+★ 교훈: **막는 시험이 통과할 때, 무엇이 막았는지 확인한다.** 사유 문자열이 우연히
+  겹치면 게이트가 없어도 초록이다.
 
 ### 4.2 ⚠️ 증명이 Snapshot 지문을 봉인하지 않는다
 
@@ -172,7 +220,7 @@ venv/Scripts/python.exe -m pytest tests/ -p no:warnings --no-header -q --junit-x
 venv/Scripts/python.exe -c "import xml.etree.ElementTree as ET; a=(lambda r:(r[0] if r.tag=='testsuites' else r).attrib)(ET.parse('reg.xml').getroot()); print(a['tests'], a['failures'], a['errors'], a['skipped'])"
 ```
 
-**현재 기준선: 4,024건 · 실패 0 · 오류 0 · 건너뜀 1.** 소요 약 9분.
+**현재 기준선: 4,055건 · 실패 0 · 오류 0 · 건너뜀 1.** 소요 약 9분.
 
 ### 5.2 운영 불변식 — 회귀 뒤에 반드시 확인
 
@@ -218,6 +266,23 @@ Dispatch 가 **조직 범위를 대조하지 않고 있었다.** 그런데 내�
 - **여러 필드를 한꺼번에 어긋내지 않는다.** 셋을 동시에 틀리게 하면 판정이 그중 하나만
   봐도 통과한다. 실제로 `tenant_id` 만 결속 표에서 가져오는 변이가 살아남았다.
   → `test_each_scope_field_is_compared_against_the_proof` 가 셋을 하나씩 본다.
+
+### 6.1b 「막는 시험」이 문구 때문에 통과하고 있었다 (Wave F-0)
+
+§4.1b 참조. 이중 입력 게이트 시험이 **게이트가 아니라 안내 문구의 우연한 단어 겹침**
+으로 통과했다. 옆 시험의 주석이 그 사실을 이미 적어 뒀는데도 아무도 「이 시험이
+무력화됐다」로 읽지 않았다.
+
+★ **막는 시험이 통과할 때, 무엇이 막았는지 확인한다.**
+
+### 6.1c 손으로 적은 계약이 스키마를 네 번 어겼다 (Wave F-0)
+
+시험 픽스처의 계약을 손으로 적었더니 `runtime_contract_version` 누락 → `purpose`
+빈 값 → `approval` 필드명 오류 → `decision_ledger_id` 누락 순으로 게이트가 막았다.
+**계약은 손으로 적지 말고 `compile_contract` 로 만든다** — 시험만 아는 계약 모양이
+생기는 것도 「시험만 아는 배선」과 같은 병이다.
+
+★ 반대로 읽으면: **계약 게이트가 실제로 일하고 있다**는 증거이기도 하다.
 
 ### 6.2 변이 검사가 놓친 네 건과 그 처리 (Wave E)
 
@@ -325,9 +390,12 @@ MVP_INT_20260816_02_GATE1_REAUDIT.md
 
 상위 정본 §10 을 정본으로 삼되, 순서는 다음과 같다.
 
-### F-0 (선행) 계약 컴파일러 → Dispatch 배선
+### ~~F-0 (선행) 계약 컴파일러 → Dispatch 배선~~ → **완료**
 
-§4.1 참조. **이것부터 한다.** 나머지 F 항목이 이 배선 위에 얹힌다.
+§4.1 참조. 승인된 계약이 실제로 데이터셋을 만든다. 변이 23/23 포착, 전체 회귀 4,055건.
+
+⚠️ 남은 조각 하나: 물질화는 **게시 시점**에 돈다. Preview(F-1)·ACTIVE 승격(F-2)이
+  각자 언제 물질화를 다시 돌릴지는 그 단계에서 정한다 — 지금은 게시 하나뿐이다.
 
 ### F-1 = I-4 6 — Release Candidate · Preview DB · Preview Proof
 
@@ -377,6 +445,7 @@ Wave H(최소 화면 7종 · Demo Reset · 시연 안정화).
 ```text
 Wave A~D (I-4 4c · 5 · BDR-2 · BDR-3)   ██████████  완료
 Wave E   (BDR-5 준비도 · BDR-6 Dispatch) ██████████  완료 · Gate E 5/5
+Wave F-0 (계약 물질화)                    ██████████  완료 · 변이 23/23
 Wave F   (I-4 6 · 7 · 8)                 ░░░░░░░░░░  미착수 ← 여기부터
 Wave G   (BDR-7 · G2 · G4 · 의사결정)     ░░░░░░░░░░  미착수
 Wave H   (최소 화면 · 시연 안정화)         ░░░░░░░░░░  미착수

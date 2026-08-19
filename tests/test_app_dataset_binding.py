@@ -1022,7 +1022,10 @@ def test_enterprise_read_never_gets_write_actions_in_the_db(svc):
     #: 읽기만이면 통과한다 — 막기만 하는 게이트는 통제를 증명하지 않는다.
     ok = svc.create_dataset("rel_1", "purchases", _schema(), actor_id="u@x",
                             allowed_actions=["read"], contract_revision=1,
-                            data_role="ENTERPRISE_ACTUAL", source_intent="ENTERPRISE_READ")
+                            data_role="ENTERPRISE_ACTUAL", source_intent="ENTERPRISE_READ",
+                            #: [Wave F-0] 사내 원천은 «어느 표 · 어느 판» 을 함께 요구한다
+                            enterprise_contract_key="purchase_orders",
+                            kit_instance_id="ki_test")
     assert svc.allowed_actions("rel_1", ok["dataset_id"]) == ("read",)
 
 
@@ -1063,7 +1066,11 @@ def test_unclassified_legacy_is_never_declared_actual(svc):
 
     actual = svc.create_dataset("rel_1", "purchases", _schema(), actor_id="u@x",
                                 allowed_actions=["read"], contract_revision=1,
-                                data_role="ENTERPRISE_ACTUAL", source_intent="ENTERPRISE_READ")
+                                data_role="ENTERPRISE_ACTUAL",
+                                source_intent="ENTERPRISE_READ",
+                                #: [Wave F-0] 사내 원천은 «어느 표 · 어느 판» 을 함께 요구한다
+                                enterprise_contract_key="purchase_orders",
+                                kit_instance_id="ki_test")
     assert svc.is_declared_enterprise_actual("rel_1", actual["dataset_id"]) is True
     #: 다른 릴리스에서는 그 사실이 성립하지 않는다 — 결속마다 따로 답한다.
     assert svc.is_declared_enterprise_actual("rel_2", actual["dataset_id"]) is False

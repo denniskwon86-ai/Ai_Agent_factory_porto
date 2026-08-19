@@ -1703,6 +1703,61 @@ async def get_system_logs(
 # ==========================================
 # 결과물 라이브러리 (배포/최종 결과물 저장 + 보관 + 재실행)
 # ==========================================
+
+def _materialize_contract_for_release(project_id: str, release_id: str, *,
+                                      actor_id: str, profile: str,
+                                      ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """[Wave F-0] 승인된 프로젝트 계약을 **이 릴리스의 데이터셋으로 만든다.**
+
+    ★★★ 여기가 「승인이 무언가를 만들게 하는」 자리다. 그전까지 승인 뒤에 하는 일은
+      타입 어댑터 파일 쓰기 하나였고, 그래서 계약 경로를 지난 릴리스가 **한 건도
+      없었다** — 그리고 그 상태는 오류를 내지 않았다.
+
+    ⚠️ **레거시 판은 건드리지 않는다.** 계약 프로필이 켜진 판만 물질화한다. 소급하면
+      이미 도는 앱들의 결속이 통째로 다시 쓰인다(4c-0 과 같은 경계).
+
+    ⚠️ 실패를 삼키지 않는다. 다만 **게시 자체를 막지도 않는다** — 산출물은 이미
+      만들어져 있고, 못 꺼내게 하는 것이 더 큰 손해다. 대신 무엇이 안 됐는지를
+      응답과 릴리스 파일에 **그대로 남긴다**(조용한 성공이 가장 나쁘다)."""
+    from core.wbs_artifact_kind import profile_enforces_contract
+
+    if not profile_enforces_contract(profile):
+        return {"state": "SKIPPED_LEGACY", "detail": "계약 이전 판입니다.", "datasets": []}
+
+    from nodes.contract import contract_path
+
+    canon = contract_path(workspace_path(project_id))
+    if not os.path.exists(canon):
+        #: ⚠️ 「계약 프로필이 켜졌는데 계약 파일이 없다」는 정상이 아니다. 조용히
+        #:   건너뛰면 그 앱은 데이터 없이 게시되고, 화면은 빈 표를 정상으로 그린다.
+        return {"state": "FAILED", "detail": "계약 원문을 찾을 수 없습니다.", "datasets": []}
+    try:
+        with open(canon, "r", encoding="utf-8") as f:
+            contract = json.load(f)
+    except Exception as e:
+        return {"state": "FAILED", "detail": f"계약 원문을 읽을 수 없습니다: {e}",
+                "datasets": []}
+
+    from core import contract_materializer as cm
+    from core.app_data import AppDataError, app_data_service
+    from core.data_preparation.store import data_preparation_store
+
+    try:
+        out = cm.materialize(
+            contract, release_id=release_id, actor_id=actor_id,
+            store=data_preparation_store, app_data=app_data_service,
+            tenant_id=str(ctx.get("tenant_id", "") or ""),
+            scope_node_id=str(ctx.get("scope_node_id", "") or ""),
+            entity_mode=str(ctx.get("entity_mode", "") or ""))
+    except (cm.MaterializeError, AppDataError) as e:
+        return {"state": "FAILED", "detail": str(e)[:400], "datasets": []}
+
+    return {"state": "MATERIALIZED", "detail": "",
+            "datasets": [d.get("name", "") for d in out.datasets],
+            "sources": {r.name: r.enterprise_contract_key
+                        for r in out.resolved if r.enterprise_contract_key}}
+
+
 @router.post("/{project_id}/release")
 async def create_release(project_id: str,
                           p: Principal = Depends(current_principal)):
@@ -1840,6 +1895,20 @@ async def create_release(project_id: str,
 
     rel_dir = library_paths.release_dir(release_id)
     os.makedirs(rel_dir, exist_ok=True)
+    with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
+        json.dump(release, f, ensure_ascii=False, indent=2)
+
+    # ── [Wave F-0] 승인된 계약을 **실제 데이터셋으로** 만든다 ──────────────
+    #
+    # ★★★ 릴리스 파일을 **먼저** 쓴다 — 물질화는 `release_id` 로 릴리스를 읽어
+    #   테넌트·앱을 확인한다(`app_data.release_identity`). 순서를 바꾸면 자기
+    #   릴리스를 못 찾아 아무것도 이어받지 못한다.
+    release["contract_materialization"] = _materialize_contract_for_release(
+        project_id, release_id, actor_id=(p.user_id or ""),
+        profile=str(release.get("runtime_contract_profile", "") or ""),
+        ctx=viewing_context(p))
+    #: ⚠️ 결과를 릴리스 파일에 **다시 쓴다** — 「무엇이 만들어졌는가」를 나중에 물을
+    #:   수 있어야 한다. 실패했다면 그 사실도 그대로 남는다.
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
         json.dump(release, f, ensure_ascii=False, indent=2)
 
