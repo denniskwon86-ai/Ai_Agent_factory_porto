@@ -31,7 +31,10 @@ def _issue(store, **kw):
                 #: ★ [2026-08-14] 발급 시점의 앱 선언을 봉인한다 — 판정이 이 값을 대조한다.
                 manifest_fingerprint="fp_1", manifest_version="1.0",
                 #: ★ [I-4 3단계] 계약 원문·물질화도 함께 봉인된다.
-                contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1")
+                contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1",
+                #: ★ [I-4 6] 청중도 봉인된다 — **기본값이 없다.** 「안 적었으면 운영」이면
+                #:   Preview 경로가 하나만 빠뜨려도 운영 데이터가 열린다.
+                audience="operational")
     base.update(kw)
     return store.issue(**base)
 

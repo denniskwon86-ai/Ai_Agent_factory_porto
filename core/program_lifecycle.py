@@ -54,8 +54,21 @@ _DB_PATH = data_path("program_lifecycle.db")
 ACTIVE = "active"
 DEPRECATED = "deprecated"
 DISABLED = "disabled"
-STATUSES = (ACTIVE, DEPRECATED, DISABLED)
+#: ★★★ [I-4 6 / Wave F-1] **아직 승인되지 않은 후보 판.** Preview 에서만 돈다.
+#:
+#: ⚠️ 상태값을 «먼저» 더한다 — 게시 기본값을 바꾸는 것과는 다른 일이다. 아무도 이
+#:   상태로 만들지 않으면 동작은 그대로이고, 대신 **Preview 경로를 실제로 태워 볼 수
+#:   있게** 된다. 값이 없으면 그 경로는 시험에서도 한 번도 실행되지 않는다(실측:
+#:   변이 검사가 7건을 놓쳤고, 원인이 전부 이것이었다).
+#: ⚠️ 게시 기본값 전환은 **승격 경로와 같은 커밋**에서 한다(Wave F-2) — 나누면 그
+#:   사이에 만들어진 릴리스가 전부 후보로 갇힌다.
+CANDIDATE = "candidate"
+STATUSES = (ACTIVE, DEPRECATED, DISABLED, CANDIDATE)
 #: 사용을 허용하는 상태. `deprecated` 는 경고를 달고 통과한다.
+#:
+#: ⚠️⚠️ `CANDIDATE` 는 **여기 없다.** 후보 판은 «운영에서 쓸 수 있는 것» 이 아니다 —
+#:   Preview 청중으로만 열린다(`core/app_preview.audience_for_state`). 여기 넣으면
+#:   승인되지 않은 판이 일반 실행 경로로 열린다.
 USABLE = (ACTIVE, DEPRECATED)
 
 _DDL = """

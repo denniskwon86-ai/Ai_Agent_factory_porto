@@ -98,7 +98,8 @@ class AppCapabilityTokenStore:
               scope_node_id: str = "", ttl_minutes: int = DEFAULT_TTL_MINUTES,
               purpose: str = "", manifest_fingerprint: str = "",
               manifest_version: str = "", contract_fingerprint: str = "",
-              materialization_fingerprint: str = "") -> Dict[str, Any]:
+              materialization_fingerprint: str = "",
+              audience: str = "") -> Dict[str, Any]:
         """토큰 발급. 반환에 **전문(`token`)이 들어 있는 유일한 곳**이다.
 
         ⚠️ 호출부는 이 값을 로그·목록·오류 메시지에 다시 싣지 않는다."""
@@ -114,6 +115,16 @@ class AppCapabilityTokenStore:
                 "그것이 정확히 이 토큰이 막으려는 상태입니다.")
         if not app_id:
             raise AppTokenError("app_id 가 필요합니다 — 어느 앱인지 없는 증명은 증명이 아닙니다.")
+        #: ★★★ [I-4 6] **청중을 봉인한다.** Preview 증명으로 운영 데이터를 만질 수 없고,
+        #:   운영 증명으로 Preview 데이터를 만질 수도 없다 — 양방향이다.
+        #: ⚠️ 기본값을 두지 않는다. 「안 적었으면 운영」이면 Preview 경로가 하나만
+        #:   빠뜨려도 운영 데이터가 열린다.
+        from core.app_preview import PreviewBoundaryError, assert_audience
+
+        try:
+            audience = assert_audience(audience)
+        except PreviewBoundaryError as e:
+            raise AppTokenError(str(e))
         #: ★★★ [rev.2] **세션에 묶는다.** 없으면 로그아웃·재로그인 후에도 같은 토큰이 통하고,
         #:   그것이 「다른 세션에서 재사용」 경로다(교차검토 지적 2).
         session_id = (session_id or "").strip()
@@ -201,6 +212,8 @@ class AppCapabilityTokenStore:
             "manifest_version": manifest_version,
             "contract_fingerprint": contract_fingerprint,
             "materialization_fingerprint": materialization_fingerprint,
+            #: ★★★ [I-4 6] 어느 쪽 것인가. 요청마다 경로의 청중과 대조한다.
+            "audience": audience,
             "issued_at": now.isoformat(),
             "expires_at": (now + timedelta(minutes=ttl)).isoformat(),
             "ttl_minutes": ttl,

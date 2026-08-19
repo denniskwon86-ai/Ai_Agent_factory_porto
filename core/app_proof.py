@@ -117,9 +117,19 @@ def program_usable(release_id: str) -> bool:
       상태(`quarantined`·`suspended` 같은 것)가 **자동으로 허용**된다. 새 상태를 만드는
       사람은 대개 「막으려고」 만드는데 그 순간 여기가 열려 있다."""
     try:
-        from core.program_lifecycle import ACTIVE, DEPRECATED, program_lifecycle
+        from core.program_lifecycle import (ACTIVE, CANDIDATE, DEPRECATED,
+                                            program_lifecycle)
         st = str(program_lifecycle.get_status(str(release_id or "")).get("status", ""))
-        return st in (ACTIVE, DEPRECATED)
+        #: ★★★ [I-4 6] `CANDIDATE` 를 **의도적으로** 허용목록에 넣는다.
+        #:
+        #: ⚠️⚠️ 이것이 안전한 이유는 오직 하나 — **청중 경계가 후보 판을 Preview 평면
+        #:   으로 보내기 때문**이다(`core/app_preview.audience_for_state`). 즉 여기서
+        #:   여는 것은 「데이터 접근」이 아니라 「미리보기 접근」이다.
+        #: ⚠️⚠️ 그러므로 `app_data_runtime._audience_of` 의 대조를 없애면 **이 줄이
+        #:   곧 승인되지 않은 코드의 운영 데이터 접근**이 된다. 둘은 한 쌍이다.
+        #: ★ `program_lifecycle.USABLE` 에는 넣지 않았다 — 그쪽은 「앱을 그냥 실행해도
+        #:   되는가」이고, 후보 판은 그 대답이 «아니오» 다.
+        return st in (ACTIVE, DEPRECATED, CANDIDATE)
     except Exception:
         return False
 

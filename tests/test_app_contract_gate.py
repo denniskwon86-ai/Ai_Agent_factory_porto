@@ -432,6 +432,7 @@ def test_a_token_cannot_be_issued_without_the_pair():
     store = AppCapabilityTokenStore()
     with pytest.raises(AppTokenError) as e:
         store.issue(actor="u@x", session_id="s", app_id="a", release_id="r",
+            audience="operational",
                     capabilities=("read",), tenant_id="t", entity_mode="REAL",
                     scope_node_id="n", manifest_fingerprint="fp", manifest_version="1.0")
     assert "contract_fingerprint" in str(e.value)

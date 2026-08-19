@@ -40,6 +40,7 @@ from pydantic import BaseModel
 from api.deps import Principal, current_principal, viewing_context, visibility_block_reason
 from core import (app_contract_gate, app_policy, app_proof, host_runtime_provider as prov,
                   host_runtime_sdk as sdk, host_runtime_wire as wire)
+from core import app_preview
 from core.app_capability_token import AppTokenError, app_capability_tokens
 from core.app_data import AppDataError, AppDataIntegrityError, app_data_service
 
@@ -213,6 +214,50 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str,
         pass
 
 
+def _release_state(release_id: str) -> str:
+    """이 릴리스가 지금 **후보인가 운영인가.**
+
+    ⚠️ 판독 실패를 「운영」으로 접지 않는다 — 그러면 상태를 못 읽는 순간 후보 판이
+      운영 데이터를 만진다. 빈 문자열은 호출부가 거부한다."""
+    try:
+        from core.program_lifecycle import program_lifecycle
+
+        return str(program_lifecycle.get_status(str(release_id or "")).get("status", ""))
+    except Exception:
+        return ""
+
+
+def _audience_of(proof: Dict[str, Any]) -> str:
+    """이 증명이 **지금도** 자기 청중과 맞는가.
+
+    ★★★ 발급 시점에 맞았다는 것으로는 부족하다. 후보였던 판이 운영으로 승격되면
+      **그때 발급된 Preview 증명이 운영 데이터를 가리키게 된다** — 그것이 교차 사용의
+      실제 경로다. 그래서 요청마다 지금 상태에서 다시 유도해 봉인 값과 대조한다.
+    ⚠️ 어긋나면 «다시 열면 된다»(`EXPIRED`)로 답한다 — 부모가 새 증명을 받으면 곧바로
+      풀린다. 「없다」로 접으면 앱이 화면에서 그 표를 지운다."""
+    rid = str(proof.get("release_id", "") or "")
+    now_audience = app_preview.audience_for_state(_release_state(rid))
+    if not now_audience:
+        raise _fail(sdk.ERR_UNAVAILABLE, audit_reason="릴리스 상태를 읽을 수 없음",
+                    target=rid)
+    try:
+        app_preview.assert_audience_match(sealed=proof.get("audience"),
+                                          requested=now_audience)
+    except app_preview.PreviewBoundaryError as e:
+        #: ⚠️ 어느 쪽으로 어긋났는지는 앱에 말하지 않는다 — 감사에만 남긴다.
+        raise _fail(sdk.ERR_EXPIRED, audit_reason=f"청중 불일치: {str(e)[:120]}",
+                    target=rid)
+    return now_audience
+
+
+def _plane(proof: Dict[str, Any]):
+    """이 증명이 만질 수 있는 **데이터 평면 하나.**
+
+    ★★★ 호출부가 «어느 DB 인가» 를 스스로 고르지 않는다 — 고르게 두면 언젠가 한 곳이
+      잘못 고르고, 그 한 곳이 곧 경계 위반이다."""
+    return app_preview.app_data_for(_audience_of(proof))
+
+
 def _dataset(proof: Dict[str, Any], name: str) -> Dict[str, Any]:
     """데이터셋 «이름» → 행. **릴리스는 증명에서 나온다 — 요청이 말하지 않는다.**
 
@@ -220,7 +265,7 @@ def _dataset(proof: Dict[str, Any], name: str) -> Dict[str, Any]:
       접으면 **서버 상태 이상이 사용자 실수처럼 보이고**, 깨진 결속은 아무도 모른 채 남는다."""
     rel = str(proof.get("release_id", "") or "")
     try:
-        ds = app_data_service.find_dataset(rel, str(name or ""))
+        ds = _plane(proof).find_dataset(rel, str(name or ""))
     except AppDataIntegrityError as e:
         raise _fail(sdk.ERR_UNAVAILABLE, audit_reason=f"무결성: {str(e)[:100]}", target=rel)
     if not ds:
@@ -268,7 +313,7 @@ def _assert_contract_action(proof: Dict[str, Any], ds: Dict[str, Any], need: str
     ⚠️ 여기서의 거부는 **그 앱 자신의 계약**에 대한 사실이므로 `FORBIDDEN` 으로 알린다 —
       숨기면 개발자가 무엇을 고쳐야 하는지 모른 채 이름을 의심한다. 반면 **계약에 없는
       이름**은 `_dataset()` 이 `NOT_FOUND` 로 답한다(존재를 알리지 않는다)."""
-    allowed = app_data_service.allowed_actions(
+    allowed = _plane(proof).allowed_actions(
         str(proof.get("release_id", "") or ""), str(ds.get("dataset_id", "") or ""))
     if allowed is None:
         #: 계약 이전(레거시) 결속 — 2차 판정이 없다.
@@ -302,7 +347,7 @@ def _dispatch(proof: Dict[str, Any], ds: Dict[str, Any], *, allow_stale: bool = 
     from datetime import datetime, timezone
 
     rel = str(proof.get("release_id", "") or "")
-    binding = app_data_service.binding_for(rel, str(ds.get("dataset_id", "") or "")) or {}
+    binding = _plane(proof).binding_for(rel, str(ds.get("dataset_id", "") or "")) or {}
     intent = str(binding.get("source_intent") or "")
     if not intent:
         #: 계약 이전(레거시) 결속 — 종전대로 우리 DB 다.
@@ -394,9 +439,12 @@ def _serve_snapshot(res: "prov.Resolution", *, limit: int = 0, offset: int = 0,
     return {**meta, "records": rows, "total": total}
 
 
-def _record_in(dataset_id: str, record_id: str) -> Dict[str, Any]:
-    """레코드가 **그** 데이터셋의 것인지 확인한다(혼동된 대리인 차단과 같은 규칙)."""
-    rec = app_data_service.get_record(str(record_id or ""))
+def _record_in(plane, dataset_id: str, record_id: str) -> Dict[str, Any]:
+    """레코드가 **그** 데이터셋의 것인지 확인한다(혼동된 대리인 차단과 같은 규칙).
+
+    ⚠️ 평면을 인자로 받는다 — 전역 운영 저장소를 직접 부르면 Preview 요청이 운영
+      레코드를 집는다."""
+    rec = plane.get_record(str(record_id or ""))
     if not rec or str(rec.get("dataset_id") or "") != str(dataset_id or ""):
         raise _fail(sdk.ERR_NOT_FOUND)
     return rec
@@ -500,9 +548,24 @@ async def issue_proof(req: ProofRequest, p: Principal = Depends(current_principa
                     audit_reason=f"계약↔물질화 불일치: {' / '.join(gate.reasons)[:160]}",
                     actor=uid, target=release_id, path="POST /runtime/proof")
 
+    #: ★★★ [I-4 6] **청중은 릴리스 상태가 정한다.** 요청이 고르게 두면 후보 판에
+    #:   운영 증명을 달라고 할 수 있고, 그것이 곧 검토되지 않은 코드의 운영 접근이다.
+    audience = app_preview.audience_for_state(_release_state(release_id))
+    if not audience:
+        raise _fail(sdk.ERR_NOT_FOUND, audit_reason="릴리스 상태를 읽을 수 없음",
+                    actor=uid, target=release_id, path="POST /runtime/proof")
+    if app_preview.is_preview(audience):
+        #: ⚠️ Preview 는 `SYNTHETIC_TEST` 문맥에서만 돈다 — 실제 조직 문맥으로 미리보기를
+        #:   돌리면 승인 전 판이 만든 숫자가 실적으로 읽힌다.
+        try:
+            app_preview.assert_preview_context(ctx.get("entity_mode", ""))
+        except app_preview.PreviewBoundaryError as e:
+            raise _fail(sdk.ERR_FORBIDDEN, audit_reason=str(e)[:160], actor=uid,
+                        target=release_id, path="POST /runtime/proof")
+
     try:
         rec = app_capability_tokens.issue(
-            actor=uid, session_id=p.session_id,
+            actor=uid, session_id=p.session_id, audience=audience,
             app_id=facts.app_id, release_id=release_id, capabilities=caps,
             tenant_id=str(ctx.get("tenant_id", "") or ""),
             entity_mode=str(ctx.get("entity_mode", "") or ""),
@@ -552,7 +615,7 @@ async def get_schema(name: str, request: Request, p: Principal = Depends(current
         return {"status": "success", "data": {**wire.project_dataset(ds),
                                               "as_of": served["as_of"],
                                               "stale": served["stale"]}}
-    ds["record_count"] = app_data_service.count_records(ds["dataset_id"])
+    ds["record_count"] = _plane(proof).count_records(ds["dataset_id"])
     return {"status": "success", "data": wire.project_dataset(ds)}
 
 
@@ -579,7 +642,7 @@ async def list_records(name: str, request: Request, limit: int = Query(50), offs
             "as_of": served["as_of"], "stale": served["stale"]}}
 
     creator = (p.user_id or "") if (ds.get("app_class") or "") == "personal" else ""
-    rows, total = app_data_service.list_records(
+    rows, total = _plane(proof).list_records(
         ds["dataset_id"], limit=max(1, min(int(limit or 50), wire.MAX_PAGE_LIMIT)),
         offset=max(0, int(offset or 0)), created_by=creator)
     #: ★ 총계를 함께 준다 — 화면이 `len(rows)` 를 «전부» 로 읽으면 상한에 걸린 순간
@@ -603,7 +666,7 @@ async def get_record(name: str, record_id: str, request: Request,
         return {"status": "success", "data": {
             **wire.project_record(served["record"], _fields_of(ds)),
             "as_of": served["as_of"], "stale": served["stale"]}}
-    rec = _record_in(ds["dataset_id"], record_id)
+    rec = _record_in(_plane(proof), ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     return {"status": "success", "data": wire.project_record(rec, _fields_of(ds))}
 
@@ -624,7 +687,7 @@ async def create_record(name: str, req: RecordWrite, request: Request,
     try:
         #: ⚠️ 앱이 보낸 권한 관련 필드를 **지운다**(검증이 아니라 삭제). 브리지도 지우지만
         #:   서버가 다시 지운다 — 브리지 결함 하나가 곧 권한 입력이 되지 않게.
-        out = app_data_service.create_record(
+        out = _plane(proof).create_record(
             ds["dataset_id"], sdk.sanitize_request(req.payload), actor_id=actor,
             #: ★ 이 릴리스가 결속한 스키마 판으로 검증한다 — 마스터가 아니다.
             release_id=str(proof.get("release_id", "") or ""))
@@ -650,10 +713,10 @@ async def update_record(name: str, record_id: str, req: RecordWrite, request: Re
     #: ★★★ [BDR-6] **Native 밖에는 쓰지 않는다.** 여기서 막지 않으면 앱이 판 위에
     #:   사본을 만들고, 그 사본은 원천과 갈라진 채 아무도 모르게 남는다.
     _assert_native_write(_dispatch(proof, ds), ds, path="PUT /records/{id}")
-    rec = _record_in(ds["dataset_id"], record_id)
+    rec = _record_in(_plane(proof), ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:
-        out = app_data_service.update_record(
+        out = _plane(proof).update_record(
             record_id, sdk.sanitize_request(req.payload), actor_id=actor,
             release_id=str(proof.get("release_id", "") or ""))
     except AppDataIntegrityError as e:
@@ -678,10 +741,10 @@ async def delete_record(name: str, record_id: str, request: Request,
     #: ★★★ [BDR-6] **Native 밖에는 쓰지 않는다.** 여기서 막지 않으면 앱이 판 위에
     #:   사본을 만들고, 그 사본은 원천과 갈라진 채 아무도 모르게 남는다.
     _assert_native_write(_dispatch(proof, ds), ds, path="DELETE /records/{id}")
-    rec = _record_in(ds["dataset_id"], record_id)
+    rec = _record_in(_plane(proof), ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:
-        out = app_data_service.delete_record(record_id, actor_id=actor)
+        out = _plane(proof).delete_record(record_id, actor_id=actor)
     except AppDataIntegrityError as e:
         #: ⚠️ 서버 상태 이상은 400 이 아니다 — 사용자가 값을 고쳐도 낫지 않는다.
         raise _fail(sdk.ERR_UNAVAILABLE, audit_reason=f"무결성: {str(e)[:100]}",

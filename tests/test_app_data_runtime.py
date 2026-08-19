@@ -597,6 +597,7 @@ def test_빈_지문으로는_증명을_발급할_수_없다(client):
                {}):
         with pytest.raises(AppTokenError):
             store.issue(actor="u@x", session_id="s1", app_id="a1", release_id="r1",
+        audience="operational",
                         capabilities=("read",), tenant_id="t", entity_mode="REAL",
                         scope_node_id="node_hq", **kw)
 

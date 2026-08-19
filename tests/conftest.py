@@ -339,7 +339,27 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         from core import app_data as _ad
         monkeypatch.setattr(_ad.app_data_service._store, "db_path",
                             str(tmp_path / "app_data.db"), raising=False)
+        monkeypatch.setattr(_ad.app_data_service._store, "db_path",
+                            str(tmp_path / "app_data.db"), raising=False)
         monkeypatch.setattr(_ad.app_data_service._store, "_ready", "", raising=False)
+
+        # ★★★ [I-4 6] **Preview 평면도 격리한다 — 운영과 «다른 파일» 이라는 것이
+        #   격리를 대신하지 않는다.** 두 파일 다 `data/` 아래이고, 시험이 Preview 를
+        #   쓰기 시작하면 `data/app_data_preview.db` 가 그대로 생긴다.
+        # ⚠️ 지연 생성이라 지금은 파일이 안 보인다 — 그 «지금» 에 기대지 않는다.
+        #   Preview 를 실제로 쓰는 시험이 하나 생기는 순간 오염이 시작된다.
+        # ⚠️ `db_path()` 를 스텁으로 갈아끼우지 않는다 — 그 함수는 **모르는 청중을
+        #   거부하는** 것이 일이고, 스텁이 그 성질을 없애면 「모르면 운영」이 된다.
+        #   (실제로 그렇게 만들었다가 경계 시험이 즉시 빨개졌다.)
+        #   대신 **격리된 인스턴스를 미리 심는다** — `preview_app_data()` 는 이미
+        #   만들어져 있으면 그대로 쓴다.
+        from core import app_preview as _ap
+        from core.app_data import AppDataService as _ADS
+        from core.app_data_store import AppDataStore as _ADStore
+        monkeypatch.setattr(
+            _ap, "_preview_service",
+            _ADS(_ADStore(db_path=str(tmp_path / "app_data_preview.db"))),
+            raising=False)
     except Exception as e:
         isolation_failed("앱 데이터 평면", e)
     try:
