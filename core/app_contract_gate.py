@@ -54,6 +54,12 @@ NO_CONTRACT = "no-contract"
 #: 판독 실패의 표식. ⚠️ 이것이 봉인되는 일은 없다 — 판독 실패면 발급 자체가 막힌다.
 UNREADABLE = "unreadable"
 
+#: ★★★ 업무 데이터를 **읽지 않는** 릴리스의 데이터 지문. 빈 문자열이 아니라 표식이다.
+#:
+#: ⚠️⚠️ `NO_CONTRACT` 와 같은 이유다 — 비워 두면 판정이 「양쪽 다 비었으니 같다」로
+#:   통과하고, 나중에 업무 데이터 결속이 **생겨도** 이미 도는 앱이 그대로 살아남는다.
+NO_DATA = "no-business-data"
+
 
 @dataclass
 class GateVerdict:
@@ -62,6 +68,10 @@ class GateVerdict:
     reasons: List[str] = field(default_factory=list)
     contract_fingerprint: str = ""
     materialization_fingerprint: str = ""
+    #: ★★★ [§4.2] 이 릴리스가 **지금 읽는 인증판 집합**의 지문.
+    #:   ⚠️ 위 둘과 **다른 사실**이다 — 계약도 결속도 그대로인데 새 판이 인증되면
+    #:     앱이 읽는 숫자만 바뀐다. 그 변화는 아무 오류도 내지 않는다.
+    data_fingerprint: str = ""
     #: 계약이 아예 없는 릴리스(레거시)인가 — 「없다」와 「어긋난다」는 다른 사실이다.
     legacy: bool = False
 
@@ -131,6 +141,51 @@ def _materialized(release_id: str, plane: Any = None) -> Dict[str, Dict[str, Any
         "  LEFT JOIN app_dataset_versions v ON v.version_id = b.version_id "
         " WHERE b.release_id=?", ((release_id or "").strip(),))
     return {str(r["name"]): dict(r) for r in rows}
+
+
+def data_fingerprint(release_id: str, plane: Any = None) -> str:
+    """이 릴리스가 **지금 읽는 인증판 집합**의 지문.
+
+    ★★★ [§4.2] 계약 원문도 DB 결속도 그대로인데 **새 판이 인증되면** 앱이 읽는 숫자만
+      바뀐다. `latest_certified` 가 다음 요청부터 새 판을 가리키기 때문이다. 그 변화는
+      아무 오류도 내지 않고, 「그 화면이 어느 판을 보고 있었나」에 답할 수 없게 만든다.
+
+    ⚠️ 지문은 `baseline_build.fingerprint_for` 를 **그대로 쓴다** — 따로 계산하면 같은
+      집합이 두 곳에서 다른 값을 내고, 대조가 곧 거짓말이 된다.
+    ⚠️ 업무 데이터를 읽지 않는 릴리스는 `NO_DATA` 표식이다(빈 문자열이 아니다).
+    ⚠️ 판독 실패는 `UNREADABLE` 이고, 그 값으로는 발급하지 않는다 — 「모르니까 통과」가
+      곧 승인 없는 권한이다."""
+    from core.baseline_build import fingerprint_for
+    from core.data_preparation import readiness as rd
+
+    rid = str(release_id or "").strip()
+    try:
+        rows = _plane(plane)._store.query(
+            "SELECT enterprise_contract_key AS key, kit_instance_id AS inst "
+            "  FROM app_release_dataset_bindings WHERE release_id=?", (rid,))
+    except Exception:
+        return UNREADABLE
+
+    pairs = sorted({(str(r["key"] or "").strip(), str(r["inst"] or "").strip())
+                    for r in rows
+                    if str(r["key"] or "").strip() and str(r["inst"] or "").strip()})
+    if not pairs:
+        return NO_DATA
+
+    try:
+        from core.data_preparation.store import data_preparation_store as dp_store
+
+        ids: List[str] = []
+        for key, inst in pairs:
+            snaps = [s for s in dp_store.list_snapshots(inst)
+                     if str(s.get("dataset_contract_key") or "") == key]
+            snap = rd.latest_certified(snaps)
+            #: ⚠️ 인증판이 아직 없는 자리는 **빈 채로 두지 않는다.** 자리 표시를 넣어야
+            #:   「없던 자리에 판이 생긴 것」도 지문 변화로 잡힌다.
+            ids.append(f"{inst}:{key}={str((snap or {}).get('snapshot_id') or '-')}")
+    except Exception:
+        return UNREADABLE
+    return fingerprint_for(ids)
 
 
 def _compare(contract: Dict[str, Any], bound: Dict[str, Dict[str, Any]]) -> List[str]:
@@ -256,6 +311,13 @@ def evaluate(release: Any, release_id: str, plane: Any = None) -> GateVerdict:
     except Exception as e:
         return GateVerdict(ok=False, reasons=[f"물질화 지문을 만들 수 없습니다: {str(e)[:80]}"])
 
+    #: ★★★ [§4.2] 「지금 읽는 판」도 함께 본다. 판독 실패면 **발급하지 않는다.**
+    data_fp = data_fingerprint(rid, plane)
+    if data_fp == UNREADABLE:
+        return GateVerdict(ok=False, materialization_fingerprint=mat_fp, data_fingerprint=data_fp,
+                           reasons=["업무 데이터 판 상태를 읽을 수 없습니다 — "
+                                    "「모르니까 통과」는 승인 없는 권한입니다."])
+
     if contract is None:
         #: 계약이 **없는** 릴리스. 계약 결속도 없어야 한다 —
         #: ⚠️⚠️ 결속만 있고 계약이 없다면 **물질화가 승인보다 앞선** 상태이고, 그것은
@@ -263,7 +325,7 @@ def evaluate(release: Any, release_id: str, plane: Any = None) -> GateVerdict:
         rogue = sorted(n for n, g in bound.items() if int(g.get("bound") or 0))
         if rogue:
             return GateVerdict(
-                ok=False, materialization_fingerprint=mat_fp,
+                ok=False, materialization_fingerprint=mat_fp, data_fingerprint=data_fp,
                 reasons=[f"승인된 계약이 없는데 계약 결속이 있습니다: {rogue} — "
                          f"아무도 승인하지 않은 권한이 열려 있습니다."])
         #: ★★★ [4c-7] **실행 가능한 앱은 레거시 면제를 받을 수 없다.**
@@ -275,20 +337,20 @@ def evaluate(release: Any, release_id: str, plane: Any = None) -> GateVerdict:
         #    경계는 릴리스가 들고 있는 `runtime_contract_profile` 이다(4c-0 과 같은 규칙).
         if release_contract_profile(release) and is_executable_app_in_app(release):
             return GateVerdict(
-                ok=False, materialization_fingerprint=mat_fp,
+                ok=False, materialization_fingerprint=mat_fp, data_fingerprint=data_fp,
                 reasons=["실행 가능한 앱인데 승인된 런타임 계약이 없습니다 — "
                          "산출물 분류(`artifact_kind`)가 무엇이든, 사용자가 실행하는 "
                          "App-in-App 은 계약을 지나야 합니다."])
         #: 레거시(계약 이전) 릴리스는 그대로 연다 — 「없다」와 「어긋난다」는 다른 사실이다.
         return GateVerdict(ok=True, contract_fingerprint=NO_CONTRACT,
-                           materialization_fingerprint=mat_fp, legacy=True)
+                           materialization_fingerprint=mat_fp, data_fingerprint=data_fp, legacy=True)
 
     errs = arc.validate(contract)
     if errs:
-        return GateVerdict(ok=False, materialization_fingerprint=mat_fp,
+        return GateVerdict(ok=False, materialization_fingerprint=mat_fp, data_fingerprint=data_fp,
                            reasons=[f"계약을 읽을 수 없습니다: {errs[0]}"])
     if str((contract.get("approval") or {}).get("status", "")) != "APPROVED":
-        return GateVerdict(ok=False, materialization_fingerprint=mat_fp,
+        return GateVerdict(ok=False, materialization_fingerprint=mat_fp, data_fingerprint=data_fp,
                            reasons=["계약이 승인되지 않았습니다 — 승인 전 계약으로는 앱을 "
                                     "열 수 없습니다."])
 
@@ -296,9 +358,9 @@ def evaluate(release: Any, release_id: str, plane: Any = None) -> GateVerdict:
     fp = contract_fingerprint(release)
     if reasons:
         return GateVerdict(ok=False, reasons=reasons, contract_fingerprint=fp,
-                           materialization_fingerprint=mat_fp)
+                           materialization_fingerprint=mat_fp, data_fingerprint=data_fp)
     #: ★ 데이터셋 0개는 정상이다 — 계약 0개 + 결속 0개면 여기까지 이유 없이 온다.
-    return GateVerdict(ok=True, contract_fingerprint=fp, materialization_fingerprint=mat_fp)
+    return GateVerdict(ok=True, contract_fingerprint=fp, materialization_fingerprint=mat_fp, data_fingerprint=data_fp)
 
 
 def sealed_pair(release: Any, release_id: str, plane: Any = None) -> Tuple[str, str]:
@@ -311,3 +373,15 @@ def sealed_pair(release: Any, release_id: str, plane: Any = None) -> Tuple[str, 
     except Exception:
         mat = UNREADABLE
     return contract_fingerprint(release), mat
+
+
+def sealed_triple(release: Any, release_id: str, plane: Any = None) -> Tuple[str, str, str]:
+    """요청마다 다시 계산하는 **지금의** 세 지문 — 계약 · 물질화 · 읽는 판.
+
+    ★★★ [§4.2] 셋은 **다른 사실**이다. 계약도 결속도 그대로인데 새 판이 인증되면
+      앱이 읽는 숫자만 바뀐다 — 그 변화는 아무 오류도 내지 않는다.
+
+    ⚠️ 판독 실패는 `UNREADABLE` 로 남긴다. 봉인된 값과 절대 같지 않으므로(발급 때는
+      `UNREADABLE` 로 봉인되지 않는다) 그 프레임은 닫힌다 — 「모르니까 통과」가 아니다."""
+    c_fp, m_fp = sealed_pair(release, release_id, plane)
+    return c_fp, m_fp, data_fingerprint(release_id, plane)

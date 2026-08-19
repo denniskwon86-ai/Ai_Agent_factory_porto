@@ -53,6 +53,9 @@ def _facts(**kw):
                 manifest_fingerprint="fp_1", manifest_version="1.0",
                 #: ★ [I-4 3단계] 계약 원문·물질화 지문도 요청마다 대조한다.
                 contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1",
+                #: ★ [§4.2] 읽는 판 지문도 요청마다 대조한다 — 인증판이 교체되면
+                #:   그 프레임은 죽어야 한다.
+                data_fingerprint="dfp_1",
                 declared_capabilities=(ap.READ, ap.WRITE, ap.DELETE, ap.MANAGE))
     base.update(kw)
     return ap.AppResourceFacts(**base)
@@ -71,6 +74,7 @@ def _app(**kw):
                tenant_id="tenant_default", entity_mode="REAL", scope_node_id="node_hq",
                manifest_fingerprint="fp_1", manifest_version="1.0",
                contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1",
+               data_fingerprint="dfp_1",
                capabilities=(ap.READ, ap.WRITE, ap.DELETE, ap.MANAGE), expired=False)
     tok.update(kw.pop("token", {}))
     base = dict(user_id="u@x", scope=_Scope(read={"hq"}, write={"hq"}), ctx=_ctx(),
@@ -411,3 +415,34 @@ def test_양쪽_다_빈_지문도_통과하지_못한다():
 def test_같은_매니페스트면_통과한다():
     """★ 대조군 — 이것이 없으면 「무조건 거부」도 위 시험을 통과한다."""
     assert ap.decide(_app(), _res(), ap.READ, app=_facts()).allowed
+
+
+def test_a_proof_without_a_data_fingerprint_is_refused():
+    """★★★ [§4.2] 빈 봉인값을 통과시키면 그것이 곧 우회로다.
+
+    ⚠️ 「옛 증명이라 지문이 없다」를 허용하면, 지문 없이 발급된 증명 하나로 판 교체를
+      전부 우회할 수 있다(매니페스트·계약 축과 같은 판단)."""
+    for bad in ("", None):
+        d = ap.decide(_app(token={"data_fingerprint": bad}), _res(), ap.READ,
+                      app=_facts())
+        assert not d.allowed, f"data_fingerprint={bad!r} 인 증명이 통과했다"
+        assert d.reason == ap.DENY_TOKEN_DATA_MISMATCH, d.reason
+
+
+def test_a_changed_data_fingerprint_closes_the_frame():
+    """★★★ [§4.2] 계약·결속이 그대로여도 **읽는 판**이 바뀌면 그 프레임은 죽는다."""
+    d = ap.decide(_app(), _res(), ap.READ, app=_facts(data_fingerprint="dfp_새판"))
+    assert not d.allowed
+    assert d.reason == ap.DENY_TOKEN_DATA_MISMATCH
+    #: ★ 사유가 다른 축과 섞이지 않는다 — 사람이 할 일이 다르다.
+    assert d.reason != ap.DENY_TOKEN_MATERIALIZATION_MISMATCH
+    assert "다시 여십시오" in (d.message or "")
+
+
+def test_the_data_axis_does_not_swallow_the_other_axes():
+    """⚠️ 새 축이 앞에서 다 잡아 버리면 「무엇을 고쳐야 하는가」가 사라진다."""
+    d = ap.decide(_app(), _res(), ap.READ, app=_facts(contract_fingerprint="cfp_다름"))
+    assert d.reason == ap.DENY_TOKEN_CONTRACT_MISMATCH, d.reason
+    d = ap.decide(_app(), _res(), ap.READ,
+                  app=_facts(materialization_fingerprint="mfp_다름"))
+    assert d.reason == ap.DENY_TOKEN_MATERIALIZATION_MISMATCH, d.reason

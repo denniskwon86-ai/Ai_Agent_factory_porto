@@ -32,6 +32,8 @@ def _issue(store, **kw):
                 manifest_fingerprint="fp_1", manifest_version="1.0",
                 #: ★ [I-4 3단계] 계약 원문·물질화도 함께 봉인된다.
                 contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1",
+                #: ★ [§4.2] 읽는 판도 봉인된다 — 업무 데이터를 안 읽어도 **표식**을 싣는다.
+                data_fingerprint="dfp_1",
                 #: ★ [I-4 6] 청중도 봉인된다 — **기본값이 없다.** 「안 적었으면 운영」이면
                 #:   Preview 경로가 하나만 빠뜨려도 운영 데이터가 열린다.
                 audience="operational")
@@ -183,6 +185,7 @@ def test_판정기가_이_토큰을_그대로_먹는다(store):
                                 manifest_fingerprint="fp_1", manifest_version="1.0",
                                 contract_fingerprint="cfp_1",
                                 materialization_fingerprint="mfp_1",
+                                data_fingerprint="dfp_1",
                                 declared_capabilities=(READ, WRITE))
     assert ap.decide(subject, res, READ, app=facts).allowed
     # 다른 릴리스면 막힌다 — 이 증명이 존재하는 이유다.
@@ -290,3 +293,21 @@ def test_성공_사용_기록은_해석이_아니라_판정_뒤에_남긴다(sto
     assert "APP_TOKEN_USED" not in seen, "해석만 했는데 «사용됨» 이 남았다"
     store.record_use(store.resolve(rec["token"], quiet=True))
     assert "APP_TOKEN_USED" in seen, "판정 뒤에도 사용 기록이 남지 않는다"
+
+
+def test_issuing_without_a_data_fingerprint_is_refused(store):
+    """★★★ [§4.2] **막을 곳은 만드는 자리다.**
+
+    ⚠️ 판정이 빈 값을 거부하는데 발급이 빈 값을 만들면, 그 증명은 태어나자마자 아무
+      데도 못 쓰는 것이 된다 — 그리고 왜인지 아무도 모른다(계약·물질화 축과 같은 판단)."""
+    for bad in ("", "   ", None):
+        with pytest.raises(act.AppTokenError) as e:
+            _issue(store, data_fingerprint=bad)
+        assert "data_fingerprint" in str(e.value)
+
+
+def test_the_sealed_data_fingerprint_is_kept_on_the_record(store):
+    """★ 봉인해 놓고 기록에 안 남기면 판정이 대조할 것이 없다."""
+    rec = _issue(store, data_fingerprint="dfp_봉인")
+    got = store.resolve(rec["token"])
+    assert got["data_fingerprint"] == "dfp_봉인", got

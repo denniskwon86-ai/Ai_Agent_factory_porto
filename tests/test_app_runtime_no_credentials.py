@@ -129,7 +129,8 @@ def test_앱_증명은_판정_경로에서도_전문을_들고_다니지_않는�
                       capabilities=(READ,), tenant_id="tenant_default",
                       entity_mode="REAL", scope_node_id="node_hq",
                       manifest_fingerprint="fp_1", manifest_version="1.0",
-        contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1")
+        contract_fingerprint="cfp_1", materialization_fingerprint="mfp_1",
+        data_fingerprint="dfp_1")
     resolved = store.resolve(rec["token"])
     assert "token" not in resolved
     assert rec["token"] not in str(resolved)

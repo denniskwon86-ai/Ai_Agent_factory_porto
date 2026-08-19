@@ -166,10 +166,11 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str,
     #:     **다음 요청에서** 그 프레임이 죽어야 한다.
     #: ★★★ [F-3] **그 증명이 만질 평면**으로 지문을 낸다. Preview 증명인데
     #:   운영 평면의 지문을 대조하면 첫 요청부터 「이 판은 사라졌다」가 된다.
-    c_fp, m_fp = app_contract_gate.sealed_pair(
+    c_fp, m_fp, d_fp = app_contract_gate.sealed_triple(
         rel, release_id, plane=app_preview.app_data_for(_audience_of(proof)))
     facts = dataclasses.replace(facts, contract_fingerprint=c_fp,
-                                materialization_fingerprint=m_fp)
+                                materialization_fingerprint=m_fp,
+                                data_fingerprint=d_fp)
     subject = app_policy.Subject(
         user_id=(p.user_id or ""), scope=p.scope, ctx=ctx,
         session_id=(p.session_id or ""),
@@ -588,6 +589,10 @@ async def issue_proof(req: ProofRequest, p: Principal = Depends(current_principa
             #:   달라지면 그 판은 사라진 것이고, 브리지는 프레임을 버린다.
             contract_fingerprint=gate.contract_fingerprint,
             materialization_fingerprint=gate.materialization_fingerprint,
+            #: ★★★ [§4.2] **읽는 판까지 봉인한다.** 인증판이 교체되면 다음 요청에서
+            #:   그 프레임이 죽어야 한다 — 아니면 「그 화면이 어느 판을 보고 있었나」에
+            #:   답할 수 없다.
+            data_fingerprint=gate.data_fingerprint,
             purpose="Host Runtime 데이터 평면")
     except AppTokenError as e:
         #: 발급 계약 위반은 앱 코드 문제가 아니라 **자료 상태** 문제다(문맥·범위 공란 등).

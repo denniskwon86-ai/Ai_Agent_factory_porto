@@ -579,3 +579,39 @@ def test_the_seal_survives_a_round_trip_through_the_real_store(tmp_path):
     finally:
         lc._release_exists = monkey
     assert got.get("data_fingerprint") == "fp_봉인", f"봉인값이 사라졌다: {got}"
+
+
+def test_the_seal_column_is_added_to_an_existing_old_schema_db(tmp_path):
+    """★★★ 이미 만들어진 DB 에는 `CREATE TABLE IF NOT EXISTS` 가 컬럼을 더해 주지 않는다.
+
+    ⚠️ 없는 채로 두면 봉인이 조용히 버려지고 「봉인했다」는 결과만 남는다. `tmp_path` 로
+      새로 만든 DB 만 시험하면 이 자리를 **한 번도 지나지 않는다** — 그래서 옛 스키마를
+      손으로 만들어 놓고 연다."""
+    import sqlite3
+
+    import core.program_lifecycle as pl
+
+    path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE program_status(release_id TEXT PRIMARY KEY, "
+        " status TEXT NOT NULL DEFAULT 'active', reason TEXT NOT NULL DEFAULT '', "
+        " replacement_release_id TEXT NOT NULL DEFAULT '', "
+        " changed_by TEXT NOT NULL DEFAULT '', changed_at TEXT NOT NULL DEFAULT '', "
+        " dependents_at_change TEXT NOT NULL DEFAULT '{}');")
+    conn.execute("INSERT INTO program_status VALUES"
+                 "('rel_옛','disabled','옛 사유','','u','2026-01-01','{}')")
+    conn.commit()
+    conn.close()
+
+    lc = pl.ProgramLifecycle(db_path=path)
+    lc._connect().close()
+
+    #: ★ 기존 행이 그대로 살아 있어야 한다 — 마이그레이션이 표를 새로 만들면 안 된다.
+    old = lc.get_status("rel_옛")
+    assert old["status"] == "disabled" and old["reason"] == "옛 사유", old
+    #: ★★★ 그리고 **봉인이 실제로 저장돼야** 한다.
+    lc._release_exists = lambda rid: True
+    lc.set_status("rel_옛", ACTIVE, actor="u@x", reason="재개",
+                  data_fingerprint="fp_봉인")
+    assert lc.get_status("rel_옛")["data_fingerprint"] == "fp_봉인"

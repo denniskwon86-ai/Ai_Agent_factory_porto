@@ -98,7 +98,7 @@ class AppCapabilityTokenStore:
               scope_node_id: str = "", ttl_minutes: int = DEFAULT_TTL_MINUTES,
               purpose: str = "", manifest_fingerprint: str = "",
               manifest_version: str = "", contract_fingerprint: str = "",
-              materialization_fingerprint: str = "",
+              materialization_fingerprint: str = "", data_fingerprint: str = "",
               audience: str = "") -> Dict[str, Any]:
         """토큰 발급. 반환에 **전문(`token`)이 들어 있는 유일한 곳**이다.
 
@@ -179,6 +179,18 @@ class AppCapabilityTokenStore:
             raise AppTokenError(
                 "contract_fingerprint 와 materialization_fingerprint 가 필요합니다 — "
                 "계약·물질화에 묶이지 않은 증명은 그 둘이 바뀌어도 그대로 통합니다.")
+        #: ★★★ [§4.2] **읽는 판까지 봉인한다.** 계약도 결속도 그대로인데 새 판이
+        #:   인증되면 앱이 읽는 숫자만 바뀐다 — 그 변화는 아무 오류도 내지 않고,
+        #:   「그 화면이 어느 판을 보고 있었나」에 답할 수 없게 만든다.
+        #: ⚠️ 업무 데이터를 안 읽는 릴리스도 **표식**(`no-business-data`)을 싣는다.
+        #:   비워 두면 판정이 「양쪽 다 비었으니 같다」로 통과하고, 나중에 업무 데이터
+        #:   결속이 생겨도 이미 도는 앱이 그대로 살아남는다.
+        data_fingerprint = (data_fingerprint or "").strip()
+        if not data_fingerprint:
+            raise AppTokenError(
+                "data_fingerprint 가 필요합니다 — 읽는 판에 묶이지 않은 증명은 인증판이 "
+                "교체돼도 그대로 통하고, 그러면 그 화면이 무엇을 보고 있었는지 답할 수 "
+                "없습니다.")
 
         try:
             ttl = int(ttl_minutes)
@@ -212,6 +224,8 @@ class AppCapabilityTokenStore:
             "manifest_version": manifest_version,
             "contract_fingerprint": contract_fingerprint,
             "materialization_fingerprint": materialization_fingerprint,
+            #: ★★★ [§4.2] 발급 시점에 이 앱이 읽던 인증판 집합.
+            "data_fingerprint": data_fingerprint,
             #: ★★★ [I-4 6] 어느 쪽 것인가. 요청마다 경로의 청중과 대조한다.
             "audience": audience,
             "issued_at": now.isoformat(),

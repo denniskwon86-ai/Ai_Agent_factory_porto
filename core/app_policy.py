@@ -85,6 +85,10 @@ DENY_TOKEN_CONTRACT_MISMATCH = "TOKEN_CONTRACT_MISMATCH"
 #:   ⚠️ 계약 원문과 **다른 사유**다 — 「계약서는 그대로인데 결속이 달라진」 경우이고,
 #:     그때 앱은 승인받은 것과 다른 권한·다른 스키마로 돈다.
 DENY_TOKEN_MATERIALIZATION_MISMATCH = "TOKEN_MATERIALIZATION_MISMATCH"
+#: ★★★ [§4.2] 계약도 결속도 그대로인데 **읽는 판**이 바뀌었다.
+#: ⚠️ 위 둘과 사유를 나누는 이유: 사람이 할 일이 다르다. 계약 개정은 재승인이고,
+#:   결속 변경은 관리 작업이며, 판 교체는 **그냥 앱을 다시 열면 된다.**
+DENY_TOKEN_DATA_MISMATCH = "TOKEN_DATA_MISMATCH"
 DENY_TOKEN_CAPABILITY = "TOKEN_CAPABILITY"
 DENY_MANIFEST_CAPABILITY = "MANIFEST_CAPABILITY"
 DENY_CONTEXT = "CONTEXT_MISMATCH"                    # 요청 문맥 ↔ 자원 문맥
@@ -187,6 +191,8 @@ class AppResourceFacts:
     #: [I-4 3단계] 지금의 계약 원문·물질화 지문. 서버가 요청마다 산출한다.
     contract_fingerprint: str = ""
     materialization_fingerprint: str = ""
+    #: [§4.2] 지금 이 릴리스가 읽는 인증판 집합의 지문.
+    data_fingerprint: str = ""
 
 
 # ── 축별 판정 ─────────────────────────────────────────────────────────────
@@ -330,6 +336,13 @@ def _token_ok(subject: Subject, res: ResourceScope,
     if not tok_mfp or tok_mfp != str(app.materialization_fingerprint or ""):
         return (False, DENY_TOKEN_MATERIALIZATION_MISMATCH,
                 "앱의 데이터 구성이 발급 이후 바뀌었습니다. 앱을 다시 여십시오.")
+    #: ③-d [§4.2] **읽는 판**이 바뀌었는가. 계약·결속이 그대로여도 새 판이 인증되면
+    #:   앱이 읽는 숫자만 바뀐다 — 그 변화는 아무 오류도 내지 않는다.
+    #:   ⚠️ 빈 값을 통과시키지 않는다(위 축들과 같은 판단).
+    tok_dfp = str(tok.get("data_fingerprint", "") or "")
+    if not tok_dfp or tok_dfp != str(app.data_fingerprint or ""):
+        return (False, DENY_TOKEN_DATA_MISMATCH,
+                "읽고 있던 데이터 판이 바뀌었습니다. 앱을 다시 여십시오.")
 
     # ④ 어느 회사·실행 문맥의 증명인가 — 문맥을 바꿔 재사용하는 경로를 막는다
     c = subject.ctx or {}

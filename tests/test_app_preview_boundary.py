@@ -395,7 +395,10 @@ def test_a_token_cannot_be_issued_without_an_audience():
                 #: 이 시험의 주제는 «청중» 이다 — 다른 필수값이 먼저 막으면 주제가
                 #: 가려진다(문구가 게이트를 대신하던 사고와 같은 종류).
                 manifest_fingerprint="fp", manifest_version="1.0",
-                contract_fingerprint="cfp", materialization_fingerprint="mfp")
+                contract_fingerprint="cfp", materialization_fingerprint="mfp",
+                #: ★ [§4.2] 읽는 판 지문도 필수다 — 여기서 채워야 이 시험이 «청중»
+                #:   때문에 막히는 것을 본다. 안 채우면 다른 이유로 막히고 초록이 된다.
+                data_fingerprint="dfp")
     with pytest.raises(AppTokenError) as e:
         store.issue(**base)
     assert "청중" in str(e.value)

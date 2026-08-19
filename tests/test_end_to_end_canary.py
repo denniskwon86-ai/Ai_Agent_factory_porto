@@ -28,6 +28,7 @@ import json
 import pytest
 
 from core import app_preview as ap
+from core import app_proof
 from core import app_runtime_contract as arc
 from core import contract_materializer as cm
 from core import release_promotion as rp
@@ -335,8 +336,22 @@ def test_revoking_the_certified_snapshot_stops_the_read(canary, dp, monkeypatch)
     dp.advance_snapshot(snaps[0]["snapshot_id"], dpm.REVOKED)
 
     after = canary.get(R + "/datasets/arrivals/records", headers=_h(tok))
-    assert after.status_code == 503, \
-        "인증 회수 뒤에도 읽혔다: " + str(after.status_code)
+    assert after.status_code != 200,         "인증 회수 뒤에도 읽혔다: " + str(after.status_code)
+
+    #: ★★★ [§4.2 이후] **증명이 먼저 죽는다.** 회수는 「이 앱이 읽는 판 집합」을 바꾸고,
+    #:   그 지문은 증명에 봉인돼 있다 — 그래서 dispatch 에 닿기 전에 프레임이 닫힌다.
+    #:   ⚠️ 이것을 「막혔으니 됐다」로 넘기지 않는다. 봉인이 먼저 걸리면 사용자에게 가는
+    #:     말이 「앱을 다시 여십시오」가 되므로, **다시 연 뒤에도 진짜 사유가 남아
+    #:     있는지**까지 봐야 한다. 아니면 다시 열면 그냥 읽히는 셈이 된다.
+    assert after.status_code == 404, (
+        "봉인 대조가 아니라 다른 이유로 막혔다: " + str(after.status_code))
+
+    #: 앱을 다시 연다 — 새 증명은 «지금» 의 판 집합으로 봉인된다.
+    fresh = _tok(canary)
+    again = canary.get(R + "/datasets/arrivals/records", headers=_h(fresh))
+    assert again.status_code == 503, (
+        "다시 연 뒤에는 «아직 준비되지 않았다» 가 나와야 한다 — 회수된 판이 다시 "
+        "읽히거나 사유가 사라졌다: " + str(again.status_code))
 
 
 def test_retiring_the_source_binding_stops_the_read(canary, dp, monkeypatch):
@@ -388,3 +403,218 @@ def test_the_canary_never_touches_operational_storage(canary, dp, monkeypatch):
                        ("생명주기", program_lifecycle.db_path)):
         assert not os.path.realpath(path).startswith(real), \
             f"{name} 저장소가 운영 영역을 가리킨다: {path}"
+
+
+def test_certifying_a_newer_snapshot_closes_the_open_frame(canary, dp, monkeypatch):
+    """★★★ [§4.2] **판이 «교체» 돼도 프레임이 닫혀야 한다** — 회수와 다른 사건이다.
+
+    회수는 읽기가 멈추므로 언젠가는 티가 난다. 그런데 **새 판이 인증되면** 계약도
+    결속도 그대로이고, 앱은 다음 요청부터 조용히 **다른 숫자**를 읽는다. 아무 오류도
+    나지 않고, 「그 화면이 어느 판을 보고 있었나」에 답할 수 없게 된다.
+
+    ⚠️ 이 시험이 없으면 봉인이 회수만 잡고 교체를 놓쳐도 초록이다."""
+    import api.routes.app_data_runtime as ard
+
+    contract = _contract()
+    inst, binding, _first = _step_source(dp, canary.raw, mode=ap.ENTITY_MODE_SYNTHETIC)
+    _write_release(canary, mode=ap.ENTITY_MODE_SYNTHETIC, contract=contract)
+    _step_materialize(dp, contract)
+    program_lifecycle.set_status(REL, CANDIDATE, actor="u@x", reason="카나리")
+    monkeypatch.setattr(ard, "viewing_context",
+                        lambda p: {"tenant_id": TENANT,
+                                   "entity_mode": ap.ENTITY_MODE_SYNTHETIC,
+                                   "scope_node_id": SCOPE}, raising=False)
+    tok = _tok(canary)
+    first = canary.get(R + "/datasets/arrivals/records", headers=_h(tok))
+    assert first.status_code == 200, first.text[:200]
+
+    #: ★ 같은 결속에 **새 파일**을 올려 인증한다. 계약도 결속도 그대로다.
+    newer = ss.ingest(dp, binding=dp.get_binding(binding["binding_id"]), payload=CSV,
+                      file_name="a2.csv", workspace_root=canary.raw)
+    out = ss.run_pipeline(dp, newer["snapshot_id"], ROWS,
+                          ["arrived_at", "material_code", "quantity"],
+                          control={"row_count": 2, "sums": {"quantity": 15}})
+    assert out["state"] == dpm.DEMO_CERTIFIED, out
+    assert newer["snapshot_id"] != _first["snapshot_id"], "같은 판을 두 번 셌다"
+
+    after = canary.get(R + "/datasets/arrivals/records", headers=_h(tok))
+    assert after.status_code == 404, (
+        "판이 교체됐는데 옛 증명으로 계속 읽힌다 — 그 화면이 무엇을 보고 있었는지 "
+        "답할 수 없다: " + str(after.status_code))
+
+    #: ★★★ 대조군 — 다시 열면 읽힌다. 이것이 없으면 「그냥 다 막혔다」를 통제로 읽는다.
+    fresh = _tok(canary)
+    again = canary.get(R + "/datasets/arrivals/records", headers=_h(fresh))
+    assert again.status_code == 200, (
+        "다시 열어도 안 읽힌다 — 시험이 통제가 아니라 고장을 보고 있다: "
+        + str(again.status_code))
+
+
+def test_an_app_without_business_data_seals_a_marker_not_a_blank(canary, dp, monkeypatch):
+    """★★★ 「업무 데이터를 안 읽는다」와 「봉인하지 않았다」는 **다른 사실**이다.
+
+    ⚠️ 둘 다 빈 값이면 판정이 「양쪽 다 비었으니 같다」로 통과하고, 나중에 업무 데이터
+      결속이 생겨도 이미 도는 앱이 그대로 살아남는다."""
+    from core import app_contract_gate as gate
+
+    #: 결속을 하나도 만들지 않은 릴리스 — 업무 데이터를 읽지 않는다.
+    assert gate.data_fingerprint("rel_없는것") == gate.NO_DATA
+    assert gate.NO_DATA and gate.NO_DATA != ""
+
+
+# ── §4.2 봉인의 «막는 성질» — 변이 검사가 놓친 자리들 ────────────────────
+def _break_snapshots(monkeypatch):
+    """**data_preparation 저장소만** 못 읽게 만든다.
+
+    ★★★ 판독 실패는 두 갈래다 — 결속 표(물질화와 같은 저장소)와 **인증판 저장소**.
+      앞의 것은 물질화 검사가 먼저 잡으므로, 데이터 축의 「모르니까 통과」를 시험하려면
+      **뒤의 것**을 끊어야 한다. 앞을 끊고 초록을 보면 시험이 다른 통제를 보고 있는 것이다."""
+    from core.data_preparation.store import data_preparation_store as dp_store
+
+    def boom(*a, **kw):
+        raise RuntimeError("원천 저장소가 응답하지 않습니다")
+
+    monkeypatch.setattr(dp_store, "list_snapshots", boom)
+
+
+def test_an_unreadable_data_store_is_not_read_as_no_data(canary, dp, monkeypatch):
+    """★★★ 「못 읽었다」와 「업무 데이터를 안 쓴다」는 **다른 사실**이다.
+
+    ⚠️ 못 읽은 것을 «없음» 표식으로 접으면, 저장소가 흔들리는 동안 발급된 증명이
+      「데이터를 안 읽는 앱」으로 봉인되고 그 뒤로 무엇이 바뀌어도 통한다."""
+    from core import app_contract_gate as gate
+
+    contract = _contract()
+    _step_source(dp, canary.raw, mode=ap.ENTITY_MODE_SYNTHETIC)
+    _write_release(canary, mode=ap.ENTITY_MODE_SYNTHETIC, contract=contract)
+    _step_materialize(dp, contract)
+    plane = ap.app_data_for(ap.AUDIENCE_PREVIEW)
+
+    #: ★ 대조군 — 끊기 전에는 진짜 지문이 나온다.
+    before = gate.data_fingerprint(REL, plane=plane)
+    assert before not in (gate.UNREADABLE, gate.NO_DATA, ""), before
+
+    _break_snapshots(monkeypatch)
+    got = gate.data_fingerprint(REL, plane=plane)
+    assert got == gate.UNREADABLE, f"판독 실패를 {got!r} 로 접었다"
+    assert got != gate.NO_DATA
+
+
+def test_an_unreadable_data_store_blocks_issuance(canary, dp, monkeypatch):
+    """★★★ 판독 실패로는 **발급하지 않는다** — 「모르니까 통과」가 곧 승인 없는 권한이다."""
+    from core import app_contract_gate as gate
+
+    contract = _contract()
+    _step_source(dp, canary.raw, mode=ap.ENTITY_MODE_SYNTHETIC)
+    rel = _write_release(canary, mode=ap.ENTITY_MODE_SYNTHETIC, contract=contract)
+    _step_materialize(dp, contract)
+    plane = ap.app_data_for(ap.AUDIENCE_PREVIEW)
+
+    #: ★ 대조군 — 끊기 전에는 발급된다. 없으면 「원래 안 되는 것」을 통제로 읽는다.
+    ok = gate.evaluate(app_proof.read_release(REL), REL, plane=plane)
+    assert ok.ok, f"끊기 전에도 막힌다 — 시험이 통제가 아니라 고장을 본다: {ok.reasons}"
+
+    _break_snapshots(monkeypatch)
+    verdict = gate.evaluate(app_proof.read_release(REL), REL, plane=plane)
+    assert not verdict.ok, "데이터 판 상태를 못 읽는데 발급을 허용했다"
+    assert any("업무 데이터" in r for r in verdict.reasons), verdict.reasons
+
+
+def test_a_dataset_with_no_certified_snapshot_still_counts(canary, dp):
+    """★★★ 인증판이 **아직 없는 자리**를 지문에서 빼면, 첫 인증이 지문을 안 바꾼다.
+
+    ⚠️ 그러면 「데이터가 하나도 없을 때 열어 둔 프레임」이 첫 판이 인증된 뒤에도 그대로
+      살아 있고, 앱은 갑자기 숫자를 그리기 시작한다 — 아무도 그것을 고장으로 안 본다."""
+    from core import app_contract_gate as gate
+
+    contract = _contract()
+    #: 결속만 만들고 **판은 올리지 않는다.**
+    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+                              tenant_id=TENANT, scope_node_id=SCOPE,
+                              entity_mode=ap.ENTITY_MODE_SYNTHETIC)
+    b = dp.create_binding(instance_id=inst["instance_id"],
+                          dataset_contract_key=CONTRACT_KEY,
+                          provider=dpm.PROVIDER_FILE_SNAPSHOT,
+                          config={"file_name": "a.csv", "column_map": {"a": "A"}},
+                          tenant_id=TENANT, scope_node_id=SCOPE,
+                          entity_mode=ap.ENTITY_MODE_SYNTHETIC)
+    for step in ("validate", "approve", "activate"):
+        getattr(sb, step)(dp, b["binding_id"])
+    _write_release(canary, mode=ap.ENTITY_MODE_SYNTHETIC, contract=contract)
+    _step_materialize(dp, contract)
+
+    plane = ap.app_data_for(ap.AUDIENCE_PREVIEW)
+    empty = gate.data_fingerprint(REL, plane=plane)
+    #: ★ 「결속은 있는데 판이 없다」는 «업무 데이터를 안 쓴다» 가 아니다.
+    assert empty not in (gate.NO_DATA, gate.UNREADABLE, ""), empty
+
+    #: 첫 판을 인증한다 — 지문이 **달라져야** 한다.
+    snap = ss.ingest(dp, binding=dp.get_binding(b["binding_id"]), payload=CSV,
+                     file_name="a.csv", workspace_root=canary.raw)
+    out = ss.run_pipeline(dp, snap["snapshot_id"], ROWS,
+                          ["arrived_at", "material_code", "quantity"],
+                          control={"row_count": 2, "sums": {"quantity": 15}})
+    assert out["state"] == dpm.DEMO_CERTIFIED, out
+    assert gate.data_fingerprint(REL, plane=plane) != empty, (
+        "첫 인증이 지문을 바꾸지 않았다 — 판 없는 자리를 지문에서 뺐다")
+
+
+class _UnqueryablePlane:
+    """결속 표를 못 읽는 평면. ★ 판독 실패의 **첫 갈래**를 곧장 지난다.
+
+    ⚠️ `evaluate()` 로는 이 갈래를 볼 수 없다 — 같은 저장소를 쓰는 물질화 검사가 먼저
+      막기 때문이다. 그래서 `data_fingerprint()` 를 직접 부른다."""
+
+    class _Store:
+        def query(self, *a, **kw):
+            raise RuntimeError("결속 표를 읽을 수 없습니다")
+
+    _store = _Store()
+
+
+def test_an_unqueryable_binding_table_is_unreadable_not_no_data():
+    """★★★ 결속 표를 **못 읽은 것**을 「업무 데이터를 안 쓴다」로 접지 않는다.
+
+    ⚠️ 접으면 저장소가 흔들리는 동안 발급된 증명이 「데이터를 안 읽는 앱」으로 봉인되고,
+      그 뒤로 무엇이 바뀌어도 통한다."""
+    from core import app_contract_gate as gate
+
+    got = gate.data_fingerprint(REL, plane=_UnqueryablePlane())
+    assert got == gate.UNREADABLE, f"판독 실패를 {got!r} 로 접었다"
+    assert got != gate.NO_DATA
+
+
+def test_an_empty_slot_does_not_collapse_to_an_empty_set(canary, dp):
+    """★★★ 인증판이 **아직 없는 자리**도 지문에 자리를 차지해야 한다.
+
+    ⚠️ 빼면 「결속은 있는데 판이 없다」가 「결속이 하나도 없다」와 같은 값이 된다.
+      그러면 계약에 데이터셋이 늘어도 지문이 안 바뀌고, 그 자리가 생기기 전에 열어 둔
+      프레임이 그대로 살아 있다.
+    ★ 이것은 「첫 인증이 지문을 바꾸는가」와 **다른 시험**이다 — 그쪽은 자리를 빼도
+      통과한다(빈 목록 → 채워진 목록으로 어차피 달라지므로). 변이 검사가 실제로
+      그렇게 통과했다(2026-08-19)."""
+    from core import app_contract_gate as gate
+    from core.baseline_build import fingerprint_for
+
+    contract = _contract()
+    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+                              tenant_id=TENANT, scope_node_id=SCOPE,
+                              entity_mode=ap.ENTITY_MODE_SYNTHETIC)
+    b = dp.create_binding(instance_id=inst["instance_id"],
+                          dataset_contract_key=CONTRACT_KEY,
+                          provider=dpm.PROVIDER_FILE_SNAPSHOT,
+                          config={"file_name": "a.csv", "column_map": {"a": "A"}},
+                          tenant_id=TENANT, scope_node_id=SCOPE,
+                          entity_mode=ap.ENTITY_MODE_SYNTHETIC)
+    for step in ("validate", "approve", "activate"):
+        getattr(sb, step)(dp, b["binding_id"])
+    _write_release(canary, mode=ap.ENTITY_MODE_SYNTHETIC, contract=contract)
+    _step_materialize(dp, contract)
+
+    plane = ap.app_data_for(ap.AUDIENCE_PREVIEW)
+    got = gate.data_fingerprint(REL, plane=plane)
+    assert got not in (gate.NO_DATA, gate.UNREADABLE, ""), got
+    #: ★★★ 빈 집합의 지문과 **같으면 안 된다** — 같다면 그 자리를 세지 않은 것이다.
+    assert got != fingerprint_for([]), (
+        "판이 없는 자리를 지문에서 뺐다 — 「결속은 있는데 판이 없다」가 "
+        "「결속이 하나도 없다」와 같은 값이 됐다")
