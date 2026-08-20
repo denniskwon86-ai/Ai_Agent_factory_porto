@@ -298,7 +298,27 @@ def certify_demo(store: Any, snapshot_id: str) -> Dict[str, Any]:
         raise m.StateConflict(
             f"«{row.get('data_kind')}» 데이터에는 시연 인증을 붙이지 않습니다 — "
             f"시연 자료와 실제 실적이 섞이면 어느 것이 시연이었는지 가릴 수 없습니다.")
-    return store.advance_snapshot(snapshot_id, m.DEMO_CERTIFIED)
+    #: ★★★ [2026-08-20 §7 3단계] **색인을 먼저 계산하고 그다음에 인증한다.**
+    #:
+    #: ⚠️⚠️ 순서가 중요하다. 인증부터 하면 「인증은 됐는데 색인이 없는 판」이 생길 수
+    #:   있고, 그 판의 객체는 Resolver 에게 `UNBOUND` 로 보인다 — 승인된 관계의 끝점에서
+    #:   **무결성 장애**가 되어 사고가 **질의 시점**에 터진다. 그때는 고칠 사람이 그
+    #:   자리에 없다.
+    #: ★ 계약키가 색인 대상이 아니면 빈 목록이고 그것은 정상이다(MVP 대상은 다섯뿐).
+    from core.data_preparation import scope_index
+
+    payload = scope_index.plan(row)              # ← 여기서 막히면 인증이 서지 않는다
+    certified = store.advance_snapshot(snapshot_id, m.DEMO_CERTIFIED)
+    try:
+        scope_index.write(store, payload, str(certified.get("certified_at", "")))
+        if payload and scope_index.bound_to(store, snapshot_id) == 0:
+            raise scope_index.ScopeIndexError("색인이 기록되지 않았습니다.")
+    except Exception:
+        #: ⚠️ 인증 뒤에는 격리로 못 간다(상태 기계가 막는다). 갈 수 있는 곳은 철회뿐이고,
+        #:   그것이 뜻으로도 맞다 — **이 인증은 물린다.**
+        store.advance_snapshot(snapshot_id, m.REVOKED)
+        raise
+    return certified
 
 
 def display_label(snapshot: Dict[str, Any]) -> str:

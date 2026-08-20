@@ -115,6 +115,41 @@ CREATE TABLE IF NOT EXISTS dataset_snapshots (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
+-- ★★★ [2026-08-20 §7 3단계] 인증판 → **업무 객체 범위 색인**
+--
+-- 온톨로지 계약의 `dataset` 객체 id 는 **업무 레코드 ID**(`SHP-…`·`STK-…`)이지
+-- 인증판 ID(`ds_…`)가 아니다. 그런데 범위(tenant·entity_mode·scope_node)는 인증판이
+-- 들고 있다. 그 사이를 잇는 것이 없어서 Resolver 가 «영영 못 찾는» 상태였다.
+--
+-- ⚠️⚠️ **업무 본문을 복제하지 않는다.** 여기 있는 것은 「어느 판의 어느 행에서 왔고
+--   그 범위가 무엇인가」뿐이다. 본문을 옮기면 두 벌이 되고, 두 벌은 갈라진다.
+--
+-- ★ 열쇠를 둘로 나눈다:
+--     정체성   (namespace, object_type, object_id)              같은 SHP-001 은 같은 배
+--     판 결속  (namespace, object_type, object_id, snapshot_id)  판마다 한 줄
+--   ⚠️ 정체성을 판에 묶으면 `as_of` 를 바꿀 때마다 **다른 객체**가 되어 경로가 끊긴다.
+CREATE TABLE IF NOT EXISTS object_scope_index (
+    namespace       TEXT NOT NULL,
+    object_type     TEXT NOT NULL,
+    object_id       TEXT NOT NULL,
+    snapshot_id     TEXT NOT NULL,
+    dataset_contract_key TEXT NOT NULL DEFAULT '',
+    -- 그 판의 **어느 행**인가. 본문이 아니라 위치다.
+    row_evidence    TEXT NOT NULL DEFAULT '',
+    tenant_id       TEXT NOT NULL,
+    scope_node_id   TEXT NOT NULL,
+    entity_mode     TEXT NOT NULL,
+    data_kind       TEXT NOT NULL DEFAULT '',
+    -- ★ `as_of` 로 판을 고르는 축. ⚠️ 「그냥 최신」을 쓰지 않기 위해 필요하다.
+    certified_at    TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    PRIMARY KEY (namespace, object_type, object_id, snapshot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_scope_index_identity
+    ON object_scope_index(namespace, object_type, object_id, certified_at);
+CREATE INDEX IF NOT EXISTS idx_scope_index_snapshot
+    ON object_scope_index(snapshot_id);
+
 CREATE INDEX IF NOT EXISTS idx_snapshot_binding ON dataset_snapshots(binding_id);
 CREATE INDEX IF NOT EXISTS idx_snapshot_state ON dataset_snapshots(instance_id, state);
 
