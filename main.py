@@ -131,12 +131,17 @@ from api.routes import (app_delivery_control, decision_control,  # [CL-1, CL-2]
                         # ⚠️ [2026-08-19] 아래 둘은 **만들어 놓고 등록되지 않았다.**
                         #   라우터가 앱에 붙지 않으면 그 기능은 «시험에서만» 존재한다.
                         data_preparation_control,  # [BDR-2·3·5] 업무 데이터 준비
-                        baseline_control)  # [BDR-7 / G2·G4] 기준선·시뮬레이션·의사결정
+                        baseline_control,  # [BDR-7 / G2·G4] 기준선·시뮬레이션·의사결정
+                        ontology_control)  # [G2] 정식 온톤로지 런타임 — 승인된 관계·영향 질의
 app.include_router(factory_control.router)
 # [BDR-2·3·5] 업무 데이터 준비 — 키트 적용·원천 결속·Snapshot·준비도
 app.include_router(data_preparation_control.router)
 # [BDR-7 / G2·G4] 기준선 고정 · 영향 경로 · 최소 시뮬레이션 · 의사결정 안건
 app.include_router(baseline_control.router)
+#: ★★★ [G2] 정식 온톤로지 런타임 — 승인·버전·유효기간을 가진 관계 저장과 영향 질의.
+#: ⚠️ `core/ontology_path.py` 는 첫 수직 경로 하나를 **고정**해 둔 시연용이다. 둘을 섞지 않는다 —
+#:   전자는 사람이 승인한 관계를 읽고, 후자는 코드에 박힌 경로를 읽는다.
+app.include_router(ontology_control.router)
 app.include_router(format_control.router)
 app.include_router(realtime.router)
 app.include_router(skill_control.router)

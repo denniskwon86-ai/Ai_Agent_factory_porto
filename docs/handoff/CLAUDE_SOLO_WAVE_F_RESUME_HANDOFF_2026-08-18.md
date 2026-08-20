@@ -614,6 +614,45 @@ Supervisor 가 LLM 사용을 승인해 로드맵 §3 의 2번 칸 질문을 그�
 ⚠️ 이 표는 「만들어진 것」이 아니라 **「내가 근거로 확인한 것」**이다. ✗ 는 없다는 뜻이고
   ◐ 는 절반만 확인했다는 뜻이다 — 재검증 때 이 근거 칸부터 볼 것.
 
+### 4.12 [MVP-P0 ①] 정식 G2 온톨로지 런타임 이식 (2026-08-20)
+
+**⚠️ Supervisor 가 내 실행 순서를 정정했다.** 나는 G5-3(실제 달성률)부터 하겠다고 했는데,
+제품 가치 순서와 **구현 의존 순서가 반대**였다:
+
+    G7-2 DB 마이그레이션 안전  →  G4-3 백테스트  →  G5-3 실제 달성률
+
+· G7-2 가 없으면 G5-3 스키마 변경을 **안전하게 되돌릴 수 없다**
+· G4-3 이 없으면 예상값과 실제값을 **같은 기간·계산식**으로 비교할 기반이 없다
+· 그리고 기간 정합(§4.7)이 미해결이라 달성률을 만들면 산식은 맞아도 **비교 기간이 다르다**
+
+⚠️⚠️ 그리고 내가 뭉갤 뻔한 구분: **`release_promotion` 의 승격 철회는 스키마 롤백이
+  아니다.** 프로그램 비활성화·승격 철회와 DB 스키마 되돌리기는 다른 것이다.
+
+**그래서 3주 시연의 미충족 Gate 부터 닫는다.** ①이 이 절이다.
+
+`codex/integration-three-week-mvp` 의 두 커밋에서 **파일만** 가져왔다(브랜치 전체 병합 금지):
+
+    330026960  feat(G2): add governed ontology relation runtime
+    dd923fcf8  feat(G2): add approved ontology model and REST contract
+      → core/ontology_runtime.py · api/routes/ontology_control.py · 시험 2종
+
+의존이 얕아(`app_policy` · `core.paths` · `api.deps`) 손대지 않고 붙었고 시험 23건이 통과했다.
+
+**★ 구조 가드가 즉시 잡았다.** `tests/test_router_registration.py` 가
+`ontology_control` 미등록을 그 자리에서 실패로 냈다 — 지난번 지적(「데이터 준비 라우터가
+main.py 에 등록돼 있지 않았다」)으로 만든 시험이 **이번엔 같은 사고를 미리 막았다.**
+
+**⚠️ `ontology_path.py` 와 섞지 않는다.**
+· `ontology_runtime` — 사람이 **승인한** 관계를 읽는다(승인·버전·유효기간·범위)
+· `ontology_path` — 코드에 **박힌** 첫 수직 경로를 읽는다(시연용 고정 경로)
+둘을 하나로 합치면 「승인된 사실」과 「코드에 적어 둔 사실」이 구분되지 않는다.
+
+**⚠️ 모델 계약은 아직 `DESIGN_ONLY` 다.**
+`docs/architecture/g2_first_vertical_ontology_contract_v1.json`(관계유형 25 · 제약 25)은
+검증은 통과하지만 `installable: False` — 런타임이 설치를 **거부한다.** 옳은 동작이다.
+· 그 파일은 **다른 멤버의 미커밋 작업**이라 내 커밋에 담지 않았다.
+· 계약을 `APPROVED` 로 올리는 것은 사람의 결정이고, 그때 런타임이 설치를 받는다.
+
 ### 4.3 문서화된 잔여물 (Supervisor 승인 하에 연기)
 
 - `tests/test_quality_outcomes.py` 가 조직 0건 상태에 의존한다.
