@@ -246,7 +246,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
 
   /** ★★★ [I-3] Host Runtime 브리지. **기본은 꺼짐**이다.
    *
-   * 두 조건이 모두 참일 때만 켜진다 — `VITE_AFS_HOST_RUNTIME='1'` **그리고** 릴리스가 있다.
+   * 켜짐이 기본이다(2026-08-20 전환) — `VITE_AFS_HOST_RUNTIME='0'` 이면 꺼지고,
+   * 어느 쪽이든 **릴리스가 있어야** 데이터 평면에 닿는다.
    * ⚠️ 릴리스가 없는 미리보기(생성 중인 코드)는 데이터 평면에 접근할 수 없다. 붙일
    *   `release_id` 가 없으면 서버가 무엇을 판정할지 정할 수 없고, 그 상태에서 열면
    *   「무엇에 대한 권한인가」가 비어 있는 요청이 된다. */
