@@ -3,22 +3,233 @@
   "version": "1.0.0",
   "name": "원료 구매·도입 경영 키트",
   "mode": "DEMO/SYNTHETIC",
-  "summary": "원료 구매·도입 업무를 시연하기 위한 최소 데이터 키트. 실제 업무 데이터가 아니다.",
+  "summary": "원료 구매·도입 업무를 시연하기 위한 최소 데이터 키트. 첫 수직 경로(원료→구매주문→선적·통관→입고·재고→생산계획→제품→현금·손익)와 외부환경 지표를 모두 덮는다. 실제 업무 데이터가 아니다.",
   "datasets": [
+    {
+      "dataset_contract_key": "external_indicators",
+      "label": "외부환경 지표",
+      "purpose": "환율·전력단가·운임 — 사슬 밖에서 현금·손익으로 들어온다",
+      "data_role": "EXTERNAL_REFERENCE",
+      "fields": [
+        {
+          "name": "as_of",
+          "type": "datetime",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "EVENT_TIME"
+        },
+        {
+          "name": "indicator",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "AMOUNT"
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "required": false,
+          "classification": "INTERNAL"
+        }
+      ]
+    },
+    {
+      "dataset_contract_key": "financials",
+      "label": "월별 손익·현금 기준선",
+      "purpose": "경영 결과의 출발점 — 여기가 없으면 시나리오는 기준값을 손으로 받는다",
+      "data_role": "ENTERPRISE_ACTUAL",
+      "fields": [
+        {
+          "name": "period",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "EVENT_TIME"
+        },
+        {
+          "name": "operating_profit",
+          "type": "number",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "AMOUNT",
+          "unit": "KRW"
+        },
+        {
+          "name": "ending_cash",
+          "type": "number",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "AMOUNT",
+          "unit": "KRW"
+        },
+        {
+          "name": "power_cost",
+          "type": "number",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "AMOUNT",
+          "unit": "KRW"
+        },
+        {
+          "name": "ending_inventory",
+          "type": "number",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "QUANTITY",
+          "unit": "ton"
+        }
+      ]
+    },
     {
       "dataset_contract_key": "material_arrivals",
       "label": "원료 입고",
       "purpose": "언제 무엇이 얼마나 들어왔는가",
       "data_role": "ENTERPRISE_ACTUAL",
       "fields": [
-        {"name": "arrived_at", "type": "datetime", "required": true,
-         "semantic_role": "EVENT_TIME", "classification": "INTERNAL"},
-        {"name": "material_code", "type": "string", "required": true,
-         "classification": "INTERNAL", "master_reference": "material"},
-        {"name": "quantity", "type": "number", "required": true,
-         "semantic_role": "QUANTITY", "unit": "ton", "classification": "INTERNAL"},
-        {"name": "lot_no", "type": "string", "required": false,
-         "classification": "INTERNAL"}
+        {
+          "name": "arrived_at",
+          "type": "datetime",
+          "required": true,
+          "semantic_role": "EVENT_TIME",
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "material_code",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL",
+          "master_reference": "material"
+        },
+        {
+          "name": "quantity",
+          "type": "number",
+          "required": true,
+          "semantic_role": "QUANTITY",
+          "unit": "ton",
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "lot_no",
+          "type": "string",
+          "required": false,
+          "classification": "INTERNAL"
+        }
+      ]
+    },
+    {
+      "dataset_contract_key": "materials",
+      "label": "원료 기준정보",
+      "purpose": "무엇을 다루는가 — 코드·이름·단위",
+      "data_role": "ENTERPRISE_ACTUAL",
+      "fields": [
+        {
+          "name": "material_code",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL",
+          "master_reference": "material"
+        },
+        {
+          "name": "material_name",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "category",
+          "type": "string",
+          "required": false,
+          "classification": "INTERNAL"
+        }
+      ]
+    },
+    {
+      "dataset_contract_key": "production_plans",
+      "label": "생산계획",
+      "purpose": "들어온 원료로 무엇을 언제 만들 계획인가",
+      "data_role": "ENTERPRISE_ACTUAL",
+      "fields": [
+        {
+          "name": "planned_at",
+          "type": "datetime",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "EVENT_TIME"
+        },
+        {
+          "name": "product_code",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "planned_qty",
+          "type": "number",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "QUANTITY",
+          "unit": "ton"
+        },
+        {
+          "name": "material_code",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL",
+          "master_reference": "material"
+        },
+        {
+          "name": "material_per_unit",
+          "type": "number",
+          "required": true,
+          "classification": "INTERNAL",
+          "unit": "ton"
+        }
+      ]
+    },
+    {
+      "dataset_contract_key": "products",
+      "label": "제품 기준정보",
+      "purpose": "무엇을 파는가 — 코드·이름·판가",
+      "data_role": "ENTERPRISE_ACTUAL",
+      "fields": [
+        {
+          "name": "product_code",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "product_name",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "unit_price",
+          "type": "number",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "AMOUNT",
+          "unit": "KRW"
+        }
       ]
     },
     {
@@ -27,16 +238,91 @@
       "purpose": "무엇을 얼마에 언제 사기로 했는가",
       "data_role": "ENTERPRISE_ACTUAL",
       "fields": [
-        {"name": "ordered_at", "type": "datetime", "required": true,
-         "semantic_role": "EVENT_TIME", "classification": "INTERNAL"},
-        {"name": "material_code", "type": "string", "required": true,
-         "classification": "INTERNAL", "master_reference": "material"},
-        {"name": "quantity", "type": "number", "required": true,
-         "semantic_role": "QUANTITY", "unit": "ton", "classification": "INTERNAL"},
-        {"name": "unit_price", "type": "number", "required": true,
-         "semantic_role": "AMOUNT", "unit": "KRW", "classification": "CONFIDENTIAL"},
-        {"name": "supplier_code", "type": "string", "required": true,
-         "classification": "INTERNAL", "master_reference": "supplier"}
+        {
+          "name": "ordered_at",
+          "type": "datetime",
+          "required": true,
+          "semantic_role": "EVENT_TIME",
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "material_code",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL",
+          "master_reference": "material"
+        },
+        {
+          "name": "quantity",
+          "type": "number",
+          "required": true,
+          "semantic_role": "QUANTITY",
+          "unit": "ton",
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "unit_price",
+          "type": "number",
+          "required": true,
+          "semantic_role": "AMOUNT",
+          "unit": "KRW",
+          "classification": "CONFIDENTIAL"
+        },
+        {
+          "name": "supplier_code",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL",
+          "master_reference": "supplier"
+        }
+      ]
+    },
+    {
+      "dataset_contract_key": "shipments",
+      "label": "선적·통관",
+      "purpose": "떠난 것이 어디까지 왔는가 — 도입 지연이 보이는 자리",
+      "data_role": "ENTERPRISE_ACTUAL",
+      "fields": [
+        {
+          "name": "shipped_at",
+          "type": "datetime",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "EVENT_TIME"
+        },
+        {
+          "name": "po_no",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "material_code",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL",
+          "master_reference": "material"
+        },
+        {
+          "name": "quantity",
+          "type": "number",
+          "required": true,
+          "classification": "INTERNAL",
+          "semantic_role": "QUANTITY",
+          "unit": "ton"
+        },
+        {
+          "name": "eta",
+          "type": "datetime",
+          "required": false,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "cleared_at",
+          "type": "datetime",
+          "required": false,
+          "classification": "INTERNAL"
+        }
       ]
     },
     {
@@ -45,24 +331,65 @@
       "purpose": "공급사 코드가 무엇을 가리키는가",
       "data_role": "ENTERPRISE_ACTUAL",
       "fields": [
-        {"name": "supplier_code", "type": "string", "required": true,
-         "classification": "INTERNAL"},
-        {"name": "supplier_name", "type": "string", "required": true,
-         "classification": "INTERNAL"},
-        {"name": "country", "type": "string", "required": false,
-         "classification": "PUBLIC"}
+        {
+          "name": "supplier_code",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "supplier_name",
+          "type": "string",
+          "required": true,
+          "classification": "INTERNAL"
+        },
+        {
+          "name": "country",
+          "type": "string",
+          "required": false,
+          "classification": "PUBLIC"
+        }
       ]
     }
   ],
   "outputs": [
-    {"output": "입고 현황 보고",
-     "purpose": "이번 달 자재가 얼마나 들어왔는가",
-     "requires": ["material_arrivals"]},
-    {"output": "구매 이행 현황",
-     "purpose": "주문한 것 중 무엇이 아직 안 왔는가",
-     "requires": ["purchase_orders", "material_arrivals"]},
-    {"output": "공급사별 납기 준수율",
-     "purpose": "어느 공급사가 약속을 지키는가",
-     "requires": ["purchase_orders", "material_arrivals", "supplier_master"]}
+    {
+      "output": "공급사별 납기 준수율",
+      "purpose": "어느 공급사가 약속을 지키는가",
+      "requires": [
+        "purchase_orders",
+        "material_arrivals",
+        "supplier_master"
+      ]
+    },
+    {
+      "output": "구매 이행 현황",
+      "purpose": "주문한 것 중 무엇이 아직 안 왔는가",
+      "requires": [
+        "purchase_orders",
+        "material_arrivals"
+      ]
+    },
+    {
+      "output": "도입 지연 영향 분석",
+      "purpose": "원료가 늦으면 생산·재고·현금·손익이 얼마나 움직이는가",
+      "requires": [
+        "materials",
+        "purchase_orders",
+        "shipments",
+        "material_arrivals",
+        "production_plans",
+        "products",
+        "financials",
+        "external_indicators"
+      ]
+    },
+    {
+      "output": "입고 현황 보고",
+      "purpose": "이번 달 자재가 얼마나 들어왔는가",
+      "requires": [
+        "material_arrivals"
+      ]
+    }
   ]
 }

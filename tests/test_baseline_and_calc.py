@@ -10,6 +10,8 @@
   보고서가 완성돼 보인다.
 ★★★ ④ **성격 표시가 빠지는 것.** 시연 데이터로 만든 결과는 시연 결과다.
 """
+from pathlib import Path
+
 import pytest
 
 from core import base_values as bv
@@ -483,3 +485,82 @@ def test_the_summary_says_how_many_a_person_must_still_fill():
     assert got["derived_count"] == 3
     assert got["manual_count"] == 4
     assert got["derived_count"] + got["manual_count"] == len(bv.FIELD_KEYS)
+
+
+# ── 키트 ↔ 온톨로지 정렬 ────────────────────────────────────────────────
+def test_the_demo_kit_covers_every_step_of_the_first_vertical_path():
+    """★★★ 온톨로지가 가리키는 칸에 계약이 없으면 그 칸은 **영영** 「근거 없음」이다.
+
+    ⚠️ 화면은 그것을 「이 경로는 아직 다 설명되지 않습니다」로 정직하게 말하지만,
+      고칠 방법이 없는 상태다 — 올릴 데이터셋 자체가 계약에 없기 때문이다.
+    ⚠️ 이름은 **글자 그대로** 같아야 한다. `material_arrival`(단수) 하나로도 그 칸은
+      영원히 비고, 아무 오류도 나지 않는다."""
+    import json
+
+    from core.data_preparation import kit_registry as kr
+
+    prof = json.loads(
+        (Path(__file__).resolve().parent.parent
+         / "docs/data-kits/afs_materials_procurement_v1.kit.json").read_text("utf-8"))
+    keys = set(kr.dataset_keys(prof))
+    need = {n.dataset_key for n in op.CHAIN} | {op.EXTERNAL.dataset_key}
+    assert need <= keys, f"온톨로지가 요구하는데 키트에 없다: {sorted(need - keys)}"
+
+
+def test_every_kit_output_only_requires_datasets_the_kit_declares():
+    """⚠️ 요구 목록에 오타가 하나 있으면 그 산출물은 **영원히 막힌다** — 그리고 사유는
+    「키트가 요구하는데 판정 대상에 없다」로만 나온다."""
+    import json
+
+    from core.data_preparation import kit_registry as kr
+
+    prof = json.loads(
+        (Path(__file__).resolve().parent.parent
+         / "docs/data-kits/afs_materials_procurement_v1.kit.json").read_text("utf-8"))
+    keys = set(kr.dataset_keys(prof))
+    for o in kr.outputs(prof):
+        need = {str(k) for k in (o.get("requires") or [])}
+        assert need <= keys, f"«{o.get('output')}» 가 없는 키를 요구한다: {sorted(need - keys)}"
+
+
+FINANCIALS = [{"period": "2026-03", "operating_profit": "100", "ending_cash": "1000",
+               "power_cost": "10", "ending_inventory": "50"},
+              {"period": "2026-04", "operating_profit": "200", "ending_cash": "1200",
+               "power_cost": "20", "ending_inventory": "60"},
+              {"period": "2026-05", "operating_profit": "300", "ending_cash": "900",
+               "power_cost": "30", "ending_inventory": "40"}]
+
+
+def test_a_balance_takes_the_last_period_and_a_flow_takes_the_sum():
+    """★★★ **잔액과 흐름은 다르게 뽑는다.**
+
+    · 잔액(현금·재고) 6개월치를 더하면 그 숫자는 아무 뜻도 없다 — 그런데 그럴듯하다.
+    · 흐름(이익·비용) 마지막 달만 쓰면 3개월치 구매지급과 한 달치 이익을 같은 표에서
+      비교하게 되고, 그 표는 「환율 10%가 이익을 날린다」처럼 읽힌다.
+
+    ⚠️ 둘을 같은 방식으로 뽑아도 **오류는 나지 않는다.** 숫자만 조용히 틀린다."""
+    got = {f.key: f for f in bv.derive(rows_by_dataset={"financials": FINANCIALS},
+                                       snapshot_by_dataset={"financials": "ds_f"})}
+    #: 잔액 — 마지막 기간(2026-05)
+    assert got["ending_cash"].value == 900.0, got["ending_cash"]
+    assert got["ending_inventory"].value == 40.0
+    #: 흐름 — 전 기간 합계
+    assert got["operating_profit"].value == 600.0, got["operating_profit"]
+    assert got["power_cost"].value == 60.0
+
+
+def test_the_latest_period_is_by_period_not_by_row_order():
+    """⚠️ 행 순서로 «마지막» 을 정하면 파일을 정렬해 올리는 순간 다른 답이 나온다."""
+    shuffled = [FINANCIALS[2], FINANCIALS[0], FINANCIALS[1]]
+    got = {f.key: f for f in bv.derive(rows_by_dataset={"financials": shuffled},
+                                       snapshot_by_dataset={"financials": "ds_f"})}
+    assert got["ending_cash"].value == 900.0, "행 순서를 기간으로 읽었다"
+
+
+def test_a_balance_without_a_period_column_is_refused():
+    """⚠️ 기간이 없으면 «마지막» 을 정할 수 없다 — 아무 행이나 고르지 않는다."""
+    rows = [{"ending_cash": "10"}, {"ending_cash": "20"}]
+    got = {f.key: f for f in bv.derive(rows_by_dataset={"financials": rows},
+                                       snapshot_by_dataset={"financials": "ds_f"})}
+    assert got["ending_cash"].value is None
+    assert "period" in got["ending_cash"].reason

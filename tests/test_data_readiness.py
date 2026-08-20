@@ -356,7 +356,15 @@ def test_a_fresh_instance_is_blocked_not_ready(client):
     assert r.status_code == 200, r.text
     data = r.json()["data"]
     assert data["status"] == "BLOCKED"
-    assert data["coverage"]["required"] == 3 and data["coverage"]["ready"] == 0
+    #: ⚠️ 요구 수를 **숫자로 박지 않는다** — 키트가 넓어질 때마다 시험이 깨지고,
+    #:   그때 「3을 9로 고치는」 일이 반복되면 이 시험이 무엇을 지키는지 흐려진다.
+    #:   지키려는 것은 「데이터가 없으면 준비 안 됨」이지 「요구가 몇 개인가」가 아니다.
+    from core.data_preparation import kit_registry as _kr
+    from core.data_preparation.store import data_preparation_store as _store
+    _kit = _kr.resolve(_store, _kr.DEMO_KIT_ID, "1.0.0")
+    assert data["coverage"]["required"] == len(_kr.dataset_keys((_kit or {}).get("profile")))
+    assert data["coverage"]["required"] > 0, "요구가 0건이면 이 시험은 아무것도 안 지킨다"
+    assert data["coverage"]["ready"] == 0
     assert all(d["state"] == "NOT_CONFIGURED" for d in data["datasets"])
 
 

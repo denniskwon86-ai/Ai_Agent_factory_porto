@@ -124,8 +124,14 @@ def test_the_demo_kit_in_the_repo_loads():
     demo = kits[kr.DEMO_KIT_ID]
     assert demo.name == kr.DEMO_KIT_NAME
     assert demo.mode == m.KIT_MODE_DEMO, "시연 키트가 실제 업무 데이터로 표시돼 있다"
-    assert kr.dataset_keys(demo.profile) == ["material_arrivals", "purchase_orders",
-                                             "supplier_master"]
+    #: ★★★ [2026-08-20 §4.4] 시연 키트가 **첫 수직 경로 전체**를 덮는다. 종전에는 셋뿐이라
+    #:   영향 경로가 영영 「근거 없음」이었다.
+    #: ⚠️ 이름은 `core/ontology_path.CHAIN` 과 **글자 그대로** 같아야 한다 —
+    #:   `tests/test_baseline_and_calc.py` 가 그 정렬을 따로 못박는다.
+    assert kr.dataset_keys(demo.profile) == [
+        "external_indicators", "financials", "material_arrivals", "materials",
+        "production_plans", "products", "purchase_orders", "shipments",
+        "supplier_master"]
 
 
 # ── 등록 ─────────────────────────────────────────────────────────────────

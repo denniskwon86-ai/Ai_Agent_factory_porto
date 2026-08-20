@@ -104,8 +104,11 @@ def run(page: Page, shots: Path | None) -> int:
         print("✗ ① 고를 수 있는 인증된 판이 없다 — 동선이 여기서 끊긴다")
         _shot(page, shots, "동선_01_판없음")
         return 1
-    boxes.first.check()
-    page.wait_for_timeout(400)
+    #: ★ 인증된 판을 **전부** 고른다 — 사슬 전체가 기준선에 들어가야 기준값이
+    #:   유도되고 영향 경로가 다 설명된다. 하나만 고르면 그 하나로만 답한다.
+    for i in range(n):
+        boxes.nth(i).check()
+    page.wait_for_timeout(600)
     _shot(page, shots, "동선_01_기준선")
 
     # ── ② 기준값 — 먼저 «판에서 뽑기» 를 눌러 본다 ──────────────────────
@@ -125,8 +128,15 @@ def run(page: Page, shots: Path | None) -> int:
         return 1
     _shot(page, shots, "동선_02_기준값유도")
 
-    #: 나머지(재무 3칸 등)는 사람이 채운다 — 그 사실 자체가 이 화면의 답이다.
-    if not (_fill(dlg, BASE, "②") and _fill(dlg, DRIVERS, "②")):
+    #: ★★★ 유도되지 **않은** 칸만 사람이 채운다. 전부 유도됐으면 손대지 않는다 —
+    #:   손으로 덮어쓰면 화면에 제품이 낸 숫자가 아니라 내가 적은 숫자가 남는다.
+    if picked < len(BASE):
+        if not _fill(dlg, BASE, "②"):
+            return 1
+        print(f"  (유도 {picked}칸 + 사람이 채운 {len(BASE) - picked}칸)")
+    else:
+        print("  (사람이 채울 칸 없음 — 전부 판에서 나왔다)")
+    if not _fill(dlg, DRIVERS, "②"):
         return 1
     page.wait_for_timeout(300)
 
@@ -179,15 +189,22 @@ def run(page: Page, shots: Path | None) -> int:
     if boxes.count() == 0:
         print("✗ ④ 고를 수 있는 판이 없다")
         return 1
-    boxes.first.check()
-    page.wait_for_timeout(800)
+    #: ★ 여기서도 인증판을 **전부** 고른다 — 하나만 고르면 영향 경로가 「근거 없음」
+    #:   투성이가 되고, 그것이 안건의 첫인상이 된다.
+    for i in range(boxes.count()):
+        boxes.nth(i).check()
+    page.wait_for_timeout(900)
     fill_btn = dlg.locator("button", has_text="고른 판에서 채우기").first
     if fill_btn.count() == 0:
         print("✗ ④ 「고른 판에서 채우기」가 없다")
         return 1
     fill_btn.click()
     page.wait_for_timeout(2500)
-    if not (_fill(dlg, BASE, "④") and _fill(dlg, DRIVERS, "④")):
+    #: ④ 도 같은 규칙 — 유도된 칸은 손대지 않는다.
+    if dlg.locator("text=판에서 뽑음").count() < len(BASE):
+        if not _fill(dlg, BASE, "④"):
+            return 1
+    if not _fill(dlg, DRIVERS, "④"):
         return 1
     page.wait_for_timeout(400)
 

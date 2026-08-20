@@ -57,6 +57,126 @@ GOOD_ORDERS = (
     "2026-07-28,M2,120,22000\n"
 ).encode("utf-8")
 
+#: ★★★ [§4.4] 계획이 정한 **최소 시연 데이터**. 로드맵 §4.4 의 수치를 그대로 쓴다 —
+#:   원료 2종 · 제품 2종 · 공급사 3곳 · 구매주문 12건 · 선적 12건 · 기준선 6개월.
+#:
+#: ⚠️ 「대충 몇 건」으로 줄이지 않는다. 12건과 3건은 화면에서 다르게 보이고, 3건짜리
+#:   표로 한 시연은 「이 제품이 실제 업무량을 감당하는가」에 답하지 못한다.
+#: ⚠️ 값은 **서로 맞물려야** 한다 — 구매주문의 po_no 가 선적에 없으면 「구매 이행
+#:   현황」이 빈다. 사슬을 만들려고 심는 데이터이므로 사슬이 끊기면 심는 의미가 없다.
+
+_MATS = (("M1", "알루미나", "ton", "산화물"), ("M2", "코크스", "ton", "탄소재"))
+_PRODS = (("P1", "1차 소성품", 480000.0), ("P2", "2차 정제품", 725000.0))
+_SUPPLIERS = (("S1", "동해원료", "KR"), ("S2", "Pacific Minerals", "AU"),
+              ("S3", "北方碳素", "CN"))
+
+MATERIALS_CSV = ("material_code,material_name,unit,category\n"
+                 + "".join(f"{c},{n},{u},{g}\n" for c, n, u, g in _MATS)).encode("utf-8")
+
+PRODUCTS_CSV = ("product_code,product_name,unit_price\n"
+                + "".join(f"{c},{n},{v:.0f}\n" for c, n, v in _PRODS)).encode("utf-8")
+
+SUPPLIERS_CSV = ("supplier_code,supplier_name,country\n"
+                 + "".join(f"{c},{n},{k}\n" for c, n, k in _SUPPLIERS)).encode("utf-8")
+
+
+def _orders():
+    """구매주문 12건. ★ 공급사·원료를 골고루 돈다 — 한 곳만 나오면 「공급사별 납기
+    준수율」이 한 줄짜리 표가 된다."""
+    rows = []
+    for i in range(12):
+        mat = _MATS[i % 2][0]
+        sup = _SUPPLIERS[i % 3][0]
+        day = 1 + (i * 2)
+        month = 6 + (i // 6)
+        rows.append({
+            "po_no": f"PO-{2026}{month:02d}-{i + 1:02d}",
+            "ordered_at": f"2026-{month:02d}-{min(day, 28):02d}",
+            "supplier_code": sup, "material_code": mat,
+            "quantity": 100 + (i * 15),
+            "unit_price": 15000 + (i * 250),
+        })
+    return rows
+
+
+def _shipments(orders):
+    """선적 12건 — **주문마다 하나씩.**
+
+    ★★★ 입고를 **3개월에 걸쳐** 흩는다. 12일 안에 몰아 넣으면 「지연 +14일」 시연이
+      기간을 넘어서 생산량이 100% 사라지고, 화면에는 영업이익 -113% 같은 숫자가 뜬다
+      (2026-08-20 실측). 산식이 틀린 것이 아니라 **데이터의 기간이 비현실적**이었다.
+    ⚠️ 일부러 늦은 건을 섞는다 — 전부 정시면 「도입 지연」 시연에 쓸 사실이 없다."""
+    from datetime import date, timedelta
+
+    rows = []
+    #: 6월 첫 주부터 8월 말까지 대략 7일 간격 — 12건이면 약 90일을 덮는다.
+    start = date(2026, 6, 3)
+    for i, o in enumerate(orders):
+        eta = start + timedelta(days=i * 7)
+        late = 6 if i % 4 == 0 else 0          # 4건에 1건꼴로 지연
+        rows.append({
+            "shipped_at": o["ordered_at"],
+            "po_no": o["po_no"], "material_code": o["material_code"],
+            "quantity": o["quantity"],
+            "eta": eta.isoformat(),
+            "cleared_at": (eta + timedelta(days=late)).isoformat(),
+        })
+    return rows
+
+
+def _arrivals(shipments):
+    """입고 — 선적이 통관된 만큼."""
+    return [{"arrived_at": sh["cleared_at"], "material_code": sh["material_code"],
+             "quantity": sh["quantity"], "lot_no": f"L-{i + 1:03d}"}
+            for i, sh in enumerate(shipments)]
+
+
+def _plans():
+    """생산계획 6건 — 제품 2종 × 3개월."""
+    rows = []
+    for i in range(6):
+        prod = _PRODS[i % 2][0]
+        rows.append({"planned_at": f"2026-{6 + (i // 2):02d}-15",
+                     "product_code": prod, "planned_qty": 300 + i * 40,
+                     "material_code": _MATS[i % 2][0], "material_per_unit": 1.2})
+    return rows
+
+
+def _financials():
+    """월별 기준선 6개월. ★ 시나리오의 기준값이 여기서 나온다 — 이것이 있어야 화면이
+    7칸을 사람에게 손으로 받지 않는다."""
+    rows = []
+    for i in range(6):
+        rows.append({"period": f"2026-{3 + i:02d}",
+                     "operating_profit": 4_000_000 + i * 120_000,
+                     "ending_cash": 30_000_000 + i * 450_000,
+                     "power_cost": 800_000 + i * 25_000,
+                     "ending_inventory": 200 + i * 12})
+    return rows
+
+
+def _indicators():
+    """외부지표 3종 × 2시점. ⚠️ 사내 실적과 **성격이 다르다**(EXTERNAL_REFERENCE)."""
+    rows = []
+    for i, (name, unit, base) in enumerate((("환율(USD/KRW)", "KRW", 1320.0),
+                                            ("전력단가", "KRW/kWh", 148.0),
+                                            ("해상운임지수", "pt", 1180.0))):
+        for j, at in enumerate(("2026-07-31", "2026-08-15")):
+            rows.append({"as_of": at, "indicator": name,
+                         "value": base * (1.0 + 0.03 * j), "unit": unit,
+                         "source": "시연용 합성값"})
+    return rows
+
+
+def _csv(rows, cols):
+    """행 목록 → CSV 바이트. ⚠️ 열 순서를 **명시**한다 — dict 순서에 기대면 파이썬
+      버전이 바뀔 때 조용히 다른 파일이 된다."""
+    out = [",".join(cols)]
+    for r in rows:
+        out.append(",".join(str(r.get(c, "")) for c in cols))
+    return ("\n".join(out) + "\n").encode("utf-8")
+
+
 #: ⚠️ 일부러 **잘린** 파일 — 원천은 5행이라 하는데 2행뿐이다.
 TRUNCATED = (
     "arrived_at,material_code,quantity\n"
@@ -300,23 +420,76 @@ def main() -> int:
         scope_node_id=SCOPE, entity_mode=MODE, label="파일럿 시연")
     print(f"· 키트 인스턴스 {inst['instance_id']}")
 
-    # ── ① 정상 판 — 인증까지 ────────────────────────────────────────────
-    b1 = _binding(inst, "material_arrivals")
-    s1 = _upload(b1, GOOD_ARRIVALS, "arrivals.csv", raw_root)
-    rows1 = [{"arrived_at": "2026-08-01", "material_code": "M1", "quantity": "120",
-              "lot_no": "L-001"},
-             {"arrived_at": "2026-08-05", "material_code": "M2", "quantity": "80",
-              "lot_no": "L-002"},
-             {"arrived_at": "2026-08-11", "material_code": "M1", "quantity": "95",
-              "lot_no": "L-003"}]
-    out1 = ss.run_pipeline(store, s1["snapshot_id"], rows1,
-                           ["arrived_at", "material_code", "quantity", "lot_no"],
-                           control={"row_count": 3, "sums": {"quantity": 295}})
-    print(f"· 입고 판 {s1['snapshot_id']} → {out1['state']}")
+    # ── ① 사슬 전체 — **인증까지** ───────────────────────────────────────
+    #: ★★★ [§4.4] 온톨로지가 가리키는 8칸을 전부 채운다. 하나라도 비면 영향 경로가
+    #:   「이 경로는 아직 다 설명되지 않습니다」로 남고, 그것이 시연의 첫 인상이 된다.
+    orders = _orders()
+    ships = _shipments(orders)
+    arrivals = _arrivals(ships)
+
+    #: (계약키, 열 순서, 행, 파일이름)
+    chain = [
+        ("materials", ["material_code", "material_name", "unit", "category"],
+         [{"material_code": c, "material_name": n, "unit": u, "category": g}
+          for c, n, u, g in _MATS], "materials.csv"),
+        ("supplier_master", ["supplier_code", "supplier_name", "country"],
+         [{"supplier_code": c, "supplier_name": n, "country": k}
+          for c, n, k in _SUPPLIERS], "suppliers.csv"),
+        ("purchase_orders",
+         ["po_no", "ordered_at", "supplier_code", "material_code", "quantity",
+          "unit_price"], orders, "purchase_orders.csv"),
+        ("shipments",
+         ["shipped_at", "po_no", "material_code", "quantity", "eta", "cleared_at"],
+         ships, "shipments.csv"),
+        ("material_arrivals",
+         ["arrived_at", "material_code", "quantity", "lot_no"], arrivals,
+         "arrivals.csv"),
+        ("production_plans",
+         ["planned_at", "product_code", "planned_qty", "material_code",
+          "material_per_unit"], _plans(), "production_plans.csv"),
+        ("products", ["product_code", "product_name", "unit_price"],
+         [{"product_code": c, "product_name": n, "unit_price": v}
+          for c, n, v in _PRODS], "products.csv"),
+        ("financials",
+         ["period", "operating_profit", "ending_cash", "power_cost",
+          "ending_inventory"], _financials(), "financials.csv"),
+        ("external_indicators",
+         ["as_of", "indicator", "value", "unit", "source"], _indicators(),
+         "external_indicators.csv"),
+    ]
+
+    certified, bindings = {}, {}
+    for key, cols, rows, fname in chain:
+        b = _binding(inst, key)
+        bindings[key] = b
+        snap = _upload(b, _csv(rows, cols), fname, raw_root)
+        #: ⚠️ 대사값은 **원천이 말한 값**이다. 여기서는 우리가 만든 행이 곧 원천이므로
+        #:   같은 목록에서 센다 — 실제 업무에서는 원천 시스템이 준 수치를 쓴다.
+        control = {"row_count": len(rows)}
+        num_col = next((c for c in ("quantity", "planned_qty", "value") if c in cols),
+                       "")
+        if num_col:
+            control["sums"] = {num_col: sum(float(r[num_col]) for r in rows)}
+        out = ss.run_pipeline(store, snap["snapshot_id"],
+                              [{c: str(r.get(c, "")) for c in cols} for r in rows],
+                              cols, control=control)
+        if out["state"] != m.DEMO_CERTIFIED:
+            print(f"✗ {key} 인증 실패: {out.get('quarantine')}")
+            return 1
+        certified[key] = snap["snapshot_id"]
+        print(f"· {key:20s} {len(rows):3d}행 → {out['state']}")
+
+    s1 = {"snapshot_id": certified["material_arrivals"]}
 
     # ── ② 인증 대기 판 — 올리기만 하고 검사 안 함 ───────────────────────
-    b2 = _binding(inst, "purchase_orders")
-    s2 = _upload(b2, GOOD_ORDERS, "orders.csv", raw_root)
+    #: ★ 준비도 보드가 「검사 대기」를 보여 주려면 그런 판이 하나 있어야 한다.
+    #: ★★★ **사슬이 쓰는 그 결속에** 올린다. 새 결속을 만들면 같은 계약키에 활성
+    #:   원천이 둘이 되고, 물질화가 「어느 것을 쓸지 사람이 정해야 합니다」로 막는다
+    #:   (실제로 막혔다 — 그리고 그 거부는 옳다).
+    #: ⚠️ 인증되지 않은 판은 `latest_certified` 를 밀어내지 못한다. 그래서 사슬은
+    #:   그대로 유지된다.
+    b2 = bindings["purchase_orders"]
+    s2 = _upload(b2, GOOD_ORDERS, "orders_pending.csv", raw_root)
     print(f"· 구매주문 판 {s2['snapshot_id']} → {s2['state']} (검사 대기)")
 
     # ── ③ 격리 판 — **잘린 파일** ───────────────────────────────────────
@@ -329,8 +502,7 @@ def main() -> int:
                            control={"row_count": 5})       # ⚠️ 원천은 5행이라 한다
     print(f"· 잘린 판 {s3['snapshot_id']} → {out3['state']}")
 
-    # ── ④ supplier_master 는 **일부러 비운다** ──────────────────────────
-    print("· supplier_master → 원천 미지정(의도적)")
+    print(f"· 사슬 인증판 {len(certified)}종 — 영향 경로가 전부 설명돼야 합니다")
 
     # ── ⑤ 생성 앱 — 계약을 물질화해 실제로 읽히게 한다 ──────────────────
     _materialize_app(inst["instance_id"])
@@ -339,8 +511,7 @@ def main() -> int:
     print("=== 화면에서 확인할 것 ===")
     print(f"  인스턴스 id : {inst['instance_id']}")
     print(f"  기준선용 판 : {s1['snapshot_id']}")
-    print("  준비도 보드에 네 가지 상태가 함께 보여야 합니다 —")
-    print("    READY(입고) · 검사 대기(구매주문) · 격리(잘린 판) · 원천 미지정(공급사)")
+    print("  준비도 보드 — 인증 9종 · 검사 대기 1건 · 격리 1건이 함께 보여야 합니다")
     print(f"  승격 화면 후보 : {RELEASE} — 다섯 검사에서 «막힌 이유» 가 보여야 합니다")
     print(f"  생성 앱        : 라이브러리에서 «{RELEASE}» 를 열면 입고 3행이 보여야 합니다")
     print("    ⚠️ 프런트에 VITE_AFS_HOST_RUNTIME=1 이 있어야 데이터 평면이 켜집니다")

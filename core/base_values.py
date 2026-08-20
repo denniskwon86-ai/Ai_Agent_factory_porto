@@ -25,6 +25,16 @@
 ⚠️ 여기서 «그럴듯한 기본값» 을 만들지 않는다. 채울 수 없으면 채우지 않고, 왜 채울 수
   없는지를 돌려준다 — 사용자가 무엇을 더 연결해야 하는지 알 수 있도록.
 
+## ⚠️ 아직 남은 어긋남 — 기간 정합
+
+`period_days` 는 **입고 기록의 기간**에서 나오고, 재무 흐름값은 **기준선에 담긴 전
+기간**의 합계다. 둘이 다르면(예: 입고 3개월 · 기준선 6개월) 하루당 값이 어긋난다.
+
+지금은 그 둘을 맞추는 장치가 없다 — 씨앗이 맞춰 심을 뿐이다. **고르는 판이 달라지면
+어긋날 수 있고, 화면은 그것을 말해 주지 않는다.** 다음 세션에서 볼 것:
+기준선의 기간을 하나로 정하고 두 값이 같은 창을 보게 하거나, 어긋나면 화면이 말하게
+하는 것 중 하나.
+
 LLM 0콜. 결정론적이다.
 """
 from __future__ import annotations
@@ -104,6 +114,32 @@ def _sum_product(rows: List[Dict[str, str]], a: str, b: str) -> Tuple[Optional[f
     return total, ""
 
 
+def _latest(rows: List[Dict[str, str]], order_by: str, column: str
+            ) -> Tuple[Optional[float], str]:
+    """**가장 최근 기간**의 값 하나.
+
+    ★★★ 월별 기준선에서 기준값을 뽑을 때는 «합계» 가 아니라 «마지막 잔액» 이다.
+      기말현금 6개월치를 더하면 그 숫자는 아무것도 아니다 — 그런데 그럴듯하다.
+    ⚠️ 기간 열이 없거나 값이 숫자가 아니면 **뽑지 않는다.**"""
+    if not rows:
+        return None, "행이 없습니다."
+    for col in (order_by, column):
+        if col not in rows[0]:
+            return None, f"«{col}» 열이 없습니다."
+    best, best_key = None, ""
+    for r in rows:
+        key = str(r.get(order_by) or "").strip()
+        if not key:
+            return None, f"«{order_by}» 이 비어 있는 행이 있습니다 — 어느 것이 마지막인지 "\
+                         f"정할 수 없습니다."
+        if key >= best_key:
+            best_key, best = key, r
+    n = _num((best or {}).get(column))
+    if n is None:
+        return None, f"마지막 기간({best_key})의 «{column}» 이 숫자가 아닙니다."
+    return n, ""
+
+
 def _day_span(rows: List[Dict[str, str]], column: str) -> Tuple[Optional[float], str]:
     """가장 이른 날 ~ 가장 늦은 날의 **일수**(양 끝 포함).
 
@@ -146,16 +182,42 @@ _RULES: Dict[str, Dict[str, Any]] = {
         "how": ("span", "arrived_at"),
         "note": "입고 기록의 처음과 마지막 사이 일수입니다.",
     },
+    #: ★★★ [2026-08-20] 월별 재무 기준선이 계약에 생겨서 넷이 더 유도된다.
+    #:   ⚠️ **합계가 아니라 마지막 기간의 값**이다 — 기말현금 6개월치를 더하면 그
+    #:     숫자는 아무것도 아닌데 그럴듯하다.
+    #: ★★★ **잔액과 흐름을 다르게 뽑는다.**
+    #:   · 잔액(현금·재고)은 **마지막 기간의 값** — 6개월치를 더하면 아무 뜻도 없다.
+    #:   · 흐름(영업이익·전력비)은 **기간 합계** — 마지막 달만 쓰면 3개월치 구매지급과
+    #:     한 달치 이익을 같은 표에서 비교하게 되고, 그 표는 「환율 10%가 이익을
+    #:     날린다」처럼 읽힌다(2026-08-20 실측에서 영업이익 -86%가 그렇게 나왔다).
+    #: ⚠️ 둘을 같은 방식으로 뽑으면 오류가 나지 않는다. 숫자만 조용히 틀린다.
+    "ending_cash": {
+        "dataset": "financials",
+        "how": ("latest", "period", "ending_cash"),
+        "note": "월별 기준선의 **가장 최근 기간** 기말현금입니다(잔액).",
+    },
+    "ending_inventory": {
+        "dataset": "financials",
+        "how": ("latest", "period", "ending_inventory"),
+        "note": "월별 기준선의 가장 최근 기간 기말재고입니다(잔액).",
+    },
+    "operating_profit": {
+        "dataset": "financials",
+        "how": ("sum", "operating_profit"),
+        "note": "기준선에 담긴 **전 기간 합계** 영업이익입니다(흐름).",
+    },
+    "power_cost": {
+        "dataset": "financials",
+        "how": ("sum", "power_cost"),
+        "note": "기준선에 담긴 전 기간 합계 전력비입니다(흐름).",
+    },
 }
 
 #: 계약에 아예 없는 것들 — **왜 없는지**를 사람 말로 적는다.
-_ABSENT: Dict[str, str] = {
-    "ending_inventory": "재고 데이터가 이 업무키트의 계약에 없습니다 — 재고 원천을 "
-                        "연결하면 채울 수 있습니다.",
-    "ending_cash": "재무 데이터(현금)가 이 업무키트의 계약에 없습니다.",
-    "operating_profit": "재무 데이터(손익)가 이 업무키트의 계약에 없습니다.",
-    "power_cost": "전력비 데이터가 이 업무키트의 계약에 없습니다.",
-}
+#: ⚠️ 지금은 비어 있다. 키트가 첫 수직 경로 전체를 덮게 되면서 일곱 칸 모두 유도된다.
+#:   ★ 이 표를 지우지 않는다 — 다른 키트는 이 중 일부가 없을 수 있고, 그때 「왜
+#:     없는지」를 말할 자리가 여기다. 빈 표가 「그런 경우는 없다」는 뜻은 아니다.
+_ABSENT: Dict[str, str] = {}
 
 #: 답해야 하는 칸 전부. ★ `core/calc_graph._require` 가 읽는 키와 **같아야 한다.**
 FIELD_KEYS: Tuple[str, ...] = ("production_qty", "ending_inventory", "purchase_payment",
@@ -195,6 +257,8 @@ def derive(*, rows_by_dataset: Dict[str, List[Dict[str, str]]],
             value, why = _sum_column(rows, how[1])
         elif how[0] == "product":
             value, why = _sum_product(rows, how[1], how[2])
+        elif how[0] == "latest":
+            value, why = _latest(rows, how[1], how[2])
         else:
             value, why = _day_span(rows, how[1])
         if value is None:
