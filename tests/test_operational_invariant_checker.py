@@ -224,3 +224,190 @@ def test_키트_레지스트리_증가는_browser_에서_허용된다(rich):
     conn.close()
     out = _run(rich, "compare", "--mode", "browser")
     assert out.returncode == 0, out.stdout
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# WAL 맹점 (2026-08-20 Supervisor 지적)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _wal_db(path: Path):
+    """WAL 에만 내용이 있는 DB. **연결을 열어 둔 채 돌려준다.**
+
+    ⚠️ SQLite 는 마지막 연결이 닫힐 때 체크포인트하며 WAL 을 비운다. 그러니 «더러운
+      WAL» 을 재현하려면 연결을 **잡고 있어야** 한다 — 서버가 떠 있는 상태와 같다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript("""
+        CREATE TABLE kit_instances(id TEXT PRIMARY KEY, scope_node_id TEXT);
+        CREATE TABLE source_bindings(id TEXT PRIMARY KEY, state TEXT);
+        CREATE TABLE dataset_snapshots(id TEXT PRIMARY KEY, checksum TEXT);
+        CREATE TABLE readiness_evaluations(id TEXT PRIMARY KEY, status TEXT);
+        CREATE TABLE baseline_builds(id TEXT PRIMARY KEY, fingerprint TEXT);
+        CREATE TABLE kit_registry_versions(id TEXT PRIMARY KEY);
+    """)
+    conn.execute("INSERT INTO kit_instances VALUES('ki_1','node_hq')")
+    conn.commit()
+    assert (path.parent / (path.name + "-wal")).stat().st_size > 0, "WAL 이 비어 있다"
+    return conn
+
+
+def test_immutable_은_WAL_내용을_보지_못한다(tmp_path):
+    """★★★ **맹점의 기전 자체를 못박는다.**
+
+    검사기 머리말은 「WAL 을 안 보는 편이 목적에 맞다」고 적어 놓고 browser 모드에서는
+    WAL 변경을 허용했다. 실제로는 표조차 못 본다 — 그러면 `_rows` 가 `"unreadable"` 을
+    돌려주고, 전후 둘 다 그러면 **값이 같아서 통과**한다.
+
+    ⚠️ 이 시험이 언젠가 실패한다면 SQLite 동작이 바뀐 것이다. 그때는 게이트를 지워도
+      되는지 **다시 판단**해야 한다 — 조용히 지우면 안 된다."""
+    db = tmp_path / "t.db"
+    conn = _wal_db(db)
+    try:
+        ro = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        assert ro.execute("SELECT COUNT(*) FROM kit_instances").fetchone()[0] == 1
+        ro.close()
+        with pytest.raises(sqlite3.OperationalError):
+            im = sqlite3.connect(f"file:{db}?immutable=1", uri=True)
+            im.execute("SELECT COUNT(*) FROM kit_instances").fetchone()
+    finally:
+        conn.close()
+
+
+def test_더러운_WAL_에서는_capture_를_거부한다(tmp_path):
+    """★ 기준선부터 «못 읽음» 으로 잡히면 그 기준선은 처음부터 못 믿는다."""
+    conn = _wal_db(tmp_path / "data" / "data_preparation.db")
+    try:
+        out = _run(tmp_path, "capture", "--mode", "browser")
+    finally:
+        conn.close()
+    assert out.returncode == 2, f"더러운 WAL 로 기준선을 잡아 버렸다:\n{out.stdout}"
+    assert "data_preparation.db-wal" in out.stdout
+
+
+def test_더러운_WAL_에서는_compare_를_거부한다(tmp_path):
+    """★★★ 화면 검증 직후가 정확히 이 상황이다 — 서버가 떠 있으면 WAL 이 더럽다.
+
+    ⚠️ 종전에는 이 상태로 돌려도 **초록**이었다. 못 보는 것을 봤다고 한 것이다."""
+    db = tmp_path / "data" / "data_preparation.db"
+    conn = _wal_db(db)
+    conn.close()                       # 깨끗하게 닫아 기준선을 먼저 잡는다
+    out = _run(tmp_path, "capture", "--mode", "browser")
+    assert out.returncode == 0, out.stdout + out.stderr
+
+    conn = sqlite3.connect(str(db))    # 다시 열어 «서버가 떠 있는» 상태를 만든다
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("INSERT INTO kit_instances VALUES('ki_2','node_남')")
+        conn.commit()
+        out = _run(tmp_path, "compare", "--mode", "browser")
+    finally:
+        conn.close()
+    assert out.returncode == 2, f"더러운 WAL 을 통과시켰다:\n{out.stdout}"
+    assert "WAL" in out.stdout
+
+
+def test_깨끗한_WAL_은_통과한다(tmp_path):
+    """★ 대조군 — 정상 종료된 WAL(크기 0)까지 막으면 검사가 늑대를 외친다."""
+    db = tmp_path / "data" / "data_preparation.db"
+    _wal_db(db).close()
+    assert _run(tmp_path, "capture", "--mode", "browser").returncode == 0
+    out = _run(tmp_path, "compare", "--mode", "browser")
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
+def test_기준선에_못읽음이_있으면_비교를_거부한다(ws):
+    """★★★ 전후가 둘 다 `"unreadable"` 이면 «같다» 가 되어 **거짓 초록**이다.
+
+    없는 표 `kits` 를 세던 사고와 더러운 WAL 사고가 **같은 값**에서 나왔다 —
+    두 번 같은 방식으로 속았으면 그 값 자체를 실패로 못박는다."""
+    base = ws / ".invariant_baseline.json"
+    state = json.loads(base.read_text(encoding="utf-8"))
+    state["rows"]["data/data_preparation.db:source_bindings"] = "unreadable"
+    base.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    out = _run(ws, "compare", "--mode", "browser")
+    assert out.returncode == 2, f"못 읽는 기준선으로 비교해 버렸다:\n{out.stdout}"
+    assert "source_bindings" in out.stdout
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 조직 데이터도 지킨다
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_조직_저장소를_감시한다(tmp_path):
+    """★★★ 「남의 조직 데이터가 우리 것으로 보인다」가 일어나는 곳은 이 파일이고,
+    ECM Resolver 가 읽는 것도 이 파일인데 **감시 밖이었다.**
+
+    ⚠️ 첫 판은 원본에 표 이름이 «들어 있는지» 만 봤다 — 변이 검사에서 살아남았다.
+      이름은 보호 목록에도 나오므로, 감시 목록에서 빼도 문자열 대조는 통과한다.
+    ★ 그래서 **실제로 잡힌 기준선**을 읽어 열쇠가 있는지 본다."""
+    org = tmp_path / "data" / "enterprise_context.db"
+    _make_db(org, {"organization_nodes": 1, "organization_edges": 1,
+                   "enterprise_entities": 1})
+    assert _run(tmp_path, "capture", "--mode", "tests").returncode == 0
+    state = json.loads((tmp_path / ".invariant_baseline.json").read_text(encoding="utf-8"))
+    for table in ("organization_nodes", "organization_edges", "enterprise_entities"):
+        key = f"data/enterprise_context.db:{table}"
+        assert key in state["rows"], f"행 수 감시에 `{key}` 가 없다"
+        assert state["rows"][key] == 1, f"{key} 를 읽지 못했다: {state['rows'][key]!r}"
+    assert "data/enterprise_context.db:organization_nodes" in (state.get("content") or {})
+
+
+def test_조직_트리_변조를_잡는다(tmp_path):
+    """★ 회귀가 조직 트리를 건드릴 이유는 없다 — 바뀌었다면 격리가 깨진 것이다."""
+    org = tmp_path / "data" / "enterprise_context.db"
+    org.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(org))
+    conn.executescript("""
+        CREATE TABLE organization_nodes(id TEXT PRIMARY KEY, tenant_id TEXT);
+        CREATE TABLE organization_edges(id TEXT PRIMARY KEY);
+        CREATE TABLE enterprise_entities(id TEXT PRIMARY KEY, entity_mode TEXT);
+    """)
+    conn.execute("INSERT INTO organization_nodes VALUES('n_1','t_ours')")
+    conn.execute("INSERT INTO enterprise_entities VALUES('e_1','REAL')")
+    conn.commit()
+    conn.close()
+    assert _run(tmp_path, "capture", "--mode", "browser").returncode == 0
+
+    conn = sqlite3.connect(str(org))
+    conn.execute("UPDATE organization_nodes SET tenant_id='t_theirs'")
+    conn.commit()
+    conn.close()
+    out = _run(tmp_path, "compare", "--mode", "browser")
+    assert out.returncode == 1, f"조직 소속 변조를 잡지 못했다:\n{out.stdout}"
+    assert "organization_nodes" in out.stdout
+
+
+def test_읽기_흔적_면제는_내용까지_번지지_않는다(tmp_path):
+    """★★★ **면제는 파일 존재까지만이다.**
+
+    `ecm_org_seed` 가 운영 조직도를 `mode=ro` 로 열면 `-wal`·`-shm` 이 생긴다. 그것을
+    위반으로 세면 검사가 매번 빨강이 되고, 늘 빨강인 검사는 아무도 보지 않는다.
+
+    ⚠️⚠️ 그렇다고 「조직 DB 는 안 본다」가 되면 면제가 **구멍**이 된다. 파일은 봐주되
+      행과 내용은 그대로여야 한다는 것을 여기서 갈라 둔다."""
+    org = tmp_path / "data" / "enterprise_context.db"
+    org.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(org))
+    conn.execute("CREATE TABLE organization_nodes(id TEXT PRIMARY KEY, tenant_id TEXT)")
+    conn.execute("CREATE TABLE organization_edges(id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE enterprise_entities(id TEXT PRIMARY KEY)")
+    conn.execute("INSERT INTO organization_nodes VALUES('n_1','t_ours')")
+    conn.commit()
+    conn.close()
+    assert _run(tmp_path, "capture", "--mode", "tests").returncode == 0
+
+    #: ① 흔적 파일만 생긴 경우 — 통과해야 한다(대조군).
+    (org.parent / "enterprise_context.db-shm").write_bytes(b"\0" * 32768)
+    (org.parent / "enterprise_context.db-wal").write_bytes(b"")
+    out = _run(tmp_path, "compare", "--mode", "tests")
+    assert out.returncode == 0, f"읽기 흔적을 위반으로 셌다:\n{out.stdout}"
+
+    #: ② 같은 흔적이 있는 채로 **내용**이 바뀐 경우 — 잡아야 한다.
+    conn = sqlite3.connect(str(org))
+    conn.execute("UPDATE organization_nodes SET tenant_id='t_theirs'")
+    conn.commit()
+    conn.close()
+    out = _run(tmp_path, "compare", "--mode", "tests")
+    assert out.returncode == 1, f"면제가 내용까지 번졌다:\n{out.stdout}"
+    assert "organization_nodes" in out.stdout

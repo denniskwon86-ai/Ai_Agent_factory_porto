@@ -14,8 +14,28 @@
 ⚠️⚠️ `mode=ro` 는 **읽기만 해도 WAL 모드 DB 의 SHM 을 만들 수 있다**(원장 사고 때 확인).
   불변식을 확인하는 행위가 스스로 파일을 만들면 그 검사는 자기 자신을 오염시킨다.
   `immutable=1` 은 WAL 을 보지 않으므로 아무것도 만들지 않는다.
-  ★ 대신 «최근 커밋되지 않은 WAL 내용» 은 안 보인다 — 이 검사의 목적(전후 비교)에는
-    그편이 맞다. 파일 자체의 변화는 크기·해시로 따로 본다.
+
+## ⚠️⚠️ 그런데 «WAL 을 보지 않는다» 가 곧 맹점이다 (2026-08-20 Supervisor 지적)
+
+종전 머리말은 「WAL 내용이 안 보이는 편이 목적에 맞다」고 적어 놓고, 정작 browser
+모드에서는 **WAL 파일 변경을 허용**했다. 임시 DB 로 실측한 결과는 이렇다:
+
+    WAL 에만 있는 행 1건
+      file:t.db?immutable=1  →  OperationalError: no such table: r
+      file:t.db?mode=ro      →  1행
+
+★ `immutable=1` 은 행은커녕 **표조차 못 본다.** 그러면 `_rows`·`_content` 가
+  `"unreadable"` 을 돌려주고, 전후 **둘 다** `"unreadable"` 이면 값이 같으므로
+  **통과한다.** 없는 표 `kits` 를 세던 때와 **완전히 같은 사고**다.
+
+⚠️ 체크포인트를 여기서 하면 안 된다 — 이 검사는 아무것도 쓰지 않는다는 것이 전제다.
+★ 그래서 **비어 있지 않은 WAL 을 보면 검사를 중단한다.** 서버를 내리고 다시 부르라고
+  말하는 것이, 못 보는 것을 봤다고 하는 것보다 낫다.
+
+## 기준선에 «못 읽음» 이 있으면 그것도 실패다
+
+전후가 둘 다 `"unreadable"` 이면 «같다». 그 «같다» 는 아무것도 지키지 않는다.
+기준선에 `"unreadable"` 이 하나라도 있으면 그 기준선은 못 믿는다 — 비교를 거부한다.
 
 ## 모드
 
@@ -52,9 +72,17 @@ WATCH = [
     "data/data_preparation.db-shm",
     "data/decision_ledger.db", "data/decision_ledger.db-wal",
     "data/decision_ledger.db-shm",
+    #: ★★★ [2026-08-20] 조직 데이터가 여기 있는데 감시 밖이었다. 「남의 조직 데이터가
+    #:   우리 것으로 보인다」는 바로 이 표에서 일어나는 일이고, ECM Resolver 가 읽는
+    #:   것도 이 파일이다 — 지켜야 할 것을 안 보고 있었다.
+    "data/enterprise_context.db", "data/enterprise_context.db-wal",
+    "data/enterprise_context.db-shm",
     "data/app_data.db", "data/app_data_preview.db",
     "data/program_lifecycle.db",
 ]
+
+#: WAL 이 있는지 물어볼 본체들(‑wal·‑shm 을 뺀 것).
+DBS = tuple(rel for rel in WATCH if not rel.endswith(("-wal", "-shm")))
 
 #: 행 수를 함께 보는 표. ⚠️ 파일 크기는 VACUUM 등으로 변할 수 있어 행 수가 더 정확하다.
 TABLES = [
@@ -71,12 +99,30 @@ TABLES = [
     ("data/data_preparation.db", "baseline_builds"),
     #: ★ 키트 레지스트리는 화면 검증이 만든다 — 그 사실을 «보고» 넘어가려면 세야 한다.
     ("data/data_preparation.db", "kit_registry_versions"),
+    ("data/enterprise_context.db", "organization_nodes"),
+    ("data/enterprise_context.db", "organization_edges"),
+    ("data/enterprise_context.db", "enterprise_entities"),
 ]
 
 #: 화면 검증 뒤에 **파일이 생기는 것**까지만 봐준다(§5.2 에 이미 적혀 있던 사실:
 #: 「업무 데이터 준비」 패널을 열면 `GET /kits` 가 키트를 등록하며 파일을 만든다).
 BROWSER_ALLOWED_FILES = {"data/data_preparation.db", "data/data_preparation.db-wal",
                          "data/data_preparation.db-shm"}
+
+#: ★★★ [2026-08-20 실측] **읽기만 해도 생기는 파일.** 어느 모드에서나 «생김» 은 봐준다.
+#:
+#: `tests/conftest.py` 의 `ecm_org_seed` 는 운영 조직도를 `mode=ro` 로 연다 — 격리가
+#: 반쪽이라(`org_directory` 는 운영 DB 를 읽는다) **노드 id 가 실제와 같아야** 하기
+#: 때문이고, 그 사실은 그 자리에 이미 적혀 있다.
+#:
+#: ⚠️ `mode=ro` 는 읽기만 해도 WAL 모드 DB 의 `-shm`·`-wal` 을 만든다. 이것을 위반으로
+#:   세면 검사가 **매번 빨강**이 되고, 늘 빨강인 검사는 아무도 보지 않는다.
+#: ★★ 면제는 **파일 존재까지만**이다. 조직 표의 행 수와 내용 지문은 그대로 지킨다 —
+#:   실제로 지켜야 할 것은 「조직 데이터가 바뀌었는가」이지 「파일이 생겼는가」가 아니다.
+#: ⚠️⚠️ 그러니 이 면제를 «조직 DB 는 안 본다» 로 읽으면 안 된다. 내용이 바뀌면 여전히
+#:   빨강이고, 그 시험이 `test_조직_트리_변조를_잡는다` 이다.
+READ_ARTIFACT_FILES = {"data/enterprise_context.db-wal",
+                       "data/enterprise_context.db-shm"}
 
 #: ★★★ [2026-08-20 Supervisor 지적 P0-4] **파일 허용이 곧 내용 허용이 아니다.**
 #:
@@ -93,6 +139,10 @@ PROTECTED_ROWS = (
     "data/data_preparation.db:source_bindings",
     "data/data_preparation.db:readiness_evaluations",
     "data/data_preparation.db:baseline_builds",
+    #: ★ 조직 트리와 실행 문맥은 **회귀가 건드릴 이유가 없다.** 바뀌었다면 격리가 깨진 것이다.
+    "data/enterprise_context.db:organization_nodes",
+    "data/enterprise_context.db:organization_edges",
+    "data/enterprise_context.db:enterprise_entities",
 )
 
 
@@ -170,6 +220,52 @@ def snapshot() -> dict:
     }
 
 
+def _dirty_wal() -> list[tuple[str, int]]:
+    """**비어 있지 않은 WAL** 을 가진 DB 들. 비어 있으면 빈 목록.
+
+    ★★★ [2026-08-20 Supervisor 지적] 이 검사는 `immutable=1` 로 읽는다 — 그래서
+      **WAL 에만 있는 내용은 보이지 않는다.** 실측:
+
+        WAL 에만 있는 행 1건 → immutable=1 은 «no such table» 로 실패한다
+
+      실패하면 `_rows`·`_content` 가 `"unreadable"` 을 돌려주고, 전후 둘 다
+      `"unreadable"` 이면 **값이 같으므로 통과한다.**
+
+    ⚠️⚠️ 즉 «서버가 떠 있는 채로 돌린 검사» 는 아무것도 지키지 않으면서 초록을 준다.
+      화면 검증(browser 모드) 직후가 정확히 그 상황이다.
+
+    ★ 체크포인트는 **하지 않는다** — 이 검사가 무언가를 쓰기 시작하면 그때부터는
+      「검사 때문에 바뀐 것」과 「오염」을 구별할 수 없다. 대신 멈추고 사람에게 말한다.
+
+    ⚠️ 크기 0 인 WAL 은 정상이다(깨끗하게 닫힌 상태). 파일이 없는 것도 정상이다."""
+    dirty = []
+    for db in DBS:
+        wal = ROOT / (db + "-wal")
+        try:
+            size = wal.stat().st_size if wal.exists() else 0
+        except OSError:                                   # pragma: no cover - 방어
+            size = -1
+        if size != 0:
+            dirty.append((db + "-wal", size))
+    return dirty
+
+
+def _wal_gate() -> int:
+    """WAL 이 깨끗하지 않으면 **검사를 중단한다.** 0 이면 계속해도 좋다."""
+    dirty = _dirty_wal()
+    if not dirty:
+        return 0
+    print("✗ 비어 있지 않은 WAL 이 있어 검사를 중단합니다.")
+    for rel, size in dirty:
+        print(f"    {size:>12,} B  {rel}")
+    print()
+    print("  · 이 검사는 `immutable=1` 로 읽으므로 **WAL 안의 내용을 보지 못합니다.**")
+    print("    그대로 진행하면 «못 읽음» 이 전후로 같아서 **거짓 초록**이 됩니다.")
+    print("  · 서버(uvicorn·vite 백엔드)를 내린 뒤 다시 부르십시오.")
+    print("  · 이 검사는 체크포인트를 하지 않습니다 — 아무것도 쓰지 않는 것이 전제입니다.")
+    return 2
+
+
 def _head() -> str:
     """지금 HEAD. 못 읽으면 빈 문자열 — **추측하지 않는다.**"""
     import subprocess
@@ -189,6 +285,9 @@ def cmd_capture(mode: str, force: bool) -> int:
       뒤에 `capture` 를 다시 돌리는 순간 **오염된 상태가 새 «정상»** 이 되고, 그 뒤로는
       아무리 비교해도 초록이다 — 증거가 사라진 줄도 모른다.
     ★ 그래서 이미 있으면 거부한다. 정말 새로 잡으려면 `--force` 를 **사람이** 준다."""
+    #: ★ 기준선 자체가 WAL 때문에 «못 읽음» 으로 잡히면 그 기준선은 처음부터 못 믿는다.
+    if _wal_gate():
+        return 2
     if BASELINE.exists() and not force:
         print(f"✗ 기준선이 이미 있습니다: {BASELINE.name}")
         print("  · 비교를 먼저 하십시오 — 덮어쓰면 **오염된 상태가 새 정상**이 됩니다.")
@@ -205,7 +304,16 @@ def cmd_capture(mode: str, force: bool) -> int:
     return 0
 
 
+def _why(rel: str) -> str:
+    """왜 봐줬는지 **줄마다 적는다** — 면제는 이유가 보여야 다시 판단할 수 있다."""
+    if rel in READ_ARTIFACT_FILES:
+        return " (읽기만 해도 생기는 파일 — 내용은 여전히 지킨다)"
+    return " (화면 검증에서 예상됨)"
+
+
 def cmd_compare(mode: str) -> int:
+    if _wal_gate():
+        return 2
     if not BASELINE.exists():
         print("✗ 기준선이 없습니다 — 회귀 **전에** `capture` 를 먼저 돌리십시오.")
         return 2
@@ -225,7 +333,22 @@ def cmd_compare(mode: str) -> int:
         print(f"✗ 기준선 모드는 «{meta['mode']}» 인데 «{mode}» 로 비교하려 합니다.")
         return 2
 
-    allowed = BROWSER_ALLOWED_FILES if mode == "browser" else set()
+    #: ★★★ [2026-08-20] **기준선에 «못 읽음» 이 있으면 비교를 거부한다.**
+    #: ⚠️⚠️ 전후가 둘 다 `"unreadable"` 이면 «같다» 가 되어 통과한다. 그것이 없는 표
+    #:   `kits` 를 세던 사고였고, WAL 이 더러울 때 다시 일어나는 사고다. 두 번 같은
+    #:   방식으로 속았으면 **그 값 자체를 실패로 못박는** 것이 맞다.
+    unread = sorted(k for k, v in (before.get("rows") or {}).items() if v == "unreadable")
+    unread += sorted(f"{k}(내용)" for k, v in (before.get("content") or {}).items()
+                     if v == "unreadable")
+    if unread:
+        print(f"✗ 기준선에 «못 읽음» 이 {len(unread)}건 있어 비교를 거부합니다.")
+        for k in unread:
+            print(f"    {k}")
+        print("  · 전후가 둘 다 «못 읽음» 이면 «같다» 가 되어 **거짓 초록**이 됩니다.")
+        print("  · 서버를 내리고 `capture --force` 로 기준선을 다시 잡으십시오.")
+        return 2
+
+    allowed = (BROWSER_ALLOWED_FILES if mode == "browser" else set()) | READ_ARTIFACT_FILES
 
     print("=== 파일 ===")
     for rel in WATCH:
@@ -233,7 +356,7 @@ def cmd_compare(mode: str) -> int:
         if b == a:
             continue
         if b is None and a is not None:
-            note = " (화면 검증에서 예상됨)" if rel in allowed else ""
+            note = _why(rel) if rel in allowed else ""
             print(f"  {'●' if rel in allowed else '✗'} {rel} **새로 생김** "
                   f"{a['size']}바이트{note}")
             if rel not in allowed:
@@ -243,7 +366,7 @@ def cmd_compare(mode: str) -> int:
             print(f"  ✗ {rel} **사라짐**")
             bad.append(rel)
         else:
-            note = " (화면 검증에서 예상됨)" if rel in allowed else ""
+            note = _why(rel) if rel in allowed else ""
             print(f"  {'●' if rel in allowed else '✗'} {rel} 바뀜 "
                   f"{b['size']}→{a['size']}바이트{note}")
             if rel not in allowed:
