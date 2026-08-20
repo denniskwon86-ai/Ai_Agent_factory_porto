@@ -138,9 +138,17 @@ app.include_router(factory_control.router)
 app.include_router(data_preparation_control.router)
 # [BDR-7 / G2·G4] 기준선 고정 · 영향 경로 · 최소 시뮬레이션 · 의사결정 안건
 app.include_router(baseline_control.router)
-#: ★★★ [G2] 정식 온톤로지 런타임 — 승인·버전·유효기간을 가진 관계 저장과 영향 질의.
-#: ⚠️ `core/ontology_path.py` 는 첫 수직 경로 하나를 **고정**해 둔 시연용이다. 둘을 섞지 않는다 —
-#:   전자는 사람이 승인한 관계를 읽고, 후자는 코드에 박힌 경로를 읽는다.
+#: ★★★ [G2] 정식 온톤로지 런타임 — **제품 Resolver 를 붙인 뒤에** 열었다(MVP-P0 ①-B).
+#:
+#: ⚠️⚠️ [2026-08-20] 한 번 붙였다가 되돌렸다. 제품 전역 런타임은
+#:   `object_scope_resolver=None` · `approval_resolver=None` 이라 범위를 해석하지도,
+#:   승인을 확인하지도 못한다 — 관계 제안·영향 질의가 503 으로 막힌다.
+#:   그 상태로 붙여 두면 화면은 **고정 `ontology_path` 를 보여 주면서**
+#:   「정식 온톤로지가 돌고 있다」는 오해만 만든다.
+#:   `api/routes/ontology_control.py` 머리말이 바로 그것을 적어 두었는데 내가 어겼다.
+#:
+#: ★ 붙이는 조건은 `tests/test_ontology_wiring_contract.py` 가 **양방향으로** 감시한다 —
+#:   Resolver 없이 붙여도, 붙이고 등록을 잊어도 실패한다.
 app.include_router(ontology_control.router)
 app.include_router(format_control.router)
 app.include_router(realtime.router)

@@ -215,5 +215,8 @@ def create_router(service: OntologyRuntime) -> APIRouter:
     return router
 
 
-# Not mounted in ``main.py`` until a product Object Scope Resolver is wired.
+#: ★ [2026-08-20] 제품 Resolver(ECM 범위 + Decision Ledger 승인)가 배선돼 `main.py` 에 등록됐다.
+#: ⚠️ 등록 조건은 `tests/test_ontology_wiring_contract.py` 가 **양방향으로** 감시한다 —
+#:   Resolver 없이 붙여도, 붙이고 등록을 잊어도 실패한다.
+#: ⚠️ 다만 `dataset`·`mdm`·`external`·`g4`·`decision`·`knowledge` 는 **아직 막혀 있다**(503).
 router = create_router(ontology_runtime)
