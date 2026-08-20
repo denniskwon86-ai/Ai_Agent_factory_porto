@@ -30,6 +30,7 @@ import { getEnterpriseContext } from '../lib/api';
 import {
   SECTION_LABELS, fetchBriefing, type Briefing, type BriefingItem,
 } from '../lib/briefingApi';
+import { getReadiness, listInstances } from '../lib/dataPrepApi';
 import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
 
@@ -79,6 +80,12 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   const [trust, setTrust] = useState<TrustCard[]>([]);
   //: §5.1 Decision Drawer — 안건 하나를 끝까지 처리하는 자리(520px).
   const [drawer, setDrawer] = useState<QueueRow | null>(null);
+  //: ★★★ [로드맵 §4.2] Javis 가 「필요한 데이터셋과 누락 항목을 선제안」하려면 준비도를
+  //:   **알아야** 한다. 종전에는 `{queue, layers}` 만 실어서, 비서는 우리 데이터를 하나도
+  //:   모른 채 「확인할 수 없습니다」만 답했다(2026-08-20 실측).
+  //: ⚠️ `null` = 아직 못 읽음, `[]` = 정말 0건. 둘을 같게 실으면 비서가 「데이터가 없다」로
+  //:   말하고, 그것은 «조회 실패 ≠ 0건» 규칙이 비서 답변에서 무너지는 것이다.
+  const [readiness, setReadiness] = useState<any[] | null>(null);
 
   const load = useCallback(async () => {
     setData(loading<Briefing>());
@@ -185,6 +192,43 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   }, [d]);
 
   useEffect(() => { if (!selected && rows.length) setSelected(rows[0]); }, [rows, selected]);
+
+  //: 준비도를 읽어 **요약만** 싣는다.
+  //: ⚠️ 원본 행을 통째로 실으면 프롬프트가 길어지고, 비서가 사람 화면에 없는 값을 인용한다.
+  //: ⚠️ 실패해도 홈 화면을 죽이지 않는다 — 다만 «못 읽었다» 를 `null` 로 남긴다.
+  useEffect(() => {
+    let alive = true;
+    listInstances()
+      .then(async (d) => {
+        const out: any[] = [];
+        //: 최대 3개까지만 본다 — 홈 화면이 느려지면 아무도 안 쓴다.
+        for (const it of (d.instances || []).slice(0, 3)) {
+          try {
+            const r = await getReadiness(it.instance_id);
+            out.push({
+              업무키트: it.label || it.kit_id,
+              조직: it.scope_node_id,
+              준비상태: r.status,
+              필요: r.coverage?.required, 준비됨: r.coverage?.ready,
+              막힘: r.coverage?.blocked,
+              //: ★ 「무엇을 해야 하는가」가 핵심이다 — 상태만 주면 비서도 상태만 말한다.
+              다음행동: (r.datasets || [])
+                .filter((x: any) => x.next_action)
+                .map((x: any) => `${x.label || x.dataset_contract_key}: ${x.next_action}`)
+                .slice(0, 6),
+              가능한산출물: r.available_outputs || [],
+              막힌산출물: (r.blocked_outputs || []).map((o: any) => o.output),
+            });
+          } catch {
+            //: 이 인스턴스만 못 읽었다 — 그 사실을 적는다(빠뜨리면 «없는 것» 이 된다).
+            out.push({ 업무키트: it.label || it.instance_id, 준비상태: '조회 실패' });
+          }
+        }
+        if (alive) setReadiness(out);
+      })
+      .catch(() => { if (alive) setReadiness(null); });
+    return () => { alive = false; };
+  }, []);
 
   /** §5.1 상단 KPI **최대 4개**. 「업무 도메인 / Master Data / 연결 / 근거 충실도」를 기본으로
    *  하되 **회사 프로필에 따라 교체**한다 — 여기서는 브리핑이 실제로 세는 축을 쓴다. */
@@ -491,17 +535,34 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
             current_module: 'enterprise',
             selected_object_type: selected?.ref_type || '',
             selected_object_id: selected?.ref || '',
-            object_snapshot: selected ? {
-              title: selected.title, severity: selected.severity, section: selected.section,
-            } : { queue: rows.length, layers },
+            object_snapshot: {
+              ...(selected
+                ? { title: selected.title, severity: selected.severity,
+                    section: selected.section }
+                : { queue: rows.length, layers }),
+              //: ★★★ 준비도를 함께 싣는다. 이것이 없으면 비서는 「무엇이 필요한가」에
+              //:   답할 재료가 없다.
+              //: ⚠️ 못 읽었으면 **그렇게 적는다** — 빈 배열로 실으면 비서가 「업무
+              //:   데이터가 없습니다」라고 단정한다.
+              업무데이터_준비도: readiness === null
+                ? '조회 실패 — 지금 확인하지 못했습니다(없다는 뜻이 아닙니다)'
+                : readiness,
+            },
             available_actions: [],
             evidence_refs: [],
           }}
           evidence={data.status === 'ok' ? [
             { label: '결정 대기', value: `${rows.length}건` },
             { label: '업무 노드', value: `${nodes.length}개` },
+            //: ★ 사람도 같은 근거를 본다 — 비서만 아는 값이 있으면 답을 검증할 수 없다.
+            { label: '업무 데이터',
+              value: readiness === null ? '확인하지 못함'
+                : readiness.length === 0 ? '적용된 업무키트 없음'
+                  : readiness.map((x: any) => `${x.업무키트} ${x.준비상태}`).join(' · ') },
           ] : []}
           quickQuestions={[
+            //: ★ 로드맵 §3 의 2번 칸이 정한 질문을 화면이 먼저 제안한다.
+            '원료 도입계획을 관리하려면 무엇이 필요한가?',
             '왜 이 판단입니까?',
             '데이터가 부족합니까?',
             '관련 SW·에이전트 상태는 어떻습니까?',

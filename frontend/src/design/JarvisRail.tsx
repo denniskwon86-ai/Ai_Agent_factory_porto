@@ -46,21 +46,38 @@ const ANSWER_SECTIONS = [
 ] as const;
 
 function parseAnswer(text: string): { label: string; body: string }[] | null {
-  const found: { label: string; at: number }[] = [];
+  //: `at` = 이 절이 시작하는 자리(앞 절의 끝을 정한다)
+  //: `bodyAt` = **머리말과 콜론을 지난** 자리 — 본문은 여기서 시작한다.
+  const found: { label: string; at: number; bodyAt: number }[] = [];
   for (const label of ANSWER_SECTIONS) {
     //: 머리말은 줄 첫머리에 오고 뒤에 `:` 가 붙는다(서버가 그렇게 요구한다).
-    const m = new RegExp(`(^|\\n)\\s*${label}\\s*[:：]`).exec(text);
-    if (m) found.push({ label, at: m.index + (m[1] ? m[1].length : 0) });
+    //: ⚠️ [2026-08-20 실측] 모델이 `**핵심 답변:**` 처럼 **마크다운 굵게**로 감싸 보낸다.
+    //:   그것을 못 읽으면 파서가 통째로 실패하고 답이 평문 덩어리로 떨어진다 — 그러면 ④ 「부족한 데이터」를
+    //:   강조하는 이 화면의 목적이 사라진다.
+    //: ★ 형식 위반을 **오류로 만들지 않는다**(평문 폴백은 그대로다). 다만 흔한 장식은 받아 준다.
+    const DECOR = '[*_#\\s]*';
+    const m = new RegExp(`(^|\\n)${DECOR}${label}${DECOR}[:：]`).exec(text);
+    if (!m) continue;
+    //: ★★★ [2026-08-20 실측] 종전에는 `at + label.length` 를 본문 시작으로 썼다.
+    //:   그런데 `at` 은 **머리말 앞 공백**을 가리킨다(`\s*` 를 건너뛰지 않았다).
+    //:   그래서 본문이 머리말의 **마지막 글자부터** 시작했다 — 화면에 「가:」「각:」
+    //:   「터:」 같은 조각이 붙어 나왔다. 답은 멀쩡한데 화면만 깨져 보였다.
+    //: ⚠️ 매치 전체 길이를 쓰면 공백·콜론·전각콜론을 한 번에 지난다.
+    found.push({
+      label,
+      at: m.index + (m[1] ? m[1].length : 0),
+      bodyAt: m.index + m[0].length,
+    });
   }
   //: 한두 개만 걸리면 형식을 지킨 것이 아니라 **우연히 그 낱말이 나온 것**일 수 있다.
   if (found.length < 3) return null;
   found.sort((a, b) => a.at - b.at);
   return found.map((f, i) => {
-    const start = f.at + f.label.length;
     const end = i + 1 < found.length ? found[i + 1].at : text.length;
     return {
       label: f.label,
-      body: text.slice(start, end).replace(/^\s*[:：]\s*/, '').trim(),
+      //: 남은 콜론·공백은 한 번 더 털어 낸다(모델이 「:」 를 두 번 쓰는 경우).
+      body: text.slice(f.bodyAt, end).replace(/^\s*[:：]\s*/, '').trim(),
     };
   }).filter((x) => x.body);
 }

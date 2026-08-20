@@ -170,6 +170,20 @@ async def ask(req: AskBody, p: Principal = Depends(current_principal)):
         #   내용을 근거로 판단한다.
         raise HTTPException(status_code=502,
                             detail=f"비서 응답을 받지 못했습니다: {e}")
+
+    #: ★★★ [2026-08-20 실측] **엔진이 예외를 삼킨다.** `supervisor_daemon.handle_user_chat`
+    #:   는 실패해도 던지지 않고 `{"status": "error", "reply": "…오류가 발생했습니다"}` 를
+    #:   돌려준다. 그래서 위 `except` 는 **한 번도 돌지 않았고**, LLM 키가 없어 답을 못
+    #:   만든 상황이 그대로 **HTTP 200 «success»** 로 나갔다.
+    #:
+    #: ⚠️ 이 파일이 바로 위에서 「실패를 그럴듯한 답으로 대체하지 않는다」고 적어 둔 바로
+    #:   그 일이 일어나고 있었다 — 말과 코드가 갈라져 있었다. 봉투의 `status` 를 보는
+    #:   호출부는 «성공» 으로 읽는다.
+    if str((result or {}).get("status", "")) == "error":
+        raise HTTPException(
+            status_code=502,
+            detail=str((result or {}).get("reply")
+                       or "비서 응답을 받지 못했습니다."))
     return {"status": "success", "data": {
         "reply": (result or {}).get("reply", ""),
         "intervene": bool((result or {}).get("intervene")),

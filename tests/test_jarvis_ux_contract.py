@@ -87,3 +87,29 @@ def test_화면이_보낸_범위를_그대로_믿지_않는다():
     남의 범위를 조회할 수 있게 된다 — 서버 판정(`p.scope`)을 써야 한다."""
     src = inspect.getsource(jarvis_control.ask)
     assert "p.scope" in src, "요청자 범위를 서버가 판정하지 않고 있습니다(§7.3 권한 우회 금지)."
+
+
+def test_엔진이_삼킨_실패가_success_로_나가지_않는다():
+    """★★★ [2026-08-20 실측] **엔진은 예외를 던지지 않는다.**
+
+    `supervisor_daemon.handle_user_chat` 은 LLM 실패를 잡아서
+    `{"status": "error", "reply": "…오류가 발생했습니다"}` 를 **돌려준다.** 그래서 라우트의
+    `except` 는 한 번도 돌지 않았고, API 키가 없어 답을 못 만든 상황이 그대로
+    **HTTP 200 «success»** 로 나갔다.
+
+    ⚠️ 이 파일이 지키려는 것과 같은 종류의 사고다 — 비서가 «답한 것처럼» 보이면 사용자는
+      그 내용을 근거로 판단한다. 봉투의 `status` 를 보는 호출부는 «성공» 으로 읽는다.
+    ⚠️ LLM 을 부르지 않는다. 소스에 그 분기가 있는지만 본다."""
+    src = inspect.getsource(jarvis_control.ask)
+    assert 'get("status", "")) == "error"' in src, (
+        "엔진이 돌려준 error 상태를 라우트가 보지 않는다 — 실패가 success 로 나간다")
+    #: ★ 그리고 **502** 여야 한다. 200 으로 답하면 화면이 그것을 답으로 그린다.
+    m = re.search(r'== "error"[\s\S]{0,400}?status_code=502', src)
+    assert m, "엔진 실패를 502 로 바꾸지 않는다"
+
+
+def test_비서_실패_사유를_사용자에게_전달한다():
+    """⚠️ 「받지 못했습니다」만 남으면 사용자는 무엇이 문제인지 알 수 없다 — 엔진이 준
+    사유를 그대로 싣는다(그 사유는 사용자에게 보일 문장이다)."""
+    src = inspect.getsource(jarvis_control.ask)
+    assert 'get("reply")' in src, "실패 사유를 버리고 고정 문장만 돌려준다"
