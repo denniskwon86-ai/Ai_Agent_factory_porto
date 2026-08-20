@@ -4,7 +4,9 @@ import io
 import sys
 from pathlib import Path
 
-sys.path.insert(0, r"C:\WorkSpace\gemini_agent_team_verG")
+#: ⚠️ 절대경로를 박지 않는다 — 내 컴퓨터에서만 도는 스크립트가 제품 폴더에 들어가면
+#:   다음 사람이 돌리면 그냥 안 돌고, 왜인지 바로 보이지도 않는다.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from playwright.sync_api import sync_playwright  # noqa: E402
