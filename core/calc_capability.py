@@ -41,7 +41,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 # ── 실행 상태 ────────────────────────────────────────────────────────────
 #: 계약에 있고 **아직 구현되지 않았다.**
@@ -120,17 +120,48 @@ class Capability:
             "outputs": [list(o) for o in self.outputs],
             "state": self.state, "model_version": self.model_version,
             "effective_from": self.effective_from, "effective_to": self.effective_to,
+            #: ★★★ [2026-08-21 감사] **범위와 승인도 지문에 든다.**
+            #: ⚠️ `mvp_scope` 를 빼면 「범위 밖이던 것을 범위 안으로 옮긴」 변경이
+            #:   지문을 안 바꾸고, 옛 실행 증명이 그대로 유효해 보인다.
+            #: ⚠️ 승인 이벤트가 바뀌는 것도 **다른 승인**이다.
+            "mvp_scope": bool(self.mvp_scope),
+            "ledger_event_id": self.ledger_event_id,
         }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
+#: ★★★ [2026-08-21] **계약 안에서는 코드를 쓴다.** 한글은 화면 표시명으로 분리한다.
+#:
+#: ⚠️ 계약에 「일」·「원」을 적으면 그 문자열이 비교·집계에 쓰이게 되고, 표기를 다듬는
+#:   순간 **판정이 조용히 바뀐다**(격리 «사유» 와 «종류» 를 가른 것과 같은 규칙).
+UNIT_TON, UNIT_DAY, UNIT_KRW = "TON", "DAY", "KRW"
+UNITS: Tuple[str, ...] = (UNIT_TON, UNIT_DAY, UNIT_KRW)
+UNIT_DISPLAY: Dict[str, str] = {UNIT_TON: "톤", UNIT_DAY: "일", UNIT_KRW: "원"}
+
+#: 부호 방향도 코드로 둔다 — 산문으로 두면 문구를 고칠 때 뜻이 흔들린다.
+UP, DOWN = "UP", "DOWN"
+DIRECTIONS: Tuple[str, ...] = (UP, DOWN)
+
 #: §5-0 §2 에서 확정한 지표 어휘. ⚠️ 부호 방향까지 함께 못 박는다 —
 #: 방향을 안 적으면 「재고 +230」이 좋은 소식인지 나쁜 소식인지 두 사람이 다르게 읽는다.
-_AVAILABLE = ("available_qty", "TON", "선적 지연이 오르면 **내린다**")
-_IN_TRANSIT = ("in_transit_qty", "TON", "선적 지연이 오르면 **오른다**")
-_SHORTAGE = ("shortage_qty", "TON", "가용재고가 내리면 **오른다**")
-_PRODUCIBLE = ("producible_qty", "TON", "부족량이 오르면 **내린다**")
-_REVENUE_SHIFT = ("revenue_shift_days", "일", "생산 가능량이 내리면 **오른다**")
+#: ⚠️⚠️ [2026-08-21 감사] `on_hand_qty` 는 **네 칸의 합이 아니다.**
+#:   `safety_stock_quantity` 는 물리적 재고가 아니라 **정책 기준량**이다(실측: 540행
+#:   전부 50.0). 합에 넣으면 있지도 않은 재고를 세게 된다.
+#:
+#:       on_hand_qty   = unrestricted + quality + blocked
+#:       available_qty = max(unrestricted − safety_stock − reserved, 0)
+#:
+#: ⚠️ `reserved_quantity` 는 **현재 데이터에 없다.** 0 으로 가정하고 그 사실을 여기
+#:   적어 둔다 — 안 적으면 다음 사람이 「예약이 없는 회사」로 읽는다.
+_AVAILABLE = ("available_qty", UNIT_TON, DOWN)
+_IN_TRANSIT = ("in_transit_qty", UNIT_TON, UP)
+_SHORTAGE = ("shortage_qty", UNIT_TON, UP)
+_PRODUCIBLE = ("producible_qty", UNIT_TON, DOWN)
+#: ⚠️⚠️ 두 지표를 **가른다.**
+#:   `delivery_delay_days` 는 이미 일어난 납기 지연 **실적**(출하일 − 약속일)이고,
+#:   `revenue_shift_days` 는 시나리오와 기준선의 **예상 인식일 차이**다.
+#: ★ 앞엣것을 뒤엣것으로 쓰면 「시뮬레이션 결과」라며 **과거 실적을 보여 주게** 된다.
+_REVENUE_SHIFT = ("revenue_shift_days", UNIT_DAY, UP)
 
 
 #: ★★★ 계약이 요구하는 계산 참조. **닫힌 목록**이고 계약의 넷과 일대일이다.
@@ -145,39 +176,61 @@ _REGISTRY: Dict[str, Capability] = {
             ref="CALC.LOGISTICS.ARRIVAL_DELAY.v1",
             subject_type="shipment", relation="AFFECTS",
             object_type="inventory-snapshot",
-            required_datasets=("LOG-02", "INV-01"),
+            #: ⚠️⚠️ [2026-08-21 감사] `LOG-03` 이 **반드시** 있어야 한다. `eta` 는
+            #:   «예정» 시점이고, 운송 중 여부는 실제 출발·도착으로 가른다:
+            #:       ETD(또는 실제 출발) ≤ as_of  AND  ATA > as_of
+            #:   실측: `LOG-02.status` 는 120건 **전부 DELIVERED** 이고 실제 도착은
+            #:   `LOG-03` 의 `ATA` 사건에만 있다. 예정으로 판정하면 이미 도착한 배를
+            #:   «운송 중» 으로 세게 된다.
+            required_datasets=("LOG-02", "LOG-03", "INV-01"),
             outputs=(_IN_TRANSIT, _AVAILABLE),
             state=NOT_IMPLEMENTED,
             blocked_reason=(
-                "승인된 지연 모델이 없습니다. 기존 calc_graph 는 «안 쓰고 남은» 재고를 "
+                "승인된 지연 모델이 없습니다. 기존 계산 엔진은 «안 쓰고 남은» 재고를 "
                 "올리므로 부호의 뜻이 반대입니다 — 이름만 이으면 「재고가 늘었으니 "
-                "여유가 있다」로 읽히고 실제로는 라인이 섭니다.")),
+                "여유가 있다」로 읽히고 실제로는 라인이 섭니다. 또한 운송 중 판정에 "
+                "예정 시각이 아니라 실제 도착 사건이 필요합니다.")),
         Capability(
             ref="CALC.INVENTORY.MATERIAL_SHORTAGE.v1",
             subject_type="inventory-snapshot", relation="AFFECTS",
             object_type="production-plan-line",
-            required_datasets=("INV-01", "MFG-01"),
+            #: ⚠️⚠️ [2026-08-21 감사] **낟알이 맞지 않아 `MDM-05` 가 필요하다.**
+            #:   `INV-01` 은 자재×창고×일자인데 `MFG-01.material_requirement` 는 여러
+            #:   BOM 투입을 합친 **계획행 총량**이다. 단일 자재 재고와 바로 뺄 수 없다.
+            #:
+            #:       계획행 → BOM 투입자재 → 자재별 필요량·수율
+            #:              → 같은 자재·사업장 가용재고 → 자재별 부족량
+            #:
+            #: ⚠️ 실측에서 하나 더 나왔다 — `material_requirement` 66.4 가 BOM×수율로
+            #:   계산한 67.35 와 **맞지 않는다.** 어느 쪽이 정본인지 5b 에서 정해야 한다.
+            required_datasets=("INV-01", "MFG-01", "MDM-05"),
             outputs=(_SHORTAGE, _PRODUCIBLE),
             state=NOT_IMPLEMENTED,
             blocked_reason=(
                 "재고를 «원인» 으로 받는 계산이 없습니다. 기존 엔진은 재고를 생산의 "
-                "«결과» 로 계산하므로 인과 방향이 반대입니다.")),
+                "«결과» 로 계산하므로 인과 방향이 반대입니다. 또한 가용 원료와 완제품 "
+                "계획을 BOM 소요계수·수율 없이 직접 비교할 수 없습니다.")),
         Capability(
             ref="CALC.PRODUCTION.REVENUE_TIMING.v1",
             subject_type="production-plan-line", relation="AFFECTS",
             object_type="sales-line",
+            #: ⚠️⚠️ [2026-08-21 감사] `actual_ship_date − due_date` 는 **이미 일어난
+            #:   납기 지연 실적**(`delivery_delay_days`)이지 시뮬레이션 결과가 아니다.
+            #:   `revenue_shift_days` 는 **시나리오 예상 인식일 − 기준선 예상 인식일**
+            #:   이고, 승인된 생산-판매 배분과 **기준선**이 있어야 계산할 수 있다.
+            #: ★ 앞엣것을 뒤엣것으로 쓰면 「시뮬레이션 결과」라며 과거 실적을 보여 준다.
             required_datasets=("MFG-01", "SLS-01"),
             outputs=(_REVENUE_SHIFT,),
             state=NOT_IMPLEMENTED,
             blocked_reason=(
-                "매출 «인식 시점» 을 내는 계산이 없습니다. 기존 엔진은 기간 손익을 "
-                "낼 뿐 시점을 옮기지 않습니다.")),
+                "매출 «인식 시점» 을 내는 계산이 없습니다. 실적 납기 지연은 시나리오 "
+                "이연이 아니며, 기준선과 승인된 생산-판매 배분이 있어야 합니다.")),
         Capability(
             ref="CALC.FINANCE.COST_MARGIN_CASH.v1",
             subject_type="cost-record", relation="AFFECTS", object_type="ledger-line",
             required_datasets=("FIN-01", "FIN-03"),
-            outputs=(("margin_delta", "원", "원가가 오르면 **내린다**"),
-                     ("cash_delta", "원", "원가가 오르면 **내린다**")),
+            outputs=(("margin_delta", UNIT_KRW, DOWN),
+                     ("cash_delta", UNIT_KRW, DOWN)),
             state=OUT_OF_SCOPE, mvp_scope=False,
             blocked_reason=(
                 "MVP 최소 경로 4관계 밖입니다 — cost-record → ledger-line 은 그 사슬과 "
@@ -209,16 +262,40 @@ def get(ref: str) -> Capability:
     return cap
 
 
-def assert_executable(ref: str) -> Capability:
+def assert_executable(ref: str, ledger_verifier: Optional[Any] = None) -> Capability:
     """실행 직전 관문. **통과하지 못하면 예외**이고, 사유가 붙는다.
 
     ★★★ 0·빈 결과·기존 엔진 fallback 으로 **접지 않는다.**
     ⚠️⚠️ 접으면 「계산이 안 됐다」가 「영향이 없다」로 보인다. 화면은 평온하고 사람은
-      그것을 사실로 읽는다 — 이 저장소가 계속 잡아 온 바로 그 고장이다."""
+      그것을 사실로 읽는다 — 이 저장소가 계속 잡아 온 바로 그 고장이다.
+
+    ## ⚠️⚠️ 승인은 **매번** 원장에서 다시 확인한다
+
+    등록부의 `state` 는 «그때 그랬다» 이지 «지금도 그렇다» 가 아니다. 승인은 **철회될
+    수 있고**, 철회는 등록부를 고치지 않는다.
+
+    ★ 그래서 `APPROVED` 를 실행하려면 `ledger_verifier(cap)` 가 있어야 하고, 그것이
+      참을 돌려줘야 한다. 검증기가 **없으면 실행하지 않는다** — 「검증기를 안 넘겼으니
+      그냥 통과」는 승인 확인을 통째로 건너뛰는 문이다.
+
+    ⚠️ 지금은 아무것도 `APPROVED` 가 아니므로 이 길은 한 번도 돌지 않는다. 그래도 지금
+      넣는다 — 승인이 생긴 뒤에 넣으면 **그 사이에 승인 없는 실행이 지나간다.**"""
     cap = get(ref)
     if not cap.executable:
         raise CapabilityError(f"{cap.ref} 을(를) 실행할 수 없습니다 "
                               f"[{cap.state}]: {cap.blocked_reason}")
+    if ledger_verifier is None:
+        raise CapabilityError(
+            f"{cap.ref}: 승인 원장을 확인할 방법 없이 실행하지 않습니다.")
+    try:
+        confirmed = bool(ledger_verifier(cap))
+    except Exception as exc:
+        #: ⚠️ 원장을 못 읽은 것을 «승인 없음» 도 «승인 있음» 도 아닌 **장애**로 올린다.
+        raise CapabilityError(
+            f"{cap.ref}: 승인 원장을 확인하지 못했습니다: {exc}") from exc
+    if not confirmed:
+        raise CapabilityError(
+            f"{cap.ref}: 승인이 확인되지 않았습니다(철회됐거나 대상이 다릅니다).")
     return cap
 
 

@@ -193,9 +193,29 @@ def test_출력에_단위와_부호_방향이_붙어_있다(ref):
     cap = cc.get(ref)
     assert cap.outputs, f"{ref}: 출력이 없다"
     for name, unit, direction in cap.outputs:
-        assert name and unit, f"{ref}: {name!r} 단위가 없다"
-        assert "오른다" in direction or "내린다" in direction, (
-            f"{ref}.{name}: 부호 방향이 없다 — {direction!r}")
+        #: ★★★ [2026-08-21] **계약 안에서는 코드를 쓴다.** 「일」·「원」을 계약에 적으면
+        #:   그 문자열이 비교에 쓰이고, 표기를 다듬는 순간 판정이 조용히 바뀐다.
+        assert unit in cc.UNITS, f"{ref}.{name}: 단위가 코드가 아니다 — {unit!r}"
+        assert direction in cc.DIRECTIONS, (
+            f"{ref}.{name}: 부호 방향이 코드가 아니다 — {direction!r}")
+        assert name, f"{ref}: 지표 이름이 없다"
+
+
+def test_한글_단위는_화면_표시명으로만_쓴다():
+    """★ 사람이 읽을 이름은 따로 둔다 — 계약과 화면을 한 문자열로 묶으면 둘 다 못 고친다.
+
+    ⚠️⚠️ 첫 판은 `unit in cc.UNITS` 만 봤다. `UNITS` 가 **같은 상수에서 파생**되므로
+      단위를 한글로 되돌리는 변이가 그대로 살아남았다 — 값을 **자기 자신과 비교**한
+      것이다. 그래서 여기서는 **글자 그대로** 못 박는다."""
+    assert cc.UNITS == ("TON", "DAY", "KRW"), cc.UNITS
+    assert (cc.UNIT_TON, cc.UNIT_DAY, cc.UNIT_KRW) == ("TON", "DAY", "KRW")
+    assert cc.DIRECTIONS == ("UP", "DOWN")
+    assert set(cc.UNIT_DISPLAY) == set(cc.UNITS)
+    for ref in cc.known_refs():
+        for _, unit, _ in cc.get(ref).outputs:
+            #: ⚠️ 계약 값에 한글이 섞이면 즉시 잡는다.
+            assert unit.isascii(), f"{ref}: 단위에 한글이 섞였다 — {unit!r}"
+            assert cc.UNIT_DISPLAY[unit]
 
 
 @pytest.mark.parametrize("ref", cc.mvp_refs())
@@ -281,3 +301,109 @@ def test_보고가_무엇이_왜_막혔는지_말한다():
         assert item["blocked_reason"]
         assert item["relation"] and "->" in item["relation"]
         assert item["fingerprint"]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 5-0 감사 보정 (2026-08-21) — 낟알·데이터셋·승인 재검증
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_부족량_계산에_BOM_이_필요하다():
+    """★★★ [감사 ②③] **낟알이 맞지 않는다.**
+
+    `INV-01` 은 자재×창고×일자인데 `MFG-01.material_requirement` 는 여러 BOM 투입을
+    합친 **계획행 총량**이다. 단일 자재 재고와 바로 뺄 수 없다.
+
+    ⚠️ BOM 없이 빼면 「부족 66톤」 같은 숫자가 나오는데, 그것은 **어느 자재의 부족도
+      아니다.** 단위는 톤이고 계산은 되고 아무도 못 알아챈다."""
+    cap = cc.get("CALC.INVENTORY.MATERIAL_SHORTAGE.v1")
+    assert "MDM-05" in cap.required_datasets, cap.required_datasets
+    assert {"INV-01", "MFG-01"} <= set(cap.required_datasets)
+
+
+def test_운송_중_판정에_실제_도착_사건이_필요하다():
+    """★★★ [감사 ④] `eta` 는 **예정** 시점이다.
+
+    ⚠️ 실측: `LOG-02.status` 는 120건 **전부 DELIVERED** 이고 실제 도착은 `LOG-03` 의
+      `ATA` 사건에만 있다. 예정으로 판정하면 **이미 도착한 배를 «운송 중»** 으로 센다."""
+    cap = cc.get("CALC.LOGISTICS.ARRIVAL_DELAY.v1")
+    assert "LOG-03" in cap.required_datasets, cap.required_datasets
+
+
+def test_매출_이연과_납기_지연_실적을_섞지_않는다():
+    """★★★ [감사 ⑤] `actual_ship_date − due_date` 는 **이미 일어난 실적**이다.
+
+    ⚠️ 그것을 「시뮬레이션 결과」로 내보내면, 화면은 예측이라며 **과거를 보여 준다.**
+    ★ `revenue_shift_days` 는 시나리오와 **기준선**의 예상 인식일 차이다."""
+    cap = cc.get("CALC.PRODUCTION.REVENUE_TIMING.v1")
+    names = {n for n, _, _ in cap.outputs}
+    assert "revenue_shift_days" in names
+    assert "delivery_delay_days" not in names, (
+        "실적 지연을 시뮬레이션 출력으로 내보내고 있다")
+    assert "기준선" in cap.blocked_reason
+
+
+def test_범위_변경이_지문을_바꾼다():
+    """★★★ [감사 ⑦] `mvp_scope` 를 지문에서 빼면 「범위 밖이던 것을 안으로 옮긴」
+    변경이 **옛 실행 증명을 그대로 유효하게** 만든다."""
+    base = cc.get("CALC.FINANCE.COST_MARGIN_CASH.v1")
+    moved = cc.Capability(**{**base.__dict__, "mvp_scope": True})
+    assert moved.fingerprint() != base.fingerprint()
+
+
+def test_승인_이벤트가_바뀌면_지문이_바뀐다():
+    """⚠️ 승인 이벤트가 다른 것은 **다른 승인**이다."""
+    base = cc.get("CALC.LOGISTICS.ARRIVAL_DELAY.v1")
+    other = cc.Capability(**{**base.__dict__, "ledger_event_id": "ev_다른것"})
+    assert other.fingerprint() != base.fingerprint()
+
+
+def _approved(ref="CALC.LOGISTICS.ARRIVAL_DELAY.v1"):
+    """승인된 능력 하나(시험용). ⚠️ 등록부는 건드리지 않는다."""
+    base = cc.get(ref)
+    return cc.Capability(**{**base.__dict__, "state": cc.APPROVED,
+                            "model_version": "1.0.0", "ledger_event_id": "ev_1",
+                            "blocked_reason": ""})
+
+
+def test_승인은_실행할_때마다_원장에서_다시_확인한다(monkeypatch):
+    """★★★ [감사 ⑦] 등록부의 상태는 «그때 그랬다» 이지 «지금도 그렇다» 가 아니다.
+
+    ⚠️⚠️ 승인은 **철회될 수 있고**, 철회는 등록부를 고치지 않는다. 다시 안 보면
+      철회된 승인으로 계산이 계속 돈다."""
+    cap = _approved()
+    monkeypatch.setitem(cc._REGISTRY, cap.ref, cap)
+
+    #: ① 검증기가 없으면 실행하지 않는다 — 「안 넘겼으니 통과」는 문을 통째로 여는 것이다.
+    with pytest.raises(cc.CapabilityError) as no_verifier:
+        cc.assert_executable(cap.ref)
+    #: ⚠️⚠️ 사유를 **구체적으로** 본다. 첫 판은 «원장» 이라는 낱말만 봤는데, 가드를
+    #:   지워도 `None(cap)` 이 `TypeError` 를 내고 그것이 「원장을 확인하지 못했습니다」로
+    #:   잡혀서 **변이가 살아남았다** — 우연히 같은 낱말이 들어 있었을 뿐이다.
+    assert "확인할 방법 없이" in str(no_verifier.value), no_verifier.value
+
+    #: ② 철회됐으면 막는다.
+    with pytest.raises(cc.CapabilityError) as revoked:
+        cc.assert_executable(cap.ref, lambda c: False)
+    assert "확인되지 않았" in str(revoked.value)
+
+    #: ③ 원장을 못 읽으면 **장애**다 — 「승인 없음」으로 접지 않는다.
+    def boom(_c):
+        raise RuntimeError("원장이 응답하지 않습니다")
+
+    with pytest.raises(cc.CapabilityError) as broken:
+        cc.assert_executable(cap.ref, boom)
+    assert "확인하지 못했" in str(broken.value)
+
+    #: ④ 대조군 — 확인되면 통과한다. 늘 막히면 통제가 아니라 고장이다.
+    assert cc.assert_executable(cap.ref, lambda c: True).ref == cap.ref
+
+
+def test_검증기는_능력을_받아_대상을_확인할_수_있다(monkeypatch):
+    """★ 검증기가 **무엇을 승인했는지** 볼 수 있어야 한다 — 대상이 다른 승인을
+    재사용하는 것이 이 저장소에서 실제로 났던 사고다."""
+    cap = _approved()
+    monkeypatch.setitem(cc._REGISTRY, cap.ref, cap)
+    seen = []
+    cc.assert_executable(cap.ref, lambda c: seen.append(c) or True)
+    assert seen and seen[0].ref == cap.ref
+    assert seen[0].ledger_event_id == "ev_1"
