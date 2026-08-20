@@ -211,6 +211,55 @@ def _open_app(page, logs) -> int:
             print("   ", line)
         return 1
 
+    # ── ⑤ **쓰기.** 읽기만 확인하고 끝내면 절반만 본 것이다 ──────────────
+    #: ★★★ 로드맵 §3 의 4번 칸이 「기존 원천 재사용과 AFS Native 입력 분리, 이중 입력
+    #:   방지」를 증명하라고 한다. 그러려면 실제로 **써 봐야** 한다 — 쓰기는 읽기보다
+    #:   위험하고(멱등키·중복·권한), 그 경로가 브라우저에서 확인된 적이 없었다.
+    frame = None
+    for f in frames:
+        try:
+            if f.locator("#afs-memo-input").count():
+                frame = f
+                break
+        except Exception:
+            continue
+    if frame is None:
+        print("✗ ⑤ 메모 입력칸이 없다 — 쓰기 경로가 화면에 없다")
+        return 1
+
+    note = "선적 지연 — 대체 공급사 확인 필요"
+    frame.locator("#afs-memo-input").fill(note)
+    frame.locator("#afs-memo-save").click()
+    page.wait_for_timeout(3000)
+
+    if frame.locator("#afs-memo-error").count():
+        print("✗ ⑤ 메모 저장 실패:",
+              frame.locator("#afs-memo-error").inner_text()[:120])
+        _shot(page, "앱_05_쓰기실패.png")
+        return 1
+    saved = frame.locator("#afs-memo-list").inner_text()
+    if note not in saved:
+        print(f"✗ ⑤ 저장한 메모가 목록에 없다: {saved[:120]!r}")
+        return 1
+    print(f"· ⑤ 메모 저장·재조회 확인 — {note}")
+    _shot(page, "앱_05_쓰기.png")
+
+    # ── ⑥ **대조군 — 사내 실적에는 못 쓴다** ──────────────────────────────
+    #: ★★★ 메모가 써지는 것만 보면 「이 앱은 쓸 수 있다」만 확인한 것이다. 로드맵 §3 의
+    #:   4번 칸이 요구하는 것은 그 반대쪽이다 — **기존 원천 재사용과 Native 입력의
+    #:   분리, 이중 입력 방지.** 실적에 쓸 수 있으면 그 순간 원천이 둘이 되고, 어느
+    #:   쪽이 맞는지 아무도 모른다.
+    #: ⚠️ 이 대조군이 없으면 「막힌다」와 「원래 그 데이터셋이 없다」를 구분할 수 없다 —
+    #:   바로 위에서 같은 앱이 `arrivals` 를 **읽는 데 성공**했으므로 존재는 증명돼 있다.
+    blocked = frame.evaluate(
+        "() => window.afs.data.create('arrivals',"
+        " { arrived_at: '2026-08-20', material_code: 'M9', quantity: 1 })"
+        "   .then(() => 'WROTE').catch(e => String((e && e.code) || e))")
+    if blocked == "WROTE":
+        print("✗ ⑥ **사내 실적에 앱이 썼다** — 원천이 둘이 됐다")
+        return 1
+    print(f"· ⑥ 사내 실적 쓰기 거부 확인 — {blocked}")
+
     print("\n=== 콘솔 ===")
     for line in logs[-15:]:
         print("   ", line)

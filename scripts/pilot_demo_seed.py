@@ -322,6 +322,9 @@ APP_CODE = """
 export default function App() {
   const [rows, setRows] = React.useState(null);
   const [err, setErr] = React.useState('');
+  const [memo, setMemo] = React.useState('');
+  const [memos, setMemos] = React.useState([]);
+  const [saveErr, setSaveErr] = React.useState('');
 
   React.useEffect(() => {
     // ★ 데이터셋 «이름» 만 말한다. 어디서 오는지(파일 판·연결·우리 DB)는 모른다.
@@ -330,6 +333,8 @@ export default function App() {
     window.afs.ready
       .then(function () { return window.afs.data.list('arrivals', { limit: 50 }); })
       .then(function (r) { setRows(r.records || r.items || []); })
+      .then(function () { return window.afs.data.list('memo', { limit: 20 }); })
+      .then(function (r) { setMemos(r.records || []); })
       .catch(function (e) {
         // ⚠️ 실패를 빈 목록으로 그리지 않는다 — 사용자가 「데이터가 없다」로 읽는다.
         setErr(String((e && e.code) || e));
@@ -345,6 +350,29 @@ export default function App() {
   }
   return React.createElement('div', { id: 'afs-app-ok' },
     React.createElement('h3', null, '원료 입고 현황'),
+    // ★★★ [시연 ④칸] **쓰기.** 원천에 없는 것만 앱이 만든다.
+    //   ⚠️ 입고 실적은 고칠 수 없다(계약이 read 만 허용) — 여기 쓰는 것은 «대응 메모» 다.
+    React.createElement('div', { id: 'afs-memo-box' },
+      React.createElement('input', {
+        id: 'afs-memo-input', value: memo, placeholder: '대응 메모를 적으십시오',
+        onChange: function (e) { setMemo(e.target.value); },
+      }),
+      React.createElement('button', {
+        id: 'afs-memo-save',
+        onClick: function () {
+          // ⚠️ 멱등키는 SDK 가 붙인다. 우리가 지어내면 재시도가 중복 쓰기가 된다.
+          window.afs.data.create('memo', { note: memo, po_no: '' })
+            .then(function () { return window.afs.data.list('memo', { limit: 20 }); })
+            .then(function (r) { setMemos(r.records || []); setMemo(''); })
+            .catch(function (e) { setSaveErr(String((e && e.code) || e)); });
+        },
+      }, '메모 저장')),
+    saveErr ? React.createElement('div', { id: 'afs-memo-error' },
+      '메모를 저장하지 못했습니다 (' + saveErr + ')') : null,
+    React.createElement('ul', { id: 'afs-memo-list' }, memos.map(function (mrec, i) {
+      return React.createElement('li', { key: 'm' + i },
+        String(((mrec.payload) || {}).note || ''));
+    })),
     React.createElement('p', { id: 'afs-app-count' }, '읽은 행 수: ' + rows.length),
     React.createElement('ul', null, rows.map(function (r, i) {
       // ⚠️ 업무 값은 **`payload` 아래**에 있다. 행을 그대로 읽으면 행 수는 맞는데
@@ -378,11 +406,27 @@ def _runtime_contract() -> dict:
         "app_class": "departmental",
         "datasets": [
             {"name": "arrivals", "purpose": "자재가 얼마나 들어왔는가",
+             #: ★★★ **읽기만.** 사내 실적은 승인된 판에서 오고 앱이 고칠 수 없다 —
+             #:   고칠 수 있으면 그 순간 «원천이 둘» 이 되고 어느 쪽이 맞는지 아무도 모른다.
              "allowed_actions": ["read"], "data_role": arc.ENTERPRISE_ACTUAL,
              "source_intent": arc.ENTERPRISE_READ,
              "enterprise_contract_key": "material_arrivals",
              "duplicate_entry_policy": arc.DENY_IF_AUTHORITATIVE_SOURCE_EXISTS,
              "fields": fields},
+            #: ★★★ [시연 ④칸] **원천에 없는 것만 앱이 만든다.** 로드맵 §3 이 「기존 원천
+            #:   재사용과 AFS Native 입력 분리, 이중 입력 방지」를 증명하라고 한다.
+            #: ⚠️ 이 데이터셋은 `AFS_NATIVE` 다 — 우리 DB 에 산다. 사내 실적을 여기로
+            #:   복사해 넣으면 그것이 곧 이중 입력이고, 계약이 그것을 막는 이유다.
+            {"name": "memo", "purpose": "원천에 없는 대응 메모",
+             "allowed_actions": ["read", "create"],
+             "data_role": arc.NATIVE_SUPPLEMENT, "source_intent": arc.AFS_NATIVE,
+             "duplicate_entry_policy": arc.NO_DUPLICATE_CHECK_REQUIRED,
+             "fields": [
+                 {"name": "note", "type": "text", "required": True,
+                  "classification": "INTERNAL"},
+                 {"name": "po_no", "type": "string", "required": False,
+                  "classification": "INTERNAL"},
+             ]},
         ]}, project_id=PROJECT)
     if not r.ok:
         raise SystemExit(f"계약 컴파일 실패: {r.errors}")
@@ -429,7 +473,12 @@ def _seed_candidate_release() -> None:
             "created_at": "2026-08-19T06:00:00+00:00",
             "manifest": {"fingerprint": "fp_pilot", "valid": True, "manifest": {
                 "version": "1.0", "app_class": "departmental",
-                "capabilities": ["arrivals.read"], "required_capabilities": []}},
+                #: ★★★ **선언한 행동만 할 수 있다.** `memo.create` 를 빼 놓고 앱에서
+                #:   쓰면 서버가 403 으로 막는다(실제로 막혔다 — 그리고 그것이 옳다).
+                #: ⚠️ 입고(`arrivals`)에는 **쓰기를 선언하지 않는다.** 사내 실적을 앱이
+                #:   고칠 수 있으면 그 순간 원천이 둘이 된다.
+                "capabilities": ["arrivals.read", "memo.read", "memo.create"],
+                "required_capabilities": []}},
         }, f, ensure_ascii=False)
 
     program_lifecycle.set_status(RELEASE, CANDIDATE, actor="pilot",
