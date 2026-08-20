@@ -412,6 +412,24 @@ def _assert_native_write(res: "prov.Resolution", ds: Dict[str, Any], *, path: st
                     target=str(ds.get("dataset_id", "")), path=path)
 
 
+def _as_record(index: int, row: Dict[str, Any], snap: Dict[str, Any]) -> Dict[str, Any]:
+    """판의 행 하나를 **Native 와 같은 레코드 모양**으로 감싼다.
+
+    ★★★ [2026-08-19 브라우저 실측] 종전에는 평평한 행을 그대로 돌려줬다. 그런데 SDK 는
+      응답을 **허용목록**(`record_id · payload · created_at · updated_at · deleted`)으로
+      투영한다 — 그래서 앱은 «3건» 을 받고 **모든 칸이 빈** 레코드를 보았다. 개수는
+      맞으니 화면은 정상으로 보였고, 아무 오류도 나지 않았다.
+
+    ⚠️ 고칠 곳은 허용목록이 아니라 **여기**다. 허용목록을 넓히면 조직 내부 필드
+      (`scope_node_id`·`owner_dept_id`)가 앱으로 새어 나가는 문을 같이 연다.
+
+    ⚠️ 판에는 우리 레코드 id 가 없다 — **행 번호**가 id 다(`data.get` 도 그렇게 읽는다).
+    ★ `created_at` 은 그 판의 **인증 시각**이다. 행마다 다른 시각을 지어내지 않는다."""
+    at = str(snap.get("certified_at") or snap.get("created_at") or "")
+    return {"record_id": str(index), "payload": dict(row),
+            "created_at": at, "updated_at": at, "deleted": False}
+
+
 def _serve_snapshot(res: "prov.Resolution", *, limit: int = 0, offset: int = 0,
                     record_id: str = "") -> Dict[str, Any]:
     """승인된 판을 읽어 돌려준다. **RAW 지문을 먼저 대조한다.**
@@ -441,10 +459,13 @@ def _serve_snapshot(res: "prov.Resolution", *, limit: int = 0, offset: int = 0,
             raise _fail(sdk.ERR_NOT_FOUND)
         if idx < 0 or idx >= len(parsed.rows):
             raise _fail(sdk.ERR_NOT_FOUND)
-        return {**meta, "record": parsed.rows[idx]}
+        return {**meta, "record": _as_record(idx, parsed.rows[idx], snap)}
 
     rows, total = prov.snapshot_rows(parsed.rows, limit=limit, offset=offset)
-    return {**meta, "records": rows, "total": total}
+    start = max(0, int(offset or 0))
+    return {**meta,
+            "records": [_as_record(start + i, r, snap) for i, r in enumerate(rows)],
+            "total": total}
 
 
 def _record_in(plane, dataset_id: str, record_id: str) -> Dict[str, Any]:

@@ -1775,6 +1775,13 @@ def _release_readiness_state(release: Dict[str, Any]) -> Any:
     from core.data_preparation import kit_registry, readiness as rd
     from core.data_preparation.store import data_preparation_store as store
 
+    #: ★★★ **이 릴리스가 읽는 키만 본다.** 키트 전체를 보면, 이 앱이 쓰지도 않는
+    #:   데이터가 준비되지 않았다는 이유로 승격이 막힌다 — 그러면 한 키트를 여러 앱이
+    #:   나눠 쓰는 순간 아무 앱도 올라가지 못한다(2026-08-19 파일럿에서 실제로 막혔다).
+    #:   ⚠️ 이 함수의 첫 줄이 「이 릴리스가 읽는 업무 데이터의 준비도」라고 말하고
+    #:     있었는데, 구현은 키트 전체를 보고 있었다. 말과 코드가 갈라진 자리였다.
+    used = {str(v).strip() for v in (mat.get("sources") or {}).values() if str(v).strip()}
+
     #: 물질화가 못 박은 인스턴스들 — 하나라도 준비 안 됐으면 승격하지 않는다.
     states = []
     for instance_id in sorted({str(v) for v in (mat.get("instances") or {}).values()
@@ -1785,16 +1792,25 @@ def _release_readiness_state(release: Dict[str, Any]) -> Any:
         kit = kit_registry.resolve(store, inst["kit_id"], inst["version"])
         if not kit:
             return None
-        keys = kit_registry.dataset_keys(kit.get("profile"))
+        declared = kit_registry.dataset_keys(kit.get("profile"))
+        keys = [k for k in declared if k in used] if used else list(declared)
+        if not keys:
+            #: ⚠️ 계약이 업무 데이터를 쓴다고 했는데 키트에 그 키가 없다 — 「없으니
+            #:   통과」로 넘기지 않는다. 확인하지 못한 것이다.
+            return None
         snapshots: Dict[str, List[Dict[str, Any]]] = {k: [] for k in keys}
         for row in store.list_snapshots(instance_id):
             key = str(row.get("dataset_contract_key") or "")
             if key in snapshots:
                 snapshots[key].append(row)
+        #: ★ 산출물도 **이 앱이 읽는 데이터만으로 만들 수 있는 것**으로 좁힌다.
+        #:   좁히지 않으면 「막힌 산출물」에 이 앱과 무관한 이름이 섞여 나온다.
+        outs = [o for o in kit_registry.outputs(kit.get("profile"))
+                if set(str(k) for k in (o.get("requires") or [])) <= set(keys)]
         states.append(rd.evaluate_instance(
             contract_keys=keys,
             bindings={k: store.active_binding(instance_id, k) for k in keys},
-            snapshots=snapshots, outputs=kit_registry.outputs(kit.get("profile")),
+            snapshots=snapshots, outputs=outs,
             now=_now_iso_utc(),
             scope={"tenant_id": inst["tenant_id"],
                    "scope_node_id": inst["scope_node_id"],

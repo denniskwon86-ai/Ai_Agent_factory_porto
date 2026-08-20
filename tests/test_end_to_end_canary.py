@@ -721,3 +721,55 @@ def test_promoting_through_the_route_seals_the_data_fingerprint(canary, dp):
     assert rows[0]["lifecycle_status"] == ACTIVE
     assert rows[0]["data_fingerprint"] == rp.DATA_NOT_APPLICABLE, (
         "승격 결과에는 있는데 목록에는 없다 — 나중에 볼 곳이 없다")
+
+
+def test_snapshot_rows_come_back_in_the_record_shape_the_sdk_projects(canary, dp,
+                                                                     monkeypatch):
+    """★★★ [2026-08-19 브라우저 실측] 판의 행을 **평평하게** 돌려주면 앱은 빈 칸을 본다.
+
+    SDK 는 응답을 허용목록(`record_id · payload · created_at · updated_at · deleted`)으로
+    투영한다. 평평한 행은 그 목록에 하나도 안 걸려 **`{}` 로 지워진다** — 개수는 맞으니
+    화면은 「3건」을 보여 주고, 값만 전부 빈다. 아무 오류도 나지 않는다.
+
+    ⚠️ HTTP 를 직접 부르는 시험은 이것을 못 본다(투영은 브리지가 한다). 그래서 여기서
+      **모양**을 못박는다 — 브라우저까지 가지 않아도 갈라짐을 잡을 수 있게."""
+    import api.routes.app_data_runtime as ard
+
+    contract = _contract()
+    _step_source(dp, canary.raw, mode=ap.ENTITY_MODE_SYNTHETIC)
+    _write_release(canary, mode=ap.ENTITY_MODE_SYNTHETIC, contract=contract)
+    _step_materialize(dp, contract)
+    program_lifecycle.set_status(REL, CANDIDATE, actor="u@x", reason="카나리")
+    monkeypatch.setattr(ard, "viewing_context",
+                        lambda p: {"tenant_id": TENANT,
+                                   "entity_mode": ap.ENTITY_MODE_SYNTHETIC,
+                                   "scope_node_id": SCOPE}, raising=False)
+    tok = _tok(canary)
+    r = canary.get(R + "/datasets/arrivals/records", headers=_h(tok))
+    assert r.status_code == 200, r.text[:200]
+    recs = r.json()["data"]["records"]
+    assert recs, "판에서 아무 행도 오지 않았다"
+
+    #: ★ SDK 허용목록과 **같은 키**로 온다.
+    allowed = {"record_id", "payload", "created_at", "updated_at", "deleted"}
+    for rec in recs:
+        assert allowed & set(rec), f"허용목록에 걸리는 키가 하나도 없다: {sorted(rec)}"
+        assert isinstance(rec["payload"], dict) and rec["payload"], (
+            f"업무 값이 payload 안에 없다: {rec}")
+    #: ★★★ 그리고 그 안에 **실제 값**이 있어야 한다 — 모양만 맞고 비면 같은 고장이다.
+    #: ★ `payload` 는 **계약이 선언한 필드**로 다시 한 번 좁혀진다(이 카나리 계약은
+    #:   `quantity` 하나만 선언한다). 선언하지 않은 열은 앱에 가지 않는다.
+    assert recs[0]["payload"].get("quantity"), recs[0]
+    assert "material_code" not in recs[0]["payload"], (
+        "계약에 선언하지 않은 열이 앱으로 갔다: " + str(recs[0]["payload"]))
+
+    #: ★ `data.get` 도 같은 모양이어야 한다 — 목록과 상세가 다르면 앱이 두 벌을 만든다.
+    one = canary.get(R + "/datasets/arrivals/records/0", headers=_h(tok))
+    assert one.status_code == 200, one.text[:200]
+    #: ⚠️ `data.get` 응답은 레코드를 **펼쳐서** 준다(`data` 자체가 레코드다).
+    got = one.json()["data"]
+    assert isinstance(got.get("payload"), dict) and got["payload"], got
+    assert got["record_id"] == "0"
+    #: ★★★ 서버의 `project_record` 는 **이미 이 모양을 전제**하고 있었다 —
+    #:   `_serve_snapshot` 만 평평한 행을 돌려주고 있었고, 그래서 이 경로도 `{}` 였다.
+    assert got["payload"].get("quantity"), got

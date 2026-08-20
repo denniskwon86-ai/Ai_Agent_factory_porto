@@ -21,11 +21,13 @@
 
 LLM 0콜.
 """
+import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core import library_paths  # noqa: E402
 from core.paths import PROJECT_ROOT  # noqa: E402
 
 #: ⚠️⚠️ 안전장치. 운영 저장소에서 돌면 **아무것도 하지 않고 멈춘다.**
@@ -119,6 +121,88 @@ def _seed_org() -> None:
 PROJECT = "proj_pilot"
 RELEASE = "rel_pilot"
 
+#: ★★★ 앱 코드. **손으로 쓴 것이다** — LLM 을 부르지 않는다(이 스크립트는 LLM 0콜).
+#:   생성기가 만드는 것과 같은 계약(`window.afs.data.*`)만 쓴다. 여기서 확인하려는 것은
+#:   「생성기가 좋은 코드를 쓰는가」가 아니라 **「브리지가 실제 브라우저에서 도는가」**다.
+#:
+#: ⚠️ 앱은 자기 로그인도 자기 백엔드도 갖지 않는다. `release_id` 도 말하지 않는다 —
+#:   부모가 붙인다(설계 §7-4). 그래서 아래 코드에 토큰·릴리스·사용자 식별자가 없다.
+APP_CODE = """
+export default function App() {
+  const [rows, setRows] = React.useState(null);
+  const [err, setErr] = React.useState('');
+
+  React.useEffect(() => {
+    // ★ 데이터셋 «이름» 만 말한다. 어디서 오는지(파일 판·연결·우리 DB)는 모른다.
+    // ⚠️ SDK 표면은 schema·list·get·create·update·remove 뿐이다. 처음에 `query` 로
+    //   적었다가 «is not a function» 을 받았다 — 표면을 늘려 쓰지 않는다.
+    window.afs.ready
+      .then(function () { return window.afs.data.list('arrivals', { limit: 50 }); })
+      .then(function (r) { setRows(r.records || r.items || []); })
+      .catch(function (e) {
+        // ⚠️ 실패를 빈 목록으로 그리지 않는다 — 사용자가 「데이터가 없다」로 읽는다.
+        setErr(String((e && e.code) || e));
+      });
+  }, []);
+
+  if (err) {
+    return React.createElement('div', { id: 'afs-app-error' },
+      '데이터를 지금 읽지 못했습니다 (' + err + ') — 데이터가 없는 것이 아닙니다.');
+  }
+  if (rows === null) {
+    return React.createElement('div', { id: 'afs-app-loading' }, '불러오는 중…');
+  }
+  return React.createElement('div', { id: 'afs-app-ok' },
+    React.createElement('h3', null, '원료 입고 현황'),
+    React.createElement('p', { id: 'afs-app-count' }, '읽은 행 수: ' + rows.length),
+    React.createElement('ul', null, rows.map(function (r, i) {
+      // ⚠️ 업무 값은 **`payload` 아래**에 있다. 행을 그대로 읽으면 행 수는 맞는데
+      //   칸이 전부 빈다 — 처음에 그렇게 적어 «· ·» 만 나왔다.
+      //   SDK 가 넘기는 것은 record_id · payload · created_at · updated_at · deleted 뿐이다.
+      var v = r.payload || {};
+      return React.createElement('li', { key: i },
+        String(v.arrived_at || '') + ' · ' + String(v.material_code || '')
+        + ' · ' + String(v.quantity || ''));
+    })));
+}
+"""
+
+
+def _runtime_contract() -> dict:
+    """계약을 **실제 컴파일러로** 만든다 — 손으로 적으면 씨앗만 아는 모양이 생긴다."""
+    from core import app_runtime_contract as arc
+    from core.host_contract_compiler import compile_contract
+
+    #: ⚠️ 스키마가 정하는 어휘를 쓴다 — 대문자 상수(`EVENT_TIME`)나 `datetime` 은
+    #:   여기서 받지 않는다. 손으로 적으면 이런 어긋남이 난다(실제로 났다).
+    fields = [
+        {"name": "arrived_at", "type": "date", "required": True,
+         "classification": "INTERNAL", "semantic_role": "event_time"},
+        {"name": "material_code", "type": "string", "required": True,
+         "classification": "INTERNAL"},
+        {"name": "quantity", "type": "number", "required": True,
+         "classification": "INTERNAL", "semantic_role": "quantity", "unit": "ton"},
+    ]
+    r = compile_contract({
+        "app_class": "departmental",
+        "datasets": [
+            {"name": "arrivals", "purpose": "자재가 얼마나 들어왔는가",
+             "allowed_actions": ["read"], "data_role": arc.ENTERPRISE_ACTUAL,
+             "source_intent": arc.ENTERPRISE_READ,
+             "enterprise_contract_key": "material_arrivals",
+             "duplicate_entry_policy": arc.DENY_IF_AUTHORITATIVE_SOURCE_EXISTS,
+             "fields": fields},
+        ]}, project_id=PROJECT)
+    if not r.ok:
+        raise SystemExit(f"계약 컴파일 실패: {r.errors}")
+    c = dict(r.contract)
+    #: ⚠️ 승인 없이 두면 게이트가 증명을 발급하지 않는다 — 시연에서는 승인된 판을 심는다.
+    c["status"] = arc.STATUS_APPROVED
+    c["approval"] = {"status": "APPROVED", "approved_by": ADMIN,
+                     "approved_at": "2026-08-19T00:00:00Z",
+                     "decision_ledger_id": "evt_pilot"}
+    return c
+
 
 def _seed_candidate_release() -> None:
     """게시가 만들어 놓는 것 — 프로젝트 메타 · 릴리스 파일 · **후보 상태**.
@@ -128,9 +212,6 @@ def _seed_candidate_release() -> None:
 
     ⚠️ 여기서 검사를 통과시키려 하지 않는다. 물질화도 계약 승인도 하지 않은 판이라
       화면은 **막힌 이유들**을 보여 줄 것이고, 그것이 이 화면의 본래 일이다."""
-    import json
-
-    from core import library_paths
     from core.paths import workspace_path
     from core.program_lifecycle import CANDIDATE, program_lifecycle
 
@@ -160,6 +241,47 @@ def _seed_candidate_release() -> None:
     program_lifecycle.set_status(RELEASE, CANDIDATE, actor="pilot",
                                  reason="파일럿 시연용 후보")
     print(f"· 후보 릴리스 {RELEASE} (프로젝트 {PROJECT})")
+
+
+def _materialize_app(instance_id: str) -> None:
+    """계약 → 앱 데이터셋 물질화. **후보는 Preview 평면**에 만든다(F-1).
+
+    ★★★ 이것이 없으면 게이트가 「계약에 있는 데이터셋이 물질화되지 않았습니다」로 막고,
+      앱은 데이터를 한 줄도 못 읽는다."""
+    from core import app_preview, contract_materializer
+    from core.data_preparation.store import data_preparation_store as store
+
+    contract = _runtime_contract()
+    rel_dir = library_paths.release_dir(RELEASE)
+    with open(os.path.join(rel_dir, "release.json"), "r", encoding="utf-8") as f:
+        body = json.load(f)
+    body["runtime_contract"] = contract
+    #: ★ 앱 코드는 미리보기 화면이 읽는 자리에 넣는다 — 종전 화면과 **같은 소스**다.
+    #:   다른 곳에 넣으면 두 화면이 다른 앱을 보여 주고, 어느 쪽이 진짜인지 모른다.
+    body["frontend_code_summary"] = APP_CODE
+    with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
+        json.dump(body, f, ensure_ascii=False)
+
+    out = contract_materializer.materialize(
+        contract, release_id=RELEASE, actor_id="pilot", store=store,
+        app_data=app_preview.app_data_for(app_preview.AUDIENCE_PREVIEW),
+        tenant_id=TENANT, scope_node_id=SCOPE, entity_mode=MODE)
+
+    #: ★★★ 게시가 릴리스 파일에 남기는 **물질화 기록**을 같은 모양으로 남긴다.
+    #:   ⚠️ 이것이 없으면 승격의 「데이터 준비도」 검사가 **어느 인스턴스를 물어야
+    #:     하는지 모른다** — 그래서 「확인하지 못했습니다」로 막히고, 화면만 보면
+    #:     데이터가 준비 안 된 것처럼 읽힌다(실제로 그렇게 막혔다).
+    body["contract_materialization"] = {
+        "state": "MATERIALIZED", "detail": "",
+        "datasets": [d.get("name", "") for d in out.datasets],
+        "sources": {r.name: r.enterprise_contract_key
+                    for r in out.resolved if r.enterprise_contract_key},
+        "instances": {r.name: r.kit_instance_id
+                      for r in out.resolved if r.kit_instance_id},
+    }
+    with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
+        json.dump(body, f, ensure_ascii=False)
+    print("· 앱 데이터셋 물질화(Preview 평면) — arrivals")
 
 
 def main() -> int:
@@ -210,6 +332,9 @@ def main() -> int:
     # ── ④ supplier_master 는 **일부러 비운다** ──────────────────────────
     print("· supplier_master → 원천 미지정(의도적)")
 
+    # ── ⑤ 생성 앱 — 계약을 물질화해 실제로 읽히게 한다 ──────────────────
+    _materialize_app(inst["instance_id"])
+
     print()
     print("=== 화면에서 확인할 것 ===")
     print(f"  인스턴스 id : {inst['instance_id']}")
@@ -217,6 +342,8 @@ def main() -> int:
     print("  준비도 보드에 네 가지 상태가 함께 보여야 합니다 —")
     print("    READY(입고) · 검사 대기(구매주문) · 격리(잘린 판) · 원천 미지정(공급사)")
     print(f"  승격 화면 후보 : {RELEASE} — 다섯 검사에서 «막힌 이유» 가 보여야 합니다")
+    print(f"  생성 앱        : 라이브러리에서 «{RELEASE}» 를 열면 입고 3행이 보여야 합니다")
+    print("    ⚠️ 프런트에 VITE_AFS_HOST_RUNTIME=1 이 있어야 데이터 평면이 켜집니다")
     return 0
 
 
