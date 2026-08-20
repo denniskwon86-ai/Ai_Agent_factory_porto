@@ -157,8 +157,15 @@ def _resolve_ecm(ref: "ObjectRef"):
             "정할 수 없습니다.")
     mode = str(getattr(entity, "entity_mode", "") or "").strip()
     if not mode:
+        #: ⚠️⚠️ [2026-08-20 Supervisor 지적] `None` 은 「안 보인다」다. 실행 모드가 비어
+        #:   있는 것은 **자료 불일치**이지 「이 문맥에서 안 보인다」가 아니다.
+        #:   `None` 으로 두면 화면이 「영향 경로 없음」을 그리고, 사람은 그것을 사실로
+        #:   읽는다 — 실제로는 REAL/VIRTUAL 을 모르는 상태다.
         stats.bump("ecm_entity_mode_missing")
-        return None
+        raise OntologyResolverError(
+            "조직의 실행 문맥(entity_mode)이 "
+            "비어 있습니다 — 실적과 "
+            "시나리오를 구분할 수 없습니다.")
     return _scope(getattr(node, "tenant_id", ""), mode, getattr(node, "node_id", ""),
                   owner_dept_id=getattr(node, "dept_id", ""),
                   status="active" if getattr(node, "status", "") == "ACTIVE" else "retired")
@@ -327,14 +334,23 @@ def product_approval_resolver(ledger_id: str, action: str, actor: str,
         stats.bump("approval_target_kind_mismatch")
         return False
 
-    try:
-        from core.decision_ledger import decision_ledger
+    from core.decision_ledger import decision_ledger
 
-        event = decision_ledger.get_event(lid)
+    try:
+        #: ★★★ **strict 조회를 쓴다.** `get_event()` 는 DB 장애를 `None` 으로 접고,
+        #:   그러면 장애가 「승인 이벤트가 없다」와 구별되지 않는다.
+        event = decision_ledger.get_event_strict(lid)
     except Exception:
+        #: ★★★ [2026-08-20 Supervisor 지적] **예외를 다시 던진다.**
+        #:
+        #: ⚠️⚠️ 여기서 `False` 로 접으면 원장 장애가 「승인이 무효다」(400)로 보인다.
+        #:   사용자는 «승인을 안 받았구나» 로 읽고 승인을 다시 요청하지만, 실제 문제는
+        #:   저장소이므로 몇 번을 해도 같다. 장애는 **503** 으로 드러나야 한다.
+        #: ★ 통계는 올리고 예외는 그대로 — `_assert_approval` 이 503 으로 바꾼다.
         stats.bump("approval_ledger_unreadable")
-        return False
+        raise
     if not event:
+        #: ★ **없는 것만** 거짓이다. 이것이 유일한 「승인 없음」이다.
         stats.bump("approval_event_missing")
         return False
 
@@ -366,8 +382,10 @@ def product_approval_resolver(ledger_id: str, action: str, actor: str,
     try:
         revoked = decision_ledger.has_invalidating_child(lid, sorted(_INVALIDATING))
     except Exception:
+        #: ⚠️ 같은 이유로 **다시 던진다** — 「철회가 있는지 못 읽었다」를 「없다」로도
+        #:   「무효다」로도 접지 않는다.
         stats.bump("approval_ledger_unreadable")
-        return False
+        raise
     if revoked:
         stats.bump("approval_invalidated")
         return False

@@ -328,8 +328,17 @@ class DecisionLedger:
             "ONTOLOGY_MODEL_APPROVED": "ontology_model_contract",
             "ONTOLOGY_RELATION_APPROVED": "ontology_relation",
             "ONTOLOGY_RELATION_RETIRED": "ontology_relation",
-            "ONTOLOGY_APPROVAL_REVOKED": "ontology_relation",
         }
+        #: ★★★ [2026-08-20 Supervisor 지적] 철회는 **관계와 계약 둘 다** 대상이 될 수
+        #:   있다. `ontology_relation` 으로 고정하면 **모델 계약 승인을 철회할 방법이
+        #:   없다** — 잘못 설치된 계약을 되돌릴 수 없다는 뜻이다.
+        _REVOKE_SUBJECTS = ("ontology_relation", "ontology_model_contract")
+        if event_type == "ONTOLOGY_APPROVAL_REVOKED":
+            if subject_type not in _REVOKE_SUBJECTS:
+                raise DecisionLedgerError(
+                    f"'ONTOLOGY_APPROVAL_REVOKED' 의 subject_type 은 "
+                    f"{list(_REVOKE_SUBJECTS)} 중 하나여야 "
+                    f"합니다(받은 값: '{subject_type}').")
         want_subject = _ONTOLOGY_SUBJECT.get(event_type)
         if want_subject and subject_type != want_subject:
             raise DecisionLedgerError(
@@ -383,11 +392,38 @@ class DecisionLedger:
           한쪽만 고쳐지는 날 체인 해시가 갈리고, 그때 `verify_chain` 은 「누군가
           장부를 고쳤다」고 말한다 — 실제로는 우리가 두 번 구현했을 뿐인데."""
         parent_event_id = row.get("parent_event_id") or ""
-        if parent_event_id and not conn.execute(
-                "SELECT 1 FROM decision_ledger_events WHERE event_id=?",
-                (parent_event_id,)).fetchone():
-            raise DecisionLedgerError(
-                f"존재하지 않는 parent_event_id 입니다: {parent_event_id}")
+        parent = None
+        if parent_event_id:
+            parent = conn.execute(
+                "SELECT event_type, subject_type, subject_id "
+                "  FROM decision_ledger_events WHERE event_id=?",
+                (parent_event_id,)).fetchone()
+            if not parent:
+                raise DecisionLedgerError(
+                    f"존재하지 않는 parent_event_id 입니다: {parent_event_id}")
+
+        #: ★★★ [MVP-P0 ①-B / 2026-08-20] **철회는 «그 승인의 그 대상» 이어야 한다.**
+        #:
+        #: ⚠️⚠️ 부모 연결만 보면, **다른 관계 id 를 적은 철회**로도 원 승인을 무효화할 수
+        #:   있다. 그러면 「무엇이 철회됐는가」가 이력에서 어긋나고, 감사에서 두 기록이
+        #:   서로 다른 대상을 가리킨다.
+        #: ★ 그래서 부모가 온톨로지 승인인지, 대상 종류·식별자가 같은지까지 본다.
+        if row.get("event_type") == "ONTOLOGY_APPROVAL_REVOKED":
+            _APPROVALS = ("ONTOLOGY_MODEL_APPROVED", "ONTOLOGY_RELATION_APPROVED",
+                          "ONTOLOGY_RELATION_RETIRED")
+            ptype = str(parent["event_type"]) if parent else ""
+            if ptype not in _APPROVALS:
+                raise DecisionLedgerError(
+                    f"철회의 parent_event_id 는 온톨로지 승인 이벤트여야 합니다"
+                    f"(부모 유형: '{ptype or '(없음)'}').")
+            if str(parent["subject_type"]) != str(row.get("subject_type") or ""):
+                raise DecisionLedgerError(
+                    f"철회 대상 종류가 원 승인과 다릅니다: "
+                    f"'{row.get('subject_type')}' ≠ '{parent['subject_type']}'.")
+            if str(parent["subject_id"]) != str(row.get("subject_id") or ""):
+                raise DecisionLedgerError(
+                    f"철회 대상이 원 승인과 다릅니다: "
+                    f"'{row.get('subject_id')}' ≠ '{parent['subject_id']}'.")
         last = conn.execute("SELECT seq, event_hash FROM decision_ledger_events "
                             "ORDER BY seq DESC LIMIT 1").fetchone()
         row["seq"] = (int(last["seq"]) + 1) if last else 1
@@ -485,6 +521,37 @@ class DecisionLedger:
         raise DecisionLedgerError(
             f"원장을 읽지 못했습니다"
             f"(무효화 이벤트 조회): {last}")
+
+    def get_event_strict(self, event_id: str) -> Optional[Dict[str, Any]]:
+        """`get_event` 와 같지만 **판독 실패를 던진다.**
+
+        ★★★ [2026-08-20 Supervisor 지적] `get_event()` 는 DB 장애를 `None` 으로 접는다.
+          조회 화면에서는 그편이 편하지만, **승인 판정**에서는 그것이 곧
+          「승인 이벤트가 없다」가 되고 — 더 위험하게는 반대로, 장애가 나면 승인이
+          조용히 거부/허용되는 쪽으로 기운다.
+
+        ⚠️ 승인처럼 «모르면 막아야 하는» 자리는 **모른다는 사실 자체를 알아야** 한다.
+          그래서 여기서는 `DecisionLedgerError` 로 올린다."""
+        self._ready()
+        last = None
+        for attempt in (0, 1):
+            try:
+                with self._connect() as conn:
+                    r = conn.execute(
+                        "SELECT * FROM decision_ledger_events WHERE event_id=?",
+                        (event_id,)).fetchone()
+                return self._to_public(dict(r)) if r else None
+            except sqlite3.OperationalError as exc:
+                last = exc
+                if attempt == 0 and self._ensure_tables():
+                    continue
+                break
+            except Exception as exc:                       # pragma: no cover - 방어
+                last = exc
+                break
+        raise DecisionLedgerError(
+            f"원장을 읽지 못했습니다"
+            f"(승인 이벤트 조회): {last}")
 
     def list_events(self, subject_type: str = "", subject_id: str = "",
                     event_type: str = "", project_id: str = "", blueprint_id: str = "",

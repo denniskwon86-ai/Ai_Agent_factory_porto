@@ -61,10 +61,16 @@ TABLES = [
     ("data/decision_ledger.db", "decision_ledger_events"),
     ("data/ontology.db", "semantic_relations"),
     ("data/ontology.db", "semantic_model_contracts"),
+    #: ★★★ [2026-08-20 Supervisor 지적] **실제 표 이름을 쓴다.** 종전에는 존재하지
+    #:   않는 `kits` 를 셌고, 전후 모두 `unreadable` 이라 비교가 **조용히 초록**이었다 —
+    #:   없는 표를 세는 검사는 아무것도 지키지 않으면서 지키는 것처럼 보인다.
     ("data/data_preparation.db", "kit_instances"),
     ("data/data_preparation.db", "dataset_snapshots"),
+    ("data/data_preparation.db", "source_bindings"),
+    ("data/data_preparation.db", "readiness_evaluations"),
+    ("data/data_preparation.db", "baseline_builds"),
     #: ★ 키트 레지스트리는 화면 검증이 만든다 — 그 사실을 «보고» 넘어가려면 세야 한다.
-    ("data/data_preparation.db", "kits"),
+    ("data/data_preparation.db", "kit_registry_versions"),
 ]
 
 #: 화면 검증 뒤에 **파일이 생기는 것**까지만 봐준다(§5.2 에 이미 적혀 있던 사실:
@@ -79,10 +85,15 @@ BROWSER_ALLOWED_FILES = {"data/data_preparation.db", "data/data_preparation.db-w
 #:   화면 검증 한 번으로 업무 데이터가 운영 영역에 들어와도 초록이 뜬다.
 #: ★ 그래서 표 단위로 못박는다: 화면 검증이 만들어도 되는 것은 **키트 레지스트리뿐**이고,
 #:   업무 행(인스턴스·판)은 **0 이어야 한다.**
-BROWSER_MAX_ROWS = {
-    "data/data_preparation.db:kit_instances": 0,
-    "data/data_preparation.db:dataset_snapshots": 0,
-}
+#: ⚠️⚠️ 「상한 0」이 아니라 **「전후 같아야 한다」**이다. 상한만 보면 기준선 1건 → 0건
+#:   **삭제도 통과**한다 — 사라진 것도 이상한 일이고, 누가 지웠는지 물어야 한다.
+PROTECTED_ROWS = (
+    "data/data_preparation.db:kit_instances",
+    "data/data_preparation.db:dataset_snapshots",
+    "data/data_preparation.db:source_bindings",
+    "data/data_preparation.db:readiness_evaluations",
+    "data/data_preparation.db:baseline_builds",
+)
 
 
 def _file_state(rel: str) -> dict | None:
@@ -112,10 +123,50 @@ def _rows(rel: str, table: str) -> int | str | None:
         return "unreadable"
 
 
+def _content(rel: str, table: str) -> str | None:
+    """보호 표의 **정렬된 내용 지문.** 없으면 `None`, 못 읽으면 `"unreadable"`.
+
+    ★★★ [2026-08-20 Supervisor 지적 P0-2] **행 수만 비교하면 변조를 놓친다.**
+      browser 모드는 `data_preparation.db` 의 파일 변경을 허용하므로, 행 수가 같은
+      다음 변조가 그대로 통과한다:
+
+        · `source_bindings.state` 를 바꾼다        · Snapshot checksum 을 바꾼다
+        · readiness 판정값을 고친다                 · baseline fingerprint 를 갈아끼운다
+        · 기존 레코드의 **조직 범위**를 바꾼다
+
+    ⚠️ 마지막 것이 특히 나쁘다 — 남의 조직 데이터가 우리 것으로 보이게 되는데
+      **행 수는 그대로**다.
+
+    ★ 그래서 전 행을 정렬해 한 줄로 잇고 해시한다. 열 순서는 `PRAGMA table_info` 의
+      순서를 쓰되 **이름순으로 고정**한다 — 열이 추가돼도 기존 열의 비교가 흔들리지
+      않게.
+    ⚠️ `immutable=1` — 읽기가 SHM 을 만들지 않게(이 검사가 자기를 오염시키지 않게)."""
+    path = ROOT / rel
+    if not path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{path}?immutable=1", uri=True)
+        try:
+            cols = sorted(str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})"))
+            if not cols:
+                return "unreadable"
+            picked = ", ".join(f'"{c}"' for c in cols)
+            rows = conn.execute(f"SELECT {picked} FROM {table}").fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return "unreadable"
+    #: ★ 행 순서는 저장소가 정한다 — 우리가 **정렬**해야 비교가 안정된다.
+    canon = "\n".join(sorted(repr(tuple(r)) for r in rows))
+    return hashlib.sha256((",".join(cols) + "\n" + canon).encode("utf-8")).hexdigest()[:16]
+
+
 def snapshot() -> dict:
     return {
         "files": {rel: _file_state(rel) for rel in WATCH},
         "rows": {f"{rel}:{tab}": _rows(rel, tab) for rel, tab in TABLES},
+        #: ★ 보호 표만 내용까지 본다 — 전 표를 해시하면 느리고, 지켜야 할 것은 업무 행이다.
+        "content": {key: _content(*key.split(":", 1)) for key in PROTECTED_ROWS},
     }
 
 
@@ -207,18 +258,26 @@ def cmd_compare(mode: str) -> int:
         rel = key.split(":", 1)[0]
         #: ★★★ [P0-4] **파일 허용과 표 허용을 분리한다.** browser 모드라도 업무 행이
         #:   늘면 실패다 — 화면 검증이 만들어도 되는 것은 키트 레지스트리뿐이다.
-        cap = BROWSER_MAX_ROWS.get(key) if mode == "browser" else None
-        if cap is not None:
-            ok = isinstance(a, int) and a <= cap
-            print(f"  {'●' if ok else '✗'} {key} {b} → {a} (browser 상한 {cap})")
-            if not ok:
-                bad.append(key)
+        if mode == "browser" and key in PROTECTED_ROWS:
+            #: ★★★ 보호 표는 **증감 둘 다** 실패다(여기 온 것 자체가 이미 달라진 것).
+            print(f"  ✗ {key} {b} → {a} (browser 에서도 업무 행은 그대로여야 한다)")
+            bad.append(key)
             continue
-        file_ok = rel in allowed and key not in BROWSER_MAX_ROWS
+        file_ok = rel in allowed and key not in PROTECTED_ROWS
         note = " (화면 검증에서 예상됨)" if file_ok else ""
         print(f"  {'●' if file_ok else '✗'} {key} {b} → {a}{note}")
         if not file_ok:
             bad.append(key)
+
+    print("=== 보호 표 내용 ===")
+    for key in PROTECTED_ROWS:
+        b = (before.get("content") or {}).get(key)
+        a = (after.get("content") or {}).get(key)
+        if b == a:
+            continue
+        #: ★★★ 행 수가 같아도 내용이 바뀌면 위반이다 — browser 모드도 예외가 아니다.
+        print(f"  ✗ {key} 내용이 바뀜 {b} → {a}")
+        bad.append(f"{key}(내용)")
 
     print()
     if bad:
