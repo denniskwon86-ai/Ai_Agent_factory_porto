@@ -38,7 +38,7 @@ import sqlite3
 import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from core.paths import data_path
 
 _DB_PATH = data_path("decision_ledger.db")
@@ -112,6 +112,21 @@ EVENT_TYPES = (
     "APP_CONTRACT_REVIEW_REQUESTED",
     "APP_CONTRACT_APPROVED",
     "APP_CONTRACT_REJECTED",
+    # ★★★ [MVP-P0 ①-B / 2026-08-20] **온톨로지 전용 승인 이벤트.**
+    #
+    #   ⚠️⚠️ 종전에는 범용 이벤트(`DECISION_RECORDED` 등)를 온톨로지 승인으로 재사용하려
+    #     했다. 그러면 **같은 행위자의 아무 결정 하나로 다른 관계 승인을 통과**시킬 수
+    #     있고, `PUBLICATION_WITHDRAWN` 이 관계 폐지를 승인하는 도메인 착오도 생긴다.
+    #   ★ 승인은 «무엇을» 승인했는지가 절반이다. 그래서 목적별 전용 유형을 두고,
+    #     `subject_type`·`subject_id` 로 **대상**을 못박는다.
+    #       · ONTOLOGY_MODEL_APPROVED    → subject_id = 계약 지문(contract_fingerprint)
+    #       · ONTOLOGY_RELATION_APPROVED → subject_id = relation_id
+    #       · ONTOLOGY_RELATION_RETIRED  → subject_id = relation_id
+    "ONTOLOGY_MODEL_APPROVED",
+    "ONTOLOGY_RELATION_APPROVED",
+    "ONTOLOGY_RELATION_RETIRED",
+    #: ⚠️ 승인 철회. `parent_event_id` 로 원 승인을 가리킨다 — 그러면 그 승인은 죽는다.
+    "ONTOLOGY_APPROVAL_REVOKED",
     "CORRECTION",                  # 정정 전용 — 반드시 parent_event_id 를 가진다
 )
 
@@ -129,7 +144,11 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  "app_dataset",
                  # [I-4 4단계] 계약은 릴리스도 데이터셋도 아니다 — «이 릴리스가 어떻게
                  #   됐나» 와 «이 계약이 언제 어떤 지문으로 승인됐나» 는 다른 질문이다.
-                 "app_contract")
+                 "app_contract",
+                 # [MVP-P0 ①-B] 온톤로지 주체 — 계약과 관계는 **다른 질문**이다.
+                 #   «이 온톤로지 계약이 언제 어떤 지문으로 승인됐나» 와
+                 #   «이 관계를 누가 승인·폐지했나» 를 뜼개면 둘 다 답할 수 없다.
+                 "ontology_model_contract", "ontology_relation")
 
 
 class DecisionLedgerError(ValueError):
@@ -301,6 +320,27 @@ class DecisionLedger:
         두 벌이면 트랜잭션 경로만 검증이 느슨해지는 날이 온다."""
         if event_type not in EVENT_TYPES:
             raise DecisionLedgerError(f"등록되지 않은 event_type 입니다: {event_type}")
+        #: ★★★ [MVP-P0 ①-B / P1] **온톨로지 이벤트는 주체 조합까지 검증한다.**
+        #:
+        #: ⚠️ 유형만 맞고 주체가 아무거나면, 「관계 승인」 이벤트에 프로젝트 id 를 넣어
+        #:   두고 나중에 그 이벤트로 관계를 통과시킬 수 있다.
+        _ONTOLOGY_SUBJECT = {
+            "ONTOLOGY_MODEL_APPROVED": "ontology_model_contract",
+            "ONTOLOGY_RELATION_APPROVED": "ontology_relation",
+            "ONTOLOGY_RELATION_RETIRED": "ontology_relation",
+            "ONTOLOGY_APPROVAL_REVOKED": "ontology_relation",
+        }
+        want_subject = _ONTOLOGY_SUBJECT.get(event_type)
+        if want_subject and subject_type != want_subject:
+            raise DecisionLedgerError(
+                f"'{event_type}' 의 subject_type 은 '{want_subject}' "
+                f"여야 합니다(받은 값: '{subject_type}').")
+        #: ⚠️ 철회는 **무엇을 철회하는지** 가리켜야 한다. 부모 없는 철회는 아무것도
+        #:   무효로 만들지 못하면서 «철회했다» 는 기록만 남긴다.
+        if event_type == "ONTOLOGY_APPROVAL_REVOKED" and not (parent_event_id or "").strip():
+            raise DecisionLedgerError(
+                "'ONTOLOGY_APPROVAL_REVOKED' 는 parent_event_id 로 "
+                "원 승인을 가리켜야 합니다.")
         if subject_type not in SUBJECT_TYPES:
             raise DecisionLedgerError(f"등록되지 않은 subject_type 입니다: {subject_type}")
         if actor_type not in ACTOR_TYPES:
@@ -403,6 +443,48 @@ class DecisionLedger:
             except Exception:
                 return None
         return None
+
+    def has_invalidating_child(self, parent_event_id: str,
+                               event_types: Sequence[str]) -> bool:
+        """이 이벤트를 **부모로 가리키는** 무효화 이벤트가 있는가.
+
+        ★★★ [2026-08-20 Supervisor 지적 P0-2] `list_events()` 로 대신하면 안 된다:
+
+          · `LIMIT` 이 있다 — 철회 뒤에 **무관한 이벤트가 100건 넘게 쌓이면** 철회가
+            조회 범위 밖으로 밀려나고 **원 승인이 되살아난다.**
+          · 판독 실패를 **빈 배열로 접는다** — 그러면 원장 장애가 「철회 없음」이 된다.
+
+        ★ 그래서 여기서는 **제한 없이 인덱스로** 묻고, 못 읽으면 **던진다.**
+          「모르니까 유효」는 승인 판정에서 가장 위험한 기본값이다.
+
+        ⚠️ 판독 실패는 `DecisionLedgerError` 다 — 호출부가 그것을 «없음» 으로 접지
+          못하게 예외로 올린다."""
+        pid = str(parent_event_id or "").strip()
+        wanted = tuple(str(t).strip() for t in (event_types or ()) if str(t).strip())
+        if not pid or not wanted:
+            return False
+        self._ready()
+        marks = ",".join("?" * len(wanted))
+        sql = ("SELECT 1 FROM decision_ledger_events "
+               f"WHERE parent_event_id=? AND event_type IN ({marks}) LIMIT 1")
+        last = None
+        for attempt in (0, 1):
+            try:
+                with self._connect() as conn:
+                    row = conn.execute(sql, (pid, *wanted)).fetchone()
+                return row is not None
+            except sqlite3.OperationalError as exc:
+                last = exc
+                if attempt == 0 and self._ensure_tables():
+                    continue
+                break
+            except Exception as exc:                       # pragma: no cover - 방어
+                last = exc
+                break
+        #: ⚠️ 빈 결과로 접지 않는다 — 「못 읽었다」와 「철회가 없다」는 다른 사실이다.
+        raise DecisionLedgerError(
+            f"원장을 읽지 못했습니다"
+            f"(무효화 이벤트 조회): {last}")
 
     def list_events(self, subject_type: str = "", subject_id: str = "",
                     event_type: str = "", project_id: str = "", blueprint_id: str = "",
