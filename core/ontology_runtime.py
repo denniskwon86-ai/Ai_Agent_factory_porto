@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from core import app_policy
+from core import ontology_resolve
 from core.ontology_errors import OntologyResolverError
 from core.paths import data_path
 
@@ -118,7 +119,13 @@ class RelationProposal:
     supersedes_relation_id: str = ""
 
 
-ObjectScopeResolver = Callable[[ObjectRef], Optional[app_policy.ResourceScope]]
+#: ★★★ [2026-08-20 §7-0] **문맥을 함께 넘긴다.** 종전 서명은 `ObjectRef` 하나였고,
+#:   그래서 Resolver 는 자기가 «임의 조회» 로 불렸는지 «승인된 관계의 끝점» 으로
+#:   불렸는지 몰랐다 — 정반대의 답이 필요한 두 자리인데도.
+#: ⚠️ 깨는 변경이다. 지금이 가장 싸다: 배선된 Resolver 가 `ecm` 하나뿐이고,
+#:   그마저 이 계약의 제약에는 쓰이지 않는다.
+ObjectScopeResolver = Callable[[ObjectRef, ontology_resolve.ResolveContext],
+                               ontology_resolve.ObjectResolution]
 
 #: ★★★ [MVP-P0 ①-B] 승인 판정기는 **다섯 인자**다 —
 #:   `(ledger_event_id, action, approver_id, target_type, target_id)`.
@@ -765,8 +772,11 @@ class OntologyRuntime:
                                        e["object_type"], e["object_id"], e["relation_id"]))
 
         paths: List[dict] = []
+        #: ★ 사용자가 고른 시작점 — **없으면 없는 것**이다(빈 결과).
+        root_ctx = ontology_resolve.ResolveContext(
+            purpose=ontology_resolve.ROOT_LOOKUP, as_of=instant)
         for root in sorted(set(roots)):
-            if not self._object_visible(subject, root):
+            if not self._object_visible(subject, root, root_ctx):
                 continue
             queue = deque([(root, tuple(), (root,))])
             while queue and len(paths) < min(max_paths, MAX_PATHS):
@@ -775,7 +785,15 @@ class OntologyRuntime:
                     continue
                 for edge in adjacency.get(node, ()):  # no hidden-node bypass
                     nxt = self._object_ref(edge)
-                    if nxt in path_nodes or not self._object_visible(subject, nxt):
+                    if nxt in path_nodes:
+                        continue
+                    #: ⚠️⚠️ 여기는 **이미 승인된 관계**를 따라가는 중이다. 끝점이 없으면
+                    #:   그것은 「경로가 없다」가 아니라 **자료가 사라진 사고**다.
+                    edge_ctx = ontology_resolve.ResolveContext(
+                        purpose=ontology_resolve.RELATION_ENDPOINT, as_of=instant,
+                        relation_id=edge["relation_id"],
+                        evidence_refs=tuple(json.loads(edge["evidence_refs_json"]) or ()))
+                    if not self._object_visible(subject, nxt, edge_ctx):
                         continue
                     next_edges = path_edges + (edge,)
                     next_nodes = path_nodes + (nxt,)
@@ -822,7 +840,12 @@ class OntologyRuntime:
         if not app_policy.decide(subject, self._relation_scope(item), app_policy.READ).allowed:
             return None
         sref, oref = self._subject_ref(item), self._object_ref(item)
-        if not self._object_visible(subject, sref) or not self._object_visible(subject, oref):
+        ev_ctx = ontology_resolve.ResolveContext(
+            purpose=ontology_resolve.EVIDENCE_VALIDATION, as_of=instant_text,
+            relation_id=str(item.get("relation_id", "")),
+            evidence_refs=tuple(json.loads(item.get("evidence_refs_json") or "[]") or ()))
+        if (not self._object_visible(subject, sref, ev_ctx)
+                or not self._object_visible(subject, oref, ev_ctx)):
             return None
         return {
             "relation_id": item["relation_id"], "relation_type_id": item["relation_type_id"],
@@ -895,9 +918,14 @@ class OntologyRuntime:
         """A proposal needs both endpoint visibility and write access to its scope."""
         if self.object_scope_resolver is None:
             raise OntologyIntegrityError("object scope resolver is not configured.")
-        if not self._object_visible(subject, proposal.subject):
+        #: ★ 제안 시점의 판을 본다 — `effective_from` 이 그 관계가 서기 시작하는 때다.
+        prop_ctx = ontology_resolve.ResolveContext(
+            purpose=ontology_resolve.RELATION_PROPOSAL,
+            as_of=str(proposal.effective_from or ""),
+            evidence_refs=tuple(proposal.evidence_refs or ()))
+        if not self._object_visible(subject, proposal.subject, prop_ctx):
             raise OntologyAccessError("the relation endpoints are not available in this context.")
-        if not self._object_visible(subject, proposal.object):
+        if not self._object_visible(subject, proposal.object, prop_ctx):
             raise OntologyAccessError("the relation endpoints are not available in this context.")
         scope = app_policy.ResourceScope(
             tenant_id=proposal.tenant_id, entity_mode=proposal.entity_mode,
@@ -921,9 +949,14 @@ class OntologyRuntime:
             raise OntologyAccessError("the relation cannot be changed in this context.")
         if self.object_scope_resolver is None:
             raise OntologyIntegrityError("object scope resolver is not configured.")
-        if not self._object_visible(subject, self._subject_ref(row)):
+        row_ctx = ontology_resolve.ResolveContext(
+            purpose=ontology_resolve.RELATION_ENDPOINT,
+            as_of=str(row.get("effective_from", "") or ""),
+            relation_id=str(row.get("relation_id", "")),
+            evidence_refs=tuple(json.loads(row.get("evidence_refs_json") or "[]") or ()))
+        if not self._object_visible(subject, self._subject_ref(row), row_ctx):
             raise OntologyAccessError("the relation endpoints are not available in this context.")
-        if not self._object_visible(subject, self._object_ref(row)):
+        if not self._object_visible(subject, self._object_ref(row), row_ctx):
             raise OntologyAccessError("the relation endpoints are not available in this context.")
 
     def _assert_approval(self, ledger_id: str, action: str, actor: str,
@@ -1007,12 +1040,57 @@ class OntologyRuntime:
                 visible.append(row)
         return visible
 
-    def _object_visible(self, subject: app_policy.Subject, ref: ObjectRef) -> bool:
+    def _object_visible(self, subject: app_policy.Subject, ref: ObjectRef,
+                        ctx: ontology_resolve.ResolveContext) -> bool:
+        """끝점 하나가 **이 문맥에서 보이는가.**
+
+        ## 판정표 (2026-08-20 §7-0 · Supervisor 확정)
+
+            FOUND        → PDP 가 결정한다. 권한 판정은 **여기서 하지 않는다**
+            NOT_FOUND    → ROOT_LOOKUP 이면 «없다»(빈 결과) · 그 밖에는 **503**
+            UNBOUND      → 위와 같다. 다만 사유가 다르다(있는데 어느 판에도 안 묶임)
+            UNAVAILABLE  → 언제나 **503**. 못 읽은 것을 없는 것으로 접지 않는다
+            AMBIGUOUS    → 언제나 **503**. 아무거나 고르면 재실행 지문이 흔들린다
+
+        ⚠️⚠️ `NOT_FOUND` 를 어디서나 «없음» 으로 접으면, **승인된 관계가 가리키는 자료가
+          사라진 사고**가 화면에서는 「영향 경로 없음」이라는 평온한 사실로 보인다.
+          사람은 그것을 읽고 「영향이 없구나」 하고 넘어간다."""
+        if self.object_scope_resolver is None:
+            raise OntologyIntegrityError("object scope resolver is not configured.")
         try:
-            scope = self.object_scope_resolver(ref) if self.object_scope_resolver else None
+            res = self.object_scope_resolver(ref, ctx)
         except Exception as exc:
             raise OntologyIntegrityError("object scope resolution failed.") from exc
-        return bool(scope and app_policy.decide(subject, scope, app_policy.READ).allowed)
+        if not isinstance(res, ontology_resolve.ObjectResolution):
+            #: ⚠️ 옛 서명(`ResourceScope | None`)을 돌려주는 Resolver 를 **조용히 받지
+            #:   않는다.** 받으면 `None` 이 다시 «안 보임» 이 되어 이 판정표가 무력해진다.
+            raise OntologyIntegrityError(
+                "object scope resolver must return an ObjectResolution.")
+
+        if res.status == ontology_resolve.FOUND:
+            #: ★ 승인 때 봉인한 판이 있으면 **그 판이어야 한다.**
+            #: ⚠️ 다른 판으로 답하면 「그때 승인한 그 자료」가 아니게 되고, 근거가
+            #:   조용히 바뀐다 — 감사에서 두 기록이 서로 다른 것을 가리킨다.
+            if ctx.required_snapshot_id and res.snapshot_id != ctx.required_snapshot_id:
+                raise OntologyIntegrityError(
+                    f"endpoint {ref.key} resolves to snapshot {res.snapshot_id!r} "
+                    f"but the relation is sealed to {ctx.required_snapshot_id!r}.")
+            return bool(res.resource_scope
+                        and app_policy.decide(subject, res.resource_scope,
+                                              app_policy.READ).allowed)
+
+        if res.status in (ontology_resolve.NOT_FOUND, ontology_resolve.UNBOUND):
+            if ctx.absence_is_normal:
+                return False
+            raise OntologyIntegrityError(
+                f"endpoint {ref.key} is required by {ctx.purpose} but resolved as "
+                f"{res.status}: {res.reason or 'no reason given'}")
+
+        #: UNAVAILABLE · AMBIGUOUS — 목적과 무관하게 장애다.
+        raise OntologyIntegrityError(
+            f"endpoint {ref.key} resolved as {res.status}: "
+            f"{res.reason or 'no reason given'}"
+            + (f" candidates={list(res.candidates)}" if res.candidates else ""))
 
     @staticmethod
     def _subject_ref(row: dict) -> ObjectRef:

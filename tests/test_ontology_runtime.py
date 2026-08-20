@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from core import app_policy
+from core import ontology_resolve
 from core.ontology_runtime import (
     ObjectRef, OntologyError, OntologyIntegrityError, OntologyRuntime, RelationProposal,
 )
@@ -27,14 +28,18 @@ def _subject(tenant="tenant_demo", mode="VIRTUAL", selected="plant_demo",
 
 
 def _resolver(hidden=frozenset(), tenant="tenant_demo", mode="VIRTUAL"):
-    def resolve(ref: ObjectRef):
+    """시험 대역. ★ **제품과 같은 두 인자·같은 반환형**이어야 시험이 제품을 대신한다.
+
+    ⚠️ `hidden` 은 «없다» 가 아니라 «다른 조직 것이다» 를 뜻한다 — 그래서 `FOUND` 를
+      돌려주되 범위를 남의 것으로 준다. 그래야 PDP 가 막는 것을 본다."""
+    def resolve(ref: ObjectRef, ctx: ontology_resolve.ResolveContext):
         if ref.key in hidden:
-            return app_policy.ResourceScope(
+            return ontology_resolve.found(app_policy.ResourceScope(
                 tenant_id=tenant, entity_mode=mode, scope_node_id="secret_plant",
-                owner_dept_id="secret_org", binding_state=app_policy.BOUND)
-        return app_policy.ResourceScope(
+                owner_dept_id="secret_org", binding_state=app_policy.BOUND))
+        return ontology_resolve.found(app_policy.ResourceScope(
             tenant_id=tenant, entity_mode=mode, scope_node_id="plant_demo",
-            owner_dept_id="org_demo", binding_state=app_policy.BOUND)
+            owner_dept_id="org_demo", binding_state=app_policy.BOUND))
     return resolve
 
 

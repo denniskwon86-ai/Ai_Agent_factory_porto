@@ -38,6 +38,7 @@ import threading
 from typing import TYPE_CHECKING, Dict, Optional
 
 from core import app_policy
+from core import ontology_resolve
 from core.ontology_errors import OntologyResolverError
 
 #: ⚠️ 모듈 수준에서 `ontology_runtime` 을 읽지 않는다 — 그쪽이 이쪽을 다시 읽어
@@ -120,7 +121,7 @@ def _scope(tenant_id: str, entity_mode: str, scope_node_id: str,
 
 
 # ── namespace 별 해석 ────────────────────────────────────────────────────
-def _resolve_ecm(ref: "ObjectRef"):
+def _resolve_ecm(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     """조직 노드. 노드 자신이 자기 범위다.
 
     ⚠️⚠️ [2026-08-20 Supervisor 지적] `entity_mode` 를 `"REAL"` 로 **고정하면 안 된다.**
@@ -138,9 +139,11 @@ def _resolve_ecm(ref: "ObjectRef"):
         raise OntologyResolverError("ECM 조직 노드를 "
                                     "읽지 못했습니다.") from exc
     if not node:
-        #: ★ 없는 것은 **없는 것**이다 — 존재를 누설하지 않도록 `None`.
+        #: ★ 없는 것은 **없는 것**이다. 무엇을 할지는 **런타임이 문맥으로 정한다** —
+        #:   임의 조회면 빈 결과, 승인된 관계의 끝점이면 무결성 장애(503).
+        #: ⚠️ 여기서 존재 여부를 메시지로 누설하지 않는다.
         stats.bump("ecm_not_found")
-        return None
+        return ontology_resolve.not_found("조직 노드가 없습니다.")
     try:
         entity = ecm_repository.get_entity(getattr(node, "entity_id", "") or "")
     except Exception as exc:
@@ -166,12 +169,15 @@ def _resolve_ecm(ref: "ObjectRef"):
             "조직의 실행 문맥(entity_mode)이 "
             "비어 있습니다 — 실적과 "
             "시나리오를 구분할 수 없습니다.")
-    return _scope(getattr(node, "tenant_id", ""), mode, getattr(node, "node_id", ""),
-                  owner_dept_id=getattr(node, "dept_id", ""),
-                  status="active" if getattr(node, "status", "") == "ACTIVE" else "retired")
+    scope = _scope(getattr(node, "tenant_id", ""), mode, getattr(node, "node_id", ""),
+                   owner_dept_id=getattr(node, "dept_id", ""),
+                   status="active" if getattr(node, "status", "") == "ACTIVE" else "retired")
+    #: ★ 조직 노드는 인증판에서 오는 것이 아니므로 `snapshot_id` 가 없다.
+    #: ⚠️ 그래서 봉인된 판을 요구하는 문맥에서는 **쓸 수 없다** — 런타임이 막는다.
+    return ontology_resolve.found(scope, data_kind=mode)
 
 
-def _resolve_dataset(ref: "ObjectRef"):
+def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     """업무 객체(선적·발주라인·재고·생산계획라인 …)의 범위.
 
     ⚠️⚠️ [2026-08-20 Supervisor 지적] **아직 배선되지 않았다.**
@@ -199,7 +205,7 @@ def _resolve_dataset(ref: "ObjectRef"):
         f"dataset 범위 색인이 아직 없습니다({ref.key}).")
 
 
-def _resolve_mdm(ref: "ObjectRef"):
+def _resolve_mdm(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     """기준정보. **아직 범위 계약이 없다.**
 
     ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
@@ -211,7 +217,7 @@ def _resolve_mdm(ref: "ObjectRef"):
         f"없습니다({ref.key}).")
 
 
-def _resolve_external(ref: "ObjectRef"):
+def _resolve_external(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     """외부지표. **아직 범위 계약이 없다.**
 
     ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
@@ -223,7 +229,7 @@ def _resolve_external(ref: "ObjectRef"):
         f"없습니다({ref.key}).")
 
 
-def _resolve_g4(ref: "ObjectRef"):
+def _resolve_g4(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     """계산 Driver·결과. **아직 범위 계약이 없다.**
 
     ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
@@ -235,7 +241,7 @@ def _resolve_g4(ref: "ObjectRef"):
         f"없습니다({ref.key}).")
 
 
-def _resolve_decision(ref: "ObjectRef"):
+def _resolve_decision(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     """시나리오·의사결정. **아직 범위 계약이 없다.**
 
     ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
@@ -247,7 +253,7 @@ def _resolve_decision(ref: "ObjectRef"):
         f"없습니다({ref.key}).")
 
 
-def _resolve_knowledge(ref: "ObjectRef"):
+def _resolve_knowledge(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     """승인된 지식. **아직 범위 계약이 없다.**
 
     ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
@@ -274,25 +280,42 @@ _RESOLVERS = {
 }
 
 
-def product_object_scope_resolver(ref: "ObjectRef") -> Optional[app_policy.ResourceScope]:
-    """제품 ObjectScopeResolver. **모르면 `None`** — 런타임이 그 경로를 지운다."""
+def product_object_scope_resolver(
+        ref: "ObjectRef",
+        ctx: ontology_resolve.ResolveContext) -> ontology_resolve.ObjectResolution:
+    """제품 ObjectScopeResolver.
+
+    ★★★ [2026-08-20 §7-0] **범위·판·근거만 번역한다.** 사용자·조직 권한은 여기서
+      판정하지 않는다 — PDP(`app_policy.decide`)의 일이다. 두 곳에서 권한을 판정하면
+      규칙이 갈라지고, 갈라진 규칙은 언젠가 한쪽만 고쳐진다.
+
+    ⚠️ 「없음」을 어떻게 다룰지도 **여기서 정하지 않는다.** 같은 「없음」이 임의 조회
+      에서는 빈 결과이고 승인된 관계의 끝점에서는 503 이다. 그 판단은 문맥을 아는
+      런타임이 한다."""
     fn = _RESOLVERS.get(str(getattr(ref, "namespace", "")))
     if fn is None:
         #: ★ 모르는 namespace 는 **없는 것**으로 본다 — 계약이 닫힌 목록이므로,
         #:   여기 없는 이름은 애초에 우리 세계에 없는 것이다.
         stats.bump("unknown_namespace")
-        return None
+        return ontology_resolve.not_found("계약에 없는 namespace 입니다.")
     try:
-        return fn(ref)
-    except OntologyResolverError:
-        #: ⚠️ [P0-3] **장애는 그대로 올린다.** 런타임이 503 으로 바꾼다.
-        raise
+        res = fn(ref, ctx)
+    except OntologyResolverError as exc:
+        #: ⚠️ [P0-3] 장애를 «없음» 으로 접지 않는다. 이제는 상태로 말한다 —
+        #:   런타임이 목적과 무관하게 503 으로 바꾼다.
+        stats.bump("resolver_unavailable")
+        return ontology_resolve.unavailable(str(exc))
     except Exception as exc:
-        #: ⚠️ 판독 실패를 «없음» 으로 접지 않는다 — 그것이 P0-3 이다.
         stats.bump("resolver_error")
-        raise OntologyResolverError(
-            "범위를 해석하지 못했습니다"
-            f"({getattr(ref, 'key', '?')}).") from exc
+        return ontology_resolve.unavailable(
+            f"범위를 해석하지 못했습니다({getattr(ref, 'key', '?')}): {exc}")
+    if not isinstance(res, ontology_resolve.ObjectResolution):
+        #: ⚠️⚠️ 옛 서명으로 남은 해석기를 **조용히 받지 않는다.** 받으면 `None` 이 다시
+        #:   «안 보임» 이 되어 목적별 판정이 통째로 무력해진다.
+        stats.bump("resolver_contract_violation")
+        return ontology_resolve.unavailable(
+            f"해석기가 ObjectResolution 을 돌려주지 않았습니다({ref.key}).")
+    return res
 
 
 # ── 승인 판정 ────────────────────────────────────────────────────────────

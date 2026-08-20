@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from api.deps import Principal, current_principal
 from api.routes import ontology_control
 from core import app_policy
+from core import ontology_resolve
 from core.ontology_runtime import ObjectRef, OntologyRuntime
 
 
@@ -26,14 +27,14 @@ def _principal(user="steward@example.com"):
 
 
 def _resolver(hidden):
-    def resolve(ref: ObjectRef):
+    def resolve(ref: ObjectRef, ctx: ontology_resolve.ResolveContext):
         if ref.key in hidden:
-            return app_policy.ResourceScope(
+            return ontology_resolve.found(app_policy.ResourceScope(
                 tenant_id="tenant_demo", entity_mode="VIRTUAL", scope_node_id="secret_plant",
-                owner_dept_id="secret_org", binding_state=app_policy.BOUND)
-        return app_policy.ResourceScope(
+                owner_dept_id="secret_org", binding_state=app_policy.BOUND))
+        return ontology_resolve.found(app_policy.ResourceScope(
             tenant_id="tenant_demo", entity_mode="VIRTUAL", scope_node_id="plant_demo",
-            owner_dept_id="org_demo", binding_state=app_policy.BOUND)
+            owner_dept_id="org_demo", binding_state=app_policy.BOUND))
     return resolve
 
 
@@ -60,7 +61,7 @@ def _harness(tmp_path, monkeypatch, with_resolver=True, resolver_error=False):
     hidden = set()
     resolver = _resolver(hidden) if with_resolver else None
     if resolver_error:
-        def resolver(ref):
+        def resolver(ref, ctx):
             raise RuntimeError("scope store unavailable")
     runtime = OntologyRuntime(str(tmp_path / "ontology.db"),
                               resolver,

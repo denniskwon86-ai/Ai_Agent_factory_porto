@@ -16,8 +16,17 @@ import threading
 
 import pytest
 
+from core import ontology_resolve
 from core import ontology_resolvers as R
 from core.ontology_runtime import ObjectRef, OntologyRuntime
+
+
+def _ctx(purpose=ontology_resolve.ROOT_LOOKUP, **kw):
+    """시험용 조회 문맥. ★ 기본은 «임의 조회» — 「없음」이 정상인 **유일한** 자리다.
+
+    ⚠️ 그러니 여기서 통과한다고 어디서나 통과하는 것이 아니다. 목적별 판정은
+      런타임 판정표가 지키고, 그 시험은 `test_ontology_resolve_contract.py` 에 있다."""
+    return ontology_resolve.ResolveContext(purpose=purpose, **kw)
 
 
 @pytest.fixture
@@ -136,11 +145,12 @@ def test_ecm_노드는_소속_법인의_실행모드를_따른다(tmp_path, monk
         node_type="business_division", code="VT", name_ko="가상 사업부(시험)",
         status=STATUS_ACTIVE))
 
-    scope = R.product_object_scope_resolver(
-        ObjectRef("ecm", "organization_node", "node_virtual_t"))
-    assert scope is not None, "노드를 찾지 못했다 — 시험 전제가 깨졌다"
-    assert scope.entity_mode == "VIRTUAL", (
-        f"가상 조직을 «{scope.entity_mode}» 로 판정했다 — 시나리오가 실적으로 섞인다")
+    res = R.product_object_scope_resolver(
+        ObjectRef("ecm", "organization_node", "node_virtual_t"), _ctx())
+    assert res.status == ontology_resolve.FOUND, f"노드를 찾지 못했다: {res}"
+    assert res.resource_scope.entity_mode == "VIRTUAL", (
+        f"가상 조직을 «{res.resource_scope.entity_mode}» 로 판정했다 — "
+        "시나리오가 실적으로 섞인다")
 
 
 @pytest.mark.parametrize("namespace", ["dataset", "mdm", "external", "g4",
@@ -151,28 +161,35 @@ def test_배선되지_않은_namespace_는_장애로_올라온다(namespace):
     ⚠️ 그러면 런타임이 경로를 조용히 지우고 화면은 「영향 경로 없음」을 그린다 —
       사용자는 그것을 **사실**로 읽는다. 배선이 없는 것은 사실이 아니라 우리 쪽
       미완성이므로, **503 으로 드러나야** 한다."""
-    with pytest.raises(R.OntologyResolverError):
-        R.product_object_scope_resolver(ObjectRef(namespace, "some_type", "some_id"))
+    #: ★ [2026-08-20] 예외가 아니라 **상태**로 답이 바뀌었다. 「목적과 무관하게 장애」
+    #:   라는 규칙은 그대로이고, 그 규칙은 런타임 판정표가 지킨다.
+    res = R.product_object_scope_resolver(
+        ObjectRef(namespace, "some_type", "some_id"), _ctx())
+    assert res.status == ontology_resolve.UNAVAILABLE, (
+        f"{namespace} 미배선이 «{res.status}» 로 나왔다 — 조용히 사라질 수 있다")
 
 
 def test_없는_객체와_저장소_장애를_다르게_답한다(monkeypatch):
     """★★★ [P0-3] **대조군.** 「없다」와 「못 읽었다」가 같아지면 통제가 사라진다.
 
-    · 없는 조직 노드   → `None`(경로에서 지운다 — 존재를 누설하지 않는다)
-    · 저장소가 흔들림  → `OntologyResolverError`(→ 503)"""
+    · 없는 조직 노드   → `NOT_FOUND` (무엇을 할지는 **문맥**이 정한다)
+    · 저장소가 흔들림  → `UNAVAILABLE` (어느 문맥에서나 503)"""
     from core.enterprise_context.repository import ecm_repository
 
     #: ① 없는 것은 없는 것이다.
-    assert R.product_object_scope_resolver(
-        ObjectRef("ecm", "organization_node", "node_없는것_확실히")) is None
+    res = R.product_object_scope_resolver(
+        ObjectRef("ecm", "organization_node", "node_없는것_확실히"), _ctx())
+    assert res.status == ontology_resolve.NOT_FOUND, res
 
     #: ② 저장소 장애는 «없음» 이 아니다.
     def boom(_node_id):
         raise RuntimeError("저장소가 응답하지 않습니다")
 
     monkeypatch.setattr(ecm_repository, "get_node", boom)
-    with pytest.raises(R.OntologyResolverError):
-        R.product_object_scope_resolver(ObjectRef("ecm", "organization_node", "node_x"))
+    bad = R.product_object_scope_resolver(
+        ObjectRef("ecm", "organization_node", "node_x"), _ctx())
+    assert bad.status == ontology_resolve.UNAVAILABLE, bad
+    assert bad.status != res.status, "「없다」와 「못 읽었다」가 같아졌다"
 
 
 def test_철회_뒤_무관한_이벤트가_쌓여도_되살아나지_않는다(ledger):
@@ -237,8 +254,7 @@ def test_대상을_받지_않는_판정기는_주입될_수_없다(tmp_path):
 def test_막힌_사유를_세어_둔다():
     """⚠️ 로그만 남기면 아무도 세지 않는다 — 「왜 경로가 비었나」에 답할 수 있어야 한다."""
     before = R.stats.snapshot().get("mdm_not_wired", 0)
-    with pytest.raises(R.OntologyResolverError):
-        R.product_object_scope_resolver(ObjectRef("mdm", "material", "M1"))
+    R.product_object_scope_resolver(ObjectRef("mdm", "material", "M1"), _ctx())
     assert R.stats.snapshot().get("mdm_not_wired", 0) == before + 1
 
 
@@ -283,8 +299,9 @@ def test_빈_실행문맥은_자료_불일치이지_비노출이_아니다(monke
 
     monkeypatch.setattr(ecm_repository, "get_node", lambda _i: _Node())
     monkeypatch.setattr(ecm_repository, "get_entity", lambda _i: _Entity())
-    with pytest.raises(R.OntologyResolverError):
-        R.product_object_scope_resolver(ObjectRef("ecm", "organization_node", "n1"))
+    res = R.product_object_scope_resolver(
+        ObjectRef("ecm", "organization_node", "n1"), _ctx())
+    assert res.status == ontology_resolve.UNAVAILABLE, res
 
 
 def test_원장_판독_실패는_이벤트_없음과_구분된다(ledger, monkeypatch):
