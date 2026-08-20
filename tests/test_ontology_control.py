@@ -64,7 +64,8 @@ def _harness(tmp_path, monkeypatch, with_resolver=True, resolver_error=False):
             raise RuntimeError("scope store unavailable")
     runtime = OntologyRuntime(str(tmp_path / "ontology.db"),
                               resolver,
-                              lambda ledger_id, action, actor: bool(ledger_id and action and actor))
+                              lambda ledger_id, action, actor, target_type="", target_id="":
+                              bool(ledger_id and action and actor))
     app = FastAPI()
     app.include_router(ontology_control.create_router(runtime))
     holder = {"principal": _principal()}

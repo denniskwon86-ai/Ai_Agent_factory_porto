@@ -38,7 +38,9 @@ def _resolver(hidden=frozenset(), tenant="tenant_demo", mode="VIRTUAL"):
     return resolve
 
 
-def _approval_resolver(ledger_id, action, actor):
+def _approval_resolver(ledger_id, action, actor, target_type="", target_id=""):
+    """시험 대역. ★ **다섯 인자**다 — 제품 계약과 같은 모양이어야
+    시험이 제품을 대신한다(2026-08-20: 3인자 폴백을 없앨다)."""
     return bool(ledger_id and action and actor)
 
 

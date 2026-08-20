@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from core import app_policy
+from core.ontology_errors import OntologyResolverError
 from core.paths import data_path
 
 
@@ -118,7 +119,20 @@ class RelationProposal:
 
 
 ObjectScopeResolver = Callable[[ObjectRef], Optional[app_policy.ResourceScope]]
-ApprovalResolver = Callable[[str, str, str], bool]
+
+#: ★★★ [MVP-P0 ①-B] 승인 판정기는 **다섯 인자**다 —
+#:   `(ledger_event_id, action, approver_id, target_type, target_id)`.
+#:
+#: ⚠️⚠️ [2026-08-20 Supervisor 지적 P0-1] 종전에는 5인자로 부르다 `TypeError` 가 나면
+#:   3인자로 후퇴했다. 그 폴백은 **대상 대조 없는 승인을 다시 허용**했고, 더 나쁘게는
+#:   Resolver **내부의** `TypeError` 까지 「옛 계약이구나」로 오인했다.
+#: ★ 폴백을 없앤다. 대상을 받지 않는 판정기는 **주입될 수 없다.**
+ApprovalResolver = Callable[[str, str, str, str, str], bool]
+
+
+#: ★ 예외는 가장 아래 층(`core/ontology_errors.py`)에 산다 — 순환 참조를
+#:   원천 차단하기 위해서다. 이름은 여기서도 쓰도록 재수출한다.
+__all_errors__ = (OntologyResolverError,)
 
 
 _DDL = """
@@ -229,24 +243,75 @@ CREATE TABLE IF NOT EXISTS semantic_model_contracts (
 class OntologyRuntime:
     """Versioned relation governance plus deterministic path traversal."""
 
-    def __init__(self, db_path: str = data_path("ontology.db"),
+    def __init__(self, db_path: str = "",
                  object_scope_resolver: Optional[ObjectScopeResolver] = None,
                  approval_resolver: Optional[ApprovalResolver] = None):
-        self.db_path = db_path
+        """★★★ **여는 것은 만드는 것이 아니다.**
+
+        ⚠️⚠️ [2026-08-20 실측] 종전에는 `__init__` 이 곧바로 `_init_db()` 를 불렀고,
+          모듈 끝의 전역 인스턴스가 **import 만으로** 그것을 실행했다. 그래서 전체
+          회귀를 한 번 돌리자 운영 폴더에 `data/ontology.db`(73,728바이트)가 생겼다.
+          행은 0이었지만 **시험이 운영 데이터 영역에 저장소를 만든 것**이고, 그것은
+          원장 오염과 같은 종류의 하니스 격리 결함이다.
+
+        ★ 그래서 **첫 쓰기·읽기 때까지 파일을 만들지 않는다.** 경로 기본값도 여기서
+          계산하지 않는다 — 기본 인자에 `data_path(...)` 를 쓰면 **모듈을 읽는 순간**
+          운영 경로가 확정되고, 시험이 경로를 갈아끼울 자리가 사라진다.
+        """
+        self._db_path = db_path
         self.object_scope_resolver = object_scope_resolver
         self.approval_resolver = approval_resolver
         self._lock = threading.RLock()
-        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
-        self._init_db()
+        #: 이 인스턴스가 스키마를 만든 적이 있는가. 경로가 바뀌면 다시 만든다.
+        self._ready_for = ""
+
+    @property
+    def db_path(self) -> str:
+        """실제 파일 경로. **부를 때** 정한다(테스트가 갈아끼울 수 있게)."""
+        return self._db_path or data_path("ontology.db")
+
+    @db_path.setter
+    def db_path(self, value: str) -> None:
+        """⚠️ 경로를 바꾸면 «만든 적 있다» 를 지운다 — 안 지우면 새 경로에 표가 없다.
+
+        ★ [P1] 상태 변경도 **초기화와 같은 Lock 안에서** 한다. 다른 스레드가 준비를
+          확인하는 중에 경로가 바뀌면 «준비됐다» 와 «어느 파일이냐» 가 어긋난다."""
+        with self._lock:
+            self._db_path = value or ""
+            self._ready_for = ""
 
     def _connect(self) -> sqlite3.Connection:
+        """★ 여기서 **처음으로** 파일을 만든다. import 는 아무것도 만들지 않는다."""
+        path = self.db_path
+        #: ★★★ [2026-08-20 Supervisor 지적 P1-1] **준비 확인 전체를 같은 Lock 으로 감싼다.**
+        #:
+        #: ⚠️⚠️ 종전에는 스키마를 만들기 **전에** `_ready_for` 를 먼저 세웠다(재귀를 끊으려고).
+        #:   그러면 두 요청이 동시에 들어올 때 ① A 가 표시 → ② 아직 표 없음 → ③ B 가
+        #:   「준비됨」으로 보고 → ④ **B 가 빈 DB 에 질의**한다. `no such table` 이 나고,
+        #:   그 순간 사용자에게는 «온톨로지가 고장» 으로 보인다.
+        #: ★ 그래서 표시는 **성공한 뒤에** 한다. 재귀는 `_raw_connect` 로 끊는다.
+        with self._lock:
+            if self._ready_for != path:
+                os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+                self._init_db()
+                self._ready_for = path
+        conn = sqlite3.connect(path, timeout=15)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    def _raw_connect(self) -> sqlite3.Connection:
+        """스키마 준비 없이 여는 통로. **`_init_db` 전용**이다."""
         conn = sqlite3.connect(self.db_path, timeout=15)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
     def _init_db(self) -> None:
-        with self._lock, self._connect() as conn:
+        """★ **`_connect` 가 Lock 을 쥔 채** 부른다(`RLock` 이라 재진입 가능).
+
+        ⚠️ `_connect` 를 부르면 무한 재귀다 — 스키마를 만드는 중이니 원시 통로를 쓴다."""
+        with self._lock, self._raw_connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_DDL)
             columns = {str(r[1]) for r in conn.execute(
@@ -275,8 +340,12 @@ class OntologyRuntime:
             raise OntologyError("model installation requires an actor.")
         if compiled["status"] != "APPROVED":
             raise OntologyError("only an APPROVED ontology model contract can be installed.")
+        #: ★★★ 대상은 **계약 지문**이다 — 「어떤 계약을 승인했는가」가 없으면 승인
+        #:   이벤트 하나로 아무 계약이나 설치할 수 있다.
         self._assert_approval(compiled["ledger_correlation_id"], "MODEL_INSTALL",
-                              compiled["approved_by"])
+                              compiled["approved_by"],
+                              target_type="model_contract",
+                              target_id=compiled["contract_fingerprint"])
         now = _utcnow()
         with self._lock, self._connect() as conn:
             other = conn.execute(
@@ -637,7 +706,9 @@ class OntologyRuntime:
                 subject: app_policy.Subject) -> dict:
         if not ledger_correlation_id.strip():
             raise OntologyError("approval requires a decision-ledger correlation id.")
-        self._assert_approval(ledger_correlation_id, "RELATION_APPROVE", actor)
+        #: ★★★ 대상은 **그 관계 id** 다. 없으면 같은 승인으로 다른 관계도 통과한다.
+        self._assert_approval(ledger_correlation_id, "RELATION_APPROVE", actor,
+                              target_type="relation", target_id=relation_id)
         with self._lock, self._connect() as conn:
             row = self._relation(conn, relation_id)
             self._assert_relation_access(subject, row, app_policy.MANAGE)
@@ -667,7 +738,8 @@ class OntologyRuntime:
                ledger_correlation_id: str, subject: app_policy.Subject) -> dict:
         if not reason.strip() or not ledger_correlation_id.strip():
             raise OntologyError("retirement reason and ledger correlation are required.")
-        self._assert_approval(ledger_correlation_id, "RELATION_RETIRE", actor)
+        self._assert_approval(ledger_correlation_id, "RELATION_RETIRE", actor,
+                              target_type="relation", target_id=relation_id)
         return self._transition(relation_id, actor, subject, "APPROVED", "RETIRED", "RETIRED",
                                 reason, ledger_correlation_id)
 
@@ -854,14 +926,28 @@ class OntologyRuntime:
         if not self._object_visible(subject, self._object_ref(row)):
             raise OntologyAccessError("the relation endpoints are not available in this context.")
 
-    def _assert_approval(self, ledger_id: str, action: str, actor: str) -> None:
-        """A correlation string is not approval; an external ledger must attest it."""
+    def _assert_approval(self, ledger_id: str, action: str, actor: str,
+                         target_type: str = "", target_id: str = "") -> None:
+        """A correlation string is not approval; an external ledger must attest it.
+
+        ★★★ [MVP-P0 ①-B] **대상까지 넘긴다.** 「누가 무엇을 승인했는가」에서 «무엇» 이
+          빠지면, 같은 행위자의 승인 하나로 **다른 계약·다른 관계**를 통과시킬 수 있다.
+
+        ⚠️⚠️ **3-인자 폴백은 없다.** 대상을 받지 않는 판정기가 주입되면 `TypeError` 가
+          나고 그것은 `OntologyIntegrityError`(503) 다 — 조용히 대상 없는 승인으로
+          떨어지지 않는다."""
         if self.approval_resolver is None:
             raise OntologyIntegrityError("decision-ledger approval resolver is not configured.")
         try:
             approved = bool(self.approval_resolver(
-                (ledger_id or "").strip(), (action or "").strip(), (actor or "").strip()))
+                (ledger_id or "").strip(), (action or "").strip(),
+                (actor or "").strip(), (target_type or "").strip(),
+                (target_id or "").strip()))
+        except OntologyError:
+            raise
         except Exception as exc:
+            #: ⚠️ `TypeError` 도 여기로 온다 — **호환성으로 오인하지 않는다.** 대상을 받지
+            #:   않는 판정기가 주입됐다면 그것은 배선 결함이고, 503 으로 드러나야 한다.
             raise OntologyIntegrityError("decision-ledger approval could not be verified.") from exc
         if not approved:
             raise OntologyError("the decision-ledger approval is not valid for this action.")
@@ -957,4 +1043,41 @@ class OntologyRuntime:
             _canonical_json(payload).encode()).hexdigest()}
 
 
-ontology_runtime = OntologyRuntime()
+#: ★★★ 제품 전역 인스턴스. **아직 Resolver 가 붙지 않았다.**
+#:
+#: ⚠️⚠️ `object_scope_resolver=None` · `approval_resolver=None` 이면 이 런타임은 범위를
+#:   해석하지도, 승인을 확인하지도 못한다 — 관계 제안·영향 질의가 503 으로 막힌다.
+#:   **그 상태로 `main.py` 에 등록하면 「정식 온톨로지가 돈다」는 오해만 만든다.**
+#:
+#: ★ 이 인스턴스는 이제 **import 시점에 아무 파일도 만들지 않는다**(지연 초기화).
+#:   그래도 Resolver 배선 전에는 라우터를 앱에 붙이지 않는다 — 붙이는 조건은
+#:   `api/routes/ontology_control.py` 머리말과 `main.py` 등록부에 적어 두었다.
+def _product_resolvers():
+    """제품 Resolver 둘을 **늦게** 불러온다.
+
+    ⚠️ 모듈 꿀에서 곱바로 import 하면 순환참조가 된다 — `ontology_resolvers` 가
+      `ObjectRef` 를 이 모듈에서 가져가기 때문이다."""
+    from core import ontology_resolvers as _r
+    return _r.product_object_scope_resolver, _r.product_approval_resolver
+
+
+#: ★★★ 제품 전역 인스턴스 — **실제 Resolver 둘을 붙인다**(MVP-P0 ①-B).
+#:
+#: ⚠️⚠️ Resolver 가 없으면 이 런타임은 범위를 해석하지도, 승인을 확인하지도
+#:   못한다 — 관계 제안·영향 질의가 503 이다. 그 상태로 앱에 붙이면
+#:   화면은 고정 `ontology_path` 를 보여 주면서 「정식 온톤로지가 돌다」는
+#:   오해를 만든다(2026-08-20 실측 — 내가 그렇게 붙였다가 되돌렸다).
+#:
+#: ★ 생성은 여전히 **아무 파일도 만들지 않는다**(지연 초기화).
+def _scope_resolver(ref):
+    """부를 때 해석기를 가져온다 — import 순환을 끊는다."""
+    return _product_resolvers()[0](ref)
+
+
+def _approval_resolver(ledger_id, action, actor, target_type="", target_id=""):
+    """마찬가지로 지연 해석. ★ **대상까지** 그대로 넘긴다."""
+    return _product_resolvers()[1](ledger_id, action, actor, target_type, target_id)
+
+
+ontology_runtime = OntologyRuntime(
+    object_scope_resolver=_scope_resolver, approval_resolver=_approval_resolver)
