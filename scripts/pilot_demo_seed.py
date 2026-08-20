@@ -190,7 +190,9 @@ def _binding(inst, key, activate=True):
         instance_id=inst["instance_id"], dataset_contract_key=key,
         provider=m.PROVIDER_FILE_SNAPSHOT,
         config={"file_name": f"{key}.csv", "column_map": {"a": "A"}},
-        tenant_id=TENANT, scope_node_id=SCOPE, entity_mode=MODE)
+        #: ★ 결속은 **인스턴스와 같은 범위**여야 한다. 다르면 Dispatch 가 매 요청
+        #:   범위를 대조하다 거부하고, 화면은 「준비 안 됨」으로만 보인다.
+        tenant_id=TENANT, scope_node_id=inst["scope_node_id"], entity_mode=MODE)
     if activate:
         for step in ("validate", "approve", "activate"):
             getattr(sb, step)(store, b["binding_id"])
@@ -204,38 +206,107 @@ def _upload(binding, payload, name, raw_root):
 
 #: 캡처 스크립트가 쓰는 계정·비밀번호. ⚠️ **격리 워크트리 전용**이다 — 운영 저장소에서
 #: 이 스크립트가 돌지 않는 것이 위 안전장치의 요점이다.
+#: ★ 승인된 예시 계정 하나만 쓴다 — 실제 인원과 충돌하는 계정을 지어내지 않는다.
 ADMIN = "hikwon@lsmnm.com"
 PASSWORD = "pass:"
-DEPT = "hq"
+
+#: ★★★ [시연 ①칸] 조직을 **법인 → 사업부 → 공장 둘**로 세운다.
+#:
+#:   로드맵 §3 의 첫 칸이 「사업부·공장 선택」으로 「다법인·다조직 문맥과 권한 상속」을
+#:   증명하라고 한다. 본사 하나만 있으면 청중이 가장 먼저 보는 화면이 그것을 증명하지
+#:   못한다 — 고를 것이 하나뿐이면 «고른다» 는 행위 자체가 없다.
+#:
+#: ⚠️ 부서 트리가 **권한 상속의 정본**이다(`org_directory.descendants_of`). ECM 노드는
+#:   `dept_id` 로 부서에 매인다 — 그 매듭이 없으면 `readable_scope_nodes` 가 비고 모든
+#:   요청이 범위 판정에서 거부된다.
+DEPT = "hq"                        # 본사(경영)
+DEPT_DIV = "div_materials"         # 원료사업부
+DEPT_P1 = "plant_gwangyang"        # 광양 1공장
+DEPT_P2 = "plant_pohang"           # 포항 2공장
+
+NODE_ENT = "node_entity"
+NODE_HQ = SCOPE                    # 본사 = 기존 `node_hq`
+NODE_DIV = "node_div_materials"
+NODE_P1 = "node_plant_gwangyang"
+NODE_P2 = "node_plant_pohang"
+
+#: ★ 두 번째 역할 — 계획 §4.1 이 「구매 담당자와 경영 의사결정자 최소 2개」를 요구한다.
+#: ⚠️ 예시 도메인을 그대로 쓰되 **한 사람만 실명 계정**이고, 나머지는 역할 계정임을
+#:   이름으로 못박는다. 실제 인원과 겹치지 않게 하려는 것이다.
+BUYER = "pilot_buyer@lsmnm.com"
 
 
 def _seed_org() -> None:
-    """조직·사용자·ECM 노드. **이것이 없으면 모든 요청이 범위 판정에서 거부된다.**
-
-    ⚠️ 부서를 ECM 노드에 매어 두지 않으면 `readable_scope_nodes` 가 비고, 화면은
-      「통제가 막았다」와 「환경이 덜 세워졌다」를 구분하지 못한다."""
+    """조직·사용자·ECM 노드. **이것이 없으면 모든 요청이 범위 판정에서 거부된다.**"""
     from core.auth import auth_store
-    from core.enterprise_context.models import (STATUS_ACTIVE, EnterpriseEntity,
+    from core.enterprise_context.models import (REL_OPERATING_PARENT, STATUS_ACTIVE,
+                                                EnterpriseEntity, OrganizationEdge,
                                                 OrganizationNode)
     from core.enterprise_context.repository import ecm_repository
     from core.org_directory import org_directory
 
-    if not org_directory.get_department(DEPT):
-        org_directory.create_department(DEPT, "본사", scope_node_id=SCOPE, actor="pilot")
-    else:
-        org_directory.update_department(DEPT, scope_node_id=SCOPE, actor="pilot")
-    org_directory.upsert_user(ADMIN, "권희권 (예시)", primary_dept_id=DEPT, actor="pilot")
+    #: ── 부서 트리 — 권한 상속의 정본 ────────────────────────────────────
+    tree = ((DEPT, "본사", "", NODE_HQ),
+            (DEPT_DIV, "원료사업부", DEPT, NODE_DIV),
+            (DEPT_P1, "광양 1공장", DEPT_DIV, NODE_P1),
+            (DEPT_P2, "포항 2공장", DEPT_DIV, NODE_P2))
+    for dept_id, name, parent, node_id in tree:
+        if not org_directory.get_department(dept_id):
+            org_directory.create_department(dept_id, name, parent_id=parent,
+                                            scope_node_id=node_id, actor="pilot")
+        else:
+            org_directory.update_department(dept_id, scope_node_id=node_id, actor="pilot")
+
+    #: ── 사용자 둘 — 경영 의사결정자 · 구매 담당자 ───────────────────────
+    #: ★★★ 역할이 **다른 범위**를 봐야 상속과 격리가 화면에서 보인다.
+    #:   · 경영자는 본사 소속 → 하위 전부 상속
+    #:   · 구매 담당자는 1공장 소속 → **2공장은 못 본다**
+    org_directory.upsert_user(ADMIN, "권희권 (예시·경영)", primary_dept_id=DEPT,
+                              actor="pilot")
     org_directory.set_user_roles(ADMIN, {DEPT: "member"}, actor="pilot")
     auth_store.set_password(ADMIN, PASSWORD)
 
+    org_directory.upsert_user(BUYER, "구매 담당자 (예시·역할계정)",
+                              primary_dept_id=DEPT_P1, actor="pilot")
+    org_directory.set_user_roles(BUYER, {DEPT_P1: "member"}, actor="pilot")
+    auth_store.set_password(BUYER, PASSWORD)
+
+    #: ── ECM — 법인 하나에 노드 넷 ───────────────────────────────────────
     ent = ecm_repository.upsert_entity(EnterpriseEntity(
-        entity_id="ent_pilot", tenant_id=TENANT, name_ko="파일럿 법인",
-        entity_kind="legal_entity", status=STATUS_ACTIVE))
-    ecm_repository.upsert_node(OrganizationNode(
-        node_id=SCOPE, entity_id=ent.entity_id, tenant_id=TENANT,
-        node_type="business_division", code="HQ", name_ko="본사",
-        dept_id=DEPT, status=STATUS_ACTIVE))
-    print(f"· 조직·사용자 {ADMIN}")
+        entity_id="ent_pilot", tenant_id=TENANT, name_ko="AFS 데모소재그룹",
+        entity_type="legal_entity", status=STATUS_ACTIVE))
+    nodes = ((NODE_ENT, "legal_entity", "ENT", "AFS 데모소재그룹", "", ""),
+             (NODE_HQ, "shared_service", "HQ", "본사", NODE_ENT, DEPT),
+             (NODE_DIV, "business_division", "DIV-M", "원료사업부", NODE_ENT, DEPT_DIV),
+             (NODE_P1, "site_plant", "PL-1", "광양 1공장", NODE_DIV, DEPT_P1),
+             (NODE_P2, "site_plant", "PL-2", "포항 2공장", NODE_DIV, DEPT_P2))
+    for node_id, kind, code, name, parent, dept in nodes:
+        ecm_repository.upsert_node(OrganizationNode(
+            node_id=node_id, entity_id=ent.entity_id, tenant_id=TENANT,
+            node_type=kind, code=code, name_ko=name,
+            default_parent_id=parent, dept_id=dept, status=STATUS_ACTIVE))
+
+    #: ⚠️ **권한 상속은 `OPERATING_PARENT` 만 따른다**(설계 §6.1). 공유서비스·연결집계
+    #:   관계를 상속에 쓰면 「전사 집계 권한」이 곧 「모든 상세 데이터 권한」이 된다.
+    for parent, child in ((NODE_ENT, NODE_DIV), (NODE_DIV, NODE_P1),
+                          (NODE_DIV, NODE_P2)):
+        ecm_repository.add_edge(OrganizationEdge(
+            edge_id=f"e_{parent}_{child}", tenant_id=TENANT,
+            from_node_id=parent, to_node_id=child,
+            relation_type=REL_OPERATING_PARENT, status=STATUS_ACTIVE))
+
+    #: ★★★ **권한 강제를 켠다.** 이것이 꺼져 있으면 `resolve_scope` 가 전원 무제한을
+    #:   돌려주고, 조직 범위·등급·드릴다운 통제가 **하나도 작동하지 않는다.**
+    #:
+    #: ⚠️⚠️ 2026-08-20 실측: 파일럿 장비가 계속 **꺼진 채** 돌고 있었다. 그래서 모든
+    #:   화면이 무제한이었고, 「격리가 되는가」를 화면에서 물어도 답이 나올 수 없었다.
+    #:   시연을 강제 꺼짐으로 하면 「권한 상속을 증명한다」는 첫 칸이 거짓이 된다.
+    from core import scope_policy
+
+    scope_policy.set_org_enforce(True, actor="pilot", reason="파일럿 시연 — 권한 통제 증명")
+    org_directory._invalidate()
+    print(f"· 조직 — 법인 1 · 사업부 1 · 공장 2 / 사용자 2({ADMIN}, {BUYER})")
+    print("· 권한 강제 ON — 범위 통제가 실제로 작동하는 상태")
 
 
 PROJECT = "proj_pilot"
@@ -338,8 +409,11 @@ def _seed_candidate_release() -> None:
     root = workspace_path(PROJECT)
     os.makedirs(root, exist_ok=True)
     with open(os.path.join(root, "project_meta.json"), "w", encoding="utf-8") as f:
-        json.dump({"owner_dept_id": DEPT, "owner_user_id": "", "visibility": "dept",
-                   "tenant_id": TENANT, "enterprise_scope_id": SCOPE,
+        #: ★★★ 앱은 **그 일을 하는 조직**의 것이다. 데이터가 광양 1공장에 있으므로
+        #:   프로젝트도 거기 소속이어야 한다 — 본사 범위로 두면 물질화가 「이 조직에
+        #:   활성 원천이 없습니다」로 막는다(실제로 막혔고, 그 거부는 옳다).
+        json.dump({"owner_dept_id": DEPT_P1, "owner_user_id": "", "visibility": "dept",
+                   "tenant_id": TENANT, "enterprise_scope_id": NODE_P1,
                    "entity_mode": MODE, "ownership_basis": "declared"},
                   f, ensure_ascii=False)
 
@@ -348,9 +422,9 @@ def _seed_candidate_release() -> None:
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
         json.dump({
             "release_id": RELEASE, "project_id": PROJECT, "tenant_id": TENANT,
-            "entity_mode": MODE, "enterprise_scope_id": SCOPE,
-            "project_name": "원료 입고 현황 앱 (파일럿)",
-            "owner_user_id": "", "owner_dept_id": DEPT, "visibility": "dept",
+            "entity_mode": MODE, "enterprise_scope_id": NODE_P1,
+            "project_name": "원료 입고 현황 앱 (광양 1공장)",
+            "owner_user_id": "", "owner_dept_id": DEPT_P1, "visibility": "dept",
             "artifact_kind": "APP", "runtime_contract_profile": "v1",
             "created_at": "2026-08-19T06:00:00+00:00",
             "manifest": {"fingerprint": "fp_pilot", "valid": True, "manifest": {
@@ -385,7 +459,7 @@ def _materialize_app(instance_id: str) -> None:
     out = contract_materializer.materialize(
         contract, release_id=RELEASE, actor_id="pilot", store=store,
         app_data=app_preview.app_data_for(app_preview.AUDIENCE_PREVIEW),
-        tenant_id=TENANT, scope_node_id=SCOPE, entity_mode=MODE)
+        tenant_id=TENANT, scope_node_id=NODE_P1, entity_mode=MODE)
 
     #: ★★★ 게시가 릴리스 파일에 남기는 **물질화 기록**을 같은 모양으로 남긴다.
     #:   ⚠️ 이것이 없으면 승격의 「데이터 준비도」 검사가 **어느 인스턴스를 물어야
@@ -414,11 +488,33 @@ def main() -> int:
         print("✗ 시연 키트를 찾지 못했습니다 — docs/data-kits/ 를 확인하십시오.")
         return 1
 
+    #: ★★★ 사슬은 **광양 1공장**에 심는다. 구매 담당자(1공장 소속)가 볼 수 있어야
+    #:   「자기 공장 일을 자기가 한다」는 시연이 성립한다.
     inst = store.create_instance(
         kit_id=kr.DEMO_KIT_ID, version="1.0.0",
         kit_fingerprint=str(kit["fingerprint"]), tenant_id=TENANT,
-        scope_node_id=SCOPE, entity_mode=MODE, label="파일럿 시연")
-    print(f"· 키트 인스턴스 {inst['instance_id']}")
+        scope_node_id=NODE_P1, entity_mode=MODE, label="광양 1공장 — 원료 도입")
+    print(f"· 키트 인스턴스 {inst['instance_id']} (광양 1공장)")
+
+    #: ★★★ **포항 2공장에도 하나 만든다.** 구매 담당자는 이것이 **보이면 안 된다** —
+    #:   그것이 「권한 상속과 격리」를 화면에서 증명하는 유일한 방법이다.
+    #: ⚠️ 인스턴스가 하나뿐이면 목록이 늘 한 줄이고, 「격리됐다」와 「원래 하나였다」를
+    #:   구분할 수 없다.
+    inst2 = store.create_instance(
+        kit_id=kr.DEMO_KIT_ID, version="1.0.0",
+        kit_fingerprint=str(kit["fingerprint"]), tenant_id=TENANT,
+        scope_node_id=NODE_P2, entity_mode=MODE, label="포항 2공장 — 원료 도입")
+    b_p2 = _binding(inst2, "material_arrivals")
+    rows_p2 = [{"arrived_at": "2026-07-10", "material_code": "M1", "quantity": "300",
+                "lot_no": "P2-001"},
+               {"arrived_at": "2026-07-24", "material_code": "M2", "quantity": "260",
+                "lot_no": "P2-002"}]
+    cols_p2 = ["arrived_at", "material_code", "quantity", "lot_no"]
+    snap_p2 = _upload(b_p2, _csv(rows_p2, cols_p2), "arrivals_p2.csv", raw_root)
+    out_p2 = ss.run_pipeline(store, snap_p2["snapshot_id"], rows_p2, cols_p2,
+                             control={"row_count": 2, "sums": {"quantity": 560}})
+    print(f"· 포항 2공장 입고 {len(rows_p2)}행 → {out_p2['state']} "
+          f"(구매 담당자에게는 **보이지 않아야** 합니다)")
 
     # ── ① 사슬 전체 — **인증까지** ───────────────────────────────────────
     #: ★★★ [§4.4] 온톨로지가 가리키는 8칸을 전부 채운다. 하나라도 비면 영향 경로가
@@ -512,6 +608,10 @@ def main() -> int:
     print(f"  인스턴스 id : {inst['instance_id']}")
     print(f"  기준선용 판 : {s1['snapshot_id']}")
     print("  준비도 보드 — 인증 9종 · 검사 대기 1건 · 격리 1건이 함께 보여야 합니다")
+    print()
+    print("  === 권한 상속·격리 ===")
+    print(f"  {ADMIN} (본사)  → 인스턴스 **2개** 보임(광양·포항)")
+    print(f"  {BUYER} (1공장) → 인스턴스 **1개** 보임(광양만)")
     print(f"  승격 화면 후보 : {RELEASE} — 다섯 검사에서 «막힌 이유» 가 보여야 합니다")
     print(f"  생성 앱        : 라이브러리에서 «{RELEASE}» 를 열면 입고 3행이 보여야 합니다")
     print("    ⚠️ 프런트에 VITE_AFS_HOST_RUNTIME=1 이 있어야 데이터 평면이 켜집니다")

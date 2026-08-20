@@ -89,7 +89,7 @@ def run(page: Page, shots: Path | None) -> int:
         return 1
     dlg = page.locator('[role="dialog"]').last
 
-    inst = dlg.locator("button", has_text="파일럿 시연").first
+    inst = dlg.locator("button", has_text="광양 1공장").first
     if inst.count() == 0:
         print("✗ ① 기준선 고르개에 인스턴스가 없다 — 여기서 사용자는 시작할 수 없다")
         _shot(page, shots, "동선_01_인스턴스없음")
@@ -179,7 +179,7 @@ def run(page: Page, shots: Path | None) -> int:
             return 1
         f.fill(v)
 
-    inst = dlg.locator("button", has_text="파일럿 시연").first
+    inst = dlg.locator("button", has_text="광양 1공장").first
     if inst.count() == 0:
         print("✗ ④ 기준선 고르개에 인스턴스가 없다")
         return 1

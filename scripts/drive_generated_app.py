@@ -67,7 +67,13 @@ def run(page) -> int:
     page.wait_for_timeout(1200)
     #: ⚠️ `.afs-scope` 는 화면에서 세 군데 쓰인다 — 클래스로 첫 것을 집으면 열림 단추
     #:   자신을 다시 누르게 된다(실제로 그랬다). **이름으로** 고른다.
-    opt = page.get_by_role("button", name="본사", exact=True).first
+    #: ★★★ **일하는 조직을 고른다.** 본사(공유서비스)는 공장의 «운영 상위» 가 아니므로
+    #:   본사 문맥에서 공장 프로젝트를 열면 `SCOPE_OUTSIDE` 로 404 다 — 그리고 그것은
+    #:   옳다(설계 §6.1: 권한 상속은 `OPERATING_PARENT` 만 따른다. 전사 집계 권한이
+    #:   곧 모든 상세 데이터 권한이 되면 안 된다).
+    #: ⚠️ 사용자에게는 「프로젝트를 찾을 수 없습니다」로만 보인다. 시연에서 문맥을
+    #:   잘못 고르면 제품이 고장 난 것처럼 읽힌다 — 시연 대본에 넣을 것.
+    opt = page.get_by_role("button", name="광양 1공장", exact=True).first
     if opt.count() == 0:
         print("✗ 고를 조직이 없다")
         return 1

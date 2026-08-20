@@ -21,6 +21,27 @@ const MODE_KO: Record<string, string> = {
   REAL: '실제', VIRTUAL: '가상', COMPETITOR: '경쟁사',
 };
 
+/** 중첩 트리를 **깊이 표시가 붙은 평평한 목록**으로 편다.
+ *
+ * ★★★ [2026-08-20 실측] `orgApi.tree()` 는 `children` 이 중첩된 **트리**를 준다. 그런데
+ *   여기서는 그것을 평평한 목록으로 `map` 하고 있었다 — 그래서 드롭다운에 **뿌리만**
+ *   떴고, 사업부·공장은 권한이 있어도 **영영 고를 수 없었다.**
+ *
+ * ⚠️ 로드맵 §3 의 첫 시연 칸이 「사업부·공장 선택」이다. 그것이 이 한 줄 때문에 막혀
+ *   있었고, 화면은 아무 오류도 내지 않았다(뿌리는 정상적으로 보이니까).
+ * ⚠️ 깊이는 **들여쓰기 문자**로 표시한다 — 색·여백만으로 계층을 말하면 좁은 화면과
+ *   흑백에서 사라진다(설계 §2.1). */
+function flatten(rows: Dept[], depth = 0): (Dept & { _depth: number })[] {
+  const out: (Dept & { _depth: number })[] = [];
+  for (const d of rows || []) {
+    out.push({ ...d, _depth: depth });
+    const kids = (d as any).children as Dept[] | undefined;
+    if (kids && kids.length) out.push(...flatten(kids, depth + 1));
+  }
+  return out;
+}
+
+
 export function CompanyContextBar() {
   const [depts, setDepts] = useState<Dept[]>([]);
   const [status, setStatus] = useState<Status>('loading');
@@ -47,7 +68,9 @@ export function CompanyContextBar() {
     return () => { alive = false; };
   }, []);
 
-  const current = depts.find((d) => d.dept_id === ctx.scopeNodeId
+  //: ★ 트리를 펴서 **모든 계층**을 고를 수 있게 한다.
+  const flat = flatten(depts);
+  const current = flat.find((d) => d.dept_id === ctx.scopeNodeId
     || (d as any).scope_node_id === ctx.scopeNodeId);
 
   const pick = (d: Dept) => {
@@ -100,24 +123,31 @@ export function CompanyContextBar() {
       {/* 회사·조직 전환. ⚠️ **텍스트 입력을 주지 않는다**(§4.1 금지) — 고르는 것만 허용한다. */}
       <button onClick={() => setOpen((v) => !v)} className="secondary-button"
         style={{ fontSize: 12, padding: '4px 10px', whiteSpace: 'nowrap' }}
-        disabled={status === 'loading' || depts.length === 0}>
+        disabled={status === 'loading' || flat.length === 0}>
         조직 전환 ▾
       </button>
 
-      {open && depts.length > 0 && (
+      {open && flat.length > 0 && (
         <div className="afs-scope" style={{
           position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 40,
           background: 'var(--surface-card)', border: '1px solid var(--surface-border)',
           borderRadius: 8, boxShadow: 'var(--surface-shadow)', minWidth: 260,
           maxHeight: 320, overflowY: 'auto', padding: 6,
         }}>
-          {depts.map((d) => (
+          {flat.map((d) => (
             <button key={d.dept_id} onClick={() => pick(d)}
               style={{
-                display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: `8px 10px 8px ${10 + d._depth * 14}px`,
                 fontSize: 13, borderRadius: 6, border: 'none', background: 'transparent',
                 color: 'var(--surface-text)', cursor: 'pointer',
               }}>
+              {/* ★ 계층을 **글자로도** 말한다 — 여백만으로는 흑백·좁은 화면에서 사라진다. */}
+              {d._depth > 0 && (
+                <span aria-hidden style={{ color: 'var(--surface-text-faint)' }}>
+                  {'└ '}
+                </span>
+              )}
               {d.name_ko || d.dept_id}
             </button>
           ))}
