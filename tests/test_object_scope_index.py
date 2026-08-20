@@ -231,11 +231,18 @@ def test_as_of_가_지나면_새_판을_고른다(two_versions, store):
     assert status == ix.FOUND and row["snapshot_id"] == new["snapshot_id"]
 
 
-def test_인증_전_시점에는_없는_것이다(two_versions, store):
-    """⚠️ 「그 시점에는 아직 인증되지 않았다」는 **사실**이다 — 최신 판으로 메우지 않는다."""
+def test_인증_전_시점은_없음이_아니라_미결속이다(two_versions, store):
+    """★★★ 「그 시점에는 아직 인증되지 않았다」와 「그런 객체가 없다」는 **다른 사실**이다.
+
+    ⚠️ 최신 판으로 메우지 않는 것은 물론이고, 둘을 하나로 뭉쳐도 안 된다 — 사람이 할
+      일이 다르다. 앞엣것은 오타를 의심하고, 뒤엣것은 인증 일정을 본다."""
     status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
                                as_of="2026-01-01T00:00:00+00:00")
-    assert status == ix.NOT_FOUND and row is None
+    assert status == ix.UNBOUND and row is None
+    #: ★ 대조군 — 진짜 없는 객체는 `NOT_FOUND` 여야 한다. 둘이 같아지면 구분이 사라진다.
+    missing, _, _ = ix.lookup(store, "dataset", "shipment", "SHP-없는배",
+                              as_of="2026-01-01T00:00:00+00:00")
+    assert missing == ix.NOT_FOUND and missing != status
 
 
 def test_없는_객체는_없는_것이다(two_versions, store):
@@ -247,7 +254,7 @@ def test_새_판에_없는_객체는_옛_판으로_답하지_않는다(two_versi
     """★ `SHP-000003` 은 새 판에만 있다. 옛 시점에는 **없어야** 한다."""
     status, _, _ = ix.lookup(store, "dataset", "shipment", "SHP-000003",
                              as_of="2026-04-01T00:00:00+00:00")
-    assert status == ix.NOT_FOUND
+    assert status == ix.UNBOUND, "새 판에만 있는 객체를 옛 시점에서 찾아 줬다"
 
 
 # ── ④ 동점은 고르지 않는다 ──────────────────────────────────────────────

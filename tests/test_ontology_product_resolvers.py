@@ -153,7 +153,10 @@ def test_ecm_노드는_소속_법인의_실행모드를_따른다(tmp_path, monk
         "시나리오가 실적으로 섞인다")
 
 
-@pytest.mark.parametrize("namespace", ["dataset", "mdm", "external", "g4",
+#: ⚠️ [2026-08-20 §7 4단계] `dataset` 이 이 목록에서 **빠졌다.** 배선됐기 때문이다.
+#:   목록을 줄일 때는 «왜 줄였는지» 를 함께 적는다 — 안 적으면 다음 사람이
+#:   「원래 안 보던 건가」와 「보다가 놓친 건가」를 구별하지 못한다.
+@pytest.mark.parametrize("namespace", ["mdm", "external", "g4",
                                        "decision", "knowledge"])
 def test_배선되지_않은_namespace_는_장애로_올라온다(namespace):
     """★★★ [P0-3] 미배선을 `None` 으로 두면 «그 객체가 안 보인다» 가 된다.

@@ -180,6 +180,10 @@ def versions(store: Any, namespace: str, object_type: str,
 #: 조회 결과의 종류. ★ 런타임의 `ObjectResolution` 상태와 **같은 어휘**를 쓴다 —
 #: 여기서 다른 이름을 쓰면 옮겨 담는 자리에서 뜻이 바뀐다.
 FOUND, NOT_FOUND, AMBIGUOUS = "FOUND", "NOT_FOUND", "AMBIGUOUS"
+#: 객체는 아는데 **그 시점에는 아직 어느 인증판에도 묶여 있지 않다.**
+#: ⚠️ 「그런 것이 없다」와 다르다 — 있는데 아직 인증 전인 것이고, 사람이 할 일도 다르다
+#:   (앞엣것은 오타를 의심하고, 뒤엣것은 인증 일정을 본다).
+UNBOUND = "UNBOUND"
 
 
 def lookup(store: Any, namespace: str, object_type: str, object_id: str,
@@ -202,8 +206,10 @@ def lookup(store: Any, namespace: str, object_type: str, object_id: str,
     if cutoff:
         rows = [r for r in rows if str(r.get("certified_at") or "") <= cutoff]
         if not rows:
-            #: ★ 그 시점에는 **아직 인증되지 않았다.** 「없다」와 같은 답이지만 사유가 다르다.
-            return NOT_FOUND, None, ()
+            #: ★★★ 그 시점에는 **아직 인증되지 않았다.** 「그런 객체가 없다」가 아니다.
+            #: ⚠️ 둘을 하나로 뭉치면 사람이 할 일을 못 고른다 — 앞엣것은 오타를
+            #:   의심하고, 뒤엣것은 인증 일정을 본다.
+            return UNBOUND, None, ()
     newest = str(rows[-1].get("certified_at") or "")
     tied = [r for r in rows if str(r.get("certified_at") or "") == newest]
     if len(tied) > 1:

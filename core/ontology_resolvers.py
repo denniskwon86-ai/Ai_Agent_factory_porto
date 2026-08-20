@@ -178,31 +178,77 @@ def _resolve_ecm(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
 
 
 def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
-    """업무 객체(선적·발주라인·재고·생산계획라인 …)의 범위.
+    """업무 객체(선적·발주라인·재고·생산계획라인·판매라인)의 범위.
 
-    ⚠️⚠️ [2026-08-20 Supervisor 지적] **아직 배선되지 않았다.**
+    ★★★ [2026-08-20 §7 4단계] **범위 색인을 통해 해석한다.**
 
-    온톨로지 계약의 `dataset` 객체는 `dataset:shipment → SHP-001` 처럼 **업무 레코드
-    ID** 다. Snapshot ID 가 아니다. 종전 구현은 그 값을 `get_snapshot()` 에 그대로
-    넣었으므로 **영영 찾지 못한다** — 그런데 결과가 `None` 이라 「범위 밖」과 구분되지
-    않아, 나는 그것을 «실배선» 이라고 보고했다.
+    ## 무엇이 어긋나 있었나
 
-    ★ 필요한 것은 **범위 색인**이다. 본문을 온톨로지에 복제하지 않으면서:
+    계약의 `dataset` 객체 id 는 **업무 레코드 ID**(`SHP-000001`·`STK-…`)이지 인증판
+    ID(`ds_…`)가 아니다. 종전 구현은 그 값을 그대로 `get_snapshot()` 에 넣었으므로
+    **영영 찾지 못했고**, 결과가 `None` 이라 「범위 밖」과 구분되지 않았다.
 
-        (namespace, object_type, object_id)
-            → snapshot_id
-            → tenant_id · entity_mode · scope_node_id
-            → source record evidence
+    ⚠️ `INV-01` 은 자기 열 이름이 하필 `snapshot_id` 라서 특히 헷갈린다.
 
-      그리고 관계 제안 때 두 끝점과 `evidence_refs` 가 **같은 인증 Snapshot** 에
-      속하는지도 봐야 한다.
+    ## 이 함수가 하는 일과 하지 않는 일
 
-    ⚠️ 색인이 생기기 전까지 이 namespace 는 **막는다.** 열어 두면 「못 찾음」이
-      「없음」처럼 조용히 지나가고, 화면은 빈 경로를 정상으로 그린다."""
-    stats.bump("dataset_index_not_built")
-    #: ⚠️ [P0-3] 색인이 없는 것은 **미완성**이지 「그 객체가 안 보인다」가 아니다.
-    raise OntologyResolverError(
-        f"dataset 범위 색인이 아직 없습니다({ref.key}).")
+        한다      업무 ID → 그 시점의 인증판 → 그 판의 **범위·근거·성격** 을 번역
+        안 한다   사용자·조직 **권한 판정**(PDP 의 일) · 「없음」을 어떻게 다룰지(문맥의 일)
+
+    ⚠️⚠️ 권한을 여기서도 판정하면 규칙이 두 곳으로 갈라지고, 갈라진 규칙은 언젠가
+      한쪽만 고쳐진다.
+
+    ## 판은 `as_of` 로 고른다
+
+    ★ 「그냥 최신」을 쓰지 않는다 — 과거 시점 질의에 **오늘의 답**을 주게 된다.
+    ⚠️ 문맥에 `as_of` 가 없으면 「지금」이고, 그때도 규칙은 하나다."""
+    from core.data_preparation import scope_index
+    from core.data_preparation.store import data_preparation_store
+
+    try:
+        status, row, candidates = scope_index.lookup(
+            data_preparation_store, ref.namespace, ref.object_type, ref.object_id,
+            as_of=str(getattr(ctx, "as_of", "") or ""))
+    except Exception as exc:
+        #: ⚠️ [P0-3] 저장소 장애를 «없음» 으로 접지 않는다. 못 읽은 것과 없는 것은
+        #:   다른 사실이고, 앞엣것은 **사람이 손을 써야** 한다.
+        stats.bump("dataset_index_unreadable")
+        raise OntologyResolverError(
+            f"범위 색인을 읽지 못했습니다({ref.key}): {exc}") from exc
+
+    if status == scope_index.AMBIGUOUS:
+        #: ⚠️⚠️ 같은 시각의 인증판이 둘이다. **아무거나 고르지 않는다** — 고르면 같은
+        #:   질문의 답이 실행마다 달라지고 재실행 지문이 흔들린다.
+        stats.bump("dataset_ambiguous_version")
+        return ontology_resolve.ambiguous(
+            candidates, f"같은 시각의 인증판이 {len(candidates)}개입니다.")
+    if status == scope_index.UNBOUND:
+        #: ★ 객체는 아는데 **그 시점에는 아직 인증 전**이다.
+        stats.bump("dataset_unbound_at_as_of")
+        return ontology_resolve.unbound(
+            f"그 시점에는 아직 인증되지 않았습니다(as_of={ctx.as_of or '지금'}).")
+    if status != scope_index.FOUND or row is None:
+        stats.bump("dataset_not_indexed")
+        #: ⚠️ 존재를 누설하지 않는다 — 무엇을 할지는 **문맥**이 정한다(임의 조회면 빈
+        #:   결과, 승인된 관계의 끝점이면 무결성 장애).
+        return ontology_resolve.not_found("색인에 없는 업무 객체입니다.")
+
+    scope = _scope(str(row.get("tenant_id", "")), str(row.get("entity_mode", "")),
+                   str(row.get("scope_node_id", "")),
+                   owner_dept_id=str(row.get("scope_node_id", "")))
+    if scope is None:
+        #: ⚠️⚠️ 색인은 범위 없는 행을 애초에 받지 않는다. 그런데도 여기 왔다면 **자료가
+        #:   어긋난 것**이지 「안 보이는 것」이 아니다.
+        #: ★ 「일어날 리 없다」를 그냥 두면 일어났을 때 `found(None)` 로 터지고, 그
+        #:   예외는 «해석 실패» 로 뭉뚱그려져 원인을 잃는다.
+        stats.bump("dataset_scope_missing")
+        return ontology_resolve.unavailable(
+            f"색인 줄에 범위가 없습니다({ref.key}) — 자료가 어긋났습니다.")
+    stats.bump("dataset_resolved")
+    return ontology_resolve.found(
+        scope, snapshot_id=str(row.get("snapshot_id", "")),
+        row_evidence=str(row.get("row_evidence", "")),
+        data_kind=str(row.get("data_kind", "")))
 
 
 def _resolve_mdm(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
