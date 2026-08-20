@@ -308,17 +308,15 @@ def certify_demo(store: Any, snapshot_id: str) -> Dict[str, Any]:
     from core.data_preparation import scope_index
 
     payload = scope_index.plan(row)              # ← 여기서 막히면 인증이 서지 않는다
-    certified = store.advance_snapshot(snapshot_id, m.DEMO_CERTIFIED)
-    try:
-        scope_index.write(store, payload, str(certified.get("certified_at", "")))
-        if payload and scope_index.bound_to(store, snapshot_id) == 0:
-            raise scope_index.ScopeIndexError("색인이 기록되지 않았습니다.")
-    except Exception:
-        #: ⚠️ 인증 뒤에는 격리로 못 간다(상태 기계가 막는다). 갈 수 있는 곳은 철회뿐이고,
-        #:   그것이 뜻으로도 맞다 — **이 인증은 물린다.**
-        store.advance_snapshot(snapshot_id, m.REVOKED)
-        raise
-    return certified
+
+    #: ★★★ [2026-08-21 P1] 상태 전환과 색인 적재를 **한 트랜잭션**에서 커밋한다.
+    #: ⚠️⚠️ 종전에는 인증을 먼저 커밋하고 색인을 따로 썼다. 그 사이가 아무리 짧아도
+    #:   「인증됐는데 색인이 없는」 구간이고, 그때 읽은 쪽은 승인된 관계의 끝점에서
+    #:   503 을 만난다 — 아무도 아무것도 잘못하지 않았는데.
+    def _index(conn, fresh):
+        scope_index.write_conn(conn, payload, str(fresh.get("certified_at", "")))
+
+    return store.advance_snapshot(snapshot_id, m.DEMO_CERTIFIED, on_commit=_index)
 
 
 def display_label(snapshot: Dict[str, Any]) -> str:

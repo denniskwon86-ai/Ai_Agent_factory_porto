@@ -774,7 +774,8 @@ class OntologyRuntime:
         paths: List[dict] = []
         #: ★ 사용자가 고른 시작점 — **없으면 없는 것**이다(빈 결과).
         root_ctx = ontology_resolve.ResolveContext(
-            purpose=ontology_resolve.ROOT_LOOKUP, as_of=instant)
+            purpose=ontology_resolve.ROOT_LOOKUP, as_of=instant,
+            **self._identity(subject))
         for root in sorted(set(roots)):
             if not self._object_visible(subject, root, root_ctx):
                 continue
@@ -791,6 +792,7 @@ class OntologyRuntime:
                     #:   그것은 「경로가 없다」가 아니라 **자료가 사라진 사고**다.
                     edge_ctx = ontology_resolve.ResolveContext(
                         purpose=ontology_resolve.RELATION_ENDPOINT, as_of=instant,
+                        **self._identity(subject),
                         relation_id=edge["relation_id"],
                         evidence_refs=tuple(json.loads(edge["evidence_refs_json"]) or ()))
                     if not self._object_visible(subject, nxt, edge_ctx):
@@ -842,6 +844,7 @@ class OntologyRuntime:
         sref, oref = self._subject_ref(item), self._object_ref(item)
         ev_ctx = ontology_resolve.ResolveContext(
             purpose=ontology_resolve.EVIDENCE_VALIDATION, as_of=instant_text,
+            **self._identity(subject),
             relation_id=str(item.get("relation_id", "")),
             evidence_refs=tuple(json.loads(item.get("evidence_refs_json") or "[]") or ()))
         if (not self._object_visible(subject, sref, ev_ctx)
@@ -922,6 +925,7 @@ class OntologyRuntime:
         prop_ctx = ontology_resolve.ResolveContext(
             purpose=ontology_resolve.RELATION_PROPOSAL,
             as_of=str(proposal.effective_from or ""),
+            **self._identity(subject),
             evidence_refs=tuple(proposal.evidence_refs or ()))
         if not self._object_visible(subject, proposal.subject, prop_ctx):
             raise OntologyAccessError("the relation endpoints are not available in this context.")
@@ -952,6 +956,7 @@ class OntologyRuntime:
         row_ctx = ontology_resolve.ResolveContext(
             purpose=ontology_resolve.RELATION_ENDPOINT,
             as_of=str(row.get("effective_from", "") or ""),
+            **self._identity(subject),
             relation_id=str(row.get("relation_id", "")),
             evidence_refs=tuple(json.loads(row.get("evidence_refs_json") or "[]") or ()))
         if not self._object_visible(subject, self._subject_ref(row), row_ctx):
@@ -1039,6 +1044,19 @@ class OntologyRuntime:
             if app_policy.decide(subject, scope, app_policy.READ).allowed:
                 visible.append(row)
         return visible
+
+    @staticmethod
+    def _identity(subject: app_policy.Subject) -> dict:
+        """**객체 정체성**을 가르는 두 값을 지금 문맥에서 뽑는다.
+
+        ★★★ [2026-08-21 P0] 업무 레코드 ID 는 회사마다 겹친다 — `SHP-000001` 은 어느
+          회사에나 있다. 이 둘을 안 넘기면 **다른 회사의 줄이 우리 줄을 가리거나**
+          동점을 만들어 `AMBIGUOUS` 가 된다.
+        ⚠️ 이것은 권한이 아니다. 다른 tenant 의 `SHP-000001` 은 「내가 볼 수 없는 우리
+          배」가 아니라 **아예 다른 배**다. 그래서 PDP 보다 앞선다."""
+        ctx = subject.ctx or {}
+        return {"tenant_id": str(ctx.get("tenant_id", "") or ""),
+                "entity_mode": str(ctx.get("entity_mode", "") or "")}
 
     def _object_visible(self, subject: app_policy.Subject, ref: ObjectRef,
                         ctx: ontology_resolve.ResolveContext) -> bool:

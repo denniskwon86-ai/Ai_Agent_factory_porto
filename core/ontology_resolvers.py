@@ -206,8 +206,17 @@ def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     from core.data_preparation.store import data_preparation_store
 
     try:
+        #: ★★★ [2026-08-21 P0] **정체성 두 값을 함께 넘긴다.** 없으면 다른 회사의
+        #:   `SHP-000001` 이 우리 것을 가리거나 동점을 만든다.
+        if not ctx.tenant_id or not ctx.entity_mode:
+            #: ⚠️ 문맥이 반쪽이면 «전부 뒤진다» 로 넓히지 않는다 — 그 순간 회사 경계가
+            #:   사라진다. 모르면 **막는다.**
+            stats.bump("dataset_identity_missing")
+            return ontology_resolve.unavailable(
+                "조회 문맥에 tenant·entity_mode 가 없습니다 — 객체를 특정할 수 없습니다.")
         status, row, candidates = scope_index.lookup(
             data_preparation_store, ref.namespace, ref.object_type, ref.object_id,
+            ctx.tenant_id, ctx.entity_mode,
             as_of=str(getattr(ctx, "as_of", "") or ""))
     except Exception as exc:
         #: ⚠️ [P0-3] 저장소 장애를 «없음» 으로 접지 않는다. 못 읽은 것과 없는 것은

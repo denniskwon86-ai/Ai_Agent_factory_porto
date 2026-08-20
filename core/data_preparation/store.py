@@ -471,8 +471,15 @@ class DataPreparationStore:
         return [self._public(dict(r)) for r in rows]
 
     def advance_snapshot(self, snapshot_id: str, target: str,
+                         on_commit: Optional[Any] = None,
                          **payload: Any) -> Dict[str, Any]:
         """Snapshot 을 다음 단계로 옮긴다.
+
+        ★★★ [2026-08-21 P1] `on_commit(conn, row)` 은 **같은 트랜잭션 안**에서 돈다.
+          상태 전환과 그에 딸린 기록(예: 범위 색인)을 **한 번에** 커밋하기 위해서다.
+        ⚠️⚠️ 나누면 「인증됐는데 색인이 없는」 구간이 아무리 짧아도 생긴다. 그 사이에
+          읽은 쪽은 색인 없는 인증판을 보고, 승인된 관계의 끝점이면 **503** 을 만난다 —
+          아무도 아무것도 잘못하지 않았는데.
 
         ★★★ **인증 뒤에는 원문도 본문도 바꾸지 않는다.** `raw_path`·`checksum`·
           `row_count` 는 여기서 아예 손대지 않는다 — 갱신하는 것은 그 단계가 «새로
@@ -504,6 +511,9 @@ class DataPreparationStore:
                          f"WHERE snapshot_id=?", tuple(args))
             out = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
                                (snapshot_id,)).fetchone()
+            if on_commit is not None:
+                #: ⚠️ 여기서 예외가 나면 **상태 전환도 함께 되돌아간다.** 그것이 의도다.
+                on_commit(conn, dict(out))
         return self._public(dict(out))
 
     # ── 공통 ─────────────────────────────────────────────────────────────

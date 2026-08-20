@@ -112,7 +112,7 @@ def test_인증하면_색인이_선다(store, workspace):
     snap = _certify(store, workspace)
     assert snap["state"] == m.DEMO_CERTIFIED
     assert ix.bound_to(store, snap["snapshot_id"]) == 3
-    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001")
+    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001", TENANT, "VIRTUAL")
     assert status == ix.FOUND
     assert row["tenant_id"] == TENANT and row["scope_node_id"] == SCOPE
     assert row["snapshot_id"] == snap["snapshot_id"]
@@ -207,7 +207,7 @@ def two_versions(store, workspace):
 
 def test_옛_판을_지우지_않는다(two_versions, store):
     """★ 옛 판을 지우면 과거 시점 질의가 **오늘의 답**을 낸다 — 조용한 거짓말이다."""
-    rows = ix.versions(store, "dataset", "shipment", "SHP-000001")
+    rows = ix.versions(store, "dataset", "shipment", "SHP-000001", TENANT, "VIRTUAL")
     assert len(rows) == 2, rows
     assert [r["certified_at"] for r in rows] == ["2026-03-01T00:00:00+00:00",
                                                  "2026-06-01T00:00:00+00:00"]
@@ -216,7 +216,7 @@ def test_옛_판을_지우지_않는다(two_versions, store):
 def test_as_of_는_그_시점의_판을_고른다(two_versions, store):
     """★★★ **이 파일의 핵심.** 「그냥 최신」이면 과거 질의가 오늘의 답을 받는다."""
     old, new = two_versions
-    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
+    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001", TENANT, "VIRTUAL",
                                as_of="2026-04-01T00:00:00+00:00")
     assert status == ix.FOUND
     assert row["snapshot_id"] == old["snapshot_id"], (
@@ -226,7 +226,7 @@ def test_as_of_는_그_시점의_판을_고른다(two_versions, store):
 def test_as_of_가_지나면_새_판을_고른다(two_versions, store):
     """★ 대조군 — 늘 옛 판만 고르면 그것도 틀린 것이다."""
     old, new = two_versions
-    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
+    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001", TENANT, "VIRTUAL",
                                as_of="2026-07-01T00:00:00+00:00")
     assert status == ix.FOUND and row["snapshot_id"] == new["snapshot_id"]
 
@@ -236,23 +236,23 @@ def test_인증_전_시점은_없음이_아니라_미결속이다(two_versions, 
 
     ⚠️ 최신 판으로 메우지 않는 것은 물론이고, 둘을 하나로 뭉쳐도 안 된다 — 사람이 할
       일이 다르다. 앞엣것은 오타를 의심하고, 뒤엣것은 인증 일정을 본다."""
-    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
+    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001", TENANT, "VIRTUAL",
                                as_of="2026-01-01T00:00:00+00:00")
     assert status == ix.UNBOUND and row is None
     #: ★ 대조군 — 진짜 없는 객체는 `NOT_FOUND` 여야 한다. 둘이 같아지면 구분이 사라진다.
-    missing, _, _ = ix.lookup(store, "dataset", "shipment", "SHP-없는배",
+    missing, _, _ = ix.lookup(store, "dataset", "shipment", "SHP-없는배", TENANT, "VIRTUAL",
                               as_of="2026-01-01T00:00:00+00:00")
     assert missing == ix.NOT_FOUND and missing != status
 
 
 def test_없는_객체는_없는_것이다(two_versions, store):
-    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-없는배")
+    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-없는배", TENANT, "VIRTUAL")
     assert status == ix.NOT_FOUND and row is None
 
 
 def test_새_판에_없는_객체는_옛_판으로_답하지_않는다(two_versions, store):
     """★ `SHP-000003` 은 새 판에만 있다. 옛 시점에는 **없어야** 한다."""
-    status, _, _ = ix.lookup(store, "dataset", "shipment", "SHP-000003",
+    status, _, _ = ix.lookup(store, "dataset", "shipment", "SHP-000003", TENANT, "VIRTUAL",
                              as_of="2026-04-01T00:00:00+00:00")
     assert status == ix.UNBOUND, "새 판에만 있는 객체를 옛 시점에서 찾아 줬다"
 
@@ -266,7 +266,7 @@ def test_같은_시각의_판이_둘이면_고르지_않는다(store, workspace)
     same = "2026-05-01T00:00:00+00:00"
     a = _certify(store, workspace, rows=_shipment_rows(2), certified_at=same)
     b = _certify(store, workspace, rows=_shipment_rows(2), certified_at=same)
-    status, row, candidates = ix.lookup(store, "dataset", "shipment", "SHP-000001")
+    status, row, candidates = ix.lookup(store, "dataset", "shipment", "SHP-000001", TENANT, "VIRTUAL")
     assert status == ix.AMBIGUOUS, f"동점인데 «{status}» 로 골랐다"
     assert row is None
     assert set(candidates) == {a["snapshot_id"], b["snapshot_id"]}
@@ -274,7 +274,7 @@ def test_같은_시각의_판이_둘이면_고르지_않는다(store, workspace)
 
 def test_동점이_아니면_고른다(two_versions, store):
     """★ 대조군 — 동점 검사가 **늘 막기만** 하면 그것은 검사가 아니다."""
-    status, row, candidates = ix.lookup(store, "dataset", "shipment", "SHP-000001")
+    status, row, candidates = ix.lookup(store, "dataset", "shipment", "SHP-000001", TENANT, "VIRTUAL")
     assert status == ix.FOUND and row is not None and candidates == ()
 
 
@@ -328,7 +328,7 @@ def test_한_판_안에서도_조직_범위가_다를_수_있다(store, workspac
 
     scopes = {}
     for r in rows:
-        status, got, _ = ix.lookup(store, "dataset", "shipment", r["shipment_id"])
+        status, got, _ = ix.lookup(store, "dataset", "shipment", r["shipment_id"], TENANT, "VIRTUAL")
         assert status == ix.FOUND
         scopes.setdefault(got["scope_node_id"], 0)
         scopes[got["scope_node_id"]] += 1
@@ -344,3 +344,152 @@ def test_tenant_은_판과_같아야_한다(store, workspace):
     rows[0]["tenant_id"] = "tenant-남의회사"
     with pytest.raises(ix.ScopeIndexError):
         _certify(store, workspace, rows=rows)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 4.1a 보정 — 감사에서 나온 P0 둘·P1 셋 (2026-08-21)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_철회된_인증판은_더_이상_해석되지_않는다(store, workspace):
+    """★★★ [P0] 색인 줄은 인증판이 철회돼도 **남는다.**
+
+    ⚠️⚠️ 상태를 안 보면 폐기된 판의 객체가 영원히 `FOUND` 로 답한다 — 철회가 아무 일도
+      하지 않는 셈이 된다. 「물렸다」고 기록만 하고 실제로는 그대로 쓰이는 것이다."""
+    snap = _certify(store, workspace)
+    ok, _, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001", TENANT, "VIRTUAL")
+    assert ok == ix.FOUND, "시험 전제가 깨졌다"
+
+    store.advance_snapshot(snap["snapshot_id"], m.REVOKED)
+    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
+                               TENANT, "VIRTUAL")
+    #: ★ 「아예 없다」가 아니라 「더는 묶여 있지 않다」다 — 사람이 볼 곳이 다르다.
+    assert status == ix.UNBOUND, f"철회된 판이 «{status}» 로 살아 있다"
+    assert row is None
+
+
+def test_다른_회사의_같은_ID_는_다른_객체다(store, workspace):
+    """★★★ [P0] 업무 레코드 ID 는 회사마다 겹친다 — `SHP-000001` 은 어디에나 있다.
+
+    ⚠️⚠️ 정체성에 tenant 가 없으면 **다른 회사의 최신 줄이 우리 줄을 가리거나** 동점을
+      만들어 `AMBIGUOUS` 가 된다.
+    ★ 이것은 권한이 아니다. 남의 `SHP-000001` 은 「내가 볼 수 없는 우리 배」가 아니라
+      **아예 다른 배**다."""
+    _certify(store, workspace, rows=_shipment_rows(2),
+             certified_at="2026-03-01T00:00:00+00:00")
+    other = [dict(r, tenant_id="tenant-남의회사", scope_node_id="plant-남의공장")
+             for r in _shipment_rows(2)]
+    _certify(store, workspace, rows=other, tenant="tenant-남의회사",
+             scope="plant-남의공장", certified_at="2026-09-01T00:00:00+00:00")
+
+    mine, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
+                             TENANT, "VIRTUAL")
+    assert mine == ix.FOUND, "남의 회사 줄이 우리 것을 가렸다"
+    assert row["tenant_id"] == TENANT
+
+    theirs, trow, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
+                                "tenant-남의회사", "VIRTUAL")
+    assert theirs == ix.FOUND and trow["tenant_id"] == "tenant-남의회사"
+    assert row["snapshot_id"] != trow["snapshot_id"], "두 회사가 같은 판을 가리킨다"
+
+
+def test_실행_문맥이_다르면_다른_객체다(store, workspace):
+    """★ `entity_mode` 도 정체성이다 — 실적의 배와 시나리오의 배는 다른 객체다."""
+    _certify(store, workspace)
+    status, _, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
+                             TENANT, "REAL")
+    assert status == ix.NOT_FOUND, "시나리오 자료가 실적 문맥에서 보였다"
+
+
+def test_새_인증판에서_빠진_객체는_살아나지_않는다(store, workspace):
+    """★★★ [P1] 인증판은 **전체판**이다 — 새 판에 없으면 사라진 것이다.
+
+    ⚠️⚠️ 옛 줄이 남아 있다고 그 객체가 아직 있는 것처럼 답하면, **폐기된 선적이 영원히
+      살아 있다.** 그리고 그 답은 그럴듯해서 아무도 틀린 줄 모른다."""
+    _certify(store, workspace, rows=_shipment_rows(3),
+             certified_at="2026-03-01T00:00:00+00:00")
+    #: 새 판에서 `SHP-000003` 이 빠졌다.
+    _certify(store, workspace, rows=_shipment_rows(2),
+             certified_at="2026-06-01T00:00:00+00:00")
+
+    gone, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000003",
+                             TENANT, "VIRTUAL")
+    assert gone == ix.UNBOUND, f"빠진 객체가 «{gone}» 로 살아 있다"
+    assert row is None
+
+    #: ★ 대조군 — 새 판에 남아 있는 객체는 그대로 보여야 한다.
+    alive, arow, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
+                               TENANT, "VIRTUAL")
+    assert alive == ix.FOUND and arow is not None
+
+    #: ★ 그리고 **과거 시점에서는 여전히 있어야 한다** — 그때는 실제로 있었다.
+    past, prow, _ = ix.lookup(store, "dataset", "shipment", "SHP-000003",
+                              TENANT, "VIRTUAL", as_of="2026-04-01T00:00:00+00:00")
+    assert past == ix.FOUND, "과거 시점의 사실까지 지워 버렸다"
+
+
+@pytest.mark.parametrize("a,b", [
+    ("2026-06-01T00:00:00Z", "2026-06-01T00:00:00+00:00"),
+    ("2026-06-01T09:00:00+09:00", "2026-06-01T00:00:00+00:00"),
+    ("2026-06-01T00:00:00", "2026-06-01T00:00:00+00:00"),
+])
+def test_같은_순간은_표기가_달라도_같다(a, b):
+    """★★★ [P1] 종전에는 시각을 **문자열 그대로** 비교했다.
+
+    ⚠️ `Z`·`+09:00`·소수초가 섞이면 **같은 순간인데 다르게** 정렬되고, `as_of` 가 몇
+      시간씩 조용히 밀린다. 답은 그럴듯하게 나온다."""
+    assert ix._utc(a) == ix._utc(b) != ""
+
+
+def test_읽을_수_없는_시점은_지금으로_대신하지_않는다(store, workspace):
+    """⚠️ 못 읽은 `as_of` 를 «지금» 으로 바꾸면 **다른 질문에 답하게** 된다."""
+    _certify(store, workspace)
+    with pytest.raises(ix.ScopeIndexError):
+        ix.lookup(store, "dataset", "shipment", "SHP-000001", TENANT, "VIRTUAL",
+                  as_of="언젠가")
+
+
+def test_인증과_색인은_한_번에_커밋된다(store, workspace, monkeypatch):
+    """★★★ [P1] 상태 전환과 색인 적재가 **한 트랜잭션**이어야 한다.
+
+    ⚠️⚠️ 나누면 「인증됐는데 색인이 없는」 구간이 아무리 짧아도 생기고, 그때 읽은 쪽은
+      승인된 관계의 끝점에서 503 을 만난다 — 아무도 아무것도 잘못하지 않았는데.
+    ★ 색인 기록이 터지면 **인증도 함께 되돌아가야** 한다."""
+    def boom(conn, payload, certified_at):
+        raise RuntimeError("색인 저장 실패")
+
+    monkeypatch.setattr(ix, "write_conn", boom)
+    with pytest.raises(Exception):
+        _certify(store, workspace)
+
+    with store.transaction() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT state, certified_at FROM dataset_snapshots")]
+    assert rows, "시험 전제가 깨졌다"
+    for r in rows:
+        assert r["state"] != m.DEMO_CERTIFIED, (
+            "색인이 실패했는데 인증이 남았다 — 색인 없는 인증판이 존재한다")
+        assert not r["certified_at"], "인증 시각이 찍혔다"
+
+
+def test_표기가_다른_시각이_정렬을_뒤집지_않는다(store, workspace):
+    """★★★ [P1] `_utc()` 를 만든 것만으로는 부족하다 — **정렬이 실제로 그것을 쓰는지**.
+
+    ⚠️⚠️ 첫 판은 `_utc()` 자체만 시험했고, 「정렬 키를 문자열로 되돌리는」 변이가
+      **살아남았다.** 도구를 만든 것과 도구를 쓰는 것은 다른 일이다.
+
+    ★ 여기서는 두 판의 인증 시각을 **표기만 다르게** 준다:
+
+        2026-06-01T09:00:00+09:00  = UTC 00:00  (실제로 **먼저**)
+        2026-06-01T05:00:00+00:00  = UTC 05:00  (실제로 **나중**)
+
+      문자열로 정렬하면 «05» < «09» 라서 **순서가 뒤집힌다.**"""
+    first = _certify(store, workspace, rows=_shipment_rows(2),
+                     certified_at="2026-06-01T09:00:00+09:00")
+    second = _certify(store, workspace, rows=_shipment_rows(2),
+                      certified_at="2026-06-01T05:00:00+00:00")
+    status, row, _ = ix.lookup(store, "dataset", "shipment", "SHP-000001",
+                               TENANT, "VIRTUAL")
+    assert status == ix.FOUND, status
+    assert row["snapshot_id"] == second["snapshot_id"], (
+        "표기가 섞이자 나중 판을 먼저로 읽었다 — 시각을 문자열로 비교하고 있다")
+    assert row["snapshot_id"] != first["snapshot_id"]

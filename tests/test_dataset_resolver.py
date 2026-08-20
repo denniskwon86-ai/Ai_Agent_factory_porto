@@ -81,6 +81,12 @@ def indexed(tmp_path, monkeypatch):
 
 
 def _ctx(purpose=ontology_resolve.ROOT_LOOKUP, **kw):
+    """★ 정체성 두 값을 **기본으로 채운다** — 실제 런타임이 주체 문맥에서 채우는 것과 같다.
+
+    ⚠️ 채우지 않은 문맥을 시험 기본값으로 두면, 「문맥이 반쪽일 때 막힌다」는 통제가
+      시험 전체를 빨갛게 만들어 **그 통제를 지우고 싶어진다.**"""
+    kw.setdefault("tenant_id", TENANT)
+    kw.setdefault("entity_mode", "VIRTUAL")
     return ontology_resolve.ResolveContext(purpose=purpose, **kw)
 
 
@@ -266,3 +272,43 @@ def test_다른_다섯_namespace_는_아직_미배선이다():
         res = R.product_object_scope_resolver(
             ObjectRef(namespace, "some_type", "some_id"), _ctx())
         assert res.status == ontology_resolve.UNAVAILABLE, f"{namespace}: {res}"
+
+
+def test_문맥이_반쪽이면_전부_뒤지지_않는다(indexed):
+    """★★★ [P0] 문맥에 tenant·entity_mode 가 없으면 **막는다.**
+
+    ⚠️⚠️ 없다고 「전부 뒤진다」로 넓히면 그 순간 **회사 경계가 사라진다.** 남의 회사
+      `SHP-000001` 이 우리 답으로 돌아오고, 행 수도 화면도 멀쩡하다.
+    ★ 모르면 막는다 — 이 저장소의 fail-closed 규칙이 여기에도 그대로 적용된다."""
+    indexed(_rows())
+    for missing in ({"tenant_id": ""}, {"entity_mode": ""}, {"tenant_id": "", "entity_mode": ""}):
+        ctx = ontology_resolve.ResolveContext(
+            purpose=ontology_resolve.ROOT_LOOKUP,
+            tenant_id=missing.get("tenant_id", TENANT),
+            entity_mode=missing.get("entity_mode", "VIRTUAL"))
+        res = R.product_object_scope_resolver(SHIP, ctx)
+        assert res.status == ontology_resolve.UNAVAILABLE, f"{missing}: {res}"
+
+
+def test_런타임이_주체_문맥에서_정체성을_채운다(indexed, tmp_path):
+    """★★★ [P0] 계약을 만들어도 **런타임이 안 채우면 소용없다.**
+
+    ⚠️ 첫 판에서 실제로 그랬다 — `_identity()` 를 빈 값으로 되돌리는 변이가 살아남았다.
+      시험들이 문맥을 **직접** 만들어 넘겼기 때문에 런타임이 채우는 경로를 아무도
+      지나가지 않았다.
+    ★ 그래서 여기서는 `find_paths` 로 **런타임을 통해** 들어가 본다."""
+    indexed(_rows())
+    seen = []
+
+    def spy(ref, ctx):
+        seen.append(ctx)
+        return R.product_object_scope_resolver(ref, ctx)
+
+    rt = OntologyRuntime(str(tmp_path / "ontology.db"), spy, lambda *a, **k: True)
+    rt.find_paths(_subject(), [SHIP], ["shipment"], [], "2026-12-01T00:00:00")
+
+    assert seen, "해석기가 한 번도 불리지 않았다"
+    assert all(c.tenant_id == TENANT for c in seen), (
+        f"런타임이 tenant 를 안 넘긴다: {[c.tenant_id for c in seen]}")
+    assert all(c.entity_mode == "VIRTUAL" for c in seen), (
+        f"런타임이 entity_mode 를 안 넘긴다: {[c.entity_mode for c in seen]}")

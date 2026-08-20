@@ -62,6 +62,38 @@ CONTRACT_OBJECTS: Dict[str, Tuple[str, str, str]] = {
 }
 
 
+#: ★★★ [2026-08-21] **인증판은 «전체판» 이다.** 각 CSV 는 그 시점의 전 목록이다.
+#:
+#: ⚠️⚠️ 그래서 **새 판에서 빠진 객체는 사라진 것**이다. 옛 판의 줄이 남아 있다고 해서
+#:   그 객체가 아직 있는 것처럼 답하면, 폐기된 선적이 영원히 살아 있게 된다.
+#: ⚠️ 증분판을 쓰게 되면 이 상수부터 바꾸고 삭제 정책을 다시 정해야 한다 —
+#:   의미를 안 적어 두면 다음 사람이 «남아 있으니 유효하다» 로 읽는다.
+SNAPSHOT_SEMANTICS = "FULL"
+
+
+def _utc(text: Any) -> str:
+    """시각을 **UTC 로 정규화**한 문자열. 못 읽으면 빈 문자열.
+
+    ★★★ [2026-08-21 P1] 종전에는 시각을 **문자열 그대로** 비교했다. 그러면
+      `2026-06-01T00:00:00Z` 와 `2026-06-01T09:00:00+09:00` 이 **같은 순간인데 다르게**
+      정렬되고, 소수초가 붙으면 또 달라진다.
+    ⚠️ 그 어긋남은 조용하다 — `as_of` 가 몇 시간씩 밀려도 답은 그럴듯하게 나온다."""
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    from datetime import datetime, timezone
+
+    candidate = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    try:
+        dt = datetime.fromisoformat(candidate)
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        #: ⚠️ 시간대가 없는 값은 **UTC 로 본다.** 지역시로 읽으면 9시간이 조용히 밀린다.
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat(timespec="microseconds")
+
+
 class ScopeIndexError(m.DataPreparationError):
     """색인을 세우지 못했다. ⚠️ 인증을 통과시키지 않는다."""
 
@@ -156,8 +188,20 @@ def write(store: Any, payload: List[tuple], certified_at: str) -> int:
       쓰면 `as_of` 로 판을 고를 때 **몇 초씩 어긋난다.**"""
     if not payload:
         return 0
-    stamped = [row[:10] + (str(certified_at or ""), row[11]) for row in payload]
     with store.transaction() as conn:
+        return write_conn(conn, payload, certified_at)
+
+
+def write_conn(conn: Any, payload: List[tuple], certified_at: str) -> int:
+    """이미 열린 트랜잭션 위에서 기록한다.
+
+    ★★★ [2026-08-21 P1] 인증 상태 전환과 **같은 트랜잭션**에서 돌기 위해 있다.
+    ⚠️⚠️ 나누면 「인증됐는데 색인이 없는」 구간이 아무리 짧아도 생기고, 그 사이에 읽은
+      쪽은 승인된 관계의 끝점에서 **503** 을 만난다 — 아무도 잘못하지 않았는데."""
+    if not payload:
+        return 0
+    stamped = [row[:10] + (str(certified_at or ""), row[11]) for row in payload]
+    if True:
         conn.executemany(
             "INSERT OR REPLACE INTO object_scope_index ("
             "namespace, object_type, object_id, snapshot_id, dataset_contract_key,"
@@ -166,55 +210,118 @@ def write(store: Any, payload: List[tuple], certified_at: str) -> int:
     return len(stamped)
 
 
-def versions(store: Any, namespace: str, object_type: str,
-             object_id: str) -> List[Dict[str, Any]]:
-    """한 객체의 **판 이력.** 오래된 것부터. ⚠️ 옛 판을 지우지 않으므로 여러 줄이 나온다."""
+def versions(store: Any, namespace: str, object_type: str, object_id: str,
+             tenant_id: str, entity_mode: str,
+             include_dead: bool = False) -> List[Dict[str, Any]]:
+    """한 객체의 **판 이력.** 오래된 것부터(UTC 기준).
+
+    ★★★ [2026-08-21 P0] `tenant_id`·`entity_mode` 로 **정체성을 가른다.**
+
+    ⚠️⚠️ 종전에는 `(namespace, object_type, object_id)` 만으로 찾았다. 그런데 업무
+      레코드 ID 는 회사마다 겹친다 — `SHP-000001` 은 어느 회사에나 있다. 그러면 **다른
+      회사의 최신 줄이 우리 줄을 가리거나** 동점을 만들어 `AMBIGUOUS` 가 된다.
+    ★ 이것은 **권한 판정이 아니라 정체성 분리**다. 다른 tenant 의 `SHP-000001` 은
+      「내가 볼 수 없는 우리 배」가 아니라 **아예 다른 배**다. 그래서 PDP 보다 앞선다.
+    ★ `entity_mode` 도 같다 — 실적의 `SHP-000001` 과 시나리오의 것은 다른 객체다.
+
+    ★★★ [2026-08-21 P0] **살아 있는 인증판만 본다.**
+    ⚠️⚠️ 색인 줄은 인증판이 철회(`REVOKED`)돼도 남는다. 상태를 안 보면 **폐기된 판의
+      객체가 영원히 `FOUND`** 로 답한다 — 철회가 아무 일도 하지 않는 셈이 된다."""
+    sql = ("SELECT i.*, s.state AS snapshot_state FROM object_scope_index i "
+           "JOIN dataset_snapshots s ON s.snapshot_id = i.snapshot_id "
+           "WHERE i.namespace=? AND i.object_type=? AND i.object_id=? "
+           "AND i.tenant_id=? AND i.entity_mode=?")
+    args = [namespace, object_type, object_id, tenant_id, entity_mode]
+    if not include_dead:
+        sql += " AND s.state=?"
+        args.append(m.DEMO_CERTIFIED)
     with store.transaction() as conn:
-        rows = conn.execute(
-            "SELECT * FROM object_scope_index WHERE namespace=? AND object_type=? "
-            "AND object_id=? ORDER BY certified_at, snapshot_id",
-            (namespace, object_type, object_id)).fetchall()
-    return [dict(r) for r in rows]
+        rows = [dict(r) for r in conn.execute(sql, tuple(args)).fetchall()]
+    #: ★ 정렬은 **UTC 로 정규화한 값**으로 한다 — 문자열 정렬은 표기가 섞이면 어긋난다.
+    rows.sort(key=lambda r: (_utc(r.get("certified_at")), str(r.get("snapshot_id"))))
+    return rows
+
+
+def current_snapshot(store: Any, dataset_contract_key: str, tenant_id: str,
+                     entity_mode: str, as_of_utc: str = "") -> Optional[str]:
+    """그 시점의 **현재 인증판** id. 없으면 `None`.
+
+    ★ 인증판이 «전체판» 이므로(§`SNAPSHOT_SEMANTICS`), 「지금 유효한 목록」은 이 판
+      하나다. 여기에 없는 객체는 **빠진 것**이다."""
+    with store.transaction() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT i.snapshot_id, s.certified_at FROM ("
+            "  SELECT DISTINCT snapshot_id FROM object_scope_index "
+            "  WHERE dataset_contract_key=? AND tenant_id=? AND entity_mode=?) i "
+            "JOIN dataset_snapshots s ON s.snapshot_id = i.snapshot_id "
+            "WHERE s.state=?",
+            (dataset_contract_key, tenant_id, entity_mode, m.DEMO_CERTIFIED)).fetchall()]
+    live = [(_utc(r["certified_at"]), str(r["snapshot_id"])) for r in rows]
+    if as_of_utc:
+        live = [x for x in live if x[0] and x[0] <= as_of_utc]
+    if not live:
+        return None
+    live.sort()
+    return live[-1][1]
 
 
 #: 조회 결과의 종류. ★ 런타임의 `ObjectResolution` 상태와 **같은 어휘**를 쓴다 —
 #: 여기서 다른 이름을 쓰면 옮겨 담는 자리에서 뜻이 바뀐다.
 FOUND, NOT_FOUND, AMBIGUOUS = "FOUND", "NOT_FOUND", "AMBIGUOUS"
-#: 객체는 아는데 **그 시점에는 아직 어느 인증판에도 묶여 있지 않다.**
-#: ⚠️ 「그런 것이 없다」와 다르다 — 있는데 아직 인증 전인 것이고, 사람이 할 일도 다르다
-#:   (앞엣것은 오타를 의심하고, 뒤엣것은 인증 일정을 본다).
+#: 객체는 아는데 **그 시점에는 어느 살아 있는 인증판에도 묶여 있지 않다.**
+#: ⚠️ 「그런 것이 없다」와 다르다 — 있는데 아직 인증 전이거나, 폐기됐거나, 새 판에서
+#:   빠진 것이고, 사람이 할 일도 각각 다르다.
 UNBOUND = "UNBOUND"
 
 
 def lookup(store: Any, namespace: str, object_type: str, object_id: str,
+           tenant_id: str, entity_mode: str,
            as_of: str = "") -> Tuple[str, Optional[Dict[str, Any]], Tuple[str, ...]]:
     """`as_of` 시점의 판 하나를 고른다 → `(상태, 줄, 후보들)`.
 
-    ★★★ **「그냥 최신」을 쓰지 않는다.** `as_of` 이하에서 인증된 판 중 가장 최근을
-      고른다. 과거 시점 질의는 그때의 답을 그대로 내야 한다.
+    ## 고르는 규칙
 
-    ⚠️⚠️ 같은 인증 시각의 판이 둘이면 **고르지 않는다.** 임의로 고르면 같은 질문의
-      답이 실행마다 달라지고, 재실행 지문이 흔들린다 — 그러면 「이 숫자는 무엇으로
-      만들었나」에 답할 수 없다.
+        as_of 이하에서 인증된 **살아 있는** 판 중 가장 최근
+        같은 시각의 후보가 둘이면 → AMBIGUOUS (아무거나 고르지 않는다)
+        그 판이 **현재 인증판이 아니면** → UNBOUND (새 판에서 빠진 객체다)
 
-    ⚠️ `as_of` 가 비면 「지금」이다. 그때도 최신이 아니라 **전 구간 중 가장 최근**을
-      고르므로 결과는 같지만, 규칙은 하나로 유지된다."""
-    rows = versions(store, namespace, object_type, object_id)
-    if not rows:
-        return NOT_FOUND, None, ()
-    cutoff = str(as_of or "").strip()
-    if cutoff:
-        rows = [r for r in rows if str(r.get("certified_at") or "") <= cutoff]
-        if not rows:
-            #: ★★★ 그 시점에는 **아직 인증되지 않았다.** 「그런 객체가 없다」가 아니다.
-            #: ⚠️ 둘을 하나로 뭉치면 사람이 할 일을 못 고른다 — 앞엣것은 오타를
-            #:   의심하고, 뒤엣것은 인증 일정을 본다.
+    ⚠️⚠️ 「그냥 최신」은 **과거 시점 질의에 오늘의 답**을 준다.
+    ⚠️⚠️ 동점을 임의로 고르면 같은 질문의 답이 실행마다 달라지고, 재실행 지문이 흔들린다.
+    ⚠️⚠️ 새 판에서 빠진 객체를 옛 줄로 답하면 **폐기된 선적이 영원히 살아 있다.**
+
+    ★ 「없다」와 「묶여 있지 않다」를 가른다 — 앞엣것은 오타를 의심하고, 뒤엣것은
+      인증 일정·철회 이력을 본다."""
+    live = versions(store, namespace, object_type, object_id, tenant_id, entity_mode)
+    if not live:
+        #: ★ 죽은 줄까지 세어 「아예 없다」와 「있었는데 지금은 아니다」를 가른다.
+        any_row = versions(store, namespace, object_type, object_id, tenant_id,
+                           entity_mode, include_dead=True)
+        if any_row:
             return UNBOUND, None, ()
-    newest = str(rows[-1].get("certified_at") or "")
-    tied = [r for r in rows if str(r.get("certified_at") or "") == newest]
+        return NOT_FOUND, None, ()
+
+    cutoff = _utc(as_of)
+    if str(as_of or "").strip() and not cutoff:
+        #: ⚠️ 읽을 수 없는 시점으로 «지금» 을 대신하지 않는다 — 조용히 다른 질문에 답하게 된다.
+        raise ScopeIndexError(f"as_of 를 시각으로 읽지 못했습니다: {as_of!r}")
+    if cutoff:
+        live = [r for r in live if _utc(r.get("certified_at")) <= cutoff]
+        if not live:
+            #: ★★★ 그 시점에는 **아직 인증되지 않았다.** 「그런 객체가 없다」가 아니다.
+            return UNBOUND, None, ()
+
+    newest = _utc(live[-1].get("certified_at"))
+    tied = [r for r in live if _utc(r.get("certified_at")) == newest]
     if len(tied) > 1:
         return AMBIGUOUS, None, tuple(str(r.get("snapshot_id")) for r in tied)
-    return FOUND, rows[-1], ()
+
+    chosen = live[-1]
+    #: ★★★ 전체판이므로 **현재 판에 없으면 빠진 것**이다.
+    current = current_snapshot(store, str(chosen.get("dataset_contract_key", "")),
+                               tenant_id, entity_mode, cutoff)
+    if current and str(chosen.get("snapshot_id")) != current:
+        return UNBOUND, None, ()
+    return FOUND, chosen, ()
 
 
 def bound_to(store: Any, snapshot_id: str) -> int:
