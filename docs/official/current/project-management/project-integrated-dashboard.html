@@ -1,0 +1,31 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Factory Studio 통합 프로젝트 현황판</title><link rel="stylesheet" href="../../assets/official.css"></head><body>
+<header class="topbar"><div class="topbar-inner"><a class="brand" href="../../index.html">AI Factory <span>Studio</span></a><nav class="topnav"><a href="#gates">Gate</a><a href="#workstreams">Workstream</a><a href="#demo">시연</a><a href="raid-log.html">RAID</a></nav></div></header>
+<section class="hero"><div class="hero-inner"><p class="eyebrow">Internal Program Control · 2026-08-20</p><h1>통합 프로젝트 현황판</h1><p>기능 수가 아니라 실제 사용 가능한 수직 폐루프, 검증 근거, 외부 시연 준비도를 기준으로 판단합니다. 상세 개발 기록과 설계 정본은 기존 Markdown 문서에서 유지합니다.</p><div class="hero-meta"><span>내부 전용</span><span>근거 기반</span><span>수동 갱신</span><span>측정 없는 ROI 금지</span></div></div></section>
+<main class="shell">
+<section><div class="grid four"><div class="metric"><strong>1</strong><span>우선 시연 폐루프<br>원료 구매 → 현금·손익</span></div><div class="metric"><strong>5</strong><span>MVP-P0 상위 묶음<br>순차 검증 대상</span></div><div class="metric"><strong>4,389+</strong><span>최근 보고된 회귀 통과 기준<br>실행 시점마다 재확인 필요</span></div><div class="metric"><strong>0</strong><span>측정 완료 고객 ROI<br>현재 주장 금지</span></div></div></section>
+<section id="gates"><p class="eyebrow">Program Gates</p><h2>완료 판정 관문</h2><p class="lede">초록은 코드 존재가 아니라 사용자 흐름, 보안 경계, 데이터 근거, 재현 가능한 시연이 함께 닫혔다는 뜻입니다.</p><div class="table-wrap"><table><thead><tr><th>Gate</th><th>목표</th><th>현재 판단</th><th>완료 근거</th><th>잔여사항</th></tr></thead><tbody>
+<tr><td><b>G1 Host Runtime</b></td><td>생성 앱이 조직·앱·계약 경계 안에서 데이터를 사용</td><td><span class="status current">CURRENT / VERIFIED</span></td><td>PDP, 단기 증명, iframe bridge, 원자 전환, 카나리</td><td>I-4 생성기 종단과 실제 사용자 앱 시연 지속</td></tr>
+<tr><td><b>G2 Ontology Runtime</b></td><td>승인된 관계·버전·시점·범위로 영향 경로 질의</td><td><span class="status limited">IN PROGRESS</span></td><td>런타임, 승인 원장, ResolveContext, ECM 기반</td><td>Dataset 범위 색인·Resolver, CALC 어댑터, 관계 설치·UI 종단</td></tr>
+<tr><td><b>G3 Business Data Readiness</b></td><td>중복 입력 없이 업무키트·원천·인증 Snapshot 준비</td><td><span class="status limited">CURRENT LIMITED</span></td><td>5개 핵심 계약키 합성 데이터·DEMO_CERTIFIED 검증</td><td>키트 인스턴스·Source Binding·Snapshot 운영 흐름, 생성기 부작용 수정</td></tr>
+<tr><td><b>G4 Calculation</b></td><td>온톨로지 경로가 찾은 영향을 결정론적으로 계산</td><td><span class="status limited">PARTIAL</span></td><td>기준선·계산 그래프·시나리오 재현성 기반</td><td>CALC.* 레지스트리 3종, 과거기간 백테스트</td></tr>
+<tr><td><b>G5 Decision & Effect</b></td><td>결과를 회의·결정·실행·실제 달성률로 닫음</td><td><span class="status limited">PARTIAL</span></td><td>결정 패키지와 기준선·결과 지문</td><td>경로 어댑터, 발간 종단, 실제 효과·달성률</td></tr>
+<tr><td><b>G7 Operations</b></td><td>마이그레이션·감사·복구 가능한 운영</td><td><span class="status pending">PENDING</span></td><td>불변식 검사, 포렌식 보관, fail-closed 시험 격리</td><td>G7-2 Lite 복원 1회 실증과 롤백 패키지</td></tr>
+</tbody></table></div></section>
+<section id="workstreams"><p class="eyebrow">Workstreams</p><h2>작업 흐름별 상태</h2><div class="grid three">
+<div class="card"><span class="status current">CURRENT</span><h3>신원·조직·SSE 격리</h3><p>Ticket 발급, 헤더 차단, 프로젝트 가시성, 실시간 이벤트 격리 기반은 닫혔습니다.</p></div>
+<div class="card"><span class="status current">CURRENT</span><h3>App Host Runtime</h3><p>window.afs 표면, 앱 증명, 계약 지문, 데이터셋별 행동, 교차 앱 격리가 구현·검증되었습니다.</p></div>
+<div class="card"><span class="status limited">IN PROGRESS</span><h3>App Generator I-4</h3><p>계약 컴파일·물질화·검토 게이트를 생성 파이프라인과 완전히 잇는 단계입니다.</p></div>
+<div class="card"><span class="status limited">IN PROGRESS</span><h3>기업 경영 온톨로지</h3><p>런타임과 승인 기반은 있으나 첫 수직 경로의 Dataset 해석·계산 연결·UI 종단이 남았습니다.</p></div>
+<div class="card"><span class="status demo">DEMO DATA</span><h3>업무키트·기초 데이터</h3><p>핵심 5종 합성 데이터가 검증됐습니다. 실적이라고 부르지 않으며 운영 원천 연결은 별도입니다.</p></div>
+<div class="card"><span class="status pending">EVIDENCE NEEDED</span><h3>사업성·ROI</h3><p>90일 Shadow Pilot로 리드타임, 수작업, 운전자본·손익 영향의 기준선과 결과를 측정해야 합니다.</p></div>
+</div></section>
+<section id="demo"><p class="eyebrow">Demonstrable MVP</p><h2>시연 성공 기준</h2><div class="flow"><div class="flow-step"><b>01</b><strong>회사·범위 선택</strong><span>사용자·조직 문맥 고정</span></div><div class="flow-step"><b>02</b><strong>업무키트 준비</strong><span>중복 입력 없는 데이터 원천</span></div><div class="flow-step"><b>03</b><strong>현업 앱 실행</strong><span>Host Runtime 경계 안에서 작업</span></div><div class="flow-step"><b>04</b><strong>온톨로지 경로</strong><span>원료 지연의 영향 관계 탐색</span></div><div class="flow-step"><b>05</b><strong>계산 그래프</strong><span>생산·매출·현금 영향 계산</span></div><div class="flow-step"><b>06</b><strong>회의·결정</strong><span>근거와 책임·기한 기록</span></div><div class="flow-step"><b>07</b><strong>브리핑·발간</strong><span>결과와 후속 조치 전달</span></div></div>
+<div class="callout warn" style="margin-top:20px"><strong>시연과 제품화를 구분합니다.</strong><br>합성 데이터로 한 번 완주한 것은 DEMO PROVEN이며, 실제 회사 원천·사용자·업무 주기로 반복 검증한 것은 PILOT MEASURED입니다.</div></section>
+<section><p class="eyebrow">Immediate Next</p><h2>우선순위</h2><div class="table-wrap"><table><thead><tr><th>순서</th><th>작업</th><th>완료 조건</th><th>이유</th></tr></thead><tbody>
+<tr><td>1</td><td>G2 Dataset 범위 색인·Resolver</td><td>인증판·행·조직 범위를 as_of로 정확히 해석</td><td>현재 첫 경로의 가장 큰 차단점</td></tr>
+<tr><td>2</td><td>CALC.* 어댑터 3종</td><td>계약키가 실제 G4 계산을 호출</td><td>온톨로지는 숫자를 계산하지 않음</td></tr>
+<tr><td>3</td><td>경로 → G5 패키지 어댑터</td><td>query_id·path fingerprint가 결정 안건과 발간에 남음</td><td>설명과 실행을 닫음</td></tr>
+<tr><td>4</td><td>G7-2 Lite 복원 실증</td><td>사본에서 설치 전·후 복원 1회 성공</td><td>스키마 확대 전에 되돌림 확보</td></tr>
+<tr><td>5</td><td>실사용 Shadow Pilot</td><td>이중입력 0, 사용자 행동·품질·리드타임 측정</td><td>BI형 관람 도구로 끝나는 위험 검증</td></tr>
+</tbody></table></div></section>
+</main><footer class="footer"><div class="shell"><span>내부 관리용 · 외부 배포 금지</span><span>최신 개발 판정은 코드·테스트·기존 상세 설계 문서로 재확인</span></div></footer></body></html>

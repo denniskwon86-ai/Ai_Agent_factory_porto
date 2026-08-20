@@ -1,0 +1,34 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Factory Studio RAID Log</title><link rel="stylesheet" href="../../assets/official.css"></head><body>
+<header class="topbar"><div class="topbar-inner"><a class="brand" href="../../index.html">AI Factory <span>Studio</span></a><nav class="topnav"><a href="project-integrated-dashboard.html">현황판</a><a href="#risk">Risk</a><a href="#assumption">Assumption</a><a href="#issue">Issue</a><a href="#decision">Decision</a></nav></div></header>
+<section class="hero"><div class="hero-inner"><p class="eyebrow">Internal RAID Control · 2026-08-20</p><h1>Risk · Assumption · Issue · Decision</h1><p>중요 위험을 개발 로그 속에 묻지 않고, 경영·제품·데이터·운영 관점에서 사람이 판단할 수 있도록 관리합니다.</p></div></section>
+<main class="shell">
+<section id="risk"><h2>Risks</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>위험</th><th>영향</th><th>가능성</th><th>대응·완료 기준</th><th>상태</th></tr></thead><tbody>
+<tr><td>R-01</td><td>현업 사용 저조 또는 데이터 품질 부족</td><td>경영 시뮬레이션의 기반 약화, BI형 관람 도구로 고착</td><td>높음</td><td>기본 업무키트, Zero Duplicate Entry Gate, Shadow Pilot 채택률·완결률 측정</td><td><span class="status limited">OPEN</span></td></tr>
+<tr><td>R-02</td><td>레거시 연계 비용의 선형 증가</td><td>EAI 비용·일정 증가, 원천 시스템 종속</td><td>높음</td><td>Source Binding·표준 Read 계약·파일/배치/MCP 우선순위, 첫 폐루프 최소 연결</td><td><span class="status limited">OPEN</span></td></tr>
+<tr><td>R-03</td><td>G2 Dataset 범위 색인 미완</td><td>정식 관계 설치와 조직 격리된 경로 질의 불가</td><td>현재</td><td>정체성/판 분리, as_of·evidence_ref 계약, 타 조직 fixture 부정 시험</td><td><span class="status blocked">BLOCKER</span></td></tr>
+<tr><td>R-04</td><td>CALC.* 계약키와 G4 런타임 불일치</td><td>경로는 찾지만 수치 계산 불가</td><td>현재</td><td>3개 어댑터 등록·버전·재현성·없는 계산기 fail-closed</td><td><span class="status blocked">BLOCKER</span></td></tr>
+<tr><td>R-05</td><td>업무키트 생성기 비멱등</td><td>검증 상태 되돌림, Excel 자산 삭제</td><td>높음</td><td>자기 소유 산출물만 정리, 검증 상태 보존, 전체 빌드 멱등 회귀</td><td><span class="status limited">OPEN</span></td></tr>
+<tr><td>R-06</td><td>AIP/IRM 문서 50건 내용 미수집</td><td>지식 기반의 초기 커버리지 부족</td><td>현재</td><td>합법적 복호화본·권한 있는 내보내기·대체 정본 등록; 우회 금지</td><td><span class="status limited">OPEN</span></td></tr>
+<tr><td>R-07</td><td>측정되지 않은 ROI를 외부 문서가 선행 주장</td><td>경영진·고객 신뢰 하락</td><td>중간</td><td>상태 배지, 증거 원장, 90일 파일럿 기준선·중단 Gate</td><td><span class="status current">CONTROLLED</span></td></tr>
+<tr><td>R-08</td><td>스키마·원장 변경의 복원 미실증</td><td>설치 실패 시 복구 불확실</td><td>중간</td><td>G7-2 Lite, 사본에서 설치·복원 1회 실증</td><td><span class="status limited">OPEN</span></td></tr>
+</tbody></table></div></section>
+<section id="assumption"><h2>Assumptions</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>가정</th><th>검증 방법</th><th>판정 시점</th></tr></thead><tbody>
+<tr><td>A-01</td><td>현업은 빈 화면보다 기본 업무키트에서 시작할 때 더 빨리 채택한다.</td><td>키트 사용군/비사용군의 첫 가치 도달시간·완결률 비교</td><td>Shadow Pilot</td></tr>
+<tr><td>A-02</td><td>읽기 중심 최소 연계와 AFS_NATIVE 보충 입력으로 이중 작업을 줄일 수 있다.</td><td>동일 사실 중복 입력 건수 0, Source Binding 비율 측정</td><td>첫 폐루프</td></tr>
+<tr><td>A-03</td><td>온톨로지 경로+결정론 계산+LLM 설명 분리가 경영 숫자 신뢰를 높인다.</td><td>재현성·근거 추적·승인자 수용성 인터뷰</td><td>임원 시연/파일럿</td></tr>
+<tr><td>A-04</td><td>한 개 수직 폐루프의 종단 증거가 넓은 기능 목록보다 구매 판단에 효과적이다.</td><td>경영진 질문·후속 의사결정 비교</td><td>대외 시연</td></tr>
+</tbody></table></div></section>
+<section id="issue"><h2>Issues</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>현상</th><th>현재 조치</th><th>잔여</th></tr></thead><tbody>
+<tr><td>I-01</td><td>과거 시험이 운영 Decision Ledger에 기록됨</td><td>포렌식 사본·체인 검증·시험 격리 fail-closed</td><td>신규 운영 원장 정책과 오염 구간 표기 유지</td></tr>
+<tr><td>I-02</td><td>소개서 화면 일부가 목표 UI·예시 데이터와 혼재</td><td>상태 배지·검증용 예시 데이터 문구 추가</td><td>최신 승인 UI 재캡처와 외부본 재렌더</td></tr>
+<tr><td>I-03</td><td>기존 문서가 여러 폴더에 분산</td><td>사람용 공식 문서 센터와 history 분리</td><td>각 문서 소유자·검토일·배포등급 메타 유지</td></tr>
+</tbody></table></div></section>
+<section id="decision"><h2>Decisions</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>결정</th><th>근거</th><th>효력</th></tr></thead><tbody>
+<tr><td>D-01</td><td>Markdown 설계·인계 문서는 이동하지 않는다.</td><td>개발 정본과 사람용 배포 문서의 목적이 다름</td><td>즉시</td></tr>
+<tr><td>D-02</td><td>공식 문서 센터는 HTML·PDF·DOCX와 시각 자산만 관리한다.</td><td>읽기·배포·히스토리 경계를 단순화</td><td>즉시</td></tr>
+<tr><td>D-03</td><td>현행 AI 보좌 명칭은 Jarvis/Javis를 유지한다.</td><td>정식 제품화 전 내부 이해도 우선</td><td>후보 확정 전</td></tr>
+<tr><td>D-04</td><td>온톨로지는 경로를 찾고 G4가 수치를 계산하며 LLM은 설명한다.</td><td>환각·책임·재현성 경계</td><td>제품 원칙</td></tr>
+<tr><td>D-05</td><td>DEMO_CERTIFIED 합성 데이터는 실제 공식 실적이 아니다.</td><td>실제 Data Owner 인증·대사 부재</td><td>항상</td></tr>
+<tr><td>D-06</td><td>origin에는 브랜치 분기 전 보존본을 유지하고 명시 승인 없이 push하지 않는다.</td><td>병렬 개발·통합 안전</td><td>별도 변경 전</td></tr>
+</tbody></table></div></section>
+</main></body></html>

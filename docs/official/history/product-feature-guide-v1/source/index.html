@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Factory Studio · 제품 및 기능소개서</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="toolbar">
+    <a href="#feature-map">기능 목록</a>
+    <button type="button" onclick="window.print()">PDF로 저장</button>
+  </div>
+
+  <main class="document">
+    <section class="page cover">
+      <div class="cover-inner">
+        <div class="brand-mark"><span class="brand-dot"></span>AI FACTORY STUDIO</div>
+        <div class="cover-title">
+          <p class="eyebrow" style="color:#75c7ff">PRODUCT &amp; FEATURE GUIDE · 2026</p>
+          <h1>현업 데이터로 만들고,<br />경영의 다음 선택까지 연결합니다.</h1>
+          <p class="lead">제품 특성은 제품 특성대로, 실제 프로그램은 실제 화면대로 분리해 설명하는 AI Factory Studio 제품 및 기능소개서입니다.</p>
+        </div>
+        <div class="cover-band">
+          <div><strong>Manufacturing Management Twin</strong>실제 데이터·업무·의사결정을 연결하는 제조 경영 시스템</div>
+          <div><strong>Operational App Factory</strong>현업이 필요한 업무 SW를 직접 설계·생성·운영</div>
+          <div><strong>Closed-loop Management</strong>시뮬레이션부터 실행·효과 측정·지식 환류까지</div>
+        </div>
+      </div>
+      <div class="page-no">01</div>
+    </section>
+
+    <section class="page standard">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">How to read</p>
+          <h2>제품 설명과 프로그램 기능을 분리했습니다</h2>
+          <p>앞부분은 AI Factory Studio가 해결하려는 경영 문제와 제품 구조를 설명하고, 뒷부분은 현재 구현된 실제 화면을 기준으로 기능·입력·출력·통제·연계를 설명합니다.</p>
+        </div>
+        <span class="status-pill">DOCUMENT GUIDE</span>
+      </header>
+      <div class="grid-2" style="height:5.75in">
+        <article class="card dark" style="padding:.42in">
+          <span class="icon-badge red">I</span>
+          <p class="eyebrow" style="color:#78c7ff">PART I · PRODUCT CHARACTERISTICS</p>
+          <h2>제품의 정체성과 차별점</h2>
+          <p>왜 필요한가, 무엇을 연결하는가, 기존 시스템과 어떻게 공존하는가, 어떤 신뢰 체계를 갖추는가를 설명합니다.</p>
+          <div class="layer-stack">
+            <div class="layer highlight"><strong>경영 문제</strong><p>업무·데이터·의사결정이 분리된 현실</p><em>WHY</em></div>
+            <div class="layer"><strong>제품 해법</strong><p>통합 의미 모델과 폐루프 경영</p><em>WHAT</em></div>
+            <div class="layer"><strong>신뢰 기반</strong><p>권한·범위·근거·버전·결정론</p><em>TRUST</em></div>
+          </div>
+        </article>
+        <article class="card" style="padding:.42in">
+          <span class="icon-badge">II</span>
+          <p class="eyebrow">PART II · PRODUCT FUNCTIONS</p>
+          <h2>실제 화면 기반 기능소개</h2>
+          <p>각 기능을 누가, 왜, 어떤 데이터로 사용하며 무엇이 남고 다음 단계와 어떻게 연결되는지를 현재 제품 화면과 함께 설명합니다.</p>
+          <div class="layer-stack">
+            <div class="layer"><strong>화면 목적</strong><p>사용자가 이 화면에서 해결하는 일</p><em>PURPOSE</em></div>
+            <div class="layer"><strong>기능 계약</strong><p>입력·처리·출력·권한·감사</p><em>CONTRACT</em></div>
+            <div class="layer"><strong>업무 연계</strong><p>앞 단계와 다음 단계의 연결</p><em>FLOW</em></div>
+          </div>
+        </article>
+      </div>
+      <p class="note">표기 원칙: CURRENT PRODUCT는 현재 코드에서 확인한 화면입니다. 제품 방향 또는 고도화 대상은 별도로 표기합니다. 화면 내 수치는 검증용 예시 데이터일 수 있습니다.</p>
+      <div class="page-no">02</div>
+    </section>
+
+    <section class="page standard">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Product definition</p>
+          <h2>자동화 도구가 아니라 제조 경영 시스템입니다</h2>
+          <p>AI Factory Studio는 모든 업무를 대체하는 단일 시스템이 아니라, 기존 ERP·MES·LPL·파일·외부 데이터와 공존하며 경영 판단에 필요한 의미와 실행 수단을 연결합니다.</p>
+        </div>
+        <span class="status-pill target">PRODUCT DIRECTION</span>
+      </header>
+      <div class="definition">
+        <article class="definition-main">
+          <p class="eyebrow" style="color:#79c9ff">CORE IDENTITY</p>
+          <h2>Manufacturing<br />Management Twin</h2>
+          <p>수주·구매·생산·품질·물류·판매·회계 데이터를 경영 의미로 연결하고, 조건 변화가 생산·현금·손익·리스크에 미치는 영향을 설명 가능한 계산으로 보여줍니다.</p>
+        </article>
+        <div class="definition-side">
+          <article class="card blue"><span class="icon-badge">01</span><h3>Operational App Factory</h3><p>현업이 필요한 업무 SW를 상담·요구정의·설계·구현·검증 워크플로우로 생성합니다.</p></article>
+          <article class="card"><span class="icon-badge green">02</span><h3>Enterprise Knowledge &amp; Data</h3><p>생성 앱의 데이터와 승인된 문서를 전사 자산으로 연결하되 출처·권한·조직 범위를 보존합니다.</p></article>
+          <article class="card"><span class="icon-badge red">03</span><h3>Decision-to-Execution Loop</h3><p>시뮬레이션 결과를 검토서·결정 패키지·실행 과제·효과 측정으로 이어갑니다.</p></article>
+        </div>
+      </div>
+      <div class="page-no">03</div>
+    </section>
+
+    <section class="page standard">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Seven product capabilities</p>
+          <h2>일곱 기능이 하나의 경영 운영체계를 만듭니다</h2>
+          <p>개별 기능의 나열이 아니라, 현업 문제를 데이터·SW·시뮬레이션·의사결정으로 이어주는 결합 구조가 제품의 핵심입니다.</p>
+        </div>
+      </header>
+      <div class="grid-4">
+        <article class="card"><span class="icon-badge">1</span><h3>현업 데이터 연결</h3><p>마스터·문서·업무 시스템·파일을 등록하고 연결합니다.</p></article>
+        <article class="card"><span class="icon-badge">2</span><h3>통합 지식 자산</h3><p>용어·동의어·연관성·출처를 관리하고 검색·재가공합니다.</p></article>
+        <article class="card"><span class="icon-badge">3</span><h3>경영 시뮬레이션</h3><p>업무 모듈과 전사 관점에서 조건 변화의 영향을 계산합니다.</p></article>
+        <article class="card"><span class="icon-badge">4</span><h3>에이전트 워크플로우</h3><p>역할·스킬·모델·사용자 검토 지점을 조합합니다.</p></article>
+      </div>
+      <div class="grid-3" style="margin-top:16px">
+        <article class="card blue" style="min-height:2.55in"><span class="icon-badge red">5</span><h3>문맥형 AI 보좌</h3><p>선택한 회사·조직·객체·업무 상태를 기준으로 질문에 답하고 다음 행동을 안내합니다.</p></article>
+        <article class="card blue"><span class="icon-badge red">6</span><h3>조직별 생성·공유</h3><p>회사·사업부·공장·부서 권한에 따라 앱·데이터·시뮬레이터를 만들고 공유합니다.</p></article>
+        <article class="card blue"><span class="icon-badge red">7</span><h3>전사 통합 경영</h3><p>부서별 기능을 연결해 경영 실적과 미래 시나리오를 전사 관점으로 집계합니다.</p></article>
+      </div>
+      <div class="card dark" style="margin-top:16px;display:grid;grid-template-columns:210px 1fr;align-items:center">
+        <h3 style="margin:0">궁극적 질문</h3><p style="margin:0">“환율·전기료·고용·원료가격이 바뀌면 올해 하반기, 내년, 후년의 매출·손익·현금흐름은 어떻게 달라지는가?”</p>
+      </div>
+      <div class="page-no">04</div>
+    </section>
+
+    <section class="page standard">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Closed loop</p>
+          <h2>데이터를 보고서로 끝내지 않고 실행과 학습으로 되돌립니다</h2>
+          <p>의사결정에 사용한 근거와 계산을 고정하고, 실행 결과를 다시 측정해 다음 계획과 지식에 반영하는 폐루프가 제품의 장기 해자입니다.</p>
+        </div>
+      </header>
+      <div class="value-chain">
+        <div class="value-node"><strong>① 연결</strong><span>ERP·MES·파일·외부지표</span></div>
+        <div class="value-node"><strong>② 의미화</strong><span>MDM·용어·계보·온톨로지</span></div>
+        <div class="value-node"><strong>③ 생성</strong><span>업무 SW·보고서·시뮬레이터</span></div>
+        <div class="value-node"><strong>④ 계산</strong><span>시나리오·민감도·백테스트</span></div>
+        <div class="value-node"><strong>⑤ 검토</strong><span>근거·리스크·영향부서</span></div>
+        <div class="value-node"><strong>⑥ 결정</strong><span>승인·조건부 승인·반려</span></div>
+        <div class="value-node"><strong>⑦ 실행</strong><span>담당·기한·업무 시스템 반영</span></div>
+        <div class="value-node"><strong>⑧ 환류</strong><span>효과 측정·지식·스킬 개선</span></div>
+      </div>
+      <div class="grid-3">
+        <article class="card"><h3>결정론적 숫자</h3><p>LLM이 숫자를 창작하지 않습니다. 승인된 입력·수식·버전으로 계산하고 입력 차이는 비교 불가로 판정합니다.</p></article>
+        <article class="card"><h3>근거가 고정된 결정</h3><p>결정 요청 후 근거가 바뀌면 조용히 덮지 않고 재검토 상태로 전환합니다.</p></article>
+        <article class="card"><h3>측정 가능한 효과</h3><p>결정 전후의 목표·실적·오차·비용·사용자 수정량을 남겨 다음 실행의 품질을 높입니다.</p></article>
+      </div>
+      <div class="card blue" style="margin-top:17px"><strong>핵심 원칙</strong><p style="margin:5px 0 0">LLM은 해석·설명·문서화에 사용하고, 경영 수치·권한·승인·배포는 결정론적 엔진과 서버 정책이 통제합니다.</p></div>
+      <div class="page-no">05</div>
+    </section>
+
+    <section class="page standard">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Enterprise trust model</p>
+          <h2>회사 구조와 권한을 가장 먼저 설정합니다</h2>
+          <p>그룹·법인·사업부·공장·부서를 기준으로 데이터와 기능의 범위를 관리하고, 가상 회사는 신사업·확장·경쟁사 시나리오를 안전하게 시험하는 별도 문맥으로 둡니다.</p>
+        </div>
+      </header>
+      <div class="grid-2">
+        <article class="card dark" style="min-height:4.8in">
+          <p class="eyebrow" style="color:#78c7ff">ORGANIZATION CONTEXT</p>
+          <div class="layer-stack">
+            <div class="layer highlight"><strong>그룹 / 지주사</strong><p>전사 정책·포트폴리오·공통 기준</p><em>GROUP</em></div>
+            <div class="layer"><strong>사업회사</strong><p>업종·업태·공통 경영 체계</p><em>COMPANY</em></div>
+            <div class="layer"><strong>사업부</strong><p>제품·공정·손익 책임 단위</p><em>DIVISION</em></div>
+            <div class="layer"><strong>공장 / 조직</strong><p>생산·품질·물류·구매 실행 단위</p><em>PLANT / DEPT</em></div>
+            <div class="layer"><strong>가상 회사</strong><p>신사업·증설·변경·경쟁사 가정</p><em>VIRTUAL</em></div>
+          </div>
+        </article>
+        <div class="grid-2">
+          <article class="card"><span class="icon-badge">A</span><h3>Host-Governed App</h3><p>생성 앱은 자체 로그인과 독자 권한을 만들지 않고 상위 플랫폼의 인증·조직·감사 정책을 상속합니다.</p></article>
+          <article class="card"><span class="icon-badge">B</span><h3>Fail-closed</h3><p>조직 범위나 바인딩을 해석하지 못하면 전사 공용으로 보지 않고 노출을 차단합니다.</p></article>
+          <article class="card"><span class="icon-badge">C</span><h3>Existing Systems Coexist</h3><p>외부 참여자 입력은 기존 파트너 시스템에서 받고 검증된 계약을 통해 연결합니다. 경영 시스템을 외부에 개방하지 않습니다.</p></article>
+          <article class="card"><span class="icon-badge">D</span><h3>Evidence &amp; Version</h3><p>출처·버전·유효기간·승인·조직 범위·근거 경로를 보존해 숫자와 판단을 재현합니다.</p></article>
+        </div>
+      </div>
+      <div class="page-no">06</div>
+    </section>
+
+    <section class="page standard" id="feature-map">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Product feature map</p>
+          <h2>현재 제품 기능을 다섯 업무 영역으로 읽습니다</h2>
+          <p>사용자는 경영 홈에서 시작하지만, 각 전문 기능은 독립 화면으로 진입해 필요한 정보 밀도와 작업 흐름을 유지합니다.</p>
+        </div>
+      </header>
+      <div class="feature-map">
+        <article class="feature-column"><h3>경영·의사결정</h3><ul><li>경영 홈</li><li>경영계획·실적</li><li>의사결정 센터</li><li>대내외 발간</li><li>전사 브리핑</li></ul></article>
+        <article class="feature-column"><h3>앱 생성·운영</h3><ul><li>업무·데이터 설계 상담</li><li>Software Factory</li><li>프로젝트 통제실</li><li>앱 전달·앱 주머니</li><li>릴리스·결과물</li></ul></article>
+        <article class="feature-column"><h3>데이터·지식</h3><ul><li>지식 허브</li><li>마스터 데이터</li><li>용어집·동의어</li><li>데이터 카탈로그</li><li>외부지표·계약</li></ul></article>
+        <article class="feature-column"><h3>조직·거버넌스</h3><ul><li>회사·조직 구조</li><li>사용자·역할·범위</li><li>데이터 거버넌스</li><li>감사·결정 원장</li><li>가상 회사 문맥</li></ul></article>
+        <article class="feature-column"><h3>AI 운영</h3><ul><li>에이전트 통제소</li><li>워크플로우 템플릿</li><li>모델·비용 라우팅</li><li>사용자 검토 지점</li><li>스킬 진화</li></ul></article>
+      </div>
+      <div class="page-no">07</div>
+    </section>
+
+    <section class="page section-cover">
+      <div class="section-copy">
+        <div class="brand-mark"><span class="brand-dot"></span>AI FACTORY STUDIO</div>
+        <div class="section-number">II</div>
+        <h2>실제 프로그램<br />기능소개</h2>
+        <p>현재 구현 화면을 크게 보여주고, 화면별 역할과 업무 계약을 기능소개서 수준으로 설명합니다.</p>
+      </div>
+      <div class="section-visual">
+        <div class="screen-stack">
+          <img src="assets/screens/01-management-home.png" alt="경영 홈 실제 화면" />
+          <img src="assets/screens/04-project-control-room.png" alt="프로젝트 통제실 실제 화면" />
+        </div>
+      </div>
+      <div class="page-no">08</div>
+    </section>
+
+    <section class="page feature-page" id="feature-home">
+      <header class="feature-head"><div class="feature-code">F-01</div><div><h2>경영 홈</h2><p>지금 결정해야 할 것과 데이터 신뢰 상태를 첫 화면에서 확인합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>경영진 · 조직 책임자 · PMO</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/01-management-home.png" alt="경영 홈 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>여러 모듈을 순회하기 전에 의사결정 대기·차단·업무 도메인·비용·신뢰 기반을 한곳에서 파악합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>내 결정과 차단 상태 요약</li><li>DATA·SW·TWIN 업무 흐름</li><li>MDM·지식·외부지표 신뢰 상태</li><li>주요 업무로 바로 이동</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>현재 경영 초점, 다음 행동, 데이터 준비도, LLM 비용과 호출량.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>회사·조직 문맥과 사용자 권한에 따라 카드·수치·결정 목록을 제한합니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">조직 문맥 선택</span><span class="arrow">→</span><span class="flow-step">결정·차단 확인</span><span class="arrow">→</span><span class="flow-step">근거·신뢰 확인</span><span class="arrow">→</span><span class="flow-step">전문 기능 진입</span></div>
+      <div class="page-no">09</div>
+    </section>
+
+    <section class="page feature-page" id="feature-advisor">
+      <header class="feature-head"><div class="feature-code">F-02</div><div><h2>업무·데이터 설계 상담</h2><p>무엇을 만들지 모르는 사용자에게 필요한 데이터와 실행 청사진을 먼저 제안합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>현업 담당자 · 혁신조직 · 데이터 오너</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/02-advisor.png" alt="업무 데이터 설계 상담 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>사용자가 긴 요구서를 쓰기 전에 선택형 상담으로 목표·범위·데이터 준비 수준을 구체화합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>업무 주제 선택</li><li>추천안 중심 선택형 질문</li><li>필요 데이터셋 자동 제안</li><li>워크플로우·산출물 청사진</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>요구사항 초안, 데이터 요구 목록, 부족 데이터와 대체 경로, 추천 생성 템플릿.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>확정되지 않은 가정은 가정으로 표시하고, 사용자가 승인한 내용만 생성 단계로 넘깁니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">업무 목표 입력</span><span class="arrow">→</span><span class="flow-step">선택형 상담</span><span class="arrow">→</span><span class="flow-step">데이터 준비 확인</span><span class="arrow">→</span><span class="flow-step">청사진 승인</span></div>
+      <div class="page-no">10</div>
+    </section>
+
+    <section class="page feature-page" id="feature-factory">
+      <header class="feature-head"><div class="feature-code">F-03</div><div><h2>Software Factory</h2><p>업무 SW 프로젝트를 만들고, 프로젝트·Mega·릴리스·보관함을 관리합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>업무 기획자 · Citizen Developer · PM</div></header>
+      <div class="feature-body">
+        <div class="screen-pair">
+          <figure class="screen-frame"><img src="assets/screens/03-software-factory.png" alt="Software Factory 프로젝트 목록" /></figure>
+          <figure class="screen-frame"><img src="assets/screens/03b-software-factory-create.png" alt="새 업무 생성 화면" /></figure>
+        </div>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>현업 앱·보고서·시뮬레이터 생성 작업을 시작하고 전체 생성 자산의 상태를 관리합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>독립·Mega 프로젝트</li><li>릴리스와 결과물 보관</li><li>회사·조직·템플릿 선택</li><li>실제·가상·시험 문맥 분리</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>프로젝트 메타정보, 적용 템플릿, 초기 요구사항, 생성 작업 ID.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>시험 산출물은 실제 경영 집계에서 제외하고, 신규 자산은 명시적 조직 범위를 요구합니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">유형 선택</span><span class="arrow">→</span><span class="flow-step">조직·템플릿 지정</span><span class="arrow">→</span><span class="flow-step">요구 입력</span><span class="arrow">→</span><span class="flow-step">통제실 생성</span></div>
+      <div class="page-no">11</div>
+    </section>
+
+    <section class="page feature-page" id="feature-control-room">
+      <header class="feature-head"><div class="feature-code">F-04</div><div><h2>프로젝트 통제실</h2><p>요구확인부터 릴리스까지 전체 단계를 숨기지 않고 사용자 검토와 함께 진행합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>프로젝트 오너 · 검토자 · 운영 책임자</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/04-project-control-room.png" alt="프로젝트 통제실 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>에이전트 작업이 암묵지가 되지 않도록 단계·WBS·실시간 기록·사용자 결정·산출물을 동시에 보여줍니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>전체 워크플로우 스트립</li><li>WBS 진행·현재 작업</li><li>사용자 검토 요청</li><li>코드·문서·미리보기</li><li>문맥형 AI 보좌</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>RFP·기획·UI·아키텍처·WBS·기술설계·코드·검수·매뉴얼.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>사용자 검토 지점, 재작업 한도, 빌드·회귀·QA 게이트, 격리된 미리보기.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">질문·요구정의</span><span class="arrow">→</span><span class="flow-step">설계·WBS</span><span class="arrow">→</span><span class="flow-step">구현·검증</span><span class="arrow">→</span><span class="flow-step">릴리스·전달</span></div>
+      <div class="page-no">12</div>
+    </section>
+
+    <section class="page feature-page" id="feature-knowledge">
+      <header class="feature-head"><div class="feature-code">F-05</div><div><h2>지식 허브</h2><p>승인된 문서와 근거를 지식팩으로 관리하고 생성·상담·검토에 연결합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>도메인 전문가 · 지식 관리자 · 현업 사용자</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/11-knowledge-hub.png" alt="지식 허브 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>표준·논문·업무지침·과거 산출물을 출처와 승인 상태를 보존한 채 검색하고 재사용합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>지식팩·문서 등록</li><li>자연어·근거 기반 검색</li><li>검색 품질·원천 레지스트리</li><li>프로젝트 문맥 주입</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>근거 조각, 출처 문서, 적용 범위, 승인·검토 상태, 프로젝트별 참조 묶음.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>승인되지 않은 문서와 권한 밖 문서는 LLM 문맥과 검색 결과에서 제외합니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">원천 등록</span><span class="arrow">→</span><span class="flow-step">검토·승인</span><span class="arrow">→</span><span class="flow-step">검색·근거 선택</span><span class="arrow">→</span><span class="flow-step">생성·판단에 사용</span></div>
+      <div class="page-no">13</div>
+    </section>
+
+    <section class="page feature-page" id="feature-master-data">
+      <header class="feature-head"><div class="feature-code">F-06</div><div><h2>마스터 데이터</h2><p>경영 계산과 업무 앱이 공통으로 사용할 기준정보를 버전과 범위로 관리합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>MDM 관리자 · 데이터 오너 · 업무 책임자</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/05-master-data.png" alt="마스터 데이터 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>제품·원료·공정·BOM·조직·재무 파라미터 등 공통 기준정보의 정본을 유지합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>유형·레코드·별칭 관리</li><li>버전·유효기간·승인</li><li>CSV 등록·개정</li><li>결정론적 문맥 주입</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>Golden Record, 버전 고정값, 별칭·동의어, 조직 범위, 계산·생성 주입 데이터.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>미바인딩은 전사 공용으로 간주하지 않으며, 개정 시 과거 버전을 보존합니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">유형 선택</span><span class="arrow">→</span><span class="flow-step">레코드 등록·검증</span><span class="arrow">→</span><span class="flow-step">승인·버전 고정</span><span class="arrow">→</span><span class="flow-step">앱·계산에 공급</span></div>
+      <div class="page-no">14</div>
+    </section>
+
+    <section class="page feature-page" id="feature-governance">
+      <header class="feature-head"><div class="feature-code">F-07</div><div><h2>데이터 거버넌스</h2><p>노출 범위·중복·정정·계약·외부지표의 이상을 “0건”으로 숨기지 않습니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>데이터 거버넌스 · 보안 · 감사</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/06-data-governance.png" alt="데이터 거버넌스 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>데이터가 존재하지 않는 것과 읽지 못한 것을 구분하고, 경영 기준선에 쓰기 전 문제를 드러냅니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>조직 범위 노출 점검</li><li>중복 기준정보 탐지</li><li>정정·대사 대상 관리</li><li>데이터 계약·외부지표 상태</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>미지정·차단·판독 실패·중복·계약 위반·기준선 사용 불가 목록.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>조회 실패는 0건으로 표시하지 않고, 기준선 차단 사유를 명시합니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">자산 스캔</span><span class="arrow">→</span><span class="flow-step">범위·품질 판정</span><span class="arrow">→</span><span class="flow-step">정정·승인</span><span class="arrow">→</span><span class="flow-step">CERTIFIED 승격</span></div>
+      <div class="page-no">15</div>
+    </section>
+
+    <section class="page feature-page" id="feature-permissions">
+      <header class="feature-head"><div class="feature-code">F-08</div><div><h2>조직·사용자·권한</h2><p>그룹에서 공장까지 회사 구조와 사용자의 역할·범위를 경영 문맥으로 관리합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>조직 관리자 · 보안 관리자 · HR 연계 담당</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/07-org-permissions.png" alt="조직 권한 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>사용자가 어느 회사·사업부·공장·부서의 데이터와 앱에 접근할 수 있는지 명시합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>조직 트리·의미 그래프</li><li>사용자·역할·범위 배정</li><li>조직 개편 이력</li><li>내 권한 확인</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>조직 노드, 상하위 관계, 사용자 소속, 역할, 자원 범위, 변경 이력.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>화면 노출뿐 아니라 API·SSE·데이터·생성 앱 런타임까지 동일 정책을 적용합니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">회사 구조 등록</span><span class="arrow">→</span><span class="flow-step">사용자·역할 배정</span><span class="arrow">→</span><span class="flow-step">자원 범위 결합</span><span class="arrow">→</span><span class="flow-step">전 기능에 강제</span></div>
+      <div class="page-no">16</div>
+    </section>
+
+    <section class="page feature-page" id="feature-agents">
+      <header class="feature-head"><div class="feature-code">F-09</div><div><h2>에이전트 통제소</h2><p>AI 에이전트의 역할·스킬·모델·순서·사용자 검토 지점을 템플릿으로 관리합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>AI 운영자 · 업무 템플릿 관리자 · 품질 책임자</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/12-agent-control.png" alt="에이전트 통제소 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>업무에 필요한 전문 에이전트를 구성하고, 저비용 모델과 고품질 모델을 단계별로 배치합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>에이전트 역할·스킬</li><li>모델 티어·폴백</li><li>작업 순서·검토 지점</li><li>업무 템플릿 생성·복사</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>실행 가능한 워크플로우 템플릿, 에이전트 레지스트리, 품질·비용 정책.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>관리 권한 없는 사용자는 조회·생성·수정·배포 기능을 사용할 수 없습니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">업무 목표 선택</span><span class="arrow">→</span><span class="flow-step">에이전트 추천</span><span class="arrow">→</span><span class="flow-step">순서·검토 설정</span><span class="arrow">→</span><span class="flow-step">템플릿 배포</span></div>
+      <div class="page-no">17</div>
+    </section>
+
+    <section class="page feature-page" id="feature-planning">
+      <header class="feature-head"><div class="feature-code">F-10</div><div><h2>경영계획·실적 시뮬레이션</h2><p>승인된 입력과 계산식을 사용해 계획·실적·현금흐름·백테스트를 비교합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>경영관리 · 재무 · 사업부 책임자</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/08-management-planning.png" alt="경영계획 실적 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>기준·공격·위험 시나리오의 차이를 숫자로 비교하고, 입력 불일치와 이중계상 위험을 사전에 차단합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>계획 대비 실적</li><li>월별 현금흐름</li><li>시나리오 비교</li><li>백테스트·오차 지표</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>매출·비용·손익·현금·오차·편향·민감도와 비교 가능 여부.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>경영 수치는 결정론적으로 계산하며, 승인 해시가 바뀌면 재검토를 요구합니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">기준선 고정</span><span class="arrow">→</span><span class="flow-step">가정 변경</span><span class="arrow">→</span><span class="flow-step">결정론 계산</span><span class="arrow">→</span><span class="flow-step">비교·백테스트</span></div>
+      <div class="page-no">18</div>
+    </section>
+
+    <section class="page feature-page" id="feature-decisions">
+      <header class="feature-head"><div class="feature-code">F-11</div><div><h2>의사결정 센터</h2><p>하나의 결정 패키지를 요청자·의사결정자·영향부서 세 관점으로 제공합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>의사결정권자 · 요청 부서 · 영향 부서</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/10-decision-center.png" alt="의사결정 센터 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>시뮬레이션 결과를 결정 가능한 문서로 바꾸고, 누가 무엇을 언제 판단해야 하는지 명확히 합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>세 관점 검토서</li><li>내 결정·참여 안건</li><li>승인·조건부 승인·반려</li><li>근거 변경 감지</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>결정 문장, 선택지, 영향도, 반대 의견, 근거 지문, 담당·기한·결정 결과.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>검토 요청 후 근거가 바뀌면 자동 갱신하지 않고 새 버전 재검토를 요구합니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">시뮬레이션 선택</span><span class="arrow">→</span><span class="flow-step">세 관점 문서 생성</span><span class="arrow">→</span><span class="flow-step">검토·결정</span><span class="arrow">→</span><span class="flow-step">실행 과제 전환</span></div>
+      <div class="page-no">19</div>
+    </section>
+
+    <section class="page feature-page" id="feature-publication">
+      <header class="feature-head"><div class="feature-code">F-12</div><div><h2>대내외 보고서 발간</h2><p>승인된 결정 Snapshot으로 보고서를 만들고, 대상별 게이트를 통과한 문서만 배포합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>경영관리 · IR · 법무 · 공시 · 책임 임원</div></header>
+      <div class="feature-body">
+        <div class="screen-pair">
+          <figure class="screen-frame"><img src="assets/screens/13-publication.png" alt="보고서 발간 목록" /></figure>
+          <figure class="screen-frame"><img src="assets/screens/14-publication-detail.png" alt="보고서 상세 미리보기" /></figure>
+        </div>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>경영 판단과 시뮬레이션 결과를 내부 운영 보고·경영 보고·대외 제한 보고로 발간합니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>보고서 초안·버전</li><li>결정론적 문서 투영</li><li>책임 임원·법무·공시 게이트</li><li>배포 대상·실패 이력</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>결정 요약, 기준선·선택지·결과·근거 지문, 독자별 제외 항목, 배포 상태.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>대외 발간은 화면과 서버에서 이중 차단하며, 게시 실패를 발간 완료로 기록하지 않습니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">결정 Snapshot</span><span class="arrow">→</span><span class="flow-step">독자별 문서 생성</span><span class="arrow">→</span><span class="flow-step">게이트 승인</span><span class="arrow">→</span><span class="flow-step">배포·이력 보존</span></div>
+      <div class="page-no">20</div>
+    </section>
+
+    <section class="page feature-page" id="feature-briefing">
+      <header class="feature-head"><div class="feature-code">F-13</div><div><h2>전사 브리핑</h2><p>전사 실적·결정·차단·데이터 품질·프로그램·AI 비용을 경영 관점으로 집계합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>CEO · CFO · 전략 · 경영관리</div></header>
+      <div class="feature-body">
+        <figure class="screen-frame"><img src="assets/screens/09-enterprise-briefing.png" alt="전사 브리핑 화면" /></figure>
+        <aside class="feature-spec">
+          <div class="spec-block"><h3>화면 목적</h3><p>모듈별 결과를 전사 관점으로 집계하되 불완전한 데이터와 비교 불가 상태를 그대로 드러냅니다.</p></div>
+          <div class="spec-block"><h3>핵심 기능</h3><ul><li>우선순위·결정·차단</li><li>데이터 계약·품질</li><li>프로그램·승격·공유</li><li>AI 비용·스킬 제안</li></ul></div>
+          <div class="spec-block output"><h3>출력</h3><p>경영 브리핑, 조직별 이슈, 결정 대기, 데이터 준비도, 제품 운영 비용.</p></div>
+          <div class="spec-block control"><h3>통제</h3><p>읽지 못한 값은 0으로 집계하지 않으며 실제·가상·시험 문맥을 분리합니다.</p></div>
+        </aside>
+      </div>
+      <div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">조직별 결과 수집</span><span class="arrow">→</span><span class="flow-step">정합성·완전성 판정</span><span class="arrow">→</span><span class="flow-step">전사 집계</span><span class="arrow">→</span><span class="flow-step">경영 의제 전환</span></div>
+      <div class="page-no">21</div>
+    </section>
+
+    <section class="page standard">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Implementation status</p>
+          <h2>화면 구현과 제품 완성도를 구분해 봅니다</h2>
+          <p>이 소개서의 화면은 현재 제품에서 확인한 기능입니다. 다만 실제 경영 현장 적용을 위해서는 보안 런타임·데이터 기준선·온톨로지·결정론 계산 그래프·Shadow Pilot의 종단 완주가 필요합니다.</p>
+        </div>
+        <span class="status-pill target">HONEST STATUS</span>
+      </header>
+      <table class="matrix">
+        <thead><tr><th>영역</th><th>현재 확인된 기반</th><th>제품 완성을 위한 다음 증명</th><th>판정 기준</th></tr></thead>
+        <tbody>
+          <tr><td>앱 생성</td><td>상담·워크플로우·WBS·구현·검수·릴리스 화면과 파이프라인</td><td>Host Runtime SDK·단기 Capability Token·릴리스 적격성 종단 적용</td><td>생성 앱이 상위 권한을 우회하지 않음</td></tr>
+          <tr><td>데이터·지식</td><td>MDM·지식팩·거버넌스·조직 범위 기반</td><td>실제 원료 구매 데이터 Snapshot·대사·CERTIFIED 기준선</td><td>원천 합계와 허용 오차 내 일치</td></tr>
+          <tr><td>의미·영향</td><td>계보 탐색과 영향 API 기반</td><td>제조 경영 온톨로지의 관계·승인·버전·유효기간·근거 경로</td><td>영향 경로가 권한 내에서 재현됨</td></tr>
+          <tr><td>계산·시뮬레이션</td><td>계획 엔진·계산 브리지·백테스트 기반</td><td>원료 가격·운임·환율→재고·생산·현금·손익 수직 계산 그래프</td><td>동일 입력은 동일 결과, 과거 기간 재현</td></tr>
+          <tr><td>폐루프</td><td>결정 패키지·발간·전사 브리핑 UI와 도메인</td><td>결정→실행→효과 측정→지식 환류 Shadow Pilot</td><td>비용·시간·오차·수정량의 개선 실측</td></tr>
+        </tbody>
+      </table>
+      <div class="card blue" style="margin-top:18px"><strong>첫 검증 시나리오</strong><p style="margin:5px 0 0">원료 구매·도입계획 → 통관·운송 → 생산 투입 → 재고 → 현금흐름·손익 → 시뮬레이션 → 의사결정 → 실행 효과 측정의 단일 수직 폐루프.</p></div>
+      <p class="note">본 문서는 제품 구조와 현재 구현 기능을 설명하기 위한 자료이며, 화면 내 검증 데이터가 실제 기업 실적을 의미하지는 않습니다.</p>
+      <div class="page-no">22</div>
+    </section>
+
+    <section class="page closing">
+      <div class="closing-copy">
+        <div class="brand-mark"><span class="brand-dot"></span>AI FACTORY STUDIO</div>
+        <p class="eyebrow" style="color:#78c7ff;margin-top:1.1in">FROM DATA TO DECISION</p>
+        <h2>현업이 만들고,<br />회사가 함께 배우며,<br />경영이 더 나은 결정을 내립니다.</h2>
+        <p>AI Factory Studio는 더 많은 AI 기능을 보여주는 제품이 아니라, 실제 기업 데이터와 책임 있는 의사결정을 연결하는 제조 경영 기반을 지향합니다.</p>
+      </div>
+      <div class="closing-side">
+        <div class="closing-list">
+          <div><strong>현업의 속도</strong><span>필요한 업무 SW와 분석 기능을 직접 생성</span></div>
+          <div><strong>전사의 연결</strong><span>회사 구조·데이터·지식·업무를 하나의 의미 체계로 연결</span></div>
+          <div><strong>경영의 신뢰</strong><span>설명 가능한 계산, 근거가 고정된 결정, 감사 가능한 실행</span></div>
+          <div><strong>지속되는 개선</strong><span>실행 효과와 사용자 피드백을 다음 생성과 판단에 환류</span></div>
+        </div>
+      </div>
+      <div class="page-no" style="color:rgba(255,255,255,.5)">23</div>
+    </section>
+  </main>
+  <script src="guide.js"></script>
+</body>
+</html>
