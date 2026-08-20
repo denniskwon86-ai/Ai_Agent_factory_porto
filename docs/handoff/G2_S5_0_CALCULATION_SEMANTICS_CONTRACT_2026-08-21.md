@@ -1,7 +1,10 @@
 # §7 5-0 — 계산 **의미 계약** (설계 · 실행 없음)
 
 작성: Claude Code (백엔드) · 2026-08-21
-**상태: 의미 확정만. 계산은 하나도 실행되지 않는다.**
+**상태: 초안 완료 · 승인 대기.** 계산은 하나도 실행되지 않는다.
+
+> ⚠️ **[2026-08-21 감사]** 첫 판을 승인 요청으로 올렸으나 모델링 결함 7건이 나왔다.
+> 아래는 그 보정을 반영한 2판이고, **아직 승인되지 않았다.**
 
 > **한 줄로** — 기존 계산 엔진과 온톨로지 계약은 「재고」라는 **같은 말로 다른 것**을
 > 가리키고 있었다. 이름만 이으면 **부호의 뜻이 반대인 숫자**가 나온다.
@@ -70,18 +73,48 @@ inventory  = inv0 + (qty0 - qty)              기말재고 ↑   ← 안 쓴 원
 `INV-01` 이 이미 네 칸을 구분해 갖고 있다 — 그동안 우리가 한 칸으로 뭉쳐서 썼을 뿐이다.
 
 ```
-unrestricted_quantity  가용        quality_quantity   검사중
-blocked_quantity       보류        safety_stock_quantity  안전재고
+unrestricted_quantity  제약 없는 물량    quality_quantity  검사중
+blocked_quantity       보류             safety_stock_quantity  안전재고 **기준**
 ```
+
+⚠️⚠️ 네 번째는 **물량이 아니라 기준**이다. 앞의 셋과 성격이 다르므로 **합에 넣지
+않는다** — 넣으면 있지도 않은 재고를 세게 된다.
+
+> ⚠️⚠️ 아래 다섯 칸은 **첫 판에서 전부 틀렸다.** 감사 지적을 반영한 정의다.
 
 | 지표 | 뜻 | 단위 | 낟알 | 원천 |
 |---|---|---|---|---|
-| `on_hand_qty` | 창고에 있는 전량 | TON | 자재×창고×일자 | `INV-01` 네 칸의 합 |
-| `available_qty` | **생산에 쓸 수 있는** 양 | TON | 〃 | `INV-01.unrestricted_quantity` − `safety_stock_quantity` |
-| `in_transit_qty` | 운송 중(아직 없음) | TON | 선적×자재 | `LOG-02.shipment_quantity` (`eta` 미도래) |
-| `shortage_qty` | 원료 부족량 | TON | 자재×사업장×기간 | `MFG-01.material_requirement` − `available_qty` |
-| `producible_qty` | 부족을 반영한 생산 가능량 | TON | `plan_line_id` | `min(plan_quantity, 가용으로 만들 수 있는 양)` |
-| `revenue_shift_days` | 매출 인식이 밀리는 일수 | 일 | `sales_line_id` | `actual_ship_date` − `due_date` |
+| `on_hand_qty` | 창고에 **물리적으로 있는** 양 | `TON` | 자재×창고×일자 | `unrestricted` + `quality` + `blocked` |
+| `available_qty` | **생산에 쓸 수 있는** 양 | `TON` | 〃 | `max(unrestricted − safety_stock − reserved, 0)` |
+| `in_transit_qty` | 실제 운송 중 | `TON` | 선적×자재 | `LOG-02` × `LOG-03`: 출발 ≤ `as_of` **AND** `ATA` > `as_of` |
+| `shortage_qty` | 원료 부족량 | `TON` | **자재**×사업장×기간 | 계획행 → `MDM-05` BOM 전개 → 자재별 필요량 − `available_qty` |
+| `producible_qty` | 생산 가능량 | `TON` | `plan_line_id` | 자재별 소요계수·수율 적용 후 **가장 부족한 원료**가 허용하는 양 |
+| `delivery_delay_days` | 납기 지연 **실적** | `DAY` | `sales_line_id` | `actual_ship_date` − `due_date` |
+| `revenue_shift_days` | 매출 인식 **이연**(시뮬레이션) | `DAY` | 〃 | 시나리오 예상 인식일 − **기준선** 예상 인식일 |
+
+### 2.0 ⚠️ 첫 판이 틀린 다섯 가지
+
+**① `safety_stock` 을 합에 넣었다.** 그것은 물리적 재고가 아니라 **정책 기준량**이다
+(실측: 540행 전부 `50.0`). 합에 넣으면 있지도 않은 재고를 센다.
+
+**② `reserved_quantity` 가 데이터에 없다.** 0 으로 가정하고 **그 사실을 적어 둔다** —
+안 적으면 다음 사람이 「예약이 없는 회사」로 읽는다.
+
+**③ 부족량의 낟알이 안 맞았다.** `INV-01` 은 자재별인데 `MFG-01.material_requirement`
+는 여러 BOM 투입을 합친 **계획행 총량**이다. 그냥 빼면 「부족 66톤」이 나오는데 그것은
+**어느 자재의 부족도 아니다.**
+
+> ⚠️ 실측에서 하나 더 나왔다 — `material_requirement` **66.4** 가 `MDM-05` 의
+> 소요계수·수율로 계산한 **67.35** 와 맞지 않는다. 어느 쪽이 정본인지 5b 에서 정해야 한다.
+> (FG-CATHODE 의 BOM 투입행이 **같은 자재로 두 줄**이라는 것도 함께 확인해야 한다.)
+
+**④ `eta` 로 운송 중을 판정했다.** `eta` 는 **예정**이다. 실측: `LOG-02.status` 는
+120건 **전부 `DELIVERED`** 이고 실제 도착은 `LOG-03` 의 `ATA` 사건에만 있다. 예정으로
+판정하면 **이미 도착한 배를 「운송 중」** 으로 센다.
+
+**⑤ 실적을 시뮬레이션 결과로 냈다.** `actual_ship_date − due_date` 는 **이미 일어난**
+납기 지연이다. 그것을 「시뮬레이션 결과」로 내보내면 화면은 예측이라며 **과거를 보여
+준다.** 두 지표를 갈랐다.
 
 ### 2.1 부호 방향을 못 박는다
 
@@ -91,13 +124,14 @@ available_qty ↓  →  shortage_qty ↑  →  producible_qty ↓
 producible_qty ↓  →  revenue_shift_days ↑
 ```
 
-⚠️ **`on_hand_qty` 는 이 사슬에 쓰지 않는다.** 안전재고와 보류 재고가 섞여 있어서
-「있는데 못 쓰는 것」이 가용으로 세어진다.
+⚠️ **`on_hand_qty` 는 이 사슬에 쓰지 않는다.** 검사중·보류 물량이 들어 있어서
+「있는데 못 쓰는 것」이 가용으로 세어진다. 사슬이 쓰는 것은 `available_qty` 다.
 
 ### 2.2 시점과 판
 
 | 축 | 규칙 |
 |---|---|
+| 단위 | 계약 안에서는 **코드**(`TON`·`DAY`·`KRW`), 한글은 화면 표시명으로 분리 |
 | `as_of` | 질의 시점. 색인이 **그 시점의 인증판**을 고른다(「그냥 최신」 금지) |
 | 입력 Snapshot | 각 지표의 원천 계약키가 **같은 `as_of` 로 고른 판**이어야 한다 |
 | 기간 | `INV-01.snapshot_date` 기준일. 기간 계산은 그 날짜로만 |
@@ -151,13 +185,20 @@ producible_qty ↓  →  revenue_shift_days ↑
 ## 5. 지금 상태
 
 ```
-5-0 의미 계약        ██████████  이 문서
-5a  Capability Registry ░░░░░░░░░░  다음
-5b  계산 모델          ░░░░░░░░░░  0/3 (+1 범위 밖)
+5-0 의미 계약           █████████░  2판 · **승인 대기**
+5a  Capability Registry ██████████  넷 등록 · 전부 실행 불가 · 보정 반영
+5b  계산 모델           ░░░░░░░░░░  0/3 (+1 범위 밖) · HOLD
 ```
+
+### 5.1 승인 시 함께 정해야 하는 것
+
+1. `reserved_quantity` — 0 으로 두는가, 별도 데이터를 만드는가
+2. `material_requirement` vs BOM 계산값(66.4 ≠ 67.35) 중 **어느 쪽이 정본인가**
+3. `revenue_shift_days` 의 기준선 — 무엇을 「원래 인식일」로 보는가
 
 ⚠️⚠️ **5a 완료를 「계산 연동 완료」로 보고하지 않는다.** Registry 는 「무엇이 있어야
 하고 지금 무엇이 막혀 있는가」를 말할 뿐, 숫자를 하나도 만들지 않는다.
 
-**판단 요청**: §2 의 지표 여섯과 §2.1 의 부호 방향을 확정해 주시면 5a 를 그 어휘로
-등록하겠습니다. §4 의 경로 단위 계약은 5b 착수 전에 별도로 올리겠습니다.
+**판단 요청**: §2 의 지표 일곱과 §2.1 의 부호 방향, 그리고 §5.1 의 미정 3건을 확정해
+주십시오. 5a 는 이 어휘로 **이미 등록**돼 있고 전부 실행 불가 상태입니다.
+§4 의 경로 단위 계약(A)은 다음 순서로 별도로 올리겠습니다.
