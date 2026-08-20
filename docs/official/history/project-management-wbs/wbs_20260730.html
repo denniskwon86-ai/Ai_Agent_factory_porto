@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Factory Studio - Master WBS Dashboard</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --primary: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --pending: #64748b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #8b5cf6;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            animation: fadeInDown 0.8s ease-out;
+            width: 100%;
+            max-width: 900px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: -webkit-linear-gradient(45deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 5px;
+        }
+
+        .date-badge {
+            display: inline-block;
+            background: rgba(139, 92, 246, 0.2);
+            color: #c4b5fd;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-bottom: 25px;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        /* Overall Progress Dashboard */
+        .overall-dashboard {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(96, 165, 250, 0.3);
+            border-radius: 20px;
+            padding: 25px 35px;
+            width: 100%;
+            box-sizing: border-box;
+            backdrop-filter: blur(12px);
+            margin-bottom: 40px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        .overall-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 15px;
+        }
+
+        .overall-title {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .overall-percent {
+            font-size: 3rem;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1;
+            text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+        }
+
+        .main-progress-wrapper {
+            width: 100%;
+            height: 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        .main-progress-fill {
+            height: 100%;
+            width: 52%; /* 52% 달성 */
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6, #10b981);
+            border-radius: 6px;
+            transition: width 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 0 15px rgba(139, 92, 246, 0.6);
+        }
+
+        .journey-container {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            max-width: 900px;
+            width: 100%;
+            position: relative;
+        }
+
+        .journey-container::before {
+            content: '';
+            position: absolute;
+            left: 50px;
+            top: 20px;
+            bottom: 20px;
+            width: 4px;
+            background: linear-gradient(to bottom, var(--success) 20%, var(--warning) 60%, var(--pending) 90%);
+            border-radius: 4px;
+            z-index: 0;
+        }
+
+        .stage-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-left: 90px;
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            animation: fadeInUp 0.6s ease-out backwards;
+        }
+
+        .stage-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.4);
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+
+        .stage-card::before {
+            content: '';
+            position: absolute;
+            left: -48px;
+            top: 30px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--bg-color);
+            border: 4px solid;
+            z-index: 1;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        .stage-card.completed::before { border-color: var(--success); background: var(--success); box-shadow: 0 0 15px var(--success); }
+        .stage-card.in-progress::before { border-color: var(--warning); background: var(--warning); box-shadow: 0 0 15px var(--warning); animation: pulse 2s infinite; }
+        .stage-card.pending::before { border-color: var(--pending); background: var(--bg-color); }
+
+        .stage-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .stage-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+        
+        .stage-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            margin-bottom: 16px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .assignee {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255,255,255,0.05);
+            padding: 4px 10px;
+            border-radius: 6px;
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge.completed { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+        .badge.in-progress { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+        .badge.pending { background: rgba(100, 116, 139, 0.2); color: #cbd5e1; }
+
+        .task-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .task-list li {
+            position: relative;
+            padding-left: 28px;
+            margin-bottom: 12px;
+            color: #e2e8f0;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            background: rgba(0,0,0,0.15);
+            padding-top: 8px;
+            padding-bottom: 8px;
+            padding-right: 12px;
+            border-radius: 8px;
+        }
+
+        .task-list li::before {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            font-weight: bold;
+        }
+
+        /* Task Status Icons */
+        .task-list li.done::before { content: '✓'; color: var(--success); }
+        .task-list li.doing::before { content: '↻'; color: var(--warning); }
+        .task-list li.todo::before { content: '○'; color: var(--pending); }
+
+        .progress-wrapper {
+            margin-top: 20px;
+            width: 100%;
+            height: 6px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            border-radius: 3px;
+        }
+        
+        .completed .progress-fill { width: 100%; background: var(--success); }
+        .in-progress.p70 .progress-fill { width: 70%; background: var(--warning); }
+        .in-progress.p60 .progress-fill { width: 60%; background: var(--warning); }
+        .in-progress.p30 .progress-fill { width: 30%; background: var(--warning); }
+        .in-progress.p20 .progress-fill { width: 20%; background: var(--warning); }
+        .pending .progress-fill { width: 0%; }
+
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+
+        /* Staggered animation */
+        .stage-card:nth-child(1) { animation-delay: 0.1s; }
+        .stage-card:nth-child(2) { animation-delay: 0.2s; }
+        .stage-card:nth-child(3) { animation-delay: 0.3s; }
+        .stage-card:nth-child(4) { animation-delay: 0.4s; }
+        .stage-card:nth-child(5) { animation-delay: 0.5s; }
+        .stage-card:nth-child(6) { animation-delay: 0.6s; }
+
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>AI Factory Studio - Master WBS</h1>
+        <div class="date-badge">📅 현재 기준일: 2026-07-30</div>
+        
+        <div class="overall-dashboard">
+            <div class="overall-header">
+                <div class="overall-title">프로젝트 전체 진척률 (Overall Progress)</div>
+                <div class="overall-percent">52%</div>
+            </div>
+            <div class="main-progress-wrapper">
+                <div class="main-progress-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="journey-container">
+        
+        <!-- Stage 1 -->
+        <div class="stage-card completed">
+            <div class="stage-header">
+                <div class="stage-title">1단계: 기초 데이터 & 기반 아키텍처</div>
+                <div class="badge completed">100% 완료</div>
+            </div>
+            <div class="stage-meta">
+                <div class="assignee">👤 주관: Claude Code / Antigravity</div>
+                <div class="weight">가중치: 15%</div>
+            </div>
+            <ul class="task-list">
+                <li class="done">런타임 실행 컨텍스트 (run_context.py) 아키텍처 확립</li>
+                <li class="done">KS 제조업 표준 규격 DB 구축 완료</li>
+                <li class="done">표준 업종 코드 및 공정 템플릿 데이터 파싱 및 적재 적용</li>
+            </ul>
+            <div class="progress-wrapper"><div class="progress-fill"></div></div>
+        </div>
+
+        <!-- Stage 2 -->
+        <div class="stage-card in-progress p70">
+            <div class="stage-header">
+                <div class="stage-title">2단계: 프로액티브 데이터 온보딩 & 인텔리전스</div>
+                <div class="badge in-progress">70% 진행 중</div>
+            </div>
+            <div class="stage-meta">
+                <div class="assignee">👤 주관: Antigravity / Claude Code</div>
+                <div class="weight">가중치: 20%</div>
+            </div>
+            <ul class="task-list">
+                <li class="done">외부 인텔리전스 및 프로액티브 온보딩 아키텍처 기획/설계 완료</li>
+                <li class="doing">외부 데이터 원천 파이프라인 수집 및 정합성 검증 코드 결합 중</li>
+                <li class="doing">자동 스키마 매핑 및 인텔리전스 백엔드 엔진 연동</li>
+                <li class="todo">온보딩 데이터 정합성 독립 감사 (진행 예정)</li>
+            </ul>
+            <div class="progress-wrapper"><div class="progress-fill"></div></div>
+        </div>
+
+        <!-- Stage 3 -->
+        <div class="stage-card in-progress p60">
+            <div class="stage-header">
+                <div class="stage-title">3단계: 백엔드 핵심 기능 API & 오케스트레이션</div>
+                <div class="badge in-progress">60% 진행 중</div>
+            </div>
+            <div class="stage-meta">
+                <div class="assignee">👤 주관: Claude Code</div>
+                <div class="weight">가중치: 25%</div>
+            </div>
+            <ul class="task-list">
+                <li class="doing">LangGraph 기반 에이전트 다중 제어 흐름 구성 (작업 중)</li>
+                <li class="doing">공정/데이터 처리 핵심 비즈니스 API 엔드포인트 세부 구현</li>
+                <li class="doing">모듈별 기능 단위 테스트 및 데이터 계약 테스트 작성</li>
+            </ul>
+            <div class="progress-wrapper"><div class="progress-fill"></div></div>
+        </div>
+
+        <!-- Stage 4 -->
+        <div class="stage-card in-progress p20">
+            <div class="stage-header">
+                <div class="stage-title">4단계: 기능 제어 및 검증용 UI 인터페이스</div>
+                <div class="badge in-progress">20% 진행 중</div>
+            </div>
+            <div class="stage-meta">
+                <div class="assignee">👤 주관: Claude Code</div>
+                <div class="weight">가중치: 15%</div>
+            </div>
+            <ul class="task-list">
+                <li class="doing">기능 조작용 기본 화면 레이아웃 스캐폴딩</li>
+                <li class="todo">백엔드 데이터 API와 UI 조작부 1:1 배선 및 통신 연동</li>
+                <li class="todo">데이터 온보딩 진행률 및 인텔리전스 상태 모니터링 시각화</li>
+            </ul>
+            <div class="progress-wrapper"><div class="progress-fill"></div></div>
+        </div>
+
+        <!-- Stage 5 -->
+        <div class="stage-card in-progress p30">
+            <div class="stage-header">
+                <div class="stage-title">5단계: E2E 통합 검증 및 텔레메트리 점검</div>
+                <div class="badge in-progress">30% 진행 중</div>
+            </div>
+            <div class="stage-meta">
+                <div class="assignee">👤 주관: Antigravity</div>
+                <div class="weight">가중치: 15%</div>
+            </div>
+            <ul class="task-list">
+                <li class="doing">E2E 통합 시나리오 베이스 스크립트 작성 (run_e2e_scenario.py)</li>
+                <li class="todo">UI 연동 포함 Full 사이클 시나리오 가동 테스트</li>
+                <li class="todo">텔레메트리/실패 로그 정밀 분석 및 가짜 통과(False Positive) 탐지</li>
+            </ul>
+            <div class="progress-wrapper"><div class="progress-fill"></div></div>
+        </div>
+
+        <!-- Stage 6 -->
+        <div class="stage-card pending">
+            <div class="stage-header">
+                <div class="stage-title">6단계: UI/UX 대대적 개편 및 사업가치 완결</div>
+                <div class="badge pending">대기 (0%)</div>
+            </div>
+            <div class="stage-meta">
+                <div class="assignee">👤 주관: Codex / Supervisor</div>
+                <div class="weight">가중치: 10%</div>
+            </div>
+            <ul class="task-list">
+                <li class="todo">현업 사용자 중심의 정보구조(IA) 및 프리미엄 디자인 시안 확정</li>
+                <li class="todo">기능 검증용 UI를 최종 디자인 시안 기반으로 전면 교체 개발</li>
+                <li class="todo">제품 사업 가치 확인, 사용자(Supervisor) 최종 승인 및 프로덕션 인계</li>
+            </ul>
+            <div class="progress-wrapper"><div class="progress-fill"></div></div>
+        </div>
+
+    </div>
+
+</body>
+</html>

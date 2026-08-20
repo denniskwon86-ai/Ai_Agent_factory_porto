@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Factory Studio - Master WBS Infographic</title>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+
+        body {
+            font-family: 'Pretendard', sans-serif;
+            background-color: #ffffff;
+            color: #333333;
+            margin: 0;
+            padding: 40px 60px;
+        }
+
+        .header-text {
+            color: #888;
+            font-size: 0.95rem;
+            margin-bottom: 40px;
+        }
+
+        /* --- Progress Bars --- */
+        .progress-section {
+            margin-bottom: 50px;
+        }
+        
+        .progress-item {
+            margin-bottom: 25px;
+        }
+        
+        .progress-label-wrap {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 6px;
+        }
+        
+        .progress-desc {
+            font-size: 0.85rem;
+            color: #999;
+        }
+        
+        .progress-percent {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+        
+        .progress-percent.green { color: #059669; }
+        .progress-percent.orange { color: #d97706; }
+        .progress-percent.red { color: #dc2626; }
+        
+        .progress-track {
+            width: 100%;
+            height: 14px;
+            background-color: #222222; /* Black background for track like image */
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+        }
+        
+        .progress-fill.green { width: 95%; background-color: #10b981; }
+        .progress-fill.orange { width: 80%; background-color: #f59e0b; }
+        .progress-fill.red { width: 10%; background-color: #ef4444; }
+
+
+        /* --- Milestones --- */
+        .milestone-container {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .milestone {
+            background-color: #e6f7f2;
+            padding: 12px 24px;
+            border-radius: 8px;
+            text-align: center;
+            min-width: 100px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: #065f46;
+        }
+        
+        .milestone.active {
+            border: 2px solid #059669;
+            background-color: #f0fdf4;
+            padding: 10px 22px; /* account for border */
+        }
+        
+        .milestone.pending {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        
+        .milestone-legend {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 50px;
+        }
+
+
+        /* --- Stat Widgets --- */
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 50px;
+        }
+        
+        .stat-card {
+            background-color: #333333;
+            color: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: baseline;
+            gap: 5px;
+        }
+        
+        .stat-desc {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+
+
+        /* --- Detail Blocks --- */
+        .blocks-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 50px;
+        }
+        
+        .detail-block {
+            background-color: #e6f7f2;
+            padding: 16px;
+            border-radius: 8px;
+        }
+        
+        .block-title {
+            font-weight: 700;
+            color: #065f46;
+            margin-bottom: 6px;
+            font-size: 1rem;
+        }
+        
+        .block-desc {
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+
+        /* --- Bottom Issues --- */
+        .issue-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .issue-row {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .issue-label {
+            background-color: #fee2e2;
+            color: #991b1b;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            min-width: 60px;
+            text-align: center;
+        }
+        
+        .issue-label.blue {
+            background-color: #e0e7ff;
+            color: #3730a3;
+        }
+
+        .issue-label.orange {
+            background-color: #ffedd5;
+            color: #9a3412;
+        }
+        
+        .issue-text {
+            font-size: 0.95rem;
+            color: #a3a3a3;
+        }
+        
+        .issue-text.active {
+            color: #555;
+        }
+
+        .footer {
+            margin-top: 40px;
+            font-size: 0.8rem;
+            color: #aaa;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="header-text">
+        명세서가 정의한 백엔드 코어 기능은 거의 채웠습니다. 남은 격차는 실제 마스터 UI 연동과 실사용 검증입니다 — 세 축을 따로 세는 이유가 그것입니다.
+    </div>
+
+    <!-- 1. Progress Section -->
+    <div class="progress-section">
+        
+        <div class="progress-item">
+            <div class="progress-label-wrap">
+                <div class="progress-desc">P0~M5 백엔드 및 코어 API 기능 완료 · 남은 것: UI 1:1 배선, 현금흐름 연계 최종 배선</div>
+                <div class="progress-percent green">95%</div>
+            </div>
+            <div class="progress-track"><div class="progress-fill green"></div></div>
+        </div>
+
+        <div class="progress-item">
+            <div class="progress-label-wrap">
+                <div class="progress-desc">UI/UX 마스터 통합(M6) 완료 · North Star 채택 · 화면 기능 정의서 및 샘플링(8종) 완료</div>
+                <div class="progress-percent orange">80%</div>
+            </div>
+            <div class="progress-track"><div class="progress-fill orange"></div></div>
+        </div>
+
+        <div class="progress-item">
+            <div class="progress-label-wrap">
+                <div class="progress-desc">실데이터 합성 온보딩 · 현업 검증(업무시간·오류 감소) 미실시 — 코드로만 달성 불가</div>
+                <div class="progress-percent red">10%</div>
+            </div>
+            <div class="progress-track"><div class="progress-fill red"></div></div>
+        </div>
+
+    </div>
+
+    <!-- 2. Milestones -->
+    <div class="milestone-container">
+        <div class="milestone">
+            <div>P0</div>
+            <div>기반 아키텍처</div>
+        </div>
+        <div class="milestone">
+            <div>M1</div>
+            <div>기준정보 DB</div>
+        </div>
+        <div class="milestone">
+            <div>M2</div>
+            <div>권한·인텔리전스</div>
+        </div>
+        <div class="milestone">
+            <div>M3</div>
+            <div>부서앱 승격</div>
+        </div>
+        <div class="milestone">
+            <div>M4</div>
+            <div>경영계획 트윈</div>
+        </div>
+        <div class="milestone">
+            <div>M5</div>
+            <div>자비스(E2E)</div>
+        </div>
+        <div class="milestone active">
+            <div>M6 ★</div>
+            <div>마스터 UI통합 — 오늘</div>
+        </div>
+    </div>
+    <div class="milestone-legend">
+        초록 = 코어 기능 완료 · 노랑 = 프론트 진행 중 · ★ = 오늘 작업이 집중된 구간
+    </div>
+
+    <!-- 3. Stat Widgets -->
+    <div class="stats-container">
+        <div class="stat-card">
+            <div class="stat-value">North Star</div>
+            <div class="stat-desc">Living Enterprise Canvas 채택 확정</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">1140 → 1268</div>
+            <div class="stat-desc">테스트 (백엔드 코어 M5 통과)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">8 Views</div>
+            <div class="stat-desc">M6 UI 샘플 렌더링 완료 (Codex)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">React 이식</div>
+            <div class="stat-desc">Claude Code 프론트/API 배선 착수</div>
+        </div>
+    </div>
+
+    <!-- 4. Detail Blocks -->
+    <div class="blocks-container">
+        <div class="detail-block">
+            <div class="block-title">UI/UX 설계서</div>
+            <div class="block-desc">M6 화면 기능 정의 및 컴포넌트 추적 맵핑 완료</div>
+        </div>
+        <div class="detail-block">
+            <div class="block-title">M5 통합 시나리오</div>
+            <div class="block-desc">3단계 Quality Gate (Core, Auth, Biz) 기동 완료</div>
+        </div>
+        <div class="detail-block">
+            <div class="block-title">관문 A (권한)</div>
+            <div class="block-desc">미바인딩 비노출 회귀 잠금 · 되돌림 방지</div>
+        </div>
+        <div class="detail-block">
+            <div class="block-title">capability token</div>
+            <div class="block-desc">30분·읽기전용·가상범위 전용 (M2 감사 완료)</div>
+        </div>
+        <div class="detail-block">
+            <div class="block-title">경영진 드릴다운</div>
+            <div class="block-desc">M4 엔진 - 하위 전체 · 법인 경계 유지</div>
+        </div>
+        <div class="detail-block">
+            <div class="block-title">지식 색인 실행</div>
+            <div class="block-desc">제조업 규격 DB 7종 색인 완료</div>
+        </div>
+        <div class="detail-block">
+            <div class="block-title">Shadow Mode</div>
+            <div class="block-desc">승격 게이트 실측 및 악화 방지 강제화</div>
+        </div>
+        <div class="detail-block">
+            <div class="block-title">감사 5년·admin</div>
+            <div class="block-desc">404 은폐 및 서버 감사로그 의무화</div>
+        </div>
+    </div>
+
+    <!-- 5. Issues / ToDo -->
+    <div class="issue-list">
+        <div class="issue-row">
+            <div class="issue-label orange">기획</div>
+            <div class="issue-text active">Codex의 주도권(M6)하에 전체 UI/UX 통합 기획 100% 달성. 사업 가치 구체화만 잔존.</div>
+        </div>
+        <div class="issue-row">
+            <div class="issue-label blue">프론트</div>
+            <div class="issue-text">Claude Code가 UI 샘플을 실제 React 코드로 변환 및 M5 API들과 연동 배선 중 (오늘의 주요 과제)</div>
+        </div>
+        <div class="issue-row">
+            <div class="issue-label blue">테스트</div>
+            <div class="issue-text">M5 E2E 통신 배선 에러 픽스 및 가짜 통과(False Positive) 방어 고도화</div>
+        </div>
+        <div class="issue-row">
+            <div class="issue-label">데이터</div>
+            <div class="issue-text">실데이터 온보딩 및 인텔리전스 팩토리 가동은 인프라 구성 후 처리로 결정됨</div>
+        </div>
+        <div class="issue-row">
+            <div class="issue-label">검증</div>
+            <div class="issue-text">실제 현업 사용자 파일럿(Pilot)은 코드로 달성할 수 없는 외부 요인.</div>
+        </div>
+    </div>
+
+    <div class="footer">
+        비율은 백엔드/기획 명세 대비 테스트 및 설계 산출물 뷰를 기준으로 한 달성치이며, 정확한 프론트엔드 연동 수치는 Claude Code의 M6 커밋 후 확정됩니다.
+    </div>
+
+</body>
+</html>
