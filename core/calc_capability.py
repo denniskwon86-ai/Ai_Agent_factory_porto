@@ -166,8 +166,10 @@ _REVENUE_SHIFT = ("revenue_shift_days", UNIT_DAY, UP)
 
 #: ★★★ 계약이 요구하는 계산 참조. **닫힌 목록**이고 계약의 넷과 일대일이다.
 #:
-#: ⚠️⚠️ 넷 다 `NOT_IMPLEMENTED`·`OUT_OF_SCOPE` 다. 하나라도 `APPROVED` 로 올리려면
-#:   §5-0 의 의미 계약이 승인되고, 산식이 구현되고, 승인 원장이 있어야 한다.
+#: ⚠️⚠️ [M0-1 / 2026-08-21] MVP 3종은 **산식이 구현됐다**(`core/calc_models.py`).
+#:   그래서 `IMPLEMENTED_UNAPPROVED` 다 — 구현은 됐고 **승인 전**이며, 실행하지 않는다.
+#: ★★★ `APPROVED` 로 올리는 것은 **사람의 결정**이고 승인 원장 사건이 있어야 한다
+#:   (`Capability.__post_init__` 이 `ledger_event_id` 없는 `APPROVED` 를 거부한다).
 #: ⚠️ 「일단 켜 놓고 나중에 검증」은 하지 않는다 — 켜진 순간 화면이 숫자를 보여 주고,
 #:   그 숫자는 검증 여부와 무관하게 회의에 올라간다.
 _REGISTRY: Dict[str, Capability] = {
@@ -184,12 +186,13 @@ _REGISTRY: Dict[str, Capability] = {
             #:   «운송 중» 으로 세게 된다.
             required_datasets=("LOG-02", "LOG-03", "INV-01"),
             outputs=(_IN_TRANSIT, _AVAILABLE),
-            state=NOT_IMPLEMENTED,
+            state=IMPLEMENTED_UNAPPROVED,
+            model_version="1.0.0",
             blocked_reason=(
-                "승인된 지연 모델이 없습니다. 기존 계산 엔진은 «안 쓰고 남은» 재고를 "
-                "올리므로 부호의 뜻이 반대입니다 — 이름만 이으면 「재고가 늘었으니 "
-                "여유가 있다」로 읽히고 실제로는 라인이 섭니다. 또한 운송 중 판정에 "
-                "예정 시각이 아니라 실제 도착 사건이 필요합니다.")),
+                "산식은 구현됐습니다(`core.calc_models.arrival_delay`, 판 1.0.0) — "
+                "운송 중 판정은 예정이 아니라 실제 사건(ATD/ATA)으로 하고, 가용 재고는 "
+                "「지금 쓸 수 있는 양」입니다. **의미 계약 승인 원장 사건이 없어 실행하지 "
+                "않습니다.** 켜려면 승인 결정과 원장 사건이 필요합니다.")),
         Capability(
             ref="CALC.INVENTORY.MATERIAL_SHORTAGE.v1",
             subject_type="inventory-snapshot", relation="AFFECTS",
@@ -205,11 +208,13 @@ _REGISTRY: Dict[str, Capability] = {
             #:   계산한 67.35 와 **맞지 않는다.** 어느 쪽이 정본인지 5b 에서 정해야 한다.
             required_datasets=("INV-01", "MFG-01", "MDM-05"),
             outputs=(_SHORTAGE, _PRODUCIBLE),
-            state=NOT_IMPLEMENTED,
+            state=IMPLEMENTED_UNAPPROVED,
+            model_version="1.0.0",
             blocked_reason=(
-                "재고를 «원인» 으로 받는 계산이 없습니다. 기존 엔진은 재고를 생산의 "
-                "«결과» 로 계산하므로 인과 방향이 반대입니다. 또한 가용 원료와 완제품 "
-                "계획을 BOM 소요계수·수율 없이 직접 비교할 수 없습니다.")),
+                "산식은 구현됐습니다(`core.calc_models.material_shortage`, 판 1.0.0) — "
+                "재고를 «원인» 으로 받고, BOM 소요계수·수율로 낟알을 맞추며, 저장된 "
+                "`material_requirement` 와 재계산값이 다르면 하나를 고르지 않고 "
+                "실패합니다(§7.2). **의미 계약 승인 원장 사건이 없어 실행하지 않습니다.**")),
         Capability(
             ref="CALC.PRODUCTION.REVENUE_TIMING.v1",
             subject_type="production-plan-line", relation="AFFECTS",
@@ -221,10 +226,14 @@ _REGISTRY: Dict[str, Capability] = {
             #: ★ 앞엣것을 뒤엣것으로 쓰면 「시뮬레이션 결과」라며 과거 실적을 보여 준다.
             required_datasets=("MFG-01", "SLS-01"),
             outputs=(_REVENUE_SHIFT,),
-            state=NOT_IMPLEMENTED,
+            state=IMPLEMENTED_UNAPPROVED,
+            model_version="1.0.0",
             blocked_reason=(
-                "매출 «인식 시점» 을 내는 계산이 없습니다. 실적 납기 지연은 시나리오 "
-                "이연이 아니며, 기준선과 승인된 생산-판매 배분이 있어야 합니다.")),
+                "산식은 구현됐습니다(`core.calc_models.revenue_timing`, 판 1.0.0) — "
+                "실적 납기 지연(`delivery_delay_days`)과 시나리오 이연"
+                "(`revenue_shift_days`)을 다른 함수로 갈랐고, 기준선이 없는 행은 0 이 "
+                "아니라 `missing_baseline` 로 드러냅니다(§7.3). **의미 계약 승인 원장 "
+                "사건이 없어 실행하지 않습니다.**")),
         Capability(
             ref="CALC.FINANCE.COST_MARGIN_CASH.v1",
             subject_type="cost-record", relation="AFFECTS", object_type="ledger-line",

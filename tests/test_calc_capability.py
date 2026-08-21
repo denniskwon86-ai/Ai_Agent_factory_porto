@@ -175,11 +175,24 @@ def test_재무_참조는_범위_밖으로_명시된다():
     assert "범위 밖" in cap.blocked_reason
 
 
-def test_MVP_셋은_범위_안이고_미구현이다():
+def test_MVP_셋은_구현됐고_아직_승인_전이다():
+    """★★★ [M0-1 / 2026-08-21] 산식이 구현됐으므로 `NOT_IMPLEMENTED` 가 아니다.
+    그러나 **승인 전**이므로 실행되지 않는다.
+
+    ⚠️ 이 시험이 `APPROVED` 를 허용하도록 느슨해지면, 승인 없는 계산이 지나간다.
+      실행 가능 상태는 하나뿐이고 그것은 `EXECUTABLE` 이 지킨다."""
     for ref in cc.mvp_refs():
         cap = cc.get(ref)
         assert cap.mvp_scope is True
-        assert cap.state == cc.NOT_IMPLEMENTED, f"{ref}: {cap.state}"
+        assert cap.state == cc.IMPLEMENTED_UNAPPROVED, f"{ref}: {cap.state}"
+        assert not cap.executable, f"{ref}: 승인 없이 실행 가능하다"
+        #: ★ 산식 판이 붙어 있어야 한다 — 판 없이 구현됐다고 하면 어느 산식인지 모른다.
+        assert cap.model_version, f"{ref}: 산식 판이 없다"
+        #: ★ 그리고 그 판은 실제 산식 모듈의 판과 **같아야** 한다.
+        from core.calc_models import MODEL_VERSIONS
+        assert cap.model_version == MODEL_VERSIONS[ref], (
+            f"{ref}: 등록부 판({cap.model_version}) 과 산식 판"
+            f"({MODEL_VERSIONS[ref]}) 이 다르다 — 어느 쪽이 실제인지 알 수 없다")
 
 
 # ── ⑥ 단위·낟알·부호가 고정돼 있다 ─────────────────────────────────────
@@ -252,7 +265,7 @@ def test_계약이_바뀌면_지문이_바뀐다():
     for change in ({"model_version": "1.0.1"},
                    {"required_datasets": ("LOG-02",)},
                    {"outputs": (("available_qty", "KG", "내린다"),)},
-                   {"state": cc.IMPLEMENTED_UNAPPROVED},
+                   {"state": cc.NOT_IMPLEMENTED},
                    {"effective_from": "2026-09-01"}):
         kw = {**base.__dict__, **change}
         kw.setdefault("blocked_reason", base.blocked_reason or "사유")
