@@ -79,7 +79,8 @@ def _view(name: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
-          baseline: Any = None, path: Optional[Dict[str, Any]] = None) -> Package:
+          baseline: Any = None, path: Optional[Dict[str, Any]] = None,
+          calc_binding: Optional[Dict[str, Any]] = None) -> Package:
     """시뮬레이션 두 판 → 회의 안건 하나.
 
     ⚠️ 책임자·기한이 없으면 만들지 않는다. 없는 안건은 「검토하겠습니다」로 끝나고
@@ -124,6 +125,42 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
             raise DecisionError(
                 "이 경로는 아직 계산할 수 없어 숫자 안건을 만들지 않습니다 — "
                 "계산되지 않은 경로 옆에 숫자를 놓으면 그 숫자가 답으로 읽힙니다.")
+
+        #: ★★★ [2026-08-21 B1.2-1a P0] **완결된 경로라도 숫자가 그 경로에서 나왔다는
+        #:   결속이 없으면 숫자 안건을 만들지 않는다.**
+        #:
+        #: ⚠️⚠️ B1.2-1 은 「계산 못 하는 경로」만 막았다. 그래서 이런 구멍이 남았다 —
+        #:
+        #:       정성 런타임 경로(`complete=True`)  +  그 경로와 **결속되지 않은**
+        #:       기존 시나리오 엔진의 base/scenario   →  숫자 Decision Package 생성·발간
+        #:
+        #:   즉 「계산할 수 없습니다」는 사라졌지만 **숫자는 여전히 남의 것**이었다. 재감사에서
+        #:   실제 발간 회귀가 바로 그 방식으로 통과하고 있던 것이 드러났다.
+        #:
+        #: ★ 계산 결과와 `query_id`·`path_fingerprint` 를 **대조**하는 것이 B2 이고 아직 없다.
+        #:   없는 대조를 있는 척하지 않는다 — 대신 **호출자가 결속을 선언**하게 하고, 선언이
+        #:   없거나 어긋나면 막는다. B2 가 오면 계산기가 그 값을 만들고 호출자는 그대로 넘긴다.
+        #: ⚠️ 「일단 만들고 B2 에서 검증하자」는 안 된다. 안건은 원장에 남고 발간으로 나간다 —
+        #:   나간 뒤에 틀렸다고 알아도 그 결정은 이미 내려져 있다.
+        want_q = str((path or {}).get("query_id", "") or "").strip()
+        want_fp = str((path or {}).get("path_fingerprint", "") or "").strip()
+        if want_q or want_fp:
+            b = calc_binding or {}
+            got_q = str(b.get("query_id", "") or "").strip()
+            got_fp = str(b.get("path_fingerprint", "") or "").strip()
+            if not (got_q or got_fp):
+                raise DecisionError(
+                    "이 숫자가 이 경로에서 나왔다는 결속이 없어 숫자 안건을 만들지 않습니다 "
+                    "— 경로 옆의 숫자는 그 경로의 답으로 읽힙니다. 계산기가 "
+                    "`calc_binding={'query_id':…, 'path_fingerprint':…}` 을 함께 넘기게 "
+                    "하십시오(B2 결과↔경로 대조가 오기 전까지의 계약입니다).")
+            if ((want_q and got_q and got_q != want_q)
+                    or (want_fp and got_fp and got_fp != want_fp)):
+                raise DecisionError(
+                    f"숫자와 경로가 다른 것을 가리킵니다 — 경로는 "
+                    f"query_id={want_q or '(없음)'}·fp={want_fp[:12] or '(없음)'} 인데 "
+                    f"계산 결과는 query_id={got_q or '(없음)'}·fp={got_fp[:12] or '(없음)'} "
+                    f"입니다. 다른 경로의 숫자를 이 안건에 붙일 수 없습니다.")
     if base.baseline_fingerprint != scenario.baseline_fingerprint:
         #: ★★★ 다른 기준선으로 만든 두 결과를 나란히 놓으면, 그 차이는 **가정 때문이
         #:   아니라 데이터 때문**일 수 있다. 그리고 화면은 그것을 구분해 주지 않는다.
@@ -159,6 +196,12 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
         #:   `purchase_orders` 를 경영 브리핑에 그대로 내보내면 읽는 사람은 그것이
         #:   무엇인지 모른 채 「모르는 게 있구나」로만 넘긴다.
         "missing_steps": (path or {}).get("missing_steps", []),
+        #: ★ [B1.2-1a] **숫자가 어느 경로에서 나왔다고 선언됐는가.** 원장·발간까지 따라간다 —
+        #:   나중에 「이 숫자는 이 경로 것이었나」를 물을 수 있어야 한다.
+        "calc_binding": {
+            "query_id": str((calc_binding or {}).get("query_id", "") or ""),
+            "path_fingerprint": str((calc_binding or {}).get("path_fingerprint", "") or ""),
+        },
     }
     #: ★ 안건의 «질문» 은 가장 크게 움직인 결과에서 뽑는다 — 지어내지 않는다.
     moved = sorted((r for r in rows if r["delta"]), key=lambda r: -abs(r["delta"]))

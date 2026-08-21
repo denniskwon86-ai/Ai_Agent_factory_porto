@@ -102,6 +102,21 @@ def test_지문이_다르면_다른_경로다():
     assert a["path_fingerprint"] != b["path_fingerprint"]
 
 
+def _binding(evidence: dict) -> dict:
+    """★★★ [B1.2-1a] 「이 숫자는 이 경로에서 나왔다」는 **결속 선언**.
+
+    ⚠️⚠️ 종전 이 파일의 시험들은 정성 런타임 경로(`complete=True`)에 **그 경로와 결속되지
+      않은** 기존 시나리오 엔진의 base/scenario 를 붙여 숫자 안건을 만들고 있었다. 재감사에서
+      「발간 회귀가 바로 그 방식으로 통과한다」고 지적된 것이 이것이다 —
+      「계산할 수 없습니다」는 사라졌지만 **숫자는 여전히 남의 것**이었다.
+
+    ★ 계산기가 결속을 만들어 주는 것(B2)이 아직 없으므로 시험이 명시적으로 선언한다.
+      B2 가 오면 이 헬퍼 자리에 계산기 출력이 들어간다.
+    """
+    return {"query_id": evidence.get("query_id", ""),
+            "path_fingerprint": evidence.get("path_fingerprint", "")}
+
+
 def _calc_result(fingerprint="fp_calc", values=None):
     """`calc_graph.Result` 대역. ★ 제품과 **같은 필드 이름**을 쓴다."""
     from core import calc_graph as cg
@@ -130,7 +145,8 @@ def test_정체성이_결정_패키지까지_실린다():
                                        "purchase_payment": 6.0, "ending_cash": 6.0,
                                        "operating_profit": 2.0})
     pkg = dp.build(title="지연 영향", owner="owner@afs.invalid", due="2026-09-01",
-                   base=base, scenario=scenario, path=evidence)
+                   base=base, scenario=scenario, path=evidence,
+                   calc_binding=_binding(evidence))
     assert pkg.evidence["query_id"] == "oq_keep", pkg.evidence
     assert pkg.evidence["path_fingerprint"] == "fp_keep", pkg.evidence
 
@@ -155,7 +171,7 @@ def test_정체성이_원장_저장과_지문까지_따라간다(tmp_path, monke
                                                          "purchase_payment": 6.0,
                                                          "ending_cash": 6.0,
                                                          "operating_profit": 2.0}),
-                        path=evidence)
+                        path=evidence, calc_binding=_binding(evidence))
 
     a, b = _pkg("fp_a"), _pkg("fp_b")
     case_a = store.create(question=a.question, created_by="owner@afs.invalid",
@@ -688,7 +704,7 @@ def test_경로_정체성이_발간까지_따라간다():
                                                   "purchase_payment": 6.0,
                                                   "ending_cash": 6.0,
                                                   "operating_profit": 2.0}),
-                   path=ev)
+                   path=ev, calc_binding=_binding(ev))
     case = dc.decision_case.create(
         question=pkg.question, created_by="owner@afs.invalid",
         package={"baseline": "bl_1", "options": ["A", "B"]},
@@ -750,5 +766,68 @@ def test_두_깃발을_따로_본다():
     ok = dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
                   base=_calc_result("fp_b"), scenario=scenario,
                   path={"path": [], "query_id": "oq_1", "path_fingerprint": "fp_1",
-                        "complete": True, "calculation_blocked": False})
+                        "complete": True, "calculation_blocked": False},
+                  calc_binding={"query_id": "oq_1", "path_fingerprint": "fp_1"})
     assert ok.evidence["path_fingerprint"] == "fp_1"
+
+
+# ── ★★★ [B1.2-1a] 완결 경로라도 «남의 숫자» 는 붙일 수 없다 ─────────────────
+
+def _complete_path(qid="oq_c", fp="fp_c"):
+    return {"path": [], "query_id": qid, "path_fingerprint": fp,
+            "complete": True, "calculation_blocked": False}
+
+
+def _numbers():
+    return (_calc_result("fp_b"),
+            _calc_result("fp_s", {"production_qty": 90.0, "ending_inventory": 12.0,
+                                  "purchase_payment": 6.0, "ending_cash": 6.0,
+                                  "operating_profit": 2.0}))
+
+
+def test_결속_선언이_없으면_완결_경로라도_숫자_안건을_만들지_않는다():
+    """★★★ B1.2-1 이 남긴 구멍이다.
+
+    「계산할 수 없습니다」는 사라졌는데 **숫자는 여전히 남의 것**이었다 — 정성 런타임
+    경로(`complete=True`)에 그 경로와 결속되지 않은 기존 시나리오 엔진 결과를 붙여
+    숫자 안건을 만들 수 있었다. 재감사에서 「발간 회귀가 바로 그 방식으로 통과한다」고
+    지적된 자리다.
+
+    ⚠️ 계산 결과와 경로를 **대조**하는 것(B2)은 아직 없다. 없는 대조를 있는 척하지 않고,
+      결속 선언이 없으면 막는다 — 「일단 만들고 나중에 검증」은 안 된다. 안건은 원장에
+      남고 발간으로 나간다."""
+    from core import decision_package as dp
+    base, scenario = _numbers()
+    with pytest.raises(dp.DecisionError, match="결속"):
+        dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                 base=base, scenario=scenario, path=_complete_path())
+
+
+def test_다른_경로의_숫자를_붙이면_막는다():
+    """★ 선언만 하면 통과하는 것도 아니다 — **가리키는 곳이 같아야** 한다."""
+    from core import decision_package as dp
+    base, scenario = _numbers()
+    with pytest.raises(dp.DecisionError, match="다른 것을 가리킵니다"):
+        dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                 base=base, scenario=scenario, path=_complete_path("oq_c", "fp_c"),
+                 calc_binding={"query_id": "oq_other", "path_fingerprint": "fp_other"})
+
+
+def test_결속이_맞으면_만들어지고_원장까지_따라간다():
+    """★ 대조군 — 위 차단이 「전부 막는 것」이 되면 통제가 아니라 고장이다.
+    그리고 선언한 결속은 **근거에 남아** 나중에 「이 숫자는 이 경로 것이었나」를 물을 수 있다."""
+    from core import decision_package as dp
+    base, scenario = _numbers()
+    pkg = dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                   base=base, scenario=scenario, path=_complete_path("oq_c", "fp_c"),
+                   calc_binding={"query_id": "oq_c", "path_fingerprint": "fp_c"})
+    assert pkg.evidence["calc_binding"] == {"query_id": "oq_c", "path_fingerprint": "fp_c"}
+
+
+def test_경로_없는_기존_흐름은_그대로_돈다():
+    """⚠️ 경로를 쓰지 않는 기존 호출부를 막으면 이 통제가 기능 정지가 된다."""
+    from core import decision_package as dp
+    base, scenario = _numbers()
+    pkg = dp.build(title="기존", owner="o@afs.invalid", due="2026-09-01",
+                   base=base, scenario=scenario)
+    assert pkg.evidence["calc_binding"] == {"query_id": "", "path_fingerprint": ""}
