@@ -103,6 +103,20 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "POST /api/v1/data-preparation/bindings/{binding_id}/snapshots": (PROJECT_RUN,),
     #   ★ 인증은 «이 판을 공식으로 쓴다» 는 선언이다 — 운영 권한을 요구한다.
     "POST /api/v1/data-preparation/snapshots/{snapshot_id}/certify": (PROJECT_RUN,),
+    # ★★★ [4.1c-D] 데이터셋 소유권 승인·철회. **표에 넣는다** — 라우트 안의 판정만
+    #   믿으면 새 소유권 경로가 생길 때 아무도 알려 주지 않는다.
+    #   ⚠️ 라우트는 이 위에 `assert_can_manage_standard` 를 **한 번 더** 요구한다.
+    #     이 표는 「이 라우트를 부를 수 있는가」를, 그 검사는 「데이터 표준을 승인할 수
+    #     있는가」를 본다 — 다른 질문이므로 한쪽으로 대신하지 않는다.
+    #   ⚠️ `PROJECT_RUN` 이 아니다. 그것으로 두면 프로젝트 `member` 가 **전사 데이터
+    #     소유권**을 정할 수 있고(그 역할에 `project.run` 이 있다), 정작 데이터 관리자는
+    #     그 권한이 없어 막힌다 — 축이 반대로 어긋난다(실측).
+    #   ⚠️ 표와 핸들러가 **같은 권한**을 요구하므로 이 줄을 지워도 실패하는 시험이 없다
+    #     (핸들러의 `require_caps` 가 먼저 막는다). 남기는 이유는 라우터 의존성이
+    #     **핸들러보다 먼저** 돌아, 본문 파싱·문맥 해석 전에 막기 때문이다 — 그리고
+    #     표가 있어야 `test_viewer_is_blocked_by_the_table` 이 이 경로를 함께 본다.
+    "POST /api/v1/data-preparation/ownership/approve": (ADMIN_DATA_ACCESS,),
+    "POST /api/v1/data-preparation/ownership/{binding_id}/revoke": (ADMIN_DATA_ACCESS,),
 
     # ── [BDR-7 / G2·G4] 기준선·시뮬레이션·의사결정 ──────────────────────
     #   ★ 기준선을 «고정» 하는 것과 그 위에서 계산하는 것은 둘 다 운영이다.
