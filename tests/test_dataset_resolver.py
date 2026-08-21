@@ -186,16 +186,25 @@ def test_없음과_미결속과_못읽음이_서로_다르다(indexed, monkeypat
 # ── ④ 권한은 PDP 가 정한다 ──────────────────────────────────────────────
 
 class _Scope:
-    def __init__(self, nodes=("plant-demo",)):
-        self.readable_dept_ids = frozenset(nodes)
-        self.writable_dept_ids = frozenset(nodes)
-        self.unrestricted = False
+    def __init__(self, depts=(), unrestricted=False):
+        self.readable_dept_ids = frozenset(depts)
+        self.writable_dept_ids = frozenset(depts)
+        self.unrestricted = unrestricted
 
 
-def _subject(nodes=("plant-demo",)):
+def _subject(depts=(), unrestricted=True, selected=SCOPE):
+    """★★★ [4.1b-0] 부서 집합에 **조직 노드 ID 를 넣지 않는다.**
+
+    ⚠️⚠️ 종전 시험은 `readable_dept_ids` 에 `plant-demo`(조직 노드)를 넣어 통과시켰다.
+      실제 `org_directory.resolve_scope()` 는 거기에 **부서 ID** 를 넣는다 — 시험이
+      제품과 다른 세계에서 돌고 있었다.
+
+    ★ 시연 데이터에 소유 부서가 없으므로, 조직 경계 자체를 보려면 `unrestricted` 를
+      써야 한다. **그것이 지금의 사실**이고, 부서 결속이 생기면 이 기본값을 되돌린다."""
     return app_policy.Subject(
-        user_id="u@example.com", scope=_Scope(nodes),
-        ctx={"tenant_id": TENANT, "entity_mode": "VIRTUAL", "scope_node_id": SCOPE})
+        user_id="u@example.com", scope=_Scope(depts, unrestricted),
+        ctx={"tenant_id": TENANT, "entity_mode": "VIRTUAL",
+             "scope_node_id": selected})
 
 
 def test_해석기는_권한을_판정하지_않는다(indexed):
@@ -216,13 +225,14 @@ def test_런타임에서는_남의_조직_것이_안_보인다(indexed, tmp_path
                          R.product_object_scope_resolver,
                          lambda *a, **k: True)
     ctx = _ctx()
-    assert rt._object_visible(_subject(), SHIP, ctx) is False
+    #: ★ 조직 노드 경계는 `_scope_covers` 가 본다 — 선택한 문맥과 다른 노드는 막힌다.
+    assert rt._object_visible(_subject(selected=SCOPE), SHIP, ctx) is False
 
     #: ★ 대조군 — 내 조직 것이면 보여야 한다. 늘 막히면 통제가 아니라 고장이다.
     indexed([{"shipment_id": "SHP-내것", "po_line_id": "PO-1-10",
               "tenant_id": TENANT, "scope_node_id": SCOPE, "etd": "2026-03-01"}])
     mine = ObjectRef("dataset", "shipment", "SHP-내것")
-    assert rt._object_visible(_subject(), mine, ctx) is True
+    assert rt._object_visible(_subject(selected=SCOPE), mine, ctx) is True
 
 
 # ── ⑤ 문맥에 따라 「없음」의 뜻이 달라진다 ──────────────────────────────
@@ -249,7 +259,7 @@ def test_봉인된_판과_다르면_막힌다(indexed, tmp_path):
                          R.product_object_scope_resolver, lambda *a, **k: True)
     ok = _ctx(purpose=ontology_resolve.EVIDENCE_VALIDATION,
               required_snapshot_id=snap["snapshot_id"])
-    assert rt._object_visible(_subject(), SHIP, ok) is True
+    assert rt._object_visible(_subject(selected=SCOPE), SHIP, ok) is True
 
     bad = _ctx(purpose=ontology_resolve.EVIDENCE_VALIDATION,
                required_snapshot_id="ds_다른판")
@@ -312,3 +322,61 @@ def test_런타임이_주체_문맥에서_정체성을_채운다(indexed, tmp_pa
         f"런타임이 tenant 를 안 넘긴다: {[c.tenant_id for c in seen]}")
     assert all(c.entity_mode == "VIRTUAL" for c in seen), (
         f"런타임이 entity_mode 를 안 넘긴다: {[c.entity_mode for c in seen]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 4.1b-0 — 조직 노드와 소유 부서는 다른 것이다 (2026-08-21)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_조직_노드를_부서_칸에_넣지_않는다(indexed):
+    """★★★ **타입 혼동.** `scope_node_id` 는 ECM 조직 노드이고 `owner_dept_id` 는
+    `org_directory` 의 **부서**다.
+
+    ⚠️⚠️ 종전에는 `owner_dept_id=scope_node_id` 로 채웠다. PDP 는
+      `owner_dept_id in readable_dept_ids` 를 보는데 그 집합은 **부서 ID** 로 만들어진다.
+      그래서 시험이 노드 ID 로 가짜 Scope 를 만들어 통과시키고 있었고, 그것은 **실제
+      제품 권한과 다른 세계**였다.
+
+    ★ 실제 사용자는 `org_directory.resolve_scope()` 로 부서 집합을 받는다 — 거기에
+      `plant-afs-*` 같은 노드 ID 는 들어 있지 않다."""
+    indexed(_rows())
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.status == ontology_resolve.FOUND
+    assert res.resource_scope.scope_node_id == SCOPE
+    assert res.resource_scope.owner_dept_id != res.resource_scope.scope_node_id, (
+        "조직 노드가 부서 칸에 들어갔다 — 실제 권한과 다른 세계가 된다")
+
+
+def test_소유_부서가_없으면_PDP_가_막는다(indexed):
+    """★★★ 시연 데이터에는 아직 부서 칸이 없다. 그래서 **막힌다 — 그것이 맞다.**
+
+    ⚠️ D-014: 미지정은 전사 공용이 아니라 **비노출**이다. 「모르니까 통과」로 두면
+      그 자원이 어느 조직 것이었는지 아무도 모르는 채 열린다.
+    ★ 사유가 `RESOURCE_UNBOUND` 인 것이 중요하다 — 「권한 없음」과 다른 말이고,
+      사람이 할 일도 다르다(소유를 정해야 한다)."""
+    indexed(_rows())
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.resource_scope.owner_dept_id == ""
+
+    #: 노드 ID 로 만든 «가짜» Scope — 종전에는 이것이 통과했다.
+    class _NodeScope:
+        readable_dept_ids = frozenset({SCOPE})
+        writable_dept_ids = frozenset({SCOPE})
+        unrestricted = False
+
+    subject = app_policy.Subject(
+        user_id="u@example.com", scope=_NodeScope(),
+        ctx={"tenant_id": TENANT, "entity_mode": "VIRTUAL", "scope_node_id": ""})
+    decision = app_policy.decide(subject, res.resource_scope, app_policy.READ)
+    assert decision.allowed is False, "노드 ID 로 만든 가짜 권한이 통과했다"
+    assert decision.reason == app_policy.DENY_UNBOUND, decision.reason
+
+
+def test_색인이_소유_부서_칸을_따로_갖는다():
+    """★ 표에 자리가 있어야 나중에 **행이 말할 수 있다.** 없으면 또 노드 ID 를 빌려 쓴다."""
+    from core.data_preparation import store as dp_store_mod
+
+    ddl = dp_store_mod.__file__
+    from pathlib import Path
+    src = Path(ddl).read_text(encoding="utf-8")
+    assert "owner_dept_id" in src, "색인에 소유 부서 칸이 없다"

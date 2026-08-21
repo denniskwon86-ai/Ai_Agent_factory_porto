@@ -242,9 +242,18 @@ def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
         #:   결과, 승인된 관계의 끝점이면 무결성 장애).
         return ontology_resolve.not_found("색인에 없는 업무 객체입니다.")
 
+    #: ★★★ [2026-08-21 4.1b-0] **조직 노드를 부서 칸에 넣지 않는다.**
+    #:
+    #: ⚠️⚠️ 종전에는 `owner_dept_id=scope_node_id` 로 채웠다. PDP 는
+    #:   `owner_dept_id in readable_dept_ids` 를 보는데 그 집합은 `org_directory` 의
+    #:   **부서 ID** 로 만들어진다. 노드 ID 를 넣으면 시험에서만 통과하고(시험이 노드
+    #:   ID 로 가짜 Scope 를 만드니까) **실제 제품 권한과 다른 세계**가 된다.
+    #: ⚠️ 지금 시연 데이터에는 부서 칸이 없다 — 비워 둔다. 그러면 PDP 가
+    #:   `RESOURCE_UNBOUND` 로 막는다(D-014: 미지정은 전사 공용이 아니라 **비노출**).
+    #:   막히는 것이 맞다. 「누가 소유하는가」를 정하지 않았기 때문이다.
     scope = _scope(str(row.get("tenant_id", "")), str(row.get("entity_mode", "")),
                    str(row.get("scope_node_id", "")),
-                   owner_dept_id=str(row.get("scope_node_id", "")))
+                   owner_dept_id=str(row.get("owner_dept_id", "") or ""))
     if scope is None:
         #: ⚠️⚠️ 색인은 범위 없는 행을 애초에 받지 않는다. 그런데도 여기 왔다면 **자료가
         #:   어긋난 것**이지 「안 보이는 것」이 아니다.

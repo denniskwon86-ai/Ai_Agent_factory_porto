@@ -172,9 +172,12 @@ def plan(snapshot: Dict[str, Any]) -> List[tuple]:
                 f"{key} {line_no}행: tenant 가 인증판과 다릅니다 "
                 f"({tenant} ≠ {snapshot.get('tenant_id')}).")
 
+        #: ⚠️ 소유 부서는 **행이 말해야 한다.** 시연 데이터에는 아직 없으므로 빈 값이고,
+        #:   그 결과 PDP 가 막는다 — 「모르면 막는다」가 맞다.
+        owner_dept = str(row.get("owner_dept_id", "") or "").strip()
         payload.append((namespace, object_type, object_id, snapshot_id, key,
                         f"line={line_no};{id_column}={object_id}",
-                        tenant, scope,
+                        tenant, scope, owner_dept,
                         str(snapshot.get("entity_mode", "")),
                         str(snapshot.get("data_kind", "")),
                         "", now))                        # certified_at 은 기록 때 채운다
@@ -200,13 +203,14 @@ def write_conn(conn: Any, payload: List[tuple], certified_at: str) -> int:
       쪽은 승인된 관계의 끝점에서 **503** 을 만난다 — 아무도 잘못하지 않았는데."""
     if not payload:
         return 0
-    stamped = [row[:10] + (str(certified_at or ""), row[11]) for row in payload]
+    stamped = [row[:11] + (str(certified_at or ""), row[12]) for row in payload]
     if True:
         conn.executemany(
             "INSERT OR REPLACE INTO object_scope_index ("
             "namespace, object_type, object_id, snapshot_id, dataset_contract_key,"
-            "row_evidence, tenant_id, scope_node_id, entity_mode, data_kind,"
-            "certified_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", stamped)
+            "row_evidence, tenant_id, scope_node_id, owner_dept_id, entity_mode,"
+            "data_kind, certified_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            stamped)
     return len(stamped)
 
 

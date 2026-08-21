@@ -575,3 +575,180 @@ def test_형제_분기가_서로의_결속을_덮지_않는다(tmp_path):
             assert path["bindings"][key] == expected, (
                 f"경로 {[n['object_id'] for n in path['nodes']]} 의 «{node['object_id']}» "
                 f"결속이 {path['bindings'][key]} 다 — 형제 분기가 덮었다(기대 {expected})")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# B1.2 — 계산 불가 경로 차단 · 근거 지문 사슬 (2026-08-21)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _blocked_envelope():
+    edges = [{"relation_id": "r1", "relation_type_id": "AFFECTS",
+              "calculation_ref": "CALC.INVENTORY.MATERIAL_SHORTAGE.v1"}]
+    return _response(paths=[_path(edges=edges)])
+
+
+def test_계산할_수_없는_경로로_숫자_안건을_만들지_않는다():
+    """★★★ [P0] 종전에는 `calculation_blocked` 를 근거에 **적어 두기만** 했다.
+
+    ⚠️⚠️ 그래서 한 패키지 안에 이 둘이 **동시에** 실렸다:
+
+        「이 경로는 아직 계산할 수 없습니다」
+        「영업이익이 -200,000,000원 변합니다 — 지금 무엇을 결정해야 합니까?」
+
+    ★ 사람은 **숫자를 읽는다.** 옆줄의 「계산할 수 없습니다」는 각주로 읽히고, 그 숫자는
+      이 경로와 아무 상관이 없다 — 기존 시나리오 엔진의 결과다."""
+    from core import decision_package as dp
+
+    ev = A.to_evidence(_blocked_envelope())
+    assert ev["calculation_blocked"] is True, ev
+    with pytest.raises(dp.DecisionError) as err:
+        dp.build(title="지연 영향", owner="o@afs.invalid", due="2026-09-01",
+                 base=_calc_result("fp_b"),
+                 scenario=_calc_result("fp_s", {"production_qty": 90.0,
+                                                "ending_inventory": 12.0,
+                                                "purchase_payment": 6.0,
+                                                "ending_cash": 6.0,
+                                                "operating_profit": 2.0}),
+                 path=ev)
+    assert "계산할 수 없" in str(err.value)
+
+
+def test_근거가_빠진_경로로도_숫자_안건을_만들지_않는다():
+    """⚠️ 계산이 열려도 **근거 없는 칸이 있으면** 완결이 아니다."""
+    from core import decision_package as dp
+
+    ev = A.to_evidence(_response(paths=[_path(bindings={})]))
+    assert ev["complete"] is False
+    with pytest.raises(dp.DecisionError):
+        dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                 base=_calc_result("fp_b"),
+                 scenario=_calc_result("fp_s", {"production_qty": 90.0,
+                                                "ending_inventory": 12.0,
+                                                "purchase_payment": 6.0,
+                                                "ending_cash": 6.0,
+                                                "operating_profit": 2.0}),
+                 path=ev)
+
+
+def test_경로_없는_기존_패키지는_그대로_돈다():
+    """★ 대조군 — 온톨로지를 안 쓰는 기존 흐름까지 막으면 그것은 회귀다."""
+    from core import decision_package as dp
+
+    pkg = dp.build(title="기존 흐름", owner="o@afs.invalid", due="2026-09-01",
+                   base=_calc_result("fp_b"),
+                   scenario=_calc_result("fp_s", {"production_qty": 90.0,
+                                                  "ending_inventory": 12.0,
+                                                  "purchase_payment": 6.0,
+                                                  "ending_cash": 6.0,
+                                                  "operating_profit": 2.0}))
+    assert pkg.question
+
+
+def test_막힌_경로는_원장에_아무_행도_남기지_않는다():
+    """★★★ 「일단 만들고 화면에서 가리자」가 안 되는 이유 — **안건은 원장에 남고
+    발간으로 나간다.**"""
+    from core import decision_case as dc
+    from core import decision_package as dp
+
+    before = len(dc.decision_case.list_cases()) if hasattr(
+        dc.decision_case, "list_cases") else None
+    with pytest.raises(dp.DecisionError):
+        dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                 base=_calc_result("fp_b"),
+                 scenario=_calc_result("fp_s", {"production_qty": 90.0,
+                                                "ending_inventory": 12.0,
+                                                "purchase_payment": 6.0,
+                                                "ending_cash": 6.0,
+                                                "operating_profit": 2.0}),
+                 path=A.to_evidence(_blocked_envelope()))
+    if before is not None:
+        assert len(dc.decision_case.list_cases()) == before, "막혔는데 행이 남았다"
+
+
+def test_경로_정체성이_발간까지_따라간다():
+    """★★★ [B1.2-2] **사슬 전체를 태운다.**
+
+        Decision Package → Decision Case 저장 → evidence_hash
+        → Publication 생성 · render → source_evidence_hash 대조
+        → 원천 Case 에서 query_id·path_fingerprint 재조회
+
+    ⚠️ 종전 보고는 「원장·발간까지 유지」였지만 **발간 종단은 태운 적이 없었다.**
+      코드에 `source_evidence_hash` 를 옮기는 줄이 있다는 것까지가 확인된 전부였다."""
+    from core import decision_case as dc
+    from core import decision_package as dp
+    from core import publication as pub
+
+    #: ★ 계산이 없는(정성) 경로 — 완결이므로 숫자 안건을 만들 수 있다.
+    ev = A.to_evidence(_response("oq_chain", paths=[_path(fingerprint="fp_chain")]))
+    assert ev["complete"] is True, ev
+    pkg = dp.build(title="지연 영향", owner="owner@afs.invalid", due="2026-09-01",
+                   base=_calc_result("fp_b"),
+                   scenario=_calc_result("fp_s", {"production_qty": 90.0,
+                                                  "ending_inventory": 12.0,
+                                                  "purchase_payment": 6.0,
+                                                  "ending_cash": 6.0,
+                                                  "operating_profit": 2.0}),
+                   path=ev)
+    case = dc.decision_case.create(
+        question=pkg.question, created_by="owner@afs.invalid",
+        package={"baseline": "bl_1", "options": ["A", "B"]},
+        evidence=dict(pkg.evidence))
+
+    #: ① Decision Case 에 그대로 저장됐는가.
+    fetched = dc.decision_case.get(case["decision_id"])
+    stored = fetched.get("evidence")
+    if isinstance(stored, str):
+        import json as _json
+        stored = _json.loads(stored)
+    assert stored["query_id"] == "oq_chain", stored
+    assert stored["path_fingerprint"] == "fp_chain", stored
+
+    #: ② 발간이 그 근거 지문을 옮기는가.
+    publication = pub.publication.create(
+        title="경영 브리핑", created_by="owner@afs.invalid",
+        source_type="DECISION_CASE", source_id=case["decision_id"])
+    rendered = pub.publication.render(publication["publication_id"], "owner@afs.invalid")
+    #: ★ 렌더 결과는 발간 레코드다. 문서는 **판본**에 들어 있다.
+    current = rendered.get("current_version") or {}
+    evidence = (current.get("document") or {}).get("evidence") or {}
+    assert evidence.get("source_evidence_hash") == case["evidence_hash"], evidence
+
+    #: ③ ★★★ 발간본의 지문으로 **원천을 되짚어** 경로 정체성을 다시 얻는다.
+    #:   이것이 「원장·발간까지 유지된다」의 실제 뜻이다.
+    back = dc.decision_case.get(evidence["source_id"])
+    back_ev = back.get("evidence")
+    if isinstance(back_ev, str):
+        import json as _json
+        back_ev = _json.loads(back_ev)
+    assert back_ev["path_fingerprint"] == "fp_chain", back_ev
+
+
+def test_두_깃발을_따로_본다():
+    """★★★ 어댑터에서는 `complete` 와 `calculation_blocked` 가 늘 함께 움직인다
+    (`complete = not missing and not blocked`). 그래서 하나만 봐도 지금은 통과한다.
+
+    ⚠️⚠️ 그러나 `path` 는 **어댑터만 만드는 것이 아니다.** 다른 호출부·화면·연동이
+      손으로 만든 딕셔너리를 넘길 수 있고, 그때 한쪽만 보면 **문이 열린다.**
+    ★ 그래서 둘을 **따로** 본다 — 「지금은 같이 움직이니까」는 계약이 아니다."""
+    from core import decision_package as dp
+
+    scenario = _calc_result("fp_s", {"production_qty": 90.0, "ending_inventory": 12.0,
+                                     "purchase_payment": 6.0, "ending_cash": 6.0,
+                                     "operating_profit": 2.0})
+    for hand_made in (
+            {"complete": True, "calculation_blocked": True},      # 차단인데 완결이라 주장
+            {"complete": False, "calculation_blocked": False},     # 미완결인데 차단 아님
+            #: ★ 뒤엣것은 **런타임 경로일 때만** 막는다 — `query_id` 가 그 표시다.
+    ):
+        with pytest.raises(dp.DecisionError):
+            dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                     base=_calc_result("fp_b"), scenario=scenario,
+                     path={"path": [], "query_id": "oq_1", "path_fingerprint": "fp_1",
+                           **hand_made})
+
+    #: ★ 대조군 — 둘 다 정상이면 만들어진다.
+    ok = dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                  base=_calc_result("fp_b"), scenario=scenario,
+                  path={"path": [], "query_id": "oq_1", "path_fingerprint": "fp_1",
+                        "complete": True, "calculation_blocked": False})
+    assert ok.evidence["path_fingerprint"] == "fp_1"

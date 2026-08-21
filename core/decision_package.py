@@ -93,6 +93,37 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
         raise DecisionError("기한이 필요합니다 — 기한 없는 결정은 결정이 아닙니다.")
     if base is None or scenario is None:
         raise DecisionError("기준과 시나리오가 모두 필요합니다.")
+
+    #: ★★★ [2026-08-21 B1.2-1 P0] **계산할 수 없는 경로로 숫자 안건을 만들지 않는다.**
+    #:
+    #: ⚠️⚠️ 종전에는 `calculation_blocked` 를 근거에 «적어 두기만» 했다. 그래서 한
+    #:   패키지 안에 이 둘이 **동시에** 실렸다:
+    #:
+    #:       「이 경로는 아직 계산할 수 없습니다」
+    #:       「영업이익이 -200,000,000원 변합니다 — 지금 무엇을 결정해야 합니까?」
+    #:
+    #: ★ 사람은 **숫자를 읽는다.** 옆줄의 「계산할 수 없습니다」는 각주로 읽힌다.
+    #:   그리고 그 숫자는 이 경로와 아무 상관이 없다 — 기존 시나리오 엔진의 결과다.
+    #: ⚠️ 「일단 만들고 화면에서 가리자」도 안 된다. 안건은 원장에 남고 발간으로 나간다.
+    if path is not None:
+        blocked = bool((path or {}).get("calculation_blocked", False))
+        incomplete = not bool((path or {}).get("complete", False))
+        #: ⚠️⚠️ **범위를 좁힌 자리다 — 확인이 필요하다.**
+        #:
+        #:   `calculation_blocked` 는 **언제나** 막는다.
+        #:   `complete=False` 는 **런타임 경로일 때만** 막는다(`query_id` 가 있는 경우).
+        #:
+        #: ★ 왜 좁혔나: 고정 경로(`core/ontology_path.trace`)는 근거가 빠진 단계를
+        #:   **브리핑에 드러내는** 것이 통제다(「근거가 없는 단계: …」). 미완결을
+        #:   어디서나 막으면 그 통제가 **도달 불가능**해지고, 「빠진 것을 숨기지 않는다」는
+        #:   장치가 조용히 사라진다.
+        #: ⚠️ 두 규칙이 실제로 부딪히는 자리이므로 **한쪽을 조용히 이기게 두지 않는다** —
+        #:   이 좁힘은 기록하고 확인을 받아야 한다(인수인계 §미결 1).
+        from_runtime = bool(str((path or {}).get("query_id", "") or "").strip())
+        if blocked or (incomplete and from_runtime):
+            raise DecisionError(
+                "이 경로는 아직 계산할 수 없어 숫자 안건을 만들지 않습니다 — "
+                "계산되지 않은 경로 옆에 숫자를 놓으면 그 숫자가 답으로 읽힙니다.")
     if base.baseline_fingerprint != scenario.baseline_fingerprint:
         #: ★★★ 다른 기준선으로 만든 두 결과를 나란히 놓으면, 그 차이는 **가정 때문이
         #:   아니라 데이터 때문**일 수 있다. 그리고 화면은 그것을 구분해 주지 않는다.

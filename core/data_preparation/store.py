@@ -137,7 +137,16 @@ CREATE TABLE IF NOT EXISTS object_scope_index (
     -- 그 판의 **어느 행**인가. 본문이 아니라 위치다.
     row_evidence    TEXT NOT NULL DEFAULT '',
     tenant_id       TEXT NOT NULL,
+    -- ★★★ [2026-08-21 4.1b-0] **둘은 다른 것이다.**
+    --   `scope_node_id`  어느 **ECM 조직 노드**의 데이터인가 (계층·조상 해석의 축)
+    --   `owner_dept_id`  어느 **실제 부서**가 소유·관리하는가 (`org_directory` 의 부서)
+    -- ⚠️⚠️ 같은 값으로 채우면 안 된다. PDP 는 `owner_dept_id in readable_dept_ids` 를
+    --   보는데 그 집합은 **부서 ID** 로 만들어진다 — 노드 ID 를 넣으면 시험에서만
+    --   통과하고 실제 사용자 권한에서는 거부된다(또는 그 반대로 새어 나간다).
+    -- ⚠️ 지금 시연 데이터에는 부서 칸이 **없다.** 비워 두고, 그 결과 PDP 가
+    --   `RESOURCE_UNBOUND` 로 막는 것이 맞다(D-014: 미지정은 전사 공용이 아니라 비노출).
     scope_node_id   TEXT NOT NULL,
+    owner_dept_id   TEXT NOT NULL DEFAULT '',
     entity_mode     TEXT NOT NULL,
     data_kind       TEXT NOT NULL DEFAULT '',
     -- ★ `as_of` 로 판을 고르는 축. ⚠️ 「그냥 최신」을 쓰지 않기 위해 필요하다.
