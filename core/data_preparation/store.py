@@ -146,7 +146,16 @@ CREATE TABLE IF NOT EXISTS object_scope_index (
     -- ⚠️ 지금 시연 데이터에는 부서 칸이 **없다.** 비워 두고, 그 결과 PDP 가
     --   `RESOURCE_UNBOUND` 로 막는 것이 맞다(D-014: 미지정은 전사 공용이 아니라 비노출).
     scope_node_id   TEXT NOT NULL,
+    -- ★★★ [G2 Ownership Binding] `owner_dept_id` 는 **정본이 아니라 물질화된 결과**다.
+    --   정본은 `dataset_ownership_bindings`(승인된 결속)이고, 여기 값은 그 결속을 물질화한
+    --   사본이다. 그래서 **어느 결속에서 나왔는지**를 함께 봉인한다 —
+    --   나중에 「이 색인 값은 어느 승인에서 나왔나」와 「그 결속이 그 뒤 바뀌었나」에
+    --   답할 수 있어야 한다.
+    -- ⚠️ 업무 데이터 행의 `owner_dept_id` 열은 **읽지 않는다.** 데이터가 자기 권한 범위를
+    --   스스로 정하면 그것이 곧 자기진술 통제다(`calc_binding` 과 같은 유형).
     owner_dept_id   TEXT NOT NULL DEFAULT '',
+    owner_binding_id TEXT NOT NULL DEFAULT '',
+    owner_binding_fingerprint TEXT NOT NULL DEFAULT '',
     entity_mode     TEXT NOT NULL,
     data_kind       TEXT NOT NULL DEFAULT '',
     -- ★ `as_of` 로 판을 고르는 축. ⚠️ 「그냥 최신」을 쓰지 않기 위해 필요하다.
@@ -232,6 +241,18 @@ class DataPreparationStore:
         conn = self._connect()
         try:
             conn.executescript(_DDL)
+            #: ⚠️ `CREATE TABLE IF NOT EXISTS` 는 **이미 있는 표에 새 열을 넣어 주지 않는다.**
+            #:   Ownership Binding 이전에 만들어진 DB 는 봉인 열이 없으므로 여기서 채운다(멱등).
+            for col in ("owner_binding_id", "owner_binding_fingerprint"):
+                try:
+                    conn.execute(
+                        f"ALTER TABLE object_scope_index ADD COLUMN {col} "
+                        f"TEXT NOT NULL DEFAULT ''")
+                except Exception:
+                    pass                        # 이미 있으면 그만이다
+            #: 소유권 «정본» 표. 색인과 같은 저장소에 두어 한 트랜잭션으로 물질화한다.
+            from core.data_preparation import ownership_binding as _ob
+            conn.executescript(_ob.DDL)
             conn.commit()
         finally:
             conn.close()

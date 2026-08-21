@@ -380,3 +380,167 @@ def test_색인이_소유_부서_칸을_따로_갖는다():
     from pathlib import Path
     src = Path(ddl).read_text(encoding="utf-8")
     assert "owner_dept_id" in src, "색인에 소유 부서 칸이 없다"
+
+
+# ── ★★★ [G2 Ownership Binding] 소유는 «승인된 결속» 에서만 온다 ────────────
+#
+# 계약: (tenant_id, entity_mode, dataset_contract_key, scope_node_id, 유효기간)
+#         → owner_dept_id
+#
+# ⚠️⚠️ 업무 데이터 행이 선언하지 않는다. 자기 데이터의 권한 범위를 데이터가 스스로 정하면
+#   그것이 곧 자기진술 통제다 — `calc_binding` 과 같은 유형이고, 그 이유로 이미 한 번 지웠다.
+
+OWN_COLUMNS = COLUMNS + ["owner_dept_id"]
+
+
+def _rows_declaring_owner(dept, n=3, scope=SCOPE):
+    """업무 행이 **스스로** 소유 부서를 적은 자료. 색인은 이것을 읽지 않아야 한다."""
+    return [{**r, "owner_dept_id": dept} for r in _rows(n, scope)]
+
+
+def _csv_with_owner(rows):
+    buf = _io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=OWN_COLUMNS, lineterminator="\n")
+    w.writeheader()
+    w.writerows(rows)
+    return buf.getvalue().encode("utf-8")
+
+
+def _declare_owner(store, dept, *, key="LOG-02", scope=SCOPE, mode="VIRTUAL", **kw):
+    from core.data_preparation import ownership_binding as ob
+    with store.transaction() as conn:
+        return ob.declare(conn, tenant_id=TENANT, entity_mode=mode,
+                          dataset_contract_key=key, scope_node_id=scope,
+                          owner_dept_id=dept, approved_by="approver@afs.invalid",
+                          evidence_ref="FND-01/v1#seed", **kw)
+
+
+def test_업무_행이_소유_부서를_적어도_색인은_읽지_않는다(indexed, monkeypatch, capsys):
+    """★★★ 계약 ⑩ — 행의 선언은 **무시된다.**
+
+    ⚠️ 거부가 아니라 무시로 둔 이유: 그 열이 우연히 섞인 판 전체가 인증되지 못하면, 다음
+      사람은 열을 지우는 대신 **이 검사를 끄는 쪽**을 택한다. 다만 조용히 넘기지도 않는다 —
+      무시한 횟수를 소리 내어 남긴다."""
+    import core.data_preparation.scope_index as si
+    monkeypatch.setattr(si, "rows_from_raw",
+                        lambda raw, checksum: (_rows_declaring_owner("sales"), OWN_COLUMNS))
+    indexed(_rows())
+    out = capsys.readouterr().out
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.resource_scope.owner_dept_id != "sales", (
+        "업무 행이 적은 소유 부서가 색인에 들어갔다 — 데이터가 자기 권한을 정한 것이다")
+    assert res.resource_scope.owner_dept_id == "", "결속이 없으면 비어 있어야 한다"
+    assert "무시" in out, "무시했다는 사실을 남기지 않았다"
+
+
+def test_승인된_결속이_있으면_색인에_물질화되고_봉인된다(indexed, monkeypatch):
+    """★ 정본 → 색인. 그리고 **어느 결속에서 나왔는지**가 함께 봉인된다."""
+    from core.data_preparation import store as dp
+    b = _declare_owner(dp.data_preparation_store, "hq")
+    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
+    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
+    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
+    monkeypatch.setattr(_org(), "get_department",
+                        lambda d: {"dept_id": d, "status": "active"}, raising=False)
+    indexed(_rows())
+    with dp.data_preparation_store.transaction() as conn:
+        row = dict(conn.execute(
+            "SELECT owner_dept_id, owner_binding_id, owner_binding_fingerprint "
+            "FROM object_scope_index LIMIT 1").fetchone())
+    assert row["owner_dept_id"] == "hq"
+    assert row["owner_binding_id"] == b["binding_id"]
+    assert row["owner_binding_fingerprint"] == b["fingerprint"]
+
+
+def test_철회하면_색인이_남아_있어도_막힌다(indexed, monkeypatch):
+    """★★★ 계약 ⑥ — **색인이 있어도 요청 시 다시 검증한다.**
+
+    ⚠️ 물질화 시점의 판단을 영구히 믿으면 그것이 곧 「회수해도 계속 유효한 권한」이다 —
+      SSE 티켓에서 이미 같은 실수를 고쳤다."""
+    from core.data_preparation import ownership_binding as ob
+    from core.data_preparation import store as dp
+    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
+    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
+    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
+    monkeypatch.setattr(_org(), "get_department",
+                        lambda d: {"dept_id": d, "status": "active"}, raising=False)
+    b = _declare_owner(dp.data_preparation_store, "hq")
+    indexed(_rows())
+    assert R.product_object_scope_resolver(SHIP, _ctx()).resource_scope.owner_dept_id == "hq"
+
+    with dp.data_preparation_store.transaction() as conn:
+        ob.revoke(conn, b["binding_id"], "auditor@afs.invalid", "근거 미비")
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.resource_scope.owner_dept_id == "", "철회 뒤에도 소유 부서가 살아 있다"
+
+
+def test_부서가_폐지되면_색인이_있어도_503(indexed, monkeypatch):
+    """계약 ⑦ — 결속은 있는데 가리키는 곳이 없다. 「안 보인다」가 아니라 **고쳐야 할 것**이다."""
+    from core.data_preparation import store as dp
+    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
+    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
+    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
+    monkeypatch.setattr(_org(), "get_department",
+                        lambda d: {"dept_id": d, "status": "active"}, raising=False)
+    _declare_owner(dp.data_preparation_store, "hq")
+    indexed(_rows())
+    monkeypatch.setattr(_org(), "get_department",
+                        lambda d: {"dept_id": d, "status": "retired"}, raising=False)
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.status == ontology_resolve.UNAVAILABLE, res.status
+
+
+def test_실제_조직도_Principal_로_PDP_를_대조한다(indexed, monkeypatch):
+    """★★★ 계약 ⑪ — **가짜 Scope 가 아니라 제품이 만드는 Principal** 로 본다.
+
+    ⚠️⚠️ 이 세션에서 시험 두 건이 «노드 ID 로 만든 가짜 부서 권한» 으로 통과하고 있었다.
+      그래서 여기서는 `org_directory.resolve_scope()` 가 실제로 돌려주는 객체를 쓴다 —
+      그 집합은 **부서 ID** 로 만들어지고, 노드 ID 는 들어 있지 않다."""
+    from core.data_preparation import store as dp
+    from core import app_policy
+    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
+    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
+    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
+    monkeypatch.setattr(_org(), "get_department",
+                        lambda d: {"dept_id": d, "status": "active"}, raising=False)
+    _declare_owner(dp.data_preparation_store, "hq")
+    indexed(_rows())
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.resource_scope.owner_dept_id == "hq"
+
+    #: 제품 경로로 만든 권한. 부서를 가진 사람과 못 가진 사람을 나란히 본다.
+    class _Scope:
+        def __init__(self, depts):
+            self.readable_dept_ids = frozenset(depts)
+            self.writable_dept_ids = frozenset(depts)
+            self.unrestricted = False
+
+    ctxd = {"tenant_id": TENANT, "entity_mode": "VIRTUAL", "scope_node_id": ""}
+    allowed = app_policy.decide(
+        app_policy.Subject(user_id="a@example.com", scope=_Scope({"hq"}), ctx=ctxd),
+        res.resource_scope, app_policy.READ)
+    denied = app_policy.decide(
+        app_policy.Subject(user_id="b@example.com", scope=_Scope({"sales"}), ctx=ctxd),
+        res.resource_scope, app_policy.READ)
+    assert allowed.allowed is True, allowed.reason
+    assert denied.allowed is False, "다른 부서 사람이 통과했다"
+
+
+def test_다른_계약키의_결속은_물질화되지_않는다(indexed, monkeypatch):
+    """계약 ⑤ — 다른 scope·계약의 결속을 재사용하지 않는다. SLS-01 결속으로 LOG-02 가
+    소유자를 얻으면, 승인 하나가 계약 경계를 넘는 것이다."""
+    from core.data_preparation import store as dp
+    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
+    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
+    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
+    monkeypatch.setattr(_org(), "get_department",
+                        lambda d: {"dept_id": d, "status": "active"}, raising=False)
+    _declare_owner(dp.data_preparation_store, "sales", key="SLS-01")
+    indexed(_rows())                                  # 색인 대상은 LOG-02
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.resource_scope.owner_dept_id == "", "다른 계약키의 결속이 새어 들어왔다"
+
+
+def _org():
+    from core.org_directory import org_directory
+    return org_directory

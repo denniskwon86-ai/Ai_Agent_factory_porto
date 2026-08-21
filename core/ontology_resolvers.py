@@ -251,9 +251,47 @@ def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     #: ⚠️ 지금 시연 데이터에는 부서 칸이 없다 — 비워 둔다. 그러면 PDP 가
     #:   `RESOURCE_UNBOUND` 로 막는다(D-014: 미지정은 전사 공용이 아니라 **비노출**).
     #:   막히는 것이 맞다. 「누가 소유하는가」를 정하지 않았기 때문이다.
+    #: ★★★ [G2 Ownership Binding] **색인 값을 그대로 믿지 않는다 — 요청 시 다시 해석한다.**
+    #:
+    #: ⚠️⚠️ 색인의 `owner_dept_id` 는 **물질화된 사본**이고 정본은
+    #:   `dataset_ownership_bindings` 다. 승인 철회 · 결속 폐지 · 부서 폐지는 모두 색인이
+    #:   만들어진 **뒤에** 일어난다. 물질화 시점의 판단을 영구히 믿으면 그것이 곧
+    #:   「회수해도 계속 유효한 권한」이다 — SSE 티켓에서 이미 같은 실수를 고쳤다.
+    #: ⚠️ 봉인된 결속 지문과 지금 해석이 **다르면 막는다**(503). 색인이 낡았다는 뜻이고,
+    #:   그 상태에서 어느 쪽을 쓸지 임의로 고르면 같은 질문에 다른 답이 나온다.
+    from core.data_preparation import ownership_binding as _ob
+    owner_dept = ""
+    try:
+        #: ⚠️ 정본은 색인과 **같은 저장소**에 있다. 별도 연결을 열지 않고 그 트랜잭션을 쓴다 —
+        #:   두 저장소로 나누면 「색인은 새 판, 소유는 옛 판」인 순간이 생긴다.
+        with data_preparation_store.transaction() as _conn:
+            _b = _ob.resolve(_conn, tenant_id=str(row.get("tenant_id", "")),
+                             entity_mode=str(row.get("entity_mode", "")),
+                             dataset_contract_key=str(row.get("dataset_contract_key", "")),
+                             scope_node_id=str(row.get("scope_node_id", "")),
+                             as_of=str(ctx.as_of or ""))
+    except _ob.OwnershipIntegrityError as e:
+        stats.bump("ownership_integrity")
+        return ontology_resolve.unavailable(f"데이터셋 소유권 결속이 어긋났습니다: {e}")
+    except _ob.OwnershipUnavailable as e:
+        stats.bump("ownership_unavailable")
+        return ontology_resolve.unavailable(f"데이터셋 소유권 정본을 읽지 못했습니다: {e}")
+    if _b is None:
+        #: 결속이 없거나 철회됐다 — 색인에 값이 남아 있어도 **소유자 없음**이다.
+        stats.bump("ownership_unbound")
+        owner_dept = ""
+    else:
+        sealed = str(row.get("owner_binding_fingerprint", "") or "")
+        if sealed and sealed != _b["fingerprint"]:
+            stats.bump("ownership_stale_index")
+            return ontology_resolve.unavailable(
+                "색인에 봉인된 소유권 결속과 지금 승인된 결속이 다릅니다 — 재물질화가 "
+                "필요합니다(어느 쪽을 쓸지 임의로 고르지 않습니다).")
+        owner_dept = str(_b["owner_dept_id"])
+
     scope = _scope(str(row.get("tenant_id", "")), str(row.get("entity_mode", "")),
                    str(row.get("scope_node_id", "")),
-                   owner_dept_id=str(row.get("owner_dept_id", "") or ""))
+                   owner_dept_id=owner_dept)
     if scope is None:
         #: ⚠️⚠️ 색인은 범위 없는 행을 애초에 받지 않는다. 그런데도 여기 왔다면 **자료가
         #:   어긋난 것**이지 「안 보이는 것」이 아니다.

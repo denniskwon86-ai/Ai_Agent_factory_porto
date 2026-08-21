@@ -146,6 +146,8 @@ def plan(snapshot: Dict[str, Any]) -> List[tuple]:
     snapshot_id = str(snapshot.get("snapshot_id", ""))
     now = _now()
     seen: Dict[str, int] = {}
+    #: 업무 행이 소유 부서를 선언한 횟수. **무시하지만 세어서 드러낸다.**
+    ignored_owner_columns = 0
     payload = []
     for line_no, row in enumerate(rows, start=2):        # 2 = 머리글 다음 줄
         object_id = str(row.get(id_column, "") or "").strip()
@@ -172,15 +174,29 @@ def plan(snapshot: Dict[str, Any]) -> List[tuple]:
                 f"{key} {line_no}행: tenant 가 인증판과 다릅니다 "
                 f"({tenant} ≠ {snapshot.get('tenant_id')}).")
 
-        #: ⚠️ 소유 부서는 **행이 말해야 한다.** 시연 데이터에는 아직 없으므로 빈 값이고,
-        #:   그 결과 PDP 가 막는다 — 「모르면 막는다」가 맞다.
-        owner_dept = str(row.get("owner_dept_id", "") or "").strip()
+        #: ★★★ [G2 Ownership Binding] **업무 행의 `owner_dept_id` 는 읽지 않는다.**
+        #:
+        #: ⚠️⚠️ 종전에는 `row.get("owner_dept_id")` 를 그대로 색인에 넣었다. 그러면
+        #:   **자기 데이터의 권한 범위를 데이터가 스스로 정한다** — 직전에 지운
+        #:   `calc_binding` 과 같은 유형의 자기진술 통제다. 고객사 파일 한 칸을 고치면
+        #:   그 데이터의 소유 부서가 바뀐다.
+        #: ★ 소유는 **승인된 결속**에서만 온다. 행에 그 열이 있어도 **무시하고 세어 둔다** —
+        #:   거부하면 그 열이 우연히 섞인 판 전체가 인증되지 못하고, 그러면 다음 사람은
+        #:   열을 지우는 대신 이 검사를 끄는 쪽을 택한다. 다만 조용히 넘기지도 않는다.
+        if str(row.get("owner_dept_id", "") or "").strip():
+            ignored_owner_columns += 1
         payload.append((namespace, object_type, object_id, snapshot_id, key,
                         f"line={line_no};{id_column}={object_id}",
-                        tenant, scope, owner_dept,
+                        tenant, scope,
+                        #: 소유 3칸은 **기록 시점에 정본에서** 채운다(`write_conn`).
+                        #: 여기서 비워 두는 것이 「아직 정하지 않았다」의 정직한 표현이다.
+                        "", "", "",
                         str(snapshot.get("entity_mode", "")),
                         str(snapshot.get("data_kind", "")),
                         "", now))                        # certified_at 은 기록 때 채운다
+    if ignored_owner_columns:
+        print(f"⚠️ [scope_index] {key}: 업무 행의 owner_dept_id 열 {ignored_owner_columns}건을 "
+              f"**무시했습니다** — 소유권은 승인된 결속(dataset_ownership_bindings)에서만 옵니다.")
     return payload
 
 
@@ -203,14 +219,36 @@ def write_conn(conn: Any, payload: List[tuple], certified_at: str) -> int:
       쪽은 승인된 관계의 끝점에서 **503** 을 만난다 — 아무도 잘못하지 않았는데."""
     if not payload:
         return 0
-    stamped = [row[:11] + (str(certified_at or ""), row[12]) for row in payload]
-    if True:
-        conn.executemany(
-            "INSERT OR REPLACE INTO object_scope_index ("
-            "namespace, object_type, object_id, snapshot_id, dataset_contract_key,"
-            "row_evidence, tenant_id, scope_node_id, owner_dept_id, entity_mode,"
-            "data_kind, certified_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            stamped)
+    #: ★★★ [G2 Ownership Binding] **소유 3칸을 정본에서 물질화한다.**
+    #:
+    #: ⚠️ 같은 트랜잭션에서 읽는다 — 나누면 「인증은 됐는데 소유는 다른 결속 것」인 구간이
+    #:   아무리 짧아도 생긴다.
+    #: ⚠️⚠️ 결속이 없으면 **비워 둔다.** 지어내지 않는다 — 그러면 요청 시 PDP 가
+    #:   `RESOURCE_UNBOUND` 로 막고, 그것이 「소유를 정하지 않았다」의 정직한 결과다.
+    #: ⚠️ 중첩·부서 폐지·원장 장애는 여기서 **터진다**(503). 인증 시점에 막는 것이 맞다 —
+    #:   그때는 고칠 사람이 그 자리에 있다. 질의 시점에 터지면 아무도 없다.
+    from core.data_preparation import ownership_binding as ob
+    resolved: Dict[tuple, tuple] = {}
+    stamped = []
+    for row in payload:
+        key, tenant, scope, mode = row[4], row[6], row[7], row[11]
+        ck = (tenant, mode, key, scope)
+        if ck not in resolved:
+            b = ob.resolve(conn, tenant_id=tenant, entity_mode=mode,
+                           dataset_contract_key=key, scope_node_id=scope,
+                           as_of=str(certified_at or ""))
+            resolved[ck] = ((b["owner_dept_id"], b["binding_id"], b["fingerprint"])
+                            if b else ("", "", ""))
+        own = resolved[ck]
+        stamped.append(row[:8] + own + row[11:13]
+                       + (str(certified_at or ""), row[14]))
+    conn.executemany(
+        "INSERT OR REPLACE INTO object_scope_index ("
+        "namespace, object_type, object_id, snapshot_id, dataset_contract_key,"
+        "row_evidence, tenant_id, scope_node_id, owner_dept_id, owner_binding_id,"
+        "owner_binding_fingerprint, entity_mode, data_kind, certified_at, created_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        stamped)
     return len(stamped)
 
 
