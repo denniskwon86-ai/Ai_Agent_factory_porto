@@ -79,8 +79,7 @@ def _view(name: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
-          baseline: Any = None, path: Optional[Dict[str, Any]] = None,
-          calc_binding: Optional[Dict[str, Any]] = None) -> Package:
+          baseline: Any = None, path: Optional[Dict[str, Any]] = None) -> Package:
     """시뮬레이션 두 판 → 회의 안건 하나.
 
     ⚠️ 책임자·기한이 없으면 만들지 않는다. 없는 안건은 「검토하겠습니다」로 끝나고
@@ -108,59 +107,36 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
     #: ⚠️ 「일단 만들고 화면에서 가리자」도 안 된다. 안건은 원장에 남고 발간으로 나간다.
     if path is not None:
         blocked = bool((path or {}).get("calculation_blocked", False))
-        incomplete = not bool((path or {}).get("complete", False))
-        #: ⚠️⚠️ **범위를 좁힌 자리다 — 확인이 필요하다.**
+        #: ★★★ [2026-08-21 B1.2-1b P0] **런타임 온톨로지 경로가 붙은 숫자 패키지는 전면 거부한다.**
         #:
-        #:   `calculation_blocked` 는 **언제나** 막는다.
-        #:   `complete=False` 는 **런타임 경로일 때만** 막는다(`query_id` 가 있는 경우).
+        #: ⚠️⚠️ 직전 구현(B1.2-1a)은 호출자가 넘긴 `calc_binding` dict 를 경로와 대조했다.
+        #:   그것은 **결속 증명이 아니라 호출자의 자기진술**이었다 — 같은 호출자가 넘긴 두
+        #:   문자열을 비교하는 것은 통제가 아니라 형식 검사다. 실제로 시험 헬퍼가
+        #:   `evidence` 에서 값을 **복사**해 넘기고 있었고, 그러면 아무 관계 없는 숫자에도
+        #:   경로 ID 를 복사해 붙일 수 있었다. 내가 만든 그 헬퍼가 구멍을 결속처럼 보이게 했다.
         #:
-        #: ★ 왜 좁혔나: 고정 경로(`core/ontology_path.trace`)는 근거가 빠진 단계를
-        #:   **브리핑에 드러내는** 것이 통제다(「근거가 없는 단계: …」). 미완결을
-        #:   어디서나 막으면 그 통제가 **도달 불가능**해지고, 「빠진 것을 숨기지 않는다」는
-        #:   장치가 조용히 사라진다.
-        #: ⚠️ 두 규칙이 실제로 부딪히는 자리이므로 **한쪽을 조용히 이기게 두지 않는다** —
-        #:   이 좁힘은 기록하고 확인을 받아야 한다(인수인계 §미결 1).
+        #: ★ 진짜 결속은 **계산기가 봉인한 결과 객체**에서 온다(5b/B2):
+        #:       PathCalculationResult(query_id, path_fingerprint, request_fingerprint,
+        #:                             result_fingerprint, used_snapshot_ids,
+        #:                             capability_fingerprints, metrics)
+        #:   `build()` 는 그때 `base/scenario + dict` 대신 이 객체를 받아 내부 필드를 대조한다.
+        #: ⚠️ 그때까지는 **막는다.** 없는 대조를 있는 척하는 통제는 없는 통제보다 나쁘다 —
+        #:   사람이 그것을 믿고 숫자를 읽는다.
+        #:
+        #: ★ 고정 경로(`core/ontology_path.trace`, `query_id` 없음)는 그대로 돈다. 거기서는
+        #:   근거가 빠진 단계를 **브리핑에 드러내는** 것이 통제이고(「근거가 없는 단계: …」),
+        #:   그것까지 막으면 「빠진 것을 숨기지 않는다」는 장치가 도달 불가능해진다.
         from_runtime = bool(str((path or {}).get("query_id", "") or "").strip())
-        if blocked or (incomplete and from_runtime):
+        if from_runtime:
+            raise DecisionError(
+                "런타임 온톨로지 경로가 붙은 숫자 안건은 아직 만들지 않습니다 — 그 숫자가 "
+                "이 경로에서 나왔다는 것을 서버가 확인할 방법이 없습니다(5b/B2 계산 결과 결속 "
+                "미구현). 숫자 없는 근거 안건으로 만들거나, 계산 결속이 들어온 뒤에 만드십시오.")
+        if blocked:
             raise DecisionError(
                 "이 경로는 아직 계산할 수 없어 숫자 안건을 만들지 않습니다 — "
                 "계산되지 않은 경로 옆에 숫자를 놓으면 그 숫자가 답으로 읽힙니다.")
 
-        #: ★★★ [2026-08-21 B1.2-1a P0] **완결된 경로라도 숫자가 그 경로에서 나왔다는
-        #:   결속이 없으면 숫자 안건을 만들지 않는다.**
-        #:
-        #: ⚠️⚠️ B1.2-1 은 「계산 못 하는 경로」만 막았다. 그래서 이런 구멍이 남았다 —
-        #:
-        #:       정성 런타임 경로(`complete=True`)  +  그 경로와 **결속되지 않은**
-        #:       기존 시나리오 엔진의 base/scenario   →  숫자 Decision Package 생성·발간
-        #:
-        #:   즉 「계산할 수 없습니다」는 사라졌지만 **숫자는 여전히 남의 것**이었다. 재감사에서
-        #:   실제 발간 회귀가 바로 그 방식으로 통과하고 있던 것이 드러났다.
-        #:
-        #: ★ 계산 결과와 `query_id`·`path_fingerprint` 를 **대조**하는 것이 B2 이고 아직 없다.
-        #:   없는 대조를 있는 척하지 않는다 — 대신 **호출자가 결속을 선언**하게 하고, 선언이
-        #:   없거나 어긋나면 막는다. B2 가 오면 계산기가 그 값을 만들고 호출자는 그대로 넘긴다.
-        #: ⚠️ 「일단 만들고 B2 에서 검증하자」는 안 된다. 안건은 원장에 남고 발간으로 나간다 —
-        #:   나간 뒤에 틀렸다고 알아도 그 결정은 이미 내려져 있다.
-        want_q = str((path or {}).get("query_id", "") or "").strip()
-        want_fp = str((path or {}).get("path_fingerprint", "") or "").strip()
-        if want_q or want_fp:
-            b = calc_binding or {}
-            got_q = str(b.get("query_id", "") or "").strip()
-            got_fp = str(b.get("path_fingerprint", "") or "").strip()
-            if not (got_q or got_fp):
-                raise DecisionError(
-                    "이 숫자가 이 경로에서 나왔다는 결속이 없어 숫자 안건을 만들지 않습니다 "
-                    "— 경로 옆의 숫자는 그 경로의 답으로 읽힙니다. 계산기가 "
-                    "`calc_binding={'query_id':…, 'path_fingerprint':…}` 을 함께 넘기게 "
-                    "하십시오(B2 결과↔경로 대조가 오기 전까지의 계약입니다).")
-            if ((want_q and got_q and got_q != want_q)
-                    or (want_fp and got_fp and got_fp != want_fp)):
-                raise DecisionError(
-                    f"숫자와 경로가 다른 것을 가리킵니다 — 경로는 "
-                    f"query_id={want_q or '(없음)'}·fp={want_fp[:12] or '(없음)'} 인데 "
-                    f"계산 결과는 query_id={got_q or '(없음)'}·fp={got_fp[:12] or '(없음)'} "
-                    f"입니다. 다른 경로의 숫자를 이 안건에 붙일 수 없습니다.")
     if base.baseline_fingerprint != scenario.baseline_fingerprint:
         #: ★★★ 다른 기준선으로 만든 두 결과를 나란히 놓으면, 그 차이는 **가정 때문이
         #:   아니라 데이터 때문**일 수 있다. 그리고 화면은 그것을 구분해 주지 않는다.
@@ -196,12 +172,6 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
         #:   `purchase_orders` 를 경영 브리핑에 그대로 내보내면 읽는 사람은 그것이
         #:   무엇인지 모른 채 「모르는 게 있구나」로만 넘긴다.
         "missing_steps": (path or {}).get("missing_steps", []),
-        #: ★ [B1.2-1a] **숫자가 어느 경로에서 나왔다고 선언됐는가.** 원장·발간까지 따라간다 —
-        #:   나중에 「이 숫자는 이 경로 것이었나」를 물을 수 있어야 한다.
-        "calc_binding": {
-            "query_id": str((calc_binding or {}).get("query_id", "") or ""),
-            "path_fingerprint": str((calc_binding or {}).get("path_fingerprint", "") or ""),
-        },
     }
     #: ★ 안건의 «질문» 은 가장 크게 움직인 결과에서 뽑는다 — 지어내지 않는다.
     moved = sorted((r for r in rows if r["delta"]), key=lambda r: -abs(r["delta"]))
