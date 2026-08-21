@@ -53,6 +53,11 @@ def indexed(tmp_path, monkeypatch):
     store = dp_store.data_preparation_store
     monkeypatch.setattr(store, "db_path", str(tmp_path / "dp.db"), raising=False)
     monkeypatch.setattr(store, "_prepared_for", None, raising=False)
+    #: ★★ 소유 결속 승인은 **원장 사건**이다 — 원장도 격리한다. 그러지 않으면 시험 승인이
+    #:   제품 감사 이력에 쌓이고, 「승인 몇 건」 집계가 실제보다 많아진다.
+    from core.decision_ledger import decision_ledger
+    monkeypatch.setattr(decision_ledger, "db_path", str(tmp_path / "ledger.db"),
+                        raising=False)
 
     def certify(rows, *, certified_at=None, key="LOG-02"):
         inst = store.create_instance(
@@ -407,12 +412,23 @@ def _csv_with_owner(rows):
 
 
 def _declare_owner(store, dept, *, key="LOG-02", scope=SCOPE, mode="VIRTUAL", **kw):
+    """★ **승인 원장 사건을 먼저 남기고** 그 id 로 결속을 세운다.
+
+    ⚠️ 첫 판은 `approved_by="approver@..."` 문자열 하나로 「승인됨」을 주장했다 — 같은
+      호출자가 넣은 값을 같은 호출자가 읽는 자기진술이었다. 지금은 원장에 사건이 없으면
+      결속 자체가 만들어지지 않는다."""
     from core.data_preparation import ownership_binding as ob
+    ap = ob.approve(tenant_id=TENANT, entity_mode=mode, dataset_contract_key=key,
+                    scope_node_id=scope, owner_dept_id=dept,
+                    actor_id="approver@afs.invalid", evidence_ref="FND-01/v1#seed",
+                    **{k: v for k, v in kw.items() if k in ("effective_from", "effective_to")})
     with store.transaction() as conn:
         return ob.declare(conn, tenant_id=TENANT, entity_mode=mode,
                           dataset_contract_key=key, scope_node_id=scope,
                           owner_dept_id=dept, approved_by="approver@afs.invalid",
-                          evidence_ref="FND-01/v1#seed", **kw)
+                          evidence_ref="FND-01/v1#seed",
+                          approval_event_id=ap["approval_event_id"],
+                          **{**kw, "effective_from": ap["effective_from"]})
 
 
 def test_업무_행이_소유_부서를_적어도_색인은_읽지_않는다(indexed, monkeypatch, capsys):
@@ -437,9 +453,6 @@ def test_승인된_결속이_있으면_색인에_물질화되고_봉인된다(in
     """★ 정본 → 색인. 그리고 **어느 결속에서 나왔는지**가 함께 봉인된다."""
     from core.data_preparation import store as dp
     b = _declare_owner(dp.data_preparation_store, "hq")
-    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
-    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
-    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
     monkeypatch.setattr(_org(), "get_department",
                         lambda d: {"dept_id": d, "status": "active"}, raising=False)
     indexed(_rows())
@@ -459,9 +472,6 @@ def test_철회하면_색인이_남아_있어도_막힌다(indexed, monkeypatch)
       SSE 티켓에서 이미 같은 실수를 고쳤다."""
     from core.data_preparation import ownership_binding as ob
     from core.data_preparation import store as dp
-    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
-    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
-    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
     monkeypatch.setattr(_org(), "get_department",
                         lambda d: {"dept_id": d, "status": "active"}, raising=False)
     b = _declare_owner(dp.data_preparation_store, "hq")
@@ -477,9 +487,6 @@ def test_철회하면_색인이_남아_있어도_막힌다(indexed, monkeypatch)
 def test_부서가_폐지되면_색인이_있어도_503(indexed, monkeypatch):
     """계약 ⑦ — 결속은 있는데 가리키는 곳이 없다. 「안 보인다」가 아니라 **고쳐야 할 것**이다."""
     from core.data_preparation import store as dp
-    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
-    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
-    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
     monkeypatch.setattr(_org(), "get_department",
                         lambda d: {"dept_id": d, "status": "active"}, raising=False)
     _declare_owner(dp.data_preparation_store, "hq")
@@ -490,49 +497,180 @@ def test_부서가_폐지되면_색인이_있어도_503(indexed, monkeypatch):
     assert res.status == ontology_resolve.UNAVAILABLE, res.status
 
 
-def test_실제_조직도_Principal_로_PDP_를_대조한다(indexed, monkeypatch):
-    """★★★ 계약 ⑪ — **가짜 Scope 가 아니라 제품이 만드는 Principal** 로 본다.
+def test_실제_조직도_Principal_로_PDP_를_대조한다(indexed, monkeypatch, tmp_path):
+    """★★★ 계약 ⑪ — **가짜 Scope 가 아니라 조직도가 만드는 실제 AccessScope** 로 본다.
 
-    ⚠️⚠️ 이 세션에서 시험 두 건이 «노드 ID 로 만든 가짜 부서 권한» 으로 통과하고 있었다.
-      그래서 여기서는 `org_directory.resolve_scope()` 가 실제로 돌려주는 객체를 쓴다 —
-      그 집합은 **부서 ID** 로 만들어지고, 노드 ID 는 들어 있지 않다."""
-    from core.data_preparation import store as dp
+    ⚠️⚠️ [재감사 P1-1] 첫 판은 이 시험 안에서 `class _Scope` 를 손으로 만들어 넣었다.
+      그 객체는 `readable_dept_ids` 를 내가 원하는 값으로 채운다 — 즉 **판정기가 아니라
+      내가 답을 정했다.** 실제 `resolve_scope()` 가 그 필드를 어떻게 채우는지(부서 상속·
+      하위 부서·폐지 사용자 제외)는 하나도 검사되지 않았다.
+    ★ 그래서 여기서는 실제 `OrgDirectory` 에 부서와 사용자를 만들고, 제품이 부르는
+      `resolve_scope()` 가 돌려주는 객체를 그대로 PDP 에 넘긴다."""
     from core import app_policy
-    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
-    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
-    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
+    from core.data_preparation import store as dp
+    from core.org_directory import OrgDirectory
+    import core.org_directory as orgmod
+    import core.scope_policy as sp
+
+    #: ★ 실제 조직도. 부서·사용자를 제품 API 로 만든다.
+    org = OrgDirectory(db_path=str(tmp_path / "org_real.db"))
+    org.create_department("hq", "본사")
+    org.create_department("sales", "영업")
+    org.upsert_user("a@example.com", "가", primary_dept_id="hq", actor="seed")
+    org.upsert_user("b@example.com", "나", primary_dept_id="sales", actor="seed")
+    #: ★★ 승인자도 **실재하는 사람**이어야 한다. `approve()` 는 기준정보·데이터 표준 승인
+    #:   권한(`can_manage_standard`)을 요구한다 — 강제를 켠 이 시험에서 그 검사가 실제로
+    #:   돌기 때문에, 등록하지 않으면 결속을 만들 수 없다(실측: 이 시험만 빨개졌다).
+    org.upsert_user("approver@afs.invalid", "표준승인자", primary_dept_id="hq",
+                    is_data_admin=True, actor="seed")
+    #: ⚠️ 강제가 꺼져 있으면 `resolve_scope` 가 **전원 무제한**을 돌려준다 — 그 상태로
+    #:   대조하면 두 사람이 다 통과하고, 시험은 아무것도 지키지 못한다(실측된 함정이다).
+    monkeypatch.setattr(sp, "_read", lambda: {"org_enforce": True})
+    monkeypatch.setattr(orgmod, "org_directory", org)
+
+    _declare_owner(dp.data_preparation_store, "hq")
+    indexed(_rows())
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.resource_scope.owner_dept_id == "hq", res.status
+
+    scope_a = org.resolve_scope("a@example.com")
+    scope_b = org.resolve_scope("b@example.com")
+    #: ★★ 먼저 **대조군이 진짜 대조군인지** 증명한다 — 둘 다 무제한이면 아래 판정은 의미가 없다.
+    assert scope_a.unrestricted is False and scope_b.unrestricted is False,         "강제가 꺼져 있어 두 사람 다 전권이다 — 이 상태의 통과는 통과가 아니다"
+    #: ★ 두 사람 다 **승인 권한은 없다** — 읽기 권한과 승인 권한은 다른 축이다.
+    assert not scope_a.can_manage_standard and not scope_b.can_manage_standard
+    assert "hq" in scope_a.readable_dept_ids and "hq" not in scope_b.readable_dept_ids
+
+    ctxd = {"tenant_id": TENANT, "entity_mode": "VIRTUAL", "scope_node_id": ""}
+    allowed = app_policy.decide(
+        app_policy.Subject(user_id="a@example.com", scope=scope_a, ctx=ctxd),
+        res.resource_scope, app_policy.READ)
+    denied = app_policy.decide(
+        app_policy.Subject(user_id="b@example.com", scope=scope_b, ctx=ctxd),
+        res.resource_scope, app_policy.READ)
+    assert allowed.allowed is True, allowed.reason
+    assert denied.allowed is False, "다른 부서 사람이 통과했다"
+
+
+# ── ⑫ 봉인 네 상태 ────────────────────────────────────────────────────────
+#
+#   ★★★ [재감사 P0-3] 색인의 `owner_binding_fingerprint` 는 **네 상태**가 있고 각각 다른
+#     답이어야 한다. 첫 판은 `sealed != 현재지문` 만 비교해서, **봉인이 빈 문자열이면**
+#     비교가 성립하지 않아 그냥 통과했다 — 즉 봉인 없는 색인이 소유 부서를 그대로 얻었다.
+#
+#       ① 결속 없음(철회 포함)   → 소유 부서 없음(정상적인 비노출)
+#       ② 봉인 있음·현재와 같음 → 소유 부서 사용
+#       ③ 봉인이 **비어 있음**   → 503(재물질화 필요) — 통과시키면 안 된다
+#       ④ 봉인이 현재와 **다름** → 503(색인이 낡았다)
+
+def _seal(store, value):
+    """색인의 봉인만 바꿔 넣는다(정본은 그대로) — ③④ 상태를 만드는 유일한 방법이다."""
+    with store.transaction() as conn:
+        conn.execute("UPDATE object_scope_index SET owner_binding_fingerprint=?", (value,))
+
+
+def test_봉인이_비어_있으면_503_이고_소유부서를_주지_않는다(indexed, monkeypatch):
+    """★★★ 상태 ③. **가장 위험한 구멍이었다** — 봉인 없는 색인이 조용히 통과했다.
+
+    ⚠️ 「빈 값이면 비교를 건너뛴다」는 코드는 어디에나 있고, 그때마다 검사 하나가 사라진다."""
+    from core.data_preparation import store as dp
+    monkeypatch.setattr(_org(), "get_department",
+                        lambda d: {"dept_id": d, "status": "active"}, raising=False)
+    _declare_owner(dp.data_preparation_store, "hq")
+    indexed(_rows())
+    _seal(dp.data_preparation_store, "")
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.status == ontology_resolve.UNAVAILABLE,         f"봉인 없는 색인이 통과했다: {res.status}/{res.resource_scope.owner_dept_id}"
+
+
+def test_봉인이_다르면_503_이다(indexed, monkeypatch):
+    """상태 ④ — 색인이 낡았다. 「낡은 소유자」로 답하면 옛 부서 권한이 되살아난다."""
+    from core.data_preparation import store as dp
+    monkeypatch.setattr(_org(), "get_department",
+                        lambda d: {"dept_id": d, "status": "active"}, raising=False)
+    _declare_owner(dp.data_preparation_store, "hq")
+    indexed(_rows())
+    _seal(dp.data_preparation_store, "fp_다른봉인")
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.status == ontology_resolve.UNAVAILABLE, res.status
+
+
+def test_봉인이_같으면_소유부서를_쓴다(indexed, monkeypatch):
+    """상태 ② — 대조군. 이것이 빨개지면 위 두 검사는 「전부 막는 검사」일 뿐이다."""
+    from core.data_preparation import store as dp
     monkeypatch.setattr(_org(), "get_department",
                         lambda d: {"dept_id": d, "status": "active"}, raising=False)
     _declare_owner(dp.data_preparation_store, "hq")
     indexed(_rows())
     res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.status != ontology_resolve.UNAVAILABLE, res.status
     assert res.resource_scope.owner_dept_id == "hq"
 
-    #: 제품 경로로 만든 권한. 부서를 가진 사람과 못 가진 사람을 나란히 본다.
-    class _Scope:
-        def __init__(self, depts):
-            self.readable_dept_ids = frozenset(depts)
-            self.writable_dept_ids = frozenset(depts)
-            self.unrestricted = False
 
-    ctxd = {"tenant_id": TENANT, "entity_mode": "VIRTUAL", "scope_node_id": ""}
-    allowed = app_policy.decide(
-        app_policy.Subject(user_id="a@example.com", scope=_Scope({"hq"}), ctx=ctxd),
-        res.resource_scope, app_policy.READ)
-    denied = app_policy.decide(
-        app_policy.Subject(user_id="b@example.com", scope=_Scope({"sales"}), ctx=ctxd),
-        res.resource_scope, app_policy.READ)
-    assert allowed.allowed is True, allowed.reason
-    assert denied.allowed is False, "다른 부서 사람이 통과했다"
+def test_결속이_철회되면_봉인이_남아도_비노출이고_503이_아니다(indexed, monkeypatch):
+    """상태 ① — **여기만 503 이 아니다.** 결속 없음은 정상적인 비노출이고, 점검할 것이 없다.
+
+    ⚠️ 이 넷을 한 덩어리로 뭉개면 「고칠 것이 없는데 고치라고 말하는」 화면이 된다."""
+    from core.data_preparation import ownership_binding as ob
+    from core.data_preparation import store as dp
+    monkeypatch.setattr(_org(), "get_department",
+                        lambda d: {"dept_id": d, "status": "active"}, raising=False)
+    b = _declare_owner(dp.data_preparation_store, "hq")
+    indexed(_rows())
+    with dp.data_preparation_store.transaction() as conn:
+        ob.revoke(conn, b["binding_id"], "auditor@afs.invalid", "근거 미비")
+    res = R.product_object_scope_resolver(SHIP, _ctx())
+    assert res.status != ontology_resolve.UNAVAILABLE, "철회를 장애로 답했다"
+    assert res.resource_scope.owner_dept_id == ""
+
+
+# ── ⑬ 인증·색인 원자성 ────────────────────────────────────────────────────
+
+def test_물질화_도중_실패하면_앞서_한_일까지_롤백된다(indexed, monkeypatch):
+    """★★★ [재감사 P0-2] **`executescript()` 는 감싼 트랜잭션을 먼저 커밋한다**(실측):
+
+        BEFORE in_transaction: True → AFTER_SCRIPT: False → ROWS_AFTER_ROLLBACK: 1
+
+    첫 판은 `declare()` 안에서 DDL 을 `executescript` 로 돌렸다. 그래서 「인증 전환과
+    색인 기록이 한 트랜잭션에서 함께 성립한다」는 보증이 **주석에만** 있었다.
+
+    ⚠️⚠️ [변이 시험에서 발견] 이 시험의 첫 판은 `declare` **뒤**만 봤다. 그런데
+      `executescript` 가 파괴하는 것은 **그 앞에 한 일**이다 — 조기 커밋 뒤의 INSERT 는
+      새로 열린 암묵 트랜잭션에 들어가므로 롤백된다. 그래서 DDL 을 되돌려 넣어도 실패가
+      0건이었다. **앞선 쓰기를 함께 확인해야** 이 회귀가 통제가 된다."""
+    from core.data_preparation import ownership_binding as ob
+    from core.data_preparation import store as dp
+    store = dp.data_preparation_store
+    indexed(_rows())
+    ap = ob.approve(tenant_id=TENANT, entity_mode="VIRTUAL", dataset_contract_key="LOG-02",
+                    scope_node_id=SCOPE, owner_dept_id="hq",
+                    actor_id="approver@afs.invalid", evidence_ref="FND-01/v1#seed")
+    with pytest.raises(RuntimeError, match="물질화 중단"):
+        with store.transaction() as conn:
+            #: ① **먼저** 한 일 — 인증 전환·색인 기록에 해당하는 자리다.
+            conn.execute("UPDATE object_scope_index SET owner_dept_id='선행쓰기'")
+            #: ② 그 다음 결속 등록. 여기서 DDL 이 돌면 ①이 커밋되어 되돌릴 수 없다.
+            ob.declare(conn, tenant_id=TENANT, entity_mode="VIRTUAL",
+                       dataset_contract_key="LOG-02", scope_node_id=SCOPE,
+                       owner_dept_id="hq", approved_by="approver@afs.invalid",
+                       evidence_ref="FND-01/v1#seed",
+                       approval_event_id=ap["approval_event_id"],
+                       effective_from=ap["effective_from"])
+            assert conn.in_transaction, "이미 커밋됐다 — DDL 이 트랜잭션을 끊었다"
+            #: ③ 물질화 실패.
+            raise RuntimeError("물질화 중단")
+    with store.transaction() as conn:
+        left = conn.execute("SELECT COUNT(*) FROM object_scope_index "
+                            "WHERE owner_dept_id='선행쓰기'").fetchone()[0]
+        n = conn.execute("SELECT COUNT(*) FROM dataset_ownership_bindings").fetchone()[0]
+    assert left == 0, f"앞서 한 쓰기 {left}건이 롤백되지 않았다 — 원자성이 깨졌다"
+    assert n == 0, f"롤백했는데 결속이 {n}건 남았다"
 
 
 def test_다른_계약키의_결속은_물질화되지_않는다(indexed, monkeypatch):
     """계약 ⑤ — 다른 scope·계약의 결속을 재사용하지 않는다. SLS-01 결속으로 LOG-02 가
     소유자를 얻으면, 승인 하나가 계약 경계를 넘는 것이다."""
     from core.data_preparation import store as dp
-    #: ⚠️ 부트스트랩(조직 미도입)이면 부서 검사를 **통째로 건너뛴다** — 그 상태로 시험하면
-    #:   「폐지된 부서를 막는다」 계약이 검사되지 않는다. 현실에 없는 모양으로 시험하는 셈이다.
-    monkeypatch.setattr(_org(), "is_bootstrap", lambda: False)
     monkeypatch.setattr(_org(), "get_department",
                         lambda d: {"dept_id": d, "status": "active"}, raising=False)
     _declare_owner(dp.data_preparation_store, "sales", key="SLS-01")

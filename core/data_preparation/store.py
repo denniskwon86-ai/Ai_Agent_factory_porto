@@ -243,13 +243,17 @@ class DataPreparationStore:
             conn.executescript(_DDL)
             #: ⚠️ `CREATE TABLE IF NOT EXISTS` 는 **이미 있는 표에 새 열을 넣어 주지 않는다.**
             #:   Ownership Binding 이전에 만들어진 DB 는 봉인 열이 없으므로 여기서 채운다(멱등).
+            #: ⚠️⚠️ [재감사 보정] 종전에는 `except Exception: pass` 였다. 그러면 디스크 꽉 참·
+            #:   파일 손상·잠금 오류까지 **「이미 존재함」으로 삼킨다** — 스키마가 반쯤 선
+            #:   상태로 서비스가 뜨고, 그 증상은 질의 시점에 엉뚱한 곳에서 터진다.
+            #:   「이미 있다」만 넘기고 나머지는 올린다.
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(object_scope_index)")}
             for col in ("owner_binding_id", "owner_binding_fingerprint"):
-                try:
-                    conn.execute(
-                        f"ALTER TABLE object_scope_index ADD COLUMN {col} "
-                        f"TEXT NOT NULL DEFAULT ''")
-                except Exception:
-                    pass                        # 이미 있으면 그만이다
+                if col in existing:
+                    continue
+                conn.execute(
+                    f"ALTER TABLE object_scope_index ADD COLUMN {col} "
+                    f"TEXT NOT NULL DEFAULT ''")
             #: 소유권 «정본» 표. 색인과 같은 저장소에 두어 한 트랜잭션으로 물질화한다.
             from core.data_preparation import ownership_binding as _ob
             conn.executescript(_ob.DDL)

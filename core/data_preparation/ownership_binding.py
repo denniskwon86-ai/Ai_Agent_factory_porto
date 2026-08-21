@@ -3,35 +3,38 @@
 ## 왜 별도 정본인가 — 업무 행이 자기 권한을 정하면 안 된다
 
 종전 색인은 업무 데이터 행의 `owner_dept_id` 열을 그대로 읽었다. 그러면 **자기 데이터의
-권한 범위를 데이터가 스스로 정한다** — 직전에 지운 `calc_binding` 과 **같은 유형의
+권한 범위를 데이터가 스스로 정한다** — 앞서 지운 `calc_binding` 과 **같은 유형의
 자기진술 통제**다. 고객사 파일 한 칸을 고치면 그 데이터의 소유 부서가 바뀐다.
 
-그래서 소유권은 **승인된 결속**에만 있다.
-
     (tenant_id, entity_mode, dataset_contract_key, scope_node_id, 유효기간)
-        → owner_dept_id     + 승인자 · 승인시각 · 근거 · 지문
+        → owner_dept_id     + 승인 원장 사건 · 행위자 · 근거 · 지문
 
-## `object_scope_index.owner_dept_id` 는 정본이 아니다
+## ⚠️⚠️ 1차 구현의 결함 — 「승인」이 승인이 아니었다 (재감사 2026-08-21)
 
-그것은 **물질화된 결과**다. 그래서 `owner_binding_id` · `owner_binding_fingerprint` 를 함께
-봉인한다 — 나중에 「이 색인 값은 어느 결속에서 나왔나」를 물을 수 있어야 하고, 결속이
-바뀌었는지도 알 수 있어야 한다.
+첫 판의 `declare()` 는 **임의의 `approved_by` 문자열만 받으면 즉시 `ACTIVE`** 를 만들었다.
 
-⚠️⚠️ 색인이 있어도 **요청 시 다시 검증한다.** 승인 철회 · 결속 폐지 · 부서 폐지 · 원장 장애는
-  모두 이미 만들어진 색인 뒤에서 일어난다. 물질화 시점의 판단을 영구히 믿으면 그것이 곧
-  「회수해도 계속 유효한 권한」이다(SSE 티켓에서 같은 실수를 이미 고쳤다).
+    · Decision Ledger 승인 사건 검증 없음
+    · 행위자 권한 검증 없음
+    · `evidence_ref` 는 주석이 「필수」라 적었는데 코드는 **빈 값을 허용**했다
+    · 철회도 원장 사건이 아니라 직접 `UPDATE`
 
-## FND-01 은 조직 정본일 뿐이다
+즉 정본은 「승인된 결속」이 아니라 **「승인됐다고 스스로 적은 결속」** 이었다. 내가 지운
+`calc_binding` 과 똑같은 자기진술을, 그것을 지운 커밋 바로 다음에 다시 만든 것이다.
 
-부서가 **존재하는가**는 조직 정본(`org_directory`)이 답한다. 그러나 **어느 부서가 이
-데이터셋을 소유하는가**는 조직 정본에 없다 — 그것이 이 파일이 있는 이유다. 둘을 섞으면
-「조직도에 부서가 있으니 소유도 정해졌다」로 읽힌다.
+이제 **원장 사건이 없으면 결속을 만들 수 없고**, 요청마다 그 사건과 **철회 자식 사건**을
+다시 확인한다.
 
-## 중첩은 임의로 고르지 않는다
+## ⚠️⚠️ `executescript` 는 진행 중인 트랜잭션을 조기 커밋한다
 
-같은 키·겹치는 유효기간에 ACTIVE 결속이 둘이면 **무결성 오류**다. 하나를 골라 답하면
-그 선택은 아무 근거가 없고, 다음 조회에서 다른 것이 뽑힐 수도 있다 — 같은 질문에 다른
-답을 주는 통제는 통제가 아니다.
+첫 판은 `declare/resolve/revoke/list` 마다 `ensure_schema()` → `executescript()` 를 불렀다.
+SQLite 에서 그것은 **열려 있는 상위 트랜잭션을 커밋**한다. 실측:
+
+    BEFORE in_transaction  True
+    AFTER_SCRIPT           False
+    ROWS_AFTER_ROLLBACK    1      ← 롤백이 무효가 됐다
+
+그래서 「인증 상태 전환과 색인 기록을 한 트랜잭션으로」라는 보증이 **주석에만** 있었다.
+DDL 은 **저장소 초기화·마이그레이션에서만** 돌린다. 이 파일의 조회·기록 함수는 절대 돌리지 않는다.
 
 LLM 0콜. 결정론적.
 """
@@ -49,9 +52,15 @@ REVOKED = "REVOKED"
 RETIRED = "RETIRED"
 STATUSES = (ACTIVE, REVOKED, RETIRED)
 
-#: 무기한 끝점을 비교할 때 쓰는 상한. `''` 를 그대로 비교하면 «가장 작은 값» 이 되어
-#: 무기한이 오히려 «이미 끝난 것» 으로 읽힌다.
-_OPEN_END = "9999-12-31T23:59:59+00:00"
+#: 원장 사건 이름. **승인과 철회가 각각 한 사건**이고, 철회는 승인의 **자식**이다 —
+#: 그래야 「이 승인이 아직 살아 있는가」를 부모-자식 관계로 물을 수 있다.
+EVENT_APPROVED = "DATASET_OWNERSHIP_APPROVED"
+EVENT_REVOKED = "DATASET_OWNERSHIP_REVOKED"
+SUBJECT_TYPE = "dataset_ownership_binding"
+
+#: 무기한 끝점. `''` 를 그대로 비교하면 «가장 작은 값» 이 되어 무기한이 오히려 «이미 끝난
+#: 것» 으로 읽힌다.
+_OPEN_END = datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 
 DDL = """
 CREATE TABLE IF NOT EXISTS dataset_ownership_bindings (
@@ -66,17 +75,26 @@ CREATE TABLE IF NOT EXISTS dataset_ownership_bindings (
     status               TEXT NOT NULL DEFAULT 'ACTIVE',
     approved_by          TEXT NOT NULL,
     approved_at          TEXT NOT NULL,
-    evidence_ref         TEXT NOT NULL DEFAULT '',
+    -- ★★★ 승인 «원장 사건» 의 id. 이것이 없으면 결속이 아니다 — 자기진술과 승인을 가르는 값.
+    approval_event_id    TEXT NOT NULL,
+    evidence_ref         TEXT NOT NULL,
     fingerprint          TEXT NOT NULL,
     revoked_by           TEXT NOT NULL DEFAULT '',
     revoked_at           TEXT NOT NULL DEFAULT '',
     revoked_reason       TEXT NOT NULL DEFAULT '',
+    revocation_event_id  TEXT NOT NULL DEFAULT '',
     created_at           TEXT NOT NULL,
     updated_at           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ownership_key
     ON dataset_ownership_bindings(tenant_id, entity_mode, dataset_contract_key,
                                   scope_node_id, status);
+-- ★★ 같은 키·같은 시작시각의 ACTIVE 중복을 **DB 가** 막는다. 조회 후 삽입만으로는
+--    다중 프로세스에서 중첩이 생긴다(읽기와 쓰기 사이에 남이 넣는다).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ownership_active_start
+    ON dataset_ownership_bindings(tenant_id, entity_mode, dataset_contract_key,
+                                  scope_node_id, effective_from)
+    WHERE status = 'ACTIVE';
 """
 
 
@@ -85,14 +103,14 @@ class OwnershipError(ValueError):
 
 
 class OwnershipIntegrityError(RuntimeError):
-    """자료가 어긋났다(중첩 결속 · 없는 부서 · 색인과 결속 불일치) — **503**.
+    """자료가 어긋났다(중첩 결속 · 없는 부서 · 색인과 결속 불일치 · 승인 사건 없음) — **503**.
 
     ⚠️ 「안 보인다」와 섞지 않는다. 전자는 정상적인 비노출이고 이것은 **고쳐야 할 것**이다.
       뭉개면 아무도 고치지 않는다."""
 
 
 class OwnershipUnavailable(RuntimeError):
-    """정본을 읽지 못했다(저장소·조직 원장 장애) — **503**.
+    """정본·원장을 읽지 못했다 — **503**.
 
     ⚠️ 읽기 실패를 「결속 없음」으로 답하지 않는다. 그러면 장애가 곧 **조용한 통제 해제**가
       된다 — 저장소가 흔들리는 순간에 모든 데이터가 «소유자 없음» 이 된다."""
@@ -102,57 +120,233 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _utc(text: Any, *, field: str) -> datetime:
+    """ISO 문자열을 **UTC datetime** 으로. 문자열 비교를 쓰지 않는 이유가 이것이다.
+
+    ⚠️⚠️ 첫 판은 ISO 문자열을 그대로 `<=` 비교했다. 그래서 UTC offset 이 다르면
+      `2026-06-01T00:00:00+09:00`(= 05-31 15:00Z)이 `2026-05-31T20:00:00+00:00` 보다
+      **문자열로는 크다.** 실제로 겹치는 기간을 「겹치지 않는다」고 판정했다 —
+      같은 시각을 다른 표기로 쓰면 중첩 차단이 조용히 뚫린다."""
+    s = str(text or "").strip()
+    if not s:
+        raise OwnershipError(f"{field} 가 비어 있습니다.")
+    try:
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError as e:
+        raise OwnershipError(f"{field} 를 시각으로 읽을 수 없습니다({s}): {e}")
+    #: 시간대 없는 값을 UTC 로 «가정» 하지 않는다 — 9시간 어긋난 판정이 조용히 통과한다.
+    if d.tzinfo is None:
+        raise OwnershipError(
+            f"{field} 에 시간대가 없습니다({s}) — UTC 로 가정하면 판정이 조용히 어긋납니다.")
+    return d.astimezone(timezone.utc)
+
+
+def _end_utc(text: Any) -> datetime:
+    return _OPEN_END if not str(text or "").strip() else _utc(text, field="effective_to")
+
+
 def fingerprint_of(tenant_id: str, entity_mode: str, dataset_contract_key: str,
                    scope_node_id: str, owner_dept_id: str,
                    effective_from: str, effective_to: str,
                    approved_by: str, evidence_ref: str) -> str:
     """결속 내용의 지문. **승인자와 근거까지 넣는다** — 같은 부서를 다른 근거로 승인한 것은
-    다른 결속이다."""
+    다른 결속이다.
+
+    ⚠️ 시각은 **UTC 정규화 후** 넣는다. 같은 순간을 다른 표기로 쓴 두 결속이 서로 다른
+      지문을 갖게 두면 멱등 판정이 깨지고 중첩이 생긴다."""
     blob = json.dumps({
         "tenant_id": tenant_id, "entity_mode": entity_mode,
         "dataset_contract_key": dataset_contract_key, "scope_node_id": scope_node_id,
         "owner_dept_id": owner_dept_id,
-        "effective_from": effective_from, "effective_to": effective_to,
+        "effective_from": _utc(effective_from, field="effective_from").isoformat(),
+        "effective_to": ("" if not str(effective_to or "").strip()
+                         else _utc(effective_to, field="effective_to").isoformat()),
         "approved_by": approved_by, "evidence_ref": evidence_ref,
     }, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def _overlaps(a_from: str, a_to: str, b_from: str, b_to: str) -> bool:
-    """두 유효기간이 겹치는가. 빈 끝점은 **무기한**이다."""
-    return a_from <= (b_to or _OPEN_END) and b_from <= (a_to or _OPEN_END)
+    """두 유효기간이 겹치는가. **UTC 로 정규화한 반열 구간 `[from, to)`** 으로 비교한다.
+
+    ★★ 끝점은 **배타적**이다. 닫힌 구간(`<=`)으로 두면 두 가지가 동시에 망가진다:
+      ① 개정 경계의 **그 한 순간**에 두 결속이 동시에 유효해져 `resolve` 가 503 을 낸다.
+      ② 그것을 피하려고 하루씩 공백을 두게 되고, 그 공백 동안 소유자가 **없어진다**
+         (=조용한 비노출). 「끝난 순간부터 다음 판」이 자연스러운 표현이어야 한다.
+    ⚠️ 그래서 `to` 를 «마지막으로 유효한 순간» 으로 읽지 않는다 — «유효가 끝나는 순간» 이다.
+      이 규약은 `resolve()` 의 창 필터와 **반드시 같아야** 한다. 한쪽만 바꾸면 등록은
+      허용되는데 해석에서 둘 다 잡히는(또는 하나도 안 잡히는) 상태가 된다."""
+    return (_utc(a_from, field="effective_from") < _end_utc(b_to)
+            and _utc(b_from, field="effective_from") < _end_utc(a_to))
 
 
 def ensure_schema(conn: Any) -> None:
+    """★★★ **초기화·마이그레이션에서만 부른다.**
+
+    ⚠️⚠️ `executescript` 는 열려 있는 트랜잭션을 **조기 커밋한다**(실측 확인). 조회·기록
+      함수가 이것을 부르면 「인증 상태 전환과 색인 기록을 한 트랜잭션으로」라는 보증이
+      깨지고, 롤백이 무효가 된다. 그래서 이 함수는 여기 한 곳에만 있고 아래 어느 함수도
+      부르지 않는다."""
     conn.executescript(DDL)
+
+
+def _require_ledger_approval(event_id: str, *, fingerprint: str) -> Dict[str, Any]:
+    """승인 원장 사건이 **실재하고 이 결속을 가리키는가.** 아니면 무결성 오류.
+
+    ⚠️ 사건 id 를 문자열로만 받아 적어 두면 그것도 자기진술이다 — 원장에서 **찾아서**
+      유형·주체·대상 지문까지 대조한다.
+
+    ★★★ [재감사 보정] `list_events()` 를 쓰지 않는다. 그 함수는
+      ① `LIMIT` 이 있어 뒤에 사건이 쌓이면 원 승인이 조회 범위 밖으로 밀려나고,
+      ② **판독 실패를 빈 배열로 접는다** — 그러면 원장 장애가 「승인 없음」이 되어
+        장애 순간에 모든 결속이 조용히 무효가 된다(반대 방향 fail-open 도 같은 뿌리다).
+      그래서 **id 로 직접** 묻고 실패는 던지는 `get_event_strict` 를 쓴다."""
+    eid = str(event_id or "").strip()
+    if not eid:
+        raise OwnershipError(
+            "승인 원장 사건 id 가 없습니다 — 「승인됐다고 스스로 적은 결속」은 만들 수 없습니다.")
+    from core.decision_ledger import DecisionLedgerError, decision_ledger
+    try:
+        row = decision_ledger.get_event_strict(eid)
+    except DecisionLedgerError as e:
+        #: ⚠️ 「못 읽었다」를 「승인이 없다」로 접지 않는다 — 점검이 필요한 상태다.
+        raise OwnershipUnavailable(f"승인 원장을 읽지 못했습니다: {e}")
+    if not row:
+        raise OwnershipIntegrityError(
+            f"승인 원장 사건({eid})이 없습니다 — 승인 없는 결속은 만들지 않습니다.")
+    #: ★ 유형·주체까지 본다. 그러지 않으면 **아무 사건 id** 하나로 승인을 주장할 수 있고,
+    #:   그것이 직전에 지운 `calc_binding` 자기진술과 같은 유형의 구멍이다.
+    if str(row.get("event_type", "")) != EVENT_APPROVED             or str(row.get("subject_type", "")) != SUBJECT_TYPE:
+        raise OwnershipIntegrityError(
+            f"사건({eid})은 데이터셋 소유 승인이 아닙니다"
+            f"({row.get('event_type')}/{row.get('subject_type')}).")
+    #: ★★ 대상 지문이 다르면 **다른 결속의 승인**이다. 부서까지 지문에 들어 있으므로
+    #:   A부서 승인으로 B부서 결속을 세우는 길이 여기서 막힌다.
+    if str(row.get("subject_id", "")) != fingerprint:
+        raise OwnershipIntegrityError(
+            f"승인 사건({eid})은 이 결속(지문 {fingerprint[:12]}…)을 가리키지 않습니다 "
+            f"— 다른 결속의 승인을 빌려 쓸 수 없습니다.")
+    return row
+
+
+def _revocation_children(event_id: str) -> Tuple[bool, bool]:
+    """이 승인 사건에 **철회 자식 사건**이 붙었는가. 돌려주는 것: `(철회됨, 조회실패)`.
+
+    ★ `has_invalidating_child` 는 제한 없이 인덱스로 묻고 실패를 던진다 — 철회가
+      조회 범위 밖으로 밀려나 **원 승인이 되살아나는** 일이 없다."""
+    from core.decision_ledger import decision_ledger
+    try:
+        return decision_ledger.has_invalidating_child(
+            str(event_id or ""), (EVENT_REVOKED,)), False
+    except Exception:
+        #: ⚠️ 실패는 「철회 없음」이 아니다. 호출부가 503 으로 답한다.
+        return False, True
+
+
+def _require_approval_authority(actor_id: str) -> None:
+    """이 사람이 **데이터 표준을 승인할 수 있는가.** 아니면 거부한다.
+
+    ★ 기준은 `AccessScope.can_manage_standard` 다 — 기준정보·데이터 표준 승인 권한이고,
+      소유 부서 결속은 정확히 그 등급의 결정이다. 라우트마다 `is_admin` 을 따로 보면 세
+      곳이 서서히 갈라지므로, 조직도가 내놓은 **확정 결과**를 쓴다.
+    ⚠️ `manageable_dept_ids` 까지 요구하지 않는다. 중앙 데이터 관리자가 다른 부서를 소유자로
+      승인하는 것은 정상이며, 요구하면 그 정상 경로가 막혀 「검사를 끄는 쪽」을 택하게 된다.
+    ⚠️ 판독 실패를 «통과» 로 접지 않는다 — 승인은 모르면 막아야 하는 자리다."""
+    try:
+        from core.org_directory import org_directory
+        scope = org_directory.resolve_scope(actor_id)
+    except Exception as e:
+        raise OwnershipUnavailable(f"승인 권한을 확인하지 못했습니다: {e}")
+    if getattr(scope, "unrestricted", False) or getattr(scope, "can_manage_standard", False):
+        return
+    raise OwnershipError(
+        f"{actor_id} 에게는 데이터 소유 결속을 승인할 권한이 없습니다 "
+        f"(기준정보·데이터 표준 승인 권한 필요).")
+
+
+def approve(*, tenant_id: str, entity_mode: str, dataset_contract_key: str,
+            scope_node_id: str, owner_dept_id: str, actor_id: str,
+            evidence_ref: str, effective_from: str = "", effective_to: str = "",
+            purpose: str = "") -> Dict[str, Any]:
+    """**원장에 승인 사건을 남기고** 그 사건 id 를 돌려준다. `declare()` 의 선행 단계다.
+
+    ★ 대상은 **결속 지문**이다 — 사건이 무엇을 승인했는지가 사건 자체에 박혀 있어야 한다.
+    ★★ 행위자 **권한을 여기서 확인한다.** 원장 기록과 권한 확인을 나누면 「권한 없는 사람의
+      승인 사건」이 이력에 남고, 그 이력은 나중에 승인의 근거로 읽힌다.
+
+    ⚠️⚠️ [2차 보정] 이 문장은 한동안 **주석에만** 있었다. 코드는 `actor_id` 가 빈 문자열인지만
+      봤고, `approve()` 를 부르는 API 경로도 없었다 — 즉 「관리자 경로에서 확인한다」는
+      말에 해당하는 경로가 존재하지 않았다. 재감사에서 지적받은 `evidence_ref` 와 **같은
+      유형**(문서가 코드를 대신 주장)이므로, 문장을 지우는 대신 검증을 넣었다."""
+    if not str(actor_id or "").strip():
+        raise OwnershipError("승인 행위자가 필요합니다.")
+    _require_approval_authority(actor_id)
+    if not str(evidence_ref or "").strip():
+        raise OwnershipError(
+            "근거(evidence_ref)가 필요합니다 — 「누가 왜 이 부서로 정했나」에 답할 수 없는 "
+            "결속은 나중에 아무도 뒤집을 수 없습니다.")
+    eff_from = str(effective_from or "").strip() or _now()
+    fp = fingerprint_of(tenant_id, entity_mode, dataset_contract_key, scope_node_id,
+                        owner_dept_id, eff_from, effective_to, actor_id, evidence_ref)
+    try:
+        from core.decision_ledger import decision_ledger
+        ev = decision_ledger.append(
+            event_type=EVENT_APPROVED, subject_type=SUBJECT_TYPE, subject_id=fp,
+            actor_type="user", actor_id=actor_id, decision="APPROVED",
+            rationale=purpose or f"{dataset_contract_key} 소유 부서 승인",
+            evidence_refs=[evidence_ref],
+            tenant_id=tenant_id, enterprise_scope_id=scope_node_id,
+            entity_mode=entity_mode)
+    except Exception as e:
+        #: ⚠️ 원장 기록 실패를 삼키지 않는다 — 「승인 이력 없는 승인」이 생긴다.
+        raise OwnershipUnavailable(f"승인 사건을 원장에 남기지 못했습니다: {e}")
+    return {"approval_event_id": str(ev.get("event_id", "")), "fingerprint": fp,
+            "effective_from": eff_from}
 
 
 def declare(conn: Any, *, tenant_id: str, entity_mode: str, dataset_contract_key: str,
             scope_node_id: str, owner_dept_id: str, approved_by: str,
-            effective_from: str = "", effective_to: str = "",
-            evidence_ref: str = "") -> Dict[str, Any]:
-    """소유권 결속을 승인 등록한다.
+            approval_event_id: str, evidence_ref: str,
+            effective_from: str = "", effective_to: str = "") -> Dict[str, Any]:
+    """승인된 결속을 정본에 등록한다.
 
-    ⚠️ 승인자·근거 없이 만들 수 없다 — 「누가 왜 이 부서로 정했나」에 답할 수 없는 결속은
-      나중에 아무도 뒤집을 수 없다.
+    ⚠️⚠️ `approval_event_id` 와 `evidence_ref` 는 **필수**다. 첫 판은 주석에 「필수」라 적고
+      코드는 빈 값을 허용했다 — 주석이 코드와 다르면 그 주석이 통제로 읽힌다.
     ★ **같은 지문의 재적용은 멱등이다.** 시드·마이그레이션을 두 번 돌려도 중첩이 되지 않는다.
-    ⚠️⚠️ 같은 키·겹치는 기간에 다른 ACTIVE 결속이 있으면 **무결성 오류**다. 하나를 골라
-      덮어쓰지 않는다 — 그 선택은 근거가 없고, 덮어쓴 쪽은 아무 기록도 남지 않는다."""
+    ⚠️ 같은 키·겹치는 기간의 다른 ACTIVE 결속은 **무결성 오류**다. 하나를 골라 덮어쓰지
+      않는다 — 그 선택은 근거가 없고, 덮어쓴 쪽은 아무 기록도 남지 않는다.
+    ⚠️ **여기서 DDL 을 돌리지 않는다**(위 `ensure_schema` 주석)."""
     for name, val in (("tenant_id", tenant_id), ("entity_mode", entity_mode),
                       ("dataset_contract_key", dataset_contract_key),
                       ("scope_node_id", scope_node_id), ("owner_dept_id", owner_dept_id),
-                      ("approved_by", approved_by)):
+                      ("approved_by", approved_by), ("evidence_ref", evidence_ref)):
         if not str(val or "").strip():
             raise OwnershipError(
                 f"{name} 은 필수입니다 — 소유권 결속은 추측으로 만들 수 없습니다.")
     eff_from = str(effective_from or "").strip() or _now()
     eff_to = str(effective_to or "").strip()
-    if eff_to and eff_to < eff_from:
-        raise OwnershipError(f"유효기간이 뒤집혀 있습니다({eff_from} → {eff_to}).")
+    #: ★ 끝점이 배타적이므로 `from == to` 는 **한 순간도 유효하지 않은** 결속이다.
+    #:   그런 것을 허용하면 「승인은 했는데 아무 때도 소유자가 없는」 상태가 조용히 생긴다.
+    if eff_to and _end_utc(eff_to) <= _utc(eff_from, field="effective_from"):
+        raise OwnershipError(
+            f"유효기간이 뒤집혀 있거나 비어 있습니다({eff_from} → {eff_to}) "
+            f"— 끝점은 배타적입니다.")
+
+    #: ★★★ [재감사 P1-2 두번째 절반] **저장하는 값 자체를 UTC 로 정규화한다.**
+    #:
+    #: ⚠️ 표기 그대로 넣어 두면 DB 의 유일 색인이 `2026-06-01T00:00:00+00:00` 과
+    #:   `2026-06-01T09:00:00+09:00` 을 **다른 값**으로 보고, 같은 순간의 동시 삽입을
+    #:   막지 못한다. 응용 계층 비교만 UTC 로 고치면 제약은 여전히 문자열을 본다 —
+    #:   즉 「경합만 남기고 검사한 척」이 된다.
+    #: ★ 지문도 UTC 로 만들므로, 정규화하면 표에 적힌 값과 지문의 근거가 같아진다.
+    eff_from = _utc(eff_from, field="effective_from").isoformat()
+    eff_to = _utc(eff_to, field="effective_to").isoformat() if eff_to else ""
 
     fp = fingerprint_of(tenant_id, entity_mode, dataset_contract_key, scope_node_id,
                         owner_dept_id, eff_from, eff_to, approved_by, evidence_ref)
-    ensure_schema(conn)
+    #: ★★★ 원장에서 **찾아서** 대조한다. 문자열로 받은 id 를 그대로 믿으면 자기진술이다.
+    _require_ledger_approval(approval_event_id, fingerprint=fp)
+
     rows = [dict(r) for r in conn.execute(
         "SELECT * FROM dataset_ownership_bindings WHERE tenant_id=? AND entity_mode=? "
         "AND dataset_contract_key=? AND scope_node_id=? AND status=?",
@@ -169,41 +363,70 @@ def declare(conn: Any, *, tenant_id: str, entity_mode: str, dataset_contract_key
 
     now = _now()
     bid = f"own_{uuid.uuid4().hex[:12]}"
-    conn.execute(
-        "INSERT INTO dataset_ownership_bindings (binding_id, tenant_id, entity_mode,"
-        "dataset_contract_key, scope_node_id, owner_dept_id, effective_from, effective_to,"
-        "status, approved_by, approved_at, evidence_ref, fingerprint, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (bid, tenant_id, entity_mode, dataset_contract_key, scope_node_id, owner_dept_id,
-         eff_from, eff_to, ACTIVE, approved_by, now, evidence_ref, fp, now, now))
+    try:
+        conn.execute(
+            "INSERT INTO dataset_ownership_bindings (binding_id, tenant_id, entity_mode,"
+            "dataset_contract_key, scope_node_id, owner_dept_id, effective_from,"
+            "effective_to, status, approved_by, approved_at, approval_event_id,"
+            "evidence_ref, fingerprint, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (bid, tenant_id, entity_mode, dataset_contract_key, scope_node_id,
+             owner_dept_id, eff_from, eff_to, ACTIVE, approved_by, now,
+             str(approval_event_id), evidence_ref, fp, now, now))
+    except sqlite3.IntegrityError as e:
+        #: DB 제약이 막은 것 — 조회와 삽입 사이에 남이 넣었다(다중 프로세스).
+        raise OwnershipIntegrityError(
+            f"같은 키·같은 시작시각의 ACTIVE 결속이 이미 있습니다: {e}")
     return {"binding_id": bid, "fingerprint": fp, "owner_dept_id": owner_dept_id,
             "status": ACTIVE, "effective_from": eff_from, "effective_to": eff_to,
+            "approval_event_id": str(approval_event_id),
             "tenant_id": tenant_id, "entity_mode": entity_mode,
             "dataset_contract_key": dataset_contract_key, "scope_node_id": scope_node_id}
 
 
 def revoke(conn: Any, binding_id: str, actor: str, reason: str = "") -> bool:
-    """승인을 철회한다. **행을 지우지 않는다** — 무엇이 있었는지는 남아야 한다."""
+    """승인을 철회한다. **원장에 철회 사건을 승인 사건의 자식으로 남긴다.**
+
+    ⚠️ 첫 판은 직접 `UPDATE` 만 했다. 그러면 「누가 언제 왜 내렸는가」가 정본 표의 한 칸으로만
+      남고, 원장에는 승인만 남아 **여전히 승인된 것처럼** 읽힌다.
+    ★ 행을 지우지 않는다 — 무엇이 있었는지는 남아야 한다."""
     if not str(actor or "").strip():
         raise OwnershipError("철회에도 행위자가 필요합니다.")
-    ensure_schema(conn)
+    row = conn.execute("SELECT * FROM dataset_ownership_bindings WHERE binding_id=? "
+                       "AND status=?", (binding_id, ACTIVE)).fetchone()
+    if row is None:
+        return False
+    r = dict(row)
+    try:
+        from core.decision_ledger import decision_ledger
+        ev = decision_ledger.append(
+            event_type=EVENT_REVOKED, subject_type=SUBJECT_TYPE,
+            subject_id=r["fingerprint"], actor_type="user", actor_id=actor,
+            decision="REVOKED", rationale=str(reason or "철회"),
+            parent_event_id=r["approval_event_id"],
+            tenant_id=r["tenant_id"], enterprise_scope_id=r["scope_node_id"],
+            entity_mode=r["entity_mode"])
+    except Exception as e:
+        raise OwnershipUnavailable(f"철회 사건을 원장에 남기지 못했습니다: {e}")
     now = _now()
     return conn.execute(
         "UPDATE dataset_ownership_bindings SET status=?, revoked_by=?, revoked_at=?, "
-        "revoked_reason=?, updated_at=? WHERE binding_id=? AND status=?",
-        (REVOKED, actor, now, str(reason or ""), now, binding_id, ACTIVE)).rowcount == 1
+        "revoked_reason=?, revocation_event_id=?, updated_at=? "
+        "WHERE binding_id=? AND status=?",
+        (REVOKED, actor, now, str(reason or ""), str(ev.get("event_id", "")), now,
+         binding_id, ACTIVE)).rowcount == 1
 
 
 def _dept_alive(owner_dept_id: str) -> Tuple[bool, bool]:
     """부서가 **지금** 존재하고 살아 있는가. 돌려주는 것: `(살아있는가, 조회실패인가)`.
 
-    ⚠️ 조회 실패를 «없다» 로도 «있다» 로도 뭉개지 않는다 — 호출부가 503 과 차단을 갈라야 한다.
-    ★ 조직 미도입(부트스트랩) 환경에서는 부서가 아예 없다. 그때 이 검사를 적용하면 모든
-      결속이 «없는 부서» 가 되어 통제가 아니라 고장이 된다(저장소 공통 계약)."""
+    ⚠️⚠️ [재감사 보정] 첫 판은 `org_directory.is_bootstrap()` 이면 **임의 부서를 살아 있다고**
+      처리했다. `is_bootstrap` 은 **초기 관리자 생성을 위한 접근정책 예외**이고, 데이터
+      소유권 정본 검증까지 면제하는 규칙이 아니다. 특히 FND-01 부서만 적재되고 사용자가
+      아직 없는 상태에서 **모든 임의 부서가 통과**했다. 그 예외를 없앴다.
+    ⚠️ 조회 실패를 «없다» 로도 «있다» 로도 뭉개지 않는다 — 호출부가 503 과 차단을 갈라야 한다."""
     try:
         from core.org_directory import org_directory
-        if org_directory.is_bootstrap():
-            return True, False
         getter = getattr(org_directory, "get_department", None)
         if getter is None:
             #: 없는 API 를 «통과» 로 읽지 않는다 — 조회 실패로 본다.
@@ -224,14 +447,14 @@ def resolve(conn: Any, *, tenant_id: str, entity_mode: str, dataset_contract_key
 
     · 정확히 하나 → 그 결속
     · 둘 이상      → `OwnershipIntegrityError`(503) — 임의로 고르지 않는다
-    · 부서 미존재·폐지 → `OwnershipIntegrityError`(503) — 결속은 있는데 가리키는 곳이 없다
+    · 승인 사건 없음·철회 자식 있음 → 각각 503 · `None`
+    · 부서 미존재·폐지 → `OwnershipIntegrityError`(503)
     · 저장소·원장 장애 → `OwnershipUnavailable`(503)
 
-    ⚠️ `as_of` 가 비면 «지금» 이다. 과거 시점 조회는 그 시점에 유효했던 결속을 본다 —
-      「지금 기준으로 과거를 판정」하면 그때의 결정을 다시 쓰는 것이 된다."""
+    ⚠️ **여기서 DDL 을 돌리지 않는다.** 그러면 상위 트랜잭션이 조기 커밋된다."""
     at = str(as_of or "").strip() or _now()
+    at_dt = _utc(at, field="as_of")
     try:
-        ensure_schema(conn)
         rows = [dict(r) for r in conn.execute(
             "SELECT * FROM dataset_ownership_bindings WHERE tenant_id=? AND entity_mode=? "
             "AND dataset_contract_key=? AND scope_node_id=? AND status=?",
@@ -239,8 +462,11 @@ def resolve(conn: Any, *, tenant_id: str, entity_mode: str, dataset_contract_key
     except (sqlite3.Error, OSError) as e:
         raise OwnershipUnavailable(f"소유권 정본을 읽지 못했습니다: {e}")
 
+    #: ★ `_overlaps` 와 **같은 반열 규약** `[from, to)` 다. 두 곳의 부등호가 어긋나면
+    #:   「등록은 됐는데 해석에서 둘 다 유효」 또는 「하나도 유효하지 않음」이 된다.
     live = [r for r in rows
-            if r["effective_from"] <= at and at <= (r["effective_to"] or _OPEN_END)]
+            if _utc(r["effective_from"], field="effective_from") <= at_dt
+            and at_dt < _end_utc(r["effective_to"])]
     if not live:
         return None
     if len(live) > 1:
@@ -248,6 +474,18 @@ def resolve(conn: Any, *, tenant_id: str, entity_mode: str, dataset_contract_key
             f"같은 키에 유효한 소유권 결속이 {len(live)}건입니다 "
             f"({[r['binding_id'] for r in live]}) — 임의로 고르지 않습니다.")
     r = live[0]
+
+    #: ★★★ 요청마다 **승인 사건과 철회 자식 사건**을 다시 확인한다. 정본 표의 `status` 만
+    #:   보면, 그 칸을 직접 고친 자료가 승인된 것처럼 통과한다.
+    _require_ledger_approval(r["approval_event_id"], fingerprint=r["fingerprint"])
+    revoked, failed = _revocation_children(r["approval_event_id"])
+    if failed:
+        raise OwnershipUnavailable(
+            f"승인({r['approval_event_id']})의 철회 여부를 확인할 수 없습니다.")
+    if revoked:
+        #: 원장에는 철회가 있는데 표는 ACTIVE 다 — 표를 믿지 않고 **원장을 따른다.**
+        return None
+
     ok, failed = _dept_alive(r["owner_dept_id"])
     if failed:
         raise OwnershipUnavailable(
@@ -260,7 +498,7 @@ def resolve(conn: Any, *, tenant_id: str, entity_mode: str, dataset_contract_key
 
 
 def list_bindings(conn: Any, *, tenant_id: str = "", status: str = "") -> List[Dict[str, Any]]:
-    ensure_schema(conn)
+    """⚠️ DDL 을 돌리지 않는다 — 조회가 트랜잭션을 커밋하면 안 된다."""
     sql = "SELECT * FROM dataset_ownership_bindings WHERE 1=1"
     args: List[Any] = []
     if tenant_id:

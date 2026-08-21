@@ -276,17 +276,34 @@ def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     except _ob.OwnershipUnavailable as e:
         stats.bump("ownership_unavailable")
         return ontology_resolve.unavailable(f"데이터셋 소유권 정본을 읽지 못했습니다: {e}")
+    #: ★★★ [재감사 보정] **봉인 대조를 네 상태로 가른다.**
+    #:
+    #: ⚠️⚠️ 첫 판은 `if sealed and sealed != now` 였다. 그래서 색인 생성 당시 결속이 없어
+    #:   `sealed=""` 였는데 나중에 결속이 추가되면, **재물질화 없이 새 소유 부서가 즉시
+    #:   권한이 됐다.** 봉인 계약이라면 「봉인 없음 + 현재 있음」은 통과가 아니라 점검이다 —
+    #:   색인이 그 결속을 근거로 만들어진 적이 없기 때문이다.
+    sealed = str(row.get("owner_binding_fingerprint", "") or "")
     if _b is None:
-        #: 결속이 없거나 철회됐다 — 색인에 값이 남아 있어도 **소유자 없음**이다.
-        stats.bump("ownership_unbound")
+        if sealed:
+            #: 봉인 있음 + 현재 없음 → 철회·폐지됐다. 비노출(정상).
+            stats.bump("ownership_revoked")
+        else:
+            #: 봉인 없음 + 현재 없음 → 소유를 아직 정하지 않았다. 비노출(정상).
+            stats.bump("ownership_unbound")
         owner_dept = ""
+    elif not sealed:
+        #: 봉인 없음 + 현재 있음 → **재물질화가 필요하다.** 색인은 이 결속을 모른다.
+        stats.bump("ownership_needs_rematerialize")
+        return ontology_resolve.unavailable(
+            "이 색인은 소유권 결속이 없던 때에 만들어졌는데 지금은 결속이 있습니다 — "
+            "재물질화가 필요합니다(색인이 모르는 승인을 권한으로 쓰지 않습니다).")
+    elif sealed != _b["fingerprint"]:
+        stats.bump("ownership_stale_index")
+        return ontology_resolve.unavailable(
+            "색인에 봉인된 소유권 결속과 지금 승인된 결속이 다릅니다 — 재물질화가 "
+            "필요합니다(어느 쪽을 쓸지 임의로 고르지 않습니다).")
     else:
-        sealed = str(row.get("owner_binding_fingerprint", "") or "")
-        if sealed and sealed != _b["fingerprint"]:
-            stats.bump("ownership_stale_index")
-            return ontology_resolve.unavailable(
-                "색인에 봉인된 소유권 결속과 지금 승인된 결속이 다릅니다 — 재물질화가 "
-                "필요합니다(어느 쪽을 쓸지 임의로 고르지 않습니다).")
+        #: 봉인 있음 + 현재 있음 + 지문 일치 → 유일하게 허용되는 상태.
         owner_dept = str(_b["owner_dept_id"])
 
     scope = _scope(str(row.get("tenant_id", "")), str(row.get("entity_mode", "")),

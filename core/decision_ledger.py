@@ -127,6 +127,21 @@ EVENT_TYPES = (
     "ONTOLOGY_RELATION_RETIRED",
     #: ⚠️ 승인 철회. `parent_event_id` 로 원 승인을 가리킨다 — 그러면 그 승인은 죽는다.
     "ONTOLOGY_APPROVAL_REVOKED",
+    # ★★★ [G2 · Dataset Ownership Binding / 2026-08-21] **데이터셋 소유 결속 전용 승인.**
+    #
+    #   ⚠️⚠️ 첫 판은 결속 표의 `approved_by` 문자열 하나로 「승인됨」을 주장했다. 그것은
+    #     승인이 아니라 **자기진술**이다 — 같은 호출자가 넣은 값을 같은 호출자가 읽는다.
+    #     감사자가 "누가 언제 무슨 근거로 이 부서를 소유자로 정했나" 를 물으면 답이 없다.
+    #   ★ 그래서 승인은 **원장 사건**이어야 한다. 결속 표는 그 사건의 id 를 가리키고,
+    #     조회할 때마다 그 사건이 살아 있는지 다시 확인한다(사건이 없으면 결속도 없다).
+    #       · subject_type = "dataset_ownership_binding"
+    #       · subject_id   = 결속 지문(tenant·mode·계약키·범위·부서·시작일의 지문)
+    #                        ⚠️ 부서까지 지문에 넣는다 — 그러지 않으면 A부서 승인 사건으로
+    #                          B부서 결속을 세울 수 있다.
+    "DATASET_OWNERSHIP_APPROVED",
+    #: 철회는 `parent_event_id` 로 원 승인을 가리키는 **자식 사건**이다. 원 사건을 지우지
+    #: 않는다 — 무엇이 있었고 누가 왜 내렸는지는 남아야 한다.
+    "DATASET_OWNERSHIP_REVOKED",
     "CORRECTION",                  # 정정 전용 — 반드시 parent_event_id 를 가진다
 )
 
@@ -148,7 +163,11 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  # [MVP-P0 ①-B] 온톤로지 주체 — 계약과 관계는 **다른 질문**이다.
                  #   «이 온톤로지 계약이 언제 어떤 지문으로 승인됐나» 와
                  #   «이 관계를 누가 승인·폐지했나» 를 뜼개면 둘 다 답할 수 없다.
-                 "ontology_model_contract", "ontology_relation")
+                 "ontology_model_contract", "ontology_relation",
+                 # [G2] 「어느 부서가 이 데이터셋을 소유하는가」. 계약(app_contract)과 다르다 —
+                 #   «이 계약이 승인됐나» 와 «이 데이터의 소유 부서가 누구인가» 는 다른 질문이고,
+                 #   후자는 권한 판정에 직접 쓰인다.
+                 "dataset_ownership_binding")
 
 
 class DecisionLedgerError(ValueError):
