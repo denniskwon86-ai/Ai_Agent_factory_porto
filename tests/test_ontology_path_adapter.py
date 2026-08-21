@@ -762,12 +762,14 @@ def test_두_깃발을_따로_본다():
     #: ⚠️ [B1.2-1b] 런타임 경로(`query_id` 있음)로는 이제 **어떤 경우에도** 숫자 안건을 만들 수
     #:   없으므로, 대조군을 **고정 경로**(`query_id` 없음)로 옮긴다. 고정 경로는 근거가 빠진
     #:   단계를 브리핑에 드러내는 것이 통제이고, 그것까지 막으면 그 장치가 도달 불가능해진다.
+    #: ⚠️ 대조군은 **실제 고정 경로 모양**이어야 한다. 실측 확인: `ontology_path.trace()` 는
+    #:   `query_id` 도 `path_fingerprint` 도 내지 않는다. 종전 이 대조군은
+    #:   `path_fingerprint="fp_1"` 을 넣고 있었는데 — 현실에 없는 모양이었고, 판별을 넓히자
+    #:   바로 걸렸다. 픽스처가 현실에 없는 모양이면 그 초록은 아무것도 보증하지 않는다.
     ok = dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
                   base=_calc_result("fp_b"), scenario=scenario,
-                  path={"path": [], "path_fingerprint": "fp_1",
-                        "complete": True, "calculation_blocked": False})
-    assert ok.evidence["path_fingerprint"] == "fp_1"
-    assert ok.evidence["query_id"] == ""
+                  path={"path": [], "complete": True, "calculation_blocked": False})
+    assert ok.evidence["query_id"] == "" and ok.evidence["path_fingerprint"] == ""
 
 
 # ── ★★★ [B1.2-1a] 완결 경로라도 «남의 숫자» 는 붙일 수 없다 ─────────────────
@@ -819,16 +821,25 @@ def test_경로_ID_를_복사해_넘겨도_통과하지_않는다():
                  calc_binding={"query_id": "oq_c", "path_fingerprint": "fp_c"})
 
 
-def test_한쪽_필드만_있는_결속도_통과하지_않는다():
-    """★ 재감사 지적 두 번째 — 부재 판정이 `not (q or fp)` 였고 불일치도 양쪽이 있을 때만
-    봐서, **한 필드만 채워도** 통과할 수 있었다. 전면 차단이 그 변형까지 함께 닫는다."""
+def test_식별자가_한쪽만_있어도_런타임으로_보고_막는다():
+    """★★ 재감사 지적 — **`query_id` 만 보면 `path_fingerprint` 만 남은 런타임 모양이
+    고정 경로로 오인된다.** 둘 중 하나만 있어도 런타임으로 본다.
+
+    ⚠️⚠️ 종전 이 시험은 `{**_complete_path("oq_c","fp_c"), **half}` 로 썼다. `_complete_path`
+      가 이미 두 값을 다 넣고 `**half` 가 **같은 값으로 덮으므로**, 한쪽이 빠지는 상황이
+      만들어지지 않았다 — 주장과 다른 것을 시험하고 있었다. 이제 **키를 실제로 뺀다.**
+    ★ 고정 경로를 잘못 막지 않는다는 근거: `ontology_path.trace()` 는 두 식별자를 둘 다
+      내지 않는다(실측 확인).
+    """
     from core import decision_package as dp
     base, scenario = _numbers()
-    for half in ({"query_id": "oq_c"}, {"path_fingerprint": "fp_c"}):
+    for only in ("query_id", "path_fingerprint"):
+        path = {"path": [], "complete": True, "calculation_blocked": False,
+                only: "x_only"}
+        assert "query_id" not in path or "path_fingerprint" not in path,             "한쪽이 실제로 빠져 있어야 한다 — 덮으면 이 시험은 아무것도 보증하지 않는다"
         with pytest.raises(dp.DecisionError, match="런타임 온톨로지 경로"):
             dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
-                     base=base, scenario=scenario,
-                     path={**_complete_path("oq_c", "fp_c"), **half})
+                     base=base, scenario=scenario, path=path)
 
 
 def test_고정_경로_숫자_안건은_그대로_만들어진다():
@@ -837,12 +848,14 @@ def test_고정_경로_숫자_안건은_그대로_만들어진다():
     ⚠️ 여기까지 막으면 「근거가 빠진 단계를 브리핑에 드러낸다」는 통제가 **도달 불가능**해진다."""
     from core import decision_package as dp
     base, scenario = _numbers()
+    #: ⚠️ 실제 `ontology_path.trace()` 모양 — 두 식별자를 **둘 다 내지 않는다.**
     pkg = dp.build(title="고정 경로", owner="o@afs.invalid", due="2026-09-01",
                    base=base, scenario=scenario,
-                   path={"path": [], "path_fingerprint": "fp_fixed",
+                   path={"path": [], "missing_evidence": ["purchase_orders"],
                          "complete": True, "calculation_blocked": False})
-    assert pkg.evidence["path_fingerprint"] == "fp_fixed"
-    assert pkg.evidence["query_id"] == ""
+    assert pkg.evidence["query_id"] == "" and pkg.evidence["path_fingerprint"] == ""
+    #: ★ 그리고 **빠진 근거는 드러난다** — 이것이 고정 경로를 막지 않는 이유다.
+    assert pkg.evidence["missing_evidence"] == ["purchase_orders"]
 
 
 def test_경로_없는_기존_흐름은_그대로_돈다():

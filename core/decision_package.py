@@ -126,7 +126,14 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
         #: ★ 고정 경로(`core/ontology_path.trace`, `query_id` 없음)는 그대로 돈다. 거기서는
         #:   근거가 빠진 단계를 **브리핑에 드러내는** 것이 통제이고(「근거가 없는 단계: …」),
         #:   그것까지 막으면 「빠진 것을 숨기지 않는다」는 장치가 도달 불가능해진다.
-        from_runtime = bool(str((path or {}).get("query_id", "") or "").strip())
+        #: ⚠️⚠️ [2026-08-21 보강] **`query_id` 만 보면 안 된다.** `query_id` 가 빠지고
+        #:   `path_fingerprint` 만 남은 런타임 모양은 고정 경로로 **오인된다.**
+        #:   실측 확인: 고정 경로(`core/ontology_path.trace`)가 내는 키는
+        #:   `path·required_datasets·missing_evidence·missing_steps·complete` 뿐이고
+        #:   **두 식별자를 둘 다 내지 않는다.** 그래서 둘 중 하나만 있어도 런타임으로 본다 —
+        #:   고정 경로를 잘못 막을 위험이 없다.
+        from_runtime = bool(str((path or {}).get("query_id", "") or "").strip()
+                            or str((path or {}).get("path_fingerprint", "") or "").strip())
         if from_runtime:
             raise DecisionError(
                 "런타임 온톨로지 경로가 붙은 숫자 안건은 아직 만들지 않습니다 — 그 숫자가 "
