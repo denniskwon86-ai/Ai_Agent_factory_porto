@@ -170,6 +170,19 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  "dataset_ownership_binding")
 
 
+#: ★★★ [4.1c-B P0-4] **철회 유형 → 허용되는 부모 유형** 표. 한 곳에만 둔다.
+#:
+#: ⚠️ 앞 판은 온톨로지 철회 검증이 `_insert` 안에 하드코딩돼 있었고, 소유권 철회를 추가할
+#:   때 그 검증을 지나지 않았다. 새 유형이 언제나 느슨한 쪽으로 태어나는 구조였다 —
+#:   유형을 늘리는 사람이 검증을 함께 늘리도록, 표를 여기 하나만 둔다.
+_REVOCATION_PARENTS = {
+    "ONTOLOGY_APPROVAL_REVOKED": ("ONTOLOGY_MODEL_APPROVED", "ONTOLOGY_RELATION_APPROVED",
+                                  "ONTOLOGY_RELATION_RETIRED"),
+    "DATASET_OWNERSHIP_REVOKED": ("DATASET_OWNERSHIP_APPROVED",),
+}
+_REVOCATION_EVENTS = tuple(_REVOCATION_PARENTS)
+
+
 class DecisionLedgerError(ValueError):
     """검증 실패 — 라우트가 4xx 로 바꾼다."""
 
@@ -347,6 +360,14 @@ class DecisionLedger:
             "ONTOLOGY_MODEL_APPROVED": "ontology_model_contract",
             "ONTOLOGY_RELATION_APPROVED": "ontology_relation",
             "ONTOLOGY_RELATION_RETIRED": "ontology_relation",
+            "DATASET_OWNERSHIP_APPROVED": "dataset_ownership_binding",
+            "DATASET_OWNERSHIP_REVOKED": "dataset_ownership_binding",
+            # ★★★ [4.1c-B P0-4] 소유권 승인·철회도 **대상 종류를 못박는다.**
+            #   ⚠️ 앞 판은 이름만 허용목록에 넣고 주체 검증을 하지 않았다. 그러면
+            #     `DATASET_OWNERSHIP_APPROVED` 를 `app_dataset` 이나 `project` 주체로
+            #     남겨 두고, 나중에 그 사건으로 결속을 통과시킬 수 있다 —
+            #     온톨로지에서 이미 같은 구멍을 막았는데 새 유형에 다시 낸 것이다.
+
         }
         #: ★★★ [2026-08-20 Supervisor 지적] 철회는 **관계와 계약 둘 다** 대상이 될 수
         #:   있다. `ontology_relation` 으로 고정하면 **모델 계약 승인을 철회할 방법이
@@ -365,10 +386,12 @@ class DecisionLedger:
                 f"여야 합니다(받은 값: '{subject_type}').")
         #: ⚠️ 철회는 **무엇을 철회하는지** 가리켜야 한다. 부모 없는 철회는 아무것도
         #:   무효로 만들지 못하면서 «철회했다» 는 기록만 남긴다.
-        if event_type == "ONTOLOGY_APPROVAL_REVOKED" and not (parent_event_id or "").strip():
+        #: ⚠️ 철회는 **무엇을 철회하는지** 가리켜야 한다. 부모 없는 철회는 아무것도
+        #:   무효로 만들지 못하면서 «철회했다» 는 기록만 남긴다. 유형을 늘릴 때 이
+        #:   목록에 넣지 않으면 그 유형만 조용히 느슨해진다.
+        if event_type in _REVOCATION_EVENTS and not (parent_event_id or "").strip():
             raise DecisionLedgerError(
-                "'ONTOLOGY_APPROVAL_REVOKED' 는 parent_event_id 로 "
-                "원 승인을 가리켜야 합니다.")
+                f"'{event_type}' 는 parent_event_id 로 원 승인을 가리켜야 합니다.")
         if subject_type not in SUBJECT_TYPES:
             raise DecisionLedgerError(f"등록되지 않은 subject_type 입니다: {subject_type}")
         if actor_type not in ACTOR_TYPES:
@@ -427,14 +450,15 @@ class DecisionLedger:
         #:   있다. 그러면 「무엇이 철회됐는가」가 이력에서 어긋나고, 감사에서 두 기록이
         #:   서로 다른 대상을 가리킨다.
         #: ★ 그래서 부모가 온톨로지 승인인지, 대상 종류·식별자가 같은지까지 본다.
-        if row.get("event_type") == "ONTOLOGY_APPROVAL_REVOKED":
-            _APPROVALS = ("ONTOLOGY_MODEL_APPROVED", "ONTOLOGY_RELATION_APPROVED",
-                          "ONTOLOGY_RELATION_RETIRED")
+        #: ★★★ [4.1c-B P0-4] 소유권 철회에 **같은 검증**을 적용한다. 온톨로지에만 두면
+        #:   유형이 늘 때마다 검증이 갈라지고, 새 유형은 언제나 느슨한 쪽으로 태어난다.
+        if row.get("event_type") in _REVOCATION_EVENTS:
+            _APPROVALS = _REVOCATION_PARENTS[str(row.get("event_type"))]
             ptype = str(parent["event_type"]) if parent else ""
             if ptype not in _APPROVALS:
                 raise DecisionLedgerError(
-                    f"철회의 parent_event_id 는 온톨로지 승인 이벤트여야 합니다"
-                    f"(부모 유형: '{ptype or '(없음)'}').")
+                    f"'{row.get('event_type')}' 의 parent_event_id 는 {list(_APPROVALS)} "
+                    f"중 하나여야 합니다(부모 유형: '{ptype or '(없음)'}').")
             if str(parent["subject_type"]) != str(row.get("subject_type") or ""):
                 raise DecisionLedgerError(
                     f"철회 대상 종류가 원 승인과 다릅니다: "

@@ -411,6 +411,26 @@ def _csv_with_owner(rows):
     return buf.getvalue().encode("utf-8")
 
 
+@pytest.fixture
+def real_org(monkeypatch, tmp_path):
+    """★★★ **실제 조직도.** 부트스트랩이 아니고, 승인자는 실재하는 데이터 표준 승인자다.
+
+    ⚠️⚠️ [4.1c-B P0-1] 조직도를 세우지 않으면 `resolve_scope()` 가 부트스트랩 예외로
+      미등록 사용자에게도 전권을 준다 — 그 상태에서 승인이 전부 통과했다. 소유권 시험은
+      **반드시 이 픽스처를 지나야** 승인 권한 검사가 실제로 돈다.
+    ⚠️ 부서는 `hq`·`sales` 만 만든다(실제 조직에 임의 배정 금지)."""
+    from core.org_directory import OrgDirectory
+    import core.org_directory as orgmod
+    o = OrgDirectory(db_path=str(tmp_path / "org_own.db"))
+    o.create_department("hq", "본사")
+    o.create_department("sales", "영업")
+    for uid in ("approver@afs.invalid", "auditor@afs.invalid"):
+        o.upsert_user(uid, uid.split("@")[0], primary_dept_id="hq",
+                      is_data_admin=True, actor="seed")
+    monkeypatch.setattr(orgmod, "org_directory", o)
+    return o
+
+
 def _declare_owner(store, dept, *, key="LOG-02", scope=SCOPE, mode="VIRTUAL", **kw):
     """★ **승인 원장 사건을 먼저 남기고** 그 id 로 결속을 세운다.
 
@@ -449,7 +469,7 @@ def test_업무_행이_소유_부서를_적어도_색인은_읽지_않는다(ind
     assert "무시" in out, "무시했다는 사실을 남기지 않았다"
 
 
-def test_승인된_결속이_있으면_색인에_물질화되고_봉인된다(indexed, monkeypatch):
+def test_승인된_결속이_있으면_색인에_물질화되고_봉인된다(indexed, real_org, monkeypatch):
     """★ 정본 → 색인. 그리고 **어느 결속에서 나왔는지**가 함께 봉인된다."""
     from core.data_preparation import store as dp
     b = _declare_owner(dp.data_preparation_store, "hq")
@@ -465,7 +485,7 @@ def test_승인된_결속이_있으면_색인에_물질화되고_봉인된다(in
     assert row["owner_binding_fingerprint"] == b["fingerprint"]
 
 
-def test_철회하면_색인이_남아_있어도_막힌다(indexed, monkeypatch):
+def test_철회하면_색인이_남아_있어도_막힌다(indexed, real_org, monkeypatch):
     """★★★ 계약 ⑥ — **색인이 있어도 요청 시 다시 검증한다.**
 
     ⚠️ 물질화 시점의 판단을 영구히 믿으면 그것이 곧 「회수해도 계속 유효한 권한」이다 —
@@ -484,7 +504,7 @@ def test_철회하면_색인이_남아_있어도_막힌다(indexed, monkeypatch)
     assert res.resource_scope.owner_dept_id == "", "철회 뒤에도 소유 부서가 살아 있다"
 
 
-def test_부서가_폐지되면_색인이_있어도_503(indexed, monkeypatch):
+def test_부서가_폐지되면_색인이_있어도_503(indexed, real_org, monkeypatch):
     """계약 ⑦ — 결속은 있는데 가리키는 곳이 없다. 「안 보인다」가 아니라 **고쳐야 할 것**이다."""
     from core.data_preparation import store as dp
     monkeypatch.setattr(_org(), "get_department",
@@ -569,7 +589,7 @@ def _seal(store, value):
         conn.execute("UPDATE object_scope_index SET owner_binding_fingerprint=?", (value,))
 
 
-def test_봉인이_비어_있으면_503_이고_소유부서를_주지_않는다(indexed, monkeypatch):
+def test_봉인이_비어_있으면_503_이고_소유부서를_주지_않는다(indexed, real_org, monkeypatch):
     """★★★ 상태 ③. **가장 위험한 구멍이었다** — 봉인 없는 색인이 조용히 통과했다.
 
     ⚠️ 「빈 값이면 비교를 건너뛴다」는 코드는 어디에나 있고, 그때마다 검사 하나가 사라진다."""
@@ -583,7 +603,7 @@ def test_봉인이_비어_있으면_503_이고_소유부서를_주지_않는다(
     assert res.status == ontology_resolve.UNAVAILABLE,         f"봉인 없는 색인이 통과했다: {res.status}/{res.resource_scope.owner_dept_id}"
 
 
-def test_봉인이_다르면_503_이다(indexed, monkeypatch):
+def test_봉인이_다르면_503_이다(indexed, real_org, monkeypatch):
     """상태 ④ — 색인이 낡았다. 「낡은 소유자」로 답하면 옛 부서 권한이 되살아난다."""
     from core.data_preparation import store as dp
     monkeypatch.setattr(_org(), "get_department",
@@ -595,7 +615,7 @@ def test_봉인이_다르면_503_이다(indexed, monkeypatch):
     assert res.status == ontology_resolve.UNAVAILABLE, res.status
 
 
-def test_봉인이_같으면_소유부서를_쓴다(indexed, monkeypatch):
+def test_봉인이_같으면_소유부서를_쓴다(indexed, real_org, monkeypatch):
     """상태 ② — 대조군. 이것이 빨개지면 위 두 검사는 「전부 막는 검사」일 뿐이다."""
     from core.data_preparation import store as dp
     monkeypatch.setattr(_org(), "get_department",
@@ -607,7 +627,7 @@ def test_봉인이_같으면_소유부서를_쓴다(indexed, monkeypatch):
     assert res.resource_scope.owner_dept_id == "hq"
 
 
-def test_결속이_철회되면_봉인이_남아도_비노출이고_503이_아니다(indexed, monkeypatch):
+def test_결속이_철회되면_봉인이_남아도_비노출이고_503이_아니다(indexed, real_org, monkeypatch):
     """상태 ① — **여기만 503 이 아니다.** 결속 없음은 정상적인 비노출이고, 점검할 것이 없다.
 
     ⚠️ 이 넷을 한 덩어리로 뭉개면 「고칠 것이 없는데 고치라고 말하는」 화면이 된다."""
@@ -626,7 +646,7 @@ def test_결속이_철회되면_봉인이_남아도_비노출이고_503이_아�
 
 # ── ⑬ 인증·색인 원자성 ────────────────────────────────────────────────────
 
-def test_물질화_도중_실패하면_앞서_한_일까지_롤백된다(indexed, monkeypatch):
+def test_물질화_도중_실패하면_앞서_한_일까지_롤백된다(indexed, real_org, monkeypatch):
     """★★★ [재감사 P0-2] **`executescript()` 는 감싼 트랜잭션을 먼저 커밋한다**(실측):
 
         BEFORE in_transaction: True → AFTER_SCRIPT: False → ROWS_AFTER_ROLLBACK: 1
@@ -667,7 +687,7 @@ def test_물질화_도중_실패하면_앞서_한_일까지_롤백된다(indexed
     assert n == 0, f"롤백했는데 결속이 {n}건 남았다"
 
 
-def test_다른_계약키의_결속은_물질화되지_않는다(indexed, monkeypatch):
+def test_다른_계약키의_결속은_물질화되지_않는다(indexed, real_org, monkeypatch):
     """계약 ⑤ — 다른 scope·계약의 결속을 재사용하지 않는다. SLS-01 결속으로 LOG-02 가
     소유자를 얻으면, 승인 하나가 계약 경계를 넘는 것이다."""
     from core.data_preparation import store as dp

@@ -256,6 +256,11 @@ class DataPreparationStore:
                     f"TEXT NOT NULL DEFAULT ''")
             #: 소유권 «정본» 표. 색인과 같은 저장소에 두어 한 트랜잭션으로 물질화한다.
             from core.data_preparation import ownership_binding as _ob
+            #: ★★★ [4.1c-B P0-2] **DDL 보다 먼저** 구버전 표를 처리한다.
+            #:   `CREATE TABLE IF NOT EXISTS` 는 이미 있는 표에 열을 넣어 주지 않으므로,
+            #:   `8ca029634` 형식 표가 있으면 첫 `declare()` 가 `no such column` 으로 죽는다.
+            #:   ⚠️ 옛 행을 승인된 것으로 백필하지 않는다 — 격리하고 UNBOUND 로 둔다.
+            _ob.migrate(conn)
             conn.executescript(_ob.DDL)
             conn.commit()
         finally:

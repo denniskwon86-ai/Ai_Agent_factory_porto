@@ -27,21 +27,40 @@ T, M, K, S = "tenant_default", "REAL", "FND-01", "node_hq"
 DEPT = "hq"
 
 
-@pytest.fixture()
-def conn(monkeypatch, tmp_path):
-    """격리 DB + 살아 있는 부서 + **격리 원장.**
+#: ★ 승인·철회 행위자. **실재하는 데이터 표준 승인자**여야 한다(4.1c-B P0-1·P0-4).
+APPROVERS = ("approver@afs.invalid", "other@afs.invalid", "second@afs.invalid",
+             "x@afs.invalid", "new@afs.invalid", "legacy@afs.invalid",
+             "auditor@afs.invalid", "std@afs.invalid")
 
-    ★★ [재감사 보정] 부트스트랩 예외를 세우지 **않는다** — 코드에서 없앴다. `is_bootstrap`
-      은 초기 관리자 생성을 위한 **접근정책 예외**이고, 데이터 소유권 정본 검증까지 면제하는
-      규칙이 아니다. 첫 판은 그 예외 하나로 임의 부서가 전부 통과했다.
-    ⚠️ 원장도 격리한다. 실 원장에 시험 승인 사건을 쌓으면 그 이력이 제품 감사에 섞인다."""
+
+@pytest.fixture()
+def org(monkeypatch, tmp_path):
+    """★★★ **실제 조직도**를 세운다 — 부트스트랩이 아니고, 승인자는 실재하는 사용자다.
+
+    ⚠️⚠️ [4.1c-B P0-1] 앞 판은 조직도를 세우지 않았다. 그래서 `resolve_scope()` 가
+      부트스트랩 예외로 **미등록 사용자에게도 전권**을 주는 상태에서 모든 승인이 통과했다.
+      즉 41건의 시험이 「승인 권한 검사」를 지나지 않고 초록이었다. 조직도를 세우는 순간
+      그 41건이 빨개졌고, 그것이 구멍의 크기다.
+    ⚠️ 임의 부서를 만들지 않는다 — `hq` 하나만 쓴다(실제 조직에 임의 배정 금지 규칙)."""
     from core.decision_ledger import decision_ledger
-    from core.org_directory import org_directory
-    monkeypatch.setattr(org_directory, "get_department",
-                        lambda d: {"dept_id": d, "status": "active"} if d == DEPT else None,
-                        raising=False)
+    from core.org_directory import OrgDirectory
+    import core.org_directory as orgmod
+
+    o = OrgDirectory(db_path=str(tmp_path / "org.db"))
+    o.create_department(DEPT, "본사")
+    for uid in APPROVERS:
+        o.upsert_user(uid, uid.split("@")[0], primary_dept_id=DEPT,
+                      is_data_admin=True, actor="seed")
+    monkeypatch.setattr(orgmod, "org_directory", o)
+    #: ⚠️ 원장도 격리한다. 실 원장에 시험 승인 사건을 쌓으면 제품 감사 이력에 섞인다.
     monkeypatch.setattr(decision_ledger, "db_path", str(tmp_path / "ledger.db"),
                         raising=False)
+    return o
+
+
+@pytest.fixture()
+def conn(org):
+    """격리 소유권 DB. 스키마는 **초기화에서만** 만든다."""
     path = os.path.join(tempfile.mkdtemp(), "own.db")
     c = sqlite3.connect(path)
     c.row_factory = sqlite3.Row
@@ -170,24 +189,36 @@ def test_기간이_겹치는_두번째_ACTIVE_결속은_무결성_오류(conn):
 
 
 def test_해석_시점에_유효한_결속이_둘이면_503(conn):
-    """⚠️ `declare` 를 우회해 직접 넣힌 자료도 있을 수 있다 — 해석 쪽에서도 막는다.
-    한쪽만 막으면 마이그레이션·시드가 그 구멍으로 들어온다."""
-    _declare(conn, effective_from="2026-01-01T00:00:00+00:00")
+    """★★★ **트리거를 빠져나가는 행이 실제로 있다** — 그래서 해석 쪽에도 검사가 있어야 한다.
+
+    트리거의 기간 비교는 **문자열 비교**다(SQLite 에서 시각 파싱을 할 수 없다). 저장값을
+    UTC 로 정규화하므로 정규형끼리는 성립하지만, **정규화 이전에 들어온 행**(마이그레이션·
+    시드·직접 SQL)은 오프셋 표기가 남아 있어 빠져나간다:
+
+        기존 끝점  2026-06-01T00:00:00+00:00
+        새 시작   2026-06-01T05:00:00+09:00  = 2026-05-31T20:00Z  ← 실제로는 **겹친다**
+        문자열로는 "…T05…" > "…T00…" 이라 **겹치지 않는다**고 읽는다
+
+    ⚠️ 한쪽만 두면 그 층의 한계가 곧 전체의 한계가 된다. 트리거는 「그래도 들어오는 것」을,
+      해석 검사는 「이미 들어와 있는 것」을 막는다."""
+    _declare(conn, effective_from="2026-01-01T00:00:00+00:00",
+             effective_to="2026-06-01T00:00:00+00:00")
     ap = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
                     owner_dept_id=DEPT, actor_id="x@afs.invalid",
-                    evidence_ref="FND-01/v1#dup", effective_from="2026-02-01T00:00:00+00:00")
+                    evidence_ref="FND-01/v0#legacy",
+                    effective_from="2026-06-01T05:00:00+09:00")
     conn.execute(
         "INSERT INTO dataset_ownership_bindings (binding_id, tenant_id, entity_mode,"
         "dataset_contract_key, scope_node_id, owner_dept_id, effective_from, effective_to,"
         "status, approved_by, approved_at, approval_event_id, evidence_ref, fingerprint,"
-        "created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        ("own_dup", T, M, K, S, DEPT, "2026-02-01T00:00:00+00:00", "",
-         ob.ACTIVE, "x@afs.invalid", "2026-02-01T00:00:00+00:00",
-         ap["approval_event_id"], "FND-01/v1#dup", ap["fingerprint"],
-         "2026-02-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00"))
+        "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("own_dup", T, M, K, S, DEPT, "2026-06-01T05:00:00+09:00", "",   # ← 옛 표기
+         ob.ACTIVE, "x@afs.invalid", "2026-05-31T20:00:00+00:00",
+         ap["approval_event_id"], "FND-01/v0#legacy", ap["fingerprint"],
+         "2026-05-31T20:00:00+00:00", "2026-05-31T20:00:00+00:00"))
+    #: 두 결속이 동시에 유효한 순간. 하나를 임의로 고르지 않는다.
     with pytest.raises(ob.OwnershipIntegrityError, match="2건"):
-        _resolve(conn, as_of="2026-07-01T00:00:00+00:00")
+        _resolve(conn, as_of="2026-05-31T21:00:00+00:00")
 
 
 def test_기간이_겹치지_않으면_나란히_둘_수_있다(conn):
@@ -514,41 +545,114 @@ def test_정규화되지_않은_기존_행도_해석된다(conn):
 
 # ── ⑮ 승인 권한 ───────────────────────────────────────────────────────────
 
-def test_승인_권한이_없으면_승인_사건도_남지_않는다(monkeypatch, tmp_path):
-    """★★★ [2차 보정] 첫 판은 「행위자 권한은 여기서 확인한다」고 **주석에만** 적어 두고
-    코드는 빈 문자열 검사만 했다. `approve()` 를 부르는 API 경로도 없었으니, 실제로는
-    **아무도 권한을 보지 않았다.**
-
-    ⚠️ 권한 없는 사람의 승인 사건이 원장에 남으면, 그 이력이 나중에 승인의 근거로 읽힌다 —
-      원장은 「무엇이 있었나」의 마지막 답이므로 거짓이 들어가면 되돌릴 곳이 없다."""
+def _bare_org(tmp_path, monkeypatch, *, depts=(), users=()):
+    """조직도를 **원하는 단계까지만** 세운다 — 부트스트랩 세 모양을 만들기 위한 도구."""
     from core.decision_ledger import decision_ledger
     from core.org_directory import OrgDirectory
     import core.org_directory as orgmod
-    import core.scope_policy as sp
-
-    org = OrgDirectory(db_path=str(tmp_path / "org.db"))
-    org.create_department(DEPT, "본사")
-    org.upsert_user("nobody@afs.invalid", "권한없음", primary_dept_id=DEPT, actor="seed")
-    org.upsert_user("std@afs.invalid", "표준승인자", primary_dept_id=DEPT,
-                    is_data_admin=True, actor="seed")
-    monkeypatch.setattr(sp, "_read", lambda: {"org_enforce": True})
-    monkeypatch.setattr(orgmod, "org_directory", org)
-    monkeypatch.setattr(decision_ledger, "db_path", str(tmp_path / "ledger.db"),
+    o = OrgDirectory(db_path=str(tmp_path / "bare_org.db"))
+    for d in depts:
+        o.create_department(d, d)
+    for uid, is_da in users:
+        o.upsert_user(uid, uid.split("@")[0], primary_dept_id=(depts[0] if depts else ""),
+                      is_data_admin=is_da, actor="seed")
+    monkeypatch.setattr(orgmod, "org_directory", o)
+    monkeypatch.setattr(decision_ledger, "db_path", str(tmp_path / "bare_ledger.db"),
                         raising=False)
+    return o
 
+
+def _approve(actor):
+    return ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                      owner_dept_id=DEPT, actor_id=actor, evidence_ref="FND-01/v1#seed")
+
+
+def _ledger_empty():
+    """승인 사건이 **하나도** 남지 않았는가.
+
+    ⚠️ 거부만 확인하면 부족하다. 거부됐는데 이력에는 승인이 남아 있으면 그것이 더 나쁘다 —
+      원장은 「무엇이 있었나」의 마지막 답이므로, 거짓이 들어가면 되돌릴 곳이 없다."""
+    from core.decision_ledger import decision_ledger
+    return decision_ledger.list_events(event_type=ob.EVENT_APPROVED) == []
+
+
+# ── ⑮ 승인 권한 — 부트스트랩 우회 세 대조군 ──────────────────────────────
+#
+#   ★★★ [4.1c-B P0-1] 실측한 우회. `resolve_scope()` 는 **부트스트랩이면 미등록
+#     사용자에게도** `unrestricted=True`·`can_manage_standard=True` 를 준다:
+#
+#       ① 조직 없음      bootstrap=True  unrestricted=True  can_manage_standard=True
+#       ② 부서만 있음    bootstrap=True  unrestricted=True  can_manage_standard=True
+#       ③ 미등록 행위자  bootstrap=False unrestricted=False can_manage_standard=False
+#
+#   그래서 `unrestricted or can_manage_standard` 는 ①②를 통과시켰다. 부서 생존 검사에서
+#   같은 예외를 지우면서 **승인 생성 경로에는 남겨 둔** 것이다.
+
+def test_조직이_없으면_아무도_승인할_수_없다(monkeypatch, tmp_path):
+    _bare_org(tmp_path, monkeypatch)                     # 부서 0 · 사용자 0
+    with pytest.raises(ob.OwnershipError, match="조직 정본이 아직 없습니다"):
+        _approve("std@afs.invalid")
+    assert _ledger_empty(), "거부했는데 승인 사건이 원장에 남았다"
+
+
+def test_부서만_있고_사용자가_없으면_승인할_수_없다(monkeypatch, tmp_path):
+    """⚠️ 이 모양이 실제로 존재한다 — FND-01 부서만 적재하고 사용자를 아직 안 만든 단계다.
+    바로 그때 임의 문자열이 승인자가 될 수 있었다."""
+    _bare_org(tmp_path, monkeypatch, depts=(DEPT,))
+    with pytest.raises(ob.OwnershipError, match="조직 정본이 아직 없습니다"):
+        _approve("std@afs.invalid")
+    assert _ledger_empty()
+
+
+def test_미등록_사용자는_승인할_수_없다(monkeypatch, tmp_path):
+    _bare_org(tmp_path, monkeypatch, depts=(DEPT,),
+              users=(("real@afs.invalid", True),))
+    with pytest.raises(ob.OwnershipError, match="조직 정본에 없는 사용자"):
+        _approve("아무도아님@afs.invalid")
+    assert _ledger_empty()
+
+
+def test_권한_플래그가_없는_실사용자도_승인할_수_없다(monkeypatch, tmp_path):
+    """★ 실재·활성만으로는 부족하다 — 승인권은 별개 축이다."""
+    _bare_org(tmp_path, monkeypatch, depts=(DEPT,),
+              users=(("plain@afs.invalid", False),))
     with pytest.raises(ob.OwnershipError, match="권한이 없습니다"):
-        ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
-                   owner_dept_id=DEPT, actor_id="nobody@afs.invalid",
-                   evidence_ref="FND-01/v1#seed")
-    #: ⚠️ 거부만으로는 부족하다 — **원장에 사건이 남지 않았는지**까지 본다. 남았다면
-    #:   「거부됐지만 이력에는 승인이 있는」 상태이고, 그것이 더 나쁘다.
-    assert decision_ledger.list_events(event_type=ob.EVENT_APPROVED) == []
+        _approve("plain@afs.invalid")
+    assert _ledger_empty()
 
-    #: 대조군 — 권한 있는 사람은 통과한다. 없으면 위 검사는 「전부 막는 검사」다.
-    ap = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
-                    owner_dept_id=DEPT, actor_id="std@afs.invalid",
-                    evidence_ref="FND-01/v1#seed")
+
+def test_폐지된_승인자는_승인할_수_없다(monkeypatch, tmp_path):
+    """⚠️ 폐지가 권한을 남겨 두면 그것은 폐지가 아니다(조직도에서 이미 한 번 실측된 결함)."""
+    o = _bare_org(tmp_path, monkeypatch, depts=(DEPT,),
+                  users=(("gone@afs.invalid", True), ("keep@afs.invalid", True)))
+    o.delete_user("gone@afs.invalid", actor="seed")   # 폐지(행은 남고 status=retired)
+    with pytest.raises(ob.OwnershipError):
+        _approve("gone@afs.invalid")
+    assert _ledger_empty()
+
+
+def test_권한_있는_실사용자는_승인한다(monkeypatch, tmp_path):
+    """★★ **대조군.** 이것이 빨개지면 위 다섯은 「전부 막는 검사」일 뿐이다."""
+    _bare_org(tmp_path, monkeypatch, depts=(DEPT,),
+              users=(("std@afs.invalid", True),))
+    ap = _approve("std@afs.invalid")
     assert ap["approval_event_id"]
+
+
+def test_정본과_확정_권한이_어긋나면_점검이다(monkeypatch, tmp_path):
+    """★ 사용자 정본에는 승인권이 있는데 확정 결과에는 없다 — 어느 쪽도 임의로 고르지 않는다."""
+    import core.org_directory as orgmod
+    o = _bare_org(tmp_path, monkeypatch, depts=(DEPT,),
+                  users=(("std@afs.invalid", True),))
+
+    class _NoStd:
+        can_manage_standard = False
+        unrestricted = True          # ⚠️ 이 값에 기대면 안 된다 — 그것이 우회 경로였다
+
+    monkeypatch.setattr(o, "resolve_scope", lambda _u="": _NoStd(), raising=False)
+    with pytest.raises(ob.OwnershipIntegrityError, match="어긋납니다"):
+        _approve("std@afs.invalid")
+    assert _ledger_empty()
 
 
 def test_권한_판독_실패는_통과가_아니다(monkeypatch):
@@ -556,11 +660,603 @@ def test_권한_판독_실패는_통과가_아니다(monkeypatch):
     import core.org_directory as orgmod
 
     class _Boom:
-        def resolve_scope(self, _uid=""):
+        def is_bootstrap(self):
             raise RuntimeError("조직도 장애")
 
     monkeypatch.setattr(orgmod, "org_directory", _Boom())
     with pytest.raises(ob.OwnershipUnavailable, match="권한을 확인하지 못했습니다"):
-        ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
-                   owner_dept_id=DEPT, actor_id="std@afs.invalid",
-                   evidence_ref="FND-01/v1#seed")
+        _approve("std@afs.invalid")
+
+
+# ── ⑯ 철회 권한과 원장 도메인 검증 ───────────────────────────────────────
+
+def test_승인권_없는_사람은_철회할_수_없다(conn, monkeypatch, tmp_path):
+    """★★★ [4.1c-B P0-4] 철회는 승인보다 **조용하다.** 소유권이 내려가면 그 데이터는
+    아무에게도 안 보이게 되고, 「안 보인다」는 아무도 신고하지 않는다.
+
+    ⚠️ 앞 판은 `actor` 가 빈 문자열인지만 봤다 — 즉 아무 문자열이나 철회할 수 있었다."""
+    b = _declare(conn)
+    org = __import__("core.org_directory", fromlist=["org_directory"]).org_directory
+    org.upsert_user("plain@afs.invalid", "권한없음", primary_dept_id=DEPT,
+                    is_data_admin=False, actor="seed")
+    with pytest.raises(ob.OwnershipError, match="권한이 없습니다"):
+        ob.revoke(conn, b["binding_id"], "plain@afs.invalid", "임의 철회")
+    #: ★ 거부만으로 부족하다 — **결속이 그대로 살아 있는지**까지 본다.
+    assert _resolve(conn) is not None, "거부됐는데 결속이 내려갔다"
+
+
+def test_철회에는_사유가_필요하다(conn):
+    """★ 철회 이력의 값은 「누가」가 아니라 「왜」에 있다."""
+    b = _declare(conn)
+    with pytest.raises(ob.OwnershipError, match="사유"):
+        ob.revoke(conn, b["binding_id"], "auditor@afs.invalid", "")
+    assert _resolve(conn) is not None
+
+
+def test_소유권_승인_사건은_다른_주체로_남길_수_없다(org):
+    """★★★ [4.1c-B P0-4] 원장이 **대상 종류**를 못박는다.
+
+    ⚠️ 앞 판은 이름만 허용목록에 넣었다. 그러면 소유권 승인을 `app_dataset` 주체로 남겨
+      두고 나중에 그 사건으로 결속을 통과시킬 수 있다 — 온톨로지에서 이미 막은 구멍을
+      새 유형에 다시 낸 것이다."""
+    from core.decision_ledger import DecisionLedgerError, decision_ledger
+    with pytest.raises(DecisionLedgerError, match="subject_type"):
+        decision_ledger.append(
+            event_type=ob.EVENT_APPROVED, subject_type="app_dataset",
+            subject_id="fp", actor_type="user", actor_id="std@afs.invalid",
+            decision="APPROVED")
+
+
+def test_소유권_철회는_부모를_가리켜야_한다(org):
+    """⚠️ 부모 없는 철회는 아무것도 무효로 만들지 못하면서 «철회했다» 는 기록만 남긴다."""
+    from core.decision_ledger import DecisionLedgerError, decision_ledger
+    with pytest.raises(DecisionLedgerError, match="parent_event_id"):
+        decision_ledger.append(
+            event_type=ob.EVENT_REVOKED, subject_type=ob.SUBJECT_TYPE,
+            subject_id="fp", actor_type="user", actor_id="std@afs.invalid",
+            decision="REVOKED")
+
+
+def test_소유권_철회의_부모는_소유권_승인이어야_한다(org):
+    """★ 다른 승인 사건을 부모로 삼으면, 그 승인이 소유권 철회로 죽는다 —
+    도메인이 다른 승인끼리 서로를 무효화하는 길이다."""
+    from core.decision_ledger import DecisionLedgerError, decision_ledger
+    other = decision_ledger.append(
+        event_type="DECISION_RECORDED", subject_type="decision_case",
+        subject_id="case_1", actor_type="user", actor_id="std@afs.invalid",
+        decision="무관한 결정")
+    with pytest.raises(DecisionLedgerError, match="parent_event_id 는"):
+        decision_ledger.append(
+            event_type=ob.EVENT_REVOKED, subject_type=ob.SUBJECT_TYPE,
+            subject_id="fp", actor_type="user", actor_id="std@afs.invalid",
+            decision="REVOKED", parent_event_id=other["event_id"])
+
+
+def test_소유권_철회의_대상은_부모와_같아야_한다(conn):
+    """★★ 부모 연결만 보면 **다른 결속 지문을 적은 철회**로도 원 승인을 무효화할 수 있다.
+    그러면 감사에서 두 기록이 서로 다른 대상을 가리킨다."""
+    from core.decision_ledger import DecisionLedgerError, decision_ledger
+    b = _declare(conn)
+    row = dict(conn.execute("SELECT approval_event_id FROM dataset_ownership_bindings "
+                            "WHERE binding_id=?", (b["binding_id"],)).fetchone())
+    with pytest.raises(DecisionLedgerError, match="철회 대상이 원 승인과 다릅니다"):
+        decision_ledger.append(
+            event_type=ob.EVENT_REVOKED, subject_type=ob.SUBJECT_TYPE,
+            subject_id="fp_다른지문", actor_type="user", actor_id="std@afs.invalid",
+            decision="REVOKED", parent_event_id=row["approval_event_id"])
+
+
+# ── ⑰ 다중 프로세스 경쟁 — 서로 다른 시작시각, 겹치는 기간 ──────────────
+#
+#   ★★★ [4.1c-B P0-3] 부분 UNIQUE 는 「같은 **시작시각**」만 막는다. 시작시각이 다르면서
+#     기간이 겹치는 두 요청은 각자 「겹치는 것 0건」을 읽은 뒤 **둘 다 삽입된다.**
+#     앞 판의 회귀는 같은 시작시각 직접 삽입만 검사해서 이 구멍을 시험하지 않았다.
+#
+#   ⚠️ 응용 계층의 조회-후-삽입으로는 닫을 수 없다. 읽기와 쓰기 사이에 남이 넣는다.
+
+def _own_db(tmp_path):
+    path = str(tmp_path / "race.db")
+    c = sqlite3.connect(path)
+    c.row_factory = sqlite3.Row
+    ob.ensure_schema(c)
+    c.close()
+    return path
+
+
+def _open(path):
+    c = sqlite3.connect(path, timeout=5)
+    c.row_factory = sqlite3.Row
+    return c
+
+
+def test_서로_다른_시작시각의_겹치는_결속을_두_연결이_동시에_넣지_못한다(org, tmp_path):
+    """★★★ **실제 경쟁 순서를 재현한다.** 두 연결이 각각 「겹치는 것 없음」을 읽고,
+    한쪽이 먼저 커밋한 뒤 다른 쪽이 삽입한다 — 응용 검사는 이미 지났다.
+
+    ⚠️ 시작시각을 **다르게** 둔다. 같게 두면 부분 UNIQUE 가 잡아 버려서 이 시험은
+      「기간 중첩 차단」이 아니라 「같은 시작시각 차단」을 검사하게 된다(앞 판이 그랬다)."""
+    path = _own_db(tmp_path)
+    a_from = "2026-01-01T00:00:00+00:00"
+    b_from = "2026-03-01T00:00:00+00:00"      # ← 다른 시작시각, 그러나 기간은 겹친다
+
+    ap_a = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                      owner_dept_id=DEPT, actor_id="approver@afs.invalid",
+                      evidence_ref="FND-01/v1#a", effective_from=a_from)
+    ap_b = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                      owner_dept_id=DEPT, actor_id="second@afs.invalid",
+                      evidence_ref="FND-01/v1#b", effective_from=b_from)
+
+    c1, c2 = _open(path), _open(path)
+    try:
+        #: ① 두 연결이 각각 조회한다 — **둘 다 0건**을 본다. 여기가 경쟁의 출발점이다.
+        for c in (c1, c2):
+            assert list(c.execute(
+                "SELECT 1 FROM dataset_ownership_bindings WHERE status='ACTIVE'")) == []
+        #: ② 한쪽이 먼저 넣고 커밋한다.
+        ob.declare(c1, tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                   owner_dept_id=DEPT, approved_by="approver@afs.invalid",
+                   evidence_ref="FND-01/v1#a", approval_event_id=ap_a["approval_event_id"],
+                   effective_from=a_from)
+        c1.commit()
+        #: ③ 다른 쪽이 넣는다. 응용 검사는 이미 지났고 — **DB 가 막아야 한다.**
+        with pytest.raises((sqlite3.IntegrityError, ob.OwnershipIntegrityError)):
+            ob.declare(c2, tenant_id=T, entity_mode=M, dataset_contract_key=K,
+                       scope_node_id=S, owner_dept_id=DEPT,
+                       approved_by="second@afs.invalid", evidence_ref="FND-01/v1#b",
+                       approval_event_id=ap_b["approval_event_id"], effective_from=b_from)
+            c2.commit()
+        c2.rollback()
+        #: ④ 결과적으로 **한 건만** 남았는가.
+        n = _open(path).execute("SELECT COUNT(*) FROM dataset_ownership_bindings "
+                                "WHERE status='ACTIVE'").fetchone()[0]
+        assert n == 1, f"겹치는 ACTIVE 결속이 {n}건 남았다 — 경쟁이 열려 있다"
+    finally:
+        c1.close(); c2.close()
+
+
+def test_철회된_행을_ACTIVE_로_되살려_중첩을_만들지_못한다(conn):
+    """★★ INSERT 만 막으면 «칸을 고쳐 되살리는» 경로가 남는다. 마이그레이션·시드는
+    실제로 그 칸을 만진다."""
+    a = _declare(conn, effective_from="2026-01-01T00:00:00+00:00",
+                 effective_to="2026-06-01T00:00:00+00:00")
+    ob.revoke(conn, a["binding_id"], "auditor@afs.invalid", "재검토")
+    _declare(conn, approved_by="second@afs.invalid",
+             effective_from="2026-03-01T00:00:00+00:00")
+    with pytest.raises(sqlite3.IntegrityError, match="겹치는"):
+        conn.execute("UPDATE dataset_ownership_bindings SET status='ACTIVE' "
+                     "WHERE binding_id=?", (a["binding_id"],))
+
+
+def test_겹치지_않으면_두_연결이_나란히_넣을_수_있다(org, tmp_path):
+    """★★ **대조군.** 트리거가 「전부 막는 트리거」면 개정을 할 수 없다."""
+    path = _own_db(tmp_path)
+    ap_a = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                      owner_dept_id=DEPT, actor_id="approver@afs.invalid",
+                      evidence_ref="FND-01/v1#a",
+                      effective_from="2026-01-01T00:00:00+00:00",
+                      effective_to="2026-04-01T00:00:00+00:00")
+    ap_b = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                      owner_dept_id=DEPT, actor_id="second@afs.invalid",
+                      evidence_ref="FND-01/v1#b",
+                      effective_from="2026-04-01T00:00:00+00:00")
+    c1, c2 = _open(path), _open(path)
+    try:
+        ob.declare(c1, tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                   owner_dept_id=DEPT, approved_by="approver@afs.invalid",
+                   evidence_ref="FND-01/v1#a", approval_event_id=ap_a["approval_event_id"],
+                   effective_from="2026-01-01T00:00:00+00:00",
+                   effective_to="2026-04-01T00:00:00+00:00")
+        c1.commit()
+        ob.declare(c2, tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                   owner_dept_id=DEPT, approved_by="second@afs.invalid",
+                   evidence_ref="FND-01/v1#b", approval_event_id=ap_b["approval_event_id"],
+                   effective_from="2026-04-01T00:00:00+00:00")
+        c2.commit()
+        n = _open(path).execute("SELECT COUNT(*) FROM dataset_ownership_bindings "
+                                "WHERE status='ACTIVE'").fetchone()[0]
+        assert n == 2, f"기간이 분리된 두 결속을 나란히 둘 수 없다({n}건)"
+    finally:
+        c1.close(); c2.close()
+
+
+def test_응용_검사가_통과해도_DB_가_중첩을_막는다(org, tmp_path, monkeypatch):
+    """★★★ **트리거가 실제로 부담하는 몫**을 시험한다.
+
+    ⚠️⚠️ [변이 시험에서 발견] 앞서 쓴 두 연결 회귀는 **트리거를 시험하지 않았다.**
+      `declare()` 가 삽입 직전에 다시 조회하므로, 상대가 커밋한 뒤에는 **응용 검사가 먼저**
+      잡는다 — 트리거를 통째로 무력화해도 실패가 0건이었다. 「경쟁을 재현했다」고 믿은
+      시험이 실은 응용 검사만 확인하고 있었다.
+
+    ★ 트리거의 몫은 **응용 검사가 통과한 다음**이다. 그 상태를 만드는 방법이 실제로 있다:
+      ① 다중 프로세스에서 조회와 삽입이 다른 트랜잭션이다(둘 사이에 남이 커밋한다)
+      ② 마이그레이션·시드가 응용을 지나지 않고 직접 INSERT 한다
+      ③ 응용 검사에 결함이 생긴다(오늘 실제로 그런 결함을 두 번 고쳤다)
+      세 경우 모두 「응용 검사는 통과했다」로 같으므로, 그 상태를 직접 만들어 시험한다."""
+    path = _own_db(tmp_path)
+    a_from = "2026-01-01T00:00:00+00:00"
+    b_from = "2026-03-01T00:00:00+00:00"      # 다른 시작시각 · 겹치는 기간
+    ap_a = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                      owner_dept_id=DEPT, actor_id="approver@afs.invalid",
+                      evidence_ref="FND-01/v1#a", effective_from=a_from)
+    ap_b = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                      owner_dept_id=DEPT, actor_id="second@afs.invalid",
+                      evidence_ref="FND-01/v1#b", effective_from=b_from)
+    c1, c2 = _open(path), _open(path)
+    try:
+        ob.declare(c1, tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                   owner_dept_id=DEPT, approved_by="approver@afs.invalid",
+                   evidence_ref="FND-01/v1#a", approval_event_id=ap_a["approval_event_id"],
+                   effective_from=a_from)
+        c1.commit()
+        #: ★ 「응용 검사가 통과한 상태」를 만든다 — 낡은 스냅숏을 읽은 것과 같은 상태다.
+        monkeypatch.setattr(ob, "_overlaps", lambda *a, **k: False)
+        with pytest.raises(ob.OwnershipIntegrityError, match="같은 시작시각|겹치는"):
+            ob.declare(c2, tenant_id=T, entity_mode=M, dataset_contract_key=K,
+                       scope_node_id=S, owner_dept_id=DEPT,
+                       approved_by="second@afs.invalid", evidence_ref="FND-01/v1#b",
+                       approval_event_id=ap_b["approval_event_id"], effective_from=b_from)
+        c2.rollback()
+        n = _open(path).execute("SELECT COUNT(*) FROM dataset_ownership_bindings "
+                                "WHERE status='ACTIVE'").fetchone()[0]
+        assert n == 1, f"응용 검사를 지나자 겹치는 결속이 {n}건 들어왔다"
+    finally:
+        c1.close(); c2.close()
+
+
+def test_응용_검사가_통과해도_기간이_분리되면_들어온다(org, tmp_path, monkeypatch):
+    """★★ 위 시험의 **대조군.** 트리거가 「전부 막는 트리거」면 위 초록은 의미가 없다."""
+    path = _own_db(tmp_path)
+    ap_a = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                      owner_dept_id=DEPT, actor_id="approver@afs.invalid",
+                      evidence_ref="FND-01/v1#a",
+                      effective_from="2026-01-01T00:00:00+00:00",
+                      effective_to="2026-04-01T00:00:00+00:00")
+    ap_b = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                      owner_dept_id=DEPT, actor_id="second@afs.invalid",
+                      evidence_ref="FND-01/v1#b",
+                      effective_from="2026-04-01T00:00:00+00:00")
+    c1, c2 = _open(path), _open(path)
+    try:
+        ob.declare(c1, tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                   owner_dept_id=DEPT, approved_by="approver@afs.invalid",
+                   evidence_ref="FND-01/v1#a",
+                   approval_event_id=ap_a["approval_event_id"],
+                   effective_from="2026-01-01T00:00:00+00:00",
+                   effective_to="2026-04-01T00:00:00+00:00")
+        c1.commit()
+        monkeypatch.setattr(ob, "_overlaps", lambda *a, **k: False)
+        ob.declare(c2, tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                   owner_dept_id=DEPT, approved_by="second@afs.invalid",
+                   evidence_ref="FND-01/v1#b", approval_event_id=ap_b["approval_event_id"],
+                   effective_from="2026-04-01T00:00:00+00:00")
+        c2.commit()
+        n = _open(path).execute("SELECT COUNT(*) FROM dataset_ownership_bindings "
+                                "WHERE status='ACTIVE'").fetchone()[0]
+        assert n == 2, f"기간이 분리됐는데 트리거가 막았다({n}건)"
+    finally:
+        c1.close(); c2.close()
+
+
+# ── ⑱ 구버전 스키마(8ca029634) 마이그레이션 ──────────────────────────────
+#
+#   ★★★ [4.1c-B P0-2] `CREATE TABLE IF NOT EXISTS` 는 **이미 있는 표에 새 열을 넣어
+#     주지 않는다.** 그래서 옛 형식 표가 있는 DB 에서는 첫 `declare()` 가
+#     `no such column: approval_event_id` 로 죽는다.
+#
+#   ⚠️ 그리고 옛 행을 **승인된 것으로 백필하면 안 된다.** 그 행들은 승인 원장 사건이 없는
+#     「승인됐다고 스스로 적은 결속」이다. 가짜 승인 사건을 만들어 승격시키면 이 작업이
+#     지우려 한 자기진술을 **원장에 박아 넣는** 셈이고, 원장은 되돌릴 곳이 없다.
+
+#: `8ca029634` 시점의 정본 표 — `approval_event_id`·`revocation_event_id` 가 없고
+#: `evidence_ref` 도 선택이었다. **실제 사본**으로 시험한다(모양을 추측하지 않는다).
+_LEGACY_DDL = """
+CREATE TABLE IF NOT EXISTS dataset_ownership_bindings (
+    binding_id           TEXT PRIMARY KEY,
+    tenant_id            TEXT NOT NULL,
+    entity_mode          TEXT NOT NULL,
+    dataset_contract_key TEXT NOT NULL,
+    scope_node_id        TEXT NOT NULL,
+    owner_dept_id        TEXT NOT NULL,
+    effective_from       TEXT NOT NULL,
+    effective_to         TEXT NOT NULL DEFAULT '',
+    status               TEXT NOT NULL DEFAULT 'ACTIVE',
+    approved_by          TEXT NOT NULL,
+    approved_at          TEXT NOT NULL,
+    evidence_ref         TEXT NOT NULL DEFAULT '',
+    revoked_by           TEXT NOT NULL DEFAULT '',
+    revoked_at           TEXT NOT NULL DEFAULT '',
+    revoked_reason       TEXT NOT NULL DEFAULT '',
+    fingerprint          TEXT NOT NULL,
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ownership_key
+    ON dataset_ownership_bindings(tenant_id, entity_mode, dataset_contract_key,
+                                  scope_node_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ownership_active_start
+    ON dataset_ownership_bindings(tenant_id, entity_mode, dataset_contract_key,
+                                  scope_node_id, effective_from);
+"""
+
+
+def _legacy_db(tmp_path, *, rows=0):
+    """`8ca029634` 형식 DB 를 만든다. `rows` 건의 **자기진술 결속**을 넣는다."""
+    c = sqlite3.connect(str(tmp_path / "legacy.db"))
+    c.row_factory = sqlite3.Row
+    c.executescript(_LEGACY_DDL)
+    for i in range(rows):
+        c.execute(
+            "INSERT INTO dataset_ownership_bindings (binding_id, tenant_id, entity_mode,"
+            "dataset_contract_key, scope_node_id, owner_dept_id, effective_from,"
+            "effective_to, status, approved_by, approved_at, evidence_ref, fingerprint,"
+            "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (f"own_old_{i}", T, M, f"KEY-{i}", S, "구버전선언부서",
+             "2026-01-01T00:00:00+00:00", "", ob.ACTIVE, "누군가@afs.invalid",
+             "2026-01-01T00:00:00+00:00", "", f"fp_old_{i}",
+             "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"))
+    c.commit()
+    return c
+
+
+def test_구버전_표에서는_등록이_실패한다는_사실을_먼저_고정한다(tmp_path):
+    """★★ **대조군 먼저.** 마이그레이션이 없으면 실제로 무엇이 깨지는지 확인한다 —
+    이것을 고정하지 않으면 마이그레이션 회귀가 「무엇을 고쳤는지」 말하지 못한다."""
+    c = _legacy_db(tmp_path)
+    cols = {r[1] for r in c.execute("PRAGMA table_info(dataset_ownership_bindings)")}
+    assert "approval_event_id" not in cols
+    with pytest.raises(sqlite3.OperationalError, match="approval_event_id"):
+        c.execute("SELECT approval_event_id FROM dataset_ownership_bindings")
+    c.close()
+
+
+def test_빈_구버전_표는_안전하게_재구성된다(org, tmp_path):
+    c = _legacy_db(tmp_path, rows=0)
+    res = ob.migrate(c)
+    c.executescript(ob.DDL)
+    assert res["action"] == "rebuilt", res
+    cols = {r[1] for r in c.execute("PRAGMA table_info(dataset_ownership_bindings)")}
+    assert {"approval_event_id", "revocation_event_id"} <= cols
+    #: ★ 재구성 뒤 **등록이 실제로 된다** — 스키마만 맞추고 못 쓰면 고친 것이 아니다.
+    b = _declare(c)
+    assert _resolve(c)["binding_id"] == b["binding_id"]
+    c.close()
+
+
+def test_행이_있는_구버전_표는_격리되고_자동_승격되지_않는다(org, tmp_path):
+    """★★★ 자동 백필 금지. 옛 행은 **소유자 없음**이 되어야 한다."""
+    from core.decision_ledger import decision_ledger
+    c = _legacy_db(tmp_path, rows=3)
+    res = ob.migrate(c)
+    c.executescript(ob.DDL)
+    assert res["action"] == "quarantined" and res["rows"] == 3, res
+
+    #: ① 새 표는 비어 있다 — 옛 결속이 넘어오지 않았다.
+    assert c.execute("SELECT COUNT(*) FROM dataset_ownership_bindings").fetchone()[0] == 0
+    #: ② 옛 행은 **사라지지 않았다.** 무엇이 있었는지는 남아야 한다.
+    rep = ob.legacy_unapproved(c)
+    assert rep["quarantined"] == 3
+    assert rep["keys"][0]["claimed_owner_dept_id"] == "구버전선언부서"
+    #: ③ 해석은 **소유자 없음**이다(UNBOUND) — 503 이 아니다. 고칠 것은 승인이지 저장소가 아니다.
+    assert ob.resolve(c, tenant_id=T, entity_mode=M, dataset_contract_key="KEY-0",
+                      scope_node_id=S) is None
+    #: ④ ★★★ **가짜 승인 사건이 만들어지지 않았다.** 이것이 이 시험의 핵심이다.
+    assert decision_ledger.list_events(event_type=ob.EVENT_APPROVED) == []
+    c.close()
+
+
+def test_격리_뒤에도_새_표의_통제가_살아_있다(org, tmp_path):
+    """★★★ **조용한 통제 소실을 막는다.**
+
+    SQLite 의 `ALTER TABLE RENAME` 은 색인을 옛 표에 그대로 남기고 **이름도 유지**한다.
+    그러면 새 표에 `CREATE ... IF NOT EXISTS` 로 같은 이름을 만들려 할 때 조용히
+    건너뛰어지고 — **새 표에 유일 색인도 트리거도 생기지 않는다.** 실패도 경고도 없다.
+
+    ⚠️ 이 함정은 마이그레이션을 쓰면서 실제로 밟을 수 있었다. 이름이 겹치는 것을 미리
+      지우지 않았다면, 마이그레이션이 성공한 DB 에서만 중첩 차단이 사라졌을 것이다."""
+    c = _legacy_db(tmp_path, rows=2)
+    ob.migrate(c)
+    c.executescript(ob.DDL)
+    attached = {r[0]: r[1] for r in c.execute(
+        "SELECT name, tbl_name FROM sqlite_master WHERE type IN ('index','trigger') "
+        "AND name NOT LIKE 'sqlite_%'")}
+    assert attached.get("uq_ownership_active_start") == "dataset_ownership_bindings", attached
+    assert attached.get("trg_ownership_no_overlap_insert") == "dataset_ownership_bindings", \
+        attached
+    #: ★ 이름이 붙어 있는 것으로 끝내지 않는다 — **실제로 막는지** 누른다.
+    _declare(c, effective_from="2026-01-01T00:00:00+00:00")
+    with pytest.raises((ob.OwnershipIntegrityError, sqlite3.IntegrityError)):
+        _declare(c, approved_by="second@afs.invalid",
+                 effective_from="2026-03-01T00:00:00+00:00")
+    c.close()
+
+
+def test_마이그레이션은_멱등이다(org, tmp_path):
+    c = _legacy_db(tmp_path, rows=2)
+    ob.migrate(c); c.executescript(ob.DDL)
+    second = ob.migrate(c)
+    assert second["action"] == "none", second
+    assert ob.legacy_unapproved(c)["quarantined"] == 2, "두 번째 실행이 격리본을 건드렸다"
+    c.close()
+
+
+def test_격리본이_두_세대면_사람이_봐야_한다(org, tmp_path):
+    """⚠️ 자동으로 합치면 어느 세대의 주장인지 알 수 없게 된다."""
+    c = _legacy_db(tmp_path, rows=1)
+    ob.migrate(c)
+    c.executescript(_LEGACY_DDL)              # 옛 형식 표가 또 생겼다(구버전 코드 재기동)
+    c.execute("INSERT INTO dataset_ownership_bindings (binding_id, tenant_id, entity_mode,"
+              "dataset_contract_key, scope_node_id, owner_dept_id, effective_from,"
+              "status, approved_by, approved_at, fingerprint, created_at, updated_at)"
+              " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              ("own_old_9", T, M, "KEY-9", S, "또다른부서", "2026-01-01T00:00:00+00:00",
+               ob.ACTIVE, "누군가@afs.invalid", "2026-01-01T00:00:00+00:00", "fp_old_9",
+               "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"))
+    with pytest.raises(ob.OwnershipIntegrityError, match="두 세대"):
+        ob.migrate(c)
+    c.close()
+
+
+def test_제품_저장소_초기화가_구버전_표를_스스로_처리한다(org, tmp_path, monkeypatch):
+    """★★★ **제품이 실제로 부르는 경로**로 확인한다.
+
+    ⚠️⚠️ [변이 시험에서 발견] 위 마이그레이션 회귀들은 `ob.migrate()` 를 **직접** 불렀다.
+      그래서 `store._ready()` 의 호출을 통째로 지워도 실패가 0건이었다 — 마이그레이션은
+      작동하지만 **아무도 부르지 않는** 상태를 시험이 통과시켰다. 「통제는 있는데 부르는
+      경로가 없다」는 이 저장소에서 이미 한 번 있었던 결함 유형이다.
+
+    ★ 그래서 옛 형식 DB 파일을 **제품 싱글턴의 경로에 두고**, 평소처럼 트랜잭션을 열어
+      초기화가 스스로 처리하는지 본다."""
+    from core.data_preparation import store as dp
+    path = str(tmp_path / "prod_legacy.db")
+    c = sqlite3.connect(path)
+    c.executescript(_LEGACY_DDL)
+    c.execute("INSERT INTO dataset_ownership_bindings (binding_id, tenant_id, entity_mode,"
+              "dataset_contract_key, scope_node_id, owner_dept_id, effective_from,"
+              "status, approved_by, approved_at, fingerprint, created_at, updated_at)"
+              " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              ("own_prod_old", T, M, "LOG-02", S, "구버전선언부서",
+               "2026-01-01T00:00:00+00:00", ob.ACTIVE, "누군가@afs.invalid",
+               "2026-01-01T00:00:00+00:00", "fp_prod_old",
+               "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"))
+    c.commit(); c.close()
+
+    store = dp.data_preparation_store
+    monkeypatch.setattr(store, "db_path", path, raising=False)
+    monkeypatch.setattr(store, "_prepared_for", None, raising=False)
+
+    #: 평소처럼 트랜잭션을 연다 — 초기화가 여기서 돈다.
+    with store.transaction() as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(dataset_ownership_bindings)")}
+        assert "approval_event_id" in cols, "제품 초기화가 구버전 표를 그대로 두었다"
+        assert conn.execute("SELECT COUNT(*) FROM dataset_ownership_bindings"
+                            ).fetchone()[0] == 0, "옛 결속이 새 표로 넘어왔다"
+        assert ob.legacy_unapproved(conn)["quarantined"] == 1, "옛 행이 사라졌다"
+        #: ★ 그리고 등록이 실제로 된다 — 옛 스키마에서는 `no such column` 으로 죽던 자리다.
+        ap = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key="LOG-02",
+                        scope_node_id=S, owner_dept_id=DEPT,
+                        actor_id="approver@afs.invalid", evidence_ref="FND-01/v1#seed")
+        ob.declare(conn, tenant_id=T, entity_mode=M, dataset_contract_key="LOG-02",
+                   scope_node_id=S, owner_dept_id=DEPT,
+                   approved_by="approver@afs.invalid", evidence_ref="FND-01/v1#seed",
+                   approval_event_id=ap["approval_event_id"],
+                   effective_from=ap["effective_from"])
+
+
+# ── ⑲ 원장 조회에서 승인 이력이 사라지지 않는다 ──────────────────────────
+
+def test_소유_부서_관리자의_원장_조회에_승인이_보인다(conn):
+    """★★★ [4.1c-B P1] 원장 조회 API 는 `enterprise_scope_id` 를 **부서 id** 로 해석한다.
+
+    ⚠️ 앞 판은 그 칸에 ECM `scope_node_id` 를 넣었다. 그 값은 어느 부서의 읽기 집합에도
+      없으므로 **소유 부서 관리자의 조회에서 승인 사건이 조용히 빠진다** — 오류 없이
+      목록에서만 사라진다. 승인 이력이 보이지 않으면 감사도 이의도 할 수 없다.
+
+    ★ 그래서 시험은 **제품의 필터 함수**를 그대로 태운다. 값만 비교하면 「그 값이 실제로
+      통과하는가」는 여전히 모른다."""
+    from api.routes.ledger_control import _filter_by_dept
+    from core.decision_ledger import decision_ledger
+    _declare(conn)
+    rows = decision_ledger.list_events(event_type=ob.EVENT_APPROVED)
+    assert rows, "승인 사건이 없다"
+
+    class _Scope:
+        unrestricted = False
+        readable_dept_ids = frozenset({DEPT})
+
+    class _P:
+        scope = _Scope()
+        user_id = "reader@afs.invalid"          # ⚠️ 행위자가 **아닌** 사람이어야 한다
+
+    seen = _filter_by_dept(rows, _P())
+    assert len(seen) == len(rows), \
+        "소유 부서 관리자의 원장 조회에서 승인 사건이 빠졌다 — 범위 칸 규약이 어긋났다"
+
+
+def test_다른_부서_사람에게는_승인이_보이지_않는다(conn):
+    """★★ **대조군.** 위 시험이 「전부 보인다」로 통과하면 아무것도 지키지 못한다."""
+    from api.routes.ledger_control import _filter_by_dept
+    from core.decision_ledger import decision_ledger
+    _declare(conn)
+    rows = decision_ledger.list_events(event_type=ob.EVENT_APPROVED)
+
+    class _Scope:
+        unrestricted = False
+        readable_dept_ids = frozenset({"남의부서"})
+
+    class _P:
+        scope = _Scope()
+        user_id = "reader@afs.invalid"
+
+    assert _filter_by_dept(rows, _P()) == []
+
+
+def test_철회도_같은_범위_규약을_쓴다(conn):
+    """★★★ 승인은 보이고 철회는 안 보이면, 그 이력은 「아직 유효하다」로 읽힌다 —
+    가장 위험한 어긋남이다."""
+    from api.routes.ledger_control import _filter_by_dept
+    from core.decision_ledger import decision_ledger
+    b = _declare(conn)
+    ob.revoke(conn, b["binding_id"], "auditor@afs.invalid", "근거 미비")
+
+    class _Scope:
+        unrestricted = False
+        readable_dept_ids = frozenset({DEPT})
+
+    class _P:
+        scope = _Scope()
+        user_id = "reader@afs.invalid"
+
+    for kind in (ob.EVENT_APPROVED, ob.EVENT_REVOKED):
+        rows = decision_ledger.list_events(event_type=kind)
+        assert rows and len(_filter_by_dept(rows, _P())) == len(rows), kind
+
+
+# ── ⑳ 승인만 남는 상태 ────────────────────────────────────────────────────
+
+def test_승인만_남고_결속이_없으면_권한이_생기지_않는다(conn):
+    """★★★ [4.1c-B P1] `approve()`(원장)와 `declare()`(정본 표)는 다른 저장소의 두 단계라
+    한 트랜잭션으로 묶을 수 없다 — 등록이 실패하면 승인 사건만 남는다.
+
+    ⚠️ 그 상태 자체는 안전해야 한다(fail-closed). 「원장에 승인이 있으니 유효」로 읽으면
+      **등록되지 않은 승인이 권한이 된다.**
+
+    ⚠️ **이 시험은 변이 검사로 포착되지 않는다**(정직하게 적는다). `resolve()` 는 정본 표를
+      먼저 보므로 「원장을 먼저 보는」 코드가 애초에 없고, 그것을 없애는 변이를 만들 수
+      없다. 즉 이것은 통제 회귀가 아니라 **계약 서술**이다 — 나중에 누가 «원장에 승인이
+      있으면 통과» 를 추가하려 할 때 이 시험이 그것을 막는다."""
+    ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+               owner_dept_id=DEPT, actor_id="approver@afs.invalid",
+               evidence_ref="FND-01/v1#seed")
+    assert _resolve(conn) is None, "결속 없는 승인이 권한이 됐다"
+
+
+def test_승인만_남은_건은_보고에_드러난다(conn):
+    """⚠️ 조용히 쌓이면 원장의 승인 건수와 실제 결속 수가 갈라지고, 아무도 그 차이를 세지 않는다."""
+    ap = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                    owner_dept_id=DEPT, actor_id="approver@afs.invalid",
+                    evidence_ref="FND-01/v1#seed")
+    dangling = ob.dangling_approvals(conn)
+    assert [d["approval_event_id"] for d in dangling] == [ap["approval_event_id"]]
+
+
+def test_취소하면_보고에서도_사라지고_되살릴_수_없다(conn):
+    """★ 취소는 **철회와 같은 사건**이다. 그래서 `resolve` 의 철회 자식 검사가 자동으로
+    그 승인을 죽인다 — 통제를 두 벌로 만들지 않는다."""
+    ap = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+                    owner_dept_id=DEPT, actor_id="approver@afs.invalid",
+                    evidence_ref="FND-01/v1#seed")
+    ob.abandon(ap["approval_event_id"], "approver@afs.invalid", "등록 실패")
+    assert ob.dangling_approvals(conn) == []
+    #: ★★ 취소된 승인으로는 **등록도 안 된다** — 그러지 않으면 취소가 무의미하다.
+    with pytest.raises(ob.OwnershipError):
+        ob.declare(conn, tenant_id=T, entity_mode=M, dataset_contract_key=K,
+                   scope_node_id=S, owner_dept_id=DEPT,
+                   approved_by="approver@afs.invalid", evidence_ref="FND-01/v1#seed",
+                   approval_event_id=ap["approval_event_id"],
+                   effective_from=ap["effective_from"])
+
+
+def test_등록된_승인은_보고에_들어가지_않는다(conn):
+    """★★ **대조군.** 이것이 빨개지면 위 보고는 「전부 미완」이라고 말하는 셈이다."""
+    _declare(conn)
+    assert ob.dangling_approvals(conn) == []
