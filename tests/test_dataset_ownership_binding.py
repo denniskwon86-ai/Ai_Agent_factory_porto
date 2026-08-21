@@ -773,66 +773,73 @@ def test_미물질화_보고는_원장_장애를_숨기지_않는다(conn, monke
 
     monkeypatch.setattr(decision_ledger, "has_invalidating_child", _boom, raising=False)
     with pytest.raises(ob.OwnershipUnavailable, match="셀 수 없습니다"):
-        ob.dangling_approvals(conn)
+        ob.dangling_approvals(conn, tenant_id=T, entity_mode=M, unrestricted=True)
 
 
-def test_미물질화_보고는_조회_한도에_닿으면_말한다(conn, capsys, monkeypatch):
-    """⚠️ `LIMIT` 에 닿으면 조용히 잘린다 — 잘린 보고를 「0건」이나 「전부」로 읽으면 안 된다."""
+def test_미물질화_보고는_한도에_닿으면_부분_결과를_주지_않는다(conn, monkeypatch):
+    """★★★ [4.1c-E P0-2] 앞 판은 한도에 닿으면 **경고를 찍고 부분 결과를 돌려줬다.**
+
+    ⚠️ 경고는 호출부가 그 값을 전체로 쓰는 것을 막지 못한다 — 실제로 그렇게 썼다. 부분
+      결과를 「미물질화 N건」으로 보고하면 그 숫자가 「우리는 N건을 확인했다」로 읽힌다.
+    ★ 그래서 예외다. 세는 자리에서는 **모른다는 사실 자체를 알아야** 한다."""
     from core.decision_ledger import decision_ledger
-    real = decision_ledger.list_events
+    #: 한도(2)보다 많은 승인을 만든다.
+    for i in range(3):
+        ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=f"K-{i}",
+                   scope_node_id=S, owner_dept_id=DEPT,
+                   actor_id="approver@afs.invalid", evidence_ref=f"ev-{i}")
+    with pytest.raises(ob.OwnershipUnavailable, match="셀 수 없습니다"):
+        ob.dangling_approvals(conn, tenant_id=T, entity_mode=M, unrestricted=True,
+                              limit=2)
+    #: ★ 대조군 — 한도 안이면 정상적으로 센다.
+    got = ob.dangling_approvals(conn, tenant_id=T, entity_mode=M, unrestricted=True,
+                                limit=50)
+    assert len(got) == 3
 
-    def _clipped(**kw):
-        rows = real(**{**kw, "limit": 1})
-        return rows * max(1, int(kw.get("limit") or 1))      # 한도를 꽉 채운 듯이 돌려준다
 
+def test_원장_목록_판독_장애는_0건이_아니다(conn, monkeypatch):
+    """★★★ [4.1c-E P0-2] `list_events()` 는 SQLite 판독 실패를 **빈 배열**로 접는다.
+    앞 판의 회귀는 `has_invalidating_child()` 장애만 시험해서 이 경로를 잡지 못했다.
+
+    ⚠️ 「사건이 없다」와 「못 읽었다」가 같은 모양이면, 장애 중에 보고가 「0건」이라고
+      말한다 — 아무 문제도 없다는 뜻으로 읽힌다."""
+    from core.decision_ledger import DecisionLedgerError, decision_ledger
+
+    def _boom(**kw):
+        raise DecisionLedgerError("원장을 읽지 못했습니다(주입)")
+
+    monkeypatch.setattr(decision_ledger, "list_events_strict", _boom, raising=False)
+    with pytest.raises(ob.OwnershipUnavailable, match="셀 수 없습니다"):
+        ob.dangling_approvals(conn, tenant_id=T, entity_mode=M, unrestricted=True)
+
+
+def test_미물질화_보고는_테넌트를_넘지_않는다(conn):
+    """★★★ [4.1c-E P0-1] 실측된 누설: A 관리자가 B 조직의 승인 ID·행위자·지문·건수를
+    볼 수 있었다. 결속과 격리는 걸렀는데 **이 목록만 안 걸렀다.**"""
     ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
-               owner_dept_id=DEPT, actor_id="approver@afs.invalid",
-               evidence_ref="FND-01/v1#seed")
-    monkeypatch.setattr(decision_ledger, "list_events", _clipped, raising=False)
-    ob.dangling_approvals(conn)
-    assert "조회 한도" in capsys.readouterr().out, "절단을 말하지 않았다"
+               owner_dept_id=DEPT, actor_id="approver@afs.invalid", evidence_ref="내것")
+    ob.approve(tenant_id="tenant_남의회사", entity_mode=M, dataset_contract_key="SLS-01",
+               scope_node_id="NODE_남", owner_dept_id=DEPT,
+               actor_id="approver@afs.invalid", evidence_ref="남의것")
+    got = ob.dangling_approvals(conn, tenant_id=T, entity_mode=M, unrestricted=True)
+    assert len(got) == 1, f"테넌트를 넘어 {len(got)}건이 보인다"
+    #: ★ 지문까지 확인한다 — 건수만 맞고 다른 테넌트 것이 섞이면 더 나쁘다.
+    blob = str(got)
+    assert "남의것" not in blob
 
 
-# ── ⑱ 구버전 스키마(8ca029634) 마이그레이션 ──────────────────────────────
-#
-#   ★★★ [4.1c-B P0-2] `CREATE TABLE IF NOT EXISTS` 는 **이미 있는 표에 새 열을 넣어
-#     주지 않는다.** 그래서 옛 형식 표가 있는 DB 에서는 첫 `declare()` 가
-#     `no such column: approval_event_id` 로 죽는다.
-#
-#   ⚠️ 그리고 옛 행을 **승인된 것으로 백필하면 안 된다.** 그 행들은 승인 원장 사건이 없는
-#     「승인됐다고 스스로 적은 결속」이다. 가짜 승인 사건을 만들어 승격시키면 이 작업이
-#     지우려 한 자기진술을 **원장에 박아 넣는** 셈이고, 원장은 되돌릴 곳이 없다.
-
-#: `8ca029634` 시점의 정본 표 — `approval_event_id`·`revocation_event_id` 가 없고
-#: `evidence_ref` 도 선택이었다. **실제 사본**으로 시험한다(모양을 추측하지 않는다).
-_LEGACY_DDL = """
-CREATE TABLE IF NOT EXISTS dataset_ownership_bindings (
-    binding_id           TEXT PRIMARY KEY,
-    tenant_id            TEXT NOT NULL,
-    entity_mode          TEXT NOT NULL,
-    dataset_contract_key TEXT NOT NULL,
-    scope_node_id        TEXT NOT NULL,
-    owner_dept_id        TEXT NOT NULL,
-    effective_from       TEXT NOT NULL,
-    effective_to         TEXT NOT NULL DEFAULT '',
-    status               TEXT NOT NULL DEFAULT 'ACTIVE',
-    approved_by          TEXT NOT NULL,
-    approved_at          TEXT NOT NULL,
-    evidence_ref         TEXT NOT NULL DEFAULT '',
-    revoked_by           TEXT NOT NULL DEFAULT '',
-    revoked_at           TEXT NOT NULL DEFAULT '',
-    revoked_reason       TEXT NOT NULL DEFAULT '',
-    fingerprint          TEXT NOT NULL,
-    created_at           TEXT NOT NULL,
-    updated_at           TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_ownership_key
-    ON dataset_ownership_bindings(tenant_id, entity_mode, dataset_contract_key,
-                                  scope_node_id, status);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_ownership_active_start
-    ON dataset_ownership_bindings(tenant_id, entity_mode, dataset_contract_key,
-                                  scope_node_id, effective_from);
-"""
+def test_미물질화_보고는_부서_범위도_거른다(conn, org):
+    """★★ 테넌트가 같아도 **부서 범위**가 다르면 보이지 않는다. 원장 조회 API 와 같은
+    규칙(`visible_events`)을 쓴다 — 두 벌이면 새로 만드는 쪽이 느슨해진다."""
+    org.create_department("dept_other", "다른부서")
+    ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
+               owner_dept_id=DEPT, actor_id="approver@afs.invalid", evidence_ref="내것")
+    ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key="SLS-01",
+               scope_node_id=S, owner_dept_id="dept_other",
+               actor_id="approver@afs.invalid", evidence_ref="다른부서것")
+    got = ob.dangling_approvals(conn, tenant_id=T, entity_mode=M,
+                                readable_dept_ids={DEPT}, actor_id="reader@afs.invalid")
+    assert len(got) == 1 and "다른부서것" not in str(got)
 
 
 def _legacy_db(tmp_path, *, rows=0):
@@ -1469,7 +1476,7 @@ def test_승인만_남은_건은_보고에_드러난다(conn):
     ap = ob.approve(tenant_id=T, entity_mode=M, dataset_contract_key=K, scope_node_id=S,
                     owner_dept_id=DEPT, actor_id="approver@afs.invalid",
                     evidence_ref="FND-01/v1#seed")
-    dangling = ob.dangling_approvals(conn)
+    dangling = ob.dangling_approvals(conn, tenant_id=T, entity_mode=M, unrestricted=True)
     assert [d["approval_event_id"] for d in dangling] == [ap["approval_event_id"]]
 
 
@@ -1480,7 +1487,7 @@ def test_취소하면_보고에서도_사라지고_되살릴_수_없다(conn):
                     owner_dept_id=DEPT, actor_id="approver@afs.invalid",
                     evidence_ref="FND-01/v1#seed")
     ob.abandon(ap["approval_event_id"], "approver@afs.invalid", "등록 실패")
-    assert ob.dangling_approvals(conn) == []
+    assert ob.dangling_approvals(conn, tenant_id=T, entity_mode=M, unrestricted=True) == []
     #: ★★ 취소된 승인으로는 **등록도 안 된다** — 그러지 않으면 취소가 무의미하다.
     with pytest.raises(ob.OwnershipError):
         ob.declare(conn, tenant_id=T, entity_mode=M, dataset_contract_key=K,
@@ -1493,7 +1500,7 @@ def test_취소하면_보고에서도_사라지고_되살릴_수_없다(conn):
 def test_등록된_승인은_보고에_들어가지_않는다(conn):
     """★★ **대조군.** 이것이 빨개지면 위 보고는 「전부 미완」이라고 말하는 셈이다."""
     _declare(conn)
-    assert ob.dangling_approvals(conn) == []
+    assert ob.dangling_approvals(conn, tenant_id=T, entity_mode=M, unrestricted=True) == []
 
 
 # ── ㉔ 마이그레이션 원자성 ────────────────────────────────────────────────

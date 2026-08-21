@@ -280,7 +280,7 @@ def test_등록이_실패하면_승인_사건이_취소된다(env):
 
     #: ★★ 그래서 **미물질화 보고에 「승인 대기」로 잡히지 않는다.**
     with env["store"].transaction() as conn:
-        assert ob.dangling_approvals(conn) == []
+        assert ob.dangling_approvals(conn, tenant_id=TENANT, entity_mode="REAL", unrestricted=True) == []
 
 
 def test_취소까지_실패하면_미물질화_보고에_남는다(env):
@@ -303,12 +303,18 @@ def test_취소까지_실패하면_미물질화_보고에_남는다(env):
     ob.declare, ob.abandon = _declare_boom, _abandon_boom
     try:
         c = _client(_scope(env))
-        assert _approve(c).status_code == 409
+        res = _approve(c)
+        #: ★★★ [4.1c-E P1-4] **409 가 아니다.** 등록 실패의 예외를 그대로 돌려주면
+        #:   「입력을 고쳐 다시 하라」로 읽힌다. 실제 상태는 원장 보상이 실패해 살아 있는
+        #:   승인이 남은 것이고, 그것은 사람이 정리해야 하는 상태(503)다.
+        assert res.status_code == 503, f"{res.status_code} {res.text[:200]}"
+        assert res.json()["detail"]["error"] == "repair_required", res.text[:300]
+        assert res.json()["detail"]["approval_event_id"]
     finally:
         ob.declare, ob.abandon = real_declare, real_abandon
 
     with env["store"].transaction() as conn:
-        dangling = ob.dangling_approvals(conn)
+        dangling = ob.dangling_approvals(conn, tenant_id=TENANT, entity_mode="REAL", unrestricted=True)
     assert len(dangling) == 1, "취소 실패한 승인이 보고에 없다"
 
 
@@ -440,3 +446,219 @@ def test_제품_앱에_소유권_경로가_붙어_있다():
             ("GET", "/api/v1/data-preparation/ownership"),
             ("GET", "/api/v1/data-preparation/ownership/quarantine")):
         assert (method, path) in have, f"{method} {path} 가 제품 앱에 없다"
+
+
+# ── ⑦ [4.1c-E] 테넌트 누설 · 멱등 · 보상 · 재조정 ────────────────────────
+
+def test_다른_테넌트의_미물질화_승인은_보이지_않는다(env):
+    """★★★ [4.1c-E P0-1] **실측된 누설의 종단 회귀.**
+
+    앞 판의 `dangling_approvals()` 는 `tenant_id` 도 받지 않고 원장 전체를 훑었다. 그래서
+    한 응답 안에서 **결속·격리는 걸러지고 미물질화 승인만 안 걸러졌다** — 다른 회사의
+    승인 ID·행위자·대상 지문과 건수가 그대로 실려 나갔다.
+
+    ⚠️ 테넌트 경계는 어떤 권한으로도 넘을 수 없다. 부서 범위와 달리 「넓은 권한자」라는
+      예외가 없다 — 다른 회사의 데이터다."""
+    from core.data_preparation import ownership_binding as ob
+    #: 다른 회사의 미물질화 승인(결속은 만들지 않는다).
+    ob.approve(tenant_id="tenant_남의회사", entity_mode="REAL",
+               dataset_contract_key="SLS-01", scope_node_id="NODE_남",
+               owner_dept_id=DEPT, actor_id="std@afs.invalid",
+               evidence_ref="남의회사근거")
+    mine = ob.approve(tenant_id=TENANT, entity_mode="REAL",
+                      dataset_contract_key="MDM-01", scope_node_id=SCOPE,
+                      owner_dept_id=DEPT, actor_id="std@afs.invalid",
+                      evidence_ref="우리근거")
+
+    for who in ("std@afs.invalid", "admin@afs.invalid"):   # 관리자도 넘지 못한다
+        c = _client(_scope(env, who))
+        seen = _data(c.get("/api/v1/data-preparation/ownership"))
+        ids = [d["approval_event_id"] for d in seen["dangling_approvals"]]
+        assert ids == [mine["approval_event_id"]], f"{who}: {ids}"
+        blob = str(seen)
+        for leak in ("tenant_남의회사", "NODE_남", "SLS-01", "남의회사근거"):
+            assert leak not in blob, f"{who} 응답에 남의 회사 정보가 새어 나갔다: {leak}"
+
+
+def test_데이터_관리자는_전_부서의_소유권을_본다(env):
+    """★★ **조직도가 그렇게 정했다는 사실을 고정한다** — 누설이 아니라 설계다.
+
+    실측(2026-08-21): `is_data_admin` 사용자의 `readable_dept_ids` 는 **전 부서**다
+    (`['dept_b', 'hq']`). 이 라우트는 `admin.data_access` 를 요구하므로, 들어오는 사람은
+    거의 항상 전 부서를 읽을 수 있다 — 즉 라우트 안의 **부서 필터는 사실상 통과**한다.
+
+    ⚠️ 그래서 「부서 축이 막힌다」고 말하지 않는다. 막히는 것은 **테넌트 축**이다.
+    ★ 이 시험은 조직도 규칙이 좁아지는 날 그 사실을 알려 주는 자리다. 지금 값을 못 박아
+      두면, 나중에 좁혀졌을 때 이 라우트가 조용히 빈 목록을 주는 것을 아무도 모른다."""
+    org = env["org"]
+    org.create_department("dept_b", "B부서", scope_node_id=OTHER_SCOPE)
+    org._invalidate()
+    scope = org.resolve_scope("std@afs.invalid")
+    assert "dept_b" in scope.readable_dept_ids, \
+        ("데이터 관리자가 더 이상 전 부서를 읽지 않는다 — 소유권 목록·미물질화 보고가 "
+         "조용히 좁아졌을 수 있다. 라우트의 부서 필터를 다시 확인할 것")
+
+
+def test_목록_조회의_원장_목록_장애도_503_이다(env, monkeypatch):
+    """⚠️ [4.1c-E P0-2] 앞 판의 회귀는 `has_invalidating_child` 장애만 봤다.
+    **최초 목록 조회**가 실패하는 경로가 따로 있고, 그것이 「0건」으로 접혔다."""
+    from core.decision_ledger import DecisionLedgerError, decision_ledger
+    c = _client(_scope(env))
+    _data(_approve(c))
+
+    def _boom(**kw):
+        raise DecisionLedgerError("목록 판독 장애(주입)")
+
+    monkeypatch.setattr(decision_ledger, "list_events_strict", _boom, raising=False)
+    assert c.get("/api/v1/data-preparation/ownership").status_code == 503
+
+
+def test_같은_승인을_두_번_해도_사건이_하나다(env):
+    """★★★ [4.1c-E P1-3] **네트워크 재시도만으로 감사 이력이 오염되면 안 된다.**
+
+    앞 판은 두 번째 요청이 새 승인 사건을 만들었고, `declare()` 는 같은 지문의 결속을
+    멱등으로 돌려줬다 — 그래서 결속은 하나인데 **어느 결속에도 연결되지 않은 승인 사건**이
+    미물질화 보고에 남았다."""
+    from core.data_preparation import ownership_binding as ob
+    c = _client(_scope(env))
+    first = _data(_approve(c))
+    res2 = _approve(c)
+    second = _data(res2)
+    assert second["binding_id"] == first["binding_id"], "두 번째 요청이 다른 결속을 만들었다"
+    assert res2.json().get("idempotent") is True, res2.text[:200]
+
+    #: ★ 살아 있는 승인 사건은 **하나**다.
+    events = env["ledger"].list_events(event_type=ob.EVENT_APPROVED, limit=100)
+    alive = [e for e in events if not ob._revocation_children(e["event_id"])[0]]
+    assert len(alive) == 1, f"살아 있는 승인 사건 {len(alive)}건"
+    #: ★ 그리고 미물질화 0건.
+    seen = _data(c.get("/api/v1/data-preparation/ownership"))
+    assert seen["dangling_approvals"] == []
+    assert len(seen["bindings"]) == 1
+
+
+def test_부서를_바꾸려면_먼저_철회해야_한다(env):
+    """★★ 멱등은 **같은 승인**에만 적용된다. 부서나 근거가 다르면 그것은 개정이고,
+    조용히 덮으면 누가 언제 무엇을 바꿨는지 사라진다."""
+    env["org"].create_department("dept_other", "다른부서", scope_node_id=SCOPE)
+    c = _client(_scope(env))
+    _data(_approve(c))
+    res = _approve(c, owner_dept_id="dept_other")
+    assert res.status_code == 409, f"{res.status_code} {res.text[:200]}"
+    assert "겹치는" in res.text or "철회" in res.text
+
+
+def test_철회_원장은_남았는데_표가_안_바뀌면_드러나고_고칠_수_있다(env):
+    """★★★ [4.1c-E P1-5] 철회는 두 단계다 — 원장 사건, 그리고 정본 표 갱신. 두 번째가
+    실패하면 **원장에는 철회, 표에는 ACTIVE** 가 남는다.
+
+    ⚠️ 권한 판정은 안전하다(fail-closed). 위험한 것은 **두 화면이 다른 말을 하는 것**이다:
+      목록에는 살아 있고 판정은 막는다. 그러면 운영자는 「왜 안 보이나」를 영원히 못 찾는다."""
+    from core.data_preparation import ownership_binding as ob
+    c = _client(_scope(env))
+    row = _data(_approve(c))
+    bid = row["binding_id"]
+
+    #: 원장에는 철회를 남기고 **표 갱신만** 되돌린다(두 번째 단계 실패 재현).
+    with env["store"].transaction() as conn:
+        ob.revoke(conn, bid, "std@afs.invalid", "철회")
+        conn.execute("UPDATE dataset_ownership_bindings SET status='ACTIVE',"
+                     " revoked_at='', revoked_reason='' WHERE binding_id=?", (bid,))
+
+    #: ① 목록이 불일치를 **드러낸다.**
+    seen = _data(c.get("/api/v1/data-preparation/ownership"))
+    assert [m["binding_id"] for m in seen["ledger_mismatches"]] == [bid], seen
+    #: ② 판정은 이미 막고 있다(fail-closed) — 두 화면이 다른 말을 한다는 것이 문제였다.
+    with env["store"].transaction() as conn:
+        assert ob.resolve(conn, tenant_id=TENANT, entity_mode="REAL",
+                          dataset_contract_key=KEY, scope_node_id=SCOPE) is None
+    #: ③ 재조정으로 표를 원장에 맞춘다.
+    fixed = _data(c.post(f"/api/v1/data-preparation/ownership/{bid}/reconcile"))
+    assert fixed["applied"] == "ACTIVE->REVOKED"
+    seen2 = _data(c.get("/api/v1/data-preparation/ownership"))
+    assert seen2["ledger_mismatches"] == []
+    #: ④ 어긋나지 않은 것을 재조정하려 하면 409 — 고칠 것이 없는데 고쳤다고 말하지 않는다.
+    assert c.post(f"/api/v1/data-preparation/ownership/{bid}/reconcile").status_code == 409
+
+
+def test_목록과_격리_조회의_권한_정책이_같다(env):
+    """★★ [4.1c-E P1-7] 두 응답에 같은 종류의 정보(어느 부서가 소유자로 주장됐는가)가
+    들어 있다. 정책이 갈리면 **느슨한 쪽이 우회 경로**가 된다."""
+    weak = _client(_scope(env, "plain@afs.invalid"))
+    for path in ("/api/v1/data-preparation/ownership",
+                 "/api/v1/data-preparation/ownership/quarantine"):
+        assert weak.get(path).status_code == 403, path
+    ok = _client(_scope(env))
+    for path in ("/api/v1/data-preparation/ownership",
+                 "/api/v1/data-preparation/ownership/quarantine"):
+        assert ok.get(path).status_code == 200, path
+
+
+def test_재조정도_남의_범위는_404_다(env):
+    from core.data_preparation import ownership_binding as ob
+    admin = _client(_scope(env, "admin@afs.invalid"))
+    row = _data(_approve(admin, scope_node_id=OTHER_SCOPE))
+    c = _client(_scope(env))
+    res = c.post(f"/api/v1/data-preparation/ownership/{row['binding_id']}/reconcile")
+    assert res.status_code == 404
+
+
+def test_동시_재시도에도_결속과_승인이_각각_하나다(env):
+    """★★★ [4.1c-E P1-3] **멱등 검사와 등록 사이에 상대가 끼어드는 경우.**
+
+    두 요청이 동시에 「아직 결속이 없다」를 읽으면 둘 다 승인·등록으로 간다. 그때 DB 가
+    하나를 막고(기간 중첩 트리거), 막힌 쪽은 **자기 승인 사건을 취소**해야 한다 —
+    그러지 않으면 재시도 한 번에 살아 있는 승인이 하나 늘어난다.
+
+    ⚠️ 스레드로 진짜 동시성을 만들지 않는다. SQLite·TestClient 조합에서 그것은
+      «막혔다» 와 «경합에 졌다» 를 구분할 수 없게 만들고, 그러면 이 시험은 무엇을
+      지키는지 말할 수 없게 된다. 대신 **멱등 검사가 이미 지난 상태**를 직접 만든다 —
+      경합에서 지는 쪽이 보는 상태가 정확히 그것이다."""
+    from core.data_preparation import ownership_binding as ob
+    c = _client(_scope(env))
+    first = _data(_approve(c))
+
+    #: 멱등 검사를 «아직 없다» 로 만든다 = 낡은 스냅숏을 읽은 상태.
+    real_resolve = ob.resolve
+    ob.resolve = lambda *a, **kw: None
+    try:
+        res = _approve(c)
+    finally:
+        ob.resolve = real_resolve
+
+    #: 등록은 기간 중첩으로 막혀야 한다(409) — 두 결속이 생기면 안 된다.
+    assert res.status_code == 409, f"{res.status_code} {res.text[:200]}"
+
+    with env["store"].transaction() as conn:
+        alive = [r for r in ob.list_bindings(conn, status=ob.ACTIVE)]
+    assert len(alive) == 1 and alive[0]["binding_id"] == first["binding_id"]
+
+    #: ★★ 그리고 **살아 있는 승인 사건도 하나**다 — 경합에 진 쪽이 자기 사건을 취소했다.
+    events = env["ledger"].list_events(event_type=ob.EVENT_APPROVED, limit=100)
+    alive_events = [e for e in events
+                    if not ob._revocation_children(e["event_id"])[0]]
+    assert len(alive_events) == 1, f"살아 있는 승인 {len(alive_events)}건 — 재시도가 오염시켰다"
+    seen = _data(c.get("/api/v1/data-preparation/ownership"))
+    assert seen["dangling_approvals"] == []
+
+
+def test_어긋나지_않은_살아_있는_결속은_재조정으로_죽지_않는다(env):
+    """★★★ [변이 시험에서 발견] 앞서 쓴 재조정 회귀는 **이미 철회된** 결속에 두 번째
+    재조정을 시도했다. 그 경로는 `status != ACTIVE` 에서 먼저 걸리므로, **원장 확인을
+    통째로 지워도** 잡히지 않았다(M55 실패 0건).
+
+    ⚠️ 판별력은 「살아 있고 어긋나지도 않은 결속」에서 생긴다. 원장 확인이 없으면 그것을
+      재조정하는 순간 **정상 결속이 REVOKED 로 죽는다** — 재조정이 복구 도구가 아니라
+      파괴 도구가 된다."""
+    from core.data_preparation import ownership_binding as ob
+    c = _client(_scope(env))
+    row = _data(_approve(c))
+    bid = row["binding_id"]
+
+    res = c.post(f"/api/v1/data-preparation/ownership/{bid}/reconcile")
+    assert res.status_code == 409, f"{res.status_code} {res.text[:200]}"
+    #: ★★ 그리고 **실제로 살아 있어야** 한다 — 409 를 주면서 표를 고쳤으면 최악이다.
+    with env["store"].transaction() as conn:
+        got = ob.resolve(conn, tenant_id=TENANT, entity_mode="REAL",
+                         dataset_contract_key=KEY, scope_node_id=SCOPE)
+    assert got and got["binding_id"] == bid, "어긋나지 않은 결속이 재조정으로 죽었다"

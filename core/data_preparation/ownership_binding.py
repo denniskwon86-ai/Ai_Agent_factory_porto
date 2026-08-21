@@ -697,38 +697,53 @@ def abandon(approval_event_id: str, actor: str, reason: str = "") -> Dict[str, A
     return {"revocation_event_id": str(ev.get("event_id", ""))}
 
 
-def dangling_approvals(conn: Any) -> List[Dict[str, Any]]:
-    """**결속이 없는 살아 있는 승인 사건.** 보고가 읽는다.
+def dangling_approvals(conn: Any, *, tenant_id: str, entity_mode: str,
+                       unrestricted: bool = False, readable_dept_ids: Any = (),
+                       actor_id: str = "", limit: int = 500) -> List[Dict[str, Any]]:
+    """**결속이 없는 살아 있는 승인 사건** — 보이는 범위 안에서만.
 
     ⚠️ 「승인했는데 아무것도 생기지 않은」 건이 조용히 쌓이면, 원장의 승인 건수와 실제
-      소유 결속 수가 갈라진다 — 그리고 그 차이를 아무도 세지 않는다."""
-    from core.decision_ledger import decision_ledger
+      소유 결속 수가 갈라진다 — 그리고 그 차이를 아무도 세지 않는다.
+
+    ## ★★★ [4.1c-E P0-1] 범위를 **반드시** 받는다
+
+    앞 판은 `tenant_id` 도 부서 범위도 받지 않고 원장 전체를 훑었다. 그래서 A 조직
+    관리자의 `GET /ownership` 응답에 **B 조직의 승인 ID·행위자·대상 지문과 건수**가
+    실려 나갔다(실측). 결속과 격리는 걸렀는데 이 목록만 안 걸렀다 — 한 응답 안에서
+    필터가 갈린 것이다.
+
+    ★ 그래서 범위 인자를 **필수 키워드**로 만들었다. 기본값을 주면 호출부가 빠뜨려도
+      조용히 전체를 보게 되고, 그것이 정확히 방금 있었던 결함이다.
+    ★ 부서 필터 규칙은 `core.decision_ledger.visible_events` **하나**를 쓴다 — 원장 조회
+      API 와 같은 규칙이어야 하고, 두 벌이면 새로 만드는 쪽이 느슨해진다.
+
+    ## ★★★ [4.1c-E P0-2] 못 읽으면 **던진다**
+
+    `list_events()` 는 판독 실패를 빈 배열로, 한도 초과를 부분 결과로 접는다. 둘 다
+    「미물질화 0건」또는 「이만큼뿐」으로 읽히고, 그 화면을 보고 아무도 고치러 가지
+    않는다. 그래서 `list_events_strict()` 를 쓴다."""
+    from core.decision_ledger import DecisionLedgerError, decision_ledger, visible_events
     try:
         have = {str(r[0]) for r in conn.execute(
             "SELECT approval_event_id FROM dataset_ownership_bindings")}
     except sqlite3.Error as e:
         raise OwnershipUnavailable(f"소유권 정본을 읽지 못했습니다: {e}")
-    #: ⚠️ `list_events` 는 `LIMIT` 이 있다. 한도에 닿으면 **조용히 잘린다** — 그러면 이
-    #:   보고는 「미물질화 0건」이라고 말하면서 실제로는 세지 않은 것이 된다. 잘렸으면
-    #:   잘렸다고 소리 내야 한다(이 저장소에서 「조용한 절단」으로 두 번 오독한 적이 있다).
-    _LIMIT = 1000
-    events = decision_ledger.list_events(event_type=EVENT_APPROVED, limit=_LIMIT)
-    if len(events) >= _LIMIT:
-        print(f"⚠️ [ownership] 승인 사건이 조회 한도({_LIMIT})에 닿았습니다 — 미물질화 "
-              f"보고가 일부만 셌을 수 있습니다. 한도를 넘겨 세려면 원장 쪽 페이지네이션이 "
-              f"필요합니다.")
+    try:
+        events = decision_ledger.list_events_strict(
+            event_type=EVENT_APPROVED, subject_type=SUBJECT_TYPE,
+            tenant_id=tenant_id, entity_mode=entity_mode, limit=limit)
+    except DecisionLedgerError as e:
+        #: ⚠️ 「못 읽었다」를 「0건」으로 접지 않는다. 절단도 예외다 — 부분 결과를 전체로
+        #:   쓰는 것을 호출부가 막을 방법이 없다.
+        raise OwnershipUnavailable(f"미물질화 승인을 셀 수 없습니다: {e}")
+    events = visible_events(events, unrestricted=unrestricted,
+                            readable_dept_ids=readable_dept_ids, actor_id=actor_id)
     out = []
     for ev in events:
         eid = str(ev.get("event_id", ""))
         if eid in have:
             continue
         revoked, failed = _revocation_children(eid)
-        #: ★★★ [4.1c-C P1-2] **판독 실패를 「해당 없음」으로 접지 않는다.**
-        #:
-        #: ⚠️ 앞 판은 `if revoked or failed: continue` 였다. 그러면 원장 장애 중에는 모든
-        #:   승인이 목록에서 빠지고, 보고가 **「미물질화 0건」** 이라고 말한다 — 아무 문제도
-        #:   없다는 뜻으로 읽힌다. 이 파일에서 세 번 고친 「모르는 것을 없는 것으로 접는」
-        #:   결함과 같다. 보고는 «세지 못했다» 를 말할 수 있어야 한다.
         if failed:
             raise OwnershipUnavailable(
                 f"승인({eid})의 철회 여부를 읽지 못해 미물질화 승인을 셀 수 없습니다 — "
@@ -983,6 +998,72 @@ def resolve(conn: Any, *, tenant_id: str, entity_mode: str, dataset_contract_key
             f"결속({r['binding_id']})이 가리키는 부서 «{r['owner_dept_id']}» 가 없거나 "
             f"폐지됐습니다 — 색인이 있어도 막습니다.")
     return r
+
+
+def ledger_mismatches(conn: Any, rows: Any = None) -> List[Dict[str, Any]]:
+    """**표는 살아 있는데 원장에는 철회된** 결속들.
+
+    ★★★ [4.1c-E P1-5] 철회는 두 단계다 — 원장에 사건을 남기고, 정본 표를 `REVOKED` 로
+      바꾼다. 두 번째가 실패하면 **원장에는 철회, 표에는 `ACTIVE`** 가 남는다.
+
+    ⚠️ 권한 판정은 그 상태에서도 안전하다(`resolve()` 가 요청마다 철회 자식을 다시 본다).
+      위험한 것은 **두 화면이 다른 말을 하는 것**이다: 목록에는 살아 있고 판정은 막는다.
+      그러면 운영자는 「왜 안 보이나」를 영원히 못 찾는다 — 목록이 정상이라고 말하므로
+      아무도 그쪽을 의심하지 않는다.
+
+    ⚠️ 판독 실패를 「어긋난 것 없음」으로 접지 않는다. 그러면 장애 중에 이 보고가
+      «일치» 라고 말한다."""
+    try:
+        source = list(rows) if rows is not None else [
+            dict(r) for r in conn.execute(
+                "SELECT * FROM dataset_ownership_bindings WHERE status=?", (ACTIVE,))]
+    except sqlite3.Error as e:
+        raise OwnershipUnavailable(f"소유권 정본을 읽지 못했습니다: {e}")
+    out = []
+    for r in source:
+        if str(r.get("status")) != ACTIVE:
+            continue
+        revoked, failed = _revocation_children(str(r.get("approval_event_id", "")))
+        if failed:
+            raise OwnershipUnavailable(
+                f"결속({r.get('binding_id')})의 철회 여부를 읽지 못해 일치 여부를 판단할 "
+                f"수 없습니다 — 「어긋난 것 없음」으로 답하지 않습니다.")
+        if revoked:
+            out.append({"binding_id": str(r.get("binding_id")),
+                        "dataset_contract_key": str(r.get("dataset_contract_key")),
+                        "scope_node_id": str(r.get("scope_node_id")),
+                        "table_status": ACTIVE, "ledger_status": REVOKED,
+                        "reason": "원장에는 철회됐으나 정본 표가 갱신되지 않았습니다."})
+    return out
+
+
+def reconcile_with_ledger(conn: Any, binding_id: str) -> str:
+    """어긋난 결속을 **원장에 맞춘다.** 고친 내용을 돌려주고, 어긋나지 않았으면 빈 문자열.
+
+    ★★★ 방향이 한쪽이다: **원장을 정본으로 표를 고친다.** 반대(표를 보고 원장을 고치기)는
+      절대 하지 않는다 — 원장은 덮어쓸 수 없는 곳이어야 하고, 그것이 원장의 유일한 값이다.
+    ⚠️ 여기서 새 원장 사건을 쓰지 않는다. 철회 사건은 이미 있고, 또 쓰면 같은 철회가
+      두 번 기록된다(그러면 「몇 번 철회됐나」가 틀린다)."""
+    row = conn.execute("SELECT * FROM dataset_ownership_bindings WHERE binding_id=?",
+                       (binding_id,)).fetchone()
+    if row is None:
+        return ""
+    r = dict(row)
+    if str(r.get("status")) != ACTIVE:
+        return ""
+    revoked, failed = _revocation_children(str(r.get("approval_event_id", "")))
+    if failed:
+        raise OwnershipUnavailable(
+            "철회 여부를 읽지 못해 재조정할 수 없습니다 — 모르는 상태로 표를 고치지 않습니다.")
+    if not revoked:
+        return ""
+    now = _now()
+    conn.execute(
+        "UPDATE dataset_ownership_bindings SET status=?, revoked_at=?, revoked_reason=?,"
+        " updated_at=? WHERE binding_id=? AND status=?",
+        (REVOKED, now,
+         "원장 철회와 재조정(정본 갱신 실패 복구)", now, binding_id, ACTIVE))
+    return f"{ACTIVE}->{REVOKED}"
 
 
 def list_bindings(conn: Any, *, tenant_id: str = "", status: str = "") -> List[Dict[str, Any]]:

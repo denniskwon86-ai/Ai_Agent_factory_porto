@@ -460,20 +460,27 @@ async def approve_ownership(req: OwnershipApproveRequest,
     승인은 **원장 사건**이고 결속은 **정본 표**다. 다른 저장소이므로 한 트랜잭션으로
     묶을 수 없다. 그래서:
 
+      ⓪ **이미 같은 승인이 서 있으면 그것을 돌려준다**(멱등 — 아래)
       ① `approve()` — 원장에 승인 사건을 남긴다(권한·근거 검증이 여기서 돈다)
       ② `declare()` — 그 사건 id 로 결속을 세운다
       ③ ②가 실패하면 **`abandon()` 으로 ①을 취소한다**
 
-    ⚠️ ③이 없으면 「승인은 했는데 아무것도 생기지 않은」 사건이 원장에 남고, 원장만 읽는
-      감사자에게는 **승인된 것으로 보인다.** 권한이 새지는 않지만 이력이 거짓이 된다.
-    ⚠️ ③ 자체가 실패해도 요청은 실패로 답한다 — 그 건은 `dangling_approvals()` 보고에
-      남는다. 조용히 성공으로 돌리지 않는다."""
-    #: ★★★ [4.1c-D] `PROJECT_RUN` 이 아니라 **`ADMIN_DATA_ACCESS`** 다.
-    #:
-    #: ⚠️ 처음에 `PROJECT_RUN` 으로 썼더니 축이 어긋났다(실측): 데이터 관리자는 그 권한이
-    #:   없어 **정작 승인해야 할 사람이 403** 이었고, 반대로 프로젝트 `member` 는 그것을
-    #:   갖고 있어 **전사 데이터 소유권을 정할 수 있었다.** 소유권 결속은 프로젝트를
-    #:   돌리는 일이 아니라 기준정보를 정하는 일이다.
+    ## ★★★ [4.1c-E P1-3] ⓪ 멱등이 없으면 재시도가 이력을 오염시킨다
+
+    앞 판은 같은 요청을 두 번 받으면 **승인 사건을 두 개** 만들었다. `declare()` 는 같은
+    지문의 결속을 멱등으로 돌려주므로 결속은 하나인데, 두 번째 승인 사건은 어느 결속에도
+    연결되지 않아 미물질화 보고에 남는다 — **네트워크 재시도만으로 감사 이력이 오염된다.**
+
+    ★ 그래서 먼저 «같은 문맥·계약·범위에 이미 유효한 결속이 있고, 부서·근거까지 같은가» 를
+      본다. 같으면 그 결속을 그대로 돌려준다(원장에 아무것도 더 쓰지 않는다).
+    ⚠️ **다르면 돌려주지 않는다** — 부서나 근거가 다르면 그것은 «개정» 이고, 기존 결속을
+      먼저 철회해야 한다. 조용히 덮으면 누가 언제 무엇을 바꿨는지 사라진다.
+
+    ## ★★★ [4.1c-E P1-4] ③이 실패하면 상태코드가 그 사실을 말해야 한다
+
+    앞 판은 등록 실패의 예외(409)를 그대로 돌려줬다. 보상 취소까지 실패했다면 실제 상태는
+    **원장 보상 실패**이고, 그것은 사람이 정리해야 하는 상태(503)다 — 409 로 답하면
+    「입력을 고쳐 다시 하라」로 읽힌다."""
     require_caps(p, ADMIN_DATA_ACCESS, resource="data_preparation",
                  action=f"ownership:approve:{req.dataset_contract_key}")
     from api.deps import assert_can_manage_standard
@@ -495,11 +502,27 @@ async def approve_ownership(req: OwnershipApproveRequest,
     assert_can_manage_standard(p)
     ctx = _ownership_scope_or_404(p, req.scope_node_id)
     from core.data_preparation import ownership_binding as _ob
+    tenant = str(ctx.get("tenant_id", ""))
+    mode = str(ctx.get("entity_mode", ""))
+
+    #: ⓪ 멱등 — 같은 승인이 이미 서 있으면 원장에 아무것도 더 쓰지 않는다.
+    try:
+        with store.transaction() as conn:
+            existing = _ob.resolve(conn, tenant_id=tenant, entity_mode=mode,
+                                   dataset_contract_key=req.dataset_contract_key,
+                                   scope_node_id=req.scope_node_id)
+    except Exception as e:
+        raise _ownership_error_to_http(e)
+    if existing and str(existing.get("owner_dept_id")) == req.owner_dept_id \
+            and str(existing.get("evidence_ref")) == req.evidence_ref:
+        _audit("DATASET_OWNERSHIP_APPROVE_IDEMPOTENT",
+               resource_id=req.dataset_contract_key, actor=p.user_id or "",
+               outcome="success", detail=f"binding={existing['binding_id']}")
+        return {"status": "success", "data": existing, "idempotent": True}
 
     try:
         ap = _ob.approve(
-            tenant_id=str(ctx.get("tenant_id", "")),
-            entity_mode=str(ctx.get("entity_mode", "")),
+            tenant_id=tenant, entity_mode=mode,
             dataset_contract_key=req.dataset_contract_key,
             scope_node_id=req.scope_node_id, owner_dept_id=req.owner_dept_id,
             actor_id=p.user_id or "", evidence_ref=req.evidence_ref,
@@ -514,8 +537,7 @@ async def approve_ownership(req: OwnershipApproveRequest,
     try:
         with store.transaction() as conn:
             row = _ob.declare(
-                conn, tenant_id=str(ctx.get("tenant_id", "")),
-                entity_mode=str(ctx.get("entity_mode", "")),
+                conn, tenant_id=tenant, entity_mode=mode,
                 dataset_contract_key=req.dataset_contract_key,
                 scope_node_id=req.scope_node_id, owner_dept_id=req.owner_dept_id,
                 approved_by=p.user_id or "", evidence_ref=req.evidence_ref,
@@ -524,17 +546,32 @@ async def approve_ownership(req: OwnershipApproveRequest,
     except Exception as e:
         #: ★★★ 등록이 실패했으므로 **승인 사건을 취소한다.** 그러지 않으면 원장에
         #:   「승인」만 남는다.
-        cancelled = ""
+        repair = False
         try:
             _ob.abandon(ap["approval_event_id"], p.user_id or "",
                         f"결속 등록 실패로 취소: {type(e).__name__}")
-            cancelled = "cancelled"
         except Exception as e2:
-            #: ⚠️ 취소도 실패했다. 조용히 넘기지 않는다 — 그 건은 미물질화 보고에 남는다.
-            cancelled = f"cancel_failed:{type(e2).__name__}"
+            #: ⚠️ 취소도 실패했다. **원래 예외의 상태코드를 그대로 쓰면 안 된다** —
+            #:   실제 상태는 「입력이 틀렸다」가 아니라 「원장 보상이 실패해 정리가
+            #:   필요하다」다(4.1c-E P1-4).
+            repair = True
+            _audit("DATASET_OWNERSHIP_REPAIR_REQUIRED",
+                   resource_id=req.dataset_contract_key, actor=p.user_id or "",
+                   outcome="error", reason=type(e2).__name__,
+                   detail=f"approval={ap['approval_event_id']} | {str(e2)[:200]}")
         _audit("DATASET_OWNERSHIP_DECLARE_FAILED", resource_id=req.dataset_contract_key,
                actor=p.user_id or "", outcome="error", reason=type(e).__name__,
-               detail=f"{str(e)[:240]} | approval={ap['approval_event_id']} | {cancelled}")
+               detail=f"{str(e)[:200]} | approval={ap['approval_event_id']} | "
+                      f"repair_required={repair}")
+        if repair:
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "repair_required",
+                        "message": "결속 등록이 실패했고 승인 사건 취소도 실패했습니다 — "
+                                   "원장에 살아 있는 승인이 남았습니다. 미물질화 승인 "
+                                   "목록에서 확인하고 취소해야 합니다.",
+                        "approval_event_id": ap["approval_event_id"],
+                        "declare_error": str(e)[:200]})
         raise _ownership_error_to_http(e)
 
     _audit("DATASET_OWNERSHIP_APPROVED", resource_id=req.dataset_contract_key,
@@ -591,26 +628,46 @@ async def revoke_ownership(binding_id: str, req: OwnershipRevokeRequest,
 
 @router.get("/ownership")
 async def list_ownership(p: Principal = Depends(current_principal)):
-    """지금 보는 문맥의 소유권 결속과 **미물질화 승인** 현황.
+    """지금 보는 문맥의 소유권 결속 · **미물질화 승인** · 격리 · **불일치** 현황.
 
-    ★★★ 권한 밖 결속의 **존재도 개수도** 응답에 넣지 않는다. 보이는 범위로 먼저 거르고,
+    ★★★ 권한 밖 자원의 **존재도 개수도** 응답에 넣지 않는다. 보이는 범위로 먼저 거르고,
       거른 뒤의 수만 센다 — 「권한 밖 3건」을 세어 주면 그 3이 곧 「그 조직에 3건이
       있다」가 된다.
-    ⚠️ 미물질화 승인 조회가 원장 장애로 실패하면 **503 으로 답한다.** 「0건」으로 돌리면
-      아무 문제 없다는 뜻이 되고, 그 화면을 보고 아무도 고치러 가지 않는다."""
+
+    ⚠️⚠️ [4.1c-E P0-1] 앞 판은 결속과 격리만 걸렀고 **미물질화 승인은 원장 전체**를
+      돌려줬다. 그래서 A 조직 관리자가 B 조직의 승인 ID·행위자·대상 지문과 건수를 볼 수
+      있었다 — **한 응답 안에서 필터가 갈렸다.** 이제 범위를 핵심 층에 넘기고, 그 함수는
+      범위 인자를 **필수**로 요구한다(빠뜨리면 조용히 전체를 보는 대신 오류가 난다).
+
+    ⚠️ 원장을 못 읽으면 **503** 이다. 「미물질화 0건」은 아무 문제 없다는 뜻이고, 그 화면을
+      보고 아무도 고치러 가지 않는다."""
     require_caps(p, ADMIN_DATA_ACCESS, resource="data_preparation",
                  action="ownership:list")
+    #: ★★ [4.1c-E P1-7] 격리 조회와 **같은 권한 정책**을 쓴다. 두 응답에 같은 종류의
+    #:   정보(어느 부서가 소유자로 주장됐는가)가 들어 있는데 정책이 갈리면, 느슨한 쪽이
+    #:   우회 경로가 된다.
+    from api.deps import assert_can_manage_standard
+    assert_can_manage_standard(p)
     from core.data_preparation import ownership_binding as _ob
     ctx = _ctx(p)
+    tenant, mode = str(ctx.get("tenant_id", "")), str(ctx.get("entity_mode", ""))
     visible = set(_visible_scopes(p))
     with store.transaction() as conn:
-        rows = _ob.list_bindings(conn, tenant_id=str(ctx.get("tenant_id", "")))
+        rows = _ob.list_bindings(conn, tenant_id=tenant)
         if not p.scope.unrestricted:
             rows = [r for r in rows
-                    if str(r["entity_mode"]) == str(ctx.get("entity_mode", ""))
+                    if str(r["entity_mode"]) == mode
                     and str(r["scope_node_id"]) in visible]
         try:
-            dangling = _ob.dangling_approvals(conn)
+            dangling = _ob.dangling_approvals(
+                conn, tenant_id=tenant, entity_mode=mode,
+                unrestricted=bool(p.scope.unrestricted),
+                readable_dept_ids=p.scope.readable_dept_ids or (),
+                actor_id=p.user_id or "")
+            #: ★★★ [4.1c-E P1-5] **표와 원장이 어긋난 결속을 드러낸다.**
+            #:   철회가 원장에는 기록됐는데 정본 갱신이 실패하면, 판정은 fail-closed 로
+            #:   막히지만 **목록에는 ACTIVE 로 보인다** — 두 화면이 다른 말을 한다.
+            mismatched = _ob.ledger_mismatches(conn, rows)
         except Exception as e:
             raise HTTPException(status_code=503, detail=str(e))
         quarantine = _ob.quarantine_state(conn)
@@ -624,7 +681,52 @@ async def list_ownership(p: Principal = Depends(current_principal)):
         quarantine = {"unresolved": len(items), "by_contract_key": by_key, "items": items}
     return {"status": "success",
             "data": {"bindings": rows, "dangling_approvals": dangling,
-                     "quarantine": quarantine}}
+                     "quarantine": quarantine, "ledger_mismatches": mismatched}}
+
+
+@router.post("/ownership/{binding_id}/reconcile")
+async def reconcile_ownership(binding_id: str,
+                              p: Principal = Depends(current_principal)):
+    """★★★ [4.1c-E P1-5] **원장을 정본으로 삼아 표를 맞춘다.**
+
+    철회는 두 단계다: 원장에 철회 사건을 남기고, 정본 표를 `REVOKED` 로 바꾼다. 두 번째가
+    실패하면 **원장에는 철회, 표에는 `ACTIVE`** 가 남는다.
+
+    ⚠️ 권한 판정은 그 상태에서도 안전하다(요청마다 철회 자식을 다시 보므로 fail-closed).
+      위험한 것은 **두 화면이 다른 말을 하는 것**이다 — 목록에는 살아 있고 판정은 막는다.
+      그러면 운영자는 「왜 안 보이나」를 영원히 못 찾는다.
+
+    ★ 그래서 재조정은 **원장을 정본으로** 표를 맞춘다. 반대 방향(표를 보고 원장을 고치기)은
+      절대 하지 않는다 — 원장은 덮어쓸 수 없는 곳이어야 하고, 그것이 원장의 유일한 값이다."""
+    require_caps(p, ADMIN_DATA_ACCESS, resource="data_preparation",
+                 action=f"ownership:reconcile:{binding_id}")
+    from api.deps import assert_can_manage_standard
+    assert_can_manage_standard(p)
+    from core.data_preparation import ownership_binding as _ob
+    ctx = _ctx(p)
+    with store.transaction() as conn:
+        row = next((r for r in _ob.list_bindings(conn)
+                    if r["binding_id"] == binding_id), None)
+        visible = bool(row) and (
+            p.scope.unrestricted or (
+                str(row["tenant_id"]) == str(ctx.get("tenant_id", "")) and
+                str(row["entity_mode"]) == str(ctx.get("entity_mode", "")) and
+                str(row["scope_node_id"]) in _visible_scopes(p)))
+        if not visible:
+            _audit("ACCESS_DENIED_SCOPE_MISMATCH", resource_id=binding_id,
+                   actor=p.user_id or "", outcome="denied",
+                   reason="not_found_or_out_of_scope", detail=f"exists={bool(row)}")
+            raise HTTPException(status_code=404, detail="소유권 결속을 찾을 수 없습니다.")
+        try:
+            fixed = _ob.reconcile_with_ledger(conn, binding_id)
+        except Exception as e:
+            raise _ownership_error_to_http(e)
+    if not fixed:
+        #: 어긋난 것이 없다 — 고칠 것이 없는데 고쳤다고 말하지 않는다.
+        raise HTTPException(status_code=409, detail="이 결속은 원장과 어긋나지 않았습니다.")
+    _audit("DATASET_OWNERSHIP_RECONCILED", resource_id=binding_id, actor=p.user_id or "",
+           outcome="success", detail=f"applied={fixed}")
+    return {"status": "success", "data": {"binding_id": binding_id, "applied": fixed}}
 
 
 @router.get("/ownership/quarantine")
@@ -638,6 +740,14 @@ async def list_ownership_quarantine(p: Principal = Depends(current_principal)):
       사실뿐이고, 「관리자가 확인했다」는 다시 자기진술이 된다.
     ⚠️ 기준정보·데이터 표준 승인 권한자 전용이다. 격리 목록에는 **어느 부서가 소유자라고
       주장돼 있었는지**가 들어 있어, 조직 구조를 읽는 것과 같다."""
+    #: ★★ [4.1c-E P1-7] 일반 목록과 **같은 권한 정책**이다. 정책이 갈리면 느슨한 쪽이
+    #:   우회 경로가 된다 — 두 응답에 같은 종류의 정보가 들어 있다.
+    #: ⚠️ 정직하게: 이 줄은 아래 `assert_can_manage_standard` 와 **등가**여서 지워도
+    #:   실패하는 시험이 없다(실측 — 두 권한 축이 현재 조직도에서 겹친다). 남기는 이유는
+    #:   ① 두 라우트의 정책 «선언» 이 코드에서 같아 보여야 하고 ② 축이 갈리는 날 감사
+    #:   기록(`require_caps` 가 남기는 거부 이력)이 여기서 나온다는 것이다.
+    require_caps(p, ADMIN_DATA_ACCESS, resource="data_preparation",
+                 action="ownership:quarantine")
     from api.deps import assert_can_manage_standard
     assert_can_manage_standard(p)
     from core.data_preparation import ownership_binding as _ob

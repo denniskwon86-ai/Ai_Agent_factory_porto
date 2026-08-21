@@ -73,24 +73,19 @@ async def get_subject_history(subject_type: str, subject_id: str,
 
 
 def _filter_by_dept(rows: list, p: Principal) -> list:
-    """부서 스코프 적용.
+    """부서 스코프 적용 — **규칙의 정본은 `core.decision_ledger.visible_events`** 다.
 
-    ⚠️ Ledger 의 `enterprise_scope_id` 는 현재 **부서 id**를 담는다(ECM-lite — E1 에서 ECM
-      node_id 로 승격 예정). 그래서 지금은 부서 권한으로 판정할 수 있다. E1 이후에는 노드
-      트리를 타야 하므로 이 함수를 ECM 리졸버로 바꿔야 한다.
-    ⚠️ 범위가 비어 있는 이벤트(전사 시스템 이벤트 등)는 **무제한 권한자에게만** 보인다 —
-      감사 이력은 결정 사유와 승인자를 담으므로 귀속 불명은 통과시키지 않는다(fail-closed)."""
-    if p.scope.unrestricted:
-        return rows
-    readable = set(p.scope.readable_dept_ids or ())
-    out = []
-    for r in rows:
-        scope = r.get("enterprise_scope_id") or ""
-        if scope and scope in readable:
-            out.append(r)
-        elif not scope and (r.get("actor_id") or "") == p.user_id:
-            out.append(r)      # 범위 없는 이벤트라도 본인이 행위자면 자기 이력은 볼 수 있다
-    return out
+    ★★★ [4.1c-E P0-1] 앞 판은 이 규칙을 여기서 직접 구현했다. 그래서 미물질화 승인
+      보고(`ownership_binding.dangling_approvals`)가 만들어질 때 **아무 필터도 지나지
+      않았고**, A 조직 관리자가 B 조직의 승인 ID·행위자·지문·건수를 볼 수 있었다.
+    ⚠️ 같은 규칙을 두 곳에 두면 새로 만드는 쪽이 언제나 느슨하게 태어난다. 그래서 규칙을
+      원장 모듈로 올리고 여기서는 그것을 부른다 — 이 함수는 이제 **얇은 위임**이다.
+    ⚠️ `enterprise_scope_id` 는 현재 **부서 id** 를 담는다(ECM-lite). E1 에서 ECM
+      node_id 로 승격되면 **정본 함수 한 곳만** 고치면 된다."""
+    from core.decision_ledger import visible_events
+    return visible_events(rows, unrestricted=p.scope.unrestricted,
+                          readable_dept_ids=p.scope.readable_dept_ids or (),
+                          actor_id=p.user_id)
 
 
 @router.get("/verify")

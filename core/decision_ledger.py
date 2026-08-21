@@ -625,6 +625,63 @@ class DecisionLedger:
                 return []
         return []
 
+    def list_events_strict(self, subject_type: str = "", subject_id: str = "",
+                           event_type: str = "", project_id: str = "",
+                           blueprint_id: str = "", tenant_id: str = "",
+                           entity_mode: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+        """`list_events` 와 같지만 **판독 실패와 절단을 던진다.**
+
+        ★★★ [4.1c-E P0-2] `list_events()` 는 두 가지를 조용히 접는다:
+
+          · SQLite 판독 실패 → **빈 배열.** 그러면 「사건이 없다」와 「못 읽었다」가
+            같은 모양이 되고, 장애 중에 보고가 「0건」이라고 말한다 — 아무 문제도 없다는
+            뜻으로 읽힌다.
+          · `LIMIT` 초과 → **부분 결과.** 부분 결과를 전체로 읽으면 집계가 틀리고,
+            그 틀린 숫자가 「우리는 N건을 검토했다」로 쓰인다.
+
+        ★ 세는 자리·판정하는 자리에서는 **모른다는 사실 자체를 알아야** 한다. 화면 목록은
+          `list_events` 로 편하게 읽어도 되지만, 감사 집계는 이 함수를 쓴다.
+
+        ⚠️ 한도에 닿으면 예외다. 「경고를 찍고 부분 결과를 돌려주는」 선택은 호출부가
+          그것을 전체로 쓰는 것을 막지 못한다(실제로 그렇게 썼다)."""
+        self._ready()
+        cap = max(1, min(int(limit or 100), 1000))
+        sql = "SELECT * FROM decision_ledger_events"
+        where, params = [], []
+        for col, val in (("subject_type", subject_type), ("subject_id", subject_id),
+                         ("event_type", event_type), ("project_id", project_id),
+                         ("blueprint_id", blueprint_id), ("tenant_id", tenant_id),
+                         ("entity_mode", entity_mode)):
+            if val:
+                where.append(f"{col}=?")
+                params.append(val)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        #: ★ 한도보다 **하나 더** 읽는다 — 그래야 「잘렸다」를 알 수 있다. 정확히 한도만
+        #:   읽으면 «딱 맞는 경우» 와 «넘친 경우» 를 구분할 수 없다.
+        sql += " ORDER BY seq DESC LIMIT ?"
+        last = None
+        for attempt in (0, 1):
+            try:
+                with self._connect() as conn:
+                    rows = conn.execute(sql, (*params, cap + 1)).fetchall()
+                if len(rows) > cap:
+                    raise DecisionLedgerError(
+                        f"원장 조회가 한도({cap})를 넘었습니다 — 부분 결과를 전체로 쓰지 "
+                        f"않습니다. 조건을 좁히거나 페이지네이션이 필요합니다.")
+                return [self._to_public(dict(r)) for r in rows]
+            except sqlite3.OperationalError as exc:
+                last = exc
+                if attempt == 0 and self._ensure_tables():
+                    continue
+                break
+            except DecisionLedgerError:
+                raise
+            except Exception as exc:                       # pragma: no cover - 방어
+                last = exc
+                break
+        raise DecisionLedgerError(f"원장을 읽지 못했습니다(목록 조회): {last}")
+
     def subject_history(self, subject_type: str, subject_id: str) -> List[Dict[str, Any]]:
         self._ready()
         """한 대상의 결정 이력(오래된 것부터). "왜 이렇게 됐나"에 답하는 기본 조회."""
@@ -703,5 +760,36 @@ class _LedgerTransaction:
         self._ledger._insert(self._conn, row)
         return self._ledger._to_public(row)
 
+
+
+def visible_events(rows: Sequence[Dict[str, Any]], *, unrestricted: bool,
+                   readable_dept_ids: Any = (), actor_id: str = "") -> List[Dict[str, Any]]:
+    """원장 사건을 **부서 범위로** 거른다. 이 규칙의 **정본은 여기 하나**다.
+
+    ★★★ [4.1c-E P0-1] 앞 판은 이 규칙이 `api/routes/ledger_control._filter_by_dept` 에만
+      있었고, 미물질화 승인 보고는 **아무 필터도 지나지 않았다.** 그래서 A 조직 관리자가
+      B 조직의 승인 ID·행위자·대상 지문과 **건수**를 볼 수 있었다(실측).
+
+    ⚠️ 같은 규칙을 두 곳에 쓰면 새로 만드는 쪽이 언제나 느슨하게 태어난다 — 이 저장소에서
+      원장 철회 검증이 정확히 그렇게 갈렸다(4.1c-B P0-4). 그래서 규칙을 원장 모듈로
+      끌어올리고 라우트가 이것을 쓴다.
+
+    규칙:
+      · `enterprise_scope_id` 는 **부서 id** 다(ECM-lite — E1 에서 노드로 승격 예정).
+      · 범위가 비어 있는 사건은 **무제한 권한자와 행위자 본인에게만** 보인다.
+        귀속 불명을 통과시키면 「누구 것도 아닌 승인」이 전원에게 보인다(fail-closed).
+    """
+    if unrestricted:
+        return list(rows)
+    readable = {str(x) for x in (readable_dept_ids or ()) if str(x)}
+    me = str(actor_id or "")
+    out = []
+    for r in rows:
+        scope = str(r.get("enterprise_scope_id") or "")
+        if scope and scope in readable:
+            out.append(r)
+        elif not scope and me and str(r.get("actor_id") or "") == me:
+            out.append(r)          # 귀속 없는 사건이라도 자기 이력은 볼 수 있다
+    return out
 
 decision_ledger = DecisionLedger()
