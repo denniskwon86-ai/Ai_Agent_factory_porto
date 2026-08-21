@@ -48,9 +48,14 @@ def test_the_state_vocabulary_is_pinned_literally():
 
     ⚠️ 정본이 둘로 갈렸던 자리다(설계서 §10.1 vs 솔로 인수인계 §9.1) — 그래서 여기에
       **하나만** 못 박는다."""
+    #: ⚠️ [4.1c-C] `LEGACY_OWNERSHIP_QUARANTINED` 가 늘었다. 「소유자 없음」과 다른
+    #:   상태다 — 앞은 아직 정하지 않은 것이고, 이것은 한 번 정했다고 적혀 있었으나
+    #:   근거가 없어 격리된 것이다. 어휘를 늘리면 `_NEXT_ACTION` 도 함께 늘어야 한다
+    #:   (아래 시험이 그것을 지킨다).
     assert r.DATASET_STATES == (
         "NOT_CONFIGURED", "SOURCE_CONFIGURED", "DATA_AVAILABLE", "QUALITY_FAILED",
-        "RECONCILIATION_FAILED", "APPROVAL_PENDING", "READY", "STALE", "UNAVAILABLE")
+        "RECONCILIATION_FAILED", "APPROVAL_PENDING", "READY", "STALE", "UNAVAILABLE",
+        "LEGACY_OWNERSHIP_QUARANTINED")
 
 
 def test_every_state_says_what_to_do_next_and_who_does_it():
@@ -473,3 +478,57 @@ def test_the_kit_refuses_an_output_that_requires_nothing(tmp_path):
         encoding="utf-8")
     with pytest.raises(kr.KitLoadError):
         kr.load_profile(str(bad))
+
+
+# ── [4.1c-C P1-1] 구버전 소유권 격리가 준비도에 드러난다 ─────────────────
+
+def test_격리된_계약키는_준비됐다고_말하지_않는다():
+    """★★★ 격리는 「데이터가 없다」가 아니라 **「소유 근거가 없어 못 쓴다」**다.
+
+    ⚠️ 그 구분을 하지 않으면 화면은 준비 완료를 띄우고, 실제로 그 데이터는 아무에게도
+      보이지 않는다 — 그리고 이유가 화면 어디에도 없다(앞 판은 기동 로그의 `print` 뿐이었다).
+    ⚠️ 「부분 가능」으로도 두지 않는다. 그 표현은 운영자에게 «기다리면 된다» 로 읽히는데,
+      이것은 사람이 **재승인해야** 풀리는 상태다."""
+    ready = _eval_instance(quarantined={})
+    assert ready["status"] == r.INSTANCE_READY, ready["status"]
+
+    blocked = _eval_instance(quarantined={"LOG-02": 1})
+    assert blocked["status"] == r.INSTANCE_BLOCKED
+    row = [d for d in blocked["datasets"]
+           if d["dataset_contract_key"] == "LOG-02"][0]
+    assert row["state"] == r.LEGACY_OWNERSHIP_QUARANTINED
+    assert row["ownership_quarantined"] == 1
+    #: ★ 화면이 「왜 안 보이나」에 답할 수 있어야 한다 — 답은 로그가 아니라 응답에 있다.
+    assert blocked["ownership_quarantined"] == {"LOG-02": 1}
+
+
+def test_격리_안내는_파일을_다시_올리라고_말하지_않는다():
+    """⚠️ 「데이터가 없습니다」로 안내하면 담당자가 파일을 다시 올리고, 그래도 안 풀린다."""
+    action, role = r._NEXT_ACTION[r.LEGACY_OWNERSHIP_QUARANTINED]
+    assert "승인" in action and role == "데이터 오너"
+
+
+def _eval_instance(*, quarantined, keys=("LOG-02",)):
+    """인증까지 끝난 계약키들. **이 파일의 기존 헬퍼를 쓴다** — 상태 상수를 손으로 적으면
+    어휘가 바뀔 때 이 시험만 조용히 낡는다."""
+    return r.evaluate_instance(
+        contract_keys=list(keys),
+        bindings={k: _binding(binding_id=f"b_{k}") for k in keys},
+        snapshots={k: [_ready_snap()] for k in keys}, now=NOW, max_age_days=365.0,
+        ownership_quarantined=quarantined)
+
+
+def test_다른_키가_준비돼_있어도_격리는_부분_가능이_아니다():
+    """★★★ [변이 시험에서 발견] 계약키를 **하나만** 쓰면 이 분기를 시험하지 못한다 —
+    격리된 row 하나뿐이면 `READY` 도 `STALE` 도 0 이라 어차피 `BLOCKED` 가 나온다.
+    분기를 지워도 결과가 같았다(등가 변이).
+
+    ⚠️ 판별력은 **다른 키가 준비돼 있을 때** 생긴다. 그때 격리를 무시하면 「부분 가능」이
+      되고, 그 표현은 운영자에게 «기다리면 된다» 로 읽힌다 — 이것은 사람이 재승인해야
+      풀리는 상태다."""
+    res = _eval_instance(quarantined={"LOG-02": 1}, keys=("LOG-02", "LOG-03"))
+    states = {d["dataset_contract_key"]: d["state"] for d in res["datasets"]}
+    #: 대조군이 진짜인지 먼저 본다 — 다른 키는 실제로 준비돼 있어야 한다.
+    assert states["LOG-03"] == r.READY, states
+    assert states["LOG-02"] == r.LEGACY_OWNERSHIP_QUARANTINED
+    assert res["status"] == r.INSTANCE_BLOCKED,         f"격리가 있는데 {res['status']} 로 답했다 — 「기다리면 된다」로 읽힌다"

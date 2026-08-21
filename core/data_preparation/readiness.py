@@ -49,9 +49,16 @@ READY = "READY"
 STALE = "STALE"                            # 인증판은 있으나 기준시점이 오래됐다
 UNAVAILABLE = "UNAVAILABLE"                # 못 읽음 — 범위·계약·서버 상태 결함
 
+#: ★★★ [4.1c-C P1-1] 구버전 소유권 결속이 **격리된** 상태. 「소유자 없음」과 다르다 —
+#: 앞은 아직 정하지 않은 것이고, 이것은 **한 번 정했다고 적혀 있었으나 근거가 없는** 것이다.
+#: ⚠️ 이 둘을 뭉개면 운영자는 무엇을 다시 승인해야 하는지 알 수 없고, 화면에는 그저
+#:   「데이터가 안 보인다」로 나타난다.
+LEGACY_OWNERSHIP_QUARANTINED = "LEGACY_OWNERSHIP_QUARANTINED"
+
 DATASET_STATES: Tuple[str, ...] = (
     NOT_CONFIGURED, SOURCE_CONFIGURED, DATA_AVAILABLE, QUALITY_FAILED,
-    RECONCILIATION_FAILED, APPROVAL_PENDING, READY, STALE, UNAVAILABLE)
+    RECONCILIATION_FAILED, APPROVAL_PENDING, READY, STALE, UNAVAILABLE,
+    LEGACY_OWNERSHIP_QUARANTINED)
 
 #: ★★★ **공식 결과에 쓸 수 있는 상태**는 둘뿐이다. 나머지는 전부 막는다.
 #: ⚠️ `STALE` 을 여기 넣지 않는다 — 오래된 판으로 만든 공식 숫자는 「틀렸다」가 아니라
@@ -86,6 +93,12 @@ _NEXT_ACTION: Dict[str, Tuple[str, str]] = {
     READY: ("", ""),
     STALE: ("기준시점이 오래됐습니다 — 최신 판을 올리십시오.", "데이터 담당자"),
     UNAVAILABLE: ("이 데이터를 읽을 수 없습니다 — 관리자에게 문의하십시오.", "시스템 관리자"),
+    #: ★★★ [4.1c-C P1-1] **「기다리면 된다」로 읽히지 않게 쓴다.** 이 상태는 사람이
+    #:   재승인해야 풀린다 — 승인 근거 없이 옮겨진 구버전 결속이 격리된 것이다.
+    #: ⚠️ 「데이터가 없습니다」로 쓰면 담당자가 파일을 다시 올리고, 그래도 안 보인다.
+    LEGACY_OWNERSHIP_QUARANTINED: (
+        "구버전 소유권 결속이 승인 근거가 없어 격리됐습니다 — 소유 부서를 다시 승인하십시오"
+        "(파일을 다시 올려도 풀리지 않습니다).", "데이터 오너"),
 }
 
 
@@ -288,7 +301,9 @@ def evaluate_instance(*, contract_keys: List[str],
                       outputs: Optional[List[Dict[str, Any]]] = None,
                       now: str, max_age_days: Optional[float] = None,
                       scope: Optional[Dict[str, Any]] = None,
-                      context_omitted: int = 0) -> Dict[str, Any]:
+                      context_omitted: int = 0,
+                      ownership_quarantined: Optional[Dict[str, int]] = None
+                      ) -> Dict[str, Any]:
     """인스턴스 하나의 준비도 전부.
 
     ★★★ **권한 밖 자원의 존재도 개수도 응답에 넣지 않는다.** 호출부가 이미 보이는
@@ -300,13 +315,32 @@ def evaluate_instance(*, contract_keys: List[str],
                              now=now, max_age_days=max_age_days, scope=scope)
             for k in keys]
 
+    #: ★★★ [4.1c-C P1-1] **격리된 계약키는 준비됐다고 말할 수 없다.**
+    #:
+    #: ⚠️ 격리는 「데이터가 없다」가 아니라 「소유 근거가 없어 못 쓴다」다. 그 구분을 여기서
+    #:   하지 않으면 화면은 준비 완료를 띄우고, 실제로는 그 데이터가 아무에게도 안 보인다 —
+    #:   그리고 이유가 화면 어디에도 없다(앞 판은 기동 로그의 `print` 뿐이었다).
+    qmap = {str(k): int(v) for k, v in (ownership_quarantined or {}).items() if int(v) > 0}
+    if qmap:
+        rows = [({**r, "state": LEGACY_OWNERSHIP_QUARANTINED,
+                  "reason": "구버전 소유권 결속이 격리됐습니다 — 소유 부서를 다시 승인해야 "
+                            "이 데이터를 쓸 수 있습니다.",
+                  "ownership_quarantined": qmap[str(r.get("dataset_contract_key"))]}
+                 if str(r.get("dataset_contract_key")) in qmap else r)
+                for r in rows]
+
     counts = {s: 0 for s in DATASET_STATES}
     for r in rows:
         counts[r["state"]] += 1
 
     out_rows = evaluate_outputs(rows, outputs or [])
 
-    if rows and counts[READY] == len(rows):
+    if counts[LEGACY_OWNERSHIP_QUARANTINED]:
+        #: ⚠️ 하나라도 격리돼 있으면 인스턴스는 준비된 것이 아니다. 「부분 가능」으로도
+        #:   두지 않는다 — 그 표현은 운영자에게 «기다리면 된다» 로 읽힌다. 이것은 사람이
+        #:   재승인해야 풀리는 상태다.
+        status = INSTANCE_BLOCKED
+    elif rows and counts[READY] == len(rows):
         status = INSTANCE_READY
     elif counts[READY] or counts[STALE]:
         status = INSTANCE_PARTIAL
@@ -328,6 +362,9 @@ def evaluate_instance(*, contract_keys: List[str],
         "blocked_outputs": [r for r in out_rows if r["state"] == BLOCKED_OUTPUT],
         "outputs": out_rows,
         "context_omitted": max(0, int(context_omitted or 0)),
+        #: ★★★ [4.1c-C P1-1] 격리 건수를 **숫자로** 싣는다. 화면이 「왜 안 보이나」에
+        #:   답할 수 있어야 하고, 그 답은 로그가 아니라 응답에 있어야 한다.
+        "ownership_quarantined": qmap,
         #: 재현성 — 같은 지문이면 같은 판정이어야 한다(§7.4).
         "binding_set_fingerprint": _fingerprint(
             {k: {"id": str((bindings.get(k) or {}).get("binding_id") or ""),

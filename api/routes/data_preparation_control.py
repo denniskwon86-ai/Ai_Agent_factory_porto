@@ -391,6 +391,25 @@ async def get_snapshot(snapshot_id: str, p: Principal = Depends(current_principa
 DEFAULT_MAX_AGE_DAYS = 30.0
 
 
+@router.get("/ownership/quarantine")
+async def list_ownership_quarantine(p: Principal = Depends(current_principal)):
+    """★★★ [4.1c-C P1-1] **승인 근거 없이 격리된 구버전 소유권 결속.**
+
+    ⚠️ 앞 판은 격리하면서 기동 로그에 `print` 만 남겼다. 그러면 서비스는 빈 새 표로 계속
+      가동되고, **모든 데이터가 UNBOUND 가 된 이유를 운영자가 화면에서 알 수 없다.**
+      로그는 다음 재시작에 사라지고, 그때부터는 「원래 소유자가 없었다」와 구분되지 않는다.
+    ★ 재승인이 끝날 때까지 해제되지 않는다 — 해제 근거는 **승인된 결속이 실제로 생겼다**는
+      사실뿐이고, 「관리자가 확인했다」는 다시 자기진술이 된다.
+    ⚠️ 기준정보·데이터 표준 승인 권한자 전용이다. 격리 목록에는 **어느 부서가 소유자라고
+      주장돼 있었는지**가 들어 있어, 조직 구조를 읽는 것과 같다."""
+    from api.deps import assert_can_manage_standard
+    assert_can_manage_standard(p)
+    from core.data_preparation import ownership_binding as _ob
+    with store.transaction() as conn:
+        state = _ob.quarantine_state(conn)
+    return {"status": "success", "data": state}
+
+
 @router.get("/instances/{instance_id}/readiness")
 async def get_readiness(instance_id: str, p: Principal = Depends(current_principal)):
     """「지금 무엇까지 믿고 만들 수 있는가」. **결정론적이다** — 같은 입력이면 같은 답.
@@ -422,13 +441,24 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
 
     profile = kit.get("profile") or {}
     max_age = profile.get("max_age_days", DEFAULT_MAX_AGE_DAYS)
+    #: ★★★ [4.1c-C P1-1] **구버전 소유권 격리를 준비도에 싣는다.**
+    #:
+    #: ⚠️ 앞 판은 격리하면서 기동 로그에 `print` 만 남겼다. 그러면 서비스는 빈 새 표로
+    #:   계속 가동되고, **모든 데이터가 UNBOUND 가 된 이유를 운영자가 화면에서 알 수
+    #:   없다.** 로그는 다음 재시작에 사라지고, 그때부터는 「원래 소유자가 없었다」와
+    #:   구분되지 않는다.
+    from core.data_preparation import ownership_binding as _ob
+    with store.transaction() as _c:
+        _q = _ob.quarantine_state(_c)
+    quarantined = {k: v for k, v in (_q.get("by_contract_key") or {}).items() if k in keys}
     try:
         result = readiness.evaluate_instance(
             contract_keys=keys, bindings=bindings, snapshots=snapshots,
             outputs=kit_registry.outputs(profile), now=_now_iso(),
             max_age_days=float(max_age) if max_age is not None else None,
             scope={"tenant_id": inst["tenant_id"], "scope_node_id": inst["scope_node_id"],
-                   "entity_mode": inst["entity_mode"]})
+                   "entity_mode": inst["entity_mode"]},
+            ownership_quarantined=quarantined)
     except m.DataPreparationError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

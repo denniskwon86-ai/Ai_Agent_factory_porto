@@ -96,40 +96,96 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_ownership_active_start
                                   scope_node_id, effective_from)
     WHERE status = 'ACTIVE';
 
--- ★★★ [4.1c-B P0-3] **기간 중첩을 DB 가 막는다.**
+-- ★★★ [4.1c-B P0-3 / 4.1c-C P0-1] **기간 중첩을 DB 가 막는다.**
 --
--- ⚠️⚠️ 위 부분 UNIQUE 는 「같은 **시작시각**」만 막는다. 시작시각이 다르면서 기간이 겹치는
+-- ⚠️⚠️ 부분 UNIQUE 는 「같은 **시작시각**」만 막는다. 시작시각이 다르면서 기간이 겹치는
 --   두 요청은 각자 「겹치는 것 0건」을 읽은 뒤 **둘 다 삽입된다.** 응용 계층의 조회-후-삽입
 --   으로는 닫을 수 없는 구멍이다(다중 프로세스에서 읽기와 쓰기 사이에 남이 넣는다).
---   그리고 앞 판의 회귀는 «같은 시작시각 직접 삽입» 만 검사해서, 이 구멍을 시험하지 않았다.
 --
--- ★ 트리거는 응용을 우회한 경로(마이그레이션·시드·직접 SQL)에도 걸린다. 그래서 응용 검사를
---   대신하는 것이 아니라 **마지막 방어선**이다 — 응용 검사는 사람이 읽을 오류 문구를 위해,
---   트리거는 「그래도 들어오는 것」을 위해 둔다.
+-- ⚠️⚠️⚠️ [4.1c-C P0-1] 앞 판은 이 비교를 **문자열 비교**로 썼고, 주석에 「`declare()` 가
+--   UTC 로 정규화하니 안전하다」고 적었다. 그것이 틀린 이유는 단순하다 —
+--   **트리거의 존재 목적이 바로 `declare()` 를 우회하는 경로를 막는 것**이다.
+--   우회하는 경로가 정규화를 지나지 않으므로, 정규화를 근거로 삼은 순간 트리거는
+--   자기가 지키겠다고 한 경로에서 아무것도 지키지 않는다. 실측:
 --
--- ⚠️ 여기 비교는 **문자열 비교**다. 성립하는 이유는 `declare()` 가 저장 시각을 UTC ISO
---   (`+00:00` 고정 오프셋)로 정규화하기 때문이다 — 같은 오프셋이면 사전순 = 시간순이다.
---   정규화를 끄면 이 트리거가 조용히 헐거워진다. 그 둘은 한 계약이다.
--- ⚠️ 빈 `effective_to` 는 «무기한» 이다. `NULLIF` 로 최댓값으로 바꾼다 — 그대로 비교하면
---   «가장 작은 값» 이 되어 무기한이 오히려 «이미 끝난 것» 으로 읽힌다.
-CREATE TRIGGER IF NOT EXISTS trg_ownership_no_overlap_insert
-BEFORE INSERT ON dataset_ownership_bindings
-FOR EACH ROW WHEN NEW.status = 'ACTIVE'
-BEGIN
-    SELECT RAISE(ABORT, '기간이 겹치는 ACTIVE 소유권 결속이 이미 있습니다')
-    WHERE EXISTS (
-        SELECT 1 FROM dataset_ownership_bindings b
-         WHERE b.status = 'ACTIVE'
+--       기존  2026-06-01T00:00:00+00:00 ~ 02:00Z
+--       신규  2026-06-01T10:00:00+09:00 ~ 12:00+09  (= 01:00Z ~ 03:00Z)
+--       결과  OVERLAPPING_ACTIVE_ROWS 2       ← 문자열로는 "T10" > "T02" 라 안 겹쳐 보인다
+--
+--   시간대 없는 값(`2026-07-01T00:00:00`)과 파싱 불가 값(`언제인지모름`)도 그대로 통과했다.
+--
+-- ★ 그래서 `julianday()` 로 **시각으로 바꿔** 비교한다. SQLite 의 시간 함수는 ISO-8601 의
+--   오프셋을 적용해 UTC 기준 값을 주고, 읽을 수 없으면 NULL 을 준다.
+-- ★★ 규칙은 INSERT·UPDATE 가 **한 벌을 공유**한다(아래 파이썬에서 조립). 두 벌로 쓰면
+--   한쪽만 고쳐지는 날이 오고, 그날 UPDATE 경로만 조용히 헐거워진다.
+{_OVERLAP_TRIGGERS}
+"""
+
+
+# ── 기간 트리거 조립 ──────────────────────────────────────────────────────
+#
+#   ⚠️ SQL 을 두 벌 쓰지 않는다. INSERT 와 UPDATE 가 같은 문자열에서 나와야 「양쪽 동일
+#     규칙」이 코드로 보장된다 — 주석으로 약속하면 지켜지지 않는다(이 파일에서 이미
+#     같은 유형의 결함을 세 번 고쳤다).
+
+#: 시간대 표기가 있는가. `+HH:MM` / `-HH:MM` / `Z` 만 인정한다.
+#:   ⚠️ 시간대 없는 값을 받아 두면 나중에 비교하는 쪽이 **추측**한다. 그 추측은 서버
+#:     시간대에 따라 달라지고, 배포 환경이 바뀌면 소유권이 바뀐다.
+def _tz_ok(col: str) -> str:
+    return (f"({col} LIKE '%Z' OR {col} LIKE '%+__:__' OR {col} LIKE '%-__:__')")
+
+
+def _time_guard_sql() -> str:
+    """새 행의 유효기간이 **시각으로 읽히는가.** 아니면 ABORT."""
+    return f"""
+    SELECT RAISE(ABORT, '유효기간에 시간대가 없습니다 — 소유권 결속의 시각은 UTC 오프셋을 포함해야 합니다')
+     WHERE NOT {_tz_ok('NEW.effective_from')}
+        OR (NEW.effective_to <> '' AND NOT {_tz_ok('NEW.effective_to')});
+    SELECT RAISE(ABORT, '유효기간을 시각으로 읽을 수 없습니다')
+     WHERE julianday(NEW.effective_from) IS NULL
+        OR (NEW.effective_to <> '' AND julianday(NEW.effective_to) IS NULL);
+    SELECT RAISE(ABORT, '유효기간이 뒤집혀 있거나 비어 있습니다 — 끝점은 배타적입니다')
+     WHERE NEW.effective_to <> ''
+       AND julianday(NEW.effective_to) <= julianday(NEW.effective_from);"""
+
+
+def _overlap_guard_sql() -> str:
+    """같은 키에 **기간이 겹치는** ACTIVE 결속이 있는가. 아니면 ABORT.
+
+    ⚠️ 기존 행이 읽히지 않으면 «겹치지 않는다» 가 아니라 **점검 필요**다. 비교가 NULL 이
+      되어 조용히 통과하는 것을 막는다 — 「모르니까 통과」는 이 파일에서 가장 자주
+      되살아나는 결함이다."""
+    same_key = """b.status = 'ACTIVE'
            AND b.binding_id <> NEW.binding_id
            AND b.tenant_id = NEW.tenant_id
            AND b.entity_mode = NEW.entity_mode
            AND b.dataset_contract_key = NEW.dataset_contract_key
-           AND b.scope_node_id = NEW.scope_node_id
-           AND NEW.effective_from <
-               COALESCE(NULLIF(b.effective_to, ''), '9999-12-31T23:59:59+00:00')
-           AND b.effective_from <
-               COALESCE(NULLIF(NEW.effective_to, ''), '9999-12-31T23:59:59+00:00')
-    );
+           AND b.scope_node_id = NEW.scope_node_id"""
+    return f"""
+    SELECT RAISE(ABORT, '기존 ACTIVE 소유권 결속의 유효기간을 시각으로 읽을 수 없습니다 — 점검이 필요합니다')
+     WHERE EXISTS (
+        SELECT 1 FROM dataset_ownership_bindings b
+         WHERE {same_key}
+           AND (julianday(b.effective_from) IS NULL
+                OR (b.effective_to <> '' AND julianday(b.effective_to) IS NULL))
+     );
+    SELECT RAISE(ABORT, '기간이 겹치는 ACTIVE 소유권 결속이 이미 있습니다')
+     WHERE EXISTS (
+        SELECT 1 FROM dataset_ownership_bindings b
+         WHERE {same_key}
+           AND julianday(NEW.effective_from) <
+               julianday(COALESCE(NULLIF(b.effective_to, ''), '9999-12-31T23:59:59+00:00'))
+           AND julianday(b.effective_from) <
+               julianday(COALESCE(NULLIF(NEW.effective_to, ''), '9999-12-31T23:59:59+00:00'))
+     );"""
+
+
+#: INSERT 와 UPDATE 가 **같은 두 조각**을 쓴다.
+_OVERLAP_TRIGGERS = f"""
+CREATE TRIGGER IF NOT EXISTS trg_ownership_no_overlap_insert
+BEFORE INSERT ON dataset_ownership_bindings
+FOR EACH ROW WHEN NEW.status = 'ACTIVE'
+BEGIN{_time_guard_sql()}{_overlap_guard_sql()}
 END;
 
 -- ⚠️ UPDATE 쪽도 막는다. 그러지 않으면 `REVOKED` 행의 `status` 를 `ACTIVE` 로 되살려
@@ -139,23 +195,12 @@ BEFORE UPDATE OF status, effective_from, effective_to, tenant_id, entity_mode,
                  dataset_contract_key, scope_node_id
 ON dataset_ownership_bindings
 FOR EACH ROW WHEN NEW.status = 'ACTIVE'
-BEGIN
-    SELECT RAISE(ABORT, '기간이 겹치는 ACTIVE 소유권 결속이 이미 있습니다')
-    WHERE EXISTS (
-        SELECT 1 FROM dataset_ownership_bindings b
-         WHERE b.status = 'ACTIVE'
-           AND b.binding_id <> NEW.binding_id
-           AND b.tenant_id = NEW.tenant_id
-           AND b.entity_mode = NEW.entity_mode
-           AND b.dataset_contract_key = NEW.dataset_contract_key
-           AND b.scope_node_id = NEW.scope_node_id
-           AND NEW.effective_from <
-               COALESCE(NULLIF(b.effective_to, ''), '9999-12-31T23:59:59+00:00')
-           AND b.effective_from <
-               COALESCE(NULLIF(NEW.effective_to, ''), '9999-12-31T23:59:59+00:00')
-    );
+BEGIN{_time_guard_sql()}{_overlap_guard_sql()}
 END;
 """
+
+DDL = DDL.format(_OVERLAP_TRIGGERS=_OVERLAP_TRIGGERS)
+
 
 
 class OwnershipError(ValueError):
@@ -253,6 +298,32 @@ def ensure_schema(conn: Any) -> None:
 #: 격리된 옛 결속을 옮겨 두는 표. **새 표와 이름이 달라야** 조회 경로가 섞이지 않는다.
 LEGACY_TABLE = "dataset_ownership_bindings_legacy_unapproved"
 
+#: ★★★ [4.1c-C P1-1] **격리는 영속 상태여야 한다.**
+#:
+#: ⚠️ 앞 판은 격리하면서 `print` 만 남겼다. 그러면 서비스는 빈 새 표로 계속 가동되고,
+#:   **모든 데이터가 UNBOUND 가 된 이유를 운영자가 화면에서 알 수 없다.** 기동 로그는
+#:   다음 재시작에 사라지고, 그때부터는 「원래 소유자가 없었다」와 구분되지 않는다.
+#: ★ 그래서 계약키·범위 단위로 미해결 행을 남기고, **재승인이 끝날 때까지 해제되지 않는다.**
+#: ⚠️ 이 표는 `DDL` 에 넣지 않는다 — `migrate()` 가 `DDL` **보다 먼저** 돌아야 하므로,
+#:   그 시점에 이미 있어야 한다. 그리고 `executescript` 를 쓰지 않는다(조기 커밋).
+QUARANTINE_TABLE = "dataset_ownership_quarantine"
+
+_QUARANTINE_DDL = f"""
+CREATE TABLE IF NOT EXISTS {QUARANTINE_TABLE} (
+    quarantine_id        TEXT PRIMARY KEY,
+    tenant_id            TEXT NOT NULL,
+    entity_mode          TEXT NOT NULL,
+    dataset_contract_key TEXT NOT NULL,
+    scope_node_id        TEXT NOT NULL,
+    claimed_owner_dept_id TEXT NOT NULL DEFAULT '',
+    legacy_binding_id    TEXT NOT NULL DEFAULT '',
+    rows_quarantined     INTEGER NOT NULL DEFAULT 0,
+    quarantined_at       TEXT NOT NULL,
+    resolved_at          TEXT NOT NULL DEFAULT '',
+    resolved_by          TEXT NOT NULL DEFAULT '',
+    resolved_binding_id  TEXT NOT NULL DEFAULT ''
+)"""
+
 #: 새 계약이 요구하는 열. 하나라도 없으면 그 표는 `8ca029634` 형식(자기진술 판)이다.
 _REQUIRED_COLUMNS = ("approval_event_id", "revocation_event_id", "evidence_ref")
 
@@ -307,6 +378,18 @@ def migrate(conn: Any) -> Dict[str, Any]:
         raise OwnershipIntegrityError(
             f"격리 표({LEGACY_TABLE})가 이미 있습니다 — 구버전 결속이 두 세대 남아 "
             f"있습니다. 자동으로 합치지 않습니다.")
+    conn.execute(_QUARANTINE_DDL)
+    #: ★ 계약키·범위 단위로 남긴다 — 운영자가 「무엇을 다시 승인해야 하는가」를 알아야 한다.
+    for r in conn.execute(
+            "SELECT tenant_id, entity_mode, dataset_contract_key, scope_node_id,"
+            " owner_dept_id, binding_id FROM dataset_ownership_bindings"
+            " WHERE status = ?", (ACTIVE,)).fetchall():
+        conn.execute(
+            f"INSERT OR IGNORE INTO {QUARANTINE_TABLE} (quarantine_id, tenant_id,"
+            f" entity_mode, dataset_contract_key, scope_node_id, claimed_owner_dept_id,"
+            f" legacy_binding_id, rows_quarantined, quarantined_at)"
+            f" VALUES (?,?,?,?,?,?,?,?,?)",
+            (f"q_{uuid.uuid4().hex[:12]}", r[0], r[1], r[2], r[3], r[4], r[5], 1, _now()))
     conn.execute(f"ALTER TABLE dataset_ownership_bindings RENAME TO {LEGACY_TABLE}")
     print(f"⚠️ [ownership] 승인 근거 없는 구버전 결속 {n}건을 격리했습니다"
           f"({LEGACY_TABLE}). **자동 승격하지 않습니다** — 다시 쓰려면 승인 원장 사건을 "
@@ -322,6 +405,49 @@ def _drop_attached(conn: Any, table: str) -> None:
         "AND type IN ('index','trigger') AND name NOT LIKE 'sqlite_%'", (table,)).fetchall()
     for r in rows:
         conn.execute(f"DROP {str(r[0]).upper()} IF EXISTS {r[1]}")
+
+
+def quarantine_state(conn: Any) -> Dict[str, Any]:
+    """**미해결 격리 현황.** 준비도와 관리자 화면이 읽는다.
+
+    ⚠️ 「소유자 없음」과 「승인 근거 없이 격리됨」은 다른 사실이다. 앞은 아직 정하지 않은
+      것이고, 뒤는 **한 번 정했다고 적혀 있었으나 근거가 없는** 것이다. 뭉개면 운영자가
+      무엇을 다시 승인해야 하는지 알 수 없다."""
+    try:
+        rows = conn.execute(
+            f"SELECT tenant_id, entity_mode, dataset_contract_key, scope_node_id,"
+            f" claimed_owner_dept_id, quarantined_at FROM {QUARANTINE_TABLE}"
+            f" WHERE resolved_at = '' ORDER BY dataset_contract_key").fetchall()
+    except sqlite3.Error:
+        #: 표가 없다 = 격리된 적이 없다. 이것은 장애가 아니다.
+        return {"unresolved": 0, "by_contract_key": {}, "items": []}
+    items = [{"tenant_id": r[0], "entity_mode": r[1], "dataset_contract_key": r[2],
+              "scope_node_id": r[3], "claimed_owner_dept_id": r[4],
+              "quarantined_at": r[5]} for r in rows]
+    by_key: Dict[str, int] = {}
+    for it in items:
+        k = str(it["dataset_contract_key"])
+        by_key[k] = by_key.get(k, 0) + 1
+    return {"unresolved": len(items), "by_contract_key": by_key, "items": items}
+
+
+def _resolve_quarantine(conn: Any, *, tenant_id: str, entity_mode: str,
+                        dataset_contract_key: str, scope_node_id: str,
+                        binding_id: str, actor: str) -> int:
+    """이 키·범위의 격리를 **재승인 완료로** 해제한다. `declare()` 가 성공할 때만 부른다.
+
+    ★ 해제 조건을 「관리자가 확인했다」로 두지 않는다 — 그러면 다시 자기진술이다.
+      **승인된 결속이 실제로 생겼다**는 사실만이 해제 근거다."""
+    try:
+        cur = conn.execute(
+            f"UPDATE {QUARANTINE_TABLE} SET resolved_at=?, resolved_by=?,"
+            f" resolved_binding_id=? WHERE resolved_at='' AND tenant_id=? AND"
+            f" entity_mode=? AND dataset_contract_key=? AND scope_node_id=?",
+            (_now(), actor, binding_id, tenant_id, entity_mode, dataset_contract_key,
+             scope_node_id))
+        return int(cur.rowcount or 0)
+    except sqlite3.Error:
+        return 0                      # 표가 없다 = 격리된 적이 없다
 
 
 def legacy_unapproved(conn: Any) -> Dict[str, Any]:
@@ -395,6 +521,35 @@ def _revocation_children(event_id: str) -> Tuple[bool, bool]:
         return False, True
 
 
+def _require_active_user(actor_id: str) -> Dict[str, Any]:
+    """행위자가 **실재하고 활성인 사용자**인가. 아니면 거부한다.
+
+    ★ 이 조각은 **모든 소유권 사건**(승인·철회·취소)이 지난다. 임의 문자열이 행위자로
+      들어오는 것을 여기서 막는다 — 그러지 않으면 `actor` 를 아는 사람이면 누구나
+      「원 승인자 본인」을 자칭할 수 있고, 그것은 다시 자기진술이다.
+    ⚠️ 조직 권한 강제(`ORG_ENFORCE`)가 꺼져 있어도 이 검사는 산다. 확정 결과가 아니라
+      **사용자 정본**을 보기 때문이다 — 스위치 하나로 사라지지 않는다."""
+    aid = str(actor_id or "").strip()
+    try:
+        from core.org_directory import org_directory
+        bootstrap = bool(org_directory.is_bootstrap())
+        user = org_directory.get_user(aid) if aid else None
+    except Exception as e:
+        raise OwnershipUnavailable(f"행위자를 확인하지 못했습니다: {e}")
+    if bootstrap:
+        raise OwnershipError(
+            "조직 정본이 아직 없습니다(부서 또는 사용자 0건) — 데이터 소유 결속은 승인할 "
+            "조직이 있어야 승인할 수 있습니다. 부트스트랩 예외는 첫 관리자 생성용이며 "
+            "소유권 승인에는 적용되지 않습니다.")
+    if not user:
+        raise OwnershipError(
+            f"{aid or '(빈 행위자)'} 는 조직 정본에 없는 사용자입니다 — 승인할 수 없습니다.")
+    if str(user.get("status", "active")) != "active":
+        raise OwnershipError(
+            f"{aid} 는 폐지된 사용자입니다 — 폐지가 권한을 남겨 두면 그것은 폐지가 아닙니다.")
+    return user
+
+
 def _require_approval_authority(actor_id: str) -> None:
     """이 사람이 **데이터 표준을 승인할 수 있는가.** 아니면 거부한다.
 
@@ -410,38 +565,21 @@ def _require_approval_authority(actor_id: str) -> None:
       생성 경로에는 같은 우회를 남겼다. 「같은 예외를 두 곳에서 지워야 한다」를 놓친 것이다.
 
     ★ 그래서 네 관문을 **순서대로** 통과해야 한다.
-      ① 조직 정본이 없으면 승인 자체가 성립하지 않는다 — 승인할 «조직» 이 없다.
-      ② 행위자가 **실재하고 활성**인 사용자여야 한다. 이 관문이 핵심 방어다:
-         조직 권한 강제(`ORG_ENFORCE`)가 꺼져 있으면 `resolve_scope` 는 등록 여부와
-         무관하게 전권을 주므로, 확정 결과만 보면 스위치 하나로 검사가 사라진다.
+      ①② 조직 정본이 있고, 행위자가 실재·활성인가(`_require_active_user`).
       ③ **사용자 정본의 권한 플래그**를 직접 본다(`is_admin`/`is_data_admin`).
-         스위치에 좌우되지 않는 유일한 근거다.
+         조직 권한 강제가 꺼져 있으면 `resolve_scope` 는 등록 여부와 무관하게 전권을
+         주므로, 확정 결과만 보면 스위치 하나로 검사가 사라진다.
       ④ 조직도의 **확정 결과**와 교차 확인한다(`can_manage_standard`만 — `unrestricted`
          는 보지 않는다). 정본과 확정 결과가 갈라지면 통과가 아니라 **점검**이다.
 
     ⚠️ 판독 실패를 «통과» 로 접지 않는다 — 승인은 모르면 막아야 하는 자리다."""
     aid = str(actor_id or "").strip()
+    user = _require_active_user(aid)
     try:
         from core.org_directory import org_directory
-        bootstrap = bool(org_directory.is_bootstrap())
-        user = org_directory.get_user(aid) if aid else None
         scope = org_directory.resolve_scope(aid)
     except Exception as e:
         raise OwnershipUnavailable(f"승인 권한을 확인하지 못했습니다: {e}")
-
-    #: ① 조직 미도입. 「아직 아무도 없으니 통과」는 승인 통제에서 가장 위험한 기본값이다.
-    if bootstrap:
-        raise OwnershipError(
-            "조직 정본이 아직 없습니다(부서 또는 사용자 0건) — 데이터 소유 결속은 승인할 "
-            "조직이 있어야 승인할 수 있습니다. 부트스트랩 예외는 첫 관리자 생성용이며 "
-            "소유권 승인에는 적용되지 않습니다.")
-    #: ② 실재·활성.
-    if not user:
-        raise OwnershipError(
-            f"{aid or '(빈 행위자)'} 는 조직 정본에 없는 사용자입니다 — 승인할 수 없습니다.")
-    if str(user.get("status", "active")) != "active":
-        raise OwnershipError(
-            f"{aid} 는 폐지된 사용자입니다 — 폐지가 권한을 남겨 두면 그것은 폐지가 아닙니다.")
     #: ③ 사용자 정본의 권한 플래그. `can_manage_standard` 의 근거와 같은 값이다.
     if not (bool(user.get("is_admin")) or bool(user.get("is_data_admin"))):
         raise OwnershipError(
@@ -524,14 +662,32 @@ def abandon(approval_event_id: str, actor: str, reason: str = "") -> Dict[str, A
         raise OwnershipError("취소할 승인 사건 id 가 필요합니다.")
     if not str(actor or "").strip():
         raise OwnershipError("취소에도 행위자가 필요합니다.")
+    #: ★★★ [4.1c-C P0-2] 앞 판은 **행위자가 비어 있는지만** 봤다. 그래서 승인 사건 id 를
+    #:   아는 임의 호출자가 정상 승인을 「등록 실패」로 취소할 수 있었다 — `revoke()` 에는
+    #:   권한 검증을 넣었는데 여기에는 넣지 않았다. **같은 결과를 내는 두 경로 중 하나만
+    #:   막은** 것이고, 이 파일에서 같은 유형을 이미 세 번 고쳤다.
+    #: ★ 취소 사유도 필수다. 「등록 실패」는 사실이 아닐 수 있고, 사유가 없으면 그것을
+    #:   확인할 방법이 없다.
+    if not str(reason or "").strip():
+        raise OwnershipError(
+            "취소 사유가 필요합니다 — 「왜 취소했는가」가 없으면 정상 승인을 취소한 것과 "
+            "등록 실패를 되돌린 것을 구분할 수 없습니다.")
     from core.decision_ledger import decision_ledger
     ap = _require_ledger_approval_raw(approval_event_id)
+    #: ★★ 실재·활성 사용자는 **언제나** 요구한다. 「원 승인자 본인」을 문자열 일치만으로
+    #:   인정하면, 그 문자열을 아는 사람이면 누구나 본인을 자칭할 수 있다 — 다시 자기진술이다.
+    _require_active_user(actor)
+    #: ★★★ 남의 승인을 취소하려면 **현재** 승인 권한자여야 한다. 본인 승인이면 권한이
+    #:   사라진 뒤에도 되돌릴 수 있게 둔다 — 자기 것을 내리는 것은 권한 축소 방향이고,
+    #:   막으면 잘못 승인한 사람이 스스로 정리할 길이 없어진다.
+    if str(ap.get("actor_id", "")) != str(actor):
+        _require_approval_authority(actor)
     try:
         ev = decision_ledger.append(
             event_type=EVENT_REVOKED, subject_type=SUBJECT_TYPE,
             subject_id=str(ap.get("subject_id", "")), actor_type="user", actor_id=actor,
             decision="REVOKED",
-            rationale=str(reason or "결속 등록 실패 — 승인만 남지 않도록 취소"),
+            rationale=str(reason),
             parent_event_id=str(ap.get("event_id", "")),
             tenant_id=str(ap.get("tenant_id", "") or "tenant_default"),
             enterprise_scope_id=str(ap.get("enterprise_scope_id", "")),
@@ -567,8 +723,18 @@ def dangling_approvals(conn: Any) -> List[Dict[str, Any]]:
         if eid in have:
             continue
         revoked, failed = _revocation_children(eid)
-        if revoked or failed:
-            continue                      # 취소됐거나 판독 실패 — 「승인 대기」가 아니다
+        #: ★★★ [4.1c-C P1-2] **판독 실패를 「해당 없음」으로 접지 않는다.**
+        #:
+        #: ⚠️ 앞 판은 `if revoked or failed: continue` 였다. 그러면 원장 장애 중에는 모든
+        #:   승인이 목록에서 빠지고, 보고가 **「미물질화 0건」** 이라고 말한다 — 아무 문제도
+        #:   없다는 뜻으로 읽힌다. 이 파일에서 세 번 고친 「모르는 것을 없는 것으로 접는」
+        #:   결함과 같다. 보고는 «세지 못했다» 를 말할 수 있어야 한다.
+        if failed:
+            raise OwnershipUnavailable(
+                f"승인({eid})의 철회 여부를 읽지 못해 미물질화 승인을 셀 수 없습니다 — "
+                f"「0건」으로 답하지 않습니다.")
+        if revoked:
+            continue                      # 취소됐다 — 「승인 대기」가 아니다
         out.append({"approval_event_id": eid, "subject_id": ev.get("subject_id", ""),
                     "actor_id": ev.get("actor_id", ""), "at": ev.get("created_at", "")})
     return out
@@ -678,6 +844,10 @@ def declare(conn: Any, *, tenant_id: str, entity_mode: str, dataset_contract_key
         #: DB 제약이 막은 것 — 조회와 삽입 사이에 남이 넣었다(다중 프로세스).
         raise OwnershipIntegrityError(
             f"같은 키·같은 시작시각의 ACTIVE 결속이 이미 있습니다: {e}")
+    #: ★★ 재승인이 끝났으므로 격리를 해제한다. 「승인된 결속이 생겼다」는 사실만이 근거다.
+    _resolve_quarantine(conn, tenant_id=tenant_id, entity_mode=entity_mode,
+                        dataset_contract_key=dataset_contract_key,
+                        scope_node_id=scope_node_id, binding_id=bid, actor=approved_by)
     return {"binding_id": bid, "fingerprint": fp, "owner_dept_id": owner_dept_id,
             "status": ACTIVE, "effective_from": eff_from, "effective_to": eff_to,
             "approval_event_id": str(approval_event_id),
