@@ -776,8 +776,11 @@ class OntologyRuntime:
         root_ctx = ontology_resolve.ResolveContext(
             purpose=ontology_resolve.ROOT_LOOKUP, as_of=instant,
             **self._identity(subject))
+        #: ★ 경로마다 «어느 판에서 온 객체인가» 를 모은다. ⚠️ 경로 지문에는 **넣지
+        #:   않는다** — 판은 결과 쪽 사실이고, 경로 정체성은 위상이다(A rev.2 §3.6).
+        bindings: Dict[str, str] = {}
         for root in sorted(set(roots)):
-            if not self._object_visible(subject, root, root_ctx):
+            if not self._object_visible(subject, root, root_ctx, bindings):
                 continue
             queue = deque([(root, tuple(), (root,))])
             while queue and len(paths) < min(max_paths, MAX_PATHS):
@@ -795,12 +798,12 @@ class OntologyRuntime:
                         **self._identity(subject),
                         relation_id=edge["relation_id"],
                         evidence_refs=tuple(json.loads(edge["evidence_refs_json"]) or ()))
-                    if not self._object_visible(subject, nxt, edge_ctx):
+                    if not self._object_visible(subject, nxt, edge_ctx, bindings):
                         continue
                     next_edges = path_edges + (edge,)
                     next_nodes = path_nodes + (nxt,)
                     if not targets or nxt.object_type in targets:
-                        paths.append(self._path(next_nodes, next_edges))
+                        paths.append(self._path(next_nodes, next_edges, bindings))
                         if len(paths) >= min(max_paths, MAX_PATHS):
                             break
                     queue.append((nxt, next_edges, next_nodes))
@@ -1059,7 +1062,8 @@ class OntologyRuntime:
                 "entity_mode": str(ctx.get("entity_mode", "") or "")}
 
     def _object_visible(self, subject: app_policy.Subject, ref: ObjectRef,
-                        ctx: ontology_resolve.ResolveContext) -> bool:
+                        ctx: ontology_resolve.ResolveContext,
+                        bindings: Optional[dict] = None) -> bool:
         """끝점 하나가 **이 문맥에서 보이는가.**
 
         ## 판정표 (2026-08-20 §7-0 · Supervisor 확정)
@@ -1093,9 +1097,16 @@ class OntologyRuntime:
                 raise OntologyIntegrityError(
                     f"endpoint {ref.key} resolves to snapshot {res.snapshot_id!r} "
                     f"but the relation is sealed to {ctx.required_snapshot_id!r}.")
-            return bool(res.resource_scope
-                        and app_policy.decide(subject, res.resource_scope,
-                                              app_policy.READ).allowed)
+            allowed = bool(res.resource_scope
+                           and app_policy.decide(subject, res.resource_scope,
+                                                 app_policy.READ).allowed)
+            if allowed and bindings is not None and res.snapshot_id:
+                #: ★★★ [2026-08-21 B1] 해석기가 이미 알아낸 **어느 판에서 왔는가**를
+                #:   버리지 않는다.
+                #: ⚠️ 나중에 다시 물으면 그 사이에 판이 바뀔 수 있고, 그러면 화면이
+                #:   가리키는 판과 실제로 본 판이 갈라진다 — 둘 다 그럴듯하다.
+                bindings[ref.key] = res.snapshot_id
+            return allowed
 
         if res.status in (ontology_resolve.NOT_FOUND, ontology_resolve.UNBOUND):
             if ctx.absence_is_normal:
@@ -1127,7 +1138,8 @@ class OntologyRuntime:
         return hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
 
     @staticmethod
-    def _path(nodes: Sequence[ObjectRef], edges: Sequence[dict]) -> dict:
+    def _path(nodes: Sequence[ObjectRef], edges: Sequence[dict],
+              bindings: Optional[dict] = None) -> dict:
         edge_payload = [{
             "relation_id": e["relation_id"], "relation_type_id": e["relation_type_id"],
             "version": e["version"], "evidence_refs": json.loads(e["evidence_refs_json"]),
@@ -1135,8 +1147,13 @@ class OntologyRuntime:
             "effective_to": e["effective_to"], "ledger_correlation_id": e["ledger_correlation_id"],
         } for e in edges]
         payload = {"nodes": [n.to_dict() for n in nodes], "edges": edge_payload}
-        return {**payload, "path_fingerprint": hashlib.sha256(
-            _canonical_json(payload).encode()).hexdigest()}
+        #: ⚠️⚠️ `bindings` 는 **지문 재료가 아니다.** 같은 위상의 경로는 판이 바뀌어도
+        #:   같은 경로이고, 「어느 판을 봤는가」는 결과 쪽 사실이다(A rev.2 §3.6).
+        #:   지문에 넣으면 `as_of` 를 바꿀 때마다 «다른 경로» 가 되어 대조가 무너진다.
+        return {**payload,
+                "path_fingerprint": hashlib.sha256(
+                    _canonical_json(payload).encode()).hexdigest(),
+                "bindings": {n.key: (bindings or {}).get(n.key, "") for n in nodes}}
 
 
 #: ★★★ 제품 전역 인스턴스. **아직 Resolver 가 붙지 않았다.**
