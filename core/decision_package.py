@@ -112,6 +112,18 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
         #: 온톨로지 경로가 있으면 **계보**로 붙인다(없으면 없다고 적는다).
         "impact_path": (path or {}).get("path", []),
         "missing_evidence": (path or {}).get("missing_evidence", []),
+        #: ★★★ [2026-08-21 B1.1-5] **경로 정체성을 싣는다.**
+        #:
+        #: ⚠️⚠️ 없으면 「이 안건은 어느 질의의 어느 경로에서 나왔는가」에 답할 수 없다.
+        #:   결과 지문(`result_fingerprint`)은 **계산**을 재현하지만 **경로**를 재현하지
+        #:   않는다 — 같은 숫자를 다른 길로도 만들 수 있다.
+        #: ★ `evidence` 는 그대로 `decision_case` 에 저장되고 `evidence_hash` 에 들어가므로,
+        #:   여기 실으면 **원장과 발간까지 그대로 따라간다.**
+        #: ⚠️ 경로가 없으면 빈 문자열이다 — 지어내지 않는다.
+        "query_id": str((path or {}).get("query_id", "") or ""),
+        "path_fingerprint": str((path or {}).get("path_fingerprint", "") or ""),
+        #: ⚠️ 계산이 막혔다는 사실도 근거의 일부다. 숨기면 그 보고는 «전부 계산된 것» 으로 읽힌다.
+        "calculation_blocked": bool((path or {}).get("calculation_blocked", False)),
         #: ★★★ 같은 사실을 **사람이 읽는 이름**으로도 싣는다(설계 §12).
         #:   `purchase_orders` 를 경영 브리핑에 그대로 내보내면 읽는 사람은 그것이
         #:   무엇인지 모른 채 「모르는 게 있구나」로만 넘긴다.

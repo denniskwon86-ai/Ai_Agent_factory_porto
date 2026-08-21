@@ -44,8 +44,11 @@ def _scope_obj(node=SCOPE):
         owner_dept_id="org_demo", binding_state=app_policy.BOUND, status="active")
 
 
-def _query(query_id="oq_test", as_of="2026-06-01T00:00:00+00:00"):
-    return {"query_id": query_id, "as_of": as_of, "status": "COMPLETE"}
+def _response(query_id="oq_test", as_of="2026-06-01T00:00:00+00:00", paths=None):
+    """런타임 **응답 봉투.** ★ 어댑터는 이것만 받는다 — 질의와 경로를 따로 받으면
+    서로 다른 실행에서 나온 둘을 섞을 수 있다."""
+    return {"query_id": query_id, "as_of": as_of, "status": "COMPLETE",
+            "paths": [_path()] if paths is None else paths}
 
 
 def _path(*, edges=None, bindings=None, nodes=None, fingerprint="fp_path"):
@@ -70,7 +73,7 @@ def test_질의_정체성이_근거에_실린다():
     """★★★ 없으면 「이 안건은 어느 질의의 어느 경로에서 나왔는가」에 답할 수 없다.
 
     ⚠️ 결과 지문은 **계산**을 재현하지만 **경로**를 재현하지 않는다."""
-    out = A.to_evidence(_query("oq_abc"), _path(fingerprint="fp_xyz"))
+    out = A.to_evidence(_response("oq_abc", paths=[_path(fingerprint="fp_xyz")]))
     assert out["query_id"] == "oq_abc"
     assert out["path_fingerprint"] == "fp_xyz"
     assert out["as_of"] == "2026-06-01T00:00:00+00:00"
@@ -82,35 +85,96 @@ def test_질의_정체성이_근거에_실린다():
 def test_정체성_없는_경로는_거부한다(broken):
     """⚠️ 정체성 없는 경로를 근거로 쓰면 나중에 되짚을 수 없다."""
     with pytest.raises(A.PathAdapterError):
-        A.to_evidence({**_query(), **broken}, _path())
+        A.to_evidence({**_response(), **broken})
 
 
 def test_지문_없는_경로는_거부한다():
     with pytest.raises(A.PathAdapterError):
-        A.to_evidence(_query(), _path(fingerprint=""))
+        A.to_evidence(_response(paths=[_path(fingerprint="")]))
 
 
 # ── ④ 지문 불일치 시 거부 ───────────────────────────────────────────────
 
 def test_지문이_다르면_다른_경로다():
     """★ 어댑터는 지문을 **그대로** 옮긴다 — G5 가 대조할 수 있어야 한다."""
-    a = A.to_evidence(_query(), _path(fingerprint="fp_a"))
-    b = A.to_evidence(_query(), _path(fingerprint="fp_b"))
+    a = A.to_evidence(_response(paths=[_path(fingerprint="fp_a")]))
+    b = A.to_evidence(_response(paths=[_path(fingerprint="fp_b")]))
     assert a["path_fingerprint"] != b["path_fingerprint"]
 
 
-def test_결정_패키지가_지문_불일치를_거부한다(tmp_path):
-    """★★★ **패키지 생성 거부.** 기준선이 다른 두 결과를 비교하지 않는 규칙과 같다.
+def _calc_result(fingerprint="fp_calc", values=None):
+    """`calc_graph.Result` 대역. ★ 제품과 **같은 필드 이름**을 쓴다."""
+    from core import calc_graph as cg
 
-    ⚠️ 경로가 바뀐 줄 모르고 옛 안건에 새 경로를 붙이면, 브리핑의 근거와 실제 경로가
-      갈라진다 — 둘 다 그럴듯하다."""
+    return cg.Result(values=values or {"production_qty": 100.0, "ending_inventory": 10.0,
+                                       "purchase_payment": 5.0, "ending_cash": 7.0,
+                                       "operating_profit": 3.0},
+                     fingerprint=fingerprint, calc_version="1.0.0",
+                     baseline_fingerprint="bl_1", data_kind="DEMO/SYNTHETIC",
+                     assumptions={"fx_rate_pct": 0.0, "lead_time_days": 0.0,
+                                  "power_price_pct": 0.0})
+
+
+def test_정체성이_결정_패키지까지_실린다():
+    """★★★ **B1 의 핵심 증명.** 어댑터 반환값에 필드가 있다는 것만으로는 부족하다 —
+    `decision_package.build()` 가 실제로 그것을 **저장하는지** 봐야 한다.
+
+    ⚠️⚠️ 첫 판의 시험은 두 지문이 다른지 보고 `build` 함수가 **존재하는지**만 봤다.
+      패키지를 만들지도, 저장을 확인하지도 않았다. 그런데 나는 「G5·원장·발간까지
+      유지된다」고 보고했다 — **증명된 것은 어댑터 반환값에 필드가 있다까지**였다."""
     from core import decision_package as dp
 
-    first = A.to_evidence(_query(), _path(fingerprint="fp_a"))
-    second = A.to_evidence(_query(), _path(fingerprint="fp_b"))
-    #: ★ 어댑터가 지문을 싣기 때문에 **대조가 가능해진다** — 그것이 B1 의 요점이다.
-    assert first["path_fingerprint"] != second["path_fingerprint"]
-    assert hasattr(dp, "build"), "decision_package.build 가 없다"
+    evidence = A.to_evidence(_response("oq_keep", paths=[_path(fingerprint="fp_keep")]))
+    base = _calc_result("fp_base")
+    scenario = _calc_result("fp_scn", {"production_qty": 90.0, "ending_inventory": 12.0,
+                                       "purchase_payment": 6.0, "ending_cash": 6.0,
+                                       "operating_profit": 2.0})
+    pkg = dp.build(title="지연 영향", owner="owner@afs.invalid", due="2026-09-01",
+                   base=base, scenario=scenario, path=evidence)
+    assert pkg.evidence["query_id"] == "oq_keep", pkg.evidence
+    assert pkg.evidence["path_fingerprint"] == "fp_keep", pkg.evidence
+
+
+def test_정체성이_원장_저장과_지문까지_따라간다(tmp_path, monkeypatch):
+    """★★★ 근거는 `decision_case` 에 **그대로 저장되고 해시된다.**
+
+    ⚠️ 그러므로 경로 정체성이 바뀌면 `evidence_hash` 도 바뀌어야 한다 — 같은 해시로
+      다른 경로를 가리키면 「같은 근거」라는 말이 거짓이 된다."""
+    from core import decision_case as dc
+    from core import decision_package as dp
+
+    #: ★ 제품이 실제로 쓰는 싱글턴을 쓴다 — conftest 가 격리한 저장소를 그대로 탄다.
+    store = dc.decision_case
+
+    def _pkg(fp):
+        evidence = A.to_evidence(_response("oq_x", paths=[_path(fingerprint=fp)]))
+        return dp.build(title="지연 영향", owner="owner@afs.invalid", due="2026-09-01",
+                        base=_calc_result("fp_base"),
+                        scenario=_calc_result("fp_scn", {"production_qty": 90.0,
+                                                         "ending_inventory": 12.0,
+                                                         "purchase_payment": 6.0,
+                                                         "ending_cash": 6.0,
+                                                         "operating_profit": 2.0}),
+                        path=evidence)
+
+    a, b = _pkg("fp_a"), _pkg("fp_b")
+    case_a = store.create(question=a.question, created_by="owner@afs.invalid",
+                          package={"baseline": "bl_1", "options": ["A", "B"]},
+                          evidence=dict(a.evidence))
+    case_b = store.create(question=b.question, created_by="owner@afs.invalid",
+                          package={"baseline": "bl_1", "options": ["A", "B"]},
+                          evidence=dict(b.evidence))
+    #: ★ 저장된 근거에 정체성이 **그대로** 있다.
+    fetched = store.get(case_a["decision_id"])
+    stored = fetched.get("evidence") or fetched.get("evidence_json")
+    if isinstance(stored, str):
+        import json as _json
+        stored = _json.loads(stored)
+    assert stored and stored.get("path_fingerprint") == "fp_a", stored
+    assert stored.get("query_id") == "oq_x", stored
+    #: ★★★ 경로가 다르면 **근거 지문도 다르다** — 같은 해시로 다른 경로를 가리키지 않는다.
+    assert case_a["evidence_hash"] != case_b["evidence_hash"], (
+        "경로가 달라도 근거 지문이 같다 — 「같은 근거」라는 말이 거짓이 된다")
 
 
 # ── ① 숨겨진 중간 노드 ──────────────────────────────────────────────────
@@ -149,7 +213,7 @@ def test_대외_사유는_구간_수를_말하지_않는다():
         {"relation_id": "r2", "relation_type_id": "AFFECTS",
          "calculation_ref": "CALC.INVENTORY.MATERIAL_SHORTAGE.v1"},
     ]
-    out = A.to_evidence(_query(), _path(edges=blocked_edges))
+    out = A.to_evidence(_response(paths=[_path(edges=blocked_edges)]))
     text = out["blocked_reason"]
     assert text == A.PUBLIC_BLOCKED
     import re
@@ -164,7 +228,7 @@ def test_내부_진단에서는_구간과_사유를_그대로_본다():
     """★ 대조군 — 권한 있는 사람은 **무엇이 왜 막혔는지** 알아야 고칠 수 있다."""
     edges = [{"relation_id": "r1", "relation_type_id": "AFFECTS",
               "calculation_ref": "CALC.LOGISTICS.ARRIVAL_DELAY.v1"}]
-    diag = A.internal_diagnosis(_query(), _path(edges=edges))
+    diag = A.internal_diagnosis(_response(paths=[_path(edges=edges)]), authorize=lambda: True)
     seg = diag["segments"][0]
     assert seg["calculation_ref"] == "CALC.LOGISTICS.ARRIVAL_DELAY.v1"
     assert seg["executable"] is False
@@ -180,7 +244,7 @@ def test_계산이_막히면_완결이_아니다():
       비어 있는 것을 사람은 **「영향이 없다」**로 읽는다."""
     edges = [{"relation_id": "r1", "relation_type_id": "AFFECTS",
               "calculation_ref": "CALC.INVENTORY.MATERIAL_SHORTAGE.v1"}]
-    out = A.to_evidence(_query(), _path(edges=edges))
+    out = A.to_evidence(_response(paths=[_path(edges=edges)]))
     assert out["calculation_blocked"] is True
     assert out["complete"] is False
     assert out["blocked_reason"]
@@ -190,7 +254,7 @@ def test_수치를_0_으로_채우지_않는다():
     """⚠️ 0 은 「영향이 없다」로 읽힌다. **없는 것은 없는 채로** 둔다."""
     edges = [{"relation_id": "r1", "relation_type_id": "AFFECTS",
               "calculation_ref": "CALC.PRODUCTION.REVENUE_TIMING.v1"}]
-    out = A.to_evidence(_query(), _path(edges=edges))
+    out = A.to_evidence(_response(paths=[_path(edges=edges)]))
     for forbidden in ("metrics", "values", "segment_outputs", "result_fingerprint"):
         assert forbidden not in out, f"막혔는데 «{forbidden}» 를 실었다"
 
@@ -198,7 +262,7 @@ def test_수치를_0_으로_채우지_않는다():
 def test_정성_관계는_막힘이_아니다():
     """★ 대조군 — 계산이 **없는** 관계(`FULFILLED_BY_SHIPMENT`)까지 막으면 검사가
     늑대를 외친다."""
-    out = A.to_evidence(_query(), _path())
+    out = A.to_evidence(_response())
     assert out["calculation_blocked"] is False
     assert out["complete"] is True
     assert out["blocked_reason"] == ""
@@ -208,9 +272,9 @@ def test_계약에_없는_참조가_붙어_있으면_막는다():
     """⚠️ 계약에 없는 계산 이름이 관계에 붙어 있는 것은 **조용히 넘길 일이 아니다.**"""
     edges = [{"relation_id": "r1", "relation_type_id": "AFFECTS",
               "calculation_ref": "CALC.MADE.UP.v9"}]
-    out = A.to_evidence(_query(), _path(edges=edges))
+    out = A.to_evidence(_response(paths=[_path(edges=edges)]))
     assert out["calculation_blocked"] is True
-    diag = A.internal_diagnosis(_query(), _path(edges=edges))
+    diag = A.internal_diagnosis(_response(paths=[_path(edges=edges)]), authorize=lambda: True)
     assert "계약에 없는" in diag["segments"][0]["reason"]
 
 
@@ -218,7 +282,7 @@ def test_계약에_없는_참조가_붙어_있으면_막는다():
 
 def test_판이_안_묶인_칸을_드러낸다():
     """★ 빼면 「전부 근거가 있다」로 보이고, 그것이 곧 근거 없는 계보다."""
-    out = A.to_evidence(_query(), _path(bindings={}))
+    out = A.to_evidence(_response(paths=[_path(bindings={})]))
     assert out["missing_evidence"], "근거 없는 칸을 숨겼다"
     assert out["complete"] is False
     #: ★★★ 사람이 읽는 이름으로도 나와야 한다 — 계약키만 주면 안 읽힌다.
@@ -229,7 +293,7 @@ def test_판이_안_묶인_칸을_드러낸다():
 def test_사람이_읽는_이름을_쓴다():
     """⚠️ 기계 이름(`inventory-snapshot`)을 경영진 화면에 그대로 내보내면 읽는 사람은
     그것이 무엇인지 모른 채 「모르는 게 있구나」로만 넘긴다."""
-    out = A.to_evidence(_query(), _path())
+    out = A.to_evidence(_response())
     labels = [s["label"] for s in out["path"]]
     assert labels == ["구매주문 라인", "선적"], labels
 
@@ -238,7 +302,7 @@ def test_모르는_유형은_이름을_지어내지_않는다():
     """★ 표에 없으면 기계 이름을 그대로 둔다 — 지어내면 **틀린 이름이 굳는다.**"""
     nodes = [{"namespace": "dataset", "object_type": "brand-new-thing",
               "object_id": "X-1"}]
-    out = A.to_evidence(_query(), _path(nodes=nodes, edges=[]))
+    out = A.to_evidence(_response(paths=[_path(nodes=nodes, edges=[])]))
     assert out["path"][0]["label"] == "brand-new-thing"
 
 
@@ -283,8 +347,12 @@ def test_계산_판정을_스스로_하지_않는다():
 
 def test_이름표는_닫힌_표다():
     """⚠️ 최소 경로 다섯 유형 밖의 이름을 지어내지 않는다."""
-    assert set(A.LABELS) == {"purchase-order-line", "shipment", "inventory-snapshot",
-                             "production-plan-line", "sales-line"}
+    #: ★★★ [B1.1-4] 열쇠는 `(namespace, object_type)` 이다. `object_type` 만 쓰면 다른
+    #:   namespace 의 같은 이름이 **같은 칸으로 접힌다.**
+    assert set(A.LABELS) == {
+        ("dataset", "purchase-order-line"), ("dataset", "shipment"),
+        ("dataset", "inventory-snapshot"), ("dataset", "production-plan-line"),
+        ("dataset", "sales-line")}
 
 
 def test_계약키_표를_두_벌로_두지_않는다():
@@ -292,8 +360,10 @@ def test_계약키_표를_두_벌로_두지_않는다():
     from core.data_preparation import scope_index as ix
 
     assert set(A._DATASET_BY_TYPE.values()) == set(ix.CONTRACT_OBJECTS)
-    for key, (_ns, object_type, _col) in ix.CONTRACT_OBJECTS.items():
-        assert A._DATASET_BY_TYPE[object_type] == key
+    for key, (ns, object_type, _col) in ix.CONTRACT_OBJECTS.items():
+        #: ⚠️ `namespace` 를 버리면 안 된다 — 계약이 닫힌 지금은 우연히 맞지만,
+        #:   `mdm:material` 같은 것이 열리는 순간 조용히 틀린다.
+        assert A._DATASET_BY_TYPE[(ns, object_type)] == key
 
 
 def test_경로_지문은_판에_흔들리지_않는다(tmp_path):
@@ -320,3 +390,188 @@ def test_경로_지문은_판에_흔들리지_않는다(tmp_path):
     #: ★ 그래도 **결속은 실려 있어야** 한다 — 그것 없이는 근거를 되짚을 수 없다.
     assert march["bindings"]["dataset:shipment:SHP-1"] == "ds_march"
     assert june["bindings"]["dataset:shipment:SHP-1"] == "ds_june"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# B1.1 감사 보정 (2026-08-21)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_봉투_밖의_경로를_붙일_수_없다():
+    """★★★ [P0-2] 첫 판은 `to_evidence(query, path)` 였다. 그러면 호출부가 **서로 다른
+    실행에서 나온 둘을 섞을 수 있다** — 3월 질의에 6월 경로를 붙이는 식으로.
+
+    ⚠️⚠️ 경로 지문은 판에 흔들리지 않게 만들었으므로(A rev.2 §3.6) **모양으로는 구별되지
+      않는다.** 둘 다 개별적으로 멀쩡해서 어댑터가 통과시킨다."""
+    march = _response("oq_march", as_of="2026-03-01T00:00:00+00:00",
+                      paths=[_path(fingerprint="fp_march")])
+    #: 6월 실행의 경로를 3월 봉투에 붙이려는 시도.
+    with pytest.raises(A.PathAdapterError) as err:
+        A.to_evidence(march, path_fingerprint="fp_june")
+    assert "없는 경로" in str(err.value)
+
+
+def test_경로가_여럿이면_아무거나_고르지_않는다():
+    """⚠️ 고르면 실행마다 답이 달라지고, 「이 안건은 어느 경로에서 나왔나」가 흔들린다."""
+    many = _response(paths=[_path(fingerprint="fp_a"), _path(fingerprint="fp_b")])
+    with pytest.raises(A.PathAdapterError):
+        A.to_evidence(many)
+    #: ★ 대조군 — 지문으로 고르면 통과한다.
+    picked = A.to_evidence(many, path_fingerprint="fp_b")
+    assert picked["path_fingerprint"] == "fp_b"
+
+
+def test_같은_유형이_두_번_나와도_판이_사라지지_않는다():
+    """★★★ [P1] `used_snapshots` 를 계약키 열쇠 딕셔너리로 두면, 같은 유형이 경로에 두
+    번 나올 때 **앞 판이 조용히 사라진다.**
+
+    ⚠️ 그러면 「이 답은 어느 판들로 만들었나」가 틀린 채로 남고, 아무도 못 알아챈다."""
+    nodes = [
+        {"namespace": "dataset", "object_type": "shipment", "object_id": "SHP-1"},
+        {"namespace": "dataset", "object_type": "shipment", "object_id": "SHP-2"},
+    ]
+    bindings = {"dataset:shipment:SHP-1": "ds_first",
+                "dataset:shipment:SHP-2": "ds_second"}
+    out = A.to_evidence(_response(paths=[_path(nodes=nodes, edges=[], bindings=bindings)]))
+    used = out["used_snapshots"]
+    assert isinstance(used, list), f"딕셔너리로 두면 판이 사라진다 — {used!r}"
+    assert {u["snapshot_id"] for u in used} == {"ds_first", "ds_second"}, used
+
+
+def test_정량_관계에_계산이_없으면_무결성_장애다():
+    """★★★ [P1] `AFFECTS` 는 계약상 **정량 관계**다(계약의 유일한 정량 관계).
+
+    ⚠️⚠️ `calculation_ref` 없이 들어오면 첫 판은 «정성 관계» 로 보고 **통과시켰다.**
+      그러면 그 관계는 숫자 없이 서고, 화면은 그 자리를 «영향 없음» 으로 그린다."""
+    edges = [{"relation_id": "r1", "relation_type_id": "AFFECTS",
+              "calculation_ref": ""}]
+    with pytest.raises(A.PathIntegrityError):
+        A.to_evidence(_response(paths=[_path(edges=edges)]))
+
+
+def test_정성_관계는_계산이_없어도_된다():
+    """★ 대조군 — 계약상 정량이 아닌 관계까지 막으면 검사가 늑대를 외친다."""
+    out = A.to_evidence(_response())
+    assert out["complete"] is True
+
+
+def test_승인된_계산도_원장을_다시_보고_판정한다(monkeypatch):
+    """★★★ [P1] `cap.executable` 만 읽으면 등록부의 «그때 그랬다» 를 믿는 것이다.
+
+    ⚠️⚠️ **철회는 등록부를 고치지 않는다.** 그래서 §5a 의 `assert_executable()` 을
+      통과시킨다 — 그 안에 원장 재검증이 있다.
+    ★ 검증기가 없으면 실행 가능으로 **표시하지 않는다.** 지금은 아무것도 `APPROVED`
+      가 아니라 결과가 같지만, 승인이 생긴 뒤에 넣으면 **그 사이가 열린다.**"""
+    ref = "CALC.LOGISTICS.ARRIVAL_DELAY.v1"
+    base = calc_capability.get(ref)
+    approved = calc_capability.Capability(
+        **{**base.__dict__, "state": calc_capability.APPROVED,
+           "model_version": "1.0.0", "ledger_event_id": "ev_1", "blocked_reason": ""})
+    monkeypatch.setitem(calc_capability._REGISTRY, ref, approved)
+    edges = [{"relation_id": "r1", "relation_type_id": "AFFECTS",
+              "calculation_ref": ref}]
+    envelope = _response(paths=[_path(edges=edges)])
+
+    #: ① 검증기 없음 → 실행 가능으로 표시하지 않는다.
+    out = A.to_evidence(envelope)
+    assert out["calculation_blocked"] is True, "승인만 보고 통과시켰다"
+
+    #: ② 철회됐다 → 막는다.
+    revoked = A.to_evidence(envelope, ledger_verifier=lambda cap: False)
+    assert revoked["calculation_blocked"] is True
+
+    #: ③ 대조군 — 확인되면 통과한다.
+    ok = A.to_evidence(envelope, ledger_verifier=lambda cap: True)
+    assert ok["calculation_blocked"] is False, ok
+
+
+def test_내부_진단은_권한을_요구한다():
+    """★★★ [B1.1-7] 첫 판은 **주석으로만** 「권한 있는 사람에게만」이라고 적었다.
+
+    ⚠️⚠️ 주석은 통제가 아니다. 구간 수 자체가 정보이므로, 권한 검사 없이 열린 진단은
+      **권한 밖 사람에게 구간이 몇 개인지 알려 준다.**"""
+    envelope = _response()
+    with pytest.raises(A.PathAdapterError):
+        A.internal_diagnosis(envelope, authorize=lambda: False)
+    with pytest.raises(A.PathAdapterError):
+        A.internal_diagnosis(envelope, authorize=None)
+
+    def boom():
+        raise RuntimeError("권한 저장소가 응답하지 않습니다")
+
+    with pytest.raises(A.PathAdapterError) as broken:
+        A.internal_diagnosis(envelope, authorize=boom)
+    assert "확인하지 못했" in str(broken.value)
+
+    #: ★ 대조군 — 권한이 있으면 열린다. 늘 막히면 통제가 아니라 고장이다.
+    opened = A.internal_diagnosis(envelope, authorize=lambda: True)
+    assert opened["segments"], "권한이 있는데도 진단이 비어 있다"
+    assert opened["query_id"] and opened["path_fingerprint"]
+
+
+def test_형제_분기가_서로의_결속을_덮지_않는다(tmp_path):
+    """★★★ [P0-3] `bindings` 딕셔너리 **하나를 모든 분기가 공유**하면, 나중 분기의
+    결속이 앞 분기의 경로 결과를 덮는다.
+
+    ## 어떻게 덮이나
+
+        R ─rel1→ SHP-A ─rel3→ SHP-B ─…      (A 를 거쳐 B 에 닿는 가지)
+        R ─rel2→ SHP-B ─rel4→ 목표          (B 로 바로 가는 가지)
+
+    ⚠️⚠️ BFS 는 깊이 1 을 **전부** 처리한 뒤 깊이 2 로 간다. `SHP-A` 가 먼저 꺼내지면
+      그 가지가 `SHP-B` 를 `rel3` 문맥으로 다시 해석해 **공유 딕셔너리를 덮는다.**
+      그 뒤에 `SHP-B` 가지가 꺼내져 목표에 닿을 때, 그 경로는 자기가 본 적 없는
+      `rel3` 의 판을 근거로 싣게 된다.
+
+    ★ 두 경로 다 그럴듯하게 남는다 — 어느 쪽이 무엇을 봤는지 알 수 없다."""
+    from core.ontology_runtime import RelationProposal
+
+    seen_ctx = {}
+
+    def resolve(ref, ctx):
+        #: ★ 같은 객체를 **관계마다 다른 판**으로 해석한다 — 봉인된 판이 다른 상황.
+        snapshot = f"ds_{ctx.relation_id or 'root'}"
+        seen_ctx.setdefault(ref.key, []).append(snapshot)
+        return ontology_resolve.found(_scope_obj(), snapshot_id=snapshot)
+
+    rt = OntologyRuntime(str(tmp_path / "o.db"), resolve, lambda *a, **k: True)
+    rt.register_relation_type("AFFECTS", "영향을 줌", "AFFECTED_BY", True, "1.0.0",
+                              "model_owner", "2026-01-01T00:00:00Z",
+                              ledger_correlation_id="led-affects")
+    rt.register_constraint("dataset", "shipment", "AFFECTS", "dataset", "shipment",
+                           ["approved delay model"], "model_owner",
+                           "CALC.LOGISTICS.ARRIVAL_DELAY.v1")
+
+    def ref(oid):
+        return ObjectRef("dataset", "shipment", oid)
+
+    def approve(a, b):
+        proposal = RelationProposal(
+            subject=ref(a), relation_type_id="AFFECTS", object=ref(b),
+            tenant_id=TENANT, enterprise_scope_id=SCOPE, entity_mode=MODE,
+            owner_organization_id="org_demo", effective_from="2026-01-01T00:00:00Z",
+            origin="derived", evidence_refs=("SNAPSHOT:LOG-02:v1",),
+            calculation_ref="CALC.LOGISTICS.ARRIVAL_DELAY.v1")
+        row = rt.propose_relation(proposal, "steward", _subject())
+        row = rt.submit(row["relation_id"], "steward", _subject())
+        return rt.approve(row["relation_id"], "governor", "led-1", _subject())
+
+    #: `SHP-A` 가 `SHP-B` 보다 먼저 꺼내지도록 id 를 고른다(정렬 열쇠가 object_id 다).
+    approve("SHP-ROOT", "SHP-A")
+    approve("SHP-ROOT", "SHP-B")
+    approve("SHP-A", "SHP-B")
+    approve("SHP-B", "SHP-TARGET")
+
+    out = rt.find_paths(_subject(), [ref("SHP-ROOT")], ["shipment"], [],
+                        "2026-06-01T00:00:00")
+    assert out["paths"], out
+
+    #: ★★★ 각 경로의 결속은 **그 경로가 실제로 지난 관계**에서 나와야 한다.
+    for path in out["paths"]:
+        by_key = {n["object_id"]: n for n in path["nodes"]}
+        edges = path["edges"]
+        for i, node in enumerate(path["nodes"][1:], start=0):
+            key = f"dataset:shipment:{node['object_id']}"
+            expected = f"ds_{edges[i]['relation_id']}"
+            assert path["bindings"][key] == expected, (
+                f"경로 {[n['object_id'] for n in path['nodes']]} 의 «{node['object_id']}» "
+                f"결속이 {path['bindings'][key]} 다 — 형제 분기가 덮었다(기대 {expected})")

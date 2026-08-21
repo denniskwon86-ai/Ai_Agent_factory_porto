@@ -778,13 +778,19 @@ class OntologyRuntime:
             **self._identity(subject))
         #: ★ 경로마다 «어느 판에서 온 객체인가» 를 모은다. ⚠️ 경로 지문에는 **넣지
         #:   않는다** — 판은 결과 쪽 사실이고, 경로 정체성은 위상이다(A rev.2 §3.6).
-        bindings: Dict[str, str] = {}
+        #:
+        #: ★★★ [2026-08-21 B1.1-1] **결속은 분기마다 따로 든다.**
+        #: ⚠️⚠️ 딕셔너리 하나를 모든 시작점·분기가 공유하면, 같은 객체가 관계마다 다른
+        #:   판으로 해석될 때(봉인된 `required_snapshot_id` 가 다르다) **나중 분기의
+        #:   결속이 앞 분기의 경로 결과를 덮는다.** 두 경로 다 그럴듯하게 남고, 어느
+        #:   쪽이 무엇을 봤는지 알 수 없게 된다.
         for root in sorted(set(roots)):
-            if not self._object_visible(subject, root, root_ctx, bindings):
+            root_bindings: Dict[str, str] = {}
+            if not self._object_visible(subject, root, root_ctx, root_bindings):
                 continue
-            queue = deque([(root, tuple(), (root,))])
+            queue = deque([(root, tuple(), (root,), root_bindings)])
             while queue and len(paths) < min(max_paths, MAX_PATHS):
-                node, path_edges, path_nodes = queue.popleft()
+                node, path_edges, path_nodes, branch = queue.popleft()
                 if len(path_edges) >= max_depth:
                     continue
                 for edge in adjacency.get(node, ()):  # no hidden-node bypass
@@ -798,15 +804,18 @@ class OntologyRuntime:
                         **self._identity(subject),
                         relation_id=edge["relation_id"],
                         evidence_refs=tuple(json.loads(edge["evidence_refs_json"]) or ()))
-                    if not self._object_visible(subject, nxt, edge_ctx, bindings):
+                    #: ★ 분기마다 **복사본**을 들고 간다 — 형제 분기가 서로를 덮지 않게.
+                    next_bindings = dict(branch)
+                    if not self._object_visible(subject, nxt, edge_ctx, next_bindings):
                         continue
                     next_edges = path_edges + (edge,)
                     next_nodes = path_nodes + (nxt,)
                     if not targets or nxt.object_type in targets:
-                        paths.append(self._path(next_nodes, next_edges, bindings))
+                        #: ★ 경로를 확정할 때 **그 분기의 결속만** 봉인한다.
+                        paths.append(self._path(next_nodes, next_edges, next_bindings))
                         if len(paths) >= min(max_paths, MAX_PATHS):
                             break
-                    queue.append((nxt, next_edges, next_nodes))
+                    queue.append((nxt, next_edges, next_nodes, next_bindings))
 
         paths.sort(key=lambda p: (len(p["edges"]), p["path_fingerprint"]))
         query_payload = {
