@@ -24,6 +24,7 @@ import pytest
 
 from core import app_policy
 from core import calc_capability as cc
+from core import demo_readiness as dr
 from core import demo_vertical_slice as dv
 from core import ontology_resolve
 from core import path_calculation as pc
@@ -474,3 +475,106 @@ def test_온톨로지_장애는_503이다(env, monkeypatch):
     monkeypatch.setattr(env["runtime"], "find_paths", boom)
     res = _client(env).post("/api/v1/calculation/path", json=_body(env))
     assert res.status_code == 503, f"{res.status_code} {res.text[:200]}"
+
+
+# ── ⑤ [M0-5] 왜 지금 계산이 안 도는가 — 실패와 0건을 가른다 ────────────────
+
+def _readiness(env, **q):
+    from urllib.parse import urlencode
+    return _data(_client(env).get("/api/v1/calculation/readiness?" + urlencode(q)))
+
+
+def test_준비도가_관문별로_다음_할_일을_말한다(env):
+    """★★★ [M0-5] 계산이 막히면 실행기가 사유를 주지만, 그것은 **시도한 뒤**에야 나온다.
+    운영자가 시연 전에 「지금 무엇이 빠졌나」를 물을 곳이 필요했다."""
+    got = _readiness(env, instance_id=env["instance_id"])
+    by = {g["gate"]: g for g in got["gates"]}
+    assert by["kit"]["state"] == dr.READY
+    assert by["instance"]["state"] == dr.READY
+    assert by["snapshots"]["state"] == dr.READY
+    #: 아직 봉인·승인 전이다 — **사람이 할 일이 남았다**(장애가 아니다).
+    assert by["baseline"]["state"] == dr.NOT_YET
+    assert got["status"] == dr.NOT_YET
+    #: ★ 다음에 할 일 **하나**를 뽑아 준다 — 목록만 주면 어디부터인지 모른다.
+    assert got["next_action"]
+
+
+def test_다_갖추면_준비됨이다(env, monkeypatch):
+    _ready(env, monkeypatch)
+    got = _readiness(env, instance_id=env["instance_id"])
+    assert got["status"] == dr.READY, got["gates"]
+    assert got["counts"]["not_yet"] == 0 and got["counts"]["failed"] == 0
+
+
+def test_앞_관문이_안_서면_뒤는_판정하지_않는다(env):
+    """⚠️ 확인하지 않은 것을 「아직 안 했다」로 적지 않는다 — 앞 관문을 풀면 이미 서
+    있을 수도 있다. 그것을 결론으로 적으면 화면이 없는 일을 시킨다."""
+    got = _readiness(env)          # instance_id 없음
+    by = {g["gate"]: g for g in got["gates"]}
+    assert by["instance"]["state"] == dr.NOT_YET
+    for gate in ("snapshots", "baseline", "capabilities"):
+        assert by[gate]["state"] == "UNKNOWN", by[gate]
+    #: ★ 확인하지 않은 관문은 **남은 수에 넣지 않는다** — 그 수는 사실이 아니다.
+    assert got["counts"]["not_yet"] == 1
+    assert got["counts"]["unknown"] == 3
+
+
+def test_원장을_못_읽으면_미승인이_아니라_실패다(env, monkeypatch):
+    """★★★ **이 파일에서 가장 중요한 회귀.** 장애를 「승인 없음」으로 접으면 운영자는
+    승인을 다시 요청하고, 몇 번을 해도 같다 — 아무도 저장소를 보러 가지 않는다."""
+    from core.decision_ledger import DecisionLedgerError, decision_ledger
+
+    _ready(env, monkeypatch)
+
+    def boom(*a, **kw):
+        raise DecisionLedgerError("ledger unavailable")
+
+    monkeypatch.setattr(decision_ledger, "get_event_strict", boom)
+    got = _readiness(env, instance_id=env["instance_id"])
+    by = {g["gate"]: g for g in got["gates"]}
+    #: 원장을 처음 읽는 관문(기준선)에서 드러난다 — 「봉인 없음」이 아니다.
+    assert by["baseline"]["state"] == dr.FAILED, by["baseline"]
+    assert "다시 시도" in by["baseline"]["next_action"]
+    assert got["status"] == dr.FAILED, "하나라도 실패면 전체가 실패다"
+    #: ★ 그리고 뒤 관문은 **판정하지 않는다** — 원장을 못 읽는데 승인을 논할 수 없다.
+    assert by["capabilities"]["state"] == "UNKNOWN", by["capabilities"]
+
+
+def test_실행_승인_확인_실패도_미승인이_아니다(env, monkeypatch):
+    """⚠️ 「승인이 없다」와 「승인을 확인하지 못했다」를 가른다 — 운영자가 할 일이 다르다."""
+    _ready(env, monkeypatch)
+
+    def boom(ref, verifier=None):
+        raise RuntimeError("ledger index unreadable")
+
+    monkeypatch.setattr(dr.cc, "assert_executable", boom)
+    got = _readiness(env, instance_id=env["instance_id"])
+    by = {g["gate"]: g for g in got["gates"]}
+    assert by["capabilities"]["state"] == dr.FAILED, by["capabilities"]
+    assert got["status"] == dr.FAILED
+
+
+def test_인증판을_못_세면_0건이_아니라_실패다(env, monkeypatch):
+    """⚠️ 「인증판 0건」과 「인증판을 세지 못했다」는 다른 답이다."""
+    _ready(env, monkeypatch)
+
+    def boom(*a, **kw):
+        raise RuntimeError("snapshot table unreadable")
+
+    monkeypatch.setattr(svc_calc.loader, "active_seals", boom)
+    got = _readiness(env, instance_id=env["instance_id"])
+    by = {g["gate"]: g for g in got["gates"]}
+    assert by["snapshots"]["state"] == dr.FAILED
+    #: ★ 그리고 뒤 관문은 **판정하지 않는다** — 자료를 못 읽었는데 기준선을 논할 수 없다.
+    assert by["baseline"]["state"] == "UNKNOWN"
+
+
+def test_남의_인스턴스_준비도는_404다(env):
+    """★ 준비도 응답으로 남의 자원의 존재를 알려 주지 않는다."""
+    other = env["store"].create_instance(
+        kit_id=dv.KIT_ID, version=dv.KIT_VERSION,
+        kit_fingerprint=dv.kit_fingerprint(env["store"]),
+        tenant_id=env["tenant"], scope_node_id="plant-남의공장", entity_mode="REAL")
+    res = _client(env).get(
+        f"/api/v1/calculation/readiness?instance_id={other['instance_id']}")
+    assert res.status_code == 404, res.text[:200]

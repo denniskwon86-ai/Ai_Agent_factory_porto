@@ -45,6 +45,8 @@ from core import app_policy
 from core import ontology_path_adapter as adapter
 from core import path_calculation as pc
 from core import calc_dataset_loader as loader
+from core import demo_readiness
+from core import demo_vertical_slice as dv
 from core import path_calculation_service as svc
 #: ★★ 인스턴스 가시성 판정을 **한 벌만** 쓴다. 같은 판정을 두 벌로 만들면 한쪽만
 #:   고쳐지는 날이 오고, 그날 이 경로만 조용히 헐거워진다.
@@ -192,6 +194,29 @@ def _calculate(req: PathCalcInput, p: Principal) -> Dict[str, Any]:
     except pc.PathCalculationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"evidence": evidence, "result": result}
+
+
+@router.get("/readiness")
+async def readiness(instance_id: str = "", kit_id: str = dv.KIT_ID,
+                    kit_version: str = dv.KIT_VERSION,
+                    p: Principal = Depends(current_principal)):
+    """[M0-5] **왜 지금 계산이 안 도는가** — 관문별로 답한다.
+
+    ★★★ 셋을 가른다: `READY` · `NOT_YET`(사람이 할 일이 남음) · `FAILED`(확인 못 함).
+      그리고 앞 관문이 안 서면 뒤는 **판정하지 않는다**(`UNKNOWN`) — 확인하지 않은
+      것을 결론으로 적으면 화면이 없는 일을 시킨다.
+
+    ⚠️ `instance_id` 를 주면 그 인스턴스로 본다. 없으면 인스턴스 관문에서 멈춘다 —
+      **아무 인스턴스나 골라 주지 않는다**(고르면 그 답이 어느 인스턴스의 것인지 모른다).
+    """
+    assert_identified(p, "경로 계산")
+    inst = None
+    if str(instance_id or "").strip():
+        #: 못 보는 인스턴스는 여기서 404 다 — 준비도 응답으로 존재를 알려 주지 않는다.
+        inst = await asyncio.to_thread(_instance_or_404, p, instance_id)
+    data = await asyncio.to_thread(demo_readiness.evaluate, store,
+                                   instance=inst, kit_id=kit_id, kit_version=kit_version)
+    return {"status": "success", "data": data}
 
 
 @router.post("/path")
