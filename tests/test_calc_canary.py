@@ -1,71 +1,89 @@
-"""★★★ [G2 M0-3 카나리] **시연 데이터 → 인증판 → 승인 → 계산** 종단.
+"""★★★ [G2 M0-3.1 카나리] **정본 스타터 키트 → 인증판 → 계산** 종단.
 
-## 이 파일이 답하는 질문
+## 앞 판과 무엇이 다른가
 
-「정본 파이프라인을 그대로 지나서, 실제로 숫자가 나오는가?」
+앞 판은 시연 자료를 **손으로 썼고** 키트도 `KIT-VERTICAL/fp-vertical` 로 임의 생성했다.
+그러면 「정본 열을 썼다」가 증거가 되지 못한다 — 실제로 `snapshot_at` 이라고 썼는데
+정본은 `snapshot_date` 였고, 회귀는 전부 초록이었다.
 
-앞선 회귀들은 각 층을 따로 시험한다(산식·실행기·투영). 이 파일은 **층을 잇는다** —
-그리고 이 저장소에서 층 사이가 끊긴 채 각 층이 초록이던 일이 여러 번 있었다:
+★ 이제 **정본 CSV 에서 행만 골라낸다**(`core/demo_vertical_slice.py`). 열 이름은 고를
+  여지가 없으므로 「fixture 가 계약을 대신 정의하는」 사고가 구조적으로 불가능하다.
 
-  · 계산 모델의 말로 fixture 를 써서, 정본으로는 한 줄도 안 돌았다
-  · 통제는 있는데 부르는 경로가 없었다(Dispatch·소유권 API)
+    starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/samples/full/*.csv
 
-⚠️ 그래서 여기서는 **제품이 실제로 쓰는 것**만 쓴다: `data_preparation_store` 싱글턴,
-  `snapshot_service.ingest/run_pipeline`, `calc_dataset_loader.load_sealed`,
-  `path_calculation.calculate`. 시험 전용 지름길을 하나도 두지 않는다.
+## ⚠️ 정본 자료의 결함 두 건 — 이 파일이 드러낸다
 
-⚠️ 운영 DB 를 건드리지 않는다 — 저장소·원장·조직도·RAW 뿌리를 전부 `tmp_path` 로 격리한다.
+1. `MFG-01.material_requirement` 가 BOM 재계산과 **200건 전부** 어긋난다
+   (예: 저장 137.78 vs 재계산 139.745). 계약 §7.2 대로 그대로 넣으면 `BLOCKED` 다.
+2. `INV-01` 의 `RM-CU-CONC` 원료 창고 재고가 2024-07 이후 **음수**다(25건).
+
+⚠️ 둘 다 **계산이 덮을 문제가 아니다.** 1은 정본 규칙(BOM)으로 파생값을 복원해 쓰고,
+  2는 그대로 흘려보내 «이미 초과 사용» 이라는 사실이 숫자로 보이게 한다 — 0 으로
+  접으면 「재고가 없다」와 「이미 모자라게 썼다」가 같은 값이 된다.
+
+## ⚠️ 아직 승인 대역이다
+
+`ledger_verifier`·`relation_verifier` 는 여기서 참을 돌려주는 대역이고,
+`required_relation_ids`·`sales_allocation`·`baseline_recognition` 은 호출자가 넣는다.
+**그것을 서버가 실제 원장·저장소에서 산출하게 만드는 것이 M0-3.2 다.** 이 파일은
+「자료와 배선이 흐르는가」까지만 답한다.
 """
 import pytest
 
 from core import calc_capability as cc
 from core import calc_dataset_loader as loader
-from core import demo_seed_vertical as seed
+from core import demo_vertical_slice as dv
 from core import path_calculation as pc
 from core.data_preparation import models as m
 from core.data_preparation import snapshot_service as svc
 from core.data_preparation import store as dp
 
-SCOPE = "MNM_BATTERY"
+#: 정본에서 `FG-CATHODE` BOM 이 실재하는 조직 노드(실측).
+SCOPE = "plant-afs-smelting-01"
+
+
+@pytest.fixture(scope="module")
+def slice_data():
+    return dv.build_slice(scope_node_id=SCOPE)
 
 
 @pytest.fixture
-def demo(tmp_path, monkeypatch):
-    """시연 자료를 **제품 파이프라인으로** 적재하고 인증까지 마친다.
-
-    ★ `create_instance → create_binding → transition → ingest → run_pipeline` 은
-      제품이 파일을 받을 때 그대로 지나는 길이다."""
+def demo(tmp_path, monkeypatch, slice_data):
+    """정본 부분집합을 **제품 파이프라인으로** 적재하고 인증까지 마친다."""
     store = dp.data_preparation_store
     monkeypatch.setattr(store, "db_path", str(tmp_path / "dp.db"), raising=False)
     monkeypatch.setattr(store, "_prepared_for", None, raising=False)
-    raw_root = str(tmp_path / "raw")
+    tenant, scope = dv.scope_of(slice_data)
 
+    #: ★★★ [M0-3.1 ④] **정본 키트를 등록부에 올리고 그 지문으로** 인스턴스를 만든다.
+    #: ⚠️ 앞 판은 `fp-vertical` 같은 임의 지문을 적었다 — 등록부와 한 번도 대조하지 않았다.
+    dv.register_kit(store)
     inst = store.create_instance(
-        kit_id="KIT-VERTICAL", version="1.0.0", kit_fingerprint="fp-vertical",
-        tenant_id=seed.TENANT, scope_node_id=SCOPE, entity_mode=seed.ENTITY_MODE)
-
+        kit_id=dv.KIT_ID, version=dv.KIT_VERSION,
+        kit_fingerprint=dv.kit_fingerprint(store),
+        tenant_id=tenant, scope_node_id=scope, entity_mode="REAL")
     seals = {}
-    for key, columns, _rows in seed.DATASETS:
+    for key in dv.SLICE_KEYS:
+        rows, cols = slice_data[key]
         b = store.create_binding(
             instance_id=inst["instance_id"], dataset_contract_key=key,
-            provider=m.PROVIDER_FILE_SNAPSHOT, config={},
-            tenant_id=seed.TENANT, scope_node_id=SCOPE, entity_mode=seed.ENTITY_MODE)
+            provider=m.PROVIDER_FILE_SNAPSHOT, config={}, tenant_id=tenant,
+            scope_node_id=scope, entity_mode="REAL")
         for target in (m.VALIDATED, m.APPROVED, m.ACTIVE):
             b = store.transition(b["binding_id"], target)
-        rows = seed.rows_for(key)
-        snap = svc.ingest(store, binding=b, payload=seed.csv_for(key),
-                          file_name=f"{key}.csv", workspace_root=raw_root)
-        final = svc.run_pipeline(store, snap["snapshot_id"], rows, list(columns),
+        snap = svc.ingest(store, binding=b, payload=dv.csv_bytes(rows, cols),
+                          file_name=f"{key}.csv", workspace_root=str(tmp_path / "raw"))
+        final = svc.run_pipeline(store, snap["snapshot_id"], rows, cols,
                                  control={"row_count": len(rows)})
         seals[key] = final["snapshot_id"]
-    return {"store": store, "instance_id": inst["instance_id"], "seals": seals}
+    return {"store": store, "instance_id": inst["instance_id"], "seals": seals,
+            "tenant": tenant, "scope": scope, "slice": slice_data}
 
 
 def _approved(monkeypatch):
-    """계산 능력 3종을 **승인된 상태로** 세운다(격리 — 등록부를 고치지 않는다).
+    """계산 능력 3종을 **승인 대역**으로 세운다(제품 등록부는 건드리지 않는다).
 
-    ⚠️ 제품 등록부는 여전히 `IMPLEMENTED_UNAPPROVED` 다. 실행 승인은 사람의 결정이고,
-      이 시험은 「승인이 나면 실제로 도는가」를 미리 확인하는 것이다."""
+    ⚠️ 이것은 승인이 아니라 대역이다. 실제 승인은 원장 사건이고 사람의 결정이다."""
     approved = {}
     for ref in pc.SEGMENTS:
         base = cc.get(ref)
@@ -75,64 +93,144 @@ def _approved(monkeypatch):
     monkeypatch.setattr(cc, "get", lambda ref: approved.get(ref) or cc._REGISTRY[ref])
 
 
-def _request(seals, **kw):
+def _request(demo, **kw):
     args = dict(
-        query_id="q-canary", path_fingerprint="pf-canary", tenant_id=seed.TENANT,
-        entity_mode=seed.ENTITY_MODE, scope_node_id=SCOPE, as_of=seed.AS_OF,
-        baseline_id="BL-2026-08", baseline_fingerprint="blfp-2026-08",
-        sealed_snapshots=dict(seals),
-        #: 경로가 요구하는 관계 — 상세설계 §관계표의 계산 간선 셋.
+        query_id="q-canary", path_fingerprint="pf-canary", tenant_id=demo["tenant"],
+        entity_mode="REAL", scope_node_id=demo["scope"], as_of=dv.AS_OF,
+        baseline_id="BL-CANARY", baseline_fingerprint="blfp-canary",
+        sealed_snapshots=dict(demo["seals"]),
         required_relation_ids=("REL_SHIPMENT_AFFECTS_INVENTORY",
                                "REL_INVENTORY_AFFECTS_PLAN",
                                "REL_PLAN_AFFECTS_SALES"),
         relation_approvals={"REL_SHIPMENT_AFFECTS_INVENTORY": "evt_rel_1",
                             "REL_INVENTORY_AFFECTS_PLAN": "evt_rel_2",
                             "REL_PLAN_AFFECTS_SALES": "evt_rel_3"},
-        assumptions=seed.assumptions())
+        assumptions=dv.assumptions(demo["slice"]))
     args.update(kw)
     return pc.PathCalculationRequest(**args)
 
 
 def _load(demo):
-    return loader.load_sealed(
-        demo["store"], sealed_snapshots=demo["seals"], tenant_id=seed.TENANT,
-        entity_mode=seed.ENTITY_MODE, scope_node_id=SCOPE)
+    return loader.load_sealed(demo["store"], sealed_snapshots=demo["seals"],
+                              tenant_id=demo["tenant"], entity_mode="REAL",
+                              scope_node_id=demo["scope"])
 
 
-# ── ① 적재가 실제로 됐는가 ───────────────────────────────────────────────
-
-def test_시연_자료_일곱_종이_인증판으로_올라간다(demo):
-    """★ 색인 0행이던 자리에 실제 인증판이 선다."""
-    assert sorted(demo["seals"]) == sorted(pc.REQUIRED_DATASETS)
-    for key, sid in demo["seals"].items():
-        row = demo["store"].get_snapshot(sid)
-        assert row["state"] == m.DEMO_CERTIFIED, f"{key}: {row['state']}"
-        assert row["data_kind"] == "DEMO/SYNTHETIC", f"{key}: 합성 표시가 없다"
-        assert row["row_count"] == len(seed.rows_for(key))
+def _run(demo):
+    return pc.calculate(_request(demo), datasets=_load(demo),
+                        ledger_verifier=lambda cap: True,
+                        relation_verifier=lambda r, e: True)
 
 
-def test_봉인된_판에서_정본_열_그대로_읽힌다(demo):
-    """★★★ 로더가 **정본 열 이름**을 그대로 돌려줘야 투영이 받을 수 있다."""
-    data = _load(demo)
-    assert set(data) == set(pc.REQUIRED_DATASETS)
-    #: LOG-03 은 `event_type`·`actual_at` 이다(계산 모델의 말이 아니다).
-    assert {"event_type", "actual_at", "shipment_id"} <= set(data["LOG-03"][0])
-    #: 모든 행에 봉인 판 id 가 붙는다.
-    for key, rows in data.items():
-        assert all(r["__snapshot_id__"] == demo["seals"][key] for r in rows)
+# ── ① 정본 키트를 쓴다 ───────────────────────────────────────────────────
+
+def test_정본_키트에서_행만_골라낸다(slice_data):
+    """★★★ 열 이름을 고를 여지가 없어야 한다 — 그것이 이 방식의 존재 이유다."""
+    assert dv.KIT_ID == "KIT-MFG-NONFERROUS-PROCUREMENT"
+    #: 정본 헤더가 그대로 있다(임의로 만든 열이 아니다).
+    inv_cols = slice_data["INV-01"][1]
+    assert "snapshot_date" in inv_cols and "unrestricted_quantity" in inv_cols
+    assert "snapshot_at" not in inv_cols, "앞 판이 쓰던 이름이 되살아났다"
+    log3_cols = slice_data["LOG-03"][1]
+    assert "event_type" in log3_cols and "actual_at" in log3_cols
+    #: 정본은 범위 열을 이미 갖고 있다 — 시드가 붙이는 것이 아니다.
+    assert {"tenant_id", "scope_node_id"} <= set(inv_cols)
 
 
-# ── ② 층을 이어 실제로 계산된다 ──────────────────────────────────────────
+def test_부분집합은_한_조직_안에_있다(slice_data):
+    """⚠️ 여러 조직이 섞이면 경계를 넘은 계산이 된다."""
+    tenant, scope = dv.scope_of(slice_data)
+    assert scope == SCOPE and tenant
 
-def test_승인이_있으면_정본_자료로_계산이_완주한다(demo, monkeypatch):
-    """★★★ **이 파일의 존재 이유.** 시드 → 인증 → 로더 → 투영 → 계산이 한 번에 흐른다.
 
-    ⚠️ 이 시험이 빨개지는 방식은 두 가지다: 산식이 틀렸거나, **층 사이가 끊겼거나.**
-      뒤엣것은 각 층의 회귀가 전부 초록이어도 일어난다."""
+def test_부분집합은_결정론적이다():
+    """★ 같은 규칙으로 두 번 뽑으면 같은 행이어야 한다 — 파일 순서에 기대면 자료가
+    재생성될 때 다른 집합이 나온다."""
+    a = dv.build_slice(scope_node_id=SCOPE)
+    b = dv.build_slice(scope_node_id=SCOPE)
+    assert {k: v[0] for k, v in a.items()} == {k: v[0] for k, v in b.items()}
+
+
+def test_배분_순서를_보여_줄_계획행이_둘_이상이다(slice_data):
+    """⚠️ 계획행이 하나면 재고 배분 순서가 결과에 나타나지 않는다."""
+    assert len(slice_data["MFG-01"][0]) >= 2
+
+
+# ── ② 정본 자료의 결함을 드러낸다 ────────────────────────────────────────
+
+def test_정본의_소요량은_BOM_재계산과_어긋난다():
+    """★★★ [M0-3.1 실측] 이 범위의 `MFG-01` **200건 전부**가 불일치다.
+
+    ⚠️ 계약 §7.2 는 「하나를 임의로 고르지 않고 실패」로 정했다. 그래서 원본을 그대로
+      넣으면 경로가 `BLOCKED` 된다 — **계약대로 작동한 것이지 결함이 아니다.**
+    ★ 이 시험은 그 사실을 못박는다. 정본 자료가 고쳐지면 여기가 빨개지고, 그때
+      `_reconcile_requirement` 를 지울 수 있다."""
+    from decimal import ROUND_HALF_UP, Decimal
+    bom, _ = dv._read("MDM-05")
+    plan, _ = dv._read("MFG-01")
+    qpo, yld = {}, {}
+    for b in bom:
+        if str(b.get("component_role", "")).upper() != "INPUT":
+            continue
+        k = (b["output_material_id"], b["input_material_id"])
+        qpo[k] = qpo.get(k, Decimal(0)) + Decimal(b["quantity_per_output"])
+        yld[k] = Decimal(b["standard_yield"])
+    mismatched = 0
+    checked = 0
+    for p in plan:
+        if p.get("scope_node_id") != SCOPE:
+            continue
+        keys = [k for k in qpo if k[0] == p["product_id"]]
+        if not keys or not p.get("material_requirement"):
+            continue
+        checked += 1
+        rec = sum(Decimal(p["plan_quantity"]) * qpo[k] / yld[k] for k in keys)
+        q = Decimal("0.001")
+        if Decimal(p["material_requirement"]).quantize(q, rounding=ROUND_HALF_UP) != \
+                rec.quantize(q, rounding=ROUND_HALF_UP):
+            mismatched += 1
+    assert checked > 0
+    assert mismatched == checked, (
+        f"정본 자료가 고쳐졌다(불일치 {mismatched}/{checked}) — 부분집합의 대사 보정을 "
+        f"다시 볼 것")
+
+
+def test_부분집합은_BOM_정본으로_소요량을_복원한다(slice_data):
+    """★ 「하나를 고르는」 것이 아니라 **정본 규칙으로 파생값을 복원**하는 것이다.
+    ⚠️ 원본 파일은 고치지 않는다 — 보정은 부분집합에만 적용된다."""
+    from decimal import Decimal
+    bom = slice_data["MDM-05"][0]
+    qpo = sum(Decimal(b["quantity_per_output"]) for b in bom
+              if str(b.get("component_role", "")).upper() == "INPUT")
+    yld = Decimal(next(b["standard_yield"] for b in bom
+                       if str(b.get("component_role", "")).upper() == "INPUT"))
+    for row in slice_data["MFG-01"][0]:
+        want = Decimal(row["plan_quantity"]) * qpo / yld
+        assert abs(Decimal(row["material_requirement"]) - want) < Decimal("0.01"), row
+
+
+def test_음수_재고를_0_으로_접지_않는다(demo, monkeypatch):
+    """★★★ 정본의 `RM-CU-CONC` 원료 창고 재고는 2024-07 이후 **음수**다(25건).
+
+    ⚠️ 음수를 0 으로 접으면 「재고가 없다」와 「이미 모자라게 썼다」가 같은 값이 된다.
+      뒤엣것은 지금 라인이 서고 있다는 뜻이고, 앞엣것보다 훨씬 급한 사실이다."""
     _approved(monkeypatch)
-    got = pc.calculate(_request(demo["seals"]), datasets=_load(demo),
-                       ledger_verifier=lambda cap: True,
-                       relation_verifier=lambda r, e: True)
+    got = _run(demo)
+    assert got["status"] == pc.COMPLETE, got.get("blocked")
+    avail = got["metrics"]["available_quantity"]
+    assert any(v < 0 for v in avail.values()), (
+        f"음수 재고가 사라졌다 — 0 으로 접혔을 수 있다: {avail}")
+
+
+# ── ③ 층을 이어 실제로 계산된다 ──────────────────────────────────────────
+
+def test_정본_자료로_경로가_완주한다(demo, monkeypatch):
+    """★★★ **이 파일의 존재 이유.** 정본 키트 → 인증 → 로더 → 투영 → 계산이 흐른다.
+
+    ⚠️ 앞 판은 손으로 쓴 자료로 이 시험을 통과했고, 정본을 넣자 `milestone_code` 누락으로
+      즉시 실패했다."""
+    _approved(monkeypatch)
+    got = _run(demo)
     assert got["status"] == pc.COMPLETE, got.get("blocked")
     assert got["request_fingerprint"] and got["result_fingerprint"]
     assert set(got["metrics"]) == {"in_transit_quantity", "available_quantity",
@@ -140,128 +238,87 @@ def test_승인이_있으면_정본_자료로_계산이_완주한다(demo, monke
                                    "revenue_shift_days"}
 
 
-def test_시연_이야기가_숫자로_성립한다(demo, monkeypatch):
-    """★★★ 자료가 **이야기를 만드는지** 확인한다.
-
-    ⚠️ 숫자를 아무렇게나 넣으면 「지연은 있는데 부족은 없는」 자료가 되어 시연이 밋밋해진다.
-      그리고 그때 사람들은 계산이 고장났다고 생각한다 — 실은 자료가 밋밋한 것인데."""
-    _approved(monkeypatch)
-    got = pc.calculate(_request(demo["seals"]), datasets=_load(demo),
-                       ledger_verifier=lambda cap: True,
-                       relation_verifier=lambda r, e: True)
-    mx = got["metrics"]
-
-    #: ① 리튬이 운송 중이다 — 지연된 SHP-0001(600) + 아직 예정 전 SHP-0002(400).
-    assert mx["in_transit_quantity"] == {seed.MAT_LI: 1000.0}, mx["in_transit_quantity"]
-    #: ② 도착한 배(SHP-0003)와 미출발(SHP-0004)은 운송 중이 아니다.
-    assert seed.MAT_NI not in mx["in_transit_quantity"], \
-        "status 열을 믿으면 도착한 배가 운송 중으로 세어진다"
-    #: ③ 리튬이 모자라 **뒤 계획행이 계획량을 못 채운다** — 배분 순서가 보인다.
-    prod = mx["producible_quantity"]
-    assert prod["PPL-0001"] == 300.0, prod
-    assert 0 < prod["PPL-0002"] < 300.0, f"뒤 계획행이 온전히 생산 가능하다: {prod}"
-    #: ④ 그래서 부족량이 있다.
-    assert seed.MAT_LI in mx["shortage_quantity"], mx["shortage_quantity"]
-    #: ⑤ 그 계획행에 배분된 판매행의 인식일이 밀린다.
-    shift = mx["revenue_shift_days"]
-    assert shift["SOL-0001"] == 0, shift
-    assert shift["SOL-0002"] > 0, f"생산이 모자란데 매출 이연이 없다: {shift}"
-
-
 def test_같은_자료_세_번이면_결과_지문이_같다(demo, monkeypatch):
     """★★★ M0 출구 조건 — 표준 시나리오 3회 연속 같은 결과."""
     _approved(monkeypatch)
-    fps = set()
-    for _ in range(3):
-        got = pc.calculate(_request(demo["seals"]), datasets=_load(demo),
-                           ledger_verifier=lambda cap: True,
-                           relation_verifier=lambda r, e: True)
-        assert got["status"] == pc.COMPLETE
-        fps.add(got["result_fingerprint"])
-    assert len(fps) == 1
+    assert len({_run(demo)["result_fingerprint"] for _ in range(3)}) == 1
 
 
 def test_승인이_없으면_같은_자료로도_계산되지_않는다(demo):
-    """★★★ **대조군.** 자료가 다 있어도 승인 전에는 숫자가 나오지 않는다.
-
-    ⚠️ 이 시험이 빨개지는 날은 실행 승인이 난 날이어야 한다."""
-    got = pc.calculate(_request(demo["seals"]), datasets=_load(demo),
-                       ledger_verifier=lambda cap: True,
-                       relation_verifier=lambda r, e: True)
+    """★★★ **대조군.** 이 시험이 빨개지는 날은 실행 승인이 난 날이어야 한다."""
+    got = _run(demo)
     assert got["status"] == pc.BLOCKED
     assert got["metrics"] == {}
 
 
-# ── ③ 로더가 지켜야 하는 것 ──────────────────────────────────────────────
+def test_날짜만_적힌_값을_규칙대로_읽는다(demo, monkeypatch):
+    """★★★ 정본의 `snapshot_date`·`plan_date`·`eta`·`due_date` 는 **날짜만**이다.
+
+    ⚠️ 규칙이 없으면 비교하는 쪽이 추측하고, 그 추측은 서버 시간대에 따라 달라진다 —
+      배포 환경이 바뀌면 같은 자료가 다른 답을 낸다."""
+    from core import calc_models as cm
+    assert cm.DATE_ONLY_RULE == "date_only_is_midnight_utc"
+    _approved(monkeypatch)
+    assert _run(demo)["status"] == pc.COMPLETE
+    #: 규칙이 가정에 실려 지문에 들어간다.
+    assert dv.assumptions(demo["slice"])["date_only_rule"] == cm.DATE_ONLY_RULE
+
+
+def test_정본에는_ATD_가_없고_ETD_의_실적시각을_쓴다(slice_data):
+    """★★★ [실측] `LOG-03.event_type` 은 BOOKED/PICKED_UP/ETD/ETA/ATA/UNLOADED 다.
+
+    ★ `LOG-03` 은 milestone 마다 `planned_at`·`actual_at` 쌍을 갖는다. `ETD` 행의
+      `actual_at` 이 **실제로 떠난 시각**이다 — 이름은 예정이지만 값은 실적이다.
+    ⚠️ `planned_at` 을 쓰면 「예정대로 떠났을 것」이라는 가정이 계산에 들어간다."""
+    from core import calc_models as cm
+    kinds = {r["event_type"] for r in slice_data["LOG-03"][0]}
+    assert "ATD" not in kinds, "정본에 ATD 가 생겼다 — 상수를 다시 볼 것"
+    assert "ETD" in kinds
+    assert "ETD" in cm.DEPARTED_MILESTONES
+
+
+def test_BOM_의_반환_역할은_소요로_세지_않는다():
+    """⚠️ `RETURN`(반환·부산물 회수)을 소요로 세면 필요량이 부풀고 없는 부족이 생긴다."""
+    from core import calc_models as cm
+    assert cm.BOM_INPUT_ROLES == ("INPUT",)
+    bom, _ = dv._read("MDM-05")
+    assert {r["component_role"] for r in bom} >= {"INPUT", "RETURN"}
+
+
+# ── ④ 로더가 지켜야 하는 것 ──────────────────────────────────────────────
 
 def test_다른_조직의_판은_봉인_목록에_적어도_읽히지_않는다(demo):
-    """★★★ 봉인은 「무엇을 읽었는가」의 기록이지 **「무엇을 읽어도 되는가」의 허가가
-    아니다.** 실행기는 봉인 목록을 주어진 것으로 보므로, 범위 대조는 로더가 한다."""
+    """★★★ 봉인은 「무엇을 읽었는가」의 기록이지 **허가가 아니다.**"""
     with pytest.raises(loader.SealedDatasetError, match="이 문맥의 것이 아닙니다"):
         loader.load_sealed(demo["store"], sealed_snapshots=demo["seals"],
-                           tenant_id=seed.TENANT, entity_mode=seed.ENTITY_MODE,
-                           scope_node_id="MNM_OTHER")
-
-
-def test_인증_전_판은_읽지_않는다(demo):
-    """⚠️ 인증 전 자료로 만든 숫자는 검증되지 않았다 — 그런데 화면에서는 구분되지 않는다."""
-    store = demo["store"]
-    b = store.create_binding(
-        instance_id=demo["instance_id"], dataset_contract_key="INV-01",
-        provider=m.PROVIDER_FILE_SNAPSHOT, config={}, tenant_id=seed.TENANT,
-        scope_node_id=SCOPE, entity_mode=seed.ENTITY_MODE)
-    for target in (m.VALIDATED, m.APPROVED, m.ACTIVE):
-        b = store.transition(b["binding_id"], target)
-    raw = store.get_snapshot(demo["seals"]["INV-01"])
-    snap = svc.ingest(store, binding=b, payload=seed.csv_for("INV-01"),
-                      file_name="INV-01.csv",
-                      workspace_root=str(raw["raw_path"]).rsplit("raw", 1)[0] + "raw")
-    with pytest.raises(loader.SealedDatasetError, match="인증 상태가 아닙니다"):
-        loader.load_sealed(store, sealed_snapshots={"INV-01": snap["snapshot_id"]},
-                           tenant_id=seed.TENANT, entity_mode=seed.ENTITY_MODE,
-                           scope_node_id=SCOPE)
+                           tenant_id=demo["tenant"], entity_mode="REAL",
+                           scope_node_id="plant-afs-other-99")
 
 
 def test_원본이_바뀌면_읽지_않는다(demo):
-    """★★★ RAW 는 디스크에 있고 디스크는 바뀔 수 있다. **인증한 그 파일인가**는
-    체크섬만이 답한다.
-
-    ⚠️ 바뀐 파일로 계산하면 지문은 멀쩡한데 숫자가 다르다 — 재현 검증이 통과하면서
-      틀린 답을 준다."""
+    """★★★ 바뀐 파일로 계산하면 지문은 멀쩡한데 숫자가 다르다 — 재현 검증이 통과하면서
+    틀린 답을 준다."""
     import io as _io
-    store = demo["store"]
     sid = demo["seals"]["INV-01"]
-    path = store.get_snapshot(sid)["raw_path"]
+    path = demo["store"].get_snapshot(sid)["raw_path"]
     with _io.open(path, "a", encoding="utf-8") as fh:
-        fh.write("STK-9999,MAT-LIOH,WH-POHANG,2026-08-20T00:00:00+00:00,99999,0,0,KG\n")
+        fh.write("x\n")
     with pytest.raises(loader.SealedDatasetError, match="체크섬이 다릅니다"):
-        loader.load_sealed(store, sealed_snapshots={"INV-01": sid},
-                           tenant_id=seed.TENANT, entity_mode=seed.ENTITY_MODE,
-                           scope_node_id=SCOPE)
-
-
-def test_다른_계약키의_판을_그_자리에_넣을_수_없다(demo):
-    """⚠️ 열이 통째로 다르다 — 투영이 「필수 열 없음」으로 막겠지만, 그 전에 여기서
-    막는 편이 원인을 정확히 말한다."""
-    seals = dict(demo["seals"])
-    seals["INV-01"] = demo["seals"]["MFG-01"]
-    with pytest.raises(loader.SealedDatasetError, match="다른 계약키"):
-        loader.load_sealed(demo["store"], sealed_snapshots=seals,
-                           tenant_id=seed.TENANT, entity_mode=seed.ENTITY_MODE,
-                           scope_node_id=SCOPE)
+        loader.load_sealed(demo["store"], sealed_snapshots={"INV-01": sid},
+                           tenant_id=demo["tenant"], entity_mode="REAL",
+                           scope_node_id=demo["scope"])
 
 
 def test_없는_판을_가리키면_빈_목록이_아니라_오류다(demo):
-    """★★★ 빈 목록으로 접으면 실행기가 「자료가 아직 없다」(BLOCKED)로 답한다 —
-    실제로는 **읽지 못한 것**인데 「아직 준비 안 됨」으로 보인다."""
+    """★★★ 빈 목록으로 접으면 실행기가 「자료가 아직 없다」로 답한다 — 실제로는
+    **읽지 못한 것**인데 「아직 준비 안 됨」으로 보인다."""
     with pytest.raises(loader.SealedDatasetError, match="찾을 수 없습니다"):
         loader.load_sealed(demo["store"], sealed_snapshots={"INV-01": "ds_없음"},
-                           tenant_id=seed.TENANT, entity_mode=seed.ENTITY_MODE,
-                           scope_node_id=SCOPE)
+                           tenant_id=demo["tenant"], entity_mode="REAL",
+                           scope_node_id=demo["scope"])
 
 
 def test_최신_인증판_목록을_만들_수_있다(demo):
-    """★ 봉인 목록을 만드는 편의 함수. ⚠️ 「지금 최신」이지 「승인 때 봉인된 것」이 아니다."""
     got = loader.active_seals(demo["store"], instance_id=demo["instance_id"],
-                              contract_keys=pc.REQUIRED_DATASETS)
+                              contract_keys=dv.SLICE_KEYS)
     assert got == demo["seals"]

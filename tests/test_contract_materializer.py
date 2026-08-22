@@ -45,13 +45,26 @@ ROWS = [{"arrived_at": "2026-01-05", "material_code": "M1", "quantity": "10"},
         {"arrived_at": "2026-01-06", "material_code": "M2", "quantity": "5"}]
 
 
+def _reg_kit(store, kit_id="k", version="1.0.0"):
+    """시험용 키트를 **등록부에 올리고** 지문을 돌려준다.
+
+    ★★★ [M0-3.1 ④] `create_instance` 는 등록된 판본만 받는다 — 임의 지문으로 인증판을
+      쌓으면 「어느 계약의 판인가」에 답할 수 없다. 지문은 손으로 적지 않고 등록 결과에서
+      읽는다."""
+    store.upsert_kit_version(
+        kit_id=kit_id, version=version, name=f"{kit_id} 시험용", mode="DEMO/SYNTHETIC",
+        source_path=f"{kit_id}.test.json", fingerprint_value=f"fp-test-{kit_id}",
+        profile={"datasets": []})
+    return store.get_kit_version(kit_id, version)["fingerprint"]
+
+
 @pytest.fixture
 def dp(tmp_path):
     return DataPreparationStore(db_path=str(tmp_path / "dp.db"))
 
 
 def _instance(dp, *, scope=SCOPE, tenant=TENANT, mode=MODE):
-    return dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+    return dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint=_reg_kit(dp),
                               tenant_id=tenant, scope_node_id=scope, entity_mode=mode)
 
 

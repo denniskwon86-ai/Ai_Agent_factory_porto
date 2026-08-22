@@ -18,6 +18,19 @@ from core.data_preparation import models as m
 from core.data_preparation.store import DataPreparationStore
 
 
+def _reg_kit(store, kit_id="k", version="1.0.0"):
+    """시험용 키트를 **등록부에 올리고** 지문을 돌려준다.
+
+    ★★★ [M0-3.1 ④] `create_instance` 는 등록된 판본만 받는다 — 임의 지문으로 인증판을
+      쌓으면 「어느 계약의 판인가」에 답할 수 없다. 지문은 손으로 적지 않고 등록 결과에서
+      읽는다."""
+    store.upsert_kit_version(
+        kit_id=kit_id, version=version, name=f"{kit_id} 시험용", mode="DEMO/SYNTHETIC",
+        source_path=f"{kit_id}.test.json", fingerprint_value=f"fp-test-{kit_id}",
+        profile={"datasets": []})
+    return store.get_kit_version(kit_id, version)["fingerprint"]
+
+
 @pytest.fixture
 def store(tmp_path):
     return DataPreparationStore(db_path=str(tmp_path / "dp.db"))
@@ -169,7 +182,9 @@ def test_a_kit_mode_outside_the_list_is_refused(store):
 
 # ── Kit Instance ─────────────────────────────────────────────────────────
 def _instance(store, **kw):
-    base = dict(kit_id="k1", version="1.0.0", kit_fingerprint="f",
+    #: ★ 등록된 판본만 인스턴스가 된다(M0-3.1 ④) — 지문은 등록부에서 온다.
+    base = dict(kit_id="k1", version="1.0.0",
+                kit_fingerprint=_reg_kit(store, "k1"),
                 tenant_id="t1", scope_node_id="n1", entity_mode="REAL")
     base.update(kw)
     return store.create_instance(**base)
@@ -306,7 +321,7 @@ def test_another_scope_is_hidden_as_404(client, monkeypatch):
     「그 조직에 그런 자원이 있다」를 알려 주는 신호가 된다."""
     monkeypatch.setattr(dp, "_ctx", _ctx_stub())
     monkeypatch.setattr(dp, "_visible_scopes", lambda p: ["n_mine"])
-    made = dp.store.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+    made = dp.store.create_instance(kit_id="k", version="1.0.0", kit_fingerprint=_reg_kit(dp.store),
                                     tenant_id="tenant_default", scope_node_id="n_theirs",
                                     entity_mode="REAL")
     missing = client.get("/api/v1/data-preparation/instances/ki_없는것",
@@ -322,7 +337,7 @@ def test_a_state_conflict_is_409(client, monkeypatch):
     고쳐 보려 한다."""
     monkeypatch.setattr(dp, "_ctx", _ctx_stub())
     monkeypatch.setattr(dp, "_visible_scopes", lambda p: ["n1"])
-    inst = dp.store.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+    inst = dp.store.create_instance(kit_id="k", version="1.0.0", kit_fingerprint=_reg_kit(dp.store),
                                     tenant_id="tenant_default", scope_node_id="n1",
                                     entity_mode="REAL")
     b = dp.store.create_binding(
@@ -339,7 +354,7 @@ def test_a_state_conflict_is_409(client, monkeypatch):
 def test_an_unknown_action_is_422(client, monkeypatch):
     monkeypatch.setattr(dp, "_ctx", _ctx_stub())
     monkeypatch.setattr(dp, "_visible_scopes", lambda p: ["n1"])
-    inst = dp.store.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+    inst = dp.store.create_instance(kit_id="k", version="1.0.0", kit_fingerprint=_reg_kit(dp.store),
                                     tenant_id="tenant_default", scope_node_id="n1",
                                     entity_mode="REAL")
     b = dp.store.create_binding(

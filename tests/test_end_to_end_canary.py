@@ -54,6 +54,19 @@ FIELDS = [{"name": "quantity", "type": "number", "required": False,
            "classification": "INTERNAL"}]
 
 
+def _reg_kit(store, kit_id="k", version="1.0.0"):
+    """시험용 키트를 **등록부에 올리고** 지문을 돌려준다.
+
+    ★★★ [M0-3.1 ④] `create_instance` 는 등록된 판본만 받는다 — 임의 지문으로 인증판을
+      쌓으면 「어느 계약의 판인가」에 답할 수 없다. 지문은 손으로 적지 않고 등록 결과에서
+      읽는다."""
+    store.upsert_kit_version(
+        kit_id=kit_id, version=version, name=f"{kit_id} 시험용", mode="DEMO/SYNTHETIC",
+        source_path=f"{kit_id}.test.json", fingerprint_value=f"fp-test-{kit_id}",
+        profile={"datasets": []})
+    return store.get_kit_version(kit_id, version)["fingerprint"]
+
+
 def _contract():
     """계약을 **실제 컴파일러로** 만든다 — 손으로 적으면 시험만 아는 모양이 생긴다."""
     from core.host_contract_compiler import compile_contract
@@ -184,7 +197,7 @@ def _step_source(dp, raw_root, *, mode=MODE):
       매 요청 범위를 대조하므로, **Preview 가 읽을 판은 SYNTHETIC 문맥에 있어야 한다.**
     ⚠️ 그래서 `REAL` 인증판은 Preview 에서 보이지 않는다 — 그것이 「Preview 에서 본
       것은 운영 기준선이 되지 않는다」의 실제 구현이다."""
-    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint=_reg_kit(dp),
                               tenant_id=TENANT, scope_node_id=SCOPE, entity_mode=mode)
     b = dp.create_binding(instance_id=inst["instance_id"],
                           dataset_contract_key=CONTRACT_KEY,
@@ -553,7 +566,7 @@ def test_a_dataset_with_no_certified_snapshot_still_counts(canary, dp):
 
     contract = _contract()
     #: 결속만 만들고 **판은 올리지 않는다.**
-    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint=_reg_kit(dp),
                               tenant_id=TENANT, scope_node_id=SCOPE,
                               entity_mode=ap.ENTITY_MODE_SYNTHETIC)
     b = dp.create_binding(instance_id=inst["instance_id"],
@@ -621,7 +634,7 @@ def test_an_empty_slot_does_not_collapse_to_an_empty_set(canary, dp):
     from core.baseline_build import fingerprint_for
 
     contract = _contract()
-    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint=_reg_kit(dp),
                               tenant_id=TENANT, scope_node_id=SCOPE,
                               entity_mode=ap.ENTITY_MODE_SYNTHETIC)
     b = dp.create_binding(instance_id=inst["instance_id"],

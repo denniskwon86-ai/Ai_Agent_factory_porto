@@ -67,10 +67,10 @@ def _datasets(**over):
              "actual_at": "2026-08-01T00:00:00+00:00"}]),
         "INV-01": _rows("INV-01", [
             {"material_id": "LIOH", "location_id": "WH1",
-             "snapshot_at": "2026-08-20T00:00:00+00:00",
+             "snapshot_date": "2026-08-20T00:00:00+00:00",
              "unrestricted_quantity": "32.4325"},
             {"material_id": "NIOH", "location_id": "WH1",
-             "snapshot_at": "2026-08-20T00:00:00+00:00",
+             "snapshot_date": "2026-08-20T00:00:00+00:00",
              "unrestricted_quantity": "400"}]),
         "MFG-01": _rows("MFG-01", [
             {"plan_line_id": "PL-1", "product_id": "FG-CATHODE",
@@ -280,10 +280,10 @@ def test_가정이_바뀌면_질문_지문이_바뀐다(monkeypatch):
     a = pc.calculate(_req(), datasets=_datasets(), ledger_verifier=_ok_ledger,
                      relation_verifier=_ok_relation)
     inv = [{"material_id": "LIOH", "location_id": "WH1",
-            "snapshot_at": "2026-08-20T00:00:00+00:00",
+            "snapshot_date": "2026-08-20T00:00:00+00:00",
             "unrestricted_quantity": "32.4325", "reserved_quantity": "0"},
            {"material_id": "NIOH", "location_id": "WH1",
-            "snapshot_at": "2026-08-20T00:00:00+00:00",
+            "snapshot_date": "2026-08-20T00:00:00+00:00",
             "unrestricted_quantity": "400", "reserved_quantity": "0"}]
     #: ★ `reserved_quantity_zero` 가정만 뺀다(재고 행에 실제 값이 있으므로 계산은 된다).
     #:   ⚠️ 가정 묶음을 통째로 갈아 끼우면 `sales_allocation` 까지 빠져 「기준선 부족」으로
@@ -318,9 +318,9 @@ def test_산식_판이_바뀌면_결과_지문이_바뀐다(monkeypatch):
                      relation_verifier=_ok_relation)
     #: 값이 달라지는 변경을 준다(재고를 늘린다) — 질문은 같고 답이 다르다.
     inv = [{"material_id": "LIOH", "location_id": "WH1",
-            "snapshot_at": "2026-08-20T00:00:00+00:00", "unrestricted_quantity": "999"},
+            "snapshot_date": "2026-08-20T00:00:00+00:00", "unrestricted_quantity": "999"},
            {"material_id": "NIOH", "location_id": "WH1",
-            "snapshot_at": "2026-08-20T00:00:00+00:00", "unrestricted_quantity": "999"}]
+            "snapshot_date": "2026-08-20T00:00:00+00:00", "unrestricted_quantity": "999"}]
     b = pc.calculate(_req(), datasets=_datasets(**{"INV-01": inv}),
                      ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
     assert a["request_fingerprint"] == b["request_fingerprint"], "질문이 달라졌다"
@@ -551,7 +551,7 @@ def test_정본_열이_하나라도_없으면_추측하지_않고_막는다(monk
     코드 한 줄의 추측이 된다."""
     _approved(monkeypatch)
     inv = [{"material_id": "LIOH", "location_id": "WH1",
-            "snapshot_at": "2026-08-20T00:00:00+00:00"}]      # 수량 열이 없다
+            "snapshot_date": "2026-08-20T00:00:00+00:00"}]      # 수량 열이 없다
     got = pc.calculate(_req(), datasets=_datasets(**{"INV-01": inv}),
                        ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
     assert got["status"] == pc.BLOCKED

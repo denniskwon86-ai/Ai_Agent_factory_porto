@@ -328,8 +328,21 @@ class DataPreparationStore:
     def create_instance(self, *, kit_id: str, version: str, kit_fingerprint: str,
                         tenant_id: str, scope_node_id: str, entity_mode: str,
                         label: str = "", created_by: str = "") -> Dict[str, Any]:
-        """키트를 조직에 적용한다. **문맥 세 값이 없으면 만들지 않는다.**"""
+        """키트를 조직에 적용한다. **문맥 세 값이 없으면 만들지 않는다.**
+
+        ## ★★★ [M0-3.1] 등록된 키트 판본만 쓸 수 있다
+
+        ⚠️⚠️ 앞 판은 `kit_id`·`version`·`kit_fingerprint` 를 **그대로 받아 적었다.** 그래서
+          시험이 `KIT-VERTICAL / fp-vertical` 같은 **임의 키트를 만들어 인증**할 수 있었고,
+          그 위에서 「정본 열을 썼다」고 보고했다 — 등록부와 한 번도 대조하지 않은 채로.
+
+        ★ 이제 등록부(`kit_registry_versions`)에서 그 판본을 찾고 **지문까지 대조**한다.
+          지문이 다르면 그것은 같은 이름의 **다른 키트**다.
+
+        ⚠️ 등록되지 않은 키트는 거부한다. 「등록은 나중에」로 두면 정본이 아닌 계약으로
+          인증판이 쌓이고, 그 판들은 나중에 어느 계약의 것인지 말할 수 없다."""
         m.assert_context(tenant_id, scope_node_id, entity_mode)
+        self._assert_registered_kit(kit_id, version, kit_fingerprint)
         now = _now()
         row = {"instance_id": f"ki_{uuid.uuid4().hex[:14]}", "kit_id": kit_id,
                "version": version, "kit_fingerprint": kit_fingerprint,
@@ -341,6 +354,31 @@ class DataPreparationStore:
             conn.execute(f"INSERT INTO kit_instances ({cols}) VALUES "
                          f"({', '.join('?' * len(row))})", tuple(row.values()))
         return dict(row)
+
+    def _assert_registered_kit(self, kit_id: str, version: str,
+                               kit_fingerprint: str) -> None:
+        """등록부에 있는 판본인가, 그리고 **지문이 같은가.**
+
+        ⚠️ 지문을 안 보면 같은 이름의 다른 계약으로 인증판이 쌓인다 — 나중에 그 판이
+          어느 계약의 것인지 말할 수 없다."""
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT kit_id, version, fingerprint, status FROM kit_registry_versions "
+                "WHERE kit_id=? AND version=?", (kit_id, version)).fetchone()
+        if row is None:
+            raise m.DataPreparationError(
+                f"등록되지 않은 키트 판본입니다: {kit_id}/{version} — 키트를 먼저 "
+                f"등록해야 합니다(임의 계약으로 인증판을 쌓지 않습니다).")
+        want = str(dict(row).get("fingerprint", "") or "")
+        got = str(kit_fingerprint or "")
+        if want and got and want != got:
+            raise m.DataPreparationError(
+                f"키트 지문이 등록부와 다릅니다({kit_id}/{version}): 등록 {want[:12]}… "
+                f"요청 {got[:12]}… — 같은 이름의 다른 계약입니다.")
+        if want and not got:
+            raise m.DataPreparationError(
+                f"키트 지문이 없습니다({kit_id}/{version}) — 어느 판본을 적용하는지 "
+                f"적지 않고 인스턴스를 만들지 않습니다.")
 
     def get_instance(self, instance_id: str) -> Optional[Dict[str, Any]]:
         with self.transaction() as conn:

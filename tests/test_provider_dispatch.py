@@ -21,6 +21,19 @@ from core.data_preparation import readiness as r
 NOW = "2026-08-18T00:00:00+00:00"
 
 
+def _reg_kit(store, kit_id="k", version="1.0.0"):
+    """시험용 키트를 **등록부에 올리고** 지문을 돌려준다.
+
+    ★★★ [M0-3.1 ④] `create_instance` 는 등록된 판본만 받는다 — 임의 지문으로 인증판을
+      쌓으면 「어느 계약의 판인가」에 답할 수 없다. 지문은 손으로 적지 않고 등록 결과에서
+      읽는다."""
+    store.upsert_kit_version(
+        kit_id=kit_id, version=version, name=f"{kit_id} 시험용", mode="DEMO/SYNTHETIC",
+        source_path=f"{kit_id}.test.json", fingerprint_value=f"fp-test-{kit_id}",
+        profile={"datasets": []})
+    return store.get_kit_version(kit_id, version)["fingerprint"]
+
+
 def _binding(state=m.ACTIVE):
     return {"binding_id": "b1", "state": state, "tenant_id": "t1",
             "scope_node_id": "n1", "entity_mode": "REAL"}
@@ -365,7 +378,7 @@ def _h(tok):
 
 def _source(dp, raw_root, *, scope=SCOPE, tenant=TENANT, mode=MODE, certify=True):
     """그 계약키를 제공하는 원천 하나 — 필요하면 인증판까지."""
-    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint="f",
+    inst = dp.create_instance(kit_id="k", version="1.0.0", kit_fingerprint=_reg_kit(dp),
                               tenant_id=tenant, scope_node_id=scope, entity_mode=mode)
     b = dp.create_binding(instance_id=inst["instance_id"],
                           dataset_contract_key=CONTRACT_KEY,

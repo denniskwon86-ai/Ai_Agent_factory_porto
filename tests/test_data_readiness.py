@@ -18,6 +18,19 @@ from core.data_preparation import readiness as r
 NOW = "2026-08-18T00:00:00+00:00"
 
 
+def _reg_kit(store, kit_id="k", version="1.0.0"):
+    """시험용 키트를 **등록부에 올리고** 지문을 돌려준다.
+
+    ★★★ [M0-3.1 ④] `create_instance` 는 등록된 판본만 받는다 — 임의 지문으로 인증판을
+      쌓으면 「어느 계약의 판인가」에 답할 수 없다. 지문은 손으로 적지 않고 등록 결과에서
+      읽는다."""
+    store.upsert_kit_version(
+        kit_id=kit_id, version=version, name=f"{kit_id} 시험용", mode="DEMO/SYNTHETIC",
+        source_path=f"{kit_id}.test.json", fingerprint_value=f"fp-test-{kit_id}",
+        profile={"datasets": []})
+    return store.get_kit_version(kit_id, version)["fingerprint"]
+
+
 def _binding(state=m.ACTIVE, **kw):
     base = {"binding_id": "b1", "state": state, "tenant_id": "t1",
             "scope_node_id": "n1", "entity_mode": "REAL"}
@@ -439,9 +452,18 @@ def test_an_unreadable_kit_refuses_to_judge_instead_of_saying_ready(client):
 
     ⚠️ 빈 요구사항으로 판정하면 아무 데이터도 없는 인스턴스가 「전부 준비됨」으로
       나온다 — 0/0 은 100% 가 아니다."""
+    #: ★★★ [M0-3.1 ④] 인스턴스는 **등록된 키트로만** 만들 수 있다. 그래서 「읽을 수 없는
+    #:   키트」는 «등록되지 않은 이름» 이 아니라 **인스턴스를 만든 뒤 판본이 사라진 것**으로
+    #:   재현한다 — 키트 폐기는 실제로 일어나고, 그때 옛 인스턴스가 남는다.
+    #: ⚠️ 앞 판은 처음부터 없는 키트 이름을 적었는데, 그 길은 이제 인스턴스 생성에서
+    #:   막힌다(임의 계약으로 인증판을 쌓지 못하게 했다).
+    kid, ver = "폐기될키트", "9.9.9"
     orphan = dp.store.create_instance(
-        kit_id="없는키트", version="9.9.9", kit_fingerprint="f",
+        kit_id=kid, version=ver, kit_fingerprint=_reg_kit(dp.store, kid, ver),
         tenant_id="tenant_default", scope_node_id="n_mine", entity_mode="REAL")
+    with dp.store.transaction() as conn:
+        conn.execute("UPDATE kit_registry_versions SET status='retired' "
+                     "WHERE kit_id=? AND version=?", (kid, ver))
     r = _readiness(client, orphan["instance_id"])
     assert r.status_code == 503, r.text
 

@@ -103,21 +103,46 @@ def _text(row: Mapping[str, Any], key: str, *, where: str) -> str:
     return val
 
 
-def _utc(text: str, *, where: str) -> datetime:
-    """시각을 UTC 로 읽는다. **시간대 없는 값은 거부한다.**
+#: ★★★ [M0-3.1] **날짜-only 값의 업무 기준시각 규칙.**
+#:
+#: 정본 자료의 `snapshot_date`·`plan_date`·`eta`·`due_date` 는 **날짜만**이다
+#: (`2023-08-31`). 시각이 없으므로 비교하려면 하루 중 어느 순간인지 정해야 한다.
+#:
+#: ⚠️⚠️ 이것을 규칙 없이 두면 **비교하는 쪽이 추측**한다. 그리고 그 추측은 서버
+#:   시간대에 따라 달라져, 배포 환경이 바뀌면 같은 자료가 다른 답을 낸다.
+#: ★ 그래서 규칙을 하나 못박는다: **날짜만인 값은 그 날의 00:00:00 UTC 로 읽는다.**
+#:   ⚠️ 이것은 업무적으로 「그 날이 시작하는 순간」이라는 뜻이다. 재고 스냅숏처럼
+#:     「그 날 마감 시점」을 뜻하는 자료가 섞이면 하루가 어긋난다 — 그 경우 자료 쪽에서
+#:     시각을 넣어야지, 여기서 자료 종류마다 다르게 해석하면 안 된다(그러면 규칙이
+#:     보이지 않는 곳으로 숨는다).
+DATE_ONLY_RULE = "date_only_is_midnight_utc"
+_DATE_ONLY_LEN = len("2026-08-31")
 
-    ⚠️ 시간대 없는 시각을 받아 두면 나중에 비교하는 쪽이 추측하고, 그 추측은 서버
-      시간대에 따라 달라진다 — 배포 환경이 바뀌면 계산 결과가 바뀐다."""
+
+def _utc(text: str, *, where: str) -> datetime:
+    """시각을 UTC 로 읽는다. **시간대 없는 «시각» 은 거부하고, 날짜-only 는 규칙으로 읽는다.**
+
+    ⚠️ 둘을 가르는 이유: `2026-08-31` 은 「시각을 적지 않은 날짜」이고,
+      `2026-08-31T14:00:00` 은 「시각을 적었는데 시간대를 빠뜨린 것」이다. 앞은 규칙으로
+      읽을 수 있지만 뒤는 **어느 시간대인지 아무도 모른다.**"""
     raw = str(text or "").strip()
     if not raw:
         raise CalcInputError(f"{where}: 시각이 비어 있습니다.")
+    if len(raw) == _DATE_ONLY_LEN and raw.count("-") == 2 and "T" not in raw:
+        #: 날짜-only → `DATE_ONLY_RULE` 대로 그 날 00:00 UTC.
+        try:
+            d = datetime.strptime(raw, "%Y-%m-%d")
+        except ValueError as e:
+            raise CalcInputError(f"{where}: 날짜를 읽을 수 없습니다({raw!r}): {e}")
+        return d.replace(tzinfo=timezone.utc)
     try:
         dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError as e:
         raise CalcInputError(f"{where}: 시각을 읽을 수 없습니다({raw!r}): {e}")
     if dt.tzinfo is None:
         raise CalcInputError(
-            f"{where}: 시간대가 없는 시각입니다({raw!r}) — UTC 오프셋이 필요합니다.")
+            f"{where}: 시간대가 없는 시각입니다({raw!r}) — UTC 오프셋이 필요합니다"
+            f"(날짜만 적으려면 «YYYY-MM-DD» 로 적으십시오).")
     return dt.astimezone(timezone.utc)
 
 
@@ -135,8 +160,22 @@ def _days(later: datetime, earlier: datetime) -> int:
 
 #: 실제 도착으로 인정하는 milestone 코드. ⚠️ `ETA`(예정)는 **들어가지 않는다.**
 ARRIVED_MILESTONES = ("ATA",)
-#: 실제 출발로 인정하는 milestone 코드.
-DEPARTED_MILESTONES = ("ATD",)
+
+#: ★★★ [M0-3.1 실측] 실제 출발로 인정하는 milestone 코드.
+#:
+#: ⚠️⚠️ 정본 자료에 **`ATD` 가 없다.** `LOG-03.event_type` 은
+#:   `BOOKED / PICKED_UP / ETD / ETA / ATA / UNLOADED` 여섯 가지다.
+#: ★ 그런데 `LOG-03` 은 milestone 마다 `planned_at`·`actual_at` **쌍**을 갖는다.
+#:   즉 `event_type='ETD'` 행의 `actual_at` 은 「출발 예정 사건이 **실제로** 일어난
+#:   시각」이다 — 이름은 예정이지만 값은 실적이다.
+#: ⚠️ 그래서 읽는 것은 **언제나 `actual_at`** 이고, `planned_at` 은 쓰지 않는다.
+#:   `planned_at` 을 쓰면 「예정대로 떠났을 것」이라는 가정이 계산에 들어간다.
+DEPARTED_MILESTONES = ("ATD", "ETD")
+
+#: ★ BOM 에서 **소요로 세는 역할.** 정본 `MDM-05.component_role` 에는 `INPUT` 과
+#: `RETURN`(반환·부산물 회수)이 섞여 있다.
+#: ⚠️ `RETURN` 을 소요로 세면 **필요량이 부풀고** 없는 부족이 생긴다.
+BOM_INPUT_ROLES = ("INPUT",)
 
 
 def arrival_delay(*, shipments: Sequence[Mapping[str, Any]],
@@ -297,6 +336,11 @@ def material_shortage(*, inventory: Sequence[Mapping[str, Any]],
     yields: Dict[Tuple[str, str], Decimal] = {}
     for i, b in enumerate(bom):
         where = f"material_shortage.bom[{i}]"
+        #: ★ 소요가 아닌 역할(반환·부산물)은 건너뛴다. ⚠️ 역할 열이 **없으면** 옛 자료로
+        #:   보고 전부 소요로 센다 — 있는데 값이 다른 것과 없는 것은 다른 사실이다.
+        role = str(b.get("component_role", "") or "").strip().upper()
+        if role and role not in BOM_INPUT_ROLES:
+            continue
         product = _text(b, "product_code", where=where)
         material = _text(b, "material_code", where=where)
         per = _num(b, "quantity_per_output", where=where)

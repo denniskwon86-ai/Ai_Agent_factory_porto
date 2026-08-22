@@ -30,6 +30,20 @@ SCOPE = "plant-demo"
 COLUMNS = ["shipment_id", "po_line_id", "tenant_id", "scope_node_id", "etd"]
 
 
+def _register_test_kit(store, kit_id="KIT-T", version="1.0.0"):
+    """시험용 키트를 **등록부에 올리고** 그 지문을 돌려준다.
+
+    ★★★ [M0-3.1 ④] `create_instance` 는 이제 등록된 판본만 받는다. 임의 지문을 적으면
+      거부된다 — 앞서 시험이 `fp` 같은 값으로 인증판을 쌓을 수 있었고, 그 위에서
+      「정본 계약을 썼다」고 말할 수 없었다.
+    ⚠️ 지문을 손으로 적지 않는다. 등록 결과에서 읽는다."""
+    store.upsert_kit_version(
+        kit_id=kit_id, version=version, name=f"{kit_id} 시험용",
+        mode="DEMO/SYNTHETIC", source_path=f"{kit_id}.test.json",
+        fingerprint_value=f"fp-test-{kit_id}-{version}", profile={"datasets": []})
+    return store.get_kit_version(kit_id, version)["fingerprint"]
+
+
 def _rows(n=3, scope=SCOPE):
     return [{"shipment_id": f"SHP-{i:06d}", "po_line_id": f"PO-{i:06d}-10",
              "tenant_id": TENANT, "scope_node_id": scope, "etd": "2026-03-01"}
@@ -61,7 +75,8 @@ def indexed(tmp_path, monkeypatch):
 
     def certify(rows, *, certified_at=None, key="LOG-02"):
         inst = store.create_instance(
-            kit_id="KIT-T", version="1.0.0", kit_fingerprint="fp",
+            kit_id="KIT-T", version="1.0.0",
+            kit_fingerprint=_register_test_kit(store),
             tenant_id=TENANT, scope_node_id=SCOPE, entity_mode="VIRTUAL")
         b = store.create_binding(
             instance_id=inst["instance_id"], dataset_contract_key=key,

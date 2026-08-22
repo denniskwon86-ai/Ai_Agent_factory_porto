@@ -8,8 +8,9 @@
     계산의 말            정본(계약키)
     material_code    ←   LOG-02 에는 **없다.** PRC-02 를 거쳐야 나온다
     quantity         ←   LOG-02.shipment_quantity
-    milestone_code   ←   LOG-03.event_type
+    milestone_code   ←   LOG-03.event_type      (ATD 는 없다 — ETD 의 actual_at 이 실적)
     event_at         ←   LOG-03.actual_at
+    as_of_date       ←   INV-01.snapshot_date   (**날짜만** — DATE_ONLY_RULE)
     on_hand_quantity ←   INV-01.unrestricted_quantity
     product_code     ←   MFG-01.product_id
     material_code    ←   MDM-05.input_material_id
@@ -53,8 +54,11 @@ FIELD_MAP: Dict[str, Dict[str, str]] = {
                "shipment_quantity": "quantity", "eta": "eta"},
     "LOG-03": {"shipment_id": "shipment_id", "event_type": "milestone_code",
                "actual_at": "event_at"},
+    #: ⚠️ [M0-3.1 실측] `snapshot_at` 이 아니라 **`snapshot_date`** 다. 그리고 그 값은
+    #:   **날짜만**이다 — `calc_models.DATE_ONLY_RULE` 이 읽는 법을 정한다.
     "INV-01": {"material_id": "material_code", "location_id": "warehouse_code",
-               "snapshot_at": "as_of_date", "unrestricted_quantity": "on_hand_quantity"},
+               "snapshot_date": "as_of_date",
+               "unrestricted_quantity": "on_hand_quantity"},
     "MFG-01": {"plan_line_id": "plan_line_id", "product_id": "product_code",
                "plan_quantity": "plan_quantity", "plan_date": "plan_date"},
     "MDM-05": {"output_material_id": "product_code",
@@ -72,6 +76,8 @@ OPTIONAL_MAP: Dict[str, Dict[str, str]] = {
     "INV-01": {"reserved_quantity": "reserved_quantity",
                "safety_stock_quantity": "safety_stock_quantity"},
     "MFG-01": {"priority": "priority", "material_requirement": "material_requirement"},
+    #: ★ 소요 역할 — 없으면 옛 자료로 보고 전부 소요로 센다(`BOM_INPUT_ROLES`).
+    "MDM-05": {"component_role": "component_role"},
     "SLS-01": {"actual_ship_date": "actual_ship_date"},
 }
 
