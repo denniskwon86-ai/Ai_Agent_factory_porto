@@ -159,7 +159,14 @@ interface FactoryStore {
   stopSprint: (projectId: string, taskId: string) => Promise<void>;
 }
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
+//: ★★★ [WEB-1] **API 주소는 `lib/api.ts` 한 곳에서만 정한다.**
+//: ⚠️ 각자 `|| 'http://127.0.0.1:8080'` 을 선언하면 same-origin 빌드가 성립하지
+//:   않는다 — 한 곳을 고쳐도 나머지가 개발 주소를 번들에 박고, 배포한 화면이
+//:   방문자의 자기 PC 를 부른다.
+//: ⚠️ `export … from` 만 쓰면 **이 파일 안에서는 그 이름을 못 쓴다.** 재수출과
+//:   지역 사용은 다른 일이다 — 둘 다 필요하다.
+import { API_BASE_URL } from '../lib/api';
+export { API_BASE_URL };
 
 // [CL-4] 사용자 식별을 쿼리로 싣는 공용 헬퍼. 여기서 다시 구현하지 않는다.
 //: [P0-1C] `apiUrl` 은 더 이상 쓰지 않는다 — 마지막 사용처였던 SSE 가 1회용 접속표로

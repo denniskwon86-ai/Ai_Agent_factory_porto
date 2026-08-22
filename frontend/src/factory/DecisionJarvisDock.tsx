@@ -30,8 +30,8 @@ import { serializeClarifyAnswers, unansweredCount } from './clarifyAnswers';
 import type { JarvisTurn } from '../lib/jarvisApi';
 import type { ClarifySelections } from './clarifyAnswers';
 import type { FactoryStudioViewModel } from './factoryViewModel';
+import { API_BASE_URL } from '../lib/api';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
 export interface DecisionJarvisDockProps {
   vm: FactoryStudioViewModel;

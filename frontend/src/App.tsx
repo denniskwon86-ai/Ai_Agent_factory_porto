@@ -173,8 +173,7 @@ function AppShell() {
 
   useEffect(() => {
     // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)
-    const API = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
-    fetch(`${API}/api/v1/knowledge/packs`).then(r => r.ok ? r.json() : null)
+    fetch(`${API_BASE_URL}/api/v1/knowledge/packs`).then(r => r.ok ? r.json() : null)
       .then(r => {
         setKnowledgePacks(r?.data || []);
         // 권한 때문에 비었으면 그 이유를 들고 있는다 — "없다"와 "안 보인다"는 정반대다.

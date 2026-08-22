@@ -1,0 +1,31 @@
+# [WEB-1] 줄바꿈 규약.
+#
+# ⚠️⚠️ **셸 스크립트가 CRLF 로 나가면 리눅스에서 `bad interpreter` 로 죽는다.**
+#   `#!/usr/bin/env bash\r` 의 `\r` 이 인터프리터 이름의 일부가 되기 때문이고, 그
+#   오류 문구는 원인을 전혀 가리키지 않는다("no such file or directory" 인데 파일은 있다).
+#   개발이 Windows 이고 배포가 Ubuntu 이므로 이 저장소는 정확히 그 조건이다.
+#
+# ★ 그래서 **배포에 나가는 텍스트는 LF 로 못 박는다.** `core.autocrlf` 설정에 기대지
+#   않는다 — 그것은 사람마다 다르고, 다른 한 사람이 곧 깨진 배포다.
+
+* text=auto
+
+# 서버에서 실행되는 것
+*.sh            text eol=lf
+*.service       text eol=lf
+Caddyfile       text eol=lf
+deploy/*        text eol=lf
+requirements*.txt text eol=lf
+
+# Windows 전용 스크립트는 CRLF 여야 한다
+*.bat           text eol=crlf
+*.ps1           text eol=crlf
+
+# 이진 파일 — 변환하면 깨진다
+*.png           binary
+*.jpg           binary
+*.pdf           binary
+*.xlsx          binary
+*.docx          binary
+*.pptx          binary
+*.db            binary

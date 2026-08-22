@@ -26,7 +26,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
 import { JarvisRail } from '../design/JarvisRail';
-import { getEnterpriseContext } from '../lib/api';
+import { getEnterpriseContext , API_BASE_URL} from '../lib/api';
 import {
   SECTION_LABELS, fetchBriefing, type Briefing, type BriefingItem,
 } from '../lib/briefingApi';
@@ -120,8 +120,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   /** §4.6 Trust Foundation 4카드 — 각 도메인 API 를 실제로 부른다. */
   useEffect(() => {
     let alive = true;
-    const base = (import.meta as any).env?.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
-    const j = (p: string) => fetch(`${base}${p}`).then((r) => (r.ok ? r.json() : Promise.reject(r)));
+    const j = (p: string) => fetch(`${API_BASE_URL}${p}`).then((r) => (r.ok ? r.json() : Promise.reject(r)));
 
     const cards: TrustCard[] = [
       { key: 'mdm', title: 'MDM', state: 'loading', headline: '확인 중', detail: '' },

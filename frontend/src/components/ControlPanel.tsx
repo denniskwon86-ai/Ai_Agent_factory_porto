@@ -4,8 +4,8 @@ import { useFactoryStore } from '../store/useFactoryStore';
 //   함수를 부른다 — 각자 조립하면 두 화면이 서로 다른 payload 를 보내게 된다.
 import { newPlanningTaskId, replanWbs, resumeAfterQuota, startPlanning }
   from '../factory/sprintActions';
+import { API_BASE_URL } from '../lib/api';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
 // 기본 실행 스프린트 전체 파이프라인 정의 (노드 id ↔ 라벨 ↔ 배정 에이전트명)
 const DEFAULT_EXEC_PIPELINE = [

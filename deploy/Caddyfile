@@ -1,0 +1,36 @@
+# [WEB-3] 도메인 · TLS · 리버스 프록시.
+#
+# ⚠️ `example.com` 을 실제 도메인으로 바꾸십시오. 바꾸지 않으면 Caddy 가 인증서를
+#   받지 못하고, 그 실패는 «사이트가 안 열린다» 로만 보입니다.
+demo.example.com {
+    encode gzip
+
+    # ★ API 는 백엔드로. 프런트는 정적 파일로 — **same-origin** 이라 CORS 가 필요 없다.
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+    # SSE(실시간)는 버퍼링하면 이벤트가 뭉쳐서 도착한다.
+    handle /api/v1/realtime/* {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+    handle /docs* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle {
+        root * /opt/afs/app/frontend/dist
+        # SPA — 없는 경로는 index.html 로 돌린다.
+        try_files {path} /index.html
+        file_server
+    }
+
+    # ⚠️ 시연 서버라도 기본 보안 헤더는 둔다. 없으면 «데모니까» 가 그대로 운영으로 간다.
+    header {
+        Referrer-Policy "no-referrer"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        -Server
+    }
+}

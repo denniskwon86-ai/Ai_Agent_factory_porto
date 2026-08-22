@@ -1,0 +1,29 @@
+# [WEB-1] AI Factory Studio — systemd 유닛.
+#
+# ⚠️ `@APP@`·`@USER@`·`@PORT@` 는 install.sh 가 치환한다. 손으로 복사하지 말 것 —
+#   경로가 하나 어긋나면 서비스는 뜨는데 데이터는 다른 곳을 본다.
+[Unit]
+Description=AI Factory Studio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@APP@
+# ★ 작업 디렉터리를 고정한다. 상대경로 저장소가 실행 위치에 따라 다른 파일을 여는
+#   사고가 이 저장소에 있었다(core/paths.py 머리말).
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+EnvironmentFile=-@APP@/.env
+ExecStart=@APP@/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port @PORT@
+# ⚠️ 127.0.0.1 에만 묶는다 — 외부 노출은 Caddy 가 TLS 와 함께 한다. 0.0.0.0 으로 열면
+#   TLS 없는 평문 포트가 인터넷에 남는다.
+Restart=on-failure
+RestartSec=5
+# 재시작이 데이터를 지우지 않게 — 쓰기는 데이터 디렉터리에만.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
