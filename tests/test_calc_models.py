@@ -364,3 +364,96 @@ def test_생산_가능량은_계획량을_넘지_않는다():
                                as_of=AS_OF)
     assert got["metrics"]["producible_quantity"] == {"PL-1": 100.0}
     assert got["metrics"]["shortage_quantity"] == {}
+
+
+# ── ⑤ [P0-CALC-ALLOC] 여러 계획행이 같은 재고를 다투는 경우 ──────────────
+
+def _two_lines(**kw):
+    a = {"plan_line_id": "PL-1", "product_code": "P", "plan_quantity": "100",
+         "plan_date": "2026-09-01T00:00:00+00:00"}
+    b = {"plan_line_id": "PL-2", "product_code": "P", "plan_quantity": "100",
+         "plan_date": "2026-09-02T00:00:00+00:00"}
+    a.update(kw.get("a") or {})
+    b.update(kw.get("b") or {})
+    return [a, b]
+
+
+def _one_material(qty="100"):
+    return [{"material_code": "M1", "warehouse_code": "W",
+             "as_of_date": "2026-08-20T00:00:00+00:00", "on_hand_quantity": qty,
+             "reserved_quantity": "0"}]
+
+
+def _simple_bom():
+    return [{"product_code": "P", "material_code": "M1",
+             "quantity_per_output": "0.6", "standard_yield": "1.0"}]
+
+
+def test_같은_재고를_두_계획행이_중복_사용하지_않는다():
+    """★★★ [감사 실측] 앞 판은 계획행마다 **전체 가용재고를 다시** 썼다.
+
+        재고 100 · 계획행 둘(각 필요 60)
+        → PL-1 생산 가능 100, PL-2 생산 가능 100   ← 합쳐서 120 을 쓰겠다는 답
+
+    ⚠️ 재고 100 으로 120 을 만들 수 있다고 답하면, 그 숫자로 세운 계획은 반드시 어긋난다.
+      그리고 어긋났을 때 사람들은 계산이 아니라 현장을 의심한다."""
+    got = cm.material_shortage(inventory=_one_material(), production_plan=_two_lines(),
+                               bom=_simple_bom(), as_of=AS_OF)
+    pq = got["metrics"]["producible_quantity"]
+    #: 앞선 행이 60 을 쓰고, 남은 40 으로 뒤 행은 66.667 만 만든다.
+    assert pq == {"PL-1": 100.0, "PL-2": 66.667}, pq
+    #: ★★ **소요 합계가 재고를 넘지 않는다** — 이것이 이 시험의 핵심 불변식이다.
+    used = sum(a["allocated"]["M1"] for a in got["allocation"])
+    assert used <= 100.0 + 1e-6, f"재고 100 인데 {used} 를 썼다"
+
+
+def test_배분_순서는_priority_다음_plan_date_다음_id_다():
+    """★ 순서를 정하지 않으면 **아무도 결정하지 않은 채 코드가 정한다.**
+
+    ⚠️ 그리고 그 순서는 입력 순서·dict 순회에 따라 달라져, 같은 자료에 다른 답이 나온다."""
+    #: PL-2 에 더 높은 우선순위(작은 값)를 준다 — 날짜는 PL-1 이 앞서지만 우선순위가 이긴다.
+    got = cm.material_shortage(
+        inventory=_one_material(), production_plan=_two_lines(b={"priority": "1"}),
+        bom=_simple_bom(), as_of=AS_OF)
+    assert [a["plan_line_id"] for a in got["allocation"]] == ["PL-2", "PL-1"]
+    assert got["metrics"]["producible_quantity"] == {"PL-2": 100.0, "PL-1": 66.667}
+    assert got["allocation_order"] == ["priority", "plan_date", "plan_line_id"]
+
+
+def test_우선순위가_없는_계획은_뒤로_간다():
+    """⚠️ 없는 것을 0 으로 두면 **최우선**이 된다 — 우선순위를 안 적은 계획이 적은 계획을
+    앞지르고, 그 역전은 아무도 의도하지 않았다."""
+    got = cm.material_shortage(
+        inventory=_one_material(), production_plan=_two_lines(b={"priority": "5"}),
+        bom=_simple_bom(), as_of=AS_OF)
+    #: PL-1 은 우선순위가 없으므로 뒤로 간다.
+    assert [a["plan_line_id"] for a in got["allocation"]] == ["PL-2", "PL-1"]
+
+
+def test_배분은_입력_순서에_흔들리지_않는다():
+    """★★ 같은 자료를 뒤집어 넣어도 같은 답이어야 한다 — 순서가 답을 바꾸면 그것은
+    산식이 아니라 우연이다."""
+    a = cm.material_shortage(inventory=_one_material(), production_plan=_two_lines(),
+                             bom=_simple_bom(), as_of=AS_OF)
+    b = cm.material_shortage(inventory=_one_material(),
+                             production_plan=list(reversed(_two_lines())),
+                             bom=_simple_bom(), as_of=AS_OF)
+    assert a == b
+
+
+def test_재고가_넉넉하면_두_계획행_모두_계획량을_만든다():
+    """★★ **대조군.** 배분이 「뒤 행을 항상 깎는 것」이 되면 안 된다."""
+    got = cm.material_shortage(inventory=_one_material("1000"),
+                               production_plan=_two_lines(), bom=_simple_bom(),
+                               as_of=AS_OF)
+    assert got["metrics"]["producible_quantity"] == {"PL-1": 100.0, "PL-2": 100.0}
+    assert got["metrics"]["shortage_quantity"] == {}
+
+
+def test_전체_부족량은_계획_전체_기준이다():
+    """★ 부족량은 **경로 전체**의 이야기다 — 배분은 누가 먼저 쓰는지를 정할 뿐,
+    총 필요량과 총 가용량의 차이를 바꾸지 않는다."""
+    got = cm.material_shortage(inventory=_one_material(), production_plan=_two_lines(),
+                               bom=_simple_bom(), as_of=AS_OF)
+    #: 필요 120 − 가용 100 = 20
+    assert got["metrics"]["shortage_quantity"] == {"M1": 20.0}

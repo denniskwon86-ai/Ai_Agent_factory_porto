@@ -52,6 +52,20 @@ MODEL_VERSIONS: Dict[str, str] = {
 #: 수량 소수점. 계약 지표는 kg·일 단위이고, 세 자리면 실측 자료의 정밀도를 잃지 않는다.
 _QTY = Decimal("0.001")
 
+#: ★★★ [P0-CALC-ALLOC] **재고 배분 순서.** 여러 계획행이 같은 자재를 놓고 다툰다.
+#:
+#: ⚠️⚠️ 순서를 정하지 않으면 계획행마다 «전체 가용재고» 를 다시 써서, 재고 100 으로
+#:   120 을 만들 수 있다고 답한다(실측: 계획행 둘 각 필요 60 → 둘 다 생산 가능 100).
+#: ★ 순서는 **결정론적**이어야 한다. dict 순회나 입력 순서에 맡기면 같은 자료에 다른
+#:   답이 나오고, 그때 「어느 계획을 먼저 대느냐」를 **아무도 결정하지 않은 채** 코드가
+#:   정하게 된다.
+#: ★ `priority` 는 작을수록 먼저다(1순위·2순위의 통상 표기). 없으면 뒤로 보낸다 —
+#:   우선순위를 안 적은 계획이 적은 계획을 앞지르면 안 된다.
+ALLOCATION_ORDER = ("priority", "plan_date", "plan_line_id")
+
+#: `priority` 가 없는 계획행의 정렬값. ⚠️ 0 으로 두면 **최우선**이 된다.
+_NO_PRIORITY = Decimal("999999")
+
 
 class CalcInputError(ValueError):
     """입력이 계약과 다르다. **계산하지 않는다.**
@@ -308,12 +322,23 @@ def material_shortage(*, inventory: Sequence[Mapping[str, Any]],
     else:
         available = _available_from_inventory(inventory, at, assume)
 
-    #: 계획행별 자재 필요량.
+    #: ★★★ [P0-CALC-ALLOC] **배분 순서를 먼저 정한다.** `priority → plan_date →
+    #:   plan_line_id`. 앞선 계획행이 쓴 만큼 재고가 줄고, 뒤 계획행은 남은 것만 본다.
+    ordered = sorted(
+        enumerate(production_plan),
+        key=lambda t: (
+            _priority(t[1], where=f"material_shortage.production_plan[{t[0]}]"),
+            _text(t[1], "plan_date", where=f"material_shortage.production_plan[{t[0]}]"),
+            _text(t[1], "plan_line_id",
+                  where=f"material_shortage.production_plan[{t[0]}]")))
+
+    #: 계획행별 자재 필요량. `remaining` 은 **배분하며 줄어드는** 재고다.
+    remaining: Dict[str, Decimal] = dict(available)
     need_by_material: Dict[str, Decimal] = {}
     producible: Dict[str, float] = {}
+    allocation: List[Dict[str, Any]] = []
     reconciliation: List[Dict[str, Any]] = []
-    for i, line in enumerate(sorted(production_plan,
-                                    key=lambda r: str(r.get("plan_line_id", "")))):
+    for i, line in ordered:
         where = f"material_shortage.production_plan[{i}]"
         line_id = _text(line, "plan_line_id", where=where)
         product = _text(line, "product_code", where=where)
@@ -345,23 +370,30 @@ def material_shortage(*, inventory: Sequence[Mapping[str, Any]],
             reconciliation.append({"plan_line_id": line_id, "stored": _round(stored),
                                    "recomputed": _round(recomputed), "matched": True})
 
-        #: 생산 가능량 = 각 자재가 허용하는 최소 생산량.
+        #: 생산 가능량 = 각 자재가 허용하는 최소 생산량. **남은 재고**로 계산한다.
         ratios = []
         for material, need in sorted(line_need.items()):
             if need <= 0:
                 continue
-            have = available.get(material)
-            if have is None:
+            if material not in available:
                 raise CalcInputError(
                     f"{where}: 자재 {material} 의 재고를 알 수 없습니다 — 없는 것을 "
                     f"0 으로 보지 않습니다(0 이면 「부족하다」는 결론이 나온다).")
-            ratios.append(max(Decimal(0), have) / need)
+            ratios.append(max(Decimal(0), remaining.get(material, Decimal(0))) / need)
         #: ★★★ **계획량이 상한이다.** 재고가 남는다고 계획보다 더 만들 수는 없다.
         #: ⚠️ 상한 없이 비율을 곱하면 재고가 넉넉할 때 생산 가능량이 계획량을 넘고
         #:   (실측: 계획 100 에 385), 그 숫자가 「이만큼 더 만들 수 있다」로 읽힌다 —
         #:   설비·인력·수요를 하나도 보지 않은 값인데도.
-        ratio = min(ratios) if ratios else Decimal(1)
-        producible[line_id] = _round(plan_qty * min(Decimal(1), ratio))
+        ratio = min(Decimal(1), min(ratios)) if ratios else Decimal(1)
+        producible[line_id] = _round(plan_qty * ratio)
+        #: ★★★ **쓴 만큼 뺀다.** 이것이 없으면 다음 계획행이 같은 재고를 다시 쓴다.
+        used_here = {}
+        for material, need in sorted(line_need.items()):
+            take = need * ratio
+            remaining[material] = remaining.get(material, Decimal(0)) - take
+            used_here[material] = _round(take)
+        allocation.append({"plan_line_id": line_id, "order": len(allocation) + 1,
+                           "allocated": used_here})
 
     shortage = {}
     for material, need in sorted(need_by_material.items()):
@@ -378,9 +410,24 @@ def material_shortage(*, inventory: Sequence[Mapping[str, Any]],
             "producible_quantity": dict(sorted(producible.items())),
         },
         "required_quantity": {m: _round(v) for m, v in sorted(need_by_material.items())},
+        #: ★ 누가 먼저 얼마를 가져갔는지 남긴다 — 「왜 내 계획행이 못 만드나」에 답할 수
+        #:   있어야 하고, 그 답은 배분 순서다.
+        "allocation": allocation,
+        "allocation_order": list(ALLOCATION_ORDER),
         "reconciliation": reconciliation,
         "assumptions_used": _assumptions_used(assume),
     }
+
+
+def _priority(line: Mapping[str, Any], *, where: str) -> Decimal:
+    """계획행 우선순위. **작을수록 먼저**다. 없으면 뒤로 보낸다.
+
+    ⚠️ 없는 것을 0 으로 두면 **최우선**이 된다 — 우선순위를 적지 않은 계획이 적은 계획을
+      앞지르고, 그 역전은 아무도 의도하지 않았다."""
+    raw = line.get("priority")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return _NO_PRIORITY
+    return _num(line, "priority", where=where)
 
 
 def _available_from_inventory(inventory: Sequence[Mapping[str, Any]], at: datetime,

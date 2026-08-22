@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core import calc_capability as cc
 from core import calc_models as cm
+from core import calc_projection as cp
 
 #: 경로 전체의 판 — 실행 순서·집계·반올림·기준선 비교 규칙(§4).
 #: ⚠️ 구간 산식이 그대로여도 이 규칙이 바뀌면 답이 달라진다. 그것은 구간의 판이 아니다.
@@ -52,9 +53,14 @@ SEGMENTS: Tuple[str, ...] = (
     "CALC.PRODUCTION.REVENUE_TIMING.v1",
 )
 
-#: 이 경로에 필요한 계약키 — 구간들의 합집합.
+#: 이 경로에 필요한 계약키 — 구간들의 합집합 **+ 투영에 필요한 것**.
+#:
+#: ⚠️⚠️ [P0-CALC-INPUT] `PRC-02` 가 들어간다. 계산 능력 등록부에는 없지만, **`LOG-02` 에
+#:   자재 ID 가 없어서** 주문행을 거치지 않으면 「어느 자재의 선적인가」를 알 수 없다.
+#:   등록부의 `required_datasets` 만 믿으면 정본으로는 한 줄도 계산되지 않는다.
 REQUIRED_DATASETS: Tuple[str, ...] = tuple(sorted(
-    {k for ref in SEGMENTS for k in cc.get(ref).required_datasets}))
+    {k for ref in SEGMENTS for k in cc.get(ref).required_datasets}
+    | set(cp.PROJECTION_DATASETS)))
 
 
 class PathCalculationError(Exception):
@@ -78,6 +84,15 @@ class PathCalculationRequest:
     #: {relation_id: ledger_event_id}
     relation_approvals: Mapping[str, str]
     assumptions: Mapping[str, Any] = field(default_factory=dict)
+    #: ★★★ [P0-CALC-PROOF] **경로 봉투가 요구하는 관계 ID 집합.**
+    #:
+    #: ⚠️⚠️ 앞 판은 `relation_approvals` 가 비었는지만 봤다. 그래서 **관계 승인 하나만
+    #:   제출해도 COMPLETE** 가 나왔다(실측) — 경로에 관계가 넷이든 승인 하나면 통과했다.
+    #: ★ 승인은 «몇 개 냈는가» 가 아니라 «이 경로의 모든 관계가 승인됐는가» 다. 그래서
+    #:   경로가 요구하는 집합을 받아 **정확히 일치**하는지 본다.
+    required_relation_ids: Tuple[str, ...] = ()
+    #: ⚠️ 호출자가 주장하는 판. **코드의 `PATH_MODEL_VERSION` 과 다르면 거부**한다 —
+    #:   앞 판은 이 값을 그대로 지문에 실어서 `"0.0.0-fake"` 로도 COMPLETE 가 됐다(실측).
     path_model_version: str = PATH_MODEL_VERSION
 
     def identity_missing(self) -> List[str]:
@@ -140,6 +155,9 @@ def request_fingerprint(req: PathCalculationRequest,
         "baseline_fingerprint": req.baseline_fingerprint,
         "sealed_snapshots": req.sealed_snapshots,
         "relation_approvals": req.relation_approvals,
+        #: ★ 경로가 요구한 관계 집합도 질문의 일부다 — 같은 승인을 냈어도 «어느 경로의
+        #:   질문이었나» 가 다르면 다른 질문이다.
+        "required_relation_ids": sorted(req.required_relation_ids),
         "assumptions": req.assumptions,
         "path_model_version": req.path_model_version,
         "segment_capability_fingerprints": segment_capability_fingerprints,
@@ -203,11 +221,35 @@ def calculate(req: PathCalculationRequest, *,
             f"경로 계산 요청의 정체성이 온전하지 않습니다: {missing} — 이 값들이 없으면 "
             f"다른 조직·다른 기준선의 계산과 구분할 수 없습니다.")
 
+    #: ★★★ [P0-CALC-PROOF] 경로 판은 **코드가 정한다.** 호출자가 주장한 값을 그대로
+    #:   쓰면 `"0.0.0-fake"` 로도 계산이 지나가고(실측), 그 지문은 재현 검증을 통과한다.
+    #: ⚠️ 조용히 덮어쓰지 않고 **거부**한다 — 덮어쓰면 호출자는 자기가 다른 판을 요청한
+    #:   줄 모른 채 다른 규칙의 답을 받는다.
+    if str(req.path_model_version) != PATH_MODEL_VERSION:
+        raise PathCalculationError(
+            f"경로 판이 코드와 다릅니다(요청 {req.path_model_version!r} ≠ 코드 "
+            f"{PATH_MODEL_VERSION!r}) — 판은 호출자가 주장하는 값이 아닙니다.")
+
     #: 관문 1·2 — 관계 승인과 **지금도 유효한지**.
     if not req.relation_approvals:
         return _blocked(req, seg_fps,
                         public="이 경로를 계산할 수 없습니다(승인 확인 필요).",
                         internal=["relation_approvals 가 비어 있습니다."])
+    #: ★★★ [P0-CALC-PROOF] **경로의 모든 관계가 승인돼 있는가**(§6 관문 1).
+    #: ⚠️ 개수만 세지 않는다 — 다른 관계의 승인을 넣어도 개수는 맞을 수 있다.
+    if not req.required_relation_ids:
+        return _blocked(req, seg_fps,
+                        public="이 경로를 계산할 수 없습니다(승인 확인 필요).",
+                        internal=["경로가 요구하는 관계 집합이 비어 있습니다 — 무엇을 "
+                                  "승인해야 하는지 모르는 채로 계산하지 않습니다."])
+    want = set(req.required_relation_ids)
+    have = set(req.relation_approvals)
+    if want != have:
+        return _blocked(req, seg_fps,
+                        public="이 경로를 계산할 수 없습니다(승인 확인 필요).",
+                        internal=[f"승인 집합이 경로와 일치하지 않습니다: "
+                                  f"없는 승인={sorted(want - have)}, "
+                                  f"경로 밖 승인={sorted(have - want)}"])
     if relation_verifier is None:
         #: ⚠️ 검증기 없이 통과시키면 **철회된 승인으로 계산이 지나간다.** 등록부의
         #:   `assert_executable` 과 같은 규칙이다 — 「안 넘겼으니 통과」는 문이다.
@@ -255,8 +297,28 @@ def calculate(req: PathCalculationRequest, *,
                         internal=[f"읽을 자료가 없습니다: {missing_rows}"])
 
     #: 관문 6 — 읽은 판 == 봉인된 판. ⚠️ 다르면 지문 문제가 아니라 **무결성 장애**다.
-    used = {k: str((datasets.get(k) or [{}])[0].get("__snapshot_id__", ""))
-            for k in REQUIRED_DATASETS}
+    #:
+    #: ★★★ [P0-CALC-PROOF] **모든 행**을 본다. 앞 판은 첫 행만 봤고, 그래서 **두 번째
+    #:   행부터 다른 판을 섞어 넣어도 COMPLETE** 가 나왔다(실측). 한 판을 봉인했다는
+    #:   말은 그 판의 행만 읽었다는 뜻이어야 한다.
+    #: ⚠️ 빈 데이터셋은 **BLOCKED** 다(자료가 아직 없다) — 무결성 장애가 아니다.
+    #:   장애로 올리면 「데이터를 채워야 한다」가 「시스템이 고장났다」로 보인다.
+    empty = [k for k in REQUIRED_DATASETS if not datasets.get(k)]
+    if empty:
+        return _blocked(req, seg_fps,
+                        public="이 경로에 필요한 데이터가 아직 준비되지 않았습니다.",
+                        internal=[f"판은 봉인됐으나 행이 0건입니다: {empty}"])
+    used: Dict[str, str] = {}
+    mixed: Dict[str, List[str]] = {}
+    for k in REQUIRED_DATASETS:
+        seen = {str(r.get("__snapshot_id__", "")) for r in datasets[k]}
+        if len(seen) > 1:
+            mixed[k] = sorted(seen)
+        used[k] = sorted(seen)[0]
+    if mixed:
+        raise PathCalculationError(
+            f"한 계약키에 여러 판의 행이 섞였습니다: {mixed} — 봉인은 판 하나를 가리키고, "
+            f"섞인 자료로 만든 숫자는 어느 판의 것인지 말할 수 없습니다.")
     mismatch = {k: (req.sealed_snapshots[k], used[k])
                 for k in REQUIRED_DATASETS if used[k] != str(req.sealed_snapshots[k])}
     if mismatch:
@@ -264,19 +326,36 @@ def calculate(req: PathCalculationRequest, *,
             f"봉인한 판이 아닌 것을 읽었습니다: {mismatch} — 지문 문제가 아니라 "
             f"무결성 장애입니다(§3.6).")
 
+    #: ── 정본 → 계산 DTO 투영 ────────────────────────────────────────────
+    #:
+    #: ★★★ [P0-CALC-INPUT] 계산 모델은 **계산의 말**로 입력을 받고 정본은 **업무의 말**로
+    #:   적혀 있다. 그 사이를 잇는 것이 투영 계층이고, 결합은 **승인된 관계 근거**로만 한다.
+    #: ⚠️ 결합이 끊기면 그 행을 빼지 않고 **실패**한다 — 빼면 운송 중 수량이 조용히 줄고
+    #:   그것은 「지연이 없다」로 읽힌다.
+    try:
+        dto = cp.project(
+            datasets,
+            sales_allocation=req.assumptions.get("sales_allocation"),
+            recognition_span_days=req.assumptions.get("recognition_span_days"))
+    except cp.ProjectionError as e:
+        return _blocked(req, seg_fps,
+                        public="이 경로의 계산에 필요한 자료가 부족합니다.",
+                        internal=[f"{type(e).__name__}: {e}"])
+
     #: ── 구간 실행. 앞 구간 결과가 뒤 구간 입력이다 ──────────────────────
     try:
         arrival = cm.arrival_delay(
-            shipments=datasets["LOG-02"], milestones=datasets["LOG-03"],
-            inventory=datasets["INV-01"], as_of=req.as_of, assumptions=req.assumptions)
+            shipments=dto["shipments"], milestones=dto["milestones"],
+            inventory=dto["inventory"], as_of=req.as_of, assumptions=req.assumptions)
         shortage = cm.material_shortage(
-            inventory=datasets["INV-01"], production_plan=datasets["MFG-01"],
-            bom=datasets["MDM-05"], as_of=req.as_of, assumptions=req.assumptions,
+            inventory=dto["inventory"], production_plan=dto["production_plan"],
+            bom=dto["bom"], as_of=req.as_of, assumptions=req.assumptions,
             arrival=arrival)
         timing = cm.revenue_timing(
-            sales_lines=datasets["SLS-01"],
+            sales_lines=dto["sales_lines"],
             baseline_recognition=dict(req.assumptions.get("baseline_recognition") or {}),
-            producible=shortage, production_plan=datasets["MFG-01"], as_of=req.as_of)
+            producible=shortage, production_plan=dto["production_plan"],
+            as_of=req.as_of)
     except (cm.CalcInputError, cm.CalcSemanticError) as e:
         #: ★★★ 자료가 계약과 다르면 **BLOCKED** 다 — 0 으로 접지 않는다.
         #: ⚠️ 이것을 무결성 장애로 올리면 「자료를 채워야 한다」가 「시스템이 고장났다」로

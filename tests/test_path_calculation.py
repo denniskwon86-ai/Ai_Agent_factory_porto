@@ -29,9 +29,14 @@ def _req(**kw):
         entity_mode="REAL", scope_node_id="NODE_A", as_of=AS_OF,
         baseline_id="bl1", baseline_fingerprint="blfp1",
         sealed_snapshots=dict(SNAP),
+        required_relation_ids=("rel_1",),
         relation_approvals={"rel_1": "evt_1"},
         assumptions={"reserved_quantity_zero": True,
-                     "baseline_recognition": {"SL-1": "2026-09-30T00:00:00+00:00"}})
+                     "baseline_recognition": {"SL-1": "2026-09-30T00:00:00+00:00"},
+                     #: ★ 정본에 없다 — **승인된 생산-판매 배분**에서 온다(§관계표
+                     #:   `FULFILLS_SALES` 의 근거가 «승인된 allocation» 이다).
+                     "sales_allocation": {"SL-1": "PL-1"},
+                     "recognition_span_days": {"SL-1": "30"}})
     args.update(kw)
     return pc.PathCalculationRequest(**args)
 
@@ -42,29 +47,42 @@ def _rows(key, rows):
 
 
 def _datasets(**over):
+    """★★★ **정본 계약키의 실제 열 이름**으로 쓴다.
+
+    ⚠️⚠️ 앞 판은 계산 모델의 말(`material_code`·`milestone_code`…)로 fixture 를 썼다.
+      그래서 실제 CSV 를 넣으면 즉시 실패하는데도 회귀는 전부 초록이었다 — fixture 가
+      계약을 대신 정의한 셈이고, 그 상태에서 「계산 모델 완료」라고 보고했다.
+    ★ 정본 열 이름은 `docs/architecture/g2_first_vertical_ontology_contract_v1.json` 과
+      상세설계 §관계표에서 온다."""
     base = {
+        #: PRC-02 — **선적의 자재를 찾는 유일한 근거**(LOG-02 에는 자재 ID 가 없다).
+        "PRC-02": _rows("PRC-02", [
+            {"po_line_id": "PO-1", "material_id": "LIOH"},
+            {"po_line_id": "PO-2", "material_id": "NIOH"}]),
         "LOG-02": _rows("LOG-02", [
-            {"shipment_id": "SHP-1", "material_code": "LIOH", "quantity": "1000",
-             "eta": "2026-08-15T00:00:00+00:00"}]),
+            {"shipment_id": "SHP-1", "po_line_id": "PO-1",
+             "shipment_quantity": "1000", "eta": "2026-08-15T00:00:00+00:00"}]),
         "LOG-03": _rows("LOG-03", [
-            {"shipment_id": "SHP-1", "milestone_code": "ATD",
-             "event_at": "2026-08-01T00:00:00+00:00"}]),
+            {"shipment_id": "SHP-1", "event_type": "ATD",
+             "actual_at": "2026-08-01T00:00:00+00:00"}]),
         "INV-01": _rows("INV-01", [
-            {"material_code": "LIOH", "warehouse_code": "WH1",
-             "as_of_date": "2026-08-20T00:00:00+00:00", "on_hand_quantity": "32.4325"},
-            {"material_code": "NIOH", "warehouse_code": "WH1",
-             "as_of_date": "2026-08-20T00:00:00+00:00", "on_hand_quantity": "400"}]),
+            {"material_id": "LIOH", "location_id": "WH1",
+             "snapshot_at": "2026-08-20T00:00:00+00:00",
+             "unrestricted_quantity": "32.4325"},
+            {"material_id": "NIOH", "location_id": "WH1",
+             "snapshot_at": "2026-08-20T00:00:00+00:00",
+             "unrestricted_quantity": "400"}]),
         "MFG-01": _rows("MFG-01", [
-            {"plan_line_id": "PL-1", "product_code": "FG-CATHODE",
+            {"plan_line_id": "PL-1", "product_id": "FG-CATHODE",
              "plan_quantity": "100", "plan_date": "2026-09-01T00:00:00+00:00"}]),
         "MDM-05": _rows("MDM-05", [
-            {"product_code": "FG-CATHODE", "material_code": "LIOH",
+            {"output_material_id": "FG-CATHODE", "input_material_id": "LIOH",
              "quantity_per_output": "0.6", "standard_yield": "0.925"},
-            {"product_code": "FG-CATHODE", "material_code": "NIOH",
+            {"output_material_id": "FG-CATHODE", "input_material_id": "NIOH",
              "quantity_per_output": "0.5", "standard_yield": "0.925"}]),
         "SLS-01": _rows("SLS-01", [
-            {"sales_line_id": "SL-1", "plan_line_id": "PL-1",
-             "recognition_span_days": "30", "due_date": "2026-09-10T00:00:00+00:00"}]),
+            {"sales_line_id": "SL-1", "product_id": "FG-CATHODE",
+             "due_date": "2026-09-10T00:00:00+00:00"}]),
     }
     base.update({k: _rows(k, v) for k, v in over.items()})
     return base
@@ -261,15 +279,20 @@ def test_가정이_바뀌면_질문_지문이_바뀐다(monkeypatch):
     _approved(monkeypatch)
     a = pc.calculate(_req(), datasets=_datasets(), ledger_verifier=_ok_ledger,
                      relation_verifier=_ok_relation)
-    inv = [{"material_code": "LIOH", "warehouse_code": "WH1",
-            "as_of_date": "2026-08-20T00:00:00+00:00", "on_hand_quantity": "32.4325",
-            "reserved_quantity": "0"},
-           {"material_code": "NIOH", "warehouse_code": "WH1",
-            "as_of_date": "2026-08-20T00:00:00+00:00", "on_hand_quantity": "400",
-            "reserved_quantity": "0"}]
+    inv = [{"material_id": "LIOH", "location_id": "WH1",
+            "snapshot_at": "2026-08-20T00:00:00+00:00",
+            "unrestricted_quantity": "32.4325", "reserved_quantity": "0"},
+           {"material_id": "NIOH", "location_id": "WH1",
+            "snapshot_at": "2026-08-20T00:00:00+00:00",
+            "unrestricted_quantity": "400", "reserved_quantity": "0"}]
+    #: ★ `reserved_quantity_zero` 가정만 뺀다(재고 행에 실제 값이 있으므로 계산은 된다).
+    #:   ⚠️ 가정 묶음을 통째로 갈아 끼우면 `sales_allocation` 까지 빠져 「기준선 부족」으로
+    #:     막히고, 그러면 이 시험은 지문이 아니라 다른 것을 보게 된다.
     b = pc.calculate(
         _req(assumptions={"baseline_recognition":
-                          {"SL-1": "2026-09-30T00:00:00+00:00"}}),
+                          {"SL-1": "2026-09-30T00:00:00+00:00"},
+                          "sales_allocation": {"SL-1": "PL-1"},
+                          "recognition_span_days": {"SL-1": "30"}}),
         datasets=_datasets(**{"INV-01": inv}), ledger_verifier=_ok_ledger,
         relation_verifier=_ok_relation)
     assert b["status"] == pc.COMPLETE, b.get("blocked")
@@ -294,10 +317,10 @@ def test_산식_판이_바뀌면_결과_지문이_바뀐다(monkeypatch):
     a = pc.calculate(_req(), datasets=_datasets(), ledger_verifier=_ok_ledger,
                      relation_verifier=_ok_relation)
     #: 값이 달라지는 변경을 준다(재고를 늘린다) — 질문은 같고 답이 다르다.
-    inv = [{"material_code": "LIOH", "warehouse_code": "WH1",
-            "as_of_date": "2026-08-20T00:00:00+00:00", "on_hand_quantity": "999"},
-           {"material_code": "NIOH", "warehouse_code": "WH1",
-            "as_of_date": "2026-08-20T00:00:00+00:00", "on_hand_quantity": "999"}]
+    inv = [{"material_id": "LIOH", "location_id": "WH1",
+            "snapshot_at": "2026-08-20T00:00:00+00:00", "unrestricted_quantity": "999"},
+           {"material_id": "NIOH", "location_id": "WH1",
+            "snapshot_at": "2026-08-20T00:00:00+00:00", "unrestricted_quantity": "999"}]
     b = pc.calculate(_req(), datasets=_datasets(**{"INV-01": inv}),
                      ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
     assert a["request_fingerprint"] == b["request_fingerprint"], "질문이 달라졌다"
@@ -343,7 +366,7 @@ def test_BOM_대사_불일치는_BLOCKED_이고_수치가_없다(monkeypatch):
     """★★★ §7.2 — 하나를 임의로 고르지 않는다. 그리고 **부분 수치를 내보내지 않는다** —
     앞 구간(도착 지연)은 계산됐지만 경로 전체가 막힌다."""
     _approved(monkeypatch)
-    plan = [{"plan_line_id": "PL-1", "product_code": "FG-CATHODE",
+    plan = [{"plan_line_id": "PL-1", "product_id": "FG-CATHODE",
              "plan_quantity": "100", "plan_date": "2026-09-01T00:00:00+00:00",
              "material_requirement": "66.4"}]
     got = pc.calculate(_req(), datasets=_datasets(**{"MFG-01": plan}),
@@ -362,3 +385,180 @@ def test_기준선이_없으면_BLOCKED_이고_이동_0_이_아니다(monkeypatc
     assert got["status"] == pc.BLOCKED
     assert "기준선" in str(got["blocked"]["internal_reasons"])
     assert got["metrics"] == {}
+
+
+# ── ⑥ [P0-CALC-PROOF] 봉인 완전성 ────────────────────────────────────────
+
+def test_경로의_관계가_넷인데_승인이_하나면_BLOCKED_다(monkeypatch):
+    """★★★ [감사 실측] 앞 판은 `relation_approvals` 가 **비었는지만** 봤다. 그래서
+    관계 승인 하나만 제출해도 `COMPLETE` 가 나왔다 — 경로에 관계가 넷이든 상관없이.
+
+    ⚠️ 승인은 「몇 개 냈는가」가 아니라 **「이 경로의 모든 관계가 승인됐는가」**다."""
+    _approved(monkeypatch)
+    got = pc.calculate(
+        _req(required_relation_ids=("rel_1", "rel_2", "rel_3", "rel_4"),
+             relation_approvals={"rel_1": "evt_1"}),
+        datasets=_datasets(), ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
+    assert got["status"] == pc.BLOCKED
+    assert "rel_2" in str(got["blocked"]["internal_reasons"])
+
+
+def test_경로_밖_관계의_승인을_섞어도_BLOCKED_다(monkeypatch):
+    """⚠️ 개수만 세면 **다른 관계의 승인**으로 개수를 맞출 수 있다."""
+    _approved(monkeypatch)
+    got = pc.calculate(
+        _req(required_relation_ids=("rel_1", "rel_2"),
+             relation_approvals={"rel_1": "evt_1", "rel_남의것": "evt_9"}),
+        datasets=_datasets(), ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
+    assert got["status"] == pc.BLOCKED
+    reasons = str(got["blocked"]["internal_reasons"])
+    assert "rel_2" in reasons and "rel_남의것" in reasons
+
+
+def test_요구_관계_집합이_비면_계산하지_않는다(monkeypatch):
+    """★ 무엇을 승인해야 하는지 모르는 채로 계산하면, 승인 검사 자체가 무의미하다."""
+    _approved(monkeypatch)
+    got = pc.calculate(_req(required_relation_ids=()), datasets=_datasets(),
+                       ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
+    assert got["status"] == pc.BLOCKED
+    assert "요구하는 관계 집합" in str(got["blocked"]["internal_reasons"])
+
+
+def test_두_번째_행부터_다른_판이_섞이면_무결성_장애다(monkeypatch):
+    """★★★ [감사 실측] 앞 판은 **첫 행의 판만** 검사했다. 그래서 두 번째 행부터 다른
+    Snapshot 을 섞어 넣어도 `COMPLETE` 가 나왔다.
+
+    ⚠️ 「판 하나를 봉인했다」는 말은 **그 판의 행만 읽었다**는 뜻이어야 한다. 섞인 자료로
+      만든 숫자는 어느 판의 것인지 말할 수 없고, 그러면 재현도 반증도 불가능하다."""
+    _approved(monkeypatch)
+    ds = _datasets()
+    ds["INV-01"] = [ds["INV-01"][0],
+                    {**ds["INV-01"][1], "__snapshot_id__": "ds_몰래_섞은_판"}]
+    with pytest.raises(pc.PathCalculationError, match="여러 판의 행이 섞였습니다"):
+        pc.calculate(_req(), datasets=ds, ledger_verifier=_ok_ledger,
+                     relation_verifier=_ok_relation)
+
+
+def test_판은_봉인됐는데_행이_0건이면_BLOCKED_다(monkeypatch):
+    """⚠️ 이것은 무결성 장애가 **아니다** — 자료가 아직 없는 것이다. 장애로 올리면
+    「데이터를 채워야 한다」가 「시스템이 고장났다」로 보인다."""
+    _approved(monkeypatch)
+    ds = _datasets()
+    ds["MDM-05"] = []
+    got = pc.calculate(_req(), datasets=ds, ledger_verifier=_ok_ledger,
+                       relation_verifier=_ok_relation)
+    assert got["status"] == pc.BLOCKED
+    assert "0건" in str(got["blocked"]["internal_reasons"])
+
+
+def test_경로_판을_위조하면_거부한다(monkeypatch):
+    """★★★ [감사 실측] 앞 판은 호출자가 주장한 `path_model_version` 을 그대로 지문에
+    실었다. `"0.0.0-fake"` 로도 `COMPLETE` 가 나왔고, 그 지문은 재현 검증을 통과한다.
+
+    ⚠️ 조용히 덮어쓰지 않고 **거부**한다 — 덮어쓰면 호출자는 자기가 다른 판을 요청한 줄
+      모른 채 다른 규칙의 답을 받는다."""
+    _approved(monkeypatch)
+    with pytest.raises(pc.PathCalculationError, match="경로 판이 코드와 다릅니다"):
+        pc.calculate(_req(path_model_version="0.0.0-fake"), datasets=_datasets(),
+                     ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
+
+
+def test_요구_관계_집합이_다르면_질문_지문도_다르다(monkeypatch):
+    """★ 같은 승인을 냈어도 **어느 경로의 질문이었나**가 다르면 다른 질문이다."""
+    _approved(monkeypatch)
+    a = pc.calculate(_req(), datasets=_datasets(), ledger_verifier=_ok_ledger,
+                     relation_verifier=_ok_relation)
+    b = pc.calculate(_req(required_relation_ids=("rel_1", "rel_2"),
+                          relation_approvals={"rel_1": "evt_1", "rel_2": "evt_2"}),
+                     datasets=_datasets(), ledger_verifier=_ok_ledger,
+                     relation_verifier=_ok_relation)
+    assert a["request_fingerprint"] != b["request_fingerprint"]
+
+
+# ── ⑦ [P0-CALC-INPUT] 정본 필드로 계산된다 ──────────────────────────────
+
+def test_LOG_02_의_자재는_PRC_02_를_거쳐_찾는다(monkeypatch):
+    """★★★ [감사 실측] `LOG-02` 에는 **자재 ID 가 없다.** 주문행을 거치지 않으면
+    「어느 자재의 선적인가」를 알 수 없다.
+
+    ⚠️ 앞 판은 이 결합 없이 `LOG-02.material_code` 를 읽었고, 실제 CSV 를 넣자 즉시
+      실패했다 — 그런데 집중 회귀는 전부 초록이었다(fixture 가 계산 모델의 말로 쓰여
+      있었다). **fixture 가 계약을 대신 정의하면 시험은 아무것도 지키지 못한다.**"""
+    _approved(monkeypatch)
+    got = pc.calculate(_req(), datasets=_datasets(), ledger_verifier=_ok_ledger,
+                       relation_verifier=_ok_relation)
+    assert got["status"] == pc.COMPLETE, got.get("blocked")
+    #: SHP-1 은 PO-1 → LIOH 다. 그 결합이 되어야 운송 중 수량이 자재별로 나온다.
+    assert got["metrics"]["in_transit_quantity"] == {"LIOH": 1000.0}
+
+
+def test_주문행을_못_찾으면_그_선적을_빼지_않고_막는다(monkeypatch):
+    """★★★ 빼면 **운송 중 수량이 조용히 줄고** 그것은 「지연이 없다」로 읽힌다.
+
+    ⚠️ 계산에서 한 줄을 빼는 것은 0 을 넣는 것과 같다 — 화면은 평온하다."""
+    _approved(monkeypatch)
+    prc = [{"po_line_id": "PO-9", "material_id": "OTHER"}]      # SHP-1 의 PO-1 이 없다
+    got = pc.calculate(_req(), datasets=_datasets(**{"PRC-02": prc}),
+                       ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
+    assert got["status"] == pc.BLOCKED
+    assert got["metrics"] == {}
+    assert "PRC-02 에서 찾을 수 없어" in str(got["blocked"]["internal_reasons"])
+
+
+def test_한_주문행에_자재가_둘이면_고르지_않는다(monkeypatch):
+    _approved(monkeypatch)
+    prc = [{"po_line_id": "PO-1", "material_id": "LIOH"},
+           {"po_line_id": "PO-1", "material_id": "NIOH"}]
+    got = pc.calculate(_req(), datasets=_datasets(**{"PRC-02": prc}),
+                       ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
+    assert got["status"] == pc.BLOCKED
+    assert "자재가 둘" in str(got["blocked"]["internal_reasons"])
+
+
+def test_생산_판매_연결은_승인된_배분에서만_온다(monkeypatch):
+    """★★★ 정본 근거가 «승인된 allocation» 이다(§관계표 `FULFILLS_SALES`).
+
+    ⚠️ 제품·기간이 같다고 이어 붙이면 그것은 승인이 아니라 **추측**이고, 매출 이연이
+      그 추측 위에 세워진다. 배분이 없으면 연결하지 않고, 계산기가 그것을 드러낸다."""
+    _approved(monkeypatch)
+    got = pc.calculate(
+        _req(assumptions={"reserved_quantity_zero": True,
+                          "baseline_recognition": {"SL-1": "2026-09-30T00:00:00+00:00"},
+                          "recognition_span_days": {"SL-1": "30"}}),   # 배분 없음
+        datasets=_datasets(), ledger_verifier=_ok_ledger,
+        relation_verifier=_ok_relation)
+    assert got["status"] == pc.BLOCKED
+    assert "기준선" in str(got["blocked"]["internal_reasons"])
+    assert got["metrics"] == {}
+
+
+def test_승인된_배분이_없는_계획행을_가리키면_막는다(monkeypatch):
+    """⚠️ 없는 계획에 매출을 붙이면 그 이연은 아무 근거가 없다."""
+    _approved(monkeypatch)
+    got = pc.calculate(
+        _req(assumptions={"reserved_quantity_zero": True,
+                          "baseline_recognition": {"SL-1": "2026-09-30T00:00:00+00:00"},
+                          "sales_allocation": {"SL-1": "PL-없음"},
+                          "recognition_span_days": {"SL-1": "30"}}),
+        datasets=_datasets(), ledger_verifier=_ok_ledger,
+        relation_verifier=_ok_relation)
+    assert got["status"] == pc.BLOCKED
+    assert "MFG-01 에 없습니다" in str(got["blocked"]["internal_reasons"])
+
+
+def test_정본_열이_하나라도_없으면_추측하지_않고_막는다(monkeypatch):
+    """★★★ 「비슷한 이름의 다른 열로 이어 붙이기」를 막는다 — 그 순간 「어느 자재인가」가
+    코드 한 줄의 추측이 된다."""
+    _approved(monkeypatch)
+    inv = [{"material_id": "LIOH", "location_id": "WH1",
+            "snapshot_at": "2026-08-20T00:00:00+00:00"}]      # 수량 열이 없다
+    got = pc.calculate(_req(), datasets=_datasets(**{"INV-01": inv}),
+                       ledger_verifier=_ok_ledger, relation_verifier=_ok_relation)
+    assert got["status"] == pc.BLOCKED
+    assert "unrestricted_quantity" in str(got["blocked"]["internal_reasons"])
+
+
+def test_PRC_02_가_필수_계약키에_들어_있다():
+    """★ 계산 능력 등록부에는 없지만 **투영에 필요하다.** 등록부만 믿으면 정본으로는
+    한 줄도 계산되지 않는다."""
+    assert "PRC-02" in pc.REQUIRED_DATASETS
