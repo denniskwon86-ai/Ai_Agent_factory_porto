@@ -152,6 +152,15 @@ EVENT_TYPES = (
     "CALC_CAPABILITY_APPROVED",
     #: 실행 승인 철회. `parent_event_id` 로 원 승인을 가리킨다.
     "CALC_CAPABILITY_REVOKED",
+    # ★★★ [G2 M0-3.2b] **계산 기준선 봉인.**
+    #
+    #   생산-판매 배분·인식 기간·기준 인식일 셋을 **한 봉인**으로 묶는다. 따로 두면
+    #   「배분은 새 것, 인식 규칙은 옛 것」 같은 조합이 생기고, 그 조합은 아무도 승인한
+    #   적이 없다 — 매출 이연은 셋의 곱이다.
+    #   ⚠️ 대상은 **내용의 지문**이다(build_id 가 아니다). 내용을 고치면 지문이 바뀌고
+    #     승인이 자동으로 죽는다 — 「같은 기준선 다른 값」이 승인을 물려받지 못한다.
+    "CALC_BASELINE_SEALED",
+    "CALC_BASELINE_REVOKED",
     "CORRECTION",                  # 정정 전용 — 반드시 parent_event_id 를 가진다
 )
 
@@ -180,7 +189,10 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  "dataset_ownership_binding",
                  # [G2 M0-3.2] 계산 능력. 「이 산식으로 계산해도 되는가」는 데이터 소유나
                  #   온톨로지 관계와 **다른 질문**이다 — 뭉개면 셋 다 답할 수 없다.
-                 "calc_capability")
+                 "calc_capability",
+                 # [G2 M0-3.2b] 계산 기준선. 「무엇과 비교해 이연을 재는가」는 산식
+                 #   승인과 다른 질문이다.
+                 "calc_baseline")
 
 
 #: ★★★ [4.1c-B P0-4] **철회 유형 → 허용되는 부모 유형** 표. 한 곳에만 둔다.
@@ -193,6 +205,7 @@ _REVOCATION_PARENTS = {
                                   "ONTOLOGY_RELATION_RETIRED"),
     "DATASET_OWNERSHIP_REVOKED": ("DATASET_OWNERSHIP_APPROVED",),
     "CALC_CAPABILITY_REVOKED": ("CALC_CAPABILITY_APPROVED",),
+    "CALC_BASELINE_REVOKED": ("CALC_BASELINE_SEALED",),
 }
 _REVOCATION_EVENTS = tuple(_REVOCATION_PARENTS)
 
@@ -378,6 +391,8 @@ class DecisionLedger:
             "DATASET_OWNERSHIP_REVOKED": "dataset_ownership_binding",
             "CALC_CAPABILITY_APPROVED": "calc_capability",
             "CALC_CAPABILITY_REVOKED": "calc_capability",
+            "CALC_BASELINE_SEALED": "calc_baseline",
+            "CALC_BASELINE_REVOKED": "calc_baseline",
             # ★★★ [4.1c-B P0-4] 소유권 승인·철회도 **대상 종류를 못박는다.**
             #   ⚠️ 앞 판은 이름만 허용목록에 넣고 주체 검증을 하지 않았다. 그러면
             #     `DATASET_OWNERSHIP_APPROVED` 를 `app_dataset` 이나 `project` 주체로

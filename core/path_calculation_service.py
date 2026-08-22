@@ -9,6 +9,7 @@
     relation_approvals      「그 셋이 승인됐다」              ← 누가 확인했나
     sealed_snapshots        「이 판을 봉인했다」              ← 누가 봉인했나
     baseline_id             「이 기준선을 썼다」              ← 어디서 왔나
+    sales_allocation        「이 배분이 승인됐다」            ← 누가 승인했나
 
 ⚠️⚠️ 이것이 이 저장소가 반복해서 지운 **자기진술** 패턴이다(`calc_binding`,
   「승인됐다고 스스로 적은 결속」). 값이 지문에 들어가도 **어디서 왔는지**가 없으면
@@ -20,6 +21,7 @@
       → 관계 ID 집합            (경로에서 나온다)
       → 승인 사건               (원장에서 찾는다)
       → 봉인 판                 (저장소의 인증판에서 나온다)
+      → 계산 기준선             (봉인된 배분·인식규칙·기준 인식일 — M0-3.2b)
       → PathCalculationRequest
 
 ## 검증기는 **제품의 것을 쓴다**
@@ -174,7 +176,6 @@ def build_request(store: Any, *, query_id: str, path_fingerprint: str,
                   relation_ids: Sequence[str], instance_id: str,
                   tenant_id: str, entity_mode: str, scope_node_id: str,
                   as_of: str, actor: str,
-                  baseline_id: str, baseline_fingerprint: str,
                   assumptions: Optional[Mapping[str, Any]] = None
                   ) -> pc.PathCalculationRequest:
     """서버가 계산 요청을 **산출한다.** 호출자는 «무엇을 묻는가» 만 준다.
@@ -188,7 +189,7 @@ def build_request(store: Any, *, query_id: str, path_fingerprint: str,
       차단 사유가 한 곳에서 말하게 하기 위해서다(두 곳에서 막으면 사유가 갈린다).
 
     ⚠️ 봉인 판은 **「지금 최신 인증판」**이다. 관계 승인 때 봉인한 판이 따로 있으면
-      그것을 써야 한다 — 그 자리는 아직 비어 있고, 다음 묶음이 채운다(M0-3.2b).
+      그것을 써야 한다 — 그 자리는 **아직 비어 있다**(M1 부채).
     """
     if not str(instance_id or "").strip():
         raise PathRequestError("키트 인스턴스가 없습니다 — 어느 자료로 계산할지 모릅니다.")
@@ -196,16 +197,42 @@ def build_request(store: Any, *, query_id: str, path_fingerprint: str,
         relation_ids, actor=actor, tenant_id=tenant_id, entity_mode=entity_mode)
     seals = loader.active_seals(store, instance_id=instance_id,
                                 contract_keys=pc.REQUIRED_DATASETS)
+
+    #: ★★★ [M0-3.2b] **기준선은 봉인된 것에서 읽는다.** 호출자가 `baseline_id` 를 적어
+    #:   보내던 자리다 — 그러면 「어느 기준선과 비교했는가」가 주장이 된다.
+    from core import calc_baseline as cb
+    base = cb.active(store, instance_id=instance_id, tenant_id=tenant_id,
+                     entity_mode=entity_mode, scope_node_id=scope_node_id)
+    if base is None:
+        #: ⚠️ 빈 기준선으로 계산하지 않는다. 계산기가 모든 판매행을 `missing_baseline`
+        #:   으로 답하고, 그것이 화면에서 「영향 없음」으로 읽힌다.
+        raise PathRequestError(
+            "봉인된 계산 기준선이 없습니다 — 배분·인식 규칙·기준 인식일을 먼저 봉인해야 "
+            "합니다(빈 기준선으로 계산하면 「이연 없음」과 「비교할 기준이 없음」이 같은 "
+            "답이 됩니다).")
+
+    #: ★★★ 호출자의 가정 위에 **봉인 값을 덮는다.** 겹치면 기준선이 이긴다 —
+    #:   봉인의 뜻이 그것이다.
+    #:
+    #: ⚠️ 「호출자 가정에서 세 키를 먼저 지운다」를 함께 두었었는데, 덮어쓰기가 있으니
+    #:   **등가**였다(변이로 확인 — 지워도 실패가 0건). 통제를 두 겹으로 보이게 두면
+    #:   어느 것이 실제로 막는지 알 수 없고, 하나를 지울 때 「다른 하나가 있으니 괜찮다」고
+    #:   믿게 된다. 그래서 **한 겹으로 남긴다.**
+    merged: Dict[str, Any] = dict(assumptions or {})
+    merged["sales_allocation"] = base["sales_allocation"]
+    merged["recognition_span_days"] = base["recognition_span_days"]
+    merged["baseline_recognition"] = base["baseline_recognition"]
+
     return pc.PathCalculationRequest(
         query_id=query_id, path_fingerprint=path_fingerprint,
         tenant_id=tenant_id, entity_mode=entity_mode, scope_node_id=scope_node_id,
-        as_of=as_of, baseline_id=baseline_id,
-        baseline_fingerprint=baseline_fingerprint,
+        as_of=as_of, baseline_id=base["build_id"],
+        baseline_fingerprint=base["fingerprint"],
         sealed_snapshots=seals,
         required_relation_ids=tuple(sorted(
             {str(r).strip() for r in relation_ids if str(r).strip()})),
         relation_approvals=approvals,
-        assumptions=dict(assumptions or {}))
+        assumptions=merged)
 
 
 def run(store: Any, request: pc.PathCalculationRequest, *, actor: str) -> Dict[str, Any]:
