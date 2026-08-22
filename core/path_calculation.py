@@ -180,6 +180,10 @@ def _blocked(req: PathCalculationRequest, seg_fps: Mapping[str, str], *,
       (「승인되지 않은 관계 3건」은 그 조직에 관계가 3건 있다는 뜻이다)."""
     return {
         "status": BLOCKED,
+        #: ★ 막혔어도 **어느 질문이 막혔는가**는 답할 수 있어야 한다.
+        "query_id": req.query_id,
+        "path_fingerprint": req.path_fingerprint,
+        "required_relation_ids": sorted(req.required_relation_ids),
         "request_fingerprint": request_fingerprint(req, seg_fps),
         #: ★ 수치는 비어 있다. 빈 dict 를 0 으로 읽지 못하게 `metrics` 자체를 비운다.
         "metrics": {},
@@ -388,6 +392,16 @@ def calculate(req: PathCalculationRequest, *,
     request_fp = request_fingerprint(req, seg_fps)
     return {
         "status": COMPLETE,
+        #: ★★★ [B2] **경로 정체성을 결과에 싣는다.** 결과 지문은 계산을 재현하지만
+        #:   경로를 재현하지 않는다 — 같은 숫자를 다른 길로도 만들 수 있다.
+        #: ⚠️ 이것이 없으면 G5 가 「이 숫자가 이 경로에서 나왔는가」를 대조할 수 없고,
+        #:   그때는 호출자가 경로 id 를 복사해 붙일 수 있다(B1.2-1a 에서 지운 구멍이다).
+        "query_id": req.query_id,
+        "path_fingerprint": req.path_fingerprint,
+        #: ★ **무엇에 기대어 계산했는가.** 경로의 관계 전부를 그대로 싣는다 — 승인이
+        #:   확인된 것만 싣는 것이 아니다(승인은 `relation_approvals` 가 답한다).
+        "required_relation_ids": sorted(req.required_relation_ids),
+        "capability_fingerprints": dict(seg_fps),
         "request_fingerprint": request_fp,
         "result_fingerprint": result_fingerprint(
             request_fp=request_fp, metrics=metrics,

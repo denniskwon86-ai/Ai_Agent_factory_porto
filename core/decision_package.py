@@ -79,7 +79,8 @@ def _view(name: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
-          baseline: Any = None, path: Optional[Dict[str, Any]] = None) -> Package:
+          baseline: Any = None, path: Optional[Dict[str, Any]] = None,
+          calculation: Optional[Dict[str, Any]] = None) -> Package:
     """시뮬레이션 두 판 → 회의 안건 하나.
 
     ⚠️ 책임자·기한이 없으면 만들지 않는다. 없는 안건은 「검토하겠습니다」로 끝나고
@@ -135,10 +136,18 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
         from_runtime = bool(str((path or {}).get("query_id", "") or "").strip()
                             or str((path or {}).get("path_fingerprint", "") or "").strip())
         if from_runtime:
-            raise DecisionError(
-                "런타임 온톨로지 경로가 붙은 숫자 안건은 아직 만들지 않습니다 — 그 숫자가 "
-                "이 경로에서 나왔다는 것을 서버가 확인할 방법이 없습니다(5b/B2 계산 결과 결속 "
-                "미구현). 숫자 없는 근거 안건으로 만들거나, 계산 결속이 들어온 뒤에 만드십시오.")
+            #: ★★★ [B2 / 2026-08-21] **계산기가 봉인한 결과가 있으면 대조하고 통과시킨다.**
+            #:
+            #: 위 주석이 적어 둔 해제 조건이 이제 갖춰졌다: `core.path_calculation` 이
+            #: 경로 정체성·요청 지문·결과 지문·봉인 판·구간 지문을 함께 봉인한다.
+            #:
+            #: ⚠️⚠️ 그래도 **호출자가 넘긴 dict 를 그냥 믿지 않는다.** 대조하는 것:
+            #:   ① `status == COMPLETE` — 막힌 계산으로 숫자 안건을 만들지 않는다
+            #:   ② 경로 정체성 두 값이 **경로와 같은가** — 다른 경로의 결과를 붙일 수 없다
+            #:   ③ 결과 지문이 있는가 — `BLOCKED` 에는 없다(§3.7)
+            #: ⚠️ 대조가 하나라도 어긋나면 **막는다.** 이 자리에서 통과시키면 그 숫자는
+            #:   경로의 근거를 입은 채 회의에 오른다.
+            _assert_calculation_binding(path, calculation)
         if blocked:
             raise DecisionError(
                 "이 경로는 아직 계산할 수 없어 숫자 안건을 만들지 않습니다 — "
@@ -180,6 +189,21 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
         #:   무엇인지 모른 채 「모르는 게 있구나」로만 넘긴다.
         "missing_steps": (path or {}).get("missing_steps", []),
     }
+    if calculation:
+        #: ★★★ [B2] **계산 결속을 근거에 봉인한다.** `evidence` 는 그대로 `decision_case`
+        #:   에 저장되고 `evidence_hash` 에 들어가므로, 여기 실으면 **원장과 발간까지
+        #:   그대로 따라간다** — 나중에 「이 숫자는 무엇으로 만들었나」에 답할 수 있다.
+        evidence["calculation"] = {
+            "request_fingerprint": str(calculation.get("request_fingerprint", "") or ""),
+            "result_fingerprint": str(calculation.get("result_fingerprint", "") or ""),
+            "used_snapshots": dict(calculation.get("used_snapshots") or {}),
+            "segment_model_versions": dict(
+                calculation.get("segment_model_versions") or {}),
+            "capability_fingerprints": dict(
+                calculation.get("capability_fingerprints") or {}),
+            "path_model_version": str(calculation.get("path_model_version", "") or ""),
+            "metrics": dict(calculation.get("metrics") or {}),
+        }
     #: ★ 안건의 «질문» 은 가장 크게 움직인 결과에서 뽑는다 — 지어내지 않는다.
     moved = sorted((r for r in rows if r["delta"]), key=lambda r: -abs(r["delta"]))
     question = (f"{moved[0]['label']}이(가) {moved[0]['delta']:+,.0f}"
@@ -190,6 +214,42 @@ def build(*, title: str, owner: str, due: str, base: Any, scenario: Any,
                    owner=str(owner).strip(), due=str(due).strip(),
                    evidence=evidence, views=[_view(v, rows) for v in VIEWS],
                    data_kind=str(base.data_kind or ""))
+
+
+def _assert_calculation_binding(path: Optional[Dict[str, Any]],
+                                calculation: Optional[Dict[str, Any]]) -> None:
+    """런타임 경로에 붙은 **계산 결과 결속**을 대조한다. 어긋나면 안건을 만들지 않는다.
+
+    ★★★ [B2] 이 함수가 없던 동안 런타임 경로 + 숫자 조합은 **전면 차단**이었다
+      (B1.2-1b). 차단을 푸는 유일한 근거는 「계산기가 봉인한 결과」이고, 그 봉인을
+      여기서 연다.
+
+    ⚠️⚠️ 호출자가 넘긴 dict 를 그냥 믿으면 그것이 다시 자기진술이다 — B1.2-1a 에서
+      `calc_binding` 을 지운 이유가 그것이었다. 그래서 **경로와 대조**한다:
+      호출자가 경로 id 를 복사해 붙여도, 결과 안의 정체성이 그 경로와 다르면 막힌다."""
+    if not calculation:
+        raise DecisionError(
+            "런타임 온톨로지 경로가 붙은 숫자 안건에는 **계산 결과 결속**이 필요합니다 "
+            "— 그 숫자가 이 경로에서 나왔다는 것을 서버가 확인할 수 없으면 만들지 "
+            "않습니다(계산기가 봉인한 결과를 `calculation=` 으로 넘기십시오).")
+    status = str(calculation.get("status", "") or "")
+    if status != "COMPLETE":
+        #: ⚠️ 막힌 계산 옆에 숫자를 놓으면 그 숫자가 답으로 읽힌다.
+        raise DecisionError(
+            f"계산이 완료되지 않았습니다({status or '(상태 없음)'}) — 계산되지 않은 "
+            f"경로로 숫자 안건을 만들지 않습니다.")
+    if not str(calculation.get("result_fingerprint", "") or "").strip():
+        #: `BLOCKED` 에는 결과 지문이 없다(§3.7). 상태가 COMPLETE 인데 없으면 위조다.
+        raise DecisionError(
+            "계산 결과에 결과 지문이 없습니다 — 수치의 출처를 재현할 수 없습니다.")
+    for field in ("query_id", "path_fingerprint"):
+        want = str((path or {}).get(field, "") or "").strip()
+        got = str(calculation.get(field, "") or "").strip()
+        if want and got != want:
+            #: ★★★ **다른 경로의 계산 결과를 이 경로에 붙일 수 없다.**
+            raise DecisionError(
+                f"계산 결과가 이 경로의 것이 아닙니다({field}: {got or '(없음)'} ≠ "
+                f"{want}) — 경로 id 를 복사해 붙인 숫자는 근거가 아닙니다.")
 
 
 def briefing_lines(pkg: Package) -> List[str]:

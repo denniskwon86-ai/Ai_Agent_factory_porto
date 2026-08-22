@@ -157,6 +157,14 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "POST /api/v1/enterprise-context/executive-board": (ADMIN_DATA_ACCESS,),
     "POST /api/v1/enterprise-context/contexts/select": (ADMIN_ORGANIZATION,),
 
+    # ── 경로 계산 [B2] ──────────────────────────────────────────────────────
+    # ★ LLM 은 0건이지만 **돌리기**로 끊었다. 승인된 자료를 읽어 경영 판단용 숫자를 내고,
+    #   그 숫자는 안건이 된다 — viewer 가 눌러서 만들 것이 아니다.
+    # ⚠️ 이 표는 「이 사람이 계산을 돌릴 수 있는가」만 답한다. 「이 인스턴스를 읽을 수
+    #   있는가」는 `_instance_or_404` 가, 「이 경로가 보이는가」는 `app_policy` 가 답한다.
+    "POST /api/v1/calculation/path": (PROJECT_RUN,),
+    "POST /api/v1/calculation/path/decision": (PROJECT_RUN,),
+
     # ── 실행(LLM) ───────────────────────────────────────────────────────────
     # viewer 도 가진 권한이다. 막으려는 것이 아니라 **익명·미등록을 걸러내고 감사에 남기는**
     # 것이 목적이다 — 비용이 나가는 경로는 누가 눌렀는지 남아야 한다.

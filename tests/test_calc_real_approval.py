@@ -91,6 +91,9 @@ def _approve_relations(env, relations=RELATIONS):
             decision="APPROVED", rationale="첫 수직 경로 관계 승인",
             tenant_id=env["tenant"], entity_mode="REAL")
         out[rel] = ev["event_id"]
+    #: ★ 제품에서는 이 결속이 **경로의 간선**에서 온다(온톨로지가 승인 때 묶어 둔다).
+    #:   여기서는 경로 없이 코어를 부르므로 방금 만든 사건을 그대로 이어 둔다.
+    env["bindings"] = dict(out)
     return out
 
 
@@ -129,9 +132,16 @@ def _seal_baseline(env, **over):
                    rationale="첫 수직 경로 시연 기준선", **args)
 
 
-def _build(env, **kw):
+def _build(env, bindings=None, **kw):
+    """★ `relation_bindings` 는 **경로의 간선**에서 온다(`{관계: 승인 사건}`).
+
+    ⚠️ 여기서는 경로 없이 코어를 직접 부르므로 원장에 남긴 사건을 그대로 쓴다. 제품
+      경로가 정말 간선에서 뽑는지는 `tests/test_calculation_api.py` 가 고정한다."""
     args = dict(query_id="q-real", path_fingerprint="pf-real",
-                relation_ids=RELATIONS, instance_id=env["instance_id"],
+                relation_bindings=(bindings if bindings is not None
+                                   else dict(env.get("bindings")
+                                             or {r: "" for r in RELATIONS})),
+                instance_id=env["instance_id"],
                 tenant_id=env["tenant"], entity_mode="REAL", scope_node_id=env["scope"],
                 as_of=dv.AS_OF, actor=ACTOR,
                 #: ★ 기준선이 정하지 않는 것만 남긴다(날짜 규칙·예약 가정).
@@ -154,13 +164,16 @@ def test_서버가_관계_승인을_원장에서_찾는다(env):
 
 
 def test_승인이_없는_관계는_목록에_들어오지_않는다(env):
-    """⚠️ 없는 승인을 지어내지 않는다. 실행기가 경로 집합과 대조해 `BLOCKED` 로 답한다."""
-    _approve_relations(env, relations=RELATIONS[:2])
+    """⚠️ 없는 승인을 지어내지 않는다. 실행기가 경로 집합과 대조해 `BLOCKED` 로 답한다.
+
+    ★ 승인이 없는 관계는 결속에 **빈 사건**으로 들어온다 — 키는 남고 값이 없다.
+      경로에는 있는 관계이기 때문이다."""
+    made = _approve_relations(env, relations=RELATIONS[:2])
     _seal_baseline(env)
-    req = _build(env)
+    req = _build(env, bindings={**{r: "" for r in RELATIONS}, **made})
     assert set(req.relation_approvals) == set(RELATIONS[:2])
-    assert set(req.required_relation_ids) == set(RELATIONS), \
-        "요구 집합이 함께 줄면 실행기의 일치 검사가 무력해진다"
+    assert set(req.required_relation_ids) == set(RELATIONS), (
+        "요구 집합이 함께 줄면 실행기의 일치 검사가 무력해진다")
 
 
 def test_봉인_판을_저장소에서_산출한다(env):
@@ -248,15 +261,54 @@ def test_실행_승인이_철회되면_BLOCKED_다(env, monkeypatch):
     assert got["status"] == pc.BLOCKED
 
 
-def test_다른_사람의_관계_승인은_인정되지_않는다(env, monkeypatch):
-    """⚠️ 승인은 「누가」와 「무엇을」이 같이 있어야 승인이다 — 제품 판정기가 행위자를
-    대조한다(그 규칙을 여기서 다시 만들지 않는다)."""
+def test_승인자가_아닌_사람도_계산할_수_있다(env, monkeypatch):
+    """★★★ [2026-08-22] **앞 판은 여기서 정반대를 고정하고 있었다.**
+
+    종전 시험의 이름은 「다른 사람의 관계 승인은 인정되지 않는다」였고, 실제로
+    `relation_approvals == {}` 를 요구했다. 그 규칙대로면 **관계를 직접 승인한 사람만
+    계산할 수 있다** — 제품 라우트를 처음 돌렸을 때 모든 계산이 그것으로 막혔다.
+
+    ⚠️⚠️ 왜 그때는 옳아 보였나: `product_approval_resolver` 의 ④ 는 「승인 사건의
+      행위자가 이 사람인가」를 본다. 그 판정기는 **승인 행위를 기록할 때** 쓰라고 만든
+      것이고, 거기서는 요청자 = 승인자다. 계산은 승인 행위가 아니다 — 묻는 것은
+      「이 관계가 승인됐는가」이지 「내가 승인했는가」가 아니다.
+
+    ★ 같은 판단이 `capability_verifier` 머리말에는 이미 적혀 있었다(④를 넣지 않는 이유).
+      옆 함수가 반대로 하고 있었고, 이 시험이 그것을 계약으로 굳혀 두었다."""
     _approve_relations(env)
     _seal_baseline(env)
     _approve_capabilities(env, monkeypatch)
     req = _build(env, actor="남@afs.invalid")
-    assert req.relation_approvals == {}, "다른 사람의 승인이 내 요청에 실렸다"
+    assert set(req.relation_approvals) == set(RELATIONS), (
+        "승인자 본인만 계산할 수 있으면 제품에서 아무도 계산하지 못한다")
 
+
+def test_다른_관계의_승인_사건은_인정되지_않는다(env, monkeypatch):
+    """★★★ 행위자 대조를 뺀 자리를 **무엇이 대신하는가.**
+
+    ⚠️ 판정기는 사건의 `subject_id` 가 그 관계인지 본다. 그래서 결속을 바꿔 넣어도
+      「같은 관계의 다른 살아 있는 승인」밖에 넣을 수 없다."""
+    made = _approve_relations(env)
+    _seal_baseline(env)
+    _approve_capabilities(env, monkeypatch)
+    #: 첫 관계 자리에 **셋째 관계의 승인 사건**을 넣는다.
+    req = _build(env, bindings={**made, RELATIONS[0]: made[RELATIONS[2]]})
+    assert RELATIONS[0] not in req.relation_approvals, (
+        "다른 관계의 승인이 이 관계의 근거가 됐다")
+
+
+def test_승인_아닌_사건은_인정되지_않는다(env, monkeypatch):
+    """⚠️ 목적 전용 유형이 아니면 승인이 아니다 — 범용 결정 사건을 재사용하지 않는다."""
+    made = _approve_relations(env)
+    _seal_baseline(env)
+    _approve_capabilities(env, monkeypatch)
+    other = env["ledger"].append(
+        event_type="ONTOLOGY_RELATION_RETIRED", subject_type="ontology_relation",
+        subject_id=RELATIONS[0], actor_type="user", actor_id=ACTOR,
+        decision="RETIRED", rationale="폐기", tenant_id=env["tenant"],
+        entity_mode="REAL")
+    req = _build(env, bindings={**made, RELATIONS[0]: other["event_id"]})
+    assert RELATIONS[0] not in req.relation_approvals
 
 def test_원장_장애는_BLOCKED_가_아니라_장애다(env, monkeypatch):
     """★★★ 「못 읽었다」를 「승인 없음」으로 접으면 장애 중에 모든 계산이 「아직 준비되지
@@ -478,3 +530,85 @@ def test_기준선이_정하는_값은_호출자_가정에서_제거된다(env):
         assert "SO-가짜" not in req.assumptions[key], f"{key} 에 호출자 값이 남았다"
     #: ★ 기준선이 정하지 않는 가정은 그대로 살아 있어야 한다(대조군).
     assert req.assumptions["reserved_quantity_zero"] is True
+
+
+# ── ④ [B2] 실제 계산 결과가 G5 안건까지 결속된다 ────────────────────────
+
+def test_실제_계산_결과가_안건_근거에_봉인된다(env, monkeypatch):
+    """★★★ **B2 의 종단 증거.** 손으로 만든 dict 가 아니라 **계산기가 실제로 낸 결과**를
+    G5 에 넘긴다.
+
+    ⚠️⚠️ 앞서 G5 쪽 회귀는 `calc = {...}` 를 손으로 적었다. 그래서 계산기가 경로
+      정체성을 **싣지 않아도** 잡히지 않았다(변이 0건) — 「fixture 가 계약을 대신
+      정의하는」 패턴이 또 나온 것이다.
+    ★ 여기서는 실제 결과를 그대로 넘긴다. 계산기가 `query_id`·`path_fingerprint` 를
+      싣지 않으면 G5 대조에서 막힌다."""
+    from core import decision_package as dp
+    from core import calc_graph as cg
+
+    _approve_relations(env)
+    _seal_baseline(env)
+    _approve_capabilities(env, monkeypatch)
+    req = _build(env)
+    got = svc_calc.run(env["store"], req, actor=ACTOR)
+    assert got["status"] == pc.COMPLETE, got.get("blocked")
+
+    #: ★ 계산기가 낸 정체성이 요청과 같아야 한다 — 이것이 G5 대조의 근거다.
+    assert got["query_id"] == req.query_id
+    assert got["path_fingerprint"] == req.path_fingerprint
+
+    #: 런타임 경로 근거(어댑터가 만드는 모양).
+    path_evidence = {"query_id": got["query_id"],
+                     "path_fingerprint": got["path_fingerprint"],
+                     "path": [], "missing_evidence": [], "missing_steps": [],
+                     "calculation_blocked": False}
+    base = cg.Result(
+        baseline_fingerprint="bl_fp", calc_version="1.0.0", assumptions={},
+        fingerprint="fp_base", data_kind="DEMO/SYNTHETIC",
+        values={"production_qty": 100.0, "ending_inventory": 10.0,
+                "purchase_payment": 5.0, "ending_cash": 5.0, "operating_profit": 1.0})
+    scenario = cg.Result(
+        baseline_fingerprint="bl_fp", calc_version="1.0.0", assumptions={"d": 1},
+        fingerprint="fp_scn", data_kind="DEMO/SYNTHETIC",
+        values={"production_qty": 90.0, "ending_inventory": 12.0,
+                "purchase_payment": 6.0, "ending_cash": 6.0, "operating_profit": 2.0})
+
+    pkg = dp.build(title="구매 지연 영향", owner=ACTOR, due="2026-07-01",
+                   base=base, scenario=scenario, path=path_evidence, calculation=got)
+    bound = pkg.evidence["calculation"]
+    #: ★★★ 계산 결속이 **근거에 봉인**된다 — 원장·발간까지 따라간다.
+    assert bound["result_fingerprint"] == got["result_fingerprint"]
+    assert bound["request_fingerprint"] == got["request_fingerprint"]
+    assert bound["used_snapshots"] == got["used_snapshots"]
+    assert bound["metrics"] == got["metrics"]
+    #: ★ 그리고 그 봉인으로 「이 숫자는 무엇으로 만들었나」에 답할 수 있다.
+    assert set(bound["segment_model_versions"]) == set(pc.SEGMENTS)
+
+
+def test_막힌_계산_결과는_안건이_되지_않는다(env):
+    """★★★ 실제 `BLOCKED` 결과를 넘긴다 — 승인이 없으니 계산이 막힌 상태다.
+
+    ⚠️ 막힌 계산 옆에 숫자를 놓으면 그 숫자가 답으로 읽힌다."""
+    from core import decision_package as dp
+    from core import calc_graph as cg
+    import pytest as _pytest
+
+    _approve_relations(env)
+    _seal_baseline(env)
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED
+
+    path_evidence = {"query_id": got["query_id"],
+                     "path_fingerprint": got["path_fingerprint"],
+                     "path": [], "missing_evidence": [], "missing_steps": [],
+                     "calculation_blocked": True}
+    base = cg.Result(baseline_fingerprint="bl", calc_version="1.0.0",
+                     assumptions={}, fingerprint="a", data_kind="DEMO/SYNTHETIC",
+                     values={"production_qty": 100.0})
+    scenario = cg.Result(baseline_fingerprint="bl", calc_version="1.0.0",
+                         assumptions={"d": 1}, fingerprint="b",
+                         data_kind="DEMO/SYNTHETIC",
+                         values={"production_qty": 90.0})
+    with _pytest.raises(dp.DecisionError):
+        dp.build(title="x", owner=ACTOR, due="2026-07-01", base=base,
+                 scenario=scenario, path=path_evidence, calculation=got)

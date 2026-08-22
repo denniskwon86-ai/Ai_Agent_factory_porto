@@ -139,15 +139,75 @@ def test_정체성이_결정_패키지까지_실린다():
     assert evidence["query_id"] == "oq_keep", evidence
     assert evidence["path_fingerprint"] == "fp_keep", evidence
 
-    #: ② ⚠️ [B1.2-1b] 그 근거로 **숫자** 안건을 만드는 것은 이제 거부된다.
-    #:   숫자가 이 경로에서 나왔다는 것을 서버가 확인할 수 없기 때문이다(5b/B2 미구현).
+    #: ② ⚠️ [B1.2-1b] 계산 결속 **없이** 숫자 안건을 만드는 것은 여전히 거부된다.
     base = _calc_result("fp_base")
     scenario = _calc_result("fp_scn", {"production_qty": 90.0, "ending_inventory": 12.0,
                                        "purchase_payment": 6.0, "ending_cash": 6.0,
                                        "operating_profit": 2.0})
-    with pytest.raises(dp.DecisionError, match="런타임 온톨로지 경로"):
+    with pytest.raises(dp.DecisionError, match="계산 결과 결속"):
         dp.build(title="지연 영향", owner="owner@afs.invalid", due="2026-09-01",
                  base=base, scenario=scenario, path=evidence)
+
+    #: ③ ★★★ [B2] **계산기가 봉인한 결과가 있으면 통과한다.** 그것이 차단의 해제 조건이다.
+    calc = {"status": "COMPLETE", "query_id": "oq_keep", "path_fingerprint": "fp_keep",
+            "request_fingerprint": "req_fp", "result_fingerprint": "res_fp",
+            "used_snapshots": {"INV-01": "ds_1"},
+            "segment_model_versions": {"CALC.X": "1.0.0"},
+            "capability_fingerprints": {"CALC.X": "cap_fp"},
+            "path_model_version": "1.0.0", "metrics": {"shortage_quantity": {"M": 1.0}}}
+    pkg = dp.build(title="지연 영향", owner="owner@afs.invalid", due="2026-09-01",
+                   base=base, scenario=scenario, path=evidence, calculation=calc)
+    #: ★ 그리고 계산 결속이 **근거에 봉인된다** — 원장·발간까지 따라간다.
+    assert pkg.evidence["calculation"]["result_fingerprint"] == "res_fp"
+    assert pkg.evidence["calculation"]["used_snapshots"] == {"INV-01": "ds_1"}
+
+
+def test_다른_경로의_계산_결과를_붙일_수_없다():
+    """★★★ [B2] 호출자가 경로 id 를 복사해 붙여도, **결과 안의 정체성**이 그 경로와
+    다르면 막힌다.
+
+    ⚠️ 이것이 B1.2-1a 에서 지운 `calc_binding` 과 다른 점이다. 그때는 호출자가 넘긴
+      두 문자열을 비교했다 — 같은 호출자가 넣은 값끼리 비교하는 것은 형식 검사다.
+      지금은 **계산기가 봉인한 결과** 안의 값과 **어댑터가 만든 경로** 를 대조한다."""
+    from core import decision_package as dp
+
+    evidence = A.to_evidence(_response("oq_mine", paths=[_path(fingerprint="fp_mine")]))
+    base = _calc_result("fp_base")
+    scenario = _calc_result("fp_scn", {"production_qty": 90.0})
+    calc = {"status": "COMPLETE", "query_id": "oq_남의것",
+            "path_fingerprint": "fp_남의것", "request_fingerprint": "req",
+            "result_fingerprint": "res"}
+    with pytest.raises(dp.DecisionError, match="이 경로의 것이 아닙니다"):
+        dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                 base=base, scenario=scenario, path=evidence, calculation=calc)
+
+
+def test_막힌_계산으로_숫자_안건을_만들지_않는다():
+    """⚠️ 계산되지 않은 경로 옆에 숫자를 놓으면 그 숫자가 답으로 읽힌다."""
+    from core import decision_package as dp
+
+    evidence = A.to_evidence(_response("oq_b", paths=[_path(fingerprint="fp_b")]))
+    base = _calc_result("fp_base")
+    scenario = _calc_result("fp_scn", {"production_qty": 90.0})
+    calc = {"status": "BLOCKED", "query_id": "oq_b", "path_fingerprint": "fp_b",
+            "request_fingerprint": "req"}
+    with pytest.raises(dp.DecisionError, match="완료되지 않았습니다"):
+        dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                 base=base, scenario=scenario, path=evidence, calculation=calc)
+
+
+def test_결과_지문_없는_계산은_받지_않는다():
+    """★ `BLOCKED` 에는 결과 지문이 없다(§3.7). 상태가 `COMPLETE` 인데 없으면 위조다."""
+    from core import decision_package as dp
+
+    evidence = A.to_evidence(_response("oq_c", paths=[_path(fingerprint="fp_c")]))
+    base = _calc_result("fp_base")
+    scenario = _calc_result("fp_scn", {"production_qty": 90.0})
+    calc = {"status": "COMPLETE", "query_id": "oq_c", "path_fingerprint": "fp_c",
+            "request_fingerprint": "req", "result_fingerprint": ""}
+    with pytest.raises(dp.DecisionError, match="결과 지문이 없습니다"):
+        dp.build(title="x", owner="o@afs.invalid", due="2026-09-01",
+                 base=base, scenario=scenario, path=evidence, calculation=calc)
 
 
 def test_정체성이_원장_저장과_지문까지_따라간다(tmp_path, monkeypatch):

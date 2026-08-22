@@ -93,9 +93,11 @@ def capability_verifier(actor: str) -> Callable[[Any], bool]:
       ⑤ 철회 자식 사건이 없는가
 
     ⚠️ ④를 넣지 않는 이유: 계산 능력 승인은 **한 번 승인하면 모두가 쓰는** 것이다.
-      관계 승인(`product_approval_resolver`)은 행위자를 대조하지만 그것은 「이 사람이
-      이 관계를 승인했는가」를 묻기 때문이고, 여기서는 「이 산식이 승인됐는가」를 묻는다.
+      묻는 것은 「이 산식이 승인됐는가」이지 「이 사람이 승인했는가」가 아니다 —
       섞으면 승인자 본인만 계산할 수 있게 된다.
+    ⚠️⚠️ 관계 승인도 같은 이유로 ④를 빼야 했는데 **거기서는 섞여 있었다**(2026-08-22
+      라우트 종단에서 실측). `relation_verifier` 머리말에 그 경위를 적었다 — 이 주석이
+      옳은 판단을 이미 적어 두었는데 옆 함수가 반대로 하고 있었다.
 
     ⚠️ 원장을 못 읽으면 **던진다.** 「모르니까 승인 없음」으로 접으면 장애 중에 모든
       계산이 「아직 준비되지 않았다」로 보이고, 아무도 저장소를 보러 가지 않는다."""
@@ -123,57 +125,96 @@ def capability_verifier(actor: str) -> Callable[[Any], bool]:
     return _verify
 
 
-def relation_verifier(actor: str) -> Callable[[str, str], bool]:
+def relation_verifier() -> Callable[[str, str], bool]:
     """관계 승인을 **제품 판정기로** 확인하는 검증기를 만든다.
 
-    ★ `product_approval_resolver` 를 그대로 쓴다 — 전용 이벤트 유형·대상 대조·행위자
-      대조·철회 확인을 이미 한다. 여기서 다시 만들면 두 벌이 되고, 한쪽만 고쳐진다.
-    ⚠️ 원장 장애는 그쪽이 예외로 올린다. 실행기가 그것을 503 으로 바꾼다."""
+    ★ `product_approval_resolver` 를 그대로 쓴다 — 전용 이벤트 유형·대상 대조·철회
+      확인을 이미 한다. 여기서 다시 만들면 두 벌이 되고, 한쪽만 고쳐진다.
+
+    ## ⚠️⚠️ [2026-08-22] 요청자를 승인자 자리에 넣고 있었다
+
+    종전에는 `relation_verifier(actor)` 가 **계산 요청자**를 판정기의 `actor` 로 넘겼다.
+    판정기의 ④ 는 「승인 사건의 `actor_id` 가 이 행위자와 같은가」를 본다 — 그래서 제품
+    경로에서는 **자기가 직접 승인한 관계로만 계산할 수 있었다.** 실제로 라우트 종단을
+    처음 돌렸을 때 모든 계산이 `relation_approvals 가 비어 있습니다` 로 막혔다.
+
+    ⚠️ 앞선 시험이 이것을 놓친 이유: 승인자와 요청자를 **같은 문자열**로 두었다. 배역이
+      같으면 두 질문의 차이가 사라진다 — 「fixture 가 계약을 대신 정의하는」 유형이다.
+
+    ★★★ 그래서 묻는 질문을 바로잡았다. 계산은 「내가 승인했는가」를 주장하지 않는다.
+      묻는 것은 **「온톨로지가 이 관계에 묶은 그 승인이 지금도 살아 있는가」**이고,
+      대조할 행위자는 **그 사건이 적어 둔 승인자**다.
+
+    ⚠️ 그래서 판정기의 ④ 는 여기서 **구조적으로 참이 된다.** 감춰 두지 않는다. 그 자리를
+      대신하는 것은 두 가지다:
+        · 승인 시점에 온톨로지 런타임이 이미 ①~⑤ 를 **승인자를 행위자로 두고** 통과시켰다.
+        · 그리고 이제 계산은 **아무 사건이나** 받지 않는다 — 온톨로지가 관계에 묶어 둔
+          `ledger_correlation_id` 그 사건만 본다(`resolve_relation_approvals`).
+      뒤지지 않으므로 「그 관계를 언급하는 다른 승인 사건」이 근거가 될 길이 없다.
+
+    ⚠️ 원장 장애는 판정기가 예외로 올린다. 실행기가 그것을 503 으로 바꾼다."""
+    from core.decision_ledger import decision_ledger
     from core.ontology_resolvers import (ACTION_RELATION_APPROVE,
                                          product_approval_resolver)
 
     def _verify(relation_id: str, event_id: str) -> bool:
+        #: ★ 승인자는 **사건이 적어 둔 사람**이다. 못 읽으면 예외가 그대로 올라간다 —
+        #:   「못 읽었다」를 「승인 없음」으로 접지 않는다.
+        event = decision_ledger.get_event_strict(str(event_id or "").strip())
+        approver = str((event or {}).get("actor_id") or "").strip()
+        if not approver:
+            return False
         return bool(product_approval_resolver(
-            event_id, ACTION_RELATION_APPROVE, actor,
+            event_id, ACTION_RELATION_APPROVE, approver,
             target_type="relation", target_id=relation_id))
     return _verify
 
 
 # ── 요청 산출 ────────────────────────────────────────────────────────────
 
-def resolve_relation_approvals(relation_ids: Sequence[str], *, actor: str,
-                               tenant_id: str, entity_mode: str
-                               ) -> Dict[str, str]:
-    """각 관계의 **살아 있는 승인 사건**을 원장에서 찾는다.
+def resolve_relation_approvals(relation_bindings: Mapping[str, str]) -> Dict[str, str]:
+    """관계마다 **온톨로지가 묶어 둔 승인 사건**이 지금도 살아 있는지 확인한다.
 
-    ★★★ 이것이 M0-3.2 의 핵심이다. 앞서는 호출자가 `{관계: 사건}` 을 적어 보냈고,
-      실행기는 그 주장을 검사했다 — 사건 id 를 아는 사람이면 아무 값이나 넣을 수 있었다.
+    ★★★ [M0-3.2] 앞서는 호출자가 `{관계: 사건}` 을 적어 보냈고, 실행기는 그 주장을
+      검사했다 — 사건 id 를 아는 사람이면 아무 값이나 넣을 수 있었다.
+
+    ★★★ [2026-08-22] 그다음 판은 **관계 id 로 원장을 뒤졌다.** 그것도 옳지 않다 —
+      그 관계를 언급하는 승인 사건이 여럿이면 «아무거나 살아 있는 것» 이 근거가 된다.
+      온톨로지는 승인할 때 **사건 하나를 관계에 묶어 둔다**(`ledger_correlation_id`).
+      대조할 것은 그것뿐이고, 이 함수는 이제 뒤지지 않는다.
+
+    ⚠️ 그래서 `relation_bindings` 는 **경로의 간선에서** 와야 한다. 호출자가 적어 보내도
+      판정기가 ①존재 ②전용 유형 ③대상 일치 ⑤철회 없음을 보므로, 바꿔 넣을 수 있는 것은
+      「같은 관계의 다른 살아 있는 승인」뿐이다 — 뒤졌을 때 나왔을 값과 같다.
 
     ⚠️ 승인이 없는 관계는 **빼지 않는다.** 빼면 실행기의 「경로의 모든 관계가 승인됐는가」
       검사가 통과해 버린다(집합이 줄었으니 일치한다) — 그것이 검사를 무력화하는 길이다.
-    ★ 그래서 **찾은 것만** 돌려주고, 호출부가 경로 전체 집합과 대조한다.
+    ★ 그래서 **확인된 것만** 돌려주고, 호출부가 경로 전체 집합과 대조한다.
     """
-    from core.decision_ledger import DecisionLedgerError, decision_ledger
+    from core.decision_ledger import DecisionLedgerError
     out: Dict[str, str] = {}
-    verify = relation_verifier(actor)
-    for rel in sorted({str(r).strip() for r in relation_ids if str(r).strip()}):
+    verify = relation_verifier()
+    for rel in sorted(relation_bindings):
+        key = str(rel).strip()
+        eid = str(relation_bindings[rel] or "").strip()
+        if not key or not eid:
+            #: ⚠️ **통제가 아니다 — 빠른 경로다.** 비워 두고 넘겨도 아래 검증기가 거짓으로
+            #:   답한다(변이로 확인: 이 줄을 지워도 실패 0건 = 등가). 통제처럼 보이게
+            #:   두면 나중에 「여기서 막으니 괜찮다」고 믿게 되므로 그렇게 적어 둔다.
+            #:   막는 것은 검증기이고, 여기서는 없는 사건을 원장에 묻지 않을 뿐이다.
+            continue
         try:
-            events = decision_ledger.list_events_strict(
-                event_type="ONTOLOGY_RELATION_APPROVED", subject_type="ontology_relation",
-                subject_id=rel, tenant_id=tenant_id, entity_mode=entity_mode, limit=100)
+            if verify(key, eid):
+                out[key] = eid
         except DecisionLedgerError as e:
-            raise PathRequestError(f"관계 승인을 읽지 못했습니다({rel}): {e}")
-        #: ★ 최신부터 본다(`list_events_strict` 는 seq 내림차순). 살아 있는 첫 승인을 쓴다.
-        for ev in events:
-            eid = str(ev.get("event_id", ""))
-            if verify(rel, eid):
-                out[rel] = eid
-                break
+            #: ⚠️ **장애를 「승인 없음」으로 접지 않는다.** 접으면 원장이 죽은 동안
+            #:   모든 계산이 「승인 안 됨」으로 보이고, 사람들은 승인을 다시 요청한다.
+            raise PathRequestError(f"관계 승인을 읽지 못했습니다({key}): {e}")
     return out
 
 
 def build_request(store: Any, *, query_id: str, path_fingerprint: str,
-                  relation_ids: Sequence[str], instance_id: str,
+                  relation_bindings: Mapping[str, str], instance_id: str,
                   tenant_id: str, entity_mode: str, scope_node_id: str,
                   as_of: str, actor: str,
                   assumptions: Optional[Mapping[str, Any]] = None
@@ -181,8 +222,11 @@ def build_request(store: Any, *, query_id: str, path_fingerprint: str,
     """서버가 계산 요청을 **산출한다.** 호출자는 «무엇을 묻는가» 만 준다.
 
     산출하는 것:
-      · `relation_approvals` — 원장에서 찾은 살아 있는 승인
+      · `relation_approvals` — 온톨로지가 관계에 묶어 둔 승인 중 **지금도 살아 있는 것**
       · `sealed_snapshots`   — 저장소의 인증판(그 인스턴스·그 범위)
+
+    ★ `relation_bindings` 는 `{관계 id: 승인 사건 id}` 이고 **경로의 간선에서** 온다
+      (`ontology_path_adapter` 가 `approval_event_id` 로 실어 준다).
 
     ⚠️ 승인이 하나라도 없으면 그 관계는 목록에서 빠진다. 실행기가 경로 집합과 대조해
       `BLOCKED` 로 답한다 — **여기서 막지 않는 이유**는, 「무엇이 없는가」를 실행기의
@@ -193,8 +237,7 @@ def build_request(store: Any, *, query_id: str, path_fingerprint: str,
     """
     if not str(instance_id or "").strip():
         raise PathRequestError("키트 인스턴스가 없습니다 — 어느 자료로 계산할지 모릅니다.")
-    approvals = resolve_relation_approvals(
-        relation_ids, actor=actor, tenant_id=tenant_id, entity_mode=entity_mode)
+    approvals = resolve_relation_approvals(relation_bindings)
     seals = loader.active_seals(store, instance_id=instance_id,
                                 contract_keys=pc.REQUIRED_DATASETS)
 
@@ -229,8 +272,10 @@ def build_request(store: Any, *, query_id: str, path_fingerprint: str,
         as_of=as_of, baseline_id=base["build_id"],
         baseline_fingerprint=base["fingerprint"],
         sealed_snapshots=seals,
+        #: ⚠️ 요구 집합은 **경로의 관계 전부**다 — 승인이 없는 것도 포함한다. 줄이면
+        #:   실행기의 일치 검사가 통과해 버린다.
         required_relation_ids=tuple(sorted(
-            {str(r).strip() for r in relation_ids if str(r).strip()})),
+            {str(r).strip() for r in relation_bindings if str(r).strip()})),
         relation_approvals=approvals,
         assumptions=merged)
 
@@ -246,7 +291,7 @@ def run(store: Any, request: pc.PathCalculationRequest, *, actor: str) -> Dict[s
         scope_node_id=request.scope_node_id)
     return pc.calculate(request, datasets=datasets,
                         ledger_verifier=capability_verifier(actor),
-                        relation_verifier=relation_verifier(actor))
+                        relation_verifier=relation_verifier())
 
 
 # ── 승인 기록(관리 경로) ─────────────────────────────────────────────────

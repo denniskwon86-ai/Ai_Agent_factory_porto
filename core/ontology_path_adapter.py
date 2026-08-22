@@ -234,6 +234,30 @@ def to_evidence(response: Dict[str, Any], *, path_fingerprint: str = "",
     }
 
 
+def relation_bindings(response: Dict[str, Any], *, path_fingerprint: str = "",
+                      index: Optional[int] = None) -> Dict[str, str]:
+    """[B2] 경로의 `{관계 id: 승인 당시 원장 사건}`.
+
+    ★★★ 온톨로지는 관계를 승인할 때 **사건 하나를 그 관계에 묶는다**
+      (`ledger_correlation_id`). 계산기가 대조할 것은 그것뿐이다 — 관계 id 로 원장을
+      뒤지면 「그 관계를 언급하는 아무 살아 있는 승인」이 근거가 된다.
+
+    ⚠️⚠️ **`to_evidence()` 에 싣지 않는다.** 근거는 안건에 봉인되고 화면에 나간다.
+      대외 근거에 구간 목록을 담지 않는 것이 규약이고(`blocked_reason` 이 숫자·이름을
+      감추는 것과 같은 이유), 그 규약은 회귀가 지킨다. 그래서 **별도 접근자**다 —
+      서버 안에서만 쓰인다.
+
+    ⚠️ 승인 사건이 비어 있는 관계도 **키로 남긴다.** 빼면 「경로의 모든 관계가
+      승인됐는가」 검사의 요구 집합이 함께 줄어 검사가 통과해 버린다."""
+    path = _select(response, path_fingerprint, index)
+    out: Dict[str, str] = {}
+    for edge in list(path.get("edges") or []):
+        rid = str(edge.get("relation_id", "") or "").strip()
+        if rid:
+            out[rid] = str(edge.get("ledger_correlation_id", "") or "").strip()
+    return out
+
+
 def internal_diagnosis(response: Dict[str, Any], *, authorize: Callable[[], bool],
                        path_fingerprint: str = "", index: Optional[int] = None,
                        ledger_verifier: Optional[Callable[[Any], bool]] = None

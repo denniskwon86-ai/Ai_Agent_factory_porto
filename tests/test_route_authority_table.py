@@ -42,6 +42,8 @@ GUARDED_MODULES = [
     "api.routes.data_preparation_control",
     #: [BDR-7 / G2·G4] 기준선·시뮬레이션·의사결정 — 운영으로 쓰는 계산 경로다.
     "api.routes.baseline_control",
+    #: [B2 / M0-3.3] 경로 계산 — 승인된 자료로 경영 판단용 숫자를 내고 안건을 만든다.
+    "api.routes.calculation_control",
 ]
 
 #: 다른 곳에 이미 판정이 있는 쓰기 라우트를 찾는 표식. `route_authority.EXEMPT` 와 함께 쓴다.

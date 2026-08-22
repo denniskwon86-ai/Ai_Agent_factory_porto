@@ -122,6 +122,7 @@ async def _warmup():
         print(f"⚠️ [업무표준] 시드 실패(코드 기본값으로 폴백): {e}")
 
 
+from api.routes import calculation_control  # [B2] 경로 계산 — 제품 실행 경로
 from api.routes import (app_delivery_control, decision_control,  # [CL-1, CL-2]
                         publication_control,  # [CL-3] 대내외 발간 게이트
                         jarvis_control,  # [CL-4 선행] 기존 Supervisor 계약의 문맥 어댑터
@@ -150,6 +151,10 @@ app.include_router(baseline_control.router)
 #: ★ 붙이는 조건은 `tests/test_ontology_wiring_contract.py` 가 **양방향으로** 감시한다 —
 #:   Resolver 없이 붙여도, 붙이고 등록을 잊어도 실패한다.
 app.include_router(ontology_control.router)
+#: ★★★ [B2 / M0-3.3] 경로 계산 — **제품이 부르는 경로.** 코어가 있는 것과 제품이
+#:   호출하는 것은 다르고, 이 저장소에서 그 차이로 두 번 지적받았다.
+#: ⚠️ 이 라우터는 승인·봉인 판·기준선·문맥을 **받지 않는다** — 서버가 파생한다.
+app.include_router(calculation_control.router)
 app.include_router(format_control.router)
 app.include_router(realtime.router)
 app.include_router(skill_control.router)
