@@ -20,6 +20,8 @@
 ⚠️ `AccessScope` 를 손으로 만들지 않는다 — 그러면 판정기가 아니라 내가 답을 정한다
   (4.1c-B P1-1 에서 지적받은 패턴이다).
 """
+import os
+
 import pytest
 
 from core import app_policy
@@ -804,3 +806,373 @@ def test_인증판이_없으면_승인할_수_없다(env):
         "instance_id": other["instance_id"], "rationale": "시연 한정 실행 승인"})
     assert res.status_code == 422, res.text[:200]
     assert "인증판" in res.text
+
+
+# ── ⑦ [M0-5] 시연 초기화 — 정본과 통제는 남는다 ──────────────────────────
+
+@pytest.fixture
+def isolated_side_stores(tmp_path, monkeypatch):
+    """시나리오·협업 저장소도 **격리**한다.
+
+    ⚠️⚠️ 이것을 빠뜨리면 초기화 시험이 **운영 파일을 지운다.** 이 저장소의 규칙
+      「운영 DB 에 쓰기 탐침 금지」가 정확히 이 자리를 가리킨다."""
+    from core.collaboration_store import collaboration_store
+    from core.enterprise_context.scenario_inputs import scenario_inputs
+    import core.app_preview as ap
+
+    monkeypatch.setattr(collaboration_store, "db_path", str(tmp_path / "collab.db"),
+                        raising=False)
+    monkeypatch.setattr(scenario_inputs._repo, "db_path",
+                        str(tmp_path / "ec.db"), raising=False)
+    preview = tmp_path / "preview.db"
+    monkeypatch.setattr(ap, "db_path", lambda audience: str(preview), raising=False)
+    return {"collab": str(tmp_path / "collab.db"), "preview": str(preview)}
+
+
+def _seed_side_data(env, sides):
+    """초기화가 지울 것과 남길 것을 **둘 다** 심는다."""
+    import sqlite3
+
+    conn = sqlite3.connect(sides["collab"])
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS decision_cases (decision_id TEXT PRIMARY KEY, "
+        "tenant_id TEXT, scope_id TEXT, status TEXT);"
+        "CREATE TABLE IF NOT EXISTS publications (publication_id TEXT PRIMARY KEY, "
+        "tenant_id TEXT, scope_id TEXT, status TEXT);")
+    rows = [("dc_draft", "DRAFT"), ("dc_review", "REVIEW_REQUESTED"),
+            ("dc_decided", "DECIDED"), ("dc_cancelled", "CANCELLED")]
+    for did, status in rows:
+        conn.execute("INSERT INTO decision_cases VALUES (?,?,?,?)",
+                     (did, env["tenant"], env["scope"], status))
+    pubs = [("pb_draft", "DRAFT"), ("pb_approved", "APPROVED"),
+            ("pb_published", "PUBLISHED"), ("pb_withdrawn", "WITHDRAWN")]
+    for pid, status in pubs:
+        conn.execute("INSERT INTO publications VALUES (?,?,?,?)",
+                     (pid, env["tenant"], env["scope"], status))
+    conn.commit()
+    conn.close()
+    io_open = open(sides["preview"], "wb")
+    io_open.write(b"preview-temp")
+    io_open.close()
+
+
+def _plan(env, sides, client=None):
+    c = client or _admin(env)
+    return _data(c.get(
+        f"/api/v1/calculation/reset/plan?instance_id={env['instance_id']}"))
+
+
+def test_계획은_아무것도_지우지_않는다(env, isolated_side_stores):
+    """★★★ 계획은 부작용이 없다 — 사람이 보고 결정하는 자리다."""
+    import sqlite3
+
+    _seed_side_data(env, isolated_side_stores)
+    got = _plan(env, isolated_side_stores)
+
+    by = {d["table"]: d for d in got["delete"]}
+    assert set(by["decision_cases"]["ids"]) == {"dc_draft", "dc_review"}
+    assert set(by["publications"]["ids"]) == {"pb_draft", "pb_approved"}
+    keep = {r["table"]: r["count"] for r in got["retain"]}
+    assert keep["decision_cases"] == 2 and keep["publications"] == 2
+    assert got["plan_fingerprint"]
+    #: ★ 그리고 아무것도 지워지지 않았다.
+    conn = sqlite3.connect(isolated_side_stores["collab"])
+    assert conn.execute("SELECT count(*) FROM decision_cases").fetchone()[0] == 4
+    conn.close()
+
+
+def test_초기화가_실행_결과만_지운다(env, isolated_side_stores):
+    """★★★ [M0-5] 사용자가 고정한 범위 그대로 — **정본과 통제는 남는다.**"""
+    import sqlite3
+
+    _seed_side_data(env, isolated_side_stores)
+    plan = _plan(env, isolated_side_stores)
+    before_snaps = len([s for s in env["store"].list_snapshots(env["instance_id"])
+                        if s["state"] == m.DEMO_CERTIFIED])
+    before_events = len(env["ledger"].list_events(limit=10000))
+
+    got = _data(_admin(env).post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "리허설 2회차 준비",
+        "confirm_fingerprint": plan["plan_fingerprint"]}))
+
+    #: ① 지울 것만 지워졌다.
+    conn = sqlite3.connect(isolated_side_stores["collab"])
+    left_cases = {r[0] for r in conn.execute(
+        "SELECT decision_id FROM decision_cases").fetchall()}
+    left_pubs = {r[0] for r in conn.execute(
+        "SELECT publication_id FROM publications").fetchall()}
+    conn.close()
+    assert left_cases == {"dc_decided", "dc_cancelled"}, "결정·취소 기록을 지웠다"
+    assert left_pubs == {"pb_published", "pb_withdrawn"}, "발간물을 지웠다"
+    #: ② Preview 임시 상태가 사라졌다.
+    assert got["preview_cleared"] is True
+    assert not os.path.exists(isolated_side_stores["preview"])
+    #: ③ **정본은 그대로다** — 인증판·계산 승인·원장.
+    after_snaps = len([s for s in env["store"].list_snapshots(env["instance_id"])
+                       if s["state"] == m.DEMO_CERTIFIED])
+    assert after_snaps == before_snaps, "인증판이 지워졌다"
+    assert got["before_fingerprint"] == got["after_fingerprint"], (
+        "유지되어야 할 것이 바뀌었다")
+    #: ④ 원장은 **늘기만 한다.**
+    after_events = env["ledger"].list_events(limit=10000)
+    assert len(after_events) == before_events + 2, "원장이 줄었거나 사건이 안 남았다"
+
+
+def test_초기화가_원장에_사실을_남긴다(env, isolated_side_stores):
+    """⚠️ 대상 환경·행위자·사유·삭제/보관 건수·전후 지문이 남아야 한다."""
+    from core import demo_reset as drst
+
+    _seed_side_data(env, isolated_side_stores)
+    plan = _plan(env, isolated_side_stores)
+    _data(_admin(env).post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "리허설 2회차 준비",
+        "confirm_fingerprint": plan["plan_fingerprint"]}))
+
+    done = env["ledger"].list_events(event_type=drst.RESET_COMPLETED)
+    assert len(done) == 1
+    ev = done[0]
+    assert ev["actor_id"] == "sysadmin@afs.invalid"
+    assert "리허설" in str(ev["rationale"])
+    facts = set(ev["evidence_refs"])
+    assert f"target.instance_id={env['instance_id']}" in facts
+    assert f"target.kit_mode={m.KIT_MODE_DEMO}" in facts
+    assert "deleted.decision_cases=2" in facts
+    assert "retained.publications=2" in facts
+    assert any(f.startswith("fingerprint.before=") for f in facts)
+    assert any(f.startswith("fingerprint.after=") for f in facts)
+
+
+def test_재확인_없이는_지울_수_없다(env, isolated_side_stores):
+    """★★★ 계획을 보지 않고는 지울 수 없다."""
+    _seed_side_data(env, isolated_side_stores)
+    c = _admin(env)
+    res = c.post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "그냥", "confirm_fingerprint": ""})
+    assert res.status_code == 422, res.text[:200]
+    res = c.post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "그냥",
+        "confirm_fingerprint": "지어낸지문"})
+    assert res.status_code == 409, res.text[:200]
+
+
+def test_계획_이후_바뀌면_거부한다(env, isolated_side_stores):
+    """⚠️ 사람이 목록을 읽고 누르는 사이에 자료가 늘 수 있다 — 그때 지워지는 것은
+    **읽은 것이 아니다.**"""
+    import sqlite3
+
+    _seed_side_data(env, isolated_side_stores)
+    plan = _plan(env, isolated_side_stores)
+    conn = sqlite3.connect(isolated_side_stores["collab"])
+    conn.execute("INSERT INTO decision_cases VALUES (?,?,?,?)",
+                 ("dc_new", env["tenant"], env["scope"], "DRAFT"))
+    conn.commit()
+    conn.close()
+    res = _admin(env).post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "리허설 준비",
+        "confirm_fingerprint": plan["plan_fingerprint"]})
+    assert res.status_code == 409, res.text[:200]
+
+
+def test_사유_없이는_지울_수_없다(env, isolated_side_stores):
+    _seed_side_data(env, isolated_side_stores)
+    plan = _plan(env, isolated_side_stores)
+    res = _admin(env).post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "   ",
+        "confirm_fingerprint": plan["plan_fingerprint"]})
+    assert res.status_code == 422, res.text[:200]
+
+
+def test_시연_키트가_아니면_거부한다(env, isolated_side_stores, monkeypatch):
+    """★★★ **이 파일에서 가장 중요한 회귀.** 운영 키트를 대상으로 삼으면 무조건 거부다.
+
+    ⚠️ 판정 근거는 등록부의 키트 모드다 — 호출자가 「데모다」라고 적어 보낼 수 없다."""
+    from core.data_preparation import kit_registry
+
+    _seed_side_data(env, isolated_side_stores)
+    real = kit_registry.resolve(env["store"], dv.KIT_ID, dv.KIT_VERSION)
+    monkeypatch.setattr(kit_registry, "resolve",
+                        lambda s, k, v: {**real, "mode": m.KIT_MODE_REAL})
+    c = _admin(env)
+    assert c.get(f"/api/v1/calculation/reset/plan?instance_id={env['instance_id']}"
+                 ).status_code == 403
+    res = c.post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "리허설 준비",
+        "confirm_fingerprint": "무엇이든"})
+    assert res.status_code == 403, res.text[:200]
+
+
+def test_등록부를_못_읽으면_거부한다(env, isolated_side_stores, monkeypatch):
+    """⚠️ 「모르니까 데모겠지」는 운영 자료를 지우는 문이다."""
+    from core.data_preparation import kit_registry
+
+    _seed_side_data(env, isolated_side_stores)
+
+    def boom(*a, **kw):
+        raise RuntimeError("registry unreadable")
+
+    monkeypatch.setattr(kit_registry, "resolve", boom)
+    res = _admin(env).get(
+        f"/api/v1/calculation/reset/plan?instance_id={env['instance_id']}")
+    assert res.status_code == 403, res.text[:200]
+
+
+def test_시스템_관리자만_초기화한다(env, isolated_side_stores):
+    _seed_side_data(env, isolated_side_stores)
+    env["org"].upsert_user("dataadmin4@afs.invalid", "데이터관리자", primary_dept_id=DEPT,
+                           is_data_admin=True, actor="seed")
+    for who in ("dataadmin4@afs.invalid", ACTOR, "viewer@afs.invalid"):
+        c = _client(env, who)
+        assert c.get(f"/api/v1/calculation/reset/plan?instance_id={env['instance_id']}"
+                     ).status_code == 403, who
+        assert c.post("/api/v1/calculation/reset", json={
+            "instance_id": env["instance_id"], "reason": "임의 초기화",
+            "confirm_fingerprint": "x"}).status_code == 403, who
+
+
+def test_초기화_뒤_같은_시연이_같은_결과를_낸다(env, isolated_side_stores):
+    """★★★ [사용자 지시 검증 ⑥] 초기화하고 다시 돌리면 **같은 결과 지문**이 나온다.
+
+    ⚠️ 이것이 성립하지 않으면 리허설이 재현되지 않는다는 뜻이고, 3회 리허설은 세 번
+      다른 것을 보여 준 것이 된다."""
+    _seed_side_data(env, isolated_side_stores)
+    _graph(env)
+    _seal_baseline(env)
+    _data(_admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인",
+        "entity_mode": "REAL"}))
+    first = _data(_client(env).post("/api/v1/calculation/path", json=_body(env)))
+    assert first["status"] == pc.COMPLETE, first.get("blocked")
+
+    plan = _plan(env, isolated_side_stores)
+    _data(_admin(env).post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "리허설 2회차 준비",
+        "confirm_fingerprint": plan["plan_fingerprint"]}))
+
+    second = _data(_client(env).post("/api/v1/calculation/path", json=_body(env)))
+    assert second["status"] == pc.COMPLETE, second.get("blocked")
+    assert second["result_fingerprint"] == first["result_fingerprint"], (
+        "초기화 뒤 같은 시연이 다른 결과를 냈다")
+    assert second["request_fingerprint"] == first["request_fingerprint"]
+
+
+def _seed_scenario_rows(env):
+    """시나리오 가정·기준값을 심는다 — **초안 · 얼린 것 · 승인된 것** 셋 다."""
+    import sqlite3
+
+    from core.enterprise_context.scenario_inputs import scenario_inputs
+
+    conn = sqlite3.connect(scenario_inputs._repo.db_path)
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS assumption_sets (assumption_set_id TEXT PRIMARY KEY,"
+        " tenant_id TEXT, scope_node_id TEXT, frozen INTEGER DEFAULT 0,"
+        " approved_at TEXT DEFAULT '');"
+        "CREATE TABLE IF NOT EXISTS baseline_snapshots (snapshot_id TEXT PRIMARY KEY,"
+        " tenant_id TEXT, scope_node_id TEXT, frozen INTEGER DEFAULT 0,"
+        " approved_at TEXT DEFAULT '');"
+        "CREATE TABLE IF NOT EXISTS scenario_results (result_id TEXT PRIMARY KEY,"
+        " tenant_id TEXT, assumption_set_id TEXT, snapshot_id TEXT);")
+    rows = [("as_draft", 0, ""), ("as_frozen", 1, ""),
+            ("as_approved", 0, "2026-06-01T00:00:00+00:00")]
+    for sid, frozen, approved in rows:
+        conn.execute("INSERT INTO assumption_sets VALUES (?,?,?,?,?)",
+                     (sid, env["tenant"], env["scope"], frozen, approved))
+        conn.execute("INSERT INTO baseline_snapshots VALUES (?,?,?,?,?)",
+                     (sid.replace("as_", "bs_"), env["tenant"], env["scope"],
+                      frozen, approved))
+    #: 결과는 부모(가정·기준값)를 가리킨다 — 범위는 부모가 정한다.
+    conn.execute("INSERT INTO scenario_results VALUES (?,?,?,?)",
+                 ("sr_1", env["tenant"], "as_draft", "bs_draft"))
+    #: ⚠️ **다른 공장의 결과** — 같은 테넌트지만 이 범위의 부모를 가리키지 않는다.
+    conn.execute("INSERT INTO scenario_results VALUES (?,?,?,?)",
+                 ("sr_other", env["tenant"], "as_남의공장", "bs_남의공장"))
+    conn.commit()
+    conn.close()
+
+
+def test_얼린_가정과_승인된_기준값은_지우지_않는다(env, isolated_side_stores):
+    """★★★ 「시나리오 입력값과 가정」을 지우되 **얼린 것과 승인된 것은 남긴다.**
+
+    ⚠️ 얼림·승인은 「이 값으로 결정했다」는 표시다. 지우면 그 결정을 재현할 수 없고,
+      초기화가 승인 이력을 지운 것이 된다.
+    ★ 이 자리는 변이로 **0건**이었다 — 통제가 없어서가 아니라 시나리오 행을 심는 시험이
+      없어서 **도달하지 못했다.** 셋(없음·등가·도달 못 함)을 가른 결과다."""
+    import sqlite3
+
+    _seed_side_data(env, isolated_side_stores)
+    _seed_scenario_rows(env)
+    plan = _plan(env, isolated_side_stores)
+
+    by = {d["table"]: d for d in plan["delete"]}
+    assert by["assumption_sets"]["ids"] == ["as_draft"], by["assumption_sets"]
+    assert by["baseline_snapshots"]["ids"] == ["bs_draft"], by["baseline_snapshots"]
+    #: ★★★ 다른 공장 결과는 대상이 아니다 — `scenario_results` 에 범위 열이 없어
+    #:   테넌트로만 지우면 남의 공장 것까지 지운다.
+    assert by["scenario_results"]["ids"] == ["sr_1"], by["scenario_results"]
+
+    _data(_admin(env).post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "리허설 2회차 준비",
+        "confirm_fingerprint": plan["plan_fingerprint"]}))
+
+    from core.enterprise_context.scenario_inputs import scenario_inputs
+    conn = sqlite3.connect(scenario_inputs._repo.db_path)
+    left = {r[0] for r in conn.execute(
+        "SELECT assumption_set_id FROM assumption_sets").fetchall()}
+    left_bs = {r[0] for r in conn.execute(
+        "SELECT snapshot_id FROM baseline_snapshots").fetchall()}
+    results = {r[0] for r in conn.execute(
+        "SELECT result_id FROM scenario_results").fetchall()}
+    conn.close()
+    assert left == {"as_frozen", "as_approved"}, "얼린·승인된 가정을 지웠다"
+    assert left_bs == {"bs_frozen", "bs_approved"}, "얼린·승인된 기준값을 지웠다"
+    assert results == {"sr_other"}, "이 범위의 결과만 지워야 한다"
+
+
+def test_원장이_줄면_초기화가_실패로_남는다(env, isolated_side_stores, monkeypatch):
+    """★★★ **경보선.** 초기화는 원장을 건드리지 않아야 한다 — 줄었다면 어딘가 지운
+    것이고, 조용히 성공으로 답하면 아무도 알아채지 못한다.
+
+    ⚠️ 실제로는 도달하지 않는 분기다(변이 0건이었다). 그래서 **강제로 울려 본다** —
+      울리지 않는 경보선은 없는 것과 같다."""
+    from core import demo_reset as drst
+
+    _seed_side_data(env, isolated_side_stores)
+    plan = _plan(env, isolated_side_stores)
+
+    calls = {"n": 0}
+
+    def shrinking():
+        #: ⚠️ 호출 횟수를 세어 특정 번째만 조작하지 않는다 — `execute()` 가 `plan()` 을
+        #:   다시 부르므로 횟수가 바뀌면 시험이 조용히 헛돈다. **단조 감소**로 둔다.
+        calls["n"] += 1
+        return 1000 - calls["n"]
+
+    monkeypatch.setattr(drst, "_ledger_count", shrinking)
+    res = _admin(env).post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "리허설 준비",
+        "confirm_fingerprint": plan["plan_fingerprint"]})
+    assert res.status_code == 409, res.text[:200]
+    assert "원장" in res.text
+
+
+def test_초기화_뒤에도_미리보기가_다시_선다(env, isolated_side_stores):
+    """★★★ 「지우기」와 「되돌리기」는 다르다.
+
+    ⚠️ 파일만 지우면 다음 미리보기가 죽는다 — `AppDataStore` 가 「이 경로는 준비됐다」를
+      기억하므로 파일이 사라져도 스키마를 다시 만들지 않는다. 되돌린다는 것은 **다시 쓸
+      수 있는 상태**로 만든다는 뜻이다."""
+    import core.app_preview as ap
+
+    _seed_side_data(env, isolated_side_stores)
+    #: 미리보기를 한 번 세워 캐시를 만든다.
+    ap.preview_app_data()._store.ensure_schema()
+    assert os.path.exists(isolated_side_stores["preview"])
+
+    plan = _plan(env, isolated_side_stores)
+    _data(_admin(env).post("/api/v1/calculation/reset", json={
+        "instance_id": env["instance_id"], "reason": "리허설 2회차 준비",
+        "confirm_fingerprint": plan["plan_fingerprint"]}))
+    assert not os.path.exists(isolated_side_stores["preview"])
+
+    #: ★ 다시 선다 — 스키마가 새로 만들어진다.
+    ap.preview_app_data()._store.ensure_schema()
+    assert os.path.exists(isolated_side_stores["preview"]), "초기화 뒤 미리보기가 죽었다"

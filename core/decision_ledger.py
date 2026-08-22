@@ -161,6 +161,15 @@ EVENT_TYPES = (
     #     승인이 자동으로 죽는다 — 「같은 기준선 다른 값」이 승인을 물려받지 못한다.
     "CALC_BASELINE_SEALED",
     "CALC_BASELINE_REVOKED",
+    # ★★★ [G2 M0-5] **시연 초기화.** 지우는 일도 기록으로 남는다.
+    #
+    #   ⚠️⚠️ 초기화는 원장 사건을 **하나도 지우지 않는다.** 원장은 추가 전용이고,
+    #     초기화 자체가 여기 세 사건으로 남는다.
+    #   ★ 셋을 가른다: 요청했다 / 끝났다 / 실패했다. 실패를 안 남기면 「요청만 있고
+    #     결과 없음」이 되고, 다음 사람은 초기화가 됐는지 안 됐는지 모른다.
+    "DEMO_RESET_REQUESTED",
+    "DEMO_RESET_COMPLETED",
+    "DEMO_RESET_FAILED",
     "CORRECTION",                  # 정정 전용 — 반드시 parent_event_id 를 가진다
 )
 
@@ -172,6 +181,8 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  #   같은 subject_type 으로 뭉개면 "이 릴리스에 무슨 일이 있었나"와 "이 전달이
                  #   어떻게 됐나"를 구분할 수 없다.
                  "app_delivery", "decision_case", "publication",
+                 # [G2 M0-5] 시연 초기화의 대상은 **키트 인스턴스**다.
+                 "demo_reset",
                  # [트랙 I] 생성 앱이 쌓는 업무 데이터의 그릇. 릴리스와 구분한다 —
                  #   «이 릴리스가 어떻게 됐나» 와 «이 앱의 데이터에 무슨 일이 있었나» 는
                  #   다른 질문이고, 뭉개면 둘 다 답할 수 없다.

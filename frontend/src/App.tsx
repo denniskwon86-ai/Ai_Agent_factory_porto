@@ -40,6 +40,7 @@ import { actingScope, governanceBlockReason, type ActingScope } from './lib/acti
 import { AgentGovernancePanel } from './components/AgentGovernancePanel';
 import { EnterprisePage } from './components/EnterprisePage';
 // [BDR-5 / Wave H] 데이터 준비 보드 — 「지금 무엇까지 믿고 만들 수 있는가」
+import { CalcApprovalPanel } from './components/CalcApprovalPanel';
 import { DataPrepPanel } from './components/DataPrepPanel';
 // [G4 / Wave H] 시나리오 시뮬레이션 — 고정된 기준선 위에서만 계산한다
 import { ScenarioPanel } from './components/ScenarioPanel';
@@ -95,6 +96,7 @@ function AppShell() {
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
   const [showDataPrep, setShowDataPrep] = useState(false);
+  const [showCalcApproval, setShowCalcApproval] = useState(false);
   const [showScenario, setShowScenario] = useState(false);
   const [showDecisionPkg, setShowDecisionPkg] = useState(false);
   const [showPromotion, setShowPromotion] = useState(false);
@@ -273,6 +275,11 @@ function AppShell() {
         { id: 'shadow', icon: '🧪', label: 'Shadow Mode',
           desc: '새 규칙·모델을 실제 데이터에 병렬 적용해 비교하고, 승인된 범위에서만 제한 적용',
           onSelect: () => setShowShadow(true) },
+        { id: 'calc-approval', icon: '🔐', label: '계산 실행 승인 · 시연 초기화',
+          desc: '산식별 정의·단위·부호·범위·유효기간을 보고 승인 — 누르기 전까지 계산은 «막힘» 입니다. 시연 초기화는 실행 결과만 되돌립니다',
+          // ⚠️ 시스템 관리자 전용이다. 화면에서 숨기는 것은 **편의**이고, 실제로 막는 것은
+          //   서버(`route_authority` 표의 `ADMIN_SECURITY`)다 — 숨김을 통제로 믿지 않는다.
+          onSelect: () => setShowCalcApproval(true) },
         { id: 'telemetry', icon: '📈', label: 'LLM 텔레메트리',
           desc: '실제 사용 모델·폴백·소요시간 — 모델 불변성 실측',
           // ⚠️ 이 화면의 «품질 결과» 탭과 에이전트 집계는 거버넌스 관문을 지난다 —
@@ -378,6 +385,8 @@ function AppShell() {
           <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
         )}
         {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
+        {showCalcApproval && (
+          <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
         {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
         {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
         {showPromotion && (
@@ -407,6 +416,8 @@ function AppShell() {
           <SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />
         )}
         {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
+        {showCalcApproval && (
+          <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
         {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
         {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
         {showPromotion && (

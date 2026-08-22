@@ -47,6 +47,7 @@ from core import path_calculation as pc
 from core import calc_dataset_loader as loader
 from core import calc_execution_approval as cea
 from core import demo_readiness
+from core import demo_reset
 from core import demo_vertical_slice as dv
 from core import path_calculation_service as svc
 #: ★★ 인스턴스 가시성 판정을 **한 벌만** 쓴다. 같은 판정을 두 벌로 만들면 한쪽만
@@ -221,6 +222,15 @@ class RevokeInput(BaseModel):
     reason: str
 
 
+def _reset_target(p: Principal, instance_id: str) -> Dict[str, Any]:
+    """초기화 대상 인스턴스. ★ 가시성 판정은 **한 벌**을 쓴다.
+
+    ⚠️ 권한(`ADMIN_SECURITY`)은 라우터 표가 막는다 — 여기 적지 않는다(앞 관문이 가려
+      도달하지 않는 통제를 두지 않는다)."""
+    inst = _instance_or_404(p, instance_id)
+    return dict(inst)
+
+
 def _admin_ctx(p: Principal, instance_id: str) -> Dict[str, str]:
     """★★★ **시스템 관리자만.** 데이터 관리자·조직 관리자·프로젝트 관리자는 못 누른다.
 
@@ -358,6 +368,61 @@ async def revoke_capability(approval_id: str, req: RevokeInput,
                                        actor=p.user_id or "", reason=req.reason)
     except cea.ExecutionApprovalError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    return {"status": "success", "data": data}
+
+
+class ResetInput(BaseModel):
+    """초기화 요청. ★ **재확인이 필수**다 — 계획을 보지 않고는 지울 수 없다."""
+
+    instance_id: str
+    reason: str
+    #: `GET /reset/plan` 이 낸 지문. 없으면 거부한다.
+    confirm_fingerprint: str
+
+
+@router.get("/reset/plan")
+async def reset_plan(instance_id: str = "",
+                     p: Principal = Depends(current_principal)):
+    """[M0-5] **무엇을 지우고 무엇을 남기는가.** 부작용이 없다.
+
+    ★ 화면은 이 목록을 사람에게 보여 주고, 응답의 `plan_fingerprint` 를 그대로
+      초기화 요청에 실어 보낸다 — 그것이 **재확인**이다."""
+    inst = await asyncio.to_thread(_reset_target, p, instance_id)
+    try:
+        data = await asyncio.to_thread(demo_reset.plan, store, instance=inst)
+    except demo_reset.DemoResetRefused as exc:
+        #: ⚠️ **환경이 아니다.** 404 로 감추지 않는다 — 운영 인스턴스를 잘못 고른 것이고,
+        #:   그 사실을 알려 주지 않으면 계속 누른다.
+        raise HTTPException(status_code=403, detail=str(exc))
+    except demo_reset.DemoResetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"status": "success", "data": data}
+
+
+@router.post("/reset")
+async def reset(req: ResetInput, p: Principal = Depends(current_principal)):
+    """[M0-5] 시연을 **처음부터 다시 시작**할 수 있게 되돌린다.
+
+    ⚠️⚠️ 정본과 통제는 유지한다 — 원장·인증판·소유권·온톨로지·계산 승인·조직.
+      되돌리는 것은 「이번 시연에서 만든 실행 결과」뿐이다.
+    ⚠️ 전체 정본 재생성은 여기 없다. 그것은 별도 운영 명령이다."""
+    inst = await asyncio.to_thread(_reset_target, p, req.instance_id)
+    if not str(req.reason or "").strip():
+        raise HTTPException(status_code=422, detail="초기화 사유가 필요합니다.")
+    if not str(req.confirm_fingerprint or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="재확인이 필요합니다 — `/reset/plan` 의 `plan_fingerprint` 를 실어 "
+                   "보내십시오(무엇을 지우는지 보지 않고는 지울 수 없습니다).")
+    try:
+        data = await asyncio.to_thread(
+            demo_reset.execute, store, instance=inst, actor=p.user_id or "",
+            reason=req.reason, confirm_fingerprint=req.confirm_fingerprint)
+    except demo_reset.DemoResetRefused as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except demo_reset.DemoResetError as exc:
+        #: 계획이 어긋났거나 실행이 실패했다 — 어느 쪽이든 **부분 성공으로 답하지 않는다.**
+        raise HTTPException(status_code=409, detail=str(exc))
     return {"status": "success", "data": data}
 
 

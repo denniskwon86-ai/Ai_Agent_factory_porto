@@ -173,6 +173,11 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "GET /api/v1/calculation/capabilities": (ADMIN_SECURITY,),
     "POST /api/v1/calculation/capabilities/approve": (ADMIN_SECURITY,),
     "POST /api/v1/calculation/capabilities/{approval_id}/revoke": (ADMIN_SECURITY,),
+    # ★★★ [M0-5] 시연 초기화 — **시스템 관리자만.** 자료를 지우는 일이고, 데이터 관리자·
+    #   조직 관리자·프로젝트 실행 권한으로는 누를 수 없다.
+    # ⚠️ 계획 조회도 막는다 — 대상 목록에 남의 조직 자원의 개수가 실린다.
+    "GET /api/v1/calculation/reset/plan": (ADMIN_SECURITY,),
+    "POST /api/v1/calculation/reset": (ADMIN_SECURITY,),
 
     # ── 실행(LLM) ───────────────────────────────────────────────────────────
     # viewer 도 가진 권한이다. 막으려는 것이 아니라 **익명·미등록을 걸러내고 감사에 남기는**
