@@ -142,6 +142,16 @@ EVENT_TYPES = (
     #: 철회는 `parent_event_id` 로 원 승인을 가리키는 **자식 사건**이다. 원 사건을 지우지
     #: 않는다 — 무엇이 있었고 누가 왜 내렸는지는 남아야 한다.
     "DATASET_OWNERSHIP_REVOKED",
+    # ★★★ [G2 M0-3.2 / 2026-08-21] **계산 능력 실행 승인.**
+    #
+    #   ⚠️⚠️ 계산은 숫자를 만들고, 그 숫자는 회의에 올라간다. 그래서 「산식을 구현했다」와
+    #     「이 산식으로 계산해도 된다」는 **다른 결정**이고, 뒤엣것은 사람이 한다.
+    #   ★ 대상은 **계산 참조 + 산식 판의 지문**이다(`Capability.fingerprint()`).
+    #     ⚠️ 참조 이름만 대상으로 삼으면 산식을 고쳐도 옛 승인이 유효해 보인다 —
+    #       그것이 「같은 이름 다른 계산」이다.
+    "CALC_CAPABILITY_APPROVED",
+    #: 실행 승인 철회. `parent_event_id` 로 원 승인을 가리킨다.
+    "CALC_CAPABILITY_REVOKED",
     "CORRECTION",                  # 정정 전용 — 반드시 parent_event_id 를 가진다
 )
 
@@ -167,7 +177,10 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  # [G2] 「어느 부서가 이 데이터셋을 소유하는가」. 계약(app_contract)과 다르다 —
                  #   «이 계약이 승인됐나» 와 «이 데이터의 소유 부서가 누구인가» 는 다른 질문이고,
                  #   후자는 권한 판정에 직접 쓰인다.
-                 "dataset_ownership_binding")
+                 "dataset_ownership_binding",
+                 # [G2 M0-3.2] 계산 능력. 「이 산식으로 계산해도 되는가」는 데이터 소유나
+                 #   온톨로지 관계와 **다른 질문**이다 — 뭉개면 셋 다 답할 수 없다.
+                 "calc_capability")
 
 
 #: ★★★ [4.1c-B P0-4] **철회 유형 → 허용되는 부모 유형** 표. 한 곳에만 둔다.
@@ -179,6 +192,7 @@ _REVOCATION_PARENTS = {
     "ONTOLOGY_APPROVAL_REVOKED": ("ONTOLOGY_MODEL_APPROVED", "ONTOLOGY_RELATION_APPROVED",
                                   "ONTOLOGY_RELATION_RETIRED"),
     "DATASET_OWNERSHIP_REVOKED": ("DATASET_OWNERSHIP_APPROVED",),
+    "CALC_CAPABILITY_REVOKED": ("CALC_CAPABILITY_APPROVED",),
 }
 _REVOCATION_EVENTS = tuple(_REVOCATION_PARENTS)
 
@@ -362,6 +376,8 @@ class DecisionLedger:
             "ONTOLOGY_RELATION_RETIRED": "ontology_relation",
             "DATASET_OWNERSHIP_APPROVED": "dataset_ownership_binding",
             "DATASET_OWNERSHIP_REVOKED": "dataset_ownership_binding",
+            "CALC_CAPABILITY_APPROVED": "calc_capability",
+            "CALC_CAPABILITY_REVOKED": "calc_capability",
             # ★★★ [4.1c-B P0-4] 소유권 승인·철회도 **대상 종류를 못박는다.**
             #   ⚠️ 앞 판은 이름만 허용목록에 넣고 주체 검증을 하지 않았다. 그러면
             #     `DATASET_OWNERSHIP_APPROVED` 를 `app_dataset` 이나 `project` 주체로

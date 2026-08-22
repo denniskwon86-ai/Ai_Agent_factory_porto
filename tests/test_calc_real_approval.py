@@ -1,0 +1,283 @@
+"""★★★ [G2 M0-3.2] **실제 원장 승인으로** 계산이 도는가 — 대역을 걷어낸다.
+
+## 앞 카나리와 무엇이 다른가
+
+앞 카나리는 이렇게 통과했다:
+
+    ledger_verifier=lambda cap: True
+    relation_verifier=lambda r, e: True
+    relation_approvals={"REL_...": "evt_rel_1"}      ← 호출자가 적어 보낸 값
+
+즉 「승인 → 계산」이 아니라 **「승인 대역 → 계산」**이었다. 그리고 관계·승인 사건은
+호출자 자기진술이었다 — 이 저장소가 반복해서 지운 바로 그 패턴이다.
+
+★ 이 파일은 **실제 원장 사건을 만들고**, 서버가 그것을 찾아 요청을 산출하고, 실제
+  검증기로 계산이 도는지 본다. 대역은 하나도 없다.
+
+⚠️ 아직 남은 자기진술: `sales_allocation`·`baseline_recognition`·`baseline_id`.
+  그것은 M0-3.2b 가 닫는다 — 여기서 「닫혔다」고 말하지 않는다.
+"""
+import pytest
+
+from core import calc_capability as cc
+from core import demo_vertical_slice as dv
+from core import path_calculation as pc
+from core import path_calculation_service as svc_calc
+from core.data_preparation import models as m
+from core.data_preparation import snapshot_service as svc
+from core.data_preparation import store as dp
+
+SCOPE = "plant-afs-smelting-01"
+ACTOR = "approver@afs.invalid"
+RELATIONS = ("REL_SHIPMENT_AFFECTS_INVENTORY", "REL_INVENTORY_AFFECTS_PLAN",
+             "REL_PLAN_AFFECTS_SALES")
+
+
+@pytest.fixture(scope="module")
+def slice_data():
+    return dv.build_slice(scope_node_id=SCOPE)
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch, slice_data):
+    """격리 저장소 + **격리 원장.** 실제 사건을 여기에 쌓는다."""
+    from core.decision_ledger import decision_ledger
+    store = dp.data_preparation_store
+    monkeypatch.setattr(store, "db_path", str(tmp_path / "dp.db"), raising=False)
+    monkeypatch.setattr(store, "_prepared_for", None, raising=False)
+    monkeypatch.setattr(decision_ledger, "db_path", str(tmp_path / "ledger.db"),
+                        raising=False)
+    tenant, scope = dv.scope_of(slice_data)
+
+    dv.register_kit(store)
+    inst = store.create_instance(
+        kit_id=dv.KIT_ID, version=dv.KIT_VERSION,
+        kit_fingerprint=dv.kit_fingerprint(store),
+        tenant_id=tenant, scope_node_id=scope, entity_mode="REAL")
+    for key in dv.SLICE_KEYS:
+        rows, cols = slice_data[key]
+        b = store.create_binding(
+            instance_id=inst["instance_id"], dataset_contract_key=key,
+            provider=m.PROVIDER_FILE_SNAPSHOT, config={}, tenant_id=tenant,
+            scope_node_id=scope, entity_mode="REAL")
+        for target in (m.VALIDATED, m.APPROVED, m.ACTIVE):
+            b = store.transition(b["binding_id"], target)
+        snap = svc.ingest(store, binding=b, payload=dv.csv_bytes(rows, cols),
+                          file_name=f"{key}.csv", workspace_root=str(tmp_path / "raw"))
+        svc.run_pipeline(store, snap["snapshot_id"], rows, cols,
+                         control={"row_count": len(rows)})
+    return {"store": store, "instance_id": inst["instance_id"], "tenant": tenant,
+            "scope": scope, "slice": slice_data, "ledger": decision_ledger}
+
+
+def _approve_relations(env, relations=RELATIONS):
+    """관계 승인 **실제 사건**을 남긴다."""
+    out = {}
+    for rel in relations:
+        ev = env["ledger"].append(
+            event_type="ONTOLOGY_RELATION_APPROVED", subject_type="ontology_relation",
+            subject_id=rel, actor_type="user", actor_id=ACTOR,
+            decision="APPROVED", rationale="첫 수직 경로 관계 승인",
+            tenant_id=env["tenant"], entity_mode="REAL")
+        out[rel] = ev["event_id"]
+    return out
+
+
+def _approve_capabilities(env, monkeypatch):
+    """계산 능력 실행 승인 **실제 사건**을 남기고 등록부를 그 사건에 잇는다.
+
+    ⚠️ 제품 등록부의 `state` 는 건드리지 않는다 — 상태 전환은 배포 결정이다. 여기서는
+      「승인이 나면 어떻게 되는가」를 미리 확인한다."""
+    approved = {}
+    for ref in pc.SEGMENTS:
+        base = cc.get(ref)
+        rec = svc_calc.approve_capability(
+            ref, actor=ACTOR, rationale="MVP 3종 실행 승인",
+            tenant_id=env["tenant"], entity_mode="REAL")
+        approved[ref] = cc.Capability(**{**base.__dict__, "state": cc.APPROVED,
+                                         "blocked_reason": "",
+                                         "ledger_event_id": rec["event_id"]})
+    monkeypatch.setattr(cc, "get", lambda ref: approved.get(ref) or cc._REGISTRY[ref])
+    return approved
+
+
+def _build(env, **kw):
+    args = dict(query_id="q-real", path_fingerprint="pf-real",
+                relation_ids=RELATIONS, instance_id=env["instance_id"],
+                tenant_id=env["tenant"], entity_mode="REAL", scope_node_id=env["scope"],
+                as_of=dv.AS_OF, actor=ACTOR, baseline_id="BL-REAL",
+                baseline_fingerprint="blfp-real",
+                assumptions=dv.assumptions(env["slice"]))
+    args.update(kw)
+    return svc_calc.build_request(env["store"], **args)
+
+
+# ── ① 서버가 승인을 원장에서 찾는다 ─────────────────────────────────────
+
+def test_서버가_관계_승인을_원장에서_찾는다(env):
+    """★★★ 앞 판은 호출자가 `{관계: 사건}` 을 적어 보냈다 — 사건 id 를 아는 사람이면
+    아무 값이나 넣을 수 있었다."""
+    made = _approve_relations(env)
+    req = _build(env)
+    assert req.relation_approvals == made
+    assert set(req.required_relation_ids) == set(RELATIONS)
+
+
+def test_승인이_없는_관계는_목록에_들어오지_않는다(env):
+    """⚠️ 없는 승인을 지어내지 않는다. 실행기가 경로 집합과 대조해 `BLOCKED` 로 답한다."""
+    _approve_relations(env, relations=RELATIONS[:2])
+    req = _build(env)
+    assert set(req.relation_approvals) == set(RELATIONS[:2])
+    assert set(req.required_relation_ids) == set(RELATIONS), \
+        "요구 집합이 함께 줄면 실행기의 일치 검사가 무력해진다"
+
+
+def test_봉인_판을_저장소에서_산출한다(env):
+    """★ 호출자가 판 id 를 적어 보내지 않는다 — 그러면 남의 판을 적을 수 있다."""
+    _approve_relations(env)
+    req = _build(env)
+    assert set(req.sealed_snapshots) == set(pc.REQUIRED_DATASETS)
+    for sid in req.sealed_snapshots.values():
+        row = env["store"].get_snapshot(sid)
+        assert row["state"] == m.DEMO_CERTIFIED
+        assert row["scope_node_id"] == env["scope"]
+
+
+# ── ② 실제 검증기로 계산이 돈다 ─────────────────────────────────────────
+
+def test_실제_원장_승인으로_계산이_완주한다(env, monkeypatch):
+    """★★★ **M0-3.2 의 증거.** 대역이 하나도 없다."""
+    _approve_relations(env)
+    _approve_capabilities(env, monkeypatch)
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.COMPLETE, got.get("blocked")
+    assert got["result_fingerprint"]
+
+
+def test_계산_능력_승인이_없으면_BLOCKED_다(env):
+    """★★★ **대조군.** 관계는 승인됐지만 산식 실행 승인이 없다 — 둘은 다른 결정이다."""
+    _approve_relations(env)
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED
+    assert got["metrics"] == {}
+
+
+def test_관계_승인이_철회되면_BLOCKED_다(env, monkeypatch):
+    """★★★ 승인은 **지금도 유효한가**를 매번 묻는다 — 철회는 등록부를 고치지 않는다."""
+    made = _approve_relations(env)
+    _approve_capabilities(env, monkeypatch)
+    assert svc_calc.run(env["store"], _build(env), actor=ACTOR)["status"] == pc.COMPLETE
+
+    rel = RELATIONS[0]
+    env["ledger"].append(
+        event_type="ONTOLOGY_APPROVAL_REVOKED", subject_type="ontology_relation",
+        subject_id=rel, actor_type="user", actor_id=ACTOR, decision="REVOKED",
+        rationale="근거 미비", parent_event_id=made[rel],
+        tenant_id=env["tenant"], entity_mode="REAL")
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED, "철회했는데 계속 계산된다"
+
+
+def test_산식이_바뀌면_실행_승인이_죽는다(env, monkeypatch):
+    """★★★ 대상은 **참조 + 산식 판의 지문**이다.
+
+    ⚠️ 참조 이름만 대상으로 삼으면 산식을 고쳐도 옛 승인이 유효해 보인다 — 그것이
+      「같은 이름 다른 계산」이고, 검증 없는 숫자가 승인 아래 숨는 길이다."""
+    _approve_relations(env)
+    approved = _approve_capabilities(env, monkeypatch)
+    assert svc_calc.run(env["store"], _build(env), actor=ACTOR)["status"] == pc.COMPLETE
+
+    #: 산식 판만 올린다 — 승인 사건은 그대로다.
+    ref = pc.SEGMENTS[0]
+    bumped = cc.Capability(**{**approved[ref].__dict__, "model_version": "1.0.1"})
+    monkeypatch.setattr(cc, "get",
+                        lambda r: (bumped if r == ref
+                                   else approved.get(r) or cc._REGISTRY[r]))
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED, "산식이 바뀌었는데 옛 승인으로 계산된다"
+
+
+def test_실행_승인이_철회되면_BLOCKED_다(env, monkeypatch):
+    _approve_relations(env)
+    approved = _approve_capabilities(env, monkeypatch)
+    ref = pc.SEGMENTS[0]
+    env["ledger"].append(
+        event_type=svc_calc.CAPABILITY_REVOKED, subject_type=svc_calc.CAPABILITY_SUBJECT,
+        subject_id=svc_calc.capability_subject(approved[ref]), actor_type="user", actor_id=ACTOR,
+        decision="REVOKED", rationale="재검토",
+        parent_event_id=approved[ref].ledger_event_id,
+        tenant_id=env["tenant"], entity_mode="REAL")
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED
+
+
+def test_다른_사람의_관계_승인은_인정되지_않는다(env, monkeypatch):
+    """⚠️ 승인은 「누가」와 「무엇을」이 같이 있어야 승인이다 — 제품 판정기가 행위자를
+    대조한다(그 규칙을 여기서 다시 만들지 않는다)."""
+    _approve_relations(env)
+    _approve_capabilities(env, monkeypatch)
+    req = _build(env, actor="남@afs.invalid")
+    assert req.relation_approvals == {}, "다른 사람의 승인이 내 요청에 실렸다"
+
+
+def test_원장_장애는_BLOCKED_가_아니라_장애다(env, monkeypatch):
+    """★★★ 「못 읽었다」를 「승인 없음」으로 접으면 장애 중에 모든 계산이 「아직 준비되지
+    않았다」로 보이고, 아무도 저장소를 보러 가지 않는다."""
+    from core.decision_ledger import DecisionLedgerError, decision_ledger
+    _approve_relations(env)
+    _approve_capabilities(env, monkeypatch)
+    req = _build(env)
+
+    def _boom(*a, **k):
+        raise DecisionLedgerError("원장 장애(주입)")
+
+    monkeypatch.setattr(decision_ledger, "get_event_strict", _boom, raising=False)
+    with pytest.raises(Exception) as e:
+        svc_calc.run(env["store"], req, actor=ACTOR)
+    assert "원장" in str(e.value) or "확인하지 못했" in str(e.value)
+
+
+def test_승인_사유_없이는_실행_승인을_남길_수_없다(env):
+    """⚠️ 「왜 이 산식으로 계산해도 되는가」에 답할 수 없는 승인은 나중에 아무도 뒤집을
+    수 없다."""
+    with pytest.raises(svc_calc.PathRequestError, match="사유"):
+        svc_calc.approve_capability(pc.SEGMENTS[0], actor=ACTOR, rationale="",
+                                    tenant_id=env["tenant"])
+
+
+def test_아직_자기진술인_값을_정직하게_남긴다(env):
+    """★★★ **닫히지 않은 것을 닫혔다고 말하지 않는다.**
+
+    `sales_allocation`·`baseline_recognition`·`baseline_id` 는 여전히 호출자가 넣는다.
+    서버가 승인된 배분·봉인된 기준선에서 산출하는 것이 M0-3.2b 다."""
+    _approve_relations(env)
+    req = _build(env)
+    assert "sales_allocation" in req.assumptions
+    assert req.baseline_id == "BL-REAL", "기준선이 아직 호출자 값이다(M0-3.2b 대상)"
+
+
+def test_철회_사건으로_승인을_주장할_수_없다(env, monkeypatch):
+    """★★★ [변이 시험에서 발견] 승인 사건 **유형** 검사를 지워도 잡히지 않았다 — 지문
+    대조가 뒤에서 걸렀기 때문이다(등가).
+
+    ⚠️ 판별력은 **같은 지문을 가진 다른 유형의 사건**에서 생긴다. 철회 사건의 대상 지문은
+      원 승인과 같으므로, 유형을 보지 않으면 **철회 사건 id 로 승인을 주장**할 수 있다.
+      「이 산식은 철회됐다」는 기록이 「이 산식은 승인됐다」로 읽히는 것이다."""
+    _approve_relations(env)
+    approved = _approve_capabilities(env, monkeypatch)
+    ref = pc.SEGMENTS[0]
+    subject = svc_calc.capability_subject(approved[ref])
+    revoke = env["ledger"].append(
+        event_type=svc_calc.CAPABILITY_REVOKED, subject_type=svc_calc.CAPABILITY_SUBJECT,
+        subject_id=subject, actor_type="user", actor_id=ACTOR, decision="REVOKED",
+        rationale="재검토", parent_event_id=approved[ref].ledger_event_id,
+        tenant_id=env["tenant"], entity_mode="REAL")
+
+    #: 철회 사건 id 를 승인으로 내민다.
+    faked = cc.Capability(**{**approved[ref].__dict__,
+                             "ledger_event_id": revoke["event_id"]})
+    monkeypatch.setattr(cc, "get",
+                        lambda r: (faked if r == ref
+                                   else approved.get(r) or cc._REGISTRY[r]))
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED, "철회 사건으로 승인이 인정됐다"
