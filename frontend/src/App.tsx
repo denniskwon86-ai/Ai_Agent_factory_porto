@@ -42,6 +42,7 @@ import { EnterprisePage } from './components/EnterprisePage';
 // [BDR-5 / Wave H] 데이터 준비 보드 — 「지금 무엇까지 믿고 만들 수 있는가」
 import { CalcApprovalPanel } from './components/CalcApprovalPanel';
 import { DataPrepPanel } from './components/DataPrepPanel';
+import { PathCalcPanel } from './components/PathCalcPanel';
 // [G4 / Wave H] 시나리오 시뮬레이션 — 고정된 기준선 위에서만 계산한다
 import { ScenarioPanel } from './components/ScenarioPanel';
 // [Wave G 11.4] 의사결정 안건 — 3관점 검토서·책임자·기한·근거 계보
@@ -97,6 +98,7 @@ function AppShell() {
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
   const [showDataPrep, setShowDataPrep] = useState(false);
   const [showCalcApproval, setShowCalcApproval] = useState(false);
+  const [showPathCalc, setShowPathCalc] = useState(false);
   const [showScenario, setShowScenario] = useState(false);
   const [showDecisionPkg, setShowDecisionPkg] = useState(false);
   const [showPromotion, setShowPromotion] = useState(false);
@@ -222,6 +224,9 @@ function AppShell() {
         { id: 'scenario', icon: '📈', label: '시나리오 시뮬레이션',
           desc: '환율·도입 지연·전력단가 → 생산량·재고·현금·손익 (고정 기준선 기준)',
           onSelect: () => setShowScenario(true) },
+        { id: 'path-calc', icon: '🧮', label: '경로 계산',
+          desc: '승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산 — 막히면 무엇이 없는지 말합니다(LLM 0콜)',
+          onSelect: () => setShowPathCalc(true) },
         { id: 'decision-pkg', icon: '🧭', label: '의사결정 안건',
           desc: '영향 경로 · 3관점 검토서 · 실행 책임자와 기한 · 근거 계보',
           onSelect: () => setShowDecisionPkg(true) },
@@ -387,6 +392,7 @@ function AppShell() {
         {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
         {showCalcApproval && (
           <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
+        {showPathCalc && <PathCalcPanel onClose={() => setShowPathCalc(false)} />}
         {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
         {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
         {showPromotion && (
@@ -418,6 +424,7 @@ function AppShell() {
         {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
         {showCalcApproval && (
           <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
+        {showPathCalc && <PathCalcPanel onClose={() => setShowPathCalc(false)} />}
         {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
         {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
         {showPromotion && (

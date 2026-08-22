@@ -208,3 +208,129 @@ export async function runReset(body: {
       body: JSON.stringify(body),
     }), '시연 초기화');
 }
+
+// ── 온톨로지 시작점 · 경로 계산 실행 ─────────────────────────────────────
+
+export interface OntologyObject {
+  namespace: string;
+  object_type: string;
+  object_id: string;
+}
+
+export interface ObjectList {
+  as_of: string;
+  /** ⚠️ `true` 면 목록이 전부가 아니다 — 화면이 그렇게 말해야 한다. */
+  truncated: boolean;
+  objects: OntologyObject[];
+  object_types: string[];
+}
+
+export async function listOntologyObjects(opts: {
+  asOf: string; objectType?: string; relationTypes?: string[];
+}) {
+  const p = new URLSearchParams({ as_of: opts.asOf });
+  if (opts.objectType) p.set('object_type', opts.objectType);
+  if (opts.relationTypes?.length) p.set('relation_types', opts.relationTypes.join(','));
+  return unwrap<ObjectList>(
+    await apiFetch(`/api/v1/ontology/objects?${p}`), '온톨로지 객체 목록');
+}
+
+export interface CalcResult {
+  status: 'COMPLETE' | 'BLOCKED';
+  query_id: string;
+  path_fingerprint: string;
+  required_relation_ids: string[];
+  request_fingerprint: string;
+  result_fingerprint?: string;
+  /** ⚠️ `BLOCKED` 면 **비어 있다.** 빈 값을 0 으로 그리지 않는다. */
+  metrics: Record<string, Record<string, number | string>>;
+  segment_outputs: Record<string, string[]>;
+  segment_model_versions: Record<string, string>;
+  used_snapshots: Record<string, string>;
+  path_model_version?: string;
+  blocked?: { public_reason: string; internal_reasons: string[] };
+}
+
+export async function runPathCalculation(body: {
+  roots: OntologyObject[];
+  target_types: string[];
+  relation_types: string[];
+  as_of: string;
+  instance_id: string;
+  path_fingerprint?: string;
+  assumptions?: Record<string, unknown>;
+}) {
+  return unwrap<CalcResult>(
+    await apiFetch(`${BASE}/path`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }), '경로 계산');
+}
+
+
+export interface ImpactPath {
+  nodes: OntologyObject[];
+  edges: { relation_id: string; relation_type_id: string; calculation_ref: string }[];
+  path_fingerprint: string;
+}
+
+export interface ImpactResult {
+  query_id: string;
+  status: string;
+  as_of: string;
+  paths: ImpactPath[];
+}
+
+/** 영향 경로 찾기. 계산 **전에** 부른다 — 경로가 여럿이면 사람이 골라야 한다. */
+export async function findImpactPaths(body: {
+  roots: OntologyObject[];
+  target_types: string[];
+  relation_types: string[];
+  as_of: string;
+}) {
+  return unwrap<ImpactResult>(
+    await apiFetch('/api/v1/ontology/query/impact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, max_depth: 6, max_paths: 20 }),
+    }), '영향 경로');
+}
+
+
+export interface DecisionResult {
+  decision: null | {
+    title: string;
+    owner: string;
+    due: string;
+    evidence: Record<string, any>;
+    briefing: string[];
+    [k: string]: any;
+  };
+  calculation: CalcResult;
+}
+
+/** [G5] 계산 결과를 안건으로. ⚠️ `BLOCKED` 이면 `decision` 이 `null` 로 온다 —
+ *  오류가 아니라 **답**이고, 화면은 사유를 그대로 보여 준다. */
+export async function runPathDecision(body: {
+  roots: OntologyObject[];
+  target_types: string[];
+  relation_types: string[];
+  as_of: string;
+  instance_id: string;
+  path_fingerprint: string;
+  assumptions?: Record<string, unknown>;
+  title: string;
+  owner: string;
+  due: string;
+  snapshot_ids: string[];
+  base_values: Record<string, number>;
+  scenario_assumptions: Record<string, number>;
+}) {
+  return unwrap<DecisionResult>(
+    await apiFetch(`${BASE}/path/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }), '의사결정 안건');
+}

@@ -199,6 +199,23 @@ def create_router(service: OntologyRuntime) -> APIRouter:
             _raise(exc)
         return {"status": "success", "data": data}
 
+    @router.get("/objects")
+    async def objects(as_of: str, namespace: str = "", object_type: str = "",
+                      relation_types: str = "", limit: int = 200,
+                      p: Principal = Depends(current_principal)):
+        """[M0-4] 시작점으로 고를 수 있는 객체들 — **화면이 손으로 치지 않게 한다.**
+
+        ⚠️ 가시성은 영향 질의와 **같은 판정**이다. 목록에는 뜨는데 질의하면 빈 결과가
+          나오면 사용자는 그것을 고장으로 읽는다."""
+        assert_identified(p, "기업 경영 의미지도")
+        rels = [v for v in (relation_types or "").split(",") if v.strip()]
+        try:
+            data = await asyncio.to_thread(service.list_objects, _subject(p), as_of,
+                                           namespace, object_type, rels, limit)
+        except Exception as exc:
+            _raise(exc)
+        return {"status": "success", "data": data}
+
     @router.get("/relations/{relation_id}/evidence")
     async def evidence(relation_id: str, as_of: str,
                        p: Principal = Depends(current_principal)):

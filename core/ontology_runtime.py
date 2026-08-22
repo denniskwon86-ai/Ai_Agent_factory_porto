@@ -836,6 +836,65 @@ class OntologyRuntime:
             "warnings": [],
         }
 
+    def list_objects(self, subject: app_policy.Subject, as_of: str,
+                     namespace: str = "", object_type: str = "",
+                     relation_types: Sequence[str] = (), limit: int = 200) -> dict:
+        """[M0-4] **이 사람이 시작점으로 고를 수 있는 객체들.**
+
+        ## 왜 필요한가
+
+        `find_paths` 는 시작점을 **받는다.** 그런데 화면에는 시작점을 고를 방법이 없었고,
+        그래서 사용자는 `dataset:shipment:SHP-001` 같은 문자열을 손으로 쳐야 했다 —
+        그것은 「개발자 도구 없이 완주」가 아니다.
+
+        ## ⚠️⚠️ 가시성은 `find_paths` 와 **같은 판정**을 쓴다
+
+        후보는 **승인되고 지금 유효한** 관계의 양 끝에서만 나오고, 각 끝점은
+        `_object_visible` 을 통과해야 한다. 두 벌로 만들면 목록에는 뜨는데 질의하면
+        빈 결과가 나오는 상태가 생기고, 사용자는 그것을 고장으로 읽는다.
+
+        ⚠️ 못 본 객체의 **수를 세어 주지 않는다.** 「권한 밖 3건」은 그 자체로 「그 조직에
+          3건이 있다」를 알려 준다(D-014 와 같은 규칙).
+
+        ★ `relation_types` 를 주면 그 관계에 붙은 객체만 본다 — 화면이 「이 질문에 쓸 수
+          있는 시작점」만 보여 줄 수 있다.
+        """
+        if self.object_scope_resolver is None:
+            raise OntologyIntegrityError("object scope resolver is not configured.")
+        instant = _normal_time(as_of, "as_of")
+        allowed = tuple(sorted({v.strip().upper() for v in relation_types if v.strip()}))
+        want_ns = (namespace or "").strip()
+        want_type = (object_type or "").strip()
+        cap = max(1, min(int(limit or 200), 500))
+
+        edges = self._visible_edges(subject, instant, allowed)
+        ctx = ontology_resolve.ResolveContext(
+            purpose=ontology_resolve.ROOT_LOOKUP, as_of=instant,
+            **self._identity(subject))
+
+        seen: Dict[str, ObjectRef] = {}
+        for edge in edges:
+            for ref in (self._subject_ref(edge), self._object_ref(edge)):
+                if want_ns and ref.namespace != want_ns:
+                    continue
+                if want_type and ref.object_type != want_type:
+                    continue
+                if ref.key in seen:
+                    continue
+                #: ★ 끝점마다 가시성을 본다 — 관계가 보인다고 양 끝이 다 보이는 것은 아니다.
+                if not self._object_visible(subject, ref, ctx, {}):
+                    continue
+                seen[ref.key] = ref
+
+        items = [seen[k].to_dict() for k in sorted(seen)]
+        return {
+            "as_of": instant,
+            #: ⚠️ 잘렸으면 **잘렸다고 말한다.** 말하지 않으면 사용자는 목록이 전부라고 믿는다.
+            "truncated": len(items) > cap,
+            "objects": items[:cap],
+            "object_types": sorted({o["object_type"] for o in items[:cap]}),
+        }
+
     def relation_evidence(self, subject: app_policy.Subject, relation_id: str,
                           as_of: str) -> Optional[dict]:
         """Return one authorised relation with evidence, or ``None`` without a side channel."""

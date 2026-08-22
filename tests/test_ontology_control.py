@@ -182,3 +182,79 @@ def test_scope_resolver_failure_is_503_not_no_visible_path(tmp_path, monkeypatch
         "as_of": "2026-03-01T00:00:00Z"})
     assert response.status_code == 503
     assert response.json()["detail"] != "NO_VISIBLE_PATH"
+
+
+# ── [M0-4] 시작점 목록 — 화면이 손으로 치지 않게 한다 ──────────────────────
+
+def _approved_graph(client, holder):
+    """관계 하나를 승인 상태로 세우고 relation_id 를 돌려준다."""
+    assert client.post("/api/v1/ontology/model/install",
+                       json={"contract": _contract()}).status_code == 200
+    proposed = client.post("/api/v1/ontology/relations/propose", json=_proposal())
+    rid = proposed.json()["data"]["relation_id"]
+    client.post(f"/api/v1/ontology/relations/{rid}/submit")
+    holder["principal"] = _principal("governor@example.com")
+    assert client.post(f"/api/v1/ontology/relations/{rid}/approve",
+                       json={"decision_ledger_id": "ledger-relation-v1"}).status_code == 200
+    return rid
+
+
+def test_objects_endpoint_lists_selectable_roots(tmp_path, monkeypatch):
+    """★★★ [M0-4] 시작점을 고를 방법이 없어 사용자가 `dataset:shipment:SHP-001` 을
+    손으로 쳐야 했다 — 그것은 「개발자 도구 없이 완주」가 아니다."""
+    client, _, _, holder = _harness(tmp_path, monkeypatch)
+    _approved_graph(client, holder)
+
+    res = client.get("/api/v1/ontology/objects",
+                     params={"as_of": "2026-03-01T00:00:00Z"})
+    assert res.status_code == 200
+    data = res.json()["data"]
+    keys = {f"{o['namespace']}:{o['object_type']}:{o['object_id']}"
+            for o in data["objects"]}
+    #: 승인된 관계의 **양 끝**이 후보다.
+    assert keys == {"dataset:shipment:SHP-001", "dataset:inventory-snapshot:INV-001"}
+    assert set(data["object_types"]) == {"shipment", "inventory-snapshot"}
+    assert data["truncated"] is False
+
+
+def test_objects_endpoint_hides_what_impact_hides(tmp_path, monkeypatch):
+    """★★★ **목록과 질의의 가시성이 같아야 한다.**
+
+    ⚠️ 두 벌로 만들면 목록에는 뜨는데 질의하면 빈 결과가 나오고, 사용자는 그것을
+      고장으로 읽는다. 그리고 못 본 것의 **수를 세어 주지 않는다** — 「권한 밖 1건」은
+      그 자체로 「그 조직에 1건이 있다」를 알려 준다."""
+    client, _, hidden, holder = _harness(tmp_path, monkeypatch)
+    _approved_graph(client, holder)
+    hidden.add("dataset:inventory-snapshot:INV-001")
+
+    res = client.get("/api/v1/ontology/objects",
+                     params={"as_of": "2026-03-01T00:00:00Z"})
+    data = res.json()["data"]
+    keys = {f"{o['namespace']}:{o['object_type']}:{o['object_id']}"
+            for o in data["objects"]}
+    assert keys == {"dataset:shipment:SHP-001"}, "가려진 끝점이 목록에 남았다"
+    #: 개수를 누설하지 않는다 — 응답 어디에도 «숨긴 수» 가 없다.
+    assert "hidden" not in res.text and "denied" not in res.text
+
+    impact = client.post("/api/v1/ontology/query/impact", json={
+        "roots": [_proposal()["subject"]], "target_types": ["inventory-snapshot"],
+        "relation_types": ["AFFECTS"], "as_of": "2026-03-01T00:00:00Z"})
+    assert impact.json()["data"]["paths"] == [], "목록은 가렸는데 질의는 열려 있다"
+
+
+def test_objects_endpoint_needs_resolver(tmp_path, monkeypatch):
+    """⚠️ 범위 해석기가 없으면 **가시성을 판정할 수 없다** — 빈 목록이 아니라 503 이다."""
+    client, _, _, _ = _harness(tmp_path, monkeypatch, with_resolver=False)
+    res = client.get("/api/v1/ontology/objects",
+                     params={"as_of": "2026-03-01T00:00:00Z"})
+    assert res.status_code == 503, res.text[:200]
+
+
+def test_objects_endpoint_filters_by_type(tmp_path, monkeypatch):
+    """★ 화면이 「이 질문에 쓸 수 있는 시작점」만 보여 줄 수 있어야 한다."""
+    client, _, _, holder = _harness(tmp_path, monkeypatch)
+    _approved_graph(client, holder)
+    res = client.get("/api/v1/ontology/objects",
+                     params={"as_of": "2026-03-01T00:00:00Z", "object_type": "shipment"})
+    data = res.json()["data"]
+    assert [o["object_id"] for o in data["objects"]] == ["SHP-001"]
