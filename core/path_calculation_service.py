@@ -46,82 +46,101 @@ CAPABILITY_SUBJECT = "calc_capability"
 
 
 def capability_subject(cap: Any) -> str:
-    """실행 승인의 **대상 지문** — 산식 정체성만 담는다.
+    """**폐기됨** — 이 함수는 더 이상 승인 대상이 아니다.
 
-    ★★★ `Capability.fingerprint()` 를 쓰지 않는다. 그것은 **계약 전체**의 지문이라
-      `state`·`ledger_event_id` 까지 들어간다. 승인을 남긴 뒤 상태를 `APPROVED` 로
-      올리는 순간 지문이 바뀌어 **승인이 스스로 죽는다**(실측 — 순환이다).
+    ⚠️⚠️ [M0-0 / 2026-08-22] 승인 대상은 산식 정체성 하나가 아니라 **결속 지문**이다
+      (산식·단위·부호·필수 계약키·인증판 집합·코드 지문·정본 규칙·실행 범위).
+      `core.calc_execution_approval.binding_fingerprint()` 가 정본이다.
 
-    ★ 승인이 물어야 하는 것은 「이 산식으로 계산해도 되는가」다. 그래서 대상은:
-
-          참조 · 산식 판 · 필요 계약키 · 출력(지표·단위·부호)
-
-    ⚠️ 산식 판이나 출력의 뜻이 바뀌면 지문이 바뀌고 옛 승인은 죽는다 — 그것이 노림수다
-      (「같은 이름 다른 계산」이 승인을 물려받지 못한다).
-    ⚠️ 상태·승인 사건 id 는 **넣지 않는다.** 그것은 「승인됐는가」이지 「무엇을
-      승인하는가」가 아니다."""
-    import hashlib
-    import json
-    payload = {
-        "ref": cap.ref,
-        "model_version": cap.model_version,
-        "subject_type": cap.subject_type,
-        "relation": cap.relation,
-        "object_type": cap.object_type,
-        "required_datasets": sorted(cap.required_datasets),
-        "outputs": sorted([list(o) for o in cap.outputs]),
-    }
-    return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    ).hexdigest()
-
-
+    ★ 왜 남겨 두는가: 이 이름으로 만든 옛 승인 사건이 원장에 남아 있을 수 있고, 그것이
+      **왜 이제 유효하지 않은지**를 코드가 말할 수 있어야 한다. 지우면 그 사건들이
+      「알 수 없는 대상」이 된다."""
+    raise NotImplementedError(
+        "승인 대상은 결속 지문입니다 — core.calc_execution_approval.binding_fingerprint() "
+        "를 쓰십시오. 산식 정체성만으로 승인하면 판·범위·코드가 바뀌어도 승인이 삽니다.")
 class PathRequestError(Exception):
     """요청을 산출할 수 없다. ⚠️ 「빈 요청으로 계산해 본다」를 하지 않는다."""
 
 
 # ── 실제 검증기 ──────────────────────────────────────────────────────────
 
-def capability_verifier(actor: str) -> Callable[[Any], bool]:
-    """계산 능력 실행 승인을 **원장에서** 확인하는 검증기를 만든다.
+def context_verifier(store: Any, *, instance_id: str, tenant_id: str, entity_mode: str,
+                     scope_node_id: str, data_kind: str = "",
+                     contract_fingerprint: str = "") -> Callable[[Any], bool]:
+    """요청이 아직 없을 때(화면·준비도) 쓰는 승인 확인기.
 
-    ★★★ 확인하는 것:
-      ① 등록부의 `ledger_event_id` 로 사건이 실재하는가
-      ② 유형이 `CALC_CAPABILITY_APPROVED` 이고 주체가 `calc_capability` 인가
-      ③ **대상 지문이 지금 등록부의 지문과 같은가** — 산식이 바뀌면 다른 대상이다
-      ④ 승인자가 이 실행을 요청한 행위자와 같은가… **가 아니다**(아래 참고)
-      ⑤ 철회 자식 사건이 없는가
+    ★ 결속을 만드는 함수는 `cea.binding` **하나**다. 다른 것은 판이 어디서 오는가뿐이다:
+      · 실행 때 — `request.sealed_snapshots`(그 계산이 실제로 읽은 판)
+      · 화면·준비도 — `loader.active_seals`(지금 최신 인증판)
+    ⚠️ `build_request` 가 후자로 전자를 채우므로 실무에서는 같은 값이다. 그래도 실행
+      경로는 **요청의 판**을 본다 — 그 사이에 새 판이 인증되면 승인은 죽어야 한다.
 
-    ⚠️ ④를 넣지 않는 이유: 계산 능력 승인은 **한 번 승인하면 모두가 쓰는** 것이다.
-      묻는 것은 「이 산식이 승인됐는가」이지 「이 사람이 승인했는가」가 아니다 —
-      섞으면 승인자 본인만 계산할 수 있게 된다.
-    ⚠️⚠️ 관계 승인도 같은 이유로 ④를 빼야 했는데 **거기서는 섞여 있었다**(2026-08-22
-      라우트 종단에서 실측). `relation_verifier` 머리말에 그 경위를 적었다 — 이 주석이
-      옳은 판단을 이미 적어 두었는데 옆 함수가 반대로 하고 있었다.
+    ⚠️ 판을 못 읽으면 **던진다.** 「판 없음 = 승인 없음」으로 접지 않는다."""
+    from core import calc_execution_approval as cea
 
-    ⚠️ 원장을 못 읽으면 **던진다.** 「모르니까 승인 없음」으로 접으면 장애 중에 모든
-      계산이 「아직 준비되지 않았다」로 보이고, 아무도 저장소를 보러 가지 않는다."""
+    seals = loader.active_seals(store, instance_id=instance_id,
+                                contract_keys=pc.REQUIRED_DATASETS)
+
     def _verify(cap: Any) -> bool:
-        from core.decision_ledger import DecisionLedgerError, decision_ledger
-        event_id = str(getattr(cap, "ledger_event_id", "") or "").strip()
-        if not event_id:
+        bound = cea.binding(
+            cap, data_kind=data_kind or cea.DEFAULT_DATA_KIND, entity_mode=entity_mode,
+            tenant_id=tenant_id, scope_node_id=scope_node_id,
+            snapshots={k: v for k, v in seals.items() if k in cap.required_datasets},
+            contract_fingerprint=contract_fingerprint)
+        got = cea.active(store, ref=cap.ref, bound=bound)
+        return bool(got) and str(got["ledger_event_id"]) == str(
+            getattr(cap, "ledger_event_id", ""))
+    return _verify
+
+
+def context_resolver(store: Any, *, instance_id: str, tenant_id: str, entity_mode: str,
+                     scope_node_id: str, data_kind: str = "",
+                     contract_fingerprint: str = "") -> Callable[[str], Any]:
+    """요청이 아직 없을 때의 **실효 능력** 해석기(화면·준비도·어댑터)."""
+    from core import calc_execution_approval as cea
+
+    seals = loader.active_seals(store, instance_id=instance_id,
+                                contract_keys=pc.REQUIRED_DATASETS)
+
+    def _resolve(ref: str) -> Any:
+        cap = cc.get(ref)
+        bound = cea.binding(
+            cap, data_kind=data_kind or cea.DEFAULT_DATA_KIND, entity_mode=entity_mode,
+            tenant_id=tenant_id, scope_node_id=scope_node_id,
+            snapshots={k: v for k, v in seals.items() if k in cap.required_datasets},
+            contract_fingerprint=contract_fingerprint)
+        return cea.effective(store, ref, bound=bound)
+    return _resolve
+
+
+def capability_verifier(store: Any, request: pc.PathCalculationRequest, *,
+                        data_kind: str = "", contract_fingerprint: str = ""
+                        ) -> Callable[[Any], bool]:
+    """실행 **직전** 승인 재확인.
+
+    ★★★ 확인은 `calc_execution_approval.active()` **한 벌**이 한다. 여기서 원장 대조를
+      다시 만들지 않는다 — 두 벌이면 한쪽만 고쳐지고, 그날 이 경로만 헐거워진다.
+
+    ## 왜 해석기와 **또** 확인하는가 — 두 벌이 아니다
+
+    해석기(`capability_resolver`)는 관문 3 **앞**에서 실효 능력을 만든다. 그 사이에
+    승인이 철회될 수 있다. 그래서 실행 직전에 **같은 함수**를 한 번 더 부른다 —
+    같은 규칙을 두 시점에 적용하는 것이지 두 규칙을 두는 것이 아니다.
+
+    ⚠️ 그리고 **해석기가 본 그 사건인지**까지 본다. 그 사이에 철회 후 재승인이 있었다면
+      다른 승인이고, 다른 승인으로 계산했다고 적으면 안 된다.
+
+    ⚠️ 원장을 못 읽으면 `active()` 가 던진다 — `assert_executable` 이 그것을 장애로
+      올린다. 「모르니까 승인 없음」으로 접지 않는다."""
+    from core import calc_execution_approval as cea
+
+    def _verify(cap: Any) -> bool:
+        bound = execution_binding(store, cap, request, data_kind=data_kind,
+                                  contract_fingerprint=contract_fingerprint)
+        got = cea.active(store, ref=cap.ref, bound=bound)
+        if not got:
             return False
-        try:
-            row = decision_ledger.get_event_strict(event_id)
-        except DecisionLedgerError as e:
-            #: ⚠️ 접지 않는다 — 호출부(`assert_executable`)가 이 예외를 그대로 올린다.
-            raise
-        if not row:
-            return False
-        if str(row.get("event_type", "")) != CAPABILITY_APPROVED:
-            return False
-        if str(row.get("subject_type", "")) != CAPABILITY_SUBJECT:
-            return False
-        #: ★★★ 대상 지문 대조. 산식 판이 바뀌면 등록부 지문이 바뀌고, 옛 승인은 죽는다.
-        if str(row.get("subject_id", "")) != capability_subject(cap):
-            return False
-        #: ⑤ 철회. ⚠️ `has_invalidating_child` 는 제한 없이 묻고 실패를 던진다.
-        return not decision_ledger.has_invalidating_child(event_id, (CAPABILITY_REVOKED,))
+        return str(got["ledger_event_id"]) == str(getattr(cap, "ledger_event_id", ""))
     return _verify
 
 
@@ -280,7 +299,43 @@ def build_request(store: Any, *, query_id: str, path_fingerprint: str,
         assumptions=merged)
 
 
-def run(store: Any, request: pc.PathCalculationRequest, *, actor: str) -> Dict[str, Any]:
+def execution_binding(store: Any, cap: Any, request: pc.PathCalculationRequest, *,
+                      data_kind: str = "", contract_fingerprint: str = "") -> Dict[str, Any]:
+    """이 요청이 실제로 서 있는 **조건**. 승인 대상과 대조할 값이다.
+
+    ★★★ 승인 화면이 만든 결속과 **같은 재료로** 만든다 — 다른 재료로 만들면 화면에서
+      승인한 것과 실행 때 대조하는 것이 달라지고, 그때는 승인이 무엇을 승인했는지 모른다.
+    ⚠️ 판은 **이 요청이 실제로 쓰는 봉인 판**이다. 「지금 최신」을 다시 읽지 않는다 —
+      그러면 승인 이후 올라온 판으로 계산하면서 승인이 살아 있게 된다."""
+    from core import calc_execution_approval as cea
+
+    return cea.binding(
+        cap, data_kind=data_kind or cea.DEFAULT_DATA_KIND,
+        entity_mode=request.entity_mode, tenant_id=request.tenant_id,
+        scope_node_id=request.scope_node_id,
+        snapshots={k: v for k, v in request.sealed_snapshots.items()
+                   if k in cap.required_datasets},
+        contract_fingerprint=contract_fingerprint)
+
+
+def capability_resolver(store: Any, request: pc.PathCalculationRequest, *,
+                        data_kind: str = "", contract_fingerprint: str = ""
+                        ) -> Callable[[str], Any]:
+    """참조 → **실효 능력.** 살아 있는 승인이 있으면 `APPROVED`, 없으면 등록부 그대로.
+
+    ⚠️ 등록부 상수를 고치지 않는다 — 고치면 프로세스 전체·모든 테넌트에 걸린다."""
+    from core import calc_execution_approval as cea
+
+    def _resolve(ref: str) -> Any:
+        cap = cc.get(ref)
+        bound = execution_binding(store, cap, request, data_kind=data_kind,
+                                  contract_fingerprint=contract_fingerprint)
+        return cea.effective(store, ref, bound=bound)
+    return _resolve
+
+
+def run(store: Any, request: pc.PathCalculationRequest, *, actor: str,
+        data_kind: str = "", contract_fingerprint: str = "") -> Dict[str, Any]:
     """요청을 **실제 검증기로** 실행한다.
 
     ⚠️ 검증기를 인자로 받지 않는다 — 받으면 호출부가 대역을 넘길 수 있고, 그것이
@@ -290,34 +345,17 @@ def run(store: Any, request: pc.PathCalculationRequest, *, actor: str) -> Dict[s
         tenant_id=request.tenant_id, entity_mode=request.entity_mode,
         scope_node_id=request.scope_node_id)
     return pc.calculate(request, datasets=datasets,
-                        ledger_verifier=capability_verifier(actor),
-                        relation_verifier=relation_verifier())
+                        ledger_verifier=capability_verifier(
+                            store, request, data_kind=data_kind,
+                            contract_fingerprint=contract_fingerprint),
+                        relation_verifier=relation_verifier(),
+                        capability_resolver=capability_resolver(
+                            store, request, data_kind=data_kind,
+                            contract_fingerprint=contract_fingerprint))
 
 
 # ── 승인 기록(관리 경로) ─────────────────────────────────────────────────
 
-def approve_capability(ref: str, *, actor: str, rationale: str,
-                       evidence_refs: Optional[Sequence[str]] = None,
-                       tenant_id: str = "tenant_default",
-                       entity_mode: str = "REAL") -> Dict[str, Any]:
-    """계산 능력 실행을 승인하고 **원장 사건 id 를 돌려준다.**
-
-    ★★★ 대상은 **참조 + 산식 판의 지문**이다. 산식이 바뀌면 지문이 바뀌고, 이 승인은
-      자동으로 죽는다 — 「같은 이름 다른 계산」이 승인을 물려받지 못한다.
-    ⚠️ 이 함수는 등록부의 `state` 를 바꾸지 않는다. 상태 전환은 배포 결정이고, 여기서
-      하면 승인 한 번으로 코드가 바뀌는 셈이 된다."""
-    from core.decision_ledger import decision_ledger
-    cap = cc.get(ref)
-    if not str(rationale or "").strip():
-        raise PathRequestError(
-            "승인 사유가 필요합니다 — 「왜 이 산식으로 계산해도 되는가」에 답할 수 없는 "
-            "승인은 나중에 아무도 뒤집을 수 없습니다.")
-    ev = decision_ledger.append(
-        event_type=CAPABILITY_APPROVED, subject_type=CAPABILITY_SUBJECT,
-        subject_id=capability_subject(cap), actor_type="user", actor_id=actor,
-        decision="APPROVED", rationale=rationale,
-        evidence_refs=[*(evidence_refs or []), f"capability:{ref}",
-                       f"model_version:{cap.model_version}"],
-        tenant_id=tenant_id, entity_mode=entity_mode)
-    return {"event_id": str(ev.get("event_id", "")),
-            "fingerprint": capability_subject(cap), "capability_ref": ref}
+#: ⚠️⚠️ [M0-0] **`approve_capability()` 를 여기서 지웠다.** 승인을 만드는 곳이 둘이면
+#:   하나는 반드시 옛 대상(산식 정체성)으로 남고, 그 승인은 판·범위·코드가 바뀌어도
+#:   살아남는다. 승인은 `core.calc_execution_approval.approve()` 한 곳에서만 만든다.

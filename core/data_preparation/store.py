@@ -199,6 +199,30 @@ CREATE TABLE IF NOT EXISTS baseline_builds (
     updated_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_baseline_instance ON baseline_builds(instance_id);
+
+-- ★★★ [M0-0] 계산 능력 **실행 승인**. 대상은 «결속 지문» 이지 참조 이름이 아니다.
+-- ⚠️ 이름을 대상으로 삼으면 산식·판·범위를 바꿔도 승인이 살아남는다.
+CREATE TABLE IF NOT EXISTS calc_execution_approvals (
+    approval_id         TEXT PRIMARY KEY,
+    ref                 TEXT NOT NULL,
+    binding_fingerprint TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'active',
+    ledger_event_id     TEXT NOT NULL,
+    binding_json        TEXT NOT NULL DEFAULT '{}',
+    tenant_id           TEXT NOT NULL DEFAULT '',
+    entity_mode         TEXT NOT NULL DEFAULT '',
+    scope_node_id       TEXT NOT NULL DEFAULT '',
+    data_kind           TEXT NOT NULL DEFAULT '',
+    valid_until         TEXT NOT NULL,
+    approved_by         TEXT NOT NULL,
+    rationale           TEXT NOT NULL DEFAULT '',
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cea_binding ON calc_execution_approvals(binding_fingerprint);
+-- ★ 같은 결속에 살아 있는 승인은 **하나뿐**이다. 멱등을 DB 가 함께 지킨다.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cea_active
+    ON calc_execution_approvals(binding_fingerprint) WHERE status='active';
 """
 
 

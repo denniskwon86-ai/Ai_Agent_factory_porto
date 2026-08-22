@@ -140,20 +140,31 @@ def evaluate(store: Any, *, instance: Optional[Dict[str, Any]],
     #:   고치지 않는다.** `assert_executable` 에 실제 원장 검증기를 태운다.
     from core import path_calculation_service as svc
 
-    verifier = svc.capability_verifier("")
+    try:
+        verifier = svc.context_verifier(
+            store, instance_id=ctx["instance_id"], tenant_id=ctx["tenant_id"],
+            entity_mode=ctx["entity_mode"], scope_node_id=ctx["scope_node_id"])
+        resolver = svc.context_resolver(
+            store, instance_id=ctx["instance_id"], tenant_id=ctx["tenant_id"],
+            entity_mode=ctx["entity_mode"], scope_node_id=ctx["scope_node_id"])
+    except Exception as exc:  # noqa: BLE001 — 결속을 만들지 못했다
+        gates.append(_gate("capabilities", FAILED,
+                           summary=f"실행 승인 조건을 산출하지 못했습니다: {exc}",
+                           action="저장소·구현 파일 상태를 확인한 뒤 다시 시도하십시오."))
+        return _wrap(gates)
     pending: List[str] = []
     broken: List[Dict[str, str]] = []
     unreadable = ""
     for ref in pc.SEGMENTS:
         try:
-            cc.assert_executable(ref, verifier)
+            cap = resolver(ref)
+            cc.assert_executable(ref, verifier, capability=cap)
         except cc.CapabilityError as exc:
-            cap = None
+            state = ""
             try:
-                cap = cc.get(ref)
-            except cc.CapabilityError:
+                state = str(resolver(ref).state)
+            except Exception:  # noqa: BLE001
                 pass
-            state = str(getattr(cap, "state", "") or "")
             broken.append({"ref": ref, "state": state, "reason": str(exc)})
             pending.append(ref)
         except Exception as exc:  # noqa: BLE001 — 원장 장애

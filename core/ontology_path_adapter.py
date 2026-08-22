@@ -85,7 +85,8 @@ def _label(namespace: str, object_type: str) -> str:
 
 
 def _segments(edges: List[dict],
-              ledger_verifier: Optional[Callable[[Any], bool]] = None) -> List[dict]:
+              ledger_verifier: Optional[Callable[[Any], bool]] = None,
+              capability_resolver: Optional[Callable[[str], Any]] = None) -> List[dict]:
     """구간마다 «계산이 실행 가능한가».
 
     ★ 판정은 §5a 가 한다 — 여기서 다시 판단하면 규칙이 두 곳으로 갈라진다.
@@ -114,7 +115,9 @@ def _segments(edges: List[dict],
             out.append(item)
             continue
         try:
-            cap = calc_capability.get(ref)
+            #: ★ [M0-0] **실효 능력**을 본다 — 등록부 상수는 계약이고, 「지금 이 조건에서
+            #:   승인됐는가」는 저장소·원장이 답한다. 해석기가 없으면 등록부 그대로다.
+            cap = (capability_resolver or calc_capability.get)(ref)
         except calc_capability.CapabilityError as exc:
             #: ⚠️ 계약에 없는 참조가 관계에 붙어 있다 — 조용히 넘기지 않는다.
             item["reason"] = str(exc)
@@ -122,7 +125,7 @@ def _segments(edges: List[dict],
             continue
         item["state"] = cap.state
         try:
-            calc_capability.assert_executable(ref, ledger_verifier)
+            calc_capability.assert_executable(ref, ledger_verifier, capability=cap)
             item["executable"] = True
         except calc_capability.CapabilityError as exc:
             item["executable"] = False
@@ -160,7 +163,8 @@ def _select(response: Dict[str, Any], path_fingerprint: str = "",
 
 def to_evidence(response: Dict[str, Any], *, path_fingerprint: str = "",
                 index: Optional[int] = None,
-                ledger_verifier: Optional[Callable[[Any], bool]] = None
+                ledger_verifier: Optional[Callable[[Any], bool]] = None,
+                capability_resolver: Optional[Callable[[str], Any]] = None
                 ) -> Dict[str, Any]:
     """런타임 **응답 봉투** → `decision_package.build(path=…)` 가 읽는 모양.
 
@@ -211,7 +215,8 @@ def to_evidence(response: Dict[str, Any], *, path_fingerprint: str = "",
         steps.append({"key": key, "label": _label(namespace, object_type),
                       "dataset_key": dataset_key, "snapshot_id": snapshot_id})
 
-    segments = _segments(list(path.get("edges") or []), ledger_verifier)
+    segments = _segments(list(path.get("edges") or []), ledger_verifier,
+                         capability_resolver)
     blocked = [s for s in segments if not s["executable"]]
 
     return {

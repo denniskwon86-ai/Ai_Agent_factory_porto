@@ -69,7 +69,8 @@ def env(tmp_path, monkeypatch, slice_data):
         svc.run_pipeline(store, snap["snapshot_id"], rows, cols,
                          control={"row_count": len(rows)})
     return {"store": store, "instance_id": inst["instance_id"], "tenant": tenant,
-            "scope": scope, "slice": slice_data, "ledger": decision_ledger}
+            "scope": scope, "slice": slice_data, "ledger": decision_ledger,
+            "raw_root": str(tmp_path / "raw")}
 
 
 def _ready(env, monkeypatch=None, relations=RELATIONS):
@@ -97,23 +98,27 @@ def _approve_relations(env, relations=RELATIONS):
     return out
 
 
-def _approve_capabilities(env, monkeypatch):
-    """계산 능력 실행 승인 **실제 사건**을 남기고 등록부를 그 사건에 잇는다.
+def _approve_capabilities(env, monkeypatch=None):
+    """★★★ [M0-0] **실제 승인 경로**로 승인한다 — `cc.get` 을 패치하지 않는다.
 
-    ⚠️ 제품 등록부의 `state` 는 건드리지 않는다 — 상태 전환은 배포 결정이다. 여기서는
-      「승인이 나면 어떻게 되는가」를 미리 확인한다."""
-    approved = {}
-    for ref in pc.SEGMENTS:
-        base = cc.get(ref)
-        rec = svc_calc.approve_capability(
-            ref, actor=ACTOR, rationale="MVP 3종 실행 승인",
-            tenant_id=env["tenant"], entity_mode="REAL")
-        approved[ref] = cc.Capability(**{**base.__dict__, "state": cc.APPROVED,
-                                         "blocked_reason": "",
-                                         "ledger_event_id": rec["event_id"]})
-    monkeypatch.setattr(cc, "get", lambda ref: approved.get(ref) or cc._REGISTRY[ref])
-    return approved
+    ⚠️⚠️ 앞 판은 `monkeypatch.setattr(cc, "get", ...)` 로 등록부를 갈아 끼웠다. 그것은
+      「승인됐다면 어떻게 되는가」를 본 것이지 **승인 경로가 도는가**를 본 것이 아니다.
+      대상 지문·유효기간·범위 결속은 하나도 검사되지 않았다.
 
+    ⚠️ 격리된 저장소·원장에서만 부른다. 운영 등록부의 상태는 건드리지 않는다 —
+      `cea.approve` 는 등록부 상수를 고치지 않고 **승인 기록**만 남긴다."""
+    from core import calc_execution_approval as cea
+
+    out = {}
+    prop = cea.proposal(env["store"], instance_id=env["instance_id"],
+                        tenant_id=env["tenant"], entity_mode="REAL",
+                        scope_node_id=env["scope"])
+    for item in prop["items"]:
+        assert item["approvable"], item
+        out[item["ref"]] = cea.approve(
+            env["store"], ref=item["ref"], bound=item["binding"], actor=ACTOR,
+            rationale="시연 한정 실행 승인")
+    return out
 
 def _seal_baseline(env, **over):
     """계산 기준선을 **봉인한다**(저장소 + 원장).
@@ -226,39 +231,191 @@ def test_관계_승인이_철회되면_BLOCKED_다(env, monkeypatch):
     assert got["status"] == pc.BLOCKED, "철회했는데 계속 계산된다"
 
 
+def test_사람이_누르기_전까지는_BLOCKED_다(env):
+    """★★★ [M0-0] 등록부는 `IMPLEMENTED_UNAPPROVED` 다. 승인 기록이 없으면 실행하지
+    않는다 — 모듈을 import 하는 것만으로는 아무것도 승인되지 않는다."""
+    _approve_relations(env)
+    _seal_baseline(env)
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED
+    assert got["blocked"]["internal_reasons"], got["blocked"]
+
+
+def test_승인_기록이_사라지면_자동으로_막힌다(env):
+    """★★★ **되돌리기가 기본값이다.** 등록부 상수를 고치지 않으므로, 기록이 없어지면
+    승인 이전 상태로 돌아간다."""
+    _approve_relations(env)
+    _seal_baseline(env)
+    _approve_capabilities(env)
+    assert svc_calc.run(env["store"], _build(env), actor=ACTOR)["status"] == pc.COMPLETE
+    with env["store"].transaction() as conn:
+        conn.execute("DELETE FROM calc_execution_approvals")
+    assert svc_calc.run(env["store"], _build(env), actor=ACTOR)["status"] == pc.BLOCKED
+
+
 def test_산식이_바뀌면_실행_승인이_죽는다(env, monkeypatch):
-    """★★★ 대상은 **참조 + 산식 판의 지문**이다.
+    """★★★ 승인 대상은 **결속 지문**이다 — 산식 판이 바뀌면 지문이 바뀌고 승인이 죽는다.
 
     ⚠️ 참조 이름만 대상으로 삼으면 산식을 고쳐도 옛 승인이 유효해 보인다 — 그것이
       「같은 이름 다른 계산」이고, 검증 없는 숫자가 승인 아래 숨는 길이다."""
     _approve_relations(env)
     _seal_baseline(env)
-    approved = _approve_capabilities(env, monkeypatch)
+    _approve_capabilities(env)
     assert svc_calc.run(env["store"], _build(env), actor=ACTOR)["status"] == pc.COMPLETE
 
-    #: 산식 판만 올린다 — 승인 사건은 그대로다.
+    #: 산식 판만 올린다 — 승인 기록은 그대로다. 계약이 바뀐 상황을 흉내 낸다.
     ref = pc.SEGMENTS[0]
-    bumped = cc.Capability(**{**approved[ref].__dict__, "model_version": "1.0.1"})
-    monkeypatch.setattr(cc, "get",
-                        lambda r: (bumped if r == ref
-                                   else approved.get(r) or cc._REGISTRY[r]))
+    bumped = cc.Capability(**{**cc.get(ref).__dict__, "model_version": "1.0.1"})
+    monkeypatch.setattr(cc, "get", lambda r: bumped if r == ref else cc._REGISTRY[r])
     got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
     assert got["status"] == pc.BLOCKED, "산식이 바뀌었는데 옛 승인으로 계산된다"
 
 
-def test_실행_승인이_철회되면_BLOCKED_다(env, monkeypatch):
+def test_코드가_바뀌면_실행_승인이_죽는다(env, monkeypatch):
+    """★★★ 계약이 같아도 **구현이 바뀌면 다른 답**이 나온다.
+
+    ⚠️ 계약 지문만 보면 산식 문서는 그대로인데 코드만 고친 변경이 승인을 물려받는다."""
+    from core import calc_execution_approval as cea
+
     _approve_relations(env)
     _seal_baseline(env)
-    approved = _approve_capabilities(env, monkeypatch)
-    ref = pc.SEGMENTS[0]
-    env["ledger"].append(
-        event_type=svc_calc.CAPABILITY_REVOKED, subject_type=svc_calc.CAPABILITY_SUBJECT,
-        subject_id=svc_calc.capability_subject(approved[ref]), actor_type="user", actor_id=ACTOR,
-        decision="REVOKED", rationale="재검토",
-        parent_event_id=approved[ref].ledger_event_id,
-        tenant_id=env["tenant"], entity_mode="REAL")
+    _approve_capabilities(env)
+    assert svc_calc.run(env["store"], _build(env), actor=ACTOR)["status"] == pc.COMPLETE
+
+    monkeypatch.setattr(cea, "code_fingerprint", lambda: "다른코드지문")
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED, "코드가 바뀌었는데 옛 승인으로 계산된다"
+
+
+def test_인증판이_바뀌면_실행_승인이_죽는다(env):
+    """★★★ 승인 이후 올라온 판으로 계산하면서 옛 승인을 근거로 삼을 수 없다."""
+    _approve_relations(env)
+    _seal_baseline(env)
+    _approve_capabilities(env)
+    assert svc_calc.run(env["store"], _build(env), actor=ACTOR)["status"] == pc.COMPLETE
+
+    #: 같은 계약키에 **새 인증판**을 하나 더 올린다.
+    key = "INV-01"
+    rows, cols = env["slice"][key]
+    b = env["store"].create_binding(
+        instance_id=env["instance_id"], dataset_contract_key=key,
+        provider=m.PROVIDER_FILE_SNAPSHOT, config={}, tenant_id=env["tenant"],
+        scope_node_id=env["scope"], entity_mode="REAL")
+    for target in (m.VALIDATED, m.APPROVED, m.ACTIVE):
+        b = env["store"].transition(b["binding_id"], target)
+    snap = svc.ingest(env["store"], binding=b, payload=dv.csv_bytes(rows, cols),
+                      file_name="INV-01-second.csv", workspace_root=env["raw_root"])
+    svc.run_pipeline(env["store"], snap["snapshot_id"], rows, cols,
+                     control={"row_count": len(rows)})
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED, "새 판이 올라왔는데 옛 승인으로 계산된다"
+
+
+def test_범위가_다르면_승인이_걸리지_않는다(env):
+    """★★★ `DEMO/SYNTHETIC` 승인으로 다른 범위의 자료를 계산하지 않는다."""
+    from core import calc_execution_approval as cea
+
+    _approve_relations(env)
+    _seal_baseline(env)
+    prop = cea.proposal(env["store"], instance_id=env["instance_id"],
+                        tenant_id=env["tenant"], entity_mode="REAL",
+                        scope_node_id=env["scope"], data_kind="PRODUCTION")
+    for item in prop["items"]:
+        cea.approve(env["store"], ref=item["ref"], bound=item["binding"], actor=ACTOR,
+                    rationale="다른 범위 승인")
+    #: 실행은 `DEMO/SYNTHETIC` 범위로 돈다 — 승인은 `PRODUCTION` 범위의 것이다.
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED, "다른 범위의 승인으로 계산됐다"
+
+
+def test_유효기간이_지나면_승인이_죽는다(env):
+    """★ 시연 한정 승인은 **영구 승인이 아니다.**"""
+    _approve_relations(env)
+    _seal_baseline(env)
+    _approve_capabilities(env)
+    assert svc_calc.run(env["store"], _build(env), actor=ACTOR)["status"] == pc.COMPLETE
+    with env["store"].transaction() as conn:
+        conn.execute("UPDATE calc_execution_approvals SET valid_until=?",
+                     ("2020-01-01T00:00:00+00:00",))
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED, "기한이 지난 승인으로 계산됐다"
+
+
+def test_같은_결속의_재승인은_멱등이다(env):
+    """⚠️ 재시도가 승인 사건을 쌓으면 원장이 「몇 번 승인했나」로 오염된다."""
+    from core import calc_execution_approval as cea
+
+    _seal_baseline(env)
+    prop = cea.proposal(env["store"], instance_id=env["instance_id"],
+                        tenant_id=env["tenant"], entity_mode="REAL",
+                        scope_node_id=env["scope"])
+    item = prop["items"][0]
+    first = cea.approve(env["store"], ref=item["ref"], bound=item["binding"],
+                        actor=ACTOR, rationale="첫 승인")
+    again = cea.approve(env["store"], ref=item["ref"], bound=item["binding"],
+                        actor=ACTOR, rationale="재시도")
+    assert again["idempotent"] is True
+    assert again["ledger_event_id"] == first["ledger_event_id"]
+    events = env["ledger"].list_events(event_type=cea.APPROVED_EVENT,
+                                       subject_id=item["binding_fingerprint"])
+    assert len(events) == 1, "재시도가 승인 사건을 쌓았다"
+
+
+def test_실행_승인이_철회되면_BLOCKED_다(env):
+    from core import calc_execution_approval as cea
+
+    _approve_relations(env)
+    _seal_baseline(env)
+    made = _approve_capabilities(env)
+    assert svc_calc.run(env["store"], _build(env), actor=ACTOR)["status"] == pc.COMPLETE
+    cea.revoke(env["store"], approval_id=made[pc.SEGMENTS[0]]["approval_id"],
+               actor=ACTOR, reason="재검토")
     got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
     assert got["status"] == pc.BLOCKED
+
+
+def test_승인_사유_없이는_실행_승인을_남길_수_없다(env):
+    """⚠️ 「왜 이 산식으로 계산해도 되는가」에 답할 수 없는 승인은 나중에 아무도 뒤집을
+    수 없다."""
+    from core import calc_execution_approval as cea
+
+    _seal_baseline(env)
+    prop = cea.proposal(env["store"], instance_id=env["instance_id"],
+                        tenant_id=env["tenant"], entity_mode="REAL",
+                        scope_node_id=env["scope"])
+    item = prop["items"][0]
+    with pytest.raises(cea.ExecutionApprovalError, match="사유"):
+        cea.approve(env["store"], ref=item["ref"], bound=item["binding"], actor=ACTOR,
+                    rationale="")
+    with pytest.raises(cea.ExecutionApprovalError, match="행위자"):
+        cea.approve(env["store"], ref=item["ref"], bound=item["binding"], actor="",
+                    rationale="사유는 있다")
+
+
+def test_철회_사건으로_승인을_주장할_수_없다(env):
+    """★★★ [변이 시험에서 발견] 승인 사건 **유형** 검사를 지워도 잡히지 않았다 — 지문
+    대조가 뒤에서 걸렀기 때문이다(등가).
+
+    ⚠️ 판별력은 **같은 지문을 가진 다른 유형의 사건**에서 생긴다. 철회 사건의 대상 지문은
+      원 승인과 같으므로, 유형을 보지 않으면 **철회 사건 id 로 승인을 주장**할 수 있다."""
+    from core import calc_execution_approval as cea
+
+    _approve_relations(env)
+    _seal_baseline(env)
+    made = _approve_capabilities(env)
+    ref = pc.SEGMENTS[0]
+    revoke = env["ledger"].append(
+        event_type=cea.REVOKED_EVENT, subject_type=cea.SUBJECT_TYPE,
+        subject_id=made[ref]["binding_fingerprint"], actor_type="user", actor_id=ACTOR,
+        decision="REVOKED", rationale="재검토",
+        parent_event_id=made[ref]["ledger_event_id"],
+        tenant_id=env["tenant"], entity_mode="REAL")
+    #: 기록이 **철회 사건**을 가리키게 만든다(옛 판·손상된 행을 흉내 낸다).
+    with env["store"].transaction() as conn:
+        conn.execute("UPDATE calc_execution_approvals SET ledger_event_id=? "
+                     "WHERE approval_id=?", (revoke["event_id"], made[ref]["approval_id"]))
+    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
+    assert got["status"] == pc.BLOCKED, "철회 사건으로 승인이 인정됐다"
 
 
 def test_승인자가_아닌_사람도_계산할_수_있다(env, monkeypatch):
@@ -326,14 +483,6 @@ def test_원장_장애는_BLOCKED_가_아니라_장애다(env, monkeypatch):
     with pytest.raises(Exception) as e:
         svc_calc.run(env["store"], req, actor=ACTOR)
     assert "원장" in str(e.value) or "확인하지 못했" in str(e.value)
-
-
-def test_승인_사유_없이는_실행_승인을_남길_수_없다(env):
-    """⚠️ 「왜 이 산식으로 계산해도 되는가」에 답할 수 없는 승인은 나중에 아무도 뒤집을
-    수 없다."""
-    with pytest.raises(svc_calc.PathRequestError, match="사유"):
-        svc_calc.approve_capability(pc.SEGMENTS[0], actor=ACTOR, rationale="",
-                                    tenant_id=env["tenant"])
 
 
 def test_배분과_기준선은_봉인에서만_온다(env):
@@ -444,36 +593,6 @@ def test_다른_조직의_기준선은_쓰지_않는다(env):
                   tenant_id=env["tenant"], entity_mode="REAL",
                   scope_node_id="plant-afs-other-99")
 
-
-def test_철회_사건으로_승인을_주장할_수_없다(env, monkeypatch):
-    """★★★ [변이 시험에서 발견] 승인 사건 **유형** 검사를 지워도 잡히지 않았다 — 지문
-    대조가 뒤에서 걸렀기 때문이다(등가).
-
-    ⚠️ 판별력은 **같은 지문을 가진 다른 유형의 사건**에서 생긴다. 철회 사건의 대상 지문은
-      원 승인과 같으므로, 유형을 보지 않으면 **철회 사건 id 로 승인을 주장**할 수 있다.
-      「이 산식은 철회됐다」는 기록이 「이 산식은 승인됐다」로 읽히는 것이다."""
-    _approve_relations(env)
-    _seal_baseline(env)
-    approved = _approve_capabilities(env, monkeypatch)
-    ref = pc.SEGMENTS[0]
-    subject = svc_calc.capability_subject(approved[ref])
-    revoke = env["ledger"].append(
-        event_type=svc_calc.CAPABILITY_REVOKED, subject_type=svc_calc.CAPABILITY_SUBJECT,
-        subject_id=subject, actor_type="user", actor_id=ACTOR, decision="REVOKED",
-        rationale="재검토", parent_event_id=approved[ref].ledger_event_id,
-        tenant_id=env["tenant"], entity_mode="REAL")
-
-    #: 철회 사건 id 를 승인으로 내민다.
-    faked = cc.Capability(**{**approved[ref].__dict__,
-                             "ledger_event_id": revoke["event_id"]})
-    monkeypatch.setattr(cc, "get",
-                        lambda r: (faked if r == ref
-                                   else approved.get(r) or cc._REGISTRY[r]))
-    got = svc_calc.run(env["store"], _build(env), actor=ACTOR)
-    assert got["status"] == pc.BLOCKED, "철회 사건으로 승인이 인정됐다"
-
-
-# ── ③ [변이 시험에서 발견] 앞선 관문이 가리던 자리 ──────────────────────
 
 def test_행은_살아_있는데_원장에_철회가_있으면_쓰지_않는다(env):
     """★★★ [변이 0건에서 발견] 「원장 철회 확인」을 통째로 지워도 잡히지 않았다 —

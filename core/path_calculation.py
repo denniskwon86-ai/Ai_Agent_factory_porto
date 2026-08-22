@@ -198,6 +198,7 @@ def calculate(req: PathCalculationRequest, *,
               datasets: Mapping[str, Sequence[Mapping[str, Any]]],
               ledger_verifier: Optional[Callable[[Any], bool]] = None,
               relation_verifier: Optional[Callable[[str, str], bool]] = None,
+              capability_resolver: Optional[Callable[[str], Any]] = None,
               ) -> Dict[str, Any]:
     """경로 하나를 계산한다. 관문 7개(§6)를 **순서대로** 지난다.
 
@@ -215,7 +216,13 @@ def calculate(req: PathCalculationRequest, *,
     ⚠️ `BLOCKED` 와 무결성 장애를 가른다 — 앞은 「아직 못 한다」(정상), 뒤는 「자료가
       어긋났다」(점검 필요)다. 뭉개면 고칠 것이 없는데 고치라고 말하게 된다.
     """
-    seg_fps = {ref: cc.get(ref).fingerprint() for ref in SEGMENTS}
+    #: ★★★ [M0-0] **실효 능력**을 해석기에서 얻는다. 등록부 상수는 계약이고, 「지금 이
+    #:   조건에서 승인됐는가」는 저장소·원장이 답한다.
+    #: ⚠️ 해석기가 없으면 등록부 그대로다 — 그래서 승인 전에는 계속 막힌다. 「해석기를
+    #:   안 넘겼으니 통과」로 접지 않는다(그 문이 승인 확인을 통째로 건너뛰게 한다).
+    resolve = capability_resolver or cc.get
+    caps = {ref: resolve(ref) for ref in SEGMENTS}
+    seg_fps = {ref: caps[ref].fingerprint() for ref in SEGMENTS}
 
     #: 관문 5 — 정체성. ⚠️ 이것을 `BLOCKED` 로 두면 「승인이 없다」와 「요청이 깨졌다」가
     #:   같은 답이 되고, 운영자는 승인을 찾으러 간다.
@@ -279,7 +286,7 @@ def calculate(req: PathCalculationRequest, *,
     blocked_segments = []
     for ref in SEGMENTS:
         try:
-            cc.assert_executable(ref, ledger_verifier)
+            cc.assert_executable(ref, ledger_verifier, capability=caps[ref])
         except cc.CapabilityError as e:
             blocked_segments.append(str(e))
     if blocked_segments:

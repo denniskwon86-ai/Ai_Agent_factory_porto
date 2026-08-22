@@ -271,7 +271,8 @@ def get(ref: str) -> Capability:
     return cap
 
 
-def assert_executable(ref: str, ledger_verifier: Optional[Any] = None) -> Capability:
+def assert_executable(ref: str, ledger_verifier: Optional[Any] = None, *,
+                      capability: Optional["Capability"] = None) -> Capability:
     """실행 직전 관문. **통과하지 못하면 예외**이고, 사유가 붙는다.
 
     ★★★ 0·빈 결과·기존 엔진 fallback 으로 **접지 않는다.**
@@ -289,7 +290,11 @@ def assert_executable(ref: str, ledger_verifier: Optional[Any] = None) -> Capabi
 
     ⚠️ 지금은 아무것도 `APPROVED` 가 아니므로 이 길은 한 번도 돌지 않는다. 그래도 지금
       넣는다 — 승인이 생긴 뒤에 넣으면 **그 사이에 승인 없는 실행이 지나간다.**"""
-    cap = get(ref)
+    #: ★ 호출부가 **실효 능력**을 넘길 수 있다(`calc_execution_approval.effective`).
+    #: ⚠️ 넘긴 것이 다른 참조면 받지 않는다 — 남의 승인을 이 이름에 꽂을 수 없다.
+    cap = get(ref) if capability is None else capability
+    if cap.ref != get(ref).ref:
+        raise CapabilityError(f"{ref}: 넘겨받은 능력이 이 참조의 것이 아닙니다({cap.ref}).")
     if not cap.executable:
         raise CapabilityError(f"{cap.ref} 을(를) 실행할 수 없습니다 "
                               f"[{cap.state}]: {cap.blocked_reason}")

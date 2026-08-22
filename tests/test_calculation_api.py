@@ -209,18 +209,27 @@ def _graph(env, approve=True):
     return ids
 
 
-def _approve_capabilities(env, monkeypatch):
-    approved = {}
-    for ref in pc.SEGMENTS:
-        base = cc.get(ref)
-        rec = svc_calc.approve_capability(ref, actor=APPROVER, rationale="MVP 3종 실행 승인",
-                                          tenant_id=env["tenant"], entity_mode="REAL")
-        approved[ref] = cc.Capability(**{**base.__dict__, "state": cc.APPROVED,
-                                         "blocked_reason": "",
-                                         "ledger_event_id": rec["event_id"]})
-    monkeypatch.setattr(cc, "get", lambda ref: approved.get(ref) or cc._REGISTRY[ref])
-    return approved
+def _approve_capabilities(env, monkeypatch=None):
+    """★★★ [M0-0] **실제 승인 경로**로 승인한다 — `cc.get` 을 패치하지 않는다.
 
+    ⚠️⚠️ 앞 판은 `monkeypatch.setattr(cc, "get", ...)` 로 등록부를 갈아 끼웠다. 그것은
+      「승인됐다면 어떻게 되는가」를 본 것이지 **승인 경로가 도는가**를 본 것이 아니다.
+      대상 지문·유효기간·범위 결속은 하나도 검사되지 않았다.
+
+    ⚠️ 격리된 저장소·원장에서만 부른다. 운영 등록부의 상태는 건드리지 않는다 —
+      `cea.approve` 는 등록부 상수를 고치지 않고 **승인 기록**만 남긴다."""
+    from core import calc_execution_approval as cea
+
+    out = {}
+    prop = cea.proposal(env["store"], instance_id=env["instance_id"],
+                        tenant_id=env["tenant"], entity_mode="REAL",
+                        scope_node_id=env["scope"])
+    for item in prop["items"]:
+        assert item["approvable"], item
+        out[item["ref"]] = cea.approve(
+            env["store"], ref=item["ref"], bound=item["binding"], actor=APPROVER,
+            rationale="시연 한정 실행 승인")
+    return out
 
 def _seal_baseline(env):
     from core import calc_baseline as cb
@@ -578,3 +587,220 @@ def test_남의_인스턴스_준비도는_404다(env):
     res = _client(env).get(
         f"/api/v1/calculation/readiness?instance_id={other['instance_id']}")
     assert res.status_code == 404, res.text[:200]
+
+
+# ── ⑥ [M0-0] 승인 경로 — 사람이 누르기 전까지 아무것도 승인되지 않는다 ────
+
+def _admin(env):
+    """시스템 관리자 주체. ★ 실제 `resolve_scope()` 가 돌려주는 값을 쓴다."""
+    env["org"].upsert_user("sysadmin@afs.invalid", "시스템관리자", primary_dept_id=DEPT,
+                           is_admin=True, actor="seed")
+    return _client(env, "sysadmin@afs.invalid")
+
+
+def test_제안서는_아무것도_승인하지_않는다(env):
+    """★★★ [M0-0] 이 화면은 **제안서**다. 부작용이 없고, 계산은 계속 `BLOCKED` 다."""
+    from core import calc_execution_approval as cea
+
+    _graph(env)
+    _seal_baseline(env)
+    got = _data(_admin(env).get(
+        f"/api/v1/calculation/capabilities?instance_id={env['instance_id']}"))
+
+    assert {i["ref"] for i in got["items"]} == set(pc.SEGMENTS)
+    #: ★ 기본 범위는 시연 한정 — `DEMO/SYNTHETIC · VIRTUAL · 30일`.
+    assert got["scope"]["data_kind"] == cea.DEFAULT_DATA_KIND
+    assert got["scope"]["entity_mode"] == cea.DEFAULT_ENTITY_MODE
+    assert got["valid_days"] == cea.DEFAULT_VALID_DAYS
+    #: ★ 화면이 보여 줄 것 — 정의·단위·부호.
+    first = got["items"][0]
+    assert first["definition"]["outputs"][0]["unit"] in cc.UNITS
+    assert first["definition"]["outputs"][0]["direction"] in cc.DIRECTIONS
+    assert first["state"] == cc.IMPLEMENTED_UNAPPROVED
+    assert first["binding_fingerprint"]
+    #: ★★★ **아무것도 승인되지 않았다.**
+    assert got["approvals"] == []
+    assert cea.list_approvals(env["store"]) == []
+    assert _data(_client(env).post("/api/v1/calculation/path",
+                                   json=_body(env)))["status"] == pc.BLOCKED
+
+
+def test_제안서도_시스템_관리자만_본다(env):
+    """★ 제안서는 결속 지문·인증판 id 를 보여 준다 — 관리자 화면이다."""
+    _graph(env)
+    _seal_baseline(env)
+    url = f"/api/v1/calculation/capabilities?instance_id={env['instance_id']}"
+    env["org"].upsert_user("dataadmin3@afs.invalid", "데이터관리자", primary_dept_id=DEPT,
+                           is_data_admin=True, actor="seed")
+    for who in ("dataadmin3@afs.invalid", ACTOR, "viewer@afs.invalid"):
+        res = _client(env, who).get(url)
+        assert res.status_code == 403, f"{who}: {res.status_code} {res.text[:160]}"
+    assert _admin(env).get(url).status_code == 200
+
+
+def test_시스템_관리자만_누를_수_있다(env):
+    """★★★ 데이터 관리자·조직 관리자·프로젝트 관리자는 못 누른다.
+
+    ⚠️ 「이 산식으로 만든 숫자를 회의에 올려도 되는가」를 정하는 일이고, 되돌려도 이미
+      그 숫자를 본 사람이 있다."""
+    _graph(env)
+    _seal_baseline(env)
+    env["org"].upsert_user("dataadmin@afs.invalid", "데이터관리자", primary_dept_id=DEPT,
+                           is_data_admin=True, actor="seed")
+    env["org"].upsert_user("orgadmin@afs.invalid", "조직관리자", primary_dept_id=DEPT,
+                           actor="seed")
+    env["org"].set_user_roles("orgadmin@afs.invalid", {DEPT: "manager"}, actor="seed")
+    body = {"instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인"}
+    for who in ("dataadmin@afs.invalid", "orgadmin@afs.invalid", ACTOR,
+                "viewer@afs.invalid"):
+        res = _client(env, who).post("/api/v1/calculation/capabilities/approve",
+                                     json=body)
+        assert res.status_code == 403, f"{who}: {res.status_code} {res.text[:160]}"
+    #: ★ 그리고 아무 승인도 안 남았다 — 403 이 났는데 사건이 남으면 안 된다.
+    from core import calc_execution_approval as cea
+    assert cea.list_approvals(env["store"]) == []
+
+
+def test_누르면_능력마다_별도_원장_사건이_남는다(env):
+    """★★★ 화면에서 셋을 한 번에 골라도 원장에는 **셋**으로 남는다.
+
+    ⚠️ 하나를 철회할 때 나머지가 함께 죽으면 안 되고, 「무엇을 승인했나」가 능력별로
+      답해져야 한다."""
+    from core import calc_execution_approval as cea
+
+    _graph(env)
+    _seal_baseline(env)
+    got = _data(_admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인",
+        "entity_mode": "REAL"}))
+
+    assert len(got["approved"]) == len(pc.SEGMENTS)
+    events = env["ledger"].list_events(event_type=cea.APPROVED_EVENT)
+    assert len(events) == len(pc.SEGMENTS), "능력별로 갈라 남기지 않았다"
+    #: ★ 대상이 서로 다르다 — 하나의 사건이 셋을 덮지 않는다.
+    assert len({e["subject_id"] for e in events}) == len(pc.SEGMENTS)
+    #: ★ 사유·행위자가 남는다.
+    assert all(e["actor_id"] == "sysadmin@afs.invalid" for e in events)
+    assert all("시연" in str(e["rationale"]) for e in events)
+
+
+def test_사유_없이는_누를_수_없다(env):
+    _graph(env)
+    _seal_baseline(env)
+    res = _admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "  "})
+    assert res.status_code == 422, res.text[:200]
+
+
+def test_재시도는_멱등이다(env):
+    """⚠️ 재시도가 승인 사건을 쌓으면 원장이 「몇 번 승인했나」로 오염된다."""
+    from core import calc_execution_approval as cea
+
+    _graph(env)
+    _seal_baseline(env)
+    c = _admin(env)
+    body = {"instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인",
+            "entity_mode": "REAL"}
+    first = _data(c.post("/api/v1/calculation/capabilities/approve", json=body))
+    again = _data(c.post("/api/v1/calculation/capabilities/approve", json=body))
+    assert all(a["idempotent"] for a in again["approved"])
+    assert ([a["ledger_event_id"] for a in again["approved"]]
+            == [a["ledger_event_id"] for a in first["approved"]])
+    assert len(env["ledger"].list_events(event_type=cea.APPROVED_EVENT)) == len(pc.SEGMENTS)
+
+
+def test_화면이_본_조건이_바뀌면_거부한다(env):
+    """★★★ 사람이 읽고 누르는 사이에 판이 새로 인증될 수 있다 — 그때 승인되는 것은
+    **읽은 것이 아니다.**"""
+    _graph(env)
+    _seal_baseline(env)
+    res = _admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인",
+        "seen_fingerprints": {pc.SEGMENTS[0]: "옛지문"}})
+    assert res.status_code == 409, res.text[:200]
+
+
+def test_승인하면_계산이_돈다(env):
+    """★★★ [M0-0 → B2] **승인 직후 실제 계산.** 사용자 지시의 검증 ②."""
+    _graph(env)
+    _seal_baseline(env)
+    assert _data(_client(env).post("/api/v1/calculation/path",
+                                   json=_body(env)))["status"] == pc.BLOCKED
+    _data(_admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인",
+        "entity_mode": "REAL"}))
+    got = _data(_client(env).post("/api/v1/calculation/path", json=_body(env)))
+    assert got["status"] == pc.COMPLETE, got.get("blocked")
+
+
+def test_철회하면_즉시_다시_막힌다(env):
+    _graph(env)
+    _seal_baseline(env)
+    c = _admin(env)
+    made = _data(c.post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인",
+        "entity_mode": "REAL"}))["approved"]
+    assert _data(_client(env).post("/api/v1/calculation/path",
+                                   json=_body(env)))["status"] == pc.COMPLETE
+    res = c.post(f"/api/v1/calculation/capabilities/{made[0]['approval_id']}/revoke",
+                 json={"reason": "재검토"})
+    assert res.status_code == 200, res.text[:200]
+    assert _data(_client(env).post("/api/v1/calculation/path",
+                                   json=_body(env)))["status"] == pc.BLOCKED
+
+
+def test_시스템_관리자만_철회할_수_있다(env):
+    """★★★ 철회도 시스템 관리자만. 남이 켠 계산을 아무나 끄면 시연 도중에 화면이
+    멈추고, 「누가 껐나」에 답할 수 없다."""
+    _graph(env)
+    _seal_baseline(env)
+    made = _data(_admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인",
+        "entity_mode": "REAL"}))["approved"]
+    url = f"/api/v1/calculation/capabilities/{made[0]['approval_id']}/revoke"
+    env["org"].upsert_user("dataadmin2@afs.invalid", "데이터관리자", primary_dept_id=DEPT,
+                           is_data_admin=True, actor="seed")
+    for who in ("dataadmin2@afs.invalid", ACTOR, "viewer@afs.invalid"):
+        res = _client(env, who).post(url, json={"reason": "임의 철회"})
+        assert res.status_code == 403, f"{who}: {res.status_code} {res.text[:160]}"
+    #: ★ 그리고 계산은 그대로 돈다 — 403 이 났는데 철회가 걸리면 안 된다.
+    assert _data(_client(env).post("/api/v1/calculation/path",
+                                   json=_body(env)))["status"] == pc.COMPLETE
+
+
+def test_철회_사유_없이는_철회할_수_없다(env):
+    _graph(env)
+    _seal_baseline(env)
+    c = _admin(env)
+    made = _data(c.post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인",
+        "entity_mode": "REAL"}))["approved"]
+    res = c.post(f"/api/v1/calculation/capabilities/{made[0]['approval_id']}/revoke",
+                 json={"reason": ""})
+    assert res.status_code == 422, res.text[:200]
+
+
+def test_없는_인스턴스로는_승인할_수_없다(env):
+    """★ 승인은 **어느 자료로 계산할지**가 정해진 뒤에만 가능하다.
+
+    ⚠️ 플랫폼 관리자는 설계상 `unrestricted` 다 — 범위로는 걸리지 않는다. 여기서 막는
+      것은 「그런 인스턴스가 없다」이고, 범위 통제는 일반 사용자 경로가 진다."""
+    _graph(env)
+    _seal_baseline(env)
+    res = _admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": "ki_없는것", "rationale": "시연 한정 실행 승인"})
+    assert res.status_code == 404, res.text[:200]
+
+
+def test_인증판이_없으면_승인할_수_없다(env):
+    """★★★ 무엇으로 계산할지 모르는 채 승인하면 그 승인은 **아무 판에나** 붙는다."""
+    _graph(env)
+    _seal_baseline(env)
+    other = env["store"].create_instance(
+        kit_id=dv.KIT_ID, version=dv.KIT_VERSION,
+        kit_fingerprint=dv.kit_fingerprint(env["store"]),
+        tenant_id=env["tenant"], scope_node_id="plant-빈공장", entity_mode="REAL")
+    res = _admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": other["instance_id"], "rationale": "시연 한정 실행 승인"})
+    assert res.status_code == 422, res.text[:200]
+    assert "인증판" in res.text

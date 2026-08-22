@@ -47,8 +47,9 @@ from fastapi import Depends, Request
 #   함수 안에서 늦게 import 할 수 없다. `api.deps` 는 이 모듈을 참조하지 않으므로 순환은 없다.
 from api.deps import current_principal as _current_principal
 
-from core.admin_capability import (ADMIN_DATA_ACCESS, ADMIN_ORGANIZATION, AGENT_EXECUTE,
-                                   PROJECT_CREATE, PROJECT_EDIT, PROJECT_RELEASE, PROJECT_RUN)
+from core.admin_capability import (ADMIN_DATA_ACCESS, ADMIN_ORGANIZATION, ADMIN_SECURITY,
+                                   AGENT_EXECUTE, PROJECT_CREATE, PROJECT_EDIT,
+                                   PROJECT_RELEASE, PROJECT_RUN)
 
 F = "/api/v1/factory"
 
@@ -164,6 +165,14 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     #   있는가」는 `_instance_or_404` 가, 「이 경로가 보이는가」는 `app_policy` 가 답한다.
     "POST /api/v1/calculation/path": (PROJECT_RUN,),
     "POST /api/v1/calculation/path/decision": (PROJECT_RUN,),
+    # ★★★ 실행 승인은 **시스템 관리자만**. 「이 산식으로 만든 숫자를 회의에 올려도 되는가」
+    #   를 정하는 일이고, 되돌려도 이미 그 숫자를 본 사람이 있다.
+    # ⚠️ `ADMIN_SECURITY` 는 플랫폼 관리자(`is_admin`)에게만 간다 — 데이터·AI 관리자와
+    #   부서 역할 어디에도 없다. 새 권한 이름을 지어내지 않았다.
+    # ★ 제안서도 관리자 화면이다 — 결속 지문·인증판 id 를 보여 준다.
+    "GET /api/v1/calculation/capabilities": (ADMIN_SECURITY,),
+    "POST /api/v1/calculation/capabilities/approve": (ADMIN_SECURITY,),
+    "POST /api/v1/calculation/capabilities/{approval_id}/revoke": (ADMIN_SECURITY,),
 
     # ── 실행(LLM) ───────────────────────────────────────────────────────────
     # viewer 도 가진 권한이다. 막으려는 것이 아니라 **익명·미등록을 걸러내고 감사에 남기는**

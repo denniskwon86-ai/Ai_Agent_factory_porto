@@ -45,6 +45,7 @@ from core import app_policy
 from core import ontology_path_adapter as adapter
 from core import path_calculation as pc
 from core import calc_dataset_loader as loader
+from core import calc_execution_approval as cea
 from core import demo_readiness
 from core import demo_vertical_slice as dv
 from core import path_calculation_service as svc
@@ -125,7 +126,8 @@ def _raise_ontology(exc: Exception) -> None:
     raise exc
 
 
-def _resolve_path(req: PathCalcInput, p: Principal, actor: str) -> Dict[str, Any]:
+def _resolve_path(req: PathCalcInput, p: Principal, actor: str,
+                  ctx: Dict[str, str]) -> Dict[str, Any]:
     """질의를 **서버에서 다시 실행해** 경로를 얻는다.
 
     ★★★ 이것이 이 라우트의 급소다. 호출자가 `relation_ids` 를 적어 보내게 두면 **빈
@@ -147,8 +149,10 @@ def _resolve_path(req: PathCalcInput, p: Principal, actor: str) -> Dict[str, Any
         #:   표시하지 않고(그 규약은 B1.1 P1 에서 정했다), 그러면 승인이 다 있어도
         #:   `calculation_blocked` 가 서서 안건이 만들어지지 않는다.
         #: ⚠️ 대역을 넣지 않는다 — 대역을 넣으면 「승인 → 계산」이 아니라 「대역 → 계산」이다.
-        evidence = adapter.to_evidence(response, path_fingerprint=req.path_fingerprint,
-                                       ledger_verifier=svc.capability_verifier(actor))
+        evidence = adapter.to_evidence(
+            response, path_fingerprint=req.path_fingerprint,
+            ledger_verifier=svc.context_verifier(store, **ctx),
+            capability_resolver=svc.context_resolver(store, **ctx))
         #: ★ **같은 경로**의 결속을 뽑는다 — 어댑터가 고른 지문을 그대로 넘긴다.
         #: ⚠️ 결속은 근거에 실리지 않는다 — 대외 근거에 구간 목록을 담지 않는 규약이다
         #:   (`blocked_reason` 이 숫자·이름을 감추는 것과 같은 이유).
@@ -169,7 +173,9 @@ def _calculate(req: PathCalcInput, p: Principal) -> Dict[str, Any]:
     scope_node_id = str(inst["scope_node_id"])
 
     actor = p.user_id or ""
-    found = _resolve_path(req, p, actor)
+    found = _resolve_path(req, p, actor,
+                          {"instance_id": req.instance_id, "tenant_id": tenant_id,
+                           "entity_mode": entity_mode, "scope_node_id": scope_node_id})
     evidence, bindings = found["evidence"], found["bindings"]
     try:
         request = svc.build_request(
@@ -194,6 +200,165 @@ def _calculate(req: PathCalcInput, p: Principal) -> Dict[str, Any]:
     except pc.PathCalculationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"evidence": evidence, "result": result}
+
+
+class ApprovalInput(BaseModel):
+    """승인 요청. ★ **지문을 받지 않는다** — 서버가 다시 산출해 대조한다."""
+
+    instance_id: str
+    refs: List[str] = Field(default_factory=list)
+    rationale: str
+    data_kind: str = ""
+    entity_mode: str = ""
+    valid_days: int = 0
+    #: ★ 화면이 본 제안서의 지문. **대조용**이지 승인 대상이 아니다.
+    #: ⚠️ 이것이 없으면 「화면에 뜬 것」과 「실제로 승인되는 것」이 다를 수 있다 —
+    #:   사람이 읽고 누르는 사이에 판이 새로 인증될 수 있기 때문이다.
+    seen_fingerprints: Dict[str, str] = Field(default_factory=dict)
+
+
+class RevokeInput(BaseModel):
+    reason: str
+
+
+def _admin_ctx(p: Principal, instance_id: str) -> Dict[str, str]:
+    """★★★ **시스템 관리자만.** 데이터 관리자·조직 관리자·프로젝트 관리자는 못 누른다.
+
+    ⚠️ 새 권한 이름을 지어내지 않는다. `ADMIN_SECURITY` 는 이 저장소에서 플랫폼 관리자
+      (`is_admin`)에게만 가고, 데이터·AI 관리자와 부서 역할 어디에도 없다 —
+      `core/admin_capability.py` 의 `_DATA_ADMIN_CAPS`·`_AI_ADMIN_CAPS`·`_ROLE_CAPS`
+      가 그것을 보증한다.
+    ★ M1 에서 `DEMO_RESET`·`CALC_APPROVE` 로 갈라 낼 수 있다 — 지금 지어내면 표와
+      코드가 갈라진다."""
+    #: ⚠️⚠️ 여기에 `require_caps` 를 **적지 않는다.** 라우터 의존성(`route_authority.guard`)
+    #:   이 표를 보고 먼저 막는다 — 실제로 여기에 한 줄 더 두었더니 **변이 0건**이었다
+    #:   (앞 관문이 가려 도달하지 않는다). 통제처럼 보이는 도달 불가 코드를 두면 나중에
+    #:   「여기서 막으니 괜찮다」고 믿고 표에서 빼게 된다.
+    #: ★ 이 세 라우트의 권한은 `core/route_authority.py` 의 표에 있다(ADMIN_SECURITY).
+    inst = _instance_or_404(p, instance_id)
+    return {"instance_id": str(inst["instance_id"]),
+            "tenant_id": str(inst["tenant_id"]),
+            "entity_mode": str(inst["entity_mode"]),
+            "scope_node_id": str(inst["scope_node_id"])}
+
+
+@router.get("/capabilities")
+async def capabilities(instance_id: str = "", data_kind: str = "",
+                       entity_mode: str = "", valid_days: int = 0,
+                       p: Principal = Depends(current_principal)):
+    """[M0-0] 승인 **제안서** — 화면이 보여 줄 정의·단위·부호·범위·유효기간.
+
+    ★★★ **아무것도 승인하지 않는다.** 부작용이 없다. 누르기 전까지 계산은 계속
+      `BLOCKED` 로 답한다.
+    ★ 서버가 지문을 직접 산출한다 — 호출자가 적어 보낼 수 없다."""
+    ctx = _admin_ctx(p, instance_id)
+    try:
+        data = await asyncio.to_thread(
+            cea.proposal, store, instance_id=ctx["instance_id"],
+            tenant_id=ctx["tenant_id"],
+            entity_mode=entity_mode or cea.DEFAULT_ENTITY_MODE,
+            scope_node_id=ctx["scope_node_id"],
+            data_kind=data_kind or cea.DEFAULT_DATA_KIND,
+            valid_days=valid_days or cea.DEFAULT_VALID_DAYS)
+    except cea.ExecutionApprovalError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except loader.SealedDatasetError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    #: ★ 지금 살아 있는 승인도 함께 — 화면이 「이미 승인됨」을 구분할 수 있어야 한다.
+    live = await asyncio.to_thread(cea.list_approvals, store,
+                                   tenant_id=ctx["tenant_id"],
+                                   scope_node_id=ctx["scope_node_id"])
+    data["approvals"] = [{k: r[k] for k in ("approval_id", "ref", "status",
+                                            "binding_fingerprint", "valid_until",
+                                            "approved_by", "data_kind", "entity_mode")}
+                         for r in live]
+    return {"status": "success", "data": data}
+
+
+@router.post("/capabilities/approve")
+async def approve_capabilities(req: ApprovalInput,
+                               p: Principal = Depends(current_principal)):
+    """[M0-0] 사람이 누르는 자리. **능력마다 별도 원장 사건**을 남긴다.
+
+    ⚠️⚠️ 화면에서 셋을 한 번에 고를 수 있어도 원장에는 셋으로 남는다 — 하나를 철회할 때
+      나머지가 함께 죽으면 안 되고, 「무엇을 승인했나」가 능력별로 답해져야 한다.
+
+    ★ 멱등: 같은 결속에 살아 있는 승인이 있으면 새 사건을 만들지 않는다.
+    ⚠️ 화면이 본 지문과 지금 서버가 산출한 지문이 다르면 **거부**한다 — 사람이 읽고
+      누르는 사이에 판이 바뀌었을 수 있고, 그때 승인되는 것은 읽은 것이 아니다."""
+    ctx = _admin_ctx(p, req.instance_id)
+    if not str(req.rationale or "").strip():
+        raise HTTPException(status_code=422, detail="승인 사유가 필요합니다.")
+    try:
+        prop = await asyncio.to_thread(
+            cea.proposal, store, instance_id=ctx["instance_id"],
+            tenant_id=ctx["tenant_id"],
+            entity_mode=req.entity_mode or cea.DEFAULT_ENTITY_MODE,
+            scope_node_id=ctx["scope_node_id"],
+            data_kind=req.data_kind or cea.DEFAULT_DATA_KIND,
+            valid_days=req.valid_days or cea.DEFAULT_VALID_DAYS)
+    except cea.ExecutionApprovalError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except loader.SealedDatasetError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    wanted = {str(r).strip() for r in req.refs if str(r).strip()}
+    items = [i for i in prop["items"] if not wanted or i["ref"] in wanted]
+    unknown = sorted(wanted - {i["ref"] for i in prop["items"]})
+    if unknown:
+        raise HTTPException(status_code=404,
+                            detail=f"승인할 수 없는 계산 참조입니다: {unknown}")
+    if not items:
+        raise HTTPException(status_code=422, detail="승인할 계산이 없습니다.")
+
+    for item in items:
+        seen = str(req.seen_fingerprints.get(item["ref"], "") or "").strip()
+        if seen and seen != item["binding_fingerprint"]:
+            #: ⚠️ 읽은 것과 승인되는 것이 다르다 — 다시 읽게 한다.
+            raise HTTPException(
+                status_code=409,
+                detail=(f"{item['ref']}: 화면에 뜬 조건이 그 사이 바뀌었습니다 — 다시 "
+                        f"확인한 뒤 승인하십시오(판이 새로 인증됐거나 코드가 바뀌었습니다)."))
+        if not item["approvable"]:
+            raise HTTPException(
+                status_code=422,
+                detail=(f"{item['ref']}: 인증판이 없는 계약키가 있어 승인할 수 없습니다 "
+                        f"{item['missing_contract_keys']} — 무엇으로 계산할지 모르는 채 "
+                        f"승인하면 그 승인은 아무 판에나 붙습니다."))
+
+    made = []
+    for item in items:
+        try:
+            #: ★★★ 능력마다 **별도 사건**이다.
+            made.append(await asyncio.to_thread(
+                cea.approve, store, ref=item["ref"], bound=item["binding"],
+                actor=p.user_id or "", rationale=req.rationale,
+                valid_days=req.valid_days or cea.DEFAULT_VALID_DAYS))
+        except cea.ExecutionApprovalError as exc:
+            #: ⚠️ 앞엣것은 이미 승인됐다 — **되돌리지 않는다.** 각각이 독립된 승인이고,
+            #:   되돌리면 「승인했다가 취소했다」는 사건이 원장에 남는다. 무엇이 됐고
+            #:   무엇이 안 됐는지 그대로 알려 준다.
+            raise HTTPException(
+                status_code=422,
+                detail=(f"{item['ref']} 승인에 실패했습니다: {exc} — 앞서 승인된 "
+                        f"{[m['ref'] for m in made]} 은(는) 그대로 유효합니다."))
+    return {"status": "success",
+            "data": {"approved": made, "valid_until": prop["valid_until"]}}
+
+
+@router.post("/capabilities/{approval_id}/revoke")
+async def revoke_capability(approval_id: str, req: RevokeInput,
+                            p: Principal = Depends(current_principal)):
+    """실행 승인을 철회한다. ⚠️ 철회하면 계산은 **즉시** `BLOCKED` 로 돌아간다."""
+    #: ⚠️ 권한은 표가 막는다(위 `_admin_ctx` 머리말 참고).
+    if not str(req.reason or "").strip():
+        raise HTTPException(status_code=422, detail="철회 사유가 필요합니다.")
+    try:
+        data = await asyncio.to_thread(cea.revoke, store, approval_id=approval_id,
+                                       actor=p.user_id or "", reason=req.reason)
+    except cea.ExecutionApprovalError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"status": "success", "data": data}
 
 
 @router.get("/readiness")

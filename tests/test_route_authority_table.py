@@ -74,17 +74,35 @@ def _write_routes():
     return out
 
 
+def _all_routes():
+    """등록된 라우트 **전부** — 읽기 포함.
+
+    ⚠️ `_write_routes()` 는 GET 을 뺀다(「쓰기 라우트가 전부 판정됐는가」를 묻기 때문).
+      그런데 표는 **읽기도 막을 수 있다** — 관리자 화면의 조회가 그렇다. 표 대조에
+      쓰기 목록을 쓰면 정당한 GET 항목이 «유령» 으로 잡힌다."""
+    import importlib
+    out = set()
+    for mod_path in GUARDED_MODULES:
+        m = importlib.import_module(mod_path)
+        for r in getattr(m.router, "routes", []):
+            for meth in sorted(getattr(r, "methods", set()) or set()):
+                if meth not in ("HEAD", "OPTIONS"):
+                    out.add(f"{meth} {r.path}")
+    assert out, "라우트를 하나도 찾지 못했다 — 검사가 헛돌고 있다"
+    return out
+
+
 # ── ① 표에 있는데 라우트가 없다 ─────────────────────────────────────────────
 def test_every_table_entry_matches_a_real_route():
     """★ 오타 하나로 통제가 «없는 라우트» 를 막게 되는 것을 잡는다."""
-    real = {k for k, _src, _m in _write_routes()}
+    real = _all_routes()
     ghosts = sorted(set(ra.ROUTE_CAPS) - real)
     assert not ghosts, (
         "표에 있으나 실제 라우트가 아니다(오타이거나 라우트가 옮겨갔다): " + "; ".join(ghosts))
 
 
 def test_every_exempt_entry_matches_a_real_route():
-    real = {k for k, _src, _m in _write_routes()}
+    real = _all_routes()
     ghosts = sorted(set(ra.EXEMPT) - real)
     assert not ghosts, "면제 목록에 있으나 실제 라우트가 아니다: " + "; ".join(ghosts)
 
