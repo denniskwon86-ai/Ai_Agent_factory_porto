@@ -67,9 +67,15 @@ function ContextFooter() {
         {virtual ? `⚠️ ${mode} — 가상 문맥입니다` : 'REAL'}
       </b>
       <span className="afs-muted">·</span>
-      <span className="afs-muted">조직 {ctx.scopeNodeId || '미지정'}</span>
-      <span className="afs-muted">·</span>
-      <span className="afs-muted">{ctx.tenantId || 'tenant_default'}</span>
+      {/* ⚠️ [2026-08-23] **모르는 것을 지어내지 않는다.** 종전에는 조직을 안 고르면
+          「조직 미지정」, 회사를 모르면 `tenant_default` 라는 **없는 값**을 찍었다.
+          문맥이 비면 서버는 «권한 범위 전체» 로 동작하므로 「미지정」은 사실이 아니다
+          (`CompanyContextBar` 에 같은 수정을 했다 — 여기만 남으면 두 곳이 다른 말을 한다). */}
+      <span className="afs-muted">
+        {ctx.scopeNodeId ? `조직 ${ctx.scopeNodeId}` : '조직 범위 — 내 권한 전체'}
+      </span>
+      {ctx.tenantId && <span className="afs-muted">·</span>}
+      {ctx.tenantId && <span className="afs-muted">{ctx.tenantId}</span>}
     </div>
   );
 }

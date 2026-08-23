@@ -312,7 +312,11 @@ export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
                 <div>
                   <span>실행 문맥</span>
                   <b>{ctx.entityMode || 'REAL'}</b>
-                  <small>{ctx.scopeNodeId || '조직 미지정'} · {ctx.tenantId || 'tenant_default'}</small>
+                  {/* ⚠️ 없는 값을 지어내지 않는다 — `CompanyContextBar`·`HubDialog` 와 같은 수정. */}
+                  <small>
+                    {ctx.scopeNodeId || '내 권한 범위 전체'}
+                    {ctx.tenantId ? ` · ${ctx.tenantId}` : ''}
+                  </small>
                 </div>
                 <div>
                   <span>현재 권한</span>
