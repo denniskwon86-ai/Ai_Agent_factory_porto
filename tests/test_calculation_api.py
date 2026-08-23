@@ -1176,3 +1176,74 @@ def test_초기화_뒤에도_미리보기가_다시_선다(env, isolated_side_st
     #: ★ 다시 선다 — 스키마가 새로 만들어진다.
     ap.preview_app_data()._store.ensure_schema()
     assert os.path.exists(isolated_side_stores["preview"]), "초기화 뒤 미리보기가 죽었다"
+
+
+# ── ⑧ [M0-3] 조직·데이터 결속 — 상위는 되고 옆은 안 된다 ──────────────────
+
+def _plant_instance(env, scope_node, tenant=None):
+    """다른 조직 노드(또는 테넌트)의 인스턴스를 만든다."""
+    return env["store"].create_instance(
+        kit_id=dv.KIT_ID, version=dv.KIT_VERSION,
+        kit_fingerprint=dv.kit_fingerprint(env["store"]),
+        tenant_id=tenant or env["tenant"], scope_node_id=scope_node,
+        entity_mode="REAL", label=f"{scope_node} 인스턴스")
+
+
+def test_상위_조직은_하위_공장을_본다(env):
+    """★★★ [M0-3] 본사 사람이 산하 공장의 자료를 볼 수 있어야 한다.
+
+    ★ 상속은 `descendants_of` 가 한다 — 상위 부서의 사람은 하위 부서의 조직 노드를
+      읽기 범위에 갖는다. 이 시험은 그 상속이 **라우트까지** 닿는지 본다.
+    ⚠️ 반대 방향은 아니다(D-003) — 하위에서 상위는 보이지 않는다."""
+    org = env["org"]
+    #: 본사(상위) → 제련(하위). 기존 fixture 의 `smelting` 을 자식으로 붙인다.
+    org.create_department("hq2", "본사", scope_node_id="corp-afs", actor="seed")
+    org.update_department(DEPT, parent_id="hq2", actor="seed")
+    org.upsert_user("chief@afs.invalid", "본사임원", primary_dept_id="hq2", actor="seed")
+    org.set_user_roles("chief@afs.invalid", {"hq2": "manager"}, actor="seed")
+
+    scope = org.resolve_scope("chief@afs.invalid")
+    if env["scope"] not in (scope.readable_scope_nodes or frozenset()):
+        import pytest as _p
+        #: ⚠️ 상속이 안 서면 **건너뛰지 않고 그 사실을 말한다** — 건너뛰면 「됐다」로 읽힌다.
+        _p.fail(f"상위 부서가 하위 조직 노드를 못 본다: {sorted(scope.readable_scope_nodes)} "
+                f"— `parent_id` 배선을 확인할 것")
+
+    got = _data(_client(env, "chief@afs.invalid").get(
+        f"/api/v1/calculation/readiness?instance_id={env['instance_id']}"))
+    assert got["status"] in (dr.READY, dr.NOT_YET), got
+
+
+def test_옆_공장은_보이지_않는다(env):
+    """★★★ [M0-3] **단일 공장 교차 거부.** 같은 회사라도 옆 공장 자료는 안 된다.
+
+    ⚠️ 없는 것과 못 보는 것을 **같은 404** 로 답한다 — 다르면 그 응답이 「그 공장에 그런
+      자료가 있다」를 알려 준다."""
+    other = _plant_instance(env, "plant-afs-refining-02")
+    c = _client(env)   # 제련 공장 사람
+    for url in (f"/api/v1/calculation/readiness?instance_id={other['instance_id']}",):
+        assert c.get(url).status_code == 404, url
+    res = c.post("/api/v1/calculation/path",
+                 json=_body(env, instance_id=other["instance_id"]))
+    assert res.status_code == 404, res.text[:200]
+
+
+def test_다른_테넌트는_보이지_않는다(env):
+    """★★★ [M0-3] **타 조직 거부.** 조직 노드 이름이 같아도 테넌트가 다르면 남의 것이다.
+
+    ⚠️ 조직 노드만 보고 판정하면 다른 회사의 같은 이름 공장이 열린다."""
+    other = _plant_instance(env, env["scope"], tenant="tenant-남의회사")
+    c = _client(env)
+    assert c.get(f"/api/v1/calculation/readiness?instance_id={other['instance_id']}"
+                 ).status_code == 404
+    res = c.post("/api/v1/calculation/path",
+                 json=_body(env, instance_id=other["instance_id"]))
+    assert res.status_code == 404, res.text[:200]
+
+
+def test_초기화도_같은_경계를_쓴다(env, isolated_side_stores):
+    """⚠️ 계산은 막는데 초기화는 열려 있으면, 못 보는 자료를 **지울 수** 있다."""
+    other = _plant_instance(env, "plant-afs-refining-02")
+    c = _client(env)
+    assert c.get(f"/api/v1/calculation/reset/plan?instance_id={other['instance_id']}"
+                 ).status_code in (403, 404)
