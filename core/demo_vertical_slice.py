@@ -282,7 +282,12 @@ def register_kit(store: Any) -> Dict[str, Any]:
     if not os.path.exists(manifest):
         raise FileNotFoundError(f"정본 키트 manifest 가 없습니다: {manifest}")
     with io.open(manifest, "r", encoding="utf-8") as fh:
-        profile = json.load(fh)
+        raw = json.load(fh)
+    #: ★★★ [2026-08-23 실측] **raw 를 그대로 넣지 않는다.** manifest 는 데이터셋을
+    #:   `dataset_id` 로 적고 등록부 독자는 `dataset_contract_key` 를 찾는다 — raw 로
+    #:   넣었더니 준비도 보드가 계약키를 0개로 보고, 인증판 7종이 있는데 「required 0」
+    #:   으로 답했다. 0은 「없다」로 읽힌다.
+    profile = kit_registry.profile_from_manifest(raw)
     return store.upsert_kit_version(
         kit_id=KIT_ID, version=KIT_VERSION,
         name=str(profile.get("company_name") or KIT_ID),

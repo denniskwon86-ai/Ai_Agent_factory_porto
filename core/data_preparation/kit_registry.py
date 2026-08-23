@@ -164,6 +164,81 @@ def register_all(store: Any, directory: str = "") -> List[Dict[str, Any]]:
     return rows
 
 
+def profile_from_manifest(manifest: Any) -> Dict[str, Any]:
+    """정본 키트 `manifest.json` → **등록부가 읽는 프로파일**.
+
+    ## ⚠️⚠️ 왜 필요한가 — 같은 것을 두 이름으로 부르고 있었다
+
+    정본 manifest 는 데이터셋을 `dataset_id`·`name` 으로 적고, 이 모듈의 독자
+    (`dataset_keys`·`dataset_labels`·`load_profile`)는 `dataset_contract_key`·`label`
+    을 찾는다. 그래서 정본 키트를 **raw 로** 등록하면 준비도 보드가 계약키를 **0개**로
+    보고, 인증판이 7종 있는데도 「required 0 / ready 0」 으로 답한다(2026-08-23 실측).
+
+    ★ 0은 「없다」로 읽힌다. 화면은 아무 말도 못 하고, 사용자는 다음에 무엇을 할지
+      알 수 없다.
+
+    ## 무엇을 옮기는가
+
+        dataset_contract_key ← dataset_id
+        label                ← name
+        outputs[]            ← app_blueprints[] (`app_id` 가 산출물, `datasets` 가 요구)
+
+    ⚠️ `purpose` 는 manifest 에 없다 — **비워 둔다.** 계약 이름을 이름칸에 복사하면
+      화면이 「이름이 없다」와 「이름이 계약과 같다」를 구분할 수 없다(`dataset_labels`
+      머리말과 같은 규칙).
+    ⚠️ 옮기지 못한 것을 지어내지 않는다. 산출물이 없는 manifest 는 산출물 없이 등록된다.
+    """
+    if not isinstance(manifest, dict):
+        raise KitLoadError("manifest 의 최상위가 객체가 아닙니다.")
+    src = manifest.get("datasets")
+    if not isinstance(src, list) or not src:
+        raise KitLoadError("manifest 에 datasets 가 없습니다.")
+
+    datasets: List[Dict[str, Any]] = []
+    for d in src:
+        if not isinstance(d, dict):
+            continue
+        key = str(d.get("dataset_contract_key") or d.get("dataset_id") or "").strip()
+        if not key:
+            #: ⚠️ 이름 없는 데이터셋을 조용히 건너뛰지 않는다 — 건너뛰면 요구사항이
+            #:   줄고, 그 산출물은 준비도에서 늘 «가능» 이 된다.
+            raise KitLoadError(f"이름 없는 데이터셋이 있습니다: {d}")
+        datasets.append({
+            "dataset_contract_key": key,
+            "label": str(d.get("label") or d.get("name") or "").strip(),
+            "purpose": str(d.get("purpose") or "").strip(),
+            "required": bool(d.get("required", True)),
+            "keys": list(d.get("keys") or []),
+            "deps": list(d.get("deps") or []),
+        })
+
+    known = {d["dataset_contract_key"] for d in datasets}
+    outputs: List[Dict[str, Any]] = []
+    for bp in (manifest.get("outputs") or manifest.get("app_blueprints") or []):
+        if not isinstance(bp, dict):
+            continue
+        name = str(bp.get("output") or bp.get("app_id") or "").strip()
+        needs = [str(x).strip() for x in (bp.get("requires") or bp.get("datasets") or [])
+                 if str(x).strip()]
+        if not name or not needs:
+            #: ⚠️ 아무것도 요구하지 않는 산출물은 데이터가 하나도 없어도 «가능» 으로
+            #:   보인다 — 그런 것은 등록하지 않는다.
+            continue
+        unknown = sorted(set(needs) - known)
+        if unknown:
+            raise KitLoadError(
+                f"산출물 «{name}» 이 이 키트에 없는 데이터를 요구합니다: {unknown}")
+        outputs.append({"output": name, "label": str(bp.get("name") or "").strip(),
+                        "requires": sorted(set(needs))})
+
+    #: ★ 원본을 **버리지 않는다.** 옮기지 못한 칸(회사 프로파일·파일 색인 등)이
+    #:   나중에 필요할 수 있고, 그때 「원본이 어디 갔나」를 묻게 된다.
+    out = dict(manifest)
+    out["datasets"] = datasets
+    out["outputs"] = outputs
+    return out
+
+
 def dataset_keys(profile: Any) -> List[str]:
     """이 키트가 요구하는 데이터셋 계약 이름들. **정렬해 돌려준다.**"""
     if not isinstance(profile, dict):

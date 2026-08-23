@@ -118,3 +118,6 @@ data/auth.db*
 # ⚠️ 버전 관리하지 않는다 — 사람마다 다른 순간을 담고 있고,
 #   공유하면 «남의 순간» 과 비교하게 된다.
 .invariant_baseline.json
+
+# [M0] 로컬 시연 데이터 — 운영 data/ 와 다른 뿌리(scripts/run_local_demo.py)
+demo_data/
