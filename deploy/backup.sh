@@ -34,8 +34,12 @@ tar -czf "$OUT/projects.tar.gz" -C "$DATA" projects 2>/dev/null || true
     for f in "$OUT"/*.db; do
         [ -e "$f" ] || continue
         [ $first -eq 0 ] && printf ',\n'
+        # ⚠️ `sha256sum "$f"` 는 경로에 역슬래시가 있으면 **줄 앞에 \\ 를 붙인다**
+        #   (GNU coreutils 파일명 이스케이프). 해시가 `\\6525…` 가 되고,
+        #   백업과 복구가 다른 플랫폼에서 돌면 대조가 깨진다. 실측으로 잡았다.
+        # ★ 표준입력으로 넣으면 파일명이 없으므로 이 문제가 아예 없다.
         printf '    {"file": "%s", "sha256": "%s"}' \
-            "$(basename "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
+            "$(basename "$f")" "$(sha256sum < "$f" | cut -d' ' -f1)"
         first=0
     done
     printf '\n  ]\n}\n'
