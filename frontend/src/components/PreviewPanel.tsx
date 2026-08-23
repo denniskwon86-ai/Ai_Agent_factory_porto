@@ -23,7 +23,7 @@ export function ManualRenderer({ markdown }: { markdown: string }) {
     } else if (/^(\d+)\. /.test(line)) {
       elements.push(<div key={key++} className="flex gap-2 text-sm text-gray-700 my-0.5 pl-2"><span className="font-bold text-blue-600 shrink-0">{line.match(/^(\d+)\. /)![1]}.</span><span>{line.replace(/^\d+\. /, '')}</span></div>);
     } else if (line.startsWith('- ') || line.startsWith('* ')) {
-      elements.push(<div key={key++} className="flex gap-2 text-sm text-gray-700 my-0.5 pl-2"><span className="text-blue-500 shrink-0">•</span><span>{line.slice(2)}</span></div>);
+      elements.push(<div key={key++} className="flex gap-2 text-sm text-gray-700 my-0.5 pl-2"><span className="text-blue-700 shrink-0">•</span><span>{line.slice(2)}</span></div>);
     } else if (line.startsWith('**Q:') || line.startsWith('**Q :')) {
       elements.push(<p key={key++} className="text-sm font-bold text-gray-800 mt-3 mb-0.5">{line.replace(/\*\*/g, '')}</p>);
     } else if (line.startsWith('A:') || line.startsWith('A :')) {

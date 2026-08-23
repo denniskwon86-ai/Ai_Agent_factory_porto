@@ -593,7 +593,12 @@ function AppShell() {
   // 🚀 [3단 레이아웃 독립 스크롤 최적화 설계 구조 적용]
   return (
     <ErrorBoundary>
-      <div className="h-screen w-screen bg-gray-950 text-gray-100 flex flex-col font-sans overflow-hidden">
+      {/* ★★★ [사용자 결정 2026-08-23 「(나)로 진행」] **통제실은 어두운 작업면으로 유지하되
+          토큰 체계 안에 넣는다.** `afs-workbench` 가 그 범위다 — `afs.css` 의 같은 이름 절이
+          이 안에서만 회색 유틸리티를 다시 해석한다.
+          ⚠️ `afs-scope` 를 붙이지 않는다. 그것은 **라이트** 표면 계열이라 여기 오면 배경과
+            글자가 뒤집힌다(실측: 뿌리에 `afs-product-shell` 을 붙였더니 결함 26 → 28건). */}
+      <div className="afs-workbench h-screen w-screen bg-gray-950 text-gray-100 flex flex-col font-sans overflow-hidden">
         <header className="h-14 bg-gray-950/95 backdrop-blur border-b border-gray-700 flex items-center justify-between px-6 shrink-0 z-20">
           <div className="flex items-center gap-4">
             <button 

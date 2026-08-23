@@ -1328,3 +1328,71 @@
 /* [Wave H] 모달 본문을 세로로 채우는 카드. 내용이 짧아도 카드가 영역을 덮는다 —
    ⚠️ 덮지 않으면 남은 자리로 뒤 화면이 비치고, 사용자는 「덜 그려졌다」로 읽는다. */
 .afs-dialog-body > .panel.afs-fill { flex: 1 1 auto; min-height: 0; }
+
+/* ══ SW 생성기(통제실) — 어두운 작업면의 유틸리티 재해석 ═══════════════════════
+ *
+ * 사용자 결정 2026-08-23: 통제실은 **어두운 채로 두되 토큰 체계 안에 넣는다**.
+ *
+ * ## 왜 유틸리티를 «덮는가» — 변수를 갈아끼우면 표면까지 바뀐다
+ *
+ * `product-shell.css` 처럼 `--color-gray-500` 을 갈아끼우면 `text-gray-500` 뿐 아니라
+ * `bg-gray-500`·`border-gray-500` 이 **한꺼번에** 바뀐다. 통제실에서 700 단계는 글자가
+ * 아니라 **패널 배경**으로 17번 쓰인다 — 변수를 바꾸면 패널이 밝아져 화면 인상이 달라진다.
+ * 숫자 스케일은 «명도»만 말하고 «역할»을 말하지 않는다는 이 저장소의 결론 그대로다.
+ *
+ * ★ 그래서 **역할이 확실한 것만** 골라 덮는다: 글자로 쓰이는 500·600, 경계로 쓰이는
+ *   600·700·800. 배경(`bg-*`)은 건드리지 않는다.
+ *
+ * ⚠️ `text-gray-700/800/900`(7곳)은 **덮지 않는다.** 그것들은 미리보기처럼 밝은 영역
+ *   안에 있고, 밝게 뒤집으면 흰 바탕에 흰 글자가 된다. 「어두운 화면이니까 전부 밝게」는
+ *   틀린 규칙이다.
+ *
+ * 실측 근거(네 바탕 #0b0c10·#12141c·#1f2833·#2f3640 전부에서의 최저 대비):
+ *     text-gray-500  #6b7280 → 2.52   text-gray-600 #4b5563 → 1.61
+ *     border-gray-700 #2f3640 → 1.00  (패널 배경과 **같은 색**)
+ */
+.afs-workbench { color-scheme: dark; }
+
+.afs-workbench .text-gray-500,
+.afs-workbench .text-gray-600 { color: var(--wb-text-muted); }
+.afs-workbench .text-gray-400 { color: var(--wb-text-muted); }
+.afs-workbench .text-gray-300,
+.afs-workbench .text-gray-200 { color: var(--wb-text); }
+
+.afs-workbench .border-gray-600,
+.afs-workbench .border-gray-700,
+.afs-workbench .border-gray-800 { border-color: var(--wb-border); }
+
+/* 입력·선택은 **컨트롤 등급**(3:1)을 쓴다 — 경계가 «여기가 입력칸» 이라는 유일한 단서다. */
+.afs-workbench input:not([type="checkbox"]):not([type="radio"]),
+.afs-workbench textarea,
+.afs-workbench select { border-color: var(--wb-border-control); }
+
+/* ★ 밝은 경고·위험 면 위에는 어두운 글자를 얹는다(흰 글자 amber 2.13 · orange 3.58).
+ *   ⚠️ 면 색은 그대로 둔다 — 상태를 알아보는 신호는 색이고, 바꾸면 학습된 의미가 깨진다.
+ *     바꾸는 것은 **그 위의 글자**뿐이다. */
+.afs-workbench .bg-amber-500.text-white,
+.afs-workbench .bg-orange-500.text-white,
+.afs-workbench .bg-orange-600.text-white,
+.afs-workbench .bg-yellow-500.text-white { color: var(--wb-on-bright); }
+
+/* ── 투명도가 붙은 유틸리티 · 플레이스홀더 ──────────────────────────────────
+ *
+ * ⚠️ `border-green-700/50` 처럼 **투명도 수식자**가 붙은 값은 클래스 이름이 달라서 위의
+ *   재해석 규칙에 걸리지 않는다. 실측하면 어두운 면 위에서 1.13~1.32 로 사라진다.
+ *   ★ 색을 바꾸지 않는다 — **투명도만** 걷어 낸다. 색은 상태(성공·경고·위험)를 나르므로
+ *     바꾸면 의미가 깨지고, 흐린 것만이 문제이기 때문이다. */
+.afs-workbench [class*="border-"][class*="/50"],
+.afs-workbench [class*="border-"][class*="/60"],
+.afs-workbench [class*="border-"][class*="/30"] { border-color: var(--wb-border); }
+
+/* 글자에 붙은 투명도도 같다 — `text-red-400/70` 이 3.65 였다. */
+.afs-workbench [class*="text-"][class*="/70"],
+.afs-workbench [class*="text-"][class*="/80"],
+.afs-workbench [class*="text-"][class*="/90"] { opacity: 1; }
+.afs-workbench .text-red-400\/70 { color: #fca5a5; }
+
+/* ★ 플레이스홀더는 «무엇을 넣는 칸인가» 를 알리는 유일한 설명인 경우가 많다.
+ *   여기서는 「승인하려면 빈칸으로 두고 전송하세요」 — 조작 방법 그 자체다. 3.8 이었다. */
+.afs-workbench input::placeholder,
+.afs-workbench textarea::placeholder { color: var(--wb-text-muted); opacity: 1; }
