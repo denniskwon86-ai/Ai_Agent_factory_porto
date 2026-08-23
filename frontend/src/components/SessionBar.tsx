@@ -63,11 +63,18 @@ export function SessionBar() {
         <span className="state-chip warn" style={{ fontSize: 12 }}
           title="초기 비밀번호를 사용 중입니다 — 바꾸십시오.">초기 비밀번호</span>
       )}
+      {/* ⚠️ [2026-08-23] 좁은 폭에서는 **글자만 접고 아이콘을 남긴다**(`afs-bar-label`).
+          버튼 자체를 지우면 로그아웃할 방법이 화면에서 사라진다 — 접는 것과 없애는 것은 다르다.
+          `title`/`aria-label` 은 그대로 두어 무엇인지 계속 읽힌다. */}
       <button className="secondary-button" onClick={() => setConsole(true)}
-        style={{ fontSize: 12, padding: '4px 10px' }}
-        title="개인 설정과 전사 관리 — 업무 화면과 분리되어 있습니다">환경설정 · 관리자</button>
-      <button className="secondary-button" onClick={logout}
-        style={{ fontSize: 12, padding: '4px 10px' }}>로그아웃</button>
+        style={{ fontSize: 12, padding: '4px 10px' }} aria-label="환경설정 · 관리자"
+        title="개인 설정과 전사 관리 — 업무 화면과 분리되어 있습니다">
+        ⚙️ <span className="afs-bar-label">환경설정 · 관리자</span>
+      </button>
+      <button className="secondary-button" onClick={logout} aria-label="로그아웃"
+        title="로그아웃" style={{ fontSize: 12, padding: '4px 10px' }}>
+        ⏻ <span className="afs-bar-label">로그아웃</span>
+      </button>
 
       {console_ && <AdminConsolePanel me={me} onClose={() => setConsole(false)} />}
     </div>

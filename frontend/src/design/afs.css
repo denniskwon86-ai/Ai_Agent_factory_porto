@@ -1186,6 +1186,27 @@
 }
 .afs-scope .afs-topbar .afs-action:hover:not(:disabled) { background: #c7d9ff; }
 
+/* ★★★ [2026-08-23 실측] **좁은 폭에서 상단바가 넘쳐 페이지 전체에 가로 스크롤이 생겼다.**
+ *
+ *   800px 창(가용 785px)에서 좌 474 + 우 495 + 여백 = **1033px** 이 필요했다. 그 결과
+ *   문서 폭이 820px 이 되고, ☰ 전체 메뉴가 **화면 밖으로 나갔다** — 메뉴를 열 수 없다.
+ *
+ * ★ 접는 순서를 정한다: **글자 → 아이콘 순으로 버리고, 기능은 절대 버리지 않는다.**
+ *   ⚠️ 버튼을 `display:none` 으로 지우면 로그아웃·전체 메뉴에 도달할 방법이 사라진다.
+ *     접는 것과 없애는 것은 다르다.
+ *   ⚠️ 글자 크기를 줄여서 맞추지 않는다 — 12px 하한은 이 저장소가 이미 지적받은 선이다. */
+.afs-scope .afs-topbar > :first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.afs-scope .afs-topbar > :last-child { flex: 0 0 auto; }
+@media (max-width: 1200px) {
+  .afs-scope .afs-topbar { padding-inline: 14px; gap: 10px; }
+  /* ① 먼저 버튼 글자를 접는다(아이콘·툴팁은 남는다). */
+  .afs-scope .afs-topbar .afs-bar-label { display: none; }
+}
+@media (max-width: 980px) {
+  /* ② 그다음 제품명 글자를 접는다. 🏭 아이콘은 남겨 어느 제품인지 유지한다. */
+  .afs-scope .afs-topbar .afs-brand-name { display: none; }
+}
+
 /* ── 반응형(승인 시안 그대로) ──────────────────────────────────────────────── */
 @media (max-width: 1450px) {
   .afs-scope .hub-layout { grid-template-columns: 220px minmax(650px, 1fr) 280px; }
@@ -1201,7 +1222,13 @@
  *   시안을 임의로 줄이면 "디자인을 입혔다"고 말할 수 없다. 실제로 안 들어가는 폭에서만 접는다. */
 @media (max-width: 1180px) {
   .afs-scope .hub-layout { grid-template-columns: 214px minmax(0, 1fr); }
-  .afs-scope .jarvis-rail { display: none; }
+  /* ⚠️⚠️ [2026-08-23 실측] **`.hub-layout` 안쪽으로 범위를 좁힌다.**
+     종전 선택자는 `.afs-scope .jarvis-rail` 이라, 모달 셸(hub) 을 위해 만든 이 규칙이
+     **경영 홈(`enterprise-canvas`)의 자비스까지 숨겼다** — 1024px 에서 레일이 0×0 이 됐다.
+     같은 이름의 부품이 두 셸에 있으면, 한쪽을 위해 쓴 규칙이 반드시 다른 쪽을 친다.
+     ★ 경영 홈은 자기 폭 규칙(아래 `enterprise-canvas` 절)에서 3열을 유지한다. */
+  .afs-scope .hub-layout > .jarvis-rail,
+  .afs-scope .hub-layout .jarvis-rail { display: none; }
   .afs-scope .inbox-layout, .afs-scope .delivery-grid { grid-template-columns: minmax(0, 1fr); }
   .afs-scope .metric-row { grid-template-columns: repeat(2, 1fr); }
   /* 문서 동일성 값은 좁아져도 **잘리면 안 된다** — 지문이 잘리면 같은 문서인지 확인할 수 없다. */
@@ -1233,29 +1260,69 @@
 }
 
 /* ── [설계 §3.1 · §9.2] 경영 홈 Decision Canvas 의 폭 규칙 ────────────────────
-   1600+      3열 전체
-   1280~1599  좌 260 / 우 320, 중앙 유동
-   1024~1279  **Atlas(우) 를 접는다** — 셋을 다 유지하면 중앙이 읽을 수 없게 좁아지고,
-              실측에서는 아예 가로 스크롤이 생겼다(문서 1206px @ 뷰포트 1024px).
-   768~1023   좌 큐도 접고 **읽기·승인 중심** 한 열로.
-   ⚠️ 접은 열을 «없앤» 것이 아니다. 큐는 아래로 내려와 계속 보이고, Atlas 는 상단
-     «전사 브리핑»·각 화면의 Jarvis 레일에서 계속 쓸 수 있다. */
+   세 칸: ① 의사결정 큐(좌)  ② 본문(중앙)  ③ **Jarvis 레일(우)**
+
+   ★★★ [2026-08-23 실측 · 사용자 지적] **세 번째 칸이 바뀐 것을 규칙이 못 따라왔다.**
+
+   종전 규칙은 세 번째 칸이 «Atlas» 이던 시절에 쓰였고, 주석도 그렇게 적혀 있었다
+   («1024~1279 Atlas(우) 를 접는다 … 중앙 아래로 내려 전체 폭을 쓴다»). 넓은 정보판인
+   Atlas 라면 아래에 전체 폭으로 눕는 것이 말이 된다.
+
+   그런데 지금 세 번째 칸은 **세로로 긴 어두운 Jarvis 레일**이다. 같은 규칙을 물려받아
+   1279px 이하에서 «본문 아래에 전체 폭으로» 깔렸다:
+
+       뷰포트 1200 → main [x280 y72 w905 h1044] · jarvis [x13 **y1128** w1160 h784]
+
+   ★ 화면이 «깨져서 아래로 이어 붙은» 것처럼 보인다. 실제로 사용자가 그렇게 지적했다.
+
+   ## 지금 규칙 — 자비스는 **오른쪽에 남는다**
+
+       ≥1180   ① 260~280 · ② 유동 · ③ 320~360      (승인 시안 그대로)
+       1000~1179 ① 240~260 · ② 최소 380 · ③ 280~300  **3열 유지** — 좁혀서 지킨다
+       760~999   ① 위로 올리고 · ② 유동 · ③ 260~280  자비스는 여전히 오른쪽
+       ≤759     한 열 — 이 폭에서는 나란히 둘 자리가 없다
+
+   ⚠️ 「좁으니 아래로 내린다」로 되돌리지 말 것. 세로 레일을 가로로 눕히면 폭 1160px 짜리
+     어두운 띠가 되고, 그것은 «접었다»가 아니라 «깨졌다»로 읽힌다.
+   ⚠️ 접은 칸을 «없앤» 것이 아니다 — ≤759 에서도 큐와 레일은 아래에 계속 보인다. */
 .afs-scope.enterprise-canvas {
   background: var(--surface-page); min-height: calc(100vh - 72px);
   display: grid; align-items: stretch;
   grid-template-columns: minmax(260px, 280px) minmax(0, 1fr) minmax(320px, 360px);
 }
-@media (max-width: 1279px) {
-  .afs-scope.enterprise-canvas { grid-template-columns: minmax(240px, 280px) minmax(0, 1fr); }
-  /* 세 번째 열(Atlas)은 중앙 아래로 내려 **전체 폭**을 쓴다 — 지우지 않는다. */
-  .afs-scope.enterprise-canvas > :nth-child(3) { grid-column: 1 / -1; }
+@media (max-width: 1179px) {
+  /* ★ 3열을 **유지**한다. 셋을 조금씩 좁히면 900px 까지 들어간다
+     (240 + 최소 380 + 280 = 900). 자비스를 아래로 내리지 않는다. */
+  .afs-scope.enterprise-canvas {
+    grid-template-columns: minmax(240px, 260px) minmax(380px, 1fr) minmax(280px, 300px);
+  }
 }
-@media (max-width: 1023px) {
+@media (max-width: 999px) {
+  /* ⚠️ 999 에서 끊는 이유: 3열을 유지하면 본문이 **325px** 까지 줄어든다(실측 @900).
+     표와 지표가 들어가는 칸이라 그 폭에서는 읽을 수 없다. 1000px 에서 본문 440px 이
+     남는 것이 하한이다(260 + 440 + 300).
+     ★ 좌측 큐만 위로 올린다 — 큐는 **목록**이라 가로로 눕어도 읽힌다. 자비스는 오른쪽. */
+  .afs-scope.enterprise-canvas {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 280px);
+  }
+  .afs-scope.enterprise-canvas > :nth-child(1) {
+    grid-column: 1 / -1; max-height: 46vh; overflow-y: auto;
+  }
+}
+@media (max-width: 759px) {
   .afs-scope.enterprise-canvas { grid-template-columns: minmax(0, 1fr); }
   .afs-scope.enterprise-canvas > :nth-child(1),
   .afs-scope.enterprise-canvas > :nth-child(3) { grid-column: 1 / -1; }
-  /* 좌측 큐는 세로 스크롤 목록이 되면 화면을 다 먹는다 — 높이를 묶는다. */
   .afs-scope.enterprise-canvas > :nth-child(1) { max-height: 46vh; overflow-y: auto; }
+  /* ⚠️ 한 열로 눕는 폭에서도 레일이 화면을 다 먹지 않게 높이를 묶는다 —
+     묶지 않으면 830px 짜리 어두운 블록이 본문을 밀어낸다(실측 @375).
+     ⚠️ 세 번째 칸은 **래퍼 `<aside>`** 이고 레일은 그 안에 있다. 래퍼에만 높이를 걸면
+       래퍼가 `overflow: visible` 이라 레일이 그대로 삐져나온다(1차 시도가 그랬다).
+       레일 자체를 묶고, 넘치는 내용은 레일 안에서 스크롤한다. */
+  .afs-scope.enterprise-canvas > :nth-child(3),
+  .afs-scope.enterprise-canvas > :nth-child(3) > .jarvis-rail {
+    max-height: 60vh; overflow-y: auto;
+  }
 }
 
 /* [Wave H] 모달 본문을 세로로 채우는 카드. 내용이 짧아도 카드가 영역을 덮는다 —

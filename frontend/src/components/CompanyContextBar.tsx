@@ -83,10 +83,15 @@ export function CompanyContextBar() {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, position: 'relative' }}>
-      {/* CI + 제품명 */}
+      {/* CI + 제품명.
+          ⚠️ [2026-08-23 실측] 좁은 폭에서 상단바가 넘쳤다 — 좌 474 + 우 495 = **1033px** 이
+            필요한데 800px 창의 가용폭은 785px 이다. 그 결과 문서가 820px 이 되어 **페이지
+            전체에 가로 스크롤**이 생겼고, ☰ 전체 메뉴가 화면 밖으로 나갔다.
+          ★ 아이콘은 남기고 **글자만** 접는다(`afs-brand-name`) — 아이콘까지 지우면 어느
+            제품인지 사라진다. 접는 폭은 `afs.css` 의 상단바 절에서 정한다. */}
       <span style={{ fontSize: 15, fontWeight: 800, whiteSpace: 'nowrap',
         color: 'var(--bar-fg)' }}>
-        🏭 AI Factory Studio
+        🏭 <span className="afs-brand-name">AI Factory Studio</span>
       </span>
 
       {/* ⚠️ 구분자를 **글자로 그리지 않는다.** 종전 `│` 글리프는 `--bar-border`(바 바깥쪽
