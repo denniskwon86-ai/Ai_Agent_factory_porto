@@ -284,7 +284,13 @@ export function JarvisRail({
             // Enter 로 보내고 Shift+Enter 로 줄바꿈 — 키보드만으로 대화할 수 있어야 한다.
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }
           }} />
-        <button onClick={() => send(input)} disabled={busy || !input.trim()}>보내기</button>
+        {/* ⚠️ [2026-08-23] 못 누르는 버튼에는 **사유**를 붙인다(설계 §8.6). 사유가 없으면
+            사용자는 「고장」으로 읽는다 — 실제로 이 버튼은 조건이 명확한데 말하지 않았다. */}
+        <button onClick={() => send(input)} disabled={busy || !input.trim()}
+          title={busy ? '답변을 받는 중입니다 — 끝나면 다시 보낼 수 있습니다.'
+            : !input.trim() ? '질문을 입력하면 보낼 수 있습니다.' : '질문을 보냅니다 (Enter)'}>
+          보내기
+        </button>
       </div>
     </aside>
   );

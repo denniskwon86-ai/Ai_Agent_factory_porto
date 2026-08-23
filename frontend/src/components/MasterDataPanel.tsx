@@ -546,7 +546,15 @@ function CatalogView(props: any) {
             <textarea className="afs-textarea" value={typeForm.schema}
               onChange={(e) => setTypeForm({ ...typeForm, schema: e.target.value })} />
           </FormField>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          {/* ⚠️ [2026-08-23] 못 누르는 이유를 **화면에** 적는다(설계 §8.6). `title` 만으로는
+              마우스를 올려 본 사람만 알 수 있고, 키보드·터치 사용자는 영영 모른다. */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
+            {(!typeForm.id.trim() || !typeForm.name.trim()) && (
+              <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                {!typeForm.id.trim() && !typeForm.name.trim() ? '유형 ID 와 이름을 입력하십시오.'
+                  : !typeForm.id.trim() ? '유형 ID 를 입력하십시오.' : '유형 이름을 입력하십시오.'}
+              </span>
+            )}
             <button className="primary-button" disabled={!typeForm.id.trim() || !typeForm.name.trim()}
               onClick={onCreateType}>유형 만들기</button>
           </div>
