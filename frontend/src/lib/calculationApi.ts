@@ -305,6 +305,8 @@ export interface DecisionResult {
     due: string;
     evidence: Record<string, any>;
     briefing: string[];
+    /** ★ 저장된 안건 id — 이것으로 검토·발간으로 이어 간다. */
+    decision_id: string;
     [k: string]: any;
   };
   calculation: CalcResult;
@@ -323,6 +325,8 @@ export async function runPathDecision(body: {
   title: string;
   owner: string;
   due: string;
+  /** ★★★ 결정 문장 — 제목이 아니다. 「무엇을 승인·기각하는가」. */
+  question: string;
   snapshot_ids: string[];
   base_values: Record<string, number>;
   scenario_assumptions: Record<string, number>;

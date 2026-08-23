@@ -37,7 +37,7 @@ import asyncio
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.deps import (Principal, assert_identified, current_principal,
                       viewing_context, visibility_block_reason)
@@ -70,7 +70,15 @@ class ObjectRefInput(BaseModel):
 
 
 class PathCalcInput(BaseModel):
-    """★ 호출자는 **질문**만 준다. 승인·판·기준선은 아래 어디에도 없다."""
+    """★ 호출자는 **질문**만 준다. 승인·판·기준선은 아래 어디에도 없다.
+
+    ⚠️⚠️ `extra="forbid"` 다. 모르는 칸을 **조용히 무시하지 않는다** — 무시하면 통합하는
+      사람은 `relation_approvals` 나 `scope_id` 를 자기가 설정했다고 믿는다. 거부해야
+      「그건 서버가 정한다」를 배운다(`decision_control` 의 본문 모델과 같은 규약).
+    ★ 변이로 확인했다: 이 규약이 없으면 「호출자가 조직을 정하게」 하는 변경이 **등가**로
+      보인다 — 모델이 그 칸을 버리기 때문이다. 그러면 무엇이 막는지 알 수 없다."""
+
+    model_config = ConfigDict(extra="forbid")
 
     #: 무엇을 묻는가
     roots: List[ObjectRefInput]
@@ -104,6 +112,10 @@ class DecisionInput(PathCalcInput):
     title: str
     owner: str
     due: str
+    #: ★★★ **결정 문장.** 제목이 아니다 — 「무엇을 승인·기각하는가」를 한 문장으로.
+    #: ⚠️ 「검토 요청」 같은 제목만 있으면 참석자는 무엇을 결정하는지 모르고, 회의록에는
+    #:   「논의함」만 남는다(`core.decision_case.create` 가 같은 이유로 요구한다).
+    question: str = ""
     #: 시뮬레이션 기준선 — 재현 가능해야 하므로 판을 **명시**한다(「최신으로 알아서」 금지).
     snapshot_ids: List[str]
     base_values: Dict[str, float]
@@ -200,7 +212,11 @@ def _calculate(req: PathCalcInput, p: Principal) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc))
     except pc.PathCalculationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    return {"evidence": evidence, "result": result}
+    #: ★ 문맥도 함께 돌려준다 — 안건의 조직은 **인스턴스가 정한다**. 호출부가 다시
+    #:   유도하면 두 곳이 갈라지고, 갈린 날 안건이 남의 부서로 들어간다.
+    return {"evidence": evidence, "result": result,
+            "ctx": {"tenant_id": tenant_id, "entity_mode": entity_mode,
+                    "scope_node_id": scope_node_id}}
 
 
 class ApprovalInput(BaseModel):
@@ -460,6 +476,49 @@ async def calculate_path(req: PathCalcInput, p: Principal = Depends(current_prin
     return {"status": "success", "data": got["result"]}
 
 
+def _decision_sections(pkg, base, scenario, baseline, snapshots) -> Dict[str, Any]:
+    """계산 패키지를 **안건 섹션 모음**으로 옮긴다.
+
+    ## ⚠️⚠️ 「Decision Package」가 두 개다
+
+    `core.decision_package` 는 **계산 비교 패키지**(title·question·views·evidence)를
+    만들고, `core.decision_case` 는 **보고서 섹션 모음**(executive_brief·baseline·
+    options·financial_impact…)을 저장한다. 이름이 같고 모양이 다르다.
+
+    ★★★ **계산이 실제로 주는 것만 채운다.** 민감도·되돌릴 수 있는가·규정 리스크는
+      계산이 답하지 않는다 — 비워 두면 `_sections` 가 `missing` 으로 표시하고, 검토자는
+      「아직 안 채웠다」를 본다. 채워 넣으면 그 순간 **검토된 척**이 된다.
+
+    ⚠️ 대안을 지어내지 않는다. 「기준」과 「시나리오」 둘은 계산이 실제로 비교한 것이다.
+    """
+    from core import calc_graph as cg
+
+    rows = cg.compare(base, scenario)
+    money = [r for r in rows if r.get("unit") == "원"]
+    return {
+        #: 사람이 먼저 읽는 한 페이지 — 브리핑 문장 그대로.
+        "executive_brief": list(pkg.get("briefing") or []),
+        "baseline": {
+            "baseline_id": str(getattr(baseline, "build_id", "") or ""),
+            "baseline_fingerprint": base.baseline_fingerprint,
+            "as_of": str(getattr(baseline, "as_of", "") or ""),
+            "data_kind": base.data_kind,
+            #: ★ 어느 판 위에 섰는지 — 계산이 읽은 그 판이다.
+            "snapshot_ids": list(snapshots),
+        },
+        #: ★ 「기준 유지」와 「시나리오 적용」 — 계산이 **실제로 비교한** 둘이다.
+        "options": {
+            "compared": rows,
+            "assumptions": dict(scenario.assumptions),
+        },
+        #: ★ 같은 표에서 **금액 행만** 고른 것이다. 새 숫자를 만들지 않는다.
+        #: ⚠️ 비워 두면 「손익을 안 봤다」로 읽히는데, 실은 위 표 안에 있다.
+        "financial_impact": {"compared": money} if money else None,
+        #: ⚠️ 아래는 **계산이 답하지 않는다.** 비워 둔다 — 채우면 검토된 척이 된다.
+        #:   민감도 · 되돌릴 수 있는가 · 규정·안전·품질 리스크 · 반대 의견 · 승인 조건
+    }
+
+
 @router.post("/path/decision")
 async def calculate_and_decide(req: DecisionInput,
                                p: Principal = Depends(current_principal)):
@@ -490,6 +549,33 @@ async def calculate_and_decide(req: DecisionInput,
         raise HTTPException(status_code=422, detail=str(exc))
     except dp.DecisionError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+    #: ★★★ [M0-4] **저장한다.** 저장하지 않으면 발간할 것이 없고, 「HTML 보고서까지
+    #:   완주」가 성립하지 않는다 — 화면에 잠깐 떴다 사라지는 것은 안건이 아니다.
+    #: ⚠️ 결정 문장이 없으면 만들지 않는다. 제목으로 대신하지 않는다(같은 이유로
+    #:   `decision_case.create` 도 요구한다).
+    from core.decision_case import DecisionCaseError, decision_case
+
+    #: ⚠️ **여기서 결정 문장을 검사하지 않는다.** `decision_case.create` 가 이미 막고,
+    #:   같은 판정을 두 겹으로 두면 어느 것이 실제로 막는지 알 수 없다 — 변이로 확인했다
+    #:   (이 자리를 지워도 실패 0건이었다). 코어의 예외를 아래에서 422 로 옮긴다.
+    question = str(req.question or "").strip()
+    #: ⚠️ 안건의 조직은 **인스턴스의 조직**이다. 호출자가 적어 보내면 남의 부서 이름으로
+    #:   안건을 만들어 넣을 수 있다(`decision_control` 이 같은 자리를 막는다).
+    try:
+        saved = await asyncio.to_thread(
+            decision_case.create, question=question, created_by=p.user_id or "",
+            baseline_id=str(getattr(baseline, "build_id", "") or ""),
+            scope_id=got["ctx"]["scope_node_id"],
+            package=_decision_sections(
+                {**pkg.public(), "briefing": dp.briefing_lines(pkg)},
+                base, scenario, baseline, req.snapshot_ids),
+            evidence=pkg.evidence, due_at=req.due, tenant_id=got["ctx"]["tenant_id"])
+    except DecisionCaseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     return {"status": "success",
-            "data": {"decision": {**pkg.public(), "briefing": dp.briefing_lines(pkg)},
+            "data": {"decision": {**pkg.public(), "briefing": dp.briefing_lines(pkg),
+                                  #: ★ 이 id 로 발간·검토·회의로 이어 간다.
+                                  "decision_id": saved["decision_id"]},
                      "calculation": result}}

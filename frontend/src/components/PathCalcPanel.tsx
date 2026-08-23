@@ -139,6 +139,9 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
   const [baseValues, setBaseValues] = useState<Record<string, string>>({});
   const [drivers, setDrivers] = useState<Record<string, string>>({});
   const [title, setTitle] = useState('');
+  //: ★★★ **결정 문장은 제목이 아니다.** 「검토 요청」 같은 제목만 있으면 참석자는
+  //:   무엇을 결정하는지 모르고, 회의록에는 「논의함」만 남는다.
+  const [question, setQuestion] = useState('');
   const [owner, setOwner] = useState('');
   const [due, setDue] = useState('');
   const [decision, setDecision] = useState<DecisionResult | null>(null);
@@ -275,7 +278,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
           ...(reservedZero ? { reserved_quantity_zero: true } : {}),
           ...(dateOnlyMidnight ? { date_only_rule: DATE_ONLY_RULE } : {}),
         },
-        title, owner, due,
+        title, owner, due, question,
         snapshot_ids: usedSnapshots,
         base_values: base,
         scenario_assumptions: scen,
@@ -288,8 +291,8 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const canDecide = !!title.trim() && !!owner.trim() && !!due.trim()
-    && busy !== 'decide';
+  const canDecide = !!title.trim() && !!question.trim() && !!owner.trim()
+    && !!due.trim() && busy !== 'decide';
 
   const canFind = !!rootKey && busy !== 'find';
   const canRun = !!pathFp && !!instanceId.trim() && busy !== 'run';
@@ -581,6 +584,14 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                     </div>
                     <div>
                       <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
+                        결정 문장 <span style={{ color: '#b91c1c' }}>*</span>
+                      </label>
+                      <input value={question} onChange={(e) => setQuestion(e.target.value)}
+                        placeholder="무엇을 승인·기각하는가 (제목이 아닙니다)"
+                        style={{ padding: 4, fontSize: 13, width: 340 }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
                         책임자 <span style={{ color: '#b91c1c' }}>*</span>
                       </label>
                       <input value={owner} onChange={(e) => setOwner(e.target.value)}
@@ -606,7 +617,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                     </button>
                     {!canDecide && busy !== 'decide' && (
                       <span style={{ fontSize: 13, color: '#6b7280' }}>
-                        제목·책임자·기한이 필요합니다.
+                        제목·결정 문장·책임자·기한이 필요합니다.
                       </span>
                     )}
                   </div>
@@ -627,6 +638,13 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                         계산 결속 결과 지문{' '}
                         {String(decision.decision.evidence?.calculation?.result_fingerprint
                           || '(없음)').slice(0, 16)}…
+                      </div>
+                      {/* ★ 저장된 안건이다 — 어디서 이어 가는지 말해 준다. */}
+                      <div style={{ fontSize: 13, marginTop: 6 }}>
+                        안건 <b>{decision.decision.decision_id}</b> 로 저장했습니다.
+                        <div style={{ color: '#6b7280', fontSize: 12 }}>
+                          「협업·의사결정·발간」 화면에서 검토 요청·발간으로 이어 갑니다.
+                        </div>
                       </div>
                     </div>
                   )}

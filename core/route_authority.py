@@ -164,6 +164,8 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     # ⚠️ 이 표는 「이 사람이 계산을 돌릴 수 있는가」만 답한다. 「이 인스턴스를 읽을 수
     #   있는가」는 `_instance_or_404` 가, 「이 경로가 보이는가」는 `app_policy` 가 답한다.
     "POST /api/v1/calculation/path": (PROJECT_RUN,),
+    # ★ 이제 **안건을 저장한다** — 만들기이자 돌리기다. 둘 다 member 권한이므로
+    #   `PROJECT_RUN` 하나로 충분하다(`PROJECT_CREATE` 도 member 가 갖는다).
     "POST /api/v1/calculation/path/decision": (PROJECT_RUN,),
     # ★★★ 실행 승인은 **시스템 관리자만**. 「이 산식으로 만든 숫자를 회의에 올려도 되는가」
     #   를 정하는 일이고, 되돌려도 이미 그 숫자를 본 사람이 있다.

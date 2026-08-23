@@ -261,6 +261,7 @@ def _decision_body(env, **kw):
     snaps = [s["snapshot_id"] for s in env["store"].list_snapshots(env["instance_id"])
              if s["state"] == m.DEMO_CERTIFIED]
     body = _body(env, title="구매 지연 영향", owner=ACTOR, due="2026-07-01",
+                 question="구매 지연 30일을 감수하고 현 계획을 유지할 것인가",
                  snapshot_ids=sorted(snaps),
                  base_values={"production_qty": 100.0, "ending_inventory": 20.0,
                               "purchase_payment": 40.0, "ending_cash": 50.0,
@@ -368,22 +369,26 @@ def test_기준선_봉인이_없으면_계산하지_않는다(env, monkeypatch):
 # ── ② 호출자가 넣을 수 없는 것들 ──────────────────────────────────────────
 
 def test_호출자는_승인_판_기준선_문맥을_넣을_수_없다(env, monkeypatch):
-    """★★★ 이 라우트 설계의 전부다. **넣어도 무시된다** — 무시되는 것으로 끝나지 않고,
-    서버가 파생한 값이 실제로 쓰였는지까지 본다."""
-    _ready(env, monkeypatch)
-    body = _body(env, relation_ids=[], relation_approvals={"REL_X": "evt_forged"},
-                 sealed_snapshots={"INV-01": "ds_남의것"}, baseline_id="bl_남의것",
-                 tenant_id="tenant_남의것", entity_mode="VIRTUAL",
-                 scope_node_id="plant_남의것", path_model_version="0.0.1")
-    got = _data(_client(env).post("/api/v1/calculation/path", json=body))
+    """★★★ 이 라우트 설계의 전부다 — 그 칸들은 **아예 받지 않는다.**
 
+    ⚠️⚠️ 종전에는 「넣어도 무시된다」였다. 무시는 나쁜 답이다 — 통합하는 사람은 자기가
+      승인을 설정했다고 믿는다. 이제 **422 로 거부**하고, 그래야 「그건 서버가 정한다」를
+      배운다."""
+    _ready(env, monkeypatch)
+    for extra in ({"relation_approvals": {"REL_X": "evt_forged"}},
+                  {"sealed_snapshots": {"INV-01": "ds_남의것"}},
+                  {"baseline_id": "bl_남의것"},
+                  {"tenant_id": "tenant_남의것"},
+                  {"scope_node_id": "plant_남의것"},
+                  {"path_model_version": "0.0.1"}):
+        res = _client(env).post("/api/v1/calculation/path", json=_body(env, **extra))
+        assert res.status_code == 422, f"{extra} 를 받아 버렸다: {res.status_code}"
+
+    #: ★ 그리고 질문만 보내면 서버가 파생한 값으로 실제로 계산된다.
+    got = _data(_client(env).post("/api/v1/calculation/path", json=_body(env)))
     assert got["status"] == pc.COMPLETE, got.get("blocked")
-    #: ★ 관계는 경로에서 나왔다 — 빈 목록을 보냈는데도 셋이 요구된다.
     assert len(got["required_relation_ids"]) == len(_CHAIN)
-    #: ★ 판은 저장소 인증판이다.
-    assert "ds_남의것" not in set(got["used_snapshots"].values())
-    #: ★ 판 버전은 계산기 상수다.
-    assert got["path_model_version"] != "0.0.1"
+    assert got["path_model_version"]
 
 
 def test_봉인된_가정은_호출자_값이_이기지_못한다(env, monkeypatch):
@@ -1247,3 +1252,106 @@ def test_초기화도_같은_경계를_쓴다(env, isolated_side_stores):
     c = _client(env)
     assert c.get(f"/api/v1/calculation/reset/plan?instance_id={other['instance_id']}"
                  ).status_code in (403, 404)
+
+
+# ── ⑨ [M0-4] 안건이 **저장된다** — 저장하지 않으면 발간할 것이 없다 ────────
+
+def test_안건이_저장되어_다시_찾을_수_있다(env, monkeypatch, isolated_side_stores):
+    """★★★ [M0-4] 화면에 잠깐 떴다 사라지는 것은 안건이 아니다.
+
+    ⚠️ 종전에는 `/path/decision` 이 패키지를 **돌려주기만** 했다 — 그래서 「HTML 보고서까지
+      완주」가 성립하지 않았다. 발간할 대상이 없었기 때문이다."""
+    from core.decision_case import decision_case
+
+    _ready(env, monkeypatch)
+    got = _data(_client(env).post("/api/v1/calculation/path/decision",
+                                  json=_decision_body(env)))
+    did = got["decision"]["decision_id"]
+    assert did, "안건 id 가 없다 — 저장되지 않았다"
+
+    #: ★ 저장소에서 실제로 다시 나오는가 — 응답만 보고 끝내지 않는다.
+    row = decision_case.get(did, viewer_scopes=None)
+    assert row, "저장했다는데 다시 찾을 수 없다"
+    assert row["scope_id"] == env["scope"], "안건의 조직이 인스턴스와 다르다"
+    #: ★★★ 계산 결속이 **저장된 근거에도** 실려 있다 — 원장·발간까지 따라간다.
+    assert row["evidence"]["calculation"]["result_fingerprint"] == \
+        got["calculation"]["result_fingerprint"]
+
+
+def test_결정_문장_없이는_안건을_만들지_않는다(env, monkeypatch, isolated_side_stores):
+    """⚠️ 「검토 요청」 같은 제목만 있으면 참석자는 무엇을 결정하는지 모르고, 회의록에는
+    「논의함」만 남는다."""
+    _ready(env, monkeypatch)
+    body = _decision_body(env)
+    body["question"] = "   "
+    res = _client(env).post("/api/v1/calculation/path/decision", json=body)
+    assert res.status_code == 422, res.text[:200]
+    assert "결정 문장" in res.text
+
+
+def test_안건의_조직은_인스턴스가_정한다(env, monkeypatch, isolated_side_stores):
+    """★★★ 호출자가 조직을 적어 보내면 **남의 부서 이름으로 안건을 만들어 넣을 수** 있다.
+
+    ⚠️ `decision_control` 이 같은 자리를 막는다 — 가시성을 막아 놓고 이 입구로 들어오는
+      것을 허용하면 막은 의미가 없다."""
+    from core.decision_case import decision_case
+
+    _ready(env, monkeypatch)
+    body = _decision_body(env)
+    body["scope_id"] = "plant-남의공장"
+    #: ★ 조용히 무시하지 않고 **거부한다** — 무시하면 「내가 조직을 정했다」고 믿는다.
+    res = _client(env).post("/api/v1/calculation/path/decision", json=body)
+    assert res.status_code == 422, res.text[:200]
+
+    #: 그리고 정상 요청의 안건은 **인스턴스의 조직**으로 들어간다.
+    got = _data(_client(env).post("/api/v1/calculation/path/decision",
+                                  json=_decision_body(env)))
+    row = decision_case.get(got["decision"]["decision_id"], viewer_scopes=None)
+    assert row["scope_id"] == env["scope"]
+
+
+# ── ⑩ [M0-4] 계산 → 안건 → 발간 문서까지 이어진다 ─────────────────────────
+
+def test_계산에서_발간_문서까지_이어진다(env, monkeypatch, isolated_side_stores):
+    """★★★ [M0-4] **「회사 선택부터 보고서까지」의 마지막 고리.**
+
+    계산 결과가 안건으로 저장되고, 그 안건을 원천으로 발간 문서가 만들어진다.
+    ⚠️ 서버는 **구조화 문서**까지 만든다 — HTML 은 화면이 그린다. 여기서 증명하는 것은
+      「실을 것이 실제로 있다」까지다."""
+    from core.decision_case import decision_case
+    from core import publication as pub
+
+    _ready(env, monkeypatch)
+    made = _data(_client(env).post("/api/v1/calculation/path/decision",
+                                   json=_decision_body(env)))
+    did = made["decision"]["decision_id"]
+
+    #: ① 안건을 원천으로 발간 초안을 만든다.
+    draft = pub.publication.create(
+        title="구매 지연 영향 보고", created_by=ACTOR,
+        source_type=pub.SOURCE_DECISION, source_id=did,
+        scope_id=env["scope"], tenant_id=env["tenant"])
+
+    #: ② 렌더 — 원천에서 실을 것을 뽑는다.
+    rendered = pub.publication.render(draft["publication_id"], ACTOR, viewer_scopes=None)
+    #: ⚠️ `render` 는 **발간물 레코드**를 돌려준다 — 문서는 현재 버전 안에 있다.
+    #:   반환값을 문서로 착각하면 섹션이 0개로 보이고, 「실을 것이 없다」로 오독한다.
+    doc = rendered["current_version"]["document"]
+    keys = {x["key"] for x in (doc.get("sections") or [])}
+
+    #: ★ 계산이 채운 섹션이 실제로 실렸다.
+    assert {"executive_brief", "baseline", "options"} <= keys, keys
+    #: ★★★ 요약이 **계산이 낸 브리핑 그대로**인가 — 지어낸 문장이면 안 된다.
+    brief = next(x["value"] for x in doc["sections"] if x["key"] == "executive_brief")
+    assert brief == made["decision"]["briefing"], "발간 요약이 안건 브리핑과 다르다"
+    assert len(brief) > 1, "요약이 한 줄뿐이다 — 지어낸 문장일 수 있다"
+    #: ★★★ 그리고 **근거 지문**이 발간본에 남는다 — 발간본과 원천이 같은 것을 봤는지
+    #:   나중에 확인할 수 있는 유일한 방법이다.
+    assert doc["evidence"]["source_id"] == did
+    assert doc["evidence"]["source_evidence_hash"]
+
+    #: ⚠️ 계산이 답하지 않는 것은 **비어 있어야 한다** — 채워져 있으면 검토된 척이다.
+    src = decision_case.get(did, viewer_scopes=None)
+    for absent in ("sensitivity", "reversible", "compliance_risk", "dissent"):
+        assert not (src["package"] or {}).get(absent), \
+            f"계산이 답하지 않는 «{absent}» 가 채워져 있다"
