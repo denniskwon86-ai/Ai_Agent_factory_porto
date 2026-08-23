@@ -50,20 +50,20 @@ function ImpactPath({ from, to, pick }: {
     //:   서로 다른 기준선을 말한다.
   }, [from, to, pick.instanceId, pick.snapshotIds.join(',')]);
 
-  if (err) return <div style={{ fontSize: 13, color: '#b91c1c' }}>{err}</div>;
-  if (!data) return <div style={{ fontSize: 13, color: '#6b7280' }}>경로 확인 중…</div>;
+  if (err) return <div style={{ fontSize: 13, color: 'var(--state-error-fg)' }}>{err}</div>;
+  if (!data) return <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>경로 확인 중…</div>;
 
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
         {(data.path || []).map((n: any, i: number) => (
           <span key={n.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {i > 0 && <span style={{ color: '#9ca3af' }}>→</span>}
+            {i > 0 && <span style={{ color: 'var(--surface-text-faint)' }}>→</span>}
             <span style={{
               padding: '4px 10px', borderRadius: 14, fontSize: 13,
               // ★ 근거가 있는 칸과 없는 칸을 **색만이 아니라 기호로도** 나눈다.
-              background: n.snapshot_id ? '#ecfdf5' : '#fef3c7',
-              border: `1px solid ${n.snapshot_id ? '#6ee7b7' : '#fcd34d'}`,
+              background: n.snapshot_id ? 'var(--state-success-bg)' : 'var(--state-warn-bg)',
+              border: `1px solid ${n.snapshot_id ? 'var(--state-success-fg)' : 'var(--state-warn-fg)'}`,
             }}>
               {n.snapshot_id ? '●' : '○'} {n.label}
             </span>
@@ -74,18 +74,18 @@ function ImpactPath({ from, to, pick }: {
           섞으면 고르지도 않은 사용자에게 「근거가 없다」고 말하게 되고, 같은 화면
           아래의 안건은 그 판을 근거로 쓴다 — 한 화면에 두 답이 뜬다. */}
       {!data.evidence_checked ? (
-        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 6 }}>
           아래에서 기준선을 고르면 각 단계가 어느 데이터 판에 서 있는지 표시합니다.
         </div>
       ) : (data.missing_steps || []).length > 0 ? (
-        <div style={{ fontSize: 12, color: '#b45309', marginTop: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--state-warn-fg)', marginTop: 6 }}>
           {/* ★ 계약키가 아니라 **사람이 읽는 단계 이름**으로 말한다(설계 §12). */}
           ⚠️ 아직 근거가 없는 단계:{' '}
           {data.missing_steps.map((s: any) => s.label).join(' · ')} — 이 경로는 아직 다
           설명되지 않습니다.
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: '#15803d', marginTop: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--state-success-fg)', marginTop: 6 }}>
           이 경로의 모든 단계가 고른 기준선 위에 서 있습니다.
         </div>
       )}
@@ -155,7 +155,7 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
   const field = (k: keyof typeof form, ph: string, flex = 1) => (
     <input value={form[k]} placeholder={ph}
       onChange={(e) => setForm({ ...form, [k]: e.target.value })}
-      style={{ flex, padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14 }} />
+      style={{ flex, padding: '8px 10px', border: '1px solid var(--surface-border)', borderRadius: 6, fontSize: 14 }} />
   );
 
   return (
@@ -165,7 +165,9 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
         <span>숫자에서 «누가 무엇을 언제» 까지 — 근거의 계보를 함께 남깁니다</span>
         <div className="bar-actions">
           {busy && <span className="busy">만드는 중…</span>}
-          <button onClick={onClose}>닫기</button>
+          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
         </div>
       </div>
 
@@ -183,7 +185,7 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setForm({ ...form, [side]: e.target.value })}
                   style={{
                     display: 'block', marginTop: 4, padding: '6px 8px',
-                    border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14,
+                    border: '1px solid var(--surface-border)', borderRadius: 6, fontSize: 14,
                   }}>
                   {CHAIN.map((n) => <option key={n.key} value={n.key}>{n.label}</option>)}
                 </select>
@@ -204,49 +206,49 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
           <h4 style={{ margin: '12px 0 8px', fontSize: 15 }}>가정</h4>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             {DRIVER_FIELDS.map((d) => (
-              <label key={d.key} style={{ flex: 1, fontSize: 13, color: '#374151' }}>
-                {d.label} <span style={{ color: '#6b7280' }}>({d.unit})</span>
+              <label key={d.key} style={{ flex: 1, fontSize: 13, color: 'var(--surface-text)' }}>
+                {d.label} <span style={{ color: 'var(--surface-text-muted)' }}>({d.unit})</span>
                 <input value={drivers[d.key] || ''} inputMode="decimal" placeholder="0"
                   onChange={(e) => setDrivers({ ...drivers, [d.key]: e.target.value })}
                   style={{
                     display: 'block', width: '100%', marginTop: 4, padding: '8px 10px',
-                    border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14,
+                    border: '1px solid var(--surface-border)', borderRadius: 6, fontSize: 14,
                   }} />
                 {/* * 이 숫자가 무엇을 움직이는지 옆에 적는다. */}
-                <span style={{ fontSize: 12, color: '#6b7280' }}>{d.hint}</span>
+                <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>{d.hint}</span>
               </label>
             ))}
           </div>
 
           {/* ★★★ 막힌 이유를 **누르기 전에** 말한다. */}
           {blocked && (
-            <div style={{ fontSize: 13, color: '#b45309', marginBottom: 8 }}>{blocked}</div>
+            <div style={{ fontSize: 13, color: 'var(--state-warn-fg)', marginBottom: 8 }}>{blocked}</div>
           )}
           <button onClick={run} disabled={busy || !!blocked} style={{
             padding: '9px 20px', borderRadius: 6, fontSize: 14,
-            border: `1px solid ${blocked ? '#d1d5db' : '#2563eb'}`,
-            background: blocked ? '#f3f4f6' : '#2563eb',
-            color: blocked ? '#9ca3af' : '#fff',
+            border: `1px solid ${blocked ? 'var(--surface-border)' : 'var(--action-primary-bg)'}`,
+            background: blocked ? 'var(--surface-sunken)' : 'var(--action-primary-bg)',
+            color: blocked ? 'var(--surface-text-faint)' : '#fff',
             cursor: busy || blocked ? 'default' : 'pointer',
           }}>{busy ? '만드는 중…' : '안건 만들기'}</button>
 
           {error && (
             <div style={{
-              marginTop: 12, padding: '10px 12px', background: '#fef2f2',
-              border: '1px solid #fca5a5', borderRadius: 6, fontSize: 14, color: '#991b1b',
+              marginTop: 12, padding: '10px 12px', background: 'var(--state-error-bg)',
+              border: '1px solid var(--state-error-fg)', borderRadius: 6, fontSize: 14, color: 'var(--state-error-fg)',
             }}>{error}</div>
           )}
 
           {pkg && (
             <div style={{ marginTop: 20 }}>
               <div style={{
-                padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d',
+                padding: '8px 12px', background: 'var(--state-warn-bg)', border: '1px solid var(--state-warn-fg)',
                 borderRadius: 6, fontSize: 13, marginBottom: 12,
               }}>{pkg.display_label}</div>
 
               <h4 style={{ margin: '0 0 4px', fontSize: 16 }}>{pkg.title}</h4>
               <div style={{ fontSize: 14, marginBottom: 12 }}>{pkg.question}</div>
-              <div style={{ fontSize: 13, color: '#374151', marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: 'var(--surface-text)', marginBottom: 16 }}>
                 실행 책임자 <strong>{pkg.owner}</strong> · 기한 <strong>{pkg.due}</strong>
               </div>
 
@@ -254,7 +256,7 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
               {(pkg.views || []).map((v: any) => (
                 <div key={v.view} style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{v.view}</div>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
+                  <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginBottom: 4 }}>
                     {v.question}
                   </div>
                   <ul style={{ paddingLeft: 18, margin: 0 }}>
@@ -264,7 +266,7 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
                         {r.unit}
                         <span style={{
                           marginLeft: 8,
-                          color: r.delta < 0 ? '#b91c1c' : r.delta > 0 ? '#15803d' : '#6b7280',
+                          color: r.delta < 0 ? 'var(--state-error-fg)' : r.delta > 0 ? 'var(--state-success-fg)' : 'var(--surface-text-muted)',
                         }}>
                           {r.delta > 0 ? '+' : ''}{r.delta.toLocaleString()}
                           {r.delta_pct !== null && ` (${r.delta_pct > 0 ? '+' : ''}${r.delta_pct}%)`}
@@ -277,12 +279,12 @@ export function DecisionPanel({ onClose }: { onClose: () => void }) {
 
               <h4 style={{ margin: '16px 0 6px', fontSize: 15 }}>경영 브리핑</h4>
               <pre style={{
-                background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6,
+                background: 'var(--surface-raised)', border: '1px solid var(--surface-border)', borderRadius: 6,
                 padding: 12, fontSize: 13, whiteSpace: 'pre-wrap', margin: 0,
                 fontFamily: 'inherit',
               }}>{(pkg.briefing || []).join('\n')}</pre>
 
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 10 }}>
+              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 10 }}>
                 근거: 기준선 {String(pkg.evidence?.baseline_fingerprint || '').slice(0, 12)}
                 {' · '}산식 {pkg.evidence?.calc_version}
                 {' · '}판 {(pkg.evidence?.snapshot_ids || []).length}개

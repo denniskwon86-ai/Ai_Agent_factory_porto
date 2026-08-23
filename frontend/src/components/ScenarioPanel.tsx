@@ -76,7 +76,9 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
         <span>고정된 기준선 위에서만 계산합니다 — 같은 입력이면 같은 답입니다</span>
         <div className="bar-actions">
           {busy && <span className="busy">계산 중…</span>}
-          <button onClick={onClose}>닫기</button>
+          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
         </div>
       </div>
 
@@ -95,27 +97,27 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
           }}>
             {DRIVERS.map((d) => (
               <label key={d.key} style={{ fontSize: 13 }}>
-                {d.label} <span style={{ color: '#6b7280' }}>({d.unit})</span>
+                {d.label} <span style={{ color: 'var(--surface-text-muted)' }}>({d.unit})</span>
                 <input value={drivers[d.key] || ''} inputMode="decimal" placeholder="0"
                   onChange={(e) => setDrivers({ ...drivers, [d.key]: e.target.value })}
                   style={{
                     width: '100%', marginTop: 4, padding: '6px 8px',
-                    border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14,
+                    border: '1px solid var(--surface-border)', borderRadius: 6, fontSize: 14,
                   }} />
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{d.hint}</div>
+                <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 2 }}>{d.hint}</div>
               </label>
             ))}
           </div>
 
           <button onClick={run} disabled={busy} style={{
-            padding: '9px 20px', border: '1px solid #2563eb', background: '#2563eb',
+            padding: '9px 20px', border: '1px solid var(--action-primary-bg)', background: 'var(--action-primary-bg)',
             color: '#fff', borderRadius: 6, cursor: busy ? 'default' : 'pointer', fontSize: 14,
           }}>{busy ? '계산 중…' : '시뮬레이션 실행'}</button>
 
           {error && (
             <div style={{
-              marginTop: 12, padding: '10px 12px', background: '#fef2f2',
-              border: '1px solid #fca5a5', borderRadius: 6, fontSize: 14, color: '#991b1b',
+              marginTop: 12, padding: '10px 12px', background: 'var(--state-error-bg)',
+              border: '1px solid var(--state-error-fg)', borderRadius: 6, fontSize: 14, color: 'var(--state-error-fg)',
             }}>{error}</div>
           )}
 
@@ -123,18 +125,18 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
             <div style={{ marginTop: 20 }}>
               {/* ★★★ 성격 표시를 결과 **바로 위**에 둔다 — 빠지면 이 숫자가 실적으로 읽힌다. */}
               <div style={{
-                padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d',
+                padding: '8px 12px', background: 'var(--state-warn-bg)', border: '1px solid var(--state-warn-fg)',
                 borderRadius: 6, fontSize: 13, marginBottom: 10,
               }}>
                 {result.baseline?.display_label || '성격을 알 수 없는 기준선입니다'}
-                <span style={{ color: '#6b7280', marginLeft: 8 }}>
+                <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8 }}>
                   기준시점 {result.baseline?.as_of?.slice(0, 16).replace('T', ' ') || '없음'}
                 </span>
               </div>
 
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr style={{ borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>
+                  <tr style={{ borderBottom: '2px solid var(--surface-border)', textAlign: 'left' }}>
                     <th style={{ padding: 8, fontSize: 13 }}>결과</th>
                     <th style={{ padding: 8, fontSize: 13, textAlign: 'right' }}>기준</th>
                     <th style={{ padding: 8, fontSize: 13, textAlign: 'right' }}>시나리오</th>
@@ -143,9 +145,9 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
                 </thead>
                 <tbody>
                   {(result.compare || []).map((r: any) => (
-                    <tr key={r.key} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                    <tr key={r.key} style={{ borderBottom: '1px solid var(--surface-border)' }}>
                       <td style={{ padding: 8, fontSize: 14 }}>
-                        {r.label} <span style={{ color: '#6b7280', fontSize: 12 }}>{r.unit}</span>
+                        {r.label} <span style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>{r.unit}</span>
                       </td>
                       <td style={{ padding: 8, fontSize: 14, textAlign: 'right' }}>
                         {r.base.toLocaleString()}
@@ -155,12 +157,12 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
                       </td>
                       <td style={{
                         padding: 8, fontSize: 14, textAlign: 'right',
-                        color: r.delta < 0 ? '#b91c1c' : r.delta > 0 ? '#15803d' : '#6b7280',
+                        color: r.delta < 0 ? 'var(--state-error-fg)' : r.delta > 0 ? 'var(--state-success-fg)' : 'var(--surface-text-muted)',
                       }}>
                         {r.delta > 0 ? '+' : ''}{r.delta.toLocaleString()}
                         {/* ★ 비율은 값 **옆에** 작게 — 비율만 크게 두면 작은 기준값에서
                             실제 규모보다 크게 읽힌다. 기준이 0이면 비율은 없다. */}
-                        <span style={{ color: '#6b7280', fontSize: 12, marginLeft: 6 }}>
+                        <span style={{ color: 'var(--surface-text-muted)', fontSize: 12, marginLeft: 6 }}>
                           {r.delta_pct === null ? '비율 없음' : `${r.delta_pct > 0 ? '+' : ''}${r.delta_pct}%`}
                         </span>
                       </td>
@@ -169,7 +171,7 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
                 </tbody>
               </table>
 
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 10 }}>
+              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 10 }}>
                 {/* ★★★ 계보를 화면에 남긴다 — 「이 숫자는 무엇으로 만들었나」에
                     다음 회의에서 답할 수 있어야 한다. */}
                 산식 {result.scenario?.calc_version} · 기준선 지문{' '}

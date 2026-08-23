@@ -28,10 +28,10 @@ import {
 // ⚠️ 색만으로 구분하지 않는다(§12) — 이름표와 기호를 함께 단다.
 
 const GATE_VIEW: Record<GateState, { label: string; mark: string; tone: string }> = {
-  READY:   { label: '준비됨',        mark: '●', tone: '#15803d' },
-  NOT_YET: { label: '아직 안 함',    mark: '◐', tone: '#b45309' },
-  FAILED:  { label: '확인하지 못함', mark: '⚠', tone: '#b91c1c' },
-  UNKNOWN: { label: '판정 안 함',    mark: '○', tone: '#6b7280' },
+  READY:   { label: '준비됨',        mark: '●', tone: 'var(--state-success-fg)' },
+  NOT_YET: { label: '아직 안 함',    mark: '◐', tone: 'var(--state-warn-fg)' },
+  FAILED:  { label: '확인하지 못함', mark: '⚠', tone: 'var(--state-error-fg)' },
+  UNKNOWN: { label: '판정 안 함',    mark: '○', tone: 'var(--surface-text-muted)' },
 };
 
 const GATE_LABEL: Record<string, string> = {
@@ -54,12 +54,12 @@ function Err({ error }: { error: CalculationError }) {
     : '';
   return (
     <div style={{
-      padding: 12, border: '1px solid #fca5a5', borderRadius: 6,
-      background: '#fef2f2', fontSize: 14, marginBottom: 12,
+      padding: 12, border: '1px solid var(--state-error-fg)', borderRadius: 6,
+      background: 'var(--state-error-bg)', fontSize: 14, marginBottom: 12,
     }}>
-      <strong style={{ color: '#b91c1c' }}>진행하지 못했습니다 ({error.status})</strong>
+      <strong style={{ color: 'var(--state-error-fg)' }}>진행하지 못했습니다 ({error.status})</strong>
       <div style={{ marginTop: 4 }}>{error.message}</div>
-      {hint && <div style={{ marginTop: 4, fontSize: 13, color: '#6b7280' }}>{hint}</div>}
+      {hint && <div style={{ marginTop: 4, fontSize: 13, color: 'var(--surface-text-muted)' }}>{hint}</div>}
     </div>
   );
 }
@@ -67,10 +67,10 @@ function Err({ error }: { error: CalculationError }) {
 function GateRow({ gate }: { gate: Gate }) {
   const v = GATE_VIEW[gate.state] ?? {
     // ⚠️ 모르는 상태를 «준비됨» 으로 떨어뜨리지 않는다.
-    label: `알 수 없는 상태(${gate.state})`, mark: '⚠', tone: '#b91c1c',
+    label: `알 수 없는 상태(${gate.state})`, mark: '⚠', tone: 'var(--state-error-fg)',
   };
   return (
-    <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+    <tr style={{ borderBottom: '1px solid var(--surface-border)' }}>
       <td style={{ padding: '10px 8px', fontSize: 14, whiteSpace: 'nowrap' }}>
         {GATE_LABEL[gate.gate] ?? gate.gate}
       </td>
@@ -80,7 +80,7 @@ function GateRow({ gate }: { gate: Gate }) {
       <td style={{ padding: '10px 8px', fontSize: 13 }}>
         <div>{gate.summary}</div>
         {gate.next_action && (
-          <div style={{ marginTop: 2, color: '#1d4ed8' }}>→ {gate.next_action}</div>
+          <div style={{ marginTop: 2, color: 'var(--action-primary-bg)' }}>→ {gate.next_action}</div>
         )}
       </td>
     </tr>
@@ -244,7 +244,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
     <HubDialog label="계산 실행 승인 · 시연 초기화" onClose={onClose}>
       <div style={{ padding: 20, maxHeight: '82vh', overflow: 'auto' }}>
         <Panel kicker="시스템 관리자" title="계산 실행 승인 · 시연 초기화">
-          <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 12px' }}>
+          <p style={{ fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 12px' }}>
             승인된 자료로 경영 판단용 숫자를 내도 되는지 정하는 곳입니다.
             <b> 되돌려도 이미 그 숫자를 본 사람이 있습니다.</b>
           </p>
@@ -254,9 +254,9 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
             대상 키트 인스턴스
           </label>
           {instances === null ? (
-            <div style={{ fontSize: 13, color: '#6b7280' }}>불러오는 중…</div>
+            <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>불러오는 중…</div>
           ) : instances.length === 0 ? (
-            <div style={{ fontSize: 13, color: '#b45309' }}>
+            <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
               내 범위에 키트 인스턴스가 없습니다 — 「업무 데이터 준비」에서 먼저 만드십시오.
             </div>
           ) : (
@@ -279,16 +279,16 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
               <button key={id} onClick={() => setTab(id)}
                 style={{
                   padding: '6px 14px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
-                  border: `1px solid ${tab === id ? '#2563eb' : '#d1d5db'}`,
-                  background: tab === id ? '#eff6ff' : '#fff',
-                  color: tab === id ? '#1d4ed8' : '#374151',
+                  border: `1px solid ${tab === id ? 'var(--action-primary-bg)' : 'var(--surface-border)'}`,
+                  background: tab === id ? 'var(--state-info-bg)' : '#fff',
+                  color: tab === id ? 'var(--action-primary-bg)' : 'var(--surface-text)',
                 }}>{label}</button>
             ))}
           </div>
 
           {error && <Err error={error} />}
           {!instanceId.trim() && (
-            <div style={{ fontSize: 14, color: '#6b7280' }}>
+            <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>
               대상 인스턴스를 고르면 내용이 표시됩니다.
             </div>
           )}
@@ -304,7 +304,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
               </Banner>
               <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
                 <thead>
-                  <tr style={{ borderBottom: '2px solid #e5e7eb', textAlign: 'left' }}>
+                  <tr style={{ borderBottom: '2px solid var(--surface-border)', textAlign: 'left' }}>
                     <th style={{ padding: 8, fontSize: 13 }}>관문</th>
                     <th style={{ padding: 8, fontSize: 13 }}>상태</th>
                     <th style={{ padding: 8, fontSize: 13 }}>내용</th>
@@ -316,7 +316,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
               </table>
               {/* ⚠️ 「판정 안 함」을 남은 일로 세지 않는다 — 앞 관문을 풀면 이미 서 있을
                   수도 있다. 서버가 그렇게 세고, 화면은 그대로 옮긴다. */}
-              <p style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+              <p style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 8 }}>
                 준비 {readiness.counts.ready} · 남음 {readiness.counts.not_yet} ·
                 확인 못 함 {readiness.counts.failed} · 판정 안 함 {readiness.counts.unknown}
                 <br />
@@ -335,10 +335,10 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
               </Banner>
               <div style={{
                 display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',
-                margin: '10px 0', padding: 10, background: '#f9fafb', borderRadius: 6,
+                margin: '10px 0', padding: 10, background: 'var(--surface-raised)', borderRadius: 6,
               }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
                     자료 성격
                   </label>
                   <select value={scopeKind || proposal.scope.data_kind}
@@ -349,7 +349,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
                     실행 모드
                   </label>
                   <select value={scopeMode || proposal.scope.entity_mode}
@@ -361,7 +361,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
                     유효기간(일)
                   </label>
                   <input type="number" min={1} max={90}
@@ -369,7 +369,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                     onChange={(e) => setValidDays(Number(e.target.value) || 0)}
                     style={{ padding: 4, fontSize: 13, width: 80 }} />
                 </div>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
                   조직 {proposal.scope.scope_node_id}
                   {' · '}~{proposal.valid_until.slice(0, 10)} 까지
                 </div>
@@ -389,8 +389,8 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
 
               {proposal.items.map((item) => (
                 <div key={item.ref} style={{
-                  border: '1px solid #e5e7eb', borderRadius: 8, padding: 12,
-                  marginBottom: 10, background: item.approvable ? '#fff' : '#f9fafb',
+                  border: '1px solid var(--surface-border)', borderRadius: 8, padding: 12,
+                  marginBottom: 10, background: item.approvable ? '#fff' : 'var(--surface-raised)',
                 }}>
                   <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <input type="checkbox" disabled={!item.approvable}
@@ -399,7 +399,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                       style={{ marginTop: 4 }} />
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 14, fontWeight: 600 }}>{item.ref}</div>
-                      <div style={{ fontSize: 13, color: '#374151', marginTop: 2 }}>
+                      <div style={{ fontSize: 13, color: 'var(--surface-text)', marginTop: 2 }}>
                         {item.definition.relation} · 산식 판 {item.definition.model_version}
                       </div>
                       {/* ★ 정의·단위·부호를 그대로 보여 준다 — 무엇을 승인하는지 알아야 한다. */}
@@ -411,15 +411,15 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                           </li>
                         ))}
                       </ul>
-                      <div style={{ fontSize: 12, color: '#6b7280' }}>
+                      <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
                         필요 자료 {item.definition.required_datasets.join(', ')}
                         {' · '}정본 규칙 {item.definition.canonical_rules.join(', ')}
                       </div>
-                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+                      <div style={{ fontSize: 11, color: 'var(--surface-text-faint)', marginTop: 4 }}>
                         승인 대상 지문 {item.binding_fingerprint.slice(0, 16)}…
                       </div>
                       {!item.approvable && (
-                        <div style={{ fontSize: 13, color: '#b91c1c', marginTop: 6 }}>
+                        <div style={{ fontSize: 13, color: 'var(--state-error-fg)', marginTop: 6 }}>
                           인증판이 없는 계약키가 있어 승인할 수 없습니다
                           {' '}({item.missing_contract_keys.join(', ')}) — 무엇으로 계산할지
                           모르는 채 승인하면 그 승인은 아무 판에나 붙습니다.
@@ -431,7 +431,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
               ))}
 
               <label style={{ display: 'block', fontSize: 13, margin: '12px 0 4px' }}>
-                승인 사유 <span style={{ color: '#b91c1c' }}>*</span>
+                승인 사유 <span style={{ color: 'var(--state-error-fg)' }}>*</span>
               </label>
               <textarea value={rationale} onChange={(e) => setRationale(e.target.value)}
                 rows={2} placeholder="왜 이 산식으로 계산해도 되는가"
@@ -441,28 +441,31 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                   onClick={onApprove}
                   style={{
                     padding: '8px 18px', fontSize: 14, borderRadius: 6,
-                    border: '1px solid #15803d',
-                    background: (!chosen.length || !rationale.trim()) ? '#f3f4f6' : '#15803d',
-                    color: (!chosen.length || !rationale.trim()) ? '#9ca3af' : '#fff',
+                    /* ⚠️ [2026-08-23] 초록이 아니라 **구조색**이다. `tokens.css` 가 못박은 규칙:
+                       「`action/*` 과 `state/*` 를 섞지 않는다 — 초록 버튼을 누르면 초록 성공
+                       배너가 뜨는 화면은 «성공했다»와 «누를 수 있다»를 구분할 수 없다.」 */
+                    border: '1px solid var(--action-primary-bg)',
+                    background: (!chosen.length || !rationale.trim()) ? 'var(--surface-sunken)' : 'var(--action-primary-bg)',
+                    color: (!chosen.length || !rationale.trim()) ? 'var(--surface-text-faint)' : '#fff',
                     cursor: (!chosen.length || !rationale.trim()) ? 'not-allowed' : 'pointer',
                   }}>
                   {busy === 'approve' ? '승인 중…' : `선택한 ${chosen.length}건 실행 승인`}
                 </button>
                 {/* ⚠️ 못 누르는 버튼에는 **사유**를 붙인다(§8.6) — 「고장」으로 읽히지 않게. */}
                 {!chosen.length && (
-                  <span style={{ fontSize: 13, color: '#6b7280' }}>승인할 계산을 고르십시오.</span>
+                  <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>승인할 계산을 고르십시오.</span>
                 )}
                 {!!chosen.length && !rationale.trim() && (
-                  <span style={{ fontSize: 13, color: '#6b7280' }}>승인 사유가 필요합니다.</span>
+                  <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>승인 사유가 필요합니다.</span>
                 )}
               </div>
               {approved && (
-                <div style={{ marginTop: 8, fontSize: 14, color: '#15803d' }}>{approved}</div>
+                <div style={{ marginTop: 8, fontSize: 14, color: 'var(--state-success-fg)' }}>{approved}</div>
               )}
 
               <h4 style={{ margin: '18px 0 6px', fontSize: 15 }}>지금 살아 있는 승인</h4>
               {proposal.approvals.length === 0 ? (
-                <div style={{ fontSize: 13, color: '#6b7280' }}>
+                <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
                   없습니다 — 계산은 계속 «막힘» 으로 답합니다.
                 </div>
               ) : (
@@ -475,8 +478,8 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                         <button onClick={() => setRevoking(a.approval_id)}
                           style={{
                             marginLeft: 8, padding: '2px 10px', fontSize: 12,
-                            border: '1px solid #b91c1c', background: '#fff',
-                            color: '#b91c1c', borderRadius: 6, cursor: 'pointer',
+                            border: '1px solid var(--state-error-fg)', background: '#fff',
+                            color: 'var(--state-error-fg)', borderRadius: 6, cursor: 'pointer',
                           }}>철회</button>
                       )}
                       {revoking === a.approval_id && (
@@ -491,18 +494,18 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                             onClick={() => onRevoke(a.approval_id)}
                             style={{
                               padding: '2px 10px', fontSize: 12,
-                              border: '1px solid #b91c1c',
+                              border: '1px solid var(--state-error-fg)',
                               background: (revokeReason[a.approval_id] || '').trim()
-                                ? '#b91c1c' : '#f3f4f6',
+                                ? 'var(--state-error-fg)' : 'var(--surface-sunken)',
                               color: (revokeReason[a.approval_id] || '').trim()
-                                ? '#fff' : '#9ca3af',
+                                ? '#fff' : 'var(--surface-text-faint)',
                               borderRadius: 6, cursor: 'pointer',
                             }}>
                             {busy === a.approval_id ? '철회 중…' : '철회 확정'}
                           </button>
                           <button onClick={() => setRevoking('')}
                             style={{
-                              padding: '2px 10px', fontSize: 12, border: '1px solid #d1d5db',
+                              padding: '2px 10px', fontSize: 12, border: '1px solid var(--surface-border)',
                               background: '#fff', borderRadius: 6, cursor: 'pointer',
                             }}>취소</button>
                         </div>
@@ -521,12 +524,12 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                 정본과 통제는 유지됩니다 — 원장·인증판·소유권·온톨로지·계산 승인·조직.
                 <b> 전체 정본 재생성은 이 버튼에 없습니다.</b>
               </Banner>
-              <div style={{ fontSize: 13, color: '#374151', margin: '10px 0' }}>
+              <div style={{ fontSize: 13, color: 'var(--surface-text)', margin: '10px 0' }}>
                 대상 {plan.target.kit_id} {plan.target.kit_version} ·
                 {' '}키트 모드 <b>{plan.target.kit_mode}</b> · {plan.target.scope_node_id}
               </div>
 
-              <h4 style={{ margin: '12px 0 6px', fontSize: 15, color: '#b91c1c' }}>
+              <h4 style={{ margin: '12px 0 6px', fontSize: 15, color: 'var(--state-error-fg)' }}>
                 지웁니다 ({totalDelete}건)
               </h4>
               <ul style={{ paddingLeft: 18, margin: 0, fontSize: 13 }}>
@@ -534,7 +537,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                   <li key={d.table} style={{ marginBottom: 2 }}>
                     {d.kind} — <b>{d.count}건</b>
                     {d.count > 0 && d.ids && (
-                      <span style={{ color: '#6b7280' }}> ({d.ids.slice(0, 5).join(', ')}
+                      <span style={{ color: 'var(--surface-text-muted)' }}> ({d.ids.slice(0, 5).join(', ')}
                         {d.ids.length > 5 ? ` 외 ${d.ids.length - 5}건` : ''})</span>
                     )}
                   </li>
@@ -542,19 +545,19 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                 <li>미리보기 임시 상태 — {plan.preview.path_exists ? '있음' : '없음'}</li>
               </ul>
 
-              <h4 style={{ margin: '12px 0 6px', fontSize: 15, color: '#b45309' }}>
+              <h4 style={{ margin: '12px 0 6px', fontSize: 15, color: 'var(--state-warn-fg)' }}>
                 남깁니다
               </h4>
               <ul style={{ paddingLeft: 18, margin: 0, fontSize: 13 }}>
                 {plan.retain.map((r) => (
                   <li key={r.table} style={{ marginBottom: 2 }}>
                     {r.kind} — <b>{r.count}건</b>
-                    {r.reason && <span style={{ color: '#6b7280' }}> · {r.reason}</span>}
+                    {r.reason && <span style={{ color: 'var(--surface-text-muted)' }}> · {r.reason}</span>}
                   </li>
                 ))}
               </ul>
 
-              <h4 style={{ margin: '12px 0 6px', fontSize: 15, color: '#15803d' }}>
+              <h4 style={{ margin: '12px 0 6px', fontSize: 15, color: 'var(--state-success-fg)' }}>
                 건드리지 않습니다
               </h4>
               <ul style={{ paddingLeft: 18, margin: 0, fontSize: 13 }}>
@@ -563,14 +566,14 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                     {p.kind} —{' '}
                     {/* ⚠️ 「세지 못함」을 0 으로 그리지 않는다. */}
                     {p.count === null
-                      ? <b style={{ color: '#b91c1c' }}>세지 못했습니다</b>
+                      ? <b style={{ color: 'var(--state-error-fg)' }}>세지 못했습니다</b>
                       : <b>{p.count}건</b>}
                   </li>
                 ))}
               </ul>
 
               <label style={{ display: 'block', fontSize: 13, margin: '14px 0 4px' }}>
-                초기화 사유 <span style={{ color: '#b91c1c' }}>*</span>
+                초기화 사유 <span style={{ color: 'var(--state-error-fg)' }}>*</span>
               </label>
               <textarea value={resetReason} onChange={(e) => setResetReason(e.target.value)}
                 rows={2} placeholder="예: 3회 리허설 2회차 준비"
@@ -579,9 +582,11 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                 <button disabled={!resetReason.trim() || busy === 'reset'} onClick={onReset}
                   style={{
                     padding: '8px 18px', fontSize: 14, borderRadius: 6,
-                    border: '1px solid #b91c1c',
-                    background: resetReason.trim() ? '#b91c1c' : '#f3f4f6',
-                    color: resetReason.trim() ? '#fff' : '#9ca3af',
+                    /* ★ 되돌릴 수 없는 행동 — danger 가 맞다. 다만 «시스템이 말하는 오류»가
+                       아니라 «사람이 누르는 위험 행동»이므로 `action/*` 쪽 토큰을 쓴다. */
+                    border: '1px solid var(--action-danger-bg)',
+                    background: resetReason.trim() ? 'var(--action-danger-bg)' : 'var(--surface-sunken)',
+                    color: resetReason.trim() ? '#fff' : 'var(--surface-text-faint)',
                     cursor: resetReason.trim() ? 'pointer' : 'not-allowed',
                   }}>
                   {busy === 'reset' ? '초기화 중…'
@@ -589,10 +594,10 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                         plan.preview.path_exists ? ' + 미리보기' : ''})`}
                 </button>
                 {!resetReason.trim() && (
-                  <span style={{ fontSize: 13, color: '#6b7280' }}>초기화 사유가 필요합니다.</span>
+                  <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>초기화 사유가 필요합니다.</span>
                 )}
               </div>
-              <p style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+              <p style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 6 }}>
                 {/* ★ 재확인이 무엇인지 사람에게 말한다 — 숨기면 409 가 「고장」으로 읽힌다. */}
                 이 목록을 확인한 시각의 상태로 지웁니다. 그 사이에 자료가 바뀌면 초기화가
                 거부되고 목록을 다시 보여 드립니다.
@@ -600,23 +605,23 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
 
               {resetDone && (
                 <div style={{
-                  marginTop: 12, padding: 12, border: '1px solid #86efac',
-                  background: '#f0fdf4', borderRadius: 6, fontSize: 13,
+                  marginTop: 12, padding: 12, border: '1px solid var(--state-success-fg)',
+                  background: 'var(--state-success-bg)', borderRadius: 6, fontSize: 13,
                 }}>
-                  <b style={{ color: '#15803d' }}>초기화했습니다.</b>
+                  <b style={{ color: 'var(--state-success-fg)' }}>초기화했습니다.</b>
                   <div style={{ marginTop: 4 }}>
                     {Object.entries(resetDone.deleted)
                       .map(([t, n]) => `${t} ${n}건`).join(' · ')}
                     {resetDone.preview_cleared ? ' · 미리보기 임시 상태' : ''}
                   </div>
-                  <div style={{ marginTop: 4, color: '#374151' }}>
+                  <div style={{ marginTop: 4, color: 'var(--surface-text)' }}>
                     {/* ★★★ 유지 대상이 그대로임을 **지문으로** 보인다. */}
                     유지 대상 지문{' '}
                     {resetDone.before_fingerprint === resetDone.after_fingerprint
-                      ? <b style={{ color: '#15803d' }}>변동 없음 ✓</b>
-                      : <b style={{ color: '#b91c1c' }}>바뀌었습니다 — 점검이 필요합니다</b>}
+                      ? <b style={{ color: 'var(--state-success-fg)' }}>변동 없음 ✓</b>
+                      : <b style={{ color: 'var(--state-error-fg)' }}>바뀌었습니다 — 점검이 필요합니다</b>}
                   </div>
-                  <div style={{ marginTop: 4, color: '#6b7280', fontSize: 12 }}>
+                  <div style={{ marginTop: 4, color: 'var(--surface-text-muted)', fontSize: 12 }}>
                     원장 사건 {resetDone.requested_event_id} → {resetDone.completed_event_id}
                   </div>
                 </div>

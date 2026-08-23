@@ -89,7 +89,13 @@ export function CompanyContextBar() {
         🏭 AI Factory Studio
       </span>
 
-      <span style={{ color: 'var(--bar-border)' }}>│</span>
+      {/* ⚠️ 구분자를 **글자로 그리지 않는다.** 종전 `│` 글리프는 `--bar-border`(바 바깥쪽
+          경계색)를 글자색으로 써서 남색 위 1.01:1 로 사라졌고, 화면읽기 프로그램은 그것을
+          「세로줄」이라고 읽었다 — 뜻이 없는 장식이다. 실제 선으로 그리고 접근성 트리에서 뺀다. */}
+      <span aria-hidden="true" style={{
+        display: 'inline-block', width: 1, height: 18,
+        background: 'var(--bar-divider)',
+      }} />
 
       {/* 문맥 breadcrumb — 회사 › 조직 */}
       <span style={{ fontSize: 13, color: 'var(--bar-fg-muted)', whiteSpace: 'nowrap',
@@ -107,7 +113,7 @@ export function CompanyContextBar() {
         whiteSpace: 'nowrap',
         background: mode === 'REAL' ? 'rgba(255,255,255,.14)' : 'rgba(167,139,250,.22)',
         color: mode === 'REAL' ? 'var(--bar-fg)' : '#ddd6fe',
-        border: `1px solid ${mode === 'REAL' ? 'var(--bar-border)' : '#8b5cf6'}`,
+        border: `1px solid ${mode === 'REAL' ? 'var(--bar-divider)' : '#8b5cf6'}`,
       }}>
         {mode === 'REAL' ? '실제' : `⚠️ ${MODE_KO[mode] || mode}`}
       </span>

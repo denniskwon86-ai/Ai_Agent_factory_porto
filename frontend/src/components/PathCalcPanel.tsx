@@ -44,12 +44,12 @@ function Err({ error }: { error: CalculationError }) {
     : '';
   return (
     <div style={{
-      padding: 12, border: '1px solid #fca5a5', borderRadius: 6,
-      background: '#fef2f2', fontSize: 14, marginBottom: 12,
+      padding: 12, border: '1px solid var(--state-error-fg)', borderRadius: 6,
+      background: 'var(--state-error-bg)', fontSize: 14, marginBottom: 12,
     }}>
-      <strong style={{ color: '#b91c1c' }}>계산하지 못했습니다 ({error.status})</strong>
+      <strong style={{ color: 'var(--state-error-fg)' }}>계산하지 못했습니다 ({error.status})</strong>
       <div style={{ marginTop: 4 }}>{error.message}</div>
-      {hint && <div style={{ marginTop: 4, fontSize: 13, color: '#6b7280' }}>{hint}</div>}
+      {hint && <div style={{ marginTop: 4, fontSize: 13, color: 'var(--surface-text-muted)' }}>{hint}</div>}
     </div>
   );
 }
@@ -73,7 +73,7 @@ function Metrics({ result }: { result: CalcResult }) {
           return (
             <div key={name} style={{ marginBottom: 14 }}>
               <h4 style={{ margin: '0 0 4px', fontSize: 15 }}>{name}</h4>
-              <div style={{ fontSize: 13, color: '#b45309' }}>
+              <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
                 이 기준시점에 해당하는 행이 없습니다 — 값이 0인 것이 아닙니다.
               </div>
             </div>
@@ -90,11 +90,11 @@ function Metrics({ result }: { result: CalcResult }) {
                   //   숫자 칸에 넣어 0 처럼 보이게 하지 않는다.
                   const missing = typeof v === 'string';
                   return (
-                    <tr key={k} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                      <td style={{ padding: '4px 12px 4px 0', color: '#374151' }}>{k}</td>
+                    <tr key={k} style={{ borderBottom: '1px solid var(--surface-border)' }}>
+                      <td style={{ padding: '4px 12px 4px 0', color: 'var(--surface-text)' }}>{k}</td>
                       <td style={{
                         padding: '4px 0', textAlign: 'right',
-                        color: missing ? '#b45309' : '#111827',
+                        color: missing ? 'var(--state-warn-fg)' : 'var(--surface-text)',
                         fontWeight: missing ? 400 : 600,
                       }}>
                         {missing ? `— ${v}` : String(v)}
@@ -105,7 +105,7 @@ function Metrics({ result }: { result: CalcResult }) {
               </tbody>
             </table>
             {keys.length > 12 && (
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 2 }}>
                 {keys.length}건 중 12건만 표시했습니다.
               </div>
             )}
@@ -301,7 +301,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
     <HubDialog label="경로 계산" onClose={onClose}>
       <div style={{ padding: 20, maxHeight: '82vh', overflow: 'auto' }}>
         <Panel kicker="영향 경로" title="경로 계산 — 질문을 고르고 답을 봅니다">
-          <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 12px' }}>
+          <p style={{ fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 12px' }}>
             승인된 관계를 따라가 <b>부족량·생산가능량·매출 이연</b>을 계산합니다.
             승인·판·기준선은 서버가 정합니다 — 여기서는 <b>질문만</b> 고릅니다.
           </p>
@@ -312,9 +312,9 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                 자료(키트 인스턴스)
               </label>
               {instances === null ? (
-                <span style={{ fontSize: 13, color: '#6b7280' }}>불러오는 중…</span>
+                <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>불러오는 중…</span>
               ) : instances.length === 0 ? (
-                <span style={{ fontSize: 13, color: '#b45309' }}>
+                <span style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
                   내 범위에 인스턴스가 없습니다.
                 </span>
               ) : (
@@ -342,17 +342,17 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
             alignItems: 'flex-end', marginTop: 12 }}>
             <div>
               <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
-                시작점 <span style={{ color: '#b91c1c' }}>*</span>
+                시작점 <span style={{ color: 'var(--state-error-fg)' }}>*</span>
               </label>
               {busy === 'objects' ? (
-                <span style={{ fontSize: 13, color: '#6b7280' }}>불러오는 중…</span>
+                <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>불러오는 중…</span>
               ) : objects === null ? (
                 // ⚠️ 「없음」과 「못 읽음」을 가른다.
-                <span style={{ fontSize: 13, color: '#b91c1c' }}>
+                <span style={{ fontSize: 13, color: 'var(--state-error-fg)' }}>
                   목록을 확인하지 못했습니다.
                 </span>
               ) : objects.length === 0 ? (
-                <span style={{ fontSize: 13, color: '#b45309' }}>
+                <span style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
                   이 기준시점에 보이는 승인된 관계가 없습니다.
                 </span>
               ) : (
@@ -379,20 +379,20 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
             <button disabled={!canFind} onClick={onFind}
               style={{
                 padding: '8px 18px', fontSize: 14, borderRadius: 6,
-                border: '1px solid #2563eb', background: canFind ? '#2563eb' : '#f3f4f6',
-                color: canFind ? '#fff' : '#9ca3af',
+                border: '1px solid var(--action-primary-bg)', background: canFind ? 'var(--action-primary-bg)' : 'var(--surface-sunken)',
+                color: canFind ? '#fff' : 'var(--surface-text-faint)',
                 cursor: canFind ? 'pointer' : 'not-allowed',
               }}>
               {busy === 'find' ? '찾는 중…' : '경로 찾기'}
             </button>
             {/* ⚠️ 못 누르는 버튼에는 사유를 붙인다(§8.6). */}
             {!canFind && busy !== 'find' && (
-              <span style={{ fontSize: 13, color: '#6b7280' }}>시작점을 고르십시오.</span>
+              <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>시작점을 고르십시오.</span>
             )}
           </div>
 
           {truncated && (
-            <div style={{ fontSize: 12, color: '#b45309', marginTop: 6 }}>
+            <div style={{ fontSize: 12, color: 'var(--state-warn-fg)', marginTop: 6 }}>
               시작점 목록이 잘렸습니다 — 전부가 아닙니다.
             </div>
           )}
@@ -400,9 +400,9 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
           {/* ★★★ **사람이 해야 하는 판단.** 계산기가 기본값을 거부하는 자리이고,
               거부하는 이유를 그대로 옆에 적는다 — 체크박스만 있으면 그냥 켠다. */}
           <fieldset style={{
-            marginTop: 14, border: '1px solid #e5e7eb', borderRadius: 6, padding: 10,
+            marginTop: 14, border: '1px solid var(--surface-border)', borderRadius: 6, padding: 10,
           }}>
-            <legend style={{ fontSize: 13, color: '#374151', padding: '0 6px' }}>
+            <legend style={{ fontSize: 13, color: 'var(--surface-text)', padding: '0 6px' }}>
               계산 가정 — 사람이 정해야 합니다
             </legend>
             <label style={{ display: 'block', fontSize: 13, marginBottom: 8 }}>
@@ -410,7 +410,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setReservedZero(e.target.checked)}
                 style={{ marginRight: 8 }} />
               예약 수량이 자료에 없는 것을 <b>0으로 본다</b>
-              <div style={{ marginLeft: 24, fontSize: 12, color: '#6b7280' }}>
+              <div style={{ marginLeft: 24, fontSize: 12, color: 'var(--surface-text-muted)' }}>
                 이 자료에는 예약 수량 칸이 없습니다. 켜지 않으면 계산기가 「명시해야
                 한다」고 답합니다 — 조용히 0으로 채우면 「예약 없음」과 「자료 없음」이
                 같아집니다.
@@ -421,7 +421,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setDateOnlyMidnight(e.target.checked)}
                 style={{ marginRight: 8 }} />
               날짜만 있는 값을 <b>그날 00:00 UTC</b> 로 본다
-              <div style={{ marginLeft: 24, fontSize: 12, color: '#6b7280' }}>
+              <div style={{ marginLeft: 24, fontSize: 12, color: 'var(--surface-text-muted)' }}>
                 시각이 없는 날짜를 어느 시점으로 읽을지 정합니다 — 규칙이 다르면 하루
                 차이로 결과가 갈립니다.
               </div>
@@ -435,7 +435,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
               </h4>
               {paths.length === 0 ? (
                 /* ⚠️ 「없음」과 「못 읽음」을 가른다 — 여기는 정말 없는 것이다. */
-                <div style={{ fontSize: 13, color: '#b45309' }}>
+                <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
                   이 시작점에서 보이는 승인된 경로가 없습니다 — 도착 유형이나 기준시점을
                   바꿔 보십시오.
                 </div>
@@ -445,8 +445,8 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                     <label key={p.path_fingerprint} style={{
                       display: 'block', padding: 8, marginBottom: 6, borderRadius: 6,
                       border: `1px solid ${pathFp === p.path_fingerprint
-                        ? '#2563eb' : '#e5e7eb'}`,
-                      background: pathFp === p.path_fingerprint ? '#eff6ff' : '#fff',
+                        ? 'var(--action-primary-bg)' : 'var(--surface-border)'}`,
+                      background: pathFp === p.path_fingerprint ? 'var(--state-info-bg)' : '#fff',
                       cursor: 'pointer',
                     }}>
                       <input type="radio" name="path"
@@ -456,7 +456,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                       <span style={{ fontSize: 14 }}>
                         {p.nodes.map((n) => `${n.object_type} ${n.object_id}`).join(' → ')}
                       </span>
-                      <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 24 }}>
+                      <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginLeft: 24 }}>
                         구간 {p.edges.length}개
                       </div>
                     </label>
@@ -464,15 +464,16 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                   <button disabled={!canRun} onClick={onRun}
                     style={{
                       padding: '8px 18px', fontSize: 14, borderRadius: 6,
-                      border: '1px solid #15803d',
-                      background: canRun ? '#15803d' : '#f3f4f6',
-                      color: canRun ? '#fff' : '#9ca3af',
+                      border: '1px solid var(--action-primary-bg)',
+                      /* ⚠️ 1차 행동은 구조색이다 — 초록은 «성공 상태» 전용(tokens.css). */
+                      background: canRun ? 'var(--action-primary-bg)' : 'var(--surface-sunken)',
+                      color: canRun ? '#fff' : 'var(--surface-text-faint)',
                       cursor: canRun ? 'pointer' : 'not-allowed',
                     }}>
                     {busy === 'run' ? '계산 중…' : '이 경로로 계산'}
                   </button>
                   {!canRun && busy !== 'run' && (
-                    <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 8 }}>
+                    <span style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginLeft: 8 }}>
                       {!instanceId.trim() ? '자료를 고르십시오.' : '경로를 고르십시오.'}
                     </span>
                   )}
@@ -491,9 +492,9 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                   {result.blocked?.public_reason || '사유가 오지 않았습니다.'}
                 </Banner>
                 <div style={{
-                  marginTop: 8, padding: 10, background: '#f9fafb', borderRadius: 6,
+                  marginTop: 8, padding: 10, background: 'var(--surface-raised)', borderRadius: 6,
                 }}>
-                  <div style={{ fontSize: 13, color: '#374151', marginBottom: 4 }}>
+                  <div style={{ fontSize: 13, color: 'var(--surface-text)', marginBottom: 4 }}>
                     무엇이 없는가
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
@@ -501,7 +502,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                       <li key={i} style={{ marginBottom: 2 }}>{r}</li>
                     ))}
                   </ul>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+                  <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 6 }}>
                     「계산 실행 승인 · 시연 초기화」 화면의 <b>준비 상태</b>에서 남은 관문을
                     확인할 수 있습니다.
                   </div>
@@ -516,10 +517,10 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                 </Banner>
                 <div style={{ marginTop: 12 }}><Metrics result={result} /></div>
                 <details style={{ marginTop: 10 }}>
-                  <summary style={{ fontSize: 13, cursor: 'pointer', color: '#1d4ed8' }}>
+                  <summary style={{ fontSize: 13, cursor: 'pointer', color: 'var(--action-primary-bg)' }}>
                     이 숫자는 무엇으로 만들었나
                   </summary>
-                  <div style={{ fontSize: 12, color: '#374151', marginTop: 8 }}>
+                  <div style={{ fontSize: 12, color: 'var(--surface-text)', marginTop: 8 }}>
                     <div>결과 지문 {result.result_fingerprint}</div>
                     <div>요청 지문 {result.request_fingerprint}</div>
                     <div>경로 {result.query_id} / {result.path_fingerprint}</div>
@@ -542,9 +543,9 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                 </details>
 
                 {/* ── [G5] 이 결과로 안건 만들기 ─────────────────────────── */}
-                <div style={{ marginTop: 18, borderTop: '1px solid #e5e7eb', paddingTop: 14 }}>
+                <div style={{ marginTop: 18, borderTop: '1px solid var(--surface-border)', paddingTop: 14 }}>
                   <h4 style={{ margin: '0 0 6px', fontSize: 15 }}>이 결과로 안건 만들기</h4>
-                  <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 10px' }}>
+                  <p style={{ fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 10px' }}>
                     안건은 <b>계산이 읽은 그 판</b> 위에 섭니다({usedSnapshots.length}개) —
                     다시 고르지 않습니다. 아래 경영 수치는 <b>시뮬레이션</b>이 쓰는 값이고,
                     경로 계산의 지표와 <b>다른 집합</b>입니다.
@@ -557,14 +558,14 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10 }}>
                     {DRIVER_FIELDS.map((f) => (
                       <div key={f.key}>
-                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
+                        <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
                           {f.label} ({f.unit})
                         </label>
                         <input value={drivers[f.key] || ''} inputMode="decimal"
                           onChange={(e) => setDrivers({ ...drivers, [f.key]: e.target.value })}
                           style={{ padding: 4, fontSize: 13, width: 110 }} />
                         {f.hint && (
-                          <div style={{ fontSize: 11, color: '#9ca3af', maxWidth: 160 }}>
+                          <div style={{ fontSize: 11, color: 'var(--surface-text-faint)', maxWidth: 160 }}>
                             {f.hint}
                           </div>
                         )}
@@ -575,32 +576,32 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap',
                     alignItems: 'flex-end', marginTop: 12 }}>
                     <div>
-                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
-                        안건 제목 <span style={{ color: '#b91c1c' }}>*</span>
+                      <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                        안건 제목 <span style={{ color: 'var(--state-error-fg)' }}>*</span>
                       </label>
                       <input value={title} onChange={(e) => setTitle(e.target.value)}
                         placeholder="예: 구매 지연 영향"
                         style={{ padding: 4, fontSize: 13, width: 240 }} />
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
-                        결정 문장 <span style={{ color: '#b91c1c' }}>*</span>
+                      <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                        결정 문장 <span style={{ color: 'var(--state-error-fg)' }}>*</span>
                       </label>
                       <input value={question} onChange={(e) => setQuestion(e.target.value)}
                         placeholder="무엇을 승인·기각하는가 (제목이 아닙니다)"
                         style={{ padding: 4, fontSize: 13, width: 340 }} />
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
-                        책임자 <span style={{ color: '#b91c1c' }}>*</span>
+                      <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                        책임자 <span style={{ color: 'var(--state-error-fg)' }}>*</span>
                       </label>
                       <input value={owner} onChange={(e) => setOwner(e.target.value)}
                         placeholder="user@company.com"
                         style={{ padding: 4, fontSize: 13, width: 220 }} />
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>
-                        기한 <span style={{ color: '#b91c1c' }}>*</span>
+                      <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                        기한 <span style={{ color: 'var(--state-error-fg)' }}>*</span>
                       </label>
                       <input type="date" value={due} onChange={(e) => setDue(e.target.value)}
                         style={{ padding: 4, fontSize: 13 }} />
@@ -609,14 +610,14 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                       style={{
                         padding: '8px 18px', fontSize: 14, borderRadius: 6,
                         border: '1px solid #7c3aed',
-                        background: canDecide ? '#7c3aed' : '#f3f4f6',
-                        color: canDecide ? '#fff' : '#9ca3af',
+                        background: canDecide ? '#7c3aed' : 'var(--surface-sunken)',
+                        color: canDecide ? '#fff' : 'var(--surface-text-faint)',
                         cursor: canDecide ? 'pointer' : 'not-allowed',
                       }}>
                       {busy === 'decide' ? '만드는 중…' : '안건 만들기'}
                     </button>
                     {!canDecide && busy !== 'decide' && (
-                      <span style={{ fontSize: 13, color: '#6b7280' }}>
+                      <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
                         제목·결정 문장·책임자·기한이 필요합니다.
                       </span>
                     )}
@@ -633,7 +634,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                           <li key={i} style={{ marginBottom: 2 }}>{line}</li>
                         ))}
                       </ul>
-                      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+                      <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 6 }}>
                         {/* ★★★ 계산 결속이 근거에 봉인됐음을 **보인다.** */}
                         계산 결속 결과 지문{' '}
                         {String(decision.decision.evidence?.calculation?.result_fingerprint
@@ -642,7 +643,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                       {/* ★ 저장된 안건이다 — 어디서 이어 가는지 말해 준다. */}
                       <div style={{ fontSize: 13, marginTop: 6 }}>
                         안건 <b>{decision.decision.decision_id}</b> 로 저장했습니다.
-                        <div style={{ color: '#6b7280', fontSize: 12 }}>
+                        <div style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>
                           「협업·의사결정·발간」 화면에서 검토 요청·발간으로 이어 갑니다.
                         </div>
                       </div>

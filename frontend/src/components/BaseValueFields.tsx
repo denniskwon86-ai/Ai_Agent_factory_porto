@@ -66,22 +66,22 @@ export function BaseValueFields({ pick, values, onChange }: {
         <h4 style={{ margin: 0, fontSize: 15 }}>기준값</h4>
         <button onClick={fill} disabled={!ready || busy} style={{
           padding: '5px 12px', fontSize: 13, borderRadius: 6, fontFamily: 'inherit',
-          border: `1px solid ${ready ? '#2563eb' : '#d1d5db'}`,
-          background: '#fff', color: ready ? '#2563eb' : '#9ca3af',
+          border: `1px solid ${ready ? 'var(--action-primary-bg)' : 'var(--surface-border)'}`,
+          background: '#fff', color: ready ? 'var(--action-primary-bg)' : 'var(--surface-text-faint)',
           cursor: ready && !busy ? 'pointer' : 'default',
         }}>{busy ? '뽑는 중…' : '고른 판에서 채우기'}</button>
         {!ready && (
-          <span style={{ fontSize: 12, color: '#6b7280' }}>
+          <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
             먼저 기준선을 고르면 뽑을 수 있는 값을 채워 드립니다.
           </span>
         )}
       </div>
 
       {err && (
-        <div style={{ fontSize: 13, color: '#b91c1c', marginBottom: 8 }}>{err}</div>
+        <div style={{ fontSize: 13, color: 'var(--state-error-fg)', marginBottom: 8 }}>{err}</div>
       )}
       {meta && (
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginBottom: 8 }}>
           {/* ★ 「몇 칸을 아직 사람이 채워야 하는가」가 이 줄의 핵심이다. */}
           인증된 판에서 뽑을 수 있는 값만 채웠습니다 — 나머지는 회사 실적에서 직접
           넣어 주십시오. 없는 값을 0으로 채우지 않습니다.
@@ -96,11 +96,11 @@ export function BaseValueFields({ pick, values, onChange }: {
           const m = meta?.[f.key];
           const derived = m?.source === 'DERIVED';
           return (
-            <label key={f.key} style={{ fontSize: 13, color: '#374151' }}>
-              {f.label} <span style={{ color: '#6b7280' }}>({f.unit})</span>
+            <label key={f.key} style={{ fontSize: 13, color: 'var(--surface-text)' }}>
+              {f.label} <span style={{ color: 'var(--surface-text-muted)' }}>({f.unit})</span>
               {/* ★ 색만으로 «유도됨» 을 나타내지 않는다(설계 §12) — 글자로도 적는다. */}
               {derived && (
-                <span style={{ color: '#15803d', marginLeft: 6, fontSize: 12 }}>
+                <span style={{ color: 'var(--state-success-fg)', marginLeft: 6, fontSize: 12 }}>
                   · 판에서 뽑음
                 </span>
               )}
@@ -108,13 +108,13 @@ export function BaseValueFields({ pick, values, onChange }: {
                 onChange={(e) => edit(f.key, e.target.value)}
                 style={{
                   display: 'block', width: '100%', marginTop: 4, padding: '8px 10px',
-                  border: `1px solid ${derived ? '#6ee7b7' : '#d1d5db'}`,
+                  border: `1px solid ${derived ? 'var(--state-success-fg)' : 'var(--surface-border)'}`,
                   borderRadius: 6, fontSize: 14,
-                  background: derived ? '#f0fdf4' : '#fff',
+                  background: derived ? 'var(--state-success-bg)' : '#fff',
                 }} />
               {/* ⚠️ 못 뽑은 이유를 그 칸 옆에 둔다 — 화면 아래 한 줄로 몰면 안 읽힌다. */}
               {m && !derived && m.reason && (
-                <span style={{ fontSize: 12, color: '#6b7280' }}>{m.reason}</span>
+                <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>{m.reason}</span>
               )}
             </label>
           );

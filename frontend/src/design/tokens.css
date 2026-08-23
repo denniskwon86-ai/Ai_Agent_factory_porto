@@ -44,8 +44,30 @@
   --surface-card: #ffffff;      /* 패널·카드 */
   --surface-raised: #f8f9fa;    /* 카드 안에서 한 단계 올라온 칸 */
   --surface-sunken: #f4f5f7;    /* 입력·비활성 영역 */
-  --surface-border: #d8dce3;    /* 경계 — 흰 표면에서 사라지지 않을 만큼 진하게 */
-  --surface-border-strong: #cbd1da;
+  /* ★★★ [2026-08-23 실측] **경계선에도 「배경과의 쌍」 규칙을 적용한다.**
+   *
+   * 위 `--surface-text-muted` 주석이 이미 못박은 원칙이다 — 「대비는 색 하나의 성질이 아니라
+   * 배경과의 쌍이다」. 그런데 그 원칙을 **글자에만 적용하고 경계선에는 적용하지 않았다.**
+   * 종전 값을 네 표면 전부에서 재어 보니:
+   *
+   *     --surface-border        #d8dce3 → card 1.38 · raised 1.30 · sunken 1.26 · page 1.21
+   *     --surface-border-strong #cbd1da → card 1.54 · raised 1.46 · sunken 1.41 · page 1.35
+   *
+   * 「흰 표면에서 사라지지 않을 만큼」이라고 적어 두었지만 흰 표면에서도 1.38 이고,
+   * 실제로 가장 많이 쓰는 화면 바탕(#eef1f4)에서는 1.21 로 **사실상 안 보인다.**
+   *
+   * ⚠️ 두 역할을 **가른다.** 하나의 값으로는 둘 다 만족할 수 없다:
+   *   · 구분선(장식) — 칸을 나누기만 한다. 보이기만 하면 된다 → 네 표면에서 **1.5 이상**
+   *   · 컨트롤 경계 — 입력칸·버튼이 «누를 수 있는 것» 임을 알리는 유일한 단서다.
+   *     WCAG 2.2 §1.4.11(비텍스트 대비)이 **3:1** 을 요구한다 → 네 표면에서 3.0 이상
+   *   ★ 입력칸 배경(#fbfcfd)은 카드(#ffffff)와 거의 같아서 **배경이 경계를 대신해 주지
+   *     못한다.** 그래서 여기서는 3:1 이 선택이 아니라 요구다. */
+  --surface-border: #c3c7cd;        /* 구분선 — card 1.70 · raised 1.61 · sunken 1.56 · page 1.50 */
+  --surface-border-control: #878b91; /* 컨트롤 경계 — card 3.42 · raised 3.25 · sunken 3.14 · page 3.02 */
+  /* ⚠️ `strong` 은 실제로 **전부 컨트롤 경계**에 쓰이고 있었다(secondary-button · studio 입력
+   *   · 드롭존 13곳). 이름만 남기고 값은 컨트롤 등급을 따르게 한다 — 두 값이 갈리면 다음
+   *   사람이 어느 쪽을 쓸지 다시 헷갈린다. */
+  --surface-border-strong: var(--surface-border-control);
   --surface-text: #101a2d;      /* 본문 */
   /* ★★ [설계 §9.1 WCAG AA] 종전 `#667185` 는 **흰 배경에서만** 4.92 로 통과하고, 이 저장소가
      실제로 쓰는 다른 배경에서는 미달이었다 — 화면 바탕(`--surface-page` #eef1f4)에서 4.34.
@@ -125,31 +147,54 @@
    *   밀어 넣으면 «표면»이 두 가지 뜻을 갖는다. 다음 사람이 반드시 잘못된 쪽을 고른다. */
   --rail-bg-top: #111b2a;
   --rail-bg-bottom: #172438;
-  --rail-border: #24344b;
+  /* ⚠️ [2026-08-23 실측] 종전 #24344b 는 레일 자기 배경(#111b2a·#172438)과 **1.24~1.37**
+   *   이라, 레일과 작업면을 가르는 선이 레일 쪽에서 보이지 않았다. 다섯 어두운 면 전부에서
+   *   1.5 이상이 되는 값으로 올린다(#111b2a 2.08 · #172438 1.88 · #0a1e5a 1.88 ·
+   *   #071846 2.06 · #123166 1.53). */
+  --rail-border: #3d4f6b;
   --rail-text: #e8eef8;
   --rail-text-muted: #9eacbf;
   --rail-text-dim: #8fa0b6;
   --rail-kicker: #80cfd9;
-  --rail-item-hover: #ffffff08;
+  /* ⚠️ [2026-08-23 실측] 어두운 면 위의 «흰색 옅게» 값들도 배경과의 쌍으로 재야 한다.
+   *   종전 8%(#ffffff08) 는 여섯 개 어두운 면 전부에서 **1.08~1.09** 로, 마우스를 올려도
+   *   올린 것을 알 수 없었다. 상태 변화는 «보이는 것» 이 조건이다. */
+  --rail-item-hover: #ffffff1f;
   --rail-item-active-bg: #22334b;
   --rail-item-active-border: #3e5472;
-  --rail-chip-bg: #ffffff0a;
+  --rail-chip-bg: #ffffff1a;
   --rail-chip-fg: #91a4bd;
 
   --jarvis-bg-top: #0a1e5a;
   --jarvis-bg-bottom: #071846;
-  --jarvis-border: #1e345e;
+  /* ⚠️ [2026-08-23 실측] Jarvis 레일과 밝은 작업면 사이의 경계다. 종전 #1e345e 는 레일 쪽
+   *   배경(#0a1e5a)과 **1.27** 이라, 레일이 어디서 시작하는지 보이지 않았다. 이 선은 두 면을
+   *   가르는 구조선이므로 레일 쪽에서도 보여야 한다(바깥 밝은 쪽과는 원래 충분히 대비된다). */
+  --jarvis-border: #37507e;
   --jarvis-text: #e6edf8;
   --jarvis-text-muted: #b9cbe8;
   --jarvis-kicker: #91a7cf;
-  --jarvis-bubble: #ffffff0d;
-  --jarvis-divider: #ffffff19;
+  /* ⚠️ 말풍선은 «여기까지가 한 발언» 을 말하는 면이다. 종전 5%(#ffffff0d)는 1.13~1.16 이라
+   *   면이 아예 안 보였고, 발언 경계가 줄바꿈으로만 남았다. */
+  --jarvis-bubble: #ffffff1a;
+  /* ⚠️ 종전 10%(#ffffff19)는 1.30~1.35 로 구분선이 사라졌다. 14%로 올려 여섯 어두운 면
+   *   (jarvis 위·아래 · rail 위·아래 · bar · nav-chip) **전부에서 1.5 이상**을 만든다.
+   *   ★ 밝은 쪽 `--surface-border` 와 같은 기준(1.5)이다 — 두 계열이 다른 잣대를 쓰면
+   *     같은 화면 안에서 어떤 선은 보이고 어떤 선은 안 보인다. */
+  --jarvis-divider: #ffffff24;
 
   /* 상단 바 — 구조색 그라데이션 */
   --bar-bg-from: #0a1e5a;
   --bar-bg-to: #123166;
   --bar-fg: #ffffff;
   --bar-fg-muted: #b9c9e6;
+  /* ⚠️ [2026-08-23 실측] `--bar-border` 는 **바 바깥쪽 경계**용이다 — 밝은 본문과 맞닿는
+   *   아래 변에서만 대비가 산다. 바 **안쪽** 구분선에 쓰면 남색 위 남색이라 1.01:1 로
+   *   사라진다(구분자 `│` 와 「실제」 배지 테두리가 그랬다).
+   * ★ 안쪽 구분선은 이것을 쓴다. 흰색을 옅게 얹어야 어두운 면 위에서 보인다
+   *   (`afs.css` 의 `.afs-topbar .afs-border` 가 이미 쓰던 값과 같은 값이다 — 정의를
+   *   한 곳으로 모은다). Jarvis 레일의 `--jarvis-divider` 와 같은 역할이다. */
+  --bar-divider: #ffffff33;
   --bar-border: #24344b;
   --backdrop: rgba(6, 12, 26, .62);
 

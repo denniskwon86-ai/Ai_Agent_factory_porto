@@ -167,6 +167,88 @@ export async function decideBinding(bindingId: string, action: string, reason = 
   );
 }
 
+// ── 키트로 앱 만들기 (2026-08-23) ───────────────────────────────────────
+//
+// ⚠️⚠️ 이 네 호출이 없던 동안 준비도 보드는 `READY` 를 그렸고 **누를 것이 없었다.**
+//   「보여 주는 것」과 「되는 것」이 다르면, 보여 주는 쪽이 거짓말을 한다.
+
+/** 앱 계약 상태. ★ `null` 은 «계약이 아직 없다» 다 — 빈 문자열이 아니다. */
+export type AppContractStatus = 'DRAFT' | 'APPROVED' | 'SUPERSEDED' | null;
+
+export interface KitAppRow {
+  app_id: string;
+  label: string;
+  /** 준비도(만들 수 있는가). ★ 계약 상태와 **다른 사실**이다. */
+  readiness_state: OutputState | string;
+  user_message: string;
+  next_action: string;
+  /** ⚠️ `null` = 계약 없음. 「없음」·「승인 대기」·「승인됨」은 서로 다른 사실이다. */
+  contract_status: AppContractStatus;
+  contract_revision: number | null;
+  drafted_by: string;
+  approved_by: string;
+  release_id: string;
+  /** 실제로 결속된 데이터셋 수. ⚠️ `null` = **지금 확인하지 못했다**(0 이 아니다). */
+  built_datasets: number | null;
+}
+
+export async function listKitApps(instanceId: string) {
+  return unwrap<{ instance_id: string; apps: KitAppRow[] }>(
+    await apiFetch(`${BASE}/instances/${encodeURIComponent(instanceId)}/apps`),
+    '앱 목록',
+  );
+}
+
+/** 계약 **초안**을 만든다. ⚠️ 승인하지 않는다 — 누르는 것은 다른 사람이다. */
+export async function draftAppContract(
+  instanceId: string, appId: string, appClass: string,
+) {
+  return unwrap<any>(
+    await apiFetch(
+      `${BASE}/instances/${encodeURIComponent(instanceId)}`
+      + `/apps/${encodeURIComponent(appId)}/contract`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // ★ `app_class` 를 화면이 **비워서 보내지 않는다.** 서버가 거부한다 —
+        //   추측한 분류는 나중에 권한 판단의 근거로 쓰인다.
+        body: JSON.stringify({ app_class: appClass }),
+      },
+    ),
+    '앱 계약 초안',
+  );
+}
+
+/** **다른 사람이** 승인한다. ⚠️ 근거는 필수다. */
+export async function approveAppContract(
+  instanceId: string, appId: string, revision: number, rationale: string,
+) {
+  return unwrap<any>(
+    await apiFetch(
+      `${BASE}/instances/${encodeURIComponent(instanceId)}`
+      + `/apps/${encodeURIComponent(appId)}/contract/approve`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revision, rationale }),
+      },
+    ),
+    '앱 계약 승인',
+  );
+}
+
+export async function buildKitApp(instanceId: string, appId: string) {
+  return unwrap<{ app_id: string; release_id: string; datasets: string[];
+                  warning: string }>(
+    await apiFetch(
+      `${BASE}/instances/${encodeURIComponent(instanceId)}`
+      + `/apps/${encodeURIComponent(appId)}/build`,
+      { method: 'POST' },
+    ),
+    '앱 만들기',
+  );
+}
+
 // ── 기준선·시뮬레이션 ───────────────────────────────────────────────────
 const BASELINE = '/api/v1/baseline';
 

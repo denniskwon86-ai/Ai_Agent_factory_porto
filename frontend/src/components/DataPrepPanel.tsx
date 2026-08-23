@@ -25,12 +25,12 @@ import {
 function Err({ error }: { error: { message: string; status: number } }) {
   return (
     <div style={{
-      padding: 12, border: '1px solid #fca5a5', borderRadius: 6,
-      background: '#fef2f2', fontSize: 14,
+      padding: 12, border: '1px solid var(--state-error-fg)', borderRadius: 6,
+      background: 'var(--state-error-bg)', fontSize: 14,
     }}>
-      <strong style={{ color: '#b91c1c' }}>불러오지 못했습니다</strong>
+      <strong style={{ color: 'var(--state-error-fg)' }}>불러오지 못했습니다</strong>
       <div style={{ marginTop: 4 }}>{error.message}</div>
-      <div style={{ marginTop: 4, fontSize: 13, color: '#6b7280' }}>
+      <div style={{ marginTop: 4, fontSize: 13, color: 'var(--surface-text-muted)' }}>
         {/* ⚠️ 「없음」과 「지금 못 읽음」은 사용자가 할 일이 다르다. */}
         {error.status === 404
           ? '찾을 수 없습니다 — 조직 범위를 확인해 주십시오.'
@@ -129,7 +129,9 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
         <b>업무 데이터 준비</b>
         <span>업무키트를 조직에 적용하고 · 원천을 연결하고 · 파일 판을 인증합니다</span>
         <div className="bar-actions">
-          <button onClick={onClose}>닫기</button>
+          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
         </div>
       </div>
 
@@ -147,10 +149,10 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
             <>
               <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>등록된 업무 데이터 키트</h4>
               {kits === null ? (
-                <div style={{ fontSize: 14, color: '#6b7280' }}>불러오는 중…</div>
+                <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>불러오는 중…</div>
               ) : kits.length === 0 ? (
                 // ⚠️ 「0건」은 실패가 아니다 — 그 사실을 **그대로** 말한다.
-                <div style={{ fontSize: 14, color: '#6b7280' }}>
+                <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>
                   등록된 키트가 없습니다. `docs/data-kits/` 에 키트 문서를 두면 여기 나타납니다.
                 </div>
               ) : (
@@ -159,7 +161,7 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                     <li key={`${k.kit_id}@${k.version}`} style={{ fontSize: 14, marginBottom: 4 }}>
                       {/* ★ 사람이 읽는 이름이 먼저, 기술 ID 는 뒤에 작게. */}
                       <strong>{k.name || k.kit_id}</strong>
-                      <span style={{ color: '#6b7280', marginLeft: 8, fontSize: 12 }}>
+                      <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
                         {k.kit_id} · v{k.version} · {k.mode}
                       </span>
                     </li>
@@ -171,12 +173,12 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
 
               {/* ★★★ 먼저 «이미 있는 것» 을 보여 준다. id 를 외워 오라고 하지 않는다. */}
               {instances === null ? (
-                <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 8 }}>
                   인스턴스 목록을 지금 확인하지 못했습니다 — 아래에 id 를 직접 넣어
                   열 수 있습니다.
                 </div>
               ) : instances.length === 0 ? (
-                <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 8 }}>
                   이 조직 범위에 적용된 업무키트가 아직 없습니다.
                 </div>
               ) : (
@@ -191,18 +193,18 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                           textAlign: 'left', padding: '10px 12px',
-                          border: '1px solid #e5e7eb', borderRadius: 6,
+                          border: '1px solid var(--surface-border)', borderRadius: 6,
                           background: '#fff', cursor: 'pointer', fontSize: 14,
                           fontFamily: 'inherit', color: 'inherit',
                         }}>
                         <span style={{ flex: 1 }}>
                           {/* 사람이 읽는 이름이 먼저다(설계 §12). */}
                           <strong>{it.label || it.kit_id}</strong>
-                          <span style={{ color: '#6b7280', marginLeft: 8, fontSize: 12 }}>
+                          <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
                             {it.scope_node_id} · {it.entity_mode} · {it.instance_id}
                           </span>
                         </span>
-                        <span style={{ color: '#2563eb', fontSize: 13 }}>열기</span>
+                        <span style={{ color: 'var(--action-primary-bg)', fontSize: 13 }}>열기</span>
                       </button>
                     </li>
                   ))}
@@ -215,11 +217,11 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setInstanceId(e.target.value)}
                   placeholder="목록에 없는 인스턴스 id 를 직접 넣습니다(선택)"
                   style={{
-                    flex: 1, padding: '8px 10px', border: '1px solid #d1d5db',
+                    flex: 1, padding: '8px 10px', border: '1px solid var(--surface-border)',
                     borderRadius: 6, fontSize: 14,
                   }} />
                 <button onClick={() => openInstance(instanceId)} style={{
-                  padding: '8px 16px', border: '1px solid #2563eb', background: '#2563eb',
+                  padding: '8px 16px', border: '1px solid var(--action-primary-bg)', background: 'var(--action-primary-bg)',
                   color: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 14,
                 }}>열기</button>
               </div>
@@ -227,9 +229,9 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
               {notice && (
                 <div style={{
                   padding: '8px 12px', borderRadius: 6, fontSize: 14, marginBottom: 12,
-                  background: notice.ok ? '#ecfdf5' : '#fef2f2',
-                  border: `1px solid ${notice.ok ? '#6ee7b7' : '#fca5a5'}`,
-                  color: notice.ok ? '#065f46' : '#991b1b',
+                  background: notice.ok ? 'var(--state-success-bg)' : 'var(--state-error-bg)',
+                  border: `1px solid ${notice.ok ? 'var(--state-success-fg)' : 'var(--state-error-fg)'}`,
+                  color: notice.ok ? '#065f46' : 'var(--state-error-fg)',
                 }}>{notice.text}</div>
               )}
 
@@ -237,13 +239,13 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                 <>
                   <h4 style={{ margin: '16px 0 8px', fontSize: 15 }}>원천 결속과 파일 등록</h4>
                   {(instance.bindings || []).length === 0 ? (
-                    <div style={{ fontSize: 14, color: '#6b7280' }}>
+                    <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>
                       아직 원천이 연결되지 않았습니다.
                     </div>
                   ) : (
                     <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
                       <thead>
-                        <tr style={{ borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>
+                        <tr style={{ borderBottom: '2px solid var(--surface-border)', textAlign: 'left' }}>
                           <th style={{ padding: 8, fontSize: 13 }}>업무 데이터</th>
                           <th style={{ padding: 8, fontSize: 13 }}>결속 상태</th>
                           <th style={{ padding: 8, fontSize: 13 }}>파일 등록</th>
@@ -251,17 +253,17 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                       </thead>
                       <tbody>
                         {(instance.bindings || []).map((b: any) => (
-                          <tr key={b.binding_id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                          <tr key={b.binding_id} style={{ borderBottom: '1px solid var(--surface-border)' }}>
                             <td style={{ padding: 8, fontSize: 14 }}>
                               {labelOf(b.dataset_contract_key)}
-                              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
                                 {b.dataset_contract_key}
                               </div>
                             </td>
                             <td style={{ padding: 8, fontSize: 14 }}>
                               {b.state}
                               {b.blocked_reason && (
-                                <div style={{ color: '#b91c1c', fontSize: 12 }}>
+                                <div style={{ color: 'var(--state-error-fg)', fontSize: 12 }}>
                                   {b.blocked_reason}
                                 </div>
                               )}
@@ -274,7 +276,7 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                                   onChange={(e) => onUpload(b.binding_id,
                                     e.target.files?.[0] || null)} />
                               ) : (
-                                <span style={{ color: '#6b7280' }}>
+                                <span style={{ color: 'var(--surface-text-muted)' }}>
                                   결속을 활성화한 뒤 올릴 수 있습니다.
                                 </span>
                               )}
@@ -287,20 +289,20 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                           .filter((d: any) => !d.bound)
                           .map((d: any) => (
                             <tr key={d.dataset_contract_key}
-                                style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                style={{ borderBottom: '1px solid var(--surface-border)' }}>
                               <td style={{ padding: 8, fontSize: 14 }}>
                                 {d.label || d.dataset_contract_key}
-                                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                                <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
                                   {d.dataset_contract_key}
                                 </div>
                               </td>
-                              <td style={{ padding: 8, fontSize: 14, color: '#b45309' }}>
+                              <td style={{ padding: 8, fontSize: 14, color: 'var(--state-warn-fg)' }}>
                                 원천 미지정
-                                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                                <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
                                   이 데이터를 어디서 가져올지 아직 고르지 않았습니다.
                                 </div>
                               </td>
-                              <td style={{ padding: 8, fontSize: 13, color: '#6b7280' }}>
+                              <td style={{ padding: 8, fontSize: 13, color: 'var(--surface-text-muted)' }}>
                                 원천을 고른 뒤 올릴 수 있습니다.
                               </td>
                             </tr>
@@ -318,7 +320,7 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                             {labelOf(s.dataset_contract_key)} · {s.state} · {s.row_count}행
                             {/* ★ 성격 표시는 서버가 준 문구를 그대로 쓴다 — 화면마다
                                 각자 붙이면 한 화면에서 빠진다. */}
-                            <div style={{ fontSize: 12, color: '#6b7280' }}>
+                            <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
                               {s.display_label}
                             </div>
                             {/* ★★★ 인증은 «이 판을 공식으로 쓴다» 는 선언이다.
@@ -329,13 +331,13 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                                 onClick={() => onCertify(s.snapshot_id, s.row_count)}
                                 style={{
                                   marginTop: 4, padding: '4px 12px', fontSize: 13,
-                                  border: '1px solid #2563eb', background: '#fff',
-                                  color: '#2563eb', borderRadius: 6, cursor: 'pointer',
+                                  border: '1px solid var(--action-primary-bg)', background: '#fff',
+                                  color: 'var(--action-primary-bg)', borderRadius: 6, cursor: 'pointer',
                                 }}>
                                 {busy === s.snapshot_id ? '검사 중…' : '품질·대사 검사 후 시연 인증'}
                               </button>
                             ) : s.state === 'QUARANTINED' ? (
-                              <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 2 }}>
+                              <div style={{ fontSize: 12, color: 'var(--state-error-fg)', marginTop: 2 }}>
                                 격리됨 — {s.quarantine?.reason || '사유 미기재'}. 고친 파일을 다시 올리십시오.
                               </div>
                             ) : null}
@@ -345,7 +347,7 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                     </>
                   )}
 
-                  <div style={{ borderTop: '1px solid #e5e7eb', marginTop: 8 }}>
+                  <div style={{ borderTop: '1px solid var(--surface-border)', marginTop: 8 }}>
                     <DataReadinessBoard instanceId={instanceId.trim()} />
                   </div>
                 </>

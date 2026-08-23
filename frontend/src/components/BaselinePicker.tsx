@@ -77,12 +77,12 @@ export function BaselinePicker({ value, onChange }: {
 
       {/* ── ① 인스턴스 ─────────────────────────────────────────────── */}
       {instances === null ? (
-        <div style={{ fontSize: 13, color: '#b45309', marginBottom: 8 }}>
+        <div style={{ fontSize: 13, color: 'var(--state-warn-fg)', marginBottom: 8 }}>
           업무키트 목록을 지금 확인하지 못했습니다{loadErr ? ` — ${loadErr}` : ''}.
           {' '}데이터가 없는 것이 아니라 지금 읽지 못한 상태입니다.
         </div>
       ) : instances.length === 0 ? (
-        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
+        <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 8 }}>
           이 조직 범위에 적용된 업무키트가 아직 없습니다 — 「업무 데이터 준비」에서
           먼저 키트를 적용하십시오.
         </div>
@@ -95,15 +95,15 @@ export function BaselinePicker({ value, onChange }: {
                 <button onClick={() => pickInstance(it.instance_id)} style={{
                   display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                   textAlign: 'left', padding: '9px 12px', fontFamily: 'inherit',
-                  border: `1px solid ${on ? '#2563eb' : '#e5e7eb'}`, borderRadius: 6,
-                  background: on ? '#eff6ff' : '#fff', cursor: 'pointer', fontSize: 14,
+                  border: `1px solid ${on ? 'var(--action-primary-bg)' : 'var(--surface-border)'}`, borderRadius: 6,
+                  background: on ? 'var(--state-info-bg)' : '#fff', cursor: 'pointer', fontSize: 14,
                   color: 'inherit',
                 }}>
                   {/* ★ 색만으로 «고름» 을 나타내지 않는다(설계 §12) — 기호를 함께 둔다. */}
                   <span aria-hidden>{on ? '◉' : '○'}</span>
                   <span style={{ flex: 1 }}>
                     <strong>{it.label || it.kit_id}</strong>
-                    <span style={{ color: '#6b7280', marginLeft: 8, fontSize: 12 }}>
+                    <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
                       {it.scope_node_id} · {it.entity_mode}
                     </span>
                   </span>
@@ -116,11 +116,11 @@ export function BaselinePicker({ value, onChange }: {
 
       {/* ── ② 판 ──────────────────────────────────────────────────── */}
       {value.instanceId && (snapshots === null ? (
-        <div style={{ fontSize: 13, color: '#b45309' }}>
+        <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
           데이터 판 목록을 지금 확인하지 못했습니다.
         </div>
       ) : certified.length === 0 ? (
-        <div style={{ fontSize: 13, color: '#b45309' }}>
+        <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
           인증된 데이터 판이 없습니다 — 인증되지 않은 판으로는 기준선을 만들 수
           없습니다{uncertified.length
             ? ` (검사·인증 대기 ${uncertified.length}건은 「업무 데이터 준비」에서 진행합니다)`
@@ -128,7 +128,7 @@ export function BaselinePicker({ value, onChange }: {
         </div>
       ) : (
         <>
-          <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 6 }}>
+          <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 6 }}>
             기준선에 넣을 판을 고르십시오. 고른 집합이 그대로 고정됩니다 —
             「최신으로 알아서」는 다음 주에 다른 숫자를 냅니다.
           </div>
@@ -137,7 +137,7 @@ export function BaselinePicker({ value, onChange }: {
               <li key={s.snapshot_id} style={{ marginBottom: 4 }}>
                 <label style={{
                   display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
-                  border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 14,
+                  border: '1px solid var(--surface-border)', borderRadius: 6, fontSize: 14,
                   cursor: 'pointer',
                 }}>
                   <input type="checkbox"
@@ -147,7 +147,7 @@ export function BaselinePicker({ value, onChange }: {
                     {/* ★ 사람이 읽는 이름이 먼저다(설계 §12). 이름이 없을 때만
                         계약키를 그대로 쓴다. */}
                     {s.label || s.dataset_contract_key}
-                    <span style={{ color: '#6b7280', marginLeft: 8, fontSize: 12 }}>
+                    <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
                       {s.row_count}행 · {String(s.certified_at || '').slice(0, 16).replace('T', ' ')}
                     </span>
                   </span>
@@ -157,7 +157,7 @@ export function BaselinePicker({ value, onChange }: {
           </ul>
           {/* ⚠️ 인증 안 된 판이 있으면 «없는 셈» 치지 않고 그 사실을 말한다. */}
           {uncertified.length > 0 && (
-            <div style={{ fontSize: 12, color: '#6b7280' }}>
+            <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
               인증되지 않은 판 {uncertified.length}건은 여기에 나오지 않습니다.
             </div>
           )}

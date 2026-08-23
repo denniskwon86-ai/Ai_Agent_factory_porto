@@ -19,7 +19,12 @@
   --color-gray-400: #5a6478;
   --color-gray-500: #667185;
   --color-gray-600: #8b95a6;
-  --color-gray-700: #e2e6ec;
+  /* ⚠️ [2026-08-23 실측] 700 단계는 이 셸에서 **경계선**으로만 쓰인다(`border-gray-700`
+   *   59곳 · `border-slate-700` 0곳; `text-gray-700` 은 셸 밖 PreviewPanel 에만 있다).
+   *   종전 #e2e6ec 는 셸 배경(#f6f7f9) 위에서 **1.10:1** 로 사라졌다. 라이트 표면의
+   *   구분선 정본(`--surface-border`)과 같은 값으로 맞춘다 — 두 곳이 다른 값을 쓰면
+   *   같은 화면에서 어떤 선은 보이고 어떤 선은 안 보인다. */
+  --color-gray-700: #c3c7cd;
   --color-gray-800: #ffffff;
   --color-gray-900: #f6f7f9;
   --color-gray-950: #eef1f4;
@@ -31,7 +36,7 @@
   --color-slate-400: #5a6478;
   --color-slate-500: #667185;
   --color-slate-600: #8b95a6;
-  --color-slate-700: #e2e6ec;
+  --color-slate-700: #c3c7cd;
   --color-slate-800: #ffffff;
   --color-slate-900: #f4f6f8;
   --color-slate-950: #e9edf2;

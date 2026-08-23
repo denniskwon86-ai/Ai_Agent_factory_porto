@@ -357,8 +357,15 @@ function AppShell() {
         <div className="afs-scope" style={{ minHeight: '100vh',
           background: 'var(--surface-page)' }}>
           {/* ★ [설계 §3.1] Top Bar **72px** · 구조색. ⑥ 상단 회사·사업부·공장 Context 는
-              `CompanyContextBar` 가 담당한다(§4.1). */}
-          <header style={{
+              `CompanyContextBar` 가 담당한다(§4.1).
+              ⚠️⚠️ [2026-08-23 실측] `afs-topbar` 를 **반드시 붙인다.** 이 바는 구조색(남색)
+                위인데, 클래스가 없으면 `afs.css` 의 「바 위에서는 유틸리티를 다시 해석한다」
+                규칙(`.afs-scope .afs-topbar .afs-muted` 등)이 전부 건너뛰어진다. 그러면 안에
+                있는 `CompanyContextBar`·`SessionBar`·`GlobalNav` 가 **본문용 어두운 색**을
+                그대로 써서 어두운 바에 얹힌다 — 로그인한 사람 이름「권희권」이 2.22:1,
+                구분자 `│` 가 1.01:1 로 측정됐다(사실상 안 보인다).
+                ★ 배경·테두리는 아래 인라인이 이미 정하므로 클래스는 **재해석만** 켠다. */}
+          <header className="afs-topbar" style={{
             height: 72, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             gap: 16, padding: '0 24px', position: 'sticky', top: 0, zIndex: 20,
             background: 'linear-gradient(90deg, var(--bar-bg-from), var(--bar-bg-to))',

@@ -24,16 +24,16 @@ import type { Check, ReleaseItem } from '../lib/promotionApi';
 //      나중에 답하려면 그 값이 화면에 한 번은 나와야 한다.
 
 const STATUS_VIEW: Record<string, { label: string; tone: string; mark: string }> = {
-  candidate: { label: '후보', mark: '◔', tone: '#b45309' },
-  active: { label: '운영', mark: '●', tone: '#15803d' },
-  deprecated: { label: '사용 중단 예고', mark: '◐', tone: '#b45309' },
-  disabled: { label: '사용 차단', mark: '✕', tone: '#b91c1c' },
+  candidate: { label: '후보', mark: '◔', tone: 'var(--state-warn-fg)' },
+  active: { label: '운영', mark: '●', tone: 'var(--state-success-fg)' },
+  deprecated: { label: '사용 중단 예고', mark: '◐', tone: 'var(--state-warn-fg)' },
+  disabled: { label: '사용 차단', mark: '✕', tone: 'var(--state-error-fg)' },
 };
 
 function StatusChip({ item }: { item: ReleaseItem }) {
   const v = STATUS_VIEW[item.lifecycle_status] ?? {
     // ⚠️ 모르는 상태를 «운영» 으로 떨어뜨리지 않는다.
-    label: `알 수 없는 상태(${item.lifecycle_status})`, mark: '⚠', tone: '#b91c1c',
+    label: `알 수 없는 상태(${item.lifecycle_status})`, mark: '⚠', tone: 'var(--state-error-fg)',
   };
   return (
     <span style={{ color: v.tone, fontSize: 13, whiteSpace: 'nowrap' }}>
@@ -41,7 +41,7 @@ function StatusChip({ item }: { item: ReleaseItem }) {
       <span aria-hidden style={{ marginRight: 4 }}>{v.mark}</span>{v.label}
       {/* ★★★ 추정과 관리자의 결정을 구분한다. 같게 보이면 «승인됨» 이라는 거짓 기록이 된다. */}
       {!item.lifecycle_recorded && (
-        <span style={{ color: '#6b7280', marginLeft: 6, fontSize: 12 }}>(미기록)</span>
+        <span style={{ color: 'var(--surface-text-muted)', marginLeft: 6, fontSize: 12 }}>(미기록)</span>
       )}
     </span>
   );
@@ -53,13 +53,13 @@ function CheckList({ checks }: { checks: Check[] }) {
       {checks.map((c) => (
         <li key={c.name} style={{
           display: 'flex', gap: 10, padding: '7px 10px', fontSize: 14,
-          borderBottom: '1px solid #f3f4f6',
+          borderBottom: '1px solid var(--surface-border)',
         }}>
-          <span aria-hidden style={{ color: c.ok ? '#15803d' : '#b91c1c' }}>
+          <span aria-hidden style={{ color: c.ok ? 'var(--state-success-fg)' : 'var(--state-error-fg)' }}>
             {c.ok ? '●' : '✕'}
           </span>
           <span style={{ width: 130 }}>{c.name}</span>
-          <span style={{ flex: 1, color: c.ok ? '#15803d' : '#b91c1c' }}>
+          <span style={{ flex: 1, color: c.ok ? 'var(--state-success-fg)' : 'var(--state-error-fg)' }}>
             {/* ⚠️ 사유를 뭉개지 않는다 — 무엇을 고쳐야 하는지가 여기에만 있다. */}
             {c.ok ? '통과' : c.reason}
           </span>
@@ -139,7 +139,9 @@ export function ReleasePromotionPanel({ onClose }: { onClose: () => void }) {
         <span>후보 판을 운영으로 — 다섯 검사를 모두 지나야 올라갑니다</span>
         <div className="bar-actions">
           {busy && <span className="busy">올리는 중…</span>}
-          <button onClick={onClose}>닫기</button>
+          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
         </div>
       </div>
 
@@ -151,18 +153,18 @@ export function ReleasePromotionPanel({ onClose }: { onClose: () => void }) {
 
           {items === null ? (
             <div style={{
-              padding: 12, border: '1px solid #fca5a5', borderRadius: 6,
-              background: '#fef2f2', fontSize: 14,
+              padding: 12, border: '1px solid var(--state-error-fg)', borderRadius: 6,
+              background: 'var(--state-error-bg)', fontSize: 14,
             }}>
-              <strong style={{ color: '#b91c1c' }}>불러오지 못했습니다</strong>
+              <strong style={{ color: 'var(--state-error-fg)' }}>불러오지 못했습니다</strong>
               <div style={{ marginTop: 4 }}>{loadErr?.message}</div>
-              <div style={{ marginTop: 4, fontSize: 13, color: '#6b7280' }}>
+              <div style={{ marginTop: 4, fontSize: 13, color: 'var(--surface-text-muted)' }}>
                 {/* ⚠️ 「없음」과 「지금 못 읽음」은 사용자가 할 일이 다르다. */}
                 결과물이 없는 것이 아니라 지금 확인하지 못한 상태입니다.
               </div>
             </div>
           ) : candidates.length === 0 ? (
-            <div style={{ fontSize: 13, color: '#6b7280' }}>
+            <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
               올릴 후보 판이 없습니다 — 게시하면 후보가 되고, 미리보기로 확인한 뒤
               여기서 운영으로 올립니다.
             </div>
@@ -175,15 +177,15 @@ export function ReleasePromotionPanel({ onClose }: { onClose: () => void }) {
                     <button onClick={() => { setPicked(it); setDone(null); }} style={{
                       display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                       textAlign: 'left', padding: '10px 12px', fontFamily: 'inherit',
-                      border: `1px solid ${on ? '#2563eb' : '#e5e7eb'}`, borderRadius: 6,
-                      background: on ? '#eff6ff' : '#fff', cursor: 'pointer',
+                      border: `1px solid ${on ? 'var(--action-primary-bg)' : 'var(--surface-border)'}`, borderRadius: 6,
+                      background: on ? 'var(--state-info-bg)' : '#fff', cursor: 'pointer',
                       fontSize: 14, color: 'inherit',
                     }}>
                       <span aria-hidden>{on ? '◉' : '○'}</span>
                       <span style={{ flex: 1 }}>
                         {/* 사람이 읽는 이름이 먼저다(설계 §12). */}
                         <strong>{it.project_name || it.release_id}</strong>
-                        <span style={{ color: '#6b7280', marginLeft: 8, fontSize: 12 }}>
+                        <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
                           {String(it.created_at || '').slice(0, 16).replace('T', ' ')}
                           {' · '}{it.release_id}
                         </span>
@@ -201,13 +203,13 @@ export function ReleasePromotionPanel({ onClose }: { onClose: () => void }) {
               <h4 style={{ margin: '12px 0 4px', fontSize: 15 }}>올리기 전 점검</h4>
               <label style={{
                 display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13,
-                color: '#374151', margin: '6px 0 10px',
+                color: 'var(--surface-text)', margin: '6px 0 10px',
               }}>
                 <input type="checkbox" checked={noData}
                   onChange={(e) => setNoData(e.target.checked)} style={{ marginTop: 3 }} />
                 <span>
                   이 앱은 업무 데이터를 쓰지 않습니다
-                  <div style={{ color: '#6b7280', fontSize: 12 }}>
+                  <div style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>
                     {/* ★★★ 「확인하지 못함」과 「해당 없음」은 다른 사실이다. */}
                     켜지 않으면 업무 데이터 준비도를 확인합니다. 확인하지 못한 것을
                     «준비됨» 으로 세지 않습니다.
@@ -216,57 +218,57 @@ export function ReleasePromotionPanel({ onClose }: { onClose: () => void }) {
               </label>
 
               {checkErr && (
-                <div style={{ fontSize: 13, color: '#b91c1c', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: 'var(--state-error-fg)', marginBottom: 8 }}>
                   {checkErr}
                 </div>
               )}
               {checks === null && !checkErr ? (
-                <div style={{ fontSize: 13, color: '#6b7280' }}>점검 중…</div>
+                <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>점검 중…</div>
               ) : checks && <CheckList checks={checks.checks} />}
 
               <div style={{ margin: '14px 0 8px' }}>
-                <label style={{ fontSize: 13, color: '#374151' }}>
-                  승격 사유 <span style={{ color: '#6b7280' }}>(선택)</span>
+                <label style={{ fontSize: 13, color: 'var(--surface-text)' }}>
+                  승격 사유 <span style={{ color: 'var(--surface-text-muted)' }}>(선택)</span>
                   <input value={reason} onChange={(e) => setReason(e.target.value)}
                     placeholder="예: 미리보기에서 확인 완료"
                     style={{
                       display: 'block', width: '100%', marginTop: 4, padding: '8px 10px',
-                      border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14,
+                      border: '1px solid var(--surface-border)', borderRadius: 6, fontSize: 14,
                     }} />
                 </label>
               </div>
 
               {/* ★★★ 막힌 이유를 **누르기 전에** 말한다. */}
               {blocked && (
-                <div style={{ fontSize: 13, color: '#b45309', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: 'var(--state-warn-fg)', marginBottom: 8 }}>
                   {blocked}
                 </div>
               )}
               <button onClick={run} disabled={busy || !!blocked || checks === null}
                 style={{
                   padding: '9px 20px', borderRadius: 6, fontSize: 14, fontFamily: 'inherit',
-                  border: `1px solid ${blocked || checks === null ? '#d1d5db' : '#2563eb'}`,
-                  background: blocked || checks === null ? '#f3f4f6' : '#2563eb',
-                  color: blocked || checks === null ? '#9ca3af' : '#fff',
+                  border: `1px solid ${blocked || checks === null ? 'var(--surface-border)' : 'var(--action-primary-bg)'}`,
+                  background: blocked || checks === null ? 'var(--surface-sunken)' : 'var(--action-primary-bg)',
+                  color: blocked || checks === null ? 'var(--surface-text-faint)' : '#fff',
                   cursor: busy || blocked || checks === null ? 'default' : 'pointer',
                 }}>{busy ? '올리는 중…' : '운영으로 올리기'}</button>
 
               {done && (
                 <div style={{
                   marginTop: 14, padding: 12, borderRadius: 6, fontSize: 14,
-                  background: '#ecfdf5', border: '1px solid #6ee7b7',
+                  background: 'var(--state-success-bg)', border: '1px solid var(--state-success-fg)',
                 }}>
                   <strong>운영으로 올렸습니다.</strong>
                   {/* ★★★ 「어느 데이터 위에서 올렸나」에 나중에 답하려면 그 값이 화면에
                       한 번은 나와야 한다. */}
-                  <div style={{ marginTop: 6, fontSize: 13, color: '#374151' }}>
+                  <div style={{ marginTop: 6, fontSize: 13, color: 'var(--surface-text)' }}>
                     봉인된 업무 데이터 지문:{' '}
                     <code>{done.data_fingerprint || '(없음)'}</code>
                     {done.data_fingerprint === 'NOT_APPLICABLE' && (
-                      <span style={{ color: '#6b7280' }}> — 업무 데이터를 쓰지 않는 앱</span>
+                      <span style={{ color: 'var(--surface-text-muted)' }}> — 업무 데이터를 쓰지 않는 앱</span>
                     )}
                   </div>
-                  <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
+                  <div style={{ marginTop: 4, fontSize: 12, color: 'var(--surface-text-muted)' }}>
                     이 판으로 열어 둔 미리보기 증명은 더 이상 쓸 수 없습니다 — 앱을 다시
                     여십시오.
                   </div>
