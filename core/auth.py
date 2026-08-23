@@ -43,7 +43,7 @@ _DB_PATH = data_path("auth.db")
 #:   저장분이 우선한다.
 #:   ⚠️ 운영 전에 반드시 바꿔야 하는 값이다. 그 사실을 코드에 남겨 두어야 «임시» 가 «영구» 가
 #:     되지 않는다(이 저장소가 한시 예외에서 배운 것과 같은 이유).
-DEFAULT_PASSWORD = "pass:"
+DEFAULT_PASSWORD = "pass1"
 
 #: 세션 수명. 짧으면 작업 중 튕기고, 길면 자리를 비운 화면이 계속 열려 있다.
 SESSION_HOURS = 12
@@ -190,7 +190,19 @@ class AuthStore:
         ★ 저장된 해시가 없으면 **초기 공통 비밀번호**와 대조한다. 21개 계정에 미리 행을 만들지
           않아도 되고, 사용자가 바꾸는 순간부터 저장분이 우선한다.
         ⚠️ 비교는 `hmac.compare_digest` 로 한다 — 문자열 `==` 는 앞자리부터 다른 시점에 끝나므로
-          응답 시간으로 정답 길이를 짐작할 여지를 준다."""
+          응답 시간으로 정답 길이를 짐작할 여지를 준다.
+
+        ## ⚠️⚠️ [2026-08-23 실측] **바이트로 비교한다.** `str` 로 넘기면 한글이 서버를 죽였다
+
+        `hmac.compare_digest` 는 `str` 인자를 받을 때 **ASCII 만** 허용한다. 비ASCII 가 한 글자라도
+        있으면 `TypeError: comparing strings with non-ASCII characters is not supported` 로
+        터진다. 즉 한글 비밀번호를 입력하면 «비밀번호가 틀렸습니다»(401) 가 아니라 **500** 이
+        났다. 한국어 사용 기업에서 이것은 예외 상황이 아니라 **기본 경로**다.
+
+        ★ 로그인 화면은 인증 없이 누구나 두드릴 수 있는 곳이다. 거기서 나는 500 은 사용자에게
+          「내 계정이 고장났나」로 보이고, 로그에는 스택 트레이스가 쌓인다.
+        ⚠️ `str(...) == ...` 로 되돌리지 말 것 — 위 문단의 타이밍 이유가 그대로 살아 있다.
+          UTF-8 바이트로 인코딩하면 상수시간 비교를 유지하면서 모든 문자를 받는다."""
         uid = (user_id or "").strip()
         if not uid or not password:
             return False
@@ -199,7 +211,8 @@ class AuthStore:
             r = conn.execute("SELECT salt, hash FROM auth_credential WHERE user_id=?",
                              (uid,)).fetchone()
         if r is None:
-            return hmac.compare_digest(password, DEFAULT_PASSWORD)
+            return hmac.compare_digest(password.encode("utf-8"),
+                                       DEFAULT_PASSWORD.encode("utf-8"))
         return hmac.compare_digest(_digest(password, r["salt"]), r["hash"])
 
     def uses_default_password(self, user_id: str) -> bool:

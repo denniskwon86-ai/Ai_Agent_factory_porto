@@ -194,8 +194,12 @@ def test_요청자가_보낸_테넌트를_티켓에_싣지_않는다(client):
     ⚠️ 바뀐 것은 **누가 채우는가** 뿐이다. 요청 헤더는 여전히 쳐다보지 않는다 — 그것이 이
       테스트가 지키는 계약이다."""
     c, store = client
+    #: ⚠️ 초기 비밀번호를 **문자열로 박지 않는다.** 박아 두었더니 상수를 바꿀 때
+    #:   이 시험만 조용히 깨졌다 — 정본은 `core.auth.DEFAULT_PASSWORD` 하나다.
+    from core.auth import DEFAULT_PASSWORD
+
     lg = c.post("/api/v1/auth/login",
-                json={"user_id": org_seed.ADMIN, "password": "pass:"})
+                json={"user_id": org_seed.ADMIN, "password": DEFAULT_PASSWORD})
     assert lg.status_code == 200
     tok = lg.json()["data"]["token"]
 
