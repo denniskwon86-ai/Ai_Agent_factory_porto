@@ -1690,8 +1690,22 @@ async def get_latest_state(project_id: str,
 @router.get("/logs")
 async def get_system_logs(
         p: Principal = Depends(current_principal)):
-    """백엔드 메모리 큐에 쌓인 최근 서버 로그를 반환합니다."""
+    """백엔드 메모리 큐에 쌓인 최근 서버 로그.
+
+    ## ⚠️⚠️ [2026-08-23 실측] **관리자 전용이다.** 종전에는 신원만 확인했다
+
+    로그인만 하면 누구나 서버 로그 전체를 받았다 — 실측에서 제련공장 소속 일반 계정이
+    관리자와 **완전히 같은 14건**을 받았고, 거기에는 처리되지 않은 예외의 **스택 트레이스**가
+    들어 있었다(`Exception in callback _ProactorBasePipeTransport…`).
+
+    ★ 스택 트레이스는 서버의 **절대 경로 · 내부 모듈 구조 · 실패 지점**을 그대로 알려 준다.
+      같은 저장소가 `/admin/audit/events` 에 「감사로그 자체가 민감정보다」라고 적고 관리자
+      전용으로 둔 것과 **같은 성격**의 자료인데, 이쪽만 열려 있었다.
+    ⚠️ 「개발 편의」로 되돌리지 말 것 — 편의가 필요하면 개발 계정에 관리자 권한을 주는 것이
+      맞다. 라우트를 열어 두면 운영에서도 열린다."""
+    from api.deps import assert_can_edit_org
     assert_identified(p, WHAT)
+    assert_can_edit_org(p)
     try:
         from core.sys_logger import get_recent_logs
         logs = get_recent_logs()

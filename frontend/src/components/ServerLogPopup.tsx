@@ -16,18 +16,32 @@ export default function ServerLogPopup({ onClose }: ServerLogPopupProps) {
   const [loading, setLoading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   
+  //: ⚠️ [2026-08-23] **못 읽은 이유를 말한다.** 종전에는 `res.ok` 가 아니면 조용히
+  //:   지나가 로그가 **빈 채로** 남았다 — 사용자는 「로그가 없다」로 읽는다.
+  //:   서버 로그는 이제 관리자 전용이므로(스택 트레이스가 담긴다) 일반 계정은 403 을
+  //:   받는다. 그 사실을 화면이 말하지 않으면 «고장» 으로 읽힌다.
+  const [blocked, setBlocked] = useState('');
+
   const fetchLogs = async () => {
     setLoading(true);
     try {
       const { API_BASE_URL } = await import('../store/useFactoryStore');
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/logs`);
       if (res.ok) {
+        setBlocked('');
         const json = await res.json();
         if (json.data && Array.isArray(json.data)) {
           setLogs(json.data);
         }
+      } else if (res.status === 403) {
+        setBlocked('서버 로그는 관리자만 볼 수 있습니다 — 로그에는 내부 경로와 오류 추적이 담깁니다.');
+      } else if (res.status === 401) {
+        setBlocked('로그인이 필요합니다.');
+      } else {
+        setBlocked(`로그를 불러오지 못했습니다 (${res.status}).`);
       }
     } catch (e) {
+      setBlocked('서버에 연결하지 못했습니다.');
       console.error("로그 불러오기 실패:", e);
     } finally {
       setLoading(false);
@@ -80,7 +94,13 @@ export default function ServerLogPopup({ onClose }: ServerLogPopupProps) {
         </div>
       </div>
       <div className="p-4 flex-1 overflow-y-auto whitespace-pre-wrap leading-relaxed text-green-400 font-mono text-[11px]">
-        {logs.length === 0 ? (
+        {/* ⚠️ 「없다」와 「못 봤다」를 가른다 — 이 저장소가 반복해서 잡아 온 구분이다.
+            권한이 없어서 못 본 것을 「로그가 없습니다」로 적으면 서버가 조용한 줄 안다. */}
+        {blocked ? (
+          <div className="text-amber-300 flex items-center justify-center h-full text-center px-6">
+            {blocked}
+          </div>
+        ) : logs.length === 0 ? (
           <div className="text-gray-500 italic flex items-center justify-center h-full">표시할 로그가 없습니다.</div>
         ) : (
           //: 기본은 **뒤에서 300줄** — 로그는 최신이 중요하고, 옛것은 «전체 보기» 로 편다.

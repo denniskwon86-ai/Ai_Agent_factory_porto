@@ -35,7 +35,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 REFERENCE_ROOT = Path("docs/reference")
@@ -444,7 +444,20 @@ EXTRACTION_FAILED = "EXTRACTION_FAILED"
 
 
 def indexable(registry_path: Path = REGISTRY_PATH,
-              include_failed: bool = False) -> dict[str, Any]:
+              include_failed: bool = False,
+              #: ★★★ [2026-08-23 실측] **범위를 받는다.** 종전에는 인자 자체가 없어 등록부
+              #:   **전체**를 돌려줬다. 라우트 주석은 「목록 통제를 적용한다」고 적어 두었지만
+              #:   실제로는 «아무것도 못 보는 사람인가» 만 묻는 전역 관문뿐이었다
+              #:   (`visibility_block_reason`) — 그것은 범위 필터가 아니다.
+              #:   실측: 제련공장 소속 일반 계정이 `/reference/assets` 로는 **0건**을 받으면서
+              #:   `/reference/indexable` 로는 관리자와 **완전히 같은** 응답을 받았다. 거기에는
+              #:   자산 ID·파일 경로·승인자 이름이 들어 있다 — 이 함수 위쪽 주석이 「파일명
+              #:   자체가 정보다」라고 적어 둔 바로 그 값이다.
+              #: ⚠️ `None` 은 «필터하지 않는다»(ECM 미도입 흐름 하위호환), 빈 집합은
+              #:   «볼 수 있는 범위가 없다» 다. 둘을 같게 다루면 통제가 사라진다.
+              visible_scope_nodes: Optional[set[str]] = None,
+              viewer_clearance: str = "",
+              include_descendants: bool = False) -> dict[str, Any]:
     """**지금 색인할 수 있는** 자산과, 나머지가 왜 안 되는지.
 
     ★ 색인 조건이 조회 조건보다 엄격한 이유: 색인은 되돌릴 수 없다. 소유 조직·승인·추출 가능
@@ -457,6 +470,18 @@ def indexable(registry_path: Path = REGISTRY_PATH,
       실패를 기록하지 않으면 이 함수가 계속 "1건 색인 가능"이라고 **지킬 수 없는 약속**을
       반복하고, 운영자는 매번 같은 실패를 다시 본다."""
     assets = load_registry(registry_path).get("assets", [])
+    if visible_scope_nodes is not None:
+        #: ★ 판정은 `/assets` 와 **같은 단일 지점**(`scoping.filter_visible`)에 맡긴다.
+        #:   여기서 다시 구현하면 두 라우트의 규칙이 어긋나고, 어긋난 권한 판정은
+        #:   유출이거나 실명이다(`visible_assets` 주석과 같은 이유).
+        allowed: set[str] = set()
+        for node in sorted(visible_scope_nodes):
+            for row in visible_assets(node, viewer_clearance, registry_path,
+                                      include_descendants):
+                aid = row.get("asset_id")
+                if aid:
+                    allowed.add(aid)
+        assets = [a for a in assets if a.get("asset_id") in allowed]
     ready = []
     blocked = {"no_owner": 0, "not_approved": 0, "conversion_required": 0,
                "encrypted": 0, "extraction_failed": 0}

@@ -75,9 +75,21 @@ async def get_summary(
         p: Principal = Depends(current_principal)):
     """등록 현황 + **색인 가능 건수.**
 
-    등록 건수만 보여주면 "68건이 등록됐는데 지식팩이 왜 비어 있나"를 아무도 설명할 수 없다."""
+    등록 건수만 보여주면 "68건이 등록됐는데 지식팩이 왜 비어 있나"를 아무도 설명할 수 없다.
+
+    ⚠️ [2026-08-23] 이것은 **전사 집계**다 — 조직 범위를 적용하지 않는다. 그 사실을 응답에
+      적어 둔다. 적지 않으면 화면이 「내 범위의 17건」으로 읽고, 사용자는 자기가 볼 수 없는
+      자산을 자기 것으로 센다. `by_pack` 은 지식팩 이름과 건수를 담으므로 «어떤 팩이
+      존재하는가» 까지 알려 준다 — 그것을 숨길 필요는 없지만 **무엇인지는 말해야 한다.**
+    ★ 자산 하나하나(ID·경로·승인자)는 여기에 담지 않는다. 그것은 `/assets`·`/indexable` 의
+      몫이고 두 곳 모두 범위 필터를 적용한다."""
     assert_identified(p, WHAT)
-    return {"status": "success", "data": await asyncio.to_thread(registry_summary)}
+    data = await asyncio.to_thread(registry_summary)
+    if isinstance(data, dict):
+        data = {**data, "scope": "TENANT_WIDE",
+                "scope_note": "조직 범위를 적용하지 않은 전사 집계입니다 — "
+                              "내 범위의 자산 목록은 «참고자산» 화면에서 보십시오."}
+    return {"status": "success", "data": data}
 
 
 @router.get("/indexable")
@@ -85,11 +97,31 @@ async def list_indexable(p: Principal = Depends(current_principal)):
     """지금 색인할 수 있는 자산과, 나머지가 **왜** 안 되는지.
 
     ⚠️ 이 응답은 **문서 파일명을 그대로 담는다** — 파일명 자체가 정보다(예: 특정 고객사·공정명).
-      집계만 담는 `/summary` 와 달리 목록 통제를 적용한다."""
+
+    ## ⚠️⚠️ [2026-08-23 실측] 위 문장은 **약속이었을 뿐 통제가 아니었다**
+
+    종전 코드는 `visibility_block_reason(p)` 하나만 봤다. 그것은 「이 사람이 **아무것도** 못
+    보는가」를 묻는 전역 관문이지 **범위 필터가 아니다.** 그래서 신원만 있으면 등록부 전체가
+    나갔다:
+
+        제련공장 소속 일반 계정 → `/reference/assets` **0건**
+                              → `/reference/indexable` 관리자와 **완전히 같은 응답**
+                                (자산 ID · 파일 경로 · `approved_by` 이름 포함)
+
+    ★ 같은 영역에서 **목록은 막고 색인은 안 막은** 것이다. 판정을 `/assets` 와 같은 단일
+      지점(`scoping.filter_visible`)에 맡긴다 — 두 곳이 따로 판정하면 반드시 어긋난다.
+    ⚠️ `viewer_scope_nodes(p)` 가 `None` 이면 «필터하지 않는다»(ECM 미도입 하위호환)이고,
+      빈 집합이면 «볼 수 있는 범위가 없다» 다. 둘을 같게 다루면 통제가 사라진다."""
     reason = visibility_block_reason(p)
     if reason:
         return {"status": "success", "data": [], "blocked_reason": reason}
-    return {"status": "success", "data": await asyncio.to_thread(indexable)}
+    from core.enterprise_context.classification import clearance_of_scope
+    nodes = viewer_scope_nodes(p)
+    data = await asyncio.to_thread(
+        indexable, REGISTRY_PATH, False,
+        None if nodes is None else set(nodes),
+        clearance_of_scope(p.scope), viewer_may_drill_down(p))
+    return {"status": "success", "data": data}
 
 
 @router.get("/assets")
