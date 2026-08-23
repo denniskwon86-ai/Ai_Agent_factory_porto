@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import glossary from '../data/technologyTerminologyGlossary.json';
 import { HubDialog } from '../design/HubDialog';
@@ -31,6 +31,7 @@ function StatusChip({ status }: { status: string }) {
 }
 
 function DictionaryRow({ entry }: { entry: Entry }) {
+  const [open, setOpen] = useState(false);
   return (
     <article className="term-row">
       <div className="term-row-id">
@@ -54,26 +55,33 @@ function DictionaryRow({ entry }: { entry: Entry }) {
         <p>{entry.redefinition_issue}</p>
       </div>
       <StatusChip status={entry.migration_status} />
-      <details className="term-detail">
+      {/* ★★★ [2026-08-23 실측] **접혀 있어도 DOM 에는 다 그려져 있었다.**
+          `<details>` 는 «보이지 않게» 할 뿐 자식을 만들지 않는 것이 아니다. 항목 349개 ×
+          한 줄 33요소 = **11,392개**가 한 화면에 올라갔고(다른 화면은 150~400개), 화면이
+          눈에 띄게 느려졌다.
+          ★ 펼친 줄만 안쪽을 그린다. 접힌 상태에서는 요약줄만 남는다. */}
+      <details className="term-detail" onToggle={(e) => setOpen(e.currentTarget.open)}>
         <summary>정의·사용 원칙 보기</summary>
-        <div>
-          <section>
-            <small>정의</small>
-            <p>{entry.definition}</p>
-          </section>
-          <section>
-            <small>사용 원칙</small>
-            <p>{entry.usage_guidance}</p>
-          </section>
-          <section>
-            <small>재정의 쟁점</small>
-            <p>{entry.redefinition_issue}</p>
-          </section>
-          <section>
-            <small>정본 출처</small>
-            <code>{entry.source}</code>
-          </section>
-        </div>
+        {open && (
+          <div>
+            <section>
+              <small>정의</small>
+              <p>{entry.definition}</p>
+            </section>
+            <section>
+              <small>사용 원칙</small>
+              <p>{entry.usage_guidance}</p>
+            </section>
+            <section>
+              <small>재정의 쟁점</small>
+              <p>{entry.redefinition_issue}</p>
+            </section>
+            <section>
+              <small>정본 출처</small>
+              <code>{entry.source}</code>
+            </section>
+          </div>
+        )}
       </details>
     </article>
   );
@@ -106,12 +114,20 @@ export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState('전체');
   const [pathCopied, setPathCopied] = useState(false);
 
+  //: 한 번에 그리는 줄 수. ⚠️ 검색·필터를 바꾸면 처음으로 되돌린다 — 안 되돌리면
+  //:   좁힌 결과가 이미 다 보이는데도 「더 보기」가 남아 사용자를 헷갈리게 한다.
+  const PAGE = 80;
+  const [shown, setShown] = useState(PAGE);
   const areas = useMemo(() => ['전체', ...new Set(glossary.entries.map((e) => e.area))], []);
   const filtered = useMemo(() => glossary.entries.filter((entry) => (
     (area === '전체' || entry.area === area)
     && (status === '전체' || entry.migration_status === status)
     && includes(entry, query.trim())
   )), [area, query, status]);
+  //: ★ 조건이 바뀌면 표시 개수를 처음으로 되돌린다. 안 되돌리면 좁힌 결과가 이미 다
+  //:   보이는데도 「더 보기」가 남거나, 반대로 넓혔는데 앞부분만 보인다.
+  //:   ⚠️ 렌더 중에 `setState` 를 부르지 않는다 — `useEffect` 로 조건 변화에 반응한다.
+  useEffect(() => { setShown(PAGE); }, [area, query, status]);
   const stats = useMemo(() => STATUS_ORDER.map((key) => ({
     key,
     count: glossary.entries.filter((entry) => entry.migration_status === key).length,
@@ -204,7 +220,19 @@ export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
               <strong>{filtered.length}개 표시</strong>
             </div>
             <div className="term-list">
-              {filtered.map((entry) => <DictionaryRow key={entry.id} entry={entry} />)}
+              {filtered.slice(0, shown).map((entry) => (
+                <DictionaryRow key={entry.id} entry={entry} />
+              ))}
+              {/* ★★★ 한 번에 다 그리지 않는다 — 349개를 모두 올리면 요소가 만 개를 넘는다.
+                  ⚠️ **감춘 건수를 반드시 적는다.** 「80개 표시」만 적으면 사용자는 그것이
+                    전부인 줄 알고 없는 용어를 찾았다고 판단한다(이 저장소가 반복해서 잡아 온
+                    «0은 없다로 읽힌다» 와 같은 결함이다). 남은 수와 전체를 함께 말한다. */}
+              {filtered.length > shown && (
+                <button className="secondary-button" style={{ margin: '10px auto', display: 'block' }}
+                  onClick={() => setShown((n) => n + PAGE)}>
+                  {filtered.length - shown}개 더 보기 (전체 {filtered.length}개 중 {shown}개 표시 중)
+                </button>
+              )}
               {filtered.length === 0 && (
                 <div className="term-empty">
                   <b>조건에 맞는 용어가 없습니다.</b>

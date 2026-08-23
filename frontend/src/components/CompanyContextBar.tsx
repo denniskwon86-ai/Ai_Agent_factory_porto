@@ -12,7 +12,8 @@
 //   않는다**(§2.1 공통 규칙)
 import { useEffect, useState } from 'react';
 
-import { getEnterpriseContext, setEnterpriseContext } from '../lib/api';
+import { API_BASE_URL, getEnterpriseContext, getSessionToken, setEnterpriseContext }
+  from '../lib/api';
 import { orgApi, type Dept } from '../lib/orgApi';
 
 type Status = 'loading' | 'verified' | 'denied' | 'stale';
@@ -47,6 +48,18 @@ export function CompanyContextBar() {
   const [status, setStatus] = useState<Status>('loading');
   const [note, setNote] = useState('');
   const [open, setOpen] = useState(false);
+  /** ★★★ [2026-08-23 실측] 「내가 지금 무엇을 보고 있는가」를 **사실대로** 적기 위해 필요하다.
+   *
+   * 종전 표시: `tenant_default › 조직 미지정`.
+   *   · `tenant_default` 는 **어디에도 없는 값**이다 — 클라이언트가 지어낸 문자열이었다.
+   *   · 「조직 미지정」도 사실이 아니다. 문맥을 안 고르면 서버는 «그 사람의 권한 범위 전체»로
+   *     동작한다(`api/deps.py` `current_principal` → `resolve_scope`). 즉 **데이터는 정상**
+   *     이고 화면만 「아무것도 안 골랐다」고 말하고 있었다.
+   *
+   * ★ 사용자는 그것을 「덜 설정됐다」로 읽고 조직을 고르러 간다 — 고를 필요가 없는데도.
+   * ⚠️ 여기서 문맥을 **자동으로 채우지 않는다.** 채우면 관리자의 «전체 범위»가 «본사 하위»로
+   *   조용히 좁아진다 — 보이는 것과 권한이 달라지는 쪽이 훨씬 위험하다. 표시만 고친다. */
+  const [me, setMe] = useState<{ primary_dept_id?: string; unrestricted?: boolean } | null>(null);
   const ctx = getEnterpriseContext();
   const mode = (ctx.entityMode || 'REAL').toUpperCase();
 
@@ -68,10 +81,36 @@ export function CompanyContextBar() {
     return () => { alive = false; };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+      headers: { 'X-Session-Token': getSessionToken() },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (alive && j?.data) setMe(j.data); })
+      .catch(() => { /* 표시용이다 — 실패해도 앱을 막지 않는다 */ });
+    return () => { alive = false; };
+  }, []);
+
   //: ★ 트리를 펴서 **모든 계층**을 고를 수 있게 한다.
   const flat = flatten(depts);
   const current = flat.find((d) => d.dept_id === ctx.scopeNodeId
     || (d as any).scope_node_id === ctx.scopeNodeId);
+
+  /** 지금 **실제로** 보고 있는 범위를 한 마디로. 고른 것이 없으면 «없다»가 아니라
+   *  «권한 범위 전체» 다 — 그것이 서버가 하는 일이다. */
+  const scopeLabel = status === 'loading' ? '확인 중…'
+    : current ? (current.name_ko || current.dept_id)
+      : ctx.scopeNodeId ? ctx.scopeNodeId
+        : me?.unrestricted ? '권한 범위 전체'
+          : me?.primary_dept_id
+            ? `내 소속 전체 · ${flat.find((d) => d.dept_id === me.primary_dept_id)?.name_ko
+                || me.primary_dept_id}`
+            : '범위 확인 중…';
+  const scopeTitle = ctx.scopeNodeId
+    ? `선택한 조직 범위: ${ctx.scopeNodeId}`
+    : '조직을 따로 고르지 않았습니다 — 서버는 당신의 권한 범위 전체로 조회합니다.'
+      + ' 좁히려면 «조직 전환» 에서 고르십시오.';
 
   const pick = (d: Dept) => {
     // §4.1 동작: 전환 → 공통 헤더 갱신 → 모든 Read Model 재조회.
@@ -102,14 +141,16 @@ export function CompanyContextBar() {
         background: 'var(--bar-divider)',
       }} />
 
-      {/* 문맥 breadcrumb — 회사 › 조직 */}
+      {/* 문맥 breadcrumb.
+          ⚠️ [2026-08-23] **모르는 것을 지어내지 않는다.** 종전에는 회사를 모를 때
+            `tenant_default` 라는 없는 값을 찍었고, 조직을 안 고르면 「조직 미지정」이라고
+            썼다. 둘 다 사실이 아니다 — 서버는 문맥이 비면 «그 사람의 권한 범위 전체»로
+            동작하므로 화면은 정상이었고, 사용자만 「덜 설정됐다」고 읽었다. */}
       <span style={{ fontSize: 13, color: 'var(--bar-fg-muted)', whiteSpace: 'nowrap',
-        overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
-        {ctx.tenantId || 'tenant_default'}
-        {' › '}
-        {status === 'loading' ? '확인 중…'
-          : current ? (current.name_ko || current.dept_id)
-            : (ctx.scopeNodeId || '조직 미지정')}
+        overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 300 }}
+        title={scopeTitle}>
+        {ctx.tenantId ? `${ctx.tenantId} › ` : ''}
+        {scopeLabel}
       </span>
 
       {/* REAL / VIRTUAL 배지 — 색만으로 전달하지 않으므로 낱말을 함께 적는다 */}
