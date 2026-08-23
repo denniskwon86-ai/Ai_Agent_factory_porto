@@ -103,4 +103,13 @@ export const adminApi = {
   changePassword: (currentPassword: string, newPassword: string) =>
     req<{ ok: boolean; token: string }>('POST', '/api/v1/auth/password',
       { current_password: currentPassword, new_password: newPassword }),
+
+  /** 내 표시 이름.
+   *
+   * ⚠️ [2026-08-23 사용자 지적] 종전에는 이름을 바꾸는 경로가 `POST /org/users` 뿐이었고
+   *   거기에는 조직 관리자 권한이 걸려 있다 — **자기 이름조차 못 바꿨다.**
+   * ★ 대상 사용자를 보내지 않는다. 서버가 «세션의 주인» 으로만 판단한다. */
+  changeMyDisplayName: (displayName: string) =>
+    req<{ display_name: string }>('PATCH', '/api/v1/auth/me',
+      { display_name: displayName }),
 };

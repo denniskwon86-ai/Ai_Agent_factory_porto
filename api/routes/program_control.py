@@ -145,14 +145,46 @@ async def set_status(release_id: str, req: SetStatusRequest,
         _err(e)
 
 
+def _published(release_id: str) -> bool:
+    """★★★ [2026-08-23 실측] 이 릴리스가 **실제로 게시되어 있는가**.
+
+    `core/library_paths.release_json()` 머리말이 정의를 못박아 두었다 — 「이 파일의 존재가
+    곧 «게시되었다» 의 정의다」. 판정을 여기서 새로 만들지 않고 그 정의를 그대로 쓴다.
+    """
+    import os
+
+    from core.library_paths import release_json
+    return os.path.exists(release_json(release_id))
+
+
 @router.get("/{release_id}/usable")
 async def check_usable(release_id: str,
         p: Principal = Depends(current_principal)):
     """사용 가능 여부만 묻는다. 소비 화면이 실행 버튼을 열기 전에 호출한다.
 
     ⚠️ 이 판정을 **UI 만** 믿게 두면 통제가 아니다 — 실행 payload 는 서버가
-      `GET /factory/library/item/{id}` 에서 직접 막는다."""
+      `GET /factory/library/item/{id}` 에서 직접 막는다.
+
+    ## ⚠️⚠️ [2026-08-23 실측] **없는 프로그램에 「써도 된다」고 답했다**
+
+        GET /api/v1/programs/__없는id__/usable
+          → {"usable": true, "status": "active", "recorded": false}
+
+    수명주기표(`program_status`)는 «관리자가 중단시켰는가» 만 기록한다. 기록이 없으면
+    「이 기능 이전에 게시된 프로그램」으로 보고 `active` 로 답하는데(그 하위호환은 의도된
+    것이다), 그 판정이 **«존재하지 않는다» 와 «예전에 게시됐다» 를 구분하지 못했다.**
+
+    ★ `recorded: false` 가 유일한 단서였지만, `usable` 만 보고 실행 버튼을 여는 호출자는
+      그 칸을 읽지 않는다. 「예」라고 답해 놓고 각주로 부인하는 것은 답이 아니다.
+    ⚠️ 하위호환을 깨지 않는다 — **게시는 됐지만 기록이 없는** 프로그램은 여전히 `usable`
+      이다. 새로 막는 것은 «게시 자체가 없는» 경우뿐이다."""
     assert_identified(p, WHAT)
+    if not await asyncio.to_thread(_published, release_id):
+        return {"status": "success",
+                "data": {"usable": False, "status": "", "recorded": False,
+                         "reason": "게시된 프로그램이 아닙니다 — 이 식별자로 게시된 것이 "
+                                   "없습니다(사용 중단이 아니라 «없음» 입니다).",
+                         "replacement_release_id": ""}}
     try:
         return {"status": "success",
                 "data": await asyncio.to_thread(program_lifecycle.assert_usable,

@@ -478,7 +478,7 @@ function AppShell() {
           }}>
             <CompanyContextBar />
             <div className="flex items-center gap-3 min-w-0">
-              <SessionBar />
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)} />
               <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
             </div>
           </header>
@@ -532,7 +532,7 @@ function AppShell() {
  {/* ★ 사용자 전환기는 «기능»이 아니라 «지금 누구인가»다. 메뉴 안으로 숨기지 않는다 —
  권한 범위가 사람마다 다르므로 상시 보여야 한다(채택 결정 6항). */}
  <div className="flex items-center gap-3 min-w-0">
- <SessionBar />
+ <SessionBar onGoToOrg={() => setShowOrgChart(true)} />
  <GlobalNav
  // 1차 영역 — 매일 쓰는 진입점 3개. 넘기면 다시 «나열»이 된다.
  primary={primaryNav}

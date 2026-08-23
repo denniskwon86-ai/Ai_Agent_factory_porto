@@ -32,7 +32,12 @@ export type OrgUser = {
   is_executive: boolean;
   is_admin: boolean;
   is_data_admin: boolean;
+  /** ⚠️ [2026-08-23] 서버는 이 칸을 **보내고 있었는데 타입에 없었다.** 타입에 없으면
+   *  화면은 그 권한이 존재하는지조차 모르고, 「권한 표식」 목록에서 조용히 빠진다 —
+   *  AI 관리자를 «권한 없음» 으로 그리게 된다. 서버 응답과 맞춘다. */
+  is_ai_admin: boolean;
   status: string;
+  created_at?: string;
   roles: Record<string, string>;
 };
 

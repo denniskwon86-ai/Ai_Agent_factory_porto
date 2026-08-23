@@ -20,7 +20,11 @@ type Me = {
   is_admin?: boolean; is_data_admin?: boolean;
 };
 
-export function SessionBar() {
+export function SessionBar({ onGoToOrg }: {
+  /** ★ 관리자 콘솔의 「조직·권한 화면 열기」 — 여기까지 이어 준다.
+   *  ⚠️ 콘솔이 스스로 열 수 없다. 어느 화면을 여는가는 App 이 쥔 상태다. */
+  onGoToOrg: () => void;
+}) {
   const [me, setMe] = useState<Me | null>(null);
   //: [설계 §5.8] 「**상단 사용자 영역의 `환경설정·관리자` 에서 진입**하며 일반 업무
   //  내비게이션과 혼합하지 않는다」 — 그래서 좌측 업무 레일이 아니라 여기서만 연다.
@@ -76,7 +80,8 @@ export function SessionBar() {
         ⏻ <span className="afs-bar-label">로그아웃</span>
       </button>
 
-      {console_ && <AdminConsolePanel me={me} onClose={() => setConsole(false)} />}
+      {console_ && <AdminConsolePanel me={me} onClose={() => setConsole(false)}
+        onGoToOrg={() => { setConsole(false); onGoToOrg(); }} />}
     </div>
   );
 }

@@ -10,8 +10,11 @@
   등록된 계정만 로그인한다. 가입 경로를 열어 두면 조직도에 없는 사용자가 생기고, 그러면
   범위·권한 판정이 전부 «모르는 사람» 으로 떨어진다.
 """
+import asyncio
+import functools
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.deps import Principal, current_principal
 from core.auth import DEFAULT_PASSWORD, auth_store
@@ -93,6 +96,16 @@ async def logout(request: Request):
     return {"status": "success", "data": {"ok": True}}
 
 
+def _effective_tenant_id() -> str:
+    """이 서버가 실제로 쓰는 테넌트.
+
+    ⚠️ `config` 를 **호출 시점에** 읽는다. 모듈 적재 시점에 얼리면 시연 기동 스크립트처럼
+      기동 중에 값을 바꾸는 경로에서 옛 값이 남는다(이 저장소가 경로 상수에서 두 번 겪은
+      같은 결함)."""
+    import config as _cfg
+    return str(getattr(_cfg, "ECM_DEFAULT_TENANT_ID", "") or "").strip()
+
+
 @router.get("/me")
 async def me(p: Principal = Depends(current_principal)):
     """지금 누구인가 + 그 권한 요약. **화면이 이것만 보고 진입 여부를 정한다.**
@@ -115,6 +128,17 @@ async def me(p: Principal = Depends(current_principal)):
             "unrestricted": bool(getattr(s, "unrestricted", False)),
             "primary_dept_id": getattr(s, "primary_dept_id", "") or "",
             "must_change_password": auth_store.uses_default_password(uid),
+            #: ★★★ [2026-08-23 사용자 지적] 「소속 회사가 첫 화면에 뜨지도 않는다」.
+            #:
+            #: 상단바는 회사를 **클라이언트 문맥**(`getEnterpriseContext().tenantId`)에서
+            #: 읽는데, 그 값은 사용자가 조직을 고를 때만 채워진다. 즉 로그인 직후에는
+            #: 비어 있고, 화면은 회사를 말하지 못했다(종전에는 `tenant_default` 라는
+            #: **없는 값**을 지어내 채웠고, 그것을 지우자 아예 사라졌다).
+            #:
+            #: ★ 서버는 이 값을 **항상 안다** — 여기서 내려보낸다. 화면이 지어낼 필요가 없다.
+            #: ⚠️ 「고른 조직 범위」와 다른 값이다. 범위는 사용자가 좁히는 것이고, 회사는
+            #:   그 사람이 속한 독립 환경이다. 둘을 같은 칸에 넣지 않는다.
+            "tenant_id": _effective_tenant_id(),
         },
     }
 
@@ -217,6 +241,66 @@ async def issue_sse_ticket(request: Request):
     t = dict(t); t["scope_node_id"] = ctx["scope_node_id"]; t["entity_mode"] = ctx["entity_mode"]
     #: ⚠️ 응답에만 원문을 싣고 로그에는 남기지 않는다(저장소에는 해시만 있다).
     return {"status": "success", "data": t}
+
+
+class DisplayNameChange(BaseModel):
+    #: ⚠️ `extra="forbid"` — 모르는 칸을 조용히 무시하면 호출자는 «설정했다» 고 믿는다.
+    #:   여기서는 특히 위험하다: `is_admin` 을 함께 보냈는데 무시되면 «권한을 올렸다» 고
+    #:   착각하거나, 반대로 **받아들여졌다고 오해**하게 된다.
+    model_config = ConfigDict(extra="forbid")
+    display_name: str = Field(..., min_length=1, max_length=60)
+
+
+@router.patch("/me")
+async def change_own_display_name(req: DisplayNameChange,
+                                  p: Principal = Depends(current_principal)):
+    """★★★ [2026-08-23 사용자 지적] **자기 표시 이름을 스스로 바꾼다.**
+
+    ## 왜 필요한가
+
+    이름을 바꾸는 유일한 경로가 `POST /org/users` 였고 거기에는 `assert_can_edit_org` 가
+    걸려 있다. 즉 **조직 관리자가 아니면 자기 이름조차 못 바꿨다** — 오타를 냈거나 개명한
+    사람이 관리자를 찾아가야 한다. 실제로 그 지적을 받았다.
+
+    ## ⚠️ 무엇을 **하지 않는가** (이 라우트의 경계)
+
+    · **자기 것만.** 대상 사용자를 인자로 받지 않는다 — 받는 순간 「남의 이름을 바꾸는」
+      경로가 되고, 그것은 조직 관리자의 권한이다.
+    · **표시 이름만.** 소속 부서·권한 표식(`is_admin` 등)·역할은 건드리지 않는다.
+      `extra="forbid"` 가 그 시도를 조용히 무시하지 않고 **거절**한다.
+    · 계정(`user_id`)은 바꾸지 않는다 — 그것은 자원의 소유자로 기록돼 있어 바꾸면
+      과거 산출물의 주인이 사라진다.
+
+    ★ 기존 값을 **읽어서 그대로 다시 넣는다.** `upsert_user` 는 전체를 덮어쓰므로, 읽지
+      않고 기본값으로 부르면 관리자 표식이 조용히 꺼진다."""
+    uid = (p.user_id or "").strip()
+    if not uid:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    name = req.display_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="표시 이름을 비울 수 없습니다.")
+    cur = await asyncio.to_thread(org_directory.get_user, uid)
+    if not cur:
+        raise HTTPException(
+            status_code=404,
+            detail="조직에 등록되지 않은 계정입니다 — 관리자가 먼저 계정을 등록해야 합니다.")
+    try:
+        #: ★ 나머지는 **현재 값 그대로**. 기본값으로 부르면 권한이 조용히 꺼진다.
+        #: ⚠️ **키워드로** 넘긴다. 위치 인자로 넘겼다가 `is_ai_admin` 하나를 빠뜨려
+        #:   `actor` 자리에 계정 문자열이 들어갔고, 「int 로 못 바꾼다」는 엉뚱한 오류가 났다.
+        #:   인자가 8개인 함수에 위치로 넘기면 다음 사람도 같은 자리에서 넘어진다.
+        u = await asyncio.to_thread(
+            functools.partial(
+                org_directory.upsert_user, uid, name,
+                primary_dept_id=cur.get("primary_dept_id") or "",
+                is_executive=bool(cur.get("is_executive")),
+                is_admin=bool(cur.get("is_admin")),
+                is_data_admin=bool(cur.get("is_data_admin")),
+                is_ai_admin=bool(cur.get("is_ai_admin")),
+                actor=uid))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success", "data": {"display_name": name, "user": u}}
 
 
 class PasswordChange(BaseModel):

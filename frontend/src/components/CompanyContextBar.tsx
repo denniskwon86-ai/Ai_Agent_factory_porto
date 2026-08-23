@@ -59,7 +59,8 @@ export function CompanyContextBar() {
    * ★ 사용자는 그것을 「덜 설정됐다」로 읽고 조직을 고르러 간다 — 고를 필요가 없는데도.
    * ⚠️ 여기서 문맥을 **자동으로 채우지 않는다.** 채우면 관리자의 «전체 범위»가 «본사 하위»로
    *   조용히 좁아진다 — 보이는 것과 권한이 달라지는 쪽이 훨씬 위험하다. 표시만 고친다. */
-  const [me, setMe] = useState<{ primary_dept_id?: string; unrestricted?: boolean } | null>(null);
+  const [me, setMe] = useState<{ primary_dept_id?: string; unrestricted?: boolean;
+    tenant_id?: string } | null>(null);
   const ctx = getEnterpriseContext();
   const mode = (ctx.entityMode || 'REAL').toUpperCase();
 
@@ -107,6 +108,15 @@ export function CompanyContextBar() {
             ? `내 소속 전체 · ${flat.find((d) => d.dept_id === me.primary_dept_id)?.name_ko
                 || me.primary_dept_id}`
             : '범위 확인 중…';
+  /** 소속 회사. ⚠️ [2026-08-23 사용자 지적] 「소속 회사가 첫 화면에 뜨지도 않는다」.
+   *
+   *  클라이언트 문맥(`ctx.tenantId`)은 **사용자가 조직을 고를 때만** 채워지므로 로그인
+   *  직후에는 비어 있다. 종전에는 그 자리에 `tenant_default` 라는 **없는 값**을 지어냈고,
+   *  그것을 지우자 회사가 아예 사라졌다.
+   *  ★ 서버가 `/auth/me` 로 **자기가 실제로 쓰는 테넌트**를 알려 준다. 고른 값이 있으면
+   *    그것을, 없으면 서버가 말한 값을 쓴다 — 어느 쪽도 지어내지 않는다. */
+  const company = (ctx.tenantId || me?.tenant_id || '').trim();
+
   const scopeTitle = ctx.scopeNodeId
     ? `선택한 조직 범위: ${ctx.scopeNodeId}`
     : '조직을 따로 고르지 않았습니다 — 서버는 당신의 권한 범위 전체로 조회합니다.'
@@ -149,7 +159,7 @@ export function CompanyContextBar() {
       <span style={{ fontSize: 13, color: 'var(--bar-fg-muted)', whiteSpace: 'nowrap',
         overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 300 }}
         title={scopeTitle}>
-        {ctx.tenantId ? `${ctx.tenantId} › ` : ''}
+        {company ? `${company} › ` : ''}
         {scopeLabel}
       </span>
 

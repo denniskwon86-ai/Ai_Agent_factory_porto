@@ -26,6 +26,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
 import { type RailIconName } from '../design/RailIcon';
 import { HubDialog } from '../design/HubDialog';
+import { orgApi, type OrgUser } from '../lib/orgApi';
 import { EmptyOrError, Refreshing, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
 import {
@@ -91,8 +92,10 @@ const STATE_COLORS = [
   { key: '주의', value: '#7a4a00' },
 ];
 
-export function AdminConsolePanel({ onClose, me }: {
+export function AdminConsolePanel({ onClose, onGoToOrg, me }: {
   onClose: () => void;
+  /** ★ 「조직도 화면에서 합니다」라고 **말만** 하지 않는다 — 실제로 데려간다. */
+  onGoToOrg: () => void;
   /** `/auth/me` 결과. 권한 표시와 「필요한 관리자 역할」 안내에 쓴다. */
   me: { user_id: string; is_admin?: boolean; is_data_admin?: boolean; display_name?: string } | null;
 }) {
@@ -100,16 +103,35 @@ export function AdminConsolePanel({ onClose, me }: {
   const [policy, setPolicy] = useState<Loaded<ScopePolicy>>(loading<ScopePolicy>());
   const [pre, setPre] = useState<Loaded<EnforcePreflight>>(loading<EnforcePreflight>());
   const [audit, setAudit] = useState<Loaded<AuditStats>>(loading<AuditStats>());
+  //: ★ 계정 목록. 건수만으로는 「누가 있는가」에 답할 수 없다(2026-08-23 지적).
+  const [users, setUsers] = useState<Loaded<OrgUser[]>>(loading<OrgUser[]>());
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
   // 개인 — 비밀번호
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
+  //: ⚠️ [2026-08-23 사용자 지적] 「로그인한 본인의 이름조차 바꿀 수 없게 되어 있다」.
+  //:   종전에는 이름을 **읽기 전용 칩**으로만 그렸다. 바꾸는 경로는 조직 관리자 전용
+  //:   `POST /org/users` 뿐이었다 — 오타를 냈거나 개명한 사람이 관리자를 찾아가야 했다.
+  const [name, setName] = useState('');
+  useEffect(() => { setName(me?.display_name || ''); }, [me?.display_name]);
   // 브랜드 — CI 색(미리보기 전용. 저장 경로는 아래 주석 참조)
   const [ci, setCi] = useState({ primary: '#0a1e5a', accent: '#fa002d' });
   // 보안 — 강제 전환
   const [reason, setReason] = useState('');
   const confirmEnforce = useConfirm<boolean>();
+
+  const loadUsers = useCallback(async () => {
+    setUsers(refreshing);
+    try {
+      const { rows } = await orgApi.users();
+      setUsers(ok(rows));
+    } catch (e) {
+      //: ⚠️ 목록이 «없다» 와 «못 읽었다» 를 가른다 — 읽기 실패를 빈 목록으로 그리면
+      //:   관리자는 계정이 하나도 없다고 판단한다.
+      setUsers(failed<OrgUser[]>(e));
+    }
+  }, []);
 
   const load = useCallback(async () => {
     // ★ [설계 §6.2] 재조회는 **값을 비우지 않는다.** 강제 전환 뒤 이력을 다시 읽을 때 표가
@@ -122,6 +144,7 @@ export function AdminConsolePanel({ onClose, me }: {
     setPolicy(p.status === 'fulfilled' ? ok(p.value) : failed<ScopePolicy>(p.reason));
     setPre(f.status === 'fulfilled' ? ok(f.value) : failed<EnforcePreflight>(f.reason));
     setAudit(a.status === 'fulfilled' ? ok(a.value) : failed<AuditStats>(a.reason));
+    await loadUsers();
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -212,6 +235,33 @@ export function AdminConsolePanel({ onClose, me }: {
               <ScreenHead kicker="ME" title="개인 설정"
                 description="여기서 바꾸는 것은 나에게만 적용됩니다. 다른 사용자나 조직 설정에는 영향이 없습니다."
                 chip={{ label: me?.display_name || me?.user_id || '로그인 정보 없음', tone: 'data' }} />
+
+              <Panel kicker="NAME" title="표시 이름">
+                <div style={{ padding: 15, display: 'grid', gap: 10, maxWidth: 460 }}>
+                  <p className="hint-line" style={{ margin: 0 }}>
+                    화면과 이력에 표시되는 이름입니다. <b>계정 주소는 바꾸지 않습니다</b> —
+                    계정은 산출물의 소유자로 기록돼 있어 바꾸면 과거 산출물의 주인이 사라집니다.
+                  </p>
+                  <label className="field-label" htmlFor="dn">표시 이름</label>
+                  <input id="dn" className="afs-input" value={name} maxLength={60}
+                    onChange={(e) => setName(e.target.value)} />
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    {/* ⚠️ 못 누르는 이유를 화면에 적는다(§8.6). */}
+                    {(!name.trim() || name.trim() === (me?.display_name || '')) && (
+                      <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                        {!name.trim() ? '이름을 입력하십시오.' : '지금 이름과 같습니다.'}
+                      </span>
+                    )}
+                    <button className="primary-button" style={{ marginLeft: 'auto' }}
+                      disabled={!name.trim() || name.trim() === (me?.display_name || '')}
+                      onClick={() => act(
+                        () => adminApi.changeMyDisplayName(name.trim()),
+                        '표시 이름을 바꿨습니다. 다른 화면은 새로고침하면 반영됩니다.')}>
+                      이름 바꾸기 (나에게만 적용)
+                    </button>
+                  </div>
+                </div>
+              </Panel>
 
               <Panel kicker="PASSWORD" title="비밀번호 변경">
                 <div style={{ padding: 15, display: 'grid', gap: 10, maxWidth: 460 }}>
@@ -351,7 +401,7 @@ export function AdminConsolePanel({ onClose, me }: {
           {domain === 'people' && (
             <>
               <ScreenHead kicker="PEOPLE" title="사용자 · 권한"
-                description="권한은 조직 범위에서 파생합니다. 이 화면은 현재 상태와 규칙을 보여 주며, 개별 사용자 편집은 조직도 화면에서 합니다."
+                description="권한은 조직 범위에서 파생합니다. 여기서 계정과 권한 표식을 확인하고, 바꾸는 것은 아래 버튼으로 조직·권한 화면에서 합니다."
                 chip={pre.status !== 'ok' ? { label: '조회 불가', tone: 'danger' }
                   : { label: `사용자 ${pre.value?.users ?? 0}명`, tone: 'data' }} />
 
@@ -399,6 +449,49 @@ export function AdminConsolePanel({ onClose, me }: {
                       ))}
                     </>
                   )}
+                </div>
+              </Panel>
+
+              {/* ★★★ [2026-08-23 사용자 지적] 「관리자 페이지에 사용자 리스트가 나오지 않아요」.
+                  종전에는 **건수만** 보여 주고 「개별 사용자 편집은 조직도 화면에서 합니다」라고
+                  적어 두었다 — 그런데 **거기로 갈 방법을 주지 않았다.** 사용자는 이 창을 닫고,
+                  ☰ 를 열고, 「조직·권한」을 찾아야 했다. 안내가 막다른 길이면 안내가 아니다.
+                  ★ 목록을 여기서 **보여 주고**, 편집은 한 번 눌러 그 화면으로 간다. */}
+              <Panel kicker="PEOPLE" title="계정 목록">
+                <div style={{ padding: 15, display: 'grid', gap: 10 }}>
+                  {users.status !== 'ok' ? (
+                    <EmptyOrError state={users.status} error={users.error} onRetry={loadUsers}
+                      emptyText="계정을 받지 못했습니다." />
+                  ) : (users.value || []).length === 0 ? (
+                    <p className="hint-line" style={{ margin: 0 }}>
+                      내 권한 범위 안에 등록된 계정이 없습니다.
+                    </p>
+                  ) : (
+                    <table className="afs-table">
+                      <thead><tr><th>이름</th><th>계정</th><th>소속</th><th>권한 표식</th></tr></thead>
+                      <tbody>
+                        {(users.value || []).map((u) => (
+                          <tr key={u.user_id}>
+                            <td><b>{u.display_name || u.user_id}</b></td>
+                            <td><code>{u.user_id}</code></td>
+                            <td>{u.primary_dept_id || '—'}</td>
+                            <td>{[u.is_admin && '관리자', u.is_data_admin && '데이터 관리자',
+                                  u.is_ai_admin && 'AI 관리자', u.is_executive && '경영진']
+                                  .filter(Boolean).join(' · ') || '없음'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  <p className="hint-line" style={{ margin: 0 }}>
+                    권한과 부서 역할은 <b>조직·권한</b> 화면에서 바꿉니다 — 권한은 조직 범위에서
+                    파생하므로 조직도와 같은 자리에서 다뤄야 어긋나지 않습니다.
+                  </p>
+                  <div>
+                    <button className="secondary-button" onClick={onGoToOrg}>
+                      조직·권한 화면 열기 →
+                    </button>
+                  </div>
                 </div>
               </Panel>
             </>
