@@ -93,9 +93,9 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
   }));
 
   return (
-    <HubDialog label="스킬 개선안 — 에이전트가 제안한 행동 규칙 검토" onClose={onClose}>
+    <HubDialog label="AI 스킬 진화 — 에이전트가 제안한 행동 규칙 검토" onClose={onClose}>
       <div className="afs-dialog-bar">
-        <b>스킬 개선안</b>
+        <b>AI 스킬 진화</b>
         <span>승인하면 에이전트의 행동 규칙이 영구히 바뀝니다<Refreshing on={list.refreshing} /></span>
         <div className="bar-actions">
           {busy && <span className="busy">{busy} 중…</span>}

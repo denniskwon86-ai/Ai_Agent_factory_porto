@@ -241,7 +241,10 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
   const totalDelete = plan?.delete.reduce((n, d) => n + d.count, 0) ?? 0;
 
   return (
-    <HubDialog label="계산 실행 승인 · 시연 초기화" onClose={onClose}>
+    // ⚠️ `subtitle` 을 주면 셸이 머리 바(제목 + 「닫기 (Esc)」)를 그린다. 빠뜨리면
+    //   제목도 닫기도 없는 전체화면 창이 된다 — 실제로 그랬다(2026-08-23).
+    <HubDialog label="계산 실행 승인 · 시연 초기화" onClose={onClose}
+      subtitle="누르기 전까지 계산은 «막힘» 으로 답합니다. 승인은 능력마다 별도 원장 사건으로 남습니다">
       <div style={{ padding: 20, maxHeight: '82vh', overflow: 'auto' }}>
         <Panel kicker="시스템 관리자" title="계산 실행 승인 · 시연 초기화">
           <p style={{ fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 12px' }}>

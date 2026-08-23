@@ -74,9 +74,25 @@ function ContextFooter() {
   );
 }
 
-export function HubDialog({ label, onClose, children }: {
+export function HubDialog({ label, subtitle, barActions, onClose, children }: {
   /** 스크린리더가 읽는 이름. 비우면 "대화상자"로만 읽혀 무엇인지 알 수 없다. */
   label: string;
+  /** ★★★ [2026-08-23 실측] 이 값을 주면 **셸이 머리 바를 그린다**(제목 + 「닫기 (Esc)」).
+   *
+   * ## 왜 셸로 올렸는가 — 두 화면이 실제로 빠뜨렸다
+   *
+   * 머리 바(`afs-dialog-bar`)는 지금까지 **화면마다 각자** 그렸다. 그 결과
+   * `CalcApprovalPanel` 과 `PathCalcPanel` 이 그것을 빠뜨렸고, **제목도 「닫기」도 없는
+   * 전체화면 창**이 됐다 — 닫는 방법은 Escape 뿐인데 화면 어디에도 그렇게 적혀 있지 않다.
+   *
+   * ⚠️ 이 파일 머리말이 이미 같은 결론을 적어 두었다: 「화면 4개를 같은 방식으로 더 만들면
+   *   같은 결함이 5개로 복제된다. 그래서 화면이 아니라 **셸**에 넣는다.」 `role="dialog"`·
+   *   포커스 덫·배경 차단을 셸로 올린 것과 **같은 이유**로 머리 바도 올린다.
+   * ★ 이미 자기 바를 그리는 화면은 이 값을 주지 않으면 된다 — 바가 둘이 되지 않는다.
+   *   아래 개발용 점검이 «둘 다 없는» 경우만 잡는다. */
+  subtitle?: string;
+  /** 머리 바 오른쪽에 놓을 것(진행 표시 등). 닫기 버튼은 셸이 항상 붙인다. */
+  barActions?: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -94,6 +110,26 @@ export function HubDialog({ label, onClose, children }: {
     //   기존 헤더가 넘치더라도 모달이 열린 동안 사용자에게 스크롤바가 보이지 않는다.
     const prev = { overflow: document.body.style.overflow };
     document.body.style.overflow = 'hidden';
+
+    // ★★★ [2026-08-23] **닫는 방법이 화면에 없는 창을 만들지 못하게 한다.**
+    //   Escape 는 동작하지만 «어디에도 그렇게 적혀 있지 않으면» 사용자에게는 없는 기능이다.
+    //   실제로 두 화면이 머리 바를 빠뜨려 제목도 닫기도 없는 전체화면 창이 됐다.
+    //   ⚠️ 조용히 넘어가지 않는다 — 조용하면 다음 화면도 똑같이 빠뜨린다.
+    if (import.meta.env?.DEV) {
+      queueMicrotask(() => {
+        const box = boxRef.current;
+        if (!box) return;
+        const hasBar = !!box.querySelector('.afs-dialog-bar');
+        const hasClose = [...box.querySelectorAll('button')]
+          .some((b) => /닫기|✕|×/.test(b.textContent || ''));
+        if (!hasBar && !hasClose) {
+          console.error(
+            `[HubDialog] «${label}» 에 머리 바도 닫기 버튼도 없습니다 — 사용자는 이 창을 `
+            + '닫을 방법을 화면에서 찾을 수 없습니다. `subtitle` 을 넘겨 셸이 바를 그리게 '
+            + '하거나, 화면이 직접 `.afs-dialog-bar` 를 그리십시오.');
+        }
+      });
+    }
 
     const first = boxRef.current ? focusables(boxRef.current)[0] : null;
     // 포커스 대상이 없으면 상자 자체에 준다 — 어디에도 포커스가 없으면 Escape 도 안 먹는다.
@@ -141,6 +177,18 @@ export function HubDialog({ label, onClose, children }: {
             표시한다」 — 처음에는 하단에 뒀는데, 문맥은 **작업을 시작하기 전에** 읽어야
             의미가 있다. 아래에 있으면 스크롤해야 보이고, 그때는 이미 누른 뒤다. */}
         <ContextFooter />
+        {subtitle !== undefined && (
+          <div className="afs-dialog-bar">
+            <b>{label}</b>
+            <span>{subtitle}</span>
+            <div className="bar-actions">
+              {barActions}
+              <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
+                닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+              </button>
+            </div>
+          </div>
+        )}
         {children}
       </div>
     </div>,

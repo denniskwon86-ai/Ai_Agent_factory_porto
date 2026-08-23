@@ -120,9 +120,12 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
         : { label: `호출 ${t.calls ?? 0}건`, tone: 'data' as const };
 
   return (
-    <HubDialog label="운영 계기판 — 무엇이 얼마나 돌았고 얼마가 들었나" onClose={onClose}>
+    <HubDialog label="LLM 텔레메트리 — 무엇이 얼마나 돌았고 얼마가 들었나" onClose={onClose}>
       <div className="afs-dialog-bar">
-        <b>운영 계기판</b>
+        {/* ⚠️ [2026-08-23] 메뉴 라벨과 **같은 이름**을 쓴다. 종전에는 메뉴가
+            「LLM 텔레메트리」라고 부르고 화면은 「운영 계기판」이라고 답해서, 사용자가
+            자기가 누른 곳에 왔는지 확인할 수 없었다. */}
+        <b>LLM 텔레메트리</b>
         <span>«0건»과 «확인하지 못함»을 구분해 표시합니다</span>
         <div className="bar-actions">
           {sum.status === 'loading' && <span className="busy">확인 중…</span>}

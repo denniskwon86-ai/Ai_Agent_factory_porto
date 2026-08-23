@@ -298,7 +298,8 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
   const canRun = !!pathFp && !!instanceId.trim() && busy !== 'run';
 
   return (
-    <HubDialog label="경로 계산" onClose={onClose}>
+    <HubDialog label="경로 계산" onClose={onClose}
+      subtitle="승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산합니다 (LLM 0콜)">
       <div style={{ padding: 20, maxHeight: '82vh', overflow: 'auto' }}>
         <Panel kicker="영향 경로" title="경로 계산 — 질문을 고르고 답을 봅니다">
           <p style={{ fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 12px' }}>

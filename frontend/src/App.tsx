@@ -328,6 +328,111 @@ function AppShell() {
     );
   }
 
+  // ★★★ [2026-08-23 실측] **오버레이 목록은 한 벌만 둔다.**
+  //
+  // ## 무엇이 고장나 있었는가
+  //
+  // 이 파일에는 최상위 `return` 이 셋 있고(경영 홈 / 런처 / Studio), **각자 자기 모달
+  // 목록을 손으로** 들고 있었다. 세 목록을 실제로 비교해 보니:
+  //
+  //   · 경영 홈  22개 — `showAgentPanel` 이 빠져 「⚙️ 에이전트 통제소」가 **안 열렸다**
+  //   · 런처     24개
+  //   · Studio   10개 — **14개가 빠져** 업무 데이터 준비·경로 계산·계산 실행 승인·
+  //     의사결정 안건·기준정보 마스터·지식 허브·용어집·업무표준·조직·권한·크로스워크·
+  //     시나리오·운영 승격·스킬 진화·텔레메트리가 전부 **눌러도 아무 일이 없었다**
+  //
+  // ★ 메뉴는 세 화면에서 **똑같이 20개**를 보여 준다. 즉 화면은 「있다」고 말하고 실제로는
+  //   없었다. 사용자는 그것을 권한 문제로 읽지 않고 **고장으로 읽는다**.
+  //
+  // ⚠️ 이 파일의 495행 주석이 이미 같은 사고를 한 번 기록했고(「런처에서 빼면 메뉴는
+  //   활성으로 보이는데 눌러도 아무 일이 없다」), 473행 주석은 「기존 중복이며 정리
+  //   대상이다」라고 적어 두었다. 목록이 여러 벌인 한 같은 사고가 반복된다.
+  //
+  // ★ 컴포넌트가 아니라 **엘리먼트 상수**로 둔다. 렌더 함수 안에서 컴포넌트를 정의하면
+  //   매 렌더마다 타입이 달라져 하위 트리가 통째로 다시 마운트된다(입력 중이던 값이 사라진다).
+  const overlays = (
+    <>
+      {showSkillEvolution && (
+        <SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />
+      )}
+      {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
+      {showCalcApproval && (
+        <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
+      {showPathCalc && <PathCalcPanel onClose={() => setShowPathCalc(false)} />}
+      {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
+      {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
+      {showPromotion && (
+        <ReleasePromotionPanel onClose={() => setShowPromotion(false)} />
+      )}
+      {showKnowledgeHub && (
+        <KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />
+      )}
+      {showTerminology && (
+        <TerminologyGlossaryPanel onClose={() => setShowTerminology(false)} />
+      )}
+      {showMasterData && (
+        <MasterDataPanel onClose={() => setShowMasterData(false)} />
+      )}
+      {showWorkStandard && (
+        <WorkStandardPanel onClose={() => setShowWorkStandard(false)} />
+      )}
+      {showOrgChart && (
+        <OrgChartPanel onClose={() => setShowOrgChart(false)} />
+      )}
+      {showCollaboration && (
+        <CollaborationHub
+          onClose={() => setShowCollaboration(false)}
+          // 라이브러리에 있는 릴리스를 그대로 선택지로 넘긴다 — 화면이 id 를 지어내지 않는다.
+          releaseIds={releases.map((r: any) => r.release_id).filter(Boolean)}
+        />
+      )}
+      {showCrosswalk && (
+        <CrosswalkPanel onClose={() => setShowCrosswalk(false)} />
+      )}
+      {showTelemetry && (
+        <TelemetryPanel onClose={() => setShowTelemetry(false)} />
+      )}
+      {showAdvisor && (
+        <AdvisorPanel onClose={() => setShowAdvisor(false)} onProjectCreated={fetchProjects} />
+      )}
+      {showGovernance && (
+        <GovernanceConsole onClose={() => setShowGovernance(false)} />
+      )}
+      {/* ⚠️ 이 모달 목록은 이 파일에 **두 벌** 있다(프로젝트 없음 화면 / 있는 화면).
+          한쪽에만 추가하면 특정 상태에서만 안 열린다 — 기존 중복이며 정리 대상이다. */}
+      {showAgentPanel && <AgentMasterPanel />}
+      {showShadow && (
+        <ShadowModePanel onClose={() => setShowShadow(false)} />
+      )}
+      {showWorkspace && (
+        <WorkspacePanel onClose={() => setShowWorkspace(false)} />
+      )}
+      {/* [사용자 결정 2026-07-30] 프로그램 사용여부 — 삭제 대신 비활성화 (IT 관리자) */}
+      {adminProgram && (
+        <ProgramAdminPanel
+          releaseId={adminProgram.id}
+          releaseName={adminProgram.name}
+          onClose={() => setAdminProgram(null)}
+          onChanged={fetchReleases}
+        />
+      )}
+      {showPlanning && (
+        <PlanningPanel onClose={() => setShowPlanning(false)} />
+      )}
+      {showBriefing && (
+        <BriefingPanel onClose={() => setShowBriefing(false)} />
+      )}
+      {/* [P2-2] 조직 자산은 **프로젝트가 없어도** 다루는 것이다 — 오히려 「프로젝트를 만들기
+          전에 우리 조직이 어떤 에이전트를 쓸 수 있는가」를 여기서 본다. 아래쪽 Studio 와 달리
+          런처에서 빼면 메뉴는 활성으로 보이는데 눌러도 아무 일이 없다. 그때 사용자는 권한
+          문제로 읽지 않고 **화면 고장으로 읽는다** — 위 351행 주석이 경고한 바로 그 상태다. */}
+      {showAgentGov && (
+        <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
+      )}
+    </>
+  );
+
+
   if (viewingRelease) {
     return (
       <ErrorBoundary>
@@ -384,39 +489,9 @@ function AppShell() {
               else if (id === 'collaboration') setShowCollaboration(true);
             }} />
         </div>
-        {/* 경영 홈에서도 열 수 있어야 하는 오버레이 — 메뉴가 이 화면에도 있기 때문이다. */}
-        {showAdvisor && (
-          <AdvisorPanel onClose={() => setShowAdvisor(false)} onProjectCreated={fetchProjects} />
-        )}
-        {showCollaboration && (
-          <CollaborationHub onClose={() => setShowCollaboration(false)}
-            releaseIds={releases.map((r: any) => r.release_id).filter(Boolean)} />
-        )}
-        {showAgentGov && (
-          <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
-        )}
-        {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
-        {showCalcApproval && (
-          <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
-        {showPathCalc && <PathCalcPanel onClose={() => setShowPathCalc(false)} />}
-        {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
-        {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
-        {showPromotion && (
-          <ReleasePromotionPanel onClose={() => setShowPromotion(false)} />
-        )}
-        {showKnowledgeHub && (<KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />)}
-        {showTerminology && (<TerminologyGlossaryPanel onClose={() => setShowTerminology(false)} />)}
-        {showMasterData && (<MasterDataPanel onClose={() => setShowMasterData(false)} />)}
-        {showWorkStandard && (<WorkStandardPanel onClose={() => setShowWorkStandard(false)} />)}
-        {showOrgChart && (<OrgChartPanel onClose={() => setShowOrgChart(false)} />)}
-        {showCrosswalk && (<CrosswalkPanel onClose={() => setShowCrosswalk(false)} />)}
-        {showTelemetry && (<TelemetryPanel onClose={() => setShowTelemetry(false)} />)}
-        {showGovernance && (<GovernanceConsole onClose={() => setShowGovernance(false)} />)}
-        {showSkillEvolution && (<SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />)}
-        {showShadow && (<ShadowModePanel onClose={() => setShowShadow(false)} />)}
-        {showWorkspace && (<WorkspacePanel onClose={() => setShowWorkspace(false)} />)}
-        {showPlanning && (<PlanningPanel onClose={() => setShowPlanning(false)} />)}
-        {showBriefing && (<BriefingPanel onClose={() => setShowBriefing(false)} />)}
+        {/* ★ 오버레이는 **한 벌**이다 — 위 `overlays` 선언 참조. 화면마다 목록을
+            손으로 들고 있었더니 화면에 따라 열리는 것이 달랐다(2026-08-23). */}
+        {overlays}
       </ErrorBoundary>
     );
   }
@@ -424,83 +499,7 @@ function AppShell() {
   if (!currentProjectId) {
     return (
       <ErrorBoundary>
-        {showSkillEvolution && (
-          <SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />
-        )}
-        {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
-        {showCalcApproval && (
-          <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
-        {showPathCalc && <PathCalcPanel onClose={() => setShowPathCalc(false)} />}
-        {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
-        {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
-        {showPromotion && (
-          <ReleasePromotionPanel onClose={() => setShowPromotion(false)} />
-        )}
-        {showKnowledgeHub && (
-          <KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />
-        )}
-        {showTerminology && (
-          <TerminologyGlossaryPanel onClose={() => setShowTerminology(false)} />
-        )}
-        {showMasterData && (
-          <MasterDataPanel onClose={() => setShowMasterData(false)} />
-        )}
-        {showWorkStandard && (
-          <WorkStandardPanel onClose={() => setShowWorkStandard(false)} />
-        )}
-        {showOrgChart && (
-          <OrgChartPanel onClose={() => setShowOrgChart(false)} />
-        )}
-        {showCollaboration && (
-          <CollaborationHub
-            onClose={() => setShowCollaboration(false)}
-            // 라이브러리에 있는 릴리스를 그대로 선택지로 넘긴다 — 화면이 id 를 지어내지 않는다.
-            releaseIds={releases.map((r: any) => r.release_id).filter(Boolean)}
-          />
-        )}
-        {showCrosswalk && (
-          <CrosswalkPanel onClose={() => setShowCrosswalk(false)} />
-        )}
-        {showTelemetry && (
-          <TelemetryPanel onClose={() => setShowTelemetry(false)} />
-        )}
-        {showAdvisor && (
-          <AdvisorPanel onClose={() => setShowAdvisor(false)} onProjectCreated={fetchProjects} />
-        )}
-        {showGovernance && (
-          <GovernanceConsole onClose={() => setShowGovernance(false)} />
-        )}
-        {/* ⚠️ 이 모달 목록은 이 파일에 **두 벌** 있다(프로젝트 없음 화면 / 있는 화면).
-            한쪽에만 추가하면 특정 상태에서만 안 열린다 — 기존 중복이며 정리 대상이다. */}
-        {showAgentPanel && <AgentMasterPanel />}
-        {showShadow && (
-          <ShadowModePanel onClose={() => setShowShadow(false)} />
-        )}
-        {showWorkspace && (
-          <WorkspacePanel onClose={() => setShowWorkspace(false)} />
-        )}
-        {/* [사용자 결정 2026-07-30] 프로그램 사용여부 — 삭제 대신 비활성화 (IT 관리자) */}
-        {adminProgram && (
-          <ProgramAdminPanel
-            releaseId={adminProgram.id}
-            releaseName={adminProgram.name}
-            onClose={() => setAdminProgram(null)}
-            onChanged={fetchReleases}
-          />
-        )}
-        {showPlanning && (
-          <PlanningPanel onClose={() => setShowPlanning(false)} />
-        )}
-        {showBriefing && (
-          <BriefingPanel onClose={() => setShowBriefing(false)} />
-        )}
-        {/* [P2-2] 조직 자산은 **프로젝트가 없어도** 다루는 것이다 — 오히려 「프로젝트를 만들기
-            전에 우리 조직이 어떤 에이전트를 쓸 수 있는가」를 여기서 본다. 아래쪽 Studio 와 달리
-            런처에서 빼면 메뉴는 활성으로 보이는데 눌러도 아무 일이 없다. 그때 사용자는 권한
-            문제로 읽지 않고 **화면 고장으로 읽는다** — 위 351행 주석이 경고한 바로 그 상태다. */}
-        {showAgentGov && (
-          <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
-        )}
+        {overlays}
         {/* §5.2 `/build/start` — 생성은 목록면과 분리된 흐름이다. */}
         {buildStart && (
           <BuildStartDialog
@@ -657,30 +656,7 @@ function AppShell() {
           </div>
         </header>
 
-        {showAdvisor && (
-          <AdvisorPanel onClose={() => setShowAdvisor(false)} onProjectCreated={fetchProjects} />
-        )}
-        {showGovernance && (
-          <GovernanceConsole onClose={() => setShowGovernance(false)} />
-        )}
-        {/* ⚠️ 이 모달 목록은 이 파일에 **두 벌** 있다(프로젝트 없음 화면 / 있는 화면).
-            한쪽에만 추가하면 특정 상태에서만 안 열린다 — 기존 중복이며 정리 대상이다. */}
-        {showAgentPanel && <AgentMasterPanel />}
-        {showShadow && (
-          <ShadowModePanel onClose={() => setShowShadow(false)} />
-        )}
-        {showWorkspace && (
-          <WorkspacePanel onClose={() => setShowWorkspace(false)} />
-        )}
-        {showPlanning && (
-          <PlanningPanel onClose={() => setShowPlanning(false)} />
-        )}
-        {showBriefing && (
-          <BriefingPanel onClose={() => setShowBriefing(false)} />
-        )}
-        {showAgentGov && (
-          <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
-        )}
+        {overlays}
         {/* [트랙 E 2단계] 프로젝트 문맥이 있는 이 화면에만 둔다 — Studio 는 «지금 만들고 있는
             SW»를 다루므로 프로젝트가 없는 런처에서는 보여 줄 것이 없다. 위 주석이 경고한
             «모달 목록 두 벌» 중 이쪽에만 추가한 것은 실수가 아니다.
