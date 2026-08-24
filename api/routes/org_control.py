@@ -8,6 +8,7 @@
    목록은 빈 배열이다. 조직을 등록하기 전까지 기존 기능은 전혀 영향받지 않는다.
 """
 import asyncio
+import functools
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -74,6 +75,9 @@ class UserUpsert(BaseModel):
     is_executive: bool = False
     is_admin: bool = False
     is_data_admin: bool = False
+    #: ★ 저장소가 받는 칸을 **빠짐없이** 싣는다. 빠뜨리면 화면에서 켤 수 없는 권한이
+    #:   생기고, 그때는 DB 를 직접 고치게 된다.
+    is_ai_admin: bool = False
 
 
 class RolesUpdate(BaseModel):
@@ -302,9 +306,18 @@ async def get_user(user_id: str, p: Principal = Depends(current_principal)):
 async def upsert_user(req: UserUpsert, p: Principal = Depends(current_principal)):
     assert_can_edit_org(p)
     try:
+        #: ★★★ **이름으로 넘긴다.** ⚠️ 위치로 넘기고 있었고 `is_ai_admin` 을 빠뜨려
+        #:   `actor` 가 그 자리에 들어갔다 — 저장소가 `int('hikwon@lsmnm.com')` 을
+        #:   시도하며 **500** 이었다. 즉 관리자 화면에서 **사용자를 추가·수정할 수
+        #:   없었다.** 위치 인자는 서명이 늘어나는 순간 조용히 어긋난다.
         u = await asyncio.to_thread(
-            org_directory.upsert_user, req.user_id, req.display_name, req.primary_dept_id,
-            req.is_executive, req.is_admin, req.is_data_admin, _actor(p))
+            functools.partial(
+                org_directory.upsert_user,
+                req.user_id, req.display_name,
+                primary_dept_id=req.primary_dept_id,
+                is_executive=req.is_executive, is_admin=req.is_admin,
+                is_data_admin=req.is_data_admin, is_ai_admin=req.is_ai_admin,
+                actor=_actor(p)))
     except MasterDataError as e:
         _err(e)
     return {"status": "success", "data": u}

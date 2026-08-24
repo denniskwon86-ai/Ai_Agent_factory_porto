@@ -332,11 +332,80 @@ def _audit_denied(p: Principal, action: str, release_id: str,
         pass
 
 
-def _require_dataset(dataset_id: str) -> Dict[str, Any]:
-    ds = app_data_service.get_dataset(dataset_id)
+def _audience_for_release(release_id: str) -> str:
+    """이 릴리스의 자료가 **어느 평면에 있는가** — 청중 이름으로 답한다.
+
+    ## ⚠️⚠️ 평면을 안 고르면 「200 인데 0건」이 된다 (2026-08-24 실측)
+
+    업무 키트 앱은 **시연 평면**에 물질화된다(운영 평면은 승격의 일이다). 그런데 이
+    라우트는 운영 평면 하나만 보고 있었다. 그래서 데이터셋 6종을 실제로 만든 뒤에도
+    목록이 **비어 있었다** — 「우리 회사에 자료가 없다」로 읽히는 화면이다.
+
+    ⚠️ 상태를 못 읽으면 청중이 빈 문자열이다 — 「모르면 운영」으로 접지 않는다.
+      그러면 후보 판이 운영 자료를 만진다."""
+    from core import app_preview
+    from core.program_lifecycle import program_lifecycle
+
+    state = str(program_lifecycle.get_status(str(release_id or "")).get("status") or "")
+    return app_preview.audience_for_state(state)
+
+
+def _plane_of(audience: str):
+    """청중 → 데이터 평면.
+
+    ★★★ 운영 평면은 **모듈 전역 이름**(`app_data_service`)으로 돌려준다 — 시험이 그
+      이름을 갈아끼워 격리한다. `app_preview.app_data_for()` 는 core 싱글턴을 직접
+      돌려주므로 여기서 쓰면 주입이 무력해지고, 실제로 10건이 404 로 뒤집혔다.
+    ⚠️ 알 수 없는 청중은 **404 로 은폐**한다 — 「그것이 존재하는데 상태가 이상하다」를
+      알려 주지 않는다(`app_data_runtime._audience_of` 와 같은 규약)."""
+    from core import app_preview
+
+    if app_preview.is_preview(audience):
+        return app_preview.preview_app_data()
+    if app_preview.normalize_audience(audience) == app_preview.AUDIENCE_OPERATIONAL:
+        return app_data_service
+    raise HTTPException(status_code=404, detail="사용할 수 없는 릴리스 상태입니다.")
+
+
+def _plane_for_release(release_id: str):
+    """릴리스 하나가 쓰는 평면. **고르는 것은 여기 한 곳이다.**"""
+    return _plane_of(_audience_for_release(release_id))
+
+
+def _find_dataset_any_plane(dataset_id: str):
+    """데이터셋 하나와 **그것이 있던 평면**. 없으면 `(None, None)`.
+
+    ★★★ 찾은 뒤 **권위와 대조한다.** 릴리스 상태가 말하는 청중과 실제로 찾은 평면의
+      청중이 다르면 없는 것으로 답한다 — 「어느 서랍에 있든 열어 준다」가 되면 승격
+      경계가 사라지고, 후보 판의 자료가 운영 경로로 새어 나온다.
+    ⚠️ 두 평면을 뒤지는 것은 **탐색**이지 판정이 아니다. 판정은 아래 대조 한 줄이다."""
+    from core import app_preview
+
+    planes = ((app_preview.AUDIENCE_OPERATIONAL, app_data_service),
+              (app_preview.AUDIENCE_PREVIEW, app_preview.preview_app_data()))
+    for audience, svc in planes:
+        try:
+            ds = svc.get_dataset(dataset_id)
+        except Exception:                        # pragma: no cover - 평면 조회 실패
+            continue
+        if not ds:
+            continue
+        if _audience_for_release(str(ds.get("release_id") or "")) != audience:
+            #: ⚠️ 상태가 말하는 평면이 아니다 — 승격 중이거나 어긋난 자료다. 은폐한다.
+            return None, None
+        return ds, svc
+    return None, None
+
+
+def _require_dataset(dataset_id: str) -> Tuple[Dict[str, Any], Any]:
+    """★ 데이터셋과 **그 평면**을 함께 돌려준다.
+
+    ⚠️ 평면을 함께 주지 않으면 호출부가 모듈 전역 서비스를 쓰고, 그것은 늘 운영 평면이다
+      — 후보 판의 레코드를 읽으면 조용히 0건이 된다."""
+    ds, svc = _find_dataset_any_plane(dataset_id)
     if not ds:
         raise HTTPException(status_code=404, detail="데이터셋을 찾을 수 없습니다.")
-    return ds
+    return ds, svc
 
 
 def _assert_personal_owner(ds: Dict[str, Any], p: Principal, row_creator: str = "") -> None:
@@ -402,8 +471,11 @@ class RecordWrite(BaseModel):
 async def create_dataset(req: DatasetCreate, p: Principal = Depends(current_principal)):
     actor = _actor(p)
     _enforce(p, "manage", req.release_id, path="POST /datasets")
+    #: ★ 만드는 자리도 **릴리스가 정한 평면**이다 — 후보 판의 데이터셋을 운영 평면에
+    #:   만들면 승격을 건너뛴 자료가 생긴다.
+    _svc = _plane_for_release(req.release_id)
     try:
-        ds = app_data_service.create_dataset(
+        ds = _svc.create_dataset(
             req.release_id, req.name, req.schema_def, actor_id=actor,
             label=req.label, app_class=req.app_class, owner_dept_id=req.owner_dept_id,
             scope_node_id=req.scope_node_id, tenant_id=req.tenant_id or "tenant_default")
@@ -422,13 +494,14 @@ async def list_datasets(release_id: str = Query(..., description="어느 앱의 
                         include_retired: bool = False,
                         p: Principal = Depends(current_principal)):
     _enforce(p, "read", release_id, path="GET /datasets")
-    rows = app_data_service.list_datasets(release_id, include_retired=include_retired)
+    _svc = _plane_for_release(release_id)
+    rows = _svc.list_datasets(release_id, include_retired=include_retired)
     out = []
     for ds in rows:
         if (ds.get("app_class") or "") == "personal" and not p.scope.unrestricted \
                 and ds.get("created_by") and ds["created_by"] != (p.user_id or ""):
             continue          # 목록에서는 조용히 감춘다(단건은 403 으로 이유를 말한다)
-        ds["record_count"] = app_data_service.count_records(ds["dataset_id"])
+        ds["record_count"] = _svc.count_records(ds["dataset_id"])
         out.append(ds)
     return {"datasets": out, "count": len(out), "release_id": release_id}
 
@@ -438,32 +511,33 @@ async def get_dataset_by_name(release_id: str = Query(...), name: str = Query(..
                               p: Principal = Depends(current_principal)):
     """★ 브리지가 쓰는 경로 — 앱은 이름만 말하고 `release_id` 는 부모가 붙인다."""
     _enforce(p, "read", release_id, path="GET /datasets/by-name")
-    ds = app_data_service.find_dataset(release_id, name)
+    _svc = _plane_for_release(release_id)
+    ds = _svc.find_dataset(release_id, name)
     if not ds:
         raise HTTPException(status_code=404, detail=f"데이터셋을 찾을 수 없습니다: {name}")
     _assert_personal_owner(ds, p)
-    ds["record_count"] = app_data_service.count_records(ds["dataset_id"])
+    ds["record_count"] = _svc.count_records(ds["dataset_id"])
     return ds
 
 
 @router.get("/datasets/{dataset_id}")
 async def get_dataset(dataset_id: str, p: Principal = Depends(current_principal)):
-    ds = _require_dataset(dataset_id)
+    ds, _svc = _require_dataset(dataset_id)
     _enforce(p, "read", ds["release_id"], ds, path="GET /datasets/{id}")
     _assert_personal_owner(ds, p)
-    ds["record_count"] = app_data_service.count_records(dataset_id)
+    ds["record_count"] = _svc.count_records(dataset_id)
     return ds
 
 
 @router.put("/datasets/{dataset_id}/schema")
 async def update_schema(dataset_id: str, req: SchemaUpdate,
                         p: Principal = Depends(current_principal)):
-    ds = _require_dataset(dataset_id)
+    ds, _svc = _require_dataset(dataset_id)
     actor = _actor(p)
     _enforce(p, "manage", ds["release_id"], ds, path="PUT /datasets/{id}/schema")
     _assert_personal_owner(ds, p)
     try:
-        out = app_data_service.update_schema(dataset_id, req.schema_def, actor_id=actor)
+        out = _svc.update_schema(dataset_id, req.schema_def, actor_id=actor)
     except AppDataError as e:
         raise HTTPException(status_code=400, detail=str(e))
     _ledger("APP_DATASET_SCHEMA_CHANGED", dataset_id, actor,
@@ -483,18 +557,18 @@ async def update_schema(dataset_id: str, req: SchemaUpdate,
 @router.delete("/datasets/{dataset_id}")
 async def retire_dataset(dataset_id: str, p: Principal = Depends(current_principal)):
     """폐지. **레코드는 지우지 않는다**(설계 §4-2)."""
-    ds = _require_dataset(dataset_id)
+    ds, _svc = _require_dataset(dataset_id)
     actor = _actor(p)
     _enforce(p, "manage", ds["release_id"], ds, path="DELETE /datasets/{id}")
     _assert_personal_owner(ds, p)
     try:
-        out = app_data_service.retire_dataset(dataset_id, actor_id=actor)
+        out = _svc.retire_dataset(dataset_id, actor_id=actor)
     except AppDataError as e:
         raise HTTPException(status_code=400, detail=str(e))
     _ledger("APP_DATASET_RETIRED", dataset_id, actor,
             decision=f"'{ds['name']}' 폐지",
             rationale="레코드는 보존한다 — 원장이 가리키는 대상이 사라지면 감사 증적이 아니다",
-            evidence=[{"record_count": app_data_service.count_records(dataset_id)}],
+            evidence=[{"record_count": _svc.count_records(dataset_id)}],
             tenant_id=ds.get("tenant_id", ""), scope=ds.get("scope_node_id", ""))
     return out
 
@@ -504,14 +578,14 @@ async def retire_dataset(dataset_id: str, p: Principal = Depends(current_princip
 async def list_records(dataset_id: str, limit: int = 200, offset: int = 0,
                        include_deleted: bool = False,
                        p: Principal = Depends(current_principal)):
-    ds = _require_dataset(dataset_id)
+    ds, _svc = _require_dataset(dataset_id)
     _enforce(p, "read", ds["release_id"], ds, path="GET /records")
     _assert_personal_owner(ds, p)
     # `personal` 앱은 자기 것만 — 데이터셋 소유자와 레코드 작성자가 다를 수 있다.
     creator = ""
     if (ds.get("app_class") or "") == "personal" and not p.scope.unrestricted:
         creator = (p.user_id or "")
-    rows, total = app_data_service.list_records(
+    rows, total = _svc.list_records(
         dataset_id, limit=limit, offset=offset,
         include_deleted=include_deleted, created_by=creator)
     # ★ 목록 길이와 총계를 함께 준다 — 화면이 `len(rows)` 를 «전부» 로 읽으면 상한에 걸린
@@ -525,17 +599,17 @@ async def list_records(dataset_id: str, limit: int = 200, offset: int = 0,
 @router.post("/datasets/{dataset_id}/records")
 async def create_record(dataset_id: str, req: RecordWrite,
                         p: Principal = Depends(current_principal)):
-    ds = _require_dataset(dataset_id)
+    ds, _svc = _require_dataset(dataset_id)
     actor = _actor(p)
     _enforce(p, "write", ds["release_id"], ds, path="POST /records")
     _assert_personal_owner(ds, p)
     try:
-        return app_data_service.create_record(dataset_id, req.payload, actor_id=actor)
+        return _svc.create_record(dataset_id, req.payload, actor_id=actor)
     except AppDataError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-def _require_record_in(dataset_id: str, record_id: str) -> Dict[str, Any]:
+def _require_record_in(dataset_id: str, record_id: str, svc: Any = None) -> Dict[str, Any]:
     """★★★ [G1-B01-B] **레코드가 «그» 데이터셋의 것인지 확인한다.**
 
     ## 왜 경로에 데이터셋이 있어야 하는가
@@ -552,7 +626,8 @@ def _require_record_in(dataset_id: str, record_id: str) -> Dict[str, Any]:
 
     ⚠️ 어긋나면 **404** 다. 403 으로 답하면 「그 레코드는 있는데 여기 것이 아니다」가 되어
       **다른 데이터셋의 존재가 새어나간다**(설계 §3.3 은폐 경계표와 같은 규칙)."""
-    rec = app_data_service.get_record(record_id)
+    #: ★ 데이터셋이 있던 **그 평면**에서 읽는다 — 안 주면 늘 운영 평면이다.
+    rec = (svc or app_data_service).get_record(record_id)
     if not rec or str(rec.get("dataset_id") or "") != str(dataset_id or ""):
         raise HTTPException(status_code=404, detail="레코드를 찾을 수 없습니다.")
     return rec
@@ -561,8 +636,8 @@ def _require_record_in(dataset_id: str, record_id: str) -> Dict[str, Any]:
 @router.get("/datasets/{dataset_id}/records/{record_id}")
 async def get_record(dataset_id: str, record_id: str,
                      p: Principal = Depends(current_principal)):
-    ds = _require_dataset(dataset_id)
-    rec = _require_record_in(dataset_id, record_id)
+    ds, _svc = _require_dataset(dataset_id)
+    rec = _require_record_in(dataset_id, record_id, _svc)
     _enforce(p, "read", ds["release_id"], ds, path="GET /records/{id}")
     _assert_personal_owner(ds, p, row_creator=rec.get("created_by", ""))
     return rec
@@ -571,13 +646,13 @@ async def get_record(dataset_id: str, record_id: str,
 @router.put("/datasets/{dataset_id}/records/{record_id}")
 async def update_record(dataset_id: str, record_id: str, req: RecordWrite,
                         p: Principal = Depends(current_principal)):
-    ds = _require_dataset(dataset_id)
-    rec = _require_record_in(dataset_id, record_id)
+    ds, _svc = _require_dataset(dataset_id)
+    rec = _require_record_in(dataset_id, record_id, _svc)
     actor = _actor(p)
     _enforce(p, "write", ds["release_id"], ds, path="PUT /records/{id}")
     _assert_personal_owner(ds, p, row_creator=rec.get("created_by", ""))
     try:
-        return app_data_service.update_record(record_id, req.payload, actor_id=actor)
+        return _svc.update_record(record_id, req.payload, actor_id=actor)
     except AppDataError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -586,13 +661,13 @@ async def update_record(dataset_id: str, record_id: str, req: RecordWrite,
 async def delete_record(dataset_id: str, record_id: str,
                         p: Principal = Depends(current_principal)):
     """논리 삭제. 물리 삭제는 제공하지 않는다(설계 §4-2)."""
-    ds = _require_dataset(dataset_id)
-    rec = _require_record_in(dataset_id, record_id)
+    ds, _svc = _require_dataset(dataset_id)
+    rec = _require_record_in(dataset_id, record_id, _svc)
     actor = _actor(p)
     _enforce(p, "delete", ds["release_id"], ds, path="DELETE /records/{id}")
     _assert_personal_owner(ds, p, row_creator=rec.get("created_by", ""))
     try:
-        return app_data_service.delete_record(record_id, actor_id=actor)
+        return _svc.delete_record(record_id, actor_id=actor)
     except AppDataError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

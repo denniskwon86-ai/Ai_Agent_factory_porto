@@ -250,6 +250,10 @@ def evaluate_outputs(datasets: List[Dict[str, Any]],
     result: List[Dict[str, Any]] = []
     for spec in outputs:
         name = str(spec.get("output") or spec.get("name") or "").strip()
+        #: ★★★ 사람이 읽을 이름. ⚠️ 세 분기 **전부**에 실어야 한다 — 하나라도 빠지면
+        #:   그 상태일 때만 화면에 「APP-03」이 뜬다(실측: 셋 다 빠져 있었고, 프로파일에
+        #:   「재고·생산 영향 분석」이 멀쩡히 들어 있는데 목록은 코드만 보여 줬다).
+        label = str(spec.get("label") or spec.get("name_ko") or "").strip()
         needs = [str(k).strip() for k in (spec.get("requires") or []) if str(k).strip()]
         blocking, warning, missing = [], [], []
         for key in needs:
@@ -266,7 +270,7 @@ def evaluate_outputs(datasets: List[Dict[str, Any]],
         if blocking or missing:
             first = blocking[0] if blocking else None
             result.append({
-                "output": name,
+                "output": name, "label": label,
                 "state": BLOCKED_OUTPUT,
                 "reason_code": (f"REQUIRED_DATA_{first['state']}" if first
                                 else "REQUIRED_DATA_UNKNOWN"),
@@ -280,7 +284,7 @@ def evaluate_outputs(datasets: List[Dict[str, Any]],
             })
         elif warning:
             result.append({
-                "output": name, "state": AVAILABLE_WITH_WARNING,
+                "output": name, "label": label, "state": AVAILABLE_WITH_WARNING,
                 "reason_code": "REQUIRED_DATA_STALE",
                 "user_message": (f"«{warning[0]['dataset_contract_key']}» 데이터의 "
                                  f"기준시점이 오래됐습니다 — 참고용으로만 사용하십시오."),
@@ -289,7 +293,8 @@ def evaluate_outputs(datasets: List[Dict[str, Any]],
                 "blocking_datasets": [],
             })
         else:
-            result.append({"output": name, "state": AVAILABLE, "reason_code": "",
+            result.append({"output": name, "label": label,
+                           "state": AVAILABLE, "reason_code": "",
                            "user_message": "", "next_action": "", "responsible_role": "",
                            "blocking_datasets": []})
     return sorted(result, key=lambda r: r["output"])
