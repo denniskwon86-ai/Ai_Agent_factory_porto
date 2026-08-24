@@ -217,13 +217,29 @@ export function BuildStartDialog({
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        {/* ⚠️⚠️ [2026-08-24 사용자 지적] **못 누르는 이유를 화면에 적는다**(설계 §8.6).
+            종전에는 `disabled={!idOk}` 뿐이었다. Project ID 가 비면 버튼이 죽어 있는데
+            **아무 문구도 없어서**, 사용자는 눌러 보고 「안 넘어간다」고 읽는다.
+            ★ `submit()` 안의 `setErr(...)` 는 도달하지 못하는 코드였다 — 버튼이 죽어 있으면
+              `submit` 자체가 불리지 않는다. 그래서 안내는 **여기서** 한다. */}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end',
+          alignItems: 'center', flexWrap: 'wrap' }}>
+          {!idOk && (
+            <span style={{ fontSize: 12.5, color: 'var(--surface-text-muted)',
+              marginRight: 'auto' }}>
+              {!projectId.trim()
+                ? '맨 위 Project ID 를 입력하면 «이 조건으로 만들기» 가 켜집니다.'
+                : 'Project ID 는 영문·숫자·`.`·`_`·`-` 로 2자 이상이어야 합니다 — '
+                  + '지금 값으로는 만들 수 없습니다.'}
+            </span>
+          )}
           <button onClick={onClose} style={{
             height: 44, padding: '0 18px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
             border: '1px solid var(--action-secondary-border)',
             background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
           }}>취소</button>
-          <button onClick={submit} disabled={!idOk} style={{
+          <button onClick={submit} disabled={!idOk}
+            title={idOk ? '' : 'Project ID 를 입력해야 만들 수 있습니다.'} style={{
             height: 46, padding: '0 22px', fontSize: 14, fontWeight: 700, borderRadius: 6,
             cursor: idOk ? 'pointer' : 'not-allowed', opacity: idOk ? 1 : .55,
             border: '1px solid var(--ls-navy)',
