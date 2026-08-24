@@ -302,22 +302,29 @@ class ShadowMode:
         run = self.get(run_id)
         if not run:
             raise ShadowModeError(f"존재하지 않는 Shadow run 입니다: {run_id}")
+        #: ⚠️⚠️ [2026-08-24 사용자 지적] **사유가 화면에 그대로 나간다.** 그러니 여기부터
+        #:   사용자 말로 쓴다 — 「기준선과 후보의 입력이 다릅니다」는 우리 안에서만
+        #:   쓰는 말이었고, 사용자는 무슨 뜻인지도 무엇을 하라는 것인지도 몰랐다.
+        #: ★ `기준선`→「지금 방식」, `후보`→「새 방식」, `입력`→「자료」.
         b, c = run["baseline"], run["candidate"]
         if not b or not c:
-            missing = "기준선" if not b else "후보"
+            missing = "지금 방식" if not b else "새 방식"
             return self._save_variance(run_id, {
                 "comparable": False,
-                "reason": f"{missing} 실행 결과가 아직 없습니다.",
-                "note": "한쪽만으로는 비교가 성립하지 않습니다.",
+                "reason": f"{missing}이 아직 돌지 않았습니다.",
+                "note": "한쪽만 돌아서는 견줄 수가 없습니다 — 둘 다 돌아야 비교가 됩니다.",
             })
         if b["input_hash"] != c["input_hash"]:
             return self._save_variance(run_id, {
                 "comparable": False,
-                "reason": "기준선과 후보의 입력이 다릅니다.",
+                "reason": "두 방식이 서로 다른 자료로 돌았습니다.",
+                #: ⚠️ 해시는 **남기되 화면에 앞세우지 않는다.** 사용자가 그 값으로 할 수
+                #:   있는 일은 없고, 문의할 때만 쓰인다(화면은 `reason` 을 보여 준다).
                 "baseline_input_hash": b["input_hash"][:12],
                 "candidate_input_hash": c["input_hash"][:12],
-                "note": ("다른 입력으로 낸 차이는 후보의 효과가 아니라 **입력의 차이**입니다. "
-                         "이것을 개선으로 읽으면 잘못된 승격을 합니다(§7.3 '같은 입력에 동시 실행')."),
+                "note": ("자료가 다르면 결과 차이가 새 방식 덕분인지 자료 탓인지 가릴 수 "
+                         "없습니다. 이것을 «좋아졌다» 로 읽으면 잘못된 것을 채택하게 "
+                         "됩니다. 같은 자료로 맞춰 다시 돌리십시오."),
             })
 
         improved, regressed, unmeasured, unchanged = [], [], [], []

@@ -230,15 +230,55 @@ def test_unapproved_query_contract_is_high(eb, wire, monkeypatch):
 
 
 def test_incomparable_shadow_run_is_judgement_unavailable_not_failure(eb, wire, monkeypatch):
-    """★★ 비교 불가는 실패가 아니라 **판정 불가**다. 실패로 적으면 잘못된 결론을 낸다."""
+    """★★ 비교 불가는 실패가 아니다. **그 뜻을 사용자 말로** 전한다.
+
+    ## ⚠️⚠️ [2026-08-24] 이 시험이 전문용어를 계약으로 붙들고 있었다
+
+    종전 단언은 `"판정 불가" in inc["why"]` 였다. 그런데 사용자가 그 화면을 보고
+    「도대체 무슨 말인지 모르겠다」고 했다 — `run`·`판정 불가`·`기준선/후보`·
+    `입력 스냅샷` 은 전부 우리 안에서만 쓰는 말이다.
+
+    ★ 지켜야 하는 것은 **낱말이 아니라 뜻**이다: ① 실패로 읽히면 안 되고 ② 왜 못
+      견줬는지 말해야 하고 ③ 무엇을 하면 되는지 말해야 한다. 그 셋을 단언한다.
+    ⚠️ 낱말을 단언하면 문구를 고칠 때마다 시험이 깨지고, 그러면 **문구를 안 고치게
+      된다** — 시험이 사용자를 막는 자리에 서 버린다.
+    """
     wire(shadow=_Shadow({"by_review_status": {"pending": 2},
                          "incomparable": [{"run_id": "r1", "name": "원가 v2",
                                            "reason": "입력 해시 불일치"}]}))
     _cost(monkeypatch)
     items = eb.briefing()["sections"]["my_decisions"]["items"]
     inc = next(i for i in items if i["kind"] == "shadow_incomparable")
-    assert "판정 불가" in inc["why"] and "입력 해시 불일치" in inc["why"]
+
+    #: ① 실패가 아니다 — 「실패」로 단정하는 말을 쓰지 않는다.
+    assert "실패했" not in inc["why"] and "오류" not in inc["why"], inc["why"]
+    #: ② 왜 못 견줬는지 — 「서로 다른 자료」라는 사실과, 서버가 준 사유를 함께 전한다.
+    assert "다른 자료" in inc["why"], inc["why"]
+    assert "입력 해시 불일치" in inc["why"], "서버가 준 사유를 버리면 원인을 못 찾는다"
+    #: ③ 무엇을 하면 되는가 — 행동이 비어 있으면 사용자는 멈춘다.
+    assert inc["suggested_action"].strip(), inc
+    #: ★ 제목에 사람이 붙인 이름이 들어간다(해시 id 가 아니다).
+    assert "원가 v2" in inc["title"], inc["title"]
     assert any(i["kind"] == "shadow_review_pending" for i in items)
+
+
+def test_이름_없는_비교는_해시_id_를_제목에_쓰지_않는다(eb, wire, monkeypatch):
+    """★★★ [2026-08-24 사용자 지적] 「sh_a111029126ae 이런 게 화면에 자꾸 노출된다」.
+
+    이름이 없으면 종전에는 **해시 id 가 그대로 제목**이었다. 사용자에게 그 문자열은
+    아무 뜻도 없고, 무엇에 대한 이야기인지조차 알려 주지 않는다.
+
+    ⚠️ 그렇다고 버리지도 않는다 — 같은 종류가 여럿일 때 구분해야 하고, 문의할 때
+      그 값으로 찾는다. **꼬리표로 남긴다.**"""
+    wire(shadow=_Shadow({"incomparable": [{"run_id": "sh_a111029126ae", "name": ""}]}))
+    _cost(monkeypatch)
+    inc = next(i for i in eb.briefing()["sections"]["my_decisions"]["items"]
+               if i["kind"] == "shadow_incomparable")
+    assert "sh_a111029126ae" not in inc["title"], inc["title"]
+    assert "이름 없는" in inc["title"], inc["title"]
+    assert "9126ae" in inc["title"], "꼬리표까지 버리면 어느 것인지 찾을 수 없다"
+    #: ★ 원래 값은 `ref` 로 그대로 간다 — 화면이 그것으로 해당 항목을 연다.
+    assert inc["ref"] == "sh_a111029126ae"
 
 
 def test_pending_skill_proposals_are_low_not_hidden(eb, wire, monkeypatch):

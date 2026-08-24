@@ -158,7 +158,7 @@ export default function ShadowModePanel({ onClose }: Props) {
             chip={runs.status === 'loading' ? { label: '확인 중', tone: 'muted' }
               : runs.status === 'forbidden' ? { label: '권한 없음', tone: 'danger' }
                 : runs.status === 'error' ? { label: '조회 불가', tone: 'danger' }
-                  : { label: `run ${(runs.value || []).length}건`, tone: 'data' }} />
+                  : { label: `비교 ${(runs.value || []).length}건`, tone: 'data' }} />
 
           {err && (
             <div style={{ marginBottom: 12 }}>
@@ -176,16 +176,20 @@ export default function ShadowModePanel({ onClose }: Props) {
               {summary.status !== 'ok' ? (
                 // ★ 요약을 못 읽었다고 목록까지 죽이지 않는다 — 따로 말한다.
                 <EmptyOrError state={summary.status} error={summary.error}
-                  emptyText="집계할 run 이 없습니다." onRetry={load} />
+                  emptyText="아직 비교해 본 것이 없습니다." onRetry={load} />
               ) : (
                 <>
                   <div className="metric-row">
-                    <div><span>전체 run</span><b>{sm!.total}</b><small /></div>
+                    {/* ⚠️⚠️ [2026-08-24 사용자 지적] `run`·`판정 불가`·`입력 불일치` 는
+                        전부 우리 안에서만 쓰는 말이다. 업무 낱말로 바꾼다. */}
+                    <div><span>비교해 본 것</span><b>{sm!.total}</b><small /></div>
                     <div><span>검토 대기</span>
-                      <b>{sm!.by_review_status.pending_review || 0}</b><small /></div>
-                    <div><span>승격됨</span><b>{sm!.promoted}</b><small>범위 제한</small></div>
-                    <div><span>판정 불가</span><b>{sm!.incomparable.length}</b>
-                      <small>입력 불일치 — 실패가 아닙니다</small></div>
+                      <b>{sm!.by_review_status.pending_review || 0}</b>
+                      <small>사람이 아직 안 봄</small></div>
+                    <div><span>채택됨</span><b>{sm!.promoted}</b>
+                      <small>정해진 범위에서만</small></div>
+                    <div><span>견줄 수 없었음</span><b>{sm!.incomparable.length}</b>
+                      <small>서로 다른 자료로 돌았음 — 실패가 아닙니다</small></div>
                   </div>
                   {sm!.note && <p className="afs-muted" style={{ fontSize: 12 }}>{sm!.note}</p>}
                 </>
@@ -201,9 +205,12 @@ export default function ShadowModePanel({ onClose }: Props) {
                 {runs.status !== 'ok' ? (
                   // ★★★ 종전에는 여기가 «등록된 run 이 없습니다» 였다 — 못 본 것을 없는 것으로.
                   <EmptyOrError state={runs.status} error={runs.error}
-                    emptyText="등록된 run 이 없습니다." onRetry={load} />
+                    emptyText="아직 비교해 본 것이 없습니다." onRetry={load} />
                 ) : (runs.value || []).length === 0 ? (
-                  <p className="afs-muted" style={{ fontSize: 13 }}>등록된 run 이 없습니다.</p>
+                  <p className="afs-muted" style={{ fontSize: 13 }}>
+                    아직 비교해 본 것이 없습니다 — 새 규칙·모델을 지금 것과 나란히 돌리면
+                    여기에 결과가 쌓입니다.
+                  </p>
                 ) : (
                   (runs.value || []).map((r) => (
                     <button key={r.run_id} onClick={() => open(r)}
@@ -254,15 +261,26 @@ export default function ShadowModePanel({ onClose }: Props) {
                       </span>
                     </div>
 
-                    {/* ③ 비교 불가는 실패가 아니라 판정 불가 */}
+                    {/* ③ 견줄 수 없는 것은 «실패» 가 아니다 — 판단할 근거가 없는 것이다.
+                        ⚠️ 해시 두 개를 나란히 보여 주던 자리를 없앴다. 사용자는 그 값으로
+                          할 수 있는 일이 없고, 「≠」 하나만 남아 겁만 준다. */}
                     {v && !v.comparable && (
-                      <Banner tone="warn" title={`판정 불가 — ${v.reason || '입력 불일치'}`}>
-                        {v.baseline_input_hash && (
-                          <div className="afs-muted" style={{ fontSize: 12 }}>
-                            기준선 {v.baseline_input_hash} ≠ 후보 {v.candidate_input_hash}
+                      <Banner tone="warn" title="이번 비교는 결과를 쓸 수 없습니다">
+                        <div>
+                          새 방식과 지금 방식이 <b>서로 다른 자료</b>로 돌아서 나란히 놓고
+                          견줄 수가 없습니다. 새 방식이 틀렸다는 뜻이 아니라, 아직 좋고
+                          나쁨을 말할 근거가 없다는 뜻입니다.
+                        </div>
+                        <div style={{ marginTop: 6 }}>
+                          <b>다음 할 일</b> — 두 방식이 같은 자료를 보도록 맞춘 뒤 다시
+                          돌리십시오.
+                        </div>
+                        {v.reason && (
+                          <div className="afs-muted" style={{ fontSize: 12, marginTop: 6 }}>
+                            확인된 차이: {v.reason}
                           </div>
                         )}
-                        <div>{v.note}</div>
+                        {v.note && <div style={{ marginTop: 6 }}>{v.note}</div>}
                       </Banner>
                     )}
 

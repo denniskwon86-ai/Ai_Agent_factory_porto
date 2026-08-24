@@ -19,6 +19,7 @@
 import { useMemo, useState } from 'react';
 
 import { useFactoryStore } from '../store/useFactoryStore';
+import { shortId } from '../lib/displayId';
 
 //: 문맥 축에서 막힌 사유를 사람 말로. **정상 격리**와 **점검 대상**을 다르게 말한다.
 const CTX_KO: Record<string, string> = {
@@ -260,7 +261,8 @@ export function BuildPage({
                 </div>
                 <div style={{ fontSize: 11, marginTop: 4,
                   fontFamily: 'var(--font-mono, monospace)',
-                  color: 'var(--surface-text-faint)' }}>{r.release_id}</div>
+                  color: 'var(--surface-text-faint)' }}
+                  title={r.release_id}>{shortId(r.release_id)}</div>
                 <div style={{ fontSize: 12, marginTop: 4, color: 'var(--surface-text-muted)' }}>
                   {r.created_at || ''}
                 </div>

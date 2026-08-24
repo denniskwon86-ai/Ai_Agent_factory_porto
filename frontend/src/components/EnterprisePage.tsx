@@ -33,6 +33,7 @@ import {
 import { getReadiness, listInstances } from '../lib/dataPrepApi';
 import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
+import { ServerText } from '../design/ServerText';
 import { fetchScopeNodes, labelForScope, type ScopeNode } from '../lib/scopeLabel';
 
 /** §4.2 상태. **색만으로 전달하지 않는다**(§2.1) — 낱말을 함께 싣는다. */
@@ -319,7 +320,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                   <span style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.4,
                     color: 'var(--surface-text)' }}>{r.title}</span>
                   <span style={{ fontSize: 12.5, lineHeight: 1.45,
-                    color: 'var(--surface-text-muted)' }}>{r.why}</span>
+                    color: 'var(--surface-text-muted)' }}><ServerText text={r.why} /></span>
                   {/* §4.2 필드: 담당 역할·기한. ⚠️ 서버가 주지 않는다 — 빈칸 대신 «미지정». */}
                   <span style={{ fontSize: 12, color: 'var(--surface-text-faint)' }}>
                     담당 미지정 · 기한 미지정
@@ -488,13 +489,15 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
               <h2 style={{ fontSize: 18, margin: 0, lineHeight: 1.4,
                 color: 'var(--surface-text)' }}>{selected.title}</h2>
               <p style={{ fontSize: 14, margin: 0, lineHeight: 1.6,
-                color: 'var(--surface-text)' }}>{selected.why}</p>
+                color: 'var(--surface-text)' }}><ServerText text={selected.why} /></p>
               {selected.suggested_action && (
                 <div style={{ background: 'var(--surface-raised)',
                   border: '1px solid var(--surface-border)', borderRadius: 8, padding: 16 }}>
                   <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>다음 행동</div>
                   <div style={{ fontSize: 14, marginTop: 2,
-                    color: 'var(--surface-text)' }}>{selected.suggested_action}</div>
+                    color: 'var(--surface-text)' }}>
+                    <ServerText text={selected.suggested_action} />
+                  </div>
                 </div>
               )}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -530,14 +533,14 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                 <div style={{ fontSize: 14, fontWeight: 700,
                   color: 'var(--surface-text)' }}>{c.title}</div>
                 <div style={{ fontSize: 13, marginTop: 6,
-                  color: 'var(--surface-text)' }}>{c.headline}</div>
+                  color: 'var(--surface-text)' }}><ServerText text={c.headline} /></div>
                 {c.detail && (
                   <div style={{ fontSize: 12, marginTop: 4,
-                    color: 'var(--surface-text-muted)' }}>{c.detail}</div>
+                    color: 'var(--surface-text-muted)' }}><ServerText text={c.detail} /></div>
                 )}
                 {c.warn && (
                   <div style={{ fontSize: 12, marginTop: 8, color: 'var(--state-warn-fg)' }}>
-                    ⚠️ {c.warn}
+                    ⚠️ <ServerText text={c.warn} />
                   </div>
                 )}
               </div>

@@ -7,6 +7,7 @@ import {
   issueAppProof, listAppDatasets, readAppRecords,
   type AppDatasetRow, type AppRecords,
 } from '../lib/kitAppViewApi';
+import { shortId } from '../lib/displayId';
 
 // [2026-08-23] 키트로 앱 만들기 — **여정의 빈 칸.**
 //
@@ -342,7 +343,7 @@ function AppRow({
                     <span style={{ color: 'var(--state-success-fg)' }}>
                       ● 만들어졌습니다 — 데이터셋 {row.built_datasets}개
                       <span style={{ color: 'var(--surface-text-muted)', marginLeft: 6, fontSize: 12 }}>
-                        {row.release_id}
+                        <span title={row.release_id}>{shortId(row.release_id)}</span>
                       </span>
                     </span>
 

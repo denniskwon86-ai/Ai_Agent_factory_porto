@@ -41,6 +41,47 @@ def _rank(sev: str) -> int:
     return SEVERITY_ORDER.index(sev) if sev in SEVERITY_ORDER else len(SEVERITY_ORDER)
 
 
+#: 사람이 붙인 이름이 없을 때 **해시 id 를 제목에 그대로 쓰지 않기 위한** 도우미.
+#:
+#: ## ⚠️⚠️ [2026-08-24 사용자 지적] `sh_a111029126ae` 가 화면에 그대로 떴다
+#:
+#: 브리핑 제목이 `f"비교 불가 run: {inc.get('name') or inc.get('run_id')}"` 였다.
+#: 이름이 없으면 **해시 id 가 제목**이 된다. 사용자에게 그 문자열은 아무 뜻도 없고,
+#: 「무엇에 대한 이야기인지」조차 알려 주지 않는다.
+#:
+#: ★ 이름이 있으면 이름을, 없으면 **«무엇인가»(종류) + 짧은 꼬리표**로 적는다.
+#:   꼬리표를 남기는 이유는 같은 종류가 여러 건일 때 구분해야 하고, 지원 요청 시
+#:   그 값으로 찾아야 하기 때문이다 — **버리지는 않는다.**
+#: ⚠️ 앞부분(`sh_`·`ds_` 같은 접두사)은 우리 내부 규칙이라 잘라 낸다. 남기면 그것이
+#:   무슨 뜻인지 또 물어야 한다.
+_ID_TAIL = 6
+
+
+#: 사람이 읽을 수 없는 식별자 — 접두사 뒤가 **긴 16진수**인 것.
+#: ⚠️ 사람이 정한 이름(`TEST1001-copy_20260713_171902`·`smart-life-app`)은 건드리지
+#:   않는다. 그것은 사용자가 직접 지은 값이라 오히려 그대로 보여야 한다.
+_OPAQUE = __import__("re").compile(r"^(?:[a-z][a-z0-9]*_)*[0-9a-f]{8,}$", __import__("re").I)
+
+
+def _readable(value: Any, kind: str) -> str:
+    """화면에 그대로 써도 되는 문자열인가 — 아니면 «종류 (…꼬리표)»로 바꾼다.
+
+    ★ 사람이 지은 이름은 그대로 둔다. 해시만 바꾼다."""
+    raw = str(value or "").strip()
+    if not raw:
+        return f"이름 없는 {kind}"
+    if not _OPAQUE.match(raw):
+        return raw
+    tail = raw.split("_")[-1][-_ID_TAIL:]
+    return f"이름 없는 {kind} (…{tail})"
+
+
+def _human(name: Any, ident: Any, kind: str) -> str:
+    """제목에 쓸 이름. `name` 이 있으면 그대로, 없으면 `_readable(ident)`."""
+    got = str(name or "").strip()
+    return got if got else _readable(ident, kind)
+
+
 def _item(kind: str, severity: str, title: str, why: str, action: str = "",
           ref: str = "", ref_type: str = "") -> Dict[str, Any]:
     """브리핑 항목 1건. `action` 이 없으면 사용자는 무엇을 해야 할지 모른다."""
@@ -104,7 +145,8 @@ class EnterpriseBriefing:
                 for r in self._visible(rows, scope_node_id, tenant_id, entity_mode,
                                        "from_scope"):
                     c.items.append(_item(
-                        f"promotion_{status}", sev, f"{title}: {r['release_id']}",
+                        f"promotion_{status}", sev,
+                        f"{title}: {_readable(r['release_id'], '릴리스')}",
                         why + f" 신청자: {r.get('requested_by') or '(미기록)'}",
                         act, r["release_id"], "release"))
         c.run("workspace_promotion.list_promotions", _promotions)
@@ -116,16 +158,37 @@ class EnterpriseBriefing:
             if pending:
                 c.items.append(_item(
                     "shadow_review_pending", "medium",
-                    f"Shadow Mode 검토 대기 {pending}건",
-                    "검토되지 않은 비교 결과는 운영 판단의 근거가 되지 못합니다.",
-                    "각 run 의 비교 결과를 검토하고 승인 또는 반려하십시오."))
+                    f"새 방식 비교 결과 {pending}건이 검토를 기다립니다",
+                    "아직 사람이 보지 않은 비교 결과입니다 — 보기 전까지는 업무 판단의 "
+                    "근거로 쓰이지 않습니다.",
+                    "Shadow Mode 화면에서 결과를 하나씩 보고 «채택» 또는 «반려» 를 "
+                    "고르십시오."))
             for inc in (s.get("incomparable") or []):
+                #: ⚠️⚠️ [2026-08-24 사용자 지적] **여기 문구가 통째로 알아들을 수 없었다.**
+                #:
+                #:   「비교 불가 run: sh_a111029126ae」
+                #:   「같은 입력이 아니어서 비교 자체가 성립하지 않았습니다 — 실패가 아니라
+                #:    **판정 불가**입니다. 기준선과 후보의 입력이 다릅니다.」
+                #:   「입력 스냅샷을 맞춰 다시 실행하십시오.」
+                #:
+                #: `run`·`판정 불가`·`기준선/후보`·`입력 스냅샷` 은 전부 **우리 안에서만
+                #: 쓰는 말**이다. 제목에는 심지어 **해시 id 가 그대로** 나왔다.
+                #: ★ 사용자가 아는 말로 바꾼다: 무엇을 하려던 것인지 → 왜 못 했는지 →
+                #:   무엇을 누르면 되는지. 셋 다 업무 낱말로만 쓴다.
+                what = _human(inc.get("name"), inc.get("run_id"), "비교")
+                why = str(inc.get("reason") or "").strip()
                 c.items.append(_item(
                     "shadow_incomparable", "medium",
-                    f"비교 불가 run: {inc.get('name') or inc.get('run_id')}",
-                    ("같은 입력이 아니어서 비교 자체가 성립하지 않았습니다 — 실패가 아니라 "
-                     f"**판정 불가**입니다. {inc.get('reason', '')}"),
-                    "입력 스냅샷을 맞춰 다시 실행하십시오.",
+                    f"«{what}» — 새 방식과 지금 방식을 견줄 수 없었습니다",
+                    #: ⚠️ `**` 를 쓰지 않는다 — 이 문자열은 **마크다운으로 그려지지
+                    #:   않는다.** 화면에 별표가 그대로 찍혀 「**서로 다른 자료로**」로
+                    #:   보였다(2026-08-24 실측). 강조가 필요하면 낱말 순서로 한다.
+                    ("두 방식이 서로 다른 자료로 돌아서, 나란히 놓고 비교할 수가 "
+                     "없습니다. 새 방식이 틀렸다는 뜻이 아니라 아직 좋고 나쁨을 "
+                     "말할 근거가 없다는 뜻입니다."
+                     + (f" (확인된 차이: {why})" if why else "")),
+                    "Shadow Mode 화면에서 이 비교를 열고, 두 방식이 같은 자료를 "
+                    "보도록 맞춘 뒤 다시 돌리십시오.",
                     inc.get("run_id", ""), "shadow_run"))
         c.run("shadow_mode.summary", _shadow)
 
@@ -182,7 +245,7 @@ class EnterpriseBriefing:
                     c.items.append(_item(
                         f"gate_{chk['state']}",
                         "high" if chk["state"] == "fail" else "medium",
-                        f"승격 차단({chk['check']}): {r['release_id']}",
+                        f"승격 차단({chk['check']}): {_readable(r['release_id'], '릴리스')}",
                         # `unverifiable` 이 통과가 아니라는 사실을 문구로 못 박는다.
                         chk["why"] + ("" if chk["state"] == "fail" else
                                       " — `unverifiable` 은 통과가 아니라 확인하지 못한 것입니다."),
@@ -207,7 +270,7 @@ class EnterpriseBriefing:
             for g in gaps[:max_gaps]:
                 c.items.append(_item(
                     f"governance_{g['kind']}", g.get("severity", "medium"),
-                    f"{g.get('asset') or g.get('asset_id')}: {g['kind']}",
+                    f"{_human(g.get('asset'), g.get('asset_id'), '자산')}: {g['kind']}",
                     g.get("why", ""), g.get("suggested_action", ""),
                     g.get("asset_id", ""), "data_asset"))
             if len(gaps) > max_gaps:
@@ -256,7 +319,7 @@ class EnterpriseBriefing:
                     rep = r.get("replacement_release_id") or ""
                     c.items.append(_item(
                         "program_disabled", "medium" if rep else "high",
-                        f"사용 중단: {r['release_id']}",
+                        f"사용 중단: {_readable(r['release_id'], '프로그램')}",
                         (r.get("reason") or "(사유 미기록)")
                         + (f" 대체: {rep}" if rep else
                            " ⚠️ 대체 프로그램이 지정되지 않았습니다 — 사용자가 막다른 길에서 "
@@ -265,7 +328,8 @@ class EnterpriseBriefing:
                         r["release_id"], "release"))
                 elif r["status"] == DEPRECATED:
                     c.items.append(_item(
-                        "program_deprecated", "low", f"사용 중단 예고: {r['release_id']}",
+                        "program_deprecated", "low",
+                        f"사용 중단 예고: {_readable(r['release_id'], '프로그램')}",
                         r.get("reason") or "(사유 미기록)",
                         "종료 전에 사용 부서를 이전시키십시오.", r["release_id"], "release"))
         c.run("program_lifecycle.list_statuses", _life)
@@ -296,7 +360,7 @@ class EnterpriseBriefing:
                 "cost_complete": bool(t.get("cost_complete", False)),
                 "note": ("" if t.get("cost_complete") else
                          f"단가가 등록되지 않은 호출 {t.get('unpriced_calls', 0)}건이 있어 "
-                         f"총액은 **하한**입니다 — 실제 비용은 이보다 큽니다."),
+                         f"총액은 «하한»입니다 — 실제 비용은 이보다 큽니다."),
             })
         except Exception as e:
             out["reason"] = f"비용 집계를 읽을 수 없습니다: {e}"

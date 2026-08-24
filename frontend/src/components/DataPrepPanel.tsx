@@ -9,6 +9,7 @@ import {
   certifySnapshot, DataPrepError, getInstance, listInstances, listKits,
   listSnapshots, uploadSnapshot,
 } from '../lib/dataPrepApi';
+import { shortId } from '../lib/displayId';
 
 // [BDR-2·3·5 / Wave H] 업무 데이터 준비 패널.
 //
@@ -201,7 +202,10 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                           {/* 사람이 읽는 이름이 먼저다(설계 §12). */}
                           <strong>{it.label || it.kit_id}</strong>
                           <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
-                            {it.scope_node_id} · {it.entity_mode} · {it.instance_id}
+                            {/* ⚠️ 해시 id 를 그대로 보여 주지 않는다 — 줄이고 원래 값은
+                                `title` 로 남긴다(`lib/displayId`). */}
+                            {it.scope_node_id} · {it.entity_mode}{' · '}
+                            <span title={it.instance_id}>{shortId(it.instance_id)}</span>
                           </span>
                         </span>
                         <span style={{ color: 'var(--action-primary-bg)', fontSize: 13 }}>열기</span>

@@ -203,35 +203,59 @@ function AppShell() {
       onSelect: () => setShowBriefing(true) },
   ];
 
+  // ── 메뉴 묶음 ─────────────────────────────────────────────────────────────
+  //
+  // ## ⚠️⚠️ [2026-08-24 사용자 지적] 왜 다시 묶었는가
+  //
+  // > 이 시스템에 접속했을 때 주요 기능이 뭔지, 그 기능이 어디에 있는지, 무슨 버튼을
+  // > 클릭해서 실행할 수 있는지를 알 수 없다.
+  //
+  // 종전 묶음(「데이터 기반」 10개 / 「업무 기준과 조직」 5 / 「운영과 검증」 5)은
+  // **성격별 분류**였다. 그래서 「업무 데이터 준비 → 계산 실행 승인 → 경로 계산 →
+  // 의사결정 안건」이라는 **하나의 여정**이 10개 목록 안에 흩어져 있었고, 사이에
+  // 「시나리오」·「운영 승격」 같은 다른 일이 끼어 있었다. 처음 여는 사람은 그 넷이
+  // 이어진 것인 줄 알 수 없다.
+  //
+  // ★★★ **순서가 있는 것은 순서대로 놓는다.** 첫 묶음이 여정이고, 번호를 붙였다.
+  //   나머지 묶음은 「그 여정을 받쳐 주는 것」·「결과를 다르게 돌려 보는 것」·
+  //   「내보내는 것」·「누가 판단하는가」로 나눴다.
+  // ⚠️ 항목을 **빼거나 더하지 않았다** — 20개 그대로다. 묶음과 순서만 바꿨다.
+  //   (숨기는 것은 통제가 아니다. 권한은 서버 `route_authority` 표가 막는다.)
   const navGroups: NavGroup[] = [
     {
-      title: '데이터 기반',
-      hint: '에이전트가 무엇을 근거로 답하는가를 정하는 곳입니다.',
+      title: '핵심 여정 — 이 넷을 순서대로',
+      hint: '먼저 좌상단 «조직 전환»에서 조직을 고르십시오. 그 다음 아래 넷을 차례로 지나면 '
+        + '경영 판단에 쓸 숫자와 안건이 나옵니다.',
       items: [
+        { id: 'dataprep', icon: '1️⃣', label: '업무 데이터 준비',
+          desc: '업무키트를 조직에 적용하고 · 원천을 연결하고 · 파일 판을 인증합니다 — 여기가 «준비됨» 이어야 뒤가 돕니다',
+          onSelect: () => setShowDataPrep(true) },
+        { id: 'calc-approval', icon: '2️⃣', label: '계산 실행 승인',
+          desc: '산식을 실제로 돌려도 되는지 사람이 승인합니다 — 누르기 전까지 계산은 «막힘» 으로 답합니다',
+          // ⚠️ 시스템 관리자 전용이다. 화면에서 숨기는 것은 **편의**이고, 실제로 막는 것은
+          //   서버(`route_authority` 표의 `ADMIN_SECURITY`)다 — 숨김을 통제로 믿지 않는다.
+          onSelect: () => setShowCalcApproval(true) },
+        { id: 'path-calc', icon: '3️⃣', label: '경로 계산',
+          desc: '승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산합니다 — 막히면 무엇이 없는지 말합니다',
+          onSelect: () => setShowPathCalc(true) },
+        { id: 'decision-pkg', icon: '4️⃣', label: '의사결정 안건',
+          desc: '계산 결과를 3관점 검토서·실행 책임자·기한이 붙은 안건으로 만듭니다',
+          onSelect: () => setShowDecisionPkg(true) },
+      ],
+    },
+    {
+      title: '근거가 되는 자료',
+      hint: '위 넷이 «무엇을 보고» 답하는지를 정하는 곳입니다. 자료가 비면 위에서 막힙니다.',
+      items: [
+        { id: 'master', icon: '🗂', label: '기준정보 마스터',
+          desc: '자재·공정·설비·KPI 골든 레코드 — 확정 조회로 모든 에이전트에 주입(모델 불변)',
+          onSelect: () => setShowMasterData(true) },
         { id: 'knowledge', icon: '📚', label: '지식 허브',
           desc: '도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결',
           onSelect: () => setShowKnowledgeHub(true) },
         { id: 'terminology', icon: '📖', label: '기술·제품 용어집',
           desc: '현재 용어·권장 사용자 용어·기술 표준명을 함께 보는 전환 사전',
           onSelect: () => setShowTerminology(true) },
-        { id: 'master', icon: '🗂', label: '기준정보 마스터',
-          desc: '자재·공정·설비·KPI 골든 레코드 — 확정 조회로 모든 에이전트에 주입(모델 불변)',
-          onSelect: () => setShowMasterData(true) },
-        { id: 'dataprep', icon: '📥', label: '업무 데이터 준비',
-          desc: '업무키트 적용 · 원천 결속 · 파일 판 인증 · 준비 상태 보드',
-          onSelect: () => setShowDataPrep(true) },
-        { id: 'scenario', icon: '📈', label: '시나리오 시뮬레이션',
-          desc: '환율·도입 지연·전력단가 → 생산량·재고·현금·손익 (고정 기준선 기준)',
-          onSelect: () => setShowScenario(true) },
-        { id: 'path-calc', icon: '🧮', label: '경로 계산',
-          desc: '승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산 — 막히면 무엇이 없는지 말합니다(LLM 0콜)',
-          onSelect: () => setShowPathCalc(true) },
-        { id: 'decision-pkg', icon: '🧭', label: '의사결정 안건',
-          desc: '영향 경로 · 3관점 검토서 · 실행 책임자와 기한 · 근거 계보',
-          onSelect: () => setShowDecisionPkg(true) },
-        { id: 'promotion', icon: '🚀', label: '운영 승격',
-          desc: '후보 판을 운영으로 — 계약·물질화·정적검사·승인·데이터 준비도 다섯 검사',
-          onSelect: () => setShowPromotion(true) },
         { id: 'crosswalk', icon: '🔗', label: '연계/크로스워크',
           desc: '외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사용자 승인',
           onSelect: () => setShowCrosswalk(true) },
@@ -243,15 +267,42 @@ function AppShell() {
       ],
     },
     {
-      title: '업무 기준과 조직',
-      hint: '누가 무엇을 어떤 기준으로 판단하는가를 정합니다.',
+      title: '다르게 돌려 보기',
+      hint: '같은 자료로 «만약 이렇다면» 을 계산해 봅니다.',
       items: [
-        { id: 'standard', icon: '📜', label: '업무표준',
-          desc: '에이전트의 법규·사규 — 무엇을 어떤 기준으로 평가해 다음 단계로 넘기는지. 개정 시 구판 보존',
-          onSelect: () => setShowWorkStandard(true) },
+        { id: 'scenario', icon: '📈', label: '시나리오 시뮬레이션',
+          desc: '환율·도입 지연·전력단가 → 생산량·재고·현금·손익 (고정 기준선 기준)',
+          onSelect: () => setShowScenario(true) },
+        { id: 'planning', icon: '📊', label: '경영계획',
+          desc: '계획·실적·시나리오를 동일 기준선에서 비교 (결정론적 계산, LLM 0콜)',
+          onSelect: () => setShowPlanning(true) },
+        { id: 'shadow', icon: '🧪', label: 'Shadow Mode',
+          desc: '새 규칙·모델을 지금 규칙과 «나란히» 돌려 결과를 비교합니다 — 승인 전에는 운영에 쓰이지 않습니다',
+          onSelect: () => setShowShadow(true) },
+      ],
+    },
+    {
+      title: '만든 것을 내보내기',
+      hint: '시연·후보 상태의 것을 실제 업무에 쓰도록 올립니다.',
+      items: [
+        { id: 'promotion', icon: '🚀', label: '운영 승격',
+          desc: '후보 판을 운영으로 — 계약·물질화·정적검사·승인·데이터 준비도 다섯 검사',
+          onSelect: () => setShowPromotion(true) },
+        { id: 'workspace', icon: '🏢', label: '워크스페이스',
+          desc: '부서 앱의 공유·복제와 전사 승격 게이트 — 계약·보안·품질·소유자 승인을 모두 통과해야 승격',
+          onSelect: () => setShowWorkspace(true) },
+      ],
+    },
+    {
+      title: '누가 무엇을 판단하는가',
+      hint: '사람과 에이전트의 권한·기준을 정합니다.',
+      items: [
         { id: 'org', icon: '🏢', label: '조직·권한',
           desc: '부서·사용자·권한 — 부서는 기준정보라 개편하면 새 버전이 되고 구판은 이력으로 남습니다',
           onSelect: () => setShowOrgChart(true) },
+        { id: 'standard', icon: '📜', label: '업무표준',
+          desc: '에이전트의 법규·사규 — 무엇을 어떤 기준으로 평가해 다음 단계로 넘기는지. 개정 시 구판 보존',
+          onSelect: () => setShowWorkStandard(true) },
         { id: 'agents', icon: '⚙️', label: '에이전트 통제소',
           desc: '각 에이전트의 역할·스킬·모델·순서·HOTL(전문가 개입)을 설정',
           onSelect: openAgentPanel },
@@ -267,23 +318,9 @@ function AppShell() {
       ],
     },
     {
-      title: '운영과 검증',
-      hint: '만든 것을 실제로 돌리고, 돌린 결과를 확인합니다.',
+      title: '점검',
+      hint: '실제로 무엇이 돌았는지 확인합니다.',
       items: [
-        { id: 'planning', icon: '📊', label: '경영계획',
-          desc: '계획·실적·시나리오를 동일 기준선에서 비교 (결정론적 계산, LLM 0콜)',
-          onSelect: () => setShowPlanning(true) },
-        { id: 'workspace', icon: '🏢', label: '워크스페이스',
-          desc: '부서 앱의 공유·복제와 전사 승격 게이트 — 계약·보안·품질·소유자 승인을 모두 통과해야 승격',
-          onSelect: () => setShowWorkspace(true) },
-        { id: 'shadow', icon: '🧪', label: 'Shadow Mode',
-          desc: '새 규칙·모델을 실제 데이터에 병렬 적용해 비교하고, 승인된 범위에서만 제한 적용',
-          onSelect: () => setShowShadow(true) },
-        { id: 'calc-approval', icon: '🔐', label: '계산 실행 승인 · 시연 초기화',
-          desc: '산식별 정의·단위·부호·범위·유효기간을 보고 승인 — 누르기 전까지 계산은 «막힘» 입니다. 시연 초기화는 실행 결과만 되돌립니다',
-          // ⚠️ 시스템 관리자 전용이다. 화면에서 숨기는 것은 **편의**이고, 실제로 막는 것은
-          //   서버(`route_authority` 표의 `ADMIN_SECURITY`)다 — 숨김을 통제로 믿지 않는다.
-          onSelect: () => setShowCalcApproval(true) },
         { id: 'telemetry', icon: '📈', label: 'LLM 텔레메트리',
           desc: '실제 사용 모델·폴백·소요시간 — 모델 불변성 실측',
           // ⚠️ 이 화면의 «품질 결과» 탭과 에이전트 집계는 거버넌스 관문을 지난다 —

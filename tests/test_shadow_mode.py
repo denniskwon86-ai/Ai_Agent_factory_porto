@@ -112,15 +112,22 @@ def test_different_input_is_not_comparable(sm):
     sm.record_side(r["run_id"], "candidate", {"error_count": 1}, input_hash="H2")
     v = sm.compare(r["run_id"])
     assert v["comparable"] is False
-    assert "입력이 다릅니다" in v["reason"]
-    assert "잘못된 승격" in v["note"]
+    #: ⚠️ [2026-08-24] **낱말이 아니라 뜻을 단언한다.** 종전에는 `"입력이 다릅니다"` 를
+    #:   찾았는데, 그 표현(`기준선`·`후보`·`입력`)이 사용자에게 통하지 않아 문구를 바꿨다.
+    #:   낱말을 붙들면 문구를 고칠 때마다 시험이 깨지고, 그러면 **문구를 안 고치게 된다.**
+    assert "다른 자료" in v["reason"], v["reason"]
+    #: ★ 「이것을 개선으로 읽으면 안 된다」는 경고는 남아야 한다 — 그게 이 분기의 존재 이유다.
+    assert "채택" in v["note"] or "가릴 수 없" in v["note"], v["note"]
+    #: ★ 해시는 버리지 않는다 — 화면에 앞세우지 않을 뿐, 문의할 때 필요하다.
+    assert v["baseline_input_hash"] and v["candidate_input_hash"]
 
 
 def test_one_side_missing_is_not_comparable(sm):
     r = _run(sm)
     sm.record_side(r["run_id"], "baseline", {"error_count": 10}, input_hash="H1")
     v = sm.compare(r["run_id"])
-    assert v["comparable"] is False and "후보" in v["reason"]
+    #: ★ 「어느 쪽이 안 돌았는가」를 말해야 한다 — 사용자 말로는 «새 방식» 이다.
+    assert v["comparable"] is False and "새 방식" in v["reason"], v["reason"]
 
 
 def test_direction_decides_improvement(sm):
