@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Factory Studio — 화면 지도</title>
+<style>
+:root {
+  --bg:#f6f7f9; --card:#fff; --line:#c3c7cd; --line-soft:#e3e6ea;
+  --text:#1b1f24; --muted:#5b6470; --navy:#123a6b; --gold:#8a6100;
+  --ok:#1a7f4b; --ng:#b3261e; --part:#8a6100; --na:#5b6470;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text);
+  font:14px/1.55 -apple-system,"Segoe UI","Malgun Gothic",sans-serif; }
+header { position:sticky; top:0; z-index:5; background:var(--navy); color:#fff;
+  padding:14px 20px; box-shadow:0 1px 4px #0003; }
+h1 { margin:0 0 2px; font-size:18px; }
+.sub { font-size:12.5px; opacity:.9; }
+.meta { display:flex; gap:14px; flex-wrap:wrap; padding:12px 20px;
+  background:var(--card); border-bottom:1px solid var(--line-soft); }
+.meta label { font-size:12.5px; color:var(--muted); display:grid; gap:3px; }
+.meta input { font:inherit; padding:5px 8px; border:1px solid var(--line);
+  border-radius:5px; min-width:190px; color:var(--text); background:#fff; }
+.bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  padding:10px 20px; background:var(--card); border-bottom:1px solid var(--line-soft);
+  position:sticky; top:62px; z-index:4; }
+button { font:inherit; padding:6px 13px; border-radius:6px; cursor:pointer;
+  border:1px solid var(--line); background:#fff; color:var(--text); }
+button.primary { background:var(--navy); color:#fff; border-color:var(--navy); font-weight:600; }
+.count { font-size:13px; color:var(--muted); margin-left:auto;
+  display:flex; align-items:center; gap:8px; }
+.count b { color:var(--text); }
+.track { height:7px; background:var(--line-soft); border-radius:4px; overflow:hidden;
+  width:170px; display:inline-block; }
+.track i { display:block; height:100%; background:var(--ok); width:0; }
+.hint { padding:11px 20px; font-size:12.5px; color:var(--muted); background:var(--card);
+  border-bottom:1px solid var(--line-soft); }
+.hint b { color:var(--ng); }
+.hint .lead { color:var(--text); font-size:13.5px; }
+main { padding:16px 20px 60px; }
+table { width:100%; border-collapse:collapse; background:var(--card);
+  border:1px solid var(--line); }
+th, td { padding:9px 11px; border-bottom:1px solid var(--line-soft);
+  vertical-align:top; text-align:left; }
+thead th { background:#eef1f5; font-size:12.5px; color:var(--muted);
+  position:sticky; top:112px; z-index:3; border-bottom:1px solid var(--line); }
+tr.grp td { background:#e8edf4; font-weight:700; font-size:13.5px; color:var(--navy);
+  border-top:2px solid var(--navy); }
+tr.grp.core td { background:#fff6e0; color:var(--gold); border-top:2px solid var(--gold); }
+tr.sub td.name { padding-left:22px; }
+tr.sub td.name strong { font-weight:600; color:var(--muted); }
+td.no { color:var(--muted); font-variant-numeric:tabular-nums; width:32px; }
+td.name { width:13%; }
+td.where { width:19%; }
+td.where code { font:12px/1.45 ui-monospace,Consolas,monospace; color:var(--navy);
+  background:#eef1f5; padding:2px 5px; border-radius:4px; display:inline-block; }
+td.what { width:22%; color:var(--text); }
+td.act { width:12%; color:var(--muted); font-size:13px; }
+td.pre { width:10%; color:var(--muted); font-size:12.5px; }
+td.verdict { width:11%; white-space:nowrap; }
+td.verdict label { display:block; margin:1px 0; cursor:pointer; font-size:12.5px; }
+.p { padding:0 3px; border-radius:3px; }
+.p.ok{color:var(--ok);} .p.ng{color:var(--ng);font-weight:700;}
+.p.part{color:var(--part);} .p.na{color:var(--na);}
+td.note { width:15%; }
+td.note textarea { width:100%; font:inherit; font-size:12.5px; padding:5px 7px;
+  border:1px solid var(--line); border-radius:5px; resize:vertical; background:#fff;
+  color:var(--text); }
+tr.done { background:#f4faf6; }
+tr.fail { background:#fdf4f3; }
+.saved { font-size:12.5px; color:var(--ok); }
+@media print {
+  header,.bar { position:static; } .bar button { display:none; }
+  thead th { position:static; } body { background:#fff; }
+  td.note textarea { border:none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Factory Studio — 화면 지도</h1>
+  <div class="sub">어떤 화면이 있고 · 어디를 눌러 열고 · 무엇을 하는 곳인지. 열어 보고 판정과 특이사항을 적습니다.</div>
+</header>
+
+<div class="meta">
+  <label>점검자 <input id="m_who" placeholder="이름"></label>
+  <label>점검일 <input id="m_when" type="date"></label>
+  <label>대상 화면 <input id="m_url" placeholder="http://localhost:5173"></label>
+  <label>계정 <input id="m_acct" placeholder="어느 계정으로 봤는가"></label>
+  <label>판본 <input id="m_rev" placeholder="git 커밋 해시"></label>
+</div>
+
+<div class="hint">
+  <div class="lead"><b>이 시스템의 핵심은 ①번 다섯 단계입니다</b> — 조직 고르기 → 업무 데이터 준비 →
+  계산 실행 승인 → 경로 계산 → 의사결정 안건. 나머지 화면은 그 다섯을 받쳐 주거나 결과를 확인하는 곳입니다.</div>
+  판정 — <span class="p ok">열림</span> 눌러서 열리고 내용이 있다 ·
+  <span class="p ng">안 열림</span> 눌러도 아무 일이 없거나 오류 ·
+  <span class="p part">열리나 빔</span> 열리지만 비어 있거나 무엇을 해야 할지 모르겠다 ·
+  <span class="p na">권한 없음</span> 이 계정 권한으로는 못 본다(그렇게 안내하면 정상).
+  <b>「안 열림」과 「열리나 빔」은 특이사항 필수</b>입니다.
+</div>
+
+<div class="bar">
+  <button class="primary" id="b_csv">CSV 내보내기</button>
+  <button id="b_json">JSON 내보내기</button>
+  <button id="b_print">인쇄 / PDF</button>
+  <button id="b_only">문제만 보기</button>
+  <button id="b_core">핵심 5단계만</button>
+  <button id="b_reset">초기화</button>
+  <span class="saved" id="saved"></span>
+  <span class="count">
+    <span class="track"><i id="bar"></i></span>
+    확인 <b id="c_done">0</b>/__TOTAL__ · 문제 <b id="c_ng">0</b>
+  </span>
+</div>
+
+<main>
+<table>
+  <thead><tr>
+    <th>#</th><th>화면</th><th>여는 길</th><th>무엇을 하는 곳</th>
+    <th>주요 행동</th><th>선행 조건</th><th>판정</th><th>특이사항</th>
+  </tr></thead>
+  <tbody id="tb">
+__TABLE__
+  </tbody>
+</table>
+</main>
+
+<script>
+(function () {
+  var KEY = 'afs.screenmap.v1';
+  var tb = document.getElementById('tb');
+  var META = ['m_who', 'm_when', 'm_url', 'm_acct', 'm_rev'];
+  var LABEL = { ok: '열림', ng: '안 열림', part: '열리나 빔', na: '권한 없음', '': '미확인' };
+
+  function state() {
+    var s = { meta: {}, rows: {} };
+    META.forEach(function (k) { s.meta[k] = document.getElementById(k).value; });
+    tb.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      var v = tr.querySelector('input[type=radio]:checked');
+      var n = tr.querySelector('textarea');
+      if (v || (n && n.value)) {
+        s.rows[tr.getAttribute('data-id')] = { v: v ? v.value : '', n: n ? n.value : '' };
+      }
+    });
+    return s;
+  }
+
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state())); } catch (e) { }
+    var el = document.getElementById('saved');
+    el.textContent = '저장됨';
+    clearTimeout(save._t);
+    save._t = setTimeout(function () { el.textContent = ''; }, 1200);
+  }
+
+  function load() {
+    var raw = null;
+    try { raw = localStorage.getItem(KEY); } catch (e) { }
+    if (!raw) { return; }
+    var s;
+    try { s = JSON.parse(raw); } catch (e) { return; }
+    META.forEach(function (k) {
+      if (s.meta && s.meta[k] != null) { document.getElementById(k).value = s.meta[k]; }
+    });
+    Object.keys(s.rows || {}).forEach(function (id) {
+      var tr = tb.querySelector('tr[data-id="' + id + '"]');
+      if (!tr) { return; }
+      var r = s.rows[id];
+      if (r.v) {
+        var box = tr.querySelector('input[value="' + r.v + '"]');
+        if (box) { box.checked = true; }
+      }
+      var n = tr.querySelector('textarea');
+      if (n && r.n) { n.value = r.n; }
+    });
+  }
+
+  function tally() {
+    var done = 0, ng = 0, total = 0;
+    tb.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      total++;
+      var v = tr.querySelector('input[type=radio]:checked');
+      tr.className = tr.className.replace(/\s*(done|fail)/g, '');
+      if (!v) { return; }
+      done++;
+      if (v.value === 'ok' || v.value === 'na') { tr.className += ' done'; }
+      if (v.value === 'ng' || v.value === 'part') { tr.className += ' fail'; ng++; }
+    });
+    document.getElementById('c_done').textContent = done;
+    document.getElementById('c_ng').textContent = ng;
+    document.getElementById('bar').style.width = total ? (done * 100 / total) + '%' : '0';
+  }
+
+  tb.addEventListener('change', function () { tally(); save(); });
+  tb.addEventListener('input', save);
+  META.forEach(function (k) {
+    document.getElementById(k).addEventListener('input', save);
+  });
+
+  function rowsOut() {
+    var out = [], grp = '';
+    Array.prototype.forEach.call(tb.querySelectorAll('tr'), function (tr) {
+      if (tr.className.indexOf('grp') >= 0) { grp = tr.textContent.trim(); return; }
+      if (!tr.getAttribute('data-id')) { return; }
+      var td = tr.querySelectorAll('td');
+      var v = tr.querySelector('input[type=radio]:checked');
+      out.push({
+        group: grp,
+        no: td[0].textContent.trim(),
+        screen: td[1].textContent.trim(),
+        where: td[2].textContent.trim(),
+        what: td[3].textContent.trim(),
+        actions: td[4].textContent.trim(),
+        needs: td[5].textContent.trim(),
+        verdict: LABEL[v ? v.value : ''],
+        note: (tr.querySelector('textarea') || {}).value || ''
+      });
+    });
+    return out;
+  }
+
+  function dl(name, text, mime) {
+    /* 엑셀이 UTF-8 을 깨뜨리지 않게 BOM 을 붙인다. */
+    var blob = new Blob(['﻿' + text], { type: mime + ';charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.parentNode.removeChild(a); }, 0);
+  }
+
+  function cell(s) {
+    return '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+  }
+
+  document.getElementById('b_csv').onclick = function () {
+    var m = state().meta;
+    var head = ['그룹', '번호', '화면', '여는 길', '무엇을 하는 곳', '주요 행동',
+                '선행 조건', '판정', '특이사항'];
+    var lines = [head.map(cell).join(',')];
+    rowsOut().forEach(function (r) {
+      lines.push([r.group, r.no, r.screen, r.where, r.what, r.actions, r.needs,
+                  r.verdict, r.note].map(cell).join(','));
+    });
+    lines.push('');
+    lines.push([cell('점검자'), cell(m.m_who), cell('점검일'), cell(m.m_when),
+      cell('대상'), cell(m.m_url), cell('계정'), cell(m.m_acct),
+      cell('판본'), cell(m.m_rev)].join(','));
+    dl('afs-screen-map.csv', lines.join('\r\n'), 'text/csv');
+  };
+
+  document.getElementById('b_json').onclick = function () {
+    dl('afs-screen-map.json',
+      JSON.stringify({ meta: state().meta, rows: rowsOut() }, null, 2), 'application/json');
+  };
+
+  document.getElementById('b_print').onclick = function () { window.print(); };
+
+  function showAll() {
+    tb.querySelectorAll('tr').forEach(function (tr) { tr.style.display = ''; });
+  }
+
+  var only = false, core = false;
+  document.getElementById('b_only').onclick = function () {
+    only = !only; core = false;
+    document.getElementById('b_core').textContent = '핵심 5단계만';
+    this.textContent = only ? '전체 보기' : '문제만 보기';
+    if (!only) { showAll(); return; }
+    tb.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      tr.style.display = tr.className.indexOf('fail') < 0 ? 'none' : '';
+    });
+    tb.querySelectorAll('tr.grp').forEach(function (tr) { tr.style.display = 'none'; });
+  };
+
+  document.getElementById('b_core').onclick = function () {
+    core = !core; only = false;
+    document.getElementById('b_only').textContent = '문제만 보기';
+    this.textContent = core ? '전체 보기' : '핵심 5단계만';
+    if (!core) { showAll(); return; }
+    /* ★ 핵심 그룹(①)에 속한 행만 남긴다 — 그룹 머리를 만나면 상태가 바뀐다. */
+    var inCore = false;
+    Array.prototype.forEach.call(tb.querySelectorAll('tr'), function (tr) {
+      if (tr.className.indexOf('grp') >= 0) {
+        inCore = tr.className.indexOf('core') >= 0;
+        tr.style.display = inCore ? '' : 'none';
+        return;
+      }
+      tr.style.display = inCore ? '' : 'none';
+    });
+  };
+
+  document.getElementById('b_reset').onclick = function () {
+    if (!confirm('입력한 판정과 특이사항을 모두 지웁니다. 계속할까요?')) { return; }
+    try { localStorage.removeItem(KEY); } catch (e) { }
+    location.reload();
+  };
+
+  load();
+  tally();
+  if (!document.getElementById('m_when').value) {
+    try { document.getElementById('m_when').valueAsDate = new Date(); } catch (e) { }
+  }
+})();
+</script>
+</body>
+</html>

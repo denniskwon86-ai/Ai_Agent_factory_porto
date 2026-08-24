@@ -1,4 +1,23 @@
-# 기능 점검표
+# 점검 문서
+
+브라우저로 열어서 씁니다. 둘 다 판정과 **특이사항**을 적으면 자동 저장되고 CSV 로
+내보낼 수 있습니다.
+
+| 문서 | 무엇에 답하나 |
+|---|---|
+| **[screen-map.html](screen-map.html)** | **어떤 화면이 있고 어디를 눌러 여는가** — 46화면. 처음 보는 사람은 여기부터. |
+| **[functional-checklist.html](functional-checklist.html)** | **그 기능이 실제로 도는가** — 69항목. |
+
+## 화면 지도를 먼저 보는 이유
+
+「이 시스템의 주요 기능이 뭔지, 어디 있는지, 무슨 버튼을 눌러야 하는지 알 수 없다」가
+실제 사용자 지적이었다(2026-08-24). 화면 지도의 **①번 그룹 다섯 줄**이 그 답이다 —
+조직 고르기 → 업무 데이터 준비 → 계산 실행 승인 → 경로 계산 → 의사결정 안건.
+나머지 화면은 그 다섯을 받쳐 주거나 결과를 확인하는 곳이다.
+
+---
+
+## 기능 점검표
 
 **[functional-checklist.html](functional-checklist.html)** — 브라우저로 열어서 씁니다.
 
@@ -14,14 +33,21 @@
 
 ## 고칠 때
 
-항목을 더하거나 고치려면 **`_checklist_items.py` 만** 고치고 다시 생성한다:
+항목을 더하거나 고치려면 **정본 파이썬 파일만** 고치고 다시 생성한다:
 
 ```
 cd docs/official/current/qa
-../../../../venv/Scripts/python.exe _build_checklist.py
+../../../../venv/Scripts/python.exe _build_checklist.py    # 기능 점검표
+../../../../venv/Scripts/python.exe _build_screenmap.py    # 화면 지도
 ```
 
-⚠️ `functional-checklist.html` 을 직접 고치지 않는다 — 다음 생성 때 사라진다.
+정본은 `_checklist_items.py` · `_screenmap_items.py` 둘이다.
+
+⚠️ 생성된 HTML(`functional-checklist.html`·`screen-map.html`)을 직접 고치지 않는다 —
+  다음 생성 때 사라진다.
+⚠️ 화면 지도는 `frontend/src/App.tsx` 의 `primaryNav`·`navGroups` 에서 뽑았다.
+  **메뉴가 바뀌면 `_screenmap_items.py` 도 함께 고친다** — 안 고치면 지도가 없는 화면을
+  가리키게 되고, 그것은 지도가 없는 것보다 나쁘다.
 
 ## 판정을 적는 규칙
 
