@@ -52,6 +52,20 @@ sys.path.insert(0, ROOT)
 DEMO_ROOT = os.path.join(ROOT, "demo_data")
 OPERATIONAL = os.path.join(ROOT, "data")
 
+#: ★★★ [2026-08-23] **파종 대상 뿌리.** 기본은 시연 뿌리다.
+#:
+#: `scripts/seed_starter_data.py` 가 이 값을 운영 뿌리로 바꿔 **같은 파종 코드**를 쓴다.
+#: 파종을 두 벌로 만들면 두 곳이 서로 다른 것을 심게 되고, 「시연에서는 되는데 실제로
+#: 띄우면 안 된다」가 다시 생긴다 — 이 저장소가 오버레이 목록에서 방금 겪은 그 유형이다.
+#: ⚠️ 이 값을 운영으로 바꾸는 쪽은 **봉인(`_seal_operational_data`)을 걸지 않는다.**
+#:   봉인은 「시연이 운영을 건드리지 않는다」를 지키는 장치이고, 의도적으로 운영에 심는
+#:   경로에서는 그것이 자기 자신을 막는다.
+TARGET_ROOT = DEMO_ROOT
+
+#: ★ 파종에 쓸 테넌트. 비우면 **정본 CSV 의 값**을 쓰고 `config` 를 거기에 맞춘다(시연).
+#:   값을 주면 **자료를 그 테넌트로** 심는다 — 설치본의 설정을 건드리지 않는다(운영).
+TENANT_OVERRIDE = ""
+
 def _seal_operational_data() -> None:
     """**운영 `data/` 를 열 수 없게 만든다.** 머리말의 약속을 코드로 만든다.
 
@@ -156,9 +170,10 @@ def _point_stores_at_demo() -> None:
 
     ⚠️ 싱글턴의 `db_path` 를 갈아끼운다 — 시험이 쓰는 것과 같은 격리 방식이다.
       `core/paths.py` 는 뿌리를 `__file__` 기준으로 잡으므로 환경변수로는 못 바꾼다."""
-    if os.path.abspath(DEMO_ROOT) == os.path.abspath(OPERATIONAL):
+    if (os.path.abspath(TARGET_ROOT) == os.path.abspath(OPERATIONAL)
+            and os.path.abspath(TARGET_ROOT) == os.path.abspath(DEMO_ROOT)):
         raise SystemExit("시연 뿌리가 운영 data/ 와 같습니다 — 멈춥니다.")
-    os.makedirs(DEMO_ROOT, exist_ok=True)
+    os.makedirs(TARGET_ROOT, exist_ok=True)
 
     import core.app_preview as ap
     from core.collaboration_store import collaboration_store
@@ -166,16 +181,16 @@ def _point_stores_at_demo() -> None:
     from core.decision_ledger import decision_ledger
     from core.enterprise_context.scenario_inputs import scenario_inputs
 
-    dp.data_preparation_store.db_path = os.path.join(DEMO_ROOT, "data_preparation.db")
+    dp.data_preparation_store.db_path = os.path.join(TARGET_ROOT, "data_preparation.db")
     dp.data_preparation_store._prepared_for = None
-    decision_ledger.db_path = os.path.join(DEMO_ROOT, "decision_ledger.db")
-    collaboration_store.db_path = os.path.join(DEMO_ROOT, "collaboration.db")
-    scenario_inputs._repo.db_path = os.path.join(DEMO_ROOT, "enterprise_context.db")
-    ap.db_path = lambda audience: os.path.join(DEMO_ROOT, "app_data_preview.db")
+    decision_ledger.db_path = os.path.join(TARGET_ROOT, "decision_ledger.db")
+    collaboration_store.db_path = os.path.join(TARGET_ROOT, "collaboration.db")
+    scenario_inputs._repo.db_path = os.path.join(TARGET_ROOT, "enterprise_context.db")
+    ap.db_path = lambda audience: os.path.join(TARGET_ROOT, "app_data_preview.db")
     #: ⚠️ 인증 저장소가 빠져 있었다 — **로그인 세션이 운영 `data/auth.db` 에 쌓였다.**
     #:   시연 로그인이 운영 세션표를 건드리면, 운영에서 누가 언제 들어왔는지가 오염된다.
     from core.auth import auth_store
-    auth_store.db_path = os.path.join(DEMO_ROOT, "auth.db")
+    auth_store.db_path = os.path.join(TARGET_ROOT, "auth.db")
 
 
 def _org():
@@ -185,7 +200,7 @@ def _org():
     import core.scope_policy as sp
     from core.org_directory import OrgDirectory
 
-    org = OrgDirectory(db_path=os.path.join(DEMO_ROOT, "org.db"))
+    org = OrgDirectory(db_path=os.path.join(TARGET_ROOT, "org.db"))
     #: ⚠️ 강제가 꺼져 있으면 `resolve_scope` 가 전원 무제한을 돌려준다 — 그 상태에서는
     #:   권한 경계가 하나도 안 보이고, 시연이 「전부 되는 것」처럼 끝난다.
     sp._read = lambda: {"org_enforce": True}
@@ -207,9 +222,20 @@ def seed() -> str:
     tenant, scope = dv.scope_of(sl)
 
     #: ⚠️ 문맥의 테넌트는 `config.ECM_DEFAULT_TENANT_ID` 가 정한다. 정본 CSV 의 테넌트와
-    #:   다르면 화면이 자기 인스턴스를 못 본다 — 정본 쪽에 맞춘다.
+    #:   다르면 화면이 자기 인스턴스를 못 본다 — 시연 뿌리에서는 정본 쪽에 맞춘다.
+    #:
+    #: ★★★ [2026-08-24] **운영 뿌리에 심을 때는 반대로 맞춘다.** 거기서는 설치본이
+    #:   이미 쓰는 테넌트가 정본이고, 자료를 그쪽으로 심어야 한다.
+    #:   ⚠️ 설정을 파일로 덮게 만들었다가 **시험 100건이 깨졌다** — `config` 를 import
+    #:     시점에 파일에서 읽으면 시험이 개발자의 `data/` 에 의존하게 되고, 그 파일이
+    #:     있는 기계에서만 빨강이 된다. 설정을 자료에 맞추지 말고 **자료를 설정에 맞춘다.**
+    #:   ★ 조회 필터는 `kit_instances.tenant_id` **열**을 본다(CSV 행 내용이 아니다).
+    #:     그래서 열만 설치본 값으로 심으면 정본 파일은 그대로 두고도 보인다.
     import config as cfg
-    cfg.ECM_DEFAULT_TENANT_ID = tenant
+    if TENANT_OVERRIDE:
+        tenant = TENANT_OVERRIDE
+    else:
+        cfg.ECM_DEFAULT_TENANT_ID = tenant
 
     say("① 조직·사용자")
     org = _org()
@@ -246,7 +272,7 @@ def seed() -> str:
             b = store.transition(b["binding_id"], target)
         snap = svc.ingest(store, binding=b, payload=dv.csv_bytes(rows, cols),
                           file_name=f"{key}.csv",
-                          workspace_root=os.path.join(DEMO_ROOT, "raw"))
+                          workspace_root=os.path.join(TARGET_ROOT, "raw"))
         svc.run_pipeline(store, snap["snapshot_id"], rows, cols,
                          control={"row_count": len(rows)})
     #: ★★★ [2026-08-23] **앱이 요구하는 나머지도 심는다.**
@@ -274,7 +300,7 @@ def seed() -> str:
             b = store.transition(b["binding_id"], target)
         snap = svc.ingest(store, binding=b, payload=dv.csv_bytes(rows, cols),
                           file_name=f"{key}.csv",
-                          workspace_root=os.path.join(DEMO_ROOT, "raw"))
+                          workspace_root=os.path.join(TARGET_ROOT, "raw"))
         svc.run_pipeline(store, snap["snapshot_id"], rows, cols,
                          control={"row_count": len(rows)})
     print(f"  ✓ {inst['instance_id']} · 인증판 {len(dv.SLICE_KEYS)}종(수직 경로) "
@@ -313,7 +339,7 @@ def _seed_ontology(tenant: str, scope: str, decision_ledger) -> None:
             tenant_id=tenant, entity_mode="REAL", scope_node_id=scope,
             owner_dept_id=DEPT_PLANT, binding_state=app_policy.BOUND))
 
-    rt = OntologyRuntime(os.path.join(DEMO_ROOT, "ontology.db"), resolver,
+    rt = OntologyRuntime(os.path.join(TARGET_ROOT, "ontology.db"), resolver,
                          product_approval_resolver)
     contract = {
         "contract_id": "G2-FIRST-VERTICAL-ONTOLOGY", "contract_version": "1.0.0",
@@ -399,7 +425,7 @@ def _top_up(instance_id: str) -> None:
             b = store.transition(b["binding_id"], target)
         snap = svc.ingest(store, binding=b, payload=dv.csv_bytes(rows, cols),
                           file_name=f"{key}.csv",
-                          workspace_root=os.path.join(DEMO_ROOT, "raw"))
+                          workspace_root=os.path.join(TARGET_ROOT, "raw"))
         svc.run_pipeline(store, snap["snapshot_id"], rows, cols,
                          control={"row_count": len(rows)})
         made += 1
@@ -498,7 +524,7 @@ def _rewire_ontology_only() -> None:
             tenant_id=tenant, entity_mode="REAL", scope_node_id=scope,
             owner_dept_id=DEPT_PLANT, binding_state=app_policy.BOUND))
 
-    rt = OntologyRuntime(os.path.join(DEMO_ROOT, "ontology.db"), resolver,
+    rt = OntologyRuntime(os.path.join(TARGET_ROOT, "ontology.db"), resolver,
                          product_approval_resolver)
     cal.ontology_runtime = rt
     ortm.ontology_runtime = rt

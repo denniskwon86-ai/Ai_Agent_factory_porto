@@ -95,14 +95,25 @@ export function CompanyContextBar() {
 
   //: ★ 트리를 펴서 **모든 계층**을 고를 수 있게 한다.
   const flat = flatten(depts);
-  const current = flat.find((d) => d.dept_id === ctx.scopeNodeId
-    || (d as any).scope_node_id === ctx.scopeNodeId);
+  /** 지금 **고른** 조직. ⚠️⚠️ [2026-08-24 실측] **빈 값으로 찾지 않는다.**
+   *
+   *  종전 코드는 `ctx.scopeNodeId` 가 빈 문자열이어도 그대로 `find` 에 넣었다. 그런데
+   *  조직도에는 **범위가 아직 비어 있는 부서**가 있다(`t_admin` · 이름 「테스트」).
+   *  그래서 «아무것도 고르지 않은» 상태에서 상단바가 그 부서를 골라
+   *  「tenant-… › 테스트」라고 적었다 — 사용자는 자기가 그 조직에 있다고 읽는다.
+   *
+   *  ★ 「비었다」는 «전부와 일치» 가 아니라 «비교하지 않는다» 다. 빈 값 비교는 이 저장소가
+   *    반복해서 잡아 온 «0/빈 값이 조용히 넓은 뜻을 갖는» 유형이다. */
+  const picked = (ctx.scopeNodeId || '').trim();
+  const current = picked
+    ? flat.find((d) => d.dept_id === picked || (d as any).scope_node_id === picked)
+    : undefined;
 
   /** 지금 **실제로** 보고 있는 범위를 한 마디로. 고른 것이 없으면 «없다»가 아니라
    *  «권한 범위 전체» 다 — 그것이 서버가 하는 일이다. */
   const scopeLabel = status === 'loading' ? '확인 중…'
     : current ? (current.name_ko || current.dept_id)
-      : ctx.scopeNodeId ? ctx.scopeNodeId
+      : picked ? picked
         : me?.unrestricted ? '권한 범위 전체'
           : me?.primary_dept_id
             ? `내 소속 전체 · ${flat.find((d) => d.dept_id === me.primary_dept_id)?.name_ko
@@ -117,8 +128,8 @@ export function CompanyContextBar() {
    *    그것을, 없으면 서버가 말한 값을 쓴다 — 어느 쪽도 지어내지 않는다. */
   const company = (ctx.tenantId || me?.tenant_id || '').trim();
 
-  const scopeTitle = ctx.scopeNodeId
-    ? `선택한 조직 범위: ${ctx.scopeNodeId}`
+  const scopeTitle = picked
+    ? `선택한 조직 범위: ${picked}`
     : '조직을 따로 고르지 않았습니다 — 서버는 당신의 권한 범위 전체로 조회합니다.'
       + ' 좁히려면 «조직 전환» 에서 고르십시오.';
 
