@@ -118,3 +118,51 @@ def test_모듈을_두_번_읽어도_운영_저장소를_만들지_않는다(tmp
                          text=True, errors="replace", timeout=180)
     assert "EXISTS False" in out.stdout, (
         "모듈을 다시 읽자 운영 저장소 파일이 생겼습니다:\n" + out.stdout + out.stderr)
+
+
+def test_Resolver_는_런타임이_부르는_모양_그대로_불릴_수_있다():
+    """★★★ [2026-08-24 실측] **「붙어 있다」와 「부를 수 있다」는 다른 사실이다.**
+
+    ## 무슨 일이 있었나
+
+    위 시험은 `bool(rt.object_scope_resolver)` 만 봤다 — 참이었다. 그런데 그 shim 은
+    `(ref)` 하나만 받는데 `_resolve_object()` 는 `(ref, ctx)` 로 부른다. 매 호출이
+    `TypeError` 였고 `OntologyIntegrityError` → **503** 이 됐다.
+
+    즉 `run.py` 로 띄운 제품 서버에서는 **영향 질의도 경로 계산도 한 번도 돌지 않았다.**
+    시연 스크립트는 `OntologyRuntime` 을 새로 만들어 해석기를 직접 붙이므로 이 shim 을
+    지나지 않는다 — 그래서 시연은 멀쩡했고 결함이 **가려져 있었다.**
+
+    ★ 그래서 배선을 «있는가» 가 아니라 **«런타임이 부르는 서명으로 묶이는가»** 로 본다.
+    """
+    import inspect
+
+    from core.ontology_runtime import ObjectRef
+
+    rt = ontology_runtime.ontology_runtime
+    #: 런타임의 실제 호출 자리와 **같은 인자 수**로 묶어 본다.
+    inspect.signature(rt.object_scope_resolver).bind(ObjectRef("dataset", "t", "i"), object())
+    #: 승인 판정기도 같다 — 3-인자 폴백이 없다는 계약이 여기에 걸려 있다.
+    inspect.signature(rt.approval_resolver).bind("dle_x", "ACT", "who", "type", "id")
+
+
+def test_Resolver_shim_은_문맥을_그대로_넘긴다(monkeypatch):
+    """★★★ **묶이기만 해서는 부족하다.** `ctx` 를 받아 놓고 버리면 같은 사고다.
+
+    ⚠️ 문맥 없이 해석하면 「누가 무엇을 볼 수 있는가」가 조용히 넓어진다 — 그리고
+      그 상태는 오류를 내지 않는다(더 많이 보일 뿐이다)."""
+    from core import ontology_resolvers as real
+    from core.ontology_runtime import ObjectRef
+
+    seen = {}
+
+    def _spy(ref, ctx):
+        seen["ref"], seen["ctx"] = ref, ctx
+        return "resolved"
+
+    monkeypatch.setattr(ontology_runtime, "_product_resolvers",
+                        lambda: (_spy, real.product_approval_resolver))
+    ref, ctx = ObjectRef("dataset", "shipment", "SHP-1"), object()
+    assert ontology_runtime.ontology_runtime.object_scope_resolver(ref, ctx) == "resolved"
+    assert seen["ref"] is ref, "시작점이 그대로 넘어가지 않았다"
+    assert seen["ctx"] is ctx, "문맥이 버려졌다 — 범위 판정이 넓어진다"

@@ -1250,9 +1250,23 @@ def _product_resolvers():
 #:   오해를 만든다(2026-08-20 실측 — 내가 그렇게 붙였다가 되돌렸다).
 #:
 #: ★ 생성은 여전히 **아무 파일도 만들지 않는다**(지연 초기화).
-def _scope_resolver(ref):
-    """부를 때 해석기를 가져온다 — import 순환을 끊는다."""
-    return _product_resolvers()[0](ref)
+def _scope_resolver(ref, ctx):
+    """부를 때 해석기를 가져온다 — import 순환을 끊는다.
+
+    ## ⚠️⚠️ `ctx` 를 빠뜨려 **제품 서버의 온톨로지가 통째로 503 이었다** (2026-08-24 실측)
+
+    `_resolve_object()` 는 `self.object_scope_resolver(ref, ctx)` 로 **두 인자**를 넘긴다.
+    이 shim 이 `(ref)` 하나만 받고 있어서 매 호출이 `TypeError` 였고, 그것이
+    `OntologyIntegrityError("object scope resolution failed.")` → **503** 이 됐다.
+
+    즉 `run.py` 로 띄운 서버에서는 **영향 질의도 경로 계산도 한 번도 돌지 않았다.**
+    시연 스크립트는 `OntologyRuntime` 을 새로 만들어 해석기를 직접 붙이므로 이 shim 을
+    지나지 않는다 — 그래서 시연에서는 멀쩡히 돌았고, 결함이 **가려져 있었다.**
+
+    ★ 인자를 그대로 흘려보낸다. 기본값을 두지 않는다 — 두면 문맥 없이 해석하게 되고,
+      그때 「누가 무엇을 볼 수 있는가」가 조용히 넓어진다.
+    """
+    return _product_resolvers()[0](ref, ctx)
 
 
 def _approval_resolver(ledger_id, action, actor, target_type="", target_id=""):
