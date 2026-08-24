@@ -22,7 +22,15 @@ export type NavItem = {
   id: string;
   label: string;
   icon: string;
-  /** 이 기능이 무엇을 하는지 — 툴팁이 아니라 메뉴에 **본문으로** 쓴다. 툴팁은 키보드·터치에서 안 보인다. */
+  /**
+   * 이 기능이 무엇을 하는지.
+   *
+   * ⚠️⚠️ [2026-08-24 사용자 지적] 종전에는 이것을 **항목마다 본문으로** 깔았다. 그래서
+   *   메뉴를 열면 20개가 설명문까지 달고 통째로 쏟아졌다 — 「음식 메뉴판 같다」.
+   *   그렇다고 툴팁으로만 두면 키보드·터치 사용자는 영영 못 본다(그래서 본문에 깔았던 것).
+   * ★ 지금은 **지금 가리키는 것 하나**만 패널 아래 고정된 칸에 보여 준다. 마우스를 올려도,
+   *   ↑↓ 로 옮겨도 같은 자리에서 읽힌다. 찾기 칸의 검색 대상이기도 하다.
+   */
   desc: string;
   onSelect: () => void;
   /** 지금 이 사람이 쓸 수 없다면 **그 이유**. 값이 있으면 비활성이 되고 이유가 본문에 붙는다.
@@ -36,6 +44,8 @@ export type NavItem = {
   disabledReason?: string;
 };
 
+/** ⚠️ `hint` 는 이제 **화면에 그리지 않는다.** 묶음마다 문단을 두면 그것만 6개다 —
+ *   묶음 이름이 스스로 설명하도록 짧게 짓는 편이 낫다. 값은 남겨 둔다(문서 생성에 쓴다). */
 export type NavGroup = { title: string; hint: string; items: NavItem[] };
 
 const PANEL_MAX_W = 860;
@@ -52,6 +62,12 @@ export function GlobalNav({ primary, groups, right }: {
   const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  //: ★ 찾기 — 20개를 훑어 읽게 하지 않는다. 두세 글자로 좁힌다.
+  const [q, setQ] = useState('');
+  //: 지금 가리키는 줄(마우스·키보드 공통). 설명은 이 하나만 아래 칸에 보여 준다.
+  const [cursor, setCursor] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   /** 버튼의 **화면 좌표**를 읽어 fixed 위치를 계산한다. 조상 스크롤과 무관해진다. */
   const place = useCallback(() => {
@@ -91,16 +107,62 @@ export function GlobalNav({ primary, groups, right }: {
     };
   }, [open, place]);
 
-  // ★ 자동 포커스는 **유지한다.** 없애면 키보드 사용자는 나머지 12개 기능에 도달할 수 없다.
-  //   위치를 잡은 **뒤에** 옮겨야 브라우저가 스크롤로 «보이게» 만들려 하지 않는다.
+  //: ★ 열면 **찾기 칸**으로 간다. 키보드 사용자는 바로 치기 시작하면 되고, ↑↓ 로
+  //:   목록을 옮긴다. (종전에는 첫 항목에 포커스를 줬는데, 그러면 20개를 Tab 으로
+  //:   지나야 마지막에 닿았다.)
+  //: ⚠️ `preventScroll` 은 유지한다 — sticky 조상이 메뉴를 밀어 올리던 결함의 해법이다.
   useEffect(() => {
     if (!open || !pos) return;
-    const first = panelRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
-    // `preventScroll` 이 이 결함의 직접적인 해법이다 — portal 과 함께 이중으로 막는다.
-    first?.focus({ preventScroll: true });
+    searchRef.current?.focus({ preventScroll: true });
   }, [open, pos]);
 
+  //: 닫으면 다음에 깨끗한 상태로 열린다 — 지난 검색어가 남아 「기능이 없다」로 보이면 안 된다.
+  useEffect(() => { if (!open) { setQ(''); setCursor(0); } }, [open]);
+
   const total = groups.reduce((n, g) => n + g.items.length, 0);
+
+  /** 검색어로 좁힌 뒤, 화면에 그릴 줄(그룹 머리 + 항목)로 편다.
+   *
+   *  ★ 이름과 설명 **양쪽**을 본다 — 사용자는 「승인」처럼 하는 일로 찾지, 우리가 붙인
+   *    이름으로 찾지 않는다.
+   *  ⚠️ 걸린 것이 없는 그룹은 머리도 그리지 않는다. 빈 제목만 남으면 「여기 뭔가 있는데
+   *    안 보인다」로 읽힌다. */
+  const needle = q.trim().toLowerCase();
+  //: ★ 그룹째로 그린다(열 나눔이 그룹을 쪼개지 않게). 커서는 **항목 통번호**로 센다 —
+  //:   ↑↓ 는 그룹을 넘어 이어져야 한다.
+  const sections: { title: string; rows: { item: NavItem; idx: number }[] }[] = [];
+  const flat: NavItem[] = [];
+  for (const g of groups) {
+    const hit = needle
+      ? g.items.filter((it) => (it.label + ' ' + it.desc).toLowerCase().includes(needle))
+      : g.items;
+    if (!hit.length) continue;
+    sections.push({ title: g.title, rows: hit.map((it) => ({ item: it, idx: flat.push(it) - 1 })) });
+  }
+  const itemIdx = flat.map((_, i) => i);
+  const active = flat[cursor] ?? null;
+
+  /** 찾기 칸에서의 ↑↓·Enter. ★ 손을 자판에서 떼지 않고 끝까지 간다. */
+  const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return;
+    if (!itemIdx.length) return;
+    e.preventDefault();
+    if (e.key === 'Enter') {
+      const it = flat[cursor];
+      if (it && !it.disabledReason) { setOpen(false); it.onSelect(); }
+      return;
+    }
+    const next = e.key === 'ArrowDown'
+      ? Math.min(flat.length - 1, cursor + 1)
+      : Math.max(0, cursor - 1);
+    setCursor(next);
+    rowRefs.current[next]?.scrollIntoView({ block: 'nearest' });
+  };
+
+  //: 검색 결과가 바뀌면 커서를 첫 항목으로 — 그룹 머리에 놓이면 설명 칸이 빈다.
+  useEffect(() => {
+    if (open) setCursor(0);
+  }, [q, open]);
 
   return (
     <div className="flex items-center gap-2 min-w-0">
@@ -153,49 +215,99 @@ export function GlobalNav({ primary, groups, right }: {
             position: 'fixed', top: pos.top, left: pos.left, width: pos.width,
             maxHeight: pos.maxH, zIndex: 70,
           }}
-          className="afs-product-shell afs-global-menu overflow-y-auto bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-5
-                     grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
+          className="afs-product-shell afs-global-menu flex flex-col overflow-hidden
+                     bg-gray-900 border border-gray-700 rounded-xl shadow-2xl"
         >
-          {groups.map((g) => (
-            <section key={g.title}>
-              <h3 className="text-[13px] font-bold text-gray-200 mb-1">{g.title}</h3>
-              {/* 그룹 설명을 둔다 — 이름만으로는 «왜 여기 묶였는지» 알 수 없다. */}
-              <p className="text-xs text-gray-400 mb-3 leading-relaxed">{g.hint}</p>
-              <div className="flex flex-col gap-1">
-                {g.items.map((it) => {
-                  const blocked = Boolean(it.disabledReason);
-                  return (
-                    <button
-                      key={it.id}
-                      role="menuitem"
-                      disabled={blocked}
-                      // ⚠️ 스크린리더에도 «왜» 를 준다 — 시각적 회색만으로는 이유가 전달되지 않는다.
-                      aria-disabled={blocked || undefined}
-                      onClick={() => { if (blocked) return; setOpen(false); it.onSelect(); }}
-                      className={`text-left px-3 py-2 rounded-lg focus:outline-none
-                                 focus-visible:ring-2 focus-visible:ring-indigo-400 transition-colors
-                                 ${blocked ? 'opacity-60 cursor-not-allowed'
-                                           : 'hover:bg-white/10 focus:bg-white/10'}`}
-                    >
-                      <span className="block text-[13px] font-semibold text-gray-100">
-                        {it.icon} {it.label}
-                      </span>
-                      {/* 설명을 본문으로 쓴다 — 툴팁은 키보드·터치 사용자에게 보이지 않는다. */}
-                      <span className="block text-xs text-gray-400 mt-0.5 leading-relaxed">
-                        {it.desc}
-                      </span>
-                      {/* ★ 못 쓰는 이유는 **누르기 전에** 같은 자리에서 읽힌다. */}
-                      {blocked && (
-                        <span className="block text-xs text-amber-300/90 mt-1 leading-relaxed">
-                          🔒 {it.disabledReason}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+          {/* ── 찾기 ─────────────────────────────────────────────────────
+              ★ 20개를 «훑어 읽게» 하지 않는다. 두세 글자만 치면 남는다. */}
+          <div className="flex-none p-3 border-b border-gray-700">
+            <input
+              ref={searchRef}
+              value={q}
+              onChange={(e) => { setQ(e.target.value); setCursor(0); }}
+              onKeyDown={onSearchKey}
+              placeholder="기능 찾기 — 예: 승인, 계산, 조직"
+              aria-label="기능 찾기"
+              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2
+                         text-[13px] text-gray-100 placeholder:text-gray-500
+                         focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+            />
+          </div>
+
+          {/* ── 목록 — 한 줄에 하나, 넓으면 2열. 설명은 아래 한 칸에서만. ────
+              ⚠️ 그룹째로 열을 나눈다(`break-inside-avoid`). 줄 단위로 나누면 그룹
+                머리가 1열 맨 아래에, 그 항목들이 2열 맨 위에 떨어져 남남이 된다. */}
+          {/* ⚠️ `flex-1` 을 쓰지 않는다 — `flex:1 1 0` 은 남은 높이를 **다 차지해서**
+              항목이 20개든 3개든 패널이 화면 끝까지 내려온다(실측: 700px 창에서 700px).
+              `min-h-0` 만 두면 내용만큼만 잡고, 넘칠 때만 스크롤한다. */}
+          <div className="min-h-0 overflow-y-auto py-2 px-1 sm:columns-2 sm:gap-2">
+            {!itemIdx.length && (
+              <p className="px-4 py-6 text-[13px] text-gray-400">
+                «{q}» 와 맞는 기능이 없습니다.
+              </p>
+            )}
+            {sections.map((sec) => (
+              <section key={sec.title} className="break-inside-avoid mb-2">
+                <div className="px-3 pt-1 pb-0.5 text-[11px] font-bold tracking-wider
+                                text-gray-500">
+                  {sec.title}
+                </div>
+                {sec.rows.map(({ item, idx }) => (
+                  <button
+                    key={item.id}
+                    role="menuitem"
+                    ref={(el) => { rowRefs.current[idx] = el; }}
+                    disabled={Boolean(item.disabledReason)}
+                    aria-disabled={Boolean(item.disabledReason) || undefined}
+                    onMouseEnter={() => setCursor(idx)}
+                    onFocus={() => setCursor(idx)}
+                    onClick={() => {
+                      if (item.disabledReason) return;
+                      setOpen(false);
+                      item.onSelect();
+                    }}
+                    className={`w-full text-left px-3 py-[5px] rounded-md flex items-center gap-2.5
+                                focus:outline-none transition-colors
+                                ${item.disabledReason
+                        ? 'opacity-55 cursor-not-allowed'
+                        : idx === cursor ? 'bg-white/10' : 'hover:bg-white/10'}`}
+                  >
+                    <span className="w-5 shrink-0 text-center text-[14px] leading-none">
+                      {item.icon}
+                    </span>
+                    <span className="text-[13px] font-medium text-gray-100 truncate">
+                      {item.label}
+                    </span>
+                    {item.disabledReason && (
+                      <span className="ml-auto shrink-0 text-[11px] text-amber-300/90">🔒</span>
+                    )}
+                  </button>
+                ))}
+              </section>
+            ))}
+          </div>
+
+          {/* ── 지금 가리키는 것 하나만 설명한다 ──────────────────────────
+              ⚠️⚠️ 설명을 항목마다 붙였더니 **20개가 통째로 쏟아졌다**(2026-08-24 지적).
+                그렇다고 툴팁으로만 두면 키보드·터치 사용자는 영영 못 본다.
+              ★ 그래서 «가리키는 것 하나»의 설명을 고정된 자리에 둔다 — 마우스를 올려도,
+                ↑↓ 로 옮겨도 같은 자리에서 읽힌다. */}
+          <div className="flex-none border-t border-gray-700 px-4 py-2.5 min-h-[52px]">
+            {active ? (
+              <>
+                <p className="text-xs text-gray-300 leading-relaxed">{active.desc}</p>
+                {active.disabledReason && (
+                  <p className="text-xs text-amber-300/90 mt-1 leading-relaxed">
+                    🔒 {active.disabledReason}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-gray-500">
+                ↑↓ 로 고르고 Enter 로 엽니다 · Esc 로 닫습니다
+              </p>
+            )}
+          </div>
         </div>,
         document.body,
       )}

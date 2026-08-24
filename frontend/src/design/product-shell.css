@@ -159,4 +159,9 @@
 .afs-product-shell textarea.bg-gray-950 { background: #fff !important; }
 
 /* portal 메뉴도 제품 셸의 일부다. body 아래로 빠져도 같은 토큰을 직접 가진다. */
-.afs-global-menu { color: var(--color-gray-100); }
+/* ⚠️⚠️ [2026-08-24 실측] `.afs-product-shell` 은 «화면을 채우는 표면» 을 전제로
+ * `min-height: 100%` 를 준다. 그런데 전체 메뉴는 **fixed popover** 라 그 100% 가
+ * 뷰포트 높이가 되고, 항목이 몇 개든 패널이 **화면 끝까지 내려왔다**(700px 창에서 700px).
+ * 내용은 569px 뿐이었다 — 아래 130px 이 빈 상자였다.
+ * ★ 셸 색만 물려받고 높이는 내용이 정한다. */
+.afs-global-menu { color: var(--color-gray-100); min-height: 0; }
