@@ -65,6 +65,9 @@ const LAYERS: { id: Layer; label: string; desc: string; color: string }[] = [
 /** §4.6 TrustFoundationStrip 의 카드 4종. 설계가 지정한 이름·핵심 정보·경고 그대로. */
 type TrustCard = {
   key: string; title: string;
+  /** ★ KPI 가 쓰는 숫자. **카드와 KPI 가 같은 조회를 두 번 하지 않게** 여기 남긴다.
+   *  ⚠️ `null` = 아직/못 읽음. 0 으로 채우면 「없다」와 「모른다」가 같아진다. */
+  n?: number | null;
   state: 'loading' | 'ok' | 'warn' | 'error';
   headline: string;      // 상태의 완전성 — 숫자보다 먼저
   detail: string;        // 핵심 정보
@@ -138,7 +141,8 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
     };
 
     j('/api/v1/master/types')
-      .then((r) => put('mdm', { state: 'ok', headline: `유형 ${(r.data || []).length}종 등록`,
+      .then((r) => put('mdm', { state: 'ok', n: (r.data || []).length,
+        headline: `유형 ${(r.data || []).length}종 등록`,
         detail: '연결 도메인·범위 커버리지' }))
       .catch(() => put('mdm', { state: 'error', headline: '확인하지 못했습니다',
         detail: '0 건이 아니라 조회 실패입니다' }));
@@ -149,6 +153,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
         const un = Number(d.unscoped || 0);
         put('ops', {
           state: un > 0 ? 'warn' : 'ok',
+          n: d.total ?? null,
           headline: `연결 시스템 ${d.total ?? 0}개`,
           detail: `범위 지정 ${d.scoped ?? 0} · 미지정 ${un}`,
           warn: un > 0 ? '범위 미지정 시스템이 있습니다 — 모든 조직에 노출됩니다.' : '',
@@ -159,7 +164,8 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
     j('/api/v1/knowledge/packs')
       .then((r) => {
         const packs = r.data || [];
-        put('knowledge', { state: 'ok', headline: `승인 팩 ${packs.length}개`,
+        put('knowledge', { state: 'ok', n: packs.length,
+          headline: `승인 팩 ${packs.length}개`,
           detail: '문서·청크·검토 대기' });
       })
       .catch(() => put('knowledge', { state: 'error', headline: '확인하지 못했습니다', detail: '' }));
@@ -232,24 +238,37 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
     return () => { alive = false; };
   }, []);
 
-  /** §5.1 상단 KPI **최대 4개**. 「업무 도메인 / Master Data / 연결 / 근거 충실도」를 기본으로
-   *  하되 **회사 프로필에 따라 교체**한다 — 여기서는 브리핑이 실제로 세는 축을 쓴다. */
+  /**
+   * §5.1 상단 KPI **최대 4개** — 설계서 기본은
+   * 「업무 도메인 / Master Data / 연결 / 근거 충실도」다.
+   *
+   * ## ⚠️⚠️ [2026-08-24] 왜 되돌렸는가
+   *
+   * 종전에는 「내가 결정할 것 / 막혀 있는 것 / 업무 도메인 / **LLM 비용**」이었다.
+   * `LLM 비용` 은 **설계서 어디에도 없다** — 설계서는 비용을 §5.7 Agent 화면과
+   * 「AI/품질 관리자」의 일로 배정한다. 경영 홈은 경영진·부서장의 결정 화면이고,
+   * 경영자가 `$0.00 · 0콜` 을 보고 할 수 있는 일이 없다. **네 칸을 채우려고 넣은
+   * 숫자**였다.
+   *
+   * ★ 「내가 결정할 것 / 막혀 있는 것」은 바로 아래 의사결정 대기열이 **제목과 함께**
+   *   보여 준다. KPI 로 한 번 더 세면 같은 것을 두 번 말하면서 자리는 잃는다.
+   * ⚠️ 값은 신뢰 기반(§4.6)이 이미 조회한 것을 **그대로 쓴다** — 같은 것을 두 곳에서
+   *   따로 세면 언젠가 두 숫자가 갈라진다.
+   */
   const kpis = useMemo(() => {
-    const sec = (k: string) => (d?.sections as any)?.[k];
-    const cost = sec('cost') || {};
+    const t = (k: string) => trust.find((c) => c.key === k);
+    const val = (k: string) => {
+      const c = t(k);
+      //: 조회 실패·미완료는 `null` 이다 — 0 으로 떨어뜨리지 않는다.
+      return c && c.state !== 'loading' && c.state !== 'error' ? (c.n ?? null) : null;
+    };
     return [
-      { label: '내가 결정할 것', value: sec('my_decisions')?.count ?? null, hint: '답해야 넘어갑니다' },
-      { label: '막혀 있는 것', value: sec('blocked')?.count ?? null, hint: '누군가 풀어야 합니다' },
       { label: '업무 도메인', value: nodes.length || null, hint: '조직 트리 기준' },
-      {
-        label: 'LLM 비용',
-        value: cost.available === false ? null : (cost.cost_usd ?? null),
-        hint: cost.available === false ? (cost.reason || '집계할 수 없습니다')
-          : `${cost.calls ?? 0}콜${cost.cost_complete === false ? ' · 일부 미가격' : ''}`,
-        money: true,
-      },
+      { label: 'Master Data', value: val('mdm'), hint: '등록된 기준정보 유형' },
+      { label: '연결', value: val('ops'), hint: '연결된 외부 시스템' },
+      { label: '근거 충실도', value: val('knowledge'), hint: '승인된 지식팩' },
     ];
-  }, [d, nodes]);
+  }, [trust, nodes]);
 
   const ctx = getEnterpriseContext();
   //: ★ 조직 이름은 **상단바와 같은 곳**에서 얻는다(`lib/scopeLabel`).
@@ -393,12 +412,11 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
           {kpis.map((k) => (
             <div key={k.label} style={card}>
               <div style={{ fontSize: 12.5, color: 'var(--surface-text-muted)' }}>{k.label}</div>
+              {/* §1.3 KPI 22px 이상 */}
               <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.2, marginTop: 2,
-                color: 'var(--surface-text)',
-                fontFamily: k.money ? 'var(--font-mono, monospace)' : undefined }}>
+                color: 'var(--surface-text)' }}>
                 {/* ⚠️ 「모른다」를 0 으로 쓰지 않는다 — 0 은 «없다» 이고 «못 셌다» 와 다르다. */}
-                {k.value === null || k.value === undefined ? '—'
-                  : k.money ? `$${Number(k.value).toFixed(2)}` : k.value}
+                {k.value === null || k.value === undefined ? '—' : k.value}
               </div>
               <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 2 }}>
                 {k.hint}
@@ -411,7 +429,18 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
         <section style={card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-            <b style={{ fontSize: 15, color: 'var(--surface-text)' }}>업무 흐름</b>
+            <div>
+              <b style={{ fontSize: 15, color: 'var(--surface-text)' }}>
+                업무 흐름 <span style={{ fontWeight: 500, fontSize: 13,
+                  color: 'var(--surface-text-muted)' }}>— 이 회사의 업무가 어디까지 이어져 있나</span>
+              </b>
+              {/* ⚠️ 못 하는 것을 말한다. 설계서 §4.4 는 노드마다 업무 상태·대표 지표·근거 수를
+                  요구하는데 서버가 아직 그것을 주지 않는다. 「곧 됩니다」로 덮지 않는다. */}
+              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 2 }}>
+                지금은 조직 트리와 각 조직의 설정만 보여 줍니다 — 노드별 업무 상태는 아직
+                집계하지 않습니다.
+              </div>
+            </div>
             {/* §4.5 LayerOverlay — 모두 끄는 것도 허용한다 */}
             <div style={{ display: 'flex', gap: 8 }}>
               {LAYERS.map((l) => {
@@ -457,23 +486,33 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                     color: 'var(--surface-text-faint)' }}>{String(i + 1).padStart(2, '0')}</span>
                   <span style={{ fontSize: 13.5, fontWeight: 600,
                     color: 'var(--surface-text)' }}>{n.name_ko || n.dept_id}</span>
-                  {/* ⚠️ [§9.1] 여기도 브랜드 원색을 **글자**에 쓰고 있었다(실측 대비 2.96~4.28).
-                      레이어 칩은 고쳤는데 노드 안은 놓쳤다 — 같은 색을 여러 자리에서 손으로
-                      적으면 한 곳만 고쳐진다. 세 자리 모두 `LAYERS` 의 색을 쓰게 해서
-                      **다음에 색이 바뀌어도 함께 따라오게** 한다. */}
+                  {/* ★★★ §4.4 `DomainNodeVM` — 노드는 **업무 상태**를 말해야 한다:
+                      `status` · `primary_metric` · `evidence_count`.
+                      ⚠️⚠️ [2026-08-24] 종전에는 「도메인 N · 템플릿 지정 · 에이전트 N」을
+                        그렸다. 그것은 **조직 설정 목록**이지 업무 상태가 아니다. 사용자가
+                        보고 할 수 있는 일이 없다(사용자 지적: 「이걸 보고 뭘 해야 하는지
+                        전혀 알 수가 없다」).
+                      ★ 지금 서버는 노드별 업무 상태를 주지 않는다. 그래서 설계서가 정한
+                        `unknown` 을 **그대로 쓴다** — 없는 상태를 «정상» 으로 칠하지 않는다.
+                        설정 수치를 상태처럼 보이게 두는 것보다 「아직 집계 안 함」이 정직하다. */}
+                  <span style={{ fontSize: 12, color: 'var(--surface-text-faint)' }}>
+                    업무 상태 미집계
+                  </span>
+                  {/* §4.5 LayerOverlay — 노드에 걸린 **설정**은 레이어를 켰을 때만.
+                      ⚠️ 이것을 상태로 읽지 않게 «설정» 이라고 적는다. */}
                   {layers.includes('DATA') && (
                     <span style={{ fontSize: 12, color: LAYERS[0].color }}>
-                      도메인 {(n.master_domains || []).length}
+                      설정 · 도메인 {(n.master_domains || []).length}
                     </span>
                   )}
                   {layers.includes('SW') && (
                     <span style={{ fontSize: 12, color: LAYERS[1].color }}>
-                      템플릿 {n.default_template_id ? '지정' : '미지정'}
+                      설정 · 템플릿 {n.default_template_id ? '지정' : '미지정'}
                     </span>
                   )}
                   {layers.includes('TWIN') && (
                     <span style={{ fontSize: 12, color: LAYERS[2].color }}>
-                      에이전트 {(n.domain_agents || []).length}
+                      설정 · 에이전트 {(n.domain_agents || []).length}
                     </span>
                   )}
                 </button>
