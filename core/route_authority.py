@@ -116,6 +116,21 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     #     (핸들러의 `require_caps` 가 먼저 막는다). 남기는 이유는 라우터 의존성이
     #     **핸들러보다 먼저** 돌아, 본문 파싱·문맥 해석 전에 막기 때문이다 — 그리고
     #     표가 있어야 `test_viewer_is_blocked_by_the_table` 이 이 경로를 함께 본다.
+    # ── 키트로 앱 만들기 (2026-08-23) ───────────────────────────────────
+    #   ★ 초안·물질화는 프로젝트 실행 권한, **승인은 데이터 관리 권한**이다.
+    #   ⚠️ 셋을 같은 권한으로 두면 만드는 사람이 곧 승인할 수 있는 사람이 되고,
+    #     직무 분리는 이름만 남는다.
+    "POST /api/v1/data-preparation/instances/{instance_id}/apps/{app_id}/contract":
+        (PROJECT_RUN,),
+    "POST /api/v1/data-preparation/instances/{instance_id}/apps/{app_id}/contract/approve":
+        (ADMIN_DATA_ACCESS,),
+    "POST /api/v1/data-preparation/instances/{instance_id}/apps/{app_id}/build":
+        (PROJECT_RUN,),
+    #: ★ 운영으로 올리는 일 — 계약 승인과 **같은 권한**이다. 만드는 것(PROJECT_RUN)과
+    #:   운영에 올리는 것은 다른 결정이고, 후자는 되돌려도 이미 본 사람이 있다.
+    "POST /api/v1/data-preparation/instances/{instance_id}/apps/{app_id}/promote":
+        (ADMIN_DATA_ACCESS,),
+
     "POST /api/v1/data-preparation/ownership/approve": (ADMIN_DATA_ACCESS,),
     "POST /api/v1/data-preparation/ownership/{binding_id}/revoke": (ADMIN_DATA_ACCESS,),
 

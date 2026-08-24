@@ -190,6 +190,13 @@ export interface KitAppRow {
   release_id: string;
   /** 실제로 결속된 데이터셋 수. ⚠️ `null` = **지금 확인하지 못했다**(0 이 아니다). */
   built_datasets: number | null;
+  /**
+   * 후보(`candidate`)인가 운영(`active`)인가. `''` = 아직 만들지 않았다.
+   *
+   * ★★★ 만든 앱은 **시연 평면의 후보 판**이다. 실제 업무 데이터를 읽으려면 운영으로
+   *   올려야 한다 — 그 전에는 앱을 열어도 표만 있고 레코드가 0 이다.
+   */
+  lifecycle_state: string;
 }
 
 export async function listKitApps(instanceId: string) {
@@ -235,6 +242,22 @@ export async function approveAppContract(
     ),
     '앱 계약 승인',
   );
+}
+
+/**
+ * 앱을 **운영으로 올린다** — 그래야 실제 업무 데이터를 읽는다.
+ *
+ * ★ 서버가 다섯 관문을 다시 본다(상태·계약↔물질화·정적 검사·계약 승인·데이터 준비도).
+ *   하나라도 어긋나면 409 이고 **아무것도 바뀌지 않는다.**
+ */
+export async function promoteKitApp(instanceId: string, appId: string, reason: string) {
+  return unwrap<{ release_id: string; status: string; checks: { name: string; ok: boolean; reason: string }[] }>(
+    await apiFetch(`${BASE}/instances/${encodeURIComponent(instanceId)}`
+      + `/apps/${encodeURIComponent(appId)}/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    }), '운영 전환');
 }
 
 export async function buildKitApp(instanceId: string, appId: string) {

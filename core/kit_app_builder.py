@@ -362,6 +362,23 @@ def publish_release(*, release_id: str, app_id: str, name: str, instance_id: str
         "app_id": app_id,
         "name": name,
         "instance_id": instance_id,
+        #: ★★★ **승인된 계약을 릴리스에 봉인한다.**
+        #:
+        #: ⚠️ `app_contract_gate.release_contract()` 는 `runtime_contract` 키만 읽는다.
+        #:   비어 있으면 승격 검사의 「계약↔물질화 대조」가 «계약 없는 판» 으로 판정하고,
+        #:   `app_data_runtime` 의 발급 게이트도 같은 자리에서 막힌다.
+        #: ★ 정본은 `kit_app_contracts` 표지만, **이 릴리스가 실제로 쓴 판**은 여기다 —
+        #:   나중에 계약이 개정돼도 「이 판이 무엇으로 만들어졌나」가 흔들리지 않는다.
+        "runtime_contract": dict(contract),
+        #: ★★★ **매니페스트 스냅샷.** `app_proof.app_facts()` 가 여기서 「이 앱이 하겠다고
+        #:   선언한 것」을 읽고, `grantable_actions()` 가 그것과 사용자 권한의 **교집합**을
+        #:   증명에 담는다.
+        #: ⚠️⚠️ 없으면 선언이 빈 집합이라 교집합도 비고, 증명 발급이 **404** 다 —
+        #:   그리고 그 404 는 「릴리스가 없다」와 구분되지 않아 원인을 가리지 못한다
+        #:   (2026-08-24 실측: 승격까지 200 인데 앱은 여전히 안 열렸다).
+        #: ★ 계약이 이미 매니페스트를 갖고 있다 — 지어내지 않고 그것을 봉인한다.
+        "manifest": app_manifest.snapshot(contract.get("manifest") or {}),
+        "app_class": str(contract.get("app_class") or ""),
         "kit_app_contract_id": str(contract.get("contract_id") or ""),
         "kit_app_revision": int(contract.get("revision") or 1),
         "semantic_fingerprint": str(contract.get("semantic_fingerprint") or ""),

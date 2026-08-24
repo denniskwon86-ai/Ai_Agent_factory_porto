@@ -402,6 +402,19 @@ def _point_stores_at_demo() -> None:
     from core.auth import auth_store
     auth_store.db_path = os.path.join(TARGET_ROOT, "auth.db")
 
+    #: ⚠️⚠️ [2026-08-24 실측] **게시된 앱 보관소도 빠져 있었다.** 키트 앱을 만들면
+    #:   `library/<release_id>/release.json` 이 생기는데, `library_paths._LIBRARY_DIR`
+    #:   는 프로세스 작업 디렉터리 기준 상대경로("library")라 **운영 보관소**에 쌓였다.
+    #:   실제로 시연에서 만든 앱 릴리스 2건이 저장소 루트의 `library/` 에 남아 있었다.
+    #: ★ 봉인이 `data/` 만 막고 있었다 — 「열지 않습니다」를 찍으면서 다른 문으로 샜다.
+    from core import library_paths
+    library_paths._LIBRARY_DIR = os.path.join(TARGET_ROOT, "library")
+
+    #: ★ 사용여부(후보/운영)도 시연 뿌리에. 안 그러면 시연 앱의 승격이 운영 표에 남는다.
+    from core.program_lifecycle import program_lifecycle
+    program_lifecycle.db_path = os.path.join(TARGET_ROOT, "program_lifecycle.db")
+    program_lifecycle._ready = ""
+
 
 def _org():
     """조직도 — **상위→하위 상속**을 볼 수 있게 두 단으로 세운다."""

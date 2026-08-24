@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   approveAppContract, buildKitApp, DataPrepError, draftAppContract, listKitApps,
-  type AppContractStatus, type KitAppRow,
+  promoteKitApp, type AppContractStatus, type KitAppRow,
 } from '../lib/dataPrepApi';
+import {
+  issueAppProof, listAppDatasets, readAppRecords,
+  type AppDatasetRow, type AppRecords,
+} from '../lib/kitAppViewApi';
 
 // [2026-08-23] 키트로 앱 만들기 — **여정의 빈 칸.**
 //
@@ -48,6 +52,145 @@ const NOTICE_STYLE: Record<Notice['tone'], { bg: string; border: string }> = {
   err: { bg: 'var(--state-error-bg)', border: 'var(--state-error-fg)' },
 };
 
+// ── 만든 앱 열어 보기 ──────────────────────────────────────────────────────
+//
+// ⚠️⚠️ [2026-08-24 실측] 이 자리가 **비어 있었다.** 「앱 만들기」를 눌러 200 을 받고
+//   나면 그 다음에 할 수 있는 일이 화면에 없었다 — 만든 것을 볼 방법이 없으니
+//   「만들어졌다」는 글자만 남는다. 여정이 여기서 끊겼다.
+//: 봉투 칸(레코드 관리용)만 남긴다 — 업무 칸 **뒤**에 붙이기 위해서다.
+//: ⚠️ 버리지 않는다. `record_id` 는 사용자가 특정 행을 지목할 때 유일한 근거다.
+const ENVELOPE_KEYS = ['record_id', 'created_at', 'updated_at', 'deleted'] as const;
+
+function stripEnvelope(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of ENVELOPE_KEYS) if (k in row) out[k] = row[k];
+  return out;
+}
+
+function AppViewer({ releaseId, appLabel }: { releaseId: string; appLabel: string }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [sets, setSets] = useState<AppDatasetRow[] | null>(null);
+  const [picked, setPicked] = useState('');
+  const [rows, setRows] = useState<AppRecords | null>(null);
+  //: ★★★ 증명은 **메모리에만** 둔다 — 저장소·URL·로그 어디에도 두지 않는다.
+  const proofRef = useRef('');
+
+  const load = useCallback(async () => {
+    setBusy(true); setErr('');
+    try {
+      const ds = await listAppDatasets(releaseId);
+      setSets(ds);
+      if (!proofRef.current) proofRef.current = await issueAppProof(releaseId);
+      if (ds.length) {
+        setPicked(ds[0].name);
+        setRows(await readAppRecords(proofRef.current, ds[0].name));
+      }
+    } catch (e: any) {
+      //: ⚠️ 사유를 삼키지 않는다. 후보 판이면 403 이고, 그때 할 일은 «운영 전환» 이다.
+      setErr(e?.message || '열지 못했습니다.');
+    } finally { setBusy(false); }
+  }, [releaseId]);
+
+  async function pick(name: string) {
+    setPicked(name); setRows(null); setErr('');
+    try {
+      setRows(await readAppRecords(proofRef.current, name));
+    } catch (e: any) { setErr(e?.message || '읽지 못했습니다.'); }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" style={{ fontSize: 13, padding: '5px 12px' }}
+              onClick={() => { setOpen(true); void load(); }}>
+        앱 열어 보기
+      </button>
+    );
+  }
+
+  //: ★ 열에 무엇이 있는지는 **데이터가 정한다** — 화면이 열 이름을 지어내지 않는다.
+  //:
+  //: ⚠️⚠️ [2026-08-24 실측] 응답 모양이 **두 가지**다. 인증판을 통해 오는 행은 업무
+  //:   칸이 평평하게 오고, 앱 자체 레코드는 `{record_id, created_at, …, payload}` 봉투에
+  //:   담겨 온다. 봉투만 그렸더니 12,000건을 읽고도 화면에는 `record_id`·`created_at`
+  //:   네 칸만 떴다 — 「데이터가 없다」보다 나쁘다(있는데 엉뚱한 것을 보여 준다).
+  //: ★ 봉투가 있으면 **벗겨서** 합친다. 봉투 칸은 뒤로 민다.
+  const flat = (rows?.records || []).map((r) => {
+    const pay = (r as any).payload;
+    return (pay && typeof pay === 'object') ? { ...pay, ...stripEnvelope(r) } : r;
+  });
+  //: ⚠️ **앞 8칸만 자르지 않는다.** 정본 CSV 는 거버넌스 칸(테넌트·범위·품질·인증)이
+  //:   앞에 오고 업무 칸(자재·수량·납기)은 뒤에 있다. 잘랐더니 화면에 tenant_id·
+  //:   scope_node_id 만 보였다 — 「데이터가 있다」는 보여 주는데 **무슨 데이터인지는
+  //:   안 보이는** 상태다. 어느 칸이 중요한지 화면이 짐작하지 않고, 전부 주고 가로로
+  //:   흐르게 한다.
+  const cols = flat.length ? Object.keys(flat[0]) : [];
+
+  return (
+    <div style={{
+      marginTop: 8, border: '1px solid var(--surface-border)', borderRadius: 8,
+      padding: 10, background: 'var(--surface-raised)', display: 'grid', gap: 8,
+    }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 13 }}>{appLabel}</strong>
+        {(sets || []).map((d) => (
+          <button key={d.name} type="button" onClick={() => void pick(d.name)}
+                  style={{
+                    fontSize: 12, padding: '3px 9px', borderRadius: 6,
+                    border: '1px solid var(--surface-border-control)',
+                    background: d.name === picked ? 'var(--surface-selected)' : 'transparent',
+                    fontWeight: d.name === picked ? 600 : 400,
+                  }}>
+            {d.name}
+          </button>
+        ))}
+        <button type="button" onClick={() => setOpen(false)}
+                style={{ fontSize: 12, padding: '3px 9px', marginLeft: 'auto' }}>닫기</button>
+      </div>
+
+      {busy && <div style={{ fontSize: 13 }}>여는 중…</div>}
+      {err && (
+        <div style={{ fontSize: 13, color: 'var(--state-error-fg)' }}>{err}</div>
+      )}
+      {rows && (
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginBottom: 4 }}>
+            {/* ⚠️ 보인 건수를 «전부» 로 읽지 않게 총계를 함께 적는다. */}
+            {flat.length}건 표시 · 총 {rows.total}건
+          </div>
+          <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: 480 }}>
+            <thead>
+              <tr>{cols.map((c) => (
+                <th key={c} style={{
+                  textAlign: 'left', padding: '4px 8px', whiteSpace: 'nowrap',
+                  borderBottom: '1px solid var(--surface-border)',
+                  color: 'var(--surface-text-muted)', fontWeight: 600,
+                }}>{c}</th>
+              ))}</tr>
+            </thead>
+            <tbody>
+              {flat.map((r, i) => (
+                <tr key={i}>{cols.map((c) => (
+                  <td key={c} style={{
+                    padding: '4px 8px', whiteSpace: 'nowrap',
+                    borderBottom: '1px solid var(--surface-border)',
+                  }}>{String((r as any)[c] ?? '')}</td>
+                ))}</tr>
+              ))}
+            </tbody>
+          </table>
+          {!flat.length && (
+            <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
+              이 데이터셋에는 행이 없습니다.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppRow({
   row, instanceId, onChanged, notice, setNotice,
 }: {
@@ -61,6 +204,7 @@ function AppRow({
 }) {
   const [appClass, setAppClass] = useState('');
   const [rationale, setRationale] = useState('');
+  const [promoteReason, setPromoteReason] = useState('');
   const [busy, setBusy] = useState('');
 
   const rv = READINESS_VIEW[row.readiness_state]
@@ -194,12 +338,54 @@ function AppRow({
                     만들어졌는지 지금 확인하지 못했습니다.
                   </span>
                 ) : row.built_datasets > 0 ? (
-                  <span style={{ color: 'var(--state-success-fg)' }}>
-                    ● 만들어졌습니다 — 데이터셋 {row.built_datasets}개
-                    <span style={{ color: 'var(--surface-text-muted)', marginLeft: 6, fontSize: 12 }}>
-                      {row.release_id}
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <span style={{ color: 'var(--state-success-fg)' }}>
+                      ● 만들어졌습니다 — 데이터셋 {row.built_datasets}개
+                      <span style={{ color: 'var(--surface-text-muted)', marginLeft: 6, fontSize: 12 }}>
+                        {row.release_id}
+                      </span>
                     </span>
-                  </span>
+
+                    {/* ★★★ **만든 것과 쓸 수 있는 것은 다르다.**
+                        ⚠️⚠️ [2026-08-24 실측] 만든 앱은 시연 평면의 «후보 판» 이고,
+                          그 상태로 열면 표만 보이고 **레코드가 0** 이다. 그것을
+                          「우리 회사에 자료가 없다」로 읽는다. 여기서 다음 할 일을
+                          말한다. */}
+                    {row.lifecycle_state === 'candidate' && (
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
+                          아직 <strong>시연용 후보 판</strong>입니다 — 실제 업무 데이터를
+                          읽으려면 운영으로 올려야 합니다.
+                        </div>
+                        <input value={promoteReason}
+                               onChange={(e) => setPromoteReason(e.target.value)}
+                               placeholder="운영 전환 근거 — 왜 지금 이 앱을 운영에 올리는지"
+                               style={{ fontSize: 13, padding: '5px 8px' }} />
+                        <div>
+                          <button type="button"
+                                  disabled={!promoteReason.trim() || !!busy}
+                                  onClick={() => run('운영 전환', () => promoteKitApp(
+                                    instanceId, row.app_id, promoteReason))}
+                                  style={{ fontSize: 13, padding: '5px 12px', fontWeight: 600 }}>
+                            {busy === '운영 전환' ? '올리는 중…' : '운영으로 올리기'}
+                          </button>
+                          <span style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginLeft: 8 }}>
+                            상태·계약·정적 검사·계약 승인·데이터 준비도 다섯 가지를 다시 봅니다.
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {row.lifecycle_state === 'active' && (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 13, color: 'var(--state-success-fg)' }}>
+                          ● 운영 중 — 인증된 업무 데이터를 읽습니다.
+                        </span>
+                        <AppViewer releaseId={row.release_id}
+                                   appLabel={row.label || row.app_id} />
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <span style={{ color: 'var(--surface-text-muted)' }}>아직 만들지 않았습니다.</span>
                 )}

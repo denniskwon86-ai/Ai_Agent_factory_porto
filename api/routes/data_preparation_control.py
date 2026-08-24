@@ -13,6 +13,8 @@
 · 지금 상태에서 할 수 없는 일 → **409**.
 ⚠️ 은폐는 응답이지 기록이 아니다 — 404 로 돌려주더라도 감사에는 실제 대상을 남긴다.
 """
+import asyncio
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -880,3 +882,445 @@ async def certify_snapshot(snapshot_id: str, req: PipelineRequest,
     return {"status": "success",
             "data": {**out,
                      "display_label": snapshot_service.display_label(out)}}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 키트로 앱 만들기 — 초안 → 승인 → 물질화 (2026-08-23)
+#
+# ⚠️⚠️ 이 세 경로가 없던 동안 준비도 보드는 `READY` 를 그렸고 **누를 것이 없었다.**
+#   통제는 다 서 있었는데 부르는 경로가 없었다 — 소유권 승인(4.1c-D)과 같은 결함이다.
+#   「보여 주는 것」과 「되는 것」이 다르면, 보여 주는 쪽이 거짓말을 한다.
+# ══════════════════════════════════════════════════════════════════════════
+
+class AppContractDraftRequest(BaseModel):
+    """★ `app_class` 를 **받는다.** `app_manifest` 가 「모르면 departmental 로 두지 않고
+    비워 둔다 — 추측한 분류는 나중에 권한 판단의 근거로 쓰인다」라고 적어 두었다."""
+    app_class: str = ""
+
+
+class AppContractApproveRequest(BaseModel):
+    """⚠️ 근거는 **필수**다. 「왜 이 앱을 열었나」에 답할 수 없는 승인은 나중에 아무도
+    뒤집지 못한다(소유권 승인의 `evidence_ref` 와 같은 규칙)."""
+    revision: int
+    rationale: str
+
+
+def _blueprint_or_404(profile: Dict[str, Any], app_id: str) -> Dict[str, Any]:
+    """키트 등록부의 산출물 → 청사진.
+
+    ★★★ **파일을 다시 읽지 않는다.** 등록부가 이미 정규화해 들고 있다 — 파일을 또
+      읽으면 등록 당시의 판본과 지금 디스크의 판본이 갈릴 수 있다.
+    ⚠️ 못 찾으면 404 다. 「없는 산출물」을 빈 청사진으로 바꾸면 데이터 0개 앱이 생긴다."""
+    for row in kit_registry.outputs(profile):
+        if str(row.get("output")) == app_id:
+            return {"app_id": app_id, "name": str(row.get("label") or app_id),
+                    "datasets": list(row.get("requires") or [])}
+    raise HTTPException(status_code=404,
+                        detail="이 키트에 그런 산출물이 없습니다.")
+
+
+def _kit_profile_or_503(inst: Dict[str, Any]) -> Dict[str, Any]:
+    kit = kit_registry.resolve(store, inst["kit_id"], inst["version"])
+    if not kit:
+        #: ⚠️ 키트를 못 읽으면 **아무것도 만들지 않는다.** 빈 요구사항으로 만들면
+        #:   데이터가 하나도 없는 앱이 「정상」으로 생긴다.
+        raise HTTPException(
+            status_code=503,
+            detail="이 인스턴스가 적용한 키트 판본을 읽을 수 없어 앱을 만들 수 없습니다.")
+    return kit.get("profile") or {}
+
+
+def _app_readiness(inst: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
+    """준비도 판정. ★ **한 곳에서만** 조립한다 — 두 라우트가 각자 조립하면 언젠가
+    한쪽만 고쳐지고, 그때 화면과 생성이 다른 답을 낸다."""
+    instance_id = str(inst["instance_id"])
+    keys = kit_registry.dataset_keys(profile)
+    snapshots: Dict[str, List[Dict[str, Any]]] = {k: [] for k in keys}
+    for row in store.list_snapshots(instance_id):
+        key = str(row.get("dataset_contract_key") or "")
+        if key in snapshots:
+            snapshots[key].append(row)
+    max_age = profile.get("max_age_days", DEFAULT_MAX_AGE_DAYS)
+    try:
+        return readiness.evaluate_instance(
+            contract_keys=keys,
+            bindings={k: store.active_binding(instance_id, k) for k in keys},
+            snapshots=snapshots, outputs=kit_registry.outputs(profile),
+            now=_now_iso(),
+            max_age_days=float(max_age) if max_age is not None else None,
+            scope={"tenant_id": inst["tenant_id"], "scope_node_id": inst["scope_node_id"],
+                   "entity_mode": inst["entity_mode"]})
+    except m.DataPreparationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/instances/{instance_id}/apps")
+async def list_apps(instance_id: str, p: Principal = Depends(current_principal)):
+    """이 인스턴스에서 **지금 무엇을 만들 수 있고 무엇이 이미 있는가.**
+
+    ★ 준비도(만들 수 있는가)와 계약(승인됐는가)을 **한 줄에** 싣는다 — 두 화면으로
+      나누면 사용자가 「준비는 됐는데 왜 안 되지」를 스스로 이어 붙여야 한다.
+    ⚠️ 계약이 없는 것을 «괜찮음» 으로 그리지 않는다. `contract_status` 가 `null` 이다."""
+    require_caps(p, PROJECT_RUN, resource="data_preparation",
+                 action=f"apps:list:{instance_id}")
+    inst = _instance_or_404(p, instance_id)
+    profile = _kit_profile_or_503(inst)
+
+    from core import kit_app_contract as kac
+    contracts: Dict[str, Dict[str, Any]] = {}
+    for row in kac.list_for_instance(store, instance_id):
+        #: ★ 앱마다 **가장 최근 개정 하나**만 화면에 준다(목록이 revision DESC 다).
+        contracts.setdefault(str(row["app_id"]), row)
+
+    #: ★★★ [2026-08-23 실측] **「이미 만들어졌는가」를 함께 싣는다.**
+    #:
+    #: ⚠️⚠️ 종전 판은 계약 상태만 줬다. 그래서 「앱 만들기」를 눌러 200 이 와도 목록은
+    #:   **아무 변화가 없었고**, 사용자는 눌린 건지 알 수 없었다 — 「보여 주는 것과
+    #:   되는 것이 다르다」의 반대 방향이다(된 것을 안 보여 준다).
+    #: ★ 응답의 「만들었다」를 믿지 않고 **결속을 직접 센다** — 그것이 사실이다.
+    from core import app_contract_gate as _gate
+    from core import app_preview as _preview
+    from core import kit_app_builder as _kb
+    _plane = _preview.app_data_for(_preview.AUDIENCE_PREVIEW)
+
+    result = _app_readiness(inst, profile)
+    apps = []
+    for row in (result.get("outputs") or []):
+        app_id = str(row.get("output") or "")
+        c = contracts.get(app_id)
+        apps.append({
+            "app_id": app_id, "label": str(row.get("label") or ""),
+            "readiness_state": str(row.get("state") or ""),
+            "user_message": str(row.get("user_message") or ""),
+            "next_action": str(row.get("next_action") or ""),
+            #: ★ 셋을 **따로** 싣는다. 「계약 없음」·「승인 대기」·「승인됨」은 서로 다른
+            #:   사실이고, 하나로 뭉개면 화면이 다음 할 일을 말해 줄 수 없다.
+            "contract_status": (str(c["status"]) if c else None),
+            "contract_revision": (int(c["revision"]) if c else None),
+            "drafted_by": (str(c.get("drafted_by") or "") if c else ""),
+            "approved_by": (str(c.get("approved_by") or "") if c else ""),
+            "release_id": _kb.release_id_for(instance_id, app_id),
+            #: ★★★ **후보인가 운영인가.** 만든 앱은 시연 평면의 후보 판이고, 실제 업무
+            #:   데이터를 읽으려면 운영으로 올려야 한다. 이 값이 없으면 화면은 「만들었다」
+            #:   에서 멈추고 다음 할 일을 말해 줄 수 없다.
+            "lifecycle_state": _lifecycle_state(
+                _kb.release_id_for(instance_id, app_id)),
+            #: ⚠️ 못 읽으면 **0 으로 채우지 않는다.** 0 은 「안 만들어졌다」이고,
+            #:   여기서 말해야 하는 것은 「지금 확인하지 못했다」다.
+            "built_datasets": _built_count(_gate, _plane, instance_id, app_id),
+        })
+    return {"status": "success",
+            "data": {"instance_id": instance_id, "apps": apps}}
+
+
+class AppPromoteRequest(BaseModel):
+    """⚠️ 사유는 **필수**다 — 「왜 운영으로 올렸나」에 답할 수 없는 승격은 나중에
+    아무도 뒤집지 못한다(계약 승인과 같은 규칙)."""
+    reason: str
+
+
+@router.post("/instances/{instance_id}/apps/{app_id}/promote")
+async def promote_app(instance_id: str, app_id: str, req: AppPromoteRequest,
+                      p: Principal = Depends(current_principal)):
+    """[2026-08-24] 만든 앱을 **운영으로 올린다** — 그래야 실제 업무 데이터를 읽는다.
+
+    ## 왜 이 라우트가 따로 있는가
+
+    `factory_control` 의 승격은 `/{project_id}/releases/{release_id}/promote` 이고
+    `assert_project_writable(p, project_id)` 로 **공장 프로젝트 작업공간**을 요구한다.
+    업무 키트 앱에는 그런 작업공간이 없다 — 청사진과 승인된 계약뿐이다.
+
+    ★★★ 그렇다고 검사를 건너뛰지 않는다. **같은 `release_promotion.promote()`** 를
+      부른다: 상태·계약↔물질화·정적 검사·계약 승인·데이터 준비도 다섯 가지를 그대로
+      본다. 면제를 만들면 그 면제가 곧 승격 게이트의 구멍이 된다.
+
+    ## 왜 승격이 필요한가 (2026-08-24 실측)
+
+    앱을 만들면 데이터셋은 **시연 평면**에 물질화된다. 그런데 후보 판의 앱 증명은
+    `SYNTHETIC_TEST` 문맥에서만 발급되고(`app_preview.assert_preview_context`),
+    업무 키트 인스턴스는 `REAL` 이다. 그래서 만든 앱을 열면 표는 보이는데 **레코드가
+    0** 이었다 — 실제 인증판을 읽는 통로가 운영 청중에만 있기 때문이다.
+    """
+    #: ★ 운영으로 올리는 일이다 — 계약 승인과 **같은 권한**을 요구한다.
+    require_caps(p, ADMIN_DATA_ACCESS, resource="data_preparation",
+                 action=f"apps:promote:{instance_id}/{app_id}")
+    from api.deps import assert_can_manage_standard
+    assert_can_manage_standard(p)
+    inst = _instance_or_404(p, instance_id)
+    profile = _kit_profile_or_503(inst)
+    _blueprint_or_404(profile, app_id)
+    #: ⚠️⚠️ 사유를 **여기서 막는다.** 모델 주석에 「필수」라고 적어 두고 검사가 없었다 —
+    #:   `release_promotion.promote()` 는 빈 사유를 기본 문구로 채우므로 그대로 통과했다
+    #:   (2026-08-24 실측). 주석이 코드를 대신 주장하면 안 된다.
+    if not str(req.reason or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="운영 전환 근거가 필요합니다 — 「왜 지금 이 앱을 운영에 올리는가」에 "
+                   "답할 수 없는 승격은 나중에 아무도 뒤집지 못합니다.")
+
+    import json as _json
+
+    from core import app_preview, library_paths, release_promotion
+    from core import kit_app_builder as kb
+    from core.program_lifecycle import program_lifecycle
+
+    release_id = kb.release_id_for(instance_id, app_id)
+    path = library_paths.release_json(release_id)
+    if not os.path.exists(path):
+        #: ⚠️ 「아직 안 만들었다」는 409 다 — 404 로 답하면 앱 자체가 없는 것으로 읽힌다.
+        raise HTTPException(
+            status_code=409,
+            detail="아직 만들어지지 않은 앱입니다 — 계약을 승인하고 «앱 만들기» 를 "
+                   "누른 뒤에 운영으로 올릴 수 있습니다.")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            release = _json.load(fh)
+    except Exception as exc:
+        #: ⚠️ 판독 실패는 «없다» 가 아니다 — 서버 상태 이상이고 사용자가 고칠 수 없다.
+        raise HTTPException(status_code=503,
+                            detail=f"릴리스를 읽을 수 없습니다: {str(exc)[:120]}")
+
+    #: ★★★ 준비도는 **판정하지 않고 넘긴다.** `release_promotion` 이 「확인하지 못한
+    #:   것을 «준비됨» 으로 세지 않는다」로 막는다.
+    #:
+    #: ⚠️⚠️ [2026-08-24 실측] 처음엔 `_app_readiness(inst, profile)` 를 그대로 넘겼다.
+    #:   그것은 **키트 전체**의 준비도라서, APP-01 이 읽는 자료가 다 준비돼 있어도
+    #:   APP-03 이 쓰는 `INV-02` 가 없으면 APP-01 승격이 막혔다 — 그 앱과 무관한
+    #:   이유로 막는 게이트는 사람이 고칠 수 없다(무엇을 고쳐야 할지 안 맞는다).
+    #: ★ `factory_control._release_readiness_state` 도 그 릴리스가 **실제로 읽는 것**만
+    #:   본다. 같은 규칙을 쓴다.
+    readiness_state = _app_data_readiness(inst, profile, app_id)
+
+    def _materialize_operational() -> None:
+        """★★★ 운영 평면에 **같은 계약으로** 물질화한다.
+
+        ⚠️ 실패하면 `promote()` 가 상태를 바꾸지 않는다 — 「운영이라고 적혀 있는데
+          읽을 데이터가 없는 판」을 만들지 않기 위해서다."""
+        from core import app_contract_gate, contract_materializer as cm
+
+        contract = app_contract_gate.release_contract(release)
+        if not contract:
+            raise HTTPException(status_code=409,
+                                detail="릴리스에 봉인된 계약이 없습니다.")
+        cm.materialize(contract, release_id=release_id, actor_id=p.user_id or "",
+                       store=store,
+                       app_data=app_preview.app_data_for(
+                           app_preview.AUDIENCE_OPERATIONAL),
+                       tenant_id=str(inst["tenant_id"]),
+                       scope_node_id=str(inst["scope_node_id"]),
+                       entity_mode=str(inst["entity_mode"]))
+
+    try:
+        out = await asyncio.to_thread(
+            release_promotion.promote,
+            release=release, release_id=release_id, lifecycle=program_lifecycle,
+            actor=(p.user_id or ""), code_paths=[library_paths.release_dir(release_id)],
+            readiness_state=readiness_state, reason=req.reason,
+            #: ★★★ 검사는 **후보가 사는 평면**으로, 물질화는 **운영 평면**에.
+            #: ⚠️ 운영 평면으로 대조하면 「계약에 있는 데이터셋이 물질화되지
+            #:   않았습니다」로 모든 승격이 막힌다(`_check_contract` 의 실측 주석).
+            plane=app_preview.app_data_for(app_preview.AUDIENCE_PREVIEW),
+            on_promote=_materialize_operational)
+    except release_promotion.PromotionError as exc:
+        #: ⚠️ 「지금 상태에서 할 수 없는 일」은 409 다 — 422 로 주면 사용자가 요청을
+        #:   고쳐 보려 하는데, 고칠 것은 요청이 아니라 판의 상태다.
+        _audit("APP_RELEASE_PROMOTED", resource_id=f"{instance_id}/{app_id}",
+               actor=p.user_id or "", outcome="denied", reason=str(exc)[:200])
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    #: 승격 사실을 릴리스에도 남긴다 — 「언제 운영이 됐나」는 파일이 답해야 한다.
+    release["lifecycle_state"] = out["status"]
+    release["promoted_by"] = p.user_id or ""
+    release["promoted_at"] = _now_iso()
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            _json.dump(release, fh, ensure_ascii=False, indent=2)
+    except Exception:                       # pragma: no cover - 파일 기록 실패
+        #: ⚠️ 상태는 이미 바뀌었다. 파일 기록 실패로 승격을 되돌리지 않는다 —
+        #:   되돌리면 「운영인데 파일은 후보」보다 더 나쁜 상태가 된다.
+        _audit("APP_RELEASE_PROMOTED", resource_id=f"{instance_id}/{app_id}",
+               actor=p.user_id or "", outcome="allowed",
+               detail=f"release={release_id} 상태는 바뀌었으나 파일 기록 실패")
+        return {"status": "success", "data": out}
+    _audit("APP_RELEASE_PROMOTED", resource_id=f"{instance_id}/{app_id}",
+           actor=p.user_id or "", outcome="allowed",
+           detail=f"release={release_id} status={out.get('status')}")
+    return {"status": "success", "data": out}
+
+
+def _app_data_readiness(inst: Dict[str, Any], profile: Dict[str, Any],
+                        app_id: str) -> Any:
+    """**이 앱이 읽는 자료만** 본 준비도.
+
+    ⚠️ 산출물 선언에 요구 목록이 없으면 `None` 을 돌려준다 — 「확인하지 못했다」이고,
+      `release_promotion._check_readiness` 가 그것을 «준비됨» 으로 세지 않는다.
+      여기서 `NOT_APPLICABLE` 로 접으면 요구 선언이 빠진 키트가 조용히 승격된다."""
+    needs = [str(k).strip()
+             for spec in kit_registry.outputs(profile)
+             if str(spec.get("output") or "") == app_id
+             for k in (spec.get("requires") or []) if str(k).strip()]
+    if not needs:
+        return None
+    instance_id = str(inst["instance_id"])
+    snapshots: Dict[str, List[Dict[str, Any]]] = {k: [] for k in needs}
+    for row in store.list_snapshots(instance_id):
+        key = str(row.get("dataset_contract_key") or "")
+        if key in snapshots:
+            snapshots[key].append(row)
+    max_age = profile.get("max_age_days", DEFAULT_MAX_AGE_DAYS)
+    try:
+        return readiness.evaluate_instance(
+            contract_keys=needs,
+            bindings={k: store.active_binding(instance_id, k) for k in needs},
+            snapshots=snapshots, outputs=[], now=_now_iso(),
+            max_age_days=float(max_age) if max_age is not None else None,
+            scope={"tenant_id": inst["tenant_id"], "scope_node_id": inst["scope_node_id"],
+                   "entity_mode": inst["entity_mode"]})
+    except m.DataPreparationError:
+        #: ⚠️ 확인하지 못한 것을 «해당 없음» 으로 바꾸지 않는다.
+        return None
+
+
+def _lifecycle_state(release_id: str) -> str:
+    """이 릴리스가 **후보인가 운영인가.** 아직 안 만들었으면 빈 문자열.
+
+    ⚠️ 미기록을 `active` 로 그리지 않는다 — `program_lifecycle` 은 하위호환을 위해
+      미기록을 `active` 로 답하지만, 여기서는 「아직 만들지 않았다」와 「운영이다」가
+      **다른 사실**이다. 뭉개면 화면이 승격 버튼을 숨긴다."""
+    from core import library_paths
+    from core.program_lifecycle import program_lifecycle
+
+    if not os.path.exists(library_paths.release_json(release_id)):
+        return ""
+    try:
+        return str(program_lifecycle.get_status(release_id).get("status") or "")
+    except Exception:                          # pragma: no cover - 상태 조회 실패
+        return ""
+
+
+def _built_count(gate: Any, plane: Any, instance_id: str, app_id: str) -> Optional[int]:
+    """이 앱의 릴리스에 **실제로 결속된 데이터셋 수**. 못 읽으면 `None`."""
+    from core import kit_app_builder as kb
+
+    try:
+        return len(gate._materialized(kb.release_id_for(instance_id, app_id), plane))
+    except Exception:
+        return None
+
+
+@router.post("/instances/{instance_id}/apps/{app_id}/contract")
+async def draft_app_contract(instance_id: str, app_id: str,
+                             req: AppContractDraftRequest,
+                             p: Principal = Depends(current_principal)):
+    """앱 계약 **초안**을 만든다. ⚠️ 승인하지 않는다 — 누르는 것은 다른 사람이다."""
+    require_caps(p, PROJECT_RUN, resource="data_preparation",
+                 action=f"apps:contract:draft:{instance_id}/{app_id}")
+    inst = _instance_or_404(p, instance_id)
+    profile = _kit_profile_or_503(inst)
+    blueprint = _blueprint_or_404(profile, app_id)
+
+    from core import kit_app_builder as kb
+    from core import kit_app_contract as kac
+    try:
+        out = kac.draft(
+            store, blueprint=blueprint, instance_id=instance_id,
+            actor_id=p.user_id or "", tenant_id=str(inst["tenant_id"]),
+            scope_node_id=str(inst["scope_node_id"]),
+            entity_mode=str(inst["entity_mode"]), app_class=req.app_class,
+            labels=kit_registry.dataset_labels(profile))
+    except (kac.ContractFlowError, kb.KitAppError) as e:
+        #: ⚠️ 여기 오는 것은 대부분 「인증판이 아직 없다」·「app_class 를 안 정했다」다 —
+        #:   사람이 고칠 수 있는 입력이므로 422 다.
+        raise HTTPException(status_code=422, detail=str(e))
+    _audit("APP_CONTRACT_DRAFTED", resource_id=f"{instance_id}/{app_id}",
+           actor=p.user_id or "", outcome="success",
+           detail=f"revision={out.get('revision')}")
+    return {"status": "success", "data": out}
+
+
+@router.post("/instances/{instance_id}/apps/{app_id}/contract/approve")
+async def approve_app_contract(instance_id: str, app_id: str,
+                               req: AppContractApproveRequest,
+                               p: Principal = Depends(current_principal)):
+    """**다른 사람이** 초안을 승인한다.
+
+    ⚠️⚠️ 만든 사람은 승인할 수 없다 — 핵심 층이 막고 DB 트리거도 막는다. 여기서
+      세 번째 판정을 만들지 않는다(만들면 규칙이 갈라지고 한쪽만 고쳐지는 날이 온다)."""
+    require_caps(p, ADMIN_DATA_ACCESS, resource="data_preparation",
+                 action=f"apps:contract:approve:{instance_id}/{app_id}")
+    from api.deps import assert_can_manage_standard
+    #: ★ 라우트 층에서도 승인 권한을 요구한다 — 소유권 승인과 같은 규칙이다.
+    assert_can_manage_standard(p)
+    _instance_or_404(p, instance_id)
+
+    from core import kit_app_contract as kac
+    try:
+        out = kac.approve(store, instance_id=instance_id, app_id=app_id,
+                          revision=int(req.revision), actor_id=p.user_id or "",
+                          rationale=req.rationale)
+    except kac.LedgerUnavailable as e:
+        #: ★ 「사람이 정리해야 하는 상태」다 — 409 로 답하면 「입력을 고쳐 다시 하라」로 읽힌다.
+        _audit("APP_CONTRACT_REJECTED", resource_id=f"{instance_id}/{app_id}",
+               actor=p.user_id or "", outcome="denied", reason=str(e)[:200])
+        raise HTTPException(status_code=503, detail=str(e))
+    except kac.ContractFlowError as e:
+        _audit("APP_CONTRACT_REJECTED", resource_id=f"{instance_id}/{app_id}",
+               actor=p.user_id or "", outcome="denied", reason=str(e)[:200])
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        #: ⚠️ 승인 권한 검사(`ownership_binding`)가 던지는 것도 여기로 온다 — 삼키지 않는다.
+        _audit("APP_CONTRACT_REJECTED", resource_id=f"{instance_id}/{app_id}",
+               actor=p.user_id or "", outcome="denied", reason=str(e)[:200])
+        raise HTTPException(status_code=403, detail=str(e))
+    _audit("APP_CONTRACT_APPROVED", resource_id=f"{instance_id}/{app_id}",
+           actor=p.user_id or "", outcome="allowed",
+           detail=f"revision={out.get('revision')} ledger={out.get('ledger_event_id')}")
+    return {"status": "success", "data": out}
+
+
+@router.post("/instances/{instance_id}/apps/{app_id}/build")
+async def build_app(instance_id: str, app_id: str,
+                    p: Principal = Depends(current_principal)):
+    """승인된 계약으로 **실제 앱을 만든다.**
+
+    ★★★ 준비도를 여기서 다시 판정하지 않는다 — `readiness` 의 결과를 그대로 넘긴다.
+    ⚠️ 승인이 없으면 만들지 않는다. 「일부라도 열어 주자」가 위험하다 — 열린 앱은 빈
+      화면을 보여 주고, 사용자는 그것을 「우리 회사에 자료가 없다」로 읽는다."""
+    require_caps(p, PROJECT_RUN, resource="data_preparation",
+                 action=f"apps:build:{instance_id}/{app_id}")
+    inst = _instance_or_404(p, instance_id)
+    profile = _kit_profile_or_503(inst)
+    blueprint = _blueprint_or_404(profile, app_id)
+
+    from core import app_preview
+    from core import kit_app_builder as kb
+    from core import kit_app_contract as kac
+    approved = kac.approved(store, instance_id, app_id)
+    if not approved or not isinstance(approved.get("contract"), dict):
+        raise HTTPException(
+            status_code=409,
+            detail="승인된 앱 계약이 없습니다 — 계약을 만들어 승인을 받은 뒤에 "
+                   "만들 수 있습니다.")
+
+    result = _app_readiness(inst, profile)
+    try:
+        out = kb.build(
+            blueprint=blueprint, approved_contract=approved["contract"],
+            instance_id=instance_id, outputs=result.get("outputs") or [],
+            actor_id=p.user_id or "", store=store,
+            #: ★ 시연 평면에 만든다. ⚠️ 운영 평면 물질화는 **승격의 일**이다
+            #:   (`factory_control._promotion_materializer`) — 여기서 하면 승격을 건너뛴다.
+            app_data=app_preview.app_data_for(app_preview.AUDIENCE_PREVIEW),
+            tenant_id=str(inst["tenant_id"]),
+            scope_node_id=str(inst["scope_node_id"]),
+            entity_mode=str(inst["entity_mode"]))
+    except kb.KitAppError as e:
+        _audit("APP_DATASET_CREATED", resource_id=f"{instance_id}/{app_id}",
+               actor=p.user_id or "", outcome="denied", reason=str(e)[:200])
+        #: ⚠️ 「아직 만들 수 없다」는 409 다 — 422 로 답하면 「입력을 고쳐라」로 읽힌다.
+        raise HTTPException(status_code=409, detail=str(e))
+    _audit("APP_DATASET_CREATED", resource_id=f"{instance_id}/{app_id}",
+           actor=p.user_id or "", outcome="allowed",
+           detail=f"release={out.get('release_id')} "
+                  f"datasets={len(out.get('datasets') or [])}")
+    return {"status": "success", "data": out}
