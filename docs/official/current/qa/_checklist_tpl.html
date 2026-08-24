@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Factory Studio — 기능 점검표</title>
+<style>
+:root {
+  --bg:#f6f7f9; --card:#fff; --line:#c3c7cd; --line-soft:#e3e6ea;
+  --text:#1b1f24; --muted:#5b6470; --navy:#123a6b;
+  --ok:#1a7f4b; --ng:#b3261e; --part:#8a6100; --na:#5b6470;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text);
+  font:14px/1.55 -apple-system,"Segoe UI","Malgun Gothic",sans-serif; }
+header { position:sticky; top:0; z-index:5; background:var(--navy); color:#fff;
+  padding:14px 20px; box-shadow:0 1px 4px #0003; }
+h1 { margin:0 0 2px; font-size:18px; }
+.sub { font-size:12.5px; opacity:.9; }
+.meta { display:flex; gap:14px; flex-wrap:wrap; padding:12px 20px;
+  background:var(--card); border-bottom:1px solid var(--line-soft); }
+.meta label { font-size:12.5px; color:var(--muted); display:grid; gap:3px; }
+.meta input { font:inherit; padding:5px 8px; border:1px solid var(--line);
+  border-radius:5px; min-width:190px; color:var(--text); background:#fff; }
+.bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  padding:10px 20px; background:var(--card); border-bottom:1px solid var(--line-soft);
+  position:sticky; top:62px; z-index:4; }
+button { font:inherit; padding:6px 13px; border-radius:6px; cursor:pointer;
+  border:1px solid var(--line); background:#fff; color:var(--text); }
+button.primary { background:var(--navy); color:#fff; border-color:var(--navy); font-weight:600; }
+.count { font-size:13px; color:var(--muted); margin-left:auto;
+  display:flex; align-items:center; gap:8px; }
+.count b { color:var(--text); }
+.track { height:7px; background:var(--line-soft); border-radius:4px; overflow:hidden;
+  width:170px; display:inline-block; }
+.track i { display:block; height:100%; background:var(--ok); width:0; }
+main { padding:16px 20px 60px; }
+table { width:100%; border-collapse:collapse; background:var(--card);
+  border:1px solid var(--line); }
+th, td { padding:9px 11px; border-bottom:1px solid var(--line-soft);
+  vertical-align:top; text-align:left; }
+thead th { background:#eef1f5; font-size:12.5px; color:var(--muted);
+  position:sticky; top:112px; z-index:3; border-bottom:1px solid var(--line); }
+tr.grp td { background:#e8edf4; font-weight:700; font-size:13.5px; color:var(--navy);
+  border-top:2px solid var(--navy); }
+td.no { color:var(--muted); font-variant-numeric:tabular-nums; width:34px; }
+td.item { width:15%; }
+td.act { width:24%; }
+td.exp { width:26%; color:var(--muted); }
+td.verdict { width:13%; white-space:nowrap; }
+td.verdict label { display:block; margin:1px 0; cursor:pointer; font-size:12.5px; }
+.p { padding:0 3px; border-radius:3px; }
+.p.ok{color:var(--ok);} .p.ng{color:var(--ng);font-weight:700;}
+.p.part{color:var(--part);} .p.na{color:var(--na);}
+td.note { width:22%; }
+td.note textarea { width:100%; font:inherit; font-size:12.5px; padding:5px 7px;
+  border:1px solid var(--line); border-radius:5px; resize:vertical; background:#fff;
+  color:var(--text); }
+tr.done { background:#f4faf6; }
+tr.fail { background:#fdf4f3; }
+.saved { font-size:12.5px; color:var(--ok); }
+.hint { padding:10px 20px; font-size:12.5px; color:var(--muted); background:var(--card);
+  border-bottom:1px solid var(--line-soft); }
+.hint b { color:var(--ng); }
+@media print {
+  header,.bar { position:static; } .bar button { display:none; }
+  thead th { position:static; } body { background:#fff; }
+  td.note textarea { border:none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Factory Studio — 전체 기능 점검표</h1>
+  <div class="sub">화면에서 직접 눌러 확인합니다. 「코드에 있다」가 아니라 <b>「눌러 봤다」</b>를 적습니다.</div>
+</header>
+
+<div class="meta">
+  <label>점검자 <input id="m_who" placeholder="이름"></label>
+  <label>점검일 <input id="m_when" type="date"></label>
+  <label>대상 화면 <input id="m_url" placeholder="http://localhost:5173"></label>
+  <label>대상 서버 <input id="m_api" placeholder="8080 / 운영 data/"></label>
+  <label>판본 <input id="m_rev" placeholder="git 커밋 해시"></label>
+</div>
+
+<div class="hint">
+  판정은 넷입니다 — <span class="p ok">정상</span> 기대대로 됨 ·
+  <span class="p ng">문제</span> 다르게 동작하거나 오류 ·
+  <span class="p part">일부</span> 되긴 하나 조건이 붙음 ·
+  <span class="p na">해당없음</span> 이 설치본에 없는 기능.
+  <b>「문제」와 「일부」는 특이사항을 반드시 적습니다</b> — 무엇이 어떻게 달랐는지 없이는 고칠 수 없습니다.
+  입력은 이 브라우저에 자동 저장되고, CSV 로 내보내면 엑셀에서 그대로 열립니다.
+</div>
+
+<div class="bar">
+  <button class="primary" id="b_csv">CSV 내보내기</button>
+  <button id="b_json">JSON 내보내기</button>
+  <button id="b_print">인쇄 / PDF</button>
+  <button id="b_only">문제만 보기</button>
+  <button id="b_reset">초기화</button>
+  <span class="saved" id="saved"></span>
+  <span class="count">
+    <span class="track"><i id="bar"></i></span>
+    확인 <b id="c_done">0</b>/__TOTAL__ · 문제 <b id="c_ng">0</b>
+  </span>
+</div>
+
+<main>
+<table>
+  <thead><tr>
+    <th>#</th><th>점검 항목</th><th>어떻게 확인하나</th><th>기대 결과</th>
+    <th>판정</th><th>특이사항</th>
+  </tr></thead>
+  <tbody id="tb">
+__TABLE__
+  </tbody>
+</table>
+</main>
+
+<script>
+(function () {
+  var KEY = 'afs.functional.checklist.v1';
+  var tb = document.getElementById('tb');
+  var META = ['m_who', 'm_when', 'm_url', 'm_api', 'm_rev'];
+  var LABEL = { ok: '정상', ng: '문제', part: '일부', na: '해당없음', '': '미확인' };
+
+  function state() {
+    var s = { meta: {}, rows: {} };
+    META.forEach(function (k) { s.meta[k] = document.getElementById(k).value; });
+    tb.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      var v = tr.querySelector('input[type=radio]:checked');
+      var n = tr.querySelector('textarea');
+      if (v || (n && n.value)) {
+        s.rows[tr.getAttribute('data-id')] = { v: v ? v.value : '', n: n ? n.value : '' };
+      }
+    });
+    return s;
+  }
+
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state())); } catch (e) { }
+    var el = document.getElementById('saved');
+    el.textContent = '저장됨';
+    clearTimeout(save._t);
+    save._t = setTimeout(function () { el.textContent = ''; }, 1200);
+  }
+
+  function load() {
+    var raw = null;
+    try { raw = localStorage.getItem(KEY); } catch (e) { }
+    if (!raw) { return; }
+    var s;
+    try { s = JSON.parse(raw); } catch (e) { return; }
+    META.forEach(function (k) {
+      if (s.meta && s.meta[k] != null) { document.getElementById(k).value = s.meta[k]; }
+    });
+    Object.keys(s.rows || {}).forEach(function (id) {
+      var tr = tb.querySelector('tr[data-id="' + id + '"]');
+      if (!tr) { return; }
+      var r = s.rows[id];
+      if (r.v) {
+        var box = tr.querySelector('input[value="' + r.v + '"]');
+        if (box) { box.checked = true; }
+      }
+      var n = tr.querySelector('textarea');
+      if (n && r.n) { n.value = r.n; }
+    });
+  }
+
+  function tally() {
+    var done = 0, ng = 0, total = 0;
+    tb.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      total++;
+      var v = tr.querySelector('input[type=radio]:checked');
+      tr.className = tr.className.replace(/\s*(done|fail)/g, '');
+      if (!v) { return; }
+      done++;
+      if (v.value === 'ok' || v.value === 'na') { tr.className += ' done'; }
+      if (v.value === 'ng' || v.value === 'part') { tr.className += ' fail'; ng++; }
+    });
+    document.getElementById('c_done').textContent = done;
+    document.getElementById('c_ng').textContent = ng;
+    document.getElementById('bar').style.width = total ? (done * 100 / total) + '%' : '0';
+  }
+
+  tb.addEventListener('change', function () { tally(); save(); });
+  tb.addEventListener('input', save);
+  META.forEach(function (k) {
+    document.getElementById(k).addEventListener('input', save);
+  });
+
+  function rowsOut() {
+    var out = [], grp = '';
+    Array.prototype.forEach.call(tb.querySelectorAll('tr'), function (tr) {
+      if (tr.className.indexOf('grp') >= 0) { grp = tr.textContent.trim(); return; }
+      if (!tr.getAttribute('data-id')) { return; }
+      var td = tr.querySelectorAll('td');
+      var v = tr.querySelector('input[type=radio]:checked');
+      out.push({
+        group: grp,
+        no: td[0].textContent.trim(),
+        item: td[1].textContent.trim(),
+        how: td[2].textContent.trim(),
+        expect: td[3].textContent.trim(),
+        verdict: LABEL[v ? v.value : ''],
+        note: (tr.querySelector('textarea') || {}).value || ''
+      });
+    });
+    return out;
+  }
+
+  function dl(name, text, mime) {
+    /* 엑셀이 UTF-8 을 깨뜨리지 않게 BOM 을 붙인다. */
+    var blob = new Blob(['﻿' + text], { type: mime + ';charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.parentNode.removeChild(a); }, 0);
+  }
+
+  function cell(s) {
+    return '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+  }
+
+  document.getElementById('b_csv').onclick = function () {
+    var m = state().meta;
+    var head = ['그룹', '번호', '점검 항목', '어떻게 확인하나', '기대 결과', '판정', '특이사항'];
+    var lines = [head.map(cell).join(',')];
+    rowsOut().forEach(function (r) {
+      lines.push([r.group, r.no, r.item, r.how, r.expect, r.verdict, r.note]
+        .map(cell).join(','));
+    });
+    lines.push('');
+    lines.push([cell('점검자'), cell(m.m_who), cell('점검일'), cell(m.m_when),
+      cell('대상'), cell(m.m_url + ' / ' + m.m_api), cell('판본'), cell(m.m_rev)].join(','));
+    dl('afs-functional-checklist.csv', lines.join('\r\n'), 'text/csv');
+  };
+
+  document.getElementById('b_json').onclick = function () {
+    dl('afs-functional-checklist.json',
+      JSON.stringify({ meta: state().meta, rows: rowsOut() }, null, 2), 'application/json');
+  };
+
+  document.getElementById('b_print').onclick = function () { window.print(); };
+
+  var only = false;
+  document.getElementById('b_only').onclick = function () {
+    only = !only;
+    this.textContent = only ? '전체 보기' : '문제만 보기';
+    tb.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      tr.style.display = (only && tr.className.indexOf('fail') < 0) ? 'none' : '';
+    });
+    tb.querySelectorAll('tr.grp').forEach(function (tr) {
+      tr.style.display = only ? 'none' : '';
+    });
+  };
+
+  document.getElementById('b_reset').onclick = function () {
+    if (!confirm('입력한 판정과 특이사항을 모두 지웁니다. 계속할까요?')) { return; }
+    try { localStorage.removeItem(KEY); } catch (e) { }
+    location.reload();
+  };
+
+  load();
+  tally();
+  if (!document.getElementById('m_when').value) {
+    try { document.getElementById('m_when').valueAsDate = new Date(); } catch (e) { }
+  }
+})();
+</script>
+</body>
+</html>

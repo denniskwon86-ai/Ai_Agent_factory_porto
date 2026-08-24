@@ -33,6 +33,7 @@ import {
 import { getReadiness, listInstances } from '../lib/dataPrepApi';
 import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
+import { fetchScopeNodes, labelForScope, type ScopeNode } from '../lib/scopeLabel';
 
 /** §4.2 상태. **색만으로 전달하지 않는다**(§2.1) — 낱말을 함께 싣는다. */
 const SEVERITY: Record<string, { label: string; fg: string; bg: string }> = {
@@ -249,6 +250,16 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   }, [d, nodes]);
 
   const ctx = getEnterpriseContext();
+  //: ★ 조직 이름은 **상단바와 같은 곳**에서 얻는다(`lib/scopeLabel`).
+  //: ⚠️ 종전에는 `ctx.scopeNodeId` 원시 id 를 그대로 찍어 `node_41402723bc90` 처럼
+  //:   아무 뜻 없는 값이 화면 맨 위에 떴다(2026-08-24 사용자 지적).
+  const [scopeNodes, setScopeNodes] = useState<ScopeNode[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void fetchScopeNodes().then((rows) => { if (alive) setScopeNodes(rows); });
+    return () => { alive = false; };
+  }, []);
+  const scopeName = labelForScope(scopeNodes, ctx.scopeNodeId || '');
   const card: React.CSSProperties = {
     background: 'var(--surface-card)', border: '1px solid var(--surface-border)',
     borderRadius: 8, padding: 18,           // §2.4 카드 내부 16~20
@@ -323,6 +334,41 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
       {/* ── 중앙: Digital Thread + 레이어 + Decision Focus + Trust ───────── */}
       <main style={{ padding: 24, minWidth: 0, display: 'flex', flexDirection: 'column',
         gap: 16 }}>
+        {/* ★★★ [2026-08-24 사용자 지적] **머리에 둔다.**
+            ⚠️ 종전에는 본문 **맨 아래**에 깔려 있었다. 「지금 무엇을 보고 있는가」
+              (기준시각·실행 문맥·조직)와 「여기서 할 수 있는 일」은 화면을 끝까지
+              내려야 보였고, 그래서 첫 화면에서 그 둘이 없는 것과 같았다. */}
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+          paddingBottom: 16, borderBottom: '1px solid var(--surface-border)',
+        }}>
+          <div style={{ fontSize: 12, fontFamily: 'var(--font-mono, monospace)',
+            color: 'var(--surface-text-muted)', textAlign: 'center' }}>
+            기준시각 {d?.generated_at ? new Date(d.generated_at).toLocaleString() : '—'}
+            {' · '}실행 문맥 {ctx.entityMode || 'REAL'} · {scopeName || '조직 미지정'}
+          </div>
+          {/* §3.4 경영 홈 → Studio. ⑦ LS Red 는 «화면당 하나의 핵심 행동» 에만 — 여기서는
+            1차 행동이 구조색(Navy)이고 Red 를 쓰지 않는다(위험한 행동이 아니다). */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
+            justifyContent: 'center' }}>
+          <button onClick={onOpenBuild} style={{
+            height: 46, padding: '0 20px', fontSize: 14, fontWeight: 700, borderRadius: 6,
+            cursor: 'pointer', border: '1px solid var(--ls-navy)',
+            background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
+          }}>🏭 업무 SW 만들기 — Software Factory</button>
+          <button onClick={() => onOpenMenu('advisor')} style={{
+            height: 46, padding: '0 18px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
+            border: '1px solid var(--action-secondary-border)',
+            background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
+          }}>🧭 무엇을 만들지 상담</button>
+          <button onClick={() => onOpenMenu('collaboration')} style={{
+            height: 46, padding: '0 18px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
+            border: '1px solid var(--action-secondary-border)',
+            background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
+          }}>🤝 협업·의사결정·발간</button>
+          </div>
+        </div>
+
         {/* §5.1 KPI 최대 4개 — KPI 22px 이상(§1.3) */}
         <div style={{ display: 'grid', gap: 16,
           gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
@@ -497,32 +543,8 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
               </div>
             ))}
           </div>
-          <div style={{ fontSize: 12, marginTop: 8, fontFamily: 'var(--font-mono, monospace)',
-            color: 'var(--surface-text-faint)' }}>
-            기준시각 {d?.generated_at ? new Date(d.generated_at).toLocaleString() : '—'}
-            {' · '}실행 문맥 {ctx.entityMode || 'REAL'} · {ctx.scopeNodeId || '조직 미지정'}
-          </div>
         </section>
 
-        {/* §3.4 경영 홈 → Studio. ⑦ LS Red 는 «화면당 하나의 핵심 행동» 에만 — 여기서는
-            1차 행동이 구조색(Navy)이고 Red 를 쓰지 않는다(위험한 행동이 아니다). */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button onClick={onOpenBuild} style={{
-            height: 46, padding: '0 20px', fontSize: 14, fontWeight: 700, borderRadius: 6,
-            cursor: 'pointer', border: '1px solid var(--ls-navy)',
-            background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
-          }}>🏭 업무 SW 만들기 — Software Factory</button>
-          <button onClick={() => onOpenMenu('advisor')} style={{
-            height: 46, padding: '0 18px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
-            border: '1px solid var(--action-secondary-border)',
-            background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
-          }}>🧭 무엇을 만들지 상담</button>
-          <button onClick={() => onOpenMenu('collaboration')} style={{
-            height: 46, padding: '0 18px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
-            border: '1px solid var(--action-secondary-border)',
-            background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
-          }}>🤝 협업·의사결정·발간</button>
-        </div>
       </main>
 
       {/* ── ⑤ 우 360: Atlas (§4.7) ──────────────────────────────────────── */}
