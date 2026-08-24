@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Banner } from '../design/HubShell';
 import { API_BASE_URL, setActingUser, setSessionToken } from '../lib/api';
 import '../design/afs.css';
+import { PRODUCT_NAME, PRODUCT_NAME_KO } from '../lib/brand';
 
 export type LoginResult = {
   user_id: string;
@@ -78,7 +79,9 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (r: LoginResult) => void
         style={{ width: 'min(420px, 100%)', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ textAlign: 'center', marginBottom: 6 }}>
           <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em' }}>
-            <span className="afs-action-fg">🏭</span> AI Factory Studio
+            <span className="afs-action-fg">🏭</span> {PRODUCT_NAME}
+            <span style={{ fontSize: 14, fontWeight: 500, marginLeft: 8,
+              color: 'var(--surface-text-muted)' }}>({PRODUCT_NAME_KO})</span>
           </div>
           <p className="afs-muted" style={{ fontSize: 13, margin: '6px 0 0' }}>
             회사 계정으로 로그인하십시오.

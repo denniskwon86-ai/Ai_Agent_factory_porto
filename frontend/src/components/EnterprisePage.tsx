@@ -35,6 +35,8 @@ import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
 import { ServerText } from '../design/ServerText';
 import { CoreJourney } from './CoreJourney';
+import { EnterpriseThread } from './EnterpriseThread';
+import { fetchCanvas, type Canvas } from '../lib/canvasApi';
 import { fetchScopeNodes, labelForScope, type ScopeNode } from '../lib/scopeLabel';
 
 /** §4.2 상태. **색만으로 전달하지 않는다**(§2.1) — 낱말을 함께 싣는다. */
@@ -263,17 +265,35 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
       return c && c.state !== 'loading' && c.state !== 'error' ? (c.n ?? null) : null;
     };
     return [
-      { label: '업무 도메인', value: nodes.length || null, hint: '조직 트리 기준' },
+      //: ⚠️ 조직을 **못 읽었으면** 개수를 쓰지 않는다. 종전에는 `nodes.length` 를 그냥
+      //:   썼는데, 권한으로 막히면 그것이 0 이 되어 「업무 도메인 0」으로 보인다 —
+      //:   「없다」와 「못 봤다」가 같아진다(`nodeNote` 가 그 구분을 들고 있다).
+      { label: '업무 도메인', value: nodeNote ? null : (nodes.length || null),
+        hint: nodeNote ? '조직을 확인하지 못했습니다' : '조직 트리 기준' },
       { label: 'Master Data', value: val('mdm'), hint: '등록된 기준정보 유형' },
       { label: '연결', value: val('ops'), hint: '연결된 외부 시스템' },
       { label: '근거 충실도', value: val('knowledge'), hint: '승인된 지식팩' },
     ];
-  }, [trust, nodes]);
+  }, [trust, nodes, nodeNote]);
 
   const ctx = getEnterpriseContext();
   //: ★ 조직 이름은 **상단바와 같은 곳**에서 얻는다(`lib/scopeLabel`).
   //: ⚠️ 종전에는 `ctx.scopeNodeId` 원시 id 를 그대로 찍어 `node_41402723bc90` 처럼
   //:   아무 뜻 없는 값이 화면 맨 위에 떴다(2026-08-24 사용자 지적).
+  //: ★★★ [LE-01] 승인 시안의 중앙 축 — **수주→손익 일곱 단계.**
+  //: ⚠️ 종전에는 조직 트리로 대체돼 있었다(줄 API 가 없어서). 이제 단일 Read Model 이 준다.
+  const [canvas, setCanvas] = useState<Canvas | null>(null);
+  const [canvasErr, setCanvasErr] = useState('');
+  const [pickedNode, setPickedNode] = useState('');
+  useEffect(() => {
+    let alive = true;
+    fetchCanvas()
+      .then((c) => { if (alive) { setCanvas(c); setCanvasErr(''); } })
+      //: ⚠️ 실패를 빈 화면으로 접지 않는다 — 「없다」와 「못 읽었다」는 다르다.
+      .catch((e) => { if (alive) setCanvasErr(e?.message || '불러오지 못했습니다.'); });
+    return () => { alive = false; };
+  }, []);
+
   const [scopeNodes, setScopeNodes] = useState<ScopeNode[]>([]);
   useEffect(() => {
     let alive = true;
@@ -430,15 +450,12 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
             <div>
+              {/* ★ 승인 시안의 제목을 그대로 쓴다 — 「업무 흐름」은 우리가 붙인 이름이었다. */}
               <b style={{ fontSize: 15, color: 'var(--surface-text)' }}>
-                업무 흐름 <span style={{ fontWeight: 500, fontSize: 13,
-                  color: 'var(--surface-text-muted)' }}>— 이 회사의 업무가 어디까지 이어져 있나</span>
+                ENTERPRISE DIGITAL THREAD
               </b>
-              {/* ⚠️ 못 하는 것을 말한다. 설계서 §4.4 는 노드마다 업무 상태·대표 지표·근거 수를
-                  요구하는데 서버가 아직 그것을 주지 않는다. 「곧 됩니다」로 덮지 않는다. */}
-              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 2 }}>
-                지금은 조직 트리와 각 조직의 설정만 보여 줍니다 — 노드별 업무 상태는 아직
-                집계하지 않습니다.
+              <div style={{ fontSize: 12.5, color: 'var(--surface-text-muted)', marginTop: 2 }}>
+                업무·데이터·AI 가 하나의 경영 결과로 이어집니다 — 수주에서 손익까지 일곱 단계.
               </div>
             </div>
             {/* §4.5 LayerOverlay — 모두 끄는 것도 허용한다 */}
@@ -464,70 +481,20 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
             </div>
           </div>
 
-          {/* §4.4 DomainNode — 선택 면적 최소 64×64px */}
-          {nodeNote ? (
-            <p style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>{nodeNote}</p>
-          ) : nodes.length === 0 ? (
-            <p style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>
-              업무 노드를 아직 받지 못했습니다.
-            </p>
+          {/* §4.3–4.4 Enterprise Digital Thread — 승인 시안의 일곱 단계 */}
+          {canvasErr ? (
+            <p style={{ fontSize: 13, color: 'var(--state-error-fg)' }}>{canvasErr}</p>
+          ) : !canvas ? (
+            <p style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>불러오는 중…</p>
           ) : (
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {/* §4.3 노드 12개 초과 시 상위 그룹 — 여기서는 상위 12개만 그리고 나머지는 수로 */}
-              {nodes.slice(0, 12).map((n, i) => (
-                <button key={n.dept_id} onClick={() => onOpenMenu('org')}
-                  style={{
-                    minWidth: 64, minHeight: 64, padding: '10px 14px', cursor: 'pointer',
-                    borderRadius: 8, border: '1px solid var(--surface-border)',
-                    background: 'var(--surface-raised)', textAlign: 'left',
-                    display: 'flex', flexDirection: 'column', gap: 4,
-                  }}>
-                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono, monospace)',
-                    color: 'var(--surface-text-faint)' }}>{String(i + 1).padStart(2, '0')}</span>
-                  <span style={{ fontSize: 13.5, fontWeight: 600,
-                    color: 'var(--surface-text)' }}>{n.name_ko || n.dept_id}</span>
-                  {/* ★★★ §4.4 `DomainNodeVM` — 노드는 **업무 상태**를 말해야 한다:
-                      `status` · `primary_metric` · `evidence_count`.
-                      ⚠️⚠️ [2026-08-24] 종전에는 「도메인 N · 템플릿 지정 · 에이전트 N」을
-                        그렸다. 그것은 **조직 설정 목록**이지 업무 상태가 아니다. 사용자가
-                        보고 할 수 있는 일이 없다(사용자 지적: 「이걸 보고 뭘 해야 하는지
-                        전혀 알 수가 없다」).
-                      ★ 지금 서버는 노드별 업무 상태를 주지 않는다. 그래서 설계서가 정한
-                        `unknown` 을 **그대로 쓴다** — 없는 상태를 «정상» 으로 칠하지 않는다.
-                        설정 수치를 상태처럼 보이게 두는 것보다 「아직 집계 안 함」이 정직하다. */}
-                  <span style={{ fontSize: 12, color: 'var(--surface-text-faint)' }}>
-                    업무 상태 미집계
-                  </span>
-                  {/* §4.5 LayerOverlay — 노드에 걸린 **설정**은 레이어를 켰을 때만.
-                      ⚠️ 이것을 상태로 읽지 않게 «설정» 이라고 적는다. */}
-                  {layers.includes('DATA') && (
-                    <span style={{ fontSize: 12, color: LAYERS[0].color }}>
-                      설정 · 도메인 {(n.master_domains || []).length}
-                    </span>
-                  )}
-                  {layers.includes('SW') && (
-                    <span style={{ fontSize: 12, color: LAYERS[1].color }}>
-                      설정 · 템플릿 {n.default_template_id ? '지정' : '미지정'}
-                    </span>
-                  )}
-                  {layers.includes('TWIN') && (
-                    <span style={{ fontSize: 12, color: LAYERS[2].color }}>
-                      설정 · 에이전트 {(n.domain_agents || []).length}
-                    </span>
-                  )}
-                </button>
-              ))}
-              {nodes.length > 12 && (
-                <span style={{ alignSelf: 'center', fontSize: 13,
-                  color: 'var(--surface-text-muted)' }}>+{nodes.length - 12}개 더</span>
-              )}
-            </div>
+            <EnterpriseThread
+              nodes={canvas.domain_nodes}
+              selected={pickedNode}
+              onSelect={setPickedNode}
+              systemsVerified={canvas.systems_verified} />
           )}
-          {/* ⚠️ 설계가 요구한 «process profile» 이 서버에 없다는 사실을 숨기지 않는다. */}
-          <p style={{ fontSize: 12, color: 'var(--surface-text-faint)', marginTop: 10 }}>
-            공정 프로필(process profile)이 아직 서버에 없어 <b>조직 트리</b>를 업무 축으로
-            표시합니다 — 공정 단위 흐름이 아닙니다.
-          </p>
+          {/* ★ 종전 「공정 프로필이 없어 조직 트리로 대체합니다」 안내를 지웠다 —
+              이제 대체가 아니라 시안이 정한 일곱 단계를 그린다. */}
         </section>
 
         {/* Decision Focus */}

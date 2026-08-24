@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import { API_BASE_URL, getEnterpriseContext, getSessionToken, setEnterpriseContext }
   from '../lib/api';
 import { orgApi, type Dept } from '../lib/orgApi';
+import { PRODUCT_NAME } from '../lib/brand';
 
 type Status = 'loading' | 'verified' | 'denied' | 'stale';
 
@@ -151,7 +152,7 @@ export function CompanyContextBar() {
             제품인지 사라진다. 접는 폭은 `afs.css` 의 상단바 절에서 정한다. */}
       <span style={{ fontSize: 15, fontWeight: 800, whiteSpace: 'nowrap',
         color: 'var(--bar-fg)' }}>
-        🏭 <span className="afs-brand-name">AI Factory Studio</span>
+        🏭 <span className="afs-brand-name">{PRODUCT_NAME}</span>
       </span>
 
       {/* ⚠️ 구분자를 **글자로 그리지 않는다.** 종전 `│` 글리프는 `--bar-border`(바 바깥쪽

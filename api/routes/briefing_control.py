@@ -76,6 +76,51 @@ async def briefing(scope_node_id: str = "", tenant_id: str = "", entity_mode: st
                            **scope_meta(_eff)}}
 
 
+@router.get("/canvas")
+async def canvas(scope_node_id: str = "", tenant_id: str = "", entity_mode: str = "REAL",
+                 p: Principal = Depends(current_principal)):
+    """[LE-01] 경영 홈이 보는 **단 하나의 집계** — Living Enterprise Canvas.
+
+    ## 왜 브리핑과 따로 두지 않고 여기 두는가
+
+    승인 시안의 매핑 문서는 `GET /api/v1/enterprise-canvas` 를 제안했지만, 그 내용의
+    대부분(의사결정 대기열·신뢰 기반·비용)은 **이미 브리핑이 모으는 것과 같은 자료**다.
+    새 prefix 를 세우면 같은 판정(식별 차단·범위 해석·거버넌스 보류)을 **두 벌** 갖게
+    되고, 두 벌은 반드시 언젠가 갈라진다.
+    ★ 그래서 같은 라우터 안에 둔다 — 위 `briefing()` 과 **같은 관문**을 지난다.
+
+    ⚠️ 종전에는 화면이 여섯 군데(`/briefing`·`/master/types`·`/crosswalk/…`·
+      `/knowledge/packs`·`/external/readiness`·`/org/tree`)를 스스로 긁어모아 조립했다.
+      그러면 판정이 화면에 있고, 화면마다 조금씩 다르게 조립된다."""
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    from api.deps import assert_scope_allowed, scope_meta
+    _eff = await assert_scope_allowed(p, scope_node_id, resource_type="briefing",
+                                     tenant_id=tenant_id, entity_mode=entity_mode)
+    eff = _eff.scope_node_id
+    brief = await asyncio.to_thread(enterprise_briefing.briefing, p.user_id, eff,
+                                    tenant_id, entity_mode, p)
+    #: ⚠️ 거버넌스 성격 섹션은 **자격 있는 사람에게만** — 브리핑과 같은 규칙이다.
+    #:   여기서 빠뜨리면 캔버스가 그 통제를 우회하는 두 번째 문이 된다.
+    gov = governance_block_reason(p)
+    if gov:
+        for _name in ("data_health", "cost"):
+            brief.setdefault("sections", {})[_name] = {
+                "items": [], "count": 0, "withheld": True, "withheld_reason": gov,
+            }
+
+    from core import enterprise_canvas as ec
+    data = await asyncio.to_thread(
+        ec.build, scope_node_id=eff, tenant_id=tenant_id, entity_mode=entity_mode,
+        briefing=brief)
+    if gov:
+        data["withheld_sections"] = ["data_health", "cost"]
+    return {"status": "success", "data": data,
+            "permission": {"scope": eff or "(범위 필터 없음)", "actor": p.user_id,
+                           **scope_meta(_eff)}}
+
+
 @router.get("/sections/{section}")
 async def section(section: str, scope_node_id: str = "", tenant_id: str = "",
                   entity_mode: str = "REAL",
