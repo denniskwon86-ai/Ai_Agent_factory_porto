@@ -354,24 +354,35 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
               「전체 메뉴」를 정리한 것은 찾을 수 있게 한 것이지 보이게 한 것이 아니다.
               처음 여는 사람은 메뉴가 있다는 것조차 모른다. */}
           <CoreJourney onOpen={onOpenMenu} />
-          {/* §3.4 경영 홈 → Studio. ⑦ LS Red 는 «화면당 하나의 핵심 행동» 에만 — 여기서는
-            1차 행동이 구조색(Navy)이고 Red 를 쓰지 않는다(위험한 행동이 아니다). */}
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
+
+          {/* ★★★ [2026-08-24 사용자 지적] **두 줄을 눈으로 갈라 놓는다.**
+              위 넷은 «이 시스템의 일»이고, 아래 셋은 «다른 입구»다. 나란히 두었더니
+              상단에 같은 무게의 버튼이 일곱 개가 되어 어느 것이 본줄기인지 사라졌다.
+              ⚠️ 아래 셋을 없애지 않는다 — 없애면 그 기능을 찾을 길이 메뉴뿐이다.
+                **작게 하고 이름을 붙여** 다른 층이라는 것만 보이게 한다. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+            marginTop: 4 }}>
+            <span style={{ flex: 1, height: 1, background: 'var(--surface-border)' }} />
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em',
+              color: 'var(--surface-text-faint)' }}>다른 입구</span>
+            <span style={{ flex: 1, height: 1, background: 'var(--surface-border)' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap',
             justifyContent: 'center' }}>
           <button onClick={onOpenBuild} style={{
-            height: 46, padding: '0 20px', fontSize: 14, fontWeight: 700, borderRadius: 6,
-            cursor: 'pointer', border: '1px solid var(--ls-navy)',
-            background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
-          }}>🏭 업무 SW 만들기 — Software Factory</button>
+            height: 34, padding: '0 14px', fontSize: 13, borderRadius: 6,
+            cursor: 'pointer', border: '1px solid var(--surface-border-control)',
+            background: 'transparent', color: 'var(--surface-text)',
+          }}>🏭 업무 SW 만들기</button>
           <button onClick={() => onOpenMenu('advisor')} style={{
-            height: 46, padding: '0 18px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
-            border: '1px solid var(--action-secondary-border)',
-            background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
+            height: 34, padding: '0 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
+            border: '1px solid var(--surface-border-control)',
+            background: 'transparent', color: 'var(--surface-text)',
           }}>🧭 무엇을 만들지 상담</button>
           <button onClick={() => onOpenMenu('collaboration')} style={{
-            height: 46, padding: '0 18px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
-            border: '1px solid var(--action-secondary-border)',
-            background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
+            height: 34, padding: '0 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
+            border: '1px solid var(--surface-border-control)',
+            background: 'transparent', color: 'var(--surface-text)',
           }}>🤝 협업·의사결정·발간</button>
           </div>
         </div>
