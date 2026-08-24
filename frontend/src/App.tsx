@@ -521,9 +521,13 @@ function AppShell() {
           </header>
           <EnterprisePage
             onOpenBuild={() => setSpace('build')}
+            //: ⚠️ 여기서 id 를 **하나씩 손으로** 잇지 않는다 — 종전에 그렇게 두었다가
+            //:   화면마다 목록이 갈라져 「메뉴에 있는데 눌러도 아무 일이 없는」 항목이
+            //:   14개 생겼다(이 파일 위쪽 주석). 메뉴 정의를 그대로 뒤진다.
             onOpenMenu={(id) => {
-              if (id === 'advisor') setShowAdvisor(true);
-              else if (id === 'collaboration') setShowCollaboration(true);
+              const hit = [...primaryNav, ...navGroups.flatMap((g) => g.items)]
+                .find((it) => it.id === id);
+              if (hit) hit.onSelect();
             }} />
         </div>
         {/* ★ 오버레이는 **한 벌**이다 — 위 `overlays` 선언 참조. 화면마다 목록을

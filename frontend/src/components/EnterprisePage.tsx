@@ -34,6 +34,7 @@ import { getReadiness, listInstances } from '../lib/dataPrepApi';
 import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
 import { ServerText } from '../design/ServerText';
+import { CoreJourney } from './CoreJourney';
 import { fetchScopeNodes, labelForScope, type ScopeNode } from '../lib/scopeLabel';
 
 /** §4.2 상태. **색만으로 전달하지 않는다**(§2.1) — 낱말을 함께 싣는다. */
@@ -348,6 +349,11 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
             기준시각 {d?.generated_at ? new Date(d.generated_at).toLocaleString() : '—'}
             {' · '}실행 문맥 {ctx.entityMode || 'REAL'} · {scopeName || '조직 미지정'}
           </div>
+
+          {/* ★★★ [2026-08-24 사용자 지적] **핵심 넷을 꺼내 놓는다.**
+              「전체 메뉴」를 정리한 것은 찾을 수 있게 한 것이지 보이게 한 것이 아니다.
+              처음 여는 사람은 메뉴가 있다는 것조차 모른다. */}
+          <CoreJourney onOpen={onOpenMenu} />
           {/* §3.4 경영 홈 → Studio. ⑦ LS Red 는 «화면당 하나의 핵심 행동» 에만 — 여기서는
             1차 행동이 구조색(Navy)이고 Red 를 쓰지 않는다(위험한 행동이 아니다). */}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
