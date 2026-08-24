@@ -99,9 +99,10 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [rationale, setRationale] = useState('');
   const [approved, setApproved] = useState<string>('');
-  //: ★ 승인 범위는 **고를 수 있어야 한다.** 기본값(`DEMO/SYNTHETIC · VIRTUAL · 30일`)이
-  //:   인스턴스와 다르면 승인해도 그 자료로는 계산이 돌지 않는다 — 실측으로 확인했다.
-  const [scopeMode, setScopeMode] = useState('');
+  //: ★★★ **실행 모드는 고르지 않는다** — 인스턴스가 정본이고 서버가 거기서 파생한다.
+  //: ⚠️ 종전에는 여기서 골랐고 기본값이 `VIRTUAL` 이었다. `REAL` 인스턴스에 승인을 눌러도
+  //:   관문은 계속 「승인 없음」이었다 — 200 과 원장 사건까지 남는데 아무 데도 오류가
+  //:   나지 않으니, 사람은 자기가 승인했다고 믿는다.
   const [scopeKind, setScopeKind] = useState('');
   const [validDays, setValidDays] = useState(0);
   const [revoking, setRevoking] = useState('');
@@ -137,7 +138,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
       }
       if (which === 'approve') {
         const got = await getCapabilityProposal({
-          instanceId: instanceId.trim(), entityMode: scopeMode || undefined,
+          instanceId: instanceId.trim(),
           dataKind: scopeKind || undefined, validDays: validDays || undefined });
         if (fresh()) { setProposal(got); setPicked({}); setApproved(''); }
       }
@@ -153,7 +154,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
     } finally {
       if (fresh()) setBusy('');
     }
-  }, [instanceId, scopeMode, scopeKind, validDays]);
+  }, [instanceId, scopeKind, validDays]);
 
   useEffect(() => {
     //: ★ 효과 본문에서 **동기로** setState 하지 않는다 — 한 틱 뒤에 시작한다.
@@ -351,17 +352,18 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                     <option value="REAL">REAL</option>
                   </select>
                 </div>
+                {/* ★★★ 고르는 자리가 아니다 — **인스턴스가 정본**이다.
+                    ⚠️ 2026-08-24 까지 여기서 고를 수 있었고 기본값이 `VIRTUAL` 이라,
+                      `REAL` 인스턴스에 승인을 눌러도 관문은 계속 「승인 없음」이었다.
+                      서버가 인스턴스에서 파생하도록 고쳤으므로 여기서는 **보여만 준다.** */}
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
                     실행 모드
                   </label>
-                  <select value={scopeMode || proposal.scope.entity_mode}
-                    onChange={(e) => setScopeMode(e.target.value)}
-                    style={{ padding: 4, fontSize: 13 }}>
-                    <option value="VIRTUAL">VIRTUAL</option>
-                    <option value="REAL">REAL</option>
-                    <option value="SYNTHETIC_TEST">SYNTHETIC_TEST</option>
-                  </select>
+                  <div style={{ padding: '4px 0', fontSize: 13, fontWeight: 600 }}
+                    title="인스턴스에서 정해집니다 — 승인 범위를 따로 고를 수 없습니다.">
+                    {proposal.scope.entity_mode}
+                  </div>
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
@@ -377,19 +379,6 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
                   {' · '}~{proposal.valid_until.slice(0, 10)} 까지
                 </div>
               </div>
-              {/* ⚠️ 시연 인스턴스가 REAL 인데 승인 범위가 VIRTUAL 이면 승인해도 계산이
-                  돌지 않는다. 누르기 **전에** 말한다. */}
-              {proposal.scope.entity_mode !== (
-                instances?.find((i) => i.instance_id === instanceId.trim())?.entity_mode
-              ) && (
-                <Banner tone="error" title="범위가 이 인스턴스와 다릅니다">
-                  승인 범위는 <b>{proposal.scope.entity_mode}</b> 인데 이 인스턴스는{' '}
-                  <b>{instances?.find((i) => i.instance_id === instanceId.trim())
-                    ?.entity_mode || '(알 수 없음)'}</b> 입니다 —
-                  이대로 승인하면 <b>이 자료로는 계산이 돌지 않습니다.</b>
-                </Banner>
-              )}
-
               {proposal.items.map((item) => (
                 <div key={item.ref} style={{
                   border: '1px solid var(--surface-border)', borderRadius: 8, padding: 12,

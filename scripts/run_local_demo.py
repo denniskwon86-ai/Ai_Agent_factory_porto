@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import io
 import os
 import shutil
 import sys
@@ -65,6 +66,55 @@ TARGET_ROOT = DEMO_ROOT
 #: ★ 파종에 쓸 테넌트. 비우면 **정본 CSV 의 값**을 쓰고 `config` 를 거기에 맞춘다(시연).
 #:   값을 주면 **자료를 그 테넌트로** 심는다 — 설치본의 설정을 건드리지 않는다(운영).
 TENANT_OVERRIDE = ""
+
+#: ★★★ [2026-08-24] 조직을 **만들지 않는다**(운영 파종용).
+#:
+#: ⚠️ `_org()` 는 `<뿌리>/org.db` 에 두 단짜리 조직을 세우고 **싱글턴을 그쪽으로 돌린다.**
+#:   시연 뿌리에서는 맞지만, 운영에서는 앱이 읽는 `data/master/master.db` 를 무시한
+#:   별도 파일이 생기고 — 더 나쁘게 — **소유권 결속이 그 임시 조직의 부서(`smelting`)를
+#:   가리킨다.** 앱에는 그 부서가 없으므로 해석기가 「부서가 없거나 폐지됐습니다」로 막는다.
+#: ★ 운영에는 이미 조직이 있다. 그것을 쓴다.
+SKIP_ORG = False
+
+
+def _rebase_days() -> int:
+    """조각의 업무 날짜를 **몇 일 옮길 것인가.** 한 번 정하면 뿌리에 고정된다.
+
+    ## ⚠️⚠️ 매번 새로 계산하면 사슬이 끊긴다
+
+    관계는 `shipment:SHP-000001 → inventory-snapshot:STK-20260823-…` 처럼 **날짜가
+    박힌 객체 id** 를 가리킨다. 보충 실행(`--top-up`)이 다른 오프셋을 쓰면 새로 심은
+    판의 id 가 어제 심은 관계가 가리키는 id 와 어긋나고, 경로는 조용히 끊긴다.
+    ★ 그래서 처음 심을 때 정해 `<뿌리>/slice_rebase.json` 에 적고, 이후로는 읽는다.
+    """
+    import json as _json
+    from datetime import date as _date
+    from core import demo_vertical_slice as _dv
+
+    path = os.path.join(TARGET_ROOT, "slice_rebase.json")
+    if os.path.exists(path):
+        with io.open(path, encoding="utf-8") as fh:
+            return int(_json.load(fh)["days"])
+    days = max(0, (_date.today() - _date.fromisoformat(_dv.AS_OF[:10])).days)
+    os.makedirs(TARGET_ROOT, exist_ok=True)
+    with io.open(path, "w", encoding="utf-8") as fh:
+        _json.dump({"days": days, "slice_as_of": _dv.AS_OF,
+                    "pinned_on": _date.today().isoformat(),
+                    "why": "자료의 업무 날짜를 설치일 기준으로 옮긴 양(정본 CSV 는 그대로)"},
+                   fh, ensure_ascii=False, indent=1)
+    return days
+
+
+def _slice(scope: str = "plant-afs-smelting-01"):
+    """시연 조각 — **업무 날짜를 설치일 기준으로 옮겨서** 돌려준다.
+
+    ★★★ `dv.build_slice` 를 직접 부르지 않는다. 옮기지 않은 조각으로 심으면 계획행이
+      전부 과거가 되어 생산가능량이 비고, 다섯 관문이 전부 READY 인데 계산만
+      `BLOCKED` 로 답한다(2026-08-24 실측 — 원인을 찾는 데 한나절 걸렸다)."""
+    from core import demo_vertical_slice as _dv
+
+    moved, _counts = _dv.rebase(_dv.build_slice(scope_node_id=scope), _rebase_days())
+    return moved
 
 def _seal_operational_data() -> None:
     """**운영 `data/` 를 열 수 없게 만든다.** 머리말의 약속을 코드로 만든다.
@@ -144,9 +194,46 @@ USER_PROPOSER = "proposer@afs.invalid"
 USER_RUNNER = "runner@afs.invalid"
 DEPT_HQ, DEPT_PLANT = "hq", "smelting"
 
-CHAIN = (("shipment", "SHP-001", "inventory-snapshot", "INV-001"),
-         ("inventory-snapshot", "INV-001", "production-plan", "PLAN-001"),
-         ("production-plan", "PLAN-001", "sales-order", "SO-001"))
+def chain_from_slice(sl) -> tuple:
+    """관계 사슬을 **정본 자료에서** 뽑는다.
+
+    ## ⚠️⚠️ [2026-08-24 실측] 종전 사슬은 **지어낸 ID** 였다
+
+        (("shipment","SHP-001"), ("inventory-snapshot","INV-001"),
+         ("production-plan","PLAN-001"), ("sales-order","SO-001"))
+
+    색인(`object_scope_index`)에 실제로 있는 것은 `SHP-000001`·`STK-20260531-…`·
+    `MPS-0003001`·`SO-001666-10` 이고 **타입 이름도 다르다**(`production-plan-line`·
+    `sales-line`). 즉 이 사슬의 끝점은 제품 해석기로 물으면 전부 `NOT_FOUND` 다.
+
+    ★ 그런데 시연은 잘 돌았다 — 시연 스크립트가 **무엇을 묻든 「찾았다」고 답하는 스텁
+      해석기**를 심었기 때문이다. 그 위에서는 어떤 ID 를 넣어도 경로가 나온다.
+      화면은 초록인데 제품 경로로는 한 줄도 성립하지 않는 상태였다.
+
+    ⚠️ 스텁 위의 초록을 «된다» 로 세지 않는다. 사슬은 **자료가 실제로 잇는 것**이어야 한다:
+
+        선적 → (발주로 자재를 찾아) 그 자재의 재고 → 그 자재를 쓰는 생산계획 → 그 제품의 판매
+    """
+    def first(key, col):
+        rows, cols = sl[key]
+        for r in rows:
+            v = str(r.get(col, "") or "").strip()
+            if v:
+                return v
+        raise ValueError(f"{key}.{col} 가 비어 있습니다 — 사슬을 만들 수 없습니다.")
+
+    #: ⚠️ 재고는 **RAW**(원료) 판을 고른다. WIP 는 이미 투입된 것이라 「도착 지연이 재고를
+    #:   줄인다」는 이야기의 대상이 아니다.
+    inv_rows, inv_cols = sl["INV-01"]
+    raw = [r for r in inv_rows if "RAW" in str(r.get("snapshot_id", ""))]
+    inv_id = str((raw or inv_rows)[0].get("snapshot_id"))
+
+    return (("shipment", first("LOG-02", "shipment_id"),
+             "inventory-snapshot", inv_id),
+            ("inventory-snapshot", inv_id,
+             "production-plan-line", first("MFG-01", "plan_line_id")),
+            ("production-plan-line", first("MFG-01", "plan_line_id"),
+             "sales-line", first("SLS-01", "sales_line_id")))
 
 
 #: ★★★ [2026-08-23 실측] **콘솔이 cp949 면 기동이 죽는다.**
@@ -159,6 +246,129 @@ CHAIN = (("shipment", "SHP-001", "inventory-snapshot", "INV-001"),
 for _stream in (sys.stdout, sys.stderr):
     with contextlib.suppress(Exception):
         _stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+def rematerialize_index(tenant: str, scope: str) -> int:
+    """색인을 **다시 세운다** — 소유권 결속이 생긴 뒤에는 필수다.
+
+    ## ⚠️⚠️ [2026-08-24 실측] 결속만 만들면 색인은 그것을 모른다
+
+    색인 줄은 **인증 시점의 소유권을 봉인**한다(`scope_index.write_conn`). 결속이 없던
+    때에 인증된 줄은 `owner_binding_id=""` 로 남고, 나중에 결속을 만들어도 해석기가
+    거부한다:
+
+        「이 색인은 소유권 결속이 없던 때에 만들어졌는데 지금은 결속이 있습니다 —
+         재물질화가 필요합니다(색인이 모르는 승인을 권한으로 쓰지 않습니다)」
+
+    ★ 그 거부는 **옳다.** 색인이 모르는 승인을 권한으로 쓰면, 나중에 결속을 바꿔치기해
+      과거 판정을 뒤집을 수 있다. 그러니 우회하지 말고 **다시 세운다.**
+    ★ 인증 때와 **같은 경로**(`plan` → `write_conn`)를 쓴다 — 재물질화용 별도 코드를
+      만들면 두 경로가 갈라지고, 갈라진 쪽은 언젠가 한쪽만 고쳐진다.
+    """
+    from core.data_preparation import scope_index
+    from core.data_preparation.store import data_preparation_store as store
+
+    done = 0
+    with store.transaction() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM dataset_snapshots WHERE tenant_id=? AND scope_node_id=? "
+            "AND state IN ('CERTIFIED','DEMO_CERTIFIED')", (tenant, scope))]
+        for row in rows:
+            try:
+                payload = scope_index.plan(row)
+            except Exception:
+                continue                     # 색인 대상이 아닌 계약키
+            if not payload:
+                continue
+            scope_index.write_conn(conn, payload, str(row.get("certified_at") or ""))
+            done += 1
+    return done
+
+
+def dept_owning(scope: str) -> str:
+    """이 범위를 가진 **실재하는 부서**를 찾는다.
+
+    ⚠️⚠️ [2026-08-24 실측] 부서 코드를 상수로 박으면(`DEPT_PLANT="smelting"`) 그 코드가
+      없는 설치본에서 결속이 죽는다:
+
+          「결속이 가리키는 부서 «smelting» 가 없거나 폐지됐습니다 — 색인이 있어도 막습니다」
+
+      시연 뿌리에는 `smelting` 을 직접 만들지만, 운영 조직에는 이미 다른 부서 체계가 있고
+      시연 자료의 자리는 `demo_smelting` 이다. **범위가 정본이고 부서 코드는 설치본마다
+      다르다** — 범위로 찾는다."""
+    from core.org_directory import org_directory
+
+    for d in org_directory.list_departments():
+        if str(d.get("scope_node_id") or "").strip() == scope:
+            return str(d.get("dept_id"))
+    #: ⚠️ 못 찾으면 상수로 되돌아가지 않는다 — 없는 부서를 적으면 결속이 만들어지고
+    #:   나중에 «색인이 있어도 막히는» 상태가 된다. 원인을 그 자리에서 말한다.
+    raise ValueError(
+        f"범위 {scope} 를 가진 부서가 조직도에 없습니다 — 소유권 결속을 만들 수 없습니다. "
+        f"먼저 그 범위를 가진 부서를 만드십시오.")
+
+
+def seed_ownership(tenant: str, scope: str, keys) -> int:
+    """데이터셋 **소유권 결속**을 심는다. 없으면 객체가 전부 `UNBOUND` 다.
+
+    ## ⚠️⚠️ [2026-08-24 실측] 이것이 없어서 경로 계산이 성립하지 않았다
+
+    제품 해석기(`_resolve_dataset`)에 실제 업무 ID 를 물어도 답이 **`UNBOUND`** 였다 —
+    `dataset_ownership_bindings` 가 **0건**이었기 때문이다. 색인의 `owner_dept_id`·
+    `owner_binding_id` 도 전부 빈 값이었다.
+
+    ★ 시연은 스텁 해석기 덕에 초록이었으므로 이 결손이 드러나지 않았다.
+
+    ## 두 단계다 — 하나만 하면 안 된다
+
+        approve()   원장에 **승인 사건**을 남긴다(행위자 권한도 여기서 확인한다)
+        declare()   그 사건 id 를 근거로 정본에 등록한다
+
+    ⚠️ `declare()` 만 부르면 「승인됐다고 스스로 적은 결속」이 된다 — 이 모듈 머리말이
+      1차 구현의 결함으로 기록해 둔 바로 그 자기진술이다.
+    ★ 같은 지문의 재적용은 멱등이다(모듈이 보장). 두 번 돌려도 중첩되지 않는다.
+    """
+    from core.data_preparation import ownership_binding as ob
+    from core.data_preparation import store as dp
+
+    owner = dept_owning(scope)
+    made = 0
+    for key in keys:
+        try:
+            ap = ob.approve(
+                tenant_id=tenant, entity_mode="REAL", dataset_contract_key=key,
+                scope_node_id=scope, owner_dept_id=owner, actor_id=USER_ADMIN,
+                evidence_ref=("정본 스타터 키트 시작 자료 — 제련공장이 이 데이터의 "
+                              "소유 부서임을 확인함"),
+                purpose="시작 자료 파종")
+            with dp.data_preparation_store.transaction() as conn:
+                ob.declare(
+                    conn, tenant_id=tenant, entity_mode="REAL",
+                    dataset_contract_key=key, scope_node_id=scope,
+                    owner_dept_id=owner, approved_by=USER_ADMIN,
+                    evidence_ref=("정본 스타터 키트 시작 자료 — 제련공장이 이 데이터의 "
+                                  "소유 부서임을 확인함"),
+                    approval_event_id=ap["approval_event_id"],
+                    effective_from=ap["effective_from"])
+            made += 1
+        except Exception as e:  # noqa: BLE001
+            #: ⚠️ 하나가 실패해도 나머지를 심는다 — 다만 **조용히 넘기지 않는다.**
+            print(f"    ⚠️ {key}: {type(e).__name__} {str(e)[:70]}")
+    return made
+
+
+def _now_iso() -> str:
+    """지금(UTC). ★ 인증·발효처럼 **시스템 시각**이 필요한 곳에만 쓴다."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _chain_text(chain) -> str:
+    """사슬을 한 줄로 — 심은 것이 «무엇인지» 를 로그에 남긴다."""
+    parts = [f"{chain[0][0]}:{chain[0][1]}"]
+    for _s_t, _s_i, o_t, o_i in chain:
+        parts.append(f"{o_t}:{o_i}")
+    return " → ".join(parts)
 
 
 def say(msg: str) -> None:
@@ -218,7 +428,7 @@ def seed() -> str:
     from core.decision_ledger import decision_ledger
 
     store = dp.data_preparation_store
-    sl = dv.build_slice(scope_node_id="plant-afs-smelting-01")
+    sl = _slice()
     tenant, scope = dv.scope_of(sl)
 
     #: ⚠️ 문맥의 테넌트는 `config.ECM_DEFAULT_TENANT_ID` 가 정한다. 정본 CSV 의 테넌트와
@@ -238,22 +448,30 @@ def seed() -> str:
         cfg.ECM_DEFAULT_TENANT_ID = tenant
 
     say("① 조직·사용자")
-    org = _org()
-    for dept, name, parent, node in ((DEPT_HQ, "본사", "", "corp-afs"),
-                                     (DEPT_PLANT, "제련공장", DEPT_HQ, scope)):
-        try:
-            org.create_department(dept, name, parent_id=parent, scope_node_id=node,
-                                  actor="demo-seed")
-        except Exception:
-            org.update_department(dept, parent_id=parent, scope_node_id=node,
-                                  actor="demo-seed")
-    org.upsert_user(USER_ADMIN, "권희권", primary_dept_id=DEPT_HQ, is_admin=True,
-                    is_data_admin=True, actor="demo-seed")
-    org.set_user_roles(USER_ADMIN, {DEPT_HQ: "manager"}, actor="demo-seed")
-    org.upsert_user(USER_RUNNER, "실행자 (예시)", primary_dept_id=DEPT_PLANT,
-                    actor="demo-seed")
-    org.set_user_roles(USER_RUNNER, {DEPT_PLANT: "member"}, actor="demo-seed")
-    print(f"  ✓ {DEPT_HQ}(corp-afs) → {DEPT_PLANT}({scope}) · 사용자 2명")
+    if SKIP_ORG:
+        #: 운영 파종 — **이미 있는 조직을 쓴다.** 강제 정책만 켠다(그것이 `_org()` 의
+        #: 나머지 절반이고, 없으면 범위 경계가 화면에서 보이지 않는다).
+        import core.scope_policy as sp
+        from core.org_directory import org_directory as org
+        sp._read = lambda: {"org_enforce": True}
+        print(f"  ✓ 기존 조직을 씁니다 — 부서 {len(org.list_departments())}개")
+    else:
+        org = _org()
+        for dept, name, parent, node in ((DEPT_HQ, "본사", "", "corp-afs"),
+                                         (DEPT_PLANT, "제련공장", DEPT_HQ, scope)):
+            try:
+                org.create_department(dept, name, parent_id=parent, scope_node_id=node,
+                                      actor="demo-seed")
+            except Exception:
+                org.update_department(dept, parent_id=parent, scope_node_id=node,
+                                      actor="demo-seed")
+        org.upsert_user(USER_ADMIN, "권희권", primary_dept_id=DEPT_HQ, is_admin=True,
+                        is_data_admin=True, actor="demo-seed")
+        org.set_user_roles(USER_ADMIN, {DEPT_HQ: "manager"}, actor="demo-seed")
+        org.upsert_user(USER_RUNNER, "실행자 (예시)", primary_dept_id=DEPT_PLANT,
+                        actor="demo-seed")
+        org.set_user_roles(USER_RUNNER, {DEPT_PLANT: "member"}, actor="demo-seed")
+        print(f"  ✓ {DEPT_HQ}(corp-afs) → {DEPT_PLANT}({scope}) · 사용자 2명")
 
     say("② 정본 키트와 인증판")
     dv.register_kit(store)
@@ -262,6 +480,25 @@ def seed() -> str:
         kit_fingerprint=dv.kit_fingerprint(store),
         tenant_id=tenant, scope_node_id=scope, entity_mode="REAL",
         label="첫 수직 시연 — 비철 제련")
+
+    #: ★★★ [2026-08-24 실측] **소유권 결속을 인증보다 먼저 심는다. 순서가 통제다.**
+    #:
+    #: 색인(`scope_index.write_conn`)은 **인증 시점**의 소유권을 봉인한다. 그래서 인증
+    #:   뒤에 결속을 만들면 색인이 그것을 모르고, 해석기가 정확히 거부한다:
+    #:
+    #:       「이 색인은 소유권 결속이 없던 때에 만들어졌는데 지금은 결속이 있습니다 —
+    #:        재물질화가 필요합니다(색인이 모르는 승인을 권한으로 쓰지 않습니다)」
+    #:
+    #: ★ 그 거부는 **옳다.** 나중에 만든 승인을 소급 적용하면, 결속을 바꿔치기해 과거
+    #:   판정을 뒤집을 수 있다. 우회(발효일을 인증 이전으로 주기)하지 않고 **순서를**
+    #:   바로잡는다 — 실제 운영에서도 「소유를 정하고 나서 인증한다」가 맞는 차례다.
+    #: ⚠️ 이 줄을 아래 인증 루프 뒤로 옮기지 말 것. 옮기면 색인이 소유자를 빈 값으로
+    #:   봉인하고, 경로 계산이 **한 줄도** 성립하지 않는다(그 상태로 한동안 돌았다 —
+    #:   스텁 해석기가 가려 주고 있었다).
+    say("②-1 데이터셋 소유권 결속(인증보다 **먼저**)")
+    _own = seed_ownership(tenant, scope, dv.kit_dataset_keys())
+    print(f"  ✓ 소유권 결속 {_own}건")
+
     for key in dv.SLICE_KEYS:
         rows, cols = sl[key]
         b = store.create_binding(
@@ -333,14 +570,26 @@ def _seed_ontology(tenant: str, scope: str, decision_ledger) -> None:
     import api.routes.calculation_control as cal
     import api.routes.ontology_control as onto
     import core.org_directory as orgmod
+    from core import demo_vertical_slice as dv
+    from core.ontology_resolvers import product_object_scope_resolver
 
-    def resolver(ref, rctx):
-        return ontology_resolve.found(app_policy.ResourceScope(
-            tenant_id=tenant, entity_mode="REAL", scope_node_id=scope,
-            owner_dept_id=DEPT_PLANT, binding_state=app_policy.BOUND))
+    #: ★ 사슬은 **정본 자료에서** 뽑는다(`chain_from_slice` 주석 참조).
+    chain = chain_from_slice(_slice(scope))
 
-    rt = OntologyRuntime(os.path.join(TARGET_ROOT, "ontology.db"), resolver,
-                         product_approval_resolver)
+    #: ★★★ [2026-08-24] **제품 해석기를 쓴다. 스텁을 심지 않는다.**
+    #:
+    #: ⚠️⚠️ 종전에는 «무엇을 묻든 찾았다» 고 답하는 스텁을 심었다:
+    #:
+    #:     def resolver(ref, rctx):
+    #:         return ontology_resolve.found(ResourceScope(... BOUND))
+    #:
+    #:   그 위에서는 어떤 ID 를 넣어도 경로가 나온다 — 실제로 사슬은 색인에 없는 지어낸
+    #:   ID(`SHP-001`)였는데도 화면에 「경로 3개」가 떴다. 제품 경로로는 한 줄도 성립하지
+    #:   않는 상태였다. 스텁 위의 초록은 아무것도 증명하지 않는다.
+    #: ★ 제품 해석기로 심으면 **파종 자체가 검증**이 된다 — 해석되지 않는 것을 심으려 하면
+    #:   `propose_relation` 이 거기서 죽는다.
+    rt = OntologyRuntime(os.path.join(TARGET_ROOT, "ontology.db"),
+                         product_object_scope_resolver, product_approval_resolver)
     contract = {
         "contract_id": "G2-FIRST-VERTICAL-ONTOLOGY", "contract_version": "1.0.0",
         "status": "APPROVED",
@@ -349,10 +598,18 @@ def _seed_ontology(tenant: str, scope: str, decision_ledger) -> None:
         "constraints": [{"subject": f"dataset:{s}", "relation": "AFFECTS",
                          "object": f"dataset:{o}", "evidence": ["승인된 지연 모형"],
                          "calculation_ref": ref}
-                        for (s, _si, o, _oi), ref in zip(CHAIN, pc.SEGMENTS)],
+                        for (s, _si, o, _oi), ref in zip(chain, pc.SEGMENTS)],
         #: 자리표시자로 지문을 얻고 **실제 원장 사건** id 로 바꿔 설치한다.
+        #: ★★★ [2026-08-24 실측] 발효일을 **인증 시각 이후**로 잡는다.
+        #:
+        #: ⚠️ 종전 `2026-01-01` 은 자료의 **업무 시각**을 따른 값인데, 끝점 해석은
+        #:   **인증 시각**(`certified_at`, 벽시계)을 본다. 두 축을 같은 값으로 물으면
+        #:   「그 시점에는 아직 인증되지 않았습니다」로 관계 제안 자체가 죽는다.
+        #: ★ 업무 시각(행 선택)과 시스템 시각(인증·발효)은 **다른 축**이다. 행은 이미
+        #:   `build_slice(AS_OF)` 가 업무 시각으로 골랐고, 여기서 정하는 것은 «이 계약이
+        #:   언제부터 유효한가» 다 — 그것은 심는 지금이다.
         "approval": {"approved_by": USER_ADMIN, "decision_ledger_id": "placeholder",
-                     "effective_from": "2026-01-01T00:00:00Z"},
+                     "effective_from": _now_iso()},
     }
     fp = rt.validate_model_contract(contract)["contract_fingerprint"]
     ev = decision_ledger.append(
@@ -366,12 +623,15 @@ def _seed_ontology(tenant: str, scope: str, decision_ledger) -> None:
         user_id=USER_ADMIN, scope=orgmod.org_directory.resolve_scope(USER_ADMIN),
         ctx={"tenant_id": tenant, "entity_mode": "REAL", "scope_node_id": scope},
         session_id="demo-seed", blocked_reason="")
-    for (s_t, s_i, o_t, o_i), ref in zip(CHAIN, pc.SEGMENTS):
+    for (s_t, s_i, o_t, o_i), ref in zip(chain, pc.SEGMENTS):
         made = rt.propose_relation(RelationProposal(
             subject=ObjectRef("dataset", s_t, s_i), relation_type_id="AFFECTS",
             object=ObjectRef("dataset", o_t, o_i), tenant_id=tenant,
             enterprise_scope_id=scope, entity_mode="REAL",
-            owner_organization_id=DEPT_PLANT, effective_from="2026-01-01T00:00:00Z",
+            #: ★ 관계의 발효일도 **시스템 시각**이다(위 계약 주석과 같은 이유).
+            #:   끝점은 `certified_at` 으로 해석되므로 인증보다 앞선 발효일을 주면
+            #:   「그 시점에는 아직 인증되지 않았습니다」로 제안 자체가 죽는다.
+            owner_organization_id=DEPT_PLANT, effective_from=_now_iso(),
             origin="derived", evidence_refs=("SNAPSHOT:LOG-02:v1",),
             calculation_ref=ref), USER_PROPOSER, subj)
         rid = made["relation_id"]
@@ -386,7 +646,7 @@ def _seed_ontology(tenant: str, scope: str, decision_ledger) -> None:
     cal.ontology_runtime = rt
     ortm.ontology_runtime = rt
     onto.router.routes[:] = onto.create_router(rt).routes
-    print(f"  ✓ 계약 1건 · 관계 {len(CHAIN)}건(승인)")
+    print(f"  ✓ 계약 1건 · 관계 {len(chain)}건(승인) — {_chain_text(chain)}")
 
 
 def _top_up(instance_id: str) -> None:
@@ -409,6 +669,10 @@ def _top_up(instance_id: str) -> None:
     if not missing:
         print(f"  보충할 것 없음 — 계약키 {len(want)}종이 모두 결속돼 있습니다.")
         return
+
+    #: ★ 여기서도 **결속을 먼저** 심는다(`seed()` 의 같은 주석 참조). 보충 경로만
+    #:   빠뜨리면 「7종은 되는데 나머지 28종은 안 되는」 절반짜리 상태가 된다.
+    seed_ownership(str(inst["tenant_id"]), str(inst["scope_node_id"]), missing)
 
     made, skipped = 0, []
     for key in missing:
@@ -514,7 +778,7 @@ def _rewire_ontology_only() -> None:
     import api.routes.ontology_control as onto
     from core import demo_vertical_slice as dv
 
-    sl = dv.build_slice(scope_node_id="plant-afs-smelting-01")
+    sl = _slice()
     tenant, scope = dv.scope_of(sl)
     import config as cfg
     cfg.ECM_DEFAULT_TENANT_ID = tenant

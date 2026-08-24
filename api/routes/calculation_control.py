@@ -268,6 +268,53 @@ def _admin_ctx(p: Principal, instance_id: str) -> Dict[str, str]:
             "scope_node_id": str(inst["scope_node_id"])}
 
 
+def _scope_of(ctx: Dict[str, str], want_mode: str, want_kind: str) -> Dict[str, str]:
+    """승인 범위를 **인스턴스에서 파생한다.**
+
+    ## ⚠️⚠️ 상수 기본값이 승인을 영원히 안 붙게 했다 (2026-08-24 실측)
+
+    종전에는 `entity_mode or cea.DEFAULT_ENTITY_MODE`(= `VIRTUAL`)였다. 그런데 준비도
+    관문과 실행기는 **인스턴스의 `entity_mode`**(시연 자료는 `REAL`)로 승인을 찾는다.
+    그래서 화면에서 승인을 눌러 200 과 원장 사건까지 받고도 관문은 계속
+    「실행 승인이 없는 계산 3건」이었다 — **오류는 어디에도 나지 않는다.**
+    제로베이스 완주를 여기서 막았다.
+
+    ★★★ 문맥은 **인스턴스 행이 정본**이다. 호출자가 정하지 않는다
+      (`PathCalcInput` 이 `tenant_id`·`scope_node_id` 를 안 받는 것과 같은 규약).
+    ⚠️ 그래도 화면이 다른 값을 적어 보내면 **거부**한다 — 조용히 갈아치우면 사람은
+      자기가 고른 범위로 승인됐다고 믿는다.
+    ★ `data_kind` 는 조회 키가 아니라 **기록 표시**다. 그래도 상수로 두면 실제 자료를
+      「DEMO/SYNTHETIC」으로 적게 되므로 인증판에서 읽는다.
+    """
+    mode = str(want_mode or "").strip()
+    if mode and mode != ctx["entity_mode"]:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"승인 범위의 실체 구분이 인스턴스와 다릅니다 — 인스턴스는 "
+                    f"「{ctx['entity_mode']}」인데 「{mode}」로 승인하려 했습니다. "
+                    f"다른 구분으로 승인하면 그 승인은 이 인스턴스의 계산에 붙지 "
+                    f"않습니다(관문은 계속 「승인 없음」으로 답합니다)."))
+    kind = str(want_kind or "").strip() or _kind_of(ctx["instance_id"])
+    return {"entity_mode": ctx["entity_mode"], "data_kind": kind}
+
+
+def _kind_of(instance_id: str) -> str:
+    """인스턴스의 **살아 있는 인증판**이 실제로 어떤 자료인지 읽는다.
+
+    ⚠️ 섞여 있으면 하나를 고르지 않는다 — 섞인 채로 승인하면 그 기록은 둘 중 어느
+      쪽도 정확히 가리키지 않는다. 그때는 상수 대신 「MIXED」로 적어 눈에 띄게 한다."""
+    try:
+        with store.transaction() as conn:
+            kinds = sorted({str(r[0]) for r in conn.execute(
+                "SELECT DISTINCT data_kind FROM dataset_snapshots "
+                "WHERE instance_id=? AND status='active'", (instance_id,)) if r[0]})
+    except Exception:  # noqa: BLE001 — 못 읽으면 지어내지 않는다
+        return cea.DEFAULT_DATA_KIND
+    if len(kinds) == 1:
+        return kinds[0]
+    return "MIXED" if kinds else cea.DEFAULT_DATA_KIND
+
+
 @router.get("/capabilities")
 async def capabilities(instance_id: str = "", data_kind: str = "",
                        entity_mode: str = "", valid_days: int = 0,
@@ -278,13 +325,14 @@ async def capabilities(instance_id: str = "", data_kind: str = "",
       `BLOCKED` 로 답한다.
     ★ 서버가 지문을 직접 산출한다 — 호출자가 적어 보낼 수 없다."""
     ctx = _admin_ctx(p, instance_id)
+    _sc = _scope_of(ctx, entity_mode, data_kind)
     try:
         data = await asyncio.to_thread(
             cea.proposal, store, instance_id=ctx["instance_id"],
             tenant_id=ctx["tenant_id"],
-            entity_mode=entity_mode or cea.DEFAULT_ENTITY_MODE,
+            entity_mode=_sc["entity_mode"],
             scope_node_id=ctx["scope_node_id"],
-            data_kind=data_kind or cea.DEFAULT_DATA_KIND,
+            data_kind=_sc["data_kind"],
             valid_days=valid_days or cea.DEFAULT_VALID_DAYS)
     except cea.ExecutionApprovalError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -313,15 +361,16 @@ async def approve_capabilities(req: ApprovalInput,
     ⚠️ 화면이 본 지문과 지금 서버가 산출한 지문이 다르면 **거부**한다 — 사람이 읽고
       누르는 사이에 판이 바뀌었을 수 있고, 그때 승인되는 것은 읽은 것이 아니다."""
     ctx = _admin_ctx(p, req.instance_id)
+    _sc = _scope_of(ctx, req.entity_mode, req.data_kind)
     if not str(req.rationale or "").strip():
         raise HTTPException(status_code=422, detail="승인 사유가 필요합니다.")
     try:
         prop = await asyncio.to_thread(
             cea.proposal, store, instance_id=ctx["instance_id"],
             tenant_id=ctx["tenant_id"],
-            entity_mode=req.entity_mode or cea.DEFAULT_ENTITY_MODE,
+            entity_mode=_sc["entity_mode"],
             scope_node_id=ctx["scope_node_id"],
-            data_kind=req.data_kind or cea.DEFAULT_DATA_KIND,
+            data_kind=_sc["data_kind"],
             valid_days=req.valid_days or cea.DEFAULT_VALID_DAYS)
     except cea.ExecutionApprovalError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

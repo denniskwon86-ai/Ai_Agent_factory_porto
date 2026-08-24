@@ -95,9 +95,19 @@ def inventory() -> dict:
         "원천 결속": _count("data_preparation.db", "source_bindings"),
         "데이터 판": _count("data_preparation.db", "dataset_snapshots"),
         "기준선": _count("data_preparation.db", "baseline_builds"),
-        "부서": _count(_org_db(), "departments"),
+        #: ⚠️ `departments` 는 **판(version) 표**다 — 폐지판까지 세면 13개 조직이 29로 보인다.
+        #:   싱글턴에게 물어 **현재 유효한 것만** 센다.
+        "부서(유효)": _org_active(),
         "사용자": _count(_org_db(), "users"),
     }
+
+
+def _org_active() -> int:
+    try:
+        from core.org_directory import org_directory
+        return len(org_directory.list_departments())
+    except Exception:
+        return 0
 
 
 def _looks_real() -> list[str]:
@@ -134,6 +144,84 @@ def _looks_real() -> list[str]:
     return hits
 
 
+def _write_instance_tenant() -> str:
+    """자료의 테넌트를 **설치본 설정**으로 기록한다(`data/instance.json`).
+
+    ⚠️ 이미 다른 값이 있으면 덮지 않는다 — 실제 테넌트를 정해 둔 설치본을 시연 값으로
+      바꾸면 그 설치본의 자료가 통째로 안 보이게 된다."""
+    import json
+
+    from core import demo_vertical_slice as dv
+
+    #: ★ 반드시 `demo._slice()` — 날짜를 옮기지 않은 조각으로 심으면 계산이 막힌다.
+    sl = demo._slice()
+    tenant, _scope = dv.scope_of(sl)
+    path = os.path.join(OPERATIONAL, "instance.json")
+    cur = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                cur = json.load(fh) or {}
+        except Exception:
+            cur = {}
+    have = str(cur.get("tenant_id", "") or "").strip()
+    if have and have != tenant:
+        print()
+        print(f"⚠️ 설치본 테넌트가 «{have}» 로 기록돼 있습니다 — 덮지 않습니다.")
+        print(f"   정본 자료는 «{tenant}» 소속이라 화면에 안 보일 수 있습니다.")
+        return have
+    if have != tenant:
+        os.makedirs(OPERATIONAL, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({**cur, "tenant_id": tenant}, fh, ensure_ascii=False, indent=2)
+    print()
+    print(f"설치본 테넌트: {tenant}  ({path})")
+    print("   ★ `run.py` 가 이 값을 읽습니다 — `config.py` 가 아니라 여기서 읽는 이유는")
+    print("     시험이 개발자의 data/ 에 의존하지 않게 하기 위해서입니다.")
+    #: 이번 프로세스에도 반영 — 파종이 그 값으로 조회한다.
+    import config as cfg
+    cfg.ECM_DEFAULT_TENANT_ID = tenant
+    return tenant
+
+
+def _top_up_ownership() -> None:
+    """소유권 결속이 **하나도 없으면** 심는다.
+
+    ⚠️ 이것이 없으면 제품 해석기가 모든 업무 객체를 `UNBOUND` 로 답하고, 경로 계산이
+      한 줄도 성립하지 않는다(2026-08-24 실측). 시연은 스텁 해석기 덕에 초록이었다."""
+    import sqlite3
+
+    from core import demo_vertical_slice as dv
+
+    dbp = os.path.join(OPERATIONAL, "data_preparation.db")
+    have = 0
+    try:
+        c = sqlite3.connect(f"file:{dbp}?mode=ro", uri=True)
+        try:
+            have = int(c.execute(
+                "SELECT count(*) FROM dataset_ownership_bindings").fetchone()[0])
+        finally:
+            c.close()
+    except sqlite3.Error:
+        have = 0
+    if have:
+        print(f"  소유권 결속 {have}건 — 그대로 둡니다.")
+        return
+
+    #: ★ 반드시 `demo._slice()` — 날짜를 옮기지 않은 조각으로 심으면 계산이 막힌다.
+    sl = demo._slice()
+    csv_tenant, scope = dv.scope_of(sl)
+    tenant = demo.TENANT_OVERRIDE or csv_tenant
+    #: ★ 계산 경로가 쓰는 계약키만 심는다 — 전부 심으면 시간이 늘고, 안 쓰는 결속은
+    #:   나중에 「누가 왜 정했나」를 물었을 때 답할 근거가 없다.
+    made = demo.seed_ownership(tenant, scope, dv.SLICE_KEYS)
+    print(f"  소유권 결속 {made}건 심음 (계약키 {len(dv.SLICE_KEYS)}종)")
+    #: ★ 결속을 만든 **뒤에는 색인을 다시 세워야 한다** — 색인은 인증 시점의 소유권을
+    #:   봉인하므로, 결속이 없던 때에 만들어진 줄은 해석기가 거부한다.
+    n = demo.rematerialize_index(tenant, scope)
+    print(f"  색인 재물질화 {n}판")
+
+
 def _top_up_ontology() -> None:
     """관계가 **하나도 없으면** 심는다.
 
@@ -162,7 +250,8 @@ def _top_up_ontology() -> None:
         print(f"  온톨로지 관계 {have}건 — 그대로 둡니다.")
         return
 
-    sl = dv.build_slice(scope_node_id="plant-afs-smelting-01")
+    #: ★ 반드시 `demo._slice()` — 날짜를 옮기지 않은 조각으로 심으면 계산이 막힌다.
+    sl = demo._slice()
     _csv_tenant, scope = dv.scope_of(sl)
     tenant = demo.TENANT_OVERRIDE or _csv_tenant
     demo._seed_ontology(tenant, scope, decision_ledger)
@@ -195,7 +284,8 @@ def _ensure_scope_home() -> None:
 
     from core import demo_vertical_slice as dv
 
-    sl = dv.build_slice(scope_node_id="plant-afs-smelting-01")
+    #: ★ 반드시 `demo._slice()` — 날짜를 옮기지 않은 조각으로 심으면 계산이 막힌다.
+    sl = demo._slice()
     _tenant, scope = dv.scope_of(sl)
 
     have = {str(d.get("scope_node_id") or "").strip()
@@ -269,10 +359,21 @@ def main() -> int:
     #:   런타임 설정을 저장소 파일로 만들면 «내 기계에서만 되는/안 되는» 상태가 생긴다.
     #: ★ 조회 필터는 `kit_instances.tenant_id` **열**을 본다(정본 CSV 의 행 내용이 아니다).
     #:   그래서 열만 설치본 값으로 심으면 정본 파일을 건드리지 않고도 화면에 보인다.
-    import config as cfg
-    demo.TENANT_OVERRIDE = str(getattr(cfg, "ECM_DEFAULT_TENANT_ID", "") or "").strip()
-    print()
-    print("설치본 테넌트로 심습니다: " + demo.TENANT_OVERRIDE)
+    #: ★★★ [2026-08-24 실측] **자료의 테넌트를 그대로 쓴다.** 바꿔치기하지 않는다.
+    #:
+    #: ⚠️ 1차 시도는 자료를 설치본 설정(`tenant_default`)으로 심었다. 그런데 정본 CSV 는
+    #:   **행마다** `tenant_id` 를 담고 있고, 색인(`scope_index.plan`)이 그 행 내용과
+    #:   인증판의 테넌트를 **대조해 거부한다**:
+    #:
+    #:       「PRC-02 2행: tenant 가 인증판과 다릅니다
+    #:        (tenant-afs-demo-materials ≠ tenant_default)」
+    #:
+    #:   그 대조는 **옳다** — 열만 바꿔 쓰면 «행은 A 회사 것인데 판은 B 회사 것» 이 된다.
+    #: ★ 그래서 반대로 한다: 자료는 자기 테넌트로 심고, **설치본이 그 테넌트를 쓰게** 한다
+    #:   (`data/instance.json` → `run.py` 가 읽는다). 설정 파일을 `config` 가 import
+    #:   시점에 읽게 하면 시험이 개발자의 `data/` 에 의존한다(그래서 100건이 깨졌다).
+    demo.TENANT_OVERRIDE = ""
+    _write_instance_tenant()
 
     from core.data_preparation import store as dp
 
@@ -288,6 +389,8 @@ def main() -> int:
     #:   화면에서 보이지 않는다.
     import core.scope_policy as sp
     sp._read = lambda: {"org_enforce": True}
+    #: ★ 운영에는 이미 조직이 있다 — 파종이 임시 조직을 만들지 못하게 한다.
+    demo.SKIP_ORG = True
     _ensure_scope_home()
 
     if existing:
@@ -295,6 +398,7 @@ def main() -> int:
         print(f"\n이미 인스턴스가 {len(existing)}개 있습니다 — 보충만 합니다.")
         demo._rewire_ontology_only()
         demo._top_up(existing[0]["instance_id"])
+        _top_up_ownership()
         _top_up_ontology()
     else:
         demo.seed()

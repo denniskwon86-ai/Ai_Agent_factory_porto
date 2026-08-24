@@ -615,9 +615,12 @@ def test_제안서는_아무것도_승인하지_않는다(env):
         f"/api/v1/calculation/capabilities?instance_id={env['instance_id']}"))
 
     assert {i["ref"] for i in got["items"]} == set(pc.SEGMENTS)
-    #: ★ 기본 범위는 시연 한정 — `DEMO/SYNTHETIC · VIRTUAL · 30일`.
-    assert got["scope"]["data_kind"] == cea.DEFAULT_DATA_KIND
-    assert got["scope"]["entity_mode"] == cea.DEFAULT_ENTITY_MODE
+    #: ★★★ 범위는 **인스턴스에서 온다** — 상수 기본값이 아니다.
+    #: ⚠️⚠️ 여기에 `cea.DEFAULT_ENTITY_MODE`(= `VIRTUAL`)를 적어 두었었다. 그래서
+    #:   `REAL` 인스턴스에 승인을 눌러도 관문은 계속 「승인 없음」이었는데 시험은
+    #:   **초록**이었다 — 시험이 결함을 계약으로 굳혀 놓았다(2026-08-24 실측).
+    assert got["scope"]["entity_mode"] == "REAL"
+    assert got["scope"]["instance_id"] == env["instance_id"]
     assert got["valid_days"] == cea.DEFAULT_VALID_DAYS
     #: ★ 화면이 보여 줄 것 — 정의·단위·부호.
     first = got["items"][0]
@@ -689,6 +692,62 @@ def test_누르면_능력마다_별도_원장_사건이_남는다(env):
     #: ★ 사유·행위자가 남는다.
     assert all(e["actor_id"] == "sysadmin@afs.invalid" for e in events)
     assert all("시연" in str(e["rationale"]) for e in events)
+
+
+def test_승인_범위는_인스턴스에서_온다(env):
+    """★★★ [2026-08-24] 승인이 **관문에 실제로 붙는가.**
+
+    ## ⚠️⚠️ 200 과 원장 사건을 받고도 관문은 「승인 없음」이었다
+
+    제안서·승인이 `entity_mode` 를 상수 기본값(`VIRTUAL`)으로 썼다. 준비도 관문과
+    실행기는 **인스턴스의 `entity_mode`**(`REAL`)로 승인을 찾는다. 그래서 화면에서
+    누르면 200 이 돌아오고 원장 사건도 남는데 관문은 계속 `NOT_YET` 이었다 —
+    **오류는 어디에도 나지 않는다.** 제로베이스 완주가 여기서 막혔다.
+
+    ★ 그래서 「승인했다」가 아니라 **「관문이 열렸다」**로 고정한다. 저장 열만 보면
+      같은 결함이 다시 지나간다(저장은 성공했었다).
+    """
+    from core import calc_execution_approval as cea
+
+    _graph(env)
+    _seal_baseline(env)
+    #: ★ `entity_mode` 를 **주지 않는다** — 화면이 안 주는 경우가 기본이다.
+    got = _data(_admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인"}))
+    assert len(got["approved"]) == len(pc.SEGMENTS)
+
+    #: ① 저장된 승인이 인스턴스의 구분을 쓴다.
+    rows = cea.list_approvals(env["store"])
+    assert {r["entity_mode"] for r in rows} == {"REAL"}, rows
+
+    #: ②★★★ **관문이 실제로 열린다.** 이것이 없으면 ① 만으로는 다시 놓친다.
+    by = {g["gate"]: g for g in _data(_admin(env).get(
+        "/api/v1/calculation/readiness"
+        f"?instance_id={env['instance_id']}"))["gates"]}
+    assert by["capabilities"]["state"] == dr.READY, by["capabilities"]
+
+
+def test_인스턴스와_다른_범위로는_승인할_수_없다(env):
+    """★ 호출자가 다른 구분을 적어 보내면 **거부**한다.
+
+    ⚠️ 조용히 인스턴스 값으로 갈아치우면, 사람은 자기가 고른 범위로 승인됐다고 믿는다.
+      거부해야 「그건 인스턴스가 정한다」를 배운다."""
+    from core import calc_execution_approval as cea
+
+    _graph(env)
+    _seal_baseline(env)
+    res = _admin(env).post("/api/v1/calculation/capabilities/approve", json={
+        "instance_id": env["instance_id"], "rationale": "시연 한정 실행 승인",
+        "entity_mode": "VIRTUAL"})
+    assert res.status_code == 422, res.text[:200]
+    assert "REAL" in res.text and "VIRTUAL" in res.text, res.text[:300]
+    #: ★ 그리고 아무것도 남지 않았다.
+    assert cea.list_approvals(env["store"]) == []
+    #: ★ 제안서도 같은 규약이다.
+    res = _admin(env).get(
+        f"/api/v1/calculation/capabilities?instance_id={env['instance_id']}"
+        "&entity_mode=VIRTUAL")
+    assert res.status_code == 422, res.text[:200]
 
 
 def test_사유_없이는_누를_수_없다(env):

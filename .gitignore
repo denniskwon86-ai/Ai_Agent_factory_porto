@@ -67,6 +67,8 @@ data/quality_outcomes.jsonl
 
 # [M1] 기준정보 저장소 런타임 DB (골든 레코드 — 런타임 데이터, 커밋 금지)
 data/master/
+#: 설치본마다 다른 값 — 조각의 업무 날짜 이동량이 여기 고정된다.
+data/slice_rebase.json
 # [§12] 외부 인텔리전스 런타임 저장소(§12.3 상 별도 DB)
 data/external_intelligence.db*
 # [§7.3] Shadow Mode 런타임 저장소

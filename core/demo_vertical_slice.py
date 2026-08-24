@@ -27,6 +27,8 @@ import csv
 import io
 import json
 import os
+import re
+from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 #: 정본 키트. ⚠️ **임의 생성 금지** — 시험이 만든 키트로 인증하면 「정본 열을 썼다」가
@@ -49,6 +51,112 @@ AS_OF = "2026-06-01T00:00:00+00:00"
 #: 시연 제품. 정본 `MDM-05.output_material_id` 에 실재하는 값이다.
 PRODUCT = "FG-CATHODE"
 
+#: 계획 지평 — **`as_of` 로부터 이만큼 뒤의 계획행**을 고른다.
+#:
+#: ## ⚠️⚠️ 0 이면 키트가 이틀 만에 아무 답도 못 낸다 (2026-08-24 실측)
+#:
+#: 종전에는 「`as_of` 이후 미래 계획행 앞 두 개」였다. 정본 계획은 거의 매일 있어서
+#: 그 둘은 `as_of`+0 · `as_of`+2 였다. 재배치해도 **쓸 수 있는 창이 이틀**이고, 사흘째
+#: 부터는 계획행이 전부 과거가 되어 생산가능량이 비고 계산이 `BLOCKED` 로 답한다.
+#:
+#: ★ 지평을 두면 이야기도 더 맞는다 — 「어제 실사한 재고」와 「한 달 반 뒤 계획」을
+#:   비교하는 것이 「어제 재고 · 내일 계획」보다 실제 구매 의사결정에 가깝다.
+#: ⚠️ 늘리려면 자료를 먼저 세어 볼 것. 정본 `MFG-01` 의 `FG-CATHODE` 계획은
+#:   2026-07-30 까지이므로 60 이면 **0건**이 된다(실측).
+HORIZON_DAYS = 45
+
+
+# ── 업무 날짜 재배치 ─────────────────────────────────────────────────────
+#:
+#: ## ⚠️⚠️ 왜 필요한가 — 자료가 설치일보다 과거면 키트가 아무 숫자도 못 낸다
+#:
+#: `AS_OF` 는 **자료 안쪽**이어야 한다(위 주석 참조). 그런데 인증판과 관계 선언은
+#: **설치 시각**에 찍힌다. 그래서 두 요구가 동시에 성립하지 않는다:
+#:
+#:   · 경로가 보이려면        `as_of ≥ certified_at`  (= 설치일)
+#:   · 생산계획이 잡히려면    `as_of ≤ plan_date`     (= 정본 최대 2026-07-30)
+#:
+#: 실측(2026-08-24): 다섯 관문 전부 READY 인데 계산은 `BLOCKED` — 「기준선 없는
+#: 판매행」이었다. 실제 원인은 계획행이 **전부 과거**여서 생산가능량이 비었던 것이다.
+#: 업무 시점(2026-06-01)으로 돌리면 부족 4,366.7 · 이연 30일이 정상 산출된다.
+#:
+#: ★★★ 그래서 **자료의 업무 날짜를 통째로 옮긴다.** 정본 CSV 원본은 건드리지 않는다 —
+#:   고른 조각에만 같은 오프셋을 더하므로 행 사이의 시간 관계(ETA↔ATA, 계획일↔납기)는
+#:   **그대로 보존된다.**
+#: ⚠️ 오프셋은 **한 번 정하면 고정**이다(`scripts/run_local_demo.py` 가 뿌리에 적어
+#:   둔다). 실행할 때마다 다시 계산하면 나중에 보충한 판이 앞선 판과 다른 시간축에
+#:   놓이고, 관계가 가리키는 객체 id 가 어긋난다.
+
+#: 온전한 날짜/일시 문자열. ⚠️ 부분 일치를 허용하지 않는다 — 허용하면 「2026」 같은
+#: 값이나 수량이 날짜로 보인다.
+#: 「끝이 없다」를 뜻하는 해. 이 이상은 날짜로 다루지 않는다.
+_SENTINEL_YEAR = 9000
+_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?![\d-])")
+#: 식별자에 박힌 날짜(`STK-20260531-RM-CU-CONC-...`). ★ 이것도 옮기지 않으면 화면에
+#: 「STK-20260531」인데 스냅샷 날짜는 8월인 물건이 생긴다.
+_EMBEDDED_RE = re.compile(r"(?<!\d)(20[2-3]\d)(\d{2})(\d{2})(?!\d)")
+
+
+def _shift_text(value: str, days: int) -> str:
+    """문자열 하나에서 **날짜로 읽히는 것만** 옮긴다."""
+    m = _DATE_RE.match(value)
+    if m:
+        try:
+            base = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return value
+        #: ⚠️ `9999-12-31` 은 날짜가 아니라 **「끝이 없다」는 표식**이다(`valid_to`·
+        #:   `effective_to`). 옮기면 넘치고, 넘치지 않게 잘라도 유한한 종료일이 생겨
+        #:   「아직 유효한 것」이 조용히 만료된다.
+        if base.year >= _SENTINEL_YEAR:
+            return value
+        try:
+            return (base + timedelta(days=days)).isoformat() + value[m.end():]
+        except OverflowError:                       # pragma: no cover - 위에서 걸러진다
+            return value
+
+    def _one(mm: "re.Match[str]") -> str:
+        try:
+            base = date(int(mm.group(1)), int(mm.group(2)), int(mm.group(3)))
+        except ValueError:
+            return mm.group(0)
+        return (base + timedelta(days=days)).strftime("%Y%m%d")
+
+    return _EMBEDDED_RE.sub(_one, value)
+
+
+def rebase(sl: Dict[str, Tuple[List[Dict[str, str]], List[str]]], days: int
+           ) -> Tuple[Dict[str, Tuple[List[Dict[str, str]], List[str]]], Dict[str, int]]:
+    """조각의 업무 날짜를 `days` 만큼 옮긴다. **모든 계약키에 같은 값을 쓴다.**
+
+    돌려주는 것: `(옮긴 조각, {계약키: 바뀐 칸 수})` — 무엇이 바뀌었는지 셀 수 있어야
+    「옮겼다」가 확인 가능한 주장이 된다.
+
+    ⚠️ `days == 0` 이면 **원본을 그대로** 돌려준다(복사하지 않는다) — 옮기지 않은 것과
+      옮겨서 같아진 것을 구분할 필요가 없고, 구분하려 들면 지문이 달라진다.
+    """
+    if not days:
+        return sl, {}
+    out: Dict[str, Tuple[List[Dict[str, str]], List[str]]] = {}
+    counts: Dict[str, int] = {}
+    for key, (rows, cols) in sl.items():
+        moved = 0
+        new_rows: List[Dict[str, str]] = []
+        for row in rows:
+            item: Dict[str, str] = {}
+            for k, v in row.items():
+                if isinstance(v, str) and v:
+                    nv = _shift_text(v, days)
+                    if nv != v:
+                        moved += 1
+                    item[k] = nv
+                else:
+                    item[k] = v
+            new_rows.append(item)
+        out[key] = (new_rows, cols)
+        counts[key] = moved
+    return out, counts
+
 
 def kit_root() -> str:
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -64,6 +172,27 @@ def _read(key: str) -> Tuple[List[Dict[str, str]], List[str]]:
         reader = csv.DictReader(fh)
         rows = [dict(r) for r in reader]
         return rows, list(reader.fieldnames or [])
+
+
+def kit_dataset_keys() -> List[str]:
+    """정본 키트가 **실제로 들고 있는** 계약키 전부. 파일에서 센다.
+
+    ★★★ [2026-08-23] 목록을 손으로 적지 않는다 — 적으면 키트가 늘어날 때 조용히
+      어긋나고, 「없는 줄 알았던 것」이 생긴다.
+    ⚠️ `SLICE_KEYS` 와 **다른 것**이다. 그쪽은 수직 폐루프 계산이 쓰는 최소 집합이고,
+      이것은 키트 앱이 요구할 수 있는 전체다. 둘을 합치면 계산 경로의 뜻이 바뀐다."""
+    root = os.path.join(kit_root(), "samples", "full")
+    if not os.path.isdir(root):
+        return []
+    return sorted(f[:-4] for f in os.listdir(root) if f.endswith(".csv"))
+
+
+def read_full(key: str) -> Tuple[List[Dict[str, str]], List[str]]:
+    """정본 CSV 를 **자르지 않고** 읽는다.
+
+    ⚠️ 수직 폐루프는 시간축으로 잘라 쓴다(`build_slice`). 앱은 자르지 않는다 —
+      앱 화면에서 「왜 우리 자료가 일부만 보이나」가 되면 그것은 다른 문제로 읽힌다."""
+    return _read(key)
 
 
 def _sorted_by(rows: Sequence[Dict[str, str]], *keys: str) -> List[Dict[str, str]]:
@@ -111,14 +240,17 @@ def build_slice(*, scope_node_id: str = "", as_of: str = AS_OF
 
     # ② 생산계획 — 미래 계획행 둘
     plan_rows, plan_cols = raw["MFG-01"]
+    #: ★ `as_of` 가 아니라 **`as_of` + 지평** 이후를 본다(`HORIZON_DAYS` 주석 참조).
+    horizon = (date.fromisoformat(as_of[:10]) + timedelta(days=HORIZON_DAYS)).isoformat()
     future = [r for r in plan_rows
               if str(r.get("product_id", "")) == PRODUCT
-              and str(r.get("plan_date", "")) >= as_of[:10]]
+              and str(r.get("plan_date", "")) >= horizon]
     plan = _sorted_by(future, "priority", "plan_date", "plan_line_id")[:2]
     if len(plan) < 2:
         raise ValueError(
-            f"MFG-01 에 {PRODUCT} 의 미래 계획행이 둘 미만입니다 — 배분 순서를 보여 줄 수 "
-            f"없습니다(찾은 수 {len(plan)}).")
+            f"MFG-01 에 {PRODUCT} 의 계획행이 {horizon} 이후로 둘 미만입니다 — 배분 "
+            f"순서를 보여 줄 수 없습니다(찾은 수 {len(plan)}). 지평(HORIZON_DAYS="
+            f"{HORIZON_DAYS})이 자료의 끝을 넘었는지 확인하십시오.")
     #: ★★★ [M0-3.1 실측] **정본의 `material_requirement` 가 BOM 재계산과 어긋난다.**
     #:   이 범위의 200건 **전부**가 불일치다(예: 저장 137.78 vs 재계산 139.745).
     #:
@@ -135,12 +267,18 @@ def build_slice(*, scope_node_id: str = "", as_of: str = AS_OF
 
     # ③ 판매행 둘
     sls_rows, sls_cols = raw["SLS-01"]
+    #: ★★★ 판매행은 **고른 계획행보다 뒤**여야 한다. 앞이면 「생산 차질 → 매출 이연」이
+    #:   거꾸로 선다 — 아직 만들지도 않은 것의 납기가 이미 지난 이야기가 된다.
+    #: ⚠️ 종전에는 `as_of` 만 봤다. 계획이 `as_of`+0 이던 시절에는 우연히 뒤였다.
+    last_plan = max(str(r.get("plan_date", ""))[:10] for r in plan)
     sales = _sorted_by([r for r in sls_rows
                         if str(r.get("product_id", "")) == PRODUCT
-                        and str(r.get("due_date", "")) >= as_of[:10]],
+                        and str(r.get("due_date", "")) >= last_plan],
                        "due_date", "sales_line_id")[:2]
     if len(sales) < 2:
-        raise ValueError(f"SLS-01 에 {PRODUCT} 의 미래 판매행이 둘 미만입니다.")
+        raise ValueError(
+            f"SLS-01 에 {PRODUCT} 의 판매행이 마지막 계획일({last_plan}) 이후로 둘 "
+            f"미만입니다 — 생산 차질이 어느 매출을 미루는지 말할 수 없습니다.")
     out["SLS-01"] = (sales, sls_cols)
 
     # ④ 재고 — 자재별 as_of 이전 마지막 두 판
