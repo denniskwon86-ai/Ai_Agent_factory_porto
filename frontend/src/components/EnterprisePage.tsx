@@ -24,28 +24,21 @@
 // 않는 값(담당 역할·기한·공정 프로필)은 **«미지정» 으로 적고 빈칸을 만들지 않는다.**
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
+import { failed, loading, ok, type Loaded } from '../design/DataState';
 import { JarvisRail } from '../design/JarvisRail';
 import { getEnterpriseContext , API_BASE_URL} from '../lib/api';
 import {
-  SECTION_LABELS, fetchBriefing, type Briefing, type BriefingItem,
+  fetchBriefing, type Briefing, type BriefingItem,
 } from '../lib/briefingApi';
 import { getReadiness, listInstances } from '../lib/dataPrepApi';
 import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
+import '../design/enterprise-canvas.css';
 import { ServerText } from '../design/ServerText';
-import { CoreJourney } from './CoreJourney';
-import { EnterpriseThread } from './EnterpriseThread';
 import { fetchCanvas, type Canvas } from '../lib/canvasApi';
 import { fetchScopeNodes, labelForScope, type ScopeNode } from '../lib/scopeLabel';
 
 /** §4.2 상태. **색만으로 전달하지 않는다**(§2.1) — 낱말을 함께 싣는다. */
-const SEVERITY: Record<string, { label: string; fg: string; bg: string }> = {
-  high: { label: '긴급', fg: 'var(--state-error-fg)', bg: 'var(--state-error-bg)' },
-  medium: { label: '확인 필요', fg: 'var(--state-warn-fg)', bg: 'var(--state-warn-bg)' },
-  low: { label: '참고', fg: 'var(--state-unknown-fg)', bg: 'var(--state-unknown-bg)' },
-  info: { label: '정보', fg: 'var(--state-info-fg)', bg: 'var(--state-info-bg)' },
-};
 
 type QueueRow = BriefingItem & { section: string };
 
@@ -55,6 +48,37 @@ type Layer = 'DATA' | 'SW' | 'TWIN';
 //  위에 흰 글자를 얹고, 꺼졌을 때는 그 색을 글자로 쓴다. 원색은 흰색 대비가 cyan 3.31 ·
 //  orange 3.12 로 둘 다 4.5:1 에 못 미친다(실측으로 잡았다). 면·글자 모두 어두운 변형을 쓴다 —
 //  원색은 테두리·아이콘처럼 **글자가 얹히지 않는 자리**에만 남긴다.
+/** §4.4 `status` → 화면 낱말. ⚠️ 모르는 상태를 «정상» 으로 떨어뜨리지 않는다. */
+const NODE_STATUS_KO: Record<string, string> = {
+  normal: '정상', attention: '확인 필요', decision_required: '결정 필요',
+  blocked: '막힘', unknown: '확인 못 함',
+};
+
+/** §4.5 레이어 오버레이 — 각 층이 **무엇을 덮는가.**
+ *
+ *  ⚠️ 시안은 여기에 개별 자산(「판매계획 v12 · 승인」)을 적었다. 그러려면 노드별 자산
+ *    귀속이 있어야 하는데 아직 없다 — **없는 것을 적지 않는다.** 층이 덮는 범위만 적고,
+ *    자산이 붙는 날 이 상수가 자리를 물려준다. */
+const OVERLAY: { key: string; layer: Layer; tone: string; kicker: string; body: string }[] = [
+  { key: 'contract', layer: 'DATA', tone: 'data', kicker: 'DATA CONTRACT',
+    body: '인증판·데이터 계약' },
+  { key: 'app', layer: 'SW', tone: 'sw', kicker: '현업 생성 SW', body: '업무 키트 산출물 앱' },
+  { key: 'project', layer: 'SW', tone: 'sw', kicker: '현업 생성 SW', body: 'Software Factory 프로젝트' },
+  { key: 'live', layer: 'DATA', tone: 'data', kicker: 'LIVE SYSTEM', body: '연계 시스템 이벤트' },
+  { key: 'twin', layer: 'TWIN', tone: 'twin', kicker: 'DIGITAL TWIN', body: '시나리오·기준선' },
+];
+
+/** §5.1 Decision Focus 의 영향 4칸.
+ *
+ *  ⚠️ 시안의 `₩428억`·`8.0%` 는 `PROTOTYPE · SAMPLE DATA` 다. 채택 결정문이 「실제 API
+ *    근거가 있을 때만」을 못박았으므로 값은 비운다 — 자리는 지킨다. */
+const IMPACT_SLOTS: { label: string; tone: string }[] = [
+  { label: '예상 매출', tone: '' },
+  { label: '영업이익률', tone: 'risk' },
+  { label: '납기 준수율', tone: 'good' },
+  { label: '결정 신뢰도', tone: '' },
+];
+
 const LAYERS: { id: Layer; label: string; desc: string; color: string }[] = [
   { id: 'DATA', label: 'DATA', desc: '자산·Master·지식팩·외부지표·최신성',
     color: 'var(--ls-cyan-fg)' },
@@ -301,332 +325,284 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
     return () => { alive = false; };
   }, []);
   const scopeName = labelForScope(scopeNodes, ctx.scopeNodeId || '');
-  const card: React.CSSProperties = {
-    background: 'var(--surface-card)', border: '1px solid var(--surface-border)',
-    borderRadius: 8, padding: 18,           // §2.4 카드 내부 16~20
+
+  /** §4.2 대기열 한 줄의 «시각/도메인» — 시안의 `10:30 · 생산계획` 자리.
+   *
+   *  ⚠️ 도메인을 지어내지 않는다. 서버가 아직 항목에 단계를 싣지 않으므로 성격
+   *    (결정/막힘/자료/프로그램)을 적는다 — 빈칸으로 두면 무엇인지도 모른다. */
+  const SECTION_KO: Record<string, string> = {
+    my_decisions: '결정', blocked: '막힘', data_health: '자료', programs: '프로그램',
   };
+  const q = canvas?.decision_queue ?? [];
+  const decisions = q.filter((i) => i.section !== 'programs');
+  const programs = q.filter((i) => i.section === 'programs');
+  const focus = q.find((i) => i.ref === pickedNode) || decisions[0] || null;
 
   return (
-    /* ★ [설계 §3.1 · §9.2] 폭 규칙은 **인라인 style 로 쓸 수 없다** — 미디어 쿼리가 안 먹기
-       때문이다. 실측(1024px): 3열이 그대로 유지돼 문서 폭이 1206px 로 **가로 스크롤**이
-       생겼다. §9.2 는 1024~1279 구간에서 「Decision Queue 또는 Atlas 를 drawer 로 전환」
-       하라고 정했다. 클래스로 옮겨 폭 구간을 CSS 가 정하게 한다. */
-    <div className="afs-scope enterprise-canvas">
-      {/* ── ① 좌 280: Decision Queue (§4.2) · surface-warm ──────────────── */}
-      <aside style={{
-        background: 'var(--surface-sunken)', borderRight: '1px solid var(--surface-border)',
-        padding: 20, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <b style={{ fontSize: 15, color: 'var(--surface-text)' }}>의사결정 대기</b>
-          <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
-            {data.status === 'ok' ? `${rows.length}건` : ''}
-          </span>
-        </div>
+    /* ★★★ 승인 시안(`uiux-prototypes/master-concept/index.html`, 2026-07-30 채택)의
+       구조를 그대로 쓴다. 클래스 이름·배치·치수는 시안 CSS(`design/enterprise-canvas.css`)
+       에서 온다 — 여기서 인라인으로 다시 그리지 않는다.
+       ⚠️ 값은 실제 API 에서만 온다(채택 결정문). 시안 표본값을 옮겨 적지 않는다. */
+    <div className="le-canvas">
+      <div className="workspace">
+        {/* ── 좌 258: 역할 기반 의사결정 대기열 ─────────────────────────── */}
+        <aside className="work-rail">
+          <span className="rail-kicker">ENTERPRISE DECISION CENTER</span>
+          <h1>지금 결정해야 할<br />회사 업무입니다.</h1>
+          <p>권한과 역할에 맞춰 영향도가 높은 순서로 정리했습니다.</p>
 
-        {data.status !== 'ok' ? (
-          <EmptyOrError state={data.status} error={data.error}
-            emptyText="지금 답해야 할 것이 없습니다." onRetry={load} />
-        ) : rows.length === 0 ? (
-          <p style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>
-            지금 답해야 할 것이 없습니다.
-          </p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
-            {rows.map((r, i) => {
-              const sev = SEVERITY[r.severity] || SEVERITY.info;
-              const on = selected === r;
-              return (
-                <button key={`${r.ref}-${i}`}
-                  onClick={() => { if (selected === r) setDrawer(r); else setSelected(r); }}
-                  title="한 번 누르면 아래에 요약, 다시 누르면 상세를 엽니다"
-                  style={{
-                    minHeight: 84,                       // §4.2 행 높이 최소 84px
-                    textAlign: 'left', padding: '12px 14px', cursor: 'pointer',
-                    background: 'var(--surface-card)',
-                    border: '1px solid var(--surface-border)',
-                    // §2.4 «선택은 그림자보다 좌측 bar·border·배경 대비로»
-                    borderLeft: `4px solid ${on ? 'var(--ls-navy)' : 'transparent'}`,
-                    borderRadius: 8,
-                    display: 'flex', flexDirection: 'column', gap: 6,
-                  }}>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, padding: '1px 7px',
-                      borderRadius: 6, color: sev.fg, background: sev.bg }}>{sev.label}</span>
-                    <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
-                      {SECTION_LABELS[r.section as keyof typeof SECTION_LABELS] || r.section}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.4,
-                    color: 'var(--surface-text)' }}>{r.title}</span>
-                  <span style={{ fontSize: 12.5, lineHeight: 1.45,
-                    color: 'var(--surface-text-muted)' }}><ServerText text={r.why} /></span>
-                  {/* §4.2 필드: 담당 역할·기한. ⚠️ 서버가 주지 않는다 — 빈칸 대신 «미지정». */}
-                  <span style={{ fontSize: 12, color: 'var(--surface-text-faint)' }}>
-                    담당 미지정 · 기한 미지정
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </aside>
-
-      {/* ── 중앙: Digital Thread + 레이어 + Decision Focus + Trust ───────── */}
-      <main style={{ padding: 24, minWidth: 0, display: 'flex', flexDirection: 'column',
-        gap: 16 }}>
-        {/* ★★★ [2026-08-24 사용자 지적] **머리에 둔다.**
-            ⚠️ 종전에는 본문 **맨 아래**에 깔려 있었다. 「지금 무엇을 보고 있는가」
-              (기준시각·실행 문맥·조직)와 「여기서 할 수 있는 일」은 화면을 끝까지
-              내려야 보였고, 그래서 첫 화면에서 그 둘이 없는 것과 같았다. */}
-        <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
-          paddingBottom: 16, borderBottom: '1px solid var(--surface-border)',
-        }}>
-          <div style={{ fontSize: 12, fontFamily: 'var(--font-mono, monospace)',
-            color: 'var(--surface-text-muted)', textAlign: 'center' }}>
-            기준시각 {d?.generated_at ? new Date(d.generated_at).toLocaleString() : '—'}
-            {' · '}실행 문맥 {ctx.entityMode || 'REAL'} · {scopeName || '조직 미지정'}
-          </div>
-
-          {/* ★★★ [2026-08-24 사용자 지적] **핵심 넷을 꺼내 놓는다.**
-              「전체 메뉴」를 정리한 것은 찾을 수 있게 한 것이지 보이게 한 것이 아니다.
-              처음 여는 사람은 메뉴가 있다는 것조차 모른다. */}
-          <CoreJourney onOpen={onOpenMenu} />
-
-          {/* ★★★ [2026-08-24 사용자 지적] **두 줄을 눈으로 갈라 놓는다.**
-              위 넷은 «이 시스템의 일»이고, 아래 셋은 «다른 입구»다. 나란히 두었더니
-              상단에 같은 무게의 버튼이 일곱 개가 되어 어느 것이 본줄기인지 사라졌다.
-              ⚠️ 아래 셋을 없애지 않는다 — 없애면 그 기능을 찾을 길이 메뉴뿐이다.
-                **작게 하고 이름을 붙여** 다른 층이라는 것만 보이게 한다. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-            marginTop: 4 }}>
-            <span style={{ flex: 1, height: 1, background: 'var(--surface-border)' }} />
-            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em',
-              color: 'var(--surface-text-faint)' }}>다른 입구</span>
-            <span style={{ flex: 1, height: 1, background: 'var(--surface-border)' }} />
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap',
-            justifyContent: 'center' }}>
-          <button onClick={onOpenBuild} style={{
-            height: 34, padding: '0 14px', fontSize: 13, borderRadius: 6,
-            cursor: 'pointer', border: '1px solid var(--surface-border-control)',
-            background: 'transparent', color: 'var(--surface-text)',
-          }}>🏭 업무 SW 만들기</button>
-          <button onClick={() => onOpenMenu('advisor')} style={{
-            height: 34, padding: '0 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
-            border: '1px solid var(--surface-border-control)',
-            background: 'transparent', color: 'var(--surface-text)',
-          }}>🧭 무엇을 만들지 상담</button>
-          <button onClick={() => onOpenMenu('collaboration')} style={{
-            height: 34, padding: '0 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
-            border: '1px solid var(--surface-border-control)',
-            background: 'transparent', color: 'var(--surface-text)',
-          }}>🤝 협업·의사결정·발간</button>
-          </div>
-        </div>
-
-        {/* §5.1 KPI 최대 4개 — KPI 22px 이상(§1.3) */}
-        <div style={{ display: 'grid', gap: 16,
-          gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
-          {kpis.map((k) => (
-            <div key={k.label} style={card}>
-              <div style={{ fontSize: 12.5, color: 'var(--surface-text-muted)' }}>{k.label}</div>
-              {/* §1.3 KPI 22px 이상 */}
-              <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.2, marginTop: 2,
-                color: 'var(--surface-text)' }}>
-                {/* ⚠️ 「모른다」를 0 으로 쓰지 않는다 — 0 은 «없다» 이고 «못 셌다» 와 다르다. */}
-                {k.value === null || k.value === undefined ? '—' : k.value}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 2 }}>
-                {k.hint}
-              </div>
+          <section className="queue">
+            <div className="queue-label">
+              <span>의사결정 대기</span>
+              <b>{canvasErr ? '—' : String(decisions.length).padStart(2, '0')}</b>
             </div>
-          ))}
-        </div>
+            {canvasErr ? (
+              <p style={{ padding: '12px 2px', fontSize: 11, color: 'var(--ls-red)' }}>
+                {canvasErr}
+              </p>
+            ) : !canvas ? (
+              <p style={{ padding: '12px 2px', fontSize: 11 }}>불러오는 중…</p>
+            ) : decisions.length === 0 ? (
+              <p style={{ padding: '12px 2px', fontSize: 11, color: '#6e7480' }}>
+                지금 답해야 할 것이 없습니다.
+              </p>
+            ) : decisions.map((it) => (
+              <button
+                key={`${it.kind}-${it.ref}-${it.title}`}
+                className={`decision${it.severity === 'high' ? ' urgent' : ''}`
+                  + (focus === it ? ' selected' : '')}
+                onClick={() => setPickedNode(it.ref)}
+              >
+                <small>{SECTION_KO[it.section] || it.section}</small>
+                <b>{it.title}</b>
+                <span><ServerText text={it.why} /></span>
+              </button>
+            ))}
 
-        {/* ── ② Enterprise Digital Thread + ③ DATA/SW/TWIN 레이어 ───────── */}
-        <section style={card}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div className="queue-label">
+              <span>진행 중인 제품</span>
+              <b>{canvasErr ? '—' : String(programs.length).padStart(2, '0')}</b>
+            </div>
+            {programs.length === 0 ? (
+              <p style={{ padding: '12px 2px', fontSize: 11, color: '#6e7480' }}>
+                진행 중인 것이 없습니다.
+              </p>
+            ) : programs.map((it) => (
+              <button key={`p-${it.ref}-${it.title}`} className="decision"
+                onClick={() => onOpenMenu('workspace')}>
+                <small>PROGRAM</small>
+                <b>{it.title}</b>
+                <span><ServerText text={it.why} /></span>
+              </button>
+            ))}
+          </section>
+
+          <div className="rail-tools">
+            <button onClick={() => onOpenMenu('dataprep')}>전체 업무 공간</button>
+            <button onClick={onOpenBuild}>내 SW·시뮬레이터</button>
+            <button onClick={() => onOpenMenu('dataprep')}>데이터 준비 상태</button>
+          </div>
+        </aside>
+
+        {/* ── 중앙: Enterprise Digital Thread ───────────────────────────── */}
+        <section className="canvas">
+          <header className="canvas-head">
             <div>
-              {/* ★ 승인 시안의 제목을 그대로 쓴다 — 「업무 흐름」은 우리가 붙인 이름이었다. */}
-              <b style={{ fontSize: 15, color: 'var(--surface-text)' }}>
-                ENTERPRISE DIGITAL THREAD
-              </b>
-              <div style={{ fontSize: 12.5, color: 'var(--surface-text-muted)', marginTop: 2 }}>
-                업무·데이터·AI 가 하나의 경영 결과로 이어집니다 — 수주에서 손익까지 일곱 단계.
-              </div>
+              <small>LIVE ENTERPRISE THREAD</small>
+              <h2>업무·데이터·AI가 하나의 경영 결과로 이어집니다.</h2>
             </div>
             {/* §4.5 LayerOverlay — 모두 끄는 것도 허용한다 */}
-            <div style={{ display: 'flex', gap: 8 }}>
-              {LAYERS.map((l) => {
-                const on = layers.includes(l.id);
+            <div className="view-switch">
+              {LAYERS.map((l) => (
+                <button key={l.id} title={l.desc}
+                  className={layers.includes(l.id) ? 'active' : ''}
+                  onClick={() => setLayers((prev) => prev.includes(l.id)
+                    ? prev.filter((x) => x !== l.id) : [...prev, l.id])}>
+                  {l.label}
+                </button>
+              ))}
+            </div>
+            <div className="context-stats">
+              {kpis.map((k) => (
+                <div key={k.label}>
+                  {/* ⚠️ 「모른다」를 0 으로 쓰지 않는다 — 0 은 «없다» 이고 «못 셌다» 와 다르다. */}
+                  <b>{k.value === null || k.value === undefined ? '—' : k.value}</b>
+                  <span>{k.label}</span>
+                </div>
+              ))}
+            </div>
+          </header>
+
+          <div className="enterprise-thread">
+            <span className="thread-label">
+              <b>ENTERPRISE DIGITAL THREAD</b> · 실제 운영 기준
+            </span>
+
+            {/* 흐름선 — 시안의 «살아 있는» 인상. ⚠️ 장식이므로 스크린리더에서 숨긴다. */}
+            <svg className="flow-svg" viewBox="0 0 1000 170" preserveAspectRatio="none"
+              aria-hidden="true">
+              <path className="flow-base" d="M40 40 H960" />
+              <path className="flow-live" d="M40 40 H960" />
+              <path className="flow-data" d="M40 96 H960" />
+            </svg>
+
+            {/* §4.4 DomainNode — 일곱 단계 */}
+            <div className="processes">
+              {(canvas?.domain_nodes ?? []).map((n) => {
+                const on = pickedNode === n.id;
                 return (
-                  <button key={l.id} title={l.desc}
-                    onClick={() => setLayers((prev) => prev.includes(l.id)
-                      ? prev.filter((x) => x !== l.id) : [...prev, l.id])}
-                    style={{
-                      fontSize: 13, height: 36, padding: '0 14px', borderRadius: 6,  // §1.3
-                      cursor: 'pointer',
-                      border: `1px solid ${on ? l.color : 'var(--surface-border)'}`,
-                      background: on ? l.color : 'var(--surface-card)',
-                      color: on ? '#fff' : 'var(--surface-text-muted)',
-                      fontWeight: on ? 700 : 500,
-                    }}>
-                    {l.label}
+                  <button key={n.id}
+                    className={`process${on ? ' active' : ''}`}
+                    title={n.reason || n.label}
+                    onClick={() => setPickedNode(on ? '' : n.id)}>
+                    <span className="process-dot">
+                      {String(n.sequence).padStart(2, '0')}
+                    </span>
+                    <b>{n.label}</b>
+                    <small>{n.systems}</small>
+                    {/* ⚠️ 시안의 `수요 +3%` 는 표본값이다. 근거가 없으면 **상태**로 답한다 —
+                        지어낸 숫자가 한 번 뜨면 그것이 실적으로 읽힌다. */}
+                    <em>{n.primary_metric
+                      ? `${n.primary_metric.label} ${n.primary_metric.value}`
+                      : NODE_STATUS_KO[n.status] || '확인 못 함'}</em>
                   </button>
                 );
               })}
             </div>
-          </div>
 
-          {/* §4.3–4.4 Enterprise Digital Thread — 승인 시안의 일곱 단계 */}
-          {canvasErr ? (
-            <p style={{ fontSize: 13, color: 'var(--state-error-fg)' }}>{canvasErr}</p>
-          ) : !canvas ? (
-            <p style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>불러오는 중…</p>
-          ) : (
-            <EnterpriseThread
-              nodes={canvas.domain_nodes}
-              selected={pickedNode}
-              onSelect={setPickedNode}
-              systemsVerified={canvas.systems_verified} />
-          )}
-          {/* ★ 종전 「공정 프로필이 없어 조직 트리로 대체합니다」 안내를 지웠다 —
-              이제 대체가 아니라 시안이 정한 일곱 단계를 그린다. */}
-        </section>
-
-        {/* Decision Focus */}
-        <section style={{ ...card, minHeight: 180 }}>
-          <div style={{ fontSize: 12, letterSpacing: '.08em',
-            color: 'var(--surface-text-faint)', fontFamily: 'var(--font-mono, monospace)' }}>
-            DECISION FOCUS
-          </div>
-          {!selected ? (
-            <p style={{ fontSize: 14, color: 'var(--surface-text-muted)', marginTop: 8 }}>
-              왼쪽에서 하나를 고르면 여기에 근거와 다음 행동이 나옵니다.
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
-              <h2 style={{ fontSize: 18, margin: 0, lineHeight: 1.4,
-                color: 'var(--surface-text)' }}>{selected.title}</h2>
-              <p style={{ fontSize: 14, margin: 0, lineHeight: 1.6,
-                color: 'var(--surface-text)' }}><ServerText text={selected.why} /></p>
-              {selected.suggested_action && (
-                <div style={{ background: 'var(--surface-raised)',
-                  border: '1px solid var(--surface-border)', borderRadius: 8, padding: 16 }}>
-                  <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>다음 행동</div>
-                  <div style={{ fontSize: 14, marginTop: 2,
-                    color: 'var(--surface-text)' }}>
-                    <ServerText text={selected.suggested_action} />
-                  </div>
+            {/* §4.5 레이어 오버레이 — 지금은 각 층이 «무엇을 덮는가» 만 말한다.
+                ⚠️ 시안처럼 개별 자산(「판매계획 v12 · 승인」)을 적으려면 노드별 자산
+                  귀속이 있어야 한다. 없는 것을 적지 않는다. */}
+            <div className="overlay-strip">
+              {OVERLAY.map((o) => (
+                <div key={o.key}
+                  className={`overlay-item ${o.tone}`}
+                  style={layers.includes(o.layer) ? undefined
+                    : { opacity: .13, filter: 'grayscale(1)' }}>
+                  <small>{o.kicker}</small>
+                  <b>{o.body}</b>
                 </div>
-              )}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <button onClick={() => setDrawer(selected)} style={{
-                  height: 36, padding: '0 16px', fontSize: 13, fontWeight: 700, borderRadius: 6,
-                  cursor: 'pointer', border: '1px solid var(--ls-navy)',
-                  background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
-                }}>상세 열기</button>
-                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono, monospace)',
-                  color: 'var(--surface-text-faint)' }}>
-                  {selected.ref_type ? `${selected.ref_type} · ` : ''}{selected.ref || 'ref 없음'}
-                </span>
-              </div>
+              ))}
             </div>
-          )}
-        </section>
 
-        {/* ── ④ Trust Foundation (§4.6) — 숫자보다 «상태의 완전성» 을 먼저 ── */}
-        <section>
-          <div style={{ fontSize: 12, letterSpacing: '.08em', marginBottom: 8,
-            color: 'var(--surface-text-faint)', fontFamily: 'var(--font-mono, monospace)' }}>
-            TRUST FOUNDATION
-          </div>
-          <div style={{ display: 'grid', gap: 16,
-            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
-            {trust.map((c) => (
-              <div key={c.key} style={{
-                ...card,
-                borderLeft: `4px solid ${c.state === 'error' ? 'var(--state-error-fg)'
-                  : c.state === 'warn' ? 'var(--state-warn-fg)'
-                    : c.state === 'ok' ? 'var(--state-success-fg)' : 'var(--state-unknown-fg)'}`,
-              }}>
-                <div style={{ fontSize: 14, fontWeight: 700,
-                  color: 'var(--surface-text)' }}>{c.title}</div>
-                <div style={{ fontSize: 13, marginTop: 6,
-                  color: 'var(--surface-text)' }}><ServerText text={c.headline} /></div>
-                {c.detail && (
-                  <div style={{ fontSize: 12, marginTop: 4,
-                    color: 'var(--surface-text-muted)' }}><ServerText text={c.detail} /></div>
-                )}
-                {c.warn && (
-                  <div style={{ fontSize: 12, marginTop: 8, color: 'var(--state-warn-fg)' }}>
-                    ⚠️ <ServerText text={c.warn} />
+            {/* §5.1 Decision Focus */}
+            <article className="focus-panel">
+              <div className="focus-copy">
+                <small>
+                  DECISION POINT{focus ? ` · ${SECTION_KO[focus.section] || ''}` : ''}
+                </small>
+                <h3>{focus ? focus.title : '지금 답해야 할 것이 없습니다.'}</h3>
+                <p>{focus
+                  ? <ServerText text={focus.why} />
+                  : '대기열이 비어 있습니다 — 새 항목이 생기면 여기에 먼저 보입니다.'}</p>
+                {focus && (
+                  <div className="focus-actions">
+                    <button className="main" onClick={() => setDrawer(focus as QueueRow)}>
+                      자세히 보고 처리
+                    </button>
+                    <button onClick={() => onOpenMenu('path-calc')}>영향 계산 열기</button>
+                    <button onClick={() => onOpenMenu('decision-pkg')}>의사결정 안건</button>
                   </div>
                 )}
               </div>
-            ))}
+              {/* ⚠️ 시안의 매출·이익률·납기·신뢰도는 표본값이다. 지금 경로 계산은 부족량·
+                  생산가능량·매출이연을 내고, 그것을 여기 실으려면 계산을 돌려야 한다.
+                  ★ 그래서 **무엇을 눌러야 채워지는지**를 적는다 — 빈 「—」만 두면 고장으로 읽힌다. */}
+              <div className="impact">
+                {IMPACT_SLOTS.map((s) => (
+                  <div key={s.label} className={s.tone}>
+                    <span>{s.label}</span>
+                    <b>—</b>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </div>
+
+          {/* §4.6 Trust Foundation */}
+          <section className="foundation">
+            <div className="foundation-title">
+              <small>TRUST FOUNDATION</small>
+              <b>이 결과의 기반</b>
+            </div>
+            <div className="layers">
+              {trust.map((c) => (
+                <div key={c.key} className="layer">
+                  <small>{c.title}</small>
+                  <b>
+                    <i style={c.state === 'ok' ? undefined : {
+                      background: c.state === 'error' ? 'var(--ls-red)' : '#d39a58',
+                    }} />
+                    {c.headline}
+                  </b>
+                  <span>{c.warn || c.detail}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <div className="status-bar">
+            <span>권한 <b>{scopeName || '권한 범위 전체'}</b></span>
+            <span>실행 문맥 <b>{ctx.entityMode || 'REAL'}</b></span>
+            <span>기준시각 <b>
+              {d?.generated_at ? new Date(d.generated_at).toLocaleString() : '—'}
+            </b></span>
+            {/* ⚠️ 비용은 설계서상 Agent 화면의 값이다. 시안 상태바에는 있으므로 자리만
+                지키되, 못 읽으면 «—» 다(0 이 아니다). */}
+            <span className="cost">LLM COST <b>{
+              (canvas?.cost_summary as any)?.cost_usd != null
+                ? `$${Number((canvas!.cost_summary as any).cost_usd).toFixed(2)}`
+                : '—'
+            }</b></span>
           </div>
         </section>
 
-      </main>
+        {/* ── 우 328: Atlas ─────────────────────────────────────────────── */}
+        <aside className="atlas-rail">
+          <JarvisRail
+            contextTitle="경영 홈"
+            contextDescription="지금 답해야 할 것과 그 근거를 봅니다."
+            context={{
+              current_module: 'enterprise',
+              selected_object_type: focus?.ref_type || '',
+              selected_object_id: focus?.ref || '',
+              object_snapshot: {
+                ...(focus
+                  ? { title: focus.title, severity: focus.severity, section: focus.section }
+                  : {}),
+                업무_데이터_준비도: readiness === null
+                  ? '조회 실패 — 지금 확인하지 못했습니다(없다는 뜻이 아닙니다)'
+                  : readiness,
+              },
+              available_actions: [],
+              evidence_refs: [],
+            }}
+            evidence={canvas ? [
+              { label: '결정 대기', value: `${decisions.length}건` },
+              { label: '업무 단계', value: `${canvas.domain_nodes.length}단계` },
+              { label: '업무 데이터',
+                value: readiness === null ? '확인하지 못함'
+                  : readiness.length === 0 ? '적용된 업무키트 없음'
+                    : readiness.map((x: any) => `${x.업무키트} ${x.준비상태}`).join(' · ') },
+            ] : []}
+            quickQuestions={[
+              '원료 도입계획을 관리하려면 무엇이 필요한가?',
+              '왜 이 판단입니까?',
+              '데이터가 부족합니까?',
+              '관련 SW·에이전트 상태는 어떻습니까?',
+              '시나리오로 보면 어떻게 됩니까?',
+            ]} />
+        </aside>
+      </div>
 
-      {/* ── ⑤ 우 360: Atlas (§4.7) ──────────────────────────────────────── */}
-      <aside style={{ borderLeft: '1px solid var(--surface-border)', minWidth: 0, padding: 12 }}>
-        <JarvisRail
-          contextTitle="경영 홈"
-          contextDescription="지금 답해야 할 것과 그 근거를 봅니다."
-          context={{
-            current_module: 'enterprise',
-            selected_object_type: selected?.ref_type || '',
-            selected_object_id: selected?.ref || '',
-            object_snapshot: {
-              ...(selected
-                ? { title: selected.title, severity: selected.severity,
-                    section: selected.section }
-                : { queue: rows.length, layers }),
-              //: ★★★ 준비도를 함께 싣는다. 이것이 없으면 비서는 「무엇이 필요한가」에
-              //:   답할 재료가 없다.
-              //: ⚠️ 못 읽었으면 **그렇게 적는다** — 빈 배열로 실으면 비서가 「업무
-              //:   데이터가 없습니다」라고 단정한다.
-              업무데이터_준비도: readiness === null
-                ? '조회 실패 — 지금 확인하지 못했습니다(없다는 뜻이 아닙니다)'
-                : readiness,
-            },
-            available_actions: [],
-            evidence_refs: [],
-          }}
-          evidence={data.status === 'ok' ? [
-            { label: '결정 대기', value: `${rows.length}건` },
-            { label: '업무 노드', value: `${nodes.length}개` },
-            //: ★ 사람도 같은 근거를 본다 — 비서만 아는 값이 있으면 답을 검증할 수 없다.
-            { label: '업무 데이터',
-              value: readiness === null ? '확인하지 못함'
-                : readiness.length === 0 ? '적용된 업무키트 없음'
-                  : readiness.map((x: any) => `${x.업무키트} ${x.준비상태}`).join(' · ') },
-          ] : []}
-          quickQuestions={[
-            //: ★ 로드맵 §3 의 2번 칸이 정한 질문을 화면이 먼저 제안한다.
-            '원료 도입계획을 관리하려면 무엇이 필요한가?',
-            '왜 이 판단입니까?',
-            '데이터가 부족합니까?',
-            '관련 SW·에이전트 상태는 어떻습니까?',
-            '시나리오로 보면 어떻게 됩니까?',
-          ]} />
-      </aside>
-
-      {/* §5.1 Decision Drawer — 520px · Summary→Impact→Evidence→Related→Approval→History */}
+      {/* §5.1 Decision Drawer — 520px */}
       {drawer && (
         <DecisionDrawer item={drawer} onClose={() => setDrawer(null)}
           onOpenRef={(refType) => {
-            //: 참조 종류로 «어느 화면으로 가야 하는가» 를 정한다. 모르는 종류는 서랍을 닫지
-            //: 않는다 — 아무 데도 못 가면서 화면만 닫히면 사용자는 무엇이 됐는지 모른다.
             const t = (refType || '').toLowerCase();
             if (t.includes('release') || t.includes('promotion')) onOpenMenu('workspace');
             else if (t.includes('contract') || t.includes('data')) onOpenMenu('governance');
-            else if (t.includes('agent') || t.includes('asset')) onOpenMenu('agentgov');
+            else if (t.includes('agent') || t.includes('asset')) onOpenMenu('agent-gov');
             else onOpenMenu('briefing');
           }} />
       )}
