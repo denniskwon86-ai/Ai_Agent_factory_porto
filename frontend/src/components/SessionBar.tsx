@@ -20,7 +20,19 @@ type Me = {
   is_admin?: boolean; is_data_admin?: boolean;
 };
 
-export function SessionBar({ onGoToOrg }: {
+/**
+ * ★ [2026-08-25] `openConsole` 를 **밖에서 열 수 있게** 했다.
+ *
+ * ⚠️ 승인 시안의 상단 셸에는 ⚙ 버튼이 셸 자체에 있다(`afs-icon-action`). 그런데 관리자
+ *   콘솔은 이 컴포넌트가 자기 상태로 들고 있어서 셸이 열 방법이 없었다.
+ * ★ 상태를 옮기지 않고 **문을 하나 낸다** — 여기 있는 이유(내 정보·로그아웃과 한 묶음)는
+ *   그대로 두고, 셸이 부를 수 있게만 한다.
+ */
+export function SessionBar({ onGoToOrg, openConsole, onConsoleHandled }: {
+  /** 밖(셸의 ⚙)에서 열라는 신호. ⚠️ 열고 나면 `onConsoleHandled` 로 되돌린다 —
+   *  안 되돌리면 콘솔을 닫아도 다시 열린다. */
+  openConsole?: boolean;
+  onConsoleHandled?: () => void;
   /** ★ 관리자 콘솔의 「조직·권한 화면 열기」 — 여기까지 이어 준다.
    *  ⚠️ 콘솔이 스스로 열 수 없다. 어느 화면을 여는가는 App 이 쥔 상태다. */
   onGoToOrg: () => void;
@@ -29,6 +41,9 @@ export function SessionBar({ onGoToOrg }: {
   //: [설계 §5.8] 「**상단 사용자 영역의 `환경설정·관리자` 에서 진입**하며 일반 업무
   //  내비게이션과 혼합하지 않는다」 — 그래서 좌측 업무 레일이 아니라 여기서만 연다.
   const [console_, setConsole] = useState(false);
+  useEffect(() => {
+    if (openConsole) { setConsole(true); onConsoleHandled?.(); }
+  }, [openConsole, onConsoleHandled]);
 
   useEffect(() => {
     let alive = true;
@@ -67,17 +82,17 @@ export function SessionBar({ onGoToOrg }: {
         <span className="state-chip warn" style={{ fontSize: 12 }}
           title="초기 비밀번호를 사용 중입니다 — 바꾸십시오.">초기 비밀번호</span>
       )}
-      {/* ⚠️ [2026-08-23] 좁은 폭에서는 **글자만 접고 아이콘을 남긴다**(`afs-bar-label`).
-          버튼 자체를 지우면 로그아웃할 방법이 화면에서 사라진다 — 접는 것과 없애는 것은 다르다.
-          `title`/`aria-label` 은 그대로 두어 무엇인지 계속 읽힌다. */}
-      <button className="secondary-button" onClick={() => setConsole(true)}
-        style={{ fontSize: 12, padding: '4px 10px' }} aria-label="환경설정 · 관리자"
-        title="개인 설정과 전사 관리 — 업무 화면과 분리되어 있습니다">
-        ⚙️ <span className="afs-bar-label">환경설정 · 관리자</span>
-      </button>
+      {/* ★★★ [2026-08-25] **⚙ 을 여기서 뺐다 — 셸에 이미 있다.**
+          ⚠️⚠️ 실측: 상단 행동 칸에 ⚙ 이 **두 개**였다(셸 38px + 여기 131px). 같은 콘솔을
+            여는 버튼이 나란히 둘 있으면 사용자는 둘이 다른 것이라고 읽는다. 그리고 그
+            131px 이 전역 내비를 눌렀다.
+          ★ 여는 방법은 그대로다 — 셸의 ⚙ 이 `openConsole` 로 이 컴포넌트를 부른다.
+          ⚠️ [2026-08-23] 로그아웃은 **글자만 접고 아이콘을 남긴다**. 버튼 자체를 지우면
+            로그아웃할 방법이 화면에서 사라진다 — 접는 것과 없애는 것은 다르다.
+            `title`/`aria-label` 은 그대로라 무엇인지 계속 읽힌다. */}
       <button className="secondary-button" onClick={logout} aria-label="로그아웃"
-        title="로그아웃" style={{ fontSize: 12, padding: '4px 10px' }}>
-        ⏻ <span className="afs-bar-label">로그아웃</span>
+        title="로그아웃" style={{ fontSize: 12, padding: '4px 8px' }}>
+        ⏻
       </button>
 
       {console_ && <AdminConsolePanel me={me} onClose={() => setConsole(false)}

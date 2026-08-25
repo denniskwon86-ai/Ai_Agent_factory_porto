@@ -49,7 +49,9 @@ import { ScenarioPanel } from './components/ScenarioPanel';
 import { DecisionPanel } from './components/DecisionPanel';
 // [I-4 7 / Wave H-4] 운영 승격 — 후보를 운영으로 올리는 단 하나의 문
 import { ReleasePromotionPanel } from './components/ReleasePromotionPanel';
-import { CompanyContextBar } from './components/CompanyContextBar';
+import { ProductShell } from './components/ProductShell';
+import { getEnterpriseContext } from './lib/api';
+import { fetchScopeNodes, labelForScope, type ScopeNode } from './lib/scopeLabel';
 import { BuildPage } from './components/BuildPage';
 import { BuildStartDialog } from './components/BuildStartDialog';
 import { Banner } from './design/HubShell';
@@ -221,6 +223,22 @@ function AppShell() {
   //   「내보내는 것」·「누가 판단하는가」로 나눴다.
   // ⚠️ 항목을 **빼거나 더하지 않았다** — 20개 그대로다. 묶음과 순서만 바꿨다.
   //   (숨기는 것은 통제가 아니다. 권한은 서버 `route_authority` 표가 막는다.)
+  //: ★ 상단 셸이 쓰는 문맥. ⚠️ 회사·범위 이름은 **한 곳**에서 얻는다
+  //:   (`lib/scopeLabel`) — 화면마다 따로 풀면 같은 것이 두 이름으로 보인다.
+  const [openConsole, setOpenConsole] = useState(false);
+  const [shellScopes, setShellScopes] = useState<ScopeNode[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void fetchScopeNodes().then((r) => { if (alive) setShellScopes(r); });
+    return () => { alive = false; };
+  }, []);
+  const _ectx = getEnterpriseContext();
+  const shellCtx = {
+    company: _ectx.tenantId || '',
+    scope: labelForScope(shellScopes, _ectx.scopeNodeId || ''),
+    entityMode: (_ectx.entityMode || 'REAL').toUpperCase(),
+  };
+
   const navGroups: NavGroup[] = [
     {
       title: '핵심 여정 — 이 넷을 순서대로',
@@ -507,18 +525,37 @@ function AppShell() {
                 그대로 써서 어두운 바에 얹힌다 — 로그인한 사람 이름「권희권」이 2.22:1,
                 구분자 `│` 가 1.01:1 로 측정됐다(사실상 안 보인다).
                 ★ 배경·테두리는 아래 인라인이 이미 정하므로 클래스는 **재해석만** 켠다. */}
-          <header className="afs-topbar" style={{
-            height: 72, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            gap: 16, padding: '0 24px', position: 'sticky', top: 0, zIndex: 20,
-            background: 'linear-gradient(90deg, var(--bar-bg-from), var(--bar-bg-to))',
-            borderBottom: '1px solid var(--bar-border)', color: 'var(--bar-fg)',
-          }}>
-            <CompanyContextBar />
-            <div className="flex items-center gap-3 min-w-0">
-              <SessionBar onGoToOrg={() => setShowOrgChart(true)} />
+          {/* ★★★ [2026-08-25] 승인 시안의 상단 셸을 **그대로** 쓴다.
+              ⚠️ 종전에는 우리가 만든 72px 바에 회사문맥바+세션바+검색메뉴를 나열했다 —
+                높이도 색도 배치도 시안과 달랐다(사용자 지적). 시안은 네 칸 그리드다:
+                브랜드 210 · 회사 문맥 270 · 전역 내비 1fr · 행동 auto. */}
+          <ProductShell
+            module="enterprise"
+            company={shellCtx.company}
+            scope={shellCtx.scope}
+            entityMode={shellCtx.entityMode}
+            onNav={(id) => {
+              //: 시안의 7개 목적지 → 이 앱의 화면. ⚠️ 아직 없는 곳은 가장 가까운 화면으로
+              //:   보내되 **조용히 아무 일도 없게** 두지 않는다.
+              if (id === 'enterprise') return;
+              if (id === 'factory') { setSpace('build'); return; }
+              const MAP: Record<string, string> = {
+                operate: 'workspace', twin: 'scenario', report: 'collaboration',
+                knowledge: 'knowledge', agent: 'agents',
+              };
+              const hit = [...primaryNav, ...navGroups.flatMap((g) => g.items)]
+                .find((it) => it.id === MAP[id]);
+              if (hit) hit.onSelect();
+            }}
+            onContext={() => setShowOrgChart(true)}
+            onSettings={() => setOpenConsole(true)}
+            onNewWork={() => setSpace('build')}
+            right={<>
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)}
+                openConsole={openConsole}
+                onConsoleHandled={() => setOpenConsole(false)} />
               <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
-            </div>
-          </header>
+            </>} />
           <EnterprisePage
             onOpenBuild={() => setSpace('build')}
             //: ⚠️ 여기서 id 를 **하나씩 손으로** 잇지 않는다 — 종전에 그렇게 두었다가

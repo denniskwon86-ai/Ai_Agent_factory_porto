@@ -119,7 +119,9 @@ export function GlobalNav({ primary, groups, right }: {
   //: 닫으면 다음에 깨끗한 상태로 열린다 — 지난 검색어가 남아 「기능이 없다」로 보이면 안 된다.
   useEffect(() => { if (!open) { setQ(''); setCursor(0); } }, [open]);
 
-  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  //: ★ 개수는 **패널이 실제로 담는 것**을 센다 — 1차 셋을 넣었으므로 함께 센다.
+  //: ⚠️ 세는 것과 보여 주는 것이 갈리면 「20이라 적혀 있는데 23개」가 된다.
+  const total = groups.reduce((n, g) => n + g.items.length, 0) + primary.length;
 
   /** 검색어로 좁힌 뒤, 화면에 그릴 줄(그룹 머리 + 항목)로 편다.
    *
@@ -132,7 +134,13 @@ export function GlobalNav({ primary, groups, right }: {
   //:   ↑↓ 는 그룹을 넘어 이어져야 한다.
   const sections: { title: string; rows: { item: NavItem; idx: number }[] }[] = [];
   const flat: NavItem[] = [];
-  for (const g of groups) {
+  //: ★★★ [2026-08-25] **1차 항목을 패널에 넣는다.**
+  //:
+  //: ⚠️⚠️ 종전에는 1차 셋(상담·협업·브리핑)이 **상단 바에만** 있었다. 그 상태로 바를
+  //:   접으면 그 셋으로 가는 길이 화면에서 사라진다 — 「접는 것」과 「없애는 것」은
+  //:   다르다. 그래서 접기 전에 갈 곳을 먼저 만든다.
+  //: ★ 검색·↑↓·Enter 도 그대로 걸린다(같은 `flat` 에 들어가므로).
+  for (const g of [{ title: '자주 쓰는 입구', items: primary }, ...groups]) {
     const hit = needle
       ? g.items.filter((it) => (it.label + ' ' + it.desc).toLowerCase().includes(needle))
       : g.items;
@@ -175,19 +183,11 @@ export function GlobalNav({ primary, groups, right }: {
             **내용이 실제로 들어가는 폭**에서 정해야 한다. 재 보고 `2xl`(1536)로 올렸다.
           ⚠️ 아이콘만 남으면 무슨 버튼인지 알 수 없으므로 `aria-label` 로 이름을 남긴다 —
             보이지 않게 하는 것과 **없애는 것**은 다르다(스크린리더·키보드 사용자). */}
-      {primary.map((it, i) => (
-        <button
-          key={it.id}
-          onClick={it.onSelect}
-          title={it.desc}
-          aria-label={it.label}
-          className={i === 0
-            ? 'shrink-0 text-[13px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 px-2 py-2 rounded-lg transition-all'
-            : 'shrink-0 text-[13px] font-bold text-gray-200 bg-white/10 hover:bg-white/20 border border-white/20 px-2 py-2 rounded-lg transition-all'}
-        >
-          {it.icon} <span className="hidden 2xl:inline">{it.label}</span>
-        </button>
-      ))}
+      {/* ★★★ [2026-08-25] 1차 아이콘 셋을 **바에서 뺐다.** 승인 시안의 행동 칸은
+          `[⚙][＋ 새 업무]` 뿐인데, 우리는 여기에 사용자 정보·전체 메뉴·1차 셋까지
+          밀어 넣어 **713px** 을 썼다(시안 125px). 그 결과 전역 내비가 828 → 470 으로
+          눌렸다 — 시안과 「딱 봐도 다른」 것의 절반이 이것이었다.
+          ★ 없앤 것이 아니라 **패널로 옮겼다**(위 `자주 쓰는 입구`). */}
 
       {/* ── 전체 메뉴 ───────────────────────────────────────────────────── */}
       <button
@@ -215,7 +215,7 @@ export function GlobalNav({ primary, groups, right }: {
             position: 'fixed', top: pos.top, left: pos.left, width: pos.width,
             maxHeight: pos.maxH, zIndex: 70,
           }}
-          className="afs-product-shell afs-global-menu flex flex-col overflow-hidden
+          className="afs-palette afs-global-menu flex flex-col overflow-hidden
                      bg-gray-900 border border-gray-700 rounded-xl shadow-2xl"
         >
           {/* ── 찾기 ─────────────────────────────────────────────────────

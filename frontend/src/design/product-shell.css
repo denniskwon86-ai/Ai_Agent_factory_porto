@@ -1,14 +1,257 @@
+/**
+ * 제품 셸 — **승인 시안의 원본을 그대로 가져왔다.**
+ *
+ * 원본: `uiux-prototypes/product-shell.css` (Living Enterprise Canvas 시안이 쓰는 것)
+ *
+ * ⚠️⚠️ [2026-08-25 사용자 지적] 「딱 봐도 시안이랑 다르지 않나요? 상단의 메뉴도 그렇고…」
+ *   상단 바를 우리가 따로 만들어 쓰고 있었다. 시안은 `afs-brand`·`afs-context`·
+ *   `afs-global-nav`·`afs-shell-actions` 네 칸짜리 그리드인데, 우리는 회사문맥바 +
+ *   세션바 + 검색 메뉴를 나열했다 — 높이도 색도 배치도 달랐다.
+ * ★ 손으로 맞추지 않고 **원본 파일을 가져온다.** 맞춰 그리면 그 순간부터 또 갈라진다.
+ * ⚠️ 아래 「앱에서 더한 것」 구역만 우리 것이다. 시안 구역을 고치지 않는다 —
+ *   시안이 바뀌면 그 파일을 **다시 가져온다.**
+ */
+
+/* ─────────────────────────────────────────────────────────────────────────
+   여기부터 시안 원본 (uiux-prototypes/product-shell.css)
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+  --afs-brand: #0a1e5a;
+  --afs-accent: #fa002d;
+  --afs-data: #009bb4;
+  --afs-ink: #101a2d;
+  --afs-line: #d8dbe1;
+  --afs-font: Pretendard, "Noto Sans KR", "Segoe UI", Arial, sans-serif;
+}
+
+html, body { min-width: 1240px !important; }
+
+.afs-product-shell {
+  position: sticky;
+  top: 0;
+  z-index: 10000;
+  display: grid;
+  grid-template-columns: 210px 270px minmax(520px, 1fr) auto;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  height: 74px;
+  padding: 0 20px;
+  color: #fff;
+  background: linear-gradient(100deg, #071747 0%, var(--afs-brand) 58%, #102f70 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, .14);
+  box-shadow: 0 4px 18px rgba(7, 23, 71, .22);
+  font-family: var(--afs-font);
+}
+
+.afs-product-shell *,
+.afs-product-shell *::before,
+.afs-product-shell *::after { box-sizing: border-box; }
+
+.afs-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  color: #fff;
+  text-decoration: none;
+}
+
+.afs-brand-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--afs-accent);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: -.04em;
+}
+
+.afs-brand-copy { min-width: 0; }
+.afs-brand-copy b,
+.afs-brand-copy small { display: block; }
+.afs-brand-copy b { font-size: 15px; letter-spacing: -.02em; white-space: nowrap; }
+.afs-brand-copy small { margin-top: 3px; color: #aebee0; font-size: 10px; font-weight: 750; letter-spacing: .09em; }
+
+.afs-context {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  margin: 11px 0;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, .17);
+  border-radius: 6px;
+  color: #fff;
+  background: rgba(255, 255, 255, .06);
+  text-align: left;
+  text-decoration: none;
+}
+
+button.afs-context { cursor: pointer; font-family: inherit; }
+.afs-context-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; color: var(--afs-brand); background: #fff; font-size: 12px; font-weight: 950; }
+.afs-context-copy { min-width: 0; }
+.afs-context-copy small,
+.afs-context-copy b { display: block; }
+.afs-context-copy small { color: #9eb0d1; font-size: 9px; font-weight: 850; letter-spacing: .08em; }
+.afs-context-copy b { margin-top: 3px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.afs-context-mode { padding: 3px 6px; border-radius: 10px; color: #b6f4ea; background: rgba(11, 141, 130, .23); font-size: 9px; font-weight: 900; }
+
+.afs-global-nav { display: flex; align-items: stretch; justify-content: center; min-width: 0; }
+.afs-global-nav a,
+.afs-global-nav button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  padding: 0 9px;
+  border: 0;
+  color: #b7c4df;
+  background: transparent;
+  font: 700 12px var(--afs-font);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.afs-global-nav a:hover,
+.afs-global-nav button:hover { color: #fff; background: rgba(255, 255, 255, .06); }
+.afs-global-nav .active { color: #fff; }
+.afs-global-nav .active::after { position: absolute; right: 20%; bottom: 0; left: 20%; height: 3px; border-radius: 3px 3px 0 0; background: var(--afs-accent); content: ""; }
+
+.afs-shell-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; white-space: nowrap; }
+.afs-sample-badge { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 1px solid rgba(255, 208, 91, .42); border-radius: 5px; color: #ffdf86; background: rgba(255, 208, 91, .08); font-size: 9px; font-weight: 900; letter-spacing: .06em; }
+.afs-icon-action,
+.afs-primary-action { display: inline-flex; align-items: center; justify-content: center; height: 38px; border-radius: 5px; font: 800 12px var(--afs-font); text-decoration: none; }
+.afs-icon-action { width: 38px; border: 1px solid rgba(255, 255, 255, .24); color: #dbe3f3; background: rgba(255, 255, 255, .05); }
+.afs-primary-action { padding: 0 13px; border: 1px solid var(--afs-accent); color: #fff; background: var(--afs-accent); }
+
+.afs-studio-context-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 58px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--afs-line);
+  background: #f8f8f5;
+  font-family: var(--afs-font);
+}
+.afs-studio-title { min-width: 205px; }
+.afs-studio-title small,
+.afs-studio-title b { display: block; }
+.afs-studio-title small { color: #6d7788; font-size: 10px; font-weight: 900; letter-spacing: .09em; }
+.afs-studio-title b { margin-top: 3px; color: var(--afs-ink); font-size: 15px; }
+.afs-work-context { min-width: 0; flex: 1; padding-left: 14px; border-left: 1px solid var(--afs-line); color: #596476; font-size: 12px; }
+.afs-work-context b { color: var(--afs-ink); }
+.afs-local-nav { display: flex; align-items: center; gap: 5px; }
+.afs-local-nav a,
+.afs-local-nav button { padding: 8px 10px; border: 1px solid transparent; border-radius: 5px; color: #596476; background: transparent; font: 750 12px var(--afs-font); text-decoration: none; }
+.afs-local-nav .active { border-color: #cfd5de; color: var(--afs-brand); background: #fff; }
+
+.afs-state-dialog {
+  width: min(460px, calc(100vw - 40px));
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  color: var(--afs-ink);
+  box-shadow: 0 26px 80px rgba(7, 23, 71, .32);
+}
+.afs-state-dialog::backdrop { background: rgba(7, 15, 35, .58); backdrop-filter: blur(3px); }
+.afs-state-dialog header { padding: 20px 22px 12px; }
+.afs-state-dialog header small { color: var(--afs-accent); font-size: 10px; font-weight: 900; letter-spacing: .1em; }
+.afs-state-dialog h2 { margin: 7px 0 0; font-size: 21px; }
+.afs-state-dialog p { margin: 0; padding: 0 22px 19px; color: #626d7e; font-size: 13px; line-height: 1.6; }
+.afs-state-dialog footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--afs-line); background: #f5f6f7; }
+.afs-state-dialog button { min-height: 38px; padding: 0 13px; border: 1px solid #cbd1da; border-radius: 5px; color: #455064; background: #fff; font: 800 12px var(--afs-font); }
+.afs-state-dialog button[data-leave] { border-color: var(--afs-accent); color: #fff; background: var(--afs-accent); }
+
+/* 통합 P0 가독성 기준: 10px 미만 메타데이터를 제외한 핵심 텍스트를 상향한다. */
+.afs-studio-page .station span,
+.afs-studio-page .station em,
+.afs-studio-page .proof-item span,
+.afs-studio-page .node .sub,
+.afs-studio-page .annotation span,
+.afs-studio-page .impacts span,
+.afs-studio-page .block footer,
+.afs-studio-page .chips span,
+.afs-studio-page .check span { font-size: 11px !important; }
+.afs-studio-page > .dock { display: none !important; }
+
+body > main.product .decision small,
+body > main.product .decision span,
+body > main.product .context-stats span,
+body > main.product .process small,
+body > main.product .process em,
+body > main.product .focus-copy p,
+body > main.product .focus-actions button,
+body > main.product .impact span,
+body > main.product .status-bar > span,
+body > main.product .atlas-head span,
+body > main.product .atlas-body > p,
+body > main.product .brief li,
+body > main.product .atlas-actions button,
+body > main.product .atlas-input input { font-size: 11px !important; }
+body > main.product .overlay-item b,
+body > main.product .layer b,
+body > main.product .layer span { font-size: 10px !important; }
+body > main.product .workspace { grid-template-columns: 252px minmax(680px, 1fr) 320px; }
+
+.afs-shell-m6 .workspace { padding-top: 0; }
+.afs-shell-m6 .left-rail,
+.afs-shell-m6 .atlas-rail { top: 74px; height: calc(100vh - 74px); }
+
+@media (max-width: 1450px) {
+  .afs-product-shell { grid-template-columns: 190px 245px minmax(470px, 1fr) auto; gap: 8px; padding-inline: 14px; }
+  .afs-global-nav a,
+  .afs-global-nav button { min-width: 60px; padding-inline: 7px; font-size: 11px; }
+  .afs-sample-badge { display: none; }
+}
+
+@media (max-width: 1280px) {
+  .afs-product-shell { grid-template-columns: 178px 235px minmax(430px, 1fr) auto; }
+  .afs-brand-copy small { display: none; }
+  .afs-global-nav a,
+  .afs-global-nav button { min-width: 54px; padding-inline: 5px; font-size: 10px; }
+  .afs-primary-action { padding-inline: 10px; font-size: 11px; }
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+
+/* ★★★ [2026-08-25] **이름을 갈라놓았다 — `.afs-product-shell` → `.afs-palette`.**
+ *
+ * ⚠️⚠️ 실측: 승인 시안의 상단 바를 `.afs-product-shell` 로 옮겨 왔는데, 이 아래 레거시
+ *   블록이 **같은 이름**으로 «화면을 채우는 밝은 표면» 을 선언하고 있었다. 파일에서
+ *   나중에 오는 이 블록이 이겨서 상단 바가
+ *
+ *       background: linear-gradient(100deg,#071747,…)   ← 시안(LS Navy)
+ *    →  background: #eef1f4                             ← 실제로 칠해진 색
+ *
+ *   가 됐다. 「딱 봐도 시안이랑 다르다」의 정체가 이것이다. 오류는 없고 색만 조용히
+ *   뒤집혔다.
+ * ★ 두 가지는 **다른 것**이다 — 하나는 74px 짜리 구조 바, 하나는 전체 메뉴 패널이
+ *   쓰는 팔레트 범위다. 한 이름에 둘을 담으면 반드시 한쪽이 다른 쪽을 덮는다.
+ * ⚠️ 쓰는 곳은 `GlobalNav.tsx` 하나다(실측). 그 한 곳만 함께 고쳤다.
+ */
+   여기부터 앱에서 더한 것 — 시안에 없는 화면(전체 메뉴 등)
+   ───────────────────────────────────────────────────────────────────────── */
 /*
  * 제품 공통 셸 — Living Enterprise Canvas 기준선
  *
  * 2026-08-04 전역 Tailwind 숫자 반전을 철회하면서 런처·통제실은 다시 다크, 새 허브만
  * 라이트가 되는 혼합 상태가 생겼다. 숫자 스케일을 전역에서 뒤집지 않고, 제품으로 명시한
- * `.afs-product-shell` 안에서만 같은 유틸리티가 라이트 의미를 갖게 한다.
+ * `.afs-palette` 안에서만 같은 유틸리티가 라이트 의미를 갖게 한다.
  *
  * 구조: 밝은 업무 표면 + LS Navy 헤더/레일 + LS Red 위험 행동 + 상태색 분리.
  * 코드 편집기·로그·미리보기 샌드박스처럼 어두운 표면이 필요한 곳은 자체 스타일을 유지한다.
  */
-.afs-product-shell {
+.afs-palette {
   color-scheme: light;
 
   /* 중립 표면과 글자 — 전역 @theme를 바꾸지 않는 범위형 팔레트 */
@@ -129,37 +372,37 @@
 }
 
 /* 공통 헤더는 다크 테마가 아니라 LS Navy 구조 표면이다. */
-.afs-product-shell .afs-product-header {
+.afs-palette .afs-product-header {
   color-scheme: dark;
   color: #fff;
   background: rgb(7 23 71 / 97%) !important;
   border-color: rgb(255 255 255 / 14%) !important;
   box-shadow: 0 1px 0 rgb(255 255 255 / 5%), 0 8px 24px rgb(7 23 71 / 14%);
 }
-.afs-product-shell .afs-product-header .text-gray-100,
-.afs-product-shell .afs-product-header .text-gray-200,
-.afs-product-shell .afs-product-header .text-gray-300 { color: #f7f9ff !important; }
-.afs-product-shell .afs-product-header .text-gray-400,
-.afs-product-shell .afs-product-header .text-gray-500 { color: #b8c4dc !important; }
-.afs-product-shell .afs-product-header .text-indigo-400,
-.afs-product-shell .afs-product-header .text-blue-400 { color: #8ed9e2 !important; }
-.afs-product-shell .afs-product-header .bg-gray-700,
-.afs-product-shell .afs-product-header .bg-gray-800 { background: rgb(255 255 255 / 10%) !important; }
-.afs-product-shell .afs-product-header .border-gray-700 { border-color: rgb(255 255 255 / 14%) !important; }
+.afs-palette .afs-product-header .text-gray-100,
+.afs-palette .afs-product-header .text-gray-200,
+.afs-palette .afs-product-header .text-gray-300 { color: #f7f9ff !important; }
+.afs-palette .afs-product-header .text-gray-400,
+.afs-palette .afs-product-header .text-gray-500 { color: #b8c4dc !important; }
+.afs-palette .afs-product-header .text-indigo-400,
+.afs-palette .afs-product-header .text-blue-400 { color: #8ed9e2 !important; }
+.afs-palette .afs-product-header .bg-gray-700,
+.afs-palette .afs-product-header .bg-gray-800 { background: rgb(255 255 255 / 10%) !important; }
+.afs-palette .afs-product-header .border-gray-700 { border-color: rgb(255 255 255 / 14%) !important; }
 
 /* 런처의 유령 카드가 밝은 바탕에서 사라지지 않게 실제 표면으로 만든다. */
-.afs-product-shell .afs-launcher-main .bg-white\/5 { background: rgb(255 255 255 / 78%) !important; }
-.afs-product-shell .afs-launcher-main .border-white\/5 { border-color: #dfe4eb !important; }
-.afs-product-shell .afs-launcher-main .shadow-2xl,
-.afs-product-shell .afs-launcher-main .shadow-xl {
+.afs-palette .afs-launcher-main .bg-white\/5 { background: rgb(255 255 255 / 78%) !important; }
+.afs-palette .afs-launcher-main .border-white\/5 { border-color: #dfe4eb !important; }
+.afs-palette .afs-launcher-main .shadow-2xl,
+.afs-palette .afs-launcher-main .shadow-xl {
   box-shadow: 0 12px 28px rgb(16 26 45 / 8%) !important;
 }
-.afs-product-shell input.bg-gray-950,
-.afs-product-shell select.bg-gray-950,
-.afs-product-shell textarea.bg-gray-950 { background: #fff !important; }
+.afs-palette input.bg-gray-950,
+.afs-palette select.bg-gray-950,
+.afs-palette textarea.bg-gray-950 { background: #fff !important; }
 
 /* portal 메뉴도 제품 셸의 일부다. body 아래로 빠져도 같은 토큰을 직접 가진다. */
-/* ⚠️⚠️ [2026-08-24 실측] `.afs-product-shell` 은 «화면을 채우는 표면» 을 전제로
+/* ⚠️⚠️ [2026-08-24 실측] `.afs-palette` 은 «화면을 채우는 표면» 을 전제로
  * `min-height: 100%` 를 준다. 그런데 전체 메뉴는 **fixed popover** 라 그 100% 가
  * 뷰포트 높이가 되고, 항목이 몇 개든 패널이 **화면 끝까지 내려왔다**(700px 창에서 700px).
  * 내용은 569px 뿐이었다 — 아래 130px 이 빈 상자였다.
