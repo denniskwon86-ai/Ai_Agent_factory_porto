@@ -26,6 +26,14 @@
 
 html, body { min-width: 1240px !important; }
 
+/* ★★★ [2026-08-25 사용자 요청] **글씨를 전반적으로 살짝 키운다.**
+ *
+ * ★ 기준 글꼴을 16 → 17px 로 올린다. Tailwind 의 `text-sm`·`text-xs` 는 **rem** 이므로
+ *   이 한 줄로 앱 전체가 6.25% 커진다 — 화면마다 손으로 고치면 반드시 빠지는 곳이 생긴다.
+ * ⚠️ 승인 시안에서 옮겨 온 캔버스(`enterprise-canvas.css`)는 **px 고정**이라 여기 영향을
+ *   받지 않는다. 그쪽은 따로 바닥을 올렸고, 올린 뒤 826px 에 들어가는지 **실측**했다. */
+html { font-size: 17px; }
+
 .afs-product-shell {
   position: sticky;
   top: 0;
@@ -223,6 +231,33 @@ body > main.product .workspace { grid-template-columns: 252px minmax(680px, 1fr)
 
 
 /* ─────────────────────────────────────────────────────────────────────────
+
+/* ★★★ [2026-08-25 실측] **셸 버튼이 시안 크기를 잃고 있었다.**
+ *
+ * 시안은 `.afs-icon-action, .afs-primary-action { font: 800 12px }` 를 준다. 그런데 앱에는
+ *
+ *     .afs-scope button, .afs-scope input, … { font: inherit }     ← 특이도 (0,1,1)
+ *     .afs-icon-action, .afs-primary-action  { font: 800 12px … }  ← 특이도 (0,1,0)
+ *
+ * 가 함께 있고 **앞엣것이 이긴다.** 그래서 셸 버튼이 본문 글꼴을 그대로 상속해
+ * 16px(기준 상향 뒤 17px)로 그려지고 있었다 — 시안은 12px 이다.
+ * ⚠️ 시안 마크업이 `<a>` 였던 자리를 `<button>` 으로 옮기면서 생긴 차이라,
+ *   «시안 그대로 옮겼다» 고 적어 두고도 실제로는 달랐다.
+ *
+ * ★ 특이도를 맞춰 되돌리되 사용자 요청(「살짝 키우기」)만큼만 올린다 —
+ *   본문이 16 → 17(+6.25%)이므로 셸도 같은 비율로 12 → 13, 11 → 12.
+ * ⚠️ 시안 숫자를 그대로 쓰지 않은 이유를 적어 둔다. 적지 않으면 다음 사람이
+ *   「시안은 12인데 왜 13인가」를 모르고 조용히 되돌린다.
+ */
+.afs-scope .afs-product-shell .afs-icon-action,
+.afs-scope .afs-product-shell .afs-primary-action { font: 800 13px var(--afs-font); }
+.afs-scope .afs-product-shell .afs-global-nav a,
+.afs-scope .afs-product-shell .afs-global-nav button { font-size: 12px; }
+@media (max-width: 1280px) {
+  .afs-scope .afs-product-shell .afs-primary-action { font-size: 12px; }
+  .afs-scope .afs-product-shell .afs-global-nav a,
+  .afs-scope .afs-product-shell .afs-global-nav button { font-size: 11px; }
+}
 
 /* ★★★ [2026-08-25] **이름을 갈라놓았다 — `.afs-product-shell` → `.afs-palette`.**
  *

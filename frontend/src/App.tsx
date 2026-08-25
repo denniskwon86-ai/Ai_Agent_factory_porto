@@ -672,9 +672,23 @@ function AppShell() {
       <div className="afs-workbench h-screen w-screen bg-gray-950 text-gray-100 flex flex-col font-sans overflow-hidden">
         <header className="h-14 bg-gray-950/95 backdrop-blur border-b border-gray-700 flex items-center justify-between px-6 shrink-0 z-20">
           <div className="flex items-center gap-4">
+            {/* ★★★ [2026-08-25 사용자 지적] 「각 화면에서 홈으로 돌아가는 버튼이 없다」.
+                ⚠️⚠️ 통제실에는 «런처 복귀» 만 있었다. 그것은 Software Factory 로 가는
+                  것이지 **경영 홈이 아니다** — 홈까지 가려면 두 번 눌러야 했고, 그 사실을
+                  아는 사람만 돌아갈 수 있었다. 설계 §3.4 는 「공통 상단 바에 `경영 홈으로
+                  돌아가기` 를 **항상** 표시한다」고 못박았다.
+                ★ 둘을 **함께** 둔다. 「한 칸 뒤로」와 「처음으로」는 다른 행동이다. */}
+            <button
+              onClick={() => { setCurrentProject(null); setSpace('enterprise'); }}
+              className="text-sm font-bold text-gray-100 hover:text-white flex items-center gap-1 bg-indigo-700 hover:bg-indigo-600 px-3 py-1.5 rounded transition-colors"
+              title="경영 홈으로 — 처음 화면으로 돌아갑니다"
+            >
+              ⌂ 경영 홈
+            </button>
             <button 
               onClick={() => setCurrentProject(null)}
               className="text-sm font-bold text-gray-400 hover:text-gray-100 flex items-center gap-1 bg-gray-700 px-3 py-1.5 rounded transition-colors"
+              title="Software Factory 런처로 — 프로젝트 목록으로 돌아갑니다"
             >
               ◀ 런처 복귀
             </button>
