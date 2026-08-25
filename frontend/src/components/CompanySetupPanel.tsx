@@ -130,16 +130,33 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-          {([['company', '회사 이름'], ['entity', '법인 · 가상회사'],
-             ['thread', '업무 연결구성']] as [Tab, string][]).map(([id, label]) => (
-            <button key={id} type="button" onClick={() => { setTab(id); setErr(''); setOk(''); }}
+        {/* ★★★ [2026-08-25 사용자 지적] 「회사 이름 선택했는데 법인 등록 기능은 어디에?」
+            ⚠️⚠️ 세 칸이 **탭으로 보이지 않았다.** 여백 6px 에 옅은 테두리라, 고른 것과
+              안 고른 것의 차이가 거의 없었다 — 그래서 「① 이름 ② 법인 ③ 연결구성」이라는
+              **순서**가 화면에서 읽히지 않았다.
+            ★ 번호를 붙이고 밑줄로 고른 칸을 못박는다. 각 칸이 무엇을 하는 곳인지도 적는다. */}
+        <div role="tablist" aria-label="회사 구성 단계"
+          style={{ display: 'flex', gap: 0, marginBottom: 16,
+                   borderBottom: '2px solid var(--surface-border)' }}>
+          {([['company', '① 회사 이름', '상단에 보이는 이름'],
+             ['entity', '② 법인 · 가상회사', '회사를 등록하고 승인'],
+             ['thread', '③ 업무 연결구성', '경영 홈의 업무 흐름']] as [Tab, string, string][])
+            .map(([id, label, hint]) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id}
+              onClick={() => { setTab(id); setErr(''); setOk(''); }}
               style={{
-                fontSize: 13, padding: '6px 12px', borderRadius: 6,
-                border: '1px solid var(--surface-border-control)',
-                background: tab === id ? 'var(--surface-selected)' : 'transparent',
-                fontWeight: tab === id ? 700 : 400,
-              }}>{label}</button>
+                display: 'grid', gap: 1, textAlign: 'left',
+                fontSize: 14, padding: '9px 16px', border: 0, background: 'transparent',
+                borderBottom: `3px solid ${tab === id ? 'var(--ls-red, #fa002d)' : 'transparent'}`,
+                marginBottom: -2,
+                fontWeight: tab === id ? 800 : 500,
+                color: tab === id ? 'var(--surface-text)' : 'var(--surface-text-muted)',
+                cursor: 'pointer',
+              }}>
+              <span>{label}</span>
+              <small style={{ fontSize: 11, fontWeight: 400,
+                              color: 'var(--surface-text-muted)' }}>{hint}</small>
+            </button>
           ))}
         </div>
 
@@ -147,7 +164,8 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
         {ok && <Notice tone="ok">{ok}</Notice>}
 
         {tab === 'company' && (
-          <CompanyTab tenants={tenants} busy={busy} run={run} current={ctx.company} />
+          <CompanyTab tenants={tenants} busy={busy} run={run} current={ctx.company}
+            onNext={() => setTab('entity')} />
         )}
         {tab === 'entity' && (
           <EntityTab entities={entities} nodes={nodes} busy={busy} run={run}
@@ -163,8 +181,9 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
 
 // ── ① 회사 이름 ──────────────────────────────────────────────────────────
 
-function CompanyTab({ tenants, busy, run, current }: {
+function CompanyTab({ tenants, busy, run, current, onNext }: {
   tenants: Tenant[] | null; busy: string; current: string;
+  onNext: () => void;
   run: (what: string, fn: () => Promise<unknown>) => Promise<void>;
 }) {
   const [id, setId] = useState('');
@@ -227,6 +246,17 @@ function CompanyTab({ tenants, busy, run, current }: {
               {busy === '회사 이름 저장' ? '저장 중…' : '저장'}
             </button>
           </div>
+        </div>
+      </Section>
+
+      {/* ★ 다음에 무엇을 하는지 화면이 말한다 — 탭 이름만으로는 순서가 읽히지 않았다. */}
+      <Section title="다음 단계"
+        desc="회사 이름은 «표시» 입니다. 실제 법인·가상회사는 다음 칸에서 등록합니다.">
+        <div>
+          <button type="button" onClick={onNext}
+            style={{ fontSize: 13, padding: '7px 16px', fontWeight: 700 }}>
+            ② 법인 · 가상회사 등록하러 가기 →
+          </button>
         </div>
       </Section>
     </>

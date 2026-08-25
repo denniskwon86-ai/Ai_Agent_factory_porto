@@ -251,10 +251,18 @@
 /* ★ [2026-08-25] 영향 4칸이 왜 비었는지 한 줄. 시안에는 없다 — 시안은 표본값이 채워진
  *   상태를 그렸기 때문이다. 값이 없을 때 **이유가 없으면 고장으로 읽힌다**.
  * ⚠️ 눈에 튀게 만들지 않는다. 이것은 경고가 아니라 «다음에 할 일» 이다. */
+/* ⚠️⚠️ [2026-08-25 실측] 이 줄을 **두 번** 잘못 놓았다.
+ *   ① `.focus-panel`(2열)의 형제로 두었더니 **세 번째 칸**이 되어 새 줄이 생겼고
+ *      패널이 자라 영향 4칸이 107 → 85 로 눌렸다.
+ *   ② `.impact`(2열) 안으로 옮겼더니 이번엔 **한 칸**이 되어 169px 폭에서 접혔다 —
+ *      높이 160px, 패널이 311px 로 자라 오버레이 띠와 95px 겹쳤다.
+ * ★ 격자 안에 넣을 때는 **몇 칸을 걸치는지**를 함께 정해야 한다. 안 정하면 한 칸이다. */
 .le-canvas .impact-why{
   display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;
-  margin-top:8px;padding-top:8px;border-top:1px dashed var(--line,#d8dbe1);
-  color:var(--muted,#667084);font-size:11px;line-height:1.5;
+  margin-top:7px;padding-top:6px;border-top:1px dashed var(--line,#d8dbe1);
+  /* ⚠️ 줄바꿈을 막지 않는다 — 막으면 긴 사유가 잘려 사라진다. 다만 이 패널은
+   *   시안에서 214px 이므로 두 줄까지만 허용하고 나머지는 버튼 이름으로 넘긴다. */
+  color:var(--muted,#667084);font-size:11px;line-height:1.35;
 }
 .le-canvas .impact-why b{color:var(--ink,#101a2d);font-weight:700}
 .le-canvas .impact-why-go{

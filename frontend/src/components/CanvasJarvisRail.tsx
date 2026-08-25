@@ -1,13 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { ServerText } from '../design/ServerText';
+import { ASSISTANT_NAME } from '../lib/brand';
 import {
   HEALTH_KO, reportRequestFailure, reportRequestSuccess, useBackendHealth,
 } from '../lib/backendHealth';
 import { jarvisApi, jarvisSession, type JarvisContext, type JarvisTurn }
   from '../lib/jarvisApi';
 
-// [승인 시안] 우측 Atlas — **시안 마크업 그대로.**
+// [승인 시안] 우측 비서 레일 — **시안 마크업 + 우리 비서 이름.**
+//
+// ## ⚠️⚠️ [2026-08-25 사용자 지적] **이름이 Atlas 가 아니다**
+//
+// > 우리 시스템의 AI비서 이름은 Atlas가 아니잖아요!
+//
+// 시안의 「Atlas」를 그대로 베꼈다. 이 시스템의 비서는 **Jarvis(자비스)** 다 —
+// `api/v1/jarvis` 이고, `api/routes/jarvis_control.py` 머리말은 대놓고
+// 「**두 번째 비서를 만들지 않는다**」라고 적어 두었다. 그 파일을 읽고도 이름을 베꼈다.
+//
+// ★ `.atlas-*` **CSS 클래스 이름은 그대로 둔다** — 그것은 시안의 «스타일 이름» 이지
+//   비서 이름이 아니다. 화면에 보이는 이름만 우리 것으로 되돌린다.
 //
 // 원본: `uiux-prototypes/master-concept/index.html` 의 `<aside class="atlas-rail">`
 // 스타일: `design/enterprise-canvas.css` 의 `.atlas-*` · `.brief` (이미 이식돼 있었다)
@@ -31,9 +43,9 @@ import { jarvisApi, jarvisSession, type JarvisContext, type JarvisTurn }
 // ⚠️ 「권고」는 지어내지 않는다 — 우리 계산은 아직 권고를 내지 않는다. 대신 지금 답해야
 //   할 것과 그 근거를 적고, 권고가 필요한 곳으로 **갈 수 있게** 한다.
 
-export type AtlasFact = { label: string; value: string };
+export type JarvisFact = { label: string; value: string };
 
-export function AtlasRail({
+export function CanvasJarvisRail({
   contextLabel, title, why, facts, actions, context, onRecommend, recommendLabel,
 }: {
   /** 시안의 `CURRENT CONTEXT · 생산계획` 자리. */
@@ -42,7 +54,7 @@ export function AtlasRail({
   /** 서버가 준 설명. ⚠️ 화면이 다시 쓰지 않는다. */
   why?: string;
   /** 시안 `brief` 의 목록 자리 — **우리가 아는 사실**만. */
-  facts: AtlasFact[];
+  facts: JarvisFact[];
   /** 시안 `atlas-actions` 의 보조 버튼들 — 누르면 비서에게 그대로 묻는다. */
   actions: string[];
   context: JarvisContext;
@@ -97,7 +109,7 @@ export function AtlasRail({
       <header className="atlas-head">
         <span className="atlas-orb" aria-hidden>✦</span>
         <div>
-          <b>Atlas</b>
+          <b>{ASSISTANT_NAME}</b>
           <span>회사 전체를 이해하는 AI 동료</span>
         </div>
         {/* 시안의 오른쪽 점. ★ 색만으로 말하지 않는다 — `title` 로 이름을 남긴다. */}
@@ -113,7 +125,7 @@ export function AtlasRail({
         {why && <p><ServerText text={why} /></p>}
 
         <section className="brief">
-          <small>ATLAS DECISION BRIEF</small>
+          <small>지금 판단의 근거</small>
           {/* ⚠️ 시안은 여기에 «권고» 를 적었다(`발주량 -4% …`). 우리 계산은 아직 권고를
               내지 않으므로 **지어내지 않는다.** 무엇을 근거로 보고 있는지를 적는다. */}
           <strong>
@@ -161,7 +173,11 @@ export function AtlasRail({
       </div>
 
       <div className="atlas-input">
-        <label htmlFor="atlas-q">Task ID 없이 회사 전체에 질문할 수 있습니다.</label>
+        {/* ⚠️⚠️ [2026-08-25 사용자 지적] 「Task ID 없이」 같은 **시스템 용어를 노출하지
+            않는다.** 시안 문구를 그대로 옮긴 것인데, 사용자는 Task ID 가 무엇인지 알 필요가
+            없다. 말하려던 사실(「특정 작업을 고르지 않아도 회사 전체를 물을 수 있다」)만
+            사용자 말로 적는다. */}
+        <label htmlFor="atlas-q">회사 전체에 대해 무엇이든 물어보십시오.</label>
         <div>
           <input id="atlas-q" value={input} disabled={busy}
                  onChange={(e) => setInput(e.target.value)}

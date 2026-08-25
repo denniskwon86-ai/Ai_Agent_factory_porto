@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { failed, loading, ok, type Loaded } from '../design/DataState';
-import { AtlasRail } from './AtlasRail';
+import { CanvasJarvisRail } from './CanvasJarvisRail';
 import { getEnterpriseContext , API_BASE_URL} from '../lib/api';
 import {
   fetchBriefing, type Briefing, type BriefingItem,
@@ -393,7 +393,15 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   //: ⚠️ 종전에는 조직 트리로 대체돼 있었다(줄 API 가 없어서). 이제 단일 Read Model 이 준다.
   const [canvas, setCanvas] = useState<Canvas | null>(null);
   const [canvasErr, setCanvasErr] = useState('');
-  const [pickedNode, setPickedNode] = useState('');
+  //: ★★★ [2026-08-25 사용자 지적] 「클릭하면 포커스 이동이 안되네요」.
+  //:
+  //: ⚠️⚠️ 종전에는 **한 변수**(`pickedNode`)를 대기열과 공정 노드가 같이 썼다. 그런데
+  //:   대기열은 `ref`(안건 식별자)를, 공정 노드는 `key`(`order`·`purchase`)를 넣는다.
+  //:   그래서 노드를 누르면 `q.find(i => i.ref === 'purchase')` 가 **늘 못 찾고**
+  //:   첫 안건으로 되돌아갔다 — 눌러도 아무 일이 없는 것처럼 보였다.
+  //: ★ 두 배역에 같은 값을 쓰면 결함이 숨는다. **따로 둔다.**
+  const [pickedRef, setPickedRef] = useState('');
+  const [pickedStep, setPickedStep] = useState<{ key: string; label: string } | null>(null);
   useEffect(() => {
     let alive = true;
     fetchCanvas()
@@ -421,7 +429,10 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   const q = canvas?.decision_queue ?? [];
   const decisions = q.filter((i) => i.section !== 'programs');
   const programs = q.filter((i) => i.section === 'programs');
-  const focus = q.find((i) => i.ref === pickedNode) || decisions[0] || null;
+  const focus = q.find((i) => i.ref === pickedRef) || decisions[0] || null;
+  //: ★ 지금 초점이 무엇인가를 **한 곳**에서 만든다 — 가운데 패널과 비서가 같은 말을 해야 한다.
+  const focusLabel = pickedStep ? pickedStep.label
+    : (focus ? (SECTION_KO[focus.section] || focus.section) : '');
 
   return (
     /* ★★★ 승인 시안(`uiux-prototypes/master-concept/index.html`, 2026-07-30 채택)의
@@ -456,7 +467,9 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                 key={`${it.kind}-${it.ref}-${it.title}`}
                 className={`decision${it.severity === 'high' ? ' urgent' : ''}`
                   + (focus === it ? ' selected' : '')}
-                onClick={() => setPickedNode(it.ref)}
+                //: ★ 대기열을 고르면 **단계 선택은 푼다** — 둘이 동시에 켜져 있으면
+                //:   가운데가 어느 것을 말하는지 화면이 답할 수 없다.
+                onClick={() => { setPickedRef(it.ref); setPickedStep(null); }}
               >
                 <small>{SECTION_KO[it.section] || it.section}</small>
                 <b>{it.title}</b>
@@ -536,12 +549,13 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                 ⚠️ 없으면 조직 트리로 되돌아간다 — 그 사실은 위 `nodeNote` 가 적는다. */}
             <div className="processes">
               {thread ? thread.map((n, i) => {
-                const on = pickedNode === n.key;
+                const on = pickedStep?.key === n.key;
                 return (
                   <button key={n.key || i}
                     className={`process${on ? ' active' : ''}`}
                     title={n.note || n.label}
-                    onClick={() => setPickedNode(on ? '' : n.key)}>
+                    aria-pressed={on}
+                    onClick={() => setPickedStep(on ? null : { key: n.key, label: n.label })}>
                     <span className="process-dot">
                       {String(i + 1).padStart(2, '0')}
                     </span>
@@ -553,12 +567,13 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                   </button>
                 );
               }) : (canvas?.domain_nodes ?? []).map((n) => {
-                const on = pickedNode === n.id;
+                const on = pickedStep?.key === n.id;
                 return (
                   <button key={n.id}
                     className={`process${on ? ' active' : ''}`}
                     title={n.reason || n.label}
-                    onClick={() => setPickedNode(on ? '' : n.id)}>
+                    aria-pressed={on}
+                    onClick={() => setPickedStep(on ? null : { key: n.id, label: n.label })}>
                     <span className="process-dot">
                       {String(n.sequence).padStart(2, '0')}
                     </span>
@@ -592,13 +607,26 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
             {/* §5.1 Decision Focus */}
             <article className="focus-panel">
               <div className="focus-copy">
-                <small>
-                  DECISION POINT{focus ? ` · ${SECTION_KO[focus.section] || ''}` : ''}
-                </small>
-                <h3>{focus ? focus.title : '지금 답해야 할 것이 없습니다.'}</h3>
-                <p>{focus
-                  ? <ServerText text={focus.why} />
-                  : '대기열이 비어 있습니다 — 새 항목이 생기면 여기에 먼저 보입니다.'}</p>
+                <small>DECISION POINT{focusLabel ? ` · ${focusLabel}` : ''}</small>
+                {/* ★★★ 고른 단계가 있으면 **그 단계를 말한다.** 종전에는 노드를 눌러도
+                    가운데가 그대로여서 「눌러도 아무 일이 없다」로 보였다.
+                    ⚠️ 단계와 안건을 잇는 원천이 아직 없다 — 그래서 «이 단계에 묶인 안건이
+                      있다» 고 **지어내지 않고**, 무엇을 고른 상태인지만 사실대로 적는다. */}
+                {pickedStep ? (
+                  <>
+                    <h3>{pickedStep.label}</h3>
+                    {/* ⚠️ 한 줄로 둔다 — 이 패널은 시안에서 214px 이고, 두 줄이 되면
+                        위 오버레이 띠를 덮는다(실측 14px 겹침). */}
+                    <p>이 단계에 묶인 안건은 아직 없습니다 — 왼쪽에서 안건을 고르십시오.</p>
+                  </>
+                ) : (
+                  <>
+                    <h3>{focus ? focus.title : '지금 답해야 할 것이 없습니다.'}</h3>
+                    <p>{focus
+                      ? <ServerText text={focus.why} />
+                      : '대기열이 비어 있습니다 — 새 항목이 생기면 여기에 먼저 보입니다.'}</p>
+                  </>
+                )}
                 {focus && (
                   <div className="focus-actions">
                     <button className="main" onClick={() => setDrawer(focus as QueueRow)}>
@@ -608,12 +636,46 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                     <button onClick={() => onOpenMenu('decision-pkg')}>의사결정 안건</button>
                   </div>
                 )}
+                {/* ★ 오른쪽 영향 4칸이 **왜 비었는지**. 서버가 준 답을 그대로 옮긴다
+                    (`GET /calculation/readiness`) — 문구를 지어내지 않는다.
+                    ⚠️ 영향 칸 안에 두면 시안의 4칸 리듬이 깨진다(실측). 여유가 있는
+                      이쪽(설명 열)에 둔다. */}
+                <div className="impact-why">
+                  {calcWhy === null ? (
+                    // ⚠️ 「아직 못 읽음」과 「막힘 없음」은 다른 사실이다.
+                    <span>계산이 도는지 확인하는 중…</span>
+                  ) : calcWhy.status === 'READY' ? (
+                    <span>계산 관문은 모두 서 있습니다 — 경로 계산을 돌리면 오른쪽 값이 채워집니다.</span>
+                  ) : (
+                    <>
+                      {/* ★ 한 줄로 둔다 — 이 패널은 시안에서 214px 이고, 여기가 길어지면
+                          위 오버레이 띠와 겹친다(실측 41px 겹침).
+                          ⚠️ 다음 할 일을 **버리지 않는다**: 버튼의 이름으로 남기고, 누르면
+                            그 화면이 같은 말을 다시 한다. */}
+                      <b>{blockingGate(calcWhy)?.summary || '계산이 아직 돌지 않습니다.'}</b>
+                      {GATE_DEST[blockingGate(calcWhy)?.gate || ''] ? (
+                        <button type="button" className="impact-why-go"
+                          title={calcWhy.next_action}
+                          aria-label={calcWhy.next_action || '해당 화면 열기'}
+                          onClick={() => onOpenMenu(GATE_DEST[blockingGate(calcWhy)!.gate])}>
+                          해결하러 가기
+                        </button>
+                      ) : (
+                        //: ⚠️ 갈 곳을 모르면 **다음 할 일이라도** 적는다 — 침묵보다 낫다.
+                        calcWhy.next_action && <span>{calcWhy.next_action}</span>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
-              {/* ★★★ [2026-08-25] 빈 「—」 옆에 **왜 비었는지**를 붙인다.
-                  ⚠️⚠️ 종전에는 `—` 넷만 있었다. 값이 없는 것은 맞지만 이유가 없으니
-                    「고장」으로 읽힌다 — 그리고 사용자는 무엇을 눌러야 채워지는지 모른다.
-                  ★ 문구를 지어내지 않는다. `GET /calculation/readiness` 가 관문별로 준
-                    `summary`·`next_action` 을 **그대로** 옮긴다. */}
+              {/* ★★★ [2026-08-25 사용자 지적] 「컨텐츠간 간격 여백이 틀어졌다」.
+                  ⚠️⚠️ 원인은 내가 넣은 «왜 비었는지» 줄이었다. **두 번** 잘못 놓았다:
+                    ① `.focus-panel`(2열)의 형제 → **세 번째 칸**이 되어 새 줄이 생겼고
+                       패널이 자라 영향 4칸이 107 → 85 로 눌렸다.
+                    ② `.impact`(2열) 안 → 이번엔 4칸의 리듬을 깼다(칸 71, 패널 250·311).
+                  ★ 시안의 영향 칸은 **4칸뿐**이다. 그 리듬을 지킨다.
+                  ⚠️ 안쪽 여백 값 자체는 시안과 같았다(7/7/14 · 패딩 27/19) — 재서 확인했다.
+                    「여백이 틀어졌다」의 원인은 여백 값이 아니라 **격자 구조**였다. */}
               <div className="impact">
                 {IMPACT_SLOTS.map((s) => (
                   <div key={s.label} className={s.tone}>
@@ -621,28 +683,6 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                     <b>—</b>
                   </div>
                 ))}
-              </div>
-              <div className="impact-why">
-                {calcWhy === null ? (
-                  // ⚠️ 「아직 못 읽음」과 「막힘 없음」은 다른 사실이다.
-                  <span>계산이 도는지 확인하는 중…</span>
-                ) : calcWhy.status === 'READY' ? (
-                  <span>계산 관문은 모두 서 있습니다 — 경로 계산을 돌리면 값이 채워집니다.</span>
-                ) : (
-                  <>
-                    <b>{blockingGate(calcWhy)?.summary || '계산이 아직 돌지 않습니다.'}</b>
-                    {calcWhy.next_action && <span>→ {calcWhy.next_action}</span>}
-                    {/* ★ 읽고 끝내지 않는다 — 그 관문으로 **갈 수 있게** 한다.
-                        ⚠️ 관문 이름과 목적지를 한 곳에서 잇는다. 모르는 관문이면 링크를
-                          그리지 않는다(엉뚱한 화면으로 보내는 것이 침묵보다 나쁘다). */}
-                    {GATE_DEST[blockingGate(calcWhy)?.gate || ''] && (
-                      <button type="button" className="impact-why-go"
-                        onClick={() => onOpenMenu(GATE_DEST[blockingGate(calcWhy)!.gate])}>
-                        열기
-                      </button>
-                    )}
-                  </>
-                )}
               </div>
             </article>
           </div>
@@ -691,11 +731,14 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
               `.atlas-*` CSS 가 **한 줄도 쓰이지 않았고**(클래스를 쓰는 마크업이 없었다)
               화면이 시안과 전혀 달랐다. 기능(질문·답변)은 같은 `jarvisApi` 로 그대로 잇는다. */}
         <aside className="atlas-rail">
-          <AtlasRail
-            contextLabel={`CURRENT CONTEXT · ${
-              focus ? (SECTION_KO[focus.section] || focus.section) : '전사'}`}
-            title={focus ? focus.title : '지금 답해야 할 것이 없습니다.'}
-            why={focus ? focus.why : '대기열이 비어 있습니다 — 새 항목이 생기면 여기에 먼저 보입니다.'}
+          <CanvasJarvisRail
+            //: ★ 가운데와 **같은 초점**을 본다 — 두 곳이 다른 것을 말하면 사용자는
+            //:   어느 쪽이 지금 문맥인지 알 수 없다.
+            contextLabel={`지금 보는 것 · ${focusLabel || '전사'}`}
+            title={pickedStep ? pickedStep.label
+              : (focus ? focus.title : '지금 답해야 할 것이 없습니다.')}
+            why={pickedStep ? '이 단계를 골랐습니다. 왼쪽 대기열에서 안건을 고르면 그 내용으로 바뀝니다.'
+              : (focus ? focus.why : '대기열이 비어 있습니다 — 새 항목이 생기면 여기에 먼저 보입니다.')}
             //: ★ 「우리가 실제로 아는 것」만 싣는다. 시안의 96%·₩8.3억·48건은 표본값이다.
             //: ⚠️ 못 읽은 것을 0 으로 적지 않는다 — 「확인하지 못함」은 다른 사실이다.
             facts={[

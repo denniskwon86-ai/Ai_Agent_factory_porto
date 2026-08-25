@@ -16,7 +16,7 @@
 // `createPortal` 로 `document.body` 에 붙이고 `#root` 에 `inert` 를 건다. 이렇게 하면 배경 전체가
 // 접근성 트리·포커스·클릭에서 한 번에 빠진다 — 요소를 하나씩 `tabindex=-1` 로 막는 방식은
 // 반드시 누락이 생긴다(이 저장소가 `fetch` 78곳에서 배운 것과 같은 이유).
-import { useCallback, useEffect, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { getEnterpriseContext } from '../lib/api';
@@ -50,7 +50,14 @@ function focusables(root: HTMLElement): HTMLElement[] {
  *
  * ⚠️ 문맥을 **읽기만** 한다. 여기서 바꾸는 수단을 주면 모달 안에서 범위를 바꾼 뒤 그 사실을
  *   잊은 채 다른 화면으로 넘어가게 된다 — 전환은 상단 전환기 한 곳에서만 한다. */
+/** 「처음 화면으로」 손잡이. **한 곳**이다.
+ *
+ * ⚠️ `null` 이면 버튼을 그리지 않는다 — 눌러도 아무 일 없는 버튼은 고장으로 읽힌다.
+ *   App 이 `HomeNavContext.Provider` 로 실제 동작을 넘겨줄 때만 나타난다. */
+export const HomeNavContext = createContext<(() => void) | null>(null);
+
 function ContextFooter() {
+  const goHome = useContext(HomeNavContext);
   const ctx = getEnterpriseContext();
   const mode = (ctx.entityMode || 'REAL').toUpperCase();
   const virtual = mode !== 'REAL';
@@ -62,6 +69,21 @@ function ContextFooter() {
         borderBottom: '1px solid var(--surface-border)',
         background: 'var(--surface-sunken)',
       }}>
+      {/* ★★★ [2026-08-25 사용자 지적] 「각 화면에서 홈으로 돌아가는 버튼이 없다」.
+          ⚠️⚠️ 「닫기」는 있었지만 그것은 «이 창을 닫는다» 로 읽힌다 — 사용자가 찾는 것은
+            «처음 화면으로 간다» 다. 그리고 화면 24개가 **각자** 머리 바를 그리므로,
+            버튼을 화면마다 달면 반드시 빠뜨리는 곳이 생긴다.
+          ★ 셸이 그리는 이 문맥 띠에 둔다 — `HubDialog` 를 쓰는 **모든** 화면이 한 번에 받는다.
+          ⚠️ 손잡이가 없으면(App 이 안 넘겨주면) 그리지 않는다 — 눌러도 아무 일 없는
+            버튼은 고장으로 읽힌다. */}
+      {goHome && (
+        <button type="button" className="secondary-button"
+          onClick={goHome}
+          title="경영 홈으로 — 처음 화면으로 돌아갑니다"
+          style={{ fontSize: 12, padding: '2px 10px', minHeight: 24, fontWeight: 700 }}>
+          ⌂ 경영 홈
+        </button>
+      )}
       <span className="afs-muted">실행 문맥</span>
       <b className={virtual ? 'afs-warn-fg' : 'afs-muted'}>
         {virtual ? `⚠️ ${mode} — 가상 문맥입니다` : 'REAL'}

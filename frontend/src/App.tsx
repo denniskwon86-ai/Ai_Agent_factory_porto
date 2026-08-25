@@ -59,6 +59,7 @@ import { useOperatingContext } from './lib/operatingContext';
 import { BuildPage } from './components/BuildPage';
 import { BuildStartDialog } from './components/BuildStartDialog';
 import { Banner } from './design/HubShell';
+import { HomeNavContext } from './design/HubDialog';
 import { API_BASE_URL, getSessionToken, setActingUser, setSessionToken } from './lib/api';
 
 
@@ -409,8 +410,46 @@ function AppShell() {
   //
   // ★ 컴포넌트가 아니라 **엘리먼트 상수**로 둔다. 렌더 함수 안에서 컴포넌트를 정의하면
   //   매 렌더마다 타입이 달라져 하위 트리가 통째로 다시 마운트된다(입력 중이던 값이 사라진다).
+  //: ★★★ [2026-08-25] **모든 대화상자가 「경영 홈」으로 돌아갈 수 있게** 한 곳에서 준다.
+  //: ⚠️ 화면 24개가 각자 머리 바를 그리므로 버튼을 화면마다 달면 반드시 빠뜨린다.
+  //:   `HubDialog` 가 그리는 문맥 띠에 넣고, 손잡이만 여기서 내려보낸다.
+  //: ★ 열려 있는 것을 **닫고** 홈으로 간다 — 닫지 않으면 홈 위에 창이 그대로 남는다.
+  const goHome = useCallback(() => {
+    //: ★ 열려 있는 것을 **전부 닫는다.** 닫지 않으면 홈 위에 창이 그대로 남아,
+    //:   「홈으로 갔는데 화면이 그대로」가 된다.
+    //: ⚠️ 목록을 손으로 들고 있으면 새 화면이 생길 때 빠뜨린다 — 위 `show*` 상태
+    //:   선언과 **같은 순서**로 적어 두고, 새 화면을 더할 때 여기도 더한다.
+    setShowSkillEvolution(false);
+    setShowKnowledgeHub(false);
+    setShowDataPrep(false);
+    setShowCalcApproval(false);
+    setShowPathCalc(false);
+    setShowScenario(false);
+    setShowDecisionPkg(false);
+    setShowPromotion(false);
+    setShowTerminology(false);
+    setShowMasterData(false);
+    setShowWorkStandard(false);
+    setShowOrgChart(false);
+    setShowCollaboration(false);
+    setShowCrosswalk(false);
+    setShowTelemetry(false);
+    setShowAdvisor(false);
+    setShowGovernance(false);
+    setShowShadow(false);
+    setShowWorkspace(false);
+    setShowPlanning(false);
+    setShowBriefing(false);
+    setShowStudio(false);
+    setShowAgentGov(false);
+    setShowLogPopup(false);
+    setShowCompany(false);
+    setCurrentProject(null);
+    setSpace('enterprise');
+  }, []);
+
   const overlays = (
-    <>
+    <HomeNavContext.Provider value={goHome}>
       {showSkillEvolution && (
         <SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />
       )}
@@ -491,7 +530,7 @@ function AppShell() {
       {showAgentGov && (
         <AgentGovernancePanel onClose={() => setShowAgentGov(false)} />
       )}
-    </>
+    </HomeNavContext.Provider>
   );
 
 
