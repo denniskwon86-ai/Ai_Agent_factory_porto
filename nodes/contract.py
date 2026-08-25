@@ -70,6 +70,41 @@ def load_drafts(workspace_root: str) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def save_draft(workspace_root: str, task_id: str, draft: Dict[str, Any]) -> str:
+    """태스크 하나의 **계약 초안**을 저장한다. 돌려주는 것은 저장 경로.
+
+    ## ⚠️⚠️ [2026-08-25 실측] 이 함수가 **없었다**
+
+    `load_drafts()` 는 처음부터 있었는데 **쓰는 곳이 저장소 어디에도 없었다**(전수 확인:
+    `contracts/drafts` 를 언급하는 코드는 이 파일의 읽기 쪽뿐이었다). 그래서 SW 생성기가
+    Tech Lead 를 지나 계약 컴파일러에 오면 언제나:
+
+        「계약 대상 태스크인데 계약 초안이 없습니다: … Tech Lead 가 초안을 만들어야 합니다.」
+
+    가 나오고, 지문이 비어 `TerminalHandler` 로 빠졌다 — 사용자가 본 「계약이 생성되지
+    않아 전달이 실패」가 이것이다. **읽는 곳은 있는데 쓰는 곳이 없었다.**
+
+    ★ 초안의 모양은 합산기(`core/project_contract_aggregator.aggregate`)가 정한다:
+
+        {"app_class": "...", "datasets": [...], "capability_intents": [...]}
+
+    ⚠️ 여기서 **검증하지 않는다.** 초안은 «아직 다듬는 중» 인 것이고, 판정은 합산기와
+      컴파일러가 한다. 여기서 한 번 더 막으면 같은 규칙이 두 곳에 생긴다.
+    ⚠️ 다만 **모양이 아닌 것은 저장하지 않는다** — 깨진 것을 저장하면 `load_drafts` 가
+      「초안이 있다」고 읽고, 합산기는 그것을 데이터셋 0개로 본다."""
+    if not isinstance(draft, dict):
+        raise TypeError("계약 초안은 객체여야 합니다.")
+    tid = str(task_id or "").strip()
+    if not tid:
+        raise ValueError("어느 태스크의 초안인지 없습니다.")
+    d = draft_dir(workspace_root)
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{tid}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(draft, f, ensure_ascii=False, indent=2)
+    return path
+
+
 def _wbs_tasks(workspace_root: str) -> List[Any]:
     from nodes.utils.wbs_manager import WBSManager
 

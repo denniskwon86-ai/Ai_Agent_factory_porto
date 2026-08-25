@@ -229,8 +229,62 @@ async def run_tech_lead(state: Any) -> Dict[str, Any]:
     updates["architecture_decisions"] = arch_decisions
     updates["technical_debt"] = tech_debt
     updates["file_index"] = file_idx
+
+    #: ★★★ [2026-08-25 실측] **계약 초안을 남긴다.**
+    #:
+    #: ⚠️⚠️ 이 저장이 **없어서** SW 생성기가 Tech Lead 다음 칸에서 늘 끝났다.
+    #:   `nodes/contract.load_drafts()` 는 처음부터 있었는데 쓰는 곳이 저장소 어디에도
+    #:   없었다(전수 확인). 그래서 계약 컴파일러가 언제나
+    #:     「계약 대상 태스크인데 계약 초안이 없습니다 … Tech Lead 가 초안을 만들어야 합니다.」
+    #:   를 내고 지문이 비어 `TerminalHandler` 로 빠졌다 — 사용자가 본 「계약이 생성되지
+    #:   않아 전달 실패」가 이것이다.
+    #: ★ 초안은 **이 태스크의 것**이다. 합산은 컴파일러가 WBS 전체로 다시 한다.
+    _save_contract_draft(state_obj, output_str)
+
     print(f"[OK] [Agent] Tech Lead 기술명세 완료 - 점수 {result.get('score')} / 판정 {result.get('verdict')}")
     return updates
+
+
+#: 계약 초안 블록. ★ 스킬(`skills/tech_lead_skill.md` §1-B)이 내는 모양이다.
+#: ⚠️ 언어 태그를 느슨하게 받는다 — 모델이 ```json / ```json contract-draft / ```
+#:   중 무엇을 쓸지 강제할 수 없다. **못 찾는 것보다 넓게 찾는 편이 낫다.**
+_DRAFT_BLOCK = re.compile(
+    r"```(?:json)?[^\r\n]*contract-draft[^\r\n]*([\s\S]*?)```", re.IGNORECASE)
+
+
+def _save_contract_draft(state_obj: Any, output_str: str) -> None:
+    """Tech Lead 출력에서 계약 초안을 뽑아 저장한다. **실패해도 명세를 되돌리지 않는다.**
+
+    ⚠️ 다만 **조용히 넘기지 않는다.** 초안이 없으면 다음 칸(계약 컴파일러)이 막히고,
+      그때 사람은 「왜 막혔나」를 여기까지 거슬러 올라와야 한다. 여기서 말해 준다."""
+    from nodes.contract import save_draft
+
+    ws = getattr(state_obj, "workspace_root", "") or ""
+    tid = str(getattr(state_obj, "current_sprint_task_id", "") or "").strip()
+    if not ws or not tid:
+        return
+
+    m = _DRAFT_BLOCK.search(output_str or "")
+    if not m:
+        #: ⚠️ 「1-B 를 안 냈다」와 「데이터를 안 쓴다」는 다른 사실이다. 여기서 빈 계약을
+        #:   지어내면 뒤 칸이 **아무 데이터도 안 쓰는 앱**을 정상으로 컴파일한다.
+        print("⚠️ [Tech Lead] 계약 초안 블록(1-B CONTRACT DRAFT)이 없습니다 — "
+              "다음 단계(계약 컴파일)가 이 태스크에서 막힙니다.")
+        return
+    try:
+        draft = json.loads(m.group(1))
+    except Exception as e:
+        print(f"⚠️ [Tech Lead] 계약 초안을 읽지 못했습니다(JSON 오류): {e}")
+        return
+    if not isinstance(draft, dict):
+        print("⚠️ [Tech Lead] 계약 초안이 객체가 아닙니다 — 저장하지 않습니다.")
+        return
+    try:
+        path = save_draft(ws, tid, draft)
+        print(f"[OK] [Tech Lead] 계약 초안 저장 — {os.path.relpath(path, ws)} "
+              f"(데이터셋 {len(draft.get('datasets') or [])}개)")
+    except Exception as e:
+        print(f"⚠️ [Tech Lead] 계약 초안을 저장하지 못했습니다: {e}")
 
 # 증분 개발 지시 - 멀티태스크에서 이전 태스크가 만든 기능을 덮어써 잃어버리는 회귀 방지.
 # 소유 파일은 컨텍스트에 '전체 코드'로(절단 없이) 주입되므로, 모델은 기존 기능을 빠짐없이 볼 수 있다.

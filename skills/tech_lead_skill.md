@@ -52,6 +52,59 @@ ProjectState에서 발견한 중요 사실
 1-A. INTERFACE CONTRACTS
 이번 태스크에 필요한 함수/컴포넌트/API의 입력·출력·오류 처리를 실제 파일 경로와 함께 명시한다. 서버 API가 없으면 "서버 API 없음"이라고 명시한다.
 
+1-B. CONTRACT DRAFT
+**기계가 읽는 계약 초안**을 아래 블록으로 반드시 낸다. 이것이 없으면 계약 컴파일러가
+「계약 초안이 없습니다」로 막고 파이프라인이 그 자리에서 끝난다.
+
+⚠️ **데이터를 안 쓰는 앱이면 `datasets` 를 빈 배열로 둔다.** 그것은 「아직 안 썼다」와
+다른 사실이며, 빈 배열도 유효한 계약이다. 블록 자체를 빼면 «안 썼다» 가 된다.
+
+```json contract-draft
+{
+  "app_class": "personal | departmental | enterprise 중 하나",
+  "datasets": [
+    {
+      "name": "소문자_스네이크(^[a-z][a-z0-9_]{0,63}$)",
+      "label": "사람이 읽는 이름",
+      "purpose": "이 데이터가 왜 필요한가(한 줄, 비우지 않는다)",
+      "allowed_actions": ["read", "create", "update", "delete"],
+      "fields": [
+        {"name": "소문자_스네이크", "type": "string|text|number|boolean|date",
+         "required": false, "classification": "PUBLIC|INTERNAL|CONFIDENTIAL|RESTRICTED"}
+      ],
+      "data_role": "ENTERPRISE_ACTUAL|OPERATIONAL_PLAN|OPERATIONAL_FORECAST|NATIVE_SUPPLEMENT|SCENARIO_INPUT|DERIVED_RESULT",
+      "source_intent": "AFS_NATIVE|ENTERPRISE_READ|EXTERNAL_REFERENCE|DERIVED_READ",
+      "duplicate_entry_policy": "DENY_IF_AUTHORITATIVE_SOURCE_EXISTS|ALLOW_SUPPLEMENT_ONLY|NO_DUPLICATE_CHECK_REQUIRED"
+    }
+  ],
+  "capability_intents": [
+    {"intent_id": "짧은 식별자", "requirement_ref": "FR-ID",
+     "capability": "요구한 능력 이름",
+     "status": "SUPPORTED|CONDITIONAL|HOST_SERVICE_REQUIRED|NOT_YET_SUPPORTED|PROHIBITED",
+     "reason": "그렇게 판단한 이유"}
+  ]
+}
+```
+
+★ 규칙
+- `name`·`fields[].name` 은 소문자·숫자·밑줄만. `record_id`·`created_at` 같은 **예약 이름은
+  쓸 수 없다**(레코드가 이미 갖는 항목이라 감사 표시를 덮어쓰게 된다).
+- 회사 업무 데이터를 **읽기만** 하면 `source_intent=ENTERPRISE_READ` ·
+  `data_role=ENTERPRISE_ACTUAL` · `allowed_actions=["read"]` ·
+  `duplicate_entry_policy=DENY_IF_AUTHORITATIVE_SOURCE_EXISTS` 다.
+- 근거 없는 데이터셋·API 를 **발명하지 않는다.** 모르면 `capability_intents` 에
+  `NOT_YET_SUPPORTED` 로 적고 이유를 남긴다.
+- `source_intent` 가 `ENTERPRISE_READ` 면 **`enterprise_contract_key` 를 반드시 적는다**
+  (어느 업무 데이터에서 오는지). 없으면 컴파일이 막힌다 —
+  「원천을 특정하지 않으면 이 데이터는 만들어져도 읽히지 않습니다」.
+- 수량·금액 칸(`semantic_role` 이 `quantity`·`amount`)에는 **`unit` 을 적는다.**
+  단위 없는 수량은 나중에 합산될 때 조용히 틀린다.
+- `duplicate_entry_policy` 가 `DENY_IF_AUTHORITATIVE_SOURCE_EXISTS` 인데 쓰기 행동
+  (`create`/`update`/`delete`)을 열면 막힌다 — 입력 화면이 생기면 그 정책은 글자로만 남는다.
+- `ALLOW_SUPPLEMENT_ONLY` 는 `data_role=NATIVE_SUPPLEMENT` 에만 쓴다.
+- 한 태스크가 같은 데이터셋을 **다르게** 선언하면 사람이 정해야 한다(자동 병합하지 않는다).
+  다른 태스크와 같은 데이터를 쓰면 **같은 `name`·같은 의미**로 적는다.
+
 2. ADR
 (XML 구조를 사용하여 ADR 기록)
 
