@@ -28,6 +28,23 @@
  *   (`docs/official/current/qa/` 의 생성기와 같은 규칙).
  */
 .le-canvas{display:contents}
+
+/* ★★★ [2026-08-25 사용자 지적] **DECISION POINT 주변 여백이 틀어졌다.**
+ *
+ * 실측: 시안의 `.focus-copy` 는 `line-height: normal`(≈1.2)인데 앱은 **25.5px**(=17px×1.5)
+ * 이었다. Tailwind preflight 가 `body{line-height:1.5}` 를 주고 캔버스가 그대로 상속했다.
+ * 글꼴을 16 → 17 로 올리면서 그 1.5 가 함께 커져 **줄 사이가 시안보다 벌어졌다** —
+ * 제목·본문·행동 줄이 다 밀렸다.
+ *
+ *     시안  .focus-copy 212  h3 55  p 34   line-height: normal
+ *     앱    .focus-copy 172  h3 29  p 17   line-height: 25.5px   ← 벌어진 쪽
+ *
+ * ★ 시안은 줄간격을 **필요한 7곳에만** 선언하고 나머지는 `normal` 에 맡긴다. 캔버스
+ *   안에서 그 전제를 되돌린다 — 시안이 직접 적은 곳(1.22·1.32·1.45·1.5·1.55·1.65)은
+ *   더 구체적인 선택자라 그대로 이긴다.
+ * ⚠️ 캔버스 **밖**은 건드리지 않는다. 본문 화면의 1.5 는 읽기용으로 맞다. */
+.le-canvas, .le-canvas .workspace, .le-canvas .canvas,
+.le-canvas .work-rail, .le-canvas .atlas-rail{line-height:normal}
 .le-canvas{
       --font:Pretendard,"Noto Sans KR","Segoe UI",Arial,sans-serif;
       --mono:"Cascadia Mono",Consolas,monospace;
@@ -245,3 +262,13 @@
   background:#fff;color:var(--ink,#101a2d);font-size:11px;font-weight:700;cursor:pointer;
 }
 .le-canvas .impact-why-go:hover{border-color:var(--ink,#101a2d)}
+
+/* ★ [2026-08-25] 비서와 주고받은 말. 시안에는 이 자리가 없다 — 시안은 «한 번 답한
+ *   상태» 를 그린 정지 화면이기 때문이다. 실제 비서는 대화가 쌓이고, 볼 곳이 없으면
+ *   답을 받고도 어디로 갔는지 알 수 없다.
+ * ⚠️ 어두운 레일 위다 — 본문용 밝은 색을 쓰면 글자가 사라진다. */
+.le-canvas .atlas-log{margin-top:16px;display:grid;gap:8px;max-height:210px;overflow:auto}
+.le-canvas .atlas-log>div{padding:9px 11px;border-radius:7px;font-size:11px;line-height:1.55;white-space:pre-wrap}
+.le-canvas .atlas-log .me{background:#ffffff14;color:#e9edf5;justify-self:end;max-width:92%}
+.le-canvas .atlas-log .it{background:#ffffff08;border:1px solid #ffffff1b;color:#c9d4e6}
+.le-canvas .atlas-log .err{border:1px solid var(--ls-red);color:#ffd7de;background:#fa002d1f}

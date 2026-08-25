@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { failed, loading, ok, type Loaded } from '../design/DataState';
-import { JarvisRail } from '../design/JarvisRail';
+import { AtlasRail } from './AtlasRail';
 import { getEnterpriseContext , API_BASE_URL} from '../lib/api';
 import {
   fetchBriefing, type Briefing, type BriefingItem,
@@ -646,10 +646,35 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
         </section>
 
         {/* ── 우 328: Atlas ─────────────────────────────────────────────── */}
+        {/* ★★★ [2026-08-25] 시안 마크업으로 바꿨다(`AtlasRail`).
+            ⚠️⚠️ 종전에는 `.atlas-rail` 안에 범용 `JarvisRail` 을 넣었다. 그래서 이식해 둔
+              `.atlas-*` CSS 가 **한 줄도 쓰이지 않았고**(클래스를 쓰는 마크업이 없었다)
+              화면이 시안과 전혀 달랐다. 기능(질문·답변)은 같은 `jarvisApi` 로 그대로 잇는다. */}
         <aside className="atlas-rail">
-          <JarvisRail
-            contextTitle="경영 홈"
-            contextDescription="지금 답해야 할 것과 그 근거를 봅니다."
+          <AtlasRail
+            contextLabel={`CURRENT CONTEXT · ${
+              focus ? (SECTION_KO[focus.section] || focus.section) : '전사'}`}
+            title={focus ? focus.title : '지금 답해야 할 것이 없습니다.'}
+            why={focus ? focus.why : '대기열이 비어 있습니다 — 새 항목이 생기면 여기에 먼저 보입니다.'}
+            //: ★ 「우리가 실제로 아는 것」만 싣는다. 시안의 96%·₩8.3억·48건은 표본값이다.
+            //: ⚠️ 못 읽은 것을 0 으로 적지 않는다 — 「확인하지 못함」은 다른 사실이다.
+            facts={[
+              { label: '결정 대기', value: `${decisions.length}건` },
+              ...(canvas ? [{ label: '업무 단계', value: `${canvas.domain_nodes.length}단계` }] : []),
+              { label: '업무 데이터',
+                value: readiness === null ? '확인하지 못함'
+                  : readiness.length === 0 ? '적용된 업무키트 없음'
+                    : readiness.map((x: any) => `${x.업무키트} ${x.준비상태}`).join(' · ') },
+            ]}
+            actions={[
+              '왜 이 판단입니까?',
+              '데이터가 부족합니까?',
+              '관련 SW·에이전트 상태는 어떻습니까?',
+              '시나리오로 보면 어떻게 됩니까?',
+            ]}
+            //: ⚠️ 「권고안 적용」은 우리 계산이 아직 못 낸다. 대신 **갈 수 있는 곳**으로 보낸다.
+            recommendLabel="의사결정 안건으로 만들기"
+            onRecommend={() => onOpenMenu('decision-pkg')}
             context={{
               current_module: 'enterprise',
               selected_object_type: focus?.ref_type || '',
@@ -664,22 +689,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
               },
               available_actions: [],
               evidence_refs: [],
-            }}
-            evidence={canvas ? [
-              { label: '결정 대기', value: `${decisions.length}건` },
-              { label: '업무 단계', value: `${canvas.domain_nodes.length}단계` },
-              { label: '업무 데이터',
-                value: readiness === null ? '확인하지 못함'
-                  : readiness.length === 0 ? '적용된 업무키트 없음'
-                    : readiness.map((x: any) => `${x.업무키트} ${x.준비상태}`).join(' · ') },
-            ] : []}
-            quickQuestions={[
-              '원료 도입계획을 관리하려면 무엇이 필요한가?',
-              '왜 이 판단입니까?',
-              '데이터가 부족합니까?',
-              '관련 SW·에이전트 상태는 어떻습니까?',
-              '시나리오로 보면 어떻게 됩니까?',
-            ]} />
+            }} />
         </aside>
       </div>
 
