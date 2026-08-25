@@ -1,4 +1,4 @@
-"""★★★ 회사(tenant)의 **사람이 읽는 이름**. (2026-08-25)
+"""★★★ 회사(tenant) 이름 · **프로필 승인**. (2026-08-25)
 
 ## 이 파일이 지키는 것
 
@@ -98,3 +98,73 @@ def test_세_경로가_등록돼_있다():
     assert ("GET", "/api/v1/enterprise-context/tenants") in paths
     assert ("GET", "/api/v1/enterprise-context/tenants/{tenant_id}") in paths
     assert ("POST", "/api/v1/enterprise-context/tenants") in paths
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 프로필 승인 — 「통제는 있는데 부르는 경로가 없다」의 또 한 자리
+# ══════════════════════════════════════════════════════════════════════════
+
+def _seeded(repo):
+    """프로필을 붙일 수 있는 최소 구성 — 법인 하나 + 노드 하나."""
+    from core.enterprise_context.models import (EnterpriseEntity, EnterpriseProfile,
+                                                OrganizationNode)
+
+    e = repo.upsert_entity(EnterpriseEntity(tenant_id="t1", name_ko="LS MnM"))
+    n = repo.upsert_node(OrganizationNode(
+        tenant_id="t1", entity_id=e.entity_id, node_type="business_division",
+        name_ko="제련"))
+    pr = repo.upsert_profile(EnterpriseProfile(
+        tenant_id="t1", scope_node_id=n.node_id, profile_kind="process_profile",
+        payload={"nodes": [{"key": "order", "label": "수주·판매"}]}))
+    return pr
+
+
+def test_저장만_하면_상속에_참여하지_못한다(repo):
+    """★★★ **이것이 이 통제의 요지다.**
+
+    `is_effective` 는 `status == ACTIVE` **와** `approved_at` 을 함께 요구한다.
+    ⚠️ 그런데 `ProfileIn` 은 `approved_at` 을 받지 않는다 — status 만 ACTIVE 로 보내도
+      계속 False 다. 즉 **승인 경로 없이는 프로필이 영원히 안 먹었다.**"""
+    pr = _seeded(repo)
+    assert pr.status == "DRAFT"
+    assert pr.is_effective is False
+
+
+def test_승인하면_상속에_참여한다(repo):
+    """★ 대조군 — 늘 막히기만 하면 그것은 기능이 아니다."""
+    pr = _seeded(repo)
+    got = repo.approve_profile(pr.profile_id, "approver@afs.invalid")
+    assert got.status == "ACTIVE"
+    assert got.approved_by == "approver@afs.invalid"
+    assert got.approved_at, "승인 시각이 비었다 — is_effective 가 계속 False 다"
+    assert got.is_effective is True
+
+
+def test_없는_프로필은_None_이다(repo):
+    """⚠️ 「찾지 못했다」를 «승인됐다» 로 읽지 않는다 — 라우트가 404 로 답한다."""
+    assert repo.approve_profile("nope", "x") is None
+
+
+def test_승인이_저장된_내용을_바꾸지_않는다(repo):
+    """⚠️ 승인은 **상태를 올리는 일**이다. 내용까지 손대면 「승인한 것」과 「지금 있는 것」이
+    갈리고, 그 갈림은 조용하다."""
+    pr = _seeded(repo)
+    got = repo.approve_profile(pr.profile_id, "a@afs.invalid")
+    assert got.payload == {"nodes": [{"key": "order", "label": "수주·판매"}]}
+    assert got.profile_id == pr.profile_id
+
+
+def test_프로필_승인은_조직_권한이다():
+    from core.admin_capability import ADMIN_ORGANIZATION
+    from core.route_authority import ROUTE_CAPS
+
+    assert ROUTE_CAPS.get(
+        "POST /api/v1/enterprise-context/profiles/{profile_id}/approve")         == (ADMIN_ORGANIZATION,)
+
+
+def test_승인_경로가_등록돼_있다():
+    from api.routes import enterprise_context_control as ecc
+
+    paths = {(sorted(r.methods)[0], r.path) for r in ecc.router.routes}
+    assert ("POST",
+            "/api/v1/enterprise-context/profiles/{profile_id}/approve") in paths

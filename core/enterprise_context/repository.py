@@ -590,6 +590,30 @@ class EcmRepository:
         return [OrganizationEdge.model_validate(r) for r in self._query(sql, tuple(params))]
 
     # ── 프로필 (E1 은 저장·조회만 — 상속 병합은 E2) ─────────────────────────
+    @staticmethod
+    def _row_to_profile(row: Dict[str, Any]) -> EnterpriseProfile:
+        """행 → 프로필. ★ **한 곳**에서 변환한다 — 두 벌이면 한쪽만 고쳐지는 날이 온다."""
+        r = dict(row)
+        r["payload"] = json.loads(r.pop("payload_json", "") or "{}")
+        return EnterpriseProfile.model_validate(r)
+
+    def approve_profile(self, profile_id: str, actor: str) -> Optional[EnterpriseProfile]:
+        """프로필 승인 = 상태를 ACTIVE 로 올리고 **승인자·시각을 남긴다.**
+
+        ★★★ [2026-08-25] 이 메서드가 없어서 프로필은 **영원히 상속에 참여하지 못했다.**
+          `EnterpriseProfile.is_effective` 는 `status == ACTIVE` **와** `approved_at` 을
+          함께 요구하는데, `ProfileIn` 은 `approved_at` 을 받지 않는다. 즉 status 만
+          ACTIVE 로 보내도 `is_effective` 는 계속 False 다.
+        ⚠️ 엔터티에는 `approve_entity` 가 있는데 프로필에는 없었다 — 「통제는 있는데
+          부르는 경로가 없다」의 또 한 자리다."""
+        rows = self._query("SELECT * FROM enterprise_profiles WHERE profile_id=?",
+                           (str(profile_id or "").strip(),))
+        if not rows:
+            return None
+        pr = self._row_to_profile(rows[0])
+        pr.status, pr.approved_by, pr.approved_at = STATUS_ACTIVE, actor or "", self._now()
+        return self.upsert_profile(pr)
+
     def upsert_profile(self, p: EnterpriseProfile) -> EnterpriseProfile:
         if p.profile_kind not in PROFILE_KINDS:
             raise EcmError(f"profile_kind 는 {PROFILE_KINDS} 중 하나여야 합니다.")
@@ -627,11 +651,7 @@ class EcmRepository:
                 params.append(val)
         if where:
             sql += " WHERE " + " AND ".join(where)
-        out = []
-        for r in self._query(sql, tuple(params)):
-            r["payload"] = json.loads(r.pop("payload_json") or "{}")
-            out.append(EnterpriseProfile.model_validate(r))
-        return out
+        return [self._row_to_profile(r) for r in self._query(sql, tuple(params))]
 
 
 ecm_repository = EcmRepository()

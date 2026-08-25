@@ -39,6 +39,7 @@ import {
   getReadiness as getCalcReadiness,
   type Gate as CalcGate, type Readiness as CalcReadiness,
 } from '../lib/calculationApi';
+import { listProfiles, type ThreadNode } from '../lib/companyApi';
 import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
 import '../design/enterprise-canvas.css';
@@ -162,6 +163,26 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   //:   읽힌다 — 서버가 관문별로 답을 갖고 있으므로 그것을 그대로 옮긴다.
   //: ⚠️ `null` = 아직 못 읽음. 「못 읽음」과 「막힘 없음」을 같게 그리지 않는다.
   const [calcWhy, setCalcWhy] = useState<CalcReadiness | null>(null);
+  //: ★★★ [2026-08-25] **회사별 업무 연결구성**(`process_profile`).
+  //:
+  //: ⚠️⚠️ 설계는 「process profile 기반 동적 렌더링」을 요구하는데 이 화면은 조직 트리를
+  //:   업무 축으로 쓰고 있었다. 원천이 없다고 적혀 있었지만, `profile_kind` 닫힌 목록에는
+  //:   `process_profile` 이 처음부터 있었다 — **부르는 곳이 없었을 뿐이다.**
+  //: ★ 승인된 것만 쓴다(`is_effective`). 초안으로 그리면 검토 전 구성이 화면에 뜬다.
+  //: ⚠️ 없으면 조직 트리로 되돌아가고, **그 사실을 화면에 적는다**(아래 `threadNote`).
+  const [thread, setThread] = useState<ThreadNode[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const scope = (getEnterpriseContext().scopeNodeId || '').trim();
+    listProfiles(scope, 'process_profile')
+      .then((rows) => {
+        if (!alive) return;
+        const eff = rows.find((r) => r.is_effective);
+        setThread(eff?.payload?.nodes?.length ? eff.payload.nodes : null);
+      })
+      .catch(() => { /* 못 읽으면 조직 트리로 되돌아간다 — 아래에서 그 사실을 적는다 */ });
+    return () => { alive = false; };
+  }, []);
 
   const load = useCallback(async () => {
     setData(loading<Briefing>());
@@ -511,8 +532,27 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
             </svg>
 
             {/* §4.4 DomainNode — 일곱 단계 */}
+            {/* ★★★ [2026-08-25] **회사가 설정한 연결구성이 있으면 그것을 그린다.**
+                ⚠️ 없으면 조직 트리로 되돌아간다 — 그 사실은 위 `nodeNote` 가 적는다. */}
             <div className="processes">
-              {(canvas?.domain_nodes ?? []).map((n) => {
+              {thread ? thread.map((n, i) => {
+                const on = pickedNode === n.key;
+                return (
+                  <button key={n.key || i}
+                    className={`process${on ? ' active' : ''}`}
+                    title={n.note || n.label}
+                    onClick={() => setPickedNode(on ? '' : n.key)}>
+                    <span className="process-dot">
+                      {String(i + 1).padStart(2, '0')}
+                    </span>
+                    <b>{n.label}</b>
+                    <small>{n.key}</small>
+                    {/* ⚠️ 대표 지표는 아직 원천이 없다. 지어내지 않고 **비워 둔다** —
+                        `note` 가 있으면 그것을 쓴다(사람이 적은 사실이다). */}
+                    <em>{n.note || '—'}</em>
+                  </button>
+                );
+              }) : (canvas?.domain_nodes ?? []).map((n) => {
                 const on = pickedNode === n.id;
                 return (
                   <button key={n.id}

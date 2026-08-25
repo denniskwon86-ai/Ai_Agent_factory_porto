@@ -49,6 +49,7 @@ import { ScenarioPanel } from './components/ScenarioPanel';
 import { DecisionPanel } from './components/DecisionPanel';
 // [I-4 7 / Wave H-4] 운영 승격 — 후보를 운영으로 올리는 단 하나의 문
 import { ReleasePromotionPanel } from './components/ReleasePromotionPanel';
+import { CompanySetupPanel } from './components/CompanySetupPanel';
 import { ProductShell } from './components/ProductShell';
 //: ★★★ [2026-08-25] 문맥을 푸는 규칙은 **한 곳**에 있다(`lib/operatingContext`).
 //: ⚠️ 종전에는 여기서 `getEnterpriseContext().tenantId` 를 그대로 썼다. 그 값은 사용자가
@@ -229,6 +230,8 @@ function AppShell() {
   //: ★ 상단 셸이 쓰는 문맥. ⚠️ 회사·범위 이름은 **한 곳**에서 얻는다
   //:   (`lib/scopeLabel`) — 화면마다 따로 풀면 같은 것이 두 이름으로 보인다.
   const [openConsole, setOpenConsole] = useState(false);
+  //: ★ [2026-08-25] 회사 구성 — 회사 이름·법인/가상회사·업무 연결구성.
+  const [showCompany, setShowCompany] = useState(false);
   //: ★ 회사는 `/auth/me`, 범위는 조직도가 답한다 — 어느 쪽도 지어내지 않는다.
   const shellCtx = useOperatingContext();
 
@@ -308,6 +311,14 @@ function AppShell() {
       title: '누가 무엇을 판단하는가',
       hint: '사람과 에이전트의 권한·기준을 정합니다.',
       items: [
+        //: ★★★ [2026-08-25 사용자 지적] 「회사 구성 정보를 등록하는 화면이 없다」.
+        //: ⚠️ `조직·권한` 은 **부서·사용자**다. 회사(법인·가상회사) 자체를 등록하는 곳은
+        //:   따로 없었다 — 백엔드는 다 있는데 부르는 화면이 없었다.
+        //: ⚠️ 여기는 **배열 리터럴**이라 `{/* */}` JSX 주석을 쓰면 빌드가 깨진다
+        //:   (`SessionBar` 주석이 같은 실수를 이미 적어 두었다 — 세 번째다).
+        { id: 'company', icon: '🏛', label: '회사 구성',
+          desc: '회사 이름 · 법인과 가상회사 등록·승인 · 업무 연결구성(Digital Thread) — 실제와 가상은 섞이지 않습니다',
+          onSelect: () => setShowCompany(true) },
         { id: 'org', icon: '🏢', label: '조직·권한',
           desc: '부서·사용자·권한 — 부서는 기준정보라 개편하면 새 버전이 되고 구판은 이력으로 남습니다',
           onSelect: () => setShowOrgChart(true) },
@@ -426,6 +437,9 @@ function AppShell() {
       )}
       {showOrgChart && (
         <OrgChartPanel onClose={() => setShowOrgChart(false)} />
+      )}
+      {showCompany && (
+        <CompanySetupPanel onClose={() => setShowCompany(false)} />
       )}
       {showCollaboration && (
         <CollaborationHub

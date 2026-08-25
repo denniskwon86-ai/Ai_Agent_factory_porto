@@ -382,6 +382,24 @@ async def list_profiles(scope_node_id: str = "", industry_code: str = "", profil
             "note": "프로필 상속 병합은 ECM 로드맵 E2 에서 제공됩니다. 여기는 저장된 원본입니다."}
 
 
+@router.post("/profiles/{profile_id}/approve")
+async def approve_profile(profile_id: str, p: Principal = Depends(current_principal)):
+    """프로필 승인 — **엔터티와 같은 규약**(§4.1 승인 가능한 버전).
+
+    ★★★ [2026-08-25] 이 경로가 없어서 프로필은 **영원히 상속에 참여하지 못했다.**
+      `is_effective` 는 `status == ACTIVE` **와** `approved_at` 을 함께 요구하는데,
+      `ProfileIn` 은 `approved_at` 을 받지 않는다 — status 만 올려 보내도 계속 False 다.
+    ⚠️ 엔터티에는 `POST /entities/{id}/approve` 가 있는데 프로필에는 없었다.
+      「통제는 있는데 부르는 경로가 없다」의 또 한 자리다."""
+    assert_can_edit_org(p)
+    pr = await asyncio.to_thread(ecm_repository.approve_profile, profile_id, p.user_id)
+    if not pr:
+        raise HTTPException(status_code=404, detail="프로필을 찾을 수 없습니다.")
+    d = pr.model_dump()
+    d["is_effective"] = pr.is_effective
+    return {"status": "success", "data": d}
+
+
 # ── E2: 프로필 상속 해석 · 템플릿 바인딩 ────────────────────────────────────
 @router.get("/contexts/{scope_id}/resolved-profile")
 async def get_resolved_profile(scope_id: str, profile_kind: str = "data_profile",
