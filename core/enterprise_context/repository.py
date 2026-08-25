@@ -25,6 +25,24 @@ from core.paths import data_path
 _DB_PATH = data_path("enterprise_context.db")
 
 _DDL = """
+-- ★★★ [2026-08-25] **회사(tenant)의 사람이 읽는 이름.**
+--
+-- ⚠️⚠️ 종전에는 `tenant_id` 밖에 없었다. 그래서 상단 문맥이
+--   「tenant-afs-demo-materials」라는 **기계 식별자**를 사람에게 그대로 보여 줬다.
+--   승인 시안의 그 자리는 「LS MnM」이다.
+-- ★ 이름은 «있는 곳» 이 있어야 한다. 클라이언트가 id 에서 만들어 내면(예: 접두어 자르기)
+--   회사 이름이 코드가 되고, 이름을 바꾸려면 배포를 해야 한다.
+-- ⚠️ `enterprise_entities`(법인)와 **다른 층**이다. 한 tenant 안에 법인이 여럿일 수 있고,
+--   그때 「어느 법인 이름을 회사 이름으로 쓸까」는 답이 없다. tenant 이름은 tenant 가 갖는다.
+CREATE TABLE IF NOT EXISTS tenants (
+    tenant_id   TEXT PRIMARY KEY,
+    name_ko     TEXT NOT NULL,
+    legal_name  TEXT DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS enterprise_entities (
     entity_id       TEXT PRIMARY KEY,
     tenant_id       TEXT NOT NULL DEFAULT 'tenant_default',
@@ -178,6 +196,42 @@ class EcmRepository:
     @staticmethod
     def _uid(prefix: str) -> str:
         return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+    # ── 회사(tenant) 이름 ─────────────────────────────────────────────────
+    def upsert_tenant(self, tenant_id: str, name_ko: str, legal_name: str = "",
+                      status: str = STATUS_ACTIVE) -> Dict[str, Any]:
+        """회사 이름을 세운다. **이름은 필수다** — 빈 이름을 저장하면 화면이 다시 id 를 쓴다."""
+        tid = str(tenant_id or "").strip()
+        name = str(name_ko or "").strip()
+        if not tid:
+            raise EcmError("tenant_id 가 필요합니다.")
+        if not name:
+            raise EcmError("회사 이름이 필요합니다 — 빈 이름은 화면에서 식별자로 되돌아갑니다.")
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO tenants (tenant_id, name_ko, legal_name, status, "
+                "                     created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(tenant_id) DO UPDATE SET "
+                "  name_ko=excluded.name_ko, legal_name=excluded.legal_name, "
+                "  status=excluded.status, updated_at=excluded.updated_at",
+                (tid, name, str(legal_name or "").strip(), str(status), now, now))
+        got = self.get_tenant(tid)
+        assert got is not None                                   # pragma: no cover
+        return got
+
+    def get_tenant(self, tenant_id: str) -> Optional[Dict[str, Any]]:
+        """⚠️ 없으면 `None` 이다 — 이름을 **지어내지 않는다.** 화면이 그때 id 를 쓴다."""
+        rows = self._query("SELECT * FROM tenants WHERE tenant_id=?",
+                           (str(tenant_id or "").strip(),))
+        return rows[0] if rows else None
+
+    def list_tenants(self, status: str = "") -> List[Dict[str, Any]]:
+        if status:
+            return self._query("SELECT * FROM tenants WHERE status=? ORDER BY name_ko",
+                               (str(status),))
+        return self._query("SELECT * FROM tenants ORDER BY name_ko")
 
     # ── 엔터티 ────────────────────────────────────────────────────────────
     def upsert_entity(self, e: EnterpriseEntity) -> EnterpriseEntity:

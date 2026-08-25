@@ -524,7 +524,8 @@ function AppShell() {
                 브랜드 210 · 회사 문맥 270 · 전역 내비 1fr · 행동 auto. */}
           <ProductShell
             module="enterprise"
-            company={shellCtx.company}
+            //: ★ 사람에게는 이름을, 없으면 식별자를 — 지어내지 않는다.
+            company={shellCtx.companyName || shellCtx.company}
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={(id) => {

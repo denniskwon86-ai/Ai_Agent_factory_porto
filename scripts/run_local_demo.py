@@ -194,6 +194,10 @@ USER_PROPOSER = "proposer@afs.invalid"
 USER_RUNNER = "runner@afs.invalid"
 DEPT_HQ, DEPT_PLANT = "hq", "smelting"
 
+#: 시연 회사의 **사람이 읽는 이름**. ⚠️ 화면에서 지어내지 않고 저장소에 심는다.
+DEMO_COMPANY_NAME = "LS MnM"
+DEMO_COMPANY_LEGAL = "LS엠엔엠 주식회사"
+
 def chain_from_slice(sl) -> tuple:
     """관계 사슬을 **정본 자료에서** 뽑는다.
 
@@ -460,6 +464,8 @@ def seed() -> str:
     else:
         cfg.ECM_DEFAULT_TENANT_ID = tenant
 
+    _ensure_company_name(tenant)
+
     say("① 조직·사용자")
     if SKIP_ORG:
         #: 운영 파종 — **이미 있는 조직을 쓴다.** 강제 정책만 켠다(그것이 `_org()` 의
@@ -662,6 +668,30 @@ def _seed_ontology(tenant: str, scope: str, decision_ledger) -> None:
     print(f"  ✓ 계약 1건 · 관계 {len(chain)}건(승인) — {_chain_text(chain)}")
 
 
+def _ensure_company_name(tenant: str) -> None:
+    """회사의 **사람이 읽는 이름**을 세운다. 멱등이다.
+
+    ⚠️⚠️ [2026-08-25] 없으면 상단 문맥이 `tenant-afs-demo-materials` 라는 기계 식별자를
+      사람에게 그대로 보여 준다(승인 시안의 그 자리는 「LS MnM」이다).
+    ★ 이름은 저장소가 갖는다 — 클라이언트가 id 를 잘라 만들면 회사 이름이 코드가 되고,
+      이름을 바꾸려면 배포를 해야 한다.
+    ⚠️ 처음 심을 때만 부르면 **이미 심어진 뿌리는 영영 이름이 없다** — 데이터셋 보충과
+      같은 함정이라, 두 경로에서 모두 부른다."""
+    try:
+        from core.enterprise_context.repository import ecm_repository
+        ecm_repository.db_path = os.path.join(TARGET_ROOT, "enterprise_context.db")
+        got = ecm_repository.get_tenant(tenant)
+        if got and got.get("name_ko") == DEMO_COMPANY_NAME:
+            print(f"  회사 이름 그대로 — «{DEMO_COMPANY_NAME}»")
+            return
+        ecm_repository.upsert_tenant(tenant, DEMO_COMPANY_NAME,
+                                     legal_name=DEMO_COMPANY_LEGAL)
+        print(f"  ✓ 회사 이름 «{DEMO_COMPANY_NAME}» ({tenant})")
+    except Exception as e:
+        #: ⚠️ 삼키지 않는다 — 이름이 없으면 화면이 식별자로 되돌아가고, 그 이유를 알아야 한다.
+        print(f"  ⚠️ 회사 이름을 심지 못했습니다: {e}")
+
+
 def _top_up(instance_id: str) -> None:
     """이 인스턴스에 **아직 없는 계약키만** 인증까지 올린다. 멱등이다.
 
@@ -765,6 +795,9 @@ def main() -> int:
         #:   기준선까지 다 날려야 했다 — 「보충」과 「초기화」는 다른 일이다.
         #: ★ 더하기만 한다. 이미 있는 결속·판은 건드리지 않는다.
         _top_up(inst)
+        #: ★ 이름도 같은 규칙 — 이미 심어진 뿌리에도 채운다.
+        from core import demo_vertical_slice as _dv
+        _ensure_company_name(_dv.scope_of(_slice())[0])
     else:
         inst = seed()
 

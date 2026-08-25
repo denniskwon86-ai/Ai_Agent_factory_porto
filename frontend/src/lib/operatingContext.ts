@@ -45,9 +45,15 @@ export function flattenDepts(rows: Dept[], depth = 0): (Dept & { _depth: number 
   return out;
 }
 
+export type Tenant = {
+  tenant_id: string; name_ko: string; legal_name?: string; status?: string;
+};
+
 export type OperatingContext = {
-  /** 소속 회사. **지어내지 않는다** — 고른 값이 없으면 서버가 말한 값이다. */
+  /** 회사 **식별자**. 지어내지 않는다 — 고른 값이 없으면 서버가 말한 값이다. */
   company: string;
+  /** 회사의 **사람이 읽는 이름**. ⚠️ 없으면 빈 문자열 — 화면이 식별자를 쓴다. */
+  companyName: string;
   /** 지금 실제로 보고 있는 범위를 한 마디로. */
   scopeLabel: string;
   /** REAL · VIRTUAL · COMPETITOR */
@@ -57,6 +63,8 @@ export type OperatingContext = {
   depts: Dept[];
   flat: (Dept & { _depth: number })[];
   me: Me | null;
+  /** 등록된 회사 목록 — 회사 전환기가 쓴다. */
+  tenants: Tenant[];
 };
 
 /** 상단 문맥 한 줄을 만든다. **표시만 한다 — 문맥을 자동으로 채우지 않는다.**
@@ -68,6 +76,20 @@ export function useOperatingContext(): OperatingContext {
   const [status, setStatus] = useState<ContextStatus>('loading');
   const [note, setNote] = useState('');
   const [me, setMe] = useState<Me | null>(null);
+  //: ★★★ [2026-08-25] 회사 이름은 **저장소가 갖는다**(`tenants` 표).
+  //: ⚠️ 없으면 채우지 않는다 — 식별자에서 이름을 만들어 내면(접두어 자르기 같은) 회사
+  //:   이름이 코드가 되고, 이름을 바꾸려면 배포를 해야 한다.
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API_BASE_URL}/api/v1/enterprise-context/tenants`, {
+      headers: { 'X-Session-Token': getSessionToken() },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (alive && j?.data) setTenants(j.data as Tenant[]); })
+      .catch(() => { /* 표시용이다 — 실패해도 앱을 막지 않는다 */ });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -133,8 +155,13 @@ export function useOperatingContext(): OperatingContext {
    *    그것을, 없으면 서버가 말한 값을 쓴다 — 어느 쪽도 지어내지 않는다. */
   const company = (ctx.tenantId || me?.tenant_id || '').trim();
 
+  //: ★ 이름이 있으면 이름을, 없으면 **식별자를 그대로** 쓴다(둘 다 사실이다).
+  const companyName = (tenants.find((t) => t.tenant_id === company)?.name_ko || '').trim();
+
   return {
     company,
+    companyName,
+    tenants,
     scopeLabel,
     entityMode: (ctx.entityMode || 'REAL').toUpperCase(),
     status, note, depts, flat, me,

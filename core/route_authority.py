@@ -172,6 +172,8 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "POST /api/v1/enterprise-context/rollup": (ADMIN_DATA_ACCESS,),
     "POST /api/v1/enterprise-context/executive-board": (ADMIN_DATA_ACCESS,),
     "POST /api/v1/enterprise-context/contexts/select": (ADMIN_ORGANIZATION,),
+    #: ★ 회사 이름을 세우는 것은 **조직 기준정보**를 고치는 일이다.
+    "POST /api/v1/enterprise-context/tenants": (ADMIN_ORGANIZATION,),
 
     # ── 경로 계산 [B2] ──────────────────────────────────────────────────────
     # ★ LLM 은 0건이지만 **돌리기**로 끊었다. 승인된 자료를 읽어 경영 판단용 숫자를 내고,

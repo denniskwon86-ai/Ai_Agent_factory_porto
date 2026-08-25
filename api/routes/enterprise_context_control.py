@@ -110,6 +110,54 @@ async def get_meta(
     }}
 
 
+# ── 회사(tenant) 이름 ────────────────────────────────────────────────────
+#
+# ⚠️⚠️ [2026-08-25 사용자 지적] 「tenant_id 말고 이름도 넣어주세요」.
+#   상단 문맥이 `tenant-afs-demo-materials` 라는 **기계 식별자**를 사람에게 그대로
+#   보여 주고 있었다. 승인 시안의 그 자리는 「LS MnM」이다.
+# ★ 이름은 **저장소가 갖는다**(`tenants` 표). 클라이언트가 id 를 잘라 만들면 회사 이름이
+#   코드가 되고, 이름을 바꾸려면 배포를 해야 한다.
+
+class TenantIn(BaseModel):
+    """★ `tenant_id` 를 **받는다.** 회사를 등록하는 일이므로 대상이 필요하다.
+    ⚠️ 이름은 필수다 — 저장소가 빈 이름을 거부한다."""
+    tenant_id: str
+    name_ko: str
+    legal_name: str = ""
+    status: str = "ACTIVE"
+
+
+@router.get("/tenants")
+async def list_tenants(p: Principal = Depends(current_principal)):
+    """등록된 회사 목록. ★ 화면의 회사 전환기가 이것을 쓴다."""
+    assert_identified(p, WHAT)
+    rows = await asyncio.to_thread(ecm_repository.list_tenants, "")
+    return {"status": "success", "data": rows}
+
+
+@router.get("/tenants/{tenant_id}")
+async def get_tenant(tenant_id: str, p: Principal = Depends(current_principal)):
+    """⚠️ 없으면 **404** 다. 이름을 지어내지 않는다 — 화면이 그때 id 를 그대로 쓴다."""
+    assert_identified(p, WHAT)
+    row = await asyncio.to_thread(ecm_repository.get_tenant, tenant_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="등록된 회사 이름이 없습니다.")
+    return {"status": "success", "data": row}
+
+
+@router.post("/tenants")
+async def upsert_tenant(req: TenantIn, p: Principal = Depends(current_principal)):
+    """회사 이름을 세운다. ★ 조직을 고칠 수 있는 사람만."""
+    assert_can_edit_org(p)
+    try:
+        row = await asyncio.to_thread(
+            ecm_repository.upsert_tenant, req.tenant_id, req.name_ko,
+            req.legal_name, req.status)
+    except EcmError as ex:
+        raise HTTPException(status_code=400, detail=str(ex))
+    return {"status": "success", "data": row}
+
+
 @router.get("/tree")
 async def get_tree(p: Principal = Depends(current_principal),
                    ctx: EnterpriseContext = Depends(enterprise_context)):
