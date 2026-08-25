@@ -189,3 +189,42 @@
 
 /* ★ 흐름선 — 시안의 «살아 있는» 인상은 이 한 줄에서 나온다. */
 @keyframes move{to{stroke-dashoffset:-30}}
+
+/* ★★★ [2026-08-25 실측] **시안의 `.product` 격자가 앱에는 없다.**
+ *
+ * 시안은 `<main class="product">` 가 `grid-template-rows:74px minmax(826px,calc(100vh - 74px))`
+ * 로 셸과 작업면의 높이를 함께 정한다. 앱은 셸(`ProductShell`)과 캔버스(`EnterprisePage`)가
+ * **다른 컴포넌트**라 그 격자를 만들 자리가 없고, `.le-canvas{display:contents}` 라
+ * 위의 `.le-canvas .product{...}` 규칙은 **걸릴 요소가 없다**(실측: `.product` 0개).
+ *
+ * ⚠️⚠️ 그래서 작업면이 내용 높이(848px)로 자랐고 문서가 921px 이 되어 **세로 스크롤**이
+ *   생겼다. 시안은 826px 에 딱 맞아 스크롤이 없다. 3열의 폭은 맞는데 높이만 어긋난
+ *   상태였고, 그 22px 이 화면 아래를 잘라 보이게 했다.
+ * ★ 격자가 주던 값을 작업면이 직접 받는다 — 숫자는 시안 그대로(74 / 826).
+ */
+.le-canvas .workspace{
+  height:calc(100vh - 74px);
+  min-height:826px;
+  /* ⚠️⚠️ 높이만 줘서는 모자랐다(실측). 격자의 **암시 행**은 여전히 내용 높이로 잡혀
+   *   세 칸이 848px 로 버텼고, 작업면 밖으로 22px 이 삐져나와 문서가 921px 이 됐다.
+   * ★ 행을 한 줄로 못박고(`minmax(0,1fr)`) 칸의 `min-height:auto` 를 푼다 —
+   *   그래야 칸이 826 으로 늘어나고, 넘치는 내용은 시안과 같이 `.canvas{overflow:hidden}`
+   *   이 자른다. */
+  grid-template-rows:minmax(0,1fr);
+}
+.le-canvas .workspace>*{min-height:0}
+
+/* ★ [2026-08-25] 영향 4칸이 왜 비었는지 한 줄. 시안에는 없다 — 시안은 표본값이 채워진
+ *   상태를 그렸기 때문이다. 값이 없을 때 **이유가 없으면 고장으로 읽힌다**.
+ * ⚠️ 눈에 튀게 만들지 않는다. 이것은 경고가 아니라 «다음에 할 일» 이다. */
+.le-canvas .impact-why{
+  display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;
+  margin-top:8px;padding-top:8px;border-top:1px dashed var(--line,#d8dbe1);
+  color:var(--muted,#667084);font-size:11px;line-height:1.5;
+}
+.le-canvas .impact-why b{color:var(--ink,#101a2d);font-weight:700}
+.le-canvas .impact-why-go{
+  padding:2px 9px;border:1px solid var(--line,#d8dbe1);border-radius:5px;
+  background:#fff;color:var(--ink,#101a2d);font-size:11px;font-weight:700;cursor:pointer;
+}
+.le-canvas .impact-why-go:hover{border-color:var(--ink,#101a2d)}

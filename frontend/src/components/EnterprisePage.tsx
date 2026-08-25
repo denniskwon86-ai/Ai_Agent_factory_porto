@@ -31,6 +31,14 @@ import {
   fetchBriefing, type Briefing, type BriefingItem,
 } from '../lib/briefingApi';
 import { getReadiness, listInstances } from '../lib/dataPrepApi';
+//: ★★★ [2026-08-25] **이미 있는 것을 쓴다.** 처음에 `dataPrepApi` 에 계산 준비도
+//:   클라이언트를 새로 만들었는데, `calculationApi.getReadiness` 가 같은 경로·같은
+//:   타입으로 이미 있었다(`GateState`·`Gate`·`Readiness`).
+//: ⚠️ 같은 질문에 두 벌이 생기면 서버가 관문을 늘릴 때 한쪽만 고쳐진다.
+import {
+  getReadiness as getCalcReadiness,
+  type Gate as CalcGate, type Readiness as CalcReadiness,
+} from '../lib/calculationApi';
 import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
 import '../design/enterprise-canvas.css';
@@ -71,12 +79,27 @@ const OVERLAY: { key: string; layer: Layer; tone: string; kicker: string; body: 
 /** §5.1 Decision Focus 의 영향 4칸.
  *
  *  ⚠️ 시안의 `₩428억`·`8.0%` 는 `PROTOTYPE · SAMPLE DATA` 다. 채택 결정문이 「실제 API
- *    근거가 있을 때만」을 못박았으므로 값은 비운다 — 자리는 지킨다. */
+ *    근거가 있을 때만」을 못박았으므로 값은 비운다 — 자리는 지킨다.
+ *
+ *  ## ⚠️⚠️ [2026-08-25] **라벨이 우리가 못 내는 값을 약속하고 있었다**
+ *
+ *  종전 넷은 시안의 `예상 매출 · 영업이익률 · 납기 준수율 · 결정 신뢰도` 였다. 그런데
+ *  이 시스템의 계산(`core/calc_graph.OUTPUTS`)이 내는 것은 **다섯**이고 그중 어느 것도
+ *  저 넷이 아니다:
+ *
+ *      production_qty 생산량 · ending_inventory 기말재고 · purchase_payment 구매지급
+ *      · ending_cash 기말현금 · operating_profit 영업이익
+ *
+ *  ★ 영원히 채울 수 없는 라벨을 걸어 두면 그 자리는 **영원히 고장**이다. 실제로 낼 수
+ *    있는 이름으로 바꾼다. `구매지급` 은 결정의 «결과» 보다 «투입» 에 가까워 넷에서 뺐다.
+ *  ⚠️ 이 목록은 `core/calc_graph.OUTPUTS` 의 **복제**다 — 서버가 다섯을 바꾸면 여기도
+ *    바뀌어야 한다. 값을 실을 때는 응답의 `labels` 를 쓰고, 여기 이름은 **빈 상태의
+ *    자리표시**로만 쓴다. */
 const IMPACT_SLOTS: { label: string; tone: string }[] = [
-  { label: '예상 매출', tone: '' },
-  { label: '영업이익률', tone: 'risk' },
-  { label: '납기 준수율', tone: 'good' },
-  { label: '결정 신뢰도', tone: '' },
+  { label: '생산량', tone: '' },
+  { label: '기말재고', tone: 'risk' },
+  { label: '기말현금', tone: 'good' },
+  { label: '영업이익', tone: '' },
 ];
 
 const LAYERS: { id: Layer; label: string; desc: string; color: string }[] = [
@@ -100,6 +123,23 @@ type TrustCard = {
   warn?: string;         // 설계가 지정한 경고
 };
 
+/** 관문 → 그 일을 하는 화면. ★ 서버의 관문 이름(`demo_readiness`)과 메뉴 id 를 잇는
+ *  **한 곳**이다. ⚠️ 표에 없는 관문은 링크를 그리지 않는다 — 엉뚱한 화면으로 보내는 것은
+ *  아무 데도 안 보내는 것보다 나쁘다. */
+const GATE_DEST: Record<string, string> = {
+  instance: 'dataprep',
+  snapshots: 'dataprep',
+  baseline: 'scenario',
+  capabilities: 'calc-approval',
+};
+
+/** 지금 **멈춰 세운 관문** 하나. ⚠️ `UNKNOWN` 은 「앞 관문이 안 서서 판정 안 함」이므로
+ *  범인이 아니다 — 그것을 사유로 적으면 사용자가 엉뚱한 곳을 고치러 간다. */
+function blockingGate(w: CalcReadiness): CalcGate | undefined {
+  return (w.gates || []).find((g) => g.state === 'FAILED')
+      || (w.gates || []).find((g) => g.state === 'NOT_YET');
+}
+
 export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   onOpenBuild: () => void;
   onOpenMenu: (id: string) => void;
@@ -118,6 +158,10 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   //: ⚠️ `null` = 아직 못 읽음, `[]` = 정말 0건. 둘을 같게 실으면 비서가 「데이터가 없다」로
   //:   말하고, 그것은 «조회 실패 ≠ 0건» 규칙이 비서 답변에서 무너지는 것이다.
   const [readiness, setReadiness] = useState<any[] | null>(null);
+  //: ★★★ [2026-08-25] **왜 지금 계산이 안 도는가.** 영향 4칸이 `—` 만 그리면 「고장」으로
+  //:   읽힌다 — 서버가 관문별로 답을 갖고 있으므로 그것을 그대로 옮긴다.
+  //: ⚠️ `null` = 아직 못 읽음. 「못 읽음」과 「막힘 없음」을 같게 그리지 않는다.
+  const [calcWhy, setCalcWhy] = useState<CalcReadiness | null>(null);
 
   const load = useCallback(async () => {
     setData(loading<Briefing>());
@@ -131,6 +175,26 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
     }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  //: ★ 인스턴스가 **딱 하나**일 때만 그것으로 묻는다.
+  //: ⚠️ 여럿이면 고르지 않는다 — 서버도 「아무 인스턴스나 골라 주지 않는다」로 두었다.
+  //:   골라 버리면 그 답이 어느 인스턴스의 것인지 화면이 말할 수 없다.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      let only = '';
+      try {
+        const r = await listInstances();
+        const rows = r?.instances || [];
+        if (rows.length === 1) only = String(rows[0]?.instance_id || '');
+      } catch { /* 목록을 못 읽으면 인스턴스 없이 묻는다 — 관문에서 멈춘 답이 온다 */ }
+      try {
+        const w = await getCalcReadiness(only);
+        if (alive) setCalcWhy(w);
+      } catch { /* ⚠️ 실패를 «막힘 없음» 으로 그리지 않는다 — null 로 둔다 */ }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   /** §4.3 EnterpriseThreadCanvas — 업무 노드.
    *
@@ -505,9 +569,11 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                   </div>
                 )}
               </div>
-              {/* ⚠️ 시안의 매출·이익률·납기·신뢰도는 표본값이다. 지금 경로 계산은 부족량·
-                  생산가능량·매출이연을 내고, 그것을 여기 실으려면 계산을 돌려야 한다.
-                  ★ 그래서 **무엇을 눌러야 채워지는지**를 적는다 — 빈 「—」만 두면 고장으로 읽힌다. */}
+              {/* ★★★ [2026-08-25] 빈 「—」 옆에 **왜 비었는지**를 붙인다.
+                  ⚠️⚠️ 종전에는 `—` 넷만 있었다. 값이 없는 것은 맞지만 이유가 없으니
+                    「고장」으로 읽힌다 — 그리고 사용자는 무엇을 눌러야 채워지는지 모른다.
+                  ★ 문구를 지어내지 않는다. `GET /calculation/readiness` 가 관문별로 준
+                    `summary`·`next_action` 을 **그대로** 옮긴다. */}
               <div className="impact">
                 {IMPACT_SLOTS.map((s) => (
                   <div key={s.label} className={s.tone}>
@@ -515,6 +581,28 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                     <b>—</b>
                   </div>
                 ))}
+              </div>
+              <div className="impact-why">
+                {calcWhy === null ? (
+                  // ⚠️ 「아직 못 읽음」과 「막힘 없음」은 다른 사실이다.
+                  <span>계산이 도는지 확인하는 중…</span>
+                ) : calcWhy.status === 'READY' ? (
+                  <span>계산 관문은 모두 서 있습니다 — 경로 계산을 돌리면 값이 채워집니다.</span>
+                ) : (
+                  <>
+                    <b>{blockingGate(calcWhy)?.summary || '계산이 아직 돌지 않습니다.'}</b>
+                    {calcWhy.next_action && <span>→ {calcWhy.next_action}</span>}
+                    {/* ★ 읽고 끝내지 않는다 — 그 관문으로 **갈 수 있게** 한다.
+                        ⚠️ 관문 이름과 목적지를 한 곳에서 잇는다. 모르는 관문이면 링크를
+                          그리지 않는다(엉뚱한 화면으로 보내는 것이 침묵보다 나쁘다). */}
+                    {GATE_DEST[blockingGate(calcWhy)?.gate || ''] && (
+                      <button type="button" className="impact-why-go"
+                        onClick={() => onOpenMenu(GATE_DEST[blockingGate(calcWhy)!.gate])}>
+                        열기
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             </article>
           </div>
