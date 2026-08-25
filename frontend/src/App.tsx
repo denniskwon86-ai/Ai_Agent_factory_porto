@@ -50,8 +50,11 @@ import { DecisionPanel } from './components/DecisionPanel';
 // [I-4 7 / Wave H-4] 운영 승격 — 후보를 운영으로 올리는 단 하나의 문
 import { ReleasePromotionPanel } from './components/ReleasePromotionPanel';
 import { ProductShell } from './components/ProductShell';
-import { getEnterpriseContext } from './lib/api';
-import { fetchScopeNodes, labelForScope, type ScopeNode } from './lib/scopeLabel';
+//: ★★★ [2026-08-25] 문맥을 푸는 규칙은 **한 곳**에 있다(`lib/operatingContext`).
+//: ⚠️ 종전에는 여기서 `getEnterpriseContext().tenantId` 를 그대로 썼다. 그 값은 사용자가
+//:   조직을 고를 때만 채워지므로 로그인 직후 상단이 「? · 확인 중」이었다 —
+//:   회사 Context 상시 노출은 채택 결정문이 고정 요소로 못박은 항목이다.
+import { useOperatingContext } from './lib/operatingContext';
 import { BuildPage } from './components/BuildPage';
 import { BuildStartDialog } from './components/BuildStartDialog';
 import { Banner } from './design/HubShell';
@@ -226,18 +229,8 @@ function AppShell() {
   //: ★ 상단 셸이 쓰는 문맥. ⚠️ 회사·범위 이름은 **한 곳**에서 얻는다
   //:   (`lib/scopeLabel`) — 화면마다 따로 풀면 같은 것이 두 이름으로 보인다.
   const [openConsole, setOpenConsole] = useState(false);
-  const [shellScopes, setShellScopes] = useState<ScopeNode[]>([]);
-  useEffect(() => {
-    let alive = true;
-    void fetchScopeNodes().then((r) => { if (alive) setShellScopes(r); });
-    return () => { alive = false; };
-  }, []);
-  const _ectx = getEnterpriseContext();
-  const shellCtx = {
-    company: _ectx.tenantId || '',
-    scope: labelForScope(shellScopes, _ectx.scopeNodeId || ''),
-    entityMode: (_ectx.entityMode || 'REAL').toUpperCase(),
-  };
+  //: ★ 회사는 `/auth/me`, 범위는 조직도가 답한다 — 어느 쪽도 지어내지 않는다.
+  const shellCtx = useOperatingContext();
 
   const navGroups: NavGroup[] = [
     {
@@ -532,7 +525,7 @@ function AppShell() {
           <ProductShell
             module="enterprise"
             company={shellCtx.company}
-            scope={shellCtx.scope}
+            scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={(id) => {
               //: 시안의 7개 목적지 → 이 앱의 화면. ⚠️ 아직 없는 곳은 가장 가까운 화면으로
