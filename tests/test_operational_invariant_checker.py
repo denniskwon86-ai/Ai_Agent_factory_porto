@@ -411,3 +411,44 @@ def test_읽기_흔적_면제는_내용까지_번지지_않는다(tmp_path):
     out = _run(tmp_path, "compare", "--mode", "tests")
     assert out.returncode == 1, f"면제가 내용까지 번졌다:\n{out.stdout}"
     assert "organization_nodes" in out.stdout
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 협업 저장소 — 격리와 감시가 같은 자리를 비워 두고 있었다 (2026-08-23)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_결정_안건과_발간물을_감시한다(tmp_path):
+    """★★★ [2026-08-23 실측] **둘 다 감시 밖이었다.**
+
+    운영 `collaboration.db` 에 결정 안건 253행·발간물 76행이 쌓여 있었고, 그중 237행이
+    시험 계정 `owner@afs.invalid` 가 만든 것이었다 — **시험이 운영 자료를 만들고 있었다.**
+
+    ⚠️⚠️ 그런데 이 검사기는 「운영 데이터 영역이 회귀 전과 같습니다」라고 **초록을 냈다.**
+      안 보고 있었으니까. 격리 목록과 감시 목록이 같은 자리를 비워 두면 그 자리는
+      **아무도 안 본다** — 통제가 둘이어도 0 이다.
+
+    ★ 이름이 원본에 있는지만 보지 않는다. **실제로 잡힌 기준선**에 열쇠가 있는지 본다."""
+    _make_db(tmp_path / "data" / "collaboration.db", {
+        "decision_cases": 1, "publications": 1, "publication_versions": 1})
+    assert _run(tmp_path, "capture", "--mode", "tests").returncode == 0
+    state = json.loads((tmp_path / ".invariant_baseline.json").read_text(encoding="utf-8"))
+    for table in ("decision_cases", "publications", "publication_versions"):
+        key = f"data/collaboration.db:{table}"
+        assert key in state["rows"], f"행 수 감시에 `{key}` 가 없다"
+        assert state["rows"][key] == 1, f"{key} 를 읽지 못했다: {state['rows'][key]!r}"
+        assert key in (state.get("content") or {}), f"내용 지문 감시에 `{key}` 가 없다"
+
+
+def test_안건이_하나라도_늘면_실패한다(tmp_path):
+    """⚠️ 회귀가 결정 안건을 만들 이유는 없다 — 만들었다면 격리가 깨진 것이다."""
+    _make_db(tmp_path / "data" / "collaboration.db", {
+        "decision_cases": 1, "publications": 1, "publication_versions": 1})
+    assert _run(tmp_path, "capture", "--mode", "tests").returncode == 0
+
+    conn = sqlite3.connect(str(tmp_path / "data" / "collaboration.db"))
+    conn.execute("INSERT INTO decision_cases(id) VALUES(999)")
+    conn.commit()
+    conn.close()
+    out = _run(tmp_path, "compare", "--mode", "tests")
+    assert out.returncode == 1, f"안건 증가를 잡지 못했다:\n{out.stdout}"
+    assert "decision_cases" in out.stdout

@@ -481,6 +481,38 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
     except Exception as e:
         isolation_failed("업무 데이터 준비 저장소", e)
 
+    try:
+        # ★★★ [2026-08-23 실측] **협업 저장소가 격리 목록에 없었다.**
+        #
+        # ⚠️⚠️ 바로 위 주석이 「결정 원장은 격리 목록에 없어서 11,633행이 오염됐다」라고
+        #   적어 놓았는데, **같은 일이 여기서 반복됐다.** 운영 `data/collaboration.db` 에
+        #   결정 안건 253행·발간물 76행이 쌓여 있었고, 그중 237행은 시험 계정
+        #   `owner@afs.invalid` 가 만든 것이다 — 시험이 운영 자료를 만들고 있었다.
+        #
+        # ★ 더 나쁜 것: 불변식 검사기도 이 파일을 **안 보고 있어서** 「운영 데이터 영역이
+        #   회귀 전과 같습니다」라고 초록을 냈다. 통제 둘이 같은 자리를 비워 두면 그
+        #   자리는 아무도 안 본다.
+        # ⚠️ 여기도 **두 곳**을 바꾼다: 모듈 기본값과 이미 만들어진 전역 싱글턴.
+        from core import collaboration_store as _cs
+        _cs_db = tmp_path / "collaboration.db"
+        monkeypatch.setattr(_cs, "_DB_PATH", str(_cs_db), raising=False)
+        monkeypatch.setattr(_cs.collaboration_store, "db_path", str(_cs_db),
+                            raising=False)
+        for _attr in ("_prepared_for", "_ready", "_ensured"):
+            if hasattr(_cs.collaboration_store, _attr):
+                monkeypatch.setattr(_cs.collaboration_store, _attr, None, raising=False)
+    except Exception as e:
+        isolation_failed("협업 저장소(결정 안건·발간)", e)
+
+    try:
+        # ⚠️ LLM 캐시는 `core/paths.py` 를 안 거치고 자기 경로를 조립했다(고쳤다).
+        #   그래도 **import 시점에 `_init_db()`** 를 부르므로, 뿌리를 안 돌리면 시험이
+        #   운영 `data/llm_cache.db` 를 만든다.
+        import core.paths as _paths
+        monkeypatch.setattr(_paths, "DATA_DIR", str(tmp_path), raising=False)
+    except Exception as e:
+        isolation_failed("데이터 뿌리(DATA_DIR)", e)
+
 
 # ── [P0-A/B] 조직·강제 상태를 **명시**하는 fixture ────────────────────────
 #

@@ -77,6 +77,13 @@ WATCH = [
     #:   것도 이 파일이다 — 지켜야 할 것을 안 보고 있었다.
     "data/enterprise_context.db", "data/enterprise_context.db-wal",
     "data/enterprise_context.db-shm",
+    #: ★★★ [2026-08-23 실측] **결정 안건·발간물이 감시 밖이었다.**
+    #:   운영 `collaboration.db` 에 안건 253행·발간 76행이 쌓여 있었고 그중 237행이
+    #:   시험 계정이 만든 것이었다. 그런데 이 검사기는 초록을 냈다 — 안 보고 있었으니까.
+    #: ⚠️ 격리 목록과 감시 목록이 **같은 자리를 비워 두면** 그 자리는 아무도 안 본다.
+    "data/collaboration.db", "data/collaboration.db-wal", "data/collaboration.db-shm",
+    #: ⚠️ LLM 캐시는 import 시점에 파일을 만든다 — 그 사실이 보이게 감시한다.
+    "data/llm_cache.db",
     "data/app_data.db", "data/app_data_preview.db",
     "data/program_lifecycle.db",
 ]
@@ -102,6 +109,10 @@ TABLES = [
     ("data/enterprise_context.db", "organization_nodes"),
     ("data/enterprise_context.db", "organization_edges"),
     ("data/enterprise_context.db", "enterprise_entities"),
+    #: ★ 결정 안건과 발간물은 **업무 산출물**이다 — 회귀가 만들 이유가 없다.
+    ("data/collaboration.db", "decision_cases"),
+    ("data/collaboration.db", "publications"),
+    ("data/collaboration.db", "publication_versions"),
 ]
 
 #: 화면 검증 뒤에 **파일이 생기는 것**까지만 봐준다(§5.2 에 이미 적혀 있던 사실:
@@ -143,6 +154,9 @@ PROTECTED_ROWS = (
     "data/enterprise_context.db:organization_nodes",
     "data/enterprise_context.db:organization_edges",
     "data/enterprise_context.db:enterprise_entities",
+    "data/collaboration.db:decision_cases",
+    "data/collaboration.db:publications",
+    "data/collaboration.db:publication_versions",
 )
 
 

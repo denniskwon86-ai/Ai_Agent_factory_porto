@@ -9,9 +9,22 @@ import os
 
 
 def live_ledger_path() -> str:
-    """운영 결정 원장의 절대 경로."""
-    from core.paths import data_path
-    return os.path.realpath(data_path("decision_ledger.db"))
+    """운영 결정 원장의 절대 경로. **움직이지 않는 기준**이다.
+
+    ⚠️⚠️ [2026-08-23 실측] 종전에는 `core.paths.data_path()` 를 썼다. 그런데 conftest 가
+      격리를 위해 `paths.DATA_DIR` 을 tmp 로 돌리자 **이 감시자가 그대로 따라갔다** —
+      즉 「운영 원장」이 tmp 를 가리키게 되고, 감시자는
+
+          · tmp 경로를 「운영 원장이다」라며 **거부**하고
+          · 진짜 `data/decision_ledger.db` 를 「격리 경로다」라며 **통과**시켰다.
+
+      감시자가 완전히 뒤집혔는데 이름은 그대로였다. 시험 4건이 그것을 잡았다.
+
+    ★★★ **통제는 자기가 막을 것에 기대면 안 된다.** 운영 뿌리는 «사실» 이지
+      «변수» 가 아니다 — `PROJECT_ROOT/data` 로 고정한다(캐너리 시험에서 같은 결함을
+      같은 방식으로 고쳤다)."""
+    from core.paths import PROJECT_ROOT
+    return os.path.realpath(os.path.join(PROJECT_ROOT, "data", "decision_ledger.db"))
 
 
 def isolation_path_error(candidate: str) -> str:

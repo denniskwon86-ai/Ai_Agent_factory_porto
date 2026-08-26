@@ -26,9 +26,14 @@ import sqlite3
 import pytest
 
 from core import decision_ledger as dl
-from core.paths import data_path
+from tests.ledger_isolation import live_ledger_path as _live_ledger_path
 
-LIVE = os.path.realpath(data_path("decision_ledger.db"))
+#: ★★★ **정의는 한 곳뿐이다.**
+#:
+#: ⚠️⚠️ [2026-08-23] 종전에는 여기서 `data_path(...)` 로 따로 계산했다. 모듈 로딩
+#:   시점이라 우연히 맞았을 뿐이고, conftest 가 `paths.DATA_DIR` 을 돌린 뒤에는
+#:   `ledger_isolation` 쪽 판정과 **다른 값**이 됐다 — 같은 질문에 두 답이 생겼다.
+LIVE = _live_ledger_path()
 
 
 #: ★ 판정을 **한 곳**에서 가져온다 — conftest 세션 감시와 이 파일이 같은 눈으로 봐야

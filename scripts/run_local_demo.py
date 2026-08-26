@@ -1,7 +1,22 @@
 # -*- coding: utf-8 -*-
-"""★★★ [M0] **로컬 시연 서버** — 12분 여정을 이 기계에서 처음부터 걸을 수 있게 한다.
+"""스타터 데이터 파종 **호환 모듈**.
 
-## 왜 필요한가
+⚠️ [2026-08-25 사용자 결정] 이 파일을 직접 실행해 별도 `demo_data/` 제품 상태를
+만드는 경로는 폐지했다. 현장 적용 전 수동 기능 확인·통합 확인·시연은 모두 `data/`를
+단일 사전검증 정본으로 사용한다.
+
+이 모듈의 파종 함수는 `scripts/seed_starter_data.py`가 `TARGET_ROOT=data/`로 바꿔
+재사용한다. 직접 서버를 띄울 때는 `venv/Scripts/python.exe run.py`를 사용한다.
+
+아래의 격리 구현과 `demo_data/` 상수는 과거 증거·파종 함수 호환을 위해 남겨 두지만,
+`main()`은 별도 데이터 평면으로의 직접 기동을 거부한다.
+
+## 과거 구현 기록
+
+아래 설명은 별도 시연 뿌리를 만들었던 이유와 당시 발견한 결함을 보존한 기록이다.
+현재 실행 정책은 위 머리말과 `main()`의 fail-closed 차단이 정본이다.
+
+## 왜 필요했는가
 
 운영 `data/` 에는 키트 인스턴스도, 인증판도, 온톨로지 관계도 **0건**이다. 그래서 지금
 이 저장소를 그대로 띄우면 시연을 시작할 수 없다 — 화면은 뜨지만 고를 것이 없다.
@@ -17,7 +32,7 @@
 ## 무엇을 심는가
 
     조직        본사 → 제련공장(상위→하위 상속을 볼 수 있게)
-    사용자      hikwon@lsmnm.com(시스템 관리자) · runner@afs.invalid(실행자)
+    사용자      demo.admin@afs.invalid(시스템 관리자) · runner@afs.invalid(실행자)
     키트        KIT-MFG-NONFERROUS-PROCUREMENT 1.0.0 — **정본 파일**에서 읽는다
     인증판      필수 7종
     온톨로지    계약 + 관계 3건(제안→상신→승인, **실제 원장 사건**으로)
@@ -29,11 +44,10 @@
 「승인 화면이 실제로 도는가」를 확인할 수 없다 — 처음부터 승인된 상태로 시작하면
 그 화면은 한 번도 안 눌린 채 시연이 끝난다.
 
-사용:
-    venv/Scripts/python.exe scripts/run_local_demo.py            # 있으면 그대로, 없으면 심고 기동
-    venv/Scripts/python.exe scripts/run_local_demo.py --reset    # 비우고 다시 심는다
-    venv/Scripts/python.exe scripts/run_local_demo.py --seed-only
-    venv/Scripts/python.exe scripts/run_local_demo.py --port 8080
+현재 사용:
+    venv/Scripts/python.exe scripts/seed_starter_data.py --check
+    venv/Scripts/python.exe scripts/seed_starter_data.py
+    venv/Scripts/python.exe run.py
 
 LLM 호출: 0건.
 """
@@ -52,6 +66,9 @@ sys.path.insert(0, ROOT)
 #: 시연 뿌리. ⚠️ 운영 `data/` 와 **다른 디렉터리**여야 한다.
 DEMO_ROOT = os.path.join(ROOT, "demo_data")
 OPERATIONAL = os.path.join(ROOT, "data")
+
+#: 사용자·화면·통합 시연이 함께 보는 **단일 사전검증 정본**.
+CANONICAL_PREPROD_ROOT = OPERATIONAL
 
 #: ★★★ [2026-08-23] **파종 대상 뿌리.** 기본은 시연 뿌리다.
 #:
@@ -188,7 +205,7 @@ def _seal_operational_data() -> None:
     builtins.open = guarded_open
 
 
-USER_ADMIN = "hikwon@lsmnm.com"          # ★ 승인된 실측 계정 하나
+USER_ADMIN = "demo.admin@afs.invalid"     # ★ 실재할 수 없는 합성 시스템 관리자
 #: ★ 제안자와 승인자는 달라야 한다(자기 승인 금지). 합성 원장 행위자를 쓴다.
 USER_PROPOSER = "proposer@afs.invalid"
 USER_RUNNER = "runner@afs.invalid"
@@ -436,6 +453,16 @@ def _org():
     return org
 
 
+def _ensure_demo_users(org) -> None:
+    """시연 계정은 모두 RFC 2606 예약 도메인만 쓴다. 기존 뿌리에도 멱등 보충한다."""
+    org.upsert_user(USER_ADMIN, "시연 관리자 (예시)", primary_dept_id=DEPT_HQ,
+                    is_admin=True, is_data_admin=True, actor="demo-seed")
+    org.set_user_roles(USER_ADMIN, {DEPT_HQ: "manager"}, actor="demo-seed")
+    org.upsert_user(USER_RUNNER, "실행자 (예시)", primary_dept_id=DEPT_PLANT,
+                    actor="demo-seed")
+    org.set_user_roles(USER_RUNNER, {DEPT_PLANT: "member"}, actor="demo-seed")
+
+
 def seed() -> str:
     from core import calc_baseline as cb
     from core import demo_vertical_slice as dv
@@ -484,12 +511,7 @@ def seed() -> str:
             except Exception:
                 org.update_department(dept, parent_id=parent, scope_node_id=node,
                                       actor="demo-seed")
-        org.upsert_user(USER_ADMIN, "권희권", primary_dept_id=DEPT_HQ, is_admin=True,
-                        is_data_admin=True, actor="demo-seed")
-        org.set_user_roles(USER_ADMIN, {DEPT_HQ: "manager"}, actor="demo-seed")
-        org.upsert_user(USER_RUNNER, "실행자 (예시)", primary_dept_id=DEPT_PLANT,
-                        actor="demo-seed")
-        org.set_user_roles(USER_RUNNER, {DEPT_PLANT: "member"}, actor="demo-seed")
+        _ensure_demo_users(org)
         print(f"  ✓ {DEPT_HQ}(corp-afs) → {DEPT_PLANT}({scope}) · 사용자 2명")
 
     say("② 정본 키트와 인증판")
@@ -743,6 +765,16 @@ def _top_up(instance_id: str) -> None:
 
 
 def main() -> int:
+    #: ★★★ 별도 `demo_data/` 제품 상태를 다시 만들지 못하게 한다.
+    #:
+    #: ⚠️ 파일을 남겨 둔 것과 실행 경로를 열어 둔 것은 다르다. 과거 데이터는 삭제하지
+    #:   않지만, 이 경로가 다시 열리면 기능 확인과 시연이 서로 다른 DB를 보게 된다.
+    if os.path.abspath(TARGET_ROOT) != os.path.abspath(CANONICAL_PREPROD_ROOT):
+        print("별도 demo_data 서버는 폐지됐습니다 — 실행하지 않습니다.")
+        print("사전검증 정본 확인: venv/Scripts/python.exe scripts/seed_starter_data.py --check")
+        print("제품 서버 기동:   venv/Scripts/python.exe run.py")
+        return 2
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--reset", action="store_true", help="시연 뿌리를 비우고 다시 심는다")
     ap.add_argument("--seed-only", action="store_true")
@@ -783,7 +815,7 @@ def main() -> int:
     if existing:
         #: ⚠️ 이미 있으면 **다시 심지 않는다.** 두 번 심으면 인스턴스가 둘이 되고,
         #:   화면에서 어느 것이 진짜인지 알 수 없다.
-        _org()
+        _ensure_demo_users(_org())
         print(f"\n이미 심어져 있습니다(인스턴스 {len(existing)}개). 다시 심으려면 --reset")
         inst = existing[0]["instance_id"]
         #: 온톨로지 런타임만 시연 파일로 돌린다.

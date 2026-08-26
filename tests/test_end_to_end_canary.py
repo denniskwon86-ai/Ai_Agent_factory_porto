@@ -426,7 +426,16 @@ def test_the_canary_never_touches_operational_storage(canary, dp, monkeypatch):
     import os
 
     from core.app_data import app_data_service
-    from core.paths import DATA_DIR
+    #: ★★★ [2026-08-23] **움직이지 않는 기준을 쓴다.**
+    #:
+    #: ⚠️ 종전에는 `core.paths.DATA_DIR` 를 「운영 영역」의 기준으로 삼았다. 그런데
+    #:   conftest 가 격리를 위해 **그 변수를 임시 폴더로 돌리는 순간** 기준이 함께
+    #:   움직여, 「운영을 안 본다」는 이 시험이 스스로 빨강이 됐다.
+    #: ★ 운영 뿌리는 `PROJECT_ROOT/data` 라는 **사실**이다. 변수가 아니라 사실을 본다 —
+    #:   그래야 격리가 강해져도 이 검사가 계속 같은 것을 지킨다.
+    from core.paths import PROJECT_ROOT
+
+    DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
     contract = _contract()
     _step_source(dp, canary.raw, mode=ap.ENTITY_MODE_SYNTHETIC)

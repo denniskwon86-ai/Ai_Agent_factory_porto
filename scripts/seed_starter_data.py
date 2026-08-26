@@ -1,22 +1,23 @@
 # -*- coding: utf-8 -*-
-"""★★★ 이 저장소의 **운영 뿌리(`data/`)에 시작 자료를 심는다.**
+"""★★★ 이 저장소의 **단일 사전검증 정본(`data/`)에 시작 자료를 심는다.**
 
 ## 왜 필요한가 (2026-08-23 사용자 지적)
 
 「샘플 데이터 넣어놓기로 하지 않았나? 업무키트도 미리 넣어놓기로 했던걸로 아는데?」
 
 심어 놓은 것은 맞는데 **시연 뿌리(`demo_data/`)에만** 있었다. 그 뿌리는
-`scripts/run_local_demo.py` 로 띄울 때만 열린다. 평소대로 `run.py`(8080)로 띄우면
-운영 `data/` 를 보는데 거기는:
+`scripts/run_local_demo.py` 로 띄울 때만 열렸었다. 평소대로 `run.py`(8080)로 띄우면
+사전검증 정본 `data/` 를 보는데 당시에는:
 
     업무 키트 등록본 1(낡음) · 인스턴스 0 · 원천 결속 0 · 인증판 0 · 기준선 0
 
 즉 **앱을 열면 아무것도 없었다.**
 
-## ⚠️ 「운영에 시연 데이터를 심지 않는다」 규칙과의 관계
+## ⚠️ 합성 데이터를 실적으로 오인하지 않게 하는 규칙과의 관계
 
-`scripts/pilot_demo_seed.py` 머리말이 못박은 규칙이다 — 「운영 저장소에 시연 데이터를
-심으면 그 순간 «실제 데이터» 와 구분되지 않습니다」.
+`scripts/pilot_demo_seed.py` 머리말이 못박은 규칙은 「표시 없는 합성 자료를 실적으로
+오인하게 만들지 않는다」는 뜻이다. 현장 적용 전에는 정본을 둘로 나누지 않고, 데이터
+자체의 `DEMO/SYNTHETIC`·`DEMO_CERTIFIED` 상태로 구분한다.
 
 ★ 그 규칙이 막으려던 것은 **표시 없는 합성 데이터**다. 실제로 그 스크립트는
   `MODE = "REAL"` 로 심는다 — 그러면 화면이 실적과 구분할 방법이 없다.
@@ -56,7 +57,7 @@ sys.path.insert(0, ROOT)
 
 import scripts.run_local_demo as demo  # noqa: E402
 
-OPERATIONAL = os.path.join(ROOT, "data")
+PREPROD_ROOT = os.path.join(ROOT, "data")
 
 
 def _org_db() -> str:
@@ -75,7 +76,7 @@ def _count(db: str, table: str) -> int:
     ★ 그 「0」은 «없다» 가 아니라 «엉뚱한 파일을 봤다» 였다. 그리고 그 0을 근거로 조직을
       다시 심어, 아무도 읽지 않는 `data/org.db` 를 만들었다.
     ⚠️ 파일명을 손으로 적지 말고 **싱글턴이 쓰는 경로**를 물어본다."""
-    p = db if os.path.isabs(db) else os.path.join(OPERATIONAL, db)
+    p = db if os.path.isabs(db) else os.path.join(PREPROD_ROOT, db)
     if not os.path.exists(p):
         return 0
     try:
@@ -120,7 +121,7 @@ def _looks_real() -> list[str]:
         · 판이 `DEMO_CERTIFIED` 가 아닌 상태로 인증돼 있으면 실제
     """
     hits: list[str] = []
-    p = os.path.join(OPERATIONAL, "data_preparation.db")
+    p = os.path.join(PREPROD_ROOT, "data_preparation.db")
     if not os.path.exists(p):
         return hits
     c = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
@@ -156,7 +157,7 @@ def _write_instance_tenant() -> str:
     #: ★ 반드시 `demo._slice()` — 날짜를 옮기지 않은 조각으로 심으면 계산이 막힌다.
     sl = demo._slice()
     tenant, _scope = dv.scope_of(sl)
-    path = os.path.join(OPERATIONAL, "instance.json")
+    path = os.path.join(PREPROD_ROOT, "instance.json")
     cur = {}
     if os.path.exists(path):
         try:
@@ -171,7 +172,7 @@ def _write_instance_tenant() -> str:
         print(f"   정본 자료는 «{tenant}» 소속이라 화면에 안 보일 수 있습니다.")
         return have
     if have != tenant:
-        os.makedirs(OPERATIONAL, exist_ok=True)
+        os.makedirs(PREPROD_ROOT, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({**cur, "tenant_id": tenant}, fh, ensure_ascii=False, indent=2)
     print()
@@ -193,7 +194,7 @@ def _top_up_ownership() -> None:
 
     from core import demo_vertical_slice as dv
 
-    dbp = os.path.join(OPERATIONAL, "data_preparation.db")
+    dbp = os.path.join(PREPROD_ROOT, "data_preparation.db")
     have = 0
     try:
         c = sqlite3.connect(f"file:{dbp}?mode=ro", uri=True)
@@ -235,7 +236,7 @@ def _top_up_ontology() -> None:
     from core import demo_vertical_slice as dv
     from core.decision_ledger import decision_ledger
 
-    onto_db = os.path.join(OPERATIONAL, "ontology.db")
+    onto_db = os.path.join(PREPROD_ROOT, "ontology.db")
     have = 0
     if os.path.exists(onto_db):
         try:
@@ -327,7 +328,7 @@ def main() -> int:
                     help="실제 자료 판정을 무시하고 심는다(권하지 않는다)")
     args = ap.parse_args()
 
-    print(f"대상 뿌리: {OPERATIONAL}")
+    print(f"사전검증 정본: {PREPROD_ROOT}")
     before = inventory()
     _show("지금 있는 것", before)
 
@@ -346,9 +347,9 @@ def main() -> int:
         return 0
 
     #: ★★★ **뿌리만 바꾸고 파종 코드는 그대로 쓴다.**
-    #: ⚠️ 봉인(`_seal_operational_data`)은 부르지 않는다 — 그것은 「시연이 운영을 건드리지
-    #:   않는다」를 지키는 장치이고, 의도적으로 운영에 심는 여기서는 자기 자신을 막는다.
-    demo.TARGET_ROOT = OPERATIONAL
+    #: ⚠️ 과거 격리용 봉인(`_seal_operational_data`)은 부르지 않는다 — 단일 정본에
+    #:   의도적으로 보충하는 이 경로에서는 자기 자신을 막는다.
+    demo.TARGET_ROOT = PREPROD_ROOT
     demo._point_stores_at_demo()
 
     #: ★★★ [2026-08-24] **자료를 설치본 설정에 맞춘다** — 반대로 하지 않는다.
@@ -382,14 +383,14 @@ def main() -> int:
             "SELECT instance_id FROM kit_instances WHERE status='active'")]
 
     #: ⚠️⚠️ **조직은 새로 만들지 않는다.** `demo._org()` 는 `<뿌리>/org.db` 에 두 단짜리
-    #:   조직을 세우고 싱글턴을 그쪽으로 돌린다 — 자기 뿌리에서는 맞지만 운영에서는
+    #:   조직을 세우고 싱글턴을 그쪽으로 돌린다 — 자기 뿌리에서는 맞지만 사전검증 정본에서는
     #:   **앱이 읽는 `data/master/master.db` 를 무시한 별도 파일**이 생긴다(1차 판이 그랬다).
-    #:   운영에는 이미 부서 13개·사용자 25명이 있다. 그것을 덮지 않는다.
+    #:   이미 부서 13개·사용자 25명이 있다. 그것을 덮지 않는다.
     #: ★ 대신 강제 정책만 켠다 — 그것이 `_org()` 의 나머지 절반이고, 그것 없이는 범위 경계가
     #:   화면에서 보이지 않는다.
     import core.scope_policy as sp
     sp._read = lambda: {"org_enforce": True}
-    #: ★ 운영에는 이미 조직이 있다 — 파종이 임시 조직을 만들지 못하게 한다.
+    #: ★ 사전검증 정본에는 이미 조직이 있다 — 파종이 임시 조직을 만들지 못하게 한다.
     demo.SKIP_ORG = True
     _ensure_scope_home()
 
