@@ -32,6 +32,19 @@ const APP_VIEWS: Record<string, AppView> = {
       'EXT-03': { label: '운임 참고', columns: ['indicator_code', 'target_ref', 'observed_at', 'value', 'unit', 'trust_grade'] },
     },
   },
+  'APP-02': {
+    title: '물류 사건 확인',
+    description: '선적·운송·통관·입고 사건을 시간 순서와 업무 상태로 확인합니다. 현업 입력은 후속 단계입니다.',
+    defaultDataset: 'LOG-03',
+    datasets: {
+      'LOG-01': { label: '공급사 제출', columns: ['submission_id', 'partner_id', 'business_ref', 'submission_status', 'submitted_at', 'revised_at'] },
+      'LOG-02': { label: '선적 현황', columns: ['shipment_id', 'po_line_id', 'vessel_or_mode', 'origin_port', 'destination_port', 'shipment_quantity', 'quantity_uom', 'etd', 'eta', 'status'] },
+      'LOG-03': { label: '운송 마일스톤', columns: ['shipment_id', 'event_type', 'planned_at', 'actual_at', 'location', 'status'] },
+      'LOG-04': { label: '통관 현황', columns: ['shipment_id', 'declaration_date', 'inspection_status', 'duty_amount', 'currency', 'cleared_at', 'status'] },
+      'LOG-05': { label: '입고 운송', columns: ['shipment_id', 'event_type', 'event_at', 'destination_location_id', 'delivered_quantity', 'quantity_uom', 'status'] },
+      'INV-02': { label: '재고 이동', columns: ['movement_date', 'movement_type', 'material_id', 'from_location_id', 'to_location_id', 'quantity', 'quantity_uom', 'reference_type', 'reference_id'] },
+    },
+  },
   'APP-03': {
     title: '재고·생산 영향',
     description: '가용재고와 안전재고, 생산계획·실적을 함께 보며 생산 차질 가능성을 확인합니다.',
@@ -107,6 +120,15 @@ const STATUS_LABELS: Record<string, string> = {
   PASS: '적합', FAIL: '부적합', ACTUAL: '실적', PLAN: '계획',
 };
 
+const EVENT_LABELS: Record<string, string> = {
+  BOOKED: '예약', PICKED_UP: '화물 인수', ETD: '출항 예정', ETA: '도착 예정',
+  ATA: '실제 도착', UNLOADED: '하역 완료', RECEIVED: '입고 완료',
+};
+
+const LOCATION_LABELS: Record<string, string> = {
+  ORIGIN: '출발지', DESTINATION: '도착지', IN_TRANSIT: '운송 중',
+};
+
 function number(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
@@ -144,6 +166,9 @@ function formatDateTime(value: string): string {
 function formatCell(key: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'boolean') return value ? '예' : '아니오';
+  if (typeof value === 'string' && key.endsWith('_at')) return formatDateTime(value);
+  if (key === 'event_type') return EVENT_LABELS[String(value).toUpperCase()] || String(value);
+  if (key === 'location') return LOCATION_LABELS[String(value).toUpperCase()] || String(value);
   if (key === 'premium_rate' || key === 'actual_yield') {
     const n = number(value);
     return n === null ? String(value) : `${formatNumber(n * 100)}%`;

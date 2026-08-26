@@ -7,10 +7,11 @@ VIEW = ROOT / "frontend" / "src" / "components" / "KitBusinessView.tsx"
 PANEL = ROOT / "frontend" / "src" / "components" / "KitAppPanel.tsx"
 
 
-def test_three_demo_apps_have_business_specific_entry_views():
+def test_four_readable_demo_apps_have_business_specific_entry_views():
     src = VIEW.read_text(encoding="utf-8")
     expected = {
         "'APP-01'": "defaultDataset: 'PRC-02'",
+        "'APP-02'": "defaultDataset: 'LOG-03'",
         "'APP-03'": "defaultDataset: 'INV-01'",
         "'APP-04'": "defaultDataset: 'FIN-02'",
     }
@@ -18,8 +19,18 @@ def test_three_demo_apps_have_business_specific_entry_views():
         assert app_id in src
         assert default_dataset in src
     assert "원료 도입 현황" in src
+    assert "물류 사건 확인" in src
     assert "재고·생산 영향" in src
     assert "구매원가·현금 전망" in src
+
+
+def test_app_02_does_not_promise_native_input_before_the_input_loop_exists():
+    panel = PANEL.read_text(encoding="utf-8")
+    view = VIEW.read_text(encoding="utf-8")
+    assert "label: '물류 사건 확인'" in panel
+    assert "현업 입력은 후속 단계에서 지원합니다." in panel
+    assert "현업 입력은 후속 단계입니다." in view
+    assert "appLabel(row)" in panel
 
 
 def test_business_view_keeps_provenance_and_moves_raw_fields_to_diagnostics():
@@ -65,6 +76,16 @@ def test_certification_time_is_localized_and_internal_dataset_id_is_secondary():
     assert "formatDateTime(asOf)" in src
     assert "title={`데이터셋 식별자: ${datasetName}`}" in src
     assert "{view?.label || datasetLabel}</span>" in src
+
+
+def test_logistics_events_use_business_labels_and_local_datetimes():
+    src = VIEW.read_text(encoding="utf-8")
+    assert "BOOKED: '예약'" in src
+    assert "ATA: '실제 도착'" in src
+    assert "UNLOADED: '하역 완료'" in src
+    assert "ORIGIN: '출발지'" in src and "DESTINATION: '도착지'" in src
+    assert "key.endsWith('_at')" in src
+    assert "return formatDateTime(value)" in src
 
 
 def test_operating_view_keeps_approval_and_release_ids_secondary():

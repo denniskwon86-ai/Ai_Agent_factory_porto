@@ -38,6 +38,19 @@ const READINESS_VIEW: Record<string, { label: string; tone: string }> = {
   BLOCKED: { label: '막힘', tone: 'var(--state-error-fg)' },
 };
 
+// Blueprint 정본은 미래 기능까지 포함할 수 있지만, 제품 화면은 지금 사용할 수 있는 기능만
+// 약속한다. APP-02의 Native 입력 루프가 열리기 전까지 «입력»을 제목으로 내걸지 않는다.
+const APP_PRESENTATION: Record<string, { label: string; note?: string }> = {
+  'APP-02': {
+    label: '물류 사건 확인',
+    note: '현재 버전은 인증된 물류 사건 조회용입니다. 현업 입력은 후속 단계에서 지원합니다.',
+  },
+};
+
+function appLabel(row: KitAppRow): string {
+  return APP_PRESENTATION[row.app_id]?.label || row.label || row.app_id;
+}
+
 // ★★★ 계약 상태 셋은 **서로 다른 사실**이다. 하나로 뭉개면 화면이 다음 할 일을
 //   말해 줄 수 없다 — 「없음」은 만들라는 뜻이고 「초안」은 승인을 받으라는 뜻이다.
 function contractView(status: AppContractStatus): { label: string; tone: string } {
@@ -230,7 +243,7 @@ function AppRow({
       listStyle: 'none',
     }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-        <strong style={{ fontSize: 15 }}>{row.label || row.app_id}</strong>
+        <strong style={{ fontSize: 15 }}>{appLabel(row)}</strong>
         <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>{row.app_id}</span>
         {/* ★ 색만으로 구분하지 않는다(설계 §12) — 이름표를 함께 단다. */}
         <span style={{ color: rv.tone, fontSize: 13 }}>준비: {rv.label}</span>
@@ -241,6 +254,12 @@ function AppRow({
           </span>
         )}
       </div>
+
+      {APP_PRESENTATION[row.app_id]?.note && (
+        <div style={{ color: 'var(--surface-text-muted)', fontSize: 12, marginTop: 4 }}>
+          {APP_PRESENTATION[row.app_id].note}
+        </div>
+      )}
 
       {row.user_message && (
         <div style={{ color: 'var(--surface-text-muted)', fontSize: 13, marginTop: 4 }}>{row.user_message}</div>
@@ -401,7 +420,7 @@ function AppRow({
                           ● 운영 중 — 인증된 업무 데이터를 읽습니다.
                         </span>
                         <AppViewer releaseId={row.release_id} appId={row.app_id}
-                                   appLabel={row.label || row.app_id} />
+                                   appLabel={appLabel(row)} />
                       </div>
                     )}
                   </div>
