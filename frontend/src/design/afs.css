@@ -68,7 +68,9 @@
  * `.afs-dialog-backdrop` 는 `document.body` 로 portal 된다(`HubDialog.tsx`).
  * ⚠️ 배경 클릭으로 닫지 않는다 — 입력 중이던 거절 사유가 한 번의 실수로 사라진다. */
 .afs-dialog-backdrop {
-  position: fixed; inset: 0; z-index: 60;
+  /* 제품 셸은 z-index 10000이다. 그보다 낮으면 전체화면 작업공간의 제목·닫기가 셸 뒤에
+   * 가려져 사용자가 화면을 나갈 수 없다. portal 작업공간은 셸보다 위에 둔다. */
+  position: fixed; inset: 0; z-index: 11000;
   display: flex; align-items: stretch; justify-content: center;
   /* ★★ [2026-08-04 실측 결함] 여백을 두지 않는다. 16px 여백 + 92vh 높이 때문에 뒤의 **다크
    *   상단 바가 위아래로 12px 씩 비쳐 보였다.** 업무 허브는 «대화상자»가 아니라 사실상 전체화면
