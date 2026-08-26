@@ -54,6 +54,16 @@ async def run_rfp_analyst(state: Any) -> Dict[str, Any]:
     if _clar_sum:
         _extra += f"\n\n[참조: 사용자 요구 확인(인터뷰) 결과 - 이 확정 방향과 모순되지 않게 작성하십시오]:\n{_clar_sum}"
 
+    #: ★★★ [2026-08-26 실측] **요구사항을 처음 적어 내리는 자리**에도 붙인다.
+    #:
+    #: ⚠️⚠️ 종전에는 Architect·Master_PM·UIDesigner 에만 붙였다. 그런데 「사용자 로그인」이
+    #:   **여기(RFP)에서** 요구사항으로 적히면 뒤 단계는 그것을 받아쓴다 — 아키텍처가
+    #:   호스트 인증을 쓰겠다고 해도 WBS 에는 「로그인·권한 관리」 태스크가 남았다.
+    #:   만들 수 없는 것을 계획에 남기면 그 프로젝트는 거기서 멈춘다.
+    #: ★ 사슬의 **첫 칸**에서 걸러야 뒤가 깨끗하다.
+    from core.app_runtime_brief import render as _runtime_brief
+    _extra += _runtime_brief(state_obj)
+
     from nodes.utils.debate import run_supervised_stage
     updates, result = await run_supervised_stage(state_obj, agent_skill("RFP_Analyst", "rfp_skill", template_id=state_obj.template_id), "RFP", extra_instruction=_extra)
     print(f"[OK] [Agent] RFP 요구정의 완료 - 점수 {result.get('score')} / 판정 {result.get('verdict')}")
@@ -152,6 +162,10 @@ async def run_master_pmo(state: Any) -> Dict[str, Any]:
     
     print(" [Agent] Master PMO 비동기 WBS 분할 및 에이전트 스케줄링 진행 중...")
     prompt = _load_skill(agent_skill("Master_PMO", "pmo_skill", template_id=state_obj.template_id))
+    #: ★ WBS 를 쪼개는 자리에도 붙인다 — 앞 단계가 깨끗해도 여기서 「로그인 태스크」를
+    #:   새로 만들면 같은 곳에서 멈춘다. 만들 수 없는 것은 **태스크가 되지 않아야 한다.**
+    from core.app_runtime_brief import render as _runtime_brief
+    prompt += _runtime_brief(state_obj)
     prompt += f"\n\n[참조: Master PM이 작성한 PRD]\n{state_obj.prd_summary}"
     # 아키텍처는 기획 단계(UI 승인 직후)에서 이미 확정됨 — WBS 분할의 입력으로 주입
     if (getattr(state_obj, "architecture_summary", "") or "").strip():

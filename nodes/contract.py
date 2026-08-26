@@ -399,10 +399,18 @@ def _with_project_approval(st: Any, workspace_root: str) -> Dict[str, Any]:
     ⚠️ `approval.status` 가 `APPROVED` 일 때만 읽는다. 「승인 봉투가 있다」와
       「승인됐다」는 다르다 — `PENDING`·`REJECTED` 를 승인으로 읽으면 게이트가 사라진다.
     """
+    #: ⚠️ 상태는 **객체로도 dict 로도** 온다 — 그래프 노드는 `ProjectState`, API 는
+    #:   체크포인트에서 읽은 dict 다. 한쪽만 받으면 그쪽만 이 기억을 쓰고, 그러면
+    #:   「화면은 승인을 요구하는데 파이프라인은 자동 통과」가 된다(2026-08-26 실측).
+    def _read(name: str) -> str:
+        if isinstance(st, dict):
+            return str(st.get(name, "") or "")
+        return str(getattr(st, name, "") or "")
+
     view = {
-        "app_runtime_contract_fingerprint": getattr(st, "app_runtime_contract_fingerprint", "") or "",
-        "approved_contract_fingerprint": getattr(st, "approved_contract_fingerprint", "") or "",
-        "app_runtime_contract_status": getattr(st, "app_runtime_contract_status", "") or "",
+        "app_runtime_contract_fingerprint": _read("app_runtime_contract_fingerprint"),
+        "approved_contract_fingerprint": _read("approved_contract_fingerprint"),
+        "app_runtime_contract_status": _read("app_runtime_contract_status"),
     }
     if view["approved_contract_fingerprint"]:
         return view

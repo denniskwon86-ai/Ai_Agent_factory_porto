@@ -168,7 +168,8 @@ def _approved_contract_brief(state_obj: Any) -> str:
     except Exception:
         return ""
     datasets = (contract or {}).get("datasets") or []
-    if not datasets:
+    intents = (contract or {}).get("capability_intents") or []
+    if not datasets and not intents:
         return ""
 
     #: ★★★ **요약하지 않는다 — 원문을 그대로 싣는다.**
@@ -180,10 +181,22 @@ def _approved_contract_brief(state_obj: Any) -> str:
     #:   요약본을 정본처럼 내밀면 **받는 쪽은 그 요약이 전부인 줄 안다.** 내가 만든 결함이다.
     #: ★ 그대로 옮기라고 시킬 것이면 **그대로 보여 줘야** 한다.
     lines = ["", "", "[🚨 이 프로젝트에는 **이미 승인된 계약**이 있습니다]", "",
-             "아래는 계약 정본의 `datasets` **원문 그대로**입니다(요약이 아닙니다).", "",
-             "```json",
+             "아래는 계약 정본 **원문 그대로**입니다(요약이 아닙니다).", "",
+             "`datasets`:", "```json",
              json.dumps(datasets, ensure_ascii=False, indent=2),
              "```"]
+    #: ★★★ [2026-08-26 실측] **능력도 함께 보여 준다.**
+    #:
+    #: ⚠️⚠️ 처음에는 `datasets` 만 보여 줬다. 그랬더니 Tech Lead 가 **능력만 매번 다시
+    #:   지어냈고**, 지문이 `e0d6b0 ↔ 82941d` 로 오가며 승인이 수렴하지 않았다.
+    #:   데이터셋을 고정한 것과 **정확히 같은 이유**로 능력도 고정해야 한다.
+    #: ★ `status` 는 뺀다 — 그것은 호스트가 결정표로 판정하는 값이고, 초안이 적으면
+    #:   「지원되는 요구에 결정을 붙였다」는 오류가 된다(스킬도 적지 말라고 한다).
+    if intents:
+        shown = [{k: v for k, v in i.items() if k != "status"}
+                 for i in intents if isinstance(i, dict)]
+        lines += ["", "`capability_intents`:", "```json",
+                  json.dumps(shown, ensure_ascii=False, indent=2), "```"]
     lines += [
         "",
         "★ 이 데이터셋을 다시 쓴다면 **위 선언을 글자 그대로** 옮겨 적으십시오.",
@@ -620,6 +633,16 @@ async def run_developer_fe(state: Any) -> Dict[str, Any]:
     prompt += f"\n\n[참조: UI 기획/목업 설계 - 화면 개발 시 반드시 아래 UI 디자이너의 의도를 그대로 화면에 구현하십시오]\n{getattr(state_obj, 'ui_mockup_summary', '')}"
     prompt += f"\n\n[참조: 아키텍처 설계]\n{getattr(state_obj, 'architecture_summary', '')}"
     prompt += f"\n\n[참조: 기술 명세]\n{getattr(state_obj, 'tech_spec_summary', '')}"
+
+    # ★★★ [2026-08-26 실측] **코드를 쓰는 사람에게도 알려 준다.**
+    #
+    # ⚠️⚠️ 고지문을 기획(RFP·PM·UIDesigner·Architect)에만 붙였다. 정작 **코드를 쓰는
+    #   Frontend** 는 호스트가 무엇을 주는지 못 들었고, 그래서 `window.afs.auth` 를
+    #   **지어냈다.** 그 검사가 실패해 앱은 첫 줄에서 멈췄다 —
+    #   「AFS 런타임 환경을 사용할 수 없습니다」. **완주는 했는데 화면이 안 떴다.**
+    # ★ 기획이 옳아도 코드가 없는 API 를 부르면 앱은 안 돈다. 사슬의 **끝 칸**이다.
+    from core.app_runtime_brief import render as _runtime_brief
+    prompt += _runtime_brief(state_obj)
 
     # 디자인 토큰 가이드 주입 - 일관된 스타일로 첫 판 품질↑(재작업↓). 안정 텍스트라 캐시 친화적.
     _ds = _load_skill("design_system")

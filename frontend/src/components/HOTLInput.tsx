@@ -8,6 +8,44 @@ import {
 import { useFactoryStore } from '../store/useFactoryStore';
 import { API_BASE_URL } from '../lib/api';
 
+/** 실패한 응답을 **사람이 할 일이 보이는** 오류로 바꾼다.
+ *
+ * ## ⚠️⚠️ [2026-08-26 실측] 왜 생겼는가
+ *
+ * 종전에는 상태 코드와 무관하게 「서버 통신에 실패했습니다. 백엔드 서버를 확인해주세요」
+ * 하나였다. 그런데 실제로 난 것은 **세션이 끊긴 401** 이었고, 사용자는 그 문구를 보고
+ * **서버를 확인하러 갔다.** 서버는 멀쩡했다.
+ *
+ * ★ 오류 문구의 값어치는 「무엇이 잘못됐나」가 아니라 **「내가 무엇을 하면 되나」**다.
+ *   401 은 다시 로그인하는 것이고, 503 은 기다리는 것이며, 통신 실패는 서버를 보는 것이다.
+ * ⚠️ 서버가 준 사유(`detail`)가 있으면 그것을 싣는다 — 화면이 다시 지어내지 않는다.
+ */
+async function requestError(res: Response): Promise<Error> {
+  let detail = '';
+  try {
+    detail = ((await res.json()) as { detail?: string })?.detail || '';
+  } catch {
+    /* JSON 이 아닐 수 있다 — 그때는 상태 코드만으로 말한다 */
+  }
+  if (res.status === 401) {
+    return new Error('로그인이 필요합니다 — 세션이 만료되었을 수 있습니다. '
+      + '다시 로그인한 뒤 이어서 진행해 주십시오.');
+  }
+  if (res.status === 403) {
+    return new Error('이 작업을 할 권한이 없습니다' + (detail ? ` — ${detail}` : '')
+      + '. 담당자에게 요청해 주십시오.');
+  }
+  if (res.status === 409) {
+    return new Error(detail || '지금은 그 작업을 할 수 있는 상태가 아닙니다.');
+  }
+  if (res.status >= 500) {
+    return new Error(`서버가 처리하지 못했습니다(${res.status})`
+      + (detail ? ` — ${detail}` : '') + '. 잠시 후 다시 시도해 주십시오.');
+  }
+  return new Error(detail || `요청이 거절되었습니다(상태 코드 ${res.status}).`);
+}
+
+
 
 export default function HOTLInput() {
   const [feedback, setFeedback] = useState("");
@@ -96,7 +134,7 @@ export default function HOTLInput() {
         });
 
         if (!response.ok) {
-          throw new Error(`서버 응답 오류 (상태 코드: ${response.status})`);
+          throw await requestError(response);
         }
 
         setFeedback("");
@@ -119,7 +157,7 @@ export default function HOTLInput() {
         });
 
         if (!response.ok) {
-          throw new Error(`서버 응답 오류 (상태 코드: ${response.status})`);
+          throw await requestError(response);
         }
 
         const data = await response.json();
@@ -128,7 +166,13 @@ export default function HOTLInput() {
       }
     } catch (error) {
       console.error("🚨 전송 실패:", error);
-      alert("서버 통신에 실패했습니다. 백엔드 서버를 확인해주세요.");
+      // ⚠️⚠️ [2026-08-26 실측] 종전에는 무엇이 실패하든 「서버 통신에 실패했습니다.
+      //   백엔드 서버를 확인해주세요」였다. 실제로는 **세션이 끊겨 401** 이었는데,
+      //   사용자는 그 문구를 보고 **서버를 보러 갔다**(실제로 그렇게 됐다).
+      //   할 일이 다른 두 가지를 같은 문장으로 말하면, 사람은 매번 틀린 쪽을 고친다.
+      alert(error instanceof Error && error.message
+        ? error.message
+        : "서버에 닿지 못했습니다. 네트워크와 백엔드 서버를 확인해 주십시오.");
     } finally {
       setIsSubmitting(false);
     }

@@ -322,7 +322,14 @@ def test_generic_hotl_resume_is_blocked_during_a_contract_review(client, ledger)
                         json={"task_id": "WBS-001", "feedback": ""},
                         headers=_as(org_seed.ADMIN))
     assert r.status_code == 409, r.text
-    assert "계약 검토 대기 중" in r.json()["detail"]
+    #: ★ 막는 **사실**을 시험한다. 문구는 사람 말로 다듬을 수 있어야 하므로 글자 그대로
+    #:   붙들지 않는다 — 다만 「승인」과 「그냥 계속으로는 안 된다」는 반드시 전해야 한다.
+    #: ⚠️⚠️ [2026-08-26] 종전 문구는 사용자에게 **API 경로**를 내밀었다
+    #:   (`POST /{project_id}/contract-review/decision`). 화면을 쓰는 사람은 그것으로 할
+    #:   수 있는 일이 없다 — 시스템 용어를 노출하지 않는다는 이 저장소의 규칙과 같다.
+    detail = r.json()["detail"]
+    assert "승인" in detail, detail
+    assert "/contract-review/" not in detail, "사용자에게 API 경로를 내밀고 있다"
     assert not resumed, "막았다면서 재개가 실행됐다"
 
 
@@ -481,3 +488,68 @@ def test_the_decision_request_accepts_only_four_fields():
     ⚠️ 「여분 필드는 무시된다」에 기대지 않는다. 필드가 추가되면 무시되지 않는다."""
     assert set(fc.ContractDecisionRequest.model_fields) == {
         "task_id", "request_event_id", "decision", "rationale"}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 화면과 파이프라인이 **같은 승인 기억**을 본다 (2026-08-26 실측)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_화면도_계약_정본의_승인을_본다(client, tmp_path, monkeypatch):
+    """★★★ **실측: TEST001 E2E-07 이 이것 때문에 멈춰 있었다.**
+
+    `approved_contract_fingerprint` 는 체크포인트에 살고, 그 단위는 `project__task` 다.
+    새 태스크에는 기억이 비어 있다. 그래서 **화면은 「승인이 필요합니다」를 내내 띄우는데
+    그래프 노드는 계약 정본을 함께 보고 자동 통과**시켰다 — 같은 질문에 두 층이 다른 답을
+    내면, 사람은 있지도 않은 승인을 기다린다(열린 검토 요청도 없어 버튼도 소용없다).
+
+    ★ 판정은 `contract_review_gate` 가 한다 — 어느 층도 다시 계산하지 않는다."""
+    import json as _j
+    import os as _o
+
+    ws = _o.path.join("projects", "P1")
+    _o.makedirs(_o.path.join(ws, "contracts"), exist_ok=True)
+    fp = "a" * 64
+    with open(_o.path.join(ws, "contracts", "app_runtime_contract.json"),
+              "w", encoding="utf-8") as f:
+        _j.dump({"semantic_fingerprint": fp, "status": "APPROVED",
+                 "approval": {"status": "APPROVED"}, "datasets": [{"name": "x"}]},
+                f, ensure_ascii=False)
+
+    with mock.patch.object(fc.orchestrator, "read_contract_state",
+                           _checkpoint(app_runtime_contract_fingerprint=fp,
+                                       approved_contract_fingerprint="",
+                                       app_runtime_contract_status="APPROVED")):
+        r = client.get("/api/v1/factory/P1/contract-review/pending?task_id=WBS-001",
+                       headers=_as(org_seed.ADMIN))
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["pending"] is False, \
+        "정본에 승인이 있는데 화면이 또 승인을 요구한다"
+
+
+def test_승인할_수_없는_상태를_화면에_알려_준다(client, ledger):
+    """⚠️⚠️ 「검토가 필요하다」와 「지금 결정할 수 있다」는 다르다. 검토 요청은 게이트
+    **노드**가 연다 — 그래프가 거기 닿기 전에는 열린 요청이 없다.
+
+    ★ 그 상태에서 버튼을 살려 두면 사용자는 누르고 **409** 를 본다(실측). 서버가
+      「눌러도 되는가」를 답해 주어야 화면이 추측하지 않는다."""
+    with mock.patch.object(fc.orchestrator, "read_contract_state", _checkpoint()):
+        r = client.get("/api/v1/factory/P1/contract-review/pending?task_id=WBS-001",
+                       headers=_as(org_seed.ADMIN))
+    d = r.json()["data"]
+    assert d["pending"] is True
+    #: 열린 요청이 없으므로 지금은 누를 수 없다 — 그 사실과 이유가 함께 와야 한다.
+    assert d["actionable"] is False
+    assert d["not_actionable_reason"], "왜 못 누르는지 알려 주지 않는다"
+
+
+def test_요청이_열려_있으면_누를_수_있다고_답한다(client, ledger):
+    """★ 대조군 — 열린 요청이 있으면 `actionable` 이 참이어야 한다. 아니면 화면이
+    영영 잠긴다."""
+    ev = _open_request(ledger)
+    with mock.patch.object(fc.orchestrator, "read_contract_state", _checkpoint()):
+        r = client.get("/api/v1/factory/P1/contract-review/pending?task_id=WBS-001",
+                       headers=_as(org_seed.ADMIN))
+    d = r.json()["data"]
+    assert d["actionable"] is True
+    assert d["request_event_id"] == ev["event_id"]
+    assert d["not_actionable_reason"] == ""

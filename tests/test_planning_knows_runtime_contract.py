@@ -101,6 +101,17 @@ def test_판정을_두_곳에서_하지_않는다():
     ("nodes.execution", "run_architect"),
     ("nodes.ui_designer", "run_ui_designer"),
     ("nodes.planning", "run_master_pm"),
+    #: ★★★ [2026-08-26 실측] **사슬의 첫 칸과 마지막 칸이 빠져 있었다.**
+    #:   요구사항을 처음 적는 곳(RFP)에서 「사용자 로그인」이 들어가면 뒤 단계는 받아쓰고,
+    #:   WBS 를 쪼개는 곳(PMO)에서 새로 만들면 앞이 깨끗해도 소용없다.
+    #:   실제로 TEST001 에 「로그인·권한 관리」 태스크가 생겼다 — 계약 단계에서 금지로
+    #:   막히므로 **처음부터 만들 수 없는 것을 계획한 것**이다.
+    ("nodes.planning", "run_rfp_analyst"),
+    ("nodes.planning", "run_master_pmo"),
+    #: ★★★ [2026-08-26 실측] **코드를 쓰는 끝 칸이 빠져 있었다.** 기획이 옳아도 개발자가
+    #:   없는 API 를 부르면 앱은 안 돈다 — 실제로 `window.afs.auth` 를 지어내 화면이
+    #:   첫 줄에서 멈췄다. 완주는 했는데 앱이 안 떴다.
+    ("nodes.execution", "run_developer_fe"),
 ])
 def test_기획_노드가_고지문을_실제로_붙인다(module, func):
     """⚠️⚠️ 이 저장소에서 **다섯 번째** 반복이라 시험으로 못박는다 — 고지문을 만들어
@@ -124,3 +135,89 @@ def test_아키텍트_스킬이_REST_지시와_충돌하지_않는다():
     text = _skill("architect_skill.md")
     assert "런타임 계약 고지문이 함께 주어졌다면" in text, \
         "REST 지시와 런타임 계약 중 무엇이 우선인지 스킬이 말하지 않는다"
+
+
+def test_사용자가_이미_로그인되어_있음을_알려_준다():
+    """★★★ **[2026-08-26 사용자 지적] 「하지 마라」만으로는 부족했다.**
+
+    금지 목록에 `auth.local_login` 이 있었는데도 기획은 「사용자 로그인」을 요구사항으로
+    남겼다. 모델 입장에서는 **요구는 있는데 금지된 상태**이므로 우회로를 찾는다.
+
+    ★ 필요한 것은 **사실**이다: 이 앱은 회사 시스템 «안에서» 열리고(앱인앱), 사용자는
+      이미 인증돼 있으며 권한도 이미 정해져 있다. 그러면 요구는 **이미 충족된 것**이 된다.
+    """
+    from core import app_runtime_brief as brief
+
+    text = brief.render(_State("v1"))
+    assert "이미 로그인되어 있습니다" in text, "이미 인증된 상태라는 사실을 안 알려 준다"
+    assert "앱인앱" in text, "왜 그런지(앱인앱)를 안 알려 준다"
+    for word in ("로그아웃", "권한 관리"):
+        assert word in text, f"«{word}» 를 짚어 주지 않는다 — 실측에서 그것이 나왔다"
+
+
+def test_요구를_거절하지_말고_충족된_것으로_다루라고_한다():
+    """⚠️ 「사용자가 요청해도 만들지 마라」로만 적으면 모델은 요구를 **삭제**하거나
+    거절 문구를 남긴다. 사용자는 자기 요구가 사라진 것을 보게 된다.
+    ★ 「이미 충족됐다」로 적으라고 해야 요구 추적이 끊기지 않는다."""
+    from core import app_runtime_brief as brief
+
+    text = brief.render(_State("v1"))
+    assert "이미 충족된 것" in text
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 호스트 표면 — **있는 것과 없는 것을 둘 다** 알려 준다 (2026-08-26 실측)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_호스트가_주는_것을_전부_알려_준다():
+    """★★★ **실측: 앱이 `window.afs.auth` 를 지어내 첫 줄에서 멈췄다.**
+
+    `SDK_SURFACE` 는 **이미 코드에 있었고 시험까지 있었다.** 그런데 그것을 에이전트에게
+    알려 주는 곳이 **0곳**이었다 — 오늘 `capability` 닫힌 목록·`data_role` 에서 반복된
+    것과 정확히 같은 모양이다."""
+    from core import app_runtime_brief as brief
+    from core import host_runtime_sdk as sdk
+
+    text = brief.render(_State("v1"))
+    missing = [n for n in sdk.SDK_SURFACE if n not in text]
+    assert not missing, "고지문에 없는 호스트 표면: " + ", ".join(missing)
+
+
+def test_없는_것도_이름으로_알려_준다():
+    """⚠️ 「있는 것만」 알려 주면 모델은 없는 것을 **있다고 가정**한다. 이름을 적어 두어야
+    지어내지 않는다 — `host_runtime_sdk` 가 `FORBIDDEN_SURFACE` 를 둔 이유와 같다."""
+    from core import app_runtime_brief as brief
+    from core import host_runtime_sdk as sdk
+
+    text = brief.render(_State("v1"))
+    missing = [n for n in sdk.FORBIDDEN_SURFACE if n not in text]
+    assert not missing, "고지문에 없는 금지 표면: " + ", ".join(missing)
+    assert "afs.auth" in text, "실측에서 지어낸 바로 그 이름이 빠졌다"
+
+
+def test_데이터셋_이름이_인자임을_알려_준다():
+    """★★★ 이름만 주면 모델은 **속성**으로 부른다 — 실측에서 `data.<데이터셋>.list()` 로
+    불렀고 호스트에는 그런 것이 없다. 호출 모양을 함께 줘야 한다."""
+    from core import app_runtime_brief as brief
+
+    text = brief.render(_State("v1"))
+    assert "window.afs.data.list(datasetName" in text, "호출 인자 모양을 안 알려 준다"
+    assert "속성이 아닙니다" in text
+
+
+def test_인자_모양을_손으로_적지_않는다():
+    """⚠️ 셔임이 바뀌면 고지문도 따라가야 한다. `OPS` 에서 **파생**하지 않고 옮겨 적으면
+    조용히 어긋난다."""
+    import inspect
+
+    from core import app_runtime_brief as brief
+
+    src = inspect.getsource(brief._surface_lines)
+    assert "sdk.OPS[" in src, "인자 모양을 코드에서 파생하지 않는다"
+
+
+def test_레거시에는_표면_고지도_안_붙는다():
+    """⚠️ 대조군 — 계약을 안 타는 프로젝트는 종전대로 동작해야 한다."""
+    from core import app_runtime_brief as brief
+
+    assert brief.render(_State("")) == ""

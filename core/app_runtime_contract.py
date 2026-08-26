@@ -430,11 +430,33 @@ def semantic_material(contract: Dict[str, Any]) -> Dict[str, Any]:
                  for f in (d.get("fields") or []) if isinstance(f, dict)),
                 key=lambda x: x["name"]),
         })
-    intents = sorted(
-        ({"capability": str(i.get("capability", "")), "status": str(i.get("status", "")),
-          "user_decision": str(i.get("user_decision", ""))}
-         for i in (c.get("capability_intents") or []) if isinstance(i, dict)),
-        key=lambda x: (x["capability"], x["status"]))
+    #: ★★★ 능력은 **집합**이다 — 같은 것이 몇 번 적혔는지는 권한이 아니다.
+    #:
+    #: ⚠️⚠️ [2026-08-26 실측] 종전에는 중복째 실었다. 그런데 이 재료에는
+    #:   `requirement_ref` 가 **빠져 있다**(설명이므로 옳다). 그 결과 「같은 `app_data.read`
+    #:   를 몇 개의 FR 이 인용했는가」만으로 지문이 바뀌었다 — 권한은 한 글자도 안 달라졌는데.
+    #:   실측: Tech Lead 가 매 실행마다 FR 인용 수를 달리 적어 지문이
+    #:   `56ac83 → 906969 → 56ac83 → 2fcd71` 로 오갔고, **승인이 영영 수렴하지 않았다.**
+    #:   사용자는 승인을 눌러도 계속 재승인을 요구받는다.
+    #: ★ 머리말이 「문구를 다듬었다고 재승인을 요구하면 사람이 게이트를 습관으로 통과시킨다」
+    #:   고 적어 둔 것과 **같은 이유**다. 인용 횟수도 문구다.
+    #: ⚠️ 「같음」의 기준은 (능력·상태·사용자결정) 셋이다. 하나라도 다르면 **남는다** —
+    #:   예: `network.external_api` 를 FR-1 은 `REDUCE`, FR-2 는 `WAIT` 로 정했다면 둘 다
+    #:   실린다. 그것은 실제로 다른 결정이고, 합치면 하나가 조용히 사라진다.
+    _seen_intents: set = set()
+    intents = []
+    for i in (c.get("capability_intents") or []):
+        if not isinstance(i, dict):
+            continue
+        item = {"capability": str(i.get("capability", "")),
+                "status": str(i.get("status", "")),
+                "user_decision": str(i.get("user_decision", ""))}
+        key = (item["capability"], item["status"], item["user_decision"])
+        if key in _seen_intents:
+            continue
+        _seen_intents.add(key)
+        intents.append(item)
+    intents.sort(key=lambda x: (x["capability"], x["status"], x["user_decision"]))
     return {
         "app_class": str(c.get("app_class", "")),
         "datasets": sorted(datasets, key=lambda x: x["name"]),
@@ -488,6 +510,39 @@ def conditional_errors(contract: Any) -> List[str]:
 
     # 2. 매니페스트 ↔ 계약 일치 — 선언된 데이터셋·행동이 서로를 벗어나지 않는가
     errs.extend(_manifest_contract_mismatch(contract))
+
+    # ★★★ [2026-08-26 실측] **예약 필드 이름은 여기서 잡는다.**
+    #
+    # ⚠️⚠️ 이 규칙은 **물질화 단계에만** 있었다(`core/app_data.py`). 그래서 실제 가동에서
+    #   이렇게 됐다:
+    #
+    #     계약 컴파일 통과 → 승인 통과 → 코드 생성 → 태스크 「완료」 → 릴리스
+    #       → 물질화 FAILED('created_at' 은 예약된 이름)
+    #       → 릴리스 매니페스트의 능력이 **빈 배열**
+    #       → 증명 발급 거절(「매니페스트 미선언」)
+    #       → 앱이 데이터를 못 읽고 「초기화 중 오류」로 멈춤
+    #
+    #   **완주했다고 보고된 앱이 실제로는 못 도는 상태로 릴리스까지 갔다.** 사람이 그것을
+    #   화면에서 처음 알았다.
+    # ★ 규칙은 이미 `skills/tech_lead_skill.md` 에 적혀 있었다 — 모델이 어겼는데 **아무
+    #   관문도 잡지 않은 것**이 문제다. 잡는 자리를 앞으로 당긴다.
+    # ⚠️ 목록은 `app_data.RESERVED_FIELD_NAMES` 하나를 쓴다 — 여기서 다시 적으면 두 목록이
+    #   갈라지고, 그러면 한쪽만 통과하는 계약이 생긴다.
+    from core.app_data import RESERVED_FIELD_NAMES
+
+    for ds in (contract.get("datasets") or []):
+        if not isinstance(ds, dict):
+            continue
+        for f in (ds.get("fields") or []):
+            if not isinstance(f, dict):
+                continue
+            fname = str(f.get("name", "")).strip().lower()
+            if fname in RESERVED_FIELD_NAMES:
+                errs.append(
+                    f"{ds.get('name', '?')}.{fname}: 예약된 이름이라 필드로 쓸 수 없습니다 — "
+                    f"레코드가 이미 갖는 항목이며, 앱이 같은 이름을 쓰면 «누가 언제 만들었나» "
+                    f"를 덮어쓸 수 있습니다(감사 표시 위조). **업무의 뜻이 드러나는 이름**을 "
+                    f"쓰십시오(예: registered_at · ordered_at · closed_at).")
 
     # 3. 수량·금액에는 단위가 필요하다 + [BDR-1] 이중 입력 게이트
     for ds in (contract.get("datasets") or []):

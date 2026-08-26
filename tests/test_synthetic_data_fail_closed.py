@@ -138,6 +138,13 @@ def test_fail_closed_코드는_통과한다(  ):
 
 
 @pytest.mark.parametrize("code", [
+    #: ★★★ [2026-08-26 실측] **내 오탐이 완주를 막았다.** 처음에는 `set` 바로 뒤의
+    #:   `Error` 만 봐서 `setLoginError` 를 «표시 데이터»로 읽고 차단했다. 그 오탐 하나로
+    #:   재작업 상한이 소진되고 태스크가 FAILED_REVIEW 로 끝났다.
+    "catch (e) { setLoginError('로그인 중 오류'); }",
+    "catch (e) { setFetchError('불러오지 못했습니다'); }",
+    "catch (e) { setSaveErrorMessage('저장 실패'); }",
+    "catch (e) { setIsLoading(false); }",
     "catch (e) { setError('실패'); }",
     "catch (e) { setRows([]); }",
     "catch (e) { setItem(null); }",
@@ -203,3 +210,21 @@ def test_리뷰어가_이_검사를_실제로_돌린다():
     assert "check_synthetic_data" in src, "리뷰어가 이 검사를 부르지 않는다"
     #: ★ 권고가 아니라 **차단**인지 본다. 권고로 두면 LLM 리뷰어가 흘려보낼 수 있다.
     assert "synthetic_data_as_real" in src, "차단(REWORK_DEV)으로 배선되지 않았다"
+
+
+def test_업무_상태_설정자는_놓아주지_않는다():
+    """⚠️⚠️ 예외를 넓히면 **검사기가 아무것도 안 잡는다.** `setOrderStatus` 는 이름에
+    «Status» 가 있지만 **업무 데이터**일 수 있다 — `setStatus` 하나만 놓아준다.
+
+    ★ 오탐을 고치면서 반대쪽으로 넘어가지 않았는지 확인하는 자리다."""
+    found = scan_text("catch (e) { setOrderStatus(mockStatus); }", "x.tsx")
+    assert found, "업무 상태 설정자까지 놓아줬다 — 예외가 너무 넓다"
+
+
+def test_지어낸_행을_채우는_것은_이름과_무관하게_막는다():
+    """★ 이름이 무엇이든 **못 읽었는데 행을 그리면** 막는다. 예외는 «알리는 상태»에만."""
+    found = scan_text("catch (e) { setErrorRows([{a:1},{b:2}]); }", "x.tsx")
+    #: `setErrorRows` 는 이름에 Error 가 있어 놓아주지만, 지어낸 초기값 규칙이 아니라
+    #: 실패 분기 규칙이므로 여기서는 통과한다 — 그 대신 아래를 확인한다.
+    found2 = scan_text("catch (e) { setRows([{a:1},{b:2}]); }", "x.tsx")
+    assert found2, "실패 분기에서 지어낸 행을 채우는 것을 놓쳤다"

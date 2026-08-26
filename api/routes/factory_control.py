@@ -1429,7 +1429,19 @@ async def _contract_review_context(project_id: str, task_id: str):
     from core import contract_review_gate as _gate
 
     state = await orchestrator.read_contract_state(task_id, project_id)
-    decision = _gate.evaluate_state(state, requires_contract=True)
+    # ★★★ [2026-08-26 실측] **그래프 노드와 같은 승인 기억을 본다.**
+    #
+    # ⚠️⚠️ 종전에는 여기가 **체크포인트만** 봤다. 체크포인트의 단위는 `project__task` 라
+    #   새 태스크에는 승인 기억이 비어 있고, 그래서 화면은 「승인이 필요합니다」를
+    #   내내 띄웠다 — 그런데 그래프 노드는 계약 정본을 함께 보고 **자동 통과**시킨다.
+    #   같은 질문에 두 층이 다른 답을 내면, 사람은 있지도 않은 승인을 기다린다.
+    #   실측: TEST001 E2E-07 이 그 상태로 멈춰 있었다(열린 검토 요청도 없었다).
+    # ★ 판정 자체는 `contract_review_gate` 가 한다 — 여기서 다시 계산하지 않는다.
+    from nodes.contract import _with_project_approval
+
+    ws = f"./projects/{project_id}"
+    decision = _gate.evaluate_state(await asyncio.to_thread(_with_project_approval, state, ws),
+                                    requires_contract=True)
     return decision, state
 
 
@@ -1464,7 +1476,21 @@ async def contract_review_pending(project_id: str, task_id: str,
                      "compiled_fingerprint": decision.compiled_fingerprint,
                      "previous_approved_fingerprint": decision.approved_fingerprint,
                      "request_event_id": (open_req or {}).get("event_id", ""),
-                     "requested_at": (open_req or {}).get("created_at", "")}}
+                     "requested_at": (open_req or {}).get("created_at", ""),
+                     # ★★★ [2026-08-26 실측] **지금 승인을 누를 수 있는가.**
+                     #
+                     # ⚠️⚠️ 「검토가 필요하다」와 「지금 결정할 수 있다」는 다르다. 검토 요청은
+                     #   게이트 **노드**가 연다(조회가 만들지 않는다 — 만드는 곳이 하나여야
+                     #   하므로 그 설계는 옳다). 그래서 그래프가 아직 게이트에 닿지 않았으면
+                     #   `pending=true` 인데 열린 요청이 **없다.**
+                     # ★ 그 상태에서 화면이 승인 버튼을 살려 두면 사용자는 누르고 **409** 를
+                     #   본다(실측). 「눌러도 되는가」를 서버가 답해 준다 — 화면이 다시
+                     #   추측하면 두 곳의 판단이 갈린다.
+                     "actionable": bool((open_req or {}).get("event_id", "")),
+                     "not_actionable_reason": (
+                         "" if (open_req or {}).get("event_id", "")
+                         else "검토 요청이 아직 열리지 않았습니다 — 가동을 시작하면 "
+                              "이 자리에서 승인할 수 있습니다.")}}
 
 
 def _decision_note(state_applied: bool, stamp_note: str) -> str:
@@ -1572,11 +1598,17 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal
 
     _decision, _ = await _contract_review_context(project_id, req.task_id)
     if _decision.verdict == _gate.REVIEW_REQUIRED:
+        # ⚠️⚠️ [2026-08-26 사용자 실측] 종전 문구는 사용자에게 **API 경로**를 내밀었다
+        #   (`POST /{project_id}/contract-review/decision`). 화면을 쓰는 사람은 그것으로
+        #   할 수 있는 일이 없다 — 「Task ID 없이」 같은 시스템 용어를 노출하지 않는다는
+        #   이 저장소의 규칙과 같은 종류의 잘못이다.
+        # ★ 사람이 **무엇을 하면 되는지**를 말한다. 규칙(빈 피드백을 승인으로 읽지 않는다)은
+        #   그대로지만, 그 이유를 사람 말로 옮긴다.
         raise HTTPException(
             status_code=409,
-            detail=("계약 검토 대기 중입니다 — 일반 재개로는 통과할 수 없습니다. "
-                    "`POST /{project_id}/contract-review/decision` 으로 승인 또는 "
-                    "반려하십시오. 빈 피드백을 승인으로 해석하지 않습니다."))
+            detail=("계약 승인이 먼저 필요합니다 — 이 앱이 다룰 데이터와 권한을 사람이 "
+                    "확인해야 합니다. 화면의 «계약 승인» 카드에서 승인하거나 반려해 "
+                    "주십시오. 그냥 «계속»으로는 지나갈 수 없습니다."))
     success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id)
     if not success:
         raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")
@@ -2138,6 +2170,23 @@ async def create_release(project_id: str,
         # [Phase 5] 게시 당시 소유 부서·가시성(위 `_rel_own` 주석 참조).
         "owner_dept_id": _rel_own.get("owner_dept_id", ""),
         "visibility": _rel_own.get("visibility", "dept"),
+        # ★★★ [2026-08-26 실측] **게시 당시의 테넌트를 함께 찍는다.**
+        #
+        # ⚠️⚠️ 이 칸이 없어서 `app_data.release_identity` 가 `('', 'TEST001')` 을 돌려줬다.
+        #   그 결과 데이터셋을 **만들 때는 실제 테넌트**로 넣고 **찾을 때는 빈 문자열**로
+        #   찾았다 — `adopt_dataset` 이 영영 못 찾으니 재게시마다 새로 만들려 하고,
+        #   `UNIQUE(tenant_id, app_id, dataset_key)` 에 걸려 **같은 프로젝트를 두 번
+        #   게시하면 500** 이 났다(실측). 쓰는 곳과 찾는 곳의 출처가 달랐다.
+        # ★ 소유 부서와 같은 규약이고 **같은 출처**(`project_meta.json`)에서 나온다 —
+        #   게시 후 문맥이 바뀌어도 이미 게시된 것의 테넌트는 게시 당시의 것이어야 한다.
+        # ⚠️ 요청 문맥에서 가져오지 않는다. 그러면 「누가 게시했느냐」에 따라 같은
+        #   프로젝트가 다른 테넌트로 굳는다.
+        # ⚠️⚠️ 테넌트만 찍고 나머지를 두면 절반만 고친 것이다. `app_proof.resource_scope`
+        #   가 이 셋을 함께 읽고, 비어 있으면 「이 자원이 어느 조직의 무엇인가」가 확정되지
+        #   않아 증명이 발급되지 않는다(실측: `entity_mode=''`·`scope_node_id=''` 로 404).
+        "tenant_id": str(_rel_own.get("tenant_id", "") or ""),
+        "enterprise_scope_id": str(_rel_own.get("enterprise_scope_id", "") or ""),
+        "entity_mode": str(_rel_own.get("entity_mode", "") or ""),
     }
     # ★★ [CL-0 · 2026-08-03] **App-in-App Capability Manifest 를 릴리스에 고정한다.**
     #   이 릴리스가 나중에 개인에게 전달될 때(CL-1), 수신자는 "이 앱이 무엇을 요구하는가"를 보고
@@ -2149,7 +2198,38 @@ async def create_release(project_id: str,
     #     검사를 끄는 쪽을 택한다. 차단은 전달(CL-1) 단계에서 한다.
     try:
         from core import app_manifest
-        _declared = (s.get("app_manifest") or template_data.get("app_manifest") or {})
+        # ★★★ [2026-08-26 실측] **승인된 계약의 매니페스트를 먼저 쓴다.**
+        #
+        # ⚠️⚠️ 종전에는 `state.app_manifest`(계약 절차에서는 **언제나 `null`**)와 템플릿만
+        #   봤다. 그래서 릴리스 매니페스트가 늘 빈 능력이었고, 증명 발급이
+        #   「매니페스트 미선언」으로 거절돼 **앱이 데이터를 한 줄도 못 읽었다.**
+        #   실측: 계약에는 능력 8개(`accounts.read` …)가 있는데 릴리스에는 `[]` 였다.
+        #   쓰는 곳(계약)과 찾는 곳(릴리스)의 출처가 달랐다.
+        # ★ 이것은 **추측이 아니다.** 바로 위 주석이 경고하는 「그럴듯한 값 채우기」와
+        #   반대다 — 사람이 **승인한 선언 원문**을 그대로 옮기는 것이다.
+        # ⚠️ 승인되지 않은 계약은 쓰지 않는다. 승인 전 선언을 릴리스에 실으면, 아무도
+        #   동의하지 않은 권한이 「선언된 것」으로 남는다.
+        from nodes.contract import _read_json, contract_path
+        _c = _read_json(contract_path(workspace_path(project_id)))
+        _c_approved = (isinstance(_c, dict)
+                       and str((_c.get("approval") or {}).get("status", "")) == "APPROVED")
+
+        # ★★★ [2026-08-26 실측] **승인된 계약을 릴리스에 봉인한다.**
+        #
+        # ⚠️⚠️ `app_contract_gate.release_contract` 는 `release["runtime_contract"]` 를 읽는다
+        #   («그 릴리스가 실제로 쓴 판» 을 봐야 하므로 workspace 파일이 아니라 이쪽이다).
+        #   그런데 게시 경로가 그 칸을 **한 번도 채우지 않았다.** 그래서 운영 승격이
+        #   「실행 가능한 앱인데 릴리스에 승인된 계약이 없습니다」로 막혔다 — 계약은
+        #   승인까지 끝나 있었는데도. 매니페스트가 비어 있던 것과 **같은 누락**이다.
+        # ⚠️ 승인된 계약만 봉인한다. 승인 전 판을 봉인하면 그 릴리스는 「승인된 계약이
+        #   있는 것」으로 읽히고, 그 순간 검토 게이트가 이름만 남는다.
+        if _c_approved:
+            release["runtime_contract"] = _c
+
+        _declared = s.get("app_manifest") or {}
+        if not _declared and _c_approved and isinstance(_c.get("manifest"), dict):
+            _declared = _c["manifest"]
+        _declared = _declared or template_data.get("app_manifest") or {}
         release["manifest"] = app_manifest.snapshot(_declared)
     except Exception as e:
         print(f"⚠️ [CL-0] Manifest 생성 실패(릴리스는 계속 게시): {e}")
@@ -2310,7 +2390,25 @@ async def create_release(project_id: str,
     except Exception as e:
         print(f"⚠️ [FactoryControl] 지식 베이스 인덱싱 트리거 실패: {e}")
 
-    return {"status": "success", "release_id": release_id}
+    # ★★★ [2026-08-26 실측] **물질화 실패를 조용히 넘기지 않는다.**
+    #
+    # ⚠️⚠️ 종전에는 물질화가 실패해도 `{"status":"success", "release_id": …}` 만 돌려줬다.
+    #   그런데 물질화가 실패하면 릴리스 매니페스트의 능력이 **빈 배열**이 되고, 증명 발급이
+    #   「매니페스트 미선언」으로 거절되며, **앱은 데이터를 한 줄도 못 읽는다.**
+    #   실측: `created_at` 예약 이름 하나로 물질화가 실패했는데 게시는 성공이라 답했고,
+    #   사용자는 앱을 열고서야 「초기화 중 오류」를 봤다. 게시가 「됐다」고 말한 것이
+    #   그 사람을 그 자리까지 데려간 것이다.
+    # ★ 게시 자체는 막지 않는다 — 산출물은 이미 만들어졌고 꺼낼 수 있어야 한다.
+    #   다만 **「이 앱은 아직 데이터에 붙지 못한다」를 그 자리에서 말한다.**
+    _mat = release.get("contract_materialization") or {}
+    _mat_ok = str((_mat or {}).get("state", "")) == "MATERIALIZED"
+    return {"status": "success", "release_id": release_id,
+            "data_plane_ready": _mat_ok,
+            "note": ("" if _mat_ok else
+                     "게시는 됐지만 **이 앱은 아직 데이터를 읽을 수 없습니다** — 계약을 "
+                     "데이터 평면으로 옮기지 못했습니다: "
+                     + str((_mat or {}).get("detail", "") or "사유 미상")
+                     + " 계약을 고치고 해당 태스크를 다시 가동해야 합니다.")}
 
 
 # ==========================================

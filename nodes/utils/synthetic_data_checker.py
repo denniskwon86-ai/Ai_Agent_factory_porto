@@ -44,9 +44,18 @@ import re
 from typing import Any, Dict, List
 
 #: 표시 데이터가 **아닌** 상태. 실패 분기에서 이것들을 세우는 것은 정상이다.
-#: ⚠️ 이름 기반 예외이므로 **좁게** 둔다 — 넓히면 검사기가 아무것도 안 잡는다.
+#:
+#: ⚠️⚠️ [2026-08-26 실측] 처음에는 `^set(Error|…)` 로 **`set` 바로 뒤만** 봤다. 그래서
+#:   `setLoginError(...)` 를 못 알아보고 **차단했다** — 그것은 오류 문구를 세우는,
+#:   내가 원하는 fail-closed 그 자체다. 그 오탐 하나로 재작업 상한(8)이 소진되고
+#:   태스크가 `FAILED_REVIEW` 로 끝났다. 실제 이름은 `setLoginError`·`setFetchError`·
+#:   `setSaveError` 처럼 **중간에** 들어간다.
+#: ★ 내 머리말이 「오탐이 늘면 검사기는 꺼진다」고 적어 두고 내가 오탐을 냈다.
+#: ⚠️ 그래도 `Status` 는 **이름 전체가 그것일 때만** 놓아준다 — `setOrderStatus` 같은
+#:   것은 업무 데이터일 수 있고, 그 구멍은 실제로 열린다.
 _NON_DATA_SETTER = re.compile(
-    r"^set(Error|Err|Loading|Busy|Pending|Message|Msg|Status|Failed|Warning|Notice)",
+    r"^set\w*(Error|Err|Loading|Busy|Pending|Message|Msg|Failed|Warning|Notice)\w*$"
+    r"|^setStatus$",
     re.IGNORECASE)
 
 #: 비우는 값. 이것을 넣는 것은 **fail-closed** 이므로 통과시킨다.

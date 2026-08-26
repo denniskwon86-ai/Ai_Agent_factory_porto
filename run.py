@@ -52,4 +52,20 @@ if __name__ == "__main__":
     #   ★ 여기를 `::` 로 바꾸면 Windows 에서는 이번엔 **IPv6 전용**이 되어 127.0.0.1 을 쓰는
     #     기존 스크립트·카나리가 전부 깨진다(실측 확인). 그래서 **바인딩은 건드리지 않고**
     #     프론트의 기본 API 주소를 `127.0.0.1` 로 고정해 해결했다(`frontend/src/lib/api.ts`).
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=dev_mode)
+    # ★★★ [2026-08-26] 포트를 고를 수 있게 한다 — 기본은 그대로 8080 이다.
+    #
+    # ⚠️⚠️ 왜 필요한가: 검증용 서버를 `uvicorn main:app` 으로 직접 띄웠더니 **이 파일이
+    #   하는 일(`_apply_installation_settings`)을 건너뛰었다.** 그러면 설치본 테넌트가
+    #   적용되지 않아, 같은 코드·같은 사용자·같은 프로젝트인데 8080 은 200 이고 검증
+    #   서버는 `TENANT_MISMATCH` 404 가 된다(실측). 원인을 코드에서 찾다 한참 헤맸다.
+    # ★ 검증 경로가 **제품 경로**여야 한다. 그래서 우회로를 만들지 않고, 제품이 지나는
+    #   이 길에 포트 선택만 붙인다.
+    port = 8080
+    if "--port" in sys.argv:
+        try:
+            port = int(sys.argv[sys.argv.index("--port") + 1])
+        except (IndexError, ValueError):
+            raise SystemExit("[run] --port 뒤에 포트 번호를 적으십시오. 예: --port 8083")
+    if port != 8080:
+        print(f"[run] 포트 {port} 로 기동합니다(기본 8080 아님).")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=dev_mode)

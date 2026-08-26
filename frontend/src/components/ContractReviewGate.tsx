@@ -98,6 +98,13 @@ export function ContractReviewGate() {
   const changed = !!row.previous_approved_fingerprint
     && row.previous_approved_fingerprint !== row.compiled_fingerprint;
 
+  // ★★★ [2026-08-26 실측] **누를 수 없을 때는 누를 수 없게 보여야 한다.**
+  //   서버가 `actionable=false` 로 답하면 검토 요청이 아직 열리지 않은 것이다. 종전에는
+  //   그 상태에서도 버튼이 살아 있어서, 누르면 409 「결정할 검토 요청이 지정되지
+  //   않았습니다」가 났다 — 사용자는 자기가 뭘 잘못했는지 알 수 없다.
+  // ⚠️ 판정은 **서버가 준 값**을 쓴다. 화면이 다시 추측하면 두 곳의 답이 갈린다.
+  const ready = row.actionable !== false && !!row.request_event_id;
+
   return (
     <div style={{
       margin: 12, padding: 14, borderRadius: 8, display: 'grid', gap: 8,
@@ -117,16 +124,23 @@ export function ContractReviewGate() {
         계약 지문 {String(row.compiled_fingerprint || '').slice(0, 12)}…
         {row.requested_at ? ` · 요청 ${row.requested_at.slice(0, 16).replace('T', ' ')}` : ''}
       </div>
+      {!ready && (
+        // ⚠️ 「왜 못 누르는가」를 말한다. 비활성 버튼만 두면 사용자는 고장으로 읽는다.
+        <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
+          {row.not_actionable_reason
+            || '검토 요청이 아직 열리지 않았습니다 — 가동을 시작하면 여기서 승인할 수 있습니다.'}
+        </div>
+      )}
       <input value={rationale} onChange={(e) => setRationale(e.target.value)}
         placeholder="사유 — 반려할 때는 반드시 적습니다"
         style={{ fontSize: 13, padding: '6px 9px' }} />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" disabled={!!busy}
+        <button type="button" disabled={!!busy || !ready}
           onClick={() => void decide('APPROVE')}
           style={{ fontSize: 13, padding: '7px 16px', fontWeight: 700 }}>
           {busy === 'APPROVE' ? '승인하는 중…' : '승인하고 계속 만들기'}
         </button>
-        <button type="button" disabled={!!busy}
+        <button type="button" disabled={!!busy || !ready}
           onClick={() => void decide('REJECT')}
           style={{ fontSize: 13, padding: '7px 16px' }}>
           {busy === 'REJECT' ? '반려하는 중…' : '반려'}

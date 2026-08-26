@@ -91,8 +91,20 @@ def _compile_intents(draft: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[
         if decision:
             if arc.is_buildable(status):
                 # 지원되는 요구에 결정이 붙어 있으면 초안이 상태를 잘못 알고 있었다는 뜻이다.
-                errors.append(f"{cap}: 상태가 {status} 인데 user_decision {decision!r} 이 있습니다 — "
-                              f"지원되는 요구에는 고를 것이 없습니다.")
+                #
+                # ★★★ [2026-08-26 실측] 그러나 **막지는 않는다.** 여기서 이미 값을 버리므로
+                #   (`decision = ""`) 계약에는 아무 영향이 없다 — 권한도, 지문도, 승인도.
+                #   그런데 종전에는 이 잉여 칸 하나로 **프로젝트 전체가 CONTRACT_BLOCKED** 였다.
+                #   실측: Tech Lead 가 `app_data.query`(CONDITIONAL)에 `WAIT` 을 붙였고
+                #   7개 태스크짜리 프로젝트가 그 자리에서 멈췄다. 통제가 지키는 것이 없는데
+                #   완주만 막는다 — 그런 거절은 통제가 아니라 마찰이다.
+                # ⚠️ 조용히 넘기지도 않는다. 초안이 상태를 잘못 안 것은 **사실**이므로
+                #   말하고 지운다. 다음 초안이 같은 실수를 반복하면 로그에 남는다.
+                # ⚠️ 정본 검증기(`arc.validate` 규칙)는 **그대로 둔다.** 어떤 경로로든 이 값이
+                #   계약까지 실려 가면 거기서 막힌다 — 층마다 가정이 달라야 층이다.
+                print(f"ℹ️ [ContractCompiler] {cap}: 상태가 {status} 인데 "
+                      f"user_decision {decision!r} 이 붙어 있습니다 — 고를 것이 없는 "
+                      f"자리이므로 **버리고 계속합니다.**")
                 decision = ""
             elif decision not in arc.allowed_decisions(status):
                 # ★★★ 금지 항목의 `REQUEST_HOST_FEATURE` 가 여기서 막힌다.

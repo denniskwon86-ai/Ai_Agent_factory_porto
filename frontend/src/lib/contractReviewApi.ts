@@ -35,6 +35,11 @@ export type ContractReviewPending = {
   previous_approved_fingerprint?: string;
   request_event_id?: string;
   requested_at?: string;
+  /** ★ **지금 승인을 누를 수 있는가.** 「검토가 필요하다」와 다르다 — 검토 요청은
+   *  게이트 노드가 열고, 그래프가 거기 닿기 전에는 열린 요청이 없다. 그때 버튼을
+   *  살려 두면 사용자는 누르고 409 를 본다(2026-08-26 실측). */
+  actionable?: boolean;
+  not_actionable_reason?: string;
 };
 
 /** ⚠️ 읽기지만 **쓰기 권한**을 요구한다(서버 규칙) — 승인할 수 없는 사람에게

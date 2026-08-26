@@ -7,6 +7,7 @@
 3. **금지 항목은 개발 요청이 되지 않는다** — `PROHIBITED` 에 `REQUEST_HOST_FEATURE` 불가.
 4. **지문이 바뀌면 승인은 초기화된다** — 문구를 다듬은 것은 바뀐 것이 아니다.
 """
+import json
 import copy
 
 import pytest
@@ -143,10 +144,44 @@ def test_host_service_required_may_request():
 
 
 def test_supported_requirement_has_nothing_to_choose():
+    """지원되는 요구에 붙은 결정은 **버려진다.**
+
+    ## ⚠️⚠️ [2026-08-26] 「막는다」에서 「버리고 계속한다」로 바꿨다
+
+    종전에는 이 잉여 칸 하나로 **프로젝트 전체가 CONTRACT_BLOCKED** 였다. 실측에서
+    Tech Lead 가 `app_data.query`(CONDITIONAL)에 `WAIT` 을 붙였고 7개 태스크짜리
+    프로젝트가 그 자리에서 멈췄다.
+
+    ★ 컴파일러는 그 값을 **어차피 버린다** — 계약에는 아무 영향이 없다(권한도, 지문도,
+      승인도). 지키는 것이 없는데 완주만 막는 거절은 통제가 아니라 마찰이다.
+    ⚠️ 그래도 **조용히 넘기지는 않는다**(로그로 말한다). 그리고 아래 시험이 보듯
+      **정본 검증기는 그대로 막는다** — 층마다 가정이 달라야 층이다."""
     d = _draft()
     d["capability_intents"][0]["user_decision"] = arc.WAIT
     r = compile_contract(d, project_id="P1")
-    assert not r.ok and any("고를 것이 없습니다" in e for e in r.errors)
+    assert r.ok, f"잉여 결정 하나로 컴파일이 막혔다: {r.errors}"
+    for i in r.contract.get("capability_intents") or []:
+        assert not i.get("user_decision"), "버려야 할 결정이 계약에 실렸다"
+
+
+def test_the_canonical_validator_still_rejects_a_surplus_decision():
+    """★★★ **대조군.** 컴파일러가 놓아준다고 정본 검증기까지 놓아주면, 어떤 경로로든
+    이 값이 계약에 실려 들어올 수 있다."""
+    #: ⚠️ **완전한 계약**을 만들어 그 칸만 뒤집는다. 조각 dict 로 부르면 스키마 오류에서
+    #:   먼저 끊겨 결정 규칙까지 가지도 않는다 — 그러면 「막았다」가 아니라 「다른 이유로
+    #:   막았다」이고, 이 시험은 아무것도 증명하지 못한다(실제로 그렇게 한 번 틀렸다).
+    good = compile_contract(_draft(), project_id="P1").contract
+    assert not arc.validate(good), "전제가 깨졌다 — 기준 계약이 이미 유효하지 않다"
+
+    bad = json.loads(json.dumps(good, ensure_ascii=False))
+    for i in bad.get("capability_intents") or []:
+        if arc.is_buildable(str(i.get("status", ""))):
+            i["user_decision"] = arc.WAIT
+            break
+    else:                                   # pragma: no cover - 기준 초안이 바뀌면
+        pytest.skip("기준 초안에 지원되는 능력이 없다")
+
+    assert any("고를 것이 없습니다" in e for e in arc.validate(bad))
 
 
 def test_undecided_requirement_blocks_compilation():
@@ -760,3 +795,131 @@ def test_status_labels_cover_every_status():
         assert arc.STATUS_LABEL.get(st)
     assert arc.STATUS_LABEL[arc.PROHIBITED] != arc.STATUS_LABEL[arc.NOT_YET_SUPPORTED], \
         "「지원 대기」와 「허용되지 않음」이 같은 문구면 사용자는 언젠가 열린다고 읽는다"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 지문은 **인용 횟수**에 흔들리지 않는다 (2026-08-26 실측)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _fp(intents):
+    from core import app_runtime_contract as _arc
+    return _arc.semantic_fingerprint(
+        {"app_class": "departmental", "datasets": [], "capability_intents": intents})
+
+
+def test_같은_능력을_여러_FR_이_인용해도_지문이_같다():
+    """★★★ **실측: 승인이 영영 수렴하지 않았다.**
+
+    지문 재료에는 `requirement_ref` 가 빠져 있다(설명이므로 옳다). 그런데 능력을
+    **중복째** 실었더니, 「같은 `app_data.read` 를 몇 개의 FR 이 인용했는가」만으로 지문이
+    바뀌었다 — 권한은 한 글자도 안 달라졌는데.
+
+    실측에서 Tech Lead 가 매 실행마다 인용 수를 달리 적어 지문이
+    `56ac83 → 906969 → 56ac83 → 2fcd71 → d0efff` 로 오갔고, 사용자는 승인을 눌러도
+    **계속 재승인을 요구받았다.**
+
+    ★ 머리말이 「문구를 다듬었다고 재승인을 요구하면 사람이 게이트를 습관으로
+      통과시킨다」고 적어 둔 것과 같은 이유다 — **인용 횟수도 문구다.**"""
+    one = [{"capability": "app_data.read", "status": "SUPPORTED",
+            "requirement_ref": "FR-1", "user_decision": ""}]
+    many = [{"capability": "app_data.read", "status": "SUPPORTED",
+             "requirement_ref": f"FR-{n}", "user_decision": ""} for n in (1, 2, 3)]
+    assert _fp(one) == _fp(many), "인용 횟수만으로 지문이 바뀐다 — 승인이 수렴하지 않는다"
+
+
+def test_순서가_달라도_지문이_같다():
+    """⚠️ 모델이 같은 것을 다른 순서로 적는 것도 문구다."""
+    a = [{"capability": "app_data.read", "status": "SUPPORTED", "user_decision": ""},
+         {"capability": "app_data.create", "status": "SUPPORTED", "user_decision": ""}]
+    assert _fp(a) == _fp(list(reversed(a)))
+
+
+def test_결정이_다르면_지문이_달라진다():
+    """★★★ **대조군.** 합치기가 실제 차이를 지우면 안 된다.
+
+    같은 능력이라도 FR-1 은 `REDUCE`, FR-2 는 `WAIT` 로 정했다면 그것은 **다른 결정**이다.
+    합쳐 버리면 하나가 조용히 사라지고, 사라진 결정은 아무도 다시 묻지 않는다."""
+    one = [{"capability": "network.external_api", "status": "HOST_SERVICE_REQUIRED",
+            "user_decision": "REDUCE"}]
+    two = one + [{"capability": "network.external_api", "status": "HOST_SERVICE_REQUIRED",
+                  "user_decision": "WAIT"}]
+    assert _fp(one) != _fp(two), "서로 다른 결정을 하나로 합쳤다"
+
+
+def test_능력이_늘면_지문이_달라진다():
+    """★ 대조군 둘 — **권한이 실제로 늘면** 반드시 재승인을 지나야 한다."""
+    a = [{"capability": "app_data.read", "status": "SUPPORTED", "user_decision": ""}]
+    b = a + [{"capability": "app_data.delete", "status": "SUPPORTED", "user_decision": ""}]
+    assert _fp(a) != _fp(b), "권한이 늘었는데 지문이 그대로다"
+
+
+def test_상태가_다르면_지문이_달라진다():
+    """⚠️ 같은 이름이라도 판정이 달라지면 다른 계약이다."""
+    a = [{"capability": "file.upload", "status": "NOT_YET_SUPPORTED", "user_decision": "WAIT"}]
+    b = [{"capability": "file.upload", "status": "SUPPORTED", "user_decision": ""}]
+    assert _fp(a) != _fp(b)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 예약 필드 이름은 **계약 단계에서** 잡힌다 (2026-08-26 실측)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_예약된_필드_이름은_계약에서_막힌다():
+    """★★★ **실측: 이것 때문에 「완주한 앱」이 못 돌았다.**
+
+    `created_at` 을 필드로 넣었더니 **계약 컴파일·승인·코드 생성·태스크 완료·릴리스까지
+    전부 통과**한 뒤 물질화에서 실패했다. 그 결과:
+
+        물질화 FAILED → 릴리스 매니페스트의 능력이 **빈 배열**
+          → 증명 발급 거절(「매니페스트 미선언」)
+          → 앱이 데이터를 못 읽고 「초기화 중 오류」로 멈춤
+
+    사람이 **화면에서** 그것을 처음 알았다. 규칙은 이미 스킬에 적혀 있었는데 **아무 관문도
+    잡지 않았다** — 잡는 자리를 계약 단계로 당긴다."""
+    from core.app_data import RESERVED_FIELD_NAMES
+
+    for reserved in sorted(RESERVED_FIELD_NAMES):
+        d = _draft()
+        d["datasets"][0]["fields"].append(
+            {"name": reserved, "type": "date", "required": False,
+             "classification": "INTERNAL"})
+        r = compile_contract(d, project_id="P1")
+        assert not r.ok, f"예약 이름 «{reserved}» 이 계약을 통과했다"
+        assert any(reserved in e for e in r.errors), r.errors
+
+
+def test_예약이_아닌_이름은_통과한다():
+    """⚠️ **대조군.** 「_at 으로 끝나면 막는다」처럼 넓히면 멀쩡한 이름이 막힌다 —
+    `registered_at`·`ordered_at` 은 정상이다."""
+    d = _draft()
+    d["datasets"][0]["fields"].append(
+        {"name": "registered_at", "type": "date", "required": False,
+         "classification": "INTERNAL"})
+    r = compile_contract(d, project_id="P1")
+    assert r.ok, f"멀쩡한 이름을 막았다: {r.errors}"
+
+
+def test_예약_목록을_두_곳에_적지_않는다():
+    """⚠️ 목록이 갈라지면 **한쪽만 통과하는 계약**이 생긴다 — 계약은 통과하는데 물질화가
+    막는, 방금 겪은 그 상태가 다시 만들어진다."""
+    import inspect
+
+    from core import app_runtime_contract as _arc
+
+    src = inspect.getsource(_arc.conditional_errors)
+    assert "RESERVED_FIELD_NAMES" in src, "예약 목록을 직접 적고 있다"
+    assert "from core.app_data import" in src, "정본에서 읽지 않는다"
+
+
+def test_스킬이_예약_이름을_전부_알려_준다():
+    """★ 규칙만 적고 목록을 안 주면 모델은 **어떤 이름이 예약인지 모른다.** 실제로
+    `created_at` 을 썼다."""
+    import os
+
+    from core.app_data import RESERVED_FIELD_NAMES
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "skills", "tech_lead_skill.md"), encoding="utf-8") as f:
+        text = f.read()
+    missing = [n for n in RESERVED_FIELD_NAMES if n not in text]
+    assert not missing, "스킬에 없는 예약 이름: " + ", ".join(sorted(missing))

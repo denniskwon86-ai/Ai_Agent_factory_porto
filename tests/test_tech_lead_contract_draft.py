@@ -382,6 +382,41 @@ def test_이미_승인된_계약을_TechLead_에게_보여_준다(tmp_path):
                 assert val in brief, f"«{key}» 의 값 «{val}» 이 빠졌다"
 
 
+def test_능력도_원문_그대로_보여_준다(tmp_path):
+    """★★★ **[2026-08-26 실측] 데이터셋만 보여 줬더니 능력이 매번 흔들렸다.**
+
+    지문이 `e0d6b0 ↔ 82941d` 로 오가며 승인이 수렴하지 않았다. 데이터셋을 고정한 것과
+    **정확히 같은 이유**로 능력도 고정해야 한다 — 모델은 안 보여 준 것을 다시 지어낸다.
+
+    ⚠️ `status` 는 빼고 보여 준다. 그것은 호스트가 결정표로 판정하는 값이고, 초안이
+      적으면 「지원되는 요구에 결정을 붙였다」는 오류가 된다."""
+    import json as _j
+    import os as _o
+
+    from nodes import execution as ex
+
+    ws = str(tmp_path)
+    d = _o.path.join(ws, "contracts")
+    _o.makedirs(d, exist_ok=True)
+    with open(_o.path.join(d, "app_runtime_contract.json"), "w", encoding="utf-8") as f:
+        _j.dump({"datasets": [], "capability_intents": [
+            {"intent_id": "i1", "requirement_ref": "FR-8",
+             "capability": "auth.local_login", "status": "PROHIBITED",
+             "user_decision": "REDUCE", "reason": "호스트가 인증한다"}]},
+            f, ensure_ascii=False)
+
+    class _S:
+        workspace_root = ws
+
+    brief = ex._approved_contract_brief(_S())
+    assert "capability_intents" in brief, "능력을 아예 안 보여 준다"
+    assert "auth.local_login" in brief
+    assert "REDUCE" in brief, "이미 내린 결정을 안 보여 준다 — 모델이 다시 정하게 된다"
+    assert "FR-8" in brief
+    #: ★ `status` 는 빼야 한다 — 초안이 적으면 오류가 된다.
+    assert "PROHIBITED" not in brief, "status 를 보여 주면 초안이 그것을 따라 적는다"
+
+
 def test_계약이_없으면_아무것도_붙이지_않는다(tmp_path):
     """⚠️ 첫 태스크에는 보여 줄 계약이 없다. 빈 목록을 「계약이 있다」로 보여 주면
     Tech Lead 가 **데이터셋 0개**를 그대로 옮겨 적는다."""
@@ -402,3 +437,153 @@ def test_TechLead_가_그_고지문을_실제로_붙인다():
 
     src = inspect.getsource(ex.run_tech_lead)
     assert "_approved_contract_brief" in src, "Tech Lead 가 기존 계약을 보지 않는다"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 잉여 `user_decision` 은 **버리고 계속한다** (2026-08-26 실측)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _compile(draft, **state):
+    import asyncio as _a
+    import json as _j
+    import os as _o
+    import tempfile
+
+    from nodes import contract as cn
+
+    ws = tempfile.mkdtemp(prefix="afs_dec_")
+    with open(_o.path.join(ws, "00_wbs_master_plan.json"), "w", encoding="utf-8") as f:
+        _j.dump({"tasks": [{"task_id": "T-1", "goal": "화면", "artifact_kind": "app"}]},
+                f, ensure_ascii=False)
+    cn.save_draft(ws, "T-1", draft)
+    out = _a.run(cn.run_host_contract_compiler(
+        {"workspace_root": ws, "project_name": "p", "current_sprint_task_id": "T-1",
+         "runtime_contract_profile": "v1", **state}))
+    return out, ws
+
+
+def _base_draft(intents):
+    return {"app_class": "departmental",
+            "datasets": [{
+                "name": "rows", "label": "행", "purpose": "조회",
+                "allowed_actions": ["read"],
+                "fields": [{"name": "id", "type": "string", "required": False,
+                            "classification": "INTERNAL"}],
+                "data_role": "ENTERPRISE_ACTUAL", "source_intent": "ENTERPRISE_READ",
+                "duplicate_entry_policy": "DENY_IF_AUTHORITATIVE_SOURCE_EXISTS",
+                "enterprise_contract_key": "PRC-02"}],
+            "capability_intents": intents}
+
+
+def test_지원되는_능력의_잉여_결정이_프로젝트를_멈추지_않는다():
+    """★★★ **실측: 이 잉여 칸 하나로 7개 태스크 프로젝트가 멈췄다.**
+
+        app_data.query: 상태가 CONDITIONAL 인데 user_decision 'WAIT' 이 있습니다
+
+    컴파일러는 그 값을 **어차피 버린다**(`decision = ""`). 계약에는 아무 영향이 없다 —
+    권한도, 지문도, 승인도. 지키는 것이 없는데 완주만 막는 거절은 통제가 아니라 마찰이다.
+
+    ⚠️ 조용히 넘기는 것도 아니다 — 버렸다고 **말한다**(로그). 사실은 사실대로 남는다."""
+    out, _ws = _compile(_base_draft([
+        {"intent_id": "i1", "requirement_ref": "FR-1",
+         "capability": "app_data.query", "user_decision": "WAIT"}]))
+    assert out.get("terminal_status") != "CONTRACT_BLOCKED", out.get("terminal_reason")
+    assert out.get("app_runtime_contract_fingerprint"), "계약이 안 나왔다"
+
+
+def test_잉여_결정은_계약에_실리지_않는다():
+    """⚠️ 「막지 않는다」가 「그대로 싣는다」가 되면 안 된다. 값은 **버려져야** 한다."""
+    import json as _j
+
+    from nodes import contract as cn
+
+    out, ws = _compile(_base_draft([
+        {"intent_id": "i1", "capability": "app_data.query", "user_decision": "WAIT"}]))
+    assert out.get("app_runtime_contract_fingerprint")
+    saved = _j.load(open(cn.contract_path(ws), encoding="utf-8"))
+    for i in saved.get("capability_intents") or []:
+        if i.get("capability") == "app_data.query":
+            assert not i.get("user_decision"), "잉여 결정이 계약에 실렸다"
+
+
+def test_금지_능력의_잘못된_결정은_여전히_막는다():
+    """★★★ **대조군.** 완화가 진짜 통제까지 지우면 안 된다.
+
+    금지 항목에 `REQUEST_HOST_FEATURE` 를 붙이는 것은 **권한에 영향이 있는** 오류다 —
+    「요청해 뒀으니 언젠가 열리겠지」가 되고 그 사이 사용자는 우회로를 쓴다."""
+    out, _ws = _compile(_base_draft([
+        {"intent_id": "i1", "capability": "auth.local_login",
+         "user_decision": "REQUEST_HOST_FEATURE"}]))
+    assert out.get("terminal_status") == "CONTRACT_BLOCKED"
+    assert "고를 수 없습니다" in (out.get("terminal_reason") or "")
+
+
+def test_결정이_없는_미지원_능력은_여전히_막는다():
+    """★ 대조군 둘 — 「사람이 정해야 하는 것」을 안 정한 채 지나가면 안 된다."""
+    out, _ws = _compile(_base_draft([
+        {"intent_id": "i1", "capability": "network.external_api"}]))
+    assert out.get("terminal_status") == "CONTRACT_BLOCKED"
+    assert "사용자 결정" in (out.get("terminal_reason") or "")
+
+
+def test_정본_검증기는_그대로_막는다():
+    """⚠️⚠️ 층마다 가정이 달라야 층이다. 컴파일러가 놓아준다고 **정본 검증기까지**
+    놓아주면 어떤 경로로든 이 값이 계약에 실려 들어올 수 있다."""
+    from core import app_runtime_contract as arc
+
+    errs = arc._decision_errors({"capability_intents": [
+        {"capability": "app_data.query", "status": arc.CONDITIONAL,
+         "user_decision": "WAIT"}]}) if hasattr(arc, "_decision_errors") else None
+    if errs is None:                      # 이름이 다르면 전체 검증으로 확인한다
+        bad = {"schema_version": arc.SCHEMA_VERSION, "capability_intents": [
+            {"capability": "app_data.query", "status": arc.CONDITIONAL,
+             "user_decision": "WAIT"}]}
+        errs = [e for e in arc.validate(bad) if "고를 것이 없습니다" in e]
+    assert errs, "정본 검증기가 잉여 결정을 놓아줬다"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# **닫힌 목록 전부**를 스킬이 알려 주는가 (2026-08-26 실측)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _closed_lists():
+    """계약 초안이 채워야 하는 닫힌 목록들. **코드가 원본**이다."""
+    from core import app_manifest
+    from core import app_runtime_contract as arc
+
+    return {
+        "app_class": tuple(app_manifest.APP_CLASSES),
+        "source_intent": tuple(arc.SOURCE_INTENT_DECISION),
+        "data_role": tuple(arc.DATA_ROLES),
+        "allowed_actions": tuple(arc.ACTIONS),
+        "duplicate_entry_policy": tuple(arc.DUPLICATE_ENTRY_POLICIES),
+        "field.type": tuple(arc.FIELD_TYPES),
+        "field.classification": tuple(arc.CLASSIFICATIONS),
+        #: ⚠️ 빈 문자열은 목록에 있지만 «이름» 이 아니다 — 문자열 포함 검사에서 제외한다.
+        "field.semantic_role": tuple(x for x in arc.SEMANTIC_ROLES if x),
+    }
+
+
+@pytest.mark.parametrize("field", sorted(_closed_lists()))
+def test_스킬이_닫힌_목록의_모든_값을_알려_준다(field):
+    """★★★ **실측: `data_role` 에 `AFS_NATIVE`(= source_intent 의 값)를 적어 7개 태스크
+    프로젝트가 멈췄다.**
+
+    `capability` 하나만 고쳤더니 다음 실행에서 **다른 칸**이 같은 방식으로 막혔다.
+    두더지잡기를 그만두고 **초안이 채우는 닫힌 목록 전부**를 못박는다.
+
+    ⚠️ 목록이 바뀌면 이 시험이 먼저 깨진다 — 스킬이 조용히 뒤처지지 않는다."""
+    values = _closed_lists()[field]
+    text = _skill_text()
+    missing = [v for v in values if v not in text]
+    assert not missing, (
+        f"«{field}» 의 값이 스킬에 없습니다: {missing} — 목록이 바뀌었으면 "
+        f"`skills/tech_lead_skill.md` 도 함께 고치십시오.")
+
+
+def test_두_칸이_무엇을_묻는지_구분해_준다():
+    """★ 값 목록만 주면 모델은 **어느 칸에 넣을지**를 틀린다 — 실측이 정확히 그랬다.
+    `AFS_NATIVE` 는 목록에 있는 값이었고, 다만 **다른 칸의 것**이었다."""
+    text = _skill_text()
+    assert "어디서 오는가" in text and "무엇인가" in text, \
+        "source_intent 와 data_role 이 무엇을 묻는 칸인지 구분해 주지 않는다"

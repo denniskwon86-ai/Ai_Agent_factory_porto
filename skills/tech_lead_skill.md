@@ -106,13 +106,75 @@ ProjectState에서 발견한 중요 사실
 ⚠️ `status` 는 **적지 않는다.** 호스트가 결정표로 판정한다 — 적으면 무시되거나,
   지원되는 능력에 결정을 붙였다는 오류가 된다.
 
-⚠️ 목록에 없는 능력이 정말 필요하면, 가장 가까운 이름을 고르고 `user_decision` 을
-  함께 적는다(`REDUCE` = 그 요구를 줄여 만든다 · `WAIT` = 지원될 때까지 미룬다 ·
-  `REQUEST_HOST_FEATURE` = 호스트 기능을 요청한다). **결정 없이 두면 파이프라인이 멈춘다.**
+
+### ⚠️⚠️ 아래 칸은 전부 **닫힌 목록**이다 — 목록 밖의 값은 컴파일을 막는다
+
+[2026-08-26 실측] `data_role` 에 `AFS_NATIVE` 를 적어 7개 태스크 프로젝트가 멈췄다.
+그 값은 **`source_intent` 의 것**이다. 두 칸은 묻는 것이 다르다:
+
+  · `source_intent` = **어디서 오는가**(호스트가 어떻게 데이터를 주는가)
+  · `data_role` = **무엇인가**(실적인가 계획인가 시나리오 입력인가)
+
+| 칸 | 고를 수 있는 값 |
+|---|---|
+| `app_class` | `personal` · `departmental` · `enterprise` |
+| `datasets[].source_intent` | `AFS_NATIVE` · `ENTERPRISE_READ` · `EXTERNAL_REFERENCE` · `DERIVED_READ` |
+| `datasets[].data_role` | `ENTERPRISE_ACTUAL` · `OPERATIONAL_PLAN` · `OPERATIONAL_FORECAST` · `NATIVE_SUPPLEMENT` · `SCENARIO_INPUT` · `DERIVED_RESULT` |
+| `datasets[].allowed_actions` | `read` · `create` · `update` · `delete` |
+| `datasets[].duplicate_entry_policy` | `DENY_IF_AUTHORITATIVE_SOURCE_EXISTS` · `ALLOW_SUPPLEMENT_ONLY` · `NO_DUPLICATE_CHECK_REQUIRED` |
+| `fields[].type` | `string` · `text` · `number` · `boolean` · `date` |
+| `fields[].classification` | `PUBLIC` · `INTERNAL` · `CONFIDENTIAL` · `RESTRICTED` |
+| `fields[].semantic_role` | `""`(비움) · `identifier` · `event_time` · `quantity` · `amount` · `status` · `party` · `location` · `note` |
+
+★ 자주 헷갈리는 짝:
+  · 앱이 화면에서 직접 받는 데이터 → `source_intent: AFS_NATIVE` +
+    `data_role: NATIVE_SUPPLEMENT`(기존 시스템에 없는 보완 정보일 때)
+  · 기존 시스템(ERP·SCM)에서 읽는 데이터 → `source_intent: ENTERPRISE_READ` +
+    `data_role: ENTERPRISE_ACTUAL` + `enterprise_contract_key` **필수**
+
+⚠️ 값을 **지어내지 마라.** 모르면 위 표에서 가장 가까운 것을 고른다 — 새 이름을
+  만들면 컴파일러가 그 자리에서 막고, 그 프로젝트는 코드를 한 줄도 못 만든다.
+
+### ⚠️⚠️ `user_decision` 을 **어디에 붙이고 어디에 안 붙이는가**
+
+[2026-08-26 실측] 여기가 애매해서 파이프라인이 막혔다. 지시가 「가장 가까운 이름을 고르고
+`user_decision` 을 함께 적는다」였는데, 모델이 **지원되는 능력**(`app_data.query`)에
+`WAIT` 을 붙였고 컴파일러가 그 자리에서 멈췄다:
+
+    app_data.query: 상태가 CONDITIONAL 인데 user_decision 'WAIT' 이 있습니다
+    — 지원되는 요구에는 고를 것이 없습니다.
+
+**위 목록의 묶음을 보고 정한다. 다른 판단 기준은 없다:**
+
+| 어느 묶음의 이름인가 | `user_decision` |
+|---|---|
+| **앱이 바로 쓸 수 있는 것**(`app_data.*`) | **넣지 않는다.** 칸 자체를 빼라 |
+| **CONDITIONAL** 로 적힌 것 | **넣지 않는다.** 조건 안에서 쓰면 되는 것이다 |
+| **호스트가 대신 해 주는 것** | `REDUCE` · `WAIT` · `REQUEST_HOST_FEATURE` 중 하나 |
+| **절대 설계하지 말 것**(금지) | `REDUCE` 하나뿐 — 애초에 선언하지 않는 편이 낫다 |
+
+★ 뜻: `REDUCE` = 그 요구를 줄여 만든다 · `WAIT` = 지원될 때까지 미룬다 ·
+  `REQUEST_HOST_FEATURE` = 호스트 기능을 요청한다.
+
+⚠️ 아래 둘 **모두** 파이프라인을 멈춘다. 한쪽만 피하면 다른 쪽에 걸린다:
+  · 지원되지 않는 능력에 결정을 **안 적었다** → 「사용자 결정이 필요한 요구가 있습니다」
+  · 지원되는 능력에 결정을 **적었다** → 「지원되는 요구에는 고를 것이 없습니다」
+
+★ 목록에 없는 능력이 필요해 보이면 **먼저 정말 필요한지 다시 보라.** 화면을 그리고
+  목록을 보여 주는 일은 `app_data.read` 로 끝난다. 그래도 필요하면 「호스트가 대신 해
+  주는 것」에서 고르고 결정을 함께 적는다.
 
 ★ 규칙
-- `name`·`fields[].name` 은 소문자·숫자·밑줄만. `record_id`·`created_at` 같은 **예약 이름은
-  쓸 수 없다**(레코드가 이미 갖는 항목이라 감사 표시를 덮어쓰게 된다).
+- `name`·`fields[].name` 은 소문자·숫자·밑줄만.
+- ⚠️⚠️ **아래 이름은 필드로 쓸 수 없다** — 레코드가 이미 갖는 항목이라, 앱이 같은 이름을
+  쓰면 「누가 언제 만들었나」를 **덮어쓸 수 있다**(감사 표시 위조):
+
+      `created_at` · `created_by` · `dataset_id` · `deleted_at` · `deleted_by` · `record_id` · `updated_at` · `updated_by`
+
+  [2026-08-26 실측] `created_at` 을 필드로 넣었더니 **계약·승인·코드 생성·태스크 완료까지
+  전부 통과한 뒤** 물질화에서 실패했다. 그 결과 릴리스의 능력이 빈 배열이 되고, 앱이
+  데이터를 못 읽어 **「초기화 중 오류」로 멈췄다.** 사람이 화면에서 그것을 처음 알았다.
+  ★ 등록 시각이 필요하면 다른 이름을 쓴다 — `registered_at` · `ordered_at` 처럼.
 - 회사 업무 데이터를 **읽기만** 하면 `source_intent=ENTERPRISE_READ` ·
   `data_role=ENTERPRISE_ACTUAL` · `allowed_actions=["read"]` ·
   `duplicate_entry_policy=DENY_IF_AUTHORITATIVE_SOURCE_EXISTS` 다.
