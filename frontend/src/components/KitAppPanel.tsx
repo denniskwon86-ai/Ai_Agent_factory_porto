@@ -11,6 +11,7 @@ import {
   datasetDisplayName, KitBusinessView, preferredDatasetName,
 } from './KitBusinessView';
 import { shortId } from '../lib/displayId';
+import { apiFetch } from '../lib/api';
 
 // [2026-08-23] 키트로 앱 만들기 — **여정의 빈 칸.**
 //
@@ -178,10 +179,11 @@ function AppViewer({
 }
 
 function AppRow({
-  row, instanceId, onChanged, notice, setNotice, mode,
+  row, instanceId, onChanged, notice, setNotice, mode, currentUser,
 }: {
   row: KitAppRow; instanceId: string; onChanged: () => void;
   mode: 'build' | 'operate';
+  currentUser: string;
   //: ★★★ [2026-08-23 실측] **알림은 부모가 들고 있어야 한다.**
   //:
   //: ⚠️⚠️ 종전에는 이 행의 지역 상태였다. 그런데 성공하면 `onChanged()` 가 목록을
@@ -199,6 +201,8 @@ function AppRow({
     ?? { label: `알 수 없는 상태(${row.readiness_state})`, tone: 'var(--state-error-fg)' };
   const cv = contractView(row.contract_status);
   const blocked = row.readiness_state === 'BLOCKED';
+  const draftedByCurrentUser = Boolean(currentUser && row.drafted_by
+    && currentUser === row.drafted_by);
 
   // ★ 서버 문구를 **그대로** 옮긴다. 여기서 새 문구를 지으면 같은 사실이 두 가지로
   //   설명되고, 사용자는 어느 쪽을 믿을지 모른다.
@@ -291,12 +295,20 @@ function AppRow({
                 {row.drafted_by ? `${row.drafted_by} 님이 만들었습니다 — ` : ''}
                 만든 사람이 아닌 <strong>다른 사람</strong>이 승인해야 합니다.
               </div>
-              <input value={rationale} onChange={(e) => setRationale(e.target.value)}
+              {draftedByCurrentUser && (
+                <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
+                  현재 로그인 사용자가 계약 작성자입니다 — 다른 승인 권한 사용자로 로그인해
+                  검토하십시오.
+                </div>
+              )}
+              <input value={rationale} disabled={draftedByCurrentUser}
+                     onChange={(e) => setRationale(e.target.value)}
                      placeholder="승인 근거 — 왜 이 앱을 여는지"
                      style={{ fontSize: 13, padding: '5px 8px' }} />
               <div>
                 <button type="button"
-                        disabled={!rationale.trim() || !!busy || row.contract_revision === null}
+                        disabled={draftedByCurrentUser || !rationale.trim()
+                          || !!busy || row.contract_revision === null}
                         onClick={() => run('계약 승인', () => approveAppContract(
                           instanceId, row.app_id, row.contract_revision as number,
                           rationale))}
@@ -437,6 +449,7 @@ export function KitAppPanel({
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
+  const [currentUser, setCurrentUser] = useState('');
   //: ★ 앱별 알림. 목록을 다시 불러도 **행이 아니라 여기** 있으므로 살아남는다.
   const [notices, setNotices] = useState<Record<string, Notice | null>>({});
 
@@ -454,6 +467,17 @@ export function KitAppPanel({
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [instanceId, tick]);
+
+  useEffect(() => {
+    let alive = true;
+    apiFetch('/api/v1/auth/me')
+      .then((response) => response.ok ? response.json() : null)
+      .then((body) => {
+        if (alive) setCurrentUser(String(body?.data?.user_id || '').trim());
+      })
+      .catch(() => { /* 표시 선행 가드다 — 서버의 자기승인 차단은 항상 최종 판정이다 */ });
+    return () => { alive = false; };
+  }, []);
 
   if (loading) return <div style={{ padding: 16 }}>앱 목록을 확인하는 중…</div>;
 
@@ -498,6 +522,7 @@ export function KitAppPanel({
           {rows.map((r) => (
             <AppRow key={r.app_id} row={r} instanceId={instanceId}
                     mode={mode}
+                    currentUser={currentUser}
                     notice={notices[r.app_id] ?? null}
                     setNotice={(n) => setNotices((m) => ({ ...m, [r.app_id]: n }))}
                     onChanged={() => setTick((t) => t + 1)} />

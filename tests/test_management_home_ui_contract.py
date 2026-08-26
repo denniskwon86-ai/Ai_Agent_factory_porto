@@ -114,6 +114,26 @@ def test_업무키트_앱은_새업무_창뿐_아니라_앱운영에서_직접_�
     assert "운영 중인 앱을 열고, 후보 앱의 운영 전환 상태를 확인합니다." in kit_apps
 
 
+def test_업무키트_조회실패는_0건으로_접지_않고_화면에서_다시_확인한다():
+    dialog = _read("frontend/src/components/BuildStartDialog.tsx")
+
+    assert "const [revision, setRevision] = useState(0);" in dialog
+    assert "setError(null);" in dialog
+    assert "if (rows.length === 1) setSelected" in dialog
+    assert "다시 확인" in dialog
+    assert "setRevision((value) => value + 1)" in dialog
+
+
+def test_계약작성자는_승인버튼을_눌러서야_자기승인_불가를_알게하지_않는다():
+    panel = _read("frontend/src/components/KitAppPanel.tsx")
+
+    assert "apiFetch('/api/v1/auth/me')" in panel
+    assert "currentUser === row.drafted_by" in panel
+    assert "현재 로그인 사용자가 계약 작성자입니다" in panel
+    assert "disabled={draftedByCurrentUser}" in panel
+    assert "disabled={draftedByCurrentUser || !rationale.trim()" in panel
+
+
 def test_회사문맥_화면에서_조직을_실제_실행범위로_전환할_수_있다():
     org = _read("frontend/src/components/OrgChartPanel.tsx")
 

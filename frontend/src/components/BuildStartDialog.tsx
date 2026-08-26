@@ -307,11 +307,19 @@ function KitStartFlow({ onOpenDataPrep }: { onOpenDataPrep: () => void }) {
   const [instances, setInstances] = useState<any[] | null>(null);
   const [selected, setSelected] = useState('');
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     let alive = true;
+    setInstances(null);
+    setError(null);
     listInstances()
-      .then((d) => { if (alive) setInstances(d.instances || []); })
+      .then((d) => {
+        if (!alive) return;
+        const rows = d.instances || [];
+        setInstances(rows);
+        if (rows.length === 1) setSelected(String(rows[0].instance_id || ''));
+      })
       .catch((e: unknown) => {
         if (!alive) return;
         const err = e as DataPrepError;
@@ -319,7 +327,7 @@ function KitStartFlow({ onOpenDataPrep }: { onOpenDataPrep: () => void }) {
           status: err?.status || 0 });
       });
     return () => { alive = false; };
-  }, []);
+  }, [revision]);
 
   if (error) {
     return (
@@ -331,6 +339,10 @@ function KitStartFlow({ onOpenDataPrep }: { onOpenDataPrep: () => void }) {
           {error.status === 404 ? '현재 회사·조직 범위를 다시 확인하십시오.'
             : '적용본이 없는 것이 아니라 지금 조회하지 못한 상태입니다.'}
         </div>
+        <button type="button" className="secondary-button" style={{ marginTop: 10 }}
+          onClick={() => setRevision((value) => value + 1)}>
+          다시 확인
+        </button>
       </div>
     );
   }
