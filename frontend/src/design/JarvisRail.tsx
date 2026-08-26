@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { jarvisApi, jarvisSession, type JarvisContext } from '../lib/jarvisApi';
+import { ASSISTANT_NAME } from '../lib/brand';
 import { HEALTH_KO, reportRequestFailure, reportRequestSuccess, useBackendHealth }
   from '../lib/backendHealth';
 
@@ -153,12 +154,12 @@ export function JarvisRail({
   };
 
   return (
-    <aside className="jarvis-rail" aria-label="Jarvis 비서">
+    <aside className="jarvis-rail" aria-label={ASSISTANT_NAME}>
       <header>
         <span className="jarvis-orb" aria-hidden="true">◈</span>
         <div>
           <small>AI FACTORY STUDIO</small>
-          <b>Jarvis</b>
+          <b>{ASSISTANT_NAME}</b>
         </div>
         {/* ★★ [UIUX-AUDIT-29 §3] 상태를 **사실대로** 표시한다. 서버가 없는데 «연결»이라고
             쓰면, 답이 안 오는 이유를 사용자가 자기 질문 탓으로 돌린다. */}
@@ -252,7 +253,7 @@ export function JarvisRail({
         )}
         {turns.map((t, i) => (
           <div key={`${t.at}-${i}`} className={`jarvis-turn ${t.role}`}>
-            <span>{t.role === 'user' ? '나' : 'Jarvis'}</span>
+            <span>{t.role === 'user' ? '나' : ASSISTANT_NAME}</span>
             {/* 사용자 발화는 그대로 — 형식은 **비서 답변**의 계약이다(§7.2). */}
             {t.role === 'user' ? <p>{t.text}</p> : <AnswerBody text={t.text} />}
           </div>
@@ -279,7 +280,7 @@ export function JarvisRail({
       <div className="jarvis-input">
         <textarea value={input} onChange={(e) => setInput(e.target.value)}
           placeholder="예: 이 앱은 어떤 자료를 요구합니까?"
-          aria-label="Jarvis 에게 질문"
+          aria-label={`${ASSISTANT_NAME}에게 질문`}
           onKeyDown={(e) => {
             // Enter 로 보내고 Shift+Enter 로 줄바꿈 — 키보드만으로 대화할 수 있어야 한다.
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }

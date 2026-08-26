@@ -23,6 +23,8 @@ export type ActingScope = {
   /** 조직도에 등록된 계정인가. 식별됐지만 미등록일 수 있다. */
   registered: boolean;
   retired: boolean;
+  /** 플랫폼 시스템 관리자. 계산 실행 승인·시연 초기화처럼 ADMIN_SECURITY인 화면에 쓴다. */
+  isAdmin: boolean;
   unrestricted: boolean;
   /** 업무표준·기준정보를 개정할 수 있는가(DA·관리자). */
   canManageStandard: boolean;
@@ -34,7 +36,8 @@ export type ActingScope = {
  *  그 짧은 순간에 사용자가 누르고 403 을 받는다(관문 A 의 «미지정 = 비노출»과 같은 이유). */
 export const UNKNOWN_SCOPE: ActingScope = {
   userId: '', displayName: '', identified: false, registered: false, retired: false,
-  unrestricted: false, canManageStandard: false, canEditOrg: false, canRunEnterprise: false,
+  isAdmin: false, unrestricted: false, canManageStandard: false, canEditOrg: false,
+  canRunEnterprise: false,
 };
 
 function parse(d: any): ActingScope {
@@ -44,6 +47,7 @@ function parse(d: any): ActingScope {
     identified: Boolean(d?.identified),
     registered: Boolean(d?.registered),
     retired: Boolean(d?.retired),
+    isAdmin: Boolean(d?.is_admin),
     unrestricted: Boolean(d?.unrestricted),
     canManageStandard: Boolean(d?.can_manage_standard),
     canEditOrg: Boolean(d?.can_edit_org),

@@ -346,18 +346,22 @@ async def create_edge(req: EdgeIn, p: Principal = Depends(current_principal),
 
 # ── 프로필 (E1: 저장·조회만) ────────────────────────────────────────────────
 class ProfileIn(BaseModel):
+    profile_id: str = ""
     profile_kind: str = "business_profile"
     scope_node_id: str = ""
     industry_code: str = ""
     payload: Dict[str, Any] = {}
     inheritance_mode: str = "merge"
     status: str = "DRAFT"
+    version: int = 1
 
 
 @router.post("/profiles")
 async def create_profile(req: ProfileIn, p: Principal = Depends(current_principal),
                          ctx: EnterpriseContext = Depends(enterprise_context)):
     assert_can_edit_org(p)
+    if req.status != "DRAFT":
+        raise HTTPException(status_code=400, detail="프로필은 초안으로 저장한 뒤 승인하십시오.")
     try:
         pr = await asyncio.to_thread(ecm_repository.upsert_profile, EnterpriseProfile(
             tenant_id=ctx.tenant_id, **req.model_dump()))
@@ -368,11 +372,13 @@ async def create_profile(req: ProfileIn, p: Principal = Depends(current_principa
 
 @router.get("/profiles")
 async def list_profiles(scope_node_id: str = "", industry_code: str = "", profile_kind: str = "",
-                        p: Principal = Depends(current_principal)):
+                        company_wide: bool = False,
+                        p: Principal = Depends(current_principal),
+                        ctx: EnterpriseContext = Depends(enterprise_context)):
     """프로필 조회. ⚠️ **상속 병합은 하지 않는다(E2)** — 저장된 것을 그대로 준다.
     `is_effective=False` 는 승인되지 않아 상속에 참여할 수 없는 프로필이다(§4.4)."""
     rows = await asyncio.to_thread(ecm_repository.list_profiles, scope_node_id, industry_code,
-                                   profile_kind)
+                                   profile_kind, ctx.tenant_id, company_wide)
     out = []
     for pr in rows:
         d = pr.model_dump()
@@ -383,7 +389,8 @@ async def list_profiles(scope_node_id: str = "", industry_code: str = "", profil
 
 
 @router.post("/profiles/{profile_id}/approve")
-async def approve_profile(profile_id: str, p: Principal = Depends(current_principal)):
+async def approve_profile(profile_id: str, p: Principal = Depends(current_principal),
+                          ctx: EnterpriseContext = Depends(enterprise_context)):
     """프로필 승인 — **엔터티와 같은 규약**(§4.1 승인 가능한 버전).
 
     ★★★ [2026-08-25] 이 경로가 없어서 프로필은 **영원히 상속에 참여하지 못했다.**
@@ -392,7 +399,8 @@ async def approve_profile(profile_id: str, p: Principal = Depends(current_princi
     ⚠️ 엔터티에는 `POST /entities/{id}/approve` 가 있는데 프로필에는 없었다.
       「통제는 있는데 부르는 경로가 없다」의 또 한 자리다."""
     assert_can_edit_org(p)
-    pr = await asyncio.to_thread(ecm_repository.approve_profile, profile_id, p.user_id)
+    pr = await asyncio.to_thread(ecm_repository.approve_profile, profile_id, p.user_id,
+                                 ctx.tenant_id)
     if not pr:
         raise HTTPException(status_code=404, detail="프로필을 찾을 수 없습니다.")
     d = pr.model_dump()

@@ -202,7 +202,7 @@ export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
               <label>
                 <span>자연어 검색</span>
                 <input value={query} onChange={(event) => setQuery(event.target.value)}
-                  placeholder="예: 권한 범위, 시뮬레이션, Jarvis, HOTL" />
+                  placeholder="예: 권한 범위, 시뮬레이션, AI 경영비서, HOTL" />
               </label>
               <label>
                 <span>영역</span>

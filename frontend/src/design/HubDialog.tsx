@@ -19,7 +19,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-import { getEnterpriseContext } from '../lib/api';
+import { useOperatingContext } from '../lib/operatingContext';
 import './afs.css';
 
 /** 포커스 가능한 요소 — 숨겨진 것·disabled 는 제외한다. */
@@ -58,9 +58,10 @@ export const HomeNavContext = createContext<(() => void) | null>(null);
 
 function ContextFooter() {
   const goHome = useContext(HomeNavContext);
-  const ctx = getEnterpriseContext();
+  const ctx = useOperatingContext();
   const mode = (ctx.entityMode || 'REAL').toUpperCase();
   const virtual = mode !== 'REAL';
+  const companyLabel = ctx.companyName || '회사 연결 필요';
   return (
     <div className="afs-dialog-context"
       style={{
@@ -93,11 +94,9 @@ function ContextFooter() {
           「조직 미지정」, 회사를 모르면 `tenant_default` 라는 **없는 값**을 찍었다.
           문맥이 비면 서버는 «권한 범위 전체» 로 동작하므로 「미지정」은 사실이 아니다
           (`CompanyContextBar` 에 같은 수정을 했다 — 여기만 남으면 두 곳이 다른 말을 한다). */}
-      <span className="afs-muted">
-        {ctx.scopeNodeId ? `조직 ${ctx.scopeNodeId}` : '조직 범위 — 내 권한 전체'}
-      </span>
-      {ctx.tenantId && <span className="afs-muted">·</span>}
-      {ctx.tenantId && <span className="afs-muted">{ctx.tenantId}</span>}
+      <span className="afs-muted">조직 범위 — {ctx.scopeLabel}</span>
+      <span className="afs-muted">·</span>
+      <span className="afs-muted">{companyLabel}</span>
     </div>
   );
 }

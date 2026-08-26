@@ -14,28 +14,28 @@
  *     [브랜드 210] [회사 문맥 270] [전역 내비 1fr] [행동 auto]
  *
  * ★ 손으로 맞추지 않고 **시안 마크업을 옮긴다.** 맞춰 그리면 그 순간부터 또 갈라진다.
- * ⚠️ 시안의 전역 내비는 **7개 목적지**(경영 홈·Factory·운영·Twin·보고서·Knowledge·Agent)
+ * ⚠️ 전역 내비는 **7개 목적지**(경영 홈·앱 제작·앱 운영·시뮬레이션·결정/보고·지식·에이전트)
  *   다 — 화면기능정의서 §3 의 8개 메뉴와 같은 축이다. 우리가 쓰던 20개 목록은 그 아래
  *   층이므로 「전체 메뉴」로 남긴다.
  */
-import { PRODUCT_NAME } from '../lib/brand';
+import { PRODUCT_DESCRIPTOR, PRODUCT_EDITION, PRODUCT_NAME } from '../lib/brand';
 
 export type ShellModule =
-  | 'enterprise' | 'factory' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent';
+  | 'about' | 'enterprise' | 'factory' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent';
 
-/** 시안의 전역 내비 7칸. ★ 순서·이름을 시안에서 옮겼다. */
+/** 전역 내비 7칸. ★ 실제로 여는 제품 화면을 사용자가 바로 알 수 있는 이름으로 고정한다. */
 const NAV: { id: ShellModule; label: string }[] = [
   { id: 'enterprise', label: '경영 홈' },
-  { id: 'factory', label: 'Factory' },
-  { id: 'operate', label: '운영' },
-  { id: 'twin', label: 'Twin' },
-  { id: 'report', label: '보고서' },
-  { id: 'knowledge', label: 'Knowledge' },
-  { id: 'agent', label: 'Agent' },
+  { id: 'factory', label: '앱 제작' },
+  { id: 'operate', label: '앱 운영' },
+  { id: 'twin', label: '시뮬레이션' },
+  { id: 'report', label: '결정·보고' },
+  { id: 'knowledge', label: '지식' },
+  { id: 'agent', label: '에이전트' },
 ];
 
 export function ProductShell({
-  module, company, scope, entityMode, onNav, onContext, onSettings, onNewWork, right,
+  module, company, scope, entityMode, onNav, onContext, onAbout, onSettings, onNewWork, right,
 }: {
   module: ShellModule;
   /** 회사 이름. ⚠️ 없으면 «확인 중» — 없는 값을 지어내지 않는다. */
@@ -44,6 +44,7 @@ export function ProductShell({
   entityMode: string;
   onNav: (id: ShellModule) => void;
   onContext: () => void;
+  onAbout: () => void;
   onSettings: () => void;
   onNewWork: () => void;
   /** 전체 메뉴처럼 앱에만 있는 것. 시안 행동 칸 **앞**에 놓는다. */
@@ -59,10 +60,11 @@ export function ProductShell({
       <button type="button" className="afs-brand"
         onClick={() => onNav('enterprise')}
         style={{ border: 0, background: 'transparent', cursor: 'pointer', font: 'inherit' }}>
-        <i className="afs-brand-mark">AF</i>
+        <img className="afs-brand-logo" src="/brand/laxs-logo-primary-on-navy-v2.png"
+          alt={PRODUCT_NAME} />
         <span className="afs-brand-copy">
-          <b>{PRODUCT_NAME}</b>
-          <small>LIVING ENTERPRISE OS</small>
+          <b>{PRODUCT_EDITION}</b>
+          <small>{PRODUCT_DESCRIPTOR}</small>
         </span>
       </button>
 
@@ -90,6 +92,8 @@ export function ProductShell({
 
       <div className="afs-shell-actions">
         {right}
+        <button type="button" className="afs-icon-action" onClick={onAbout}
+          aria-label="LAXS 시스템 안내" title="LAXS 시스템 안내">ⓘ</button>
         <button type="button" className="afs-icon-action" onClick={onSettings}
           aria-label="환경설정 · 관리자">⚙</button>
         <button type="button" className="afs-primary-action" onClick={onNewWork}>

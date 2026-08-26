@@ -223,6 +223,56 @@ CREATE INDEX IF NOT EXISTS idx_cea_binding ON calc_execution_approvals(binding_f
 -- ★ 같은 결속에 살아 있는 승인은 **하나뿐**이다. 멱등을 DB 가 함께 지킨다.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_cea_active
     ON calc_execution_approvals(binding_fingerprint) WHERE status='active';
+
+-- ★★★ 키트 앱 런타임 계약. **초안과 승인이 같은 표에 산다.**
+--
+-- ⚠️⚠️ 이 표가 없던 동안 앱 계약을 승인할 곳이 아무 데도 없었다. 그래서 「키트로 앱
+--   생성」은 통제를 다 지나고도 **부를 방법이 없었다** — 소유권 승인 경로가 없던 것과
+--   같은 결함이다(「통제는 있는데 부르는 경로가 없다」).
+-- ★ 같은 DB 에 둔다. 새 DB 를 만들면 시험 격리 목록과 불변식 감시 목록에 **또** 빠지고,
+--   그것이 2026-08-23 협업 저장소 오염의 원인이었다.
+CREATE TABLE IF NOT EXISTS kit_app_contracts (
+    contract_row_id      TEXT PRIMARY KEY,
+    instance_id          TEXT NOT NULL,
+    app_id               TEXT NOT NULL,
+    revision             INTEGER NOT NULL,
+    status               TEXT NOT NULL,        -- DRAFT | APPROVED | SUPERSEDED
+    semantic_fingerprint TEXT NOT NULL,
+    contract_json        TEXT NOT NULL,
+    drafted_by           TEXT NOT NULL,
+    drafted_at           TEXT NOT NULL,
+    approved_by          TEXT NOT NULL DEFAULT '',
+    approved_at          TEXT NOT NULL DEFAULT '',
+    ledger_event_id      TEXT NOT NULL DEFAULT '',
+    tenant_id            TEXT NOT NULL DEFAULT '',
+    scope_node_id        TEXT NOT NULL DEFAULT '',
+    entity_mode          TEXT NOT NULL DEFAULT '',
+    updated_at           TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_kac_rev
+    ON kit_app_contracts(instance_id, app_id, revision);
+-- ★ 한 앱에 승인된 계약은 **하나뿐**이다. 둘이면 어느 쪽이 도는 앱인지 알 수 없다.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_kac_approved
+    ON kit_app_contracts(instance_id, app_id) WHERE status='APPROVED';
+-- ★★★ **자기 승인 금지를 DB 가 함께 지킨다.**
+--
+-- ⚠️⚠️ 응용에만 두면 다음 호출 경로가 그 검사를 건너뛴다 — 이 저장소에서 이미
+--   「예외를 한 곳만 지웠다」로 겪은 일이다. 다만 층마다 **다른 가정**에 서야 하므로,
+--   여기서는 응용 정규화를 믿지 않고 값 자체를 본다(공백·대소문자까지).
+CREATE TRIGGER IF NOT EXISTS trg_kac_no_self_approval_ins
+BEFORE INSERT ON kit_app_contracts
+WHEN NEW.status = 'APPROVED'
+     AND lower(trim(NEW.approved_by)) = lower(trim(NEW.drafted_by))
+BEGIN
+    SELECT RAISE(ABORT, '만든 사람이 자기 계약을 승인할 수 없습니다.');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_kac_no_self_approval_upd
+BEFORE UPDATE ON kit_app_contracts
+WHEN NEW.status = 'APPROVED'
+     AND lower(trim(NEW.approved_by)) = lower(trim(NEW.drafted_by))
+BEGIN
+    SELECT RAISE(ABORT, '만든 사람이 자기 계약을 승인할 수 없습니다.');
+END;
 """
 
 

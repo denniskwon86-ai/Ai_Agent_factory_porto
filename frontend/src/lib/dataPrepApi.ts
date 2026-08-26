@@ -36,6 +36,11 @@ export interface DatasetReadiness {
   as_of: string;
   snapshot_id: string;
   data_kind: string;
+  /** Starter Package 안에서 이 계약이 속한 주 업무기능. 서버 정본을 그대로 쓴다. */
+  business_kit_id: string;
+  business_kit_name: string;
+  description?: string;
+  order: number;
 }
 
 export interface OutputReadiness {
@@ -97,7 +102,8 @@ export class DataPrepError extends Error {
 const BASE = '/api/v1/data-preparation';
 
 export async function listKits() {
-  return unwrap<{ kits: any[] }>(await apiFetch(`${BASE}/kits`), '데이터 키트 목록');
+  return unwrap<{ kits: any[]; starter_packages: any[] }>(
+    await apiFetch(`${BASE}/kits`), '샘플 패키지 목록');
 }
 
 // ★ 사용자에게 `ki_…` 를 타이핑하라고 요구하지 않기 위한 목록.

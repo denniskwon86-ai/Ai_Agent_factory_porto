@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Banner } from '../design/HubShell';
 import { API_BASE_URL, setActingUser, setSessionToken } from '../lib/api';
 import '../design/afs.css';
-import { PRODUCT_NAME, PRODUCT_NAME_KO } from '../lib/brand';
+import { PRODUCT_NAME } from '../lib/brand';
 
 export type LoginResult = {
   user_id: string;
@@ -74,16 +74,22 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (r: LoginResult) => void
 
   return (
     <div className="afs-scope afs-page"
-      style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
+      style={{ minHeight: '100dvh', width: '100%', display: 'grid', placeItems: 'center', padding: 24 }}>
       <form onSubmit={submit}
-        style={{ width: 'min(420px, 100%)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        aria-label="LAXS 로그인"
+        style={{
+          width: 'min(440px, 100%)', display: 'flex', flexDirection: 'column', gap: 16,
+          padding: '32px 34px', border: '1px solid var(--surface-border)', borderRadius: 12,
+          background: 'var(--surface-card)', boxShadow: 'var(--surface-shadow)',
+        }}>
         <div style={{ textAlign: 'center', marginBottom: 6 }}>
-          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em' }}>
-            <span className="afs-action-fg">🏭</span> {PRODUCT_NAME}
-            <span style={{ fontSize: 14, fontWeight: 500, marginLeft: 8,
-              color: 'var(--surface-text-muted)' }}>({PRODUCT_NAME_KO})</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+            minHeight: 60 }}>
+            <img src="/brand/laxs-logo-primary-on-white-v3.png" alt={PRODUCT_NAME}
+              style={{ display: 'block', width: 286, maxWidth: '86%', height: 'auto' }} />
           </div>
-          <p className="afs-muted" style={{ fontSize: 13, margin: '6px 0 0' }}>
+          <p className="afs-muted" style={{ fontSize: 14, lineHeight: 1.55, margin: '8px 0 0' }}>
+            현업의 실행과 경영의 판단을 AX로 연결합니다.<br />
             회사 계정으로 로그인하십시오.
           </p>
         </div>
@@ -94,7 +100,7 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (r: LoginResult) => void
           <span className="field-label">아이디</span>
           <input ref={idRef} className="afs-input" value={userId} autoComplete="username"
             onChange={(e) => setUserId(e.target.value)}
-            placeholder="예: hikwon@lsmnm.com" />
+            placeholder="예: name@company.com" />
         </label>
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -105,7 +111,7 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (r: LoginResult) => void
         </label>
 
         <button className="primary-button" type="submit" disabled={busy}
-          style={{ marginTop: 4, padding: '10px 0', fontSize: 15 }}>
+          style={{ marginTop: 4, minHeight: 44, padding: '10px 0', fontSize: 15 }}>
           {busy ? '확인 중…' : '로그인'}
         </button>
 

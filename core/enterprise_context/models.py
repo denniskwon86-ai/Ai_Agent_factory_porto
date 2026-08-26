@@ -132,6 +132,10 @@ class OrganizationEdge(BaseModel):
 class EnterpriseProfile(BaseModel):
     """업종·공정·제품·회계·용어 특성 (§4.2 `enterprise_profiles`).
 
+    `scope_node_id` 와 `industry_code` 가 모두 비고 `profile_kind == process_profile` 이면
+    **현재 회사(tenant) 전체의 업무 연결구성**이다. 회사가 조직도를 아직 세우지 않았어도
+    Digital Thread 의 정본은 가질 수 있어야 하며, 이때 적용 경계는 `tenant_id` 가 담당한다.
+
     `scope_node_id` 가 비고 `industry_code` 가 있으면 **산업 공통 프로필**(§4.4 체인 최상위)이며,
     그 자리는 `playbooks/*.json` 의 저작 기본값이 담당한다(M0-a 결정 — `advisor_playbook.py` 주석).
 
@@ -140,7 +144,7 @@ class EnterpriseProfile(BaseModel):
       나중에 추가하면 이미 쌓인 프로필의 승인 여부를 알 수 없다."""
     profile_id: str = ""
     tenant_id: str = "tenant_default"
-    scope_node_id: str = ""                  # 비면 산업 공통
+    scope_node_id: str = ""                  # process_profile 에서는 비면 회사 전체
     industry_code: str = ""
     profile_kind: str = "business_profile"
     payload: Dict[str, Any] = Field(default_factory=dict)

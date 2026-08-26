@@ -146,6 +146,7 @@ export function BriefingPanel({ onClose }: { onClose: () => void }) {
   }, [load]);
 
   const b = state.value;
+  const topCount = b?.top?.length ?? 0;
   const sections = (b?.sections || {}) as Record<string, any>;
   const withheld = (name: View) => name !== 'top' && Boolean(sections[name]?.withheld);
   const withheldReason = (name: View) =>
@@ -202,7 +203,7 @@ export function BriefingPanel({ onClose }: { onClose: () => void }) {
           }
           jarvis={<JarvisRail
             contextTitle={state.status === 'ok'
-              ? ((b?.attention_count ?? 0) > 0 ? `주의 필요 ${b?.attention_count}건` : '주의 필요 없음')
+              ? (topCount > 0 ? `먼저 볼 것 ${topCount}건` : '먼저 볼 것 없음')
               : state.status === 'forbidden' ? '권한 없음'
                 : state.status === 'error' ? '조회 불가' : '집계 중'}
             contextDescription={state.status === 'ok'
@@ -282,17 +283,17 @@ export function BriefingPanel({ onClose }: { onClose: () => void }) {
               ? state.status === 'loading'
                 ? { label: '집계 중', tone: 'muted' }
                 : { label: state.status === 'forbidden' ? '권한 없음' : '조회 불가', tone: 'danger' }
-              : withheld(view)
+                : withheld(view)
                 ? { label: '권한 없음', tone: 'danger' }
                 : (b?.attention_count ?? 0) > 0
-                  ? { label: `주의 ${b?.attention_count}건`, tone: 'warn' }
-                  : { label: '주의 없음', tone: 'success' }} />
+                  ? { label: `보통 이상 ${b?.attention_count}건`, tone: 'warn' }
+                  : { label: '보통 이상 없음', tone: 'success' }} />
 
           <div className="metric-row">
-            <Metric label="주의 필요" state={state.status}
+            <Metric label="심각도 보통 이상" state={state.status}
               value={state.status === 'ok' ? (b?.attention_count ?? 0) : null}
               notes={{ forbidden: '권한 없음', error: '조회 불가', loading: '집계 중' }}
-              hint={b && b.complete === false ? '불완전한 집계입니다' : '전체 섹션 합계'} />
+              hint={b && b.complete === false ? '불완전한 집계입니다' : '높음 + 보통'} />
             {(['high', 'medium', 'low'] as const).map((sev) => (
               <Metric key={sev} label={`심각도 ${severityKo(sev)}`} state={state.status}
                 value={state.status === 'ok' ? (b?.by_severity?.[sev] ?? 0) : null}

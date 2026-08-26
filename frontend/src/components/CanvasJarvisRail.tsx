@@ -66,13 +66,22 @@ export function CanvasJarvisRail({
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const logRef = useRef<HTMLDivElement>(null);
+  const primaryLabel = recommendLabel || '의사결정 안건으로 만들기';
+  const [selectedAction, setSelectedAction] = useState(primaryLabel);
+  //: ★ 스크롤하는 것은 **본문**이다(로그가 아니다). 로그를 스크롤 상자로 두면 상자 둘이
+  //:   생기고, 그중 하나가 화면 밖으로 밀려나 새 답이 보이지 않는다(2026-08-26 실측).
+  const bodyRef = useRef<HTMLDivElement>(null);
   // ★★ 상태를 **사실대로** 표시한다. 서버가 없는데 «연결» 이라고 쓰면, 답이 안 오는
   //   이유를 사용자가 자기 질문 탓으로 돌린다(UIUX-AUDIT-29 §3).
   const health = useBackendHealth();
 
   useEffect(() => jarvisSession.subscribe(() => setTurns(jarvisSession.turns())), []);
-  useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [turns]);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    //: ⚠️ 답이 도착했는데 사용자가 스크롤을 내려야 보인다면 「안 왔다」와 구별되지 않는다.
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [turns, busy, err]);
 
   const send = async (message: string) => {
     const m = message.trim();
@@ -110,16 +119,14 @@ export function CanvasJarvisRail({
         <span className="atlas-orb" aria-hidden>✦</span>
         <div>
           <b>{ASSISTANT_NAME}</b>
-          <span>회사 전체를 이해하는 AI 동료</span>
+          <span>회사 전체를 이해하는 AI 경영비서</span>
         </div>
         {/* 시안의 오른쪽 점. ★ 색만으로 말하지 않는다 — `title` 로 이름을 남긴다. */}
         <i title={`서버 ${dotKo}`} aria-label={`서버 ${dotKo}`}
            style={{ background: dot, boxShadow: `0 0 0 4px ${dot}1a` }} />
       </header>
 
-      {/* ⚠️ 입력칸이 `position:absolute; bottom:18px` 이므로 본문 아래에 그만큼 자리를
-          비운다 — 비우지 않으면 마지막 줄이 입력칸 밑에 깔린다. */}
-      <div className="atlas-body" style={{ paddingBottom: 104 }}>
+      <div className="atlas-body" ref={bodyRef}>
         <span className="atlas-context">{contextLabel}</span>
         <h2>{title}</h2>
         {why && <p><ServerText text={why} /></p>}
@@ -145,12 +152,17 @@ export function CanvasJarvisRail({
 
         <div className="atlas-actions">
           {onRecommend && (
-            <button type="button" className="recommend" onClick={onRecommend}>
-              {recommendLabel || '의사결정 안건으로 만들기'}
+            <button type="button" className={selectedAction === primaryLabel ? 'selected' : ''}
+              aria-pressed={selectedAction === primaryLabel}
+              onClick={() => { setSelectedAction(primaryLabel); onRecommend(); }}>
+              {primaryLabel}
             </button>
           )}
           {actions.map((q) => (
-            <button key={q} type="button" disabled={busy} onClick={() => void send(q)}>
+            <button key={q} type="button" disabled={busy}
+              className={selectedAction === q ? 'selected' : ''}
+              aria-pressed={selectedAction === q}
+              onClick={() => { setSelectedAction(q); void send(q); }}>
               {q}
             </button>
           ))}
@@ -160,7 +172,7 @@ export function CanvasJarvisRail({
             정지 화면이기 때문이다. 실제 비서는 대화가 쌓이고, 그것을 볼 곳이 없으면
             답을 받고도 어디로 갔는지 알 수 없다. */}
         {(turns.length > 0 || err) && (
-          <div ref={logRef} className="atlas-log">
+          <div className="atlas-log">
             {turns.map((t, i) => (
               <div key={i} className={t.role === 'user' ? 'me' : 'it'}>
                 {t.role === 'assistant' ? <ServerText text={t.text} /> : t.text}

@@ -118,6 +118,29 @@ export async function selectContext(enterpriseScopeId: string, entityMode: strin
 // ★ 회사마다 이 프로필을 세우면 그 회사의 연결 구성이 된다.
 
 /** Digital Thread 한 칸. ★ 서버 `payload` 안의 모양이며 **여기가 그 정의다**. */
+export type ThreadOverlayLayer = 'DATA' | 'SW' | 'TWIN';
+
+/** 업무 단계 위에 겹쳐 보는 보조정보 카드 한 장.
+ *
+ * ★ 업무 단계마다 최대 한 장이다. 화면의 세로 예산 안에서 여러 장을 쌓으면 하단 결정
+ * 패널을 침범한다. 여러 근거가 필요한 경우 `body`가 요약하고 상세 화면으로 연결한다. */
+export type ThreadOverlay = {
+  layer: ThreadOverlayLayer;
+  /** 카드 상단 분류 — 예: DATA CONTRACT, 현업 생성 SW. */
+  kicker: string;
+  /** 카드 본문 — 실제 연결된 근거·도구·예측의 짧은 이름. */
+  body: string;
+};
+
+/** 승인된 회사 구성이 없을 때 새 초안에 제공하는 시작점. 실행 정본은 아니다. */
+export const DEFAULT_THREAD_OVERLAY_BY_NODE: Record<string, ThreadOverlay> = {
+  sales: { layer: 'DATA', kicker: 'DATA CONTRACT', body: '인증판·데이터 계약' },
+  sourcing: { layer: 'SW', kicker: '현업 생성 SW', body: '업무 키트 산출물 앱' },
+  production: { layer: 'SW', kicker: '현업 생성 SW', body: 'Software Factory 프로젝트' },
+  logistics: { layer: 'DATA', kicker: 'LIVE SYSTEM', body: '연계 시스템 이벤트' },
+  finance: { layer: 'TWIN', kicker: 'DIGITAL TWIN', body: '시나리오·기준선' },
+};
+
 export type ThreadNode = {
   /** 기계 이름. 흐름선·오버레이가 이 값으로 이어진다. */
   key: string;
@@ -125,26 +148,32 @@ export type ThreadNode = {
   label: string;
   /** 한 줄 설명. 없으면 빈 문자열 — 지어내지 않는다. */
   note?: string;
+  /** `null`이면 명시적 빈 카드, 필드 자체가 없으면 옛 프로필이라 기본값을 승계한다. */
+  overlay?: ThreadOverlay | null;
 };
 
 export type Profile = {
   profile_id: string; tenant_id: string; scope_node_id: string; industry_code?: string;
   profile_kind: string; payload: { nodes?: ThreadNode[] };
   inheritance_mode: string; status: string;
+  version: number;
   approved_by?: string; approved_at?: string; is_effective?: boolean;
 };
 
-export async function listProfiles(scopeNodeId = '', kind = 'process_profile') {
+export async function listProfiles(scopeNodeId = '', kind = 'process_profile', companyWide = false) {
   const q = new URLSearchParams();
   if (scopeNodeId) q.set('scope_node_id', scopeNodeId);
   if (kind) q.set('profile_kind', kind);
+  if (companyWide) q.set('company_wide', 'true');
   return unwrap<Profile[]>(
     await apiFetch(`${BASE}/profiles?${q.toString()}`), '공정 프로필');
 }
 
 export async function saveProfile(body: {
+  profile_id?: string;
   profile_kind?: string; scope_node_id: string; industry_code?: string;
   payload: { nodes: ThreadNode[] }; inheritance_mode?: string; status?: string;
+  version?: number;
 }) {
   return unwrap<Profile>(await apiFetch(`${BASE}/profiles`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },

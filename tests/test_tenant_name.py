@@ -154,6 +154,23 @@ def test_승인이_저장된_내용을_바꾸지_않는다(repo):
     assert got.profile_id == pr.profile_id
 
 
+def test_업무단계_보조정보는_같은_승인_프로필에_보존된다(repo):
+    """카드가 화면 상수나 별도 저장소에 살면 회사 연결구성과 판이 갈린다."""
+    from core.enterprise_context.models import EnterpriseProfile
+
+    payload = {"nodes": [{
+        "key": "sales", "label": "수주·판매", "note": "판매 업무",
+        "overlay": {"layer": "DATA", "kicker": "DATA CONTRACT",
+                    "body": "판매계획 인증판"},
+    }]}
+    pr = repo.upsert_profile(EnterpriseProfile(
+        tenant_id="t1", profile_kind="process_profile", payload=payload))
+    approved = repo.approve_profile(pr.profile_id, "approver@afs.invalid", tenant_id="t1")
+
+    assert approved.payload == payload
+    assert approved.payload["nodes"][0]["overlay"]["layer"] == "DATA"
+
+
 def test_프로필_승인은_조직_권한이다():
     from core.admin_capability import ADMIN_ORGANIZATION
     from core.route_authority import ROUTE_CAPS
@@ -168,3 +185,82 @@ def test_승인_경로가_등록돼_있다():
     paths = {(sorted(r.methods)[0], r.path) for r in ecc.router.routes}
     assert ("POST",
             "/api/v1/enterprise-context/profiles/{profile_id}/approve") in paths
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 회사 전체 연결구성 — 현재 회사와 실제 구성을 한 저장 경계로 묶는다
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_회사_전체_process_profile은_tenant를_범위로_저장한다(repo):
+    from core.enterprise_context.models import EnterpriseProfile
+
+    pr = repo.upsert_profile(EnterpriseProfile(
+        tenant_id="t1", profile_kind="process_profile",
+        payload={"nodes": [{"key": "sales", "label": "수주·판매"}]}))
+    assert pr.scope_node_id == "" and pr.industry_code == ""
+    got = repo.list_profiles(profile_kind="process_profile", tenant_id="t1",
+                             company_wide=True)
+    assert [x.profile_id for x in got] == [pr.profile_id]
+
+
+def test_범위_없는_다른_프로필은_회사_전체로_번지지_않는다(repo):
+    from core.enterprise_context.models import EnterpriseProfile
+
+    with pytest.raises(EcmError):
+        repo.upsert_profile(EnterpriseProfile(
+            tenant_id="t1", profile_kind="data_profile", payload={"secret": True}))
+
+
+def test_프로필_목록은_현재_회사만_돌려준다(repo):
+    from core.enterprise_context.models import EnterpriseProfile
+
+    a = repo.upsert_profile(EnterpriseProfile(
+        tenant_id="t1", profile_kind="process_profile", payload={"nodes": []}))
+    repo.upsert_profile(EnterpriseProfile(
+        tenant_id="t2", profile_kind="process_profile", payload={"nodes": []}))
+    got = repo.list_profiles(profile_kind="process_profile", tenant_id="t1",
+                             company_wide=True)
+    assert [x.profile_id for x in got] == [a.profile_id]
+
+
+def test_다른_회사의_프로필은_승인할_수_없다(repo):
+    from core.enterprise_context.models import EnterpriseProfile
+
+    pr = repo.upsert_profile(EnterpriseProfile(
+        tenant_id="t2", profile_kind="process_profile", payload={"nodes": []}))
+    assert repo.approve_profile(pr.profile_id, "admin@afs.invalid", tenant_id="t1") is None
+    assert repo.list_profiles(profile_kind="process_profile", tenant_id="t2",
+                              company_wide=True)[0].status == "DRAFT"
+
+
+def test_새_승인판은_이전_승인판을_보존하되_적용에서는_내린다(repo):
+    from core.enterprise_context.models import EnterpriseProfile
+
+    old = repo.upsert_profile(EnterpriseProfile(
+        tenant_id="t1", profile_kind="process_profile", version=1,
+        payload={"nodes": [{"key": "old", "label": "이전"}]}))
+    repo.approve_profile(old.profile_id, "a@afs.invalid", tenant_id="t1")
+    new = repo.upsert_profile(EnterpriseProfile(
+        tenant_id="t1", profile_kind="process_profile", version=2,
+        payload={"nodes": [{"key": "new", "label": "신규"}]}))
+    repo.approve_profile(new.profile_id, "b@afs.invalid", tenant_id="t1")
+
+    rows = repo.list_profiles(profile_kind="process_profile", tenant_id="t1",
+                              company_wide=True)
+    effective = [x for x in rows if x.is_effective]
+    archived = [x for x in rows if x.status == "ARCHIVED"]
+    assert [x.profile_id for x in effective] == [new.profile_id]
+    assert [x.profile_id for x in archived] == [old.profile_id]
+
+
+def test_조직별_프로필은_현재_회사의_노드에만_붙는다(repo):
+    from core.enterprise_context.models import (EnterpriseEntity, EnterpriseProfile,
+                                                OrganizationNode)
+
+    e = repo.upsert_entity(EnterpriseEntity(tenant_id="t2", name_ko="다른 회사"))
+    n = repo.upsert_node(OrganizationNode(
+        tenant_id="t2", entity_id=e.entity_id, node_type="legal_entity", name_ko="다른 회사"))
+    with pytest.raises(EcmError):
+        repo.upsert_profile(EnterpriseProfile(
+            tenant_id="t1", scope_node_id=n.node_id, profile_kind="process_profile",
+            payload={"nodes": []}))

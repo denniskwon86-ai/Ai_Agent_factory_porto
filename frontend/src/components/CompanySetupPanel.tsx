@@ -5,9 +5,12 @@ import { setEnterpriseContext } from '../lib/api';
 import {
   approveEntity, approveProfile, createEntity, createNode, getTree, listEntities,
   listProfiles, listTenants, saveProfile, selectContext, upsertTenant,
+  DEFAULT_THREAD_OVERLAY_BY_NODE,
   type EcmNode, type Entity, type Profile, type Tenant, type ThreadNode,
+  type ThreadOverlay,
 } from '../lib/companyApi';
 import { useOperatingContext } from '../lib/operatingContext';
+import { fetchCanvas } from '../lib/canvasApi';
 
 // [ECM §4·§9] **회사 구성** — 회사 이름 · 법인/가상회사 · 조직 노드 · Digital Thread 연결구성.
 //
@@ -36,6 +39,7 @@ const MODE_TONE: Record<string, string> = {
   VIRTUAL: '#7c3aed',
   COMPETITOR: 'var(--state-warn-fg)',
 };
+const COMPANY_SCOPE = '__company__';
 
 type Tab = 'company' | 'entity' | 'thread';
 
@@ -72,6 +76,17 @@ function flatten(rows: EcmNode[], depth = 0): (EcmNode & { _d: number })[] {
   return out;
 }
 
+/** 선택한 조직이 어느 법인 아래에 있는지 보여 주기 위한 경로. 저장/권한 판정에는 쓰지 않는다. */
+function findNodePath(rows: EcmNode[], nodeId: string, parents: EcmNode[] = []): EcmNode[] {
+  for (const n of rows || []) {
+    const path = [...parents, n];
+    if (n.node_id === nodeId) return path;
+    const child = findNodePath(n.children || [], nodeId, path);
+    if (child.length) return child;
+  }
+  return [];
+}
+
 export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
   const ctx = useOperatingContext();
   const [tab, setTab] = useState<Tab>('company');
@@ -102,6 +117,9 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
       await fn();
       setOk(`${what}을(를) 마쳤습니다.`);
       setTick((t) => t + 1);
+      // 회사명·조직·Digital Thread 는 홈 화면이 즉시 다시 읽어야 한다. 저장됐는데 새로고침
+      // 전까지 옛 이름/구성이 남으면 사용자는 저장 실패로 판단한다.
+      window.dispatchEvent(new CustomEvent('factory:company-configuration-changed'));
     } catch (e: any) {
       //: ⚠️ 사유를 삼키지 않는다. 403 이면 권한이고, 그때 할 일은 관리자에게 요청하는 것이다.
       setErr(e?.status === 403
@@ -113,7 +131,10 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
   return (
     <HubDialog label="회사 구성" onClose={onClose}
       subtitle="회사 이름 · 법인과 가상회사 · 업무 연결구성(Digital Thread)">
-      <div style={{ padding: 16, minWidth: 0 }}>
+      {/* 회사 구성은 탭에 따라 본문 높이가 크게 달라진다. 공용 스크롤 셸에 연결하지 않으면
+          업무 연결구성의 마지막 저장 버튼이 화면 아래에서 잘린다. */}
+      <div className="afs-dialog-body company-setup-body"
+        style={{ padding: '16px 16px 28px', minWidth: 0 }}>
         {/* ★ 지금 어느 회사·어느 모드인지 **항상** 위에 둔다(채택 결정 6항). */}
         <div style={{
           display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap',
@@ -172,7 +193,9 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
             currentMode={ctx.entityMode} />
         )}
         {tab === 'thread' && (
-          <ThreadTab nodes={nodes} busy={busy} run={run} />
+          <ThreadTab nodes={nodes} entities={entities} busy={busy} run={run}
+            companyId={ctx.company} companyName={ctx.companyName}
+            entityMode={ctx.entityMode} scopeLabel={ctx.scopeLabel} />
         )}
       </div>
     </HubDialog>
@@ -559,139 +582,262 @@ function ContextSwitch({ flat, busy, run }: {
 
 // ── ③ 업무 연결구성 (Digital Thread) ─────────────────────────────────────
 
-function ThreadTab({ nodes, busy, run }: {
-  nodes: EcmNode[] | null; busy: string;
+function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityMode, scopeLabel }: {
+  nodes: EcmNode[] | null; entities: Entity[] | null; busy: string;
+  companyId: string; companyName: string; entityMode: string; scopeLabel: string;
   run: (what: string, fn: () => Promise<unknown>) => Promise<void>;
 }) {
   const flat = flatten(nodes || []);
-  const [scope, setScope] = useState('');
+  const [scope, setScope] = useState(COMPANY_SCOPE);
   const [rows, setRows] = useState<ThreadNode[]>([]);
-  const [found, setFound] = useState<Profile | null>(null);
+  const [active, setActive] = useState<Profile | null>(null);
+  const [draft, setDraft] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
   const [note, setNote] = useState('');
 
-  const load = useCallback(async (nodeId: string) => {
-    setScope(nodeId); setRows([]); setFound(null); setNote('');
-    if (!nodeId) return;
+  const editableNodes = (source: ThreadNode[]) => source.map((node) => (
+    Object.prototype.hasOwnProperty.call(node, 'overlay')
+      ? node
+      : { ...node, overlay: DEFAULT_THREAD_OVERLAY_BY_NODE[node.key] || null }
+  ));
+
+  const load = useCallback(async (target: string) => {
+    setScope(target); setRows([]); setActive(null); setDraft(null); setNote('');
+    if (!target) return;
     setLoading(true);
     try {
-      const list = await listProfiles(nodeId, 'process_profile');
-      //: ★ 승인된 것이 있으면 그것을, 없으면 초안을 연다. 둘 다 없으면 빈 상태다.
-      const pick = list.find((x) => x.is_effective) || list[0] || null;
-      setFound(pick);
-      setRows(pick?.payload?.nodes || []);
-      if (!pick) setNote('이 범위에 아직 연결구성이 없습니다 — 새로 만드십시오.');
-      else if (!pick.is_effective) setNote('승인 대기 중인 초안입니다 — 승인해야 화면에 반영됩니다.');
+      const companyWide = target === COMPANY_SCOPE;
+      const list = await listProfiles(companyWide ? '' : target, 'process_profile', companyWide);
+      const current = list.find((x) => x.is_effective) || null;
+      const editing = list.find((x) => x.status === 'DRAFT') || null;
+      setActive(current); setDraft(editing);
+      if (editing) {
+        setRows(editableNodes(editing.payload?.nodes || []));
+        setNote('승인 대기 중인 편집 초안입니다. 현재 승인 구성은 승인 전까지 유지됩니다.');
+      } else if (current) {
+        setRows(editableNodes(current.payload?.nodes || []));
+        setNote('현재 승인 구성을 복사해 편집합니다. 저장하면 새 판의 초안이 됩니다.');
+      } else {
+        const canvas = await fetchCanvas();
+        setRows((canvas.domain_nodes || []).map((n) => ({
+          key: n.id, label: n.label, note: n.reason || '',
+          overlay: DEFAULT_THREAD_OVERLAY_BY_NODE[n.id],
+        })));
+        setNote('승인된 회사 구성이 없어 현재 홈의 기본 업무 흐름을 편집 초안으로 불러왔습니다.');
+      }
     } catch (e: any) {
       setNote(e?.message || '연결구성을 읽지 못했습니다.');
     } finally { setLoading(false); }
   }, []);
 
+  useEffect(() => { void load(COMPANY_SCOPE); }, [companyId, load]);
+
   const set = (i: number, patch: Partial<ThreadNode>) =>
     setRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const setOverlay = (i: number, patch: Partial<ThreadOverlay>) => setRows((old) =>
+    old.map((row, j) => j === i
+      ? { ...row, overlay: { layer: 'DATA', kicker: '', body: '', ...row.overlay, ...patch } }
+      : row));
+  const move = (i: number, by: number) => setRows((old) => {
+    const j = i + by;
+    if (j < 0 || j >= old.length) return old;
+    const next = [...old];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+
+  const isCompany = scope === COMPANY_SCOPE;
+  const selectedPath = !isCompany && scope ? findNodePath(nodes || [], scope) : [];
+  const selectedNode = selectedPath[selectedPath.length - 1];
+  const companyNode = [...selectedPath].reverse().find((n) => n.node_type === 'legal_entity')
+    || selectedPath[0];
+  const selectedEntity = companyNode
+    ? (entities || []).find((e) => e.entity_id === companyNode.entity_id)
+    : undefined;
+  const targetCompanyName = selectedEntity?.name_ko || companyNode?.name_ko || companyName;
+  const targetMode = selectedEntity?.entity_mode || entityMode;
 
   return (
     <>
-      <Section title="어느 조직의 연결구성인가"
-        desc="회사·사업부·공장마다 다를 수 있습니다. 하위가 없으면 상위 것을 물려받습니다.">
+      <Section title="현재 회사와 적용 구성"
+        desc="회사 이름과 실제 적용 중인 Digital Thread를 같은 자리에서 확인하고 새 판을 편집합니다.">
+        <div className="company-thread-context" style={{
+          display: 'grid', gridTemplateColumns: 'minmax(180px, 1.2fr) minmax(220px, 1.8fr)',
+          gap: 10, maxWidth: 780, padding: '12px 14px', borderRadius: 8,
+          border: '1px solid var(--surface-border)', background: 'var(--surface-raised)',
+        }}>
+          <div>
+            <small style={{ display: 'block', fontSize: 11,
+              color: 'var(--surface-text-muted)' }}>현재 회사</small>
+            <strong style={{ display: 'block', marginTop: 3, fontSize: 16 }}>
+              {companyName || '회사 이름 미등록'}
+            </strong>
+            <span style={{ display: 'block', marginTop: 3, fontSize: 11,
+              color: 'var(--surface-text-muted)' }}>{companyId || '회사 ID 확인 불가'}</span>
+          </div>
+          <div>
+            <small style={{ display: 'block', fontSize: 11,
+              color: 'var(--surface-text-muted)' }}>현재 적용 중인 연결구성</small>
+            {active ? <>
+              <strong style={{ display: 'block', marginTop: 3, fontSize: 14 }}>
+                {active.payload.nodes?.map((n) => n.label).join(' → ') || '단계 없음'}
+              </strong>
+              <span style={{ display: 'block', marginTop: 3, fontSize: 11,
+                color: 'var(--surface-text-muted)' }}>
+                승인판 v{active.version} · {active.approved_by || '승인자 미표시'}
+              </span>
+            </> : <>
+              <strong style={{ display: 'block', marginTop: 3, fontSize: 14,
+                color: 'var(--state-warn-fg)' }}>회사 승인 구성 없음 · 홈 기본 흐름 사용 중</strong>
+              <span style={{ display: 'block', marginTop: 3, fontSize: 11,
+                color: 'var(--surface-text-muted)' }}>아래 기본 흐름을 저장·승인하면 회사 정본이 됩니다.</span>
+            </>}
+          </div>
+        </div>
+      </Section>
+
+      <Section title="적용 범위"
+        desc="기본은 회사 전체입니다. 필요한 경우에만 사업부·공장별 구성을 따로 정의합니다.">
         <select value={scope} onChange={(e) => void load(e.target.value)}
-          style={{ fontSize: 13, padding: '4px 6px', maxWidth: 360 }}>
-          <option value="">— 조직 범위 —</option>
+          style={{ fontSize: 13, padding: '6px 8px', maxWidth: 420 }}>
+          <option value={COMPANY_SCOPE}>회사 전체 · {companyName || companyId}</option>
           {flat.map((n) => (
             <option key={n.node_id} value={n.node_id}>
               {' '.repeat(n._d * 2)}{n._d ? '└ ' : ''}{n.name_ko}
             </option>
           ))}
         </select>
-        {flat.length === 0 && (
-          <div style={{ fontSize: 12, color: 'var(--state-warn-fg)', marginTop: 6 }}>
-            고를 조직 범위가 없습니다 — 「법인 · 가상회사」에서 먼저 등록·승인하십시오.
-          </div>
-        )}
+        <div style={{ marginTop: 9, padding: '8px 10px', maxWidth: 700,
+          borderLeft: '3px solid var(--ls-blue)', background: 'var(--surface-raised)',
+          fontSize: 12, lineHeight: 1.5 }}>
+          <b>연결구성 대상</b> · {isCompany
+            ? `${companyName || companyId} / 회사 전체`
+            : `${targetCompanyName || '법인 확인 불가'} / ${selectedNode?.name_ko || '조직 확인 불가'}`}
+          <span style={{ marginLeft: 8, fontWeight: 700, color: MODE_TONE[targetMode] }}>
+            {MODE_KO[targetMode] || targetMode}
+          </span>
+          <span style={{ marginLeft: 8, color: 'var(--surface-text-muted)' }}>
+            현재 문맥 · {scopeLabel}
+          </span>
+        </div>
       </Section>
 
-      {scope && (
-        <Section title="업무 흐름 단계"
-          desc="경영 홈 가운데의 ENTERPRISE DIGITAL THREAD 가 이 순서대로 그려집니다.">
-          {loading ? <div style={{ fontSize: 13 }}>읽는 중…</div> : (
-            <>
-              {/* ★ [2026-08-25 실측] 저장·승인 뒤에도 「아직 연결구성이 없습니다」가
-                  남아 있었다 — 안내문을 **한 번 적어 두고 갱신하지 않았기** 때문이다.
-                  ⚠️ 지금 상태에서 **파생**시킨다. 두 곳이 다른 말을 하면 사용자는 무엇이
-                    참인지 화면에서 판단할 수 없다. */}
-              {(() => {
-                const msg = !found ? (note || '이 범위에 아직 연결구성이 없습니다 — 새로 만드십시오.')
-                  : !found.is_effective ? '승인 대기 중인 초안입니다 — 승인해야 화면에 반영됩니다.'
-                    : '';
-                return msg ? (
-                  <div style={{ fontSize: 13, color: 'var(--state-warn-fg)', marginBottom: 8 }}>
-                    {msg}
-                  </div>
-                ) : null;
-              })()}
-              <ul style={{ padding: 0, margin: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
-                {rows.map((r, i) => (
-                  <li key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, width: 26, textAlign: 'right',
-                      color: 'var(--surface-text-muted)' }}>
-                      {String(i + 1).padStart(2, '0')}
+      <Section title="업무 흐름 편집"
+        desc="경영 홈의 ENTERPRISE DIGITAL THREAD가 아래 순서와 설명으로 표시됩니다.">
+        {loading ? <div style={{ fontSize: 13 }}>현재 구성을 읽는 중…</div> : <>
+          {note && <div style={{ fontSize: 13, color: draft
+            ? 'var(--state-warn-fg)' : 'var(--surface-text-muted)', marginBottom: 10 }}>{note}</div>}
+          <ul style={{ padding: 0, margin: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
+            {rows.map((r, i) => (
+              <li key={i} style={{ display: 'grid', gap: 6, alignItems: 'center',
+                gridTemplateColumns: '28px 130px minmax(150px, 1fr) minmax(180px, 1.4fr) auto',
+                padding: '9px 10px', border: '1px solid var(--surface-border)', borderRadius: 7 }}>
+                <span style={{ fontSize: 12, textAlign: 'right', color: 'var(--surface-text-muted)' }}>
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <input value={r.key} onChange={(e) => set(i, { key: e.target.value })}
+                  placeholder="단계 코드" style={{ fontSize: 13, padding: '5px 8px' }} />
+                <input value={r.label} onChange={(e) => set(i, { label: e.target.value })}
+                  placeholder="화면 표시 이름" style={{ fontSize: 13, padding: '5px 8px', minWidth: 0 }} />
+                <input value={r.note || ''} onChange={(e) => set(i, { note: e.target.value })}
+                  placeholder="이 단계의 역할·설명" style={{ fontSize: 13, padding: '5px 8px', minWidth: 0 }} />
+                <span style={{ display: 'flex', gap: 3 }}>
+                  <button type="button" aria-label={`${i + 1}번 단계 위로`}
+                    disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+                  <button type="button" aria-label={`${i + 1}번 단계 아래로`}
+                    disabled={i === rows.length - 1} onClick={() => move(i, 1)}>↓</button>
+                  <button type="button" aria-label={`${i + 1}번 단계 삭제`}
+                    onClick={() => setRows((x) => x.filter((_, j) => j !== i))}>✕</button>
+                </span>
+                <div style={{
+                  gridColumn: '1 / -1', display: 'grid', alignItems: 'center', gap: 6,
+                  gridTemplateColumns: r.overlay
+                    ? '100px minmax(130px, .8fr) minmax(180px, 1.4fr) auto'
+                    : '1fr auto',
+                  padding: '8px 10px', borderRadius: 6,
+                  border: '1px dashed var(--surface-border-control)',
+                  background: 'var(--surface-raised)',
+                }}>
+                  {r.overlay ? <>
+                    <select value={r.overlay.layer}
+                      aria-label={`${i + 1}번 단계 보조정보 종류`}
+                      onChange={(e) => setOverlay(i, { layer: e.target.value as ThreadOverlay['layer'] })}
+                      style={{ fontSize: 12, padding: '5px 6px' }}>
+                      <option value="DATA">DATA 근거</option>
+                      <option value="SW">SW 도구</option>
+                      <option value="TWIN">TWIN 예측</option>
+                    </select>
+                    <input value={r.overlay.kicker}
+                      aria-label={`${i + 1}번 단계 보조정보 제목`}
+                      onChange={(e) => setOverlay(i, { kicker: e.target.value })}
+                      placeholder="카드 제목 — 예: DATA CONTRACT"
+                      style={{ minWidth: 0, fontSize: 12, padding: '5px 7px', textAlign: 'center' }} />
+                    <input value={r.overlay.body}
+                      aria-label={`${i + 1}번 단계 보조정보 내용`}
+                      onChange={(e) => setOverlay(i, { body: e.target.value })}
+                      placeholder="연결된 근거·도구·예측"
+                      style={{ minWidth: 0, fontSize: 12, padding: '5px 7px', textAlign: 'center' }} />
+                    <button type="button" aria-label={`${i + 1}번 단계 보조정보 삭제`}
+                      onClick={() => set(i, { overlay: null })}
+                      style={{ fontSize: 12, padding: '5px 9px' }}>카드 삭제</button>
+                  </> : <>
+                    <span style={{ fontSize: 12, color: 'var(--surface-text-muted)', textAlign: 'center' }}>
+                      이 업무 단계에는 등록된 보조정보가 없습니다.
                     </span>
-                    <input value={r.key} onChange={(e) => set(i, { key: e.target.value })}
-                      placeholder="기계 이름 — 예: order"
-                      style={{ fontSize: 13, padding: '5px 8px', width: 150 }} />
-                    <input value={r.label} onChange={(e) => set(i, { label: e.target.value })}
-                      placeholder="사람이 읽는 이름 — 예: 수주·판매"
-                      style={{ fontSize: 13, padding: '5px 8px', flex: 1, minWidth: 120 }} />
-                    <button type="button" aria-label={`${i + 1}번 단계 삭제`}
-                      onClick={() => setRows((x) => x.filter((_, j) => j !== i))}
-                      style={{ fontSize: 12, padding: '4px 9px' }}>✕</button>
-                  </li>
-                ))}
-              </ul>
-              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                <button type="button"
-                  onClick={() => setRows((r) => [...r, { key: '', label: '' }])}
-                  style={{ fontSize: 13, padding: '6px 12px' }}>＋ 단계 추가</button>
-                <button type="button"
-                  disabled={!!busy || rows.length === 0
-                    || rows.some((r) => !r.key.trim() || !r.label.trim())}
-                  onClick={() => void run('연결구성 저장', async () => {
-                    const saved = await saveProfile({
-                      scope_node_id: scope,
-                      payload: { nodes: rows.map((r) => ({
-                        key: r.key.trim(), label: r.label.trim(), note: r.note || '' })) },
-                    });
-                    setFound(saved);
-                  })}
-                  style={{ fontSize: 13, padding: '6px 12px', fontWeight: 600 }}>
-                  {busy === '연결구성 저장' ? '저장 중…' : '저장 (승인 대기로)'}
-                </button>
-                {found && !found.is_effective && (
-                  <button type="button" disabled={!!busy}
-                    onClick={() => void run('연결구성 승인', async () => {
-                      const a = await approveProfile(found.profile_id);
-                      setFound(a);
-                    })}
-                    style={{ fontSize: 13, padding: '6px 12px', fontWeight: 600 }}>
-                    승인
-                  </button>
-                )}
-                {found?.is_effective && (
-                  <span style={{ fontSize: 13, color: 'var(--state-success-fg)',
-                    alignSelf: 'center' }}>
-                    ● 승인됨 — 경영 홈에 반영됩니다
-                    {found.approved_by ? ` (${found.approved_by})` : ''}
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 8 }}>
-                {/* ⚠️ 저장만 하면 반영되지 않는다는 사실을 **누르기 전에** 말한다. */}
-                저장하면 초안입니다. <b>승인해야</b> 경영 홈의 업무 흐름에 반영됩니다.
-              </div>
-            </>
-          )}
-        </Section>
-      )}
+                    <button type="button" onClick={() => setOverlay(i, {})}
+                      style={{ fontSize: 12, padding: '5px 10px' }}>＋ 보조정보 카드 연결</button>
+                  </>}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 10 }}>
+            저장은 현재 승인 구성을 바꾸지 않습니다. <b>새 판을 승인할 때</b> 홈에 적용되며,
+            이전 승인판은 이력으로 보존됩니다.
+          </div>
+          <div className="company-thread-actions">
+            <button type="button" onClick={() => setRows((r) => [...r, { key: '', label: '', note: '' }])}
+              style={{ fontSize: 13, padding: '6px 12px' }}>＋ 단계 추가</button>
+            <button type="button"
+              disabled={!!busy || rows.length === 0
+                || rows.some((r) => !r.key.trim() || !r.label.trim()
+                  || (r.overlay && (!r.overlay.kicker.trim() || !r.overlay.body.trim())))}
+              onClick={() => void run('연결구성 저장', async () => {
+                await saveProfile({
+                  profile_id: draft?.profile_id,
+                  scope_node_id: isCompany ? '' : scope,
+                  version: draft?.version || ((active?.version || 0) + 1),
+                  payload: { nodes: rows.map((r) => {
+                    const node: ThreadNode = {
+                      key: r.key.trim(), label: r.label.trim(), note: (r.note || '').trim(),
+                    };
+                    node.overlay = r.overlay ? {
+                      layer: r.overlay.layer, kicker: r.overlay.kicker.trim(),
+                      body: r.overlay.body.trim(),
+                    } : null;
+                    return node;
+                  }) },
+                });
+                await load(scope);
+              })}
+              style={{ fontSize: 13, padding: '6px 12px', fontWeight: 700 }}>
+              {busy === '연결구성 저장' ? '저장 중…' : draft ? '편집 초안 저장' : '새 판으로 저장'}
+            </button>
+            {draft && <button type="button" disabled={!!busy}
+              onClick={() => void run('연결구성 승인', async () => {
+                await approveProfile(draft.profile_id);
+                await load(scope);
+              })}
+              style={{ fontSize: 13, padding: '6px 12px', fontWeight: 700 }}>
+              승인하고 홈에 적용
+            </button>}
+            {active && !draft && <span style={{ fontSize: 13,
+              color: 'var(--state-success-fg)', alignSelf: 'center' }}>
+              ● 현재 승인판이 홈에 적용 중입니다. 수정 후 저장하면 새 초안이 생성됩니다.
+            </span>}
+          </div>
+        </>}
+      </Section>
     </>
   );
 }

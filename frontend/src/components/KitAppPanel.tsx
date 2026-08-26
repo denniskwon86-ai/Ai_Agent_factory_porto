@@ -7,6 +7,9 @@ import {
   issueAppProof, listAppDatasets, readAppRecords,
   type AppDatasetRow, type AppRecords,
 } from '../lib/kitAppViewApi';
+import {
+  datasetDisplayName, KitBusinessView, preferredDatasetName,
+} from './KitBusinessView';
 import { shortId } from '../lib/displayId';
 
 // [2026-08-23] 키트로 앱 만들기 — **여정의 빈 칸.**
@@ -68,7 +71,9 @@ function stripEnvelope(row: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-function AppViewer({ releaseId, appLabel }: { releaseId: string; appLabel: string }) {
+function AppViewer({
+  releaseId, appId, appLabel,
+}: { releaseId: string; appId: string; appLabel: string }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -85,14 +90,15 @@ function AppViewer({ releaseId, appLabel }: { releaseId: string; appLabel: strin
       setSets(ds);
       if (!proofRef.current) proofRef.current = await issueAppProof(releaseId);
       if (ds.length) {
-        setPicked(ds[0].name);
-        setRows(await readAppRecords(proofRef.current, ds[0].name));
+        const first = preferredDatasetName(appId, ds);
+        setPicked(first);
+        setRows(await readAppRecords(proofRef.current, first));
       }
     } catch (e: any) {
       //: ⚠️ 사유를 삼키지 않는다. 후보 판이면 403 이고, 그때 할 일은 «운영 전환» 이다.
       setErr(e?.message || '열지 못했습니다.');
     } finally { setBusy(false); }
-  }, [releaseId]);
+  }, [appId, releaseId]);
 
   async function pick(name: string) {
     setPicked(name); setRows(null); setErr('');
@@ -110,8 +116,6 @@ function AppViewer({ releaseId, appLabel }: { releaseId: string; appLabel: strin
     );
   }
 
-  //: ★ 열에 무엇이 있는지는 **데이터가 정한다** — 화면이 열 이름을 지어내지 않는다.
-  //:
   //: ⚠️⚠️ [2026-08-24 실측] 응답 모양이 **두 가지**다. 인증판을 통해 오는 행은 업무
   //:   칸이 평평하게 오고, 앱 자체 레코드는 `{record_id, created_at, …, payload}` 봉투에
   //:   담겨 온다. 봉투만 그렸더니 12,000건을 읽고도 화면에는 `record_id`·`created_at`
@@ -121,12 +125,10 @@ function AppViewer({ releaseId, appLabel }: { releaseId: string; appLabel: strin
     const pay = (r as any).payload;
     return (pay && typeof pay === 'object') ? { ...pay, ...stripEnvelope(r) } : r;
   });
-  //: ⚠️ **앞 8칸만 자르지 않는다.** 정본 CSV 는 거버넌스 칸(테넌트·범위·품질·인증)이
-  //:   앞에 오고 업무 칸(자재·수량·납기)은 뒤에 있다. 잘랐더니 화면에 tenant_id·
-  //:   scope_node_id 만 보였다 — 「데이터가 있다」는 보여 주는데 **무슨 데이터인지는
-  //:   안 보이는** 상태다. 어느 칸이 중요한지 화면이 짐작하지 않고, 전부 주고 가로로
-  //:   흐르게 한다.
-  const cols = flat.length ? Object.keys(flat[0]) : [];
+  //: ★ 원본 열은 버리지 않는다. 다만 사용자의 첫 화면은 앱 계약에 선언한 **업무 열**을
+  //:   먼저 보여 주고, 거버넌스·기술 열은 접힌 관리자 진단으로 내린다. 원본 표를 그대로
+  //:   내놓는 것은 앱이 아니라 데이터 브라우저다.
+  const pickedDataset = (sets || []).find((dataset) => dataset.name === picked);
 
   return (
     <div style={{
@@ -143,7 +145,7 @@ function AppViewer({ releaseId, appLabel }: { releaseId: string; appLabel: strin
                     background: d.name === picked ? 'var(--surface-selected)' : 'transparent',
                     fontWeight: d.name === picked ? 600 : 400,
                   }}>
-            {d.name}
+            {datasetDisplayName(appId, d)}
           </button>
         ))}
         <button type="button" onClick={() => setOpen(false)}
@@ -155,37 +157,20 @@ function AppViewer({ releaseId, appLabel }: { releaseId: string; appLabel: strin
         <div style={{ fontSize: 13, color: 'var(--state-error-fg)' }}>{err}</div>
       )}
       {rows && (
-        <div style={{ overflowX: 'auto' }}>
+        <div>
           <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginBottom: 4 }}>
             {/* ⚠️ 보인 건수를 «전부» 로 읽지 않게 총계를 함께 적는다. */}
             {flat.length}건 표시 · 총 {rows.total}건
           </div>
-          <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: 480 }}>
-            <thead>
-              <tr>{cols.map((c) => (
-                <th key={c} style={{
-                  textAlign: 'left', padding: '4px 8px', whiteSpace: 'nowrap',
-                  borderBottom: '1px solid var(--surface-border)',
-                  color: 'var(--surface-text-muted)', fontWeight: 600,
-                }}>{c}</th>
-              ))}</tr>
-            </thead>
-            <tbody>
-              {flat.map((r, i) => (
-                <tr key={i}>{cols.map((c) => (
-                  <td key={c} style={{
-                    padding: '4px 8px', whiteSpace: 'nowrap',
-                    borderBottom: '1px solid var(--surface-border)',
-                  }}>{String((r as any)[c] ?? '')}</td>
-                ))}</tr>
-              ))}
-            </tbody>
-          </table>
-          {!flat.length && (
-            <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
-              이 데이터셋에는 행이 없습니다.
-            </div>
-          )}
+          <KitBusinessView
+            appId={appId}
+            datasetName={picked}
+            datasetLabel={pickedDataset?.label || picked}
+            records={flat}
+            total={rows.total}
+            asOf={rows.as_of}
+            stale={rows.stale}
+          />
         </div>
       )}
     </div>
@@ -382,7 +367,7 @@ function AppRow({
                         <span style={{ fontSize: 13, color: 'var(--state-success-fg)' }}>
                           ● 운영 중 — 인증된 업무 데이터를 읽습니다.
                         </span>
-                        <AppViewer releaseId={row.release_id}
+                        <AppViewer releaseId={row.release_id} appId={row.app_id}
                                    appLabel={row.label || row.app_id} />
                       </div>
                     )}

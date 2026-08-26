@@ -1,7 +1,61 @@
+import json
+import os
 import sys
+
 import uvicorn
 
+
+def _apply_installation_settings() -> None:
+    """★★★ [2026-08-24] 이 **설치본**의 값을 적용한다(`data/instance.json`).
+
+    ## 왜 여기인가 — `config.py` 에 넣었다가 시험 100건이 깨졌다
+
+    `config.ECM_DEFAULT_TENANT_ID` 를 import 시점에 파일에서 읽게 했더니, **시험이
+    개발자의 `data/` 에 의존**하게 됐다(`TENANT_MISMATCH` 100건). 파일이 있는 기계에서만
+    빨강이 되는 상태다.
+
+    ★ `run.py` 는 **앱을 띄우는 사람만** 지나는 길이다. 시험은 `main:app` 을 직접 import
+      하므로 이 함수를 밟지 않는다 — 설치본 설정과 시험 격리가 둘 다 성립한다.
+
+    ## 왜 테넌트를 설치본마다 정해야 하는가
+
+    정본 스타터 키트의 CSV 는 **행마다** `tenant_id` 를 담는다(`tenant-afs-demo-materials`).
+    색인은 그 행 내용과 인증판의 테넌트가 **같은지 대조**한다 — 다르면 거부한다(옳다).
+    그러니 설치본의 기본 테넌트가 자료와 같아야 한다. 열만 바꿔치기하면 그 대조에서 죽는다.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "instance.json")
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            cfg_file = json.load(fh) or {}
+    except Exception as e:  # noqa: BLE001
+        print(f"[run] ⚠️ {path} 를 읽지 못했습니다 — 기본값으로 갑니다: {e}")
+        return
+    tenant = str(cfg_file.get("tenant_id", "") or "").strip()
+    if tenant:
+        import config
+        config.ECM_DEFAULT_TENANT_ID = tenant
+        print(f"[run] 설치본 테넌트: {tenant}")
+    company_name = str(cfg_file.get("company_name", "") or "").strip()
+    if tenant and company_name:
+        # 설치본의 사람이 읽는 회사명도 같은 정본에서 세운다. tenant_id만 적용하면 상단
+        # Operating Context가 영원히 기계 ID로 남는다. 멱등 upsert이며 이름이 바뀌면 다음
+        # 기동에서 저장소와 화면이 함께 바뀐다.
+        try:
+            from core.enterprise_context.repository import ecm_repository
+            ecm_repository.upsert_tenant(
+                tenant,
+                company_name,
+                legal_name=str(cfg_file.get("company_legal_name", "") or "").strip(),
+            )
+            print(f"[run] 설치본 회사명: {company_name}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[run] ⚠️ 설치본 회사명을 등록하지 못했습니다: {e}")
+
+
 if __name__ == "__main__":
+    _apply_installation_settings()
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
     # 기본은 '운영 모드'(reload OFF) - reload 는 리포의 아무 .py 나 저장돼도 서버를 재시작해

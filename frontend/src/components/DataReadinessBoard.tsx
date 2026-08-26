@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   DataPrepError, getReadiness,
   type DatasetReadiness, type DatasetState, type InstanceReadiness, type OutputReadiness,
@@ -119,6 +119,28 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
     return () => { alive = false; };
   }, [instanceId]);
 
+  // ★ 35개 계약을 한 표로 펴지 않는다. 사용자는 먼저 구매·물류·재고 같은 업무기능을
+  // 이해하고, 진단이 필요할 때만 그 안의 계약을 펼친다. 분류는 서버가 준 정본만 쓴다.
+  // ⚠️ 로딩 전에도 Hook 호출 순서를 지켜야 하므로 `data`가 없으면 빈 목록을 쓴다.
+  const groups = useMemo(() => {
+    const byId = new Map<string, {
+      id: string; name: string; description: string; order: number; rows: DatasetReadiness[];
+    }>();
+    for (const row of (data?.datasets || [])) {
+      const id = row.business_kit_id || 'UNCLASSIFIED';
+      const group = byId.get(id) || {
+        id,
+        name: row.business_kit_name || '미분류 — 정본 보완 필요',
+        description: row.description || '',
+        order: Number.isFinite(row.order) ? row.order : 999,
+        rows: [],
+      };
+      group.rows.push(row);
+      byId.set(id, group);
+    }
+    return [...byId.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  }, [data?.datasets]);
+
   if (loading) return <div style={{ padding: 16 }}>준비 상태를 확인하는 중…</div>;
 
   // ★★★ **조회 실패와 0건을 구분한다**(설계 §12 UI 규칙). 실패를 빈 표로 그리면
@@ -162,19 +184,51 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
         )}
       </div>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20 }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid var(--surface-border)', textAlign: 'left' }}>
-            <th style={{ padding: '8px', fontSize: 13, color: 'var(--surface-text)' }}>업무 데이터</th>
-            <th style={{ padding: '8px', fontSize: 13, color: 'var(--surface-text)' }}>상태</th>
-            <th style={{ padding: '8px', fontSize: 13, color: 'var(--surface-text)' }}>다음에 할 일</th>
-            <th style={{ padding: '8px', fontSize: 13, color: 'var(--surface-text)' }}>기준시점</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.datasets.map((d) => <DatasetRow key={d.dataset_contract_key} row={d} />)}
-        </tbody>
-      </table>
+      <h3 style={{ fontSize: 16, margin: '0 0 8px' }}>업무기능별 준비도</h3>
+      <div style={{ display: 'grid', gap: 8, marginBottom: 20 }}>
+        {groups.map((group) => {
+          const ready = group.rows.filter((r) => r.state === 'READY').length;
+          const attention = group.rows.length - ready;
+          return (
+            <details key={group.id} data-business-kit={group.id} style={{
+              border: '1px solid var(--surface-border)', borderRadius: 7,
+              background: 'var(--surface-card)',
+            }}>
+              <summary style={{
+                cursor: 'pointer', padding: '10px 12px', display: 'flex', alignItems: 'center',
+                gap: 10, fontSize: 14,
+              }}>
+                <strong style={{ minWidth: 78 }}>{group.id}</strong>
+                <span style={{ flex: 1 }}>{group.name}</span>
+                <span style={{ color: attention ? 'var(--state-warn-fg)' : 'var(--state-success-fg)',
+                  fontSize: 13 }}>
+                  준비 {ready}/{group.rows.length}{attention ? ` · 확인 ${attention}` : ''}
+                </span>
+              </summary>
+              {group.description && (
+                <div style={{ padding: '0 12px 8px', color: 'var(--surface-text-muted)', fontSize: 13 }}>
+                  {group.description}
+                </div>
+              )}
+              <div style={{ overflowX: 'auto', borderTop: '1px solid var(--surface-border)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--surface-border)', textAlign: 'left' }}>
+                      <th style={{ padding: '8px', fontSize: 13 }}>업무 데이터</th>
+                      <th style={{ padding: '8px', fontSize: 13 }}>상태</th>
+                      <th style={{ padding: '8px', fontSize: 13 }}>다음에 할 일</th>
+                      <th style={{ padding: '8px', fontSize: 13 }}>기준시점</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.rows.map((d) => <DatasetRow key={d.dataset_contract_key} row={d} />)}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          );
+        })}
+      </div>
 
       <h3 style={{ fontSize: 16, margin: '0 0 8px' }}>지금 만들 수 있는 것</h3>
       {data.outputs.length === 0 ? (

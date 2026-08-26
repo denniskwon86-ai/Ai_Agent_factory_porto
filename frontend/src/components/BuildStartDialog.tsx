@@ -12,7 +12,7 @@
 // ⚠️ 아직 없는 것을 만들어 넣지 않는다. 설계 §5.2 의 «전체 Workflow Map + 앞으로 생성될
 //   단계·산출물·승인 계약» 은 서버가 그 목록을 주지 않으므로, **무엇이 정해지고 무엇이 아직
 //   정해지지 않았는지**를 적는 데서 멈춘다.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
 
@@ -43,10 +43,21 @@ export function BuildStartDialog({
   const [err, setErr] = useState('');
 
   const idOk = /^[A-Za-z0-9._-]{2,}$/.test(projectId.trim());
+  const selectedTemplate = templates.find((t) => t.template_id === templateId);
+  const selectedTemplateName = selectedTemplate?.pipeline_name || selectedTemplate?.name
+    || '선택한 업무 절차';
+
+  // 템플릿은 화면이 열린 뒤 비동기로 도착할 수 있다. 보이는 첫 옵션과 실제 제출값이
+  // 갈라지지 않도록 현재 값이 목록에 없을 때만 첫 정본 값으로 맞춘다.
+  useEffect(() => {
+    if (templates.length && !templates.some((t) => t.template_id === templateId)) {
+      setTemplateId(templates[0].template_id);
+    }
+  }, [templates, templateId]);
 
   const submit = () => {
     if (!idOk) {
-      setErr('Project ID 는 영문·숫자·`.`·`_`·`-` 로 2자 이상이어야 합니다.');
+      setErr('업무 식별자는 영문·숫자·`.`·`_`·`-` 로 2자 이상이어야 합니다.');
       return;
     }
     onCreate({
@@ -94,7 +105,7 @@ export function BuildStartDialog({
         )}
 
         <div>
-          <span style={label}>Project ID (영문)</span>
+          <span style={label}>업무 식별자 (영문)</span>
           <input style={input} value={projectId} autoFocus
             onChange={(e) => { setProjectId(e.target.value); setErr(''); }}
             placeholder="예: smart-life-app" />
@@ -114,14 +125,14 @@ export function BuildStartDialog({
                 <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>독립 프로젝트</b>
                 <span style={{ display: 'block', fontSize: 12,
                   color: 'var(--surface-text-muted)' }}>
-                  선택한 워크플로우를 따라 단일 목표를 수행합니다 · 추천
+                  선택한 업무 절차를 따라 단일 목표를 수행합니다 · 추천
                 </span>
               </span>
             </button>
             <button style={option(isMega)} onClick={() => setIsMega(true)}>
               <span style={{ fontSize: 20 }}>🌟</span>
               <span>
-                <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>메가 프로젝트</b>
+                <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>통합 프로젝트</b>
                 <span style={{ display: 'block', fontSize: 12,
                   color: 'var(--surface-text-muted)' }}>
                   여러 프로젝트를 묶어 상위 목표로 운영합니다
@@ -132,7 +143,7 @@ export function BuildStartDialog({
         </div>
 
         <div>
-          <span style={label}>워크플로우 템플릿</span>
+          <span style={label}>업무 진행 절차</span>
           <select style={input} value={templateId}
             onChange={(e) => setTemplateId(e.target.value)}>
             {(templates || []).map((t) => (
@@ -142,7 +153,7 @@ export function BuildStartDialog({
             ))}
           </select>
           <p style={{ fontSize: 12, marginTop: 6, color: 'var(--surface-text-muted)' }}>
-            어떤 에이전트가 어떤 순서로 일하고 어디서 사람이 확인하는지가 여기서 정해집니다.
+            어떤 역할이 어떤 순서로 일하고 어디서 사람이 확인하는지가 여기서 정해집니다.
           </p>
         </div>
 
@@ -178,12 +189,12 @@ export function BuildStartDialog({
         </div>
 
         <div>
-          <span style={label}>기준정보 도메인 (선택)</span>
+          <span style={label}>연결할 기준정보 분야 (선택)</span>
           <input style={input} value={masterDomains}
             onChange={(e) => setMasterDomains(e.target.value)}
             placeholder="콤마 구분 · 예: manufacturing, logistics" />
           <p style={{ fontSize: 12, marginTop: 6, color: 'var(--surface-text-muted)' }}>
-            해당 도메인의 골든 레코드가 모든 산출물에 확정 주입됩니다.
+            선택한 분야의 승인된 기준정보가 모든 산출물에 일관되게 반영됩니다.
           </p>
         </div>
 
@@ -191,9 +202,9 @@ export function BuildStartDialog({
           <input type="checkbox" checked={mcp} onChange={(e) => setMcp(e.target.checked)}
             style={{ marginTop: 3 }} />
           <span>
-            <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>외부 실측값(MCP) 병기</b>
+            <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>외부 연계 실측값 함께 보기</b>
             <span style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
-              활성 연계 시스템의 실측값을 산출물에 참고로 붙입니다 — 지연·쿼터가 늘어납니다.
+              활성 연계 시스템의 실측값을 산출물에 참고로 붙입니다 — 처리 시간과 호출 한도가 늘어납니다.
             </span>
           </span>
         </label>
@@ -206,9 +217,8 @@ export function BuildStartDialog({
           </div>
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, lineHeight: 1.7,
             color: 'var(--surface-text-muted)' }}>
-            <li>유형 — {isMega ? '메가 프로젝트' : '독립 프로젝트'}</li>
-            <li>워크플로우 — {templates.find((t) => t.template_id === templateId)?.pipeline_name
-              || templateId}</li>
+            <li>유형 — {isMega ? '통합 프로젝트' : '독립 프로젝트'}</li>
+            <li>업무 절차 — {selectedTemplateName}</li>
             <li>지식팩 — {packIds.length ? `${packIds.length}개 연결` : '연결 없음'}</li>
             <li>기준정보 — {masterDomains.trim() || '지정 없음'}</li>
           </ul>
@@ -223,13 +233,15 @@ export function BuildStartDialog({
             ★ `submit()` 안의 `setErr(...)` 는 도달하지 못하는 코드였다 — 버튼이 죽어 있으면
               `submit` 자체가 불리지 않는다. 그래서 안내는 **여기서** 한다. */}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end',
-          alignItems: 'center', flexWrap: 'wrap' }}>
+          alignItems: 'center', flexWrap: 'wrap', position: 'sticky', bottom: 0, zIndex: 2,
+          margin: '0 -2px -2px', padding: '12px 2px 2px',
+          borderTop: '1px solid var(--surface-border)', background: 'var(--surface-page)' }}>
           {!idOk && (
             <span style={{ fontSize: 12.5, color: 'var(--surface-text-muted)',
               marginRight: 'auto' }}>
               {!projectId.trim()
-                ? '맨 위 Project ID 를 입력하면 «이 조건으로 만들기» 가 켜집니다.'
-                : 'Project ID 는 영문·숫자·`.`·`_`·`-` 로 2자 이상이어야 합니다 — '
+                ? '맨 위 업무 식별자를 입력하면 «이 조건으로 만들기»가 켜집니다.'
+                : '업무 식별자는 영문·숫자·`.`·`_`·`-` 로 2자 이상이어야 합니다 — '
                   + '지금 값으로는 만들 수 없습니다.'}
             </span>
           )}
@@ -239,7 +251,7 @@ export function BuildStartDialog({
             background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
           }}>취소</button>
           <button onClick={submit} disabled={!idOk}
-            title={idOk ? '' : 'Project ID 를 입력해야 만들 수 있습니다.'} style={{
+            title={idOk ? '' : '업무 식별자를 입력해야 만들 수 있습니다.'} style={{
             height: 46, padding: '0 22px', fontSize: 14, fontWeight: 700, borderRadius: 6,
             cursor: idOk ? 'pointer' : 'not-allowed', opacity: idOk ? 1 : .55,
             border: '1px solid var(--ls-navy)',

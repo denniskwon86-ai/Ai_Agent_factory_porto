@@ -592,6 +592,13 @@ def _require_approval_authority(actor_id: str) -> None:
             f"(정본은 승인권 있음, 확정 결과는 없음) — 임의로 고르지 않습니다.")
 
 
+def require_approval_authority(actor_id: str) -> None:
+    """공개 이름. ★ 다른 모듈이 **같은 질문**("데이터 표준을 승인할 수 있는가")을 할 때
+    규칙을 복제하지 않도록 연다 — 복제하면 두 판정이 갈라지고, 갈린 날 어느 쪽이 옳은지
+    아무도 모른다(`core.kit_app_contract.approve` 가 쓴다)."""
+    _require_approval_authority(actor_id)
+
+
 def approve(*, tenant_id: str, entity_mode: str, dataset_contract_key: str,
             scope_node_id: str, owner_dept_id: str, actor_id: str,
             evidence_ref: str, effective_from: str = "", effective_to: str = "",

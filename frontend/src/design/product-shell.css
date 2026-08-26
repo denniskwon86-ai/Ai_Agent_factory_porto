@@ -24,7 +24,9 @@
   --afs-font: Pretendard, "Noto Sans KR", "Segoe UI", Arial, sans-serif;
 }
 
-html, body { min-width: 1240px !important; }
+/* 제품 셸이 필요한 최소 폭을 로그인·오류 화면까지 전역으로 강제하지 않는다.
+ * 전역 `html, body` 규칙은 1240px 미만 창에서 로그인 화면을 잘라 놓고 가로 스크롤을
+ * 만들었다. 넓은 업무 캔버스의 계약은 셸 자신이 지고, 셸이 없는 진입 화면은 반응형으로 둔다. */
 
 /* ★★★ [2026-08-25 사용자 요청] **글씨를 전반적으로 살짝 키운다.**
  *
@@ -37,12 +39,25 @@ html { font-size: 17px; }
 .afs-product-shell {
   position: sticky;
   top: 0;
+  /* ★★★ 층 순서 — 이 숫자는 **혼자 정할 수 없다.**
+   *
+   *     .afs-dialog-backdrop   11000   전체화면 작업공간(대화상자) — 셸보다 위
+   *     .afs-product-shell     10000   ← 여기
+   *     본문 · 캔버스           0~10
+   *
+   * ⚠️⚠️ [2026-08-25 실측] 시안에서 이 셸을 옮겨 오면서 `z-index:10000` 을 함께 가져왔다.
+   *   그때 대화상자는 `z-index:60` 이었다 — 즉 **셸이 모든 대화상자의 위쪽을 덮었다.**
+   *   사용자 지적: 「각 페이지의 상단 영역이 겹쳐서 짤리고 닫기 버튼이 5분의1만 보인다」.
+   *   화면을 나갈 방법이 사라지는 것이라 단순한 미관 문제가 아니다.
+   * ★ 이 값을 올릴 때는 `afs.css` 의 `.afs-dialog-backdrop` 도 함께 올린다.
+   *   `tests/test_ui_layer_order.py` 가 그 순서를 지킨다. */
   z-index: 10000;
   display: grid;
   grid-template-columns: 210px 270px minmax(520px, 1fr) auto;
   align-items: stretch;
   gap: 12px;
   width: 100%;
+  min-width: 1240px;
   height: 74px;
   padding: 0 20px;
   color: #fff;
@@ -66,25 +81,31 @@ html { font-size: 17px; }
 }
 
 .afs-brand-mark {
-  display: grid;
-  place-items: center;
+  display: block;
   flex: 0 0 auto;
   width: 34px;
   height: 34px;
+  object-fit: contain;
   border-radius: 8px;
-  color: #fff;
-  background: var(--afs-accent);
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 950;
-  letter-spacing: -.04em;
+  border: 1px solid rgba(255, 255, 255, .34);
+  background: transparent;
+}
+
+/* 확정 브랜드 기본형(B안) — 남색 바에서는 흰 L/S, 붉은 AX, 황색 흐름이 한 덩어리로 보인다. */
+.afs-brand-logo {
+  display: block;
+  flex: 0 0 auto;
+  width: 92px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 4px;
 }
 
 .afs-brand-copy { min-width: 0; }
 .afs-brand-copy b,
 .afs-brand-copy small { display: block; }
 .afs-brand-copy b { font-size: 15px; letter-spacing: -.02em; white-space: nowrap; }
-.afs-brand-copy small { margin-top: 3px; color: #aebee0; font-size: 10px; font-weight: 750; letter-spacing: .09em; }
+.afs-brand-copy small { margin-top: 3px; color: #aebee0; font-size: 9px; font-weight: 700; letter-spacing: 0; white-space: nowrap; }
 
 .afs-context {
   display: grid;
@@ -107,9 +128,9 @@ button.afs-context { cursor: pointer; font-family: inherit; }
 .afs-context-copy { min-width: 0; }
 .afs-context-copy small,
 .afs-context-copy b { display: block; }
-.afs-context-copy small { color: #9eb0d1; font-size: 9px; font-weight: 850; letter-spacing: .08em; }
-.afs-context-copy b { margin-top: 3px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.afs-context-mode { padding: 3px 6px; border-radius: 10px; color: #b6f4ea; background: rgba(11, 141, 130, .23); font-size: 9px; font-weight: 900; }
+.afs-context-copy small { color: #9eb0d1; font-size: 10px; font-weight: 850; letter-spacing: .08em; }
+.afs-context-copy b { margin-top: 3px; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.afs-context-mode { padding: 3px 6px; border-radius: 10px; color: #b6f4ea; background: rgba(11, 141, 130, .23); font-size: 10px; font-weight: 900; }
 
 .afs-global-nav { display: flex; align-items: stretch; justify-content: center; min-width: 0; }
 .afs-global-nav a,
@@ -134,7 +155,7 @@ button.afs-context { cursor: pointer; font-family: inherit; }
 .afs-global-nav .active::after { position: absolute; right: 20%; bottom: 0; left: 20%; height: 3px; border-radius: 3px 3px 0 0; background: var(--afs-accent); content: ""; }
 
 .afs-shell-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; white-space: nowrap; }
-.afs-sample-badge { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 1px solid rgba(255, 208, 91, .42); border-radius: 5px; color: #ffdf86; background: rgba(255, 208, 91, .08); font-size: 9px; font-weight: 900; letter-spacing: .06em; }
+.afs-sample-badge { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 1px solid rgba(255, 208, 91, .42); border-radius: 5px; color: #ffdf86; background: rgba(255, 208, 91, .08); font-size: 10px; font-weight: 900; letter-spacing: .06em; }
 .afs-icon-action,
 .afs-primary-action { display: inline-flex; align-items: center; justify-content: center; height: 38px; border-radius: 5px; font: 800 12px var(--afs-font); text-decoration: none; }
 .afs-icon-action { width: 38px; border: 1px solid rgba(255, 255, 255, .24); color: #dbe3f3; background: rgba(255, 255, 255, .05); }
@@ -252,11 +273,11 @@ body > main.product .workspace { grid-template-columns: 252px minmax(680px, 1fr)
 .afs-scope .afs-product-shell .afs-icon-action,
 .afs-scope .afs-product-shell .afs-primary-action { font: 800 13px var(--afs-font); }
 .afs-scope .afs-product-shell .afs-global-nav a,
-.afs-scope .afs-product-shell .afs-global-nav button { font-size: 12px; }
+.afs-scope .afs-product-shell .afs-global-nav button { font-size: 13px; }
 @media (max-width: 1280px) {
   .afs-scope .afs-product-shell .afs-primary-action { font-size: 12px; }
   .afs-scope .afs-product-shell .afs-global-nav a,
-  .afs-scope .afs-product-shell .afs-global-nav button { font-size: 11px; }
+  .afs-scope .afs-product-shell .afs-global-nav button { font-size: 12px; }
 }
 
 /* ★★★ [2026-08-25] **이름을 갈라놓았다 — `.afs-product-shell` → `.afs-palette`.**
@@ -274,6 +295,7 @@ body > main.product .workspace { grid-template-columns: 252px minmax(680px, 1fr)
  *   쓰는 팔레트 범위다. 한 이름에 둘을 담으면 반드시 한쪽이 다른 쪽을 덮는다.
  * ⚠️ 쓰는 곳은 `GlobalNav.tsx` 하나다(실측). 그 한 곳만 함께 고쳤다.
  */
+/* ─────────────────────────────────────────────────────────────────────────
    여기부터 앱에서 더한 것 — 시안에 없는 화면(전체 메뉴 등)
    ───────────────────────────────────────────────────────────────────────── */
 /*

@@ -23,6 +23,7 @@ from core.data_preparation import models as m
 
 #: 키트 문서가 있는 곳(저장소 기준 절대경로).
 KITS_DIRNAME = os.path.join("docs", "data-kits")
+STARTER_PACKAGES_DIRNAME = "starter_kits"
 
 #: 기계 Profile 파일 이름. 문서 옆에 두고, **없으면 등록하지 않는다.**
 #: ⚠️ 사람이 읽는 문서만으로 등록하면 필드 목록을 사람이 옮겨 적게 되고, 옮겨 적는
@@ -53,6 +54,73 @@ class LoadedKit(NamedTuple):
 def kits_dir() -> str:
     from core.paths import PROJECT_ROOT
     return os.path.join(PROJECT_ROOT, KITS_DIRNAME)
+
+
+def starter_package_catalog(directory: str = "") -> List[Dict[str, Any]]:
+    """샘플 기업 Starter Package 카탈로그를 읽는다 — 운영 등록과 분리한다.
+
+    `docs/data-kits` 의 Profile은 조직에 적용할 운영 템플릿이고, `starter_kits` 는
+    샘플 기업·합성 데이터·앱·보고서를 묶은 체험 패키지다. 둘을 한 목록으로 그리면 옛
+    9개 데이터셋 Profile이 두 번째 샘플 회사처럼 보인다. 준비 중 패키지는 등록하지 않되
+    카탈로그에는 남겨 전체 모수와 상태를 숨기지 않는다.
+    """
+    import json
+    from core.paths import PROJECT_ROOT
+
+    root = directory or os.path.join(PROJECT_ROOT, STARTER_PACKAGES_DIRNAME)
+    if not os.path.isdir(root):
+        return []
+    out: List[Dict[str, Any]] = []
+    for kit_id in sorted(os.listdir(root)):
+        kit_root = os.path.join(root, kit_id)
+        if not os.path.isdir(kit_root):
+            continue
+        for version in sorted(os.listdir(kit_root)):
+            manifest_path = os.path.join(kit_root, version, "manifest.json")
+            if not os.path.isfile(manifest_path):
+                continue
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
+            except Exception as e:
+                raise KitLoadError(
+                    f"{kit_id}/{version} 샘플 패키지 manifest 를 읽을 수 없습니다: "
+                    f"{str(e)[:120]}")
+            if not isinstance(manifest, dict):
+                raise KitLoadError(f"{kit_id}/{version} manifest 최상위가 객체가 아닙니다.")
+            manifest_id = str(manifest.get("kit_id") or "").strip()
+            manifest_version = str(manifest.get("version") or "").strip()
+            if manifest_id != kit_id or manifest_version != version:
+                raise KitLoadError(
+                    f"{kit_id}/{version} 경로와 manifest 정체성이 일치하지 않습니다.")
+            raw_status = str(manifest.get("status") or "").strip()
+            available = raw_status == "VALIDATED_FOR_DEMO"
+            datasets = manifest.get("datasets")
+            apps = manifest.get("app_blueprints")
+            reports = manifest.get("report_templates") or manifest.get("reports")
+            from core.data_preparation.business_kits import represented_business_kits
+            dataset_keys = [str(d.get("dataset_contract_key") or d.get("dataset_id") or "")
+                            for d in datasets if isinstance(d, dict)] \
+                if isinstance(datasets, list) else []
+            out.append({
+                "kit_id": kit_id,
+                "version": version,
+                "name": str(manifest.get("company_name") or kit_id).strip(),
+                "description": str(manifest.get("industry")
+                                   or manifest.get("primary_use_case") or "").strip(),
+                "data_kind": "DEMO/SYNTHETIC",
+                "catalog_status": "AVAILABLE_FOR_DEMO" if available else "PREPARING",
+                "selectable": available,
+                "dataset_count": len(datasets) if isinstance(datasets, list)
+                    else int(manifest.get("dataset_count") or 0),
+                "app_count": len(apps) if isinstance(apps, list) else 0,
+                "report_count": len(reports) if isinstance(reports, list) else 0,
+                # 준비 중 패키지의 `dataset_count` 숫자만으로 업무기능이 구현됐다고 말하지
+                # 않는다. 실제 데이터 계약 목록이 있는 판에서만 센다.
+                "business_kit_count": len(represented_business_kits(dataset_keys)),
+            })
+    # 지금 바로 쓸 수 있는 패키지를 먼저. 준비 중 자산이 첫 선택처럼 보이면 첫 클릭부터 막힌다.
+    return sorted(out, key=lambda row: (not bool(row["selectable"]), row["name"]))
 
 
 def file_fingerprint(path: str) -> str:

@@ -46,6 +46,9 @@ export async function issueAppProof(releaseId: string): Promise<string> {
 export interface AppRecords {
   records: Record<string, unknown>[];
   total: number;
+  /** 앱에 공개 가능한 판 정보. 내부 Snapshot/Binding ID는 의도적으로 공개하지 않는다. */
+  as_of: string;
+  stale: boolean;
 }
 
 /**
@@ -63,5 +66,10 @@ export async function readAppRecords(
   if (!res.ok) throw new Error(`«${name}» 을(를) 읽지 못했습니다 (${res.status})`);
   const body = await res.json();
   const d = (body && typeof body === 'object' && 'data' in body) ? body.data : body;
-  return { records: d.records || [], total: Number(d.total ?? (d.records || []).length) };
+  return {
+    records: d.records || [],
+    total: Number(d.total ?? (d.records || []).length),
+    as_of: String(d.as_of || ''),
+    stale: Boolean(d.stale),
+  };
 }

@@ -119,7 +119,15 @@ function Metrics({ result }: { result: CalcResult }) {
 export function PathCalcPanel({ onClose }: { onClose: () => void }) {
   const [instances, setInstances] = useState<any[] | null>(null);
   const [instanceId, setInstanceId] = useState('');
-  const [asOf, setAsOf] = useState('2026-06-01');
+  // ★ 기준시점은 데모 날짜를 코드에 박지 않는다. 관계 승인은 벽시계 시각부터 유효한데
+  // `type=date`의 00:00 UTC로 묻으면 오늘 오후에 승인한 관계도 «없음»으로 보인다.
+  // 현지시각을 분 단위로 받아 실제 순간으로 바꿔 서버에 보낸다.
+  const [asOf, setAsOf] = useState(() => {
+    const now = new Date();
+    const n = (v: number) => String(v).padStart(2, '0');
+    return `${now.getFullYear()}-${n(now.getMonth() + 1)}-${n(now.getDate())}`
+      + `T${n(now.getHours())}:${n(now.getMinutes())}`;
+  });
   const [objects, setObjects] = useState<OntologyObject[] | null>(null);
   const [types, setTypes] = useState<string[]>([]);
   const [truncated, setTruncated] = useState(false);
@@ -156,7 +164,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
         e?.message || '키트 인스턴스 목록을 불러오지 못했습니다.', e?.status ?? 0)));
   }, []);
 
-  const instant = `${asOf}T00:00:00+00:00`;
+  const instant = asOf ? new Date(asOf).toISOString() : '';
 
   const loadObjects = useCallback(async () => {
     const seq = ++reqRef.current;
@@ -332,9 +340,9 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
-                기준시점
+                기준시점(현지시각)
               </label>
-              <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)}
+              <input type="datetime-local" value={asOf} onChange={(e) => setAsOf(e.target.value)}
                 style={{ padding: 6, fontSize: 14 }} />
             </div>
           </div>

@@ -191,7 +191,15 @@ async def list_kits(p: Principal = Depends(current_principal)):
         #: ⚠️ 깨진 키트는 **조용히 건너뛰지 않는다.** 건너뛰면 「키트가 없다」와
         #:   「키트가 깨졌다」가 같은 화면이 된다.
         raise HTTPException(status_code=503, detail=f"키트를 읽을 수 없습니다: {e}")
-    return {"status": "success", "data": {"kits": store.list_kit_versions()}}
+    try:
+        packages = kit_registry.starter_package_catalog()
+    except m.DataPreparationError as e:
+        raise HTTPException(status_code=503, detail=f"샘플 패키지 카탈로그를 읽을 수 없습니다: {e}")
+    return {"status": "success", "data": {
+        # `kits` 는 조직 적용용 운영 템플릿. `starter_packages` 와 섞지 않는다.
+        "kits": store.list_kit_versions(),
+        "starter_packages": packages,
+    }}
 
 
 @router.get("/kits/{kit_id}/versions/{version}")
@@ -813,8 +821,12 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
     #: ★ 이름을 함께 싣는다 — 화면이 `material_arrivals` 를 그대로 사람에게 보여
     #:   주지 않도록. 이름은 계약과 함께 살아야 화면마다 달라지지 않는다.
     labels = kit_registry.dataset_labels(profile)
-    datasets = [{**d, **labels.get(str(d.get("dataset_contract_key", "")), {})}
-                for d in (result.get("datasets") or [])]
+    from core.data_preparation.business_kits import classify_dataset
+    datasets = [
+        {**d, **labels.get(str(d.get("dataset_contract_key", "")), {}),
+         **classify_dataset(str(d.get("dataset_contract_key", "")))}
+        for d in (result.get("datasets") or [])
+    ]
     return {"status": "success",
             "data": {**result, "datasets": datasets,
                      "kit_id": inst["kit_id"], "version": inst["version"],

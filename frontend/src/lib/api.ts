@@ -74,6 +74,14 @@ export function setSessionToken(token: string) {
   } catch {
     // localStorage 가 막힌 환경에서도 동작은 계속돼야 한다
   }
+  // App 은 로그인 화면에서도 마운트돼 있다. 따라서 `useEffect([])` 로 회사·사용자 정보를
+  // 읽으면 로그인 전 401 결과가 그대로 굳는다. 토큰 변경을 명시적으로 알리고, 표시용
+  // 문맥을 로그인 직후 다시 읽게 한다.
+  try {
+    window.dispatchEvent(new CustomEvent('factory:session-changed'));
+  } catch {
+    // 브라우저 밖의 시험 환경에서는 저장 자체만 성공하면 된다.
+  }
 }
 
 let actingUser: string =

@@ -39,20 +39,26 @@ import {
   getReadiness as getCalcReadiness,
   type Gate as CalcGate, type Readiness as CalcReadiness,
 } from '../lib/calculationApi';
-import { listProfiles, type ThreadNode } from '../lib/companyApi';
+import {
+  DEFAULT_THREAD_OVERLAY_BY_NODE, listProfiles, type ThreadNode, type ThreadOverlay,
+  type ThreadOverlayLayer,
+} from '../lib/companyApi';
 import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
 import '../design/enterprise-canvas.css';
 import { ServerText } from '../design/ServerText';
 import { fetchCanvas, type Canvas } from '../lib/canvasApi';
 import { fetchScopeNodes, labelForScope, type ScopeNode } from '../lib/scopeLabel';
+import {
+  actingScope, governanceBlockReason, UNKNOWN_SCOPE, type ActingScope,
+} from '../lib/actingScope';
 
 /** §4.2 상태. **색만으로 전달하지 않는다**(§2.1) — 낱말을 함께 싣는다. */
 
 type QueueRow = BriefingItem & { section: string };
 
 /** §4.5 LayerOverlay — DATA·SW·TWIN. **모두 끄는 것도 허용한다.** */
-type Layer = 'DATA' | 'SW' | 'TWIN';
+type Layer = ThreadOverlayLayer;
 //: ⚠️ [설계 §9.1 WCAG AA] **브랜드 원색을 그대로 쓰면 안 된다.** 이 칩은 켜졌을 때 색 면
 //  위에 흰 글자를 얹고, 꺼졌을 때는 그 색을 글자로 쓴다. 원색은 흰색 대비가 cyan 3.31 ·
 //  orange 3.12 로 둘 다 4.5:1 에 못 미친다(실측으로 잡았다). 면·글자 모두 어두운 변형을 쓴다 —
@@ -62,20 +68,6 @@ const NODE_STATUS_KO: Record<string, string> = {
   normal: '정상', attention: '확인 필요', decision_required: '결정 필요',
   blocked: '막힘', unknown: '확인 못 함',
 };
-
-/** §4.5 레이어 오버레이 — 각 층이 **무엇을 덮는가.**
- *
- *  ⚠️ 시안은 여기에 개별 자산(「판매계획 v12 · 승인」)을 적었다. 그러려면 노드별 자산
- *    귀속이 있어야 하는데 아직 없다 — **없는 것을 적지 않는다.** 층이 덮는 범위만 적고,
- *    자산이 붙는 날 이 상수가 자리를 물려준다. */
-const OVERLAY: { key: string; layer: Layer; tone: string; kicker: string; body: string }[] = [
-  { key: 'contract', layer: 'DATA', tone: 'data', kicker: 'DATA CONTRACT',
-    body: '인증판·데이터 계약' },
-  { key: 'app', layer: 'SW', tone: 'sw', kicker: '현업 생성 SW', body: '업무 키트 산출물 앱' },
-  { key: 'project', layer: 'SW', tone: 'sw', kicker: '현업 생성 SW', body: 'Software Factory 프로젝트' },
-  { key: 'live', layer: 'DATA', tone: 'data', kicker: 'LIVE SYSTEM', body: '연계 시스템 이벤트' },
-  { key: 'twin', layer: 'TWIN', tone: 'twin', kicker: 'DIGITAL TWIN', body: '시나리오·기준선' },
-];
 
 /** §5.1 Decision Focus 의 영향 4칸.
  *
@@ -104,12 +96,12 @@ const IMPACT_SLOTS: { label: string; tone: string }[] = [
 ];
 
 const LAYERS: { id: Layer; label: string; desc: string; color: string }[] = [
-  { id: 'DATA', label: 'DATA', desc: '자산·Master·지식팩·외부지표·최신성',
-    color: 'var(--ls-cyan-fg)' },
-  { id: 'SW', label: 'SW', desc: '프로젝트·릴리스·운영 상태·담당 Agent',
-    color: 'var(--ls-orange-fg)' },
-  { id: 'TWIN', label: 'TWIN', desc: '시나리오·기준선·영향·Backtest',
-    color: 'var(--ls-green-fg)' },
+  { id: 'DATA', label: 'DATA 근거', desc: '업무가 참조하는 인증 데이터·계약·현장 이벤트',
+    color: 'var(--cyan)' },
+  { id: 'SW', label: 'SW 도구', desc: '업무를 실행하는 현업 앱·프로젝트·릴리스',
+    color: 'var(--ls-red)' },
+  { id: 'TWIN', label: 'TWIN 예측', desc: '변화의 영향을 비교하는 기준선·시나리오·Backtest',
+    color: 'var(--warm)' },
 ];
 
 /** §4.6 TrustFoundationStrip 의 카드 4종. 설계가 지정한 이름·핵심 정보·경고 그대로. */
@@ -118,7 +110,7 @@ type TrustCard = {
   /** ★ KPI 가 쓰는 숫자. **카드와 KPI 가 같은 조회를 두 번 하지 않게** 여기 남긴다.
    *  ⚠️ `null` = 아직/못 읽음. 0 으로 채우면 「없다」와 「모른다」가 같아진다. */
   n?: number | null;
-  state: 'loading' | 'ok' | 'warn' | 'error';
+  state: 'loading' | 'ok' | 'warn' | 'error' | 'blocked';
   headline: string;      // 상태의 완전성 — 숫자보다 먼저
   detail: string;        // 핵심 정보
   warn?: string;         // 설계가 지정한 경고
@@ -151,6 +143,23 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   const [nodes, setNodes] = useState<Dept[]>([]);
   const [nodeNote, setNodeNote] = useState('');
   const [trust, setTrust] = useState<TrustCard[]>([]);
+  //: ★ Trust Foundation 중 운영 연결·외부지표는 거버넌스 권한이 필요한 조회다.
+  //: ⚠️ 권한 밖인 사용자에게 일단 요청을 보내 403을 받은 뒤 오류 카드로 바꾸면,
+  //:   정상적인 권한 경계가 화면에서는 제품 장애로 보인다. 서버가 준 자격을 먼저 읽고
+  //:   권한 밖이면 요청 자체를 보내지 않는다. 판정 규칙은 `actingScope` 한 곳만 쓴다.
+  const [trustScope, setTrustScope] = useState<ActingScope | null>(actingScope.peek());
+  const [trustScopeSettled, setTrustScopeSettled] = useState(Boolean(actingScope.peek()));
+  useEffect(() => {
+    let alive = true;
+    const apply = (s: ActingScope) => {
+      if (!alive) return;
+      setTrustScope(s);
+      setTrustScopeSettled(true);
+    };
+    actingScope.load().then(apply).catch(() => apply(UNKNOWN_SCOPE));
+    const unsubscribe = actingScope.subscribe(apply);
+    return () => { alive = false; unsubscribe(); };
+  }, []);
   //: §5.1 Decision Drawer — 안건 하나를 끝까지 처리하는 자리(520px).
   const [drawer, setDrawer] = useState<QueueRow | null>(null);
   //: ★★★ [로드맵 §4.2] Javis 가 「필요한 데이터셋과 누락 항목을 선제안」하려면 준비도를
@@ -171,18 +180,41 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   //: ★ 승인된 것만 쓴다(`is_effective`). 초안으로 그리면 검토 전 구성이 화면에 뜬다.
   //: ⚠️ 없으면 조직 트리로 되돌아가고, **그 사실을 화면에 적는다**(아래 `threadNote`).
   const [thread, setThread] = useState<ThreadNode[] | null>(null);
+  const [threadState, setThreadState] = useState<'loading' | 'configured' | 'fallback' | 'error'>('loading');
+  const [threadRevision, setThreadRevision] = useState(0);
+  useEffect(() => {
+    const refresh = () => setThreadRevision((v) => v + 1);
+    window.addEventListener('factory:enterprise-context-changed', refresh);
+    window.addEventListener('factory:company-configuration-changed', refresh);
+    return () => {
+      window.removeEventListener('factory:enterprise-context-changed', refresh);
+      window.removeEventListener('factory:company-configuration-changed', refresh);
+    };
+  }, []);
   useEffect(() => {
     let alive = true;
+    setThreadState('loading');
     const scope = (getEnterpriseContext().scopeNodeId || '').trim();
-    listProfiles(scope, 'process_profile')
+    (async () => {
+      // 조직별 승인 구성이 있으면 그것을 쓰고, 없으면 회사 전체 승인 구성으로 내려간다.
+      // 빈 scope 조회를 「전체 프로필」로 쓰지 않는다 — company_wide가 저장 경계를 못박는다.
+      const scoped = scope ? await listProfiles(scope, 'process_profile') : [];
+      const scopedEffective = scoped.find((r) => r.is_effective) || null;
+      const rows = scopedEffective
+        ? [scopedEffective]
+        : await listProfiles('', 'process_profile', true);
+      return rows;
+    })()
       .then((rows) => {
         if (!alive) return;
         const eff = rows.find((r) => r.is_effective);
-        setThread(eff?.payload?.nodes?.length ? eff.payload.nodes : null);
+        const configured = eff?.payload?.nodes?.length ? eff.payload.nodes : null;
+        setThread(configured);
+        setThreadState(configured ? 'configured' : 'fallback');
       })
-      .catch(() => { /* 못 읽으면 조직 트리로 되돌아간다 — 아래에서 그 사실을 적는다 */ });
+      .catch(() => { if (alive) { setThread(null); setThreadState('error'); } });
     return () => { alive = false; };
-  }, []);
+  }, [threadRevision]);
 
   const load = useCallback(async () => {
     setData(loading<Briefing>());
@@ -258,20 +290,6 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
       .catch(() => put('mdm', { state: 'error', headline: '확인하지 못했습니다',
         detail: '0 건이 아니라 조회 실패입니다' }));
 
-    j('/api/v1/crosswalk/systems/coverage')
-      .then((r) => {
-        const d = r.data || {};
-        const un = Number(d.unscoped || 0);
-        put('ops', {
-          state: un > 0 ? 'warn' : 'ok',
-          n: d.total ?? null,
-          headline: `연결 시스템 ${d.total ?? 0}개`,
-          detail: `범위 지정 ${d.scoped ?? 0} · 미지정 ${un}`,
-          warn: un > 0 ? '범위 미지정 시스템이 있습니다 — 모든 조직에 노출됩니다.' : '',
-        });
-      })
-      .catch(() => put('ops', { state: 'error', headline: '확인하지 못했습니다', detail: '' }));
-
     j('/api/v1/knowledge/packs')
       .then((r) => {
         const packs = r.data || [];
@@ -281,21 +299,45 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
       })
       .catch(() => put('knowledge', { state: 'error', headline: '확인하지 못했습니다', detail: '' }));
 
-    j('/api/v1/external/readiness')
-      .then((r) => {
-        const d = r.data || {};
-        const blocked = Number(d.blocked || 0);
-        put('external', {
-          state: blocked > 0 ? 'warn' : 'ok',
-          headline: `지표 ${d.total ?? 0}개 중 사용 가능 ${d.usable_for_baseline ?? 0}개`,
-          detail: 'vintage·지연 확인 필요',
-          warn: blocked > 0 ? `${blocked}개가 기준선 사용 차단 상태입니다.` : '',
-        });
-      })
-      .catch(() => put('external', { state: 'error', headline: '확인하지 못했습니다', detail: '' }));
+    if (trustScopeSettled) {
+      const blockedReason = governanceBlockReason(trustScope);
+      if (blockedReason) {
+        const blocked = { state: 'blocked' as const, n: null,
+          headline: '권한 범위에서 제외', detail: blockedReason };
+        put('ops', blocked);
+        put('external', blocked);
+      } else {
+        j('/api/v1/crosswalk/systems/coverage')
+          .then((r) => {
+            const d = r.data || {};
+            const un = Number(d.unscoped || 0);
+            put('ops', {
+              state: un > 0 ? 'warn' : 'ok',
+              n: d.total ?? null,
+              headline: `연결 시스템 ${d.total ?? 0}개`,
+              detail: `범위 지정 ${d.scoped ?? 0} · 미지정 ${un}`,
+              warn: un > 0 ? '범위 미지정 시스템이 있습니다 — 모든 조직에 노출됩니다.' : '',
+            });
+          })
+          .catch(() => put('ops', { state: 'error', headline: '확인하지 못했습니다', detail: '' }));
+
+        j('/api/v1/external/readiness')
+          .then((r) => {
+            const d = r.data || {};
+            const blocked = Number(d.blocked || 0);
+            put('external', {
+              state: blocked > 0 ? 'warn' : 'ok',
+              headline: `지표 ${d.total ?? 0}개 중 사용 가능 ${d.usable_for_baseline ?? 0}개`,
+              detail: 'vintage·지연 확인 필요',
+              warn: blocked > 0 ? `${blocked}개가 기준선 사용 차단 상태입니다.` : '',
+            });
+          })
+          .catch(() => put('external', { state: 'error', headline: '확인하지 못했습니다', detail: '' }));
+      }
+    }
 
     return () => { alive = false; };
-  }, []);
+  }, [trustScope, trustScopeSettled]);
 
   const d = data.value;
 
@@ -433,6 +475,25 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
   //: ★ 지금 초점이 무엇인가를 **한 곳**에서 만든다 — 가운데 패널과 비서가 같은 말을 해야 한다.
   const focusLabel = pickedStep ? pickedStep.label
     : (focus ? (SECTION_KO[focus.section] || focus.section) : '');
+  const processKeys = thread?.map((n) => n.key)
+    || canvas?.domain_nodes?.map((n) => n.id) || [];
+  const processCount = Math.max(1, processKeys.length);
+  //: ★ 보조정보는 업무 노드와 **같은 프로필·같은 열**에 산다. 종전에는 고정 상수 다섯을
+  //:   단계 수에 맞춰 비율 배치해 회사가 단계를 바꾸면 엉뚱한 노드 아래로 이동했다.
+  //: ⚠️ `null` 은 «그 단계에 등록된 카드가 없음»이다. 칸 자체를 없애면 사용자는 카드가
+  //:   없는 것과 화면이 정렬을 놓친 것을 구분할 수 없다.
+  const overlaySlots: (ThreadOverlay | null)[] = processKeys.map((key, index) => {
+    if (thread) {
+      const node = thread[index];
+      if (node && Object.prototype.hasOwnProperty.call(node, 'overlay')) {
+        return node.overlay || null;
+      }
+      // 옛 승인 프로필에는 `overlay` 필드가 없다. 그 경우에만 제품 기본값을 한 번 승계한다.
+      // 새 판에서 사용자가 카드를 삭제해 `null`로 저장하면 이 기본값은 되살아나지 않는다.
+      return DEFAULT_THREAD_OVERLAY_BY_NODE[key] || null;
+    }
+    return DEFAULT_THREAD_OVERLAY_BY_NODE[key] || null;
+  });
 
   return (
     /* ★★★ 승인 시안(`uiux-prototypes/master-concept/index.html`, 2026-07-30 채택)의
@@ -510,12 +571,15 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
               <h2>업무·데이터·AI가 하나의 경영 결과로 이어집니다.</h2>
             </div>
             {/* §4.5 LayerOverlay — 모두 끄는 것도 허용한다 */}
-            <div className="view-switch">
+            <div className="view-switch" role="group"
+              aria-label="업무 흐름 위에 표시할 보조 정보 레이어">
               {LAYERS.map((l) => (
                 <button key={l.id} title={l.desc}
+                  aria-pressed={layers.includes(l.id)}
                   className={layers.includes(l.id) ? 'active' : ''}
                   onClick={() => setLayers((prev) => prev.includes(l.id)
                     ? prev.filter((x) => x !== l.id) : [...prev, l.id])}>
+                  <span className="layer-color" style={{ background: l.color }} aria-hidden="true" />
                   {l.label}
                 </button>
               ))}
@@ -532,22 +596,54 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
           </header>
 
           <div className="enterprise-thread">
-            <span className="thread-label">
-              <b>ENTERPRISE DIGITAL THREAD</b> · 실제 운영 기준
-            </span>
+            <div className="thread-heading">
+              <span className="thread-label">
+                <b>ENTERPRISE DIGITAL THREAD</b> · 실제 운영 기준
+              </span>
+              <span className={`thread-source ${threadState}`}>
+                {threadState === 'configured' ? '회사별 승인 구성'
+                  : threadState === 'loading' ? '구성 확인 중'
+                    : threadState === 'error' ? '구성 조회 실패 · 기본 흐름 표시'
+                      : '기본 흐름 표시'}
+              </span>
+              <button type="button" className="thread-config"
+                onClick={() => onOpenMenu('company')}>
+                회사 등록 · 연결구성
+              </button>
+            </div>
 
-            {/* 흐름선 — 시안의 «살아 있는» 인상. ⚠️ 장식이므로 스크린리더에서 숨긴다. */}
+            {/* ★ 업무 단계가 «연결돼 움직인다»는 시안의 핵심 인상.
+                ⚠️ 하늘색 보조 점선은 무엇을 뜻하는지 설명할 수 없어 복원하지 않는다.
+                회색 기반선 = 연결 구조, 붉은 이동선·펄스 = 현재 회사의 실행 흐름이다. */}
             <svg className="flow-svg" viewBox="0 0 1000 170" preserveAspectRatio="none"
               aria-hidden="true">
-              <path className="flow-base" d="M40 40 H960" />
-              <path className="flow-live" d="M40 40 H960" />
-              <path className="flow-data" d="M40 96 H960" />
+              <defs>
+                <marker id="thread-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4"
+                  orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L8,4 L0,8 Z" className="flow-arrow" />
+                </marker>
+              </defs>
+              <path className="flow-base"
+                d="M40 40 C145 7 225 74 335 40 S520 7 620 40 S805 74 960 40" />
+              <path className="flow-live"
+                d="M40 40 C145 7 225 74 335 40 S520 7 620 40 S805 74 960 40"
+                markerEnd="url(#thread-arrow)" />
+              <circle className="flow-pulse" r="5">
+                <animateMotion dur="4.8s" repeatCount="indefinite"
+                  path="M40 40 C145 7 225 74 335 40 S520 7 620 40 S805 74 960 40" />
+              </circle>
+              <circle className="flow-pulse flow-pulse-late" r="4">
+                <animateMotion dur="4.8s" begin="-2.4s" repeatCount="indefinite"
+                  path="M40 40 C145 7 225 74 335 40 S520 7 620 40 S805 74 960 40" />
+              </circle>
             </svg>
 
             {/* §4.4 DomainNode — 일곱 단계 */}
             {/* ★★★ [2026-08-25] **회사가 설정한 연결구성이 있으면 그것을 그린다.**
                 ⚠️ 없으면 조직 트리로 되돌아간다 — 그 사실은 위 `nodeNote` 가 적는다. */}
-            <div className="processes">
+            <div className="processes" style={{
+              gridTemplateColumns: `repeat(${processCount}, minmax(0, 1fr))`,
+            }}>
               {thread ? thread.map((n, i) => {
                 const on = pickedStep?.key === n.key;
                 return (
@@ -589,17 +685,32 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
               })}
             </div>
 
-            {/* §4.5 레이어 오버레이 — 지금은 각 층이 «무엇을 덮는가» 만 말한다.
+            {/* §4.5 레이어 오버레이 — **업무 단계가 하나 더 생긴 것이 아니다.**
+                DATA=판단 근거, SW=실행 도구, TWIN=예측·비교 모델을 업무 흐름 위에
+                겹쳐 보는 보조 정보다. 상단 스위치는 이 세 층의 표시만 켜고 끈다.
+                지금은 각 층이 «무엇을 덮는가» 만 말한다.
                 ⚠️ 시안처럼 개별 자산(「판매계획 v12 · 승인」)을 적으려면 노드별 자산
                   귀속이 있어야 한다. 없는 것을 적지 않는다. */}
-            <div className="overlay-strip">
-              {OVERLAY.map((o) => (
-                <div key={o.key}
-                  className={`overlay-item ${o.tone}`}
-                  style={layers.includes(o.layer) ? undefined
-                    : { opacity: .13, filter: 'grayscale(1)' }}>
-                  <small>{o.kicker}</small>
-                  <b>{o.body}</b>
+            <div className="overlay-strip" style={{
+              gridTemplateColumns: `repeat(${processCount}, minmax(0, 1fr))`,
+            }}>
+              {overlaySlots.map((item, index) => (
+                <div key={processKeys[index] || index} className="overlay-slot"
+                  data-node-key={processKeys[index] || ''}>
+                  {item ? (
+                    <div className={`overlay-item ${item.layer.toLowerCase()}`}
+                      aria-hidden={!layers.includes(item.layer)}
+                      style={layers.includes(item.layer) ? undefined
+                        : { opacity: 0, visibility: 'hidden' }}>
+                      <small>{item.kicker}</small>
+                      <b>{item.body}</b>
+                    </div>
+                  ) : (
+                    <div className="overlay-item empty" aria-label="등록된 보조정보 없음">
+                      <small>보조정보</small>
+                      <b>등록된 정보 없음</b>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -608,6 +719,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
             <article className="focus-panel">
               <div className="focus-copy">
                 <small>DECISION POINT{focusLabel ? ` · ${focusLabel}` : ''}</small>
+                <div className="focus-content">
                 {/* ★★★ 고른 단계가 있으면 **그 단계를 말한다.** 종전에는 노드를 눌러도
                     가운데가 그대로여서 「눌러도 아무 일이 없다」로 보였다.
                     ⚠️ 단계와 안건을 잇는 원천이 아직 없다 — 그래서 «이 단계에 묶인 안건이
@@ -627,6 +739,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
                       : '대기열이 비어 있습니다 — 새 항목이 생기면 여기에 먼저 보입니다.'}</p>
                   </>
                 )}
+                </div>
                 {focus && (
                   <div className="focus-actions">
                     <button className="main" onClick={() => setDrawer(focus as QueueRow)}>

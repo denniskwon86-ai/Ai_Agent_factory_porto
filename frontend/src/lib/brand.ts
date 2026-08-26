@@ -21,14 +21,15 @@ export const PRODUCT_NAME_KO = '랙스';
 /** 이 설치본의 이름. ⚠️ 회사가 정해지면 `LAXS-M` 처럼 접미사가 붙는다. */
 export const PRODUCT_EDITION = 'LAXS-M';
 
-/** AI 비서 이름. **한 곳**이다.
- *
- * ⚠️⚠️ [2026-08-25] 승인 시안은 이 자리를 「Atlas」로 그렸지만 이 시스템의 비서는
- *   `Jarvis` 다(`api/v1/jarvis`). `jarvis_control.py` 머리말이 「두 번째 비서를 만들지
- *   않는다」라고 적어 두었는데, 시안을 옮기며 화면에 Atlas 를 띄웠다.
- * ★ 화면마다 이름을 적지 않는다 — 한 곳만 고치면 전부 따라오게 둔다.
- */
-export const ASSISTANT_NAME = 'Jarvis';
+/** 상단 셸처럼 자리가 좁은 곳에서 쓰는 제품 역할 설명. 발음 표기는 안내 페이지에서만 한다. */
+export const PRODUCT_DESCRIPTOR = '업무·경영 AX 운영체계';
 
-/** 한글 표기. 처음 보는 사람에게 읽는 법을 알려 준다. */
-export const ASSISTANT_NAME_KO = '자비스';
+/** AI 비서의 제품 표시명. **한 곳**이다.
+ *
+ * 현재 사용자 호출명은 `자비스` 다. 기능 설명에서는 «AI 경영비서»라는 역할명을 쓰되,
+ * 실제 대화 레일의 고유명은 여기서만 관리한다.
+ */
+export const ASSISTANT_NAME = '자비스';
+
+/** 별도 한글 음역은 쓰지 않는다. */
+export const ASSISTANT_NAME_KO = '';

@@ -404,6 +404,16 @@ class DecisionLedger:
             "CALC_CAPABILITY_REVOKED": "calc_capability",
             "CALC_BASELINE_SEALED": "calc_baseline",
             "CALC_BASELINE_REVOKED": "calc_baseline",
+            #: ★★★ [2026-08-23] 앱 계약 승인·반려도 **대상 종류를 못박는다.**
+            #:
+            #: ⚠️ 이름만 허용목록에 있고 주체는 열려 있었다. 그러면
+            #:   `APP_CONTRACT_APPROVED` 를 `project` 주체로 남겨 두고 나중에 그 사건을
+            #:   계약 승인 근거로 읽을 수 있다 — 온톨로지·소유권에서 이미 막은 구멍이다.
+            #: ★ 위 머리말이 「subject_id 는 계약 지문이다」라고 이미 적어 두었는데,
+            #:   코드가 그것을 강제하지 않았다(주석이 코드를 대신 주장하던 자리).
+            "APP_CONTRACT_REVIEW_REQUESTED": "app_contract",
+            "APP_CONTRACT_APPROVED": "app_contract",
+            "APP_CONTRACT_REJECTED": "app_contract",
             # ★★★ [4.1c-B P0-4] 소유권 승인·철회도 **대상 종류를 못박는다.**
             #   ⚠️ 앞 판은 이름만 허용목록에 넣고 주체 검증을 하지 않았다. 그러면
             #     `DATASET_OWNERSHIP_APPROVED` 를 `app_dataset` 이나 `project` 주체로

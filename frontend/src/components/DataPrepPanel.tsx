@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // ★★★ 손수 모달을 만들지 않는다 — 승인된 제품 셸을 쓴다(설계 §12 UI 규칙).
 //   `HubDialog` 가 dialog semantics · 배경 inert · 포커스 트랩 · Escape 를 준다.
@@ -14,7 +14,7 @@ import { shortId } from '../lib/displayId';
 // [BDR-2·3·5 / Wave H] 업무 데이터 준비 패널.
 //
 // 파일럿 동선의 2~4칸을 한 화면에서 끝낸다:
-//   업무키트 확인 → 원천 결속 상태 → 파일 등록 → 준비 상태 확인
+//   Starter Package 확인 → 조직 적용본 선택 → 원천 결속 상태 → 파일 등록 → 준비 상태 확인
 //
 // ⚠️ 이 화면이 지켜야 할 것 셋
 //   ① **조회 실패와 0건을 구분한다.** 실패를 빈 목록으로 그리면 사용자는 「데이터가
@@ -42,7 +42,7 @@ function Err({ error }: { error: { message: string; status: number } }) {
 }
 
 export function DataPrepPanel({ onClose }: { onClose: () => void }) {
-  const [kits, setKits] = useState<any[] | null>(null);
+  const [packages, setPackages] = useState<any[] | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [instanceId, setInstanceId] = useState('');
   //: `null` = 아직 못 읽음, `[]` = 정말 0건. ⚠️ 둘을 같은 화면으로 그리면 사용자가
@@ -57,10 +57,18 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
     (instance?.required_datasets || []).find(
       (d: any) => d.dataset_contract_key === key)?.label || key;
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const instanceSectionRef = useRef<HTMLDivElement>(null);
+
+  // ★ «열기» 뒤에는 사용자의 질문(어느 업무기능이 준비됐나)에 먼저 답한다.
+  // 원천 파일 관리 표가 앞에 오면 35행을 지나야 준비도를 볼 수 있어, 업무키트가 평면
+  // 데이터 목록처럼 보인다. 선택된 적용본이 그려진 다음 준비도 시작점으로 이동한다.
+  useEffect(() => {
+    if (instance) instanceSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [instance]);
 
   useEffect(() => {
     listKits()
-      .then((d) => setKits(d.kits || []))
+      .then((d) => setPackages(d.starter_packages || []))
       .catch((e: unknown) => {
         const err = e as DataPrepError;
         setError({ message: err?.message || '', status: err?.status || 0 });
@@ -125,10 +133,10 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <HubDialog label="업무 데이터 준비 — 업무키트·원천 결속·파일 판" onClose={onClose}>
+    <HubDialog label="업무 데이터 준비 — 샘플 패키지·업무기능·데이터 판" onClose={onClose}>
       <div className="afs-dialog-bar">
         <b>업무 데이터 준비</b>
-        <span>업무키트를 조직에 적용하고 · 원천을 연결하고 · 파일 판을 인증합니다</span>
+        <span>샘플 기업 패키지를 고르고 · 필요한 업무기능의 데이터를 준비합니다</span>
         <div className="bar-actions">
           <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
@@ -148,39 +156,54 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
         <Panel className="afs-fill">
           {error ? <Err error={error} /> : (
             <>
-              <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>등록된 업무 데이터 키트</h4>
-              {kits === null ? (
+              <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>사용 가능한 샘플 기업 패키지</h4>
+              {packages === null ? (
                 <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>불러오는 중…</div>
-              ) : kits.length === 0 ? (
+              ) : packages.length === 0 ? (
                 // ⚠️ 「0건」은 실패가 아니다 — 그 사실을 **그대로** 말한다.
                 <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>
-                  등록된 키트가 없습니다. `docs/data-kits/` 에 키트 문서를 두면 여기 나타납니다.
+                  등록된 샘플 패키지가 없습니다. 관리자에게 패키지 등록을 요청해 주십시오.
                 </div>
               ) : (
-                <ul style={{ paddingLeft: 18, margin: '0 0 16px' }}>
-                  {kits.map((k) => (
-                    <li key={`${k.kit_id}@${k.version}`} style={{ fontSize: 14, marginBottom: 4 }}>
-                      {/* ★ 사람이 읽는 이름이 먼저, 기술 ID 는 뒤에 작게. */}
-                      <strong>{k.name || k.kit_id}</strong>
-                      <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
-                        {k.kit_id} · v{k.version} · {k.mode}
-                      </span>
-                    </li>
-                  ))}
+                <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 16px', display: 'grid', gap: 8 }}>
+                  {packages.map((k) => {
+                    const ready = k.catalog_status === 'AVAILABLE_FOR_DEMO';
+                    return (
+                      <li key={`${k.kit_id}@${k.version}`} style={{
+                        padding: '10px 12px', border: '1px solid var(--surface-border)', borderRadius: 7,
+                        background: ready ? 'var(--surface-card)' : 'var(--surface-sunken)',
+                        fontSize: 14,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <strong>{k.name || k.kit_id}</strong>
+                          <span className={`state-chip ${ready ? 'success' : 'warn'}`}>
+                            {ready ? '시연 가능' : '준비 중'}
+                          </span>
+                          <span style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>
+                            데이터 {k.dataset_count} · 업무키트 {k.business_kit_count}
+                            {' · '}앱 {k.app_count} · 보고서 {k.report_count}
+                          </span>
+                        </div>
+                        <div style={{ color: 'var(--surface-text-muted)', marginTop: 4, fontSize: 12 }}>
+                          {k.description || '패키지 설명 준비 중'} · {k.data_kind}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
 
-              <h4 style={{ margin: '16px 0 8px', fontSize: 15 }}>키트 인스턴스 열기</h4>
+              <h4 style={{ margin: '16px 0 8px', fontSize: 15 }}>이 조직에 적용된 패키지</h4>
 
               {/* ★★★ 먼저 «이미 있는 것» 을 보여 준다. id 를 외워 오라고 하지 않는다. */}
               {instances === null ? (
                 <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 8 }}>
-                  인스턴스 목록을 지금 확인하지 못했습니다 — 아래에 id 를 직접 넣어
-                  열 수 있습니다.
+                  적용된 패키지 목록을 지금 확인하지 못했습니다. 관리자 진단에서 식별자로
+                  확인할 수 있습니다.
                 </div>
               ) : instances.length === 0 ? (
                 <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 8 }}>
-                  이 조직 범위에 적용된 업무키트가 아직 없습니다.
+                  이 조직 범위에 적용된 샘플 패키지가 아직 없습니다.
                 </div>
               ) : (
                 <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 12px' }}>
@@ -215,20 +238,27 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                 </ul>
               )}
 
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <input
-                  value={instanceId}
-                  onChange={(e) => setInstanceId(e.target.value)}
-                  placeholder="목록에 없는 인스턴스 id 를 직접 넣습니다(선택)"
-                  style={{
-                    flex: 1, padding: '8px 10px', border: '1px solid var(--surface-border)',
-                    borderRadius: 6, fontSize: 14,
-                  }} />
-                <button onClick={() => openInstance(instanceId)} style={{
-                  padding: '8px 16px', border: '1px solid var(--action-primary-bg)', background: 'var(--action-primary-bg)',
-                  color: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 14,
-                }}>열기</button>
-              </div>
+              {/* 기술 식별자는 일반 사용자 여정이 아니다. 목록 장애를 ID 암기로 우회하게 하면
+                  제품 결함이 사용자의 숙련도 문제로 바뀐다. 진단이 필요한 관리자만 펼친다. */}
+              <details style={{ marginBottom: 12 }}>
+                <summary style={{ fontSize: 12, color: 'var(--surface-text-muted)', cursor: 'pointer' }}>
+                  관리자 진단 — 적용 식별자로 열기
+                </summary>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <input
+                    value={instanceId}
+                    onChange={(e) => setInstanceId(e.target.value)}
+                    aria-label="패키지 적용 식별자"
+                    placeholder="적용 식별자"
+                    style={{
+                      flex: 1, padding: '8px 10px', border: '1px solid var(--surface-border-control)',
+                      borderRadius: 6, fontSize: 14,
+                    }} />
+                  <button className="secondary-button" onClick={() => openInstance(instanceId)}>
+                    진단 열기
+                  </button>
+                </div>
+              </details>
 
               {notice && (
                 <div style={{
@@ -240,8 +270,20 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
               )}
 
               {instance && (
-                <>
-                  <h4 style={{ margin: '16px 0 8px', fontSize: 15 }}>원천 결속과 파일 등록</h4>
+                <div ref={instanceSectionRef} style={{ scrollMarginTop: 12 }}>
+                  <DataReadinessBoard instanceId={instanceId.trim()} />
+
+                  {/* 일반 사용자의 첫 질문은 준비도다. 원천·파일·판 관리는 필요할 때만
+                      펼치는 관리자 작업으로 둔다. 기능을 숨기지 않고 위계만 바로잡는다. */}
+                  <details style={{
+                    margin: '4px 16px 16px', border: '1px solid var(--surface-border)',
+                    borderRadius: 7, background: 'var(--surface-sunken)',
+                  }}>
+                    <summary style={{ cursor: 'pointer', padding: '10px 12px', fontSize: 14 }}>
+                      관리자 작업 — 원천 결속·파일 등록·데이터 판
+                    </summary>
+                    <div style={{ padding: '0 12px 12px' }}>
+                  <h4 style={{ margin: '8px 0', fontSize: 15 }}>원천 결속과 파일 등록</h4>
                   {(instance.bindings || []).length === 0 ? (
                     <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>
                       아직 원천이 연결되지 않았습니다.
@@ -350,11 +392,9 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                       </ul>
                     </>
                   )}
-
-                  <div style={{ borderTop: '1px solid var(--surface-border)', marginTop: 8 }}>
-                    <DataReadinessBoard instanceId={instanceId.trim()} />
-                  </div>
-                </>
+                    </div>
+                  </details>
+                </div>
               )}
             </>
         )}

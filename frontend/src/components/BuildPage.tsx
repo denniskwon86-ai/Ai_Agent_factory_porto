@@ -46,7 +46,9 @@ const MODE_KO: Record<string, string> = {
  *   여기서 다시 만들지 않는다.
  * ⚠️ 서버가 값을 안 주면(`null`) **아무 말도 하지 않는다** — 「가려진 것 없음」이라고 단정하면
  *   옛 서버에 붙었을 때 거짓말이 된다. */
-function ProjectVisibilityNotice() {
+function ProjectVisibilityNotice({ companyName, scopeLabel, entityMode }: {
+  companyName: string; scopeLabel: string; entityMode: string;
+}) {
   const load = useFactoryStore((s) => s.projectsLoad);
   const err = useFactoryStore((s) => s.projectsError);
   const ctx = useFactoryStore((s) => s.viewingContext);
@@ -80,8 +82,9 @@ function ProjectVisibilityNotice() {
       }}>다시 시도</button></>);
   }
 
-  const modeKo = MODE_KO[String(ctx?.entity_mode || '')] || ctx?.entity_mode || '';
-  const scopeTxt = ctx?.scope_node_id ? `조직 범위 ${ctx.scope_node_id}` : '조직 범위 전체';
+  const modeKo = MODE_KO[String(entityMode || ctx?.entity_mode || '')]
+    || entityMode || ctx?.entity_mode || '';
+  const contextTxt = [companyName, scopeLabel].filter(Boolean).join(' · ');
   const hasBlocked = typeof blocked === 'number' && blocked > 0;
   const needsFix = typeof attention === 'number' && attention > 0;
 
@@ -90,21 +93,23 @@ function ProjectVisibilityNotice() {
   return box(needsFix ? 'warn' : 'info', <>
     {ctx && (
       <div style={{ fontSize: 12, opacity: .8 }}>
-        지금 보는 문맥 — <b>{modeKo}</b> · {scopeTxt}
-        {ctx.tenant_id ? ` · ${ctx.tenant_id}` : ''}
+        지금 보는 문맥 — <b>{modeKo}</b>{contextTxt ? ` · ${contextTxt}` : ''}
       </div>
     )}
     {hasBlocked && (
       <div style={{ marginTop: ctx ? 6 : 0 }}>
         이 문맥 밖이라 <b>{blocked}건</b>을 목록에서 제외했습니다
         {needsFix ? <> — 그중 <b style={{ color: 'var(--state-warn)' }}>{attention}건은 점검이 필요</b>합니다</> : null}.
-        {reasons && (
-          <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12, opacity: .9 }}>
+        {reasons && <details style={{ marginTop: 5, fontSize: 12 }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--surface-text-muted)' }}>
+            제외 사유 보기
+          </summary>
+          <ul style={{ margin: '5px 0 0', paddingLeft: 18, opacity: .9 }}>
             {Object.entries(reasons).map(([k, n]) => (
               <li key={k}>{CTX_KO[k] || k} — {n}건</li>
             ))}
           </ul>
-        )}
+        </details>}
       </div>
     )}
   </>);
@@ -121,9 +126,9 @@ type Bucket = 'active' | 'mine' | 'mega' | 'releases' | 'archive';
 const BUCKETS: { id: Bucket; label: string; hint: string }[] = [
   { id: 'active', label: '미완료', hint: '완료되지 않았거나 진행률을 아직 집계하지 못한 작업' },
   { id: 'mine', label: '내 프로젝트', hint: '내가 만든 독립 프로젝트' },
-  { id: 'mega', label: 'Mega', hint: '여러 프로젝트를 묶어 운영하는 상위 단위' },
-  { id: 'releases', label: 'Releases', hint: '완성되어 전달 가능한 결과물' },
-  { id: 'archive', label: 'Archive', hint: '더 진행하지 않는 것' },
+  { id: 'mega', label: '통합 프로젝트', hint: '여러 프로젝트를 묶어 운영하는 상위 단위' },
+  { id: 'releases', label: '릴리스', hint: '완성되어 전달 가능한 결과물' },
+  { id: 'archive', label: '보관함', hint: '더 진행하지 않는 것' },
 ];
 
 const card: React.CSSProperties = {
@@ -132,13 +137,16 @@ const card: React.CSSProperties = {
 };
 
 export function BuildPage({
-  projects, releases, onOpenProject, onOpenRelease, onNewWork, onManageRelease, onDeleteProject,
+  projects, releases, companyName, scopeLabel, entityMode,
+  onOpenProject, onOpenRelease, onManageRelease, onDeleteProject,
 }: {
   projects: Project[];
   releases: any[];
+  companyName: string;
+  scopeLabel: string;
+  entityMode: string;
   onOpenProject: (id: string) => void;
   onOpenRelease: (releaseId: string) => void;
-  onNewWork: () => void;
   onManageRelease: (r: any) => void;
   onDeleteProject: (id: string) => void;
 }) {
@@ -196,24 +204,28 @@ export function BuildPage({
 
   return (
     <div className="afs-scope" style={{
-      background: 'var(--surface-page)', minHeight: 'calc(100vh - 72px)', padding: 24,
+      background: 'var(--surface-page)', minHeight: 'calc(100vh - 74px)', padding: 24,
       display: 'flex', flexDirection: 'column', gap: 16,
     }}>
-      <ProjectVisibilityNotice />
+      <div>
+        <small style={{ display: 'block', color: 'var(--ls-red)', fontSize: 11,
+          fontWeight: 800, letterSpacing: '.1em' }}>APP FACTORY</small>
+        <h1 style={{ margin: '5px 0 4px', color: 'var(--surface-text)',
+          fontSize: 26, lineHeight: 1.25 }}>앱 제작</h1>
+        <p style={{ margin: 0, color: 'var(--surface-text-muted)', fontSize: 14 }}>
+          현업의 요구를 앱과 시뮬레이터로 만들고, 진행 상태와 릴리스를 관리합니다.
+        </p>
+      </div>
 
-      {/* ── 상단: 새 업무 만들기 + 진행 상태 필터 (§5.2) ─────────────── */}
+      <ProjectVisibilityNotice companyName={companyName} scopeLabel={scopeLabel}
+        entityMode={entityMode} />
+
+      {/* ── 상단: 찾기 + 진행 상태 필터 (§5.2) ───────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 16, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          {/* 화면당 하나의 핵심 행동 — 높이 46px(§1.3 42~48) */}
-          <button onClick={onNewWork} style={{
-            height: 46, padding: '0 20px', fontSize: 14, fontWeight: 700, borderRadius: 6,
-            cursor: 'pointer', border: '1px solid var(--ls-navy)',
-            background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
-          }}>＋ 새 업무 만들기</button>
-
           <input value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="이름·ID 로 찾기"
+            placeholder="이름 또는 ID로 찾기"
             style={{
               height: 38, minWidth: 220, padding: '0 12px', fontSize: 14, borderRadius: 6,
               border: '1px solid var(--surface-border)', background: 'var(--surface-card)',
@@ -288,7 +300,7 @@ export function BuildPage({
             여기에 표시할 것이 없습니다.
           </div>
           <p style={{ fontSize: 14, marginTop: 6, color: 'var(--surface-text-muted)' }}>
-            {q ? '검색어와 맞는 것이 없습니다.' : '«＋ 새 업무 만들기» 로 시작하십시오.'}
+            {q ? '검색어와 맞는 것이 없습니다.' : '상단의 «＋ 새 업무»로 시작하십시오.'}
           </p>
         </div>
       ) : (
@@ -301,7 +313,7 @@ export function BuildPage({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   {p.is_mega_project && (
                     <span style={{ fontSize: 12, fontWeight: 700, padding: '1px 7px',
-                      borderRadius: 6, color: '#6d28d9', background: '#ede9fe' }}>Mega</span>
+                      borderRadius: 6, color: '#6d28d9', background: '#ede9fe' }}>통합</span>
                   )}
                   <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--surface-text)' }}>
                     {p.name || p.id}

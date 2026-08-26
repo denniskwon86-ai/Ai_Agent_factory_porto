@@ -28,6 +28,7 @@ import { useFactoryStore } from '../store/useFactoryStore';
 import { serializeClarifyAnswers, unansweredCount } from './clarifyAnswers';
 
 import type { JarvisTurn } from '../lib/jarvisApi';
+import { ASSISTANT_NAME } from '../lib/brand';
 import type { ClarifySelections } from './clarifyAnswers';
 import type { FactoryStudioViewModel } from './factoryViewModel';
 import { API_BASE_URL } from '../lib/api';
@@ -200,7 +201,7 @@ export function DecisionJarvisDock({
 
       <article className="jarvis-dock">
         <div className="jarvis-head">
-          <h3>✦ Jarvis</h3>
+          <h3>✦ {ASSISTANT_NAME}</h3>
           <p>
             {shownStageLabel
               ? `«${shownStageLabel}» 문맥으로 답합니다`
@@ -209,7 +210,7 @@ export function DecisionJarvisDock({
           </p>
         </div>
         <input
-          aria-label="Jarvis 질문"
+          aria-label={`${ASSISTANT_NAME} 질문`}
           value={ask}
           onChange={(e) => setAsk(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') sendAsk(ask); }}
@@ -235,7 +236,7 @@ export function DecisionJarvisDock({
           ) : (
             turns.map((t, i) => (
               <div className={`turn ${t.role}`} key={`${t.at}__${i}`}>
-                <b>{t.role === 'user' ? '나' : 'Jarvis'}</b>
+                <b>{t.role === 'user' ? '나' : ASSISTANT_NAME}</b>
                 <p>{t.text}</p>
               </div>
             ))

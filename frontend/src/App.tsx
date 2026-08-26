@@ -45,12 +45,11 @@ import { DataPrepPanel } from './components/DataPrepPanel';
 import { PathCalcPanel } from './components/PathCalcPanel';
 // [G4 / Wave H] 시나리오 시뮬레이션 — 고정된 기준선 위에서만 계산한다
 import { ScenarioPanel } from './components/ScenarioPanel';
-// [Wave G 11.4] 의사결정 안건 — 3관점 검토서·책임자·기한·근거 계보
-import { DecisionPanel } from './components/DecisionPanel';
 // [I-4 7 / Wave H-4] 운영 승격 — 후보를 운영으로 올리는 단 하나의 문
 import { ReleasePromotionPanel } from './components/ReleasePromotionPanel';
 import { CompanySetupPanel } from './components/CompanySetupPanel';
 import { ProductShell } from './components/ProductShell';
+import { SystemAboutPage } from './components/SystemAboutPage';
 //: ★★★ [2026-08-25] 문맥을 푸는 규칙은 **한 곳**에 있다(`lib/operatingContext`).
 //: ⚠️ 종전에는 여기서 `getEnterpriseContext().tenantId` 를 그대로 썼다. 그 값은 사용자가
 //:   조직을 고를 때만 채워지므로 로그인 직후 상단이 「? · 확인 중」이었다 —
@@ -93,7 +92,7 @@ function AppShell() {
   //   ⚠️ URL 라우터가 아직 없으므로 상태로 둔다 — 설계 §3.3 은 「React Router 도입 여부와
   //     무관하게 URL 은 새로고침·공유가 가능한 상태 계약으로 관리한다」고 했고, 그 계약은
   //     라우터를 넣을 때 이 한 값을 URL 로 올리면 된다.
-  const [space, setSpace] = useState<'enterprise' | 'build'>('enterprise');
+  const [space, setSpace] = useState<'enterprise' | 'about' | 'build'>('enterprise');
   // 경영 홈 → Factory, 목록 → 프로젝트처럼 화면 문맥이 바뀔 때 이전 화면의 스크롤 위치를
   // 가져오면 핵심 행동과 헤더가 화면 밖에서 시작한다. 새 화면은 항상 문서 맨 위에서 시작한다.
   useEffect(() => {
@@ -107,7 +106,6 @@ function AppShell() {
   const [showCalcApproval, setShowCalcApproval] = useState(false);
   const [showPathCalc, setShowPathCalc] = useState(false);
   const [showScenario, setShowScenario] = useState(false);
-  const [showDecisionPkg, setShowDecisionPkg] = useState(false);
   const [showPromotion, setShowPromotion] = useState(false);
   // 기술·제품 용어 전환 사전 — 사용자 권장 용어와 현재 기술 용어를 함께 확인하는 임시 페이지.
   const [showTerminology, setShowTerminology] = useState(false);
@@ -115,6 +113,9 @@ function AppShell() {
   const [showWorkStandard, setShowWorkStandard] = useState(false);
   const [showOrgChart, setShowOrgChart] = useState(false);
   const [showCollaboration, setShowCollaboration] = useState(false);
+  // 핵심 여정의 «의사결정 안건»은 계산 결과에 결속된 Decision Case를 검토하는 곳이다.
+  // 협업 메뉴는 수신함에서, 핵심 여정 4단계는 의사결정 센터에서 시작한다.
+  const [collaborationInitialView, setCollaborationInitialView] = useState<'inbox' | 'decisions'>('inbox');
   const [showCrosswalk, setShowCrosswalk] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
   // [M0] 업무·데이터 설계 상담 — §4.3 F-DA-01: 런처와 프로젝트 화면 **양쪽에서** 접근 가능해야 한다
@@ -141,6 +142,11 @@ function AppShell() {
   useEffect(() => { actingScope.load().then(setScope).catch(() => setScope(null)); }, []);
   useEffect(() => actingScope.subscribe(setScope), []);
   const govBlocked = governanceBlockReason(scope);
+  // ★ 계산 능력 승인·시연 초기화는 `ADMIN_SECURITY`, 즉 시스템 관리자 전용이다.
+  // `unrestricted`를 화면에서 새로 해석하지 않고 `/org/me`가 준 `is_admin`을 그대로 쓴다.
+  const calcAdminBlocked = !scope
+    ? '권한을 확인하는 중입니다 — 잠시 후 다시 시도하십시오.'
+    : scope.isAdmin ? '' : '시스템 관리자만 계산 실행을 승인하거나 시연 자료를 초기화할 수 있습니다.';
   const [showLogPopup, setShowLogPopup] = useState(false);
   // 신규 프로젝트에 연결할 지식팩 선택 상태
   const [knowledgePacks, setKnowledgePacks] = useState<any[]>([]);
@@ -204,10 +210,7 @@ function AppShell() {
       onSelect: () => setShowAdvisor(true) },
     { id: 'collaboration', icon: '🤝', label: '협업·의사결정·발간',
       desc: '앱 전달·수락, 의사결정 패키지, 대내외 발간을 한 곳에서 — 수락해도 데이터 권한은 넓어지지 않습니다',
-      onSelect: () => setShowCollaboration(true) },
-    { id: 'briefing', icon: '🧭', label: '전사 브리핑',
-      desc: '권한 범위 안의 전사 상태 — 내가 결정할 것·막힌 것·데이터 결손·비용 (LLM 0콜)',
-      onSelect: () => setShowBriefing(true) },
+      onSelect: () => { setCollaborationInitialView('inbox'); setShowCollaboration(true); } },
   ];
 
   // ── 메뉴 묶음 ─────────────────────────────────────────────────────────────
@@ -235,27 +238,34 @@ function AppShell() {
   const [showCompany, setShowCompany] = useState(false);
   //: ★ 회사는 `/auth/me`, 범위는 조직도가 답한다 — 어느 쪽도 지어내지 않는다.
   const shellCtx = useOperatingContext();
+  // 회사 이름표와 실행 테넌트가 결속되지 않았을 때 내부 식별자를 회사명처럼 보이지 않는다.
+  // 실제 결속은 회사 구성에서 고쳐야 하며, 화면은 그 상태를 숨기지 않는다.
+  const shellCompanyName = shellCtx.companyName || '회사 연결 필요';
 
   const navGroups: NavGroup[] = [
     {
-      title: '핵심 여정 — 이 넷을 순서대로',
-      hint: '먼저 좌상단 «조직 전환»에서 조직을 고르십시오. 그 다음 아래 넷을 차례로 지나면 '
-        + '경영 판단에 쓸 숫자와 안건이 나옵니다.',
+      title: '핵심 여정 — 이 다섯을 순서대로',
+      hint: '먼저 좌상단 «조직 전환»에서 조직을 고르십시오. 그 다음 아래 다섯을 차례로 지나면 '
+        + '데이터 준비부터 경영 브리핑까지 한 흐름으로 닫힙니다.',
       items: [
         { id: 'dataprep', icon: '1️⃣', label: '업무 데이터 준비',
-          desc: '업무키트를 조직에 적용하고 · 원천을 연결하고 · 파일 판을 인증합니다 — 여기가 «준비됨» 이어야 뒤가 돕니다',
+          desc: '샘플 패키지를 조직에 적용하고 · 업무기능별 원천을 연결하고 · 데이터 판을 인증합니다 — 여기가 «준비됨» 이어야 뒤가 돕니다',
           onSelect: () => setShowDataPrep(true) },
         { id: 'calc-approval', icon: '2️⃣', label: '계산 실행 승인',
           desc: '산식을 실제로 돌려도 되는지 사람이 승인합니다 — 누르기 전까지 계산은 «막힘» 으로 답합니다',
           // ⚠️ 시스템 관리자 전용이다. 화면에서 숨기는 것은 **편의**이고, 실제로 막는 것은
           //   서버(`route_authority` 표의 `ADMIN_SECURITY`)다 — 숨김을 통제로 믿지 않는다.
+          disabledReason: calcAdminBlocked,
           onSelect: () => setShowCalcApproval(true) },
         { id: 'path-calc', icon: '3️⃣', label: '경로 계산',
           desc: '승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산합니다 — 막히면 무엇이 없는지 말합니다',
           onSelect: () => setShowPathCalc(true) },
         { id: 'decision-pkg', icon: '4️⃣', label: '의사결정 안건',
-          desc: '계산 결과를 3관점 검토서·실행 책임자·기한이 붙은 안건으로 만듭니다',
-          onSelect: () => setShowDecisionPkg(true) },
+          desc: '경로 계산에서 만든 안건을 세 관점으로 검토하고 · 실행 책임자와 기한을 확정하고 · 근거 계보를 확인합니다',
+          onSelect: () => { setCollaborationInitialView('decisions'); setShowCollaboration(true); } },
+        { id: 'briefing', icon: '5️⃣', label: '경영 브리핑',
+          desc: '결정할 일·막힌 일·데이터 결손과 근거를 권한 범위 안에서 확인합니다 (LLM 0콜)',
+          onSelect: () => setShowBriefing(true) },
       ],
     },
     {
@@ -356,6 +366,25 @@ function AppShell() {
 
   const isMegaProject = projects.find(p => p.id === currentProjectId)?.is_mega_project === true;
 
+  const handleShellNav = (id: Parameters<React.ComponentProps<typeof ProductShell>['onNav']>[0]) => {
+    if (id === 'enterprise') { setSpace('enterprise'); return; }
+    if (id === 'factory') { setSpace('build'); return; }
+    // 「결정·보고」는 협업 허브의 받은함이 아니라 의사결정 패키지에서 시작한다.
+    // 상단 메뉴 이름과 첫 화면이 다르면 사용자는 잘못 열린 것으로 판단한다.
+    if (id === 'report') {
+      setCollaborationInitialView('decisions');
+      setShowCollaboration(true);
+      return;
+    }
+    const map: Record<string, string> = {
+      operate: 'workspace', twin: 'scenario',
+      knowledge: 'knowledge', agent: 'agents',
+    };
+    const hit = [...primaryNav, ...navGroups.flatMap((g) => g.items)]
+      .find((it) => it.id === map[id]);
+    if (hit) hit.onSelect();
+  };
+
   const handleDeleteProject = async (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
     // ★★ [2026-08-07] **문구가 서버와 같은 말을 해야 한다.**
@@ -425,7 +454,6 @@ function AppShell() {
     setShowCalcApproval(false);
     setShowPathCalc(false);
     setShowScenario(false);
-    setShowDecisionPkg(false);
     setShowPromotion(false);
     setShowTerminology(false);
     setShowMasterData(false);
@@ -458,7 +486,6 @@ function AppShell() {
         <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
       {showPathCalc && <PathCalcPanel onClose={() => setShowPathCalc(false)} />}
       {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
-      {showDecisionPkg && <DecisionPanel onClose={() => setShowDecisionPkg(false)} />}
       {showPromotion && (
         <ReleasePromotionPanel onClose={() => setShowPromotion(false)} />
       )}
@@ -483,6 +510,7 @@ function AppShell() {
       {showCollaboration && (
         <CollaborationHub
           onClose={() => setShowCollaboration(false)}
+          initialView={collaborationInitialView}
           // 라이브러리에 있는 릴리스를 그대로 선택지로 넘긴다 — 화면이 id 를 지어내지 않는다.
           releaseIds={releases.map((r: any) => r.release_id).filter(Boolean)}
         />
@@ -555,6 +583,33 @@ function AppShell() {
     );
   }
 
+  if (!currentProjectId && space === 'about') {
+    return (
+      <ErrorBoundary>
+        <div className="afs-scope" style={{ minHeight: '100vh', background: 'var(--surface-page)' }}>
+          <ProductShell module="about"
+            company={shellCompanyName}
+            scope={shellCtx.scopeLabel}
+            entityMode={shellCtx.entityMode}
+            onNav={handleShellNav}
+            onContext={() => setShowOrgChart(true)}
+            onAbout={() => setSpace('about')}
+            onSettings={() => setOpenConsole(true)}
+            onNewWork={() => setSpace('build')}
+            right={<>
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
+                onConsoleHandled={() => setOpenConsole(false)} />
+              <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
+            </>} />
+          <SystemAboutPage company={shellCompanyName}
+            onBack={() => setSpace('enterprise')}
+            onCompanySetup={() => setShowCompany(true)} />
+        </div>
+        {overlays}
+      </ErrorBoundary>
+    );
+  }
+
   // ★★★ [설계 §3.2] 프로젝트를 고르지 않았고 «경영 홈» 공간이면 Decision Canvas 를 그린다.
   //   Software Factory(런처)는 그 아래 Studio 다.
   if (!currentProjectId && space === 'enterprise') {
@@ -578,23 +633,12 @@ function AppShell() {
           <ProductShell
             module="enterprise"
             //: ★ 사람에게는 이름을, 없으면 식별자를 — 지어내지 않는다.
-            company={shellCtx.companyName || shellCtx.company}
+            company={shellCompanyName}
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
-            onNav={(id) => {
-              //: 시안의 7개 목적지 → 이 앱의 화면. ⚠️ 아직 없는 곳은 가장 가까운 화면으로
-              //:   보내되 **조용히 아무 일도 없게** 두지 않는다.
-              if (id === 'enterprise') return;
-              if (id === 'factory') { setSpace('build'); return; }
-              const MAP: Record<string, string> = {
-                operate: 'workspace', twin: 'scenario', report: 'collaboration',
-                knowledge: 'knowledge', agent: 'agents',
-              };
-              const hit = [...primaryNav, ...navGroups.flatMap((g) => g.items)]
-                .find((it) => it.id === MAP[id]);
-              if (hit) hit.onSelect();
-            }}
+            onNav={handleShellNav}
             onContext={() => setShowOrgChart(true)}
+            onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => setSpace('build')}
             right={<>
@@ -643,41 +687,30 @@ function AppShell() {
             }} />
         )}
         <div className="afs-scope afs-page min-h-screen w-full flex flex-col font-sans">
- <header className="h-16 afs-topbar backdrop-blur-md border-b afs-border flex items-center justify-between gap-2 px-3 xl:px-5 shrink-0 sticky top-0 z-10 overflow-hidden">
- <div className="flex items-center gap-3 shrink-0">
- {/* ★ [설계 §3.4] 「Studio 의 공통 상단 바에는 `경영 홈으로 돌아가기` 와 현재 회사 문맥을
-     항상 표시한다」 — 돌아갈 길이 없으면 Studio 는 앱의 끝이 되고, 사용자는 새로고침으로
-     빠져나온다. */}
- <button className="secondary-button" onClick={() => setSpace('enterprise')}
- style={{ whiteSpace: 'nowrap' }}>◀ 경영 홈</button>
- <h1 className="text-xl 2xl:text-2xl font-bold tracking-tight afs-ink flex items-center gap-2 shrink-0">
- <span className="afs-action-fg">🏭</span> Software Factory
- </h1>
- </div>
- {/* ★ 사용자 전환기는 «기능»이 아니라 «지금 누구인가»다. 메뉴 안으로 숨기지 않는다 —
- 권한 범위가 사람마다 다르므로 상시 보여야 한다(채택 결정 6항). */}
- <div className="flex items-center gap-3 min-w-0">
- <SessionBar onGoToOrg={() => setShowOrgChart(true)} />
- <GlobalNav
- // 1차 영역 — 매일 쓰는 진입점 3개. 넘기면 다시 «나열»이 된다.
- primary={primaryNav}
- groups={navGroups}
- right={
- <div className="relative shrink-0">
- <button
- onClick={() => setShowLogPopup(v => !v)}
- title="서버 로그 보기"
- className="flex items-center gap-2 afs-bg-sunken afs-hover-raise transition-colors px-1.5 2xl:px-3 py-1.5 rounded-full border afs-border cursor-pointer"
- >
- <span className="hidden 2xl:inline text-xs afs-muted font-medium">Network</span>
- <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_8px] ${isConnected ? 'bg-green-500 shadow-green-500/50' : 'bg-red-500 shadow-red-500/50 animate-pulse'}`} />
- </button>
- {showLogPopup && <ServerLogPopup onClose={() => setShowLogPopup(false)} />}
- </div>
- }
- />
- </div>
- </header>
+          {/* 앱 제작도 경영 홈과 같은 제품 셸을 쓴다. 화면마다 별도 머리 바를 만들면
+              브랜드·회사 문맥·메뉴 명칭이 다시 갈라진다. */}
+          <ProductShell module="factory"
+            company={shellCompanyName}
+            scope={shellCtx.scopeLabel}
+            entityMode={shellCtx.entityMode}
+            onNav={handleShellNav}
+            onContext={() => setShowOrgChart(true)}
+            onAbout={() => setSpace('about')}
+            onSettings={() => setOpenConsole(true)}
+            onNewWork={() => setBuildStart(true)}
+            right={<>
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
+                onConsoleHandled={() => setOpenConsole(false)} />
+              <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
+              <div className="relative shrink-0">
+                <button onClick={() => setShowLogPopup(v => !v)} title="서버 연결 상태"
+                  aria-label="서버 연결 상태"
+                  className="flex items-center afs-bg-sunken afs-hover-raise transition-colors p-2 rounded-full border afs-border cursor-pointer">
+                  <span className={`w-2.5 h-2.5 rounded-full shadow-[0_0_8px] ${isConnected ? 'bg-green-500 shadow-green-500/50' : 'bg-red-500 shadow-red-500/50 animate-pulse'}`} />
+                </button>
+                {showLogPopup && <ServerLogPopup onClose={() => setShowLogPopup(false)} />}
+              </div>
+            </>} />
 
  <main style={{ flex: 1, overflowY: 'auto', width: '100%' }}>
           {/* ★★★ [설계 §5.2] `/build` 는 **목록면**이다 — 상단 「새 업무 만들기」 + 진행 상태
@@ -688,9 +721,11 @@ function AppShell() {
           <BuildPage
             projects={projects as any}
             releases={releases}
+            companyName={shellCompanyName}
+            scopeLabel={shellCtx.scopeLabel}
+            entityMode={shellCtx.entityMode}
             onOpenProject={(id) => setCurrentProject(id)}
             onOpenRelease={(releaseId) => viewRelease(releaseId)}
-            onNewWork={() => setBuildStart(true)}
             onManageRelease={(r) => setAdminProgram({ id: r.release_id, name: r.project_name || r.release_id })}
             onDeleteProject={(id) => {
               // ⚠️ 기존 확인 문구를 그대로 쓴다 — 서버는 «표시 삭제» 이고 데이터는 남는다.

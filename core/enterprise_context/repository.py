@@ -597,7 +597,8 @@ class EcmRepository:
         r["payload"] = json.loads(r.pop("payload_json", "") or "{}")
         return EnterpriseProfile.model_validate(r)
 
-    def approve_profile(self, profile_id: str, actor: str) -> Optional[EnterpriseProfile]:
+    def approve_profile(self, profile_id: str, actor: str,
+                        tenant_id: str = "") -> Optional[EnterpriseProfile]:
         """프로필 승인 = 상태를 ACTIVE 로 올리고 **승인자·시각을 남긴다.**
 
         ★★★ [2026-08-25] 이 메서드가 없어서 프로필은 **영원히 상속에 참여하지 못했다.**
@@ -606,24 +607,60 @@ class EcmRepository:
           ACTIVE 로 보내도 `is_effective` 는 계속 False 다.
         ⚠️ 엔터티에는 `approve_entity` 가 있는데 프로필에는 없었다 — 「통제는 있는데
           부르는 경로가 없다」의 또 한 자리다."""
-        rows = self._query("SELECT * FROM enterprise_profiles WHERE profile_id=?",
-                           (str(profile_id or "").strip(),))
-        if not rows:
-            return None
-        pr = self._row_to_profile(rows[0])
-        pr.status, pr.approved_by, pr.approved_at = STATUS_ACTIVE, actor or "", self._now()
-        return self.upsert_profile(pr)
+        pid = str(profile_id or "").strip()
+        tid = str(tenant_id or "").strip()
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            sql = "SELECT * FROM enterprise_profiles WHERE profile_id=?"
+            params: List[Any] = [pid]
+            if tid:
+                sql += " AND tenant_id=?"
+                params.append(tid)
+            row = conn.execute(sql, tuple(params)).fetchone()
+            if not row:
+                return None
+
+            current = dict(row)
+            # ★ 같은 적용 자리의 승인본은 하나뿐이다. 새 판을 올리면서 옛 ACTIVE 를
+            #   그대로 두면 조회 순서에 따라 서로 다른 구성이 홈에 뜬다.
+            conn.execute(
+                "UPDATE enterprise_profiles SET status=?, updated_at=? "
+                "WHERE tenant_id=? AND scope_node_id=? AND industry_code=? "
+                "AND profile_kind=? AND status=? AND profile_id<>?",
+                ("ARCHIVED", now, current["tenant_id"], current["scope_node_id"],
+                 current["industry_code"], current["profile_kind"], STATUS_ACTIVE, pid))
+            conn.execute(
+                "UPDATE enterprise_profiles SET status=?, approved_by=?, approved_at=?, "
+                "updated_at=? WHERE profile_id=?",
+                (STATUS_ACTIVE, actor or "", now, now, pid))
+            updated = conn.execute(
+                "SELECT * FROM enterprise_profiles WHERE profile_id=?", (pid,)).fetchone()
+        return self._row_to_profile(dict(updated)) if updated else None
 
     def upsert_profile(self, p: EnterpriseProfile) -> EnterpriseProfile:
         if p.profile_kind not in PROFILE_KINDS:
             raise EcmError(f"profile_kind 는 {PROFILE_KINDS} 중 하나여야 합니다.")
         if p.inheritance_mode not in INHERITANCE_MODES:
             raise EcmError(f"inheritance_mode 는 {INHERITANCE_MODES} 중 하나여야 합니다.")
+        if p.status not in STATUSES:
+            raise EcmError(f"status 는 {STATUSES} 중 하나여야 합니다.")
         if not p.scope_node_id and not p.industry_code:
-            # 범위도 업종도 없으면 어디에 적용되는지 알 수 없다 → 상속 체인에 자리가 없다.
-            raise EcmError("scope_node_id 또는 industry_code 중 하나는 있어야 합니다.")
-        if p.scope_node_id and not self.get_node(p.scope_node_id):
-            raise EcmError(f"존재하지 않는 노드입니다: {p.scope_node_id}")
+            # process_profile 은 tenant_id 자체가 적용 범위다. 다른 종류까지 열면 범위 없는
+            # 데이터/권한 프로필이 회사 전체에 번질 수 있으므로 이 한 종류만 허용한다.
+            if p.profile_kind != "process_profile":
+                raise EcmError("scope_node_id 또는 industry_code 중 하나는 있어야 합니다.")
+        if p.scope_node_id:
+            node = self.get_node(p.scope_node_id)
+            if not node or node.tenant_id != p.tenant_id:
+                raise EcmError(f"현재 회사에 속하지 않은 노드입니다: {p.scope_node_id}")
+        if p.profile_id:
+            existing = self._query(
+                "SELECT tenant_id, status FROM enterprise_profiles WHERE profile_id=?",
+                (p.profile_id,))
+            if existing and existing[0]["tenant_id"] != p.tenant_id:
+                raise EcmError("다른 회사의 프로필은 변경할 수 없습니다.")
+            if existing and existing[0]["status"] == STATUS_ACTIVE and p.status != STATUS_ACTIVE:
+                raise EcmError("승인된 구성은 직접 수정할 수 없습니다. 새 판을 만드십시오.")
         now = self._now()
         if not p.profile_id:
             p.profile_id = self._uid("prof")
@@ -642,8 +679,16 @@ class EcmRepository:
         return p
 
     def list_profiles(self, scope_node_id: str = "", industry_code: str = "",
-                      profile_kind: str = "") -> List[EnterpriseProfile]:
+                      profile_kind: str = "", tenant_id: str = "",
+                      company_wide: bool = False) -> List[EnterpriseProfile]:
         sql, where, params = "SELECT * FROM enterprise_profiles", [], []
+        if tenant_id:
+            where.append("tenant_id=?")
+            params.append(tenant_id)
+        if company_wide:
+            # 빈 필터를 「모두」로 읽지 않는다. 회사 전체 구성은 빈 scope/industry 라는
+            # **실제 저장 자리**이며, 조직별 구성과 명시적으로 갈린다.
+            where.extend(("scope_node_id=''", "industry_code=''"))
         for col, val in (("scope_node_id", scope_node_id), ("industry_code", industry_code),
                          ("profile_kind", profile_kind)):
             if val:
@@ -651,6 +696,7 @@ class EcmRepository:
                 params.append(val)
         if where:
             sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY updated_at DESC, version DESC, profile_id DESC"
         return [self._row_to_profile(r) for r in self._query(sql, tuple(params))]
 
 

@@ -142,6 +142,15 @@
  *   `auto` 라서 넘칠 때만 나타난다(이중 스크롤바가 생기지 않는다). */
 .afs-dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
+/* 회사별 업무 연결구성은 단계 수에 따라 길어진다. 본문은 `.afs-dialog-body` 가 스크롤한다.
+ * ⚠️ 이 영역을 sticky 로 띄우면 직전 안내 문구 위에 올라가 글자와 버튼이 겹친다. 저장
+ * 버튼은 문서 흐름의 마지막에 두고, 충분한 안쪽 여백으로 온전히 보이게 한다. */
+.company-thread-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  margin: 12px 0 0; padding: 12px 0 4px;
+  border-top: 1px solid var(--surface-border);
+}
+
 /* ── 3열 셸: 238px Rail / 가변 작업면(최소 680px) / 300px Jarvis ───────────── */
 .afs-scope .hub-layout {
   display: grid;

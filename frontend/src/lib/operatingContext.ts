@@ -17,7 +17,11 @@
 //   복제하면 두 곳이 다른 회사 이름을 적는 날이 온다.
 import { useEffect, useState } from 'react';
 
-import { API_BASE_URL, getEnterpriseContext, getSessionToken } from './api';
+import { apiFetch, getEnterpriseContext } from './api';
+import {
+  getTree as getCompanyTree, listEntities, listTenants,
+  type EcmNode, type Entity, type Tenant,
+} from './companyApi';
 import { orgApi, type Dept } from './orgApi';
 
 export type ContextStatus = 'loading' | 'verified' | 'denied' | 'stale';
@@ -45,10 +49,6 @@ export function flattenDepts(rows: Dept[], depth = 0): (Dept & { _depth: number 
   return out;
 }
 
-export type Tenant = {
-  tenant_id: string; name_ko: string; legal_name?: string; status?: string;
-};
-
 export type OperatingContext = {
   /** 회사 **식별자**. 지어내지 않는다 — 고른 값이 없으면 서버가 말한 값이다. */
   company: string;
@@ -72,6 +72,7 @@ export type OperatingContext = {
  * ⚠️ 자동으로 채우면 관리자의 «전체 범위» 가 «본사 하위» 로 조용히 좁아진다 —
  *   보이는 것과 권한이 달라지는 쪽이 훨씬 위험하다. */
 export function useOperatingContext(): OperatingContext {
+  const [revision, setRevision] = useState(0);
   const [depts, setDepts] = useState<Dept[]>([]);
   const [status, setStatus] = useState<ContextStatus>('loading');
   const [note, setNote] = useState('');
@@ -80,16 +81,33 @@ export function useOperatingContext(): OperatingContext {
   //: ⚠️ 없으면 채우지 않는다 — 식별자에서 이름을 만들어 내면(접두어 자르기 같은) 회사
   //:   이름이 코드가 되고, 이름을 바꾸려면 배포를 해야 한다.
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [companyTree, setCompanyTree] = useState<EcmNode[]>([]);
+  useEffect(() => {
+    const refresh = () => setRevision((v) => v + 1);
+    window.addEventListener('factory:session-changed', refresh);
+    window.addEventListener('factory:enterprise-context-changed', refresh);
+    window.addEventListener('factory:company-configuration-changed', refresh);
+    return () => {
+      window.removeEventListener('factory:session-changed', refresh);
+      window.removeEventListener('factory:enterprise-context-changed', refresh);
+      window.removeEventListener('factory:company-configuration-changed', refresh);
+    };
+  }, []);
+
   useEffect(() => {
     let alive = true;
-    fetch(`${API_BASE_URL}/api/v1/enterprise-context/tenants`, {
-      headers: { 'X-Session-Token': getSessionToken() },
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (alive && j?.data) setTenants(j.data as Tenant[]); })
+    listTenants()
+      .then((rows) => { if (alive) setTenants(rows || []); })
       .catch(() => { /* 표시용이다 — 실패해도 앱을 막지 않는다 */ });
+    listEntities()
+      .then((rows) => { if (alive) setEntities(rows || []); })
+      .catch(() => { /* tenant 이름이 있으면 그것만으로 표시할 수 있다 */ });
+    getCompanyTree()
+      .then((rows) => { if (alive) setCompanyTree(rows || []); })
+      .catch(() => { /* 회사 이름표·법인 목록으로 계속 해석한다 */ });
     return () => { alive = false; };
-  }, []);
+  }, [revision]);
 
   useEffect(() => {
     let alive = true;
@@ -107,18 +125,16 @@ export function useOperatingContext(): OperatingContext {
         setNote(e?.message || '조직 정보를 확인하지 못했습니다.');
       });
     return () => { alive = false; };
-  }, []);
+  }, [revision]);
 
   useEffect(() => {
     let alive = true;
-    fetch(`${API_BASE_URL}/api/v1/auth/me`, {
-      headers: { 'X-Session-Token': getSessionToken() },
-    })
+    apiFetch('/api/v1/auth/me')
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (alive && j?.data) setMe(j.data); })
       .catch(() => { /* 표시용이다 — 실패해도 앱을 막지 않는다 */ });
     return () => { alive = false; };
-  }, []);
+  }, [revision]);
 
   const ctx = getEnterpriseContext();
   const flat = flattenDepts(depts);
@@ -139,7 +155,9 @@ export function useOperatingContext(): OperatingContext {
   /** 고른 것이 없으면 «없다» 가 아니라 «권한 범위 전체» 다 — 그것이 서버가 하는 일이다. */
   const scopeLabel = status === 'loading' ? '확인 중…'
     : current ? (current.name_ko || current.dept_id)
-      : picked ? picked
+      // 식별자가 정본 조직도에 결속되지 않았으면 그 코드를 사람 이름처럼 내보내지 않는다.
+      // 잘못된 이름을 지어내지도 않고, 사용자가 회사 구성에서 고칠 자리도 분명히 한다.
+      : picked ? '조직 연결 필요'
         : me?.unrestricted ? '권한 범위 전체'
           : me?.primary_dept_id
             ? `내 소속 전체 · ${flat.find((d) => d.dept_id === me.primary_dept_id)?.name_ko
@@ -153,10 +171,43 @@ export function useOperatingContext(): OperatingContext {
    *  그것을 지우자 회사가 아예 사라졌다.
    *  ★ 서버가 `/auth/me` 로 **자기가 실제로 쓰는 테넌트**를 알려 준다. 고른 값이 있으면
    *    그것을, 없으면 서버가 말한 값을 쓴다 — 어느 쪽도 지어내지 않는다. */
-  const company = (ctx.tenantId || me?.tenant_id || '').trim();
+  // 인증 서버가 말한 설치본 테넌트가 정본이다. 브라우저 localStorage에는 이전 시연 서버의
+  // tenant가 남을 수 있으므로 그것을 먼저 쓰면 새 서버에서도 옛 코드 ID가 계속 보인다.
+  // 현재 제품에는 tenant 전환 API가 없고 조직/REAL·VIRTUAL 문맥만 전환하므로, 선택값은
+  // 서버가 아직 답하지 못한 짧은 로딩 구간의 보조값으로만 쓴다.
+  const company = (me?.tenant_id || ctx.tenantId || '').trim();
 
-  //: ★ 이름이 있으면 이름을, 없으면 **식별자를 그대로** 쓴다(둘 다 사실이다).
-  const companyName = (tenants.find((t) => t.tenant_id === company)?.name_ko || '').trim();
+  //: ★ tenant 이름이 정본이다. 과거 자료처럼 tenant 이름표가 아직 없고 승인된 실제 법인이
+  //:   정확히 하나라면 그 법인 이름도 저장된 사실이므로 쓸 수 있다. 둘 이상이면 고르지 않는다.
+  const realEntities = entities.filter((e) => e.tenant_id === company
+    && e.entity_mode === 'REAL' && e.status === 'ACTIVE');
+
+  // 현재 범위/소속 부서가 속한 가장 가까운 법인. ★ 그룹 전체에 실제 법인이 여럿이어도
+  // 사용자의 조직 경로는 하나이므로 `LS`나 첫 번째 법인을 임의 선택하지 않는다.
+  const companyPath: EcmNode[][] = [];
+  const walkCompany = (rows: EcmNode[], parents: EcmNode[] = []) => {
+    for (const n of rows) {
+      const path = [...parents, n];
+      companyPath.push(path);
+      walkCompany(n.children || [], path);
+    }
+  };
+  walkCompany(companyTree);
+  const scopeRef = (ctx.scopeNodeId || '').trim();
+  const deptRef = (me?.primary_dept_id || '').trim();
+  const matchedPaths = companyPath.filter((path) => {
+    const leaf = path[path.length - 1];
+    return scopeRef
+      ? leaf.node_id === scopeRef
+      : Boolean(deptRef && leaf.dept_id === deptRef);
+  });
+  const legalNames = [...new Set(matchedPaths.map((path) =>
+    [...path].reverse().find((n) => n.node_type === 'legal_entity')?.name_ko || '')
+    .filter(Boolean))];
+  const contextualCompanyName = legalNames.length === 1 ? legalNames[0] : '';
+  const companyName = (tenants.find((t) => t.tenant_id === company)?.name_ko
+    || contextualCompanyName
+    || (realEntities.length === 1 ? realEntities[0].name_ko : '') || '').trim();
 
   return {
     company,
