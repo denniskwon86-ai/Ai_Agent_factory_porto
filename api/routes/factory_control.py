@@ -1952,15 +1952,35 @@ def _promotion_materializer(release: Dict[str, Any], release_id: str, actor: str
     return _run
 
 
-def _release_code_paths(release_id: str) -> List[str]:
+def _release_code_paths(release_id: str, project_id: str = "") -> List[str]:
     """이 릴리스의 생성 코드가 어디 있는가. **없으면 빈 목록**이다.
 
     ⚠️ 없는 것을 「검사할 것이 없으니 통과」로 바꾸지 않는다 — 그 판단은
-      `release_promotion._check_static` 이 «보지 못한 것은 통과가 아니다» 로 한다."""
+      `release_promotion._check_static` 이 «보지 못한 것은 통과가 아니다» 로 한다.
+
+    ★★★ [2026-08-27 실측] **프로젝트 워크스페이스를 함께 본다.**
+
+    종전에는 라이브러리 릴리스 디렉터리만 돌려줬다. 그런데 거기에는 `release.json`
+    하나뿐이고 생성 코드(`src/App.tsx`)는 워크스페이스에 있다. 그래서 승격의 정적
+    인증 검사는 **0개 파일을 훑고 «통과»** 를 냈다.
+
+        게시 때  : `scan_paths([workspace_path(project_id)])` → 차단 3건 (ok=False)
+        승격 때  : `scan_paths([release_dir(release_id)])`    → 0건    (ok=True)
+
+    같은 질문에 출처가 둘이면 둘이 다른 답을 한다. 실제로 자체 로그인 폼과 비밀번호
+    비교가 든 앱이 **운영으로 승격됐다** — 매니페스트가 `local_login` 을 금지한 채로.
+    ⚠️ 릴리스 디렉터리도 계속 본다(거기에 사본이 생기면 그것도 검사 대상이다)."""
     from core import library_paths
 
+    out: List[str] = []
     root = library_paths.release_dir(release_id)
-    return [root] if os.path.isdir(root) else []
+    if os.path.isdir(root):
+        out.append(root)
+    if project_id:
+        ws = workspace_path(project_id)
+        if os.path.isdir(ws):
+            out.append(ws)
+    return out
 
 
 def _release_readiness_state(release: Dict[str, Any]) -> Any:
@@ -2036,8 +2056,23 @@ def _now_iso_utc() -> str:
 
 def _materialize_contract_for_release(project_id: str, release_id: str, *,
                                       actor_id: str, profile: str,
-                                      ctx: Dict[str, Any]) -> Dict[str, Any]:
+                                      ctx: Dict[str, Any], plane: Any) -> Dict[str, Any]:
     """[Wave F-0] 승인된 프로젝트 계약을 **이 릴리스의 데이터셋으로 만든다.**
+
+    ★★★ [2026-08-27 실측] **어느 평면에 만드는지는 부르는 쪽이 정한다.** 종전에는
+      여기서 `app_data_service`(운영 평면)를 직접 잡았다. 그런데 게시되는 판은
+      **후보**이고 후보의 평면은 Preview 다(`_candidate_plane`). 결과가 둘이었다:
+
+        ① **앱이 영영 안 열린다.** 증명 발급도 승격 검사도 후보의 평면(Preview)을
+           보는데 거기엔 아무것도 없다 — 「계약에 있는 데이터셋이 물질화되지
+           않았습니다: ['accounts', 'users']」. 7/7 완주하고 계약까지 승인된 판이
+           **열 수 있는 길이 하나도 없는 상태**로 서 있었다.
+        ② **검토 안 된 판이 운영 평면에 썼다.** 실측으로 운영 `app_data.db` 에
+           `accounts`·`users` 가 들어가 있었다 — Preview 경계가 막으려던 바로 그것이다.
+
+    ⚠️⚠️ 바로 위(게시 경로)의 주석은 「그전까지 이 판은 Preview 평면만 만지고 운영
+      데이터에 닿지 않는다(F-1)」고 **적혀 있었다.** 주석이 코드를 대신 주장한 자리다.
+    ★ 그래서 여기서 평면을 고르지 않는다 — 고르면 또 갈린다. 상태를 아는 쪽이 준다.
 
     ★★★ 여기가 「승인이 무언가를 만들게 하는」 자리다. 그전까지 승인 뒤에 하는 일은
       타입 어댑터 파일 쓰기 하나였고, 그래서 계약 경로를 지난 릴리스가 **한 건도
@@ -2069,13 +2104,20 @@ def _materialize_contract_for_release(project_id: str, release_id: str, *,
                 "datasets": []}
 
     from core import contract_materializer as cm
-    from core.app_data import AppDataError, app_data_service
+    from core.app_data import AppDataError
     from core.data_preparation.store import data_preparation_store
+
+    #: ⚠️ 평면을 모르면 **아무 데도 쓰지 않는다.** 종전처럼 운영 평면으로 되돌아가면
+    #:   그것이 바로 이 결함이다 — 모를 때의 기본값이 가장 위험한 평면이면 안 된다.
+    if plane is None:
+        return {"state": "FAILED", "datasets": [],
+                "detail": "이 판이 어느 데이터 평면에 속하는지 확정하지 못해 "
+                          "물질화하지 않았습니다(생애주기 상태 미기록)."}
 
     try:
         out = cm.materialize(
             contract, release_id=release_id, actor_id=actor_id,
-            store=data_preparation_store, app_data=app_data_service,
+            store=data_preparation_store, app_data=plane,
             tenant_id=str(ctx.get("tenant_id", "") or ""),
             scope_node_id=str(ctx.get("scope_node_id", "") or ""),
             entity_mode=str(ctx.get("entity_mode", "") or ""))
@@ -2307,10 +2349,12 @@ async def create_release(project_id: str,
         release["lifecycle_state"] = ""
         release["lifecycle_state_error"] = str(e)[:300]
 
+    #: ★★★ **상태를 기록한 뒤에 부른다** — `_candidate_plane` 이 생애주기를 읽어
+    #:   평면을 고르기 때문이다. 순서가 바뀌면 평면을 못 정하고 위에서 fail-closed 된다.
     release["contract_materialization"] = _materialize_contract_for_release(
         project_id, release_id, actor_id=(p.user_id or ""),
         profile=str(release.get("runtime_contract_profile", "") or ""),
-        ctx=viewing_context(p))
+        ctx=viewing_context(p), plane=_candidate_plane(release_id))
     #: ⚠️ 결과를 릴리스 파일에 **다시 쓴다** — 「무엇이 만들어졌는가」를 나중에 물을
     #:   수 있어야 한다. 실패했다면 그 사실도 그대로 남는다.
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
@@ -3252,7 +3296,7 @@ async def promote_release(project_id: str, release_id: str, req: PromoteRequest,
     try:
         out = release_promotion.promote(
             release=release, release_id=release_id, lifecycle=program_lifecycle,
-            actor=(p.user_id or ""), code_paths=_release_code_paths(release_id),
+            actor=(p.user_id or ""), code_paths=_release_code_paths(release_id, project_id),
             readiness_state=readiness_state, reason=req.reason,
             #: ★★★ [F-3] 검사는 **후보가 사는 평면**으로, 물질화는 **운영 평면**에.
             plane=_candidate_plane(release_id),
@@ -3300,7 +3344,7 @@ async def promotion_check(project_id: str, release_id: str, no_business_data: bo
 
     verdict = release_promotion.run_checks(
         release=release, release_id=release_id, lifecycle=program_lifecycle,
-        code_paths=_release_code_paths(release_id),
+        code_paths=_release_code_paths(release_id, project_id),
         plane=_candidate_plane(release_id),
         readiness_state=(release_promotion.NOT_APPLICABLE if no_business_data
                          else _release_readiness_state(release)))

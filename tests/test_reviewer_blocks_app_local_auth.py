@@ -1,0 +1,128 @@
+"""★★★ 앱이 **자기 로그인을 만들면 빌드 중에 막힌다.** (2026-08-27 실측)
+
+## ⚠️⚠️ 무엇이 있었나
+
+실제 가동이 만든 앱의 첫 화면이 이랬다:
+
+    거래처 관리 시스템 / 사용자 아이디 / 비밀번호 / 로그인
+    App.tsx:61  (u) => u.username === loginUsername && u.password_hash === loginPassword
+
+이 앱은 회사 호스트 **안에서** 열린다(앱인앱). 사용자는 이미 인증돼 있다. 그런데 앱이
+자기 로그인 화면에 막혀 **데이터 평면을 한 번도 부르지 않았다** — 7/7 완주했고, 계약
+승인됐고, 게시됐고, 화면에 뜨는데, 아무것도 못 한다.
+
+## ⚠️ 검사기는 이미 있었다 — 부르는 곳이 없었을 뿐이다
+
+`platform_auth_checker` 는 게시 때 워크스페이스를 훑어 차단 3건을 찾고 `release.json` 에
+`ok: false` 로 적어 두기까지 했다. 그런데 **빌드 중에 부르는 곳이 0곳**이었다. 코드가 다
+만들어진 뒤에야 말하니 그때는 고칠 사람이 없다.
+
+    고지문(`app_runtime_brief`)  = 설득 — 모델이 안 들으면 아무 일도 안 일어난다
+    이 게이트                     = 차단 — 안 들으면 재작업이 돈다
+
+★ 그래서 이 파일은 **실제로 생성된 앱 코드**를 대조군으로 쓴다. 내가 지어낸 문자열로
+  시험하면 「내 정규식이 내 예제를 잡는다」만 증명하게 된다.
+"""
+import inspect
+
+import pytest
+
+from nodes.utils import platform_auth_checker as pac
+
+
+#: 실제 가동이 만든 코드에서 그대로 가져온 두 줄. **바꾸지 않는다.**
+_REAL_LOGIN_CHECK = (
+    "const found = users.find(\n"
+    "  (u) => u.username === loginUsername && u.password_hash === loginPassword\n"
+    ");\n")
+_REAL_PASSWORD_FIELD = (
+    '<label className="block text-sm font-medium text-slate-700 mb-1">비밀번호</label>\n'
+    '<input\n'
+    '  type="password"\n'
+    '  value={loginPassword}\n'
+    '/>\n')
+
+
+def _blocks(code: str):
+    return [h for h in pac.scan_text(code, path="src/App.tsx")
+            if h.get("severity") == "block"]
+
+
+def test_실제로_생성된_로그인_코드가_차단_신호를_낸다():
+    """★★★ **이 파일의 요지.** 제품이 실제로 만든 것을 잡아야 게이트다."""
+    hits = _blocks(_REAL_LOGIN_CHECK + _REAL_PASSWORD_FIELD)
+    signals = {h["signal"] for h in hits}
+    assert "password_storage" in signals, f"비밀번호 비교를 못 잡는다: {signals}"
+    assert "local_login_form" in signals, f"비밀번호 입력 필드를 못 잡는다: {signals}"
+
+
+def test_업무_화면은_걸리지_않는다():
+    """★★★ 대조군. 오탐이 나면 개발자가 이 검사를 끄고, 꺼진 검사는 없는 것과 같다."""
+    ok_code = (
+        "const [accounts, setAccounts] = useState([]);\n"
+        "useEffect(() => { afs.list('accounts').then(setAccounts)"
+        "  .catch(() => setLoadError('데이터를 불러오지 못했습니다')); }, []);\n"
+        "return <table>{accounts.map(a => <tr key={a.account_id}>"
+        "<td>{a.company_name}</td></tr>)}</table>;\n")
+    assert _blocks(ok_code) == [], _blocks(ok_code)
+
+
+# ── 게이트가 **실제로 걸려 있는가** ───────────────────────────────────────
+
+def test_리뷰어가_빌드_중에_이_검사를_부른다():
+    """⚠️⚠️ 결함의 본체는 정규식이 아니라 **부르는 곳이 없었다**는 것이다.
+
+    ★ 검사기가 훌륭해도 아무도 안 부르면 없는 것과 같다 — 이 저장소가 반복해 온 모양."""
+    import nodes.execution as ex
+
+    src = inspect.getsource(ex.run_reviewer)
+    assert "platform_auth_checker" in src, (
+        "리뷰어가 자체 인증 검사를 부르지 않는다 — 검사기가 있어도 소용없다")
+
+
+def test_차단이면_재작업으로_돌려보낸다():
+    """★ 「경고를 붙이고 통과」가 아니라 **REWORK_DEV** 여야 한다.
+
+    ⚠️ 권고로 두면 리뷰어 LLM 이 판단에 섞어 버리고, 그러면 통과할 때가 생긴다."""
+    import nodes.execution as ex
+
+    src = inspect.getsource(ex.run_reviewer)
+    i = src.index("app_local_auth")
+    around = src[max(0, i - 1400):i + 400]
+    assert "REWORK_DEV" in around, "차단 신호를 재작업으로 돌려보내지 않는다"
+
+
+def test_프런트와_백엔드를_함께_본다():
+    """⚠️ 로그인 화면만 막고 `/login` 라우트를 남기면 절반만 막은 것이다."""
+    import nodes.execution as ex
+
+    src = inspect.getsource(ex.run_reviewer)
+    i = src.index("_pac.scan_text")
+    around = src[max(0, i - 600):i + 200]
+    assert "fe_files" in around and "be_files" in around, (
+        "프런트만 검사한다 — 서버측 로그인 라우트가 그대로 남는다")
+
+
+# ── 승격 게이트도 같은 사실을 봐야 한다 ──────────────────────────────────
+
+def test_승격_검사가_0건_스캔을_통과로_세지_않는다():
+    """★★★ 「빈 결과」와 「깨끗한 결과」는 다르다.
+
+    ⚠️ 실측: 승격 검사가 라이브러리 릴리스 디렉터리(`release.json` 하나뿐)를 훑어
+      **0개 파일**을 보고 `ok=True` 를 냈다. 그래서 자체 로그인이 든 앱이 운영으로
+      승격됐다 — 게시 때 같은 검사기가 이미 차단 3건을 찾아 둔 상태에서."""
+    from core import release_promotion as rp
+
+    src = inspect.getsource(rp._check_static)
+    assert "scanned" in src, "검사한 파일 수를 보지 않는다"
+
+
+def test_승격_검사가_게시와_같은_코드를_본다():
+    """★★★ 같은 질문에 출처가 둘이면 둘이 다른 답을 한다."""
+    import inspect as _i
+
+    import api.routes.factory_control as fc
+
+    src = _i.getsource(fc._release_code_paths)
+    assert "workspace_path" in src, (
+        "승격 검사가 프로젝트 워크스페이스를 안 본다 — 생성 코드는 거기 있다")

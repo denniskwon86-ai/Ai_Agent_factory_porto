@@ -138,6 +138,20 @@ def _check_static(code_paths: Optional[List[str]]) -> Check:
         return Check(CHECK_STATIC, False,
                      f"읽지 못한 파일이 {len(out['unreadable'])}개 있습니다 — "
                      f"검사하지 못한 것을 통과로 세지 않습니다.")
+    #: ★★★ [2026-08-27 실측] **한 건도 안 봤으면 통과가 아니다.**
+    #:
+    #: ⚠️⚠️ 바로 위 주석은 「검사할 경로가 없으면 통과가 아니다」라고 말하는데, 실제로
+    #:   막힌 자리는 그게 아니었다 — 경로는 **있었고**(라이브러리 릴리스 디렉터리),
+    #:   그 안에 코드가 한 줄도 없었다. `scanned == 0` 이라 findings 가 비었고,
+    #:   `ok = not blocking` 이 그대로 `True` 가 됐다.
+    #:   결과: 자체 로그인 폼과 비밀번호 비교가 든 앱이 **운영으로 승격됐다.**
+    #:   게시 때 같은 검사기가 워크스페이스를 훑어 차단 3건을 이미 찾아 둔 상태였다.
+    #: ★ 「빈 결과」와 「깨끗한 결과」를 가른다 — 통제가 자기가 볼 것이 있었는지를
+    #:   먼저 확인해야 통제다.
+    if not out.get("scanned"):
+        return Check(CHECK_STATIC, False,
+                     "검사한 파일이 0개입니다 — 생성 코드를 찾지 못했습니다. "
+                     "보지 못한 것을 통과로 세지 않습니다.")
     if not out.get("ok"):
         first = (out.get("blocking") or [{}])[0]
         return Check(CHECK_STATIC, False,

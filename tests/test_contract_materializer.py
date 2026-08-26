@@ -381,6 +381,7 @@ def test_rerunning_materialization_adopts_instead_of_duplicating(dp, app_data):
 # ★★★ 이 절이 없으면 **아무도 부르지 않는 물질화기**가 남는다 — 단위 시험은 전부
 #   초록인데 사용자 경로에서는 아무 일도 일어나지 않는 상태. 그것이 바로 이 Wave 가
 #   고치러 온 결함이다(승인은 되는데 아무것도 생기지 않았다).
+from core.app_data import app_data_service
 import api.routes.factory_control as fc                              # noqa: E402
 
 
@@ -399,7 +400,11 @@ def test_a_legacy_release_is_not_materialized(tmp_path, monkeypatch):
     """★★★ **소급하지 않는다.** 계약 이전 판의 결속을 다시 쓰면 이미 도는 앱이 바뀐다."""
     out = fc._materialize_contract_for_release(
         "P1", "rel_1", actor_id="u@x", profile="",
-        ctx={"tenant_id": TENANT, "scope_node_id": SCOPE, "entity_mode": MODE})
+        ctx={"tenant_id": TENANT, "scope_node_id": SCOPE, "entity_mode": MODE},
+        #: ★ [2026-08-27] 평면은 **부르는 쪽이 준다.** 종전에는 함수가 운영 싱글턴을
+        #:   직접 잡았고, 그래서 후보 판이 운영 데이터에 썼다. 이 세 시험은 전부
+        #:   물질화 **전에** 끝나므로 어느 평면을 주든 결과가 같다.
+        plane=app_data_service)
     assert out["state"] == "SKIPPED_LEGACY"
     assert out["datasets"] == []
 
@@ -413,7 +418,11 @@ def test_a_contract_profile_release_without_a_contract_file_is_reported_not_skip
                         raising=False)
     out = fc._materialize_contract_for_release(
         "P1", "rel_1", actor_id="u@x", profile="v1",
-        ctx={"tenant_id": TENANT, "scope_node_id": SCOPE, "entity_mode": MODE})
+        ctx={"tenant_id": TENANT, "scope_node_id": SCOPE, "entity_mode": MODE},
+        #: ★ [2026-08-27] 평면은 **부르는 쪽이 준다.** 종전에는 함수가 운영 싱글턴을
+        #:   직접 잡았고, 그래서 후보 판이 운영 데이터에 썼다. 이 세 시험은 전부
+        #:   물질화 **전에** 끝나므로 어느 평면을 주든 결과가 같다.
+        plane=app_data_service)
     assert out["state"] == "FAILED"
     assert out["state"] != "SKIPPED_LEGACY"
 
@@ -438,7 +447,11 @@ def test_a_materialization_failure_is_recorded_not_swallowed(tmp_path, monkeypat
 
     out = fc._materialize_contract_for_release(
         "P1", "rel_1", actor_id="u@x", profile="v1",
-        ctx={"tenant_id": TENANT, "scope_node_id": SCOPE, "entity_mode": MODE})
+        ctx={"tenant_id": TENANT, "scope_node_id": SCOPE, "entity_mode": MODE},
+        #: ★ [2026-08-27] 평면은 **부르는 쪽이 준다.** 종전에는 함수가 운영 싱글턴을
+        #:   직접 잡았고, 그래서 후보 판이 운영 데이터에 썼다. 이 세 시험은 전부
+        #:   물질화 **전에** 끝나므로 어느 평면을 주든 결과가 같다.
+        plane=app_data_service)
     assert out["state"] == "FAILED"
     assert out["detail"], "무엇이 안 됐는지가 비어 있다"
     assert "활성 원천이" in out["detail"]

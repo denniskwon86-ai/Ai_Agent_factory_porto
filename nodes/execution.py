@@ -1176,6 +1176,70 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             else:
                 render_note += "\n([OK] 지어낸 데이터 표시 없음 - 실패 시 fail-closed 확인)"
 
+            # ══════════════════════════════════════════════════════════════
+            # 🚨🚨 [2026-08-27 실측] **앱이 자기 로그인을 만들었는가** — 하드 차단
+            # ══════════════════════════════════════════════════════════════
+            #
+            # 실제 가동이 만든 앱의 첫 화면이 이랬다:
+            #
+            #     거래처 관리 시스템 / 사용자 아이디 / 비밀번호 / 로그인
+            #     App.tsx:61  (u) => u.username === loginUsername
+            #                        && u.password_hash === loginPassword
+            #
+            # 이 앱은 회사 호스트 **안에서** 열린다(앱인앱). 사용자는 이미 인증돼 있다.
+            # 그런데 앱이 자기 로그인 화면에 막혀 **데이터 평면을 한 번도 부르지 않았다** —
+            # 완주했고, 승인됐고, 게시됐고, 열리는데, 아무것도 못 한다.
+            #
+            # ⚠️⚠️ **검사기는 이미 있었다.** `platform_auth_checker` 가 게시 때 워크스페이스를
+            #   훑어 차단 3건을 찾아 `release.json` 에 `ok: false` 로 적어 두기까지 했다.
+            #   그런데 **빌드 중에 부르는 곳이 0곳**이었다 — 코드가 다 만들어진 뒤에야
+            #   말하니 그때는 고칠 사람이 없다. 이 저장소가 반복해 온 모양 그대로다.
+            #
+            # ★ 고지문(`app_runtime_brief`)은 **설득**이고 이것은 **차단**이다. 설득만
+            #   두면 모델이 안 들었을 때 아무 일도 일어나지 않는다 — 실제로 그랬다.
+            # ⚠️ 프런트·백엔드를 **함께** 본다. 로그인 화면만 막고 `/login` 라우트를
+            #   남기면 절반만 막은 것이다.
+            from nodes.utils import platform_auth_checker as _pac
+            _auth_hits = []
+            for _f in (fe_files + be_files):
+                _code = _f.get("code", "") or ""
+                if _code:
+                    _auth_hits.extend(_pac.scan_text(_code, path=_f.get("file_path", "")))
+            _auth_block = [h for h in _auth_hits if h.get("severity") == "block"]
+            if _auth_block:
+                print(f"❌ [PlatformAuth] 앱이 자체 인증을 만들었다 {len(_auth_block)}건 - 재작업")
+                _lines = "\n".join(
+                    f"  · {h.get('path','')}:{h.get('line','')} — {h.get('description','')}"
+                    f"  ({str(h.get('evidence',''))[:80]})" for h in _auth_block[:12])
+                review_text = (
+                    "🚨 이 앱은 **회사 시스템 안에서 열립니다(앱인앱).** 사용자는 이미 "
+                    "인증되어 있고, 부서·역할·조회 범위도 이미 정해져 있습니다. 그런데 "
+                    "앱이 자체 인증을 만들었습니다:\n" + _lines +
+                    "\n\n[수정 지침] 로그인 화면·비밀번호 입력·사용자 테이블·토큰 발급을 "
+                    "**전부 지우십시오.** 앱은 첫 화면부터 바로 업무 화면을 그립니다. "
+                    "사용자 정보가 필요하면 호스트가 준 문맥을 쓰고, 별도로 확인하지 "
+                    "마십시오. 요구사항에 「로그인」이 적혀 있더라도 그 요구는 **이미 "
+                    "충족된 것**으로 다루십시오 — 이 플랫폼에서는 만들 수 없습니다."
+                )
+                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+                cr_scores["CODE_REVIEW"] = 0.0
+                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
+                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV",
+                               "blocking_fails": ["app_local_auth"]})
+                return {
+                    "reviewer_decision": "REWORK_DEV",
+                    "reviewer_feedback": review_text,
+                    "pm_override_reason": "",
+                    "needs_revision": False,
+                    "current_stage": "CODE_REVIEW",
+                    "stage_scores": cr_scores,
+                    "criteria_log": cr_log,
+                    "supervisor_feedback": review_text,
+                    "supervisor_hops": hops,
+                }
+            else:
+                render_note += "\n([OK] 자체 인증 없음 - 호스트 인증을 그대로 물려받음)"
+
             #  정적 품질 백스톱(Phase 2): 컴포넌트 분리/빈상태/디자인토큰 - 하드 차단이 아니라
             #    권고로 LLM 리뷰어 판단에 주입(오탐 재작업 폭증 방지). frontend_skill/design_system 가
             #    1차 규율, 이 검사기는 그 규율이 무너진 경우를 잡는 백스톱.
