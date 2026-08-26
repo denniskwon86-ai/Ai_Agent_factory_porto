@@ -15,6 +15,8 @@
 import { useEffect, useState } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
+import { DataPrepError, listInstances } from '../lib/dataPrepApi';
+import { KitAppPanel } from './KitAppPanel';
 
 export type BuildStartResult = {
   projectId: string;
@@ -26,14 +28,16 @@ export type BuildStartResult = {
 };
 
 export function BuildStartDialog({
-  templates, knowledgePacks, packsBlocked, onClose, onCreate,
+  templates, knowledgePacks, packsBlocked, onClose, onCreate, onOpenDataPrep,
 }: {
   templates: { template_id: string; name?: string; pipeline_name?: string }[];
   knowledgePacks: any[];
   packsBlocked: string;
   onClose: () => void;
   onCreate: (r: BuildStartResult) => void;
+  onOpenDataPrep: () => void;
 }) {
+  const [startMode, setStartMode] = useState<'kit' | 'general'>('kit');
   const [projectId, setProjectId] = useState('');
   const [isMega, setIsMega] = useState(false);
   const [templateId, setTemplateId] = useState(templates[0]?.template_id || 'default');
@@ -99,6 +103,36 @@ export function BuildStartDialog({
 
       <div className="afs-dialog-body" style={{ padding: 24, display: 'flex',
         flexDirection: 'column', gap: 20 }}>
+        <div>
+          <span style={label}>시작 방식</span>
+          <div style={{ display: 'grid', gap: 10,
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+            <button style={option(startMode === 'kit')} onClick={() => setStartMode('kit')}>
+              <span style={{ fontSize: 20 }}>▦</span>
+              <span>
+                <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>업무키트 기반 앱</b>
+                <span style={{ display: 'block', fontSize: 12,
+                  color: 'var(--surface-text-muted)' }}>
+                  이 조직에 적용된 패키지의 준비도·계약을 확인하고 시작합니다 · 추천
+                </span>
+              </span>
+            </button>
+            <button style={option(startMode === 'general')} onClick={() => setStartMode('general')}>
+              <span style={{ fontSize: 20 }}>＋</span>
+              <span>
+                <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>일반 앱 제작</b>
+                <span style={{ display: 'block', fontSize: 12,
+                  color: 'var(--surface-text-muted)' }}>
+                  업무 절차·지식·기준정보를 직접 골라 새 프로젝트를 만듭니다
+                </span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {startMode === 'kit' ? (
+          <KitStartFlow onOpenDataPrep={onOpenDataPrep} />
+        ) : (<>
         {err && (
           <div style={{ fontSize: 13, padding: '10px 14px', borderRadius: 8,
             color: 'var(--state-error-fg)', background: 'var(--state-error-bg)' }}>{err}</div>
@@ -258,7 +292,108 @@ export function BuildStartDialog({
             background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
           }}>이 조건으로 만들기</button>
         </div>
+        </>)}
       </div>
     </HubDialog>
+  );
+}
+
+/** 현재 사용자가 **볼 수 있는 조직 적용본**에서만 앱 생성 흐름을 시작한다.
+ *
+ * 임의 `kit_instance_id` 입력을 받지 않는다. 적용본을 골라도 서버가 내려 준 준비도와
+ * 계약 상태를 `KitAppPanel`이 다시 확인하며, 승인된 계약 전에는 앱 만들기 행동이 열리지 않는다.
+ */
+function KitStartFlow({ onOpenDataPrep }: { onOpenDataPrep: () => void }) {
+  const [instances, setInstances] = useState<any[] | null>(null);
+  const [selected, setSelected] = useState('');
+  const [error, setError] = useState<{ message: string; status: number } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    listInstances()
+      .then((d) => { if (alive) setInstances(d.instances || []); })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        const err = e as DataPrepError;
+        setError({ message: err?.message || '적용된 업무키트를 확인하지 못했습니다.',
+          status: err?.status || 0 });
+      });
+    return () => { alive = false; };
+  }, []);
+
+  if (error) {
+    return (
+      <div style={{ padding: 14, borderRadius: 8, border: '1px solid var(--state-error-fg)',
+        background: 'var(--state-error-bg)' }}>
+        <strong style={{ color: 'var(--state-error-fg)' }}>업무키트를 확인하지 못했습니다</strong>
+        <div style={{ fontSize: 13, marginTop: 5 }}>{error.message}</div>
+        <div style={{ fontSize: 12, marginTop: 5, color: 'var(--surface-text-muted)' }}>
+          {error.status === 404 ? '현재 회사·조직 범위를 다시 확인하십시오.'
+            : '적용본이 없는 것이 아니라 지금 조회하지 못한 상태입니다.'}
+        </div>
+      </div>
+    );
+  }
+
+  if (instances === null) {
+    return <div style={{ color: 'var(--surface-text-muted)', fontSize: 14 }}>
+      이 조직에 적용된 업무키트를 확인하는 중…
+    </div>;
+  }
+
+  if (instances.length === 0) {
+    return (
+      <div style={{ padding: 16, borderRadius: 8, border: '1px solid var(--surface-border)',
+        background: 'var(--surface-raised)' }}>
+        <strong>이 회사·조직에 적용된 업무키트가 없습니다.</strong>
+        <p style={{ margin: '7px 0 12px', fontSize: 13, color: 'var(--surface-text-muted)' }}>
+          먼저 업무 데이터 준비에서 샘플 패키지를 조직에 적용하고 필요한 데이터 판을 인증하십시오.
+        </p>
+        <button className="secondary-button" onClick={onOpenDataPrep}>업무 데이터 준비 열기</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 7 }}>조직 적용본</div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {instances.map((row: any) => {
+            const on = selected === row.instance_id;
+            return (
+              <button key={row.instance_id} type="button" onClick={() => setSelected(row.instance_id)}
+                aria-pressed={on} style={{
+                  minHeight: 58, padding: '10px 13px', textAlign: 'left', borderRadius: 8,
+                  border: `1px solid ${on ? 'var(--ls-navy)' : 'var(--surface-border)'}`,
+                  borderLeft: `4px solid ${on ? 'var(--ls-navy)' : 'transparent'}`,
+                  background: on ? 'var(--surface-raised)' : 'var(--surface-card)',
+                  color: 'var(--surface-text)', cursor: 'pointer',
+                }}>
+                <strong style={{ display: 'block', fontSize: 14 }}>
+                  {row.label || row.kit_id || '이름 없는 적용본'}
+                </strong>
+                <span style={{ display: 'block', marginTop: 3, fontSize: 12,
+                  color: 'var(--surface-text-muted)' }}>
+                  {row.entity_mode || '문맥 확인 필요'} · {row.status || '상태 확인 필요'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {selected ? (
+        <div style={{ border: '1px solid var(--surface-border)', borderRadius: 8,
+          background: 'var(--surface-card)' }}>
+          <KitAppPanel instanceId={selected} />
+        </div>
+      ) : (
+        <div style={{ padding: 13, borderRadius: 8, background: 'var(--surface-raised)',
+          color: 'var(--surface-text-muted)', fontSize: 13 }}>
+          적용본을 고르면 만들 수 있는 업무 앱, 데이터 준비 상태, 계약 승인 여부가 표시됩니다.
+        </div>
+      )}
+    </div>
   );
 }

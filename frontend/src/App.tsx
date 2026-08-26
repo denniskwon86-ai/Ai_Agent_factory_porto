@@ -679,6 +679,7 @@ function AppShell() {
             knowledgePacks={knowledgePacks}
             packsBlocked={packsBlocked}
             onClose={() => setBuildStart(false)}
+            onOpenDataPrep={() => { setBuildStart(false); setShowDataPrep(true); }}
             onCreate={async (r) => {
               const domains = r.masterDomains.split(',').map((x) => x.trim()).filter(Boolean);
               const okDone = await createProject(r.projectId, r.templateId, r.packIds,

@@ -85,6 +85,20 @@ def test_설치본_회사와_데이터_범위는_같은_tenant의_조직으로_�
     assert scopes["plant-afs-smelting-01"]["dept_id"] == "demo_smelting"
 
 
+def test_새_업무는_조직에_적용된_업무키트와_일반_제작을_명시적으로_가른다():
+    dialog = _read("frontend/src/components/BuildStartDialog.tsx")
+    app = _read("frontend/src/App.tsx")
+
+    assert "'kit' | 'general'" in dialog
+    assert "업무키트 기반 앱" in dialog
+    assert "일반 앱 제작" in dialog
+    assert "listInstances()" in dialog
+    assert "<KitAppPanel instanceId={selected}" in dialog
+    assert "적용본을 고르면 만들 수 있는 업무 앱" in dialog
+    assert "onOpenDataPrep={() => { setBuildStart(false); setShowDataPrep(true); }}" in app
+    assert 'placeholder="kit_instance_id' not in dialog
+
+
 def test_비서의_화면_이름은_Jarvis_한곳에서_관리한다():
     brand = _read("frontend/src/lib/brand.ts")
     rail = _read("frontend/src/components/CanvasJarvisRail.tsx")
