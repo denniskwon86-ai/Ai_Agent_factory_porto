@@ -114,6 +114,15 @@ def test_업무키트_앱은_새업무_창뿐_아니라_앱운영에서_직접_�
     assert "운영 중인 앱을 열고, 후보 앱의 운영 전환 상태를 확인합니다." in kit_apps
 
 
+def test_회사문맥_화면에서_조직을_실제_실행범위로_전환할_수_있다():
+    org = _read("frontend/src/components/OrgChartPanel.tsx")
+
+    assert "이 조직으로 전환" in org
+    assert "setEnterpriseContext({ scopeNodeId });" in org
+    assert "disabled={!String(selectedDept.scope_node_id || '').trim()}" in org
+    assert "window.location.reload();" in org
+
+
 def test_릴리스_카드는_키트_앱_이름과_운영상태를_앞세우고_내부_id는_접는다():
     page = _read("frontend/src/components/BuildPage.tsx")
 

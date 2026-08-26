@@ -31,6 +31,7 @@ import { JarvisRail } from '../design/JarvisRail';
 import { DEPT_ROLE_KO, deptRoleKo, orgStatusKo } from '../design/terms';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
 import { errorTitle } from '../lib/closedLoopFetch';
+import { setEnterpriseContext } from '../lib/api';
 import { orgApi, type Dept, type MyScope, type OrgEdge, type OrgUser } from '../lib/orgApi';
 
 type View = 'chart' | 'graph' | 'users' | 'history' | 'myscope';
@@ -435,6 +436,28 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
                           비어 있는 것이 «전사 공개»를 뜻하지 않습니다.
                         </Banner>
                       )}
+
+                      {/* ★ 상단의 회사 문맥 버튼은 이 화면을 연다. 따라서 여기서 조직을
+                          고른 뒤 실제 실행 문맥으로 전환할 행동이 반드시 있어야 한다.
+                          조직 정본을 편집하는 «적용»과 사용자의 조회 문맥을 바꾸는 이 행동은
+                          서로 다른 일이다. 범위가 비면 D-014에 따라 전환하지 않는다. */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8,
+                        margin: '10px 0 14px', flexWrap: 'wrap' }}>
+                        <button className="secondary-button"
+                          disabled={!String(selectedDept.scope_node_id || '').trim()}
+                          onClick={() => {
+                            const scopeNodeId = String(selectedDept.scope_node_id || '').trim();
+                            if (!scopeNodeId) return;
+                            setEnterpriseContext({ scopeNodeId });
+                            onClose();
+                            window.location.reload();
+                          }}>
+                          이 조직으로 전환
+                        </button>
+                        <span className="hint-line" style={{ margin: 0 }}>
+                          선택하면 모든 화면이 이 조직 범위의 자료를 다시 조회합니다.
+                        </span>
+                      </div>
 
                       {canEdit ? (
                         <FormField label="조직 범위"
