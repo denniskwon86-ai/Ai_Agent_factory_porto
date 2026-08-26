@@ -99,6 +99,19 @@ def test_새_업무는_조직에_적용된_업무키트와_일반_제작을_명�
     assert 'placeholder="kit_instance_id' not in dialog
 
 
+def test_릴리스_카드는_키트_앱_이름과_운영상태를_앞세우고_내부_id는_접는다():
+    page = _read("frontend/src/components/BuildPage.tsx")
+
+    assert "listKitApps" in page
+    assert "kitApp?.label || r.project_name" in page
+    assert "업무 앱 {kitApp.app_id}" in page
+    assert "운영 중" in page and "운영 후보" in page
+    assert "게시 {localTime(r.created_at)}" in page
+    assert "<summary style={{ cursor: 'pointer' }}>식별 정보</summary>" in page
+    assert ">앱 실행</button>" in page
+    assert ">릴리스 관리</button>" in page
+
+
 def test_비서의_화면_이름은_Jarvis_한곳에서_관리한다():
     brand = _read("frontend/src/lib/brand.ts")
     rail = _read("frontend/src/components/CanvasJarvisRail.tsx")

@@ -16,10 +16,11 @@
 //
 // ⚠️ §1.3 최소 크기: 본문 14px+ / 보조 12px+ / 버튼 13px+·36px+ / 핵심 42~48px.
 // ⚠️ §2.4 간격: 화면 24~32 · 카드 내부 16~20 · gap 16 · 버튼 r6 · 카드 r8.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useFactoryStore } from '../store/useFactoryStore';
 import { shortId } from '../lib/displayId';
+import { listInstances, listKitApps, type KitAppRow } from '../lib/dataPrepApi';
 
 //: 문맥 축에서 막힌 사유를 사람 말로. **정상 격리**와 **점검 대상**을 다르게 말한다.
 const CTX_KO: Record<string, string> = {
@@ -127,7 +128,7 @@ const BUCKETS: { id: Bucket; label: string; hint: string }[] = [
   { id: 'active', label: '미완료', hint: '완료되지 않았거나 진행률을 아직 집계하지 못한 작업' },
   { id: 'mine', label: '내 프로젝트', hint: '내가 만든 독립 프로젝트' },
   { id: 'mega', label: '통합 프로젝트', hint: '여러 프로젝트를 묶어 운영하는 상위 단위' },
-  { id: 'releases', label: '릴리스', hint: '완성되어 전달 가능한 결과물' },
+  { id: 'releases', label: '릴리스', hint: '게시된 결과물과 현재 운영 상태' },
   { id: 'archive', label: '보관함', hint: '더 진행하지 않는 것' },
 ];
 
@@ -135,6 +136,39 @@ const card: React.CSSProperties = {
   background: 'var(--surface-card)', border: '1px solid var(--surface-border)',
   borderRadius: 8, padding: 18,
 };
+
+function localTime(raw: string): string {
+  const value = String(raw || '').trim();
+  if (!value) return '게시 시각 미기록';
+  // 시간대가 적힌 값만 현지시각으로 바꾼다. 시간대 없는 옛 기록을 UTC라고 추측하면
+  // 실제보다 9시간 밀린 시각을 사람이 사실로 읽는다.
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(date);
+}
+
+function lifecycleView(row: any, kitApp?: KitAppRow) {
+  if (row.lifecycle_status === 'disabled') {
+    return { label: '사용 중단', tone: 'var(--state-error-fg)', detail: row.lifecycle_reason || '' };
+  }
+  if (row.lifecycle_status === 'deprecated') {
+    return { label: '중단 예고', tone: 'var(--state-warn-fg)', detail: row.lifecycle_reason || '' };
+  }
+  if (kitApp?.lifecycle_state === 'active' || row.is_enterprise) {
+    return { label: '운영 중', tone: 'var(--state-success-fg)', detail: '인증된 업무 데이터를 읽습니다.' };
+  }
+  if (kitApp?.lifecycle_state === 'candidate') {
+    return { label: '운영 후보', tone: 'var(--state-warn-fg)', detail: '운영 전환 전의 후보 판입니다.' };
+  }
+  return {
+    label: row.lifecycle_recorded ? '사용 가능' : '사용 상태 미기록',
+    tone: row.lifecycle_recorded ? 'var(--state-success-fg)' : 'var(--surface-text-muted)',
+    detail: row.lifecycle_recorded ? '' : '기존 릴리스로, 관리자의 사용 상태 기록이 없습니다.',
+  };
+}
 
 export function BuildPage({
   projects, releases, companyName, scopeLabel, entityMode,
@@ -152,6 +186,30 @@ export function BuildPage({
 }) {
   const [bucket, setBucket] = useState<Bucket>('active');
   const [q, setQ] = useState('');
+  const [kitApps, setKitApps] = useState<Record<string, KitAppRow>>({});
+
+  // 키트 앱 릴리스는 `project_name`이 내부 release_id와 같을 수 있다. 그 문자열을 잘라
+  // 이름을 만들지 않고, 현재 조직에서 볼 수 있는 적용본의 앱 계약이 준 이름을 결속한다.
+  useEffect(() => {
+    let alive = true;
+    listInstances()
+      .then(async (d) => {
+        const groups = await Promise.allSettled(
+          (d.instances || []).map((row: any) => listKitApps(String(row.instance_id || ''))),
+        );
+        if (!alive) return;
+        const next: Record<string, KitAppRow> = {};
+        for (const group of groups) {
+          if (group.status !== 'fulfilled') continue;
+          for (const app of group.value.apps || []) {
+            if (app.release_id) next[app.release_id] = app;
+          }
+        }
+        setKitApps(next);
+      })
+      .catch(() => { /* 이름 보강 실패가 릴리스 목록 자체를 0건으로 만들면 안 된다 */ });
+    return () => { alive = false; };
+  }, []);
 
   const progress = (p: Project) => {
     const t = Number(p.total_tasks || 0);
@@ -266,32 +324,49 @@ export function BuildPage({
         ) : (
           <div style={{ display: 'grid', gap: 16,
             gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', maxWidth: 1180 }}>
-            {releaseRows.map((r: any) => (
+            {releaseRows.map((r: any) => {
+              const kitApp = kitApps[String(r.release_id || '')];
+              const displayName = kitApp?.label || r.project_name || '이름 없는 릴리스';
+              const state = lifecycleView(r, kitApp);
+              return (
               <div key={r.release_id} style={card}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--surface-text)' }}>
-                  📦 {r.project_name || r.release_id}
+                  📦 {displayName}
                 </div>
-                <div style={{ fontSize: 11, marginTop: 4,
-                  fontFamily: 'var(--font-mono, monospace)',
-                  color: 'var(--surface-text-faint)' }}
-                  title={r.release_id}>{shortId(r.release_id)}</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+                  marginTop: 5, fontSize: 12 }}>
+                  {kitApp?.app_id && <span style={{ color: 'var(--surface-text-muted)' }}>
+                    업무 앱 {kitApp.app_id}
+                  </span>}
+                  <strong style={{ color: state.tone }}>{state.label}</strong>
+                </div>
+                {state.detail && <div style={{ fontSize: 12, marginTop: 4,
+                  color: 'var(--surface-text-muted)' }}>{state.detail}</div>}
                 <div style={{ fontSize: 12, marginTop: 4, color: 'var(--surface-text-muted)' }}>
-                  {r.created_at || ''}
+                  게시 {localTime(r.created_at)}
                 </div>
+                <details style={{ fontSize: 11, marginTop: 7, color: 'var(--surface-text-faint)' }}>
+                  <summary style={{ cursor: 'pointer' }}>식별 정보</summary>
+                  <div style={{ fontFamily: 'var(--font-mono, monospace)', marginTop: 3 }}
+                    title={r.release_id}>{shortId(r.release_id)}</div>
+                </details>
                 <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
                   <button onClick={() => onOpenRelease(String(r.release_id || ''))} style={{
                     height: 36, padding: '0 16px', fontSize: 13, fontWeight: 700, borderRadius: 6,
                     cursor: 'pointer', border: '1px solid var(--ls-navy)',
                     background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
-                  }}>열기</button>
+                  }} title="게시된 앱 또는 결과 화면을 엽니다">앱 실행</button>
                   <button onClick={() => onManageRelease(r)} style={{
                     height: 36, padding: '0 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
                     border: '1px solid var(--action-secondary-border)',
                     background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
-                  }}>관리</button>
+                  }} title="사용 상태·운영 승격·중단 이력을 관리합니다">릴리스 관리</button>
+                </div>
+                <div style={{ fontSize: 11.5, marginTop: 7, color: 'var(--surface-text-faint)' }}>
+                  앱 실행은 결과 화면 · 릴리스 관리는 사용 상태와 운영 전환
                 </div>
               </div>
-            ))}
+            );})}
           </div>
         )
       ) : filtered.length === 0 ? (
