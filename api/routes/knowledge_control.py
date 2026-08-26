@@ -7,7 +7,7 @@ from typing import Optional
 from api.deps import (Principal, assert_can_manage_standard, current_principal,
                       hidden_envelope, scope_allows_owner, viewer_visible_scopes,
                       visibility_block_reason)
-from core.knowledge_base import knowledge_base, extract_text
+from core.knowledge_base import DocumentExtractionError, extract_text, knowledge_base
 
 router = APIRouter(prefix="/api/v1/knowledge")
 
@@ -181,6 +181,34 @@ async def delete_document(pack_id: str, filename: str,
     if not ok:
         raise HTTPException(status_code=404, detail="지식팩 또는 문서를 찾을 수 없습니다.")
     return {"status": "success"}
+
+
+@router.get("/packs/{pack_id}/documents/{filename}/content")
+async def document_content(pack_id: str, filename: str, offset: int = 0,
+                           limit: int = 20000,
+                           p: Principal = Depends(current_principal)):
+    """보관 원문의 추출 내용을 읽는다. 검색 청크를 원문처럼 이어 붙이지 않는다."""
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    _safe_pack_id(pack_id)
+    if not _FNAME_RE.match(filename or ""):
+        raise HTTPException(status_code=400, detail="잘못된 파일명입니다.")
+    manifest = knowledge_base.get_pack(pack_id)
+    if not manifest:
+        raise HTTPException(status_code=404, detail="지식팩을 찾을 수 없습니다.")
+    nodes = viewer_visible_scopes(p)
+    if nodes is not None and not scope_allows_owner(nodes, manifest.get("owner_org_id", "")):
+        # 본문은 목록보다 무겁다. 권한 밖 팩의 존재 자체를 새 경로에서 알리지 않는다.
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    try:
+        data = await asyncio.to_thread(
+            knowledge_base.document_content, pack_id, filename, offset, limit)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except DocumentExtractionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"status": "success", "data": data}
 
 
 @router.post("/packs/{pack_id}/search")

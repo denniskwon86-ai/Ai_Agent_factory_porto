@@ -265,6 +265,42 @@ class KnowledgeBase:
     def get_pack(self, pack_id: str) -> dict:
         return self._read_manifest(pack_id)
 
+    def document_content(self, pack_id: str, filename: str, offset: int = 0,
+                         limit: int = 20000) -> dict:
+        """보관한 원문을 다시 추출해 사람이 읽을 수 있는 구간을 돌려준다.
+
+        검색 색인의 청크는 검색 품질 확인용이지 원문 열람 계약이 아니다. 원문이 보존되지 않은
+        레거시 문서는 빈 문자열로 접지 않는다 — 빈 문자열은 «내용이 없는 문서»로 오해되므로
+        ``FileNotFoundError`` 로 구분한다.
+        """
+        manifest = self._read_manifest(pack_id)
+        if not manifest:
+            raise FileNotFoundError("지식팩을 찾을 수 없습니다.")
+        documents = manifest.get("documents") or []
+        if not any(str(d.get("filename", "")) == filename for d in documents
+                   if isinstance(d, dict)):
+            raise FileNotFoundError("지식팩에 등록된 문서를 찾을 수 없습니다.")
+        path = os.path.join(PACKS_DIR, pack_id, "files", filename)
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                "원본이 보존되지 않은 레거시 문서입니다. 원본을 다시 등록해야 내용을 확인할 수 있습니다."
+            ) from exc
+        text = extract_text(filename, raw)
+        start = max(0, int(offset or 0))
+        size = max(1, min(int(limit or 20000), 50000))
+        end = min(len(text), start + size)
+        return {
+            "filename": filename,
+            "content": text[start:end],
+            "offset": start,
+            "returned": max(0, end - start),
+            "total_chars": len(text),
+            "truncated": end < len(text),
+        }
+
     # ── 지식팩의 조직 범위 (2026-07-30) ──────────────────────────────────
     def pack_scope_report(self, pack_ids: list = None) -> dict:
         """팩별로 **몇 개 청크에 조직 범위가 심겨 있는지** 센다.

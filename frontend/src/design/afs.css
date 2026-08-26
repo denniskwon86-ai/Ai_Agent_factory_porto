@@ -1350,6 +1350,559 @@
    ⚠️ 덮지 않으면 남은 자리로 뒤 화면이 비치고, 사용자는 「덜 그려졌다」로 읽는다. */
 .afs-dialog-body > .panel.afs-fill { flex: 1 1 auto; min-height: 0; }
 
+/* 앱 운영 — 승인 시안의 master/detail 구조.
+   왼쪽은 공통 기능 메뉴가 아니라 현재 키트의 앱 목록이고, 오른쪽은 선택 앱의 운영 상세다. */
+.afs-scope .afs-master-detail {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.afs-scope .afs-master-list,
+.afs-scope .afs-master-detail-pane {
+  min-width: 0;
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-soft);
+}
+.afs-scope .afs-master-list { overflow: hidden; }
+.afs-scope .afs-master-list > header {
+  min-height: 55px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--surface-border);
+}
+.afs-scope .afs-master-list > header strong,
+.afs-scope .afs-master-list > header span { display: block; }
+.afs-scope .afs-master-list > header strong { font-size: 15px; }
+.afs-scope .afs-master-list > header span {
+  margin-top: 2px;
+  color: var(--surface-text-muted);
+  font-size: 11px;
+}
+.afs-scope .afs-master-list-body { padding: 8px; }
+.afs-scope .afs-master-selector {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 14px;
+  gap: 10px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--surface-text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.afs-scope .afs-master-selector + .afs-master-selector { margin-top: 4px; }
+.afs-scope .afs-master-selector:hover { background: var(--surface-sunken); }
+.afs-scope .afs-master-selector[aria-pressed="true"] {
+  border-color: var(--surface-border-control);
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--ls-red);
+}
+.afs-scope .afs-master-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--ls-navy);
+  font-size: 14px;
+  font-weight: 800;
+}
+.afs-scope .afs-master-selector-copy,
+.afs-scope .afs-master-selector-copy small,
+.afs-scope .afs-master-selector-copy strong,
+.afs-scope .afs-master-selector-copy span { display: block; min-width: 0; }
+.afs-scope .afs-master-selector-copy small { font-size: 10px; font-weight: 700; }
+.afs-scope .afs-master-selector-copy strong {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.afs-scope .afs-master-selector-copy span {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--surface-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.afs-scope .afs-master-detail-pane { padding: 14px; }
+.afs-scope .afs-master-detail-pane > ul > li { margin-bottom: 0 !important; }
+@media (max-width: 900px) {
+  .afs-scope .afs-master-detail { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 시뮬레이션 — 조건과 결과를 같은 작업면에서 비교한다. */
+.afs-scope.scenario-page {
+  min-height: calc(100vh - 74px);
+  padding: 24px;
+  background: var(--surface-page);
+}
+.afs-scope .scenario-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+.afs-scope .scenario-page-head small,
+.afs-scope .scenario-controls > header small,
+.afs-scope .scenario-results > header small {
+  color: var(--ls-red);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+.afs-scope .scenario-page-head h1 {
+  margin: 5px 0 4px;
+  color: var(--surface-text);
+  font-size: 26px;
+  line-height: 1.25;
+}
+.afs-scope .scenario-page-head p,
+.afs-scope .scenario-controls > header p {
+  margin: 0;
+  color: var(--surface-text-muted);
+  font-size: 14px;
+}
+.afs-scope .scenario-principle {
+  max-width: 390px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--ls-red);
+  background: var(--surface-raised);
+}
+.afs-scope .scenario-principle strong,
+.afs-scope .scenario-principle span { display: block; }
+.afs-scope .scenario-principle strong { font-size: 13px; }
+.afs-scope .scenario-principle span {
+  margin-top: 3px;
+  color: var(--surface-text-muted);
+  font-size: 11px;
+}
+.afs-scope .scenario-workspace {
+  display: grid;
+  grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.afs-scope .scenario-controls,
+.afs-scope .scenario-results {
+  min-width: 0;
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-soft);
+}
+.afs-scope .scenario-controls { padding: 16px; }
+.afs-scope .scenario-controls > header {
+  margin: -16px -16px 16px;
+  padding: 15px 16px;
+  border-bottom: 1px solid var(--surface-border);
+}
+.afs-scope .scenario-controls > header h2,
+.afs-scope .scenario-results > header h2 {
+  margin: 3px 0;
+  font-size: 18px;
+}
+.afs-scope .scenario-driver-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.afs-scope .scenario-driver-grid label { min-width: 0; font-size: 13px; }
+.afs-scope .scenario-driver-grid label > span { display: block; font-weight: 650; }
+.afs-scope .scenario-driver-grid label em {
+  color: var(--surface-text-muted);
+  font-style: normal;
+  font-weight: 400;
+}
+.afs-scope .scenario-driver-grid input {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--surface-border-control);
+  border-radius: 6px;
+  background: var(--surface-card);
+  font-size: 14px;
+}
+.afs-scope .scenario-driver-grid small {
+  display: block;
+  margin-top: 3px;
+  color: var(--surface-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.afs-scope .scenario-run { width: 100%; min-height: 42px; }
+.afs-scope .scenario-results { overflow: hidden; }
+.afs-scope .scenario-results > header {
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px;
+  color: #fff;
+  background: linear-gradient(110deg, var(--ls-navy), #204b98);
+}
+.afs-scope .scenario-results > header small { color: #b7c8e7; }
+.afs-scope .scenario-result-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: #e8edf5;
+  background: rgba(255,255,255,.12);
+  font-size: 11px;
+  font-weight: 750;
+}
+.afs-scope .scenario-result-state.ready { color: #d6f5e7; background: rgba(31,157,111,.3); }
+.afs-scope .scenario-error {
+  margin: 14px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--state-error-fg);
+  border-radius: 6px;
+  color: var(--state-error-fg);
+  background: var(--state-error-bg);
+  font-size: 13px;
+}
+.afs-scope .scenario-empty {
+  min-height: 480px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 36px;
+  text-align: center;
+}
+.afs-scope .scenario-empty > span {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--ls-navy);
+  font-size: 25px;
+}
+.afs-scope .scenario-empty strong { font-size: 17px; }
+.afs-scope .scenario-empty p {
+  max-width: 520px;
+  margin: 8px 0;
+  color: var(--surface-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.afs-scope .scenario-empty ol {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: var(--surface-text-muted);
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.afs-scope .scenario-result-body { padding: 14px; }
+.afs-scope .scenario-baseline-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--state-warn-fg);
+  border-radius: 7px;
+  background: var(--state-warn-bg);
+  font-size: 13px;
+}
+.afs-scope .scenario-baseline-banner span { color: var(--surface-text-muted); }
+.afs-scope .scenario-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.afs-scope .scenario-kpis article {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+.afs-scope .scenario-kpis span,
+.afs-scope .scenario-kpis strong,
+.afs-scope .scenario-kpis em { display: block; }
+.afs-scope .scenario-kpis span { color: var(--surface-text-muted); font-size: 11px; }
+.afs-scope .scenario-kpis strong { margin: 5px 0; font-size: 18px; }
+.afs-scope .scenario-kpis strong small { font-size: 10px; font-weight: 500; }
+.afs-scope .scenario-kpis em,
+.afs-scope .scenario-table-wrap td.up { color: var(--state-success-fg); }
+.afs-scope .scenario-kpis em.down,
+.afs-scope .scenario-table-wrap td.down { color: var(--state-error-fg); }
+.afs-scope .scenario-kpis em { color: var(--surface-text-muted); font-size: 10px; font-style: normal; }
+.afs-scope .scenario-table-wrap { overflow-x: auto; }
+.afs-scope .scenario-table-wrap table { width: 100%; border-collapse: collapse; }
+.afs-scope .scenario-table-wrap th,
+.afs-scope .scenario-table-wrap td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--surface-border);
+  font-size: 13px;
+  text-align: right;
+}
+.afs-scope .scenario-table-wrap th:first-child,
+.afs-scope .scenario-table-wrap td:first-child { text-align: left; }
+.afs-scope .scenario-table-wrap td small {
+  margin-left: 5px;
+  color: var(--surface-text-muted);
+  font-size: 10px;
+}
+.afs-scope .scenario-trace {
+  margin-top: 12px;
+  color: var(--surface-text-muted);
+  font-size: 11px;
+}
+.afs-dialog-body.scenario-dialog-body { padding: 18px; overflow: auto; }
+.afs-scope.scenario-dialog-content .scenario-workspace { grid-template-columns: 420px minmax(520px, 1fr); }
+@media (max-width: 1100px) {
+  .afs-scope .scenario-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .afs-scope .scenario-page-head { align-items: flex-start; flex-direction: column; }
+  .afs-scope .scenario-principle { max-width: none; width: 100%; }
+  .afs-scope .scenario-workspace,
+  .afs-scope.scenario-dialog-content .scenario-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .afs-scope.scenario-page { padding: 16px; }
+  .afs-scope .scenario-driver-grid,
+  .afs-scope .scenario-kpis { grid-template-columns: minmax(0, 1fr); }
+  .afs-scope .scenario-baseline-banner { flex-direction: column; }
+}
+
+/* ── 독립 제품공간 3열 셸: 왼쪽 업무 메뉴 / 가운데 본문 / 오른쪽 Jarvis ────────
+ * 에이전트 통제소와 **같은 탐색 문법**을 앱 제작·운영·시뮬레이션에도 쓴다.
+ * ProductShell 아래에 있으므로 중앙 최소폭 680px을 강제하지 않는다 — 그 값을 유지하면
+ * 1280px 화면에서 Jarvis가 잘리거나 문서 전체에 가로 스크롤이 생긴다. */
+.afs-scope .hub-layout.product-page-shell {
+  grid-template-columns: 220px minmax(0, 1fr) 300px;
+  min-height: 0;
+  background: var(--surface-page);
+}
+.afs-scope .product-page-shell > .hub-main { padding: 0; }
+.afs-scope .product-page-shell > .jarvis-rail { display: flex; }
+.afs-scope .product-page-shell .product-atlas-rail {
+  width: 100%; height: 100%; min-width: 0; min-height: 0;
+}
+.afs-scope .product-page-content {
+  min-width: 0;
+  min-height: 100%;
+  padding: 22px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--surface-page);
+}
+/* 결정·보고는 기존 협업 모달의 조밀한 타이포를 그대로 가져오지 않는다. 독립 제품공간에서는
+   앱 운영·시뮬레이션과 같은 제목 비율, 여백, 버튼 높이와 브랜드 색 문법을 쓴다. */
+.afs-scope .product-hub-page .screen-head {
+  align-items: flex-start;
+  margin-bottom: 0;
+}
+.afs-scope .product-hub-page .screen-head small,
+.afs-scope .product-hub-page .panel-head small {
+  color: var(--ls-red);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+.afs-scope .product-hub-page .screen-head h2 {
+  margin: 5px 0 4px;
+  color: var(--surface-text);
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -.035em;
+}
+.afs-scope .product-hub-page .screen-head p {
+  max-width: 760px;
+  color: var(--surface-text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.afs-scope .product-hub-page .state-chip {
+  min-height: 28px;
+  margin-top: 0;
+  display: inline-flex;
+  align-items: center;
+}
+.afs-scope .product-hub-page .primary-button,
+.afs-scope .product-hub-page .secondary-button,
+.afs-scope .product-hub-page .danger-ghost,
+.afs-scope .product-hub-page .danger-solid {
+  min-height: 38px !important;
+}
+.afs-scope .product-hub-page .panel-head {
+  min-height: 62px;
+  align-items: center;
+}
+.afs-scope .product-hub-page .panel-head h3 {
+  color: var(--surface-text);
+  font-size: 17px;
+}
+.afs-scope .product-hub-page .metric-row {
+  margin: 0;
+  gap: 10px;
+}
+.afs-scope .agent-page-actions {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--surface-border);
+  border-left: 3px solid var(--ls-red);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+.afs-scope .agent-page-actions > div:last-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.afs-scope .agent-page-actions small,
+.afs-scope .agent-page-actions b { display: block; }
+.afs-scope .agent-page-actions small {
+  color: var(--ls-red);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+.afs-scope .agent-page-actions b {
+  margin-top: 3px;
+  color: var(--surface-text);
+  font-size: 13px;
+}
+@media (min-width: 901px) {
+  /* 에이전트는 목록에서 고른 즉시 오른쪽 상세를 편집해야 한다. 공통 1180px 규칙처럼 한 열로
+     쌓으면 15개 목록을 모두 지나야 상세가 보여 선택과 편집의 관계가 끊어진다. */
+  .afs-scope .agent-master-detail-layout {
+    grid-template-columns: minmax(275px, .9fr) minmax(330px, 1.1fr);
+    align-items: start;
+  }
+  .afs-scope .agent-master-detail-layout > .panel { min-width: 0; }
+  .afs-scope .agent-master-detail-layout > .panel:first-child .people-list {
+    max-height: 560px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+}
+/* 에이전트 상세의 12개 편집 필드는 그대로 재사용하되, 과거 다크 사이드바 색만 현재 제품
+   카드 체계로 번역한다. 실행 흐름의 ReactFlow 캔버스는 이 범위 밖이라 어두운 작업면을 유지한다. */
+.afs-scope .agent-master-page .agent-detail-editor {
+  width: 100% !important;
+  height: auto !important;
+  max-height: 620px;
+  border: 0 !important;
+  color: var(--surface-text) !important;
+  background: var(--surface-card) !important;
+  box-shadow: none !important;
+}
+.afs-scope .agent-master-page .agent-detail-editor > div:first-child {
+  color: var(--surface-text);
+  background: var(--surface-raised) !important;
+  border-color: var(--surface-border) !important;
+}
+.afs-scope .agent-master-page .agent-detail-editor .bg-gray-900 {
+  background: var(--surface-card) !important;
+}
+.afs-scope .agent-master-page .agent-detail-editor .bg-gray-800,
+.afs-scope .agent-master-page .agent-detail-editor .bg-gray-850 {
+  background: var(--surface-raised) !important;
+}
+.afs-scope .agent-master-page .agent-detail-editor .border-gray-700 {
+  border-color: var(--surface-border-control) !important;
+}
+.afs-scope .agent-master-page .agent-detail-editor .text-gray-100,
+.afs-scope .agent-master-page .agent-detail-editor .text-gray-200,
+.afs-scope .agent-master-page .agent-detail-editor .text-gray-300 {
+  color: var(--surface-text) !important;
+}
+.afs-scope .agent-master-page .agent-detail-editor .text-gray-400,
+.afs-scope .agent-master-page .agent-detail-editor .text-gray-500 {
+  color: var(--surface-text-muted) !important;
+}
+.afs-scope .agent-master-page .agent-detail-editor input,
+.afs-scope .agent-master-page .agent-detail-editor textarea,
+.afs-scope .agent-master-page .agent-detail-editor select {
+  min-height: 38px;
+  color: var(--surface-text) !important;
+  background: var(--surface-card) !important;
+}
+.afs-scope .agent-master-page .agent-detail-editor .bg-blue-600,
+.afs-scope .agent-master-page .agent-detail-editor .bg-purple-600 {
+  color: #fff !important;
+  background: var(--action-primary-bg) !important;
+  border-color: var(--action-primary-bg) !important;
+}
+.afs-scope .agent-master-page .agent-detail-editor .bg-blue-600:hover,
+.afs-scope .agent-master-page .agent-detail-editor .bg-purple-600:hover {
+  background: var(--action-primary-hover) !important;
+}
+/* 두 레일 사이의 시뮬레이션 본문은 세로 흐름이 더 읽기 쉽다. 넓은 화면에서만 다시 나눈다. */
+.afs-scope .scenario-product-shell .scenario-workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+.afs-scope .scenario-product-shell .scenario-empty { min-height: 320px; }
+@media (min-width: 1700px) {
+  .afs-scope .scenario-product-shell .scenario-workspace {
+    grid-template-columns: minmax(360px, 410px) minmax(0, 1fr);
+  }
+}
+@media (max-width: 1180px) {
+  /* 공통 HubShell은 이 폭에서 Jarvis를 접지만, 사용자가 세 제품공간에서는 계속 보도록
+     요구했다. 좌우 폭을 줄여 세 영역을 모두 유지한다. */
+  .afs-scope .hub-layout.product-page-shell {
+    grid-template-columns: 190px minmax(0, 1fr) 280px;
+  }
+  .afs-scope .hub-layout.product-page-shell > .jarvis-rail,
+  .afs-scope .hub-layout.product-page-shell .jarvis-rail { display: flex; }
+  .afs-scope .product-page-content { padding-inline: 16px; }
+  .afs-scope .product-page-shell > .jarvis-rail .jarvis-input {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .afs-scope .product-page-shell > .jarvis-rail .jarvis-input button {
+    justify-self: end;
+    min-width: 72px;
+  }
+}
+@media (max-width: 900px) {
+  /* 좁은 창에서도 없애지 않는다. 메뉴는 왼쪽에 유지하고 Jarvis를 본문 아래 칸으로 내린다. */
+  .afs-scope .hub-layout.product-page-shell {
+    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(300px, 42vh);
+  }
+  .afs-scope .product-page-shell > .module-rail { grid-column: 1; grid-row: 1 / 3; }
+  .afs-scope .product-page-shell > .hub-main { grid-column: 2; grid-row: 1; }
+  .afs-scope .product-page-shell > .jarvis-rail {
+    grid-column: 2; grid-row: 2; max-height: none;
+    border-top: 1px solid var(--jarvis-divider);
+  }
+  .afs-scope .product-page-shell .product-atlas-rail {
+    grid-column: 2; grid-row: 2; max-height: none;
+    border-top: 1px solid #ffffff18;
+  }
+}
+
 /* ══ SW 생성기(통제실) — 어두운 작업면의 유틸리티 재해석 ═══════════════════════
  *
  * 사용자 결정 2026-08-23: 통제실은 **어두운 채로 두되 토큰 체계 안에 넣는다**.

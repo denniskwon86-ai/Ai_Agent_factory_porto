@@ -275,7 +275,7 @@ function QueueScreen({ list, state, stats, onOpen, onNew, onRetry }: {
   return (
     <>
       <ScreenHead kicker="DECISIONS" title="의사결정 센터"
-        description="시뮬레이션 결과를 하나의 Decision Package 로 만들고, 요청자·의사결정자·영향부서가 같은 문서를 관점별로 봅니다."
+        description="시뮬레이션·경로 계산 결과를 하나의 Decision Package 로 만들고, 요청자·의사결정자·영향부서가 같은 문서를 관점별로 봅니다."
         chip={state.status !== 'ok'
           ? { label: state.status === 'forbidden' ? '접근 불가' : '조회 불가', tone: 'danger' }
           : { label: stats.mine ? `내가 결정할 것 ${stats.mine}건` : '내 결정 대기 없음',
@@ -345,11 +345,17 @@ function DetailScreen({ d, views, view, onView, onBack, onRequestReview, onRespo
   onMeasure: (actionId: string, v: string) => void;
 }) {
   const rv = views?.views?.[view] || null;
+  const queryId = String(d.evidence?.query_id || '').trim();
+  const sourceLabel = d.simulation_run_id
+    ? `시뮬레이션 ${d.simulation_run_id}`
+    : queryId
+      ? `경로 계산 ${queryId.slice(0, 14)}`
+      : '원천 연결 없음';
 
   return (
     <>
       <ScreenHead kicker="DECISION PACKAGE" title={d.question}
-        description={`시뮬레이션 ${d.simulation_run_id || '(연결 없음)'} · 기준선 ${d.baseline_id || '(없음)'}`}
+        description={`${sourceLabel} · 기준선 ${d.baseline_id || '(없음)'}`}
         chip={{ label: DECISION_STATUS_KO[d.status]?.label || d.status,
           tone: DECISION_STATUS_KO[d.status]?.tone || 'muted' }} />
 
@@ -895,7 +901,7 @@ function CreateScreen({ runIds, onCancel, onSubmit }: {
   return (
     <>
       <ScreenHead kicker="NEW PACKAGE" title="새 Decision Package"
-        description="시뮬레이션 결과를 하나의 문서로 만듭니다. 세 관점 검토서를 따로 만들지 않습니다 — 이 문서 하나를 관점별로 렌더링합니다."
+        description="시뮬레이션·경로 계산 결과를 하나의 문서로 만듭니다. 세 관점 검토서를 따로 만들지 않습니다 — 이 문서 하나를 관점별로 렌더링합니다."
         chip={{ label: ready ? '만들 준비 완료' : '입력 중', tone: ready ? 'success' : 'data' }} />
 
       <Panel kicker="SOURCE" title="근거가 되는 시뮬레이션">

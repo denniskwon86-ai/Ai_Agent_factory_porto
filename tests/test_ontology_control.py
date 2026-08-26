@@ -111,6 +111,36 @@ def test_model_validation_and_atomic_install_api(tmp_path, monkeypatch):
     assert status.status_code == 200
     assert status.json()["data"]["status"] == "READY"
 
+    detail = client.get("/api/v1/ontology/model/G2-FIRST-VERTICAL-ONTOLOGY",
+                        params={"contract_version": "1.0.0"})
+    assert detail.status_code == 200
+    assert detail.json()["data"]["relation_types"][0]["id"] == "AFFECTS"
+    assert detail.json()["data"]["constraints"][0]["calculation_ref"].endswith(
+        "ARRIVAL_DELAY.v1")
+
+
+def test_management_list_and_proposal_context_use_verified_scope(tmp_path, monkeypatch):
+    client, _, _, _ = _harness(tmp_path, monkeypatch)
+    client.post("/api/v1/ontology/model/install", json={"contract": _contract()})
+    proposed = client.post("/api/v1/ontology/relations/propose", json=_proposal())
+    assert proposed.status_code == 200
+
+    listed = client.get("/api/v1/ontology/relations", params={"approval_status": "DRAFT"})
+    assert listed.status_code == 200
+    body = listed.json()["data"]
+    assert len(body["relations"]) == 1
+    assert body["relations"][0]["subject"]["object_id"] == "SHP-001"
+    assert body["relations"][0]["evidence_refs"] == ["SNAPSHOT:LOG-02:v1"]
+    assert "hidden_count" not in listed.text
+
+    context = client.get("/api/v1/ontology/proposal/context")
+    assert context.status_code == 200
+    assert context.json()["data"] == {
+        "tenant_id": "tenant_demo", "enterprise_scope_id": "plant_demo",
+        "entity_mode": "VIRTUAL", "owner_organization_id": "org_demo",
+        "ready": True, "reason": "",
+    }
+
 
 def test_relation_lifecycle_impact_and_evidence_api(tmp_path, monkeypatch):
     client, _, _, holder = _harness(tmp_path, monkeypatch)
@@ -141,6 +171,99 @@ def test_relation_lifecycle_impact_and_evidence_api(tmp_path, monkeypatch):
                           params={"as_of": "2026-03-01T00:00:00Z"})
     assert evidence.status_code == 200
     assert evidence.json()["data"]["calculation_ref"].endswith("ARRIVAL_DELAY.v1")
+
+
+def test_product_approval_action_records_and_binds_one_ledger_event(tmp_path, monkeypatch):
+    from core.decision_ledger import decision_ledger
+    from core.ontology_resolvers import product_approval_resolver
+
+    client, runtime, _, holder = _harness(tmp_path, monkeypatch)
+    assert client.post("/api/v1/ontology/model/install",
+                       json={"contract": _contract()}).status_code == 200
+    relation_id = client.post("/api/v1/ontology/relations/propose",
+                              json=_proposal()).json()["data"]["relation_id"]
+    assert client.post(f"/api/v1/ontology/relations/{relation_id}/submit").status_code == 200
+    holder["principal"] = _principal("governor@example.com")
+    runtime.approval_resolver = product_approval_resolver
+
+    approved = client.post(
+        f"/api/v1/ontology/relations/{relation_id}/decisions/approve",
+        json={"rationale": "인증판 근거와 계산 참조를 검토해 운영 관계로 승인합니다."})
+    assert approved.status_code == 200, approved.text
+    data = approved.json()["data"]
+    assert data["relation"]["approval_status"] == "APPROVED"
+    assert data["relation"]["ledger_correlation_id"] == data["decision_event"]["event_id"]
+    event = decision_ledger.get_event_strict(data["decision_event"]["event_id"])
+    assert event["event_type"] == "ONTOLOGY_RELATION_APPROVED"
+    assert event["subject_type"] == "ontology_relation"
+    assert event["subject_id"] == relation_id
+    assert event["actor_id"] == "governor@example.com"
+    assert event["enterprise_scope_id"] == "org_demo"
+
+    before = decision_ledger.list_events_strict(
+        subject_type="ontology_relation", subject_id=relation_id, limit=20)
+    retry = client.post(
+        f"/api/v1/ontology/relations/{relation_id}/decisions/approve",
+        json={"rationale": "네트워크 재시도"})
+    assert retry.status_code == 200
+    assert retry.json()["data"]["idempotent"] is True
+    after = decision_ledger.list_events_strict(
+        subject_type="ontology_relation", subject_id=relation_id, limit=20)
+    assert len(after) == len(before)
+
+    retired = client.post(
+        f"/api/v1/ontology/relations/{relation_id}/decisions/retire",
+        json={"rationale": "대체 관계가 승인되어 이 관계의 운영 사용을 종료합니다."})
+    assert retired.status_code == 200, retired.text
+    retired_data = retired.json()["data"]
+    assert retired_data["relation"]["approval_status"] == "RETIRED"
+    assert retired_data["decision_event"]["event_type"] == "ONTOLOGY_RELATION_RETIRED"
+    assert retired_data["relation"]["ledger_correlation_id"] == retired_data["decision_event"]["event_id"]
+
+
+def test_product_approval_action_blocks_self_approval_before_ledger_write(tmp_path, monkeypatch):
+    from core.decision_ledger import decision_ledger
+
+    client, _, _, _ = _harness(tmp_path, monkeypatch)
+    client.post("/api/v1/ontology/model/install", json={"contract": _contract()})
+    relation_id = client.post("/api/v1/ontology/relations/propose",
+                              json=_proposal()).json()["data"]["relation_id"]
+    client.post(f"/api/v1/ontology/relations/{relation_id}/submit")
+
+    denied = client.post(
+        f"/api/v1/ontology/relations/{relation_id}/decisions/approve",
+        json={"rationale": "제안자가 자신의 관계를 승인하려 합니다."})
+    assert denied.status_code == 400
+    assert decision_ledger.list_events_strict(
+        subject_type="ontology_relation", subject_id=relation_id, limit=20) == []
+
+
+def test_failed_relation_binding_compensates_the_approval_event(tmp_path, monkeypatch):
+    from core.decision_ledger import decision_ledger
+    from core.ontology_runtime import OntologyError
+
+    client, runtime, _, holder = _harness(tmp_path, monkeypatch)
+    client.post("/api/v1/ontology/model/install", json={"contract": _contract()})
+    relation_id = client.post("/api/v1/ontology/relations/propose",
+                              json=_proposal()).json()["data"]["relation_id"]
+    client.post(f"/api/v1/ontology/relations/{relation_id}/submit")
+    holder["principal"] = _principal("governor@example.com")
+
+    def fail_binding(*args, **kwargs):
+        raise OntologyError("injected relation write failure")
+
+    monkeypatch.setattr(runtime, "approve", fail_binding)
+    failed = client.post(
+        f"/api/v1/ontology/relations/{relation_id}/decisions/approve",
+        json={"rationale": "승인 후 관계 결속 실패를 재현합니다."})
+    assert failed.status_code == 400
+    events = decision_ledger.list_events_strict(
+        subject_type="ontology_relation", subject_id=relation_id, limit=20)
+    assert {e["event_type"] for e in events} == {
+        "ONTOLOGY_RELATION_APPROVED", "ONTOLOGY_APPROVAL_REVOKED"}
+    approved = next(e for e in events if e["event_type"] == "ONTOLOGY_RELATION_APPROVED")
+    revoked = next(e for e in events if e["event_type"] == "ONTOLOGY_APPROVAL_REVOKED")
+    assert revoked["parent_event_id"] == approved["event_id"]
 
 
 def test_hidden_endpoint_removes_path_and_evidence_without_count(tmp_path, monkeypatch):

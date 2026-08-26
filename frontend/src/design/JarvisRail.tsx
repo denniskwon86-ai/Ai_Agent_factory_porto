@@ -129,7 +129,13 @@ export function JarvisRail({
   const [quickOpen, setQuickOpen] = useState(false);
 
   useEffect(() => jarvisSession.subscribe(() => setTurns(jarvisSession.turns())), []);
-  useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [turns]);
+  useEffect(() => {
+    const log = logRef.current;
+    if (!log) return;
+    // 대화가 없을 때도 맨 아래로 보내면 시작 안내의 첫 문단이 잘리고 마지막 질문만 보인다.
+    // 실제 대화가 생긴 뒤에만 최신 답변으로 이동한다.
+    log.scrollTo({ top: turns.length ? log.scrollHeight : 0 });
+  }, [turns]);
 
   const send = async (message: string) => {
     const m = message.trim();
@@ -158,7 +164,7 @@ export function JarvisRail({
       <header>
         <span className="jarvis-orb" aria-hidden="true">◈</span>
         <div>
-          <small>AI FACTORY STUDIO</small>
+          <small>LAXS-M · AI 경영비서</small>
           <b>{ASSISTANT_NAME}</b>
         </div>
         {/* ★★ [UIUX-AUDIT-29 §3] 상태를 **사실대로** 표시한다. 서버가 없는데 «연결»이라고
@@ -279,7 +285,7 @@ export function JarvisRail({
 
       <div className="jarvis-input">
         <textarea value={input} onChange={(e) => setInput(e.target.value)}
-          placeholder="예: 이 앱은 어떤 자료를 요구합니까?"
+          placeholder="현재 화면과 선택한 객체에 대해 질문하세요."
           aria-label={`${ASSISTANT_NAME}에게 질문`}
           onKeyDown={(e) => {
             // Enter 로 보내고 Shift+Enter 로 줄바꿈 — 키보드만으로 대화할 수 있어야 한다.

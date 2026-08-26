@@ -170,7 +170,10 @@ const MODULE: Record<View, { kicker: string; title: string; subtitle: string; de
   },
 };
 
-export default function AgentMasterPanel() {
+export default function AgentMasterPanel({ page = false, onClose }: {
+  page?: boolean;
+  onClose?: () => void;
+} = {}) {
   const agentRegistry = useFactoryStore((s) => s.agentRegistry);
   const registryError = useFactoryStore((s) => s.agentRegistryError);
   const actionError = useFactoryStore((s) => s.agentActionError);
@@ -179,6 +182,7 @@ export default function AgentMasterPanel() {
   const resetAgentRegistry = useFactoryStore((s) => s.resetAgentRegistry);
   const restoreAgentRegistry = useFactoryStore((s) => s.restoreAgentRegistry);
   const closeAgentPanel = useFactoryStore((s) => s.closeAgentPanel);
+  const close = onClose || closeAgentPanel;
   const templates = useFactoryStore((s) => s.templates);
   const editingTemplateId = useFactoryStore((s) => s.editingTemplateId);
   const selectEditingTemplate = useFactoryStore((s) => s.selectEditingTemplate);
@@ -493,27 +497,8 @@ export default function AgentMasterPanel() {
     selectEditingTemplate(tid);
   };
 
-  return (
-    <HubDialog label="에이전트 통제소 — 누가 무엇을 어떤 순서로 하는가" onClose={closeAgentPanel}>
-      <div className="afs-dialog-bar">
-        <b>에이전트 통제소</b>
-        <span>사람 확인 지점을 지우면 확인 없이 끝까지 흐릅니다</span>
-        <div className="bar-actions">
-          {dirty && <span className="busy">저장 안 됨</span>}
-          {saving && <span className="busy">저장 중…</span>}
-          {canEdit && (
-            <button className="primary-button" disabled={!dirty || saving} onClick={handleSave}>
-              저장
-            </button>
-          )}
-          <button className="secondary-button" onClick={closeAgentPanel}>
-            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="afs-dialog-body">
-        <HubShell
+  const hub = (
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
           items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
           footer={
@@ -544,6 +529,7 @@ export default function AgentMasterPanel() {
               '이 순서를 바꾸면 어디에 영향이 갑니까?',
             ]} />}
         >
+          <div className={page ? 'product-page-content product-hub-page agent-master-page' : undefined}>
           {/* ★★ 조회 실패와 «구성 없음»을 구분한다. 없다고 믿으면 사용자는 처음부터 다시 만든다. */}
           {registryError && (
             <Banner tone="error" title="에이전트 구성을 가져오지 못했습니다">
@@ -571,6 +557,23 @@ export default function AgentMasterPanel() {
               : !draft ? { label: '확인 중', tone: 'muted' }
                 : { label: `에이전트 ${agents.length}개`, tone: 'data' }} />
 
+          {page && (
+            <div className="agent-page-actions" aria-label="에이전트 구성 저장 상태">
+              <div>
+                <small>CONFIGURATION</small>
+                <b>{dirty ? '저장하지 않은 변경이 있습니다' : '현재 구성이 저장되어 있습니다'}</b>
+              </div>
+              <div>
+                {saving && <span className="busy">저장 중…</span>}
+                {canEdit && (
+                  <button className="primary-button" disabled={!dirty || saving} onClick={handleSave}>
+                    변경사항 저장
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="metric-row">
             <Metric label="에이전트" state={metricState} value={draft ? agents.length : null}
               notes={{ error: '조회 불가', loading: '확인 중' }} hint="이 템플릿의 구성" />
@@ -595,7 +598,7 @@ export default function AgentMasterPanel() {
                 hint={canEdit
                   ? '고른 에이전트의 역할·모델·스킬을 오른쪽에서 편집합니다. 저장 전까지 반영되지 않습니다.'
                   : undefined} />
-              <div className="inbox-layout">
+              <div className="inbox-layout agent-master-detail-layout">
                 <FoundationList state={listState} rows={agentRows}
                   selectedId={selectedAgentId || ''} onSelect={setSelectedAgentId}
                   onRetry={() => fetchAgentRegistry()}
@@ -858,8 +861,30 @@ export default function AgentMasterPanel() {
               </div>
             </>
           )}
+          </div>
         </HubShell>
+  );
+
+  if (page) return hub;
+  return (
+    <HubDialog label="에이전트 통제소 — 누가 무엇을 어떤 순서로 하는가" onClose={close}>
+      <div className="afs-dialog-bar">
+        <b>에이전트 통제소</b>
+        <span>사람 확인 지점을 지우면 확인 없이 끝까지 흐릅니다</span>
+        <div className="bar-actions">
+          {dirty && <span className="busy">저장 안 됨</span>}
+          {saving && <span className="busy">저장 중…</span>}
+          {canEdit && (
+            <button className="primary-button" disabled={!dirty || saving} onClick={handleSave}>
+              저장
+            </button>
+          )}
+          <button className="secondary-button" onClick={close}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
+        </div>
       </div>
+      <div className="afs-dialog-body">{hub}</div>
     </HubDialog>
   );
 }

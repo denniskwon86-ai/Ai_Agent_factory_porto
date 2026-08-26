@@ -29,7 +29,7 @@ export type RailItem = {
 export function HubShell({
   title, subtitle, kicker,
   items, activeId, onSelect,
-  footer, jarvis, children,
+  footer, jarvis, layoutClassName = '', children,
 }: {
   title: string;
   subtitle?: string;
@@ -41,6 +41,8 @@ export function HubShell({
   footer?: React.ReactNode;
   /** 300px 우측 레일. 좁은 창(<1330px)에서는 CSS 가 접는다. */
   jarvis?: React.ReactNode;
+  /** 같은 3열 문법을 제품의 독립 페이지에서 쓸 때 붙이는 범위 클래스. */
+  layoutClassName?: string;
   children: React.ReactNode;
 }) {
   // ★★ 같은 화면에서 아이콘이 겹치면 아이콘은 구별에 쓸모가 없어진다(2026-08-04 «발» 충돌).
@@ -67,7 +69,8 @@ export function HubShell({
   //   실측에서 `display: block` 으로 떨어져 3열이 무너졌다. 스코프는 감싸는 요소가 갖는다.
   return (
     <div className="afs-scope" style={{ height: '100%' }}>
-    <div className={`hub-layout ${jarvis ? '' : 'no-jarvis'}`} style={{ height: '100%' }}>
+    <div className={`hub-layout ${jarvis ? '' : 'no-jarvis'} ${layoutClassName}`.trim()}
+      style={{ height: '100%' }}>
       {/* 좌: 모듈 레일 — 역할 기반 진입점(채택 결정 1항) */}
       <nav className="module-rail" aria-label="협업 모듈">
         <div className="module-intro">

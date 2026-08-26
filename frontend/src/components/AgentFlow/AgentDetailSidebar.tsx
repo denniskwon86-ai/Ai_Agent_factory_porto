@@ -62,7 +62,7 @@ export default function AgentDetailSidebar({
   };
 
   return (
-    <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col h-full shrink-0 shadow-xl overflow-y-auto">
+    <div className="agent-detail-editor w-80 bg-gray-800 border-l border-gray-700 flex flex-col h-full shrink-0 shadow-xl overflow-y-auto">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-850">
         <h2 className="text-sm font-bold text-gray-100 flex items-center gap-2">
           <span>🛠️</span> 에이전트 상세 편집

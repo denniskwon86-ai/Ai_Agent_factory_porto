@@ -41,7 +41,10 @@ function Err({ error }: { error: { message: string; status: number } }) {
   );
 }
 
-export function DataPrepPanel({ onClose }: { onClose: () => void }) {
+export function DataPrepPanel({ onClose, initialView = 'overview' }: {
+  onClose: () => void;
+  initialView?: 'overview' | 'readiness';
+}) {
   const [packages, setPackages] = useState<any[] | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [instanceId, setInstanceId] = useState('');
@@ -67,17 +70,32 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
   }, [instance]);
 
   useEffect(() => {
-    listKits()
-      .then((d) => setPackages(d.starter_packages || []))
-      .catch((e: unknown) => {
-        const err = e as DataPrepError;
-        setError({ message: err?.message || '', status: err?.status || 0 });
-      });
+    // 준비도 확인은 패키지 카탈로그와 독립적이다. 카탈로그 조회 장애 때문에 이미 적용된
+    // 업무기능의 준비도까지 못 보는 것은 잘못된 결합이므로, 준비도 입구에서는 조회하지 않는다.
+    if (initialView === 'overview') {
+      listKits()
+        .then((d) => setPackages(d.starter_packages || []))
+        .catch((e: unknown) => {
+          const err = e as DataPrepError;
+          setError({ message: err?.message || '', status: err?.status || 0 });
+        });
+    } else {
+      setPackages([]);
+    }
     //: ⚠️ 목록 실패가 키트 화면까지 막지 않는다 — 실패는 목록 자리에만 남긴다.
     listInstances()
-      .then((d) => setInstances(d.instances || []))
+      .then((d) => {
+        const visible = d.instances || [];
+        setInstances(visible);
+        // 홈의 「데이터 준비 상태」는 패키지 카탈로그가 아니라 현재 적용본의 준비도를
+        // 묻는 입구다. 하나뿐이면 곧바로 연다. 여러 개면 임의 선택하지 않고 사용자가
+        // 고르게 한다 — 다른 조직·업무기능을 대신 고르는 것은 편의가 아니라 오판이다.
+        if (initialView === 'readiness' && visible.length === 1) {
+          openInstance(visible[0].instance_id);
+        }
+      })
       .catch(() => setInstances(null));
-  }, []);
+  }, [initialView]);
 
   async function openInstance(id: string) {
     setInstanceId(id);
@@ -133,10 +151,16 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <HubDialog label="업무 데이터 준비 — 샘플 패키지·업무기능·데이터 판" onClose={onClose}>
+    <HubDialog
+      label={initialView === 'readiness'
+        ? '데이터 준비 상태 — 현재 적용본의 계약·결속·인증판'
+        : '업무 데이터 준비 — 샘플 패키지·업무기능·데이터 판'}
+      onClose={onClose}>
       <div className="afs-dialog-bar">
-        <b>업무 데이터 준비</b>
-        <span>샘플 기업 패키지를 고르고 · 필요한 업무기능의 데이터를 준비합니다</span>
+        <b>{initialView === 'readiness' ? '데이터 준비 상태' : '업무 데이터 준비'}</b>
+        <span>{initialView === 'readiness'
+          ? '현재 조직에 적용된 업무기능의 계약·원천 결속·인증판을 확인합니다'
+          : '샘플 기업 패키지를 고르고 · 필요한 업무기능의 데이터를 준비합니다'}</span>
         <div className="bar-actions">
           <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
@@ -156,6 +180,7 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
         <Panel className="afs-fill">
           {error ? <Err error={error} /> : (
             <>
+              {initialView === 'overview' && (<>
               <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>사용 가능한 샘플 기업 패키지</h4>
               {packages === null ? (
                 <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>불러오는 중…</div>
@@ -192,8 +217,13 @@ export function DataPrepPanel({ onClose }: { onClose: () => void }) {
                   })}
                 </ul>
               )}
+              </>)}
 
-              <h4 style={{ margin: '16px 0 8px', fontSize: 15 }}>이 조직에 적용된 패키지</h4>
+              <h4 style={{ margin: initialView === 'overview' ? '16px 0 8px' : '0 0 8px', fontSize: 15 }}>
+                {initialView === 'readiness'
+                  ? '준비 상태를 확인할 적용본'
+                  : '이 조직에 적용된 패키지'}
+              </h4>
 
               {/* ★★★ 먼저 «이미 있는 것» 을 보여 준다. id 를 외워 오라고 하지 않는다. */}
               {instances === null ? (

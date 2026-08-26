@@ -164,6 +164,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
   }, [tab, load]);
 
   const chosen = proposal?.items.filter((i) => picked[i.ref]) ?? [];
+  const activeApprovalCount = proposal?.approvals.filter((a) => a.status === 'active').length ?? 0;
 
   async function onApprove() {
     if (!proposal || !chosen.length) return;
@@ -333,9 +334,13 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
           {/* ── ② 실행 승인 ───────────────────────────────────────────── */}
           {tab === 'approve' && instanceId.trim() && proposal && (
             <>
-              {/* ★ 서버가 준 문장을 **그대로** 보여 준다. */}
-              <Banner tone="warn" title="아직 아무것도 승인되지 않았습니다">
-                {proposal.notice}
+              <Banner tone={activeApprovalCount ? 'info' : 'warn'}
+                title={activeApprovalCount
+                  ? `현재 ${activeApprovalCount}건이 실행 승인되어 있습니다`
+                  : '아직 실행 승인된 계산이 없습니다'}>
+                {activeApprovalCount
+                  ? '아래의 살아 있는 승인이 현재 실행 범위입니다. 새 승인은 선택한 산식에만 추가됩니다.'
+                  : proposal.notice}
               </Banner>
               <div style={{
                 display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',

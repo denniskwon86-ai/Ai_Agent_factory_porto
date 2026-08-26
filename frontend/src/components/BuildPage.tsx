@@ -4,8 +4,8 @@
 //
 // · 상단: `새 업무 만들기` 와 **진행 상태 필터**
 // · 본문: **미완료 / 내 프로젝트 / Mega / Releases / Archive**
-// · 프로젝트 **카드 최소 320px, 최대 3열**
-// · 카드 **주 CTA 는 `열기`**, 보조 메뉴에 목록에서 내리기·관리
+// · 앱 운영과 같은 **왼쪽 목록 + 오른쪽 선택 상세** 탐색 문법
+// · 상세의 **주 CTA 는 `열기`**, 보조 행동은 목록에서 내리기·관리
 //
 // ## 왜 다시 만드는가
 //
@@ -21,6 +21,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 import { shortId } from '../lib/displayId';
 import { listInstances, listKitApps, type KitAppRow } from '../lib/dataPrepApi';
+import { HubShell, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
 
 //: 문맥 축에서 막힌 사유를 사람 말로. **정상 격리**와 **점검 대상**을 다르게 말한다.
 const CTX_KO: Record<string, string> = {
@@ -187,6 +189,7 @@ export function BuildPage({
   const [bucket, setBucket] = useState<Bucket>('active');
   const [q, setQ] = useState('');
   const [kitApps, setKitApps] = useState<Record<string, KitAppRow>>({});
+  const [selectedKey, setSelectedKey] = useState('');
 
   // 키트 앱 릴리스는 `project_name`이 내부 release_id와 같을 수 있다. 그 문자열을 잘라
   // 이름을 만들지 않고, 현재 조직에서 볼 수 있는 적용본의 앱 계약이 준 이름을 결속한다.
@@ -249,6 +252,19 @@ export function BuildPage({
       || String(r.project_name || '').toLowerCase().includes(key));
   }, [releases, q]);
 
+  useEffect(() => {
+    const keys = bucket === 'releases'
+      ? releaseRows.map((row: any) => String(row.release_id || ''))
+      : filtered.map((row) => row.id);
+    setSelectedKey((current) => keys.includes(current) ? current : (keys[0] || ''));
+  }, [bucket, filtered, releaseRows]);
+
+  const selectedProject = bucket === 'releases'
+    ? undefined : filtered.find((row) => row.id === selectedKey);
+  const selectedRelease = bucket === 'releases'
+    ? releaseRows.find((row: any) => String(row.release_id || '') === selectedKey)
+    : undefined;
+
   const count = (b: Bucket) => {
     if (b === 'releases') return (releases || []).length;
     const list = projects || [];
@@ -260,11 +276,54 @@ export function BuildPage({
     return list.filter((p) => { const { t, c } = progress(p); return t > 0 && c >= t; }).length;
   };
 
+  const railIcons: Record<Bucket, RailItem['icon']> = {
+    active: 'flow', mine: 'people', mega: 'orgtree', releases: 'publish', archive: 'sources',
+  };
+  const railItems: RailItem[] = BUCKETS.map((item) => ({
+    ...item, icon: railIcons[item.id], count: count(item.id), countLabel: `${count(item.id)}개`,
+  }));
+  const selectedTitle = selectedRelease
+    ? (kitApps[String(selectedRelease.release_id || '')]?.label
+      || selectedRelease.project_name || '이름 없는 릴리스')
+    : selectedProject ? (selectedProject.name || selectedProject.id)
+      : BUCKETS.find((item) => item.id === bucket)?.label || '앱 제작';
+  const selectedObjectId = selectedRelease
+    ? String(selectedRelease.release_id || '') : String(selectedProject?.id || '');
+
   return (
-    <div className="afs-scope" style={{
-      background: 'var(--surface-page)', minHeight: 'calc(100vh - 74px)', padding: 24,
-      display: 'flex', flexDirection: 'column', gap: 16,
-    }}>
+    <HubShell layoutClassName="product-page-shell"
+      kicker="APP FACTORY" title="앱 제작"
+      subtitle="현업 요구를 앱과 시뮬레이터로 만들고 릴리스까지 관리합니다."
+      items={railItems} activeId={bucket} onSelect={(id) => setBucket(id as Bucket)}
+      footer={<div className="inheritance-card">
+        <span>CONTRACT FIRST</span>
+        <b>운영 앱은 승인 뒤에 열립니다</b>
+        <p>제작 완료와 운영 가능은 다릅니다. 계약·데이터 준비도·승인을 따로 확인합니다.</p>
+      </div>}
+      jarvis={<JarvisRail
+        contextTitle={selectedTitle}
+        contextDescription={selectedObjectId
+          ? '현재 선택한 제작 프로젝트 또는 릴리스를 기준으로 답합니다.'
+          : '왼쪽 메뉴와 목록에서 대상을 선택하면 그 객체를 기준으로 답합니다.'}
+        context={{
+          current_module: 'app_factory',
+          selected_object_type: selectedRelease ? 'release' : selectedProject ? 'project' : 'factory_view',
+          selected_object_id: selectedObjectId,
+          object_snapshot: { bucket, company_name: companyName, scope_label: scopeLabel, entity_mode: entityMode },
+          available_actions: selectedRelease ? ['앱 실행', '릴리스 관리']
+            : selectedProject ? ['프로젝트 열기', '목록에서 내리기'] : ['목록 탐색'],
+        }}
+        evidence={selectedObjectId ? [
+          { label: '회사·범위', value: [companyName, scopeLabel].filter(Boolean).join(' · ') || '미확정' },
+          { label: '현재 보기', value: BUCKETS.find((item) => item.id === bucket)?.label || bucket },
+        ] : []}
+        quickQuestions={[
+          '이 프로젝트가 운영 앱이 되려면 무엇이 남았습니까?',
+          '현재 선택한 릴리스의 데이터 계약을 설명해 주세요.',
+          '다음으로 처리할 우선순위를 알려 주세요.',
+        ]} />}
+    >
+    <div className="product-page-content">
       <div>
         <small style={{ display: 'block', color: 'var(--ls-red)', fontSize: 11,
           fontWeight: 800, letterSpacing: '.1em' }}>APP FACTORY</small>
@@ -279,8 +338,7 @@ export function BuildPage({
         entityMode={entityMode} />
 
       {/* ── 상단: 찾기 + 진행 상태 필터 (§5.2) ───────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 16, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <input value={q} onChange={(e) => setQ(e.target.value)}
             placeholder="이름 또는 ID로 찾기"
@@ -290,24 +348,6 @@ export function BuildPage({
               color: 'var(--surface-text)',
             }} />
         </div>
-
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {BUCKETS.map((b) => {
-            const on = bucket === b.id;
-            return (
-              <button key={b.id} onClick={() => setBucket(b.id)} title={b.hint}
-                style={{
-                  height: 36, padding: '0 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
-                  border: `1px solid ${on ? 'var(--ls-navy)' : 'var(--surface-border)'}`,
-                  background: on ? 'var(--action-primary-bg)' : 'var(--surface-card)',
-                  color: on ? 'var(--action-primary-fg)' : 'var(--surface-text-muted)',
-                  fontWeight: on ? 700 : 500,
-                }}>
-                {b.label} <span style={{ opacity: .8 }}>{count(b.id)}</span>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       <p style={{ fontSize: 12, color: 'var(--surface-text-faint)', margin: 0 }}>
@@ -315,125 +355,163 @@ export function BuildPage({
         {bucket === 'active' && ' — 서버가 실행 상태를 제공하지 않은 항목은 «진행률 집계 전»으로 구분합니다.'}
       </p>
 
-      {/* ── 본문: 카드 최소 320px · 최대 3열 (§5.2) ───────────────────── */}
-      {bucket === 'releases' ? (
-        releaseRows.length === 0 ? (
-          <p style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>
-            전달 가능한 결과물이 없습니다.
-          </p>
-        ) : (
-          <div style={{ display: 'grid', gap: 16,
-            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', maxWidth: 1180 }}>
-            {releaseRows.map((r: any) => {
-              const kitApp = kitApps[String(r.release_id || '')];
-              const displayName = kitApp?.label || r.project_name || '이름 없는 릴리스';
-              const state = lifecycleView(r, kitApp);
-              return (
-              <div key={r.release_id} style={card}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--surface-text)' }}>
-                  📦 {displayName}
-                </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
-                  marginTop: 5, fontSize: 12 }}>
-                  {kitApp?.app_id && <span style={{ color: 'var(--surface-text-muted)' }}>
-                    업무 앱 {kitApp.app_id}
-                  </span>}
-                  <strong style={{ color: state.tone }}>{state.label}</strong>
-                </div>
-                {state.detail && <div style={{ fontSize: 12, marginTop: 4,
-                  color: 'var(--surface-text-muted)' }}>{state.detail}</div>}
-                <div style={{ fontSize: 12, marginTop: 4, color: 'var(--surface-text-muted)' }}>
-                  게시 {localTime(r.created_at)}
-                </div>
-                <details style={{ fontSize: 11, marginTop: 7, color: 'var(--surface-text-faint)' }}>
-                  <summary style={{ cursor: 'pointer' }}>식별 정보</summary>
-                  <div style={{ fontFamily: 'var(--font-mono, monospace)', marginTop: 3 }}
-                    title={r.release_id}>{shortId(r.release_id)}</div>
-                </details>
-                <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-                  <button onClick={() => onOpenRelease(String(r.release_id || ''))} style={{
-                    height: 36, padding: '0 16px', fontSize: 13, fontWeight: 700, borderRadius: 6,
-                    cursor: 'pointer', border: '1px solid var(--ls-navy)',
-                    background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
-                  }} title="게시된 앱 또는 결과 화면을 엽니다">앱 실행</button>
-                  <button onClick={() => onManageRelease({ ...r, display_name: displayName })} style={{
-                    height: 36, padding: '0 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
-                    border: '1px solid var(--action-secondary-border)',
-                    background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
-                  }} title="사용 상태·운영 승격·중단 이력을 관리합니다">릴리스 관리</button>
-                </div>
-                <div style={{ fontSize: 11.5, marginTop: 7, color: 'var(--surface-text-faint)' }}>
-                  앱 실행은 결과 화면 · 릴리스 관리는 사용 상태와 운영 전환
-                </div>
-              </div>
-            );})}
-          </div>
-        )
-      ) : filtered.length === 0 ? (
+      {/* 앱 운영과 같은 탐색 문법: 왼쪽 목록에서 고르고 오른쪽에서 상세·행동을 수행한다. */}
+      {(bucket === 'releases' ? releaseRows.length === 0 : filtered.length === 0) ? (
         <div style={{ ...card, maxWidth: 560 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--surface-text)' }}>
             여기에 표시할 것이 없습니다.
           </div>
           <p style={{ fontSize: 14, marginTop: 6, color: 'var(--surface-text-muted)' }}>
-            {q ? '검색어와 맞는 것이 없습니다.' : '상단의 «＋ 새 업무»로 시작하십시오.'}
+            {q ? '검색어와 맞는 것이 없습니다.'
+              : bucket === 'releases' ? '전달 가능한 결과물이 없습니다.'
+                : '상단의 «＋ 새 업무»로 시작하십시오.'}
           </p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: 16,
-          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', maxWidth: 1180 }}>
-          {filtered.map((p) => {
-            const { t, c, pct } = progress(p);
-            return (
-              <div key={p.id} style={card}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  {p.is_mega_project && (
-                    <span style={{ fontSize: 12, fontWeight: 700, padding: '1px 7px',
-                      borderRadius: 6, color: '#6d28d9', background: '#ede9fe' }}>통합</span>
-                  )}
-                  <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--surface-text)' }}>
-                    {p.name || p.id}
-                  </span>
-                </div>
-                <div style={{ fontSize: 11, marginTop: 4, fontFamily: 'var(--font-mono, monospace)',
-                  color: 'var(--surface-text-faint)' }}>{p.id}</div>
-                {p.initial_idea && (
-                  <p style={{ fontSize: 13, marginTop: 8, lineHeight: 1.5,
-                    color: 'var(--surface-text-muted)',
-                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden' }}>{p.initial_idea}</p>
-                )}
-
-                {/* 진행률 — ⚠️ 총 태스크가 0이면 «0%» 가 아니라 «집계 전» 이다. */}
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
-                    {pct === null ? '진행률 집계 전' : `${c} / ${t} 단계 · ${pct}%`}
-                  </div>
-                  <div style={{ height: 6, borderRadius: 3, marginTop: 6,
-                    background: 'var(--surface-sunken)', overflow: 'hidden' }}>
-                    <div style={{ width: `${pct ?? 0}%`, height: '100%',
-                      background: pct === 100 ? 'var(--state-success-fg)' : 'var(--ls-navy)' }} />
-                  </div>
-                </div>
-
-                {/* §5.2 주 CTA 는 «열기». 이 동작은 삭제가 아니라 목록 비노출이므로 이름도 사실대로 쓴다. */}
-                <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-                  <button onClick={() => onOpenProject(p.id)} style={{
-                    height: 36, padding: '0 18px', fontSize: 13, fontWeight: 700, borderRadius: 6,
-                    cursor: 'pointer', border: '1px solid var(--ls-navy)',
-                    background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
-                  }}>열기</button>
-                  <button onClick={() => onDeleteProject(p.id)} style={{
-                    height: 36, padding: '0 12px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
-                    border: '1px solid var(--action-secondary-border)',
-                    background: 'var(--action-secondary-bg)',
-                    color: 'var(--action-danger-quiet-fg)',
-                  }}>목록에서 내리기</button>
-                </div>
+        <div className="afs-master-detail">
+          <aside className="afs-master-list"
+                 aria-label={bucket === 'releases' ? '릴리스 목록' : '제작 프로젝트 목록'}>
+            <header>
+              <div>
+                <strong>{bucket === 'releases' ? '릴리스' : '제작 프로젝트'}</strong>
+                <span>{bucket === 'releases' ? releaseRows.length : filtered.length}개</span>
               </div>
-            );
-          })}
+            </header>
+            <div className="afs-master-list-body">
+              {bucket === 'releases' ? releaseRows.map((row: any) => {
+                const releaseId = String(row.release_id || '');
+                const kitApp = kitApps[releaseId];
+                const displayName = kitApp?.label || row.project_name || '이름 없는 릴리스';
+                const state = lifecycleView(row, kitApp);
+                return (
+                  <button key={releaseId} type="button" className="afs-master-selector"
+                          aria-pressed={selectedKey === releaseId}
+                          onClick={() => setSelectedKey(releaseId)}>
+                    <span className="afs-master-icon" aria-hidden="true">앱</span>
+                    <span className="afs-master-selector-copy">
+                      <small style={{ color: state.tone }}>{state.label}</small>
+                      <strong>{displayName}</strong>
+                      <span>{kitApp?.app_id || shortId(releaseId)} · {localTime(row.created_at)}</span>
+                    </span>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                );
+              }) : filtered.map((project) => {
+                const { t, c, pct } = progress(project);
+                return (
+                  <button key={project.id} type="button" className="afs-master-selector"
+                          aria-pressed={selectedKey === project.id}
+                          onClick={() => setSelectedKey(project.id)}>
+                    <span className="afs-master-icon" aria-hidden="true">
+                      {project.is_mega_project ? '통' : 'P'}
+                    </span>
+                    <span className="afs-master-selector-copy">
+                      <small>{project.is_mega_project ? '통합 프로젝트' : '제작 프로젝트'}</small>
+                      <strong>{project.name || project.id}</strong>
+                      <span>{project.id} · {pct === null ? '진행률 집계 전' : `${c}/${t} 단계 · ${pct}%`}</span>
+                    </span>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          <section className="afs-master-detail-pane"
+                   aria-label={bucket === 'releases' ? '선택한 릴리스 상세' : '선택한 제작 프로젝트 상세'}>
+            {selectedRelease && (() => {
+              const releaseId = String(selectedRelease.release_id || '');
+              const kitApp = kitApps[releaseId];
+              const displayName = kitApp?.label || selectedRelease.project_name || '이름 없는 릴리스';
+              const state = lifecycleView(selectedRelease, kitApp);
+              return (
+                <article style={{ padding: 4 }}>
+                  <small style={{ color: 'var(--ls-red)', fontWeight: 800, letterSpacing: '.08em' }}>
+                    RELEASE DETAIL
+                  </small>
+                  <h2 style={{ margin: '5px 0 8px', fontSize: 22 }}>{displayName}</h2>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+                    padding: '10px 0', borderTop: '1px solid var(--surface-border)',
+                    borderBottom: '1px solid var(--surface-border)' }}>
+                    {kitApp?.app_id && <span>업무 앱 {kitApp.app_id}</span>}
+                    <strong style={{ color: state.tone }}>{state.label}</strong>
+                    <span style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>
+                      게시 {localTime(selectedRelease.created_at)}
+                    </span>
+                  </div>
+                  {state.detail && <p style={{ color: 'var(--surface-text-muted)' }}>{state.detail}</p>}
+                  <details style={{ fontSize: 12, color: 'var(--surface-text-faint)' }}>
+                    <summary style={{ cursor: 'pointer' }}>식별 정보</summary>
+                    <div style={{ fontFamily: 'var(--font-mono, monospace)', marginTop: 5 }}
+                         title={releaseId}>{shortId(releaseId)}</div>
+                  </details>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
+                    <button className="primary-button"
+                            onClick={() => onOpenRelease(releaseId)}>앱 실행</button>
+                    <button className="secondary-button"
+                            onClick={() => onManageRelease({
+                              ...selectedRelease, display_name: displayName,
+                            })}>릴리스 관리</button>
+                  </div>
+                  <div style={{ fontSize: 11.5, marginTop: 8,
+                    color: 'var(--surface-text-faint)' }}>
+                    앱 실행은 결과 화면 · 릴리스 관리는 사용 상태와 운영 전환
+                  </div>
+                </article>
+              );
+            })()}
+
+            {selectedProject && (() => {
+              const { t, c, pct } = progress(selectedProject);
+              return (
+                <article style={{ padding: 4 }}>
+                  <small style={{ color: 'var(--ls-red)', fontWeight: 800, letterSpacing: '.08em' }}>
+                    PROJECT WORKSPACE
+                  </small>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <h2 style={{ margin: '5px 0 3px', fontSize: 22 }}>
+                      {selectedProject.name || selectedProject.id}
+                    </h2>
+                    {selectedProject.is_mega_project && (
+                      <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 8px',
+                        borderRadius: 6, color: '#6d28d9', background: '#ede9fe' }}>통합</span>
+                    )}
+                  </div>
+                  <div style={{ color: 'var(--surface-text-faint)', fontSize: 12,
+                    fontFamily: 'var(--font-mono, monospace)' }}>{selectedProject.id}</div>
+                  {selectedProject.initial_idea && (
+                    <p style={{ margin: '14px 0', lineHeight: 1.6,
+                      color: 'var(--surface-text-muted)' }}>{selectedProject.initial_idea}</p>
+                  )}
+                  <div style={{ marginTop: 16, padding: 14, borderRadius: 8,
+                    background: 'var(--surface-raised)', border: '1px solid var(--surface-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12,
+                      color: 'var(--surface-text-muted)', fontSize: 13 }}>
+                      <span>제작 진행률</span>
+                      <strong style={{ color: 'var(--surface-text)' }}>
+                        {pct === null ? '집계 전' : `${c} / ${t} 단계 · ${pct}%`}
+                      </strong>
+                    </div>
+                    <div style={{ height: 7, borderRadius: 4, marginTop: 9,
+                      background: 'var(--surface-sunken)', overflow: 'hidden' }}>
+                      <div style={{ width: `${pct ?? 0}%`, height: '100%',
+                        background: pct === 100 ? 'var(--state-success-fg)' : 'var(--ls-navy)' }} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
+                    <button className="primary-button"
+                            onClick={() => onOpenProject(selectedProject.id)}>열기</button>
+                    <button className="secondary-button"
+                            onClick={() => onDeleteProject(selectedProject.id)}
+                            style={{ color: 'var(--action-danger-quiet-fg)' }}>목록에서 내리기</button>
+                  </div>
+                </article>
+              );
+            })()}
+          </section>
         </div>
       )}
     </div>
+    </HubShell>
   );
 }

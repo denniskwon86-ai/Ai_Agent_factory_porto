@@ -106,6 +106,21 @@ def _effective_tenant_id() -> str:
     return str(getattr(_cfg, "ECM_DEFAULT_TENANT_ID", "") or "").strip()
 
 
+def _effective_company_name() -> str:
+    """설치 테넌트에 결속된 사람이 읽는 회사명.
+
+    선택 범위로 조직 트리를 자르면 상위 법인 노드가 응답에서 사라질 수 있다. 회사 이름은
+    현재 조회 범위의 부수 정보가 아니라 인증 세션의 설치 문맥이므로 `/auth/me`가 함께 답한다.
+    판독 실패를 tenant id로 꾸미지 않고 빈 값으로 드러낸다.
+    """
+    try:
+        from core.enterprise_context.repository import ecm_repository
+        row = ecm_repository.get_tenant(_effective_tenant_id())
+        return str((row or {}).get("name_ko") or "").strip()
+    except Exception:
+        return ""
+
+
 @router.get("/me")
 async def me(p: Principal = Depends(current_principal)):
     """지금 누구인가 + 그 권한 요약. **화면이 이것만 보고 진입 여부를 정한다.**
@@ -139,6 +154,7 @@ async def me(p: Principal = Depends(current_principal)):
             #: ⚠️ 「고른 조직 범위」와 다른 값이다. 범위는 사용자가 좁히는 것이고, 회사는
             #:   그 사람이 속한 독립 환경이다. 둘을 같은 칸에 넣지 않는다.
             "tenant_id": _effective_tenant_id(),
+            "company_name": _effective_company_name(),
         },
     }
 

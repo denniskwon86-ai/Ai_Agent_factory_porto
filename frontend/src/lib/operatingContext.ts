@@ -24,12 +24,33 @@ import {
 } from './companyApi';
 import { orgApi, type Dept } from './orgApi';
 
+const COMPANY_NAME_CACHE_KEY = 'factory.companyNameByTenant';
+
+function cachedCompanyName(tenantId: string): string {
+  if (!tenantId) return '';
+  try {
+    const values = JSON.parse(localStorage.getItem(COMPANY_NAME_CACHE_KEY) || '{}');
+    return typeof values?.[tenantId] === 'string' ? values[tenantId].trim() : '';
+  } catch { return ''; }
+}
+
+function rememberCompanyName(tenantId: string, companyName: string): void {
+  if (!tenantId || !companyName) return;
+  try {
+    const values = JSON.parse(localStorage.getItem(COMPANY_NAME_CACHE_KEY) || '{}');
+    localStorage.setItem(COMPANY_NAME_CACHE_KEY,
+      JSON.stringify({ ...(values && typeof values === 'object' ? values : {}),
+        [tenantId]: companyName }));
+  } catch { /* 표시 캐시를 저장하지 못해도 서버 정본 조회는 계속된다 */ }
+}
+
 export type ContextStatus = 'loading' | 'verified' | 'denied' | 'stale';
 
 export type Me = {
   primary_dept_id?: string;
   unrestricted?: boolean;
   tenant_id?: string;
+  company_name?: string;
 };
 
 /** 중첩 트리를 **깊이 표시가 붙은 평평한 목록**으로 편다.
@@ -217,9 +238,23 @@ export function useOperatingContext(): OperatingContext {
     [...path].reverse().find((n) => n.node_type === 'legal_entity')?.name_ko || '')
     .filter(Boolean))];
   const contextualCompanyName = legalNames.length === 1 ? legalNames[0] : '';
-  const companyName = (tenants.find((t) => t.tenant_id === company)?.name_ko
+  // 선택 범위로 트리가 잘려 오면 경로 안에 상위 `legal_entity` 노드가 없을 수 있다.
+  // 그때 회사명을 지우지 말고, 선택 노드가 명시한 `entity_id`를 실제 법인 정본과 대조한다.
+  // 이름을 node_id나 tenant_id에서 추측하지는 않는다.
+  const matchedEntityIds = [...new Set(matchedPaths.map((path) =>
+    path[path.length - 1]?.entity_id || '').filter(Boolean))];
+  const contextualEntityNames = [...new Set(matchedEntityIds.map((entityId) =>
+    realEntities.find((e) => e.entity_id === entityId)?.name_ko || '').filter(Boolean))];
+  const contextualEntityName = contextualEntityNames.length === 1 ? contextualEntityNames[0] : '';
+  const verifiedCompanyName = (String(me?.company_name || '').trim()
+    || tenants.find((t) => t.tenant_id === company)?.name_ko
     || contextualCompanyName
+    || contextualEntityName
     || (realEntities.length === 1 ? realEntities[0].name_ko : '') || '').trim();
+  // 범위 선택 뒤 서버가 하위 트리만 주는 짧은 구간에도 마지막으로 확인한 이름을 유지한다.
+  // 캐시는 tenant별이며, 인증 응답·tenant 정본·법인 정본 중 하나가 다시 오면 즉시 덮어쓴다.
+  if (verifiedCompanyName) rememberCompanyName(company, verifiedCompanyName);
+  const companyName = verifiedCompanyName || cachedCompanyName(company);
 
   return {
     company,

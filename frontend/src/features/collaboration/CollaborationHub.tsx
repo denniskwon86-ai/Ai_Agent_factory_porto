@@ -89,7 +89,7 @@ const MODULE_CONTEXT: Record<View, ModuleContext> = {
     barTitle: '의사결정 센터',
     barNote: '세 관점은 같은 문서의 다른 렌더링입니다',
     kicker: 'DECISIONS', title: '의사결정 패키지',
-    subtitle: '시뮬레이션 결과를 하나의 Package 로 만들고, 요청자·의사결정자·영향부서가 같은 문서를 관점별로 봅니다.',
+    subtitle: '시뮬레이션·경로 계산 결과를 하나의 Package 로 만들고, 요청자·의사결정자·영향부서가 같은 문서를 관점별로 봅니다.',
     guard: { kicker: 'ONE PACKAGE', title: '숫자를 자동으로 갱신하지 않습니다',
       body: '검토 요청 후 근거가 바뀌면 조용히 고치지 않고 «근거 변경됨»으로 세워 사람이 다시 보게 합니다. 참석자가 읽은 문서와 결정된 문서가 달라지면 회의록이 거짓이 됩니다.' },
   },
@@ -189,11 +189,12 @@ function CapabilityManifestCard({ m }: { m: CapabilityManifest }) {
 }
 
 export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = [],
-  simulationRunIds = [] }: {
+  simulationRunIds = [], page = false }: {
   onClose: () => void;
   initialView?: View;
   releaseIds?: string[];
   simulationRunIds?: string[];
+  page?: boolean;
 }) {
   const [view, setView] = useState<View>(initialView);
   // [CL-2] 의사결정 센터가 **자기가 강조 중인 객체**를 올려 준다. 허브가 추측하지 않는다 —
@@ -345,25 +346,31 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
       ? [{ manifest_fingerprint: selected.manifest_fingerprint }] : [],
   };
 
-  return (
-    // ★ [교차검토 지적 1] 손으로 만든 `fixed div` 는 모달이 아니었다 — dialog semantics·배경
-    //   inert·포커스 트랩·Escape·포커스 복귀·스크롤 잠금이 모두 없었다. 셸 공통 기반으로 옮겼다.
-    <HubDialog label={ctx.dialogLabel} onClose={onClose}>
-      <div className="afs-dialog-bar">
-        {/* [UIUX-AUDIT-29 §1] 제목·설명이 활성 모듈을 따라간다. 고정 문구는 화면이 자기
-            위치를 잘못 말하는 것이다. */}
-        <b>{ctx.barTitle}</b>
-        <span>{ctx.barNote}</span>
-        <div className="bar-actions">
-          {isCollab && busy && <span className="busy">{busy}…</span>}
-          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
-            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
-          </button>
-        </div>
-      </div>
+  const questions = view === 'publications' ? [
+    '이 보고서는 지금 왜 나갈 수 없습니까?',
+    '대외 발간에서 무엇이 제외됩니까?',
+    '배포가 실패한 대상이 있습니까?',
+  ] : view === 'decisions' ? [
+    '이 안건은 무엇을 승인하는 것입니까?',
+    '지금 결정할 수 없는 이유가 무엇입니까?',
+    '세 관점이 같은 근거를 보고 있습니까?',
+  ] : [
+    '이 앱은 어떤 자료를 요구합니까?',
+    '수락하면 제 권한이 넓어집니까?',
+    '이 요청은 언제 만료됩니까?',
+  ];
 
-      <div className="afs-dialog-body">
-          <HubShell
+  const assistant = (
+    <JarvisRail
+      contextTitle={jarvisCtx.title}
+      contextDescription={jarvisCtx.desc}
+      evidence={jarvisCtx.ev}
+      context={jarvisContext}
+      quickQuestions={questions} />
+  );
+
+  const hub = (
+          <HubShell layoutClassName={page ? 'product-page-shell' : ''}
             kicker={ctx.kicker}
             title={ctx.title}
             subtitle={ctx.subtitle}
@@ -378,30 +385,9 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
                 <p>{ctx.guard.body}</p>
               </div>
             }
-            jarvis={
-              // ⚠️ [지적 3] 고정 문자열 응답을 제거했다. 실제 어댑터(`lib/jarvisApi.ts`)를 호출하고
-              //   대화는 레일 안에서 유지된다. 연결 실패는 숨기지 않고 그대로 표시한다.
-              <JarvisRail
-                contextTitle={jarvisCtx.title}
-                contextDescription={jarvisCtx.desc}
-                evidence={jarvisCtx.ev}
-                context={jarvisContext}
-                quickQuestions={view === 'publications' ? [
-                  '이 보고서는 지금 왜 나갈 수 없습니까?',
-                  '대외 발간에서 무엇이 제외됩니까?',
-                  '배포가 실패한 대상이 있습니까?',
-                ] : view === 'decisions' ? [
-                  '이 안건은 무엇을 승인하는 것입니까?',
-                  '지금 결정할 수 없는 이유가 무엇입니까?',
-                  '세 관점이 같은 근거를 보고 있습니까?',
-                ] : [
-                  '이 앱은 어떤 자료를 요구합니까?',
-                  '수락하면 제 권한이 넓어집니까?',
-                  '이 요청은 언제 만료됩니까?',
-                ]}
-              />
-            }
+            jarvis={assistant}
           >
+            <div className={page ? 'product-page-content product-hub-page decision-report-page' : undefined}>
             {/* [UIUX-AUDIT-29 §2] 허브의 전달 목록 오류를 **의사결정·발간 화면에서 띄우지
                 않는다.** 그 화면들은 자기 오류를 스스로 말하며, 두 배너가 겹치면 화면이
                 오류로 뒤덮이고 정작 «무엇을 해야 하는가»가 안 보인다. */}
@@ -458,8 +444,26 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
             {view === 'publications' && (
               <PublicationCenter onJarvis={setPubCtx} />
             )}
+            </div>
           </HubShell>
+  );
+
+  if (page) return hub;
+  return (
+    // 모달 진입(전체 메뉴의 협업)은 기존 접근성 계약을 유지한다. 상단 핵심 메뉴의
+    // 결정·보고만 ProductShell 아래 독립 페이지로 연다.
+    <HubDialog label={ctx.dialogLabel} onClose={onClose}>
+      <div className="afs-dialog-bar">
+        <b>{ctx.barTitle}</b>
+        <span>{ctx.barNote}</span>
+        <div className="bar-actions">
+          {isCollab && busy && <span className="busy">{busy}…</span>}
+          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
+        </div>
       </div>
+      <div className="afs-dialog-body">{hub}</div>
     </HubDialog>
   );
 }

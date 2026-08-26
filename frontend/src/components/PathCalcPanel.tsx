@@ -173,6 +173,10 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
     try {
       const got = await listOntologyObjects({ asOf: instant, relationTypes: RELATION_TYPES });
       if (reqRef.current !== seq) return;
+      // A previous transient request can fail while this dialog is mounting and be followed by
+      // a successful refresh.  Keeping that stale error beside a populated selector tells the
+      // user both "loaded" and "failed".  The newest request sequence is authoritative.
+      setError(null);
       setObjects(got.objects);
       setTypes(got.object_types);
       setTruncated(got.truncated);
@@ -612,7 +616,12 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                       <label style={{ display: 'block', fontSize: 12, color: 'var(--surface-text-muted)' }}>
                         기한 <span style={{ color: 'var(--state-error-fg)' }}>*</span>
                       </label>
-                      <input type="date" value={due} onChange={(e) => setDue(e.target.value)}
+                      <input type="date" value={due}
+                        // Embedded Chromium date controls may commit through `input` before
+                        // `change` (the picker is native UI). Listen to both so a visibly filled
+                        // deadline cannot leave the action disabled.
+                        onInput={(e) => setDue((e.target as HTMLInputElement).value)}
+                        onChange={(e) => setDue(e.target.value)}
                         style={{ padding: 4, fontSize: 13 }} />
                     </div>
                     <button disabled={!canDecide} onClick={onDecide}

@@ -18,13 +18,102 @@ def _read(path: str) -> str:
 def test_로그인_뒤_회사명을_다시_읽는다():
     api = _read("frontend/src/lib/api.ts")
     ctx = _read("frontend/src/lib/operatingContext.ts")
+    auth = _read("api/routes/auth_control.py")
 
     assert "factory:session-changed" in api
+    assert '"company_name": _effective_company_name()' in auth
+    assert "String(me?.company_name || '').trim()" in ctx
+    assert "COMPANY_NAME_CACHE_KEY = 'factory.companyNameByTenant'" in ctx
+    assert "verifiedCompanyName || cachedCompanyName(company)" in ctx
     assert "addEventListener('factory:session-changed'" in ctx
     assert "listTenants()" in ctx
     assert "getCompanyTree()" in ctx
     assert "node_type === 'legal_entity'" in ctx
+    assert "path[path.length - 1]?.entity_id" in ctx
+    assert "realEntities.find((e) => e.entity_id === entityId)" in ctx
     assert "realEntities.length === 1" in ctx
+
+
+def test_상단_회사문맥은_조직도_관리와_분리된_검증형_선택기를_연다():
+    app = _read("frontend/src/App.tsx")
+    switcher = _read("frontend/src/components/OperatingContextSwitcher.tsx")
+
+    assert "onContext={() => setShowContextSwitcher(true)}" in app
+    assert "onContext={() => setShowOrgChart(true)}" not in app
+    assert "selectContext(scopeNodeId" in switcher
+    assert "verifiedScope !== scopeNodeId" in switcher
+    assert "setEnterpriseContext({" in switcher
+    assert "window.location.reload()" not in switcher
+    assert "조직 코드를 직접 입력하지 않습니다" in switcher
+
+
+def test_회사문맥_변경은_온톨로지의_객체와_관계_양쪽을_다시_읽는다():
+    ontology = _read("frontend/src/components/OntologyExplorerView.tsx")
+
+    assert "addEventListener('factory:enterprise-context-changed', refresh)" in ontology
+    assert "const refresh = () => { load(); loadGovernance(); };" in ontology
+
+
+def test_업무_온톨로지는_표뿐_아니라_실제_조회관계를_상관그래프로_보여준다():
+    view = _read("frontend/src/components/OntologyExplorerView.tsx")
+    graph = _read("frontend/src/components/OntologyGraphPanel.tsx")
+
+    assert '<OntologyGraphPanel relations={relationRows}' in view
+    assert 'aria-label="업무 온톨로지 상관 그래프"' in graph
+    assert "onSelectRoot(node.data.ref as OntologyObject)" in graph
+    assert "onSelectRelation(String(edge.data?.relationId || edge.id))" in graph
+    assert "현재 조회 조건에서 시각화할 관계가 없습니다" in graph
+    assert "보이지 않는 관계의 존재나 수를" in view
+    assert "relations: OntologyRelation[]" in graph
+
+
+def test_회사문맥_변경은_업무키트_목록과_열린_앱을_새_증명으로_다시_읽는다():
+    operations = _read("frontend/src/components/KitOperationsPanel.tsx")
+    app_panel = _read("frontend/src/components/KitAppPanel.tsx")
+
+    assert "addEventListener('factory:enterprise-context-changed', refresh)" in operations
+    assert "setRevision((value) => value + 1)" in operations
+    assert "next.tenantId !== contextRef.current.tenantId" in operations
+    assert "addEventListener('factory:enterprise-context-changed', refresh)" in app_panel
+    assert "proofRef.current = ''" in app_panel
+    assert "if (open) void load()" in app_panel
+
+
+def test_계산승인화면은_살아있는_승인을_승인없음으로_표시하지_않는다():
+    panel = _read("frontend/src/components/CalcApprovalPanel.tsx")
+
+    assert "activeApprovalCount" in panel
+    assert "현재 ${activeApprovalCount}건이 실행 승인되어 있습니다" in panel
+    assert 'title="아직 아무것도 승인되지 않았습니다"' not in panel
+
+
+def test_경로계산_객체재조회가_성공하면_이전_실패표시를_지운다():
+    panel = _read("frontend/src/components/PathCalcPanel.tsx")
+
+    success = panel.index("const got = await listOntologyObjects")
+    clear = panel.index("setError(null);", success)
+    populate = panel.index("setObjects(got.objects);", success)
+    assert success < clear < populate
+
+
+def test_경로계산_기한은_내장_날짜선택기의_input_commit도_받는다():
+    panel = _read("frontend/src/components/PathCalcPanel.tsx")
+
+    assert 'type="date" value={due}' in panel
+    assert "onInput={(e) => setDue((e.target as HTMLInputElement).value)}" in panel
+    assert "onChange={(e) => setDue(e.target.value)}" in panel
+
+
+def test_경로계산_안건을_시뮬레이션_연결없음으로_오표시하지_않는다():
+    center = _read("frontend/src/features/collaboration/DecisionCenter.tsx")
+    hub = _read("frontend/src/features/collaboration/CollaborationHub.tsx")
+
+    assert "d.evidence?.query_id" in center
+    assert "`경로 계산 ${queryId.slice(0, 14)}`" in center
+    assert "시뮬레이션 ${d.simulation_run_id || '(연결 없음)'}" not in center
+    assert "시뮬레이션 결과를 하나의 Decision Package" not in center
+    assert "시뮬레이션 결과를 하나의 문서" not in center
+    assert "시뮬레이션·경로 계산 결과" in hub
 
 
 def test_로그인_세션의_tenant로_이전_브라우저_회사와_범위를_교체한다():
@@ -104,14 +193,97 @@ def test_업무키트_앱은_새업무_창뿐_아니라_앱운영에서_직접_�
     panel = _read("frontend/src/components/KitOperationsPanel.tsx")
     kit_apps = _read("frontend/src/components/KitAppPanel.tsx")
 
-    assert "if (id === 'operate') { setShowKitOperations(true); return; }" in app
+    assert "if (id === 'operate') { setShowKitOperations(false); setSpace('operate'); return; }" in app
     assert "<KitOperationsPanel" in app
     assert "listInstances()" in panel
-    assert '<KitAppPanel instanceId={selected} mode="operate" />' in panel
-    assert "현재 운영 가능한 앱" in panel
-    assert "새 업무키트 앱 만들기" in panel
-    assert "mode === 'build' ? '키트로 앱 만들기' : '업무 앱 운영'" in kit_apps
+    assert '<KitAppPanel instanceId={selected} mode="operate" statusFilter={view} />' in panel
+    assert "현재 회사의 업무 앱" in panel
+    assert "＋ 새 업무키트 앱" in panel
+    assert '<ProductShell module="operate"' in app
+    assert "<KitOperationsPanel page" in app
+    assert "OPERATIONS_ITEMS" in panel
+    assert "운영 전환', hint: '검토·승격이 필요한 앱'" in panel
+    assert 'statusFilter={view}' in panel
+    assert "aria-pressed={on}" in panel
+    assert "mode === 'build' ? '키트로 앱 만들기' : '앱 현황'" in kit_apps
     assert "운영 중인 앱을 열고, 후보 앱의 운영 전환 상태를 확인합니다." in kit_apps
+    assert "contextLabel(row.entity_mode)" in panel
+    assert "instanceStatusLabel(row.status)" in panel
+    assert 'aria-label="앱 운영 상태 요약"' in kit_apps
+    assert 'className="afs-master-detail"' in kit_apps
+    assert 'aria-label="업무 앱 목록"' in kit_apps
+    assert 'aria-label="선택한 앱 운영 상세"' in kit_apps
+    assert "setSelectedAppId(row.app_id)" in kit_apps
+    assert "운영 전환 필요" in kit_apps
+    assert "운영 전환 검토" in kit_apps
+    assert "setShowPromotion(false)" in kit_apps
+    assert "shownRows.map" in kit_apps
+    assert "setRevision((value) => value + 1)" in panel
+    assert "setTick((value) => value + 1)" in kit_apps
+
+
+def test_앱제작과_앱운영은_같은_목록_상세_탐색문법을_쓴다():
+    build = _read("frontend/src/components/BuildPage.tsx")
+    operate = _read("frontend/src/components/KitAppPanel.tsx")
+
+    assert 'className="afs-master-detail"' in build
+    assert 'aria-label={bucket === \'releases\' ? \'릴리스 목록\' : \'제작 프로젝트 목록\'}' in build
+    assert "setSelectedKey(project.id)" in build
+    assert "setSelectedKey(releaseId)" in build
+    assert "selectedProject &&" in build
+    assert "selectedRelease &&" in build
+    assert 'className="afs-master-detail"' in operate
+    assert 'aria-label="업무 앱 목록"' in operate
+
+
+def test_시뮬레이션은_공통셸_아래_조건과_결과가_나뉜_독립화면이다():
+    app = _read("frontend/src/App.tsx")
+    scenario = _read("frontend/src/components/ScenarioPanel.tsx")
+
+    assert "| 'twin'" in app
+    assert "if (id === 'twin') { setShowScenario(false); setSpace('twin'); return; }" in app
+    assert 'space === \'twin\'' in app
+    assert '<ProductShell module="twin"' in app
+    assert '<ScenarioPanel page' in app
+    assert 'className="scenario-workspace"' in scenario
+    assert 'aria-label="시나리오 조건 설정"' in scenario
+    assert 'aria-label="시뮬레이션 비교 결과"' in scenario
+    assert "실행 전에는 결과를 0이나 빈 차트로 그리지 않습니다" in scenario
+
+
+def test_앱제작_앱운영_시뮬레이션은_좌측메뉴_본문_자비스_3열을_공유한다():
+    build = _read("frontend/src/components/BuildPage.tsx")
+    operate = _read("frontend/src/components/KitOperationsPanel.tsx")
+    scenario = _read("frontend/src/components/ScenarioPanel.tsx")
+    shell = _read("frontend/src/design/HubShell.tsx")
+    css = _read("frontend/src/design/afs.css")
+
+    for source in (build, operate, scenario):
+        assert '<HubShell layoutClassName="product-page-shell' in source
+        assert '<JarvisRail' in source
+
+    assert "items={railItems} activeId={bucket}" in build
+    assert "items={railItems} activeId={view}" in operate
+    assert "items={SCENARIO_ITEMS} activeId={stage}" in scenario
+    assert "layoutClassName?: string" in shell
+    assert ".hub-layout.product-page-shell" in css
+    assert ".product-page-shell > .jarvis-rail { display: flex; }" in css
+    assert "grid-template-columns: 220px minmax(0, 1fr) 300px" in css
+    assert "grid-template-columns: 190px minmax(0, 1fr) 280px" in css
+
+
+def test_제품화면_자비스는_정보구조와_넓은_질문입력을_유지한다():
+    rail = _read("frontend/src/design/JarvisRail.tsx")
+    css = _read("frontend/src/design/afs.css")
+
+    assert "LAXS-M · AI 경영비서" in rail
+    assert "jarvis-context" in rail
+    assert "jarvis-evidence" in rail
+    assert "jarvis-zero-quick" in rail
+    assert "현재 화면과 선택한 객체에 대해 질문하세요." in rail
+    assert ".product-page-shell > .jarvis-rail .jarvis-input" in css
+    assert "grid-template-columns: minmax(0, 1fr)" in css
+    assert "turns.length ? log.scrollHeight : 0" in rail
 
 
 def test_업무키트_조회실패는_0건으로_접지_않고_화면에서_다시_확인한다():
@@ -143,14 +315,15 @@ def test_회사문맥_화면에서_조직을_실제_실행범위로_전환할_�
     assert "window.location.reload();" in org
 
 
-def test_릴리스_카드는_키트_앱_이름과_운영상태를_앞세우고_내부_id는_접는다():
+def test_릴리스_상세는_키트_앱_이름과_운영상태를_앞세우고_내부_id는_접는다():
     page = _read("frontend/src/components/BuildPage.tsx")
 
     assert "listKitApps" in page
-    assert "kitApp?.label || r.project_name" in page
+    assert "kitApp?.label || row.project_name" in page
+    assert "kitApp?.label || selectedRelease.project_name" in page
     assert "업무 앱 {kitApp.app_id}" in page
     assert "운영 중" in page and "운영 후보" in page
-    assert "게시 {localTime(r.created_at)}" in page
+    assert "게시 {localTime(selectedRelease.created_at)}" in page
     assert "<summary style={{ cursor: 'pointer' }}>식별 정보</summary>" in page
     assert ">앱 실행</button>" in page
     assert ">릴리스 관리</button>" in page
@@ -348,3 +521,153 @@ def test_회사별_연결구성에서_단계별_보조정보를_편집하고_같
     assert "node.overlay = r.overlay ?" in panel
     assert "overlay: null" in panel, "삭제한 카드가 기본값으로 되살아나면 안 된다"
     assert "payload: { nodes: rows.map" in panel
+
+
+def test_결정보고는_독립_3열_페이지와_첫화면_자비스를_쓴다():
+    app = _read("frontend/src/App.tsx")
+    hub = _read("frontend/src/features/collaboration/CollaborationHub.tsx")
+
+    assert "| 'report'" in app
+    assert "space === 'report'" in app
+    assert '<ProductShell module="report"' in app
+    assert '<CollaborationHub page initialView={collaborationInitialView}' in app
+    assert "layoutClassName={page ? 'product-page-shell' : ''}" in hub
+    assert "product-page-content product-hub-page decision-report-page" in hub
+    assert "<JarvisRail" in hub
+    assert "if (page) return hub;" in hub
+
+
+def test_홈_하단_업무공간과_데이터준비상태는_서로_다른_목적으로_연결된다():
+    app = _read("frontend/src/App.tsx")
+    page = _read("frontend/src/components/EnterprisePage.tsx")
+    prep = _read("frontend/src/components/DataPrepPanel.tsx")
+
+    assert "onOpenMenu('workspace')}>전체 업무 공간" in page
+    assert '<button onClick={onOpenDataReadiness}>데이터 준비 상태</button>' in page
+    assert "setDataPrepInitialView('readiness')" in app
+    assert "initialView={dataPrepInitialView}" in app
+    assert "initialView?: 'overview' | 'readiness'" in prep
+    assert "if (initialView === 'readiness' && visible.length === 1)" in prep
+    assert "if (initialView === 'overview')" in prep
+    assert "준비 상태를 확인할 적용본" in prep
+
+
+def test_전체메뉴의_정식_제품화면은_레거시_모달을_다시_열지_않는다():
+    app = _read("frontend/src/App.tsx")
+
+    assert "setCollaborationInitialView('inbox');" in app
+    assert "setCollaborationInitialView('decisions');" in app
+    assert "setShowCollaboration(false);" in app
+    assert "setShowKnowledgeHub(false); setSpace('knowledge')" in app
+    assert "setShowScenario(false); setSpace('twin')" in app
+    assert "closeAgentPanel(); setSpace('agent')" in app
+
+
+def test_결정보고_본문은_다른_제품화면과_같은_타이포와_컨트롤_비율을_쓴다():
+    css = _read("frontend/src/design/afs.css")
+
+    scope = css.split(".afs-scope .product-hub-page .screen-head {", 1)[1]
+    assert "font-size: 26px" in scope
+    assert "font-size: 14px" in scope
+    assert "color: var(--ls-red)" in scope
+    assert "min-height: 38px !important" in scope
+    assert "min-height: 62px" in scope
+
+
+def test_지식은_모달이_아닌_독립_제품화면에서_근거형_자비스를_쓴다():
+    app = _read("frontend/src/App.tsx")
+    panel = _read("frontend/src/components/KnowledgeHubPanel.tsx")
+
+    assert "| 'knowledge'" in app
+    assert "space === 'knowledge'" in app
+    assert '<ProductShell module="knowledge"' in app
+    assert '<KnowledgeHubPanel page' in app
+    assert "layoutClassName={page ? 'product-page-shell' : ''}" in panel
+    assert "product-page-content product-hub-page knowledge-page" in panel
+    assert "<JarvisRail" in panel
+    assert "if (page) return hub;" in panel
+
+
+def test_지식화면에서_원문_온톨로지_대외지표를_직접_확인한다():
+    app = _read("frontend/src/App.tsx")
+    panel = _read("frontend/src/components/KnowledgeHubPanel.tsx")
+    ontology = _read("frontend/src/components/OntologyExplorerView.tsx")
+    ontology_api = _read("frontend/src/lib/ontologyApi.ts")
+    external = _read("frontend/src/components/ExternalIntelligenceView.tsx")
+    api = _read("frontend/src/lib/knowledgeApi.ts")
+    external_api = _read("frontend/src/lib/externalIntelligenceApi.ts")
+
+    assert "'contents'" in panel and "지식 내용 확인" in panel
+    assert "documentContent" in api and "/content?offset=" in api
+    assert "<OntologyExplorerView />" in panel
+    assert "ontologyApi.impact(root, asOf)" in ontology
+    assert "승인된 의미만 표시합니다" in ontology
+    assert "ontologyApi.modelContract" in ontology
+    assert "설치된 계약 원문을 운영 기준으로 확인합니다" in ontology
+    assert "ontologyApi.relations(relationFilter)" in ontology
+    assert "ontologyApi.proposalContext()" in ontology
+    assert "계약에 허용된 관계 제안" in ontology
+    assert "승인 버튼이 전용 원장 사건을 기록합니다" in ontology
+    assert "임의 원장 ID를 입력하지 않습니다" in ontology
+    assert "ontologyApi.decideApprove" in ontology
+    assert "ontologyApi.decideRetire" in ontology
+    assert "Decision Ledger 사건 ID" not in ontology
+    assert "<ConfirmInline" in ontology
+    assert "modelContract:" in ontology_api and "/api/v1/ontology/model/${" in ontology_api
+    assert "relations:" in ontology_api and "/api/v1/ontology/relations?" in ontology_api
+    assert "proposalContext:" in ontology_api and "/api/v1/ontology/proposal/context" in ontology_api
+    assert "propose:" in ontology_api and "/api/v1/ontology/relations/propose" in ontology_api
+    assert "decideApprove:" in ontology_api and "/decisions/approve`" in ontology_api
+    assert "decideRetire:" in ontology_api and "/decisions/retire`" in ontology_api
+    assert "<ExternalIntelligenceView />" in panel
+    assert "externalIntelligenceApi.resolveBaseline(selected)" in external
+    assert "발표 시점별 관측값" in external
+    assert "externalIntelligenceApi.registerSource(sourceForm)" in external
+    assert "externalIntelligenceApi.approveSource(sourceId)" in external
+    assert "externalIntelligenceApi.recordObservation" in external
+    assert "등록은 승인이 아닙니다" in external
+    assert "승인된 원천이 없어 관측값을 기록할 수 없습니다" in external
+    assert "quality_status: 'RAW'" in external
+    assert "원천 승인 철회 경로가 없습니다" in external
+    assert "registerSource:" in external_api and "/api/v1/external/sources" in external_api
+    assert "approveSource:" in external_api and "/approve`" in external_api
+    assert "recordObservation:" in external_api and "/api/v1/external/observations" in external_api
+    assert "externalIntelligenceApi.collectable()" in external
+    assert "externalIntelligenceApi.collectCsv" in external
+    assert "externalIntelligenceApi.collectSource" in external
+    assert "먼저 예행하기" in external
+    assert "예행 결과대로 실제 적재 검토" in external
+    assert "previewSnapshot === collectionSnapshot(collectionMode)" in external
+    assert "indicator_map: Object.fromEntries" in external
+    assert "추측 매핑은 하지 않습니다" in external
+    assert "0이나 오늘 날짜로 보정하지 않음" in external
+    assert "원천 값이 바뀔 수 있습니다" in external
+    assert "collectCsv:" in external_api and "/api/v1/external/collect/csv" in external_api
+    assert "collectSource:" in external_api and "/api/v1/external/collect/${" in external_api
+    assert "label: '업무 온톨로지'" in app
+    assert "label: '대외 인텔리전스'" in app
+    assert "setKnowledgeInitialView('ontology')" in app
+    assert "setKnowledgeInitialView('external')" in app
+
+
+def test_에이전트는_독립_제품화면에서_저장상태와_사람확인_통제를_보인다():
+    app = _read("frontend/src/App.tsx")
+    panel = _read("frontend/src/components/AgentMasterPanel.tsx")
+    detail = _read("frontend/src/components/AgentFlow/AgentDetailSidebar.tsx")
+    css = _read("frontend/src/design/afs.css")
+
+    assert "| 'agent'" in app
+    assert "space === 'agent'" in app
+    assert '<ProductShell module="agent"' in app
+    assert '<AgentMasterPanel page' in app
+    assert "layoutClassName={page ? 'product-page-shell' : ''}" in panel
+    assert "product-page-content product-hub-page agent-master-page" in panel
+    assert "agent-page-actions" in panel
+    assert "agent-master-detail-layout" in panel
+    assert "변경사항 저장" in panel
+    assert "사람 확인 지점은 통제입니다" in panel
+    assert "if (page) return hub;" in panel
+    assert ".afs-scope .agent-page-actions" in css
+    assert ".afs-scope .agent-master-detail-layout" in css
+    assert "agent-detail-editor" in detail
+    assert ".agent-master-page .agent-detail-editor" in css

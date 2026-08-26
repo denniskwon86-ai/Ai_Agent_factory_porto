@@ -104,6 +104,32 @@ def test_pack_detail_and_search_are_blocked_with_403(monkeypatch):
                   json={"query": "원가"}).status_code == 403
 
 
+def test_document_content_is_blocked_with_403_before_reading_storage(monkeypatch):
+    """원문은 검색 청크보다 무겁다. 무자격 요청은 저장소를 읽기 전에 막혀야 한다."""
+    import core.knowledge_base as kb
+    monkeypatch.setattr(kb.knowledge_base, "document_content",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("권한 확인 전에 원문을 읽었다")))
+    c = TestClient(_app(monkeypatch, user_id="ghost@ls", user=None))
+    assert c.get("/api/v1/knowledge/packs/p0/documents/secret.pdf/content").status_code == 403
+
+
+def test_admin_can_read_preserved_document_content(monkeypatch):
+    """대조군 — 원본이 보존된 문서는 검색 질의 없이도 내용을 직접 확인한다."""
+    import core.knowledge_base as kb
+    monkeypatch.setattr(kb.knowledge_base, "get_pack", lambda pid: {
+        "pack_id": pid, "owner_org_id": "", "documents": [{"filename": "rule.txt"}]})
+    monkeypatch.setattr(kb.knowledge_base, "document_content", lambda *a, **k: {
+        "filename": "rule.txt", "content": "재고 승인 기준", "offset": 0,
+        "returned": 8, "total_chars": 8, "truncated": False})
+    c = TestClient(_app(monkeypatch, user_id="hikwon@ls",
+                        user={"user_id": "hikwon@ls", "status": "active"},
+                        scope_kw={"unrestricted": True}))
+    r = c.get("/api/v1/knowledge/packs/p0/documents/rule.txt/content")
+    assert r.status_code == 200
+    assert r.json()["data"]["content"] == "재고 승인 기준"
+
+
 def test_reference_assets_are_hidden_without_explicit_scope(monkeypatch):
     """★★★ `scope_node_id` 를 **주지 않아도** 통제된다. 종전 계약("주지 않으면 필터 안 함")이
     바로 구멍이었다 — 프론트는 실제로 주지 않았다."""

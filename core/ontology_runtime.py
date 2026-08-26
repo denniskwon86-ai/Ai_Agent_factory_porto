@@ -513,6 +513,44 @@ class OntologyRuntime:
         status = "NOT_INSTALLED" if not rows else ("READY" if ready else "NOT_READY")
         return {"status": status, "contracts": contracts, "count": len(contracts)}
 
+    def model_contract(self, contract_id: str, contract_version: str = "") -> dict:
+        """Return one installed contract with its relation dictionary.
+
+        The status endpoint intentionally stays compact.  Management screens still need to answer
+        *what* was installed; otherwise an installation fingerprint is a label without inspectable
+        meaning.  This read verifies the materialised dictionary before returning it.
+        """
+        cid = (contract_id or "").strip()
+        version = (contract_version or "").strip()
+        if not cid:
+            raise OntologyError("contract_id is required.")
+        sql = "SELECT * FROM semantic_model_contracts WHERE contract_id=?"
+        params: Tuple[object, ...] = (cid,)
+        if version:
+            sql += " AND contract_version=?"
+            params = (cid, version)
+        sql += " ORDER BY contract_version DESC LIMIT 1"
+        with self._connect() as conn:
+            row = conn.execute(sql, params).fetchone()
+            if row is None:
+                raise OntologyAccessError("model contract was not found.")
+            out = dict(row)
+            try:
+                material = json.loads(out.pop("contract_json") or "{}")
+                compiled = {
+                    "contract_version": out["contract_version"],
+                    "relation_types": material.get("relation_types") or [],
+                    "constraints": material.get("constraints") or [],
+                }
+                self._assert_model_materialized(conn, compiled)
+            except OntologyIntegrityError:
+                raise
+            except Exception as exc:
+                raise OntologyIntegrityError("installed model material is unreadable.") from exc
+        return {**out, "integrity_status": "READY",
+                "relation_types": compiled["relation_types"],
+                "constraints": compiled["constraints"]}
+
     @staticmethod
     def _compile_model_contract(contract: dict) -> dict:
         if not isinstance(contract, dict):
@@ -749,6 +787,53 @@ class OntologyRuntime:
                               target_type="relation", target_id=relation_id)
         return self._transition(relation_id, actor, subject, "APPROVED", "RETIRED", "RETIRED",
                                 reason, ledger_correlation_id)
+
+    def list_relations(self, subject: app_policy.Subject, approval_status: str = "",
+                       limit: int = 200) -> dict:
+        """List relations the caller may manage, without reporting hidden-row counts.
+
+        Approved path queries cannot expose DRAFT/IN_REVIEW rows, yet those are precisely the rows
+        a reviewer must act on.  The route using this method already requires standard-management
+        capability; this method additionally applies the stored relation scope per row.
+        """
+        state = (approval_status or "").strip().upper()
+        if state and state not in APPROVAL_STATES:
+            raise OntologyError(f"approval_status must be one of {APPROVAL_STATES}.")
+        cap = max(1, min(int(limit), 500))
+        sql = "SELECT * FROM semantic_relations"
+        params: Tuple[object, ...] = ()
+        if state:
+            sql += " WHERE approval_status=?"
+            params = (state,)
+        sql += " ORDER BY updated_at DESC, relation_id LIMIT 2000"
+        visible: List[dict] = []
+        with self._connect() as conn:
+            rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        for row in rows:
+            if not app_policy.decide(subject, self._relation_scope(row), app_policy.MANAGE).allowed:
+                continue
+            visible.append(self._public_relation(row))
+            if len(visible) > cap:
+                break
+        return {"relations": visible[:cap], "truncated": len(visible) > cap,
+                "approval_status": state}
+
+    def relation_for_management(self, subject: app_policy.Subject, relation_id: str) -> dict:
+        """Return one manageable relation or hide its existence.
+
+        The decision route needs the stored tenant, owner department, evidence and current state
+        before it writes a domain-specific ledger event.  Reusing the public list would silently
+        fail once the relation falls outside that page, while reading the row without the policy
+        check would expose a hidden relation to the approval API.
+        """
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM semantic_relations WHERE relation_id=?",
+                               ((relation_id or "").strip(),)).fetchone()
+        if row is None:
+            raise OntologyAccessError("the relation cannot be managed in this context.")
+        item = dict(row)
+        self._assert_relation_access(subject, item, app_policy.MANAGE)
+        return self._public_relation(item)
 
     # -- deterministic paths ---------------------------------------------
     def find_paths(self, subject: app_policy.Subject, roots: Sequence[ObjectRef],
@@ -1017,6 +1102,15 @@ class OntologyRuntime:
             scope_node_id=row["enterprise_scope_id"],
             owner_dept_id=row["owner_organization_id"],
             binding_state=app_policy.BOUND, status="active")
+
+    def _public_relation(self, row: dict) -> dict:
+        item = dict(row)
+        item["subject"] = self._subject_ref(item).to_dict()
+        item["object"] = self._object_ref(item).to_dict()
+        item["evidence_refs"] = json.loads(item.pop("evidence_refs_json") or "[]")
+        item["source_lineage"] = json.loads(item.pop("source_lineage_json") or "[]")
+        item["scope_assignments"] = json.loads(item.pop("scope_assignments_json") or "[]")
+        return item
 
     def _assert_relation_access(self, subject: app_policy.Subject, row: dict,
                                 action: str) -> None:

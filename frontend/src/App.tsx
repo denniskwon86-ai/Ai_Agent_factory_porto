@@ -21,7 +21,7 @@ import { SkillEvolutionPanel } from './components/SkillEvolutionPanel';
 // [CL-1] 협업 허브 — 앱 전달·수락·내 앱. 오버레이 boolean 을 4개 만들지 않고
 //   하나의 허브 안에서 내부 view 를 관리한다(작업서 §CL-FE-01).
 import { CollaborationHub } from './features/collaboration/CollaborationHub';
-import { KnowledgeHubPanel } from './components/KnowledgeHubPanel';
+import { KnowledgeHubPanel, type KnowledgeView } from './components/KnowledgeHubPanel';
 import { TerminologyGlossaryPanel } from './components/TerminologyGlossaryPanel';
 import { MasterDataPanel } from './components/MasterDataPanel';
 import { WorkStandardPanel } from './components/WorkStandardPanel';
@@ -48,6 +48,7 @@ import { ScenarioPanel } from './components/ScenarioPanel';
 // [I-4 7 / Wave H-4] 운영 승격 — 후보를 운영으로 올리는 단 하나의 문
 import { ReleasePromotionPanel } from './components/ReleasePromotionPanel';
 import { CompanySetupPanel } from './components/CompanySetupPanel';
+import { OperatingContextSwitcher } from './components/OperatingContextSwitcher';
 import { ProductShell } from './components/ProductShell';
 import { SystemAboutPage } from './components/SystemAboutPage';
 import { KitOperationsPanel } from './components/KitOperationsPanel';
@@ -84,7 +85,7 @@ function AppShell() {
   // deleteRelease 는 더 이상 목록에서 쓰지 않는다 — 서버가 삭제를 거부하고 사용 중단을
   //   안내한다(사용자 결정 2026-07-30). 스토어 액션 자체는 남겨둔다.
   const showAgentPanel = useFactoryStore((state) => state.showAgentPanel);
-  const openAgentPanel = useFactoryStore((state) => state.openAgentPanel);
+  const closeAgentPanel = useFactoryStore((state) => state.closeAgentPanel);
   const showFormatPanel = useFactoryStore((state) => state.showFormatPanel);
   const templates = useFactoryStore((state) => state.templates);
   const fetchTemplates = useFactoryStore((state) => state.fetchTemplates);
@@ -98,11 +99,13 @@ function AppShell() {
   const initialProject = React.useRef<string | null>(
     typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('project')
   );
-  const [space, setSpace] = useState<'enterprise' | 'about' | 'build'>(() => {
+  const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'>(() => {
     if (initialProject.current) return 'build';
     if (typeof window === 'undefined') return 'enterprise';
     const value = new URLSearchParams(window.location.search).get('space');
-    return value === 'about' || value === 'build' ? value : 'enterprise';
+    return value === 'about' || value === 'build' || value === 'operate' || value === 'twin'
+      || value === 'report' || value === 'knowledge' || value === 'agent'
+      ? value : 'enterprise';
   });
   const [routeRestored, setRouteRestored] = useState(initialProject.current === null);
   useEffect(() => {
@@ -132,7 +135,9 @@ function AppShell() {
   const [buildStart, setBuildStart] = useState(false);
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
+  const [knowledgeInitialView, setKnowledgeInitialView] = useState<KnowledgeView>('packs');
   const [showDataPrep, setShowDataPrep] = useState(false);
+  const [dataPrepInitialView, setDataPrepInitialView] = useState<'overview' | 'readiness'>('overview');
   const [showCalcApproval, setShowCalcApproval] = useState(false);
   const [showPathCalc, setShowPathCalc] = useState(false);
   const [showScenario, setShowScenario] = useState(false);
@@ -143,6 +148,7 @@ function AppShell() {
   const [showMasterData, setShowMasterData] = useState(false);
   const [showWorkStandard, setShowWorkStandard] = useState(false);
   const [showOrgChart, setShowOrgChart] = useState(false);
+  const [showContextSwitcher, setShowContextSwitcher] = useState(false);
   const [showCollaboration, setShowCollaboration] = useState(false);
   // 핵심 여정의 «의사결정 안건»은 계산 결과에 결속된 Decision Case를 검토하는 곳이다.
   // 협업 메뉴는 수신함에서, 핵심 여정 4단계는 의사결정 센터에서 시작한다.
@@ -241,7 +247,11 @@ function AppShell() {
       onSelect: () => setShowAdvisor(true) },
     { id: 'collaboration', icon: '🤝', label: '협업·의사결정·발간',
       desc: '앱 전달·수락, 의사결정 패키지, 대내외 발간을 한 곳에서 — 수락해도 데이터 권한은 넓어지지 않습니다',
-      onSelect: () => { setCollaborationInitialView('inbox'); setShowCollaboration(true); } },
+      onSelect: () => {
+        setCollaborationInitialView('inbox');
+        setShowCollaboration(false);
+        setSpace('report');
+      } },
   ];
 
   // ── 메뉴 묶음 ─────────────────────────────────────────────────────────────
@@ -260,8 +270,8 @@ function AppShell() {
   // ★★★ **순서가 있는 것은 순서대로 놓는다.** 첫 묶음이 여정이고, 번호를 붙였다.
   //   나머지 묶음은 「그 여정을 받쳐 주는 것」·「결과를 다르게 돌려 보는 것」·
   //   「내보내는 것」·「누가 판단하는가」로 나눴다.
-  // ⚠️ 항목을 **빼거나 더하지 않았다** — 20개 그대로다. 묶음과 순서만 바꿨다.
-  //   (숨기는 것은 통제가 아니다. 권한은 서버 `route_authority` 표가 막는다.)
+  // 온톨로지·대외 인텔리전스처럼 제품 화면이 생긴 기능은 이 목록에서 직접 찾을 수 있어야
+  // 한다. 숨기는 것은 통제가 아니며 실제 권한은 서버 `route_authority` 표가 막는다.
   //: ★ 상단 셸이 쓰는 문맥. ⚠️ 회사·범위 이름은 **한 곳**에서 얻는다
   //:   (`lib/scopeLabel`) — 화면마다 따로 풀면 같은 것이 두 이름으로 보인다.
   const [openConsole, setOpenConsole] = useState(false);
@@ -281,7 +291,7 @@ function AppShell() {
       items: [
         { id: 'dataprep', icon: '1️⃣', label: '업무 데이터 준비',
           desc: '샘플 패키지를 조직에 적용하고 · 업무기능별 원천을 연결하고 · 데이터 판을 인증합니다 — 여기가 «준비됨» 이어야 뒤가 돕니다',
-          onSelect: () => setShowDataPrep(true) },
+          onSelect: () => { setDataPrepInitialView('overview'); setShowDataPrep(true); } },
         { id: 'calc-approval', icon: '2️⃣', label: '계산 실행 승인',
           desc: '산식을 실제로 돌려도 되는지 사람이 승인합니다 — 누르기 전까지 계산은 «막힘» 으로 답합니다',
           // ⚠️ 시스템 관리자 전용이다. 화면에서 숨기는 것은 **편의**이고, 실제로 막는 것은
@@ -293,7 +303,11 @@ function AppShell() {
           onSelect: () => setShowPathCalc(true) },
         { id: 'decision-pkg', icon: '4️⃣', label: '의사결정 안건',
           desc: '경로 계산에서 만든 안건을 세 관점으로 검토하고 · 실행 책임자와 기한을 확정하고 · 근거 계보를 확인합니다',
-          onSelect: () => { setCollaborationInitialView('decisions'); setShowCollaboration(true); } },
+          onSelect: () => {
+            setCollaborationInitialView('decisions');
+            setShowCollaboration(false);
+            setSpace('report');
+          } },
         { id: 'briefing', icon: '5️⃣', label: '경영 브리핑',
           desc: '결정할 일·막힌 일·데이터 결손과 근거를 권한 범위 안에서 확인합니다 (LLM 0콜)',
           onSelect: () => setShowBriefing(true) },
@@ -308,7 +322,13 @@ function AppShell() {
           onSelect: () => setShowMasterData(true) },
         { id: 'knowledge', icon: '📚', label: '지식 허브',
           desc: '도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결',
-          onSelect: () => setShowKnowledgeHub(true) },
+          onSelect: () => { setKnowledgeInitialView('packs'); setShowKnowledgeHub(false); setSpace('knowledge'); } },
+        { id: 'ontology', icon: '🕸', label: '업무 온톨로지',
+          desc: '승인된 업무 객체·관계를 따라 영향 경로와 결속된 데이터 판을 확인',
+          onSelect: () => { setKnowledgeInitialView('ontology'); setShowKnowledgeHub(false); setSpace('knowledge'); } },
+        { id: 'external-intelligence', icon: '🌐', label: '대외 인텔리전스',
+          desc: '승인 원천·확정 대외지표·발표 시점별 관측값과 기준계획 사용 가능 여부',
+          onSelect: () => { setKnowledgeInitialView('external'); setShowKnowledgeHub(false); setSpace('knowledge'); } },
         { id: 'terminology', icon: '📖', label: '기술·제품 용어집',
           desc: '현재 용어·권장 사용자 용어·기술 표준명을 함께 보는 전환 사전',
           onSelect: () => setShowTerminology(true) },
@@ -328,7 +348,7 @@ function AppShell() {
       items: [
         { id: 'scenario', icon: '📈', label: '시나리오 시뮬레이션',
           desc: '환율·도입 지연·전력단가 → 생산량·재고·현금·손익 (고정 기준선 기준)',
-          onSelect: () => setShowScenario(true) },
+          onSelect: () => { setShowScenario(false); setSpace('twin'); } },
         { id: 'planning', icon: '📊', label: '경영계획',
           desc: '계획·실적·시나리오를 동일 기준선에서 비교 (결정론적 계산, LLM 0콜)',
           onSelect: () => setShowPlanning(true) },
@@ -369,7 +389,7 @@ function AppShell() {
           onSelect: () => setShowWorkStandard(true) },
         { id: 'agents', icon: '⚙️', label: '에이전트 통제소',
           desc: '각 에이전트의 역할·스킬·모델·순서·HOTL(전문가 개입)을 설정',
-          onSelect: openAgentPanel },
+          onSelect: () => { closeAgentPanel(); setSpace('agent'); } },
         { id: 'agent-gov', icon: '🏛', label: 'Agent Governance Center',
           desc: '조직 자산의 범위·권한·승인 — 누가 만들고 누가 승인해서 어디에 쓰이는가',
           // ⚠️ 여기는 「내 업무」다 — viewer 도 자기 범위의 자산을 볼 수 있어야 하므로
@@ -404,14 +424,17 @@ function AppShell() {
     // 상단 메뉴 이름과 첫 화면이 다르면 사용자는 잘못 열린 것으로 판단한다.
     if (id === 'report') {
       setCollaborationInitialView('decisions');
-      setShowCollaboration(true);
+      setShowCollaboration(false);
+      setSpace('report');
       return;
     }
-    if (id === 'operate') { setShowKitOperations(true); return; }
-    const map: Record<string, string> = {
-      twin: 'scenario',
-      knowledge: 'knowledge', agent: 'agents',
-    };
+    if (id === 'operate') { setShowKitOperations(false); setSpace('operate'); return; }
+    if (id === 'twin') { setShowScenario(false); setSpace('twin'); return; }
+    if (id === 'knowledge') {
+      setKnowledgeInitialView('packs'); setShowKnowledgeHub(false); setSpace('knowledge'); return;
+    }
+    if (id === 'agent') { closeAgentPanel(); setSpace('agent'); return; }
+    const map: Record<string, string> = {};
     const hit = [...primaryNav, ...navGroups.flatMap((g) => g.items)]
       .find((it) => it.id === map[id]);
     if (hit) hit.onSelect();
@@ -462,7 +485,7 @@ function AppShell() {
   //     의사결정 안건·기준정보 마스터·지식 허브·용어집·업무표준·조직·권한·크로스워크·
   //     시나리오·운영 승격·스킬 진화·텔레메트리가 전부 **눌러도 아무 일이 없었다**
   //
-  // ★ 메뉴는 세 화면에서 **똑같이 20개**를 보여 준다. 즉 화면은 「있다」고 말하고 실제로는
+  // ★ 메뉴는 세 화면에서 **똑같은 목록**을 보여 준다. 즉 화면은 「있다」고 말하고 실제로는
   //   없었다. 사용자는 그것을 권한 문제로 읽지 않고 **고장으로 읽는다**.
   //
   // ⚠️ 이 파일의 495행 주석이 이미 같은 사고를 한 번 기록했고(「런처에서 빼면 메뉴는
@@ -514,7 +537,9 @@ function AppShell() {
       {showSkillEvolution && (
         <SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />
       )}
-      {showDataPrep && <DataPrepPanel onClose={() => setShowDataPrep(false)} />}
+      {showDataPrep && (
+        <DataPrepPanel initialView={dataPrepInitialView}
+          onClose={() => setShowDataPrep(false)} />)}
       {showCalcApproval && (
         <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
       {showPathCalc && <PathCalcPanel onClose={() => setShowPathCalc(false)} />}
@@ -546,6 +571,12 @@ function AppShell() {
       )}
       {showOrgChart && (
         <OrgChartPanel onClose={() => setShowOrgChart(false)} />
+      )}
+      {showContextSwitcher && (
+        <OperatingContextSwitcher
+          onClose={() => setShowContextSwitcher(false)}
+          onManageOrg={() => { setShowContextSwitcher(false); setShowOrgChart(true); }}
+          onManageCompany={() => { setShowContextSwitcher(false); setShowCompany(true); }} />
       )}
       {showCompany && (
         <CompanySetupPanel onClose={() => setShowCompany(false)} />
@@ -635,7 +666,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowOrgChart(true)}
+            onContext={() => setShowContextSwitcher(true)}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => setSpace('build')}
@@ -680,7 +711,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowOrgChart(true)}
+            onContext={() => setShowContextSwitcher(true)}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => setSpace('build')}
@@ -692,6 +723,10 @@ function AppShell() {
             </>} />
           <EnterprisePage
             onOpenBuild={() => setSpace('build')}
+            onOpenDataReadiness={() => {
+              setDataPrepInitialView('readiness');
+              setShowDataPrep(true);
+            }}
             //: ⚠️ 여기서 id 를 **하나씩 손으로** 잇지 않는다 — 종전에 그렇게 두었다가
             //:   화면마다 목록이 갈라져 「메뉴에 있는데 눌러도 아무 일이 없는」 항목이
             //:   14개 생겼다(이 파일 위쪽 주석). 메뉴 정의를 그대로 뒤진다.
@@ -703,6 +738,157 @@ function AppShell() {
         </div>
         {/* ★ 오버레이는 **한 벌**이다 — 위 `overlays` 선언 참조. 화면마다 목록을
             손으로 들고 있었더니 화면에 따라 열리는 것이 달랐다(2026-08-23). */}
+        {overlays}
+      </ErrorBoundary>
+    );
+  }
+
+  // 에이전트는 역할·모델·스킬·실행 순서와 사람 확인 지점을 정하는 독립 제품공간이다.
+  // 전체 메뉴의 관리 모달은 유지하되, 상단 핵심 메뉴에서는 공통 ProductShell 안에서 연다.
+  if (!currentProjectId && space === 'agent') {
+    return (
+      <ErrorBoundary>
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
+          <ProductShell module="agent"
+            company={shellCompanyName}
+            scope={shellCtx.scopeLabel}
+            entityMode={shellCtx.entityMode}
+            onNav={handleShellNav}
+            onContext={() => setShowContextSwitcher(true)}
+            onAbout={() => setSpace('about')}
+            onSettings={() => setOpenConsole(true)}
+            onNewWork={() => setSpace('build')}
+            right={<>
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
+                onConsoleHandled={() => setOpenConsole(false)} />
+              <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
+            </>} />
+          <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
+            <AgentMasterPanel page onClose={() => setSpace('enterprise')} />
+          </main>
+        </div>
+        {overlays}
+      </ErrorBoundary>
+    );
+  }
+
+  // 지식은 모든 앱·에이전트가 참고할 근거를 다루는 독립 제품공간이다. 전체 메뉴에서 여는
+  // 지식 허브 모달은 유지하되, 상단 핵심 메뉴는 공통 ProductShell 안에서 연다.
+  if (!currentProjectId && space === 'knowledge') {
+    return (
+      <ErrorBoundary>
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
+          <ProductShell module="knowledge"
+            company={shellCompanyName}
+            scope={shellCtx.scopeLabel}
+            entityMode={shellCtx.entityMode}
+            onNav={handleShellNav}
+            onContext={() => setShowContextSwitcher(true)}
+            onAbout={() => setSpace('about')}
+            onSettings={() => setOpenConsole(true)}
+            onNewWork={() => setSpace('build')}
+            right={<>
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
+                onConsoleHandled={() => setOpenConsole(false)} />
+              <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
+            </>} />
+          <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
+            <KnowledgeHubPanel page initialView={knowledgeInitialView}
+              onClose={() => setSpace('enterprise')} />
+          </main>
+        </div>
+        {overlays}
+      </ErrorBoundary>
+    );
+  }
+
+  // 결정·보고는 제품 수명주기의 독립 공간이다. 전체 메뉴의 협업 허브는 모달로 유지하지만,
+  // 상단 핵심 메뉴는 ProductShell과 3열 작업면을 유지한다.
+  if (!currentProjectId && space === 'report') {
+    return (
+      <ErrorBoundary>
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
+          <ProductShell module="report"
+            company={shellCompanyName}
+            scope={shellCtx.scopeLabel}
+            entityMode={shellCtx.entityMode}
+            onNav={handleShellNav}
+            onContext={() => setShowContextSwitcher(true)}
+            onAbout={() => setSpace('about')}
+            onSettings={() => setOpenConsole(true)}
+            onNewWork={() => setSpace('build')}
+            right={<>
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
+                onConsoleHandled={() => setOpenConsole(false)} />
+              <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
+            </>} />
+          <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
+            <CollaborationHub page initialView={collaborationInitialView}
+              onClose={() => setSpace('enterprise')}
+              releaseIds={releases.map((r: any) => r.release_id).filter(Boolean)} />
+          </main>
+        </div>
+        {overlays}
+      </ErrorBoundary>
+    );
+  }
+
+  // 시뮬레이션은 기준선·가정·결과를 함께 다루는 주요 제품 공간이다. 홈 위 대화상자가
+  // 아니라 공통 ProductShell 아래의 독립 페이지로 유지한다.
+  if (!currentProjectId && space === 'twin') {
+    return (
+      <ErrorBoundary>
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
+          <ProductShell module="twin"
+            company={shellCompanyName}
+            scope={shellCtx.scopeLabel}
+            entityMode={shellCtx.entityMode}
+            onNav={handleShellNav}
+            onContext={() => setShowContextSwitcher(true)}
+            onAbout={() => setSpace('about')}
+            onSettings={() => setOpenConsole(true)}
+            onNewWork={() => setSpace('build')}
+            right={<>
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
+                onConsoleHandled={() => setOpenConsole(false)} />
+              <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
+            </>} />
+          <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
+            <ScenarioPanel page onClose={() => setSpace('enterprise')} />
+          </main>
+        </div>
+        {overlays}
+      </ErrorBoundary>
+    );
+  }
+
+  // 앱 운영은 앱 제작과 같은 제품 수명주기 화면이다. 홈 위에 뜨는 대화상자가 아니라
+  // 동일한 ProductShell 아래의 독립 페이지로 유지한다.
+  if (!currentProjectId && space === 'operate') {
+    return (
+      <ErrorBoundary>
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
+          <ProductShell module="operate"
+            company={shellCompanyName}
+            scope={shellCtx.scopeLabel}
+            entityMode={shellCtx.entityMode}
+            onNav={handleShellNav}
+            onContext={() => setShowContextSwitcher(true)}
+            onAbout={() => setSpace('about')}
+            onSettings={() => setOpenConsole(true)}
+            onNewWork={() => { setSpace('build'); setBuildStart(true); }}
+            right={<>
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
+                onConsoleHandled={() => setOpenConsole(false)} />
+              <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
+            </>} />
+          <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
+            <KitOperationsPanel page onOpenBuild={() => {
+              setSpace('build');
+              setBuildStart(true);
+            }} />
+          </main>
+        </div>
         {overlays}
       </ErrorBoundary>
     );
@@ -730,7 +916,7 @@ function AppShell() {
               }
             }} />
         )}
-        <div className="afs-scope afs-page min-h-screen w-full flex flex-col font-sans">
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
           {/* 앱 제작도 경영 홈과 같은 제품 셸을 쓴다. 화면마다 별도 머리 바를 만들면
               브랜드·회사 문맥·메뉴 명칭이 다시 갈라진다. */}
           <ProductShell module="factory"
@@ -738,7 +924,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowOrgChart(true)}
+            onContext={() => setShowContextSwitcher(true)}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => setBuildStart(true)}
@@ -756,7 +942,7 @@ function AppShell() {
               </div>
             </>} />
 
- <main style={{ flex: 1, overflowY: 'auto', width: '100%' }}>
+ <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
           {/* ★★★ [설계 §5.2] `/build` 는 **목록면**이다 — 상단 「새 업무 만들기」 + 진행 상태
               필터, 본문은 진행 중/내 프로젝트/Mega/Releases/Archive.
               ⚠️ 종전에는 열자마자 «신규 프로젝트 개설» 폼이 본문을 차지했다(2026-07-28 AS-IS).

@@ -32,20 +32,29 @@ import { EmptyOrError, Metric, failed, loading, ok, refreshing, type Loaded } fr
 import { errorTitle } from '../lib/closedLoopFetch';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
 import {
-  knowledgeApi, type Pack, type ReferenceAsset, type ReferenceSummary, type SearchHit,
+  knowledgeApi, type DocumentContent, type Pack, type ReferenceAsset, type ReferenceSummary,
+  type SearchHit,
 } from '../lib/knowledgeApi';
+import { ExternalIntelligenceView } from './ExternalIntelligenceView';
+import { OntologyExplorerView } from './OntologyExplorerView';
 
-type View = 'packs' | 'register' | 'search' | 'sources';
+export type KnowledgeView = 'packs' | 'contents' | 'register' | 'search' | 'sources'
+  | 'ontology' | 'external';
 
 const MODULE = {
   packs: { kicker: 'KNOWLEDGE', title: '지식팩', subtitle: '프로젝트에 연결하면 이 범위 안에서 산출물이 만들어집니다.' },
+  contents: { kicker: 'CONTENT', title: '지식 내용 확인', subtitle: '등록한 원문에서 실제로 추출되는 내용을 사람이 직접 확인합니다.' },
   register: { kicker: 'REGISTER', title: '자료 등록', subtitle: '등록한 파일은 텍스트를 추출해 검색 색인에 들어갑니다.' },
   search: { kicker: 'GROUNDING', title: '검색 품질 확인', subtitle: '에이전트가 이 질의로 어떤 지식을 받게 되는지 그대로 봅니다.' },
   sources: { kicker: 'SOURCES', title: '원본 자료 등록부', subtitle: '출처·범위·분류를 관리합니다. 검토 전에는 자동으로 연결하지 않습니다.' },
+  ontology: { kicker: 'ONTOLOGY', title: '업무 온톨로지', subtitle: '승인된 업무 객체와 관계를 따라 영향 경로와 근거를 확인합니다.' },
+  external: { kicker: 'EXTERNAL', title: '대외 인텔리전스', subtitle: '승인 원천·확정 지표·발표 시점별 관측값을 확인합니다.' },
 };
 
-export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
-  const [view, setView] = useState<View>('packs');
+export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs' }: {
+  onClose: () => void; page?: boolean; initialView?: KnowledgeView;
+}) {
+  const [view, setView] = useState<KnowledgeView>(initialView);
   const [packs, setPacks] = useState<Loaded<Pack[]>>(loading<Pack[]>());
   // 건수는 DA·관리자에게만 온다(`api.deps.hidden_envelope`) — `null` 은 «모른다»다.
   const EMPTY_PACK_VIS = { blockedReason: '', hiddenPresent: false,
@@ -85,6 +94,7 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setView(initialView); }, [initialView]);
 
   // 사용자가 바뀌면 이전 사용자의 목록을 즉시 폐기한다 — 권한 범위가 다르다.
   useEffect(() => {
@@ -132,26 +142,45 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
     { id: 'packs', label: '지식팩', hint: '등록된 자료 묶음', icon: 'packs',
       count: packs.status === 'ok' ? rows.length : undefined,
       countLabel: `지식팩 ${rows.length}개` },
+    { id: 'contents', label: '내용 확인', hint: '원문에서 추출된 지식', icon: 'catalog' },
     { id: 'register', label: '자료 등록', hint: '파일 올리기·삭제', icon: 'upload' },
     { id: 'search', label: '검색 품질 확인', hint: '에이전트가 받는 지식', icon: 'search' },
     { id: 'sources', label: '원본 등록부', hint: '출처·변환 필요', icon: 'sources' },
+    { id: 'ontology', label: '업무 온톨로지', hint: '승인된 객체·관계', icon: 'flow' },
+    { id: 'external', label: '대외 인텔리전스', hint: '원천·지표·관측값', icon: 'globe' },
   ];
 
+  const semanticView = view === 'ontology' || view === 'external';
   const jarvis = foundationJarvis({
     module: `knowledge/${view}`,
     moduleTitle: MODULE[view].title,
     objectType: 'knowledge_pack',
-    selected: pack ? { id: pack.pack_id, title: pack.name || pack.pack_id,
+    selected: !semanticView && pack ? { id: pack.pack_id, title: pack.name || pack.pack_id,
       meta: `문서 ${docCount}건 · ${pack.description || '설명 없음'}` } : null,
     state: packs,
     counts: { packs: packs.status === 'ok' ? rows.length : null },
-    actions: pack ? ['자료 등록', '검색 품질 확인', '팩 삭제'] : ['팩 만들기'],
-    evidence: pack ? [
+    actions: view === 'ontology' ? ['업무 객체 선택', '영향 경로 확인']
+      : view === 'external' ? ['지표 선택', '기준계획 사용 가능 여부 확인']
+        : pack ? ['자료 등록', '내용 확인', '검색 품질 확인'] : ['팩 만들기'],
+    evidence: !semanticView && pack ? [
       { label: '팩 ID', value: pack.pack_id },
       { label: '문서', value: `${docCount}건` },
       { label: '등록', value: (pack.created_at || '').slice(0, 10) || '미상' },
     ] : [],
   });
+  const quickQuestions = view === 'ontology' ? [
+    '이 객체는 어떤 업무 결과에 영향을 줍니까?',
+    '이 관계는 어떤 승인과 데이터 판에 근거합니까?',
+    '현재 범위에서 보이지 않는 이유는 무엇입니까?',
+  ] : view === 'external' ? [
+    '기준계획에 사용할 수 있는 대외지표는 무엇입니까?',
+    '차단된 지표별 다음 조치는 무엇입니까?',
+    '이 값은 어느 원천과 발표판에서 왔습니까?',
+  ] : [
+    '이 지식팩에는 어떤 자료가 들어 있습니까?',
+    '이 질의에 어떤 문서가 걸립니까?',
+    '변환이 필요한 원본이 있습니까?',
+  ];
 
   const runSearch = async () => {
     if (!pack || !query.trim()) return;
@@ -161,44 +190,31 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
     finally { setBusy(null); }
   };
 
-  return (
-    <HubDialog label="지식 허브 — 도메인 참고자료와 근거" onClose={onClose}>
-      <div className="afs-dialog-bar">
-        <b>지식 허브</b>
-        <span>등록한 자료의 범위 안에서 모든 에이전트가 산출물을 만듭니다</span>
-        <div className="bar-actions">
-          {busy && <span className="busy">{busy}…</span>}
-          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
-            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="afs-dialog-body">
-        <HubShell
+  const hub = (
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
-          items={items} activeId={view} onSelect={(id) => setView(id as View)}
+          items={items} activeId={view} onSelect={(id) => setView(id as KnowledgeView)}
           footer={
             <div className="inheritance-card">
-              <span>GROUNDING</span>
-              <b>등록하지 않은 자료는 참고되지 않습니다</b>
-              <p>
-                에이전트는 여기에 등록되고 프로젝트에 연결된 지식팩만 봅니다. 사내 어딘가에
-                파일이 있다는 사실만으로는 산출물에 반영되지 않습니다.
-              </p>
+              <span>{view === 'ontology' ? 'SEMANTICS' : view === 'external' ? 'EVIDENCE' : 'GROUNDING'}</span>
+              <b>{view === 'ontology' ? '승인되지 않은 관계는 경로가 아닙니다'
+                : view === 'external' ? '승인되지 않은 원천은 기준값이 아닙니다'
+                  : '등록하지 않은 자료는 참고되지 않습니다'}</b>
+              <p>{view === 'ontology'
+                ? '설치된 의미계약과 승인·유효기간·조직 범위를 모두 통과한 관계만 표시합니다.'
+                : view === 'external'
+                  ? '신뢰등급과 발표판을 함께 확인하며, 조건을 못 맞춘 값은 0으로 대체하지 않습니다.'
+                  : '에이전트는 여기에 등록되고 프로젝트에 연결된 지식팩만 봅니다. 사내 어딘가에 파일이 있다는 사실만으로는 산출물에 반영되지 않습니다.'}</p>
             </div>
           }
           jarvis={
             <JarvisRail
               contextTitle={jarvis.title} contextDescription={jarvis.desc}
               evidence={jarvis.ev} context={jarvis.ctx}
-              quickQuestions={[
-                '이 지식팩에는 어떤 자료가 들어 있습니까?',
-                '이 질의에 어떤 문서가 걸립니까?',
-                '변환이 필요한 원본이 있습니까?',
-              ]} />
+              quickQuestions={quickQuestions} />
           }
         >
+          <div className={page ? 'product-page-content product-hub-page knowledge-page' : undefined}>
           {err && (
             <Banner tone="error" title={errorTitle(err.status)}>
               {err.msg}
@@ -254,6 +270,10 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
             />
           )}
 
+          {view === 'contents' && (
+            <ContentView packs={rows} pack={pack} selected={selected} onSelect={setSelected} />
+          )}
+
           {view === 'search' && (
             <SearchView pack={pack} query={query} onQuery={setQuery} onRun={runSearch}
               hits={hits} onGoPacks={() => setView('packs')} />
@@ -264,8 +284,28 @@ export function KnowledgeHubPanel({ onClose }: { onClose: () => void }) {
               onScan={() => act('원본 폴더 재스캔 중', knowledgeApi.referenceScan,
                 '재스캔했습니다. 등록부 수치를 확인하십시오.')} />
           )}
+
+          {view === 'ontology' && <OntologyExplorerView />}
+
+          {view === 'external' && <ExternalIntelligenceView />}
+          </div>
         </HubShell>
+  );
+
+  if (page) return hub;
+  return (
+    <HubDialog label="지식 허브 — 도메인 참고자료와 근거" onClose={onClose}>
+      <div className="afs-dialog-bar">
+        <b>지식 허브</b>
+        <span>등록한 자료의 범위 안에서 모든 에이전트가 산출물을 만듭니다</span>
+        <div className="bar-actions">
+          {busy && <span className="busy">{busy}…</span>}
+          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
+            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
+          </button>
+        </div>
       </div>
+      <div className="afs-dialog-body">{hub}</div>
     </HubDialog>
   );
 }
@@ -363,6 +403,87 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
           </div>
           <p className="hint-line">최초 생성 시 임베딩 모델을 한 번 불러오므로 몇 초 걸릴 수 있습니다.</p>
         </div>
+      </Panel>}
+    </>
+  );
+}
+
+// ── 내용 확인 ────────────────────────────────────────────────────────────────
+function ContentView({ packs, pack, selected, onSelect }: {
+  packs: Pack[]; pack: Pack | null; selected: string; onSelect: (id: string) => void;
+}) {
+  const [filename, setFilename] = useState('');
+  const [content, setContent] = useState<Loaded<DocumentContent> | null>(null);
+
+  useEffect(() => { setFilename(''); setContent(null); }, [pack?.pack_id]);
+
+  const read = async (name: string, append = false) => {
+    if (!pack || !name) return;
+    const offset = append ? (content?.value?.offset || 0) + (content?.value?.returned || 0) : 0;
+    setFilename(name); setContent(loading<DocumentContent>());
+    try {
+      const next = await knowledgeApi.documentContent(pack.pack_id, name, offset, 50000);
+      if (append && content?.value) {
+        setContent(ok({ ...next, offset: 0, returned: content.value.returned + next.returned,
+          content: content.value.content + next.content }));
+      } else setContent(ok(next));
+    } catch (e) { setContent(failed<DocumentContent>(e)); }
+  };
+
+  const docs = pack?.documents || [];
+  return (
+    <>
+      <ScreenHead kicker="CONTENT" title="지식 내용 확인"
+        description="검색 결과 몇 줄이 아니라 보관한 원문에서 실제로 추출되는 내용을 확인합니다."
+        chip={{ label: pack ? `문서 ${docs.length}건` : '팩 선택 필요', tone: pack ? 'data' : 'warn' }} />
+
+      <Banner tone="info" title="내용 확인과 검색 품질 확인은 다릅니다">
+        여기서는 문서 전체의 추출 내용을 읽습니다. 실제 질문에 어떤 조각이 전달되는지는
+        «검색 품질 확인»에서 별도로 확인하십시오.
+      </Banner>
+
+      <Panel kicker="SELECT" title="지식팩과 문서 선택">
+        <div style={{ padding: 15, display: 'grid', gap: 12 }}>
+          <label className="reg-filter"><span>지식팩</span>
+            <select className="afs-select" value={selected} onChange={(e) => onSelect(e.target.value)}>
+              <option value="">지식팩을 선택하십시오</option>
+              {packs.map((p) => <option key={p.pack_id} value={p.pack_id}>{p.name || p.pack_id}</option>)}
+            </select>
+          </label>
+          {!pack ? <div className="empty-note">확인할 지식팩을 선택하십시오.</div>
+            : docs.length === 0 ? <div className="empty-note">이 지식팩에는 등록된 문서가 없습니다.</div>
+              : <div className="people-list">
+                {docs.map((d) => <div className="person" key={d.filename}>
+                  <i aria-hidden="true">문</i><div><b>{d.filename}</b>
+                    <small>{d.chunks ? `${d.chunks} 청크` : '청크 미상'} · {d.source || '출처 미상'}
+                      {' · '}{d.added_at ? String(d.added_at).slice(0, 16) : '등록 시각 미상'}</small></div>
+                  <button className="text-button" onClick={() => read(d.filename)}>
+                    {filename === d.filename ? '다시 읽기' : '내용 열기'}
+                  </button>
+                </div>)}
+              </div>}
+        </div>
+      </Panel>
+
+      {filename && <Panel kicker="DOCUMENT" title={filename}>
+        {content?.status !== 'ok' ? <EmptyOrError state={content?.status || 'loading'}
+          error={content?.error} onRetry={() => read(filename)} emptyText="추출된 내용이 없습니다." />
+          : <div style={{ padding: 15 }}>
+            <EvidenceStrip items={[
+              { label: '전체 글자', value: `${content.value?.total_chars ?? 0}` },
+              { label: '현재 표시', value: `${content.value?.returned ?? 0}` },
+              { label: '원문 보존', value: '확인됨' },
+            ]} note="페이지·슬라이드 표시는 원문 추출기가 남긴 위치 표식입니다." />
+            <pre style={{ marginTop: 12, padding: 16, maxHeight: 520, overflow: 'auto',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', fontSize: 14,
+              lineHeight: 1.7, color: 'var(--surface-text)', background: 'var(--surface-sunken)',
+              border: '1px solid var(--surface-border)', borderRadius: 8 }}>
+              {content.value?.content || '추출된 내용이 없습니다.'}
+            </pre>
+            {content.value?.truncated && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+              <button className="secondary-button" onClick={() => read(filename, true)}>다음 내용 더 보기</button>
+            </div>}
+          </div>}
       </Panel>}
     </>
   );

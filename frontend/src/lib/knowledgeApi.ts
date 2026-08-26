@@ -64,6 +64,15 @@ export type SearchHit = {
   metadata?: { filename?: string; [k: string]: any };
 };
 
+export type DocumentContent = {
+  filename: string;
+  content: string;
+  offset: number;
+  returned: number;
+  total_chars: number;
+  truncated: boolean;
+};
+
 export type PackList = {
   packs: Pack[];
   blockedReason: string;
@@ -94,6 +103,11 @@ export const knowledgeApi = {
   removeDoc: (packId: string, filename: string) =>
     req<unknown>('DELETE',
       `/api/v1/knowledge/packs/${encodeURIComponent(packId)}/documents/${encodeURIComponent(filename)}`),
+
+  documentContent: (packId: string, filename: string, offset = 0, limit = 20000) =>
+    req<DocumentContent>('GET',
+      `/api/v1/knowledge/packs/${encodeURIComponent(packId)}/documents/${encodeURIComponent(filename)}`
+      + `/content?offset=${offset}&limit=${limit}`),
 
   search: (packId: string, query: string, nResults = 3) =>
     req<SearchHit[]>('POST',

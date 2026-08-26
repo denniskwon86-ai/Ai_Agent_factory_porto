@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
-import { Panel } from '../design/HubShell';
+import { HubShell, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
 import { DataPrepError, simulate } from '../lib/dataPrepApi';
 import {
   BASE_FIELDS, DRIVER_FIELDS as DRIVERS, num,
@@ -19,7 +20,16 @@ import { BaseValueFields } from './BaseValueFields';
 //   ③ **비율만 크게 보여주지 않는다.** 작은 기준값에서 «+300%» 가 나오고, 그것이
 //      회의에서 실제 규모보다 크게 읽힌다. 값과 비율을 함께 둔다.
 
-export function ScenarioPanel({ onClose }: { onClose: () => void }) {
+type ScenarioStage = 'baseline' | 'base' | 'drivers' | 'results';
+
+const SCENARIO_ITEMS: RailItem[] = [
+  { id: 'baseline', label: '1. 기준선', hint: '인증된 업무키트와 데이터 판 선택', icon: 'catalog' },
+  { id: 'base', label: '2. 기준값', hint: '계산에 사용할 현재 값 확인', icon: 'checklist' },
+  { id: 'drivers', label: '3. 변화 가정', hint: '환율·지연·단가 변화 입력', icon: 'revise' },
+  { id: 'results', label: '4. 비교 결과', hint: '기준 대비 영향과 재현 지문 확인', icon: 'decision' },
+];
+
+export function ScenarioPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   //: ★ id 를 타이핑하게 하지 않는다 — 고르개가 목록에서 집어 준다.
   const [pick, setPick] = useState<BaselineChoice>({ instanceId: '', snapshotIds: [] });
   const [base, setBase] = useState<Record<string, string>>({});
@@ -27,6 +37,18 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<ScenarioStage>('baseline');
+  const baselineRef = useRef<HTMLDivElement>(null);
+  const baseRef = useRef<HTMLDivElement>(null);
+  const driversRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLElement>(null);
+
+  const goStage = (id: string) => {
+    const next = id as ScenarioStage;
+    setStage(next);
+    const refs = { baseline: baselineRef, base: baseRef, drivers: driversRef, results: resultsRef };
+    refs[next].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   async function run() {
     setError(null);
@@ -69,6 +91,178 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
     }
   }
 
+  const workspace = (
+    <div className={page ? 'product-page-content scenario-page' : 'afs-scope scenario-dialog-content'}>
+      {page && (
+        <header className="scenario-page-head">
+          <div>
+            <small>MANAGEMENT DIGITAL TWIN</small>
+            <h1>시뮬레이션</h1>
+            <p>승인된 데이터 판과 고정된 기준선에서 가정을 바꾸고 경영 영향을 비교합니다.</p>
+          </div>
+          <div className="scenario-principle">
+            <strong>같은 기준선 · 같은 입력 · 같은 결과</strong>
+            <span>화면이 숫자를 만들지 않고 서버 계산 결과를 그대로 표시합니다.</span>
+          </div>
+        </header>
+      )}
+
+      <div className="scenario-workspace">
+        <section className="scenario-controls" aria-label="시나리오 조건 설정">
+          <header>
+            <small>SCENARIO CONTROL</small>
+            <h2>기준선과 가정</h2>
+            <p>인증된 판을 고정한 뒤 기준값과 변화 조건을 입력합니다.</p>
+          </header>
+
+          <div ref={baselineRef} data-scenario-stage="baseline">
+            <BaselinePicker value={pick} onChange={setPick} />
+          </div>
+          <div ref={baseRef} data-scenario-stage="base">
+            <BaseValueFields pick={pick} values={base} onChange={setBase} />
+          </div>
+
+          <div ref={driversRef} data-scenario-stage="drivers">
+            <h4 style={{ margin: '4px 0 8px', fontSize: 15 }}>변화 가정</h4>
+            <div className="scenario-driver-grid">
+              {DRIVERS.map((driver) => (
+                <label key={driver.key}>
+                  <span>{driver.label} <em>({driver.unit})</em></span>
+                  <input value={drivers[driver.key] || ''} inputMode="decimal" placeholder="0"
+                    onChange={(event) => setDrivers({
+                      ...drivers, [driver.key]: event.target.value,
+                    })} />
+                  <small>{driver.hint}</small>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <button onClick={run} disabled={busy} className="primary-button scenario-run">
+            {busy ? '계산 중…' : '시뮬레이션 실행'}
+          </button>
+        </section>
+
+        <section ref={resultsRef} className="scenario-results" aria-label="시뮬레이션 비교 결과"
+          data-scenario-stage="results">
+          <header>
+            <div>
+              <small>SCENARIO RESULTS</small>
+              <h2>기준 대비 영향</h2>
+            </div>
+            <span className={result ? 'scenario-result-state ready' : 'scenario-result-state'}>
+              {result ? '계산 완료' : '실행 대기'}
+            </span>
+          </header>
+
+          {error && (
+            <div className="scenario-error" role="alert">{error}</div>
+          )}
+
+          {!result ? (
+            <div className="scenario-empty">
+              <span aria-hidden="true">↗</span>
+              <strong>왼쪽에서 기준선과 가정을 확정하십시오.</strong>
+              <p>실행 전에는 결과를 0이나 빈 차트로 그리지 않습니다. 계산하지 않은 값은 결과가 아닙니다.</p>
+              <ol>
+                <li>업무키트와 인증 데이터 판 선택</li>
+                <li>기준값 확인·보완</li>
+                <li>변화 가정 입력 후 실행</li>
+              </ol>
+            </div>
+          ) : (
+            <div className="scenario-result-body">
+              {/* 성격 표시를 결과 바로 위에 둔다 — 빠지면 이 숫자가 실적으로 읽힌다. */}
+              <div className="scenario-baseline-banner">
+                <strong>{result.baseline?.display_label || '성격을 알 수 없는 기준선입니다'}</strong>
+                <span>기준시점 {result.baseline?.as_of?.slice(0, 16).replace('T', ' ') || '없음'}</span>
+              </div>
+
+              <div className="scenario-kpis">
+                {(result.compare || []).slice(0, 4).map((row: any) => (
+                  <article key={row.key}>
+                    <span>{row.label}</span>
+                    <strong>{row.scenario.toLocaleString()} <small>{row.unit}</small></strong>
+                    <em className={row.delta < 0 ? 'down' : row.delta > 0 ? 'up' : ''}>
+                      기준 대비 {row.delta > 0 ? '+' : ''}{row.delta.toLocaleString()}
+                    </em>
+                  </article>
+                ))}
+              </div>
+
+              <div className="scenario-table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>결과</th><th>기준</th><th>시나리오</th><th>변화</th></tr>
+                  </thead>
+                  <tbody>
+                    {(result.compare || []).map((row: any) => (
+                      <tr key={row.key}>
+                        <td>{row.label} <small>{row.unit}</small></td>
+                        <td>{row.base.toLocaleString()}</td>
+                        <td>{row.scenario.toLocaleString()}</td>
+                        <td className={row.delta < 0 ? 'down' : row.delta > 0 ? 'up' : ''}>
+                          {row.delta > 0 ? '+' : ''}{row.delta.toLocaleString()}
+                          <small>{row.delta_pct === null ? '비율 없음'
+                            : `${row.delta_pct > 0 ? '+' : ''}${row.delta_pct}%`}</small>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <footer className="scenario-trace">
+                산식 {result.scenario?.calc_version} · 기준선 지문{' '}
+                {String(result.baseline?.fingerprint || '').slice(0, 12)} · 결과 지문{' '}
+                {String(result.scenario?.fingerprint || '').slice(0, 12)}
+              </footer>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+
+  if (page) return (
+    <HubShell layoutClassName="product-page-shell scenario-product-shell"
+      kicker="MANAGEMENT DIGITAL TWIN" title="시뮬레이션"
+      subtitle="승인된 판과 고정 기준선에서 변화 가정을 비교합니다."
+      items={SCENARIO_ITEMS} activeId={stage} onSelect={goStage}
+      footer={<div className="inheritance-card">
+        <span>REPRODUCIBLE</span>
+        <b>같은 기준선 · 같은 입력 · 같은 결과</b>
+        <p>화면은 숫자를 만들지 않고 서버 계산 결과와 재현 지문을 그대로 보여 줍니다.</p>
+      </div>}
+      jarvis={<JarvisRail
+        contextTitle={pick.instanceId ? `시나리오 · ${pick.instanceId}` : '새 시나리오'}
+        contextDescription={pick.instanceId
+          ? '현재 선택한 업무키트·데이터 판·변화 가정을 기준으로 답합니다.'
+          : '기준선을 선택하면 해당 데이터 판을 기준으로 답합니다.'}
+        context={{
+          current_module: 'management_twin',
+          selected_object_type: result ? 'scenario_result' : 'scenario_draft',
+          selected_object_id: result?.scenario?.fingerprint || pick.instanceId,
+          object_snapshot: {
+            instance_id: pick.instanceId, snapshot_ids: pick.snapshotIds,
+            assumptions: drivers, result_fingerprint: result?.scenario?.fingerprint,
+          },
+          available_actions: ['기준선 설명', '가정 영향 점검', '결과 근거 확인'],
+        }}
+        evidence={pick.instanceId ? [
+          { label: '업무키트', value: pick.instanceId },
+          { label: '봉인된 데이터 판', value: `${pick.snapshotIds.length}개` },
+          { label: '계산 상태', value: result ? '완료' : busy ? '계산 중' : '실행 전' },
+        ] : []}
+        quickQuestions={[
+          '이 시나리오의 기준선과 데이터 판을 설명해 주세요.',
+          '입력한 가정이 어떤 경영 지표에 영향을 줍니까?',
+          '결과를 의사결정에 쓰기 전에 무엇을 확인해야 합니까?',
+        ]} />}
+    >
+      {workspace}
+    </HubShell>
+  );
   return (
     <HubDialog label="시나리오 시뮬레이션 — 환율·지연·전력단가" onClose={onClose}>
       <div className="afs-dialog-bar">
@@ -76,112 +270,10 @@ export function ScenarioPanel({ onClose }: { onClose: () => void }) {
         <span>고정된 기준선 위에서만 계산합니다 — 같은 입력이면 같은 답입니다</span>
         <div className="bar-actions">
           {busy && <span className="busy">계산 중…</span>}
-          <button onClick={onClose} className="secondary-button" style={{ minHeight: 32 }}>
-            닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
-          </button>
+          <button onClick={onClose} className="secondary-button">닫기 (Esc)</button>
         </div>
       </div>
-
-      <div className="afs-dialog-body" style={{
-        overflow: 'auto', padding: 18, display: 'flex', flexDirection: 'column',
-      }}>
-        <Panel className="afs-fill">
-          <BaselinePicker value={pick} onChange={setPick} />
-
-          <BaseValueFields pick={pick} values={base} onChange={setBase} />
-
-          <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>가정</h4>
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-            gap: 10, marginBottom: 16,
-          }}>
-            {DRIVERS.map((d) => (
-              <label key={d.key} style={{ fontSize: 13 }}>
-                {d.label} <span style={{ color: 'var(--surface-text-muted)' }}>({d.unit})</span>
-                <input value={drivers[d.key] || ''} inputMode="decimal" placeholder="0"
-                  onChange={(e) => setDrivers({ ...drivers, [d.key]: e.target.value })}
-                  style={{
-                    width: '100%', marginTop: 4, padding: '6px 8px',
-                    border: '1px solid var(--surface-border)', borderRadius: 6, fontSize: 14,
-                  }} />
-                <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 2 }}>{d.hint}</div>
-              </label>
-            ))}
-          </div>
-
-          <button onClick={run} disabled={busy} style={{
-            padding: '9px 20px', border: '1px solid var(--action-primary-bg)', background: 'var(--action-primary-bg)',
-            color: '#fff', borderRadius: 6, cursor: busy ? 'default' : 'pointer', fontSize: 14,
-          }}>{busy ? '계산 중…' : '시뮬레이션 실행'}</button>
-
-          {error && (
-            <div style={{
-              marginTop: 12, padding: '10px 12px', background: 'var(--state-error-bg)',
-              border: '1px solid var(--state-error-fg)', borderRadius: 6, fontSize: 14, color: 'var(--state-error-fg)',
-            }}>{error}</div>
-          )}
-
-          {result && (
-            <div style={{ marginTop: 20 }}>
-              {/* ★★★ 성격 표시를 결과 **바로 위**에 둔다 — 빠지면 이 숫자가 실적으로 읽힌다. */}
-              <div style={{
-                padding: '8px 12px', background: 'var(--state-warn-bg)', border: '1px solid var(--state-warn-fg)',
-                borderRadius: 6, fontSize: 13, marginBottom: 10,
-              }}>
-                {result.baseline?.display_label || '성격을 알 수 없는 기준선입니다'}
-                <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8 }}>
-                  기준시점 {result.baseline?.as_of?.slice(0, 16).replace('T', ' ') || '없음'}
-                </span>
-              </div>
-
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid var(--surface-border)', textAlign: 'left' }}>
-                    <th style={{ padding: 8, fontSize: 13 }}>결과</th>
-                    <th style={{ padding: 8, fontSize: 13, textAlign: 'right' }}>기준</th>
-                    <th style={{ padding: 8, fontSize: 13, textAlign: 'right' }}>시나리오</th>
-                    <th style={{ padding: 8, fontSize: 13, textAlign: 'right' }}>변화</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(result.compare || []).map((r: any) => (
-                    <tr key={r.key} style={{ borderBottom: '1px solid var(--surface-border)' }}>
-                      <td style={{ padding: 8, fontSize: 14 }}>
-                        {r.label} <span style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>{r.unit}</span>
-                      </td>
-                      <td style={{ padding: 8, fontSize: 14, textAlign: 'right' }}>
-                        {r.base.toLocaleString()}
-                      </td>
-                      <td style={{ padding: 8, fontSize: 14, textAlign: 'right' }}>
-                        {r.scenario.toLocaleString()}
-                      </td>
-                      <td style={{
-                        padding: 8, fontSize: 14, textAlign: 'right',
-                        color: r.delta < 0 ? 'var(--state-error-fg)' : r.delta > 0 ? 'var(--state-success-fg)' : 'var(--surface-text-muted)',
-                      }}>
-                        {r.delta > 0 ? '+' : ''}{r.delta.toLocaleString()}
-                        {/* ★ 비율은 값 **옆에** 작게 — 비율만 크게 두면 작은 기준값에서
-                            실제 규모보다 크게 읽힌다. 기준이 0이면 비율은 없다. */}
-                        <span style={{ color: 'var(--surface-text-muted)', fontSize: 12, marginLeft: 6 }}>
-                          {r.delta_pct === null ? '비율 없음' : `${r.delta_pct > 0 ? '+' : ''}${r.delta_pct}%`}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 10 }}>
-                {/* ★★★ 계보를 화면에 남긴다 — 「이 숫자는 무엇으로 만들었나」에
-                    다음 회의에서 답할 수 있어야 한다. */}
-                산식 {result.scenario?.calc_version} · 기준선 지문{' '}
-                {String(result.baseline?.fingerprint || '').slice(0, 12)} · 결과 지문{' '}
-                {String(result.scenario?.fingerprint || '').slice(0, 12)}
-              </div>
-            </div>
-          )}
-        </Panel>
-      </div>
+      <div className="afs-dialog-body scenario-dialog-body">{workspace}</div>
     </HubDialog>
   );
 }

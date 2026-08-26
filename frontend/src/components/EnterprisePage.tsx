@@ -133,9 +133,10 @@ function blockingGate(w: CalcReadiness): CalcGate | undefined {
       || (w.gates || []).find((g) => g.state === 'NOT_YET');
 }
 
-export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
+export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }: {
   onOpenBuild: () => void;
   onOpenMenu: (id: string) => void;
+  onOpenDataReadiness: () => void;
 }) {
   const [data, setData] = useState<Loaded<Briefing>>(loading<Briefing>());
   const [selected, setSelected] = useState<QueueRow | null>(null);
@@ -557,9 +558,9 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu }: {
           </section>
 
           <div className="rail-tools">
-            <button onClick={() => onOpenMenu('dataprep')}>전체 업무 공간</button>
+            <button onClick={() => onOpenMenu('workspace')}>전체 업무 공간</button>
             <button onClick={onOpenBuild}>내 SW·시뮬레이터</button>
-            <button onClick={() => onOpenMenu('dataprep')}>데이터 준비 상태</button>
+            <button onClick={onOpenDataReadiness}>데이터 준비 상태</button>
           </div>
         </aside>
 

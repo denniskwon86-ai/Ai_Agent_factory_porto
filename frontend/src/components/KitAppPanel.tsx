@@ -55,6 +55,32 @@ function appLabel(row: KitAppRow): string {
   return APP_PRESENTATION[row.app_id]?.label || row.label || row.app_id;
 }
 
+function lifecycleView(row: KitAppRow): { label: string; tone: string; bg: string } {
+  if (row.lifecycle_state === 'active') {
+    return { label: '운영 중', tone: 'var(--state-success-fg)', bg: 'var(--state-success-bg)' };
+  }
+  if (row.lifecycle_state === 'candidate') {
+    return { label: '운영 전환 필요', tone: 'var(--state-warn-fg)', bg: '#fffbeb' };
+  }
+  if (row.contract_status === 'DRAFT') {
+    return { label: '승인 대기', tone: 'var(--state-warn-fg)', bg: '#fffbeb' };
+  }
+  if (row.built_datasets === 0 || row.built_datasets === null) {
+    return { label: '제작 전', tone: 'var(--surface-text-muted)', bg: 'var(--surface-sunken)' };
+  }
+  return { label: '상태 확인 필요', tone: 'var(--state-error-fg)', bg: 'var(--state-error-bg)' };
+}
+
+function matchesStatusFilter(
+  row: KitAppRow,
+  statusFilter: 'all' | 'active' | 'candidate' | 'pending',
+): boolean {
+  if (statusFilter === 'active') return row.lifecycle_state === 'active';
+  if (statusFilter === 'candidate') return row.lifecycle_state === 'candidate';
+  if (statusFilter === 'pending') return row.contract_status === 'DRAFT';
+  return true;
+}
+
 // ★★★ 계약 상태 셋은 **서로 다른 사실**이다. 하나로 뭉개면 화면이 다음 할 일을
 //   말해 줄 수 없다 — 「없음」은 만들라는 뜻이고 「초안」은 승인을 받으라는 뜻이다.
 function contractView(status: AppContractStatus): { label: string; tone: string } {
@@ -118,6 +144,17 @@ function AppViewer({
     } finally { setBusy(false); }
   }, [appId, releaseId]);
 
+  useEffect(() => {
+    const refresh = () => {
+      // 운영 문맥이 바뀌면 이전 범위에서 발급한 증명을 재사용할 수 없다.
+      // 열린 화면도 닫았다 다시 열게 하지 않고 새 문맥으로 즉시 재조회한다.
+      proofRef.current = '';
+      if (open) void load();
+    };
+    window.addEventListener('factory:enterprise-context-changed', refresh);
+    return () => window.removeEventListener('factory:enterprise-context-changed', refresh);
+  }, [load, open]);
+
   async function pick(name: string) {
     setPicked(name); setRows(null); setErr('');
     try {
@@ -129,7 +166,7 @@ function AppViewer({
     return (
       <button type="button" style={{ fontSize: 13, padding: '5px 12px' }}
               onClick={() => { setOpen(true); void load(); }}>
-        앱 열어 보기
+        앱 열기
       </button>
     );
   }
@@ -211,12 +248,14 @@ function AppRow({
   const [appClass, setAppClass] = useState('');
   const [rationale, setRationale] = useState('');
   const [promoteReason, setPromoteReason] = useState('');
+  const [showPromotion, setShowPromotion] = useState(false);
   const [busy, setBusy] = useState('');
 
   const rv = READINESS_VIEW[row.readiness_state]
     // ⚠️ 서버가 새 상태를 내면 화면은 그것을 «모른다» 고 말해야 한다.
     ?? { label: `알 수 없는 상태(${row.readiness_state})`, tone: 'var(--state-error-fg)' };
   const cv = contractView(row.contract_status);
+  const lv = lifecycleView(row);
   const blocked = row.readiness_state === 'BLOCKED';
   const draftedByCurrentUser = Boolean(currentUser && row.drafted_by
     && currentUser === row.drafted_by);
@@ -243,12 +282,31 @@ function AppRow({
 
   return (
     <li style={{
-      border: '1px solid var(--surface-border)', borderRadius: 8, padding: 12, marginBottom: 10,
-      listStyle: 'none',
+      border: '1px solid var(--surface-border)', borderLeft: `4px solid ${lv.tone}`,
+      borderRadius: 10, padding: '14px 16px', marginBottom: 10,
+      listStyle: 'none', background: 'var(--surface-card)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-        <strong style={{ fontSize: 15 }}>{appLabel(row)}</strong>
-        <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>{row.app_id}</span>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12,
+        justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <strong style={{ fontSize: 16 }}>{appLabel(row)}</strong>
+            <span style={{ fontSize: 11, color: 'var(--surface-text-muted)' }}>{row.app_id}</span>
+          </div>
+          {APP_PRESENTATION[row.app_id]?.note && (
+            <div style={{ color: 'var(--surface-text-muted)', fontSize: 12, marginTop: 4 }}>
+              {APP_PRESENTATION[row.app_id].note}
+            </div>
+          )}
+        </div>
+        <span style={{ color: lv.tone, background: lv.bg, border: `1px solid ${lv.tone}`,
+          borderRadius: 999, padding: '4px 9px', fontSize: 12, fontWeight: 700 }}>
+          {lv.label}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        marginTop: 9, paddingTop: 8, borderTop: '1px solid var(--surface-border)' }}>
         {/* ★ 색만으로 구분하지 않는다(설계 §12) — 이름표를 함께 단다. */}
         <span style={{ color: rv.tone, fontSize: 13 }}>준비: {rv.label}</span>
         <span style={{ color: cv.tone, fontSize: 13 }}>계약: {cv.label}</span>
@@ -258,12 +316,6 @@ function AppRow({
           </span>
         )}
       </div>
-
-      {APP_PRESENTATION[row.app_id]?.note && (
-        <div style={{ color: 'var(--surface-text-muted)', fontSize: 12, marginTop: 4 }}>
-          {APP_PRESENTATION[row.app_id].note}
-        </div>
-      )}
 
       {row.user_message && (
         <div style={{ color: 'var(--surface-text-muted)', fontSize: 13, marginTop: 4 }}>{row.user_message}</div>
@@ -396,25 +448,42 @@ function AppRow({
                     {row.lifecycle_state === 'candidate' && (
                       <div style={{ display: 'grid', gap: 6 }}>
                         <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
-                          아직 <strong>시연용 후보 판</strong>입니다 — 실제 업무 데이터를
-                          읽으려면 운영으로 올려야 합니다.
+                          운영 전환 전입니다 — 실제 업무 데이터를 읽으려면 검토 근거를
+                          남기고 운영으로 올려야 합니다.
                         </div>
-                        <input value={promoteReason}
-                               onChange={(e) => setPromoteReason(e.target.value)}
-                               placeholder="운영 전환 근거 — 왜 지금 이 앱을 운영에 올리는지"
-                               style={{ fontSize: 13, padding: '5px 8px' }} />
-                        <div>
-                          <button type="button"
-                                  disabled={!promoteReason.trim() || !!busy}
-                                  onClick={() => run('운영 전환', () => promoteKitApp(
-                                    instanceId, row.app_id, promoteReason))}
-                                  style={{ fontSize: 13, padding: '5px 12px', fontWeight: 600 }}>
-                            {busy === '운영 전환' ? '올리는 중…' : '운영으로 올리기'}
-                          </button>
-                          <span style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginLeft: 8 }}>
-                            상태·계약·정적 검사·계약 승인·데이터 준비도 다섯 가지를 다시 봅니다.
-                          </span>
-                        </div>
+                        {!showPromotion ? (
+                          <div>
+                            <button type="button" onClick={() => setShowPromotion(true)}
+                                    style={{ fontSize: 13, padding: '5px 12px', fontWeight: 600 }}>
+                              운영 전환 검토
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'grid', gap: 7, padding: 10,
+                            border: '1px solid var(--state-warn-fg)', borderRadius: 8,
+                            background: '#fffbeb' }}>
+                            <label style={{ fontSize: 12, fontWeight: 600 }}>운영 전환 근거</label>
+                            <input value={promoteReason}
+                                   onChange={(e) => setPromoteReason(e.target.value)}
+                                   placeholder="왜 지금 이 앱을 운영에 올리는지 입력하십시오"
+                                   style={{ fontSize: 13, padding: '7px 9px' }} />
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <button type="button"
+                                      disabled={!promoteReason.trim() || !!busy}
+                                      onClick={() => run('운영 전환', () => promoteKitApp(
+                                        instanceId, row.app_id, promoteReason))}
+                                      style={{ fontSize: 13, padding: '5px 12px', fontWeight: 600 }}>
+                                {busy === '운영 전환' ? '올리는 중…' : '운영으로 올리기'}
+                              </button>
+                              <button type="button" disabled={!!busy}
+                                      onClick={() => { setShowPromotion(false); setPromoteReason(''); }}
+                                      style={{ fontSize: 13, padding: '5px 12px' }}>취소</button>
+                              <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                                상태·계약·정적 검사·승인·데이터 준비도를 다시 확인합니다.
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -466,13 +535,18 @@ function AppRow({
 }
 
 export function KitAppPanel({
-  instanceId, mode = 'build',
-}: { instanceId: string; mode?: 'build' | 'operate' }) {
+  instanceId, mode = 'build', statusFilter = 'all',
+}: {
+  instanceId: string;
+  mode?: 'build' | 'operate';
+  statusFilter?: 'all' | 'active' | 'candidate' | 'pending';
+}) {
   const [rows, setRows] = useState<KitAppRow[] | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
   const [currentUser, setCurrentUser] = useState('');
+  const [selectedAppId, setSelectedAppId] = useState('');
   //: ★ 앱별 알림. 목록을 다시 불러도 **행이 아니라 여기** 있으므로 살아남는다.
   const [notices, setNotices] = useState<Record<string, Notice | null>>({});
 
@@ -502,6 +576,14 @@ export function KitAppPanel({
     return () => { alive = false; };
   }, []);
 
+  useEffect(() => {
+    if (mode !== 'operate' || !rows) return;
+    const visible = rows.filter((row) => matchesStatusFilter(row, statusFilter));
+    setSelectedAppId((current) => (
+      visible.some((row) => row.app_id === current) ? current : (visible[0]?.app_id || '')
+    ));
+  }, [mode, rows, statusFilter]);
+
   if (loading) return <div style={{ padding: 16 }}>앱 목록을 확인하는 중…</div>;
 
   // ★★★ **조회 실패와 0건을 구분한다.** 실패를 빈 목록으로 그리면 사용자는
@@ -516,15 +598,36 @@ export function KitAppPanel({
             ? '이 키트 인스턴스를 찾을 수 없습니다 — 조직 범위를 확인해 주십시오.'
             : '만들 수 있는 앱이 없는 것이 아니라 지금 확인하지 못한 상태입니다.'}
         </div>
+        <div style={{ marginTop: 10 }}>
+          <button type="button" className="secondary-button"
+                  onClick={() => setTick((value) => value + 1)}>다시 확인</button>
+        </div>
       </div>
     );
   }
   if (!rows) return null;
 
+  const activeCount = rows.filter((row) => row.lifecycle_state === 'active').length;
+  const candidateCount = rows.filter((row) => row.lifecycle_state === 'candidate').length;
+  const pendingCount = rows.filter((row) => row.contract_status === 'DRAFT').length;
+  const shownRows = rows.filter((row) => matchesStatusFilter(row, statusFilter));
+  const selectedRow = shownRows.find((row) => row.app_id === selectedAppId) || shownRows[0];
+
+  const renderAppRow = (row: KitAppRow) => (
+    <AppRow key={row.app_id} row={row} instanceId={instanceId}
+            mode={mode}
+            currentUser={currentUser}
+            notice={notices[row.app_id] ?? null}
+            setNotice={(notice) => setNotices((current) => ({
+              ...current, [row.app_id]: notice,
+            }))}
+            onChanged={() => setTick((current) => current + 1)} />
+  );
+
   return (
     <div style={{ padding: 16 }}>
       <h3 style={{ fontSize: 16, margin: '0 0 4px' }}>
-        {mode === 'build' ? '키트로 앱 만들기' : '업무 앱 운영'}
+        {mode === 'build' ? '키트로 앱 만들기' : '앱 현황'}
       </h3>
       <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 10 }}>
         {/* ★ 「만드는 사람 ≠ 승인하는 사람」을 화면 맨 위에 적는다 — 나중에 403 을
@@ -535,21 +638,74 @@ export function KitAppPanel({
           운영 중인 앱을 열고, 후보 앱의 운영 전환 상태를 확인합니다.
         </>}
       </div>
+      {mode === 'operate' && rows.length > 0 && (
+        <div aria-label="앱 운영 상태 요약" style={{ display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(120px, 1fr))', gap: 8, marginBottom: 12 }}>
+          {[
+            ['운영 중', activeCount, 'var(--state-success-fg)'],
+            ['운영 전환 필요', candidateCount, 'var(--state-warn-fg)'],
+            ['승인 대기', pendingCount, 'var(--surface-text-muted)'],
+          ].map(([label, count, tone]) => (
+            <div key={String(label)} style={{ border: '1px solid var(--surface-border)',
+              borderRadius: 8, padding: '9px 11px', background: 'var(--surface-raised)' }}>
+              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>{label}</div>
+              <strong style={{ display: 'block', marginTop: 2, fontSize: 18,
+                color: String(tone) }}>{count}개</strong>
+            </div>
+          ))}
+        </div>
+      )}
       {rows.length === 0 ? (
         // ⚠️ 산출물 선언이 없는 키트를 «전부 가능» 으로 보이게 두지 않는다.
         <div style={{ fontSize: 14, color: 'var(--state-warn-fg)' }}>
           이 키트는 만들 수 있는 앱을 선언하지 않았습니다.
         </div>
+      ) : shownRows.length === 0 ? (
+        <div style={{ padding: 14, border: '1px dashed var(--surface-border)',
+          borderRadius: 8, color: 'var(--surface-text-muted)', fontSize: 13 }}>
+          이 상태에 해당하는 앱이 없습니다.
+        </div>
+      ) : mode === 'operate' ? (
+        <div className="afs-master-detail">
+          <aside className="afs-master-list" aria-label="업무 앱 목록">
+            <header>
+              <div>
+                <strong>업무 앱</strong>
+                <span>{shownRows.length}개</span>
+              </div>
+            </header>
+            <div className="afs-master-list-body">
+              {shownRows.map((row) => {
+                const selected = row.app_id === selectedRow?.app_id;
+                const lifecycle = lifecycleView(row);
+                return (
+                  <button key={row.app_id} type="button"
+                          className="afs-master-selector"
+                          aria-pressed={selected}
+                          onClick={() => setSelectedAppId(row.app_id)}>
+                    <span className="afs-master-icon" aria-hidden="true">
+                      {appLabel(row).slice(0, 1)}
+                    </span>
+                    <span className="afs-master-selector-copy">
+                      <small style={{ color: lifecycle.tone }}>{lifecycle.label}</small>
+                      <strong>{appLabel(row)}</strong>
+                      <span>{row.app_id} · 준비 {READINESS_VIEW[row.readiness_state]?.label || '확인 필요'}</span>
+                    </span>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+          <section className="afs-master-detail-pane" aria-label="선택한 앱 운영 상세">
+            <ul style={{ padding: 0, margin: 0 }}>
+              {selectedRow && renderAppRow(selectedRow)}
+            </ul>
+          </section>
+        </div>
       ) : (
         <ul style={{ padding: 0, margin: 0 }}>
-          {rows.map((r) => (
-            <AppRow key={r.app_id} row={r} instanceId={instanceId}
-                    mode={mode}
-                    currentUser={currentUser}
-                    notice={notices[r.app_id] ?? null}
-                    setNotice={(n) => setNotices((m) => ({ ...m, [r.app_id]: n }))}
-                    onChanged={() => setTick((t) => t + 1)} />
-          ))}
+          {shownRows.map(renderAppRow)}
         </ul>
       )}
     </div>

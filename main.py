@@ -63,15 +63,23 @@ async def health():
 #     ⚠️ 이 벽의 증상은 «권한 오류» 가 아니라 **`Failed to fetch`** 다. 화면은 그것을
 #       「서버가 죽었다」로 그리고, 그러면 검증하던 사람이 자기 변경을 의심한다.
 #   운영 환경은 `CORS_ALLOWED_ORIGINS` 로 명시 지정하므로 이 기본값이 넓어져도 영향이 없다.
-allowed_origins_env = os.getenv(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:3000,"
-    "http://localhost:5173,http://127.0.0.1:5173,"
-    "http://localhost:5174,http://127.0.0.1:5174,"
-    "http://localhost:5175,http://127.0.0.1:5175,"
-    "http://localhost:5176,http://127.0.0.1:5176,"
-    "http://localhost:5177,http://127.0.0.1:5177")
-allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+#: ★★★ [2026-08-23] **네 번째로 같은 벽에 부딪혔다**(5179). 하나씩 더하기를 멈춘다.
+#:
+#: ⚠️⚠️ 포트를 손으로 나열하면 세션이 하나 늘 때마다 같은 사고가 반복된다 —
+#:   2026-08-04(5174) · 08-06(5175) · 08-08(5177) · 08-23(5179). 네 번 다 증상이
+#:   같았고(「서버가 죽었다」), 네 번 다 원인을 찾는 데 시간을 썼다.
+#: ★ Vite 개발 서버가 쓰는 **대역 전체**(5173~5199)를 미리 연다. 개발 기본값이고,
+#:   운영은 `CORS_ALLOWED_ORIGINS` 로 명시 지정하므로 영향이 없다.
+#: ⚠️ 대역을 넓히는 것이 안전한 이유: 이 목록은 **개발 기본값에만** 쓰이고, 열리는
+#:   것은 `localhost`·`127.0.0.1` 뿐이다. 외부 출처는 한 건도 들어오지 않는다.
+_DEV_VITE_PORTS = range(5173, 5200)
+_DEV_ORIGINS = ["http://localhost:3000"] + [
+    f"http://{host}:{port}"
+    for port in _DEV_VITE_PORTS for host in ("localhost", "127.0.0.1")]
+
+allowed_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", ",".join(_DEV_ORIGINS))
+allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")
+                   if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
