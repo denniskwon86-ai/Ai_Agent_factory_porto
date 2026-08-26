@@ -239,6 +239,36 @@ class AsyncFactoryOrchestrator:
             })
             return
 
+        # ══════════════════════════════════════════════════════════════════
+        # ★★★ [2026-08-25 실측] **계약 승인 대기를 «완료» 로 보고하지 않는다**
+        # ══════════════════════════════════════════════════════════════════
+        # `ContractReviewPending` 은 `END` 로 끝난다(승인은 전용 API 가 원장에 남긴다).
+        # 그래서 `snapshot.next` 가 비고, `terminal_status` 도 비어 있다 —
+        # 그 결과 **아래 DONE 경로로 떨어져 WBS 가 DONE, SPRINT_COMPLETED** 가 나갔다.
+        #
+        # ⚠️⚠️ 즉 사람이 계약을 승인해야 하는데 화면은 「완료」라고 말했다. 이 필드
+        #   (`terminal_status`)를 만든 이유가 정확히 「END 는 성공이 아니다」인데,
+        #   그 규칙이 이 갈래에서만 새고 있었다.
+        # ★ 대기는 **실패가 아니다.** WBS 를 FAILED 로 태우지 않고 `BLOCKED` 로 두고,
+        #   화면이 승인 자리로 갈 수 있게 별도 신호를 보낸다.
+        if (vals.get("current_stage") or "") == "CONTRACT_REVIEW":
+            req_id = (vals.get("contract_review_request_event_id") or "").strip()
+            print(f"⏸️ [Orchestrator] Task {task_id}: 계약 승인 대기 — 완료로 보고하지 않습니다.")
+            try:
+                if not _is_planning:
+                    WBSManager(workspace_root=workspace_root).update_task_status(task_id, "BLOCKED")
+            except Exception as e:
+                print(f"⚠️ [Orchestrator] WBS BLOCKED 마킹 실패: {e}")
+            await factory_broadcaster.broadcast("WBS_UPDATED", {
+                "task_id": task_id, "project_id": pid, "status": "BLOCKED"})
+            await factory_broadcaster.broadcast("CONTRACT_REVIEW_PENDING", {
+                "task_id": task_id, "project_id": pid,
+                "request_event_id": req_id,
+                "contract_fingerprint": (vals.get("app_runtime_contract_fingerprint") or ""),
+                "summary": (vals.get("app_runtime_contract_summary") or ""),
+            })
+            return
+
         try:
             if not _is_planning:
                 WBSManager(workspace_root=workspace_root).update_task_status(task_id, "DONE")

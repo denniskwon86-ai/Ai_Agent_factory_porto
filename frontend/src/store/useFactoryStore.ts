@@ -1068,6 +1068,20 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
             currentActivity: { node: "System", step: "인간 개입 필요", activity: "HOTL 게이트 대기 중..." }
           };
         }
+        // ★★★ [2026-08-25] **계약 승인 대기.** 종전에는 이 갈래가 없어 서버가 멈춰도
+        //   화면은 «완료» 로 보였다(오케스트레이터가 DONE 을 쐈다 — 그쪽도 함께 고쳤다).
+        // ⚠️ 「대기」는 실패가 아니다 — 실패 배너를 띄우지 않고 승인 자리를 연다.
+        if (data.type === 'CONTRACT_REVIEW_PENDING') {
+          window.dispatchEvent(new CustomEvent('factory:contract-review-pending'));
+          return {
+            logs,
+            state: { ...(prev.state || {}),
+              current_sprint_task_id: data.payload?.task_id } as ProjectState,
+            activeSprintId: null,
+            currentActivity: { node: 'ContractReview', step: '계약 승인 대기',
+              activity: '사람이 계약을 승인해야 코드로 넘어갑니다.' },
+          };
+        }
         if (data.type === 'QUOTA_EXHAUSTED') {
           return {
             logs,

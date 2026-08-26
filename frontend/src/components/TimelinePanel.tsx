@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 import HOTLInput from './HOTLInput';
+import { ContractReviewGate } from './ContractReviewGate';
 
 // 토론·채점 단계(phase) → 아이콘/색상
 const PHASE_META: Record<string, { icon: string; color: string }> = {
@@ -60,7 +61,7 @@ export default function TimelinePanel() {
       <div className="p-4 border-b border-gray-700 bg-gray-800 shrink-0">
         <h2 className="text-sm font-bold text-gray-200 tracking-wider flex items-center gap-2">
           🧭 Supervisor Console
-          <span className="text-[10px] text-gray-500 font-normal">— 모든 에이전트를 관장하는 자비스</span>
+          <span className="text-[10px] text-gray-500 font-normal">— 모든 에이전트를 관장하는 AI 경영비서</span>
         </h2>
       </div>
 
@@ -139,6 +140,10 @@ export default function TimelinePanel() {
         </div>
       </div>
 
+      {/* ★★★ [2026-08-25] 계약 승인 자리. HOTL 재개로는 지날 수 없는 게이트라
+          전용 결정 API 를 쓴다([4c-4] — 빈 피드백을 승인으로 해석하지 않는다).
+          ⚠️ 이것이 없어서 파이프라인이 계약 검토에서 멈추면 되살릴 방법이 없었다. */}
+      <ContractReviewGate />
       <HOTLInput />
     </div>
   );
