@@ -79,12 +79,36 @@ ProjectState에서 발견한 중요 사실
   ],
   "capability_intents": [
     {"intent_id": "짧은 식별자", "requirement_ref": "FR-ID",
-     "capability": "요구한 능력 이름",
-     "status": "SUPPORTED|CONDITIONAL|HOST_SERVICE_REQUIRED|NOT_YET_SUPPORTED|PROHIBITED",
-     "reason": "그렇게 판단한 이유"}
+     "capability": "아래 닫힌 목록의 이름 **그대로**",
+     "reason": "왜 이 능력이 필요한가",
+     "user_decision": "지원되지 않는 능력에만 — REDUCE|WAIT|REQUEST_HOST_FEATURE"}
   ]
 }
 ```
+
+### ⚠️⚠️ `capability` 는 **닫힌 목록**이다 — 새 이름을 지어내면 앱이 안 만들어진다
+
+[2026-08-26 실측] 여기에 「원료 입고 현황 목록 표시」·「반응형 테이블 컴포넌트」 같은
+**설명 문구**를 적었다. 결정표에 없는 이름은 전부 `NOT_YET_SUPPORTED` 로 떨어지고,
+결정이 없는 미지원 요구가 하나라도 있으면 **계약 컴파일이 막힌다.** 그래서 그 프로젝트는
+화면 코드를 한 줄도 만들지 못했다. 아래 이름 **그대로** 쓸 것:
+
+  · **SUPPORTED** — `app_data.create`, `app_data.delete`, `app_data.read`, `app_data.update`
+  · **CONDITIONAL** — `app_data.aggregate`, `app_data.query`
+  · **HOST_SERVICE_REQUIRED** — `action.business`, `compute.simulation`, `network.external_api`, `network.mcp`, `server.custom_logic`
+  · **NOT_YET_SUPPORTED** — `file.upload`, `job.background`
+  · **PROHIBITED** — `api.direct_call`, `auth.local_login`, `auth.local_roles`, `auth.local_session`, `storage.credentials`, `storage.local_db`
+
+★ 화면을 그리고·목록을 보여 주고·강조하고·새로고침하는 것은 **능력이 아니다.** 그것은
+  `app_data.read` 로 읽은 데이터를 앱이 그리는 일이고, 따로 선언할 것이 없다.
+  `capability_intents` 는 **호스트에게 무엇을 요구하는가**만 적는다 — 비어 있어도 된다.
+
+⚠️ `status` 는 **적지 않는다.** 호스트가 결정표로 판정한다 — 적으면 무시되거나,
+  지원되는 능력에 결정을 붙였다는 오류가 된다.
+
+⚠️ 목록에 없는 능력이 정말 필요하면, 가장 가까운 이름을 고르고 `user_decision` 을
+  함께 적는다(`REDUCE` = 그 요구를 줄여 만든다 · `WAIT` = 지원될 때까지 미룬다 ·
+  `REQUEST_HOST_FEATURE` = 호스트 기능을 요청한다). **결정 없이 두면 파이프라인이 멈춘다.**
 
 ★ 규칙
 - `name`·`fields[].name` 은 소문자·숫자·밑줄만. `record_id`·`created_at` 같은 **예약 이름은

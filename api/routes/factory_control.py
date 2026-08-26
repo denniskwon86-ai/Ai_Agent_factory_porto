@@ -1347,6 +1347,22 @@ async def contract_review_pending(project_id: str, task_id: str,
                      "requested_at": (open_req or {}).get("created_at", "")}}
 
 
+def _decision_note(state_applied: bool, stamp_note: str) -> str:
+    """계약 결정 뒤 **아직 남은 일**을 사람 말로 한 줄에 담는다.
+
+    ★ 원인이 둘이어도 사람이 할 일은 하나다 — 다시 승인하지 말고 재개를 다시 시도한다.
+      결정은 이미 원장에 있으므로 두 번 승인하면 두 번째는 409 로 막히고 더 혼란스럽다."""
+    causes = []
+    if not state_applied:
+        causes.append("파이프라인 상태 반영에 실패했습니다")
+    if stamp_note:
+        causes.append(stamp_note.rstrip("."))
+    if not causes:
+        return ""
+    return ("결정은 기록됐지만 " + " / ".join(causes)
+            + ". 다시 승인하지 마십시오. 재개를 다시 시도하십시오.")
+
+
 @router.post("/{project_id}/contract-review/decision")
 async def contract_review_decision(project_id: str, req: ContractDecisionRequest,
                                    p: Principal = Depends(current_principal)):
@@ -1386,6 +1402,25 @@ async def contract_review_decision(project_id: str, req: ContractDecisionRequest
                else _gate.state_updates_for_rejection(decision))
     updates["contract_review_request_event_id"] = "" if approved else req.request_event_id
     applied = await orchestrator.apply_contract_decision(req.task_id, project_id, updates)
+
+    # ── ★★★ 승인을 **계약 정본에도** 남긴다 ─────────────────────────────────
+    #
+    # ⚠️⚠️ [2026-08-26 실측] 이 세 줄이 없어서 **완주가 불가능**했다. 승인은 원장과
+    #   체크포인트에만 남았는데, 컴파일러의 승인 이월은 디스크의 계약 파일을 본다
+    #   (`host_contract_compiler.py` — `previous["approval"]["status"] == "APPROVED"`).
+    #   그 파일에 승인을 쓰는 곳이 **0곳**이었다. 그래서 승인 뒤 다시 가동해도
+    #   「지문은 같지만 상태가 COMPILED」로 게이트가 다시 열렸고, 사용자는 승인을
+    #   몇 번을 눌러도 코드 생성에 닿지 못했다(대역 걷기에서 12회 왕복 재현).
+    # ★ 어댑터도 이 도장을 보고 나온다 — 승인 전에는 만들지 않기 때문이다.
+    stamp_note = ""
+    if approved:
+        from nodes.contract import stamp_approval as _stamp
+        stamp_note = await asyncio.to_thread(
+            _stamp, f"./projects/{project_id}",
+            fingerprint=decision.compiled_fingerprint,
+            actor_id=p.user_id or "", ledger_event_id=str(row.get("event_id", "")))
+        if stamp_note:
+            print(f"⚠️ [ContractReview] 계약 정본 승인 기록 실패({project_id}): {stamp_note}")
     #: ⚠️ 상태 반영이 실패해도 **결정은 이미 원장에 있다.** 되돌리지 않는다(되돌릴 수도
     #:   없다 — 원장은 추가만 된다). 대신 그 사실을 응답에 담아 화면이 재시도를
     #:   안내하게 한다. 「승인했는데 안 됐다」를 조용히 넘기면 두 번 승인하게 된다.
@@ -1393,10 +1428,13 @@ async def contract_review_decision(project_id: str, req: ContractDecisionRequest
             "data": {"decision": verdict, "event_id": row.get("event_id", ""),
                      "request_event_id": req.request_event_id,
                      "contract_fingerprint": decision.compiled_fingerprint,
-                     "state_applied": applied,
-                     "note": ("" if applied else
-                              "결정은 기록됐지만 파이프라인 상태 반영에 실패했습니다 — "
-                              "다시 승인하지 마십시오. 재개를 다시 시도하십시오.")}}
+                     "state_applied": applied and not stamp_note,
+                     #: ⚠️⚠️ 두 실패가 **서로를 가리지 않게** 한다. 처음에는 도장 실패를
+                     #:   note 에 그대로 넣었는데, 그러면 상태 반영 실패의 「다시 승인하지
+                     #:   마십시오」가 사라져 사람이 두 번 승인하게 된다(기존 회귀가 잡았다).
+                     #:   원인이 둘이면 둘 다 말하고, 사람이 할 일은 언제나 같다 —
+                     #:   **다시 승인하지 말고 재개를 다시 시도한다.**
+                     "note": _decision_note(applied, stamp_note)}}
 
 
 @router.post("/{project_id}/hotl/resume")

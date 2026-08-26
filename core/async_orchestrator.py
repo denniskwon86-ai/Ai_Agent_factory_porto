@@ -91,6 +91,28 @@ class AsyncFactoryOrchestrator:
             print(f" 상태 백업 실패: {e}")
 
     async def start_sprint(self, task_id: str, project_state_payload: dict, workspace_root: str) -> bool:
+        # ── ★★★ 새 가동은 **직전 판정을 물려받지 않는다** ────────────────────
+        #
+        # ⚠️⚠️ [2026-08-26 실측] 이것이 「생성 실패」가 영영 안 풀리던 이유다.
+        #
+        #   `terminal_status` 는 체크포인트(thread_id = project__task)에 남는다. 그래서
+        #   한 번 종결로 끝난 태스크를 **다시 가동하면**, 라우터가 첫 갈림길에서
+        #   `_terminated(state)` 를 보고 곧바로 `TerminalHandler` 로 보낸다 —
+        #   노드는 하나도 돌지 않고 **직전과 똑같은 사유로** 다시 실패한다.
+        #   실측: 계약 결함을 고친 뒤에도 TASK-01 이 옛 사유 그대로 3회 연속 실패했고,
+        #   나는 그것을 「아직 안 고쳐졌다」로 두 번 잘못 짚었다.
+        #
+        #   화면의 「재시도」도 같은 구멍이다(`ControlPanel.handleRetryFailedTask` 가
+        #   `...state` 를 그대로 실어 보낸다). 그래서 **클라이언트가 아니라 여기서** 지운다 —
+        #   재시도 경로가 몇 개든 서버를 지나므로 한 곳에서 막힌다.
+        #
+        # ★ 지우는 것은 **판정**뿐이다. `build_error_log` 같은 **근거는 남긴다** —
+        #   자가복구가 직전 실패 원인을 프롬프트에 실어야 하기 때문이다([자가복구 P1]).
+        #   판정은 매번 새로 내려야 하고, 근거는 물려받아야 한다.
+        if isinstance(project_state_payload, dict):
+            project_state_payload["terminal_status"] = ""
+            project_state_payload["terminal_reason"] = ""
+
         if task_id.startswith("PLANNING") and len(task_id.split("_")) == 2:
             if os.path.exists(workspace_root):
                 #  [Phase 3] 파괴적 삭제(rmtree) 제거 및 스마트 아카이빙 적용

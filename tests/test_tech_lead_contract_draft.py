@@ -212,8 +212,11 @@ def _compile_with_no_draft(tmp_path):
     with open(os.path.join(ws, "00_wbs_master_plan.json"), "w", encoding="utf-8") as f:
         _json.dump({"tasks": [{"task_id": "T-1", "goal": "원료 도입 화면",
                                "artifact_kind": "app"}]}, f, ensure_ascii=False)
+    #: ⚠️ `current_sprint_task_id` 를 빼면 제품과 다른 것을 시험한다 — 스프린트는 언제나
+    #:   **어떤 태스크를 돌고 있다.** 없으면 T-1 이 「아직 시작 안 한 태스크」로 빠져
+    #:   초안 요구 자체가 성립하지 않는다(2026-08-26 범위 정리 이후).
     return asyncio.run(cn.run_host_contract_compiler(
-        {"workspace_root": ws, "project_name": "proj_x",
+        {"workspace_root": ws, "project_name": "proj_x", "current_sprint_task_id": "T-1",
          "runtime_contract_profile": "app"}))
 
 
@@ -269,3 +272,133 @@ def test_WBS_를_못_읽으면_그렇게_말한다(tmp_path):
     reason = out.get("terminal_reason") or ""
     assert "WBS" in reason, reason
     assert "app_class" not in reason, "원인이 아닌 증상을 사유로 적었다"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 능력 이름은 **닫힌 목록**이다 — 스킬이 그것을 알려 주는가 (2026-08-26 실측)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _skill_text() -> str:
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "skills", "tech_lead_skill.md"), encoding="utf-8") as f:
+        return f.read()
+
+
+def test_스킬이_능력_닫힌_목록을_전부_알려_준다():
+    """★★★ **실제 가동에서 앱이 여기서 죽었다.**
+
+    Tech Lead 가 `capability` 에 「원료 입고 현황 목록 표시」 같은 **설명 문구**를 적었다.
+    결정표(`CAPABILITY_DECISION`)에 없는 이름은 전부 `NOT_YET_SUPPORTED` 로 떨어지고,
+    결정이 없는 미지원 요구가 하나라도 있으면 계약 컴파일이 막힌다 — 그 프로젝트는
+    화면 코드를 **한 줄도** 만들지 못했다.
+
+    ⚠️ 스킬이 목록을 안 알려 주면 모델은 자연어를 쓴다. 그것을 「모델이 틀렸다」고
+      부르면 안 된다 — **알려 주지 않은 것을 맞히라고 요구한 것**이다."""
+    from core import app_runtime_contract as arc
+
+    text = _skill_text()
+    missing = [c for c in arc.CAPABILITY_DECISION if c not in text]
+    assert not missing, (
+        "스킬에 없는 능력 이름: " + ", ".join(sorted(missing))
+        + " — 결정표가 바뀌면 스킬도 함께 고쳐야 합니다.")
+
+
+def test_스킬이_사용자_결정_어휘를_알려_준다():
+    """⚠️ 미지원 능력에는 `user_decision` 이 **반드시** 있어야 컴파일이 지나간다.
+    고를 수 있는 값을 안 알려 주면 모델은 빈칸으로 두고 파이프라인이 멈춘다."""
+    from core import app_runtime_contract as arc
+
+    text = _skill_text()
+    vocab = {d for opts in arc.ALLOWED_USER_DECISIONS.values() for d in opts}
+    missing = [d for d in vocab if d not in text]
+    assert not missing, "스킬에 없는 결정 어휘: " + ", ".join(sorted(missing))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 이미 있는 계약을 **보여 주는가** (2026-08-26 실측)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _write_contract(ws, datasets):
+    import json as _j
+    import os as _o
+    d = _o.path.join(ws, "contracts")
+    _o.makedirs(d, exist_ok=True)
+    with open(_o.path.join(d, "app_runtime_contract.json"), "w", encoding="utf-8") as f:
+        _j.dump({"datasets": datasets}, f, ensure_ascii=False)
+
+
+def test_이미_승인된_계약을_TechLead_에게_보여_준다(tmp_path):
+    """★★★ **실제 가동에서 E2E-02 가 여기서 죽었다.**
+
+    계약은 프로젝트 하나인데 태스크마다 Tech Lead 가 데이터셋을 처음부터 다시 정의했고,
+    두 선언이 달라지자 합산기가 멈췄다:
+
+        데이터셋 «raw_material_inbound_status» 를 «E2E-01» 와 «E2E-02» 가 다르게
+        선언했습니다 — … 사람이 정해야 합니다(자동 병합하지 않습니다).
+
+    ⚠️ 그런데 **사람이 정할 화면도 API 도 없다.** 막다른 길이다.
+    ★ 합산기의 거절은 옳다(자동 병합은 조용한 권한 확대다). 고칠 것은 Tech Lead 가
+      이미 있는 것을 **모른 채** 새로 짓는 것이다."""
+    from nodes import execution as ex
+
+    ws = str(tmp_path)
+    _write_contract(ws, [{
+        "name": "raw_material_inbound_status", "label": "원료 입고",
+        "source_intent": "ENTERPRISE_READ", "allowed_actions": ["read"],
+        #: ⚠️ 이 세 칸이 빠진 채로 시험했다가 **결함을 놓쳤다.** 정본에는 반드시 있다.
+        "enterprise_contract_key": "PRC-02",
+        "data_role": "ENTERPRISE_ACTUAL",
+        "duplicate_entry_policy": "DENY_IF_AUTHORITATIVE_SOURCE_EXISTS",
+        "fields": [{"name": "po_id", "type": "string"},
+                   {"name": "qty", "type": "number", "unit": "kg"}],
+    }])
+
+    class _S:
+        workspace_root = ws
+
+    brief = ex._approved_contract_brief(_S())
+    assert "글자 그대로" in brief, "그대로 옮기라고 말하지 않는다"
+
+    #: ★★★ **요약이 아니라 원문이어야 한다.** [2026-08-26] 처음에 내가 골라 보여 줬더니
+    #:   Tech Lead 가 **안 보여 준 `enterprise_contract_key` 를 빠뜨렸고** 컴파일러가 막았다.
+    #:   요약본을 정본처럼 내밀면 받는 쪽은 그 요약이 전부인 줄 안다.
+    #: ⚠️ 그래서 「몇 개 칸이 보이는가」가 아니라 **모든 키가 살아 있는가**를 본다 —
+    #:   계약 스키마가 늘어나도 이 시험이 함께 지킨다.
+    import json as _json
+    for ds in _json.loads(
+            _json.dumps([{
+                "name": "raw_material_inbound_status", "label": "원료 입고",
+                "source_intent": "ENTERPRISE_READ", "allowed_actions": ["read"],
+                "enterprise_contract_key": "PRC-02",
+                "data_role": "ENTERPRISE_ACTUAL",
+                "duplicate_entry_policy": "DENY_IF_AUTHORITATIVE_SOURCE_EXISTS",
+                "fields": [{"name": "po_id", "type": "string"},
+                           {"name": "qty", "type": "number", "unit": "kg"}],
+            }])):
+        for key, val in ds.items():
+            assert key in brief, f"«{key}» 가 고지문에서 빠졌다 — 그러면 Tech Lead 도 뺀다"
+            if isinstance(val, str):
+                assert val in brief, f"«{key}» 의 값 «{val}» 이 빠졌다"
+
+
+def test_계약이_없으면_아무것도_붙이지_않는다(tmp_path):
+    """⚠️ 첫 태스크에는 보여 줄 계약이 없다. 빈 목록을 「계약이 있다」로 보여 주면
+    Tech Lead 가 **데이터셋 0개**를 그대로 옮겨 적는다."""
+    from nodes import execution as ex
+
+    class _S:
+        workspace_root = str(tmp_path)
+
+    assert ex._approved_contract_brief(_S()) == ""
+
+
+def test_TechLead_가_그_고지문을_실제로_붙인다():
+    """⚠️⚠️ 이 저장소에서 여섯 번째 반복이라 시험으로 못박는다 — 만들어 두고 부르지
+    않으면 아무 일도 일어나지 않는다."""
+    import inspect
+
+    from nodes import execution as ex
+
+    src = inspect.getsource(ex.run_tech_lead)
+    assert "_approved_contract_brief" in src, "Tech Lead 가 기존 계약을 보지 않는다"

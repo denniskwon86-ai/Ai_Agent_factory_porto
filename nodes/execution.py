@@ -126,12 +126,76 @@ async def run_architect(state: Any) -> Dict[str, Any]:
     if ui_mockup:
         extra = f"\n\n[참조: 사용자가 승인한 UI 목업 - 화면 구성과 컴포넌트 경계를 아키텍처 설계에 반영하십시오]\n{ui_mockup}"
 
+    # ★★★ [2026-08-26 실측] **이 플랫폼이 무엇을 만들 수 있는지 알려 준다.**
+    #
+    # ⚠️⚠️ 없을 때 Architect 는 「백엔드 API 서버(예: Spring Boot)」를 설계했고, 공장은
+    #   `InboundApplication.java` 를 만들었다. 그런데 `server.custom_logic`·`api.direct_call`
+    #   은 계약상 **금지**다 — 프론트 렌더 검증이 8회 반려하고 FAILED_REVIEW 로 끝났다.
+    #   스킬은 오히려 「High FR 은 반드시 REST 엔드포인트로 설계하라」고 적고 있었다.
+    # ★ 계약을 안 타는 레거시 프로젝트에는 빈 문자열이라 종전과 같이 동작한다.
+    from core.app_runtime_brief import render as _runtime_brief
+    extra += _runtime_brief(state_obj)
+
     from nodes.utils.debate import run_supervised_stage
     updates, result = await run_supervised_stage(state_obj, agent_skill("Architect", "architect_skill", template_id=state_obj.template_id), "ARCHITECTURE", extra_instruction=extra)
     print(f"[OK] [Agent] Architect 설계 완료 - 점수 {result.get('score')} / 판정 {result.get('verdict')}")
     updates.setdefault("factory_mode", "EXECUTION")
     updates.setdefault("needs_revision", False)
     return updates
+
+def _approved_contract_brief(state_obj: Any) -> str:
+    """이 프로젝트에 **이미 있는 계약**을 Tech Lead 에게 그대로 보여 준다.
+
+    ## ⚠️ 왜 필요한가 (2026-08-26 실측)
+
+    계약은 프로젝트 하나인데 태스크마다 Tech Lead 가 데이터셋을 처음부터 다시 정의했다.
+    두 선언이 달라지자 합산기가 「사람이 정해야 합니다」로 멈췄고 — 그런데 **사람이
+    정할 화면도 API 도 없다.** 막다른 길이었다.
+
+    ★ 합산기를 고치지 않는다. 자동 병합은 조용한 권한 확대이므로 그 거절이 옳다.
+      고칠 것은 **Tech Lead 가 이미 있는 것을 모른 채 새로 짓는 것**이다.
+
+    ⚠️ 계약이 없으면 빈 문자열이다 — 첫 태스크에는 붙을 것이 없다.
+    """
+    from nodes.contract import contract_path
+
+    ws = getattr(state_obj, "workspace_root", "") or ""
+    if not ws:
+        return ""
+    try:
+        with open(contract_path(ws), encoding="utf-8") as f:
+            contract = json.load(f)
+    except Exception:
+        return ""
+    datasets = (contract or {}).get("datasets") or []
+    if not datasets:
+        return ""
+
+    #: ★★★ **요약하지 않는다 — 원문을 그대로 싣는다.**
+    #:
+    #: ⚠️⚠️ [2026-08-26 실측] 처음에는 이름·라벨·출처·행동·칸만 골라 보여 주고 「글자 그대로
+    #:   옮기라」고 했다. 그랬더니 Tech Lead 가 **내가 안 보여 준 `enterprise_contract_key`
+    #:   를 빠뜨린** 데이터셋을 냈고, 컴파일러가 그 자리에서 막았다:
+    #:     「출처가 ENTERPRISE_READ 인데 어느 업무 데이터에서 오는지가 없습니다」
+    #:   요약본을 정본처럼 내밀면 **받는 쪽은 그 요약이 전부인 줄 안다.** 내가 만든 결함이다.
+    #: ★ 그대로 옮기라고 시킬 것이면 **그대로 보여 줘야** 한다.
+    lines = ["", "", "[🚨 이 프로젝트에는 **이미 승인된 계약**이 있습니다]", "",
+             "아래는 계약 정본의 `datasets` **원문 그대로**입니다(요약이 아닙니다).", "",
+             "```json",
+             json.dumps(datasets, ensure_ascii=False, indent=2),
+             "```"]
+    lines += [
+        "",
+        "★ 이 데이터셋을 다시 쓴다면 **위 선언을 글자 그대로** 옮겨 적으십시오.",
+        "  이름·칸·타입·행동·출처 중 하나라도 다르면 합산기가 «두 태스크가 다르게",
+        "  선언했다» 로 **파이프라인을 멈춥니다**(자동 병합하지 않습니다).",
+        "⚠️ 정말로 바꿔야 한다면 바꾸십시오 — 다만 그것은 **재승인 대상**입니다.",
+        "  「같은 것을 조금 다르게 적는 것」과 「바꾸는 것」을 구분하십시오.",
+        "★ 이 태스크가 새 데이터를 다루면 **위 목록에 더해서** 선언하십시오. 빼면 그 데이터셋이",
+        "  계약에서 사라지고, 이미 만들어진 화면이 읽을 것을 잃습니다.",
+    ]
+    return "\n".join(lines)
+
 
 async def run_tech_lead(state: Any) -> Dict[str, Any]:
     state_obj = ProjectState.model_validate(state)
@@ -182,6 +246,17 @@ async def run_tech_lead(state: Any) -> Dict[str, Any]:
             "(3) 서버 API가 필요 없으면 '서버 API 없음'을 반드시 포함하라. "
             "이전 초안의 index.tsx, App.css, 근거 없는 백엔드 API는 현재 사실이 아니므로 재사용 금지."
         )
+
+    # ★★★ [2026-08-26 실측] **이미 승인된 계약을 보여 준다.**
+    #
+    # ⚠️⚠️ 이것이 없어서 E2E-02 가 막혔다. 계약은 **프로젝트 하나**인데 태스크마다 Tech Lead
+    #   가 데이터셋을 **처음부터 다시** 정의했고, 두 선언이 달라지자 합산기가 멈췄다:
+    #     「데이터셋 «raw_material_inbound_status» 를 «E2E-01» 와 «E2E-02» 가 다르게
+    #      선언했습니다 — … 사람이 정해야 합니다(자동 병합하지 않습니다).」
+    #   합산기가 옳다 — 자동 병합은 조용한 권한 확대다. 문제는 **Tech Lead 가 이미 있는
+    #   것을 못 봤다**는 점이다(전수 확인: 계약 파일을 읽는 코드가 0곳이었다).
+    # ★ 지문이 그대로면 재승인도 필요 없다 — 사람의 승인 횟수까지 함께 줄어든다.
+    extra += _approved_contract_brief(state_obj)
 
     from nodes.utils.debate import run_supervised_stage
     updates, result = await run_supervised_stage(state_obj, agent_skill("Tech_Lead", "tech_lead_skill", template_id=state_obj.template_id), "TECH_SPEC", extra_instruction=extra)

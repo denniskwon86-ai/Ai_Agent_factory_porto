@@ -133,6 +133,12 @@ async def run_master_pm(state: Any) -> Dict[str, Any]:
         else:
             print(" [Agent] Master PM 토론·합의 기반 기획(PRD) 진행 중...")
 
+
+        #: ★★★ [2026-08-26 실측] 이 플랫폼이 만들 수 있는 것을 함께 알려 준다 — 없으면
+        #:   기획이 「백엔드 API 서버」를 전제로 흘러가고, 그 전제가 Architect 까지 내려가
+        #:   **호스팅 불가능한 설계**가 된다. 계약을 안 타는 프로젝트에는 빈 문자열이다.
+        from core.app_runtime_brief import render as _runtime_brief
+        _extra += _runtime_brief(state_obj)
         from nodes.utils.debate import run_supervised_stage
         updates, result = await run_supervised_stage(state_obj, agent_skill("Master_PM", "pm_skill", template_id=state_obj.template_id), "PLANNING", extra_instruction=_extra)
         print(f"[OK] [Agent] Master PM 기획 완료 - 점수 {result.get('score')} / 판정 {result.get('verdict')}")

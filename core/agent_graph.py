@@ -168,8 +168,23 @@ def route_from_tech_lead(state: ProjectState) -> str:
 
 
 def route_from_contract_compiler(state: ProjectState) -> str:
-    """컴파일 실패는 **게이트로 보내지 않는다** — 볼 계약이 없다."""
-    if not (getattr(state, "app_runtime_contract_fingerprint", "") or "").strip():
+    """컴파일 실패는 **게이트로 보내지 않는다** — 볼 계약이 없다.
+
+    ## ⚠️⚠️ [2026-08-26 실측] 「지문이 없다」를 「실패했다」로 읽지 않는다
+
+    종전에는 지문이 비면 무조건 종결로 보냈다. 그런데 지문이 비는 경우는 **둘**이다:
+
+        ① 계약을 만들다 실패했다        → 종결 (`terminal_status` 가 찍혀 있다)
+        ② 이번 범위에 계약 대상이 없다  → 그냥 다음 단계로 (LIBRARY·REPORT 태스크)
+
+    ②를 종결로 보내면 계약이 필요 없는 태스크가 **전부 실패로 끝난다.** 실제 가동에서
+    WBS 4개 중 APP 이 하나뿐이었고 나머지 셋이 여기에 걸렸다.
+
+    ★ 판정을 여기서 다시 계산하지 않는다 — 노드가 남긴 자취(`terminal_status`)를 읽는다.
+      `route_from_contract_gate` 와 같은 규칙이다.
+    ⚠️ ②로 게이트에 가도 통제는 남는다 — 게이트가 「계약이 필요한데 지문이 없다」를
+      `BLOCKED` 로 잡는다. 층마다 가정이 달라야 층이다."""
+    if _terminated(state):
         return "TerminalHandler"
     return "ContractReviewGate"
 

@@ -122,6 +122,67 @@ def _summary(contract: Dict[str, Any], required: List[str]) -> str:
             + (f"({names}{more})" if datasets else "(데이터셋 0개 — 그 선언 자체가 통제다)"))
 
 
+def stamp_approval(workspace_root: str, *, fingerprint: str, actor_id: str = "",
+                   ledger_event_id: str = "") -> str:
+    """승인을 **계약 정본에** 남긴다. 성공하면 `""`, 실패하면 사람이 읽을 사유.
+
+    ## ⚠️⚠️ [2026-08-26 실측] 왜 이 함수가 생겼는가 — 승인해도 완주가 안 됐다
+
+    승인은 원장에 남고 **체크포인트 상태**(`approved_contract_fingerprint`)에 반영됐다.
+    그런데 컴파일러의 승인 이월은 **디스크의 계약 파일**을 본다:
+
+        if previous and not changed:                     # host_contract_compiler.py
+            if previous["approval"]["status"] == "APPROVED": ...
+
+    그 파일에 승인을 쓰는 곳이 **어디에도 없었다.** 그래서 재가동할 때마다
+
+        Tech_Lead → 컴파일 → 게이트 「지문은 같지만 상태가 COMPILED」 → 승인 대기
+
+    가 **끝없이 반복**됐다. 사용자는 승인을 눌러도 코드가 나오지 않는다.
+    ★ 쓰는 곳과 찾는 곳의 출처가 갈리면, 양쪽 다 200 을 돌려주면서 아무 일도 안 한다.
+
+    ## 무엇을 지키는가
+
+    ⚠️⚠️ **파일의 지문이 승인된 지문과 같을 때만 찍는다.** 다르면 「사람이 A 를 보고
+      B 를 승인한」 것이 되고, 그 승인은 승인이 아니다. 그 자리는 재승인이 맞다.
+    ⚠️ 던지지 않는다 — 결정은 **이미 원장에 있다.** 파일 기록 실패가 승인을 되돌리면
+      안 되므로, 사유를 돌려주어 호출부가 사람에게 그대로 전하게 한다.
+    """
+    from core import app_runtime_contract as arc
+
+    fp = (fingerprint or "").strip()
+    if not fp:
+        return "승인할 계약 지문이 없습니다."
+    path = contract_path(workspace_root)
+    contract = _read_json(path)
+    if not isinstance(contract, dict) or not contract:
+        return f"계약 정본을 읽지 못했습니다({path}) — 승인은 기록됐지만 계약에 반영하지 못했습니다."
+
+    on_disk = str(contract.get("semantic_fingerprint", ""))
+    if on_disk != fp:
+        return (f"계약 정본의 지문({on_disk[:12] or '없음'}…)이 승인한 지문({fp[:12]}…)과 "
+                f"다릅니다 — 그 사이에 계약이 바뀌었습니다. 다시 검토하십시오.")
+
+    from datetime import datetime, timezone
+    contract["status"] = arc.STATUS_APPROVED
+    #: ★ 모양은 `core/kit_app_contract.py` 의 승인 도장과 같다 — 두 곳이 다른 봉투를
+    #:   쓰면 읽는 쪽이 한쪽만 알아본다.
+    contract["approval"] = {"status": "APPROVED", "approved_by": str(actor_id or ""),
+                            "approved_at": datetime.now(timezone.utc).isoformat(),
+                            "decision_ledger_id": str(ledger_event_id or "")}
+    #: ⚠️ 봉투를 바꿨으면 정본 검증기를 **다시** 지난다 — 내가 만든 흠을 내가 봐주지 않는다.
+    errs = arc.validate(contract)
+    if errs:
+        return "승인 도장을 찍은 계약이 검증을 통과하지 못했습니다: " + " / ".join(errs[:3])
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(contract, f, ensure_ascii=False, indent=2)
+    except Exception as e:                                # pragma: no cover - 방어
+        return f"계약 정본에 승인을 기록하지 못했습니다({e})."
+    return ""
+
+
 def adapter_path(workspace_root: str) -> str:
     from core.typed_sdk_adapter import ADAPTER_PATH
     return os.path.join(workspace_root or ".", *ADAPTER_PATH.split("/"))
@@ -145,6 +206,58 @@ def _write_adapter(workspace_root: str, contract: Dict[str, Any]) -> str:
     except Exception as e:                                # pragma: no cover - 방어
         return f"어댑터 기록 실패({e})"
     return f"어댑터 {len(result.dataset_names)}개 데이터셋"
+
+
+def _tasks_in_contract_scope(tasks: List[Dict[str, Any]], drafts: Dict[str, Any],
+                             current_task_id: str) -> List[Dict[str, Any]]:
+    """지금 계약에 합산할 태스크만 남긴다.
+
+    ## ⚠️⚠️ [2026-08-26 실측] 왜 걸러야 하는가 — 교착이었다
+
+    합산기는 **계약 대상 태스크 전부**의 초안을 요구한다. 그런데 초안은 그 태스크의
+    Tech Lead 가 만들고, 그 Tech Lead 는 **컴파일러를 지나야** 돈다. 그래서 WBS 에
+    APP 태스크가 뒤에 하나라도 있으면:
+
+        TASK-01(LIBRARY) 가동 → Tech Lead → 컴파일러
+          → 「계약 대상 태스크인데 계약 초안이 없습니다: TASK-03」 → CONTRACT_BLOCKED
+
+    TASK-03 은 아직 **시작도 안 했는데** 그 초안을 요구한다. 실제 가동에서 그대로
+    재현됐다(live-walk-02). 앞 태스크가 뒤 태스크의 미래를 기다리는 교착이다.
+
+    ## 규칙 — 초안을 **요구하는 것은 지금 도는 태스크 하나뿐**이다
+
+        남긴다:  ① 지금 도는 태스크         (상태와 무관하게 **언제나**)
+                 ② 초안이 이미 있는 태스크   (합산해야 데이터가 안 사라진다)
+        뺀다:    그 밖의 계약 대상 태스크    (아직 초안이 없다 = 아직 만들 것이 없다)
+
+    ★ 통제는 **쓰이는 자리에서** 지켜진다. 어떤 태스크가 계약 없이 코드를 만들 수 있는
+      순간은 **그 태스크가 도는 때뿐**이고, 그때 이 함수는 ①로 그것을 반드시 요구한다.
+      TASK-03 이 초안을 안 남겼다고 **TASK-02 를** 막는 것은 아무것도 지키지 못한다 —
+      TASK-03 은 지금 아무것도 만들고 있지 않다.
+
+    ⚠️⚠️ 처음에는 「이미 손댄(IN_PROGRESS·DONE) 태스크가 초안을 안 남긴 것은 오류」로
+      두었다. 그런데 **종결 롤백이 `contracts/drafts/*.json` 을 지운다**(커밋 전이므로).
+      그래서 APP 태스크가 한 번 실패하면 「손댔는데 초안이 없는」 상태로 굳고, 그때부터
+      **다른 모든 태스크가 영영 막혔다** — 실측에서 TASK-02 가 그렇게 죽었다.
+      상태(status)로 판단하지 않는 이유가 이것이다. 초안의 존재만 본다.
+
+    ⚠️ 나중에 빠진 태스크가 돌면 데이터셋이 붙고 **지문이 바뀌어 재승인을 지난다** —
+      이 저장소가 원래 설계해 둔 그 경로다([4c-1] 의 데이터 소실도 생기지 않는다.
+      초안이 없는 태스크에는 합산할 데이터셋이 애초에 없다).
+    """
+    keep, dropped = [], []
+    for t in (tasks or []):
+        tid = str(t.get("task_id", ""))
+        if tid == current_task_id or tid in (drafts or {}):
+            keep.append(t)
+        else:
+            dropped.append(tid)
+    if dropped:
+        #: ★ 조용히 빼지 않는다 — 「계약에 무엇이 들어갔나」는 승인의 근거다.
+        print(f"ℹ️ [HostContractCompiler] 아직 시작하지 않은 태스크는 이번 계약에서 "
+              f"제외합니다({', '.join(dropped)}) — 그 태스크가 돌면 지문이 바뀌어 "
+              f"다시 검토를 지납니다.")
+    return keep
 
 
 async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
@@ -180,8 +293,27 @@ async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
             "supervisor_feedback": reason,
         }
 
+    drafts = load_drafts(ws)
+    tasks = _tasks_in_contract_scope(tasks, drafts, st.current_sprint_task_id or "")
+
+    #: ★★★ 이번 범위에 **계약 대상이 하나도 없으면** 만들 계약이 없다.
+    #:
+    #: ⚠️⚠️ 그냥 컴파일하면 빈 초안이 들어가 「app_class 가 … 중 하나여야 합니다(현재
+    #:   (없음))」로 죽는다 — WBS 를 못 읽었을 때와 **똑같은 거짓 사유**다(바로 위 갈래가
+    #:   그 사고를 기록해 두었다). 사용자는 분류를 고르러 헤매지만 진짜 사실은
+    #:   「이 태스크는 계약이 필요 없다」이다.
+    #: ★ 종결 상태를 세우지 않는다. 판정은 검토 게이트가 `NOT_APPLICABLE` 로 내린다 —
+    #:   판정하는 곳은 하나여야 한다.
+    if not artifact_kind.contract_required_task_ids(tasks):
+        note = ("이번 범위에 계약이 필요한 산출물이 없습니다 — 계약을 만들지 않고 "
+                "다음 단계로 넘어갑니다.")
+        print(f"ℹ️ [HostContractCompiler] {note}")
+        return {"app_runtime_contract_status": "",
+                "app_runtime_contract_fingerprint": "",
+                "app_runtime_contract_summary": note}
+
     result, agg = aggregator.compile_project_contract(
-        tasks, load_drafts(ws), project_id=os.path.basename(ws.rstrip("/\\")) or st.project_name,
+        tasks, drafts, project_id=os.path.basename(ws.rstrip("/\\")) or st.project_name,
         previous=previous if isinstance(previous, dict) else None)
     contract = result.contract
     required = artifact_kind.contract_required_task_ids(tasks)
@@ -252,7 +384,15 @@ async def run_contract_review_gate(state: Any) -> Dict[str, Any]:
     st = ProjectState.model_validate(state)
     ws = st.workspace_root or ""
     project_id = os.path.basename(ws.rstrip("/\\")) or st.project_name
-    decision, required = gate.evaluate_project(_wbs_tasks(ws), st)
+    #: ★★★ 컴파일러와 **같은 범위**를 본다.
+    #:
+    #: ⚠️⚠️ [2026-08-26 실측] 컴파일러는 「아직 시작 안 한 태스크」를 빼는데 게이트는
+    #:   WBS 전체로 판정했다. 그래서 컴파일러가 「이번엔 계약 대상이 없다」고 통과시킨
+    #:   태스크를 게이트가 「계약 대상인데 컴파일된 계약이 없다」로 막았다 —
+    #:   **두 계층의 답이 갈리면 통제가 아니라 교착이 된다**([I-4 2.2a] 와 같은 종류).
+    tasks = _tasks_in_contract_scope(_wbs_tasks(ws), load_drafts(ws),
+                                     st.current_sprint_task_id or "")
+    decision, required = gate.evaluate_project(tasks, st)
 
     if decision.verdict == gate.AUTO_PASS:
         print("[OK] [ContractReviewGate] 승인된 계약과 지문이 같습니다 — 자동 통과.")
@@ -264,7 +404,13 @@ async def run_contract_review_gate(state: Any) -> Dict[str, Any]:
 
     if decision.verdict == gate.BLOCKED:
         print(f"⛔ [ContractReviewGate] {decision.reason}")
+        #: ⚠️⚠️ [2026-08-26 실측] `terminal_reason` 을 함께 세운다. 종전에는 상태만
+        #:   찍고 사유를 안 세워서, 화면과 로그에 **직전 실패의 사유가 그대로 남았다.**
+        #:   실제로 그것 때문에 「컴파일러가 못 만들었다」고 한참을 잘못 짚었다 —
+        #:   진짜 원인은 게이트였다. 사유가 원인을 가리키지 않으면 사람은 영영
+        #:   엉뚱한 곳을 고친다(같은 파일 위쪽이 경고해 둔 그 결함이다).
         return {"terminal_status": "CONTRACT_BLOCKED",
+                "terminal_reason": decision.reason,
                 "supervisor_feedback": decision.reason,
                 "contract_review_request_event_id": ""}
 

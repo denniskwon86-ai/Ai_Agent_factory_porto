@@ -96,11 +96,47 @@ def test_a_52_checkpoint_reads_clean_and_routes_the_old_way():
 # ── 4c-6 판정별 목적지 ──────────────────────────────────────────────────
 def test_compiler_failure_goes_to_the_terminal_handler():
     """⚠️ 볼 계약이 없는데 게이트로 보내면, 사용자는 「승인하라」는 화면과 「계약이
-    없다」는 문장을 동시에 본다."""
+    없다」는 문장을 동시에 본다.
+
+    ## ⚠️⚠️ [2026-08-26 실측] 판정 기준을 지문 → **종결 자취**로 바꿨다
+
+    종전에는 「지문이 비면 무조건 종결」이었다. 그런데 지문이 비는 경우는 **둘**이다:
+
+        ① 계약을 만들다 실패했다        → 종결 (`terminal_status` 가 찍혀 있다)
+        ② 이번 범위에 계약 대상이 없다  → 그냥 다음 단계로 (LIBRARY·REPORT 태스크)
+
+    ②를 종결로 보내면 **계약이 필요 없는 태스크가 전부 실패로 끝난다.** 실제 가동에서
+    WBS 5개 중 그 갈래에 걸려 완주가 막혔다.
+
+    ★ 이 시험이 지키려던 것(「승인하라」와 「계약이 없다」를 동시에 보이지 않기)은
+      **그대로 지킨다** — 아래 마지막 단언이 그것이다. 계약이 필요한데 지문이 없으면
+      게이트가 `BLOCKED` 로 잡는다. 층마다 가정이 다르므로 층이다."""
+    #: ① 실패는 종결로 — 자취를 보고 판단한다.
     assert ag.route_from_contract_compiler(
-        _st(app_runtime_contract_fingerprint="")) == "TerminalHandler"
+        _st(app_runtime_contract_fingerprint="",
+            terminal_status="CONTRACT_BLOCKED")) == "TerminalHandler"
+    #: ② 계약이 있으면 게이트로.
     assert ag.route_from_contract_compiler(
         _st(app_runtime_contract_fingerprint=FP_B)) == "ContractReviewGate"
+    #: ③ 계약 대상이 없어 지문이 빈 것은 실패가 아니다 — 지나간다.
+    assert ag.route_from_contract_compiler(
+        _st(app_runtime_contract_fingerprint="")) == "ContractReviewGate"
+
+
+def test_the_gate_still_blocks_a_contract_less_walkthrough(tmp_path):
+    """★★★ 위 완화가 **구멍을 만들지 않는지**가 진짜 질문이다.
+
+    계약이 필요한 태스크가 지문 없이 게이트에 닿으면, 게이트가 막아야 한다.
+    막지 못하면 계약 대상 앱이 **계약 없이** 빌드된다."""
+    from nodes import contract as cn
+
+    ws = str(tmp_path / "ws")
+    os.makedirs(ws)
+    _wbs(ws, [{"task_id": "A", "title": "앱", "artifact_kind": "APP"}])
+    out = asyncio.run(cn.run_contract_review_gate(
+        {"project_name": "p", "workspace_root": ws, "current_sprint_task_id": "A",
+         "runtime_contract_profile": "v1"}))
+    assert out["terminal_status"] == "CONTRACT_BLOCKED"
 
 
 def test_gate_routes_by_what_the_node_left_behind():
@@ -167,8 +203,12 @@ def test_compiler_does_not_overwrite_the_canon_on_failure(tmp_path):
     #: 초안 없는 계약 태스크를 더한다 → 합산이 막힌다
     _wbs(ws, [{"task_id": "A", "title": "앱", "artifact_kind": "APP"},
               {"task_id": "B", "title": "앱2", "artifact_kind": "APP"}])
+    #: ⚠️ `current_sprint_task_id` 를 빼면 제품과 다른 것을 시험한다 — 스프린트는
+    #:   언제나 어떤 태스크를 돌고 있다. 없으면 그 태스크가 계약 범위에서 빠져
+    #:   초안 요구 자체가 성립하지 않는다(2026-08-26 범위 정리 이후).
     out = asyncio.run(cn.run_host_contract_compiler(
-        {"project_name": "p", "workspace_root": ws, "runtime_contract_profile": "v1"}))
+        {"project_name": "p", "workspace_root": ws, "current_sprint_task_id": "B",
+         "runtime_contract_profile": "v1"}))
     assert out["app_runtime_contract_status"] == "DRAFT"
     assert out["app_runtime_contract_fingerprint"] == ""
     assert open(cn.contract_path(ws), encoding="utf-8").read() == before
@@ -194,6 +234,7 @@ def test_gate_opens_exactly_one_request_and_stops(tmp_path):
     os.makedirs(ws)
     _wbs(ws, [{"task_id": "A", "title": "앱", "artifact_kind": "APP"}])
     state = {"project_name": "p", "workspace_root": ws, "runtime_contract_profile": "v1",
+             "current_sprint_task_id": "A",
              "app_runtime_contract_fingerprint": FP_B,
              "approved_contract_fingerprint": FP_A,
              "app_runtime_contract_status": "COMPILED"}
@@ -233,7 +274,8 @@ def test_gate_blocks_when_there_is_no_contract(tmp_path):
     os.makedirs(ws)
     _wbs(ws, [{"task_id": "A", "title": "앱", "artifact_kind": "APP"}])
     out = asyncio.run(cn.run_contract_review_gate(
-        {"project_name": "p", "workspace_root": ws, "runtime_contract_profile": "v1"}))
+        {"project_name": "p", "workspace_root": ws, "current_sprint_task_id": "A",
+         "runtime_contract_profile": "v1"}))
     assert out["terminal_status"] == "CONTRACT_BLOCKED"
     assert out["contract_review_request_event_id"] == ""
 
