@@ -112,6 +112,27 @@ def test_릴리스_카드는_키트_앱_이름과_운영상태를_앞세우고_�
     assert ">릴리스 관리</button>" in page
 
 
+def test_릴리스_관리도_사람용_이름_상태_시각을_우선하고_감사원문은_보존한다():
+    page = _read("frontend/src/components/BuildPage.tsx")
+    app = _read("frontend/src/App.tsx")
+    admin = _read("frontend/src/components/ProgramAdminPanel.tsx")
+
+    assert "display_name: displayName" in page
+    assert "r.display_name || r.project_name || r.release_id" in app
+    assert 'kicker="프로그램"' in admin
+    assert 'kicker="상태"' in admin
+    assert 'kicker="영향 범위"' in admin
+    assert 'kicker="상태 변경"' in admin
+    assert 'kicker="변경 이력"' in admin
+    assert "localTime(data!.changed_at)" in admin
+    assert "actorLabel(data!.changed_by, actorNames)" in admin
+    assert "title={data!.changed_by}" in admin
+    assert "candidate: '운영 후보'" in admin
+    assert "historyStatusLabel(h.from_status)" in admin
+    assert "historyStatusLabel(h.to_status)" in admin
+    assert "<summary className=\"afs-muted\" style={{ cursor: 'pointer' }}>식별 정보</summary>" in admin
+
+
 def test_프로젝트_제작_화면은_사람용_명칭과_자비스_역할을_쓴다():
     app = _read("frontend/src/App.tsx")
     control = _read("frontend/src/components/ControlPanel.tsx")

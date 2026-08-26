@@ -756,7 +756,9 @@ function AppShell() {
             entityMode={shellCtx.entityMode}
             onOpenProject={(id) => setCurrentProject(id)}
             onOpenRelease={(releaseId) => viewRelease(releaseId)}
-            onManageRelease={(r) => setAdminProgram({ id: r.release_id, name: r.project_name || r.release_id })}
+            onManageRelease={(r) => setAdminProgram({
+              id: r.release_id, name: r.display_name || r.project_name || r.release_id,
+            })}
             onDeleteProject={(id) => {
               // ⚠️ 기존 확인 문구를 그대로 쓴다 — 서버는 «표시 삭제» 이고 데이터는 남는다.
               //   여기서 새 문구를 지어내면 화면이 서버보다 무섭게 말한다.

@@ -356,7 +356,7 @@ export function BuildPage({
                     cursor: 'pointer', border: '1px solid var(--ls-navy)',
                     background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
                   }} title="게시된 앱 또는 결과 화면을 엽니다">앱 실행</button>
-                  <button onClick={() => onManageRelease(r)} style={{
+                  <button onClick={() => onManageRelease({ ...r, display_name: displayName })} style={{
                     height: 36, padding: '0 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
                     border: '1px solid var(--action-secondary-border)',
                     background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',

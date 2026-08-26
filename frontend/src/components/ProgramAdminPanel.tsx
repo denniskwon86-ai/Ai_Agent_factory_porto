@@ -36,6 +36,7 @@ import type { ProgramLifecycle, ProgramStatus } from '../lib/programApi';
 import {
   STATUS_LABEL, deprecateProgram, disableProgram, fetchProgram, reactivateProgram,
 } from '../lib/programApi';
+import { orgApi } from '../lib/orgApi';
 
 type Props = {
   releaseId: string;
@@ -49,6 +50,34 @@ const TONE: Record<ProgramStatus, string> = {
   active: 'success', deprecated: 'warn', disabled: 'danger',
 };
 
+function localTime(value?: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '시각 미기록';
+  // 시간대가 없는 레거시 값은 임의 해석하지 않는다. Z 또는 offset이 있는 값만 현지화한다.
+  if (!/(?:Z|[+-]\d\d:\d\d)$/.test(raw)) return raw;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(date);
+}
+
+function actorLabel(actor: string, names: Record<string, string>): string {
+  const raw = String(actor || '').trim();
+  if (!raw) return '행위자 미기록';
+  const local = raw.includes('@') ? raw.split('@', 1)[0] : raw;
+  return names[raw] || names[local] || local;
+}
+
+function historyStatusLabel(value?: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '미기록';
+  const labels: Record<string, string> = {
+    active: '사용 중', candidate: '운영 후보', deprecated: '중단 예고', disabled: '사용 중단',
+  };
+  return labels[raw] || raw;
+}
+
 export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onChanged }: Props) {
   const [prog, setProg] = useState<Loaded<ProgramLifecycle>>(loading<ProgramLifecycle>());
   const [err, setErr] = useState('');
@@ -56,6 +85,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
   const [reason, setReason] = useState('');
   const [replacement, setReplacement] = useState('');
   const [ack, setAck] = useState(false);
+  const [actorNames, setActorNames] = useState<Record<string, string>>({});
 
   // ⚠️ 「사용 중단」은 의존 대상을 끊는다 — 누르는 즉시 나가지 않게 화면 안에서 한 번 확인한다
   //   (디자인 시스템 규칙 ②: `alert()`/`confirm()` 을 쓰지 않고 **무엇이 끊기는지** 적는다).
@@ -81,6 +111,18 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
   }, [releaseId]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    // 이름 보강이 실패해도 사용 상태 조회는 그대로 보여 준다. 감사 원문은 title/details에 남는다.
+    orgApi.users().then((result) => {
+      const mapped: Record<string, string> = {};
+      result.rows.forEach((user) => {
+        if (!user.user_id || !user.display_name) return;
+        mapped[user.user_id] = user.display_name;
+        mapped[user.user_id.split('@', 1)[0]] = user.display_name;
+      });
+      setActorNames(mapped);
+    }).catch(() => setActorNames({}));
+  }, []);
 
   const act = async (fn: () => Promise<ProgramLifecycle>) => {
     setBusy(true);
@@ -122,9 +164,13 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
 
       <div className="afs-dialog-body">
         <div className="hub-main">
-          <ScreenHead kicker="PROGRAM" title={releaseName || releaseId}
+          <ScreenHead kicker="프로그램" title={releaseName || releaseId}
             description="배포된 프로그램을 지우는 대신 사용만 막습니다. 지우면 이 프로그램을 근거로 남긴 결재 이력·감사 로그·파생 프로그램의 출처가 전부 고아가 됩니다."
             chip={headChip} />
+          <details style={{ marginTop: -8, marginBottom: 14, fontSize: 12 }}>
+            <summary className="afs-muted" style={{ cursor: 'pointer' }}>식별 정보</summary>
+            <code className="afs-muted" title={releaseId}>{releaseId}</code>
+          </details>
 
           {err && (
             <div style={{ marginBottom: 14 }}>
@@ -135,7 +181,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
             </div>
           )}
 
-          <Panel kicker="STATUS" title="현재 상태">
+          <Panel kicker="상태" title="현재 상태">
             <div className="panel-body">
               {prog.status !== 'ok' ? (
                 <EmptyOrError state={prog.status} error={prog.error}
@@ -163,7 +209,8 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
                   )}
                   {data!.recorded && (
                     <div className="afs-muted" style={{ fontSize: 12 }}>
-                      {data!.changed_by} · {data!.changed_at}
+                      <span title={data!.changed_by}>{actorLabel(data!.changed_by, actorNames)}</span>
+                      {' · '}{localTime(data!.changed_at)}
                     </div>
                   )}
                   {data!.note && (
@@ -176,7 +223,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
 
           {dep && (
             <div style={{ marginTop: 14 }}>
-              <Panel kicker="BLAST RADIUS" title="끄면 영향받는 대상">
+              <Panel kicker="영향 범위" title="끄면 영향받는 대상">
                 <div className="panel-body">
                   <div style={{ fontSize: 13 }}
                     className={dep.blast_radius === 'enterprise' ? 'afs-danger-fg'
@@ -211,7 +258,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
           )}
 
           <div style={{ marginTop: 14 }}>
-            <Panel kicker="CHANGE" title="변경">
+            <Panel kicker="상태 변경" title="가능한 변경">
               <div className="panel-body">
                 <div>
                   <label htmlFor="pa-reason" className="afs-muted"
@@ -225,7 +272,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
                 <div>
                   <label htmlFor="pa-replacement" className="afs-muted"
                     style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>
-                    대체 프로그램 release_id (선택 — 없으면 사용자는 막다른 길에서 같은 걸 다시 만듭니다)
+                    대체 프로그램 식별자 (선택 — 없으면 사용자는 막다른 길에서 같은 걸 다시 만듭니다)
                   </label>
                   <input id="pa-replacement" className="afs-input" style={{ width: '100%' }}
                     value={replacement} onChange={(e) => setReplacement(e.target.value)}
@@ -242,18 +289,21 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
                 </label>
 
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  <button className="secondary-button" disabled={busy}
+                  <button className="secondary-button"
+                    disabled={busy || prog.status !== 'ok' || data?.status !== 'active'}
                     onClick={() => act(() => deprecateProgram(releaseId, {
                       reason, replacement_release_id: replacement, acknowledge_dependents: ack }))}>
                     ⚠ 중단 예고 (아직 사용 가능)
                   </button>
                   {/* ⚠️ 위험한 행동만 danger 색이다 — 재개까지 색을 주면 구분이 사라진다. */}
-                  <button className="danger-solid" disabled={busy}
+                  <button className="danger-solid"
+                    disabled={busy || prog.status !== 'ok' || data?.status === 'disabled'}
                     onClick={() => confirmDisable.ask(true)}>
                     ⛔ 사용 중단 (삭제 아님)
                   </button>
                   {/* 재개는 되돌리는 행동이므로 1차 행동(구조색)이다 — 위험색을 주지 않는다. */}
-                  <button className="primary-button" disabled={busy}
+                  <button className="primary-button"
+                    disabled={busy || prog.status !== 'ok' || data?.status === 'active'}
                     onClick={() => act(() => reactivateProgram(releaseId, reason))}>
                     ▶ 사용 재개
                   </button>
@@ -288,7 +338,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
           </div>
 
           <div style={{ marginTop: 14 }}>
-            <Panel kicker="HISTORY" title="변경 이력 (지워지지 않습니다)">
+            <Panel kicker="변경 이력" title="변경 이력 (지워지지 않습니다)">
               <div className="panel-body">
                 {prog.status !== 'ok' ? (
                   // ★ 조회에 실패했으면 «이력이 없습니다» 로 쓰지 않는다 — 있는데 못 본 것일 수 있다.
@@ -301,11 +351,12 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
                     <div key={h.event_id} className="afs-bg-sunken afs-border"
                       style={{ borderWidth: 1, borderStyle: 'solid', borderRadius: 8,
                         padding: '8px 12px', fontSize: 13 }}>
-                      <span className="afs-muted">{h.at}</span>
+                      <span className="afs-muted">{localTime(h.at)}</span>
                       {' · '}
-                      <b>{h.from_status || '(미기록)'} → {h.to_status}</b>
+                      <b>{historyStatusLabel(h.from_status)}
+                        {' → '}{historyStatusLabel(h.to_status)}</b>
                       {' · '}
-                      <span className="afs-muted">{h.actor}</span>
+                      <span className="afs-muted" title={h.actor}>{actorLabel(h.actor, actorNames)}</span>
                       {h.reason && <span className="afs-muted"> — {h.reason}</span>}
                     </div>
                   ))
