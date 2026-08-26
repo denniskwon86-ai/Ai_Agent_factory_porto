@@ -1107,6 +1107,52 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             else:
                 render_note += "\n([OK] 입력 동작 검증 통과 - 제어 입력에 onChange 연결 확인)"
 
+            # ══════════════════════════════════════════════════════════════
+            # 🚨🚨 [2026-08-26 실측] **지어낸 데이터를 사실처럼 보여 주는가** — 하드 차단
+            # ══════════════════════════════════════════════════════════════
+            #
+            # 실제 가동이 만든 앱이 읽기에 실패하면 `setInboundData(mockData)` 로 **지어낸
+            # 입고 내역을 표로 그렸다.** 「목업입니다」는 표 위 한 줄이고 행은 진짜와 똑같이
+            # 생겼다. 사용자는 그 표를 보고 발주를 판단한다.
+            #
+            # ★ 권고가 아니라 **차단**이다. 렌더 실패·동결 입력과 같은 급으로 둔다 —
+            #   저 둘은 「안 보인다」이고 이것은 **「틀린 것이 보인다」**이므로 더 나쁘다.
+            # ⚠️ 원인은 모델이 아니라 `frontend_skill.md` 의 「mock 우선」 지시였다. 지시문은
+            #   고쳤고, 이 검사기는 그 규율이 무너졌을 때 잡는 백스톱이다.
+            from nodes.utils.synthetic_data_checker import (
+                check_synthetic_data, render_report as _synth_report)
+            synth = await asyncio.to_thread(check_synthetic_data, fe_files)
+            if not synth.get("ok") and not synth.get("skipped"):
+                n_synth = len(synth.get("blocking", []))
+                print(f"❌ [SyntheticData] 지어낸 데이터를 사실처럼 표시 {n_synth}건 - 재작업")
+                review_text = (
+                    "🚨 지어낸 데이터를 실제처럼 보여 주는 코드가 있습니다 - 사용자가 그것을 "
+                    "사실로 믿고 판단합니다:\n"
+                    + _synth_report(synth)
+                    + "\n\n[수정 지침] 세 상태를 구분하십시오. 읽는 중이면 로딩, 읽었는데 0건이면 "
+                      "빈 상태, **읽기에 실패했으면 실패 상태**입니다. 실패 분기에서는 표시 데이터를 "
+                      "비우고(`[]`·`null`) 실패 사실만 알리십시오 - 목업·샘플 행을 그리지 마십시오. "
+                      "업무 데이터 상태의 useState 초기값도 `[]` 로 시작하십시오."
+                )
+                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+                cr_scores["CODE_REVIEW"] = 0.0
+                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
+                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV",
+                               "blocking_fails": ["synthetic_data_as_real"]})
+                return {
+                    "reviewer_decision": "REWORK_DEV",
+                    "reviewer_feedback": review_text,
+                    "pm_override_reason": "",
+                    "needs_revision": False,
+                    "current_stage": "CODE_REVIEW",
+                    "stage_scores": cr_scores,
+                    "criteria_log": cr_log,
+                    "supervisor_feedback": review_text,
+                    "supervisor_hops": hops,
+                }
+            else:
+                render_note += "\n([OK] 지어낸 데이터 표시 없음 - 실패 시 fail-closed 확인)"
+
             #  정적 품질 백스톱(Phase 2): 컴포넌트 분리/빈상태/디자인토큰 - 하드 차단이 아니라
             #    권고로 LLM 리뷰어 판단에 주입(오탐 재작업 폭증 방지). frontend_skill/design_system 가
             #    1차 규율, 이 검사기는 그 규율이 무너진 경우를 잡는 백스톱.
