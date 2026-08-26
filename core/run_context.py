@@ -18,6 +18,7 @@ LangChain 의 `with_fallbacks` 는 **개별 실패를 삼킨다**(성공하면 �
 ⚠️ 두 값 모두 **contextvar** 다. 스웜은 에이전트 3개를 병렬로 돌리므로 모듈 전역에 담으면
 서로의 기록이 섞인다.
 """
+import re
 from contextvars import ContextVar
 from typing import Any, Dict, List
 
@@ -40,13 +41,43 @@ def reset_fallback_errors() -> None:
     _fallback_errors.set([])
 
 
+#: 오류 본문에 박혀 있는 모델 이름. 제공사마다 문장이 다르므로 관측된 모양만 담는다.
+#:   · google:  "Error calling model 'gemini-2.5-pro' (NOT_FOUND): 404 …"
+#:   · OpenAI 호환: "{'code': 'invalid-argument', 'error': 'Model not found: grok-2-latest'}"
+_MODEL_IN_ERROR = re.compile(r"""model\s+'([^']+)'|Model\s+not\s+found:\s*([^,}'"]+)""",
+                             re.IGNORECASE)
+
+
+def _model_from_error(error: str) -> str:
+    """오류 본문에서 모델 이름을 건져 낸다. 없으면 빈 문자열.
+
+    ## ⚠️⚠️ [2026-08-26 실측] 왜 필요한가 — **계측이 「?」만 남겼다**
+
+    `FallbackErrorCollector` 는 `serialized["name"]` → `metadata["ls_model_name"]` 순으로
+    이름을 찾는데 이 환경에서는 **둘 다 비어 있다.** 그래서 폴백 실패 298건이 전부
+    `model: "?"` 로 쌓였고, 「어느 모델이 왜 죽는가」에 **답할 수 없었다.**
+
+    그런데 오류 본문에는 이름이 **그대로 적혀 있었다.** 실제로 여기서 뽑아 세어 보니
+    `gemini-2.5-pro` 는 404 NOT_FOUND 28회(쿼터가 아니라 **없는 이름**),
+    `grok-2-latest` 는 400 Model not found 24회였다 — 기다려도 살아나지 않는 것들이다.
+
+    ★ 재는 도구가 틀리면 그 위의 판단이 전부 틀린다. 상류가 안 주면 **있는 곳에서 읽는다.**
+    """
+    m = _MODEL_IN_ERROR.search(error or "")
+    if not m:
+        return ""
+    return (m.group(1) or m.group(2) or "").strip().strip("'\"")
+
+
 def record_fallback_error(model: str, error: str) -> None:
     cur = _fallback_errors.get()
     if cur is None:
         cur = []
         _fallback_errors.set(cur)
+    #: ★ 상류가 이름을 안 주면 오류 본문에서 읽는다 — 「?」로 남기면 아무도 셀 수 없다.
+    name = (model or "").strip() or _model_from_error(error)
     # 오류 문자열은 길고 대부분 중복이라 앞부분만 남긴다(로그 1줄이 수 KB 가 되면 아무도 안 본다).
-    cur.append({"model": model or "?", "error": (error or "")[:200]})
+    cur.append({"model": name or "?", "error": (error or "")[:200]})
 
 
 def get_fallback_errors() -> List[Dict[str, str]]:

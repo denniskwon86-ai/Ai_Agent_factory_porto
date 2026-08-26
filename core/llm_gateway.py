@@ -444,6 +444,42 @@ GLOBAL_KOREAN_ONLY_SYSTEM_DIRECTIVE = """
 # 하위호환: 기존 호출부/주석에서 쓰던 이름은 전역 정책을 가리킨다.
 _LANG_DIRECTIVE = "\n\n" + GLOBAL_KOREAN_ONLY_SYSTEM_DIRECTIVE
 
+
+#: 이번 실행에서 다시 시도하지 않을 만큼 긴 시간(≈ 1년). 「영구」를 별도 자료구조로 만들지
+#: 않고 기존 쿨다운 사전을 그대로 쓴다 — 배제 경로가 둘이 되면 한쪽만 고쳐지는 날이 온다.
+_DEAD_MODEL_COOLDOWN_SEC = 365 * 24 * 3600
+
+#: **없는 이름**의 신호. 관측된 문장만 담는다(지어내지 않는다):
+#:   · google:      "Error calling model 'x' (NOT_FOUND): 404 …"
+#:   · OpenAI 호환: "{'code': 'invalid-argument', 'error': 'Model not found: x'}"
+#: ⚠️ 404 라고 다 그런 것은 아니므로 **model 이라는 말이 함께 있을 때만** 본다 —
+#:   넓게 잡으면 살아 있는 모델이 영구 배제되고, 그것은 되돌리기 어려운 오탐이다.
+_DEAD_NAME_SIGNAL = re.compile(
+    r"(model\s+not\s+found)|(not_found[\s\S]{0,80}model)|(model[\s\S]{0,80}not_found)",
+    re.IGNORECASE)
+
+
+def _dead_model_names(failed) -> set:
+    """이번 walk 에서 **이름이 없어서** 실패한 모델들.
+
+    ⚠️ 판정은 **모델별 오류**로 한다. 체인 전체의 마지막 예외 하나로 판단하면, A 가 404 이고
+      B 가 429 일 때 둘 다 영구 배제된다 — 살아 있는 B 를 잃는다.
+    ★ 그 모델별 기록은 `core/run_context.record_fallback_error` 가 남긴다(이름을 오류
+      본문에서 건져 내도록 함께 고쳤다 — 그전에는 전부 «?» 였다)."""
+    try:
+        from core.run_context import get_fallback_errors
+        per_model = get_fallback_errors()
+    except Exception:
+        return set()
+    names = {n for n in (failed or []) if n and n != "?"}
+    out = set()
+    for rec in per_model:
+        n = str(rec.get("model", "") or "")
+        if n in names and _DEAD_NAME_SIGNAL.search(str(rec.get("error", "") or "")):
+            out.add(n)
+    return out
+
+
 class LLMGateway:
     """
     LLM 호출과 자원 최적화를 전담하는 비동기 게이트웨이.
@@ -469,6 +505,8 @@ class LLMGateway:
 
         # [레버B] 모델별 쿨다운 상태(모델명 → 해제 timestamp). 죽은 모델을 폴백 체인에서 한시적 제외.
         self._model_cooldown = {}
+        #: 이름이 없어서 실패한 모델 — 이번 실행에서는 다시 부르지 않는다.
+        self._dead_models = set()
         # 마지막으로 응답에 성공한 모델(sticky winner) — 다음 체인 구성에서 맨 앞으로 올린다.
         self._last_success_model = None
 
@@ -676,6 +714,28 @@ class LLMGateway:
             self._last_success_model = attempts[-1]
 
         failed = attempts if not ok else attempts[:-1]
+
+        # ★★★ [2026-08-26 실측] **없는 이름은 기다려도 살아나지 않는다.**
+        #
+        # ⚠️⚠️ 쿨다운은 「쿼터 소진(길게)」과 「일시적 실패(짧게)」 둘만 알았다. 그런데
+        #   관측된 실패에는 **세 번째 부류**가 있었다 — 모델 이름이 아예 없는 경우다:
+        #     · `gemini-2.5-pro`  404 NOT_FOUND       28회
+        #     · `grok-2-latest`   400 Model not found 24회
+        #   이것들은 90초 뒤에도, 30분 뒤에도 없다. 그런데 매 walk 마다 다시 두들겼고,
+        #   `GEMINI_MAX_RETRIES` 만큼 재시도까지 붙어 **순수한 지연**만 쌓였다.
+        # ★ 그래서 이번 실행에서는 다시 시도하지 않는다. 이름은 사람이 고쳐야 하는 것이므로
+        #   **크게 말한다** — 조용히 빼면 설정이 틀린 채로 영원히 굴러간다.
+        # ⚠️ 프로세스 수명 동안만이다. 설정을 고치고 다시 띄우면 그대로 살아난다.
+        _dead = _dead_model_names(failed)
+        for n in _dead:
+            if n not in self._dead_models:
+                self._dead_models.add(n)
+                print(f"⛔ [LLM Gateway] «{n}» 은 **존재하지 않는 모델 이름**입니다 — 이번 "
+                      f"실행에서 더 시도하지 않습니다. 설정(config.py)의 모델 이름을 "
+                      f"고쳐야 합니다.")
+            self._model_cooldown[n] = now + _DEAD_MODEL_COOLDOWN_SEC
+
+        failed = [n for n in failed if n not in _dead]
         if not _is_quota and failed:
             _why = "일시적 실패" if error_str else "원인 불명(체인 내부 실패)"
             print(f"⏳ [LLM Gateway] {_why} — 무료 모델 쿨다운 {_cd_free}초로 단축: {failed[:4]}")

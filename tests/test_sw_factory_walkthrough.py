@@ -332,3 +332,116 @@ def test_근거는_지우지_않는다():
     head = src[:src.index('create_task')]
     assert 'build_error_log' not in head.replace('build_error_log` 같은', ''), \
         "근거(build_error_log)까지 지우고 있다"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ⑦ 승인 기억은 **프로젝트 단위**다 (2026-08-26 실측)
+# ══════════════════════════════════════════════════════════════════════════
+
+#: ⚠️ 지문은 **64자 hex** 다(`arc.FINGERPRINT_PATTERN`). 내 말로 «fp_same» 이라고 쓰면
+#:   `ProjectState` 검증에서 조용히 떨어져 「컴파일된 계약이 없다」로 엉뚱하게 실패한다 —
+#:   실제로 그렇게 한 번 틀렸다. 형식은 **정본을 보고** 정한다.
+FP_SAME = "a" * 64
+FP_OLD = "b" * 64
+FP_NEW = "c" * 64
+FP_STATE = "d" * 64
+
+
+def _approved_contract(ws, fingerprint=FP_SAME, status="APPROVED",
+                       approval_status="APPROVED"):
+    import os as _o
+    d = _o.path.join(ws, "contracts")
+    _o.makedirs(d, exist_ok=True)
+    with open(_o.path.join(d, "app_runtime_contract.json"), "w", encoding="utf-8") as f:
+        json.dump({"semantic_fingerprint": fingerprint, "status": status,
+                   "approval": {"status": approval_status},
+                   "datasets": [{"name": "x"}]}, f, ensure_ascii=False)
+
+
+def test_다음_태스크가_같은_계약을_다시_승인받지_않는다(tmp_path):
+    """★★★ **실측: 5개 태스크에 승인을 5번 받았다.**
+
+    계약은 프로젝트 하나인데 `approved_contract_fingerprint` 는 체크포인트(`project__task`)
+    에 산다. 태스크가 바뀌면 그 기억이 비어 「이 프로젝트의 **최초 계약**입니다」가 뜬다 —
+    이미 승인된 계약이 있는데도. 사실이 아닌 말을 화면이 하면 사람은 그 화면을 안 믿는다."""
+    from nodes import contract as cn
+
+    ws = str(tmp_path)
+    _wbs_status(ws, [{"task_id": "T-2", "goal": "화면", "artifact_kind": "APP",
+                      "status": "IN_PROGRESS"}])
+    _approved_contract(ws, FP_SAME)
+
+    out = asyncio.run(cn.run_contract_review_gate({
+        "workspace_root": ws, "project_name": "p", "current_sprint_task_id": "T-2",
+        "runtime_contract_profile": PROFILE,
+        #: 새 태스크의 체크포인트 — 승인 기억이 비어 있다(이것이 실측 상황이다).
+        "app_runtime_contract_fingerprint": FP_SAME,
+        "approved_contract_fingerprint": "",
+        "app_runtime_contract_status": "APPROVED",
+    }))
+    assert not (out.get("contract_review_request_event_id") or ""), \
+        "이미 승인된 계약인데 또 승인을 요구했다"
+    assert not out.get("terminal_status")
+
+
+def test_계약이_바뀌었으면_여전히_재승인을_요구한다(tmp_path):
+    """★★★ **대조군.** 위 완화가 게이트를 없애면 안 된다 — 계약이 실제로 달라졌으면
+    태스크가 무엇이든 사람이 다시 봐야 한다."""
+    from nodes import contract as cn
+
+    ws = str(tmp_path)
+    _wbs_status(ws, [{"task_id": "T-2", "goal": "화면", "artifact_kind": "APP",
+                      "status": "IN_PROGRESS"}])
+    _approved_contract(ws, FP_OLD)
+
+    out = asyncio.run(cn.run_contract_review_gate({
+        "workspace_root": ws, "project_name": "p", "current_sprint_task_id": "T-2",
+        "runtime_contract_profile": PROFILE,
+        "app_runtime_contract_fingerprint": FP_NEW,     # ← 달라졌다
+        "approved_contract_fingerprint": "",
+        "app_runtime_contract_status": "COMPILED",
+    }))
+    assert out.get("contract_review_request_event_id"), "바뀐 계약을 그냥 통과시켰다"
+
+
+@pytest.mark.parametrize("approval_status", ["PENDING", "REJECTED", ""])
+def test_승인되지_않은_봉투를_승인으로_읽지_않는다(tmp_path, approval_status):
+    """⚠️⚠️ 「승인 봉투가 있다」와 「승인됐다」는 다르다. `PENDING`·`REJECTED` 를 승인으로
+    읽으면 **게이트가 사라진다** — 반려된 계약이 반려된 채로 빌드된다."""
+    from nodes import contract as cn
+
+    ws = str(tmp_path)
+    _wbs_status(ws, [{"task_id": "T-2", "goal": "화면", "artifact_kind": "APP",
+                      "status": "IN_PROGRESS"}])
+    _approved_contract(ws, FP_SAME, status="COMPILED", approval_status=approval_status)
+
+    out = asyncio.run(cn.run_contract_review_gate({
+        "workspace_root": ws, "project_name": "p", "current_sprint_task_id": "T-2",
+        "runtime_contract_profile": PROFILE,
+        "app_runtime_contract_fingerprint": FP_SAME,
+        "approved_contract_fingerprint": "",
+        "app_runtime_contract_status": "COMPILED",
+    }))
+    assert out.get("contract_review_request_event_id"), \
+        f"«{approval_status}» 봉투를 승인으로 읽었다 — 게이트가 열렸다"
+
+
+def test_상태에_있는_승인_기억이_정본보다_우선한다(tmp_path):
+    """⚠️ 정본은 **보조 기억**이다. 체크포인트에 값이 있으면 그것이 이긴다 — 두 곳이
+    다를 때 어느 쪽을 믿는지가 정해져 있지 않으면 판정이 실행마다 달라진다."""
+    from nodes import contract as cn
+
+    ws = str(tmp_path)
+    _wbs_status(ws, [{"task_id": "T-2", "goal": "화면", "artifact_kind": "APP",
+                      "status": "IN_PROGRESS"}])
+    _approved_contract(ws, "fp_file")
+
+    out = asyncio.run(cn.run_contract_review_gate({
+        "workspace_root": ws, "project_name": "p", "current_sprint_task_id": "T-2",
+        "runtime_contract_profile": PROFILE,
+        "app_runtime_contract_fingerprint": FP_STATE,
+        "approved_contract_fingerprint": FP_STATE,      # ← 상태가 이겨야 한다
+        "app_runtime_contract_status": "APPROVED",
+    }))
+    assert not (out.get("contract_review_request_event_id") or ""), \
+        "상태의 승인 기억을 무시하고 정본으로 판정했다"

@@ -376,6 +376,54 @@ async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
     }
 
 
+def _with_project_approval(st: Any, workspace_root: str) -> Dict[str, Any]:
+    """게이트가 볼 상태에 **프로젝트 단위 승인 기억**을 이어 붙인다.
+
+    ## ⚠️⚠️ [2026-08-26 실측] 승인 기억의 범위가 계약의 범위와 달랐다
+
+    계약은 **프로젝트 하나**인데(`compile_project_contract` 가 WBS 전체를 합산한다),
+    `approved_contract_fingerprint` 는 **체크포인트**에 산다. 체크포인트의 단위는
+    `project__task` 이므로 태스크가 바뀌면 그 기억이 비어 있다. 그래서 실측에서:
+
+        · 태스크마다 **같은 계약을 다시 승인**받았다(5개 태스크 = 5번).
+        · 문구가 「이 프로젝트의 **최초 계약**입니다」였다 — 이미 승인된 계약이 있는데도.
+          사실이 아닌 말을 화면이 하면, 사람은 다음번에 그 화면을 믿지 않는다.
+
+    ★ 계약 정본(`contracts/app_runtime_contract.json`)에는 승인이 남아 있다
+      (`approval.status` · `semantic_fingerprint`) — `stamp_approval` 이 찍는다.
+      **계약과 같은 범위에 있는 그 기록**을 승인 기억으로 쓴다.
+
+    ⚠️ 상태에 값이 있으면 그것이 이긴다. 반려는 상태를 비우는데(`""`), 그때는 정본의
+      옛 승인(다른 지문)으로 떨어지므로 판정이 `REVIEW_REQUIRED` 로 남는다 — 반려의
+      뜻이 유지되고, 사유도 「최초 계약」이 아니라 「지문이 바뀌었다」로 정확해진다.
+    ⚠️ `approval.status` 가 `APPROVED` 일 때만 읽는다. 「승인 봉투가 있다」와
+      「승인됐다」는 다르다 — `PENDING`·`REJECTED` 를 승인으로 읽으면 게이트가 사라진다.
+    """
+    view = {
+        "app_runtime_contract_fingerprint": getattr(st, "app_runtime_contract_fingerprint", "") or "",
+        "approved_contract_fingerprint": getattr(st, "approved_contract_fingerprint", "") or "",
+        "app_runtime_contract_status": getattr(st, "app_runtime_contract_status", "") or "",
+    }
+    if view["approved_contract_fingerprint"]:
+        return view
+
+    contract = _read_json(contract_path(workspace_root))
+    if not isinstance(contract, dict):
+        return view
+    if str((contract.get("approval") or {}).get("status", "")) != "APPROVED":
+        return view
+    fp = str(contract.get("semantic_fingerprint", "") or "")
+    if not fp:
+        return view
+
+    view["approved_contract_fingerprint"] = fp
+    #: ★ 상태 필드도 함께 이어 준다. 지문만 이어 주면 「지문은 같은데 상태가 COMPILED」로
+    #:   또 막힌다 — 그것이 정확히 무한 재승인의 모양이었다(같은 파일 `stamp_approval` 참조).
+    if not view["app_runtime_contract_status"]:
+        view["app_runtime_contract_status"] = str(contract.get("status", "") or "")
+    return view
+
+
 async def run_contract_review_gate(state: Any) -> Dict[str, Any]:
     """최초 계약 또는 지문 변경이면 **검토 요청을 원장에 열고** 멈춘다.
 
@@ -392,7 +440,7 @@ async def run_contract_review_gate(state: Any) -> Dict[str, Any]:
     #:   **두 계층의 답이 갈리면 통제가 아니라 교착이 된다**([I-4 2.2a] 와 같은 종류).
     tasks = _tasks_in_contract_scope(_wbs_tasks(ws), load_drafts(ws),
                                      st.current_sprint_task_id or "")
-    decision, required = gate.evaluate_project(tasks, st)
+    decision, required = gate.evaluate_project(tasks, _with_project_approval(st, ws))
 
     if decision.verdict == gate.AUTO_PASS:
         print("[OK] [ContractReviewGate] 승인된 계약과 지문이 같습니다 — 자동 통과.")
