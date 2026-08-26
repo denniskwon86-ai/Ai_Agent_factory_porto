@@ -92,10 +92,36 @@ function AppShell() {
   //   Software Factory 는 거기서 들어가는 Immersive Studio 다 — 설계는 「경영 홈에서 Studio 로
   //   이동한다」고 방향을 못박았는데, 실제로는 「신규 프로젝트 개설」 폼이 첫 화면이었다
   //   (2026-07-28 리버스엔지니어링 AS-IS 그대로. 화면 이관은 개별 화면만 옮겼다).
-  //   ⚠️ URL 라우터가 아직 없으므로 상태로 둔다 — 설계 §3.3 은 「React Router 도입 여부와
-  //     무관하게 URL 은 새로고침·공유가 가능한 상태 계약으로 관리한다」고 했고, 그 계약은
-  //     라우터를 넣을 때 이 한 값을 URL 로 올리면 된다.
-  const [space, setSpace] = useState<'enterprise' | 'about' | 'build'>('enterprise');
+  //   React Router 를 새로 들이지 않고도 최소 URL 상태 계약을 지킨다. `space`와 `project`는
+  //   새로고침·공유 뒤 같은 제작 문맥을 복원한다. 인증·권한 검사는 URL 이 아니라 서버가 한다.
+  const initialProject = React.useRef<string | null>(
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('project')
+  );
+  const [space, setSpace] = useState<'enterprise' | 'about' | 'build'>(() => {
+    if (initialProject.current) return 'build';
+    if (typeof window === 'undefined') return 'enterprise';
+    const value = new URLSearchParams(window.location.search).get('space');
+    return value === 'about' || value === 'build' ? value : 'enterprise';
+  });
+  const [routeRestored, setRouteRestored] = useState(initialProject.current === null);
+  useEffect(() => {
+    if (!initialProject.current) return;
+    setCurrentProject(initialProject.current);
+    setRouteRestored(true);
+  }, [setCurrentProject]);
+  useEffect(() => {
+    if (!routeRestored || typeof window === 'undefined') return;
+    const next = new URL(window.location.href);
+    if (currentProjectId) {
+      next.searchParams.set('space', 'build');
+      next.searchParams.set('project', currentProjectId);
+    } else {
+      next.searchParams.delete('project');
+      if (space === 'enterprise') next.searchParams.delete('space');
+      else next.searchParams.set('space', space);
+    }
+    window.history.replaceState(window.history.state, '', `${next.pathname}${next.search}${next.hash}`);
+  }, [currentProjectId, routeRestored, space]);
   // 경영 홈 → Factory, 목록 → 프로젝트처럼 화면 문맥이 바뀔 때 이전 화면의 스크롤 위치를
   // 가져오면 핵심 행동과 헤더가 화면 밖에서 시작한다. 새 화면은 항상 문서 맨 위에서 시작한다.
   useEffect(() => {
@@ -763,8 +789,8 @@ function AppShell() {
           ⚠️ `afs-scope` 를 붙이지 않는다. 그것은 **라이트** 표면 계열이라 여기 오면 배경과
             글자가 뒤집힌다(실측: 뿌리에 `afs-product-shell` 을 붙였더니 결함 26 → 28건). */}
       <div className="afs-workbench h-screen w-screen bg-gray-950 text-gray-100 flex flex-col font-sans overflow-hidden">
-        <header className="h-14 bg-gray-950/95 backdrop-blur border-b border-gray-700 flex items-center justify-between px-6 shrink-0 z-20">
-          <div className="flex items-center gap-4">
+        <header className="min-h-14 bg-gray-950/95 backdrop-blur border-b border-gray-700 flex items-center justify-between gap-3 px-4 py-2 shrink-0 z-20">
+          <div className="flex items-center gap-3 min-w-0">
             {/* ★★★ [2026-08-25 사용자 지적] 「각 화면에서 홈으로 돌아가는 버튼이 없다」.
                 ⚠️⚠️ 통제실에는 «런처 복귀» 만 있었다. 그것은 Software Factory 로 가는
                   것이지 **경영 홈이 아니다** — 홈까지 가려면 두 번 눌러야 했고, 그 사실을
@@ -781,21 +807,22 @@ function AppShell() {
             <button 
               onClick={() => setCurrentProject(null)}
               className="text-sm font-bold text-gray-400 hover:text-gray-100 flex items-center gap-1 bg-gray-700 px-3 py-1.5 rounded transition-colors"
-              title="Software Factory 런처로 — 프로젝트 목록으로 돌아갑니다"
+              title="앱 제작 목록으로 돌아갑니다"
             >
-              ◀ 런처 복귀
+              ◀ 앱 목록
             </button>
-            <h1 className="text-xl font-bold tracking-tight text-gray-100 flex items-center gap-2 truncate max-w-xl">
-              <span className="text-blue-400 truncate">[{projects.find(p => p.id === currentProjectId)?.name || currentProjectId}]</span> 통제실
+            <h1 className="text-lg font-bold tracking-tight text-gray-100 flex items-center gap-2 truncate max-w-lg">
+              <span className="text-blue-300 truncate">{projects.find(p => p.id === currentProjectId)?.name || currentProjectId}</span>
+              <span className="text-gray-400 text-sm font-semibold shrink-0">· 앱 제작 작업공간</span>
             </h1>
           </div>
-          <div className="relative flex items-center gap-3">
+          <div className="relative flex items-center justify-end gap-2 overflow-x-auto shrink-0">
             <button
               onClick={() => setShowAdvisor(true)}
               className="text-xs font-bold text-indigo-200 bg-indigo-900/50 hover:bg-indigo-800/70 border border-indigo-700/60 px-3 py-1.5 rounded-lg transition-colors"
               title="업무·데이터 설계 상담 — 필요한 데이터와 추진 순서를 선택형 대화로 정합니다"
             >
-              🧭 설계 상담
+              🧭 기획·설계 상담
             </button>
             <button
               onClick={() => setShowGovernance(true)}
@@ -809,30 +836,30 @@ function AppShell() {
             <button
               onClick={() => setShowStudio(true)}
               className="text-xs font-bold text-orange-100 bg-orange-900/50 hover:bg-orange-800/70 border border-orange-700/60 px-3 py-1.5 rounded-lg transition-colors"
-              title="새 제작 작업공간(병행 카나리) — 전체 제작 단계와 WBS 실행 구조를 실제 상태로 봅니다. 종전 통제실은 그대로 유지됩니다."
+              title="새 제작 화면 — 전체 제작 단계와 작업 실행 구조를 실제 상태로 봅니다. 기존 작업 화면은 그대로 유지됩니다."
             >
-              🏗 새 작업공간
+              🏗 새 제작 화면
             </button>
             <button
               onClick={() => setShowShadow(true)}
               className="text-xs font-bold text-slate-200 bg-slate-800/70 hover:bg-slate-700/70 border border-slate-600/60 px-3 py-1.5 rounded-lg transition-colors"
               title="후보 병렬 검증 · 제한적 승격(§7.3)"
             >
-              🧪 Shadow
+              🧪 병렬 검증
             </button>
             <button
               onClick={() => setShowWorkspace(true)}
               className="text-xs font-bold text-slate-200 bg-slate-800/70 hover:bg-slate-700/70 border border-slate-600/60 px-3 py-1.5 rounded-lg transition-colors"
               title="공유·복제·전사 승격 게이트(§9.3)"
             >
-              🏢 워크스페이스
+              🏢 공유·승격
             </button>
             <button 
               onClick={() => setShowLogPopup(v => !v)}
               title="서버 로그 보기"
               className="flex items-center gap-3 hover:bg-white/10 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
             >
-              <span className="text-sm text-gray-400 font-medium">실시간 통신망:</span>
+              <span className="text-xs text-gray-400 font-medium">서버 연결</span>
               <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
             </button>
             {showLogPopup && <ServerLogPopup onClose={() => setShowLogPopup(false)} />}

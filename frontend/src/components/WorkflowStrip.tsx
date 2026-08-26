@@ -4,15 +4,15 @@ const DEFAULT_FLOW: { key: string; label: string; agents?: string[] }[] = [
   { key: 'CLARIFICATION', label: '요구확인' },
   { key: 'RFP', label: '요구정의' },
   { key: 'PLANNING', label: '기획' },
-  { key: 'UI_DESIGN', label: 'UI디자인' },
-  { key: 'VISION_QA', label: '비전QA' },
+  { key: 'UI_DESIGN', label: '화면설계' },
+  { key: 'VISION_QA', label: '방향검증' },
   { key: 'ARCHITECTURE', label: '아키텍처' },
-  { key: 'PMO', label: 'WBS분할' },
+  { key: 'PMO', label: '작업분해' },
   { key: 'TECH_SPEC', label: '기술설계' },
   { key: '__code', label: '구현', agents: ['backend', 'frontend'] },
   { key: '__build', label: '빌드', agents: ['codebuilder'] },
   { key: 'CODE_REVIEW', label: '검수' },
-  { key: 'QA', label: 'QA' },
+  { key: 'QA', label: '품질검증' },
   { key: 'SUPERVISOR', label: '수용검수' },
   { key: '__manual', label: '매뉴얼', agents: ['manualwriter'] },
 ];
@@ -63,7 +63,7 @@ export default function WorkflowStrip() {
 
   return (
     <div className="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center gap-0.5 overflow-x-auto shrink-0">
-      <span className="text-[10px] text-gray-500 font-bold tracking-wider mr-2 shrink-0">🔭 WORKFLOW</span>
+      <span className="text-[10px] text-gray-400 font-bold tracking-wider mr-2 shrink-0">🔭 제작 단계</span>
       {FLOW.map((step, i) => {
         // 2. 정확한 상태 매핑 (단조 증가 꼼수 제거, 개별 에이전트 완료/활성 상태 명확히 추적)
         const agentsForStep = Object.keys(NODE_TO_IDX).filter(k => NODE_TO_IDX[k] === i);

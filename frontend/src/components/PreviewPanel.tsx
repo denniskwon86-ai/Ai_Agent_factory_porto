@@ -1026,11 +1026,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ rawCode, isLoading, release
 
   } else {
     tabs = [
-      { id: 'PREVIEW', label: '🖥️ 실시간 샌드박스' }, { id: 'RFP', label: '📋 요구정의(RFP)' }, { id: 'PRD', label: '📄 기획서' },
-      { id: 'UI_DESIGN', label: '🎨 UI 디자인' },
+      { id: 'PREVIEW', label: '🖥️ 앱 미리보기' }, { id: 'RFP', label: '📋 요구정의' }, { id: 'PRD', label: '📄 기획서' },
+      { id: 'UI_DESIGN', label: '🎨 화면설계' },
       { id: 'ARCH', label: '🏗️ 아키텍처' }, { id: 'TECH', label: '🛠️ 기술사양' },
       { id: 'FRONTEND', label: '🎨 프론트엔드' }, { id: 'BACKEND', label: '⚙️ 백엔드' },
-      { id: 'REVIEW', label: '📝 리뷰' }, { id: 'QA', label: '🧪 QA' },
+      { id: 'REVIEW', label: '📝 코드검토' }, { id: 'QA', label: '🧪 품질검증' },
       { id: 'ACCEPT', label: '🧑‍⚖️ 수용검수' }, { id: 'MANUAL', label: '📘 사용자 매뉴얼' },
       { id: 'TRACE', label: '🔗 추적성' }
     ];

@@ -112,6 +112,36 @@ def test_릴리스_카드는_키트_앱_이름과_운영상태를_앞세우고_�
     assert ">릴리스 관리</button>" in page
 
 
+def test_프로젝트_제작_화면은_사람용_명칭과_자비스_역할을_쓴다():
+    app = _read("frontend/src/App.tsx")
+    control = _read("frontend/src/components/ControlPanel.tsx")
+    timeline = _read("frontend/src/components/TimelinePanel.tsx")
+    flow = _read("frontend/src/components/WorkflowStrip.tsx")
+    preview = _read("frontend/src/components/PreviewPanel.tsx")
+    hotl = _read("frontend/src/components/HOTLInput.tsx")
+
+    assert "· 앱 제작 작업공간" in app
+    assert "◀ 앱 목록" in app
+    assert "🧪 병렬 검증" in app
+    assert "⚙️ 작업 실행" in control
+    assert "❌ 실패" in control and '"TODO"' not in control
+    assert "🧭 자비스 · AI 제작 감독" in timeline
+    assert "🔭 제작 단계" in flow
+    assert "🖥️ 앱 미리보기" in preview
+    assert "자비스에게 질문·지시" in hotl
+    assert "Target Task:" not in hotl
+
+
+def test_앱_제작_프로젝트는_URL로_새로고침_복원된다():
+    app = _read("frontend/src/App.tsx")
+
+    assert "new URLSearchParams(window.location.search).get('project')" in app
+    assert "setCurrentProject(initialProject.current)" in app
+    assert "next.searchParams.set('space', 'build')" in app
+    assert "next.searchParams.set('project', currentProjectId)" in app
+    assert "window.history.replaceState" in app
+
+
 def test_비서의_화면_이름은_Jarvis_한곳에서_관리한다():
     brand = _read("frontend/src/lib/brand.ts")
     rail = _read("frontend/src/components/CanvasJarvisRail.tsx")

@@ -139,18 +139,18 @@ export default function HOTLInput() {
       <div className="flex flex-col gap-3">
         <div className="flex justify-between items-center">
           <span className={`text-sm font-semibold ${isWaitingForHuman ? 'text-yellow-400' : 'text-blue-400'}`}>
-            {isWaitingForHuman ? "⏸️ HOTL (전문가 개입) 대기 중 - 설계 승인 또는 피드백 필요" : "▶️ AI 팩토리 자율 가동 중 (슈퍼바이저에게 질문 가능)"}
+            {isWaitingForHuman ? "⏸️ 전문가 확인 대기 · 승인 또는 수정 의견이 필요합니다" : "▶️ AI 제작 진행 중 · 자비스에게 질문할 수 있습니다"}
           </span>
-          <span className="text-xs text-gray-400">Target Task: {currentTask || "알 수 없음"}</span>
+          <span className="text-xs text-gray-400">현재 작업 · {currentTask || "확인 중"}</span>
         </div>
 
         {/* ✋ 실시간 채팅 응답 박스 */}
         {supervisorReply && (
           <div className="bg-gray-800 border border-purple-500 rounded p-3 mb-4 max-h-60 overflow-y-auto shrink-0 custom-scrollbar">
             <div className="font-bold flex items-center gap-1 mb-1 sticky top-0 bg-gray-800 pb-1">
-              <span>🤖 슈퍼바이저 답변</span>
+              <span>🤖 자비스 답변</span>
             </div>
-            <div className="text-sm font-medium text-gray-300 mb-2">[{state?.project_name || "프로젝트"}] HOTL (전문가 개입) 리뷰 대기 중...</div>
+            <div className="text-sm font-medium text-gray-300 mb-2">[{state?.project_name || "프로젝트"}] 전문가 검토 대기 중...</div>
             <div className="whitespace-pre-wrap text-sm">{supervisorReply}</div>
           </div>
         )}
@@ -162,7 +162,7 @@ export default function HOTLInput() {
             {state?.human_feedback_queue && state.human_feedback_queue.filter((q: any) => q.feedback.includes("[SUPERVISOR]")).length > 0 && (
               <div className="rounded border border-red-700/50 bg-red-900/20 p-2.5 text-xs text-red-100 leading-relaxed">
                 <div className="font-bold flex items-center gap-1">
-                  <span>🤖 슈퍼바이저 개입 발생!</span>
+                  <span>🤖 자비스 확인 요청</span>
                 </div>
                 <div className="mt-1 text-red-200/90 whitespace-pre-wrap">
                   {state.human_feedback_queue.filter((q: any) => q.feedback.includes("[SUPERVISOR]")).pop()?.feedback.replace("[SUPERVISOR] ", "")}
@@ -234,7 +234,7 @@ export default function HOTLInput() {
               ? "(선택) 선택지에 없는 추가 의견이 있으면 여기에 적으세요. 위 선택과 함께 반영됩니다."
               : isWaitingForHuman
                 ? "승인하려면 빈칸으로 두고 전송하세요. 수정이 필요하면 요구사항을 입력하세요."
-                : "가동 중인 파이프라인에 대해 슈퍼바이저에게 지시하거나 질문하세요."
+                : "진행 중인 제작 작업에 대해 자비스에게 지시하거나 질문하세요."
           }
           className="w-full h-24 bg-gray-900 border border-gray-600 rounded p-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
         />
@@ -250,7 +250,7 @@ export default function HOTLInput() {
                 ? "선택 완료 — 답변 반영하여 RFP 작성"
                 : isWaitingForHuman
                   ? (feedback.trim() ? "피드백 적용 후 재가동" : "설계 승인 및 진행")
-                  : "슈퍼바이저에게 질문/지시")}
+                  : "자비스에게 질문·지시")}
         </button>
       </div>
     </div>

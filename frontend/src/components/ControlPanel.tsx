@@ -20,7 +20,7 @@ const DEFAULT_EXEC_PIPELINE = [
 ];
 
 const DEFAULT_MACRO_STAGES: [string, string][] = [
-  ["CLARIFICATION", "요구확인"], ["RFP", "요구정의"], ["PLANNING", "기획"], ["ARCHITECTURE", "아키텍처"], ["PMO", "WBS"],
+  ["CLARIFICATION", "요구확인"], ["RFP", "요구정의"], ["PLANNING", "기획"], ["ARCHITECTURE", "아키텍처"], ["PMO", "작업분해"],
   ["TECH_SPEC", "기술설계"], ["EXECUTION", "구현"], ["BUILD", "빌드"], ["CODE_REVIEW", "검수"],
   ["QA", "QA"], ["MANUAL", "매뉴얼"],
 ];
@@ -494,7 +494,7 @@ export default function ControlPanel() {
     <div className="flex flex-col h-full bg-gray-800 text-gray-200">
       <div className="p-4 border-b border-gray-700 bg-gray-900 shrink-0">
         <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
-          ⚙️ 팩토리 제어반
+          ⚙️ 작업 실행
           {currentTemplateData && currentTemplateData.id !== 'default' && (
             <span className="text-[10px] bg-purple-900/60 text-purple-300 border border-purple-700 px-2 py-0.5 rounded-full shadow-sm ml-2">
               🛠️ {currentTemplateData.name || currentTemplateData.id} 템플릿
@@ -522,10 +522,10 @@ export default function ControlPanel() {
 
         {isSuspendedQuota && (
           <div className="mb-4 p-4 bg-orange-900/50 border border-orange-500 rounded text-sm text-orange-200 shadow-lg">
-            <h3 className="font-bold text-base mb-2">🚨 LLM API 할당량(Quota) 모두 소진됨</h3>
+            <h3 className="font-bold text-base mb-2">🚨 AI 사용 한도를 모두 사용했습니다</h3>
             <p className="mb-3 text-xs leading-relaxed opacity-90">
-              현재 연결된 모든 LLM(Groq, Gemini 등)의 무료 호출 할당량이 모두 바닥났습니다. <br/>
-              가동 중이던 에이전트 파이프라인은 현재 상태 그대로 안전하게 <strong>동결(Suspend)</strong> 되었습니다. 
+              현재 연결된 AI 모델의 호출 한도를 모두 사용했습니다. <br/>
+              가동 중이던 제작 작업은 현재 상태 그대로 안전하게 <strong>일시 정지</strong>되었습니다.
               내일 할당량이 갱신된 후 보류된 태스크를 재가동하거나, 새로운 API 키를 등록해 주세요.
             </p>
             <div className="flex gap-2">
@@ -592,7 +592,7 @@ export default function ControlPanel() {
           )}
           {acceptedIdea && totalTasks === 0 && (
             <div className="mt-2 pt-2 border-t border-white/10 text-xs">
-              <span className="opacity-70">📨 접수된 요구사항 (WBS 분할 전까지 표시)</span>
+              <span className="opacity-70">📨 접수된 요구사항 (작업 분해 전까지 표시)</span>
               <div className="mt-1 text-gray-100 whitespace-pre-wrap break-words leading-relaxed">{acceptedIdea}</div>
             </div>
           )}
@@ -653,7 +653,7 @@ export default function ControlPanel() {
 
         {!wbsData && !state?.project_name ? (
           <div className="flex flex-col gap-2">
-            <label className="text-sm font-semibold text-gray-400">💡 1. 신규 기획 (Track 0)</label>
+            <label className="text-sm font-semibold text-gray-400">💡 1. 신규 앱 기획</label>
             <textarea 
               value={idea} onChange={(e) => setIdea(e.target.value)} disabled={isStarting || activeSprintId !== null}
               placeholder="프로젝트 아이디어를 입력하세요..."
@@ -663,7 +663,7 @@ export default function ControlPanel() {
               <div className="flex items-center justify-between mb-3">
                 <label className="text-sm font-semibold text-gray-300 flex items-center gap-2">
                   <span>🔗 데이터 소스 및 외부 지식 연결</span>
-                  <span className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded border border-blue-800">MCP 연동 대기중</span>
+                  <span className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded border border-blue-800">외부 연동 준비 중</span>
                 </label>
               </div>
               
@@ -698,14 +698,14 @@ export default function ControlPanel() {
               onClick={handleStartPlanning} disabled={isStarting || !idea.trim() || activeSprintId !== null}
               className="mt-2 w-full bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 font-bold py-3 rounded transition-colors"
             >
-              {isStarting ? "가동 중..." : "🎯 기획 및 WBS 분할 가동"}
+              {isStarting ? "기획 중..." : "🎯 기획 및 작업분해 시작"}
             </button>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col mb-2 border-b border-gray-700 pb-3">
               <div className="flex justify-between items-end mb-1">
-                <label className="text-sm font-semibold text-gray-400">📋 2. 일일 스프린트 통제</label>
+                <label className="text-sm font-semibold text-gray-400">📋 2. 작업 실행 현황</label>
                 <span className="text-xs font-bold text-blue-400">진척률: {progressPercent}% ({doneTasks}/{totalTasks})</span>
               </div>
               <div className="w-full bg-gray-950 rounded-full h-2 mt-1 border border-gray-700">
@@ -715,16 +715,16 @@ export default function ControlPanel() {
                 <button
                   onClick={openWbsWindow}
                   className="text-[11px] font-bold text-gray-200 bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition-colors"
-                  title="전체 WBS 를 새 창에 표로 보기"
+                  title="전체 작업계획을 새 창에 표로 봅니다"
                 >
-                  ↗ 전체 WBS 표 보기
+                  ↗ 전체 작업계획 보기
                 </button>
                 {/* 🔁 WBS 재분할 - 기획 산출물(PRD/아키텍처)은 그대로 두고 태스크 분할만 다시 수행 */}
                 {!!(state as any)?.prd_summary && !activeSprintId && (
                   <button
                     onClick={async () => {
                       if (!currentProjectId) return;
-                      if (!confirm("기획 산출물(RFP/PRD/UI/아키텍처)은 유지한 채 WBS 분할만 다시 수행합니다.\n(분할이 실패했거나 태스크 구성이 마음에 들지 않을 때 사용)\n진행할까요?")) return;
+                      if (!confirm("기획 산출물(요구정의/기획서/화면설계/아키텍처)은 유지한 채 작업만 다시 나눕니다.\n(작업 분해가 실패했거나 구성이 적절하지 않을 때 사용)\n진행할까요?")) return;
                       try {
                         const r = await replanWbs(currentProjectId);
                         if (!r.ok) { alert(r.message); return; }
@@ -733,9 +733,9 @@ export default function ControlPanel() {
                       } catch (e) { console.error("WBS 재분할 실패:", e); }
                     }}
                     className="text-[11px] font-bold text-amber-200 bg-amber-900/50 hover:bg-amber-800/60 border border-amber-700/50 px-2.5 py-1 rounded transition-colors"
-                    title="기획을 다시 돌리지 않고 WBS 분할(Master PMO)만 재실행합니다."
+                    title="기획은 유지하고 작업 분해만 다시 수행합니다."
                   >
-                    🔁 WBS 재분할
+                    🔁 작업 다시 나누기
                   </button>
                 )}
               </div>
@@ -874,21 +874,21 @@ export default function ControlPanel() {
                       isPaused ? 'bg-orange-600 text-white' :
                       isFailed ? 'bg-red-700 text-white' : 'bg-gray-700 text-gray-300'
                     }`}>
-                      {isDone ? "✅ DONE" : isRunning ? "⚙️ RUNNING" : isHotl ? "⚠️ HOTL (전문가 개입)" : isPaused ? "⏸️ PAUSED" : isFailed ? "❌ FAILED" : "TODO"}
+                      {isDone ? "✅ 완료" : isRunning ? "⚙️ 진행 중" : isHotl ? "⚠️ 전문가 확인" : isPaused ? "⏸️ 일시 정지" : isFailed ? "❌ 실패" : "대기"}
                     </span>
                   </div>
                   <h4 className="text-sm font-bold text-gray-200 mb-1">{task.title}</h4>
                   <p className="text-xs text-gray-400 mb-3">{task.goal}</p>
                   
                   {isIdle && (
-                    <button onClick={() => handleStartSprint(task)} disabled={isStarting || activeSprintId !== null} className="w-full text-xs font-bold py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white">🚀 신규 가동</button>
+                    <button onClick={() => handleStartSprint(task)} disabled={isStarting || activeSprintId !== null} className="w-full text-xs font-bold py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white">▶️ 작업 시작</button>
                   )}
                   {isPaused && (
-                    <button onClick={() => handleStartSprint(task)} disabled={isStarting || activeSprintId !== null} className="w-full text-xs font-bold py-2 rounded bg-orange-600 hover:bg-orange-500 disabled:bg-gray-700 text-white">▶️ 이어서 재가동 (Resume)</button>
+                    <button onClick={() => handleStartSprint(task)} disabled={isStarting || activeSprintId !== null} className="w-full text-xs font-bold py-2 rounded bg-orange-600 hover:bg-orange-500 disabled:bg-gray-700 text-white">▶️ 이어서 실행</button>
                   )}
                   {isRunning && (
                     <div className="flex flex-col gap-2">
-                      <button onClick={() => handlePauseSprint(task)} className="w-full text-xs font-bold py-2 rounded bg-red-600 hover:bg-red-500 text-white">🛑 강제 일시정지 (Pause)</button>
+                      <button onClick={() => handlePauseSprint(task)} className="w-full text-xs font-bold py-2 rounded bg-red-600 hover:bg-red-500 text-white">🛑 작업 일시 정지</button>
                       {renderPipelineTracker(false, task)}
                     </div>
                   )}
@@ -899,7 +899,7 @@ export default function ControlPanel() {
 
             {doneTasks > 0 && (
               <div className="mt-4 pt-4 border-t border-gray-700 flex flex-col gap-2">
-                <label className="text-sm font-semibold text-yellow-500">🎯 3. 고객 리뷰 및 수정 지시 (Track 2)</label>
+                <label className="text-sm font-semibold text-yellow-500">🎯 3. 사용자 검토 및 수정 요청</label>
                 <textarea 
                   value={feedback} onChange={(e) => setFeedback(e.target.value)} disabled={isStarting || activeSprintId !== null}
                   placeholder="디자인이나 기능 수정 요구사항을 입력하세요..."
@@ -909,7 +909,7 @@ export default function ControlPanel() {
                   onClick={handleSubmitFeedback} disabled={isStarting || !feedback.trim() || activeSprintId !== null}
                   className="mt-1 w-full bg-yellow-600 hover:bg-yellow-500 disabled:bg-gray-700 font-bold py-3 rounded text-white"
                 >
-                  {isStarting ? "처리 중..." : "📨 피드백 백로그 발행 (WBS 추가)"}
+                  {isStarting ? "처리 중..." : "📨 수정 요청 등록"}
                 </button>
               </div>
             )}

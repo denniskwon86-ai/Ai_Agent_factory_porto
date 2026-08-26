@@ -60,8 +60,8 @@ export default function TimelinePanel() {
     <div className="flex flex-col h-full bg-gray-900 overflow-hidden">
       <div className="p-4 border-b border-gray-700 bg-gray-800 shrink-0">
         <h2 className="text-sm font-bold text-gray-200 tracking-wider flex items-center gap-2">
-          🧭 Supervisor Console
-          <span className="text-[10px] text-gray-500 font-normal">— 모든 에이전트를 관장하는 AI 경영비서</span>
+          🧭 자비스 · AI 제작 감독
+          <span className="text-[10px] text-gray-500 font-normal">— 제작 단계와 담당 AI의 판단 기록</span>
         </h2>
       </div>
 
@@ -118,14 +118,14 @@ export default function TimelinePanel() {
 
         {items.length === 0 && (
           <div className="text-gray-600 italic text-center mt-10 p-4 border border-dashed border-gray-700 rounded-lg">
-            슈퍼바이저 대기 중.<br />기획을 가동하면 토론·평가 과정을 실시간으로 중계합니다.
+            자비스가 대기 중입니다.<br />기획을 시작하면 담당 AI의 토론·평가 과정을 보여줍니다.
           </div>
         )}
         <div ref={endRef} />
       </div>
 
       <div className="px-4 py-3 bg-gray-800 border-t border-gray-700 shrink-0">
-        <div className="text-[10px] text-gray-500 mb-2 font-bold tracking-wider">✅ COMPLETED AGENTS ({completedAgents.length})</div>
+        <div className="text-[10px] text-gray-500 mb-2 font-bold tracking-wider">✅ 완료한 담당 AI ({completedAgents.length})</div>
         {/* 높이 제한 + 내부 스크롤 — 길어져도 피드·승인버튼을 밀어내지 않음 */}
         <div className="flex flex-wrap gap-2 max-h-16 overflow-y-auto pr-1">
           {completedAgents.length > 0 ? (
