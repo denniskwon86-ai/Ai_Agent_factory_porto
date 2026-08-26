@@ -50,6 +50,7 @@ import { ReleasePromotionPanel } from './components/ReleasePromotionPanel';
 import { CompanySetupPanel } from './components/CompanySetupPanel';
 import { ProductShell } from './components/ProductShell';
 import { SystemAboutPage } from './components/SystemAboutPage';
+import { KitOperationsPanel } from './components/KitOperationsPanel';
 //: ★★★ [2026-08-25] 문맥을 푸는 규칙은 **한 곳**에 있다(`lib/operatingContext`).
 //: ⚠️ 종전에는 여기서 `getEnterpriseContext().tenantId` 를 그대로 썼다. 그 값은 사용자가
 //:   조직을 고를 때만 채워지므로 로그인 직후 상단이 「? · 확인 중」이었다 —
@@ -136,6 +137,7 @@ function AppShell() {
   const [showPathCalc, setShowPathCalc] = useState(false);
   const [showScenario, setShowScenario] = useState(false);
   const [showPromotion, setShowPromotion] = useState(false);
+  const [showKitOperations, setShowKitOperations] = useState(false);
   // 기술·제품 용어 전환 사전 — 사용자 권장 용어와 현재 기술 용어를 함께 확인하는 임시 페이지.
   const [showTerminology, setShowTerminology] = useState(false);
   const [showMasterData, setShowMasterData] = useState(false);
@@ -405,8 +407,9 @@ function AppShell() {
       setShowCollaboration(true);
       return;
     }
+    if (id === 'operate') { setShowKitOperations(true); return; }
     const map: Record<string, string> = {
-      operate: 'workspace', twin: 'scenario',
+      twin: 'scenario',
       knowledge: 'knowledge', agent: 'agents',
     };
     const hit = [...primaryNav, ...navGroups.flatMap((g) => g.items)]
@@ -484,6 +487,7 @@ function AppShell() {
     setShowPathCalc(false);
     setShowScenario(false);
     setShowPromotion(false);
+    setShowKitOperations(false);
     setShowTerminology(false);
     setShowMasterData(false);
     setShowWorkStandard(false);
@@ -517,6 +521,16 @@ function AppShell() {
       {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
       {showPromotion && (
         <ReleasePromotionPanel onClose={() => setShowPromotion(false)} />
+      )}
+      {showKitOperations && (
+        <KitOperationsPanel
+          onClose={() => setShowKitOperations(false)}
+          onOpenBuild={() => {
+            setShowKitOperations(false);
+            setSpace('build');
+            setBuildStart(true);
+          }}
+        />
       )}
       {showKnowledgeHub && (
         <KnowledgeHubPanel onClose={() => setShowKnowledgeHub(false)} />

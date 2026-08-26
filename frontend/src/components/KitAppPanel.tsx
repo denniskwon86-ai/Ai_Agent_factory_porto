@@ -178,9 +178,10 @@ function AppViewer({
 }
 
 function AppRow({
-  row, instanceId, onChanged, notice, setNotice,
+  row, instanceId, onChanged, notice, setNotice, mode,
 }: {
   row: KitAppRow; instanceId: string; onChanged: () => void;
+  mode: 'build' | 'operate';
   //: ★★★ [2026-08-23 실측] **알림은 부모가 들고 있어야 한다.**
   //:
   //: ⚠️⚠️ 종전에는 이 행의 지역 상태였다. 그런데 성공하면 `onChanged()` 가 목록을
@@ -253,7 +254,7 @@ function AppRow({
         </div>
       ) : (
         <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-          {row.contract_status === null && (
+          {row.contract_status === null && mode === 'build' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <label style={{ fontSize: 13 }}>
                 앱 분류{' '}
@@ -276,7 +277,13 @@ function AppRow({
             </div>
           )}
 
-          {row.contract_status === 'DRAFT' && (
+          {row.contract_status === null && mode === 'operate' && (
+            <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
+              아직 만들지 않은 앱입니다 — 앱 제작에서 분류와 계약을 준비하십시오.
+            </div>
+          )}
+
+          {row.contract_status === 'DRAFT' && mode === 'build' && (
             <div style={{ display: 'grid', gap: 6 }}>
               <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
                 {/* ★★★ 직무 분리를 화면이 **말한다.** 눌러 보고 403 을 받는 것보다,
@@ -300,20 +307,28 @@ function AppRow({
             </div>
           )}
 
+          {row.contract_status === 'DRAFT' && mode === 'operate' && (
+            <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
+              계약 승인 대기 중입니다 — 승인된 뒤 앱을 만들 수 있습니다.
+            </div>
+          )}
+
           {row.contract_status === 'APPROVED' && (
             <div style={{ display: 'grid', gap: 6 }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
                   {row.approved_by ? `${row.approved_by} 님이 승인했습니다.` : '승인되었습니다.'}
                 </span>
-                <button type="button" disabled={!!busy}
-                        onClick={() => run('앱 만들기',
-                                           () => buildKitApp(instanceId, row.app_id))}
-                        style={{ fontSize: 13, padding: '5px 12px', fontWeight: 600 }}>
-                  {busy === '앱 만들기'
-                    ? '만드는 중…'
-                    : (row.built_datasets ? '다시 만들기' : '앱 만들기')}
-                </button>
+                {mode === 'build' && (
+                  <button type="button" disabled={!!busy}
+                          onClick={() => run('앱 만들기',
+                                             () => buildKitApp(instanceId, row.app_id))}
+                          style={{ fontSize: 13, padding: '5px 12px', fontWeight: 600 }}>
+                    {busy === '앱 만들기'
+                      ? '만드는 중…'
+                      : (row.built_datasets ? '다시 만들기' : '앱 만들기')}
+                  </button>
+                )}
               </div>
               {/* ★★★ **된 것을 보여 준다.** 눌러서 200 이 왔는데 화면이 그대로면
                   사용자는 눌리지 않았다고 읽는다(실측 2026-08-23). */}
@@ -409,7 +424,9 @@ function AppRow({
   );
 }
 
-export function KitAppPanel({ instanceId }: { instanceId: string }) {
+export function KitAppPanel({
+  instanceId, mode = 'build',
+}: { instanceId: string; mode?: 'build' | 'operate' }) {
   const [rows, setRows] = useState<KitAppRow[] | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -453,11 +470,17 @@ export function KitAppPanel({ instanceId }: { instanceId: string }) {
 
   return (
     <div style={{ padding: 16 }}>
-      <h3 style={{ fontSize: 16, margin: '0 0 4px' }}>키트로 앱 만들기</h3>
+      <h3 style={{ fontSize: 16, margin: '0 0 4px' }}>
+        {mode === 'build' ? '키트로 앱 만들기' : '업무 앱 운영'}
+      </h3>
       <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 10 }}>
         {/* ★ 「만드는 사람 ≠ 승인하는 사람」을 화면 맨 위에 적는다 — 나중에 403 을
             받고 나서 알게 하지 않는다. */}
-        계약을 만든 뒤 <strong>다른 사람의 승인</strong>을 받아야 앱을 만들 수 있습니다.
+        {mode === 'build' ? <>
+          계약을 만든 뒤 <strong>다른 사람의 승인</strong>을 받아야 앱을 만들 수 있습니다.
+        </> : <>
+          운영 중인 앱을 열고, 후보 앱의 운영 전환 상태를 확인합니다.
+        </>}
       </div>
       {rows.length === 0 ? (
         // ⚠️ 산출물 선언이 없는 키트를 «전부 가능» 으로 보이게 두지 않는다.
@@ -468,6 +491,7 @@ export function KitAppPanel({ instanceId }: { instanceId: string }) {
         <ul style={{ padding: 0, margin: 0 }}>
           {rows.map((r) => (
             <AppRow key={r.app_id} row={r} instanceId={instanceId}
+                    mode={mode}
                     notice={notices[r.app_id] ?? null}
                     setNotice={(n) => setNotices((m) => ({ ...m, [r.app_id]: n }))}
                     onChanged={() => setTick((t) => t + 1)} />

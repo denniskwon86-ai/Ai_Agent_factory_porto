@@ -99,6 +99,21 @@ def test_새_업무는_조직에_적용된_업무키트와_일반_제작을_명�
     assert 'placeholder="kit_instance_id' not in dialog
 
 
+def test_업무키트_앱은_새업무_창뿐_아니라_앱운영에서_직접_찾고_연다():
+    app = _read("frontend/src/App.tsx")
+    panel = _read("frontend/src/components/KitOperationsPanel.tsx")
+    kit_apps = _read("frontend/src/components/KitAppPanel.tsx")
+
+    assert "if (id === 'operate') { setShowKitOperations(true); return; }" in app
+    assert "<KitOperationsPanel" in app
+    assert "listInstances()" in panel
+    assert '<KitAppPanel instanceId={selected} mode="operate" />' in panel
+    assert "현재 운영 가능한 앱" in panel
+    assert "새 업무키트 앱 만들기" in panel
+    assert "mode === 'build' ? '키트로 앱 만들기' : '업무 앱 운영'" in kit_apps
+    assert "운영 중인 앱을 열고, 후보 앱의 운영 전환 상태를 확인합니다." in kit_apps
+
+
 def test_릴리스_카드는_키트_앱_이름과_운영상태를_앞세우고_내부_id는_접는다():
     page = _read("frontend/src/components/BuildPage.tsx")
 
