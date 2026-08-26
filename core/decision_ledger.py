@@ -112,6 +112,19 @@ EVENT_TYPES = (
     "APP_CONTRACT_REVIEW_REQUESTED",
     "APP_CONTRACT_APPROVED",
     "APP_CONTRACT_REJECTED",
+    # ★★★ [2026-08-26 실측] **컴파일러가 사람에게 넘긴 결정**을 사람이 내린 기록.
+    #
+    #   ⚠️⚠️ 승인(`APP_CONTRACT_APPROVED`)과 **다른 사건**이다. 승인은 「이 계약 전부를
+    #     이대로 간다」이고, 이것은 「계약을 만들기 전에 컴파일러가 못 정한 것을 정했다」다.
+    #     같은 유형으로 뭉개면 원장에서 승인 건수를 셀 때 실제보다 많아지고, 그 숫자가
+    #     「우리는 계약을 N번 검토했다」로 읽힌다(자동 통과를 남기지 않는 이유와 같다).
+    #   ★ 「무엇을」 결정했는지가 절반이므로 `subject_type` 으로 대상을 못박는다:
+    #       · app_contract_capability → subject_id = 능력 이름(app_data.read 등)
+    #       · app_contract_dataset    → subject_id = 데이터셋 정체(dataset_key)
+    #     그래야 「A 능력 결정 사건으로 B 데이터셋 충돌을 통과」시킬 수 없다.
+    #   ⚠️ 초안 파일은 롤백·재생성으로 바뀐다. 「누가 언제 무슨 근거로 이 능력을 줄이기로
+    #     했나」는 덮어쓸 수 없는 곳에 있어야 하고, 그것이 이 원장이다.
+    "APP_CONTRACT_DECISION_RECORDED",
     # ★★★ [MVP-P0 ①-B / 2026-08-20] **온톨로지 전용 승인 이벤트.**
     #
     #   ⚠️⚠️ 종전에는 범용 이벤트(`DECISION_RECORDED` 등)를 온톨로지 승인으로 재사용하려
@@ -190,6 +203,11 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  # [I-4 4단계] 계약은 릴리스도 데이터셋도 아니다 — «이 릴리스가 어떻게
                  #   됐나» 와 «이 계약이 언제 어떤 지문으로 승인됐나» 는 다른 질문이다.
                  "app_contract",
+                 # [2026-08-26] 계약을 **만들기 전에** 사람이 정한 것들. 계약 자체(app_contract)
+                 #   와 다르다 — «이 계약이 승인됐나» 와 «이 능력을 줄이기로 누가 정했나» 는
+                 #   다른 질문이다. 둘을 나눠 두어야 「능력 결정 사건으로 데이터셋 충돌을
+                 #   통과」시키는 경로가 생기지 않는다.
+                 "app_contract_capability", "app_contract_dataset",
                  # [MVP-P0 ①-B] 온톤로지 주체 — 계약과 관계는 **다른 질문**이다.
                  #   «이 온톤로지 계약이 언제 어떤 지문으로 승인됐나» 와
                  #   «이 관계를 누가 승인·폐지했나» 를 뜼개면 둘 다 답할 수 없다.

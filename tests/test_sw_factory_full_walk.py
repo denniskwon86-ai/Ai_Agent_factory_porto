@@ -297,3 +297,109 @@ def test_대역이_모르는_출력계약이_없다(walked):
     unknown = walked["rec"].unknown
     assert not unknown, "출력 형식을 알 수 없는 LLM 호출: " + json.dumps(
         unknown, ensure_ascii=False, indent=2)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 사람이 결정한 **뒤**, 같은 체크포인트에서 이어서 완주하는가 (2026-08-26)
+# ══════════════════════════════════════════════════════════════════════════
+
+MIXED_DRAFT = {
+    "app_class": "departmental",
+    "datasets": CONTRACT_DRAFT["datasets"],
+    #: 지원되지 않는 능력 하나 — 컴파일러가 사람에게 넘긴다.
+    "capability_intents": [
+        {"intent_id": "i-upload", "requirement_ref": "FR-9", "capability": "file.upload"},
+    ],
+}
+
+
+def test_사람이_결정하기_전에는_막히고_결정_뒤에_이어진다(tmp_path, monkeypatch):
+    """★★★ **막다른 길이 실제로 열렸는가.**
+
+    실측에서 컴파일러가 「사용자 결정이 필요한 요구가 …(지원 대기) 있습니다」로 멈췄고,
+    그것을 정할 방법이 없었다. 이제 결정하면 **같은 워크스페이스에서 이어서** 계약이
+    나와야 한다 — 결정이 초안에 착지하기 때문이다.
+
+    ⚠️ 「API 가 200 을 준다」는 증명이 아니다. **그다음 컴파일이 지나가는지**가 증명이다.
+    """
+    from core import contract_decision as cd
+    from nodes import contract as cn
+
+    ws = str(tmp_path / "ws")
+    os.makedirs(ws, exist_ok=True)
+    _wbs(ws)
+    cn.save_draft(ws, "T-1", MIXED_DRAFT)
+
+    #: ① 결정 전 — 막힌다.
+    out = asyncio.run(cn.run_host_contract_compiler(
+        {"workspace_root": ws, "project_name": "p", "current_sprint_task_id": "T-1",
+         "runtime_contract_profile": "v1"}))
+    assert out.get("terminal_status") == "CONTRACT_BLOCKED"
+    assert "사용자 결정" in (out.get("terminal_reason") or ""), out.get("terminal_reason")
+
+    #: ② 무엇을 정해야 하는지 **고를 값과 함께** 보인다.
+    pend = cd.pending_items(cn._wbs_tasks(ws), cn.load_drafts(ws))
+    assert pend["pending"] is True
+    assert pend["capability_decisions"][0]["capability"] == "file.upload"
+    choices = pend["capability_decisions"][0]["choices"]
+    assert "WAIT" in choices
+
+    #: ③ 사람이 정한다 — 결정은 **초안에** 착지한다(컴파일러의 입력이 초안이므로).
+    draft = cn.load_drafts(ws)["T-1"]
+    fixed, _summary = cd.apply_capability_decision(
+        draft, capability="file.upload", decision="WAIT")
+    cn.save_draft(ws, "T-1", fixed)
+
+    #: ④ 같은 워크스페이스에서 다시 컴파일 — 이번엔 지나간다.
+    out2 = asyncio.run(cn.run_host_contract_compiler(
+        {"workspace_root": ws, "project_name": "p", "current_sprint_task_id": "T-1",
+         "runtime_contract_profile": "v1"}))
+    assert not out2.get("terminal_status"), out2.get("terminal_reason")
+    assert out2.get("app_runtime_contract_fingerprint"), "결정 뒤에도 계약이 안 나왔다"
+
+    #: ⑤ 결정이 **계약에 실린다** — 「미지원인데 이렇게 하기로 했다」가 남아야 한다.
+    saved = json.load(open(cn.contract_path(ws), encoding="utf-8"))
+    unsupported = saved.get("unsupported_requirements") or []
+    assert any(u.get("user_decision") == "WAIT" for u in unsupported), \
+        f"결정이 계약에 남지 않았다: {unsupported}"
+
+
+def test_데이터셋_충돌도_결정_뒤에_이어진다(tmp_path):
+    """★★★ 두 번째 막다른 길. 합산기의 거절은 옳으므로 **거절을 없애지 않고**
+    사람이 고른 대로 통일해서 지나간다."""
+    from core import contract_decision as cd
+    from nodes import contract as cn
+
+    ws = str(tmp_path / "ws")
+    os.makedirs(ws, exist_ok=True)
+    with open(os.path.join(ws, "00_wbs_master_plan.json"), "w", encoding="utf-8") as f:
+        json.dump({"tasks": [
+            {"task_id": "T-1", "goal": "화면", "artifact_kind": "app",
+             "required_agents": ["Tech_Lead", "Frontend"]},
+            {"task_id": "T-2", "goal": "화면2", "artifact_kind": "app",
+             "required_agents": ["Tech_Lead", "Frontend"]},
+        ]}, f, ensure_ascii=False)
+
+    other = json.loads(json.dumps(CONTRACT_DRAFT, ensure_ascii=False))
+    other["datasets"][0]["allowed_actions"] = ["read", "create"]   # ← 다르게 선언
+    cn.save_draft(ws, "T-1", CONTRACT_DRAFT)
+    cn.save_draft(ws, "T-2", other)
+
+    out = asyncio.run(cn.run_host_contract_compiler(
+        {"workspace_root": ws, "project_name": "p", "current_sprint_task_id": "T-2",
+         "runtime_contract_profile": "v1"}))
+    assert out.get("terminal_status") == "CONTRACT_BLOCKED"
+    assert "다르게 선언" in (out.get("terminal_reason") or "")
+
+    changed, _s = cd.apply_dataset_resolution(
+        cn.load_drafts(ws), dataset_key="material_arrivals", winner_task_id="T-1")
+    for tid, d in changed.items():
+        cn.save_draft(ws, tid, d)
+
+    out2 = asyncio.run(cn.run_host_contract_compiler(
+        {"workspace_root": ws, "project_name": "p", "current_sprint_task_id": "T-2",
+         "runtime_contract_profile": "v1"}))
+    assert not out2.get("terminal_status"), out2.get("terminal_reason")
+    #: ★ 이긴 쪽 선언이 그대로 쓰였는가 — 섞이지 않았는가.
+    saved = json.load(open(cn.contract_path(ws), encoding="utf-8"))
+    assert saved["datasets"][0]["allowed_actions"] == ["read"]

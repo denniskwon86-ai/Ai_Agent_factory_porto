@@ -1304,6 +1304,126 @@ _DECISION_APPROVE = "APPROVE"
 _DECISION_REJECT = "REJECT"
 
 
+class ContractResolveRequest(BaseModel):
+    """[2026-08-26] 컴파일러가 **사람에게 넘긴 결정**을 사람이 내린다.
+
+    ★ 받는 것은 「무엇을 어떻게」뿐이다. 행위자·테넌트·범위는 **서버가 파생한다** —
+      계약 승인 요청이 셋만 받는 것과 같은 이유다.
+    ⚠️ 둘 중 **하나만** 채운다. 한 요청에 둘을 담으면 「능력은 됐고 데이터셋은 실패」
+      같은 절반 성공이 생기고, 그때 무엇이 반영됐는지 아무도 모른다."""
+    #: 능력 결정 — `task_id` 의 초안에서 이 능력의 처리를 정한다.
+    task_id: str = ""
+    capability: str = ""
+    decision: str = ""                  # REDUCE | WAIT | REQUEST_HOST_FEATURE
+    #: 데이터셋 충돌 — 이 데이터셋을 `winner_task_id` 의 선언으로 통일한다.
+    dataset_key: str = ""
+    winner_task_id: str = ""
+    rationale: str = ""
+
+
+@router.get("/{project_id}/contract-decisions/pending")
+async def contract_decisions_pending(project_id: str,
+                                     p: Principal = Depends(current_principal)):
+    """지금 **사람이 정해야 하는 것**들.
+
+    ⚠️⚠️ [2026-08-26 실측] 이것이 없어서 파이프라인이 막다른 길에 섰다. 컴파일러는
+      「사용자 결정이 필요한 요구가 … 있습니다」·「… 사람이 정해야 합니다(자동 병합하지
+      않습니다)」라고 말하는데, **정할 화면도 API 도 없었다.**
+    ★ 고를 수 있는 값(`choices`)을 함께 준다 — 목록 없이 「정하라」고 하면 무엇을 적어야
+      하는지 모르고, 그러면 이 API 도 다시 막다른 길이 된다."""
+    _safe_id(project_id, "project_id")
+    assert_project_readable(p, project_id)
+    from core import contract_decision as _cd
+    from nodes.contract import _wbs_tasks, load_drafts
+
+    ws = f"./projects/{project_id}"
+    items = await asyncio.to_thread(_cd.pending_items, _wbs_tasks(ws), load_drafts(ws))
+    return {"status": "success", "data": items}
+
+
+@router.post("/{project_id}/contract-decisions/resolve")
+async def contract_decisions_resolve(project_id: str, req: ContractResolveRequest,
+                                     p: Principal = Depends(current_principal)):
+    """사람의 결정을 **초안에 남기고 원장에 기록한다.**
+
+    ★ 초안에 남기는 이유: 컴파일러의 입력이 초안이다. 별도 «결정 표» 를 만들고 컴파일러가
+      안 보면 그것이 「만들어 두고 부르는 곳이 없다」의 반복이다.
+    ⚠️ **원장을 먼저 쓴다.** 초안만 바뀌고 원장이 없으면 「누가 왜 정했나」에 답할 수 없고,
+      초안은 롤백·재생성으로 사라진다. 순서를 뒤집으면 그 창에서 근거 없는 결정이 남는다.
+    """
+    _safe_id(project_id, "project_id")
+    assert_project_writable(p, project_id)
+    from core import contract_decision as _cd
+    from core.decision_ledger import decision_ledger
+    from nodes.contract import load_drafts, save_draft
+
+    ws = f"./projects/{project_id}"
+    is_cap = bool((req.capability or "").strip())
+    is_ds = bool((req.dataset_key or "").strip())
+    if is_cap == is_ds:
+        raise HTTPException(
+            status_code=422,
+            detail="능력 결정(capability) 또는 데이터셋 충돌 해소(dataset_key) 중 "
+                   "**하나만** 지정해야 합니다.")
+
+    drafts = await asyncio.to_thread(load_drafts, ws)
+    try:
+        if is_cap:
+            tid = (req.task_id or "").strip()
+            if not tid:
+                raise HTTPException(status_code=422, detail="task_id 가 필요합니다.")
+            draft = drafts.get(tid)
+            if not isinstance(draft, dict) or not draft:
+                raise HTTPException(status_code=404,
+                                    detail=f"«{tid}» 의 계약 초안을 찾지 못했습니다.")
+            changed_one, summary = _cd.apply_capability_decision(
+                draft, capability=req.capability, decision=req.decision)
+            changed = {tid: changed_one}
+            subject_type = _cd.SUBJECT_CAPABILITY
+            subject_id = (req.capability or "").strip()
+            decision_value = (req.decision or "").strip().upper()
+        else:
+            changed, summary = _cd.apply_dataset_resolution(
+                drafts, dataset_key=req.dataset_key, winner_task_id=req.winner_task_id)
+            subject_type = _cd.SUBJECT_DATASET
+            subject_id = (req.dataset_key or "").strip()
+            decision_value = (req.winner_task_id or "").strip()
+    except _cd.DecisionError as e:
+        # ⚠️ 사유를 그대로 전한다 — 「받을 수 없습니다」만 말하면 사람은 무엇을 고쳐야
+        #   하는지 모른 채 같은 값을 다시 보낸다.
+        raise HTTPException(status_code=422, detail=str(e))
+
+    row = await asyncio.to_thread(
+        decision_ledger.append,
+        event_type="APP_CONTRACT_DECISION_RECORDED",
+        subject_type=subject_type, subject_id=subject_id,
+        actor_type="user", actor_id=p.user_id or "",
+        decision=decision_value, rationale=(req.rationale or "").strip() or summary,
+        evidence_refs=[f"project:{project_id}"] + [f"task:{t}" for t in sorted(changed)],
+        project_id=project_id,
+        tenant_id=getattr(p, "tenant_id", "") or "tenant_default",
+        enterprise_scope_id=getattr(p, "enterprise_scope_id", "") or "")
+
+    applied, failed = [], []
+    for tid, draft in sorted(changed.items()):
+        try:
+            await asyncio.to_thread(save_draft, ws, tid, draft)
+            applied.append(tid)
+        except Exception as e:                      # pragma: no cover - 디스크 사고
+            failed.append(f"{tid}: {e}")
+
+    # ⚠️ 초안 반영이 실패해도 **결정은 이미 원장에 있다.** 되돌리지 않는다(되돌릴 수도 없다).
+    #   대신 그 사실을 응답에 담아 사람이 재시도를 판단하게 한다 — 조용히 넘기면
+    #   「분명히 정했는데 또 물어본다」가 되고, 그때 사람은 시스템을 믿지 않는다.
+    return {"status": "success",
+            "data": {"event_id": row.get("event_id", ""), "summary": summary,
+                     "applied_tasks": applied,
+                     "draft_applied": not failed,
+                     "note": ("" if not failed else
+                              "결정은 기록됐지만 초안 반영에 실패했습니다 — "
+                              "다시 결정하지 마시고 재시도만 하십시오: " + " / ".join(failed))}}
+
+
 async def _contract_review_context(project_id: str, task_id: str):
     """`(게이트 판정, 체크포인트 계약 상태)`. **서버가 파생한다.**"""
     from core import contract_review_gate as _gate

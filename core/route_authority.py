@@ -86,6 +86,14 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     #     「승인할 것이 있다」를 알릴 이유가 없다.
     f"POST {F}/{{project_id}}/contract-review/decision": (PROJECT_RUN,),
 
+    # ── [2026-08-26] 계약을 **만들기 전에** 사람이 정하는 것들 ─────────────
+    #   ★★★ 승인과 같은 권한을 요구한다(`PROJECT_RUN`). 이 결정은 **앱이 갖는 권한**을
+    #     바꾸기 때문이다 — 「이 능력을 줄인다」·「이 데이터셋 선언으로 통일한다」는
+    #     결국 계약의 내용이 되고, 계약은 곧 그 앱이 무엇에 손댈 수 있는가다.
+    #   ⚠️ 읽기(`contract-decisions/pending`)는 여기 없다 — 쓰기 라우트 전용 표이고,
+    #     읽기 쪽은 핸들러가 `assert_project_readable` 로 직접 막는다.
+    f"POST {F}/{{project_id}}/contract-decisions/resolve": (PROJECT_RUN,),
+
     # ── [I-4 7 / Wave F-2] 후보 판을 **운영으로 올린다** ────────────────
     #   ★★★ 이것은 «만들기» 가 아니라 «운영에 내보내기» 다. 이 순간부터 그 앱은
     #     실제 조직 데이터를 만지므로, 프로젝트를 굴릴 수 있는 권한을 요구한다.
