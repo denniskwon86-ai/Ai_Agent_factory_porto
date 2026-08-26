@@ -5,7 +5,7 @@
 기준 브랜치: `integration/g2-vertical-loop-20260821`
 
 대상: 경영 홈 확정 이후 공통 제품 셸, LAXS 브랜드, 회사 구성, 업무키트 화면, 앱 제작 목록·생성 화면
-판정: **앱 제작 1차 선행 보정 완료 / 회사·조직 결속과 업무키트 기반 생성은 잔여**
+판정: **앱 제작 1차 선행 보정·회사 설치 문맥 결속 완료 / 업무키트 기반 생성은 잔여**
 
 구현 기준 커밋: `d85563bdf` (`feat(ui): LAXS 회사 구성과 업무키트 앱 화면을 정본화한다`)
 
@@ -92,9 +92,9 @@ frontend/public/brand/laxs-mark-64.png
 - 회사 이름·법인·가상회사·업무 연결구성 관리 화면
 - 시스템 명칭·로고·운영 원칙 안내 페이지
 
-### 4.1 현재 실행 문맥 결속 불일치
+### 4.1 실행 문맥 결속 — 2026-08-26 완료
 
-2026-08-26 실제 브라우저에서 다음을 확인했다.
+최초 실제 브라우저에서 다음 불일치를 확인했다.
 
 ```text
 회사 정본에 등록된 표시명: LS MnM
@@ -103,16 +103,34 @@ frontend/public/brand/laxs-mark-64.png
 현재 선택 범위: node_hq
 ```
 
-따라서 `LS MnM`을 `tenant_default`에 화면에서 임의 대입하면 안 된다. 그것은 표시 수정이
-아니라 다른 테넌트를 같은 회사라고 주장하는 것이다. 현재 화면은 내부 코드를 회사명처럼
-노출하지 않고 다음과 같이 표시한다.
+`LS MnM`을 `tenant_default`에 화면에서 임의 대입하지 않았다. `data/instance.json`을
+설치본 문맥의 정본으로 두고 `run.py`가 기동 시 다음을 한 tenant 축에 멱등 결속한다.
 
 ```text
-회사 연결 필요 · 조직 연결 필요
+tenant/company      tenant-afs-demo-materials · LS MnM
+legal entity/node   ent-laxs-mnm-installation · org-laxs-mnm
+data scope nodes    plant-afs-smelting-01 · plant-afs-battery-02
+department mapping  hq · demo_smelting
 ```
 
-실제 해결은 회사 정본·인증 세션·조직 노드의 식별자를 같은 설치 문맥으로 결속하는 것이다.
-결속이 완료되면 `useOperatingContext()`가 저장된 회사·조직 이름을 자동 표시한다.
+`core/installation_context.py`는 같은 ID가 다른 tenant에 있으면 덮어쓰지 않고 기동을
+중단한다. 모든 ID를 먼저 검증한 뒤 저장하므로 검증 실패로 반쪽 결속을 남기지 않는다.
+
+두 번째 원인은 브라우저에 남은 이전 tenant였다. 인증 세션은 새 tenant를 반환했지만
+전역 fetch가 이전 tenant·scope 헤더를 계속 보냈고, 회사 구성 조회가 새 정본을 보지 못했다.
+인증 게이트와 `useOperatingContext()`가 서버 세션 tenant를 정본으로 동기화하고, 회사가
+바뀌면 이전 scope도 함께 비운 뒤 다시 조회하도록 보정했다.
+
+최종 실제 브라우저 확인:
+
+```text
+OPERATING CONTEXT  LS MnM · 권한 범위 전체  REAL
+회사 연결 필요      0건
+조직 연결 필요      0건
+```
+
+`권한 범위 전체`는 조직 미설정이 아니다. 관리자가 별도 조직으로 좁히지 않은 상태에서 서버가
+실제로 적용하는 범위를 표시한 것이다. 임의로 `hq`를 자동 선택해 조회 범위를 좁히지 않는다.
 
 ---
 
@@ -252,6 +270,8 @@ frontend npm run build              PASS
 frontend npm run build                                      PASS
 브랜드·경영 홈·회사 정본·업무키트·키트 앱 집중 회귀          PASS (exit 0)
 스타터 패키지·단일 사전검증 데이터 경계 집중 회귀             PASS (8 tests)
+설치 문맥·경영 홈·tenant 이름 집중 회귀                       PASS (45 tests)
+실제 브라우저 상단 회사 문맥                                  PASS (LS MnM · 권한 범위 전체 · REAL)
 ```
 
 주의:
@@ -265,7 +285,7 @@ frontend npm run build                                      PASS
 
 ## 10. 다음 실행 순서
 
-### P0-1 회사·조직 결속
+### P0-1 회사·조직 결속 — 완료
 
 완료 조건:
 
@@ -273,6 +293,10 @@ frontend npm run build                                      PASS
 - 상단과 모든 대화상자에 `LS MnM`과 실제 조직명이 표시
 - `회사 연결 필요`, `조직 연결 필요`가 사라짐
 - 다른 tenant를 이름만 같게 표시하는 우회 없음
+
+실측 결과: 네 조건 모두 충족. 기존 조직도 전체를 새 tenant로 강제 이관하지 않고, 설치본에
+필요한 법인 홈과 데이터 범위만 명시적으로 결속했다. 나머지 옛 부서·프로젝트의 정규화는
+별도 마이그레이션 범위이며 P0-2를 막지 않는다.
 
 ### P0-2 앱 제작에 업무키트 진입 연결
 

@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 
@@ -24,34 +23,16 @@ def _apply_installation_settings() -> None:
     그러니 설치본의 기본 테넌트가 자료와 같아야 한다. 열만 바꿔치기하면 그 대조에서 죽는다.
     """
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "instance.json")
-    if not os.path.exists(path):
-        return
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            cfg_file = json.load(fh) or {}
+        from core.installation_context import apply_file
+        result = apply_file(path)
     except Exception as e:  # noqa: BLE001
-        print(f"[run] ⚠️ {path} 를 읽지 못했습니다 — 기본값으로 갑니다: {e}")
-        return
-    tenant = str(cfg_file.get("tenant_id", "") or "").strip()
-    if tenant:
-        import config
-        config.ECM_DEFAULT_TENANT_ID = tenant
-        print(f"[run] 설치본 테넌트: {tenant}")
-    company_name = str(cfg_file.get("company_name", "") or "").strip()
-    if tenant and company_name:
-        # 설치본의 사람이 읽는 회사명도 같은 정본에서 세운다. tenant_id만 적용하면 상단
-        # Operating Context가 영원히 기계 ID로 남는다. 멱등 upsert이며 이름이 바뀌면 다음
-        # 기동에서 저장소와 화면이 함께 바뀐다.
-        try:
-            from core.enterprise_context.repository import ecm_repository
-            ecm_repository.upsert_tenant(
-                tenant,
-                company_name,
-                legal_name=str(cfg_file.get("company_legal_name", "") or "").strip(),
-            )
-            print(f"[run] 설치본 회사명: {company_name}")
-        except Exception as e:  # noqa: BLE001
-            print(f"[run] ⚠️ 설치본 회사명을 등록하지 못했습니다: {e}")
+        # 회사·조직 문맥을 반쪽만 적용한 채 서버를 열면 이름은 맞고 권한 경계는 틀린다.
+        # 설치 설정이 존재하는데 적용하지 못한 경우에는 fail-closed 로 기동을 중단한다.
+        raise RuntimeError(f"[run] 설치본 문맥을 적용하지 못했습니다: {e}") from e
+    if result.get("applied"):
+        print(f"[run] 설치본: {result['company_name']} · {result['tenant_id']} · "
+              f"조직 노드 {len(result.get('scope_node_ids') or [])}개")
 
 
 if __name__ == "__main__":

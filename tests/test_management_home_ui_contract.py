@@ -27,6 +27,16 @@ def test_로그인_뒤_회사명을_다시_읽는다():
     assert "realEntities.length === 1" in ctx
 
 
+def test_로그인_세션의_tenant로_이전_브라우저_회사와_범위를_교체한다():
+    app = _read("frontend/src/App.tsx")
+    ctx = _read("frontend/src/lib/operatingContext.ts")
+
+    assert "payload?.data?.tenant_id" in app
+    assert "setEnterpriseContext({ tenantId: sessionTenant, scopeNodeId: '' })" in app
+    assert "selected.tenantId !== sessionTenant" in ctx
+    assert "setEnterpriseContext({ tenantId: sessionTenant, scopeNodeId: '' })" in ctx
+
+
 def test_LAXS_확정_B안이_제품셸과_로그인에_적용되고_파비콘은_별도_마크를_쓴다():
     shell = _read("frontend/src/components/ProductShell.tsx")
     login = _read("frontend/src/components/LoginPage.tsx")
@@ -59,8 +69,20 @@ def test_설치본_회사명은_기동시_회사_정본에_동기화된다():
 
     assert instance["tenant_id"] == "tenant-afs-demo-materials"
     assert instance["company_name"] == "LS MnM"
-    assert 'cfg_file.get("company_name"' in runner
-    assert "ecm_repository.upsert_tenant(" in runner
+    assert "apply_file(path)" in runner
+
+
+def test_설치본_회사와_데이터_범위는_같은_tenant의_조직으로_선언된다():
+    import json
+
+    instance = json.loads(_read("data/instance.json"))
+    org = instance["organization"]
+    assert org["legal_node_id"] == "org-laxs-mnm"
+    assert org["legal_dept_id"] == "hq"
+    scopes = {row["node_id"]: row for row in org["scope_nodes"]}
+    assert "plant-afs-smelting-01" in scopes
+    assert "plant-afs-battery-02" in scopes
+    assert scopes["plant-afs-smelting-01"]["dept_id"] == "demo_smelting"
 
 
 def test_비서의_화면_이름은_Jarvis_한곳에서_관리한다():

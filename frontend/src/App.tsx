@@ -59,7 +59,10 @@ import { BuildPage } from './components/BuildPage';
 import { BuildStartDialog } from './components/BuildStartDialog';
 import { Banner } from './design/HubShell';
 import { HomeNavContext } from './design/HubDialog';
-import { API_BASE_URL, getSessionToken, setActingUser, setSessionToken } from './lib/api';
+import {
+  API_BASE_URL, getEnterpriseContext, getSessionToken, setActingUser,
+  setEnterpriseContext, setSessionToken,
+} from './lib/api';
 
 
 function AppShell() {
@@ -900,7 +903,18 @@ export default function App() {
       const r = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
         headers: { 'X-Session-Token': getSessionToken() },
       });
-      if (r.ok) { setState('in'); return; }
+      if (r.ok) {
+        const payload = await r.json();
+        const sessionTenant = String(payload?.data?.tenant_id || '').trim();
+        const selected = getEnterpriseContext();
+        if (sessionTenant && selected.tenantId !== sessionTenant) {
+          // 인증 게이트가 세션의 회사 tenant를 먼저 적용해야, 바로 뒤에 마운트되는 모든
+          // 회사·조직 조회가 이전 브라우저 tenant 헤더로 나가지 않는다. 회사가 바뀌면
+          // 이전 회사의 조직 범위도 함께 비운다 — 그 둘을 섞는 것은 유효한 문맥이 아니다.
+          setEnterpriseContext({ tenantId: sessionTenant, scopeNodeId: '' });
+        }
+        setState('in'); return;
+      }
       // 401/403 = 세션이 죽었다. 토큰을 버려야 다음 새로고침에서 또 묻지 않는다.
       setSessionToken(''); setActingUser('');
       setState('out');

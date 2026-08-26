@@ -17,7 +17,7 @@
 //   복제하면 두 곳이 다른 회사 이름을 적는 날이 온다.
 import { useEffect, useState } from 'react';
 
-import { apiFetch, getEnterpriseContext } from './api';
+import { apiFetch, getEnterpriseContext, setEnterpriseContext } from './api';
 import {
   getTree as getCompanyTree, listEntities, listTenants,
   type EcmNode, type Entity, type Tenant,
@@ -131,7 +131,19 @@ export function useOperatingContext(): OperatingContext {
     let alive = true;
     apiFetch('/api/v1/auth/me')
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (alive && j?.data) setMe(j.data); })
+      .then((j) => {
+        if (!alive || !j?.data) return;
+        const sessionTenant = String(j.data.tenant_id || '').trim();
+        const selected = getEnterpriseContext();
+        if (sessionTenant && selected.tenantId !== sessionTenant) {
+          // ★ 설치본/로그인 세션의 tenant가 정본이다. 브라우저에는 이전 서버에서 고른
+          // tenant·scope가 남을 수 있다. tenant만 바꾸고 scope를 남기면 옛 회사의 조직
+          // 노드를 새 회사에 보내므로 상단은 계속 「회사/조직 연결 필요」가 되고, API도
+          // 옛 tenant 헤더로 조회한다. 회사가 바뀌는 순간 범위도 함께 비운 뒤 재조회한다.
+          setEnterpriseContext({ tenantId: sessionTenant, scopeNodeId: '' });
+        }
+        setMe(j.data);
+      })
       .catch(() => { /* 표시용이다 — 실패해도 앱을 막지 않는다 */ });
     return () => { alive = false; };
   }, [revision]);

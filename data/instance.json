@@ -1,5 +1,27 @@
 {
   "tenant_id": "tenant-afs-demo-materials",
   "company_name": "LS MnM",
-  "company_legal_name": "LS MnM 주식회사"
+  "company_legal_name": "LS MnM 주식회사",
+  "organization": {
+    "entity_id": "ent-laxs-mnm-installation",
+    "industry_code": "C24",
+    "legal_node_id": "org-laxs-mnm",
+    "legal_node_code": "LS_MNM",
+    "legal_dept_id": "hq",
+    "scope_nodes": [
+      {
+        "node_id": "plant-afs-smelting-01",
+        "node_type": "site_plant",
+        "code": "SMELTING_P1",
+        "name_ko": "제련공장 · 사전검증",
+        "dept_id": "demo_smelting"
+      },
+      {
+        "node_id": "plant-afs-battery-02",
+        "node_type": "site_plant",
+        "code": "BATTERY_P2",
+        "name_ko": "배터리소재 공장 · 사전검증"
+      }
+    ]
+  }
 }
