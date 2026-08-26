@@ -317,7 +317,11 @@ function AppRow({
             <div style={{ display: 'grid', gap: 6 }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
-                  {row.approved_by ? `${row.approved_by} 님이 승인했습니다.` : '승인되었습니다.'}
+                  {mode === 'operate'
+                    ? <span title={row.approved_by ? `승인 기록: ${row.approved_by}` : undefined}>
+                        계약 승인이 확인되었습니다.
+                      </span>
+                    : (row.approved_by ? `${row.approved_by} 님이 승인했습니다.` : '승인되었습니다.')}
                 </span>
                 {mode === 'build' && (
                   <button type="button" disabled={!!busy}
@@ -342,9 +346,11 @@ function AppRow({
                   <div style={{ display: 'grid', gap: 6 }}>
                     <span style={{ color: 'var(--state-success-fg)' }}>
                       ● 만들어졌습니다 — 데이터셋 {row.built_datasets}개
-                      <span style={{ color: 'var(--surface-text-muted)', marginLeft: 6, fontSize: 12 }}>
-                        <span title={row.release_id}>{shortId(row.release_id)}</span>
-                      </span>
+                      {mode === 'build' && (
+                        <span style={{ color: 'var(--surface-text-muted)', marginLeft: 6, fontSize: 12 }}>
+                          <span title={row.release_id}>{shortId(row.release_id)}</span>
+                        </span>
+                      )}
                     </span>
 
                     {/* ★★★ **만든 것과 쓸 수 있는 것은 다르다.**

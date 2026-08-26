@@ -126,6 +126,21 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 }).format(value);
 }
 
+/** 물질화된 데이터셋 이름은 `prc_01`, 계약 정본은 `PRC-01`을 쓴다.
+ *  표기 차이를 업무 의미 차이로 취급하면 사람용 이름·기본 탭이 전부 사라진다. */
+function canonicalDatasetKey(value: string): string {
+  return String(value || '').trim().toUpperCase().replace(/_/g, '-');
+}
+
+function formatDateTime(value: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('ko-KR', {
+    dateStyle: 'medium', timeStyle: 'short',
+  }).format(date);
+}
+
 function formatCell(key: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'boolean') return value ? '예' : '아니오';
@@ -187,11 +202,13 @@ function metrics(appId: string, dataset: string, rows: BusinessRow[], total: num
 
 export function preferredDatasetName(appId: string, datasets: AppDatasetRow[]): string {
   const preferred = APP_VIEWS[appId]?.defaultDataset;
-  return datasets.find((row) => row.name === preferred)?.name || datasets[0]?.name || '';
+  return datasets.find((row) => canonicalDatasetKey(row.name) === preferred)?.name
+    || datasets[0]?.name || '';
 }
 
 export function datasetDisplayName(appId: string, dataset: AppDatasetRow): string {
-  return APP_VIEWS[appId]?.datasets[dataset.name]?.label || dataset.label || dataset.name;
+  return APP_VIEWS[appId]?.datasets[canonicalDatasetKey(dataset.name)]?.label
+    || dataset.label || dataset.name;
 }
 
 export function KitBusinessView({
@@ -206,12 +223,13 @@ export function KitBusinessView({
   stale: boolean;
 }) {
   const app = APP_VIEWS[appId];
-  const view = app?.datasets[datasetName];
+  const datasetKey = canonicalDatasetKey(datasetName);
+  const view = app?.datasets[datasetKey];
   const available = records.length ? new Set(Object.keys(records[0])) : new Set<string>();
   const columns = (view?.columns || Array.from(available).filter((key) => !TECHNICAL_KEYS.has(key)))
     .filter((key) => available.has(key));
   const allColumns = records.length ? Object.keys(records[0]) : [];
-  const cards = metrics(appId, datasetName, records, total);
+  const cards = metrics(appId, datasetKey, records, total);
   const first = records[0] || {};
   const synthetic = String(first.data_class || '').toUpperCase() === 'SYNTHETIC'
     || String(first.data_origin || '').toUpperCase() === 'SYNTHETIC';
@@ -238,12 +256,12 @@ export function KitBusinessView({
               fontSize: 12, padding: '3px 8px', borderRadius: 999,
               color: stale ? 'var(--state-warn-fg)' : 'var(--surface-text-muted)',
               border: `1px solid ${stale ? 'var(--state-warn-fg)' : 'var(--surface-border)'}`,
-            }}>{stale ? '오래된 인증판' : '인증 기준'} · {asOf}</span>
+            }}>{stale ? '오래된 인증판' : '인증 기준'} · {formatDateTime(asOf)}</span>
           )}
           <span style={{
             fontSize: 12, padding: '3px 8px', borderRadius: 999,
             color: 'var(--surface-text-muted)', border: '1px solid var(--surface-border)',
-          }}>{view?.label || datasetLabel} · {datasetName}</span>
+          }} title={`데이터셋 식별자: ${datasetName}`}>{view?.label || datasetLabel}</span>
         </div>
       </div>
 

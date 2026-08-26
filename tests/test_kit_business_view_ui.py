@@ -49,6 +49,32 @@ def test_app_panel_passes_identity_and_uses_business_view():
     assert "asOf={rows.as_of}" in src and "stale={rows.stale}" in src
 
 
+def test_materialized_lowercase_dataset_names_keep_business_labels_and_defaults():
+    src = VIEW.read_text(encoding="utf-8")
+    assert "function canonicalDatasetKey" in src
+    assert ".toUpperCase().replace(/_/g, '-')" in src
+    assert "canonicalDatasetKey(row.name) === preferred" in src
+    assert "datasets[canonicalDatasetKey(dataset.name)]" in src
+    assert "const datasetKey = canonicalDatasetKey(datasetName);" in src
+    assert "metrics(appId, datasetKey, records, total)" in src
+
+
+def test_certification_time_is_localized_and_internal_dataset_id_is_secondary():
+    src = VIEW.read_text(encoding="utf-8")
+    assert "new Intl.DateTimeFormat('ko-KR'" in src
+    assert "formatDateTime(asOf)" in src
+    assert "title={`데이터셋 식별자: ${datasetName}`}" in src
+    assert "{view?.label || datasetLabel}</span>" in src
+
+
+def test_operating_view_keeps_approval_and_release_ids_secondary():
+    src = PANEL.read_text(encoding="utf-8")
+    assert "계약 승인이 확인되었습니다." in src
+    assert "title={row.approved_by ? `승인 기록: ${row.approved_by}`" in src
+    assert "mode === 'build' && (" in src
+    assert "title={row.release_id}" in src
+
+
 def test_public_app_api_keeps_internal_snapshot_ids_out_of_the_client_contract():
     src = (ROOT / "frontend" / "src" / "lib" / "kitAppViewApi.ts").read_text(
         encoding="utf-8")
