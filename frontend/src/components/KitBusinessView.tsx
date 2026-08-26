@@ -71,6 +71,19 @@ const APP_VIEWS: Record<string, AppView> = {
       'EXT-02': { label: '원자재 가격', columns: ['commodity_code', 'observed_at', 'value', 'unit', 'currency', 'trust_grade'] },
     },
   },
+  'APP-05': {
+    title: '공급 위험·대체안',
+    description: '등록된 공급사 위험등급과 계약·발주·외부 지표를 함께 확인합니다. 위험 계산과 대체 추천은 지원 대기입니다.',
+    defaultDataset: 'MDM-02',
+    datasets: {
+      'MDM-02': { label: '공급사 기준정보', columns: ['supplier_id', 'supplier_name', 'country_code', 'currency', 'lead_time_days', 'payment_terms', 'risk_grade', 'material_ids', 'active'] },
+      'PRC-01': { label: '구매 계약', columns: ['contract_id', 'supplier_id', 'material_id', 'contract_quantity', 'ordered_quantity', 'quantity_uom', 'benchmark_price', 'premium_rate', 'currency', 'valid_from', 'valid_to'] },
+      'PRC-02': { label: '발주 현황', columns: ['po_line_id', 'supplier_id', 'material_id', 'order_date', 'due_date', 'order_quantity', 'quantity_uom', 'unit_price', 'currency', 'status'] },
+      'EXT-02': { label: '원자재 가격', columns: ['commodity_code', 'observed_at', 'value', 'unit', 'currency', 'trust_grade'] },
+      'EXT-03': { label: '운임·외부 지표', columns: ['indicator_code', 'target_ref', 'observed_at', 'value', 'unit', 'trust_grade'] },
+      'SIM-02': { label: '검토 시나리오', columns: ['scenario_id', 'scenario_name', 'baseline_id', 'driver_id', 'change_value', 'change_unit', 'impact_metrics', 'scenario_period_start', 'scenario_period_end', 'approval_status', 'rationale'] },
+    },
+  },
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -106,6 +119,12 @@ const FIELD_LABELS: Record<string, string> = {
   document_type: '문서 유형', posting_date: '전기일', amount: '금액', paid_at: '지급일',
   document_id: '전표', account_id: '계정', cost_center_id: '코스트센터', debit_amount: '차변',
   credit_amount: '대변', cashflow_line: '현금흐름 항목', plan_actual: '계획/실적',
+  supplier_name: '공급사명', country_code: '국가', lead_time_days: '조달 기간(일)',
+  risk_grade: '등록 위험등급', material_ids: '공급 자재', active: '사용 여부',
+  scenario_id: '시나리오', scenario_name: '시나리오명', baseline_id: '기준선',
+  driver_id: '변동 요인', change_value: '변동값', change_unit: '변동 단위',
+  impact_metrics: '영향 항목', scenario_period_start: '적용 시작',
+  scenario_period_end: '적용 종료', approval_status: '검토 상태', rationale: '검토 근거',
 };
 
 const TECHNICAL_KEYS = new Set([
@@ -129,10 +148,31 @@ const LOCATION_LABELS: Record<string, string> = {
   ORIGIN: '출발지', DESTINATION: '도착지', IN_TRANSIT: '운송 중',
 };
 
+const RISK_LABELS: Record<string, string> = {
+  LOW: '낮음', MEDIUM: '보통', HIGH: '높음',
+};
+
 function number(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
   return null;
+}
+
+function booleanValue(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (normalized === 'TRUE' || normalized === '1') return true;
+  if (normalized === 'FALSE' || normalized === '0') return false;
+  return null;
+}
+
+function listValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map(String).join(', ');
+  if (typeof value !== 'string') return String(value);
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String).join(', ') : value;
+  } catch { return value; }
 }
 
 function sum(rows: BusinessRow[], key: string): number {
@@ -165,10 +205,16 @@ function formatDateTime(value: string): string {
 
 function formatCell(key: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
+  if (key === 'active') {
+    const active = booleanValue(value);
+    return active === null ? String(value) : (active ? '사용' : '중지');
+  }
+  if (key === 'material_ids') return listValue(value);
   if (typeof value === 'boolean') return value ? '예' : '아니오';
   if (typeof value === 'string' && key.endsWith('_at')) return formatDateTime(value);
   if (key === 'event_type') return EVENT_LABELS[String(value).toUpperCase()] || String(value);
   if (key === 'location') return LOCATION_LABELS[String(value).toUpperCase()] || String(value);
+  if (key === 'risk_grade') return RISK_LABELS[String(value).toUpperCase()] || String(value);
   if (key === 'premium_rate' || key === 'actual_yield') {
     const n = number(value);
     return n === null ? String(value) : `${formatNumber(n * 100)}%`;
@@ -212,6 +258,17 @@ function metrics(appId: string, dataset: string, rows: BusinessRow[], total: num
       { label: '미지급', value: `${unpaid}건`, hint: '현재 표시 범위 기준' },
       { label: '표시 금액', value: currency ? `${formatNumber(sum(rows, 'amount'))} ${currency}` : '통화 혼합', hint: currency ? '현재 표시 범위 합계' : '통화별로 나눠 확인 필요' },
       { label: '지급 완료', value: `${rows.length - unpaid}건`, hint: '현재 표시 범위 기준' },
+    ];
+  }
+  if (appId === 'APP-05' && dataset === 'MDM-02') {
+    const grades = rows.map((row) => String(row.risk_grade || '').toUpperCase()).filter(Boolean);
+    const activeValues = rows.map((row) => booleanValue(row.active)).filter((value) => value !== null);
+    const countries = new Set(rows.map((row) => String(row.country_code || '').trim()).filter(Boolean));
+    return [
+      { label: '등록 공급사', value: `${total}곳`, hint: `${rows.length}곳을 현재 화면에서 확인` },
+      { label: '사용 중', value: activeValues.length ? `${activeValues.filter(Boolean).length}곳` : '상태 근거 없음', hint: '현재 표시 범위의 등록 상태' },
+      { label: '등록 고위험', value: grades.length ? `${grades.filter((grade) => grade === 'HIGH').length}곳` : '등급 근거 없음', hint: '계산 점수가 아닌 공급사 기준정보' },
+      { label: '등록 국가', value: countries.size ? `${countries.size}개` : '국가 근거 없음', hint: '현재 표시 범위의 국가 코드' },
     ];
   }
   const statusKey = rows.some((row) => 'status' in row) ? 'status' : '';

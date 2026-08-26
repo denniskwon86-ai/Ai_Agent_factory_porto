@@ -45,6 +45,10 @@ const APP_PRESENTATION: Record<string, { label: string; note?: string }> = {
     label: '물류 사건 확인',
     note: '현재 버전은 인증된 물류 사건 조회용입니다. 현업 입력은 후속 단계에서 지원합니다.',
   },
+  'APP-05': {
+    label: '공급 위험·대체안',
+    note: '등록된 위험 근거를 조회합니다. 위험 계산과 대체 공급사 추천은 지원 대기입니다.',
+  },
 };
 
 function appLabel(row: KitAppRow): string {

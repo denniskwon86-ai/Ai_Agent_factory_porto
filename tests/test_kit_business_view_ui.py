@@ -7,13 +7,14 @@ VIEW = ROOT / "frontend" / "src" / "components" / "KitBusinessView.tsx"
 PANEL = ROOT / "frontend" / "src" / "components" / "KitAppPanel.tsx"
 
 
-def test_four_readable_demo_apps_have_business_specific_entry_views():
+def test_five_kit_apps_have_business_specific_entry_views():
     src = VIEW.read_text(encoding="utf-8")
     expected = {
         "'APP-01'": "defaultDataset: 'PRC-02'",
         "'APP-02'": "defaultDataset: 'LOG-03'",
         "'APP-03'": "defaultDataset: 'INV-01'",
         "'APP-04'": "defaultDataset: 'FIN-02'",
+        "'APP-05'": "defaultDataset: 'MDM-02'",
     }
     for app_id, default_dataset in expected.items():
         assert app_id in src
@@ -22,6 +23,7 @@ def test_four_readable_demo_apps_have_business_specific_entry_views():
     assert "물류 사건 확인" in src
     assert "재고·생산 영향" in src
     assert "구매원가·현금 전망" in src
+    assert "공급 위험·대체안" in src
 
 
 def test_app_02_does_not_promise_native_input_before_the_input_loop_exists():
@@ -31,6 +33,26 @@ def test_app_02_does_not_promise_native_input_before_the_input_loop_exists():
     assert "현업 입력은 후속 단계에서 지원합니다." in panel
     assert "현업 입력은 후속 단계입니다." in view
     assert "appLabel(row)" in panel
+
+
+def test_app_05_does_not_turn_missing_calculations_into_safe_scores_or_recommendations():
+    panel = PANEL.read_text(encoding="utf-8")
+    view = VIEW.read_text(encoding="utf-8")
+    assert "위험 계산과 대체 공급사 추천은 지원 대기입니다." in panel
+    assert "계산 점수가 아닌 공급사 기준정보" in view
+    assert "등급 근거 없음" in view
+    assert "등록 고위험" in view
+    assert "value: grades.length ?" in view
+
+
+def test_app_05_normalizes_csv_boolean_and_material_list_for_people():
+    src = VIEW.read_text(encoding="utf-8")
+    assert "function booleanValue" in src
+    assert "normalized === 'TRUE'" in src and "normalized === 'FALSE'" in src
+    assert "active ? '사용' : '중지'" in src
+    assert "function listValue" in src
+    assert "parsed.map(String).join(', ')" in src
+    assert "rows.map((row) => booleanValue(row.active))" in src
 
 
 def test_business_view_keeps_provenance_and_moves_raw_fields_to_diagnostics():
