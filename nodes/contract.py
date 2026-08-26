@@ -158,6 +158,28 @@ async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
     tasks = _wbs_tasks(ws)
     previous = _read_json(contract_path(ws))
 
+    #: ★★★ [2026-08-25 실측] **WBS 를 못 읽은 것을 «계약이 잘못됐다» 로 말하지 않는다.**
+    #:
+    #: ⚠️⚠️ WBS 가 없거나 비면 계약 대상이 0건이 되고, 합산기는 막지 않는다(막을 것이
+    #:   없으므로). 그러면 **빈 초안**이 컴파일러로 가서 「app_class 가 …중 하나여야
+    #:   합니다(현재 (없음))」로 죽는다. 사용자는 「분류를 안 골랐나?」를 찾아 헤매지만
+    #:   진짜 원인은 **WBS 를 못 읽은 것**이다 — 사유가 원인을 가리키지 않으면 사람은
+    #:   영영 엉뚱한 곳을 고친다.
+    #: ★ 여기서 먼저 말한다. `normalize_tasks` 머리말이 「WBS 전체를 못 읽는 것이 태스크
+    #:   하나를 못 읽는 것보다 나쁘다」고 적어 둔 것과 같은 방향이다.
+    if not tasks:
+        reason = ("WBS 를 읽지 못했습니다(태스크 0건) — 계약을 만들 대상이 없습니다. "
+                  "기획이 WBS 를 남겼는지 먼저 확인하십시오.")
+        print(f"⛔ [HostContractCompiler] {reason}")
+        return {
+            "app_runtime_contract_status": "DRAFT",
+            "app_runtime_contract_fingerprint": "",
+            "app_runtime_contract_summary": reason,
+            "terminal_status": "CONTRACT_BLOCKED",
+            "terminal_reason": reason,
+            "supervisor_feedback": reason,
+        }
+
     result, agg = aggregator.compile_project_contract(
         tasks, load_drafts(ws), project_id=os.path.basename(ws.rstrip("/\\")) or st.project_name,
         previous=previous if isinstance(previous, dict) else None)
@@ -170,10 +192,28 @@ async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
         print("⛔ [HostContractCompiler] 계약을 만들지 못했습니다:")
         for e in result.errors[:8]:
             print(f"   · {e}")
+        #: ★★★ [2026-08-25 사용자 실측] **종결 상태를 여기서 확정한다.**
+        #:
+        #: ⚠️⚠️ 종전에는 지문만 비워 돌려줬다. 그러면 `route_from_contract_compiler` 가
+        #:   `TerminalHandler` 로 보내고, 그 노드는 `terminal_status` 가 비어 있으니
+        #:   **「FAILED_BUILD — 빌드 자가복구 N회 소진」** 으로 확정했다.
+        #:   사용자가 본 「자가복구 실패했다고 하고 생성 실패」가 이것이다.
+        #:
+        #:   계약을 못 만든 것은 **코드가 빌드되지 않은 것이 아니다.** 뭉개면
+        #:   「모델이 형식을 못 맞췄다」와 「사람이 계약을 정해야 한다」가 같은 화면이 되고,
+        #:   사용자는 **재시도만 반복한다** — `state_models` 의 `CONTRACT_BLOCKED` 주석이
+        #:   정확히 그 위험을 경고해 두었는데, 세우는 곳이 검토 게이트뿐이었다.
+        #: ★ 사유는 **합산기가 준 말 그대로** 싣는다. 여기서 새 문구를 지으면 같은 사실이
+        #:   두 가지로 설명된다.
+        reason = ("계약을 만들지 못해 다음 단계로 넘어갈 수 없습니다: "
+                  + " / ".join(result.errors[:4]))
         return {
             "app_runtime_contract_status": "DRAFT",
             "app_runtime_contract_fingerprint": "",
             "app_runtime_contract_summary": "; ".join(result.errors[:4]),
+            "terminal_status": "CONTRACT_BLOCKED",
+            "terminal_reason": reason,
+            "supervisor_feedback": reason,
             "unsupported_requirements": contract.get("unsupported_requirements") or [],
             "capability_intents": contract.get("capability_intents") or [],
         }

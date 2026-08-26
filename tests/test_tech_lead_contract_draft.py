@@ -183,3 +183,89 @@ def test_초안이_없으면_그_사유가_그대로_나온다():
     assert result.errors
     assert any("계약 초안이 없습니다" in e for e in result.errors)
     assert not result.contract.get("semantic_fingerprint")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ④ 계약 실패를 **「빌드 자가복구 소진」으로 뭉개지 않는다**
+#
+# ⚠️⚠️ [2026-08-25 사용자 실측] 「tech리드한테 전달하는 과정에서 자가복구 실패 했다고
+#   하고 생성 실패」 — 컴파일러가 지문만 비워 돌려주자 `TerminalHandler` 가
+#   `terminal_status` 가 비어 있다는 이유로 **FAILED_BUILD** 로 확정했다.
+#
+#   계약을 못 만든 것은 **코드가 빌드되지 않은 것이 아니다.** 뭉개면 「모델이 형식을
+#   못 맞췄다」와 「사람이 계약을 정해야 한다」가 같은 화면이 되고, 사용자는 **재시도만
+#   반복한다** — `state_models` 의 `CONTRACT_BLOCKED` 주석이 정확히 그것을 경고했는데
+#   세우는 곳이 검토 게이트뿐이었다.
+# ══════════════════════════════════════════════════════════════════════════
+
+def _compile_with_no_draft(tmp_path):
+    """계약 대상 태스크는 있는데 초안이 없는 워크스페이스에서 컴파일러를 돌린다."""
+    import asyncio
+    import json as _json
+
+    from nodes import contract as cn
+
+    ws = str(tmp_path)
+    #: ★ WBS 는 **정본 경로**에 둔다(`WBSManager.wbs_file_path`).
+    #: ⚠️ 내가 고른 경로(`wbs/wbs.json`)에 두었더니 계약 대상이 0건이 되어 **다른 실패**
+    #:   (`app_class 가 없음`)가 났다 — 시험이 재려던 것을 재지 못했다.
+    with open(os.path.join(ws, "00_wbs_master_plan.json"), "w", encoding="utf-8") as f:
+        _json.dump({"tasks": [{"task_id": "T-1", "goal": "원료 도입 화면",
+                               "artifact_kind": "app"}]}, f, ensure_ascii=False)
+    return asyncio.run(cn.run_host_contract_compiler(
+        {"workspace_root": ws, "project_name": "proj_x",
+         "runtime_contract_profile": "app"}))
+
+
+def test_계약_실패는_CONTRACT_BLOCKED_다(tmp_path):
+    """★★★ **이 파일의 마지막 요지.** 빌드 실패로 위장하지 않는다."""
+    out = _compile_with_no_draft(tmp_path)
+    assert out.get("terminal_status") == "CONTRACT_BLOCKED", out.get("terminal_status")
+    assert not out.get("app_runtime_contract_fingerprint")
+
+
+def test_사유에_진짜_원인이_담긴다(tmp_path):
+    """⚠️ 「자가복구 소진」이라고 적히면 사용자는 원인을 영영 못 찾는다."""
+    out = _compile_with_no_draft(tmp_path)
+    reason = out.get("terminal_reason") or ""
+    assert "계약" in reason, reason
+    assert "자가복구" not in reason, "빌드 실패 문구가 계약 실패에 붙었다"
+    #: ★ 합산기가 준 말이 그대로 실려야 한다 — 여기서 새 문구를 지으면 두 설명이 생긴다.
+    assert "계약 초안이 없습니다" in reason, reason
+
+
+def test_종결_노드가_그_사유를_덮지_않는다(tmp_path):
+    """★ 상태를 세워도 종결 노드가 덮어쓰면 소용없다 — 거기까지 확인한다."""
+    import asyncio
+
+    import nodes.execution as ex
+
+    out = _compile_with_no_draft(tmp_path)
+    fin = asyncio.run(ex.run_terminal_handler({
+        "workspace_root": str(tmp_path), "project_name": "proj_x",
+        "terminal_status": out["terminal_status"],
+        "terminal_reason": out["terminal_reason"],
+    }))
+    assert fin.get("terminal_status") == "CONTRACT_BLOCKED"
+    assert "자가복구" not in (fin.get("terminal_reason") or "")
+
+
+def test_WBS_를_못_읽으면_그렇게_말한다(tmp_path):
+    """★★★ **원인을 가리키는 사유여야 한다.**
+
+    ⚠️⚠️ WBS 가 없으면 계약 대상이 0건이 되고, 빈 초안이 컴파일러로 가서
+      「app_class 가 …중 하나여야 합니다(현재 (없음))」로 죽었다. 사용자는 「분류를 안
+      골랐나?」를 찾아 헤매지만 진짜 원인은 **WBS 를 못 읽은 것**이다.
+    ⚠️ 이 실패는 내가 회귀를 쓰다 WBS 경로를 틀리게 두어서 **우연히** 드러났다 —
+      그때 「시험이 틀렸다」로만 고쳤으면 제품 결함은 그대로 남았을 것이다."""
+    import asyncio
+
+    from nodes import contract as cn
+
+    out = asyncio.run(cn.run_host_contract_compiler(
+        {"workspace_root": str(tmp_path), "project_name": "p",
+         "runtime_contract_profile": "v1"}))
+    assert out.get("terminal_status") == "CONTRACT_BLOCKED"
+    reason = out.get("terminal_reason") or ""
+    assert "WBS" in reason, reason
+    assert "app_class" not in reason, "원인이 아닌 증상을 사유로 적었다"
