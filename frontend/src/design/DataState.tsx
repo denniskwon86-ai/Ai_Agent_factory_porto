@@ -62,6 +62,17 @@ export function ok<T>(value: T): Loaded<T> {
   return { status: 'ok', value };
 }
 
+/** 브라우저·운영체제별 네트워크 예외를 사용자가 이해할 수 있는 한 문장으로 정규화한다.
+ * `Failed to fetch` 같은 구현 문구는 원인도 다음 행동도 말하지 못한다. 서버가 보낸 업무
+ * 오류는 그대로 보존하고, 응답 자체를 받지 못한 경우에만 연결 안내로 바꾼다. */
+export function loadErrorMessage(e: any): string {
+  const raw = String(e?.message || e || '').trim();
+  if (/failed to fetch|networkerror|network request failed|load failed/i.test(raw)) {
+    return '현재 서비스에 연결할 수 없습니다. 잠시 후 다시 시도하거나 시스템 관리자에게 문의하십시오.';
+  }
+  return raw || '조회 중 알 수 없는 오류가 발생했습니다.';
+}
+
 export function failed<T>(e: any): Loaded<T> {
   // 401/403 은 «없다»가 아니라 «내가 볼 수 없다»다 — 사용자가 할 일이 다르다.
   //
@@ -84,9 +95,10 @@ export function failed<T>(e: any): Loaded<T> {
     status: s === 401 || s === 403 || hidden ? 'forbidden' : 'error',
     value: null,
     error: e?.message
-      || (hidden ? '이 범위에서는 볼 수 없습니다 — 다른 조직을 선택하거나 권한을 요청하십시오.'
+      ? loadErrorMessage(e)
+      : (hidden ? '이 범위에서는 볼 수 없습니다 — 다른 조직을 선택하거나 권한을 요청하십시오.'
         : s === 401 || s === 403 ? '볼 권한이 없습니다.'
-          : String(e)),
+          : loadErrorMessage(e)),
     httpStatus: s,
   };
 }

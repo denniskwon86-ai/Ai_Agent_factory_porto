@@ -297,13 +297,19 @@ export function ExternalIntelligenceView() {
   const jobs = researchJobs.value || [];
   const candidates = researchCandidates.value || [];
   const canManage = Boolean(scope?.canManageStandard || scope?.unrestricted);
+  const loadUnavailable = [ready, indicators, sources, collectable, researchProfiles,
+    researchJobs, researchCandidates].some((state) => state.status === 'error');
+  // 읽지 못한 상태에서 등록·승인·수집을 허용하면 사용자는 현재 정본을 모른 채 덮어쓴다.
+  const canWrite = canManage && !loadUnavailable;
 
   return (
     <>
       <ScreenHead kicker="EXTERNAL INTELLIGENCE" title="대외 인텔리전스"
         description="확정된 외부 원천·지표·발표 시점(vintage)을 함께 보며, 기준계획에 쓸 수 있는 값인지 확인합니다."
-        chip={{ label: `${ready.value?.usable_for_baseline ?? 0}/${ready.value?.total ?? 0} 사용 가능`,
-          tone: ready.value?.blocked ? 'warn' : 'success' }} />
+        chip={{ label: ready.status === 'ok'
+          ? `${ready.value?.usable_for_baseline ?? 0}/${ready.value?.total ?? 0} 사용 가능`
+          : ready.status === 'loading' ? '확인 중' : '조회 불가',
+          tone: ready.status === 'ok' ? (ready.value?.blocked ? 'warn' : 'success') : 'muted' }} />
 
       <Banner tone="info" title="등록된 값과 사용할 수 있는 값은 다릅니다">
         승인된 원천과 요구 신뢰등급을 통과한 값만 기준계획에 사용됩니다. 등급이 부족하거나
@@ -313,6 +319,13 @@ export function ExternalIntelligenceView() {
       {!canManage && <Banner tone="warn" title="조회만 가능합니다">
         대외 원천·회사 조사 프로필·관측값의 등록과 승인은 데이터 관리자·플랫폼 관리자만 할 수
         있습니다. 현재 화면의 빈 수치와 접근 불가는 실제 0건을 뜻하지 않습니다.
+      </Banner>}
+
+      {loadUnavailable && <Banner tone="error" title="대외정보를 조회할 수 없어 변경 기능을 잠시 차단했습니다">
+        화면의 수치는 0건이 아니라 조회 불가 상태입니다. 연결이 복구된 뒤 다시 조회하십시오.
+        <div style={{ marginTop: 10 }}>
+          <button className="secondary-button" onClick={load}>다시 시도</button>
+        </div>
       </Banner>}
 
       {actionMessage && <Banner tone={actionMessage.tone === 'error' ? 'error' : 'info'}
@@ -331,8 +344,9 @@ export function ExternalIntelligenceView() {
       </div>
 
       <Panel kicker="COMPANY RESEARCH BOTS" title="회사 기준정보 기반 대외 조사"
-        action={<button className="secondary-button" disabled={!canManage}
-          title={canManage ? '' : '회사 조사 프로필을 등록할 권한이 없습니다.'}
+        action={<button className="secondary-button" disabled={!canWrite}
+          title={!canManage ? '회사 조사 프로필을 등록할 권한이 없습니다.'
+            : loadUnavailable ? '현재 상태를 조회할 수 없어 변경 기능을 잠시 사용할 수 없습니다.' : ''}
           onClick={() => setShowResearchForm((v) => !v)}>
           {showResearchForm ? '등록 취소' : '회사 조사 프로필 등록'}
         </button>}>
@@ -354,7 +368,7 @@ export function ExternalIntelligenceView() {
               hint="회사 기초 조사만 연결" />
           </div>
 
-          {canManage && showResearchForm && <div className="request-card" aria-label="회사 조사 프로필 등록">
+          {canWrite && showResearchForm && <div className="request-card" aria-label="회사 조사 프로필 등록">
             <div className="panel-body">
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0 14px' }}>
                 <FormField label="법인 ID" required>
@@ -424,11 +438,11 @@ export function ExternalIntelligenceView() {
                   <td><span className={`state-chip ${p.status === 'APPROVED' ? 'success' : 'warn'}`}>{p.status}</span><br />
                     <span className="afs-muted">지문 {p.fingerprint.slice(0, 10)}…</span></td>
                   <td><div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {p.status === 'DRAFT' && <button className="secondary-button" disabled={actionBusy || !canManage}
+                    {p.status === 'DRAFT' && <button className="secondary-button" disabled={actionBusy || !canWrite}
                       onClick={() => submitResearchProfile(p.profile_id)}>검토 요청</button>}
-                    {p.status === 'REVIEW_REQUIRED' && <button className="primary-button" disabled={actionBusy || !canManage}
+                    {p.status === 'REVIEW_REQUIRED' && <button className="primary-button" disabled={actionBusy || !canWrite}
                       onClick={() => approveResearch.ask(p)}>내용 지문 승인</button>}
-                    {p.status === 'APPROVED' && <button className="secondary-button" disabled={actionBusy || !canManage}
+                    {p.status === 'APPROVED' && <button className="secondary-button" disabled={actionBusy || !canWrite}
                       onClick={() => scheduleResearchJob(p.profile_id)}>회사 조사 예약</button>}
                   </div></td>
                 </tr>)}</tbody>
@@ -459,7 +473,7 @@ export function ExternalIntelligenceView() {
               <td>{BOT_LABELS[j.bot_kind]}</td><td>{j.status}</td><td>{j.profile_fingerprint.slice(0, 10)}…</td>
               <td>{j.requested_by}<br /><span className="afs-muted">{j.requested_at}</span></td>
               <td>{j.status === 'SCHEDULED'
-                ? <button className="primary-button" disabled={actionBusy || !canManage}
+                ? <button className="primary-button" disabled={actionBusy || !canWrite}
                   onClick={() => runResearchJob(j.job_id)}>dry-run 실행</button>
                 : (j.error || `후보 ${String(j.result_summary.candidate_count ?? 0)}건`)}</td>
             </tr>)}</tbody>
@@ -476,9 +490,9 @@ export function ExternalIntelligenceView() {
                     <span className="afs-muted">{c.source_url}</span><br />{c.summary}</td>
                   <td>{c.status}<br /><span className="afs-muted">지문 {c.content_hash.slice(0, 10)}…</span></td>
                   <td>{c.status === 'CANDIDATE_READY' ? <div style={{ display: 'flex', gap: 6 }}>
-                    <button className="secondary-button" disabled={actionBusy || !canManage}
+                    <button className="secondary-button" disabled={actionBusy || !canWrite}
                       onClick={() => decideCandidate(c, 'ACCEPTED')}>원천 후보 채택</button>
-                    <button className="danger-ghost" disabled={actionBusy || !canManage}
+                    <button className="danger-ghost" disabled={actionBusy || !canWrite}
                       onClick={() => decideCandidate(c, 'REJECTED')}>기각</button>
                   </div> : `검토자 ${c.reviewed_by || '미상'}`}</td>
                 </tr>)}</tbody>
@@ -487,12 +501,13 @@ export function ExternalIntelligenceView() {
       </Panel>
 
       <Panel kicker="SOURCES" title="대외 원천 등록부"
-        action={<button className="secondary-button" disabled={!canManage}
-          title={canManage ? '' : '대외 원천을 등록할 권한이 없습니다.'}
+        action={<button className="secondary-button" disabled={!canWrite}
+          title={!canManage ? '대외 원천을 등록할 권한이 없습니다.'
+            : loadUnavailable ? '현재 상태를 조회할 수 없어 변경 기능을 잠시 사용할 수 없습니다.' : ''}
           onClick={() => setShowSourceForm((v) => !v)}>
           {showSourceForm ? '등록 취소' : '새 원천 등록'}
         </button>}>
-        {canManage && showSourceForm && <div className="panel-body" aria-label="대외 원천 등록">
+        {canWrite && showSourceForm && <div className="panel-body" aria-label="대외 원천 등록">
           <Banner tone="info" title="등록은 승인이 아닙니다">
             원천의 사용 범위와 담당 부서를 기록합니다. 등록 뒤 별도 승인 전까지 어떤 값도 계획에 쓰이지 않습니다.
           </Banner>
@@ -557,7 +572,7 @@ export function ExternalIntelligenceView() {
                 <td>{s.enabled ? `승인 · ${s.approved_by || '승인자 미상'}` : '미승인'}</td>
                 <td>{s.refresh_frequency || '미정'}</td><td>{s.owner_department || '미정'}</td>
                 <td>{s.enabled ? <span className="state-chip success">사용 중</span>
-                  : <button className="secondary-button" disabled={actionBusy || !canManage}
+                  : <button className="secondary-button" disabled={actionBusy || !canWrite}
                     onClick={() => approve.ask(s.source_id)}>승인 검토</button>}</td>
               </tr>)}</tbody></table></div>}
         {approve.target && (() => {
@@ -575,7 +590,7 @@ export function ExternalIntelligenceView() {
       </Panel>
 
       <Panel kicker="COLLECTION" title="외부정보 수집 예행·적재">
-        <fieldset disabled={!canManage} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+        <fieldset disabled={!canWrite} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
         <div className="panel-body" aria-label="외부정보 수집">
           {collectable.status !== 'ok'
             ? <EmptyOrError state={collectable.status} error={collectable.error} onRetry={load}
@@ -758,7 +773,7 @@ export function ExternalIntelligenceView() {
                     </tr>)}</tbody></table></div>}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
-                <button className="secondary-button" disabled={!canManage || approvedSources.length === 0}
+                <button className="secondary-button" disabled={!canWrite || approvedSources.length === 0}
                   title={approvedSources.length === 0 ? '먼저 원천을 등록하고 승인해야 합니다.' : undefined}
                   onClick={() => setShowObservationForm((v) => !v)}>
                   {showObservationForm ? '입력 취소' : '관측값 등록'}
@@ -767,7 +782,7 @@ export function ExternalIntelligenceView() {
               {approvedSources.length === 0 && <p className="hint-line" style={{ marginTop: 7 }}>
                 승인된 원천이 없어 관측값을 기록할 수 없습니다. 원천 등록부에서 승인 절차를 먼저 완료하십시오.
               </p>}
-              {canManage && showObservationForm && <div className="request-card" aria-label="대외지표 관측값 등록">
+              {canWrite && showObservationForm && <div className="request-card" aria-label="대외지표 관측값 등록">
                 <div className="panel-body">
                   <Banner tone="info" title="발표판(vintage)과 원천을 함께 기록합니다">
                     같은 관측일의 값도 발표판에 따라 달라질 수 있습니다. 원천 없는 숫자나 오늘 날짜로 보정한 값은 받지 않습니다.

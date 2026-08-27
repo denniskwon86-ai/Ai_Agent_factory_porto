@@ -80,11 +80,26 @@ def test_Viewer에게_온톨로지와_대외정보_쓰기버튼을_활성으로_
     assert "disabled={proposalContext.status !== 'ok' || !proposalContext.value?.ready}" in ontology
     assert "const canManage = Boolean(scope?.canManageStandard || scope?.unrestricted)" in external
     assert 'title="조회만 가능합니다"' in external
-    assert 'disabled={!canManage}' in external
-    assert "<fieldset disabled={!canManage}" in external
-    assert "canManage && showResearchForm" in external
-    assert "canManage && showSourceForm" in external
-    assert "canManage && showObservationForm" in external
+    assert "const canWrite = canManage && !loadUnavailable" in external
+    assert 'disabled={!canWrite}' in external
+    assert "<fieldset disabled={!canWrite}" in external
+    assert "canWrite && showResearchForm" in external
+    assert "canWrite && showSourceForm" in external
+    assert "canWrite && showObservationForm" in external
+
+
+def test_대외정보_조회장애는_0건이나_기술문구로_보이지_않고_쓰기를_차단한다():
+    state = _read("frontend/src/design/DataState.tsx")
+    external = _read("frontend/src/components/ExternalIntelligenceView.tsx")
+
+    assert "failed to fetch|networkerror|network request failed|load failed" in state
+    assert "현재 서비스에 연결할 수 없습니다" in state
+    assert "const loadUnavailable = [ready, indicators, sources, collectable, researchProfiles" in external
+    assert "const canWrite = canManage && !loadUnavailable" in external
+    assert "화면의 수치는 0건이 아니라 조회 불가 상태입니다" in external
+    assert "disabled={!canWrite}" in external
+    assert "<fieldset disabled={!canWrite}" in external
+    assert "ready.status === 'loading' ? '확인 중' : '조회 불가'" in external
 
 
 def test_회사문맥_변경은_온톨로지의_객체와_관계_양쪽을_다시_읽는다():
@@ -191,6 +206,19 @@ def test_로그인_세션의_tenant로_이전_브라우저_회사와_범위를_�
     assert "setEnterpriseContext({ tenantId: sessionTenant, scopeNodeId: '' })" in app
     assert "selected.tenantId !== sessionTenant" in ctx
     assert "setEnterpriseContext({ tenantId: sessionTenant, scopeNodeId: '' })" in ctx
+
+
+def test_백엔드_연결장애는_로그아웃이나_빈화면으로_오인시키지_않는다():
+    app = _read("frontend/src/App.tsx")
+
+    assert "'checking' | 'in' | 'out' | 'offline'" in app
+    assert "setState('offline')" in app
+    assert 'aria-label="서비스 연결 장애"' in app
+    assert "저장된 로그인 정보는 유지됩니다" in app
+    assert "비밀번호를 다시 입력할 필요가 없습니다" in app
+    assert ">\n            다시 연결하기\n          </button>" in app
+    offline = app[app.index("if (state === 'offline')"):app.index("if (state === 'out')")]
+    assert '<LoginPage' not in offline
 
 
 def test_LAXS_확정_B안이_제품셸과_로그인에_적용되고_파비콘은_별도_마크를_쓴다():

@@ -1237,12 +1237,13 @@ function AppShell() {
  * ⚠️ 서버에 닿지 못한 경우를 «미인증» 과 구분한다. 백엔드가 꺼져 있는 것을 로그인 화면으로
  *   답하면 사용자는 비밀번호를 의심한다. */
 export default function App() {
-  const [state, setState] = useState<'checking' | 'in' | 'out'>('checking');
+  const [state, setState] = useState<'checking' | 'in' | 'out' | 'offline'>('checking');
   const [offline, setOffline] = useState('');
 
   const check = useCallback(async () => {
     setOffline('');
     if (!getSessionToken()) { setState('out'); return; }
+    setState('checking');
     try {
       const r = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
         headers: { 'X-Session-Token': getSessionToken() },
@@ -1263,8 +1264,8 @@ export default function App() {
       setSessionToken(''); setActingUser('');
       setState('out');
     } catch {
-      setOffline('서버에 연결하지 못했습니다. 백엔드가 실행 중인지 확인하십시오.');
-      setState('out');
+      setOffline('현재 서비스에 연결할 수 없습니다. 저장된 로그인 정보는 유지됩니다. 잠시 후 다시 시도하거나 시스템 관리자에게 문의하십시오.');
+      setState('offline');
     }
   }, []);
 
@@ -1278,15 +1279,33 @@ export default function App() {
       </div>
     );
   }
+  if (state === 'offline') {
+    return (
+      <div className="afs-scope afs-page"
+        style={{ minHeight: '100dvh', width: '100%', display: 'grid', placeItems: 'center', padding: 24 }}>
+        <section aria-label="서비스 연결 장애"
+          style={{
+            width: 'min(520px, 100%)', display: 'flex', flexDirection: 'column', gap: 18,
+            padding: '34px 36px', border: '1px solid var(--surface-border)', borderRadius: 12,
+            background: 'var(--surface-card)', boxShadow: 'var(--surface-shadow)', textAlign: 'center',
+          }}>
+          <img src="/brand/laxs-logo-primary-on-white-v3.png" alt="LAXS"
+            style={{ display: 'block', width: 250, maxWidth: '82%', height: 'auto', margin: '0 auto 4px' }} />
+          <Banner tone="warn" title="서비스 연결을 확인할 수 없습니다">{offline}</Banner>
+          <p className="afs-muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+            비밀번호를 다시 입력할 필요가 없습니다. 연결이 복구되면 같은 업무 문맥으로 돌아갑니다.
+          </p>
+          <button className="primary-button" type="button" onClick={check}
+            style={{ minHeight: 44, fontSize: 15 }}>
+            다시 연결하기
+          </button>
+        </section>
+      </div>
+    );
+  }
   if (state === 'out') {
     return (
       <ErrorBoundary>
-        {offline && (
-          <div style={{ position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)',
-            zIndex: 10, maxWidth: 520 }}>
-            <Banner tone="warn" title="서버에 연결하지 못했습니다">{offline}</Banner>
-          </div>
-        )}
         <LoginPage onLoggedIn={() => {
           setState('in');
           // 초기 비밀번호 상태는 로그인 뒤 상단 SessionBar가 지속적으로 보여 주고 바로 옆
