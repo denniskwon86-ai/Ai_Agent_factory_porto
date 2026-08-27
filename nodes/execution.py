@@ -1134,6 +1134,52 @@ def _platform_auth_review_text(hits: list) -> str:
     return "\n\n".join(parts)
 
 
+def _repeat_count(text: str, history: list) -> tuple:
+    """이 지적이 **몇 번째 반복인가**. `(반복수, 근거)` 를 돌려준다.
+
+    ## ⚠️⚠️ [2026-08-27 실측] 앞 200자 **완전 일치**로는 못 잡는다
+
+    종전 규칙은 `공백정규화 + 소문자 + 앞 200자` 가 **똑같아야** 반복으로 셌다. 그런데
+    리뷰어는 매 회차 표현을 조금씩 바꾼다. `CRM003` E2E-05 의 실제 이력:
+
+        1회차  「…일부 항목이 미흡합니다. 1. **성능 - … 3초 이내 응답 시간 검증**: …」
+        3회차  「…**여전히** 일부 항목이 미흡합니다. 1. **성능 - … 3초 이내 응답 시간 검증**: …」
+
+    내용은 같은데 「여전히」 한 낱말 때문에 다른 지적으로 셌고, 자동 상신이 한 번도
+    발동하지 않아 상한(8)까지 소진하고 `FAILED_REVIEW` 로 죽었다.
+
+    ★ 그래서 **유사도**로 본다(`difflib`, 표준 라이브러리). 완전 일치는 이 규칙의
+      부분집합이므로 종전 동작을 잃지 않는다.
+    ⚠️⚠️ **문턱은 실측으로 잡았다.** `CRM003` E2E-05 의 실제 이력 3건을 쌍별로 재니
+
+        1회차 vs 3회차  0.493   ← 같은 지적을 고쳐 쓴 것
+        1회차 vs 2회차  0.137   ← 다른 지적
+        2회차 vs 3회차  0.140   ← 다른 지적
+
+      「같은 것」과 「다른 것」 사이가 0.49 대 0.14 로 넓다. 그래서 **0.45** 로 잡는다.
+      처음에 짐작으로 0.75 를 넣었더니 실제 반복을 못 잡았다 — 짐작한 상수는 재 봐야 한다.
+    ⚠️ 다만 **표본이 한 건**이다. 이 문턱만 믿지 않는다 — 아래 홉 바닥이 진짜 보장이고,
+      유사도는 그보다 **일찍** 빠져나오게 하는 보조 수단이다.
+    """
+    import difflib
+    import re as _re
+
+    def _norm(s):
+        return _re.sub(r"\s+", " ", str(s)).strip().lower()[:300]
+
+    cur = _norm(text)
+    if not cur:
+        return 0, ""
+    thr = getattr(config, "REPEAT_FEEDBACK_SIMILARITY", 0.45)
+    n, best = 0, 0.0
+    for h in (history or []):
+        r = difflib.SequenceMatcher(None, cur, _norm(h)).ratio()
+        if r >= thr:
+            n += 1
+            best = max(best, r)
+    return n, (f"유사도 {best:.2f}" if n else "")
+
+
 async def run_reviewer(state: Any) -> Dict[str, Any]:
     """Reviewer(개발 엔지니어, 단위 관점) - 코드 정확성·버그·해당 단위 기능 동작 검증 게이트.
     코드리뷰 단계의 PASS/REWORK_DEV/ESCALATE_PM 3분기 및 Git 커밋/WBS 완료 로직 보존, 단계 기준 채점 기록.
@@ -1745,23 +1791,34 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
     #   **결정론적으로** 승격한다. 이것이 없으면 상한까지 소진하고 그냥 죽는다.
     _rework_hist = list(getattr(state_obj, "rework_history", []) or [])
     if reviewer_decision == "REWORK_DEV" and review_text:
-        _norm = re.sub(r'\s+', ' ', str(review_text)).strip().lower()[:200]
-        _repeats = sum(1 for h in _rework_hist
-                       if re.sub(r'\s+', ' ', str(h)).strip().lower()[:200] == _norm)
+        _repeats, _why = _repeat_count(review_text, _rework_hist)
         _limit = getattr(config, "REPEAT_FEEDBACK_ESCALATE_AFTER", 2)
-        if _repeats >= _limit:
-            print(f"⬆️ [Reviewer] 동일 지적 {_repeats + 1}회 반복 감지 — 개발자가 수행할 수 없는 "
-                  f"지시일 가능성이 큽니다. PM 으로 자동 상신(ESCALATE_PM)합니다.")
+        #: ★★★ [2026-08-27 실측] **홉 바닥**을 함께 둔다.
+        #:
+        #: ⚠️⚠️ 반복 판정이 놓쳐도 상한(8)까지 가면 `FAILED_REVIEW` 로 **그냥 죽는다.**
+        #:   그것은 상신보다 언제나 나쁘다 — 죽으면 아무도 못 고치고, 상신하면 PM 이
+        #:   요구를 조정할 수 있다. 그래서 「몇 번 더 시켜도 안 되면 올린다」를 홉으로도
+        #:   보장한다. 수렴 중이더라도 어차피 상한에서 죽을 참이므로 손해가 없다.
+        _cap = getattr(config, "GLOBAL_MAX_SUPERVISOR_HOPS", 8)
+        _floor = max(2, int(_cap * 0.6))
+        if _repeats >= _limit or hops >= _floor:
+            if _repeats >= _limit:
+                _reason = f"동일 지적 {_repeats + 1}회 반복({_why})"
+            else:
+                _reason = f"재작업 {hops}회차 — 상한({_cap}) 전에 상신"
+            print(f"⬆️ [Reviewer] {_reason} — 개발자가 수행할 수 없는 지시일 가능성이 "
+                  f"큽니다. PM 으로 자동 상신(ESCALATE_PM)합니다.")
             reviewer_decision = "ESCALATE_PM"
             review_text = (
-                f"[자동 상신] 아래 지적이 {_repeats + 1}회 반복되었으나 해소되지 않았습니다. "
-                f"실무 재작업으로는 수렴하지 않으므로 기획·설계 수준의 조정이 필요합니다.\n"
-                f"반복된 지적: {review_text}\n"
+                f"[자동 상신] {_reason}. 실무 재작업으로는 수렴하지 않으므로 기획·설계 "
+                f"수준의 조정이 필요합니다.\n"
+                f"마지막 지적: {review_text}\n"
                 f"검토 요청: (1) 이 요구가 현재 시스템에서 **수행 가능한지** "
                 f"(2) 기술명세·아키텍처에 상충이 없는지 (3) 요구를 조정하거나 태스크를 분할할지."
             )
         _rework_hist.append(str(review_text)[:1000])
         _rework_hist = _rework_hist[-8:]
+
 
     workspace_root = state_obj.workspace_root
     task_id = state_obj.current_sprint_task_id
