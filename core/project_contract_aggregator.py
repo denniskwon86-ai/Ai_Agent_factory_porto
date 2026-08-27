@@ -35,6 +35,7 @@ WBS 에서 사라진 태스크의 데이터셋은 **새 합산에서 즉시 제�
   덕분에 `label`·`purpose` 처럼 지문에 안 들어가는 문구는 충돌도 아니다 — 문구가
   다르다고 막으면 사람이 문구를 맞추느라 의미를 안 보게 된다.
 """
+import re
 from typing import Any, Dict, List, NamedTuple, Tuple
 
 from core import app_runtime_contract as arc
@@ -87,6 +88,58 @@ def _intent_semantics(intent: Any) -> Dict[str, str]:
     #: `reason` 은 설명 문구다 — 지문에도 안 들어간다. 여기서도 충돌 근거가 아니다.
     return {"status": str(i.get("status", "")).strip(),
             "user_decision": str(i.get("user_decision", "")).strip()}
+
+
+_FR_RE = re.compile(r"\bFR-\d{2,3}\b")
+
+
+def _task_requirements(task: Any) -> set:
+    """태스크가 **자기 것이라고 말한 요구들**. 제목·목표·범위에서 FR-ID 를 뽑는다.
+
+    ⚠️ `out_of_scope` 는 보지 않는다 — 거기 적힌 것은 「이 태스크가 안 하는 일」이다.
+      섞으면 하지 않기로 한 것까지 계약에 요구하게 된다."""
+    t = task if isinstance(task, dict) else {}
+    parts = [str(t.get("title", "")), str(t.get("goal", ""))]
+    scope = t.get("scope")
+    if isinstance(scope, list):
+        parts += [str(x) for x in scope]
+    return set(_FR_RE.findall(" ".join(parts)))
+
+
+def _coverage_errors(tasks_in_scope: Any, intents: Any) -> list:
+    """★★★ [2026-08-27 실측] **만들 수 없는 요구가 말없이 사라지면 안 된다.**
+
+    ## ⚠️⚠️ 무엇이 있었나
+
+    `CRM002` 의 RFP 에 `FR-008`(사용자 권한 제어)이 **Must** 로 있었고 WBS 에 그 태스크도
+    생겼다. 그런데 계약에는 —
+
+        FR-009 (파일 첨부)  → `unsupported_requirements` 에 기록
+                              (「데이터 평면에 바이너리가 없다」· user_decision=WAIT)
+        FR-008 (권한 제어)  → **능력에도 없고 미지원 목록에도 없다**
+
+    아무도 「이 요구는 만들 수 없습니다」라고 말하지 않았다. 요구가 **증발**했다.
+    만들 수 없는 것을 말없이 지우는 것은, 만들었다고 말하는 것 다음으로 나쁘다 —
+    사용자는 그것이 만들어지는 줄 알고 인수한다.
+
+    ★ 그래서 **집합 비교**로 막는다. 정규식 판정이 아니라 「태스크가 자기 것이라 말한
+      FR」과 「계약이 다룬 FR」의 차집합이므로 오탐이 없다.
+    ⚠️ 능력으로 다루든 미지원으로 적든 **둘 다 «다뤘다»** 다. 강제하는 것은 「만들라」가
+      아니라 **「말하라」** 이다 — 못 만들면 못 만든다고 적으면 통과한다.
+    """
+    covered = {str((i or {}).get("requirement_ref", "")).strip()
+               for i in (intents or []) if isinstance(i, dict)}
+    out = []
+    for t in (tasks_in_scope or []):
+        tid = str((t or {}).get("task_id", "")).strip()
+        missing_fr = sorted(_task_requirements(t) - covered)
+        if missing_fr:
+            out.append(
+                f"{tid}: 계약이 {', '.join(missing_fr)} 를 다루지 않습니다 — 만들 수 "
+                f"있으면 `capability_intents` 에 능력으로, **만들 수 없으면 그 사실을** "
+                f"적으십시오(못 만드는 능력 이름 + `user_decision`). 말없이 빠지면 "
+                f"사용자는 그 요구가 만들어지는 줄 알고 인수합니다.")
+    return out
 
 
 def aggregate(tasks: Any, drafts: Any) -> AggregateResult:
@@ -174,6 +227,14 @@ def aggregate(tasks: Any, drafts: Any) -> AggregateResult:
             "계약 대상 태스크인데 계약 초안이 없습니다: " + ", ".join(missing)
             + " — 「데이터를 안 쓰는 앱(데이터셋 0개)」과 「아직 계약을 안 쓴 태스크」는 "
               "다릅니다. Tech Lead 가 초안을 만들어야 합니다.")
+
+    #: ★★★ [2026-08-27] **요구가 말없이 사라지지 않게 한다.**
+    #: ⚠️ 초안이 아예 없는 태스크는 위 `missing` 이 이미 말했으므로 여기서 또 말하지
+    #:   않는다 — 같은 사실을 두 번 말하면 사람은 두 가지 문제로 읽는다.
+    _in = set(included)
+    _scoped = [t for t in normalized if str((t or {}).get("task_id", "")) in _in]
+    #: `intents` 는 `{(ref, cap): (tid, 원문, 의미)}` 다 — 원문만 넘긴다.
+    errors.extend(_coverage_errors(_scoped, [v[1] for v in intents.values()]))
 
     classes = sorted(set(app_class_by_task.values()))
     if len(classes) > 1:

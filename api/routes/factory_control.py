@@ -1183,6 +1183,31 @@ async def start_sprint(project_id: str, req: SprintStartRequest,
     req.project_state_payload["runtime_contract_profile"] = \
         _read_project_runtime_contract_profile(workspace_root)
 
+    # ── [2026-08-27] 요구문에 **이 플랫폼의 확정 사실**을 못박는다 ──────────────
+    #
+    # ★★★ 여기가 요구가 들어오는 **한 지점**이다. `context_engine` 은 `initial_idea` 를
+    #   모든 에이전트 문맥에 `[초기 기획]` 으로 넣으므로, 여기서 고치면 RFP 작성자·
+    #   비평가·PRD·WBS·그라운딩이 **전부 같은 사실**을 본다.
+    #
+    # ⚠️⚠️ 왜 뒤에서 못 잡았나(실측 2026-08-27):
+    #   ① 고지문은 `debate.run_debate` 가 **작성자에게만** 붙인다 —
+    #      비평가는 이 플랫폼이 무엇을 못 만드는지 **한 글자도 모른 채** 비평한다.
+    #   ② 채점 8단계 35개 검사 중 「만들 수 있는가」는 **0개**인데 완성도·추적성은
+    #      **7개**다. `must_have_components` 는 「빠짐없이 있는가」를 보므로, 루브릭이
+    #      오히려 그 요구의 **포함을 보상**했다.
+    #   ⇒ 측정되는 것과 부탁하는 것이 싸우면 측정되는 쪽이 이긴다. 그래서 부탁을
+    #      늘리지 않고 **목표 자체**를 고친다.
+    #
+    # ⚠️ 원문은 지우지 않는다. 「호스트가 제공(구현 대상 아님)」으로 적을 길을 열어 주면
+    #   완성도와 실현가능성이 **동시에** 만족된다 — 둘이 싸우지 않는다.
+    # ⚠️ 계약 프로필이 꺼진 레거시에는 붙이지 않는다(정규화기가 그렇게 판정한다).
+    from core.requirement_normalizer import normalize_idea
+    _idea = req.project_state_payload.get("initial_idea")
+    if _idea:
+        req.project_state_payload["initial_idea"] = normalize_idea(
+            _idea,
+            enforced=bool(req.project_state_payload["runtime_contract_profile"]))
+
     # ── [D-019] 소유권도 같은 권위 원본에서 주입한다 ─────────────────────────────
     #
     # ★ 여기에 소유권만 빠져 있었다. `ProjectState.owner_dept_id` 는 **읽는 곳이 3군데인데
