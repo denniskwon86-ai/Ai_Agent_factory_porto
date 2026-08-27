@@ -123,7 +123,7 @@ def test_agent_config_writes_require_data_admin(monkeypatch):
         assert c.delete("/api/v1/factory/templates/x").status_code in BLOCKED
 
 
-def test_skill_approval_requires_data_admin(monkeypatch):
+def test_skill_approval_requires_ai_governance_capability(monkeypatch):
     """★★★ 승인은 에이전트의 스킬 문서를 **실제로 고친다** — 자격 없는 승인은 관문이 아니다."""
     touched = []
     import core.skill_evolution as se
@@ -132,13 +132,23 @@ def test_skill_approval_requires_data_admin(monkeypatch):
     monkeypatch.setattr(se.skill_evolution, "reject_proposal",
                         lambda pid: touched.append(pid) or True)
     for uid, user in (("", None),
-                      ("staff@ls", {"user_id": "staff@ls", "status": "active"})):
+                      ("staff@ls", {"user_id": "staff@ls", "status": "active"}),
+                      ("data@ls", {"user_id": "data@ls", "status": "active",
+                                   "is_data_admin": True})):
         c = TestClient(_app(
             monkeypatch, user_id=uid, user=user,
             scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"})}))
-        assert c.post("/skills/proposals/prop_1/approve").status_code == 403
-        assert c.post("/skills/proposals/prop_1/reject").status_code == 403
+        assert c.post("/skills/proposals/prop_1/approve").status_code in BLOCKED
+        assert c.post("/skills/proposals/prop_1/reject").status_code in BLOCKED
     assert touched == [], "차단됐는데 스킬 문서를 건드렸다"
+
+    ai = TestClient(_app(
+        monkeypatch, user_id="ai@ls",
+        user={"user_id": "ai@ls", "status": "active", "is_ai_admin": True},
+        scope_kw={"unrestricted": False, "readable_dept_ids": frozenset({"dept-a"})}))
+    assert ai.post("/skills/proposals/prop_1/approve").status_code == 200
+    assert ai.post("/skills/proposals/prop_2/reject").status_code == 200
+    assert touched == ["prop_1", "prop_2"]
 
 
 def test_llm_recommend_is_not_open_to_anonymous(monkeypatch):

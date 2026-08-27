@@ -30,6 +30,8 @@ export type ActingScope = {
   canManageStandard: boolean;
   canEditOrg: boolean;
   canRunEnterprise: boolean;
+  /** 서버 권한 정본이 확정한 관리자 capability. 화면은 문자열을 새로 계산하지 않는다. */
+  adminCapabilities: string[];
 };
 
 /** 아직 모르는 상태. ⚠️ 기본값은 **모두 거짓**이다 — 모르는 동안 «할 수 있다»고 그리면
@@ -37,7 +39,7 @@ export type ActingScope = {
 export const UNKNOWN_SCOPE: ActingScope = {
   userId: '', displayName: '', identified: false, registered: false, retired: false,
   isAdmin: false, unrestricted: false, canManageStandard: false, canEditOrg: false,
-  canRunEnterprise: false,
+  canRunEnterprise: false, adminCapabilities: [],
 };
 
 function parse(d: any): ActingScope {
@@ -52,6 +54,8 @@ function parse(d: any): ActingScope {
     canManageStandard: Boolean(d?.can_manage_standard),
     canEditOrg: Boolean(d?.can_edit_org),
     canRunEnterprise: Boolean(d?.can_run_enterprise),
+    adminCapabilities: Array.isArray(d?.admin?.capabilities)
+      ? d.admin.capabilities.map((v: unknown) => String(v)) : [],
   };
 }
 

@@ -1136,3 +1136,26 @@ UI 계약 회귀                           PASS · 63 tests
 frontend npm run build                 PASS · 3,492 modules
 나머지 역할·저장소 장애·실제 실패 상태    HOLD
 ```
+
+## 25. 2026-08-27 U9 임원·AI 거버넌스 역할 감사
+
+1280×720에서 경영 홈에 세로 스크롤바가 생긴 실제 콘텐츠 폭은 1265px였다. 작업면 3열은
+252/693/320px로 맞았지만 공통 헤더가 11px 넘쳤다. 1280 구간의 헤더 폭 예산을 다시 맞춰
+행동 버튼을 숨기지 않고 문서 `clientWidth == scrollWidth == 1265`를 확인했다.
+
+임원 계정은 `space=report`의 의사결정 센터·대내외 발간 탭을 실제로 눌러 참여자 범위와 발간
+게이트를 확인했다. 보안 검토자 계정은 서버 정본상 AI 거버넌스 관리자다. Agent Governance에서는
+승인이 가능했지만 AI 스킬 진화는 오래된 데이터 관리자 판정을 써서 막혔다. 프런트는 `/org/me`의
+`admin.capabilities` 중 `skill.approve`, 서버는 `require_caps(SKILL_APPROVE)`를 보도록 통일했다.
+데이터 관리자는 더 이상 스킬을 승인하지 못하고, AI 관리자는 승인·거부를 볼 수 있다. 같은 AI
+관리자가 회사 구성·조직도에서는 조회 전용인 상태도 그대로여서 권한을 전역으로 넓히지 않았다.
+
+```text
+경영 홈 1265px 실제 폭                 PASS · 가로 넘침 0
+임원 결정·발간 실제 탭                 PASS · 2/2
+AI 관리자 스킬 승인                    PASS · 화면/API 동일 capability
+권한 비확대 대조군                     PASS · 회사·조직 조회 전용
+집중 회귀                              PASS · 76 tests
+frontend build                         PASS · 3,492 modules
+오류·장애·실패 상태                    HOLD
+```

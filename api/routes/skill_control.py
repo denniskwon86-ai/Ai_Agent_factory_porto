@@ -13,8 +13,9 @@ core.skill_evolution.SkillEvolutionEngine 이 담당하며, 본 라우터는 그
 import re
 from fastapi import APIRouter, Depends, HTTPException
 
-from api.deps import (Principal, assert_can_manage_standard, current_principal,
+from api.deps import (Principal, current_principal, require_caps,
                       visibility_block_reason)
+from core.admin_capability import SKILL_APPROVE
 from core.enterprise_context import audit
 from core.skill_evolution import skill_evolution
 
@@ -26,7 +27,10 @@ router = APIRouter(prefix="/skills", tags=["Skill Evolution"])
 #   스킬 문서(`skills/*.md`)를 **실제로 고친다.** 그 문서는 다음 실행부터 에이전트가 따르는
 #   행동 규칙이므로, 승인 한 번이 이후 모든 산출물의 만들어지는 방식을 바꾼다.
 #   ⚠️ 「제안을 검토·승인한다」는 것 자체가 사람의 판단을 요구하는 관문인데, 그 관문에 자격이
-#     없으면 관문이 아니다. 승인은 데이터 표준 관리자·관리자만 할 수 있어야 한다.
+#     없으면 관문이 아니다. 승인은 AI 거버넌스 관리자·플랫폼 관리자만 할 수 있어야 한다.
+#   ★ 권한 정본(`core.admin_capability`)은 데이터 표준 승인과 AI 행동 규칙 승인을 분리한다.
+#     이 라우트가 종전 `assert_can_manage_standard`를 써서 AI 관리자를 막고 데이터 관리자를
+#     통과시킨 것은 같은 메뉴군의 Agent Governance와 정반대인 오래된 권한 축이었다.
 def _assert_readable(p: Principal):
     """목록 조회 자격. 제안 본문에는 실패 사례와 내부 규칙이 담긴다."""
     reason = visibility_block_reason(p)
@@ -58,7 +62,7 @@ async def list_proposals(p: Principal = Depends(current_principal)):
 @router.post("/proposals/{proposal_id}/approve")
 async def approve_proposal(proposal_id: str, p: Principal = Depends(current_principal)):
     """제안을 승인하고 해당 에이전트의 스킬 마크다운(skills/*.md)에 규칙을 반영한다."""
-    assert_can_manage_standard(p)
+    require_caps(p, SKILL_APPROVE, resource="skill_proposal", action="approve")
     _safe_proposal_id(proposal_id)
     ok = skill_evolution.apply_approved_update(proposal_id)
     if not ok:
@@ -74,7 +78,7 @@ async def approve_proposal(proposal_id: str, p: Principal = Depends(current_prin
 @router.post("/proposals/{proposal_id}/reject")
 async def reject_proposal(proposal_id: str, p: Principal = Depends(current_principal)):
     """제안을 거부하고 rejected 보관소로 이동한다(스킬 파일은 변경하지 않음)."""
-    assert_can_manage_standard(p)
+    require_caps(p, SKILL_APPROVE, resource="skill_proposal", action="reject")
     _safe_proposal_id(proposal_id)
     ok = skill_evolution.reject_proposal(proposal_id)
     if not ok:

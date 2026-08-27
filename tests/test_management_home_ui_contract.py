@@ -54,10 +54,23 @@ def test_1280_제품셸은_사용자이름만_접고_핵심행동을_화면안�
     assert 'className="afs-session-name afs-muted"' in session
     assert "title={me ? (me.display_name || me.user_id) : '사용자 확인 중'}" in session
     assert ".afs-session-name { max-width: 48px !important; }" in shell_css
-    assert "grid-template-columns: 168px 225px minmax(430px, 1fr) auto" in shell_css
+    assert "grid-template-columns: 160px 210px minmax(405px, 1fr) auto" in shell_css
     assert "gap: 6px;" in shell_css
     assert 'aria-label="로그아웃"' in session
     assert "＋ 새 업무" in _read("frontend/src/components/ProductShell.tsx")
+
+
+def test_AI스킬_승인은_데이터관리자가_아니라_서버의_AI권한정본을_쓴다():
+    scope = _read("frontend/src/lib/actingScope.ts")
+    panel = _read("frontend/src/components/SkillEvolutionPanel.tsx")
+    route = _read("api/routes/skill_control.py")
+
+    assert "adminCapabilities" in scope
+    assert "d?.admin?.capabilities" in scope
+    assert "adminCapabilities.includes('skill.approve')" in panel
+    assert "canManageStandard || scope?.unrestricted" not in panel
+    assert "require_caps(p, SKILL_APPROVE" in route
+    assert "assert_can_manage_standard(p)" not in route
 
 
 def test_회사문맥_변경은_온톨로지의_객체와_관계_양쪽을_다시_읽는다():
@@ -523,6 +536,13 @@ def test_긴_결정_내용은_상단_컨트롤을_밀지_않고_패널_안에서
     assert "overflow:hidden" in copy_css
     assert "overflow-y:auto" in content_css
     assert "flex:0 0 auto" in css, "해결 버튼은 스크롤 내용 밖에서 항상 보여야 한다"
+
+
+def test_1280_세로스크롤바가_생겨도_경영홈은_가로로_넘치지_않는다():
+    css = _read("frontend/src/design/enterprise-canvas.css")
+
+    responsive = css.split("@media(max-width:1280px){", 1)[1].split("}", 1)[0]
+    assert "grid-template-columns:252px minmax(0,1fr) 320px" in responsive
 
 
 def test_DATA_SW_TWIN은_업무단계가_아니라_보조정보_레이어로_설명된다():

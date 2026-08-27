@@ -65,7 +65,8 @@ export function SkillEvolutionPanel({ onClose, page = false }: { onClose: () => 
 
   const rows = list.value || [];
   const current = rows.find((r) => r.id === selected) || null;
-  const canDecide = Boolean(scope?.canManageStandard || scope?.unrestricted);
+  // AI 행동 규칙 승인은 데이터 표준 승인이 아니다. 서버의 `skill.approve` 정본을 그대로 쓴다.
+  const canDecide = Boolean(scope?.adminCapabilities.includes('skill.approve'));
 
   const act = async (label: string, fn: () => Promise<unknown>, note: string) => {
     setBusy(label); setErr(null); setFlash(null);
@@ -152,7 +153,7 @@ export function SkillEvolutionPanel({ onClose, page = false }: { onClose: () => 
           {!canDecide && list.status === 'ok' && (
             <Banner tone="warn" title="검토만 가능합니다">
               승인·거부 권한이 없습니다. 승인은 에이전트의 행동 규칙을 <b>영구히</b> 바꾸므로
-              데이터 관리자·관리자만 할 수 있습니다.
+              AI 거버넌스 관리자·플랫폼 관리자만 할 수 있습니다.
             </Banner>
           )}
 
@@ -306,7 +307,7 @@ export function SkillEvolutionPanel({ onClose, page = false }: { onClose: () => 
                     </div>
                   ) : (
                     <p className="hint-line">
-                      승인·거부 권한이 없습니다 — 데이터 관리자에게 검토를 요청하십시오.
+                      승인·거부 권한이 없습니다 — AI 거버넌스 관리자에게 검토를 요청하십시오.
                     </p>
                   )}
                 </div>
