@@ -111,7 +111,7 @@ export function ProductShell({
         <button type="button" className="afs-icon-action" onClick={onAbout}
           aria-label="LAXS 시스템 안내" title="LAXS 시스템 안내">ⓘ</button>
         <button type="button" className="afs-icon-action" onClick={onSettings}
-          aria-label="환경설정 · 관리자">⚙</button>
+          aria-label="환경설정" title="환경설정">⚙</button>
         <button type="button" className="afs-primary-action" onClick={onNewWork}>
           ＋ 새 업무
         </button>

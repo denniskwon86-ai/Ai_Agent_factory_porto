@@ -1003,6 +1003,20 @@ def test_회사구성_제품페이지는_실제단계와_실행문맥을_자비�
     assert "실제와 가상은 섞지 않습니다" in panel
 
 
+def test_회사구성은_일반사용자에게_쓰기행동을_약속하지_않는다():
+    panel = _read("frontend/src/components/CompanySetupPanel.tsx")
+    shell = _read("frontend/src/components/ProductShell.tsx")
+
+    assert "actingScope.load()" in panel
+    assert "const canEdit = Boolean(actorScope?.canEditOrg)" in panel
+    assert "조직 편집 권한이 없어 회사 구성을 조회만 할 수 있습니다" in panel
+    assert "available_actions: !canEdit" in panel
+    assert "disabled={!canEdit || !id.trim()" in panel
+    assert "disabled={!canEdit || !!busy || rows.length === 0" in panel
+    assert 'aria-label="환경설정" title="환경설정"' in shell
+    assert 'aria-label="환경설정 · 관리자"' not in shell
+
+
 def test_U6_LLM_텔레메트리는_에이전트_제품셸_아래_독립페이지로_열린다():
     app = _read("frontend/src/App.tsx")
     shell = _read("frontend/src/components/ProductShell.tsx")

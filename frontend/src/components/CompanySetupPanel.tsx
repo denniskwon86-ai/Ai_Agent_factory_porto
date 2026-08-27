@@ -11,6 +11,7 @@ import {
   type EcmNode, type Entity, type Profile, type Tenant, type ThreadNode,
   type ThreadOverlay,
 } from '../lib/companyApi';
+import { actingScope, type ActingScope } from '../lib/actingScope';
 import { useOperatingContext } from '../lib/operatingContext';
 import { fetchCanvas } from '../lib/canvasApi';
 
@@ -64,12 +65,15 @@ function Section({ title, desc, children }: {
   );
 }
 
-function Notice({ tone, children }: { tone: 'ok' | 'err'; children: React.ReactNode }) {
+function Notice({ tone, children }: { tone: 'ok' | 'warn' | 'err'; children: React.ReactNode }) {
+  const bg = tone === 'ok' ? 'var(--state-success-bg)'
+    : tone === 'warn' ? 'var(--state-warn-bg)' : 'var(--state-error-bg)';
+  const fg = tone === 'ok' ? 'var(--state-success-fg)'
+    : tone === 'warn' ? 'var(--state-warn-fg)' : 'var(--state-error-fg)';
   return (
     <div style={{
       marginTop: 8, padding: '6px 10px', fontSize: 13, borderRadius: 6,
-      background: tone === 'ok' ? 'var(--state-success-bg)' : 'var(--state-error-bg)',
-      border: `1px solid ${tone === 'ok' ? 'var(--state-success-fg)' : 'var(--state-error-fg)'}`,
+      background: bg, border: `1px solid ${fg}`,
     }}>{children}</div>
   );
 }
@@ -97,6 +101,7 @@ function findNodePath(rows: EcmNode[], nodeId: string, parents: EcmNode[] = []):
 
 export function CompanySetupPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   const ctx = useOperatingContext();
+  const [actorScope, setActorScope] = useState<ActingScope | null>(actingScope.peek());
   const [tab, setTab] = useState<Tab>('company');
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [entities, setEntities] = useState<Entity[] | null>(null);
@@ -105,6 +110,15 @@ export function CompanySetupPanel({ onClose, page = false }: { onClose: () => vo
   const [ok, setOk] = useState('');
   const [busy, setBusy] = useState('');
   const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    actingScope.load().then((value) => { if (alive) setActorScope(value); })
+      .catch(() => { if (alive) setActorScope(null); });
+    const unsubscribe = actingScope.subscribe((value) => { if (alive) setActorScope(value); });
+    return () => { alive = false; unsubscribe(); };
+  }, []);
+  const canEdit = Boolean(actorScope?.canEditOrg);
 
   useEffect(() => {
     let alive = true;
@@ -187,21 +201,24 @@ export function CompanySetupPanel({ onClose, page = false }: { onClose: () => vo
           ))}
         </div>}
 
+        {!canEdit && <Notice tone="warn">{actorScope
+          ? '조직 편집 권한이 없어 회사 구성을 조회만 할 수 있습니다 — 변경은 관리자에게 요청하십시오.'
+          : '회사 구성 편집 권한을 확인하는 중입니다 — 확인 전에는 변경할 수 없습니다.'}</Notice>}
         {err && <Notice tone="err">{err}</Notice>}
         {ok && <Notice tone="ok">{ok}</Notice>}
 
         {tab === 'company' && (
           <CompanyTab tenants={tenants} busy={busy} run={run} current={ctx.company}
-            onNext={() => setTab('entity')} />
+            canEdit={canEdit} onNext={() => setTab('entity')} />
         )}
         {tab === 'entity' && (
           <EntityTab entities={entities} nodes={nodes} busy={busy} run={run}
-            currentMode={ctx.entityMode} />
+            currentMode={ctx.entityMode} canEdit={canEdit} />
         )}
         {tab === 'thread' && (
           <ThreadTab nodes={nodes} entities={entities} busy={busy} run={run}
             companyId={ctx.company} companyName={ctx.companyName}
-            entityMode={ctx.entityMode} scopeLabel={ctx.scopeLabel} />
+            entityMode={ctx.entityMode} scopeLabel={ctx.scopeLabel} canEdit={canEdit} />
         )}
       </div>
   );
@@ -226,9 +243,10 @@ export function CompanySetupPanel({ onClose, page = false }: { onClose: () => vo
           selected_object_id: ctx.company || tab,
           object_snapshot: { company: ctx.company, company_name: ctx.companyName,
             entity_mode: ctx.entityMode, scope: ctx.scopeLabel, stage: tab },
-          available_actions: tab === 'company' ? ['회사 이름 등록', '현재 회사 확인']
-            : tab === 'entity' ? ['법인 등록', '가상회사 등록', '승인 상태 확인']
-              : ['업무 단계 구성', '보조정보 카드 구성', '홈 연결구성 저장'],
+          available_actions: !canEdit ? ['현재 회사 확인', '승인 상태 확인']
+            : tab === 'company' ? ['회사 이름 등록', '현재 회사 확인']
+              : tab === 'entity' ? ['법인 등록', '가상회사 등록', '승인 상태 확인']
+                : ['업무 단계 구성', '보조정보 카드 구성', '홈 연결구성 저장'],
         }}
         evidence={[
           { label: '현재 회사', value: ctx.companyName || ctx.company || '확인 불가' },
@@ -255,8 +273,9 @@ export function CompanySetupPanel({ onClose, page = false }: { onClose: () => vo
 
 // ── ① 회사 이름 ──────────────────────────────────────────────────────────
 
-function CompanyTab({ tenants, busy, run, current, onNext }: {
+function CompanyTab({ tenants, busy, run, current, canEdit, onNext }: {
   tenants: Tenant[] | null; busy: string; current: string;
+  canEdit: boolean;
   onNext: () => void;
   run: (what: string, fn: () => Promise<unknown>) => Promise<void>;
 }) {
@@ -302,17 +321,17 @@ function CompanyTab({ tenants, busy, run, current, onNext }: {
       <Section title="회사 이름 등록 · 변경"
         desc="같은 식별자로 다시 저장하면 이름이 바뀝니다. 이름은 비울 수 없습니다.">
         <div style={{ display: 'grid', gap: 6, maxWidth: 560 }}>
-          <input value={id} onChange={(e) => setId(e.target.value)}
+          <input value={id} disabled={!canEdit} onChange={(e) => setId(e.target.value)}
             placeholder="회사 식별자 — 예: tenant-afs-demo-materials"
             style={{ fontSize: 13, padding: '6px 9px' }} />
-          <input value={name} onChange={(e) => setName(e.target.value)}
+          <input value={name} disabled={!canEdit} onChange={(e) => setName(e.target.value)}
             placeholder="회사 이름 — 예: LS MnM"
             style={{ fontSize: 13, padding: '6px 9px' }} />
-          <input value={legal} onChange={(e) => setLegal(e.target.value)}
+          <input value={legal} disabled={!canEdit} onChange={(e) => setLegal(e.target.value)}
             placeholder="법인명(선택) — 예: LS엠엔엠 주식회사"
             style={{ fontSize: 13, padding: '6px 9px' }} />
           <div>
-            <button type="button" disabled={!id.trim() || !name.trim() || !!busy}
+            <button type="button" disabled={!canEdit || !id.trim() || !name.trim() || !!busy}
               onClick={() => void run('회사 이름 저장',
                 () => upsertTenant({ tenant_id: id.trim(), name_ko: name.trim(),
                   legal_name: legal.trim() }))}
@@ -339,8 +358,9 @@ function CompanyTab({ tenants, busy, run, current, onNext }: {
 
 // ── ② 법인 · 가상회사 ────────────────────────────────────────────────────
 
-function EntityTab({ entities, nodes, busy, run, currentMode }: {
+function EntityTab({ entities, nodes, busy, run, currentMode, canEdit }: {
   entities: Entity[] | null; nodes: EcmNode[] | null; busy: string; currentMode: string;
+  canEdit: boolean;
   run: (what: string, fn: () => Promise<unknown>) => Promise<void>;
 }) {
   const [name, setName] = useState('');
@@ -387,7 +407,7 @@ function EntityTab({ entities, nodes, busy, run, currentMode }: {
                   {e.status === 'ACTIVE' ? '승인됨' : '승인 대기'}
                 </span>
                 {e.status !== 'ACTIVE' && (
-                  <button type="button" disabled={!!busy}
+                  <button type="button" disabled={!canEdit || !!busy}
                     onClick={() => void run('회사 승인', () => approveEntity(e.entity_id))}
                     style={{ fontSize: 12, padding: '3px 10px', marginLeft: 'auto' }}>
                     승인
@@ -402,12 +422,12 @@ function EntityTab({ entities, nodes, busy, run, currentMode }: {
       <Section title="새로 등록"
         desc="가상회사는 시나리오·복제용이며 반드시 원본이 있어야 합니다 — 「이 가상 조직이 어느 실제 조직에서 나왔는가」를 잃지 않기 위해서입니다(§7.1 계보).">
         <div style={{ display: 'grid', gap: 6, maxWidth: 560 }}>
-          <input value={name} onChange={(e) => setName(e.target.value)}
+          <input value={name} disabled={!canEdit} onChange={(e) => setName(e.target.value)}
             placeholder="이름 — 예: LS MnM 가상(2027 시나리오)"
             style={{ fontSize: 13, padding: '6px 9px' }} />
           <label style={{ fontSize: 13 }}>
             성격{' '}
-            <select value={mode} onChange={(e) => setMode(e.target.value)}
+            <select value={mode} disabled={!canEdit} onChange={(e) => setMode(e.target.value)}
               style={{ fontSize: 13, padding: '4px 6px' }}>
               {/* ⚠️ 미리 고르지 않는다 — 실제/가상을 사람이 **의식해서** 골라야 한다.
                   기본값으로 REAL 이 박혀 있으면 시나리오 회사가 실제로 등록된다. */}
@@ -426,7 +446,7 @@ function EntityTab({ entities, nodes, busy, run, currentMode }: {
                   ⚠️ id 를 손으로 적게 하지 않는다. 오타 하나가 **거짓 계보**를 만든다. */}
               <label style={{ fontSize: 13 }}>
                 원본 회사(필수){' '}
-                <select value={base} onChange={(e) => setBase(e.target.value)}
+                <select value={base} disabled={!canEdit} onChange={(e) => setBase(e.target.value)}
                   style={{ fontSize: 13, padding: '4px 6px', maxWidth: 300 }}>
                   <option value="">— 고르십시오 —</option>
                   {(entities || []).map((e) => (
@@ -446,7 +466,7 @@ function EntityTab({ entities, nodes, busy, run, currentMode }: {
           <div>
             {/* ⚠️ 서버가 막을 것을 **누르기 전에** 막는다 — 400 을 받고 나서 알게 하지 않는다. */}
             <button type="button"
-              disabled={!name.trim() || !mode || !!busy
+              disabled={!canEdit || !name.trim() || !mode || !!busy
                 || (mode === 'VIRTUAL' && !base)}
               onClick={() => void run('회사 등록', () => createEntity({
                 name_ko: name.trim(), entity_mode: mode,
@@ -465,7 +485,7 @@ function EntityTab({ entities, nodes, busy, run, currentMode }: {
 
       <Section title="조직 노드"
         desc="연결구성(Digital Thread)은 조직 노드에 붙습니다. 노드가 없으면 붙일 곳이 없습니다.">
-        <NodeAdd entities={entities} busy={busy} run={run} flat={flat} />
+        <NodeAdd entities={entities} busy={busy} run={run} flat={flat} canEdit={canEdit} />
       </Section>
 
       <Section title="지금 보는 성격 — 실제 · 가상 · 경쟁사"
@@ -515,8 +535,9 @@ function ModeSwitch({ current, busy, run }: {
 }
 
 /** 조직 노드 만들기. ⚠️ 노드가 없으면 연결구성을 붙일 곳도, 문맥을 고를 곳도 없다. */
-function NodeAdd({ entities, flat, busy, run }: {
+function NodeAdd({ entities, flat, busy, run, canEdit }: {
   entities: Entity[] | null; flat: (EcmNode & { _d: number })[]; busy: string;
+  canEdit: boolean;
   run: (what: string, fn: () => Promise<unknown>) => Promise<void>;
 }) {
   const [entity, setEntity] = useState('');
@@ -535,7 +556,7 @@ function NodeAdd({ entities, flat, busy, run }: {
       )}
       <label style={{ fontSize: 13 }}>
         소속 회사{' '}
-        <select value={entity} onChange={(e) => setEntity(e.target.value)}
+        <select value={entity} disabled={!canEdit} onChange={(e) => setEntity(e.target.value)}
           style={{ fontSize: 13, padding: '4px 6px', maxWidth: 260 }}>
           <option value="">— 고르십시오 —</option>
           {usable.map((e) => (
@@ -550,7 +571,7 @@ function NodeAdd({ entities, flat, busy, run }: {
       )}
       <label style={{ fontSize: 13 }}>
         종류{' '}
-        <select value={type} onChange={(e) => setType(e.target.value)}
+        <select value={type} disabled={!canEdit} onChange={(e) => setType(e.target.value)}
           style={{ fontSize: 13, padding: '4px 6px' }}>
           <option value="business_division">사업부</option>
           <option value="site_plant">공장·사업장</option>
@@ -560,7 +581,7 @@ function NodeAdd({ entities, flat, busy, run }: {
       </label>
       <label style={{ fontSize: 13 }}>
         상위(선택){' '}
-        <select value={parent} onChange={(e) => setParent(e.target.value)}
+        <select value={parent} disabled={!canEdit} onChange={(e) => setParent(e.target.value)}
           style={{ fontSize: 13, padding: '4px 6px', maxWidth: 260 }}>
           <option value="">— 없음(최상위) —</option>
           {flat.map((n) => (
@@ -570,11 +591,11 @@ function NodeAdd({ entities, flat, busy, run }: {
           ))}
         </select>
       </label>
-      <input value={name} onChange={(e) => setName(e.target.value)}
+      <input value={name} disabled={!canEdit} onChange={(e) => setName(e.target.value)}
         placeholder="이름 — 예: 제련공장"
         style={{ fontSize: 13, padding: '6px 9px' }} />
       <div>
-        <button type="button" disabled={!entity || !name.trim() || !!busy}
+        <button type="button" disabled={!canEdit || !entity || !name.trim() || !!busy}
           onClick={() => void run('조직 노드 추가', () => createNode({
             entity_id: entity, node_type: type, name_ko: name.trim(),
             default_parent_id: parent,
@@ -633,9 +654,10 @@ function ContextSwitch({ flat, busy, run }: {
 
 // ── ③ 업무 연결구성 (Digital Thread) ─────────────────────────────────────
 
-function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityMode, scopeLabel }: {
+function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityMode, scopeLabel, canEdit }: {
   nodes: EcmNode[] | null; entities: Entity[] | null; busy: string;
   companyId: string; companyName: string; entityMode: string; scopeLabel: string;
+  canEdit: boolean;
   run: (what: string, fn: () => Promise<unknown>) => Promise<void>;
 }) {
   const flat = flatten(nodes || []);
@@ -786,18 +808,18 @@ function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityM
                 <span style={{ fontSize: 12, textAlign: 'right', color: 'var(--surface-text-muted)' }}>
                   {String(i + 1).padStart(2, '0')}
                 </span>
-                <input value={r.key} onChange={(e) => set(i, { key: e.target.value })}
+                <input value={r.key} disabled={!canEdit} onChange={(e) => set(i, { key: e.target.value })}
                   placeholder="단계 코드" style={{ fontSize: 13, padding: '5px 8px' }} />
-                <input value={r.label} onChange={(e) => set(i, { label: e.target.value })}
+                <input value={r.label} disabled={!canEdit} onChange={(e) => set(i, { label: e.target.value })}
                   placeholder="화면 표시 이름" style={{ fontSize: 13, padding: '5px 8px', minWidth: 0 }} />
-                <input value={r.note || ''} onChange={(e) => set(i, { note: e.target.value })}
+                <input value={r.note || ''} disabled={!canEdit} onChange={(e) => set(i, { note: e.target.value })}
                   placeholder="이 단계의 역할·설명" style={{ fontSize: 13, padding: '5px 8px', minWidth: 0 }} />
                 <span style={{ display: 'flex', gap: 3 }}>
                   <button type="button" aria-label={`${i + 1}번 단계 위로`}
-                    disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+                    disabled={!canEdit || i === 0} onClick={() => move(i, -1)}>↑</button>
                   <button type="button" aria-label={`${i + 1}번 단계 아래로`}
-                    disabled={i === rows.length - 1} onClick={() => move(i, 1)}>↓</button>
-                  <button type="button" aria-label={`${i + 1}번 단계 삭제`}
+                    disabled={!canEdit || i === rows.length - 1} onClick={() => move(i, 1)}>↓</button>
+                  <button type="button" disabled={!canEdit} aria-label={`${i + 1}번 단계 삭제`}
                     onClick={() => setRows((x) => x.filter((_, j) => j !== i))}>✕</button>
                 </span>
                 <div style={{
@@ -810,7 +832,7 @@ function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityM
                   background: 'var(--surface-raised)',
                 }}>
                   {r.overlay ? <>
-                    <select value={r.overlay.layer}
+                    <select value={r.overlay.layer} disabled={!canEdit}
                       aria-label={`${i + 1}번 단계 보조정보 종류`}
                       onChange={(e) => setOverlay(i, { layer: e.target.value as ThreadOverlay['layer'] })}
                       style={{ fontSize: 12, padding: '5px 6px' }}>
@@ -818,24 +840,24 @@ function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityM
                       <option value="SW">SW 도구</option>
                       <option value="TWIN">TWIN 예측</option>
                     </select>
-                    <input value={r.overlay.kicker}
+                    <input value={r.overlay.kicker} disabled={!canEdit}
                       aria-label={`${i + 1}번 단계 보조정보 제목`}
                       onChange={(e) => setOverlay(i, { kicker: e.target.value })}
                       placeholder="카드 제목 — 예: DATA CONTRACT"
                       style={{ minWidth: 0, fontSize: 12, padding: '5px 7px', textAlign: 'center' }} />
-                    <input value={r.overlay.body}
+                    <input value={r.overlay.body} disabled={!canEdit}
                       aria-label={`${i + 1}번 단계 보조정보 내용`}
                       onChange={(e) => setOverlay(i, { body: e.target.value })}
                       placeholder="연결된 근거·도구·예측"
                       style={{ minWidth: 0, fontSize: 12, padding: '5px 7px', textAlign: 'center' }} />
-                    <button type="button" aria-label={`${i + 1}번 단계 보조정보 삭제`}
+                    <button type="button" disabled={!canEdit} aria-label={`${i + 1}번 단계 보조정보 삭제`}
                       onClick={() => set(i, { overlay: null })}
                       style={{ fontSize: 12, padding: '5px 9px' }}>카드 삭제</button>
                   </> : <>
                     <span style={{ fontSize: 12, color: 'var(--surface-text-muted)', textAlign: 'center' }}>
                       이 업무 단계에는 등록된 보조정보가 없습니다.
                     </span>
-                    <button type="button" onClick={() => setOverlay(i, {})}
+                    <button type="button" disabled={!canEdit} onClick={() => setOverlay(i, {})}
                       style={{ fontSize: 12, padding: '5px 10px' }}>＋ 보조정보 카드 연결</button>
                   </>}
                 </div>
@@ -847,10 +869,11 @@ function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityM
             이전 승인판은 이력으로 보존됩니다.
           </div>
           <div className="company-thread-actions">
-            <button type="button" onClick={() => setRows((r) => [...r, { key: '', label: '', note: '' }])}
+            <button type="button" disabled={!canEdit}
+              onClick={() => setRows((r) => [...r, { key: '', label: '', note: '' }])}
               style={{ fontSize: 13, padding: '6px 12px' }}>＋ 단계 추가</button>
             <button type="button"
-              disabled={!!busy || rows.length === 0
+              disabled={!canEdit || !!busy || rows.length === 0
                 || rows.some((r) => !r.key.trim() || !r.label.trim()
                   || (r.overlay && (!r.overlay.kicker.trim() || !r.overlay.body.trim())))}
               onClick={() => void run('연결구성 저장', async () => {
@@ -874,7 +897,7 @@ function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityM
               style={{ fontSize: 13, padding: '6px 12px', fontWeight: 700 }}>
               {busy === '연결구성 저장' ? '저장 중…' : draft ? '편집 초안 저장' : '새 판으로 저장'}
             </button>
-            {draft && <button type="button" disabled={!!busy}
+            {draft && <button type="button" disabled={!canEdit || !!busy}
               onClick={() => void run('연결구성 승인', async () => {
                 await approveProfile(draft.profile_id);
                 await load(scope);
