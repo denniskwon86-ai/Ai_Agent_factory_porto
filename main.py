@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import sys
 
 # uvicorn reload=True 워커 자식 프로세스는 run.py의 stdout 재설정을 상속받지 못한다.
@@ -26,6 +27,7 @@ sys.stderr = StdoutInterceptor(sys.stderr)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from api.storage_errors import sqlite_storage_unavailable
 from api.routes import factory_control, realtime, format_control, skill_control, knowledge_control, telemetry_control, master_control, catalog_control, glossary_control, lineage_control, contract_control, external_control, benchmark_control, crosswalk_control, mcp_control, standard_control, org_control, advisor_control, ledger_control, enterprise_context_control, reference_control, planning_control, connector_control, briefing_control, shadow_control, workspace_control, readiness_control, program_control, scope_control, sandbox_control, admin_control, agent_governance
 
 # 슈퍼바이저 데몬 초기화 (백그라운드 이벤트 리스너 등록)
@@ -44,6 +46,10 @@ app = FastAPI(
     description="범용 자율형 소프트웨어 팩토리 플랫폼 관제용 비동기 API",
     version="5.1.0"
 )
+
+# 읽지 못한 저장소를 «자료 없음»이나 일반 500으로 답하지 않는다. 세부 SQL·경로는 숨기고
+# 사용자가 재시도/관리자 문의를 선택할 수 있는 503으로 통일한다.
+app.add_exception_handler(sqlite3.Error, sqlite_storage_unavailable)
 
 
 @app.get("/api/v1/health", tags=["System"])
