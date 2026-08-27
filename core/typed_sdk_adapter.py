@@ -114,9 +114,22 @@ def _dataset_block(ds: Dict[str, Any]) -> str:
         if action not in allowed:
             continue
         if method == "list":
+            #: ★★★ [2026-08-28 실측] **브리지가 실제로 돌려주는 이름을 쓴다.**
+            #:
+            #: ⚠️⚠️ 종전에는 `{ items }` 라고 약속했다. 그런데 런타임 브리지는
+            #:   `{ records, total, cursor }` 를 돌려준다
+            #:   (`frontend/src/lib/hostRuntimeBridge.ts` 의 `data.list`).
+            #:   같은 계약을 두 곳이 각자 선언했고 **정본은 어디에도 없었다.**
+            #:   그래서 어댑터 타입을 따라 쓴 앱은 `data.items` 가 `undefined` 라
+            #:   반드시 죽는다 — 실측: 생성된 앱이 화면에서
+            #:   「Uncaught TypeError: Cannot read properties of undefined
+            #:    (reading 'forEach')」로 멈췄다. 데이터는 **200 으로 잘 왔는데**
+            #:   이름이 달라서 못 읽었다.
+            #: ★ 실제로 도는 쪽(브리지)이 진실이므로 어댑터를 그쪽에 맞춘다.
+            #:   `tests/test_typed_sdk_adapter_shape.py` 가 둘이 어긋나면 운다.
             body.append(f"  list: (page?: {{ limit?: number; cursor?: string }}) =>\n"
                         f"    window.afs.data.list('{resource}', page) as Promise<"
-                        f"{{ items: {rec}[]; cursor?: string }}>,")
+                        f"{{ records: {rec}[]; total: number; cursor?: string }}>,")
         elif method == "get":
             body.append(f"  get: (recordId: string) =>\n"
                         f"    window.afs.data.get('{resource}', recordId) as Promise<{rec}>,")
