@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
-import { Banner, Panel } from '../design/HubShell';
+import { Banner, HubShell, Panel, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
 import { listInstances } from '../lib/dataPrepApi';
 import {
   CalculationError, findImpactPaths, listOntologyObjects, runPathCalculation,
@@ -155,7 +156,12 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
   const [decision, setDecision] = useState<DecisionResult | null>(null);
   const [error, setError] = useState<CalculationError | null>(null);
   const [busy, setBusy] = useState('');
+  const [activeSection, setActiveSection] = useState('question');
   const reqRef = useRef(0);
+  const questionSectionRef = useRef<HTMLParagraphElement>(null);
+  const pathsSectionRef = useRef<HTMLHeadingElement>(null);
+  const resultSectionRef = useRef<HTMLDivElement>(null);
+  const decisionSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     listInstances()
@@ -309,12 +315,113 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
   const canFind = !!rootKey && busy !== 'find';
   const canRun = !!pathFp && !!instanceId.trim() && busy !== 'run';
 
+  useEffect(() => {
+    if (paths === null) return;
+    setActiveSection('paths');
+    pathsSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [paths]);
+
+  useEffect(() => {
+    if (!result) return;
+    setActiveSection('result');
+    resultSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [result]);
+
+  useEffect(() => {
+    if (!decision) return;
+    setActiveSection('decision');
+    decisionSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [decision]);
+
+  const railItems: RailItem[] = [
+    { id: 'question', label: '질문·기준시점', hint: '자료·시점·시작점·가정을 정합니다', icon: 'search' },
+    { id: 'paths', label: '영향 경로 선택',
+      hint: paths === null ? '질문을 실행한 뒤 열립니다' : '승인된 관계 경로를 고릅니다',
+      icon: 'flow', count: paths?.length || undefined },
+    { id: 'result', label: '계산 결과·차단',
+      hint: result ? '수치 또는 차단 사유를 확인합니다' : '경로 계산 후 열립니다', icon: 'cost' },
+    { id: 'decision', label: '의사결정 안건 연결',
+      hint: result?.status === 'COMPLETE' ? '봉인된 계산 결과로 안건을 만듭니다' : '계산 완료 후 열립니다',
+      icon: 'decision' },
+  ];
+
+  const selectSection = (id: string) => {
+    if (id === 'question') questionSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (id === 'paths' && paths !== null) pathsSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (id === 'result' && result) resultSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (id === 'decision' && result?.status === 'COMPLETE') {
+      decisionSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+    const available = id === 'question' || (id === 'paths' && paths !== null)
+      || (id === 'result' && !!result) || (id === 'decision' && result?.status === 'COMPLETE');
+    if (available) setActiveSection(id);
+    else setError(new CalculationError(id === 'paths'
+      ? '시작점과 기준시점을 정해 경로를 먼저 찾으십시오.'
+      : id === 'result'
+        ? '승인된 영향 경로를 선택해 계산을 먼저 실행하십시오.'
+        : '계산이 완료되어야 의사결정 안건으로 연결할 수 있습니다.', 409));
+  };
+
   return (
     <HubDialog label="경로 계산" onClose={onClose}
       subtitle="승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산합니다 (LLM 0콜)">
-      <div style={{ padding: 20, maxHeight: '82vh', overflow: 'auto' }}>
-        <Panel kicker="영향 경로" title="경로 계산 — 질문을 고르고 답을 봅니다">
-          <p style={{ fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 12px' }}>
+      <div className="afs-dialog-body">
+        <HubShell
+          kicker="PATH CALCULATION"
+          title="경로 계산"
+          subtitle="승인된 업무 관계와 인증판 위에서만 영향을 계산합니다"
+          items={railItems}
+          activeId={activeSection}
+          onSelect={selectSection}
+          footer={
+            <div className="inheritance-card">
+              <span>NO SILENT ZERO</span>
+              <b>막힌 계산은 숫자가 아닙니다</b>
+              <p>승인·판·가정이 없으면 0을 표시하지 않고 차단 사유를 보여 줍니다.</p>
+            </div>
+          }
+          jarvis={<JarvisRail
+            contextKicker="현재 영향 문맥"
+            contextTitle={root
+              ? `${root.object_type} · ${root.object_id}` : '영향 시작점을 선택하십시오'}
+            contextDescription={result?.status === 'COMPLETE'
+              ? '봉인된 경로·인증판·산식으로 계산을 완료했습니다.'
+              : result?.status === 'BLOCKED'
+                ? '계산이 막혔습니다. 차단 사유를 해결하기 전에는 숫자를 만들지 않습니다.'
+                : '기준시점과 승인된 시작점을 고른 뒤 영향 경로를 찾습니다.'}
+            context={{
+              current_module: `path-calculation/${activeSection}`,
+              selected_object_type: root?.object_type || 'ontology_object',
+              selected_object_id: root?.object_id || '',
+              object_snapshot: {
+                as_of: instant,
+                path_fingerprint: pathFp || null,
+                calculation_status: result?.status || null,
+                result_fingerprint: result?.status === 'COMPLETE' ? result.result_fingerprint : null,
+              },
+              available_actions: result?.status === 'COMPLETE'
+                ? ['근거 확인', '의사결정 안건 만들기']
+                : paths?.length ? ['경로 선택', '계산 실행'] : ['시작점 선택', '경로 찾기'],
+              evidence_refs: result?.status === 'COMPLETE'
+                ? Object.entries(result.used_snapshots).map(([key, snapshotId]) => ({
+                    dataset_contract_key: key, snapshot_id: snapshotId,
+                  })) : [],
+            }}
+            evidence={[
+              { label: '기준시점', value: asOf || '미지정' },
+              ...(paths !== null ? [{ label: '보이는 경로', value: `${paths.length}개` }] : []),
+              ...(result ? [{ label: '계산 상태', value: result.status }] : []),
+            ]}
+            quickQuestions={[
+              '이 경로가 막힌 이유는 무엇입니까?',
+              '이 숫자는 어떤 인증판으로 만들었습니까?',
+              '이 결과를 안건으로 만들 때 확인할 것은 무엇입니까?',
+            ]} />}
+        >
+        <Panel className="path-calc-panel" kicker="영향 경로" title="경로 계산 — 질문을 고르고 답을 봅니다">
+          <p ref={questionSectionRef} style={{
+            fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 12px', scrollMarginTop: 12,
+          }}>
             승인된 관계를 따라가 <b>부족량·생산가능량·매출 이연</b>을 계산합니다.
             승인·판·기준선은 서버가 정합니다 — 여기서는 <b>질문만</b> 고릅니다.
           </p>
@@ -443,7 +550,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
 
           {paths !== null && (
             <div style={{ marginTop: 14 }}>
-              <h4 style={{ margin: '0 0 6px', fontSize: 15 }}>
+              <h4 ref={pathsSectionRef} style={{ margin: '0 0 6px', fontSize: 15, scrollMarginTop: 12 }}>
                 찾은 경로 {paths.length}개
               </h4>
               {paths.length === 0 ? (
@@ -495,7 +602,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          <div style={{ marginTop: 16 }}>
+          <div ref={resultSectionRef} style={{ marginTop: 16, scrollMarginTop: 12 }}>
             {error && <Err error={error} />}
 
             {result && result.status === 'BLOCKED' && (
@@ -556,7 +663,10 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
                 </details>
 
                 {/* ── [G5] 이 결과로 안건 만들기 ─────────────────────────── */}
-                <div style={{ marginTop: 18, borderTop: '1px solid var(--surface-border)', paddingTop: 14 }}>
+                <div ref={decisionSectionRef} style={{
+                  marginTop: 18, borderTop: '1px solid var(--surface-border)',
+                  paddingTop: 14, scrollMarginTop: 12,
+                }}>
                   <h4 style={{ margin: '0 0 6px', fontSize: 15 }}>이 결과로 안건 만들기</h4>
                   <p style={{ fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 10px' }}>
                     안건은 <b>계산이 읽은 그 판</b> 위에 섭니다({usedSnapshots.length}개) —
@@ -678,6 +788,7 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
             )}
           </div>
         </Panel>
+        </HubShell>
       </div>
     </HubDialog>
   );

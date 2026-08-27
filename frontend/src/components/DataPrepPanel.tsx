@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 // ★★★ 손수 모달을 만들지 않는다 — 승인된 제품 셸을 쓴다(설계 §12 UI 규칙).
 //   `HubDialog` 가 dialog semantics · 배경 inert · 포커스 트랩 · Escape 를 준다.
 import { HubDialog } from '../design/HubDialog';
-import { Panel } from '../design/HubShell';
+import { HubShell, Panel, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
 import { DataReadinessBoard } from './DataReadinessBoard';
 import {
   certifySnapshot, DataPrepError, getInstance, listInstances, listKits,
@@ -60,13 +61,21 @@ export function DataPrepPanel({ onClose, initialView = 'overview' }: {
     (instance?.required_datasets || []).find(
       (d: any) => d.dataset_contract_key === key)?.label || key;
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [activeSection, setActiveSection] = useState(
+    initialView === 'readiness' ? 'instances' : 'packages');
+  const packagesSectionRef = useRef<HTMLHeadingElement>(null);
+  const instancesSectionRef = useRef<HTMLHeadingElement>(null);
   const instanceSectionRef = useRef<HTMLDivElement>(null);
+  const sourceSectionRef = useRef<HTMLDetailsElement>(null);
 
   // ★ «열기» 뒤에는 사용자의 질문(어느 업무기능이 준비됐나)에 먼저 답한다.
   // 원천 파일 관리 표가 앞에 오면 35행을 지나야 준비도를 볼 수 있어, 업무키트가 평면
   // 데이터 목록처럼 보인다. 선택된 적용본이 그려진 다음 준비도 시작점으로 이동한다.
   useEffect(() => {
-    if (instance) instanceSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (instance) {
+      setActiveSection('readiness');
+      instanceSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
   }, [instance]);
 
   useEffect(() => {
@@ -150,6 +159,43 @@ export function DataPrepPanel({ onClose, initialView = 'overview' }: {
     }
   }
 
+  const railItems: RailItem[] = [
+    ...(initialView === 'overview' ? [{
+      id: 'packages', label: '샘플 기업 패키지', hint: '사용 가능한 업무·데이터 구성을 봅니다',
+      icon: 'packs' as const, count: packages?.length || undefined,
+    }] : []),
+    { id: 'instances', label: '조직 적용본', hint: '현재 조직에 적용된 패키지를 고릅니다',
+      icon: 'apps', count: instances?.length || undefined },
+    { id: 'readiness', label: '업무기능 준비도',
+      hint: instance ? '계약·결속·인증판의 준비 상태' : '적용본 선택 후 열립니다', icon: 'checklist' },
+    { id: 'sources', label: '원천·데이터 판',
+      hint: instance ? '관리자용 결속·등록·인증 작업' : '적용본 선택 후 열립니다', icon: 'upload',
+      count: snapshots.length || undefined },
+  ];
+
+  const selectSection = (id: string) => {
+    setActiveSection(id);
+    if (id === 'packages') packagesSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (id === 'instances') instancesSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (id === 'readiness') {
+      if (!instance) {
+        setNotice({ ok: false, text: '조직 적용본을 먼저 선택해야 준비도를 확인할 수 있습니다.' });
+        setActiveSection('instances');
+        return;
+      }
+      instanceSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+    if (id === 'sources') {
+      if (!instance) {
+        setNotice({ ok: false, text: '조직 적용본을 먼저 선택해야 원천과 데이터 판을 관리할 수 있습니다.' });
+        setActiveSection('instances');
+        return;
+      }
+      if (sourceSectionRef.current) sourceSectionRef.current.open = true;
+      sourceSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+  };
+
   return (
     <HubDialog
       label={initialView === 'readiness'
@@ -171,17 +217,63 @@ export function DataPrepPanel({ onClose, initialView = 'overview' }: {
       {/* ★★★ `.afs-dialog-body` 가 셸의 배경·여백 규약이다. 이걸 빼고 손수
           `padding` 만 주면 **배경이 없어 뒤 화면이 그대로 비친다** — 감사 게이트는
           그것을 잡지 못하고 통과시킨다(실측). */}
-      <div className="afs-dialog-body" style={{
-        overflow: 'auto', padding: 18,
-        // ⚠️ 카드가 내용 높이만큼만 차지하면 **아래가 텅 비고** 뒤 화면이 그 자리로
-        //   비친다. 사용자는 그것을 「화면이 덜 그려졌다」로 읽는다.
-        display: 'flex', flexDirection: 'column',
-      }}>
-        <Panel className="afs-fill">
+      <div className="afs-dialog-body">
+        <HubShell
+          kicker="DATA READINESS"
+          title={initialView === 'readiness' ? '데이터 준비 상태' : '업무 데이터 준비'}
+          subtitle="업무기능별 계약·원천 결속·인증판을 한 흐름으로 준비합니다"
+          items={railItems}
+          activeId={activeSection}
+          onSelect={selectSection}
+          footer={
+            <div className="inheritance-card">
+              <span>NOT ZERO</span>
+              <b>못 읽은 것은 0건이 아닙니다</b>
+              <p>적용본·원천·인증판의 조회 실패와 실제 미등록 상태를 구분합니다.</p>
+            </div>
+          }
+          jarvis={<JarvisRail
+            contextKicker="현재 데이터 문맥"
+            contextTitle={instance?.label || instance?.kit_id || '조직 적용본을 선택하십시오'}
+            contextDescription={instance
+              ? `${instance.scope_node_id || '범위 미상'} · ${instance.entity_mode || '모드 미상'}`
+              : '현재 회사·조직에 적용된 업무기능을 고르면 계약과 인증판을 함께 봅니다.'}
+            context={{
+              current_module: `data-preparation/${activeSection}`,
+              selected_object_type: instance ? 'kit_instance' : 'starter_package',
+              selected_object_id: instanceId,
+              object_snapshot: {
+                active_section: activeSection,
+                binding_count: instance?.bindings?.length ?? null,
+                snapshot_count: instance ? snapshots.length : null,
+              },
+              available_actions: instance
+                ? ['준비도 확인', '원천 결속 확인', '파일 등록', '데이터 판 인증']
+                : ['조직 적용본 선택'],
+              evidence_refs: snapshots.map((snapshot) => ({
+                snapshot_id: snapshot.snapshot_id,
+                dataset_contract_key: snapshot.dataset_contract_key,
+                state: snapshot.state,
+              })),
+            }}
+            evidence={instance ? [
+              { label: '조직 범위', value: instance.scope_node_id || '미상' },
+              { label: '원천 결속', value: `${instance.bindings?.length || 0}건` },
+              { label: '데이터 판', value: `${snapshots.length}건` },
+            ] : []}
+            quickQuestions={[
+              '지금 준비가 막힌 업무기능은 무엇입니까?',
+              '인증되지 않은 데이터 판은 무엇입니까?',
+              '다음으로 연결해야 할 원천은 무엇입니까?',
+            ]} />}
+        >
+        <Panel className="afs-fill data-prep-panel">
           {error ? <Err error={error} /> : (
             <>
               {initialView === 'overview' && (<>
-              <h4 style={{ margin: '0 0 8px', fontSize: 15 }}>사용 가능한 샘플 기업 패키지</h4>
+              <h4 ref={packagesSectionRef} style={{ margin: '0 0 8px', fontSize: 15, scrollMarginTop: 12 }}>
+                사용 가능한 샘플 기업 패키지
+              </h4>
               {packages === null ? (
                 <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>불러오는 중…</div>
               ) : packages.length === 0 ? (
@@ -219,7 +311,10 @@ export function DataPrepPanel({ onClose, initialView = 'overview' }: {
               )}
               </>)}
 
-              <h4 style={{ margin: initialView === 'overview' ? '16px 0 8px' : '0 0 8px', fontSize: 15 }}>
+              <h4 ref={instancesSectionRef} style={{
+                margin: initialView === 'overview' ? '16px 0 8px' : '0 0 8px',
+                fontSize: 15, scrollMarginTop: 12,
+              }}>
                 {initialView === 'readiness'
                   ? '준비 상태를 확인할 적용본'
                   : '이 조직에 적용된 패키지'}
@@ -305,7 +400,7 @@ export function DataPrepPanel({ onClose, initialView = 'overview' }: {
 
                   {/* 일반 사용자의 첫 질문은 준비도다. 원천·파일·판 관리는 필요할 때만
                       펼치는 관리자 작업으로 둔다. 기능을 숨기지 않고 위계만 바로잡는다. */}
-                  <details style={{
+                  <details ref={sourceSectionRef} style={{
                     margin: '4px 16px 16px', border: '1px solid var(--surface-border)',
                     borderRadius: 7, background: 'var(--surface-sunken)',
                   }}>
@@ -429,6 +524,7 @@ export function DataPrepPanel({ onClose, initialView = 'overview' }: {
             </>
         )}
         </Panel>
+        </HubShell>
       </div>
     </HubDialog>
   );

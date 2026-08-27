@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 // ★★★ 손수 모달을 만들지 않는다 — 승인된 제품 셸을 쓴다(설계 §12 UI 규칙).
 import { HubDialog } from '../design/HubDialog';
-import { Banner, Panel } from '../design/HubShell';
+import { Banner, HubShell, Panel, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
 import { listInstances } from '../lib/dataPrepApi';
 import {
   approveCapabilities, CalculationError, getCapabilityProposal, getReadiness,
@@ -241,14 +242,80 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
   }
 
   const totalDelete = plan?.delete.reduce((n, d) => n + d.count, 0) ?? 0;
+  const railItems: RailItem[] = [
+    { id: 'readiness', label: '준비 상태', hint: '계산 전 관문을 순서대로 확인합니다',
+      icon: 'checklist', count: readiness?.counts.not_yet || readiness?.counts.failed || undefined,
+      countLabel: readiness
+        ? `남음 ${readiness.counts.not_yet}건 · 확인 못 함 ${readiness.counts.failed}건` : undefined },
+    { id: 'approve', label: '계산 실행 승인', hint: '산식·단위·부호·유효기간을 승인합니다',
+      icon: 'standard', count: activeApprovalCount || undefined,
+      countLabel: activeApprovalCount ? `살아 있는 승인 ${activeApprovalCount}건` : undefined },
+    { id: 'reset', label: '시연 실행 초기화', hint: '정본은 남기고 실행 결과만 지웁니다',
+      icon: 'blocked', count: totalDelete || undefined,
+      countLabel: totalDelete ? `삭제 예정 ${totalDelete}건` : undefined },
+  ];
 
   return (
     // ⚠️ `subtitle` 을 주면 셸이 머리 바(제목 + 「닫기 (Esc)」)를 그린다. 빠뜨리면
     //   제목도 닫기도 없는 전체화면 창이 된다 — 실제로 그랬다(2026-08-23).
     <HubDialog label="계산 실행 승인 · 시연 초기화" onClose={onClose}
       subtitle="누르기 전까지 계산은 «막힘» 으로 답합니다. 승인은 능력마다 별도 원장 사건으로 남습니다">
-      <div style={{ padding: 20, maxHeight: '82vh', overflow: 'auto' }}>
-        <Panel kicker="시스템 관리자" title="계산 실행 승인 · 시연 초기화">
+      <div className="afs-dialog-body">
+        <HubShell
+          kicker="CALCULATION CONTROL"
+          title="계산 실행 승인"
+          subtitle="승인된 자료로 경영 판단용 숫자를 내도 되는지 통제합니다"
+          items={railItems}
+          activeId={tab}
+          onSelect={(id) => setTab(id as typeof tab)}
+          footer={
+            <div className="inheritance-card">
+              <span>APPROVAL REQUIRED</span>
+              <b>승인 전에는 계산하지 않습니다</b>
+              <p>제안과 구현 완료는 실행 승인이 아닙니다. 철회되면 다음 요청부터 다시 막힙니다.</p>
+            </div>
+          }
+          jarvis={<JarvisRail
+            contextKicker="현재 승인 문맥"
+            contextTitle={instances?.find((item) => item.instance_id === instanceId)?.label
+              || '대상 키트 인스턴스를 고르십시오'}
+            contextDescription={tab === 'readiness'
+              ? '정본·인증판·기준선·계산 승인 관문을 확인합니다.'
+              : tab === 'approve'
+                ? '산식의 정의·단위·부호·유효기간과 승인 지문을 검토합니다.'
+                : '정본과 승인 원장은 유지하고 이번 시연의 실행 결과만 초기화합니다.'}
+            context={{
+              current_module: `calculation-approval/${tab}`,
+              selected_object_type: 'kit_instance',
+              selected_object_id: instanceId,
+              object_snapshot: {
+                tab,
+                readiness_status: readiness?.status ?? null,
+                active_approval_count: proposal ? activeApprovalCount : null,
+                reset_delete_count: plan ? totalDelete : null,
+              },
+              available_actions: tab === 'readiness'
+                ? ['관문 확인']
+                : tab === 'approve'
+                  ? ['산식 검토', '실행 승인', '승인 철회']
+                  : ['삭제 목록 확인', '시연 실행 초기화'],
+              evidence_refs: proposal?.items.map((item) => ({
+                calculation_ref: item.ref,
+                binding_fingerprint: item.binding_fingerprint,
+              })) || [],
+            }}
+            evidence={instanceId ? [
+              { label: '대상 적용본', value: instanceId },
+              ...(readiness ? [{ label: '관문 상태', value: readiness.status }] : []),
+              ...(proposal ? [{ label: '실행 승인', value: `${activeApprovalCount}건` }] : []),
+            ] : []}
+            quickQuestions={[
+              '지금 계산을 막는 관문은 무엇입니까?',
+              '이 산식을 승인할 때 확인할 위험은 무엇입니까?',
+              '철회하면 어떤 결과부터 무효가 됩니까?',
+            ]} />}
+        >
+        <Panel className="calc-approval-panel" kicker="시스템 관리자" title="계산 실행 승인 · 시연 초기화">
           <p style={{ fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 12px' }}>
             승인된 자료로 경영 판단용 숫자를 내도 되는지 정하는 곳입니다.
             <b> 되돌려도 이미 그 숫자를 본 사람이 있습니다.</b>
@@ -276,20 +343,6 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
               ))}
             </select>
           )}
-
-          {/* ── 탭 ────────────────────────────────────────────────────── */}
-          <div style={{ display: 'flex', gap: 6, margin: '16px 0 12px' }}>
-            {([['readiness', '준비 상태'], ['approve', '실행 승인'],
-               ['reset', '시연 초기화']] as const).map(([id, label]) => (
-              <button key={id} onClick={() => setTab(id)}
-                style={{
-                  padding: '6px 14px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
-                  border: `1px solid ${tab === id ? 'var(--action-primary-bg)' : 'var(--surface-border)'}`,
-                  background: tab === id ? 'var(--state-info-bg)' : '#fff',
-                  color: tab === id ? 'var(--action-primary-bg)' : 'var(--surface-text)',
-                }}>{label}</button>
-            ))}
-          </div>
 
           {error && <Err error={error} />}
           {!instanceId.trim() && (
@@ -626,6 +679,7 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
             </>
           )}
         </Panel>
+        </HubShell>
       </div>
     </HubDialog>
   );

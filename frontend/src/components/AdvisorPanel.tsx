@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
 import { EmptyOrError, failed, ok, type Loaded } from '../design/DataState';
 import { HubDialog } from '../design/HubDialog';
+import { HubShell, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
 import {
   advisorApi, DATA_KIND_KO, NECESSITY_KO, REQ_STATUS_KO, REQ_TYPE_KO,
   type Blueprint, type Consultation, type LedgerEvent, type PlaybookSummary,
@@ -269,6 +271,48 @@ export function AdvisorPanel(
   const selectedPlaybook = useMemo(
     () => playbooks.find((p) => p.playbook_id === playbookId), [playbooks, playbookId]);
 
+  const railItems: RailItem[] = [
+    { id: 'pick', label: '업무 선택', hint: '목표와 상담 유형을 고릅니다', icon: 'apps' },
+    { id: 'interview', label: '선택형 상담',
+      hint: consultation ? '선택한 조건을 구체화합니다' : '업무 선택 후 열립니다', icon: 'inbox',
+      count: progress?.total ? Math.max(progress.total - progress.answered, 0) : undefined,
+      countLabel: progress?.total ? `남은 질문 ${Math.max(progress.total - progress.answered, 0)}건` : undefined },
+    { id: 'status', label: '데이터 보유 확인',
+      hint: preview ? '보유·검증필요·부족을 구분합니다' : '상담 완료 후 열립니다', icon: 'checklist',
+      count: preview?.gaps?.length || undefined,
+      countLabel: preview?.gaps?.length ? `확인할 데이터 ${preview.gaps.length}건` : undefined },
+    { id: 'blueprint', label: '청사진·승인·생성',
+      hint: blueprint ? '승인 근거와 생성 결과를 확인합니다' : '데이터 확인 후 열립니다', icon: 'standard' },
+  ];
+
+  const selectRailStep = (id: string) => {
+    const next = id as Step;
+    const available = next === 'pick'
+      || (next === 'interview' && !!consultation)
+      || (next === 'status' && !!preview)
+      || (next === 'blueprint' && !!blueprint);
+    if (available) {
+      setStep(next);
+      return;
+    }
+    setNotice(next === 'interview'
+      ? '업무를 선택하고 상담을 시작하면 열립니다.'
+      : next === 'status'
+        ? '선택형 상담을 마치면 데이터 보유 상태를 확인할 수 있습니다.'
+        : '데이터 보유 상태를 확인해 청사진을 만든 뒤 열립니다.');
+  };
+
+  const selectedObjectId = blueprint?.blueprint_id || consultation?.consultation_id || playbookId;
+  const jarvisTitle = blueprint?.title || question?.question || selectedPlaybook?.name_ko
+    || '상담할 업무를 선택하십시오';
+  const jarvisDescription = step === 'pick'
+    ? '업무 목적과 필요한 데이터의 범위를 정하는 단계입니다.'
+    : step === 'interview'
+      ? `선택형 질문 ${progress?.answered || 0}/${progress?.total || 0}에 답하고 있습니다.`
+      : step === 'status'
+        ? '보유·검증 필요·부족을 구분해야 준비도가 실제보다 높게 보이지 않습니다.'
+        : '청사진의 범위·제외 범위·데이터 결손과 승인 근거를 검토합니다.';
+
   return (
     <HubDialog label="업무·데이터 설계 상담 — 무엇을 만들지와 어떤 데이터가 필요한지" onClose={onClose}>
       <div className="afs-dialog-bar">
@@ -282,29 +326,65 @@ export function AdvisorPanel(
         </div>
       </div>
 
-      <div className="afs-dialog-body" style={{ display: 'flex', flexDirection: 'column' }}>
-
-        {/* 진행 단계 */}
-        <div className="px-6 py-2 border-b afs-border/70 afs-bg-sunken/50 flex items-center gap-2 text-xs">
-          {([['pick', '1. 업무 선택'], ['interview', '2. 선택형 상담'],
-             ['status', '3. 데이터 보유 확인'], ['blueprint', '4. 청사진·승인·생성']] as [Step, string][])
-            .map(([s, label]) => (
-              <span key={s}
-                className={`px-2 py-1 rounded ${step === s ? 'afs-action-bg afs-action-fg' : 'afs-muted'}`}>
-                {label}
-              </span>
-            ))}
-          {progress && (
-            <span className="ml-auto afs-muted">
-              질문 {progress.answered}/{progress.total}
-              {consultation && <span className="afs-muted ml-2">
-                문맥 {consultation.tenant_id} · {consultation.enterprise_scope_id || '범위 미지정'} · {consultation.entity_mode}
-              </span>}
-            </span>
-          )}
-        </div>
-
-        <div className="p-6 overflow-y-auto flex-1 space-y-5">
+      <div className="afs-dialog-body">
+        <HubShell
+          kicker="BUSINESS & DATA DESIGN"
+          title="업무·데이터 설계 상담"
+          subtitle="필요한 데이터와 추진 순서를 선택형 대화로 정합니다"
+          items={railItems}
+          activeId={step}
+          onSelect={selectRailStep}
+          footer={
+            <div className="inheritance-card">
+              <span>현재 진행</span>
+              <b>{railItems.find((item) => item.id === step)?.label}</b>
+              <p>{progress
+                ? `질문 ${progress.answered}/${progress.total} · 답하지 않은 항목은 보유로 간주하지 않습니다.`
+                : '선택과 승인 결과는 회사·조직·REAL/VIRTUAL 문맥에 결속됩니다.'}</p>
+            </div>
+          }
+          jarvis={<JarvisRail
+            contextKicker="현재 상담 문맥"
+            contextTitle={jarvisTitle}
+            contextDescription={jarvisDescription}
+            context={{
+              current_module: `advisor/${step}`,
+              selected_object_type: blueprint ? 'solution_blueprint'
+                : consultation ? 'advisor_consultation' : 'advisor_playbook',
+              selected_object_id: selectedObjectId,
+              object_snapshot: {
+                step,
+                readiness_score: blueprint?.readiness?.score ?? preview?.score ?? null,
+                blocking_gap_count: blueprint?.readiness?.blocking_gaps?.length
+                  ?? preview?.blocking_gaps?.length ?? null,
+                blueprint_status: blueprint?.status ?? null,
+              },
+              available_actions: step === 'pick'
+                ? ['업무 선택', '상담 시작']
+                : step === 'interview'
+                  ? ['질문 답변', '준비도 미리보기']
+                  : step === 'status'
+                    ? ['보유 상태 확인', '청사진 만들기']
+                    : ['범위 검토', '승인·반려', '프로젝트 생성'],
+              evidence_refs: ledger.status === 'ok'
+                ? (ledger.value || []).map((event) => ({
+                    event_id: event.event_id,
+                    event_type: event.event_type,
+                    created_at: event.created_at,
+                  })) : [],
+            }}
+            evidence={[
+              { label: '진행 단계', value: railItems.find((item) => item.id === step)?.label || step },
+              ...(progress ? [{ label: '상담 진행', value: `${progress.answered}/${progress.total}` }] : []),
+              ...(blueprint ? [{ label: '준비도', value: `${blueprint.readiness.score}/100` }] : []),
+            ]}
+            quickQuestions={[
+              '이 단계에서 반드시 결정할 것은 무엇입니까?',
+              '아직 확인하지 못한 데이터는 무엇입니까?',
+              '다음 단계로 가기 전에 누가 승인해야 합니까?',
+            ]} />}
+        >
+        <div className="space-y-5">
           {err && (
             <div className="bg-red-950/60 border border-red-800 rounded-lg px-4 py-3 text-sm text-red-200">
               ⚠️ {err}
@@ -751,6 +831,7 @@ export function AdvisorPanel(
             </p>
           )}
         </div>
+        </HubShell>
       </div>
     </HubDialog>
   );

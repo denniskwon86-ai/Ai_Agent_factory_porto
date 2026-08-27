@@ -1350,6 +1350,17 @@
    ⚠️ 덮지 않으면 남은 자리로 뒤 화면이 비치고, 사용자는 「덜 그려졌다」로 읽는다. */
 .afs-dialog-body > .panel.afs-fill { flex: 1 1 auto; min-height: 0; }
 
+/* 업무 데이터 준비는 3열 셸 안의 카드 한 장으로 동작한다. HubShell이 바깥 여백을 맡고,
+ * 이 카드는 표·목록이 테두리에 붙지 않도록 내용 여백만 가진다. */
+.afs-scope .data-prep-panel { padding: 18px; }
+
+/* 계산 승인 카드의 제목은 카드 폭을 유지하고, 실제 통제 내용만 읽기 여백을 갖는다. */
+.afs-scope .calc-approval-panel { padding: 0 18px 18px; }
+.afs-scope .calc-approval-panel > .panel-head { margin: 0 -18px 16px; }
+
+.afs-scope .path-calc-panel { padding: 0 18px 18px; }
+.afs-scope .path-calc-panel > .panel-head { margin: 0 -18px 16px; }
+
 /* 앱 운영 — 승인 시안의 master/detail 구조.
    왼쪽은 공통 기능 메뉴가 아니라 현재 키트의 앱 목록이고, 오른쪽은 선택 앱의 운영 상세다. */
 .afs-scope .afs-master-detail {

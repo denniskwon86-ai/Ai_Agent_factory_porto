@@ -671,3 +671,77 @@ def test_에이전트는_독립_제품화면에서_저장상태와_사람확인_
     assert ".afs-scope .agent-master-detail-layout" in css
     assert "agent-detail-editor" in detail
     assert ".agent-master-page .agent-detail-editor" in css
+
+
+def test_업무데이터_설계상담은_가로단계표가_아닌_3열_업무공간을_쓴다():
+    panel = _read("frontend/src/components/AdvisorPanel.tsx")
+
+    assert "<HubShell" in panel
+    assert "<JarvisRail" in panel
+    assert "BUSINESS & DATA DESIGN" in panel
+    assert "업무 선택" in panel
+    assert "선택형 상담" in panel
+    assert "데이터 보유 확인" in panel
+    assert "청사진·승인·생성" in panel
+    assert "selectRailStep" in panel
+    assert "selected_object_id: selectedObjectId" in panel
+    assert "evidence_refs: ledger.status === 'ok'" in panel
+    assert "진행 단계" in panel
+    assert "현재 상담 문맥" in panel
+
+
+def test_업무데이터_준비는_적용본부터_인증판까지_3열_업무공간으로_탐색한다():
+    panel = _read("frontend/src/components/DataPrepPanel.tsx")
+    css = _read("frontend/src/design/afs.css")
+
+    assert "<HubShell" in panel
+    assert "<JarvisRail" in panel
+    assert "DATA READINESS" in panel
+    assert "샘플 기업 패키지" in panel
+    assert "조직 적용본" in panel
+    assert "업무기능 준비도" in panel
+    assert "원천·데이터 판" in panel
+    assert "selectSection" in panel
+    assert "sourceSectionRef.current.open = true" in panel
+    assert "조직 적용본을 먼저 선택해야" in panel
+    assert "evidence_refs: snapshots.map" in panel
+    assert "못 읽은 것은 0건이 아닙니다" in panel
+    assert ".afs-scope .data-prep-panel" in css
+
+
+def test_계산실행_승인은_관문_승인_초기화를_3열_통제화면으로_구분한다():
+    panel = _read("frontend/src/components/CalcApprovalPanel.tsx")
+    css = _read("frontend/src/design/afs.css")
+
+    assert "<HubShell" in panel
+    assert "<JarvisRail" in panel
+    assert "CALCULATION CONTROL" in panel
+    assert "label: '준비 상태'" in panel
+    assert "label: '계산 실행 승인'" in panel
+    assert "label: '시연 실행 초기화'" in panel
+    assert "APPROVAL REQUIRED" in panel
+    assert "승인 전에는 계산하지 않습니다" in panel
+    assert "current_module: `calculation-approval/${tab}`" in panel
+    assert "binding_fingerprint: item.binding_fingerprint" in panel
+    assert "정본과 승인 원장은 유지" in panel
+    assert ".afs-scope .calc-approval-panel" in css
+
+
+def test_경로계산은_질문부터_안건연결까지_3열_폐루프로_보인다():
+    panel = _read("frontend/src/components/PathCalcPanel.tsx")
+    css = _read("frontend/src/design/afs.css")
+
+    assert "<HubShell" in panel
+    assert "<JarvisRail" in panel
+    assert "PATH CALCULATION" in panel
+    assert "label: '질문·기준시점'" in panel
+    assert "label: '영향 경로 선택'" in panel
+    assert "label: '계산 결과·차단'" in panel
+    assert "label: '의사결정 안건 연결'" in panel
+    assert "NO SILENT ZERO" in panel
+    assert "막힌 계산은 숫자가 아닙니다" in panel
+    assert "selectSection" in panel
+    assert "result.used_snapshots" in panel
+    assert "result.result_fingerprint" in panel
+    assert "계산이 완료되어야 의사결정 안건" in panel
+    assert ".afs-scope .path-calc-panel" in css
