@@ -215,6 +215,60 @@ LLM_PRICE_PER_MTOK = {
 }
 QUOTA_RETRY_SLEEP_SEC = 8        # Flash 체인마저 소진 시 재시도 전 대기(과거 15초 → 단축)
 
+# ══════════════════════════════════════════════════════════════════════════
+# ★★★ [2026-08-27 한시 조치] **OpenRouter 유료 모델만 쓴다**
+# ══════════════════════════════════════════════════════════════════════════
+#
+# ## 왜
+#
+# 실측(`TEST001` 재빌드 — 199콜 / 73분): 폴백 실패 190건 중
+#
+#     429 무료 쿼터 소진   130건   ← 압도적 1위
+#     원인 미상             40건
+#     404 죽은 모델명       18건
+#     503/504                2건
+#
+# 병목은 **제공사 속도가 아니라 무료 티어 일일 쿼터**였다. 그리고 무료 체인이 소진되면
+# 남는 것이 출력 8k 짜리 llama 뿐이라 `with_structured_output` 코드 생성이 **구조적으로**
+# 완결되지 못한다(결함 #15 — 이 파일 :62 주석).
+#
+# ## 켜면 무슨 일이 일어나는가
+#
+# Gemini·xAI·Groq·Cerebras 를 **전부 건너뛰고** 아래 체인만 쓴다. 인스턴스를 만들지도
+# 않으므로 `GOOGLE_API_KEY`·`GROQ_API_KEY` 가 없어도 뜬다.
+#
+# ⚠️⚠️ **`LLM_*_FALLBACK_LIST` 는 건드리지 않는다.** 그 리스트는 위치=제공사 매핑이라
+#   (`[0]`Gemini `[1]`xAI `[2]`Groq `[3]`Cerebras `[4]`OpenRouter) OpenRouter 슬러그를
+#   끼워 넣으면 **Groq 에 OpenRouter 슬러그를 보내는 체인**이 만들어진다 — 실제로 한 번
+#   그랬고 그 사고가 :89 주석에 남아 있다. 그래서 **별도 리스트**로 둔다.
+#
+# ## 무엇을 넣을 수 있나
+#
+# 여기 적는 슬러그는 `LLM_PRICE_PER_MTOK`·`MODEL_OUTPUT_LIMITS` 에 **등록된 것**을 쓴다.
+# 등록 없이 넣으면 과금 산정이 조용히 비고(§16 비협상 조건), 출력 상한도 모른 채 돈다.
+# 기본값 둘은 이 저장소에서 실측으로 검증된 것뿐이다:
+#
+#     google/gemini-2.5-flash        출력 65,535 · in $0.30 / out $2.50 per Mtok
+#     google/gemini-2.5-flash-lite   출력 65,535 · in $0.10 / out $0.40 per Mtok
+#
+# ⚠️ `:free` 로 끝나는 슬러그는 **거부한다.** 그것은 OpenRouter 를 거친 무료 쿼터이고,
+#   이 조치가 없애려는 바로 그 실패 경로다(크레딧이 있어도 무료 쿼터에 묶여 실패한다 —
+#   2026-07-26 실측, :70 주석).
+#
+# ## 끄는 법
+#
+#     config 에서 False 로 되돌리거나, 환경변수로 `AFS_OPENROUTER_ONLY=0`.
+#     (환경변수가 config 보다 우선한다 — 서버를 고치지 않고 되돌릴 수 있어야 한다)
+OPENROUTER_ONLY = True
+OPENROUTER_ONLY_PRO_CHAIN = [
+    "google/gemini-2.5-flash",        # 65k 출력 — 코드 생성이 잘리지 않는다
+    "google/gemini-2.5-flash-lite",   # 같은 65k 출력, 1/6 가격 — 백스톱
+]
+OPENROUTER_ONLY_FLASH_CHAIN = [
+    "google/gemini-2.5-flash-lite",   # 심사·채점은 싼 쪽 먼저
+    "google/gemini-2.5-flash",
+]
+
 # 모델별 컨텍스트 윈도우 한도 (토큰 기준, 안전 마진 포함)
 MODEL_CONTEXT_LIMITS = {
     "gemini-2.5-pro":          600000,

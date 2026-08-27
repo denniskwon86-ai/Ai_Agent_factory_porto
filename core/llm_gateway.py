@@ -254,6 +254,76 @@ def _make_openrouter(model: str, temperature: float):
     )
 
 
+def _openrouter_only() -> bool:
+    """★★★ [2026-08-27 한시 조치] OpenRouter 유료 모델만 쓰는가.
+
+    ⚠️ **환경변수가 config 보다 우선한다.** 켜고 끄는 일을 코드 수정 없이 할 수 있어야
+      한다 — 그러지 않으면 되돌리려고 서버 코드를 고치게 되고, 그 수정이 남는다.
+
+        AFS_OPENROUTER_ONLY=1/true/on   → 켠다
+        AFS_OPENROUTER_ONLY=0/false/off → 끈다(config 가 True 여도)
+        미설정                           → `config.OPENROUTER_ONLY`
+    """
+    raw = (os.environ.get("AFS_OPENROUTER_ONLY") or "").strip().lower()
+    if raw in ("1", "true", "on", "yes"):
+        return True
+    if raw in ("0", "false", "off", "no"):
+        return False
+    return bool(getattr(config, "OPENROUTER_ONLY", False))
+
+
+def _openrouter_only_chain(tier: str, names) -> list:
+    """OpenRouter 전용 체인의 슬러그를 **검증해서** 돌려준다.
+
+    ⚠️ `:free` 는 거부한다 — 그것은 OpenRouter 를 거친 무료 쿼터이고, 이 조치가
+      없애려는 실패 경로 그 자체다(크레딧이 있어도 무료 쿼터에 묶여 실패한다).
+    ⚠️ 가격·출력 상한 미등록은 **막지 않고 크게 경고한다.** 막으면 내일 슬러그를
+      바꾸려는 사람이 여기서 걸리고, 그러면 이 스위치를 안 쓰게 된다. 다만 조용히
+      넘어가지도 않는다 — 미등록이면 과금 산정이 비고 출력 상한을 모른 채 돈다.
+    """
+    out = []
+    for n in (names or []):
+        n = str(n or "").strip()
+        if not n:
+            continue
+        if n.endswith(":free"):
+            raise RuntimeError(
+                f"[{tier}] OpenRouter 전용 모드에 무료 슬러그가 있습니다: {n}\n"
+                f"  이 모드는 무료 쿼터 소진(실측 429 130건)을 없애려는 것입니다. "
+                f"`:free` 슬러그는 크레딧이 있어도 무료 쿼터에 묶여 실패합니다.\n"
+                f"  → `config.OPENROUTER_ONLY_{tier.upper()}_CHAIN` 에서 빼십시오.")
+        if n not in (getattr(config, "LLM_PRICE_PER_MTOK", {}) or {}):
+            print(f"⚠️⚠️ [Gateway] {tier} 체인의 `{n}` 은 `LLM_PRICE_PER_MTOK` 에 "
+                  f"없습니다 — **이 모델의 비용은 0 으로 집계됩니다.**")
+        if n not in (getattr(config, "MODEL_OUTPUT_LIMITS", {}) or {}):
+            print(f"⚠️⚠️ [Gateway] {tier} 체인의 `{n}` 은 `MODEL_OUTPUT_LIMITS` 에 "
+                  f"없습니다 — 출력 상한을 모른 채 돕니다(코드 생성이 잘릴 수 있습니다).")
+        out.append(n)
+    if not out:
+        raise RuntimeError(
+            f"[{tier}] OpenRouter 전용 모드인데 체인이 비었습니다 — "
+            f"`config.OPENROUTER_ONLY_{tier.upper()}_CHAIN` 을 채우십시오.")
+    return out
+
+
+def _assert_openrouter_only_usable() -> None:
+    """★★★ **fail-closed.** 키가 없으면 뜨지 않는다.
+
+    ⚠️⚠️ 여기서 조용히 기존(무료) 체인으로 되돌리면, 사용자는 「OpenRouter 로 돌린다」고
+      믿으면서 **정확히 없애려던 429 폭풍**을 다시 맞는다. 그리고 그것을 알 방법이 없다 —
+      로그에는 gemini 가 찍히는데 그건 켜졌을 때도 찍히는 이름이다.
+    ★ 「모르면 안전한 쪽」이 여기서는 «멈춘다» 다."""
+    if _OPENROUTER_AVAILABLE and os.environ.get("OPENROUTER_API_KEY"):
+        return
+    why = ("`langchain-openai` 패키지가 없습니다" if not _OPENROUTER_AVAILABLE
+           else "`OPENROUTER_API_KEY` 환경변수가 없습니다")
+    raise RuntimeError(
+        "OpenRouter 전용 모드가 켜져 있는데 OpenRouter 를 쓸 수 없습니다 — " + why + ".\n"
+        "  ⚠️ 조용히 무료 체인으로 되돌리지 않습니다. 되돌리면 없애려던 쿼터 소진을 "
+        "그대로 맞으면서, 로그만 보고는 그 사실을 알 수 없습니다.\n"
+        "  → 키를 넣거나, `AFS_OPENROUTER_ONLY=0` 으로 이 모드를 끄십시오.")
+
+
 def is_llm_error_text(text) -> bool:
     """게이트웨이가 최종 실패 시 반환하는 에러 sentinel 문자열 감지(모든 소비자 공용).
     이 문자열이 산출물/채점 입력으로 흘러들면 '조용한 오판'이 생기므로, 소비자는
@@ -510,38 +580,54 @@ class LLMGateway:
         # 마지막으로 응답에 성공한 모델(sticky winner) — 다음 체인 구성에서 맨 앞으로 올린다.
         self._last_success_model = None
 
+        #: ★★★ [2026-08-27 한시 조치] 무료 쿼터 소진(실측 429 130건)을 없애기 위한
+        #:   OpenRouter 전용 모드. **판정을 여기 한 번만 하고 두 체인이 같은 값을 쓴다** —
+        #:   따로 판정하면 Pro 는 OpenRouter, Flash 는 무료로 갈리는 상태가 생긴다.
+        _or_only = _openrouter_only()
+        if _or_only:
+            _assert_openrouter_only_usable()          # 키 없으면 **여기서 멈춘다**
+
         # 3. [Track 1] Pro 모델 체인 조립 (고난도 추론용)
         # [레버B 정제] 비-텍스트 Gemini 변종 제외 + 변종 개수 상한(MAX_GEMINI_VARIANTS)으로 죽은 체인 walk 축소.
-        pro_candidates = [config.LLM_PRO_FALLBACK_LIST[0]]
-        for m in available_gemini_models:
-            if 'pro' in m.lower() and _is_text_gen_model(m) and m not in pro_candidates:
-                pro_candidates.append(m)
-        pro_candidates = pro_candidates[:1 + getattr(config, "MAX_GEMINI_VARIANTS", 3)]
-        # ★ [2026-07-27] 살아있는 Gemini Flash 를 Pro 변종 풀 **뒤에** 덧붙인다.
-        #   Pro 변종들은 같은 무료 쿼터 풀을 공유해 함께 429 가 나는데, 그때 남은 선택지가
-        #   출력 8k 짜리 OpenRouter llama 뿐이라 코드 생성이 구조적으로 실패했다(v3·v4 실측).
-        #   ⚠️ `LLM_PRO_FALLBACK_LIST` 는 위치=제공사 매핑이라 거기에 끼워 넣으면 안 된다
-        #     (실제로 끼워 넣었다가 xAI 에 gemini 를 보내는 체인이 만들어졌다). 여기서 붙인다.
-        for m in getattr(config, "PRO_TIER_EXTRA_GEMINI", []):
-            if m and m not in pro_candidates and (not available_gemini_models or m in available_gemini_models):
-                pro_candidates.append(m)
+        #: ★★★ [2026-08-27 한시 조치] OpenRouter 전용 모드면 **다른 제공사를
+        #:   만들지도 않는다.** 만들기만 해도 그 SDK 가 키를 요구할 수 있고,
+        #:   그러면 「OpenRouter 만 쓴다」면서 GOOGLE_API_KEY 가 있어야 뜬다.
+        if _or_only:
+            pro_candidates = _openrouter_only_chain(
+                "Pro", getattr(config, "OPENROUTER_ONLY_PRO_CHAIN", []))
+            pro_named = [(n, _make_openrouter(n, temperature=0.2))
+                          for n in pro_candidates]
+        else:
+            pro_candidates = [config.LLM_PRO_FALLBACK_LIST[0]]
+            for m in available_gemini_models:
+                if 'pro' in m.lower() and _is_text_gen_model(m) and m not in pro_candidates:
+                    pro_candidates.append(m)
+            pro_candidates = pro_candidates[:1 + getattr(config, "MAX_GEMINI_VARIANTS", 3)]
+            # ★ [2026-07-27] 살아있는 Gemini Flash 를 Pro 변종 풀 **뒤에** 덧붙인다.
+            #   Pro 변종들은 같은 무료 쿼터 풀을 공유해 함께 429 가 나는데, 그때 남은 선택지가
+            #   출력 8k 짜리 OpenRouter llama 뿐이라 코드 생성이 구조적으로 실패했다(v3·v4 실측).
+            #   ⚠️ `LLM_PRO_FALLBACK_LIST` 는 위치=제공사 매핑이라 거기에 끼워 넣으면 안 된다
+            #     (실제로 끼워 넣었다가 xAI 에 gemini 를 보내는 체인이 만들어졌다). 여기서 붙인다.
+            for m in getattr(config, "PRO_TIER_EXTRA_GEMINI", []):
+                if m and m not in pro_candidates and (not available_gemini_models or m in available_gemini_models):
+                    pro_candidates.append(m)
 
-        # 이름↔인스턴스를 함께 추적해 per-model 쿨다운(런타임 체인 재구성)에 사용한다.
-        # ★ [2026-07-27] max_retries 를 0 에서 올린다 — 자세한 근거는 config.GEMINI_MAX_RETRIES 주석.
-        #   요약: 분당 레이트리밋 한 번에 즉시 폴백하면 출력 8k 짜리 llama 가 받는데, 그게 더 느리고
-        #   품질도 낮아 재작업이 늘어난다. 몇 초 기다렸다 Gemini 로 받는 편이 모든 면에서 낫다.
-        _g_retry = getattr(config, "GEMINI_MAX_RETRIES", 2)
-        pro_named = [(pro_candidates[0],
-                      ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=pro_candidates[0], temperature=0.2, max_retries=_g_retry, max_output_tokens=_gemini_out(pro_candidates[0])))]
-        for m in pro_candidates[1:]:
-            pro_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.2, max_retries=_g_retry, max_output_tokens=_gemini_out(m))))
-        if _xai_enabled():
-            pro_named.append((config.LLM_PRO_FALLBACK_LIST[1], _make_xai(config.LLM_PRO_FALLBACK_LIST[1], temperature=0.2)))
-        pro_named.append((config.LLM_PRO_FALLBACK_LIST[2], ChatGroq(timeout=config.LLM_TIMEOUT_GROQ, model=config.LLM_PRO_FALLBACK_LIST[2], temperature=0.2, max_retries=0, max_tokens=_groq_out(config.LLM_PRO_FALLBACK_LIST[2]))))
-        if _cerebras_enabled():
-            pro_named.append((config.LLM_PRO_FALLBACK_LIST[3], _make_cerebras(config.LLM_PRO_FALLBACK_LIST[3], temperature=0.2)))
-        if _openrouter_enabled():
-            pro_named.append((config.LLM_PRO_FALLBACK_LIST[4], _make_openrouter(config.LLM_PRO_FALLBACK_LIST[4], temperature=0.2)))
+            # 이름↔인스턴스를 함께 추적해 per-model 쿨다운(런타임 체인 재구성)에 사용한다.
+            # ★ [2026-07-27] max_retries 를 0 에서 올린다 — 자세한 근거는 config.GEMINI_MAX_RETRIES 주석.
+            #   요약: 분당 레이트리밋 한 번에 즉시 폴백하면 출력 8k 짜리 llama 가 받는데, 그게 더 느리고
+            #   품질도 낮아 재작업이 늘어난다. 몇 초 기다렸다 Gemini 로 받는 편이 모든 면에서 낫다.
+            _g_retry = getattr(config, "GEMINI_MAX_RETRIES", 2)
+            pro_named = [(pro_candidates[0],
+                          ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=pro_candidates[0], temperature=0.2, max_retries=_g_retry, max_output_tokens=_gemini_out(pro_candidates[0])))]
+            for m in pro_candidates[1:]:
+                pro_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.2, max_retries=_g_retry, max_output_tokens=_gemini_out(m))))
+            if _xai_enabled():
+                pro_named.append((config.LLM_PRO_FALLBACK_LIST[1], _make_xai(config.LLM_PRO_FALLBACK_LIST[1], temperature=0.2)))
+            pro_named.append((config.LLM_PRO_FALLBACK_LIST[2], ChatGroq(timeout=config.LLM_TIMEOUT_GROQ, model=config.LLM_PRO_FALLBACK_LIST[2], temperature=0.2, max_retries=0, max_tokens=_groq_out(config.LLM_PRO_FALLBACK_LIST[2]))))
+            if _cerebras_enabled():
+                pro_named.append((config.LLM_PRO_FALLBACK_LIST[3], _make_cerebras(config.LLM_PRO_FALLBACK_LIST[3], temperature=0.2)))
+            if _openrouter_enabled():
+                pro_named.append((config.LLM_PRO_FALLBACK_LIST[4], _make_openrouter(config.LLM_PRO_FALLBACK_LIST[4], temperature=0.2)))
 
         self._pro_chain = pro_named          # [(name, instance), ...] — aexecute 가 런타임에 live 만 조립
         self._pro_primary_model = pro_candidates[0]
@@ -551,23 +637,32 @@ class LLMGateway:
         self.llm_pro_code = pro_named[0][1].with_structured_output(CodeFilesOutput).with_fallbacks([f.with_structured_output(CodeFilesOutput) for f in pro_fallbacks])
 
         # 4. [Track 2] Flash 모델 체인 조립 (고속 단순 작업용) — Pro 와 동일한 정제·이름추적 방식.
-        flash_candidates = [config.LLM_FLASH_FALLBACK_LIST[0]]
-        for m in available_gemini_models:
-            if 'flash' in m.lower() and _is_text_gen_model(m) and m not in flash_candidates:
-                flash_candidates.append(m)
-        flash_candidates = flash_candidates[:1 + getattr(config, "MAX_GEMINI_VARIANTS", 3)]
+        #: ★★★ [2026-08-27 한시 조치] OpenRouter 전용 모드면 **다른 제공사를
+        #:   만들지도 않는다.** 만들기만 해도 그 SDK 가 키를 요구할 수 있고,
+        #:   그러면 「OpenRouter 만 쓴다」면서 GOOGLE_API_KEY 가 있어야 뜬다.
+        if _or_only:
+            flash_candidates = _openrouter_only_chain(
+                "Flash", getattr(config, "OPENROUTER_ONLY_FLASH_CHAIN", []))
+            flash_named = [(n, _make_openrouter(n, temperature=0.1))
+                          for n in flash_candidates]
+        else:
+            flash_candidates = [config.LLM_FLASH_FALLBACK_LIST[0]]
+            for m in available_gemini_models:
+                if 'flash' in m.lower() and _is_text_gen_model(m) and m not in flash_candidates:
+                    flash_candidates.append(m)
+            flash_candidates = flash_candidates[:1 + getattr(config, "MAX_GEMINI_VARIANTS", 3)]
 
-        flash_named = [(flash_candidates[0],
-                        ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=flash_candidates[0], temperature=0.1, max_retries=_g_retry, max_output_tokens=_gemini_out(flash_candidates[0])))]
-        for m in flash_candidates[1:]:
-            flash_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.1, max_retries=_g_retry, max_output_tokens=_gemini_out(m))))
-        if _xai_enabled():
-            flash_named.append((config.LLM_FLASH_FALLBACK_LIST[1], _make_xai(config.LLM_FLASH_FALLBACK_LIST[1], temperature=0.1)))
-        flash_named.append((config.LLM_FLASH_FALLBACK_LIST[2], ChatGroq(timeout=config.LLM_TIMEOUT_GROQ, model=config.LLM_FLASH_FALLBACK_LIST[2], temperature=0.1, max_retries=0, max_tokens=_groq_out(config.LLM_FLASH_FALLBACK_LIST[2]))))
-        if _cerebras_enabled():
-            flash_named.append((config.LLM_FLASH_FALLBACK_LIST[3], _make_cerebras(config.LLM_FLASH_FALLBACK_LIST[3], temperature=0.1)))
-        if _openrouter_enabled():
-            flash_named.append((config.LLM_FLASH_FALLBACK_LIST[4], _make_openrouter(config.LLM_FLASH_FALLBACK_LIST[4], temperature=0.1)))
+            flash_named = [(flash_candidates[0],
+                            ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=flash_candidates[0], temperature=0.1, max_retries=_g_retry, max_output_tokens=_gemini_out(flash_candidates[0])))]
+            for m in flash_candidates[1:]:
+                flash_named.append((m, ChatGoogleGenerativeAI(timeout=config.LLM_TIMEOUT_GEMINI, model=m, temperature=0.1, max_retries=_g_retry, max_output_tokens=_gemini_out(m))))
+            if _xai_enabled():
+                flash_named.append((config.LLM_FLASH_FALLBACK_LIST[1], _make_xai(config.LLM_FLASH_FALLBACK_LIST[1], temperature=0.1)))
+            flash_named.append((config.LLM_FLASH_FALLBACK_LIST[2], ChatGroq(timeout=config.LLM_TIMEOUT_GROQ, model=config.LLM_FLASH_FALLBACK_LIST[2], temperature=0.1, max_retries=0, max_tokens=_groq_out(config.LLM_FLASH_FALLBACK_LIST[2]))))
+            if _cerebras_enabled():
+                flash_named.append((config.LLM_FLASH_FALLBACK_LIST[3], _make_cerebras(config.LLM_FLASH_FALLBACK_LIST[3], temperature=0.1)))
+            if _openrouter_enabled():
+                flash_named.append((config.LLM_FLASH_FALLBACK_LIST[4], _make_openrouter(config.LLM_FLASH_FALLBACK_LIST[4], temperature=0.1)))
 
         self._flash_chain = flash_named
         self._flash_primary_model = flash_candidates[0]
@@ -584,6 +679,18 @@ class LLMGateway:
         _cb_flash = f" -> Cerebras({config.LLM_FLASH_FALLBACK_LIST[3]})" if _cerebras_enabled() else ""
         _or_flash = f" -> OpenRouter({config.LLM_FLASH_FALLBACK_LIST[4]})" if _openrouter_enabled() else ""
 
+        #: ★★★ 어느 모드인지 **화면에서 보여야 한다.** 전용 모드에서 기존 줄을
+        #:   그대로 찍으면 Groq·Gemini 이름이 보이고, 사람은 그것들이 여전히 체인에
+        #:   있다고 읽는다. 「대조군이 진짜 대조군인지」를 로그만 보고 알 수 있어야 한다.
+        if _or_only:
+            print()
+            print("[OK] [LLM Gateway] === OpenRouter 전용 모드 === (한시 조치)")
+            print(f"   [Pro Tier]   OpenRouter: {' -> '.join(pro_candidates)}")
+            print(f"   [Flash Tier] OpenRouter: {' -> '.join(flash_candidates)}")
+            print("   [!] Gemini/xAI/Groq/Cerebras 는 인스턴스도 만들지 않았습니다.")
+            print("   - 끄려면 AFS_OPENROUTER_ONLY=0 또는 config.OPENROUTER_ONLY = False")
+            print()
+            return
         print(f"\n[OK] [LLM Gateway] 다중 계층 동적 라우팅 엔진 가동 완료 (최신 SDK 적용)")
         print(f"   [Pro Tier] {' -> '.join(pro_candidates)}{_xai_pro} -> Groq({config.LLM_PRO_FALLBACK_LIST[2]}){_cb_pro}{_or_pro}")
         print(f"   [Flash Tier] {' -> '.join(flash_candidates)}{_xai_flash} -> Groq({config.LLM_FLASH_FALLBACK_LIST[2]}){_cb_flash}{_or_flash}")

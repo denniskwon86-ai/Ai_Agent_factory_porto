@@ -68,4 +68,20 @@ if __name__ == "__main__":
             raise SystemExit("[run] --port 뒤에 포트 번호를 적으십시오. 예: --port 8083")
     if port != 8080:
         print(f"[run] 포트 {port} 로 기동합니다(기본 8080 아님).")
+    #: ★★★ [2026-08-27 한시 조치] **어느 모델 모드로 도는지 기동 때 알린다.**
+    #:
+    #: ⚠️ 게이트웨이는 **지연 초기화**라(`_LazyGateway` — import 때 네트워크를 타지
+    #:   않으려는 설계) 그 배너는 첫 LLM 호출에서야 찍히고, 그때는 이미 파이프라인
+    #:   로그에 묻힌다. 긴 완주를 시작하기 **전에** 확인할 수 있어야 한다.
+    #: ★ 여기서 게이트웨이를 만들지 않는다 — 판정 함수만 부른다(네트워크 없음).
+    try:
+        from core.llm_gateway import _openrouter_only
+        if _openrouter_only():
+            import config as _cfg
+            print("[run] === OpenRouter 전용 모드 === (한시 조치, AFS_OPENROUTER_ONLY=0 으로 해제)")
+            print(f"[run]   Pro   : {' -> '.join(getattr(_cfg, 'OPENROUTER_ONLY_PRO_CHAIN', []))}")
+            print(f"[run]   Flash : {' -> '.join(getattr(_cfg, 'OPENROUTER_ONLY_FLASH_CHAIN', []))}")
+    except Exception as _e:                       # 알림 실패가 기동을 막지 않는다
+        print(f"[run] (모델 모드 확인 실패, 기동은 계속: {_e})")
+
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=dev_mode)
