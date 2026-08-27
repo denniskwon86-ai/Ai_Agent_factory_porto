@@ -84,6 +84,50 @@ def test_오늘_틀어진_셋을_모두_덮는다():
         assert word in clause, word
 
 
+def test_금지_목록이_바뀌면_문구를_다시_본다():
+    """★★★ 문구를 **손으로 적었으므로** 목록 변화를 사람이 알아야 한다.
+
+    ⚠️⚠️ 3차까지는 문구를 `CAPABILITY_DECISION` 에서 렌더링했다. 4줄로 줄이면서
+      손으로 적게 됐고, 그 순간 「목록이 바뀌어도 문구는 안 바뀌는」 상태가 됐다 —
+      이 저장소가 오늘만 세 번 지적한 그 패턴이다.
+    ★ 문구를 다시 늘리는 대신 **잠금**으로 해결한다. 금지 목록이 바뀌면 이 시험이
+      빨개지고, 그때 «4줄에 한 줄을 더할지 게이트에 맡길지» 를 **사람이 정한다.**
+    """
+    from core.requirement_normalizer import COVERED_PROHIBITED, DEFERRED_TO_GATES
+
+    actual = {k for k, (s, _r) in arc.CAPABILITY_DECISION.items()
+              if s == arc.PROHIBITED}
+    declared = COVERED_PROHIBITED | DEFERRED_TO_GATES
+    assert actual == declared, (
+        f"금지 목록이 바뀌었습니다. 새로 생긴 것: {sorted(actual - declared)} / "
+        f"금지 목록이 바뀌었습니다. 새로 생긴 것: {sorted(actual - declared)} / "
+        f"사라진 것: {sorted(declared - actual)} — "
+        f"입구 고지문(4줄)에 한 줄을 더할지, 게이트에 맡길지 정하고 "
+        f"`COVERED_PROHIBITED` / `DEFERRED_TO_GATES` 를 갱신하십시오.")
+
+
+def test_문구가_덮는다고_선언한_것을_실제로_덮는다():
+    """★ 선언만 하고 문구에 없으면 그 선언이 거짓이 된다."""
+    from core.requirement_normalizer import COVERED_PROHIBITED
+
+    clause = render_clause()
+    hint = {"auth.local_login": "로그인", "auth.local_roles": "권한",
+            "auth.local_session": "로그인", "storage.local_db": "데이터베이스"}
+    for cap in sorted(COVERED_PROHIBITED):
+        assert hint[cap] in clause, f"{cap} 를 덮는다고 했는데 문구에 없다"
+
+
+def test_서버와_자체DB의_상태가_다름을_기록한다():
+    """⚠️ 문구는 둘을 한 줄로 묶었지만 정본에서는 **상태가 다르다.**
+
+    ★ 이 시험은 그 사실을 코드에 고정한다 — 나중에 「서버도 PROHIBITED 였지」라고
+      잘못 기억하고 판정 코드를 쓰는 것을 막는다."""
+    assert arc.CAPABILITY_DECISION["storage.local_db"][0] == arc.PROHIBITED
+    assert arc.CAPABILITY_DECISION["server.custom_logic"][0] == arc.HOST_SERVICE_REQUIRED
+    #: 그래도 앱이 만들면 안 되는 것은 같다 — 정본의 사유가 그렇게 말한다.
+    assert "FastAPI" in arc.CAPABILITY_DECISION["server.custom_logic"][1]
+
+
 def test_문구에_특정_도메인_낱말이_없다():
     """⚠️ 이 문구는 **모든 프로젝트**에 붙는다. 한 도메인의 낱말을 박으면 다른
     프로젝트에서 엉뚱한 예시가 되고, 모델이 그 도메인을 끌어온다."""

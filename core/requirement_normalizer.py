@@ -54,29 +54,27 @@ MARKER = "[🚨 반드시 지킬 것 — 아래 기능은 이 프로젝트에서
 #: 붙이면 같은 지시가 두 벌이 된다.
 _LEGACY_MARKERS = ("[🚨 이 플랫폼의 확정 사실 — 아래는 이미 충족되어 있습니다]",)
 
-#: 금지 능력을 사람 말로 옮길 때 쓰는 이름. **판정에는 쓰지 않는다** — 판정은 닫힌 목록이
-#: 하고, 이것은 그 항목을 사람이 읽을 수 있게만 만든다.
-_KO: Dict[str, str] = {
-    "auth.local_login": "사용자 인증 — 로그인·로그아웃·회원가입·비밀번호",
-    "auth.local_roles": "사용자별 권한 부여·변경·관리",
-    "auth.local_session": "세션 유지·로그인 상태 관리",
-    "storage.credentials": "자격증명 보관",
-    "storage.local_db": "앱 자체 데이터베이스",
-    "api.direct_call": "앱이 외부 API 를 직접 호출",
-}
-
-#: 「이미 충족됨」이라고 말할 수 있는 것만 여기 담는다.
-#: ⚠️ `storage.local_db`·`api.direct_call` 은 «이미 충족» 이 아니라 «다른 길이 있다» 다 —
-#:   문구를 나눈다. 같은 말로 뭉개면 「DB 가 이미 있으니 쓰면 되겠네」로 읽힌다.
-_ALREADY_PROVIDED = ("auth.local_login", "auth.local_roles", "auth.local_session")
-
-
-def _prohibited() -> List[str]:
-    """금지 능력 목록. **닫힌 목록에서 읽는다.**"""
-    from core import app_runtime_contract as arc
-
-    return sorted(k for k, (s, _r) in arc.CAPABILITY_DECISION.items()
-                  if s == arc.PROHIBITED)
+#: ⚠️⚠️ [2026-08-27 4차] 종전에는 이 문구를 `CAPABILITY_DECISION` 에서 **렌더링**했다.
+#:   4줄로 줄이면서 손으로 적게 됐고, 그 순간 「목록이 바뀌어도 문구는 안 바뀌는」
+#:   상태가 됐다 — 이 저장소가 오늘만 세 번 지적한 그 패턴이다.
+#: ★ 문구는 짧게 두되(길이가 설계 속성이다), **목록이 바뀌면 사람이 알도록** 잠근다:
+#:   `tests/test_requirement_normalizer.py::test_금지_목록이_바뀌면_문구를_다시_본다`
+#:   가 아래 집합을 정본과 대조하고, 달라지면 빨개진다. 그때 4줄에 한 줄을 더할지
+#:   게이트에 맡길지 **사람이 정한다.**
+#:
+#: ⚠️ 「서버」와 「자체 DB」는 정본에서 **상태가 다르다**(실측 확인):
+#:     storage.local_db      PROHIBITED             「판정이 두 곳이 된다」
+#:     server.custom_logic   HOST_SERVICE_REQUIRED  「임의 FastAPI 생성 금지」
+#:   앱이 만들면 안 되는 것은 같으므로 문구에서는 한 줄로 묶었다. 다만 «금지» 와
+#:   «호스트가 대신 함» 은 다른 사실이므로, 여기 적어 둔다.
+COVERED_PROHIBITED = frozenset({
+    "auth.local_login", "auth.local_roles", "auth.local_session",  # 1행: 로그인·권한
+    "storage.local_db",                                            # 3행: 자체 DB
+})
+#: 문구가 **다루지 않는** 금지 항목. 이것들은 기획 문구가 아니라 **게이트**가 막는다 —
+#: 계약 컴파일러(`api.direct_call`)와 정적 검사(`storage.credentials`).
+#: ⚠️ 문구를 늘리면 그만큼 묽어진다. 기획에서 새는 것만 문구로 다룬다.
+DEFERRED_TO_GATES = frozenset({"api.direct_call", "storage.credentials"})
 
 
 def already_applied(idea: Any) -> bool:
