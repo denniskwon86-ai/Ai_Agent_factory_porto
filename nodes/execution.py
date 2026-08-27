@@ -143,6 +143,103 @@ async def run_architect(state: Any) -> Dict[str, Any]:
     updates.setdefault("needs_revision", False)
     return updates
 
+def _previous_contract_errors(st: Any) -> str:
+    """직전 계약 컴파일이 **왜 막혔는지**를 Tech Lead 에게 되돌려 준다. (2026-08-27)
+
+    ## ⚠️⚠️ 왜 필요한가 — 실측
+
+    새 프로젝트(`CRM002`)에서 `E2E-01` 이 계약 단계에서 **네 번 연속** 막혔다. 그런데
+    다시 걸 때마다 Tech Lead 는 **자기가 무엇을 틀렸는지 모른 채** 처음부터 다시 썼다.
+    오류는 상태에 그대로 들어 있었는데(`app_runtime_contract_summary` ·
+    `terminal_reason` · `supervisor_feedback`), **읽는 곳이 0곳**이었다.
+
+        1회차  capability 칸에 상태 이름(`NOT_YET_SUPPORTED`)
+        2·3회차 `file.upload` 에 허용되지 않는 `REQUEST_HOST_FEATURE`
+        4회차  `record_id` — 예약 필드명(스킬 172행에 8개가 다 적혀 있다)
+
+    ★ 코드 리뷰에는 `REWORK_DEV` 로 되돌아가는 길이 있는데 **계약에는 없었다.**
+      그래서 계약 오류는 사람이 손으로 재시작해야 하고, 재시작해도 같은 실수가 난다 —
+      에이전트가 결과를 못 보기 때문이다. 그것은 통제가 아니라 무한 재시도다.
+
+    ⚠️ 사유는 **합산기가 준 말 그대로** 싣는다. 여기서 다시 쓰면 같은 사실이 두 가지로
+      설명되고, 어느 쪽이 정본인지 아무도 모르게 된다.
+    """
+    #: ⚠️ 「초안이 있다」가 아니라 「**직전 컴파일이 실패했다**」일 때만 붙인다.
+    #:   성공한 뒤에도 붙이면 Tech Lead 가 이미 고친 것을 다시 고치려 든다.
+    status = str(getattr(st, "app_runtime_contract_status", "") or "")
+    fingerprint = str(getattr(st, "app_runtime_contract_fingerprint", "") or "")
+    summary = str(getattr(st, "app_runtime_contract_summary", "") or "").strip()
+    if fingerprint or status != "DRAFT" or not summary:
+        return ""
+    return "\n".join([
+        "",
+        "",
+        "[🚨 직전 시도가 계약 단계에서 막혔습니다 — 그 이유를 먼저 고치십시오]",
+        "",
+        summary,
+        "",
+        "★ 위 지적은 **합산기가 실제로 낸 말**입니다. 같은 초안을 다시 내면 같은 자리에서",
+        "  다시 막힙니다 — 지적된 칸을 고쳐서 내십시오.",
+        "⚠️ 「예약된 이름」이라면 그 필드를 **다른 이름으로 바꾸십시오.** 지우는 것이 아니라",
+        "  업무의 뜻이 드러나는 이름으로 바꾸는 것입니다(플랫폼이 같은 이름을 이미 씁니다).",
+        "⚠️ 「능력 이름이 아닙니다」라면 위 결정표의 이름 중에서 고르십시오.",
+        "⚠️ 「고를 수 없습니다」라면 그 상태에 허용된 결정만 쓰십시오 — 비워 두면 사람에게",
+        "  넘어갑니다(그것도 정상 경로입니다).",
+    ])
+
+
+def _capability_decision_table() -> str:
+    """★★★ 능력 → 상태 → **고를 수 있는 결정**을 코드에서 렌더링한다. (2026-08-27)
+
+    ## ⚠️⚠️ 왜 스킬 파일에 적어 두면 안 되는가 — 실측 두 번
+
+    `skills/tech_lead_skill.md` 에 이 표를 **손으로 옮겨** 두었다. 그리고 두 번 어긋났다.
+
+      ① 「모르면 `NOT_YET_SUPPORTED` 로 적고 이유를 남긴다」고 썼더니 모델이 **능력 이름
+         칸에 그 글자를 적었다** — `{"capability": "NOT_YET_SUPPORTED"}`. 정작 필요한
+         이름은 목록에 있었다(`file.upload`).
+      ② 표에서 **`NOT_YET_SUPPORTED` 행이 통째로 빠져 있었다.** 모델은 그 행을 못 찾고
+         위쪽 문장의 「REDUCE|WAIT|REQUEST_HOST_FEATURE」 셋 중에서 골랐는데,
+         `NOT_YET_SUPPORTED` 에 허용된 것은 **`REDUCE`·`WAIT` 둘뿐**이다.
+
+    두 번 다 8개 태스크짜리 프로젝트가 **첫 태스크에서** 멈췄다.
+
+    ★ 그래서 여기서 **정본을 읽어 렌더링한다.** 목록이 바뀌면 이 표도 같이 바뀐다.
+      손으로 옮긴 표는 바뀐 날 조용히 거짓말을 시작한다.
+    ⚠️ 상태는 **적는 값이 아니다.** 결정표가 정한다 — 그 사실을 표의 머리말에 박아 둔다.
+    """
+    from core import app_runtime_contract as arc
+
+    rows = []
+    for status in (arc.SUPPORTED, arc.CONDITIONAL, arc.HOST_SERVICE_REQUIRED,
+                   arc.NOT_YET_SUPPORTED, arc.PROHIBITED):
+        caps = sorted(k for k, (s, _r) in arc.CAPABILITY_DECISION.items() if s == status)
+        if not caps:
+            continue
+        allowed = list(arc.allowed_decisions(status))
+        rows.append(f"  · {arc.STATUS_LABEL.get(status, status)} — "
+                    + " · ".join(f"`{c}`" for c in caps))
+        rows.append("      → user_decision: "
+                    + ("**적지 않는다**(고를 것이 없다)" if not allowed
+                       else " | ".join(f"`{d}`" for d in allowed)))
+    return "\n".join([
+        "",
+        "",
+        "[🚨 capability_intents — 닫힌 목록과 고를 수 있는 결정]",
+        "",
+        "⚠️ `capability` 는 **아래 이름 그대로**만 쓴다. 지어낸 이름은 컴파일이 막는다.",
+        "⚠️ `status` 는 **절대 적지 않는다** — 아래 표가 정하는 값이다. 상태 이름을",
+        "   `capability` 칸에 적는 실수가 실측에서 나왔다(그 프로젝트는 거기서 멈췄다).",
+        "",
+        *rows,
+        "",
+        "★ 요구가 «아직 안 되는 것»·«호스트가 해 주는 것»·«금지» 에 걸리면, 그 능력 이름을",
+        "  고르고 위에 허용된 결정 중 하나를 함께 적는다. 결정을 비워 두면 **사람에게**",
+        "  넘어가고 프로젝트는 그 결정이 올 때까지 기다린다.",
+        "★ 화면을 그리고·목록을 보여 주고·정렬하는 것은 능력이 아니다 — 선언할 것이 없다.",
+    ])
+
+
 def _approved_contract_brief(state_obj: Any) -> str:
     """이 프로젝트에 **이미 있는 계약**을 Tech Lead 에게 그대로 보여 준다.
 
@@ -180,9 +277,27 @@ def _approved_contract_brief(state_obj: Any) -> str:
     #:     「출처가 ENTERPRISE_READ 인데 어느 업무 데이터에서 오는지가 없습니다」
     #:   요약본을 정본처럼 내밀면 **받는 쪽은 그 요약이 전부인 줄 안다.** 내가 만든 결함이다.
     #: ★ 그대로 옮기라고 시킬 것이면 **그대로 보여 줘야** 한다.
+    #: ★★★ [2026-08-27 실측] **`app_class` 도 보여 준다 — 세 번째 같은 누락이다.**
+    #:
+    #: ⚠️⚠️ 처음에는 `datasets` 만 보여 줘서 능력이 매번 달라졌고(→ 능력 추가),
+    #:   이번에는 `app_class` 를 안 보여 줘서 태스크마다 다르게 적었다:
+    #:     「태스크마다 `app_class` 가 다릅니다(['departmental', 'enterprise']) —
+    #:      프로젝트 계약은 하나이므로 분류도 하나여야 합니다. 넓은 쪽으로 자동
+    #:      승격하지 않습니다(그것은 조용한 권한 확대입니다).」
+    #:   합산기가 옳다. 틀린 것은 **정해진 값을 안 알려 주고** 정하라고 시킨 쪽이다.
+    #: ★ 같은 실수를 세 번 했다 — 「계약 정본 원문 그대로」라고 적어 놓고 매번 일부만
+    #:   실었다. 그래서 이제 **빠뜨린 칸이 또 생기지 않도록** 세 칸을 한 자리에 모은다.
+    _cls = str((contract or {}).get("app_class", "") or "").strip()
     lines = ["", "", "[🚨 이 프로젝트에는 **이미 승인된 계약**이 있습니다]", "",
-             "아래는 계약 정본 **원문 그대로**입니다(요약이 아닙니다).", "",
-             "`datasets`:", "```json",
+             "아래는 계약 정본 **원문 그대로**입니다(요약이 아닙니다).", ""]
+    if _cls:
+        lines += [f"`app_class`: **{_cls}**",
+                  "  ⚠️ 이 값은 **프로젝트 하나에 하나**입니다. 이번 태스크의 초안에도",
+                  f'    반드시 `{{"app_class": "{_cls}"}}` 로 적으십시오 — 다르게 적으면',
+                  "    합산기가 «분류도 하나여야 합니다» 로 파이프라인을 멈춥니다.",
+                  "    넓은 쪽으로 자동 승격하지 않습니다(조용한 권한 확대이므로).",
+                  ""]
+    lines += ["`datasets`:", "```json",
              json.dumps(datasets, ensure_ascii=False, indent=2),
              "```"]
     #: ★★★ [2026-08-26 실측] **능력도 함께 보여 준다.**
@@ -269,6 +384,13 @@ async def run_tech_lead(state: Any) -> Dict[str, Any]:
     #   합산기가 옳다 — 자동 병합은 조용한 권한 확대다. 문제는 **Tech Lead 가 이미 있는
     #   것을 못 봤다**는 점이다(전수 확인: 계약 파일을 읽는 코드가 0곳이었다).
     # ★ 지문이 그대로면 재승인도 필요 없다 — 사람의 승인 횟수까지 함께 줄어든다.
+    #: ★★★ [2026-08-27] 닫힌 목록과 허용 결정을 **코드에서 뽑아** 붙인다.
+    #: ⚠️ 스킬 파일의 손으로 옮긴 표가 두 번 어긋나 두 번 다 첫 태스크에서 멈췄다.
+    extra += _capability_decision_table()
+    #: ★★★ [2026-08-27] 직전 계약 오류를 **되돌려 준다.**
+    #: ⚠️ 이것이 없어서 같은 태스크가 네 번 연속 막히는 동안 Tech Lead 는
+    #:   자기가 무엇을 틀렸는지 한 번도 못 봤다(오류는 상태에 있었다).
+    extra += _previous_contract_errors(state_obj)
     extra += _approved_contract_brief(state_obj)
 
     from nodes.utils.debate import run_supervised_stage
@@ -943,6 +1065,23 @@ async def run_code_builder(state: Any) -> Dict[str, Any]:
         out["backend_code_summary"] = json.dumps({"files": be_full}, ensure_ascii=False)
     return out
 
+def _platform_auth_blocks(fe_files: list, be_files: list) -> list:
+    """생성 앱의 프런트·백엔드에서 **자체 인증 차단 신호**를 함께 찾는다.
+
+    한쪽 산출물만 있는 태스크도 정상 입력이다. 호출부의 조건문 안에서 다른 쪽 변수를
+    만들면 프런트 전용은 크래시하고 백엔드 전용은 검사를 건너뛴다. 그래서 빈 목록을
+    명시적으로 받아 공통 관문이 두 경우를 같은 규칙으로 처리한다.
+    """
+    from nodes.utils import platform_auth_checker as checker
+
+    hits = []
+    for item in list(fe_files or []) + list(be_files or []):
+        code = item.get("code", "") or ""
+        if code:
+            hits.extend(checker.scan_text(code, path=item.get("file_path", "")))
+    return [hit for hit in hits if hit.get("severity") == "block"]
+
+
 async def run_reviewer(state: Any) -> Dict[str, Any]:
     """Reviewer(개발 엔지니어, 단위 관점) - 코드 정확성·버그·해당 단위 기능 동작 검증 게이트.
     코드리뷰 단계의 PASS/REWORK_DEV/ESCALATE_PM 3분기 및 Git 커밋/WBS 완료 로직 보존, 단계 기준 채점 기록.
@@ -982,6 +1121,17 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
     else:
         has_fe_code = bool(_extract_files_from_json(state_obj.frontend_code_summary))
         has_be_code = bool(_extract_files_from_json(state_obj.backend_code_summary))
+        #: ★★★ 두 집합을 **조건문 밖에서** 먼저 확정한다.
+        #:
+        #: ⚠️ 프런트 검사 안에서만 `fe_files`, 백엔드 검사 안에서만 `be_files` 를 만들면
+        #:   프런트 전용 앱은 초기화되지 않은 `be_files` 때문에 크래시하고, 백엔드 전용
+        #:   앱은 자체 로그인 라우트 검사를 아예 지나지 않는다(전체 걷기에서 실측).
+        fe_files = ((_collect_disk_files(state_obj.workspace_root, _FE_OWNED_EXTS)
+                     or _extract_files_from_json(state_obj.frontend_code_summary))
+                    if has_fe_code else [])
+        be_files = ((_collect_disk_files(state_obj.workspace_root, _BE_OWNED_EXTS)
+                     or _extract_files_from_json(state_obj.backend_code_summary))
+                    if has_be_code else [])
 
         #  [심볼 회귀 게이트] 직전 커밋(baseline) 대비 사라진 export/핸들러/입력요소/엔드포인트를
         #    결정적으로 탐지(LLM 0콜). 모든 다른 게이트는 신규 파일만 stateless 로 보므로 '기능 삭제'를
@@ -1048,8 +1198,6 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             #   ① 정밀 복구(C2)로 일부 파일만 재출력되면, LLM 출력만 보는 검증은 나머지 모듈을
             #      찾지 못해 '미해결 상대 모듈' 거짓 실패를 낸다.
             #   ② 실제로 배포되는 것은 디스크의 파일 집합이지 마지막 응답이 아니다.
-            fe_files = _collect_disk_files(state_obj.workspace_root, _FE_OWNED_EXTS) \
-                or _extract_files_from_json(state_obj.frontend_code_summary)
             # 최대 60초 동기 subprocess - 이벤트 루프 동결 방지 위해 스레드로
             render = await asyncio.to_thread(check_frontend_render, fe_files)
             if not render.get("ok") and not render.get("skipped"):
@@ -1176,70 +1324,6 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             else:
                 render_note += "\n([OK] 지어낸 데이터 표시 없음 - 실패 시 fail-closed 확인)"
 
-            # ══════════════════════════════════════════════════════════════
-            # 🚨🚨 [2026-08-27 실측] **앱이 자기 로그인을 만들었는가** — 하드 차단
-            # ══════════════════════════════════════════════════════════════
-            #
-            # 실제 가동이 만든 앱의 첫 화면이 이랬다:
-            #
-            #     거래처 관리 시스템 / 사용자 아이디 / 비밀번호 / 로그인
-            #     App.tsx:61  (u) => u.username === loginUsername
-            #                        && u.password_hash === loginPassword
-            #
-            # 이 앱은 회사 호스트 **안에서** 열린다(앱인앱). 사용자는 이미 인증돼 있다.
-            # 그런데 앱이 자기 로그인 화면에 막혀 **데이터 평면을 한 번도 부르지 않았다** —
-            # 완주했고, 승인됐고, 게시됐고, 열리는데, 아무것도 못 한다.
-            #
-            # ⚠️⚠️ **검사기는 이미 있었다.** `platform_auth_checker` 가 게시 때 워크스페이스를
-            #   훑어 차단 3건을 찾아 `release.json` 에 `ok: false` 로 적어 두기까지 했다.
-            #   그런데 **빌드 중에 부르는 곳이 0곳**이었다 — 코드가 다 만들어진 뒤에야
-            #   말하니 그때는 고칠 사람이 없다. 이 저장소가 반복해 온 모양 그대로다.
-            #
-            # ★ 고지문(`app_runtime_brief`)은 **설득**이고 이것은 **차단**이다. 설득만
-            #   두면 모델이 안 들었을 때 아무 일도 일어나지 않는다 — 실제로 그랬다.
-            # ⚠️ 프런트·백엔드를 **함께** 본다. 로그인 화면만 막고 `/login` 라우트를
-            #   남기면 절반만 막은 것이다.
-            from nodes.utils import platform_auth_checker as _pac
-            _auth_hits = []
-            for _f in (fe_files + be_files):
-                _code = _f.get("code", "") or ""
-                if _code:
-                    _auth_hits.extend(_pac.scan_text(_code, path=_f.get("file_path", "")))
-            _auth_block = [h for h in _auth_hits if h.get("severity") == "block"]
-            if _auth_block:
-                print(f"❌ [PlatformAuth] 앱이 자체 인증을 만들었다 {len(_auth_block)}건 - 재작업")
-                _lines = "\n".join(
-                    f"  · {h.get('path','')}:{h.get('line','')} — {h.get('description','')}"
-                    f"  ({str(h.get('evidence',''))[:80]})" for h in _auth_block[:12])
-                review_text = (
-                    "🚨 이 앱은 **회사 시스템 안에서 열립니다(앱인앱).** 사용자는 이미 "
-                    "인증되어 있고, 부서·역할·조회 범위도 이미 정해져 있습니다. 그런데 "
-                    "앱이 자체 인증을 만들었습니다:\n" + _lines +
-                    "\n\n[수정 지침] 로그인 화면·비밀번호 입력·사용자 테이블·토큰 발급을 "
-                    "**전부 지우십시오.** 앱은 첫 화면부터 바로 업무 화면을 그립니다. "
-                    "사용자 정보가 필요하면 호스트가 준 문맥을 쓰고, 별도로 확인하지 "
-                    "마십시오. 요구사항에 「로그인」이 적혀 있더라도 그 요구는 **이미 "
-                    "충족된 것**으로 다루십시오 — 이 플랫폼에서는 만들 수 없습니다."
-                )
-                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
-                cr_scores["CODE_REVIEW"] = 0.0
-                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
-                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV",
-                               "blocking_fails": ["app_local_auth"]})
-                return {
-                    "reviewer_decision": "REWORK_DEV",
-                    "reviewer_feedback": review_text,
-                    "pm_override_reason": "",
-                    "needs_revision": False,
-                    "current_stage": "CODE_REVIEW",
-                    "stage_scores": cr_scores,
-                    "criteria_log": cr_log,
-                    "supervisor_feedback": review_text,
-                    "supervisor_hops": hops,
-                }
-            else:
-                render_note += "\n([OK] 자체 인증 없음 - 호스트 인증을 그대로 물려받음)"
-
             #  정적 품질 백스톱(Phase 2): 컴포넌트 분리/빈상태/디자인토큰 - 하드 차단이 아니라
             #    권고로 LLM 리뷰어 판단에 주입(오탐 재작업 폭증 방지). frontend_skill/design_system 가
             #    1차 규율, 이 검사기는 그 규율이 무너진 경우를 잡는 백스톱.
@@ -1257,8 +1341,6 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         if has_be_code:
             from nodes.utils.backend_smoke import check_backend_smoke
             # ★ [2026-07-27] 위 렌더 검증과 같은 이유로 디스크의 현재 전체 파일 집합을 검증한다.
-            be_files = _collect_disk_files(state_obj.workspace_root, _BE_OWNED_EXTS) \
-                or _extract_files_from_json(state_obj.backend_code_summary)
             # 최대 45초 동기 subprocess(격리 부팅) - 이벤트 루프 동결 방지 위해 스레드로
             smoke = await asyncio.to_thread(check_backend_smoke, be_files)
             if not smoke.get("ok") and not smoke.get("skipped"):
@@ -1287,6 +1369,106 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
             elif smoke.get("ok") and not smoke.get("skipped"):
                 _w = smoke.get("warnings", [])
                 render_note += f"\n([OK] 백엔드 스모크 통과 - 라우트 {smoke.get('routes', 0)}개" + (f", 경고 {len(_w)}건" if _w else "") + ")"
+
+        # ══════════════════════════════════════════════════════════════
+        # 🚨🚨 [2026-08-27 실측] **앱이 자기 로그인을 만들었는가** — 공통 하드 차단
+        # ══════════════════════════════════════════════════════════════
+        #
+        # 프런트·백엔드 개별 검사 안에 두지 않는다. 프런트 전용·백엔드 전용·양쪽 생성은
+        # 모두 정상 입력이고, 어느 한쪽만 있어도 자체 인증은 호스트 권한을 우회한다.
+        if has_fe_code or has_be_code:
+            _auth_block = _platform_auth_blocks(fe_files, be_files)
+            if _auth_block:
+                print(f"❌ [PlatformAuth] 앱이 자체 인증을 만들었다 {len(_auth_block)}건 - 재작업")
+                _lines = "\n".join(
+                    f"  · {h.get('path','')}:{h.get('line','')} — {h.get('description','')}"
+                    f"  ({str(h.get('evidence',''))[:80]})" for h in _auth_block[:12])
+                review_text = (
+                    "🚨 이 앱은 **회사 시스템 안에서 열립니다(앱인앱).** 사용자는 이미 "
+                    "인증되어 있고, 부서·역할·조회 범위도 이미 정해져 있습니다. 그런데 "
+                    "앱이 자체 인증을 만들었습니다:\n" + _lines +
+                    "\n\n[수정 지침] 로그인 화면·비밀번호 입력·사용자 테이블·토큰 발급을 "
+                    "**전부 지우십시오.** 앱은 첫 화면부터 바로 업무 화면을 그립니다. "
+                    "사용자 정보가 필요하면 호스트가 준 문맥을 쓰고, 별도로 확인하지 "
+                    "마십시오. 요구사항에 「로그인」이 적혀 있더라도 그 요구는 **이미 "
+                    "충족된 것**으로 다루십시오 — 이 플랫폼에서는 만들 수 없습니다."
+                )
+                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+                cr_scores["CODE_REVIEW"] = 0.0
+                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
+                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0,
+                               "verdict": "REWORK_DEV",
+                               "blocking_fails": ["app_local_auth"]})
+                return {
+                    "reviewer_decision": "REWORK_DEV",
+                    "reviewer_feedback": review_text,
+                    "pm_override_reason": "",
+                    "needs_revision": False,
+                    "current_stage": "CODE_REVIEW",
+                    "stage_scores": cr_scores,
+                    "criteria_log": cr_log,
+                    "supervisor_feedback": review_text,
+                    "supervisor_hops": hops,
+                }
+            render_note += "\n([OK] 자체 인증 없음 - 호스트 인증을 그대로 물려받음)"
+
+            # ══════════════════════════════════════════════════════════════
+            # 🚨🚨 [2026-08-27 실측] **앱이 자기 서버를 만들었는가** — 하드 차단
+            # ══════════════════════════════════════════════════════════════
+            #
+            # `app_runtime_brief` 의 머리말이 바로 이 사고로 시작한다(live-walk-02,
+            # Spring Boot). 고지문을 썼는데 `CRM002` 에서 **또 났다** — 이번엔 FastAPI:
+            #
+            #     main.py · backend/routers.py · backend/models.py · backend/database.py
+            #     backend/services.py · backend/schemas.py   (FastAPI + SQLAlchemy)
+            #
+            # 계약이 금지하는 셋에 정면으로 걸린다 —
+            #   `server.custom_logic`(호스트 기능 필요) · `api.direct_call`(금지) ·
+            #   `storage.local_db`(금지).
+            # ⚠️ 그런데 **차단 신호 0건**이었다. 인증 검사기는 «인증» 만 보지
+            #   «서버를 만들었나» 는 보지 않는다. 고지문은 있고 차단기가 없었다.
+            #
+            # ★ 계약 프로필이 켜진 프로젝트에만 적용한다. 레거시 자유 형식 앱에
+            #   소급하면 이미 도는 것들이 깨진다(저장소의 다른 경계와 같은 규칙).
+            from core.wbs_artifact_kind import profile_enforces_contract
+            if profile_enforces_contract(
+                    getattr(state_obj, "runtime_contract_profile", "") or ""):
+                from nodes.utils.server_build_checker import (
+                    check_server_build, render_report as _srv_report)
+                _srv = check_server_build(fe_files + be_files)
+                if not _srv.get("ok") and not _srv.get("skipped"):
+                    print(f"❌ [ServerBuild] 앱이 자기 서버를 만들었다 "
+                          f"{len(_srv['blocking'])}건 - 재작업")
+                    review_text = (
+                        "🚨 이 앱은 **서버를 띄우지 않습니다.** 회사 호스트 안에서 도는 "
+                        "화면 하나이고, 데이터는 호스트가 줍니다. 그런데 서버를 "
+                        "만들었습니다:\n" + _srv_report(_srv) +
+                        "\n\n[수정 지침] 서버 프레임워크(FastAPI·Flask·Express)·ORM"
+                        "(SQLAlchemy 등)·자체 DB·서버 기동 진입점을 **전부 지우십시오.** "
+                        "그 파일들도 함께 지웁니다. 데이터 읽기·쓰기는 생성된 어댑터"
+                        "(`src/generated/afs-contract.ts`)만 씁니다 — 그것이 호스트 "
+                        "데이터 평면에 붙는 유일한 길이고, 계약이 `server.custom_logic`·"
+                        "`api.direct_call`·`storage.local_db` 를 금지합니다."
+                    )
+                    cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+                    cr_scores["CODE_REVIEW"] = 0.0
+                    cr_log = list(getattr(state_obj, "criteria_log", []) or [])
+                    cr_log.append({"stage": "CODE_REVIEW", "score": 0.0,
+                                   "verdict": "REWORK_DEV",
+                                   "blocking_fails": ["app_builds_server"]})
+                    return {
+                        "reviewer_decision": "REWORK_DEV",
+                        "reviewer_feedback": review_text,
+                        "pm_override_reason": "",
+                        "needs_revision": False,
+                        "current_stage": "CODE_REVIEW",
+                        "stage_scores": cr_scores,
+                        "criteria_log": cr_log,
+                        "supervisor_feedback": review_text,
+                        "supervisor_hops": hops,
+                    }
+                else:
+                    render_note += "\n([OK] 자체 서버 없음 - 호스트 데이터 평면만 씁니다)"
 
         if not has_fe_code and not has_be_code:
             print("⏩ [Smart Bypass] 코드 작성 내역이 없으므로 리뷰를 통과(PASS)합니다.")
@@ -1387,7 +1569,26 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
 
             _rv_fe = _collect_disk_files(state_obj.workspace_root, _FE_OWNED_EXTS)
             _rv_be = _collect_disk_files(state_obj.workspace_root, _BE_OWNED_EXTS)
-            _rv_files = _rv_fe + _rv_be
+            #: ★★★ [2026-08-27 실측] **생성된 어댑터는 «고치라고 시킬» 대상이 아니다.**
+            #:
+            #: ⚠️⚠️ `CRM002` 의 첫 태스크가 리뷰 왕복 8회를 전부 태우고 죽었다. 리뷰어가
+            #:   물고 늘어진 것은 `src/generated/afs-contract.ts` 였다 —
+            #:     「`customers` 와 `customerFiles` 가 `window.afs!.data!` 로 동일하게
+            #:      할당되어 있습니다 … 데이터셋마다 별도 인스턴스를 만드십시오」
+            #:   그런데 그것이 **정상**이다. `window.afs.data` 는 하나이고 데이터셋 이름은
+            #:   **인자**다. 게다가 이 파일은 승인된 계약에서 `typed_sdk_adapter` 가
+            #:   결정론적으로 만든다 — **개발자가 고칠 수 없다.** 고칠 수 없는 파일을
+            #:   8번 고치라고 시키면 그 태스크는 코드 0줄로 끝난다.
+            #:
+            #: ⚠️⚠️ **여기서만 뺀다.** 처음에는 `_collect_disk_files` 에서 통째로 뺐다가
+            #:   렌더 검증이 `App.tsx` 의 `import "./generated/afs-contract"` 를 못 풀어
+            #:   **다음 회차가 같은 자리에서 또 죽었다**(내가 만든 회귀다). 그 파일은
+            #:   컴파일에는 반드시 있어야 하고, **비평 대상에서만** 빠져야 한다.
+            #: ★ 판정은 `platform_auth_checker._is_generated_adapter` 를 그대로 부른다 —
+            #:   그 검사기가 같은 파일을 같은 이유로 이미 면제한다. 두 곳에서 정하면 갈린다.
+            from nodes.utils.platform_auth_checker import _is_generated_adapter
+            _rv_files = [f for f in (_rv_fe + _rv_be)
+                         if not _is_generated_adapter(f.get("file_path", ""))]
             if _rv_files:
                 _budget = getattr(config, "REVIEWER_CODE_BUDGET_CHARS", 60000)
                 _parts, _used = [], 0

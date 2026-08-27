@@ -178,8 +178,19 @@ ProjectState에서 발견한 중요 사실
 - 회사 업무 데이터를 **읽기만** 하면 `source_intent=ENTERPRISE_READ` ·
   `data_role=ENTERPRISE_ACTUAL` · `allowed_actions=["read"]` ·
   `duplicate_entry_policy=DENY_IF_AUTHORITATIVE_SOURCE_EXISTS` 다.
-- 근거 없는 데이터셋·API 를 **발명하지 않는다.** 모르면 `capability_intents` 에
-  `NOT_YET_SUPPORTED` 로 적고 이유를 남긴다.
+- 근거 없는 데이터셋·API 를 **발명하지 않는다.**
+  ⚠️⚠️ [2026-08-27 실측] 여기 있던 문장(「모르면 `NOT_YET_SUPPORTED` 로 적고」)을
+    모델이 **능력 이름 칸에 그 글자를 적는 것**으로 읽었다:
+
+        {"capability": "NOT_YET_SUPPORTED", "user_decision": "REQUEST_HOST_FEATURE"}
+
+    그래서 8개 태스크짜리 프로젝트가 첫 태스크에서 멈췄다. 정작 필요한 이름은
+    목록에 **있었다** — `file.upload`.
+  ★ **`status` 는 절대 적지 않는다.** 상태는 결정표가 정하는 값이고, 당신이 적는 것은
+    `capability`(닫힌 목록의 이름) 와 필요할 때의 `user_decision` 뿐이다.
+  ★ 호스트가 못 하는 일을 요구가 시키면, **그 일에 해당하는 능력 이름**을 고르고
+    (예: 파일 첨부 → `file.upload`) `user_decision` 을 함께 적는다.
+    목록 어디에도 맞는 이름이 정말 없을 때만 이유를 적어 사람에게 넘긴다.
 - `source_intent` 가 `ENTERPRISE_READ` 면 **`enterprise_contract_key` 를 반드시 적는다**
   (어느 업무 데이터에서 오는지). 없으면 컴파일이 막힌다 —
   「원천을 특정하지 않으면 이 데이터는 만들어져도 읽히지 않습니다」.

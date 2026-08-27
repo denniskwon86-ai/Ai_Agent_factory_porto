@@ -75,8 +75,9 @@ def test_리뷰어가_빌드_중에_이_검사를_부른다():
     ★ 검사기가 훌륭해도 아무도 안 부르면 없는 것과 같다 — 이 저장소가 반복해 온 모양."""
     import nodes.execution as ex
 
-    src = inspect.getsource(ex.run_reviewer)
-    assert "platform_auth_checker" in src, (
+    reviewer_src = inspect.getsource(ex.run_reviewer)
+    helper_src = inspect.getsource(ex._platform_auth_blocks)
+    assert "_platform_auth_blocks" in reviewer_src and "platform_auth_checker" in helper_src, (
         "리뷰어가 자체 인증 검사를 부르지 않는다 — 검사기가 있어도 소용없다")
 
 
@@ -97,10 +98,22 @@ def test_프런트와_백엔드를_함께_본다():
     import nodes.execution as ex
 
     src = inspect.getsource(ex.run_reviewer)
-    i = src.index("_pac.scan_text")
-    around = src[max(0, i - 600):i + 200]
-    assert "fe_files" in around and "be_files" in around, (
+    assert "_platform_auth_blocks(fe_files, be_files)" in src, (
         "프런트만 검사한다 — 서버측 로그인 라우트가 그대로 남는다")
+
+
+@pytest.mark.parametrize("side", ["frontend", "backend"])
+def test_한쪽_산출물만_있어도_자체_인증을_검사한다(side):
+    """프런트 전용은 크래시하지 않고, 백엔드 전용은 검사를 건너뛰지 않는다."""
+    import nodes.execution as ex
+
+    frontend = [{"file_path": "src/App.tsx", "code": _REAL_PASSWORD_FIELD}]
+    backend = [{"file_path": "api.py",
+                "code": '@app.post("/login")\ndef login(): return {}\n'}]
+    hits = ex._platform_auth_blocks(
+        frontend if side == "frontend" else [],
+        backend if side == "backend" else [])
+    assert hits, f"{side} 전용 산출물의 자체 인증을 찾지 못했다"
 
 
 # ── 승격 게이트도 같은 사실을 봐야 한다 ──────────────────────────────────

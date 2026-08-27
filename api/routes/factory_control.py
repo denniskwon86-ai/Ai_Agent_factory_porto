@@ -1383,6 +1383,12 @@ async def contract_decisions_resolve(project_id: str, req: ContractResolveReques
             subject_id = (req.capability or "").strip()
             decision_value = (req.decision or "").strip().upper()
         else:
+            #: ★★★ [2026-08-27] **결정을 초안 밖에도 남긴다.**
+            #: ⚠️ 초안에만 적으면 Tech Lead 가 다시 돌 때 통째로 덮이고, 같은 충돌이
+            #:   45초마다 되살아난다(실측). `load_drafts` 가 이 기록을 다시 얹는다.
+            from nodes.contract import record_dataset_resolution
+            await asyncio.to_thread(record_dataset_resolution, ws,
+                                    req.dataset_key, req.winner_task_id)
             changed, summary = _cd.apply_dataset_resolution(
                 drafts, dataset_key=req.dataset_key, winner_task_id=req.winner_task_id)
             subject_type = _cd.SUBJECT_DATASET

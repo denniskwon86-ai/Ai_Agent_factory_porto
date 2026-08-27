@@ -82,6 +82,33 @@ def _compile_intents(draft: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[
             continue
         ref = str(raw.get("requirement_ref", "")).strip()
         status, reason = arc.decide(cap)
+        #: ★★★ [2026-08-27 실측] **결정표에 없는 이름이면 그렇게 말한다.**
+        #:
+        #: ⚠️⚠️ 실제 가동에서 Tech Lead 가 `capability` 칸에 **상태 이름**을 적었다:
+        #:
+        #:     {"capability": "NOT_YET_SUPPORTED", "user_decision": "REQUEST_HOST_FEATURE",
+        #:      "requirement_ref": "FR-009", "reason": "파일 첨부 …"}
+        #:
+        #:   결정표에 없는 이름은 `NOT_YET_SUPPORTED` 상태로 떨어지므로(fail-closed, 옳다)
+        #:   컴파일러가 낸 말은 이랬다 —
+        #:
+        #:     「NOT_YET_SUPPORTED: 지원 대기 에는 REQUEST_HOST_FEATURE 를 고를 수 없습니다」
+        #:
+        #:   **능력 이름 자리에 상태 이름이 찍혀서 읽을 수가 없다.** 모델은 자기가 무엇을
+        #:   틀렸는지(이름을 지어냈다는 것) 알 길이 없고, 그 프로젝트는 거기서 멈춘다.
+        #:   실제로 필요한 이름은 목록에 **있었다** — `file.upload`.
+        #: ★ 막는 것은 그대로 두고 **무엇을 고쳐야 하는지**를 말한다. 거절이 행동으로
+        #:   이어지지 않으면 그것은 통제가 아니라 교착이다.
+        if cap not in arc.CAPABILITY_DECISION:
+            _hint = ""
+            if cap in arc.STATUS_LABEL:
+                _hint = (f" — 그것은 **상태 이름**이지 능력 이름이 아닙니다. "
+                         f"상태는 이 표가 정하므로 적지 마십시오. "
+                         f"요구에 맞는 **능력 이름**을 고르십시오.")
+            errors.append(
+                f"{cap!r} 은 능력 이름이 아닙니다{_hint} "
+                f"가능한 이름: {sorted(arc.CAPABILITY_DECISION)}")
+            continue
         iid = _intent_id(cap, ref)
         if iid in seen:
             continue
@@ -107,11 +134,40 @@ def _compile_intents(draft: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[
                       f"자리이므로 **버리고 계속합니다.**")
                 decision = ""
             elif decision not in arc.allowed_decisions(status):
-                # ★★★ 금지 항목의 `REQUEST_HOST_FEATURE` 가 여기서 막힌다.
-                errors.append(
-                    f"{cap}: {arc.STATUS_LABEL.get(status, status)} 에는 {decision} 를 "
-                    f"고를 수 없습니다(가능: {list(arc.allowed_decisions(status))}).")
-                decision = ""
+                #: ★★★ [2026-08-27 실측] **가까운 값이 안전 결과가 같으면 바로잡고 계속한다.**
+                #:
+                #: ⚠️⚠️ Tech Lead 가 `file.upload`(지원 대기)에 `REQUEST_HOST_FEATURE` 를
+                #:   적었다. 능력 이름은 맞았고 결정만 목록 밖이었다. 스킬 문구를 고치고,
+                #:   닫힌 목록을 **코드에서 렌더링**해 프롬프트에 붙이기까지 했는데도
+                #:   **세 번 연속 같은 값을 골랐다.** 그동안 8개 태스크짜리 프로젝트는
+                #:   첫 태스크에서 한 줄도 못 나갔다.
+                #:   ★ 설득은 차단기가 아니다 — 안 들으면 아무 일도 일어나지 않는다.
+                #:
+                #: ## 왜 이것만 바로잡아도 되는가
+                #:
+                #:   `NOT_YET_SUPPORTED` 에서 `WAIT` 과 `REQUEST_HOST_FEATURE` 는 **결과가
+                #:   같다** — 어느 쪽이든 그 능력은 만들어지지 않고, 앱은 그 기능 없이
+                #:   나온다. 목록이 후자를 뺀 것은 「지원 예정인 것을 다시 요청하지 말라」는
+                #:   정리이지 안전 경계가 아니다.
+                #:
+                #: ⚠️⚠️ **`PROHIBITED` 는 절대 여기 넣지 않는다.** 거기서
+                #:   `REQUEST_HOST_FEATURE` 는 「금지된 것을 열어 달라」는 요청이고,
+                #:   그것이야말로 이 관문이 막으려는 것이다. 그래서 조건을 상태 하나로
+                #:   좁힌다 — 넓히면 이 자리가 통제를 무르게 하는 문이 된다.
+                if (status == arc.NOT_YET_SUPPORTED
+                        and decision == "REQUEST_HOST_FEATURE"
+                        and "WAIT" in arc.allowed_decisions(status)):
+                    print(f"ℹ️ [ContractCompiler] {cap}: {decision} 는 "
+                          f"{arc.STATUS_LABEL.get(status, status)} 에 쓸 수 없어 "
+                          f"**WAIT 으로 바로잡습니다** — 어느 쪽이든 그 능력은 "
+                          f"만들어지지 않습니다.")
+                    decision = "WAIT"
+                else:
+                    # ★★★ 금지 항목의 `REQUEST_HOST_FEATURE` 가 여기서 막힌다.
+                    errors.append(
+                        f"{cap}: {arc.STATUS_LABEL.get(status, status)} 에는 {decision} 를 "
+                        f"고를 수 없습니다(가능: {list(arc.allowed_decisions(status))}).")
+                    decision = ""
 
         intents.append({
             "intent_id": iid,

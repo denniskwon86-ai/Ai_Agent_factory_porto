@@ -64,10 +64,71 @@ def load_drafts(workspace_root: str) -> Dict[str, Dict[str, Any]]:
     for name in sorted(os.listdir(d)):
         if not name.endswith(".json"):
             continue
+        if name.startswith("_"):
+            #: ⚠️ `_resolutions.json` 은 초안이 아니다. 태스크로 읽히면 합산기가
+            #:   「_resolutions 라는 태스크의 초안」을 보게 되고, 계약 범위가 틀어진다.
+            continue
         task_id = name[: -len(".json")]
         raw = _read_json(os.path.join(d, name))
         out[task_id] = raw if isinstance(raw, dict) else {"__unreadable__": name}
-    return out
+    #: ★★★ [2026-08-27 실측] **사람이 정한 것을 다시 덮어씌운다.**
+    #:
+    #: ⚠️⚠️ 결정은 초안 파일에 착지하는데, 그 파일은 Tech Lead 가 다시 돌 때 **통째로
+    #:   덮인다.** 실측: `customers` 를 E2E-01·E2E-02 가 다르게 선언 → 사람이 E2E-01 로
+    #:   정함 → 태스크 재개 → Tech Lead 가 초안을 새로 씀 → **같은 충돌이 다시** →
+    #:   45초마다 도는 무한 루프가 됐다(LLM 비용도 그만큼).
+    #:   승인된 계약 원문을 4,289자 그대로 프롬프트에 줘도 모델은 다르게 썼다 —
+    #:   설득으로는 안 되는 자리다.
+    #: ★ 그래서 결정을 **초안 밖에** 적어 두고, 초안을 읽을 때마다 그 위에 다시 얹는다.
+    #:   읽는 곳이 하나이므로(컴파일러·pending·합산기 전부 이 함수를 지난다) 여기서
+    #:   얹으면 모두가 같은 것을 본다.
+    #: ⚠️ 지우는 것이 아니라 **정해진 쪽으로 맞추는 것**이다 — 원본 초안은 그대로 두고
+    #:   메모리에서만 얹는다. 다음에 사람이 다시 정하면 그 값이 이긴다.
+    return _with_resolutions(workspace_root, out)
+
+
+def resolutions_path(workspace_root: str) -> str:
+    """사람이 내린 결정의 **지속 기록**. 초안과 나란히 둔다."""
+    return os.path.join(draft_dir(workspace_root), "_resolutions.json")
+
+
+def record_dataset_resolution(workspace_root: str, dataset_key: str,
+                              winner_task_id: str) -> None:
+    """데이터셋 충돌 결정을 남긴다 — 초안이 다시 써져도 살아남게."""
+    path = resolutions_path(workspace_root)
+    doc = _read_json(path)
+    doc = doc if isinstance(doc, dict) else {}
+    doc.setdefault("datasets", {})[str(dataset_key)] = str(winner_task_id)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=2)
+
+
+def _with_resolutions(workspace_root: str,
+                      drafts: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """기록된 결정을 초안 위에 얹는다. **기록이 없으면 그대로 돌려준다.**"""
+    doc = _read_json(resolutions_path(workspace_root))
+    picks = (doc or {}).get("datasets") if isinstance(doc, dict) else None
+    if not isinstance(picks, dict) or not picks:
+        return drafts
+    for key, winner in picks.items():
+        win = drafts.get(str(winner))
+        if not isinstance(win, dict):
+            continue                       # 이긴 초안이 사라졌으면 얹을 것이 없다
+        src = next((d for d in (win.get("datasets") or [])
+                    if str((d or {}).get("name", "")) == str(key)), None)
+        if src is None:
+            continue
+        for tid, draft in drafts.items():
+            if tid == winner or not isinstance(draft, dict):
+                continue
+            dss = draft.get("datasets")
+            if not isinstance(dss, list):
+                continue
+            for i, d in enumerate(dss):
+                if str((d or {}).get("name", "")) == str(key):
+                    dss[i] = json.loads(json.dumps(src))     # 깊은 복사
+    return drafts
 
 
 def save_draft(workspace_root: str, task_id: str, draft: Dict[str, Any]) -> str:
