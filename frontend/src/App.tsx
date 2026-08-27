@@ -52,6 +52,7 @@ import { OperatingContextSwitcher } from './components/OperatingContextSwitcher'
 import { ProductShell } from './components/ProductShell';
 import { SystemAboutPage } from './components/SystemAboutPage';
 import { KitOperationsPanel } from './components/KitOperationsPanel';
+import { SimulationGovernanceShell } from './components/SimulationGovernanceShell';
 //: ★★★ [2026-08-25] 문맥을 푸는 규칙은 **한 곳**에 있다(`lib/operatingContext`).
 //: ⚠️ 종전에는 여기서 `getEnterpriseContext().tenantId` 를 그대로 썼다. 그 값은 사용자가
 //:   조직을 고를 때만 채워지므로 로그인 직후 상단이 「? · 확인 중」이었다 —
@@ -101,7 +102,7 @@ function AppShell() {
   );
   const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
     | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'
-    | 'master' | 'terminology' | 'crosswalk' | 'governance'>(() => {
+    | 'master' | 'terminology' | 'crosswalk' | 'governance' | 'planning' | 'shadow'>(() => {
     if (initialProject.current) return 'build';
     if (typeof window === 'undefined') return 'enterprise';
     const value = new URLSearchParams(window.location.search).get('space');
@@ -109,7 +110,7 @@ function AppShell() {
       || value === 'report' || value === 'knowledge' || value === 'agent'
       || value === 'advisor' || value === 'data' || value === 'calc' || value === 'path'
       || value === 'briefing' || value === 'master' || value === 'terminology'
-      || value === 'crosswalk' || value === 'governance'
+      || value === 'crosswalk' || value === 'governance' || value === 'planning' || value === 'shadow'
       ? value : 'enterprise';
   });
   const [routeRestored, setRouteRestored] = useState(initialProject.current === null);
@@ -358,10 +359,10 @@ function AppShell() {
           onSelect: () => { setShowScenario(false); setSpace('twin'); } },
         { id: 'planning', icon: '📊', label: '경영계획',
           desc: '계획·실적·시나리오를 동일 기준선에서 비교 (결정론적 계산, LLM 0콜)',
-          onSelect: () => setShowPlanning(true) },
+          onSelect: () => { setShowPlanning(false); setSpace('planning'); } },
         { id: 'shadow', icon: '🧪', label: 'Shadow Mode',
           desc: '새 규칙·모델을 지금 규칙과 «나란히» 돌려 결과를 비교합니다 — 승인 전에는 운영에 쓰이지 않습니다',
-          onSelect: () => setShowShadow(true) },
+          onSelect: () => { setShowShadow(false); setSpace('shadow'); } },
       ],
     },
     {
@@ -684,7 +685,15 @@ function AppShell() {
                 : space === 'crosswalk'
                   ? <CrosswalkPanel page onClose={() => setSpace('knowledge')} />
                   : space === 'governance'
-                    ? <GovernanceConsole page onClose={() => setSpace('knowledge')} />
+                  ? <GovernanceConsole page onClose={() => setSpace('knowledge')} />
+                  : space === 'planning'
+                    ? <SimulationGovernanceShell kind="planning">
+                        <PlanningPanel page onClose={() => setSpace('twin')} />
+                      </SimulationGovernanceShell>
+                    : space === 'shadow'
+                      ? <SimulationGovernanceShell kind="shadow">
+                          <ShadowModePanel page onClose={() => setSpace('twin')} />
+                        </SimulationGovernanceShell>
             : null;
   const journeyModule = space === 'advisor' ? 'advisor'
     : space === 'data' ? 'data'
@@ -694,13 +703,15 @@ function AppShell() {
   const foundationModule = space === 'master' ? 'master'
     : space === 'terminology' ? 'terminology'
       : space === 'crosswalk' ? 'crosswalk'
-        : space === 'governance' ? 'governance' : null;
+      : space === 'governance' ? 'governance' : null;
+  const decisionModule = space === 'planning' ? 'planning'
+    : space === 'shadow' ? 'shadow' : null;
 
-  if (!currentProjectId && journeyPage && (journeyModule || foundationModule)) {
+  if (!currentProjectId && journeyPage && (journeyModule || foundationModule || decisionModule)) {
     return (
       <ErrorBoundary>
         <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
-          <ProductShell module={journeyModule || foundationModule!}
+          <ProductShell module={journeyModule || foundationModule || decisionModule!}
             company={shellCompanyName}
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}

@@ -772,7 +772,7 @@ def test_U1_핵심여정은_홈위_모달이_아니라_공통_제품상단바_�
     assert "<CalcApprovalPanel page" in app
     assert "<PathCalcPanel page" in app
     assert "<BriefingPanel page" in app
-    assert "<ProductShell module={journeyModule || foundationModule!}" in app
+    assert "<ProductShell module={journeyModule || foundationModule || decisionModule!}" in app
     assert "const NAV_PARENT" in shell
     assert "calc: 'twin'" in shell
     assert "briefing: 'report'" in shell
@@ -815,7 +815,7 @@ def test_U2_근거화면_일곱개는_공통_제품상단바_아래에서_열린
     assert "<GovernanceConsole page" in app
     assert "setKnowledgeInitialView('ontology')" in app
     assert "setKnowledgeInitialView('external')" in app
-    assert "<ProductShell module={journeyModule || foundationModule!}" in app
+    assert "<ProductShell module={journeyModule || foundationModule || decisionModule!}" in app
 
 
 def test_용어집은_중복탭이_아니라_단계레일_본문_자비스_세영역을_쓴다():
@@ -849,3 +849,32 @@ def test_크로스워크는_제안과_승인주소록을_가르고_판독실패�
     assert "시스템을 먼저 선택해야 이 단계를 확인할 수 있습니다" in panel
     assert "ref={proposalsSection}" in panel
     assert "ref={confirmedSection}" in panel
+
+
+def test_U3_경영계획과_Shadow_Mode는_팝업이_아니라_공통_제품상단바_아래에서_열린다():
+    app = _read("frontend/src/App.tsx")
+    shell = _read("frontend/src/components/ProductShell.tsx")
+    planning = _read("frontend/src/components/PlanningPanel.tsx")
+    shadow = _read("frontend/src/components/ShadowModePanel.tsx")
+    workspace_shell = _read("frontend/src/components/SimulationGovernanceShell.tsx")
+
+    for space in ("planning", "shadow"):
+        assert f"setSpace('{space}')" in app
+        assert f"{space}: 'twin'" in shell
+    assert "<PlanningPanel page" in app
+    assert "<ShadowModePanel page" in app
+    assert "const decisionModule" in app
+    assert "journeyModule || foundationModule || decisionModule" in app
+    assert '<SimulationGovernanceShell kind="planning">' in app
+    assert '<SimulationGovernanceShell kind="shadow">' in app
+    assert "<HubShell" in workspace_shell
+    assert "<JarvisRail" in workspace_shell
+    assert "PLANNING_ITEMS" in workspace_shell
+    assert "SHADOW_ITEMS" in workspace_shell
+    assert "selected_object_id: active" in workspace_shell
+    assert "panel.querySelector<HTMLElement>('.panel-head small')" in workspace_shell
+
+    for panel in (planning, shadow):
+        assert "page = false" in panel
+        assert "page={page}" in panel
+        assert "!page && <div className=\"afs-dialog-bar\"" in panel

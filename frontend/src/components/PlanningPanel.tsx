@@ -47,7 +47,7 @@ function settled<T>(r: PromiseSettledResult<T>): Loaded<T> {
   return r.status === 'fulfilled' ? ok(r.value) : failed<T>(r.reason);
 }
 
-export function PlanningPanel({ onClose }: { onClose: () => void }) {
+export function PlanningPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   const [orgId, setOrgId] = useState('MNM_BATTERY');
   const [period, setPeriod] = useState('2027');
   const [accounts, setAccounts] = useState<Loaded<Account[]>>(loading<Account[]>());
@@ -114,8 +114,9 @@ export function PlanningPanel({ onClose }: { onClose: () => void }) {
   const integrityUnknown = (roll && roll.status !== 'ok') || (appr && appr.status !== 'ok');
 
   return (
-    <HubDialog label="경영계획 — 계획·실적·시나리오를 동일 기준선에서 비교" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog label="경영계획 — 계획·실적·시나리오를 동일 기준선에서 비교" onClose={onClose}
+      page={page}>
+      {!page && <div className="afs-dialog-bar">
         <b>경영계획 · 실적 · 시나리오</b>
         <span>계산은 결정론적입니다(LLM 0콜) — 같은 입력이면 같은 결과가 나옵니다</span>
         <div className="bar-actions">
@@ -124,7 +125,7 @@ export function PlanningPanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="afs-dialog-body">
         <div className="hub-main">

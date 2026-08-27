@@ -38,7 +38,7 @@ import {
   compareRun, fetchRuns, fetchSummary, promoteRun, reviewRun,
 } from '../lib/shadowApi';
 
-type Props = { onClose: () => void };
+type Props = { onClose: () => void; page?: boolean };
 
 /** ★ 미측정을 «변화 없음» 과 같은 톤으로 두면 「문제 없음」으로 읽힌다. 구분한다. */
 const VERDICT: Record<string, { label: string; cls: string }> = {
@@ -69,7 +69,7 @@ function fmt(v: number | null | undefined) {
 
 /** 401/403 은 «없다» 가 아니라 «못 봤다» 다 — 상태를 구분해 담는다. */
 
-export default function ShadowModePanel({ onClose }: Props) {
+export default function ShadowModePanel({ onClose, page = false }: Props) {
   //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
   const claim = useLatestOnly();
 
@@ -136,8 +136,8 @@ export default function ShadowModePanel({ onClose }: Props) {
   const allAcked = regressed.every((m) => ack.has(m));
 
   return (
-    <HubDialog label="Shadow Mode — 병렬 검증과 제한적 승격" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog label="Shadow Mode — 병렬 검증과 제한적 승격" onClose={onClose} page={page}>
+      {!page && <div className="afs-dialog-bar">
         <b>Shadow Mode</b>
         <span>승격되지 않은 결과는 운영값이 아닙니다 · 같은 입력이 아니면 비교하지 않습니다(§7.3)</span>
         <div className="bar-actions">
@@ -149,7 +149,7 @@ export default function ShadowModePanel({ onClose }: Props) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="afs-dialog-body">
         <div className="hub-main">
