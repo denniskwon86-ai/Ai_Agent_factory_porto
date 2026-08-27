@@ -231,10 +231,30 @@ def aggregate(tasks: Any, drafts: Any) -> AggregateResult:
     #: ★★★ [2026-08-27] **요구가 말없이 사라지지 않게 한다.**
     #: ⚠️ 초안이 아예 없는 태스크는 위 `missing` 이 이미 말했으므로 여기서 또 말하지
     #:   않는다 — 같은 사실을 두 번 말하면 사람은 두 가지 문제로 읽는다.
+    #: ★★★ [2026-08-27 실측 — 내 오탐을 내가 고친다] **경고이지 차단이 아니다.**
+    #:
+    #: ⚠️⚠️ 처음에는 `errors` 에 넣어 막았다. 그리고 `CRM003` 의 `E2E-04` 가 그것에
+    #:   걸렸다 — 「계약이 FR-003 를 다루지 않습니다」.
+    #:   그런데 실제로는 **덮여 있었다**:
+    #:       E2E-04 태스크  FR-003(상세 조회)·FR-004(수정)·FR-005(삭제)
+    #:       초안 선언      FR-002 → app_data.read   ← 상세 조회가 쓸 능력이 이미 여기
+    #:                     FR-004 → app_data.update
+    #:                     FR-005 → app_data.delete
+    #:   **한 능력이 여러 요구를 덮는 정상적인 경우**다. 요구마다 행을 만들라고 강요하면
+    #:   그것은 통제가 아니라 마찰이다.
+    #:
+    #: ★ `CRM002` 의 `FR-008`(권한 제어)과는 다르다 — 그건 `auth.local_roles` 가 필요한데
+    #:   **선언될 수도 없는** 것이었고, 그래서 흔적 없이 사라졌다. 이 검사는 문자열만
+    #:   보므로 둘을 가르지 못한다.
+    #: ★ 해악은 「사라지는 것」이 아니라 **「말없이」** 다. 그래서 말은 하되 막지 않는다 —
+    #:   화면과 로그에 남아 사람이 볼 수 있으면 목적은 달성된다.
+    #: ⚠️ 만들 수 없는 요구가 애초에 안 들어오게 하는 것은 **입구**(`requirement_normalizer`)가
+    #:   한다. 이 검사는 그 뒤의 관측이지 이중 차단기가 아니다.
     _in = set(included)
     _scoped = [t for t in normalized if str((t or {}).get("task_id", "")) in _in]
     #: `intents` 는 `{(ref, cap): (tid, 원문, 의미)}` 다 — 원문만 넘긴다.
-    errors.extend(_coverage_errors(_scoped, [v[1] for v in intents.values()]))
+    for _w in _coverage_errors(_scoped, [v[1] for v in intents.values()]):
+        print(f"ℹ️ [ContractAggregator] {_w}")
 
     classes = sorted(set(app_class_by_task.values()))
     if len(classes) > 1:

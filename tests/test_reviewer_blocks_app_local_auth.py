@@ -139,3 +139,56 @@ def test_승격_검사가_게시와_같은_코드를_본다():
     src = _i.getsource(fc._release_code_paths)
     assert "workspace_path" in src, (
         "승격 검사가 프로젝트 워크스페이스를 안 본다 — 생성 코드는 거기 있다")
+
+# ── 문구가 **걸린 신호에 맞는가** (2026-08-27 실측) ─────────────────────
+
+_DATA_HIT = {"signal": "direct_appdata_call",
+             "description": "앱 데이터 API 를 직접 호출한다(브리지를 거치지 않는다)",
+             "path": "src/hooks/useCustomers.ts", "line": 38,
+             "evidence": "const data = await window.afs.data.list(datasetName);"}
+_AUTH_HIT = {"signal": "local_login_form", "description": "로그인 폼 또는 비밀번호 입력 필드",
+             "path": "src/App.tsx", "line": 187, "evidence": 'type="password"'}
+
+
+def test_데이터_신호에_인증_문구를_주지_않는다():
+    """★★★ [2026-08-27 실측 — 내가 만든 결함] `CRM003` E2E-05 가 이것으로 죽었다.
+
+    ⚠️⚠️ `platform_auth_checker` 는 이름과 달리 **인증만 보지 않는다** — 11개 신호 중
+      인증은 6개이고 나머지는 데이터 평면·저장소다. 그런데 게이트는 무엇이 걸렸든
+      「앱이 자체 인증을 만들었습니다」라고 말했다. 실제로 걸린 것은
+
+          src/hooks/useCustomers.ts:38 — 어댑터를 거치지 않은 window.afs.data 직접 호출
+
+      인데 개발자는 **없는 로그인을 지우라는 지시**를 받고 8왕복을 태웠다.
+    ★ 거절이 행동으로 이어지지 않으면 그것은 통제가 아니라 교착이다."""
+    from nodes.execution import _platform_auth_review_text
+
+    text = _platform_auth_review_text([_DATA_HIT])
+    assert "자체 인증" not in text, "인증이 아닌데 인증 문구를 준다"
+    assert "어댑터만" in text, "무엇을 쓰라는 지시가 없다"
+    assert "generated/afs-contract" in text, "import 예시가 없다"
+
+
+def test_인증_신호에는_인증_문구를_준다():
+    """★ 대조군 — 반대쪽이 없으면 위 시험은 「항상 인증 문구 없음」만 증명한다."""
+    from nodes.execution import _platform_auth_review_text
+
+    text = _platform_auth_review_text([_AUTH_HIT])
+    assert "자체 인증" in text
+    assert "어댑터만" not in text, "인증 문제에 데이터 지시가 섞인다"
+
+
+def test_둘_다_걸리면_둘_다_말한다():
+    from nodes.execution import _platform_auth_review_text
+
+    text = _platform_auth_review_text([_DATA_HIT, _AUTH_HIT])
+    assert "자체 인증" in text and "어댑터만" in text
+
+
+def test_근거_줄을_함께_준다():
+    """⚠️ 근거가 없으면 개발자가 어디를 고칠지 모르고, 반박도 못 한다."""
+    from nodes.execution import _platform_auth_review_text
+
+    text = _platform_auth_review_text([_DATA_HIT])
+    assert "useCustomers.ts:38" in text
+    assert "window.afs.data.list" in text

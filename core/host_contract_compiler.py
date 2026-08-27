@@ -378,6 +378,22 @@ def compile_contract(draft: Any, *, project_id: str, task_id: str = "",
         if isinstance(prev_ap, dict) and prev_ap.get("status") == "APPROVED":
             contract["approval"] = dict(prev_ap)
             contract["status"] = "APPROVED"
+    elif changed:
+        #: ★★★ [2026-08-27 실측] **무엇을 대체하는지는 남긴다.**
+        #:
+        #: ⚠️⚠️ 승인을 PENDING 으로 되돌리는 것은 옳다 — 바뀐 계약은 다시 승인받아야
+        #:   한다. 그런데 승인 **블록째** 버리니 게이트가 「직전에 무엇이 승인됐는지」를
+        #:   알 길이 없어졌고, 그래서 두 번째 태스크에도 이렇게 말했다:
+        #:       「이 프로젝트의 **최초 계약**입니다 — 사용자 검토가 필요합니다」
+        #:   실측: `CRM003` 의 E2E-02·E2E-03·E2E-04 가 전부 「최초 계약」이었다.
+        #: ★ 그러면 사람은 **무엇이 바뀌었는지 못 보고** 승인한다. 비교 대상이 없는
+        #:   검토는 검토가 아니라 클릭이다.
+        #: ⚠️⚠️ 이 값은 **문구에만** 쓴다. 통과 판정에 쓰면 「대체된 지문」이 승인으로
+        #:   읽혀 게이트가 열린다 — 그래서 `approval.status` 는 `PENDING` 그대로 두고,
+        #:   별도 칸에 담는다.
+        if prev_fp:
+            contract["approval"] = {"status": "PENDING",
+                                    "supersedes_fingerprint": prev_fp}
 
     # 마지막으로 자기 자신을 정본 검증기에 통과시킨다 — 컴파일러의 실수를 컴파일러가
     # 봐주지 않게 한다.

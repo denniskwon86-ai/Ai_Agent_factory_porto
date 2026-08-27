@@ -1082,6 +1082,58 @@ def _platform_auth_blocks(fe_files: list, be_files: list) -> list:
     return [hit for hit in hits if hit.get("severity") == "block"]
 
 
+def _platform_auth_review_text(hits: list) -> str:
+    """차단 신호에 **맞는** 수정 지시를 만든다. (2026-08-27)
+
+    ## ⚠️⚠️ 왜 나뉘어야 하는가 — 내가 만든 결함
+
+    `platform_auth_checker` 는 이름과 달리 **인증만 보지 않는다.** 11개 신호 중 인증
+    계열은 6개이고, 나머지 5개는 데이터 평면·저장소 문제다:
+
+        인증     local_login_form · local_login_route · password_storage
+                 jwt_issuer · local_user_store · auth_library
+        데이터   direct_appdata_call · generic_host_fetch · app_local_db
+                 undeclared_dataset · token_in_browser_store
+
+    그런데 내 게이트는 **무엇이 걸렸든** 「앱이 자체 인증을 만들었습니다」라고 말했다.
+    실측(`CRM003` E2E-05): 실제로 걸린 것은
+
+        src/hooks/useCustomers.ts:38 — 어댑터를 거치지 않은 window.afs.data 직접 호출
+          (const data = await window.afs.data.list(datasetName);)
+
+    인데 개발자는 **없는 로그인을 지우라는 지시**를 받았고, 8왕복을 그렇게 태웠다.
+    ★ 거절이 행동으로 이어지지 않으면 그것은 통제가 아니라 교착이다 — 오늘 세 번째다.
+    """
+    _AUTH = {"local_login_form", "local_login_route", "password_storage",
+             "jwt_issuer", "local_user_store", "auth_library"}
+    auth = [h for h in hits if h.get("signal") in _AUTH]
+    data = [h for h in hits if h.get("signal") not in _AUTH]
+
+    def _lines(rows):
+        return "\n".join(
+            f"  · {h.get('path', '')}:{h.get('line', '')} — {h.get('description', '')}"
+            f"  ({str(h.get('evidence', ''))[:90]})" for h in rows[:8])
+
+    parts = []
+    if auth:
+        parts.append(
+            "🚨 이 앱은 **회사 시스템 안에서 열립니다(앱인앱).** 사용자는 이미 인증되어 "
+            "있고, 부서·역할·조회 범위도 이미 정해져 있습니다. 그런데 앱이 자체 인증을 "
+            "만들었습니다:\n" + _lines(auth) +
+            "\n\n[수정 지침] 로그인 화면·비밀번호 입력·사용자 테이블·토큰 발급을 "
+            "**전부 지우십시오.** 앱은 첫 화면부터 바로 업무 화면을 그립니다. "
+            "요구사항에 「로그인」이 적혀 있더라도 그 요구는 **이미 충족된 것**입니다.")
+    if data:
+        parts.append(
+            "🚨 앱이 호스트 데이터 평면을 **정해진 길로 쓰지 않았습니다**:\n" + _lines(data) +
+            "\n\n[수정 지침] 데이터 읽기·쓰기는 **생성된 어댑터만** 씁니다 — "
+            "`import { list, create, update, remove } from './generated/afs-contract'`. "
+            "`window.afs.data.*` 를 직접 부르지 마십시오(정적 검사가 릴리스를 막습니다). "
+            "`localStorage`·`sessionStorage` 에 토큰·자격증명을 넣지 마십시오. "
+            "앱 자체 DB·권한 테이블을 만들지 마십시오 — 데이터는 호스트가 줍니다.")
+    return "\n\n".join(parts)
+
+
 async def run_reviewer(state: Any) -> Dict[str, Any]:
     """Reviewer(개발 엔지니어, 단위 관점) - 코드 정확성·버그·해당 단위 기능 동작 검증 게이트.
     코드리뷰 단계의 PASS/REWORK_DEV/ESCALATE_PM 3분기 및 Git 커밋/WBS 완료 로직 보존, 단계 기준 채점 기록.
@@ -1218,6 +1270,36 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                         "  (2) 그 import 문을 **삭제**한다(예: CSS 는 없어도 동작하므로 삭제가 더 간단).\n"
                         "⚠️ 이전 회차에서 이미 이 오류를 고쳤다면, 전체 파일을 다시 출력할 때 "
                         "**그 수정을 되돌리지 말 것.** 같은 import 를 다시 넣으면 즉시 재작업 처리된다."
+                    )
+                #: ★★★ [2026-08-27 실측] **CSS·빌드도구 갈래.** 위 «미해결 import» 와 같은 이유로
+                #:   구체적 해결책을 준다 — 일반 문구만 주면 같은 실패를 8왕복 반복한다.
+                #:
+                #: ⚠️⚠️ `CRM003` 의 첫 태스크가 이렇게 죽었다:
+                #:     [src/index.tsx] 로드/컴파일 실패: /src/styles/index.css:
+                #:     Support for the experimental syntax 'decorators' isn't currently enabled
+                #:     > 1 | @tailwind base;
+                #:   에이전트는 webpack + tailwind CLI 방식으로 골격을 짰다(webpack.config.js ·
+                #:   tailwind.config.js · src/index.tsx · src/styles/index.css). 그런데 미리보기
+                #:   런타임은 **번들러가 없다** — 브라우저 안 Babel 이 TSX 를 바로 컴파일하고
+                #:   Tailwind 는 이미 로드돼 있다. 그래서 Babel 이 CSS 를 JS 로 파싱하다 죽는다.
+                #:
+                #: ★ 규칙은 **이미 `skills/frontend_skill.md` 에 있었다**(「CSS 파일 생성 금지」).
+                #:   문제는 오류 메시지가 「decorators 문법」이라 그 규칙과 이어지지 않는 것이다.
+                #:   거절이 행동으로 이어지지 않으면 그것은 통제가 아니라 교착이다.
+                _css_broken = re.search(
+                    r"(@tailwind|\.css|\.scss|\.less)", " ".join(errs), re.I)
+                if _css_broken and not _missing:
+                    _fix_hint += (
+                        "\n\n[🚨 스타일 해결법 — 이 런타임에는 **번들러가 없습니다**]\n"
+                        "브라우저 안에서 Babel 이 TSX 를 바로 컴파일합니다. CSS 파일은 "
+                        "**컴파일되지 않고 JS 로 파싱되어 위와 같이 죽습니다.**\n"
+                        "  · `*.css` 파일을 **만들지 마십시오.** 이미 만들었다면 지우고, "
+                        "그 파일을 import 하는 문장도 지우십시오.\n"
+                        "  · Tailwind 는 **이미 로드돼 있습니다.** 클래스명을 그냥 쓰면 됩니다"
+                        "(`className=\"p-4 rounded bg-white\"`).\n"
+                        "  · 더 필요한 스타일은 인라인 `style={{...}}` 로 쓰십시오.\n"
+                        "  · `webpack.config.js`·`tailwind.config.js`·`postcss.config.js` 같은 "
+                        "**빌드 설정 파일도 만들지 마십시오** — 이 런타임은 쓰지 않습니다."
                     )
                 review_text = (
                     "️ 프론트엔드 렌더 검증 실패 - 생성 코드가 실제로 렌더되지 않습니다:\n- "
@@ -1379,20 +1461,10 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
         if has_fe_code or has_be_code:
             _auth_block = _platform_auth_blocks(fe_files, be_files)
             if _auth_block:
-                print(f"❌ [PlatformAuth] 앱이 자체 인증을 만들었다 {len(_auth_block)}건 - 재작업")
-                _lines = "\n".join(
-                    f"  · {h.get('path','')}:{h.get('line','')} — {h.get('description','')}"
-                    f"  ({str(h.get('evidence',''))[:80]})" for h in _auth_block[:12])
-                review_text = (
-                    "🚨 이 앱은 **회사 시스템 안에서 열립니다(앱인앱).** 사용자는 이미 "
-                    "인증되어 있고, 부서·역할·조회 범위도 이미 정해져 있습니다. 그런데 "
-                    "앱이 자체 인증을 만들었습니다:\n" + _lines +
-                    "\n\n[수정 지침] 로그인 화면·비밀번호 입력·사용자 테이블·토큰 발급을 "
-                    "**전부 지우십시오.** 앱은 첫 화면부터 바로 업무 화면을 그립니다. "
-                    "사용자 정보가 필요하면 호스트가 준 문맥을 쓰고, 별도로 확인하지 "
-                    "마십시오. 요구사항에 「로그인」이 적혀 있더라도 그 요구는 **이미 "
-                    "충족된 것**으로 다루십시오 — 이 플랫폼에서는 만들 수 없습니다."
-                )
+                print(f"❌ [PlatformAuth] 플랫폼 규약 위반 {len(_auth_block)}건 - 재작업")
+                #: ★ 문구는 **걸린 신호에 맞춰** 만든다 — 인증이 아닌 신호에
+                #:   「자체 인증을 만들었다」고 말하면 고칠 수 없는 지시가 된다.
+                review_text = _platform_auth_review_text(_auth_block)
                 cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
                 cr_scores["CODE_REVIEW"] = 0.0
                 cr_log = list(getattr(state_obj, "criteria_log", []) or [])
