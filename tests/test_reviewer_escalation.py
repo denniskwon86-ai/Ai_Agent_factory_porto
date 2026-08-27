@@ -107,32 +107,102 @@ def test_홉_바닥이_상한보다_먼저다():
 
 
 def test_리뷰어가_홉_바닥으로도_상신한다():
-    """⚠️ 유사도 조건만 있으면 표현을 매번 크게 바꾸는 리뷰어에게는 안 걸린다."""
+    """⚠️ 유사도 조건만 있으면 표현을 매번 크게 바꾸는 리뷰어에게는 안 걸린다.
+
+    ⚠️ [2026-08-28] 판정 자리가 `run_reviewer` 에서 `_rework_ladder` 로 **옮겨졌다** —
+      두 경로(LLM·결정론)가 각자 세면 규칙이 갈리기 때문이다. 여기도 그쪽을 본다."""
     import inspect
 
     import nodes.execution as ex
 
-    src = inspect.getsource(ex.run_reviewer)
-    #: ⚠️ 그냥 `ESCALATE_PM` 을 찾으면 **프롬프트 문구**(「3. ESCALATE_PM: 기획서 자체의…」)
-    #:   가 먼저 걸린다. 실제 판정이 바뀌는 자리는 대입문이다.
-    i = src.index('reviewer_decision = "ESCALATE_PM"')
+    src = inspect.getsource(ex._rework_ladder)
+    i = src.index('decision = "ESCALATE_PM"')
     around = src[max(0, i - 1500):i + 300]
     assert "hops >=" in around, "홉 바닥 조건이 없다"
-    assert "_repeats >=" in around, "반복 조건이 없다"
+    assert "repeats >=" in around, "반복 조건이 없다"
 
 
-def test_결정적_게이트는_상신하지_않는다():
+class _S:
+    """`_rework_ladder` 가 읽는 것은 이력 하나뿐이다."""
+
+    def __init__(self, hist=()):
+        self.rework_history = list(hist)
+
+
+def test_결정론_게이트의_첫_지적은_개발자에게_돌아간다():
     """★★★ 렌더·인증·서버·합성데이터 게이트는 **개발자가 고칠 수 있는** 것이고,
-    고칠 방법까지 함께 준다. 그것을 PM 에게 올리면 사람이 대신 코드를 고쳐야 한다.
+    고칠 방법까지 함께 준다. 그것을 곧바로 PM 에게 올리면 사람이 대신 코드를 고쳐야 한다.
 
-    ⚠️ 상신은 **LLM 리뷰어의 REWORK_DEV** 에만 건다 — 그 위 결정적 게이트들은
-      `return` 으로 먼저 빠져나가므로 이 자리에 도달하지 않는다."""
+    ⚠️ 이 단언은 종전 `test_결정적_게이트는_상신하지_않는다` 의 **의도를 그대로 잇는다.**
+      다만 「절대 안 올린다」가 아니라 「첫 지적은 안 올린다」로 좁혔다 — 아래 시험의
+      실측 때문이다."""
+    from nodes.execution import _rework_ladder
+
+    d, text, hist = _rework_ladder(_S(), "렌더 검증 실패 - 컴파일되지 않습니다", hops=1,
+                                   deterministic=True)
+    assert d == "REWORK_DEV", "첫 지적을 PM 으로 올리면 사람이 코드를 고쳐야 한다"
+    assert "[자동 상신]" not in text
+    assert len(hist) == 1, "이력에 남아야 **다음번에** 반복을 셀 수 있다"
+
+
+def test_결정론_게이트도_반복되면_상신한다():
+    """★★★ [2026-08-28 실측] 종전에는 결정론 게이트가 **한 번도** 상신하지 않았다.
+
+    CRM003 의 CODE_REVIEW 28회를 세면 갈린다:
+
+        code_review(LLM)     10회 상신   ← 사다리가 붙어 있다
+        결정론 게이트          13회  0회   ← 각자 `return` 으로 빠져나갔다
+          · symbol_regression 7회 (5·7·13·17·19·21·23 회차)
+          · frontend_render   3회 (15·16 은 **연속**)
+
+    그리고 그 태스크는 상한에서 `FAILED_REVIEW` 로 죽었다. 「개발자가 고칠 수 있다」는
+    전제가 **7회째에는 반증된 것**이다 — 그때는 죽이지 말고 PM 에게 올려야 한다.
+    ⚠️ 죽는 것이 상신보다 나은 경우는 없다. 죽으면 아무도 못 고친다."""
+    from nodes.execution import _rework_ladder
+
+    text = ("회귀 감지 - 직전 버전의 심볼이 사라졌습니다:"
+            + chr(10) + "- src/App.tsx: export App")
+    st = _S()
+    seen = []
+    for hop in (1, 2, 3):
+        d, out, st.rework_history = _rework_ladder(st, text, hops=hop, deterministic=True)
+        seen.append(d)
+    assert seen[0] == "REWORK_DEV" and seen[-1] == "ESCALATE_PM", seen
+
+
+def test_결정론_바닥이_LLM_바닥보다_늦다():
+    """⚠️⚠️ 두 경로의 홉 바닥을 **같이 당기면 수렴하던 태스크가 잘린다.**
+
+    결정론 게이트는 구체적 결함을 짚으므로 한 번에 고쳐지는 일이 잦다. 그래서 여유를
+    주되(상한 직전), 상한에서 **그냥 죽게 두지는 않는다**."""
+    import config
+
+    from nodes.execution import _rework_ladder
+
+    cap = getattr(config, "GLOBAL_MAX_SUPERVISOR_HOPS", 8)
+    llm_floor = max(2, int(cap * 0.6))
+    #: 매번 다른 문구 = 반복 조건은 걸리지 않는다. 남는 것은 홉 바닥뿐이다.
+    def _at(hop, det):
+        return _rework_ladder(_S(), f"서로 다른 지적 {hop} 번째 {'x' * hop}", hops=hop,
+                              deterministic=det)[0]
+
+    assert _at(llm_floor, False) == "ESCALATE_PM", "LLM 경로가 바닥에서 안 올린다"
+    assert _at(llm_floor, True) == "REWORK_DEV", (
+        "결정론 경로가 LLM 과 같은 바닥을 쓴다 — 수렴 중인 태스크가 잘린다")
+    assert _at(cap - 1, True) == "ESCALATE_PM", "상한 직전인데도 안 올린다 — 그냥 죽는다"
+
+
+def test_사다리_정의가_하나다():
+    """★★★ 두 경로가 각자 「몇 번 반복이면 올린다」를 세면 그 둘은 반드시 갈린다.
+
+    ⚠️ 실제로 갈려 있었다 — 결정론 게이트 7곳이 `reviewer_decision` 을 손으로 써서
+      반환했고, `rework_history` 에 적지도 않아 16회 재작업 중 이력이 **3건**뿐이었다."""
     import inspect
 
     import nodes.execution as ex
 
     src = inspect.getsource(ex.run_reviewer)
-    esc = src.index('reviewer_decision = "ESCALATE_PM"')
-    for gate in ("app_local_auth", "app_builds_server", "synthetic_data_as_real"):
-        assert src.index(gate) < esc, (
-            f"{gate} 게이트가 상신 로직 뒤에 있다 — 고칠 수 있는 결함이 PM 으로 간다")
+    assert 'reviewer_decision = "ESCALATE_PM"' not in src, (
+        "run_reviewer 가 상신 판정을 직접 쓴다 — 사다리는 _rework_ladder 하나여야 한다")
+    assert src.count("_deterministic_rework(") == 7, (
+        f"결정론 게이트가 공통 반환부를 안 쓴다: {src.count('_deterministic_rework(')}곳")

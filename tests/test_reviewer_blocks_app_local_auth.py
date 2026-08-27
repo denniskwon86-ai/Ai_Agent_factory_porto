@@ -87,10 +87,21 @@ def test_차단이면_재작업으로_돌려보낸다():
     ⚠️ 권고로 두면 리뷰어 LLM 이 판단에 섞어 버리고, 그러면 통과할 때가 생긴다."""
     import nodes.execution as ex
 
+    #: ⚠️ [2026-08-28] 종전에는 `run_reviewer` 소스에서 게이트 이름 주변 N자 안에
+    #:   "REWORK_DEV" 가 있는지 **문자열로** 찾았다. 판정을 공통 반환부
+    #:   (`_deterministic_rework`)로 모으자 그 문자열이 사라져 시험이 깨졌다 —
+    #:   기전은 그대로인데 시험만 깨진 것이다. 그래서 **행동으로** 확인한다.
     src = inspect.getsource(ex.run_reviewer)
     i = src.index("app_local_auth")
     around = src[max(0, i - 1400):i + 400]
-    assert "REWORK_DEV" in around, "차단 신호를 재작업으로 돌려보내지 않는다"
+    assert "_deterministic_rework" in around, "차단 신호를 재작업 반환부로 보내지 않는다"
+
+    class _S:
+        rework_history = ()
+
+    d, _t, _h = ex._rework_ladder(_S(), "자체 인증(로그인 폼)을 만들었습니다", hops=1,
+                                  deterministic=True)
+    assert d == "REWORK_DEV", "차단 신호가 개발자에게 돌아가지 않는다"
 
 
 def test_프런트와_백엔드를_함께_본다():

@@ -4,7 +4,7 @@ import re
 import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 import config
 from state_models import ProjectState
 from core.llm_gateway import gateway, QuotaExhaustedException, GenerationFailure
@@ -1180,6 +1180,91 @@ def _repeat_count(text: str, history: list) -> tuple:
     return n, (f"유사도 {best:.2f}" if n else "")
 
 
+def _rework_ladder(state_obj: Any, review_text: str, hops: int,
+                   *, deterministic: bool = False) -> Tuple[str, str, list]:
+    """재작업 판정에 **상신 사다리**를 적용한다 → `(판정, 문구, 갱신된 이력)`.
+
+    ## ⚠️⚠️ [2026-08-28 실측] 사다리가 **LLM 경로에만** 붙어 있었다
+
+    CRM003 의 CODE_REVIEW 28회를 세어 보면 갈린다:
+
+        code_review(LLM)        10회 상신   ← 사다리가 붙어 있다
+        결정론 게이트            13회  0회 상신 ← 아무도 안 본다
+          · symbol_regression  7회 (5·7·13·17·19·21·23 회차)
+          · frontend_render    3회 (15·16 은 **연속**)
+
+    결정론 게이트는 각자 `return` 으로 빠져나가서 이 판정을 **지나지 않았다.** 게다가
+    `rework_history` 에 적지도 않아서 — 16회 재작업 중 이력은 **3건**뿐이었다 —
+    나중에 LLM 경로가 와도 그 반복을 **볼 수 없었다.**
+
+    ★★★ 정의는 하나여야 한다. 두 경로가 각자 「몇 번 반복이면 올린다」를 세면 그 둘은
+      반드시 갈린다 — 이 저장소가 이번 주에만 여섯 번 만난 모양이다.
+
+    ## ⚠️ 두 경로의 «홉 바닥» 은 일부러 다르다
+
+        LLM 경로     hops >= 0.6*cap (=4)   지적이 되풀이되면 대개 수행 불가다
+        결정론 경로   hops >= cap-1  (=7)    구체적 결함을 짚으므로 한 번에 고쳐지는 일이 잦다
+
+    ⚠️ 결정론 쪽을 0.6 으로 같이 당기면 **수렴하던 태스크가 4회차에 잘린다.** 실측에서
+      결정론 거절 뒤 실제로 고쳐진 회차가 있었다. 그래서 여유를 주되 **상한에서 그냥
+      죽게 두지는 않는다** — 죽으면 아무도 못 고치고, 상신하면 PM 이 요구를 조정한다.
+    ★ 반복 판정(`_repeat_count`)은 **양쪽 같다.** 같은 지적이 되풀이된다는 신호는
+      게이트의 종류와 무관하게 「개발자가 수행할 수 없다」는 뜻이기 때문이다.
+    """
+    hist = list(getattr(state_obj, "rework_history", []) or [])
+    text = str(review_text or "")
+    if not text:
+        return "REWORK_DEV", text, hist
+    decision = "REWORK_DEV"
+    repeats, why = _repeat_count(text, hist)
+    limit = getattr(config, "REPEAT_FEEDBACK_ESCALATE_AFTER", 2)
+    cap = getattr(config, "GLOBAL_MAX_SUPERVISOR_HOPS", 8)
+    floor = (cap - 1) if deterministic else max(2, int(cap * 0.6))
+    if repeats >= limit or hops >= floor:
+        if repeats >= limit:
+            reason = f"동일 지적 {repeats + 1}회 반복({why})"
+        else:
+            reason = f"재작업 {hops}회차 — 상한({cap}) 전에 상신"
+        print(f"⬆️ [Reviewer] {reason} — 개발자가 수행할 수 없는 지시일 가능성이 "
+              f"큽니다. PM 으로 자동 상신(ESCALATE_PM)합니다.")
+        decision = "ESCALATE_PM"
+        text = (
+            f"[자동 상신] {reason}. 실무 재작업으로는 수렴하지 않으므로 기획·설계 "
+            f"수준의 조정이 필요합니다.\n"
+            f"마지막 지적: {text}\n"
+            f"검토 요청: (1) 이 요구가 현재 시스템에서 **수행 가능한지** "
+            f"(2) 기술명세·아키텍처에 상충이 없는지 (3) 요구를 조정하거나 태스크를 분할할지."
+        )
+    hist.append(str(text)[:1000])
+    return decision, text, hist[-8:]
+
+
+def _deterministic_rework(state_obj: Any, *, review_text: str, hops: int,
+                          blocking: list) -> Dict[str, Any]:
+    """결정론 게이트의 **공통 반환부**. 게이트마다 손으로 쓰면 사다리를 빠뜨리는 곳이 생긴다.
+
+    ⚠️ `criteria_log` 의 `verdict` 는 **실제 판정**을 적는다 — 상신했는데 기록만
+      `REWORK_DEV` 로 남으면 사후에 이 사다리가 돈 적 없는 것처럼 보인다."""
+    decision, text, hist = _rework_ladder(state_obj, review_text, hops, deterministic=True)
+    cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
+    cr_scores["CODE_REVIEW"] = 0.0
+    cr_log = list(getattr(state_obj, "criteria_log", []) or [])
+    cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": decision,
+                   "blocking_fails": list(blocking)})
+    return {
+        "reviewer_decision": decision,
+        "reviewer_feedback": text,
+        "pm_override_reason": "",
+        "needs_revision": False,
+        "current_stage": "CODE_REVIEW",
+        "stage_scores": cr_scores,
+        "criteria_log": cr_log,
+        "supervisor_feedback": text,
+        "supervisor_hops": hops,
+        "rework_history": hist,
+    }
+
+
 async def run_reviewer(state: Any) -> Dict[str, Any]:
     """Reviewer(개발 엔지니어, 단위 관점) - 코드 정확성·버그·해당 단위 기능 동작 검증 게이트.
     코드리뷰 단계의 PASS/REWORK_DEV/ESCALATE_PM 3분기 및 Git 커밋/WBS 완료 로직 보존, 단계 기준 채점 기록.
@@ -1260,21 +1345,9 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                       "이번 태스크 기능만 추가/수정해 '기존 전부 + 신규'를 합친 완전한 코드를 다시 출력하십시오. "
                       "기존 기능을 의도적으로 제거해야 한다면 그 사유를 명시하십시오."
                 )
-                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
-                cr_scores["CODE_REVIEW"] = 0.0
-                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
-                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV", "blocking_fails": ["symbol_regression"]})
-                return {
-                    "reviewer_decision": "REWORK_DEV",
-                    "reviewer_feedback": review_text,
-                    "pm_override_reason": "",
-                    "needs_revision": False,
-                    "current_stage": "CODE_REVIEW",
-                    "stage_scores": cr_scores,
-                    "criteria_log": cr_log,
-                    "supervisor_feedback": review_text,
-                    "supervisor_hops": hops,
-                }
+                return _deterministic_rework(
+                    state_obj, review_text=review_text, hops=hops,
+                    blocking=["symbol_regression"])
 
         # 🧮 [FinOps 리스크 분석기] 변경분 정적 위험도 산출(LLM 0콜) — baseline(직전 커밋) 대비.
         #    LOW 는 아래에서 '자유 판단 LLM 리뷰' 1콜을 생략(자동 승인)하고, HIGH 는 정밀 검토
@@ -1356,21 +1429,9 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                 reviewer_decision = "REWORK_DEV"
                 # 렌더 실패는 결정적 결함 → LLM 리뷰 생략하고 재작업 루프로 직행
                 workspace_root = state_obj.workspace_root
-                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
-                cr_scores["CODE_REVIEW"] = 0.0
-                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
-                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV", "blocking_fails": ["frontend_render"]})
-                return {
-                    "reviewer_decision": "REWORK_DEV",
-                    "reviewer_feedback": review_text,
-                    "pm_override_reason": "",
-                    "needs_revision": False,
-                    "current_stage": "CODE_REVIEW",
-                    "stage_scores": cr_scores,
-                    "criteria_log": cr_log,
-                    "supervisor_feedback": review_text,
-                    "supervisor_hops": hops,
-                }
+                return _deterministic_rework(
+                    state_obj, review_text=review_text, hops=hops,
+                    blocking=["frontend_render"])
             elif render.get("ok") and not render.get("skipped"):
                 render_note += f"\n([OK] 프론트 렌더 검증 통과 - renderToString {render.get('rendered', 0)}자)"
 
@@ -1388,21 +1449,9 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                     + "\n\n[수정 지침] 제어 컴포넌트(value={...})에는 반드시 onChange 핸들러와 useState 를 연결하십시오. "
                       "표시 전용 필드라면 readOnly 를 명시하고, 비제어 입력이면 value 대신 defaultValue 를 사용하십시오."
                 )
-                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
-                cr_scores["CODE_REVIEW"] = 0.0
-                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
-                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV", "blocking_fails": ["frontend_interactivity"]})
-                return {
-                    "reviewer_decision": "REWORK_DEV",
-                    "reviewer_feedback": review_text,
-                    "pm_override_reason": "",
-                    "needs_revision": False,
-                    "current_stage": "CODE_REVIEW",
-                    "stage_scores": cr_scores,
-                    "criteria_log": cr_log,
-                    "supervisor_feedback": review_text,
-                    "supervisor_hops": hops,
-                }
+                return _deterministic_rework(
+                    state_obj, review_text=review_text, hops=hops,
+                    blocking=["frontend_interactivity"])
             else:
                 render_note += "\n([OK] 입력 동작 검증 통과 - 제어 입력에 onChange 연결 확인)"
 
@@ -1433,22 +1482,9 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                       "비우고(`[]`·`null`) 실패 사실만 알리십시오 - 목업·샘플 행을 그리지 마십시오. "
                       "업무 데이터 상태의 useState 초기값도 `[]` 로 시작하십시오."
                 )
-                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
-                cr_scores["CODE_REVIEW"] = 0.0
-                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
-                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV",
-                               "blocking_fails": ["synthetic_data_as_real"]})
-                return {
-                    "reviewer_decision": "REWORK_DEV",
-                    "reviewer_feedback": review_text,
-                    "pm_override_reason": "",
-                    "needs_revision": False,
-                    "current_stage": "CODE_REVIEW",
-                    "stage_scores": cr_scores,
-                    "criteria_log": cr_log,
-                    "supervisor_feedback": review_text,
-                    "supervisor_hops": hops,
-                }
+                return _deterministic_rework(
+                    state_obj, review_text=review_text, hops=hops,
+                    blocking=["synthetic_data_as_real"])
             else:
                 render_note += "\n([OK] 지어낸 데이터 표시 없음 - 실패 시 fail-closed 확인)"
 
@@ -1479,21 +1515,9 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                     + "\n- ".join(errs[:5])
                     + "\n\n위 오류(부팅 크래시 / 내부 모듈 import 누락 / 엔드포인트 5xx 등)를 수정해 다시 작성하십시오."
                 )
-                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
-                cr_scores["CODE_REVIEW"] = 0.0
-                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
-                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0, "verdict": "REWORK_DEV", "blocking_fails": ["backend_smoke"]})
-                return {
-                    "reviewer_decision": "REWORK_DEV",
-                    "reviewer_feedback": review_text,
-                    "pm_override_reason": "",
-                    "needs_revision": False,
-                    "current_stage": "CODE_REVIEW",
-                    "stage_scores": cr_scores,
-                    "criteria_log": cr_log,
-                    "supervisor_feedback": review_text,
-                    "supervisor_hops": hops,
-                }
+                return _deterministic_rework(
+                    state_obj, review_text=review_text, hops=hops,
+                    blocking=["backend_smoke"])
             elif smoke.get("ok") and not smoke.get("skipped"):
                 _w = smoke.get("warnings", [])
                 render_note += f"\n([OK] 백엔드 스모크 통과 - 라우트 {smoke.get('routes', 0)}개" + (f", 경고 {len(_w)}건" if _w else "") + ")"
@@ -1511,23 +1535,9 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                 #: ★ 문구는 **걸린 신호에 맞춰** 만든다 — 인증이 아닌 신호에
                 #:   「자체 인증을 만들었다」고 말하면 고칠 수 없는 지시가 된다.
                 review_text = _platform_auth_review_text(_auth_block)
-                cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
-                cr_scores["CODE_REVIEW"] = 0.0
-                cr_log = list(getattr(state_obj, "criteria_log", []) or [])
-                cr_log.append({"stage": "CODE_REVIEW", "score": 0.0,
-                               "verdict": "REWORK_DEV",
-                               "blocking_fails": ["app_local_auth"]})
-                return {
-                    "reviewer_decision": "REWORK_DEV",
-                    "reviewer_feedback": review_text,
-                    "pm_override_reason": "",
-                    "needs_revision": False,
-                    "current_stage": "CODE_REVIEW",
-                    "stage_scores": cr_scores,
-                    "criteria_log": cr_log,
-                    "supervisor_feedback": review_text,
-                    "supervisor_hops": hops,
-                }
+                return _deterministic_rework(
+                    state_obj, review_text=review_text, hops=hops,
+                    blocking=["app_local_auth"])
             render_note += "\n([OK] 자체 인증 없음 - 호스트 인증을 그대로 물려받음)"
 
             # ══════════════════════════════════════════════════════════════
@@ -1568,23 +1578,9 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
                         "데이터 평면에 붙는 유일한 길이고, 계약이 `server.custom_logic`·"
                         "`api.direct_call`·`storage.local_db` 를 금지합니다."
                     )
-                    cr_scores = dict(getattr(state_obj, "stage_scores", {}) or {})
-                    cr_scores["CODE_REVIEW"] = 0.0
-                    cr_log = list(getattr(state_obj, "criteria_log", []) or [])
-                    cr_log.append({"stage": "CODE_REVIEW", "score": 0.0,
-                                   "verdict": "REWORK_DEV",
-                                   "blocking_fails": ["app_builds_server"]})
-                    return {
-                        "reviewer_decision": "REWORK_DEV",
-                        "reviewer_feedback": review_text,
-                        "pm_override_reason": "",
-                        "needs_revision": False,
-                        "current_stage": "CODE_REVIEW",
-                        "stage_scores": cr_scores,
-                        "criteria_log": cr_log,
-                        "supervisor_feedback": review_text,
-                        "supervisor_hops": hops,
-                    }
+                    return _deterministic_rework(
+                        state_obj, review_text=review_text, hops=hops,
+                        blocking=["app_builds_server"])
                 else:
                     render_note += "\n([OK] 자체 서버 없음 - 호스트 데이터 평면만 씁니다)"
 
@@ -1791,33 +1787,10 @@ async def run_reviewer(state: Any) -> Dict[str, Any]:
     #   **결정론적으로** 승격한다. 이것이 없으면 상한까지 소진하고 그냥 죽는다.
     _rework_hist = list(getattr(state_obj, "rework_history", []) or [])
     if reviewer_decision == "REWORK_DEV" and review_text:
-        _repeats, _why = _repeat_count(review_text, _rework_hist)
-        _limit = getattr(config, "REPEAT_FEEDBACK_ESCALATE_AFTER", 2)
-        #: ★★★ [2026-08-27 실측] **홉 바닥**을 함께 둔다.
-        #:
-        #: ⚠️⚠️ 반복 판정이 놓쳐도 상한(8)까지 가면 `FAILED_REVIEW` 로 **그냥 죽는다.**
-        #:   그것은 상신보다 언제나 나쁘다 — 죽으면 아무도 못 고치고, 상신하면 PM 이
-        #:   요구를 조정할 수 있다. 그래서 「몇 번 더 시켜도 안 되면 올린다」를 홉으로도
-        #:   보장한다. 수렴 중이더라도 어차피 상한에서 죽을 참이므로 손해가 없다.
-        _cap = getattr(config, "GLOBAL_MAX_SUPERVISOR_HOPS", 8)
-        _floor = max(2, int(_cap * 0.6))
-        if _repeats >= _limit or hops >= _floor:
-            if _repeats >= _limit:
-                _reason = f"동일 지적 {_repeats + 1}회 반복({_why})"
-            else:
-                _reason = f"재작업 {hops}회차 — 상한({_cap}) 전에 상신"
-            print(f"⬆️ [Reviewer] {_reason} — 개발자가 수행할 수 없는 지시일 가능성이 "
-                  f"큽니다. PM 으로 자동 상신(ESCALATE_PM)합니다.")
-            reviewer_decision = "ESCALATE_PM"
-            review_text = (
-                f"[자동 상신] {_reason}. 실무 재작업으로는 수렴하지 않으므로 기획·설계 "
-                f"수준의 조정이 필요합니다.\n"
-                f"마지막 지적: {review_text}\n"
-                f"검토 요청: (1) 이 요구가 현재 시스템에서 **수행 가능한지** "
-                f"(2) 기술명세·아키텍처에 상충이 없는지 (3) 요구를 조정하거나 태스크를 분할할지."
-            )
-        _rework_hist.append(str(review_text)[:1000])
-        _rework_hist = _rework_hist[-8:]
+        #: ★ 판정은 `_rework_ladder` **하나**가 한다. 여기서 다시 세면 결정론
+        #:   경로와 규칙이 갈린다(그래서 갈려 있었다).
+        reviewer_decision, review_text, _rework_hist = _rework_ladder(
+            state_obj, review_text, hops)
 
 
     workspace_root = state_obj.workspace_root

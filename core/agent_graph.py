@@ -456,7 +456,14 @@ def _wire_edges(workflow):
     workflow.add_conditional_edges("Frontend", route_from_frontend, {"CodeBuilder": "CodeBuilder", "TerminalHandler": "TerminalHandler"})
     workflow.add_conditional_edges("CodeBuilder", map_builder_router, {"Frontend": "Frontend", "Backend": "Backend", "Reviewer": "Reviewer", "TerminalHandler": "TerminalHandler", END: END})
 
-    workflow.add_conditional_edges("Reviewer", route_from_reviewer, {"QA": "QA", "ManualWriter": "ManualWriter", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", "TerminalHandler": "TerminalHandler", END: END})
+    #: ⚠️⚠️ [2026-08-28 실측] `route_from_reviewer` 는 **`"Supervisor"` 를 반환한다**
+    #:   (QA 는 없고 수용검수만 배정된 태스크). 그런데 이 매핑에 그 이름이 없어서
+    #:   LangGraph 가 `KeyError: 'Supervisor'` 로 **가동 중에 죽는다** — 작은 그래프로
+    #:   실물 확인했다. 지금까지 안 터진 이유는 실제 WBS 107개 태스크 전부가
+    #:   Supervisor 를 QA 와 함께 배정했고, 라우터가 QA 를 먼저 보기 때문이다.
+    #:   즉 **PMO 가 수용검수만 있는 태스크를 하나 내는 순간** 원인 불명의 크래시가 된다.
+    #: ★ 라우터가 낼 수 있는 이름의 집합 ⊇ 이 매핑의 키여야 한다. 회귀가 그 포함을 고정한다.
+    workflow.add_conditional_edges("Reviewer", route_from_reviewer, {"QA": "QA", "Supervisor": "Supervisor", "ManualWriter": "ManualWriter", "Master_PM": "Master_PM", "Tech_Lead": "Tech_Lead", "TerminalHandler": "TerminalHandler", END: END})
     # 3단 수용 사다리: QA(수행사 통합검수) → Supervisor(고객사 수용검수) → ManualWriter
     #   QA: 통과→Supervisor / 미달→Tech_Lead 재작업
     #   Supervisor: 수용→ManualWriter / 반려→PM 재조정(상한 초과 시 종료)
