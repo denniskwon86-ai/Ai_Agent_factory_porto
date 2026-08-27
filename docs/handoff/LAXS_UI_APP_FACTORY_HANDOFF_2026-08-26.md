@@ -1227,3 +1227,17 @@ frontend build                         PASS · 3,492 modules
 브라우저 정상 복구                      PASS
 실제 업무 실패·사용자 최종 승인           HOLD
 ```
+
+## 29. 2026-08-27 U13 화면 실행 오류 안전화
+
+기존 `ErrorBoundary`는 영문 개발 문구와 React 예외 stack을 그대로 보여 줬다. 이를 LAXS 로고와
+공통 상태 카드로 바꾸고, 데이터 삭제가 아닌 화면 표시 실패임을 설명한다. `경영 홈으로`와
+`다시 시도`만 사용자 행동으로 제공하며 기술 진단은 콘솔에만 남긴다.
+
+```text
+내부 stack 사용자 비노출                 PASS
+복구 행동 2종                           PASS
+UI 계약 회귀                           PASS · 69 tests
+frontend build                         PASS · 3,492 modules
+격리 브라우저 실크래시 시각 확인           다음
+```

@@ -221,6 +221,17 @@ def test_백엔드_연결장애는_로그아웃이나_빈화면으로_오인시�
     assert '<LoginPage' not in offline
 
 
+def test_화면_실행오류는_내부스택을_노출하지_않고_복구행동을_제공한다():
+    boundary = _read("frontend/src/components/ErrorBoundary.tsx")
+
+    assert 'aria-label="화면 표시 오류"' in boundary
+    assert "저장된 업무 데이터가 삭제된 것은 아닙니다" in boundary
+    assert "경영 홈으로" in boundary and "다시 시도" in boundary
+    assert 'window.location.href = "/?space=enterprise"' in boundary
+    assert "this.state.error?.stack" not in boundary
+    assert "System Crash Prevented" not in boundary
+
+
 def test_LAXS_확정_B안이_제품셸과_로그인에_적용되고_파비콘은_별도_마크를_쓴다():
     shell = _read("frontend/src/components/ProductShell.tsx")
     login = _read("frontend/src/components/LoginPage.tsx")
