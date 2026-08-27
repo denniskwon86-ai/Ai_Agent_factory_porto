@@ -100,7 +100,9 @@ function GapList({ gaps, title }: { gaps: Readiness['gaps']; title: string }) {
 }
 
 export function AdvisorPanel(
-  { onClose, onProjectCreated }: { onClose: () => void; onProjectCreated?: () => void },
+  { onClose, onProjectCreated, page = false }: {
+    onClose: () => void; onProjectCreated?: () => void; page?: boolean;
+  },
 ) {
   const [step, setStep] = useState<Step>('pick');
   const [busy, setBusy] = useState(false);
@@ -314,8 +316,9 @@ export function AdvisorPanel(
         : '청사진의 범위·제외 범위·데이터 결손과 승인 근거를 검토합니다.';
 
   return (
-    <HubDialog label="업무·데이터 설계 상담 — 무엇을 만들지와 어떤 데이터가 필요한지" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog page={page}
+      label="업무·데이터 설계 상담 — 무엇을 만들지와 어떤 데이터가 필요한지" onClose={onClose}>
+      {!page && <div className="afs-dialog-bar">
         <b>업무·데이터 설계 상담</b>
         <span>선택형 대화로 정하고, 승인하면 프로젝트가 됩니다</span>
         <div className="bar-actions">
@@ -324,10 +327,11 @@ export function AdvisorPanel(
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
-      <div className="afs-dialog-body">
+      <div className={`afs-dialog-body${page ? ' journey-product-body' : ''}`}>
         <HubShell
+          layoutClassName={page ? 'product-page-shell' : ''}
           kicker="BUSINESS & DATA DESIGN"
           title="업무·데이터 설계 상담"
           subtitle="필요한 데이터와 추진 순서를 선택형 대화로 정합니다"

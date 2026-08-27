@@ -99,12 +99,15 @@ function AppShell() {
   const initialProject = React.useRef<string | null>(
     typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('project')
   );
-  const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'>(() => {
+  const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
+    | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'>(() => {
     if (initialProject.current) return 'build';
     if (typeof window === 'undefined') return 'enterprise';
     const value = new URLSearchParams(window.location.search).get('space');
     return value === 'about' || value === 'build' || value === 'operate' || value === 'twin'
       || value === 'report' || value === 'knowledge' || value === 'agent'
+      || value === 'advisor' || value === 'data' || value === 'calc' || value === 'path'
+      || value === 'briefing'
       ? value : 'enterprise';
   });
   const [routeRestored, setRouteRestored] = useState(initialProject.current === null);
@@ -244,7 +247,7 @@ function AppShell() {
   const primaryNav: NavItem[] = [
     { id: 'advisor', icon: '🧭', label: '업무·데이터 설계 상담',
       desc: '무엇을 만들지 모를 때 — 선택형 대화로 필요한 데이터와 추진 순서를 정하고, 승인하면 프로젝트가 됩니다',
-      onSelect: () => setShowAdvisor(true) },
+      onSelect: () => { setShowAdvisor(false); setSpace('advisor'); } },
     { id: 'collaboration', icon: '🤝', label: '협업·의사결정·발간',
       desc: '앱 전달·수락, 의사결정 패키지, 대내외 발간을 한 곳에서 — 수락해도 데이터 권한은 넓어지지 않습니다',
       onSelect: () => {
@@ -291,16 +294,18 @@ function AppShell() {
       items: [
         { id: 'dataprep', icon: '1️⃣', label: '업무 데이터 준비',
           desc: '샘플 패키지를 조직에 적용하고 · 업무기능별 원천을 연결하고 · 데이터 판을 인증합니다 — 여기가 «준비됨» 이어야 뒤가 돕니다',
-          onSelect: () => { setDataPrepInitialView('overview'); setShowDataPrep(true); } },
+          onSelect: () => {
+            setDataPrepInitialView('overview'); setShowDataPrep(false); setSpace('data');
+          } },
         { id: 'calc-approval', icon: '2️⃣', label: '계산 실행 승인',
           desc: '산식을 실제로 돌려도 되는지 사람이 승인합니다 — 누르기 전까지 계산은 «막힘» 으로 답합니다',
           // ⚠️ 시스템 관리자 전용이다. 화면에서 숨기는 것은 **편의**이고, 실제로 막는 것은
           //   서버(`route_authority` 표의 `ADMIN_SECURITY`)다 — 숨김을 통제로 믿지 않는다.
           disabledReason: calcAdminBlocked,
-          onSelect: () => setShowCalcApproval(true) },
+          onSelect: () => { setShowCalcApproval(false); setSpace('calc'); } },
         { id: 'path-calc', icon: '3️⃣', label: '경로 계산',
           desc: '승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산합니다 — 막히면 무엇이 없는지 말합니다',
-          onSelect: () => setShowPathCalc(true) },
+          onSelect: () => { setShowPathCalc(false); setSpace('path'); } },
         { id: 'decision-pkg', icon: '4️⃣', label: '의사결정 안건',
           desc: '경로 계산에서 만든 안건을 세 관점으로 검토하고 · 실행 책임자와 기한을 확정하고 · 근거 계보를 확인합니다',
           onSelect: () => {
@@ -310,7 +315,7 @@ function AppShell() {
           } },
         { id: 'briefing', icon: '5️⃣', label: '경영 브리핑',
           desc: '결정할 일·막힌 일·데이터 결손과 근거를 권한 범위 안에서 확인합니다 (LLM 0콜)',
-          onSelect: () => setShowBriefing(true) },
+          onSelect: () => { setShowBriefing(false); setSpace('briefing'); } },
       ],
     },
     {
@@ -653,6 +658,53 @@ function AppShell() {
             <PreviewPanel rawCode={viewingRelease.frontend_code_summary || ""} release={viewingRelease} />
           </div>
         </div>
+      </ErrorBoundary>
+    );
+  }
+
+  // 핵심 여정은 앱 제작·운영·시뮬레이션과 같은 ProductShell 아래의 독립 페이지다.
+  // 홈 위 전체화면 대화상자로 열면 상단 메뉴·회사 문맥·행동 영역이 사라져 같은 제품의
+  // 화면으로 읽히지 않는다. 프로젝트 작업공간에서 여는 보조 진입만 기존 대화상자를 유지한다.
+  const journeyPage = space === 'advisor'
+    ? <AdvisorPanel page onClose={() => setSpace('enterprise')} onProjectCreated={fetchProjects} />
+    : space === 'data'
+      ? <DataPrepPanel page initialView={dataPrepInitialView} onClose={() => setSpace('enterprise')} />
+      : space === 'calc'
+        ? <CalcApprovalPanel page onClose={() => setSpace('enterprise')} />
+        : space === 'path'
+          ? <PathCalcPanel page onClose={() => setSpace('enterprise')} />
+          : space === 'briefing'
+            ? <BriefingPanel page onClose={() => setSpace('enterprise')} />
+            : null;
+  const journeyModule = space === 'advisor' ? 'advisor'
+    : space === 'data' ? 'data'
+      : space === 'calc' ? 'calc'
+        : space === 'path' ? 'path'
+          : space === 'briefing' ? 'briefing' : null;
+
+  if (!currentProjectId && journeyPage && journeyModule) {
+    return (
+      <ErrorBoundary>
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
+          <ProductShell module={journeyModule}
+            company={shellCompanyName}
+            scope={shellCtx.scopeLabel}
+            entityMode={shellCtx.entityMode}
+            onNav={handleShellNav}
+            onContext={() => setShowContextSwitcher(true)}
+            onAbout={() => setSpace('about')}
+            onSettings={() => setOpenConsole(true)}
+            onNewWork={() => setSpace('build')}
+            right={<>
+              <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
+                onConsoleHandled={() => setOpenConsole(false)} />
+              <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
+            </>} />
+          <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
+            {journeyPage}
+          </main>
+        </div>
+        {overlays}
       </ErrorBoundary>
     );
   }

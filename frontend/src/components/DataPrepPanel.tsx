@@ -42,9 +42,10 @@ function Err({ error }: { error: { message: string; status: number } }) {
   );
 }
 
-export function DataPrepPanel({ onClose, initialView = 'overview' }: {
+export function DataPrepPanel({ onClose, initialView = 'overview', page = false }: {
   onClose: () => void;
   initialView?: 'overview' | 'readiness';
+  page?: boolean;
 }) {
   const [packages, setPackages] = useState<any[] | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
@@ -197,12 +198,12 @@ export function DataPrepPanel({ onClose, initialView = 'overview' }: {
   };
 
   return (
-    <HubDialog
+    <HubDialog page={page}
       label={initialView === 'readiness'
         ? '데이터 준비 상태 — 현재 적용본의 계약·결속·인증판'
         : '업무 데이터 준비 — 샘플 패키지·업무기능·데이터 판'}
       onClose={onClose}>
-      <div className="afs-dialog-bar">
+      {!page && <div className="afs-dialog-bar">
         <b>{initialView === 'readiness' ? '데이터 준비 상태' : '업무 데이터 준비'}</b>
         <span>{initialView === 'readiness'
           ? '현재 조직에 적용된 업무기능의 계약·원천 결속·인증판을 확인합니다'
@@ -212,13 +213,13 @@ export function DataPrepPanel({ onClose, initialView = 'overview' }: {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* ★★★ `.afs-dialog-body` 가 셸의 배경·여백 규약이다. 이걸 빼고 손수
           `padding` 만 주면 **배경이 없어 뒤 화면이 그대로 비친다** — 감사 게이트는
           그것을 잡지 못하고 통과시킨다(실측). */}
-      <div className="afs-dialog-body">
-        <HubShell
+      <div className={`afs-dialog-body${page ? ' journey-product-body' : ''}`}>
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker="DATA READINESS"
           title={initialView === 'readiness' ? '데이터 준비 상태' : '업무 데이터 준비'}
           subtitle="업무기능별 계약·원천 결속·인증판을 한 흐름으로 준비합니다"

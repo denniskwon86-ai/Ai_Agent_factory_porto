@@ -88,7 +88,7 @@ function GateRow({ gate }: { gate: Gate }) {
   );
 }
 
-export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
+export function CalcApprovalPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   const [tab, setTab] = useState<'readiness' | 'approve' | 'reset'>('readiness');
   const [instances, setInstances] = useState<any[] | null>(null);
   const [instanceId, setInstanceId] = useState('');
@@ -258,10 +258,10 @@ export function CalcApprovalPanel({ onClose }: { onClose: () => void }) {
   return (
     // ⚠️ `subtitle` 을 주면 셸이 머리 바(제목 + 「닫기 (Esc)」)를 그린다. 빠뜨리면
     //   제목도 닫기도 없는 전체화면 창이 된다 — 실제로 그랬다(2026-08-23).
-    <HubDialog label="계산 실행 승인 · 시연 초기화" onClose={onClose}
+    <HubDialog page={page} label="계산 실행 승인 · 시연 초기화" onClose={onClose}
       subtitle="누르기 전까지 계산은 «막힘» 으로 답합니다. 승인은 능력마다 별도 원장 사건으로 남습니다">
-      <div className="afs-dialog-body">
-        <HubShell
+      <div className={`afs-dialog-body${page ? ' journey-product-body' : ''}`}>
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker="CALCULATION CONTROL"
           title="계산 실행 승인"
           subtitle="승인된 자료로 경영 판단용 숫자를 내도 되는지 통제합니다"

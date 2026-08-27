@@ -21,7 +21,8 @@
 import { PRODUCT_DESCRIPTOR, PRODUCT_EDITION, PRODUCT_NAME } from '../lib/brand';
 
 export type ShellModule =
-  | 'about' | 'enterprise' | 'factory' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent';
+  | 'about' | 'enterprise' | 'factory' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
+  | 'advisor' | 'data' | 'calc' | 'path' | 'briefing';
 
 /** 전역 내비 7칸. ★ 실제로 여는 제품 화면을 사용자가 바로 알 수 있는 이름으로 고정한다. */
 const NAV: { id: ShellModule; label: string }[] = [
@@ -33,6 +34,11 @@ const NAV: { id: ShellModule; label: string }[] = [
   { id: 'knowledge', label: '지식' },
   { id: 'agent', label: '에이전트' },
 ];
+
+/** 전체 메뉴에서 연 핵심 여정은 독립 페이지지만, 상단 1차 내비에서는 상위 제품공간을 밝힌다. */
+const NAV_PARENT: Partial<Record<ShellModule, ShellModule>> = {
+  advisor: 'enterprise', data: 'enterprise', calc: 'twin', path: 'twin', briefing: 'report',
+};
 
 export function ProductShell({
   module, company, scope, entityMode, onNav, onContext, onAbout, onSettings, onNewWork, right,
@@ -50,6 +56,7 @@ export function ProductShell({
   /** 전체 메뉴처럼 앱에만 있는 것. 시안 행동 칸 **앞**에 놓는다. */
   right?: React.ReactNode;
 }) {
+  const activeModule = NAV_PARENT[module] || module;
   //: 시안의 `LS MnM · 전사공통 · 경영관리팀` 자리 — 회사 · 범위를 이어 적는다.
   const contextLine = [company || '확인 중', scope].filter(Boolean).join(' · ');
   //: 시안의 `M` 마크 — 회사 첫 글자. ⚠️ 회사를 모르면 «?» 다(빈 사각형을 남기지 않는다).
@@ -83,7 +90,7 @@ export function ProductShell({
       <nav className="afs-global-nav" aria-label="주요 기능">
         {NAV.map((n) => (
           <button key={n.id} type="button"
-            className={n.id === module ? 'active' : undefined}
+            className={n.id === activeModule ? 'active' : undefined}
             onClick={() => onNav(n.id)}>
             {n.label}
           </button>

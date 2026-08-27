@@ -142,6 +142,13 @@
  *   `auto` 라서 넘칠 때만 나타난다(이중 스크롤바가 생기지 않는다). */
 .afs-dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
+/* 핵심 여정 화면을 ProductShell 아래의 독립 페이지로 열 때 대화상자 본문 규칙을 재사용한다.
+ * 높이를 명시하지 않으면 안쪽 HubShell의 `height:100%` 기준이 없어져 상단 메뉴 아래에서
+ * 내용이 잘리거나 문서 스크롤로 빠진다. 페이지에서는 바깥 문서가 아니라 세 칸이 각자 스크롤한다. */
+.afs-scope .journey-product-body {
+  width: 100%; height: 100%; min-height: 0; overflow: hidden;
+}
+
 /* 회사별 업무 연결구성은 단계 수에 따라 길어진다. 본문은 `.afs-dialog-body` 가 스크롤한다.
  * ⚠️ 이 영역을 sticky 로 띄우면 직전 안내 문구 위에 올라가 글자와 버튼이 겹친다. 저장
  * 버튼은 문서 흐름의 마지막에 두고, 충분한 안쪽 여백으로 온전히 보이게 한다. */

@@ -101,7 +101,7 @@ function ContextFooter() {
   );
 }
 
-export function HubDialog({ label, subtitle, barActions, onClose, children }: {
+export function HubDialog({ label, subtitle, barActions, onClose, children, page = false }: {
   /** 스크린리더가 읽는 이름. 비우면 "대화상자"로만 읽혀 무엇인지 알 수 없다. */
   label: string;
   /** ★★★ [2026-08-23 실측] 이 값을 주면 **셸이 머리 바를 그린다**(제목 + 「닫기 (Esc)」).
@@ -120,6 +120,8 @@ export function HubDialog({ label, subtitle, barActions, onClose, children }: {
   subtitle?: string;
   /** 머리 바 오른쪽에 놓을 것(진행 표시 등). 닫기 버튼은 셸이 항상 붙인다. */
   barActions?: React.ReactNode;
+  /** 공통 ProductShell 아래의 독립 페이지로 렌더링할 때 portal·dialog 동작을 사용하지 않는다. */
+  page?: boolean;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -128,6 +130,7 @@ export function HubDialog({ label, subtitle, barActions, onClose, children }: {
 
   // 열릴 때: 포커스 원위치 기억 → 배경 차단 → 첫 요소로 포커스
   useEffect(() => {
+    if (page) return;
     restoreRef.current = (document.activeElement as HTMLElement) || null;
 
     const root = document.getElementById('root');
@@ -168,7 +171,7 @@ export function HubDialog({ label, subtitle, barActions, onClose, children }: {
       // 닫은 뒤 **열었던 버튼으로 돌아간다.** 없으면 사용자는 문서 맨 위로 튕긴다.
       restoreRef.current?.focus?.();
     };
-  }, []);
+  }, [label, page]);
 
   // Escape 닫기 + 포커스 트랩
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -192,6 +195,8 @@ export function HubDialog({ label, subtitle, barActions, onClose, children }: {
       lastEl.focus();
     }
   }, [onClose]);
+
+  if (page) return <>{children}</>;
 
   return createPortal(
     <div className="afs-scope afs-dialog-backdrop" onKeyDown={onKeyDown}

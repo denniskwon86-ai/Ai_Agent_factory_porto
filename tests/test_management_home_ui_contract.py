@@ -745,3 +745,47 @@ def test_경로계산은_질문부터_안건연결까지_3열_폐루프로_보�
     assert "result.result_fingerprint" in panel
     assert "계산이 완료되어야 의사결정 안건" in panel
     assert ".afs-scope .path-calc-panel" in css
+
+
+def test_U1_핵심여정은_홈위_모달이_아니라_공통_제품상단바_아래에서_열린다():
+    app = _read("frontend/src/App.tsx")
+    shell = _read("frontend/src/components/ProductShell.tsx")
+    dialog = _read("frontend/src/design/HubDialog.tsx")
+    css = _read("frontend/src/design/afs.css")
+
+    for space in ("advisor", "data", "calc", "path", "briefing"):
+        assert f"space === '{space}'" in app
+        assert f"setSpace('{space}')" in app
+    assert "<AdvisorPanel page" in app
+    assert "<DataPrepPanel page" in app
+    assert "<CalcApprovalPanel page" in app
+    assert "<PathCalcPanel page" in app
+    assert "<BriefingPanel page" in app
+    assert "<ProductShell module={journeyModule}" in app
+    assert "const NAV_PARENT" in shell
+    assert "calc: 'twin'" in shell
+    assert "briefing: 'report'" in shell
+    assert "if (page) return <>{children}</>" in dialog
+    assert ".afs-scope .journey-product-body" in css
+
+
+def test_U1_독립페이지에서는_대화상자_전용_상단바를_중복해_그리지_않는다():
+    for path in (
+        "frontend/src/components/AdvisorPanel.tsx",
+        "frontend/src/components/DataPrepPanel.tsx",
+        "frontend/src/components/BriefingPanel.tsx",
+    ):
+        panel = _read(path)
+        assert "!page && <div className=\"afs-dialog-bar\"" in panel
+
+    for path in (
+        "frontend/src/components/AdvisorPanel.tsx",
+        "frontend/src/components/DataPrepPanel.tsx",
+        "frontend/src/components/CalcApprovalPanel.tsx",
+        "frontend/src/components/PathCalcPanel.tsx",
+        "frontend/src/components/BriefingPanel.tsx",
+    ):
+        panel = _read(path)
+        assert "page = false" in panel
+        assert "page={page}" in panel
+        assert "product-page-shell" in panel

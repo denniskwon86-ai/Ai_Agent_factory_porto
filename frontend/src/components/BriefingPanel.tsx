@@ -108,7 +108,7 @@ function CostBlock({ c }: { c: CostSection }) {
   );
 }
 
-export function BriefingPanel({ onClose }: { onClose: () => void }) {
+export function BriefingPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   const [view, setView] = useState<View>('top');
   const [scopeNode, setScopeNode] = useState('');
   const [nodes, setNodes] = useState<FlatNode[]>([]);
@@ -178,8 +178,8 @@ export function BriefingPanel({ onClose }: { onClose: () => void }) {
   const anyWithheld = (b?.withheld_sections || []).length > 0;
 
   return (
-    <HubDialog label="전사 브리핑 — 권한 범위 안의 상태 1장" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog page={page} label="전사 브리핑 — 권한 범위 안의 상태 1장" onClose={onClose}>
+      {!page && <div className="afs-dialog-bar">
         <b>전사 브리핑</b>
         <span>결정론적으로 모았습니다(LLM 0콜) — 못 읽은 것은 숨기지 않습니다</span>
         <div className="bar-actions">
@@ -188,10 +188,11 @@ export function BriefingPanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
-      <div className="afs-dialog-body">
+      <div className={`afs-dialog-body${page ? ' journey-product-body' : ''}`}>
         <HubShell
+          layoutClassName={page ? 'product-page-shell' : ''}
           kicker="BRIEFING" title={FULL_LABEL[view]} subtitle={current.hint}
           items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
           footer={

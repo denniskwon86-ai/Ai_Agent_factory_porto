@@ -117,7 +117,7 @@ function Metrics({ result }: { result: CalcResult }) {
   );
 }
 
-export function PathCalcPanel({ onClose }: { onClose: () => void }) {
+export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   const [instances, setInstances] = useState<any[] | null>(null);
   const [instanceId, setInstanceId] = useState('');
   // ★ 기준시점은 데모 날짜를 코드에 박지 않는다. 관계 승인은 벽시계 시각부터 유효한데
@@ -363,10 +363,10 @@ export function PathCalcPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <HubDialog label="경로 계산" onClose={onClose}
+    <HubDialog page={page} label="경로 계산" onClose={onClose}
       subtitle="승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산합니다 (LLM 0콜)">
-      <div className="afs-dialog-body">
-        <HubShell
+      <div className={`afs-dialog-body${page ? ' journey-product-body' : ''}`}>
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker="PATH CALCULATION"
           title="경로 계산"
           subtitle="승인된 업무 관계와 인증판 위에서만 영향을 계산합니다"
