@@ -252,7 +252,11 @@ export function OntologyExplorerView() {
       </Panel>
 
       <Panel kicker="GOVERNANCE" title="관계 제안과 승인 관리"
-        action={<button className="primary-button" onClick={() => setShowProposal((v) => !v)}>
+        action={<button className="primary-button"
+          disabled={proposalContext.status !== 'ok' || !proposalContext.value?.ready}
+          title={proposalContext.status !== 'ok' ? '관계 제안 권한을 확인할 수 없습니다.'
+            : !proposalContext.value?.ready ? '귀속할 회사·조직 범위를 먼저 선택하십시오.' : ''}
+          onClick={() => setShowProposal((v) => !v)}>
           {showProposal ? '제안 입력 닫기' : '새 관계 제안'}</button>}>
         <div style={{ padding: 15, display: 'grid', gap: 13 }}>
           {proposalContext.status !== 'ok' ? (

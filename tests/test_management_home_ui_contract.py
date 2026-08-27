@@ -73,6 +73,20 @@ def test_AI스킬_승인은_데이터관리자가_아니라_서버의_AI권한�
     assert "assert_can_manage_standard(p)" not in route
 
 
+def test_Viewer에게_온톨로지와_대외정보_쓰기버튼을_활성으로_약속하지_않는다():
+    ontology = _read("frontend/src/components/OntologyExplorerView.tsx")
+    external = _read("frontend/src/components/ExternalIntelligenceView.tsx")
+
+    assert "disabled={proposalContext.status !== 'ok' || !proposalContext.value?.ready}" in ontology
+    assert "const canManage = Boolean(scope?.canManageStandard || scope?.unrestricted)" in external
+    assert 'title="조회만 가능합니다"' in external
+    assert 'disabled={!canManage}' in external
+    assert "<fieldset disabled={!canManage}" in external
+    assert "canManage && showResearchForm" in external
+    assert "canManage && showSourceForm" in external
+    assert "canManage && showObservationForm" in external
+
+
 def test_회사문맥_변경은_온톨로지의_객체와_관계_양쪽을_다시_읽는다():
     ontology = _read("frontend/src/components/OntologyExplorerView.tsx")
 
