@@ -44,63 +44,44 @@ def test_원문을_지우지_않는다():
     assert "사용자 로그인과 권한 관리를 포함한다" in out
 
 
-def test_지시문이_붙는다():
-    """★ [2026-08-27 2차] 문구를 지시문으로 바꾸면서 이 단언도 같이 옮겼다 —
-    옛 문구(「이미 제공」)를 계속 단언하면 시험이 옛 계약을 지키게 된다."""
-    out = normalize_idea(_IDEA, enforced=True)
-    assert MARKER in out
-    assert "이미 수행합니다" in out, "A무리(회사 시스템이 수행)가 없다"
-    assert "본 프로젝트 구현 범위 아님" in out, "복사할 문장이 없다"
+def test_세_가지_전제가_적힌다():
+    """★★★ [2026-08-27 4차] **오늘 실제로 틀어진 셋만** 적는다.
 
-
-def test_출구로_적을_문장을_그대로_준다():
-    """★★★ 「지우라」가 아니라 **복사해 쓸 문장**을 준다.
-
-    ⚠️ [2026-08-27 2차] 1차 문구는 「~로 적으면 됩니다」였다 — 허용문이라 지시가 아니고
-      **어디에** 적으라는 것도 없었다. 문장을 통째로 주고 위치를 지정한다."""
+    ⚠️⚠️ 3차까지는 35줄이었다. Supervisor 가 「무슨 말인지 솔직히 나는 잘 이해가
+      안되는데」라고 했다 — **사람이 못 읽으면 모델이 읽는다고 볼 근거도 없다.**
+    ★ 그리고 실측이 짧은 쪽을 받친다: 로그인은 실제로 막혔고, 그때 걸린 문장은
+      「로그인/로그아웃 화면·API·세션을 요구사항에 적지 마십시오」 **한 줄**이었다.
+      권한 관리는 문장이 길고 묻혀 있어서 안 걸렸다."""
     clause = render_clause()
-    assert "호스트 시스템이 수행함. 본 프로젝트 구현 범위 아님." in clause, (
-        "그대로 복사할 문장이 없다 — 해석의 여지가 남는다")
-    assert "삭제하지 마십시오" in clause
+    assert "로그인 기능은 필요 없습니다" in clause
+    assert "권한을 만들거나 관리하는 기능도 필요 없습니다" in clause
+    assert "서버·데이터베이스도 필요 없습니다" in clause
+    assert "요구사항·화면·태스크 어디에도 넣지 마십시오" in clause
 
 
-def test_금지_대상을_산출물_종류로_말한다():
-    """★★★ 「적지 마십시오」만으로는 무엇을 만들지 말라는 건지 모호하다.
+def test_짧게_유지된다():
+    """★★★ **길이 자체가 설계 속성이다.**
 
-    ⚠️ 실측에서 요구사항에는 안 적혀도 **WBS 태스크**는 생겼다. 막을 대상을
-      종류로 나열한다 — 요구사항·화면·API·데이터셋·태스크."""
+    ⚠️ 실패할 때마다 문장을 붙이는 것이 반사였고, 세 번 만에 35줄이 됐다. 이 시험은
+      그 반사를 막는다 — 다시 늘리려면 이 시험을 먼저 지워야 하고, 그때 왜 늘리는지
+      적게 된다.
+    ⚠️ 「대신 이렇게 적으십시오」(복사할 문장)를 뺀 근거: 그것은 «완성도 검사와 싸우지
+      않으려면 출구가 필요하다» 는 **추론**이었는데, 실제로는 시키지 않아도 모델이
+      「별도의 로그인/회원가입 기능은 구현하지 않는다」라고 알아서 적었다.
+      **관측하지 않은 문제를 미리 막지 않는다.**"""
+    body = [l for l in render_clause().splitlines() if l.strip()]
+    assert len(body) <= 6, f"고지문이 {len(body)}줄로 늘었다 — 왜 늘리는지 먼저 적을 것"
+
+
+def test_오늘_틀어진_셋을_모두_덮는다():
+    """★ 실측 대응: `CRM002` 에서 실제로 새어 나간 셋.
+
+    ⚠️ 나머지 금지 능력(`api.direct_call`·`storage.credentials`)은 이 문구가 아니라
+      **게이트**가 막는다 — 계약 컴파일러와 `server_build_checker` 다. 기획 문구는
+      기획에서 새는 것만 다룬다(문구를 늘리면 그만큼 묽어진다)."""
     clause = render_clause()
-    for kind in ("요구사항", "화면", "API", "데이터셋", "태스크"):
-        assert kind in clause, kind
-    assert "Must" in clause and "Should" in clause, (
-        "우선순위 어디에도 넣지 말라는 말이 없다")
-
-
-def test_권한_반영은_기능이_아니라_구현세부로_적는다():
-    """★★★ [2026-08-27 3차] Supervisor 지적: 「권한 관리 기능을 넣으라는 의미로 읽혀」.
-
-    ⚠️⚠️ 2차 문구는 「**이것은 만들어야 합니다** — 호스트가 준 권한 범위를 읽어서
-      화면에 반영하는 **것**」이었다. 「만들어야 한다」+ 명사 = **만들 항목의 이름**이다.
-      그러면 「권한 관리」라는 이름의 기능·태스크가 다시 생긴다 — 막으려던 그것이다.
-    ★ 그래서 «기능» 이 아니라 **업무 화면을 그릴 때의 조건**으로 다시 썼다:
-      새로 만들 것이 없고, 그 이름이 붙은 요구·태스크를 만들지 말라고 못박는다."""
-    clause = render_clause()
-    assert "기능» 이 아니라" in clause, "여전히 «기능» 으로 읽힌다"
-    assert "아무것도 새로 만들지 마십시오" in clause
-    assert "권한 관리" in clause and "만들지 마십시오" in clause, (
-        "그 이름의 요구·태스크를 금지하지 않는다")
-    assert "요구사항 표에 **적지 마십시오" in clause, (
-        "요구사항으로 적지 말라는 말이 없다")
-    assert "disabled" in clause, "구현 방식 예시가 없다"
-
-
-def test_허용_설명에_만들어야_한다는_말이_없다():
-    """★★★ 「반드시 구현하십시오」 한 줄이 그것을 **산출물로** 만든다.
-
-    ⚠️ 금지 절 안에서 「만들어야」가 나오면 모델은 그 절을 «만들 목록» 으로 읽는다."""
-    clause = render_clause()
-    i = clause.index("오해 금지")
-    assert "만들어야" not in clause[i:], clause[i:i + 300]
+    for word in ("로그인", "권한", "서버", "데이터베이스"):
+        assert word in clause, word
 
 
 def test_문구에_특정_도메인_낱말이_없다():
@@ -111,49 +92,14 @@ def test_문구에_특정_도메인_낱말이_없다():
         assert word not in clause, f"도메인 낱말이 박혀 있다: {word}"
 
 
-def test_표지가_금지문이다():
-    """⚠️ [2026-08-27 2차] 종전 표지 「아래는 이미 충족되어 있습니다」는 **무엇을 하지
-    말라는 건지** 말하지 않았다 — 「이미 있으니 연동 화면을 만들자」로 읽힌다."""
-    from core.requirement_normalizer import MARKER
+def test_만들라는_말이_없다():
+    """★★★ Supervisor 3차 지적: 「권한 관리 기능을 **넣으라는 의미로 읽혀**」.
 
-    assert "만들지 않습니다" in MARKER, MARKER
-
-
-def test_옛_표지가_붙은_요구문에는_다시_안_붙인다():
-    """★ 표지를 바꿨으므로 옛 표지도 재진입 판정에서 봐야 한다 —
-    아니면 같은 지시가 두 벌로 실린다."""
-    from core.requirement_normalizer import _LEGACY_MARKERS
-
-    old_text = _IDEA + chr(10) * 2 + _LEGACY_MARKERS[0] + chr(10) + "(옛 본문)"
-    assert normalize_idea(old_text, enforced=True) == old_text
-
-
-# ── 목록은 닫힌 목록에서 온다 ────────────────────────────────────────────
-
-def test_금지_능력을_모두_고지한다():
-    """★★★ 손으로 적은 목록은 바뀐 날 조용히 갈린다 — 이 저장소가 세 번 겪었다.
-
-    ⚠️ 닫힌 목록의 `PROHIBITED` **전부**가 문구에 나타나는지 본다. 새 금지 항목이
-      추가된 날 이 시험이 잡는다."""
+    ⚠️ 금지 고지문 안에 「만들어야」·「구현하십시오」가 한 번이라도 나오면 모델은
+      그 절을 «만들 목록» 으로 읽는다. 이 문구는 **금지만** 말한다."""
     clause = render_clause()
-    prohibited = [k for k, (s, _r) in arc.CAPABILITY_DECISION.items()
-                  if s == arc.PROHIBITED]
-    assert prohibited, "금지 능력이 하나도 없다 — 대조군이 성립하지 않는다"
-    missing = [c for c in prohibited
-               if c.split(".")[-1] not in clause and _ko_hint(c) not in clause]
-    assert not missing, f"고지문에 안 실린 금지 능력: {missing}"
-
-
-def _ko_hint(cap: str) -> str:
-    from core.requirement_normalizer import _KO
-    return _KO.get(cap, cap)
-
-
-def test_인증_세_가지가_이미_충족으로_적힌다():
-    """★ 사용자가 실제로 겪은 셋 — 로그인·권한·세션."""
-    clause = render_clause()
-    for word in ("로그인", "권한", "세션"):
-        assert word in clause, word
+    for word in ("만들어야", "구현하십시오", "반드시 구현"):
+        assert word not in clause, f"만들라는 말이 남아 있다: {word}"
 
 
 # ── 두 번 붙지 않는다 ───────────────────────────────────────────────────
