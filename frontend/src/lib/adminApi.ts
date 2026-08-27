@@ -79,6 +79,32 @@ export type AuditRetention = {
   [k: string]: unknown;
 };
 
+/** 모델 라우팅 — 지금 어떤 모델로 도는가. (2026-08-27)
+ *
+ * ⚠️⚠️ `enabled` 만 그리면 안 된다. 환경변수가 저장소를 이기는 구조라, 관리자가 스위치를
+ *   내리고 「껐다」고 믿는데 서버는 켜진 채로 도는 상태가 생긴다. 그래서 **누가 이겼는지**
+ *   (`source`)와 세 출처의 값을 함께 받는다 — 화면이 그것을 말할 수 있어야 한다.
+ * ★ 화면은 판정하지 않는다. 우선순위는 서버(`core/model_routing_policy`)가 정한다. */
+export type ModelRouting = {
+  enabled: boolean;
+  /** 'env' | 'store' | 'code' — 지금 값을 정한 출처 */
+  source: string;
+  /** 환경변수가 정한 값. **정하지 않았으면 null**(false 와 다르다) */
+  env_value: boolean | null;
+  /** 화면에서 저장한 값. 저장한 적 없으면 null */
+  stored_value: boolean | null;
+  code_default: boolean;
+  env_key: string;
+  /** 저장한 값이 환경변수에 눌려 **적용되지 않고 있다** */
+  overridden: boolean;
+  chains?: { pro: string[]; flash: string[] };
+  history?: { from: boolean; to: boolean; actor: string; reason: string; at?: string }[];
+  /** PUT 응답에만 있다 — 결정의 결과를 사람 말로 적은 것 */
+  note?: string;
+  /** PUT 응답에만 있다 — 'next_boot' */
+  applies?: string;
+};
+
 export const adminApi = {
   scopePolicy: () => req<ScopePolicy>('GET', '/api/v1/admin/scope-policy'),
   enforcePreflight: () => req<EnforcePreflight>('GET', '/api/v1/admin/org-enforcement/preflight'),
@@ -98,6 +124,20 @@ export const adminApi = {
    *    그래서 사유를 필수로 받는다(서버도 강제한다). */
   setAppPdpEnforcement: (enabled: boolean, reason: string) =>
     req<ScopePolicy>('PUT', '/api/v1/admin/app-pdp-enforcement', { enabled, reason }),
+
+  /** 모델 라우팅 조회. (2026-08-27) */
+  modelRouting: () => req<ModelRouting>('GET', '/api/v1/admin/model-routing'),
+
+  /** OpenRouter 전용 모드 전환.
+   *
+   * ⚠️ 켜면 **비용이 나가고**, 끄면 **429 쿼터 소진이 돌아온다**(실측 폴백 실패 190건 중
+   *   130건). 어느 쪽이든 결과가 있으므로 사유를 받는다 — 되돌릴 때 «왜 켰는가» 를
+   *   모르면 되돌려도 되는지 판단할 수 없다(`setEnforcement` 와 같은 규약).
+   * ★ 적용은 **다음 서버 기동부터**다. 돌고 있는 Sprint 가 도중에 모델을 갈아타면
+   *   앞뒤 산출물이 달라진다. */
+  setModelRouting: (openrouterOnly: boolean, reason: string) =>
+    req<ModelRouting>('PUT', '/api/v1/admin/model-routing',
+      { openrouter_only: openrouterOnly, reason }),
 
   /** 내 비밀번호. [설계 §5.8] 개인 설정은 «나에게만 적용» 이다. */
   changePassword: (currentPassword: string, newPassword: string) =>

@@ -30,7 +30,8 @@ import { orgApi, type OrgUser } from '../lib/orgApi';
 import { EmptyOrError, Refreshing, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
 import {
-  adminApi, type AuditStats, type EnforcePreflight, type ScopePolicy,
+  adminApi, type AuditStats, type EnforcePreflight, type ModelRouting,
+  type ScopePolicy,
 } from '../lib/adminApi';
 
 type Domain = 'me' | 'brand' | 'people' | 'ai' | 'data' | 'security';
@@ -121,6 +122,21 @@ export function AdminConsolePanel({ onClose, onGoToOrg, me }: {
   const [reason, setReason] = useState('');
   const confirmEnforce = useConfirm<boolean>();
 
+  //: ★★★ [2026-08-27] AI — 모델 라우팅. 사유는 **강제 전환과 별도 상태**로 둔다.
+  //: ⚠️ 하나를 공유하면 한쪽 Sheet 에 적은 사유가 다른 쪽 감사 기록에 실린다.
+  const [routing, setRouting] = useState<Loaded<ModelRouting>>(loading<ModelRouting>());
+  const [routingReason, setRoutingReason] = useState('');
+  const [routingNote, setRoutingNote] = useState('');
+  const confirmRouting = useConfirm<boolean>();
+
+  const loadRouting = useCallback(async () => {
+    setRouting(refreshing);
+    try { setRouting(ok(await adminApi.modelRouting())); }
+    //: ⚠️ 실패를 「꺼짐」으로 그리지 않는다 — 관리자는 전용 모드가 꺼진 줄 알고
+    //:   비용이 안 나간다고 판단한다. «못 읽었다» 와 «꺼졌다» 는 다른 사실이다.
+    catch (e) { setRouting(failed<ModelRouting>(e)); }
+  }, []);
+
   const loadUsers = useCallback(async () => {
     setUsers(refreshing);
     try {
@@ -145,7 +161,8 @@ export function AdminConsolePanel({ onClose, onGoToOrg, me }: {
     setPre(f.status === 'fulfilled' ? ok(f.value) : failed<EnforcePreflight>(f.reason));
     setAudit(a.status === 'fulfilled' ? ok(a.value) : failed<AuditStats>(a.reason));
     await loadUsers();
-  }, []);
+    await loadRouting();
+  }, [loadRouting]);
   useEffect(() => { load(); }, [load]);
 
   const act = async (fn: () => Promise<unknown>, okMsg: string) => {
@@ -500,15 +517,165 @@ export function AdminConsolePanel({ onClose, onGoToOrg, me }: {
           {domain === 'ai' && (
             <>
               <ScreenHead kicker="AI" title="AI 모델 · 비용"
-                description="모델 역할과 품질 기준, 비용 정책을 다룹니다."
-                chip={{ label: '설정 경로 부분 부재', tone: 'warn' }} />
+                description="어떤 모델로 도는지, 그리고 그 선택의 비용을 다룹니다."
+                chip={routing.status !== 'ok'
+                  ? { label: '조회 불가', tone: 'danger' }
+                  : routing.value!.enabled
+                    ? { label: 'OpenRouter 전용', tone: 'warn' }
+                    : { label: '무료 폴백 체인', tone: 'data' }} />
+
+              {/* ══════════════════════════════════════════════════════════════
+                  ★★★ [2026-08-27] 모델 라우팅 — **화면에서 바꾼다.**
+
+                  코드 상수로 두면 모드를 켜고 끄는 데 배포가 필요하고, 그러면 사람들은
+                  아예 안 끄거나(비용이 계속 나감) 아예 안 켠다(쿼터가 계속 터짐).
+                  `scope_policy` 가 한시 예외 만료일을 두고 내린 것과 같은 결론이다.
+                 ══════════════════════════════════════════════════════════════ */}
+              <Panel kicker="ROUTING" title="모델 라우팅"
+                action={<button className="secondary-button" onClick={loadRouting}>다시 읽기</button>}>
+                {routing.status !== 'ok' ? (
+                  <div style={{ padding: 15 }}>
+                    <EmptyOrError state={routing.status} error={routing.error}
+                      emptyText="모델 라우팅 설정을 읽지 못했습니다." onRetry={loadRouting} />
+                  </div>
+                ) : (
+                  <div style={{ padding: 15 }}>
+                    {/* ⚠️⚠️ **적용되지 않고 있는 저장값**을 가장 먼저 말한다.
+                        환경변수가 저장소를 이기는 구조라, 이 줄이 없으면 관리자는 스위치를
+                        내리고 「껐다」고 믿는데 서버는 켜진 채로 돈다 — 그리고 화면만
+                        보고는 알 수 없다. 그건 통제가 아니라 거짓 표시다. */}
+                    {routing.value!.source === 'env' && (
+                      <Banner tone="warn" title="지금은 환경변수가 이기고 있습니다">
+                        서버가 <b>{routing.value!.env_key}={String(routing.value!.env_value)}</b>
+                        {' '}로 기동돼 있어, 이 화면에서 바꾼 값은 <b>적용되지 않습니다.</b>
+                        {routing.value!.stored_value !== null && (
+                          <> 저장된 값은 <b>{routing.value!.stored_value ? '켬' : '끔'}</b>입니다.</>
+                        )}
+                        {' '}적용하려면 그 환경변수 없이 서버를 다시 띄우십시오.
+                      </Banner>
+                    )}
+
+                    <div className="validation-facts">
+                      <div><span>지금 적용 중</span>
+                        <b>{routing.value!.enabled ? 'OpenRouter 유료' : '무료 폴백 체인'}</b>
+                        <small>{routing.value!.enabled
+                          ? 'Gemini·xAI·Groq·Cerebras 는 인스턴스도 만들지 않습니다.'
+                          : 'Gemini 를 1순위로 하는 5개 제공사 체인입니다.'}</small></div>
+                      <div><span>이 값을 정한 곳</span>
+                        <b>{routing.value!.source === 'env' ? '환경변수'
+                          : routing.value!.source === 'store' ? '이 화면' : '코드 기본값'}</b>
+                        <small>{routing.value!.source === 'env'
+                          ? `${routing.value!.env_key} — 화면 설정보다 셉니다.`
+                          : routing.value!.source === 'store'
+                            ? '관리자가 이 화면에서 저장한 값입니다.'
+                            : '아직 아무도 바꾸지 않았습니다.'}</small></div>
+                      <div><span>Pro 체인</span>
+                        <b>{routing.value!.enabled
+                          ? (routing.value!.chains?.pro.length ?? 0) : '—'}</b>
+                        <small>{routing.value!.enabled
+                          ? (routing.value!.chains?.pro.join(' → ') || '(비어 있음)')
+                          : '전용 모드에서만 표시됩니다.'}</small></div>
+                      <div><span>Flash 체인</span>
+                        <b>{routing.value!.enabled
+                          ? (routing.value!.chains?.flash.length ?? 0) : '—'}</b>
+                        <small>{routing.value!.enabled
+                          ? (routing.value!.chains?.flash.join(' → ') || '(비어 있음)')
+                          : '전용 모드에서만 표시됩니다.'}</small></div>
+                    </div>
+
+                    <div style={{ marginTop: 12 }}>
+                      <button className="primary-button"
+                        onClick={() => confirmRouting.ask(!routing.value!.enabled)}>
+                        {routing.value!.enabled
+                          ? 'OpenRouter 전용 끄기 — 검토 요청'
+                          : 'OpenRouter 전용 켜기 — 검토 요청'}
+                      </button>
+                    </div>
+
+                    {/* ★ [설계 §6.5] 운영 변경 — 5요소를 전부 채운다.
+                        ⚠️ 켜는 것도 끄는 것도 **결과가 있다.** 한쪽만 위험한 것처럼 그리면
+                          사람은 반대쪽을 «안전한 기본» 으로 읽는다. */}
+                    <ConfirmInline open={confirmRouting.open}
+                      title={confirmRouting.target
+                        ? 'OpenRouter 유료 모델만 쓰도록 바꿉니다'
+                        : '무료 티어 폴백 체인으로 되돌립니다'}
+                      changes={confirmRouting.target
+                        ? 'Gemini·xAI·Groq·Cerebras 를 쓰지 않습니다. 인스턴스도 만들지 않습니다.'
+                        : 'Gemini 를 1순위로 하는 종전 폴백 체인이 돌아옵니다.'}
+                      affects={confirmRouting.target ? (
+                        <><b>비용이 발생합니다.</b> 무료 쿼터를 쓰지 않으므로 호출마다 과금됩니다
+                          (Pro 체인 기준 출력 100만 토큰당 $2.50). 대신 실측 폴백 실패 190건 중
+                          <b> 429 쿼터 소진 130건</b>이 사라집니다.</>
+                      ) : (
+                        <><b>429 쿼터 소진이 돌아옵니다.</b> 실측에서 폴백 실패 190건 중 130건이
+                          그것이었고, 무료 체인이 소진되면 남는 것이 출력 8k 짜리 모델뿐이라
+                          <b> 코드 생성이 구조적으로 실패</b>합니다.</>
+                      )}
+                      reversible={<>반대 방향으로 다시 바꾸면 됩니다. 두 변경 모두 이력과 감사에
+                        남습니다. <b>다만 이미 나간 호출의 비용은 되돌릴 수 없습니다.</b></>}
+                      approval="전사 관리자 권한이 필요합니다. 감사 로그에 기록됩니다."
+                      reason={{
+                        value: routingReason, onChange: setRoutingReason, required: true,
+                        placeholder: '예: 무료 쿼터 소진으로 완주가 반복 실패 — 한시 전환',
+                        label: <>변경 사유 <b>(필수)</b> — 되돌릴 때 «왜 바꿨는가» 의 근거가 됩니다</>,
+                      }}
+                      confirmLabel="적용"
+                      onCancel={confirmRouting.cancel}
+                      onConfirm={() => confirmRouting.run((t) => act(
+                        async () => {
+                          const out = await adminApi.setModelRouting(t, routingReason.trim());
+                          //: ★ 서버가 적어 준 결과 문장을 **그대로** 보여 준다. 화면이 다시
+                          //:   쓰면 「저장은 됐는데 안 먹는다」 같은 사실이 빠진다.
+                          setRoutingNote(out.note || '');
+                          return out;
+                        },
+                        '모델 라우팅을 바꿨습니다.')
+                        .then(() => { setRoutingReason(''); loadRouting(); }))} />
+
+                    {routingNote && (
+                      <Banner tone="info" title="이 변경의 결과">{routingNote}</Banner>
+                    )}
+
+                    {/* ★★★ **언제 적용되는지**를 말한다. 「눌렀는데 아무 일도 없다」로
+                        읽히지 않게. */}
+                    <p className="hint-line" style={{ marginTop: 10 }}>
+                      ⚠️ 이 변경은 <b>다음 서버 기동부터</b> 적용됩니다. 지금 돌고 있는 작업이
+                      도중에 다른 모델로 갈아타면 앞 태스크와 뒤 태스크의 산출물이 달라지고,
+                      그 프로젝트는 «무엇이 만든 것인가» 에 답할 수 없게 됩니다.
+                    </p>
+
+                    {(routing.value!.history || []).length > 0 && (
+                      <div className="afs-table-wrap" style={{ marginTop: 12 }}>
+                        <table className="afs-table">
+                          <thead>
+                            <tr><th>이전</th><th>이후</th><th>변경자</th><th>사유</th><th>시각</th></tr>
+                          </thead>
+                          <tbody>
+                            {(routing.value!.history || []).map((h, i) => (
+                              <tr key={i}>
+                                <td>{h.from ? '켬' : '끔'}</td>
+                                <td><b>{h.to ? '켬' : '끔'}</b></td>
+                                <td>{h.actor}</td>
+                                <td>{h.reason || '—'}</td>
+                                <td>{h.at || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Panel>
 
               {/* ⚠️ 설계가 요구하는 항목 중 **서버에 저장 경로가 없는 것**을 입력란으로 그리지
-                  않는다. 그리면 사용자는 입력하고 저장된 줄 안다. */}
-              <Banner tone="warn" title="이 도메인은 아직 설정을 저장할 수 없습니다">
-                설계는 여기에서 <b>모델 역할·예상 품질·비용 하한·월 예산·쿼터</b>를 다루도록
-                정했지만, 이 시스템에는 그 값을 저장할 서버 경로가 아직 없습니다. 입력란을
-                만들어 두면 저장되지 않는 값을 저장한 것으로 오해하게 되므로 두지 않았습니다.
+                  않는다. 그리면 사용자는 입력하고 저장된 줄 안다.
+                  ★ [2026-08-27] 모델 라우팅에는 저장 경로가 생겼으므로 이 배너에서 뺐다 —
+                    「전부 저장 안 됨」이라고 계속 말하면 위 스위치도 안 먹는다고 읽힌다. */}
+              <Banner tone="warn" title="아직 저장할 수 없는 설정이 남아 있습니다">
+                설계는 여기에서 <b>모델 역할·예상 품질·비용 하한·월 예산·쿼터</b>도 다루도록
+                정했지만, 그 값들을 저장할 서버 경로는 아직 없습니다. 입력란을 만들어 두면
+                저장되지 않는 값을 저장한 것으로 오해하게 되므로 두지 않았습니다.
               </Banner>
 
               <Panel kicker="QUALITY" title="Golden Benchmark">

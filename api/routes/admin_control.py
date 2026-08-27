@@ -185,3 +185,56 @@ async def put_legacy_deadline(req: DeadlineRequest,
                                                 req.reason or "")}
     except ScopePolicyError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── 모델 라우팅 (2026-08-27) ──────────────────────────────────────────────
+
+class ModelRoutingRequest(BaseModel):
+    """OpenRouter 전용 모드 전환."""
+    openrouter_only: bool
+    reason: Optional[str] = ""
+
+
+@router.get("/model-routing")
+async def get_model_routing(p: Principal = Depends(current_principal)):
+    """지금 어떤 모델로 도는가 — **바꾸지 않고 본다.**
+
+    ★★★ 값만 주지 않는다. `source`(env / store / code)를 함께 준다.
+
+    ⚠️⚠️ 환경변수가 저장소를 이기는 구조라, 값만 그리면 관리자가 스위치를 내리고
+      「껐다」고 믿는데 서버는 계속 켜진 채로 도는 상태를 **화면에서 볼 수 없다.**
+      그건 통제가 아니라 거짓 표시다."""
+    from core import model_routing_policy as mrp
+
+    _admin(p)
+    return {"status": "success",
+            "data": {**mrp.effective(),
+                     "chains": mrp.chains(),
+                     "history": mrp.history()}}
+
+
+@router.put("/model-routing")
+async def put_model_routing(req: ModelRoutingRequest,
+                            p: Principal = Depends(current_principal)):
+    """모드를 바꾼다(**코드 배포 없이**).
+
+    ⚠️ 켜는 것도 끄는 것도 결과가 있다 — 응답의 `note` 를 그대로 화면에 보여줘야
+      그 사실이 결정자에게 전달된다(`legacy-deadline` 과 같은 규약).
+
+    ★★★ **진행 중인 작업에는 소급하지 않는다.** 게이트웨이는 첫 호출에서 한 번 만들어지고
+      그 인스턴스가 체인을 들고 있다. 여기서 싱글턴을 깨면 **돌고 있는 Sprint 가 도중에
+      다른 모델로 갈아탄다** — 앞 태스크와 뒤 태스크의 산출물이 달라지고, 그 프로젝트는
+      「무엇이 만든 것인가」에 답할 수 없게 된다. 이 화면의 기존 문구가 이미 그렇게
+      약속하고 있다(「정책은 진행 중인 Sprint 에 소급하지 않습니다」).
+      → 그래서 **다음 서버 기동부터** 적용된다고 분명히 말한다."""
+    from core import model_routing_policy as mrp
+
+    actor = _admin(p)
+    try:
+        out = await asyncio.to_thread(mrp.set_openrouter_only,
+                                      bool(req.openrouter_only), actor, req.reason or "")
+    except mrp.ModelRoutingError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success",
+            "data": {**out, "chains": mrp.chains(), "history": mrp.history(),
+                     "applies": "next_boot"}}

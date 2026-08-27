@@ -48,8 +48,19 @@ def test_환경변수가_config_를_이긴다(monkeypatch, raw, expected):
     assert gw._openrouter_only() is expected
 
 
-def test_환경변수가_없으면_config_를_따른다(monkeypatch):
+def test_환경변수도_저장값도_없으면_config_를_따른다(monkeypatch, tmp_path):
+    """★ [2026-08-27 갱신] 우선순위에 **관리자 화면 저장값**이 끼어들었다.
+
+    ⚠️⚠️ 종전 이 시험은 config 만 놓고 판정을 봤다. 그런데 이제 순서가
+      env > 저장소 > config 라, 저장소에 값이 있으면 config 는 안 먹는다 —
+      실제로 화면에서 한 번 끄자 이 시험이 빨개졌다. **제품이 맞고 시험이 옛
+      계약을 단언하고 있었다.**
+    ★ 그래서 세 출처를 **다 비운 상태**에서 config 를 본다. 저장소를 안 비우면
+      이 시험은 「그때 마지막으로 화면에서 누른 값」을 따라 흔들린다."""
+    from core import model_routing_policy as mrp
+
     monkeypatch.delenv("AFS_OPENROUTER_ONLY", raising=False)
+    monkeypatch.setattr(mrp, "_PATH", str(tmp_path / "none.json"), raising=False)
     monkeypatch.setattr(gw.config, "OPENROUTER_ONLY", True, raising=False)
     assert gw._openrouter_only() is True
     monkeypatch.setattr(gw.config, "OPENROUTER_ONLY", False, raising=False)
@@ -118,27 +129,32 @@ def test_키가_있으면_통과한다(monkeypatch):
 
 # ── ①② 체인이 실제로 갈리는가 ───────────────────────────────────────────
 
-def _chain_names(monkeypatch, on: bool):
+def _chain_names(monkeypatch, on: bool, tmp_path=None):
+    #: ⚠️ env 가 최우선이라 저장소를 비우지 않아도 되지만, **그 사실에 기대지 않는다** —
+    #:   우선순위가 바뀌면 이 시험이 조용히 「저장소 값」을 재게 된다.
+    from core import model_routing_policy as mrp
+    if tmp_path is not None:
+        monkeypatch.setattr(mrp, "_PATH", str(tmp_path / "none.json"), raising=False)
     monkeypatch.setenv("AFS_OPENROUTER_ONLY", "1" if on else "0")
     g = gw.LLMGateway()
     return ([n for n, _ in g._pro_chain], [n for n, _ in g._flash_chain],
             {type(i).__name__ for _, i in g._pro_chain + g._flash_chain})
 
 
-def test_켜면_OpenRouter_아닌_모델이_하나도_없다(monkeypatch):
+def test_켜면_OpenRouter_아닌_모델이_하나도_없다(monkeypatch, tmp_path):
     """★★★ **이 파일의 요지.**
 
     ⚠️ 이름만 보지 않는다 — **인스턴스 타입**까지 본다. 이름이 OpenRouter 슬러그인데
       Groq 클라이언트에 실려 있으면(위 주석의 그 사고) 이름 검사만으로는 초록이다."""
-    pro, flash, types = _chain_names(monkeypatch, on=True)
+    pro, flash, types = _chain_names(monkeypatch, on=True, tmp_path=tmp_path)
     bad = [n for n in pro + flash if not n.startswith(("google/", "openai/",
                                                        "anthropic/", "meta-llama/"))]
     assert not bad, f"OpenRouter 슬러그가 아닌 모델이 남았다: {bad}"
     assert types == {"ChatOpenAI"}, f"OpenRouter 클라이언트가 아닌 인스턴스: {types}"
 
 
-def test_끄면_종전_체인_그대로다(monkeypatch):
+def test_끄면_종전_체인_그대로다(monkeypatch, tmp_path):
     """★★★ 대조군. 한시 조치가 **기존 동작을 바꾸면** 끄고도 못 돌아간다."""
-    pro, flash, types = _chain_names(monkeypatch, on=False)
+    pro, flash, types = _chain_names(monkeypatch, on=False, tmp_path=tmp_path)
     assert any(n.startswith("gemini") for n in pro), f"Gemini 가 사라졌다: {pro}"
     assert len(types) > 1, f"제공사가 하나뿐이다 — 끈 게 아니다: {types}"

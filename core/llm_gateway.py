@@ -257,19 +257,23 @@ def _make_openrouter(model: str, temperature: float):
 def _openrouter_only() -> bool:
     """★★★ [2026-08-27 한시 조치] OpenRouter 유료 모델만 쓰는가.
 
-    ⚠️ **환경변수가 config 보다 우선한다.** 켜고 끄는 일을 코드 수정 없이 할 수 있어야
-      한다 — 그러지 않으면 되돌리려고 서버 코드를 고치게 되고, 그 수정이 남는다.
+    ⚠️⚠️ **판정을 여기서 하지 않는다.** `core.model_routing_policy.effective()` 하나가
+      env / 화면 저장소 / 코드 기본값의 우선순위를 정한다. 두 곳에서 판정하면 「화면은
+      꺼졌다고 그리는데 게이트웨이는 켜진 채로 도는」 상태가 생긴다.
 
-        AFS_OPENROUTER_ONLY=1/true/on   → 켠다
-        AFS_OPENROUTER_ONLY=0/false/off → 끈다(config 가 True 여도)
-        미설정                           → `config.OPENROUTER_ONLY`
+        ① 환경변수 `AFS_OPENROUTER_ONLY`  ← 가장 세다
+        ② 관리자 화면에서 바꾼 값(저장소)
+        ③ `config.OPENROUTER_ONLY`        ← 코드 기본값
+
+    ★ 저장소를 못 읽어도 **멈추지 않는다** — 코드 기본값으로 되돌아간다. 모델 라우팅이
+      설정 파일 하나 때문에 죽으면 안 된다.
     """
-    raw = (os.environ.get("AFS_OPENROUTER_ONLY") or "").strip().lower()
-    if raw in ("1", "true", "on", "yes"):
-        return True
-    if raw in ("0", "false", "off", "no"):
-        return False
-    return bool(getattr(config, "OPENROUTER_ONLY", False))
+    try:
+        from core import model_routing_policy as mrp
+        return mrp.enabled()
+    except Exception as e:                                       # pragma: no cover
+        print(f"⚠️ [Gateway] 모델 라우팅 정책 판독 실패 — 코드 기본값을 씁니다: {e}")
+        return bool(getattr(config, "OPENROUTER_ONLY", False))
 
 
 def _openrouter_only_chain(tier: str, names) -> list:
