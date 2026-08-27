@@ -82,7 +82,9 @@ function toLoaded<T>(r: PromiseSettledResult<T>): Loaded<T> {
   return failed<T>(r.reason);
 }
 
-export default function GovernanceConsole({ onClose }: { onClose: () => void }) {
+export default function GovernanceConsole({ onClose, page = false }: {
+  onClose: () => void; page?: boolean;
+}) {
   const [view, setView] = useState<View>('exposure');
   const [scopeNode, setScopeNode] = useState('');
   const [nodes, setNodes] = useState<FlatNode[]>([]);
@@ -256,8 +258,8 @@ export default function GovernanceConsole({ onClose }: { onClose: () => void }) 
   ], [gapRows, docRows]);
 
   return (
-    <HubDialog label="데이터 거버넌스 — 무엇이 안 되어 있는가" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog page={page} label="데이터 거버넌스 — 무엇이 안 되어 있는가" onClose={onClose}>
+      {!page && <div className="afs-dialog-bar">
         <b>데이터 거버넌스</b>
         <span>«없음»과 «확인하지 못함»을 구분해 표시합니다</span>
         <div className="bar-actions">
@@ -266,10 +268,11 @@ export default function GovernanceConsole({ onClose }: { onClose: () => void }) 
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
-      <div className="afs-dialog-body">
+      <div className={`afs-dialog-body${page ? ' journey-product-body' : ''}`}>
         <HubShell
+          layoutClassName={page ? 'product-page-shell' : ''}
           kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
           items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
           footer={

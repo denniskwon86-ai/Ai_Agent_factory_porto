@@ -22,7 +22,8 @@ import { PRODUCT_DESCRIPTOR, PRODUCT_EDITION, PRODUCT_NAME } from '../lib/brand'
 
 export type ShellModule =
   | 'about' | 'enterprise' | 'factory' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
-  | 'advisor' | 'data' | 'calc' | 'path' | 'briefing';
+  | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'
+  | 'master' | 'terminology' | 'crosswalk' | 'governance';
 
 /** 전역 내비 7칸. ★ 실제로 여는 제품 화면을 사용자가 바로 알 수 있는 이름으로 고정한다. */
 const NAV: { id: ShellModule; label: string }[] = [
@@ -38,6 +39,7 @@ const NAV: { id: ShellModule; label: string }[] = [
 /** 전체 메뉴에서 연 핵심 여정은 독립 페이지지만, 상단 1차 내비에서는 상위 제품공간을 밝힌다. */
 const NAV_PARENT: Partial<Record<ShellModule, ShellModule>> = {
   advisor: 'enterprise', data: 'enterprise', calc: 'twin', path: 'twin', briefing: 'report',
+  master: 'knowledge', terminology: 'knowledge', crosswalk: 'knowledge', governance: 'knowledge',
 };
 
 export function ProductShell({

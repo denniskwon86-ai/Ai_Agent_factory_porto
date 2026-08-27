@@ -761,7 +761,7 @@ def test_U1_핵심여정은_홈위_모달이_아니라_공통_제품상단바_�
     assert "<CalcApprovalPanel page" in app
     assert "<PathCalcPanel page" in app
     assert "<BriefingPanel page" in app
-    assert "<ProductShell module={journeyModule}" in app
+    assert "<ProductShell module={journeyModule || foundationModule!}" in app
     assert "const NAV_PARENT" in shell
     assert "calc: 'twin'" in shell
     assert "briefing: 'report'" in shell
@@ -789,3 +789,52 @@ def test_U1_독립페이지에서는_대화상자_전용_상단바를_중복해_
         assert "page = false" in panel
         assert "page={page}" in panel
         assert "product-page-shell" in panel
+
+
+def test_U2_근거화면_일곱개는_공통_제품상단바_아래에서_열린다():
+    app = _read("frontend/src/App.tsx")
+    shell = _read("frontend/src/components/ProductShell.tsx")
+
+    for space in ("master", "terminology", "crosswalk", "governance"):
+        assert f"setSpace('{space}')" in app
+        assert f"{space}: 'knowledge'" in shell
+    assert "<MasterDataPanel page" in app
+    assert "<TerminologyGlossaryPanel page" in app
+    assert "<CrosswalkPanel page" in app
+    assert "<GovernanceConsole page" in app
+    assert "setKnowledgeInitialView('ontology')" in app
+    assert "setKnowledgeInitialView('external')" in app
+    assert "<ProductShell module={journeyModule || foundationModule!}" in app
+
+
+def test_용어집은_중복탭이_아니라_단계레일_본문_자비스_세영역을_쓴다():
+    panel = _read("frontend/src/components/TerminologyGlossaryPanel.tsx")
+    css = _read("frontend/src/components/terminology-glossary.css")
+
+    assert "<HubShell" in panel
+    assert "<JarvisRail" in panel
+    assert "label: '전체 용어 사전'" in panel
+    assert "label: 'P0 충돌과 권장안'" in panel
+    assert "label: '사용 원칙'" in panel
+    assert '<nav className="terminology-tabs"' not in panel
+    assert "current_module: `knowledge/terminology/${tab}`" in panel
+    assert "visible_count: filtered.length" in panel
+    assert "표시명과 시스템 식별자는 다릅니다" in panel
+    assert ".product-page-shell .term-controls" in css
+    assert "grid-template-columns: minmax(230px, 1.35fr) minmax(150px, .85fr)" in css
+
+
+def test_크로스워크는_제안과_승인주소록을_가르고_판독실패를_0건으로_접지_않는다():
+    panel = _read("frontend/src/components/CrosswalkPanel.tsx")
+
+    assert "<HubShell" in panel
+    assert "<JarvisRail" in panel
+    assert "label: '시스템·스키마'" in panel
+    assert "label: '매핑 제안'" in panel
+    assert "label: '승인된 매핑'" in panel
+    assert "proposals.status === 'ok' ? pending.length : undefined" in panel
+    assert "mappings.status === 'ok' ? (mappings.value || []).length : undefined" in panel
+    assert "제안은 아직 조회 주소가 아닙니다" in panel
+    assert "시스템을 먼저 선택해야 이 단계를 확인할 수 있습니다" in panel
+    assert "ref={proposalsSection}" in panel
+    assert "ref={confirmedSection}" in panel

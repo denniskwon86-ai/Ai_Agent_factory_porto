@@ -28,20 +28,21 @@
 //   · 자체 `fixed inset-0` 모달(모달 semantics·포커스 트랩·Escape 없음) → `HubDialog`
 //   · 승인·기각이 **응답을 확인하지 않던 것**(fire-and-forget — 실패해도 화면은 성공처럼 굴었다)
 //   · **9~11px 글자 12곳** → 본문 12px 이상
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
 import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
 import { useLatestOnly } from '../design/useLatestOnly';
 import { HubDialog } from '../design/HubDialog';
-import { Banner, Panel, ScreenHead } from '../design/HubShell';
+import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
 import {
   crosswalkApi, type Field, type LiveValue, type Mapping, type Proposal, type Sys,
 } from '../lib/crosswalkApi';
 
 
-export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
+export function CrosswalkPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
   const claim = useLatestOnly();
   const [systems, setSystems] = useState<Loaded<Sys[]>>(loading<Sys[]>());
@@ -58,6 +59,10 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  const [section, setSection] = useState<'systems' | 'proposals' | 'confirmed'>('systems');
+  const systemsSection = useRef<HTMLDivElement>(null);
+  const proposalsSection = useRef<HTMLDivElement>(null);
+  const confirmedSection = useRef<HTMLDivElement>(null);
 
   const [sysId, setSysId] = useState('');
   const [sysName, setSysName] = useState('');
@@ -111,6 +116,29 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
 
   const selSys = (systems.value || []).find((s) => s.system_id === sel) || null;
   const pending = (proposals.value || []).filter((p) => p.status === 'pending');
+  const railItems: RailItem[] = [
+    { id: 'systems', label: '시스템·스키마', hint: '연계 대상과 조인 열쇠', icon: 'globe',
+      count: systems.status === 'ok' ? (systems.value || []).length : undefined,
+      countLabel: `등록 시스템 ${(systems.value || []).length}개` },
+    { id: 'proposals', label: '매핑 제안', hint: '승인 전 후보', icon: 'revise',
+      count: proposals.status === 'ok' ? pending.length : undefined,
+      countLabel: `승인 대기 ${pending.length}건` },
+    { id: 'confirmed', label: '승인된 매핑', hint: '실측 조회 주소록', icon: 'contract',
+      count: mappings.status === 'ok' ? (mappings.value || []).length : undefined,
+      countLabel: `승인 매핑 ${(mappings.value || []).length}건` },
+  ];
+
+  const selectSection = (id: string) => {
+    const next = id as 'systems' | 'proposals' | 'confirmed';
+    setSection(next);
+    const target = next === 'systems' ? systemsSection.current
+      : next === 'proposals' ? proposalsSection.current : confirmedSection.current;
+    if (!target) {
+      setErr('시스템을 먼저 선택해야 이 단계를 확인할 수 있습니다.');
+      return;
+    }
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   /** 쓰기 한 번. **응답을 반드시 확인한다** — 종전 승인·기각은 확인하지 않았다. */
   const act = async (tag: string, fn: () => Promise<unknown>, okMsg: string) => {
@@ -213,8 +241,9 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <HubDialog label="연계 / 크로스워크 — 외부 시스템 키를 기준정보와 매핑" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog page={page}
+      label="연계 / 크로스워크 — 외부 시스템 키를 기준정보와 매핑" onClose={onClose}>
+      {!page && <div className="afs-dialog-bar">
         <b>연계 / 크로스워크</b>
         <span>초안 → 사용자 승인 2단계 · 승인된 매핑만 M3 온디맨드 조회의 주소록이 됩니다</span>
         <div className="bar-actions">
@@ -223,10 +252,51 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
-      <div className="afs-dialog-body">
-        <div className="hub-main">
+      <div className={`afs-dialog-body${page ? ' journey-product-body' : ''}`}>
+        <HubShell
+          layoutClassName={page ? 'product-page-shell' : ''}
+          kicker="CROSSWALK" title="연계 / 크로스워크"
+          subtitle="외부 시스템의 키·필드를 승인된 기준정보 주소로 연결합니다."
+          items={railItems} activeId={section} onSelect={selectSection}
+          footer={
+            <div className="inheritance-card">
+              <span>APPROVAL BOUNDARY</span>
+              <b>제안은 아직 조회 주소가 아닙니다</b>
+              <p>사용자가 승인한 매핑만 외부 실측값을 가져오는 주소록으로 사용합니다.</p>
+            </div>
+          }
+          jarvis={<JarvisRail
+            contextTitle={selSys ? `${selSys.name} 연계` : '연계 시스템 미선택'}
+            contextDescription={selSys
+              ? `스키마·제안·승인 매핑을 ${selSys.name} 문맥에서 검토 중입니다.`
+              : '시스템을 선택하면 해당 스키마와 승인 상태를 기준으로 답합니다.'}
+            evidence={[
+              { label: '조회 상태', value: systems.status === 'ok' ? '확인됨' : '확인 불가' },
+              { label: '승인 대기', value: proposals.status === 'ok' ? `${pending.length}건` : '판독 불가' },
+              { label: '승인 매핑', value: mappings.status === 'ok'
+                ? `${(mappings.value || []).length}건` : '판독 불가' },
+            ]}
+            context={{
+              current_module: `knowledge/crosswalk/${section}`,
+              selected_object_type: 'external_system',
+              selected_object_id: selSys?.system_id,
+              object_snapshot: selSys ? {
+                system_id: selSys.system_id, status: selSys.status,
+                schema_status: schema.status, proposal_status: proposals.status,
+                mapping_status: mappings.status,
+              } : { selection: 'none' },
+              available_actions: ['시스템 등록', '스키마 확인', '매핑 제안 검토', '실측 조회'],
+              evidence_refs: selSys ? [{ kind: 'crosswalk_system', id: selSys.system_id }] : [],
+            }}
+            quickQuestions={[
+              '승인 대기 중인 매핑은 무엇입니까?',
+              '이 시스템의 조인 열쇠가 충분합니까?',
+              '승인된 매핑으로 어떤 실측값을 조회할 수 있습니까?',
+            ]} />}
+        >
+        <div className="product-page-content product-hub-page" ref={systemsSection}>
           <ScreenHead kicker="CROSSWALK" title="연계 / 크로스워크"
             description="외부 시스템의 키·필드를 우리 기준정보와 잇습니다. 승인은 «외부 필드 = 우리 표준의 무엇»을 확정하는 행위입니다 — 확정된 매핑이 이후 모든 실측 조회의 주소록이 됩니다."
             chip={systems.status === 'loading' ? { label: '확인 중', tone: 'muted' }
@@ -392,7 +462,7 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
                   </div>
 
                   {/* 매핑 초안 */}
-                  <div style={{ marginTop: 14 }}>
+                  <div style={{ marginTop: 14 }} ref={proposalsSection}>
                     <Panel kicker="PROPOSALS" title={`매핑 제안 (대기 ${pending.length})`}
                       action={
                         <button className="secondary-button" disabled={busy !== null}
@@ -492,7 +562,7 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
                   </div>
 
                   {/* 승인된 매핑 */}
-                  <div style={{ marginTop: 14 }}>
+                  <div style={{ marginTop: 14 }} ref={confirmedSection}>
                     <Panel kicker="CONFIRMED"
                       title={`승인된 크로스워크 (${(mappings.value || []).length})`}
                       action={<span className="afs-muted" style={{ fontSize: 12 }}>
@@ -553,6 +623,7 @@ export function CrosswalkPanel({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         </div>
+        </HubShell>
       </div>
     </HubDialog>
   );

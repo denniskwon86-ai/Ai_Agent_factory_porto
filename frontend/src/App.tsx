@@ -100,14 +100,16 @@ function AppShell() {
     typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('project')
   );
   const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
-    | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'>(() => {
+    | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'
+    | 'master' | 'terminology' | 'crosswalk' | 'governance'>(() => {
     if (initialProject.current) return 'build';
     if (typeof window === 'undefined') return 'enterprise';
     const value = new URLSearchParams(window.location.search).get('space');
     return value === 'about' || value === 'build' || value === 'operate' || value === 'twin'
       || value === 'report' || value === 'knowledge' || value === 'agent'
       || value === 'advisor' || value === 'data' || value === 'calc' || value === 'path'
-      || value === 'briefing'
+      || value === 'briefing' || value === 'master' || value === 'terminology'
+      || value === 'crosswalk' || value === 'governance'
       ? value : 'enterprise';
   });
   const [routeRestored, setRouteRestored] = useState(initialProject.current === null);
@@ -324,7 +326,7 @@ function AppShell() {
       items: [
         { id: 'master', icon: '🗂', label: '기준정보 마스터',
           desc: '자재·공정·설비·KPI 골든 레코드 — 확정 조회로 모든 에이전트에 주입(모델 불변)',
-          onSelect: () => setShowMasterData(true) },
+          onSelect: () => { setShowMasterData(false); setSpace('master'); } },
         { id: 'knowledge', icon: '📚', label: '지식 허브',
           desc: '도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결',
           onSelect: () => { setKnowledgeInitialView('packs'); setShowKnowledgeHub(false); setSpace('knowledge'); } },
@@ -336,15 +338,15 @@ function AppShell() {
           onSelect: () => { setKnowledgeInitialView('external'); setShowKnowledgeHub(false); setSpace('knowledge'); } },
         { id: 'terminology', icon: '📖', label: '기술·제품 용어집',
           desc: '현재 용어·권장 사용자 용어·기술 표준명을 함께 보는 전환 사전',
-          onSelect: () => setShowTerminology(true) },
+          onSelect: () => { setShowTerminology(false); setSpace('terminology'); } },
         { id: 'crosswalk', icon: '🔗', label: '연계/크로스워크',
           desc: '외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사용자 승인',
-          onSelect: () => setShowCrosswalk(true) },
+          onSelect: () => { setShowCrosswalk(false); setSpace('crosswalk'); } },
         { id: 'governance', icon: '🛡️', label: '데이터 거버넌스',
           desc: '조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약·외부지표 준비도',
           // ★ 서버가 403 을 줄 자리를 **누르기 전에** 말한다(설계 §10 수용 기준).
           disabledReason: govBlocked,
-          onSelect: () => setShowGovernance(true) },
+          onSelect: () => { setShowGovernance(false); setSpace('governance'); } },
       ],
     },
     {
@@ -675,18 +677,30 @@ function AppShell() {
           ? <PathCalcPanel page onClose={() => setSpace('enterprise')} />
           : space === 'briefing'
             ? <BriefingPanel page onClose={() => setSpace('enterprise')} />
+            : space === 'master'
+              ? <MasterDataPanel page onClose={() => setSpace('knowledge')} />
+              : space === 'terminology'
+                ? <TerminologyGlossaryPanel page onClose={() => setSpace('knowledge')} />
+                : space === 'crosswalk'
+                  ? <CrosswalkPanel page onClose={() => setSpace('knowledge')} />
+                  : space === 'governance'
+                    ? <GovernanceConsole page onClose={() => setSpace('knowledge')} />
             : null;
   const journeyModule = space === 'advisor' ? 'advisor'
     : space === 'data' ? 'data'
       : space === 'calc' ? 'calc'
         : space === 'path' ? 'path'
           : space === 'briefing' ? 'briefing' : null;
+  const foundationModule = space === 'master' ? 'master'
+    : space === 'terminology' ? 'terminology'
+      : space === 'crosswalk' ? 'crosswalk'
+        : space === 'governance' ? 'governance' : null;
 
-  if (!currentProjectId && journeyPage && journeyModule) {
+  if (!currentProjectId && journeyPage && (journeyModule || foundationModule)) {
     return (
       <ErrorBoundary>
         <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
-          <ProductShell module={journeyModule}
+          <ProductShell module={journeyModule || foundationModule!}
             company={shellCompanyName}
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}

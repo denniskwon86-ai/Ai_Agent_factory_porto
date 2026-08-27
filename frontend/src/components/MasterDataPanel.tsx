@@ -47,7 +47,7 @@ function jsonObject(value: string, label: string): Record<string, unknown> | und
   return parsed as Record<string, unknown>;
 }
 
-export function MasterDataPanel({ onClose }: { onClose: () => void }) {
+export function MasterDataPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
   const claim = useLatestOnly();
   const [view, setView] = useState<View>('catalog');
@@ -282,8 +282,8 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <HubDialog label="기준정보 마스터 — 골든 레코드와 주입 기준" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog page={page} label="기준정보 마스터 — 골든 레코드와 주입 기준" onClose={onClose}>
+      {!page && <div className="afs-dialog-bar">
         <b>기준정보 마스터</b>
         <span>골든 레코드는 확정 조회로 모든 에이전트에 동일하게 주입됩니다</span>
         <div className="bar-actions">
@@ -292,10 +292,11 @@ export function MasterDataPanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
-      <div className="afs-dialog-body">
+      <div className={`afs-dialog-body${page ? ' journey-product-body' : ''}`}>
         <HubShell
+          layoutClassName={page ? 'product-page-shell' : ''}
           kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
           items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
           footer={

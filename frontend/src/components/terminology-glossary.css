@@ -47,6 +47,12 @@
   position: sticky; top: -26px; z-index: 3; padding: 14px; border: 1px solid var(--line);
   background: rgba(255,255,255,.96); box-shadow: 0 7px 22px rgba(16, 26, 45, .08);
 }
+/* 독립 제품 화면은 양쪽 레일을 유지하므로 중앙 작업면이 종전 전체화면 대화상자보다 좁다.
+ * 고정 4열을 그대로 쓰면 마지막 필터가 자비스 아래로 잘린다. 두 행으로 재배치하되 필터를
+ * 접거나 숨기지 않는다. */
+.afs-scope .product-page-shell .term-controls {
+  grid-template-columns: minmax(230px, 1.35fr) minmax(150px, .85fr);
+}
 .afs-scope .term-controls label { display: grid; gap: 5px; }
 .afs-scope .term-controls label span { color: var(--muted); font-size: 12px; font-weight: 800; }
 .afs-scope .term-controls input, .afs-scope .term-controls select { height: 40px; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #fff; font-size: 13px; }

@@ -148,6 +148,10 @@
 .afs-scope .journey-product-body {
   width: 100%; height: 100%; min-height: 0; overflow: hidden;
 }
+.afs-scope .foundation-product-body {
+  width: 100%; height: 100%; min-height: 0; overflow-y: auto;
+  background: var(--surface-page);
+}
 
 /* 회사별 업무 연결구성은 단계 수에 따라 길어진다. 본문은 `.afs-dialog-body` 가 스크롤한다.
  * ⚠️ 이 영역을 sticky 로 띄우면 직전 안내 문구 위에 올라가 글자와 버튼이 겹친다. 저장

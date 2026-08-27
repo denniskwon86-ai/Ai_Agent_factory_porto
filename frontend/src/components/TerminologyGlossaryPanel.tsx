@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import glossary from '../data/technologyTerminologyGlossary.json';
 import { HubDialog } from '../design/HubDialog';
+import { HubShell, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
 import './terminology-glossary.css';
 
 type Entry = (typeof glossary.entries)[number];
@@ -107,7 +109,9 @@ function ConflictCard({ conflict }: { conflict: Conflict }) {
   );
 }
 
-export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
+export function TerminologyGlossaryPanel({ onClose, page = false }: {
+  onClose: () => void; page?: boolean;
+}) {
   const [tab, setTab] = useState<Tab>('dictionary');
   const [query, setQuery] = useState('');
   const [area, setArea] = useState('전체');
@@ -133,6 +137,14 @@ export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
     count: glossary.entries.filter((entry) => entry.migration_status === key).length,
   })), []);
   const excelPath = 'docs/architecture/AI_FACTORY_STUDIO_TECHNOLOGY_TERMINOLOGY_DICTIONARY_2026-08-12.xlsx';
+  const railItems: RailItem[] = [
+    { id: 'dictionary', label: '전체 용어 사전', hint: '화면 표기와 기술 표준명', icon: 'catalog',
+      count: filtered.length, countLabel: `검색 결과 ${filtered.length}개` },
+    { id: 'conflicts', label: 'P0 충돌과 권장안', hint: '결정이 필요한 용어', icon: 'duplicate',
+      count: glossary.metadata.conflict_count, countLabel: `충돌 ${glossary.metadata.conflict_count}건` },
+    { id: 'guide', label: '사용 원칙', hint: '표기·전환 기준', icon: 'checklist',
+      count: glossary.metadata.policy.length, countLabel: `원칙 ${glossary.metadata.policy.length}건` },
+  ];
 
   const copyExcelPath = async () => {
     try {
@@ -145,8 +157,9 @@ export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <HubDialog label="기술·제품 용어집 — 현재 용어와 권장 용어 전환 사전" onClose={onClose}>
-      <div className="afs-dialog-bar terminology-bar">
+    <HubDialog page={page}
+      label="기술·제품 용어집 — 현재 용어와 권장 용어 전환 사전" onClose={onClose}>
+      {!page && <div className="afs-dialog-bar terminology-bar">
         <div>
           <b>기술·제품 용어집</b>
           <span>표준 용어는 유지하고, 쉬운 설명과 기술 표준명을 함께 관리합니다.</span>
@@ -157,9 +170,48 @@ export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
           </button>
           <button className="secondary-button" onClick={onClose}>닫기 <b>(Esc)</b></button>
         </div>
-      </div>
+      </div>}
 
-      <div className="afs-dialog-body terminology-page">
+      <div className={`afs-dialog-body${page ? ' journey-product-body' : ''}`}>
+        <HubShell
+          layoutClassName={page ? 'product-page-shell' : ''}
+          kicker="TERMINOLOGY" title="기술·제품 용어집"
+          subtitle="사용자 표현과 기술 표준명을 한 정본에서 관리합니다."
+          items={railItems} activeId={tab} onSelect={(id) => setTab(id as Tab)}
+          footer={
+            <div className="inheritance-card">
+              <span>TRANSITION RULE</span>
+              <b>표시명과 시스템 식별자는 다릅니다</b>
+              <p>화면·문서 표기는 이 사전을 따르되 API·DB·코드 식별자는 별도 승인 없이 바꾸지 않습니다.</p>
+            </div>
+          }
+          jarvis={<JarvisRail
+            contextTitle={tab === 'dictionary' ? '용어 전환 사전'
+              : tab === 'conflicts' ? 'P0 용어 충돌' : '용어 사용 원칙'}
+            contextDescription={tab === 'dictionary'
+              ? `현재 조건에 맞는 용어 ${filtered.length}개를 검토 중입니다.`
+              : tab === 'conflicts'
+                ? `승인 전 충돌 ${glossary.metadata.conflict_count}건을 검토 중입니다.`
+                : '새 화면과 문서에 적용할 표기 원칙을 검토 중입니다.'}
+            evidence={[
+              { label: '용어집 판', value: `v${glossary.metadata.version}` },
+              { label: '정본', value: glossary.metadata.canonical_source },
+            ]}
+            context={{
+              current_module: `knowledge/terminology/${tab}`,
+              selected_object_type: 'terminology_dictionary',
+              selected_object_id: `terminology-${glossary.metadata.version}`,
+              object_snapshot: { tab, query: query.trim(), area, status, visible_count: filtered.length },
+              available_actions: ['용어 검색', '충돌 검토', '사용 원칙 확인'],
+              evidence_refs: [{ kind: 'terminology_dictionary', version: glossary.metadata.version }],
+            }}
+            quickQuestions={[
+              '현재 화면 표기로 바꿔야 할 용어는 무엇입니까?',
+              'P0 충돌 중 먼저 결정할 항목은 무엇입니까?',
+              '이 용어를 사용자 화면과 기술 문서에 어떻게 나눠 써야 합니까?',
+            ]} />}
+        >
+        <div className="terminology-page">
         <section className="terminology-intro">
           <div>
             <small>TRANSITION DICTIONARY · v{glossary.metadata.version}</small>
@@ -172,6 +224,11 @@ export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
           <aside>
             <b>{glossary.metadata.decision_label} · 최종 승인 전</b>
             <p>신규 화면과 문서의 기본 표현입니다. API·DB·코드 식별자는 별도 마이그레이션 승인 없이 변경하지 않습니다.</p>
+            {page && (
+              <button className="secondary-button" onClick={copyExcelPath}>
+                {pathCopied ? '경로 복사됨' : 'Excel 경로 복사'}
+              </button>
+            )}
           </aside>
         </section>
 
@@ -183,18 +240,6 @@ export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
             <div key={item.key}><strong>{item.count}</strong><span>{item.key}</span></div>
           ))}
         </section>
-
-        <nav className="terminology-tabs" aria-label="용어집 보기">
-          <button className={tab === 'dictionary' ? 'active' : ''} onClick={() => setTab('dictionary')}>
-            전체 용어 사전
-          </button>
-          <button className={tab === 'conflicts' ? 'active' : ''} onClick={() => setTab('conflicts')}>
-            P0 충돌과 권장안
-          </button>
-          <button className={tab === 'guide' ? 'active' : ''} onClick={() => setTab('guide')}>
-            사용 원칙
-          </button>
-        </nav>
 
         {tab === 'dictionary' && (
           <section className="terminology-dictionary">
@@ -268,6 +313,8 @@ export function TerminologyGlossaryPanel({ onClose }: { onClose: () => void }) {
             </div>
           </section>
         )}
+        </div>
+        </HubShell>
       </div>
     </HubDialog>
   );
