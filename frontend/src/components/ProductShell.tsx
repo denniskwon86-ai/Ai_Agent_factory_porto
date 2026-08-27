@@ -24,7 +24,7 @@ export type ShellModule =
   | 'about' | 'enterprise' | 'factory' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
   | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'
   | 'master' | 'terminology' | 'crosswalk' | 'governance'
-  | 'planning' | 'shadow';
+  | 'planning' | 'shadow' | 'promotion' | 'workspace';
 
 /** 전역 내비 7칸. ★ 실제로 여는 제품 화면을 사용자가 바로 알 수 있는 이름으로 고정한다. */
 const NAV: { id: ShellModule; label: string }[] = [
@@ -42,6 +42,7 @@ const NAV_PARENT: Partial<Record<ShellModule, ShellModule>> = {
   advisor: 'enterprise', data: 'enterprise', calc: 'twin', path: 'twin', briefing: 'report',
   master: 'knowledge', terminology: 'knowledge', crosswalk: 'knowledge', governance: 'knowledge',
   planning: 'twin', shadow: 'twin',
+  promotion: 'operate', workspace: 'operate',
 };
 
 export function ProductShell({

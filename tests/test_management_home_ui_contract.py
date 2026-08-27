@@ -873,8 +873,39 @@ def test_U3_경영계획과_Shadow_Mode는_팝업이_아니라_공통_제품상�
     assert "SHADOW_ITEMS" in workspace_shell
     assert "selected_object_id: active" in workspace_shell
     assert "panel.querySelector<HTMLElement>('.panel-head small')" in workspace_shell
+    assert "useEffect(() => setActive(items[0].id), [kind])" in workspace_shell
 
     for panel in (planning, shadow):
         assert "page = false" in panel
         assert "page={page}" in panel
         assert "!page && <div className=\"afs-dialog-bar\"" in panel
+
+
+def test_U4_운영승격과_워크스페이스는_공통_제품셸과_통제단계_자비스를_쓴다():
+    app = _read("frontend/src/App.tsx")
+    shell = _read("frontend/src/components/ProductShell.tsx")
+    promotion = _read("frontend/src/components/ReleasePromotionPanel.tsx")
+    workspace = _read("frontend/src/components/WorkspacePanel.tsx")
+    operations_shell = _read("frontend/src/components/OperationsGovernanceShell.tsx")
+
+    for space in ("promotion", "workspace"):
+        assert f"setSpace('{space}')" in app
+        assert f"{space}: 'operate'" in shell
+    assert '<OperationsGovernanceShell kind="promotion">' in app
+    assert '<OperationsGovernanceShell kind="workspace">' in app
+    assert "<ReleasePromotionPanel page" in app
+    assert "<WorkspacePanel page" in app
+
+    for panel in (promotion, workspace):
+        assert "page = false" in panel
+        assert "page={page}" in panel
+        assert "!page && <div className=\"afs-dialog-bar\"" in panel
+
+    assert "<HubShell" in operations_shell
+    assert "<JarvisRail" in operations_shell
+    assert "PROMOTION_ITEMS" in operations_shell
+    assert "WORKSPACE_ITEMS" in operations_shell
+    assert "selected_object_id: active" in operations_shell
+    assert "useEffect(() => setActive(items[0].id), [kind])" in operations_shell
+    assert "승격 전 결과는 운영값이 아닙니다" not in operations_shell
+    assert "검사를 통과해도 사람의 결정이 필요합니다" in operations_shell

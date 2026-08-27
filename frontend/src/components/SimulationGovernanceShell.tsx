@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { HubShell, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
@@ -41,6 +41,10 @@ export function SimulationGovernanceShell({ kind, children }: { kind: Kind; chil
   const items = kind === 'planning' ? PLANNING_ITEMS : SHADOW_ITEMS;
   const [active, setActive] = useState(items[0].id);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // React가 같은 셸을 planning ↔ shadow 전환에서 재사용한다. 이전 단계 id를 남기면
+  // 선택된 탭이 하나도 없고 자비스가 다른 화면의 객체를 말한다.
+  useEffect(() => setActive(items[0].id), [kind]);
 
   const select = (id: string) => {
     setActive(id);

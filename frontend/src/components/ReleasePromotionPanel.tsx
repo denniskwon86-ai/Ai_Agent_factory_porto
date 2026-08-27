@@ -69,7 +69,7 @@ function CheckList({ checks }: { checks: Check[] }) {
   );
 }
 
-export function ReleasePromotionPanel({ onClose }: { onClose: () => void }) {
+export function ReleasePromotionPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   //: `null` = 아직 못 읽음, `[]` = 정말 0건.
   const [items, setItems] = useState<ReleaseItem[] | null>(null);
   const [loadErr, setLoadErr] = useState<{ message: string; status: number } | null>(null);
@@ -131,10 +131,10 @@ export function ReleasePromotionPanel({ onClose }: { onClose: () => void }) {
         : '';
 
   return (
-    <HubDialog label="운영 승격 — 후보 판을 운영으로 올립니다" onClose={onClose}>
+    <HubDialog label="운영 승격 — 후보 판을 운영으로 올립니다" onClose={onClose} page={page}>
       {/* ★ 제품 셸의 머리 바. ⚠️ 빠뜨리면 제목도 「닫기」도 없는 창이 되고, 사용자는
           Escape 를 아는 사람만 닫을 수 있다(첫 판에서 실제로 그랬다). */}
-      <div className="afs-dialog-bar">
+      {!page && <div className="afs-dialog-bar">
         <b>운영 승격</b>
         <span>후보 판을 운영으로 — 다섯 검사를 모두 지나야 올라갑니다</span>
         <div className="bar-actions">
@@ -143,7 +143,7 @@ export function ReleasePromotionPanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="afs-dialog-body" style={{
         overflow: 'auto', padding: 18, display: 'flex', flexDirection: 'column',

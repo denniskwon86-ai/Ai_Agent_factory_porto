@@ -53,6 +53,7 @@ import { ProductShell } from './components/ProductShell';
 import { SystemAboutPage } from './components/SystemAboutPage';
 import { KitOperationsPanel } from './components/KitOperationsPanel';
 import { SimulationGovernanceShell } from './components/SimulationGovernanceShell';
+import { OperationsGovernanceShell } from './components/OperationsGovernanceShell';
 //: ★★★ [2026-08-25] 문맥을 푸는 규칙은 **한 곳**에 있다(`lib/operatingContext`).
 //: ⚠️ 종전에는 여기서 `getEnterpriseContext().tenantId` 를 그대로 썼다. 그 값은 사용자가
 //:   조직을 고를 때만 채워지므로 로그인 직후 상단이 「? · 확인 중」이었다 —
@@ -102,7 +103,8 @@ function AppShell() {
   );
   const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
     | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'
-    | 'master' | 'terminology' | 'crosswalk' | 'governance' | 'planning' | 'shadow'>(() => {
+    | 'master' | 'terminology' | 'crosswalk' | 'governance' | 'planning' | 'shadow'
+    | 'promotion' | 'workspace'>(() => {
     if (initialProject.current) return 'build';
     if (typeof window === 'undefined') return 'enterprise';
     const value = new URLSearchParams(window.location.search).get('space');
@@ -111,6 +113,7 @@ function AppShell() {
       || value === 'advisor' || value === 'data' || value === 'calc' || value === 'path'
       || value === 'briefing' || value === 'master' || value === 'terminology'
       || value === 'crosswalk' || value === 'governance' || value === 'planning' || value === 'shadow'
+      || value === 'promotion' || value === 'workspace'
       ? value : 'enterprise';
   });
   const [routeRestored, setRouteRestored] = useState(initialProject.current === null);
@@ -371,10 +374,10 @@ function AppShell() {
       items: [
         { id: 'promotion', icon: '🚀', label: '운영 승격',
           desc: '후보 판을 운영으로 — 계약·물질화·정적검사·승인·데이터 준비도 다섯 검사',
-          onSelect: () => setShowPromotion(true) },
+          onSelect: () => { setShowPromotion(false); setSpace('promotion'); } },
         { id: 'workspace', icon: '🏢', label: '워크스페이스',
           desc: '부서 앱의 공유·복제와 전사 승격 게이트 — 계약·보안·품질·소유자 승인을 모두 통과해야 승격',
-          onSelect: () => setShowWorkspace(true) },
+          onSelect: () => { setShowWorkspace(false); setSpace('workspace'); } },
       ],
     },
     {
@@ -694,6 +697,14 @@ function AppShell() {
                       ? <SimulationGovernanceShell kind="shadow">
                           <ShadowModePanel page onClose={() => setSpace('twin')} />
                         </SimulationGovernanceShell>
+                      : space === 'promotion'
+                        ? <OperationsGovernanceShell kind="promotion">
+                            <ReleasePromotionPanel page onClose={() => setSpace('operate')} />
+                          </OperationsGovernanceShell>
+                        : space === 'workspace'
+                          ? <OperationsGovernanceShell kind="workspace">
+                              <WorkspacePanel page onClose={() => setSpace('operate')} />
+                            </OperationsGovernanceShell>
             : null;
   const journeyModule = space === 'advisor' ? 'advisor'
     : space === 'data' ? 'data'
@@ -705,7 +716,9 @@ function AppShell() {
       : space === 'crosswalk' ? 'crosswalk'
       : space === 'governance' ? 'governance' : null;
   const decisionModule = space === 'planning' ? 'planning'
-    : space === 'shadow' ? 'shadow' : null;
+    : space === 'shadow' ? 'shadow'
+      : space === 'promotion' ? 'promotion'
+        : space === 'workspace' ? 'workspace' : null;
 
   if (!currentProjectId && journeyPage && (journeyModule || foundationModule || decisionModule)) {
     return (

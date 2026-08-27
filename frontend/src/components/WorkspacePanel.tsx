@@ -46,7 +46,7 @@ import {
   rollbackRelease,
 } from '../lib/workspaceApi';
 
-type Props = { onClose: () => void };
+type Props = { onClose: () => void; page?: boolean };
 
 /** ★ 통과와 같은 톤이면 «확인 못 한 것» 이 «괜찮은 것» 으로 읽힌다. */
 const STATE: Record<string, { label: string; cls: string }> = {
@@ -142,7 +142,7 @@ function OperateFilters({ rows, filter, onChange }: {
 }
 
 
-export default function WorkspacePanel({ onClose }: Props) {
+export default function WorkspacePanel({ onClose, page = false }: Props) {
   const [promotions, setPromotions] = useState<Loaded<Promotion[]>>(loading<Promotion[]>());
   const [releaseId, setReleaseId] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -244,8 +244,8 @@ export default function WorkspacePanel({ onClose }: Props) {
     && (!filter.target || p.target_scope === filter.target));
 
   return (
-    <HubDialog label="부서 워크스페이스 — 공유·복제·전사 승격" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog label="부서 워크스페이스 — 공유·복제·전사 승격" onClose={onClose} page={page}>
+      {!page && <div className="afs-dialog-bar">
         <b>부서 워크스페이스</b>
         <span>공유는 승격이 아닙니다 · 전사 승격은 데이터 계약·보안·품질·소유자 승인을 모두 통과해야 합니다(§9.3)</span>
         <div className="bar-actions">
@@ -253,7 +253,7 @@ export default function WorkspacePanel({ onClose }: Props) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* ★ [UI 설계서 §5.4 `/operate/workspace`] 「좌: 부서/상태/유형 필터 · 중앙: 프로그램·
           릴리스 목록 · 우: 선택 자산 상세와 공유/승격 흐름」.
