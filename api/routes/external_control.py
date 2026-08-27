@@ -17,16 +17,18 @@
 ⚠️ 라우트 순서: 고정 경로는 경로 변수보다 위에 둔다.
 """
 import asyncio
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.deps import (Principal, assert_can_manage_standard, assert_governance_readable,
                       current_principal)
 from core.external_collector import CollectorError, external_collector
 from core.external_intelligence import (ExternalIntelligenceError,
                                         external_intelligence)
+from core.external_research import (BOT_KINDS, ExternalResearchError,
+                                    external_research, external_research_runner)
 
 router = APIRouter(prefix="/api/v1/external")
 
@@ -84,6 +86,160 @@ class SourceCollectRequest(BaseModel):
     path: str = ""                        # 등록된 base_url 아래 **상대 경로만**
     indicator_map: Optional[Dict[str, str]] = None
     timeout: float = 10.0
+
+
+class ResearchProfileRequest(BaseModel):
+    profile_id: str = ""
+    legal_entity_id: str
+    company_name: str
+    official_domains: List[str]
+    official_urls: List[str]
+    business_keywords: List[str] = Field(default_factory=list)
+    product_keywords: List[str] = Field(default_factory=list)
+    regions: List[str] = Field(default_factory=list)
+    competitor_names: List[str] = Field(default_factory=list)
+    material_keywords: List[str] = Field(default_factory=list)
+    required_indicators: List[str] = Field(default_factory=list)
+    collection_purpose: str
+    schedule_rule: str = ""
+    owner_id: str
+    retention_days: int = 365
+
+
+class ResearchApprovalRequest(BaseModel):
+    expected_fingerprint: str
+
+
+class ResearchJobRequest(BaseModel):
+    profile_id: str
+    bot_kind: str = BOT_KINDS[0]
+    dry_run: bool = True
+
+
+class ResearchCandidateDecisionRequest(BaseModel):
+    decision: str
+    expected_content_hash: str
+
+
+def _research_err(e: ExternalResearchError):
+    raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/research/profiles")
+async def list_research_profiles(p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
+    return {"status": "success",
+            "data": await asyncio.to_thread(external_research.list_profiles)}
+
+
+@router.post("/research/profiles")
+async def save_research_profile(req: ResearchProfileRequest,
+                                p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    try:
+        out = await asyncio.to_thread(external_research.save_profile,
+                                      req.model_dump(exclude={"profile_id"}), req.profile_id)
+    except ExternalResearchError as e:
+        _research_err(e)
+    return {"status": "success", "data": out}
+
+
+@router.post("/research/profiles/{profile_id}/submit")
+async def submit_research_profile(profile_id: str,
+                                  p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    try:
+        out = await asyncio.to_thread(external_research.request_review, profile_id)
+    except ExternalResearchError as e:
+        _research_err(e)
+    return {"status": "success", "data": out}
+
+
+@router.post("/research/profiles/{profile_id}/approve")
+async def approve_research_profile(profile_id: str, req: ResearchApprovalRequest,
+                                   p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    try:
+        out = await asyncio.to_thread(external_research.approve_profile, profile_id,
+                                      _actor(p), req.expected_fingerprint)
+    except ExternalResearchError as e:
+        _research_err(e)
+    return {"status": "success", "data": out}
+
+
+@router.get("/research/jobs")
+async def list_research_jobs(profile_id: str = "",
+                             p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
+    return {"status": "success",
+            "data": await asyncio.to_thread(external_research.list_jobs, profile_id)}
+
+
+@router.post("/research/jobs")
+async def schedule_research_job(req: ResearchJobRequest,
+                                p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    try:
+        out = await asyncio.to_thread(external_research.schedule_job, req.profile_id,
+                                      req.bot_kind, _actor(p), req.dry_run)
+    except ExternalResearchError as e:
+        _research_err(e)
+    return {"status": "success", "data": out}
+
+
+@router.post("/research/jobs/{job_id}/run")
+async def run_research_job(job_id: str, p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    _actor(p)
+    try:
+        out = await asyncio.to_thread(external_research_runner.run, job_id)
+    except ExternalResearchError as e:
+        _research_err(e)
+    return {"status": "success", "data": out}
+
+
+@router.get("/research/candidates")
+async def list_research_candidates(profile_id: str = "", status: str = "",
+                                   p: Principal = Depends(current_principal)):
+    assert_governance_readable(p)
+    return {"status": "success", "data": await asyncio.to_thread(
+        external_research.list_candidates, profile_id, status)}
+
+
+@router.post("/research/candidates/{candidate_id}/decision")
+async def decide_research_candidate(candidate_id: str,
+                                    req: ResearchCandidateDecisionRequest,
+                                    p: Principal = Depends(current_principal)):
+    """후보 채택은 승인 원천의 **등록**까지만 한다. 원천 활성 승인은 별도 절차다."""
+    assert_can_manage_standard(p)
+    actor = _actor(p)
+    try:
+        candidate = await asyncio.to_thread(external_research.get_candidate, candidate_id)
+        if req.decision not in ("ACCEPTED", "REJECTED"):
+            raise ExternalResearchError("후보 결정은 ACCEPTED 또는 REJECTED여야 합니다.")
+        if candidate["status"] != "CANDIDATE_READY":
+            raise ExternalResearchError("검토 대기 후보만 결정할 수 있습니다.")
+        if candidate["content_hash"] != req.expected_content_hash:
+            raise ExternalResearchError("검토한 후보와 현재 후보의 내용 지문이 다릅니다.")
+        created_source = None
+        if req.decision == "ACCEPTED":
+            source_id = "src_research_" + candidate_id.removeprefix("erc_")[:10]
+            created_source = await asyncio.to_thread(external_intelligence.get_source, source_id)
+            if not created_source:
+                created_source = await asyncio.to_thread(
+                    external_intelligence.register_source,
+                    candidate["title"] or "회사 조사 원천 후보", "WEB",
+                    candidate["source_url"], "", "후보 검토 후 별도 원천 승인 필요", "MANUAL",
+                    "", "bronze",
+                    f"research_candidate={candidate_id}; content_hash={candidate['content_hash']}",
+                    source_id)
+        decided = await asyncio.to_thread(
+            external_research.review_candidate, candidate_id, req.decision, actor,
+            req.expected_content_hash)
+    except (ExternalResearchError, ExternalIntelligenceError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success", "data": {"candidate": decided,
+                                             "registered_source": created_source}}
 
 
 @router.get("/readiness")

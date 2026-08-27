@@ -148,6 +148,63 @@ export type SourceCollectionInput = {
   timeout?: number;
 };
 
+export type ResearchProfileStatus = 'DRAFT' | 'REVIEW_REQUIRED' | 'APPROVED' | 'PAUSED' | 'RETIRED';
+export type ResearchProfile = {
+  profile_id: string;
+  legal_entity_id: string;
+  company_name: string;
+  official_domains: string[];
+  official_urls: string[];
+  business_keywords: string[];
+  product_keywords: string[];
+  regions: string[];
+  competitor_names: string[];
+  material_keywords: string[];
+  required_indicators: string[];
+  collection_purpose: string;
+  schedule_rule: string;
+  owner_id: string;
+  retention_days: number;
+  status: ResearchProfileStatus;
+  approved_by: string;
+  approved_at: string;
+  fingerprint: string;
+  updated_at: string;
+};
+
+export type ResearchProfileInput = Omit<ResearchProfile,
+  'status' | 'approved_by' | 'approved_at' | 'fingerprint' | 'updated_at'>;
+
+export type ResearchJob = {
+  job_id: string;
+  profile_id: string;
+  bot_kind: 'COMPANY_BASE_RESEARCH' | 'INDICATOR_COLLECTOR' |
+    'EXTERNAL_EVENT_MONITOR' | 'QUALITY_CHANGE_MONITOR';
+  status: 'SCHEDULED' | 'RUNNING' | 'CANDIDATE_READY' | 'ACCEPTED' |
+    'REJECTED' | 'FAILED' | 'CANCELLED';
+  dry_run: boolean;
+  profile_fingerprint: string;
+  requested_by: string;
+  requested_at: string;
+  error: string;
+  result_summary: Record<string, unknown>;
+};
+
+export type ResearchCandidate = {
+  candidate_id: string;
+  job_id: string;
+  profile_id: string;
+  candidate_kind: string;
+  source_url: string;
+  title: string;
+  summary: string;
+  evidence: Record<string, unknown>;
+  content_hash: string;
+  status: 'CANDIDATE_READY' | 'ACCEPTED' | 'REJECTED';
+  reviewed_by: string;
+  created_at: string;
+};
+
 export const externalIntelligenceApi = {
   readiness: () => req<ExternalReadiness>('GET', '/api/v1/external/readiness'),
   collectable: () => req<ExternalCollectable>('GET', '/api/v1/external/collectable'),
@@ -163,6 +220,27 @@ export const externalIntelligenceApi = {
     'POST', '/api/v1/external/collect/csv', body),
   collectSource: (sourceId: string, body: SourceCollectionInput) => req<ExternalCollectionResult>(
     'POST', `/api/v1/external/collect/${encodeURIComponent(sourceId)}`, body),
+  researchProfiles: () => req<ResearchProfile[]>('GET', '/api/v1/external/research/profiles'),
+  saveResearchProfile: (body: ResearchProfileInput) => req<ResearchProfile>(
+    'POST', '/api/v1/external/research/profiles', body),
+  submitResearchProfile: (profileId: string) => req<ResearchProfile>(
+    'POST', `/api/v1/external/research/profiles/${encodeURIComponent(profileId)}/submit`),
+  approveResearchProfile: (profileId: string, expectedFingerprint: string) => req<ResearchProfile>(
+    'POST', `/api/v1/external/research/profiles/${encodeURIComponent(profileId)}/approve`,
+    { expected_fingerprint: expectedFingerprint }),
+  researchJobs: (profileId = '') => req<ResearchJob[]>(
+    'GET', `/api/v1/external/research/jobs${profileId ? `?profile_id=${encodeURIComponent(profileId)}` : ''}`),
+  scheduleResearchJob: (profileId: string, botKind: ResearchJob['bot_kind']) => req<ResearchJob>(
+    'POST', '/api/v1/external/research/jobs',
+    { profile_id: profileId, bot_kind: botKind, dry_run: true }),
+  runResearchJob: (jobId: string) => req<ResearchJob>(
+    'POST', `/api/v1/external/research/jobs/${encodeURIComponent(jobId)}/run`),
+  researchCandidates: (profileId = '') => req<ResearchCandidate[]>(
+    'GET', `/api/v1/external/research/candidates${profileId ? `?profile_id=${encodeURIComponent(profileId)}` : ''}`),
+  decideResearchCandidate: (candidateId: string, decision: 'ACCEPTED' | 'REJECTED',
+    expectedContentHash: string) => req<{ candidate: ResearchCandidate; registered_source: ExternalSource | null }>(
+      'POST', `/api/v1/external/research/candidates/${encodeURIComponent(candidateId)}/decision`,
+      { decision, expected_content_hash: expectedContentHash }),
   observations: (code: string) => req<ExternalObservation[]>(
     'GET', `/api/v1/external/observations/${encodeURIComponent(code)}?limit=50`),
   resolveBaseline: (code: string) => req<ResolvedExternalValue>(

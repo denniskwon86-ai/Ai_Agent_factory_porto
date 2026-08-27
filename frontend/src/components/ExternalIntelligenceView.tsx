@@ -7,6 +7,7 @@ import {
   externalIntelligenceApi, type ExternalCollectable, type ExternalCollectionResult,
   type ExternalIndicator, type ExternalObservation, type ExternalObservationInput,
   type ExternalReadiness, type ExternalSource, type ExternalSourceInput, type ResolvedExternalValue,
+  type ResearchCandidate, type ResearchJob, type ResearchProfile, type ResearchProfileInput,
 } from '../lib/externalIntelligenceApi';
 
 const SOURCE_TYPES: ExternalSourceInput['source_type'][] =
@@ -18,11 +19,29 @@ const EMPTY_SOURCE: ExternalSourceInput = {
   refresh_frequency: '', owner_department: '', trust_grade: 'silver', note: '',
 };
 
+const EMPTY_RESEARCH_PROFILE: ResearchProfileInput = {
+  profile_id: '', legal_entity_id: '', company_name: '', official_domains: [], official_urls: [],
+  business_keywords: [], product_keywords: [], regions: [], competitor_names: [],
+  material_keywords: [], required_indicators: [], collection_purpose: '', schedule_rule: 'MANUAL',
+  owner_id: '', retention_days: 365,
+};
+
+const splitValues = (value: string) => value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean);
+const BOT_LABELS: Record<ResearchJob['bot_kind'], string> = {
+  COMPANY_BASE_RESEARCH: '회사 기초 조사',
+  INDICATOR_COLLECTOR: '외부지표 수집',
+  EXTERNAL_EVENT_MONITOR: '대외 사건 감시',
+  QUALITY_CHANGE_MONITOR: '품질·변경 감시',
+};
+
 export function ExternalIntelligenceView() {
   const [ready, setReady] = useState<Loaded<ExternalReadiness>>(loading<ExternalReadiness>());
   const [indicators, setIndicators] = useState<Loaded<ExternalIndicator[]>>(loading<ExternalIndicator[]>());
   const [sources, setSources] = useState<Loaded<ExternalSource[]>>(loading<ExternalSource[]>());
   const [collectable, setCollectable] = useState<Loaded<ExternalCollectable>>(loading<ExternalCollectable>());
+  const [researchProfiles, setResearchProfiles] = useState<Loaded<ResearchProfile[]>>(loading<ResearchProfile[]>());
+  const [researchJobs, setResearchJobs] = useState<Loaded<ResearchJob[]>>(loading<ResearchJob[]>());
+  const [researchCandidates, setResearchCandidates] = useState<Loaded<ResearchCandidate[]>>(loading<ResearchCandidate[]>());
   const [selected, setSelected] = useState('');
   const [observations, setObservations] = useState<Loaded<ExternalObservation[]>>(ok<ExternalObservation[]>([]));
   const [resolved, setResolved] = useState<Loaded<ResolvedExternalValue> | null>(null);
@@ -45,20 +64,30 @@ export function ExternalIntelligenceView() {
   });
   const [collectionPreview, setCollectionPreview] = useState<ExternalCollectionResult | null>(null);
   const [previewSnapshot, setPreviewSnapshot] = useState('');
+  const [showResearchForm, setShowResearchForm] = useState(false);
+  const [researchForm, setResearchForm] = useState<ResearchProfileInput>({ ...EMPTY_RESEARCH_PROFILE });
   const approve = useConfirm<string>();
+  const approveResearch = useConfirm<ResearchProfile>();
   const commitCollection = useConfirm<'csv' | 'api'>();
 
   const load = useCallback(async () => {
     setReady(loading<ExternalReadiness>()); setIndicators(loading<ExternalIndicator[]>());
     setSources(loading<ExternalSource[]>()); setCollectable(loading<ExternalCollectable>());
-    const [r, i, s, c] = await Promise.allSettled([
+    setResearchProfiles(loading<ResearchProfile[]>()); setResearchJobs(loading<ResearchJob[]>());
+    setResearchCandidates(loading<ResearchCandidate[]>());
+    const [r, i, s, c, rp, rj, rc] = await Promise.allSettled([
       externalIntelligenceApi.readiness(), externalIntelligenceApi.indicators(),
       externalIntelligenceApi.sources(), externalIntelligenceApi.collectable(),
+      externalIntelligenceApi.researchProfiles(), externalIntelligenceApi.researchJobs(),
+      externalIntelligenceApi.researchCandidates(),
     ]);
     setReady(r.status === 'fulfilled' ? ok(r.value) : failed<ExternalReadiness>(r.reason));
     setIndicators(i.status === 'fulfilled' ? ok(i.value) : failed<ExternalIndicator[]>(i.reason));
     setSources(s.status === 'fulfilled' ? ok(s.value) : failed<ExternalSource[]>(s.reason));
     setCollectable(c.status === 'fulfilled' ? ok(c.value) : failed<ExternalCollectable>(c.reason));
+    setResearchProfiles(rp.status === 'fulfilled' ? ok(rp.value) : failed<ResearchProfile[]>(rp.reason));
+    setResearchJobs(rj.status === 'fulfilled' ? ok(rj.value) : failed<ResearchJob[]>(rj.reason));
+    setResearchCandidates(rc.status === 'fulfilled' ? ok(rc.value) : failed<ResearchCandidate[]>(rc.reason));
     if (i.status === 'fulfilled') setSelected((v) => v || i.value[0]?.code || '');
   }, []);
 
@@ -176,6 +205,79 @@ export function ExternalIntelligenceView() {
     } finally { setActionBusy(false); }
   };
 
+  const saveResearchProfile = async () => {
+    if (!researchForm.legal_entity_id.trim() || !researchForm.company_name.trim()
+      || !researchForm.owner_id.trim()) return;
+    setActionBusy(true); setActionMessage(null);
+    try {
+      await externalIntelligenceApi.saveResearchProfile(researchForm);
+      setShowResearchForm(false); setResearchForm({ ...EMPTY_RESEARCH_PROFILE });
+      setActionMessage({ tone: 'info', text: '회사 조사 프로필을 초안으로 저장했습니다. 검토 요청과 승인이 끝나기 전에는 봇이 실행되지 않습니다.' });
+      await load();
+    } catch (e) {
+      setActionMessage({ tone: 'error', text: e instanceof Error ? e.message : '회사 조사 프로필을 저장하지 못했습니다.' });
+    } finally { setActionBusy(false); }
+  };
+
+  const submitResearchProfile = async (profileId: string) => {
+    setActionBusy(true); setActionMessage(null);
+    try {
+      await externalIntelligenceApi.submitResearchProfile(profileId);
+      setActionMessage({ tone: 'info', text: '회사 조사 프로필을 검토 요청 상태로 전환했습니다.' });
+      await load();
+    } catch (e) {
+      setActionMessage({ tone: 'error', text: e instanceof Error ? e.message : '검토를 요청하지 못했습니다.' });
+    } finally { setActionBusy(false); }
+  };
+
+  const approveResearchProfile = async (profile: ResearchProfile) => {
+    setActionBusy(true); setActionMessage(null);
+    try {
+      await externalIntelligenceApi.approveResearchProfile(profile.profile_id, profile.fingerprint);
+      setActionMessage({ tone: 'info', text: '현재 내용 지문으로 회사 조사 범위를 승인했습니다.' });
+      await load();
+    } catch (e) {
+      setActionMessage({ tone: 'error', text: e instanceof Error ? e.message : '프로필을 승인하지 못했습니다.' });
+    } finally { setActionBusy(false); }
+  };
+
+  const scheduleResearchJob = async (profileId: string) => {
+    setActionBusy(true); setActionMessage(null);
+    try {
+      await externalIntelligenceApi.scheduleResearchJob(profileId, 'COMPANY_BASE_RESEARCH');
+      setActionMessage({ tone: 'info', text: '회사 기초 조사 dry-run을 예약했습니다. 실행 전 승인 범위와 URL을 다시 확인하십시오.' });
+      await load();
+    } catch (e) {
+      setActionMessage({ tone: 'error', text: e instanceof Error ? e.message : '조사 작업을 예약하지 못했습니다.' });
+    } finally { setActionBusy(false); }
+  };
+
+  const runResearchJob = async (jobId: string) => {
+    setActionBusy(true); setActionMessage(null);
+    try {
+      await externalIntelligenceApi.runResearchJob(jobId);
+      setActionMessage({ tone: 'info', text: '조사를 마쳤습니다. 발견한 정보는 확정값이 아니라 검토 후보로만 저장했습니다.' });
+      await load();
+    } catch (e) {
+      setActionMessage({ tone: 'error', text: e instanceof Error ? e.message : '조사 작업을 완료하지 못했습니다.' });
+      await load();
+    } finally { setActionBusy(false); }
+  };
+
+  const decideCandidate = async (candidate: ResearchCandidate, decision: 'ACCEPTED' | 'REJECTED') => {
+    setActionBusy(true); setActionMessage(null);
+    try {
+      await externalIntelligenceApi.decideResearchCandidate(
+        candidate.candidate_id, decision, candidate.content_hash);
+      setActionMessage({ tone: 'info', text: decision === 'ACCEPTED'
+        ? '후보를 채택해 미승인 원천으로 등록했습니다. 실제 사용에는 별도 원천 승인이 필요합니다.'
+        : '후보를 기각했습니다. 관측값과 원천 등록부에는 반영되지 않습니다.' });
+      await load();
+    } catch (e) {
+      setActionMessage({ tone: 'error', text: e instanceof Error ? e.message : '후보 결정을 저장하지 못했습니다.' });
+    } finally { setActionBusy(false); }
+  };
+
   const inds = indicators.value || [];
   const srcs = sources.value || [];
   const approvedSources = srcs.filter((s) => !!s.enabled);
@@ -186,6 +288,9 @@ export function ExternalIntelligenceView() {
   const current = inds.find((i) => i.code === selected) || null;
   const readiness = ready.value?.indicators.find((i) => i.code === selected) || null;
   const obs = observations.value || [];
+  const profiles = researchProfiles.value || [];
+  const jobs = researchJobs.value || [];
+  const candidates = researchCandidates.value || [];
 
   return (
     <>
@@ -213,6 +318,159 @@ export function ExternalIntelligenceView() {
         <Metric label="승인 원천" state={ready.status} value={ready.value?.approved_sources}
           hint="회사 계획에 사용 허용" />
       </div>
+
+      <Panel kicker="COMPANY RESEARCH BOTS" title="회사 기준정보 기반 대외 조사"
+        action={<button className="secondary-button" onClick={() => setShowResearchForm((v) => !v)}>
+          {showResearchForm ? '등록 취소' : '회사 조사 프로필 등록'}
+        </button>}>
+        <div className="panel-body">
+          <Banner tone="info" title="봇은 승인된 회사와 공식 도메인만 조사합니다">
+            웹에서 찾은 문장과 숫자는 확정 대외지표가 아닙니다. 먼저 후보로 저장하고,
+            사람이 채택한 원천도 별도 승인을 거쳐야 계획과 시뮬레이션에 사용할 수 있습니다.
+          </Banner>
+
+          <div className="metric-row" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
+            <Metric label="회사 조사 프로필" state={researchProfiles.status} value={profiles.length}
+              hint={`승인 ${profiles.filter((p) => p.status === 'APPROVED').length}건`} />
+            <Metric label="수집 작업" state={researchJobs.status} value={jobs.length}
+              hint={`검토 후보 생성 ${jobs.filter((j) => j.status === 'CANDIDATE_READY').length}건`} />
+            <Metric label="검토 후보" state={researchCandidates.status}
+              value={candidates.filter((c) => c.status === 'CANDIDATE_READY').length}
+              hint="자동 확정하지 않음" />
+            <Metric label="실행 가능한 봇" state="ok" value="1/4"
+              hint="회사 기초 조사만 연결" />
+          </div>
+
+          {showResearchForm && <div className="request-card" aria-label="회사 조사 프로필 등록">
+            <div className="panel-body">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0 14px' }}>
+                <FormField label="법인 ID" required>
+                  <input className="afs-input" value={researchForm.legal_entity_id}
+                    placeholder="예: corp-ls-mnm" onChange={(e) => setResearchForm({ ...researchForm,
+                      legal_entity_id: e.target.value })} />
+                </FormField>
+                <FormField label="회사명" required>
+                  <input className="afs-input" value={researchForm.company_name}
+                    placeholder="예: LS MnM" onChange={(e) => setResearchForm({ ...researchForm,
+                      company_name: e.target.value })} />
+                </FormField>
+                <FormField label="공식 도메인" required hint="scheme·경로 없이 쉼표로 구분합니다.">
+                  <input className="afs-input" value={researchForm.official_domains.join(', ')}
+                    placeholder="lsmnm.com" onChange={(e) => setResearchForm({ ...researchForm,
+                      official_domains: splitValues(e.target.value) })} />
+                </FormField>
+                <FormField label="공식 조사 URL" required hint="승인 도메인 아래 HTTPS 주소만 허용합니다.">
+                  <input className="afs-input" value={researchForm.official_urls.join(', ')}
+                    placeholder="https://www.lsmnm.com/" onChange={(e) => setResearchForm({ ...researchForm,
+                      official_urls: splitValues(e.target.value) })} />
+                </FormField>
+                <FormField label="사업·제품 키워드" hint="쉼표로 구분합니다.">
+                  <input className="afs-input"
+                    value={[...researchForm.business_keywords, ...researchForm.product_keywords].join(', ')}
+                    onChange={(e) => setResearchForm({ ...researchForm,
+                      business_keywords: splitValues(e.target.value), product_keywords: [] })} />
+                </FormField>
+                <FormField label="지역·경쟁사" hint="쉼표로 구분합니다.">
+                  <input className="afs-input"
+                    value={[...researchForm.regions, ...researchForm.competitor_names].join(', ')}
+                    onChange={(e) => setResearchForm({ ...researchForm,
+                      regions: splitValues(e.target.value), competitor_names: [] })} />
+                </FormField>
+                <FormField label="필요 대외지표" hint="등록부 코드 기준, 쉼표로 구분합니다.">
+                  <input className="afs-input" value={researchForm.required_indicators.join(', ')}
+                    placeholder="LME_CU, FX_USDKRW" onChange={(e) => setResearchForm({ ...researchForm,
+                      required_indicators: splitValues(e.target.value) })} />
+                </FormField>
+                <FormField label="담당자 ID" required>
+                  <input className="afs-input" value={researchForm.owner_id}
+                    onChange={(e) => setResearchForm({ ...researchForm, owner_id: e.target.value })} />
+                </FormField>
+              </div>
+              <FormField label="수집 목적" required>
+                <textarea className="afs-textarea" value={researchForm.collection_purpose}
+                  placeholder="어떤 경영 판단의 근거 후보를 찾는지 적습니다."
+                  onChange={(e) => setResearchForm({ ...researchForm, collection_purpose: e.target.value })} />
+              </FormField>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="primary-button" disabled={actionBusy
+                  || !researchForm.legal_entity_id.trim() || !researchForm.company_name.trim()
+                  || !researchForm.owner_id.trim()} onClick={saveResearchProfile}>초안 저장</button>
+              </div>
+            </div>
+          </div>}
+
+          {researchProfiles.status !== 'ok' ? <EmptyOrError state={researchProfiles.status}
+            error={researchProfiles.error} onRetry={load} emptyText="회사 조사 프로필이 없습니다." />
+            : profiles.length === 0 ? <div className="empty-note">회사 조사 프로필이 없습니다. 회사·공식 도메인·수집 목적을 먼저 등록하십시오.</div>
+              : <div className="afs-table-wrap" style={{ marginTop: 14 }}><table className="afs-table">
+                <thead><tr><th>회사·범위</th><th>공식 URL</th><th>목적·담당</th><th>상태</th><th>조치</th></tr></thead>
+                <tbody>{profiles.map((p) => <tr key={p.profile_id}>
+                  <td><b>{p.company_name}</b><br /><span className="afs-muted">{p.legal_entity_id} · {p.official_domains.join(', ')}</span></td>
+                  <td>{p.official_urls.join(', ') || '미등록'}</td>
+                  <td>{p.collection_purpose || '목적 미등록'}<br /><span className="afs-muted">{p.owner_id}</span></td>
+                  <td><span className={`state-chip ${p.status === 'APPROVED' ? 'success' : 'warn'}`}>{p.status}</span><br />
+                    <span className="afs-muted">지문 {p.fingerprint.slice(0, 10)}…</span></td>
+                  <td><div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {p.status === 'DRAFT' && <button className="secondary-button" disabled={actionBusy}
+                      onClick={() => submitResearchProfile(p.profile_id)}>검토 요청</button>}
+                    {p.status === 'REVIEW_REQUIRED' && <button className="primary-button" disabled={actionBusy}
+                      onClick={() => approveResearch.ask(p)}>내용 지문 승인</button>}
+                    {p.status === 'APPROVED' && <button className="secondary-button" disabled={actionBusy}
+                      onClick={() => scheduleResearchJob(p.profile_id)}>회사 조사 예약</button>}
+                  </div></td>
+                </tr>)}</tbody>
+              </table></div>}
+
+          {approveResearch.target && <ConfirmInline open title={`«${approveResearch.target.company_name}» 조사 범위를 승인합니다`}
+            danger={false} confirmLabel="현재 지문 승인" onCancel={approveResearch.cancel}
+            onConfirm={() => approveResearch.run(approveResearchProfile)}
+            changes="승인된 공식 URL에서 회사 기초 조사 작업을 예약할 수 있게 됩니다."
+            affects={`${approveResearch.target.official_domains.join(', ')} · 보존 ${approveResearch.target.retention_days}일`}
+            reversible="내용이 바뀌면 승인이 자동 해제되고 다시 검토해야 합니다."
+            approval={`지문 ${approveResearch.target.fingerprint}`} />}
+
+          <h3 style={{ fontSize: 14, margin: '18px 0 8px' }}>조사 봇과 최근 작업</h3>
+          <div className="metric-row" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
+            {(Object.entries(BOT_LABELS) as Array<[ResearchJob['bot_kind'], string]>).map(([kind, label]) =>
+              <div className="request-card" key={kind}><div className="panel-body">
+                <b>{label}</b><p className="hint-line">{kind === 'COMPANY_BASE_RESEARCH'
+                  ? '승인 공식 URL → 검토 후보' : '어댑터 미연결 · 실행 차단'}</p>
+                <span className={`state-chip ${kind === 'COMPANY_BASE_RESEARCH' ? 'success' : 'warn'}`}>
+                  {kind === 'COMPANY_BASE_RESEARCH' ? 'DRY-RUN 가능' : '준비 중'}
+                </span>
+              </div></div>)}
+          </div>
+          {jobs.length > 0 && <div className="afs-table-wrap" style={{ marginTop: 12 }}><table className="afs-table">
+            <thead><tr><th>봇</th><th>상태</th><th>프로필 지문</th><th>요청</th><th>조치·오류</th></tr></thead>
+            <tbody>{jobs.slice(0, 20).map((j) => <tr key={j.job_id}>
+              <td>{BOT_LABELS[j.bot_kind]}</td><td>{j.status}</td><td>{j.profile_fingerprint.slice(0, 10)}…</td>
+              <td>{j.requested_by}<br /><span className="afs-muted">{j.requested_at}</span></td>
+              <td>{j.status === 'SCHEDULED'
+                ? <button className="primary-button" disabled={actionBusy} onClick={() => runResearchJob(j.job_id)}>dry-run 실행</button>
+                : (j.error || `후보 ${String(j.result_summary.candidate_count ?? 0)}건`)}</td>
+            </tr>)}</tbody>
+          </table></div>}
+
+          <h3 style={{ fontSize: 14, margin: '18px 0 8px' }}>조사 후보 검토</h3>
+          {researchCandidates.status !== 'ok' ? <EmptyOrError state={researchCandidates.status}
+            error={researchCandidates.error} onRetry={load} emptyText="조사 후보가 없습니다." />
+            : candidates.length === 0 ? <div className="empty-note">조사 후보가 없습니다. 승인된 프로필로 회사 기초 조사를 실행하십시오.</div>
+              : <div className="afs-table-wrap"><table className="afs-table">
+                <thead><tr><th>종류</th><th>제목·주소</th><th>상태</th><th>조치</th></tr></thead>
+                <tbody>{candidates.slice(0, 50).map((c) => <tr key={c.candidate_id}>
+                  <td>{c.candidate_kind}</td><td><b>{c.title || '제목 없음'}</b><br />
+                    <span className="afs-muted">{c.source_url}</span><br />{c.summary}</td>
+                  <td>{c.status}<br /><span className="afs-muted">지문 {c.content_hash.slice(0, 10)}…</span></td>
+                  <td>{c.status === 'CANDIDATE_READY' ? <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="secondary-button" disabled={actionBusy}
+                      onClick={() => decideCandidate(c, 'ACCEPTED')}>원천 후보 채택</button>
+                    <button className="danger-ghost" disabled={actionBusy}
+                      onClick={() => decideCandidate(c, 'REJECTED')}>기각</button>
+                  </div> : `검토자 ${c.reviewed_by || '미상'}`}</td>
+                </tr>)}</tbody>
+              </table></div>}
+        </div>
+      </Panel>
 
       <Panel kicker="SOURCES" title="대외 원천 등록부"
         action={<button className="secondary-button" onClick={() => setShowSourceForm((v) => !v)}>

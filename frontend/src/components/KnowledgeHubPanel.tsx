@@ -48,7 +48,7 @@ const MODULE = {
   search: { kicker: 'GROUNDING', title: '검색 품질 확인', subtitle: '에이전트가 이 질의로 어떤 지식을 받게 되는지 그대로 봅니다.' },
   sources: { kicker: 'SOURCES', title: '원본 자료 등록부', subtitle: '출처·범위·분류를 관리합니다. 검토 전에는 자동으로 연결하지 않습니다.' },
   ontology: { kicker: 'ONTOLOGY', title: '업무 온톨로지', subtitle: '승인된 업무 객체와 관계를 따라 영향 경로와 근거를 확인합니다.' },
-  external: { kicker: 'EXTERNAL', title: '대외 인텔리전스', subtitle: '승인 원천·확정 지표·발표 시점별 관측값을 확인합니다.' },
+  external: { kicker: 'EXTERNAL', title: '대외 인텔리전스', subtitle: '회사 조사 봇·검토 후보·승인 원천·확정 지표를 한 흐름으로 확인합니다.' },
 };
 
 export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs' }: {
@@ -147,7 +147,7 @@ export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs'
     { id: 'search', label: '검색 품질 확인', hint: '에이전트가 받는 지식', icon: 'search' },
     { id: 'sources', label: '원본 등록부', hint: '출처·변환 필요', icon: 'sources' },
     { id: 'ontology', label: '업무 온톨로지', hint: '승인된 객체·관계', icon: 'flow' },
-    { id: 'external', label: '대외 인텔리전스', hint: '원천·지표·관측값', icon: 'globe' },
+    { id: 'external', label: '대외 인텔리전스', hint: '회사 조사·후보·확정값', icon: 'globe' },
   ];
 
   const semanticView = view === 'ontology' || view === 'external';
@@ -160,7 +160,7 @@ export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs'
     state: packs,
     counts: { packs: packs.status === 'ok' ? rows.length : null },
     actions: view === 'ontology' ? ['업무 객체 선택', '영향 경로 확인']
-      : view === 'external' ? ['지표 선택', '기준계획 사용 가능 여부 확인']
+      : view === 'external' ? ['회사 조사 범위 확인', '후보 검토', '기준계획 사용 가능 여부 확인']
         : pack ? ['자료 등록', '내용 확인', '검색 품질 확인'] : ['팩 만들기'],
     evidence: !semanticView && pack ? [
       { label: '팩 ID', value: pack.pack_id },
@@ -173,9 +173,9 @@ export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs'
     '이 관계는 어떤 승인과 데이터 판에 근거합니까?',
     '현재 범위에서 보이지 않는 이유는 무엇입니까?',
   ] : view === 'external' ? [
+    '회사 조사 봇은 어느 공식 도메인까지 볼 수 있습니까?',
+    '검토 대기 중인 외부 원천 후보는 무엇입니까?',
     '기준계획에 사용할 수 있는 대외지표는 무엇입니까?',
-    '차단된 지표별 다음 조치는 무엇입니까?',
-    '이 값은 어느 원천과 발표판에서 왔습니까?',
   ] : [
     '이 지식팩에는 어떤 자료가 들어 있습니까?',
     '이 질의에 어떤 문서가 걸립니까?',

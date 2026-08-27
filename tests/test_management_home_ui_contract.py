@@ -644,6 +644,17 @@ def test_지식화면에서_원문_온톨로지_대외지표를_직접_확인한
     assert "원천 값이 바뀔 수 있습니다" in external
     assert "collectCsv:" in external_api and "/api/v1/external/collect/csv" in external_api
     assert "collectSource:" in external_api and "/api/v1/external/collect/${" in external_api
+    assert "회사 기준정보 기반 대외 조사" in external
+    assert "웹에서 찾은 문장과 숫자는 확정 대외지표가 아닙니다" in external
+    assert "externalIntelligenceApi.researchProfiles()" in external
+    assert "externalIntelligenceApi.scheduleResearchJob" in external
+    assert "externalIntelligenceApi.runResearchJob" in external
+    assert "externalIntelligenceApi.decideResearchCandidate" in external
+    assert "실행 가능한 봇" in external and 'value="1/4"' in external
+    assert "어댑터 미연결 · 실행 차단" in external
+    assert "researchProfiles:" in external_api and "/api/v1/external/research/profiles" in external_api
+    assert "runResearchJob:" in external_api and "/run`" in external_api
+    assert "decideResearchCandidate:" in external_api and "/decision`" in external_api
     assert "label: '업무 온톨로지'" in app
     assert "label: '대외 인텔리전스'" in app
     assert "setKnowledgeInitialView('ontology')" in app
