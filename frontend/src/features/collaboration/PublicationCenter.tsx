@@ -23,6 +23,7 @@ import {
   type Audience, type Publication, type ReviewType, type SourceType,
 } from '../../lib/publicationApi';
 import { decisionApi, type DecisionCase } from '../../lib/decisionApi';
+import { StructuredValue } from '../../design/StructuredValue';
 
 export type PublicationJarvis = {
   title: string; desc: string; ev: { label: string; value: string }[];
@@ -41,15 +42,7 @@ function StatusChip({ p }: { p: Publication }) {
 }
 
 function SectionValue({ v }: { v: any }) {
-  if (Array.isArray(v)) {
-    return <ul className="section-list">{v.map((x, i) => (
-      <li key={i}>{x !== null && typeof x === 'object' ? JSON.stringify(x) : String(x)}</li>))}</ul>;
-  }
-  if (v !== null && typeof v === 'object') {
-    return <dl className="section-kv">{Object.entries(v).map(([k, val]) => (
-      <div key={k}><dt>{k}</dt><dd>{typeof val === 'object' ? JSON.stringify(val) : String(val)}</dd></div>))}</dl>;
-  }
-  return <p className="section-text">{String(v)}</p>;
+  return <StructuredValue value={v} />;
 }
 
 export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarvis) => void }) {
@@ -237,6 +230,13 @@ function ListScreen({ list, state, stats, onOpen, onNew, onRetry }: {
 }) {
   const [filter, setFilter] = useState<'all' | 'EXTERNAL'>('all');
   const shown = filter === 'all' ? list : list.filter((p) => p.audience === 'EXTERNAL');
+  const pageSize = 20;
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const pageRows = shown.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  useEffect(() => { setPage((value) => Math.min(value, pageCount)); }, [pageCount]);
 
   return (
     <>
@@ -262,8 +262,10 @@ function ListScreen({ list, state, stats, onOpen, onNew, onRetry }: {
         action={
           <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
             <div className="filter-pills">
-              <button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>전체</button>
-              <button className={filter === 'EXTERNAL' ? 'active' : ''} onClick={() => setFilter('EXTERNAL')}>대외만</button>
+              <button className={filter === 'all' ? 'active' : ''}
+                onClick={() => { setFilter('all'); setPage(1); }}>전체</button>
+              <button className={filter === 'EXTERNAL' ? 'active' : ''}
+                onClick={() => { setFilter('EXTERNAL'); setPage(1); }}>대외만</button>
             </div>
             <button className="primary-button" style={{ minHeight: 32 }} onClick={onNew}>새 발간 초안</button>
           </div>
@@ -273,7 +275,7 @@ function ListScreen({ list, state, stats, onOpen, onNew, onRetry }: {
             emptyText="발간물이 없습니다. 결정이 끝난 안건을 원천으로 «새 발간 초안»을 만들 수 있습니다." />
         ) : (
           <div className="people-list" style={{ padding: 15 }}>
-            {shown.map((p) => (
+            {pageRows.map((p) => (
               <button key={p.publication_id} type="button" className="person" onClick={() => onOpen(p.publication_id)}>
                 <i aria-hidden="true">{AUDIENCE_KO[p.audience].label}</i>
                 <div style={{ minWidth: 0 }}>
@@ -290,6 +292,16 @@ function ListScreen({ list, state, stats, onOpen, onNew, onRetry }: {
                 <StatusChip p={p} />
               </button>
             ))}
+            {shown.length > pageSize && (
+              <nav className="list-pagination" aria-label="발간물 목록 페이지">
+                <span>{(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, shown.length)} / {shown.length}건</span>
+                <button className="secondary-button" disabled={safePage === 1}
+                  onClick={() => setPage((value) => Math.max(1, value - 1))}>이전</button>
+                <b>{safePage} / {pageCount}</b>
+                <button className="secondary-button" disabled={safePage === pageCount}
+                  onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>다음</button>
+              </nav>
+            )}
           </div>
         )}
       </Panel>

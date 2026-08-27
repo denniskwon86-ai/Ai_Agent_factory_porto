@@ -264,8 +264,11 @@ export function OntologyExplorerView() {
               {' · '}소유 부서 {proposalContext.value.owner_organization_id}
             </Banner>
           ) : (
-            <Banner tone="error" title="관계를 제안할 수 없습니다">
-              {proposalContext.value?.reason || '쓰기 가능한 회사·부서 문맥을 먼저 선택해야 합니다.'}
+            <Banner tone="warn" title="관계를 저장할 조직 범위를 선택하십시오">
+              {!proposalContext.value?.enterprise_scope_id
+                ? '현재 ‘권한 범위 전체’는 조회 문맥입니다. 관계를 저장하려면 화면 상단 OPERATING CONTEXT에서 귀속할 회사·조직 범위를 하나 선택하십시오.'
+                : proposalContext.value?.reason
+                  || '쓰기 가능한 소유 부서를 확인하지 못했습니다. 회사·조직 권한 설정을 점검하십시오.'}
             </Banner>
           )}
 

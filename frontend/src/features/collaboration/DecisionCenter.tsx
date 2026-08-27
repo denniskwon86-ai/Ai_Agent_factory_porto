@@ -26,6 +26,7 @@ import { errorTitle } from '../../lib/closedLoopFetch';
 import { EmptyOrError, Metric, failed, loading, ok, type Loaded }
   from '../../design/DataState';
 import { reportRequestFailure, reportRequestSuccess } from '../../lib/backendHealth';
+import { StructuredValue } from '../../design/StructuredValue';
 
 export type DecisionJarvis = {
   title: string; desc: string; ev: { label: string; value: string }[];
@@ -46,31 +47,7 @@ function SectionValue({ s }: { s: ViewSection }) {
   if (s.missing) {
     return <p className="section-missing">아직 채워지지 않았습니다 — 이 항목은 검토되지 않았습니다.</p>;
   }
-  const v = s.value;
-  if (Array.isArray(v)) {
-    return (
-      <ul className="section-list">
-        {v.map((item, i) => (
-          <li key={i}>
-            {item !== null && typeof item === 'object'
-              ? Object.entries(item).map(([k, val]) => (
-                <span key={k}><b>{k}</b> {String(val)}</span>))
-              : String(item)}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  if (v !== null && typeof v === 'object') {
-    return (
-      <dl className="section-kv">
-        {Object.entries(v).map(([k, val]) => (
-          <div key={k}><dt>{k}</dt><dd>{typeof val === 'object' ? JSON.stringify(val) : String(val)}</dd></div>
-        ))}
-      </dl>
-    );
-  }
-  return <p className="section-text">{String(v)}</p>;
+  return <StructuredValue value={s.value} />;
 }
 
 export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {

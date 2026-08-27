@@ -47,6 +47,19 @@ def test_상단_회사문맥은_조직도_관리와_분리된_검증형_선택�
     assert "조직 코드를 직접 입력하지 않습니다" in switcher
 
 
+def test_1280_제품셸은_사용자이름만_접고_핵심행동을_화면안에_남긴다():
+    session = _read("frontend/src/components/SessionBar.tsx")
+    shell_css = _read("frontend/src/design/product-shell.css")
+
+    assert 'className="afs-session-name afs-muted"' in session
+    assert "title={me ? (me.display_name || me.user_id) : '사용자 확인 중'}" in session
+    assert ".afs-session-name { max-width: 48px !important; }" in shell_css
+    assert "grid-template-columns: 168px 225px minmax(430px, 1fr) auto" in shell_css
+    assert "gap: 6px;" in shell_css
+    assert 'aria-label="로그아웃"' in session
+    assert "＋ 새 업무" in _read("frontend/src/components/ProductShell.tsx")
+
+
 def test_회사문맥_변경은_온톨로지의_객체와_관계_양쪽을_다시_읽는다():
     ontology = _read("frontend/src/components/OntologyExplorerView.tsx")
 
@@ -114,6 +127,33 @@ def test_경로계산_안건을_시뮬레이션_연결없음으로_오표시하�
     assert "시뮬레이션 결과를 하나의 Decision Package" not in center
     assert "시뮬레이션 결과를 하나의 문서" not in center
     assert "시뮬레이션·경로 계산 결과" in hub
+
+
+def test_결정과_발간은_구조화값을_JSON_한줄이_아닌_공통_카드로_보여준다():
+    decision = _read("frontend/src/features/collaboration/DecisionCenter.tsx")
+    publication = _read("frontend/src/features/collaboration/PublicationCenter.tsx")
+    renderer = _read("frontend/src/design/StructuredValue.tsx")
+    css = _read("frontend/src/design/afs.css")
+
+    assert "<StructuredValue value={s.value}" in decision
+    assert "<StructuredValue value={v}" in publication
+    assert "JSON.stringify" not in decision
+    assert "JSON.stringify" not in publication
+    assert "structured-value-card" in renderer
+    assert "delta_pct: '변화율'" in renderer
+    assert ".structured-value-kv > div" in css
+
+
+def test_발간물_대량목록은_전체건수를_유지한채_20건씩_나눠_보여준다():
+    publication = _read("frontend/src/features/collaboration/PublicationCenter.tsx")
+    css = _read("frontend/src/design/afs.css")
+
+    assert "const pageSize = 20" in publication
+    assert "const pageRows = shown.slice" in publication
+    assert "{pageRows.map((p)" in publication
+    assert 'aria-label="발간물 목록 페이지"' in publication
+    assert "Math.min(safePage * pageSize, shown.length)" in publication
+    assert ".list-pagination" in css
 
 
 def test_로그인_세션의_tenant로_이전_브라우저_회사와_범위를_교체한다():
@@ -607,6 +647,9 @@ def test_지식화면에서_원문_온톨로지_대외지표를_직접_확인한
     assert "ontologyApi.relations(relationFilter)" in ontology
     assert "ontologyApi.proposalContext()" in ontology
     assert "계약에 허용된 관계 제안" in ontology
+    assert 'tone="warn" title="관계를 저장할 조직 범위를 선택하십시오"' in ontology
+    assert "현재 ‘권한 범위 전체’는 조회 문맥입니다" in ontology
+    assert "쓰기 가능한 소유 부서를 확인하지 못했습니다" in ontology
     assert "승인 버튼이 전용 원장 사건을 기록합니다" in ontology
     assert "임의 원장 ID를 입력하지 않습니다" in ontology
     assert "ontologyApi.decideApprove" in ontology

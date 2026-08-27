@@ -1101,6 +1101,51 @@
 .afs-scope .section-kv > div { display: grid; grid-template-columns: minmax(90px, 25%) 1fr; gap: 9px; }
 .afs-scope .section-kv dt { color: var(--muted); font-size: 12px; font-weight: 900; }
 .afs-scope .section-kv dd { margin: 0; color: var(--action-secondary-fg); font-size: 12px; line-height: 1.6; }
+.afs-scope .structured-value-list { display: grid; gap: 8px; }
+.afs-scope .structured-value-card {
+  position: relative;
+  min-width: 0;
+  padding: 11px 12px 11px 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+}
+.afs-scope .structured-value-index {
+  position: absolute;
+  top: 11px;
+  left: 11px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--brand);
+  background: var(--surface-page);
+  font-size: 10px;
+  font-weight: 900;
+}
+.afs-scope .structured-value-kv { display: grid; gap: 6px; margin: 0; min-width: 0; }
+.afs-scope .structured-value-kv > div {
+  display: grid;
+  grid-template-columns: minmax(92px, 25%) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.afs-scope .structured-value-kv dt { color: var(--muted); font-size: 12px; font-weight: 900; }
+.afs-scope .structured-value-kv dd { min-width: 0; margin: 0; color: var(--action-secondary-fg); font-size: 12px; line-height: 1.55; }
+.afs-scope .structured-value-kv.nested > div { grid-template-columns: minmax(82px, 32%) minmax(0, 1fr); }
+.afs-scope .structured-value-scalar { overflow-wrap: anywhere; }
+.afs-scope .list-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 11px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.afs-scope .list-pagination > span { margin-right: auto; }
+.afs-scope .list-pagination .secondary-button { min-height: 30px; padding: 0 10px; }
 
 .afs-scope .view-who { margin: 0 0 10px; color: var(--cyan); font-size: 12px; font-weight: 900; }
 .afs-scope .hint-line { margin: 6px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.55; }

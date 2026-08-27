@@ -243,8 +243,14 @@ body > main.product .workspace { grid-template-columns: 252px minmax(680px, 1fr)
 }
 
 @media (max-width: 1280px) {
-  .afs-product-shell { grid-template-columns: 178px 235px minmax(430px, 1fr) auto; }
+  .afs-product-shell {
+    grid-template-columns: 168px 225px minmax(430px, 1fr) auto;
+    gap: 6px;
+  }
   .afs-brand-copy small { display: none; }
+  /* 1280px 실측에서 행동 칸의 마지막 «＋ 새 업무»가 40px 잘렸다. 사용자 정체성은
+   * 없애지 않고 이름만 말줄임표로 접어, 로그아웃·전체 메뉴·새 업무를 모두 남긴다. */
+  .afs-session-name { max-width: 48px !important; }
   .afs-global-nav a,
   .afs-global-nav button { min-width: 54px; padding-inline: 5px; font-size: 10px; }
   .afs-primary-action { padding-inline: 10px; font-size: 11px; }

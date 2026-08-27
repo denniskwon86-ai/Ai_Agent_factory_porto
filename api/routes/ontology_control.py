@@ -259,7 +259,8 @@ def create_router(service: OntologyRuntime) -> APIRouter:
             "owner_organization_id": owner,
             "ready": bool(ctx.get("tenant_id") and scope_node and ctx.get("entity_mode") and owner),
             "reason": ("" if scope_node else
-                       "관계를 제안하려면 먼저 화면 상단에서 회사·조직 범위를 선택하십시오."),
+                       "현재 ‘권한 범위 전체’는 조회 문맥입니다. 관계를 저장하려면 화면 상단 "
+                       "OPERATING CONTEXT에서 귀속할 회사·조직 범위를 하나 선택하십시오."),
         }}
 
     @router.get("/relations")

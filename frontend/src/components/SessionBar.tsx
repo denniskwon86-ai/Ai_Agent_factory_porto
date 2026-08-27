@@ -69,8 +69,10 @@ export function SessionBar({ onGoToOrg, openConsole, onConsoleHandled }: {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-      <span className="afs-muted" style={{ fontSize: 12, whiteSpace: 'nowrap',
-        overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
+      <span className="afs-session-name afs-muted"
+        title={me ? (me.display_name || me.user_id) : '사용자 확인 중'}
+        style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden',
+          textOverflow: 'ellipsis', maxWidth: 200 }}>
         {me ? (me.display_name || me.user_id) : '확인 중…'}
       </span>
       {/* ⚠️ [설계 §1.3 · §11 공통] 아래 칩은 11px 였다. 10~11px 는 **해시·ID·타임스탬프 같은

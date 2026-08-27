@@ -2583,9 +2583,16 @@ async def resimulate(project_id: str, req: ResimulateRequest,
 @router.get("/library/list")
 async def list_releases(
         p: Principal = Depends(current_principal)):
-    """라이브러리에 보관된 결과물 목록(요약)."""
+    """라이브러리에 보관된 결과물 목록(요약).
+
+    ★ 릴리스도 프로젝트의 소유·회사·조직 문맥을 그대로 따른다. 승격 상세에서만 막으면
+      목록이 다른 회사의 프로젝트명·릴리스 ID를 먼저 공개한다. 보이는 프로젝트 집합을
+      서버에서 한 번 확정하고, 그 집합 밖의 릴리스는 건수까지 싣지 않는다.
+    """
     assert_identified(p, WHAT)
     os.makedirs(library_paths.library_dir(), exist_ok=True)
+    _visible_project_ids, _ = _visible_projects_with_reasons(p, viewing_context(p))
+    _visible_project_ids = set(_visible_project_ids)
 
     # ★ [M3] 승격 상태를 목록에 함께 준다. 이것이 없으면 승격이 별도 테이블에만 남아
     #   **"이 앱이 전사 앱인가"를 라이브러리에서 알 수 없다** — 승격 게이트가 통과 기록만
@@ -2616,6 +2623,10 @@ async def list_releases(
             try:
                 with open(rp, "r", encoding="utf-8") as f:
                     r = json.load(f)
+                _project_id = str(r.get("project_id", "") or "").strip()
+                if not _project_id or _project_id not in _visible_project_ids:
+                    # 존재·건수 비누설 — 다른 문맥의 릴리스를 «접근 불가 1건»으로도 세지 않는다.
+                    continue
                 _rid = r.get("release_id", rid)
                 pr = _promo.get(_rid)
                 _lf = _life.get(_rid)
@@ -2629,7 +2640,7 @@ async def list_releases(
                     #: ★★★ 승격 화면이 `/{project_id}/releases/{release_id}/promote` 를
                     #:   부르려면 **프로젝트 id 가 필요하다.** 이것이 없으면 화면은
                     #:   사용자에게 id 를 타이핑하라고 요구하게 된다.
-                    "project_id": r.get("project_id", ""),
+                    "project_id": _project_id,
                     #: ★ [§4.2/§4.5③] 이 판이 **어느 업무 데이터 위에서** 운영이 됐는가.
                     #:   빈 값은 「봉인하지 않음」이고 `NOT_APPLICABLE` 은 「데이터를 안 씀」이다.
                     "data_fingerprint": (_lf or {}).get("data_fingerprint", ""),

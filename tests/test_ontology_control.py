@@ -142,6 +142,22 @@ def test_management_list_and_proposal_context_use_verified_scope(tmp_path, monke
     }
 
 
+def test_proposal_context_explains_that_full_scope_is_read_only(tmp_path, monkeypatch):
+    client, _, _, _ = _harness(tmp_path, monkeypatch)
+    monkeypatch.setattr(ontology_control, "viewing_context", lambda p: {
+        "tenant_id": "tenant_demo", "entity_mode": "VIRTUAL", "scope_node_id": ""})
+
+    context = client.get("/api/v1/ontology/proposal/context")
+
+    assert context.status_code == 200
+    data = context.json()["data"]
+    assert data["ready"] is False
+    assert data["enterprise_scope_id"] == ""
+    assert "권한 범위 전체" in data["reason"]
+    assert "조회 문맥" in data["reason"]
+    assert "귀속할 회사·조직 범위" in data["reason"]
+
+
 def test_relation_lifecycle_impact_and_evidence_api(tmp_path, monkeypatch):
     client, _, _, holder = _harness(tmp_path, monkeypatch)
     assert client.post("/api/v1/ontology/model/install",
