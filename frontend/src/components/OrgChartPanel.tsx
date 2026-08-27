@@ -74,7 +74,7 @@ const FLAGS: { key: 'is_admin' | 'is_executive' | 'is_data_admin'; label: string
   { key: 'is_data_admin', label: '데이터 관리자', what: '표준·카탈로그 전권과 메타 전사 열람' },
 ];
 
-export function OrgChartPanel({ onClose }: { onClose: () => void }) {
+export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
   const claim = useLatestOnly();
   const [view, setView] = useState<View>('chart');
@@ -283,8 +283,8 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <HubDialog label="조직·권한 — 부서와 계정, 그리고 무엇이 보이는지" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog label="조직·권한 — 부서와 계정, 그리고 무엇이 보이는지" onClose={onClose} page={page}>
+      {!page && <div className="afs-dialog-bar">
         <b>조직·권한</b>
         <span>부서의 조직 범위가 자료 노출을 정합니다</span>
         <div className="bar-actions">
@@ -293,10 +293,10 @@ export function OrgChartPanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="afs-dialog-body">
-        <HubShell
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
           items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
           footer={

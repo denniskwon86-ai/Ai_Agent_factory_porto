@@ -52,7 +52,7 @@ const BASIS_KO: Record<string, string> = {
   paid: '유료(산정)', paid_partial: '유료(단가 일부)', unpriced: '유료·단가 미등록',
 };
 
-export function TelemetryPanel({ onClose }: { onClose: () => void }) {
+export function TelemetryPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   const [view, setView] = useState<View>('llm');
   const [project, setProject] = useState('');            // '' = 전역
   const [projects, setProjects] = useState<Loaded<TelemetryProject[]>>(
@@ -120,8 +120,8 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
         : { label: `호출 ${t.calls ?? 0}건`, tone: 'data' as const };
 
   return (
-    <HubDialog label="LLM 텔레메트리 — 무엇이 얼마나 돌았고 얼마가 들었나" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog label="LLM 텔레메트리 — 무엇이 얼마나 돌았고 얼마가 들었나" onClose={onClose} page={page}>
+      {!page && <div className="afs-dialog-bar">
         {/* ⚠️ [2026-08-23] 메뉴 라벨과 **같은 이름**을 쓴다. 종전에는 메뉴가
             「LLM 텔레메트리」라고 부르고 화면은 「운영 계기판」이라고 답해서, 사용자가
             자기가 누른 곳에 왔는지 확인할 수 없었다. */}
@@ -133,10 +133,10 @@ export function TelemetryPanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="afs-dialog-body">
-        <HubShell
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
           items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
           footer={

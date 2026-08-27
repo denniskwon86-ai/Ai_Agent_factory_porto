@@ -63,7 +63,7 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 
-export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
+export function AgentGovernancePanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   const [kind, setKind] = useState<AssetKindPath>('agents');
   const [tab, setTab] = useState<AssetTab>('org');
   const [caps, setCaps] = useState<Loaded<GovCapabilities>>(loading<GovCapabilities>());
@@ -237,8 +237,8 @@ export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
         ].join(' · ');
 
   return (
-    <HubDialog label="Agent Governance Center — 조직 자산의 범위·권한·승인" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog label="Agent Governance Center — 조직 자산의 범위·권한·승인" onClose={onClose} page={page}>
+      {!page && <div className="afs-dialog-bar">
         <b>Agent Governance Center</b>
         <span>이 권한 범위 안에서 «어떤 에이전트를 만들고 운영할 것인가»를 관리합니다</span>
         <div className="bar-actions">
@@ -247,10 +247,10 @@ export function AgentGovernancePanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="afs-dialog-body">
-        <HubShell
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker="GOVERNANCE" title="조직 자산"
           subtitle={ASSET_TABS.find((t) => t.id === tab)?.hint || ''}
           items={railItems} activeId={tab} onSelect={(id) => setTab(id as AssetTab)}

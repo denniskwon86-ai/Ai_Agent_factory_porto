@@ -772,7 +772,8 @@ def test_U1_핵심여정은_홈위_모달이_아니라_공통_제품상단바_�
     assert "<CalcApprovalPanel page" in app
     assert "<PathCalcPanel page" in app
     assert "<BriefingPanel page" in app
-    assert "<ProductShell module={journeyModule || foundationModule || decisionModule!}" in app
+    assert "<ProductShell module={journeyModule || foundationModule || decisionModule" in app
+    assert "|| governanceModule || inspectionModule!}" in app
     assert "const NAV_PARENT" in shell
     assert "calc: 'twin'" in shell
     assert "briefing: 'report'" in shell
@@ -815,7 +816,8 @@ def test_U2_근거화면_일곱개는_공통_제품상단바_아래에서_열린
     assert "<GovernanceConsole page" in app
     assert "setKnowledgeInitialView('ontology')" in app
     assert "setKnowledgeInitialView('external')" in app
-    assert "<ProductShell module={journeyModule || foundationModule || decisionModule!}" in app
+    assert "<ProductShell module={journeyModule || foundationModule || decisionModule" in app
+    assert "|| governanceModule || inspectionModule!}" in app
 
 
 def test_용어집은_중복탭이_아니라_단계레일_본문_자비스_세영역을_쓴다():
@@ -909,3 +911,67 @@ def test_U4_운영승격과_워크스페이스는_공통_제품셸과_통제단�
     assert "useEffect(() => setActive(items[0].id), [kind])" in operations_shell
     assert "승격 전 결과는 운영값이 아닙니다" not in operations_shell
     assert "검사를 통과해도 사람의 결정이 필요합니다" in operations_shell
+
+
+def test_U5_회사조직표준에이전트_통제화면은_전체메뉴에서_독립_제품페이지로_열린다():
+    app = _read("frontend/src/App.tsx")
+    shell = _read("frontend/src/components/ProductShell.tsx")
+
+    expected = {
+        "company": "enterprise", "org": "enterprise", "standard": "knowledge",
+        "agentgov": "agent", "skills": "agent",
+    }
+    for space, parent in expected.items():
+        assert f"setSpace('{space}')" in app
+        assert f"{space}: '{parent}'" in shell
+    assert "const governanceModule" in app
+    assert "journeyModule || foundationModule || decisionModule || governanceModule" in app
+    assert "<CompanySetupPanel page" in app
+    assert "<OrgChartPanel page" in app
+    assert "<WorkStandardPanel page" in app
+    assert "<AgentGovernancePanel page" in app
+    assert "<SkillEvolutionPanel page" in app
+
+    for path in (
+        "frontend/src/components/OrgChartPanel.tsx",
+        "frontend/src/components/WorkStandardPanel.tsx",
+        "frontend/src/components/AgentGovernancePanel.tsx",
+        "frontend/src/components/SkillEvolutionPanel.tsx",
+    ):
+        panel = _read(path)
+        assert "page = false" in panel
+        assert "page={page}" in panel
+        assert "!page && <div className=\"afs-dialog-bar\"" in panel
+        assert "layoutClassName={page ? 'product-page-shell' : ''}" in panel
+
+
+def test_회사구성_제품페이지는_실제단계와_실행문맥을_자비스에_결속한다():
+    panel = _read("frontend/src/components/CompanySetupPanel.tsx")
+
+    assert "page = false" in panel
+    assert "COMPANY_ITEMS" in panel
+    assert '<HubShell layoutClassName="product-page-shell company-product-shell"' in panel
+    assert "activeId={tab}" in panel
+    assert "!page && <div role=\"tablist\"" in panel
+    assert "<JarvisRail" in panel
+    assert "current_module: `company_setup/${tab}`" in panel
+    assert "selected_object_id: ctx.company || tab" in panel
+    assert "company_name: ctx.companyName" in panel
+    assert "실제와 가상은 섞지 않습니다" in panel
+
+
+def test_U6_LLM_텔레메트리는_에이전트_제품셸_아래_독립페이지로_열린다():
+    app = _read("frontend/src/App.tsx")
+    shell = _read("frontend/src/components/ProductShell.tsx")
+    panel = _read("frontend/src/components/TelemetryPanel.tsx")
+
+    assert "setSpace('telemetry')" in app
+    assert "telemetry: 'agent'" in shell
+    assert "const inspectionModule = space === 'telemetry'" in app
+    assert "<TelemetryPanel page" in app
+    assert "page = false" in panel
+    assert "page={page}" in panel
+    assert "!page && <div className=\"afs-dialog-bar\"" in panel
+    assert "layoutClassName={page ? 'product-page-shell' : ''}" in panel
+    assert "<JarvisRail" in panel
+    assert "cost_is_lower_bound" in panel

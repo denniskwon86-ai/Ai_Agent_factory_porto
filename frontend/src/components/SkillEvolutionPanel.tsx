@@ -24,7 +24,7 @@ import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth
 import { errorTitle } from '../lib/closedLoopFetch';
 import { skillApi, type SkillProposal } from '../lib/skillApi';
 
-export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
+export function SkillEvolutionPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   const [list, setList] = useState<Loaded<SkillProposal[]>>(loading<SkillProposal[]>());
   const [selected, setSelected] = useState('');
   const [scope, setScope] = useState<ActingScope | null>(actingScope.peek());
@@ -93,8 +93,8 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
   }));
 
   return (
-    <HubDialog label="AI 스킬 진화 — 에이전트가 제안한 행동 규칙 검토" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog label="AI 스킬 진화 — 에이전트가 제안한 행동 규칙 검토" onClose={onClose} page={page}>
+      {!page && <div className="afs-dialog-bar">
         <b>AI 스킬 진화</b>
         <span>승인하면 에이전트의 행동 규칙이 영구히 바뀝니다<Refreshing on={list.refreshing} /></span>
         <div className="bar-actions">
@@ -103,10 +103,10 @@ export function SkillEvolutionPanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="afs-dialog-body">
-        <HubShell
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker="SKILL EVOLUTION" title="승인 대기열"
           subtitle="에이전트가 스스로 제안한 규칙입니다."
           items={railItems} activeId="queue" onSelect={() => { /* 항목이 하나다 */ }}

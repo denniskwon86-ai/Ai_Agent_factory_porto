@@ -64,7 +64,7 @@ const MODULE: Record<View, { kicker: string; title: string; subtitle: string; de
   },
 };
 
-export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
+export function WorkStandardPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
   const claim = useLatestOnly();
   const [view, setView] = useState<View>('regulation');
@@ -217,8 +217,8 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
   }));
 
   return (
-    <HubDialog label="업무표준 — 에이전트가 따르는 판정 기준" onClose={onClose}>
-      <div className="afs-dialog-bar">
+    <HubDialog label="업무표준 — 에이전트가 따르는 판정 기준" onClose={onClose} page={page}>
+      {!page && <div className="afs-dialog-bar">
         <b>업무표준</b>
         <span>에이전트가 무엇을 보고 통과를 정하는지가 여기 적혀 있습니다</span>
         <div className="bar-actions">
@@ -227,10 +227,10 @@ export function WorkStandardPanel({ onClose }: { onClose: () => void }) {
             닫기 <span aria-hidden="true" style={{ opacity: .7 }}>(Esc)</span>
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="afs-dialog-body">
-        <HubShell
+        <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
           items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
           footer={

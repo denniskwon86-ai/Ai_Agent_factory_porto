@@ -104,7 +104,8 @@ function AppShell() {
   const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
     | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'
     | 'master' | 'terminology' | 'crosswalk' | 'governance' | 'planning' | 'shadow'
-    | 'promotion' | 'workspace'>(() => {
+    | 'promotion' | 'workspace' | 'company' | 'org' | 'standard' | 'agentgov' | 'skills'
+    | 'telemetry'>(() => {
     if (initialProject.current) return 'build';
     if (typeof window === 'undefined') return 'enterprise';
     const value = new URLSearchParams(window.location.search).get('space');
@@ -114,6 +115,9 @@ function AppShell() {
       || value === 'briefing' || value === 'master' || value === 'terminology'
       || value === 'crosswalk' || value === 'governance' || value === 'planning' || value === 'shadow'
       || value === 'promotion' || value === 'workspace'
+      || value === 'company' || value === 'org' || value === 'standard'
+      || value === 'agentgov' || value === 'skills'
+      || value === 'telemetry'
       ? value : 'enterprise';
   });
   const [routeRestored, setRouteRestored] = useState(initialProject.current === null);
@@ -391,13 +395,13 @@ function AppShell() {
         //:   (`SessionBar` 주석이 같은 실수를 이미 적어 두었다 — 세 번째다).
         { id: 'company', icon: '🏛', label: '회사 구성',
           desc: '회사 이름 · 법인과 가상회사 등록·승인 · 업무 연결구성(Digital Thread) — 실제와 가상은 섞이지 않습니다',
-          onSelect: () => setShowCompany(true) },
+          onSelect: () => { setShowCompany(false); setSpace('company'); } },
         { id: 'org', icon: '🏢', label: '조직·권한',
           desc: '부서·사용자·권한 — 부서는 기준정보라 개편하면 새 버전이 되고 구판은 이력으로 남습니다',
-          onSelect: () => setShowOrgChart(true) },
+          onSelect: () => { setShowOrgChart(false); setSpace('org'); } },
         { id: 'standard', icon: '📜', label: '업무표준',
           desc: '에이전트의 법규·사규 — 무엇을 어떤 기준으로 평가해 다음 단계로 넘기는지. 개정 시 구판 보존',
-          onSelect: () => setShowWorkStandard(true) },
+          onSelect: () => { setShowWorkStandard(false); setSpace('standard'); } },
         { id: 'agents', icon: '⚙️', label: '에이전트 통제소',
           desc: '각 에이전트의 역할·스킬·모델·순서·HOTL(전문가 개입)을 설정',
           onSelect: () => { closeAgentPanel(); setSpace('agent'); } },
@@ -406,10 +410,10 @@ function AppShell() {
           // ⚠️ 여기는 「내 업무」다 — viewer 도 자기 범위의 자산을 볼 수 있어야 하므로
           //   거버넌스 콘솔(전사 정비 상태)과 달리 막지 않는다. 자격은 화면 안에서
           //   행동 단위로 표시하고, 못 누르는 버튼마다 사유를 붙인다(§8.6).
-          onSelect: () => setShowAgentGov(true) },
+          onSelect: () => { setShowAgentGov(false); setSpace('agentgov'); } },
         { id: 'skills', icon: '🧬', label: 'AI 스킬 진화',
           desc: '에이전트가 스스로 제안한 스킬 개선안 승인/반려',
-          onSelect: () => setShowSkillEvolution(true) },
+          onSelect: () => { setShowSkillEvolution(false); setSpace('skills'); } },
       ],
     },
     {
@@ -421,7 +425,7 @@ function AppShell() {
           // ⚠️ 이 화면의 «품질 결과» 탭과 에이전트 집계는 거버넌스 관문을 지난다 —
           //   `/telemetry/agents` 가 형제 둘과 갈라져 익명에게 열려 있던 것을 함께 고쳤다.
           disabledReason: govBlocked,
-          onSelect: () => setShowTelemetry(true) },
+          onSelect: () => { setShowTelemetry(false); setSpace('telemetry'); } },
       ],
     },
   ];
@@ -705,6 +709,18 @@ function AppShell() {
                           ? <OperationsGovernanceShell kind="workspace">
                               <WorkspacePanel page onClose={() => setSpace('operate')} />
                             </OperationsGovernanceShell>
+                          : space === 'company'
+                            ? <CompanySetupPanel page onClose={() => setSpace('enterprise')} />
+                            : space === 'org'
+                              ? <OrgChartPanel page onClose={() => setSpace('enterprise')} />
+                              : space === 'standard'
+                                ? <WorkStandardPanel page onClose={() => setSpace('knowledge')} />
+                                : space === 'agentgov'
+                                  ? <AgentGovernancePanel page onClose={() => setSpace('agent')} />
+                                  : space === 'skills'
+                                    ? <SkillEvolutionPanel page onClose={() => setSpace('agent')} />
+                                    : space === 'telemetry'
+                                      ? <TelemetryPanel page onClose={() => setSpace('agent')} />
             : null;
   const journeyModule = space === 'advisor' ? 'advisor'
     : space === 'data' ? 'data'
@@ -719,12 +735,20 @@ function AppShell() {
     : space === 'shadow' ? 'shadow'
       : space === 'promotion' ? 'promotion'
         : space === 'workspace' ? 'workspace' : null;
+  const governanceModule = space === 'company' ? 'company'
+    : space === 'org' ? 'org'
+      : space === 'standard' ? 'standard'
+        : space === 'agentgov' ? 'agentgov'
+          : space === 'skills' ? 'skills' : null;
+  const inspectionModule = space === 'telemetry' ? 'telemetry' : null;
 
-  if (!currentProjectId && journeyPage && (journeyModule || foundationModule || decisionModule)) {
+  if (!currentProjectId && journeyPage
+    && (journeyModule || foundationModule || decisionModule || governanceModule || inspectionModule)) {
     return (
       <ErrorBoundary>
         <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
-          <ProductShell module={journeyModule || foundationModule || decisionModule!}
+          <ProductShell module={journeyModule || foundationModule || decisionModule
+            || governanceModule || inspectionModule!}
             company={shellCompanyName}
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}

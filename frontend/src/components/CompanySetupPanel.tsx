@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
+import { HubShell, type RailItem } from '../design/HubShell';
+import { JarvisRail } from '../design/JarvisRail';
 import { setEnterpriseContext } from '../lib/api';
 import {
   approveEntity, approveProfile, createEntity, createNode, getTree, listEntities,
@@ -42,6 +44,12 @@ const MODE_TONE: Record<string, string> = {
 const COMPANY_SCOPE = '__company__';
 
 type Tab = 'company' | 'entity' | 'thread';
+
+const COMPANY_ITEMS: RailItem[] = [
+  { id: 'company', label: '1. 회사 이름', hint: '상단 문맥에 보일 회사 등록', icon: 'catalog' },
+  { id: 'entity', label: '2. 법인·가상회사', hint: '실제·가상·경쟁사 구분과 승인', icon: 'orgtree' },
+  { id: 'thread', label: '3. 업무 연결구성', hint: '회사별 Digital Thread 구성', icon: 'flow' },
+];
 
 function Section({ title, desc, children }: {
   title: string; desc?: string; children: React.ReactNode;
@@ -87,7 +95,7 @@ function findNodePath(rows: EcmNode[], nodeId: string, parents: EcmNode[] = []):
   return [];
 }
 
-export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
+export function CompanySetupPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
   const ctx = useOperatingContext();
   const [tab, setTab] = useState<Tab>('company');
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
@@ -128,11 +136,9 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
     } finally { setBusy(''); }
   }, []);
 
-  return (
-    <HubDialog label="회사 구성" onClose={onClose}
-      subtitle="회사 이름 · 법인과 가상회사 · 업무 연결구성(Digital Thread)">
-      {/* 회사 구성은 탭에 따라 본문 높이가 크게 달라진다. 공용 스크롤 셸에 연결하지 않으면
-          업무 연결구성의 마지막 저장 버튼이 화면 아래에서 잘린다. */}
+  // 회사 구성은 탭에 따라 본문 높이가 크게 달라진다. 공용 스크롤 셸에 연결하지 않으면
+  // 업무 연결구성의 마지막 저장 버튼이 화면 아래에서 잘린다.
+  const body = (
       <div className="afs-dialog-body company-setup-body"
         style={{ padding: '16px 16px 28px', minWidth: 0 }}>
         {/* ★ 지금 어느 회사·어느 모드인지 **항상** 위에 둔다(채택 결정 6항). */}
@@ -156,7 +162,7 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
               안 고른 것의 차이가 거의 없었다 — 그래서 「① 이름 ② 법인 ③ 연결구성」이라는
               **순서**가 화면에서 읽히지 않았다.
             ★ 번호를 붙이고 밑줄로 고른 칸을 못박는다. 각 칸이 무엇을 하는 곳인지도 적는다. */}
-        <div role="tablist" aria-label="회사 구성 단계"
+        {!page && <div role="tablist" aria-label="회사 구성 단계"
           style={{ display: 'flex', gap: 0, marginBottom: 16,
                    borderBottom: '2px solid var(--surface-border)' }}>
           {([['company', '① 회사 이름', '상단에 보이는 이름'],
@@ -179,7 +185,7 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
                               color: 'var(--surface-text-muted)' }}>{hint}</small>
             </button>
           ))}
-        </div>
+        </div>}
 
         {err && <Notice tone="err">{err}</Notice>}
         {ok && <Notice tone="ok">{ok}</Notice>}
@@ -198,6 +204,51 @@ export function CompanySetupPanel({ onClose }: { onClose: () => void }) {
             entityMode={ctx.entityMode} scopeLabel={ctx.scopeLabel} />
         )}
       </div>
+  );
+
+  if (page) return (
+    <HubShell layoutClassName="product-page-shell company-product-shell"
+      kicker="ENTERPRISE CONTEXT" title="회사 구성"
+      subtitle="회사 이름·법인·가상회사와 경영 홈의 업무 연결구성을 관리합니다."
+      items={COMPANY_ITEMS} activeId={tab}
+      onSelect={(id) => { setTab(id as Tab); setErr(''); setOk(''); }}
+      footer={<div className="inheritance-card">
+        <span>ENTITY MODE</span>
+        <b>실제와 가상은 섞지 않습니다</b>
+        <p>승인된 회사 구성만 상속·판정에 참여하고 문맥 전환은 서버 허가 뒤 적용됩니다.</p>
+      </div>}
+      jarvis={<JarvisRail
+        contextTitle={tab === 'company' ? '회사 이름' : tab === 'entity' ? '법인 · 가상회사' : '업무 연결구성'}
+        contextDescription="현재 회사와 실행 문맥, 선택한 구성 단계를 기준으로 답합니다."
+        context={{
+          current_module: `company_setup/${tab}`,
+          selected_object_type: tab === 'thread' ? 'enterprise_profile' : tab === 'entity' ? 'enterprise_entity' : 'tenant',
+          selected_object_id: ctx.company || tab,
+          object_snapshot: { company: ctx.company, company_name: ctx.companyName,
+            entity_mode: ctx.entityMode, scope: ctx.scopeLabel, stage: tab },
+          available_actions: tab === 'company' ? ['회사 이름 등록', '현재 회사 확인']
+            : tab === 'entity' ? ['법인 등록', '가상회사 등록', '승인 상태 확인']
+              : ['업무 단계 구성', '보조정보 카드 구성', '홈 연결구성 저장'],
+        }}
+        evidence={[
+          { label: '현재 회사', value: ctx.companyName || ctx.company || '확인 불가' },
+          { label: '실행 문맥', value: MODE_KO[ctx.entityMode] || ctx.entityMode },
+          { label: '권한 범위', value: ctx.scopeLabel },
+        ]}
+        quickQuestions={[
+          '현재 회사 구성과 승인 상태를 설명해 주세요.',
+          '실제 회사와 가상회사는 어떻게 구분됩니까?',
+          '경영 홈 업무 연결구성은 어디에 적용됩니까?',
+        ]} />}
+    >
+      {body}
+    </HubShell>
+  );
+
+  return (
+    <HubDialog label="회사 구성" onClose={onClose}
+      subtitle="회사 이름 · 법인과 가상회사 · 업무 연결구성(Digital Thread)">
+      {body}
     </HubDialog>
   );
 }
