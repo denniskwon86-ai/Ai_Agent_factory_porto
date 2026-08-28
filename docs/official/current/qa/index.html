@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LAXS-M QA · v1.0</title>
+  <link rel="stylesheet" href="../../assets/official.css">
+</head>
+<body>
+  <header class="topbar"><div class="topbar-inner">
+    <a class="brand" href="../index.html">LAXS-<span>M</span></a>
+    <nav class="topnav"><a href="../index.html">현재 공식 문서</a></nav>
+  </div></header>
+  <section class="hero"><div class="hero-inner">
+    <p class="eyebrow">Quality Assurance · v1.0 · 2026-08-29</p>
+    <h1>화면을 열고, 눌러 보고, 근거를 남깁니다.</h1>
+    <p>전체 메뉴 26개와 핵심 실행 흐름을 실제 브라우저에서 검증하는 LAXS-M 점검 도구입니다.</p>
+  </div></section>
+  <main class="shell">
+    <section>
+      <h2>두 문서를 순서대로 사용합니다.</h2>
+      <p class="lede">화면 지도에서 접근성과 내용을 확인한 뒤, 기능 점검표에서 실제 동작과 경계를 판정합니다.</p>
+      <div class="grid two">
+        <a class="card card-link" href="screen-map.html">
+          <span class="label">01 · Screen Map</span>
+          <h3>화면 지도 · 51개 확인 지점</h3>
+          <p>전체 메뉴 26개와 홈·상세 화면의 여는 길, 역할, 선행 조건을 확인합니다.</p>
+        </a>
+        <a class="card card-link" href="functional-checklist.html">
+          <span class="label">02 · Functional QA</span>
+          <h3>기능 점검표 · 78개 항목</h3>
+          <p>기능·권한·데이터 경계·UI 품질을 직접 조작하고 결과를 CSV·JSON으로 남깁니다.</p>
+        </a>
+      </div>
+    </section>
+    <section class="callout">
+      <strong>판정 원칙</strong><br>
+      구현 파일의 존재가 아니라 `http://127.0.0.1:5173`에서 사용자가 실제로 수행한 결과를 기록합니다.
+      미확인은 정상으로 세지 않습니다.
+    </section>
+  </main>
+  <div class="global-author-credit" style="padding:12px 24px;text-align:center;font:600 12px/1.5 Pretendard,Noto Sans KR,Malgun Gothic,sans-serif;color:#66758a;background:#f5f7fa;border-top:1px solid #dce4eb;">작성자 : 권혁일(Hyuk il Kwon)</div>
+</body>
+</html>

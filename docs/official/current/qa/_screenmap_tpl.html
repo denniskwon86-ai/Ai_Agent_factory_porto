@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI Factory Studio — 화면 지도</title>
+<title>LAXS-M — 화면 지도 v1.0</title>
 <style>
 :root {
   --bg:#f6f7f9; --card:#fff; --line:#c3c7cd; --line-soft:#e3e6ea;
@@ -79,21 +79,21 @@ tr.fail { background:#fdf4f3; }
 </head>
 <body>
 <header>
-  <h1>AI Factory Studio — 화면 지도</h1>
+  <h1>LAXS-M — 화면 지도 <small>v1.0</small></h1>
   <div class="sub">어떤 화면이 있고 · 어디를 눌러 열고 · 무엇을 하는 곳인지. 열어 보고 판정과 특이사항을 적습니다.</div>
 </header>
 
 <div class="meta">
   <label>점검자 <input id="m_who" placeholder="이름"></label>
   <label>점검일 <input id="m_when" type="date"></label>
-  <label>대상 화면 <input id="m_url" placeholder="http://localhost:5173"></label>
+  <label>대상 화면 <input id="m_url" placeholder="http://127.0.0.1:5173"></label>
   <label>계정 <input id="m_acct" placeholder="어느 계정으로 봤는가"></label>
   <label>판본 <input id="m_rev" placeholder="git 커밋 해시"></label>
 </div>
 
 <div class="hint">
-  <div class="lead"><b>이 시스템의 핵심은 ①번 다섯 단계입니다</b> — 조직 고르기 → 업무 데이터 준비 →
-  계산 실행 승인 → 경로 계산 → 의사결정 안건. 나머지 화면은 그 다섯을 받쳐 주거나 결과를 확인하는 곳입니다.</div>
+  <div class="lead"><b>조직 문맥을 고른 뒤 핵심 실행 5단계를 확인합니다</b> — 업무 데이터 준비 →
+  계산 실행 승인 → 경로 계산 → 의사결정 안건 → 경영 브리핑. 나머지 화면은 이 흐름의 근거·통제·확장을 담당합니다.</div>
   판정 — <span class="p ok">열림</span> 눌러서 열리고 내용이 있다 ·
   <span class="p ng">안 열림</span> 눌러도 아무 일이 없거나 오류 ·
   <span class="p part">열리나 빔</span> 열리지만 비어 있거나 무엇을 해야 할지 모르겠다 ·
@@ -106,7 +106,7 @@ tr.fail { background:#fdf4f3; }
   <button id="b_json">JSON 내보내기</button>
   <button id="b_print">인쇄 / PDF</button>
   <button id="b_only">문제만 보기</button>
-  <button id="b_core">핵심 5단계만</button>
+  <button id="b_core">핵심 실행만</button>
   <button id="b_reset">초기화</button>
   <span class="saved" id="saved"></span>
   <span class="count">
@@ -129,7 +129,7 @@ __TABLE__
 
 <script>
 (function () {
-  var KEY = 'afs.screenmap.v1';
+  var KEY = 'laxs.screenmap.v2';
   var tb = document.getElementById('tb');
   var META = ['m_who', 'm_when', 'm_url', 'm_acct', 'm_rev'];
   var LABEL = { ok: '열림', ng: '안 열림', part: '열리나 빔', na: '권한 없음', '': '미확인' };
@@ -249,11 +249,11 @@ __TABLE__
     lines.push([cell('점검자'), cell(m.m_who), cell('점검일'), cell(m.m_when),
       cell('대상'), cell(m.m_url), cell('계정'), cell(m.m_acct),
       cell('판본'), cell(m.m_rev)].join(','));
-    dl('afs-screen-map.csv', lines.join('\r\n'), 'text/csv');
+    dl('laxs-screen-map-v1.0.csv', lines.join('\r\n'), 'text/csv');
   };
 
   document.getElementById('b_json').onclick = function () {
-    dl('afs-screen-map.json',
+    dl('laxs-screen-map-v1.0.json',
       JSON.stringify({ meta: state().meta, rows: rowsOut() }, null, 2), 'application/json');
   };
 
@@ -266,7 +266,7 @@ __TABLE__
   var only = false, core = false;
   document.getElementById('b_only').onclick = function () {
     only = !only; core = false;
-    document.getElementById('b_core').textContent = '핵심 5단계만';
+    document.getElementById('b_core').textContent = '핵심 실행만';
     this.textContent = only ? '전체 보기' : '문제만 보기';
     if (!only) { showAll(); return; }
     tb.querySelectorAll('tr[data-id]').forEach(function (tr) {
@@ -278,7 +278,7 @@ __TABLE__
   document.getElementById('b_core').onclick = function () {
     core = !core; only = false;
     document.getElementById('b_only').textContent = '문제만 보기';
-    this.textContent = core ? '전체 보기' : '핵심 5단계만';
+    this.textContent = core ? '전체 보기' : '핵심 실행만';
     if (!core) { showAll(); return; }
     /* ★ 핵심 그룹(①)에 속한 행만 남긴다 — 그룹 머리를 만나면 상태가 바뀐다. */
     var inCore = false;

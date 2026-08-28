@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI Factory Studio — 화면 지도</title>
+<title>LAXS-M — 화면 지도 v1.0</title>
 <style>
 :root {
   --bg:#f6f7f9; --card:#fff; --line:#c3c7cd; --line-soft:#e3e6ea;
@@ -79,21 +79,21 @@ tr.fail { background:#fdf4f3; }
 </head>
 <body>
 <header>
-  <h1>AI Factory Studio — 화면 지도</h1>
+  <h1>LAXS-M — 화면 지도 <small>v1.0</small></h1>
   <div class="sub">어떤 화면이 있고 · 어디를 눌러 열고 · 무엇을 하는 곳인지. 열어 보고 판정과 특이사항을 적습니다.</div>
 </header>
 
 <div class="meta">
   <label>점검자 <input id="m_who" placeholder="이름"></label>
   <label>점검일 <input id="m_when" type="date"></label>
-  <label>대상 화면 <input id="m_url" placeholder="http://localhost:5173"></label>
+  <label>대상 화면 <input id="m_url" placeholder="http://127.0.0.1:5173"></label>
   <label>계정 <input id="m_acct" placeholder="어느 계정으로 봤는가"></label>
   <label>판본 <input id="m_rev" placeholder="git 커밋 해시"></label>
 </div>
 
 <div class="hint">
-  <div class="lead"><b>이 시스템의 핵심은 ①번 다섯 단계입니다</b> — 조직 고르기 → 업무 데이터 준비 →
-  계산 실행 승인 → 경로 계산 → 의사결정 안건. 나머지 화면은 그 다섯을 받쳐 주거나 결과를 확인하는 곳입니다.</div>
+  <div class="lead"><b>조직 문맥을 고른 뒤 핵심 실행 5단계를 확인합니다</b> — 업무 데이터 준비 →
+  계산 실행 승인 → 경로 계산 → 의사결정 안건 → 경영 브리핑. 나머지 화면은 이 흐름의 근거·통제·확장을 담당합니다.</div>
   판정 — <span class="p ok">열림</span> 눌러서 열리고 내용이 있다 ·
   <span class="p ng">안 열림</span> 눌러도 아무 일이 없거나 오류 ·
   <span class="p part">열리나 빔</span> 열리지만 비어 있거나 무엇을 해야 할지 모르겠다 ·
@@ -106,12 +106,12 @@ tr.fail { background:#fdf4f3; }
   <button id="b_json">JSON 내보내기</button>
   <button id="b_print">인쇄 / PDF</button>
   <button id="b_only">문제만 보기</button>
-  <button id="b_core">핵심 5단계만</button>
+  <button id="b_core">핵심 실행만</button>
   <button id="b_reset">초기화</button>
   <span class="saved" id="saved"></span>
   <span class="count">
     <span class="track"><i id="bar"></i></span>
-    확인 <b id="c_done">0</b>/46 · 문제 <b id="c_ng">0</b>
+    확인 <b id="c_done">0</b>/51 · 문제 <b id="c_ng">0</b>
   </span>
 </div>
 
@@ -122,12 +122,12 @@ tr.fail { background:#fdf4f3; }
     <th>주요 행동</th><th>선행 조건</th><th>판정</th><th>특이사항</th>
   </tr></thead>
   <tbody id="tb">
-<tr class="grp core"><td colspan="8">① 처음 여는 사람이 밟는 길 — 이 다섯이 핵심 여정이다</td></tr>
+<tr class="grp core"><td colspan="8">① 조직 문맥을 고르고 밟는 핵심 실행 5단계</td></tr>
 <tr data-id="s1" class="">
   <td class="no">1</td>
-  <td class="name"><strong>1단계 · 조직 고르기</strong></td>
+  <td class="name"><strong>준비 · 조직 고르기</strong></td>
   <td class="where"><code>좌상단 «조직 전환 ▾» → 부서 선택</code></td>
-  <td class="what">지금 어느 조직의 자료를 보는지 정한다. **여기서 고르지 않으면 뒤의 화면 대부분이 비거나 막힌다.**</td>
+  <td class="what">지금 어느 조직의 자료를 보는지 정한다. <strong>여기서 고르지 않으면 뒤의 화면 대부분이 비거나 막힌다.</strong></td>
   <td class="act">부서 선택</td>
   <td class="pre">없음 — 로그인 직후 첫 행동이다</td>
   <td class="verdict">
@@ -140,11 +140,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s2" class="">
   <td class="no">2</td>
-  <td class="name"><strong>2단계 · 업무 데이터 준비</strong></td>
+  <td class="name"><strong>1단계 · 업무 데이터 준비</strong></td>
   <td class="where"><code>«전체 메뉴» → 📥 업무 데이터 준비 → 인스턴스 «열기»</code></td>
   <td class="what">업무 키트를 조직에 적용하고, 원천을 연결하고, 파일 판을 인증한다. 여기서 «준비됨»이 되어야 계산이 돈다.</td>
   <td class="act">원천 결속 · 파일 올리기 · 판 인증</td>
-  <td class="pre">1단계</td>
+  <td class="pre">조직 문맥 선택</td>
   <td class="verdict">
     <label><input type="radio" name="v_s2" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s2" value="ng"><span class="p ng">안 열림</span></label>
@@ -155,11 +155,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s3" class="">
   <td class="no">3</td>
-  <td class="name"><strong>3단계 · 계산 실행 승인</strong></td>
+  <td class="name"><strong>2단계 · 계산 실행 승인</strong></td>
   <td class="where"><code>«전체 메뉴» → 🔐 계산 실행 승인 · 시연 초기화</code></td>
-  <td class="what">산식을 실제로 돌려도 되는지 사람이 승인한다. **누르기 전까지 계산은 «막힘»으로 답한다.**</td>
+  <td class="what">산식을 실제로 돌려도 되는지 사람이 승인한다. <strong>누르기 전까지 계산은 «막힘»으로 답한다.</strong></td>
   <td class="act">정의·단위·부호 확인 후 승인</td>
-  <td class="pre">2단계 · 시스템 관리자 권한</td>
+  <td class="pre">1단계 · 시스템 관리자 권한</td>
   <td class="verdict">
     <label><input type="radio" name="v_s3" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s3" value="ng"><span class="p ng">안 열림</span></label>
@@ -170,11 +170,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s4" class="">
   <td class="no">4</td>
-  <td class="name"><strong>4단계 · 경로 계산</strong></td>
+  <td class="name"><strong>3단계 · 경로 계산</strong></td>
   <td class="where"><code>«전체 메뉴» → 🧮 경로 계산</code></td>
-  <td class="what">승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산한다. **이 시스템의 핵심 산출물이다.**</td>
+  <td class="what">승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산한다. <strong>이 시스템의 핵심 산출물이다.</strong></td>
   <td class="act">시작점 선택 → 경로 조회 → 계산</td>
-  <td class="pre">3단계</td>
+  <td class="pre">2단계</td>
   <td class="verdict">
     <label><input type="radio" name="v_s4" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s4" value="ng"><span class="p ng">안 열림</span></label>
@@ -185,11 +185,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s5" class="">
   <td class="no">5</td>
-  <td class="name"><strong>5단계 · 의사결정 안건</strong></td>
+  <td class="name"><strong>4단계 · 의사결정 안건</strong></td>
   <td class="where"><code>«전체 메뉴» → 🧭 의사결정 안건</code></td>
   <td class="what">계산 결과를 3관점 검토서와 책임자·기한이 붙은 안건으로 만든다.</td>
   <td class="act">안건 생성 · 검토 · 발간</td>
-  <td class="pre">4단계 (BLOCKED 로는 안 만들어진다)</td>
+  <td class="pre">3단계 (BLOCKED 로는 안 만들어진다)</td>
   <td class="verdict">
     <label><input type="radio" name="v_s5" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s5" value="ng"><span class="p ng">안 열림</span></label>
@@ -198,14 +198,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s5" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr class="grp"><td colspan="8">② 상단 바 — 항상 보이는 것</td></tr>
 <tr data-id="s6" class="">
   <td class="no">6</td>
-  <td class="name"><strong>조직 전환</strong></td>
-  <td class="where"><code>좌상단 «조직 전환 ▾»</code></td>
-  <td class="what">보는 조직 범위를 바꾼다. 바꾸면 화면이 새로 뜬다(이전 자료가 남지 않는다).</td>
-  <td class="act">부서 선택</td>
-  <td class="pre">없음</td>
+  <td class="name"><strong>5단계 · 경영 브리핑</strong></td>
+  <td class="where"><code>«전체 메뉴» → 📣 경영 브리핑</code></td>
+  <td class="what">확정한 안건과 실행 상태를 경영진이 읽는 브리핑으로 묶는다. 근거가 없는 수치와 미확인 상태를 정상처럼 표시하지 않는다.</td>
+  <td class="act">브리핑 조회 · 근거 확인 · 발간</td>
+  <td class="pre">4단계</td>
   <td class="verdict">
     <label><input type="radio" name="v_s6" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s6" value="ng"><span class="p ng">안 열림</span></label>
@@ -214,12 +213,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s6" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
+<tr class="grp"><td colspan="8">② 상단 바 — 항상 보이는 것</td></tr>
 <tr data-id="s7" class="">
   <td class="no">7</td>
-  <td class="name"><strong>회사·범위 표시</strong></td>
-  <td class="where"><code>상단 바 왼쪽 텍스트</code></td>
-  <td class="what">지금 소속 회사와 보는 범위를 적는다. 안 골랐으면 「권한 범위 전체」다.</td>
-  <td class="act">표시 전용</td>
+  <td class="name"><strong>조직 전환</strong></td>
+  <td class="where"><code>좌상단 «조직 전환 ▾»</code></td>
+  <td class="what">보는 조직 범위를 바꾼다. 바꾸면 화면이 새로 뜬다(이전 자료가 남지 않는다).</td>
+  <td class="act">부서 선택</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s7" value="ok"><span class="p ok">열림</span></label>
@@ -231,10 +231,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s8" class="">
   <td class="no">8</td>
-  <td class="name"><strong>환경설정 · 관리자</strong></td>
-  <td class="where"><code>우상단 «환경설정 · 관리자»</code></td>
-  <td class="what">내 정보(표시 이름)·시스템 설정·관리자 기능 입구.</td>
-  <td class="act">이름 변경 · 설정</td>
+  <td class="name"><strong>회사·범위 표시</strong></td>
+  <td class="where"><code>상단 바 왼쪽 텍스트</code></td>
+  <td class="what">지금 소속 회사와 보는 범위를 적는다. 안 골랐으면 「권한 범위 전체」다.</td>
+  <td class="act">표시 전용</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s8" value="ok"><span class="p ok">열림</span></label>
@@ -246,10 +246,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s9" class="">
   <td class="no">9</td>
-  <td class="name"><strong>전사 브리핑</strong></td>
-  <td class="where"><code>우상단 «전사 브리핑»</code></td>
-  <td class="what">권한 범위 안의 전사 상태 — 내가 결정할 것·막힌 것·데이터 결손·비용. LLM 0콜.</td>
-  <td class="act">상세 열기</td>
+  <td class="name"><strong>환경설정 · 관리자</strong></td>
+  <td class="where"><code>우상단 «환경설정 · 관리자»</code></td>
+  <td class="what">내 정보(표시 이름)·시스템 설정·관리자 기능 입구.</td>
+  <td class="act">이름 변경 · 설정</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s9" value="ok"><span class="p ok">열림</span></label>
@@ -261,10 +261,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s10" class="">
   <td class="no">10</td>
-  <td class="name"><strong>전체 메뉴</strong></td>
-  <td class="where"><code>우상단 «전체 메뉴»</code></td>
-  <td class="what">20개 화면 전체 목록. 핵심 여정이 맨 위이고 6묶음으로 나뉜다.</td>
-  <td class="act">화면 선택</td>
+  <td class="name"><strong>전사 브리핑</strong></td>
+  <td class="where"><code>우상단 «전사 브리핑»</code></td>
+  <td class="what">권한 범위 안의 전사 상태 — 내가 결정할 것·막힌 것·데이터 결손·비용. LLM 0콜.</td>
+  <td class="act">상세 열기</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s10" value="ok"><span class="p ok">열림</span></label>
@@ -276,10 +276,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s11" class="">
   <td class="no">11</td>
-  <td class="name"><strong>로그아웃</strong></td>
-  <td class="where"><code>우상단 «로그아웃»</code></td>
-  <td class="what">세션을 끝낸다.</td>
-  <td class="act">로그아웃</td>
+  <td class="name"><strong>전체 메뉴</strong></td>
+  <td class="where"><code>우상단 «전체 메뉴»</code></td>
+  <td class="what">26개 메뉴 전체 목록. 핵심 여정이 맨 위이고 6묶음으로 나뉜다.</td>
+  <td class="act">화면 선택</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s11" value="ok"><span class="p ok">열림</span></label>
@@ -289,13 +289,12 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s11" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr class="grp"><td colspan="8">③ 경영 홈 본문 — 로그인하면 처음 보이는 화면</td></tr>
 <tr data-id="s12" class="">
   <td class="no">12</td>
-  <td class="name"><strong>문맥 줄</strong></td>
-  <td class="where"><code>본문 맨 위</code></td>
-  <td class="what">기준시각 · 실행 문맥(REAL/VIRTUAL) · 조직 이름. **지금 무엇을 보고 있는가**에 답한다.</td>
-  <td class="act">표시 전용</td>
+  <td class="name"><strong>로그아웃</strong></td>
+  <td class="where"><code>우상단 «로그아웃»</code></td>
+  <td class="what">세션을 끝낸다.</td>
+  <td class="act">로그아웃</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s12" value="ok"><span class="p ok">열림</span></label>
@@ -305,12 +304,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s12" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
+<tr class="grp"><td colspan="8">③ 경영 홈 본문 — 로그인하면 처음 보이는 화면</td></tr>
 <tr data-id="s13" class="">
   <td class="no">13</td>
-  <td class="name"><strong>업무 SW 만들기</strong></td>
-  <td class="where"><code>본문 맨 위 «🏭 업무 SW 만들기 — Software Factory»</code></td>
-  <td class="what">요구사항에서 업무 소프트웨어를 생성하는 공장 입구.</td>
-  <td class="act">프로젝트 생성</td>
+  <td class="name"><strong>문맥 줄</strong></td>
+  <td class="where"><code>본문 맨 위</code></td>
+  <td class="what">기준시각 · 실행 문맥(REAL/VIRTUAL) · 조직 이름. <strong>지금 무엇을 보고 있는가</strong>에 답한다.</td>
+  <td class="act">표시 전용</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s13" value="ok"><span class="p ok">열림</span></label>
@@ -322,10 +322,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s14" class="">
   <td class="no">14</td>
-  <td class="name"><strong>무엇을 만들지 상담</strong></td>
-  <td class="where"><code>본문 맨 위 «🧭 무엇을 만들지 상담»</code></td>
-  <td class="what">무엇을 만들지 모를 때 — 선택형 대화로 필요한 데이터와 추진 순서를 정한다. 승인하면 프로젝트가 된다.</td>
-  <td class="act">상담 진행 · 승인</td>
+  <td class="name"><strong>업무 SW 만들기</strong></td>
+  <td class="where"><code>본문 맨 위 «🏭 업무 SW 만들기 — Software Factory»</code></td>
+  <td class="what">요구사항에서 업무 소프트웨어를 생성하는 공장 입구.</td>
+  <td class="act">프로젝트 생성</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s14" value="ok"><span class="p ok">열림</span></label>
@@ -337,10 +337,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s15" class="">
   <td class="no">15</td>
-  <td class="name"><strong>협업·의사결정·발간</strong></td>
-  <td class="where"><code>본문 맨 위 «🤝 협업·의사결정·발간»</code></td>
-  <td class="what">앱 전달·수락, 의사결정 패키지, 대내외 발간. 수락해도 데이터 권한은 넓어지지 않는다.</td>
-  <td class="act">전달 · 수락 · 발간</td>
+  <td class="name"><strong>업무·데이터 설계 상담</strong></td>
+  <td class="where"><code>본문 맨 위 «🧭 업무·데이터 설계 상담»</code></td>
+  <td class="what">무엇을 만들지 모를 때 — 선택형 대화로 필요한 데이터와 추진 순서를 정한다. 승인하면 프로젝트가 된다.</td>
+  <td class="act">상담 진행 · 승인</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s15" value="ok"><span class="p ok">열림</span></label>
@@ -352,10 +352,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s16" class="">
   <td class="no">16</td>
-  <td class="name"><strong>KPI 4칸</strong></td>
-  <td class="where"><code>문맥 줄 아래</code></td>
-  <td class="what">내가 결정할 것 · 막혀 있는 것 · 업무 도메인 · LLM 비용.</td>
-  <td class="act">표시 전용</td>
+  <td class="name"><strong>협업·의사결정·발간</strong></td>
+  <td class="where"><code>본문 맨 위 «🤝 협업·의사결정·발간»</code></td>
+  <td class="what">앱 전달·수락, 의사결정 패키지, 대내외 발간. 수락해도 데이터 권한은 넓어지지 않는다.</td>
+  <td class="act">전달 · 수락 · 발간</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s16" value="ok"><span class="p ok">열림</span></label>
@@ -367,10 +367,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s17" class="">
   <td class="no">17</td>
-  <td class="name"><strong>업무 흐름 (DATA/SW/TWIN)</strong></td>
-  <td class="where"><code>KPI 아래 탭</code></td>
-  <td class="what">조직 트리를 업무 축으로 본다. 공정 프로필이 없으면 그렇게 적는다.</td>
-  <td class="act">탭 전환 · 노드 선택</td>
+  <td class="name"><strong>KPI 4칸</strong></td>
+  <td class="where"><code>문맥 줄 아래</code></td>
+  <td class="what">내가 결정할 것 · 막혀 있는 것 · 업무 도메인 · LLM 비용.</td>
+  <td class="act">표시 전용</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s17" value="ok"><span class="p ok">열림</span></label>
@@ -382,10 +382,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s18" class="">
   <td class="no">18</td>
-  <td class="name"><strong>DECISION FOCUS</strong></td>
-  <td class="where"><code>본문 가운데</code></td>
-  <td class="what">지금 답해야 할 것 하나와 다음 행동.</td>
-  <td class="act">상세 열기</td>
+  <td class="name"><strong>업무 흐름 (DATA/SW/TWIN)</strong></td>
+  <td class="where"><code>KPI 아래 탭</code></td>
+  <td class="what">조직 트리를 업무 축으로 본다. 공정 프로필이 없으면 그렇게 적는다.</td>
+  <td class="act">탭 전환 · 노드 선택</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s18" value="ok"><span class="p ok">열림</span></label>
@@ -397,10 +397,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s19" class="">
   <td class="no">19</td>
-  <td class="name"><strong>TRUST FOUNDATION</strong></td>
-  <td class="where"><code>본문 아래 4칸</code></td>
-  <td class="what">MDM · 운영 데이터 · 지식 · 외부지표의 커버리지와 최신성.</td>
-  <td class="act">각 칸 클릭 → 해당 화면</td>
+  <td class="name"><strong>DECISION FOCUS</strong></td>
+  <td class="where"><code>본문 가운데</code></td>
+  <td class="what">지금 답해야 할 것 하나와 다음 행동.</td>
+  <td class="act">상세 열기</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s19" value="ok"><span class="p ok">열림</span></label>
@@ -412,10 +412,10 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s20" class="">
   <td class="no">20</td>
-  <td class="name"><strong>Jarvis 패널</strong></td>
-  <td class="where"><code>화면 오른쪽</code></td>
-  <td class="what">지금 보는 문맥에 대한 답변·근거·기준시각.</td>
-  <td class="act">질문 · 근거 열기</td>
+  <td class="name"><strong>TRUST FOUNDATION</strong></td>
+  <td class="where"><code>본문 아래 4칸</code></td>
+  <td class="what">MDM · 운영 데이터 · 지식 · 외부지표의 커버리지와 최신성.</td>
+  <td class="act">각 칸 클릭 → 해당 화면</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s20" value="ok"><span class="p ok">열림</span></label>
@@ -425,14 +425,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s20" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr class="grp"><td colspan="8">④ 전체 메뉴 › 핵심 여정 — 이 넷을 순서대로</td></tr>
 <tr data-id="s21" class="">
   <td class="no">21</td>
-  <td class="name"><strong>1️⃣ 업무 데이터 준비</strong></td>
-  <td class="where"><code>전체 메뉴 → 1️⃣ 업무 데이터 준비</code></td>
-  <td class="what">업무키트를 조직에 적용하고 · 원천을 연결하고 · 파일 판을 인증합니다 — 여기가 «준비됨»이어야 뒤가 돕니다.</td>
-  <td class="act">인스턴스 열기 · 결속 · 인증 · 앱 만들기</td>
-  <td class="pre">조직 범위 선택</td>
+  <td class="name"><strong>AI 경영비서(자비스) 패널</strong></td>
+  <td class="where"><code>화면 오른쪽</code></td>
+  <td class="what">지금 보는 문맥에 대한 답변·근거·기준시각.</td>
+  <td class="act">질문 · 근거 열기</td>
+  <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s21" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s21" value="ng"><span class="p ng">안 열림</span></label>
@@ -441,13 +440,14 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s21" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr data-id="s22" class=" sub">
+<tr class="grp"><td colspan="8">④ 전체 메뉴 › 핵심 여정 — 이 다섯을 순서대로</td></tr>
+<tr data-id="s22" class="">
   <td class="no">22</td>
-  <td class="name"><strong>└ 준비도 보드</strong></td>
-  <td class="where"><code>업무 데이터 준비 → 인스턴스 «열기»</code></td>
-  <td class="what">데이터셋별 준비 상태와 막힌 이유·다음 할 일.</td>
-  <td class="act">결속 · 파일 올리기 · 판 인증</td>
-  <td class="pre">인스턴스</td>
+  <td class="name"><strong>1️⃣ 업무 데이터 준비</strong></td>
+  <td class="where"><code>전체 메뉴 → 1️⃣ 업무 데이터 준비</code></td>
+  <td class="what">업무키트를 조직에 적용하고 · 원천을 연결하고 · 파일 판을 인증합니다 — 여기가 «준비됨»이어야 뒤가 돕니다.</td>
+  <td class="act">인스턴스 열기 · 결속 · 인증 · 앱 만들기</td>
+  <td class="pre">조직 범위 선택</td>
   <td class="verdict">
     <label><input type="radio" name="v_s22" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s22" value="ng"><span class="p ng">안 열림</span></label>
@@ -458,11 +458,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s23" class=" sub">
   <td class="no">23</td>
-  <td class="name"><strong>└ 키트로 앱 만들기</strong></td>
-  <td class="where"><code>인스턴스 화면 아래쪽</code></td>
-  <td class="what">키트가 주는 산출물 앱(APP-01~05)을 계약→승인→생성→운영 전환으로 연다.</td>
-  <td class="act">계약 초안 · 승인 · 앱 만들기 · 운영으로 올리기 · 앱 열어 보기</td>
-  <td class="pre">데이터 준비 완료 + 관리자 2인(직무 분리)</td>
+  <td class="name"><strong>└ 준비도 보드</strong></td>
+  <td class="where"><code>업무 데이터 준비 → 인스턴스 «열기»</code></td>
+  <td class="what">데이터셋별 준비 상태와 막힌 이유·다음 할 일.</td>
+  <td class="act">결속 · 파일 올리기 · 판 인증</td>
+  <td class="pre">인스턴스</td>
   <td class="verdict">
     <label><input type="radio" name="v_s23" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s23" value="ng"><span class="p ng">안 열림</span></label>
@@ -471,13 +471,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s23" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr data-id="s24" class="">
+<tr data-id="s24" class=" sub">
   <td class="no">24</td>
-  <td class="name"><strong>2️⃣ 계산 실행 승인</strong></td>
-  <td class="where"><code>전체 메뉴 → 2️⃣ 계산 실행 승인</code></td>
-  <td class="what">산식을 실제로 돌려도 되는지 사람이 승인한다 — 누르기 전까지 계산은 «막힘»으로 답한다.</td>
-  <td class="act">정의·단위·부호 확인 후 승인 · 철회</td>
-  <td class="pre">1단계 · 시스템 관리자 권한</td>
+  <td class="name"><strong>└ 키트로 앱 만들기</strong></td>
+  <td class="where"><code>인스턴스 화면 아래쪽</code></td>
+  <td class="what">키트가 정의한 산출물 앱을 계약→승인→생성→운영 전환으로 연다. 내부 코드는 시스템이 관리한다.</td>
+  <td class="act">계약 초안 · 승인 · 앱 만들기 · 운영으로 올리기 · 앱 열어 보기</td>
+  <td class="pre">데이터 준비 완료 + 관리자 2인(직무 분리)</td>
   <td class="verdict">
     <label><input type="radio" name="v_s24" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s24" value="ng"><span class="p ng">안 열림</span></label>
@@ -488,11 +488,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s25" class="">
   <td class="no">25</td>
-  <td class="name"><strong>3️⃣ 경로 계산</strong></td>
-  <td class="where"><code>전체 메뉴 → 3️⃣ 경로 계산</code></td>
-  <td class="what">승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산한다. 막히면 무엇이 없는지 말한다.</td>
-  <td class="act">시작점 선택 · 경로 조회 · 계산 · 안건 만들기</td>
-  <td class="pre">2단계</td>
+  <td class="name"><strong>2️⃣ 계산 실행 승인</strong></td>
+  <td class="where"><code>전체 메뉴 → 2️⃣ 계산 실행 승인</code></td>
+  <td class="what">산식을 실제로 돌려도 되는지 사람이 승인한다 — 누르기 전까지 계산은 «막힘»으로 답한다.</td>
+  <td class="act">정의·단위·부호 확인 후 승인 · 철회</td>
+  <td class="pre">1단계 · 시스템 관리자 권한</td>
   <td class="verdict">
     <label><input type="radio" name="v_s25" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s25" value="ng"><span class="p ng">안 열림</span></label>
@@ -503,11 +503,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s26" class="">
   <td class="no">26</td>
-  <td class="name"><strong>4️⃣ 의사결정 안건</strong></td>
-  <td class="where"><code>전체 메뉴 → 4️⃣ 의사결정 안건</code></td>
-  <td class="what">계산 결과를 3관점 검토서·실행 책임자·기한이 붙은 안건으로 만든다.</td>
-  <td class="act">안건 생성 · 검토 · 확정</td>
-  <td class="pre">3단계 (막힘 상태로는 안 만들어진다)</td>
+  <td class="name"><strong>3️⃣ 경로 계산</strong></td>
+  <td class="where"><code>전체 메뉴 → 3️⃣ 경로 계산</code></td>
+  <td class="what">승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산한다. 막히면 무엇이 없는지 말한다.</td>
+  <td class="act">시작점 선택 · 경로 조회 · 계산 · 안건 만들기</td>
+  <td class="pre">2단계</td>
   <td class="verdict">
     <label><input type="radio" name="v_s26" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s26" value="ng"><span class="p ng">안 열림</span></label>
@@ -516,14 +516,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s26" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr class="grp"><td colspan="8">⑤ 전체 메뉴 › 근거가 되는 자료 — 위 넷이 무엇을 보고 답하는지</td></tr>
 <tr data-id="s27" class="">
   <td class="no">27</td>
-  <td class="name"><strong>🗂 기준정보 마스터</strong></td>
-  <td class="where"><code>전체 메뉴 → 기준정보 마스터</code></td>
-  <td class="what">자재·공정·설비·KPI 골든 레코드. 확정 조회로 모든 에이전트에 주입(모델 불변).</td>
-  <td class="act">조회 · 등록 · 개정</td>
-  <td class="pre">없음</td>
+  <td class="name"><strong>4️⃣ 의사결정 안건</strong></td>
+  <td class="where"><code>전체 메뉴 → 4️⃣ 의사결정 안건</code></td>
+  <td class="what">계산 결과를 3관점 검토서·실행 책임자·기한이 붙은 안건으로 만든다.</td>
+  <td class="act">안건 생성 · 검토 · 확정</td>
+  <td class="pre">3단계 (막힘 상태로는 안 만들어진다)</td>
   <td class="verdict">
     <label><input type="radio" name="v_s27" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s27" value="ng"><span class="p ng">안 열림</span></label>
@@ -534,11 +533,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s28" class="">
   <td class="no">28</td>
-  <td class="name"><strong>📚 지식 허브</strong></td>
-  <td class="where"><code>전체 메뉴 → 지식 허브</code></td>
-  <td class="what">도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결한다.</td>
-  <td class="act">지식팩 만들기 · 문서 등록 · 승인</td>
-  <td class="pre">없음</td>
+  <td class="name"><strong>5️⃣ 경영 브리핑</strong></td>
+  <td class="where"><code>전체 메뉴 → 5️⃣ 경영 브리핑</code></td>
+  <td class="what">확정 안건·실행 상태·근거를 경영진이 읽는 한 흐름으로 정리한다.</td>
+  <td class="act">브리핑 조회 · 근거 확인 · 발간</td>
+  <td class="pre">4단계</td>
   <td class="verdict">
     <label><input type="radio" name="v_s28" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s28" value="ng"><span class="p ng">안 열림</span></label>
@@ -547,12 +546,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s28" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
+<tr class="grp"><td colspan="8">⑤ 전체 메뉴 › 근거가 되는 자료 — 핵심 여정이 무엇을 보고 답하는지</td></tr>
 <tr data-id="s29" class="">
   <td class="no">29</td>
-  <td class="name"><strong>📖 기술·제품 용어집</strong></td>
-  <td class="where"><code>전체 메뉴 → 기술·제품 용어집</code></td>
-  <td class="what">현재 용어 · 권장 사용자 용어 · 기술 표준명을 함께 보는 전환 사전.</td>
-  <td class="act">검색 · 용어 추가</td>
+  <td class="name"><strong>🗂 기준정보 마스터</strong></td>
+  <td class="where"><code>전체 메뉴 → 기준정보 마스터</code></td>
+  <td class="what">자재·공정·설비·KPI 골든 레코드. 확정 조회로 모든 에이전트에 주입(모델 불변).</td>
+  <td class="act">조회 · 등록 · 개정</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s29" value="ok"><span class="p ok">열림</span></label>
@@ -564,11 +564,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s30" class="">
   <td class="no">30</td>
-  <td class="name"><strong>🔗 연계/크로스워크</strong></td>
-  <td class="where"><code>전체 메뉴 → 연계/크로스워크</code></td>
-  <td class="what">외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사용자 승인.</td>
-  <td class="act">매핑 초안 · 승인</td>
-  <td class="pre">기준정보</td>
+  <td class="name"><strong>📚 지식 허브</strong></td>
+  <td class="where"><code>전체 메뉴 → 지식 허브</code></td>
+  <td class="what">도메인 참고자료(표준·논문·데이터)를 등록하고 프로젝트에 연결한다.</td>
+  <td class="act">지식팩 만들기 · 문서 등록 · 승인</td>
+  <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s30" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s30" value="ng"><span class="p ng">안 열림</span></label>
@@ -579,11 +579,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s31" class="">
   <td class="no">31</td>
-  <td class="name"><strong>🛡️ 데이터 거버넌스</strong></td>
-  <td class="where"><code>전체 메뉴 → 데이터 거버넌스</code></td>
-  <td class="what">조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약·외부지표 준비도.</td>
-  <td class="act">점검 · 조치</td>
-  <td class="pre">거버넌스 권한(없으면 누르기 전에 사유를 표시)</td>
+  <td class="name"><strong>🕸️ 업무 온톨로지</strong></td>
+  <td class="where"><code>전체 메뉴 → 업무 온톨로지</code></td>
+  <td class="what">업무 객체와 관계를 상관 그래프로 보고, 선택한 관계의 근거·승인·유효시점을 확인한다.</td>
+  <td class="act">그래프 탐색 · 관계 상세 · 근거 확인</td>
+  <td class="pre">조직 문맥</td>
   <td class="verdict">
     <label><input type="radio" name="v_s31" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s31" value="ng"><span class="p ng">안 열림</span></label>
@@ -592,14 +592,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s31" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr class="grp"><td colspan="8">⑥ 전체 메뉴 › 다르게 돌려 보기 — «만약 이렇다면»</td></tr>
 <tr data-id="s32" class="">
   <td class="no">32</td>
-  <td class="name"><strong>📈 시나리오 시뮬레이션</strong></td>
-  <td class="where"><code>전체 메뉴 → 시나리오 시뮬레이션</code></td>
-  <td class="what">환율·도입 지연·전력단가 → 생산량·재고·현금·손익 (고정 기준선 기준).</td>
-  <td class="act">가정 입력 · 실행 · 비교</td>
-  <td class="pre">기준선 봉인</td>
+  <td class="name"><strong>🌐 대외 인텔리전스</strong></td>
+  <td class="where"><code>전체 메뉴 → 대외 인텔리전스</code></td>
+  <td class="what">회사·사업 기준으로 외부 자료를 수집하고 후보를 검토해 확정 지표와 근거로 승격한다.</td>
+  <td class="act">수집 실행 · 후보 검토 · 승인/반려</td>
+  <td class="pre">회사 구성 · 수집 대상</td>
   <td class="verdict">
     <label><input type="radio" name="v_s32" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s32" value="ng"><span class="p ng">안 열림</span></label>
@@ -610,11 +609,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s33" class="">
   <td class="no">33</td>
-  <td class="name"><strong>📊 경영계획</strong></td>
-  <td class="where"><code>전체 메뉴 → 경영계획</code></td>
-  <td class="what">계획·실적·시나리오를 동일 기준선에서 비교 (결정론적 계산, LLM 0콜).</td>
-  <td class="act">계획 등록 · 비교</td>
-  <td class="pre">기준선</td>
+  <td class="name"><strong>📖 기술·제품 용어집</strong></td>
+  <td class="where"><code>전체 메뉴 → 기술·제품 용어집</code></td>
+  <td class="what">현재 용어 · 권장 사용자 용어 · 기술 표준명을 함께 보는 전환 사전.</td>
+  <td class="act">검색 · 용어 추가</td>
+  <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s33" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s33" value="ng"><span class="p ng">안 열림</span></label>
@@ -625,11 +624,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s34" class="">
   <td class="no">34</td>
-  <td class="name"><strong>🧪 Shadow Mode</strong></td>
-  <td class="where"><code>전체 메뉴 → Shadow Mode</code></td>
-  <td class="what">새 규칙·모델을 지금 규칙과 «나란히» 돌려 결과를 비교한다 — 승인 전에는 운영에 쓰이지 않는다.</td>
-  <td class="act">나란히 실행 · 비교 · 채택/반려</td>
-  <td class="pre">비교할 대상</td>
+  <td class="name"><strong>🔗 연계/크로스워크</strong></td>
+  <td class="where"><code>전체 메뉴 → 연계/크로스워크</code></td>
+  <td class="what">외부 시스템(ERP/MES 등)의 키·필드를 기준정보와 매핑 — 초안→사용자 승인.</td>
+  <td class="act">매핑 초안 · 승인</td>
+  <td class="pre">기준정보</td>
   <td class="verdict">
     <label><input type="radio" name="v_s34" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s34" value="ng"><span class="p ng">안 열림</span></label>
@@ -638,14 +637,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s34" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr class="grp"><td colspan="8">⑦ 전체 메뉴 › 만든 것을 내보내기</td></tr>
 <tr data-id="s35" class="">
   <td class="no">35</td>
-  <td class="name"><strong>🚀 운영 승격</strong></td>
-  <td class="where"><code>전체 메뉴 → 운영 승격</code></td>
-  <td class="what">후보 판을 운영으로 — 계약·물질화·정적검사·승인·데이터 준비도 다섯 검사.</td>
-  <td class="act">승격 · 사유 입력</td>
-  <td class="pre">후보 판 존재 + 데이터 관리 권한</td>
+  <td class="name"><strong>🛡️ 데이터 거버넌스</strong></td>
+  <td class="where"><code>전체 메뉴 → 데이터 거버넌스</code></td>
+  <td class="what">조직 범위 노출·중복 기준정보·카탈로그 결손·데이터 계약·외부지표 준비도.</td>
+  <td class="act">점검 · 조치</td>
+  <td class="pre">거버넌스 권한(없으면 누르기 전에 사유를 표시)</td>
   <td class="verdict">
     <label><input type="radio" name="v_s35" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s35" value="ng"><span class="p ng">안 열림</span></label>
@@ -654,13 +652,14 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s35" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
+<tr class="grp"><td colspan="8">⑥ 전체 메뉴 › 다르게 돌려 보기 — «만약 이렇다면»</td></tr>
 <tr data-id="s36" class="">
   <td class="no">36</td>
-  <td class="name"><strong>🏢 워크스페이스</strong></td>
-  <td class="where"><code>전체 메뉴 → 워크스페이스</code></td>
-  <td class="what">부서 앱의 공유·복제와 전사 승격 게이트 — 계약·보안·품질·소유자 승인을 모두 통과해야 승격.</td>
-  <td class="act">공유 · 복제 · 승격 요청</td>
-  <td class="pre">앱 존재</td>
+  <td class="name"><strong>📈 시나리오 시뮬레이션</strong></td>
+  <td class="where"><code>전체 메뉴 → 시나리오 시뮬레이션</code></td>
+  <td class="what">환율·도입 지연·전력단가 → 생산량·재고·현금·손익 (고정 기준선 기준).</td>
+  <td class="act">가정 입력 · 실행 · 비교</td>
+  <td class="pre">기준선 봉인</td>
   <td class="verdict">
     <label><input type="radio" name="v_s36" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s36" value="ng"><span class="p ng">안 열림</span></label>
@@ -669,14 +668,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s36" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr class="grp"><td colspan="8">⑧ 전체 메뉴 › 누가 무엇을 판단하는가</td></tr>
 <tr data-id="s37" class="">
   <td class="no">37</td>
-  <td class="name"><strong>🏢 조직·권한</strong></td>
-  <td class="where"><code>전체 메뉴 → 조직·권한</code></td>
-  <td class="what">부서·사용자·권한. 부서는 기준정보라 개편하면 새 버전이 되고 구판은 이력으로 남는다.</td>
-  <td class="act">부서 만들기 · 사용자 추가 · 권한 부여</td>
-  <td class="pre">조직 관리 권한</td>
+  <td class="name"><strong>📊 경영계획</strong></td>
+  <td class="where"><code>전체 메뉴 → 경영계획</code></td>
+  <td class="what">계획·실적·시나리오를 동일 기준선에서 비교 (결정론적 계산, LLM 0콜).</td>
+  <td class="act">계획 등록 · 비교</td>
+  <td class="pre">기준선</td>
   <td class="verdict">
     <label><input type="radio" name="v_s37" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s37" value="ng"><span class="p ng">안 열림</span></label>
@@ -687,11 +685,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s38" class="">
   <td class="no">38</td>
-  <td class="name"><strong>📜 업무표준</strong></td>
-  <td class="where"><code>전체 메뉴 → 업무표준</code></td>
-  <td class="what">에이전트의 법규·사규 — 무엇을 어떤 기준으로 평가해 다음 단계로 넘기는지. 개정 시 구판 보존.</td>
-  <td class="act">표준 등록 · 개정</td>
-  <td class="pre">없음</td>
+  <td class="name"><strong>🧪 Shadow Mode</strong></td>
+  <td class="where"><code>전체 메뉴 → Shadow Mode</code></td>
+  <td class="what">새 규칙·모델을 지금 규칙과 «나란히» 돌려 결과를 비교한다 — 승인 전에는 운영에 쓰이지 않는다.</td>
+  <td class="act">나란히 실행 · 비교 · 채택/반려</td>
+  <td class="pre">비교할 대상</td>
   <td class="verdict">
     <label><input type="radio" name="v_s38" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s38" value="ng"><span class="p ng">안 열림</span></label>
@@ -700,13 +698,14 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s38" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
+<tr class="grp"><td colspan="8">⑦ 전체 메뉴 › 만든 것을 내보내기</td></tr>
 <tr data-id="s39" class="">
   <td class="no">39</td>
-  <td class="name"><strong>⚙️ 에이전트 통제소</strong></td>
-  <td class="where"><code>전체 메뉴 → 에이전트 통제소</code></td>
-  <td class="what">각 에이전트의 역할·스킬·모델·순서·HOTL(전문가 개입)을 설정.</td>
-  <td class="act">모델 지정 · 순서 변경 · HOTL 설정</td>
-  <td class="pre">없음</td>
+  <td class="name"><strong>🚀 운영 승격</strong></td>
+  <td class="where"><code>전체 메뉴 → 운영 승격</code></td>
+  <td class="what">후보 판을 운영으로 — 계약·물질화·정적검사·승인·데이터 준비도 다섯 검사.</td>
+  <td class="act">승격 · 사유 입력</td>
+  <td class="pre">후보 판 존재 + 데이터 관리 권한</td>
   <td class="verdict">
     <label><input type="radio" name="v_s39" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s39" value="ng"><span class="p ng">안 열림</span></label>
@@ -717,11 +716,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s40" class="">
   <td class="no">40</td>
-  <td class="name"><strong>🏛 Agent Governance Center</strong></td>
-  <td class="where"><code>전체 메뉴 → Agent Governance Center</code></td>
-  <td class="what">조직 자산의 범위·권한·승인 — 누가 만들고 누가 승인해서 어디에 쓰이는가.</td>
-  <td class="act">자산 조회 · 승인</td>
-  <td class="pre">없음</td>
+  <td class="name"><strong>🏢 워크스페이스</strong></td>
+  <td class="where"><code>전체 메뉴 → 워크스페이스</code></td>
+  <td class="what">부서 앱의 공유·복제와 전사 승격 게이트 — 계약·보안·품질·소유자 승인을 모두 통과해야 승격.</td>
+  <td class="act">공유 · 복제 · 승격 요청</td>
+  <td class="pre">앱 존재</td>
   <td class="verdict">
     <label><input type="radio" name="v_s40" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s40" value="ng"><span class="p ng">안 열림</span></label>
@@ -730,13 +729,14 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s40" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
+<tr class="grp"><td colspan="8">⑧ 전체 메뉴 › 누가 무엇을 판단하는가</td></tr>
 <tr data-id="s41" class="">
   <td class="no">41</td>
-  <td class="name"><strong>🧬 AI 스킬 진화</strong></td>
-  <td class="where"><code>전체 메뉴 → AI 스킬 진화</code></td>
-  <td class="what">에이전트가 스스로 제안한 스킬 개선안 승인/반려.</td>
-  <td class="act">승인 · 반려</td>
-  <td class="pre">없음</td>
+  <td class="name"><strong>🏢 회사 구성</strong></td>
+  <td class="where"><code>전체 메뉴 → 회사 구성</code></td>
+  <td class="what">현재 회사의 법인 정보와 업무 흐름·보조정보 구성을 연결하고 개정한다.</td>
+  <td class="act">회사 등록 · 구성 연결 · 개정</td>
+  <td class="pre">회사 관리 권한</td>
   <td class="verdict">
     <label><input type="radio" name="v_s41" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s41" value="ng"><span class="p ng">안 열림</span></label>
@@ -745,14 +745,13 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s41" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr class="grp"><td colspan="8">⑨ 전체 메뉴 › 점검</td></tr>
 <tr data-id="s42" class="">
   <td class="no">42</td>
-  <td class="name"><strong>📈 LLM 텔레메트리</strong></td>
-  <td class="where"><code>전체 메뉴 → LLM 텔레메트리</code></td>
-  <td class="what">실제 사용 모델·폴백·소요시간 — 모델 불변성 실측.</td>
-  <td class="act">조회 · 필터</td>
-  <td class="pre">거버넌스 권한(없으면 누르기 전에 사유를 표시)</td>
+  <td class="name"><strong>🏢 조직·권한</strong></td>
+  <td class="where"><code>전체 메뉴 → 조직·권한</code></td>
+  <td class="what">부서·사용자·권한. 부서는 기준정보라 개편하면 새 버전이 되고 구판은 이력으로 남는다.</td>
+  <td class="act">부서 만들기 · 사용자 추가 · 권한 부여</td>
+  <td class="pre">조직 관리 권한</td>
   <td class="verdict">
     <label><input type="radio" name="v_s42" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s42" value="ng"><span class="p ng">안 열림</span></label>
@@ -761,13 +760,12 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s42" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
-<tr class="grp"><td colspan="8">⑩ Software Factory — 업무 SW 만들기 안쪽</td></tr>
 <tr data-id="s43" class="">
   <td class="no">43</td>
-  <td class="name"><strong>프로젝트 시작</strong></td>
-  <td class="where"><code>본문 «🏭 업무 SW 만들기» → 새 프로젝트</code></td>
-  <td class="what">요구사항을 받아 워크플로우를 시작한다.</td>
-  <td class="act">템플릿 선택 · 요구 입력 · 시작</td>
+  <td class="name"><strong>📜 업무표준</strong></td>
+  <td class="where"><code>전체 메뉴 → 업무표준</code></td>
+  <td class="what">에이전트의 법규·사규 — 무엇을 어떤 기준으로 평가해 다음 단계로 넘기는지. 개정 시 구판 보존.</td>
+  <td class="act">표준 등록 · 개정</td>
   <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s43" value="ok"><span class="p ok">열림</span></label>
@@ -779,11 +777,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s44" class="">
   <td class="no">44</td>
-  <td class="name"><strong>진행 상황</strong></td>
-  <td class="where"><code>프로젝트 화면</code></td>
-  <td class="what">단계별 에이전트 진행과 HOTL(사람 개입) 지점.</td>
-  <td class="act">승인 · 반려 · 재실행</td>
-  <td class="pre">프로젝트</td>
+  <td class="name"><strong>⚙️ 에이전트 통제소</strong></td>
+  <td class="where"><code>전체 메뉴 → 에이전트 통제소</code></td>
+  <td class="what">각 에이전트의 역할·스킬·모델·순서·HOTL(전문가 개입)을 설정.</td>
+  <td class="act">모델 지정 · 순서 변경 · HOTL 설정</td>
+  <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s44" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s44" value="ng"><span class="p ng">안 열림</span></label>
@@ -794,11 +792,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s45" class="">
   <td class="no">45</td>
-  <td class="name"><strong>산출물·릴리스</strong></td>
-  <td class="where"><code>프로젝트 화면 → 산출물</code></td>
-  <td class="what">생성된 코드·문서와 게시된 릴리스.</td>
-  <td class="act">미리보기 · 게시 · 승격</td>
-  <td class="pre">프로젝트 완료</td>
+  <td class="name"><strong>🏛 Agent Governance Center</strong></td>
+  <td class="where"><code>전체 메뉴 → Agent Governance Center</code></td>
+  <td class="what">조직 자산의 범위·권한·승인 — 누가 만들고 누가 승인해서 어디에 쓰이는가.</td>
+  <td class="act">자산 조회 · 승인</td>
+  <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s45" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s45" value="ng"><span class="p ng">안 열림</span></label>
@@ -809,11 +807,11 @@ tr.fail { background:#fdf4f3; }
 </tr>
 <tr data-id="s46" class="">
   <td class="no">46</td>
-  <td class="name"><strong>Studio 화면</strong></td>
-  <td class="where"><code>프로젝트 열기</code></td>
-  <td class="what">프로젝트 작업 공간. **여기서도 전체 메뉴 20개가 전부 열려야 한다.**</td>
-  <td class="act">메뉴 이동 · 편집</td>
-  <td class="pre">프로젝트</td>
+  <td class="name"><strong>🧬 AI 스킬 진화</strong></td>
+  <td class="where"><code>전체 메뉴 → AI 스킬 진화</code></td>
+  <td class="what">에이전트가 스스로 제안한 스킬 개선안 승인/반려.</td>
+  <td class="act">승인 · 반려</td>
+  <td class="pre">없음</td>
   <td class="verdict">
     <label><input type="radio" name="v_s46" value="ok"><span class="p ok">열림</span></label>
     <label><input type="radio" name="v_s46" value="ng"><span class="p ng">안 열림</span></label>
@@ -822,13 +820,90 @@ tr.fail { background:#fdf4f3; }
   </td>
   <td class="note"><textarea rows="2" data-note="s46" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
 </tr>
+<tr class="grp"><td colspan="8">⑨ 전체 메뉴 › 점검</td></tr>
+<tr data-id="s47" class="">
+  <td class="no">47</td>
+  <td class="name"><strong>📈 LLM 텔레메트리</strong></td>
+  <td class="where"><code>전체 메뉴 → LLM 텔레메트리</code></td>
+  <td class="what">실제 사용 모델·폴백·소요시간 — 모델 불변성 실측.</td>
+  <td class="act">조회 · 필터</td>
+  <td class="pre">거버넌스 권한(없으면 누르기 전에 사유를 표시)</td>
+  <td class="verdict">
+    <label><input type="radio" name="v_s47" value="ok"><span class="p ok">열림</span></label>
+    <label><input type="radio" name="v_s47" value="ng"><span class="p ng">안 열림</span></label>
+    <label><input type="radio" name="v_s47" value="part"><span class="p part">열리나 빔</span></label>
+    <label><input type="radio" name="v_s47" value="na"><span class="p na">권한 없음</span></label>
+  </td>
+  <td class="note"><textarea rows="2" data-note="s47" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
+</tr>
+<tr class="grp"><td colspan="8">⑩ Software Factory — 업무 SW 만들기 안쪽</td></tr>
+<tr data-id="s48" class="">
+  <td class="no">48</td>
+  <td class="name"><strong>프로젝트 시작</strong></td>
+  <td class="where"><code>본문 «🏭 업무 SW 만들기» → 새 프로젝트</code></td>
+  <td class="what">요구사항을 받아 워크플로우를 시작한다.</td>
+  <td class="act">템플릿 선택 · 요구 입력 · 시작</td>
+  <td class="pre">없음</td>
+  <td class="verdict">
+    <label><input type="radio" name="v_s48" value="ok"><span class="p ok">열림</span></label>
+    <label><input type="radio" name="v_s48" value="ng"><span class="p ng">안 열림</span></label>
+    <label><input type="radio" name="v_s48" value="part"><span class="p part">열리나 빔</span></label>
+    <label><input type="radio" name="v_s48" value="na"><span class="p na">권한 없음</span></label>
+  </td>
+  <td class="note"><textarea rows="2" data-note="s48" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
+</tr>
+<tr data-id="s49" class="">
+  <td class="no">49</td>
+  <td class="name"><strong>진행 상황</strong></td>
+  <td class="where"><code>프로젝트 화면</code></td>
+  <td class="what">단계별 에이전트 진행과 HOTL(사람 개입) 지점.</td>
+  <td class="act">승인 · 반려 · 재실행</td>
+  <td class="pre">프로젝트</td>
+  <td class="verdict">
+    <label><input type="radio" name="v_s49" value="ok"><span class="p ok">열림</span></label>
+    <label><input type="radio" name="v_s49" value="ng"><span class="p ng">안 열림</span></label>
+    <label><input type="radio" name="v_s49" value="part"><span class="p part">열리나 빔</span></label>
+    <label><input type="radio" name="v_s49" value="na"><span class="p na">권한 없음</span></label>
+  </td>
+  <td class="note"><textarea rows="2" data-note="s49" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
+</tr>
+<tr data-id="s50" class="">
+  <td class="no">50</td>
+  <td class="name"><strong>산출물·릴리스</strong></td>
+  <td class="where"><code>프로젝트 화면 → 산출물</code></td>
+  <td class="what">생성된 코드·문서와 게시된 릴리스.</td>
+  <td class="act">미리보기 · 게시 · 승격</td>
+  <td class="pre">프로젝트 완료</td>
+  <td class="verdict">
+    <label><input type="radio" name="v_s50" value="ok"><span class="p ok">열림</span></label>
+    <label><input type="radio" name="v_s50" value="ng"><span class="p ng">안 열림</span></label>
+    <label><input type="radio" name="v_s50" value="part"><span class="p part">열리나 빔</span></label>
+    <label><input type="radio" name="v_s50" value="na"><span class="p na">권한 없음</span></label>
+  </td>
+  <td class="note"><textarea rows="2" data-note="s50" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
+</tr>
+<tr data-id="s51" class="">
+  <td class="no">51</td>
+  <td class="name"><strong>Studio 화면</strong></td>
+  <td class="where"><code>프로젝트 열기</code></td>
+  <td class="what">프로젝트 작업 공간. <strong>여기서도 전체 메뉴 26개가 전부 열려야 한다.</strong></td>
+  <td class="act">메뉴 이동 · 편집</td>
+  <td class="pre">프로젝트</td>
+  <td class="verdict">
+    <label><input type="radio" name="v_s51" value="ok"><span class="p ok">열림</span></label>
+    <label><input type="radio" name="v_s51" value="ng"><span class="p ng">안 열림</span></label>
+    <label><input type="radio" name="v_s51" value="part"><span class="p part">열리나 빔</span></label>
+    <label><input type="radio" name="v_s51" value="na"><span class="p na">권한 없음</span></label>
+  </td>
+  <td class="note"><textarea rows="2" data-note="s51" placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지"></textarea></td>
+</tr>
   </tbody>
 </table>
 </main>
 
 <script>
 (function () {
-  var KEY = 'afs.screenmap.v1';
+  var KEY = 'laxs.screenmap.v2';
   var tb = document.getElementById('tb');
   var META = ['m_who', 'm_when', 'm_url', 'm_acct', 'm_rev'];
   var LABEL = { ok: '열림', ng: '안 열림', part: '열리나 빔', na: '권한 없음', '': '미확인' };
@@ -948,11 +1023,11 @@ tr.fail { background:#fdf4f3; }
     lines.push([cell('점검자'), cell(m.m_who), cell('점검일'), cell(m.m_when),
       cell('대상'), cell(m.m_url), cell('계정'), cell(m.m_acct),
       cell('판본'), cell(m.m_rev)].join(','));
-    dl('afs-screen-map.csv', lines.join('\r\n'), 'text/csv');
+    dl('laxs-screen-map-v1.0.csv', lines.join('\r\n'), 'text/csv');
   };
 
   document.getElementById('b_json').onclick = function () {
-    dl('afs-screen-map.json',
+    dl('laxs-screen-map-v1.0.json',
       JSON.stringify({ meta: state().meta, rows: rowsOut() }, null, 2), 'application/json');
   };
 
@@ -965,7 +1040,7 @@ tr.fail { background:#fdf4f3; }
   var only = false, core = false;
   document.getElementById('b_only').onclick = function () {
     only = !only; core = false;
-    document.getElementById('b_core').textContent = '핵심 5단계만';
+    document.getElementById('b_core').textContent = '핵심 실행만';
     this.textContent = only ? '전체 보기' : '문제만 보기';
     if (!only) { showAll(); return; }
     tb.querySelectorAll('tr[data-id]').forEach(function (tr) {
@@ -977,7 +1052,7 @@ tr.fail { background:#fdf4f3; }
   document.getElementById('b_core').onclick = function () {
     core = !core; only = false;
     document.getElementById('b_only').textContent = '문제만 보기';
-    this.textContent = core ? '전체 보기' : '핵심 5단계만';
+    this.textContent = core ? '전체 보기' : '핵심 실행만';
     if (!core) { showAll(); return; }
     /* ★ 핵심 그룹(①)에 속한 행만 남긴다 — 그룹 머리를 만나면 상태가 바뀐다. */
     var inCore = false;

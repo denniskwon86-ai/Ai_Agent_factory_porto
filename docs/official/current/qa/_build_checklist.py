@@ -1,15 +1,21 @@
 # -*- coding: utf-8 -*-
-"""기능 점검표 HTML 생성. ★ 항목 정본은 `items.py` 하나다."""
+"""기능 점검표 HTML 생성. ★ 항목 정본은 `_checklist_items.py` 하나다."""
 import html
 import io
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _checklist_items import GROUPS
 
 E = html.escape
-OUT = r"C:\WorkSpace\gemini_agent_team_verG\docs\official\current\qa\functional-checklist.html"
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "functional-checklist.html")
+
+def rich(value):
+    """Escape first, then render the one emphasis form used by the canonical items."""
+    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", E(value))
 
 rows = []
 n = 0
@@ -37,13 +43,12 @@ for gi, (group, items) in enumerate(GROUPS):
             '  <td class="note"><textarea rows="2" data-note="{rid}" '
             'placeholder="특이사항 — 무엇이 어떻게 달랐는지, 화면·값·재현 방법">'
             '</textarea></td>\n'
-            '</tr>'.format(rid=rid, gi=gi, n=n, how=E(how), act=E(act), exp=E(expect)))
+            '</tr>'.format(rid=rid, gi=gi, n=n, how=E(how), act=rich(act), exp=rich(expect)))
 
 TOTAL = n
 TABLE = "\n".join(rows)
 
-TPL = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_checklist_tpl.html"),
-              encoding="utf-8").read()
+TPL = io.open(os.path.join(HERE, "_checklist_tpl.html"), encoding="utf-8").read()
 DOC = TPL.replace("__TABLE__", TABLE).replace("__TOTAL__", str(TOTAL))
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 io.open(OUT, "w", encoding="utf-8").write(DOC)

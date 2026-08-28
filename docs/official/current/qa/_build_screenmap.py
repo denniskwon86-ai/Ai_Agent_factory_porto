@@ -3,6 +3,7 @@
 import html
 import io
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -11,6 +12,10 @@ from _screenmap_items import GROUPS
 E = html.escape
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "screen-map.html")
+
+def rich(value):
+    """Escape first, then render the one emphasis form used by the canonical items."""
+    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", E(value))
 
 rows = []
 n = 0
@@ -43,7 +48,7 @@ for gi, (group, items) in enumerate(GROUPS):
             'placeholder="특이사항 — 어디서 막혔는지, 무엇이 비었는지, 문구가 이상한지">'
             '</textarea></td>\n'
             '</tr>'.format(rid=rid, sub=sub, n=n, name=E(name), where=E(where),
-                           what=E(what), act=E(act), pre=E(pre)))
+                           what=rich(what), act=rich(act), pre=rich(pre)))
 
 TABLE = "\n".join(rows)
 TPL = io.open(os.path.join(HERE, "_screenmap_tpl.html"), encoding="utf-8").read()
