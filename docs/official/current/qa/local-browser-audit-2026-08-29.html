@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LAXS-M 로컬 브라우저 실측 보고서 · 2026-08-29</title>
+  <link rel="stylesheet" href="../../assets/official.css">
+  <style>
+    .evidence { width:100%; display:block; border:1px solid var(--line); border-radius:13px; }
+    .compact td,.compact th { padding:11px 12px; }
+    .verdict { font-weight:850; }
+    .pass { color:#0b6659; } .fail { color:#a3112c; } .partial { color:#7a4b08; }
+  </style>
+</head>
+<body>
+  <header class="topbar"><div class="topbar-inner">
+    <a class="brand" href="../index.html">LAXS-<span>M</span></a>
+    <nav class="topnav"><a href="index.html">QA 문서</a><a href="screen-map.html">화면 지도</a><a href="functional-checklist.html">기능 점검표</a></nav>
+  </div></header>
+  <section class="hero"><div class="hero-inner">
+    <p class="eyebrow">Local Browser Audit · v1.0 · 2026-08-29</p>
+    <h1>메뉴는 모두 열렸지만, 시연 준비 완료로 판정할 수는 없습니다.</h1>
+    <p>실제 로컬 화면에서 접근성·표시 데이터·공통 UI를 확인하고, 통과와 미완료를 분리한 실행 기록입니다.</p>
+    <div class="hero-meta"><span>화면 http://127.0.0.1:5173</span><span>API http://127.0.0.1:8080</span><span>Edge · 1440/1200/1024px</span><span>관리자 권한 · 읽기 중심</span></div>
+  </div></section>
+  <main class="shell">
+    <section>
+      <h2>판정 요약</h2>
+      <div class="grid four">
+        <div class="metric"><strong>26/26</strong><span>전체 메뉴 접근</span></div>
+        <div class="metric"><strong>0건</strong><span>메뉴 순회 중 HTTP 4xx/5xx</span></div>
+        <div class="metric"><strong>7/7</strong><span>상단 주요 화면 자비스 표시</span></div>
+        <div class="metric"><strong class="partial">부분 통과</strong><span>로컬 시연 준비성</span></div>
+      </div>
+      <div class="callout warn" style="margin-top:18px"><strong>결론</strong><br>메뉴 접근성과 1440px 기본 골격은 통과했습니다. 그러나 1024px 잘림, 시뮬레이션 기준값 단절, 대외 인텔리전스 정본 부재, 내부 코드와 철회 문구 노출 때문에 실제 시연 완료로는 판정하지 않습니다.</div>
+    </section>
+
+    <section>
+      <h2>확인 범위</h2>
+      <div class="table-wrap"><table class="compact"><thead><tr><th>대상</th><th>실측 결과</th><th>판정</th></tr></thead><tbody>
+        <tr><td>로그인·회사 문맥</td><td>권혁일 계정 로그인, `LS MnM · 권한 범위 전체`, `REAL` 표시</td><td class="verdict pass">통과</td></tr>
+        <tr><td>전체 메뉴</td><td>기본 진입 2개와 전체 메뉴 24개를 실제 클릭. 모든 화면 열림, 오류 경계와 4xx/5xx 없음</td><td class="verdict pass">통과</td></tr>
+        <tr><td>상단 주요 화면</td><td>경영 홈·앱 제작·앱 운영·시뮬레이션·결정·보고·지식·에이전트에서 자비스와 질문 입력 확인</td><td class="verdict pass">통과</td></tr>
+        <tr><td>지식</td><td>지식팩 4개·문서 27건. 배터리소재 팩 선택 시 문서 4건과 등록일·설명이 문맥에 반영</td><td class="verdict pass">통과</td></tr>
+        <tr><td>업무 온톨로지</td><td>그래프·승인 관계·관계 상세가 표시됨. 조회/표시 28/29, 현재 정본 결속 26/29</td><td class="verdict partial">일부</td></tr>
+        <tr><td>대외 인텔리전스</td><td>지표 6개 중 사용 가능 0, 회사 조사 프로필·승인 원천·후보 0, 봇 1/4만 예행 가능</td><td class="verdict fail">문제</td></tr>
+        <tr><td>시뮬레이션</td><td>인증판 35개 선택은 가능하지만 현재 계약키가 기준값 추출기의 자료명과 이어지지 않아 7개 기준값이 모두 비어 있음</td><td class="verdict fail">문제</td></tr>
+        <tr><td>반응형 UI</td><td>1440px 정상. 1024px에서 중앙 제목·회사 구성 버튼·상단 제어 일부가 우측 자비스 아래로 잘림</td><td class="verdict fail">문제</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section>
+      <h2>수정 필요 항목</h2>
+      <div class="table-wrap"><table class="compact"><thead><tr><th>ID</th><th>우선순위</th><th>발견</th><th>완료 조건</th></tr></thead><tbody>
+        <tr><td>QA-UI-01</td><td><span class="status blocked">P1</span></td><td>1024px에서 우측 자비스가 중앙 콘텐츠를 가리고 상단 제어가 잘린다.</td><td>1024·1280·1440px에서 헤더·중앙·우측 레일의 겹침과 비의도 잘림 0건</td></tr>
+        <tr><td>QA-SIM-01</td><td><span class="status blocked">P1</span></td><td>35개 인증판을 고른 뒤에도 `material_arrivals`·`financials`·`purchase_orders` 자료가 없다고 판정해 기준값을 채우지 못한다.</td><td>현재 업무키트 계약키와 시뮬레이션 입력 투영을 연결하고, 기준값 7개가 인증판 근거와 함께 채워짐</td></tr>
+        <tr><td>QA-EXT-01</td><td><span class="status blocked">P1</span></td><td>회사 조사 프로필·승인 원천·검토 후보가 모두 0이며 기준계획 사용 가능 지표도 0/6이다.</td><td>합성 회사 프로필과 승인 가능한 원천·후보를 준비하고, 최소 한 지표가 출처·발표판과 함께 검토 흐름을 통과</td></tr>
+        <tr><td>QA-CONTENT-01</td><td><span class="status blocked">P1</span></td><td>경영 브리핑 첫 항목에 사용하지 않기로 한 「입력 불일치 사례」와 `shadow_run` 내부 ID가 노출된다.</td><td>업무 효과 중심 제목으로 교체하고 내부 ID는 화면에서 제거. 근거는 사람용 명칭으로 연결</td></tr>
+        <tr><td>QA-ID-01</td><td><span class="status blocked">P1</span></td><td>앱 운영 목록과 상세에 `APP-01`~`APP-05` 내부 코드가 노출된다.</td><td>업무명·상태·소유 조직으로 식별하고 내부 코드는 상세 진단 권한에서만 선택적으로 표시</td></tr>
+        <tr><td>QA-ONTO-01</td><td><span class="status limited">P2</span></td><td>29종 중 현재 정본 결속이 26종이며 폐지 관계 일부 객체는 「이름 미등록」이다.</td><td>미결속 3종과 사람용 명칭 공백의 담당·처리 시점을 명시하고 시연 경로에는 이름 미등록이 나오지 않음</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section>
+      <h2>화면 증거</h2>
+      <div class="grid two">
+        <div class="card"><h3>1024px 홈 — 중앙 콘텐츠 잘림</h3><img class="evidence" src="evidence/home-1024.jpg" alt="1024px 경영 홈 화면"></div>
+        <div class="card"><h3>1440px 앱 운영 — 공통 3열 골격</h3><img class="evidence" src="evidence/app-operations-1440.jpg" alt="1440px 앱 운영 화면"></div>
+      </div>
+      <div class="card" style="margin-top:17px"><h3>업무 온톨로지 — 실제 승인 관계 그래프</h3><img class="evidence" src="evidence/ontology-1440.jpg" alt="업무 온톨로지 화면"></div>
+    </section>
+
+    <section>
+      <h2>재현과 재검증 순서</h2>
+      <div class="flow">
+        <div class="flow-step"><b>01</b><strong>P1 보정</strong><span>반응형·ID·브리핑 문구</span></div>
+        <div class="flow-step"><b>02</b><strong>데이터 연결</strong><span>시뮬레이션 입력 투영</span></div>
+        <div class="flow-step"><b>03</b><strong>대외 정본</strong><span>프로필·원천·후보</span></div>
+        <div class="flow-step"><b>04</b><strong>집중 재검증</strong><span>위 6건만 먼저</span></div>
+        <div class="flow-step"><b>05</b><strong>전체 점검</strong><span>78개 기능 항목</span></div>
+        <div class="flow-step"><b>06</b><strong>실행 증거</strong><span>시뮬레이션 결과·근거</span></div>
+        <div class="flow-step"><b>07</b><strong>완료 판정</strong><span>미확인 0건</span></div>
+      </div>
+      <p class="print-note">이번 실행은 화면 접근과 조회 중심입니다. 승인·등록·삭제·시뮬레이션 실행처럼 운영 저장소를 바꾸는 행동은 수행하지 않았습니다. 기준 HEAD는 658c312bc이며 작업트리에는 별도 구현 변경이 존재했습니다.</p>
+    </section>
+  </main>
+  <div class="global-author-credit" style="padding:12px 24px;text-align:center;font:600 12px/1.5 Pretendard,Noto Sans KR,Malgun Gothic,sans-serif;color:#66758a;background:#f5f7fa;border-top:1px solid #dce4eb;">작성자 : 권혁일(Hyuk il Kwon)</div>
+</body>
+</html>
