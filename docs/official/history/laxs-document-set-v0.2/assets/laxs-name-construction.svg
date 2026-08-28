@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
+  <title id="title">LAXS 명칭 구성</title>
+  <desc id="desc">LS 사이에 AX를 배치하여 LAXS가 되는 과정을 보여 주는 도식</desc>
+  <rect width="1280" height="420" rx="28" fill="#F7F8FA"/>
+  <rect x="1" y="1" width="1278" height="418" rx="27" fill="none" stroke="#D8DEE8" stroke-width="2"/>
+
+  <text x="78" y="74" fill="#5C6779" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="2">NAME CONSTRUCTION</text>
+  <text x="78" y="258" fill="#0A1E5A" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="150" font-weight="850">L</text>
+  <text x="410" y="258" fill="#0A1E5A" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="150" font-weight="850">S</text>
+  <path d="M214 225 H352" stroke="#AAB4C3" stroke-width="5" stroke-linecap="round" stroke-dasharray="12 14"/>
+  <rect x="230" y="132" width="168" height="156" rx="18" fill="#FA002D"/>
+  <text x="264" y="242" fill="#FFFFFF" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="92" font-weight="850">AX</text>
+  <text x="226" y="332" fill="#5C6779" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="23" font-weight="700">AX embedded in LS</text>
+
+  <path d="M555 210 H676" stroke="#009BB4" stroke-width="6" stroke-linecap="round"/>
+  <path d="M660 194 L681 210 L660 226" fill="none" stroke="#009BB4" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="738" y="253" fill="#0A1E5A" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="148" font-weight="900" letter-spacing="-6">L</text>
+  <text x="832" y="253" fill="#FA002D" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="148" font-weight="900" letter-spacing="-6">AX</text>
+  <text x="1025" y="253" fill="#0A1E5A" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="148" font-weight="900">S</text>
+  <text x="746" y="326" fill="#0A1E5A" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="28" font-weight="750">LAXS</text>
+  <text x="825" y="326" fill="#5C6779" font-family="Pretendard, Noto Sans KR, Arial, sans-serif" font-size="25" font-weight="650">랙스 · AX at the core of LS</text>
+</svg>

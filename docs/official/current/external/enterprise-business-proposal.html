@@ -53,12 +53,19 @@
       <div class="risk-grid"><article class="risk"><b>“효과가 불확실하다”</b><p>그래서 한 개 실제 업무에서 시작합니다. 사전 성공 기준과 중단 기준을 합의해, 기대만으로 확산하지 않습니다.</p></article><article class="risk"><b>“데이터가 아직 완벽하지 않다”</b><p>그래서 초기에는 데이터 준비도를 함께 측정합니다. 정확도 보정은 실제 도입 전·운영 과정에서 데이터 오너와 수행합니다.</p></article><article class="risk"><b>“보안·권한 통제가 어렵다”</b><p>테넌트·조직 범위·권한·실제/가상 데이터 분리·감사 이력을 제품의 선행 조건으로 둡니다.</p></article><article class="risk"><b>“결국 맞춤 SI가 되는 것 아닌가”</b><p>설정, 공식 확장, 고객 전용 개발, 제품화 심사를 구분해 제품 코어가 고객별로 분열되지 않게 합니다.</p></article><article class="risk"><b>“ITO 역할이 축소되는 것 아닌가”</b><p>반대로 ITO는 연계·구축·운영·보안·SLA를 담당하는 첫 번째 인증 파트너로 역할을 확장합니다.</p></article><article class="risk"><b>“LLM 비용이 커지는 것 아닌가”</b><p>저비용 모델·규칙 검증·필요 구간의 상위 모델 심사를 조합하고, 호출 수가 아니라 승인된 결과당 비용을 관리합니다.</p></article></div>
     </div></section>
 
+    <section class="white" id="ai-trust-faq"><div class="wrap">
+      <div class="eyebrow">07 · AI Trust Q&amp;A</div><h2>AI 학습과 데이터 사용 경계를<br>계약·기술·운영으로 구분합니다.</h2>
+      <p class="lede">LAXS-M은 외부 모델이 회사 데이터를 자동 학습한다고 설명하지 않습니다. 승인된 자료와 업무 결과를 회사가 회수·감사할 수 있는 지식과 실행규칙으로 축적합니다.</p>
+      <div class="grid3"><article class="card" style="border-top:5px solid #087f91"><div class="tag">Q1 · LEARNING</div><h3>입력 데이터로 강화학습합니까?</h3><p>온라인 모델 가중치 학습은 사용하지 않습니다. 업무 결과를 기록하고 검색·규칙·스킬 개선안을 평가·승인해 버전으로 반영합니다.</p></article><article class="card" style="border-top:5px solid #e31b36"><div class="tag">Q2 · DATA</div><h3>외부 LLM에 데이터가 노출되지 않습니까?</h3><p>외부 API로 전달한 최소 문맥은 공급자가 처리합니다. 학습 금지 계약만으로 충분하지 않으며 등급별 차단·비식별화·보존·전송 감사를 함께 적용합니다.</p></article><article class="card" style="border-top:5px solid #0a1e5a"><div class="tag">Q3 · RAG</div><h3>사람이 검색 점수를 매깁니까?</h3><p>사람은 자료의 정본성과 사용 범위를 승인합니다. 분할·로컬 임베딩·검색·권한 필터·근거 연결은 시스템이 자동 수행합니다.</p></article></div>
+      <div class="callout" style="margin-top:22px">공급자·제품·엔드포인트에 따라 학습·보존·리전 정책이 다릅니다. 파일럿 계약에는 데이터 등급, 허용 모델, 보존 조건, 외부 전송 감사와 차단 책임을 명시합니다.</div>
+    </div></section>
+
     <section id="ask"><div class="wrap">
-      <div class="eyebrow">07 · Decision Requested</div><h2>본 제안은 다음 세 가지 결정을 요청합니다.</h2>
+      <div class="eyebrow">08 · Decision Requested</div><h2>본 제안은 다음 세 가지 결정을 요청합니다.</h2>
       <div class="ask"><article class="ask-main"><div class="tag" style="color:var(--lime)">권고안</div><h3>제한된 범위의 공식 파일럿을 승인하고, 결과를 근거로 다음 단계를 결정합니다.</h3><p>이 접근은 변화의 가치를 검증할 기회를 만들면서도, 전사 일괄 도입이나 조직 개편을 성급하게 결정하지 않게 합니다. 파일럿이 성공하면 그룹 차원의 제품 자산을 만들 수 있고, 기대에 미치지 못하면 손실을 제한한 채 보완 또는 중단할 수 있습니다.</p></article><div class="ask-list"><article class="card"><div class="tag">결정 1</div><h3>파일럿 스폰서와 대상 업무 지정</h3><p>현업·데이터·경영 판단을 대표할 책임 주체를 지정합니다.</p></article><article class="card"><div class="tag">결정 2</div><h3>공동 운영 체계 구성</h3><p>현업, DX, IT/ITO, 보안·데이터 담당자가 범위·위험·성과를 함께 검토합니다.</p></article><article class="card"><div class="tag">결정 3</div><h3>단계형 제품화 검토 원칙 승인</h3><p>두 번째 조직 재사용과 내부 정산이 검증되면 제품화·사내벤처·독립 조직 옵션을 공식 검토합니다.</p></article></div></div>
       <div class="callout">이 제안의 목적은 새로운 시스템을 하나 더 만드는 것이 아닙니다. 그룹이 보유한 데이터와 현업 지식을 더 빠르게 업무 가치와 경영 판단으로 전환할 수 있는, 반복 가능한 제품 역량을 확보하는 것입니다.</div>
     </div></section>
   </main>
   <footer class="footer"><div class="wrap"><b>AI Factory Studio 공식 파일럿·제품화 제안서</b><br>본 문서는 경영진·현업·IT/ITO·보안·전략 조직이 공통의 사실과 선택지를 바탕으로 공식 파일럿 여부를 판단할 수 있도록 작성되었습니다. 비용·기간·실제 데이터 범위는 대상 업무와 조직이 확정된 후 별도 실행계획으로 구체화합니다.</div></footer>
-</body>
+<div class="global-author-credit" style="padding:12px 24px;text-align:center;font:600 12px/1.5 Pretendard,Noto Sans KR,Malgun Gothic,sans-serif;color:#66758a;background:#f5f7fa;border-top:1px solid #dce4eb;">작성자 : 권혁일(Hyuk il Kwon)</div></body>
 </html>

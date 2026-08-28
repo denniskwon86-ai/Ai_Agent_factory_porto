@@ -1,0 +1,1334 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LAXS-M | 전사 AX 전략 확정 및 임원 의사결정 보고서 (Executive Edition)</title>
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <style>
+    :root {
+      --primary: #0F172A;       /* Deep Navy */
+      --primary-light: #1E293B; /* Slate Dark */
+      --secondary: #2563EB;     /* Executive Blue */
+      --secondary-soft: #EFF6FF;/* Ice Blue */
+      --accent: #0D9488;        /* Teal */
+      --accent-soft: #CCFBF1;   /* Soft Teal */
+      --amber: #D97706;        /* Executive Amber */
+      --amber-soft: #FEF3C7;
+      --red: #DC2626;          /* Red */
+      --red-soft: #FEE2E2;
+      --green: #15803D;
+      --green-soft: #DCFCE7;
+      --text: #1E293B;
+      --text-muted: #475569;
+      --bg: #94A3B8;           /* Contrast Slate Background for Slide Deck */
+      --slide-bg: #FFFFFF;     /* Pure White Slide Canvas */
+      --border: #CBD5E1;
+      --border-dark: #64748B;
+      --shadow: 0 25px 35px -5px rgba(0, 0, 0, 0.2), 0 15px 15px -5px rgba(0, 0, 0, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html {
+      scroll-behavior: smooth;
+      scroll-snap-type: y mandatory;
+    }
+    body {
+      margin: 0;
+      padding: 40px 0;
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.65;
+      font-size: 16px;
+      word-break: keep-all; /* Unnatural Korean word clipping prevention */
+      overflow-wrap: break-word;
+    }
+
+    /* 16:9 Premium Executive Slide Deck Canvas */
+    .slide-deck {
+      max-width: 1440px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 50px;
+    }
+
+    .slide {
+      width: 100%;
+      min-height: 840px; /* 16:9 Aspect Ratio Canvas */
+      background: var(--slide-bg);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 46px 56px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      overflow: visible;
+      scroll-snap-align: start;
+      border: 1px solid var(--border-dark);
+    }
+
+    /* Slide Header */
+    .slide-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 3px solid var(--primary);
+      padding-bottom: 14px;
+      margin-bottom: 20px;
+    }
+
+    .slide-title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .slide-eyebrow {
+      font-size: 14.5px;
+      font-weight: 800;
+      color: var(--secondary);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .slide-title {
+      font-size: 30px;
+      font-weight: 850;
+      color: var(--primary);
+      margin: 0;
+      letter-spacing: -0.03em;
+      line-height: 1.25;
+    }
+
+    .slide-num {
+      background: var(--primary);
+      color: #FFF;
+      font-size: 14px;
+      font-weight: 800;
+      padding: 6px 16px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+
+    /* Slide Body Layout */
+    .slide-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    /* Cover Slide Specifics */
+    .cover-slide {
+      background: linear-gradient(135deg, #0F172A 0%, #1E293B 60%, #090D16 100%);
+      color: #FFF;
+    }
+    .cover-slide .slide-header {
+      border-bottom-color: rgba(255,255,255,0.25);
+    }
+    .cover-slide .slide-eyebrow {
+      color: #38BDF8;
+      font-size: 16px;
+    }
+    .cover-slide .slide-title {
+      color: #FFF;
+      font-size: 36px;
+      line-height: 1.25;
+    }
+    .cover-slide .slide-num {
+      background: rgba(255,255,255,0.18);
+      color: #38BDF8;
+      font-size: 15px;
+    }
+
+    .cover-hero {
+      margin: 14px 0;
+    }
+    .cover-hero h1 {
+      font-size: 42px;
+      font-weight: 850;
+      margin: 0 0 16px 0;
+      line-height: 1.22;
+      color: #FFF;
+      letter-spacing: -0.03em;
+    }
+    .cover-hero p {
+      font-size: 19px;
+      color: #CBD5E1;
+      max-width: 1100px;
+      line-height: 1.65;
+      margin: 0;
+    }
+
+    .cover-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .cover-card {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.16);
+      padding: 18px;
+      border-radius: 12px;
+    }
+    .cover-card label {
+      display: block;
+      font-size: 13px;
+      color: #38BDF8;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .cover-card strong {
+      display: block;
+      font-size: 17.5px;
+      color: #5EEAD4;
+      font-weight: 800;
+    }
+
+    /* Brand declaration slide */
+    .brand-declaration-lead {
+      max-width: 1050px;
+      margin: 0 0 22px;
+      color: var(--text-muted);
+      font-size: 18px;
+      line-height: 1.65;
+    }
+    .brand-declaration-grid {
+      display: grid;
+      grid-template-columns: .9fr 1.1fr;
+      gap: 20px;
+    }
+    .brand-name-panel, .brand-intent-panel {
+      min-height: 315px;
+      padding: 30px;
+      border-radius: 16px;
+    }
+    .brand-name-panel {
+      color: #FFF;
+      background: linear-gradient(145deg, #0F172A, #164E63);
+    }
+    .brand-intent-panel {
+      background: #F8FAFC;
+      border: 1.5px solid var(--border-dark);
+    }
+    .brand-panel-label {
+      display: block;
+      margin-bottom: 14px;
+      color: var(--secondary);
+      font-size: 13px;
+      font-weight: 850;
+      letter-spacing: .08em;
+    }
+    .brand-name-panel .brand-panel-label { color: #5EEAD4; }
+    .brand-wordmark { font-size: 54px; font-weight: 900; letter-spacing: -.05em; line-height: 1; }
+    .brand-pronunciation { margin-left: 10px; color: #CBD5E1; font-size: 18px; font-weight: 750; }
+    .brand-expansion { margin-top: 20px; color: #A7F3D0; font-size: 23px; font-weight: 850; }
+    .brand-panel-copy { margin: 12px 0 0; color: #CBD5E1; font-size: 16px; line-height: 1.65; }
+    .brand-intent-panel .brand-panel-copy { color: var(--text-muted); }
+    .brand-edition { margin-top: 22px; padding-top: 17px; border-top: 1px solid rgba(255,255,255,.18); }
+    .brand-edition strong { font-size: 22px; }
+    .brand-edition span { margin-left: 8px; color: #CBD5E1; font-size: 14px; }
+    .brand-intent-panel h3 { margin: 0; color: var(--primary); font-size: 28px; line-height: 1.35; }
+    .brand-intent-panel .intent-ko { margin-top: 20px; color: #0F766E; font-size: 22px; font-weight: 850; }
+    .brand-declaration-close {
+      margin-top: 20px;
+      padding: 16px 22px;
+      border-left: 5px solid var(--secondary);
+      border-radius: 4px 12px 12px 4px;
+      background: #ECFEFF;
+      color: var(--primary);
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1.55;
+    }
+
+    /* Content Components & Grids */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+
+    .card {
+      background: #FFF;
+      border: 1.5px solid var(--border-dark);
+      border-radius: 12px;
+      padding: 18px;
+    }
+
+    .card-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--primary);
+      margin: 0 0 8px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-desc {
+      font-size: 15px;
+      color: var(--text-muted);
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    .highlight-banner {
+      background: var(--secondary-soft);
+      border-left: 6px solid var(--secondary);
+      padding: 16px 20px;
+      border-radius: 0 10px 10px 0;
+      font-size: 17.5px;
+      font-weight: 750;
+      color: #1E3A8A;
+      margin-bottom: 18px;
+      line-height: 1.55;
+    }
+
+    /* Comparison Box */
+    .compare-bad { border-top: 5px solid var(--red); background: #FAFAFA; }
+    .compare-good { border-top: 5px solid var(--accent); background: var(--secondary-soft); }
+    .compare-tag {
+      display: inline-block;
+      font-size: 13.5px;
+      font-weight: 800;
+      padding: 4px 10px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+    .compare-bad .compare-tag { background: var(--red-soft); color: var(--red); }
+    .compare-good .compare-tag { background: var(--accent-soft); color: var(--accent); }
+
+    .bullet-list {
+      margin: 0;
+      padding-left: 20px;
+      font-size: 15px;
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .bullet-list li { margin-bottom: 6px; }
+
+    /* Tables */
+    .ppt-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14.5px;
+      margin: 8px 0;
+    }
+    .ppt-table th {
+      background: #F1F5F9;
+      color: var(--primary);
+      padding: 10px 14px;
+      border: 1px solid var(--border-dark);
+      text-align: left;
+      font-weight: 800;
+      font-size: 15px;
+    }
+    .ppt-table td {
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      color: var(--text);
+      vertical-align: top;
+      line-height: 1.55;
+    }
+    .ppt-table tr:nth-child(even) { background: #F8FAFC; }
+
+    /* Diagram Nodes */
+    .flow-nodes {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin: 14px 0;
+    }
+    .flow-node {
+      background: var(--primary);
+      color: #FFF;
+      padding: 14px 12px;
+      border-radius: 10px;
+      text-align: center;
+      flex: 1;
+    }
+    .flow-node strong { display: block; font-size: 15.5px; color: #5EEAD4; margin-bottom: 3px; }
+    .flow-node span { font-size: 13px; color: #CBD5E1; line-height: 1.4; display: block; }
+    .flow-arrow { font-size: 22px; font-weight: 900; color: var(--secondary); }
+
+    /* Key Strength Pill */
+    .strength-pill {
+      display: inline-block;
+      background: var(--primary);
+      color: #5EEAD4;
+      font-size: 12.5px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin-bottom: 6px;
+    }
+
+    /* Slide Footer */
+    .slide-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1.5px solid var(--border);
+      padding-top: 12px;
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .cover-slide .slide-footer {
+      border-top-color: rgba(255,255,255,0.2);
+      color: #94A3B8;
+    }
+
+    @media print {
+      body { background: none; padding: 0; }
+      .slide-deck { gap: 0; }
+      .slide {
+        page-break-after: always;
+        box-shadow: none;
+        border: none;
+        border-radius: 0;
+        min-height: 100vh;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="slide-deck">
+
+  <!-- SLIDE 1: COVER & EXECUTIVE PITCH -->
+  <div class="slide cover-slide" id="slide-1">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">LAXS-M · LAXS for LS MnM · Executive Edition</span>
+        <h2 class="slide-title">전사 AX 전략 확정 및 임원 의사결정 보고서</h2>
+      </div>
+      <span class="slide-num">Slide 01 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="cover-hero">
+        <h1>우리 회사의 AX 전략은 단순 AI 도입이 아닌,<br><span style="color:#38BDF8;">스스로 진화하는 경영 운영체계(OS) 구축입니다.</span></h1>
+        <p>
+          부서별 챗봇 도입이나 외주 SI 개발 방식은 기업 지식을 외부에 파편화시킵니다. 본 제안은 당사가 보유한 데이터와 업무 지식을 기반으로 현업이 직접 업무 SW와 경영 시뮬레이션을 생성하고, 의사결정 결과를 전사 자산으로 선순환시키는 <strong>자율진화형 경영 OS `LAXS-M`</strong> 승인안입니다.
+        </p>
+      </div>
+
+      <div class="card" style="background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18); color:#FFF; margin-top:10px; padding:16px;">
+        <div style="font-size:15px; font-weight:800; color:#5EEAD4; margin-bottom:4px;">🎯 핵심 승인 안건 (Executive Decision Pitch)</div>
+        <div style="font-size:16px; color:#F1F5F9; line-height:1.55;">
+          LAXS-M은 구호가 아닌 <strong>이미 주요 화면·데이터·Agent·통제 구조가 완성되어 가동 중인 실체화된 실행 플랫폼</strong>입니다. LAXS는 LS그룹 공통 AX 플랫폼을, LAXS-M은 그 첫 LS MnM 적용판을 뜻합니다. 소수정예 TF(제품총괄 1명 + Power User 3~4명)로 1호 수직 Closed Loop를 완주하고, 전사 확산 및 그룹 공통 LAXS로 성장시키는 로드맵을 승인 요청드립니다.
+        </div>
+      </div>
+
+      <div class="cover-summary-grid">
+        <div class="cover-card">
+          <label>Data as Corporate Memory</label>
+          <strong>데이터·지식의 전사 자산화</strong>
+        </div>
+        <div class="cover-card">
+          <label>Software by Business Users</label>
+          <strong>현업 주도 업무 SW 직접 생성</strong>
+        </div>
+        <div class="cover-card">
+          <label>Management Digital Twin</label>
+          <strong>0% 리스크 미래 손익 시뮬레이션</strong>
+        </div>
+        <div class="cover-card">
+          <label>Closed Loop Governance</label>
+          <strong>결정 ➔ 실행 ➔ 효과 ➔ 학습 선순환</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Confidential · For Executive Review Only</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 2: BRAND DECLARATION -->
+  <div class="slide" id="slide-2">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">00. The Name and the Direction</span>
+        <h2 class="slide-title">이런 의미를 담아, 이런 지향점의 시스템을 제안합니다.</h2>
+      </div>
+      <span class="slide-num">Slide 02 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <p class="brand-declaration-lead">이름은 단순한 약어가 아니라 우리가 AX를 어디에 둘 것인지에 대한 선언입니다. AX를 별도의 도구로 덧붙이는 것이 아니라 LS의 일하는 방식과 경영체계 안에 내재화하고, 현업에서 만들어지는 실행과 경영진의 판단을 하나의 흐름으로 연결하고자 합니다.</p>
+      <div class="brand-declaration-grid">
+        <div class="brand-name-panel">
+          <span class="brand-panel-label">NAME · 명칭의 의미</span>
+          <div><span class="brand-wordmark">LAXS</span><span class="brand-pronunciation">랙스</span></div>
+          <div class="brand-expansion">AX embedded in LS</div>
+          <p class="brand-panel-copy">LS의 일과 경영에 AX를 내재화한다는 의미입니다. AX가 일부 업무의 보조 기능에 머무르지 않고 회사의 데이터·업무·지식·의사결정 구조 안에서 작동하도록 하겠다는 뜻을 담았습니다.</p>
+          <div class="brand-edition"><strong>LAXS-M</strong><span>랙스-엠 · LS MnM에서 시작하는 첫 적용판</span></div>
+        </div>
+        <div class="brand-intent-panel">
+          <span class="brand-panel-label">DIRECTION · 시스템의 지향점</span>
+          <h3>LAXS — AX at the core of LS</h3>
+          <div class="intent-ko">현업의 실행과 경영의 판단을 AX로 연결하다.</div>
+          <p class="brand-panel-copy">현업이 생성한 데이터와 업무 성과가 경영의 시뮬레이션과 판단으로 이어지고, 그 결정과 실행 결과가 다시 현업의 다음 업무와 회사의 지식으로 축적되는 구조를 지향합니다.</p>
+        </div>
+      </div>
+      <div class="brand-declaration-close">이러한 의미와 지향을 담아, <strong>LS MnM의 현업과 경영을 하나의 AX 흐름으로 연결하는 첫 번째 시스템 ‘LAXS-M(랙스-엠)’</strong>을 제안합니다.</div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Confidential · For Executive Review Only</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 3: EXECUTIVE CRISIS & STRATEGIC CHOICE -->
+  <div class="slide" id="slide-3">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">01. Crisis & Strategic Choice</span>
+        <h2 class="slide-title">사후 결산 경영의 위기와 3대 AX 접근 방식 비교</h2>
+      </div>
+      <span class="slide-num">Slide 03 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="highlight-banner">
+        "급변하는 환율·원가·수요 환경에서 '월말 사후 결산' 중심의 경영 방식은 치명적입니다. 실행 전에 대안을 시뮬레이션하는 경영 OS 도입이 시급합니다."
+      </div>
+
+      <div class="grid-3" style="margin-bottom: 14px;">
+        <div class="card compare-bad">
+          <span class="compare-tag">❌ 방식 A (단편적 챗봇 도입)</span>
+          <div class="card-title">업무별 AI 기능 파편화</div>
+          <div class="card-desc">
+            챗봇·문서요약이 개별 존재하지만 사내 데이터 및 경영 결정과 연결되지 않아, 과제 종료 후 회사의 잔존 자산으로 축적되지 못하고 소멸함.
+          </div>
+        </div>
+        <div class="card compare-bad">
+          <span class="compare-tag">❌ 방식 B (대형 외주 SI 개발)</span>
+          <div class="card-title">외부 SI 중심 반복 개발</div>
+          <div class="card-desc">
+            현업 요구 변경 시마다 외주 개발자에 재설명이 필요하여 핵심 업무 노하우가 외부에 유출되고, 개발 지연 및 막대한 SI 비용이 지속 발생함.
+          </div>
+        </div>
+        <div class="card compare-good">
+          <span class="compare-tag">✅ 방식 C (🏆 LAXS-M)</span>
+          <div class="card-title">현업 주도 자율진화 경영 OS</div>
+          <div class="card-desc">
+            전사 지식을 기반으로 현업이 직접 앱·시뮬레이션을 만들고, 의사결정 근거와 결과를 회사의 영구 자산으로 선순환시키는 압도적 해결책.
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="background:#F8FAFC; border-left:5px solid var(--primary); padding:14px;">
+        <div style="font-size:16px; font-weight:800; color:var(--primary); margin-bottom:3px;">💡 임원진이 확보해야 할 핵심 경쟁력 (Strategic Thesis)</div>
+        <div style="font-size:15px; color:var(--text); line-height:1.55;">
+          "우리 회사의 AX 전략은 'AI를 어디에 적용할 것인가'가 아니라, <strong>'회사가 환경 변화에 맞춰 필요한 디지털 업무와 경영 판단을 얼마나 빠르게 스스로 만들어낼 수 있는가'</strong>를 내재화하는 것입니다."
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section I: Crisis & Strategic Choice</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 4: CORE STRENGTHS OF LAXS-M -->
+  <div class="slide" id="slide-4">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">02. Unrivaled Strengths</span>
+        <h2 class="slide-title">타 솔루션이 모방할 수 없는 LAXS-M 5대 독보적 강점</h2>
+      </div>
+      <span class="slide-num">Slide 04 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="grid-5" style="gap:12px;">
+        <div class="card" style="border-top:5px solid var(--secondary); padding:16px;">
+          <span class="strength-pill">STRENGTH 01</span>
+          <div class="card-title" style="font-size:16.5px;">기업 지식 주권 확보</div>
+          <div class="card-desc" style="font-size:13.5px;">
+            MDM, 데이터 카탈로그, 용어 Crosswalk를 회사가 직접 통제하여 모든 AI가 동일한 전사 문맥체계를 공유함.
+          </div>
+        </div>
+
+        <div class="card" style="border-top:5px solid var(--secondary); padding:16px;">
+          <span class="strength-pill">STRENGTH 02</span>
+          <div class="card-title" style="font-size:16.5px;">현업 SW 즉시 생성</div>
+          <div class="card-desc" style="font-size:13.5px;">
+            개발자 없이 Power User 요구 시 AI Agent가 기획·구현·QA를 수행해 사내 권한 상속 App-in-App으로 배포.
+          </div>
+        </div>
+
+        <div class="card" style="border-top:5px solid var(--accent); padding:16px;">
+          <span class="strength-pill">STRENGTH 03</span>
+          <div class="card-title" style="font-size:16.5px;">0% 리스크 Twin</div>
+          <div class="card-desc" style="font-size:13.5px;">
+            환율·원가·수요 변동이 손익과 현금에 미치는 영향을 사내 검증된 결정론 산식으로 100% 재현 시뮬레이션.
+          </div>
+        </div>
+
+        <div class="card" style="border-top:5px solid var(--accent); padding:16px;">
+          <span class="strength-pill">STRENGTH 04</span>
+          <div class="card-title" style="font-size:16.5px;">Decision Closed Loop</div>
+          <div class="card-desc" style="font-size:13.5px;">
+            시뮬레이션 ➔ 경영 승인 ➔ 실행 ➔ 사후 효과 검증이 피드백되어 회사의 판단 지능이 지속 상향 진화함.
+          </div>
+        </div>
+
+        <div class="card" style="border-top:5px solid var(--amber); padding:16px;">
+          <span class="strength-pill">STRENGTH 05</span>
+          <div class="card-title" style="font-size:16.5px;">Private RAG 통제</div>
+          <div class="card-desc" style="font-size:13.5px;">
+            외부 LLM에 사내 원본 데이터를 유출하지 않으며 최소 문맥 조합 및 난이도별 경제적 모델 라우팅으로 비용 절감.
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px; background:var(--secondary-soft); border-color:#BFDBFE; padding:16px;">
+        <div class="card-title" style="color:var(--secondary); font-size:17px;">🏆 최고 의사결정권자를 위한 가치 요약 (Executive Value Summary)</div>
+        <div style="font-size:15px; color:#1E3A8A; line-height:1.55;">
+          LAXS-M의 본질은 "화려한 AI 답변"이 아니라, <strong>"어떤 데이터·가정·권한·계산을 근거로 그 결론이 도출되었는지 100% 재현하고 설명할 수 있는 경영 판단 체계"</strong>를 제공하는 것입니다.
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section II: Core Strengths</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 5: 6 PILLARS OF AUTONOMOUS AX OS -->
+  <div class="slide" id="slide-5">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">03. Strategic Pillars</span>
+        <h2 class="slide-title">자율진화형 경영 OS를 완벽히 구축하는 전사 6대 기둥</h2>
+      </div>
+      <span class="slide-num">Slide 05 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="grid-3">
+        <div class="card" style="border-top: 5px solid var(--secondary);">
+          <div class="card-title">01. 기업 데이터·지식 주권</div>
+          <div class="card-desc">회사구조, MDM, 데이터 카탈로그, 업무표준, 문서, 용어와 관계를 회사가 직접 관리하고 모든 AI가 같은 의미체계를 공유하도록 통제합니다.</div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--secondary);">
+          <div class="card-title">02. 현업의 SW 생산능력</div>
+          <div class="card-desc">Power User가 요구를 설명하면 AI Agent가 기획·설계·구현·검증을 수행하고 결과는 사내 권한을 상속한 App-in-App으로 운영됩니다.</div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--secondary);">
+          <div class="card-title">03. 경영 Digital Twin</div>
+          <div class="card-desc">수요·환율·원료·에너지·고용 변화가 생산·재고·현금흐름·손익에 미치는 영향을 실제 데이터와 결정론 산식으로 실시간 비교 계산합니다.</div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--accent);">
+          <div class="card-title">04. Agentic Operating Model</div>
+          <div class="card-desc">업무별 AI Agent와 워크플로우를 자유롭게 생성·결합하고 Jarvis가 전사 문맥에서 질의, 진행, 품질과 토큰 비용을 거버넌스로 통제합니다.</div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--accent);">
+          <div class="card-title">05. Decision Closed Loop</div>
+          <div class="card-desc">시뮬레이션 결과가 검토서·회의·결정·실행과제로 이어지고 실제 효과와 피드백이 다음 지식과 모델 개선에 즉시 피드백되는 학습 구조입니다.</div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--accent);">
+          <div class="card-title">06. 전사 데이터·지식 통합</div>
+          <div class="card-desc">각 부서 앱에서 생성되는 데이터와 지식이 공통 기준과 권한 아래 전사 DB와 지식허브에 축적되어 부서 단절(Silo)을 완벽히 해소합니다.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section III: 6 Strategic Pillars</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 6: PLATFORM MODULES & ENGINE -->
+  <div class="slide" id="slide-6">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">04. Platform Architecture & Modules</span>
+        <h2 class="slide-title">실행 플랫폼: LAXS-M 8대 모듈 및 보안/비용 통제 엔진</h2>
+      </div>
+      <span class="slide-num">Slide 06 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="grid-4" style="gap:12px; margin-bottom:14px;">
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px; color:var(--secondary);">01. ENTERPRISE CONTEXT</div>
+          <div class="card-desc" style="font-size:13.5px;">지주사·회사·사업부·공장·가상회사·사용자 권한 최상위 통제</div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px; color:var(--secondary);">02. DATA & KNOWLEDGE</div>
+          <div class="card-desc" style="font-size:13.5px;">MDM, 카탈로그, Graph RAG, Lineage, 용어 Crosswalk 관리</div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px; color:var(--secondary);">03. SW FACTORY</div>
+          <div class="card-desc" style="font-size:13.5px;">상담·요구명확화·기획·WBS·자동구현·QA·Release 파이프라인</div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px; color:var(--secondary);">04. APP COLLABORATION</div>
+          <div class="card-desc" style="font-size:13.5px;">부서 간 앱 전달·승인·권한상속·업무연결 네트워크</div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px; color:var(--accent);">05. MANAGEMENT TWIN</div>
+          <div class="card-desc" style="font-size:13.5px;">Actual·Plan·Forecast·Scenario 결정론적 손익 연쇄 계산 엔진</div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px; color:var(--accent);">06. AGENT STUDIO</div>
+          <div class="card-desc" style="font-size:13.5px;">업무 Agent·Skill·Workflow 및 모델 비용/품질 라우팅 통제</div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px; color:var(--accent);">07. JARVIS</div>
+          <div class="card-desc" style="font-size:13.5px;">전사 질의·상담·진행설명·위험개입 및 전사 제어 거버넌스</div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px; color:var(--accent);">08. DECISION & REPORT</div>
+          <div class="card-desc" style="font-size:13.5px;">검토서·회의요청·실행과제·대내외 보고서 패키지 생성</div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="gap:14px;">
+        <div class="card" style="background:#F0F9FF; border-color:#BAE6FD; padding:14px;">
+          <div class="card-title" style="color:#0369A1; font-size:15.5px; margin-bottom:4px;">🔒 PRIVATE DATA ARCHITECTURE</div>
+          <div class="card-desc" style="font-size:13.5px;">
+            사내 민감문서와 원본 데이터는 사내 통제 DB/지식허브에서 관리합니다. 외부 LLM에 원본을 연결하지 않으며 RAG가 최소한의 문맥만 선별 조합하여 안전하게 추론을 지원합니다.
+          </div>
+        </div>
+        <div class="card" style="background:#FEF3C7; border-color:#FDE68A; padding:14px;">
+          <div class="card-title" style="color:#B45309; font-size:15.5px; margin-bottom:4px;">💡 MULTI-MODEL COST OPTIMIZATION</div>
+          <div class="card-desc" style="font-size:13.5px;">
+            단일 고가 모델에 모든 작업을 맡기지 않고 난이도와 보안등급에 따라 모델을 경제적으로 자동 선택하며, RAG·캐시·결정론 검증으로 토큰 사용량을 최소화합니다.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section IV: Platform Architecture</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 7: VIRTUAL ENTITY SANDBOX -->
+  <div class="slide" id="slide-7">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">05. Sandbox Simulation</span>
+        <h2 class="slide-title">가상 회사/사업부(Virtual Entity) 기반 신사업 & 경쟁사 시뮬레이션</h2>
+      </div>
+      <span class="slide-num">Slide 07 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="highlight-banner">
+        "실제 조직 변경 전에 가상의 사업부나 가상의 경쟁사를 생성하여 신사업 투자 손익 및 시장 변화를 사전에 시뮬레이션합니다."
+      </div>
+
+      <div class="grid-3" style="margin-bottom: 14px;">
+        <div class="card" style="border-top: 5px solid var(--secondary);">
+          <div class="card-title">왜 이 기능이 필수적인가? (Why Needed?)</div>
+          <div class="card-desc">
+            신규 공장 설립, 신제품 라인 투자, M&A 추진 시 실제 예산을 집행한 후 실패하면 막대한 재무적 손실이 발생함. 사전 샌드박스 검증 필수.
+          </div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--accent);">
+          <div class="card-title">무엇을 얻을 수 있는가? (What We Gain?)</div>
+          <div class="card-desc">
+            <strong>0% 리스크 사전 검증:</strong> 실제 자원 투입 전 가상 파티션에서 손익분기점(BEP), NPV, 현금 소요량을 사전 계산하여 의사결정 안전성 확보.
+          </div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--amber);">
+          <div class="card-title">경쟁사 방어 및 검증된 산식</div>
+          <div class="card-desc">
+            경쟁사 가격 인하 시 당사 마진 영향 사전 산출 및 사내 재무/기획 기준의 결정론적 손익 산식을 활용해 계산 신뢰성 보장.
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="background:#F8FAFC; border-left:5px solid var(--primary);">
+        <div class="card-title" style="color:var(--primary); font-size:17.5px;">💡 구체적 시뮬레이션 유스케이스 예시</div>
+        <div class="grid-2" style="font-size:15px; color:var(--text); line-height:1.6;">
+          <div>
+            • <strong>유스케이스 1 (신규 해외 공장 가상 설립):</strong> 인도네시아 가상 법인을 미리 생성하여 투입 CAPEX, 원자재 물류비, 인건비 입력 ➔ 투자 3년 차 BEP 달성 가능 여부 사전 검증.
+          </div>
+          <div>
+            • <strong>유스케이스 2 (경쟁사 A사 가격 인하 공격):</strong> 경쟁사 10% 단가 인하 시 당사 시장점유율 5% 감소 및 영업이익률 차감 추정 ➔ 최적 대응 단가 및 원가 절감 대응안 산출.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section V: Sandbox Simulation</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 8: LEGACY DATA INTEGRATION -->
+  <div class="slide" id="slide-8">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">06. Legacy Integration</span>
+        <h2 class="slide-title">기존 시스템(ERP/MES/LPL) 교체 없는 전사 데이터 통합 3대 원칙</h2>
+      </div>
+      <span class="slide-num">Slide 08 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <p style="font-size: 16.5px; color: var(--text-muted); margin-top: 0; margin-bottom: 18px; font-weight: 500;">
+        ERP·MES·LPL, 부서 파일, 외부 지표 등 기존 시스템을 교체하지 않고 연결하여 분산된 업무 데이터를 전사 하나의 경영 언어로 전환하는 3대 연동 원칙입니다.
+      </p>
+
+      <div class="grid-3">
+        <div class="card" style="border-top:5px solid var(--secondary);">
+          <div class="card-title">01. SYSTEM OF RECORD 유지</div>
+          <div class="card-desc">
+            ERP·MES·LPL 등 원천 거래 및 현장 데이터 시스템의 역할을 그대로 존중합니다. LAXS-M은 필요한 데이터만 복제·가상참조·집계하고 원천 위치와 변경이력을 보존합니다.
+          </div>
+        </div>
+
+        <div class="card" style="border-top:5px solid var(--accent);">
+          <div class="card-title">02. 외부 참여자 직접 개방 방지</div>
+          <div class="card-desc">
+            거래처·통관사·운송사는 기존 LPL 포털에 입력하도록 유지하고 결과만 API·MCP·배치로 연계합니다. 경영 플랫폼 자체를 외부 참여자에게 개방하지 않아 사내망 보안을 강화합니다.
+          </div>
+        </div>
+
+        <div class="card" style="border-top:5px solid var(--amber);">
+          <div class="card-title">03. 목적 기반 논리적 통합</div>
+          <div class="card-desc">
+            무조건적인 단일 거대 DB 복제가 아닌, 데이터의 성격과 보안 등급에 맞게 복제/가상참조/주기집계 방식을 선택하는 논리적 통합 계층을 형성합니다. 권한·품질·Lineage는 공통 통제합니다.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section VI: Legacy Integration</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 9: 8 BUSINESS DOMAINS TRANSFORMED -->
+  <div class="slide" id="slide-9">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">07. Business Domain Transformation</span>
+        <h2 class="slide-title">8대 경영 문제 해결 및 시뮬레이션 질문 예시 (Scenario Test)</h2>
+      </div>
+      <span class="slide-num">Slide 09 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="grid-4" style="gap:12px; margin-bottom:14px;">
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15.5px; margin-bottom:4px;">01. 수주 · 판매</div>
+          <div class="card-desc" style="font-size:13.5px;">수주와 생산·출하 가능성을 연결하여 <strong>예상 매출, 지연 위험과 고객별 손익 조기 확인</strong></div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15.5px; margin-bottom:4px;">02. 구매 · 원료</div>
+          <div class="card-desc" style="font-size:13.5px;">구매조건과 도착계획을 생산·재고·현금에 연결해 <strong>최적 발주 시점과 물량 대안 비교</strong></div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15.5px; margin-bottom:4px;">03. 생산 · 설비</div>
+          <div class="card-desc" style="font-size:13.5px;">공정능력과 제약조건으로 시뮬레이션해 <strong>납기, 생산량, 원가와 병목 사전에 확인</strong></div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15.5px; margin-bottom:4px;">04. 품질 · 추적성</div>
+          <div class="card-desc" style="font-size:13.5px;">원료–공정–제품–고객 관계를 연결하여 <strong>영향범위, 잠재 손실과 우선조치 신속 산정</strong></div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15.5px; margin-bottom:4px;">05. 물류 · 재고</div>
+          <div class="card-desc" style="font-size:13.5px;">ETA와 생산소요, 안전재고를 연결해 <strong>지연경보와 재배치·대체조달 시나리오 제안</strong></div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15.5px; margin-bottom:4px;">06. 재무 · 손익 · 자금</div>
+          <div class="card-desc" style="font-size:13.5px;">가격·물량·원가·재고·회수조건 연계로 <strong>Forecast와 Scenario 손익·현금 조기 계산</strong></div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15.5px; margin-bottom:4px;">07. 경영계획</div>
+          <div class="card-desc" style="font-size:13.5px;">수요·가격·환율·원가·투자·인력 가정을 연결해 <strong>기준안·낙관안·비관안 즉시 비교</strong></div>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="card-title" style="font-size:15.5px; margin-bottom:4px;">08. 전사 의사결정</div>
+          <div class="card-desc" style="font-size:13.5px;">시뮬레이션 근거로 검토서를 만들고 <strong>결정–과제–실적을 연결하여 다음 판단 재사용</strong></div>
+        </div>
+      </div>
+
+      <div class="card" style="background:#0F172A; color:#FFF; padding:18px;">
+        <div style="font-size:16.5px; font-weight:800; color:#38BDF8; margin-bottom:8px;">
+          📊 경영진이 직접 조정해 볼 수 있는 질문 예시 (Scenario Cases)
+        </div>
+        <div class="grid-2" style="font-size:14.5px; color:#E2E8F0; line-height:1.6;">
+          <div>
+            1. <strong>환율이 5% 상승하면?</strong> 원료 매입 ➔ 재고평가 ➔ 제품원가 ➔ 영업이익 ➔ 현금소요<br>
+            2. <strong>전기료가 10% 오르면?</strong> 공정별 에너지비 ➔ 단위원가 ➔ 제품별 수익성 ➔ 판매전략
+          </div>
+          <div>
+            3. <strong>원료 입항이 7일 늦어지면?</strong> 안전재고 ➔ 생산차질 ➔ 납기·매출 ➔ 대체조달 비용<br>
+            4. <strong>고용을 30명 늘리면?</strong> 인건비·교육기간 ➔ 생산능력 ➔ 추가매출 ➔ 손익분기 시점
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section VII: Domain Transformation</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 10: 1호 CLOSED LOOP EXECUTION PROOF -->
+  <div class="slide" id="slide-10">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">08. Execution Proof</span>
+        <h2 class="slide-title">1호 권고 과제: 원료 구매·도입계획 ➔ 통관·물류 ➔ 생산 투입 ➔ 손익 영향 Closed Loop</h2>
+      </div>
+      <span class="slide-num">Slide 10 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="highlight-banner">
+        "첫 적용은 기능 시연이 아니라 부서와 경영을 연결하는 하나의 Closed Loop 완주여야 합니다."
+      </div>
+
+      <div class="grid-4" style="margin-top: 12px; margin-bottom: 12px;">
+        <div class="card" style="border-top: 5px solid var(--secondary);">
+          <div class="card-title">Step 1. 자료·업무기준 등록</div>
+          <div class="card-desc">계약·계획·실적·입항·재고·원료·환율·운임 자료와 용어를 시스템에 등록</div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--accent);">
+          <div class="card-title">Step 2. Power User 앱 생성</div>
+          <div class="card-desc">구매 담당자의 자연어 요구로 도입계획·추적 앱을 만들고 실제 업무주기에 사용</div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--amber);">
+          <div class="card-title">Step 3. 경영 시나리오 연결</div>
+          <div class="card-desc">물류·생산·경영관리 관점의 입력과 영향을 연계하여 대안 비교 산출</div>
+        </div>
+        <div class="card" style="border-top: 5px solid var(--primary);">
+          <div class="card-title">Step 4. 결정·실행·효과 학습</div>
+          <div class="card-desc">검토서와 결정 이후 실제 결과를 측정해 지식과 다음 시뮬레이션에 반영</div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="gap:14px;">
+        <div class="card" style="background:#F8FAFC; border-left:5px solid var(--accent); padding:14px;">
+          <div style="font-size:15.5px; font-weight:800; color:var(--primary); margin-bottom:3px;">⏱️ 소요시간 절감 지표</div>
+          <div style="font-size:14.5px; color:var(--text); line-height:1.55;">
+            기존 수작업 엑셀 10개 부서 취합 시 <strong>24시간 (3일) 소요</strong> ➔ LAXS-M 가동 시 <strong>15분 완주 (98.9% 절감, AI 토큰 비용 $0.42)</strong>로 경영 판단 대폭 신속화.
+          </div>
+        </div>
+
+        <div class="card" style="background:#EFF6FF; border-left:5px solid var(--secondary); padding:14px;">
+          <div style="font-size:15.5px; font-weight:800; color:var(--secondary); margin-bottom:3px;">💰 정량적 경영 비용 절감 및 재무 효과 (Quantified Value)</div>
+          <div style="font-size:14.5px; color:#1E3A8A; line-height:1.55;">
+            • <strong>수작업 인건비 감소:</strong> 전사 취합 공수 절감 | • <strong>체선료 및 과잉 재고 감축:</strong> 물류 지연 사전 경보 | • <strong>원자재 적기 조달 손실 차단:</strong> 최적 발주 타이밍 제시로 실질 재무 효과 달성
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section VIII: Execution Proof</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 11: LEAN TF & ORGANIZATIONAL GOVERNANCE -->
+  <div class="slide" id="slide-11">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">09. Governance & Core Team</span>
+        <h2 class="slide-title">전사 AX 소수정예 TF 구성 및 경영진 Top-down 4대 지침</h2>
+      </div>
+      <span class="slide-num">Slide 11 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="grid-2" style="margin-bottom: 18px;">
+        <div class="card">
+          <div class="card-title">👥 전사 AX Core Team 구성 (소수 정예)</div>
+          <table class="ppt-table" style="margin-top: 10px;">
+            <tr>
+              <td style="width: 35%;"><strong>AX & Product Lead</strong></td>
+              <td>제안자 (1명) · 전략, 제품, Agent Team, 우선순위, 경영진 보고, 성과 및 사내벤처 준비 총괄</td>
+            </tr>
+            <tr>
+              <td><strong>Power Users</strong></td>
+              <td>현업 대표 (3~4명) · 구매/생산/물류/재무 실무 담당자, 자료 수집·등록, 업무기준 설명, 앱 생성·실사용</td>
+            </tr>
+            <tr>
+              <td><strong>On-Demand Support</strong></td>
+              <td>보안·IT·법무 담당자 · 상시 TF가 아닌 특정 데이터·정책·권한 결정 필요 시 제한적 참여</td>
+            </tr>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🏛️ 임원진 Top-down 가버넌스 4대 지침</div>
+          <ul class="bullet-list" style="margin-top: 10px;">
+            <li><strong>Power User 공식 업무시간 배정:</strong> 주당 8~10시간 전담 업무시간 공식 배정</li>
+            <li><strong>원천 데이터 접근권 지시:</strong> 보안 레벨 이내 범위의 원천 업무문서 및 실적 데이터 제공 지원 지시</li>
+            <li><strong>부서 간 과제 우선 조정:</strong> 업무 연결 시 부서 간 충돌 발생 시 AX 과제를 최우선 조정 지시</li>
+            <li><strong>신속 의사결정 채널 가동:</strong> 권한·보안 이슈 발생 시 경영진 직속의 지연 없는 판단 경로 확보</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section IX: Governance & Core Team</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 12: EXISTING IT & GROUP ITO COEXISTENCE -->
+  <div class="slide" id="slide-12">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">10. IT Partnership & Coexistence</span>
+        <h2 class="slide-title">기존 IT 조직 & 그룹 ITO 계열사 역할 분담 체계</h2>
+      </div>
+      <span class="slide-num">Slide 12 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="card" style="background:#F8FAFC; border-left:5px solid var(--secondary); margin-bottom:14px; padding:14px;">
+        <div class="card-title" style="color:var(--secondary); font-size:17px;">🤝 상생 및 파트너십 원칙 (Coexistence Principle)</div>
+        <div class="card-desc" style="color:var(--text); font-size:15px;">
+          ITO의 참여는 소유권 흡수가 아니라 <strong>제품 확산을 위한 첫 번째 파트너십</strong>으로 설계합니다. 제품 단일성은 제품 조직이 지키고, 현장 구축 및 운영 가치는 ITO 파트너가 확대합니다.
+        </div>
+      </div>
+
+      <table class="ppt-table">
+        <thead>
+          <tr>
+            <th style="width: 22%;">구분 영역</th>
+            <th style="width: 38%;">제품 회사 (신생 전담 조직)</th>
+            <th style="width: 40%;">그룹 ITO 조직 (인증 파트너)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>제품 코어 & IP</strong></td>
+            <td>소유, 전사 로드맵 결정, 라이선스, 아키텍처 승인권</td>
+            <td>배포·사용, 고객사 구축, 임의 코어 포크 금지</td>
+          </tr>
+          <tr>
+            <td><strong>데이터 & 업무 연계</strong></td>
+            <td>제품 보안 통제 및 감사 텔레메트리 기능 제공</td>
+            <td>원천 ERP/MES 수집·연계 위탁 운영 및 설정 수행</td>
+          </tr>
+          <tr>
+            <td><strong>맞춤 구현 (Bespoke)</strong></td>
+            <td>확장 규격·아키텍처·릴리스 공식 승인 및 인증</td>
+            <td>고객별 설정·공식 확장·고객 전용 개발 서비스 수행</td>
+          </tr>
+          <tr>
+            <td><strong>운영 지원 (SLA)</strong></td>
+            <td>L3 제품 코어 장애 및 보안 패치 수율 책임</td>
+            <td>L1/L2 고객 운영 접점 및 24/7 SLA 서비스 수행</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section X: IT Partnership</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 13: 3-STAGE SCALE-UP BRIDGE -->
+  <div class="slide" id="slide-13">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">11. Scale-up Strategy</span>
+        <h2 class="slide-title">당사 검증 ➔ 전사 확산 ➔ 그룹 확대를 잇는 3단계 스케일업 브릿지</h2>
+      </div>
+      <span class="slide-num">Slide 13 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="flow-nodes" style="margin: 22px 0;">
+        <div class="flow-node" style="background:var(--secondary-soft); border:2px solid var(--secondary); color:var(--primary);">
+          <strong style="color:var(--secondary);">Phase 1. 당사 1호 Closed Loop 성과</strong>
+          <span>원료 구매~손익 15분 완주 & 자산화</span>
+        </div>
+        <div class="flow-arrow">➔</div>
+        <div class="flow-node" style="background:var(--accent-soft); border:2px solid var(--accent); color:var(--primary);">
+          <strong style="color:var(--accent);">Phase 2. 사내 타 부서 확산</strong>
+          <span>생산·품질·재무로 Core 플랫폼 재사용</span>
+        </div>
+        <div class="flow-arrow">➔</div>
+        <div class="flow-node" style="background:var(--primary); color:#FFF;">
+          <strong style="color:#5EEAD4;">Phase 3. 그룹 계열사 확대</strong>
+          <span>계열사 맞춤형 그룹 공통 OS 전환</span>
+        </div>
+      </div>
+
+      <div class="grid-3" style="margin-top: 18px;">
+        <div class="card">
+          <div class="card-title">1단계: 자산 모듈화</div>
+          <div class="card-desc">1호 과제 성공 결과를 Data Contract 및 Agent Skill Pack으로 표준화하여 즉시 이식 가능 상태로 전환</div>
+        </div>
+        <div class="card">
+          <div class="card-title">2단계: 높은 Core 재사용률</div>
+          <div class="card-desc">플랫폼 Core(80%)를 재사용하고 부서 특화 커스텀(20%)만 추가하여 개발 공수 70% 단축</div>
+        </div>
+        <div class="card">
+          <div class="card-title">3단계: 그룹 템플릿화</div>
+          <div class="card-desc">화학·소재·부품 등 계열사 업종별 Industry Pack을 정의하여 전 그룹사 경영 OS로 확산</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section XI: Scale-up Strategy</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 14: GROUP STANDARD & EXECUTIVE BENEFITS -->
+  <div class="slide" id="slide-14">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">12. Executive Benefits</span>
+        <h2 class="slide-title">표준 프레임워크로서의 그룹 확산 적용 체계 및 전 그룹 / 당사 기대 효과 (Benefits)</h2>
+      </div>
+      <span class="slide-num">Slide 14 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="card" style="background:#F8FAFC; border-left:5px solid var(--secondary); margin-bottom:14px; padding:14px;">
+        <div class="card-title" style="color:var(--secondary); font-size:17.5px;">🌐 전 그룹 통용 표준 프레임워크 (Group Standard Framework) 선행 적용 메커니즘</div>
+        <div class="card-desc" style="color:var(--text); font-size:15.5px;">
+          당사에서 LAXS-M으로 검증한 공통 코어는 상위 플랫폼 LAXS로 발전시켜 계열사별 적용판에 재사용합니다. 제조·경영 공통 데이터 및 AI 엔진은 공유하되, 각 계열사의 업종·조직·권한·레거시 환경은 별도 적용판과 Industry Pack으로 결속합니다.
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card" style="background:#FFF; border-top: 5px solid var(--secondary);">
+          <div class="card-title" style="color:var(--secondary); font-size:18.5px;">🏢 전 그룹 차원의 기대 효과 (Group Benefits)</div>
+          <ul class="bullet-list" style="margin-top: 8px; font-size:14.5px;">
+            <li><strong>그룹 경영 지식 통합 (Group Memory):</strong> 계열사별 파편화된 실적·원가를 그룹 공통 언어로 통합해 지주사 통합 시뮬레이션 가능</li>
+            <li><strong>중복 투자 절감 (Cost Synergy):</strong> 계열사별 개별 AI/SI 중복 개발 비용 방지 및 도입 기간 80% 단축</li>
+            <li><strong>신성장동력 B2B 사업화:</strong> 그룹 검증 후 대외 B2B 제조 AX SaaS 시장으로 진출하여 그룹 차원의 신규 고수익 사업 육성</li>
+          </ul>
+        </div>
+
+        <div class="card" style="background:#F0F9FF; border-top: 5px solid var(--accent);">
+          <div class="card-title" style="color:var(--accent); font-size:18.5px;">🎯 당사(최초 검증사)의 3대 직접적 기대 효과 (Our Benefits)</div>
+          <ul class="bullet-list" style="margin-top: 8px; font-size:14.5px;">
+            <li><strong>AX 주도권 & 리더십 확보:</strong> 당사가 전 그룹 AX의 표준 앵커(Standard Anchor)가 되어 경영 선도 위치 확립</li>
+            <li><strong>지분 및 지속적 기술료 환수:</strong> 사내벤처 독립 시 초기 자산 기여에 따른 모회사 대주주 지분 확보 및 코어 IP 기술료(Royalty) 지속 환수</li>
+            <li><strong>네트워크 효과 자동 고도화:</strong> 타 계열사 확장 과정에서 개발되는 AI Skill 모듈이 당사로 재연계되어 추가 비용 없이 자동 발전</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section XII: Executive Benefits</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 15: INDEPENDENT ORGANIZATION STRATEGY -->
+  <div class="slide" id="slide-15">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">13. Organization Options</span>
+        <h2 class="slide-title">그룹 차원의 확산을 위한 전담 독립조직의 필요성</h2>
+      </div>
+      <span class="slide-num">Slide 15 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="highlight-banner" style="background:#FEF3C7; border-left-color:var(--amber); color:#B45309;">
+        "그룹 전체 계열사로 플랫폼을 중립적으로 확산하고 전담 R&D를 완수하기 위해 전담 독립조직 설립 형태의 옵션을 비교합니다."
+      </div>
+
+      <div class="grid-3" style="margin-top: 16px;">
+        <div class="card compare-bad">
+          <span class="compare-tag">옵션 A (대형 신규 법인)</span>
+          <div class="card-title">신규 외부 법인 직접 설립</div>
+          <div class="card-desc">
+            • 초기 대규모 자본금 및 조직 설립 부담 발생<br>
+            • 당사 데이터 및 실증 검증 완료 전 높은 리스크
+          </div>
+        </div>
+
+        <div class="card compare-bad">
+          <span class="compare-tag">옵션 B (사내 전담팀)</span>
+          <div class="card-title">사내 기존 부서 내 전담팀</div>
+          <div class="card-desc">
+            • 타 계열사 확장 시 중립성 및 보안 격리 한계<br>
+            • 기존 본업 유지보수에 치여 플랫폼 R&D 몰입 불가
+          </div>
+        </div>
+
+        <div class="card compare-good" style="border-top: 5px solid var(--accent);">
+          <span class="compare-tag">옵션 C (🏆 Best / 추천 대안)</span>
+          <div class="card-title">사내벤처 ➔ 자회사 독립</div>
+          <div class="card-desc">
+            • 당사 기술·인력으로 리스크 없이 스타트<br>
+            • 1호 과제 실증 후 독립 자회사 전환으로 그룹 중립 확산 및 모회사 지분/기술료 수익 확보 최적 대안
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section XIII: Organization Options</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 16: EXPANSION ROADMAP & STAGE GATES -->
+  <div class="slide" id="slide-16">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">14. Roadmap & Gates</span>
+        <h2 class="slide-title">확산 로드맵: 5대 마일스톤 및 단계별 통과 기준 (Phase 0 ~ Phase 4)</h2>
+      </div>
+      <span class="slide-num">Slide 16 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="grid-5" style="margin-top: 10px;">
+        <div class="card" style="background:#F8FAFC; border-top: 5px solid var(--secondary); padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px;">Phase 0</div>
+          <strong style="display:block; color:var(--primary); font-size:15.5px; margin-bottom:4px;">내부 공동설계·1호 확정</strong>
+          <div class="card-desc" style="font-size:13px;">혁신 DX 조직과 데이터 오너가 첫 루프 선택 및 수용지표 정의</div>
+          <div style="font-size:12px; color:var(--secondary); font-weight:800; margin-top:6px;">Gate: 오너·결정권자 지정</div>
+        </div>
+        <div class="card" style="background:#F8FAFC; border-top: 5px solid var(--accent); padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px;">Phase 1</div>
+          <strong style="display:block; color:var(--primary); font-size:15.5px; margin-bottom:4px;">내부 운영 파일럿</strong>
+          <div class="card-desc" style="font-size:13px;">실제 데이터로 앱·시뮬레이터 가동 및 버전·승인 이력 축적</div>
+          <div style="font-size:12px; color:var(--accent); font-weight:800; margin-top:6px;">Gate: 한 루프 승인 완주</div>
+        </div>
+        <div class="card" style="background:#F8FAFC; border-top: 5px solid var(--amber); padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px;">Phase 2</div>
+          <strong style="display:block; color:var(--primary); font-size:15.5px; margin-bottom:4px;">그룹 확산 & 산업팩</strong>
+          <div class="card-desc" style="font-size:13px;">다른 법인·사업부 복제, ITO 1호 인증 파트너 체계 정립</div>
+          <div style="font-size:12px; color:var(--amber); font-weight:800; margin-top:6px;">Gate: 2개 조직 코어 재사용</div>
+        </div>
+        <div class="card" style="background:#F8FAFC; border-top: 5px solid var(--primary); padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px;">Phase 3</div>
+          <strong style="display:block; color:var(--primary); font-size:15.5px; margin-bottom:4px;">독립 제품회사 사업화</strong>
+          <div class="card-desc" style="font-size:13px;">제품 IP·로드맵 독립조직 집중 및 정식 파트너 체계 운영</div>
+          <div style="font-size:12px; color:var(--primary); font-weight:800; margin-top:6px;">Gate: IP·SLA 계약화</div>
+        </div>
+        <div class="card" style="background:#F8FAFC; border-top: 5px solid #14856A; padding:14px;">
+          <div class="card-title" style="font-size:15px; margin-bottom:4px;">Phase 4</div>
+          <strong style="display:block; color:var(--primary); font-size:15.5px; margin-bottom:4px;">외부 제조기업 확장</strong>
+          <div class="card-desc" style="font-size:13px;">유사 제조업종 제안 및 외부 파트너 생태계 확장</div>
+          <div style="font-size:12px; color:#14856A; font-weight:800; margin-top:6px;">Gate: 그룹 밖 반복 판매</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px; background:var(--secondary-soft);">
+        <div class="card-title" style="color:var(--secondary);">🎯 로드맵 집행 핵심 원칙 (Roadmap Principle)</div>
+        <div class="card-desc" style="color:#1E3A8A; font-size:15.5px;">
+          법인 설립 시점이 아니라, <strong>반복 가능한 제품성이 검증되는 시점이 분기점</strong>입니다. 각 단계는 단순 시간 경과가 아니라 정해진 증거(Gate)를 기준으로 다음 단계로 진입합니다.
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section XIV: Roadmap & Gates</div>
+    </div>
+  </div>
+
+
+  <!-- SLIDE 17: EXECUTIVE DECISION DECK & ACTION AGENDA -->
+  <div class="slide" id="slide-17">
+    <div class="slide-header">
+      <div class="slide-title-group">
+        <span class="slide-eyebrow">15. Instant Decision Agenda</span>
+        <h2 class="slide-title">경영진 의사결정 요청 안건 및 회의 종료 전 확정 사항</h2>
+      </div>
+      <span class="slide-num">Slide 17 / 17</span>
+    </div>
+
+    <div class="slide-body">
+      <div class="grid-2">
+        <div class="card" style="border: 2.5px solid var(--primary); padding: 22px;">
+          <div class="card-title" style="font-size: 18.5px; color: var(--primary); border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 12px;">
+            📋 공식 의안 (Formal Agenda)
+          </div>
+
+          <ol class="bullet-list" style="font-size: 14.5px; line-height: 1.55; padding-left: 20px;">
+            <li>회사의 AX 전략을 `기업 데이터·지식 기반의 현업 SW 생성 + 경영 Digital Twin + Decision Closed Loop`로 확정</li>
+            <li>LAXS-M을 해당 AX 전략의 공식 실행 플랫폼으로 지정</li>
+            <li>제안자를 AX & Product Lead로 하고 Power User 3~4명으로 구성한 전사 AX Core Team 승인</li>
+            <li>관련 부서에 Power User 지정, 자료·데이터 제공, 공식 업무시간 배정을 Top-down으로 지시</li>
+            <li>초기에는 기존 기술환경을 활용하고 추가 자원·비용은 필요성과 근거에 따라 항목별 승인</li>
+            <li>당사에서 확립한 AX 표준을 그룹 경영플랫폼으로 확장할 수 있도록 사내벤처 분리독립안을 처음부터 병행 설계</li>
+          </ol>
+        </div>
+
+        <div class="card" style="background:#F8FAFC; border:2px solid var(--accent); padding:22px;">
+          <div class="card-title" style="font-size: 18.5px; color: var(--accent); border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 12px;">
+            ✅ 회의 종료 전 확정 항목 (Decision Checklist)
+          </div>
+
+          <ul class="bullet-list" style="font-size: 14.5px; line-height: 1.6; padding-left: 20px; list-style:none;">
+            <li>☑️ <strong>AX 전략 방향 승인:</strong> 자율진화형 경영 OS 전환 승인</li>
+            <li>☑️ <strong>AX & Product Lead 지정:</strong> 제안자 리더십 부여</li>
+            <li>☑️ <strong>Power User 대상 부서·인원:</strong> 구매·생산·물류·재무 대표</li>
+            <li>☑️ <strong>자료·데이터 제공 지시:</strong> 원천 데이터 접근 지원 지시</li>
+            <li>☑️ <strong>첫 Closed Loop 적용 업무:</strong> 원료 구매~손익 연계 과제</li>
+            <li>☑️ <strong>사내벤처 전환안 준비 지시:</strong> 스핀아웃 설계 병행</li>
+          </ul>
+        </div>
+      </div>
+
+      <div style="margin-top: 16px; background: var(--secondary-soft); padding: 14px; border-radius: 8px; font-size: 16px; font-weight: 800; color: #1E3A8A; text-align: center;">
+        승인 시 기대 변화: 전사 지식 자산화 ➔ 수직 Closed Loop 완주 ➔ 실시간 손익 시뮬레이션 ➔ 전 그룹사 확산
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div>LAXS-M Executive Decision Deck</div>
+      <div>Section XV: Instant Decision Agenda</div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

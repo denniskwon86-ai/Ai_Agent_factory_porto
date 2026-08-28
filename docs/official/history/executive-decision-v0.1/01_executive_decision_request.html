@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LAXS-M | LS MnM AX 전략 및 실행 제안서</title>
+  <style>
+    :root{--navy:#071a2e;--navy2:#103656;--ink:#14263a;--muted:#607185;--line:#dce5ed;--bg:#f3f6f9;--card:#fff;--blue:#1769e0;--cyan:#0b9fac;--green:#14856a;--lime:#c7e968;--amber:#e59a22;--red:#c94758;--purple:#7359c7;--shadow:0 15px 38px rgba(18,42,70,.09)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Pretendard","Noto Sans KR","Malgun Gothic",Arial,sans-serif;line-height:1.66}a{color:inherit;text-decoration:none}.wrap{max-width:1220px;margin:auto;padding:0 30px}.top{position:sticky;top:0;z-index:20;background:rgba(7,26,46,.96);border-bottom:1px solid rgba(255,255,255,.1);backdrop-filter:blur(14px)}.top .wrap{height:66px;display:flex;align-items:center;justify-content:space-between;gap:18px}.brand{color:#fff;font-weight:900}.brand span{color:var(--lime)}nav{display:flex;gap:15px;color:#b7c8d9;font-size:12px;white-space:nowrap;overflow:auto}nav a:hover{color:#fff}.hero{color:#fff;background:radial-gradient(circle at 82% 13%,rgba(11,159,172,.36),transparent 28%),radial-gradient(circle at 15% 100%,rgba(23,105,224,.42),transparent 34%),var(--navy)}.hero .wrap{padding-top:72px;padding-bottom:68px}.eyebrow{color:var(--cyan);font-size:12px;font-weight:900;letter-spacing:.14em;text-transform:uppercase}.hero .eyebrow{color:var(--lime)}h1{max-width:1060px;margin:11px 0 19px;font-size:clamp(38px,5.7vw,72px);line-height:1.07;letter-spacing:-.067em}.lead{max-width:940px;margin:0;color:#c5d5e5;font-size:18px}.thesis{margin-top:30px;padding:24px 25px;border:1px solid rgba(255,255,255,.16);border-radius:17px;background:rgba(255,255,255,.08)}.thesis b{color:var(--lime);font-size:12px;letter-spacing:.08em}.thesis strong{display:block;margin-top:6px;font-size:22px}.thesis span{display:block;margin-top:5px;color:#bdd0e1}.hero-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-top:24px}.hero-stat{padding:15px;border-radius:12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1)}.hero-stat b{display:block;font-size:18px}.hero-stat span{color:#b8c9d9;font-size:12px}section{padding:78px 0}section.white{background:#fff}h2{margin:7px 0 14px;font-size:clamp(29px,3.4vw,44px);line-height:1.18;letter-spacing:-.052em}h3{margin:0 0 8px;font-size:19px;letter-spacing:-.03em}.lede{max-width:910px;margin:0;color:var(--muted);font-size:17px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:17px;margin-top:29px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:29px}.card{padding:23px;border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:var(--shadow)}.card p{margin:0;color:var(--muted)}.tag{display:inline-flex;margin-bottom:11px;padding:4px 8px;border-radius:999px;background:#e9f2fd;color:var(--blue);font-size:12px;font-weight:900}.wrong{border-top:5px solid var(--red)}.right{border-top:5px solid var(--green)}.statement{margin-top:25px;padding:20px 22px;border-left:5px solid var(--lime);border-radius:4px 13px 13px 4px;background:#eaf5df;font-size:19px;font-weight:780}.pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:29px}.pillar{padding:22px;border-radius:15px;background:#fff;border:1px solid var(--line);min-height:210px}.pillar i{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;background:#e5f1fd;color:var(--blue);font-style:normal;font-size:12px;font-weight:900}.pillar h3{margin-top:13px}.pillar p{margin:0;color:var(--muted);font-size:13px}.product{margin-top:27px;padding:27px;border-radius:19px;background:var(--navy);color:#fff}.product-head{display:grid;grid-template-columns:1fr 330px;gap:20px}.product-head p{color:#c2d3e3}.proof{padding:15px;border:1px solid rgba(255,255,255,.16);border-radius:11px;background:rgba(255,255,255,.08);font-size:13px}.proof b{display:block;color:var(--lime)}.product-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-top:21px}.feature{padding:16px;border:1px solid rgba(255,255,255,.13);border-radius:11px;background:rgba(255,255,255,.065)}.feature b{color:var(--lime);font-size:12px}.feature p{margin:6px 0 0;color:#c2d3e2;font-size:12px}.loop{margin-top:28px;padding:27px;border-radius:18px;background:linear-gradient(145deg,#103a61,#071a2e);color:#fff}.loop-flow{display:grid;grid-template-columns:repeat(7,1fr);align-items:stretch;gap:8px;margin-top:19px}.loop-node{padding:15px 10px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.07);text-align:center}.loop-node b{display:block;color:var(--lime);font-size:12px}.loop-node span{font-size:12px;color:#c3d4e3}.loop-arrow{display:grid;place-items:center;color:var(--cyan);font-size:21px}.matrix{margin-top:29px;overflow:auto;border:1px solid var(--line);border-radius:16px;background:#fff}.matrix table{width:100%;min-width:1000px;border-collapse:collapse}.matrix th,.matrix td{padding:14px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);text-align:left;vertical-align:top;font-size:13px}.matrix th{background:#edf3f8;color:#31485f}.matrix tr:last-child td{border-bottom:0}.matrix th:last-child,.matrix td:last-child{border-right:0}.matrix td:first-child{font-weight:850}.time{display:inline-block;padding:3px 7px;border-radius:999px;background:#e6f4f1;color:#14715f;font-size:12px;font-weight:900}.scenario{display:grid;grid-template-columns:.9fr 1.1fr;gap:18px;margin-top:28px}.scenario-main{padding:25px;border-radius:16px;background:var(--navy);color:#fff}.scenario-main p{color:#c3d4e4}.steps{display:grid;gap:10px}.step{display:grid;grid-template-columns:34px 1fr;gap:12px;padding:15px;border:1px solid var(--line);border-radius:12px;background:#fff}.step i{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;background:#e3f4f2;color:#157563;font-style:normal;font-weight:900}.step p{margin:2px 0 0;color:var(--muted);font-size:13px}.team{margin-top:29px;padding:27px;border-radius:19px;background:var(--navy);color:#fff}.team-head{display:grid;grid-template-columns:1fr 320px;gap:20px}.team-head p{color:#c2d3e3}.team-rule{padding:15px;border:1px solid rgba(255,255,255,.16);border-radius:11px;background:rgba(255,255,255,.08);font-size:13px}.team-rule b{display:block;color:var(--lime)}.team-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-top:20px}.role{padding:17px;border:1px solid rgba(255,255,255,.13);border-radius:11px;background:rgba(255,255,255,.065)}.role b{color:var(--lime);font-size:12px}.role strong{display:block;margin:5px 0}.role p{margin:0;color:#c2d3e2;font-size:12px}.direction{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-top:27px}.direction-card{padding:21px;border-top:5px solid var(--blue);border-radius:14px;background:#fff;box-shadow:var(--shadow)}.direction-card:nth-child(2){border-color:var(--cyan)}.direction-card:nth-child(3){border-color:var(--green)}.direction-card ul{padding-left:18px;color:#52657a;font-size:13px}.direction-card li{margin:7px 0}.resource{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:28px}.resource-card{padding:20px;border-radius:14px;background:#fff;border:1px solid var(--line)}.resource-card b{display:block;color:var(--blue);font-size:12px}.resource-card p{margin:6px 0 0;color:var(--muted);font-size:13px}.venture{margin-top:28px;padding:28px;border-radius:19px;background:linear-gradient(145deg,#281e52,#071a2e);color:#fff}.venture-head{display:grid;grid-template-columns:1fr 330px;gap:20px}.venture-head p{color:#d0c9e5}.must{padding:15px;border:1px solid rgba(255,255,255,.16);border-radius:11px;background:rgba(255,255,255,.08);font-size:13px}.must b{display:block;color:var(--lime)}.why-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-top:20px}.why{padding:16px;border:1px solid rgba(255,255,255,.13);border-radius:11px;background:rgba(255,255,255,.065)}.why b{color:var(--lime);font-size:12px}.why p{margin:6px 0 0;color:#d1cce4;font-size:12px}.trigger{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-top:27px}.trigger-card{padding:19px;border-radius:13px;background:#fff;border:1px solid var(--line)}.trigger-card b{color:var(--purple);font-size:12px}.trigger-card p{margin:5px 0 0;color:var(--muted);font-size:13px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:28px}.metric{padding:20px;border-radius:14px;background:#fff;border:1px solid var(--line)}.metric b{display:block;color:var(--blue);font-size:12px}.metric strong{display:block;margin:6px 0;font-size:19px}.metric p{margin:0;color:var(--muted);font-size:13px}.approval{display:grid;grid-template-columns:1.1fr .9fr;gap:18px;margin-top:28px}.approval-main{padding:27px;border-radius:17px;background:linear-gradient(145deg,#103a61,#071a2e);color:#fff}.approval-main p{color:#c3d4e4}.approval-main ol{padding-left:20px}.approval-main li{margin:9px 0}.check{padding:23px;border-radius:17px;background:#fff;border:1px solid var(--line)}.check label{display:flex;gap:8px;margin:9px 0;color:#506276;font-size:13px}.check input{accent-color:var(--blue)}.note{margin-top:22px;padding:17px;border-radius:11px;background:#eef3f7;color:#53677b;font-size:13px}footer{padding:42px 0 55px;background:var(--navy);color:#adbdce;font-size:13px}footer b{color:#fff}@media(max-width:960px){.hero-stats,.grid4,.product-grid,.resource,.why-grid,.trigger{grid-template-columns:repeat(2,1fr)}.grid3,.pillars,.team-grid,.direction,.metrics{grid-template-columns:1fr}.product-head,.team-head,.venture-head,.approval,.scenario{grid-template-columns:1fr}.loop-flow{grid-template-columns:1fr}.loop-arrow{transform:rotate(90deg);height:25px}}@media(max-width:620px){.wrap{padding:0 18px}nav{display:none}section{padding:56px 0}.hero-stats,.grid4,.product-grid,.resource,.why-grid,.trigger{grid-template-columns:1fr}}
+  </style>
+  <style>
+    .legacy-map{margin-top:30px;padding:28px;border-radius:20px;background:#071a2e;color:#fff;box-shadow:var(--shadow)}
+    .legacy-map h3{font-size:22px}.map-caption{margin:0;color:#bed0e1;font-size:14px}
+    .source-grid,.consumer-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:20px}
+    .source-node,.consumer-node{padding:15px;border:1px solid rgba(255,255,255,.14);border-radius:12px;background:rgba(255,255,255,.07);min-height:112px}
+    .source-node b,.consumer-node b{display:block;color:var(--lime);font-size:13px}.source-node span,.consumer-node span{display:block;margin-top:6px;color:#c5d5e4;font-size:12px;line-height:1.5}
+    .map-arrow{padding:10px;text-align:center;color:var(--cyan);font-size:24px;font-weight:900}
+    .integration-band{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;padding:14px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:#103656}
+    .integration-band div{padding:11px;border-radius:9px;background:rgba(255,255,255,.08);text-align:center;font-size:12px;color:#d5e1ec}.integration-band b{display:block;color:#fff;font-size:13px}
+    .data-core{display:grid;grid-template-columns:.82fr 1fr 1.18fr 1fr;gap:10px;padding:16px;border:1px solid rgba(199,233,104,.42);border-radius:15px;background:rgba(199,233,104,.08)}
+    .core-layer{padding:16px;border-radius:11px;background:#fff;color:var(--ink)}.core-layer b{display:block;color:var(--blue);font-size:13px}.core-layer span{display:block;margin-top:7px;color:var(--muted);font-size:12px;line-height:1.55}
+    .data-principles{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}.data-principle{padding:19px;border-radius:14px;background:#fff;border:1px solid var(--line)}.data-principle b{display:block;color:var(--green);font-size:12px}.data-principle p{margin:6px 0 0;color:var(--muted);font-size:13px}
+    .impact-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:29px}.impact-card{padding:21px;border:1px solid var(--line);border-radius:15px;background:#fff;box-shadow:var(--shadow)}.impact-card b{display:block;color:var(--blue);font-size:12px}.impact-card h3{margin-top:7px;font-size:17px;line-height:1.45;word-break:keep-all}.impact-card dl{margin:10px 0 0}.impact-card dt{margin-top:9px;color:#8a4350;font-size:12px;font-weight:900}.impact-card dd{margin:2px 0 0;color:var(--muted);font-size:13px}.impact-card dt:last-of-type{color:var(--green)}
+    .scenario-strip{margin-top:27px;padding:26px;border-radius:18px;background:linear-gradient(145deg,#103a61,#071a2e);color:#fff}.scenario-strip>p{margin-top:0;color:#c3d4e3}.scenario-cases{display:grid;grid-template-columns:repeat(4,1fr);gap:11px}.scenario-case{padding:17px;border:1px solid rgba(255,255,255,.14);border-radius:11px;background:rgba(255,255,255,.07)}.scenario-case b{display:block;color:var(--lime);font-size:13px}.scenario-case span{display:block;margin-top:6px;color:#c5d5e4;font-size:12px;line-height:1.55}
+    @media(max-width:960px){.source-grid,.consumer-grid,.impact-grid,.scenario-cases{grid-template-columns:repeat(2,1fr)}.integration-band,.data-core,.data-principles{grid-template-columns:1fr}}
+    @media(max-width:620px){.source-grid,.consumer-grid,.impact-grid,.scenario-cases{grid-template-columns:1fr}.legacy-map{padding:20px}}
+    .brand-declaration{background:#fff}.declaration-intro{max-width:880px}.declaration-grid{display:grid;grid-template-columns:.88fr 1.12fr;gap:18px;margin-top:30px}.declaration-name,.declaration-intent{padding:29px;border-radius:18px}.declaration-name{background:var(--navy);color:#fff}.declaration-intent{border:1px solid var(--line);background:#f7fafc}.declaration-kicker{display:block;margin-bottom:10px;color:var(--cyan);font-size:12px;font-weight:900;letter-spacing:.1em}.declaration-name .declaration-kicker{color:var(--lime)}.declaration-word{font-size:42px;font-weight:900;letter-spacing:-.045em;line-height:1}.declaration-pronunciation{margin-left:9px;color:#c5d5e5;font-size:16px;font-weight:750}.declaration-expansion{margin-top:18px;color:var(--lime);font-size:20px;font-weight:850}.declaration-name p,.declaration-intent p{margin:10px 0 0}.declaration-name p{color:#c6d5e3}.declaration-intent h3{font-size:25px;line-height:1.35}.declaration-intent strong{display:block;margin-top:18px;color:var(--green);font-size:18px}.edition-line{display:flex;align-items:baseline;gap:10px;margin-top:20px;padding-top:18px;border-top:1px solid rgba(255,255,255,.16)}.edition-line b{font-size:22px}.edition-line span{color:#c5d5e5;font-size:14px}.declaration-close{margin-top:22px;padding:21px 24px;border-left:5px solid var(--cyan);border-radius:4px 14px 14px 4px;background:#e9f5f5;font-size:20px;font-weight:800;line-height:1.55}.declaration-close span{color:var(--green)}
+    @media(max-width:960px){.declaration-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <header class="top"><div class="wrap"><a class="brand" href="#top">LAXS<span>-M</span></a><nav><a href="#meaning">명칭과 지향점</a><a href="#strategy">AX 전략</a><a href="#platform">실행체계</a><a href="#data-architecture">데이터 구조</a><a href="#business-impact">경영효과</a><a href="#scenario">1호 적용</a><a href="#team">정예 TF</a><a href="#venture">분리독립</a><a href="#approval">승인</a></nav></div></header>
+  <main id="top">
+    <section class="hero"><div class="wrap">
+      <div class="eyebrow">LAXS-M · LAXS for LS MnM · Executive Draft</div>
+      <h1>우리 회사의 AX 전략은<br>회사가 스스로 진화하는 경영 운영체계가 되어야 합니다.</h1>
+      <p class="lead">AX의 목표는 기존 업무에 AI 기능을 몇 개 더 붙이는 것이 아닙니다. 회사가 보유한 데이터와 업무지식을 바탕으로 현업이 필요한 업무 SW와 경영 시뮬레이션을 직접 만들고, 부서 간 실행과 의사결정 결과를 다시 전사 지식으로 축적해 다음 판단의 품질을 높이는 구조를 만드는 것입니다.</p>
+      <div class="thesis"><b>전략 명제</b><strong>LAXS-M은 새롭게 검토할 후보 제품이 아니라, 이 AX 전략을 이미 구체적인 제품과 화면·데이터·Agent·통제 구조로 실체화하고 있는 LS MnM의 실행 플랫폼입니다.</strong><span>LAXS는 LS그룹 공통 AX 플랫폼을, LAXS-M은 그 첫 LS MnM 적용판을 뜻합니다. 핵심 아키텍처와 주요 기능은 현재 구현·고도화 중이며, 회사의 실제 데이터와 Power User를 연결하면 추상적 AX 구호를 실제 업무와 경영 의사결정으로 전환할 수 있습니다.</span></div>
+      <div class="hero-stats"><div class="hero-stat"><b>Data as Corporate Memory</b><span>데이터·지식이 전사 자산으로 축적</span></div><div class="hero-stat"><b>Software by Business Users</b><span>현업이 필요한 기능을 직접 생성</span></div><div class="hero-stat"><b>Management Digital Twin</b><span>실제 데이터로 미래 경영환경 비교</span></div><div class="hero-stat"><b>Closed Loop</b><span>결정→실행→효과→학습의 순환</span></div></div>
+    </div></section>
+
+    <section id="meaning" class="brand-declaration"><div class="wrap">
+      <div class="declaration-intro">
+        <div class="eyebrow">00 · The Name and the Direction</div>
+        <h2>이런 의미를 담아,<br>이런 지향점의 시스템을 제안합니다.</h2>
+        <p class="lede">이름은 단순한 약어가 아니라 우리가 AX를 어디에 둘 것인지에 대한 선언입니다. AX를 별도의 도구로 덧붙이는 것이 아니라 LS의 일하는 방식과 경영체계 안에 내재화하고, 현업에서 만들어지는 실행과 경영진의 판단을 하나의 흐름으로 연결하고자 합니다.</p>
+      </div>
+      <div class="declaration-grid">
+        <article class="declaration-name">
+          <span class="declaration-kicker">NAME · 명칭의 의미</span>
+          <div><span class="declaration-word">LAXS</span><span class="declaration-pronunciation">랙스</span></div>
+          <div class="declaration-expansion">AX embedded in LS</div>
+          <p>LS의 일과 경영에 AX를 내재화한다는 의미를 담았습니다. AX가 일부 업무의 보조 기능에 머무르지 않고 회사의 데이터·업무·지식·의사결정 구조 안에서 작동하도록 하겠다는 뜻입니다.</p>
+          <div class="edition-line"><b>LAXS-M</b><span>랙스-엠 · LS MnM에서 시작하는 첫 적용판</span></div>
+        </article>
+        <article class="declaration-intent">
+          <span class="declaration-kicker">DIRECTION · 시스템의 지향점</span>
+          <h3>LAXS — AX at the core of LS</h3>
+          <strong>현업의 실행과 경영의 판단을 AX로 연결하다.</strong>
+          <p>현업이 생성한 데이터와 업무 성과가 경영의 시뮬레이션과 판단으로 이어지고, 그 결정과 실행 결과가 다시 현업의 다음 업무와 회사의 지식으로 축적되는 구조를 지향합니다.</p>
+        </article>
+      </div>
+      <div class="declaration-close">이러한 의미와 지향을 담아, <span>LS MnM의 현업과 경영을 하나의 AX 흐름으로 연결하는 첫 번째 시스템 ‘LAXS-M(랙스-엠)’</span>을 제안합니다.</div>
+    </div></section>
+
+    <section id="strategy" class="white"><div class="wrap">
+      <div class="eyebrow">01 · The AX Strategy We Need</div><h2>우리에게 필요한 AX는 자동화 과제의 집합이 아니라<br>기업의 디지털 실행능력 자체를 내재화하는 전략입니다.</h2>
+      <div class="grid3"><article class="card wrong"><div class="tag">지양해야 할 AX</div><h3>업무별 AI 기능 도입</h3><p>챗봇, 문서요약, 개별 예측모델이 각각 존재하지만 데이터·업무·결정이 연결되지 않아 과제 종료 후 자산이 남지 않습니다.</p></article><article class="card wrong"><div class="tag">지양해야 할 AX</div><h3>외부 SI 중심 반복개발</h3><p>현업 요구가 바뀔 때마다 다시 설명하고 개발하며 회사의 업무지식과 제품역량이 외부 수행경험으로 흩어집니다.</p></article><article class="card right"><div class="tag">제안하는 AX</div><h3>현업 주도 기업 운영체계</h3><p>회사 데이터와 지식을 공통 기반으로 현업이 앱·시뮬레이션을 만들고 실행 결과를 다시 전사 자산으로 축적합니다.</p></article></div>
+      <div class="statement">우리 회사의 AX 전략은 “AI를 어디에 적용할 것인가”에서 출발하지 않고, “회사가 변화에 맞춰 필요한 디지털 업무와 경영 판단을 얼마나 빠르게 스스로 만들어낼 수 있는가”를 핵심 경쟁력으로 삼아야 합니다.</div>
+      <div class="pillars">
+        <article class="pillar"><i>01</i><h3>기업 데이터·지식 주권</h3><p>회사구조, MDM, 데이터 카탈로그, 업무표준, 문서, 용어와 관계를 회사가 직접 관리하고 모든 AI가 같은 의미체계를 사용합니다.</p></article>
+        <article class="pillar"><i>02</i><h3>현업의 SW 생산능력</h3><p>Power User가 요구를 설명하면 AI Agent가 기획·설계·구현·검증을 수행하고 결과는 회사 권한을 상속한 App-in-App으로 운영됩니다.</p></article>
+        <article class="pillar"><i>03</i><h3>경영 Digital Twin</h3><p>수요·환율·원료·에너지·고용 변화가 생산·재고·현금흐름·손익에 미치는 영향을 실제 데이터와 산식으로 비교합니다.</p></article>
+        <article class="pillar"><i>04</i><h3>Agentic Operating Model</h3><p>업무별 AI Agent와 워크플로우를 생성·결합하고 Jarvis가 전사 문맥에서 사용자 질의, 진행, 품질과 비용을 통제합니다.</p></article>
+        <article class="pillar"><i>05</i><h3>Decision Closed Loop</h3><p>시뮬레이션 결과가 검토서·회의·결정·실행과제로 이어지고 실제 효과와 피드백이 다음 지식과 모델 개선에 반영됩니다.</p></article>
+        <article class="pillar"><i>06</i><h3>전사 데이터·지식 통합</h3><p>각 부서의 앱에서 생성·관리되는 데이터와 업무지식, Agent의 실행 결과가 공통 기준과 권한 아래 전사 데이터베이스와 지식허브에 축적됩니다. 부서별로 단절된 정보가 서로 연결되어 회사 전체가 함께 활용하는 기업 지식자산으로 발전합니다.</p></article>
+      </div>
+    </div></section>
+
+    <section id="platform"><div class="wrap">
+      <div class="eyebrow">02 · How the Strategy Becomes Real</div><h2>LAXS-M은 전략을 설명하는 문서가 아니라<br>전략을 작동시키는 제품입니다.</h2>
+      <div class="product"><div class="product-head"><div><h3>LAXS-M · Living Enterprise Platform</h3><p>회사구조와 권한을 최상위 기준으로 두고, 데이터·지식·현업 SW·경영 시뮬레이션·AI Agent·의사결정을 하나의 제품 안에서 연결합니다. 기존 ERP·MES·LPL·파일은 교체하지 않고 필요한 데이터 계층을 연계합니다.</p></div><div class="proof"><b>현재 상태</b>핵심 아키텍처와 주요 기능은 작동 가능한 제품으로 구현·고도화되고 있습니다. 회사 적용 단계에서는 실제 Power User와 데이터를 연결해 기능을 업무 결과와 경영효과로 전환합니다.</div></div><div class="product-grid"><div class="feature"><b>ENTERPRISE CONTEXT</b><p>지주사·회사·사업부·공장·가상회사·권한</p></div><div class="feature"><b>DATA & KNOWLEDGE</b><p>MDM·카탈로그·Graph RAG·Lineage·Crosswalk</p></div><div class="feature"><b>SW FACTORY</b><p>상담·요구명확화·기획·WBS·구현·검증·Release</p></div><div class="feature"><b>APP COLLABORATION</b><p>부서 간 앱 전달·승인·권한상속·업무연결</p></div><div class="feature"><b>MANAGEMENT TWIN</b><p>Actual·Plan·Forecast·Scenario·결정론 계산</p></div><div class="feature"><b>AGENT STUDIO</b><p>업무 Agent·Skill·Workflow·모델 비용/품질 라우팅</p></div><div class="feature"><b>JARVIS</b><p>전사 질의·상담·진행설명·제어·위험개입</p></div><div class="feature"><b>DECISION & REPORT</b><p>검토서·회의요청·실행과제·대내외 보고서</p></div></div></div>
+      <div class="scenario" style="margin-top:18px"><article class="card right"><span class="tag">PRIVATE DATA ARCHITECTURE</span><h3>회사 데이터는 회사의 통제영역에 남습니다.</h3><p>사내 민감정보와 원본 문서는 자체 데이터베이스·지식허브에서 권한과 이력에 따라 별도 관리합니다. 외부 LLM에 내부 저장소 전체를 직접 연결하거나 회사 자료를 모델 학습용으로 제공하지 않습니다. RAG가 사용자 권한과 업무 목적에 맞는 최소한의 문맥만 선별하여 기업용 API 호출 시 조합·추론을 지원하고, 결과와 근거는 다시 내부 통제영역에 저장합니다.</p></article><article class="card right"><span class="tag">MULTI-MODEL COST OPTIMIZATION</span><h3>품질에 필요한 만큼만 LLM 비용을 사용합니다.</h3><p>단일 고가 모델에 모든 작업을 맡기지 않습니다. 문서 분류·검색·요약·코드 생성·품질판정의 난이도와 보안등급, 문맥길이에 따라 여러 LLM을 API로 선택·조합합니다. 경제적인 모델에서 시작해 품질기준을 충족하지 못할 때만 상위 모델로 전환하고, RAG·캐시·결정론적 검증을 함께 사용하여 토큰 사용량과 재호출을 최소화합니다.</p></article></div>
+      <div class="loop"><h3>Closed Loop가 만드는 회사의 학습구조</h3><div class="loop-flow"><div class="loop-node"><b>현업 문제</b><span>요구·데이터</span></div><div class="loop-arrow">→</div><div class="loop-node"><b>SW·시뮬레이션</b><span>생성·실행</span></div><div class="loop-arrow">→</div><div class="loop-node"><b>경영 결정</b><span>검토·승인</span></div><div class="loop-arrow">→</div><div class="loop-node"><b>실행·효과</b><span>결과·피드백</span></div></div><div class="statement" style="background:rgba(255,255,255,.08);color:#fff;border-color:var(--lime)">실행 결과는 다시 데이터 카탈로그·지식허브·업무표준·Agent Skill로 축적되어 다음 앱과 시뮬레이션의 품질을 높입니다.</div></div>
+    </div></section>
+
+    <section id="data-architecture" class="white"><div class="wrap">
+      <div class="eyebrow">03 · Legacy Connection & Enterprise Data Architecture</div><h2>기존 시스템을 교체하지 않고 연결하여<br>분산된 업무 데이터를 하나의 경영 언어로 전환합니다.</h2>
+      <p class="lede">ERP·MES·LPL과 같은 외부 참여자 입력 포털, 부서 파일과 문서, 공공기관의 외부지표는 각자의 역할을 계속 수행합니다. LAXS-M은 이 시스템들 위에 통합 데이터·지식·시뮬레이션 계층을 형성하여 서로 다른 코드와 시점, 단위를 공통 기준으로 연결합니다.</p>
+      <div class="legacy-map">
+        <h3>LAXS-M 전체 데이터 구조도</h3><p class="map-caption">하단의 원천 업무데이터가 연계·정합화와 전사 통합 데이터·지식 계층을 거쳐, 상단의 현업 SW와 경영 Digital Twin·의사결정을 지원합니다.</p>
+        <div class="consumer-grid">
+          <div class="consumer-node"><b>현업 생성 SW</b><span>부서 특화 업무·입력·조회·협업</span></div>
+          <div class="consumer-node"><b>경영 Digital Twin</b><span>가정·제약·시나리오·영향 계산</span></div>
+          <div class="consumer-node"><b>Jarvis & Agent</b><span>질의·분석·업무흐름·통제 지원</span></div>
+          <div class="consumer-node"><b>Decision Package</b><span>검토서·회의·승인·실행과제</span></div>
+          <div class="consumer-node"><b>경영·대내외 보고</b><span>실적·전망·위험·설명 가능한 근거</span></div>
+        </div>
+        <div class="map-arrow">↑</div>
+        <div class="data-core">
+          <div class="core-layer"><b>ENTERPRISE CONTEXT</b><span>그룹 → 회사 → 사업부 → 공장 → 조직·사용자<br>모든 데이터와 권한의 최상위 범위</span></div>
+          <div class="core-layer"><b>MDM & CATALOG</b><span>고객·거래처·품목·제품·공정·설비·계정·원가중심<br>용어·소유자·품질·버전</span></div>
+          <div class="core-layer"><b>INTEGRATED DATA LAYER</b><span>Actual·Plan·Forecast·Scenario<br>업무 이벤트·관계·시계열·집계와 원천 Lineage</span></div>
+          <div class="core-layer"><b>KNOWLEDGE & GRAPH RAG</b><span>문서·업무표준·의사결정·실행결과<br>연관관계 검색과 권한 기반 문맥 구성</span></div>
+        </div>
+        <div class="map-arrow">↑</div>
+        <div class="integration-band">
+          <div><b>API·MCP</b>실시간·요청형 연계</div><div><b>Event·Batch</b>변경·주기 수집</div><div><b>File Connector</b>검증 후 적재</div><div><b>Crosswalk</b>코드·단위·동의어 변환</div><div><b>Data Contract</b>품질·권한·이력·계보</div>
+        </div>
+        <div class="map-arrow">↑</div>
+        <div class="source-grid">
+          <div class="source-node"><b>ERP</b><span>수주·구매·재고·매입·매출·회계·원가·자금</span></div>
+          <div class="source-node"><b>MES·QMS·설비</b><span>생산계획·실적·투입·수율·품질·비가동·에너지</span></div>
+          <div class="source-node"><b>LPL 등 외부 입력 포털</b><span>거래처·통관사·운송사의 선적·통관·도착·운송 정보</span></div>
+          <div class="source-node"><b>파일·문서·업무표준</b><span>Excel·PDF·계약·계획·회의록·매뉴얼·현업 노하우</span></div>
+          <div class="source-node"><b>검증된 외부지표</b><span>환율·금리·원자재·운임·에너지·고용·산업수요</span></div>
+        </div>
+      </div>
+      <div class="data-principles">
+        <article class="data-principle"><b>SYSTEM OF RECORD 유지</b><h3>원천 시스템의 책임을 존중합니다.</h3><p>ERP·MES·LPL 등은 원천 거래와 현장 데이터를 계속 책임집니다. LAXS-M은 필요한 데이터만 복제·참조·집계하고 원천 위치와 변경이력을 보존합니다.</p></article>
+        <article class="data-principle"><b>외부 참여자 직접 개방 없음</b><h3>기존 외부 포털을 안전하게 활용합니다.</h3><p>거래처·통관사·운송사는 기존 포털에 입력하고, 필요한 결과만 API·MCP·배치로 연계합니다. 경영플랫폼 자체를 외부 참여자에게 개방하지 않습니다.</p></article>
+        <article class="data-principle"><b>통합은 전량 복제가 아님</b><h3>목적과 보안등급에 따라 연결합니다.</h3><p>통합 데이터 레이어는 단일 거대 복제DB가 아니라 데이터별로 복제·가상참조·집계 방식을 선택하는 논리적 통합계층입니다. 권한·품질·Lineage는 공통으로 관리합니다.</p></article>
+      </div>
+    </div></section>
+
+    <section id="business-impact"><div class="wrap">
+      <div class="eyebrow">04 · Business Problems We Can Solve</div><h2>정보를 보여주는 시스템을 넘어<br>경영 문제의 원인·대안·영향을 함께 판단하게 합니다.</h2>
+      <p class="lede">실적을 사후 집계하는 데서 끝나지 않고, 수주부터 구매·생산·품질·물류·판매·재무까지 이어지는 인과관계를 추적합니다. 경영진은 변화가 어디서 시작되어 손익과 현금흐름에 어떻게 전달되는지 확인하고, 실행 전에 대안을 비교할 수 있습니다.</p>
+      <div class="impact-grid">
+        <article class="impact-card"><b>수주·판매</b><h3>매출 전망을 조기에 확인</h3><dl><dt>현재 문제</dt><dd>수주잔고·납기·생산능력·판매전망이 별도 자료로 관리되어 매출 예상이 늦고 자주 바뀝니다.</dd><dt>실질적 도움</dt><dd>수주와 생산·출하 가능성을 연결하여 예상 매출, 지연 위험과 고객별 손익을 조기에 보여줍니다.</dd></dl></article>
+        <article class="impact-card"><b>구매·원료</b><h3>가격·도착 변동에 선제 대응</h3><dl><dt>현재 문제</dt><dd>원료가격·환율·운임·입항일 변화가 재고와 생산, 자금에 미치는 영향이 여러 부서에 흩어집니다.</dd><dt>실질적 도움</dt><dd>구매조건과 도착계획을 생산·재고·현금흐름에 연결해 발주 시점과 물량 대안을 비교합니다.</dd></dl></article>
+        <article class="impact-card"><b>생산·설비</b><h3>생산계획의 실행 가능성 검증</h3><dl><dt>현재 문제</dt><dd>수요계획은 있으나 병목설비·정비·수율·인력 제약을 함께 반영한 대안 비교가 어렵습니다.</dd><dt>실질적 도움</dt><dd>공정능력과 제약조건으로 생산계획을 시뮬레이션해 납기, 생산량, 원가와 병목을 사전에 확인합니다.</dd></dl></article>
+        <article class="impact-card"><b>품질·추적성</b><h3>품질문제의 영향범위 추적</h3><dl><dt>현재 문제</dt><dd>불량·클레임 발생 시 원료 LOT, 공정조건, 설비, 출하처를 여러 시스템에서 수작업으로 추적합니다.</dd><dt>실질적 도움</dt><dd>원료–공정–제품–고객 관계를 연결하여 영향범위, 잠재 손실과 우선 조치대상을 신속하게 산정합니다.</dd></dl></article>
+        <article class="impact-card"><b>물류·재고</b><h3>지연과 과잉재고 동시 관리</h3><dl><dt>현재 문제</dt><dd>선적·통관·운송·창고 정보가 분리되어 결품과 체선, 과잉재고 위험을 함께 보기 어렵습니다.</dd><dt>실질적 도움</dt><dd>ETA와 생산소요, 안전재고를 연결해 지연경보와 재배치·대체조달 시나리오를 제안합니다.</dd></dl></article>
+        <article class="impact-card"><b>재무·손익·자금</b><h3>손익·현금 영향을 조기에 예측</h3><dl><dt>현재 문제</dt><dd>회계 실적은 정확하지만 사후 결과이며, 현업 변화가 월말 손익과 현금흐름에 미칠 영향을 미리 알기 어렵습니다.</dd><dt>실질적 도움</dt><dd>가격·물량·원가·재고·회수조건을 연결해 Forecast와 Scenario 손익·현금을 조기에 계산합니다.</dd></dl></article>
+        <article class="impact-card"><b>경영계획</b><h3>계획을 살아 있는 가정체계로</h3><dl><dt>현재 문제</dt><dd>사업계획이 제출용 Excel에 고정되어 가정 변경 때 부서별 숫자를 다시 취합해야 합니다.</dd><dt>실질적 도움</dt><dd>수요·가격·환율·원가·투자·인력 가정을 연결해 기준안·낙관안·비관안을 즉시 비교합니다.</dd></dl></article>
+        <article class="impact-card"><b>전사 의사결정</b><h3>결정 근거와 실행결과 축적</h3><dl><dt>현재 문제</dt><dd>회의자료와 결정, 실행과제, 사후효과가 분리되어 왜 결정했는지와 실제 효과가 조직지식으로 남지 않습니다.</dd><dt>실질적 도움</dt><dd>시뮬레이션 근거로 검토서를 만들고 결정–과제–실적을 연결하여 다음 판단에 재사용합니다.</dd></dl></article>
+      </div>
+      <div class="scenario-strip"><h3>경영진이 직접 조정해 볼 수 있는 질문</h3><p>하나의 가정을 바꾸면 해당 부서의 숫자만 바뀌는 것이 아니라 가치사슬 전체의 연쇄영향을 계산합니다.</p><div class="scenario-cases"><div class="scenario-case"><b>환율이 5% 상승하면?</b><span>원료 매입 → 재고평가 → 제품원가 → 영업이익 → 현금소요</span></div><div class="scenario-case"><b>전기료가 10% 오르면?</b><span>공정별 에너지비 → 단위원가 → 제품별 수익성 → 판매전략</span></div><div class="scenario-case"><b>원료 입항이 7일 늦어지면?</b><span>안전재고 → 생산차질 → 납기·매출 → 대체조달 비용</span></div><div class="scenario-case"><b>고용을 30명 늘리면?</b><span>인건비·교육기간 → 생산능력 → 추가매출 → 손익분기 시점</span></div></div></div>
+      <div class="statement">LAXS-M의 실질적 가치는 더 많은 화면을 제공하는 데 있지 않습니다. 회사 곳곳의 사실을 하나의 경영 문맥으로 연결하고, 변화가 발생했을 때 더 일찍 위험을 발견하며, 실행 전에 대안을 비교하고, 결정 이후 실제 효과까지 학습하는 데 있습니다.</div>
+    </div></section>
+
+    <section id="effect" class="white"><div class="wrap">
+      <div class="eyebrow">05 · Effects and When They Appear</div><h2>효과는 시스템 오픈일이 아니라<br>실제 업무 이벤트가 연결될 때 단계적으로 드러납니다.</h2>
+      <div class="matrix"><table><thead><tr><th>효과 발생 조건</th><th>처음 확인할 변화</th><th>목표 확인 시점</th><th>측정 방법</th><th>장기 의미</th></tr></thead><tbody>
+        <tr><td>회사구조·핵심 데이터·문서 등록</td><td>어떤 데이터가 어디에 있고 누가 책임지는지 가시화</td><td><span class="time">착수 후 2~4주 목표</span></td><td>데이터 오너 식별률, 검색시간, 누락목록</td><td>전사 데이터·지식 주권 확보</td></tr>
+        <tr><td>첫 Power User 앱 실사용</td><td>요구→기능 사용까지 시간과 반복 설명 감소</td><td><span class="time">첫 앱 적용 후 즉시</span></td><td>생성시간, 수정횟수, 사용빈도</td><td>현업 SW 생산능력 내재화</td></tr>
+        <tr><td>2개 이상 부서의 업무연결</td><td>재입력·누락·대기와 진행상태 불명확 감소</td><td><span class="time">업무 1회 완주 후</span></td><td>Lead Time, 재입력, 누락, 승인대기</td><td>부서 간 Digital Thread 형성</td></tr>
+        <tr><td>실제 데이터 기반 시뮬레이션·결정</td><td>대안 준비시간 감소와 영향근거 명확화</td><td><span class="time">첫 경영회의 적용 시</span></td><td>시나리오 준비시간, 근거추적, 채택결정</td><td>경영 Digital Twin의 실사용</td></tr>
+        <tr><td>두 번째 앱·조직에 재사용</td><td>기존 데이터팩·Agent·기능의 재사용률 확인</td><td><span class="time">두 번째 적용 완료 시</span></td><td>코어 재사용률, 추가개발량, 적용기간</td><td>그룹 확장 가능한 제품성 증명</td></tr>
+      </tbody></table></div>
+      <div class="note">표시한 시기는 실행 목표이며 확정 성과가 아닙니다. 승인 직후 Power User의 업무주기와 데이터 준비상태를 확인해 세부 Calendar를 확정하고, 효과는 반드시 적용 전 기준선과 비교합니다.</div>
+    </div></section>
+
+    <section id="scenario"><div class="wrap">
+      <div class="eyebrow">06 · First Corporate Use Case</div><h2>첫 적용은 기능 시연이 아니라<br>부서와 경영을 연결하는 하나의 Closed Loop여야 합니다.</h2>
+      <div class="scenario"><article class="scenario-main"><div class="tag" style="color:var(--lime);background:rgba(255,255,255,.09)">권고 1호 적용</div><h3>원료 구매·도입계획 → 통관·물류 → 생산 투입 → 재고·손익 영향</h3><p>구매 Power User가 원료 도입계획 앱을 만들고, 물류·통관 정보를 연결하며, 환율·원료가격·운임·도착일 변화가 생산과 손익에 미치는 영향을 시뮬레이션합니다.</p><p>한 사례에서 현업 SW 생성, 데이터 등록, 부서 협업, 레거시 연계, 외부지표, 경영 시뮬레이션, 결정 검토서와 실행 피드백을 모두 확인할 수 있습니다.</p></article><div class="steps"><article class="step"><i>1</i><div><h3>자료와 업무기준 등록</h3><p>계약·계획·실적·입항·재고·원료·환율·운임 자료와 용어를 등록합니다.</p></div></article><article class="step"><i>2</i><div><h3>Power User 앱 생성·사용</h3><p>구매 담당자의 요구로 도입계획·추적 앱을 만들고 실제 업무주기에 사용합니다.</p></div></article><article class="step"><i>3</i><div><h3>부서 업무와 경영 시나리오 연결</h3><p>물류·생산·경영관리 관점의 입력과 영향을 연결해 대안을 비교합니다.</p></div></article><article class="step"><i>4</i><div><h3>결정·실행·효과 학습</h3><p>검토서와 결정 이후 실제 결과를 측정해 지식과 다음 시뮬레이션에 반영합니다.</p></div></article></div></div>
+    </div></section>
+
+    <section id="team" class="white"><div class="wrap">
+      <div class="eyebrow">07 · Lean Enterprise AX Core Team</div><h2>초기에는 대규모 조직이 아니라<br>제품총괄 1명과 Power User 3~4명의 정예팀이면 됩니다.</h2>
+      <div class="team"><div class="team-head"><div><h3>전사 AX Core Team · 소수 정예</h3><p>제안자가 AX 전략과 제품을 총괄하고, 실제 업무와 데이터를 가진 3~4명의 Power User가 부서 대표로 참여합니다. AI 설계·개발은 현재와 같이 제안자와 AI Agent Team이 수행하므로 초기 대규모 엔지니어 채용을 전제하지 않습니다.</p></div><div class="team-rule"><b>팀 운영 원칙</b>직급보다 실제 자료를 확보하고 업무를 바꿀 수 있는 사람 · 겸임 명목이 아니라 정해진 시간을 투입할 사람 · 보고용 테스트가 아니라 본인 업무에 직접 사용할 사람</div></div><div class="team-grid"><article class="role"><b>AX & PRODUCT LEAD · 1명</b><strong>제안자</strong><p>전략, 제품, Agent Team, 우선순위, 경영진 보고, 성과와 사내벤처 준비 총괄</p></article><article class="role"><b>POWER USERS · 3~4명</b><strong>구매·물류·생산·경영관리/재무 중 선정</strong><p>자료수집·등록, 업무기준 설명, 앱 생성·실사용, 시뮬레이션 검증, 개선제안</p></article><article class="role"><b>ON-DEMAND SUPPORT</b><strong>데이터 오너·보안·법무 등 필요 시</strong><p>상시 TF가 아니라 특정 데이터·정책·권한 결정이 필요할 때 제한적으로 참여</p></article></div></div>
+      <div class="direction"><article class="direction-card"><h3>임원 Top-down 지시</h3><ul><li>AX Core Team과 Power User 3~4명 지정</li><li>Power User의 공식 업무시간 배정</li><li>부서 자료·데이터·업무기준 제공 협조</li><li>부서 간 충돌 시 AX 과제를 우선 조정</li></ul></article><article class="direction-card"><h3>초기 범위에서 제외</h3><ul><li>대규모 개발조직 구성</li><li>ITO의 초기 제품개발 참여</li><li>전사 시스템 일괄 교체</li><li>모든 부서의 동시 참여</li></ul></article><article class="direction-card"><h3>후속 지원 연결</h3><ul><li>실운영 인프라·레거시 연계 시 IT/ITO 협의</li><li>IP·조직분리 시 법무·인사·전략 참여</li><li>그룹 확산 시 계열사 담당자 연결</li><li>필요한 비용만 항목별 승인</li></ul></article></div>
+    </div></section>
+
+    <section><div class="wrap">
+      <div class="eyebrow">08 · Focused Resources & Stage-Gated Approval</div><h2>소수정예 실행조직과 회사의 데이터,<br>현재 기술환경을 기반으로 즉시 시작합니다.</h2>
+      <div class="resource"><article class="resource-card"><b>PEOPLE</b><h3>시간과 역할</h3><p>제안자의 제품총괄 역할, Power User 3~4명의 공식 업무시간과 부서 협조</p></article><article class="resource-card"><b>DATA</b><h3>자료·접근권</h3><p>업무문서·기준정보·실적·계획 데이터와 데이터 오너 협의창구</p></article><article class="resource-card"><b>TECHNOLOGY</b><h3>기존 환경 활용</h3><p>현재 개발환경·LLM·저장소를 우선 사용하고 추가비용은 사용근거와 함께 항목별 승인</p></article><article class="resource-card"><b>GOVERNANCE</b><h3>신속한 의사결정</h3><p>권한·보안·IP·조직 이슈가 발생할 때 담당조직과 지연 없이 결정할 경로</p></article></div>
+      <div class="statement">초기에는 현재 인력과 기술환경을 최대한 활용합니다. 이후 운영 인프라, 보안, 데이터 연계 등 추가 자원이 필요한 시점에는 적용 범위와 기대효과, 기존 자원의 재사용 가능성을 확인하여 단계별로 결정합니다.</div>
+    </div></section>
+
+    <section id="venture" class="white"><div class="wrap">
+      <div class="eyebrow">09 · From Company Standard to Group Management Platform</div><h2>당사를 AX 표준의 출발점으로 삼아<br>전 그룹사의 경영플랫폼으로 확장합니다.</h2>
+      <div class="venture"><div class="venture-head"><div><h3>그룹 확장을 책임할 분리독립 운영체계를 처음부터 설계합니다.</h3><p>당사에서 LAXS-M의 효과와 운영표준을 실제 데이터와 경영업무로 입증하면, 검증된 공통 코어를 상위 플랫폼 LAXS로 발전시켜 그룹 각 사의 업종·조직·레거시 환경에 맞게 확장할 수 있습니다. LAXS는 그룹 경영의 데이터·지식·시뮬레이션·의사결정 체계를 연결하는 공통 AX 플랫폼을 뜻합니다. 이를 지속적으로 제품화하고 그룹 각 사의 서로 다른 요구를 중립적으로 조정하려면 기존 부서의 부가업무가 아니라 독립된 사내벤처 또는 이에 준하는 분리조직으로 운영되어야 합니다.</p></div><div class="must"><b>핵심 원칙</b>당사 적용과 조직전환안을 함께 준비합니다. 제품·IP·핵심인력·그룹 운영 및 정산 구조를 처음부터 분리 가능한 형태로 설계하여, LAXS-M에서 검증된 표준을 그룹 공통 LAXS로 신속하게 확장할 수 있도록 합니다.</div></div><div class="why-grid"><article class="why"><b>GROUP NEUTRALITY</b><p>특정 부서의 이해를 넘어 그룹 공통 경영플랫폼의 기준과 확장 우선순위를 조정</p></article><article class="why"><b>PRODUCT AUTHORITY</b><p>운영업무에 밀리지 않는 독립 로드맵과 품질 책임</p></article><article class="why"><b>ECONOMIC MODEL</b><p>라이선스·구축·운영·내부정산과 재투자 구조</p></article><article class="why"><b>TALENT & SPEED</b><p>필요 인재·보상·협력사를 제품 성장속도에 맞게 운용</p></article></div></div>
+      <div class="trigger"><article class="trigger-card"><b>전환 준비 01</b><h3>제품·IP 경계</h3><p>코어, 회사 데이터, 업무지식, 산업팩과 기여관계를 처음부터 구분합니다.</p></article><article class="trigger-card"><b>전환 준비 02</b><h3>조직·인력안</h3><p>제품총괄, 핵심인력, Power User Network, 향후 개발·영업·운영구조를 설계합니다.</p></article><article class="trigger-card"><b>전환 준비 03</b><h3>그룹 운영모델</h3><p>계열사 라이선스, 도입비, 데이터 격리, 공통·특화 기능과 정산원칙을 정리합니다.</p></article><article class="trigger-card"><b>전환 실행 조건</b><h3>시간이 아니라 증거</h3><p>실사용 Closed Loop, 두 번째 재사용, 그룹사 도입의향, 독립 경제성이 확인되면 즉시 전환안을 상정합니다.</p></article></div>
+    </div></section>
+
+    <section><div class="wrap">
+      <div class="eyebrow">10 · AX Success Measures</div><h2>AX 성과는 AI 사용량이 아니라<br>회사의 실행속도와 학습능력으로 측정합니다.</h2>
+      <div class="metrics"><article class="metric"><b>LEADING</b><strong>데이터·Power User 활성화</strong><p>등록 데이터셋, 데이터 오너, Power User 사용일수, 생성한 앱과 시나리오</p></article><article class="metric"><b>OPERATIONAL</b><strong>업무 변화 대응속도</strong><p>요구→앱 사용시간, 부서간 Lead Time, 재입력·누락, 시나리오 준비시간</p></article><article class="metric"><b>MANAGEMENT</b><strong>결정의 품질과 추적성</strong><p>근거가 연결된 경영결정, 실행과제, 사후 효과측정, 재사용된 지식</p></article><article class="metric"><b>PRODUCT</b><strong>재사용과 확장성</strong><p>두 번째 앱·부서·회사 적용 시 코어 재사용률과 추가 작업량</p></article><article class="metric"><b>ECONOMIC</b><strong>회피비용과 가치</strong><p>중복개발·SI·수작업·재작업 감소와 의사결정 개선가치</p></article><article class="metric"><b>STRATEGIC</b><strong>그룹 제품 전환성</strong><p>계열사 도입의향, 라이선스 가능성, 독립조직 경제성과 파트너 확장성</p></article></div>
+    </div></section>
+
+    <section id="approval" class="white"><div class="wrap">
+      <div class="eyebrow">11 · Executive Decisions for AX Execution</div><h2>AX 전략을 실행으로 전환하기 위해<br>다음의 추진체계와 운영원칙을 제안합니다.</h2>
+      <div class="approval"><article class="approval-main"><h3>승인 요청안</h3><ol><li>회사의 AX 전략을 `기업 데이터·지식 기반의 현업 SW 생성 + 경영 Digital Twin + Decision Closed Loop`로 확정</li><li>LAXS-M을 해당 AX 전략의 공식 실행 플랫폼으로 지정</li><li>제안자를 AX & Product Lead로 하고 Power User 3~4명으로 구성한 전사 AX Core Team 승인</li><li>관련 부서에 Power User 지정, 자료·데이터 제공, 공식 업무시간 배정을 Top-down으로 지시</li><li>초기에는 기존 기술환경을 활용하고 추가 자원·비용은 필요성과 근거에 따라 항목별 승인</li><li>당사에서 확립한 AX 표준을 그룹 경영플랫폼으로 확장할 수 있도록 사내벤처 분리독립안을 처음부터 병행 설계</li></ol><p><b>기대하는 변화:</b> 회사의 데이터와 업무지식이 하나의 기업자산으로 축적되고, 현업이 필요한 소프트웨어를 직접 만들며, 경영진은 실제 데이터에 근거한 시뮬레이션과 영향분석으로 의사결정할 수 있습니다. 이 운영표준은 당사에서 검증된 뒤 전 그룹사의 경영플랫폼으로 확장됩니다.</p></article><aside class="check"><h3>회의 종료 전 확정</h3><label><input type="checkbox"> AX 전략방향 승인</label><label><input type="checkbox"> AX & Product Lead 지정</label><label><input type="checkbox"> Power User 대상 부서·인원</label><label><input type="checkbox"> 자료·데이터 제공 지시</label><label><input type="checkbox"> 첫 Closed Loop 적용업무</label><label><input type="checkbox"> 사내벤처 전환안 준비 지시</label></aside></div>
+      <div class="note"><b>회사 맞춤 확정에 필요한 정보:</b> 보고 대상 임원과 의사결정 방식, Power User 후보 3~4명, 1호 적용업무의 현재 자료·시스템·처리주기, 공개 가능한 현재 문제와 기대효과, 사내벤처·직무발명 관련 내부제도.</div>
+    </div></section>
+  </main>
+  <footer><div class="wrap"><b>우리 회사 AX 전략 및 LAXS-M 실행 제안서</b><br>경영진 보고 초안 · 회사 고유 조직·데이터·Power User·전환제도를 반영해 확정</div></footer>
+</body>
+</html>

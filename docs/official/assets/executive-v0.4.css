@@ -1,0 +1,172 @@
+:root {
+  --exec-navy: #0A1E5A;
+  --exec-deep: #071747;
+  --exec-red: #FA002D;
+  --exec-cyan: #009BB4;
+  --exec-green: #138578;
+  --exec-ink: #101A2D;
+  --exec-muted: #5C6779;
+  --exec-faint: #7C8798;
+  --exec-line: #D8DEE8;
+  --exec-paper: #FFFFFF;
+  --exec-raised: #F7F8FA;
+  --exec-page: #EEF1F4;
+}
+
+/* Executive document v0.4 — restrained LS-aligned palette, fixed-ratio imagery and print-safe pages. */
+body { color: var(--exec-ink); background: var(--exec-page); }
+.version-mark { color: var(--exec-faint); font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+.name-construction { display: block; width: 100%; height: auto; border-radius: 18px; }
+.evidence-note { color: var(--exec-muted); font-size: 12px; line-height: 1.6; }
+.executive-label { color: var(--exec-cyan); font-size: 12px; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
+
+/* Do not use decorative lime/purple/amber in official executive material. */
+.hero, .cover-slide { background: var(--exec-deep) !important; }
+.card, .pillar, .metric, .resource-card, .impact-card, .direction-card, .trigger-card,
+.brand-intent-panel, .table-wrap { box-shadow: none !important; }
+.card, .pillar, .metric, .resource-card, .impact-card, .direction-card, .trigger-card,
+.brand-intent-panel { border-color: var(--exec-line) !important; }
+.statement, .brand-declaration-close { border-left-color: var(--exec-red) !important; background: #FFF3F5 !important; color: var(--exec-ink) !important; }
+.statement span, .brand-declaration-close span { color: var(--exec-navy) !important; }
+.tag { color: var(--exec-navy) !important; background: #E9EEF8 !important; }
+
+.brand-name-panel { background: var(--exec-deep) !important; }
+.brand-name-panel .brand-panel-label, .brand-expansion { color: #FFFFFF !important; }
+.brand-panel-label, .slide-eyebrow, .doc-chapter, .eyebrow { color: var(--exec-cyan) !important; }
+.slide-eyebrow,
+.doc-chapter,
+.executive-label,
+main section:not(.hero) .eyebrow { color: #006B7D !important; }
+.hero .eyebrow { color: #79D7E5 !important; }
+.intent-ko { color: var(--exec-navy) !important; }
+
+
+.cover-brand-logo {
+  display: block;
+  width: 260px;
+  height: auto;
+  margin: 0 0 22px;
+  object-fit: contain;
+  object-position: left center;
+}
+.brand-logo-row {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  align-items: center;
+  gap: 34px;
+  max-width: 1080px;
+  margin: 4px auto 12px;
+}
+.brand-system-logo {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.brand-logo-row .name-construction {
+  width: 100%;
+  max-width: 760px;
+  height: 188px;
+  max-height: 188px;
+  object-fit: contain;
+  object-position: center;
+  border-radius: 12px;
+}
+
+@media screen and (min-width: 901px) {
+  .reading-document .slide {
+    aspect-ratio: 16 / 10;
+    min-height: 0 !important;
+    overflow: hidden;
+  }
+  .decision-document {
+    background: #DDE3EA;
+  }
+  .decision-document .hero,
+  .decision-document main > section {
+    width: min(1440px, calc(100vw - 40px));
+    aspect-ratio: 16 / 10;
+    min-height: 0;
+    margin: 20px auto 0;
+    padding: 0;
+    overflow: hidden;
+    background: #FFFFFF;
+    box-shadow: 0 12px 30px rgba(7, 23, 71, .12);
+  }
+  .decision-document .hero { background: var(--navy); }
+  .decision-document .hero > .wrap,
+  .decision-document main > section > .wrap {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    padding: 48px 56px;
+    overflow: hidden;
+  }
+  .decision-document footer {
+    width: min(1440px, calc(100vw - 40px));
+    margin: 20px auto 0;
+  }
+}
+
+/* Actual product-screen evidence used by executive appendices and backups. */
+.screen-proof-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.screen-proof-grid.compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.screen-proof {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--exec-line);
+  border-radius: 10px;
+  background: var(--exec-paper);
+}
+.screen-proof img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  object-position: center;
+  background: #E8ECF2;
+}
+.screen-proof figcaption { padding: 10px 12px 12px; color: var(--exec-muted); font-size: 12px; line-height: 1.5; }
+.screen-proof figcaption strong { display: block; margin-bottom: 3px; color: var(--exec-navy); font-size: 13.5px; }
+.screen-placeholder-note {
+  margin: 12px 0 0;
+  padding: 10px 13px;
+  border-left: 4px solid var(--exec-cyan);
+  background: #EEF7F8;
+  color: var(--exec-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.screen-placeholder-note strong { color: var(--exec-navy); }
+
+.pdf-download {
+  position: fixed;
+  z-index: 120;
+  top: 12px;
+  right: 18px;
+  padding: 9px 15px;
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 999px;
+  background: rgba(7,23,71,.94);
+  color: #fff !important;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+@media screen and (max-width: 900px) {
+  .screen-proof-grid,
+  .screen-proof-grid.compact { grid-template-columns: 1fr; }
+}
+
+@media print {
+  * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .pdf-download { display: none !important; }
+  .global-author-credit { display: none !important; }
+  img { max-width: 100% !important; }
+}

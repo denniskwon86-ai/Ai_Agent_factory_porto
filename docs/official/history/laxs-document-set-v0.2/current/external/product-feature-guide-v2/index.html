@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LAXS-M v0.2 · 제품 기능설명서</title>
+  <link rel="stylesheet" href="styles.css?v=20260814-2" />
+</head>
+<body>
+  <div class="toolbar">
+    <a href="#feature-map">기능 목록</a>
+    <button type="button" onclick="window.print()">PDF로 저장</button>
+  </div>
+
+  <main class="document">
+    <section class="page cover">
+      <div class="cover-inner">
+        <div class="brand-mark"><span class="brand-dot"></span>LAXS-M · VERSION 0.2</div>
+        <div class="cover-title">
+          <p class="eyebrow" style="color:#75c7ff">PRODUCT &amp; FUNCTION GUIDE · 2026</p>
+          <h1>현업이 만들고,<br />데이터가 연결되고,<br />경영이 답을 얻습니다.</h1>
+          <p class="lead">현업이 AI와 함께 필요한 업무 SW와 시뮬레이터를 직접 만들고, 그 과정에서 생성되는 데이터를 전사 경영 온톨로지로 연결해 실제 경영 질문에 답하는 제조 경영 시스템입니다.</p>
+        </div>
+        <div class="cover-band">
+          <div><strong>Operational App Factory</strong>현업이 업무 기능을 직접 설계·생성·운영</div>
+          <div><strong>Enterprise Ontology</strong>사람·조직·업무·데이터·영향 관계를 전사 의미망으로 연결</div>
+          <div><strong>Decision-to-Execution</strong>시뮬레이션에서 회의·결정·실행·효과 측정까지 폐루프화</div>
+        </div>
+      </div>
+      <div class="page-no">01</div>
+    </section>
+
+    <section class="page standard story-page">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">The product story</p>
+          <h2>현업의 작은 업무 도구가 전사 경영지능으로 성장합니다</h2>
+          <p>LAXS-M은 ‘앱을 만들어 주는 도구’에서 끝나지 않습니다. 현업이 만든 기능과 운영 데이터가 중앙 데이터 계층으로 환류되고, 승인된 온톨로지와 계산 그래프를 통해 전사 경영 판단의 근거가 됩니다.</p>
+        </div>
+        <span class="status-pill current">PRODUCT DEFINITION</span>
+      </header>
+      <div class="story-flow">
+        <article><span>01</span><h3>현업이 직접 생성</h3><p>구매·생산·품질·물류·재무 담당자가 AI와 대화해 필요한 SW·보고서·시뮬레이터를 만듭니다.</p><em>FIELD CREATION</em></article>
+        <article><span>02</span><h3>업무에 실제 사용</h3><p>생성 앱은 상위 플랫폼의 인증·조직 권한·데이터 계약·감사 정책을 상속받아 앱인앱으로 실행됩니다.</p><em>HOST-GOVERNED</em></article>
+        <article><span>03</span><h3>데이터가 중앙으로 환류</h3><p>각 앱과 시뮬레이터에서 관리한 데이터는 출처·버전·유효기간·조직 범위를 가진 전사 데이터 자산으로 축적됩니다.</p><em>ENTERPRISE DATA</em></article>
+        <article><span>04</span><h3>온톨로지가 의미를 연결</h3><p>AI가 관계 후보를 제안하고 데이터 오너가 승인해, 자재·공정·주문·재고·생산·현금·손익의 의미 경로를 만듭니다.</p><em>SEMANTIC GRAPH</em></article>
+        <article><span>05</span><h3>경영 질문에 답변</h3><p>외부지표·마스터·Legacy·현업 앱 데이터를 총합해 변화 원인, 영향 경로, 대응 대안과 실행 결과를 설명합니다.</p><em>MANAGEMENT ANSWER</em></article>
+      </div>
+      <div class="story-anchor"><strong>제품의 핵심</strong><span>개별 앱의 생산성이 아니라, 현업이 만든 모든 기능과 데이터가 전사 경영 의미망과 의사결정 체계로 연결되는 구조입니다.</span></div>
+      <div class="page-no">02</div>
+    </section>
+
+    <section class="page standard ontology-page">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Enterprise ontology</p>
+          <h2>온톨로지가 흩어진 데이터를 ‘경영의 언어’로 연결합니다</h2>
+          <p>같은 원료·공정·설비·고객·계정이라도 시스템마다 이름과 코드가 다릅니다. 온톨로지는 단순 검색 그래프가 아니라, 승인된 관계·버전·유효기간·조직 범위·근거 경로를 가진 기업 경영 의미지도입니다.</p>
+        </div>
+        <span class="status-pill pending">DESIGNED · G2 IMPLEMENTATION PENDING</span>
+      </header>
+      <div class="ontology-canvas">
+        <div class="source-row">
+          <div><b>Legacy via MCP</b><small>ERP · MES · WMS · Partner Portal · DMS</small></div>
+          <div><b>MDM &amp; Catalog</b><small>자재 · 공정 · 설비 · 고객 · 계정</small></div>
+          <div><b>External Indicators</b><small>환율 · 금리 · 운임 · 원자재 · 전력</small></div>
+          <div><b>Knowledge Hub</b><small>표준 · 논문 · 사규 · 계약 · 보고서</small></div>
+          <div><b>App &amp; Twin Data</b><small>현업 생성 SW · 시뮬레이터 운영 데이터</small></div>
+        </div>
+        <div class="ontology-core">
+          <div class="core-ring ring-a"></div><div class="core-ring ring-b"></div>
+          <div class="core-title"><small>AI-ASSISTED · HUMAN-APPROVED</small><strong>기업 경영 온톨로지</strong><span>조직 · 제품 · 자재 · 주문 · 구매 · 운송 · 재고 · 공정 · 설비 · 생산 · 품질 · 판매 · 현금 · 손익</span></div>
+          <span class="ont-node n1">원료</span><span class="ont-node n2">구매계약</span><span class="ont-node n3">선적</span><span class="ont-node n4">공정</span><span class="ont-node n5">생산계획</span><span class="ont-node n6">재고</span><span class="ont-node n7">매출</span><span class="ont-node n8">현금흐름</span><span class="ont-node n9">손익</span>
+        </div>
+        <div class="action-row">
+          <div><b>영향 경로</b><small>무엇이 어디에 영향을 주는가</small></div>
+          <div><b>결정론적 계산</b><small>얼마나 변하는가</small></div>
+          <div><b>근거 설명</b><small>왜 이 답이 나왔는가</small></div>
+          <div><b>권한 통제</b><small>누가 어느 범위까지 보는가</small></div>
+        </div>
+      </div>
+      <div class="ontology-rule"><strong>역할 분리</strong><span>온톨로지는 관계와 영향 경로를 찾고, 계산 그래프는 수치를 산출하며, LLM은 결과를 해석·설명합니다. LLM이 경영 숫자를 임의로 만들지 않습니다.</span></div>
+      <div class="page-no">03</div>
+    </section>
+
+    <section class="page standard question-page">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">From question to decision</p>
+          <h2>경영자의 질문을 데이터·관계·계산·행동으로 분해합니다</h2>
+          <p>단순한 자연어 답변이 아니라, 질문에 필요한 데이터와 관계 경로를 찾고 같은 기준선에서 계산한 뒤 결정안과 실행 과제로 연결합니다.</p>
+        </div>
+        <span class="status-pill approved">TARGET OPERATING MODEL</span>
+      </header>
+      <div class="executive-question">“환율이 10% 오르고 원료 도입이 15일 지연되며 전기료가 12% 상승하면, 하반기 생산·현금·손익은 어떻게 달라지고 무엇을 결정해야 하는가?”</div>
+      <div class="answer-pipeline">
+        <article><span>1</span><h3>질문 해석</h3><p>기간·조직·제품·시나리오·결정 목적을 확정합니다.</p></article>
+        <article><span>2</span><h3>근거 수집</h3><p>ERP·MES·외부 파트너 포털, 기준정보, 외부지표, 현업 앱 데이터를 동일 시점 Snapshot으로 고정합니다.</p></article>
+        <article><span>3</span><h3>온톨로지 탐색</h3><p>환율→구매원가→재고→생산→매출채권→현금→손익의 승인된 영향 경로를 찾습니다.</p></article>
+        <article><span>4</span><h3>시나리오 계산</h3><p>기준·공격·위험안을 같은 입력 지문으로 계산하고 민감도와 최악 조건을 비교합니다.</p></article>
+        <article><span>5</span><h3>의사결정 패키지</h3><p>요청자·결정권자·영향부서용 검토서와 회의 요청, 결정 조건을 생성합니다.</p></article>
+        <article><span>6</span><h3>실행·효과 측정</h3><p>승인 결과를 실행 과제로 전환하고 실제 성과를 기준선과 대사해 다음 학습으로 환류합니다.</p></article>
+      </div>
+      <div class="answer-output">
+        <div><small>영향 경로</small><strong>구매원가 → 운전자본 → 생산계획 → 현금흐름 → 손익</strong></div>
+        <div><small>결정 결과</small><strong>대안별 수치 · 리스크 · 조건 · 담당 · 기한 · 중간 점검 기준</strong></div>
+      </div>
+      <div class="page-no">04</div>
+    </section>
+
+    <section class="page standard">
+      <header class="page-header"><div><p class="eyebrow">Seven product capabilities</p><h2>일곱 기능이 하나의 경영 운영체계를 만듭니다</h2><p>기능의 수가 아니라, 현업 생성과 전사 데이터·온톨로지·시뮬레이션·의사결정이 폐루프로 연결되는 것이 차별점입니다.</p></div><span class="status-pill approved">APPROVED PRODUCT SCOPE</span></header>
+      <div class="grid-4 capability-grid">
+        <article class="card"><span class="icon-badge">1</span><h3>현업 데이터 연결</h3><p>마스터·문서·Legacy·파일·외부지표를 등록하고 계약 기반으로 연결합니다.</p></article>
+        <article class="card"><span class="icon-badge">2</span><h3>통합 지식 자산</h3><p>동의어·유사어·계보·연관성·출처를 관리해 전사 검색과 재가공을 지원합니다.</p></article>
+        <article class="card"><span class="icon-badge">3</span><h3>경영 시뮬레이션</h3><p>업무 모듈별·전사 관점의 변화 영향을 결정론적으로 계산합니다.</p></article>
+        <article class="card"><span class="icon-badge">4</span><h3>AI Factory</h3><p>에이전트 추천·생성·연결로 업무 SW·보고서·시뮬레이터를 만듭니다.</p></article>
+        <article class="card blue"><span class="icon-badge red">5</span><h3>문맥형 AI 보좌</h3><p>회사·조직·객체·작업 상태를 이해하고 질문·병목·다음 행동에 답합니다.</p></article>
+        <article class="card blue"><span class="icon-badge red">6</span><h3>조직별 생성·공유</h3><p>회사·사업부·공장·부서 권한에 따라 앱과 데이터를 만들고 전달합니다.</p></article>
+        <article class="card blue"><span class="icon-badge red">7</span><h3>전사 통합 경영</h3><p>부서별 기능을 연결해 경영실적과 미래 시나리오를 전사 관점으로 집계합니다.</p></article>
+      </div>
+      <div class="card dark capability-anchor"><h3>하나의 선순환</h3><p>현업 생성 → 운영 데이터 → 중앙 통합 → 온톨로지 연결 → 시뮬레이션 → 회의·결정 → 실행 → 효과 측정 → 다음 생성</p></div>
+      <div class="page-no">05</div>
+    </section>
+
+    <section class="page standard">
+      <header class="page-header"><div><p class="eyebrow">Closed loop</p><h2>데이터를 보고서로 끝내지 않고 실행과 학습으로 되돌립니다</h2><p>의사결정에 사용된 근거와 계산을 고정하고, 실행 결과를 다시 측정해 다음 계획·앱·에이전트·지식에 반영합니다.</p></div><span class="status-pill pending">PARTIAL CURRENT · TARGET CLOSED LOOP</span></header>
+      <div class="value-chain">
+        <div class="value-node"><strong>연결</strong><span>Legacy · 파일 · 외부지표</span></div><div class="value-node"><strong>정제</strong><span>MDM · 카탈로그 · 계약</span></div><div class="value-node"><strong>생성</strong><span>SW · 보고서 · 시뮬레이터</span></div><div class="value-node"><strong>연결</strong><span>온톨로지 · 근거 경로</span></div><div class="value-node"><strong>계산</strong><span>시나리오 · 민감도 · 재현</span></div><div class="value-node"><strong>결정</strong><span>검토서 · 회의 · 승인</span></div><div class="value-node"><strong>실행</strong><span>담당 · 기한 · 업무 반영</span></div><div class="value-node"><strong>환류</strong><span>효과 측정 · 지식 · 스킬</span></div>
+      </div>
+      <div class="grid-3">
+        <article class="card"><h3>재현 가능한 숫자</h3><p>승인된 입력·수식·엔진 버전과 Snapshot을 고정해 같은 입력이면 같은 결과를 냅니다.</p></article>
+        <article class="card"><h3>근거가 고정된 결정</h3><p>검토 요청 뒤 근거가 바뀌면 조용히 덮어쓰지 않고 재검토 상태로 전환합니다.</p></article>
+        <article class="card"><h3>측정 가능한 실행</h3><p>결정 전후의 목표·실적·오차·비용·효과를 함께 저장해 다음 판단의 기준선으로 씁니다.</p></article>
+      </div>
+      <div class="card blue" style="margin-top:17px"><strong>AI와 계산의 경계</strong><p style="margin:5px 0 0">AI는 관계 후보·해석·설명·문서화를 돕고, 승인·권한·경영 수치·발간·실행은 정책 엔진과 결정론적 계산, 사용자 결정이 통제합니다.</p></div>
+      <div class="page-no">06</div>
+    </section>
+
+    <section class="page standard">
+      <header class="page-header"><div><p class="eyebrow">Enterprise trust model</p><h2>회사 구조와 권한이 모든 기능보다 먼저 적용됩니다</h2><p>그룹·법인·사업부·공장·부서 범위에 따라 데이터·앱·시뮬레이션·알림·온톨로지 경로를 제한합니다. 가상 회사는 실제 경영 데이터와 분리된 Sandbox에서만 실험합니다.</p></div><span class="status-pill current">CURRENT FOUNDATION · HARDENING</span></header>
+      <div class="grid-2">
+        <article class="card dark" style="min-height:4.8in"><p class="eyebrow" style="color:#78c7ff">ORGANIZATION CONTEXT</p><div class="layer-stack"><div class="layer highlight"><strong>그룹 / 지주사</strong><p>전사 정책·포트폴리오·공통 기준</p><em>GROUP</em></div><div class="layer"><strong>사업회사</strong><p>업종·업태·공통 경영체계</p><em>COMPANY</em></div><div class="layer"><strong>사업부</strong><p>제품·공정·손익 책임 단위</p><em>DIVISION</em></div><div class="layer"><strong>공장 / 부서</strong><p>생산·품질·물류·구매 실행 단위</p><em>PLANT / DEPT</em></div><div class="layer"><strong>가상 회사</strong><p>신사업·증설·경쟁사·M&amp;A 시나리오</p><em>VIRTUAL</em></div></div></article>
+        <div class="grid-2"><article class="card"><span class="icon-badge">A</span><h3>Host-Governed App</h3><p>생성 앱은 자체 로그인과 별도 보안을 만들지 않고 플랫폼 인증·조직·감사·데이터 정책을 상속합니다.</p></article><article class="card"><span class="icon-badge">B</span><h3>Fail-closed</h3><p>범위나 권한을 해석할 수 없으면 전사 공용으로 간주하지 않고 노출을 차단합니다.</p></article><article class="card"><span class="icon-badge">C</span><h3>Legacy Coexistence</h3><p>외부 참여자는 기존 포털을 사용하고, 경영 시스템은 MCP·계약 기반으로 검증된 데이터만 가져옵니다.</p></article><article class="card"><span class="icon-badge">D</span><h3>Evidence &amp; Version</h3><p>출처·버전·유효기간·승인·조직 범위·근거 경로를 보존해 결과와 판단을 재현합니다.</p></article></div>
+      </div>
+      <div class="page-no">07</div>
+    </section>
+
+    <section class="page standard" id="feature-map">
+      <header class="page-header"><div><p class="eyebrow">Product feature map</p><h2>사용자는 경영 홈에서 시작하고, 목적별 전문 화면으로 이동합니다</h2><p>모든 기능을 한 화면에 욱여넣지 않습니다. 경영·생성·데이터·거버넌스·AI 운영이 각각 독립된 작업면을 가지며 문맥형 AI 보좌 레일을 공유합니다.</p></div></header>
+      <div class="feature-map">
+        <article class="feature-column"><h3>경영·의사결정</h3><ul><li>경영 현황·의사결정 홈</li><li>경영계획·실적·시나리오 분석</li><li>의사결정·회의 실행 관리</li><li>대내외 보고서 작성·발간</li><li>전사 경영 브리핑</li></ul></article>
+        <article class="feature-column"><h3>현업 생성·운영</h3><ul><li>AI 경영비서 · 업무/데이터 설계 상담</li><li>현업 SW 생성</li><li>프로젝트 실행 통제·WBS</li><li>SW·보고서·시뮬레이터 산출물</li><li>사용자 전달·앱 주머니</li></ul></article>
+        <article class="feature-column"><h3>데이터·온톨로지</h3><ul><li>기업 지식 허브</li><li>기준정보·데이터 카탈로그</li><li>용어·동의어 사전</li><li>Crosswalk·MCP 연계</li><li>기업 경영 의미지도</li></ul></article>
+        <article class="feature-column"><h3>조직·거버넌스</h3><ul><li>회사·사업부·공장 구조</li><li>사용자·역할·권한</li><li>데이터 계약·품질</li><li>결정·감사 원장</li><li>가상 회사 Sandbox</li></ul></article>
+        <article class="feature-column"><h3>AI 운영</h3><ul><li>AI 에이전트 운영</li><li>워크플로우 템플릿</li><li>모델·비용 라우팅</li><li>사용자 검토 지점</li><li>스킬 진화·텔레메트리</li></ul></article>
+      </div>
+      <div class="status-legend"><span class="status-pill current">CURRENT PRODUCT</span><span class="status-pill approved">APPROVED TARGET</span><span class="status-pill pending">DESIGNED · IMPLEMENTATION PENDING</span></div>
+      <div class="page-no">08</div>
+    </section>
+
+    <section class="page section-cover">
+      <div class="section-copy"><div class="brand-mark"><span class="brand-dot"></span>LAXS-M · VERSION 0.2</div><div class="section-number">II</div><h2>프로그램 기능과<br />실제 작업 화면</h2><p>목록이 아니라 사용자가 실제로 입력·생성·연결·계산·검토·회의·발간하는 상태를 중심으로 설명합니다. 화면 안의 AI Factory Studio와 Jarvis 표기는 현재 구현의 개발명·가칭이며, 공식 명칭은 LAXS-M과 AI 경영비서입니다.</p></div>
+      <div class="section-visual"><div class="screen-stack"><img src="assets/screens/01-management-home.png" alt="경영 홈" /><img src="assets/screens/15-control-room-approved.png" alt="프로젝트 통제실 승인 시안" /></div></div>
+      <div class="page-no">09</div>
+    </section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-01</div><div><h2>경영 현황·의사결정 홈</h2><p>지금 결정해야 할 일과 데이터·SW·Twin의 상태를 첫 화면에서 확인합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>경영진 · 조직 책임자 · PMO</div></header><div class="feature-body"><figure class="screen-frame"><img src="assets/screens/01-management-home.png" alt="경영 홈 화면" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>여러 모듈을 순회하기 전에 결정 대기·차단·데이터 신뢰·프로그램 상태를 한곳에서 파악합니다.</p></div><div class="spec-block"><h3>핵심 기능</h3><ul><li>결정·차단 우선순위</li><li>DATA·SW·TWIN 운영 흐름</li><li>MDM·지식·외부지표 준비도</li><li>전문 기능 바로가기</li></ul></div><div class="spec-block output"><h3>출력</h3><p>현재 경영 초점, 다음 행동, 데이터 준비도, AI 비용과 신뢰 상태.</p></div><div class="spec-block control"><h3>통제</h3><p>선택 회사·조직·권한 범위 내의 정보만 집계하고, 조회 불가를 0건으로 표시하지 않습니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">회사·조직 선택</span><span class="arrow">→</span><span class="flow-step">결정·차단 확인</span><span class="arrow">→</span><span class="flow-step">근거·신뢰 확인</span><span class="arrow">→</span><span class="flow-step">전문 기능 진입</span></div><div class="page-no">10</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-02</div><div><h2>AI 경영비서 · 업무/데이터 설계 상담</h2><p>무엇부터 해야 할지 모르는 사용자에게 필요한 데이터와 실행 순서를 먼저 제안합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>현업 담당자 · 혁신조직 · 데이터 오너</div></header><div class="feature-body"><figure class="screen-frame"><img src="assets/screens/02-advisor.png" alt="업무 데이터 설계 상담 화면" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>사용자의 목표를 선택형 문답으로 구체화하고 준비해야 할 데이터 키트와 첫 실행 계획을 만듭니다.</p></div><div class="spec-block"><h3>핵심 기능</h3><ul><li>업무 목적·사용자·결정 질문 확인</li><li>권장 데이터셋·품질 수준 제안</li><li>부족 데이터의 대체 경로 안내</li><li>앱·보고서·Twin 실행 청사진</li></ul></div><div class="spec-block output"><h3>출력</h3><p>요구사항 초안, 데이터 준비 체크리스트, 권장 에이전트·워크플로우, 단계별 수행 계획.</p></div><div class="spec-block control"><h3>통제</h3><p>실행 전 사용자가 범위·추천안·데이터 가정을 확인하고 승인합니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">목표 질문</span><span class="arrow">→</span><span class="flow-step">추천안 선택</span><span class="arrow">→</span><span class="flow-step">데이터 키트 제안</span><span class="arrow">→</span><span class="flow-step">생성 계획 전환</span></div><div class="page-no">11</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-03</div><div><h2>현업 SW 생성</h2><p>현업의 한 문장 요구를 SW·보고서·시뮬레이터 제작 프로젝트로 전환합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>현업 기획자 · 프로덕트 오너 · 시민 개발자</div></header><div class="feature-body"><figure class="screen-frame"><img src="assets/screens/03-software-factory.png" alt="Software Factory 화면" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>프로젝트를 만들고 내 업무·Mega·릴리스·보관 상태를 회사·조직 문맥 안에서 관리합니다.</p></div><div class="spec-block"><h3>핵심 기능</h3><ul><li>독립·Mega 프로젝트 생성</li><li>템플릿·산출물 유형 선택</li><li>프로젝트 검색·재개·보관</li><li>릴리스·사용자 전달 진입</li></ul></div><div class="spec-block output"><h3>출력</h3><p>요구 인터뷰부터 구현·검증·릴리스까지 추적 가능한 생성 프로젝트.</p></div><div class="spec-block control"><h3>통제</h3><p>조직 범위가 없는 프로젝트는 운영 영역에 노출하지 않고 시험 산출물은 Sandbox로 분리합니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">새 업무 생성</span><span class="arrow">→</span><span class="flow-step">산출물·템플릿 선택</span><span class="arrow">→</span><span class="flow-step">요구 인터뷰</span><span class="arrow">→</span><span class="flow-step">통제실 진입</span></div><div class="page-no">12</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-04</div><div><h2>프로젝트 실행 통제</h2><p>전체 제작 단계와 WBS, 현재 작업, 사용자 결정, AI 활동, 다음 전환 조건을 숨기지 않습니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>현업 오너 · PM · 검토자 · 개발 운영자</div></header><div class="feature-body"><figure class="screen-frame approved"><img src="assets/screens/15-control-room-approved.png" alt="승인된 프로젝트 통제실 UI" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>AI 작업을 암묵지로 만들지 않고, 요구→RFP→기획→아키텍처→WBS→구현→검증→릴리스 전 과정을 한눈에 추적합니다.</p></div><div class="spec-block"><h3>핵심 기능</h3><ul><li>전체 단계·승인 상태</li><li>WBS 의존성·진척·차단</li><li>현재 작업·입력 계약·완료 조건</li><li>사용자 결정 대기·AI 보좌·실시간 로그</li></ul></div><div class="spec-block output"><h3>출력</h3><p>요구서·기획서·설계서·WBS·소스·보고서·실행 앱·검증 근거·릴리스.</p></div><div class="spec-block control"><h3>통제</h3><p>사용자 검토 지점과 품질 게이트를 통과하지 않으면 다음 단계가 시작되지 않습니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">전체 흐름 확인</span><span class="arrow">→</span><span class="flow-step">현재 WBS 수행</span><span class="arrow">→</span><span class="flow-step">사용자 결정</span><span class="arrow">→</span><span class="flow-step">다음 단계 자동 전환</span></div><div class="page-no">13</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-05</div><div><h2>기업 지식 허브</h2><p>표준·논문·사규·업무 문서를 승인된 지식팩으로 구성해 AI와 현업이 함께 사용합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>지식 관리자 · 현업 전문가 · 데이터 오너</div></header><div class="feature-body"><figure class="screen-frame"><img src="assets/screens/04-knowledge-hub.png" alt="지식 허브 화면" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>제조 공정·물동·품질·재무·법규 자료를 자연어로 찾고 프로젝트·에이전트의 근거로 연결합니다.</p></div><div class="spec-block"><h3>핵심 기능</h3><ul><li>지식팩·문서 등록</li><li>자연어·메타데이터 검색</li><li>출처·등급·유효기간 관리</li><li>프로젝트·에이전트 연결</li></ul></div><div class="spec-block output"><h3>출력</h3><p>근거 문서, 검색 결과, 문맥 묶음, 인용 경로, 승인된 참고 지식.</p></div><div class="spec-block control"><h3>통제</h3><p>승인되지 않은 문서와 권한 밖 문서는 AI 문맥에 주입하지 않습니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">자료 등록</span><span class="arrow">→</span><span class="flow-step">등급·범위 승인</span><span class="arrow">→</span><span class="flow-step">자연어 검색</span><span class="arrow">→</span><span class="flow-step">생성·판단 근거 연결</span></div><div class="page-no">14</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-06</div><div><h2>기준정보·데이터 카탈로그·용어 관리</h2><p>전사 공통 기준정보와 데이터 자산의 의미·소유·품질·위치를 함께 관리합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>MDM 관리자 · 데이터 오너 · 현업 책임자</div></header><div class="feature-body"><figure class="screen-frame"><img src="assets/screens/05-master-data.png" alt="마스터 데이터 화면" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>자재·제품·공정·설비·조직·고객·회계 파라미터의 정본과 데이터셋 카탈로그, 동의어를 통합 관리합니다.</p></div><div class="spec-block"><h3>핵심 기능</h3><ul><li>유형·레코드·계층·버전 관리</li><li>소유자·품질·보안등급·계보</li><li>동의어·기술용어·사용자 용어</li><li>CSV 등록·Crosswalk·MCP 계약</li></ul></div><div class="spec-block output"><h3>출력</h3><p>Golden Record, 데이터 카탈로그, 용어 매핑, 조직 범위, 생성·계산 주입 데이터.</p></div><div class="spec-block control"><h3>통제</h3><p>미바인딩 자료는 전사 공용이 아니라 미노출이며, 개정 전 버전과 유효기간을 보존합니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">데이터 유형 정의</span><span class="arrow">→</span><span class="flow-step">레코드·카탈로그 등록</span><span class="arrow">→</span><span class="flow-step">승인·버전 고정</span><span class="arrow">→</span><span class="flow-step">온톨로지·계산 공급</span></div><div class="page-no">15</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-07</div><div><h2>데이터 품질·조직 권한 관리</h2><p>데이터 신뢰와 회사·사업부·공장·부서의 접근 범위를 같은 운영 계약으로 관리합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>거버넌스 · 보안 · 조직 관리자 · 감사</div></header><div class="feature-body"><div class="screen-pair"><figure class="screen-frame"><img src="assets/screens/06-data-governance.png" alt="데이터 거버넌스" /></figure><figure class="screen-frame"><img src="assets/screens/07-org-permissions.png" alt="조직 권한" /></figure></div><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>무엇을 믿을 수 있는지와 누가 볼 수 있는지를 분리하지 않고 함께 검증합니다.</p></div><div class="spec-block"><h3>핵심 기능</h3><ul><li>중복·결손·계약 위반 탐지</li><li>회사 구조·상하위 조직 관리</li><li>사용자·역할·자원 범위 배정</li><li>API·SSE·앱·온톨로지 경로 통제</li></ul></div><div class="spec-block output"><h3>출력</h3><p>품질 이슈, 계약 상태, 조직 그래프, 권한 정책, 감사·정책 판정 근거.</p></div><div class="spec-block control"><h3>통제</h3><p>권한 없는 자원의 존재와 개수를 노출하지 않고, 범위 해석 실패는 Fail-closed 처리합니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">회사·조직 등록</span><span class="arrow">→</span><span class="flow-step">소유·권한 배정</span><span class="arrow">→</span><span class="flow-step">품질·계약 판정</span><span class="arrow">→</span><span class="flow-step">전 기능 강제</span></div><div class="page-no">16</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-08</div><div><h2>AI 에이전트 운영</h2><p>에이전트를 실제로 구성하고 역할·모델·스킬·순서·사용자 검토 지점을 연결합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>AI 운영자 · 템플릿 관리자 · 현업 책임자</div></header><div class="feature-body"><div class="screen-pair"><figure class="screen-frame"><img src="assets/screens/16-agent-main.png" alt="에이전트 구성 화면" /></figure><figure class="screen-frame"><img src="assets/screens/17-agent-flow.png" alt="에이전트 실행 흐름 화면" /></figure></div><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>업무 목적에 맞는 AI 팀을 만들고, 누가 무엇을 어떤 순서와 근거로 수행하는지 실행 가능한 흐름으로 설계합니다.</p></div><div class="spec-block"><h3>핵심 기능</h3><ul><li>에이전트 생성·역할·스킬 편집</li><li>모델 등급·비용·대체 모델 정책</li><li>노드 연결·순서 재계산</li><li>사용자 검토 지점·템플릿 복사</li></ul></div><div class="spec-block output"><h3>출력</h3><p>에이전트 레지스트리, 연결 그래프, 실행 순서, 검토 지점, 재사용 가능한 업무 템플릿.</p></div><div class="spec-block control"><h3>통제</h3><p>설정 권한을 별도로 통제하고, 검토 지점 삭제·모델 변경·템플릿 배포를 감사 기록으로 남깁니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">업무 목표 선택</span><span class="arrow">→</span><span class="flow-step">에이전트 구성</span><span class="arrow">→</span><span class="flow-step">연결·검토 지점 설계</span><span class="arrow">→</span><span class="flow-step">템플릿 배포</span></div><div class="page-no">17</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-09</div><div><h2>경영계획·실적·시나리오 분석</h2><p>기준·공격·위험 시나리오를 동일 입력 지문에서 계산하고 실적·현금·손익·오차를 비교합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>경영관리 · 재무 · 사업부 책임자</div></header><div class="feature-body"><figure class="screen-frame"><img src="assets/screens/18-simulation-comparison.png" alt="경영 시뮬레이션 비교 결과" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>가정 변화가 영업이익·순이익·현금흐름에 미치는 영향을 같은 기준선에서 비교하고 입력 불일치를 차단합니다.</p></div><div class="spec-block"><h3>화면에 보이는 결과</h3><ul><li>기본·공격·위험 시나리오 선택</li><li>영업이익·순이익·기준선 대비</li><li>계획 대비 실적 차이 분석</li><li>현금흐름·Backtest·오차·편향</li></ul></div><div class="spec-block output"><h3>출력</h3><p>수치 비교표, 입력 지문, 미적용 가정, 민감도, 계획 오차, 의사결정용 Snapshot.</p></div><div class="spec-block control"><h3>통제</h3><p>결정론적 엔진으로 계산하고, 기준선·입력 지문이 다르면 비교 불가로 판정합니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">기준선·Snapshot 고정</span><span class="arrow">→</span><span class="flow-step">외부·내부 가정 변경</span><span class="arrow">→</span><span class="flow-step">수치·영향 계산</span><span class="arrow">→</span><span class="flow-step">결정 패키지 전환</span></div><div class="page-no">18</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-10</div><div><h2>의사결정·회의 실행 관리</h2><p>시뮬레이션 결과를 세 관점 검토서로 만들고, 필요한 회의와 결정 기록을 한 안건에서 관리합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>의사결정권자 · 요청 부서 · 영향 부서</div></header><div class="feature-body"><figure class="screen-frame"><img src="assets/screens/19-decision-meeting.png" alt="의사결정 회의 요청 화면" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>무엇을 왜 결정해야 하는지, 누가 영향을 받는지, 회의에서 무엇을 검토할지 명확히 합니다.</p></div><div class="spec-block"><h3>핵심 기능</h3><ul><li>요청자·결정권자·영향부서 검토서</li><li>동의·조건부 동의·반대·정보 부족</li><li>회의 제목·일정·채널·메모 기록</li><li>승인·조건부 승인·기각·보류</li></ul></div><div class="spec-block output"><h3>출력</h3><p>회의 요청, 참여자 의견, 결정 문장, 근거 지문, 조건·담당·기한·점검 기준.</p></div><div class="spec-block control"><h3>통제</h3><p>회의 요청 후 근거가 바뀌면 같은 문서로 보지 않고 재검토를 요구합니다. 외부 캘린더 전송은 승인된 어댑터가 붙을 때만 수행합니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">시뮬레이션 선택</span><span class="arrow">→</span><span class="flow-step">세 관점 검토서</span><span class="arrow">→</span><span class="flow-step">회의 요청·의견 수렴</span><span class="arrow">→</span><span class="flow-step">결정·실행 과제</span></div><div class="page-no">19</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-11</div><div><h2>대내외 보고서 작성·발간</h2><p>승인된 결정 Snapshot을 실제 보고서로 렌더링하고 독자·보안등급·게이트에 맞춰 발간합니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>경영관리 · IR · 법무 · 공시 · 책임 임원</div></header><div class="feature-body"><figure class="screen-frame"><img src="assets/screens/20-publication-body.png" alt="발간 보고서 본문 예시" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>결정 결과와 근거를 내부 운영 보고·경영진 보고·대외 제한 보고 등 목적별 문서로 재구성합니다.</p></div><div class="spec-block"><h3>보고서 예시</h3><ul><li>결정 문장·결과·문서 버전</li><li>기준안·대안·조건</li><li>근거 지문·제외 항목</li><li>책임 임원·법무·공시 승인</li></ul></div><div class="spec-block output"><h3>출력</h3><p>화면 미리보기, PDF/문서, 독자별 요약, 발간·배포 이력, 정정판.</p></div><div class="spec-block control"><h3>통제</h3><p>대외 문서는 책임 임원과 법무·공시 검토를 모두 통과해야 하며, 화면과 서버 API를 함께 차단합니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">결정 Snapshot</span><span class="arrow">→</span><span class="flow-step">독자별 보고서 생성</span><span class="arrow">→</span><span class="flow-step">게이트 승인</span><span class="arrow">→</span><span class="flow-step">발간·이력 보존</span></div><div class="page-no">20</div></section>
+
+    <section class="page feature-page"><header class="feature-head"><div class="feature-code">F-12</div><div><h2>전사 경영 브리핑</h2><p>경영자가 먼저 봐야 할 데이터 계약·비교 불가·결정 대기·운영 리스크와 다음 행동을 한 장에 보여줍니다.</p></div><div class="feature-owner"><strong>주요 사용자</strong>CEO · CFO · 전략 · 경영관리</div></header><div class="feature-body"><figure class="screen-frame"><img src="assets/screens/21-briefing-content.png" alt="전사 브리핑 내용 화면" /></figure><aside class="feature-spec"><div class="spec-block"><h3>화면 목적</h3><p>상태 숫자만 나열하지 않고, 지금 가장 급한 문제와 원인·영향·다음 행동을 전사 관점에서 설명합니다.</p></div><div class="spec-block"><h3>화면에 보이는 내용</h3><ul><li>데이터 계약 위반과 원천 소실</li><li>입력 불일치로 비교 불가한 실행</li><li>미검토 AI 스킬 제안</li><li>내 결정·차단·데이터·비용 상태</li></ul></div><div class="spec-block output"><h3>출력</h3><p>우선순위 브리핑, 심각도, 근거 객체, 조직 범위, 다음 행동과 담당 기능.</p></div><div class="spec-block control"><h3>통제</h3><p>읽지 못한 정보와 불완전한 집계를 문제 없음으로 표시하지 않으며 비용 하한과 누락을 명시합니다.</p></div></aside></div><div class="feature-flow"><span class="flow-label">업무 흐름</span><span class="flow-step">전사 상태 수집</span><span class="arrow">→</span><span class="flow-step">완전성·심각도 판정</span><span class="arrow">→</span><span class="flow-step">우선순위 브리핑</span><span class="arrow">→</span><span class="flow-step">결정·조치 화면 연결</span></div><div class="page-no">21</div></section>
+
+    <section class="page standard vertical-page">
+      <header class="page-header"><div><p class="eyebrow">First vertical closed loop</p><h2>원료 구매에서 현금·손익까지, 첫 수직 폐루프로 검증합니다</h2><p>첫 적용은 기능별 데모가 아니라 구매·물류·생산·재무가 연결되는 수직 폐루프입니다. 현재는 검증 시나리오와 판정 계약이며, Shadow Pilot에서 실제 기준선과 비교해 효과를 측정합니다.</p></div><span class="status-pill pending">VALIDATION SCENARIO · NOT YET PROVEN</span></header>
+      <div class="vertical-chain">
+        <article><span>구매</span><h3>원료 도입 계획</h3><p>계약 단가·환율·수량·납기</p></article><article><span>외부</span><h3>선적·통관·운송</h3><p>Legacy Portal / MCP</p></article><article><span>물류</span><h3>도착·이동·재고</h3><p>ETA·야드·재고일수</p></article><article><span>생산</span><h3>투입·공정·품질</h3><p>생산계획·수율·병목</p></article><article><span>판매</span><h3>출하·매출</h3><p>수주·납기·매출채권</p></article><article><span>재무</span><h3>현금·손익</h3><p>운전자본·원가·이익</p></article>
+      </div>
+      <div class="validation-contract">
+        <article><small>VALIDATION INPUT</small><strong>복합 충격 시나리오</strong><p>환율 +10% · 원료 도입 +15일 지연 · 전기료 +12%. 수치는 검증 입력이며 경영 성과가 아닙니다.</p></article>
+        <article><small>REQUIRED OUTPUT</small><strong>경로와 수치의 동시 증명</strong><p>생산량·재고·운전자본·현금·영업이익 변화와 민감 요인을 동일 입력 지문으로 산출합니다.</p></article>
+        <article><small>DECISION &amp; EXECUTION</small><strong>대안·책임·기한까지 연결</strong><p>구매량·생산계획·자금조달 대안을 비교하고 회의 요청, 결정권자, 실행 책임자와 기한을 남깁니다.</p></article>
+        <article><small>PROOF GATE</small><strong>효과는 측정 후 주장</strong><p>기존 분석 소요시간·수작업·오차와 Shadow Pilot 결과를 비교하기 전에는 ROI를 확정하지 않습니다.</p></article>
+      </div>
+      <div class="vertical-note"><strong>Legacy 공존 원칙</strong><span>기존 ERP·MES·WMS와 외부 포털은 원천·실행 시스템으로 유지합니다. 초기에는 파일 Snapshot·읽기 전용 계약으로 시작하고, 원천별 승인에 따라 API·MCP·어댑터 연계를 단계적으로 확대합니다.</span></div>
+      <div class="page-no">22</div>
+    </section>
+
+    <section class="page standard pilot-page">
+      <header class="page-header"><div><p class="eyebrow">90-day proof plan</p><h2>90일 파일럿은 ‘좋아 보이는 데모’가 아니라 도입 여부를 판단하는 검증입니다</h2><p>효과 수치를 먼저 약속하지 않습니다. 시작 시 기준선과 목표를 합의하고, 데이터 대사·재현성·보안·업무 효과를 통과한 경우에만 다음 확산 단계로 이동합니다.</p></div><span class="status-pill approved">PROPOSED ADOPTION PLAN</span></header>
+      <div class="pilot-timeline">
+        <article><small>WEEK 0–2</small><h3>범위·기준선</h3><p>원료 구매 1개 흐름, 데이터 오너, 현재 리드타임·수작업·오차·비용 기준선을 확정합니다.</p></article>
+        <article><small>WEEK 3–6</small><h3>데이터·대사</h3><p>원천 Snapshot, Crosswalk, 품질 규칙, 조직 범위와 CERTIFIED 기준선 후보를 구성합니다.</p></article>
+        <article><small>WEEK 7–10</small><h3>Replay·Shadow</h3><p>과거 기간 재현과 실제 업무 병행 운영으로 동일 입력 재현성·결과 차이·수정량을 측정합니다.</p></article>
+        <article><small>WEEK 11–13</small><h3>결정·확산 판정</h3><p>검토서·회의·실행과제를 완주하고 효과·운영비·리스크를 근거로 확대·보완·중단을 결정합니다.</p></article>
+      </div>
+      <div class="pilot-grid">
+        <article class="card"><h3>측정할 경영·운영 지표</h3><ul><li>질문 접수부터 의사결정까지의 리드타임</li><li>데이터 취합·대사·보고서 작성 시간</li><li>수작업 수정 횟수와 재작업량</li><li>예측 오차·편향과 계획 대비 실적 차이</li><li>재고·운전자본·품질손실 개선 가능액</li><li>승인 산출물 1건당 LLM·컴퓨팅 비용</li></ul></article>
+        <article class="card cost"><h3>비용은 항목별로 공개</h3><ul><li>초기 데이터 진단·정합화</li><li>원천별 파일·API·MCP 어댑터</li><li>제품 라이선스와 인프라</li><li>LLM·저장소·계산 운영비</li><li>데이터 오너·승인·운영 거버넌스</li><li>유지보수와 사용자 확산 지원</li></ul></article>
+        <article class="card gate"><h3>확산·중단 Gate</h3><ul><li>합의 허용오차 내 원천 대사</li><li>동일 입력 지문은 동일 결과</li><li>결과·관계·수식의 근거 추적 100%</li><li>조직 범위 밖 노출 0건</li><li>착수 시 합의한 핵심 KPI 달성</li><li>미달 시 원인·보완비용 확인 후 중단 가능</li></ul></article>
+      </div>
+      <div class="note">기간과 목표치는 회사의 원천 시스템 수, 데이터 품질, 승인 절차에 따라 달라집니다. 본 페이지는 계약할 검증 절차이며 실측 성과를 주장하는 페이지가 아닙니다.</div>
+      <div class="page-no">23</div>
+    </section>
+
+    <section class="page standard alternatives-page">
+      <header class="page-header"><div><p class="eyebrow">Coexistence and positioning</p><h2>기존 시스템을 무조건 대체하지 않고, 경영 의미·시뮬레이션·결정 폐루프를 보완합니다</h2><p>LAXS-M의 목적은 전사 시스템을 한 번에 교체하는 것이 아닙니다. 원천과 실행의 책임은 기존 시스템에 남기고, 분절된 데이터를 경영 질문과 실행 결정으로 연결하는 상위 계층을 제공합니다.</p></div><span class="status-pill current">PRODUCT POSITIONING</span></header>
+      <table class="role-matrix">
+        <thead><tr><th>기존 시스템·대안</th><th>권장 관계</th><th>기존 시스템이 계속 맡는 일</th><th>LAXS-M이 추가하는 일</th></tr></thead>
+        <tbody>
+          <tr><td>ERP · MES · WMS</td><td>유지 + 보완</td><td>정본 거래·생산·재고 기록과 현장 실행</td><td>Snapshot·계약 기반 연결, 온톨로지 영향 경로, 전사 시뮬레이션과 결정 패키지</td></tr>
+          <tr><td>EPM · BI</td><td>보완 · 선택적 확장</td><td>계획·실적 집계, 정형 리포트와 대시보드</td><td>현업 앱 데이터 환류, 원인 경로, 복합 시나리오, 회의·결정·효과 측정 폐루프</td></tr>
+          <tr><td>Low-code</td><td>선택적 대안</td><td>화면·워크플로우 중심의 범용 앱 제작</td><td>AI 에이전트 생성, Host 권한 상속, 데이터 계약, 전사 의미망 환류가 필요한 업무 앱</td></tr>
+          <tr><td>Lakehouse · Data Platform</td><td>보완</td><td>대규모 저장·처리·분석 기반</td><td>경영 의미·조직 범위·승인 관계·결정론적 계산·실행 책임의 운영 계층</td></tr>
+          <tr><td>전문 Digital Twin</td><td>연계 + 보완</td><td>설비·공정별 고정밀 물리·운영 모델</td><td>업무 Twin과 전문 모델 결과를 현금·손익·전사 의사결정 관점으로 연결</td></tr>
+          <tr><td>RPA · 범용 Agent Platform</td><td>비대상 + 보완</td><td>반복 작업 자동화와 범용 에이전트 실행</td><td>제조 경영 의미 모델, 데이터 신뢰, 결정 Gate, 효과 측정이 필요한 경영 폐루프</td></tr>
+        </tbody>
+      </table>
+      <div class="role-principle"><strong>도입 원칙 · No Rip-and-Replace</strong><span>원천 시스템 개편을 전제로 하지 않습니다. 파일 Snapshot과 읽기 전용 계약으로 가장 작은 검증을 시작하고, 가치와 통제가 증명된 원천부터 API·MCP·어댑터를 확대합니다.</span></div>
+      <div class="page-no">24</div>
+    </section>
+
+    <section class="page standard differentiation-page">
+      <header class="page-header"><div><p class="eyebrow">Why it matters</p><h2>‘AI로 앱을 만드는 기능’이 아니라 ‘회사가 학습하는 구조’가 제품의 해자입니다</h2><p>생성 기능은 시작점입니다. 각 조직의 기능과 데이터가 공통 의미체계와 경영 폐루프로 축적될수록 다른 모델로 교체해도 지식·품질·통제·경영 맥락은 회사에 남습니다.</p></div><span class="status-pill current">PRODUCT STRATEGY</span></header>
+      <div class="moat-grid">
+        <article><span>01</span><h3>현업 생성</h3><p>IT 대기열 없이 현업이 필요한 기능을 직접 구체화합니다.</p></article><article><span>02</span><h3>Host 통제</h3><p>모든 생성 앱이 플랫폼 인증·권한·데이터 계약을 상속합니다.</p></article><article><span>03</span><h3>전사 온톨로지</h3><p>앱과 시스템의 데이터가 동일한 경영 의미망으로 누적됩니다.</p></article><article><span>04</span><h3>결정론적 Twin</h3><p>LLM 설명과 수치 계산을 분리해 경영 결과를 재현합니다.</p></article><article><span>05</span><h3>폐루프 실행</h3><p>분석을 회의·결정·업무 적용·효과 측정으로 이어갑니다.</p></article><article><span>06</span><h3>비용·품질 최적화</h3><p>작업 난이도에 맞는 모델 라우팅과 캐시로 골든포인트를 찾습니다.</p></article>
+      </div>
+      <div class="final-statement">모델은 바뀔 수 있습니다. 그러나 <strong>회사의 데이터, 온톨로지, 계산 계약, 결정 근거와 실행 학습</strong>은 회사의 자산으로 남아야 합니다.</div>
+      <div class="page-no">25</div>
+    </section>
+
+    <section class="page closing">
+      <div class="closing-copy"><div class="brand-mark"><span class="brand-dot"></span>LAXS-M · VERSION 0.2</div><p class="eyebrow" style="color:#78c7ff;margin-top:1.1in">FROM FIELD CREATION TO MANAGEMENT DECISION</p><h2>현업의 실행과<br />전사의 데이터가 만나<br />경영의 다음 선택이 됩니다.</h2><p>LAXS-M은 현업이 필요한 기능을 직접 만드는 자유와, 전사 데이터·온톨로지·계산·권한·의사결정이 지켜야 할 통제를 함께 제공합니다.</p></div>
+      <div class="closing-side"><div class="closing-list"><div><strong>현업의 속도</strong><span>업무 SW·보고서·시뮬레이터를 직접 생성</span></div><div><strong>전사의 연결</strong><span>Legacy·MDM·지식·외부지표·생성 데이터를 온톨로지로 통합</span></div><div><strong>경영의 신뢰</strong><span>재현 가능한 계산, 근거가 고정된 결정, 감사 가능한 실행</span></div><div><strong>지속되는 학습</strong><span>실행 효과와 사용자 피드백을 다음 생성·지식·계획으로 환류</span></div></div></div>
+      <div class="page-no" style="color:rgba(255,255,255,.5)">26</div>
+    </section>
+  </main>
+  <script src="guide.js"></script>
+</body>
+</html>
