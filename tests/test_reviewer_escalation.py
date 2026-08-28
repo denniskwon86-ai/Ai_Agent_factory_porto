@@ -206,3 +206,41 @@ def test_사다리_정의가_하나다():
         "run_reviewer 가 상신 판정을 직접 쓴다 — 사다리는 _rework_ladder 하나여야 한다")
     assert src.count("_deterministic_rework(") == 7, (
         f"결정론 게이트가 공통 반환부를 안 쓴다: {src.count('_deterministic_rework(')}곳")
+
+
+def test_이력에는_상신_문구가_아니라_원래_지적이_남는다():
+    """★★★ [2026-08-28 실측] 반복 판정의 상대는 «무엇이 지적됐나» 여야 한다.
+
+    상신하면 문구가 `[자동 상신] …` 래퍼로 덮인다. 종전에는 **그 덮인 것**을 이력에
+    넣었고, 래퍼가 200자쯤 되는 고정 문구라 원본이 묽어졌다. PM 이 수용한 뒤 같은
+    결함이 재발하면 그때의 원본과 대조되는 상대가 이 묽어진 문자열이다:
+
+        지적 215자 → 유사도 0.721   걸린다
+        지적  86자 → 유사도 0.509   걸린다(여유 없음)
+        지적  22자 → 유사도 0.210   **못 잡는다**(임계 0.45)
+
+    ⚠️ 「짧은 지적일수록 무너진다」가 요지다 — 긴 것만 시험하면 이 결함이 안 보인다."""
+    import difflib
+
+    import config
+
+    from nodes.execution import _repeat_count, _rework_ladder
+
+    thr = getattr(config, "REPEAT_FEEDBACK_SIMILARITY", 0.45)
+    #: ⚠️ **짧은** 지적으로 본다. 실측에서 무너진 것이 이쪽이다.
+    orig = "렌더 검증 실패 - 컴파일되지 않습니다."
+
+    st = _S()
+    decision = ""
+    for hop in (1, 2, 3):
+        decision, _out, st.rework_history = _rework_ladder(
+            st, orig, hops=hop, deterministic=True)
+    assert decision == "ESCALATE_PM", "상신이 안 나면 이 시험이 헛돈다"
+
+    stored = st.rework_history[-1]
+    assert "[자동 상신]" not in stored, "상신 래퍼가 이력에 들어갔다 — 원본이 묽어진다"
+    assert difflib.SequenceMatcher(None, orig, stored).ratio() == 1.0, stored
+
+    #: ★ PM 수용 뒤 **같은 결함이 재발**하면 다시 잡혀야 한다.
+    again, _why = _repeat_count(orig, [stored])
+    assert again >= 1, f"재발을 못 잡는다(임계 {thr})"

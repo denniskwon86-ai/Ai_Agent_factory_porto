@@ -1215,6 +1215,19 @@ def _rework_ladder(state_obj: Any, review_text: str, hops: int,
     text = str(review_text or "")
     if not text:
         return "REWORK_DEV", text, hist
+    #: ⚠️⚠️ [2026-08-28 실측] 이력에는 **원래 지적**을 남긴다 — 상신 문구가 아니다.
+    #:
+    #:   상신하면 `text` 가 `[자동 상신] …` 래퍼로 덮이는데, 종전에는 그 덮인 것을
+    #:   이력에 넣었다. 래퍼가 200자쯤 되는 고정 문구라 **원본이 묽어진다.** PM 이 수용한
+    #:   뒤 같은 결함이 재발하면 그때의 원본과 대조되는 상대가 이 묽어진 문자열이다:
+    #:
+    #:       지적 길이 215자 → 유사도 0.721   걸린다
+    #:       지적 길이  86자 → 유사도 0.509   걸린다(여유 없음)
+    #:       지적 길이  22자 → 유사도 0.210   **못 잡는다**(임계 0.45)
+    #:
+    #: ★ 반복 판정의 상대는 «무엇이 지적됐나» 여야 한다. 「어떻게 상신했나」는 그 판정과
+    #:   무관한 우리 쪽 문구다 — 섞으면 짧은 지적일수록 판정이 무너진다.
+    original = text
     decision = "REWORK_DEV"
     repeats, why = _repeat_count(text, hist)
     limit = getattr(config, "REPEAT_FEEDBACK_ESCALATE_AFTER", 2)
@@ -1235,7 +1248,7 @@ def _rework_ladder(state_obj: Any, review_text: str, hops: int,
             f"검토 요청: (1) 이 요구가 현재 시스템에서 **수행 가능한지** "
             f"(2) 기술명세·아키텍처에 상충이 없는지 (3) 요구를 조정하거나 태스크를 분할할지."
         )
-    hist.append(str(text)[:1000])
+    hist.append(str(original)[:1000])
     return decision, text, hist[-8:]
 
 
