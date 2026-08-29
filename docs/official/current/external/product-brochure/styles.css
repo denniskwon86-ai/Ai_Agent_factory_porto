@@ -18,6 +18,7 @@ main{display:grid;gap:28px;padding:96px 0 44px}
 .eyebrow{display:inline-block;color:var(--red);font:850 11px var(--mono);letter-spacing:.14em}.eyebrow.light{color:#79cad8}
 .section-head{display:grid;grid-template-columns:1.16fr .84fr;gap:70px;align-items:end}.section-head.compact{align-items:center}.section-head h2{margin:12px 0 0;font-size:45px;line-height:1.12;letter-spacing:-.055em}.section-head p{margin:0;color:var(--muted);font-size:16px;line-height:1.75}.section-head p strong{color:var(--ink)}.section-head.inverse{color:#fff}.section-head.inverse p{color:#bac6dc}.section-head.inverse p strong{color:#fff}
 .page-number,.cover-footer{position:absolute;left:72px;right:72px;bottom:24px;display:flex;justify-content:space-between;color:#7c8491;font:700 10px var(--mono);letter-spacing:.06em}.page-number.inverse,.cover-footer{color:#93a4c5}
+.cover .cover-author{font-size:13px;font-weight:900;letter-spacing:0}
 
 .brand-logo{display:block;width:76px;height:32px;object-fit:contain;object-position:left center}
 .cover-logo{display:block;width:250px;height:72px;margin:0 0 18px;object-fit:contain;object-position:left center}
@@ -114,6 +115,7 @@ main{display:grid;gap:28px;padding:96px 0 44px}
   @page{size:15in 9.375in;margin:0}
   html,body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .brochure-nav{display:none!important}
+  .global-author-credit{display:none!important}
   main{display:block;padding:0}
   .page{width:1440px;height:900px;min-height:900px;max-height:900px;margin:0;overflow:hidden;break-after:page;page-break-after:always;box-shadow:none}
   .page:last-child{break-after:auto;page-break-after:auto}

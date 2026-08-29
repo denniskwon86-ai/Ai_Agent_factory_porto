@@ -108,6 +108,8 @@ body {
   margin-right: 10px;
 }
 
+.cover .cover-author { font-size:15px; font-weight:900; letter-spacing:0; }
+
 .cover-logo { display:block; width:230px; height:auto; margin-bottom:22px; object-fit:contain; }
 
 .eyebrow {
