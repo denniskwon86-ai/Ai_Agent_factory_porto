@@ -96,11 +96,11 @@ export function OperatingContextSwitcher({ onClose, onManageCompany, onManageOrg
                 <button key={d.dept_id} type="button"
                   className={active ? 'primary-button' : 'secondary-button'}
                   disabled={!ref || !!busy}
-                  onClick={() => apply(ref, d.name_ko || d.dept_id)}
+                  onClick={() => apply(ref, d.name_ko || '이름 미등록 조직')}
                   style={{ textAlign: 'left', justifyContent: 'flex-start',
                     paddingLeft: 12 + d._depth * 18 }}>
                   {d._depth > 0 && <span aria-hidden>└</span>}
-                  <span>{d.name_ko || d.dept_id}</span>
+                  <span>{d.name_ko || '이름 미등록 조직'}</span>
                   {!d.scope_node_id && <small>부서 기준</small>}
                   {busy === ref && <small>확인 중…</small>}
                 </button>

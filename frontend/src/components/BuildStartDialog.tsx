@@ -19,7 +19,7 @@ import { DataPrepError, listInstances } from '../lib/dataPrepApi';
 import { KitAppPanel } from './KitAppPanel';
 
 export type BuildStartResult = {
-  projectId: string;
+  projectName: string;
   isMega: boolean;
   templateId: string;
   packIds: string[];
@@ -38,7 +38,7 @@ export function BuildStartDialog({
   onOpenDataPrep: () => void;
 }) {
   const [startMode, setStartMode] = useState<'kit' | 'general'>('kit');
-  const [projectId, setProjectId] = useState('');
+  const [projectName, setProjectName] = useState('');
   const [isMega, setIsMega] = useState(false);
   const [templateId, setTemplateId] = useState(templates[0]?.template_id || 'default');
   const [packIds, setPackIds] = useState<string[]>([]);
@@ -46,7 +46,7 @@ export function BuildStartDialog({
   const [mcp, setMcp] = useState(false);
   const [err, setErr] = useState('');
 
-  const idOk = /^[A-Za-z0-9._-]{2,}$/.test(projectId.trim());
+  const nameOk = projectName.trim().length >= 2;
   const selectedTemplate = templates.find((t) => t.template_id === templateId);
   const selectedTemplateName = selectedTemplate?.pipeline_name || selectedTemplate?.name
     || '선택한 업무 절차';
@@ -60,12 +60,12 @@ export function BuildStartDialog({
   }, [templates, templateId]);
 
   const submit = () => {
-    if (!idOk) {
-      setErr('업무 식별자는 영문·숫자·`.`·`_`·`-` 로 2자 이상이어야 합니다.');
+    if (!nameOk) {
+      setErr('업무 이름을 2자 이상 입력하십시오.');
       return;
     }
     onCreate({
-      projectId: projectId.trim(), isMega, templateId, packIds,
+      projectName: projectName.trim(), isMega, templateId, packIds,
       masterDomains, mcpLiveGrounding: mcp,
     });
   };
@@ -139,12 +139,12 @@ export function BuildStartDialog({
         )}
 
         <div>
-          <span style={label}>업무 식별자 (영문)</span>
-          <input style={input} value={projectId} autoFocus
-            onChange={(e) => { setProjectId(e.target.value); setErr(''); }}
-            placeholder="예: smart-life-app" />
+          <span style={label}>업무 이름</span>
+          <input style={input} value={projectName} autoFocus
+            onChange={(e) => { setProjectName(e.target.value); setErr(''); }}
+            placeholder="예: 원료 재고 부족 조기경보" />
           <p style={{ fontSize: 12, marginTop: 6, color: 'var(--surface-text-muted)' }}>
-            작업공간 폴더 이름이 됩니다 — 나중에 바꾸기 어렵습니다.
+            화면에 표시할 이름입니다. 내부 식별자와 작업공간 경로는 시스템이 자동 관리합니다.
           </p>
         </div>
 
@@ -262,7 +262,7 @@ export function BuildStartDialog({
         </div>
 
         {/* ⚠️⚠️ [2026-08-24 사용자 지적] **못 누르는 이유를 화면에 적는다**(설계 §8.6).
-            종전에는 `disabled={!idOk}` 뿐이었다. Project ID 가 비면 버튼이 죽어 있는데
+            이름이 비면 버튼이 죽어 있는데
             **아무 문구도 없어서**, 사용자는 눌러 보고 「안 넘어간다」고 읽는다.
             ★ `submit()` 안의 `setErr(...)` 는 도달하지 못하는 코드였다 — 버튼이 죽어 있으면
               `submit` 자체가 불리지 않는다. 그래서 안내는 **여기서** 한다. */}
@@ -270,13 +270,12 @@ export function BuildStartDialog({
           alignItems: 'center', flexWrap: 'wrap', position: 'sticky', bottom: 0, zIndex: 2,
           margin: '0 -2px -2px', padding: '12px 2px 2px',
           borderTop: '1px solid var(--surface-border)', background: 'var(--surface-page)' }}>
-          {!idOk && (
+          {!nameOk && (
             <span style={{ fontSize: 12.5, color: 'var(--surface-text-muted)',
               marginRight: 'auto' }}>
-              {!projectId.trim()
-                ? '맨 위 업무 식별자를 입력하면 «이 조건으로 만들기»가 켜집니다.'
-                : '업무 식별자는 영문·숫자·`.`·`_`·`-` 로 2자 이상이어야 합니다 — '
-                  + '지금 값으로는 만들 수 없습니다.'}
+              {!projectName.trim()
+                ? '맨 위 업무 이름을 입력하면 «이 조건으로 만들기»가 켜집니다.'
+                : '업무 이름은 2자 이상이어야 합니다.'}
             </span>
           )}
           <button onClick={onClose} style={{
@@ -284,10 +283,10 @@ export function BuildStartDialog({
             border: '1px solid var(--action-secondary-border)',
             background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
           }}>취소</button>
-          <button onClick={submit} disabled={!idOk}
-            title={idOk ? '' : '업무 식별자를 입력해야 만들 수 있습니다.'} style={{
+          <button onClick={submit} disabled={!nameOk}
+            title={nameOk ? '' : '업무 이름을 입력해야 만들 수 있습니다.'} style={{
             height: 46, padding: '0 22px', fontSize: 14, fontWeight: 700, borderRadius: 6,
-            cursor: idOk ? 'pointer' : 'not-allowed', opacity: idOk ? 1 : .55,
+            cursor: nameOk ? 'pointer' : 'not-allowed', opacity: nameOk ? 1 : .55,
             border: '1px solid var(--ls-navy)',
             background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
           }}>이 조건으로 만들기</button>

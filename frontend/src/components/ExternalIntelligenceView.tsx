@@ -4,12 +4,15 @@ import { Banner, Panel, ScreenHead } from '../design/HubShell';
 import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
 import { ConfirmInline, FormField, useConfirm } from '../design/DataFoundationShell';
 import { actingScope, UNKNOWN_SCOPE, type ActingScope } from '../lib/actingScope';
+import { listEntities, type Entity } from '../lib/companyApi';
 import {
   externalIntelligenceApi, type ExternalCollectable, type ExternalCollectionResult,
-  type ExternalIndicator, type ExternalObservation, type ExternalObservationInput,
+  type ExternalIndicator, type ExternalIndicatorProposal, type ExternalIndicatorProposalInput,
+  type ExternalObservation, type ExternalObservationInput,
   type ExternalReadiness, type ExternalSource, type ExternalSourceInput, type ResolvedExternalValue,
   type ResearchCandidate, type ResearchJob, type ResearchProfile, type ResearchProfileInput,
 } from '../lib/externalIntelligenceApi';
+import { orgApi, type OrgUser } from '../lib/orgApi';
 
 const SOURCE_TYPES: ExternalSourceInput['source_type'][] =
   ['API', 'CSV', 'RSS', 'WEB', 'REPORT', 'PROVIDER_API'];
@@ -21,10 +24,15 @@ const EMPTY_SOURCE: ExternalSourceInput = {
 };
 
 const EMPTY_RESEARCH_PROFILE: ResearchProfileInput = {
-  profile_id: '', legal_entity_id: '', company_name: '', official_domains: [], official_urls: [],
+  legal_entity_id: '', company_name: '', official_domains: [], official_urls: [],
   business_keywords: [], product_keywords: [], regions: [], competitor_names: [],
   material_keywords: [], required_indicators: [], collection_purpose: '', schedule_rule: 'MANUAL',
   owner_id: '', retention_days: 365,
+};
+
+const EMPTY_INDICATOR_PROPOSAL: ExternalIndicatorProposalInput = {
+  name: '', category: '', canonical_term: '', unit: '', frequency: '', required_grade: 'gold',
+  acceptable_latency: '', source_hint: '', purpose: '', gap_impact: '', next_action: '', rationale: '',
 };
 
 const splitValues = (value: string) => value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean);
@@ -39,16 +47,23 @@ export function ExternalIntelligenceView() {
   const [scope, setScope] = useState<ActingScope | null>(actingScope.peek());
   const [ready, setReady] = useState<Loaded<ExternalReadiness>>(loading<ExternalReadiness>());
   const [indicators, setIndicators] = useState<Loaded<ExternalIndicator[]>>(loading<ExternalIndicator[]>());
+  const [indicatorProposals, setIndicatorProposals] = useState<Loaded<ExternalIndicatorProposal[]>>(ok([]));
   const [sources, setSources] = useState<Loaded<ExternalSource[]>>(loading<ExternalSource[]>());
   const [collectable, setCollectable] = useState<Loaded<ExternalCollectable>>(loading<ExternalCollectable>());
   const [researchProfiles, setResearchProfiles] = useState<Loaded<ResearchProfile[]>>(loading<ResearchProfile[]>());
   const [researchJobs, setResearchJobs] = useState<Loaded<ResearchJob[]>>(loading<ResearchJob[]>());
   const [researchCandidates, setResearchCandidates] = useState<Loaded<ResearchCandidate[]>>(loading<ResearchCandidate[]>());
+  const [entities, setEntities] = useState<Loaded<Entity[]>>(loading<Entity[]>());
+  const [orgUsers, setOrgUsers] = useState<Loaded<OrgUser[]>>(loading<OrgUser[]>());
   const [selected, setSelected] = useState('');
   const [observations, setObservations] = useState<Loaded<ExternalObservation[]>>(ok<ExternalObservation[]>([]));
   const [resolved, setResolved] = useState<Loaded<ResolvedExternalValue> | null>(null);
   const [showSourceForm, setShowSourceForm] = useState(false);
   const [showObservationForm, setShowObservationForm] = useState(false);
+  const [showIndicatorProposal, setShowIndicatorProposal] = useState(false);
+  const [indicatorProposalForm, setIndicatorProposalForm] = useState<ExternalIndicatorProposalInput>(
+    { ...EMPTY_INDICATOR_PROPOSAL });
+  const [indicatorReviewReason, setIndicatorReviewReason] = useState('');
   const [sourceForm, setSourceForm] = useState<ExternalSourceInput>({ ...EMPTY_SOURCE });
   const [observationForm, setObservationForm] = useState({
     observed_at: '', value: '', vintage: '', grade: 'silver' as ExternalObservationInput['grade'],
@@ -80,11 +95,12 @@ export function ExternalIntelligenceView() {
     setSources(loading<ExternalSource[]>()); setCollectable(loading<ExternalCollectable>());
     setResearchProfiles(loading<ResearchProfile[]>()); setResearchJobs(loading<ResearchJob[]>());
     setResearchCandidates(loading<ResearchCandidate[]>());
-    const [r, i, s, c, rp, rj, rc] = await Promise.allSettled([
+    setEntities(loading<Entity[]>()); setOrgUsers(loading<OrgUser[]>());
+    const [r, i, s, c, rp, rj, rc, en, ou] = await Promise.allSettled([
       externalIntelligenceApi.readiness(), externalIntelligenceApi.indicators(),
       externalIntelligenceApi.sources(), externalIntelligenceApi.collectable(),
       externalIntelligenceApi.researchProfiles(), externalIntelligenceApi.researchJobs(),
-      externalIntelligenceApi.researchCandidates(),
+      externalIntelligenceApi.researchCandidates(), listEntities(), orgApi.users(),
     ]);
     setReady(r.status === 'fulfilled' ? ok(r.value) : failed<ExternalReadiness>(r.reason));
     setIndicators(i.status === 'fulfilled' ? ok(i.value) : failed<ExternalIndicator[]>(i.reason));
@@ -93,6 +109,8 @@ export function ExternalIntelligenceView() {
     setResearchProfiles(rp.status === 'fulfilled' ? ok(rp.value) : failed<ResearchProfile[]>(rp.reason));
     setResearchJobs(rj.status === 'fulfilled' ? ok(rj.value) : failed<ResearchJob[]>(rj.reason));
     setResearchCandidates(rc.status === 'fulfilled' ? ok(rc.value) : failed<ResearchCandidate[]>(rc.reason));
+    setEntities(en.status === 'fulfilled' ? ok(en.value) : failed<Entity[]>(en.reason));
+    setOrgUsers(ou.status === 'fulfilled' ? ok(ou.value.rows) : failed<OrgUser[]>(ou.reason));
     if (i.status === 'fulfilled') setSelected((v) => v || i.value[0]?.code || '');
   }, []);
 
@@ -133,6 +151,52 @@ export function ExternalIntelligenceView() {
     ]);
     setObservations(ok(o)); setResolved(ok(r));
   }, [load, selected]);
+
+  const loadIndicatorProposals = useCallback(async () => {
+    setIndicatorProposals(loading<ExternalIndicatorProposal[]>());
+    try {
+      setIndicatorProposals(ok(await externalIntelligenceApi.indicatorProposals('pending')));
+    } catch (e) {
+      setIndicatorProposals(failed<ExternalIndicatorProposal[]>(e));
+    }
+  }, []);
+
+  const submitIndicatorProposal = async () => {
+    if (!indicatorProposalForm.name.trim()) return;
+    setActionBusy(true); setActionMessage(null);
+    try {
+      await externalIntelligenceApi.proposeIndicator(indicatorProposalForm);
+      setIndicatorProposalForm({ ...EMPTY_INDICATOR_PROPOSAL });
+      setShowIndicatorProposal(false);
+      setActionMessage({ tone: 'info', text: '신규 대외지표 제안을 제출했습니다. 승인 전에는 수집·계획에 사용되지 않습니다.' });
+      if (canWrite) await loadIndicatorProposals();
+    } catch (e) {
+      setActionMessage({ tone: 'error', text: e instanceof Error ? e.message : '대외지표 제안을 제출하지 못했습니다.' });
+    } finally { setActionBusy(false); }
+  };
+
+  const decideIndicatorProposal = async (proposal: ExternalIndicatorProposal,
+    decision: 'approve' | 'reject') => {
+    if (decision === 'reject' && !indicatorReviewReason.trim()) {
+      setActionMessage({ tone: 'error', text: '반려 사유를 입력하십시오.' }); return;
+    }
+    setActionBusy(true); setActionMessage(null);
+    try {
+      if (decision === 'approve') {
+        await externalIntelligenceApi.approveIndicatorProposal(
+          proposal.proposal_id, proposal.fingerprint, indicatorReviewReason.trim());
+      } else {
+        await externalIntelligenceApi.rejectIndicatorProposal(
+          proposal.proposal_id, proposal.fingerprint, indicatorReviewReason.trim());
+      }
+      setIndicatorReviewReason('');
+      setActionMessage({ tone: 'info', text: decision === 'approve'
+        ? '대외지표를 확정 등록했습니다.' : '대외지표 제안을 반려했습니다.' });
+      await Promise.all([load(), loadIndicatorProposals()]);
+    } catch (e) {
+      setActionMessage({ tone: 'error', text: e instanceof Error ? e.message : '지표 검토 결과를 저장하지 못했습니다.' });
+    } finally { setActionBusy(false); }
+  };
 
   const registerSource = async () => {
     if (!sourceForm.name.trim() || !sourceForm.allowed_usage?.trim()
@@ -296,9 +360,19 @@ export function ExternalIntelligenceView() {
   const profiles = researchProfiles.value || [];
   const jobs = researchJobs.value || [];
   const candidates = researchCandidates.value || [];
+  const selectableEntities = (entities.value || []).filter((e) => e.status === 'ACTIVE');
+  const selectableOwners = (orgUsers.value || []).filter((u) => u.status === 'ACTIVE');
+  const entityNameById = new Map((entities.value || []).map((e) =>
+    [e.entity_id, e.name_ko || e.legal_name || '회사 정보 확인 불가']));
+  const ownerNameById = new Map((orgUsers.value || []).map((u) =>
+    [u.user_id, u.display_name || '담당자 정보 확인 불가']));
+  const sourceNameById = new Map(srcs.map((s) => [s.source_id, s.name]));
+  const profileLookupUnavailable = entities.status !== 'ok' || orgUsers.status !== 'ok';
   const canManage = Boolean(scope?.canManageStandard || scope?.unrestricted);
   const loadUnavailable = [ready, indicators, sources, collectable, researchProfiles,
     researchJobs, researchCandidates].some((state) => state.status === 'error');
+  const canPropose = Boolean(scope?.identified && scope?.registered && !scope?.retired)
+    && !loadUnavailable;
   // 읽지 못한 상태에서 등록·승인·수집을 허용하면 사용자는 현재 정본을 모른 채 덮어쓴다.
   const canWrite = canManage && !loadUnavailable;
 
@@ -370,16 +444,28 @@ export function ExternalIntelligenceView() {
 
           {canWrite && showResearchForm && <div className="request-card" aria-label="회사 조사 프로필 등록">
             <div className="panel-body">
+              {profileLookupUnavailable && <Banner tone="error" title="회사·담당자 기준정보를 확인할 수 없습니다">
+                내부 식별자를 직접 입력해 우회하지 않습니다. 기준정보 연결이 복구된 뒤 다시 시도하십시오.
+              </Banner>}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0 14px' }}>
-                <FormField label="법인 ID" required>
-                  <input className="afs-input" value={researchForm.legal_entity_id}
-                    placeholder="예: corp-ls-mnm" onChange={(e) => setResearchForm({ ...researchForm,
-                      legal_entity_id: e.target.value })} />
+                <FormField label="조사 대상 회사" required hint="승인된 실제·가상 회사 기준정보에서 선택합니다.">
+                  <select className="afs-select" value={researchForm.legal_entity_id}
+                    disabled={profileLookupUnavailable}
+                    onChange={(e) => {
+                      const entity = selectableEntities.find((item) => item.entity_id === e.target.value);
+                      setResearchForm({ ...researchForm, legal_entity_id: e.target.value,
+                        company_name: entity?.name_ko || entity?.legal_name || '' });
+                    }}>
+                    <option value="">{selectableEntities.length
+                      ? '회사를 선택하십시오' : '선택 가능한 승인 회사가 없습니다'}</option>
+                    {selectableEntities.map((entity) => <option key={entity.entity_id} value={entity.entity_id}>
+                      {entity.name_ko || entity.legal_name || '이름 미등록'} · {entity.entity_mode}
+                    </option>)}
+                  </select>
                 </FormField>
-                <FormField label="회사명" required>
-                  <input className="afs-input" value={researchForm.company_name}
-                    placeholder="예: LS MnM" onChange={(e) => setResearchForm({ ...researchForm,
-                      company_name: e.target.value })} />
+                <FormField label="적용 회사명" hint="선택한 회사 기준정보에서 자동으로 가져옵니다.">
+                  <input className="afs-input" value={researchForm.company_name} readOnly
+                    placeholder="회사를 선택하면 표시됩니다" />
                 </FormField>
                 <FormField label="공식 도메인" required hint="scheme·경로 없이 쉼표로 구분합니다.">
                   <input className="afs-input" value={researchForm.official_domains.join(', ')}
@@ -403,14 +489,31 @@ export function ExternalIntelligenceView() {
                     onChange={(e) => setResearchForm({ ...researchForm,
                       regions: splitValues(e.target.value), competitor_names: [] })} />
                 </FormField>
-                <FormField label="필요 대외지표" hint="등록부 코드 기준, 쉼표로 구분합니다.">
-                  <input className="afs-input" value={researchForm.required_indicators.join(', ')}
-                    placeholder="LME_CU, FX_USDKRW" onChange={(e) => setResearchForm({ ...researchForm,
-                      required_indicators: splitValues(e.target.value) })} />
+                <FormField label="필요 대외지표" hint="확정 대외지표 등록부에서 선택합니다.">
+                  <div style={{ display: 'grid', gap: 6, maxHeight: 132, overflowY: 'auto',
+                    border: '1px solid var(--line-soft)', borderRadius: 8, padding: 10 }}>
+                    {inds.length === 0 ? <span className="afs-muted">선택 가능한 확정 지표가 없습니다.</span>
+                      : inds.map((indicator) => <label key={indicator.code}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input type="checkbox" checked={researchForm.required_indicators.includes(indicator.code)}
+                          onChange={(e) => setResearchForm({ ...researchForm,
+                            required_indicators: e.target.checked
+                              ? [...researchForm.required_indicators, indicator.code]
+                              : researchForm.required_indicators.filter((code) => code !== indicator.code) })} />
+                        <span>{indicator.name || '이름 미등록 지표'}</span>
+                      </label>)}
+                  </div>
                 </FormField>
-                <FormField label="담당자 ID" required>
-                  <input className="afs-input" value={researchForm.owner_id}
-                    onChange={(e) => setResearchForm({ ...researchForm, owner_id: e.target.value })} />
+                <FormField label="조사 담당자" required hint="현재 회사의 활성 사용자에서 선택합니다.">
+                  <select className="afs-select" value={researchForm.owner_id}
+                    disabled={profileLookupUnavailable}
+                    onChange={(e) => setResearchForm({ ...researchForm, owner_id: e.target.value })}>
+                    <option value="">{selectableOwners.length
+                      ? '담당자를 선택하십시오' : '선택 가능한 담당자가 없습니다'}</option>
+                    {selectableOwners.map((user) => <option key={user.user_id} value={user.user_id}>
+                      {user.display_name || '이름 미등록 사용자'}
+                    </option>)}
+                  </select>
                 </FormField>
               </div>
               <FormField label="수집 목적" required>
@@ -420,6 +523,7 @@ export function ExternalIntelligenceView() {
               </FormField>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button className="primary-button" disabled={actionBusy
+                  || profileLookupUnavailable
                   || !researchForm.legal_entity_id.trim() || !researchForm.company_name.trim()
                   || !researchForm.owner_id.trim()} onClick={saveResearchProfile}>초안 저장</button>
               </div>
@@ -432,9 +536,11 @@ export function ExternalIntelligenceView() {
               : <div className="afs-table-wrap" style={{ marginTop: 14 }}><table className="afs-table">
                 <thead><tr><th>회사·범위</th><th>공식 URL</th><th>목적·담당</th><th>상태</th><th>조치</th></tr></thead>
                 <tbody>{profiles.map((p) => <tr key={p.profile_id}>
-                  <td><b>{p.company_name}</b><br /><span className="afs-muted">{p.legal_entity_id} · {p.official_domains.join(', ')}</span></td>
+                  <td><b>{entityNameById.get(p.legal_entity_id) || p.company_name || '회사 정보 확인 불가'}</b><br />
+                    <span className="afs-muted">{p.official_domains.join(', ') || '공식 도메인 미등록'}</span></td>
                   <td>{p.official_urls.join(', ') || '미등록'}</td>
-                  <td>{p.collection_purpose || '목적 미등록'}<br /><span className="afs-muted">{p.owner_id}</span></td>
+                  <td>{p.collection_purpose || '목적 미등록'}<br />
+                    <span className="afs-muted">{ownerNameById.get(p.owner_id) || '담당자 정보 확인 불가'}</span></td>
                   <td><span className={`state-chip ${p.status === 'APPROVED' ? 'success' : 'warn'}`}>{p.status}</span><br />
                     <span className="afs-muted">지문 {p.fingerprint.slice(0, 10)}…</span></td>
                   <td><div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -584,7 +690,7 @@ export function ExternalIntelligenceView() {
             changes="이 원천에 귀속된 관측값을 회사 계획의 후보로 사용할 수 있게 됩니다."
             affects={`${target.allowed_usage || '허용 범위 미기재'} · 담당 ${target.owner_department || '미정'}`}
             reversible="현재 API에는 원천 승인 철회 경로가 없습니다. 승인 전 등록 내용을 다시 확인하십시오."
-            approval={`현재 사용자 ID가 승인자로 기록됩니다. 원천 등급: ${target.trust_grade}`} />
+            approval={`현재 로그인 사용자가 승인자로 기록됩니다. 원천 등급: ${target.trust_grade}`} />
           </div>;
         })()}
       </Panel>
@@ -632,16 +738,16 @@ export function ExternalIntelligenceView() {
                 }} />
             </FormField>
             <FormField label="CSV 내용 확인" required
-              hint="열 별칭은 indicator/code/지표, observed_at/date/기준일, value/값, vintage/발표일을 지원합니다.">
+              hint="열 별칭은 indicator/지표, observed_at/date/기준일, value/값, vintage/발표일을 지원합니다.">
               <textarea className="afs-textarea" rows={6} value={csvContent}
-                placeholder={'indicator,observed_at,value,vintage,unit\next_fx,2026-08-01,1380.5,2026-08 잠정치,KRW/USD'}
+                placeholder={'indicator,observed_at,value,vintage,unit\n원달러 환율,2026-08-01,1380.5,2026-08 잠정치,KRW/USD'}
                 onChange={(e) => { setCsvContent(e.target.value); invalidatePreview(); }} />
             </FormField>
-            <FormField label="파일 전체 기본 지표" hint="지표 열이 없는 단일 지표 파일에만 지정합니다. 행의 지표 코드가 있으면 그 값을 씁니다.">
+            <FormField label="파일 전체 기본 지표" hint="지표 열이 없는 단일 지표 파일에만 지정합니다. 행에 지표 열이 있으면 그 값을 씁니다.">
               <select className="afs-select" value={defaultIndicator}
                 onChange={(e) => { setDefaultIndicator(e.target.value); invalidatePreview(); }}>
                 <option value="">지표 열을 사용합니다</option>
-                {inds.map((i) => <option key={i.code} value={i.code}>{i.name} · {i.code}</option>)}
+                {inds.map((i) => <option key={i.code} value={i.code}>{i.name || '이름 미등록 지표'}</option>)}
               </select>
             </FormField>
           </> : <>
@@ -719,7 +825,7 @@ export function ExternalIntelligenceView() {
                 changes={`적재 후보 ${collectionPreview.loaded}건을 관측값 이력에 기록합니다.`}
                 affects={`${collectionPreview.source_name} · ${collectionPreview.grade} 등급 · 포함 지표는 위 예행 결과와 동일`}
                 reversible="이 화면에는 일괄 삭제가 없습니다. 잘못된 값은 품질 상태와 후속 이력으로 정정해야 합니다."
-                approval="현재 사용자 ID가 적재 행위자로 확인되며, 승인 원천의 등급을 그대로 사용합니다." />
+                approval="현재 로그인 사용자가 적재 행위자로 확인되며, 승인 원천의 등급을 그대로 사용합니다." />
             </div>
           </div>}
         </div>
@@ -727,6 +833,102 @@ export function ExternalIntelligenceView() {
       </Panel>
 
       <Panel kicker="INDICATORS" title="확정 대외지표와 관측값">
+        {canPropose && <div style={{ padding: '15px 15px 0', display: 'grid', gap: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <p className="hint-line" style={{ margin: 0 }}>
+              신규 지표는 코드 없이 제안하고, 제안자와 다른 데이터 관리자가 내용 지문을 승인합니다.
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="secondary-button" onClick={() => {
+                if (canWrite) loadIndicatorProposals();
+                setShowIndicatorProposal((v) => !v);
+              }}>{showIndicatorProposal ? '제안 닫기' : canWrite ? '신규 지표 제안·검토' : '신규 지표 제안'}</button>
+            </div>
+          </div>
+          {showIndicatorProposal && <div className="request-card" aria-label="신규 대외지표 제안">
+            <div className="panel-body">
+              <Banner tone="info" title="내부 코드는 승인 시 시스템이 발급합니다">
+                지표 명칭·단위·주기·사용 목적을 검토합니다. 승인 전에는 수집 대상이나 기준계획 값으로 사용되지 않습니다.
+              </Banner>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0 14px' }}>
+                <FormField label="지표 명칭" required>
+                  <input className="afs-input" value={indicatorProposalForm.name}
+                    onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm, name: e.target.value })} />
+                </FormField>
+                <FormField label="표준 용어">
+                  <input className="afs-input" value={indicatorProposalForm.canonical_term}
+                    onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm, canonical_term: e.target.value })} />
+                </FormField>
+                <FormField label="분류">
+                  <input className="afs-input" value={indicatorProposalForm.category}
+                    onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm, category: e.target.value })} />
+                </FormField>
+                <FormField label="단위">
+                  <input className="afs-input" value={indicatorProposalForm.unit}
+                    onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm, unit: e.target.value })} />
+                </FormField>
+                <FormField label="발표 주기">
+                  <input className="afs-input" value={indicatorProposalForm.frequency}
+                    onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm, frequency: e.target.value })} />
+                </FormField>
+                <FormField label="최소 신뢰등급" required>
+                  <select className="afs-select" value={indicatorProposalForm.required_grade}
+                    onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm,
+                      required_grade: e.target.value as ExternalIndicatorProposalInput['required_grade'] })}>
+                    {GRADES.map((grade) => <option key={grade}>{grade}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="허용 지연">
+                  <input className="afs-input" value={indicatorProposalForm.acceptable_latency}
+                    onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm, acceptable_latency: e.target.value })} />
+                </FormField>
+                <FormField label="권고 원천">
+                  <input className="afs-input" value={indicatorProposalForm.source_hint}
+                    onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm, source_hint: e.target.value })} />
+                </FormField>
+              </div>
+              <FormField label="사용 목적" required>
+                <textarea className="afs-textarea" value={indicatorProposalForm.purpose}
+                  onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm, purpose: e.target.value })} />
+              </FormField>
+              <FormField label="제안 사유">
+                <textarea className="afs-textarea" value={indicatorProposalForm.rationale}
+                  onChange={(e) => setIndicatorProposalForm({ ...indicatorProposalForm, rationale: e.target.value })} />
+              </FormField>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="primary-button" disabled={actionBusy || !indicatorProposalForm.name.trim()
+                  || !indicatorProposalForm.purpose?.trim()} onClick={submitIndicatorProposal}>검토 제안 제출</button>
+              </div>
+
+              {canWrite && <><h3 style={{ fontSize: 14, margin: '18px 0 8px' }}>검토 대기 제안</h3>
+              {indicatorProposals.status !== 'ok' ? <EmptyOrError state={indicatorProposals.status}
+                error={indicatorProposals.error} onRetry={loadIndicatorProposals}
+                emptyText="검토 대기 제안이 없습니다." />
+                : !(indicatorProposals.value || []).length
+                  ? <div className="empty-note">검토 대기 중인 지표 제안이 없습니다.</div>
+                  : <>
+                    <FormField label="검토 의견" hint="반려 시 필수이며 승인 의견도 감사 근거로 남습니다.">
+                      <textarea className="afs-textarea" value={indicatorReviewReason}
+                        onChange={(e) => setIndicatorReviewReason(e.target.value)} />
+                    </FormField>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      {(indicatorProposals.value || []).map((proposal) => <div className="request-alert info"
+                        key={proposal.proposal_id}><div style={{ width: '100%' }}>
+                          <b>{proposal.name}</b>
+                          <small>{proposal.unit || '단위 미정'} · {proposal.frequency || '주기 미정'} · 최소 {proposal.required_grade}</small>
+                          <p style={{ margin: '7px 0' }}>{proposal.purpose || '사용 목적 미등록'}</p>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                            <button className="danger-ghost" disabled={actionBusy}
+                              onClick={() => decideIndicatorProposal(proposal, 'reject')}>반려</button>
+                            <button className="primary-button" disabled={actionBusy}
+                              onClick={() => decideIndicatorProposal(proposal, 'approve')}>지표 승인</button>
+                          </div>
+                        </div></div>)}
+                    </div>
+                  </>}</>}
+            </div>
+          </div>}
+        </div>}
         <div className="afs-master-detail" style={{ padding: 15 }}>
           <div className="afs-master-list" aria-label="확정 대외지표 목록">
             {indicators.status !== 'ok' ? <EmptyOrError state={indicators.status} error={indicators.error}
@@ -734,12 +936,12 @@ export function ExternalIntelligenceView() {
               : inds.length === 0 ? <div className="empty-note">등록된 대외지표가 없습니다.</div>
                 : inds.map((i) => <button key={i.code} className={selected === i.code ? 'active' : ''}
                   onClick={() => setSelected(i.code)}>
-                  <b>{i.name || i.code}</b><small>{i.code} · 최소 {i.required_grade}</small>
+                  <b>{i.name || '이름 미등록 지표'}</b><small>최소 {i.required_grade} · {i.frequency || '주기 미정'}</small>
                 </button>)}
           </div>
           <div className="afs-master-editor" aria-label="선택한 대외지표 상세">
             {!current ? <div className="empty-note">왼쪽에서 확인할 지표를 선택하십시오.</div> : <>
-              <ScreenHead kicker={current.code} title={current.name || current.code}
+              <ScreenHead kicker="EXTERNAL INDICATOR" title={current.name || '이름 미등록 지표'}
                 description={current.purpose || '사용 목적이 등록되지 않았습니다.'}
                 chip={{ label: readiness?.usable_for_baseline ? '기준계획 사용 가능' : '기준계획 차단',
                   tone: readiness?.usable_for_baseline ? 'success' : 'warn' }} />
@@ -769,7 +971,7 @@ export function ExternalIntelligenceView() {
                     <thead><tr><th>관측일</th><th>값</th><th>발표판</th><th>등급</th><th>원천</th><th>품질</th></tr></thead>
                     <tbody>{obs.map((o) => <tr key={o.observation_id}>
                       <td>{o.observed_at}</td><td>{o.value} {o.unit}</td><td>{o.vintage}</td>
-                      <td>{o.grade}</td><td>{o.source_id || '미상'}</td><td>{o.quality_status}</td>
+                      <td>{o.grade}</td><td>{sourceNameById.get(o.source_id) || '원천 정보 확인 불가'}</td><td>{o.quality_status}</td>
                     </tr>)}</tbody></table></div>}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
@@ -831,9 +1033,9 @@ export function ExternalIntelligenceView() {
                         }).map((g) => <option key={g}>{g}</option>)}
                       </select>
                     </FormField>
-                    <FormField label="원천 레코드 참조">
+                    <FormField label="원천 근거 위치" hint="내부 ID가 아니라 공표문서 URL·표·행 위치를 적습니다.">
                       <input className="afs-input" value={observationForm.source_record_ref}
-                        placeholder="표·시계열·공표 문서 식별자"
+                        placeholder="예: https://…/report.pdf · 표 3, 12행"
                         onChange={(e) => setObservationForm({ ...observationForm, source_record_ref: e.target.value })} />
                     </FormField>
                   </div>

@@ -648,7 +648,7 @@ async def _get_runtime_saver():
     return _runtime_saver
 
 
-async def get_runtime_app(template_id: str = "default"):
+async def get_runtime_app(template_id: str = "default", expected_fingerprint: str = ""):
     """오케스트레이터용 그래프(영속 체크포인터=SQLite). template_id 별로 1회 compile·캐시.
     → 서버 재시작 시에도 HOTL 대기 체크포인트가 디스크에 보존되어 스프린트 재개가 가능하다.
     → 템플릿마다 enabled/hotl_after 가 다르면 토폴로지·중단점도 그에 맞게 컴파일된다(T2-b)."""
@@ -671,6 +671,11 @@ async def get_runtime_app(template_id: str = "default"):
         snap = capture(tid)
     except Exception as e:
         print(f"⚠️ [agent_graph] 구성 지문 계산 실패(tid 로 캐시): {e}")
+    if expected_fingerprint:
+        if not (snap and snap.fingerprint):
+            raise RuntimeError("결속된 워크플로우의 현재 지문을 확인할 수 없습니다.")
+        if snap.fingerprint != expected_fingerprint:
+            raise RuntimeError("프로젝트에 결속된 워크플로우 지문과 실행 직전 지문이 다릅니다.")
     key = f"{tid}@{snap.fingerprint}" if (snap and snap.fingerprint) else tid
 
     cached = _runtime_apps.get(key)

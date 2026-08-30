@@ -23,11 +23,22 @@ const SEVERITY_KO: Record<string, string> = {
 /** 안건 종류 → 사람이 읽는 말. ⚠️ 모르는 종류를 «기타» 로 뭉개지 않는다 — 원본 코드를 보여
  *  주어야 어느 경로에서 온 안건인지 되짚을 수 있다. */
 const KIND_KO: Record<string, string> = {
+  decision_case_pending: '의사결정 검토 대기',
   promotion_requested: '전사 승격 승인 대기',
   gate_fail: '게이트 차단',
   contract_breached: '데이터 계약 위반',
   approval_pending: '승인 대기',
 };
+
+function displayValue(value: number, unit: string): string {
+  if (unit === '원') {
+    const eok = value / 100_000_000;
+    return eok >= 1000
+      ? `${(eok / 10000).toFixed(2)}조원`
+      : `${eok.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}억원`;
+  }
+  return `${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}${unit}`;
+}
 
 export function DecisionDrawer({ item, onClose, onOpenRef }: {
   item: BriefingItem & { section?: string };
@@ -68,6 +79,13 @@ export function DecisionDrawer({ item, onClose, onOpenRef }: {
             </div>
             <h2 style={{ fontSize: 17, margin: '4px 0 0', lineHeight: 1.4,
               color: 'var(--surface-text)' }}>{item.title}</h2>
+            {!!item.data_kind && (
+              <div style={{ marginTop: 7, fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                {item.data_kind === 'DEMO/SYNTHETIC'
+                  ? '시연용 합성 데이터 · 실제 실적이 아닙니다'
+                  : item.data_kind}
+              </div>
+            )}
           </div>
           <button onClick={onClose} style={{
             height: 36, padding: '0 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
@@ -80,33 +98,45 @@ export function DecisionDrawer({ item, onClose, onOpenRef }: {
           {/* ① Summary */}
           {sec('SUMMARY', <p style={body}>{item.why || '요약이 없습니다.'}</p>)}
 
-          {/* ② Impact — ⚠️ 수치가 없다. 없는 것을 0 으로 그리지 않는다. */}
+          {/* ② Impact — 저장된 비교표가 있을 때만 숫자를 그린다. */}
           {sec('IMPACT', (
-            <>
-              <p style={body}>
-                {item.severity === 'high'
-                  ? '지금 처리하지 않으면 관련 작업이 진행되지 않습니다.'
-                  : '진행에 영향을 주지만 즉시 멈추지는 않습니다.'}
-              </p>
-              <p style={{ ...muted, marginTop: 6 }}>
-                ⚠️ 정량 영향(금액·일정·건수)은 서버가 이 안건에 대해 계산하지 않습니다 —
-                숫자를 지어내지 않았습니다.
-              </p>
-            </>
+            item.impact_rows?.length ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {item.impact_rows.map((row) => (
+                  <div key={row.key} style={{ padding: '10px 12px', borderRadius: 6,
+                    border: '1px solid var(--surface-border)', background: 'var(--surface-sunken)' }}>
+                    <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>{row.label}</div>
+                    <b style={{ display: 'block', marginTop: 4, fontSize: 16,
+                      color: 'var(--surface-text)' }}>{displayValue(row.scenario, row.unit)}</b>
+                    <span style={{ fontSize: 12,
+                      color: row.delta < 0 ? 'var(--ls-red)' : 'var(--surface-text-muted)' }}>
+                      기준 대비 {row.delta > 0 ? '+' : ''}{displayValue(row.delta, row.unit)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                <p style={body}>
+                  {item.severity === 'high'
+                    ? '지금 처리하지 않으면 관련 작업이 진행되지 않습니다.'
+                    : '진행에 영향을 주지만 즉시 멈추지는 않습니다.'}
+                </p>
+                <p style={{ ...muted, marginTop: 6 }}>
+                  정량 영향은 이 안건에 아직 결속되지 않았습니다 — 없는 값을 0으로 표시하지 않습니다.
+                </p>
+              </>
+            )
           ))}
 
           {/* ③ Evidence */}
           {sec('EVIDENCE', (
             item.ref ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ fontSize: 13, color: 'var(--surface-text)' }}>
-                  {item.ref_type || '참조'}
-                </div>
-                <code style={{ fontSize: 12, padding: '8px 10px', borderRadius: 6,
-                  fontFamily: 'var(--font-mono, monospace)', wordBreak: 'break-all',
-                  background: 'var(--surface-sunken)', color: 'var(--surface-text)' }}>
-                  {item.ref}
-                </code>
+              <div>
+                <p style={body}>근거와 안건이 결속되어 있습니다.</p>
+                <p style={{ ...muted, marginTop: 6 }}>
+                  내부 식별자는 시스템이 자동 생성·관리하며 사용자 화면에 노출하지 않습니다.
+                </p>
               </div>
             ) : <p style={muted}>이 안건에는 참조가 붙어 있지 않습니다.</p>
           ))}

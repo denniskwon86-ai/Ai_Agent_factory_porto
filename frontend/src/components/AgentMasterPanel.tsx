@@ -34,6 +34,7 @@ import { JarvisRail } from '../design/JarvisRail';
 import { deliverableTypeKo, modelTierKo, stageKo, DELIVERABLE_TYPE_KO } from '../design/terms';
 import { actingScope, UNKNOWN_SCOPE, type ActingScope } from '../lib/actingScope';
 import { useFactoryStore, API_BASE_URL } from '../store/useFactoryStore';
+import { allocateSystemIds } from '../lib/systemIdApi';
 
 const nodeTypes = { agentNode: AgentNode };
 
@@ -152,6 +153,52 @@ function FlowValidationPanel({ agents, edges, hotlCount }: {
 
 type View = 'agents' | 'flow' | 'templates';
 
+type RecommendedAgent = {
+  id: string;
+  name_ko: string;
+  role: string;
+  skill: string;
+  stage: string;
+  category: string;
+  model_tier: string;
+  enabled: boolean;
+  hotl_after: boolean;
+  debate: boolean;
+  llm: boolean;
+  position: null;
+  is_start: false;
+  is_end: false;
+  is_framework: false;
+  output_format: string;
+};
+
+/** AI 출력은 곧바로 편집판에 넣지 않는다. 식별자와 실행 필드를 먼저 닫힌 형태로 만든 뒤
+ *  사용자가 고른 후보만 추가한다. 기존 그래프의 연결은 복사하거나 추측하지 않는다. */
+function toRecommendedAgent(raw: any, allocatedId: string): RecommendedAgent | null {
+  const id = String(allocatedId || '').trim();
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) return null;
+  return {
+    id,
+    name_ko: String(raw?.name_ko || id).trim() || id,
+    role: String(raw?.role || '').trim(),
+    skill: String(raw?.skill || '').trim(),
+    stage: String(raw?.stage || 'EXECUTION').trim() || 'EXECUTION',
+    category: String(raw?.category || 'execution').trim() || 'execution',
+    model_tier: ['flash', 'pro', 'ultra'].includes(String(raw?.model_tier || ''))
+      ? String(raw.model_tier) : 'pro',
+    enabled: raw?.enabled !== false,
+    hotl_after: Boolean(raw?.hotl_after),
+    debate: Boolean(raw?.debate),
+    llm: raw?.llm !== false,
+    position: null,
+    // 기존 흐름 안에서 시작·종료점과 연결 순서를 AI가 조용히 정하지 않는다.
+    is_start: false,
+    is_end: false,
+    is_framework: false,
+    output_format: String(raw?.output_format || '').trim(),
+  };
+}
+
 const MODULE: Record<View, { kicker: string; title: string; subtitle: string; desc: string }> = {
   agents: {
     kicker: 'AGENTS', title: '에이전트',
@@ -165,8 +212,8 @@ const MODULE: Record<View, { kicker: string; title: string; subtitle: string; de
   },
   templates: {
     kicker: 'TEMPLATES', title: '워크플로우 템플릿',
-    subtitle: '여러 벌을 두고 프로젝트마다 고릅니다.',
-    desc: '기존 템플릿은 바꾸지 않고 복사해서 새로 만듭니다 — 이미 생성된 프로젝트는 계속 동작합니다.',
+    subtitle: '먼저 템플릿을 고른 뒤 에이전트와 실행 흐름을 조율합니다.',
+    desc: '템플릿이 에이전트 셋과 실행 순서의 기준입니다. 기존 템플릿은 바꾸지 않고 복사해서 새로 만듭니다.',
   },
 };
 
@@ -189,8 +236,12 @@ export default function AgentMasterPanel({ page = false, onClose }: {
   const saveTemplateRegistry = useFactoryStore((s) => s.saveTemplateRegistry);
   const copyTemplate = useFactoryStore((s) => s.copyTemplate);
   const deleteTemplate = useFactoryStore((s) => s.deleteTemplate);
+  const fetchTemplates = useFactoryStore((s) => s.fetchTemplates);
 
-  const [view, setView] = useState<View>('agents');
+  // 워크플로우 템플릿이 에이전트 셋·실행 흐름의 선행 기준이다. 화면을 에이전트부터 열면
+  // 사용자는 어떤 템플릿을 조율하는지 모른 채 전역 구성처럼 오해한다.
+  const [view, setView] = useState<View>('templates');
+  const [confirmedTemplateId, setConfirmedTemplateId] = useState<string | null>(null);
   const [draft, setDraft] = useState<any | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -200,7 +251,13 @@ export default function AgentMasterPanel({ page = false, onClose }: {
   const [scope, setScope] = useState<ActingScope | null>(actingScope.peek());
 
   // 화면 안 입력 — `prompt()` 를 쓰지 않는다.
-  const [copyForm, setCopyForm] = useState({ id: '', name: '' });
+  const [copyForm, setCopyForm] = useState({ name: '' });
+  const [newAgentForm, setNewAgentForm] = useState({ name: '' });
+  const [showAddAgent, setShowAddAgent] = useState(false);
+  const [agentNeed, setAgentNeed] = useState('');
+  const [recommendBusy, setRecommendBusy] = useState(false);
+  const [recommendedAgents, setRecommendedAgents] = useState<RecommendedAgent[]>([]);
+  const [selectedRecommendationIds, setSelectedRecommendationIds] = useState<string[]>([]);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [askAi, setAskAi] = useState(false);
@@ -213,7 +270,9 @@ export default function AgentMasterPanel({ page = false, onClose }: {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges] = useEdgesState<Edge>([]);
 
-  const isDefault = editingTemplateId === 'default';
+  const selectionReady = Boolean(confirmedTemplateId
+    && confirmedTemplateId === editingTemplateId && draft && !registryError);
+  const isDefault = selectionReady && confirmedTemplateId === 'default';
   const canEdit = Boolean(scope?.canManageStandard || scope?.unrestricted);
 
   useEffect(() => { actingScope.load().then(setScope).catch(() => setScope(UNKNOWN_SCOPE)); }, []);
@@ -236,10 +295,15 @@ export default function AgentMasterPanel({ page = false, onClose }: {
 
   // 사용자가 바뀌면 즉시 다시 읽는다 — 권한 범위가 다르다.
   useEffect(() => {
-    const onUser = () => { fetchAgentRegistry(); };
+    const onUser = () => {
+      setConfirmedTemplateId(null);
+      setDraft(null);
+      setView('templates');
+      fetchTemplates();
+    };
     window.addEventListener('factory:acting-user-changed', onUser);
     return () => window.removeEventListener('factory:acting-user-changed', onUser);
-  }, [fetchAgentRegistry]);
+  }, [fetchTemplates]);
 
   // draft가 변경될 때마다 React Flow 노드/엣지 초기화 동기화
   useEffect(() => {
@@ -372,22 +436,24 @@ export default function AgentMasterPanel({ page = false, onClose }: {
   const onPaneClick = useCallback(() => { setSelectedAgentId(null); }, []);
 
   // ── 파생 ────────────────────────────────────────────────────────────────
-  const agents: any[] = draft?.agents || [];
+  const agents: any[] = selectionReady ? (draft?.agents || []) : [];
+  const confirmedTemplate = templates.find((t: any) => t.id === confirmedTemplateId);
+  const confirmedTemplateName = confirmedTemplate?.name || (isDefault ? '기본 워크플로우' : '선택한 워크플로우');
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) || null;
   const enabledAgents = agents.filter((a) => a.enabled);
   const hotlCount = enabledAgents.filter((a) => a.hotl_after).length;
   const filteredAgents = (() => {
     const q = search.trim().toLowerCase();
     if (!q) return agents;
-    return agents.filter((a) => `${a.name_ko || ''} ${a.id} ${a.role || ''} ${a.stage || ''}`
+    return agents.filter((a) => `${a.name_ko || ''} ${a.role || ''} ${a.stage || ''}`
       .toLowerCase().includes(q));
   })();
 
   /** 조회 상태 — «아직 안 왔다»·«못 가져왔다»·«정상»을 구분한다. */
   const listState: Loaded<any[]> = registryError
     ? { status: 'error', value: null, error: registryError }
-    : draft ? { status: 'ok', value: agents } : { status: 'loading', value: null };
-  const metricState = registryError ? 'error' : draft ? 'ok' : 'loading';
+    : selectionReady ? { status: 'ok', value: agents } : { status: 'ok', value: [] };
+  const metricState = registryError ? 'error' : 'ok';
 
   const updateAgent = (id: string, key: string, value: any) => {
     setDraft((d: any) => ({
@@ -402,13 +468,136 @@ export default function AgentMasterPanel({ page = false, onClose }: {
     setDirty(true);
   };
 
+  const clearAgentRecommendation = () => {
+    setAgentNeed('');
+    setRecommendedAgents([]);
+    setSelectedRecommendationIds([]);
+  };
+
+  const runRecommendAgents = async () => {
+    if (!selectionReady || !agentNeed.trim()) return;
+    setRecommendBusy(true); setFlash(null); clearActionError();
+    setRecommendedAgents([]); setSelectedRecommendationIds([]);
+    try {
+      const existing = agents.map((a) => a.name_ko || '이름 없음').join(', ');
+      const request = [
+        `워크플로우 템플릿 «${confirmedTemplateName}» 에 새로 추가할 에이전트 후보만 추천하십시오.`,
+        `기존 에이전트 역할명: ${existing || '없음'}. 기존 에이전트는 다시 만들지 마십시오.`,
+        `추가하고 싶은 기능: ${agentNeed.trim()}`,
+      ].join('\n');
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/ai-recommend/pipeline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_request: request }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.status !== 'success') {
+        useFactoryStore.setState({
+          agentActionError: res.status === 403
+            ? '에이전트 추천을 사용할 권한이 없습니다.'
+            : String(data?.detail || `에이전트 추천에 실패했습니다(서버 ${res.status}).`),
+        });
+        return;
+      }
+      const raw = data?.data?.agents || data?.data?.execution_agents || [];
+      const rows = Array.isArray(raw) ? raw : [];
+      if (!rows.length) {
+        useFactoryStore.setState({ agentActionError: '추천 결과에 에이전트 후보가 없습니다.' });
+        return;
+      }
+      const allocatedIds = await allocateSystemIds('agent', rows.length);
+      const candidates = rows
+        .map((candidate: any, index: number) => toRecommendedAgent(candidate, allocatedIds[index]))
+        .filter((a: RecommendedAgent | null): a is RecommendedAgent => Boolean(a))
+        .filter((candidate) => !agents.some((existingAgent) =>
+          String(existingAgent.name_ko || '').trim() === candidate.name_ko));
+      if (!candidates.length) {
+        useFactoryStore.setState({ agentActionError: '추천 결과에서 사용할 수 있는 에이전트 후보를 찾지 못했습니다.' });
+        return;
+      }
+      setRecommendedAgents(candidates);
+      setSelectedRecommendationIds(candidates.map((a) => a.id));
+      setFlash(`에이전트 후보 ${candidates.length}개를 만들었습니다. 검토 후 추가할 후보를 선택하십시오.`);
+    } catch (e: any) {
+      useFactoryStore.setState({ agentActionError: `에이전트 추천 중 오류: ${e?.message || e}` });
+    } finally {
+      setRecommendBusy(false);
+    }
+  };
+
+  const addRecommendedAgents = () => {
+    const existingIds = new Set(agents.map((a) => a.id));
+    const chosen = recommendedAgents.filter((a) => selectedRecommendationIds.includes(a.id)
+      && !existingIds.has(a.id));
+    if (!chosen.length) {
+      setFlash('추가할 수 있는 에이전트 후보를 하나 이상 선택하십시오.');
+      return;
+    }
+    setDraft((d: any) => {
+      const current = d?.agents || [];
+      return {
+        ...d,
+        agents: [...current, ...chosen.map((a, index) => ({ ...a, order: current.length + index }))],
+      };
+    });
+    setSelectedAgentId(chosen[0].id);
+    setDirty(true);
+    setShowAddAgent(false);
+    clearAgentRecommendation();
+    setFlash(`추천 에이전트 ${chosen.length}개를 템플릿 «${confirmedTemplateName}» 편집판에 추가했습니다. `
+      + '실행 흐름에서 연결을 정한 뒤 변경사항을 저장하십시오.');
+  };
+
+  const addAgent = async () => {
+    const name = newAgentForm.name.trim();
+    if (!selectionReady) {
+      setFlash('먼저 워크플로우 템플릿을 선택하십시오. 새 에이전트는 선택한 템플릿에만 추가됩니다.');
+      setView('templates');
+      return;
+    }
+    if (!name) {
+      setFlash('에이전트 이름을 입력하십시오. 내부 식별자는 시스템이 자동으로 발급합니다.');
+      return;
+    }
+    if (agents.some((a) => String(a.name_ko || '').trim() === name)) {
+      setFlash(`에이전트 이름 «${name}» 은 이 템플릿에서 이미 사용 중입니다.`);
+      return;
+    }
+    let id = '';
+    try {
+      [id] = await allocateSystemIds('agent');
+    } catch (e: any) {
+      useFactoryStore.setState({ agentActionError: `에이전트 추가 준비 실패: ${e?.message || e}` });
+      return;
+    }
+    const next = {
+      id, name_ko: name, role: '', skill: '', stage: 'EXECUTION', category: 'execution',
+      model_tier: 'pro', order: agents.length, enabled: true, hotl_after: false,
+      debate: false, llm: true, position: null, is_start: false, is_end: false,
+      is_framework: false, output_format: '',
+    };
+    setDraft((d: any) => ({ ...d, agents: [...(d?.agents || []), next] }));
+    setSelectedAgentId(id);
+    setDirty(true);
+    setShowAddAgent(false);
+    setNewAgentForm({ name: '' });
+    clearAgentRecommendation();
+    setFlash(`에이전트 «${name}» 을 템플릿 «${confirmedTemplateName}» 편집판에 추가했습니다. `
+      + '실행 흐름에서 연결하고 변경사항을 저장하십시오.');
+  };
+
   const handleSave = async () => {
+    if (!selectionReady || !confirmedTemplateId) {
+      setFlash('먼저 워크플로우 템플릿을 선택하십시오. 선택 전 구성은 저장할 수 없습니다.');
+      setView('templates');
+      return;
+    }
     setSaving(true); setFlash(null); clearActionError();
-    const ok = await saveTemplateRegistry(editingTemplateId, draft);
+    const ok = await saveTemplateRegistry(confirmedTemplateId, draft);
     setSaving(false);
     if (ok) {
       setDirty(false);
-      setFlash(`템플릿 «${editingTemplateId}» 을 저장했습니다. `
+      setFlash(`템플릿 «${confirmedTemplateName}» 을 저장했습니다. `
         + '이 템플릿으로 새로 만드는 프로젝트부터 반영되고, 진행 중인 작업에는 영향이 없습니다.');
     }
   };
@@ -444,22 +633,22 @@ export default function AgentMasterPanel({ page = false, onClose }: {
   };
 
   const railItems: RailItem[] = [
+    { id: 'templates', label: '워크플로우 템플릿', hint: '에이전트 셋을 먼저 고른다', icon: 'apps' },
     { id: 'agents', label: '에이전트', hint: '역할·모델·스킬', icon: 'people' },
     { id: 'flow', label: '실행 흐름', hint: '연결이 순서다', icon: 'flow',
       // 사람 확인 지점은 통제다 — 몇 곳인지 항상 보여야 한다.
       count: hotlCount || undefined, countLabel: `사람 확인 지점 ${hotlCount}곳` },
-    { id: 'templates', label: '워크플로우 템플릿', hint: '복사해서 만든다', icon: 'apps' },
   ];
 
   const jarvisContext = {
     current_module: `agent_master/${view}`,
-    selected_object_type: 'agent',
+    selected_object_type: selectedAgent ? 'agent' : selectionReady ? 'workflow_template' : '',
     selected_object_id: selectedAgent?.id || '',
     object_snapshot: selectedAgent
       ? { id: selectedAgent.id, stage: selectedAgent.stage, enabled: selectedAgent.enabled,
         hotl_after: selectedAgent.hotl_after, model_tier: selectedAgent.model_tier }
-      : { template: editingTemplateId, agents: agents.length, hotl: hotlCount },
-    available_actions: canEdit
+      : selectionReady ? { template: confirmedTemplateId, agents: agents.length, hotl: hotlCount } : {},
+    available_actions: canEdit && selectionReady
       ? ['역할 수정', '모델 등급 변경', '사람 확인 지점 설정', '템플릿 복사']
       : [],
     evidence_refs: [],
@@ -467,10 +656,9 @@ export default function AgentMasterPanel({ page = false, onClose }: {
 
   const agentRows: FoundationRow[] = filteredAgents.map((a) => ({
     id: a.id,
-    title: a.name_ko || a.id,
-    // ⚠️ `stage` 와 `model_tier` 는 내부 코드다(`CLARIFICATION` · `pro`). 사전을 거친다 —
-    //   6/10 실측에서 그대로 노출됐다. `a.id` 는 로그·리포트의 실제 식별자이므로 그대로 둔다.
-    meta: `${a.id}${a.stage ? ` · ${stageKo(a.stage)}` : ''}`
+    title: a.name_ko || '이름 미등록 에이전트',
+    // 내부 ID는 목록에 표시하지 않는다 — 사용자가 관리할 값이 아니다.
+    meta: `${a.stage ? stageKo(a.stage) : '단계 미지정'}`
       + `${a.model_tier ? ` · ${modelTierKo(a.model_tier)}` : ''}`
       + ` · 순서 ${a.order ?? '미지정'}`,
     // ⚠️ 꺼진 에이전트를 조용히 두지 않는다 — 파이프라인에서 아예 빠진다.
@@ -483,24 +671,44 @@ export default function AgentMasterPanel({ page = false, onClose }: {
 
   const templateRows: FoundationRow[] = templates.map((t: any) => ({
     id: t.id,
-    title: t.name || t.id,
-    meta: `${t.id}${t.builtin ? ' · 기본 템플릿' : ' · 사용자 템플릿'}`,
-    chip: t.id === editingTemplateId
+    title: t.name || '이름 미등록 템플릿',
+    meta: t.builtin ? '기본 템플릿' : '사용자 템플릿',
+    chip: selectionReady && t.id === confirmedTemplateId
       ? { label: '편집 중', tone: 'success' }
       : t.builtin ? { label: '기본', tone: 'data' } : { label: '사용자', tone: 'muted' },
   }));
 
+  const confirmTemplate = async (tid: string) => {
+    setFlash(null); clearActionError(); setSelectedAgentId(null); setDraft(null);
+    setShowAddAgent(false); clearAgentRecommendation();
+    setConfirmedTemplateId(null);
+    const ok = await selectEditingTemplate(tid);
+    if (ok) {
+      setConfirmedTemplateId(tid);
+      setFlash(`템플릿 «${tid}» 의 에이전트 셋을 불러왔습니다. 이제 에이전트와 실행 흐름을 조율할 수 있습니다.`);
+    }
+  };
+
   const askSwitch = (tid: string) => {
-    if (tid === editingTemplateId) return;
+    if (selectionReady && tid === confirmedTemplateId) return;
     // 저장하지 않은 변경이 있으면 화면 안에서 확인한다(`confirm()` 을 쓰지 않는다).
     if (dirty) { switchTpl.ask(tid); return; }
-    selectEditingTemplate(tid);
+    void confirmTemplate(tid);
+  };
+
+  const selectRailView = (id: string) => {
+    if (id !== 'templates' && !selectionReady) {
+      setFlash('먼저 워크플로우 템플릿을 선택하십시오. 에이전트와 실행 흐름은 선택한 템플릿을 기준으로 열립니다.');
+      setView('templates');
+      return;
+    }
+    setView(id as View);
   };
 
   const hub = (
         <HubShell layoutClassName={page ? 'product-page-shell' : ''}
           kicker={MODULE[view].kicker} title={MODULE[view].title} subtitle={MODULE[view].subtitle}
-          items={railItems} activeId={view} onSelect={(id) => setView(id as View)}
+          items={railItems} activeId={view} onSelect={selectRailView}
           footer={
             <div className="inheritance-card">
               <span>HOTL</span>
@@ -509,17 +717,19 @@ export default function AgentMasterPanel({ page = false, onClose }: {
             </div>
           }
           jarvis={<JarvisRail
-            contextTitle={selectedAgent ? (selectedAgent.name_ko || selectedAgent.id)
-              : registryError ? '조회 불가' : MODULE[view].title}
+            contextTitle={selectedAgent ? (selectedAgent.name_ko || '이름 미등록 에이전트')
+              : registryError ? '조회 불가' : selectionReady ? MODULE[view].title : '템플릿 선택 필요'}
             contextDescription={selectedAgent
-              ? `${selectedAgent.id} · ${selectedAgent.stage ? stageKo(selectedAgent.stage) + ' · ' : ''}순서 ${selectedAgent.order ?? '미지정'}`
+              ? `${selectedAgent.stage ? stageKo(selectedAgent.stage) + ' · ' : ''}순서 ${selectedAgent.order ?? '미지정'}`
                 + `${selectedAgent.hotl_after ? ' · 사람 확인 지점' : ''}`
               : registryError
                 ? '에이전트 구성을 가져오지 못했습니다 — «구성 없음»이 아닙니다.'
-                : `템플릿 «${editingTemplateId}» · 에이전트 ${agents.length}개 · 사람 확인 ${hotlCount}곳`}
+                : selectionReady
+                  ? `템플릿 «${confirmedTemplateName}» · 에이전트 ${agents.length}개 · 사람 확인 ${hotlCount}곳`
+                  : '워크플로우 템플릿을 먼저 선택하면 그 에이전트 셋을 문맥으로 씁니다.'}
             context={jarvisContext}
             evidence={selectedAgent ? [
-              { label: '에이전트', value: selectedAgent.id },
+              { label: '에이전트', value: selectedAgent.name_ko || '이름 미등록' },
               { label: '모델 등급', value: selectedAgent.model_tier ? modelTierKo(selectedAgent.model_tier) : '미지정' },
               { label: '사람 확인', value: selectedAgent.hotl_after ? '있음' : '없음' },
             ] : []}
@@ -544,6 +754,12 @@ export default function AgentMasterPanel({ page = false, onClose }: {
             </Banner>
           )}
           {flash && <Banner tone="info">{flash}</Banner>}
+          {!selectionReady && !registryError && (
+            <Banner tone="info" title="워크플로우 템플릿을 먼저 선택하십시오">
+              에이전트와 실행 흐름은 전역 설정이 아닙니다. 아래에서 템플릿을 선택하면 그 안의
+              에이전트 셋만 불러와 조율합니다.
+            </Banner>
+          )}
           {!canEdit && !registryError && (
             <Banner tone="warn" title="조회만 가능합니다">
               에이전트 구성을 바꿀 권한이 없습니다. 이 구성은 모든 산출물이 만들어지는 방식을
@@ -554,19 +770,21 @@ export default function AgentMasterPanel({ page = false, onClose }: {
           <ScreenHead kicker={MODULE[view].kicker} title={MODULE[view].title}
             description={MODULE[view].desc}
             chip={registryError ? { label: '조회 불가', tone: 'danger' }
-              : !draft ? { label: '확인 중', tone: 'muted' }
+              : !selectionReady ? { label: '템플릿 선택 필요', tone: 'warn' }
                 : { label: `에이전트 ${agents.length}개`, tone: 'data' }} />
 
           {page && (
             <div className="agent-page-actions" aria-label="에이전트 구성 저장 상태">
               <div>
                 <small>CONFIGURATION</small>
-                <b>{dirty ? '저장하지 않은 변경이 있습니다' : '현재 구성이 저장되어 있습니다'}</b>
+                <b>{!selectionReady ? '선택한 워크플로우 템플릿이 없습니다'
+                  : dirty ? '저장하지 않은 변경이 있습니다' : '현재 구성이 저장되어 있습니다'}</b>
               </div>
               <div>
                 {saving && <span className="busy">저장 중…</span>}
                 {canEdit && (
-                  <button className="primary-button" disabled={!dirty || saving} onClick={handleSave}>
+                  <button className="primary-button" disabled={!selectionReady || !dirty || saving}
+                    onClick={handleSave}>
                     변경사항 저장
                   </button>
                 )}
@@ -575,29 +793,111 @@ export default function AgentMasterPanel({ page = false, onClose }: {
           )}
 
           <div className="metric-row">
-            <Metric label="에이전트" state={metricState} value={draft ? agents.length : null}
-              notes={{ error: '조회 불가', loading: '확인 중' }} hint="이 템플릿의 구성" />
+            <Metric label="에이전트" state={metricState} value={selectionReady ? agents.length : null}
+              notes={{ error: '조회 불가', empty: '템플릿 선택 필요' }} hint="이 템플릿의 구성" />
             <Metric label="켜진 에이전트" state={metricState}
-              value={draft ? enabledAgents.length : null}
-              notes={{ error: '조회 불가', loading: '확인 중' }}
-              hint={draft && enabledAgents.length < agents.length
+              value={selectionReady ? enabledAgents.length : null}
+              notes={{ error: '조회 불가', empty: '템플릿 선택 필요' }}
+              hint={selectionReady && enabledAgents.length < agents.length
                 ? `${agents.length - enabledAgents.length}개는 빠집니다` : '전부 참여'} />
             {/* ⚠️ 0 을 숨기지 않는다. 사람 확인 지점 0곳은 «통제 없음»이라는 중요한 사실이다. */}
-            <Metric label="사람 확인 지점" state={metricState} value={draft ? hotlCount : null}
-              notes={{ error: '조회 불가', loading: '확인 중' }}
-              hint={draft && hotlCount === 0 ? '확인 없이 끝까지 흐릅니다' : '전문가 개입'} />
+            <Metric label="사람 확인 지점" state={metricState}
+              value={selectionReady ? hotlCount : null}
+              notes={{ error: '조회 불가', empty: '템플릿 선택 필요' }}
+              hint={selectionReady && hotlCount === 0 ? '확인 없이 끝까지 흐릅니다' : '전문가 개입'} />
             <Metric label="최종 산출물" state={metricState}
-              value={draft ? deliverableTypeKo(draft.deliverable_type || 'software_app') : null}
-              notes={{ error: '조회 불가', loading: '확인 중', empty: '미지정' }} />
+              value={selectionReady ? deliverableTypeKo(draft.deliverable_type || 'software_app') : null}
+              notes={{ error: '조회 불가', empty: selectionReady ? '미지정' : '템플릿 선택 필요' }} />
           </div>
 
           {view === 'agents' && (
             <>
               <FoundationToolbar search={search} onSearch={setSearch}
-                placeholder="이름·식별자·역할로 찾기"
+                placeholder="이름·역할로 찾기"
+                actions={canEdit && selectionReady ? (
+                  <button className="primary-button" onClick={() => setShowAddAgent(true)}>
+                    ＋ 새 에이전트
+                  </button>
+                ) : undefined}
                 hint={canEdit
                   ? '고른 에이전트의 역할·모델·스킬을 오른쪽에서 편집합니다. 저장 전까지 반영되지 않습니다.'
                   : undefined} />
+              {showAddAgent && selectionReady && (
+                <Panel kicker="NEW AGENT" title="선택한 템플릿에 에이전트 추가">
+                  <div style={{ padding: 14 }}>
+                    <Banner tone="info">
+                      새 에이전트는 템플릿 «{confirmedTemplateId}» 편집판에만 추가됩니다.
+                      추가 후 실행 흐름에서 앞뒤 연결을 정하고 변경사항을 저장하십시오.
+                    </Banner>
+                    <div style={{ marginTop: 14, padding: 14, border: '1px solid var(--surface-border)',
+                      borderRadius: 8, background: 'var(--surface-subtle)' }}>
+                      <FormField label="추가하고 싶은 기능"
+                        hint="필요한 일을 설명하면 현재 템플릿과 겹치지 않는 에이전트 후보를 추천합니다. 추천만으로 저장되지는 않습니다.">
+                        <textarea className="afs-textarea" rows={3} value={agentNeed}
+                          onChange={(e) => setAgentNeed(e.target.value)}
+                          placeholder="예: 생산계획과 실제 생산실적의 차이를 찾아 원인을 설명하고 조치안을 제안" />
+                      </FormField>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button className="secondary-button" disabled={recommendBusy || !agentNeed.trim()}
+                          onClick={runRecommendAgents}>
+                          {recommendBusy ? '후보를 구상하는 중…' : 'AI로 에이전트 후보 추천'}
+                        </button>
+                      </div>
+
+                      {recommendedAgents.length > 0 && (
+                        <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+                          <b style={{ fontSize: 13 }}>추천 후보 — 추가할 에이전트를 선택하십시오</b>
+                          {recommendedAgents.map((candidate) => {
+                            const checked = selectedRecommendationIds.includes(candidate.id);
+                            return (
+                              <label key={candidate.id} style={{ display: 'grid', gridTemplateColumns: '20px 1fr',
+                                gap: 9, alignItems: 'start', padding: 10, border: '1px solid var(--surface-border)',
+                                borderRadius: 7 }}>
+                                <input type="checkbox" checked={checked}
+                                  onChange={(e) => setSelectedRecommendationIds((ids) => e.target.checked
+                                    ? [...ids, candidate.id]
+                                    : ids.filter((id) => id !== candidate.id))} />
+                                <span>
+                                  <b>{candidate.name_ko}</b>
+                                  <small style={{ display: 'block', marginTop: 4 }}>
+                                    {candidate.role || '역할 설명 없음'} · {stageKo(candidate.stage)} · {modelTierKo(candidate.model_tier)}
+                                    {candidate.hotl_after ? ' · 사람 확인' : ''}
+                                  </small>
+                                </span>
+                              </label>
+                            );
+                          })}
+                          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <button className="primary-button"
+                              disabled={!selectedRecommendationIds.length}
+                              onClick={addRecommendedAgents}>선택한 후보를 편집판에 추가</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="hint-line" style={{ margin: '14px 0 0' }}>
+                      직접 추가하려면 이름만 입력하십시오. 내부 식별자는 시스템이 자동으로 발급합니다.
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <FormField label="에이전트 이름" required
+                        hint="사용자에게 보이는 이름입니다. 내부 ID는 입력하거나 관리할 필요가 없습니다.">
+                        <input className="afs-input" value={newAgentForm.name}
+                          onChange={(e) => setNewAgentForm({ name: e.target.value })}
+                          placeholder="예: 원가 분석 에이전트" />
+                      </FormField>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 7 }}>
+                      <button className="secondary-button" onClick={() => {
+                        setShowAddAgent(false); setNewAgentForm({ name: '' });
+                        clearAgentRecommendation();
+                      }}>취소</button>
+                      <button className="primary-button" disabled={!newAgentForm.name.trim()}
+                        onClick={addAgent}>에이전트 추가</button>
+                    </div>
+                  </div>
+                </Panel>
+              )}
               <div className="inbox-layout agent-master-detail-layout">
                 <FoundationList state={listState} rows={agentRows}
                   selectedId={selectedAgentId || ''} onSelect={setSelectedAgentId}
@@ -615,10 +915,10 @@ export default function AgentMasterPanel({ page = false, onClose }: {
                     <>
                       <div style={{ padding: '0 14px' }}>
                         <EvidenceStrip items={[
-                          { label: '식별자', value: selectedAgent.id },
+                          { label: '업무 단계', value: selectedAgent.stage ? stageKo(selectedAgent.stage) : '미지정' },
                           { label: '모델 등급', value: selectedAgent.model_tier ? modelTierKo(selectedAgent.model_tier) : '미지정' },
                           { label: '사람 확인', value: selectedAgent.hotl_after ? '있음' : '없음' },
-                        ]} note="식별자는 로그·리포트에 같은 문자열로 남습니다 — 바꾸지 않습니다." />
+                        ]} note="내부 식별자는 시스템이 자동 관리하며 일반 화면에는 표시하지 않습니다." />
                       </div>
                       {/* ★ 상세 편집은 기존 패널을 그대로 재사용한다(12개 필드). 아직 다크
                           스타일이며 별도 단계로 옮긴다 — 다시 만들면 필드 누락 위험이 크다. */}
@@ -772,15 +1072,22 @@ export default function AgentMasterPanel({ page = false, onClose }: {
                 title="저장하지 않은 변경이 사라집니다"
                 body="템플릿을 전환하면 지금 편집판의 변경이 사라집니다. 먼저 저장하려면 취소하십시오."
                 confirmLabel="전환" danger={false}
-                onConfirm={() => switchTpl.run((tid) => selectEditingTemplate(tid))}
+                onConfirm={() => switchTpl.run((tid) => { void confirmTemplate(tid); })}
                 onCancel={switchTpl.cancel} />
 
               <ConfirmInline open={delTpl.open}
-                title={`템플릿 «${delTpl.target || ''}» 을 삭제합니다`}
-                body={<>되돌릴 수 없습니다. <b>이미 이 템플릿으로 생성된 프로젝트는 계속
-                  동작합니다</b> — 앞으로 이 템플릿을 고를 수 없게 되는 것입니다.</>}
+                title={`템플릿 «${confirmedTemplateName}» 을 삭제합니다`}
+                body={<>되돌릴 수 없습니다. <b>이미 이 템플릿에 결속된 프로젝트도 새 실행과
+                  재개가 차단됩니다.</b> 템플릿을 복원하거나 검토 후 다시 결속하기 전에는
+                  실행할 수 없습니다.</>}
                 confirmLabel="삭제"
-                onConfirm={() => delTpl.run((tid) => deleteTemplate(tid))}
+                onConfirm={() => delTpl.run(async (tid) => {
+                  const ok = await deleteTemplate(tid);
+                  if (ok) {
+                    setConfirmedTemplateId(null); setDraft(null); setSelectedAgentId(null);
+                    setFlash('템플릿을 삭제했습니다. 계속하려면 다른 템플릿을 명시적으로 선택하십시오.');
+                  }
+                })}
                 onCancel={delTpl.cancel} />
 
               <div className="inbox-layout">
@@ -788,16 +1095,22 @@ export default function AgentMasterPanel({ page = false, onClose }: {
                   state={registryError
                     ? { status: 'error', value: null, error: registryError }
                     : { status: 'ok', value: templates }}
-                  rows={templateRows} selectedId={editingTemplateId}
-                  onSelect={askSwitch} onRetry={() => fetchAgentRegistry()}
+                  rows={templateRows} selectedId={confirmedTemplateId || ''}
+                  onSelect={askSwitch} onRetry={() => fetchTemplates()}
                   kicker="TEMPLATES" title="워크플로우 템플릿"
                   emptyText={<>템플릿을 가져오지 못했거나 등록된 것이 없습니다 — 기본 템플릿으로
                     동작합니다.</>} />
 
-                <Panel kicker="TEMPLATE" title="지금 편집 중">
+                <Panel kicker="TEMPLATE" title={selectionReady ? '지금 편집 중' : '템플릿을 선택하십시오'}>
                   <div style={{ padding: 14 }}>
+                    {!selectionReady ? (
+                      <div className="empty-note">
+                        왼쪽에서 워크플로우 템플릿을 선택하십시오. 선택하기 전에는 에이전트 셋과
+                        실행 흐름을 불러오거나 편집하지 않습니다.
+                      </div>
+                    ) : <>
                     <EvidenceStrip items={[
-                      { label: '식별자', value: editingTemplateId },
+                      { label: '템플릿', value: confirmedTemplateName },
                       { label: '구분', value: isDefault ? '기본 템플릿' : '사용자 템플릿' },
                       { label: '에이전트', value: `${agents.length}개` },
                     ]} note={isDefault
@@ -807,31 +1120,34 @@ export default function AgentMasterPanel({ page = false, onClose }: {
                     {canEdit ? (
                       <>
                         <div style={{ marginTop: 14 }}>
-                          <FormField label="새 템플릿 식별자" required
-                            hint="영문·숫자·_- 만. 프로젝트 기록에 남으므로 나중에 바꾸기 어렵습니다.">
-                            <input className="afs-input" value={copyForm.id}
-                              onChange={(e) => setCopyForm({ ...copyForm, id: e.target.value })}
-                              placeholder="예: cost_analysis" />
-                          </FormField>
-                          <FormField label="표시 이름">
+                          <FormField label="새 템플릿 이름" required
+                            hint="내부 식별자는 시스템이 자동으로 발급하고 관리합니다.">
                             <input className="afs-input" value={copyForm.name}
-                              onChange={(e) => setCopyForm({ ...copyForm, name: e.target.value })}
+                              onChange={(e) => setCopyForm({ name: e.target.value })}
                               placeholder="예: 원가 분석 파이프라인" />
                           </FormField>
                           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-                            <button className="primary-button" disabled={!copyForm.id.trim()}
+                            <button className="primary-button" disabled={!copyForm.name.trim()}
                               onClick={async () => {
-                                const okDone = await copyTemplate(editingTemplateId,
-                                  copyForm.id.trim(), copyForm.name.trim());
+                                let newId = '';
+                                try {
+                                  [newId] = await allocateSystemIds('workflow');
+                                } catch (e: any) {
+                                  useFactoryStore.setState({ agentActionError: `템플릿 생성 준비 실패: ${e?.message || e}` });
+                                  return;
+                                }
+                                const okDone = await copyTemplate(confirmedTemplateId || '',
+                                  newId, copyForm.name.trim());
                                 if (okDone) {
-                                  setFlash(`템플릿 «${copyForm.id.trim()}» 을 만들었습니다 — `
+                                  setConfirmedTemplateId(newId);
+                                  setFlash(`템플릿 «${copyForm.name.trim()}» 을 만들었습니다 — `
                                     + '지금부터 이 템플릿을 편집합니다.');
-                                  setCopyForm({ id: '', name: '' });
+                                  setCopyForm({ name: '' });
                                 }
                               }}>복사해서 새로 만들기</button>
                             {!isDefault && (
                               <button className="danger-ghost"
-                                onClick={() => delTpl.ask(editingTemplateId)}>
+                                onClick={() => delTpl.ask(confirmedTemplateId || '')}>
                                 이 템플릿 삭제
                               </button>
                             )}
@@ -856,6 +1172,7 @@ export default function AgentMasterPanel({ page = false, onClose }: {
                     ) : (
                       <p className="hint-line">템플릿을 만들거나 삭제할 권한이 없습니다.</p>
                     )}
+                    </>}
                   </div>
                 </Panel>
               </div>
@@ -875,7 +1192,8 @@ export default function AgentMasterPanel({ page = false, onClose }: {
           {dirty && <span className="busy">저장 안 됨</span>}
           {saving && <span className="busy">저장 중…</span>}
           {canEdit && (
-            <button className="primary-button" disabled={!dirty || saving} onClick={handleSave}>
+            <button className="primary-button" disabled={!selectionReady || !dirty || saving}
+              onClick={handleSave}>
               저장
             </button>
           )}

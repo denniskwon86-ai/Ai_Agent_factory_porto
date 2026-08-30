@@ -37,6 +37,7 @@ import {
   STATUS_LABEL, deprecateProgram, disableProgram, fetchProgram, reactivateProgram,
 } from '../lib/programApi';
 import { orgApi } from '../lib/orgApi';
+import { useFactoryStore } from '../store/useFactoryStore';
 
 type Props = {
   releaseId: string;
@@ -79,6 +80,7 @@ function historyStatusLabel(value?: string): string {
 }
 
 export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onChanged }: Props) {
+  const releases = useFactoryStore((state) => state.releases);
   const [prog, setProg] = useState<Loaded<ProgramLifecycle>>(loading<ProgramLifecycle>());
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -143,6 +145,13 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
 
   const data = prog.value;
   const dep = data?.dependents;
+  const replacementOptions = releases.filter((release: any) =>
+    release?.release_id && release.release_id !== releaseId).map((release: any) => ({
+      id: String(release.release_id),
+      label: String(release.display_name || release.project_name || '이름 미등록 프로그램'),
+    }));
+  const replacementLabel = replacementOptions.find((option) =>
+    option.id === data?.replacement_release_id)?.label || '대체 프로그램 정보 확인 불가';
 
   const headChip = prog.status === 'loading' ? { label: '확인 중', tone: 'muted' as const }
     : prog.status === 'forbidden' ? { label: '권한 없음', tone: 'danger' as const }
@@ -204,7 +213,7 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
                   )}
                   {data!.replacement_release_id && (
                     <div className="afs-info-fg" style={{ fontSize: 13 }}>
-                      대체 프로그램: {data!.replacement_release_id}
+                      대체 프로그램: {replacementLabel}
                     </div>
                   )}
                   {data!.recorded && (
@@ -272,11 +281,15 @@ export default function ProgramAdminPanel({ releaseId, releaseName, onClose, onC
                 <div>
                   <label htmlFor="pa-replacement" className="afs-muted"
                     style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>
-                    대체 프로그램 식별자 (선택 — 없으면 사용자는 막다른 길에서 같은 걸 다시 만듭니다)
+                    대체 프로그램 (선택 — 없으면 사용자는 막다른 길에서 같은 걸 다시 만듭니다)
                   </label>
-                  <input id="pa-replacement" className="afs-input" style={{ width: '100%' }}
-                    value={replacement} onChange={(e) => setReplacement(e.target.value)}
-                    placeholder="예: myapp_20260801_120000" />
+                  <select id="pa-replacement" className="afs-select" style={{ width: '100%' }}
+                    value={replacement} onChange={(e) => setReplacement(e.target.value)}>
+                    <option value="">대체 프로그램을 지정하지 않음</option>
+                    {replacementOptions.map((option) => <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>)}
+                  </select>
                 </div>
                 <label className="afs-ink"
                   style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13 }}>

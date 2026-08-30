@@ -25,6 +25,8 @@ type Props = {
   selectedRoot: OntologyObject | null;
   onSelectRelation: (relationId: string) => void;
   onSelectRoot: (ref: OntologyObject) => void;
+  getObjectLabel: (ref: OntologyObject) => string;
+  getRelationLabel: (relationTypeId: string) => string;
 };
 
 /** 현재 사용자가 실제로 조회한 관계만 그리는 읽기 전용 상관 그래프.
@@ -33,7 +35,7 @@ type Props = {
  * 시작점 선택과 같은 상태를 사용하고, 간선 선택은 관계 상세 패널과 같은 상태를 사용한다.
  */
 export function OntologyGraphPanel({ relations, selectedRelationId, selectedRoot,
-  onSelectRelation, onSelectRoot }: Props) {
+  onSelectRelation, onSelectRoot, getObjectLabel, getRelationLabel }: Props) {
   const graph = useMemo(() => {
     const refs = new Map<string, OntologyObject>();
     const outgoing = new Map<string, string[]>();
@@ -84,8 +86,8 @@ export function OntologyGraphPanel({ relations, selectedRelationId, selectedRoot
           id: key,
           position: { x: l * 285, y: row * 116 },
           data: { ref, label: <div style={{ display: 'grid', gap: 2, textAlign: 'left' }}>
-            <small style={{ color, fontWeight: 800 }}>{ref.namespace} · {ref.object_type}</small>
-            <b style={{ color: '#172033', fontSize: 13 }}>{ref.object_id}</b>
+            <small style={{ color, fontWeight: 800 }}>승인 업무 객체</small>
+            <b style={{ color: '#172033', fontSize: 13 }}>{getObjectLabel(ref)}</b>
           </div> },
           style: {
             width: 230, borderRadius: 9, padding: '10px 12px', background: '#fff',
@@ -103,7 +105,7 @@ export function OntologyGraphPanel({ relations, selectedRelationId, selectedRoot
       return {
         id: relation.relation_id,
         source: objectKey(relation.subject), target: objectKey(relation.object),
-        label: relation.relation_type_id,
+        label: getRelationLabel(relation.relation_type_id),
         type: 'smoothstep',
         animated: relation.approval_status === 'IN_REVIEW',
         markerEnd: { type: MarkerType.ArrowClosed, color },
@@ -116,7 +118,7 @@ export function OntologyGraphPanel({ relations, selectedRelationId, selectedRoot
       };
     });
     return { nodes, edges };
-  }, [relations, selectedRelationId, selectedRoot]);
+  }, [relations, selectedRelationId, selectedRoot, getObjectLabel, getRelationLabel]);
 
   if (!relations.length) {
     return <div className="empty-note">현재 조회 조건에서 시각화할 관계가 없습니다. 관계를 지어내지 않고 빈 그래프로 둡니다.</div>;

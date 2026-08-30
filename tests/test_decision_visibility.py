@@ -166,14 +166,40 @@ def test_every_decision_route_passes_viewer_scopes():
         + "\n  ".join(missing))
 
 
-def test_create_rejects_foreign_scope():
-    """남의 조직 이름으로 안건을 만들 수 없다 — 가시성을 막고 이 입구를 열면 우회로가 된다."""
-    import inspect
+def test_create_rejects_foreign_scope(monkeypatch):
+    """서버 결속 조회에 실제 열람 범위를 넘기고, 범위 밖 실행은 존재도 알리지 않는다."""
+    import asyncio
+    from types import SimpleNamespace
 
+    from fastapi import HTTPException
     import api.routes.decision_control as dc
-    src = inspect.getsource(dc.create_case)
-    assert "not in allowed" in src, "생성 시 조직 범위를 검사하지 않는다"
-    assert "status_code=400" in src, "범위 위반을 400 으로 알려야 한다"
+    from core.decision_source_binding import DecisionSourceNotFound
+
+    seen = {}
+
+    def reject_foreign(run_id, visible_scopes):
+        seen["run_id"] = run_id
+        seen["visible_scopes"] = visible_scopes
+        raise DecisionSourceNotFound("찾을 수 없습니다")
+
+    monkeypatch.setattr(dc.decision_sources, "resolve", reject_foreign)
+    principal = SimpleNamespace(
+        user_id="kim",
+        scope=SimpleNamespace(
+            unrestricted=False,
+            readable_dept_ids=frozenset({"quality"}),
+            readable_scope_nodes=frozenset({"node_q"}),
+        ),
+    )
+    request = dc.CaseCreate(question="q", package=PKG)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(dc.create_case("foreign-run", request, principal))
+
+    assert exc.value.status_code == 404
+    assert seen == {
+        "run_id": "foreign-run",
+        "visible_scopes": frozenset({"quality", "node_q"}),
+    }
 
 
 def test_scopes_helper_never_returns_none():

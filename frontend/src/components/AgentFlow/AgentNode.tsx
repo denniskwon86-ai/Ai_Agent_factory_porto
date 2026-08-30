@@ -37,8 +37,8 @@ export default function AgentNode({ data, selected }: { data: any; selected: boo
           <h3 className="text-sm font-bold text-gray-100 truncate" title={data.name_ko}>
             {data.name_ko || "Unnamed Agent"}
           </h3>
-          <p className="text-xs font-mono text-gray-500 truncate" title={data.id}>
-            {data.id}
+          <p className="text-xs text-gray-500 truncate">
+            {data.role || "역할 설명 없음"}
           </p>
         </div>
       </div>

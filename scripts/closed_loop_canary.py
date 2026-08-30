@@ -121,6 +121,7 @@ class Canary:
         print("\n[2] CL-2 Decision Package — 한 문서 · 세 관점 · 결정 차단")
         s, j = self.call("POST", "/api/v1/simulations/canary_run/decision-cases", {
             "question": "[카나리] 정련 가동률 상향안을 승인할 것인가",
+            "record_purpose": "VALIDATION",
             "baseline_id": "BL-CANARY",
             "package": {"baseline": "무행동 시 변화 없음",
                         "options": ["A안 상향", "B안 단계 상향", "C안 유지"]},
@@ -282,6 +283,7 @@ class Canary:
 
         s, j = self.call("POST", "/api/v1/simulations/canary_run/decision-cases", {
             "question": "[카나리] 알림 격리 확인용 안건", "baseline_id": "BL-CANARY",
+            "record_purpose": "VALIDATION",
             "package": {"baseline": "무행동", "options": ["A", "B"]}, "evidence": {}})
         if s != 200:
             self.check("알림 트리거용 안건 생성", False, f"HTTP {s}")

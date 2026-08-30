@@ -34,7 +34,9 @@ LLM 호출: 0건.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List
+import hashlib
+import json
+from typing import Any, Dict, List, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -50,6 +52,7 @@ from core import demo_readiness
 from core import demo_reset
 from core import demo_vertical_slice as dv
 from core import path_calculation_service as svc
+from core.enterprise_context import audit
 #: ★★ 인스턴스 가시성 판정을 **한 벌만** 쓴다. 같은 판정을 두 벌로 만들면 한쪽만
 #:   고쳐지는 날이 오고, 그날 이 경로만 조용히 헐거워진다.
 from api.routes import baseline_control as bc
@@ -95,6 +98,17 @@ class PathCalcInput(BaseModel):
     instance_id: str
     #: 시나리오 손잡이 — ⚠️ 봉인된 키(배분·인식 규칙)를 넣어도 봉인이 이긴다
     assumptions: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DiagnosticInput(PathCalcInput):
+    """내부 진단을 펼치거나 복사할 때의 명시적 확인.
+
+    질문·경로·인스턴스는 일반 계산과 같은 선택값을 다시 보내지만, 내부 식별자 자체는
+    클라이언트가 보내지 않는다. 서버가 경로와 계산을 다시 실행해 당시 진단을 만든다.
+    """
+
+    purpose: str = Field(min_length=10, max_length=300)
+    acknowledgement: Literal["SHOW_INTERNAL_DIAGNOSTIC", "COPY_INTERNAL_DIAGNOSTIC"]
 
 
 class DecisionInput(PathCalcInput):
@@ -177,7 +191,7 @@ def _resolve_path(req: PathCalcInput, p: Principal, actor: str,
     return {"evidence": evidence, "bindings": bindings}
 
 
-def _calculate(req: PathCalcInput, p: Principal) -> Dict[str, Any]:
+def _calculate(req: PathCalcInput, p: Principal, *, include_internal: bool = False) -> Dict[str, Any]:
     #: ★★★ **문맥을 인스턴스에서 읽는다.** 보이지 않는 인스턴스는 404 다(없는 것과 못
     #:   보는 것을 같은 답으로 돌려준다 — 다르면 그 응답이 존재를 알려 준다).
     inst = _instance_or_404(p, req.instance_id)
@@ -212,11 +226,53 @@ def _calculate(req: PathCalcInput, p: Principal) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc))
     except pc.PathCalculationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    #: ★ 코어 진단에는 관계 ID·계약키·계산 참조가 들어간다. 일반 제품 API는 닫힌
+    #:   사유 코드와 다음 행동만 반환한다. 원본 진단은 권한 분리된 운영 경로의 몫이다.
+    if not include_internal:
+        result = pc.public_result(result)
     #: ★ 문맥도 함께 돌려준다 — 안건의 조직은 **인스턴스가 정한다**. 호출부가 다시
     #:   유도하면 두 곳이 갈라지고, 갈린 날 안건이 남의 부서로 들어간다.
     return {"evidence": evidence, "result": result,
             "ctx": {"tenant_id": tenant_id, "entity_mode": entity_mode,
                     "scope_node_id": scope_node_id}}
+
+
+def _diagnostic(got: Dict[str, Any]) -> Dict[str, Any]:
+    """계산 내부 결과에서 운영 진단 봉투를 만든다."""
+    result = got["result"]
+    blocked = result.get("blocked")
+    if result.get("status") != pc.BLOCKED or not isinstance(blocked, dict):
+        raise HTTPException(status_code=409, detail="차단된 계산 결과에만 내부 진단이 있습니다.")
+    internal = blocked.get("internal_reasons")
+    if not isinstance(internal, list) or not internal:
+        raise HTTPException(status_code=503, detail="내부 진단 근거를 확인할 수 없습니다.")
+    payload = {
+        "reason_code": str(blocked.get("reason_code") or ""),
+        "internal_reasons": [str(v) for v in internal],
+        "identifiers": {
+            "query_id": str(result.get("query_id") or ""),
+            "path_fingerprint": str(result.get("path_fingerprint") or ""),
+            "request_fingerprint": str(result.get("request_fingerprint") or ""),
+            "required_relation_ids": [str(v) for v in result.get("required_relation_ids") or []],
+        },
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    payload["diagnostic_fingerprint"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return payload
+
+
+def _record_diagnostic(event: str, diagnostic: Dict[str, Any], got: Dict[str, Any],
+                       req: DiagnosticInput, p: Principal) -> None:
+    """민감 진단의 열람·복사를 감사하고, 기록 실패 시 공개하지 않는다."""
+    ok = audit.record(
+        event, "calculation_diagnostic", diagnostic["diagnostic_fingerprint"],
+        actor=p.user_id or "", requested_scope=got["ctx"]["scope_node_id"],
+        outcome="allowed", reason="explicit_operator_action",
+        detail=json.dumps({"purpose": req.purpose.strip(),
+                           "reason_code": diagnostic["reason_code"]},
+                          ensure_ascii=False, sort_keys=True))
+    if not ok:
+        raise HTTPException(status_code=503, detail="감사 기록을 남기지 못해 내부 진단을 공개하지 않았습니다.")
 
 
 class ApprovalInput(BaseModel):
@@ -523,6 +579,35 @@ async def calculate_path(req: PathCalcInput, p: Principal = Depends(current_prin
     assert_identified(p, "경로 계산")
     got = await asyncio.to_thread(_calculate, req, p)
     return {"status": "success", "data": got["result"]}
+
+
+@router.post("/path/diagnostics/reveal")
+async def reveal_path_diagnostic(req: DiagnosticInput,
+                                 p: Principal = Depends(current_principal)):
+    """시스템 관리자가 차단 진단을 명시적으로 펼친다. 열람 자체를 감사한다."""
+    assert_identified(p, "경로 계산 내부 진단")
+    if req.acknowledgement != "SHOW_INTERNAL_DIAGNOSTIC":
+        raise HTTPException(status_code=422, detail="내부 진단 펼침 확인값이 올바르지 않습니다.")
+    got = await asyncio.to_thread(_calculate, req, p, include_internal=True)
+    diagnostic = _diagnostic(got)
+    _record_diagnostic(audit.CALCULATION_DIAGNOSTIC_REVEALED, diagnostic, got, req, p)
+    return {"status": "success", "data": diagnostic}
+
+
+@router.post("/path/diagnostics/copy")
+async def copy_path_diagnostic(req: DiagnosticInput,
+                               p: Principal = Depends(current_principal)):
+    """시스템 관리자가 진단을 복사한다. 서버가 만든 본문만 감사 후 반환한다."""
+    assert_identified(p, "경로 계산 내부 진단 복사")
+    if req.acknowledgement != "COPY_INTERNAL_DIAGNOSTIC":
+        raise HTTPException(status_code=422, detail="내부 진단 복사 확인값이 올바르지 않습니다.")
+    got = await asyncio.to_thread(_calculate, req, p, include_internal=True)
+    diagnostic = _diagnostic(got)
+    _record_diagnostic(audit.CALCULATION_DIAGNOSTIC_COPY_ISSUED, diagnostic, got, req, p)
+    return {"status": "success", "data": {
+        "diagnostic_fingerprint": diagnostic["diagnostic_fingerprint"],
+        "copy_text": json.dumps(diagnostic, ensure_ascii=False, indent=2, sort_keys=True),
+    }}
 
 
 def _decision_sections(pkg, base, scenario, baseline, snapshots) -> Dict[str, Any]:

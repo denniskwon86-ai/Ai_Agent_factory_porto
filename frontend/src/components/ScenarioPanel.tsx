@@ -57,7 +57,7 @@ export function ScenarioPanel({ onClose, page = false }: { onClose: () => void; 
     const ids = pick.snapshotIds;
     if (!pick.instanceId || ids.length === 0) {
       // ★★★ 서버가 막을 자리를 **누르기 전에** 말한다.
-      setError('키트 인스턴스와 Snapshot ID 를 지정해 주십시오 — 「최신으로 알아서」는 '
+      setError('업무키트와 인증된 데이터 판을 선택해 주십시오 — 「최신으로 알아서」는 '
         + '재현할 수 없는 숫자를 만듭니다.');
       return;
     }
@@ -235,7 +235,7 @@ export function ScenarioPanel({ onClose, page = false }: { onClose: () => void; 
         <p>화면은 숫자를 만들지 않고 서버 계산 결과와 재현 지문을 그대로 보여 줍니다.</p>
       </div>}
       jarvis={<JarvisRail
-        contextTitle={pick.instanceId ? `시나리오 · ${pick.instanceId}` : '새 시나리오'}
+        contextTitle={pick.instanceId ? '선택한 업무키트 시나리오' : '새 시나리오'}
         contextDescription={pick.instanceId
           ? '현재 선택한 업무키트·데이터 판·변화 가정을 기준으로 답합니다.'
           : '기준선을 선택하면 해당 데이터 판을 기준으로 답합니다.'}
@@ -250,7 +250,7 @@ export function ScenarioPanel({ onClose, page = false }: { onClose: () => void; 
           available_actions: ['기준선 설명', '가정 영향 점검', '결과 근거 확인'],
         }}
         evidence={pick.instanceId ? [
-          { label: '업무키트', value: pick.instanceId },
+          { label: '업무키트', value: '선택 완료' },
           { label: '봉인된 데이터 판', value: `${pick.snapshotIds.length}개` },
           { label: '계산 상태', value: result ? '완료' : busy ? '계산 중' : '실행 전' },
         ] : []}

@@ -24,12 +24,14 @@
 //   · 자체 `fixed inset-0` 전체화면(모달 semantics·포커스 트랩·Escape 없음) → `HubDialog`
 //   · **10~11px 글자 21곳** → 본문 12px 이상
 //   · slate/amber 팔레트 직접 지정 → 디자인 토큰
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, Panel, ScreenHead } from '../design/HubShell';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
+import { orgApi, type OrgUser } from '../lib/orgApi';
+import { fetchOrgNodeOptions, type OrgNodeOption } from '../lib/governanceApi';
 import {
   compareScenarios, fetchAccounts, fetchBacktestPlan, fetchCashFlow,
   fetchCurrentApproved, fetchRollupCheck, fetchScenarios, fetchVariance,
@@ -52,6 +54,8 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
   const [period, setPeriod] = useState('2027');
   const [accounts, setAccounts] = useState<Loaded<Account[]>>(loading<Account[]>());
   const [scenarios, setScenarios] = useState<Loaded<Scenario[]>>(loading<Scenario[]>());
+  const [orgNodes, setOrgNodes] = useState<Loaded<OrgNodeOption[]>>(loading<OrgNodeOption[]>());
+  const [users, setUsers] = useState<Loaded<OrgUser[]>>(loading<OrgUser[]>());
   const [picked, setPicked] = useState<string[]>([]);
   const [cmp, setCmp] = useState<Loaded<ScenarioComparison | null> | null>(null);
   const [vr, setVr] = useState<Loaded<Variance> | null>(null);
@@ -65,14 +69,18 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
 
   /** 계정·시나리오 목록. **「계산」은 «지금 상태를 다시 읽는다» 는 뜻이어야 한다.** */
   const loadLists = useCallback(async () => {
-    const [a, s] = await Promise.allSettled([fetchAccounts(), fetchScenarios(orgId)]);
+    const [a, s, d, u] = await Promise.allSettled([
+      fetchAccounts(), fetchScenarios(), fetchOrgNodeOptions(), orgApi.users(),
+    ]);
     if (a.status === 'fulfilled') reportRequestSuccess();
     else reportRequestFailure((a.reason as any)?.status);
     // ★★★ 종전에는 실패를 `[]` 로 바꿔 「등록된 시나리오가 없습니다」가 됐다 —
     //   이 파일 주석이 «조용한 거짓말» 이라고 부른 바로 그것이다.
     setAccounts(settled(a));
     setScenarios(settled(s));
-  }, [orgId]);
+    setOrgNodes(d.status === 'fulfilled' ? ok(d.value) : failed<OrgNodeOption[]>(d.reason));
+    setUsers(u.status === 'fulfilled' ? ok(u.value.rows) : failed<OrgUser[]>(u.reason));
+  }, []);
 
   useEffect(() => { loadLists(); }, [loadLists]);
 
@@ -108,6 +116,31 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
   const vrV = vr?.value;
   const cfV = cf?.value;
   const btV = bt?.value;
+  const planningScopes = useMemo(() => {
+    if (orgNodes.status !== 'ok' || scenarios.status !== 'ok') {
+      return [] as { id: string; name: string }[];
+    }
+    const scenarioOrgIds = [...new Set((scenarios.value || []).map((s) => s.org_id).filter(Boolean))];
+    return scenarioOrgIds.flatMap((id) => {
+      const node = (orgNodes.value || []).find(
+        (candidate) => candidate.readable && (candidate.code === id || candidate.node_id === id));
+      return node ? [{ id, name: node.label }] : [];
+    });
+  }, [orgNodes, scenarios]);
+  const orgName = planningScopes.find((o) => o.id === orgId)?.name || '조직 미선택';
+  const scenarioNames = useMemo(() => new Map(
+    (scenarios.value || []).map((s) => [s.scenario_id, s.name || '이름 미등록 시나리오']),
+  ), [scenarios.value]);
+  const shownScenarios = (scenarios.value || []).filter((s) => s.org_id === orgId);
+  const userNames = useMemo(() => new Map(
+    (users.value || []).map((u) => [u.user_id, u.display_name || '이름 미등록 사용자']),
+  ), [users.value]);
+  const approverName = (id?: string) => id ? (userNames.get(id) || '이름 미등록 승인자') : '확인 불가';
+  const accountNames = useMemo(() => new Map(
+    (accounts.value || []).map((a) => [a.account_code, a.name || '이름 미등록 계정']),
+  ), [accounts.value]);
+  const accountName = (code?: string) => code ? (accountNames.get(code) || '이름 미등록 계정') : '확인 불가';
+  const orgReady = orgNodes.status === 'ok' && planningScopes.some((o) => o.id === orgId);
 
   /** 신뢰 경고를 띄울 조건. ⚠️ **못 읽은 것은 «문제 없음» 이 아니다** — 따로 말한다. */
   const distrust = rollV?.has_conflict || (apprV && apprV.integrity?.intact === false);
@@ -133,20 +166,35 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
             description="결손을 결과처럼 보여주지 않습니다. 실적 미입력을 「차이 0」으로 그리면 「계획대로 됐다」로 읽히고, 기준선이 다른 비교는 숫자만 나란히 놓으면 유효해 보입니다."
             chip={busy ? { label: '계산 중', tone: 'muted' }
               : distrust ? { label: '이 숫자를 그대로 쓰지 마십시오', tone: 'danger' }
-                : { label: `${orgId} · ${period}`, tone: 'data' }} />
+                : { label: `${orgName} · ${period}`, tone: 'data' }} />
 
           {/* ── 조회 조건 ─────────────────────────────────────────────── */}
           <Panel kicker="SCOPE" title="조직 · 기간">
             <div className="panel-body">
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <input className="afs-input" style={{ width: 180 }} value={orgId}
-                  onChange={(e) => setOrgId(e.target.value)} placeholder="조직 코드" />
+                <select className="afs-select" style={{ width: 220 }} value={orgId}
+                  disabled={orgNodes.status !== 'ok' || planningScopes.length === 0}
+                  aria-label="계획 조직"
+                  onChange={(e) => { setOrgId(e.target.value); setPicked([]); }}>
+                  <option value="">— 조직 선택 —</option>
+                  {planningScopes.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
                 <input className="afs-input" style={{ width: 160 }} value={period}
                   onChange={(e) => setPeriod(e.target.value)} placeholder="기간 (2027 / 2027-03)" />
-                <button className="primary-button" onClick={load} disabled={busy}>
+                <button className="primary-button" onClick={load} disabled={busy || !orgReady}>
                   {busy ? '계산 중…' : '계산'}
                 </button>
               </div>
+              {orgNodes.status !== 'ok' && (
+                <Banner tone="error" title="조직 기준정보를 불러오지 못했습니다">
+                  조직 코드를 직접 입력해 우회할 수 없습니다. 조직 기준정보를 복구한 뒤 다시 시도하십시오.
+                </Banner>
+              )}
+              {orgNodes.status === 'ok' && planningScopes.length === 0 && (
+                <div className="empty-note" style={{ marginTop: 8 }}>
+                  계획 범위와 연결된 조직이 없습니다. 조직 기준정보에서 운영 범위를 먼저 연결하십시오.
+                </div>
+              )}
             </div>
           </Panel>
 
@@ -158,7 +206,7 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
                 {apprV && apprV.integrity?.intact === false && (
                   <div style={{ marginBottom: 6 }}>
                     <b>승인 후 값이 변경되었습니다.</b> 상태는 <code>APPROVED</code>
-                    ({apprV.approved_by}, {apprV.approved_at?.slice(0, 10)})이지만 승인받은
+                    ({approverName(apprV.approved_by)}, {apprV.approved_at?.slice(0, 10)})이지만 승인받은
                     내용과 다릅니다 — 재승인이 필요합니다.
                     <div className="afs-muted" style={{ fontFamily: 'monospace', fontSize: 12 }}>
                       승인 시점 {apprV.integrity.approved_fingerprint} → 현재{' '}
@@ -168,7 +216,7 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
                 )}
                 {rollV?.has_conflict && rollV.conflicts.map((c) => (
                   <div key={`${c.account_code}-${c.period}`} style={{ marginBottom: 4 }}>
-                    <b>이중 계상 위험</b> — {c.account_code}/{c.period}: 합계 행{' '}
+                    <b>이중 계상 위험</b> — {accountName(c.account_code)}/{c.period}: 합계 행{' '}
                     {_n(c.total_row_amount)} 과 상세 {c.detail_rows}건(합 {_n(c.detail_sum)})이
                     함께 있습니다. 단순 합산하면 <b>{_n(c.naive_sum)}</b> 이 됩니다.
                     {!c.matches && <span> (합계와 상세가 일치하지도 않습니다)</span>}
@@ -195,7 +243,7 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
               <Panel kicker="APPROVAL" title="승인 상태">
                 <div className="panel-body">
                   <p className="afs-success-fg" style={{ fontSize: 13 }}>
-                    ✅ {apprV.approved_by} 승인 ({apprV.approved_at?.slice(0, 10)}) ·
+                    ✅ {approverName(apprV.approved_by)} 승인 ({apprV.approved_at?.slice(0, 10)}) ·
                     승인 시점 값과 동일합니다
                     <span className="afs-muted" style={{ fontFamily: 'monospace' }}>
                       {' '}[{apprV.integrity.approved_fingerprint}]
@@ -217,16 +265,15 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
                   // ★★★ 이 파일 주석이 «조용한 거짓말» 이라 부른 바로 그 자리다.
                   <EmptyOrError state={scenarios.status} error={scenarios.error}
                     emptyText="등록된 시나리오가 없습니다." onRetry={loadLists} />
-                ) : (scenarios.value || []).length === 0 ? (
+                ) : shownScenarios.length === 0 ? (
                   <p className="afs-muted" style={{ fontSize: 13 }}>등록된 시나리오가 없습니다.</p>
                 ) : (
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {(scenarios.value || []).map((s) => (
+                    {shownScenarios.map((s) => (
                       <button key={s.scenario_id} onClick={() => toggle(s.scenario_id)}
                         className={picked.includes(s.scenario_id)
                           ? 'primary-button' : 'secondary-button'}>
-                        {s.name}{' '}
-                        <span style={{ opacity: .7 }}>({s.scenario_id})</span>
+                        {s.name || '이름 미등록 시나리오'}
                       </button>
                     ))}
                   </div>
@@ -284,7 +331,7 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
                           <tbody>
                             {cmpV.scenarios.map((s) => (
                               <tr key={s.scenario_id}>
-                                <td>{s.scenario_id}</td>
+                                <td>{scenarioNames.get(s.scenario_id) || '이름 미등록 시나리오'}</td>
                                 <td className="num">{_n(s.operating_profit)}</td>
                                 <td className="num"><b>{_n(s.net_profit)}</b></td>
                                 <td className={`num ${s.delta_net >= 0 ? 'afs-success-fg' : 'afs-danger-fg'}`}>
@@ -356,7 +403,7 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
                           <tbody>
                             {(vrV!.by_account || []).map((r) => (
                               <tr key={r.account_code}>
-                                <td>{r.account_code}</td>
+                                <td>{accountName(r.account_code)}</td>
                                 <td className="num">{_n(r.plan)}</td>
                                 <td className="num">{_n(r.actual)}</td>
                                 {/* 없는 값은 0 이 아니라 «미입력» 이다 */}
@@ -447,7 +494,7 @@ export function PlanningPanel({ onClose, page = false }: { onClose: () => void; 
                           <small>{(btV!.bias ?? 0) > 0 ? '과대추정 경향'
                             : (btV!.bias ?? 0) < 0 ? '과소추정 경향' : ''}</small></div>
                         {btV!.worst && (
-                          <div><span>최악 계정</span><b>{btV!.worst.account_code}</b>
+                          <div><span>최악 계정</span><b>{accountName(btV!.worst.account_code)}</b>
                             <small>{btV!.worst.pct_error}%</small></div>
                         )}
                       </div>

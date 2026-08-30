@@ -29,7 +29,7 @@ export default class ErrorBoundary extends Component<EBProps, EBState> {
               padding: "34px 36px", border: "1px solid var(--surface-border)", borderRadius: 12,
               background: "var(--surface-card)", boxShadow: "var(--surface-shadow)",
             }}>
-            <img src="/brand/laxs-logo-primary-on-white-v3.png" alt="LAXS"
+            <img src="/brand/laxs-logo-primary-on-white-v5.png" alt="LAXS"
               style={{ display: "block", width: 250, maxWidth: "82%", height: "auto", margin: "0 auto 4px" }} />
             <Banner tone="error" title="현재 화면을 표시할 수 없습니다">
               화면 처리 중 오류가 발생했습니다. 저장된 업무 데이터가 삭제된 것은 아닙니다.

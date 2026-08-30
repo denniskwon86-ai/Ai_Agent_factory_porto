@@ -106,11 +106,11 @@ export default function HOTLInput() {
   const handleSubmit = async () => {
     // 승인/재개(resume)에만 태스크가 필요 - 슈퍼바이저 대화(자비스)는 태스크·가동 여부와 무관하게 가능
     if (isWaitingForHuman && !currentTask) {
-      alert("🚨 재개할 타겟 태스크(Task ID)를 찾을 수 없습니다.");
+      alert("🚨 재개할 작업을 찾을 수 없습니다. 작업 목록을 새로 확인해 주십시오.");
       return;
     }
     if (!currentProjectId) {
-      alert("🚨 현재 프로젝트 ID를 찾을 수 없습니다.");
+      alert("🚨 현재 프로젝트를 확인할 수 없습니다. 프로젝트를 다시 선택해 주십시오.");
       return;
     }
     if (!isWaitingForHuman && !feedback.trim()) {

@@ -45,13 +45,23 @@ export type MasterRecord = {
 };
 
 export type RecordInput = {
-  master_code: string;
   type_id: string;
   name: string;
   attributes?: Record<string, unknown>;
   domains?: string[];
   aliases?: string[];
   is_core?: boolean;
+  rationale?: string;
+};
+
+export type MasterRecordProposal = RecordInput & {
+  proposal_id: string;
+  status: 'pending' | 'approved' | 'rejected';
+  proposed_by: string;
+  reviewed_by: string;
+  review_reason: string;
+  reviewed_at: string;
+  created_at: string;
 };
 
 export type GroundingPreview = {
@@ -63,7 +73,7 @@ export type GroundingPreview = {
 export type CsvImportReport = {
   imported: number;
   total: number;
-  failed: { row: number; master_code?: string; error: string }[];
+  failed: { row: number; error: string }[];
 };
 
 export type MasterList<T> = {
@@ -113,7 +123,18 @@ export const masterDataApi = {
   },
   record: (code: string) =>
     req<MasterRecord>('GET', `/api/v1/master/records/${encodeURIComponent(code)}`),
-  saveRecord: (body: RecordInput) => req<MasterRecord>('POST', '/api/v1/master/records', body),
+  proposeRecord: (body: RecordInput) =>
+    req<MasterRecordProposal>('POST', '/api/v1/master/records/proposals', body),
+  reviseRecord: (masterCode: string, body: Omit<RecordInput, 'type_id' | 'rationale'>) =>
+    req<MasterRecord>('PUT', `/api/v1/master/records/${encodeURIComponent(masterCode)}`, body),
+  proposals: (status: 'pending' | 'approved' | 'rejected' | 'all' = 'pending') =>
+    req<MasterRecordProposal[]>('GET', `/api/v1/master/records/proposals?status=${status}`),
+  approveProposal: (proposalId: string, reason = '') =>
+    req<{ proposal: MasterRecordProposal; record: MasterRecord }>(
+      'POST', `/api/v1/master/records/proposals/${encodeURIComponent(proposalId)}/approve`, { reason }),
+  rejectProposal: (proposalId: string, reason: string) =>
+    req<MasterRecordProposal>(
+      'POST', `/api/v1/master/records/proposals/${encodeURIComponent(proposalId)}/reject`, { reason }),
   retireRecord: (code: string) =>
     req<unknown>('DELETE', `/api/v1/master/records/${encodeURIComponent(code)}`),
   addAlias: (code: string, alias: string) =>

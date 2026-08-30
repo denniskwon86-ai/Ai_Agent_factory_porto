@@ -305,6 +305,7 @@ CONTRACT_SCHEMA: Dict[str, Any] = {
                 "approved_by": {"type": "string"},
                 "approved_at": {"type": "string"},
                 "decision_ledger_id": {"type": "string"},
+                "supersedes_fingerprint": {"type": "string", "pattern": FINGERPRINT_PATTERN},
             },
         },
     },

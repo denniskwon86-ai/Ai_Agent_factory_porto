@@ -273,6 +273,36 @@
   .le-canvas .workspace{grid-template-columns:252px minmax(0,1fr) 320px}
 }
 
+/* ★ [2026-08-28 실측] 800px 안팎의 인앱 브라우저에서 가운데 캔버스가 226px까지
+ * 줄어들면 `.focus-copy` 는 47px인데 `.impact` 는 235px을 유지했다. 그 결과 영향 카드가
+ * «자세히 보고 처리» 버튼 위에 그려져, 버튼이 보이면서도 실제 클릭 대상은 기말현금 카드가
+ * 되는 결함이 생겼다. 좁은 화면에서는 좌·우 레일을 함께 줄이고, 정량 영향은 상세 서랍에서
+ * 보도록 접는다. 판단 제목과 처리 행동을 먼저 보존하는 순서다. */
+@media(max-width:900px){
+  .le-canvas .workspace{grid-template-columns:180px minmax(0,1fr) 260px}
+  .le-canvas .focus-panel{
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:minmax(0,1fr) 72px;
+    height:286px;
+  }
+  .le-canvas .focus-copy{padding:12px}
+  .le-canvas .focus-actions{gap:5px}
+  .le-canvas .focus-actions button{padding:7px 8px;font-size:11px}
+  .le-canvas .impact{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    border-left:0;
+    border-top:1px solid #dfe1e5;
+  }
+  .le-canvas .impact div{
+    min-width:0;
+    padding:8px 7px;
+    border-bottom:0;
+  }
+  .le-canvas .impact span{font-size:9.5px}
+  .le-canvas .impact b{font-size:13px}
+}
+
 /* ★ [2026-08-25] 영향 4칸이 왜 비었는지 한 줄. 시안에는 없다 — 시안은 표본값이 채워진
  *   상태를 그렸기 때문이다. 값이 없을 때 **이유가 없으면 고장으로 읽힌다**.
  * ⚠️ 눈에 튀게 만들지 않는다. 이것은 경고가 아니라 «다음에 할 일» 이다. */

@@ -126,6 +126,10 @@ def test_업무_ID_로_실제_범위를_찾아낸다(indexed):
     assert res.snapshot_id == snap["snapshot_id"]
     assert "line=2" in res.row_evidence
     assert res.data_kind == m.DATA_KIND_DEMO
+    #: 표시명도 **같은 인증판 원본**에서 온다. 업무 ID 를 화면 이름으로 재사용하지 않는다.
+    assert res.display_name.startswith("선적 1")
+    assert SHIP.object_id not in res.display_name
+    assert len(res.display_fingerprint) == 64
 
 
 def test_인증판_ID_를_넣으면_찾지_못한다(indexed):

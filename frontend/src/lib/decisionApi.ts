@@ -51,6 +51,18 @@ export type DecisionCase = {
   note?: string;
 };
 
+export type DecisionSourceOption = {
+  /** 내부 결속용이며 화면에 문자열로 표시하지 않는다. */
+  run_id: string;
+  label: string;
+  scenario_label: string;
+  baseline_label: string;
+  completed_at: string;
+  engine_version: string;
+  bindable: boolean;
+  blocked_reason: string;
+};
+
 export type ViewSection = { key: string; label: string; value: any; missing: boolean };
 
 export type RenderedView = {
@@ -71,9 +83,11 @@ export type ViewsBundle = {
 };
 
 export const decisionApi = {
+  sources: () => req<DecisionSourceOption[]>('GET', '/api/v1/decisions/sources'),
+
   create: (runId: string, body: {
     question: string; package: Record<string, any>; evidence?: Record<string, any>;
-    baseline_id?: string; scenario_id?: string; scope_id?: string; due_at?: string;
+    due_at?: string;
   }) => req<DecisionCase>(
     'POST', `/api/v1/simulations/${encodeURIComponent(runId)}/decision-cases`, body),
 

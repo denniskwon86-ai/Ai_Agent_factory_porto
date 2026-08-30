@@ -232,11 +232,11 @@ export function JarvisRail({
                   «무엇을 보고 있는가»는 위 `jarvis-context` 제목이 이미 한국어로 말한다. */}
               <div>
                 <dt>선택한 객체</dt>
-                {/* ⚠️ `selected_object_type`(`master_type` 등)도 내부 식별자다. 괄호로 붙여 놓으면
-                    사용자에게 뜻 없는 영문이 하나 더 늘어난다. 식별자는 **id 하나**로 충분하다.
-                    선택이 없다는 것은 숨기지 않는다 — 숨기면 사용자는 객체별 답을 기대한다. */}
+                {/* ⚠️ `selected_object_type`과 `selected_object_id`는 서버 결속용 내부 식별자다.
+                    화면에는 사람용 이름만 표시한다. 선택이 없다는 사실은 숨기지 않는다. */}
                 <dd>{context.selected_object_id
-                  || '없음 — 목록에서 하나를 고르면 그 객체를 기준으로 답합니다'}</dd>
+                  ? (context.selected_object_label || contextTitle)
+                  : '없음 — 목록에서 하나를 고르면 그 객체를 기준으로 답합니다'}</dd>
               </div>
               {!!context.available_actions?.length && (
                 <div>

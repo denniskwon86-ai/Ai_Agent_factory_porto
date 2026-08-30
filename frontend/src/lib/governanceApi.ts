@@ -189,6 +189,9 @@ export type EcmNode = {
 };
 
 export type FlatNode = { node_id: string; label: string; depth: number; readable: boolean };
+export type OrgNodeOption = {
+  node_id: string; code: string; label: string; depth: number; readable: boolean;
+};
 
 export function flattenTree(roots: EcmNode[]): FlatNode[] {
   const out: FlatNode[] = [];
@@ -206,4 +209,20 @@ export async function fetchOrgNodes(): Promise<FlatNode[]> {
   } catch {
     return []; // ECM 미도입 환경 — 범위 선택 없이 전체를 본다
   }
+}
+
+/** 계산·기준정보처럼 과거 조직 코드를 조회키로 쓰는 화면용 별칭 표.
+ * 실패를 빈 목록으로 접지 않는다. 빈 목록이면 «조직 없음», 예외면 «정본 조회 실패»다. */
+export async function fetchOrgNodeOptions(): Promise<OrgNodeOption[]> {
+  const roots = await get<EcmNode[]>('/api/v1/enterprise-context/tree');
+  const out: OrgNodeOption[] = [];
+  const walk = (node: EcmNode, depth: number) => {
+    out.push({
+      node_id: node.node_id, code: node.code,
+      label: node.name_ko || '이름 미등록 조직', depth, readable: node.readable,
+    });
+    (node.children || []).forEach((child) => walk(child, depth + 1));
+  };
+  roots.forEach((root) => walk(root, 0));
+  return out;
 }

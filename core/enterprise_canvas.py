@@ -38,6 +38,11 @@ from typing import Any, Dict, List, Optional
 NORMAL = "normal"
 ATTENTION = "attention"
 DECISION_REQUIRED = "decision_required"
+
+#: 경영 홈은 회사가 무엇을 결정하고 실행할 수 있는지 보여 주는 자리다.
+#: 개별 Shadow 비교의 기술적 진단은 이력을 보존하되 Shadow Mode 화면에서 다룬다.
+#: 이를 의사결정 대기열에 올리면 검증용 입력 오류가 회사의 대표 안건처럼 보인다.
+HOME_EXCLUDED_KINDS = frozenset({"shadow_incomparable"})
 BLOCKED = "blocked"
 UNKNOWN = "unknown"
 
@@ -148,6 +153,8 @@ def build(*, scope_node_id: str = "", tenant_id: str = "", entity_mode: str = ""
     queue: List[Dict[str, Any]] = []
     for name in ("my_decisions", "blocked", "data_health", "programs"):
         for it in ((sections.get(name) or {}).get("items") or []):
+            if str(it.get("kind") or "") in HOME_EXCLUDED_KINDS:
+                continue
             queue.append({**it, "section": name})
 
     #: ── 도메인 노드 ────────────────────────────────────────────────────

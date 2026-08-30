@@ -32,6 +32,32 @@ export type ExternalIndicator = {
   origin: string;
 };
 
+export type ExternalIndicatorProposalInput = {
+  name: string;
+  category?: string;
+  canonical_term?: string;
+  unit?: string;
+  frequency?: string;
+  required_grade: 'gold' | 'silver' | 'bronze';
+  acceptable_latency?: string;
+  source_hint?: string;
+  purpose?: string;
+  gap_impact?: string;
+  next_action?: string;
+  rationale?: string;
+};
+
+export type ExternalIndicatorProposal = ExternalIndicatorProposalInput & {
+  proposal_id: string;
+  fingerprint: string;
+  status: 'pending' | 'approved' | 'rejected';
+  proposed_by: string;
+  reviewed_by: string;
+  review_reason: string;
+  reviewed_at: string;
+  created_at: string;
+};
+
 export type ExternalObservation = {
   observation_id: string;
   observed_at: string;
@@ -173,7 +199,7 @@ export type ResearchProfile = {
 };
 
 export type ResearchProfileInput = Omit<ResearchProfile,
-  'status' | 'approved_by' | 'approved_at' | 'fingerprint' | 'updated_at'>;
+  'profile_id' | 'status' | 'approved_by' | 'approved_at' | 'fingerprint' | 'updated_at'>;
 
 export type ResearchJob = {
   job_id: string;
@@ -209,6 +235,18 @@ export const externalIntelligenceApi = {
   readiness: () => req<ExternalReadiness>('GET', '/api/v1/external/readiness'),
   collectable: () => req<ExternalCollectable>('GET', '/api/v1/external/collectable'),
   indicators: () => req<ExternalIndicator[]>('GET', '/api/v1/external/indicators'),
+  indicatorProposals: (status: 'pending' | 'approved' | 'rejected' | 'all' = 'pending') =>
+    req<ExternalIndicatorProposal[]>('GET', `/api/v1/external/indicators/proposals?status=${status}`),
+  proposeIndicator: (body: ExternalIndicatorProposalInput) =>
+    req<ExternalIndicatorProposal>('POST', '/api/v1/external/indicators/proposals', body),
+  approveIndicatorProposal: (proposalId: string, expectedFingerprint: string, reason = '') =>
+    req<{ proposal: ExternalIndicatorProposal; indicator: ExternalIndicator }>(
+      'POST', `/api/v1/external/indicators/proposals/${encodeURIComponent(proposalId)}/approve`,
+      { expected_fingerprint: expectedFingerprint, reason }),
+  rejectIndicatorProposal: (proposalId: string, expectedFingerprint: string, reason: string) =>
+    req<ExternalIndicatorProposal>(
+      'POST', `/api/v1/external/indicators/proposals/${encodeURIComponent(proposalId)}/reject`,
+      { expected_fingerprint: expectedFingerprint, reason }),
   sources: () => req<ExternalSource[]>('GET', '/api/v1/external/sources'),
   registerSource: (body: ExternalSourceInput) => req<ExternalSource>(
     'POST', '/api/v1/external/sources', body),

@@ -54,6 +54,8 @@ export type ReferenceAsset = {
   approved_sha256?: string;
   /** 서버 판정 — `''`(정상) · `changed`(승인 후 변경) · `unknown`(승인 당시 해시 없음). */
   approval_drift?: '' | 'changed' | 'unknown';
+  /** 승인 문자열이 아니라 원문·조직 문맥·Decision Ledger까지 결속됐는지. */
+  approval_binding?: 'NOT_APPROVED' | 'REAPPROVAL_REQUIRED' | 'LEDGER_BOUND';
   notes?: string;
   tags?: string[];
 };

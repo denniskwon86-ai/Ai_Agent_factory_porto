@@ -35,6 +35,8 @@ import {
   type GovCapabilities, type GovList, type GovUsage,
 } from '../lib/agentGovernanceApi';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
+import { orgApi, type OrgUser } from '../lib/orgApi';
+import { fetchOrgNodeOptions, type OrgNodeOption } from '../lib/governanceApi';
 import { AgentAssetWizard } from './AgentAssetWizard';
 
 const KINDS: { id: AssetKindPath; label: string }[] = [
@@ -76,6 +78,8 @@ export function AgentGovernancePanel({ onClose, page = false }: { onClose: () =>
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   const [wizard, setWizard] = useState(false);
+  const [orgNodes, setOrgNodes] = useState<OrgNodeOption[]>([]);
+  const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
 
   // ⚠️ 승인·폐기·승격·복사는 다른 사람에게 영향을 준다 — 화면 안에서 한 번 확인한다.
   const confirmApprove = useConfirm<GovAsset>();
@@ -123,6 +127,12 @@ export function AgentGovernancePanel({ onClose, page = false }: { onClose: () =>
   useEffect(() => { loadCaps(); }, [loadCaps]);
   useEffect(() => { loadList(); }, [loadList]);
   useEffect(() => { loadUsage(); }, [loadUsage]);
+  useEffect(() => {
+    // 표시명 조회 실패가 자산 목록을 죽이지는 않는다. 다만 ID로 물러나지 않고
+    // «이름 미등록»으로 보여, 정본 결속 누락을 숨기지 않는다.
+    fetchOrgNodeOptions().then(setOrgNodes).catch(() => setOrgNodes([]));
+    orgApi.users().then((r) => setOrgUsers(r.rows)).catch(() => setOrgUsers([]));
+  }, []);
 
   const c = caps.value;
   const d = list.value;
@@ -194,6 +204,15 @@ export function AgentGovernancePanel({ onClose, page = false }: { onClose: () =>
   /** 이 자산의 사용 현황. ⚠️ `undefined` 는 «아직 못 받았다» 이고 `countable=false` 는
    *  «셀 수 없다» 다. 둘 다 «0개가 쓴다» 가 아니다. */
   const usageOf = (a: GovAsset): GovAssetUsage | undefined => usage?.usage?.[a.asset_id];
+  const scopeName = (id?: string) => {
+    if (!id) return '미지정';
+    const found = orgNodes.find((n) => n.node_id === id || n.code === id);
+    return found?.label || '이름 미등록 조직';
+  };
+  const personName = (id?: string) => {
+    if (!id) return '없음';
+    return orgUsers.find((u) => u.user_id === id)?.display_name || '이름 미등록 사용자';
+  };
 
   /** 카드·확인 대화가 함께 쓰는 한 문장. 세 상태를 **다른 말**로 가른다. */
   const usageText = (a: GovAsset): string => {
@@ -314,8 +333,7 @@ export function AgentGovernancePanel({ onClose, page = false }: { onClose: () =>
                   <b>{ctx.entityMode || 'REAL'}</b>
                   {/* ⚠️ 없는 값을 지어내지 않는다 — `CompanyContextBar`·`HubDialog` 와 같은 수정. */}
                   <small>
-                    {ctx.scopeNodeId || '내 권한 범위 전체'}
-                    {ctx.tenantId ? ` · ${ctx.tenantId}` : ''}
+                    {ctx.scopeNodeId ? scopeName(ctx.scopeNodeId) : '내 권한 범위 전체'}
                   </small>
                 </div>
                 <div>
@@ -429,7 +447,7 @@ export function AgentGovernancePanel({ onClose, page = false }: { onClose: () =>
                         padding: '10px 12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8,
                         flexWrap: 'wrap' }}>
-                        <b style={{ fontSize: 14 }}>{a.name_ko || a.asset_id}</b>
+                        <b style={{ fontSize: 14 }}>{a.name_ko || '이름 미등록 자산'}</b>
                         <span className={`state-chip ${STATUS_TONE[a.status] || 'muted'}`}>
                           {STATUS_KO[a.status] || a.status}
                         </span>
@@ -445,17 +463,17 @@ export function AgentGovernancePanel({ onClose, page = false }: { onClose: () =>
                       )}
                       {/* §8.4 — 카드가 실어야 하는 것들. **없는 값은 «미상» 으로 쓴다.** */}
                       <p className="afs-muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
-                        소유 조직 {a.owner_scope_id || '미지정'}
+                        소유 조직 {scopeName(a.owner_scope_id)}
                         {' · '}버전 {a.version_count || a.current_version || 0}
-                        {' · '}승인자 {a.approved_by || '없음'}
-                        {' · '}작성 {a.created_by || '미상'}
+                        {' · '}승인자 {personName(a.approved_by)}
+                        {' · '}작성 {personName(a.created_by)}
                         {/* ★ 「0개가 쓴다」와 「아직 모른다」를 **다른 말**로 가른다 —
                             둘을 같은 «0» 으로 쓰면 폐기 판단이 눈을 감는다. */}
                         {' · '}{usageText(a)}
                       </p>
                       {a.promotion_requested_by && (
                         <p className="afs-warn-fg" style={{ fontSize: 12, margin: '4px 0 0' }}>
-                          ⏳ 전사 승격 요청됨 — {a.promotion_requested_by} · AI 거버넌스 관리자가
+                          ⏳ 전사 승격 요청됨 — {personName(a.promotion_requested_by)} · AI 거버넌스 관리자가
                           확정해야 전사에 공개됩니다(요청만으로는 공개되지 않습니다).
                         </p>
                       )}
@@ -558,7 +576,7 @@ export function AgentGovernancePanel({ onClose, page = false }: { onClose: () =>
                       {confirmPublish.open && confirmPublish.target?.asset_id === a.asset_id && (
                         <ConfirmInline open danger={false} title="이 초안을 조직에 공개합니다"
                           body={<>
-                            «{a.name_ko}» 를 <b>{ctx.scopeNodeId || '현재 조직'}</b> 소유로
+                            «{a.name_ko}» 를 <b>{ctx.scopeNodeId ? scopeName(ctx.scopeNodeId) : '현재 조직'}</b> 소유로
                             <b> 옮깁니다</b> — 복사가 아니므로 개인 초안 목록에서는 사라집니다.
                             {a.status === 'APPROVED' && (
                               <><br />⚠️ 이 자산은 승인돼 있는데, 조직에 공개하면

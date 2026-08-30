@@ -4,6 +4,8 @@ export type OntologyObject = {
   namespace: string;
   object_type: string;
   object_id: string;
+  display_name?: string;
+  display_fingerprint?: string;
 };
 
 export type ModelContractStatus = {
@@ -46,6 +48,31 @@ export type OntologyModelStatus = {
   status: 'NOT_INSTALLED' | 'READY' | 'NOT_READY' | string;
   contracts: ModelContractStatus[];
   count: number;
+};
+
+export type OntologyNamespaceStatus = {
+  namespace: string;
+  label: string;
+  contract_object_type_count: number;
+  resolver_object_type_count: number;
+  display_object_type_count: number;
+  materialized_object_type_count: number;
+  resolver_status: 'READY' | 'PARTIAL' | 'BLOCKED' | 'CONTRACT_REQUIRED' | string;
+  display_status: 'READY' | 'PARTIAL' | 'BLOCKED' | 'CONTRACT_REQUIRED' | string;
+  message: string;
+  next_action: string;
+};
+
+export type OntologyRuntimeStatus = {
+  status: 'READY' | 'PARTIAL' | 'BLOCKED' | string;
+  namespace_count: number;
+  resolver_available_namespace_count: number;
+  fully_ready_namespace_count: number;
+  contract_object_type_count: number;
+  resolver_object_type_count: number;
+  display_object_type_count: number;
+  materialized_object_type_count: number;
+  namespaces: OntologyNamespaceStatus[];
 };
 
 export type OntologyObjectList = {
@@ -145,6 +172,7 @@ export type OntologyRelationProposal = {
 
 export const ontologyApi = {
   modelStatus: () => req<OntologyModelStatus>('GET', '/api/v1/ontology/model/status'),
+  runtimeStatus: () => req<OntologyRuntimeStatus>('GET', '/api/v1/ontology/runtime/status'),
   modelContract: (contractId: string, version = '') => {
     const q = new URLSearchParams();
     if (version) q.set('contract_version', version);

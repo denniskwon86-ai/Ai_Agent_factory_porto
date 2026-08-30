@@ -215,6 +215,8 @@ export interface OntologyObject {
   namespace: string;
   object_type: string;
   object_id: string;
+  display_name?: string;
+  display_fingerprint?: string;
 }
 
 export interface ObjectList {
@@ -248,10 +250,19 @@ export interface CalcResult {
   segment_model_versions: Record<string, string>;
   used_snapshots: Record<string, string>;
   path_model_version?: string;
-  blocked?: { public_reason: string; internal_reasons: string[] };
+  blocked?: {
+    reason_code: string;
+    public_reason: string;
+    reasons: Array<{
+      code: string;
+      category: 'approval' | 'data' | 'baseline' | string;
+      message: string;
+      next_action: string;
+    }>;
+  };
 }
 
-export async function runPathCalculation(body: {
+export interface PathCalcBody {
   roots: OntologyObject[];
   target_types: string[];
   relation_types: string[];
@@ -259,13 +270,45 @@ export async function runPathCalculation(body: {
   instance_id: string;
   path_fingerprint?: string;
   assumptions?: Record<string, unknown>;
-}) {
+}
+
+export async function runPathCalculation(body: PathCalcBody) {
   return unwrap<CalcResult>(
     await apiFetch(`${BASE}/path`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }), '경로 계산');
+}
+
+export interface CalculationDiagnostic {
+  reason_code: string;
+  internal_reasons: string[];
+  identifiers: {
+    query_id: string;
+    path_fingerprint: string;
+    request_fingerprint: string;
+    required_relation_ids: string[];
+  };
+  diagnostic_fingerprint: string;
+}
+
+export async function revealPathDiagnostic(body: PathCalcBody, purpose: string) {
+  return unwrap<CalculationDiagnostic>(
+    await apiFetch(`${BASE}/path/diagnostics/reveal`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, purpose,
+        acknowledgement: 'SHOW_INTERNAL_DIAGNOSTIC' }),
+    }), '내부 진단');
+}
+
+export async function copyPathDiagnostic(body: PathCalcBody, purpose: string) {
+  return unwrap<{ diagnostic_fingerprint: string; copy_text: string }>(
+    await apiFetch(`${BASE}/path/diagnostics/copy`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, purpose,
+        acknowledgement: 'COPY_INTERNAL_DIAGNOSTIC' }),
+    }), '내부 진단 복사용 본문');
 }
 
 

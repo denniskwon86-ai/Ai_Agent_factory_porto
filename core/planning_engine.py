@@ -32,7 +32,6 @@ LLM 의 몫은 가정 후보 제안 · 결과 설명 · 이상 탐지 **보조**
 """
 import hashlib
 import json
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -188,16 +187,24 @@ def run_scenario(scenario_id: str, org_id: str, period: str,
     # ★ [§17.2 기능 5] 동인 가정을 계정 가정으로 펼친 뒤 한 경로로 합류시킨다.
     #   두 형태를 따로 처리하면 한쪽에만 적용되는 규칙이 생긴다.
     from core.planning_drivers import expand_assumptions
-    expanded, driver_warnings = expand_assumptions(assumptions)
+    expanded, driver_warnings = expand_assumptions(
+        assumptions, tenant_id=str(scn["tenant_id"] or ""),
+        scope_node_id=str(scn["owner_organization_id"] or ""),
+        entity_mode=str(scn["entity_mode"] or ""))
     applied, unapplied = apply_assumptions(baseline, expanded)
     accounts = _accounts_by_code()
     before = compute_pl(baseline, accounts)
     after = compute_pl(applied, accounts)
 
-    run_id = uuid.uuid4().hex[:16]
+    # 실행과 기준선의 내부 식별자는 사용자가 정하지 않는다. 표시명은 시나리오명·기간으로
+    # 만들고, 이 값은 DB·원장 결속에만 쓴다.
+    from core.system_ids import allocate
+    run_id = allocate("simulation_run")[0]
+    baseline_id = allocate("baseline")[0]
     fingerprint = input_fingerprint(baseline, assumptions)
     result = {
         "run_id": run_id,
+        "baseline_id": baseline_id,
         "scenario_id": scenario_id,
         "org_id": org_id,
         "period": period,
@@ -229,8 +236,19 @@ def run_scenario(scenario_id: str, org_id: str, period: str,
             "INSERT INTO simulation_runs(run_id,scenario_id,engine_version,input_hash,status,"
             "started_at,completed_at,metrics_json) VALUES(?,?,?,?,?,?,?,?)",
             (run_id, scenario_id, ENGINE_VERSION, fingerprint, "completed", _now(), _now(),
-             json.dumps({"net_profit": after["net_profit"],
-                         "operating_profit": after["operating_profit"]}, ensure_ascii=False)))
+             json.dumps({
+                 "net_profit": after["net_profit"],
+                 "operating_profit": after["operating_profit"],
+                 # Decision Package 는 이 봉투만 정본으로 읽는다. 화면이 기준선·시나리오
+                 # 식별자를 따로 적어 보내게 두면 서로 다른 실행을 조합할 수 있다.
+                 "baseline_id": baseline_id,
+                 "org_id": org_id,
+                 "period": period,
+                 "baseline_kind": baseline_kind,
+                 "complete": bool(before.get("complete") and after.get("complete")),
+                 "unapplied_assumptions": list(unapplied),
+                 "driver_warnings": list(driver_warnings),
+             }, ensure_ascii=False)))
         conn.commit()
     finally:
         conn.close()

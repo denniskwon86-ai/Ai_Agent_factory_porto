@@ -76,6 +76,7 @@ function AppShell() {
   const currentProjectId = useFactoryStore((state) => state.currentProjectId);
   const fetchProjects = useFactoryStore((state) => state.fetchProjects);
   const createProject = useFactoryStore((state) => state.createProject);
+  const createMegaProject = useFactoryStore((state) => state.createMegaProject);
   const deleteProject = useFactoryStore((state) => state.deleteProject);
   const setCurrentProject = useFactoryStore((state) => state.setCurrentProject);
   const statePayload = useFactoryStore((state) => state.state);
@@ -601,7 +602,10 @@ function AppShell() {
           onClose={() => setShowCollaboration(false)}
           initialView={collaborationInitialView}
           // 라이브러리에 있는 릴리스를 그대로 선택지로 넘긴다 — 화면이 id 를 지어내지 않는다.
-          releaseIds={releases.map((r: any) => r.release_id).filter(Boolean)}
+          releaseOptions={releases.filter((r: any) => r.release_id).map((r: any) => ({
+            id: r.release_id,
+            label: r.display_name || r.project_name || '이름 미등록 앱',
+          }))}
         />
       )}
       {showCrosswalk && (
@@ -623,7 +627,12 @@ function AppShell() {
         <ShadowModePanel onClose={() => setShowShadow(false)} />
       )}
       {showWorkspace && (
-        <WorkspacePanel onClose={() => setShowWorkspace(false)} />
+        <WorkspacePanel onClose={() => setShowWorkspace(false)}
+          releaseOptions={releases.filter((r: any) => r.release_id).map((r: any) => ({
+            id: r.release_id,
+            label: r.display_name || r.project_name || '이름 미등록 릴리스',
+            projectId: r.project_id || '',
+          }))} />
       )}
       {/* [사용자 결정 2026-07-30] 프로그램 사용여부 — 삭제 대신 비활성화 (IT 관리자) */}
       {adminProgram && (
@@ -707,7 +716,12 @@ function AppShell() {
                           </OperationsGovernanceShell>
                         : space === 'workspace'
                           ? <OperationsGovernanceShell kind="workspace">
-                              <WorkspacePanel page onClose={() => setSpace('operate')} />
+                              <WorkspacePanel page onClose={() => setSpace('operate')}
+                                releaseOptions={releases.filter((r: any) => r.release_id).map((r: any) => ({
+                                  id: r.release_id,
+                                  label: r.display_name || r.project_name || '이름 미등록 릴리스',
+                                  projectId: r.project_id || '',
+                                }))} />
                             </OperationsGovernanceShell>
                           : space === 'company'
                             ? <CompanySetupPanel page onClose={() => setSpace('enterprise')} />
@@ -939,7 +953,10 @@ function AppShell() {
           <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
             <CollaborationHub page initialView={collaborationInitialView}
               onClose={() => setSpace('enterprise')}
-              releaseIds={releases.map((r: any) => r.release_id).filter(Boolean)} />
+              releaseOptions={releases.filter((r: any) => r.release_id).map((r: any) => ({
+                id: r.release_id,
+                label: r.display_name || r.project_name || '이름 미등록 앱',
+              }))} />
           </main>
         </div>
         {overlays}
@@ -1022,11 +1039,13 @@ function AppShell() {
             onOpenDataPrep={() => { setBuildStart(false); setShowDataPrep(true); }}
             onCreate={async (r) => {
               const domains = r.masterDomains.split(',').map((x) => x.trim()).filter(Boolean);
-              const okDone = await createProject(r.projectId, r.templateId, r.packIds,
-                domains, r.mcpLiveGrounding);
-              if (okDone) {
+              const createdProjectId = r.isMega
+                ? await createMegaProject(r.projectName, r.templateId)
+                : await createProject(r.projectName, r.templateId, r.packIds,
+                    domains, r.mcpLiveGrounding);
+              if (createdProjectId) {
                 setBuildStart(false);
-                setCurrentProject(r.projectId);
+                setCurrentProject(createdProjectId);
               }
             }} />
         )}
@@ -1289,7 +1308,7 @@ export default function App() {
             padding: '34px 36px', border: '1px solid var(--surface-border)', borderRadius: 12,
             background: 'var(--surface-card)', boxShadow: 'var(--surface-shadow)', textAlign: 'center',
           }}>
-          <img src="/brand/laxs-logo-primary-on-white-v3.png" alt="LAXS"
+          <img src="/brand/laxs-logo-primary-on-white-v5.png" alt="LAXS"
             style={{ display: 'block', width: 250, maxWidth: '82%', height: 'auto', margin: '0 auto 4px' }} />
           <Banner tone="warn" title="서비스 연결을 확인할 수 없습니다">{offline}</Banner>
           <p className="afs-muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>

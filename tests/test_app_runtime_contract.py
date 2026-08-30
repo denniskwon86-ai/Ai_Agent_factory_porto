@@ -320,7 +320,10 @@ def test_changed_fingerprint_resets_approval_and_bumps_revision():
     d["datasets"][0]["allowed_actions"].append("delete")
     r = compile_contract(d, project_id="P1", task_id="T1", previous=prev)
     assert r.ok and r.fingerprint_changed
-    assert r.contract["approval"] == {"status": "PENDING"}
+    assert r.contract["approval"] == {
+        "status": "PENDING",
+        "supersedes_fingerprint": prev["semantic_fingerprint"],
+    }
     assert r.contract["status"] == "COMPILED"
     assert r.contract["revision"] == prev["revision"] + 1
 
@@ -697,7 +700,10 @@ def test_changing_the_source_intent_resets_approval():
                              "duplicate_entry_policy": arc.NO_DUPLICATE_CHECK_REQUIRED})
     r = compile_contract(d, project_id="P1", task_id="T1", previous=prev)
     assert r.ok and r.fingerprint_changed
-    assert r.contract["approval"] == {"status": "PENDING"}
+    assert r.contract["approval"] == {
+        "status": "PENDING",
+        "supersedes_fingerprint": prev["semantic_fingerprint"],
+    }
 
 
 def test_unclassified_is_never_declared_enterprise_actual():

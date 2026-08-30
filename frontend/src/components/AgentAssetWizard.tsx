@@ -19,13 +19,14 @@
 //
 // 마찬가지로 7단계 「테스트 실행」도 **실행하지 않는다.** 자산을 시험 실행하는 서버 경로가
 // 없으므로, 있는 척하는 버튼 대신 무엇을 어디서 확인해야 하는지를 적는다.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ConfirmInline, FormField } from '../design/DataFoundationShell';
 import { Banner, Panel } from '../design/HubShell';
 import { HubDialog } from '../design/HubDialog';
 import { MODEL_TIER_KO } from '../design/terms';
 import { getEnterpriseContext } from '../lib/api';
+import { fetchOrgNodes, type FlatNode } from '../lib/governanceApi';
 import {
   agentGovApi, type AssetKindPath, type GovAsset, type GovCapabilities,
 } from '../lib/agentGovernanceApi';
@@ -107,10 +108,15 @@ export function AgentAssetWizard({ kind, caps, onClose, onCreated }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [orgNodes, setOrgNodes] = useState<FlatNode[]>([]);
+
+  useEffect(() => { fetchOrgNodes().then(setOrgNodes).catch(() => setOrgNodes([])); }, []);
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
   const na = NA_STEPS[kind].includes(STEPS[i].id);
   const canPublishEnterprise = Boolean(caps?.can_publish_enterprise);
+  const ownerScopeLabel = orgNodes.find((node) => node.node_id === d.owner_scope_id)?.label
+    || (d.owner_scope_id === ctx.scopeNodeId ? '현재 실행 조직' : '소유 조직 미지정');
 
   /** 다음으로 갈 수 있는가. ⚠️ **막을 때는 이유를 함께 낸다** — 회색 버튼만 두면 사용자는
    *  화면이 고장난 것으로 읽는다(§8.6 과 같은 규칙). */
@@ -256,9 +262,16 @@ export function AgentAssetWizard({ kind, caps, onClose, onCreated }: {
                 {d.visibility !== 'PERSONAL' && (
                   <FormField label="소유 조직" required
                     hint="지금 실행 문맥의 조직이 기본값입니다. ⚠️ 관리 범위 밖이면 서버가 거절하고 사유를 알려 줍니다 — 화면은 그 판정을 흉내 내지 않습니다.">
-                    <input className="afs-input" value={d.owner_scope_id}
-                      onChange={(e) => set('owner_scope_id', e.target.value)}
-                      placeholder={ctx.scopeNodeId || '조직 노드 id'} />
+                    <select className="afs-select" value={d.owner_scope_id}
+                      onChange={(e) => set('owner_scope_id', e.target.value)}>
+                      <option value="">소유 조직을 선택하십시오</option>
+                      {d.owner_scope_id && !orgNodes.some((node) => node.node_id === d.owner_scope_id) &&
+                        <option value={d.owner_scope_id}>현재 실행 조직</option>}
+                      {orgNodes.filter((node) => node.readable).map((node) =>
+                        <option key={node.node_id} value={node.node_id}>
+                          {'　'.repeat(node.depth)}{node.label}
+                        </option>)}
+                    </select>
                   </FormField>
                 )}
                 {d.visibility === 'ENTERPRISE' && !canPublishEnterprise && (
@@ -365,7 +378,7 @@ export function AgentAssetWizard({ kind, caps, onClose, onCreated }: {
                         <b>{d.name_ko || '(이름 없음)'}</b>
                         {' · '}{d.visibility === 'PERSONAL' ? '개인'
                           : d.visibility === 'ENTERPRISE' ? '전사' : '조직'}
-                        {d.visibility !== 'PERSONAL' && ` (${d.owner_scope_id || '미지정'})`}
+                        {d.visibility !== 'PERSONAL' && ` (${ownerScopeLabel})`}
                       </p>
                       <p className="afs-muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
                         산출물 {d.deliverable || '미기재'}
@@ -406,7 +419,7 @@ export function AgentAssetWizard({ kind, caps, onClose, onCreated }: {
               {d.visibility === 'PERSONAL' ? (
                 <>«{d.name_ko}» 를 <b>내 초안</b>으로 만듭니다 — 다른 사람에게는 보이지 않습니다.</>
               ) : (
-                <>«{d.name_ko}» 를 <b>{d.owner_scope_id || '미지정'} 조직의 자산</b>으로 만듭니다.
+                <>«{d.name_ko}» 를 <b>{ownerScopeLabel}의 조직 자산</b>으로 만듭니다.
                   승인되면 그 범위의 실행에 쓰입니다.</>
               )}
               {d.submit_now && <><br />저장과 동시에 <b>승인을 요청</b>합니다.</>}

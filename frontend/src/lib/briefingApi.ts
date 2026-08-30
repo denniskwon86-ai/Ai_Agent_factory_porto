@@ -28,6 +28,12 @@ export type BriefingItem = {
   suggested_action: string;
   ref: string;
   ref_type: string;
+  impact_rows?: {
+    key: 'production_qty' | 'ending_inventory' | 'ending_cash' | 'operating_profit';
+    label: string; unit: string; base: number; scenario: number;
+    delta: number; delta_pct: number | null;
+  }[];
+  data_kind?: string;
 };
 
 export type CostSection = {

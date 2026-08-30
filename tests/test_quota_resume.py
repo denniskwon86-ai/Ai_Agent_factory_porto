@@ -45,7 +45,7 @@ class _FakeEngine:
 
 
 def _patch(monkeypatch, engine, orch):
-    async def fake_get(tid="default"):
+    async def fake_get(tid="default", expected_fingerprint=""):
         return engine
     monkeypatch.setattr(ao, "get_runtime_app", fake_get)
 

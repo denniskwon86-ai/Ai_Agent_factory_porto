@@ -97,6 +97,32 @@ def test_requester_is_registered_as_participant(svc):
     assert c["status"] == DRAFT
 
 
+def test_main_queue_excludes_validation_cases_but_keeps_business(svc):
+    """카나리도 같은 저장소에 보존하지만 경영 홈의 업무 대기열에는 섞지 않는다."""
+    business = _case(svc, question="공급 지연 대응안을 승인할까요?")
+    validation = _case(svc, question="[카나리] 알림 격리 확인용 안건",
+                       simulation_run_id="canary_run", baseline_id="BL-CANARY",
+                       record_purpose="VALIDATION")
+
+    visible = svc.queue("kim")
+    assert [row["decision_id"] for row in visible] == [business["decision_id"]]
+    all_rows = svc.queue("kim", include_validation=True)
+    assert {row["decision_id"] for row in all_rows} == {
+        business["decision_id"], validation["decision_id"]}
+
+
+def test_legacy_canary_binding_is_classified_without_title_matching(svc):
+    """기존 오염은 제목 문구가 아니라 실행 ID와 기준선의 결속으로 분류한다."""
+    legacy = _case(svc, question="문구가 바뀐 검증 안건",
+                   simulation_run_id="test_mega_01", baseline_id="BL-CL4")
+    # create 직후에는 기본 BUSINESS지만 다음 제품 조회의 멱등 마이그레이션이 재분류한다.
+    svc._store.execute("UPDATE decision_cases SET record_purpose='BUSINESS' WHERE decision_id=?",
+                       (legacy["decision_id"],))
+    svc._store._ready = ""
+    assert svc.queue("kim") == []
+    assert svc.queue("kim", include_validation=True)[0]["record_purpose"] == "VALIDATION"
+
+
 def test_evidence_hash_is_order_independent(svc):
     """★★ 키 순서가 달라도 같은 근거는 같은 지문이다 — 아니면 "바뀌었다"는 판정이 거짓이 된다."""
     assert evidence_hash({"a": 1, "b": 2}) == evidence_hash({"b": 2, "a": 1})

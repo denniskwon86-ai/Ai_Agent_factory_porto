@@ -378,6 +378,24 @@ def test_승격하면_운영이_되고_다섯_관문이_전부_기록된다(env)
     assert next(r for r in rows if r["app_id"] == APP)["lifecycle_state"] == "active"
 
 
+def test_코드_없는_키트앱은_호스트_실행_선언을_봉인한다(env):
+    """빈 디렉터리를 면제하지 않는다 — 매니페스트 결속이 없으면 정적 관문이 막아야 한다."""
+    out = _approve_and_build(env)
+    from core import library_paths
+    from core import release_promotion as rp
+    import json
+
+    path = library_paths.release_json(out["release_id"])
+    with open(path, "r", encoding="utf-8") as fh:
+        release = json.load(fh)
+    assert release["execution_surface"] == rp.HOST_DECLARATIVE
+    assert rp._check_static([library_paths.release_dir(out["release_id"])], release).ok
+
+    release["manifest"]["fingerprint"] = "tampered"
+    assert not rp._check_static(
+        [library_paths.release_dir(out["release_id"])], release).ok
+
+
 def test_승격은_같은_승격기를_쓴다():
     """★★★ **면제를 만들지 않았는지**를 잠근다.
 

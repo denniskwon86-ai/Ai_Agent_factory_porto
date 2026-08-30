@@ -162,6 +162,24 @@ def test_llm_recommend_is_not_open_to_anonymous(monkeypatch):
                         "role_description": "역할"}).status_code in BLOCKED
 
 
+def test_internal_identifier_is_issued_by_system_not_user(monkeypatch):
+    c = TestClient(_app(
+        monkeypatch, user_id="platform@ls",
+        user={"user_id": "platform@ls", "status": "active", "is_admin": True},
+        scope_kw={"unrestricted": False, "is_admin": True,
+                  "readable_dept_ids": frozenset({"dept-a"})}))
+    r = c.post("/api/v1/factory/identifiers/allocate",
+               json={"object_type": "agent", "count": 3})
+    assert r.status_code == 200, r.text
+    ids = r.json()["ids"]
+    assert len(ids) == len(set(ids)) == 3
+    assert all(v.startswith("agt_") and len(v) == 24 for v in ids)
+
+    bad = c.post("/api/v1/factory/identifiers/allocate",
+                 json={"object_type": "user_entered_type", "count": 1})
+    assert bad.status_code == 422
+
+
 def test_agent_registry_write_currently_has_no_holder(monkeypatch):
     """★★★ [병합 2026-08-05 실측 · **사용자 결정 대기**] 지금 에이전트 레지스트리를 저장할 수
     있는 사람이 **아무도 없다.**

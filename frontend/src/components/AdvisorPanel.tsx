@@ -128,9 +128,15 @@ export function AdvisorPanel(
   //   조회 실패가 «이력 없음» 이 됐고, 그러면 그 구획이 통째로 사라져 사용자는 근거가
   //   **원래 없는 줄** 안다. 감사 자리에서 가장 나쁜 형태의 침묵이다.
   const [ledger, setLedger] = useState<Loaded<LedgerEvent[]>>(ok<LedgerEvent[]>([]));
-  const [projectId, setProjectId] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [createdProjectId, setCreatedProjectId] = useState('');
   const [notice, setNotice] = useState('');
   const [rejectReason, setRejectReason] = useState('');
+
+  useEffect(() => {
+    setProjectName('');
+    setCreatedProjectId('');
+  }, [blueprint?.blueprint_id]);
 
   // ⚠️ 승인은 «미확보 필수 데이터를 안고» 진행될 수 있다 — 그 사실을 **승인 후**가 아니라
   //   승인 전에 보여준다(종전에는 완료 문구로만 알려줬다).
@@ -250,19 +256,21 @@ export function AdvisorPanel(
   const bootstrap = () =>
     run(async () => {
       if (!blueprint) return;
-      const r = await advisorApi.bootstrapProject(blueprint.blueprint_id, projectId.trim());
+      const r = await advisorApi.bootstrapProject(
+        blueprint.blueprint_id, projectName.trim() || blueprint.title || '새 프로젝트');
+      setCreatedProjectId(r.project_id);
       setLedger(await loadLedger(blueprint.blueprint_id));
       // ⚠️ 런처의 프로젝트 목록은 마운트 시점에 한 번만 불린다. 여기서 갱신을 알리지 않으면
       //   상담으로 만든 프로젝트가 목록에 나타나지 않아 사용자가 "안 만들어졌나?" 하고 혼란한다
       //   (실측으로 발견 — 백엔드에는 있는데 화면에만 없었다).
       onProjectCreated?.();
-      setNotice(`프로젝트 '${r.project_id}' 생성 완료 (템플릿 ${r.template_id}). ${r.next_step}`);
+      setNotice(`프로젝트 «${r.project_name || projectName.trim() || blueprint.title}» 생성 완료. ${r.next_step}`);
     });
 
   const dataTasks = () =>
     run(async () => {
       if (!blueprint) return;
-      const r = await advisorApi.createDataTasks(blueprint.blueprint_id, projectId.trim());
+      const r = await advisorApi.createDataTasks(blueprint.blueprint_id, createdProjectId);
       setLedger(await loadLedger(blueprint.blueprint_id));
       setNotice(r.created.length
         ? `데이터 준비 태스크 ${r.created.length}건을 WBS에 추가했습니다: ${r.created.map((t) => t.task_id).join(', ')}`
@@ -769,13 +777,13 @@ export function AdvisorPanel(
                       승인자 {blueprint.approved_by} · {blueprint.approved_at}
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <input value={projectId} onChange={(e) => setProjectId(e.target.value)}
-                        placeholder="새 프로젝트 ID (영문/숫자/_/-)"
+                      <input value={projectName} onChange={(e) => setProjectName(e.target.value)}
+                        placeholder={blueprint.title || '새 프로젝트 이름'}
                         className="flex-1 min-w-[220px] afs-bg-sunken border afs-border rounded px-3 py-2 text-xs afs-ink " />
-                      <button onClick={bootstrap} disabled={busy || !projectId.trim()} className={BTN_PRIMARY}>
+                      <button onClick={bootstrap} disabled={busy || !!createdProjectId} className={BTN_PRIMARY}>
                         프로젝트 생성
                       </button>
-                      <button onClick={dataTasks} disabled={busy || !projectId.trim()} className={BTN_GHOST}
+                      <button onClick={dataTasks} disabled={busy || !createdProjectId} className={BTN_GHOST}
                         title="미확보 데이터를 WBS 준비 태스크로 추가합니다. 기획(WBS 생성) 완료 후에만 동작합니다">
                         데이터 준비 태스크 추가
                       </button>

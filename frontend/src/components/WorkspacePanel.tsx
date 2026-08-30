@@ -29,7 +29,7 @@
 //   · 자체 `fixed inset-0` 전체화면(모달 semantics·포커스 트랩·Escape 없음) → `HubDialog`
 //   · `String(e)` 를 그대로 찍어 «Error: ...» 가 노출되던 것
 //   · **10~11px 글자 16곳** → 본문 12px 이상
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ConfirmInline, useConfirm } from '../design/DataFoundationShell';
 import { EmptyOrError, failed, loading, ok, type Loaded } from '../design/DataState';
@@ -37,6 +37,7 @@ import { useLatestOnly } from '../design/useLatestOnly';
 import { HubDialog } from '../design/HubDialog';
 import { Banner, Panel, ScreenHead } from '../design/HubShell';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
+import { fetchOrgNodes, type FlatNode } from '../lib/governanceApi';
 import type {
   Checklist, ChecklistStep, Fork, Gate, GateCheck, Promotion, RollbackResult, Share,
 } from '../lib/workspaceApi';
@@ -46,7 +47,13 @@ import {
   rollbackRelease,
 } from '../lib/workspaceApi';
 
-type Props = { onClose: () => void; page?: boolean };
+export type WorkspaceReleaseOption = {
+  id: string;
+  label: string;
+  projectId?: string;
+};
+
+type Props = { onClose: () => void; page?: boolean; releaseOptions?: WorkspaceReleaseOption[] };
 
 /** ★ 통과와 같은 톤이면 «확인 못 한 것» 이 «괜찮은 것» 으로 읽힌다. */
 const STATE: Record<string, { label: string; cls: string }> = {
@@ -99,8 +106,9 @@ type OperateFilter = { scope: string; status: string; target: string };
  *   상태만은 `PROMO` 순서를 따르되 **데이터에 있는 것만** 노출한다.
  *
  * ⚠️ 목록을 못 읽었을 때 필터를 「없음」으로 그리지 않는다 — 조회 실패와 0건은 다르다. */
-function OperateFilters({ rows, filter, onChange }: {
+function OperateFilters({ rows, filter, onChange, scopeLabel }: {
   rows: Promotion[]; filter: OperateFilter; onChange: (f: OperateFilter) => void;
+  scopeLabel?: (id: string) => string;
 }) {
   const uniq = (pick: (p: Promotion) => string) =>
     Array.from(new Set(rows.map(pick).filter(Boolean))).sort();
@@ -134,16 +142,18 @@ function OperateFilters({ rows, filter, onChange }: {
 
   return (
     <aside className="operate-filters" aria-label="필터">
-      {group('부서 (소유 범위)', 'scope', scopes, (v) => v)}
+      {group('부서 (소유 범위)', 'scope', scopes, (v) => scopeLabel?.(v) || '조직 이름 미확인')}
       {group('상태', 'status', statuses, (v) => PROMO[v]?.label || v)}
-      {group('유형 (목표 범위)', 'target', targets, (v) => v)}
+      {group('유형 (목표 범위)', 'target', targets,
+        (v) => v === 'enterprise' ? '전사' : (scopeLabel?.(v) || '조직 이름 미확인'))}
     </aside>
   );
 }
 
 
-export default function WorkspacePanel({ onClose, page = false }: Props) {
+export default function WorkspacePanel({ onClose, page = false, releaseOptions = [] }: Props) {
   const [promotions, setPromotions] = useState<Loaded<Promotion[]>>(loading<Promotion[]>());
+  const [orgNodes, setOrgNodes] = useState<FlatNode[]>([]);
   const [releaseId, setReleaseId] = useState('');
   const [projectId, setProjectId] = useState('');
   const [fromScope, setFromScope] = useState('');
@@ -183,9 +193,12 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
   }, []);
 
   useEffect(() => { loadList(); }, [loadList]);
+  useEffect(() => {
+    fetchOrgNodes().then(setOrgNodes).catch(() => setOrgNodes([]));
+  }, []);
 
   const inspect = useCallback(async (rid: string, pid = '', live = liveIntegration) => {
-    if (!rid.trim()) { setErr('release_id 를 입력하십시오.'); return; }
+    if (!rid.trim()) { setErr('점검할 릴리스를 선택하십시오.'); return; }
     const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
     setErr(''); setMsg('');
     setReleaseId(rid); setProjectId(pid);
@@ -224,6 +237,16 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
   const g = gate?.value;
   const cl = checklist.value;
   const current = (promotions.value || []).find((p) => p.release_id === releaseId);
+  const releaseNames = useMemo(() => new Map(
+    releaseOptions.map((row) => [row.id, row.label || '이름 미등록 릴리스']),
+  ), [releaseOptions]);
+  const releaseLabel = (id: string) => releaseNames.get(id) || '이름 미등록 릴리스';
+  const scopeNames = useMemo(() => new Map(orgNodes.map((row) => [row.node_id, row.label])), [orgNodes]);
+  const scopeLabel = (id: string) => {
+    if (!id) return '미지정';
+    if (id === 'enterprise') return '전사';
+    return scopeNames.get(id) || '조직 이름 미확인';
+  };
   //: 좌측 필터가 걸러 낸 중앙 목록. **선택된 릴리스는 필터와 무관하게 우측에 그대로 남는다** —
   //  보고 있던 상세가 필터 한 번에 사라지면 사용자는 화면이 고장 난 것으로 읽는다.
   /** [설계 §5.4] **지금 눌러야 할 것 하나.** 상태가 다음에 요구하는 행동을 주 CTA 로 삼는다.
@@ -260,7 +283,8 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
           ⚠️ 이전에는 전부 한 줄(단일 컬럼)이었다. 그러면 목록을 찾으려고 스크롤하고, 상세를
             보려고 또 스크롤한다 — 「어느 릴리스를 보고 있는가」가 화면에서 사라진다. */}
       <div className="afs-dialog-body operate-workspace">
-        <OperateFilters rows={promotions.value || []} filter={filter} onChange={setFilter} />
+        <OperateFilters rows={promotions.value || []} filter={filter} onChange={setFilter}
+          scopeLabel={scopeLabel} />
 
         <div className="hub-main">
           <ScreenHead kicker="WORKSPACE" title="공유 · 복제 · 전사 승격"
@@ -283,11 +307,18 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
           <Panel kicker="INSPECT" title="릴리스 점검">
             <div className="panel-body">
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <input className="afs-input" style={{ flex: 1, minWidth: 220 }} value={releaseId}
-                  onChange={(e) => setReleaseId(e.target.value)} placeholder="release_id" />
-                <input className="afs-input" style={{ flex: 1, minWidth: 200 }} value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
-                  placeholder="project_id (품질 기록 조회 키)" />
+                <select className="afs-select" aria-label="점검할 릴리스" style={{ flex: 1, minWidth: 260 }}
+                  value={releaseId} onChange={(e) => {
+                    const id = e.target.value;
+                    const picked = releaseOptions.find((row) => row.id === id);
+                    setReleaseId(id);
+                    setProjectId(picked?.projectId || '');
+                  }}>
+                  <option value="">— 릴리스 선택 —</option>
+                  {releaseOptions.map((row) => (
+                    <option key={row.id} value={row.id}>{row.label || '이름 미등록 릴리스'}</option>
+                  ))}
+                </select>
                 <button className="primary-button"
                   onClick={() => inspect(releaseId, projectId)}>게이트 점검</button>
               </div>
@@ -308,7 +339,7 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
                   {shownPromotions.map((p) => (
                     <button key={p.promotion_id} className="secondary-button"
                       onClick={() => inspect(p.release_id, p.project_id)}>
-                      {p.release_id}{' '}
+                      {releaseLabel(p.release_id)}{' '}
                       <span className={`state-chip ${PROMO[p.status]?.tone || 'muted'}`}>
                         {PROMO[p.status]?.label || p.status}
                       </span>
@@ -324,11 +355,11 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
               {/* ★ [설계 §5.4 promotions] 「상단: 릴리스·**소유 범위·목표 범위**」.
                   승격은 «어디서 어디로» 가 전부인데, 그동안 화면 어디에도 없었다. */}
               <div className="promotion-head">
-                <div><span>릴리스</span><b>{releaseId || '미선택'}</b></div>
+                <div><span>릴리스</span><b>{releaseId ? releaseLabel(releaseId) : '미선택'}</b></div>
                 <div><span>소유 범위</span>
-                  <b>{current?.from_scope || fromScope || '미지정'}</b></div>
+                  <b>{scopeLabel(current?.from_scope || fromScope)}</b></div>
                 <div><span>목표 범위</span>
-                  <b>{current?.target_scope || '전사'}</b></div>
+                  <b>{scopeLabel(current?.target_scope || 'enterprise')}</b></div>
                 <div><span>상태</span>
                   <b className={`state-chip ${PROMO[current?.status || '']?.tone || 'muted'}`}>
                     {current ? (PROMO[current.status]?.label || current.status) : '신청 없음'}
@@ -418,8 +449,8 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
                         {/* ★ [설계 §6.5] 승격은 확인 Sheet 5요소를 전부 채운다. */}
                         <ConfirmInline open={confirmPromote.open}
                           title="이 릴리스를 전사에 승격합니다"
-                          changes={<>{releaseId} 가 <b>{current?.from_scope || fromScope || '이 조직'}</b>
-                            {' '}범위에서 <b>{current?.target_scope || '전사'}</b> 범위로 올라갑니다.</>}
+                          changes={<>{releaseLabel(releaseId)}가 <b>{scopeLabel(current?.from_scope || fromScope)}</b>
+                            {' '}범위에서 <b>{scopeLabel(current?.target_scope || 'enterprise')}</b> 범위로 올라갑니다.</>}
                           affects={<>전 조직이 이 프로그램을 볼 수 있게 됩니다.
                             {/* ⚠️ 아는 만큼만 적는다 — 조회 실패를 «없음» 으로 쓰지 않는다. */}
                             {shares.status === 'ok'
@@ -515,7 +546,7 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
                           경고는 읽고 그냥 누를 수 있지만, 입력 자리는 비우면 진행되지 않는다. */}
                       <ConfirmInline open={confirmRollback.open}
                         title="이 릴리스를 운영에서 내립니다"
-                        changes={<>{releaseId} 가 운영에서 내려갑니다. 전사 승격 상태였다면
+                        changes={<>{releaseLabel(releaseId)}가 운영에서 내려갑니다. 전사 승격 상태였다면
                           <b> 함께 철회</b>됩니다.</>}
                         affects={<>쓰고 있는 쪽은 <b>즉시</b> 막힙니다.
                           {shares.status === 'ok'
@@ -563,12 +594,16 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
                   action={<span className="afs-muted" style={{ fontSize: 12 }}>승격이 아닙니다</span>}>
                   <div className="panel-body">
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <input className="afs-input" style={{ flex: 1, minWidth: 120 }}
-                        value={fromScope} onChange={(e) => setFromScope(e.target.value)}
-                        placeholder="소유 조직" />
-                      <input className="afs-input" style={{ flex: 1, minWidth: 120 }}
-                        value={toScope} onChange={(e) => setToScope(e.target.value)}
-                        placeholder="공유 대상 조직" />
+                      <select className="afs-select" aria-label="소유 조직" style={{ flex: 1, minWidth: 160 }}
+                        value={fromScope} onChange={(e) => setFromScope(e.target.value)}>
+                        <option value="">— 소유 조직 선택 —</option>
+                        {orgNodes.map((node) => <option key={node.node_id} value={node.node_id}>{node.label}</option>)}
+                      </select>
+                      <select className="afs-select" aria-label="공유 대상 조직" style={{ flex: 1, minWidth: 160 }}
+                        value={toScope} onChange={(e) => setToScope(e.target.value)}>
+                        <option value="">— 공유 대상 선택 —</option>
+                        {orgNodes.map((node) => <option key={node.node_id} value={node.node_id}>{node.label}</option>)}
+                      </select>
                       <button className="secondary-button"
                         onClick={() => act(() => createShare({
                           release_id: releaseId, from_scope: fromScope, to_scope: toScope,
@@ -587,15 +622,15 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
                             justifyContent: 'space-between', gap: 8, borderWidth: 1,
                             borderStyle: 'solid', borderRadius: 8, padding: '6px 10px',
                             fontSize: 13 }}>
-                          <span>{s.to_scope} · {s.mode}</span>
+                          <span>{scopeLabel(s.to_scope)} · {s.mode}</span>
                           <button className="secondary-button"
                             onClick={() => confirmRevoke.ask(s)}>회수</button>
                         </div>
                       ))
                     )}
                     <ConfirmInline open={confirmRevoke.open} title="이 공유를 회수합니다"
-                      changes={<>{confirmRevoke.target?.to_scope} 에 준 공유가 해제됩니다.</>}
-                      affects={<><b>{confirmRevoke.target?.to_scope}</b> 의 접근이 끊깁니다 —
+                      changes={<>{scopeLabel(confirmRevoke.target?.to_scope || '')}에 준 공유가 해제됩니다.</>}
+                      affects={<><b>{scopeLabel(confirmRevoke.target?.to_scope || '')}</b>의 접근이 끊깁니다 —
                         지금 쓰고 있다면 그쪽은 <b>원인을 모른 채</b> 막힙니다.</>}
                       reversible="다시 공유하면 복구됩니다."
                       approval="이 릴리스의 소유 조직 권한이 필요합니다."
@@ -622,8 +657,8 @@ export default function WorkspacePanel({ onClose, page = false }: Props) {
                         <div key={f.fork_id} className="afs-border"
                           style={{ borderWidth: 1, borderStyle: 'solid', borderRadius: 8,
                             padding: '6px 10px', fontSize: 13 }}>
-                          {f.new_project_id}{' '}
-                          <span className="afs-muted">· {f.owner_scope}</span>
+                          복제 프로젝트{' '}
+                          <span className="afs-muted">· {scopeLabel(f.owner_scope)}</span>
                         </div>
                       ))
                     )}

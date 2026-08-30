@@ -50,7 +50,7 @@ export function SystemAboutPage({ company, onBack, onCompanySetup }: Props) {
             <figcaption><b>기본형</b><span>어두운 배경</span></figcaption>
           </figure>
           <figure className="laxs-about-logo-card laxs-about-logo-light">
-            <img src="/brand/laxs-logo-primary-on-white-v3.png" alt="LAXS 밝은 배경 반전형" />
+            <img src="/brand/laxs-logo-primary-on-white-v5.png" alt="LAXS 밝은 배경 반전형" />
             <figcaption><b>반전형</b><span>밝은 배경</span></figcaption>
           </figure>
           <p className="laxs-about-edition"><b>{PRODUCT_EDITION}</b><span>LS MnM 기준 첫 적용본</span></p>

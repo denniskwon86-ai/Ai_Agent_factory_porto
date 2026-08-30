@@ -90,7 +90,13 @@ def _shape(reg: Dict[str, Any]) -> Dict[str, Any]:
     agents = []
     for a in (reg.get("agents") or []):
         agents.append({k: a.get(k) for k in _AGENT_KEYS if k in a})
-    return {"agents": agents}
+    return {
+        "agents": agents,
+        "edges": reg.get("edges") or [],
+        "deliverable_type": str(reg.get("deliverable_type") or ""),
+        "simulation_framework": bool(reg.get("simulation_framework", False)),
+        "framework_agents": reg.get("framework_agents") or {},
+    }
 
 
 def capture(template_id: str, *, policy_decision_id: str = "") -> ConfigSnapshot:

@@ -16,22 +16,26 @@ import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../desig
 import { useLatestOnly } from '../design/useLatestOnly';
 import { errorTitle } from '../lib/closedLoopFetch';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
+import { fetchOrgNodes, type FlatNode } from '../lib/governanceApi';
 import {
   masterDataApi, type CsvImportReport, type GroundingPreview, type MasterRecord,
-  type MasterType,
+  type MasterRecordProposal, type MasterType,
 } from '../lib/masterDataApi';
+import { allocateSystemIds } from '../lib/systemIdApi';
 
-type View = 'catalog' | 'register' | 'import' | 'preview';
+type View = 'catalog' | 'propose' | 'revise' | 'review' | 'import' | 'preview';
 
 const MODULE = {
   catalog: { kicker: 'MASTER DATA', title: '기준정보', subtitle: '모델이 바뀌어도 동일하게 적용되는 골든 레코드입니다.' },
-  register: { kicker: 'REVISE', title: '등록·개정', subtitle: '같은 코드를 다시 저장하면 구판을 보존하고 새 버전을 만듭니다.' },
-  import: { kicker: 'BULK', title: 'CSV 일괄등록', subtitle: '행별 성공·실패를 분리해 결과를 남깁니다.' },
+  propose: { kicker: 'PROPOSE', title: '신규 정본 제안', subtitle: '업무 내용을 제안하면 검토 승인 후 시스템이 식별자를 발급합니다.' },
+  revise: { kicker: 'REVISE', title: '현행 정본 개정', subtitle: '선택한 정본의 구판을 보존하고 새 버전을 만듭니다.' },
+  review: { kicker: 'REVIEW', title: '정본 승인', subtitle: '제안자와 다른 데이터 관리자가 검토해 골든 레코드로 확정합니다.' },
+  import: { kicker: 'BULK', title: 'CSV 일괄 제안', subtitle: '코드 없이 업무 내용을 올리고 행별 검토 제안을 만듭니다.' },
   preview: { kicker: 'INJECTION', title: '주입 미리보기', subtitle: '실제 에이전트 프롬프트에 들어갈 기준정보 블록을 확인합니다.' },
 };
 
 const EMPTY_RECORD = {
-  code: '', name: '', domains: '', aliases: '', attrs: '', core: false,
+  name: '', domains: '', aliases: '', attrs: '', core: false, rationale: '',
 };
 
 function csvList(value: string): string[] {
@@ -69,13 +73,16 @@ export function MasterDataPanel({ onClose, page = false }: { onClose: () => void
     recordsHidden: false, recordsCount: null as number | null };
   const [visibility, setVisibility] = useState(EMPTY_VIS);
 
-  const [typeForm, setTypeForm] = useState({ id: '', name: '', desc: '', schema: '' });
+  const [typeForm, setTypeForm] = useState({ name: '', desc: '', schema: '' });
   const [recordForm, setRecordForm] = useState(EMPTY_RECORD);
   const [aliasDraft, setAliasDraft] = useState('');
   const [previewText, setPreviewText] = useState('');
   const [previewDomains, setPreviewDomains] = useState('');
   const [previewScope, setPreviewScope] = useState('');
+  const [orgNodes, setOrgNodes] = useState<FlatNode[]>([]);
   const [preview, setPreview] = useState<Loaded<GroundingPreview | null>>(ok(null));
+  const [proposals, setProposals] = useState<Loaded<MasterRecordProposal[]>>(ok([]));
+  const [reviewReason, setReviewReason] = useState('');
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvReport, setCsvReport] = useState<CsvImportReport | null>(null);
   const [csvKey, setCsvKey] = useState(0);
@@ -147,7 +154,19 @@ export function MasterDataPanel({ onClose, page = false }: { onClose: () => void
     }
   }, []);
 
+  const loadProposals = useCallback(async () => {
+    setProposals(loading<MasterRecordProposal[]>());
+    try {
+      const rows = await masterDataApi.proposals('pending');
+      setProposals(ok(rows)); reportRequestSuccess();
+    } catch (e: any) {
+      setProposals(failed<MasterRecordProposal[]>(e)); reportRequestFailure(e?.status);
+    }
+  }, []);
+
   useEffect(() => { loadTypes(); }, [loadTypes]);
+  useEffect(() => { fetchOrgNodes().then(setOrgNodes).catch(() => setOrgNodes([])); }, []);
+  useEffect(() => { if (view === 'review') loadProposals(); }, [view, loadProposals]);
   useEffect(() => {
     setSearch(''); setSelectedCode(''); setDetail(ok(null)); setCsvReport(null);
     loadRecords(selectedType);
@@ -170,8 +189,11 @@ export function MasterDataPanel({ onClose, page = false }: { onClose: () => void
     { id: 'catalog', label: '유형·레코드', hint: '골든 레코드 조회', icon: 'catalog',
       count: types.status === 'ok' ? recordRows.length : undefined,
       countLabel: `현재 유형 레코드 ${recordRows.length}건` },
-    { id: 'register', label: '등록·개정', hint: '구판을 보존해 개정', icon: 'revise' },
-    { id: 'import', label: 'CSV 일괄등록', hint: '행별 결과 확인', icon: 'csv' },
+    { id: 'propose', label: '신규 정본 제안', hint: '코드 없이 검토 요청', icon: 'revise' },
+    { id: 'review', label: '정본 승인', hint: '검토 대기 제안 확정', icon: 'revise',
+      count: proposals.status === 'ok' ? (proposals.value || []).length : undefined,
+      countLabel: `검토 대기 ${(proposals.value || []).length}건` },
+    { id: 'import', label: 'CSV 일괄 제안', hint: '코드 없이 행별 제안', icon: 'csv' },
     { id: 'preview', label: '주입 미리보기', hint: '에이전트가 받는 값', icon: 'inject' },
   ];
 
@@ -182,10 +204,10 @@ export function MasterDataPanel({ onClose, page = false }: { onClose: () => void
     objectType: selectedRecord ? 'master_record' : 'master_type',
     selected: selectedRecord
       ? { id: selectedRecord.master_code, title: selectedRecord.name,
-        meta: `${selectedRecord.master_code} · v${selectedRecord.version} · ${selectedRecord.domains.join(', ') || '도메인 미지정'}` }
+        meta: `v${selectedRecord.version} · ${selectedRecord.domains.join(', ') || '도메인 미지정'}` }
       : selectedTypeData
         ? { id: selectedTypeData.type_id, title: selectedTypeData.name_ko,
-          meta: `${selectedTypeData.type_id} · 레코드 ${recordRows.length}건` }
+          meta: `현행 레코드 ${recordRows.length}건` }
         : null,
     state: jarvisState,
     counts: {
@@ -193,49 +215,93 @@ export function MasterDataPanel({ onClose, page = false }: { onClose: () => void
       records: records.status === 'ok' ? recordRows.length : null,
     },
     actions: selectedRecord
-      ? ['별칭 관리', '개정 등록', '주입 미리보기', '폐기']
-      : ['유형 생성', '레코드 등록', 'CSV 일괄등록'],
+      ? ['별칭 관리', '주입 미리보기', '폐기']
+      : ['신규 정본 제안', '승인 검토', 'CSV 일괄 제안'],
     evidence: selectedRecord ? [
-      { label: '코드', value: selectedRecord.master_code },
       { label: '버전', value: `v${selectedRecord.version}` },
       { label: '출처', value: selectedRecord.source || '미상' },
     ] : [],
   });
 
   const createType = async () => {
-    if (!typeForm.id.trim() || !typeForm.name.trim()) {
-      setErr({ msg: 'type_id와 한글명을 입력하십시오.' }); return;
+    if (!typeForm.name.trim()) {
+      setErr({ msg: '유형 이름을 입력하십시오.' }); return;
     }
     let schema: Record<string, unknown> | undefined;
     try { schema = jsonObject(typeForm.schema, '속성 스키마'); }
     catch (e: any) { setErr({ msg: e.message || String(e) }); return; }
-    const id = typeForm.id.trim();
+    let id = '';
+    try { [id] = await allocateSystemIds('master_type'); }
+    catch (e: any) { setErr({ msg: e?.message || '유형 내부 식별자를 발급하지 못했습니다.' }); return; }
     const result = await run('유형 생성 중', () => masterDataApi.createType({
       type_id: id, name_ko: typeForm.name.trim(), description: typeForm.desc.trim(), attr_schema: schema,
     }), '기준정보 유형을 만들었습니다. 이제 레코드를 등록하십시오.');
     if (result) {
-      setTypeForm({ id: '', name: '', desc: '', schema: '' });
+      setTypeForm({ name: '', desc: '', schema: '' });
       await loadTypes(); setSelectedType(id);
     }
   };
 
-  const saveRecord = async () => {
+  const submitProposal = async () => {
     if (!selectedType) { setErr({ msg: '기준정보 유형을 먼저 선택하십시오.' }); return; }
-    if (!recordForm.code.trim() || !recordForm.name.trim()) {
-      setErr({ msg: '코드와 정식 명칭을 입력하십시오.' }); return;
+    if (!recordForm.name.trim()) {
+      setErr({ msg: '정식 명칭을 입력하십시오.' }); return;
     }
     let attrs: Record<string, unknown> | undefined;
     try { attrs = jsonObject(recordForm.attrs, '속성값'); }
     catch (e: any) { setErr({ msg: e.message || String(e) }); return; }
-    const code = recordForm.code.trim();
-    const result = await run('레코드 저장 중', () => masterDataApi.saveRecord({
-      master_code: code, type_id: selectedType, name: recordForm.name.trim(), attributes: attrs,
+    const result = await run('신규 정본 제안 중', () => masterDataApi.proposeRecord({
+      type_id: selectedType, name: recordForm.name.trim(), attributes: attrs,
+      domains: csvList(recordForm.domains), aliases: csvList(recordForm.aliases),
+      is_core: recordForm.core, rationale: recordForm.rationale.trim(),
+    }), '신규 정본 제안을 제출했습니다. 승인 전에는 현행 기준값으로 사용되지 않습니다.');
+    if (result) {
+      setRecordForm(EMPTY_RECORD); await loadProposals(); setView('review');
+    }
+  };
+
+  const startRevision = () => {
+    if (!selectedRecord) return;
+    setRecordForm({
+      name: selectedRecord.name,
+      domains: selectedRecord.domains.join(', '),
+      aliases: selectedRecord.aliases.filter((a) => a !== selectedRecord.name).join(', '),
+      attrs: JSON.stringify(selectedRecord.attributes || {}, null, 2),
+      core: selectedRecord.is_core,
+      rationale: '',
+    });
+    setView('revise');
+  };
+
+  const saveRevision = async () => {
+    if (!selectedRecord || !recordForm.name.trim()) {
+      setErr({ msg: '카탈로그에서 개정할 현행 정본을 먼저 선택하십시오.' }); return;
+    }
+    let attrs: Record<string, unknown> | undefined;
+    try { attrs = jsonObject(recordForm.attrs, '속성값'); }
+    catch (e: any) { setErr({ msg: e.message || String(e) }); return; }
+    const result = await run('정본 개정 중', () => masterDataApi.reviseRecord(selectedRecord.master_code, {
+      name: recordForm.name.trim(), attributes: attrs,
       domains: csvList(recordForm.domains), aliases: csvList(recordForm.aliases),
       is_core: recordForm.core,
-    }), '기준정보를 저장했습니다. 같은 코드가 있었다면 새 버전으로 개정됐습니다.');
+    }), '새 버전을 만들고 구판을 이력으로 보존했습니다.');
     if (result) {
-      setRecordForm(EMPTY_RECORD); await loadRecords(selectedType, search); await selectRecord(code);
-      setView('catalog');
+      setRecordForm(EMPTY_RECORD); await loadRecords(selectedType, search);
+      await selectRecord(selectedRecord.master_code); setView('catalog');
+    }
+  };
+
+  const decideProposal = async (proposalId: string, decision: 'approve' | 'reject') => {
+    if (decision === 'reject' && !reviewReason.trim()) {
+      setErr({ msg: '반려 사유를 입력하십시오.' }); return;
+    }
+    const result = await run<unknown>(decision === 'approve' ? '정본 승인 중' : '제안 반려 중',
+      () => decision === 'approve'
+        ? masterDataApi.approveProposal(proposalId, reviewReason.trim())
+        : masterDataApi.rejectProposal(proposalId, reviewReason.trim()),
+      decision === 'approve' ? '골든 레코드로 승인했습니다.' : '신규 정본 제안을 반려했습니다.');
+    if (result) {
+      setReviewReason(''); await loadProposals(); await loadRecords(selectedType, search);
     }
   };
 
@@ -303,7 +369,7 @@ export function MasterDataPanel({ onClose, page = false }: { onClose: () => void
             <div className="inheritance-card">
               <span>DETERMINISTIC</span>
               <b>문서 검색이 아니라 확정값입니다</b>
-              <p>같은 코드에는 같은 값이 적용됩니다. 개정은 구판을 지우지 않고 새 버전을 만듭니다.</p>
+              <p>같은 정본에는 같은 값이 적용됩니다. 신규 제안은 승인 전까지 주입되지 않습니다.</p>
             </div>
           }
           jarvis={<JarvisRail contextTitle={jarvis.title} contextDescription={jarvis.desc}
@@ -349,11 +415,20 @@ export function MasterDataPanel({ onClose, page = false }: { onClose: () => void
               aliasDraft={aliasDraft} setAliasDraft={setAliasDraft} onAddAlias={addAlias}
               removeAlias={removeAlias} onRemoveAlias={doRemoveAlias}
               retire={retire} onRetire={doRetire}
+              onStartRevision={startRevision}
             />
           )}
-          {view === 'register' && (
-            <RegisterView types={typeRows} selectedType={selectedType} setSelectedType={setSelectedType}
-              form={recordForm} setForm={setRecordForm} onSave={saveRecord} />
+          {view === 'propose' && (
+            <ProposeView types={typeRows} selectedType={selectedType} setSelectedType={setSelectedType}
+              form={recordForm} setForm={setRecordForm} onSave={submitProposal} />
+          )}
+          {view === 'review' && (
+            <ReviewView state={proposals} reason={reviewReason} setReason={setReviewReason}
+              onRetry={loadProposals} onDecide={decideProposal} />
+          )}
+          {view === 'revise' && (
+            <RevisionView record={selectedRecord} form={recordForm} setForm={setRecordForm}
+              onSave={saveRevision} onCancel={() => setView('catalog')} />
           )}
           {view === 'import' && (
             <ImportView types={typeRows} selectedType={selectedType} setSelectedType={setSelectedType}
@@ -364,6 +439,7 @@ export function MasterDataPanel({ onClose, page = false }: { onClose: () => void
             <PreviewView text={previewText} setText={setPreviewText}
               domains={previewDomains} setDomains={setPreviewDomains}
               scope={previewScope} setScope={setPreviewScope}
+              orgNodes={orgNodes}
               state={preview} onRun={runPreview} />
           )}
         </HubShell>
@@ -377,14 +453,14 @@ function CatalogView(props: any) {
     types, records, detail, typeRows, recordRows, selectedType, setSelectedType,
     selectedCode, selectRecord, search, setSearch, onSearch, onRetryTypes, onRetryRecords,
     typeForm, setTypeForm, onCreateType, aliasDraft, setAliasDraft, onAddAlias,
-    removeAlias, onRemoveAlias, retire, onRetire,
+    removeAlias, onRemoveAlias, retire, onRetire, onStartRevision,
   } = props;
   const selected: MasterRecord | null = detail.value;
   const core = recordRows.filter((r: MasterRecord) => r.is_core).length;
   return (
     <>
       <ScreenHead kicker="MASTER DATA" title="기준정보 카탈로그"
-        description="유형을 고르고 골든 레코드의 코드·별칭·속성·개정 이력을 확인합니다."
+        description="유형을 고르고 골든 레코드의 명칭·별칭·속성·개정 이력을 확인합니다."
         chip={types.status !== 'ok'
           ? types.status === 'loading'
             ? { label: '확인 중', tone: 'muted' }
@@ -425,7 +501,6 @@ function CatalogView(props: any) {
       {selectedType && (
         <EvidenceStrip items={[
           { label: '선택 유형', value: typeRows.find((t: MasterType) => t.type_id === selectedType)?.name_ko },
-          { label: 'type_id', value: selectedType },
           { label: '현행 레코드', value: records.status === 'ok' ? `${recordRows.length}건` : '조회 불가' },
         ]} note={typeRows.find((t: MasterType) => t.type_id === selectedType)?.description
           || '유형 설명이 없습니다 — 무엇을 등록해야 하는지 다른 사용자가 판단하기 어렵습니다.'} />
@@ -436,7 +511,7 @@ function CatalogView(props: any) {
           onRetry={onRetryRecords}
           rows={recordRows.map((r: MasterRecord) => ({
             id: r.master_code, title: r.name,
-            meta: `${r.master_code} · v${r.version} · ${r.domains.join(', ') || '도메인 미지정'}`,
+            meta: `v${r.version} · ${r.domains.join(', ') || '도메인 미지정'}`,
             chip: r.is_core
               ? { label: 'CORE', tone: 'warn' as const }
               : { label: '현행', tone: 'success' as const },
@@ -455,7 +530,6 @@ function CatalogView(props: any) {
           ) : (
             <div style={{ padding: 15 }}>
               <EvidenceStrip items={[
-                { label: '마스터 코드', value: selected.master_code },
                 { label: '현행 버전', value: `v${selected.version}` },
                 { label: '출처', value: selected.source },
               ]} note={`적용 도메인: ${selected.domains.join(', ') || '미지정 — 주입 범위를 확인하십시오.'}`} />
@@ -514,7 +588,8 @@ function CatalogView(props: any) {
                 </section>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                <button className="secondary-button" onClick={onStartRevision}>현행 내용 개정</button>
                 <button className="danger-ghost" onClick={() => retire.ask(selected.master_code)}>현행 레코드 폐기</button>
               </div>
               <ConfirmInline open={retire.target === selected.master_code}
@@ -530,13 +605,12 @@ function CatalogView(props: any) {
       {types.status !== 'forbidden' && <Panel kicker="NEW TYPE" title="새 기준정보 유형">
         <div style={{ padding: 15 }}>
           <div className="delivery-grid">
-            <FormField label="type_id" required hint="영소문자·숫자·_·- 조합, 2~32자">
-              <input className="afs-input" value={typeForm.id} placeholder="예: process"
-                onChange={(e) => setTypeForm({ ...typeForm, id: e.target.value })} />
-            </FormField>
             <FormField label="한글명" required>
               <input className="afs-input" value={typeForm.name} placeholder="예: 공정"
                 onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })} />
+            </FormField>
+            <FormField label="내부 식별자">
+              <input className="afs-input" value="시스템 자동 발급" readOnly />
             </FormField>
           </div>
           <FormField label="설명" hint="이 유형에 무엇을 등록해야 하는지 판단할 수 있게 적으십시오.">
@@ -550,13 +624,12 @@ function CatalogView(props: any) {
           {/* ⚠️ [2026-08-23] 못 누르는 이유를 **화면에** 적는다(설계 §8.6). `title` 만으로는
               마우스를 올려 본 사람만 알 수 있고, 키보드·터치 사용자는 영영 모른다. */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
-            {(!typeForm.id.trim() || !typeForm.name.trim()) && (
+            {!typeForm.name.trim() && (
               <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
-                {!typeForm.id.trim() && !typeForm.name.trim() ? '유형 ID 와 이름을 입력하십시오.'
-                  : !typeForm.id.trim() ? '유형 ID 를 입력하십시오.' : '유형 이름을 입력하십시오.'}
+                유형 이름을 입력하십시오.
               </span>
             )}
-            <button className="primary-button" disabled={!typeForm.id.trim() || !typeForm.name.trim()}
+            <button className="primary-button" disabled={!typeForm.name.trim()}
               onClick={onCreateType}>유형 만들기</button>
           </div>
         </div>
@@ -571,30 +644,29 @@ function TypeSelect({ types, value, onChange }: {
   return (
     <select className="afs-select" value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">유형을 선택하십시오</option>
-      {types.map((t) => <option key={t.type_id} value={t.type_id}>{t.name_ko} ({t.type_id})</option>)}
+      {types.map((t) => <option key={t.type_id} value={t.type_id}>{t.name_ko}</option>)}
     </select>
   );
 }
 
-function RegisterView({ types, selectedType, setSelectedType, form, setForm, onSave }: any) {
+function ProposeView({ types, selectedType, setSelectedType, form, setForm, onSave }: any) {
   return (
     <>
-      <ScreenHead kicker="REVISE" title="기준정보 등록·개정"
-        description="같은 마스터 코드를 다시 저장하면 기존 현행판을 구판으로 보존하고 버전을 올립니다."
+      <ScreenHead kicker="PROPOSE" title="신규 정본 제안"
+        description="정식 명칭과 업무 내용을 제출하면 검토 승인 시 시스템이 내부 식별자를 자동 발급합니다."
         chip={{ label: selectedType ? '유형 선택됨' : '유형 필요', tone: selectedType ? 'data' : 'warn' }} />
-      <Panel kicker="RECORD" title="골든 레코드">
+      <Panel kicker="REQUEST" title="검토할 기준정보">
         <div style={{ padding: 15 }}>
           <FormField label="기준정보 유형" required>
             <TypeSelect types={types} value={selectedType} onChange={setSelectedType} />
           </FormField>
           <div className="delivery-grid">
-            <FormField label="마스터 코드" required hint="대문자·숫자로 시작하고 _·- 사용 가능">
-              <input className="afs-input" value={form.code} placeholder="예: PROC-ASSY-01"
-                onChange={(e) => setForm({ ...form, code: e.target.value })} />
-            </FormField>
             <FormField label="정식 명칭" required>
               <input className="afs-input" value={form.name} placeholder="예: 조립 공정"
                 onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </FormField>
+            <FormField label="내부 식별자" hint="승인 시 시스템이 자동 발급하고 화면에는 노출하지 않습니다.">
+              <input className="afs-input" value="승인 후 시스템 자동 발급" readOnly />
             </FormField>
           </div>
           <div className="delivery-grid">
@@ -611,20 +683,122 @@ function RegisterView({ types, selectedType, setSelectedType, form, setForm, onS
             <textarea className="afs-textarea" value={form.attrs}
               onChange={(e) => setForm({ ...form, attrs: e.target.value })} />
           </FormField>
+          <FormField label="제안 사유" hint="새 기준값이 필요한 업무 배경과 기존 정본으로 해결되지 않는 이유를 적으십시오.">
+            <textarea className="afs-textarea" value={form.rationale}
+              onChange={(e) => setForm({ ...form, rationale: e.target.value })} />
+          </FormField>
           <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input type="checkbox" checked={form.core}
               onChange={(e) => setForm({ ...form, core: e.target.checked })} />
             도메인 핵심 레코드 — 별칭이 직접 언급되지 않아도 우선 주입
           </label>
           <div className="request-alert warn" style={{ margin: '12px 0' }}>
-            <i aria-hidden="true">!</i><div><b>같은 코드는 덮어쓰지 않습니다</b>
-              <small>새 버전을 만들고 구판을 보존합니다. 코드가 같은지 저장 전에 확인하십시오.</small></div>
+            <i aria-hidden="true">!</i><div><b>제출 즉시 현행 기준값이 되지 않습니다</b>
+              <small>제안자와 다른 데이터 관리자가 검토·승인해야 골든 레코드로 사용됩니다.</small></div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button className="primary-button" disabled={!selectedType || !form.code.trim() || !form.name.trim()}
-              onClick={onSave}>저장·개정</button>
+            <button className="primary-button" disabled={!selectedType || !form.name.trim()}
+              onClick={onSave}>검토 제안 제출</button>
           </div>
         </div>
+      </Panel>
+    </>
+  );
+}
+
+function RevisionView({ record, form, setForm, onSave, onCancel }: any) {
+  if (!record) {
+    return (
+      <Panel kicker="REVISE" title="개정할 정본이 선택되지 않았습니다">
+        <div className="empty-note">카탈로그에서 현행 정본을 선택한 뒤 «현행 내용 개정»을 누르십시오.</div>
+      </Panel>
+    );
+  }
+  return (
+    <>
+      <ScreenHead kicker="REVISE" title="현행 정본 개정"
+        description="내부 식별자는 유지하고 내용만 새 버전으로 개정합니다. 구판은 삭제하지 않습니다."
+        chip={{ label: `현재 v${record.version}`, tone: 'data' }} />
+      <Panel kicker="REVISION" title={record.name}>
+        <div style={{ padding: 15 }}>
+          <div className="delivery-grid">
+            <FormField label="정식 명칭" required>
+              <input className="afs-input" value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </FormField>
+            <FormField label="내부 식별자" hint="선택된 정본에 서버가 결속하며 화면에서는 변경하지 않습니다.">
+              <input className="afs-input" value="기존 정본 식별자 유지" readOnly />
+            </FormField>
+          </div>
+          <div className="delivery-grid">
+            <FormField label="도메인" hint="콤마로 구분합니다.">
+              <input className="afs-input" value={form.domains}
+                onChange={(e) => setForm({ ...form, domains: e.target.value })} />
+            </FormField>
+            <FormField label="별칭" hint="콤마로 구분합니다. 정식 명칭은 자동 포함됩니다.">
+              <input className="afs-input" value={form.aliases}
+                onChange={(e) => setForm({ ...form, aliases: e.target.value })} />
+            </FormField>
+          </div>
+          <FormField label="속성값 JSON">
+            <textarea className="afs-textarea" value={form.attrs}
+              onChange={(e) => setForm({ ...form, attrs: e.target.value })} />
+          </FormField>
+          <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" checked={form.core}
+              onChange={(e) => setForm({ ...form, core: e.target.checked })} />
+            도메인 핵심 레코드
+          </label>
+          <div className="request-alert warn" style={{ margin: '12px 0' }}>
+            <i aria-hidden="true">!</i><div><b>구판은 이력으로 보존됩니다</b>
+              <small>저장하면 기존 현행판을 폐기하지 않고 새 버전이 이어집니다.</small></div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="secondary-button" onClick={onCancel}>취소</button>
+            <button className="primary-button" disabled={!form.name.trim()} onClick={onSave}>새 버전 저장</button>
+          </div>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+function ReviewView({ state, reason, setReason, onRetry, onDecide }: any) {
+  const rows: MasterRecordProposal[] = state.value || [];
+  return (
+    <>
+      <ScreenHead kicker="REVIEW" title="신규 정본 승인"
+        description="제안 내용을 확인하고 승인하거나 사유와 함께 반려합니다. 제안자는 자기 제안을 승인할 수 없습니다."
+        chip={state.status === 'ok'
+          ? { label: `${rows.length}건 대기`, tone: rows.length ? 'warn' : 'success' }
+          : { label: '조회 불가', tone: 'danger' }} />
+      <Panel kicker="QUEUE" title="검토 대기">
+        {state.status !== 'ok' ? (
+          <EmptyOrError state={state.status} error={state.error} onRetry={onRetry}
+            emptyText="검토 대기 제안이 없습니다." />
+        ) : !rows.length ? (
+          <div className="empty-note">검토 대기 중인 신규 정본 제안이 없습니다.</div>
+        ) : (
+          <div style={{ padding: 15, display: 'grid', gap: 12 }}>
+            <FormField label="검토 의견" hint="반려할 때는 사유가 필수이며, 승인 의견도 감사 근거로 남습니다.">
+              <textarea className="afs-textarea" value={reason}
+                onChange={(e) => setReason(e.target.value)} />
+            </FormField>
+            {rows.map((p) => (
+              <section key={p.proposal_id} className="request-alert info">
+                <div style={{ width: '100%' }}>
+                  <b>{p.name}</b>
+                  <small>{p.domains?.join(', ') || '도메인 미지정'} · 제안자 {p.proposed_by}</small>
+                  <p style={{ margin: '8px 0' }}>{p.rationale || '제안 사유가 입력되지 않았습니다.'}</p>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <button className="danger-ghost" onClick={() => onDecide(p.proposal_id, 'reject')}>반려</button>
+                    <button className="primary-button" onClick={() => onDecide(p.proposal_id, 'approve')}>정본 승인</button>
+                  </div>
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
       </Panel>
     </>
   );
@@ -633,8 +807,8 @@ function RegisterView({ types, selectedType, setSelectedType, form, setForm, onS
 function ImportView({ types, selectedType, setSelectedType, file, setFile, fileKey, report, onImport }: any) {
   return (
     <>
-      <ScreenHead kicker="BULK" title="CSV 일괄등록"
-        description="부분 성공을 허용하되 실패 행과 사유를 숨기지 않습니다."
+      <ScreenHead kicker="BULK" title="CSV 일괄 제안"
+        description="코드 없이 여러 신규 정본 제안을 제출합니다. 승인 전에는 현행 기준값이 되지 않습니다."
         chip={report ? { label: `${report.imported}/${report.total} 성공`, tone: report.failed.length ? 'warn' : 'success' } : undefined} />
       <Panel kicker="UPLOAD" title="CSV 파일">
         <div style={{ padding: 15 }}>
@@ -642,7 +816,7 @@ function ImportView({ types, selectedType, setSelectedType, file, setFile, fileK
             <TypeSelect types={types} value={selectedType} onChange={setSelectedType} />
           </FormField>
           <FormField label="CSV 파일" required
-            hint="헤더: master_code,name,domains,aliases,attr:<속성명>… / domains·aliases는 ; 구분">
+            hint="헤더: name,domains,aliases,attr:<속성명>… / domains·aliases는 ; 구분. 코드 열은 받지 않습니다.">
             <input key={fileKey} type="file" accept=".csv" className="afs-input"
               onChange={(e) => setFile(e.target.files?.[0] || null)} />
           </FormField>
@@ -658,11 +832,11 @@ function ImportView({ types, selectedType, setSelectedType, file, setFile, fileK
               { label: '전체 행', value: report.total },
               { label: '성공', value: report.imported },
               { label: '실패', value: report.failed.length },
-            ]} note="실패 행을 고쳐 다시 올리면 같은 코드는 새 버전으로 개정됩니다." />
+            ]} note="성공 행은 검토 대기로 등록됩니다. 데이터 관리자의 승인 뒤에만 현행 정본이 됩니다." />
             {report.failed.length > 0 && (
               <ul className="section-list">
-                {report.failed.map((f: any) => <li key={`${f.row}-${f.master_code || ''}`}>
-                  <b>행 {f.row}{f.master_code ? ` · ${f.master_code}` : ''}</b> {f.error}
+                {report.failed.map((f: any) => <li key={`${f.row}-${f.error}`}>
+                  <b>행 {f.row}</b> {f.error}
                 </li>)}
               </ul>
             )}
@@ -673,7 +847,7 @@ function ImportView({ types, selectedType, setSelectedType, file, setFile, fileK
   );
 }
 
-function PreviewView({ text, setText, domains, setDomains, scope, setScope, state, onRun }: any) {
+function PreviewView({ text, setText, domains, setDomains, scope, setScope, orgNodes, state, onRun }: any) {
   const value: GroundingPreview | null = state.value;
   return (
     <>
@@ -690,9 +864,14 @@ function PreviewView({ text, setText, domains, setDomains, scope, setScope, stat
             <input className="afs-input" value={domains} placeholder="예: manufacturing"
               onChange={(e) => setDomains(e.target.value)} />
           </FormField>
-          <FormField label="조직 범위" hint="일반 사용자는 소속 범위 안의 ECM 노드 ID를 지정해야 합니다. 관리자는 비워도 됩니다.">
-            <input className="afs-input" value={scope} placeholder="예: MNM_BATTERY"
-              onChange={(e) => setScope(e.target.value)} />
+          <FormField label="조직 범위" hint="현재 권한으로 볼 수 있는 실제 조직 이름에서 선택합니다.">
+            <select className="afs-select" value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value="">현재 권한 범위 전체</option>
+              {(orgNodes as FlatNode[]).filter((node) => node.readable).map((node) =>
+                <option key={node.node_id} value={node.node_id}>
+                  {'　'.repeat(node.depth)}{node.label}
+                </option>)}
+            </select>
           </FormField>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button className="primary-button" disabled={!text.trim()} onClick={onRun}>주입값 확인</button>
@@ -707,7 +886,6 @@ function PreviewView({ text, setText, domains, setDomains, scope, setScope, stat
           <div style={{ padding: 15 }}>
             <EvidenceStrip items={[
               { label: '매칭 수', value: value.matched.length },
-              { label: '매칭 코드', value: value.matched.join(', ') || '없음' },
               { label: '주입 여부', value: value.block ? '주입됨' : '주입 안 됨' },
             ]} note="매칭이 없으면 기준정보가 없는지, 별칭이 등록되지 않았는지 확인하십시오." />
             {value.block ? <pre className="mdm-preview-block">{value.block}</pre>

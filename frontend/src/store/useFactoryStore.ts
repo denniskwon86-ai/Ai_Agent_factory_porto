@@ -111,9 +111,9 @@ interface FactoryStore {
   setActiveSprintId: (id: string | null) => void;
   setCurrentProject: (id: string | null) => void;
   fetchProjects: () => Promise<void>;
-  createProject: (id: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean) => Promise<boolean>;
-  createMegaProject: (id: string, templateId?: string) => Promise<boolean>;
-  copyProject: (id: string, newId: string) => Promise<boolean>;
+  createProject: (name: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean) => Promise<string | null>;
+  createMegaProject: (name: string, templateId?: string) => Promise<string | null>;
+  copyProject: (id: string, newName: string) => Promise<string | null>;
   /** 프로젝트 삭제. 기본은 **표시 삭제**(데이터는 남는다), `purge=true` 는 실제 삭제(관리자만). */
   deleteProject: (id: string, purge?: boolean) => Promise<boolean>;
   /** 표시 삭제 되돌리기. */
@@ -143,7 +143,8 @@ interface FactoryStore {
   // 템플릿 관리(T2-c)
   fetchTemplates: () => Promise<void>;
   setSelectedTemplate: (id: string) => void;
-  selectEditingTemplate: (id: string) => Promise<void>;
+  /** 편집 템플릿을 읽어 실제 레지스트리까지 결속했을 때만 true. 실패 시 이전 레지스트리를 지운다. */
+  selectEditingTemplate: (id: string) => Promise<boolean>;
   saveTemplateRegistry: (id: string, reg: any) => Promise<boolean>;
   copyTemplate: (srcId: string, newId: string, newName?: string) => Promise<boolean>;
   deleteTemplate: (id: string) => Promise<boolean>;
@@ -290,14 +291,14 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  createProject: async (id: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean) => {
+  createProject: async (name: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean) => {
     try {
 
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          project_id: id,
+          project_name: name,
           template_id: templateId || get().selectedTemplateId || 'default',
           knowledge_pack_ids: knowledgePackIds || [],
           master_domains: masterDomains || [],
@@ -305,41 +306,43 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
         })
       });
       if (res.ok) {
+        const created = await res.json();
         await get().fetchProjects();
-        return true;
+        return String(created?.project_id || '') || null;
       }
       // 백엔드 검증 실패(404 미존재 템플릿 / 400 형식 / 409 중복)는 사유를 표면화
       let msg = "프로젝트 생성에 실패했습니다. (중복된 ID일 수 있습니다)";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
       set({ agentActionError: msg });
-      return false;
+      return null;
     } catch (error) {
       console.error("프로젝트 생성 실패:", error);
-      return false;
+      return null;
     }
   },
 
-  createMegaProject: async (id: string, templateId?: string) => {
+  createMegaProject: async (name: string, templateId?: string) => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects/mega`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          mega_project_id: id, 
+          mega_project_name: name,
           template_id: templateId || get().selectedTemplateId || 'manufacturing-production'
         })
       });
       if (res.ok) {
+        const created = await res.json();
         await get().fetchProjects();
-        return true;
+        return String(created?.mega_project_id || '') || null;
       }
       let msg = "메가 프로젝트 생성에 실패했습니다. (중복된 ID일 수 있습니다)";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
       set({ agentActionError: msg });
-      return false;
+      return null;
     } catch (error) {
       console.error("메가 프로젝트 생성 실패:", error);
-      return false;
+      return null;
     }
   },
 
@@ -367,24 +370,25 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  copyProject: async (id: string, newId: string) => {
+  copyProject: async (id: string, newName: string) => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects/${id}/copy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ new_project_id: newId })
+        body: JSON.stringify({ new_project_name: newName })
       });
       if (res.ok) {
+        const created = await res.json();
         await get().fetchProjects();
-        return true;
+        return String(created?.new_project_id || '') || null;
       }
       let msg = "시나리오 복제에 실패했습니다.";
       try { const r = await res.json(); if (r?.detail) msg = `❌ ${r.detail}`; } catch { /* noop */ }
       set({ agentActionError: msg });
-      return false;
+      return null;
     } catch (error) {
       console.error("프로젝트 복제 실패:", error);
-      return false;
+      return null;
     }
   },
 
@@ -693,13 +697,18 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       if (res.ok) {
         const r = await res.json();
         set({ agentRegistry: r.data, editingTemplateId: tid, agentRegistryError: '' });
+        return true;
       } else {
-        set({ agentRegistryError: res.status === 403
+        // 이전 템플릿을 남기면 목록은 B인데 에이전트·그래프는 A인 상태가 된다.
+        set({ agentRegistry: null, agentRegistryError: res.status === 403
           ? '이 템플릿을 볼 권한이 없습니다.'
           : `템플릿을 가져오지 못했습니다(서버 ${res.status}).` });
+        return false;
       }
     } catch (error: any) {
-      set({ agentRegistryError: `템플릿 조회 실패: ${error?.message || error}` });
+      set({ agentRegistry: null,
+        agentRegistryError: `템플릿 조회 실패: ${error?.message || error}` });
+      return false;
     }
   },
 

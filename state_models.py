@@ -148,6 +148,8 @@ class ProjectState(BaseModel):
     # 범용 플랫폼(T2-b): 이 프로젝트가 실행될 워크플로우 템플릿 id(레지스트리/그래프/스킬 해석의 기준).
     # "default" = 기존 SW 파이프라인(하위호환). 노드는 이 값으로 자기 스킬/그래프를 해석한다.
     template_id: str = Field(default="default")
+    # 서버가 계산한 워크플로우 의미 지문. 클라이언트 입력이 아니라 프로젝트 결속에서 주입한다.
+    config_fingerprint: str = Field(default="")
     output_format_id: str = Field(default="default")
     view_type: str = Field(default="react_app")
     # 범용 노드(T3): 커스텀 에이전트 파이프라인의 단계별 산출물 저장소(<agent_id> → 텍스트).

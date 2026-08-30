@@ -397,7 +397,9 @@ async def decide_blueprint(blueprint_id: str, req: DecisionIn,
 
 # ── Blueprint → 프로젝트 연결 (§4.7 / M0 백로그 4) ────────────────────────
 class BootstrapIn(BaseModel):
-    project_id: str
+    # 신규 UI는 표시 이름만 보내며 내부 ID는 서버가 발급한다. project_id는 레거시 호출 호환용.
+    project_id: str = ""
+    project_name: str = ""
     template_id: str = ""        # 비우면 Blueprint 의 추천 템플릿
 
 
@@ -461,16 +463,20 @@ async def bootstrap_project(blueprint_id: str, req: BootstrapIn,
                             detail=f"승인된 Blueprint 만 프로젝트로 만들 수 있습니다"
                                    f"(현재 상태: {bp.status}).")
     from api.routes.factory_control import provision_project
+    from core.system_ids import allocate
 
     tid = (req.template_id or bp.system.template_id or "default")
+    project_id = (req.project_id or "").strip() or allocate("project")[0]
+    project_name = (req.project_name or "").strip() or bp.title or "새 프로젝트"
     try:
         tid = await asyncio.to_thread(
-            provision_project, req.project_id, tid,
+            provision_project, project_id, tid,
             owner_dept_id=bp.owner_dept_id, owner_user_id=bp.owner_user_id,
             # ECM §10.2 — 프로젝트는 Blueprint 의 문맥을 물려받는다. 여기서 요청 헤더를 쓰면
             #   승인된 Blueprint 와 다른 문맥의 프로젝트가 생겨 추적이 끊긴다.
             tenant_id=bp.tenant_id, enterprise_scope_id=bp.enterprise_scope_id,
-            entity_mode=bp.entity_mode, blueprint_id=bp.blueprint_id)
+            entity_mode=bp.entity_mode, blueprint_id=bp.blueprint_id,
+            project_name=project_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"잘못된 id 형식입니다: {e}")
     except KeyError as e:
@@ -482,10 +488,10 @@ async def bootstrap_project(blueprint_id: str, req: BootstrapIn,
     #   순서를 바꾸면 LLM 이 요약을 사용자 발화로 오해한다.
     idea = (bp.business.problem or bp.business.objective or "").strip()
     initial_idea = (idea + "\n\n" + _blueprint_brief(bp)).strip()
-    ws = workspace_path(req.project_id)
+    ws = workspace_path(project_id)
     state_path = os.path.join(ws, "latest_state.json")
     await asyncio.to_thread(_write_json, state_path, {
-        "project_name": req.project_id,
+        "project_name": project_name,
         "template_id": tid,
         "initial_idea": initial_idea,
         "blueprint_id": bp.blueprint_id,
@@ -502,19 +508,19 @@ async def bootstrap_project(blueprint_id: str, req: BootstrapIn,
     from core.decision_ledger import decision_ledger
     await asyncio.to_thread(
         decision_ledger.append,
-        event_type="PROJECT_BOOTSTRAPPED", subject_type="project", subject_id=req.project_id,
+        event_type="PROJECT_BOOTSTRAPPED", subject_type="project", subject_id=project_id,
         actor_type="user", actor_id=p.user_id or "",
         decision=f"승인된 Blueprint 로 프로젝트 생성 (템플릿 {tid})",
         rationale=f"준비도 {bp.readiness_score}점/100 · 승인자 {bp.approved_by or '-'}",
         evidence_refs=[{"kind": "blueprint", "blueprint_id": bp.blueprint_id,
                         "version": bp.version, "approved_at": bp.approved_at}],
-        output_version_refs=[{"project_id": req.project_id, "template_id": tid}],
+        output_version_refs=[{"project_id": project_id, "template_id": tid}],
         tenant_id=bp.tenant_id or "tenant_default",
         enterprise_scope_id=bp.enterprise_scope_id, entity_mode=bp.entity_mode,
-        project_id=req.project_id, blueprint_id=bp.blueprint_id)
+        project_id=project_id, blueprint_id=bp.blueprint_id)
 
     return {"status": "success", "data": {
-        "project_id": req.project_id, "template_id": tid,
+        "project_id": project_id, "project_name": project_name, "template_id": tid,
         "blueprint_id": bp.blueprint_id, "entity_mode": bp.entity_mode,
         "enterprise_scope_id": bp.enterprise_scope_id,
         "next_step": "프로젝트 통제실에서 스프린트를 시작하면 요구 확인 인터뷰부터 진행됩니다.",

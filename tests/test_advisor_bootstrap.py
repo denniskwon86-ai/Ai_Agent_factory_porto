@@ -115,6 +115,47 @@ def test_bootstrap_creates_project_with_inherited_context(client, store):
     assert own["tenant_id"] == "tenant_default"
 
 
+def test_bootstrap_allocates_hidden_project_id_and_keeps_display_name(client, store):
+    app, c = client
+    _as(app)
+    bp = _approved_blueprint(store)
+    r = c.post(f"/api/v1/advisor/blueprints/{bp.blueprint_id}/bootstrap-project",
+               json={"project_name": "승인 설계 기반 원가 개선"})
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["project_id"].startswith("prj_")
+    assert d["project_name"] == "승인 설계 기반 원가 개선"
+    with open(f"./projects/{d['project_id']}/project_meta.json", encoding="utf-8") as f:
+        assert json.load(f)["project_name"] == "승인 설계 기반 원가 개선"
+
+
+def test_factory_allocates_project_id_when_user_only_enters_name(client):
+    app, c = client
+    _as(app)
+    r = c.post("/api/v1/factory/projects", json={"project_name": "공정 이상 조기경보"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["project_id"].startswith("prj_")
+    assert d["project_name"] == "공정 이상 조기경보"
+    assert os.path.isdir(f"./projects/{d['project_id']}")
+
+
+def test_project_copy_allocates_new_id_and_changes_display_name(client):
+    app, c = client
+    _as(app)
+    source = c.post("/api/v1/factory/projects",
+                    json={"project_id": "P_COPY_SOURCE", "project_name": "원본 업무"})
+    assert source.status_code == 200, source.text
+    r = c.post("/api/v1/factory/projects/P_COPY_SOURCE/copy",
+               json={"new_project_name": "비교 시나리오"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["new_project_id"].startswith("prj_")
+    assert d["new_project_name"] == "비교 시나리오"
+    with open(f"./projects/{d['new_project_id']}/project_meta.json", encoding="utf-8") as f:
+        assert json.load(f)["project_name"] == "비교 시나리오"
+
+
 def test_bootstrap_context_comes_from_blueprint_not_headers(client, store):
     """★ 요청 헤더의 문맥으로 만들면 승인된 Blueprint 와 다른 문맥의 프로젝트가 생긴다."""
     app, c = client

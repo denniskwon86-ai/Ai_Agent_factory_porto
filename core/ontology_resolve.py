@@ -127,6 +127,10 @@ class ObjectResolution:
     row_evidence: str = ""
     #: `REAL` · `DEMO` 같은 자료 성격. 계보에 성격 표시를 붙이는 데 쓴다.
     data_kind: str = ""
+    #: 봉인된 업무 객체에서 파생한 사람용 표시 설명. 객체 정체성 자체는 아니다.
+    display_name: str = ""
+    #: 표시 설명이 어느 객체·인증판·원본 지문에서 왔는지 대조하는 지문.
+    display_fingerprint: str = ""
     #: 사람이 읽을 사유. ⚠️ 장애를 «없음» 으로 접지 않으려면 **왜**가 남아야 한다.
     reason: str = ""
     #: `AMBIGUOUS` 일 때 부딪힌 후보들. 사람이 무엇을 골라야 하는지 보이게.
@@ -142,12 +146,19 @@ class ObjectResolution:
             raise ValueError("FOUND resolutions must carry a resource scope.")
         if self.status != FOUND and self.resource_scope is not None:
             raise ValueError("only FOUND resolutions may carry a resource scope.")
+        if bool(self.display_name) != bool(self.display_fingerprint):
+            raise ValueError("display_name and display_fingerprint must be supplied together.")
+        if self.status != FOUND and (self.display_name or self.display_fingerprint):
+            raise ValueError("only FOUND resolutions may carry a display descriptor.")
 
 
 def found(scope: app_policy.ResourceScope, *, snapshot_id: str = "",
-          row_evidence: str = "", data_kind: str = "") -> ObjectResolution:
+          row_evidence: str = "", data_kind: str = "", display_name: str = "",
+          display_fingerprint: str = "") -> ObjectResolution:
     return ObjectResolution(FOUND, resource_scope=scope, snapshot_id=snapshot_id,
-                            row_evidence=row_evidence, data_kind=data_kind)
+                            row_evidence=row_evidence, data_kind=data_kind,
+                            display_name=display_name,
+                            display_fingerprint=display_fingerprint)
 
 
 def not_found(reason: str = "") -> ObjectResolution:

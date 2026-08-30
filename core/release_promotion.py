@@ -120,7 +120,43 @@ def _check_review(release: Any) -> Check:
     return Check(CHECK_REVIEW, True)
 
 
-def _check_static(code_paths: Optional[List[str]]) -> Check:
+HOST_DECLARATIVE = "HOST_DECLARATIVE"
+
+
+def _declarative_manifest_error(release: Any) -> str:
+    """코드 없는 호스트 렌더링 앱의 **정적 인증 증거**를 다시 검증한다.
+
+    빈 디렉터리를 곧바로 면제하지 않는다. 선언형 앱은 실행 코드를 갖지 않는 대신,
+    호스트 인증·회사 문맥·플랫폼 감사를 강제하는 Manifest와 그 지문을 릴리스에
+    봉인한다. 계약과 릴리스의 Manifest가 갈리면 어느 쪽이 실제 실행 선언인지 알 수
+    없으므로 역시 통과시키지 않는다.
+    """
+    if not isinstance(release, dict) or release.get("execution_surface") != HOST_DECLARATIVE:
+        return ""
+    if str(release.get("kind") or "") != "kit_app":
+        return "HOST_DECLARATIVE 표식은 업무 키트 앱 릴리스에만 사용할 수 있습니다."
+
+    from core import app_manifest
+
+    sealed = release.get("manifest")
+    manifest = sealed.get("manifest") if isinstance(sealed, dict) else None
+    errors = app_manifest.validate(manifest)
+    if errors:
+        return "호스트 인증 Manifest가 유효하지 않습니다: " + " / ".join(errors[:3])
+    expected = app_manifest.fingerprint(manifest)
+    if str(sealed.get("fingerprint") or "") != expected:
+        return "호스트 인증 Manifest 지문이 현재 내용과 일치하지 않습니다."
+    if sealed.get("valid") is not True:
+        return "호스트 인증 Manifest의 검증 상태가 유효하지 않습니다."
+
+    contract_manifest = ((release.get("runtime_contract") or {}).get("manifest")
+                         if isinstance(release.get("runtime_contract"), dict) else None)
+    if app_manifest.canonical_json(contract_manifest) != app_manifest.canonical_json(manifest):
+        return "승인 계약과 릴리스의 호스트 인증 Manifest가 일치하지 않습니다."
+    return "__VALID__"
+
+
+def _check_static(code_paths: Optional[List[str]], release: Any = None) -> Check:
     """생성 코드가 플랫폼 인증을 **직접** 만지지 않는가.
 
     ⚠️ 검사할 경로가 **없으면 통과가 아니다.** 「볼 것이 없었다」와 「봤는데 깨끗했다」는
@@ -149,6 +185,11 @@ def _check_static(code_paths: Optional[List[str]]) -> Check:
     #: ★ 「빈 결과」와 「깨끗한 결과」를 가른다 — 통제가 자기가 볼 것이 있었는지를
     #:   먼저 확인해야 통제다.
     if not out.get("scanned"):
+        declarative = _declarative_manifest_error(release)
+        if declarative == "__VALID__":
+            return Check(CHECK_STATIC, True)
+        if declarative:
+            return Check(CHECK_STATIC, False, declarative)
         return Check(CHECK_STATIC, False,
                      "검사한 파일이 0개입니다 — 생성 코드를 찾지 못했습니다. "
                      "보지 못한 것을 통과로 세지 않습니다.")
@@ -244,7 +285,7 @@ def run_checks(*, release: Any, release_id: str, lifecycle: Any,
     checks = [
         _check_state(release_id, lifecycle),
         _check_contract(release, release_id, plane),
-        _check_static(code_paths),
+        _check_static(code_paths, release),
         _check_review(release),
         _check_readiness(readiness_state),
     ]

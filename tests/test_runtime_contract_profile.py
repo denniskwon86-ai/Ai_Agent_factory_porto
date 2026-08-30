@@ -94,9 +94,9 @@ def test_profile_survives_a_meta_update_that_does_not_mention_it(tmp_path):
                            runtime_contract_profile=ak.PROFILE_V1)
     assert fc._read_project_runtime_contract_profile(str(tmp_path)) == "v1"
 
-    fc._write_project_meta(str(tmp_path), "marketing")      # 프로필을 안 넘긴다
+    fc._write_project_meta(str(tmp_path), "content-marketing")  # 프로필을 안 넘긴다
     assert fc._read_project_runtime_contract_profile(str(tmp_path)) == "v1"
-    assert fc._read_project_template(str(tmp_path)) == "marketing"
+    assert fc._read_project_template(str(tmp_path)) == "content-marketing"
 
 
 def test_profile_survives_even_when_every_other_field_is_supplied(tmp_path):
@@ -111,7 +111,7 @@ def test_profile_survives_even_when_every_other_field_is_supplied(tmp_path):
                            runtime_contract_profile=ak.PROFILE_V1)
 
     fc._write_project_meta(
-        str(tmp_path), "marketing", "default", "react_app",
+        str(tmp_path), "content-marketing", "default", "react_app",
         knowledge_pack_ids=[], master_domains=[], mcp_live_grounding=False,
         owner_dept_id="", owner_user_id="u", visibility="dept", nature="",
         forked_from={}, tenant_id="tenant_default", enterprise_scope_id="",
@@ -124,7 +124,7 @@ def test_profile_survives_even_when_every_other_field_is_supplied(tmp_path):
 def test_a_legacy_project_is_not_switched_on_by_an_update(tmp_path):
     """⚠️ 반대 방향도 지킨다 — 꺼진 프로젝트가 갱신 한 번으로 켜지면 안 된다."""
     fc._write_project_meta(str(tmp_path), "default", owner_user_id="u")
-    fc._write_project_meta(str(tmp_path), "marketing")
+    fc._write_project_meta(str(tmp_path), "content-marketing")
     assert fc._read_project_runtime_contract_profile(str(tmp_path)) == ""
 
 

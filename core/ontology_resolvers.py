@@ -34,7 +34,10 @@ LLM 0콜. 결정론적이다.
 """
 from __future__ import annotations
 
+import sqlite3
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Optional
 
 from core import app_policy
@@ -172,13 +175,29 @@ def _resolve_ecm(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     scope = _scope(getattr(node, "tenant_id", ""), mode, getattr(node, "node_id", ""),
                    owner_dept_id=getattr(node, "dept_id", ""),
                    status="active" if getattr(node, "status", "") == "ACTIVE" else "retired")
+    try:
+        from core import ontology_object_display
+        descriptor = ontology_object_display.describe_ecm_object(
+            object_id=str(getattr(node, "node_id", "") or ""),
+            node_name=str(getattr(node, "name_ko", "") or ""),
+            entity_id=str(getattr(entity, "entity_id", "") or ""),
+            entity_name=str(getattr(entity, "name_ko", "") or ""),
+            entity_mode=mode,
+        )
+    except Exception as exc:
+        stats.bump("ecm_display_unavailable")
+        return ontology_resolve.unavailable(
+            f"조직 객체의 사람용 표시 설명을 만들지 못했습니다: {exc}")
     #: ★ 조직 노드는 인증판에서 오는 것이 아니므로 `snapshot_id` 가 없다.
     #: ⚠️ 그래서 봉인된 판을 요구하는 문맥에서는 **쓸 수 없다** — 런타임이 막는다.
-    return ontology_resolve.found(scope, data_kind=mode)
+    return ontology_resolve.found(
+        scope, data_kind=mode,
+        display_name=descriptor.display_name,
+        display_fingerprint=descriptor.display_fingerprint)
 
 
 def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
-    """업무 객체(선적·발주라인·재고·생산계획라인·판매라인)의 범위.
+    """인증판 범위 색인에 결속된 dataset·mdm·external 객체의 범위.
 
     ★★★ [2026-08-20 §7 4단계] **범위 색인을 통해 해석한다.**
 
@@ -204,6 +223,7 @@ def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     ⚠️ 문맥에 `as_of` 가 없으면 「지금」이고, 그때도 규칙은 하나다."""
     from core.data_preparation import scope_index
     from core.data_preparation.store import data_preparation_store
+    stats_namespace = str(ref.namespace or "dataset")
 
     try:
         #: ★★★ [2026-08-21 P0] **정체성 두 값을 함께 넘긴다.** 없으면 다른 회사의
@@ -211,7 +231,7 @@ def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
         if not ctx.tenant_id or not ctx.entity_mode:
             #: ⚠️ 문맥이 반쪽이면 «전부 뒤진다» 로 넓히지 않는다 — 그 순간 회사 경계가
             #:   사라진다. 모르면 **막는다.**
-            stats.bump("dataset_identity_missing")
+            stats.bump(f"{stats_namespace}_identity_missing")
             return ontology_resolve.unavailable(
                 "조회 문맥에 tenant·entity_mode 가 없습니다 — 객체를 특정할 수 없습니다.")
         status, row, candidates = scope_index.lookup(
@@ -221,23 +241,36 @@ def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
     except Exception as exc:
         #: ⚠️ [P0-3] 저장소 장애를 «없음» 으로 접지 않는다. 못 읽은 것과 없는 것은
         #:   다른 사실이고, 앞엣것은 **사람이 손을 써야** 한다.
-        stats.bump("dataset_index_unreadable")
+        stats.bump(f"{stats_namespace}_index_unreadable")
         raise OntologyResolverError(
             f"범위 색인을 읽지 못했습니다({ref.key}): {exc}") from exc
 
     if status == scope_index.AMBIGUOUS:
         #: ⚠️⚠️ 같은 시각의 인증판이 둘이다. **아무거나 고르지 않는다** — 고르면 같은
         #:   질문의 답이 실행마다 달라지고 재실행 지문이 흔들린다.
-        stats.bump("dataset_ambiguous_version")
+        stats.bump(f"{stats_namespace}_ambiguous_version")
         return ontology_resolve.ambiguous(
             candidates, f"같은 시각의 인증판이 {len(candidates)}개입니다.")
     if status == scope_index.UNBOUND:
         #: ★ 객체는 아는데 **그 시점에는 아직 인증 전**이다.
-        stats.bump("dataset_unbound_at_as_of")
+        stats.bump(f"{stats_namespace}_unbound_at_as_of")
         return ontology_resolve.unbound(
             f"그 시점에는 아직 인증되지 않았습니다(as_of={ctx.as_of or '지금'}).")
     if status != scope_index.FOUND or row is None:
-        stats.bump("dataset_not_indexed")
+        try:
+            needs_index = scope_index.has_unmaterialized_snapshot(
+                data_preparation_store, ref.namespace, ref.object_type,
+                ctx.tenant_id, ctx.entity_mode)
+        except Exception as exc:
+            stats.bump(f"{stats_namespace}_index_readiness_unreadable")
+            raise OntologyResolverError(
+                f"인증판 색인 준비 상태를 읽지 못했습니다({ref.key}): {exc}") from exc
+        if needs_index:
+            stats.bump(f"{stats_namespace}_needs_materialization")
+            return ontology_resolve.unavailable(
+                "인증된 원본은 있으나 객체 범위 색인이 아직 물질화되지 않았습니다 — "
+                "색인 백필이 필요합니다.")
+        stats.bump(f"{stats_namespace}_not_indexed")
         #: ⚠️ 존재를 누설하지 않는다 — 무엇을 할지는 **문맥**이 정한다(임의 조회면 빈
         #:   결과, 승인된 관계의 끝점이면 무결성 장애).
         return ontology_resolve.not_found("색인에 없는 업무 객체입니다.")
@@ -314,74 +347,403 @@ def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
         #:   어긋난 것**이지 「안 보이는 것」이 아니다.
         #: ★ 「일어날 리 없다」를 그냥 두면 일어났을 때 `found(None)` 로 터지고, 그
         #:   예외는 «해석 실패» 로 뭉뚱그려져 원인을 잃는다.
-        stats.bump("dataset_scope_missing")
+        stats.bump(f"{stats_namespace}_scope_missing")
         return ontology_resolve.unavailable(
             f"색인 줄에 범위가 없습니다({ref.key}) — 자료가 어긋났습니다.")
-    stats.bump("dataset_resolved")
+    try:
+        from core import ontology_object_display
+        descriptor = ontology_object_display.describe_dataset_object(
+            namespace=ref.namespace,
+            object_type=ref.object_type,
+            object_id=ref.object_id,
+            snapshot_id=str(row.get("snapshot_id", "")),
+            dataset_contract_key=str(row.get("dataset_contract_key", "")),
+            raw_path=str(row.get("snapshot_raw_path", "")),
+            checksum=str(row.get("snapshot_checksum", "")),
+        )
+    except Exception as exc:
+        stats.bump(f"{stats_namespace}_display_unavailable")
+        return ontology_resolve.unavailable(
+            f"봉인된 객체 표시 설명을 만들지 못했습니다({ref.key}): {exc}")
+    stats.bump(f"{stats_namespace}_resolved")
     return ontology_resolve.found(
         scope, snapshot_id=str(row.get("snapshot_id", "")),
         row_evidence=str(row.get("row_evidence", "")),
-        data_kind=str(row.get("data_kind", "")))
+        data_kind=str(row.get("data_kind", "")),
+        display_name=descriptor.display_name,
+        display_fingerprint=descriptor.display_fingerprint)
 
 
 def _resolve_mdm(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
-    """기준정보. **아직 범위 계약이 없다.**
+    """인증된 기준정보 중 단일키·표시 계약이 확정된 유형만 해석한다.
 
-    ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
-      경로를 조용히 지우고 화면은 「영향 경로 없음」을 그린다 — 사용자는 그것을
-      사실로 읽는다. 배선이 없는 것은 사실이 아니라 **우리 쪽 미완성**이다."""
-    stats.bump("mdm_not_wired")
-    raise OntologyResolverError(
-        f"기준정보 namespace 는 아직 범위 계약이 "
-        f"없습니다({ref.key}).")
+    복합키 직렬화가 없는 BOM·라우팅과 사람용 명칭이 없는 원가센터는 임의 규칙으로
+    넓히지 않는다. 그 객체가 없다는 뜻이 아니라 **유형 계약이 아직 미완성**이다.
+    """
+    from core.data_preparation import scope_index
+    supported = {target[1] for key in (set(scope_index.REFERENCE_OBJECTS)
+                                      | set(scope_index.COMPOSITE_REFERENCE_OBJECTS))
+                 for target in scope_index.object_specs(key) if target[0] == "mdm"}
+    if ref.object_type not in supported:
+        stats.bump("mdm_type_not_wired")
+        return ontology_resolve.unavailable(
+            f"이 기준정보 유형은 복합키 또는 사람용 표시 계약이 아직 없습니다({ref.object_type}).")
+    return _resolve_dataset(ref, ctx)
 
 
 def _resolve_external(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
-    """외부지표. **아직 범위 계약이 없다.**
-
-    ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
-      경로를 조용히 지우고 화면은 「영향 경로 없음」을 그린다 — 사용자는 그것을
-      사실로 읽는다. 배선이 없는 것은 사실이 아니라 **우리 쪽 미완성**이다."""
-    stats.bump("external_not_wired")
-    raise OntologyResolverError(
-        f"외부지표 namespace 는 아직 범위 계약이 "
-        f"없습니다({ref.key}).")
+    """승인된 외부 관측값을 인증판·조직 범위·공표 근거에 결속해 해석한다."""
+    if ref.object_type != "external-observation":
+        stats.bump("external_type_not_wired")
+        return ontology_resolve.unavailable(
+            f"이 대외정보 유형은 범위·표시 계약이 아직 없습니다({ref.object_type}).")
+    return _resolve_dataset(ref, ctx)
 
 
 def _resolve_g4(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
-    """계산 Driver·결과. **아직 범위 계약이 없다.**
+    """Approved immutable planning-driver release bound to scope and ledger."""
+    if ref.object_type != "driver":
+        stats.bump("g4_type_not_wired")
+        return ontology_resolve.unavailable("이 경영 동인 유형은 승인 판본 계약이 없습니다.")
+    try:
+        from core import planning_driver_release as release
+        row = release.effective_release(ref.object_id, as_of=str(ctx.as_of or ""))
+    except Exception as exc:
+        stats.bump("g4_release_unavailable")
+        raise OntologyResolverError("승인된 경영 동인 판본을 읽지 못했습니다.") from exc
+    if not row:
+        stats.bump("g4_driver_unbound")
+        return ontology_resolve.unbound("그 시점에 유효한 승인 동인 판본이 없습니다.")
+    scope = _scope(row["tenant_id"], row["entity_mode"], row["scope_node_id"])
+    if scope is None:
+        return ontology_resolve.unavailable("승인 동인 판본의 조직 범위가 비어 있습니다.")
+    try:
+        from core import ontology_object_display
+        descriptor = ontology_object_display.describe_driver_object(
+            object_id=ref.object_id, name=row["name"], version=int(row["version"]),
+            fingerprint=row["fingerprint"], category=row["category"], unit=row["unit"],
+            external_code=row["external_code"], approved_at=row["approved_at"])
+    except Exception as exc:
+        stats.bump("g4_display_unavailable")
+        return ontology_resolve.unavailable(f"경영 동인 표시 설명을 만들지 못했습니다: {exc}")
+    stats.bump("g4_driver_resolved")
+    return ontology_resolve.found(
+        scope, row_evidence=f"approval={row['approval_event_id']};version={row['version']}",
+        data_kind="APPROVED_DRIVER", display_name=descriptor.display_name,
+        display_fingerprint=descriptor.display_fingerprint)
 
-    ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
-      경로를 조용히 지우고 화면은 「영향 경로 없음」을 그린다 — 사용자는 그것을
-      사실로 읽는다. 배선이 없는 것은 사실이 아니라 **우리 쪽 미완성**이다."""
-    stats.bump("g4_not_wired")
-    raise OntologyResolverError(
-        f"계산 Driver·결과 namespace 는 아직 범위 계약이 "
-        f"없습니다({ref.key}).")
+
+def current_g4_object_types() -> tuple[str, ...]:
+    """Return current binding at type level; never expose driver count or IDs."""
+    from core import planning_driver_release as release
+    from core.planning_model import planning_store
+    conn = planning_store._connect()
+    try:
+        codes = [str(row[0]) for row in conn.execute(
+            "SELECT DISTINCT driver_code FROM driver_releases ORDER BY driver_code").fetchall()]
+    except sqlite3.Error as exc:
+        raise OntologyResolverError("경영 동인 판본 저장소를 읽지 못했습니다.") from exc
+    finally:
+        conn.close()
+    for code in codes:
+        try:
+            if release.effective_release(code):
+                return ("driver",)
+        except Exception as exc:
+            raise OntologyResolverError("경영 동인 승인 결속을 확인하지 못했습니다.") from exc
+    return ()
+
+
+def _instant(value: object) -> Optional[datetime]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise OntologyResolverError(f"업무 객체 시각을 읽지 못했습니다: {raw!r}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _decision_row(decision_id: str) -> Optional[dict]:
+    """Read the authoritative case without creating or migrating its database."""
+    from core.collaboration_store import collaboration_store
+
+    path = Path(collaboration_store.db_path)
+    if not path.is_file():
+        raise OntologyResolverError("의사결정 정본 저장소가 준비되지 않았습니다.")
+    try:
+        conn = sqlite3.connect(
+            f"file:{path.resolve().as_posix()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT decision_id,tenant_id,scope_id,question,evidence_hash,"
+                "package_version,status,outcome,created_by,created_at,updated_at "
+                "FROM decision_cases WHERE decision_id=?", (decision_id,)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        raise OntologyResolverError("의사결정 정본 저장소를 읽지 못했습니다.") from exc
+    return dict(row) if row else None
+
+
+def current_decision_object_types() -> tuple[str, ...]:
+    """Return type-level current binding only; never expose case counts or IDs."""
+    from core.collaboration_store import collaboration_store
+    from core.enterprise_context.repository import ecm_repository
+
+    path = Path(collaboration_store.db_path)
+    if not path.is_file():
+        raise OntologyResolverError("의사결정 정본 저장소가 준비되지 않았습니다.")
+    try:
+        conn = sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT tenant_id,scope_id,question,evidence_hash,created_at,updated_at,status "
+                "FROM decision_cases WHERE status<>'CANCELLED' ORDER BY updated_at DESC"
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        raise OntologyResolverError("의사결정 정본 저장소를 읽지 못했습니다.") from exc
+    for raw in rows:
+        row = dict(raw)
+        tenant = str(row.get("tenant_id") or "").strip()
+        scope_id = str(row.get("scope_id") or "").strip()
+        if not all((tenant, scope_id, str(row.get("question") or "").strip(),
+                    str(row.get("evidence_hash") or "").strip(),
+                    str(row.get("created_at") or "").strip(),
+                    str(row.get("updated_at") or "").strip())):
+            continue
+        try:
+            node = ecm_repository.get_node(scope_id)
+            entity = ecm_repository.get_entity(getattr(node, "entity_id", "") or "") \
+                if node else None
+        except Exception as exc:
+            raise OntologyResolverError("의사결정의 조직 정본을 읽지 못했습니다.") from exc
+        if (node and entity and str(getattr(node, "tenant_id", "") or "") == tenant
+                and str(getattr(entity, "entity_mode", "") or "").strip()):
+            return ("decision",)
+    return ()
+
+
+def current_scenario_object_types() -> tuple[str, ...]:
+    """Return scenario type readiness without exposing release counts or IDs."""
+    from core.decision_ledger import decision_ledger
+    from core.planning_model import planning_store
+    from core import planning_scenario_release
+
+    conn = planning_store._connect()
+    try:
+        scenario_ids = [str(row[0]) for row in conn.execute(
+            "SELECT DISTINCT scenario_id FROM scenario_releases").fetchall()]
+    except sqlite3.Error as exc:
+        raise OntologyResolverError("승인 시나리오 판본 저장소를 읽지 못했습니다.") from exc
+    finally:
+        conn.close()
+    for scenario_id in scenario_ids:
+        try:
+            if planning_scenario_release.effective_release(
+                    scenario_id, store=planning_store, ledger=decision_ledger):
+                return ("scenario",)
+        except Exception as exc:
+            raise OntologyResolverError("시나리오 승인 판본을 검증하지 못했습니다.") from exc
+    return ()
+
+
+def _decision_scope(row: dict, ctx: ontology_resolve.ResolveContext):
+    """Bind a decision's stored scope node to its canonical ECM execution mode."""
+    from core.enterprise_context.repository import ecm_repository
+
+    tenant_id = str(row.get("tenant_id") or "").strip()
+    scope_node_id = str(row.get("scope_id") or "").strip()
+    if not tenant_id or not scope_node_id:
+        return None
+    try:
+        node = ecm_repository.get_node(scope_node_id)
+        entity = ecm_repository.get_entity(getattr(node, "entity_id", "") or "") if node else None
+    except Exception as exc:
+        raise OntologyResolverError("의사결정의 조직 범위를 읽지 못했습니다.") from exc
+    if not node or not entity:
+        raise OntologyResolverError("의사결정이 가리키는 조직 정본이 없습니다.")
+    node_tenant = str(getattr(node, "tenant_id", "") or "").strip()
+    if node_tenant != tenant_id:
+        raise OntologyResolverError("의사결정과 조직 정본의 tenant가 일치하지 않습니다.")
+    mode = str(getattr(entity, "entity_mode", "") or "").strip()
+    if not mode:
+        raise OntologyResolverError("의사결정 조직의 실행 문맥이 비어 있습니다.")
+    if ctx.tenant_id and ctx.tenant_id != tenant_id:
+        return ontology_resolve.not_found("현재 tenant의 의사결정이 아닙니다.")
+    if ctx.entity_mode and ctx.entity_mode != mode:
+        return ontology_resolve.not_found("현재 실행 문맥의 의사결정이 아닙니다.")
+    return _scope(
+        tenant_id, mode, scope_node_id,
+        owner_dept_id=str(getattr(node, "dept_id", "") or ""),
+        owner_user_id=str(row.get("created_by") or ""),
+        status="active")
 
 
 def _resolve_decision(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
-    """시나리오·의사결정. **아직 범위 계약이 없다.**
+    """Resolve decision cases and immutable approved scenario releases."""
+    if ref.object_type == "scenario":
+        from core import planning_scenario_release
+        from core.decision_ledger import decision_ledger
+        from core.planning_model import planning_store
 
-    ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
-      경로를 조용히 지우고 화면은 「영향 경로 없음」을 그린다 — 사용자는 그것을
-      사실로 읽는다. 배선이 없는 것은 사실이 아니라 **우리 쪽 미완성**이다."""
-    stats.bump("decision_not_wired")
-    raise OntologyResolverError(
-        f"시나리오·의사결정 namespace 는 아직 범위 계약이 "
-        f"없습니다({ref.key}).")
+        try:
+            row = planning_scenario_release.effective_release(
+                ref.object_id, ctx.as_of, store=planning_store, ledger=decision_ledger)
+        except Exception as exc:
+            stats.bump("scenario_release_unreadable")
+            raise OntologyResolverError("승인 시나리오 판본을 확인하지 못했습니다.") from exc
+        if not row:
+            stats.bump("scenario_not_approved")
+            return ontology_resolve.unbound("기준 시각에 유효한 승인 시나리오 판본이 없습니다.")
+        scenario_scope = _decision_scope({
+            "tenant_id": row["tenant_id"], "scope_id": row["scope_node_id"],
+            "created_by": row["approved_by"],
+        }, ctx)
+        if isinstance(scenario_scope, ontology_resolve.ObjectResolution):
+            return scenario_scope
+        if scenario_scope is None:
+            return ontology_resolve.unbound("승인 시나리오의 조직 범위가 결속되지 않았습니다.")
+        try:
+            from core import ontology_object_display
+            descriptor = ontology_object_display.describe_scenario_object(
+                object_id=ref.object_id, name=row["name"], version=int(row["version"]),
+                fingerprint=row["fingerprint"], baseline_kind=row["baseline_kind"],
+                baseline_period=row["baseline_period"], approved_at=row["approved_at"])
+        except Exception as exc:
+            stats.bump("scenario_display_unavailable")
+            return ontology_resolve.unavailable(
+                f"승인 시나리오 표시 설명을 만들지 못했습니다: {exc}")
+        stats.bump("scenario_resolved")
+        return ontology_resolve.found(
+            scenario_scope,
+            row_evidence=(f"scenario_release:fingerprint={row['fingerprint']}:"
+                          f"version={row['version']}:approval={row['approval_event_id']}"),
+            data_kind=scenario_scope.entity_mode,
+            display_name=descriptor.display_name,
+            display_fingerprint=descriptor.display_fingerprint)
+
+    if ref.object_type != "decision":
+        stats.bump("decision_type_not_wired")
+        raise OntologyResolverError(
+            f"이 시나리오·의사결정 유형은 승인·유효시점 계약이 아직 없습니다({ref.key}).")
+    row = _decision_row(ref.object_id)
+    if not row:
+        stats.bump("decision_not_found")
+        return ontology_resolve.not_found("의사결정 안건이 없습니다.")
+    if str(row.get("status") or "").upper() == "CANCELLED":
+        stats.bump("decision_cancelled")
+        return ontology_resolve.unbound("취소된 의사결정 안건입니다.")
+
+    created = _instant(row.get("created_at"))
+    updated = _instant(row.get("updated_at"))
+    if created is None or updated is None:
+        stats.bump("decision_time_unreadable")
+        raise OntologyResolverError("의사결정 안건의 생성·갱신 시각이 비어 있습니다.")
+    cutoff = _instant(ctx.as_of) if str(ctx.as_of or "").strip() else None
+    if cutoff and cutoff < created:
+        stats.bump("decision_not_created_as_of")
+        return ontology_resolve.unbound("기준 시각에는 아직 생성되지 않은 안건입니다.")
+    if cutoff and cutoff < updated:
+        # decision_cases is the current projection, not an append-only version
+        # store.  Returning it for an earlier time would leak future edits.
+        stats.bump("decision_historical_version_unavailable")
+        return ontology_resolve.unavailable(
+            "기준 시각의 의사결정 안건 판본을 재구성할 수 없습니다.")
+
+    scope_or_resolution = _decision_scope(row, ctx)
+    if isinstance(scope_or_resolution, ontology_resolve.ObjectResolution):
+        return scope_or_resolution
+    if scope_or_resolution is None:
+        stats.bump("decision_scope_unbound")
+        return ontology_resolve.unbound("의사결정 안건의 조직 범위가 결속되지 않았습니다.")
+    try:
+        from core import ontology_object_display
+        descriptor = ontology_object_display.describe_decision_object(
+            object_id=str(row.get("decision_id") or ""),
+            question=str(row.get("question") or ""),
+            evidence_hash=str(row.get("evidence_hash") or ""),
+            package_version=int(row.get("package_version") or 0),
+            status=str(row.get("status") or ""),
+            outcome=str(row.get("outcome") or ""),
+            updated_at=str(row.get("updated_at") or ""),
+        )
+    except Exception as exc:
+        stats.bump("decision_display_unavailable")
+        return ontology_resolve.unavailable(
+            f"의사결정 표시 설명을 만들지 못했습니다: {exc}")
+    stats.bump("decision_resolved")
+    return ontology_resolve.found(
+        scope_or_resolution,
+        row_evidence=(f"decision_cases:evidence={row.get('evidence_hash')}:"
+                      f"version={row.get('package_version')}"),
+        data_kind=scope_or_resolution.entity_mode,
+        display_name=descriptor.display_name,
+        display_fingerprint=descriptor.display_fingerprint,
+    )
 
 
 def _resolve_knowledge(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
-    """승인된 지식. **아직 범위 계약이 없다.**
+    """Resolve a source-byte and ledger-bound reference asset."""
+    if ref.object_type != "reference-asset":
+        stats.bump("knowledge_type_not_wired")
+        return ontology_resolve.unavailable("이 승인 지식 유형은 범위 계약이 없습니다.")
+    try:
+        from core import knowledge_asset_release as release
+        from core.reference_registry import REFERENCE_ROOT, REGISTRY_PATH
+        asset = release.effective_asset(
+            ref.object_id, str(ctx.as_of or ""), registry_path=REGISTRY_PATH,
+            reference_root=REFERENCE_ROOT)
+    except release.KnowledgeAssetError as exc:
+        stats.bump("knowledge_release_unavailable")
+        raise OntologyResolverError("승인 지식 판본을 검증하지 못했습니다.") from exc
+    if not asset:
+        stats.bump("knowledge_asset_unbound")
+        return ontology_resolve.unbound("기준 시각에 유효한 원장 결속 지식 판본이 없습니다.")
+    tenant_id = str(asset.get("approval_tenant_id") or "")
+    entity_mode = str(asset.get("approval_entity_mode") or "")
+    scope_node_id = str(asset.get("approval_scope_node_id") or "")
+    scope = _scope(tenant_id, entity_mode, scope_node_id,
+                   owner_user_id=str(asset.get("approved_by") or ""))
+    if scope is None:
+        return ontology_resolve.unavailable("승인 지식 판본의 조직 범위가 비어 있습니다.")
+    try:
+        from core import ontology_object_display
+        descriptor = ontology_object_display.describe_knowledge_asset(
+            object_id=ref.object_id, filename=str(asset.get("filename") or ""),
+            pack_id=str(asset.get("pack_id") or ""),
+            classification=str(asset.get("classification") or ""),
+            approved_sha256=str(asset.get("approved_sha256") or ""),
+            approval_fingerprint=str(asset.get("approval_fingerprint") or ""),
+            approved_at=str(asset.get("approved_at") or ""))
+    except Exception as exc:
+        stats.bump("knowledge_display_unavailable")
+        return ontology_resolve.unavailable("승인 지식의 사람용 표시 설명을 만들지 못했습니다.")
+    stats.bump("knowledge_asset_resolved")
+    return ontology_resolve.found(
+        scope, snapshot_id=str(asset.get("approval_fingerprint") or ""),
+        row_evidence=(f"reference_registry:approval={asset.get('approval_event_id')}:"
+                      f"sha256={asset.get('approved_sha256')}"),
+        data_kind="APPROVED_KNOWLEDGE", display_name=descriptor.display_name,
+        display_fingerprint=descriptor.display_fingerprint)
 
-    ⚠️ [P0-3] `None`(=안 보인다)이 아니라 **장애**로 올린다. `None` 이면 런타임이
-      경로를 조용히 지우고 화면은 「영향 경로 없음」을 그린다 — 사용자는 그것을
-      사실로 읽는다. 배선이 없는 것은 사실이 아니라 **우리 쪽 미완성**이다."""
-    stats.bump("knowledge_not_wired")
-    raise OntologyResolverError(
-        f"승인된 지식 namespace 는 아직 범위 계약이 "
-        f"없습니다({ref.key}).")
+
+def current_knowledge_object_types() -> tuple[str, ...]:
+    """Return current effective type only; never expose asset counts or names."""
+    try:
+        from core import knowledge_asset_release as release
+        from core.reference_registry import REFERENCE_ROOT, REGISTRY_PATH
+        return release.current_object_types(
+            registry_path=REGISTRY_PATH, reference_root=REFERENCE_ROOT)
+    except release.KnowledgeAssetError as exc:
+        raise OntologyResolverError("승인 지식 판본 저장소를 읽지 못했습니다.") from exc
 
 
 #: namespace → 해석기. ★ **닫힌 표다.** 여기 없는 namespace 는 `None` 이다.

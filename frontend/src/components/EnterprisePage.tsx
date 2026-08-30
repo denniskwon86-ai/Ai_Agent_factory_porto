@@ -88,12 +88,26 @@ const NODE_STATUS_KO: Record<string, string> = {
  *  ⚠️ 이 목록은 `core/calc_graph.OUTPUTS` 의 **복제**다 — 서버가 다섯을 바꾸면 여기도
  *    바뀌어야 한다. 값을 실을 때는 응답의 `labels` 를 쓰고, 여기 이름은 **빈 상태의
  *    자리표시**로만 쓴다. */
-const IMPACT_SLOTS: { label: string; tone: string }[] = [
-  { label: '생산량', tone: '' },
-  { label: '기말재고', tone: 'risk' },
-  { label: '기말현금', tone: 'good' },
-  { label: '영업이익', tone: '' },
+type ImpactKey = 'production_qty' | 'ending_inventory' | 'ending_cash' | 'operating_profit';
+
+const IMPACT_SLOTS: { key: ImpactKey; label: string; tone: string }[] = [
+  { key: 'production_qty', label: '생산량', tone: '' },
+  { key: 'ending_inventory', label: '기말재고', tone: 'risk' },
+  { key: 'ending_cash', label: '기말현금', tone: 'good' },
+  { key: 'operating_profit', label: '영업이익', tone: '' },
 ];
+
+function impactValue(row?: { scenario: number; unit: string }): string {
+  if (!row || !Number.isFinite(Number(row.scenario))) return '—';
+  const value = Number(row.scenario);
+  if (row.unit === '원') {
+    const eok = value / 100_000_000;
+    return eok >= 1000
+      ? `${(eok / 10000).toFixed(2)}조원`
+      : `${eok.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}억원`;
+  }
+  return `${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}${row.unit}`;
+}
 
 const LAYERS: { id: Layer; label: string; desc: string; color: string }[] = [
   { id: 'DATA', label: 'DATA 근거', desc: '업무가 참조하는 인증 데이터·계약·현장 이벤트',
@@ -473,6 +487,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
   const decisions = q.filter((i) => i.section !== 'programs');
   const programs = q.filter((i) => i.section === 'programs');
   const focus = q.find((i) => i.ref === pickedRef) || decisions[0] || null;
+  const focusImpact = new Map((focus?.impact_rows || []).map((row) => [row.key, row]));
   //: ★ 지금 초점이 무엇인가를 **한 곳**에서 만든다 — 가운데 패널과 비서가 같은 말을 해야 한다.
   const focusLabel = pickedStep ? pickedStep.label
     : (focus ? (SECTION_KO[focus.section] || focus.section) : '');
@@ -759,7 +774,9 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
                     // ⚠️ 「아직 못 읽음」과 「막힘 없음」은 다른 사실이다.
                     <span>계산이 도는지 확인하는 중…</span>
                   ) : calcWhy.status === 'READY' ? (
-                    <span>계산 관문은 모두 서 있습니다 — 경로 계산을 돌리면 오른쪽 값이 채워집니다.</span>
+                    <span>{focusImpact.size
+                      ? '봉인된 계산 결과입니다 — 각 값은 기준 대비 시나리오 결과입니다.'
+                      : '계산 관문은 모두 서 있습니다 — 경로 계산을 돌리면 오른쪽 값이 채워집니다.'}</span>
                   ) : (
                     <>
                       {/* ★ 한 줄로 둔다 — 이 패널은 시안에서 214px 이고, 여기가 길어지면
@@ -792,9 +809,12 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
                     「여백이 틀어졌다」의 원인은 여백 값이 아니라 **격자 구조**였다. */}
               <div className="impact">
                 {IMPACT_SLOTS.map((s) => (
-                  <div key={s.label} className={s.tone}>
+                  <div key={s.key} className={s.tone}
+                    title={focusImpact.get(s.key)
+                      ? `기준 대비 ${Number(focusImpact.get(s.key)!.delta).toLocaleString('ko-KR')}${focusImpact.get(s.key)!.unit}`
+                      : '계산 결과가 없는 항목입니다.'}>
                     <span>{s.label}</span>
-                    <b>—</b>
+                    <b>{impactValue(focusImpact.get(s.key))}</b>
                   </div>
                 ))}
               </div>
@@ -898,6 +918,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
             if (t.includes('release') || t.includes('promotion')) onOpenMenu('workspace');
             else if (t.includes('contract') || t.includes('data')) onOpenMenu('governance');
             else if (t.includes('agent') || t.includes('asset')) onOpenMenu('agent-gov');
+            else if (t.includes('decision')) onOpenMenu('decision-pkg');
             else onOpenMenu('briefing');
           }} />
       )}

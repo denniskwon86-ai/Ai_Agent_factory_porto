@@ -20,6 +20,7 @@
 //   설명할 수 없다. 그래서 문서마다 출처·청크 수·등록 시각을 함께 싣고, 값이 없으면 빈칸이
 //   아니라 «미상»이라고 쓴다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { allocateSystemIds } from '../lib/systemIdApi';
 
 import { HubDialog } from '../design/HubDialog';
 import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../design/HubShell';
@@ -31,6 +32,8 @@ import {
 import { EmptyOrError, Metric, failed, loading, ok, refreshing, type Loaded } from '../design/DataState';
 import { errorTitle } from '../lib/closedLoopFetch';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
+import { orgApi, type OrgUser } from '../lib/orgApi';
+import { fetchOrgNodeOptions, type OrgNodeOption } from '../lib/governanceApi';
 import {
   knowledgeApi, type DocumentContent, type Pack, type ReferenceAsset, type ReferenceSummary,
   type SearchHit,
@@ -68,7 +71,7 @@ export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs'
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
-  const [form, setForm] = useState({ id: '', name: '', desc: '' });
+  const [form, setForm] = useState({ name: '', desc: '' });
 
   const delPack = useConfirm<string>();
   const delDoc = useConfirm<string>();
@@ -132,7 +135,8 @@ export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs'
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((p) =>
-      p.pack_id.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q));
+      (p.name || '').toLowerCase().includes(q)
+      || (p.description || '').toLowerCase().includes(q));
   }, [rows, search]);
 
   const pack = rows.find((p) => p.pack_id === selected) || null;
@@ -155,7 +159,7 @@ export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs'
     module: `knowledge/${view}`,
     moduleTitle: MODULE[view].title,
     objectType: 'knowledge_pack',
-    selected: !semanticView && pack ? { id: pack.pack_id, title: pack.name || pack.pack_id,
+    selected: !semanticView && pack ? { id: pack.pack_id, title: pack.name || '이름 미등록 지식팩',
       meta: `문서 ${docCount}건 · ${pack.description || '설명 없음'}` } : null,
     state: packs,
     counts: { packs: packs.status === 'ok' ? rows.length : null },
@@ -163,7 +167,7 @@ export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs'
       : view === 'external' ? ['회사 조사 범위 확인', '후보 검토', '기준계획 사용 가능 여부 확인']
         : pack ? ['자료 등록', '내용 확인', '검색 품질 확인'] : ['팩 만들기'],
     evidence: !semanticView && pack ? [
-      { label: '팩 ID', value: pack.pack_id },
+      { label: '지식팩', value: pack.name || '이름 미등록' },
       { label: '문서', value: `${docCount}건` },
       { label: '등록', value: (pack.created_at || '').slice(0, 10) || '미상' },
     ] : [],
@@ -238,13 +242,15 @@ export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs'
               search={search} onSearch={setSearch} onRetry={load}
               form={form} setForm={setForm}
               onCreate={async () => {
-                const id = form.id.trim();
-                if (!id) return;
+                if (!form.name.trim()) return;
+                let id = '';
+                try { [id] = await allocateSystemIds('knowledge_pack'); }
+                catch (e: any) { setErr({ msg: e?.message || '내부 식별자를 발급하지 못했습니다.' }); return; }
                 const okd = await act('팩 생성 중',
                   () => knowledgeApi.createPack({
-                    pack_id: id, name: form.name.trim() || id, description: form.desc.trim() }),
+                    pack_id: id, name: form.name.trim(), description: form.desc.trim() }),
                   '지식팩을 만들었습니다. «자료 등록»에서 파일을 올리십시오.');
-                if (okd) { setForm({ id: '', name: '', desc: '' }); setSelected(id); setView('register'); }
+                if (okd) { setForm({ name: '', desc: '' }); setSelected(id); setView('register'); }
               }}
               confirmDel={delPack}
               onDelete={(pid: string) => act('팩 삭제 중', () => knowledgeApi.deletePack(pid),
@@ -280,7 +286,7 @@ export function KnowledgeHubPanel({ onClose, page = false, initialView = 'packs'
           )}
 
           {view === 'sources' && (
-            <SourcesView state={refSummary} onRetry={load}
+            <SourcesView state={refSummary} packs={rows} onRetry={load}
               onScan={() => act('원본 폴더 재스캔 중', knowledgeApi.referenceScan,
                 '재스캔했습니다. 등록부 수치를 확인하십시오.')} />
           )}
@@ -334,14 +340,14 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
       </div>
 
       <FoundationToolbar search={search} onSearch={onSearch}
-        placeholder="팩 ID 또는 이름으로 찾기"
-        hint="팩 ID·이름만 찾습니다. 문서 내용 검색은 «검색 품질 확인» 에서 합니다." />
+        placeholder="팩 이름 또는 설명으로 찾기"
+        hint="팩 이름·설명으로 찾습니다. 문서 내용 검색은 «검색 품질 확인» 에서 합니다." />
 
       <FoundationList kicker="PACKS" title="등록된 지식팩" state={state} onRetry={onRetry}
         rows={rows.map((p: Pack) => ({
           id: p.pack_id,
-          title: p.name || p.pack_id,
-          meta: `${p.pack_id} · 문서 ${p.documents?.length || 0}건`,
+          title: p.name || '이름 미등록 지식팩',
+          meta: `${p.description || '설명 없음'} · 문서 ${p.documents?.length || 0}건`,
           chip: (p.documents?.length || 0) > 0
             ? { label: '자료 있음', tone: 'success' as const }
             : { label: '비어 있음', tone: 'warn' as const },
@@ -352,11 +358,11 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
           : '등록된 지식팩이 없습니다. 아래에서 새로 만드십시오.'} />
 
       {pack && (
-        <Panel kicker="SELECTED" title={pack.name || pack.pack_id}>
+        <Panel kicker="SELECTED" title={pack.name || '이름 미등록 지식팩'}>
           <div style={{ padding: 15 }}>
             <EvidenceStrip
               items={[
-                { label: '팩 ID', value: pack.pack_id },
+                { label: '지식팩', value: pack.name || '이름 미등록' },
                 { label: '문서', value: `${pack.documents?.length || 0}건` },
                 { label: '만든 날', value: (pack.created_at || '').slice(0, 10) },
               ]}
@@ -368,7 +374,7 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
             </div>
             <ConfirmInline
               open={confirmDel.target === pack.pack_id}
-              title={`«${pack.name || pack.pack_id}» 을(를) 삭제합니다`}
+              title={`«${pack.name || '이름 미등록 지식팩'}» 을(를) 삭제합니다`}
               body={<>
                 등록된 문서 <b>{pack.documents?.length || 0}건</b>과 검색 색인이 함께 지워집니다.
                 이 팩을 연결한 프로젝트는 해당 지식 없이 산출물을 만들게 됩니다. 되돌릴 수 없습니다.
@@ -382,12 +388,7 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
 
       {state.status !== 'forbidden' && <Panel kicker="NEW" title="새 지식팩">
         <div style={{ padding: 15 }}>
-          <FormField label="팩 ID" required
-            hint="영문·숫자·_·- 만 씁니다. 나중에 프로젝트 설정에서 이 값으로 연결합니다.">
-            <input className="afs-input" value={form.id} placeholder="예: mfg_standard"
-              onChange={(e: any) => setForm({ ...form, id: e.target.value })} />
-          </FormField>
-          <FormField label="이름" hint="비우면 팩 ID 를 그대로 씁니다.">
+          <FormField label="이름" required hint="내부 식별자는 시스템이 자동으로 발급하고 관리합니다.">
             <input className="afs-input" value={form.name} placeholder="예: 제조 표준 지식"
               onChange={(e: any) => setForm({ ...form, name: e.target.value })} />
           </FormField>
@@ -397,7 +398,7 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
               onChange={(e: any) => setForm({ ...form, desc: e.target.value })} />
           </FormField>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button className="primary-button" disabled={!form.id.trim()} onClick={onCreate}>
+            <button className="primary-button" disabled={!form.name.trim()} onClick={onCreate}>
               지식팩 만들기
             </button>
           </div>
@@ -409,6 +410,13 @@ function PacksView({ state, rows, selected, onSelect, search, onSearch, onRetry,
 }
 
 // ── 내용 확인 ────────────────────────────────────────────────────────────────
+function formatExtractedContent(value: string): string {
+  if (!value) return '';
+  // 원문 추출기가 남긴 위치 표식은 내용이 아니라 읽기 경계다. API 원문은 그대로 두고
+  // 화면에서만 줄 경계로 펼쳐 PPT·PDF의 여러 장이 한 문단처럼 보이지 않게 한다.
+  return value.replace(/(\[\[(?:slide|page)\.[^\]]+\]\])/gi, '\n\n$1\n').trim();
+}
+
 function ContentView({ packs, pack, selected, onSelect }: {
   packs: Pack[]; pack: Pack | null; selected: string; onSelect: (id: string) => void;
 }) {
@@ -447,7 +455,7 @@ function ContentView({ packs, pack, selected, onSelect }: {
           <label className="reg-filter"><span>지식팩</span>
             <select className="afs-select" value={selected} onChange={(e) => onSelect(e.target.value)}>
               <option value="">지식팩을 선택하십시오</option>
-              {packs.map((p) => <option key={p.pack_id} value={p.pack_id}>{p.name || p.pack_id}</option>)}
+              {packs.map((p) => <option key={p.pack_id} value={p.pack_id}>{p.name || '이름 미등록 지식팩'}</option>)}
             </select>
           </label>
           {!pack ? <div className="empty-note">확인할 지식팩을 선택하십시오.</div>
@@ -478,7 +486,7 @@ function ContentView({ packs, pack, selected, onSelect }: {
               whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', fontSize: 14,
               lineHeight: 1.7, color: 'var(--surface-text)', background: 'var(--surface-sunken)',
               border: '1px solid var(--surface-border)', borderRadius: 8 }}>
-              {content.value?.content || '추출된 내용이 없습니다.'}
+              {formatExtractedContent(content.value?.content || '') || '추출된 내용이 없습니다.'}
             </pre>
             {content.value?.truncated && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
               <button className="secondary-button" onClick={() => read(filename, true)}>다음 내용 더 보기</button>
@@ -508,7 +516,7 @@ function RegisterView({ pack, state, onUpload, confirmDoc, onRemove, onGoPacks }
   const docs: any[] = pack.documents || [];
   return (
     <>
-      <ScreenHead kicker="REGISTER" title={`자료 등록 — ${pack.name || pack.pack_id}`}
+      <ScreenHead kicker="REGISTER" title={`자료 등록 — ${pack.name || '이름 미등록 지식팩'}`}
         description="같은 파일명을 다시 올리면 교체됩니다. 등록 즉시 색인에 반영됩니다."
         chip={{ label: `${docs.length}건`, tone: docs.length ? 'success' : 'warn' }} />
 
@@ -591,7 +599,7 @@ function SearchView({ pack, query, onQuery, onRun, hits, onGoPacks }: any) {
   const rows: SearchHit[] = hits.value || [];
   return (
     <>
-      <ScreenHead kicker="GROUNDING" title={`검색 품질 확인 — ${pack.name || pack.pack_id}`}
+      <ScreenHead kicker="GROUNDING" title={`검색 품질 확인 — ${pack.name || '이름 미등록 지식팩'}`}
         description="여기서 걸리지 않는 내용은 에이전트도 참고하지 못합니다. 산출물이 이상하면 먼저 여기를 확인하십시오."
         chip={{ label: `문서 ${pack.documents?.length || 0}건`, tone: 'data' }} />
 
@@ -628,7 +636,7 @@ function SearchView({ pack, query, onQuery, onRun, hits, onGoPacks }: any) {
 }
 
 // ── 원본 등록부 ──────────────────────────────────────────────────────────────
-function SourcesView({ state, onScan, onRetry }: any) {
+function SourcesView({ state, packs, onScan, onRetry }: any) {
   const s: ReferenceSummary | null = state.value;
   return (
     <>
@@ -664,7 +672,7 @@ function SourcesView({ state, onScan, onRetry }: any) {
         </div>
       </Panel>
 
-      <ReferenceTable onChanged={onRetry} />
+      <ReferenceTable packs={packs || []} onChanged={onRetry} />
     </>
   );
 }
@@ -679,13 +687,15 @@ function SourcesView({ state, onScan, onRetry }: any) {
  *   보여 줬고, 「검토 대기 N건」이라고 말하면서 **그 N건이 무엇인지는 어디에서도 볼 수 없었다.**
  *   숫자를 세는 화면과 일을 할 수 있는 화면은 다르다.
  */
-function ReferenceTable({ onChanged }: { onChanged: () => void }) {
+function ReferenceTable({ packs, onChanged }: { packs: Pack[]; onChanged: () => void }) {
   const [rows, setRows] = useState<Loaded<ReferenceAsset[]>>(loading<ReferenceAsset[]>());
   const [f, setF] = useState({ pack: '', scope: '', cls: '', ext: '', approval: '', index: '' });
   const [openId, setOpenId] = useState('');
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
+  const [orgNodes, setOrgNodes] = useState<OrgNodeOption[]>([]);
+  const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
 
   const load = useCallback(async () => {
     // §6.2 — 승인·색인 뒤 목록을 다시 읽어도 표가 사라지지 않게 한다.
@@ -697,6 +707,10 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
     }
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetchOrgNodeOptions().then(setOrgNodes).catch(() => setOrgNodes([]));
+    orgApi.users().then((r) => setOrgUsers(r.rows)).catch(() => setOrgUsers([]));
+  }, []);
 
   const all = rows.value || [];
   const opts = (pick: (a: ReferenceAsset) => string) =>
@@ -711,6 +725,14 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
     && (!f.index || a.ingestion_status === f.index));
 
   const open = all.find((a) => a.asset_id === openId) || null;
+  const packName = (id?: string) => id
+    ? (packs.find((p) => p.pack_id === id)?.name || '이름 미등록 지식팩') : '미지정';
+  const scopeName = (id?: string) => {
+    if (!id) return '미지정';
+    return orgNodes.find((n) => n.node_id === id || n.code === id)?.label || '이름 미등록 조직';
+  };
+  const personName = (id?: string) => id
+    ? (orgUsers.find((u) => u.user_id === id)?.display_name || '이름 미등록 사용자') : '';
 
   const act = async (fn: () => Promise<unknown>, label: string) => {
     setBusy(label); setErr('');
@@ -720,19 +742,23 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
     } finally { setBusy(''); }
   };
 
-  const sel = (label: string, key: keyof typeof f, values: string[]) => (
+  const sel = (label: string, key: keyof typeof f,
+    values: { value: string; label: string }[]) => (
     <label className="reg-filter">
       <span>{label}</span>
       <select className="afs-select" value={f[key]}
         onChange={(e) => setF({ ...f, [key]: e.target.value })}>
         <option value="">전체</option>
-        {values.map((v) => <option key={v} value={v}>{v}</option>)}
+        {values.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
       </select>
     </label>
   );
 
   /** 위험 열 — **분류와 승인 드리프트를 합친 한 낱말.** 색만으로 전달하지 않는다(§2.1). */
   const risk = (a: ReferenceAsset) => {
+    if (a.approval_binding === 'REAPPROVAL_REQUIRED') {
+      return { label: '원장 재승인 필요', cls: 'afs-warn-fg' };
+    }
     if (a.approval_drift === 'changed') {
       return { label: '승인 후 변경', cls: 'afs-danger-fg' };
     }
@@ -758,12 +784,12 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
       <div style={{ padding: 15 }}>
         {/* 설계 §5.6 필터 6종 */}
         <div className="reg-filters">
-          {sel('지식팩', 'pack', opts((a) => a.pack_id))}
-          {sel('범위', 'scope', opts((a) => a.scope_code))}
-          {sel('분류', 'cls', opts((a) => a.classification))}
-          {sel('확장자', 'ext', opts((a) => a.extension))}
-          {sel('승인', 'approval', opts((a) => a.approval_status))}
-          {sel('색인', 'index', opts((a) => a.ingestion_status))}
+          {sel('지식팩', 'pack', opts((a) => a.pack_id).map((v) => ({ value: v, label: packName(v) })))}
+          {sel('범위', 'scope', opts((a) => a.scope_code).map((v) => ({ value: v, label: scopeName(v) })))}
+          {sel('분류', 'cls', opts((a) => a.classification).map((v) => ({ value: v, label: v })))}
+          {sel('확장자', 'ext', opts((a) => a.extension).map((v) => ({ value: v, label: v })))}
+          {sel('승인', 'approval', opts((a) => a.approval_status).map((v) => ({ value: v, label: v })))}
+          {sel('색인', 'index', opts((a) => a.ingestion_status).map((v) => ({ value: v, label: v })))}
         </div>
 
         {err && <Banner tone="error" title="진행하지 못했습니다">{err}</Banner>}
@@ -793,12 +819,14 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
                   return (
                     <tr key={a.asset_id} className={openId === a.asset_id ? 'on' : ''}>
                       <td title={a.relative_path}>{a.filename}</td>
-                      <td>{a.scope_code || '미지정'}</td>
+                      <td>{scopeName(a.scope_code)}</td>
                       <td>
                         {a.approval_status}
+                        {a.approval_binding === 'REAPPROVAL_REQUIRED'
+                          && <span className="afs-warn-fg"> · 재승인 필요</span>}
                         <span className="afs-muted"> · {a.ingestion_status}</span>
                       </td>
-                      <td>{a.owner_org_id || '미지정'}</td>
+                      <td>{scopeName(a.owner_org_id)}</td>
                       {/* ⚠️ 「최신성」의 원천이 승인 시각뿐이다 — 파일 수정 시각을 서버가 주지
                           않는다. 그래서 «최종 수정» 이라 쓰지 않고 무엇의 시각인지 밝힌다. */}
                       <td>{a.approved_at
@@ -825,7 +853,7 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
             aria-label={`자산 상세: ${open.filename}`}>
             <header>
               <div>
-                <span>{open.pack_id || '지식팩 미지정'}</span>
+                <span>{packName(open.pack_id)}</span>
                 <b>{open.filename}</b>
               </div>
               <button className="secondary-button" onClick={() => setOpenId('')}>닫기</button>
@@ -843,16 +871,23 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
                 판단할 근거가 없습니다. 필요하면 다시 승인해 기준을 남기십시오.
               </Banner>
             )}
+            {open.approval_binding === 'REAPPROVAL_REQUIRED' && (
+              <Banner tone="warn" title="원장과 조직 문맥에 다시 승인해야 합니다">
+                이 자산의 옛 승인에는 원문 지문·ECM 조직 범위·Decision Ledger 사건이 함께
+                결속돼 있지 않습니다. 현재 조직 문맥을 선택하고 사유를 적어 다시 승인하기
+                전에는 온톨로지와 색인에서 사용하지 않습니다.
+              </Banner>
+            )}
 
             <dl className="drawer-facts">
-              <div><dt>범위</dt><dd>{open.scope_code || '미지정'}</dd></div>
-              <div><dt>소유 조직</dt><dd>{open.owner_org_id || '미지정'}</dd></div>
+              <div><dt>범위</dt><dd>{scopeName(open.scope_code)}</dd></div>
+              <div><dt>소유 조직</dt><dd>{scopeName(open.owner_org_id)}</dd></div>
               <div><dt>분류</dt><dd>{open.classification}</dd></div>
               <div><dt>추출</dt><dd>{open.extraction_status}</dd></div>
               <div><dt>색인</dt><dd>{open.ingestion_status}</dd></div>
               <div><dt>승인</dt>
                 <dd>{open.approval_status}
-                  {open.approved_by ? ` · ${open.approved_by}` : ''}</dd></div>
+                  {open.approved_by ? ` · ${personName(open.approved_by)}` : ''}</dd></div>
               <div><dt>크기</dt>
                 <dd>{(open.size_bytes / 1024).toFixed(0)} KB · {open.extension}</dd></div>
               <div><dt>내용 지문</dt>
@@ -867,7 +902,7 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
               onChange={(e) => setNote(e.target.value)} />
 
             <div className="drawer-actions">
-              <button className="secondary-button" disabled={!!busy}
+              <button className="secondary-button" disabled={!!busy || !note.trim()}
                 onClick={() => act(() => knowledgeApi.referenceApprove(open.asset_id, note),
                   'approve')}>
                 {busy === 'approve' ? '승인 중…' : '승인'}
@@ -885,7 +920,8 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
               </button>
               <button className="primary-button"
                 disabled={!!busy || open.approval_status !== 'APPROVED'
-                  || open.approval_drift === 'changed'}
+                  || open.approval_drift === 'changed'
+                  || open.approval_binding !== 'LEDGER_BOUND'}
                 onClick={() => act(() => knowledgeApi.referenceIndex([open.asset_id], false),
                   'index')}>
                 {busy === 'index' ? '색인 중…' : '색인'}
@@ -894,6 +930,13 @@ function ReferenceTable({ onChanged }: { onChanged: () => void }) {
             {open.approval_status !== 'APPROVED' && (
               <p className="afs-muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
                 승인되지 않은 자산은 색인할 수 없습니다 — 먼저 승인하십시오.
+              </p>
+            )}
+            {open.approval_status === 'APPROVED'
+              && open.approval_binding !== 'LEDGER_BOUND' && (
+              <p className="afs-muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+                옛 승인 문자열만으로는 색인할 수 없습니다 — 사유를 적고 현재 조직 문맥에서
+                다시 승인하십시오.
               </p>
             )}
           </aside>

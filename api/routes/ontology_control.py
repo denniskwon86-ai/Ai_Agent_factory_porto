@@ -211,6 +211,44 @@ def create_router(service: OntologyRuntime) -> APIRouter:
         return {"status": "success", "data": await asyncio.to_thread(
             service.model_status, contract_id)}
 
+    @router.get("/runtime/status")
+    async def runtime_status(p: Principal = Depends(current_principal)):
+        """Resolver/display readiness, distinct from model installation status.
+
+        Counts describe implemented object types only.  They never count hidden
+        business rows, so an unready namespace cannot leak another scope's data.
+        """
+        assert_identified(p, "기업 경영 의미지도")
+        from core.ontology_namespace_capabilities import runtime_status as _status
+        from core.ontology_resolvers import (current_decision_object_types,
+                                             current_g4_object_types,
+                                             current_knowledge_object_types,
+                                             current_scenario_object_types)
+        from core.data_preparation import scope_index
+        from core.data_preparation.store import data_preparation_store
+        try:
+            materialized = await asyncio.to_thread(
+                scope_index.materialized_object_types, data_preparation_store)
+        except Exception as exc:
+            _raise(OntologyIntegrityError(
+                "업무 객체 색인 준비 상태를 읽지 못했습니다."))
+            raise AssertionError("unreachable") from exc
+        materialized = dict(materialized)
+        # ECM is resolved from its own authoritative directory, not the snapshot index.
+        materialized["ecm"] = ("organization-node",)
+        try:
+            decision_types = await asyncio.to_thread(current_decision_object_types)
+            scenario_types = await asyncio.to_thread(current_scenario_object_types)
+            materialized["decision"] = tuple(sorted(set(decision_types + scenario_types)))
+            materialized["g4"] = await asyncio.to_thread(current_g4_object_types)
+            materialized["knowledge"] = await asyncio.to_thread(
+                current_knowledge_object_types)
+        except Exception as exc:
+            _raise(OntologyIntegrityError(
+                "의사결정 객체 결속 준비 상태를 읽지 못했습니다."))
+            raise AssertionError("unreachable") from exc
+        return {"status": "success", "data": _status(materialized)}
+
     @router.get("/model/{contract_id}")
     async def model_contract(contract_id: str, contract_version: str = "",
                              p: Principal = Depends(current_principal)):

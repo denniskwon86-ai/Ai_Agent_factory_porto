@@ -45,7 +45,8 @@ def _err(e: MasterDataError):
 
 # ── 요청 모델 ─────────────────────────────────────────────────────────────
 class DeptCreate(BaseModel):
-    dept_id: str
+    # 신규 화면은 내부 식별자를 받지 않는다. 레거시·이관 호출만 명시값을 허용한다.
+    dept_id: str = ""
     name_ko: str
     parent_id: str = ""
     master_domains: List[str] = []
@@ -217,9 +218,11 @@ async def dept_history(dept_id: str, p: Principal = Depends(current_principal)):
 @router.post("/departments")
 async def create_department(req: DeptCreate, p: Principal = Depends(current_principal)):
     assert_can_edit_org(p)
+    from core.system_ids import allocate
+    dept_id = (req.dept_id or "").strip() or allocate("department")[0]
     try:
         d = await asyncio.to_thread(
-            org_directory.create_department, req.dept_id, req.name_ko, req.parent_id,
+            org_directory.create_department, dept_id, req.name_ko, req.parent_id,
             req.master_domains, req.default_template_id, req.domain_agents,
             req.legacy_domain, req.aliases, req.scope_node_id, _actor(p))
     except MasterDataError as e:

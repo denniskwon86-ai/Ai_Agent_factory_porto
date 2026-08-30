@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useFactoryStore, type OutputFormat } from "../store/useFactoryStore";
+import { allocateSystemIds } from "../lib/systemIdApi";
 
 export default function FormatMasterPanel() {
   const formats = useFactoryStore((s) => s.formats);
@@ -26,14 +27,13 @@ export default function FormatMasterPanel() {
     }
   }, [editingId, formats]);
 
-  const handleCreateNew = () => {
-    const newId = prompt("새로운 포맷 ID (영문, 숫자, _ 만 사용):", "");
-    if (!newId || !newId.trim()) return;
-    if (formats.find(f => f.id === newId)) {
-      alert("이미 존재하는 ID입니다.");
-      return;
+  const handleCreateNew = async () => {
+    try {
+      const [newId] = await allocateSystemIds('output_format');
+      setEditingId(newId);
+    } catch (error: any) {
+      alert(error?.message || '새 출력 양식의 내부 식별자를 발급하지 못했습니다.');
     }
-    setEditingId(newId.trim());
   };
 
   const handleSave = async () => {
@@ -56,7 +56,8 @@ export default function FormatMasterPanel() {
       alert("기본(default) 포맷은 삭제할 수 없습니다.");
       return;
     }
-    if (!confirm(`정말 '${id}' 포맷을 삭제하시겠습니까?`)) return;
+    const label = formats.find((format) => format.id === id)?.name || '선택한 출력 양식';
+    if (!confirm(`정말 '${label}' 양식을 삭제하시겠습니까?`)) return;
     await deleteFormat(id);
     if (editingId === id) setEditingId(null);
   };
@@ -113,7 +114,9 @@ export default function FormatMasterPanel() {
                 >
                   <div>
                     <div className="text-sm font-bold text-gray-200">{f.name}</div>
-                    <div className="text-xs text-gray-500 mt-1 truncate max-w-[200px]">{f.id}</div>
+                    <div className="text-xs text-gray-500 mt-1 truncate max-w-[200px]">
+                      {f.description || '설명 미등록'}
+                    </div>
                   </div>
                   {f.id !== "default" && (
                     <button 
@@ -142,7 +145,7 @@ export default function FormatMasterPanel() {
                 <div className="flex justify-between items-end mb-2">
                   <div>
                     <h3 className="text-xl font-bold text-gray-100">양식 편집</h3>
-                    <div className="text-sm text-gray-400 mt-1">ID: <span className="text-gray-300 font-mono">{draft.id}</span></div>
+                    <div className="text-sm text-gray-400 mt-1">내부 식별자는 시스템이 자동으로 관리합니다.</div>
                   </div>
                   <div className="flex gap-2">
                     <button 

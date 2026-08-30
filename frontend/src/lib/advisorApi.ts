@@ -185,11 +185,11 @@ export const advisorApi = {
       `/api/v1/advisor/blueprints/${id}/approve`,
       { method: 'POST', body: JSON.stringify({ decision, reason }) }),
 
-  bootstrapProject: (id: string, project_id: string, template_id = '') =>
-    call<{ project_id: string; template_id: string; blueprint_id: string; entity_mode: string;
+  bootstrapProject: (id: string, project_name: string, template_id = '') =>
+    call<{ project_id: string; project_name: string; template_id: string; blueprint_id: string; entity_mode: string;
            enterprise_scope_id: string; next_step: string }>(
       `/api/v1/advisor/blueprints/${id}/bootstrap-project`,
-      { method: 'POST', body: JSON.stringify({ project_id, template_id }) }),
+      { method: 'POST', body: JSON.stringify({ project_name, template_id }) }),
 
   createDataTasks: (id: string, project_id: string) =>
     call<{ created: { task_id: string; canonical_term: string; owner_department: string;

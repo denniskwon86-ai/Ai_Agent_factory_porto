@@ -141,10 +141,28 @@ def test_대외_차단_사유에_구간_이름과_건수가_없다():
     got = pc.calculate(_req(), datasets=_datasets(), ledger_verifier=_ok_ledger,
                        relation_verifier=_ok_relation)
     public = got["blocked"]["public_reason"]
+    assert got["blocked"]["reason_code"] == pc.CALCULATION_APPROVAL_REQUIRED
+    assert got["blocked"]["reasons"] == [{
+        "code": pc.CALCULATION_APPROVAL_REQUIRED,
+        "category": "approval",
+        "message": public,
+        "next_action": "계산 실행 승인 화면에서 산식 정의와 적용 범위를 검토하십시오.",
+    }]
     for leak in ("CALC.", "LOG-02", "INV-01", "rel_1", "evt_"):
         assert leak not in public, f"대외 사유에 내부 값이 들어갔다: {leak}"
     #: ★ 그러나 내부 사유에는 **있어야** 한다 — 운영자가 고칠 수 있어야 한다.
     assert any("CALC." in r for r in got["blocked"]["internal_reasons"])
+
+
+def test_일반_응답은_내부_진단을_제거하고_원본은_보존한다():
+    got = pc.calculate(_req(), datasets=_datasets(), ledger_verifier=_ok_ledger,
+                       relation_verifier=_ok_relation)
+    public = pc.public_result(got)
+
+    assert "internal_reasons" not in public["blocked"]
+    assert public["blocked"]["reason_code"] == pc.CALCULATION_APPROVAL_REQUIRED
+    assert public["blocked"]["reasons"][0]["next_action"]
+    assert got["blocked"]["internal_reasons"], "공개 변환이 코어 진단을 훼손했다"
 
 
 # ── ② 승인 관문 ──────────────────────────────────────────────────────────

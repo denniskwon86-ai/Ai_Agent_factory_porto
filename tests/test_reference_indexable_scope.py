@@ -58,12 +58,20 @@ def _asset(aid, scope, *, approved=True):
         "approved_by": "hikwon@lsmnm.com",
         "extraction_status": "SUPPORTED",
         "classification": "INTERNAL",
+        "approved_sha256": "a" * 64,
+        "approval_fingerprint": "b" * 64,
+        "approval_event_id": f"evt-{aid}",
+        "approval_tenant_id": "tenant_default",
+        "approval_scope_node_id": scope,
+        "approval_entity_mode": "REAL",
     }
 
 
 @pytest.fixture()
-def two_orgs(tmp_path):
+def two_orgs(tmp_path, monkeypatch):
     """서로 다른 조직의 자산 둘. ★ 한쪽만 보이는 상황을 만들 수 있어야 시험이 성립한다."""
+    from core import knowledge_asset_release
+    monkeypatch.setattr(knowledge_asset_release, "effective_asset", lambda *a, **k: {"ok": True})
     return _registry(tmp_path, [_asset("REF-HQ-1", "corp-afs"),
                                 _asset("REF-PLANT-1", "plant-afs-smelting-01")])
 

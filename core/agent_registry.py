@@ -25,6 +25,7 @@ REGISTRY_PATH = os.path.join(_ROOT, "agents_registry.json")
 TEMPLATES_DIR = os.path.join(_ROOT, "templates")
 DEFAULT_TEMPLATE_ID = "default"
 _TID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_AGENT_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 # templates/ 에 있으나 워크플로우 템플릿이 아닌 예약 설정 파일(목록 노출 제외).
 # output_formats.json 은 format_control 이 출력 포맷 정의로 사용한다.
 _RESERVED_TEMPLATE_FILES = {"output_formats.json"}
@@ -138,6 +139,23 @@ def _normalize(reg: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _validate_agent_ids(reg: Dict[str, Any]) -> None:
+    """그래프 노드 식별자는 템플릿 안에서 유일하고 실행 가능한 형식이어야 한다.
+
+    UI만 검사하면 API 직접 저장으로 중복 노드가 들어와 ReactFlow와 LangGraph가 서로 다른
+    하나를 가리킬 수 있다. 저장 경계에서 다시 거부한다.
+    """
+    ids = [str(a.get("id") or "") for a in reg.get("agents", [])]
+    invalid = [agent_id for agent_id in ids if not _AGENT_ID_RE.fullmatch(agent_id)]
+    if invalid:
+        raise ValueError(
+            "잘못된 agent id 형식입니다(영문자로 시작, 허용: 영문/숫자/_): "
+            + ", ".join(invalid[:3]))
+    duplicates = sorted({agent_id for agent_id in ids if ids.count(agent_id) > 1})
+    if duplicates:
+        raise ValueError("중복 agent id 는 저장할 수 없습니다: " + ", ".join(duplicates[:3]))
+
+
 def load_registry() -> Dict[str, Any]:
     """레지스트리 로드. 파일이 없거나 손상 시 DEFAULT로 안전 폴백.
     반환 결과의 id 는 항상 'default'(기존 단일 레지스트리 = default 템플릿)로 스탬프한다."""
@@ -164,6 +182,7 @@ def save_registry(reg: Dict[str, Any]) -> Dict[str, Any]:
     norm = _normalize(reg)
     if not norm["agents"]:
         raise ValueError("최소 1개 이상의 에이전트가 필요합니다.")
+    _validate_agent_ids(norm)
     with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
         json.dump(norm, f, ensure_ascii=False, indent=2)
     return norm
@@ -287,6 +306,33 @@ def load_template(template_id: str = DEFAULT_TEMPLATE_ID) -> Dict[str, Any]:
         return _normalize(DEFAULT_REGISTRY)
 
 
+def load_template_strict(template_id: str = DEFAULT_TEMPLATE_ID) -> Dict[str, Any]:
+    """실행·지문 계산용 템플릿 로더.
+
+    조회 화면은 :func:`load_template` 의 부팅 안전 폴백을 유지한다. 실행 경로에서는 커스텀
+    템플릿이 없어졌거나 손상됐을 때 ``default`` 로 대체하면 사용자가 고른 것과 다른 흐름이
+    정상 실행처럼 보이므로 반드시 거부한다.
+    """
+    tid = _safe_tid((template_id or "").strip() or DEFAULT_TEMPLATE_ID)
+    if tid == DEFAULT_TEMPLATE_ID:
+        return load_registry()
+    path = _template_path(tid)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"워크플로우 템플릿을 찾을 수 없습니다: {tid}")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as exc:
+        raise ValueError(f"워크플로우 템플릿을 읽을 수 없습니다: {tid}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f"워크플로우 템플릿의 최상위는 객체여야 합니다: {tid}")
+    reg = _normalize(raw)
+    if not reg["agents"]:
+        raise ValueError(f"워크플로우 템플릿에 실행 에이전트가 없습니다: {tid}")
+    reg["id"] = tid
+    return reg
+
+
 def list_templates() -> List[Dict[str, Any]]:
     """공존하는 워크플로우 템플릿 요약(항상 default 포함)."""
     base = load_registry()
@@ -327,6 +373,7 @@ def save_template(template_id: str, reg: Dict[str, Any]) -> Dict[str, Any]:
     norm = _normalize(reg)
     if not norm["agents"]:
         raise ValueError("최소 1개 이상의 에이전트가 필요합니다.")
+    _validate_agent_ids(norm)
     os.makedirs(TEMPLATES_DIR, exist_ok=True)
     with open(_template_path(template_id), "w", encoding="utf-8") as f:
         json.dump(norm, f, ensure_ascii=False, indent=2)

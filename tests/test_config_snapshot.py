@@ -68,6 +68,21 @@ def test_agent_order_matters(monkeypatch):
     assert f1 != cs.capture("t").fingerprint
 
 
+@pytest.mark.parametrize("field,first,second", [
+    ("edges", [{"from": "A", "to": "B"}], [{"from": "A", "to": "C"}]),
+    ("simulation_framework", False, True),
+    ("framework_agents", {"preparation": ["A"]}, {"preparation": ["B"]}),
+    ("deliverable_type", "software_app", "report"),
+])
+def test_top_level_execution_contract_moves_fingerprint(monkeypatch, field, first, second):
+    import core.agent_asset_adapter as ad
+    base = {"agents": [{"id": "A", "enabled": True}], field: first}
+    monkeypatch.setattr(ad, "resolve_workflow", lambda tid, **kw: dict(base))
+    before = cs.capture("t").fingerprint
+    base[field] = second
+    assert before != cs.capture("t").fingerprint
+
+
 # ── ② 모르면 «없음» 이라고 쓰지 않는다 ──────────────────────────────────────
 def test_unresolved_config_is_not_an_empty_snapshot(monkeypatch):
     """★★★ 구성을 읽지 못하면 지문이 비고 **이유가 붙는다.**
@@ -161,8 +176,10 @@ def test_sprint_start_records_snapshot():
 
     import api.routes.factory_control as fc
     src = inspect.getsource(fc.start_sprint)
-    assert "config_snapshot" in src and "_snap.write" in src, "가동 시점에 남기지 않는다"
-    assert "가동은 계속" in src, "스냅샷 실패가 가동을 막으면 안 된다"
+    helper = inspect.getsource(fc._prepare_project_execution)
+    assert "_prepare_project_execution" in src, "가동 준비 공통 경로를 지나지 않는다"
+    assert "_snap.write" in helper, "가동 시점에 구성 스냅샷을 남기지 않는다"
+    assert "가동은 계속" in helper, "스냅샷 이력 쓰기 실패가 가동을 막으면 안 된다"
 
 
 def test_snapshot_json_is_serializable(tmp_path, monkeypatch):

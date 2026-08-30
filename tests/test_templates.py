@@ -65,3 +65,39 @@ def test_safe_tid_rejects_bad_ids(isolated):
     for bad in ["../etc", "a/b", "a b", "", "x.y"]:
         with pytest.raises(ValueError):
             ar._safe_tid(bad)
+
+
+def test_template_rejects_duplicate_agent_ids(isolated):
+    reg = ar.load_template("default")
+    reg["agents"].append(dict(reg["agents"][0]))
+
+    with pytest.raises(ValueError, match="중복 agent id"):
+        ar.save_template("duplicate-agent", reg)
+
+
+def test_template_rejects_agent_id_that_cannot_be_a_runtime_node(isolated):
+    reg = ar.load_template("default")
+    reg["agents"][0]["id"] = "bad agent/id"
+
+    with pytest.raises(ValueError, match="잘못된 agent id"):
+        ar.save_template("bad-agent", reg)
+
+
+def test_new_agent_is_persisted_only_in_the_selected_template(isolated):
+    before = ar.load_template("default")
+    reg = ar.copy_template("default", "pilot-flow")
+    reg["agents"].append({
+        "id": "Pilot_Optimizer",
+        "name_ko": "파일럿 최적화 에이전트",
+        "stage": "EXECUTION",
+        "category": "execution",
+        "model_tier": "pro",
+        "order": len(reg["agents"]),
+        "enabled": True,
+    })
+
+    saved = ar.save_template("pilot-flow", reg)
+
+    assert saved["agents"][-1]["id"] == "Pilot_Optimizer"
+    assert ar.load_template("pilot-flow")["agents"][-1]["id"] == "Pilot_Optimizer"
+    assert ar.load_template("default") == before

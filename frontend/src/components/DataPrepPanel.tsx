@@ -10,7 +10,6 @@ import {
   certifySnapshot, DataPrepError, getInstance, listInstances, listKits,
   listSnapshots, uploadSnapshot,
 } from '../lib/dataPrepApi';
-import { shortId } from '../lib/displayId';
 
 // [BDR-2·3·5 / Wave H] 업무 데이터 준비 패널.
 //
@@ -235,9 +234,9 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
           }
           jarvis={<JarvisRail
             contextKicker="현재 데이터 문맥"
-            contextTitle={instance?.label || instance?.kit_id || '조직 적용본을 선택하십시오'}
+            contextTitle={instance?.label || '조직 적용본을 선택하십시오'}
             contextDescription={instance
-              ? `${instance.scope_node_id || '범위 미상'} · ${instance.entity_mode || '모드 미상'}`
+              ? `${instance.entity_mode === 'VIRTUAL' ? '가상 시나리오 기준' : '실제 운영 기준'} · 현재 조직 문맥`
               : '현재 회사·조직에 적용된 업무기능을 고르면 계약과 인증판을 함께 봅니다.'}
             context={{
               current_module: `data-preparation/${activeSection}`,
@@ -258,7 +257,7 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
               })),
             }}
             evidence={instance ? [
-              { label: '조직 범위', value: instance.scope_node_id || '미상' },
+              { label: '조직 범위', value: '현재 운영 문맥' },
               { label: '원천 결속', value: `${instance.bindings?.length || 0}건` },
               { label: '데이터 판', value: `${snapshots.length}건` },
             ] : []}
@@ -293,7 +292,7 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                         fontSize: 14,
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                          <strong>{k.name || k.kit_id}</strong>
+                          <strong>{k.name || '이름 미등록 패키지'}</strong>
                           <span className={`state-chip ${ready ? 'success' : 'warn'}`}>
                             {ready ? '시연 가능' : '준비 중'}
                           </span>
@@ -324,8 +323,8 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
               {/* ★★★ 먼저 «이미 있는 것» 을 보여 준다. id 를 외워 오라고 하지 않는다. */}
               {instances === null ? (
                 <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 8 }}>
-                  적용된 패키지 목록을 지금 확인하지 못했습니다. 관리자 진단에서 식별자로
-                  확인할 수 있습니다.
+                  적용된 패키지 목록을 지금 확인하지 못했습니다. 잠시 뒤 다시 시도하거나
+                  관리자에게 데이터 준비 상태 점검을 요청하십시오.
                 </div>
               ) : instances.length === 0 ? (
                 <div style={{ fontSize: 13, color: 'var(--surface-text-muted)', marginBottom: 8 }}>
@@ -349,12 +348,9 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                         }}>
                         <span style={{ flex: 1 }}>
                           {/* 사람이 읽는 이름이 먼저다(설계 §12). */}
-                          <strong>{it.label || it.kit_id}</strong>
+                          <strong>{it.label || '이름 미등록 적용본'}</strong>
                           <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
-                            {/* ⚠️ 해시 id 를 그대로 보여 주지 않는다 — 줄이고 원래 값은
-                                `title` 로 남긴다(`lib/displayId`). */}
-                            {it.scope_node_id} · {it.entity_mode}{' · '}
-                            <span title={it.instance_id}>{shortId(it.instance_id)}</span>
+                            {it.entity_mode === 'VIRTUAL' ? '가상 기준' : '실제 운영 기준'}
                           </span>
                         </span>
                         <span style={{ color: 'var(--action-primary-bg)', fontSize: 13 }}>열기</span>
@@ -364,27 +360,8 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                 </ul>
               )}
 
-              {/* 기술 식별자는 일반 사용자 여정이 아니다. 목록 장애를 ID 암기로 우회하게 하면
-                  제품 결함이 사용자의 숙련도 문제로 바뀐다. 진단이 필요한 관리자만 펼친다. */}
-              <details style={{ marginBottom: 12 }}>
-                <summary style={{ fontSize: 12, color: 'var(--surface-text-muted)', cursor: 'pointer' }}>
-                  관리자 진단 — 적용 식별자로 열기
-                </summary>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <input
-                    value={instanceId}
-                    onChange={(e) => setInstanceId(e.target.value)}
-                    aria-label="패키지 적용 식별자"
-                    placeholder="적용 식별자"
-                    style={{
-                      flex: 1, padding: '8px 10px', border: '1px solid var(--surface-border-control)',
-                      borderRadius: 6, fontSize: 14,
-                    }} />
-                  <button className="secondary-button" onClick={() => openInstance(instanceId)}>
-                    진단 열기
-                  </button>
-                </div>
-              </details>
+              {/* 목록 장애를 ID 암기로 우회하게 하지 않는다. 기술 진단은 사용자 제품 화면이
+                  아니라 관리자 관측 도구에서 다룬다. */}
 
               {notice && (
                 <div style={{

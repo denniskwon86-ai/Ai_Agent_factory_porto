@@ -123,3 +123,10 @@ data/auth.db*
 
 # [M0] 로컬 시연 데이터 — 운영 data/ 와 다른 뿌리(scripts/run_local_demo.py)
 demo_data/
+
+# ===== Local generated artifacts =====
+# Reproducible outputs from document, browser, and regression QA.
+# Keep the files on disk; exclude them only from the Git baseline.
+/tmp/
+/output/
+/.codex/runtime-logs/

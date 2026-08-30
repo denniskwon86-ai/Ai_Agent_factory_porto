@@ -222,7 +222,7 @@ export function CompanyContextBar() {
                   {'└ '}
                 </span>
               )}
-              {d.name_ko || d.dept_id}
+              {d.name_ko || '이름 미등록 조직'}
             </button>
           ))}
           <div style={{ borderTop: '1px solid var(--surface-border)', marginTop: 6,
