@@ -7,14 +7,24 @@
  */
 
 const LABELS: Record<string, string> = {
-  as_of: '기준 시각', baseline_fingerprint: '기준선 지문', baseline_id: '기준선 ID',
-  data_kind: '데이터 구분', snapshot_ids: '사용한 인증판', assumptions: '가정',
+  as_of: '기준 시각', baseline_fingerprint: '기준선 지문', baseline_id: '기준선 연결',
+  data_kind: '데이터 구분', snapshot_ids: '인증 데이터 판', assumptions: '가정',
   compared: '지표 비교', base: '기준', scenario: '시나리오', delta: '변화',
   delta_pct: '변화율', key: '지표 코드', label: '지표', unit: '단위',
   fx_rate_pct: '환율 변동률', lead_time_days: '리드타임', power_price_pct: '전력비 변동률',
 };
 
 const label = (key: string) => LABELS[key] || key.replaceAll('_', ' ');
+
+/** 내부 식별자는 원장·API 결속에는 필요하지만 사람이 읽는 문서 값은 아니다.
+ * 값 자체를 가리는 대신 결속 여부와 개수만 보여 주어, «근거 없음»으로 오해하지 않게 한다. */
+const internalReference = (key: string) => key === 'id' || key.endsWith('_id')
+  || key.endsWith('_ids') || key.endsWith('_code');
+
+function referenceSummary(value: unknown) {
+  if (Array.isArray(value)) return value.length ? `${value.length}개 결속됨` : '연결 안 됨';
+  return value === null || value === undefined || value === '' ? '연결 안 됨' : '연결됨';
+}
 
 function scalar(value: unknown, key = '') {
   if (value === null || value === undefined || value === '') return '—';
@@ -44,11 +54,17 @@ export function StructuredValue({ value, depth = 0 }: { value: unknown; depth?: 
   }
 
   if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
     return <dl className={`structured-value-kv${depth ? ' nested' : ''}`}>
-      {Object.entries(value as Record<string, unknown>).map(([key, child]) => (
+      {Object.entries(record)
+        // 지표의 사람용 label 이 있으면 병렬 key 는 내부 코드이므로 문서에 반복하지 않는다.
+        .filter(([key]) => !(key === 'key' && typeof record.label === 'string'))
+        .map(([key, child]) => (
         <div key={key}>
           <dt>{label(key)}</dt>
-          <dd>{child !== null && typeof child === 'object'
+          <dd>{internalReference(key)
+            ? <span className="structured-value-scalar">{referenceSummary(child)}</span>
+            : child !== null && typeof child === 'object'
             ? <StructuredValue value={child} depth={depth + 1} />
             : <span className="structured-value-scalar">{scalar(child, key)}</span>}</dd>
         </div>

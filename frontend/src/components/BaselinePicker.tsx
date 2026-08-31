@@ -102,9 +102,10 @@ export function BaselinePicker({ value, onChange }: {
                   {/* ★ 색만으로 «고름» 을 나타내지 않는다(설계 §12) — 기호를 함께 둔다. */}
                   <span aria-hidden>{on ? '◉' : '○'}</span>
                   <span style={{ flex: 1 }}>
-                    <strong>{it.label || it.kit_id}</strong>
+                    <strong>{it.label || '이름 미등록 업무키트'}</strong>
                     <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
-                      {it.scope_node_id} · {it.entity_mode}
+                      {it.entity_mode === 'REAL' ? '실제 운영 기준'
+                        : it.entity_mode === 'VIRTUAL' ? '가상 시나리오 기준' : '운영 성격 미확인'}
                     </span>
                   </span>
                 </button>
@@ -144,9 +145,9 @@ export function BaselinePicker({ value, onChange }: {
                     checked={value.snapshotIds.includes(s.snapshot_id)}
                     onChange={() => toggle(s.snapshot_id)} />
                   <span style={{ flex: 1 }}>
-                    {/* ★ 사람이 읽는 이름이 먼저다(설계 §12). 이름이 없을 때만
-                        계약키를 그대로 쓴다. */}
-                    {s.label || s.dataset_contract_key}
+                    {/* ★ 사람이 읽는 이름만 보인다(설계 §12). 이름이 없으면 내부 계약키를
+                        대체 표기로 쓰지 않고, 표시명 백필이 필요하다는 사실을 드러낸다. */}
+                    {s.label || '이름 미등록 데이터 판'}
                     <span style={{ color: 'var(--surface-text-muted)', marginLeft: 8, fontSize: 12 }}>
                       {s.row_count}행 · {String(s.certified_at || '').slice(0, 16).replace('T', ' ')}
                     </span>

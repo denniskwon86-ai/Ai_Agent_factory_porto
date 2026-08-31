@@ -134,6 +134,62 @@ CREATE TABLE IF NOT EXISTS scenario_assumptions (
 );
 CREATE INDEX IF NOT EXISTS idx_assumption_scn ON scenario_assumptions(scenario_id);
 
+-- 온톨로지와 경영 보고가 참조하는 **승인 시점의 불변 시나리오 판본**.
+-- `scenarios` 는 계속 편집 가능한 초안이므로 그 행을 직접 정본으로 읽지 않는다.
+CREATE TABLE IF NOT EXISTS scenario_releases (
+    release_id        TEXT PRIMARY KEY,
+    scenario_id       TEXT NOT NULL,
+    version           INTEGER NOT NULL,
+    fingerprint       TEXT NOT NULL UNIQUE,
+    name              TEXT NOT NULL,
+    org_id            TEXT NOT NULL,
+    tenant_id         TEXT NOT NULL,
+    scope_node_id     TEXT NOT NULL,
+    entity_mode       TEXT NOT NULL,
+    baseline_kind     TEXT NOT NULL,
+    baseline_period   TEXT NOT NULL DEFAULT '',
+    assumptions_json  TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'APPROVED',
+    approved_by       TEXT NOT NULL,
+    approved_at       TEXT NOT NULL,
+    approval_event_id TEXT NOT NULL,
+    revoked_by        TEXT NOT NULL DEFAULT '',
+    revoked_at        TEXT NOT NULL DEFAULT '',
+    revocation_event_id TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    UNIQUE (scenario_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_scenario_release_effective
+    ON scenario_releases(scenario_id, approved_at, revoked_at, status);
+
+-- 수정 가능한 계획 동인·파급계수를 승인 시점에 봉인한 온톨로지 정본.
+CREATE TABLE IF NOT EXISTS driver_releases (
+    release_id TEXT PRIMARY KEY,
+    driver_code TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT '',
+    external_code TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    tenant_id TEXT NOT NULL,
+    scope_node_id TEXT NOT NULL,
+    entity_mode TEXT NOT NULL,
+    impacts_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'APPROVED',
+    approved_by TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    approval_event_id TEXT NOT NULL,
+    revoked_by TEXT NOT NULL DEFAULT '',
+    revoked_at TEXT NOT NULL DEFAULT '',
+    revocation_event_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE (driver_code, version)
+);
+CREATE INDEX IF NOT EXISTS idx_driver_release_effective
+    ON driver_releases(driver_code, approved_at, revoked_at, status);
+
 -- 시뮬레이션 실행 이력 (§11.5 simulation_runs) — 재현성의 근거
 CREATE TABLE IF NOT EXISTS simulation_runs (
     run_id         TEXT PRIMARY KEY,

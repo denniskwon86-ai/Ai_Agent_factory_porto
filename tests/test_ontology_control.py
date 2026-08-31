@@ -28,13 +28,19 @@ def _principal(user="steward@example.com"):
 
 def _resolver(hidden):
     def resolve(ref: ObjectRef, ctx: ontology_resolve.ResolveContext):
+        label = {
+            "shipment": "선적 1 · 15 TON · 2026-03-02 도착 예정",
+            "inventory-snapshot": "재고 현황 1 · 2026-03-01 기준",
+        }.get(ref.object_type, "업무 객체 · 이름 미등록")
         if ref.key in hidden:
             return ontology_resolve.found(app_policy.ResourceScope(
                 tenant_id="tenant_demo", entity_mode="VIRTUAL", scope_node_id="secret_plant",
-                owner_dept_id="secret_org", binding_state=app_policy.BOUND))
+                owner_dept_id="secret_org", binding_state=app_policy.BOUND),
+                display_name=label, display_fingerprint="b" * 64)
         return ontology_resolve.found(app_policy.ResourceScope(
             tenant_id="tenant_demo", entity_mode="VIRTUAL", scope_node_id="plant_demo",
-            owner_dept_id="org_demo", binding_state=app_policy.BOUND))
+            owner_dept_id="org_demo", binding_state=app_policy.BOUND),
+            display_name=label, display_fingerprint="a" * 64)
     return resolve
 
 
@@ -352,6 +358,12 @@ def test_objects_endpoint_lists_selectable_roots(tmp_path, monkeypatch):
             for o in data["objects"]}
     #: 승인된 관계의 **양 끝**이 후보다.
     assert keys == {"dataset:shipment:SHP-001", "dataset:inventory-snapshot:INV-001"}
+    assert {o["display_name"] for o in data["objects"]} == {
+        "선적 1 · 15 TON · 2026-03-02 도착 예정",
+        "재고 현황 1 · 2026-03-01 기준",
+    }
+    assert all(o["object_id"] not in o["display_name"] for o in data["objects"])
+    assert all(len(o["display_fingerprint"]) == 64 for o in data["objects"])
     assert set(data["object_types"]) == {"shipment", "inventory-snapshot"}
     assert data["truncated"] is False
 

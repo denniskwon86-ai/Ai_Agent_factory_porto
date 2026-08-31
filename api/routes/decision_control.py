@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +17,9 @@ from pydantic import BaseModel, ConfigDict
 from api.deps import Principal, current_principal
 from core.decision_case import (UNRESTRICTED, DecisionCaseError, DecisionNotFound,
                                 decision_case)
+from core.decision_source_binding import (DecisionSourceBlocked,
+                                          DecisionSourceNotFound,
+                                          decision_sources)
 
 router = APIRouter(tags=["Decision"])
 
@@ -59,10 +63,8 @@ class CaseCreate(BaseModel):
     question: str
     package: Dict[str, Any]
     evidence: Dict[str, Any] = {}
-    baseline_id: str = ""
-    scenario_id: str = ""
-    scope_id: str = ""
     due_at: str = ""
+    record_purpose: str = "BUSINESS"
 
 
 class ReviewRequest(BaseModel):
@@ -108,25 +110,46 @@ async def create_case(run_id: str, req: CaseCreate,
 
     ★ 세 관점 검토서를 따로 저장하지 않는다(§3-5) — 하나의 Package 를 만들고 관점별로 렌더링한다."""
     actor = _actor(p)
-    # ★★ 생성은 조회가 아니라 **새로 만드는 것**이라 `_scopes()` 를 넘기지 않는다. 대신
-    #   «내가 속하지 않은 조직 이름으로 만들 수 없다» 를 여기서 막는다 — 그러지 않으면
-    #   가시성을 막아 놓고 이 입구로 남의 부서 안건을 만들어 넣을 수 있다(발간과 같은 이유).
-    scope_id = (req.scope_id or "").strip() or (p.scope.primary_dept_id or "")
     allowed = _scopes(p)
-    if scope_id and allowed is not UNRESTRICTED and scope_id not in allowed:
+    visible_scopes = None if allowed is UNRESTRICTED else allowed
+    try:
+        # ★ 목록에서 본 실행을 **생성 시 다시 읽는다.** 화면이 baseline/scenario/scope 를
+        # 따로 보내면 서로 다른 실행의 세 값을 조합할 수 있으므로 요청 모델에서 받지 않는다.
+        source = await asyncio.to_thread(decision_sources.resolve, run_id, visible_scopes)
+    except DecisionSourceNotFound:
+        _hidden()
+    except DecisionSourceBlocked as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    if "simulation_binding" in req.evidence:
         raise HTTPException(
-            status_code=400,
-            detail=(f"'{scope_id}' 는 볼 수 있는 조직이 아닙니다 — 자신이 속한 조직으로만 "
-                    f"안건을 만들 수 있습니다."))
+            status_code=422,
+            detail="시뮬레이션 결속은 서버가 기록합니다. 사용자가 덮어쓸 수 없습니다.")
+    evidence = {**req.evidence, "simulation_binding": source["binding"]}
     try:
         data = decision_case.create(
             question=req.question, created_by=actor, simulation_run_id=run_id,
-            baseline_id=req.baseline_id, scenario_id=req.scenario_id,
-            scope_id=scope_id,
-            package=req.package, evidence=req.evidence, due_at=req.due_at)
+            baseline_id=source["baseline_id"], scenario_id=source["scenario_id"],
+            scope_id=source["scope_id"],
+            package=req.package, evidence=evidence, due_at=req.due_at,
+            record_purpose=req.record_purpose)
     except DecisionCaseError as e:
         _bad(e)
     return {"status": "success", "data": data}
+
+
+@router.get("/api/v1/decisions/sources")
+async def list_decision_sources(p: Principal = Depends(current_principal)):
+    """내 범위에서 안건으로 결속할 수 있는 실행과 차단 사유를 사람이 읽는 이름으로 돌린다."""
+    _actor(p)
+    allowed = _scopes(p)
+    visible_scopes = None if allowed is UNRESTRICTED else allowed
+    data = await asyncio.to_thread(decision_sources.list_options, visible_scopes)
+    # binding 은 생성 순간 서버가 다시 파생한다. 목록 응답에 원문 지문·내부 결속을 싣지 않는다.
+    public = [{k: v for k, v in row.items()
+               if k not in {"binding", "scenario_id", "baseline_id", "scope_id"}}
+              for row in data]
+    return {"status": "success", "data": public}
 
 
 @router.get("/api/v1/decisions/queue")

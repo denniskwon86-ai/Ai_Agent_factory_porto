@@ -232,6 +232,66 @@ class AssumptionRequest(BaseModel):
     rationale: str = ""
 
 
+class ScenarioDecisionRequest(BaseModel):
+    rationale: str
+
+
+async def _scenario_owner(p: Principal, scenario_id: str) -> dict:
+    """Read the canonical scenario scope; callers never submit scope or tenant IDs."""
+    def _read():
+        conn = planning_store._connect()
+        try:
+            row = conn.execute(
+                "SELECT org_id,tenant_id,owner_organization_id,entity_mode "
+                "FROM scenarios WHERE scenario_id=?", (scenario_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    row = await asyncio.to_thread(_read)
+    if not row:
+        raise HTTPException(status_code=404, detail="대상을 찾을 수 없습니다.")
+    await _scope(
+        p, str(row.get("org_id") or ""), scenario_id,
+        str(row.get("tenant_id") or ""), str(row.get("entity_mode") or ""))
+    return row
+
+
+@router.post("/scenarios/{scenario_id}/approve")
+async def approve_scenario(scenario_id: str, req: ScenarioDecisionRequest,
+                           p: Principal = Depends(current_principal)):
+    """Freeze the editable scenario into an immutable, ledger-backed release."""
+    _assert_identified(p, "시나리오 승인")
+    from api.deps import assert_can_manage_standard
+    from core import planning_scenario_release
+    assert_can_manage_standard(p)
+    await _scenario_owner(p, scenario_id)
+    try:
+        data = await asyncio.to_thread(
+            planning_scenario_release.approve, scenario_id, p.user_id,
+            req.rationale, store=planning_store)
+        return {"status": "success", "data": data}
+    except PlanningError as exc:
+        _err(exc)
+
+
+@router.post("/scenarios/{scenario_id}/revoke")
+async def revoke_scenario(scenario_id: str, req: ScenarioDecisionRequest,
+                          p: Principal = Depends(current_principal)):
+    """Revoke an approved release; the approval and revocation remain in the ledger."""
+    _assert_identified(p, "시나리오 승인 철회")
+    from api.deps import assert_can_manage_standard
+    from core import planning_scenario_release
+    assert_can_manage_standard(p)
+    await _scenario_owner(p, scenario_id)
+    try:
+        data = await asyncio.to_thread(
+            planning_scenario_release.revoke, scenario_id, p.user_id,
+            req.rationale, store=planning_store)
+        return {"status": "success", "data": data}
+    except PlanningError as exc:
+        _err(exc)
+
+
 @router.get("/scenarios")
 async def list_scenarios(org_id: str = "", p: Principal = Depends(current_principal)):
     """★★★ [2026-08-05 실측 결함] 익명이 시나리오 4건을 그대로 읽었다.
@@ -588,6 +648,53 @@ async def add_impact(driver_code: str, req: ImpactRequest,
         return {"status": "success", "data": data}
     except PlanningError as e:
         _err(e)
+
+
+@router.post("/drivers/{driver_code}/approve")
+async def approve_driver(driver_code: str, req: ScenarioDecisionRequest,
+                         p: Principal = Depends(current_principal)):
+    """Freeze the selected draft driver and impacts in the verified viewing context."""
+    _assert_identified(p, "경영 동인 승인")
+    from api.deps import assert_can_manage_standard, viewing_context
+    from core import planning_driver_release
+    assert_can_manage_standard(p)
+    ctx = viewing_context(p)
+    scope_node_id = str(ctx.get("scope_node_id") or "").strip()
+    tenant_id = str(ctx.get("tenant_id") or "").strip()
+    entity_mode = str(ctx.get("entity_mode") or "").strip()
+    if not all((scope_node_id, tenant_id, entity_mode)):
+        raise HTTPException(status_code=409, detail="승인할 회사·조직 문맥을 먼저 선택하십시오.")
+    try:
+        data = await asyncio.to_thread(
+            planning_driver_release.approve, driver_code, p.user_id, req.rationale,
+            tenant_id=tenant_id, scope_node_id=scope_node_id, entity_mode=entity_mode,
+            store=planning_store)
+        return {"status": "success", "data": data}
+    except PlanningError as exc:
+        _err(exc)
+
+
+@router.post("/drivers/{driver_code}/revoke")
+async def revoke_driver(driver_code: str, req: ScenarioDecisionRequest,
+                        p: Principal = Depends(current_principal)):
+    _assert_identified(p, "경영 동인 승인 철회")
+    from api.deps import assert_can_manage_standard
+    from core import planning_driver_release
+    assert_can_manage_standard(p)
+    try:
+        current = await asyncio.to_thread(
+            planning_driver_release.effective_release, driver_code, store=planning_store)
+        if not current:
+            raise PlanningError("철회할 승인 동인 판본이 없습니다.")
+        await _scope(
+            p, str(current.get("scope_node_id") or ""), driver_code,
+            str(current.get("tenant_id") or ""), str(current.get("entity_mode") or ""))
+        data = await asyncio.to_thread(
+            planning_driver_release.revoke, driver_code, p.user_id, req.rationale,
+            store=planning_store)
+        return {"status": "success", "data": data}
+    except PlanningError as exc:
+        _err(exc)
 
 
 @router.get("/drivers/{driver_code}/preview")

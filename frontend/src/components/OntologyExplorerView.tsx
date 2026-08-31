@@ -6,18 +6,46 @@ import { ConfirmInline, FormField, useConfirm } from '../design/DataFoundationSh
 import { OntologyGraphPanel } from './OntologyGraphPanel';
 import {
   ontologyApi, type ImpactResult, type OntologyConstraint, type OntologyModelContract,
-  type OntologyModelStatus, type OntologyObject, type OntologyObjectList,
+  type OntologyModelStatus, type OntologyObject, type OntologyObjectList, type OntologyRuntimeStatus,
   type OntologyProposalContext, type OntologyRelationList,
 } from '../lib/ontologyApi';
 
 const now = () => new Date().toISOString();
 const refLabel = (o: OntologyObject) => `${o.namespace}:${o.object_type}:${o.object_id}`;
+const OBJECT_TYPE_LABELS: Record<string, string> = {
+  'organization-node': '회사·조직',
+  account: '계정', 'bom-line': 'BOM 구성행', equipment: '설비', location: '위치',
+  'logistics-reference': '물류 기준', material: '자재',
+  'routing-operation': '공정 라우팅', supplier: '공급사',
+  'procurement-contract': '조달 계약', 'purchase-order-line': '구매 주문행',
+  'partner-submission': '파트너 제출', shipment: '선적',
+  'shipment-milestone': '선적 이정표', 'customs-clearance': '통관 처리',
+  'transport-event': '내륙 운송 사건', 'inventory-snapshot': '재고 현황',
+  'production-plan-line': '생산 계획행', 'production-batch': '생산 실적 배치',
+  'sales-line': '판매 주문행', 'cost-record': '원가 실적',
+  'finance-document': '재무 문서', 'ledger-line': '원장 전기행',
+  'external-observation': '대외 관측값',
+  driver: '경영 동인',
+  decision: '의사결정 안건', scenario: '승인 시나리오',
+  'reference-asset': '승인 참고자산',
+};
+const NAMESPACE_LABELS: Record<string, string> = {
+  dataset: '업무 데이터', ecm: '회사·조직', mdm: '기준정보', external: '대외정보',
+  g4: '계산 결과', decision: '의사결정', knowledge: '지식',
+};
+const EVIDENCE_LABELS: Record<string, string> = {
+  'PRC-02.po_line_id': '구매 주문행 근거', 'LOG-02.po_line_id': '선적의 구매 주문행 근거',
+  'LOG-02.shipment_id': '선적 근거', 'INV-01.material_id': '재고 품목 근거',
+  'MFG-01.material_id': '생산계획 품목 근거', 'MFG-01.plan_line_id': '생산 계획행 근거',
+  'SLS-01.plan_line_id': '판매·생산계획 연결 근거',
+};
 
 /** 승인된 관계를 사람이 직접 탐색하는 읽기 화면. 모델 설치·관계 승인은 기존 통제 API가 맡는다. */
 export function OntologyExplorerView() {
   const [asOf, setAsOf] = useState(now());
   const [namespace, setNamespace] = useState('');
   const [model, setModel] = useState<Loaded<OntologyModelStatus>>(loading<OntologyModelStatus>());
+  const [runtime, setRuntime] = useState<Loaded<OntologyRuntimeStatus>>(loading<OntologyRuntimeStatus>());
   const [objects, setObjects] = useState<Loaded<OntologyObjectList>>(loading<OntologyObjectList>());
   const [modelContract, setModelContract] = useState<Loaded<OntologyModelContract> | null>(null);
   const [relations, setRelations] = useState<Loaded<OntologyRelationList>>(loading<OntologyRelationList>());
@@ -28,7 +56,7 @@ export function OntologyExplorerView() {
   const [showProposal, setShowProposal] = useState(false);
   const [proposal, setProposal] = useState({
     constraint: '', subject: '', object: '', effective_from: now(), effective_to: '',
-    evidence: '', lineage: '',
+    lineage: '',
   });
   const [actionReason, setActionReason] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
@@ -41,11 +69,13 @@ export function OntologyExplorerView() {
 
   const load = useCallback(async () => {
     setModel(loading<OntologyModelStatus>()); setObjects(loading<OntologyObjectList>());
-    const [m, o] = await Promise.allSettled([
-      ontologyApi.modelStatus(), ontologyApi.objects(asOf, namespace),
+    setRuntime(loading<OntologyRuntimeStatus>());
+    const [m, o, r] = await Promise.allSettled([
+      ontologyApi.modelStatus(), ontologyApi.objects(asOf, namespace), ontologyApi.runtimeStatus(),
     ]);
     setModel(m.status === 'fulfilled' ? ok(m.value) : failed<OntologyModelStatus>(m.reason));
     setObjects(o.status === 'fulfilled' ? ok(o.value) : failed<OntologyObjectList>(o.reason));
+    setRuntime(r.status === 'fulfilled' ? ok(r.value) : failed<OntologyRuntimeStatus>(r.reason));
     if (o.status === 'fulfilled') {
       setRoot((prev) => prev && o.value.objects.some((v) => refLabel(v) === refLabel(prev))
         ? prev : null);
@@ -92,7 +122,7 @@ export function OntologyExplorerView() {
 
   const proposeRelation = async () => {
     if (!selectedConstraint || !proposalSubject || !proposalObject || !proposalContext.value?.ready
-      || !proposal.evidence.trim()) return;
+      || !selectedConstraint.evidence.length) return;
     setActionBusy(true); setActionMessage(null);
     try {
       await ontologyApi.propose({
@@ -102,13 +132,13 @@ export function OntologyExplorerView() {
         entity_mode: proposalContext.value.entity_mode,
         owner_organization_id: proposalContext.value.owner_organization_id,
         effective_from: proposal.effective_from, effective_to: proposal.effective_to,
-        origin: 'user', evidence_refs: splitLines(proposal.evidence),
+        origin: 'user', evidence_refs: selectedConstraint.evidence,
         source_lineage: splitLines(proposal.lineage),
         calculation_ref: selectedConstraint.calculation_ref || '', classification: 'INTERNAL',
         scope_type: 'ORG_PRIVATE',
         scope_assignments: [proposalContext.value.enterprise_scope_id],
       });
-      setProposal((v) => ({ ...v, subject: '', object: '', evidence: '', lineage: '' }));
+      setProposal((v) => ({ ...v, subject: '', object: '', lineage: '' }));
       setShowProposal(false);
       setActionMessage({ tone: 'info', text: '관계를 초안으로 제안했습니다. 검토 요청 전에는 영향 경로에 나타나지 않습니다.' });
       await loadGovernance();
@@ -140,7 +170,15 @@ export function OntologyExplorerView() {
 
   const rows = objects.value?.objects || [];
   const types = objects.value?.object_types || [];
-  const namespaces = useMemo(() => Array.from(new Set(rows.map((o) => o.namespace))).sort(), [rows]);
+  // 객체 목록은 승인된 관계의 끝점만 포함하므로 관계가 0건이면 비어 있다. 그 목록에서
+  // 필터를 만들면 이미 배선된 기준정보·대외정보·의사결정 영역까지 화면에서 사라진다.
+  // 준비도 계약이 조회 가능하다고 선언한 영역을 필터의 정본으로 사용한다.
+  const namespaces = useMemo(() => {
+    const available = (runtime.value?.namespaces || [])
+      .filter((row) => row.resolver_object_type_count > 0)
+      .map((row) => row.namespace);
+    return available.length ? available : ['ecm', 'mdm', 'dataset', 'external', 'decision'];
+  }, [runtime.value]);
   const paths = impact.value?.paths || [];
   const contractConstraints = modelContract?.value?.constraints || [];
   const contractTypes = modelContract?.value?.relation_types || [];
@@ -155,6 +193,16 @@ export function OntologyExplorerView() {
   const proposalObject = proposalObjects.find((o) => refLabel(o) === proposal.object) || null;
   const relationRows = relations.value?.relations || [];
   const selectedRelationRow = relationRows.find((r) => r.relation_id === selectedRelation) || null;
+  const relationNameById = new Map(contractTypes.map((type) => [type.id, type.name_ko || '관계']));
+  const objectByRef = new Map(rows.map((object) => [refLabel(object), object]));
+  const objectDisplay = (object: OntologyObject) => {
+    const type = OBJECT_TYPE_LABELS[object.object_type] || '업무 객체';
+    const displayName = object.display_name?.trim()
+      || objectByRef.get(refLabel(object))?.display_name?.trim();
+    return displayName || `${type} · 이름 미등록`;
+  };
+  const relationDisplay = (relationTypeId: string) => relationNameById.get(relationTypeId) || '업무 관계';
+  const evidenceDisplay = (value: string) => EVIDENCE_LABELS[value] || '계약 필수 근거';
 
   return (
     <>
@@ -168,6 +216,52 @@ export function OntologyExplorerView() {
         이 화면은 문서의 단어를 임의로 연결하지 않습니다. 설치된 의미계약과 승인된 관계,
         현재 사용자에게 보이는 범위를 모두 통과한 객체만 표시합니다.
       </Banner>
+
+      <Panel kicker="RUNTIME READINESS" title="업무 영역 연결 준비도">
+        <div style={{ padding: 15, display: 'grid', gap: 10 }}>
+          <Banner tone="warn" title="연결 전은 데이터 없음이 아닙니다">
+            이 표는 실제 데이터 건수가 아니라 정본 저장소를 안전하게 해석하고 사람용 설명으로
+            표시할 수 있는 객체 유형 수를 보여줍니다. 연결되지 않은 영역을 0건으로 표현하지 않습니다.
+          </Banner>
+          {runtime.status !== 'ok' ? (
+            <EmptyOrError state={runtime.status} error={runtime.error} onRetry={load}
+              emptyText="업무 영역 연결 준비도를 확인할 수 없습니다." />
+          ) : <>
+            <div className="metric-row">
+              <Metric label="업무 영역" state="ok"
+                value={`${runtime.value?.resolver_available_namespace_count || 0}/${runtime.value?.namespace_count || 0}`}
+                hint="Resolver 경로가 있는 영역" />
+              <Metric label="조회 가능 유형" state="ok"
+                value={`${runtime.value?.resolver_object_type_count || 0}/${runtime.value?.contract_object_type_count || 0}`}
+                hint="정본 범위 해석 가능" />
+              <Metric label="사람용 표시" state="ok"
+                value={`${runtime.value?.display_object_type_count || 0}/${runtime.value?.contract_object_type_count || 0}`}
+                hint="내부 ID 대신 설명 가능" />
+              <Metric label="현재 정본 결속" state="ok"
+                value={`${runtime.value?.materialized_object_type_count || 0}/${runtime.value?.contract_object_type_count || 0}`}
+                hint="현재 정본 저장소와 결속된 유형" />
+            </div>
+            <div className="afs-table-wrap">
+              <table className="afs-table"><thead><tr><th>업무 영역</th><th>정본 조회</th>
+                <th>사람용 표시</th><th>현재 정본 결속</th><th>현재 상태</th><th>다음 조치</th></tr></thead>
+                <tbody>{(runtime.value?.namespaces || []).map((row) => <tr key={row.namespace}>
+                  <td><b>{row.label}</b></td>
+                  <td>{row.contract_object_type_count
+                    ? `${row.resolver_object_type_count}/${row.contract_object_type_count}`
+                    : '계약 필요'}</td>
+                  <td>{row.contract_object_type_count
+                    ? `${row.display_object_type_count}/${row.contract_object_type_count}`
+                    : '계약 필요'}</td>
+                  <td>{row.contract_object_type_count
+                    ? `${row.materialized_object_type_count}/${row.contract_object_type_count}`
+                    : '계약 필요'}</td>
+                  <td>{row.message}</td><td>{row.next_action}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </>}
+        </div>
+      </Panel>
 
       {actionMessage && <Banner tone={actionMessage.tone} title={actionMessage.tone === 'error'
         ? '관계 상태를 변경하지 못했습니다' : '온톨로지 관리 결과'}>{actionMessage.text}</Banner>}
@@ -193,7 +287,8 @@ export function OntologyExplorerView() {
           ) : <OntologyGraphPanel relations={relationRows} selectedRelationId={selectedRelation}
             selectedRoot={root} onSelectRelation={(relationId) => {
               setSelectedRelation(relationId); setActionReason('');
-            }} onSelectRoot={setRoot} />}
+            }} onSelectRoot={setRoot} getObjectLabel={objectDisplay}
+            getRelationLabel={relationDisplay} />}
         </div>
       </Panel>
 
@@ -209,9 +304,9 @@ export function OntologyExplorerView() {
               <div className="person" key={`${c.contract_id || 'contract'}-${c.contract_version || i}`}>
                 <i aria-hidden="true">계</i>
                 <div>
-                  <b>{c.contract_id || '계약 ID 미상'} · {c.contract_version || '판 미상'}</b>
-                  <small>{c.integrity_status || c.status || '상태 미상'} · 승인자 {c.approved_by || '미상'}
-                    {' · '}지문 {(c.contract_fingerprint || '').slice(0, 16) || '미상'}</small>
+                  <b>설치 의미계약 {i + 1} · {c.contract_version || '판 미상'}</b>
+                  <small>{c.integrity_status || c.status || '상태 미상'} · 승인 기록 {c.approved_by ? '확인됨' : '미확인'}
+                    {' · '}무결성 {c.contract_fingerprint ? '확인됨' : '미확인'}</small>
                 </div>
               </div>
             ))}
@@ -229,9 +324,10 @@ export function OntologyExplorerView() {
               이 화면에서 임의 JSON을 직접 설치하지 않습니다.
             </Banner>
             <div className="afs-table-wrap">
-              <table className="afs-table"><thead><tr><th>관계 유형</th><th>표시명</th><th>역관계</th><th>정량</th></tr></thead>
+              <table className="afs-table"><thead><tr><th>업무 관계</th><th>표시 상태</th><th>역관계</th><th>정량</th></tr></thead>
                 <tbody>{contractTypes.map((t) => <tr key={t.id}>
-                  <td><b>{t.id}</b></td><td>{t.name_ko || '—'}</td><td>{t.inverse || '—'}</td>
+                  <td><b>{t.name_ko || '이름 미등록 관계'}</b></td><td>{t.name_ko ? '표시명 등록' : '표시명 미등록'}</td>
+                  <td>{relationNameById.get(t.inverse) || '역관계 이름 미등록'}</td>
                   <td><span className={`state-chip ${t.quantitative ? 'warn' : 'muted'}`}>
                     {t.quantitative ? '계산 필요' : '정성'}</span></td>
                 </tr>)}</tbody>
@@ -240,10 +336,11 @@ export function OntologyExplorerView() {
             <div className="afs-table-wrap">
               <table className="afs-table"><thead><tr><th>주어</th><th>관계</th><th>목적어</th><th>필수 근거·계산</th></tr></thead>
                 <tbody>{contractConstraints.map((c, i) => <tr key={`${c.relation}-${i}`}>
-                  <td>{c.subject_namespace}:{c.subject_type}</td><td><b>{c.relation}</b></td>
-                  <td>{c.object_namespace}:{c.object_type}</td>
-                  <td>{(c.evidence || []).join(' · ') || '근거 규칙 없음'}
-                    {c.calculation_ref ? <><br /><small className="afs-muted">{c.calculation_ref}</small></> : null}</td>
+                  <td>{OBJECT_TYPE_LABELS[c.subject_type] || '업무 객체'}</td>
+                  <td><b>{relationDisplay(c.relation)}</b></td>
+                  <td>{OBJECT_TYPE_LABELS[c.object_type] || '업무 객체'}</td>
+                  <td>{(c.evidence || []).map(evidenceDisplay).join(' · ') || '근거 규칙 없음'}
+                    {c.calculation_ref ? <><br /><small className="afs-muted">승인 계산 능력 필요</small></> : null}</td>
                 </tr>)}</tbody>
               </table>
             </div>
@@ -264,8 +361,7 @@ export function OntologyExplorerView() {
               onRetry={loadGovernance} emptyText="관계 제안 문맥을 확인할 수 없습니다." />
           ) : proposalContext.value?.ready ? (
             <Banner tone="info" title="현재 운영 문맥에 제안합니다">
-              테넌트 {proposalContext.value.tenant_id} · 범위 {proposalContext.value.enterprise_scope_id}
-              {' · '}소유 부서 {proposalContext.value.owner_organization_id}
+              화면 상단에서 선택한 회사·조직 범위와 현재 데이터 책임 조직에 결속합니다.
             </Banner>
           ) : (
             <Banner tone="warn" title="관계를 저장할 조직 범위를 선택하십시오">
@@ -290,26 +386,27 @@ export function OntologyExplorerView() {
                     {contractConstraints.map((c, i) => {
                       const key = `${c.subject_namespace}:${c.subject_type}|${c.relation}|${c.object_namespace}:${c.object_type}`;
                       return <option value={key} key={`${key}-${i}`}>
-                        {c.subject_type} → {c.relation} → {c.object_type}
+                        {OBJECT_TYPE_LABELS[c.subject_type] || '업무 객체'} → {relationDisplay(c.relation)} → {OBJECT_TYPE_LABELS[c.object_type] || '업무 객체'}
                       </option>;
                     })}
                   </select>
                 </FormField>
                 <FormField label="계산 참조" hint="정량 관계는 승인된 계산 능력이 별도로 필요합니다.">
-                  <input className="afs-input" readOnly value={selectedConstraint?.calculation_ref || '정성 관계'} />
+                  <input className="afs-input" readOnly value={selectedConstraint?.calculation_ref
+                    ? '승인 계산 능력 결속 필요' : '정성 관계'} />
                 </FormField>
                 <FormField label="주어 업무 객체" required>
                   <select className="afs-select" value={proposal.subject}
                     onChange={(e) => setProposal((v) => ({ ...v, subject: e.target.value }))}>
                     <option value="">주어를 선택하세요</option>
-                    {proposalSubjects.map((o) => <option key={refLabel(o)} value={refLabel(o)}>{refLabel(o)}</option>)}
+                    {proposalSubjects.map((o) => <option key={refLabel(o)} value={refLabel(o)}>{objectDisplay(o)}</option>)}
                   </select>
                 </FormField>
                 <FormField label="목적어 업무 객체" required>
                   <select className="afs-select" value={proposal.object}
                     onChange={(e) => setProposal((v) => ({ ...v, object: e.target.value }))}>
                     <option value="">목적어를 선택하세요</option>
-                    {proposalObjects.map((o) => <option key={refLabel(o)} value={refLabel(o)}>{refLabel(o)}</option>)}
+                    {proposalObjects.map((o) => <option key={refLabel(o)} value={refLabel(o)}>{objectDisplay(o)}</option>)}
                   </select>
                 </FormField>
                 <FormField label="유효 시작" required hint="끝점 자료가 인증된 시점보다 이를 수 없습니다.">
@@ -321,19 +418,21 @@ export function OntologyExplorerView() {
                     onChange={(e) => setProposal((v) => ({ ...v, effective_to: e.target.value }))} />
                 </FormField>
               </div>
-              <FormField label="근거 참조" required hint="한 줄에 하나씩 입력합니다. 필수 근거 유형은 계약 상세에서 확인합니다.">
-                <textarea className="afs-textarea" rows={3} value={proposal.evidence}
-                  onChange={(e) => setProposal((v) => ({ ...v, evidence: e.target.value }))}
-                  placeholder="예: dataset://snapshot/evidence-id" />
+              <FormField label="필수 근거" required hint="설치 계약이 정한 근거를 서버 요청에 자동 결속합니다.">
+                <div className="empty-note">{selectedConstraint
+                  ? selectedConstraint.evidence.length
+                    ? selectedConstraint.evidence.map(evidenceDisplay).join(' · ')
+                    : '이 관계에는 승인 가능한 근거 규칙이 없습니다.'
+                  : '먼저 허용 관계를 선택하십시오.'}</div>
               </FormField>
-              <FormField label="출처 계보" hint="원천·변환·검증 이력을 한 줄에 하나씩 입력합니다.">
+              <FormField label="출처 설명" hint="원천 문서명·공표 URL·변환 및 검증 설명을 한 줄에 하나씩 적습니다. 내부 ID는 입력하지 않습니다.">
                 <textarea className="afs-textarea" rows={2} value={proposal.lineage}
                   onChange={(e) => setProposal((v) => ({ ...v, lineage: e.target.value }))} />
               </FormField>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button className="primary-button" onClick={proposeRelation} disabled={actionBusy
                   || !proposalContext.value?.ready || !selectedConstraint || !proposalSubject || !proposalObject
-                  || !proposal.evidence.trim()}>초안으로 제안</button>
+                  || !selectedConstraint.evidence.length}>초안으로 제안</button>
               </div>
             </section>
           )}
@@ -358,8 +457,8 @@ export function OntologyExplorerView() {
                   onClick={() => { setSelectedRelation(r.relation_id); setActionReason(''); }}
                   style={{ width: '100%', textAlign: 'left', cursor: 'pointer', borderColor:
                     r.relation_id === selectedRelation ? 'var(--action-primary)' : undefined }}>
-                  <i aria-hidden="true">관</i><div><b>{r.relation_type_id}</b>
-                    <small>{r.subject.object_id} → {r.object.object_id}</small></div>
+                  <i aria-hidden="true">관</i><div><b>{relationDisplay(r.relation_type_id)}</b>
+                    <small>{objectDisplay(r.subject)} → {objectDisplay(r.object)}</small></div>
                   <span className={`state-chip ${r.approval_status === 'APPROVED' ? 'success'
                     : r.approval_status === 'IN_REVIEW' ? 'warn' : 'muted'}`}>{r.approval_status}</span>
                 </button>)}
@@ -367,21 +466,21 @@ export function OntologyExplorerView() {
 
               {selectedRelationRow && <section className="panel" style={{ padding: 15 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'start' }}>
-                  <div><small className="afs-muted">{selectedRelationRow.relation_id}</small>
-                    <h3 style={{ margin: '3px 0 0' }}>{refLabel(selectedRelationRow.subject)}</h3>
+                  <div><small className="afs-muted">선택한 업무 관계</small>
+                    <h3 style={{ margin: '3px 0 0' }}>{objectDisplay(selectedRelationRow.subject)}</h3>
                     <p className="section-text" style={{ margin: '5px 0' }}>
-                      <b>{selectedRelationRow.relation_type_id}</b> → {refLabel(selectedRelationRow.object)}</p></div>
+                      <b>{relationDisplay(selectedRelationRow.relation_type_id)}</b> → {objectDisplay(selectedRelationRow.object)}</p></div>
                   <span className={`state-chip ${selectedRelationRow.approval_status === 'APPROVED' ? 'success'
                     : selectedRelationRow.approval_status === 'IN_REVIEW' ? 'warn' : 'muted'}`}>
                     {selectedRelationRow.approval_status}</span>
                 </div>
                 <dl className="confirm-facts" style={{ marginTop: 12 }}>
                   <div><dt>유효 기간</dt><dd>{selectedRelationRow.effective_from} → {selectedRelationRow.effective_to || '폐지 전'}</dd></div>
-                  <div><dt>소유·범위</dt><dd>{selectedRelationRow.owner_organization_id} · {selectedRelationRow.enterprise_scope_id}</dd></div>
-                  <div><dt>근거</dt><dd>{selectedRelationRow.evidence_refs.join(' · ') || '없음'}</dd></div>
-                  <div><dt>계산 참조</dt><dd>{selectedRelationRow.calculation_ref || '정성 관계'}</dd></div>
-                  <div><dt>제출·승인</dt><dd>{selectedRelationRow.submitted_by || '미제출'} · {selectedRelationRow.approved_by || '미승인'}</dd></div>
-                  <div><dt>결정 원장</dt><dd>{selectedRelationRow.ledger_correlation_id || '아직 결속되지 않음'}</dd></div>
+                  <div><dt>소유·범위</dt><dd>현재 회사·조직 문맥에 결속</dd></div>
+                  <div><dt>근거</dt><dd>{selectedRelationRow.evidence_refs.map(evidenceDisplay).join(' · ') || '없음'}</dd></div>
+                  <div><dt>계산</dt><dd>{selectedRelationRow.calculation_ref ? '승인 계산 능력 결속' : '정성 관계'}</dd></div>
+                  <div><dt>제출·승인</dt><dd>{selectedRelationRow.submitted_by ? '제출 기록 있음' : '미제출'} · {selectedRelationRow.approved_by ? '승인 기록 있음' : '미승인'}</dd></div>
+                  <div><dt>결정 원장</dt><dd>{selectedRelationRow.ledger_correlation_id ? '결정 원장 결속 완료' : '아직 결속되지 않음'}</dd></div>
                 </dl>
 
                 {selectedRelationRow.approval_status === 'IN_REVIEW' && (
@@ -422,7 +521,7 @@ export function OntologyExplorerView() {
                     : confirmAction.target === 'approve' ? '승인 관계가 영향 경로에 사용될 수 있습니다.'
                       : confirmAction.target === 'reject' ? '검토 관계가 반려 상태로 종료됩니다.'
                         : '이 관계는 폐지 시각 이후 영향 경로에서 제외됩니다.'}
-                  affects={`${selectedRelationRow.relation_type_id} · ${selectedRelationRow.enterprise_scope_id}`}
+                  affects={`${relationDisplay(selectedRelationRow.relation_type_id)} · 현재 회사·조직 범위`}
                   reversible={confirmAction.target === 'submit' ? '검토 중에는 승인 또는 반려로 종료합니다.'
                     : confirmAction.target === 'approve' ? '직접 되돌리지 않고 별도 폐지 승인으로 종료합니다.'
                       : confirmAction.target === 'reject' ? '새 관계 제안이 필요합니다.' : '새 승인 관계를 다시 제안해야 합니다.'}
@@ -448,10 +547,11 @@ export function OntologyExplorerView() {
             <label className="reg-filter"><span>기준 시각</span>
               <input className="afs-input" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
             </label>
-            <label className="reg-filter"><span>네임스페이스</span>
+            <label className="reg-filter"><span>업무 영역</span>
               <select className="afs-select" value={namespace} onChange={(e) => setNamespace(e.target.value)}>
                 <option value="">전체</option>
-                {(namespaces.length ? namespaces : ['ecm', 'dataset']).map((v) => <option key={v}>{v}</option>)}
+                {namespaces.map((v) =>
+                  <option key={v} value={v}>{NAMESPACE_LABELS[v] || '업무 영역'}</option>)}
               </select>
             </label>
             <button className="secondary-button" style={{ alignSelf: 'end' }} onClick={load}>다시 조회</button>
@@ -464,11 +564,12 @@ export function OntologyExplorerView() {
             <div className="empty-note">승인된 활성 관계에서 시작할 수 있는 객체가 없습니다.</div>
           ) : (
             <div className="afs-table-wrap">
-              <table className="afs-table"><thead><tr><th>네임스페이스</th><th>유형</th><th>업무 객체</th><th /></tr></thead>
+              <table className="afs-table"><thead><tr><th>업무 영역</th><th>유형</th><th>업무 객체</th><th /></tr></thead>
                 <tbody>{rows.map((o) => {
                   const selected = root && refLabel(root) === refLabel(o);
                   return <tr key={refLabel(o)} className={selected ? 'on' : ''}>
-                    <td>{o.namespace}</td><td>{o.object_type}</td><td>{o.object_id}</td>
+                    <td>{NAMESPACE_LABELS[o.namespace] || '업무 영역'}</td>
+                    <td>{OBJECT_TYPE_LABELS[o.object_type] || '업무 객체'}</td><td>{objectDisplay(o)}</td>
                     <td><button className="text-button" onClick={() => setRoot(o)}>
                       {selected ? '선택됨' : '시작점 선택'}</button></td>
                   </tr>;
@@ -491,9 +592,9 @@ export function OntologyExplorerView() {
             : <div style={{ padding: 15, display: 'grid', gap: 10 }}>
               {paths.map((p, i) => <section className="panel" style={{ padding: 13 }} key={p.path_fingerprint}>
                 <b>경로 {i + 1}</b>
-                <p className="section-text">{(p.nodes || []).map(refLabel).join(' → ')}</p>
-                <small className="afs-muted">관계 {(p.edges || []).map((e) => e.relation_type_id || '미상').join(' · ')}
-                  {' · '}경로 지문 {p.path_fingerprint.slice(0, 16)}</small>
+                <p className="section-text">{(p.nodes || []).map(objectDisplay).join(' → ')}</p>
+                <small className="afs-muted">관계 {(p.edges || []).map((e) => relationDisplay(e.relation_type_id || '')).join(' · ')}
+                  {' · '}경로 무결성 확인됨</small>
               </section>)}
             </div>}
         </Panel>

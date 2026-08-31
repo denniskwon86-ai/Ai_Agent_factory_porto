@@ -25,6 +25,7 @@ def client():
 # 경로 변수 라우트에 잡아먹히기 쉬운 **고정 경로**들. 새 고정 경로를 추가하면 여기에도 넣는다.
 _LITERAL_ROUTES = [
     "/api/v1/master/records/duplicates",
+    "/api/v1/master/records/proposals",
     "/api/v1/master/scope-bindings/coverage",
     "/api/v1/master/scope-bindings/allowed?scope_node_id=node_none",
     "/api/v1/master/documents/quality",
@@ -102,3 +103,26 @@ def test_record_path_param_still_works(client):
     """고정 경로를 위로 올린 뒤에도 `/{master_code}` 가 정상이어야 한다(반대 방향 회귀)."""
     r = client.get("/api/v1/master/records/__NO_SUCH_CODE__")
     assert r.status_code == 404 and "존재하지 않는" in r.json()["detail"]
+
+
+def test_new_record_cannot_be_created_by_supplying_a_manual_code(client):
+    r = client.post("/api/v1/master/records", json={
+        "master_code": "USER-CHOSEN-001", "type_id": "anything", "name": "직접 생성 시도",
+    })
+    assert r.status_code == 409
+    assert "신규 정본 제안" in r.json()["detail"]
+
+
+def test_proposal_and_revision_contracts_do_not_ask_for_a_code(client):
+    schema = client.get("/openapi.json").json()
+    proposal_ref = schema["paths"]["/api/v1/master/records/proposals"]["post"][
+        "requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    proposal_name = proposal_ref.rsplit("/", 1)[-1]
+    proposal_props = schema["components"]["schemas"][proposal_name]["properties"]
+    assert "master_code" not in proposal_props
+
+    revision_ref = schema["paths"]["/api/v1/master/records/{master_code}"]["put"][
+        "requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    revision_name = revision_ref.rsplit("/", 1)[-1]
+    revision_props = schema["components"]["schemas"][revision_name]["properties"]
+    assert "master_code" not in revision_props

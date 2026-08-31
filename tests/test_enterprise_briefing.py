@@ -67,6 +67,14 @@ class _Skills:
         return [{"id": i} for i in range(self._n)]
 
 
+class _Decisions:
+    def __init__(self, rows=None):
+        self._rows = rows or []
+
+    def queue(self, actor):
+        return list(self._rows)
+
+
 class _Catalog:
     def __init__(self, gaps=None):
         self._g = gaps or []
@@ -98,6 +106,7 @@ def wire(monkeypatch):
         import core.connector_registry as cr
         import core.data_catalog as dc
         import core.data_contract as dct
+        import core.decision_case as dcase
         import core.program_lifecycle as pl
         import core.shadow_mode as sm
         import core.skill_evolution as se
@@ -106,6 +115,8 @@ def wire(monkeypatch):
         monkeypatch.setattr(sm, "shadow_mode", kw.get("shadow") or _Shadow(), raising=False)
         monkeypatch.setattr(cr, "connector_registry", kw.get("reg") or _Reg(), raising=False)
         monkeypatch.setattr(se, "skill_evolution", kw.get("skills") or _Skills(),
+                            raising=False)
+        monkeypatch.setattr(dcase, "decision_case", kw.get("decisions") or _Decisions(),
                             raising=False)
         monkeypatch.setattr(dc, "data_catalog", kw.get("catalog") or _Catalog(),
                             raising=False)
@@ -216,6 +227,49 @@ def test_approved_but_not_promoted_is_surfaced(eb, wire, monkeypatch):
     _cost(monkeypatch)
     kinds = [i["kind"] for i in eb.briefing()["sections"]["my_decisions"]["items"]]
     assert "promotion_approved" in kinds
+
+
+def test_검토_요청된_실제_안건이_경영_홈_대기열에_오른다(eb, wire, monkeypatch):
+    """초안은 숨기되 사람이 답해야 하는 실제 안건은 첫 화면에 보여야 한다."""
+    wire(decisions=_Decisions([
+        {"decision_id": "dec_draft", "status": "DRAFT", "my_role": "REQUESTER",
+         "question": "아직 작성 중인 초안", "due_at": ""},
+        {"decision_id": "dec_live", "status": "REVIEW_REQUESTED", "my_role": "DECIDER",
+         "question": "원료 지연에 맞춰 생산계획을 조정할 것인가", "due_at": "2026-09-04",
+         "package": {
+             "baseline": {"data_kind": "DEMO/SYNTHETIC"},
+             "options": {"compared": [
+                 {"key": "production_qty", "label": "생산량", "unit": "ton",
+                  "base": 12000, "scenario": 7200, "delta": -4800, "delta_pct": -40},
+                 {"key": "purchase_payment", "label": "구매지급", "unit": "원",
+                  "base": 1, "scenario": 2, "delta": 1, "delta_pct": 100},
+             ]},
+         }},
+        {"decision_id": "dec_done", "status": "DECIDED", "my_role": "DECIDER",
+         "question": "이미 끝난 결정", "due_at": ""},
+    ]))
+    _cost(monkeypatch)
+    items = [i for i in eb.briefing(actor="admin")["sections"]["my_decisions"]["items"]
+             if i["kind"] == "decision_case_pending"]
+    assert len(items) == 1
+    assert items[0]["ref"] == "dec_live" and items[0]["ref_type"] == "decision_case"
+    assert items[0]["severity"] == "high"
+    assert "원료 지연" in items[0]["title"] and "2026-09-04" in items[0]["why"]
+    assert items[0]["data_kind"] == "DEMO/SYNTHETIC"
+    assert [r["key"] for r in items[0]["impact_rows"]] == ["production_qty"]
+    assert items[0]["impact_rows"][0]["scenario"] == 7200
+
+
+def test_근거가_바뀐_안건은_결정자_아니어도_높은_우선순위다(eb, wire, monkeypatch):
+    wire(decisions=_Decisions([
+        {"decision_id": "dec_changed", "status": "EVIDENCE_CHANGED",
+         "my_role": "REQUESTER", "question": "바뀐 근거를 다시 볼 것인가", "due_at": ""},
+    ]))
+    _cost(monkeypatch)
+    item = next(i for i in eb.briefing(actor="owner")["sections"]["my_decisions"]["items"]
+                if i["kind"] == "decision_case_pending")
+    assert item["severity"] == "high"
+    assert "근거가 바뀌" in item["why"]
 
 
 def test_unapproved_query_contract_is_high(eb, wire, monkeypatch):

@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="ko">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LS MnM AX전략 및 AX플랫폼 도입 제안서</title>
+  <link rel="stylesheet" href="../../assets/document-v0.92.css" />
+  <style>
+    .strategy-doc .top .eyebrow,
+    .strategy-doc>.page>.eyebrow,
+    .strategy-doc .closing-copy .eyebrow {
+      font-size: 26px;
+      letter-spacing: .055em
+    }
+
+    .strategy-doc .top .eyebrow,
+    .strategy-doc .closing-copy .eyebrow {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      white-space: nowrap
+    }
+
+    .section-ko {
+      color: #657185;
+      font: 850 14px/1.2 "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif;
+      letter-spacing: -.02em;
+      text-transform: none
+    }
+
+    .section-ko:before {
+      margin-right: 8px;
+      color: #a6afbb;
+      content: "·"
+    }
+
+    .dark .section-ko,
+    .closing .section-ko {
+      color: #aebdd3
+    }
+
+    .strategy-cover {
+      background: radial-gradient(circle at 82% 18%, rgba(27, 138, 165, .28), transparent 28%), linear-gradient(135deg, #05133b, #0b2867);
+      color: #fff
+    }
+
+    .strategy-cover:after {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      width: 440px;
+      height: 440px;
+      border: 1px solid rgba(255, 255, 255, .11);
+      border-radius: 50%;
+      content: ""
+    }
+
+    .strategy-cover .cover-copy {
+      position: relative;
+      z-index: 2;
+      max-width: 940px;
+      padding-top: 58px
+    }
+
+    .strategy-cover .cover-logo {
+      width: 215px
+    }
+
+    .strategy-cover .cover-kicker {
+      margin: 54px 0 14px;
+      color: #7ed8e8;
+      font: 900 17px/1.2 "Cascadia Mono", Consolas, monospace;
+      letter-spacing: .12em
+    }
+
+    .strategy-cover h1 {
+      margin: 0;
+      font-size: 69px;
+      line-height: 1.1;
+      letter-spacing: -.06em
+    }
+
+    .strategy-cover .cover-line {
+      width: 150px;
+      height: 6px;
+      margin: 30px 0;
+      background: var(--red)
+    }
+
+    .strategy-cover .cover-sub {
+      max-width: 850px;
+      color: #cbd8ea;
+      font-size: 23px
+    }
+
+    .strategy-cover .cover-author {
+      margin-top: 48px;
+      font-size: 19px;
+      font-weight: 900
+    }
+
+    .strategy-cover .footer {
+      color: #a9bbd2;
+      border-color: rgba(255, 255, 255, .18)
+    }
+
+    .contents-title {
+      margin: 13px 0 29px;
+      font-size: 60px;
+      letter-spacing: -.055em
+    }
+
+    .contents-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px 42px
+    }
+
+    .contents-item {
+      display: grid;
+      grid-template-columns: 58px 1fr;
+      gap: 16px;
+      align-items: center;
+      padding: 13px 0;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .contents-item b {
+      color: var(--red);
+      font: 900 16px/1 "Cascadia Mono", Consolas, monospace
+    }
+
+    .contents-item strong {
+      display: block;
+      font-size: 20px
+    }
+
+    .contents-item span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px
+    }
+
+    .name-direction .name-layout {
+      display: grid;
+      grid-template-columns: .9fr 1.1fr;
+      gap: 28px;
+      align-items: center
+    }
+
+    .name-direction .screen img {
+      height: 405px
+    }
+
+    .name-direction .declaration {
+      font-size: 18px
+    }
+
+    .name-direction .grid3 {
+      margin-top: 24px
+    }
+
+    .strategy-choice-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 22px;
+      margin-top: 20px
+    }
+
+    .strategy-choice {
+      display: flex;
+      flex-direction: column;
+      min-width: 0
+    }
+
+    .strategy-option {
+      min-height: 218px
+    }
+
+    .strategy-option.rejected {
+      border: 2px dashed #a9b1bc;
+      background: #eef1f4;
+      box-shadow: none
+    }
+
+    .strategy-option.rejected .kicker {
+      color: #7d8794
+    }
+
+    .strategy-option.rejected h3 {
+      color: #4b5563
+    }
+
+    .strategy-option.rejected p {
+      color: #6c7682
+    }
+
+    .strategy-option.preferred {
+      border: 2px solid #1b8aa5;
+      border-top: 7px solid var(--red);
+      background: linear-gradient(145deg, #fff, #eaf5f8);
+      box-shadow: 0 12px 28px rgba(7, 23, 71, .12)
+    }
+
+    .strategy-verdict {
+      display: flex;
+      min-height: 46px;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding-top: 9px
+    }
+
+    .x-mark {
+      display: grid;
+      width: 31px;
+      height: 31px;
+      place-items: center;
+      color: #8a929d;
+      font: 900 28px/1 Arial, sans-serif
+    }
+
+    .target-dot {
+      width: 15px;
+      height: 15px;
+      border: 4px solid #fff;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 0 2px var(--red)
+    }
+
+    .strategy-verdict strong {
+      color: var(--red);
+      font-size: 15px
+    }
+
+    .why-now-title {
+      max-width: none !important;
+      font-size: 32px !important;
+      letter-spacing: -.06em !important;
+      white-space: nowrap
+    }
+
+    .why-now-bridge p {
+      max-width: 930px;
+      color: #fff;
+      font-size: 18px;
+      font-weight: 850;
+      line-height: 1.55
+    }
+
+    @media print {
+
+      .strategy-doc .top .eyebrow,
+      .strategy-doc>.page>.eyebrow,
+      .strategy-doc .closing-copy .eyebrow {
+        font-size: 16px
+      }
+
+      .strategy-doc .top .eyebrow,
+      .strategy-doc .closing-copy .eyebrow {
+        gap: .09in
+      }
+
+      .section-ko {
+        font-size: 9.2px
+      }
+
+      .strategy-cover .cover-copy {
+        padding-top: .38in
+      }
+
+      .strategy-cover .cover-logo {
+        width: 1.45in
+      }
+
+      .strategy-cover .cover-kicker {
+        margin: .4in 0 .09in;
+        font-size: 11px
+      }
+
+      .strategy-cover h1 {
+        font-size: 46px
+      }
+
+      .strategy-cover .cover-line {
+        width: 1in;
+        height: 4px;
+        margin: .2in 0
+      }
+
+      .strategy-cover .cover-sub {
+        font-size: 15px
+      }
+
+      .strategy-cover .cover-author {
+        margin-top: .3in;
+        font-size: 13px
+      }
+
+      .contents-title {
+        margin: .04in 0 .14in;
+        font-size: 39px
+      }
+
+      .contents-grid {
+        gap: .045in .28in
+      }
+
+      .contents-item {
+        grid-template-columns: .38in 1fr;
+        gap: .08in;
+        padding: .06in 0
+      }
+
+      .contents-item b {
+        font-size: 10px
+      }
+
+      .contents-item strong {
+        font-size: 13px
+      }
+
+      .contents-item span {
+        font-size: 8px
+      }
+
+      .name-direction .name-layout {
+        gap: .2in
+      }
+
+      .name-direction .screen img {
+        height: 2.7in
+      }
+
+      .name-direction .declaration {
+        font-size: 11px
+      }
+
+      .name-direction .grid3 {
+        margin-top: .14in
+      }
+
+      .strategy-choice-grid {
+        gap: .14in;
+        margin-top: .12in
+      }
+
+      .strategy-option {
+        min-height: 1.48in
+      }
+
+      .strategy-option.rejected {
+        border-width: 1.5px
+      }
+
+      .strategy-option.preferred {
+        border-width: 1.5px;
+        border-top-width: 5px
+      }
+
+      .strategy-verdict {
+        min-height: .29in;
+        gap: .06in;
+        padding-top: .055in
+      }
+
+      .x-mark {
+        width: .22in;
+        height: .22in;
+        font-size: 19px
+      }
+
+      .target-dot {
+        width: .1in;
+        height: .1in;
+        border-width: 3px;
+        box-shadow: 0 0 0 1.5px var(--red)
+      }
+
+      .strategy-verdict strong {
+        font-size: 10px
+      }
+
+      .why-now-title {
+        font-size: 20px !important
+      }
+
+      .why-now-bridge p {
+        max-width: 6.55in;
+        font-size: 12.5px;
+        line-height: 1.48
+      }
+    }
+    .benchmark-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.benchmark-card{position:relative;padding:22px 24px;border:1px solid var(--line);border-top:7px solid var(--cyan);background:#fff;box-shadow:0 10px 24px rgba(7,23,71,.07)}.benchmark-card.enhans{border-top-color:var(--red)}.benchmark-card .case-brand{display:flex;align-items:center;justify-content:space-between;gap:10px}.benchmark-card .case-brand b{color:var(--navy);font-size:24px}.benchmark-card .case-brand span{padding:6px 10px;border-radius:999px;background:#e9f1f5;color:#126276;font:850 10px/1 "Cascadia Mono",Consolas,monospace}.benchmark-card.enhans .case-brand span{background:#fff0f3;color:var(--red)}.benchmark-card h3{margin:15px 0 10px;font-size:23px;letter-spacing:-.035em}.benchmark-card ul{margin:0;padding-left:19px}.benchmark-card li{margin:7px 0;color:var(--muted);font-size:13px;line-height:1.46}.source-note{margin:9px 0 0;color:#788496;font-size:9px;line-height:1.35}.source-note a{color:#315c86;text-decoration:none}.decision-gap{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:18px}.decision-gap article{position:relative;padding:15px 17px;border-radius:12px;background:#edf1f5}.decision-gap article:nth-child(3){color:#fff;background:var(--navy)}.decision-gap article:not(:last-child):after{position:absolute;right:-22px;top:50%;color:var(--red);font-size:25px;font-weight:900;content:"→";transform:translateY(-50%)}.decision-gap b,.decision-gap span{display:block}.decision-gap b{font-size:16px}.decision-gap span{margin-top:5px;color:var(--muted);font-size:11px}.decision-gap article:nth-child(3) span{color:#c8d5e6}.simulation-flow{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;margin:19px 0}.simulation-flow article{position:relative;display:flex;min-height:105px;flex-direction:column;justify-content:center;padding:14px 10px;border-top:5px solid var(--cyan);background:#eef3f6;text-align:center}.simulation-flow article:nth-child(4),.simulation-flow article:nth-child(5){border-color:var(--red);background:#fff0f3}.simulation-flow article:last-child{border-color:var(--gold);background:#fff8e3}.simulation-flow article:not(:last-child):after{position:absolute;right:-9px;top:50%;z-index:2;color:#7d8fa5;font-weight:900;content:"→";transform:translate(50%,-50%)}.simulation-flow b{color:var(--navy);font-size:14px}.simulation-flow span{margin-top:5px;color:var(--muted);font-size:10px;line-height:1.35}.reason-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:11px}.reason-card{padding:15px 16px;border-left:5px solid var(--cyan);background:#fff}.reason-card:nth-child(2),.reason-card:nth-child(5){border-color:var(--red)}.reason-card h3{margin:0 0 6px;font-size:16px}.reason-card p{margin:0;color:var(--muted);font-size:11px;line-height:1.43}.reason-card.wide{grid-column:span 2}.decision-rule{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px;padding:13px;background:var(--navy)}.decision-rule article{padding:10px 11px;border:1px solid rgba(255,255,255,.18)}.decision-rule b,.decision-rule span{display:block}.decision-rule b{color:#76d5e4;font-size:11px}.decision-rule span{margin-top:4px;color:#d2dceb;font-size:9px;line-height:1.35}.case-highlight{color:var(--red);font-weight:900}
+    @media print{.benchmark-grid{gap:.12in}.benchmark-card{padding:.12in .14in}.benchmark-card .case-brand b{font-size:16px}.benchmark-card .case-brand span{padding:.035in .06in;font-size:6.7px}.benchmark-card h3{margin:.08in 0 .055in;font-size:15px}.benchmark-card li{margin:.035in 0;font-size:8.4px}.source-note{margin-top:.055in;font-size:5.9px}.decision-gap{gap:.19in;margin-top:.11in}.decision-gap article{padding:.09in .11in}.decision-gap article:not(:last-child):after{right:-.15in;font-size:17px}.decision-gap b{font-size:10.5px}.decision-gap span{font-size:7.2px}.simulation-flow{gap:.055in;margin:.11in 0}.simulation-flow article{min-height:.68in;padding:.08in .06in}.simulation-flow b{font-size:9.2px}.simulation-flow span{font-size:6.7px}.reason-grid{gap:.07in}.reason-card{padding:.09in .10in}.reason-card h3{font-size:10.5px}.reason-card p{font-size:7.2px}.decision-rule{gap:.05in;margin-top:.08in;padding:.075in}.decision-rule article{padding:.06in .07in}.decision-rule b{font-size:7.2px}.decision-rule span{font-size:6.2px}}
+  </style>
+</head>
+
+<body>
+  <div class="toolbar"><a href="../pdf/LAXS-M_v1.1_AX_Strategy_and_Adoption_Proposal_16x10.pdf" download>PDF 내려받기 ·
+      16:10</a></div>
+  <main class="deck strategy-doc">
+    <section class="page strategy-cover">
+      <div class="cover-copy">
+        <img class="cover-logo" src="../../assets/brand-v0.3/laxs-logo-primary-on-navy-v2.png" alt="LAXS-M" />
+        <p class="cover-kicker">LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</p>
+        <h1>LS MnM AX전략 및<br>AX플랫폼 도입 제안서</h1>
+        <div class="cover-line"></div>
+        <p class="cover-sub">현업 사용자의 일하는 방식 개선, 전사 데이터 연계, 전사 실적 시뮬레이션과 의사결정 체계를 하나의 AX 운영모델로 구축합니다.</p>
+        <div class="cover-author">작성자 : 권혁일(Hyuk il Kwon)</div>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>01 / 16</span>
+      </footer>
+    </section>
+
+    <section class="page soft">
+      <p class="eyebrow" style="font-size:18px">DOCUMENT MAP</p>
+      <h1 class="contents-title">목차</h1>
+      <div class="contents-grid">
+        <article class="contents-item"><b>01</b>
+          <div><strong>STRATEGIC RATIONALE</strong><span>왜 AX를 회사 운영능력으로 봐야 하는가</span></div>
+        </article>
+        <article class="contents-item"><b>02</b>
+          <div><strong>WHY NOW</strong><span>사업 변동성과 현재 판단체계의 간극</span></div>
+        </article>
+        <article class="contents-item"><b>03</b>
+          <div><strong>AX DIRECTION</strong><span>LS MnM이 가져가야 할 네 가지 AX 방향</span></div>
+        </article>
+        <article class="contents-item"><b>04</b>
+          <div><strong>NEW WAY OF WORKING</strong><span>현업 주도의 업무모델 설계와 운영</span></div>
+        </article>
+        <article class="contents-item"><b>05</b>
+          <div><strong>ENTERPRISE DATA FABRIC</strong><span>기존 시스템과 전사 경영 문맥의 연결</span></div>
+        </article>
+        <article class="contents-item"><b>06</b>
+          <div><strong>ENTERPRISE PERFORMANCE SIMULATION</strong><span>부서 시뮬레이션과 전사 실적 조합</span></div>
+        </article>
+        <article class="contents-item"><b>07</b>
+          <div><strong>DECISION SYSTEM</strong><span>질문에서 근거·대안·실행으로 이어지는 체계</span></div>
+        </article>
+        <article class="contents-item"><b>08</b>
+          <div><strong>AI &amp; AGENT OPERATING MODEL</strong><span>AI 경영비서와 역할별 에이전트 운영</span></div>
+        </article>
+        <article class="contents-item"><b>09</b>
+          <div><strong>OPERATING GOVERNANCE</strong><span>AX Core Team과 현업 Power User</span></div>
+        </article>
+        <article class="contents-item"><b>10</b>
+          <div><strong>ADOPTION ROADMAP &amp; MEASURES</strong><span>현장 적용부터 그룹 플랫폼까지의 확장</span></div>
+        </article>
+        <article class="contents-item"><b>11</b>
+          <div><strong>WHY DECISION-CENTRIC AX</strong><span>시뮬레이션 기반 의사결정 시스템이어야 하는 이유</span></div>
+        </article>
+        <article class="contents-item"><b>NAME</b>
+          <div><strong>THE NAME AND THE DIRECTION</strong><span>LAXS의 의미와 시스템 지향점</span></div>
+        </article>
+        <article class="contents-item"><b>12</b>
+          <div><strong>STRATEGIC CONCLUSION</strong><span>LS MnM AX 운영체계를 구현할 LAXS-M</span></div>
+        </article>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>02 / 16</span>
+      </footer>
+    </section>
+    <section class="page soft">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>01. STRATEGIC RATIONALE</span><span class="section-ko">왜 AX를 회사 운영능력으로 봐야 하는가</span>
+          </p>
+          <h1>AX의 성과는 도입한 기능 수가 아니라<br>회사가 스스로 실행하고 판단하는 능력으로 평가해야 합니다.</h1>
+        </div><span class="page-num">03 / 16</span>
+      </header>
+      <p class="lead">LS MnM의 AX는 개별 AI 도구를 늘리는 활동이 아니라, 현업의 업무방식과 전사 데이터, 경영 시뮬레이션과 의사결정을 하나의 운영체계로 바꾸는 전략이어야 합니다.</p>
+      <div class="strategy-choice-grid">
+        <div class="strategy-choice">
+          <article class="card strategy-option rejected"><span class="kicker">FRAGMENTED AX</span>
+            <h3>업무별 AI 기능 도입</h3>
+            <p>챗봇·요약·예측 기능이 각각 존재하지만 업무 데이터와 결정이 연결되지 않아 과제 종료 후 회사 자산이 남지 않습니다.</p>
+          </article>
+          <div class="strategy-verdict" aria-label="지양"><span class="x-mark">×</span></div>
+        </div>
+        <div class="strategy-choice">
+          <article class="card strategy-option rejected"><span class="kicker">OUTSOURCED KNOWLEDGE</span>
+            <h3>외부 개발 중심 반복</h3>
+            <p>현업 요구가 바뀔 때마다 다시 설명하고 개발하면서 회사의 업무지식과 개선 경험이 외부 수행경험으로 흩어집니다.</p>
+          </article>
+          <div class="strategy-verdict" aria-label="지양"><span class="x-mark">×</span></div>
+        </div>
+        <div class="strategy-choice">
+          <article class="card strategy-option preferred"><span class="kicker">ENTERPRISE AX</span>
+            <h3>현업 주도 경영 운영체계</h3>
+            <p>현업이 업무 시뮬레이션을 만들고, 그 결과가 전사 데이터와 연결되어 경영 판단·실행·효과로 축적되는 체계를 지향합니다.</p>
+          </article>
+          <div class="strategy-verdict"><span class="target-dot"></span><strong>지향점</strong></div>
+        </div>
+      </div>
+      <div class="declaration" style="margin-top:25px"><strong>전략적 전환</strong>AI를 업무에 덧붙이는 수준에서 벗어나, 회사의 일하는 방식과 판단체계 안에
+        AX를 내재화합니다.</div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>02. WHY NOW</span><span class="section-ko">사업 변동성과 현재 판단체계의 간극</span></p>
+          <h2 class="why-now-title">사업 변동성은 빨라졌지만, 부서의 판단과 전사 실적은 여전히 늦게 연결됩니다.</h2>
+        </div><span class="page-num">04 / 16</span>
+      </header>
+      <div class="grid2">
+        <article class="card"><span class="kicker">BUSINESS VOLATILITY</span>
+          <h3>원료·환율·금리·에너지·물류의 동시 변동</h3>
+          <p>금속 가격과 환율, 도입 일정, 전력비와 수요 변화가 동시에 움직이며 구매·생산·판매·자금에 연쇄 영향을 만듭니다.</p>
+        </article>
+        <article class="card"><span class="kicker">DECISION LATENCY</span>
+          <h3>부서별 자료와 가정의 시간차</h3>
+          <p>각 부서의 계획과 분석이 파일·회의자료·개별 시스템에 머물러 같은 질문에 서로 다른 기준시점과 가정으로 답하게 됩니다.</p>
+        </article>
+        <article class="card"><span class="kicker">KNOWLEDGE LOSS</span>
+          <h3>업무 개선 경험이 재사용되지 않음</h3>
+          <p>누가 어떤 데이터와 산식으로 판단했는지, 결정 이후 실제 효과가 어땠는지가 다음 업무와 시뮬레이션에 충분히 이어지지 않습니다.</p>
+        </article>
+        <article class="card"><span class="kicker">MANAGEMENT GAP</span>
+          <h3>실적은 정확하지만 사후에 확인</h3>
+          <p>ERP·MES·LPL은 거래와 실행을 정확히 기록하지만, 변화가 향후 손익과 현금에 미칠 영향을 사전에 조합하는 역할은 제한적입니다.</p>
+        </article>
+      </div>
+      <div class="bridge why-now-bridge" style="margin-top:25px">
+        <div>
+          <h3>LS MnM의 AX 핵심 질문</h3>
+          <p>“현업의 작은 변화가 전사 손익·현금·납기와 실행 우선순위에 어떤 영향을 만드는가?”에 같은 데이터와 기준선으로 답할 수 있어야 합니다.</p>
+        </div><span class="next">AX 방향성</span>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page dark">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>03. AX DIRECTION</span><span class="section-ko">LS MnM이 가져가야 할 네 가지 AX 방향</span></p>
+          <h2>LS MnM의 AX는 현업 실행, 전사 데이터, 경영 시뮬레이션과 의사결정을 함께 전환해야 합니다.</h2>
+        </div><span class="page-num">05 / 16</span>
+      </header>
+      <div class="grid4">
+        <article class="card"><span class="kicker">01 · WORK</span>
+          <h3>현업의 일하는 방식</h3>
+          <p>요청서와 수작업 취합 대신 현업이 업무 앱·에이전트·시뮬레이터를 구성하고 직접 개선합니다.</p>
+        </article>
+        <article class="card"><span class="kicker">02 · DATA</span>
+          <h3>전사 데이터 연결</h3>
+          <p>기존 시스템의 원천을 존중하면서 조직·업무·데이터 의미와 기준시점을 하나의 문맥으로 연결합니다.</p>
+        </article>
+        <article class="card"><span class="kicker">03 · TWIN</span>
+          <h3>전사 실적 시뮬레이션</h3>
+          <p>구매·재고·생산·판매의 부서 결과를 조합해 전사 손익·현금·납기 영향을 계산합니다.</p>
+        </article>
+        <article class="card"><span class="kicker">04 · DECISION</span>
+          <h3>판단에서 실행까지</h3>
+          <p>근거와 대안을 안건으로 만들고 실행계획·책임·기한·실제 효과를 다시 회사 지식으로 축적합니다.</p>
+        </article>
+      </div>
+      <div class="declaration" style="margin-top:28px"><strong>AX = 회사 운영능력의 내재화</strong>기술을 도입하는 전략이 아니라 현업이 만들고, 전사가
+        연결하고, 경영이 판단하며, 실행 결과로 학습하는 체계를 구축합니다.</div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>04. NEW WAY OF WORKING</span><span class="section-ko">현업 주도의 업무모델 설계와 운영</span></p>
+          <h2>현업 사용자는 시스템 개발의 요청자가 아니라 업무모델의 설계자이자 운영자가 됩니다.</h2>
+        </div><span class="page-num">06 / 16</span>
+      </header>
+      <div class="flow">
+        <article class="node"><b>01 · QUESTION</b><strong>업무 문제 정의</strong><span>현업 언어로 목적·제약·필요 데이터와 판단기준을
+            설명합니다.</span></article>
+        <article class="node"><b>02 · BUILD</b><strong>앱·에이전트 구성</strong><span>표준 업무키트와 에이전트 템플릿으로 업무 기능을 구성합니다.</span>
+        </article>
+        <article class="node"><b>03 · OPERATE</b><strong>부서 시뮬레이션</strong><span>실제 업무주기에서 데이터와 가정을 갱신하고 대안을
+            비교합니다.</span></article>
+        <article class="node"><b>04 · COMBINE</b><strong>전사 영향 조합</strong><span>다른 부서 결과와 같은 기준선에서 손익·현금 영향을
+            계산합니다.</span></article>
+        <article class="node"><b>05 · LEARN</b><strong>효과와 지식 축적</strong><span>결정·실행·실적을 연결해 다음 앱과 시뮬레이션에 재사용합니다.</span>
+        </article>
+      </div>
+      <div class="grid3" style="margin-top:28px">
+        <article class="metric"><b>현업 자율성</b><span>작은 개선을 긴 개발 대기 없이 업무 흐름 안에서 구현합니다.</span></article>
+        <article class="metric"><b>표준 내 재사용</b><span>업무키트·데이터 계약·산식·에이전트가 회사 자산으로 남습니다.</span></article>
+        <article class="metric"><b>통제 가능한 속도</b><span>조직 권한·데이터 기준·검증·운영 이력을 유지한 채 빠르게 바꿉니다.</span></article>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>05. ENTERPRISE DATA FABRIC</span><span class="section-ko">기존 시스템과 전사 경영 문맥의 연결</span>
+          </p>
+          <h2>ERP·MES·LPL과 기타 Legacy를 교체하지 않고, 전사 경영 문맥으로 연결합니다.</h2>
+        </div><span class="page-num">07 / 16</span>
+      </header>
+      <p class="lead">거래와 실적의 원천은 기존 시스템에 남겨두고, AX 플랫폼은 인증된 데이터 판·조직 권한·업무 의미·관계·기준시점을 공통으로 관리합니다.</p>
+      <div class="chain">
+        <article><b>SOURCE</b><strong>ERP · MES · LPL</strong><span>거래·생산·물류·실적의 기존 정본</span></article>
+        <article><b>CONTEXT</b><strong>회사·조직·권한</strong><span>법인·부서·업무범위에 따른 접근 문맥</span></article>
+        <article><b>MEANING</b><strong>MDM·온톨로지</strong><span>품목·공정·주문·재고·계정의 공통 의미</span></article>
+        <article><b>EVIDENCE</b><strong>데이터 판·지식</strong><span>사용한 값·문서·가정·산식의 재현 근거</span></article>
+        <article><b>MANAGEMENT</b><strong>전사 경영 모델</strong><span>부서 결과를 조합한 손익·현금·영향 경로</span></article>
+      </div>
+      <div class="grid3" style="margin-top:28px">
+        <article class="card"><span class="kicker">CONNECT, NOT REPLACE</span>
+          <h3>기존 투자를 존중</h3>
+          <p>새 거대 시스템을 만드는 대신 검증된 API·DB View·File Contract·MCP로 필요한 범위를 연결합니다.</p>
+        </article>
+        <article class="card"><span class="kicker">ONE MEANING</span>
+          <h3>같은 숫자의 같은 뜻</h3>
+          <p>실적·계획·예측·시나리오를 구분하고 데이터의 출처와 기준시점을 전사 공통으로 유지합니다.</p>
+        </article>
+        <article class="card"><span class="kicker">REUSABLE RAG</span>
+          <h3>근거가 연결되는 지식</h3>
+          <p>문서를 수동으로 모으는 대신 업무 이벤트와 데이터 관계를 기준으로 필요한 지식 근거를 자동 연결합니다.</p>
+        </article>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>06. ENTERPRISE PERFORMANCE SIMULATION</span><span class="section-ko">부서 시뮬레이션과 전사 실적
+              조합</span></p>
+          <h2>부서별 업무 시뮬레이션을 연결해 전사 실적과 현금 영향을 사전에 검토합니다.</h2>
+        </div><span class="page-num">08 / 16</span>
+      </header>
+      <div class="chain">
+        <article><b>PROCUREMENT</b><strong>원료 구매</strong><span>가격·환율·도입 지연·운임</span></article>
+        <article><b>INVENTORY</b><strong>재고 가용성</strong><span>안전재고·품질·가용량·도착</span></article>
+        <article><b>PRODUCTION</b><strong>생산 가능량</strong><span>BOM·수율·설비·생산계획</span></article>
+        <article><b>SALES</b><strong>출하·매출</strong><span>수주·납기·매출 인식·채권</span></article>
+        <article><b>ENTERPRISE</b><strong>손익·현금</strong><span>영업이익·운전자금·현금흐름</span></article>
+      </div>
+      <div class="screen-grid" style="margin-top:24px">
+        <figure class="screen"><img src="../../assets/screens-v0.5/02-simulation-result-actual.png"
+            alt="전사 실적 시뮬레이션 결과 화면" />
+          <figcaption>동일 기준선에서 생산량·재고·구매자금·기말현금의 변화를 비교하는 실제 제품 화면</figcaption>
+        </figure>
+        <div class="grid2">
+          <article class="card accent"><span class="kicker">DEPARTMENT</span>
+            <h3>업무별 판단</h3>
+            <p>각 부서가 자신이 책임지는 가정과 결과를 검증합니다.</p>
+          </article>
+          <article class="card accent blue"><span class="kicker">ENTERPRISE</span>
+            <h3>전사 조합</h3>
+            <p>부서 결과를 같은 시점·판·산식으로 조합합니다.</p>
+          </article>
+          <article class="card accent gold"><span class="kicker">CONTRIBUTION</span>
+            <h3>기여도 확인</h3>
+            <p>어느 가정과 부서 변화가 손익·현금에 영향을 주었는지 추적합니다.</p>
+          </article>
+          <article class="card accent"><span class="kicker">ALTERNATIVES</span>
+            <h3>대안 비교</h3>
+            <p>기준안·대안·제약조건을 함께 보고 실행 가능한 조합을 선택합니다.</p>
+          </article>
+        </div>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page dark">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>07. DECISION SYSTEM</span><span class="section-ko">질문에서 근거·대안·실행으로 이어지는 체계</span></p>
+          <h2>경영자의 질문을 데이터·관계·계산·대안·실행으로 변환합니다.</h2>
+        </div><span class="page-num">09 / 16</span>
+      </header>
+      <div class="flow">
+        <article class="node"><b>01</b><strong>경영 질문</strong><span>환율·원료·에너지·수요 변화의 전사 영향을 묻습니다.</span></article>
+        <article class="node"><b>02</b><strong>근거 결속</strong><span>조직 권한 안에서 데이터 판·지식·관계 경로를 찾습니다.</span></article>
+        <article class="node"><b>03</b><strong>결정론적 계산</strong><span>확정된 산식과 가정으로 손익·현금·납기 영향을 산출합니다.</span></article>
+        <article class="node"><b>04</b><strong>안건과 대안</strong><span>요청자·결정자·영향부서 관점에서 선택지를 구성합니다.</span></article>
+        <article class="node"><b>05</b><strong>실행·효과</strong><span>책임·기한·조치와 실제 결과를 연결해 다음 판단에 반영합니다.</span></article>
+      </div>
+      <div class="declaration" style="margin-top:28px"><strong>AI가 숫자를 지어내지 않습니다.</strong>AI는 질문을 해석하고 근거를 설명하며 업무를
+        실행합니다. 경영 수치는 인증된 데이터, 확정된 관계와 산식, 명시된 가정에서 계산됩니다.</div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>08. AI AND AGENT OPERATING MODEL</span><span class="section-ko">AI 경영비서와 역할별 에이전트
+              운영</span></p>
+          <h2>AI 경영비서를 넘어, 역할별 에이전트 팀이 업무의 준비·실행·검증을 담당합니다.</h2>
+        </div><span class="page-num">10 / 16</span>
+      </header>
+      <div class="grid3">
+        <article class="card accent"><span class="kicker">AI MANAGEMENT ASSISTANT</span>
+          <h3>전사 문맥의 설명과 안내</h3>
+          <p>경영 현황, 근거, 시나리오와 실행 상태를 사용자 권한 범위에서 설명하고 다음 행동을 제안합니다.</p>
+        </article>
+        <article class="card accent blue"><span class="kicker">AGENT TEAM</span>
+          <h3>업무 준비와 실행</h3>
+          <p>기획·분석·데이터 준비·앱 생성·검토·보고 역할을 워크플로우 템플릿으로 조율합니다.</p>
+        </article>
+        <article class="card accent gold"><span class="kicker">HUMAN CONTROL</span>
+          <h3>책임 있는 사용자 통제</h3>
+          <p>AI는 정해진 권한과 정책 안에서 수행하고, 중요 판단과 외부 발간은 책임 있는 사용자가 통제합니다.</p>
+        </article>
+      </div>
+      <div class="screen-grid" style="margin-top:18px;grid-template-columns:.9fr 1.1fr">
+        <div class="grid2">
+          <article class="metric"><b>자동 생성</b><span>업무 목적을 입력하면 필요한 에이전트 구성과 역할을 추천합니다.</span></article>
+          <article class="metric"><b>업무 조율</b><span>워크플로우별로 에이전트의 순서·입력·검토·출력을 관리합니다.</span></article>
+          <article class="metric"><b>실행 근거</b><span>사용한 데이터·지식·도구·결과를 업무 이력으로 남깁니다.</span></article>
+          <article class="metric"><b>비용·품질</b><span>업무 난이도와 위험에 따라 모델·도구·검토 강도를 조정합니다.</span></article>
+        </div>
+        <figure class="screen"><img src="../../assets/screens-v0.3/08-agents.png" alt="AI 에이전트 운영 화면" />
+          <figcaption>역할별 에이전트와 실행 흐름을 구성·관찰하는 제품 화면</figcaption>
+        </figure>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>09. OPERATING GOVERNANCE</span><span class="section-ko">AX Core Team과 현업 Power
+              User</span></p>
+          <h2>소수정예 AX Core Team과 현업 Power User가 제품·업무·데이터를 함께 운영합니다.</h2>
+        </div><span class="page-num">11 / 16</span>
+      </header>
+      <div class="grid4">
+        <article class="card"><span class="kicker">SPONSOR</span>
+          <h3>경영 스폰서</h3>
+          <p>전사 우선순위, 부서 간 조정, 운영 범위와 성과기준을 제시합니다.</p>
+        </article>
+        <article class="card"><span class="kicker">AX &amp; PRODUCT</span>
+          <h3>AX·제품 총괄</h3>
+          <p>전략·제품 로드맵·에이전트 팀·데이터·품질·확산을 통합 관리합니다.</p>
+        </article>
+        <article class="card"><span class="kicker">POWER USER</span>
+          <h3>현업 책임 사용자</h3>
+          <p>업무기준과 데이터를 설명하고 앱·업무키트·시뮬레이션을 실제 업무에서 운영합니다.</p>
+        </article>
+        <article class="card"><span class="kicker">IT · SECURITY</span>
+          <h3>IT·보안·데이터</h3>
+          <p>연계·인프라·접근권한·보안·복구·운영 안정성을 제품 통제와 연결합니다.</p>
+        </article>
+      </div>
+      <div class="table-wrap" style="margin-top:28px">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>운영 리듬</th>
+              <th>주요 활동</th>
+              <th>남는 회사 자산</th>
+              <th>경영 확인 항목</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>현업 일상</td>
+              <td>자료 갱신, 시뮬레이션, 앱·에이전트 개선</td>
+              <td>데이터 계약, 업무 규칙, 실행 이력</td>
+              <td>사용성·정확성·예외</td>
+            </tr>
+            <tr>
+              <td>주간 운영</td>
+              <td>부서 결과 조합, 이슈·대안 검토</td>
+              <td>전사 시나리오, 영향 경로, 개선과제</td>
+              <td>리드타임·재작업·데이터 품질</td>
+            </tr>
+            <tr>
+              <td>월간 경영</td>
+              <td>실적·계획·예측·시나리오 비교</td>
+              <td>결정 근거, 실행계획, 효과 측정</td>
+              <td>손익·현금·납기·실행성과</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>10. ADOPTION ROADMAP AND MEASURES</span><span class="section-ko">현장 적용부터 그룹 플랫폼까지의
+              확장</span></p>
+          <h2>작은 범위에서 시작하되, 전사 운영체계와 확장성을 처음부터 같은 기준으로 설계합니다.</h2>
+        </div><span class="page-num">12 / 16</span>
+      </header>
+      <div class="timeline">
+        <article class="phase"><i>1</i>
+          <div>
+            <h3>현장 적용</h3>
+            <p>핵심 사용자와 대표 업무 시나리오에서 실제 업무주기·데이터·의사결정을 운영합니다.</p>
+          </div>
+          <aside>판단속도 · 재작업 · 정확성 · 사용성</aside>
+        </article>
+        <article class="phase"><i>2</i>
+          <div>
+            <h3>전사 운영 확대</h3>
+            <p>업무영역과 사용자를 늘리고 PostgreSQL·복구·모니터링·SLA를 운영규모에 맞게 강화합니다.</p>
+          </div>
+          <aside>재사용률 · 운영비 · 안정성 · 보안</aside>
+        </article>
+        <article class="phase"><i>3</i>
+          <div>
+            <h3>그룹내 계열사 확산 적용</h3>
+            <p>공통 코어와 업무키트의 재사용성과 법인별 데이터 격리·특화 범위를 검증합니다.</p>
+          </div>
+          <aside>재사용 기간 · 현지화 비용 · 가치 실현</aside>
+        </article>
+        <article class="phase"><i>4</i>
+          <div>
+            <h3>그룹 AX 플랫폼</h3>
+            <p>그룹 공통 기준과 계열사별 운영모델을 연결하고 제품·IP·조직·정산체계를 확장합니다.</p>
+          </div>
+          <aside>그룹 확산성 · 제품성 · 독립 경제성</aside>
+        </article>
+      </div>
+      <div class="grid4" style="margin-top:20px">
+        <article class="metric"><b>판단 리드타임</b><span>자료 요청에서 안건·대안 확정까지</span></article>
+        <article class="metric"><b>업무 재작업</b><span>취합·대조·재계산·보고 수정 시간</span></article>
+        <article class="metric"><b>업무자산 재사용</b><span>데이터·산식·앱·에이전트 재사용률</span></article>
+        <article class="metric"><b>실행 효과</b><span>결정 이후 손익·현금·납기·운영 개선</span></article>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>작성자 : 권혁일(Hyuk il
+          Kwon)</span></footer>
+    </section>
+
+    <section class="page soft decision-benchmark">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>11. WHY DECISION-CENTRIC AX</span><span class="section-ko">AX 플랫폼이 시뮬레이션 기반 의사결정 시스템이어야 하는 이유</span></p>
+          <h2>AX의 경쟁력은 답변 생성이 아니라 선택지의 결과를 계산하고 실행으로 연결하는 능력입니다.</h2>
+        </div><span class="page-num">13 / 16</span>
+      </header>
+      <div class="benchmark-grid">
+        <article class="benchmark-card">
+          <div class="case-brand"><b>PALANTIR</b><span>DECISION-CENTRIC ONTOLOGY</span></div>
+          <h3>데이터를 모으는 플랫폼에서<br><span class="case-highlight">결정을 표현하는 운영체계</span>로</h3>
+          <ul>
+            <li>Ontology가 데이터뿐 아니라 업무 논리·행동·보안을 함께 연결합니다.</li>
+            <li>Scenario는 운영 데이터의 분기본에 행동과 모델을 적용해 실행 전 영향을 비교합니다.</li>
+            <li>운영 애플리케이션은 현황 조회에서 멈추지 않고 시뮬레이션과 통제된 실행까지 이어집니다.</li>
+          </ul>
+          <p class="source-note">공식 자료: <a href="https://www.palantir.com/docs/foundry/platform-overview/overview/index.html">Platform Overview</a> · <a href="https://www.palantir.com/docs/foundry/workshop/scenarios-concepts">Scenarios</a> · <a href="https://www.palantir.com/docs/foundry/app-building/operational-apps">Operational Applications</a></p>
+        </article>
+        <article class="benchmark-card enhans">
+          <div class="case-brand"><b>ENHANS</b><span>ONTOLOGY + AGENTOS</span></div>
+          <h3>AI가 설명하는 단계를 넘어<br><span class="case-highlight">판단하고 실행하는 운영체계</span>로</h3>
+          <ul>
+            <li>기업 데이터·Ontology·에이전트·워크플로우·화면·행동을 하나의 운영체계로 연결합니다.</li>
+            <li>복잡한 업무 논리와 의존관계를 시뮬레이션하고 그 결과를 에이전트 실행으로 전환합니다.</li>
+            <li>수요·재고·생산, 가격·프로모션처럼 다기능 신호를 하나의 의사결정 흐름으로 다룹니다.</li>
+          </ul>
+          <p class="source-note">공식 자료: <a href="https://www.enhans.ai/">AgentOS Overview</a> · <a href="https://www.enhans.ai/newsroom/commerceos-from-data-to-execution-with-ontology-and-ai-agents">From Data to Execution</a></p>
+        </article>
+      </div>
+      <div class="decision-gap">
+        <article><b>생성형 AI 도구</b><span>질문에 답하고 문서와 콘텐츠를 생성합니다.</span></article>
+        <article><b>분석·대시보드</b><span>현재와 과거를 설명하지만 실행 전 결과 비교에는 한계가 있습니다.</span></article>
+        <article><b>시뮬레이션 기반 AX</b><span>미래 선택지를 계산·비교하고 결정과 실행을 회사 운영에 연결합니다.</span></article>
+      </div>
+      <div class="declaration" style="margin-top:16px"><strong>전략적 시사점</strong>AX 플랫폼의 차별성은 LLM이 얼마나 자연스럽게 답하는가가 아니라, 회사의 실제 데이터를 바탕으로 선택지의 결과를 계산하고 책임 있는 결정과 실행으로 전환할 수 있는가에 있습니다.</div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>13 / 16</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>11-2. LAXS-M DECISION OPERATING MODEL</span><span class="section-ko">전사 시뮬레이션 중심의 AX 운영 구조</span></p>
+          <h2>부서별 업무 시뮬레이션을 하나의 전사 경영 시나리오로 결합해야 합니다.</h2>
+        </div><span class="page-num">14 / 16</span>
+      </header>
+      <div class="simulation-flow">
+        <article><b>전사 데이터·대외지표</b><span>ERP·MES·LPL·시장·환율·금속가</span></article>
+        <article><b>경영 Ontology·업무키트</b><span>회사 의미·업무 규칙·데이터 계약</span></article>
+        <article><b>부서별 시뮬레이션</b><span>구매·생산·재고·판매·재무</span></article>
+        <article><b>전사 영향 조합</b><span>손익·현금·납기·운전자금</span></article>
+        <article><b>의사결정·실행계획</b><span>대안 비교·책임·기한·조치</span></article>
+        <article><b>실제 효과 측정</b><span>결과·차이·다음 판단 자산화</span></article>
+      </div>
+      <div class="reason-grid">
+        <article class="reason-card"><h3>미래 선택의 문제</h3><p>대시보드는 과거를 설명하지만 경영진은 조건이 달라졌을 때의 결과를 선택해야 합니다.</p></article>
+        <article class="reason-card"><h3>전사 연쇄 영향</h3><p>구매 지연은 재고·생산·납기·매출·현금까지 이어지므로 부서별 최적화만으로는 충분하지 않습니다.</p></article>
+        <article class="reason-card"><h3>확정 가능한 숫자</h3><p>LLM은 질문과 결과를 설명하고, 경영 수치는 정본 데이터·산식·가정·기준시점으로 계산해야 합니다.</p></article>
+        <article class="reason-card"><h3>실행 전 안전한 검증</h3><p>ERP·MES·LPL을 변경하기 전에 별도 시나리오에서 대안의 결과와 위험을 비교해야 합니다.</p></article>
+        <article class="reason-card wide"><h3>결정이 회사 자산으로 남는 구조</h3><p>어떤 데이터와 가정으로 무엇을 선택했고 실제 효과가 어떠했는지를 축적해야 다음 판단의 품질과 에이전트의 실행 신뢰가 함께 높아집니다.</p></article>
+      </div>
+      <div class="decision-rule">
+        <article><b>LLM</b><span>질문을 해석하고 근거와 결과를 설명</span></article>
+        <article><b>계산 엔진</b><span>확정된 데이터·산식으로 수치를 산출</span></article>
+        <article><b>사람</b><span>대안을 비교하고 책임 있게 결정</span></article>
+        <article><b>의사결정 원장</b><span>근거·결정·실행·효과를 추적</span></article>
+      </div>
+      <div class="declaration" style="margin-top:14px"><strong>LAXS-M의 지향점</strong>LAXS-M은 AI 기능을 모아 놓은 도구가 아니라, 현업의 업무 시뮬레이션을 전사 데이터와 경영 Ontology로 연결해 더 나은 경영 의사결정을 가능하게 하는 AX 경영 플랫폼입니다.</div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>14 / 16</span></footer>
+    </section>
+
+    <section class="page soft name-direction">
+      <header class="top">
+        <div>
+          <p class="eyebrow"><span>THE NAME AND THE DIRECTION</span><span class="section-ko">LAXS의 의미와 시스템 지향점</span>
+          </p>
+          <h2>LS 안에 AX를 심고, 현업과 경영을 하나의 흐름으로 연결합니다.</h2>
+        </div><span class="page-num">15 / 16</span>
+      </header>
+      <div class="name-layout">
+        <div class="declaration"><strong>LAXS = AX embedded in LS</strong>LS의 일과 경영에 AX를 내재화합니다.<br><br><strong>LAXS -
+            AX at the core of LS</strong>현업의 실행과 경영의 판단을 AX로 연결합니다.</div>
+        <figure class="screen"><img src="../../assets/laxs-name-construction.svg" alt="L과 S 사이에 AX를 내재화한 LAXS 명칭 구성" />
+          <figcaption>LAXS는 ‘랙스’로 읽습니다. AX를 LS의 일하는 방식과 경영체계 안에 내재화한다는 의미입니다.</figcaption>
+        </figure>
+      </div>
+      <div class="grid3">
+        <article class="card accent"><span class="kicker">EMBEDDED</span>
+          <h3>업무 안의 AX</h3>
+          <p>별도 AI 도구가 아니라 사용자의 실제 업무 흐름과 데이터 안에서 작동합니다.</p>
+        </article>
+        <article class="card accent blue"><span class="kicker">CONNECTED</span>
+          <h3>전사의 AX</h3>
+          <p>부서별 개선이 전사 공통 데이터와 경영 시나리오에 연결됩니다.</p>
+        </article>
+        <article class="card accent gold"><span class="kicker">GOVERNED</span>
+          <h3>책임 있는 AX</h3>
+          <p>권한·근거·계산·결정·실행 이력을 유지하며 회사가 통제합니다.</p>
+        </article>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>15 / 16</span>
+      </footer>
+    </section>
+
+    <section class="page dark">
+      <div class="hero" style="grid-template-columns:1fr .78fr">
+        <div><img class="logo" src="../../assets/brand-v0.3/laxs-logo-primary-on-navy-v2.png" alt="LAXS-M" />
+          <p class="eyebrow" style="margin-top:28px"><span>12. STRATEGIC CONCLUSION</span><span class="section-ko">LS
+              MnM AX 운영체계를 구현할 LAXS-M</span></p>
+          <h1>LS MnM의 AX 방향을<br>실제 운영체계로 구현하는 플랫폼,<br><span style="color:#ff3857">LAXS-M을 제안합니다.</span></h1>
+          <p>현업이 만들고, 전사 데이터가 연결되며, 경영 시뮬레이션으로 판단하고, 실행 결과가 다시 회사 자산이 되는 AX 운영체계를 구축합니다.</p>
+          <div class="author">작성자 : 권혁일(Hyuk il Kwon)</div>
+        </div>
+        <div class="declaration"><strong>LAXS = AX embedded in LS</strong>LS의 일과 경영에 AX를 내재화합니다.<br><br><strong>LAXS -
+            AX at the core of LS</strong>현업의 실행과 경영의 판단을 AX로 연결합니다.</div>
+      </div>
+      <footer class="footer"><span>LS MnM AX STRATEGY &amp; AX PLATFORM ADOPTION PROPOSAL</span><span>16 / 16</span>
+      </footer>
+    </section>
+  </main>
+  <div class="global-author-credit" style="display:none">작성자 : 권혁일(Hyuk il Kwon)</div>
+</body>
+
+</html>

@@ -334,6 +334,21 @@ def test_mega_sub_projects_own_their_domain_dept(client):
     assert master["owner_dept_id"] == "hq" and master["visibility"] == "company"
 
 
+def test_mega_project_and_subprojects_receive_system_ids(client):
+    app, c = client
+    _as(app, user_id="bob", dept="quality")
+    r = c.post("/api/v1/factory/projects/mega",
+               json={"mega_project_name": "전사 제조혁신 프로그램"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["mega_project_id"].startswith("prj_")
+    assert d["mega_project_name"] == "전사 제조혁신 프로그램"
+    assert d["sub_projects"]
+    assert all(sub_id.startswith("prj_") for sub_id in d["sub_projects"].values())
+    with open(f"./projects/{d['mega_project_id']}/project_meta.json", encoding="utf-8") as f:
+        assert json.load(f)["project_name"] == "전사 제조혁신 프로그램"
+
+
 def test_release_passes_owner_dept_to_indexing(client, monkeypatch):
     """★★ 이 배선이 빠져 있었다 — 청크가 전부 미태깅으로 들어가 RAG 가 조용히 0건이 됐다."""
     app, c = client

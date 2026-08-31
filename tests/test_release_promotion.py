@@ -62,8 +62,9 @@ def _ok_checks(monkeypatch, *, contract=True, static=True):
                             rp.CHECK_CONTRACT, contract,
                             "" if contract else "어긋남"))
     monkeypatch.setattr(rp, "_check_static",
-                        lambda paths: rp.Check(rp.CHECK_STATIC, static,
-                                               "" if static else "차단 신호"))
+                        lambda paths, release=None: rp.Check(
+                            rp.CHECK_STATIC, static,
+                            "" if static else "차단 신호"))
 
 
 def _promote(monkeypatch, *, lifecycle=None, release=None, readiness=rp.NOT_APPLICABLE,
@@ -353,6 +354,59 @@ def test_a_blocking_signal_in_the_code_stops_promotion(tmp_path):
     (bad / "app.js").write_text(sample, encoding="utf-8")
 
     c = rp._check_static([str(bad)])
+    assert not c.ok and "차단 신호" in c.reason
+
+
+def _host_declarative_release():
+    """코드가 없는 대신 **검증 가능한 호스트 실행 선언**을 가진 릴리스."""
+    from core import app_manifest
+
+    manifest = app_manifest.build(
+        capabilities=[{"resource": "orders", "actions": ["read"]}],
+        app_class="departmental")
+    return {
+        "kind": "kit_app",
+        "execution_surface": rp.HOST_DECLARATIVE,
+        "manifest": app_manifest.snapshot(manifest),
+        "runtime_contract": {"manifest": manifest},
+    }
+
+
+def test_a_host_declarative_release_can_prove_auth_without_generated_code(tmp_path):
+    """코드 0개를 면제하는 것이 아니라 Manifest 결속으로 **다른 증거**를 낸다."""
+    empty = tmp_path / "declarative"
+    empty.mkdir()
+    assert rp._check_static([str(empty)], _host_declarative_release()).ok
+
+
+def test_an_unmarked_empty_release_still_fails_static_inspection(tmp_path):
+    empty = tmp_path / "unknown"
+    empty.mkdir()
+    c = rp._check_static([str(empty)], {})
+    assert not c.ok and "0개" in c.reason
+
+
+@pytest.mark.parametrize("mutation", ["fingerprint", "contract", "standalone"])
+def test_a_declarative_release_with_broken_auth_evidence_is_rejected(tmp_path, mutation):
+    empty = tmp_path / mutation
+    empty.mkdir()
+    release = _host_declarative_release()
+    if mutation == "fingerprint":
+        release["manifest"]["fingerprint"] = "tampered"
+    elif mutation == "contract":
+        release["runtime_contract"]["manifest"] = dict(
+            release["runtime_contract"]["manifest"], app_class="enterprise")
+    else:
+        release["manifest"]["manifest"]["standalone_auth"] = True
+    assert not rp._check_static([str(empty)], release).ok
+
+
+def test_declarative_marker_does_not_hide_generated_login_code(tmp_path):
+    root = tmp_path / "with-code"
+    root.mkdir()
+    (root / "app.js").write_text(
+        'fetch("/api/v1/auth/login", {method: "POST"})', encoding="utf-8")
+    c = rp._check_static([str(root)], _host_declarative_release())
     assert not c.ok and "차단 신호" in c.reason
 
 

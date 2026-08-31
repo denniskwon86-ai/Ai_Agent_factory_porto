@@ -45,7 +45,10 @@ function SectionValue({ v }: { v: any }) {
   return <StructuredValue value={v} />;
 }
 
-export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarvis) => void }) {
+export function PublicationCenter({ onJarvis, userName }: {
+  onJarvis?: (c: PublicationJarvis) => void;
+  userName: (id?: string) => string;
+}) {
   //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
   const claim = useLatestOnly();
   const [mode, setMode] = useState<Mode>('list');
@@ -122,6 +125,14 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
   };
 
   const rows = list.value || [];
+  const decisionNames = useMemo(() => new Map(
+    decisions.map((row) => [row.decision_id, row.question || '이름 미등록 의사결정 안건']),
+  ), [decisions]);
+  const sourceName = (p: Pick<Publication, 'source_type' | 'source_id'>) => (
+    p.source_type === 'DECISION_CASE'
+      ? (decisionNames.get(p.source_id) || '이름 미등록 의사결정 안건')
+      : '시뮬레이션 결과'
+  );
   const stats = useMemo(() => {
     if (list.status !== 'ok') {
       return { total: null, external: null, blocked: null, failed: null } as Record<string, number | null>;
@@ -145,14 +156,14 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
           { label: '독자', value: AUDIENCE_KO[current.audience].label },
           { label: '문서 버전', value: current.document_version ? `v${current.document_version}` : '없음' },
           { label: '남은 게이트', value: current.blockers.length ? `${current.blockers.length}건` : '없음' },
-          { label: '원천', value: `${current.source_type} ${current.source_id}` },
+          { label: '원천', value: sourceName(current) },
         ],
         objectId: current.publication_id,
         snapshot: {
           title: current.title, audience: current.audience, status: current.status,
           document_version: current.document_version, render_error: current.render_error,
           blockers: current.blockers.map((b) => b.code),
-          source: `${current.source_type}:${current.source_id}`,
+          source_name: sourceName(current),
         },
         actions: current.can_publish ? ['발간']
           : current.blockers.length ? ['게이트 해소'] : ['문서 생성', '검토 요청'],
@@ -204,6 +215,7 @@ export function PublicationCenter({ onJarvis }: { onJarvis?: (c: PublicationJarv
       {mode === 'detail' && current && (
         <DetailScreen
           p={current}
+          sourceName={sourceName(current)} userName={userName}
           onBack={() => { setMode('list'); setCurrent(null); load(); }}
           onRender={() => act('문서 생성 중', () => publicationApi.render(current.publication_id))}
           onRequestApproval={(t) => act('검토 요청 중',
@@ -311,8 +323,10 @@ function ListScreen({ list, state, stats, onOpen, onNew, onRetry }: {
 
 // ── 상세 ─────────────────────────────────────────────────────────────────────
 function DetailScreen({ p, onBack, onRender, onRequestApproval, onApprove, onPublish,
-  onCorrect, onWithdraw }: {
+  onCorrect, onWithdraw, sourceName, userName }: {
   p: Publication; onBack: () => void;
+  sourceName: string;
+  userName: (id?: string) => string;
   onRender: () => void;
   onRequestApproval: (types: ReviewType[]) => void;
   onApprove: (t: ReviewType, s: 'APPROVED' | 'REJECTED', comment: string) => void;
@@ -327,7 +341,7 @@ function DetailScreen({ p, onBack, onRender, onRequestApproval, onApprove, onPub
   return (
     <>
       <ScreenHead kicker="PUBLICATION" title={p.title}
-        description={`${PUB_TYPE_KO[p.publication_type] || p.publication_type} · 원천 ${p.source_type} ${p.source_id}`}
+        description={`${PUB_TYPE_KO[p.publication_type] || p.publication_type} · 원천 ${sourceName}`}
         chip={{ label: AUDIENCE_KO[p.audience].label, tone: AUDIENCE_KO[p.audience].tone }} />
 
       <div style={{ display: 'flex', gap: 7, marginBottom: 12, alignItems: 'center' }}>
@@ -347,7 +361,7 @@ function DetailScreen({ p, onBack, onRender, onRequestApproval, onApprove, onPub
 
       {p.supersedes_id && (
         <Banner tone="warn" title="이 문서는 정정판입니다">
-          원본({p.supersedes_id})은 «정정됨»으로 보존됩니다 — 원본을 지우면 그것을 읽고 판단한
+          이전 발간본은 «정정됨»으로 보존됩니다 — 원본을 지우면 그것을 읽고 판단한
           사람이 무엇을 봤는지 말할 수 없습니다.
         </Banner>
       )}
@@ -360,7 +374,8 @@ function DetailScreen({ p, onBack, onRender, onRequestApproval, onApprove, onPub
 
       <GatePanel p={p} onRender={onRender} />
       <DocumentPanel doc={doc} excluded={excluded} version={p.current_version} external={external} />
-      <ReviewPanel p={p} onRequestApproval={onRequestApproval} onApprove={onApprove} />
+      <ReviewPanel p={p} userName={userName}
+        onRequestApproval={onRequestApproval} onApprove={onApprove} />
       <PublishPanel p={p} onPublish={onPublish} onCorrect={onCorrect} onWithdraw={onWithdraw} />
     </>
   );
@@ -495,8 +510,9 @@ function DocumentPanel({ doc, excluded, version, external }: {
 }
 
 // ── 검토 ─────────────────────────────────────────────────────────────────────
-function ReviewPanel({ p, onRequestApproval, onApprove }: {
+function ReviewPanel({ p, userName, onRequestApproval, onApprove }: {
   p: Publication;
+  userName: (id?: string) => string;
   onRequestApproval: (types: ReviewType[]) => void;
   onApprove: (t: ReviewType, s: 'APPROVED' | 'REJECTED', comment: string) => void;
 }) {
@@ -525,7 +541,7 @@ function ReviewPanel({ p, onRequestApproval, onApprove }: {
                   <b>{REVIEW_KO[r.review_type]?.label || r.review_type}</b>
                   <small>
                     {r.status === 'PENDING' ? '아직 판정하지 않았습니다'
-                      : `${r.reviewer_id} · ${r.reviewed_at.slice(0, 10)}${r.comment ? ` · ${r.comment}` : ''}`}
+                      : `${userName(r.reviewer_id)} · ${r.reviewed_at.slice(0, 10)}${r.comment ? ` · ${r.comment}` : ''}`}
                     {` · 대상 문서 v${r.document_version}`}
                   </small>
                   {form?.t === r.review_type && (

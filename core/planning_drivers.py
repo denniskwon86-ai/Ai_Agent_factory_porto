@@ -178,11 +178,13 @@ def expand_driver_assumption(driver_code: str, pct_change: float) -> Tuple[List[
     return out, warns
 
 
-def expand_assumptions(assumptions: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """시나리오 가정 목록에서 **동인 가정을 계정 가정으로 펼친다**(계정 가정은 그대로 통과).
+def expand_assumptions(assumptions: List[Dict[str, Any]], *, tenant_id: str = "",
+                       scope_node_id: str = "", entity_mode: str = "REAL",
+                       as_of: str = "") -> Tuple[List[Dict[str, Any]], List[str]]:
+    """실행용 확장. 동인 가정은 유효한 승인 판본의 파급계수만 사용한다.
 
-    이 함수 하나를 엔진이 호출하면 동인·계정 두 형태가 한 경로로 합류한다 —
-    두 경로를 따로 두면 한쪽에만 적용되는 규칙이 생긴다."""
+    초안 미리보기는 ``expand_driver_assumption`` 이 담당한다. 두 함수를 섞으면 미승인
+    초안이 실제 숫자로 흘러가므로, 실행 경로는 조직 범위까지 봉인된 판본을 요구한다."""
     expanded: List[Dict[str, Any]] = []
     warnings: List[str] = []
     for a in assumptions:
@@ -193,9 +195,33 @@ def expand_assumptions(assumptions: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             warnings.append(f"동인 가정은 pct 만 지원합니다(받은 값: {a.get('operator')}) — "
                             f"'{a.get('target_code')}' 는 적용되지 않았습니다.")
             continue
-        rows, warns = expand_driver_assumption(a.get("target_code"), float(a.get("value") or 0))
-        expanded.extend(rows)
-        warnings.extend(warns)
+        if not all(str(value or "").strip() for value in
+                   (tenant_id, scope_node_id, entity_mode)):
+            raise PlanningError("동인 계산에는 tenant·조직 범위·실행 문맥이 필요합니다.")
+        from core import planning_driver_release
+        code = str(a.get("target_code") or "")
+        approved = planning_driver_release.effective_release(code, as_of=as_of)
+        if not approved:
+            raise PlanningError(f"승인된 동인 판본이 없습니다: {code}")
+        binding = (str(approved.get("tenant_id") or ""),
+                   str(approved.get("scope_node_id") or ""),
+                   str(approved.get("entity_mode") or ""))
+        if binding != (str(tenant_id), str(scope_node_id), str(entity_mode)):
+            raise PlanningError(f"동인 승인 판본의 조직 범위가 시나리오와 다릅니다: {code}")
+        try:
+            impacts = __import__("json").loads(str(approved.get("impacts_json") or "[]"))
+        except (TypeError, ValueError) as exc:
+            raise PlanningError(f"승인 동인 판본의 파급계수를 읽지 못했습니다: {code}") from exc
+        for impact in impacts:
+            elasticity = float(impact["elasticity"])
+            expanded.append({
+                "target_kind": "account", "target_code": impact["account_code"],
+                "operator": "pct", "value": float(a.get("value") or 0) * elasticity,
+                "rationale": (f"[{code} {float(a.get('value') or 0):+g}% × 탄력도 {elasticity}] "
+                              f"{impact['rationale']}"),
+                "derived_from_driver": code, "elasticity_source": impact["source"],
+                "approved": True, "driver_release_fingerprint": approved["fingerprint"],
+            })
     return expanded, warnings
 
 

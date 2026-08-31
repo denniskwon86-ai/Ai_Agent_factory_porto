@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LAXS-M v0.8 | 의사결정 근거 열람본</title>
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <style>
+    :root {
+      --primary: #0F172A;       /* Deep Navy */
+      --primary-light: #1E293B; /* Slate Dark */
+      --secondary: #1D4ED8;     /* Royal Blue */
+      --secondary-soft: #EFF6FF;/* Ice Blue */
+      --accent: #047857;        /* Deep Emerald */
+      --accent-soft: #D1FAE5;   /* Soft Emerald */
+      --amber: #B45309;        /* Deep Amber */
+      --amber-soft: #FEF3C7;
+      --text: #0F172A;         /* Near Black for readability */
+      --text-muted: #334155;    /* Dark Gray for body text */
+      --bg: #E2E8F0;           /* Gray Background outside slides */
+      --slide-bg: #FFFFFF;     /* White Slide Canvas */
+      --border: #CBD5E1;
+      --shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    * { box-sizing: border-box; }
+    html {
+      scroll-behavior: smooth;
+      scroll-snap-type: y mandatory;
+    }
+    body {
+      margin: 0;
+      padding: 40px 0;
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: "Pretendard", "Malgun Gothic", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.7; /* Increased line height for reading */
+      font-size: 14.5px; /* Base font size suitable for detailed reading */
+      word-break: keep-all;
+      overflow-wrap: break-word;
+    }
+
+    /* 16:10 Reading Deck Canvas */
+    .slide-deck {
+      max-width: 1440px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 50px;
+    }
+
+    .slide {
+      width: 100%;
+      min-height: 900px; /* 1440 × 900, 16:10 */
+      background: var(--slide-bg);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 50px 60px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      scroll-snap-align: start;
+      border: 1px solid #94A3B8;
+    }
+
+    /* Header for Reading Document */
+    .doc-header {
+      border-bottom: 3px solid var(--primary);
+      padding-bottom: 12px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .doc-chapter {
+      font-size: 13.5px;
+      font-weight: 800;
+      color: var(--secondary);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      display: block;
+    }
+    .doc-title {
+      font-size: 28px;
+      font-weight: 850;
+      color: var(--primary);
+      margin: 0;
+      line-height: 1.3;
+      letter-spacing: -0.02em;
+    }
+    .page-num {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-muted);
+      background: #F1F5F9;
+      padding: 4px 12px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+
+    /* Reading Layouts */
+    .content-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    
+    .grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+    .grid-3-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+    
+    .text-column {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Typography Elements */
+    h3.section-title {
+      font-size: 18.5px;
+      font-weight: 800;
+      color: var(--primary);
+      margin: 0 0 10px 0;
+      border-left: 4px solid var(--secondary);
+      padding-left: 10px;
+    }
+    
+    h4.subsection-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--secondary);
+      margin: 0 0 6px 0;
+    }
+
+    p.paragraph {
+      margin: 0;
+      color: var(--text-muted);
+      text-align: justify;
+      line-height: 1.75;
+    }
+
+    /* Emphasis Boxes */
+    .executive-summary-box {
+      background: #F8FAFC;
+      border: 1px solid #CBD5E1;
+      border-left: 6px solid var(--primary);
+      padding: 20px 24px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    .executive-summary-box strong {
+      display: block;
+      font-size: 16.5px;
+      color: var(--primary);
+      margin-bottom: 8px;
+    }
+
+    /* Name and direction declaration */
+    .brand-declaration-intro {
+      max-width: 1040px;
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 17px;
+      line-height: 1.75;
+    }
+    .brand-declaration-grid {
+      display: grid;
+      grid-template-columns: .9fr 1.1fr;
+      gap: 24px;
+      margin-top: 8px;
+    }
+    .brand-name-panel, .brand-intent-panel {
+      min-height: 330px;
+      padding: 30px;
+      border-radius: 12px;
+    }
+    .brand-name-panel { color:#FFF; background:linear-gradient(145deg,#0F172A,#164E63); }
+    .brand-intent-panel { background:#F8FAFC; border:1px solid var(--border); }
+    .brand-panel-label { display:block; margin-bottom:14px; color:var(--secondary); font-size:12.5px; font-weight:850; letter-spacing:.08em; }
+    .brand-name-panel .brand-panel-label { color:#FFFFFF; }
+    .brand-wordmark { font-size:52px; font-weight:900; letter-spacing:-.05em; line-height:1; }
+    .brand-pronunciation { margin-left:10px; color:#CBD5E1; font-size:17px; font-weight:750; }
+    .brand-expansion { margin-top:20px; color:#FFFFFF; font-size:22px; font-weight:850; }
+    .brand-panel-copy { margin:12px 0 0; color:#CBD5E1; font-size:15px; line-height:1.72; }
+    .brand-intent-panel .brand-panel-copy { color:var(--text-muted); }
+    .brand-edition { margin-top:22px; padding-top:16px; border-top:1px solid rgba(255,255,255,.18); }
+    .brand-edition strong { font-size:21px; }
+    .brand-edition span { margin-left:8px; color:#CBD5E1; font-size:13px; }
+    .brand-intent-panel h3 { margin:0; color:var(--primary); font-size:27px; line-height:1.35; }
+    .brand-intent-panel .intent-ko { margin-top:20px; color:#0F766E; font-size:21px; font-weight:850; line-height:1.45; }
+    .brand-declaration-close { margin-top:2px; padding:17px 22px; border-left:5px solid var(--secondary); border-radius:4px 10px 10px 4px; background:#ECFEFF; color:var(--primary); font-size:17px; font-weight:800; line-height:1.6; }
+
+    .insight-box {
+      background: var(--secondary-soft);
+      border: 1px solid #BFDBFE;
+      padding: 16px;
+      border-radius: 4px;
+    }
+    
+    .warning-box {
+      background: #FEF2F2;
+      border: 1px solid #FECACA;
+      border-left: 4px solid #DC2626;
+      padding: 16px;
+      border-radius: 4px;
+    }
+
+    /* Detailed Bullet Lists */
+    ul.detail-list {
+      margin: 0;
+      padding-left: 20px;
+    }
+    ul.detail-list li {
+      margin-bottom: 12px;
+      color: var(--text-muted);
+      text-align: justify;
+    }
+    ul.detail-list li strong {
+      color: var(--primary);
+    }
+
+    /* Tables for Data Reading */
+    .reading-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      margin: 10px 0;
+    }
+    .reading-table th {
+      background: #F1F5F9;
+      color: var(--primary);
+      padding: 12px;
+      border-top: 2px solid var(--primary);
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      font-weight: 700;
+    }
+    .reading-table td {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+      vertical-align: top;
+      line-height: 1.6;
+    }
+    
+    /* Footer */
+    .doc-footer {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      margin-top: 20px;
+      font-size: 12.5px;
+      color: #64748B;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+  <link rel="stylesheet" href="../../assets/executive-v0.4.css" />
+  <style>
+    :root{--primary:#071747;--primary-light:#0A1E5A;--secondary:#0A1E5A;--secondary-soft:#EEF2F8;--accent:#006B7D;--accent-soft:#E8F5F7;--amber:#5C6779;--amber-soft:#F1F3F6;--text:#101A2D;--text-muted:#445066;--bg:#DDE2E9;--slide-bg:#FFFFFF;--border:#D8DEE8;--shadow:0 12px 30px rgba(10,30,90,.10)}
+    .slide{border-color:#C8D0DC}.doc-header{border-bottom-color:var(--primary)}.page-num{color:#fff;background:var(--primary);border-color:var(--primary)}.doc-footer{border-top-color:var(--border)}
+    .reading-cover{color:#fff;background:#071747!important}.reading-cover .doc-header{border-bottom-color:rgba(255,255,255,.28)}.reading-cover .doc-chapter{color:#fff!important}.reading-cover .doc-title{color:#fff}.reading-cover .page-num{color:#fff;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25)}.reading-cover .content-area{justify-content:center}.reading-cover h1{max-width:960px;margin:0;color:#fff;font-size:55px;line-height:1.22;letter-spacing:-.045em}.reading-cover p{max-width:820px;margin:26px 0 0;color:#D3DCEB;font-size:18px;line-height:1.75}.cover-rule{width:72px;height:5px;margin-bottom:28px;background:var(--exec-red)}.cover-meta-line{display:flex;flex-wrap:wrap;gap:24px;margin-top:54px;padding-top:18px;border-top:1px solid rgba(255,255,255,.24);color:#C7D0DF;font-size:12px;letter-spacing:.06em}.cover-meta-line b{color:#fff}.cover-meta-line .cover-author{color:#fff;font-size:16px;font-weight:800;letter-spacing:0}.reading-cover .doc-footer{color:#B9C3D3;border-top-color:rgba(255,255,255,.22)}
+    .brand-declaration-intro{max-width:1000px;margin-bottom:2px}.brand-visual{max-width:1000px;margin:0 auto}.brand-visual .name-construction{max-height:325px}.brand-meaning-row{display:grid;grid-template-columns:1fr 1fr;gap:28px;max-width:1000px;margin:14px auto 0}.brand-meaning-row div{padding-top:12px;border-top:2px solid var(--border)}.brand-meaning-row div:first-child{border-color:var(--exec-red)}.brand-meaning-row div:last-child{border-color:var(--exec-cyan)}.brand-meaning-row b{display:block;color:var(--primary);font-size:14.5px}.brand-meaning-row span{color:var(--text-muted);font-size:13.5px}.brand-declaration-close{max-width:1000px;margin:13px auto 0;padding:13px 18px;font-size:15.5px}
+    .executive-summary-box,.insight-box{box-shadow:none}.executive-summary-box{border-left-color:var(--exec-red)}.section-title{border-left-color:var(--exec-cyan)!important}.callout{padding:17px 20px;border-left:5px solid var(--exec-red);border-radius:3px 10px 10px 3px;background:#FFF3F5;color:var(--text-muted);font-size:14px;line-height:1.65}.callout strong{color:var(--primary)}
+    /* Fixed-size reading pages: compact only the dense pages, never clip them. */
+    .reading-document .slide .doc-footer{position:absolute;left:60px;right:60px;bottom:28px;margin:0}
+    .reading-document .slide:nth-child(4) .content-area{zoom:.90}
+    .reading-document .slide:nth-child(5) .content-area{zoom:.79}
+    .reading-document .slide:nth-child(6) .content-area{zoom:.82}
+    .reading-document .slide:nth-child(7) .content-area{zoom:.90}
+    .reading-document .slide:nth-child(9) .content-area{zoom:.78}
+    .reading-document .slide:nth-child(10) .content-area{zoom:.86}
+    @media print{@page{size:15in 9.375in;margin:0}html,body{width:15in;margin:0;padding:0;background:#fff}.slide-deck{width:15in;max-width:none;gap:0}.slide{width:15in;height:9.375in;min-height:9.375in!important;max-height:9.375in;overflow:hidden;break-after:page;page-break-after:always;border:0;border-radius:0;box-shadow:none}}
+  </style>
+</head>
+<body class="reading-document">
+<a class="pdf-download" href="../pdf/LAXS-M_v0.8_Executive_Reading_Deck_16x10.pdf" download>PDF 내려받기 · 16:10</a>
+
+<div class="slide-deck">
+
+  <!-- PAGE 1: COVER -->
+  <div class="slide reading-cover">
+    <div class="doc-header">
+      <div>
+        <span class="doc-chapter">LAXS-M · Executive Reading Deck · Version 0.8</span>
+        <h2 class="doc-title">LAXS-M 의사결정 근거 열람본</h2>
+      </div>
+      <span class="page-num">Page 1 / 10</span>
+    </div>
+
+    <div class="content-area">
+      <img class="cover-brand-logo" src="../../assets/brand-v0.3/laxs-logo-primary-on-navy-v2.png" alt="LAXS 공식 로고" />
+      <div class="cover-rule"></div>
+      <h1>부서의 실행과 전사의 경영판단을 연결하는<br>LAXS-M 도입 근거</h1>
+      <p>도입 주장 자체를 반복하지 않고, 경영진과 검토부서가 데이터·계산·통제·효과·운영 근거를 독립적으로 확인할 수 있도록 구성한 열람본입니다.</p>
+      <div class="cover-meta-line"><span><b>DOCUMENT</b> Executive Reading Deck</span><span><b>STATUS</b> Evidence Review</span><span><b>VERSION</b> 0.8</span><span><b>DATE</b> 2026.08</span><span class="cover-author"><b>AUTHOR</b> 권혁일(Hyuk il Kwon)</span></div>
+    </div>
+
+    <div class="doc-footer">
+      <span>Confidential - For Executive Review Only</span>
+      <span>LAXS-M Reading Deck</span>
+    </div>
+  </div>
+
+
+  <!-- PAGE 2: NAME & DIRECTION DECLARATION -->
+  
+
+
+  <!-- PAGE 3: EXECUTIVE SUMMARY & THESIS -->
+  <div class="slide">
+    <div class="doc-header">
+      <div>
+        <span class="doc-chapter">Document 01. Executive Summary</span>
+        <h2 class="doc-title">왜 LAXS-M이며, 무엇을 도입 의사결정해야 하는가</h2>
+      </div>
+      <span class="page-num">Page 2 / 10</span>
+    </div>
+
+    <div class="content-area">
+      <div class="executive-summary-box">
+        <strong>Executive Summary</strong>
+        <p class="paragraph">LAXS-M은 새로운 챗봇을 추가하는 제안이 아닙니다. 기존 ERP·MES·LPL의 책임은 유지하면서 회사 데이터와 업무지식을 공통 문맥으로 연결하고, 부서별 업무 시뮬레이션을 전사 손익·현금흐름·의사결정·실행관리로 조합하는 AX 경영 운영체계입니다.</p>
+      </div>
+      <div class="grid-2-col">
+        <div class="text-column">
+          <h3 class="section-title">현재 접근에서 남는 구조적 공백</h3>
+          <p class="paragraph"><strong>개별 AI 도구</strong>는 문서 작성과 검색을 빠르게 하지만 수주·생산·원가 같은 경영 데이터 및 승인 흐름과 분리되기 쉽습니다. 성과와 업무지식도 과제 단위로 흩어집니다.</p>
+          <p class="paragraph"><strong>프로젝트형 SI</strong>는 정해진 범위를 구현하는 데 효과적이지만, 요구 변화 때마다 재설명과 계약 변경이 필요합니다. 시스템 수정 속도와 현업의 변화 속도 사이에 간극이 생깁니다.</p>
+        </div>
+        <div class="text-column">
+          <h3 class="section-title">LAXS-M이 제안하는 전환</h3>
+          <p class="paragraph">현업이 회사의 권한·데이터 계약·업무표준을 상속한 업무 기능을 만들고, 승인된 데이터와 산식으로 대안을 비교하며, 결정과 실제 결과를 다음 업무에 재사용할 수 있게 합니다.</p>
+          <div class="insight-box">
+            <h4 class="subsection-title">이번 의사결정의 범위</h4>
+            <p class="paragraph">① LAXS-M을 공식 AX 경영 플랫폼으로 지정 ② 원료매입·생산·판매·전사경영 4개 업무키트 적용 ③ 제품 책임자와 Power User 지정 ④ 보안 범위 내 데이터 연결 및 효과 측정 원칙 승인입니다.</p>
+          </div>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:2px"><strong>판단 기준</strong><br>도입 후에는 리드타임·재작업·데이터 품질·의사결정 시간·재고·현금·손익 효과를 같은 기준으로 측정합니다. 기능 확장과 조직 확산은 실사용·재사용·경영효과가 확인된 범위부터 단계적으로 승인합니다.</div>
+    </div>
+
+    <div class="doc-footer">
+      <span>Confidential - For Executive Review Only</span>
+      <span>LAXS-M Reading Deck · v0.8</span>
+    </div>
+  </div>
+
+
+  <!-- PAGE 4: CORE STRENGTHS & PILLARS -->
+  
+
+
+  <!-- PAGE 5: ARCHITECTURE & SANDBOX -->
+  
+
+
+  <!-- PAGE 6: DATA INTEGRATION & DOMAIN TRANSFORMATION -->
+  <div class="slide">
+    <div class="doc-header">
+      <div>
+        <span class="doc-chapter">Document 04. 데이터 연결 원칙</span>
+        <h2 class="doc-title">레거시를 교체하지 않고 필요한 경영 데이터만 연결합니다.</h2>
+      </div>
+      <span class="page-num">Page 3 / 10</span>
+    </div>
+
+    <div class="content-area">
+      <p class="paragraph">LAXS-M은 ERP·MES·LPL을 대체하는 또 하나의 원장 시스템이 아닙니다. 원천 책임은 유지하고, 승인된 업무 목적에 필요한 데이터만 같은 조직·시점·단위로 연결합니다.</p>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:24px">
+        <article class="insight-box" style="background:#F8FAFC"><h3 class="section-title">System of Record 유지</h3><p class="paragraph">재무 전표·생산실적·선적정보는 기존 책임 시스템에 남깁니다. 분석에는 필요한 판과 근거만 선택해 사용합니다.</p></article>
+        <article class="insight-box" style="background:#F0F9FF;border-color:#BAE6FD"><h3 class="section-title">목적 기반 연결</h3><p class="paragraph">보안등급·사용빈도·신선도에 따라 API, 배치, 파일 또는 가상참조 방식을 선택하고 계보를 보존합니다.</p></article>
+        <article class="insight-box" style="background:#FFF6F7;border-color:#F4C7CF"><h3 class="section-title">외부 접근 경계</h3><p class="paragraph">운송사·협력업체·통관사는 기존 포털을 사용하며 경영 플랫폼에 직접 접근하지 않습니다.</p></article>
+      </div>
+      <div class="executive-summary-box" style="margin-top:28px"><h3 class="section-title">업무키트와 전사 데이터 연결 원칙</h3><p class="paragraph">원료매입·생산·판매·전사경영 업무키트는 원천 데이터를 전량 복제하지 않습니다. 승인된 데이터 판과 업무 관계만 연결해 <strong>원료 도착지연이 재고·생산량·납기·매출·현금·손익에 미치는 영향</strong>을 같은 전사 시나리오에서 계산합니다. 세부 기능과 화면은 <strong>제품 기능설명서</strong>에서 관리합니다.</p></div>
+    </div>
+
+    <div class="doc-footer">
+      <span>Confidential - For Executive Review Only</span>
+      <span>LAXS-M Reading Deck</span>
+    </div>
+  </div>
+
+
+  <!-- PAGE 7: PROOF OF EXECUTION (1호 과제) -->
+  <div class="slide">
+    <div class="doc-header">
+      <div>
+        <span class="doc-chapter">Document 05. Enterprise Simulation &amp; Value Evidence</span>
+        <h2 class="doc-title">4개 업무키트가 전사 경영 시뮬레이션으로 조합됩니다.</h2>
+      </div>
+      <span class="page-num">Page 4 / 10</span>
+    </div>
+    <div class="content-area">
+      <h3 class="section-title">1. 부서별 판단을 하나의 전사 시나리오로 연결</h3>
+      <p class="paragraph">
+        각 부서는 자기 업무키트에서 필요한 시나리오를 만들고 의사결정합니다. LAXS-M은 그 결과를 동일한 전사 시나리오와 인증 데이터에 저장해 <strong>원료매입·생산·판매의 변화가 손익·현금흐름과 실행계획에 미치는 영향</strong>으로 조합합니다.
+      </p>
+      
+      <div class="grid-2-col" style="margin: 16px 0;">
+        <div class="text-column">
+          <h4 class="subsection-title">업무키트 조합과 운영 증거</h4>
+          <ul class="detail-list">
+            <li><strong>원료매입 키트:</strong> 원료가격·환율·선적일정·도착지연을 비교하고 구매·대체조달 의사결정을 기록합니다.</li>
+            <li><strong>생산 키트:</strong> 재고·BOM·생산계획을 결합해 자재부족과 생산가능량을 계산합니다.</li>
+            <li><strong>판매 키트:</strong> 수주·납기·출하·매출인식 영향을 비교하고 고객 대응안을 관리합니다.</li>
+            <li><strong>전사경영 키트:</strong> 부서별 결과를 손익·현금흐름·영향 경로로 조합하고 의사결정 안건과 실행계획으로 전환합니다.</li>
+          </ul>
+        </div>
+        <div class="insight-box" style="background:#F7F8FA; border-color:#D8DEE8;">
+          <h4 class="subsection-title" style="color:var(--primary);">전사 조합 시나리오 예시</h4>
+          <p class="paragraph">30일 공급지연 가정에서 생산량은 기준선 대비 <strong>-4,800 ton</strong>, 영업이익은 <strong>-98.2억원</strong>, 기말현금은 <strong>-165.4억원</strong>으로 계산됐습니다.</p>
+          <p class="paragraph" style="margin-top:10px; font-weight:700; color:var(--primary); font-size:15px;">위 수치는 공개정보와 업무구조를 바탕으로 구성한 시연용 합성 결과입니다. 도입 효과는 실제 승인자료·실적·기준선을 연결한 뒤 동일 산식으로 사후 검증합니다.</p>
+        </div>
+      </div>
+    </div>
+    <div class="doc-footer">
+      <span>Confidential - For Executive Review Only</span>
+      <span>LAXS-M Reading Deck</span>
+    </div>
+  </div>
+
+  <!-- PAGE 8: ROI MEASUREMENT -->
+  <div class="slide">
+    <div class="doc-header">
+      <div>
+        <span class="doc-chapter">Document 06. Adoption Effect Measurement</span>
+        <h2 class="doc-title">도입 효과는 기준선과 사후 실측으로 검증합니다.</h2>
+      </div>
+      <span class="page-num">Page 5 / 10</span>
+    </div>
+    <div class="content-area">
+      <h3 class="section-title">2. 경영 플랫폼 도입에 따른 정량적 / 정성적 재무 가치 (ROI)</h3>
+      <p class="paragraph" style="margin-bottom: 12px;">
+        업무 효율뿐 아니라 재고·체선료·조달 차질·운전자본에 미치는 영향을 도입 전 기준선과 비교합니다. 효과가 확인된 업무키트와 조직부터 확장해 투자와 운영 리스크를 함께 관리합니다.
+      </p>
+
+      <table class="reading-table">
+        <thead>
+          <tr>
+            <th style="width: 25%;">분류</th>
+            <th style="width: 25%;">기대 효과 항목</th>
+            <th style="width: 50%;">상세 재무 가치 기전 (Mechanism of Value)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td rowspan="3" style="font-weight:700; color:var(--secondary); background:#F8FAFC;">정량적 재무 절감<br>(Quantified Value)</td>
+            <td><strong>체선료 및 보관료 감축</strong></td>
+            <td>물류 일정과 하역계획을 연결하여 체선·보관 발생 건수와 비용의 기준선 대비 변화를 측정합니다.</td>
+          </tr>
+          <tr>
+            <td><strong>과잉 안전재고 축소</strong></td>
+            <td>생산 투입계획과 공급 변동을 함께 비교해 서비스 수준을 유지하면서 조정 가능한 안전재고 범위를 검토합니다.</td>
+          </tr>
+          <tr>
+            <td><strong>수작업 인건비 절감</strong></td>
+            <td>부서 간 엑셀 취합·이중 입력·재작업 시간을 측정하고 계약 기반 데이터 연계 후의 공수와 비교합니다.</td>
+          </tr>
+          <tr>
+            <td rowspan="2" style="font-weight:700; color:var(--accent); background:#F8FAFC;">정성적 전략 자산<br>(Strategic Value)</td>
+            <td><strong>적기 조달 리스크 헷지</strong></td>
+             <td>지연 경보와 대체 조달 시나리오를 통해 생산 차질 가능성과 대응 리드타임이 어떻게 달라지는지 추적합니다.</td>
+          </tr>
+          <tr>
+            <td><strong>전사 지식의 영구 자산화</strong></td>
+             <td>의사결정 근거·업무 기준·앱 버전을 회사 자산으로 남겨 특정 개인 의존도를 낮추고 재사용 가능성을 높입니다.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout" style="margin-top:14px;"><strong>확대 조건:</strong> 리드타임·재작업·재고·의사결정 시간·재무 효과와 업무키트 재사용률이 합의한 기준을 충족한 범위부터 다음 단계 투자를 승인합니다.</div>
+    </div>
+    <div class="doc-footer">
+      <span>Confidential - For Executive Review Only</span>
+      <span>LAXS-M Reading Deck</span>
+    </div>
+  </div>
+
+  <!-- PAGE 9: GOVERNANCE, IT PARTNERSHIP & ROADMAP -->
+  <div class="slide">
+    <div class="doc-header">
+      <div>
+        <span class="doc-chapter">Document 07. 추진 거버넌스와 책임 경계</span>
+        <h2 class="doc-title">운영 책임은 명확히 두고, 확산은 검증된 범위부터 진행합니다.</h2>
+      </div>
+      <span class="page-num">Page 6 / 10</span>
+    </div>
+
+    <div class="content-area">
+      <p class="paragraph">이 열람본에서는 LAXS-M을 실제 업무에 정착시키는 책임과 협업 경계를 확정합니다. 조직 확장·그룹 확산·외부 사업화의 단계별 조건과 경제성은 <strong>현장 성공 마스터 로드맵</strong>과 <strong>사업모델·확산 로드맵</strong>을 정본으로 관리합니다.</p>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:24px">
+        <article class="text-column" style="padding:22px;border:1px solid var(--border);border-top:5px solid var(--primary);border-radius:12px"><h3 class="section-title">AX & Product Lead</h3><p class="paragraph">제품 로드맵, 업무키트 표준, 도입 성공기준, 보안·데이터 원칙과 경영진 보고를 단일 책임으로 관리합니다.</p></article>
+        <article class="text-column" style="padding:22px;border:1px solid var(--border);border-top:5px solid var(--secondary);border-radius:12px"><h3 class="section-title">Power User 3~4명</h3><p class="paragraph">원료매입·생산·판매·재무의 업무 규칙과 데이터 의미를 관리하고, 결과의 현업 사용성과 재사용성을 검증합니다.</p></article>
+        <article class="text-column" style="padding:22px;border:1px solid var(--border);border-top:5px solid var(--accent);border-radius:12px"><h3 class="section-title">IT·보안·ITO 파트너</h3><p class="paragraph">레거시 연계, 접근통제, 운영환경과 장애 대응을 지원합니다. IP·SLA·확산 역할은 운영성과와 경제성 근거에 따라 계약으로 확정합니다.</p></article>
+      </div>
+      <div class="executive-summary-box" style="margin-top:28px;border-left-color:var(--secondary);background:#F0F9FF"><h3 class="section-title">이 문서에서 결정할 경계</h3><p class="paragraph">이번 결정은 <strong>LS MnM 적용 책임자·참여자·업무시간·초기 4개 업무키트·데이터 접근·효과 측정 원칙</strong>까지입니다. 추가 경영영역과 그룹 확산은 실사용·재사용·경제성 검증 후 별도 안건으로 상정합니다.</p></div>
+    </div>
+
+    <div class="doc-footer">
+      <span>Confidential - For Executive Review Only</span>
+      <span>LAXS-M Reading Deck</span>
+    </div>
+  </div>
+
+
+  <!-- PAGE 7: EVIDENCE INDEX AND REVIEW QUESTIONS -->
+  <div class="slide" style="min-height: auto;">
+    <div class="doc-header">
+      <div>
+        <span class="doc-chapter">Document 07. Evidence Index &amp; Review Questions</span>
+        <h2 class="doc-title">승인 전에 확인할 6개 증거 묶음</h2>
+      </div>
+      <span class="page-num">Page 7 / 10</span>
+    </div>
+
+    <div class="content-area">
+      <div class="executive-summary-box" style="border-left-color: var(--secondary); background: #F0F9FF;">
+        <p class="paragraph" style="font-size: 16px; font-weight: 600; color: var(--secondary);">
+          이 문서는 승인 문안을 반복하지 않습니다. 아래 여섯 가지 증거가 재현 가능하고 서로 같은 회사·기준일·권한 범위를 가리키는지 검토합니다.
+        </p>
+      </div>
+
+      <div class="text-column" style="gap: 20px; padding: 10px 20px;">
+        <div>
+          <h4 class="subsection-title" style="font-size: 17px; display: flex; align-items: center; gap: 8px;">
+            <span style="display:inline-block; background:var(--primary); color:#FFF; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-size:14px;">1</span> 제품 증거
+          </h4>
+          <p class="paragraph" style="padding-left:32px;">4개 업무키트, 실제 브라우저 화면, 부서별 시뮬레이션과 전사 조합 결과가 같은 사용 흐름에서 동작하는가?</p>
+        </div>
+
+        <div>
+          <h4 class="subsection-title" style="font-size: 17px; display: flex; align-items: center; gap: 8px;">
+            <span style="display:inline-block; background:var(--primary); color:#FFF; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-size:14px;">2</span> 데이터 증거
+          </h4>
+          <p class="paragraph" style="padding-left:32px;">Source Binding, 인증 Snapshot, 조직 범위와 원천 지문이 결과에서 다시 추적되는가?</p>
+        </div>
+
+        <div>
+          <h4 class="subsection-title" style="font-size: 17px; display: flex; align-items: center; gap: 8px;">
+            <span style="display:inline-block; background:var(--primary); color:#FFF; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-size:14px;">3</span> 계산 증거
+          </h4>
+          <p class="paragraph" style="padding-left:32px;">모델 판·단위·부호·기준선·결과 지문이 봉인되고, 같은 질문이 같은 답으로 재현되는가?</p>
+        </div>
+
+        <div>
+          <h4 class="subsection-title" style="font-size: 17px; display: flex; align-items: center; gap: 8px;">
+            <span style="display:inline-block; background:var(--accent); color:#FFF; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-size:14px;">4</span> 통제 증거
+          </h4>
+          <p class="paragraph" style="padding-left:32px;">회사·조직·권한·승인·감사·발간 통제가 브라우저 경로와 저장소 양쪽에서 우회 없이 작동하는가?</p>
+        </div>
+
+        <div>
+          <h4 class="subsection-title" style="font-size: 17px; display: flex; align-items: center; gap: 8px;">
+            <span style="display:inline-block; background:var(--primary); color:#FFF; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-size:14px;">5</span> 가치 증거
+          </h4>
+          <p class="paragraph" style="padding-left:32px;">도입 전 기준선, 사용량, 사후 변화와 총비용이 같은 기간·모수로 비교되며 효과와 기여도가 구분되는가?</p>
+        </div>
+
+        <div>
+          <h4 class="subsection-title" style="font-size: 17px; display: flex; align-items: center; gap: 8px;">
+            <span style="display:inline-block; background:var(--secondary); color:#FFF; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-size:14px;">6</span> 운영 증거
+          </h4>
+          <p class="paragraph" style="padding-left:32px;">백업·복구·SLA·용량·장애 대응과 최대 10명 운영 절차가 문서가 아니라 실제 검증 기록으로 남는가?</p>
+        </div>
+      </div>
+      
+      <div style="margin-top: 20px; border-top: 2px dashed var(--border); padding-top: 20px; text-align: center;">
+        <p style="font-size: 15.5px; font-weight: 700; color: var(--primary);">
+          최종 승인 문안과 책임·재의결 조건은 별도 「의사결정 요청서」에서 확정합니다.
+        </p>
+      </div>
+    </div>
+
+    <div class="doc-footer">
+      <span>Confidential - For Executive Review Only</span>
+      <span>LAXS-M Reading Deck · Evidence Review</span>
+    </div>
+  </div>
+
+  <!-- PAGE 11: ACTUAL PRODUCT SCREENS — MANAGEMENT & ADVISOR -->
+  <div class="slide" style="min-height:auto;">
+    <div class="doc-header"><div><span class="doc-chapter">Appendix 01. Actual Product Screens</span><h2 class="doc-title">경영 현황과 AI 에이전트 조율 구현 화면</h2></div><span class="page-num">Page 8 / 10</span></div>
+    <div class="content-area">
+      <p class="paragraph">아래 이미지는 문서용 목업이 아니라 현재 제품에서 캡처한 구현 화면입니다.</p>
+      <div class="screen-proof-grid">
+        <figure class="screen-proof"><img src="../../assets/screens-v0.3/01-management-home.png" alt="경영 현황과 의사결정 홈 구현 화면"><figcaption><strong>경영 현황·의사결정 홈</strong>결정 대기, 차단, 데이터·SW·Twin의 상태와 다음 행동을 한 화면에 모읍니다.</figcaption></figure>
+        <figure class="screen-proof"><img src="../../assets/screens-v0.3/09-agent-generator-focus.png" alt="AI 에이전트 생성과 워크플로우 조율 구현 화면"><figcaption><strong>AI 에이전트 생성·조율</strong>업무 요구에서 역할·스킬을 추천하고 워크플로우 템플릿으로 에이전트 셋을 구성합니다.</figcaption></figure>
+      </div>
+      <div class="screen-placeholder-note"><strong>화면 기준:</strong> 2026.08.28 현재 LAXS-M 제품 화면입니다. 26개 전체 메뉴, 업무 온톨로지, 대외 인텔리전스, 앱 제작, 시뮬레이션과 의사결정·보고 UI를 반영했습니다. 수치는 시연용 합성 데이터입니다.</div>
+    </div>
+    <div class="doc-footer"><span>Confidential - For Executive Review Only</span><span>LAXS-M Reading Deck · Screen Evidence</span></div>
+  </div>
+
+  <!-- PAGE 12: ACTUAL PRODUCT SCREENS — BUILD & CONTROL -->
+  <div class="slide" style="min-height:auto;">
+    <div class="doc-header"><div><span class="doc-chapter">Appendix 02. Actual Product Screens</span><h2 class="doc-title">현업 SW 생성과 대외 인텔리전스 화면</h2></div><span class="page-num">Page 9 / 10</span></div>
+    <div class="content-area">
+      <div class="screen-proof-grid">
+        <figure class="screen-proof"><img src="../../assets/screens-v0.5/01-sw-generator-actual.png" alt="실제 현업 SW 생성 작업공간"><figcaption><strong>현업 SW 생성기 · 실제 작업공간</strong>WBS·AI 제작 스트림·생성 앱 미리보기를 한 화면에서 확인합니다.</figcaption></figure>
+        <figure class="screen-proof"><img src="../../assets/screens-v0.5/03-ontology-graph-actual.png" alt="승인된 업무 온톨로지 상관 그래프"><figcaption><strong>업무 온톨로지 · 실제 관계 그래프</strong>구매·선적·재고·생산·판매 객체와 승인 영향 경로를 탐색합니다.</figcaption></figure>
+      </div>
+    </div>
+    <div class="doc-footer"><span>Confidential - For Executive Review Only</span><span>LAXS-M Reading Deck · Screen Evidence</span></div>
+  </div>
+
+  <!-- PAGE 13: ACTUAL PRODUCT SCREENS — CALCULATE & DECIDE -->
+  <div class="slide" style="min-height:auto;">
+    <div class="doc-header"><div><span class="doc-chapter">Appendix 03. Actual Product Screens</span><h2 class="doc-title">경영 시나리오 분석과 의사결정 실행 화면</h2></div><span class="page-num">Page 10 / 10</span></div>
+    <div class="content-area">
+      <div class="screen-proof-grid">
+        <figure class="screen-proof"><img src="../../assets/screens-v0.5/02-simulation-result-actual.png" alt="경영 시뮬레이션 실제 계산 결과"><figcaption><strong>경영 시뮬레이션 · 실제 계산 결과</strong>생산량·재고·현금·영업이익 변화를 같은 기준선에서 비교합니다.</figcaption></figure>
+        <figure class="screen-proof"><img src="../../assets/screens-v0.5/04-publication-external-demo.png" alt="대외 보고본 발간 미리보기"><figcaption><strong>대외 보고본 · 시연용 합성 데이터</strong>결정과 수치를 문서로 렌더링하고 임원·법무 게이트를 확인합니다.</figcaption></figure>
+      </div>
+      <div class="screen-placeholder-note"><strong>현재 기능 범위:</strong> 26개 전체 메뉴와 회사 문맥, 업무키트, 데이터 준비, 앱 제작·운영, 시뮬레이션, 온톨로지, 대외 인텔리전스, 의사결정·보고를 동일 운영 화면에서 연결합니다.</div>
+    </div>
+    <div class="doc-footer"><span>Confidential - For Executive Review Only</span><span>LAXS-M Reading Deck - END OF DOCUMENT</span></div>
+  </div>
+
+  
+</div>
+
+<div class="global-author-credit" style="padding:12px 24px;text-align:center;font:600 12px/1.5 Pretendard,Noto Sans KR,Malgun Gothic,sans-serif;color:#66758a;background:#f5f7fa;border-top:1px solid #dce4eb;">작성자 : 권혁일(Hyuk il Kwon)</div></body>
+</html>

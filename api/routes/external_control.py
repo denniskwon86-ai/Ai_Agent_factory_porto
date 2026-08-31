@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.deps import (Principal, assert_can_manage_standard, assert_governance_readable,
-                      current_principal)
+                      current_principal, visibility_block_reason)
 from core.external_collector import CollectorError, external_collector
 from core.external_intelligence import (ExternalIntelligenceError,
                                         external_intelligence)
@@ -72,6 +72,26 @@ class ObservationRequest(BaseModel):
     source_record_ref: str = ""
     quality_status: str = "RAW"
     note: str = ""
+
+
+class IndicatorProposalRequest(BaseModel):
+    name: str
+    category: str = ""
+    canonical_term: str = ""
+    unit: str = ""
+    frequency: str = ""
+    required_grade: str = "gold"
+    acceptable_latency: str = ""
+    source_hint: str = ""
+    purpose: str = ""
+    gap_impact: str = ""
+    next_action: str = ""
+    rationale: str = ""
+
+
+class IndicatorProposalDecision(BaseModel):
+    expected_fingerprint: str
+    reason: str = ""
 
 
 class CsvCollectRequest(BaseModel):
@@ -311,6 +331,71 @@ async def list_indicators(p: Principal = Depends(current_principal)):
     assert_governance_readable(p)
     return {"status": "success",
             "data": await asyncio.to_thread(external_intelligence.list_indicators)}
+
+
+@router.get("/indicators/proposals")
+async def list_indicator_proposals(status: str = "pending",
+                                   p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    try:
+        rows = await asyncio.to_thread(external_intelligence.list_indicator_proposals, status)
+    except ExternalIntelligenceError as e:
+        _err(e)
+    return {"status": "success", "data": rows}
+
+
+@router.post("/indicators/proposals")
+async def propose_indicator(req: IndicatorProposalRequest,
+                            p: Principal = Depends(current_principal)):
+    actor = _actor(p)
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    try:
+        out = await asyncio.to_thread(
+            external_intelligence.propose_indicator, req.model_dump(), actor)
+    except ExternalIntelligenceError as e:
+        _err(e)
+    from core.enterprise_context import audit
+    audit.record(audit.EXTERNAL_INDICATOR_PROPOSED, "external_indicator_proposal",
+                 out["proposal_id"], actor=actor, outcome="allowed",
+                 detail=f"대외지표 제안 · {req.name}"[:500])
+    return {"status": "success", "data": out}
+
+
+@router.post("/indicators/proposals/{proposal_id}/approve")
+async def approve_indicator_proposal(proposal_id: str, req: IndicatorProposalDecision,
+                                     p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    actor = _actor(p)
+    try:
+        out = await asyncio.to_thread(
+            external_intelligence.approve_indicator_proposal, proposal_id, actor,
+            req.expected_fingerprint, req.reason)
+    except ExternalIntelligenceError as e:
+        _err(e)
+    from core.enterprise_context import audit
+    audit.record(audit.EXTERNAL_INDICATOR_APPROVED, "external_indicator_proposal",
+                 proposal_id, actor=actor, outcome="allowed",
+                 detail=f"대외지표 승인 · {out['indicator']['name']}"[:500])
+    return {"status": "success", "data": out}
+
+
+@router.post("/indicators/proposals/{proposal_id}/reject")
+async def reject_indicator_proposal(proposal_id: str, req: IndicatorProposalDecision,
+                                    p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    actor = _actor(p)
+    try:
+        out = await asyncio.to_thread(
+            external_intelligence.reject_indicator_proposal, proposal_id, actor,
+            req.reason, req.expected_fingerprint)
+    except ExternalIntelligenceError as e:
+        _err(e)
+    from core.enterprise_context import audit
+    audit.record(audit.EXTERNAL_INDICATOR_REJECTED, "external_indicator_proposal",
+                 proposal_id, actor=actor, outcome="allowed", reason=req.reason[:500])
+    return {"status": "success", "data": out}
 
 
 @router.get("/sources")

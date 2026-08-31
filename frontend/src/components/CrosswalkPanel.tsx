@@ -40,6 +40,7 @@ import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth
 import {
   crosswalkApi, type Field, type LiveValue, type Mapping, type Proposal, type Sys,
 } from '../lib/crosswalkApi';
+import { allocateSystemIds } from '../lib/systemIdApi';
 
 
 export function CrosswalkPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
@@ -64,7 +65,6 @@ export function CrosswalkPanel({ onClose, page = false }: { onClose: () => void;
   const proposalsSection = useRef<HTMLDivElement>(null);
   const confirmedSection = useRef<HTMLDivElement>(null);
 
-  const [sysId, setSysId] = useState('');
   const [sysName, setSysName] = useState('');
   const [sysEndpoint, setSysEndpoint] = useState('');
 
@@ -156,12 +156,18 @@ export function CrosswalkPanel({ onClose, page = false }: { onClose: () => void;
   };
 
   const handleCreateSystem = async () => {
-    if (!sysId.trim()) { setErr('system_id 를 입력하십시오 (영소문자/숫자/_/-, 2~32자).'); return; }
-    const id = sysId.trim();
+    const name = sysName.trim();
+    if (!name) { setErr('연계 시스템 이름을 입력하십시오.'); return; }
+    let id = '';
+    try {
+      [id] = await allocateSystemIds('external_system');
+    } catch (e: any) {
+      setErr(e?.message || '연계 시스템의 내부 식별자를 발급하지 못했습니다.'); return;
+    }
     if (await act('sys', () => crosswalkApi.createSystem({
-      system_id: id, name: sysName.trim() || id, mcp_endpoint: sysEndpoint.trim(),
-    }), `시스템 «${id}» 를 등록했습니다.`)) {
-      setSysId(''); setSysName(''); setSysEndpoint('');
+      system_id: id, name, mcp_endpoint: sysEndpoint.trim(),
+    }), `시스템 «${name}» 을(를) 등록했습니다.`)) {
+      setSysName(''); setSysEndpoint('');
       await fetchSystems();
       setSel(id);
     }
@@ -319,17 +325,15 @@ export function CrosswalkPanel({ onClose, page = false }: { onClose: () => void;
             <div>
               <Panel kicker="REGISTER" title="연계 시스템 등록">
                 <div className="panel-body">
-                  <input className="afs-input" style={{ width: '100%' }} value={sysId}
-                    onChange={(e) => setSysId(e.target.value)}
-                    placeholder="system_id (예: sap, mes)" />
                   <input className="afs-input" style={{ width: '100%' }} value={sysName}
-                    onChange={(e) => setSysName(e.target.value)} placeholder="이름 (예: SAP ERP)" />
+                    onChange={(e) => setSysName(e.target.value)} placeholder="시스템 이름 (예: SAP ERP)" />
+                  <p className="hint-line">내부 식별자는 시스템이 자동으로 발급하고 관리합니다.</p>
                   <input className="afs-input" style={{ width: '100%' }} value={sysEndpoint}
                     onChange={(e) => setSysEndpoint(e.target.value)}
                     placeholder="MCP endpoint (선택, M3용)" />
                   <button className="primary-button" style={{ width: '100%' }}
                     onClick={handleCreateSystem}
-                    disabled={busy !== null || Boolean(writeBlocked)}
+                    disabled={busy !== null || Boolean(writeBlocked) || !sysName.trim()}
                     aria-disabled={Boolean(writeBlocked) || undefined}>
                     {busy === 'sys' ? '등록 중…' : '+ 시스템 등록'}
                   </button>
@@ -366,8 +370,6 @@ export function CrosswalkPanel({ onClose, page = false }: { onClose: () => void;
                               {s.status}
                             </span>
                           </span>
-                          <span className="afs-muted" style={{ display: 'block', fontSize: 12,
-                            fontFamily: 'monospace' }}>{s.system_id}</span>
                         </button>
                       ))
                     )}
@@ -396,8 +398,8 @@ export function CrosswalkPanel({ onClose, page = false }: { onClose: () => void;
                         {selSys.status === 'active' ? '⏸ 비활성화' : '▶ 활성화(승인 매핑 필요)'}
                       </button>}>
                     <div className="panel-body">
-                      <p className="afs-muted" style={{ fontSize: 12, fontFamily: 'monospace' }}>
-                        {selSys.system_id}
+                      <p className="afs-muted" style={{ fontSize: 12 }}>
+                        내부 연결 식별자는 시스템이 관리하며 승인된 매핑에만 사용됩니다.
                       </p>
                     </div>
                   </Panel>

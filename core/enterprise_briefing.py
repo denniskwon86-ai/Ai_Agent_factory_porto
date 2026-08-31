@@ -131,6 +131,66 @@ class EnterpriseBriefing:
                      entity_mode: str = "REAL") -> _Collector:
         c = _Collector()
 
+        def _decision_cases():
+            """실제 의사결정 안건 중 **지금 사람이 처리할 것만** 올린다.
+
+            초안은 작성자의 작업 중 문서라 경영 홈에 노출하지 않는다. 반대로 검토 요청 이후
+            안건을 수집하지 않으면 제품에서 만든 의사결정이 첫 화면의 「의사결정 대기 00」에
+            영원히 잡히지 않는다. 완료·취소된 안건도 다시 올리지 않는다.
+            """
+            if not str(actor or "").strip():
+                return
+            from core.decision_case import (EVIDENCE_CHANGED, IN_REVIEW,
+                                            MEETING_REQUESTED, REVIEW_REQUESTED,
+                                            ROLE_DECIDER, decision_case)
+
+            active = {
+                REVIEW_REQUESTED: (
+                    "검토 요청을 받은 안건입니다.",
+                    "같은 근거를 확인하고 검토 의견을 남기십시오."),
+                IN_REVIEW: (
+                    "참여 부서의 검토가 진행 중입니다.",
+                    "남은 의견과 차단 조건을 확인해 결정 준비를 마치십시오."),
+                MEETING_REQUESTED: (
+                    "의사결정 회의가 요청된 안건입니다.",
+                    "회의 전에 근거·대안·참여자 의견이 같은 판인지 확인하십시오."),
+                EVIDENCE_CHANGED: (
+                    "검토를 요청한 뒤 근거가 바뀌었습니다.",
+                    "바뀐 근거를 다시 확인하고 검토를 재요청하십시오."),
+            }
+            for row in decision_case.queue(actor):
+                status = str(row.get("status") or "")
+                if status not in active:
+                    continue
+                why, action = active[status]
+                due = str(row.get("due_at") or "").strip()
+                if due:
+                    why += f" 처리 기한: {due}."
+                role = str(row.get("my_role") or "")
+                severity = "high" if role == ROLE_DECIDER or status == EVIDENCE_CHANGED else "medium"
+                item = _item(
+                    "decision_case_pending", severity,
+                    str(row.get("question") or "결정 문장이 없는 안건"),
+                    why, action, str(row.get("decision_id") or ""), "decision_case")
+                #: ★ 경영 홈 영향 4칸은 **저장된 비교표에서만** 채운다. 표본 숫자나
+                #: 경로 지표를 다른 뜻의 칸에 끼워 넣지 않는다. 화면이 쓰는 네 항목만
+                #: 공개하고, 계산이 답하지 않은 칸은 계속 비워 둔다.
+                package = row.get("package") if isinstance(row.get("package"), dict) else {}
+                options = package.get("options") if isinstance(package.get("options"), dict) else {}
+                compared = options.get("compared") if isinstance(options.get("compared"), list) else []
+                allowed = {"production_qty", "ending_inventory",
+                           "ending_cash", "operating_profit"}
+                item["impact_rows"] = [
+                    {k: value.get(k) for k in
+                     ("key", "label", "unit", "base", "scenario", "delta", "delta_pct")}
+                    for value in compared
+                    if isinstance(value, dict) and value.get("key") in allowed
+                ]
+                baseline = package.get("baseline") if isinstance(package.get("baseline"), dict) else {}
+                item["data_kind"] = str(baseline.get("data_kind") or "")
+                c.items.append(item)
+        c.run("decision_case.queue", _decision_cases)
+
         def _promotions():
             from core.workspace_promotion import workspace
             for status, sev, title, why, act in (

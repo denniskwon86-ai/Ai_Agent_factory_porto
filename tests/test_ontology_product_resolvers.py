@@ -151,13 +151,16 @@ def test_ecm_노드는_소속_법인의_실행모드를_따른다(tmp_path, monk
     assert res.resource_scope.entity_mode == "VIRTUAL", (
         f"가상 조직을 «{res.resource_scope.entity_mode}» 로 판정했다 — "
         "시나리오가 실적으로 섞인다")
+    assert res.display_name == "가상 법인(시험) · 가상 사업부(시험)"
+    assert "node_virtual_t" not in res.display_name
+    assert len(res.display_fingerprint) == 64
 
 
-#: ⚠️ [2026-08-20 §7 4단계] `dataset` 이 이 목록에서 **빠졌다.** 배선됐기 때문이다.
+#: ⚠️ `dataset`·안전한 `mdm`·`external` 은 이 목록에서 빠졌다. 인증판 색인으로
+#:   배선됐기 때문이다. 미완료 MDM 유형은 아래 별도 회귀가 막는다.
 #:   목록을 줄일 때는 «왜 줄였는지» 를 함께 적는다 — 안 적으면 다음 사람이
 #:   「원래 안 보던 건가」와 「보다가 놓친 건가」를 구별하지 못한다.
-@pytest.mark.parametrize("namespace", ["mdm", "external", "g4",
-                                       "decision", "knowledge"])
+@pytest.mark.parametrize("namespace", ["g4"])
 def test_배선되지_않은_namespace_는_장애로_올라온다(namespace):
     """★★★ [P0-3] 미배선을 `None` 으로 두면 «그 객체가 안 보인다» 가 된다.
 
@@ -170,6 +173,140 @@ def test_배선되지_않은_namespace_는_장애로_올라온다(namespace):
         ObjectRef(namespace, "some_type", "some_id"), _ctx())
     assert res.status == ontology_resolve.UNAVAILABLE, (
         f"{namespace} 미배선이 «{res.status}» 로 나왔다 — 조용히 사라질 수 있다")
+
+
+def test_시나리오_초안은_승인_판본이_없으면_계속_숨긴다(tmp_path, monkeypatch):
+    from core.planning_model import PlanningStore
+    import core.planning_model as pm
+    import core.decision_ledger as dl
+    from core.decision_ledger import DecisionLedger
+
+    monkeypatch.setattr(pm, "planning_store", PlanningStore(str(tmp_path / "planning.db")))
+    monkeypatch.setattr(dl, "decision_ledger", DecisionLedger(str(tmp_path / "ledger.db")))
+    res = R.product_object_scope_resolver(
+        ObjectRef("decision", "scenario", "scenario-any"), _ctx())
+    assert res.status == ontology_resolve.UNBOUND
+
+
+def test_승인된_시나리오_판본만_실제_범위와_원장에_결속한다(tmp_path, monkeypatch):
+    from core.planning_model import PlanningStore
+    import core.planning_model as pm
+    import core.decision_ledger as dl
+    from core.decision_ledger import DecisionLedger
+    from core import planning_scenario_release
+
+    store = PlanningStore(str(tmp_path / "planning.db"))
+    ledger = DecisionLedger(str(tmp_path / "ledger.db"))
+    monkeypatch.setattr(pm, "planning_store", store)
+    monkeypatch.setattr(dl, "decision_ledger", ledger)
+    _decision_scope(monkeypatch)
+    conn = store._connect()
+    try:
+        conn.execute(
+            "INSERT INTO scenarios(scenario_id,name,org_id,baseline_kind,baseline_period,"
+            "tenant_id,owner_organization_id,entity_mode,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            ("scenario-approved", "원료비 상승", "dept_decision", "PLAN", "2027",
+             "tenant_default", "node_decision", "REAL", "2026-08-27T00:00:00+00:00"))
+        conn.execute(
+            "INSERT INTO scenario_assumptions(assumption_id,scenario_id,target_kind,target_code,"
+            "operator,value,rationale,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            ("asm-approved", "scenario-approved", "driver", "원료 단가", "pct", 12,
+             "공급사 갱신 제안", "2026-08-27T00:00:00+00:00"))
+        conn.commit()
+    finally:
+        conn.close()
+    approved = planning_scenario_release.approve(
+        "scenario-approved", "reviewer@test.invalid", "가정 검토 완료",
+        store=store, ledger=ledger)
+    res = R.product_object_scope_resolver(
+        ObjectRef("decision", "scenario", "scenario-approved"),
+        _ctx(tenant_id="tenant_default", entity_mode="REAL",
+             as_of=approved["approved_at"]))
+    assert res.status == ontology_resolve.FOUND
+    assert res.resource_scope.scope_node_id == "node_decision"
+    assert res.display_name == "승인 시나리오 · 원료비 상승 · 기준 2027 · PLAN"
+    assert approved["fingerprint"] in res.row_evidence
+    assert len(res.display_fingerprint) == 64
+    assert R.current_scenario_object_types() == ("scenario",)
+
+
+def _decision_scope(monkeypatch):
+    from types import SimpleNamespace
+    from core.enterprise_context.repository import ecm_repository
+
+    node = SimpleNamespace(
+        node_id="node_decision", entity_id="entity_decision",
+        tenant_id="tenant_default", dept_id="dept_decision")
+    entity = SimpleNamespace(entity_id="entity_decision", entity_mode="REAL")
+    monkeypatch.setattr(ecm_repository, "get_node", lambda node_id: node)
+    monkeypatch.setattr(ecm_repository, "get_entity", lambda entity_id: entity)
+
+
+def _insert_decision(tmp_path, monkeypatch, *, updated_at="2026-08-28T00:00:00+00:00"):
+    from core.collaboration_store import collaboration_store
+    from core.decision_case import decision_case
+
+    db = tmp_path / "collaboration-decision.db"
+    monkeypatch.setattr(collaboration_store, "db_path", str(db))
+    monkeypatch.setattr(collaboration_store, "_ready", "")
+    decision_case._ensure()
+    collaboration_store.execute(
+        "INSERT INTO decision_cases "
+        "(decision_id,tenant_id,scope_id,question,evidence_hash,package_version,status,"
+        "created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("dec-test", "tenant_default", "node_decision", "원료 재고 대응안을 승인할 것인가",
+         "e" * 32, 1, "IN_REVIEW", "owner@test.invalid",
+         "2026-08-27T00:00:00+00:00", updated_at))
+    return db
+
+
+def test_의사결정_정본을_실제_범위와_근거_지문에_결속한다(tmp_path, monkeypatch):
+    _decision_scope(monkeypatch)
+    _insert_decision(tmp_path, monkeypatch)
+    res = R.product_object_scope_resolver(
+        ObjectRef("decision", "decision", "dec-test"),
+        _ctx(tenant_id="tenant_default", entity_mode="REAL",
+             as_of="2026-08-29T00:00:00+00:00"))
+    assert res.status == ontology_resolve.FOUND
+    assert res.resource_scope.scope_node_id == "node_decision"
+    assert res.resource_scope.owner_dept_id == "dept_decision"
+    assert res.resource_scope.owner_user_id == "owner@test.invalid"
+    assert res.display_name == "의사결정 안건 · 원료 재고 대응안을 승인할 것인가"
+    assert "dec-test" not in res.display_name
+    assert "e" * 32 in res.row_evidence
+    assert R.current_decision_object_types() == ("decision",)
+
+
+def test_다른_tenant의_의사결정은_없는_것처럼_답한다(tmp_path, monkeypatch):
+    _decision_scope(monkeypatch)
+    _insert_decision(tmp_path, monkeypatch)
+    res = R.product_object_scope_resolver(
+        ObjectRef("decision", "decision", "dec-test"),
+        _ctx(tenant_id="tenant-other", entity_mode="REAL"))
+    assert res.status == ontology_resolve.NOT_FOUND
+
+
+def test_과거_시점에_미래_수정본을_보여주지_않는다(tmp_path, monkeypatch):
+    _decision_scope(monkeypatch)
+    _insert_decision(
+        tmp_path, monkeypatch, updated_at="2026-08-29T00:00:00+00:00")
+    res = R.product_object_scope_resolver(
+        ObjectRef("decision", "decision", "dec-test"),
+        _ctx(tenant_id="tenant_default", entity_mode="REAL",
+             as_of="2026-08-28T00:00:00+00:00"))
+    assert res.status == ontology_resolve.UNAVAILABLE
+
+
+def test_없는_의사결정과_정본_장애를_구분한다(tmp_path, monkeypatch):
+    _decision_scope(monkeypatch)
+    db = _insert_decision(tmp_path, monkeypatch)
+    missing = R.product_object_scope_resolver(
+        ObjectRef("decision", "decision", "dec-missing"), _ctx())
+    assert missing.status == ontology_resolve.NOT_FOUND
+    db.write_bytes(b"not-a-sqlite-database")
+    broken = R.product_object_scope_resolver(
+        ObjectRef("decision", "decision", "dec-test"), _ctx())
+    assert broken.status == ontology_resolve.UNAVAILABLE
 
 
 def test_없는_객체와_저장소_장애를_다르게_답한다(monkeypatch):
@@ -256,9 +393,73 @@ def test_대상을_받지_않는_판정기는_주입될_수_없다(tmp_path):
 
 def test_막힌_사유를_세어_둔다():
     """⚠️ 로그만 남기면 아무도 세지 않는다 — 「왜 경로가 비었나」에 답할 수 있어야 한다."""
-    before = R.stats.snapshot().get("mdm_not_wired", 0)
-    R.product_object_scope_resolver(ObjectRef("mdm", "material", "M1"), _ctx())
-    assert R.stats.snapshot().get("mdm_not_wired", 0) == before + 1
+    before = R.stats.snapshot().get("mdm_type_not_wired", 0)
+    result = R.product_object_scope_resolver(
+        ObjectRef("mdm", "cost-center", "opaque-object"),
+        _ctx(tenant_id="tenant", entity_mode="REAL"))
+    assert result.status == ontology_resolve.UNAVAILABLE
+    assert R.stats.snapshot().get("mdm_type_not_wired", 0) == before + 1
+
+
+@pytest.mark.parametrize("namespace,object_type", [
+    ("mdm", "material"),
+    ("mdm", "supplier"),
+    ("mdm", "location"),
+    ("mdm", "equipment"),
+    ("mdm", "account"),
+    ("mdm", "logistics-reference"),
+    ("mdm", "bom-line"),
+    ("mdm", "routing-operation"),
+    ("external", "external-observation"),
+])
+def test_지원_유형은_미배선이_아니라_물질화_필요로_답한다(
+        monkeypatch, namespace, object_type):
+    """인증판은 있는데 색인이 없을 때 객체 부재로 거짓 보고하지 않는다."""
+    from core.data_preparation import scope_index
+
+    monkeypatch.setattr(scope_index, "lookup",
+                        lambda *args, **kwargs: (scope_index.NOT_FOUND, None, ()))
+    monkeypatch.setattr(scope_index, "has_unmaterialized_snapshot",
+                        lambda *args, **kwargs: True)
+    result = R.product_object_scope_resolver(
+        ObjectRef(namespace, object_type, "opaque-object"),
+        _ctx(tenant_id="tenant", entity_mode="REAL"))
+    assert result.status == ontology_resolve.UNAVAILABLE
+    assert "물질화" in result.reason
+
+
+def test_사람용_명칭_미완료_원가센터는_명시적으로_차단한다():
+    result = R.product_object_scope_resolver(
+        ObjectRef("mdm", "cost-center", "opaque-object"),
+        _ctx(tenant_id="tenant", entity_mode="REAL"))
+    assert result.status == ontology_resolve.UNAVAILABLE
+    assert "계약" in result.reason
+
+
+def test_g4_driver_is_unbound_until_an_approved_release_exists(monkeypatch):
+    from core import planning_driver_release
+    monkeypatch.setattr(planning_driver_release, "effective_release", lambda *a, **k: None)
+    got = R.product_object_scope_resolver(
+        ObjectRef("g4", "driver", "DRV-FX"),
+        _ctx(tenant_id="tenant-a", entity_mode="REAL"))
+    assert got.status == ontology_resolve.UNBOUND
+
+
+def test_g4_driver_uses_the_approved_release_scope_and_human_name(monkeypatch):
+    from core import planning_driver_release
+    monkeypatch.setattr(planning_driver_release, "effective_release", lambda *a, **k: {
+        "name": "원달러 환율", "version": 1, "fingerprint": "a" * 64,
+        "category": "fx", "unit": "%", "external_code": "USD-KRW",
+        "tenant_id": "tenant-a", "scope_node_id": "node-a", "entity_mode": "REAL",
+        "approved_at": "2026-08-28T00:00:00Z", "approval_event_id": "evt-1",
+    })
+    got = R.product_object_scope_resolver(
+        ObjectRef("g4", "driver", "DRV-FX"),
+        _ctx(tenant_id="tenant-a", entity_mode="REAL"))
+    assert got.status == ontology_resolve.FOUND
+    assert got.resource_scope.scope_node_id == "node-a"
+    assert got.display_name == "경영 동인 · 원달러 환율 · fx · %"
+    assert "DRV-FX" not in got.display_name
 
 
 # ── 지연 초기화 동시성 ───────────────────────────────────────────────────

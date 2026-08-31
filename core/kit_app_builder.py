@@ -358,6 +358,12 @@ def publish_release(*, release_id: str, app_id: str, name: str, instance_id: str
         #: ★ 이 릴리스가 **키트 앱**임을 적는다 — 공장 프로젝트 릴리스와 모양이 다르고,
         #:   구분이 없으면 승격·삭제 같은 절차가 남의 것에 손댄다.
         "kind": "kit_app",
+        #: ★★★ 업무 키트 앱은 별도 소스코드를 생성하지 않고 호스트가 계약을 렌더링한다.
+        #:
+        #: ⚠️ 이것은 정적 검사 면제 표식이 아니다. 승격기는 코드가 0개일 때 이 값을 본 뒤
+        #:   아래 Manifest를 현재 규칙으로 다시 검증하고, 내용 지문과 승인 계약의 Manifest까지
+        #:   모두 대조한다. 소스 파일이 생기면 이 표식과 무관하게 기존 스캐너가 그 파일을 본다.
+        "execution_surface": "HOST_DECLARATIVE",
         "release_id": release_id,
         "app_id": app_id,
         "name": name,

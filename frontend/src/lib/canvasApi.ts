@@ -33,6 +33,18 @@ export interface CanvasQueueItem {
   /** 어느 섹션에서 왔는가 — 결정/막힘/자료/프로그램. */
   section: string;
   domain?: string;
+  /** 실제 Decision Package 의 비교표 중 경영 홈 영향 4칸에 해당하는 행만. */
+  impact_rows?: {
+    key: 'production_qty' | 'ending_inventory' | 'ending_cash' | 'operating_profit';
+    label: string;
+    unit: string;
+    base: number;
+    scenario: number;
+    delta: number;
+    delta_pct: number | null;
+  }[];
+  /** DEMO/SYNTHETIC 이면 화면에서 실적으로 오인하지 않게 표시한다. */
+  data_kind?: string;
 }
 
 export interface Canvas {

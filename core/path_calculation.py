@@ -45,6 +45,44 @@ PATH_MODEL_VERSION = "1.0.0"
 COMPLETE = "COMPLETE"
 BLOCKED = "BLOCKED"
 
+#: 일반 화면과 API가 사용하는 **닫힌 차단 사유 어휘**.
+#:
+#: ⚠️ 내부 관계 ID·계약키·계산 참조·건수는 여기에 들어가지 않는다. 그것들은 권한이
+#: 분리된 운영 진단의 근거이지 일반 사용자가 다음 행동을 정하는 데 필요한 정보가 아니다.
+RELATION_APPROVAL_REQUIRED = "RELATION_APPROVAL_REQUIRED"
+CALCULATION_APPROVAL_REQUIRED = "CALCULATION_APPROVAL_REQUIRED"
+DATA_NOT_READY = "DATA_NOT_READY"
+DATA_CONTRACT_INCOMPLETE = "DATA_CONTRACT_INCOMPLETE"
+BASELINE_NOT_READY = "BASELINE_NOT_READY"
+
+BLOCK_REASON_CATALOG: Dict[str, Dict[str, str]] = {
+    RELATION_APPROVAL_REQUIRED: {
+        "category": "approval",
+        "message": "이 경로의 관계 승인을 확인해야 합니다.",
+        "next_action": "온톨로지 관계 검토 화면에서 승인 상태를 확인하십시오.",
+    },
+    CALCULATION_APPROVAL_REQUIRED: {
+        "category": "approval",
+        "message": "이 경로에 필요한 계산이 아직 실행 승인되지 않았습니다.",
+        "next_action": "계산 실행 승인 화면에서 산식 정의와 적용 범위를 검토하십시오.",
+    },
+    DATA_NOT_READY: {
+        "category": "data",
+        "message": "이 경로에 필요한 인증 데이터가 아직 준비되지 않았습니다.",
+        "next_action": "데이터 준비 상태에서 인증판과 결속 상태를 확인하십시오.",
+    },
+    DATA_CONTRACT_INCOMPLETE: {
+        "category": "data",
+        "message": "계산에 필요한 업무 데이터의 연결 조건이 충족되지 않았습니다.",
+        "next_action": "데이터 준비 상태에서 필수 열과 업무 연결 상태를 점검하십시오.",
+    },
+    BASELINE_NOT_READY: {
+        "category": "baseline",
+        "message": "비교에 필요한 기준선이 아직 준비되지 않았습니다.",
+        "next_action": "기준선 관리 화면에서 적용 기준선과 대상 기간을 확인하십시오.",
+    },
+}
+
 #: 이 경로가 쓰는 구간 순서. **앞 구간의 결과가 뒤 구간의 입력**이다.
 #: ⚠️ 순서를 바꾸면 답이 달라지므로 `PATH_MODEL_VERSION` 이 함께 올라가야 한다.
 SEGMENTS: Tuple[str, ...] = (
@@ -173,11 +211,20 @@ def result_fingerprint(*, request_fp: str, metrics: Mapping[str, Any],
 
 
 def _blocked(req: PathCalculationRequest, seg_fps: Mapping[str, str], *,
-             public: str, internal: Sequence[str]) -> Dict[str, Any]:
+             reason_code: str, internal: Sequence[str]) -> Dict[str, Any]:
     """§2.1 — 차단 사유를 **두 층**으로 낸다.
 
     ⚠️⚠️ 대외 사유에 내부 식별자·구간 이름·건수를 넣으면 **차단 사유가 누설이 된다**
       (「승인되지 않은 관계 3건」은 그 조직에 관계가 3건 있다는 뜻이다)."""
+    definition = BLOCK_REASON_CATALOG.get(reason_code)
+    if definition is None:
+        raise PathCalculationError(f"unknown blocked reason code: {reason_code!r}")
+    public_reason = {
+        "code": reason_code,
+        "category": definition["category"],
+        "message": definition["message"],
+        "next_action": definition["next_action"],
+    }
     return {
         "status": BLOCKED,
         #: ★ 막혔어도 **어느 질문이 막혔는가**는 답할 수 있어야 한다.
@@ -190,8 +237,32 @@ def _blocked(req: PathCalculationRequest, seg_fps: Mapping[str, str], *,
         "segment_outputs": {},
         "segment_model_versions": {},
         "used_snapshots": {},
-        "blocked": {"public_reason": public, "internal_reasons": list(internal)},
+        "blocked": {
+            "reason_code": reason_code,
+            #: 호환 필드도 닫힌 카탈로그의 안전한 문장만 쓴다.
+            "public_reason": definition["message"],
+            "reasons": [public_reason],
+            #: 코어 내부 회귀·권한 분리 진단용. API 경계에서 반드시 제거한다.
+            "internal_reasons": list(internal),
+        },
     }
+
+
+def public_result(result: Mapping[str, Any]) -> Dict[str, Any]:
+    """일반 API·화면에 내보낼 계산 결과를 만든다.
+
+    코어의 ``internal_reasons`` 는 운영 진단과 회귀를 위해 남긴다. 그러나 관계 ID,
+    데이터 계약키, 계산 참조처럼 사용자가 해석할 필요가 없는 내부 결속값이 들어 있으므로
+    제품 API가 원본 결과를 그대로 반환해서는 안 된다. 원본을 변경하지 않고 새 봉투를
+    만들어 진단값만 제거한다.
+    """
+    public = dict(result)
+    blocked = result.get("blocked")
+    if isinstance(blocked, Mapping):
+        safe_blocked = dict(blocked)
+        safe_blocked.pop("internal_reasons", None)
+        public["blocked"] = safe_blocked
+    return public
 
 
 def calculate(req: PathCalculationRequest, *,
@@ -244,20 +315,20 @@ def calculate(req: PathCalculationRequest, *,
     #: 관문 1·2 — 관계 승인과 **지금도 유효한지**.
     if not req.relation_approvals:
         return _blocked(req, seg_fps,
-                        public="이 경로를 계산할 수 없습니다(승인 확인 필요).",
+                        reason_code=RELATION_APPROVAL_REQUIRED,
                         internal=["relation_approvals 가 비어 있습니다."])
     #: ★★★ [P0-CALC-PROOF] **경로의 모든 관계가 승인돼 있는가**(§6 관문 1).
     #: ⚠️ 개수만 세지 않는다 — 다른 관계의 승인을 넣어도 개수는 맞을 수 있다.
     if not req.required_relation_ids:
         return _blocked(req, seg_fps,
-                        public="이 경로를 계산할 수 없습니다(승인 확인 필요).",
+                        reason_code=RELATION_APPROVAL_REQUIRED,
                         internal=["경로가 요구하는 관계 집합이 비어 있습니다 — 무엇을 "
                                   "승인해야 하는지 모르는 채로 계산하지 않습니다."])
     want = set(req.required_relation_ids)
     have = set(req.relation_approvals)
     if want != have:
         return _blocked(req, seg_fps,
-                        public="이 경로를 계산할 수 없습니다(승인 확인 필요).",
+                        reason_code=RELATION_APPROVAL_REQUIRED,
                         internal=[f"승인 집합이 경로와 일치하지 않습니다: "
                                   f"없는 승인={sorted(want - have)}, "
                                   f"경로 밖 승인={sorted(have - want)}"])
@@ -265,7 +336,7 @@ def calculate(req: PathCalculationRequest, *,
         #: ⚠️ 검증기 없이 통과시키면 **철회된 승인으로 계산이 지나간다.** 등록부의
         #:   `assert_executable` 과 같은 규칙이다 — 「안 넘겼으니 통과」는 문이다.
         return _blocked(req, seg_fps,
-                        public="이 경로를 계산할 수 없습니다(승인 확인 필요).",
+                        reason_code=RELATION_APPROVAL_REQUIRED,
                         internal=["relation_verifier 가 없어 승인 유효성을 확인할 수 "
                                   "없습니다."])
     stale = []
@@ -279,7 +350,7 @@ def calculate(req: PathCalculationRequest, *,
             stale.append(rel_id)
     if stale:
         return _blocked(req, seg_fps,
-                        public="이 경로를 계산할 수 없습니다(승인 확인 필요).",
+                        reason_code=RELATION_APPROVAL_REQUIRED,
                         internal=[f"승인이 유효하지 않습니다: {stale}"])
 
     #: 관문 3 — 구간별 참조가 실행 가능한가. **지금은 여기서 전부 멈춘다**(승인 전).
@@ -291,7 +362,7 @@ def calculate(req: PathCalculationRequest, *,
             blocked_segments.append(str(e))
     if blocked_segments:
         return _blocked(req, seg_fps,
-                        public="이 경로의 계산이 아직 준비되지 않았습니다.",
+                        reason_code=CALCULATION_APPROVAL_REQUIRED,
                         internal=blocked_segments)
 
     #: 관문 4·7 — 봉인된 판과 실제 판.
@@ -299,12 +370,12 @@ def calculate(req: PathCalculationRequest, *,
                      if not str(req.sealed_snapshots.get(k, "") or "").strip()]
     if missing_seals:
         return _blocked(req, seg_fps,
-                        public="이 경로에 필요한 데이터가 아직 준비되지 않았습니다.",
+                        reason_code=DATA_NOT_READY,
                         internal=[f"봉인된 판이 없습니다: {missing_seals}"])
     missing_rows = [k for k in REQUIRED_DATASETS if k not in datasets]
     if missing_rows:
         return _blocked(req, seg_fps,
-                        public="이 경로에 필요한 데이터가 아직 준비되지 않았습니다.",
+                        reason_code=DATA_NOT_READY,
                         internal=[f"읽을 자료가 없습니다: {missing_rows}"])
 
     #: 관문 6 — 읽은 판 == 봉인된 판. ⚠️ 다르면 지문 문제가 아니라 **무결성 장애**다.
@@ -317,7 +388,7 @@ def calculate(req: PathCalculationRequest, *,
     empty = [k for k in REQUIRED_DATASETS if not datasets.get(k)]
     if empty:
         return _blocked(req, seg_fps,
-                        public="이 경로에 필요한 데이터가 아직 준비되지 않았습니다.",
+                        reason_code=DATA_NOT_READY,
                         internal=[f"판은 봉인됐으나 행이 0건입니다: {empty}"])
     used: Dict[str, str] = {}
     mixed: Dict[str, List[str]] = {}
@@ -350,7 +421,7 @@ def calculate(req: PathCalculationRequest, *,
             recognition_span_days=req.assumptions.get("recognition_span_days"))
     except cp.ProjectionError as e:
         return _blocked(req, seg_fps,
-                        public="이 경로의 계산에 필요한 자료가 부족합니다.",
+                        reason_code=DATA_CONTRACT_INCOMPLETE,
                         internal=[f"{type(e).__name__}: {e}"])
 
     #: ── 구간 실행. 앞 구간 결과가 뒤 구간 입력이다 ──────────────────────
@@ -372,7 +443,7 @@ def calculate(req: PathCalculationRequest, *,
         #: ⚠️ 이것을 무결성 장애로 올리면 「자료를 채워야 한다」가 「시스템이 고장났다」로
         #:   보이고, 운영자는 데이터가 아니라 서버를 본다.
         return _blocked(req, seg_fps,
-                        public="이 경로의 계산에 필요한 자료가 부족합니다.",
+                        reason_code=DATA_CONTRACT_INCOMPLETE,
                         internal=[f"{type(e).__name__}: {e}"])
 
     segment_outputs = {
@@ -393,7 +464,7 @@ def calculate(req: PathCalculationRequest, *,
     #: ★★ 기준선 없는 판매행은 **드러낸다.** 조용히 빼면 「이동 없음」과 구분되지 않는다.
     if timing.get("missing_baseline"):
         return _blocked(req, seg_fps,
-                        public="이 경로의 계산에 필요한 기준선이 부족합니다.",
+                        reason_code=BASELINE_NOT_READY,
                         internal=[f"기준선 없는 판매행: {timing['missing_baseline']}"])
 
     request_fp = request_fingerprint(req, seg_fps)

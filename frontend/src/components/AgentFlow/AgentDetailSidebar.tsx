@@ -73,11 +73,8 @@ export default function AgentDetailSidebar({
       </div>
 
       <div className="p-4 flex flex-col gap-4">
-        {/* ID & 활성 상태 */}
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-mono text-gray-500 bg-gray-900 px-2 py-1 rounded border border-gray-700">
-            {agent.id}
-          </span>
+        {/* 내부 ID는 사용자가 관리하는 값이 아니다. 활성 상태만 표시한다. */}
+        <div className="flex items-center justify-end">
           <Toggle
             on={!!agent.enabled}
             onClick={() => updateAgent(agent.id, "enabled", !agent.enabled)}

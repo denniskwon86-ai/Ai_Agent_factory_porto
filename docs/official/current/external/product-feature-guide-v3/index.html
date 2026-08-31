@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LAXS-M 제품 기능설명서</title>
+  <link rel="stylesheet" href="../../../assets/document-v0.92.css" />
+  <style>
+    .feature-guide-doc .top{margin-bottom:22px}
+    .feature-guide-doc .top .eyebrow{display:flex;align-items:baseline;gap:14px;font-size:22px;letter-spacing:.07em;white-space:nowrap}
+    .feature-guide-doc .section-ko{color:#39506d;font:850 16px/1.2 "Pretendard","Noto Sans KR","Malgun Gothic",sans-serif;letter-spacing:-.03em;text-transform:none}
+    .feature-guide-doc .dark .section-ko{color:#cbd7e8}
+    .feature-guide-doc .author{font-size:21px}
+    .feature-guide-doc .footer span:last-child{font-family:"Pretendard","Noto Sans KR","Malgun Gothic",sans-serif;font-size:12px}
+    .toc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 24px;margin-top:8px}
+    .toc-item{display:grid;grid-template-columns:46px 1fr;gap:14px;align-items:center;padding:11px 14px;border-bottom:1px solid #cdd6e1;background:#fff}
+    .toc-item b{color:#ff183b;font:900 14px/1 "Cascadia Mono",Consolas,monospace}
+    .toc-item strong{display:block;font-size:16px}.toc-item span{color:#63748a;font-size:12px}
+    .function-stack{display:grid;gap:12px;margin-top:4px}
+    .function-layer{display:grid;grid-template-columns:160px 1fr;gap:14px;align-items:stretch}
+    .function-layer>strong{display:grid;place-items:center;padding:16px;background:#071b50;color:#fff;font-size:17px;text-align:center}
+    .function-layer>div{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+    .function-layer span{display:grid;place-items:center;min-height:58px;padding:9px;border:1px solid #cdd6e1;background:#fff;color:#243750;font-size:13px;font-weight:800;text-align:center}
+    .function-layer.exec>strong{background:#c71f34}.function-layer.exec span{border-top:4px solid #ff183b}
+    .function-layer.meaning>strong{background:#087b91}.function-layer.meaning span{border-top:4px solid #12a8ba}
+    .function-layer.trust>strong{background:#8a6310}.function-layer.trust span{border-top:4px solid #d6a62c}
+    .compact-cards .card{padding:18px}.compact-cards .card h3{font-size:19px}.compact-cards .card p{font-size:13px}
+    .screen-pair .screen img{height:370px}.screen-tall img{height:390px!important}
+    .cover-brand{display:flex;align-items:center;gap:22px}.cover-brand .logo{flex:0 0 auto}.cover-brand strong{color:#fff;font-size:32px;font-weight:850;letter-spacing:-.035em;white-space:nowrap}
+    .mini-flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px}
+    .mini-flow article{padding:13px 15px;border-top:4px solid #12a8ba;background:#fff}
+    .mini-flow b{display:block;color:#ff183b;font-size:12px}.mini-flow strong{display:block;margin:4px 0;font-size:15px}.mini-flow span{color:#63748a;font-size:11px}
+    @media print{
+      .feature-guide-doc .top .eyebrow{gap:9px;font-size:14px}
+      .feature-guide-doc .section-ko{font-size:10px}
+      .feature-guide-doc .author{font-size:14px}
+      .feature-guide-doc .footer span:last-child{font-size:8px}
+      .toc-grid{gap:6px 14px}.toc-item{grid-template-columns:29px 1fr;gap:8px;padding:6px 8px}.toc-item b{font-size:9px}.toc-item strong{font-size:10px}.toc-item span{font-size:7.5px}
+      .function-stack{gap:7px}.function-layer{grid-template-columns:100px 1fr;gap:8px}.function-layer>strong{padding:9px;font-size:11px}.function-layer>div{gap:5px}.function-layer span{min-height:36px;padding:5px;font-size:8px}
+      .compact-cards .card{padding:11px}.compact-cards .card h3{font-size:12px}.compact-cards .card p{font-size:8.5px}
+      .screen-pair .screen img{height:2.25in}.screen-tall img{height:2.45in!important}
+      .mini-flow{gap:7px;margin-top:10px}.mini-flow article{padding:7px 9px}.mini-flow b{font-size:7.5px}.mini-flow strong{font-size:10px}.mini-flow span{font-size:7px}
+      .feature-guide-doc .page:nth-child(2) .top{margin-bottom:.11in;padding-bottom:.06in}
+      .feature-guide-doc .page:nth-child(2) .top h2{font-size:22px}
+      .feature-guide-doc .page:nth-child(2) .toc-grid{gap:3px 14px}
+      .feature-guide-doc .page:nth-child(2) .toc-item{padding:4px 8px}
+      .feature-guide-doc .page:nth-child(10) .screen img{height:2.18in}
+      .feature-guide-doc .page:nth-child(10) .declaration{margin-top:.11in!important;padding:11px}
+      .feature-guide-doc .page:nth-child(10) .declaration strong{font-size:14px}
+      .feature-guide-doc .page:nth-child(12) .screen-tall img{height:2.18in!important}
+      .feature-guide-doc .page:nth-child(12) .declaration{margin-top:.10in!important;padding:11px}
+      .feature-guide-doc .page:nth-child(12) .declaration strong{font-size:14px}
+      .feature-guide-doc .page:nth-child(14) .screen-tall img{height:1.93in!important}
+      .feature-guide-doc .page:nth-child(14) .mini-flow{margin-top:4px}
+      .feature-guide-doc .page:nth-child(14) .top{margin-bottom:.13in}
+      .feature-guide-doc .page:nth-child(14) .top h2{font-size:24px}
+      .feature-guide-doc .page:nth-child(14) .card{padding:9px}
+      .feature-guide-doc .page:nth-child(14) .card h3{font-size:11px;margin:4px 0}
+      .feature-guide-doc .page:nth-child(14) .card p{font-size:7.5px}
+      .feature-guide-doc .page:nth-child(15) .screen-pair .screen img{height:2.02in}
+      .feature-guide-doc .page:nth-child(15) .mini-flow{margin-top:7px}
+      .feature-guide-doc .page:nth-child(15) .declaration{margin-top:.08in!important;padding:10px}
+      .feature-guide-doc .page:nth-child(15) .declaration strong{font-size:13px}
+    }
+    @media print{
+      .cover-brand{gap:.16in}.cover-brand .logo{width:1.55in}.cover-brand strong{font-size:20px}
+      .feature-guide-doc .page:nth-child(1) .hero{grid-template-columns:.76fr 1.24fr;gap:.24in}
+      .feature-guide-doc .page:nth-child(1) .screen img{height:3.45in}
+      .feature-guide-doc .screen-pair .screen img{height:2.58in}
+      .feature-guide-doc .screen-grid .screen img{height:2.72in}
+      .feature-guide-doc .screen-grid .screen-tall img{height:2.78in!important}
+      .feature-guide-doc .page:nth-child(10) .screen img{height:2.58in}
+      .feature-guide-doc .page:nth-child(12) .screen-tall img{height:2.55in!important}
+      .feature-guide-doc .page:nth-child(14) .screen-tall img{height:2.28in!important}
+      .feature-guide-doc .page:nth-child(15) .screen-pair .screen img{height:2.32in}
+      .feature-guide-doc .page:nth-child(16) .screen-pair .screen img{height:2.48in}
+      .feature-guide-doc .page:nth-child(17) .screen img{height:2.38in}
+      .feature-guide-doc .screen figcaption{padding:.055in .075in;font-size:6.9px}
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar"><a href="../../pdf/LAXS-M_v1.0_Product_Feature_Guide_16x10.pdf" download>PDF 내려받기 · 16:10</a></div>
+  <main class="deck feature-guide-doc">
+    <section class="page dark">
+      <div class="hero">
+        <div><div class="cover-brand"><img class="logo" src="../../../assets/brand-v0.3/laxs-logo-primary-on-navy-v2.png" alt="LAXS-M" /><strong>제품 및 기능설명서</strong></div><p class="eyebrow" style="margin-top:28px">PRODUCT &amp; FUNCTION GUIDE</p><h1>전체 구조와 기능을 이해하고,<br><span style="color:#ff3857">핵심 사용 흐름</span>을 확인합니다.</h1><p>LAXS-M의 제품 구조와 실제 화면을 기준으로 경영 홈, AI 경영비서, 앱·에이전트 생성, 업무키트, 데이터·온톨로지, 전사 시뮬레이션, 의사결정과 보고 기능을 설명합니다.</p><div class="author">작성자 : 권혁일(Hyuk il Kwon)</div></div>
+        <figure class="screen"><img src="../../../assets/screens-v0.5/20-management-home-realistic-current.png" alt="데이터가 적용된 LAXS-M 경영 홈" /><figcaption>원료 도입 지연 시나리오와 전사 영향이 표시된 현재 LAXS-M 경영 홈</figcaption></figure>
+      </div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>01 / 18</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top"><div><p class="eyebrow"><span>CONTENTS</span><span class="section-ko">목차</span></p><h2>현업 실행에서 전사 경영 판단과 보고까지, 제품 기능을 실제 화면 순서로 설명합니다.</h2></div><span class="page-num">02 / 18</span></header>
+      <div class="toc-grid">
+        <div class="toc-item"><b>01</b><div><strong>Product Architecture</strong><span>제품 구조와 공통 신뢰 기반</span></div></div>
+        <div class="toc-item"><b>02</b><div><strong>Enterprise Business Function Map</strong><span>전사 업무 기능 맵</span></div></div>
+        <div class="toc-item"><b>03</b><div><strong>Operational Capability Map</strong><span>현업 실행 기능</span></div></div>
+        <div class="toc-item"><b>04</b><div><strong>Evidence &amp; Decision Capability Map</strong><span>데이터·지식·판단 기능</span></div></div>
+        <div class="toc-item"><b>05</b><div><strong>Management Home &amp; AI Assistant</strong><span>경영 홈과 AI 경영비서</span></div></div>
+        <div class="toc-item"><b>06</b><div><strong>App Creation</strong><span>업무 앱 제작</span></div></div>
+        <div class="toc-item"><b>07</b><div><strong>Agent Orchestration</strong><span>에이전트 추천·생성·조율</span></div></div>
+        <div class="toc-item"><b>08</b><div><strong>Work Kits &amp; App Operations</strong><span>업무키트와 앱 운영</span></div></div>
+        <div class="toc-item"><b>09</b><div><strong>Data &amp; Master Data</strong><span>데이터 준비와 기준정보</span></div></div>
+        <div class="toc-item"><b>10</b><div><strong>Knowledge &amp; RAG</strong><span>지식·RAG</span></div></div>
+        <div class="toc-item"><b>11</b><div><strong>Ontology &amp; External Intelligence</strong><span>온톨로지·대외 인텔리전스</span></div></div>
+        <div class="toc-item"><b>12</b><div><strong>Enterprise Simulation</strong><span>전사 시뮬레이션</span></div></div>
+        <div class="toc-item"><b>13</b><div><strong>Decision &amp; Execution</strong><span>의사결정·실행</span></div></div>
+        <div class="toc-item"><b>14</b><div><strong>Reporting &amp; Publication</strong><span>브리핑·보고서 발간</span></div></div>
+        <div class="toc-item"><b>15</b><div><strong>Governance &amp; Administration</strong><span>거버넌스·관리</span></div></div>
+        <div class="toc-item"><b>16</b><div><strong>Core Usage Flow</strong><span>핵심 사용 흐름</span></div></div>
+      </div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top"><div><p class="eyebrow"><span>01. PRODUCT ARCHITECTURE</span><span class="section-ko">제품 구조와 공통 신뢰 기반</span></p><h2>세 제품면과 하나의 신뢰 기반이 현업 실행에서 경영 판단까지 연결합니다.</h2></div><span class="page-num">03 / 18</span></header>
+      <div class="grid3"><article class="card accent"><span class="kicker">OPERATIONAL APP FACTORY</span><h3>현업 실행 제품면</h3><p>업무 요구를 앱·에이전트·워크플로우·업무키트로 만들고 운영합니다.</p><ul><li>앱 제작·운영</li><li>에이전트 추천·생성·조율</li><li>업무키트·프로젝트 통제</li></ul></article><article class="card accent blue"><span class="kicker">MANAGEMENT MEANING MAP</span><h3>전사 의미 제품면</h3><p>회사·조직·데이터·지식·대외지표와 업무 영향 관계를 연결합니다.</p><ul><li>MDM·데이터 카탈로그</li><li>지식·RAG·대외 인텔리전스</li><li>업무 온톨로지</li></ul></article><article class="card accent gold"><span class="kicker">MANAGEMENT DIGITAL TWIN</span><h3>경영 판단 제품면</h3><p>실적·계획·예측·시나리오를 비교하고 결정·실행·효과로 연결합니다.</p><ul><li>부서·전사 시뮬레이션</li><li>의사결정·회의·실행계획</li><li>브리핑·보고서 발간</li></ul></article></div>
+      <div class="bridge" style="margin-top:28px"><div><h3>Trust Foundation</h3><p>회사·조직 권한, 데이터 판과 지문, 확정 산식, 감사·보안·비용·발간 통제가 모든 기능에 공통 적용됩니다.</p></div><span class="next">ONE ENTERPRISE CONTEXT</span></div>
+      <div class="declaration" style="margin-top:24px"><strong>제품의 기본 원칙</strong>사용자 화면은 달라도 같은 회사 문맥·조직 권한·데이터 기준·근거 경로를 사용합니다.</div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top"><div><p class="eyebrow"><span>02. ENTERPRISE BUSINESS FUNCTION MAP</span><span class="section-ko">전사 업무 기능 맵</span></p><h2>현업의 업무 실행 자산이 전사 데이터·의미·시뮬레이션을 거쳐 경영 판단과 실행으로 이어집니다.</h2></div><span class="page-num">04 / 18</span></header>
+      <div class="function-stack">
+        <div class="function-layer exec"><strong>경영 판단·실행</strong><div><span>경영 홈<br>AI 경영비서</span><span>전사 시뮬레이션<br>대안 비교</span><span>의사결정<br>회의·실행계획</span><span>브리핑<br>대내외 발간</span><span>실제 효과<br>성과 추적</span></div></div>
+        <div class="function-layer"><strong>현업 업무 실행</strong><div><span>앱 제작<br>SW 생성</span><span>에이전트 추천<br>자동 생성</span><span>워크플로우<br>사람 확인</span><span>업무키트<br>데이터·규칙</span><span>앱 운영<br>버전·사용자</span></div></div>
+        <div class="function-layer meaning"><strong>전사 의미·근거</strong><div><span>데이터 준비<br>MDM·카탈로그</span><span>지식팩<br>RAG</span><span>업무 온톨로지<br>영향 경로</span><span>대외 정보<br>확정 지표</span><span>기준선·산식<br>결과 지문</span></div></div>
+        <div class="function-layer trust"><strong>공통 신뢰 기반</strong><div><span>회사·조직<br>운영 문맥</span><span>사용자·역할<br>업무 범위</span><span>데이터·AI<br>정책</span><span>결정 원장<br>감사 이력</span><span>복구·비용<br>운영 불변식</span></div></div>
+      </div>
+      <div class="bridge" style="margin-top:20px"><div><h3>확장 가능한 업무 영역</h3><p>원료매입·물류·생산·품질·판매·재무를 시작으로 자금·투자·자산·인사·조직 등 경영활동 전반에 같은 구조를 적용합니다.</p></div><span class="next">ONE ENTERPRISE MODEL</span></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top"><div><p class="eyebrow"><span>03. OPERATIONAL CAPABILITY MAP</span><span class="section-ko">현업 실행 기능</span></p><h2>사용자 경험과 현업 실행 기능은 경영 홈에서 앱·에이전트·업무 운영으로 이어집니다.</h2></div><span class="page-num">05 / 18</span></header>
+      <div class="table-wrap"><table class="table"><thead><tr><th>기능 영역</th><th>주요 기능</th><th>사용자 입력</th><th>주요 결과</th><th>통제 기준</th></tr></thead><tbody>
+        <tr><td>경영 홈</td><td>업무 연결도, 의사결정 대기, 운영 문맥, 보조정보</td><td>회사·조직·업무 범위 선택</td><td>전사 현황과 다음 행동</td><td>사용자·조직 범위</td></tr>
+        <tr><td>AI 경영비서</td><td>질문, 근거 탐색, 설명, 업무 전환</td><td>자연어 질문·목적</td><td>근거가 연결된 답변·제안</td><td>권한·출처·모델 정책</td></tr>
+        <tr><td>앱 제작</td><td>요구 정제, WBS, 설계·생성·검토·릴리스</td><td>업무 목적·규칙·필요 데이터</td><td>회사 문맥을 상속한 업무 앱</td><td>품질 게이트·계약·릴리스</td></tr>
+        <tr><td>앱 운영</td><td>실행 현황, 사용자·데이터·버전 관리</td><td>운영 설정·업무 입력</td><td>업무 결과·운영 이력</td><td>상태·권한·감사</td></tr>
+        <tr><td>에이전트</td><td>추천·자동 생성, 역할 구성, 워크플로우 조율</td><td>수행할 업무·목표·제약</td><td>에이전트 세트와 실행 흐름</td><td>도구·모델·비용·검토</td></tr>
+        <tr><td>업무키트</td><td>데이터 입력, 규칙, 관리 화면, 시뮬레이션 결속</td><td>업무영역별 실제 데이터</td><td>재사용 가능한 업무 실행 자산</td><td>데이터 계약·품질·소유권</td></tr>
+      </tbody></table></div>
+      <div class="grid3" style="margin-top:25px"><article class="metric"><b>현업 중심</b><span>ID·코드 대신 업무명과 목적을 입력하며 시스템이 내부 식별자를 관리합니다.</span></article><article class="metric"><b>생성에서 운영까지</b><span>앱·에이전트를 만드는 것에서 끝나지 않고 사용자 업무와 데이터 운영으로 이어집니다.</span></article><article class="metric"><b>전사 자산화</b><span>부서가 만든 데이터·규칙·결과가 공통 문맥 아래 다음 업무에 재사용됩니다.</span></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top"><div><p class="eyebrow"><span>04. EVIDENCE &amp; DECISION CAPABILITY MAP</span><span class="section-ko">데이터·지식·판단 기능</span></p><h2>데이터·지식·온톨로지와 시뮬레이션·의사결정 기능이 하나의 근거 흐름을 만듭니다.</h2></div><span class="page-num">06 / 18</span></header>
+      <div class="table-wrap"><table class="table"><thead><tr><th>기능 영역</th><th>주요 기능</th><th>사용자 입력</th><th>주요 결과</th><th>통제 기준</th></tr></thead><tbody>
+        <tr><td>기준정보·데이터</td><td>MDM, 카탈로그, 소스 결속, 준비도·품질</td><td>원천·필드·단위·소유권</td><td>인증된 데이터 판과 상태</td><td>출처·품질·유효기간</td></tr>
+        <tr><td>지식·RAG</td><td>지식팩, 문서·근거 연결, 검색·설명</td><td>업무 문서·정책·분류</td><td>업무 문맥별 지식 근거</td><td>보안등급·출처·버전</td></tr>
+        <tr><td>대외 인텔리전스</td><td>대상회사·사업 기반 수집 봇, 지표 확정</td><td>회사·산업·수집 주제</td><td>환율·금리·원자재·시장 근거</td><td>출처·수집시점·사용 범위</td></tr>
+        <tr><td>업무 온톨로지</td><td>관계·영향 경로·근거 그래프</td><td>객체·관계·유효기간·근거</td><td>업무 상관 그래프와 경로</td><td>조직 범위·관계 상태·버전</td></tr>
+        <tr><td>시뮬레이션</td><td>기준선·가정·결정론적 계산·대안 비교</td><td>가정·시점·시나리오</td><td>생산·재고·매출·손익·현금 영향</td><td>봉인 데이터·산식·결과 지문</td></tr>
+        <tr><td>결정·보고</td><td>안건·회의·실행계획·효과·브리핑·발간</td><td>대안·책임·기한·공개 범위</td><td>결정 패키지와 보고서</td><td>근거 해시·권한·발간 상태</td></tr>
+      </tbody></table></div>
+      <div class="grid3" style="margin-top:25px"><article class="metric"><b>데이터에서 판단까지</b><span>화면별 기능이 분리되지 않고 같은 근거와 기준선으로 연결됩니다.</span></article><article class="metric"><b>LLM과 계산 분리</b><span>AI는 해석·설명을 담당하고 경영 수치는 확정된 계산 모델이 산출합니다.</span></article><article class="metric"><b>결정 이후까지</b><span>안건을 실행계획·실적·효과와 연결해 다음 지식과 모델 개선에 반영합니다.</span></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top"><div><p class="eyebrow"><span>05. MANAGEMENT HOME &amp; AI ASSISTANT</span><span class="section-ko">경영 홈과 AI 경영비서</span></p><h2>전사 업무 연결과 의사결정 상태를 보고, AI 경영비서가 선택한 문맥의 근거와 다음 행동을 설명합니다.</h2></div><span class="page-num">07 / 18</span></header>
+      <div class="grid2 screen-pair"><figure class="screen"><img src="../../../assets/screens-v0.5/20-management-home-realistic-current.png" alt="데이터가 적용된 경영 홈" /><figcaption>원료 도입 지연 안건과 업무별 데이터가 연결된 현재 경영 홈</figcaption></figure><figure class="screen"><img src="../../../assets/screens-v0.5/02-ai-assistant-current.png" alt="AI 경영비서 화면" /><figcaption>선택한 발간 문서와 근거·상태를 기준으로 답하는 AI 경영비서</figcaption></figure></div>
+      <div class="grid3 compact-cards" style="margin-top:17px"><article class="card accent"><span class="kicker">OPERATING CONTEXT</span><h3>회사·조직 문맥</h3><p>현재 회사와 권한 범위에 맞는 업무·데이터·의사결정만 표시합니다.</p></article><article class="card accent blue"><span class="kicker">DECISION CENTER</span><h3>우선순위와 영향</h3><p>대기 안건·업무 흐름·생산·재고·현금 영향을 같은 화면에서 봅니다.</p></article><article class="card accent gold"><span class="kicker">CONTEXTUAL ASSISTANT</span><h3>근거 기반 설명</h3><p>선택 객체의 근거를 연결해 답하고 안건·시뮬레이션·발간 작업으로 전환합니다.</p></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top"><div><p class="eyebrow"><span>06. APP CREATION</span><span class="section-ko">업무 앱 제작</span></p><h2>업무 목적과 규칙을 입력하면 요구 정제부터 설계·구현·검토·릴리스까지 생성 흐름을 관리합니다.</h2></div><span class="page-num">08 / 18</span></header>
+      <div class="screen-grid"><figure class="screen screen-tall"><img src="../../../assets/screens-v0.5/03-sw-generator-current.png" alt="실제 SW 생성 화면" /><figcaption>요구 정제·WBS·에이전트 실행·품질 검토·릴리스 상태가 연결된 SW 생성 작업공간</figcaption></figure><div class="compact-cards"><article class="card accent"><span class="kicker">REQUIREMENT</span><h3>업무 언어로 목적 정의</h3><p>기능·업무규칙·필요 데이터·사용자·제약을 자연어와 구조화 항목으로 정리합니다.</p></article><article class="card accent blue" style="margin-top:12px"><span class="kicker">BUILD GRAPH</span><h3>WBS와 역할별 실행</h3><p>기획·설계·구현·검토 에이전트의 작업과 산출물을 그래프로 추적합니다.</p></article><article class="card accent gold" style="margin-top:12px"><span class="kicker">QUALITY &amp; RELEASE</span><h3>검증 후 운영 전환</h3><p>품질 게이트와 사람 확인을 통과한 결과만 회사 문맥·권한·데이터 계약을 상속해 배치합니다.</p></article></div></div>
+      <div class="mini-flow"><article><b>01</b><strong>목적 입력</strong><span>업무·제약 설명</span></article><article><b>02</b><strong>계획 생성</strong><span>WBS·역할 분해</span></article><article><b>03</b><strong>구현·검토</strong><span>코드·시험·품질</span></article><article><b>04</b><strong>릴리스</strong><span>운영 계약 상속</span></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top"><div><p class="eyebrow"><span>07. AGENT ORCHESTRATION</span><span class="section-ko">에이전트 추천·생성·조율</span></p><h2>필요한 업무를 설명하면 에이전트 후보를 추천하고, 템플릿·실행 흐름·사람 확인 지점을 함께 구성합니다.</h2></div><span class="page-num">09 / 18</span></header>
+      <div class="grid2 screen-pair"><figure class="screen"><img src="../../../assets/screens-v0.5/09-agent-current.png" alt="에이전트 추천과 생성 화면" /><figcaption>원료 지연·재고 부족 영향 분석 업무를 입력한 에이전트 추천·생성 화면</figcaption></figure><figure class="screen"><img src="../../../assets/screens-v0.5/10-agent-workflow-current.png" alt="에이전트 워크플로우 템플릿 화면" /><figcaption>15개 에이전트와 6개 사람 확인 지점이 포함된 워크플로우 템플릿</figcaption></figure></div>
+      <div class="grid4 compact-cards" style="margin-top:17px"><article class="card"><h3>AI 추천</h3><p>업무 목적·산출물·필요 전문성을 분석해 겹치지 않는 역할 후보를 제안합니다.</p></article><article class="card"><h3>자동 식별</h3><p>사용자는 이름과 역할만 입력하며 내부 ID와 코드는 시스템이 발급합니다.</p></article><article class="card"><h3>실행 조율</h3><p>템플릿 기준으로 역할 순서·병렬 작업·인수인계·재작업 경로를 연결합니다.</p></article><article class="card"><h3>사람 확인</h3><p>승인·대외 발간·고위험 변경 등 사람 판단이 필요한 지점을 분리합니다.</p></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top"><div><p class="eyebrow"><span>08. WORK KITS &amp; APP OPERATIONS</span><span class="section-ko">업무키트와 앱 운영</span></p><h2>업무키트가 업무별 데이터·규칙·관리 화면·시뮬레이션 결속을 제공하고 앱 운영이 실제 사용을 관리합니다.</h2></div><span class="page-num">10 / 18</span></header>
+      <div class="screen-grid"><figure class="screen"><img src="../../../assets/screens-v0.5/04-app-operations-current.png" alt="앱 운영 화면" /><figcaption>업무 앱의 실행 상태·버전·사용자·업무 데이터를 관리하는 운영 화면</figcaption></figure><div class="grid2"><article class="card"><span class="kicker">DATA CONTRACT</span><h3>입력과 품질</h3><p>필드·단위·필수값·정합성·소유권 기준을 제공합니다.</p></article><article class="card"><span class="kicker">WORKFLOW</span><h3>업무 상태와 역할</h3><p>사용자 역할·상태 전이·검토·예외 처리 규칙을 관리합니다.</p></article><article class="card"><span class="kicker">SIMULATION BINDING</span><h3>전사 모델 결속</h3><p>업무 결과가 전사 시나리오의 입력과 기여도로 연결됩니다.</p></article><article class="card"><span class="kicker">OPERATIONS</span><h3>버전과 사용 이력</h3><p>앱 버전·릴리스·사용자·실행 이력과 운영 상태를 추적합니다.</p></article></div></div>
+      <div class="declaration" style="margin-top:24px"><strong>업무키트의 역할</strong>원료매입·물류·생산·품질·판매·재무뿐 아니라 자금·투자·자산·인사·조직 등 경영활동을 같은 데이터·실행·시뮬레이션 구조로 빠르게 구성합니다.</div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top"><div><p class="eyebrow"><span>09. DATA &amp; MASTER DATA</span><span class="section-ko">데이터 준비와 기준정보</span></p><h2>원천 데이터를 계약·품질·소유권·기준시점과 함께 관리해 계산과 판단에 사용할 수 있는 인증 데이터 판으로 만듭니다.</h2></div><span class="page-num">11 / 18</span></header>
+      <div class="screen-grid"><figure class="screen screen-tall"><img src="../../../assets/screens-v0.5/06-master-data-current.png" alt="기준정보와 데이터 카탈로그 화면" /><figcaption>업무 유형·필드·단위·소유권과 연결 상태를 관리하는 MDM·데이터 카탈로그</figcaption></figure><div class="grid2 compact-cards"><article class="card"><span class="kicker">SOURCE BINDING</span><h3>원천 결속</h3><p>ERP·MES·LPL·파일 등 원천과 업무 객체를 연결합니다.</p></article><article class="card"><span class="kicker">DATA CONTRACT</span><h3>필드·단위·품질</h3><p>필수값·형식·낟알·단위·정합성 규칙을 선언합니다.</p></article><article class="card"><span class="kicker">OWNERSHIP</span><h3>소유권·범위</h3><p>데이터셋과 조직 범위별 책임 부서를 결속합니다.</p></article><article class="card"><span class="kicker">CERTIFIED SNAPSHOT</span><h3>인증판·지문</h3><p>기준시점·출처·내용 지문을 봉인해 재현 가능하게 합니다.</p></article></div></div>
+      <div class="mini-flow"><article><b>01</b><strong>수집</strong><span>원천·계약 등록</span></article><article><b>02</b><strong>검증</strong><span>품질·낟알 대조</span></article><article><b>03</b><strong>인증</strong><span>소유권·시점 확정</span></article><article><b>04</b><strong>사용</strong><span>RAG·계산·보고</span></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top"><div><p class="eyebrow"><span>10. KNOWLEDGE &amp; RAG</span><span class="section-ko">지식·RAG</span></p><h2>문서와 업무 지식을 출처·버전·보안등급과 함께 관리하고, 업무 객체와 이벤트 문맥에 맞는 근거를 자동 연결합니다.</h2></div><span class="page-num">12 / 18</span></header>
+      <div class="screen-grid"><figure class="screen screen-tall"><img src="../../../assets/screens-v0.5/05-knowledge-current.png" alt="지식팩과 RAG 화면" /><figcaption>업무 지식팩·문서 원문·추출 지식·연결 상태를 확인하는 지식 화면</figcaption></figure><div class="compact-cards"><article class="card accent"><span class="kicker">KNOWLEDGE PACK</span><h3>업무 단위 지식 구성</h3><p>정책·절차·계약·업무 사례를 업무영역별 지식팩으로 구성합니다.</p></article><article class="card accent blue" style="margin-top:12px"><span class="kicker">CONTEXTUAL RETRIEVAL</span><h3>문맥 기반 RAG</h3><p>사용자 점수에만 의존하지 않고 객체·이벤트·온톨로지 관계·권한을 기준으로 검색 범위를 구성합니다.</p></article><article class="card accent gold" style="margin-top:12px"><span class="kicker">EVIDENCE TRACE</span><h3>출처가 남는 설명</h3><p>AI 답변이 사용한 문서·데이터·시점·버전을 근거로 보존합니다.</p></article></div></div>
+      <div class="declaration" style="margin-top:18px"><strong>AI 답변의 기준</strong>AI가 문장을 생성하더라도 데이터 계산·업무 관계·근거 출처는 서버의 확정 결과를 사용하며, 권한 밖 지식은 검색 단계에서 제외합니다.</div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top"><div><p class="eyebrow"><span>11. ONTOLOGY &amp; EXTERNAL INTELLIGENCE</span><span class="section-ko">온톨로지·대외 인텔리전스</span></p><h2>업무 객체의 영향 관계를 시각화하고, 회사·사업 기준 외부 조사와 확정 지표를 전사 시나리오 근거로 연결합니다.</h2></div><span class="page-num">13 / 18</span></header>
+      <div class="grid2 screen-pair"><figure class="screen"><img src="../../../assets/screens-v0.5/15-ontology-current.png" alt="업무 온톨로지 상관 그래프" /><figcaption>재고·생산계획·판매주문·선적의 영향 관계와 승인 근거를 보여주는 상관 그래프</figcaption></figure><figure class="screen"><img src="../../../assets/screens-v0.5/16-external-intelligence-current.png" alt="대외 인텔리전스 화면" /><figcaption>회사 조사 프로필·수집 작업·검토 후보·확정 지표를 관리하는 대외 인텔리전스</figcaption></figure></div>
+      <div class="grid4 compact-cards" style="margin-top:17px"><article class="card"><h3>관계 모델</h3><p>객체·관계·유효기간·근거를 판으로 관리합니다.</p></article><article class="card"><h3>영향 경로</h3><p>구매 지연이 재고·생산·판매로 이어지는 경로를 설명합니다.</p></article><article class="card"><h3>조사 봇</h3><p>등록 회사와 공식 도메인·사업 주제를 기준으로 공개 정보를 수집합니다.</p></article><article class="card"><h3>확정 지표</h3><p>환율·금리·금속가 등은 출처와 관측시점을 검토한 뒤 계산에 사용합니다.</p></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top"><div><p class="eyebrow"><span>12. ENTERPRISE SIMULATION</span><span class="section-ko">전사 시뮬레이션</span></p><h2>부서별 업무 시뮬레이션을 같은 전사 시나리오에 조합해 생산·재고·매출·손익·현금 영향을 비교합니다.</h2></div><span class="page-num">14 / 18</span></header>
+      <div class="screen-grid"><figure class="screen screen-tall"><img src="../../../assets/screens-v0.5/18-simulation-result-current.png" alt="전사 시뮬레이션 실제 계산 결과" /><figcaption>원료 도입 12일 지연·환율 +3.5%·전력단가 +8%를 반영한 DEMO/SYNTHETIC 계산 결과</figcaption></figure><div><article class="card accent"><span class="kicker">BASELINE</span><h3>같은 비교 기준</h3><p>기준시점·인증 데이터 판·산식·가정을 고정하고 기준안과 대안을 분리합니다.</p></article><article class="card accent blue" style="margin-top:12px"><span class="kicker">DETERMINISTIC CALCULATION</span><h3>재현 가능한 계산</h3><p>구매 지연·재고 부족·생산 가능량·매출 이연을 확정 모델로 계산합니다.</p></article><article class="card accent gold" style="margin-top:12px"><span class="kicker">ENTERPRISE IMPACT</span><h3>부서 결과의 전사 조합</h3><p>생산량 12,000→7,200 ton, 영업이익 180.0→103.9억원 등 손익·현금·납기 영향을 함께 봅니다.</p></article></div></div>
+      <div class="mini-flow"><article><b>01</b><strong>업무키트 결과</strong><span>구매·생산·판매</span></article><article><b>02</b><strong>외부 가정</strong><span>환율·가격·금리</span></article><article><b>03</b><strong>전사 조합</strong><span>손익·현금·납기</span></article><article><b>04</b><strong>결과 봉인</strong><span>기준선·결과 지문</span></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page soft">
+      <header class="top"><div><p class="eyebrow"><span>13. DECISION &amp; EXECUTION</span><span class="section-ko">의사결정·실행</span></p><h2>시뮬레이션 결과를 근거·대안·영향부서가 결속된 안건으로 전환하고 책임·기한·조치까지 관리합니다.</h2></div><span class="page-num">15 / 18</span></header>
+      <div class="grid2 screen-pair"><figure class="screen"><img src="../../../assets/screens-v0.5/12-decision-current.png" alt="의사결정 안건 화면" /><figcaption>결정 대기·대안·근거·영향부서·기한을 한 사건으로 관리하는 의사결정 화면</figcaption></figure><figure class="screen"><img src="../../../assets/screens-v0.5/14-briefing-current.png" alt="경영 브리핑 화면" /><figcaption>전사 경영 현황과 결정·실행 상태를 요약한 경영 브리핑</figcaption></figure></div>
+      <div class="mini-flow"><article><b>01</b><strong>결과 봉인</strong><span>데이터·산식·가정</span></article><article><b>02</b><strong>안건 구성</strong><span>대안·위험·반대의견</span></article><article><b>03</b><strong>결정 기록</strong><span>행위자·시점·근거</span></article><article><b>04</b><strong>실행·효과</strong><span>책임·기한·실적</span></article></div>
+      <div class="declaration" style="margin-top:17px"><strong>결정 이후까지 관리</strong>안건은 회의·실행계획·담당자·기한·실제 효과와 연결되어 다음 시뮬레이션과 지식 개선의 근거가 됩니다.</div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top"><div><p class="eyebrow"><span>14. REPORTING &amp; PUBLICATION</span><span class="section-ko">브리핑·보고서 발간</span></p><h2>결정 패키지를 대상별 보고서로 투영하고, 공개 범위·검토 상태·제외 항목·근거 해시를 함께 관리합니다.</h2></div><span class="page-num">16 / 18</span></header>
+      <div class="grid2 screen-pair"><figure class="screen"><img src="../../../assets/screens-v0.5/19-publication-workflow-current.png" alt="보고서 발간 업무 화면" /><figcaption>결정 문장·대상·문서 버전·남은 게이트·제외 항목을 관리하는 발간 화면</figcaption></figure><figure class="screen"><img src="../../../assets/screens-v0.5/17-publication-report-current.png" alt="발간 보고서 미리보기" /><figcaption>생산량·재고·구매지급·현금·영업이익이 포함된 대외 보고본 미리보기</figcaption></figure></div>
+      <div class="grid4 compact-cards" style="margin-top:17px"><article class="card"><h3>결정론적 투영</h3><p>같은 결정 Snapshot에서 같은 문서가 생성됩니다.</p></article><article class="card"><h3>대상별 공개</h3><p>내부·대외 범위에 따라 민감정보와 반대의견을 분리합니다.</p></article><article class="card"><h3>검토 게이트</h3><p>책임 임원·법무·공시 등 필요한 검토 상태를 관리합니다.</p></article><article class="card"><h3>근거 추적</h3><p>문서 버전과 evidence hash로 원천 결정 근거를 다시 확인합니다.</p></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page">
+      <header class="top"><div><p class="eyebrow"><span>15. GOVERNANCE &amp; ADMINISTRATION</span><span class="section-ko">거버넌스·관리</span></p><h2>회사 등록부터 조직·권한·데이터·AI·비용·감사까지 제품 운영 기준을 통합 관리합니다.</h2></div><span class="page-num">17 / 18</span></header>
+      <div class="grid2"><figure class="screen"><img src="../../../assets/screens-v0.5/08-org-current.png" alt="조직·권한 화면" /><figcaption>회사·법인·부서·사용자·역할·업무범위 관리</figcaption></figure><figure class="screen"><img src="../../../assets/screens-v0.5/07-governance-current.png" alt="데이터·AI 거버넌스 화면" /><figcaption>데이터 품질·출처·모델 정책·감사·운영 상태 관리</figcaption></figure></div>
+      <div class="grid4" style="margin-top:22px"><article class="metric"><b>Enterprise Context</b><span>회사·법인·사업부·공장·가상회사 문맥</span></article><article class="metric"><b>Identity &amp; Access</b><span>사용자·부서·역할·업무 범위 기반 접근</span></article><article class="metric"><b>Data &amp; AI Policy</b><span>출처·품질·보안·외부 LLM·모델·비용 정책</span></article><article class="metric"><b>Audit &amp; Recovery</b><span>결정 원장·변경 이력·복구·운영 불변식</span></article></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+
+    <section class="page dark">
+      <header class="top"><div><p class="eyebrow"><span>16. CORE USAGE FLOW</span><span class="section-ko">핵심 사용 흐름</span></p><h2>현업의 업무 문제에서 시작해 전사 경영 판단과 실행 효과까지 하나의 제품 흐름으로 이어집니다.</h2></div><span class="page-num">18 / 18</span></header>
+      <div class="flow">
+        <article class="node"><b>01</b><strong>회사·업무 문맥</strong><span>사용자·조직·업무범위와 데이터 기준을 확인합니다.</span></article><article class="node"><b>02</b><strong>앱·에이전트</strong><span>현업 목적에 맞는 기능과 역할별 실행팀을 구성합니다.</span></article><article class="node"><b>03</b><strong>데이터·지식</strong><span>업무키트로 입력·관리하고 필요한 근거와 관계를 연결합니다.</span></article><article class="node"><b>04</b><strong>시뮬레이션</strong><span>부서 결과를 조합해 전사 실적·손익·현금 영향을 계산합니다.</span></article><article class="node"><b>05</b><strong>결정·실행·효과</strong><span>안건과 실행계획으로 전환하고 실제 결과를 다음 업무에 축적합니다.</span></article>
+      </div>
+      <div class="bridge" style="margin-top:30px;background:rgba(255,255,255,.08)"><div><h3>LAXS-M</h3><p>현업이 업무 앱·에이전트·업무키트를 만들고, 전사가 데이터·지식·관계를 연결하며, 경영이 시뮬레이션으로 판단하고 실행 결과를 다시 축적하는 AX 경영 플랫폼입니다.</p></div><span class="next">ONE MANAGEMENT FLOW</span></div>
+      <footer class="footer"><span>LAXS-M PRODUCT &amp; FUNCTION GUIDE</span><span>작성자 : 권혁일(Hyuk il Kwon)</span></footer>
+    </section>
+  </main>
+  <div class="global-author-credit" style="display:none">작성자 : 권혁일(Hyuk il Kwon)</div>
+</body>
+</html>

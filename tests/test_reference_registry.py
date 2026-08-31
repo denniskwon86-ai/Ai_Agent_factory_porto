@@ -150,7 +150,9 @@ def test_approval_opens_indexing_and_records_the_approver(reg):
     assert out["approved_at"]
 
     idx = indexable(target)
-    assert idx["total"] == 1 and idx["items"][0]["owner_org_id"] == "MNM_BATTERY"
+    # 옛 승인 함수는 승인 문자열과 해시만 남긴다. 원장·조직 문맥에 다시 결속하기 전에는
+    # 색인할 수 없다 — 기존 17건을 자동 승격하지 않는 제품 계약이다.
+    assert idx["total"] == 0 and idx["blocked"]["approval_unsealed"] == 1
     assert audit.recent(limit=1)[0]["event"] == audit.APPROVAL_GRANTED
 
 
@@ -260,15 +262,21 @@ def _docx(text: str) -> bytes:
 
 
 @pytest.fixture()
-def indexed_env(tmp_path):
+def indexed_env(tmp_path, monkeypatch):
     root = tmp_path / "reference"
     root.mkdir()
     (root / "배터리소재_SIOP.docx").write_bytes(_docx("배터리 SIOP 운영 기준"))
     target = tmp_path / "reference_registry.json"
     reg = build_registry(root, target)
-    from core.reference_registry import approve_asset
+    from core import knowledge_asset_release
+    from core.enterprise_context.resolver import ecm_resolver
+    monkeypatch.setattr(ecm_resolver, "resolve_scope_ref", lambda *a, **k: {
+        "resolved": True, "node_id": "node-battery", "kind": "ecm_code"})
     aid = reg["assets"][0]["asset_id"]
-    approve_asset(aid, "cdo@ls", registry_path=target)
+    knowledge_asset_release.approve(
+        aid, "cdo@ls", "색인 경로 회귀용 승인",
+        tenant_id="tenant_default", scope_node_id="node-battery", entity_mode="REAL",
+        registry_path=target, reference_root=root)
     return root, target, aid
 
 
@@ -321,8 +329,8 @@ def test_reindex_is_skipped_when_content_is_unchanged(indexed_env):
 
 
 def test_changed_file_is_reindexed(indexed_env):
-    """★★ 파일이 바뀌면 다시 넣는다 — 낡은 내용이 프롬프트에 계속 실리면 그게 오답의 근거가 된다."""
-    from core.reference_registry import index_approved
+    """승인 뒤 파일이 바뀌면 자동 재색인이 아니라 **재승인 대기**다."""
+    from core.reference_registry import index_approved, indexable
     root, target, _ = indexed_env
     kb = _FakeKB()
     index_approved(root, target, dry_run=False, kb=kb)
@@ -331,15 +339,17 @@ def test_changed_file_is_reindexed(indexed_env):
     build_registry(root, target)          # 재스캔 → sha256 변경(승인은 보존)
     out = index_approved(root, target, dry_run=False, kb=kb)
 
-    assert out["indexed"] == 1 and len(kb.calls) == 2
-    assert "개정된 SIOP 기준" in kb.calls[1]["text"]
+    assert out["indexed"] == 0 and len(kb.calls) == 1
+    assert indexable(target, reference_root=root)["blocked"]["approval_invalid"] == 1
 
 
 def test_unapproved_asset_is_never_indexed(indexed_env):
     """★★ 승인 없는 문서는 색인되지 않는다 — 색인은 승인의 결과여야 한다."""
-    from core.reference_registry import index_approved, reject_asset
+    from core import knowledge_asset_release
+    from core.reference_registry import index_approved
     root, target, aid = indexed_env
-    reject_asset(aid, "cdo@ls", "개인정보 포함", registry_path=target)
+    knowledge_asset_release.revoke(
+        aid, "cdo@ls", "개인정보 포함", registry_path=target, reference_root=root)
     kb = _FakeKB()
     out = index_approved(root, target, dry_run=False, kb=kb)
     assert out["indexed"] == 0 and kb.calls == []
@@ -347,11 +357,12 @@ def test_unapproved_asset_is_never_indexed(indexed_env):
 
 def test_missing_source_file_is_reported_not_silent(indexed_env):
     """★ 등록 후 파일이 사라졌으면 그 사실을 말한다 — 조용히 0건이면 "색인이 고장났다"가 된다."""
-    from core.reference_registry import index_approved
+    from core.reference_registry import index_approved, indexable
     root, target, _ = indexed_env
     (root / "배터리소재_SIOP.docx").unlink()
     out = index_approved(root, target, dry_run=False, kb=_FakeKB())
-    assert out["failed"] == 1 and "원본 파일이 없습니다" in out["failed_items"][0]["reason"]
+    assert out["failed"] == 0 and out["indexed"] == 0
+    assert indexable(target, reference_root=root)["blocked"]["approval_invalid"] == 1
 
 
 def test_indexing_failure_is_recorded_and_stops_the_empty_promise(indexed_env):
@@ -389,15 +400,22 @@ def test_force_retries_a_previously_failed_asset(indexed_env):
     assert out["indexed"] == 1 and len(kb.calls) == 1
 
 
-def test_empty_extraction_is_not_indexed(tmp_path):
+def test_empty_extraction_is_not_indexed(tmp_path, monkeypatch):
     """★★ 빈 문서를 색인하면 검색은 되는데 내용이 없다 — 가장 나쁜 상태다."""
-    from core.reference_registry import approve_asset, index_approved
+    from core import knowledge_asset_release
+    from core.enterprise_context.resolver import ecm_resolver
+    from core.reference_registry import index_approved
     root = tmp_path / "reference"
     root.mkdir()
     (root / "빈문서.txt").write_bytes(b"   \n  ")
     target = tmp_path / "reg.json"
     reg = build_registry(root, target)
-    approve_asset(reg["assets"][0]["asset_id"], "cdo@ls", registry_path=target)
+    monkeypatch.setattr(ecm_resolver, "resolve_scope_ref", lambda *a, **k: {
+        "resolved": True, "node_id": "node-default", "kind": "ecm_code"})
+    knowledge_asset_release.approve(
+        reg["assets"][0]["asset_id"], "cdo@ls", "빈 원문 회귀",
+        tenant_id="tenant_default", scope_node_id="node-default", entity_mode="REAL",
+        registry_path=target, reference_root=root)
 
     out = index_approved(root, target, dry_run=False, kb=_FakeKB())
     assert out["indexed"] == 0 and out["failed"] == 1
@@ -593,7 +611,9 @@ def test_옛_승인은_변경이_아니라_확인_불가다(reg):
     from api.routes.reference_control import _with_hash_warning
 
     old = {"approval_status": "APPROVED", "sha256": "abc", "approved_sha256": ""}
-    assert _with_hash_warning(old)["approval_drift"] == "unknown"
+    shown = _with_hash_warning(old)
+    assert shown["approval_drift"] == "unknown"
+    assert shown["approval_binding"] == "REAPPROVAL_REQUIRED"
 
 
 def test_승인되지_않은_자산에는_드리프트가_없다(reg):

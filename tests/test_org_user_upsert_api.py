@@ -71,6 +71,20 @@ def test_관리자가_사용자를_추가한다(client):
     assert got["primary_dept_id"] == "hq"
 
 
+def test_부서는_이름만_받고_내부_id를_서버가_발급한다(client):
+    """사람이 부서 코드까지 정하면 오타와 명칭 개정이 영구 식별자에 섞인다."""
+    c, org = client
+    tok = _login(c, "boss@x.invalid")
+    r = c.post("/api/v1/org/departments",
+               json={"name_ko": "신사업기획", "parent_id": "hq"},
+               headers={"X-Session-Token": tok})
+    assert r.status_code == 200, r.text
+    row = r.json()["data"]
+    assert row["dept_id"].startswith("dep_")
+    assert row["name_ko"] == "신사업기획"
+    assert org.get_department(row["dept_id"])["parent_id"] == "hq"
+
+
 def test_행위자가_권한칸으로_새지_않는다(client):
     """⚠️⚠️ **결함의 정확한 모양.** `actor` 가 `is_ai_admin` 자리에 들어갔었다.
 

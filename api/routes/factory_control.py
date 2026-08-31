@@ -99,7 +99,10 @@ class SupervisorChatRequest(BaseModel):
     message: str
 
 class ProjectCreateRequest(BaseModel):
-    project_id: str
+    # 신규 화면은 내부 ID를 보내지 않는다. 레거시·내부 호출만 명시값을 허용하고,
+    # 일반 생성은 서버가 중앙 규칙으로 발급한다.
+    project_id: str = ""
+    project_name: str = ""
     template_id: str = "default"  # 이 프로젝트가 실행될 워크플로우 템플릿(범용 플랫폼 T2-b)
     output_format_id: str = "default"  # 이 프로젝트에 적용될 출력 포맷
     view_type: str = "react_app"
@@ -113,7 +116,8 @@ class ProjectKnowledgeRequest(BaseModel):
     master_domains: Optional[list] = None  # [M1] None 이면 기존 값 유지
 
 class ProjectCopyRequest(BaseModel):
-    new_project_id: str
+    new_project_id: str = ""       # 레거시 API 호환용. 신규 UI는 보내지 않는다.
+    new_project_name: str = ""
 
 class HealRequest(BaseModel):
     error_log: str
@@ -163,6 +167,97 @@ def _is_empty(v) -> bool:
 
 # 프로젝트↔워크플로우 템플릿 바인딩(T2-b) — 프로젝트 폴더에 영속해, 새로고침/HOTL 재개로
 # 프론트 state 가 stale 해져도 모든 태스크가 같은 템플릿으로 실행되도록 보장한다.
+_TEMPLATE_BINDING_VERSION = "v1"
+
+
+class TemplateBindingError(RuntimeError):
+    """저장된 워크플로우 결속을 현재 실행 정의로 증명할 수 없다."""
+
+
+def _capture_runnable_template(template_id: str):
+    from core import config_snapshot as _snap
+    snap = _snap.capture(template_id)
+    if not snap.resolved:
+        raise TemplateBindingError(
+            "워크플로우 실행 구성을 확인할 수 없습니다. "
+            f"기본 템플릿으로 대체하지 않습니다. ({snap.error})")
+    return snap
+
+
+def _read_project_template_binding(workspace_root: str) -> tuple[str, str, str]:
+    path = _project_meta_path(workspace_root)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        raise TemplateBindingError("프로젝트의 워크플로우 결속 정보를 읽을 수 없습니다.") from exc
+    if not isinstance(data, dict):
+        raise TemplateBindingError("프로젝트의 워크플로우 결속 정보 형식이 올바르지 않습니다.")
+    tid = str(data.get("template_id") or "default")
+    return tid, str(data.get("template_fingerprint") or ""), str(
+        data.get("template_binding_version") or "")
+
+
+def _seal_template_binding(workspace_root: str, template_id: str, fingerprint: str) -> None:
+    """P3-2 이전 프로젝트가 새 실행을 요청한 시점의 구성을 원자적으로 채택한다."""
+    path = _project_meta_path(workspace_root)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        raise TemplateBindingError("프로젝트 메타를 읽지 못해 워크플로우를 결속할 수 없습니다.") from exc
+    if not isinstance(data, dict):
+        raise TemplateBindingError("프로젝트 메타 형식이 올바르지 않아 워크플로우를 결속할 수 없습니다.")
+    if str(data.get("template_id") or "default") != template_id:
+        raise TemplateBindingError("워크플로우 결속 중 프로젝트 템플릿이 변경됐습니다. 다시 시도하십시오.")
+    data["template_fingerprint"] = fingerprint
+    data["template_binding_version"] = _TEMPLATE_BINDING_VERSION
+    tmp = path + ".template-binding.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as exc:
+        raise TemplateBindingError("워크플로우 결속을 프로젝트 메타에 기록하지 못했습니다.") from exc
+
+
+def _verify_project_template_binding(workspace_root: str, *, seal_legacy: bool = False):
+    tid, expected, version = _read_project_template_binding(workspace_root)
+    current = _capture_runnable_template(tid)
+    if not expected:
+        if seal_legacy:
+            _seal_template_binding(workspace_root, tid, current.fingerprint)
+        return current
+    if version != _TEMPLATE_BINDING_VERSION:
+        raise TemplateBindingError(f"지원하지 않는 워크플로우 결속 버전입니다: {version or '(없음)'}")
+    if expected != current.fingerprint:
+        raise TemplateBindingError(
+            "프로젝트 생성 이후 워크플로우 템플릿의 실행 구성이 변경됐습니다. "
+            "기존 프로젝트에 새 구성을 조용히 적용하지 않습니다. 새 프로젝트를 만들거나 "
+            "검토 후 템플릿을 다시 결속하십시오.")
+    return current
+
+
+async def _prepare_project_execution(workspace_root: str, state: dict) -> None:
+    """모든 새 실행 진입점이 공유하는 템플릿 결속·스냅샷 주입."""
+    from core import config_snapshot as _snap
+    current = await asyncio.to_thread(
+        _verify_project_template_binding, workspace_root, seal_legacy=True)
+    state["template_id"] = current.template_id
+    state["config_fingerprint"] = current.fingerprint
+    try:
+        await asyncio.to_thread(_snap.write, workspace_root, current)
+    except Exception as exc:
+        print(f"⚠️ [factory] 구성 스냅샷 기록 실패(가동은 계속): {exc}")
+
+
+async def _prepare_project_execution_or_conflict(workspace_root: str, state: dict) -> None:
+    try:
+        await _prepare_project_execution(workspace_root, state)
+    except TemplateBindingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 def _read_project_meta(workspace_root: str) -> tuple[str, str, str]:
     try:
         with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
@@ -291,6 +386,51 @@ def _resolve_scope_node(dept_id: str) -> str:
         return ""
 
 
+def _release_scope_node(own: Dict[str, Any]) -> str:
+    """릴리스에 찍을 **조직 노드 id**. 부서 id 가 들어와도 노드로 풀어서 찍는다.
+
+    ## ⚠️⚠️ [2026-08-28 실측] 식별자 공간이 둘이라 **사람이 앱을 못 열었다**
+
+    `project_meta.enterprise_scope_id` 에는 **부서 id**(`hq`)가 들어 있었고, 릴리스는
+    그것을 그대로 찍었다. 그런데 증명 발급이 대조하는 상대는 `viewing_context` 의
+    `scope_node_id` — **노드 id** 다. 화면의 조직 선택기도 노드 id 를 보낸다:
+
+        화면이 보내는 것   X-Enterprise-Scope: node_41402723bc90   ← 노드 id
+        릴리스가 찍은 것   enterprise_scope_id: hq                 ← 부서 id
+        증명               404 (사유는 은폐된다 — 「요청한 데이터를 찾을 수 없습니다」)
+
+    실측으로 셋을 다 눌러 확인했다:
+
+        scope=hq                 → 200 OK      (API 로 부서 id 를 직접 보낸 경우)
+        scope=org-laxs-mnm       → 404
+        scope=node_557f490add1b  → 404
+
+    즉 **API 로 부서 id 를 손으로 보내야만** 열렸다. 화면으로는 영영 못 연다 —
+    선택기가 부서 id 를 보낼 방법이 없기 때문이다.
+
+    ★ 해석기는 **이미 있었다**(`_resolve_scope_node`, 같은 파일 :368). 스프린트 시작에서는
+      그것을 쓰는데(`owner_scope_node_id`) **릴리스만 안 거쳤다** — 어제 조직 문맥 세 칸을
+      찍게 하면서 원본 값을 그대로 넣은 것이 원인이다(내 결함).
+
+    ⚠️ 이미 노드 id 면 **그대로 둔다.** 노드를 다시 풀면 `update_department` 가 개정한 새
+      노드가 나와 과거 릴리스의 문맥이 소급해 움직인다(D-019 스냅샷 규칙).
+    ⚠️ 못 풀면 **원본을 그대로 둔다.** 빈 값으로 만들면 「조직 없는 릴리스」가 되어 증명이
+      아예 발급되지 않는다 — 못 여는 것보다 나쁘다.
+    """
+    raw = str((own or {}).get("enterprise_scope_id", "") or "").strip()
+    if raw:
+        try:
+            from core.enterprise_context.repository import ecm_repository as _repo
+            if _repo.get_node(raw):
+                return raw          # 이미 노드 id — 스냅샷을 그대로 유지한다
+        except Exception:
+            pass                    # 조회 실패는 판정하지 않는다(아래에서 부서로 시도)
+    node = _resolve_scope_node(str((own or {}).get("owner_dept_id", "") or ""))
+    if node:
+        return node
+    return raw
+
+
 class ProjectOwnershipRequired(ValueError):
     """[G1-C1.1] 소유 범위 없이 프로젝트를 만들려 했다 — 라우트가 4xx 로 바꾼다."""
 
@@ -311,7 +451,10 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                         forked_from: dict = None,
                         tenant_id: str = None, enterprise_scope_id: str = None,
                         entity_mode: str = None, blueprint_id: str = None,
-                        runtime_contract_profile: str = None) -> None:
+                        runtime_contract_profile: str = None,
+                        template_fingerprint: str = None,
+                        template_binding_version: str = None,
+                        project_name: str = None) -> None:
     """⚠️ 소유권 5필드도 **None 이면 보존**한다(Phase 3).
     이 함수는 템플릿만 바꾸려는 호출부가 많은데, 거기서 소유권이 초기화되면
     프로젝트가 조용히 무소속이 되어 권한 필터에서 사라진다."""
@@ -333,7 +476,9 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                             runtime_contract_profile))
         _prev = {}
         if (master_domains is None or mcp_live_grounding is None
-                or knowledge_pack_ids is None or _own_missing):
+                or knowledge_pack_ids is None or _own_missing
+                or template_fingerprint is None or template_binding_version is None
+                or project_name is None):
             try:
                 with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
                     _prev = json.load(f) or {}
@@ -368,6 +513,21 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
             mcp_live_grounding = _prev.get("mcp_live_grounding", False)
         if knowledge_pack_ids is None:
             knowledge_pack_ids = _prev.get("knowledge_pack_ids", [])
+        if project_name is None:
+            project_name = str(_prev.get("project_name") or "")
+
+        tid = template_id or "default"
+        previous_tid = str(_prev.get("template_id") or "default")
+        if template_fingerprint is None:
+            template_fingerprint = (
+                str(_prev.get("template_fingerprint") or "") if previous_tid == tid else "")
+        if template_binding_version is None:
+            template_binding_version = (
+                str(_prev.get("template_binding_version") or "") if previous_tid == tid else "")
+        if not template_fingerprint:
+            _bound = _capture_runnable_template(tid)
+            template_fingerprint = _bound.fingerprint
+            template_binding_version = _TEMPLATE_BINDING_VERSION
 
         # ★★★ [G1-C1.1] **미바인딩 프로젝트를 새로 만들지 못하게 한다.**
         #
@@ -394,7 +554,10 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
 
         with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
             json.dump({
-                "template_id": template_id or "default",
+                "project_name": str(project_name or "").strip(),
+                "template_id": tid,
+                "template_fingerprint": template_fingerprint,
+                "template_binding_version": template_binding_version or _TEMPLATE_BINDING_VERSION,
                 "output_format_id": output_format_id or "default",
                 "view_type": view_type or "react_app",
                 "knowledge_pack_ids": list(knowledge_pack_ids or []),
@@ -416,7 +579,7 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                 "runtime_contract_profile": runtime_contract_profile or "",
             }, f, ensure_ascii=False, indent=2)
         _sync_project_ownership(workspace_root, owner_dept_id, owner_user_id, visibility, nature)
-    except ProjectOwnershipRequired:
+    except (ProjectOwnershipRequired, TemplateBindingError):
         # ⚠️ **삼키지 않는다.** 아래 `except Exception` 이 이것까지 잡으면 메타가 안 써지고
         #   콘솔 한 줄만 남는다 — 사용자는 만들어졌다고 믿는 프로젝트를 아무도 못 보게 된다.
         #   라우트가 이것을 4xx 로 바꿔 «무엇이 없어서 못 만들었는지» 를 말해야 한다.
@@ -620,6 +783,12 @@ async def get_projects(include_deleted: bool = False,
                 continue
             wbs_path = os.path.join(item_path, "00_wbs_master_plan.json")
             project_name = item
+            try:
+                with open(_project_meta_path(item_path), "r", encoding="utf-8") as f:
+                    project_name = str((json.load(f) or {}).get("project_name") or item)
+            except Exception:
+                # 레거시 프로젝트는 폴더 ID를 표시명으로 유지한다.
+                pass
             initial_idea = ""
             total_tasks = 0
             completed_tasks = 0
@@ -673,7 +842,8 @@ def provision_project(project_id: str, template_id: str = "default",
                       mcp_live_grounding: bool = None,
                       owner_dept_id: str = "", owner_user_id: str = "",
                       tenant_id: str = None, enterprise_scope_id: str = None,
-                      entity_mode: str = None, blueprint_id: str = None) -> str:
+                      entity_mode: str = None, blueprint_id: str = None,
+                      project_name: str = "") -> str:
     """프로젝트 디렉터리와 `project_meta.json` 을 만든다. **`POST /projects` 와 상담사
     `bootstrap-project` 가 공유하는 단일 경로**다.
 
@@ -700,6 +870,7 @@ def provision_project(project_id: str, template_id: str = "default",
                         owner_dept_id=owner_dept_id, owner_user_id=owner_user_id,
                         tenant_id=tenant_id, enterprise_scope_id=enterprise_scope_id,
                         entity_mode=entity_mode, blueprint_id=blueprint_id,
+                        project_name=project_name,
                         # ★ [I-4 §3] **신규 프로젝트만** 계약 절차를 켠다. 생성 경로가
                         #   하나로 모여 있는 덕에 여기 한 줄이 경계 전부다 — 갱신 경로는
                         #   `None` 으로 두어 기존 값을 보존한다.
@@ -725,20 +896,26 @@ async def create_project(req: ProjectCreateRequest, p: Principal = Depends(curre
     if _reason:
         raise HTTPException(status_code=403, detail=_reason)
     _own_dept = getattr(p.scope, "primary_dept_id", "") or ""
+    from core.system_ids import allocate
+    project_id = (req.project_id or "").strip() or allocate("project")[0]
+    project_name = (req.project_name or "").strip() or "새 업무"
     try:
         tid = provision_project(
-            req.project_id, req.template_id or "default", req.output_format_id, req.view_type,
+            project_id, req.template_id or "default", req.output_format_id, req.view_type,
             req.knowledge_pack_ids, req.master_domains, req.mcp_live_grounding,
             owner_dept_id=_own_dept, owner_user_id=p.user_id or "",
             tenant_id=ctx.tenant_id, enterprise_scope_id=ctx.enterprise_scope_id or _own_dept,
-            entity_mode=ctx.entity_mode)
+            entity_mode=ctx.entity_mode, project_name=project_name)
     except ValueError:
         raise HTTPException(status_code=400, detail="잘못된 template_id 형식입니다.")
     except KeyError as e:
         raise HTTPException(status_code=404, detail=f"존재하지 않는 템플릿입니다: {e.args[0]}")
+    except TemplateBindingError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except FileExistsError:
         raise HTTPException(status_code=409, detail="이미 존재하는 프로젝트 ID입니다.")
-    return {"status": "success", "project_id": req.project_id, "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids, "master_domains": req.master_domains, "mcp_live_grounding": req.mcp_live_grounding,
+    return {"status": "success", "project_id": project_id, "project_name": project_name,
+            "template_id": tid, "view_type": req.view_type, "knowledge_pack_ids": req.knowledge_pack_ids, "master_domains": req.master_domains, "mcp_live_grounding": req.mcp_live_grounding,
             "owner_dept_id": _own_dept, "owner_user_id": p.user_id or "",
             "tenant_id": ctx.tenant_id, "enterprise_scope_id": ctx.enterprise_scope_id or _own_dept,
             "entity_mode": ctx.entity_mode}
@@ -775,7 +952,8 @@ async def update_project_knowledge(project_id: str, req: ProjectKnowledgeRequest
             "master_domains": _read_project_master_domains(workspace_root)}
 
 class MegaProjectCreateRequest(BaseModel):
-    mega_project_id: str
+    mega_project_id: str = ""      # 레거시 API 호환용. 신규 UI는 보내지 않는다.
+    mega_project_name: str = ""
     template_id: str = "manufacturing-production" # Default master template
     
 @router.post("/projects/mega")
@@ -786,7 +964,10 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
     _reason = visibility_block_reason(p)
     if _reason:
         raise HTTPException(status_code=403, detail=_reason)
-    _safe_id(req.mega_project_id, "mega_project_id")
+    from core.system_ids import allocate
+    mega_project_id = (req.mega_project_id or "").strip() or allocate("project")[0]
+    mega_project_name = (req.mega_project_name or "").strip() or "통합 프로젝트"
+    _safe_id(mega_project_id, "mega_project_id")
 
     # 템플릿 존재 검증 — 미존재 템플릿으로 서브 프로젝트가 default 폴백되는 것을 방지
     from core.agent_registry import _safe_tid, list_templates
@@ -798,19 +979,10 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
     if tid not in {t["id"] for t in list_templates()}:
         raise HTTPException(status_code=404, detail=f"존재하지 않는 템플릿입니다: {tid}")
     
-    mega_path = workspace_path(req.mega_project_id)
+    mega_path = workspace_path(mega_project_id)
     if os.path.exists(mega_path):
         raise HTTPException(status_code=409, detail="이미 존재하는 메가 프로젝트 ID입니다.")
         
-    # 1. 마스터 프로젝트 생성
-    os.makedirs(mega_path, exist_ok=True)
-    # ★ [2026-07-28 Phase 5] 메가 마스터는 전사 종합이므로 `hq` + `company`(전사 공개).
-    #   `scripts/migrate_org_ownership.py:49` 의 추론 규약과 **같은 값**을 쓴다 — 생성 시점에
-    #   찍어두면 그 마이그레이션이 신규 메가에 대해 할 일이 없어진다(멱등 유지).
-    _write_project_meta(mega_path, tid, "default", "react_app",
-                        owner_dept_id="hq", owner_user_id=p.user_id or "", visibility="company",
-                        runtime_contract_profile=_ak.PROFILE_V1)   # 신규 생성 경로
-    
     # ★ [2026-07-27 Phase 1] 하드코딩 맵 3개(domain_agents_map / domain_templates_map /
     #   domain_ko_map)를 제거하고 **부서 기준정보**를 조회한다.
     #   ⚠️ 왜: 부서 하나를 추가·개명·이동·폐지하려면 코드를 고치고 배포해야 했고, 세 맵이
@@ -837,6 +1009,9 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
     #   ★ 부서 하나만 조용히 건너뛰지 않는다 — 메가 프로젝트는 부서들이 함께 도는 것이고,
     #     한 부서가 빠진 채 완주하면 그 산출물이 «전사 검토를 마쳤다» 는 얼굴을 하게 된다.
     _blocked = []
+    # `allocate` 의 한 번 발급 상한은 대량 오용을 막기 위한 20개다. 부서 수가 늘었다고
+    # 메가 프로젝트가 갑자기 생성 불능이 되지 않도록, 프로젝트마다 독립적으로 발급한다.
+    sub_ids = iter([allocate("project")[0] for _ in _domains])
     for domain in _domains:
         _pre = resolve_department_config(domain)
         if _pre.get("blocked_reason"):
@@ -847,6 +1022,18 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
             detail=("승인된 에이전트 구성이 없는 부서가 있어 메가 프로젝트를 만들지 않았습니다 "
                     f"({len(_blocked)}개).\n"
                     + "\n".join(f"· {d}: {why}" for d, why in _blocked)))
+
+    # 1. 마스터 프로젝트 생성 — **모든 선검사가 끝난 뒤** 처음으로 디스크에 쓴다.
+    # 종전에는 승인되지 않은 부서를 발견하기 전에 폴더부터 만들어, 400 응답 뒤에도 빈
+    # 메가 프로젝트가 목록에 남았다. 실패한 생성은 사용자에게 존재하지 않아야 한다.
+    os.makedirs(mega_path, exist_ok=True)
+    # ★ [2026-07-28 Phase 5] 메가 마스터는 전사 종합이므로 `hq` + `company`(전사 공개).
+    #   `scripts/migrate_org_ownership.py:49` 의 추론 규약과 **같은 값**을 쓴다 — 생성 시점에
+    #   찍어두면 그 마이그레이션이 신규 메가에 대해 할 일이 없어진다(멱등 유지).
+    _write_project_meta(mega_path, tid, "default", "react_app",
+                        owner_dept_id="hq", owner_user_id=p.user_id or "", visibility="company",
+                        runtime_contract_profile=_ak.PROFILE_V1,
+                        project_name=mega_project_name)   # 신규 생성 경로
 
     # 2. 서브 프로젝트들 생성 — 도메인별 템플릿 및 에이전트 필터 주입
     for domain in _domains:
@@ -860,7 +1047,7 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
                     "template_id": _legacy.get("template", "")}
         domain_agents = _cfg.get("agents") or []
 
-        sub_id = f"{req.mega_project_id}_{domain}"
+        sub_id = next(sub_ids)
         sub_path = workspace_path(sub_id)
         os.makedirs(sub_path, exist_ok=True)
 
@@ -868,16 +1055,18 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
         # 서브 프로젝트는 도메인 특화 템플릿 사용 (없으면 마스터 템플릿)
         # ★ [2026-07-28 Phase 5] `domain` 이 곧 `dept_id` 다 — 서브 프로젝트의 소유 부서로 찍는다.
         #   가시성은 기본값 `dept`: 부서 산출물은 부서 안에서만 프롬프트에 주입된다.
+        domain_name_ko = _cfg.get("name_ko") or domain.upper()
+        sub_project_name = f"[{domain_name_ko}] {mega_project_name}"
         _write_project_meta(sub_path, sub_tid, "default", "react_app",
                             owner_dept_id=domain, owner_user_id=p.user_id or "",
-                            runtime_contract_profile=_ak.PROFILE_V1)   # 신규 생성 경로
+                            runtime_contract_profile=_ak.PROFILE_V1,
+                            project_name=sub_project_name)   # 신규 생성 경로
 
-        domain_name_ko = _cfg.get("name_ko") or domain.upper()
         # 서브 프로젝트 상태 초기화
         sub_state = {
             "is_mega_project": False,
-            "parent_project_id": req.mega_project_id,
-            "project_name": f"[{domain_name_ko}] {req.mega_project_id}",
+            "parent_project_id": mega_project_id,
+            "project_name": sub_project_name,
             "template_id": sub_tid,
             "domain_agents": domain_agents
         }
@@ -891,14 +1080,15 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
         "is_mega_project": True,
         "parent_project_id": "",
         "sub_projects_map": sub_projects_map,
-        "project_name": f"🌟 메가 프로젝트: {req.mega_project_id}",
+        "project_name": mega_project_name,
         "template_id": tid,
         "shared_ledger": {}
     }
     with open(os.path.join(mega_path, "latest_state.json"), "w", encoding="utf-8") as f:
         json.dump(master_state, f, ensure_ascii=False, indent=2)
 
-    return {"status": "success", "mega_project_id": req.mega_project_id, "sub_projects": sub_projects_map}
+    return {"status": "success", "mega_project_id": mega_project_id,
+            "mega_project_name": mega_project_name, "sub_projects": sub_projects_map}
 
 
 
@@ -1006,7 +1196,8 @@ async def start_all_mega_subprojects(project_id: str, p: Principal = Depends(cur
         
         with open(sub_state_path, "w", encoding="utf-8") as f:
             json.dump(sub_state, f, ensure_ascii=False, indent=2)
-            
+
+        await _prepare_project_execution_or_conflict(sub_ws, sub_state)
         await orchestrator.start_sprint(task_id, sub_state, sub_ws)
         results.append(sub_id)
         
@@ -1138,10 +1329,13 @@ async def copy_project(project_id: str, req: ProjectCopyRequest,
                           p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
     assert_project_writable(p, project_id)
-    _safe_id(req.new_project_id, "new_project_id")
+    from core.system_ids import allocate
+    new_project_id = (req.new_project_id or "").strip() or allocate("project")[0]
+    new_project_name = (req.new_project_name or "").strip() or "복제 프로젝트"
+    _safe_id(new_project_id, "new_project_id")
     
     src_path = workspace_path(project_id)
-    dst_path = workspace_path(req.new_project_id)
+    dst_path = workspace_path(new_project_id)
     
     if not os.path.exists(src_path):
         raise HTTPException(status_code=404, detail="원본 프로젝트가 없습니다.")
@@ -1150,10 +1344,13 @@ async def copy_project(project_id: str, req: ProjectCopyRequest,
         
     try:
         shutil.copytree(src_path, dst_path)
+        tid, fid, vtype = _read_project_meta(dst_path)
+        _write_project_meta(dst_path, tid, fid, vtype, project_name=new_project_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"복사 실패: {e}")
         
-    return {"status": "success", "new_project_id": req.new_project_id}
+    return {"status": "success", "new_project_id": new_project_id,
+            "new_project_name": new_project_name}
 
 @router.post("/{project_id}/sprint/start")
 async def start_sprint(project_id: str, req: SprintStartRequest,
@@ -1229,16 +1426,8 @@ async def start_sprint(project_id: str, req: SprintStartRequest,
     #
     # ★ 산출물만 보고는 어느 구성이 만들었는지 되짚을 수 없었다. 그 질문은 언제나 문제가 생긴
     #   뒤에 나오고, 그때는 이미 구성이 여러 번 바뀌어 있다. 그래서 **시작 시점에** 찍는다.
-    # ⚠️ 스냅샷 실패가 실행을 막지 않는다 — 기록 기능의 장애가 가동 불가가 되면 안 된다.
-    #   대신 실패도 «이유가 붙은 미확인» 으로 기록되므로 조용히 사라지지 않는다.
-    try:
-        from core import config_snapshot as _snap
-        _s = await asyncio.to_thread(_snap.capture,
-                                     req.project_state_payload["template_id"])
-        await asyncio.to_thread(_snap.write, workspace_root, _s)
-        req.project_state_payload["config_fingerprint"] = _s.fingerprint
-    except Exception as _e:
-        print(f"⚠️ [factory] 구성 스냅샷 기록 실패(가동은 계속): {_e}")
+    # 생성 때 봉인한 내용 지문과 먼저 대조한다. ID만 같다고 같은 워크플로우가 아니다.
+    await _prepare_project_execution_or_conflict(workspace_root, req.project_state_payload)
 
     # 신규 기획(PLANNING)은 새 출발이므로 옛 누적 산출물을 복원하지 않는다.
     # 그 외(실행/리비전) 태스크는 stale 페이로드의 빈 누적 필드를 디스크 진실원본에서 복원.
@@ -1309,6 +1498,10 @@ async def _assert_resumable(project_id: str) -> None:
     # ★ [I-4 4c-0] 재개도 같은 문을 지난다. 시작만 막으면 **재개가 열린 쪽**이 되고,
     #   사용자는 막힌 쪽을 피해 그리로 간다 — 바로 위 독스트링이 말하는 형태 그대로다.
     _assert_contract_profile_readable(ws, project_id)
+    try:
+        await asyncio.to_thread(_verify_project_template_binding, ws, seal_legacy=False)
+    except TemplateBindingError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     v = await asyncio.to_thread(resume_guard.check, ws, _read_project_template(ws))
     if not v.ok:
         # 409 — 요청은 정당하지만 **지금 상태와 맞지 않는다.** 403(권한)도 400(잘못된 요청)도
@@ -1779,6 +1972,7 @@ async def trigger_self_healing(project_id: str, req: HealRequest, p: Principal =
     project_state_payload["workspace_root"] = workspace_root
     project_state_payload["template_id"] = _read_project_template(workspace_root)  # T2-b: 바인딩 템플릿 유지
 
+    await _prepare_project_execution_or_conflict(workspace_root, project_state_payload)
     await orchestrator.start_sprint(task_id, project_state_payload, workspace_root)
     return {"status": "healing_started", "task_id": task_id}
 
@@ -1807,6 +2001,7 @@ async def replan_wbs(project_id: str, p: Principal = Depends(current_principal))
     st["needs_revision"] = False
     st["workspace_root"] = workspace_root
     st["template_id"] = _read_project_template(workspace_root)
+    await _prepare_project_execution_or_conflict(workspace_root, st)
     ok = await orchestrator.start_sprint(task_id, st, workspace_root)
     if not ok:
         raise HTTPException(status_code=409, detail="이미 실행 중인 스프린트가 있습니다.")
@@ -2258,7 +2453,9 @@ async def create_release(project_id: str,
         #   가 이 셋을 함께 읽고, 비어 있으면 「이 자원이 어느 조직의 무엇인가」가 확정되지
         #   않아 증명이 발급되지 않는다(실측: `entity_mode=''`·`scope_node_id=''` 로 404).
         "tenant_id": str(_rel_own.get("tenant_id", "") or ""),
-        "enterprise_scope_id": str(_rel_own.get("enterprise_scope_id", "") or ""),
+        #: ★★★ [2026-08-28] **노드 id 로 풀어서 찍는다.** 부서 id 를 그대로 찍으면
+        #:   화면(노드 id 를 보냄)과 안 맞아 증명이 404 가 되고, 사람이 앱을 못 연다.
+        "enterprise_scope_id": _release_scope_node(_rel_own),
         "entity_mode": str(_rel_own.get("entity_mode", "") or ""),
     }
     # ★★ [CL-0 · 2026-08-03] **App-in-App Capability Manifest 를 릴리스에 고정한다.**
@@ -2599,6 +2796,7 @@ async def resimulate(project_id: str, req: ResimulateRequest,
     
     # 스프린트 가동 (Validator부터 시작 — 설계 건너뛰기)
     workspace = workspace_path(project_id)
+    await _prepare_project_execution_or_conflict(workspace, updated_state)
     success = await orchestrator.start_sprint(resim_task_id, updated_state, workspace)
     
     if success:
@@ -2914,6 +3112,12 @@ class AIRecommendSkillRequest(BaseModel):
     agent_name_ko: str
     role_description: str
 
+
+class IdentifierAllocationRequest(BaseModel):
+    """사용자 입력 대신 시스템이 발급할 내부 객체 식별자."""
+    object_type: str
+    count: int = 1
+
 def _assert_agent_config_readable(p: Principal):
     """구성 조회 자격. 에이전트 구성은 사내 운영 정보다 — 익명·미등록에게 주지 않는다.
 
@@ -2924,6 +3128,19 @@ def _assert_agent_config_readable(p: Principal):
     reason = visibility_block_reason(p)
     if reason:
         raise HTTPException(status_code=403, detail=reason)
+
+
+@router.post("/identifiers/allocate")
+async def allocate_identifiers(req: IdentifierAllocationRequest,
+                               p: Principal = Depends(current_principal)):
+    """내부 식별자를 발급한다. 이름·업무 코드와 달리 사용자가 정하거나 화면에서 노출하지 않는다."""
+    _assert_agent_config_readable(p)
+    from core.system_ids import allocate
+    try:
+        ids = allocate(req.object_type, req.count)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "success", "object_type": req.object_type, "ids": ids}
 
 
 @router.post("/ai-recommend/pipeline")

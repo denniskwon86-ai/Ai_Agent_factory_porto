@@ -15,6 +15,8 @@ export type JarvisContext = {
   selected_object_type?: string;
   /** ⚠️ 화면이 **강조 중인** 객체와 같아야 한다. 다르면 사용자는 A 를 보면서 B 의 답을 읽는다. */
   selected_object_id?: string;
+  /** 일반 화면에 보일 사람용 이름. 내부 ID는 서버 문맥에만 남긴다. */
+  selected_object_label?: string;
   object_snapshot?: Record<string, unknown>;
   available_actions?: string[];
   evidence_refs?: Record<string, unknown>[];

@@ -151,6 +151,8 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     # 감독관 대화도 LLM 을 태운다 — 「채팅이니까」로 열어 두면 비용 통제에 구멍이 난다.
     f"POST {F}/{{project_id}}/supervisor/chat": (PROJECT_RUN,),
     f"POST {F}/ai-recommend/pipeline": (PROJECT_RUN,),
+    # 내부 ID는 사용자가 정하지 않는다. 추천 기능과 같은 식별·실행 자격에서 시스템이 발급한다.
+    f"POST {F}/identifiers/allocate": (PROJECT_RUN,),
 
     # ── 프로젝트 고치기 (남의 자료를 끌어온다) ──────────────────────────────
     f"PUT {F}/projects/{{project_id}}/knowledge": (PROJECT_EDIT,),
@@ -191,6 +193,10 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     # ⚠️ 이 표는 「이 사람이 계산을 돌릴 수 있는가」만 답한다. 「이 인스턴스를 읽을 수
     #   있는가」는 `_instance_or_404` 가, 「이 경로가 보이는가」는 `app_policy` 가 답한다.
     "POST /api/v1/calculation/path": (PROJECT_RUN,),
+    # 내부 진단에는 관계·계약·원장 식별자가 들어간다. 일반 계산 권한과 분리하고,
+    # 시스템 관리자가 명시적으로 펼침/복사를 요청한 경우에만 감사와 함께 반환한다.
+    "POST /api/v1/calculation/path/diagnostics/reveal": (ADMIN_SECURITY,),
+    "POST /api/v1/calculation/path/diagnostics/copy": (ADMIN_SECURITY,),
     # ★ 이제 **안건을 저장한다** — 만들기이자 돌리기다. 둘 다 member 권한이므로
     #   `PROJECT_RUN` 하나로 충분하다(`PROJECT_CREATE` 도 member 가 갖는다).
     "POST /api/v1/calculation/path/decision": (PROJECT_RUN,),

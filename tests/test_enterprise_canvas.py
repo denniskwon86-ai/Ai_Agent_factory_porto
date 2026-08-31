@@ -123,3 +123,24 @@ def test_대기열은_네_섹션을_한_줄기로_모은다():
     assert [i["title"] for i in q] == ["A", "B", "C", "D"]
     assert [i["section"] for i in q] == ["my_decisions", "blocked",
                                          "data_health", "programs"]
+
+
+def test_비교_진단은_경영_홈_대표_안건으로_올리지_않는다():
+    """개별 Shadow 입력 불일치는 진단 화면의 기록이지 회사의 대표 결정 안건이 아니다.
+
+    기록을 삭제하지 않으면서도 첫 화면이 검증 실패 사례로 시작하지 않게 한다.
+    검토해야 할 Shadow 결과의 총량은 별도 shadow_review_pending 항목으로 남는다.
+    """
+    brief = {"sections": {
+        "my_decisions": {"items": [
+            {"kind": "shadow_incomparable", "title": "입력 불일치 사례"},
+            {"kind": "shadow_review_pending", "title": "새 방식 비교 결과 검토"},
+        ]},
+        "blocked": {"items": []},
+        "data_health": {"items": []},
+        "programs": {"items": []},
+    }}
+
+    queue = ec.build(briefing=brief)["decision_queue"]
+
+    assert [item["kind"] for item in queue] == ["shadow_review_pending"]

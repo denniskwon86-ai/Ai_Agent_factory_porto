@@ -144,6 +144,29 @@ class RecordRequest(BaseModel):
     valid_from: Optional[str] = None
 
 
+class RecordProposalRequest(BaseModel):
+    type_id: str
+    name: str
+    attributes: Optional[dict] = None
+    domains: Optional[list] = None
+    aliases: Optional[list] = None
+    is_core: bool = False
+    rationale: str = ""
+
+
+class RecordRevisionRequest(BaseModel):
+    name: str
+    attributes: Optional[dict] = None
+    domains: Optional[list] = None
+    aliases: Optional[list] = None
+    is_core: bool = False
+    valid_from: Optional[str] = None
+
+
+class RecordProposalDecision(BaseModel):
+    reason: str = ""
+
+
 class AliasRequest(BaseModel):
     aliases: List[str]
 
@@ -165,7 +188,17 @@ async def list_records(type_id: Optional[str] = None, q: Optional[str] = None,
 
 @router.post("/records")
 async def create_record(req: RecordRequest, p: Principal = Depends(current_principal)):
+    """기존 정본의 개정 전용 하위호환 경로.
+
+    신규 코드를 보내 즉시 현행화하는 옛 동작은 막는다. 신규 정본은 `/records/proposals` 에
+    업무 내용만 제안하고 별도 관리자가 승인할 때 서버가 키를 발급한다.
+    """
     assert_can_manage_standard(p)
+    existing = await asyncio.to_thread(master_data.get_record, req.master_code)
+    if not existing:
+        raise HTTPException(
+            status_code=409,
+            detail="신규 기준정보는 코드를 입력해 직접 만들 수 없습니다. 신규 정본 제안을 제출하십시오.")
     try:
         data = await asyncio.to_thread(
             master_data.create_or_revise_record, req.master_code, req.type_id, req.name,
@@ -173,6 +206,93 @@ async def create_record(req: RecordRequest, p: Principal = Depends(current_princ
         return {"status": "success", "data": data}
     except MasterDataError as e:
         _domain_err(e)
+
+
+@router.put("/records/{master_code}")
+async def revise_record(master_code: str, req: RecordRevisionRequest,
+                        p: Principal = Depends(current_principal)):
+    """선택된 현행 정본의 내용 개정. 내부 키는 경로 결속이고 사용자가 입력하지 않는다."""
+    assert_can_manage_standard(p)
+    existing = await asyncio.to_thread(master_data.get_record, master_code)
+    if not existing:
+        raise HTTPException(status_code=404, detail="존재하지 않는 기준정보입니다.")
+    try:
+        data = await asyncio.to_thread(
+            master_data.create_or_revise_record, master_code, existing["type_id"], req.name,
+            req.attributes, req.domains, req.aliases, req.is_core, req.valid_from)
+    except MasterDataError as e:
+        _domain_err(e)
+    from core.enterprise_context import audit
+    audit.record(audit.MASTER_DATA_REVISED, "master_record", master_code,
+                 actor=p.user_id, outcome="allowed",
+                 detail=f"기준정보 개정 · 명칭={req.name} · v{data['version']}"[:500])
+    return {"status": "success", "data": data}
+
+
+@router.get("/records/proposals")
+async def list_record_proposals(status: str = "pending",
+                                p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    try:
+        rows = await asyncio.to_thread(master_data.list_record_proposals, status)
+        return {"status": "success", "data": rows}
+    except MasterDataError as e:
+        _domain_err(e)
+
+
+@router.post("/records/proposals")
+async def propose_record(req: RecordProposalRequest,
+                         p: Principal = Depends(current_principal)):
+    if not (p.user_id or "").strip():
+        raise HTTPException(status_code=401, detail="신규 정본 제안을 제출하려면 로그인이 필요합니다.")
+    reason = visibility_block_reason(p)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    try:
+        data = await asyncio.to_thread(
+            master_data.propose_record, req.type_id, req.name,
+            attributes=req.attributes, domains=req.domains, aliases=req.aliases,
+            is_core=req.is_core, rationale=req.rationale, proposed_by=p.user_id)
+    except MasterDataError as e:
+        _domain_err(e)
+    from core.enterprise_context import audit
+    audit.record(audit.MASTER_DATA_PROPOSED, "master_record_proposal", data["proposal_id"],
+                 actor=p.user_id, outcome="allowed",
+                 detail=f"신규 정본 제안 · 유형={req.type_id} · 명칭={req.name}"[:500])
+    return {"status": "success", "data": data}
+
+
+@router.post("/records/proposals/{proposal_id}/approve")
+async def approve_record_proposal(proposal_id: str, req: RecordProposalDecision,
+                                  p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    try:
+        data = await asyncio.to_thread(
+            master_data.approve_record_proposal, proposal_id,
+            reviewed_by=p.user_id, review_reason=req.reason)
+    except MasterDataError as e:
+        _domain_err(e)
+    from core.enterprise_context import audit
+    audit.record(audit.MASTER_DATA_APPROVED, "master_record_proposal", proposal_id,
+                 actor=p.user_id, outcome="allowed",
+                 detail=f"신규 정본 승인 · 명칭={data['record']['name']}"[:500])
+    return {"status": "success", "data": data}
+
+
+@router.post("/records/proposals/{proposal_id}/reject")
+async def reject_record_proposal(proposal_id: str, req: RecordProposalDecision,
+                                 p: Principal = Depends(current_principal)):
+    assert_can_manage_standard(p)
+    try:
+        data = await asyncio.to_thread(
+            master_data.reject_record_proposal, proposal_id,
+            reviewed_by=p.user_id, review_reason=req.reason)
+    except MasterDataError as e:
+        _domain_err(e)
+    from core.enterprise_context import audit
+    audit.record(audit.MASTER_DATA_REJECTED, "master_record_proposal", proposal_id,
+                 actor=p.user_id, outcome="allowed", reason=req.reason[:500])
+    return {"status": "success", "data": data}
 
 
 @router.get("/records/duplicates")
@@ -241,7 +361,8 @@ async def remove_alias(master_code: str, alias: str,
 @router.post("/import/csv")
 async def import_csv(type_id: str = Form(...), file: UploadFile = File(...),
                      p: Principal = Depends(current_principal)):
-    assert_can_manage_standard(p)
+    if not (p.user_id or "").strip():
+        raise HTTPException(status_code=401, detail="일괄 제안을 제출하려면 로그인이 필요합니다.")
     raw = await file.read()
     try:
         text = raw.decode("utf-8-sig")  # BOM 허용(엑셀 CSV)
@@ -250,7 +371,8 @@ async def import_csv(type_id: str = Form(...), file: UploadFile = File(...),
     rows = list(csv.DictReader(io.StringIO(text)))
     if not rows:
         raise HTTPException(status_code=400, detail="빈 CSV 이거나 헤더만 있습니다.")
-    report = await asyncio.to_thread(master_data.import_csv_rows, rows, type_id)
+    report = await asyncio.to_thread(
+        master_data.import_proposal_rows, rows, type_id, proposed_by=p.user_id)
     return {"status": "success", "data": report}
 
 

@@ -315,6 +315,86 @@ def test_능력_승인이_없으면_막히고_그것은_오류가_아니다(env)
     got = _data(_client(env).post("/api/v1/calculation/path", json=_body(env)))
     assert got["status"] == pc.BLOCKED
     assert got["blocked"], "무엇이 없는지 말하지 않으면 「영향 없음」과 구별되지 않는다"
+    blocked = got["blocked"]
+    assert blocked["reason_code"] == pc.CALCULATION_APPROVAL_REQUIRED
+    assert "internal_reasons" not in blocked
+    assert blocked["reasons"][0]["next_action"]
+    rendered = str(blocked)
+    for leak in ("CALC.", "LOG-02", "rel_", "evt_"):
+        assert leak not in rendered, f"일반 API 차단 응답에 내부 결속값이 노출됐다: {leak}"
+
+
+def _diagnostic_body(env, acknowledgement="SHOW_INTERNAL_DIAGNOSTIC"):
+    return {**_body(env), "purpose": "계산 차단 원인과 결속 상태 점검",
+            "acknowledgement": acknowledgement}
+
+
+def test_내부_진단은_시스템_관리자만_펼친다(env):
+    _graph(env)
+    _seal_baseline(env)
+    url = "/api/v1/calculation/path/diagnostics/reveal"
+
+    for who in (ACTOR, "viewer@afs.invalid"):
+        for endpoint, body in (
+            (url, _diagnostic_body(env)),
+            ("/api/v1/calculation/path/diagnostics/copy",
+             _diagnostic_body(env, "COPY_INTERNAL_DIAGNOSTIC")),
+        ):
+            res = _client(env, who).post(endpoint, json=body)
+            assert res.status_code == 403, f"{who}: {endpoint}: {res.status_code} {res.text[:160]}"
+
+    got = _data(_admin(env).post(url, json=_diagnostic_body(env)))
+    assert got["reason_code"] == pc.CALCULATION_APPROVAL_REQUIRED
+    assert any("CALC." in reason for reason in got["internal_reasons"])
+    assert got["identifiers"]["query_id"]
+    assert got["identifiers"]["path_fingerprint"]
+    assert got["diagnostic_fingerprint"]
+
+    from core.enterprise_context import audit
+    event = audit.recent(1, audit.CALCULATION_DIAGNOSTIC_REVEALED)[0]
+    assert event["actor"] == "sysadmin@afs.invalid"
+    assert event["resource_id"] == got["diagnostic_fingerprint"]
+    assert "결속 상태 점검" in event["detail"]
+
+
+def test_진단_복사는_서버가_만든_본문을_감사_후_발급한다(env):
+    _graph(env)
+    _seal_baseline(env)
+    got = _data(_admin(env).post(
+        "/api/v1/calculation/path/diagnostics/copy",
+        json=_diagnostic_body(env, "COPY_INTERNAL_DIAGNOSTIC")))
+
+    assert got["diagnostic_fingerprint"]
+    copied = got["copy_text"]
+    assert "internal_reasons" in copied and "CALC." in copied
+    from core.enterprise_context import audit
+    event = audit.recent(1, audit.CALCULATION_DIAGNOSTIC_COPY_ISSUED)[0]
+    assert event["resource_id"] == got["diagnostic_fingerprint"]
+
+
+def test_감사_기록에_실패하면_내부_진단을_공개하지_않는다(env, monkeypatch):
+    _graph(env)
+    _seal_baseline(env)
+    monkeypatch.setattr(env["cal"].audit, "record", lambda *a, **kw: False)
+
+    res = _admin(env).post("/api/v1/calculation/path/diagnostics/reveal",
+                           json=_diagnostic_body(env))
+    assert res.status_code == 503
+    assert "internal_reasons" not in res.text and "CALC." not in res.text
+
+
+def test_진단은_목적과_행동_확인이_없으면_열리지_않는다(env):
+    _graph(env)
+    _seal_baseline(env)
+    admin = _admin(env)
+    short = {**_body(env), "purpose": "점검",
+             "acknowledgement": "SHOW_INTERNAL_DIAGNOSTIC"}
+    assert admin.post("/api/v1/calculation/path/diagnostics/reveal", json=short).status_code == 422
+
+    wrong = {**_body(env), "purpose": "계산 차단 원인과 결속 상태 점검",
+             "acknowledgement": "COPY_INTERNAL_DIAGNOSTIC"}
+    res = admin.post("/api/v1/calculation/path/diagnostics/reveal", json=wrong)
+    assert res.status_code == 422
 
 
 def test_관계_승인이_없으면_경로가_보이지_않는다(env, monkeypatch):

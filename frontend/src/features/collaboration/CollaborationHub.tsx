@@ -15,6 +15,7 @@ import { Banner, HubShell, Panel, ScreenHead, type RailItem } from '../../design
 import { HubDialog } from '../../design/HubDialog';
 import { JarvisRail } from '../../design/JarvisRail';
 import type { JarvisContext } from '../../lib/jarvisApi';
+import { orgApi, type Dept, type OrgUser } from '../../lib/orgApi';
 import {
   collaborationApi, DELIVERY_STATUS_KO, type CapabilityManifest, type Delivery,
   type DeliveryPreflight, type PocketApp,
@@ -27,6 +28,7 @@ import { PublicationCenter, type PublicationJarvis } from './PublicationCenter';
 // [CL-2] 목표 정보구조(§4)의 «의사결정 센터»를 같은 허브 안에 둔다. 별도 모달을 하나 더 띄우면
 // 사용자는 전달·결정·발간이 서로 다른 제품이라고 읽는다 — 이것들은 하나의 폐루프다.
 type View = 'inbox' | 'apps' | 'deliver' | 'sent' | 'decisions' | 'publications';
+export type CollaborationReleaseOption = { id: string; label: string };
 
 /** [UIUX-AUDIT-29 §1] **화면 문맥은 활성 모듈을 따라간다.**
  *
@@ -188,12 +190,11 @@ function CapabilityManifestCard({ m }: { m: CapabilityManifest }) {
   );
 }
 
-export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = [],
-  simulationRunIds = [], page = false }: {
+export function CollaborationHub({ onClose, initialView = 'inbox', releaseOptions = [],
+  page = false }: {
   onClose: () => void;
   initialView?: View;
-  releaseIds?: string[];
-  simulationRunIds?: string[];
+  releaseOptions?: CollaborationReleaseOption[];
   page?: boolean;
 }) {
   const [view, setView] = useState<View>(initialView);
@@ -211,6 +212,10 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
   const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string>('');
+  // 사용자·부서 식별자는 전송 payload 안에서만 쓴다. 화면은 조직 정본의 이름을 읽고,
+  // 정본을 못 읽었을 때 자유 입력으로 우회하지 않는다.
+  const [usersState, setUsersState] = useState<Loaded<OrgUser[]>>(loading<OrgUser[]>());
+  const [deptsState, setDeptsState] = useState<Loaded<Dept[]>>(loading<Dept[]>());
 
   const load = useCallback(async () => {
     setBusy('불러오는 중'); setErr(null);
@@ -227,15 +232,28 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     } finally { setBusy(null); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadDirectory = useCallback(() => {
+    setUsersState(loading<OrgUser[]>());
+    setDeptsState(loading<Dept[]>());
+    orgApi.users()
+      .then((r) => setUsersState(ok(r.rows.filter(
+        (u) => String(u.status || '').toUpperCase() === 'ACTIVE'))))
+      .catch((e) => setUsersState(failed<OrgUser[]>(e)));
+    orgApi.departments()
+      .then((r) => setDeptsState(ok(r.rows.filter(
+        (d) => String(d.status || '').toUpperCase() === 'ACTIVE'))))
+      .catch((e) => setDeptsState(failed<Dept[]>(e)));
+  }, []);
+
+  useEffect(() => { load(); loadDirectory(); }, [load, loadDirectory]);
 
   // ★ 사용자가 바뀌면 이전 수신함·주머니를 **즉시 폐기**한다(§CL-FE-03). 남겨 두면 다른
   //   사용자의 목록이 화면에 그대로 남고, 그것이 곧 유출이다.
   useEffect(() => {
-    const h = () => { setData(loading()); setSelectedId(''); load(); };
+    const h = () => { setData(loading()); setSelectedId(''); load(); loadDirectory(); };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
-  }, [load]);
+  }, [load, loadDirectory]);
 
   const act = async (label: string, fn: () => Promise<any>) => {
     setBusy(label); setErr(null); setFlash(null);
@@ -258,6 +276,18 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
   const selected = useMemo(
     () => inbox.find((d) => d.delivery_id === selectedId) || pending[0] || inbox[0] || null,
     [inbox, pending, selectedId]);
+  const releaseNames = useMemo(() => new Map(
+    releaseOptions.map((row) => [row.id, row.label || '이름 미등록 앱']),
+  ), [releaseOptions]);
+  const releaseName = (id: string) => releaseNames.get(id) || '이름 미등록 앱';
+  const userNames = useMemo(() => new Map(
+    (usersState.value || []).map((row) => [row.user_id, row.display_name || '이름 미등록 사용자']),
+  ), [usersState.value]);
+  const deptNames = useMemo(() => new Map(
+    (deptsState.value || []).map((row) => [row.dept_id, row.name_ko || '이름 미등록 조직']),
+  ), [deptsState.value]);
+  const userName = (id?: string) => id ? (userNames.get(id) || '이름 미등록 사용자') : '확인 불가';
+  const deptName = (id?: string) => id ? (deptNames.get(id) || '이름 미등록 조직') : '확인 불가';
 
   const items: RailItem[] = [
     // 조회에 실패했으면 배지 숫자를 **표시하지 않는다.** «0» 배지는 «없다»로 읽힌다.
@@ -290,19 +320,19 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     if (view === 'apps') {
       return { title: apps.length ? `내 앱 ${apps.length}개` : '내 앱 없음',
         desc: '수락한 앱은 현재 사용자·조직 권한으로 실행됩니다.',
-        ev: apps.slice(0, 3).map((a) => ({ label: a.display_name, value: a.release_id })) };
+        ev: apps.slice(0, 3).map((a) => ({ label: a.display_name, value: '현재 사용자 권한으로 실행' })) };
     }
     if (view === 'sent') {
       return { title: sent.length ? `보낸 요청 ${sent.length}건` : '보낸 요청 없음',
         desc: '수락 전에는 언제든 회수할 수 있습니다.',
-        ev: sent.slice(0, 3).map((d) => ({ label: d.recipient_user_id, value: DELIVERY_STATUS_KO[d.status]?.label || d.status })) };
+        ev: sent.slice(0, 3).map((d) => ({ label: userName(d.recipient_user_id), value: DELIVERY_STATUS_KO[d.status]?.label || d.status })) };
     }
     if (selected) {
       return {
-        title: selected.release_id,
+        title: releaseName(selected.release_id),
         desc: selected.purpose,
         ev: [
-          { label: '보낸 사람', value: selected.sender_user_id },
+          { label: '보낸 사람', value: userName(selected.sender_user_id) },
           { label: '상태', value: DELIVERY_STATUS_KO[selected.status]?.label || selected.status },
           { label: 'Manifest 지문', value: (selected.manifest_fingerprint || '').slice(0, 12) || '없음' },
           { label: '만료', value: selected.expires_at || '없음' },
@@ -336,7 +366,7 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
     selected_object_id: view === 'apps' ? (apps[0]?.pocket_id || '') : (selected?.delivery_id || ''),
     object_snapshot: selected ? {
       release_id: selected.release_id, purpose: selected.purpose, status: selected.status,
-      expires_at: selected.expires_at, sender: selected.sender_user_id,
+      expires_at: selected.expires_at, sender_name: userName(selected.sender_user_id),
       capabilities: selected.manifest_snapshot?.capabilities || [],
       auth_mode: selected.manifest_snapshot?.auth_mode,
     } : { inbox_count: inbox.length, apps_count: apps.length, sent_count: sent.length },
@@ -407,6 +437,8 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
 
             {view === 'inbox' && (
               <InboxScreen list={inbox} state={data} onRetry={load}
+                releaseName={releaseName}
+                userName={userName} deptName={deptName}
                 selectedId={selected?.delivery_id || ''}
                 onSelect={setSelectedId}
                 onAccept={(d) => act('수락 중', () => collaborationApi.accept(d.delivery_id))}
@@ -415,6 +447,8 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
             )}
             {view === 'apps' && (
               <AppsScreen list={apps} state={data} onRetry={load}
+                releaseName={releaseName}
+                userName={userName} deptName={deptName}
                 onPin={(a) => act('갱신 중', () => collaborationApi.patchApp(a.pocket_id, { pinned: !a.pinned }))}
                 onRename={(a, n) => act('이름 변경 중', () => collaborationApi.patchApp(a.pocket_id, { display_name: n }))}
                 //: ⚠️ 앱을 실제로 띄우는 실행 경로는 아직 서버에 없다. **여는 척하지 않는다** —
@@ -423,7 +457,9 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
                   a.pocket_id, { mark_opened: true }))} />
             )}
             {view === 'deliver' && (
-              <DeliverScreen releaseIds={releaseIds}
+              <DeliverScreen releaseOptions={releaseOptions}
+                recipients={usersState.value || []} recipientState={usersState}
+                userName={userName}
                 onSubmit={async (f) => {
                   const r = await act('전달 중', () => collaborationApi.create({
                     release_id: f.release_id, recipient_user_id: f.recipient, purpose: f.purpose,
@@ -436,13 +472,15 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
             )}
             {view === 'sent' && (
               <SentScreen list={sent} state={data} onRetry={load}
+                releaseName={releaseName}
+                userName={userName}
                 onRevoke={(d, r) => act('회수 중', () => collaborationApi.revoke(d.delivery_id, r))} />
             )}
             {view === 'decisions' && (
-              <DecisionCenter onJarvis={setDecisionCtx} simulationRunIds={simulationRunIds} />
+              <DecisionCenter onJarvis={setDecisionCtx} />
             )}
             {view === 'publications' && (
-              <PublicationCenter onJarvis={setPubCtx} />
+              <PublicationCenter onJarvis={setPubCtx} userName={userName} />
             )}
             </div>
           </HubShell>
@@ -470,12 +508,15 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseIds = 
 
 // ── 받은 앱 ──────────────────────────────────────────────────────────────────
 function InboxScreen({ list, state, onRetry, selectedId, onSelect, onAccept, onReject,
-  onReassign }: {
+  onReassign, releaseName, userName, deptName }: {
   list: Delivery[]; state: Loaded<any>; onRetry: () => void;
   selectedId: string; onSelect: (id: string) => void;
   onAccept: (d: Delivery) => void;
   onReject: (d: Delivery, note: string) => void;
   onReassign: (d: Delivery, note: string) => void;
+  releaseName: (id: string) => string;
+  userName: (id?: string) => string;
+  deptName: (id?: string) => string;
 }) {
   const [filter, setFilter] = useState<'all' | 'pending'>('pending');
   // 화면 안 입력 — `prompt()` 를 쓰지 않는다(키보드·스크린리더·스타일 모두 안 되기 때문).
@@ -515,10 +556,10 @@ function InboxScreen({ list, state, onRetry, selectedId, onSelect, onAccept, onR
               aria-pressed={d.delivery_id === selectedId}
               onClick={() => onSelect(d.delivery_id)}
               onFocus={() => onSelect(d.delivery_id)}>
-              <span className="app-mark" aria-hidden="true">{d.release_id.slice(-2)}</span>
+              <span className="app-mark" aria-hidden="true">{releaseName(d.release_id).slice(0, 2)}</span>
               <span className="request-select-main">
                 <small>{d.release_version ? `v${d.release_version}` : 'RELEASE'}</small>
-                <b>{d.release_id}</b>
+                <b>{releaseName(d.release_id)}</b>
                 <span className="purpose">{d.purpose}</span>
               </span>
               <span className="request-select-side">
@@ -532,10 +573,10 @@ function InboxScreen({ list, state, onRetry, selectedId, onSelect, onAccept, onR
                 발신자·부서 / 앱·릴리스 / 요청 사유 / 최소 권한 / 데이터 범위 / 만료 / 감사 대상.
                 앱·릴리스와 사유는 위 선택 버튼이, 최소 권한·데이터 범위는 Manifest 카드가 든다. */}
             <div className="request-scope">
-              <div><span>보낸 사람</span><b>{d.sender_user_id}</b></div>
+              <div><span>보낸 사람</span><b>{userName(d.sender_user_id)}</b></div>
               {/* ⚠️ 부서를 서버가 확인하지 못했으면 «미확인» 이라고 적는다 — 빈칸으로 두면
                   받는 사람은 부서가 없는 것으로 읽는다. */}
-              <div><span>부서</span><b>{d.sender_dept_id || '미확인'}</b></div>
+              <div><span>부서</span><b>{deptName(d.sender_dept_id)}</b></div>
               <div><span>만료</span><b>{d.expires_at || '없음'}</b></div>
               <div><span>감사 대상</span>
                 <b>{d.manifest_snapshot?.audit_mode
@@ -621,10 +662,14 @@ function InboxScreen({ list, state, onRetry, selectedId, onSelect, onAccept, onR
 }
 
 // ── 내 앱 ────────────────────────────────────────────────────────────────────
-function AppsScreen({ list, state, onRetry, onPin, onRename, onOpen }: {
+function AppsScreen({ list, state, onRetry, onPin, onRename, onOpen, releaseName,
+  userName, deptName }: {
   list: PocketApp[]; state: Loaded<any>; onRetry: () => void;
   onPin: (a: PocketApp) => void; onRename: (a: PocketApp, n: string) => void;
   onOpen: (a: PocketApp) => void;
+  releaseName: (id: string) => string;
+  userName: (id?: string) => string;
+  deptName: (id?: string) => string;
 }) {
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const colors = ['blue', 'green', 'orange', 'violet'];
@@ -665,14 +710,14 @@ function AppsScreen({ list, state, onRetry, onPin, onRename, onOpen }: {
                   ) : (
                     <>
                       <b>{a.display_name}</b>
-                      <small>{a.release_id} · {a.accepted_at ? `${a.accepted_at.slice(0, 10)} 수락` : ''}</small>
+                      <small>{releaseName(a.release_id)} · {a.accepted_at ? `${a.accepted_at.slice(0, 10)} 수락` : ''}</small>
                       {/* ★ [설계 §5.3] 「수락 후 MyAppPocket 에는 **실행, 세부 권한, 버전 변경,
                           전달 출처, 회수 상태**를 표시한다」 — 이전에는 이름·수락일뿐이어서
                           받은 사람은 누가 준 앱인지도, 회수됐는지도 알 수 없었다. */}
                       <div className="pocket-facts">
                         <span>전달 출처{' '}
-                          <b>{a.source_user_id || '확인 불가'}
-                            {a.source_dept_id ? ` · ${a.source_dept_id}` : ''}</b>
+                          <b>{userName(a.source_user_id)}
+                            {a.source_dept_id ? ` · ${deptName(a.source_dept_id)}` : ''}</b>
                         </span>
                         <span>버전{' '}
                           <b>{a.accepted_version ? `v${a.accepted_version}` : '미기록'}</b>
@@ -736,14 +781,17 @@ function AppsScreen({ list, state, onRetry, onPin, onRename, onOpen }: {
  *   금지 기능) 모른 채 보냈다. 조건을 못 보고 누르는 마법사는 설계의 요점을 잃는다.
  *   서버 `preflight` 를 붙여 3단계에서 **실제 Manifest** 를 읽는다.
  */
-function DeliverScreen({ releaseIds, onSubmit }: {
-  releaseIds: string[];
+function DeliverScreen({ releaseOptions, recipients, recipientState, userName, onSubmit }: {
+  releaseOptions: CollaborationReleaseOption[];
+  recipients: OrgUser[];
+  recipientState: Loaded<OrgUser[]>;
+  userName: (id?: string) => string;
   onSubmit: (f: {
     release_id: string; recipient: string; purpose: string; expires_in_days: number;
   }) => void;
 }) {
   const [f, setF] = useState({
-    release_id: releaseIds[0] || '', recipient: '', purpose: '', expires_in_days: 14,
+    release_id: releaseOptions[0]?.id || '', recipient: '', purpose: '', expires_in_days: 14,
   });
   //: 3단계의 원천. 릴리스가 바뀌면 다시 읽는다.
   const [pre, setPre] = useState<Loaded<DeliveryPreflight>>(loading<DeliveryPreflight>());
@@ -769,7 +817,8 @@ function DeliverScreen({ releaseIds, onSubmit }: {
     : !(f.recipient.trim() && f.purpose.trim()) ? 1
       : pre.status !== 'ok' ? 2
         : 3;
-  const ready = step === 3 && deliverable;
+  const ready = step === 3 && deliverable && recipientState.status === 'ok'
+    && recipients.some((u) => u.user_id === f.recipient);
 
   return (
     <>
@@ -791,17 +840,18 @@ function DeliverScreen({ releaseIds, onSubmit }: {
         <Panel kicker="STEP 1 · RELEASE" title="릴리스 확인" className="release-card">
           <div style={{ paddingTop: 14 }}>
             <label className="field-label" htmlFor="rel">릴리스</label>
-            {releaseIds.length > 0 ? (
+            {releaseOptions.length > 0 ? (
               <select id="rel" className="afs-select" value={f.release_id}
                 onChange={(e) => setF({ ...f, release_id: e.target.value })}>
                 <option value="">— 선택 —</option>
-                {releaseIds.map((r) => <option key={r} value={r}>{r}</option>)}
+                {releaseOptions.map((r) => <option key={r.id} value={r.id}>{r.label || '이름 미등록 앱'}</option>)}
               </select>
             ) : (
-              <input id="rel" className="afs-input" value={f.release_id} placeholder="release_id"
-                onChange={(e) => setF({ ...f, release_id: e.target.value })} />
+              <div className="empty-note" style={{ margin: 0 }}>
+                선택할 수 있는 게시 릴리스가 없습니다.
+              </div>
             )}
-            {releaseIds.length === 0 && (
+            {releaseOptions.length === 0 && (
               <div className="empty-note" style={{ margin: '10px 0 0' }}>
                 게시된 릴리스가 없습니다. 프로젝트를 완료해 릴리스를 게시하면 목록에 나타납니다.
               </div>
@@ -830,12 +880,25 @@ function DeliverScreen({ releaseIds, onSubmit }: {
 
         <Panel kicker="STEP 2 · RECIPIENT" title="수신자 선택">
           <div style={{ padding: 18 }}>
-            <label className="field-label" htmlFor="rcp">받는 사람 (사용자 ID)</label>
-            <div className="search-field">
-              <span aria-hidden="true">🔍</span>
-              <input id="rcp" value={f.recipient} placeholder="예: hikwon@lsmnm.com"
-                onChange={(e) => setF({ ...f, recipient: e.target.value })} />
-            </div>
+            <label className="field-label" htmlFor="rcp">받는 사람</label>
+            <select id="rcp" className="afs-select" value={f.recipient}
+              disabled={recipientState.status !== 'ok' || recipients.length === 0}
+              onChange={(e) => setF({ ...f, recipient: e.target.value })}>
+              <option value="">— 조직 사용자 선택 —</option>
+              {recipients.map((u) => (
+                <option key={u.user_id} value={u.user_id}>{u.display_name || '이름 미등록 사용자'}</option>
+              ))}
+            </select>
+            {recipientState.status !== 'ok' && (
+              <Banner tone="error" title="조직 사용자 목록을 불러오지 못했습니다">
+                계정 코드를 직접 입력해 우회할 수 없습니다. 조직 기준정보를 복구한 뒤 다시 시도하십시오.
+              </Banner>
+            )}
+            {recipientState.status === 'ok' && recipients.length === 0 && (
+              <div className="empty-note" style={{ margin: '8px 0 0' }}>
+                선택할 수 있는 활성 사용자가 없습니다. 조직 기준정보에서 사용자를 먼저 등록하십시오.
+              </div>
+            )}
 
             <label className="field-label" htmlFor="pps">전달 목적 (필수)</label>
             <textarea id="pps" className="afs-textarea" value={f.purpose}
@@ -869,7 +932,7 @@ function DeliverScreen({ releaseIds, onSubmit }: {
             <div className="permission-summary" style={{ marginTop: 16 }}>
               <b>이 조건으로 전달합니다</b>
               <span>
-                {f.recipient || '수신자 미지정'} · {f.release_id || '릴리스 미지정'}
+                {f.recipient ? userName(f.recipient) : '수신자 미지정'} · {releaseOptions.find((r) => r.id === f.release_id)?.label || '릴리스 미지정'}
                 {p?.release_version ? ` v${p.release_version}` : ''} · {f.expires_in_days}일 후 만료
               </span>
               <small>
@@ -901,9 +964,11 @@ function DeliverScreen({ releaseIds, onSubmit }: {
 }
 
 // ── 보낸 요청 ────────────────────────────────────────────────────────────────
-function SentScreen({ list, state, onRetry, onRevoke }: {
+function SentScreen({ list, state, onRetry, onRevoke, releaseName, userName }: {
   list: Delivery[]; state: Loaded<any>; onRetry: () => void;
   onRevoke: (d: Delivery, reason: string) => void;
+  releaseName: (id: string) => string;
+  userName: (id?: string) => string;
 }) {
   const [form, setForm] = useState<{ id: string; reason: string } | null>(null);
   const accepted = list.filter((d) => d.status === 'ACCEPTED').length;
@@ -924,7 +989,7 @@ function SentScreen({ list, state, onRetry, onRevoke }: {
               <div key={d.delivery_id}>
                 <i className={DOT[d.status] || 'off'} aria-hidden="true" />
                 <div>
-                  <b>{d.release_id} → {d.recipient_user_id}</b>
+                  <b>{releaseName(d.release_id)} → {userName(d.recipient_user_id)}</b>
                   <small>
                     {d.purpose}
                     {d.response_note ? ` · 응답: ${d.response_note}` : ''}

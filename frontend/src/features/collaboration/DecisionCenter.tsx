@@ -19,7 +19,8 @@ import { Banner, Panel, ScreenHead } from '../../design/HubShell';
 import { useLatestOnly } from '../../design/useLatestOnly';
 import {
   decisionApi, DECISION_STATUS_KO, OUTCOME_KO, PACKAGE_FIELDS, RESPONSE_KO, ROLE_KO, VIEW_KO,
-  type DecisionAction, type DecisionCase, type DecisionRole, type Outcome, type ResponseStatus,
+  type DecisionAction, type DecisionCase, type DecisionRole, type DecisionSourceOption,
+  type Outcome, type ResponseStatus,
   type ViewKey, type ViewSection, type ViewsBundle,
 } from '../../lib/decisionApi';
 import { errorTitle } from '../../lib/closedLoopFetch';
@@ -27,6 +28,7 @@ import { EmptyOrError, Metric, failed, loading, ok, type Loaded }
   from '../../design/DataState';
 import { reportRequestFailure, reportRequestSuccess } from '../../lib/backendHealth';
 import { StructuredValue } from '../../design/StructuredValue';
+import { orgApi, type OrgUser } from '../../lib/orgApi';
 
 export type DecisionJarvis = {
   title: string; desc: string; ev: { label: string; value: string }[];
@@ -50,9 +52,8 @@ function SectionValue({ s }: { s: ViewSection }) {
   return <StructuredValue value={s.value} />;
 }
 
-export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
+export function DecisionCenter({ onJarvis }: {
   onJarvis?: (c: DecisionJarvis) => void;
-  simulationRunIds?: string[];
 }) {
   const [mode, setMode] = useState<Mode>('list');
   //: [설계 §6.1] 늦게 온 응답을 버리는 표 — 다른 것을 고른 뒤 옛 응답이 그려지지 않게.
@@ -66,6 +67,27 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<{ msg: string; status?: number } | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  // 참여자·담당자는 계정 문자열을 타이핑하지 않고 조직 정본에서 고른다. `null` 은 조회 실패다.
+  const [people, setPeople] = useState<OrgUser[] | null>(null);
+  const [sources, setSources] = useState<Loaded<DecisionSourceOption[]>>(
+    loading<DecisionSourceOption[]>());
+  const loadPeople = useCallback(async () => {
+    try {
+      const result = await orgApi.users();
+      if (result.blockedReason) throw new Error(result.blockedReason);
+      setPeople(result.rows.filter((u) => u.status === 'ACTIVE'));
+    } catch {
+      setPeople(null);
+    }
+  }, []);
+  const loadSources = useCallback(async () => {
+    setSources((p) => p.status === 'ok' ? p : loading<DecisionSourceOption[]>());
+    try {
+      setSources(ok(await decisionApi.sources()));
+    } catch (e: any) {
+      setSources(failed<DecisionSourceOption[]>(e));
+    }
+  }, []);
   // ⚠️ `rows` 는 Jarvis 문맥 effect 의 의존성에 들어간다 — **선언이 사용처보다 앞이어야** 한다.
   //   뒤에 두면 렌더 중 의존성 배열을 평가할 때 TDZ 오류로 화면이 통째로 죽는다.
   const rows = queue.value || [];
@@ -102,18 +124,18 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
     } finally { setBusy(null); }
   }, [claim]);
 
-  useEffect(() => { loadQueue(); }, [loadQueue]);
+  useEffect(() => { loadQueue(); loadPeople(); loadSources(); }, [loadQueue, loadPeople, loadSources]);
 
   // ★ 사용자가 바뀌면 이전 사용자의 안건·검토서를 **즉시 폐기**한다(§CL-FE-03). 남겨 두면 다른
   //   사용자의 결정 목록이 화면에 그대로 남고, 그것이 곧 유출이다.
   useEffect(() => {
     const h = () => {
       setQueue(loading<DecisionCase[]>()); setCurrent(null); setViews(null);
-      setMode('list'); loadQueue();
+      setMode('list'); loadQueue(); loadPeople(); loadSources();
     };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
-  }, [loadQueue]);
+  }, [loadQueue, loadPeople, loadSources]);
 
   /** 서버가 돌려준 최신 안건으로 갱신한다. 응답의 `note` 는 **서버 문구 그대로** 보여준다 —
    *  화면이 지어내면 서버 규칙과 갈라진다(회의 요청의 "외부에 아무것도 보내지 않았다"가 그 예다). */
@@ -143,7 +165,7 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
         ev: [
           { label: '문서 버전', value: `v${current.package_version}` },
           { label: '근거 지문', value: (current.evidence_hash || '').slice(0, 12) || '없음' },
-          { label: '기준선', value: current.baseline_id || '없음' },
+          { label: '기준선', value: current.baseline_id ? '연결됨' : '없음' },
           { label: '결정 차단', value: current.blockers.length ? `${current.blockers.length}건` : '없음' },
         ],
         objectId: current.decision_id,
@@ -208,7 +230,8 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
 
       {mode === 'create' && (
         <CreateScreen
-          runIds={simulationRunIds}
+          sources={sources}
+          onRetrySources={loadSources}
           onCancel={() => setMode('list')}
           onSubmit={async (runId, body) => {
             setBusy('안건 생성 중'); setErr(null);
@@ -225,6 +248,7 @@ export function DecisionCenter({ onJarvis, simulationRunIds = [] }: {
       {mode === 'detail' && current && (
         <DetailScreen
           d={current} views={views} view={view} onView={setView}
+          people={people}
           onBack={() => { setMode('list'); setCurrent(null); setViews(null); loadQueue(); }}
           onRequestReview={(ps) => act('검토 요청 중', () => decisionApi.requestReview(current.decision_id, ps))}
           onRespond={(s, t) => act('의견 저장 중', () => decisionApi.respond(current.decision_id, s, t))}
@@ -311,8 +335,10 @@ function QueueScreen({ list, state, stats, onOpen, onNew, onRetry }: {
 
 // ── 상세 ─────────────────────────────────────────────────────────────────────
 function DetailScreen({ d, views, view, onView, onBack, onRequestReview, onRespond, onMeeting,
+  people,
   onDecide, onActions, onMeasure }: {
   d: DecisionCase; views: ViewsBundle | null; view: ViewKey; onView: (v: ViewKey) => void;
+  people: OrgUser[] | null;
   onBack: () => void;
   onRequestReview: (ps: { user_id: string; role: DecisionRole }[]) => void;
   onRespond: (s: ResponseStatus, text: string) => void;
@@ -323,16 +349,20 @@ function DetailScreen({ d, views, view, onView, onBack, onRequestReview, onRespo
 }) {
   const rv = views?.views?.[view] || null;
   const queryId = String(d.evidence?.query_id || '').trim();
+  const simulationBinding = d.evidence?.simulation_binding || {};
   const sourceLabel = d.simulation_run_id
-    ? `시뮬레이션 ${d.simulation_run_id}`
+    ? String(simulationBinding.scenario_label || '시뮬레이션 실행 결과')
     : queryId
-      ? `경로 계산 ${queryId.slice(0, 14)}`
+      ? '업무 영향 경로 계산'
       : '원천 연결 없음';
+  const baselineLabel = String(simulationBinding.baseline_label || '').trim();
+  const personName = (id: string) => people?.find((u) => u.user_id === id)?.display_name
+    || '이름 미등록 사용자';
 
   return (
     <>
       <ScreenHead kicker="DECISION PACKAGE" title={d.question}
-        description={`${sourceLabel} · 기준선 ${d.baseline_id || '(없음)'}`}
+        description={`${sourceLabel} · ${baselineLabel || (d.baseline_id ? '기준선 연결됨' : '기준선 없음')}`}
         chip={{ label: DECISION_STATUS_KO[d.status]?.label || d.status,
           tone: DECISION_STATUS_KO[d.status]?.tone || 'muted' }} />
 
@@ -340,7 +370,7 @@ function DetailScreen({ d, views, view, onView, onBack, onRequestReview, onRespo
         <button className="secondary-button" onClick={onBack}>← 목록으로</button>
         <span style={{ flex: 1 }} />
         <span className="state-chip muted">
-          {ROLE_KO[d.my_role as DecisionRole] || '참여자 아님'} · {d.created_by} 요청
+          {ROLE_KO[d.my_role as DecisionRole] || '참여자 아님'} · {personName(d.created_by)} 요청
         </span>
       </div>
 
@@ -397,19 +427,23 @@ function DetailScreen({ d, views, view, onView, onBack, onRequestReview, onRespo
         </div>
       </Panel>
 
-      <ParticipantPanel d={d} onRequestReview={onRequestReview} onRespond={onRespond} />
-      <MeetingPanel d={d} onMeeting={onMeeting} />
-      <DecidePanel d={d} onDecide={onDecide} />
+      <ParticipantPanel d={d} people={people} personName={personName}
+        onRequestReview={onRequestReview} onRespond={onRespond} />
+      <MeetingPanel d={d} personName={personName} onMeeting={onMeeting} />
+      <DecidePanel d={d} personName={personName} onDecide={onDecide} />
       {['DECIDED', 'ACTIONED', 'EFFECT_MEASURED'].includes(d.status) && (
-        <ActionPanel d={d} onActions={onActions} onMeasure={onMeasure} />
+        <ActionPanel d={d} people={people} personName={personName}
+          onActions={onActions} onMeasure={onMeasure} />
       )}
     </>
   );
 }
 
 // ── 참여자·의견 ──────────────────────────────────────────────────────────────
-function ParticipantPanel({ d, onRequestReview, onRespond }: {
+function ParticipantPanel({ d, people, personName, onRequestReview, onRespond }: {
   d: DecisionCase;
+  people: OrgUser[] | null;
+  personName: (id: string) => string;
   onRequestReview: (ps: { user_id: string; role: DecisionRole }[]) => void;
   onRespond: (s: ResponseStatus, text: string) => void;
 }) {
@@ -444,7 +478,7 @@ function ParticipantPanel({ d, onRequestReview, onRespond }: {
                 <div key={`${p.user_id}-${p.role}`} className="person">
                   <i aria-hidden="true">{ROLE_KO[p.role][0]}</i>
                   <div style={{ minWidth: 0 }}>
-                    <b>{p.user_id}</b>
+                    <b>{personName(p.user_id)}</b>
                     <small>
                       {ROLE_KO[p.role]}
                       {/* ⚠️ 무응답을 '동의'처럼 보이게 두지 않는다 — 침묵은 동의가 아니다. */}
@@ -465,8 +499,14 @@ function ParticipantPanel({ d, onRequestReview, onRespond }: {
             <label className="field-label">참여자 지정 (역할을 섞지 않습니다 — 요청자·의사결정자·영향부서는 서로 다른 일을 합니다)</label>
             {rows.map((r, i) => (
               <div key={i} style={{ display: 'flex', gap: 7, marginBottom: 7 }}>
-                <input className="afs-input" value={r.user_id} placeholder="사용자 ID (예: hikwon@lsmnm.com)"
-                  onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, user_id: e.target.value } : x))} />
+                <select className="afs-select" value={r.user_id} disabled={people === null}
+                  aria-label={`참여자 ${i + 1}`}
+                  onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, user_id: e.target.value } : x))}>
+                  <option value="">— 참여자 선택 —</option>
+                  {(people || []).map((u) => <option key={u.user_id} value={u.user_id}>
+                    {u.display_name || '이름 미등록 사용자'}
+                  </option>)}
+                </select>
                 <select className="afs-select" style={{ maxWidth: 160 }} value={r.role}
                   onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, role: e.target.value as DecisionRole } : x))}>
                   {(Object.keys(ROLE_KO) as DecisionRole[]).map((k) => (
@@ -480,6 +520,10 @@ function ParticipantPanel({ d, onRequestReview, onRespond }: {
             <button className="text-button" onClick={() => setRows([...rows, { user_id: '', role: 'AFFECTED' }])}>
               + 참여자 추가
             </button>
+            {people === null && <div className="request-alert warn" style={{ marginTop: 8 }}>
+              <i aria-hidden="true">!</i><div><b>사용자 목록을 확인하지 못했습니다</b>
+                <small>계정 문자열을 직접 입력해 우회하지 않습니다. 조직 연결을 복구한 뒤 다시 시도하십시오.</small></div>
+            </div>}
             {!hasDecider && (
               <div className="request-alert warn" style={{ marginTop: 8 }}>
                 <i aria-hidden="true">!</i>
@@ -536,8 +580,9 @@ function ParticipantPanel({ d, onRequestReview, onRespond }: {
 }
 
 // ── 회의 ─────────────────────────────────────────────────────────────────────
-function MeetingPanel({ d, onMeeting }: {
-  d: DecisionCase; onMeeting: (b: { title: string; schedule?: string; channel?: string }) => void;
+function MeetingPanel({ d, personName, onMeeting }: {
+  d: DecisionCase; personName: (id: string) => string;
+  onMeeting: (b: { title: string; schedule?: string; channel?: string }) => void;
 }) {
   const [f, setF] = useState({ title: '', schedule: '', channel: '' });
   const [open, setOpen] = useState(false);
@@ -561,7 +606,7 @@ function MeetingPanel({ d, onMeeting }: {
                 <div style={{ minWidth: 0 }}>
                   <b>{m.title}</b>
                   <small>
-                    {m.schedule || '일정 미정'} · {m.channel || '채널 미정'} · {m.requested_by} 요청
+                    {m.schedule || '일정 미정'} · {m.channel || '채널 미정'} · {personName(m.requested_by)} 요청
                     {/* ★ 외부 캘린더에 만들어졌는지 여부를 **명시**한다. 시스템이 만든 줄 알고
                         기다리다 회의가 열리지 않는 것이 이 화면이 막으려는 사고다. */}
                     {m.external_created ? ` · 외부 일정 ${m.external_ref}` : ` · ${m.note || '외부 캘린더 미생성'}`}
@@ -612,8 +657,9 @@ function MeetingPanel({ d, onMeeting }: {
 }
 
 // ── 결정 ─────────────────────────────────────────────────────────────────────
-function DecidePanel({ d, onDecide }: {
-  d: DecisionCase; onDecide: (b: { outcome: Outcome; rationale: string; conditions?: string }) => void;
+function DecidePanel({ d, personName, onDecide }: {
+  d: DecisionCase; personName: (id: string) => string;
+  onDecide: (b: { outcome: Outcome; rationale: string; conditions?: string }) => void;
 }) {
   const [f, setF] = useState<{ outcome: Outcome | ''; rationale: string; conditions: string }>(
     { outcome: '', rationale: '', conditions: '' });
@@ -625,7 +671,7 @@ function DecidePanel({ d, onDecide }: {
           <div className="release-facts" style={{ marginTop: 0 }}>
             <div><span>결과</span><b>{OUTCOME_KO[d.outcome as Outcome]?.label || d.outcome}</b>
               <small>{d.decided_at ? d.decided_at.slice(0, 10) : ''}</small></div>
-            <div><span>결정자</span><b>{d.decided_by || '없음'}</b><small>이 기록이 원장에 남습니다</small></div>
+            <div><span>결정자</span><b>{d.decided_by ? personName(d.decided_by) : '없음'}</b><small>이 기록이 원장에 남습니다</small></div>
             <div><span>근거 지문</span><b>{(d.evidence_hash || '').slice(0, 12)}</b>
               <small>결정 시점의 근거</small></div>
           </div>
@@ -719,8 +765,10 @@ function DecidePanel({ d, onDecide }: {
 }
 
 // ── 실행과제·효과 ────────────────────────────────────────────────────────────
-function ActionPanel({ d, onActions, onMeasure }: {
+function ActionPanel({ d, people, personName, onActions, onMeasure }: {
   d: DecisionCase;
+  people: OrgUser[] | null;
+  personName: (id: string) => string;
   onActions: (a: { action: string; owner_user_id: string; due_at: string }[]) => void;
   onMeasure: (actionId: string, v: string) => void;
 }) {
@@ -759,7 +807,7 @@ function ActionPanel({ d, onActions, onMeasure }: {
                   <div style={{ minWidth: 0 }}>
                     <b style={{ whiteSpace: 'normal' }}>{a.action}</b>
                     <small>
-                      담당 {a.owner_user_id} · 기한 {a.due_at}
+                      담당 {personName(a.owner_user_id)} · 기한 {a.due_at}
                       {a.status === 'MEASURED'
                         ? ` · 효과: ${a.measured_effect}${a.measured_at ? ` (${a.measured_at.slice(0, 10)})` : ''}`
                         : ' · 효과 미측정 — 아직 모릅니다'}
@@ -767,7 +815,7 @@ function ActionPanel({ d, onActions, onMeasure }: {
                     {measuring?.id === a.action_id && (
                       <div style={{ marginTop: 8 }}>
                         <label className="field-label" htmlFor={`ms-${a.action_id}`}>
-                          측정값 (결정 당시 기준선 {d.baseline_id || '(없음)'} 대비)
+                          측정값 (결정 당시 기준선 대비)
                         </label>
                         <textarea id={`ms-${a.action_id}`} className="afs-textarea" rows={2} value={measuring.v}
                           placeholder="빈 값을 0 으로 저장하지 않습니다 — 모르면 미측정으로 두십시오"
@@ -807,8 +855,14 @@ function ActionPanel({ d, onActions, onMeasure }: {
               <div key={i} style={{ display: 'flex', gap: 7, marginBottom: 7 }}>
                 <input className="afs-input" value={r.action} placeholder="무엇을 합니까"
                   onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, action: e.target.value } : x))} />
-                <input className="afs-input" style={{ maxWidth: 200 }} value={r.owner_user_id} placeholder="담당자 ID"
-                  onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, owner_user_id: e.target.value } : x))} />
+                <select className="afs-select" style={{ maxWidth: 220 }} value={r.owner_user_id}
+                  disabled={people === null} aria-label={`실행과제 담당자 ${i + 1}`}
+                  onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, owner_user_id: e.target.value } : x))}>
+                  <option value="">— 담당자 선택 —</option>
+                  {(people || []).map((u) => <option key={u.user_id} value={u.user_id}>
+                    {u.display_name || '이름 미등록 사용자'}
+                  </option>)}
+                </select>
                 <input className="afs-input" style={{ maxWidth: 150 }} type="date" value={r.due_at}
                   onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, due_at: e.target.value } : x))} />
                 <button className="text-button" disabled={rows.length === 1}
@@ -819,6 +873,10 @@ function ActionPanel({ d, onActions, onMeasure }: {
               onClick={() => setRows([...rows, { action: '', owner_user_id: '', due_at: '' }])}>
               + 과제 추가
             </button>
+            {people === null && <div className="request-alert warn" style={{ marginTop: 8 }}>
+              <i aria-hidden="true">!</i><div><b>담당자 목록을 확인하지 못했습니다</b>
+                <small>담당자 계정을 직접 입력하지 않습니다. 조직 연결을 복구한 뒤 다시 시도하십시오.</small></div>
+            </div>}
             <div style={{ display: 'flex', gap: 7, marginTop: 10, justifyContent: 'flex-end' }}>
               <button className="secondary-button" onClick={() => setOpen(false)}>취소</button>
               <button className="primary-button" disabled={!filled.length}
@@ -834,16 +892,17 @@ function ActionPanel({ d, onActions, onMeasure }: {
 }
 
 // ── 새 안건 ──────────────────────────────────────────────────────────────────
-function CreateScreen({ runIds, onCancel, onSubmit }: {
-  runIds: string[];
+function CreateScreen({ sources, onRetrySources, onCancel, onSubmit }: {
+  sources: Loaded<DecisionSourceOption[]>;
+  onRetrySources: () => void;
   onCancel: () => void;
   onSubmit: (runId: string, body: {
     question: string; package: Record<string, any>; evidence: Record<string, any>;
-    baseline_id: string; scenario_id: string; due_at: string;
+    due_at: string;
   }) => void;
 }) {
   const [head, setHead] = useState({
-    run_id: runIds[0] || '', question: '', baseline_id: '', scenario_id: '', due_at: '',
+    run_id: '', question: '', due_at: '',
   });
   const [fields, setFields] = useState<Record<string, string>>({});
   const [ev, setEv] = useState<{ key: string; value: string; verified: boolean }[]>([]);
@@ -851,7 +910,15 @@ function CreateScreen({ runIds, onCancel, onSubmit }: {
 
   const required = PACKAGE_FIELDS.filter((f) => f.required);
   const optional = PACKAGE_FIELDS.filter((f) => !f.required);
-  const ready = !!head.run_id.trim() && !!head.question.trim()
+  const sourceRows = sources.value || [];
+  const selectedSource = sourceRows.find((item) => item.run_id === head.run_id) || null;
+  useEffect(() => {
+    if (head.run_id || sources.status !== 'ok') return;
+    const first = sourceRows.find((item) => item.bindable);
+    if (first) setHead((prev) => ({ ...prev, run_id: first.run_id }));
+  }, [head.run_id, sourceRows, sources.status]);
+
+  const ready = !!selectedSource?.bindable && !!head.question.trim()
     && required.every((f) => (fields[f.key] || '').trim());
 
   const build = () => {
@@ -883,39 +950,38 @@ function CreateScreen({ runIds, onCancel, onSubmit }: {
 
       <Panel kicker="SOURCE" title="근거가 되는 시뮬레이션">
         <div style={{ padding: 15 }}>
-          <label className="field-label" htmlFor="nc-run">시뮬레이션 실행 ID (필수)</label>
-          {runIds.length > 0 ? (
+          <label className="field-label" htmlFor="nc-run">시뮬레이션 실행 (필수)</label>
+          {sources.status === 'ok' && sourceRows.length > 0 ? (
             <select id="nc-run" className="afs-select" value={head.run_id}
               onChange={(e) => setHead({ ...head, run_id: e.target.value })}>
               <option value="">— 선택 —</option>
-              {runIds.map((r) => <option key={r} value={r}>{r}</option>)}
+              {sourceRows.map((item) => <option key={item.run_id} value={item.run_id}
+                disabled={!item.bindable}>
+                {item.label}{item.bindable ? '' : ' · 사용 불가'}
+              </option>)}
             </select>
           ) : (
-            <>
-              <input id="nc-run" className="afs-input" value={head.run_id} placeholder="run_id"
-                onChange={(e) => setHead({ ...head, run_id: e.target.value })} />
-              {/* ★ 선택 목록을 지어내지 않는다. 시뮬레이션 실행을 열거하는 API 가 아직 없으므로
-                  «없다»고 말하고 붙여 넣게 한다 — 그럴듯한 가짜 목록을 두면 사용자는 존재하지
-                  않는 실행을 근거로 안건을 만든다. */}
-              <p className="hint-line">
-                시뮬레이션 실행 목록을 제공하는 API 가 아직 없습니다 — 결과 화면의 실행 ID 를
-                붙여 넣으십시오. 이 값은 나중에 «이 결정의 근거가 어느 실행이었는가»를 되짚는
-                유일한 연결입니다.
-              </p>
-            </>
+            <div className="request-alert warn">
+              <i aria-hidden="true">!</i><div><b>{sources.status === 'ok'
+                ? '안건으로 만들 수 있는 시뮬레이션 실행이 없습니다'
+                : '시뮬레이션 실행 목록을 불러오지 못했습니다'}</b>
+                <small>내부 식별자를 직접 입력해 우회하지 않습니다. 시뮬레이션을 완료한 뒤 다시 불러오십시오.</small>
+                {sources.status !== 'ok' && <button className="text-button" onClick={onRetrySources}>다시 불러오기</button>}
+              </div>
+            </div>
+          )}
+
+          {selectedSource && (
+            <div className={`request-alert ${selectedSource.bindable ? 'success' : 'warn'}`} style={{ marginTop: 10 }}>
+              <i aria-hidden="true">{selectedSource.bindable ? '✓' : '!'}</i>
+              <div><b>{selectedSource.scenario_label}</b>
+                <small>{selectedSource.baseline_label} · {selectedSource.bindable
+                  ? '서버가 실행·기준선·조직을 함께 결속합니다'
+                  : selectedSource.blocked_reason}</small></div>
+            </div>
           )}
 
           <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
-            <div style={{ flex: 1 }}>
-              <label className="field-label" htmlFor="nc-base">기준선 ID</label>
-              <input id="nc-base" className="afs-input" value={head.baseline_id}
-                onChange={(e) => setHead({ ...head, baseline_id: e.target.value })} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="field-label" htmlFor="nc-scn">시나리오 ID</label>
-              <input id="nc-scn" className="afs-input" value={head.scenario_id}
-                onChange={(e) => setHead({ ...head, scenario_id: e.target.value })} />
-            </div>
             <div style={{ flex: 1 }}>
               <label className="field-label" htmlFor="nc-due">기한</label>
               <input id="nc-due" className="afs-input" type="date" value={head.due_at}
@@ -923,15 +989,6 @@ function CreateScreen({ runIds, onCancel, onSubmit }: {
             </div>
           </div>
 
-          {/* ★ 기준선 없이 만들 수는 있지만 **결정은 막힌다**. 그 사실을 만들기 전에 말한다 —
-              나중에 결정 단계에서 알면 검토 시간이 통째로 낭비된다. */}
-          {!head.baseline_id.trim() && (
-            <div className="request-alert warn" style={{ marginTop: 10 }}>
-              <i aria-hidden="true">!</i>
-              <div><b>기준선이 없으면 결정 단계에서 막힙니다</b>
-                <small>무엇과 비교해 결정하는지 알 수 없기 때문입니다. 지금 넣어 두는 편이 낫습니다.</small></div>
-            </div>
-          )}
         </div>
       </Panel>
 
@@ -1035,7 +1092,6 @@ function CreateScreen({ runIds, onCancel, onSubmit }: {
             const { pkg, evidence } = build();
             onSubmit(head.run_id.trim(), {
               question: head.question.trim(), package: pkg, evidence,
-              baseline_id: head.baseline_id.trim(), scenario_id: head.scenario_id.trim(),
               due_at: head.due_at,
             });
           }}>

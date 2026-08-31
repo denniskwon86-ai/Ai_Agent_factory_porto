@@ -263,17 +263,18 @@ export default function ControlPanel() {
     const rows = tasks.map((t, i) => {
       const st = String(t.status || "");
       const stCls = st === "DONE" ? "done" : st === "IN_PROGRESS" ? "prog" : "";
-      return `<tr><td>${i + 1}</td><td>${esc(t.task_id)}</td><td>${esc(t.title || t.name || t.description)}</td>`
+      return `<tr><td>${i + 1}</td><td>${esc(t.title || t.name || t.description || `작업 ${i + 1}`)}</td>`
         + `<td class="${stCls}">${esc(st)}</td><td>${esc((t.required_agents || []).join(", "))}</td><td>${esc(t.sprint_day ?? "")}</td></tr>`;
     }).join("");
-    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>WBS · ${esc(currentProjectId)}</title>`
+    const projectLabel = wbsData?.project_name || '현재 프로젝트';
+    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>WBS · ${esc(projectLabel)}</title>`
       + `<style>body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:20px}`
       + `h1{font-size:17px;margin:0 0 14px}table{border-collapse:collapse;width:100%;font-size:13px}`
       + `th,td{border:1px solid #334155;padding:8px 10px;text-align:left;vertical-align:top}`
       + `th{background:#1e293b;position:sticky;top:0}tr:nth-child(even) td{background:#15213330}`
       + `.done{color:#4ade80;font-weight:700}.prog{color:#fbbf24;font-weight:700}</style></head><body>`
-      + `<h1>📋 전체 WBS — ${esc(currentProjectId)} <span style="color:#64748b;font-weight:400">(${tasks.length}개 태스크)</span></h1>`
-      + `<table><thead><tr><th>#</th><th>Task ID</th><th>태스크</th><th>상태</th><th>배정 에이전트</th><th>Sprint Day</th></tr></thead>`
+      + `<h1>📋 전체 WBS — ${esc(projectLabel)} <span style="color:#64748b;font-weight:400">(${tasks.length}개 태스크)</span></h1>`
+      + `<table><thead><tr><th>#</th><th>태스크</th><th>상태</th><th>배정 에이전트</th><th>Sprint Day</th></tr></thead>`
       + `<tbody>${rows}</tbody></table></body></html>`;
     const w = window.open("", "omega_wbs", "width=920,height=720,resizable=yes,scrollbars=yes");
     if (!w) { alert("팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용해 주세요."); return; }
@@ -326,7 +327,7 @@ export default function ControlPanel() {
   };
 
   const handleStartSprint = async (targetTask: any) => {
-    if (!confirm(`[${targetTask.task_id}] ${targetTask.title}\n해당 스프린트를 가동/재가동하시겠습니까?`)) return;
+    if (!confirm(`${targetTask.title || '선택한 작업'}\n해당 스프린트를 가동/재가동하시겠습니까?`)) return;
     if (!currentProjectId) return;
     
     setIsStarting(true);
@@ -849,7 +850,7 @@ export default function ControlPanel() {
             )}
 
 
-            {wbsData?.tasks?.map((task: any) => {
+            {wbsData?.tasks?.map((task: any, taskIndex: number) => {
               const isDone = task.status === 'DONE';
               const isInProgress = task.status === 'IN_PROGRESS';
               const isFailed = task.status === 'FAILED'; // 빌드 자가복구(3회) 소진 - 재가동 가능
@@ -866,7 +867,7 @@ export default function ControlPanel() {
                   isPaused ? 'bg-orange-900/20 border-orange-500' : 'bg-gray-800 border-gray-600'
                 }`}>
                   <div className="flex justify-between items-center mb-2">
-                    <span className={`text-xs font-bold ${isHotl ? 'text-amber-300' : isPaused ? 'text-orange-300' : 'text-blue-300'}`}>{task.task_id}</span>
+                    <span className={`text-xs font-bold ${isHotl ? 'text-amber-300' : isPaused ? 'text-orange-300' : 'text-blue-300'}`}>작업 {taskIndex + 1}</span>
                     <span className={`text-xs px-2 py-0.5 rounded font-bold ${
                       isDone ? 'bg-green-900 text-green-300' :
                       isRunning ? 'bg-blue-600 text-white animate-pulse' :

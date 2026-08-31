@@ -91,6 +91,10 @@ VIEW_DECIDER = "decider"
 VIEW_AFFECTED = "affected"
 VIEWS = (VIEW_REQUESTER, VIEW_DECIDER, VIEW_AFFECTED)
 
+PURPOSE_BUSINESS = "BUSINESS"
+PURPOSE_VALIDATION = "VALIDATION"
+PURPOSES = (PURPOSE_BUSINESS, PURPOSE_VALIDATION)
+
 _DDL = """
 CREATE TABLE IF NOT EXISTS decision_cases (
     decision_id      TEXT PRIMARY KEY,
@@ -103,6 +107,7 @@ CREATE TABLE IF NOT EXISTS decision_cases (
     package_json     TEXT NOT NULL DEFAULT '{}',
     evidence_json    TEXT NOT NULL DEFAULT '{}',
     evidence_hash    TEXT NOT NULL DEFAULT '',
+    record_purpose   TEXT NOT NULL DEFAULT 'BUSINESS',
     package_version  INTEGER NOT NULL DEFAULT 1,
     status           TEXT NOT NULL DEFAULT 'DRAFT',
     due_at           TEXT NOT NULL DEFAULT '',
@@ -195,6 +200,20 @@ class DecisionCase:
         conn = self._store._connect()
         try:
             conn.executescript(_DDL)
+            columns = {str(row[1]) for row in conn.execute(
+                "PRAGMA table_info(decision_cases)").fetchall()}
+            if "record_purpose" not in columns:
+                conn.execute(
+                    "ALTER TABLE decision_cases ADD COLUMN record_purpose "
+                    "TEXT NOT NULL DEFAULT 'BUSINESS'")
+            # 2026-08-03 격리 카나리가 같은 운영 저장소에 남긴 두 안건. 삭제하지 않고
+            # 검증 이력으로 분류한다. 제목 문자열이 아니라 실행·기준선 결속을 함께 본다.
+            conn.execute(
+                "UPDATE decision_cases SET record_purpose=? "
+                "WHERE record_purpose=? AND ((simulation_run_id=? AND baseline_id=?) "
+                "OR (simulation_run_id=? AND baseline_id=?))",
+                (PURPOSE_VALIDATION, PURPOSE_BUSINESS,
+                 "test_mega_01", "BL-CL4", "canary_run", "BL-CANARY"))
             conn.commit()
         finally:
             conn.close()
@@ -204,7 +223,8 @@ class DecisionCase:
                baseline_id: str = "", scenario_id: str = "", scope_id: str = "",
                package: Optional[Dict[str, Any]] = None,
                evidence: Optional[Dict[str, Any]] = None, due_at: str = "",
-               tenant_id: str = "tenant_default") -> Dict[str, Any]:
+               tenant_id: str = "tenant_default",
+               record_purpose: str = PURPOSE_BUSINESS) -> Dict[str, Any]:
         """시뮬레이션 결과에서 Decision Package 를 만든다.
 
         ⚠️ `question`(결정해야 하는 문장)을 요구한다. "검토 요청" 같은 제목만 있으면 참석자가
@@ -216,6 +236,9 @@ class DecisionCase:
                 "참석자는 무엇을 결정하는지 모릅니다.")
         if not (created_by or "").strip():
             raise DecisionCaseError("요청자(created_by)가 필요합니다.")
+        purpose = str(record_purpose or "").strip().upper()
+        if purpose not in PURPOSES:
+            raise DecisionCaseError(f"record_purpose 는 {PURPOSES} 중 하나여야 합니다.")
         pkg = package or {}
         ev = evidence or {}
         missing = [k for k in ("baseline", "options") if not pkg.get(k)]
@@ -229,10 +252,10 @@ class DecisionCase:
         self._store.execute(
             "INSERT INTO decision_cases (decision_id, tenant_id, scope_id, simulation_run_id, "
             "baseline_id, scenario_id, question, package_json, evidence_json, evidence_hash, "
-            "package_version, status, due_at, created_by, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
+            "record_purpose, package_version, status, due_at, created_by, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
             (did, tenant_id, scope_id, simulation_run_id, baseline_id, scenario_id,
-             question.strip(), canonical_json(pkg), canonical_json(ev), h, DRAFT,
+             question.strip(), canonical_json(pkg), canonical_json(ev), h, purpose, DRAFT,
              due_at, created_by, now, now))
         # 요청자는 참여자로 자동 등록된다 — 올린 사람이 목록에 없으면 누가 올렸는지 화면에서 사라진다.
         self._store.execute(
@@ -315,12 +338,15 @@ class DecisionCase:
                            and not d["blockers"])
         return d
 
-    def queue(self, user_id: str, today: str = "") -> List[Dict[str, Any]]:
-        """내가 관여한 결정 목록. **본인이 참여자인 것만** 돌려준다."""
+    def queue(self, user_id: str, today: str = "",
+              include_validation: bool = False) -> List[Dict[str, Any]]:
+        """내가 관여한 업무 결정 목록. 검증 이력은 같은 DB에 보존하되 기본 화면에서 제외한다."""
         self._ensure()
+        purpose_clause = "" if include_validation else "AND c.record_purpose='BUSINESS' "
         rows = self._store.query(
             "SELECT c.* FROM decision_cases c JOIN decision_participants p "
             "ON p.decision_id = c.decision_id WHERE p.user_id=? "
+            + purpose_clause +
             "GROUP BY c.decision_id ORDER BY c.created_at DESC", (user_id,))
         out = []
         for r in rows:

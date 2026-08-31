@@ -26,12 +26,14 @@ from api.deps import (
     viewer_may_drill_down,
     viewer_scope_nodes,
     viewer_visible_scopes,
+    viewing_context,
     visibility_block_reason,
 )
 from core.route_authority import guard as _route_authority_guard
 from core.reference_registry import (REFERENCE_ROOT, REGISTRY_PATH, approve_asset,
                                      build_registry, index_approved, indexable, load_registry,
                                      registry_summary, reject_asset, visible_assets)
+from core import knowledge_asset_release
 
 
 # ★★ [2026-08-07] 권한 배정표를 **라우터에 붙인다.** 라우트마다 `require_caps` 를 적지
@@ -190,20 +192,35 @@ def _with_hash_warning(a: dict) -> dict:
         out["approval_drift"] = "changed"
     else:
         out["approval_drift"] = ""
+    required = ("approved_sha256", "approval_fingerprint", "approval_event_id",
+                "approval_tenant_id", "approval_scope_node_id", "approval_entity_mode")
+    if a.get("approval_status") != "APPROVED":
+        out["approval_binding"] = "NOT_APPROVED"
+    elif not all(str(a.get(key) or "").strip() for key in required):
+        out["approval_binding"] = "REAPPROVAL_REQUIRED"
+    else:
+        out["approval_binding"] = "LEDGER_BOUND"
     return out
 
 
 @router.post("/assets/{asset_id}/approve")
 async def approve(asset_id: str, req: ApproveRequest,
                   p: Principal = Depends(current_principal)):
-    """이 문서를 지식팩 색인 대상으로 승인한다(데이터 표준 관리자)."""
+    """현재 원문 바이트와 ECM 조직 문맥을 원장에 봉인해 승인한다."""
     assert_can_manage_standard(p)
+    ctx = viewing_context(p)
+    scope_node_id = str(ctx.get("scope_node_id") or "").strip()
+    if not scope_node_id:
+        raise HTTPException(status_code=409, detail="승인할 회사·조직 문맥을 먼저 선택하십시오.")
     try:
         return {"status": "success",
-                "data": await asyncio.to_thread(approve_asset, asset_id, _actor(p),
-                                                req.note or "")}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+                "data": await asyncio.to_thread(
+                    knowledge_asset_release.approve, asset_id, _actor(p), req.note or "",
+                    tenant_id=str(ctx.get("tenant_id") or ""), scope_node_id=scope_node_id,
+                    entity_mode=str(ctx.get("entity_mode") or ""),
+                    registry_path=REGISTRY_PATH, reference_root=REFERENCE_ROOT)}
+    except knowledge_asset_release.KnowledgeAssetError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/assets/{asset_id}/reject")
@@ -212,11 +229,21 @@ async def reject(asset_id: str, req: RejectRequest,
     """색인 대상에서 제외한다(사유 필수)."""
     assert_can_manage_standard(p)
     try:
+        registered = await asyncio.to_thread(load_registry)
+        target = next((a for a in registered.get("assets", [])
+                       if a.get("asset_id") == asset_id), None)
+        if target and target.get("approval_event_id"):
+            data = await asyncio.to_thread(
+                knowledge_asset_release.revoke, asset_id, _actor(p), req.reason,
+                registry_path=REGISTRY_PATH, reference_root=REFERENCE_ROOT)
+        else:
+            # 옛 APPROVED 행은 유효 승인 판본이 아니지만, 제거 결정 자체는 안전하므로
+            # 기존 반려 경로로 내릴 수 있다. 권한을 주는 방향의 예외는 없다.
+            data = await asyncio.to_thread(reject_asset, asset_id, _actor(p), req.reason)
         return {"status": "success",
-                "data": await asyncio.to_thread(reject_asset, asset_id, _actor(p),
-                                                req.reason)}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+                "data": data}
+    except (ValueError, knowledge_asset_release.KnowledgeAssetError) as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/index")

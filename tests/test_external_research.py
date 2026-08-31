@@ -6,6 +6,7 @@ import pytest
 from core.external_research import (BOT_KINDS, ExternalResearchError,
                                     ExternalResearchRunner, ExternalResearchStore,
                                     FetchDocument, validate_public_target)
+from core.system_ids import is_system_id
 
 
 @pytest.fixture
@@ -45,6 +46,11 @@ def test_import_does_not_create_database(tmp_path: Path):
     target = tmp_path / "not-created.db"
     ExternalResearchStore(db_path=str(target))
     assert not target.exists(), "객체 생성만으로 운영 데이터 파일을 만들면 시험 격리가 깨진다"
+
+
+def test_new_research_profile_uses_the_central_system_identifier(store: ExternalResearchStore):
+    made = store.save_profile(profile())
+    assert is_system_id(made["profile_id"], "research_profile")
 
 
 def test_profile_requires_allowed_https_url(store: ExternalResearchStore):

@@ -343,10 +343,21 @@ class DataPreparationStore:
 
     @contextlib.contextmanager
     def transaction(self):
-        """조회와 기록을 **한 락·한 트랜잭션**으로. 활성 교체가 이것을 쓴다."""
+        """조회와 기록을 **한 락·한 트랜잭션**으로 하고 연결도 반드시 닫는다.
+
+        ``sqlite3.Connection`` 의 context manager는 commit/rollback만 수행하며
+        연결 자체는 닫지 않는다.  종전 구현은 CPython의 객체 회수 시점에 종료를
+        맡겨 Windows에서 DB 파일 핸들이 남았고, 일관성 검증용 사본조차 즉시 폐기할
+        수 없었다.  파일 수명과 트랜잭션 수명을 여기서 함께 닫는다.
+        """
         self._ready()
-        with self._lock, self._connect() as conn:
-            yield conn
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    yield conn
+            finally:
+                conn.close()
 
     # ── Kit Registry ─────────────────────────────────────────────────────
     def upsert_kit_version(self, *, kit_id: str, version: str, name: str, mode: str,

@@ -5,10 +5,13 @@ import { Banner, HubShell, Panel, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
 import { listInstances } from '../lib/dataPrepApi';
 import {
-  CalculationError, findImpactPaths, listOntologyObjects, runPathCalculation,
+  CalculationError, copyPathDiagnostic, findImpactPaths, listOntologyObjects,
+  revealPathDiagnostic, runPathCalculation,
   runPathDecision,
-  type CalcResult, type DecisionResult, type ImpactPath, type OntologyObject,
+  type CalcResult, type CalculationDiagnostic, type DecisionResult, type ImpactPath,
+  type OntologyObject, type PathCalcBody,
 } from '../lib/calculationApi';
+import { actingScope, UNKNOWN_SCOPE, type ActingScope } from '../lib/actingScope';
 import { BaseValueFields } from './BaseValueFields';
 import { BASE_FIELDS, DRIVER_FIELDS, num } from '../lib/calcFields';
 
@@ -24,13 +27,23 @@ import { BASE_FIELDS, DRIVER_FIELDS, num } from '../lib/calcFields';
 //
 // ① **막힌 것을 «영향 없음» 으로 그리지 않는다.** `BLOCKED` 면 수치 칸을 아예 비우고
 //    사유를 그 자리에 놓는다. 0 을 그리면 사용자는 그 위에서 보고서를 만든다.
-// ② **사유를 두 층으로 보여 준다.** 대외 문구는 누설을 피해 뭉툭하고, 내부 사유가
-//    「무엇이 없는가」를 말한다 — 둘 다 필요하다.
+// ② 일반 사용자는 폐쇄형 사유와 다음 행동만 본다. 내부 진단은 시스템 관리자가 목적을
+//    적고 명시적으로 펼치거나 복사용 본문을 발급받을 때만 감사와 함께 별도 API로 받는다.
 // ③ **판정하지 않는다.** 승인·범위·판은 서버가 정하고 화면은 질문만 보낸다.
 // ④ **목록이 잘렸으면 잘렸다고 말한다.** 말하지 않으면 전부라고 믿는다.
 
 /** 서버 계약과 같아야 한다 — 정량 관계만 계산이 붙는다(`ontology_path_adapter`). */
 const RELATION_TYPES = ['AFFECTS'];
+const OBJECT_TYPE_LABELS: Record<string, string> = {
+  'purchase-order-line': '구매 주문행', shipment: '선적', 'inventory-snapshot': '재고 현황',
+  'production-plan-line': '생산 계획행', 'sales-line': '판매 주문행', entity: '회사·조직',
+};
+const DATASET_LABELS: Record<string, string> = {
+  'PRC-02': '구매 주문행', 'LOG-02': '선적', 'LOG-03': '운송 이력', 'INV-01': '재고 현황',
+  'MFG-01': '생산 계획', 'MDM-05': '자재 소요 기준', 'SLS-01': '판매 주문',
+};
+const objectKey = (object: OntologyObject) =>
+  `${object.namespace}:${object.object_type}:${object.object_id}`;
 
 /** 정본 날짜 규칙 코드. ⚠️ 문자열을 화면에서 지어내지 않는다 — 서버 상수와 같아야 한다
  *  (`core.calc_models.DATE_ONLY_RULE`). */
@@ -85,14 +98,14 @@ function Metrics({ result }: { result: CalcResult }) {
             <h4 style={{ margin: '0 0 6px', fontSize: 15 }}>{name}</h4>
             <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
               <tbody>
-                {keys.slice(0, 12).map((k) => {
+                {keys.slice(0, 12).map((k, index) => {
                   const v = series[k];
                   // ★★★ **문자열 값은 「없음」의 표시다**(`missing_baseline` 등).
                   //   숫자 칸에 넣어 0 처럼 보이게 하지 않는다.
                   const missing = typeof v === 'string';
                   return (
                     <tr key={k} style={{ borderBottom: '1px solid var(--surface-border)' }}>
-                      <td style={{ padding: '4px 12px 4px 0', color: 'var(--surface-text)' }}>{k}</td>
+                      <td style={{ padding: '4px 12px 4px 0', color: 'var(--surface-text)' }}>업무 항목 {index + 1}</td>
                       <td style={{
                         padding: '4px 0', textAlign: 'right',
                         color: missing ? 'var(--state-warn-fg)' : 'var(--surface-text)',
@@ -156,6 +169,10 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
   const [decision, setDecision] = useState<DecisionResult | null>(null);
   const [error, setError] = useState<CalculationError | null>(null);
   const [busy, setBusy] = useState('');
+  const [operatorScope, setOperatorScope] = useState<ActingScope | null>(actingScope.peek());
+  const [diagnosticPurpose, setDiagnosticPurpose] = useState('');
+  const [diagnostic, setDiagnostic] = useState<CalculationDiagnostic | null>(null);
+  const [diagnosticNote, setDiagnosticNote] = useState('');
   const [activeSection, setActiveSection] = useState('question');
   const reqRef = useRef(0);
   const questionSectionRef = useRef<HTMLParagraphElement>(null);
@@ -168,6 +185,11 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
       .then((r) => setInstances(r.instances || []))
       .catch((e) => setError(new CalculationError(
         e?.message || '키트 인스턴스 목록을 불러오지 못했습니다.', e?.status ?? 0)));
+  }, []);
+
+  useEffect(() => {
+    actingScope.load().then(setOperatorScope).catch(() => setOperatorScope(UNKNOWN_SCOPE));
+    return actingScope.subscribe(setOperatorScope);
   }, []);
 
   const instant = asOf ? new Date(asOf).toISOString() : '';
@@ -204,7 +226,30 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
   }, [loadObjects]);
 
   const root = (objects || []).find(
-    (o) => `${o.namespace}:${o.object_type}:${o.object_id}` === rootKey);
+    (o) => objectKey(o) === rootKey);
+  const objectByRef = new Map((objects || []).map((object) => [objectKey(object), object]));
+  const objectDisplay = (object: OntologyObject) => {
+    const type = OBJECT_TYPE_LABELS[object.object_type] || '업무 객체';
+    const displayName = object.display_name?.trim()
+      || objectByRef.get(objectKey(object))?.display_name?.trim();
+    return displayName || `${type} · 이름 미등록`;
+  };
+
+  const pathRequest = (): PathCalcBody | null => {
+    if (!root || !instanceId.trim() || !pathFp) return null;
+    return {
+      roots: [root],
+      target_types: targetType ? [targetType] : [],
+      relation_types: RELATION_TYPES,
+      as_of: instant,
+      instance_id: instanceId.trim(),
+      path_fingerprint: pathFp,
+      assumptions: {
+        ...(reservedZero ? { reserved_quantity_zero: true } : {}),
+        ...(dateOnlyMidnight ? { date_only_rule: DATE_ONLY_RULE } : {}),
+      },
+    };
+  };
 
   async function onFind() {
     if (!root) return;
@@ -212,6 +257,8 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
     setPaths(null);
     setPathFp('');
     setResult(null);
+    setDiagnostic(null);
+    setDiagnosticNote('');
     setBusy('find');
     try {
       const got = await findImpactPaths({
@@ -232,32 +279,51 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
   }
 
   async function onRun() {
-    if (!root || !instanceId.trim() || !pathFp) return;
+    const request = pathRequest();
+    if (!request) return;
     setError(null);
     setResult(null);
     setDecision(null);
+    setDiagnostic(null);
+    setDiagnosticNote('');
     setBusy('run');
     try {
-      setResult(await runPathCalculation({
-        roots: [root],
-        target_types: targetType ? [targetType] : [],
-        relation_types: RELATION_TYPES,
-        as_of: instant,
-        instance_id: instanceId.trim(),
-        path_fingerprint: pathFp,
-        //: ★ 고른 것만 보낸다. 안 고르면 **보내지 않고**, 계산기가 「명시해야 한다」고
-        //:   답한다 — 화면이 대신 정하지 않는다.
-        assumptions: {
-          ...(reservedZero ? { reserved_quantity_zero: true } : {}),
-          ...(dateOnlyMidnight ? { date_only_rule: DATE_ONLY_RULE } : {}),
-        },
-      }));
+      //: ★ 고른 것만 보낸다. 안 고르면 **보내지 않고**, 계산기가 「명시해야 한다」고
+      //:   답한다 — 화면이 대신 정하지 않는다.
+      setResult(await runPathCalculation(request));
     } catch (e: any) {
       setError(e instanceof CalculationError ? e
         : new CalculationError(e?.message || '계산하지 못했습니다.', 0));
     } finally {
       setBusy('');
     }
+  }
+
+  async function onRevealDiagnostic() {
+    const request = pathRequest();
+    if (!request || diagnosticPurpose.trim().length < 10) return;
+    setError(null); setDiagnosticNote(''); setBusy('diagnostic');
+    try {
+      setDiagnostic(await revealPathDiagnostic(request, diagnosticPurpose.trim()));
+      setDiagnosticNote('내부 진단 열람을 감사 기록에 남겼습니다.');
+    } catch (e: any) {
+      setError(e instanceof CalculationError ? e
+        : new CalculationError(e?.message || '내부 진단을 펼치지 못했습니다.', 0));
+    } finally { setBusy(''); }
+  }
+
+  async function onCopyDiagnostic() {
+    const request = pathRequest();
+    if (!request || diagnosticPurpose.trim().length < 10) return;
+    setError(null); setDiagnosticNote(''); setBusy('diagnostic-copy');
+    try {
+      const issued = await copyPathDiagnostic(request, diagnosticPurpose.trim());
+      await navigator.clipboard.writeText(issued.copy_text);
+      setDiagnosticNote('복사용 본문 발급을 감사 기록에 남기고 클립보드에 복사했습니다.');
+    } catch (e: any) {
+      setError(e instanceof CalculationError ? e
+        : new CalculationError(e?.message || '내부 진단을 복사하지 못했습니다.', 0));
+    } finally { setBusy(''); }
   }
 
 
@@ -383,7 +449,7 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
           jarvis={<JarvisRail
             contextKicker="현재 영향 문맥"
             contextTitle={root
-              ? `${root.object_type} · ${root.object_id}` : '영향 시작점을 선택하십시오'}
+              ? objectDisplay(root) : '영향 시작점을 선택하십시오'}
             contextDescription={result?.status === 'COMPLETE'
               ? '봉인된 경로·인증판·산식으로 계산을 완료했습니다.'
               : result?.status === 'BLOCKED'
@@ -443,7 +509,7 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
                   <option value="">— 고르십시오 —</option>
                   {instances.map((i) => (
                     <option key={i.instance_id} value={i.instance_id}>
-                      {i.label || `${i.kit_id} ${i.version}`} · {i.scope_node_id}
+                      {i.label || '이름 미등록 업무키트'} · {i.version || '판 미상'}
                     </option>
                   ))}
                 </select>
@@ -480,8 +546,8 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
                   style={{ padding: 6, fontSize: 14, minWidth: 320 }}>
                   <option value="">— 고르십시오 —</option>
                   {objects.map((o) => {
-                    const k = `${o.namespace}:${o.object_type}:${o.object_id}`;
-                    return <option key={k} value={k}>{o.object_type} · {o.object_id}</option>;
+                    const k = objectKey(o);
+                    return <option key={k} value={k}>{objectDisplay(o)}</option>;
                   })}
                 </select>
               )}
@@ -493,7 +559,7 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
               <select value={targetType} onChange={(e) => setTargetType(e.target.value)}
                 style={{ padding: 6, fontSize: 14, minWidth: 200 }}>
                 <option value="">— 전부 —</option>
-                {types.map((t) => <option key={t} value={t}>{t}</option>)}
+                {types.map((t) => <option key={t} value={t}>{OBJECT_TYPE_LABELS[t] || '업무 객체'}</option>)}
               </select>
             </div>
             <button disabled={!canFind} onClick={onFind}
@@ -574,7 +640,7 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
                         onChange={() => setPathFp(p.path_fingerprint)}
                         style={{ marginRight: 8 }} />
                       <span style={{ fontSize: 14 }}>
-                        {p.nodes.map((n) => `${n.object_type} ${n.object_id}`).join(' → ')}
+                        {p.nodes.map(objectDisplay).join(' → ')}
                       </span>
                       <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginLeft: 24 }}>
                         구간 {p.edges.length}개
@@ -615,11 +681,11 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
                   marginTop: 8, padding: 10, background: 'var(--surface-raised)', borderRadius: 6,
                 }}>
                   <div style={{ fontSize: 13, color: 'var(--surface-text)', marginBottom: 4 }}>
-                    무엇이 없는가
+                    다음 조치
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-                    {(result.blocked?.internal_reasons || []).map((r, i) => (
-                      <li key={i} style={{ marginBottom: 2 }}>{r}</li>
+                    {(result.blocked?.reasons || []).map((reason) => (
+                      <li key={reason.code} style={{ marginBottom: 2 }}>{reason.next_action}</li>
                     ))}
                   </ul>
                   <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 6 }}>
@@ -627,6 +693,60 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
                     확인할 수 있습니다.
                   </div>
                 </div>
+                {operatorScope?.isAdmin && (
+                  <details style={{
+                    marginTop: 10, padding: 10, border: '1px solid var(--surface-border)',
+                    borderRadius: 6, background: 'var(--surface-sunken)',
+                  }}>
+                    <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                      시스템 관리자 내부 진단
+                    </summary>
+                    <p style={{ margin: '8px 0', fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                      관계·데이터 계약·원장 식별자가 포함됩니다. 열람과 복사용 본문 발급은
+                      감사 기록에 남으며, 목적을 10자 이상 입력해야 합니다.
+                    </p>
+                    <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+                      진단 목적
+                      <input value={diagnosticPurpose}
+                        onChange={(e) => setDiagnosticPurpose(e.target.value)}
+                        placeholder="예: 데이터 결속 오류 원인 확인"
+                        maxLength={300}
+                        style={{ padding: 7, fontSize: 13 }} />
+                    </label>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                      <button type="button" onClick={onRevealDiagnostic}
+                        disabled={diagnosticPurpose.trim().length < 10 || busy === 'diagnostic'}>
+                        {busy === 'diagnostic' ? '확인 중…' : '내부 진단 펼치기'}
+                      </button>
+                      <button type="button" onClick={onCopyDiagnostic}
+                        disabled={diagnosticPurpose.trim().length < 10 || busy === 'diagnostic-copy'}>
+                        {busy === 'diagnostic-copy' ? '발급 중…' : '감사 후 복사'}
+                      </button>
+                    </div>
+                    {diagnosticNote && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--state-success-fg)' }}>
+                        {diagnosticNote}
+                      </div>
+                    )}
+                    {diagnostic && (
+                      <div style={{ marginTop: 10, fontSize: 12 }}>
+                        <div style={{ fontWeight: 600 }}>내부 차단 근거</div>
+                        <ul style={{ margin: '4px 0 8px', paddingLeft: 18 }}>
+                          {diagnostic.internal_reasons.map((reason, index) => (
+                            <li key={index}>{reason}</li>
+                          ))}
+                        </ul>
+                        <div style={{ fontWeight: 600 }}>결속 식별자</div>
+                        <pre style={{
+                          margin: '4px 0 0', padding: 8, overflowX: 'auto', whiteSpace: 'pre-wrap',
+                          background: 'var(--surface-raised)', borderRadius: 4,
+                        }}>
+                          {JSON.stringify(diagnostic.identifiers, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </details>
+                )}
               </>
             )}
 
@@ -641,24 +761,19 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
                     이 숫자는 무엇으로 만들었나
                   </summary>
                   <div style={{ fontSize: 12, color: 'var(--surface-text)', marginTop: 8 }}>
-                    <div>결과 지문 {result.result_fingerprint}</div>
-                    <div>요청 지문 {result.request_fingerprint}</div>
-                    <div>경로 {result.query_id} / {result.path_fingerprint}</div>
+                    <div>결과 무결성 {result.result_fingerprint ? '확인됨' : '미확인'}</div>
+                    <div>요청 결속 {result.request_fingerprint ? '확인됨' : '미확인'}</div>
+                    <div>질의·경로 결속 {result.query_id && result.path_fingerprint ? '완료' : '미완료'}</div>
                     <div style={{ marginTop: 6 }}>
-                      기댄 관계 {result.required_relation_ids.join(', ') || '(없음)'}
+                      기댄 승인 관계 {result.required_relation_ids.length}개
                     </div>
-                    <div style={{ marginTop: 6 }}>읽은 판</div>
+                    <div style={{ marginTop: 6 }}>읽은 인증판</div>
                     <ul style={{ margin: '2px 0', paddingLeft: 18 }}>
-                      {Object.entries(result.used_snapshots).sort().map(([k, v]) => (
-                        <li key={k}>{k} — {v}</li>
+                      {Object.entries(result.used_snapshots).sort().map(([k]) => (
+                        <li key={k}>{DATASET_LABELS[k] || '업무 데이터'} — 인증판 결속 완료</li>
                       ))}
                     </ul>
-                    <div style={{ marginTop: 6 }}>산식 판</div>
-                    <ul style={{ margin: '2px 0', paddingLeft: 18 }}>
-                      {Object.entries(result.segment_model_versions).sort().map(([k, v]) => (
-                        <li key={k}>{k} — {v}</li>
-                      ))}
-                    </ul>
+                    <div style={{ marginTop: 6 }}>승인 산식 판 {Object.keys(result.segment_model_versions).length}개 결속</div>
                   </div>
                 </details>
 
@@ -764,13 +879,12 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
                       </ul>
                       <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 6 }}>
                         {/* ★★★ 계산 결속이 근거에 봉인됐음을 **보인다.** */}
-                        계산 결속 결과 지문{' '}
-                        {String(decision.decision.evidence?.calculation?.result_fingerprint
-                          || '(없음)').slice(0, 16)}…
+                        계산 근거 결속 {decision.decision.evidence?.calculation?.result_fingerprint
+                          ? '확인됨' : '미확인'}
                       </div>
                       {/* ★ 저장된 안건이다 — 어디서 이어 가는지 말해 준다. */}
                       <div style={{ fontSize: 13, marginTop: 6 }}>
-                        안건 <b>{decision.decision.decision_id}</b> 로 저장했습니다.
+                        의사결정 안건으로 저장했습니다.
                         <div style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>
                           「협업·의사결정·발간」 화면에서 검토 요청·발간으로 이어 갑니다.
                         </div>

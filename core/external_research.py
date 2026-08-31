@@ -25,6 +25,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urljoin, urlparse
 
 from core.paths import data_path
+from core.system_ids import allocate
 
 
 _DB_PATH = data_path("external_intelligence.db")
@@ -379,7 +380,9 @@ class ExternalResearchStore:
         values = self._normalise(payload)
         fingerprint = _fingerprint(values)
         self._ready()
-        pid = profile_id or f"erp_{uuid.uuid4().hex[:12]}"
+        # 화면·API 호출자가 내부 키를 지어내지 않는다. 기존 profile_id 로 저장하는 경로는
+        # 승인본 개정 호환을 위해 보존하고, 신규 프로필만 중앙 발급 규칙을 따른다.
+        pid = profile_id or allocate("research_profile")[0]
         now = _now()
         with self._lock, self._connect() as conn:
             previous = conn.execute(

@@ -31,6 +31,7 @@
 저장소는 `data/external_intelligence.db` 로 분리한다(§12.3 명시 — 시계열 규모와 향후 이전).
 """
 import json
+import hashlib
 import os
 import sqlite3
 import threading
@@ -103,6 +104,33 @@ CREATE TABLE IF NOT EXISTS external_indicators (
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS external_indicator_proposals (
+    proposal_id   TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    category      TEXT DEFAULT '',
+    canonical_term TEXT DEFAULT '',
+    unit          TEXT DEFAULT '',
+    frequency     TEXT DEFAULT '',
+    required_grade TEXT NOT NULL DEFAULT 'gold',
+    acceptable_latency TEXT DEFAULT '',
+    source_hint   TEXT DEFAULT '',
+    purpose       TEXT DEFAULT '',
+    gap_impact    TEXT DEFAULT '',
+    next_action   TEXT DEFAULT '',
+    rationale     TEXT DEFAULT '',
+    fingerprint   TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    proposed_by   TEXT NOT NULL,
+    reviewed_by   TEXT DEFAULT '',
+    review_reason TEXT DEFAULT '',
+    reviewed_at   TEXT DEFAULT '',
+    indicator_id  TEXT DEFAULT '',
+    code          TEXT DEFAULT '',
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_external_indicator_proposal_status
+    ON external_indicator_proposals(status, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS external_observations (
     observation_id TEXT PRIMARY KEY,
@@ -227,6 +255,159 @@ class ExternalIntelligence:
             return [dict(r) for r in conn.execute(sql + " ORDER BY priority, name").fetchall()]
 
     # ── 지표 마스터 (§12.5) ───────────────────────────────────────────────
+    @staticmethod
+    def _proposal_material(payload: dict) -> dict:
+        keys = ("name", "category", "canonical_term", "unit", "frequency",
+                "required_grade", "acceptable_latency", "source_hint", "purpose",
+                "gap_impact", "next_action", "rationale")
+        return {key: str(payload.get(key, "") or "").strip() for key in keys}
+
+    @classmethod
+    def _proposal_fingerprint(cls, payload: dict) -> str:
+        raw = json.dumps(cls._proposal_material(payload), ensure_ascii=False,
+                         sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _proposal_row(row: sqlite3.Row) -> dict:
+        return dict(row)
+
+    @staticmethod
+    def _indicator_code_from_proposal(proposal_id: str) -> str:
+        from core.system_ids import is_system_id
+        if not is_system_id(proposal_id, "external_indicator"):
+            raise ExternalIntelligenceError("대외지표 제안 식별자가 발급 규칙과 일치하지 않습니다.")
+        return "EXT-" + proposal_id.split("_", 1)[1].upper()
+
+    def propose_indicator(self, payload: dict, proposed_by: str) -> dict:
+        material = self._proposal_material(payload)
+        if not proposed_by.strip():
+            raise ExternalIntelligenceError("제안자 식별이 필요합니다.")
+        if not material["name"]:
+            raise ExternalIntelligenceError("지표 명칭은 필수입니다.")
+        if material["required_grade"] not in GRADES:
+            raise ExternalIntelligenceError(
+                f"required_grade 는 {list(GRADES)} 중 하나여야 합니다.")
+        from core.system_ids import allocate
+        proposal_id = allocate("external_indicator")[0]
+        fingerprint = self._proposal_fingerprint(material)
+        now = _now()
+        with self._lock, self._connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM external_indicators WHERE status='active' "
+                "AND lower(trim(name))=? LIMIT 1",
+                (material["name"].casefold(),)).fetchone():
+                raise ExternalIntelligenceError("같은 명칭의 확정 대외지표가 이미 존재합니다.")
+            if conn.execute(
+                "SELECT 1 FROM external_indicator_proposals WHERE status='pending' "
+                "AND lower(trim(name))=? LIMIT 1", (material["name"].casefold(),)).fetchone():
+                raise ExternalIntelligenceError("같은 명칭의 검토 대기 지표 제안이 이미 존재합니다.")
+            conn.execute(
+                "INSERT INTO external_indicator_proposals("
+                "proposal_id,name,category,canonical_term,unit,frequency,required_grade,"
+                "acceptable_latency,source_hint,purpose,gap_impact,next_action,rationale,"
+                "fingerprint,status,proposed_by,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)",
+                (proposal_id, *[material[k] for k in (
+                    "name", "category", "canonical_term", "unit", "frequency",
+                    "required_grade", "acceptable_latency", "source_hint", "purpose",
+                    "gap_impact", "next_action", "rationale")],
+                 fingerprint, proposed_by.strip(), now))
+            row = conn.execute(
+                "SELECT * FROM external_indicator_proposals WHERE proposal_id=?",
+                (proposal_id,)).fetchone()
+        return self._proposal_row(row)
+
+    def list_indicator_proposals(self, status: str = "pending") -> List[dict]:
+        wanted = (status or "pending").strip().lower()
+        if wanted not in {"pending", "approved", "rejected", "all"}:
+            raise ExternalIntelligenceError(
+                "status 는 pending·approved·rejected·all 중 하나여야 합니다.")
+        with self._connect() as conn:
+            if wanted == "all":
+                rows = conn.execute(
+                    "SELECT * FROM external_indicator_proposals ORDER BY created_at DESC").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM external_indicator_proposals WHERE status=? "
+                    "ORDER BY created_at DESC", (wanted,)).fetchall()
+        return [self._proposal_row(row) for row in rows]
+
+    def approve_indicator_proposal(self, proposal_id: str, approved_by: str,
+                                   expected_fingerprint: str, reason: str = "") -> dict:
+        if not approved_by.strip():
+            raise ExternalIntelligenceError("승인자 식별이 필요합니다.")
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT * FROM external_indicator_proposals WHERE proposal_id=?",
+                    (proposal_id,)).fetchone()
+                if not row:
+                    raise ExternalIntelligenceError("존재하지 않는 대외지표 제안입니다.")
+                if row["status"] != "pending":
+                    raise ExternalIntelligenceError("검토 대기 상태의 지표 제안만 승인할 수 있습니다.")
+                if row["proposed_by"] == approved_by.strip():
+                    raise ExternalIntelligenceError("제안자는 자신의 대외지표 제안을 승인할 수 없습니다.")
+                if not expected_fingerprint or row["fingerprint"] != expected_fingerprint:
+                    raise ExternalIntelligenceError("검토한 내용과 현재 지표 제안의 지문이 다릅니다.")
+                if conn.execute(
+                    "SELECT 1 FROM external_indicators WHERE lower(trim(name))=? AND status='active'",
+                    (row["name"].strip().casefold(),)).fetchone():
+                    raise ExternalIntelligenceError("같은 명칭의 확정 대외지표가 이미 존재합니다.")
+                indicator_id = proposal_id
+                code = self._indicator_code_from_proposal(proposal_id)
+                now = _now()
+                conn.execute(
+                    "INSERT INTO external_indicators("
+                    "indicator_id,code,name,category,canonical_term,unit,frequency,required_grade,"
+                    "acceptable_latency,source_hint,purpose,gap_impact,next_action,origin,status,"
+                    "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'approved_proposal',"
+                    "'active',?,?)",
+                    (indicator_id, code, row["name"], row["category"], row["canonical_term"],
+                     row["unit"], row["frequency"], row["required_grade"],
+                     row["acceptable_latency"], row["source_hint"], row["purpose"],
+                     row["gap_impact"], row["next_action"], now, now))
+                conn.execute(
+                    "UPDATE external_indicator_proposals SET status='approved',reviewed_by=?,"
+                    "review_reason=?,reviewed_at=?,indicator_id=?,code=? WHERE proposal_id=?",
+                    (approved_by.strip(), reason.strip(), now, indicator_id, code, proposal_id))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return {"proposal": next(p for p in self.list_indicator_proposals("approved")
+                                  if p["proposal_id"] == proposal_id),
+                "indicator": self.get_indicator(code)}
+
+    def reject_indicator_proposal(self, proposal_id: str, reviewed_by: str,
+                                  reason: str, expected_fingerprint: str) -> dict:
+        if not reviewed_by.strip():
+            raise ExternalIntelligenceError("검토자 식별이 필요합니다.")
+        if not reason.strip():
+            raise ExternalIntelligenceError("반려 사유는 필수입니다.")
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM external_indicator_proposals WHERE proposal_id=?",
+                (proposal_id,)).fetchone()
+            if not row:
+                raise ExternalIntelligenceError("존재하지 않는 대외지표 제안입니다.")
+            if row["status"] != "pending":
+                raise ExternalIntelligenceError("검토 대기 상태의 지표 제안만 반려할 수 있습니다.")
+            if row["proposed_by"] == reviewed_by.strip():
+                raise ExternalIntelligenceError("제안자는 자신의 대외지표 제안을 반려할 수 없습니다.")
+            if not expected_fingerprint or row["fingerprint"] != expected_fingerprint:
+                raise ExternalIntelligenceError("검토한 내용과 현재 지표 제안의 지문이 다릅니다.")
+            now = _now()
+            conn.execute(
+                "UPDATE external_indicator_proposals SET status='rejected',reviewed_by=?,"
+                "review_reason=?,reviewed_at=? WHERE proposal_id=?",
+                (reviewed_by.strip(), reason.strip(), now, proposal_id))
+            updated = conn.execute(
+                "SELECT * FROM external_indicator_proposals WHERE proposal_id=?",
+                (proposal_id,)).fetchone()
+        return self._proposal_row(updated)
+
     def upsert_indicator(self, code: str, name: str, **kw) -> dict:
         if not (code or "").strip() or not (name or "").strip():
             raise ExternalIntelligenceError("code 와 name 은 필수입니다.")
@@ -258,10 +439,26 @@ class ExternalIntelligence:
                      now, now, *[vals[c] for c in cols]))
         return self.get_indicator(code)
 
-    def get_indicator(self, code: str) -> Optional[dict]:
+    def get_indicator(self, reference: str) -> Optional[dict]:
+        """내부 코드를 우선 해석하고, 사용자 입력에는 확정 지표 명칭도 허용한다.
+
+        화면·CSV 작성자에게 내부 코드를 요구하지 않는다. 이름이 중복되면 임의로 고르지 않고
+        명확히 실패시켜 잘못된 지표에 관측값이 결속되는 것을 막는다.
+        """
+        value = str(reference or "").strip()
         with self._connect() as conn:
-            r = conn.execute("SELECT * FROM external_indicators WHERE code=?", (code,)).fetchone()
-        return dict(r) if r else None
+            row = conn.execute(
+                "SELECT * FROM external_indicators WHERE code=?", (value,)).fetchone()
+            if row:
+                return dict(row)
+            rows = conn.execute(
+                "SELECT * FROM external_indicators WHERE status='active' "
+                "AND lower(trim(name))=lower(trim(?)) ORDER BY indicator_id",
+                (value,)).fetchall()
+        if len(rows) > 1:
+            raise ExternalIntelligenceError(
+                "같은 명칭의 확정 대외지표가 여러 건입니다. 데이터 관리자가 중복을 정리해야 합니다.")
+        return dict(rows[0]) if rows else None
 
     def list_indicators(self) -> List[dict]:
         with self._connect() as conn:

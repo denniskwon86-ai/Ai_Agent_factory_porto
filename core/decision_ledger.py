@@ -174,6 +174,16 @@ EVENT_TYPES = (
     #     승인이 자동으로 죽는다 — 「같은 기준선 다른 값」이 승인을 물려받지 못한다.
     "CALC_BASELINE_SEALED",
     "CALC_BASELINE_REVOKED",
+    # 계획 시나리오의 편집 가능한 초안과 승인 판본을 분리한다. 대상은 승인 시점
+    # 내용 지문이므로 같은 시나리오 이름으로 가정을 바꾸면 옛 승인을 물려받지 못한다.
+    "PLANNING_SCENARIO_APPROVED",
+    "PLANNING_SCENARIO_REVOKED",
+    "PLANNING_DRIVER_APPROVED",
+    "PLANNING_DRIVER_REVOKED",
+    # 승인 지식은 파일 이름이 아니라 **그 바이트와 조직 문맥**에 대한 결정이다.
+    # subject_id 는 reference asset release fingerprint 이다.
+    "KNOWLEDGE_ASSET_APPROVED",
+    "KNOWLEDGE_ASSET_REVOKED",
     # ★★★ [G2 M0-5] **시연 초기화.** 지우는 일도 기록으로 남는다.
     #
     #   ⚠️⚠️ 초기화는 원장 사건을 **하나도 지우지 않는다.** 원장은 추가 전용이고,
@@ -221,7 +231,8 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  "calc_capability",
                  # [G2 M0-3.2b] 계산 기준선. 「무엇과 비교해 이연을 재는가」는 산식
                  #   승인과 다른 질문이다.
-                 "calc_baseline")
+                 "calc_baseline", "planning_scenario_release", "planning_driver_release",
+                 "knowledge_asset")
 
 
 #: ★★★ [4.1c-B P0-4] **철회 유형 → 허용되는 부모 유형** 표. 한 곳에만 둔다.
@@ -235,6 +246,9 @@ _REVOCATION_PARENTS = {
     "DATASET_OWNERSHIP_REVOKED": ("DATASET_OWNERSHIP_APPROVED",),
     "CALC_CAPABILITY_REVOKED": ("CALC_CAPABILITY_APPROVED",),
     "CALC_BASELINE_REVOKED": ("CALC_BASELINE_SEALED",),
+    "PLANNING_SCENARIO_REVOKED": ("PLANNING_SCENARIO_APPROVED",),
+    "PLANNING_DRIVER_REVOKED": ("PLANNING_DRIVER_APPROVED",),
+    "KNOWLEDGE_ASSET_REVOKED": ("KNOWLEDGE_ASSET_APPROVED",),
 }
 _REVOCATION_EVENTS = tuple(_REVOCATION_PARENTS)
 
@@ -422,6 +436,12 @@ class DecisionLedger:
             "CALC_CAPABILITY_REVOKED": "calc_capability",
             "CALC_BASELINE_SEALED": "calc_baseline",
             "CALC_BASELINE_REVOKED": "calc_baseline",
+            "PLANNING_SCENARIO_APPROVED": "planning_scenario_release",
+            "PLANNING_SCENARIO_REVOKED": "planning_scenario_release",
+            "PLANNING_DRIVER_APPROVED": "planning_driver_release",
+            "PLANNING_DRIVER_REVOKED": "planning_driver_release",
+            "KNOWLEDGE_ASSET_APPROVED": "knowledge_asset",
+            "KNOWLEDGE_ASSET_REVOKED": "knowledge_asset",
             #: ★★★ [2026-08-23] 앱 계약 승인·반려도 **대상 종류를 못박는다.**
             #:
             #: ⚠️ 이름만 허용목록에 있고 주체는 열려 있었다. 그러면
@@ -594,7 +614,7 @@ class DecisionLedger:
         return None
 
     def has_invalidating_child(self, parent_event_id: str,
-                               event_types: Sequence[str]) -> bool:
+                               event_types: Sequence[str], as_of: str = "") -> bool:
         """이 이벤트를 **부모로 가리키는** 무효화 이벤트가 있는가.
 
         ★★★ [2026-08-20 Supervisor 지적 P0-2] `list_events()` 로 대신하면 안 된다:
@@ -615,12 +635,19 @@ class DecisionLedger:
         self._ready()
         marks = ",".join("?" * len(wanted))
         sql = ("SELECT 1 FROM decision_ledger_events "
-               f"WHERE parent_event_id=? AND event_type IN ({marks}) LIMIT 1")
+               f"WHERE parent_event_id=? AND event_type IN ({marks})")
+        args: tuple[Any, ...] = (pid, *wanted)
+        if str(as_of or "").strip():
+            # Historical ontology queries must not apply a revocation that happened later.
+            # ISO-8601 UTC timestamps are normalized by this ledger before storage.
+            sql += " AND created_at<=?"
+            args = (*args, str(as_of).strip())
+        sql += " LIMIT 1"
         last = None
         for attempt in (0, 1):
             try:
                 with self._connect() as conn:
-                    row = conn.execute(sql, (pid, *wanted)).fetchone()
+                    row = conn.execute(sql, args).fetchone()
                 return row is not None
             except sqlite3.OperationalError as exc:
                 last = exc

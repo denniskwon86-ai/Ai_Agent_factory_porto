@@ -369,7 +369,7 @@ def resolve_workflow(template_id: str, require_runnable: bool = True) -> Dict[st
         # [P4-4] 파일 템플릿도 「쓰이는 것」이다 — 여기서 안 세면 파일 템플릿이 전부
         #   「사용 기록 없음」으로 보고된다(관측 구멍이 곧 오보가 된다).
         _usage_record(_tid, "file_template")
-        return _reg.load_template(_tid)
+        return _reg.load_template_strict(_tid)
 
     a = agent_assets.get(template_id)                    # 없으면 AssetNotFound
     if a.get("kind") != KIND_WORKFLOW:

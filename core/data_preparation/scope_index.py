@@ -53,13 +53,74 @@ from core.data_preparation import models as m
 #: ⚠️ `object_type` 은 계약의 **하이픈 표기**를 그대로 쓴다(`purchase-order-line`).
 #:   여기서 표기를 바꾸면 계약과 런타임이 서로 다른 이름을 부르게 된다.
 CONTRACT_OBJECTS: Dict[str, Tuple[str, str, str]] = {
+    "PRC-01": ("dataset", "procurement-contract", "contract_id"),
     "PRC-02": ("dataset", "purchase-order-line", "po_line_id"),
+    "LOG-01": ("dataset", "partner-submission", "submission_id"),
     "LOG-02": ("dataset", "shipment", "shipment_id"),
+    "LOG-03": ("dataset", "shipment-milestone", "milestone_id"),
+    "LOG-04": ("dataset", "customs-clearance", "clearance_id"),
+    "LOG-05": ("dataset", "transport-event", "transport_event_id"),
     #: ⚠️ 이 열의 이름이 `snapshot_id` 다. **인증판 ID 와 다른 것이다.**
     "INV-01": ("dataset", "inventory-snapshot", "snapshot_id"),
     "MFG-01": ("dataset", "production-plan-line", "plan_line_id"),
+    "MFG-02": ("dataset", "production-batch", "batch_id"),
     "SLS-01": ("dataset", "sales-line", "sales_line_id"),
+    "FIN-01": ("dataset", "cost-record", "cost_record_id"),
+    "FIN-02": ("dataset", "finance-document", "finance_document_id"),
+    "FIN-03": ("dataset", "ledger-line", "ledger_line_id"),
 }
+
+#: ★★★ 정본 계약상 MDM·대외정보 객체 중 단일키가 실제 인증판에서 고유하고
+#: 사람용 표시 필드까지 존재하는 유형.
+REFERENCE_OBJECTS: Dict[str, Tuple[str, str, str]] = {
+    "MDM-01": ("mdm", "material", "material_id"),
+    "MDM-02": ("mdm", "supplier", "supplier_id"),
+    "MDM-04": ("mdm", "location", "location_id"),
+    "MDM-06": ("mdm", "equipment", "equipment_id"),
+    "MDM-07": ("mdm", "account", "account_id"),
+    "MDM-08": ("mdm", "logistics-reference", "reference_id"),
+    "EXT-01": ("external", "external-observation", "observation_id"),
+    "EXT-02": ("external", "external-observation", "observation_id"),
+    "EXT-03": ("external", "external-observation", "observation_id"),
+}
+
+#: 색인기가 실제로 물질화하는 닫힌 표. `CONTRACT_OBJECTS` 는 기존 dataset 경로·계산
+#: 계약이 참조하므로 의미를 바꾸지 않고, 추가 namespace 는 별도 표에서 합친다.
+INDEX_OBJECTS: Dict[str, Tuple[str, str, str]] = {
+    **CONTRACT_OBJECTS,
+    **REFERENCE_OBJECTS,
+}
+
+#: 한 인증판에서 두 번째 객체 유형을 만드는 복합키 계약.
+#:
+#: ★ 값에 나타날 수 있는 구분자를 이어 붙이지 않는다. 내부 객체 ID 는 정렬된 JSON
+#: 배열로 직렬화해 `("A|B", "C")` 와 `("A", "B|C")` 가 충돌하지 않게 한다.
+#: ⚠️ `cost-center` 는 단일키지만 같은 센터가 16개 계정행에 반복되고 사람용 정본 명칭이
+#: 없다. 코드 접미사로 이름을 지어내지 않고 별도 명칭 정본이 생길 때까지 제외한다.
+COMPOSITE_REFERENCE_OBJECTS: Dict[str, Tuple[Tuple[str, str, Tuple[str, ...]], ...]] = {
+    "MDM-05": (("mdm", "bom-line", ("bom_id", "line_no")),),
+    "MDM-06": (("mdm", "routing-operation", ("routing_id", "operation_seq")),),
+}
+
+
+def object_id_for(row: Dict[str, Any], key_columns: Tuple[str, ...]) -> str:
+    """Build an opaque deterministic ID from the contract's ordered key columns."""
+    values = [str(row.get(column, "") or "").strip() for column in key_columns]
+    if any(not value for value in values):
+        return ""
+    if len(values) == 1:
+        return values[0]
+    return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
+
+
+def object_specs(dataset_contract_key: str) -> Tuple[Tuple[str, str, Tuple[str, ...]], ...]:
+    """All ontology object specifications materialized from one certified dataset."""
+    specs: List[Tuple[str, str, Tuple[str, ...]]] = []
+    primary = INDEX_OBJECTS.get(dataset_contract_key)
+    if primary:
+        specs.append((primary[0], primary[1], (primary[2],)))
+    specs.extend(COMPOSITE_REFERENCE_OBJECTS.get(dataset_contract_key, ()))
+    return tuple(specs)
 
 
 #: ★★★ [2026-08-21] **인증판은 «전체판» 이다.** 각 CSV 는 그 시점의 전 목록이다.
@@ -129,71 +190,61 @@ def plan(snapshot: Dict[str, Any]) -> List[tuple]:
     ⚠️ 반대 순서(인증 먼저)로 하면 사고가 질의 시점에 터진다 — 그때는 고칠 사람이
       그 자리에 없다.
 
-    ★ 계약키가 `CONTRACT_OBJECTS` 에 없으면 **빈 목록**이다(설계상 대상 아님).
+    ★ 계약키가 `INDEX_OBJECTS` 에 없으면 **빈 목록**이다(설계상 대상 아님).
     ⚠️ 대상인데 세우지 못하면 `ScopeIndexError` — 조용히 0줄로 넘어가지 않는다."""
     key = str(snapshot.get("dataset_contract_key", "") or "")
-    target = CONTRACT_OBJECTS.get(key)
-    if target is None:
+    targets = object_specs(key)
+    if not targets:
         return []
-    namespace, object_type, id_column = target
 
     rows, columns = rows_from_raw(str(snapshot.get("raw_path", "") or ""),
                                   str(snapshot.get("checksum", "") or ""))
-    if id_column not in columns:
-        raise ScopeIndexError(
-            f"{key} 에 «{id_column}» 열이 없습니다 — 업무 객체 ID 를 정할 수 없습니다.")
+    for _, _, key_columns in targets:
+        missing = [column for column in key_columns if column not in columns]
+        if missing:
+            raise ScopeIndexError(
+                f"{key} 에 객체 열쇠 열이 없습니다({', '.join(missing)}) — "
+                "업무 객체 ID 를 정할 수 없습니다.")
 
     snapshot_id = str(snapshot.get("snapshot_id", ""))
     now = _now()
-    seen: Dict[str, int] = {}
     #: 업무 행이 소유 부서를 선언한 횟수. **무시하지만 세어서 드러낸다.**
     ignored_owner_columns = 0
     payload = []
-    for line_no, row in enumerate(rows, start=2):        # 2 = 머리글 다음 줄
-        object_id = str(row.get(id_column, "") or "").strip()
-        if not object_id:
-            raise ScopeIndexError(
-                f"{key} {line_no}행: «{id_column}» 이 비어 있습니다 — "
-                f"범위를 잇지 못하는 행은 색인할 수 없습니다.")
-        if object_id in seen:
-            #: ⚠️ 같은 판 안에서 업무 ID 가 겹치면 **어느 행이 그 객체인지** 알 수 없다.
-            raise ScopeIndexError(
-                f"{key}: «{object_id}» 가 {seen[object_id]}행과 {line_no}행에 겹칩니다.")
-        seen[object_id] = line_no
+    for namespace, object_type, key_columns in targets:
+        seen: Dict[str, int] = {}
+        for line_no, row in enumerate(rows, start=2):        # 2 = 머리글 다음 줄
+            object_id = object_id_for(row, key_columns)
+            if not object_id:
+                raise ScopeIndexError(
+                    f"{key} {line_no}행: 객체 열쇠({', '.join(key_columns)})가 비어 있습니다 — "
+                    "범위를 잇지 못하는 행은 색인할 수 없습니다.")
+            if object_id in seen:
+                raise ScopeIndexError(
+                    f"{key}: 복합 객체 열쇠가 {seen[object_id]}행과 {line_no}행에 겹칩니다.")
+            seen[object_id] = line_no
 
-        tenant = str(row.get("tenant_id", "") or "").strip()
-        scope = str(row.get("scope_node_id", "") or "").strip()
-        if not tenant or not scope:
-            #: ★ 범위 없는 행은 권한 필터에서 «미기록» 이 되어 통제 밖에 놓인다.
-            raise ScopeIndexError(
-                f"{key} {line_no}행: 범위(tenant·scope_node)가 없습니다.")
-        if tenant != str(snapshot.get("tenant_id", "")):
-            #: ⚠️⚠️ 행의 tenant 와 인증판의 tenant 가 다르면 **남의 조직 자료**가 우리
-            #:   범위로 들어온다. 행 수는 그대로여서 눈으로는 보이지 않는다.
-            raise ScopeIndexError(
-                f"{key} {line_no}행: tenant 가 인증판과 다릅니다 "
-                f"({tenant} ≠ {snapshot.get('tenant_id')}).")
+            tenant = str(row.get("tenant_id", "") or "").strip()
+            scope = str(row.get("scope_node_id", "") or "").strip()
+            if not tenant or not scope:
+                raise ScopeIndexError(
+                    f"{key} {line_no}행: 범위(tenant·scope_node)가 없습니다.")
+            if tenant != str(snapshot.get("tenant_id", "")):
+                raise ScopeIndexError(
+                    f"{key} {line_no}행: tenant 가 인증판과 다릅니다 "
+                    f"({tenant} ≠ {snapshot.get('tenant_id')}).")
 
-        #: ★★★ [G2 Ownership Binding] **업무 행의 `owner_dept_id` 는 읽지 않는다.**
-        #:
-        #: ⚠️⚠️ 종전에는 `row.get("owner_dept_id")` 를 그대로 색인에 넣었다. 그러면
-        #:   **자기 데이터의 권한 범위를 데이터가 스스로 정한다** — 직전에 지운
-        #:   `calc_binding` 과 같은 유형의 자기진술 통제다. 고객사 파일 한 칸을 고치면
-        #:   그 데이터의 소유 부서가 바뀐다.
-        #: ★ 소유는 **승인된 결속**에서만 온다. 행에 그 열이 있어도 **무시하고 세어 둔다** —
-        #:   거부하면 그 열이 우연히 섞인 판 전체가 인증되지 못하고, 그러면 다음 사람은
-        #:   열을 지우는 대신 이 검사를 끄는 쪽을 택한다. 다만 조용히 넘기지도 않는다.
-        if str(row.get("owner_dept_id", "") or "").strip():
-            ignored_owner_columns += 1
-        payload.append((namespace, object_type, object_id, snapshot_id, key,
-                        f"line={line_no};{id_column}={object_id}",
-                        tenant, scope,
-                        #: 소유 3칸은 **기록 시점에 정본에서** 채운다(`write_conn`).
-                        #: 여기서 비워 두는 것이 「아직 정하지 않았다」의 정직한 표현이다.
-                        "", "", "",
-                        str(snapshot.get("entity_mode", "")),
-                        str(snapshot.get("data_kind", "")),
-                        "", now))                        # certified_at 은 기록 때 채운다
+            if str(row.get("owner_dept_id", "") or "").strip():
+                ignored_owner_columns += 1
+            evidence = ";".join(
+                f"{column}={str(row.get(column, '') or '').strip()}"
+                for column in key_columns)
+            payload.append((namespace, object_type, object_id, snapshot_id, key,
+                            f"line={line_no};{evidence}", tenant, scope,
+                            "", "", "",
+                            str(snapshot.get("entity_mode", "")),
+                            str(snapshot.get("data_kind", "")),
+                            "", now))
     if ignored_owner_columns:
         print(f"⚠️ [scope_index] {key}: 업무 행의 owner_dept_id 열 {ignored_owner_columns}건을 "
               f"**무시했습니다** — 소유권은 승인된 결속(dataset_ownership_bindings)에서만 옵니다.")
@@ -269,7 +320,9 @@ def versions(store: Any, namespace: str, object_type: str, object_id: str,
     ★★★ [2026-08-21 P0] **살아 있는 인증판만 본다.**
     ⚠️⚠️ 색인 줄은 인증판이 철회(`REVOKED`)돼도 남는다. 상태를 안 보면 **폐기된 판의
       객체가 영원히 `FOUND`** 로 답한다 — 철회가 아무 일도 하지 않는 셈이 된다."""
-    sql = ("SELECT i.*, s.state AS snapshot_state FROM object_scope_index i "
+    sql = ("SELECT i.*, s.state AS snapshot_state, "
+           "s.raw_path AS snapshot_raw_path, s.checksum AS snapshot_checksum "
+           "FROM object_scope_index i "
            "JOIN dataset_snapshots s ON s.snapshot_id = i.snapshot_id "
            "WHERE i.namespace=? AND i.object_type=? AND i.object_id=? "
            "AND i.tenant_id=? AND i.entity_mode=?")
@@ -372,6 +425,64 @@ def bound_to(store: Any, snapshot_id: str) -> int:
         return int(conn.execute(
             "SELECT COUNT(*) FROM object_scope_index WHERE snapshot_id=?",
             (snapshot_id,)).fetchone()[0])
+
+
+def materialized_object_types(store: Any) -> Dict[str, Tuple[str, ...]]:
+    """Return implemented object types that have a live certified index.
+
+    Counts are type-level readiness, never business row counts.  A namespace with
+    no materialized type must not be presented as having zero business records.
+    """
+    with store.transaction() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT i.namespace, i.object_type "
+            "FROM object_scope_index i JOIN dataset_snapshots s "
+            "ON s.snapshot_id=i.snapshot_id WHERE s.state=? AND s.status='active'",
+            (m.DEMO_CERTIFIED,)).fetchall()
+    grouped: Dict[str, set] = {}
+    for row in rows:
+        grouped.setdefault(str(row[0]), set()).add(str(row[1]))
+    return {namespace: tuple(sorted(types)) for namespace, types in grouped.items()}
+
+
+def has_unmaterialized_snapshot(store: Any, namespace: str, object_type: str,
+                                tenant_id: str, entity_mode: str) -> bool:
+    """Whether a supported certified source exists but its derived index is absent."""
+    keys = [key for key in set(INDEX_OBJECTS) | set(COMPOSITE_REFERENCE_OBJECTS)
+            if any(target[:2] == (namespace, object_type)
+                   for target in object_specs(key))]
+    if not keys:
+        return False
+    marks = ",".join("?" for _ in keys)
+    with store.transaction() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM dataset_snapshots s WHERE s.dataset_contract_key IN (" + marks + ") "
+            "AND s.state=? AND s.status='active' AND s.tenant_id=? AND s.entity_mode=? "
+            "AND NOT EXISTS (SELECT 1 FROM object_scope_index i "
+            "WHERE i.snapshot_id=s.snapshot_id AND i.namespace=? AND i.object_type=?) LIMIT 1",
+            (*keys, m.DEMO_CERTIFIED, tenant_id, entity_mode,
+             namespace, object_type)).fetchone()
+    return row is not None
+
+
+def backfill_supported_snapshots(store: Any) -> Dict[str, int]:
+    """Idempotently rebuild derived scope indexes from sealed certified snapshots.
+
+    This is an explicit maintenance operation; importing a module or reading status
+    never writes.  Source bytes are checksum-verified by :func:`plan` first.
+    """
+    with store.transaction() as conn:
+        snapshots = [dict(row) for row in conn.execute(
+            "SELECT * FROM dataset_snapshots WHERE state=? AND status='active' "
+            "ORDER BY dataset_contract_key, certified_at, snapshot_id",
+            (m.DEMO_CERTIFIED,)).fetchall()
+            if object_specs(str(row["dataset_contract_key"]))]
+    written: Dict[str, int] = {}
+    for snapshot in snapshots:
+        payload = plan(snapshot)
+        count = write(store, payload, str(snapshot.get("certified_at", "") or ""))
+        written[str(snapshot["dataset_contract_key"])] = count
+    return written
 
 
 def evidence_bound(store: Any, evidence_refs: Any, snapshot_id: str) -> Tuple[bool, str]:

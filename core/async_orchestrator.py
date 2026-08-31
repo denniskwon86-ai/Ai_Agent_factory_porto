@@ -374,7 +374,8 @@ class AsyncFactoryOrchestrator:
         pid = _pid(workspace_root)
         # T2-b: 이 프로젝트의 워크플로우 템플릿 그래프로 실행(스킬/토폴로지/HOTL 게이트가 템플릿별)
         tid = (state_dict or {}).get("template_id", "default")
-        langgraph_engine = await get_runtime_app(tid)
+        expected_fp = (state_dict or {}).get("config_fingerprint", "")
+        langgraph_engine = await get_runtime_app(tid, expected_fp)
         try:
             async for event in langgraph_engine.astream(state_dict, config=config):
                 for node_name, state_data in event.items():
@@ -413,7 +414,9 @@ class AsyncFactoryOrchestrator:
         # T2-b: 재개도 이 프로젝트의 템플릿 그래프로(초기 스프린트와 동일 토폴로지여야 체크포인트 정합)
         tid = (current_state.get("template_id", "default") if isinstance(current_state, dict)
                else getattr(current_state, "template_id", "default"))
-        langgraph_engine = await get_runtime_app(tid)
+        expected_fp = (current_state.get("config_fingerprint", "") if isinstance(current_state, dict)
+                       else getattr(current_state, "config_fingerprint", ""))
+        langgraph_engine = await get_runtime_app(tid, expected_fp)
 
         try:
             if feedback:
@@ -446,15 +449,17 @@ class AsyncFactoryOrchestrator:
             return False
 
         skey = _skey(_pid(workspace_root), task_id)
-        task = asyncio.create_task(self._resume_stream(config, task_id, workspace_root, tid))
+        task = asyncio.create_task(self._resume_stream(
+            config, task_id, workspace_root, tid, expected_fp))
         self.active_tasks[skey] = task
         self.task_projects[skey] = _pid(workspace_root)
         task.add_done_callback(lambda t, k=skey: (self.active_tasks.pop(k, None), self.task_projects.pop(k, None)))
         return True
 
-    async def _resume_stream(self, config: dict, task_id: str, workspace_root: str, template_id: str = "default"):
+    async def _resume_stream(self, config: dict, task_id: str, workspace_root: str,
+                             template_id: str = "default", expected_fingerprint: str = ""):
         pid = _pid(workspace_root)
-        langgraph_engine = await get_runtime_app(template_id)
+        langgraph_engine = await get_runtime_app(template_id, expected_fingerprint)
         try:
             async for event in langgraph_engine.astream(None, config=config):
                 for node_name, state_data in event.items():
@@ -517,9 +522,10 @@ class AsyncFactoryOrchestrator:
             return False
         workspace_root = vals.get("workspace_root", "./workspace")
         tid = vals.get("template_id", "default")
+        expected_fp = vals.get("config_fingerprint", "")
         restored_mode = vals.get("pre_suspend_mode") or "EXECUTION"
         # T2-b: 재개도 이 프로젝트의 템플릿 그래프로(초기 스프린트와 동일 토폴로지여야 체크포인트 정합)
-        langgraph_engine = await get_runtime_app(tid)
+        langgraph_engine = await get_runtime_app(tid, expected_fp)
         try:
             # factory_mode 복구 + 보존값 초기화. 이 복구가 있어야 재개 후 HOTL 게이트 감지가 정상화된다.
             await langgraph_engine.aupdate_state(config, {"factory_mode": restored_mode, "pre_suspend_mode": ""})
@@ -531,7 +537,8 @@ class AsyncFactoryOrchestrator:
 
         pid = _pid(workspace_root)
         skey = _skey(pid, task_id)
-        task = asyncio.create_task(self._resume_stream(config, task_id, workspace_root, tid))
+        task = asyncio.create_task(self._resume_stream(
+            config, task_id, workspace_root, tid, expected_fp))
         self.active_tasks[skey] = task
         self.task_projects[skey] = pid
         task.add_done_callback(lambda t, k=skey: (self.active_tasks.pop(k, None), self.task_projects.pop(k, None)))

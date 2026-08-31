@@ -33,6 +33,7 @@ import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth
 import { errorTitle } from '../lib/closedLoopFetch';
 import { setEnterpriseContext } from '../lib/api';
 import { orgApi, type Dept, type MyScope, type OrgEdge, type OrgUser } from '../lib/orgApi';
+import { fetchOrgNodes, type FlatNode } from '../lib/governanceApi';
 
 type View = 'chart' | 'graph' | 'users' | 'history' | 'myscope';
 
@@ -93,8 +94,9 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
   const [flash, setFlash] = useState<string | null>(null);
 
   // 화면 안 편집 폼 — `prompt()` 를 쓰지 않는다.
-  const [deptForm, setDeptForm] = useState({ id: '', name: '', parent: '' });
+  const [deptForm, setDeptForm] = useState({ name: '', parent: '' });
   const [scopeDraft, setScopeDraft] = useState('');
+  const [scopeNodes, setScopeNodes] = useState<FlatNode[]>([]);
   const [userForm, setUserForm] = useState({ id: '', name: '' });
 
   const retire = useConfirm<Dept>();
@@ -108,8 +110,8 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
     //   한 번도 읽지 않았다**(`flat` 으로 그린다). 결과를 버리는 호출이라 지웠다 — 그 호출도
     //   권한 판정을 타므로, 쓰지 않는 조회는 실패했을 때 «이유 없는 오류» 만 늘린다.
     //   트리 표시를 넣을 때 다시 부르면 된다.
-    const [d, u, m] = await Promise.allSettled([
-      orgApi.departments(), orgApi.users(), orgApi.me(),
+    const [d, u, m, n] = await Promise.allSettled([
+      orgApi.departments(), orgApi.users(), orgApi.me(), fetchOrgNodes(),
     ]);
     const asLoaded = <T,>(r: PromiseSettledResult<{ rows: T[]; blockedReason: string }>) => {
       if (r.status !== 'fulfilled') {
@@ -128,6 +130,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
       setHidden({ present: u.value.hiddenPresent, count: u.value.hiddenCount });
     } else setHidden({ present: false, count: null });
     setMe(m.status === 'fulfilled' ? ok(m.value) : failed<MyScope | null>(m.reason));
+    setScopeNodes(n.status === 'fulfilled' ? n.value : []);
   }, []);
 
   const loadHistory = useCallback(async (deptId: string) => {
@@ -177,13 +180,11 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
   const selectedUser = userRows.find((u) => u.user_id === selUser) || null;
   const unscoped = deptRows.filter((d) => !String(d.scope_node_id || '').trim());
 
-  /** 이미 쓰이고 있는 조직 범위 값. ★ 여기서 목록을 만드는 이유: 이 저장소에는 부서가 쓰는
-   *  `LS_MNM` 계열 코드와 ECM 트리의 `node_*` 해시가 **함께** 존재한다. 어느 쪽이 정본인지는
-   *  이 화면이 정할 일이 아니므로, 실제로 쓰이는 값을 그대로 제안하고 새 값도 받는다. */
-  const scopeChoices = useMemo(
-    () => [...new Set(deptRows.map((d) => String(d.scope_node_id || '').trim()).filter(Boolean))]
-      .sort(),
-    [deptRows]);
+  /** 내부 `scope_node_id` 는 값으로만 쓰고 화면에는 조직명을 표시한다. */
+  const scopeLabel = useCallback((nodeId: string) => {
+    if (!nodeId) return '미지정';
+    return scopeNodes.find((n) => n.node_id === nodeId)?.label || '연결된 조직';
+  }, [scopeNodes]);
 
   useEffect(() => { setScopeDraft(selectedDept?.scope_node_id || ''); }, [selDept, selectedDept]);
 
@@ -192,16 +193,16 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
   const filteredDepts = useMemo(() => {
     const q = deptSearch.trim().toLowerCase();
     if (!q) return deptRows;
-    return deptRows.filter((d) => `${d.name_ko} ${d.dept_id} ${d.scope_node_id || ''}`
+    return deptRows.filter((d) => `${d.name_ko} ${scopeLabel(d.scope_node_id || '')}`
       .toLowerCase().includes(q));
-  }, [deptRows, deptSearch]);
+  }, [deptRows, deptSearch, scopeLabel]);
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return userRows;
-    return userRows.filter((u) => `${u.display_name} ${u.user_id} ${u.primary_dept_id}`
+    return userRows.filter((u) => `${u.display_name} ${u.user_id} ${deptRows.find((d) => d.dept_id === u.primary_dept_id)?.name_ko || ''}`
       .toLowerCase().includes(q));
-  }, [userRows, search]);
+  }, [userRows, search, deptRows]);
 
   const railItems: RailItem[] = [
     { id: 'chart', label: '조직도', hint: '부서와 조직 범위', icon: 'orgtree',
@@ -238,12 +239,11 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
       : flat.status === 'ok' ? MODULE[view].title : '조회 불가');
   const jarvisDesc = view === 'users'
     ? (selectedUser
-      ? `${selectedUser.user_id} · ${selectedUser.primary_dept_id || '부서 미배정'}`
+      ? `${selectedUser.user_id} · ${deptRows.find((d) => d.dept_id === selectedUser.primary_dept_id)?.name_ko || '부서 미배정'}`
       : users.status === 'ok' ? '왼쪽 목록에서 사람을 고르면 그 계정을 문맥으로 씁니다.'
         : '사용자 명부를 가져오지 못했습니다 — «없다»가 아닙니다.')
     : (selectedDept
-      ? `${selectedDept.dept_id} · v${selectedDept.version} · `
-        + (selectedDept.scope_node_id || '조직 범위 미지정')
+      ? `v${selectedDept.version} · ${scopeLabel(selectedDept.scope_node_id || '')}`
       : flat.status === 'ok'
         ? (unscoped.length
           ? `조직 범위가 없는 부서가 ${unscoped.length}개 있습니다 — 그 부서에는 자료가 보이지 않습니다.`
@@ -258,12 +258,12 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
     //   안 보이고 `trim()` 으로도 안 잡히는 문자가 화면 결함의 원인이었다.
     //   계층은 메타에 «상위» 로 적는다.
     title: d.name_ko,
-    meta: `${d.dept_id} · v${d.version} · ${orgStatusKo(d.status)}`
+    meta: `v${d.version} · ${orgStatusKo(d.status)}`
       + (d.parent_id
-        ? ` · 상위 ${deptRows.find((x) => x.dept_id === d.parent_id)?.name_ko || d.parent_id}`
+        ? ` · 상위 ${deptRows.find((x) => x.dept_id === d.parent_id)?.name_ko || '확인 불가'}`
         : ' · 최상위'),
     chip: String(d.scope_node_id || '').trim()
-      ? { label: d.scope_node_id, tone: 'success' }
+      ? { label: scopeLabel(d.scope_node_id), tone: 'success' }
       // ⚠️ 미지정을 조용히 두지 않는다. 이 값이 비면 그 부서에는 자료가 하나도 안 보인다.
       : { label: '범위 미지정', tone: 'warn' },
   }));
@@ -273,7 +273,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
     return {
       id: u.user_id,
       title: u.display_name || u.user_id,
-      meta: `${u.user_id} · ${u.primary_dept_id || '부서 미배정'}`
+      meta: `${u.user_id} · ${deptRows.find((d) => d.dept_id === u.primary_dept_id)?.name_ko || '부서 미배정'}`
         + (marks.length ? ` · ${marks.join('·')}` : ''),
       chip: u.status && u.status !== 'active'
         ? { label: orgStatusKo(u.status), tone: 'danger' }
@@ -309,12 +309,11 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
           jarvis={<JarvisRail contextTitle={jarvisTitle} contextDescription={jarvisDesc}
             context={jarvisContext}
             evidence={selectedDept && view !== 'users' ? [
-              { label: '부서 코드', value: selectedDept.dept_id },
               { label: '버전', value: `v${selectedDept.version}` },
-              { label: '조직 범위', value: selectedDept.scope_node_id || '미지정' },
+              { label: '조직 범위', value: scopeLabel(selectedDept.scope_node_id || '') },
             ] : selectedUser && view === 'users' ? [
               { label: '계정', value: selectedUser.user_id },
-              { label: '소속', value: selectedUser.primary_dept_id || '미배정' },
+              { label: '소속', value: deptRows.find((d) => d.dept_id === selectedUser.primary_dept_id)?.name_ko || '미배정' },
               { label: '상태', value: orgStatusKo(selectedUser.status || 'active') },
             ] : []}
             quickQuestions={[
@@ -374,7 +373,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
           {view === 'chart' && (
             <>
               <FoundationToolbar search={deptSearch} onSearch={setDeptSearch}
-                placeholder="부서명·코드·조직 범위로 찾기"
+                placeholder="부서명·조직 범위로 찾기"
                 actions={canEdit ? (
                   <button className="secondary-button" disabled={!!busy}
                     onClick={() => seed.ask('all')}>부서 시드</button>
@@ -425,7 +424,6 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
                   ) : (
                     <div style={{ padding: '0 14px 14px' }}>
                       <EvidenceStrip items={[
-                        { label: '부서 코드', value: selectedDept.dept_id },
                         { label: '버전', value: `v${selectedDept.version}` },
                         { label: '상태', value: orgStatusKo(selectedDept.status) },
                       ]} note="개편은 구판을 지우지 않습니다 — 과거 산출물의 소유 부서가 유지됩니다." />
@@ -461,24 +459,23 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
 
                       {canEdit ? (
                         <FormField label="조직 범위"
-                          hint="이미 쓰이는 값에서 고르거나 새 코드를 입력하십시오. 개정이므로 새 버전이 됩니다.">
+                          hint="회사 구성에 등록된 조직에서 고릅니다. 개정이므로 새 버전이 됩니다.">
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                             <select className="afs-select" style={{ maxWidth: 220 }}
-                              value={scopeChoices.includes(scopeDraft) ? scopeDraft : ''}
+                              value={scopeDraft}
                               onChange={(e) => setScopeDraft(e.target.value)}>
-                              <option value="">직접 입력 / 미지정</option>
-                              {scopeChoices.map((s) => <option key={s} value={s}>{s}</option>)}
+                              <option value="">미지정</option>
+                              {scopeNodes.map((n) => <option key={n.node_id} value={n.node_id}>
+                                {'　'.repeat(n.depth)}{n.label}
+                              </option>)}
                             </select>
-                            <input className="afs-input" style={{ maxWidth: 220 }}
-                              value={scopeDraft} onChange={(e) => setScopeDraft(e.target.value)}
-                              placeholder="예: LS_MNM" aria-label="조직 범위 코드" />
                             <button className="primary-button" disabled={!!busy
                               || scopeDraft.trim() === (selectedDept.scope_node_id || '')}
                               onClick={() => run('조직 범위 지정',
                                 () => orgApi.updateDept(selectedDept.dept_id,
                                   { scope_node_id: scopeDraft.trim() }),
                                 scopeDraft.trim()
-                                  ? `'${selectedDept.name_ko}' 의 조직 범위를 «${scopeDraft.trim()}» 로 지정했습니다.`
+                                  ? `'${selectedDept.name_ko}' 의 조직 범위를 «${scopeLabel(scopeDraft.trim())}» 로 지정했습니다.`
                                   : `'${selectedDept.name_ko}' 의 조직 범위를 비웠습니다 — 이 부서에는 자료가 보이지 않습니다.`)}>
                               적용
                             </button>
@@ -486,7 +483,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
                         </FormField>
                       ) : (
                         <p className="hint-line">
-                          조직 범위: <b>{selectedDept.scope_node_id || '미지정'}</b>
+                          조직 범위: <b>{scopeLabel(selectedDept.scope_node_id || '')}</b>
                         </p>
                       )}
 
@@ -504,12 +501,6 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
               {canEdit && (
                 <Panel kicker="NEW" title="부서 추가" className="afs-mt">
                   <div style={{ padding: 14, display: 'grid', gap: 10 }}>
-                    <FormField label="부서 코드" required
-                      hint="영소문자·숫자·_- 2~32자. 산출물의 소유 부서로 기록되므로 나중에 바꾸기 어렵습니다.">
-                      <input className="afs-input" value={deptForm.id}
-                        onChange={(e) => setDeptForm({ ...deptForm, id: e.target.value })}
-                        placeholder="예: quality" />
-                    </FormField>
                     <FormField label="부서명" required>
                       <input className="afs-input" value={deptForm.name}
                         onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })}
@@ -520,19 +511,19 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
                         onChange={(e) => setDeptForm({ ...deptForm, parent: e.target.value })}>
                         <option value="">(최상위)</option>
                         {deptRows.map((d) => (
-                          <option key={d.dept_id} value={d.dept_id}>{d.name_ko} ({d.dept_id})</option>
+                          <option key={d.dept_id} value={d.dept_id}>{d.name_ko}</option>
                         ))}
                       </select>
                     </FormField>
                     <div>
                       <button className="primary-button"
-                        disabled={!!busy || !deptForm.id.trim() || !deptForm.name.trim()}
+                        disabled={!!busy || !deptForm.name.trim()}
                         onClick={async () => {
                           const okDone = await run('부서 추가', () => orgApi.createDept({
-                            dept_id: deptForm.id.trim(), name_ko: deptForm.name.trim(),
+                            name_ko: deptForm.name.trim(),
                             parent_id: deptForm.parent,
                           }), `'${deptForm.name.trim()}' 부서를 만들었습니다. 조직 범위를 지정해야 자료가 보입니다.`);
-                          if (okDone) setDeptForm({ id: '', name: '', parent: '' });
+                          if (okDone) setDeptForm({ name: '', parent: '' });
                         }}>부서 만들기</button>
                     </div>
                   </div>
@@ -541,7 +532,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
             </>
           )}
 
-          {view === 'graph' && <StructureGraph />}
+          {view === 'graph' && <StructureGraph scopeNodes={scopeNodes} />}
 
           {view === 'users' && (
             <>
@@ -571,7 +562,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
                     <div style={{ padding: '0 14px 14px' }}>
                       <EvidenceStrip items={[
                         { label: '계정', value: selectedUser.user_id },
-                        { label: '소속', value: selectedUser.primary_dept_id || '미배정' },
+                        { label: '소속', value: deptRows.find((d) => d.dept_id === selectedUser.primary_dept_id)?.name_ko || '미배정' },
                         { label: '상태', value: orgStatusKo(selectedUser.status || 'active') },
                       ]} />
 
@@ -700,7 +691,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
                       id: `v${h.version}`,
                       version: `v${h.version}`,
                       at: (h.valid_from || '').slice(0, 10) || '시행일 미기재',
-                      actor: h.scope_node_id || '조직 범위 미지정',
+                      actor: scopeLabel(h.scope_node_id || ''),
                       summary: `${h.name_ko} · ${orgStatusKo(h.status)}`,
                     }))}
                     emptyText="개편 이력이 없습니다 — 아직 한 번도 개정되지 않았습니다." />
@@ -718,7 +709,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
                 <div style={{ padding: 14 }}>
                   <EvidenceStrip items={[
                     { label: '계정', value: scope.user_id || '(익명)' },
-                    { label: '소속', value: scope.primary_dept_id || '미배정' },
+                    { label: '소속', value: deptRows.find((d) => d.dept_id === scope.primary_dept_id)?.name_ko || '미배정' },
                     { label: '권한 강제', value: scope.org_enforced ? '켜짐' : '꺼짐' },
                   ]} note={scope.org_enforced
                     ? '조직 범위·등급 통제가 작동 중입니다.'
@@ -755,8 +746,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
                           {scope.readable_dept_ids.map((id) => {
                             const d = deptRows.find((x) => x.dept_id === id);
                             return <li key={id}>
-                              <b>{d?.name_ko || id}</b>
-                              <span> {id}</span>
+                              <b>{d?.name_ko || '확인할 수 없는 부서'}</b>
                               {d && !String(d.scope_node_id || '').trim()
                                 && <span> — 조직 범위가 없어 자료가 보이지 않습니다</span>}
                             </li>;
@@ -778,7 +768,9 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
                         <p className="section-text">전체 범위입니다.</p>
                       ) : scope.readable_scope_nodes.length ? (
                         <ul className="section-list">
-                          {scope.readable_scope_nodes.map((n) => <li key={n}><b>{n}</b></li>)}
+                          {scope.readable_scope_nodes.map((n) => <li key={n}>
+                            <b>{scopeLabel(n)}</b>
+                          </li>)}
                         </ul>
                       ) : (
                         <p className="section-missing">
@@ -812,7 +804,7 @@ export function OrgChartPanel({ onClose, page = false }: { onClose: () => void; 
  * 것으로 결론짓는다. 판정(`grants_authority`)은 **서버가 붙여 준 값**을 쓴다 — 여기서 관계
  * 이름으로 추측하면 관계 종류가 늘어날 때 조용히 틀린다.
  */
-function StructureGraph() {
+function StructureGraph({ scopeNodes }: { scopeNodes: FlatNode[] }) {
   const [rows, setRows] = useState<Loaded<OrgEdge[]>>(loading<OrgEdge[]>());
 
   const load = useCallback(async () => {
@@ -829,6 +821,11 @@ function StructureGraph() {
   const all = rows.value || [];
   const authority = all.filter((e) => e.grants_authority);
   const others = all.filter((e) => !e.grants_authority);
+  const nodeName = (id: string) => scopeNodes.find((n) => n.node_id === id)?.label || '연결된 조직';
+  const relationName = (value: string) => ({
+    OPERATING_PARENT: '운영 상위', LEGAL_OWNERSHIP: '법적 소유',
+    SHARED_SERVICE: '공유 서비스', CONSOLIDATION_SCOPE: '연결 범위',
+  } as Record<string, string>)[value] || '조직 관계';
 
   const group = (title: string, list: OrgEdge[], note: string, strong: boolean) => (
     <Panel kicker={strong ? 'AUTHORITY' : 'OTHER'} title={title}
@@ -846,9 +843,9 @@ function StructureGraph() {
               <tbody>
                 {list.map((e, i) => (
                   <tr key={e.edge_id || `${e.from_node_id}-${e.to_node_id}-${i}`}>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{e.from_node_id}</td>
-                    <td>{e.relation_type}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{e.to_node_id}</td>
+                    <td>{nodeName(e.from_node_id)}</td>
+                    <td>{relationName(e.relation_type)}</td>
+                    <td>{nodeName(e.to_node_id)}</td>
                     <td className={e.grants_authority ? 'afs-success-fg' : 'afs-muted'}>
                       {e.grants_authority ? '예 — 권한이 내려갑니다' : '아니오'}
                     </td>

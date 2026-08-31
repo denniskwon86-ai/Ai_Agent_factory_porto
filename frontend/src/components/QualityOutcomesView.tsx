@@ -139,7 +139,7 @@ export function QualityOutcomesView({ project }: { project: string }) {
                       <span className="font-bold">{o.gate_name}</span>
                       <span className="text-gray-500"> · {o.verdict}</span>
                       {o.score !== null && <span className="text-gray-500"> · 점수 {o.score}</span>}
-                      {o.task_id && <span className="text-gray-500"> · {o.task_id}</span>}
+                      {o.task_id && <span className="text-gray-500"> · 작업 연결됨</span>}
                     </div>
                     <div className="text-[11px] text-gray-400 mt-1 break-words">
                       {o.rework_reason || (o.failed_checks?.length ? `미달 기준: ${o.failed_checks.join(', ')}` : '기록된 사유 없음')}

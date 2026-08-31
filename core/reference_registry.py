@@ -244,6 +244,16 @@ def build_registry(reference_root: Path = REFERENCE_ROOT, registry_path: Path = 
             #: ⚠️ 재스캔은 `sha256` 을 **새로 계산**한다. 승인 당시 해시를 여기서 이어받지
             #  않으면 재스캔 한 번에 「승인 후 바뀐 파일」이라는 사실이 지워진다.
             "approved_sha256": previous.get("approved_sha256", ""),
+            # 원장 결속 승인은 재스캔으로 지워지면 안 된다. 반대로 이 필드가 없는 옛
+            # APPROVED 행은 자동 승격하지 않는다(`knowledge_asset_release`).
+            "approval_fingerprint": previous.get("approval_fingerprint", ""),
+            "approval_event_id": previous.get("approval_event_id", ""),
+            "approval_tenant_id": previous.get("approval_tenant_id", ""),
+            "approval_scope_node_id": previous.get("approval_scope_node_id", ""),
+            "approval_entity_mode": previous.get("approval_entity_mode", ""),
+            "revoked_by": previous.get("revoked_by", ""),
+            "revoked_at": previous.get("revoked_at", ""),
+            "revocation_event_id": previous.get("revocation_event_id", ""),
             "notes": previous.get("notes", ""),
         })
     registry = {
@@ -396,6 +406,10 @@ def _set_approval(asset_id: str, state: str, actor: str, note: str,
     target = next((a for a in assets if a.get("asset_id") == asset_id), None)
     if not target:
         raise ValueError(f"등록되지 않은 자산입니다: {asset_id}")
+    if target.get("approval_event_id"):
+        raise ValueError(
+            "원장에 결속된 지식 자산은 구형 승인 함수로 변경할 수 없습니다. "
+            "원장 철회 경로를 사용하십시오.")
     if state == APPROVED and not _owner_of(target):
         # 소유 조직 없는 자산을 승인하면, 승인은 됐는데 아무에게도 안 보이는 상태가 된다.
         raise ValueError(
@@ -412,6 +426,12 @@ def _set_approval(asset_id: str, state: str, actor: str, note: str,
     #    않은 문서가 검토된 얼굴로 색인되고 산출물에 실려 나간다. 승인은 **그 내용**에 대한
     #    것이지 파일 이름에 대한 것이 아니다.
     target["approved_sha256"] = target.get("sha256", "") if state == APPROVED else ""
+    # 이 함수는 구형 로컬 워크플로우 호환용이다. 원장 결속 필드를 만들지 않으며,
+    # 따라서 이 행은 새 색인/온톨로지 게이트를 통과할 수 없다.
+    for key in ("approval_fingerprint", "approval_event_id", "approval_tenant_id",
+                "approval_scope_node_id", "approval_entity_mode", "revoked_by",
+                "revoked_at", "revocation_event_id"):
+        target[key] = ""
     if note:
         target["notes"] = note
     registry["summary"]["pending_review"] = sum(
@@ -457,7 +477,8 @@ def indexable(registry_path: Path = REGISTRY_PATH,
               #:   «볼 수 있는 범위가 없다» 다. 둘을 같게 다루면 통제가 사라진다.
               visible_scope_nodes: Optional[set[str]] = None,
               viewer_clearance: str = "",
-              include_descendants: bool = False) -> dict[str, Any]:
+              include_descendants: bool = False,
+              reference_root: Path = REFERENCE_ROOT) -> dict[str, Any]:
     """**지금 색인할 수 있는** 자산과, 나머지가 왜 안 되는지.
 
     ★ 색인 조건이 조회 조건보다 엄격한 이유: 색인은 되돌릴 수 없다. 소유 조직·승인·추출 가능
@@ -483,7 +504,8 @@ def indexable(registry_path: Path = REGISTRY_PATH,
                     allowed.add(aid)
         assets = [a for a in assets if a.get("asset_id") in allowed]
     ready = []
-    blocked = {"no_owner": 0, "not_approved": 0, "conversion_required": 0,
+    blocked = {"no_owner": 0, "not_approved": 0, "approval_unsealed": 0,
+               "approval_invalid": 0, "conversion_required": 0,
                "encrypted": 0, "extraction_failed": 0}
     for a in assets:
         if not _owner_of(a):
@@ -502,6 +524,25 @@ def indexable(registry_path: Path = REGISTRY_PATH,
         if a.get("ingestion_status") == EXTRACTION_FAILED and not include_failed:
             blocked["extraction_failed"] += 1
             continue
+        # 승인 문자열만으로는 색인하지 않는다. 파일 바이트·조직 문맥·원장 사건을 함께
+        # 봉인한 판본이어야 한다. 2026-07-30 옛 승인 17건은 필드가 없으므로 재승인 대상이다.
+        if not all(str(a.get(key) or "").strip() for key in
+                   ("approved_sha256", "approval_fingerprint", "approval_event_id",
+                    "approval_tenant_id", "approval_scope_node_id",
+                    "approval_entity_mode")):
+            blocked["approval_unsealed"] += 1
+            continue
+        try:
+            from core.knowledge_asset_release import effective_asset
+            effective = effective_asset(
+                str(a.get("asset_id") or ""), registry_path=registry_path,
+                reference_root=reference_root)
+        except Exception:
+            blocked["approval_invalid"] += 1
+            continue
+        if not effective:
+            blocked["approval_invalid"] += 1
+            continue
         ready.append({"asset_id": a["asset_id"], "relative_path": a["relative_path"],
                       "pack_id": a["pack_id"], "owner_org_id": _owner_of(a),
                       "classification": a.get("classification", "INTERNAL"),
@@ -511,6 +552,10 @@ def indexable(registry_path: Path = REGISTRY_PATH,
         "note": ("색인에는 소유 조직 + 승인 + 추출 가능이 모두 필요합니다(색인은 되돌릴 수 "
                  "없습니다). "
                  + (f"승인 대기 {blocked['not_approved']}건 · " if blocked["not_approved"] else "")
+                 + (f"원장 재승인 필요 {blocked['approval_unsealed']}건 · "
+                    if blocked["approval_unsealed"] else "")
+                 + (f"승인 결속 점검 필요 {blocked['approval_invalid']}건 · "
+                    if blocked["approval_invalid"] else "")
                  + (f"소유 미지정 {blocked['no_owner']}건 · " if blocked["no_owner"] else "")
                  + (f"변환 필요 {blocked['conversion_required']}건 · "
                     if blocked["conversion_required"] else "")
@@ -592,7 +637,8 @@ def index_approved(reference_root: Path = REFERENCE_ROOT,
     assets = {a["asset_id"]: a for a in registry.get("assets", [])}
     # `force` 는 이전에 추출 실패한 자산도 다시 시도한다 — 파일을 변환해 올린 뒤 재시도하는
     #   경로가 있어야 실패 기록이 영구 사망 선고가 되지 않는다.
-    ready = indexable(registry_path, include_failed=force)["items"]
+    ready = indexable(registry_path, include_failed=force,
+                      reference_root=reference_root)["items"]
     if asset_ids:
         want = set(asset_ids)
         ready = [i for i in ready if i["asset_id"] in want]

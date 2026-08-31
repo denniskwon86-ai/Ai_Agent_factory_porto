@@ -173,7 +173,7 @@ export function KitOperationsPanel({ onClose, onOpenBuild, page = false }: Props
                     <button key={id} type="button" aria-pressed={active}
                       className={active ? 'primary-button' : 'secondary-button'}
                       onClick={() => setSelected(id)}>
-                      {row.label || row.kit_id || '이름 없는 적용본'}
+                      {row.label || '이름 미등록 적용본'}
                       <span style={{ opacity: .7, marginLeft: 6, fontSize: 11 }}>
                         {contextLabel(row.entity_mode)} · {instanceStatusLabel(row.status)}
                       </span>
@@ -204,7 +204,7 @@ export function KitOperationsPanel({ onClose, onOpenBuild, page = false }: Props
         <p>만들어진 앱이라도 계약과 인증 데이터가 준비되기 전에는 운영 앱이 아닙니다.</p>
       </div>}
       jarvis={<JarvisRail
-        contextTitle={selectedInstance?.label || selectedInstance?.kit_id || VIEW_TITLE[view].title}
+        contextTitle={selectedInstance?.label || VIEW_TITLE[view].title}
         contextDescription={selectedInstance
           ? '현재 선택한 업무키트 적용본과 그 안의 앱 상태를 기준으로 답합니다.'
           : '업무키트 적용본을 선택하면 해당 운영 문맥으로 답합니다.'}

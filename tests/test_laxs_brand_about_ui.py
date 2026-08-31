@@ -9,9 +9,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BRAND = ROOT / "frontend/public/brand/laxs-logo-primary-on-navy-v2.png"
-INVERSE = ROOT / "frontend/public/brand/laxs-logo-primary-on-white-v3.png"
+INVERSE = ROOT / "frontend/public/brand/laxs-logo-primary-on-white-v5.png"
 APPROVED_B_SHA256 = "6ffc8ad1004272cbcc09ac144d8f105bbdba2879d8987971e6f84f2dde1f63b8"
-INVERSE_SHA256 = "ea7cacebc3c665f70734c77689237236d4ec9a1b7dd2f9a85f70c84c537eb07c"
+INVERSE_SHA256 = "c867c197f94a0fbce5a3d3d00e2b2f46cfcc06277c79442e32e852c66ed11514"
 
 
 def _read(path: str) -> str:
@@ -27,7 +27,7 @@ def test_로그인은_밝은배경형_제품셸은_어두운배경형을_쓴다(
     login = _read("frontend/src/components/LoginPage.tsx")
     shell = _read("frontend/src/components/ProductShell.tsx")
     dark = "/brand/laxs-logo-primary-on-navy-v2.png"
-    light = "/brand/laxs-logo-primary-on-white-v3.png"
+    light = "/brand/laxs-logo-primary-on-white-v5.png"
 
     assert light in login and dark not in login
     assert dark in shell and light not in shell
@@ -40,7 +40,7 @@ def test_밝은배경_반전형도_고정되고_안내페이지에_두_버전이
     assert sha256(INVERSE.read_bytes()).hexdigest() == INVERSE_SHA256
     page = _read("frontend/src/components/SystemAboutPage.tsx")
     assert "/brand/laxs-logo-primary-on-navy-v2.png" in page
-    assert "/brand/laxs-logo-primary-on-white-v3.png" in page
+    assert "/brand/laxs-logo-primary-on-white-v5.png" in page
     assert "어두운 배경 기본형" in page
     assert "밝은 배경 반전형" in page
 

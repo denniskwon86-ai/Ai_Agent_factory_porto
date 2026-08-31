@@ -102,14 +102,73 @@ def _certify(store, workspace, *, key="LOG-02", rows=None, columns=None,
 def test_색인_대상은_다섯_계약키뿐이다():
     """⚠️ 넓히려면 Resolver·관계·계산이 함께 준비돼야 한다 — 표만 넓히면 「승인은 됐는데
     아무도 범위를 확인하지 않은 관계」가 생긴다."""
-    assert set(ix.CONTRACT_OBJECTS) == {"PRC-02", "LOG-02", "INV-01", "MFG-01", "SLS-01"}
+    assert set(ix.CONTRACT_OBJECTS) == {
+        "PRC-01", "PRC-02", "LOG-01", "LOG-02", "LOG-03", "LOG-04", "LOG-05",
+        "INV-01", "MFG-01", "MFG-02", "SLS-01", "FIN-01", "FIN-02", "FIN-03",
+    }
+
+
+def test_기준정보와_대외정보는_검증된_단일키_유형만_추가한다():
+    assert ix.REFERENCE_OBJECTS == {
+        "MDM-01": ("mdm", "material", "material_id"),
+        "MDM-02": ("mdm", "supplier", "supplier_id"),
+        "MDM-04": ("mdm", "location", "location_id"),
+        "MDM-06": ("mdm", "equipment", "equipment_id"),
+        "MDM-07": ("mdm", "account", "account_id"),
+        "MDM-08": ("mdm", "logistics-reference", "reference_id"),
+        "EXT-01": ("external", "external-observation", "observation_id"),
+        "EXT-02": ("external", "external-observation", "observation_id"),
+        "EXT-03": ("external", "external-observation", "observation_id"),
+    }
+    assert ix.COMPOSITE_REFERENCE_OBJECTS == {
+        "MDM-05": (("mdm", "bom-line", ("bom_id", "line_no")),),
+        "MDM-06": (("mdm", "routing-operation", ("routing_id", "operation_seq")),),
+    }
+    assert ix.object_id_for({"bom_id": "A|B", "line_no": "C"},
+                            ("bom_id", "line_no")) != ix.object_id_for(
+                                {"bom_id": "A", "line_no": "B|C"},
+                                ("bom_id", "line_no"))
+    # 사람용 명칭 정본이 없는 원가센터는 임의로 열지 않는다.
+    assert "cost-center" not in {value[1] for value in ix.REFERENCE_OBJECTS.values()}
+
+
+def test_구버전_인증판_색인_백필은_명시적이고_멱등이다(store, workspace):
+    rows = [{
+        "material_id": "MAT-1", "material_name": "시험 품목",
+        "material_type": "RAW", "base_uom": "TON",
+        "tenant_id": TENANT, "scope_node_id": SCOPE,
+    }]
+    columns = list(rows[0])
+    snapshot = _certify(
+        store, workspace, key="MDM-01", rows=rows, columns=columns,
+        tenant=TENANT, scope=SCOPE)
+
+    # 구버전처럼 인증판은 남았지만 파생 색인만 없는 상태를 재현한다.
+    with store.transaction() as conn:
+        conn.execute("DELETE FROM object_scope_index WHERE snapshot_id=?",
+                     (snapshot["snapshot_id"],))
+    assert ix.has_unmaterialized_snapshot(
+        store, "mdm", "material", TENANT, "VIRTUAL") is True
+
+    first = ix.backfill_supported_snapshots(store)
+    assert first["MDM-01"] == 1
+    assert ix.bound_to(store, snapshot["snapshot_id"]) == 1
+    assert ix.materialized_object_types(store)["mdm"] == ("material",)
+
+    second = ix.backfill_supported_snapshots(store)
+    assert second["MDM-01"] == 1
+    assert ix.bound_to(store, snapshot["snapshot_id"]) == 1
 
 
 def test_객체_유형은_계약의_하이픈_표기다():
     """★ 여기서 표기를 바꾸면 계약과 런타임이 **서로 다른 이름**을 부르게 된다."""
     types = {v[1] for v in ix.CONTRACT_OBJECTS.values()}
-    assert types == {"purchase-order-line", "shipment", "inventory-snapshot",
-                     "production-plan-line", "sales-line"}
+    assert types == {
+        "procurement-contract", "purchase-order-line", "partner-submission", "shipment",
+        "shipment-milestone", "customs-clearance", "transport-event", "inventory-snapshot",
+        "production-plan-line", "production-batch", "sales-line", "cost-record",
+        "finance-document", "ledger-line",
+    }
     assert all("_" not in t for t in types)
 
 
@@ -136,8 +195,8 @@ def test_인증하면_색인이_선다(store, workspace):
 
 
 def test_대상이_아닌_계약키는_색인하지_않는다(store, workspace):
-    """★ 0줄이 **정상**인 자리다 — 온톨로지 MVP 대상은 다섯뿐이다."""
-    snap = _certify(store, workspace, key="FIN-01")
+    """★ 0줄이 **정상**인 자리다 — 명시된 온톨로지 계약 밖의 자료다."""
+    snap = _certify(store, workspace, key="UNMAPPED-01")
     assert snap["state"] == m.DEMO_CERTIFIED
     assert ix.bound_to(store, snap["snapshot_id"]) == 0
 
@@ -311,8 +370,8 @@ def test_근거가_없으면_거부한다(store, workspace):
 
 
 def test_색인이_없는_판의_근거는_거부한다(store, workspace):
-    snap = _certify(store, workspace, key="FIN-01")
-    ok, why = ix.evidence_bound(store, ["FIN-01.amount"], snap["snapshot_id"])
+    snap = _certify(store, workspace, key="UNMAPPED-01")
+    ok, why = ix.evidence_bound(store, ["UNMAPPED-01.amount"], snap["snapshot_id"])
     assert not ok and "색인이 없습니다" in why
 
 

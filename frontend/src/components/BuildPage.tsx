@@ -19,7 +19,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useFactoryStore } from '../store/useFactoryStore';
-import { shortId } from '../lib/displayId';
 import { listInstances, listKitApps, type KitAppRow } from '../lib/dataPrepApi';
 import { HubShell, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
@@ -285,7 +284,7 @@ export function BuildPage({
   const selectedTitle = selectedRelease
     ? (kitApps[String(selectedRelease.release_id || '')]?.label
       || selectedRelease.project_name || '이름 없는 릴리스')
-    : selectedProject ? (selectedProject.name || selectedProject.id)
+    : selectedProject ? (selectedProject.name || '이름 미등록 프로젝트')
       : BUCKETS.find((item) => item.id === bucket)?.label || '앱 제작';
   const selectedObjectId = selectedRelease
     ? String(selectedRelease.release_id || '') : String(selectedProject?.id || '');
@@ -341,7 +340,7 @@ export function BuildPage({
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <input value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="이름 또는 ID로 찾기"
+            placeholder="업무 이름으로 찾기"
             style={{
               height: 38, minWidth: 220, padding: '0 12px', fontSize: 14, borderRadius: 6,
               border: '1px solid var(--surface-border)', background: 'var(--surface-card)',
@@ -391,7 +390,7 @@ export function BuildPage({
                     <span className="afs-master-selector-copy">
                       <small style={{ color: state.tone }}>{state.label}</small>
                       <strong>{displayName}</strong>
-                      <span>{kitApp?.app_id || shortId(releaseId)} · {localTime(row.created_at)}</span>
+                      <span>{localTime(row.created_at)}</span>
                     </span>
                     <span aria-hidden="true">›</span>
                   </button>
@@ -407,8 +406,8 @@ export function BuildPage({
                     </span>
                     <span className="afs-master-selector-copy">
                       <small>{project.is_mega_project ? '통합 프로젝트' : '제작 프로젝트'}</small>
-                      <strong>{project.name || project.id}</strong>
-                      <span>{project.id} · {pct === null ? '진행률 집계 전' : `${c}/${t} 단계 · ${pct}%`}</span>
+                      <strong>{project.name || '이름 미등록 프로젝트'}</strong>
+                      <span>{pct === null ? '진행률 집계 전' : `${c}/${t} 단계 · ${pct}%`}</span>
                     </span>
                     <span aria-hidden="true">›</span>
                   </button>
@@ -433,18 +432,13 @@ export function BuildPage({
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
                     padding: '10px 0', borderTop: '1px solid var(--surface-border)',
                     borderBottom: '1px solid var(--surface-border)' }}>
-                    {kitApp?.app_id && <span>업무 앱 {kitApp.app_id}</span>}
+                    {kitApp?.label && <span>업무 앱</span>}
                     <strong style={{ color: state.tone }}>{state.label}</strong>
                     <span style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>
                       게시 {localTime(selectedRelease.created_at)}
                     </span>
                   </div>
                   {state.detail && <p style={{ color: 'var(--surface-text-muted)' }}>{state.detail}</p>}
-                  <details style={{ fontSize: 12, color: 'var(--surface-text-faint)' }}>
-                    <summary style={{ cursor: 'pointer' }}>식별 정보</summary>
-                    <div style={{ fontFamily: 'var(--font-mono, monospace)', marginTop: 5 }}
-                         title={releaseId}>{shortId(releaseId)}</div>
-                  </details>
                   <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
                     <button className="primary-button"
                             onClick={() => onOpenRelease(releaseId)}>앱 실행</button>
@@ -470,15 +464,13 @@ export function BuildPage({
                   </small>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <h2 style={{ margin: '5px 0 3px', fontSize: 22 }}>
-                      {selectedProject.name || selectedProject.id}
+                      {selectedProject.name || '이름 미등록 프로젝트'}
                     </h2>
                     {selectedProject.is_mega_project && (
                       <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 8px',
                         borderRadius: 6, color: '#6d28d9', background: '#ede9fe' }}>통합</span>
                     )}
                   </div>
-                  <div style={{ color: 'var(--surface-text-faint)', fontSize: 12,
-                    fontFamily: 'var(--font-mono, monospace)' }}>{selectedProject.id}</div>
                   {selectedProject.initial_idea && (
                     <p style={{ margin: '14px 0', lineHeight: 1.6,
                       color: 'var(--surface-text-muted)' }}>{selectedProject.initial_idea}</p>

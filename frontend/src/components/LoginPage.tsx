@@ -85,7 +85,7 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (r: LoginResult) => void
         <div style={{ textAlign: 'center', marginBottom: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
             minHeight: 60 }}>
-            <img src="/brand/laxs-logo-primary-on-white-v3.png" alt={PRODUCT_NAME}
+            <img src="/brand/laxs-logo-primary-on-white-v5.png" alt={PRODUCT_NAME}
               style={{ display: 'block', width: 286, maxWidth: '86%', height: 'auto' }} />
           </div>
           <p className="afs-muted" style={{ fontSize: 14, lineHeight: 1.55, margin: '8px 0 0' }}>

@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import planning_drivers as dr
 from core import planning_engine as eng
+from core import planning_driver_release as driver_release
+from core.decision_ledger import DecisionLedger
 from core.planning_model import PLAN, PlanningError, PlanningStore
 
 
@@ -25,6 +27,10 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setattr("core.planning_model.planning_store", s)
     monkeypatch.setattr(dr, "planning_store", s)
     monkeypatch.setattr(eng, "planning_store", s)
+    monkeypatch.setattr(driver_release, "planning_store", s)
+    ledger = DecisionLedger(str(tmp_path / "ledger.db"))
+    monkeypatch.setattr(driver_release, "decision_ledger", ledger)
+    s._test_driver_ledger = ledger
     s.upsert_account("4000", "매출", "REVENUE", sign=1)
     s.upsert_account("5000", "원가", "COGS", sign=-1)
     s.upsert_account("6000", "판관비", "SGA", sign=-1)
@@ -105,8 +111,9 @@ def test_account_assumptions_pass_through(store):
 def _scenario(store, sid, target_kind, code, op, val):
     conn = store._connect()
     try:
-        conn.execute("INSERT INTO scenarios(scenario_id,name,org_id,created_at) VALUES(?,?,?,?)",
-                     (sid, sid, "MNM_BATTERY", "2026-07-29"))
+        conn.execute("INSERT INTO scenarios(scenario_id,name,org_id,tenant_id,"
+                     "owner_organization_id,entity_mode,created_at) VALUES(?,?,?,?,?,?,?)",
+                     (sid, sid, "MNM_BATTERY", "tenant-a", "node-a", "REAL", "2026-07-29"))
         conn.execute("INSERT INTO scenario_assumptions(assumption_id,scenario_id,target_kind,"
                      "target_code,operator,value,rationale,created_at) VALUES(?,?,?,?,?,?,?,?)",
                      (f"a-{sid}", sid, target_kind, code, op, val, "테스트", "2026-07-29"))
@@ -120,6 +127,10 @@ def test_engine_applies_driver_assumption(store):
     dr.register_driver("SALES_VOL", "판매량")
     dr.add_impact("SALES_VOL", "4000", 1.0, "비례", "실적회귀", "cfo")
     dr.add_impact("SALES_VOL", "5000", 0.8, "변동비 80%", "원가분석", "cfo")
+    driver_release.approve(
+        "SALES_VOL", "cfo@test.invalid", "파급계수 검토", tenant_id="tenant-a",
+        scope_node_id="node-a", entity_mode="REAL", store=store,
+        ledger=store._test_driver_ledger)
     _scenario(store, "vol-up", "driver", "SALES_VOL", "pct", 10)
 
     r = eng.run_scenario("vol-up", "MNM_BATTERY", "2027")
@@ -129,14 +140,43 @@ def test_engine_applies_driver_assumption(store):
     assert r["driver_warnings"] == []
 
 
-def test_engine_surfaces_driver_warning(store):
-    """매핑 없는 동인은 결과에 경고로 남는다 — 숫자가 안 변한 이유를 알 수 있어야 한다."""
+def test_execution_uses_the_sealed_impact_not_a_later_draft_edit(store):
+    dr.register_driver("SALES_VOL", "판매량")
+    dr.add_impact("SALES_VOL", "4000", 1.0, "비례", "실적회귀", "cfo")
+    driver_release.approve(
+        "SALES_VOL", "cfo@test.invalid", "검토", tenant_id="tenant-a",
+        scope_node_id="node-a", entity_mode="REAL", store=store,
+        ledger=store._test_driver_ledger)
+    conn = store._connect()
+    try:
+        conn.execute("UPDATE driver_impacts SET elasticity=9 WHERE driver_code='SALES_VOL'")
+        conn.commit()
+    finally:
+        conn.close()
+    _scenario(store, "sealed", "driver", "SALES_VOL", "pct", 10)
+    result = eng.run_scenario("sealed", "MNM_BATTERY", "2027")
+    assert result["result"]["operating_profit"] == 300.0
+
+
+def test_driver_release_from_another_scope_cannot_run(store):
+    dr.register_driver("SALES_VOL", "판매량")
+    dr.add_impact("SALES_VOL", "4000", 1.0, "비례", "실적회귀", "cfo")
+    driver_release.approve(
+        "SALES_VOL", "cfo@test.invalid", "검토", tenant_id="tenant-a",
+        scope_node_id="node-other", entity_mode="REAL", store=store,
+        ledger=store._test_driver_ledger)
+    _scenario(store, "wrong-scope", "driver", "SALES_VOL", "pct", 10)
+    with pytest.raises(PlanningError, match="조직 범위가 시나리오와 다릅니다"):
+        eng.run_scenario("wrong-scope", "MNM_BATTERY", "2027")
+
+
+def test_engine_blocks_driver_without_an_approved_release(store):
+    """미승인 동인을 0 변화로 접지 않는다 — 0은 영향 없음이라는 거짓 주장이다."""
     dr.register_driver("FX_RATE", "환율")
     _scenario(store, "fx", "driver", "FX_RATE", "pct", 10)
 
-    r = eng.run_scenario("fx", "MNM_BATTERY", "2027")
-    assert r["delta"]["net_profit"] == 0.0
-    assert r["driver_warnings"], "동인 경고가 결과에 실리지 않았다"
+    with pytest.raises(PlanningError, match="승인된 동인 판본"):
+        eng.run_scenario("fx", "MNM_BATTERY", "2027")
 
 
 def test_external_indicator_link_is_recorded_not_auto_injected(store):

@@ -81,6 +81,29 @@ CREATE TABLE IF NOT EXISTS master_records (
     PRIMARY KEY (master_code, version)
 );
 CREATE INDEX IF NOT EXISTS idx_records_type ON master_records(type_id, status);
+-- 신규 골든 레코드는 사용자가 코드를 직접 정해 곧바로 현행화하지 않는다.
+-- 업무 내용을 제안하고 데이터 관리자가 승인할 때 서버가 내부 정본 키를 발급한다.
+CREATE TABLE IF NOT EXISTS master_record_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    type_id     TEXT NOT NULL REFERENCES entity_types(type_id),
+    name        TEXT NOT NULL,
+    attributes  TEXT DEFAULT '{}',
+    domains     TEXT DEFAULT '[]',
+    aliases     TEXT DEFAULT '[]',
+    is_core     INTEGER DEFAULT 0,
+    rationale   TEXT DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending',
+    proposed_by TEXT NOT NULL,
+    reviewed_by TEXT DEFAULT '',
+    review_reason TEXT DEFAULT '',
+    reviewed_at TEXT DEFAULT '',
+    master_code TEXT DEFAULT '',
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_master_proposal_status
+    ON master_record_proposals(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_master_proposal_type
+    ON master_record_proposals(type_id, status);
 CREATE TABLE IF NOT EXISTS aliases (
     alias       TEXT NOT NULL,
     master_code TEXT NOT NULL,
@@ -645,6 +668,12 @@ class MasterData:
             n = conn.execute("SELECT COUNT(*) FROM master_records WHERE type_id=?", (type_id,)).fetchone()[0]
             if n:
                 raise MasterDataError(f"이 타입을 사용하는 레코드가 {n}건 있어 삭제할 수 없습니다.")
+            proposals = conn.execute(
+                "SELECT COUNT(*) FROM master_record_proposals WHERE type_id=?",
+                (type_id,)).fetchone()[0]
+            if proposals:
+                raise MasterDataError(
+                    f"이 타입을 참조하는 신규 정본 제안 이력이 {proposals}건 있어 삭제할 수 없습니다.")
             conn.execute("DELETE FROM entity_types WHERE type_id=?", (type_id,))
             conn.commit()
         finally:
@@ -787,6 +816,187 @@ class MasterData:
         self._invalidate()
         return self.get_record(master_code)
 
+    @staticmethod
+    def _proposal_row(row: sqlite3.Row) -> dict:
+        return {
+            "proposal_id": row["proposal_id"],
+            "type_id": row["type_id"],
+            "name": row["name"],
+            "attributes": _loads(row["attributes"], {}),
+            "domains": _loads(row["domains"], []),
+            "aliases": _loads(row["aliases"], []),
+            "is_core": bool(row["is_core"]),
+            "rationale": row["rationale"],
+            "status": row["status"],
+            "proposed_by": row["proposed_by"],
+            "reviewed_by": row["reviewed_by"],
+            "review_reason": row["review_reason"],
+            "reviewed_at": row["reviewed_at"],
+            "master_code": row["master_code"],
+            "created_at": row["created_at"],
+        }
+
+    @staticmethod
+    def _master_code_from_proposal(proposal_id: str) -> str:
+        """내부 제안 ID를 신규 정본 키로 바꾼다. 사용자 입력이나 명칭은 키에 넣지 않는다."""
+        from core.system_ids import is_system_id
+        if not is_system_id(proposal_id, "master_record"):
+            raise MasterDataError("신규 정본 제안 식별자가 발급 규칙과 일치하지 않습니다.")
+        return "MRC-" + proposal_id.split("_", 1)[1].upper()
+
+    def propose_record(self, type_id: str, name: str, *, attributes: dict = None,
+                       domains: list = None, aliases: list = None, is_core: bool = False,
+                       rationale: str = "", proposed_by: str) -> dict:
+        """코드 없이 신규 골든 레코드를 제안한다. 승인 전에는 주입·검색 대상이 아니다."""
+        if not (proposed_by or "").strip():
+            raise MasterDataError("제안자 식별이 필요합니다.")
+        if not (name or "").strip():
+            raise MasterDataError("name 은 필수입니다.")
+        for d in (domains or []):
+            self._check_type_or_domain(d, "domain")
+        attributes = attributes or {}
+        conn = self._connect()
+        try:
+            trow = conn.execute(
+                "SELECT attr_schema FROM entity_types WHERE type_id=?", (type_id,)).fetchone()
+            if not trow:
+                raise MasterDataError(f"존재하지 않는 type_id 입니다: {type_id}")
+            attr_errors = self._validate_attributes(attributes, _loads(trow["attr_schema"], {}))
+            if attr_errors:
+                raise MasterDataError("속성 검증 실패: " + "; ".join(attr_errors))
+            normalized = name.strip().casefold()
+            existing = conn.execute(
+                "SELECT 1 FROM master_record_proposals "
+                "WHERE type_id=? AND status='pending' AND lower(trim(name))=? LIMIT 1",
+                (type_id, normalized)).fetchone()
+            if existing:
+                raise MasterDataError("같은 유형·명칭의 검토 대기 제안이 이미 존재합니다.")
+            from core.system_ids import allocate
+            proposal_id = allocate("master_record")[0]
+            now = self._now()
+            conn.execute(
+                "INSERT INTO master_record_proposals("
+                "proposal_id,type_id,name,attributes,domains,aliases,is_core,rationale,status,"
+                "proposed_by,created_at) VALUES(?,?,?,?,?,?,?,?,'pending',?,?)",
+                (proposal_id, type_id, name.strip(),
+                 json.dumps(attributes, ensure_ascii=False),
+                 json.dumps(domains or [], ensure_ascii=False),
+                 json.dumps([a.strip() for a in (aliases or [])
+                             if isinstance(a, str) and a.strip()], ensure_ascii=False),
+                 1 if is_core else 0, (rationale or "").strip(), proposed_by.strip(), now))
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM master_record_proposals WHERE proposal_id=?", (proposal_id,)).fetchone()
+            return self._proposal_row(row)
+        finally:
+            conn.close()
+
+    def list_record_proposals(self, status: str = "pending") -> list:
+        wanted = (status or "pending").strip().lower()
+        if wanted not in {"pending", "approved", "rejected", "all"}:
+            raise MasterDataError("status 는 pending·approved·rejected·all 중 하나여야 합니다.")
+        conn = self._connect()
+        try:
+            if wanted == "all":
+                rows = conn.execute(
+                    "SELECT * FROM master_record_proposals ORDER BY created_at DESC").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM master_record_proposals WHERE status=? ORDER BY created_at DESC",
+                    (wanted,)).fetchall()
+            return [self._proposal_row(row) for row in rows]
+        finally:
+            conn.close()
+
+    def approve_record_proposal(self, proposal_id: str, *, reviewed_by: str,
+                                review_reason: str = "") -> dict:
+        """제안과 신규 현행판을 한 트랜잭션으로 확정한다. 승인 실패 시 둘 다 남지 않는다."""
+        if not (reviewed_by or "").strip():
+            raise MasterDataError("승인자 식별이 필요합니다.")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM master_record_proposals WHERE proposal_id=?", (proposal_id,)).fetchone()
+            if not row:
+                raise MasterDataError("존재하지 않는 신규 정본 제안입니다.")
+            if row["status"] != "pending":
+                raise MasterDataError("검토 대기 상태의 제안만 승인할 수 있습니다.")
+            if row["proposed_by"] == reviewed_by.strip():
+                raise MasterDataError("제안자는 자신의 신규 정본 제안을 승인할 수 없습니다.")
+            duplicate = conn.execute(
+                "SELECT 1 FROM master_records WHERE type_id=? AND lower(trim(name))=? "
+                "AND status='active' AND valid_to IS NULL LIMIT 1",
+                (row["type_id"], row["name"].strip().casefold())).fetchone()
+            if duplicate:
+                raise MasterDataError("같은 유형·정식 명칭의 현행 정본이 이미 존재합니다.")
+            trow = conn.execute(
+                "SELECT attr_schema FROM entity_types WHERE type_id=?", (row["type_id"],)).fetchone()
+            if not trow:
+                raise MasterDataError("제안이 참조한 기준정보 유형이 더 이상 존재하지 않습니다.")
+            attributes = _loads(row["attributes"], {})
+            attr_errors = self._validate_attributes(attributes, _loads(trow["attr_schema"], {}))
+            if attr_errors:
+                raise MasterDataError("승인 시점 속성 검증 실패: " + "; ".join(attr_errors))
+            master_code = self._master_code_from_proposal(proposal_id)
+            self._check_master_code(master_code)
+            now = self._now()
+            conn.execute(
+                "INSERT INTO master_records(master_code,type_id,name,attributes,domains,is_core,version,"
+                "valid_from,valid_to,supersedes,status,source,updated_at) "
+                "VALUES(?,?,?,?,?,?,1,?,NULL,NULL,'active','approved_proposal',?)",
+                (master_code, row["type_id"], row["name"], row["attributes"], row["domains"],
+                 row["is_core"], now, now))
+            all_aliases = {a.strip() for a in _loads(row["aliases"], [])
+                           if isinstance(a, str) and a.strip()}
+            all_aliases.add(row["name"].strip())
+            for alias in all_aliases:
+                conn.execute(
+                    "INSERT OR IGNORE INTO aliases(alias,master_code,source) VALUES(?,?,'approved_proposal')",
+                    (alias[:128], master_code))
+            conn.execute(
+                "UPDATE master_record_proposals SET status='approved',reviewed_by=?,review_reason=?,"
+                "reviewed_at=?,master_code=? WHERE proposal_id=?",
+                (reviewed_by.strip(), (review_reason or "").strip(), now, master_code, proposal_id))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        self._invalidate()
+        return {"proposal": next(p for p in self.list_record_proposals("approved")
+                                  if p["proposal_id"] == proposal_id),
+                "record": self.get_record(master_code)}
+
+    def reject_record_proposal(self, proposal_id: str, *, reviewed_by: str,
+                               review_reason: str) -> dict:
+        if not (reviewed_by or "").strip():
+            raise MasterDataError("검토자 식별이 필요합니다.")
+        if not (review_reason or "").strip():
+            raise MasterDataError("반려 사유를 입력하십시오.")
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM master_record_proposals WHERE proposal_id=?", (proposal_id,)).fetchone()
+            if not row:
+                raise MasterDataError("존재하지 않는 신규 정본 제안입니다.")
+            if row["status"] != "pending":
+                raise MasterDataError("검토 대기 상태의 제안만 반려할 수 있습니다.")
+            if row["proposed_by"] == reviewed_by.strip():
+                raise MasterDataError("제안자는 자신의 신규 정본 제안을 반려할 수 없습니다.")
+            now = self._now()
+            conn.execute(
+                "UPDATE master_record_proposals SET status='rejected',reviewed_by=?,review_reason=?,"
+                "reviewed_at=? WHERE proposal_id=?",
+                (reviewed_by.strip(), review_reason.strip(), now, proposal_id))
+            conn.commit()
+            updated = conn.execute(
+                "SELECT * FROM master_record_proposals WHERE proposal_id=?", (proposal_id,)).fetchone()
+            return self._proposal_row(updated)
+        finally:
+            conn.close()
+
     def retire_record(self, master_code: str) -> bool:
         """소프트 삭제(status=retired) — 물리 삭제 없음(리니지 보존)."""
         conn = self._connect()
@@ -852,6 +1062,28 @@ class MasterData:
                 ok += 1
             except Exception as e:
                 failed.append({"row": i + 1, "master_code": row.get("master_code", ""), "error": str(e)})
+        return {"imported": ok, "failed": failed, "total": len(rows)}
+
+    def import_proposal_rows(self, rows: list, type_id: str, *, proposed_by: str) -> dict:
+        """사용자 업로드용 일괄 제안. 코드 열을 받지 않고 모든 행을 승인 대기로 만든다."""
+        ok, failed = 0, []
+        for i, row in enumerate(rows):
+            try:
+                if (row.get("master_code") or "").strip():
+                    raise MasterDataError("master_code 는 입력하지 않습니다. 시스템이 승인 시 발급합니다.")
+                name = (row.get("name") or "").strip()
+                domains = [d.strip() for d in (row.get("domains") or "").split(";") if d.strip()]
+                aliases = [a.strip() for a in (row.get("aliases") or "").split(";") if a.strip()]
+                attrs = {}
+                for key, value in row.items():
+                    if key and key.startswith("attr:") and value not in (None, ""):
+                        attrs[key[5:]] = _coerce_scalar(value)
+                self.propose_record(
+                    type_id, name, attributes=attrs, domains=domains, aliases=aliases,
+                    rationale="CSV 일괄 제안", proposed_by=proposed_by)
+                ok += 1
+            except Exception as e:
+                failed.append({"row": i + 1, "error": str(e)})
         return {"imported": ok, "failed": failed, "total": len(rows)}
 
     # ── 캐시 + 결정론적 주입 ──────────────────────────────────────────

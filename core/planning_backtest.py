@@ -157,13 +157,21 @@ def _applied_facts(scenario_id: str, org_id: str, period: str,
 
     conn = planning_store._connect()
     try:
+        scenario = conn.execute(
+            "SELECT tenant_id,owner_organization_id,entity_mode FROM scenarios WHERE scenario_id=?",
+            (scenario_id,)).fetchone()
         assumptions = [dict(r) for r in conn.execute(
             "SELECT * FROM scenario_assumptions WHERE scenario_id=? ORDER BY assumption_id",
             (scenario_id,))]
     finally:
         conn.close()
     baseline = planning_store.list_facts(org_id=org_id, period=period, value_kind=baseline_kind)
-    expanded, _ = expand_assumptions(assumptions)
+    if not scenario:
+        raise PlanningError(f"존재하지 않는 시나리오입니다: {scenario_id}")
+    expanded, _ = expand_assumptions(
+        assumptions, tenant_id=str(scenario["tenant_id"] or ""),
+        scope_node_id=str(scenario["owner_organization_id"] or ""),
+        entity_mode=str(scenario["entity_mode"] or ""))
     applied, _ = apply_assumptions(baseline, expanded)
     return applied
 

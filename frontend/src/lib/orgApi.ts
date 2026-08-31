@@ -104,7 +104,7 @@ export const orgApi = {
     return e.data;
   },
 
-  createDept: (body: { dept_id: string; name_ko: string; parent_id?: string }) =>
+  createDept: (body: { name_ko: string; parent_id?: string }) =>
     closedLoopEnvelopeFetch<Dept>('POST', `${O}/departments`, body),
 
   updateDept: (deptId: string, body: Partial<Pick<Dept,

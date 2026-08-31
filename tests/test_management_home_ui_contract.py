@@ -164,7 +164,8 @@ def test_경로계산_안건을_시뮬레이션_연결없음으로_오표시하�
     hub = _read("frontend/src/features/collaboration/CollaborationHub.tsx")
 
     assert "d.evidence?.query_id" in center
-    assert "`경로 계산 ${queryId.slice(0, 14)}`" in center
+    assert "'업무 영향 경로 계산'" in center
+    assert "queryId.slice(0, 14)" not in center
     assert "시뮬레이션 ${d.simulation_run_id || '(연결 없음)'}" not in center
     assert "시뮬레이션 결과를 하나의 Decision Package" not in center
     assert "시뮬레이션 결과를 하나의 문서" not in center
@@ -184,6 +185,12 @@ def test_결정과_발간은_구조화값을_JSON_한줄이_아닌_공통_카드
     assert "structured-value-card" in renderer
     assert "delta_pct: '변화율'" in renderer
     assert ".structured-value-kv > div" in css
+    assert "internalReference(key)" in renderer
+    assert "key.endsWith('_id')" in renderer
+    assert "key.endsWith('_ids')" in renderer
+    assert "key.endsWith('_code')" in renderer
+    assert "`${value.length}개 결속됨`" in renderer
+    assert "key === 'key' && typeof record.label === 'string'" in renderer
 
 
 def test_발간물_대량목록은_전체건수를_유지한채_20건씩_나눠_보여준다():
@@ -238,7 +245,7 @@ def test_LAXS_확정_B안이_제품셸과_로그인에_적용되고_파비콘은
     index = _read("frontend/index.html")
 
     approved = '/brand/laxs-logo-primary-on-navy-v2.png'
-    inverse = '/brand/laxs-logo-primary-on-white-v3.png'
+    inverse = '/brand/laxs-logo-primary-on-white-v5.png'
     assert approved in shell
     assert '>AF</i>' not in shell
     assert inverse in login and approved not in login
@@ -427,12 +434,123 @@ def test_릴리스_상세는_키트_앱_이름과_운영상태를_앞세우고_�
     assert "listKitApps" in page
     assert "kitApp?.label || row.project_name" in page
     assert "kitApp?.label || selectedRelease.project_name" in page
-    assert "업무 앱 {kitApp.app_id}" in page
+    assert "업무 앱 {kitApp.app_id}" not in page
+    assert "{selectedRelease.release_id}" not in page
+    assert "{selectedProject.id}" not in page
     assert "운영 중" in page and "운영 후보" in page
     assert "게시 {localTime(selectedRelease.created_at)}" in page
-    assert "<summary style={{ cursor: 'pointer' }}>식별 정보</summary>" in page
+    assert "<summary style={{ cursor: 'pointer' }}>식별 정보</summary>" not in page
     assert ">앱 실행</button>" in page
     assert ">릴리스 관리</button>" in page
+
+
+def test_워크스페이스는_릴리스와_프로젝트_id를_직접_입력받지_않는다():
+    panel = _read("frontend/src/components/WorkspacePanel.tsx")
+    app = _read("frontend/src/App.tsx")
+
+    assert 'aria-label="점검할 릴리스"' in panel
+    assert 'placeholder="release_id"' not in panel
+    assert 'placeholder="project_id' not in panel
+    assert "releaseOptions.find" in panel
+    assert "releaseOptions={releases.filter" in app
+    assert 'aria-label="소유 조직"' in panel
+    assert 'aria-label="공유 대상 조직"' in panel
+    assert 'placeholder="소유 조직"' not in panel
+    assert 'placeholder="공유 대상 조직"' not in panel
+    assert "scopeLabel(s.to_scope)" in panel
+
+
+def test_협업_전달은_사람용_릴리스_이름을_선택하고_내부_id를_보이지_않는다():
+    hub = _read("frontend/src/features/collaboration/CollaborationHub.tsx")
+
+    assert "releaseOptions: CollaborationReleaseOption[]" in hub
+    assert "r.label || '이름 미등록 앱'" in hub
+    assert 'placeholder="release_id"' not in hub
+    assert "{d.release_id}</b>" not in hub
+    assert "{a.release_id} ·" not in hub
+    assert "받는 사람 계정" not in hub
+    assert "조직 사용자 선택" in hub
+    assert "orgApi.users()" in hub
+    assert "계정 코드를 직접 입력해 우회할 수 없습니다" in hub
+    assert "{d.sender_user_id}</b>" not in hub
+    assert "{d.recipient_user_id}</b>" not in hub
+    assert "{a.source_user_id || '확인 불가'}" not in hub
+    assert "userName(d.sender_user_id)" in hub
+    assert "userName(d.recipient_user_id)" in hub
+    assert "deptName(d.sender_dept_id)" in hub
+
+
+def test_발간화면은_원천과_검토자를_내부_id가_아닌_사람용_이름으로_보여준다():
+    publication = _read("frontend/src/features/collaboration/PublicationCenter.tsx")
+    hub = _read("frontend/src/features/collaboration/CollaborationHub.tsx")
+
+    assert "<PublicationCenter onJarvis={setPubCtx} userName={userName}" in hub
+    assert "decisionNames.get(p.source_id)" in publication
+    assert "description={`${PUB_TYPE_KO[p.publication_type] || p.publication_type} · 원천 ${sourceName}`}" in publication
+    assert "userName(r.reviewer_id)" in publication
+    assert "원본({p.supersedes_id})" not in publication
+    assert "${current.source_type} ${current.source_id}" not in publication
+
+
+def test_경영계획은_조직_시나리오_계정코드를_사람용_이름으로_대체한다():
+    panel = _read("frontend/src/components/PlanningPanel.tsx")
+
+    assert 'placeholder="조직 코드"' not in panel
+    assert 'aria-label="계획 조직"' in panel
+    assert "fetchOrgNodeOptions()" in panel
+    assert "candidate.code === id || candidate.node_id === id" in panel
+    assert "조직 코드를 직접 입력해 우회할 수 없습니다" in panel
+    assert "{s.scenario_id}</span>" not in panel
+    assert "scenarioNames.get(s.scenario_id)" in panel
+    assert "<td>{r.account_code}</td>" not in panel
+    assert "accountName(r.account_code)" in panel
+    assert "approverName(apprV.approved_by)" in panel
+
+
+def test_에이전트_거버넌스는_조직과_사람과_자산_id를_표시명으로_대체한다():
+    panel = _read("frontend/src/components/AgentGovernancePanel.tsx")
+
+    assert "fetchOrgNodeOptions().then(setOrgNodes)" in panel
+    assert "orgApi.users().then" in panel
+    assert "a.name_ko || a.asset_id" not in panel
+    assert "scopeName(a.owner_scope_id)" in panel
+    assert "personName(a.approved_by)" in panel
+    assert "personName(a.created_by)" in panel
+    assert "personName(a.promotion_requested_by)" in panel
+    assert "ctx.tenantId ? ` · ${ctx.tenantId}`" not in panel
+
+
+def test_지식_원본등록부는_팩과_조직과_승인자를_표시명으로_보여준다():
+    panel = _read("frontend/src/components/KnowledgeHubPanel.tsx")
+
+    assert "<ReferenceTable packs={packs || []}" in panel
+    assert "packName(open.pack_id)" in panel
+    assert "scopeName(a.scope_code)" in panel
+    assert "scopeName(a.owner_org_id)" in panel
+    assert "personName(open.approved_by)" in panel
+    assert "{open.pack_id || '지식팩 미지정'}" not in panel
+    assert "{open.scope_code || '미지정'}" not in panel
+    assert "{a.owner_org_id || '미지정'}" not in panel
+
+
+def test_회사_연결구성은_단계_코드를_입력받지_않고_회사_id도_보이지_않는다():
+    panel = _read("frontend/src/components/CompanySetupPanel.tsx")
+
+    assert "allocateSystemIds('process_stage')" in panel
+    assert 'placeholder="단계 코드"' not in panel
+    assert "{ctx.company}</span>" not in panel
+    assert "companyId || '회사 ID 확인 불가'" not in panel
+    assert "원본 {e.base_entity_id}" not in panel
+    assert "selected_object_label: ctx.companyName" in panel
+
+
+def test_자비스는_서버_문맥_id_대신_사람용_이름을_표시한다():
+    rail = _read("frontend/src/design/JarvisRail.tsx")
+    api = _read("frontend/src/lib/jarvisApi.ts")
+
+    assert "selected_object_label?: string" in api
+    assert "context.selected_object_label || contextTitle" in rail
+    assert "<dd>{context.selected_object_id\n                  ||" not in rail
 
 
 def test_릴리스_관리도_사람용_이름_상태_시각을_우선하고_감사원문은_보존한다():
@@ -598,6 +716,18 @@ def test_1280_세로스크롤바가_생겨도_경영홈은_가로로_넘치지_�
     assert "grid-template-columns:252px minmax(0,1fr) 320px" in responsive
 
 
+def test_좁은_화면에서는_영향카드가_결정_행동을_덮지_않는다():
+    css = _read("frontend/src/design/enterprise-canvas.css")
+
+    responsive = css.split("@media(max-width:900px){", 1)[1].split("\n}", 1)[0]
+    assert "grid-template-columns:180px minmax(0,1fr) 260px" in responsive
+    assert "grid-template-rows:minmax(0,1fr) 72px" in responsive
+    assert "height:286px" in responsive
+    assert ".le-canvas .impact{" in responsive
+    assert "grid-template-columns:repeat(4,minmax(0,1fr))" in responsive
+    assert ".le-canvas .impact{display:none}" not in responsive
+
+
 def test_DATA_SW_TWIN은_업무단계가_아니라_보조정보_레이어로_설명된다():
     page = _read("frontend/src/components/EnterprisePage.tsx")
 
@@ -701,6 +831,181 @@ def test_지식은_모달이_아닌_독립_제품화면에서_근거형_자비�
     assert "if (page) return hub;" in panel
 
 
+def test_에이전트_화면은_워크플로우_템플릿을_먼저_선택하게_한다():
+    panel = _read("frontend/src/components/AgentMasterPanel.tsx")
+    store = _read("frontend/src/store/useFactoryStore.ts")
+
+    assert "useState<View>('templates')" in panel
+    menu = panel.split("const railItems: RailItem[] = [", 1)[1].split("];", 1)[0]
+    assert menu.index("id: 'templates'") < menu.index("id: 'agents'") < menu.index("id: 'flow'")
+    assert "에이전트 셋을 먼저 고른다" in menu
+    assert "const [confirmedTemplateId, setConfirmedTemplateId]" in panel
+    assert "id !== 'templates' && !selectionReady" in panel
+    assert "먼저 워크플로우 템플릿을 선택하십시오" in panel
+    assert "selectedId={confirmedTemplateId || ''}" in panel
+    assert "agentRegistry: null, agentRegistryError:" in store
+    assert "selectEditingTemplate: (id: string) => Promise<boolean>" in store
+    assert "if (dirty) { switchTpl.ask(tid); return; }" in panel
+    assert 'title="저장하지 않은 변경이 사라집니다"' in panel
+    assert "이미 이 템플릿에 결속된 프로젝트도 새 실행과" in panel
+
+
+def test_새_에이전트는_선택한_템플릿_편집판에만_추가된다():
+    panel = _read("frontend/src/components/AgentMasterPanel.tsx")
+
+    assert "＋ 새 에이전트" in panel
+    assert "if (!selectionReady)" in panel
+    assert "allocateSystemIds('agent')" in panel
+    assert "existingAgent.name_ko" in panel
+    assert 'label="에이전트 식별자"' not in panel
+    assert "agents: [...(d?.agents || []), next]" in panel
+    assert "setSelectedAgentId(id)" in panel
+    assert "실행 흐름에서 연결하고 변경사항을 저장하십시오" in panel
+
+
+def test_프로젝트_생성은_이름만_받고_내부_id를_화면에서_받지_않는다():
+    dialog = _read("frontend/src/components/BuildStartDialog.tsx")
+    advisor = _read("frontend/src/components/AdvisorPanel.tsx")
+    api = _read("frontend/src/lib/advisorApi.ts")
+    store = _read("frontend/src/store/useFactoryStore.ts")
+
+    assert "업무 이름" in dialog
+    assert "projectName" in dialog
+    assert "업무 식별자" not in dialog
+    create_block = store.split("createProject: async", 1)[1].split("createMegaProject:", 1)[0]
+    assert "project_id:" not in create_block
+    assert "project_name: name" in store
+    assert "새 프로젝트 ID" not in advisor
+    assert "createdProjectId" in advisor
+    assert "JSON.stringify({ project_name, template_id })" in api
+
+
+def test_company_knowledge_and_format_creation_use_central_hidden_ids():
+    company = _read("frontend/src/components/CompanySetupPanel.tsx")
+    knowledge = _read("frontend/src/components/KnowledgeHubPanel.tsx")
+    output_format = _read("frontend/src/components/FormatMasterPanel.tsx")
+    node = _read("frontend/src/components/AgentFlow/AgentNode.tsx")
+
+    assert "allocateSystemIds('company')" in company
+    assert "회사 식별자" not in company
+    assert "{t.tenant_id}</span>" not in company
+    assert "allocateSystemIds('knowledge_pack')" in knowledge
+    assert 'label="팩 ID"' not in knowledge
+    assert "allocateSystemIds('output_format')" in output_format
+    assert "새로운 포맷 ID" not in output_format
+    assert "{data.id}" not in node
+
+
+def test_지식_작업_시뮬레이션_화면은_내부_id를_사람용_표기로_대체한다():
+    knowledge = _read("frontend/src/components/KnowledgeHubPanel.tsx")
+    control = _read("frontend/src/components/ControlPanel.tsx")
+    hotl = _read("frontend/src/components/HOTLInput.tsx")
+    scenario = _read("frontend/src/components/ScenarioPanel.tsx")
+    baseline = _read("frontend/src/components/BaselinePicker.tsx")
+
+    assert "p.pack_id.toLowerCase().includes(q)" not in knowledge
+    assert "팩 ID·이름만 찾습니다" not in knowledge
+    assert "meta: `${p.pack_id}" not in knowledge
+    assert "{ label: '팩 ID', value: pack.pack_id }" not in knowledge
+    assert "<th>Task ID</th>" not in control
+    assert "{task.task_id}</span>" not in control
+    assert "타겟 태스크(Task ID)" not in hotl
+    assert "현재 프로젝트 ID" not in hotl
+    assert "Snapshot ID 를 지정" not in scenario
+    assert "value: pick.instanceId" not in scenario
+    assert "{it.scope_node_id}" not in baseline
+    assert "{it.label || it.kit_id}" not in baseline
+
+
+def test_결정_보고는_참여자와_담당자를_조직_표시명으로_선택한다():
+    center = _read("frontend/src/features/collaboration/DecisionCenter.tsx")
+
+    assert "orgApi.users()" in center
+    assert 'placeholder="사용자 ID' not in center
+    assert 'placeholder="담당자 ID"' not in center
+    assert "personName(p.user_id)" in center
+    assert "personName(a.owner_user_id)" in center
+    assert "계정 문자열을 직접 입력해 우회하지 않습니다" in center
+    assert "담당자 계정을 직접 입력하지 않습니다" in center
+    assert 'placeholder="run_id"' not in center
+    assert 'htmlFor="nc-base"' not in center
+    assert 'htmlFor="nc-scn"' not in center
+    assert "내부 식별자를 직접 입력해 우회하지 않습니다" in center
+    assert "decisionApi.sources()" in center
+    assert "selectedSource.scenario_label" in center
+    assert "selectedSource.baseline_label" in center
+    assert "baseline_id: head" not in center
+    assert "scenario_id: head" not in center
+
+
+def test_이름없는_조직_키트_작업은_내부_ID를_대체표기로_쓰지_않는다():
+    asset = _read("frontend/src/components/AgentAssetWizard.tsx")
+    prep = _read("frontend/src/components/DataPrepPanel.tsx")
+    operations = _read("frontend/src/components/KitOperationsPanel.tsx")
+    context = _read("frontend/src/components/OperatingContextSwitcher.tsx")
+    company_bar = _read("frontend/src/components/CompanyContextBar.tsx")
+    quality = _read("frontend/src/components/QualityOutcomesView.tsx")
+
+    assert "ownerScopeLabel" in asset
+    assert "d.owner_scope_id || '미지정'" not in asset
+    assert "instance?.label || instance?.kit_id" not in prep
+    assert "instance.scope_node_id || '미상'" not in prep
+    assert "it.label || it.kit_id" not in prep
+    assert "selectedInstance?.label || selectedInstance?.kit_id" not in operations
+    assert "d.name_ko || d.dept_id" not in context
+    assert "d.name_ko || d.dept_id" not in company_bar
+    assert "{o.task_id}</span>" not in quality
+
+
+def test_조직_화면은_부서와_범위의_내부_id를_직접_입력시키지_않는다():
+    panel = _read("frontend/src/components/OrgChartPanel.tsx")
+    api = _read("frontend/src/lib/orgApi.ts")
+
+    assert 'label="부서 코드"' not in panel
+    assert 'aria-label="조직 범위 코드"' not in panel
+    assert "fetchOrgNodes()" in panel
+    assert "scopeLabel(selectedDept.scope_node_id" in panel
+    assert "<option key={d.dept_id} value={d.dept_id}>{d.name_ko}</option>" in panel
+    assert "createDept: (body: { name_ko: string; parent_id?: string })" in api
+    assert "dept_id: deptForm" not in panel
+    # 사용자 계정은 SSO/사내 메일 정체성이므로 시스템 임의 채번 대상이 아니다.
+    assert 'label="계정"' in panel and "사내 메일 주소를 그대로 씁니다" in panel
+
+
+def test_데이터_준비_화면은_적용본_id를_입력하거나_노출하지_않는다():
+    panel = _read("frontend/src/components/DataPrepPanel.tsx")
+
+    assert 'aria-label="패키지 적용 식별자"' not in panel
+    assert 'placeholder="적용 식별자"' not in panel
+    assert "shortId(it.instance_id)" not in panel
+    assert "title={it.instance_id}" not in panel
+    assert "instances.map" in panel and "openInstance(it.instance_id)" in panel
+
+
+def test_앱_제작_목록은_내부_프로젝트와_릴리스_id를_노출하지_않는다():
+    page = _read("frontend/src/components/BuildPage.tsx")
+
+    assert 'placeholder="업무 이름으로 찾기"' in page
+    assert "project.name || '이름 미등록 프로젝트'" in page
+    assert "{project.id} ·" not in page
+    assert "{selectedProject.id}</div>" not in page
+    assert "shortId(releaseId)" not in page
+    assert "title={releaseId}" not in page
+
+
+def test_integrated_project_creation_sends_name_not_user_chosen_id():
+    app = _read("frontend/src/App.tsx")
+    store = _read("frontend/src/store/useFactoryStore.ts")
+    mega = store.split("createMegaProject: async", 1)[1].split("stopSprint:", 1)[0]
+    copy = store.split("copyProject: async", 1)[1].split("// 🗑️", 1)[0]
+
+    assert "r.isMega" in app and "createMegaProject(r.projectName" in app
+    assert "mega_project_name: name" in mega
+    assert "mega_project_id:" not in mega
+    assert "new_project_name: newName" in copy
+    assert "new_project_id:" not in copy
+
+
 def test_지식화면에서_원문_온톨로지_대외지표를_직접_확인한다():
     app = _read("frontend/src/App.tsx")
     panel = _read("frontend/src/components/KnowledgeHubPanel.tsx")
@@ -712,6 +1017,9 @@ def test_지식화면에서_원문_온톨로지_대외지표를_직접_확인한
 
     assert "'contents'" in panel and "지식 내용 확인" in panel
     assert "documentContent" in api and "/content?offset=" in api
+    assert "function formatExtractedContent(value: string)" in panel
+    assert "(?:slide|page)" in panel
+    assert "formatExtractedContent(content.value?.content || '')" in panel
     assert "<OntologyExplorerView />" in panel
     assert "ontologyApi.impact(root, asOf)" in ontology
     assert "승인된 의미만 표시합니다" in ontology
@@ -793,6 +1101,22 @@ def test_에이전트는_독립_제품화면에서_저장상태와_사람확인_
     assert "agent-master-detail-layout" in panel
     assert "변경사항 저장" in panel
     assert "사람 확인 지점은 통제입니다" in panel
+    assert "추가하고 싶은 기능" in panel
+    assert "AI로 에이전트 후보 추천" in panel
+    assert "선택한 후보를 편집판에 추가" in panel
+    assert "/api/v1/factory/ai-recommend/pipeline" in panel
+    assert "const runRecommendAgents" in panel
+    assert "const addRecommendedAgents" in panel
+    assert "is_start: false" in panel and "is_end: false" in panel
+    assert "기존 에이전트는 다시 만들지 마십시오" in panel
+    assert "실행 흐름에서 연결을 정한 뒤" in panel
+    id_api = _read("frontend/src/lib/systemIdApi.ts")
+    assert "/api/v1/factory/identifiers/allocate" in id_api
+    assert 'label="에이전트 식별자"' not in panel
+    assert 'label="새 템플릿 식별자"' not in panel
+    assert "<code>{candidate.id}</code>" not in panel
+    assert "내부 식별자는 시스템이 자동" in panel
+    assert '<span className="text-xs font-mono' not in detail
     assert "if (page) return hub;" in panel
     assert ".afs-scope .agent-page-actions" in css
     assert ".afs-scope .agent-master-detail-layout" in css
@@ -1084,7 +1408,8 @@ def test_회사구성은_일반사용자에게_쓰기행동을_약속하지_않�
     assert "const canEdit = Boolean(actorScope?.canEditOrg)" in panel
     assert "조직 편집 권한이 없어 회사 구성을 조회만 할 수 있습니다" in panel
     assert "available_actions: !canEdit" in panel
-    assert "disabled={!canEdit || !id.trim()" in panel
+    assert "disabled={!canEdit || !name.trim()" in panel
+    assert "allocateSystemIds('company')" in panel
     assert "disabled={!canEdit || !!busy || rows.length === 0" in panel
     assert 'aria-label="환경설정" title="환경설정"' in shell
     assert 'aria-label="환경설정 · 관리자"' not in shell
@@ -1105,3 +1430,90 @@ def test_U6_LLM_텔레메트리는_에이전트_제품셸_아래_독립페이지
     assert "layoutClassName={page ? 'product-page-shell' : ''}" in panel
     assert "<JarvisRail" in panel
     assert "cost_is_lower_bound" in panel
+
+
+def test_대외조사_프로필은_내부_ID를_입력하거나_업무화면에_노출하지_않는다():
+    panel = _read("frontend/src/components/ExternalIntelligenceView.tsx")
+    api = _read("frontend/src/lib/externalIntelligenceApi.ts")
+
+    assert "listEntities()" in panel and "orgApi.users()" in panel
+    assert 'label="조사 대상 회사"' in panel
+    assert 'label="조사 담당자"' in panel
+    assert 'label="법인 ID"' not in panel
+    assert 'label="담당자 ID"' not in panel
+    assert 'placeholder="예: corp-ls-mnm"' not in panel
+    assert "{p.legal_entity_id}" not in panel
+    assert "{p.owner_id}" not in panel
+    assert "ownerNameById.get(p.owner_id)" in panel
+    assert "entityNameById.get(p.legal_entity_id)" in panel
+    assert "'profile_id' | 'status'" in api
+
+
+def test_대외조사_지표와_원천은_이름으로_선택하고_외부근거는_ID로_오해시키지_않는다():
+    panel = _read("frontend/src/components/ExternalIntelligenceView.tsx")
+
+    assert "required_indicators: e.target.checked" in panel
+    assert "등록부 코드 기준, 쉼표로 구분합니다" not in panel
+    assert "FX_USDKRW" not in panel
+    assert 'label="원천 근거 위치"' in panel
+    assert "공표문서 URL·표·행 위치" in panel
+    assert 'label="원천 레코드 참조"' not in panel
+    assert "sourceNameById.get(o.source_id)" in panel
+
+
+def test_출력양식과_대체프로그램은_내부_ID를_표시하거나_직접_입력시키지_않는다():
+    formats = _read("frontend/src/components/FormatMasterPanel.tsx")
+    programs = _read("frontend/src/components/ProgramAdminPanel.tsx")
+
+    assert "allocateSystemIds('output_format')" in formats
+    assert "ID: <span" not in formats
+    assert "{f.id}</div>" not in formats
+    assert "내부 식별자는 시스템이 자동으로 관리합니다" in formats
+    assert "replacementOptions" in programs
+    assert '<select id="pa-replacement"' in programs
+    assert "대체 프로그램 식별자" not in programs
+    assert "placeholder=\"예: myapp_" not in programs
+    assert "대체 프로그램: {replacementLabel}" in programs
+
+
+def test_크로스워크_연계시스템은_이름만_받고_내부_ID를_자동발급한다():
+    panel = _read("frontend/src/components/CrosswalkPanel.tsx")
+
+    assert "allocateSystemIds('external_system')" in panel
+    assert "system_id (예: sap, mes)" not in panel
+    assert "system_id 를 입력하십시오" not in panel
+    assert "시스템 이름 (예: SAP ERP)" in panel
+    assert "내부 식별자는 시스템이 자동으로 발급하고 관리합니다" in panel
+    assert "{s.system_id}</span>" not in panel
+    assert "{selSys.system_id}" not in panel
+
+
+def test_기준정보_유형은_이름만_받고_내부_ID를_자동발급한다():
+    panel = _read("frontend/src/components/MasterDataPanel.tsx")
+
+    assert "allocateSystemIds('master_type')" in panel
+    assert 'label="type_id"' not in panel
+    assert "typeForm.id" not in panel
+    assert 'value="시스템 자동 발급" readOnly' in panel
+    assert "{t.name_ko} ({t.type_id})" not in panel
+    assert "{t.name_ko}</option>" in panel
+
+
+def test_기준정보_주입범위는_조직_ID가_아니라_실제_조직명으로_선택한다():
+    panel = _read("frontend/src/components/MasterDataPanel.tsx")
+
+    assert "fetchOrgNodes()" in panel
+    assert "(orgNodes as FlatNode[]).filter((node) => node.readable)" in panel
+    assert 'label="조직 범위"' in panel
+    assert "ECM 노드 ID를 지정" not in panel
+    assert 'placeholder="예: MNM_BATTERY"' not in panel
+
+
+def test_에이전트_자산_소유조직은_조직_ID를_직접_입력하지_않는다():
+    wizard = _read("frontend/src/components/AgentAssetWizard.tsx")
+
+    assert "fetchOrgNodes()" in wizard
+    assert "orgNodes.filter((node) => node.readable)" in wizard
+    assert 'placeholder={ctx.scopeNodeId' not in wizard
+    assert "조직 노드 id" not in wizard
+    assert "현재 실행 조직" in wizard

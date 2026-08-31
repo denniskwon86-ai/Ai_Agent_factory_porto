@@ -958,6 +958,7 @@ class OntologyRuntime:
             **self._identity(subject))
 
         seen: Dict[str, ObjectRef] = {}
+        descriptors: Dict[str, dict] = {}
         for edge in edges:
             for ref in (self._subject_ref(edge), self._object_ref(edge)):
                 if want_ns and ref.namespace != want_ns:
@@ -967,11 +968,15 @@ class OntologyRuntime:
                 if ref.key in seen:
                     continue
                 #: ★ 끝점마다 가시성을 본다 — 관계가 보인다고 양 끝이 다 보이는 것은 아니다.
-                if not self._object_visible(subject, ref, ctx, {}):
+                if not self._object_visible(subject, ref, ctx, {}, descriptors):
                     continue
                 seen[ref.key] = ref
 
-        items = [seen[k].to_dict() for k in sorted(seen)]
+        items = []
+        for key in sorted(seen):
+            item = seen[key].to_dict()
+            item.update(descriptors.get(key, {"display_name": "", "display_fingerprint": ""}))
+            items.append(item)
         return {
             "as_of": instant,
             #: ⚠️ 잘렸으면 **잘렸다고 말한다.** 말하지 않으면 사용자는 목록이 전부라고 믿는다.
@@ -1225,7 +1230,8 @@ class OntologyRuntime:
 
     def _object_visible(self, subject: app_policy.Subject, ref: ObjectRef,
                         ctx: ontology_resolve.ResolveContext,
-                        bindings: Optional[dict] = None) -> bool:
+                        bindings: Optional[dict] = None,
+                        descriptors: Optional[dict] = None) -> bool:
         """끝점 하나가 **이 문맥에서 보이는가.**
 
         ## 판정표 (2026-08-20 §7-0 · Supervisor 확정)
@@ -1268,6 +1274,11 @@ class OntologyRuntime:
                 #: ⚠️ 나중에 다시 물으면 그 사이에 판이 바뀔 수 있고, 그러면 화면이
                 #:   가리키는 판과 실제로 본 판이 갈라진다 — 둘 다 그럴듯하다.
                 bindings[ref.key] = res.snapshot_id
+            if allowed and descriptors is not None:
+                descriptors[ref.key] = {
+                    "display_name": res.display_name,
+                    "display_fingerprint": res.display_fingerprint,
+                }
             return allowed
 
         if res.status in (ontology_resolve.NOT_FOUND, ontology_resolve.UNBOUND):

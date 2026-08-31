@@ -22,6 +22,8 @@ export type PLResult = {
 
 export type ScenarioRun = {
   run_id: string;
+  /** 서버가 발급한 결속용 기준선 식별자. 화면에는 기간·기준선명으로 표시한다. */
+  baseline_id: string;
   scenario_id: string;
   input_hash: string;
   engine_version: string;
