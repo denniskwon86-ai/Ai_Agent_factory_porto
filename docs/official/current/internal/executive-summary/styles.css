@@ -166,3 +166,25 @@
   .ontology-strip figcaption{display:grid;gap:.05in;padding:.12in;font-size:9.5px}
   .ontology-strip figcaption b{font-size:12px}.ontology-strip figcaption span{font-size:9.5px}
 }
+
+/* 표지 스크린샷 PDF 선명도: 3D transform(perspective·rotateY)이 걸린 요소는 Chromium page.pdf()에서
+   원본 이미지가 아니라 합성 레이어 비트맵(341x217 · 약 62dpi)으로 래스터화되어 글자가 뭉개진다.
+   인쇄에서는 기울기를 없애 정면으로 두고, 원본 1600x1000을 그대로 임베드한다(약 307dpi).
+   화면(screen)에서는 기존 3D 기울기가 그대로 유지된다. */
+@media print{
+  .cover-screen{transform:none;box-shadow:0 .18in .5in rgba(0,0,0,.28)}
+}
+
+/* 4페이지(온톨로지) 하단 침범 교정: .ontology-page 접두사 규칙(명시도 0,2,0)이 인쇄 블록의
+   .enterprise-stack/.stack-layer(0,1,0)를 이겨서 인쇄에서도 화면용 px 값이 적용되고,
+   그 결과 .ontology-strip 하단이 꼬리글(.footer top 568px)을 약 11px 침범했다.
+   같은 명시도로 인쇄 값을 다시 지정해 세로 여백을 회수한다. */
+@media print{
+  .ontology-page .department-row article{padding:.11in .16in}
+  .ontology-page .enterprise-stack{margin-top:.22in}
+  .ontology-page .stack-layer{padding:.11in .25in}
+  /* 온톨로지 그래프(1328x461 · 비율 2.88)는 object-fit:contain이라 넓은 열에서 좌우 빈 공간이 크다.
+     이미지 실제 비율에 맞춰 열 폭을 잡고 박스를 가운데 정렬한다. */
+  .ontology-page .ontology-strip{grid-template-columns:minmax(0,4.2in) 1.75in;max-width:5.95in;margin:0 auto}
+  .ontology-page .ontology-strip img{height:1.45in}
+}
