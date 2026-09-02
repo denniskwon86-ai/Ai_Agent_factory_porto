@@ -1502,9 +1502,13 @@ def _isolate_work_scenarios(env, monkeypatch, tmp_path):
     from types import SimpleNamespace
     from core import enterprise_work_scenario as ews
 
+    repository = SimpleNamespace(db_path=str(tmp_path / "work-scenarios.db"))
     monkeypatch.setattr(
-        ews.enterprise_work_scenarios, "_repo_override",
-        SimpleNamespace(db_path=str(tmp_path / "work-scenarios.db")))
+        ews.enterprise_work_scenarios, "_repo_override", repository)
+    monkeypatch.setattr(ews.enterprise_work_scenarios, "_ledger_override", env["ledger"])
+    from core import financial_bridge_contract as fbc
+    monkeypatch.setattr(fbc.financial_bridge_contracts, "_repo_override", repository)
+    monkeypatch.setattr(fbc.financial_bridge_contracts, "_ledger_override", env["ledger"])
     # 이 파일의 계산 픽스처는 키트 앱 릴리스까지 만들지 않는다. 활성 상태 판정 자체는
     # 별도 회귀로 보고, 여기서는 제품 계산과 저장 배선을 관통한다.
     monkeypatch.setattr(env["cal"], "_assert_active_work_kit_app", lambda *_: None)
@@ -1641,3 +1645,195 @@ def test_다른_인스턴스의_계산을_시나리오에_붙일_수_없다(
         f"/api/v1/calculation/work-scenarios/{sid}/contributions/APP-01",
         json=_body(env, instance_id=other["instance_id"]))
     assert res.status_code == 404, res.text[:200]
+
+def test_전사_조합_API는_부서_결과가_덜_모이면_BLOCKED다(
+        env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    sid = _create_work_scenario(env)["scenario_id"]
+
+    got = _data(_client(env).get(
+        f"/api/v1/calculation/work-scenarios/{sid}/composition"))
+
+    assert got["status"] == "BLOCKED"
+    assert got["reason_code"] == "DEPARTMENT_RESULTS_REQUIRED"
+    assert got["financial_impact"] is None
+
+
+def test_전사_조합_API는_실제_세_부서_결과를_결속하고_재무를_차단한다(
+        env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    _ready(env, monkeypatch)
+    sid = _create_work_scenario(env)["scenario_id"]
+    for app_id in ("APP-01", "APP-03", "APP-06"):
+        saved = _client(env).post(
+            f"/api/v1/calculation/work-scenarios/{sid}/contributions/{app_id}",
+            json=_body(env))
+        assert saved.status_code == 200, saved.text[:300]
+
+    got = _data(_client(env).get(
+        f"/api/v1/calculation/work-scenarios/{sid}/composition"))
+
+    assert got["status"] == "READY"
+    assert len(got["department_results"]) == 3
+    assert got["composition_fingerprint"]
+    assert got["financial_impact"]["status"] == "BLOCKED"
+    assert got["financial_impact"]["reason_code"] == "FINANCIAL_BRIDGE_REQUIRED"
+
+
+def _seed_financial_bridge_sources(env, tmp_path):
+    """제품 제안 경로가 읽는 MDM-07·EXT-01을 실제 인증판으로 세운다."""
+    common = {
+        "tenant_id": env["tenant"], "scope_node_id": env["scope"],
+        "entity_mode": "REAL", "cost_center_id": "CC-FIN",
+        "cost_center_name": "재무관리 원가센터",
+    }
+    accounts = [
+        {**common, "account_id": "1100", "account_name": "매출채권",
+         "account_type": "ASSET", "cost_element": "AR", "currency": "KRW",
+         "active": "True"},
+        {**common, "account_id": "1200", "account_name": "재고자산",
+         "account_type": "ASSET", "cost_element": "INVENTORY", "currency": "KRW",
+         "active": "True"},
+        {**common, "account_id": "2000", "account_name": "매입채무",
+         "account_type": "LIABILITY", "cost_element": "AP", "currency": "KRW",
+         "active": "True"},
+        {**common, "account_id": "4000", "account_name": "제품매출",
+         "account_type": "REVENUE", "cost_element": "REVENUE", "currency": "KRW",
+         "active": "True"},
+        {**common, "account_id": "5000", "account_name": "재료비",
+         "account_type": "EXPENSE", "cost_element": "MATERIAL_COST",
+         "currency": "KRW", "active": "True"},
+        {**common, "account_id": "5100", "account_name": "가공비",
+         "account_type": "EXPENSE", "cost_element": "CONVERSION_COST",
+         "currency": "KRW", "active": "True"},
+    ]
+    fx = [{**common, "observation_id": "fx-usd-krw-202609",
+           "indicator_code": "USD_KRW", "value": "1330.0", "unit": "KRW/USD"}]
+    for key, rows in (("MDM-07", accounts), ("EXT-01", fx)):
+        columns = list(rows[0])
+        binding = env["store"].create_binding(
+            instance_id=env["instance_id"], dataset_contract_key=key,
+            provider=m.PROVIDER_FILE_SNAPSHOT, config={}, tenant_id=env["tenant"],
+            scope_node_id=env["scope"], entity_mode="REAL")
+        for target in (m.VALIDATED, m.APPROVED, m.ACTIVE):
+            binding = env["store"].transition(binding["binding_id"], target)
+        snap = svc.ingest(
+            env["store"], binding=binding, payload=dv.csv_bytes(rows, columns),
+            file_name=f"{key}.csv", workspace_root=str(tmp_path / "bridge-raw"))
+        certified = svc.run_pipeline(
+            env["store"], snap["snapshot_id"], rows, columns,
+            control={"row_count": len(rows)})
+        assert certified["state"] == m.DEMO_CERTIFIED
+
+
+def _financial_bridge_payload(env, admin):
+    proposal = _data(admin.get(
+        f"/api/v1/calculation/financial-bridge/proposal"
+        f"?instance_id={env['instance_id']}"))
+    return {
+        "instance_id": env["instance_id"],
+        "effective_from": "2026-01-01T00:00:00Z",
+        "seen_proposal_fingerprint": proposal["proposal_fingerprint"],
+    }
+
+
+def test_금융브리지_API는_초안만으로_APP07을_열지_않는다(
+        env, monkeypatch, tmp_path):
+    from core import financial_bridge_contract as fbc
+
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    _seed_financial_bridge_sources(env, tmp_path)
+    admin = _admin(env)
+    made = _data(admin.post(
+        "/api/v1/calculation/financial-bridge/contracts",
+        json=_financial_bridge_payload(env, admin)))
+    assert made["status"] == fbc.DRAFT
+    assert env["ledger"].list_events(event_type=fbc.EVENT_APPROVED) == []
+
+    listed = _data(admin.get(
+        f"/api/v1/calculation/financial-bridge/contracts?instance_id={env['instance_id']}"))
+    assert listed["required_rules"] == list(fbc.REQUIRED_RULES)
+    assert listed["contracts"][0]["fingerprint"] == made["fingerprint"]
+
+
+def test_금융브리지_초안은_서버제안만_받고_오래된_제안은_거부한다(
+        env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    _seed_financial_bridge_sources(env, tmp_path)
+    admin = _admin(env)
+    proposal = _data(admin.get(
+        f"/api/v1/calculation/financial-bridge/proposal"
+        f"?instance_id={env['instance_id']}"))
+    assert [row["label"] for row in proposal["rule_summaries"]] == [
+        "구매·운전자본 영향", "생산·마진 영향", "매출 인식 영향", "환율 환산"]
+    assert "snapshot_id" not in str(proposal)
+    assert "account_code" not in str(proposal)
+
+    stale = admin.post("/api/v1/calculation/financial-bridge/contracts", json={
+        "instance_id": env["instance_id"],
+        "effective_from": "2026-01-01T00:00:00Z",
+        "seen_proposal_fingerprint": "0" * 64,
+    })
+    assert stale.status_code == 409
+
+    manual = _financial_bridge_payload(env, admin)
+    manual["rules"] = [{"target_account_codes": ["9999"]}]
+    refused = admin.post("/api/v1/calculation/financial-bridge/contracts", json=manual)
+    assert refused.status_code == 422
+
+
+def test_금융브리지_상세와_변경은_시스템관리자만_접근한다(
+        env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    for method, path, body in (
+        ("get", f"/api/v1/calculation/financial-bridge/proposal?instance_id={env['instance_id']}", None),
+        ("get", f"/api/v1/calculation/financial-bridge/contracts?instance_id={env['instance_id']}", None),
+        ("post", "/api/v1/calculation/financial-bridge/contracts",
+         {"instance_id": env["instance_id"], "effective_from": "2026-01-01T00:00:00Z",
+          "seen_proposal_fingerprint": "not-visible"}),
+    ):
+        response = getattr(_client(env), method)(path, json=body) if body else getattr(_client(env), method)(path)
+        assert response.status_code == 403, response.text[:200]
+
+
+def test_금융브리지_승인과_철회가_APP07_다음관문에_즉시_반영된다(
+        env, monkeypatch, tmp_path):
+    from core import financial_bridge_contract as fbc
+
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    _ready(env, monkeypatch)
+    _seed_financial_bridge_sources(env, tmp_path)
+    admin = _admin(env)
+    draft = _data(admin.post(
+        "/api/v1/calculation/financial-bridge/contracts",
+        json=_financial_bridge_payload(env, admin)))
+
+    approver = "bridge.approver@afs.invalid"
+    env["org"].upsert_user(
+        approver, "재무승인자", primary_dept_id=DEPT, is_admin=True, actor="seed")
+    approved = _data(_client(env, approver).post(
+        f"/api/v1/calculation/financial-bridge/contracts/{draft['contract_id']}/approve",
+        json={"instance_id": env["instance_id"],
+              "seen_fingerprint": draft["fingerprint"],
+              "rationale": "계정 매핑과 환율 출처 검토 완료"}))
+    assert approved["status"] == fbc.APPROVED
+    assert len(env["ledger"].list_events(event_type=fbc.EVENT_APPROVED)) == 1
+
+    sid = _create_work_scenario(env)["scenario_id"]
+    for app_id in ("APP-01", "APP-03", "APP-06"):
+        response = _client(env).post(
+            f"/api/v1/calculation/work-scenarios/{sid}/contributions/{app_id}",
+            json=_body(env))
+        assert response.status_code == 200, response.text[:300]
+    composed = _data(_client(env).get(
+        f"/api/v1/calculation/work-scenarios/{sid}/composition"))
+    assert composed["financial_impact"]["reason_code"] == "FINANCIAL_MODEL_REQUIRED"
+    assert "values" not in composed["financial_impact"]
+
+    revoked = _data(_client(env, approver).post(
+        f"/api/v1/calculation/financial-bridge/contracts/{draft['contract_id']}/revoke",
+        json={"instance_id": env["instance_id"], "rationale": "회계 정책 재검토"}))
+    assert revoked["status"] == fbc.REVOKED
+    composed = _data(_client(env).get(
+        f"/api/v1/calculation/work-scenarios/{sid}/composition"))
+    assert composed["financial_impact"]["reason_code"] == "FINANCIAL_BRIDGE_REQUIRED"

@@ -152,6 +152,88 @@ export async function revokeCapability(approvalId: string, reason: string) {
     }), '실행 승인 철회');
 }
 
+// ── 업무 지표 → 회계 계정 변환 계약 ─────────────────────────────────────
+
+export interface FinancialBridgeProposal {
+  proposal_fingerprint: string;
+  model_version: string;
+  reporting_currency: string;
+  exchange_rate_source: string;
+  rule_summaries: Array<{
+    rule_id: string;
+    label: string;
+    target_accounts: Array<{ name: string; type: string }>;
+  }>;
+}
+
+export interface FinancialBridgeContract {
+  contract_id: string;
+  revision: number;
+  status: 'DRAFT' | 'APPROVED' | 'SUPERSEDED' | 'REVOKED';
+  fingerprint: string;
+  effective_from: string;
+  effective_to: string;
+  drafted_by: string;
+  drafted_at: string;
+  approved_by: string;
+  approved_at: string;
+  rationale: string;
+}
+
+export async function getFinancialBridgeProposal(instanceId: string) {
+  return unwrap<FinancialBridgeProposal>(
+    await apiFetch(
+      `${BASE}/financial-bridge/proposal?instance_id=${encodeURIComponent(instanceId)}`),
+    '업무-회계 변환 제안');
+}
+
+export async function listFinancialBridgeContracts(instanceId: string) {
+  return unwrap<{ contracts: FinancialBridgeContract[]; required_rules: string[] }>(
+    await apiFetch(
+      `${BASE}/financial-bridge/contracts?instance_id=${encodeURIComponent(instanceId)}`),
+    '업무-회계 변환 계약 목록');
+}
+
+export async function createFinancialBridgeDraft(body: {
+  instance_id: string;
+  effective_from: string;
+  effective_to?: string;
+  seen_proposal_fingerprint: string;
+}) {
+  return unwrap<FinancialBridgeContract>(
+    await apiFetch(`${BASE}/financial-bridge/contracts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }), '업무-회계 변환 초안');
+}
+
+export async function approveFinancialBridgeContract(
+  contractId: string,
+  body: { instance_id: string; seen_fingerprint: string; rationale: string },
+) {
+  return unwrap<FinancialBridgeContract>(
+    await apiFetch(
+      `${BASE}/financial-bridge/contracts/${encodeURIComponent(contractId)}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }), '업무-회계 변환 계약 승인');
+}
+
+export async function revokeFinancialBridgeContract(
+  contractId: string,
+  body: { instance_id: string; rationale: string },
+) {
+  return unwrap<FinancialBridgeContract>(
+    await apiFetch(
+      `${BASE}/financial-bridge/contracts/${encodeURIComponent(contractId)}/revoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }), '업무-회계 변환 계약 철회');
+}
+
 // ── 시연 초기화 ───────────────────────────────────────────────────────────
 
 export interface ResetBucket {
@@ -311,6 +393,30 @@ export interface EnterpriseWorkScenario {
   };
 }
 
+export interface EnterpriseComposition {
+  status: 'READY' | 'BLOCKED';
+  scenario_id: string;
+  reason_code?: 'DEPARTMENT_RESULTS_REQUIRED';
+  message?: string;
+  missing_department_roles?: Array<'procurement' | 'production' | 'sales'>;
+  as_of?: string;
+  composition_fingerprint?: string;
+  department_results?: Array<{
+    department_role: 'procurement' | 'production' | 'sales';
+    segment_ref: string;
+    values: Record<string, Record<string, number | string>>;
+    result_fingerprint: string;
+    path_fingerprint: string;
+  }>;
+  used_snapshots?: Record<string, string>;
+  financial_impact: null | {
+    status: 'BLOCKED';
+    reason_code: 'FINANCIAL_BRIDGE_REQUIRED' | 'FINANCIAL_MODEL_REQUIRED';
+    message: string;
+    contract_state?: 'APPROVED';
+  };
+}
+
 export async function createEnterpriseWorkScenario(body: {
   instance_id: string; name: string; purpose: string;
 }) {
@@ -325,6 +431,12 @@ export async function listEnterpriseWorkScenarios(instanceId: string) {
   return unwrap<{ scenarios: EnterpriseWorkScenario[] }>(
     await apiFetch(`${BASE}/work-scenarios?instance_id=${encodeURIComponent(instanceId)}`),
     '전사 업무 시나리오 목록');
+}
+
+export async function getEnterpriseComposition(scenarioId: string) {
+  return unwrap<EnterpriseComposition>(
+    await apiFetch(`${BASE}/work-scenarios/${encodeURIComponent(scenarioId)}/composition`),
+    '전사 운영 영향 조합');
 }
 
 export async function saveDepartmentContribution(

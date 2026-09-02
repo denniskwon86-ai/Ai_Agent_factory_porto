@@ -133,3 +133,68 @@ def test_저장소_장애를_빈_목록으로_접지_않는다(tmp_path):
     with pytest.raises(ews.WorkScenarioStoreError):
         store.list_for(tenant_id="tenant-a", instance_id="ki-a")
 
+
+def test_전사_조합은_세_부서가_모이기_전에는_숫자를_만들지_않는다(tmp_path):
+    store = _store(tmp_path)
+    scenario = _scenario(store)
+    _record(store, scenario["scenario_id"], "APP-01", "result-p")
+
+    composed = store.compose(scenario["scenario_id"])
+
+    assert composed["status"] == ews.COMPOSITION_BLOCKED
+    assert composed["reason_code"] == "DEPARTMENT_RESULTS_REQUIRED"
+    assert composed["missing_department_roles"] == ["production", "sales"]
+    assert composed["financial_impact"] is None
+
+
+def test_전사_조합은_운영영향을_결속하고_재무숫자는_계약_전까지_막는다(tmp_path):
+    store = _store(tmp_path)
+    scenario = _scenario(store)
+    for app_id, fingerprint in (
+            ("APP-01", "result-p"), ("APP-03", "result-m"),
+            ("APP-06", "result-s")):
+        _record(store, scenario["scenario_id"], app_id, fingerprint)
+
+    first = store.compose(scenario["scenario_id"])
+    again = store.compose(scenario["scenario_id"])
+
+    assert first["status"] == ews.COMPOSITION_READY
+    assert first["composition_fingerprint"] == again["composition_fingerprint"]
+    assert [row["department_role"] for row in first["department_results"]] == [
+        "procurement", "production", "sales"]
+    assert first["financial_impact"] == {
+        "status": ews.COMPOSITION_BLOCKED,
+        "reason_code": ews.FINANCIAL_BRIDGE_REQUIRED,
+        "message": "업무 영향은 결합되었습니다. 손익·현금흐름은 승인된 업무-회계 변환 계약이 연결된 뒤 계산합니다.",
+    }
+
+
+def test_전사_조합은_서로_다른_기준시점을_거부한다(tmp_path):
+    store = _store(tmp_path)
+    scenario = _scenario(store)
+    _record(store, scenario["scenario_id"], "APP-01", "result-p")
+    _record(store, scenario["scenario_id"], "APP-03", "result-m")
+    store.record_contribution(
+        scenario_id=scenario["scenario_id"], app_id="APP-06",
+        result=_result("APP-06", "result-s"), as_of="2026-09-03T00:00:00Z",
+        tenant_id="tenant-a", instance_id="ki-a", scope_node_id="plant-a",
+        entity_mode="REAL", actor="planner@a.invalid")
+
+    with pytest.raises(ews.WorkScenarioError, match="기준시점"):
+        store.compose(scenario["scenario_id"])
+
+
+def test_전사_조합은_겹치는_계약키의_다른_인증판을_거부한다(tmp_path):
+    store = _store(tmp_path)
+    scenario = _scenario(store)
+    _record(store, scenario["scenario_id"], "APP-01", "result-p")
+    _record(store, scenario["scenario_id"], "APP-03", "result-m")
+    sales = _result("APP-06", "result-s")
+    sales["used_snapshots"] = {**sales["used_snapshots"], "INV-01": "ds-other"}
+    store.record_contribution(
+        scenario_id=scenario["scenario_id"], app_id="APP-06", result=sales,
+        as_of="2026-09-02T00:00:00Z", tenant_id="tenant-a", instance_id="ki-a",
+        scope_node_id="plant-a", entity_mode="REAL", actor="planner@a.invalid")
+
+    with pytest.raises(ews.WorkScenarioError, match="서로 다른 인증판"):
+        store.compose(scenario["scenario_id"])

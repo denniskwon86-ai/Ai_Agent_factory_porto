@@ -53,6 +53,7 @@ from core import demo_readiness
 from core import demo_reset
 from core import demo_vertical_slice as dv
 from core import enterprise_work_scenario as ews
+from core import financial_bridge_contract as fbc
 from core import path_calculation_service as svc
 from core.enterprise_context import audit
 #: ★★ 인스턴스 가시성 판정을 **한 벌만** 쓴다. 같은 판정을 두 벌로 만들면 한쪽만
@@ -114,6 +115,36 @@ class WorkScenarioCreateInput(BaseModel):
     instance_id: str
     name: str = Field(min_length=1, max_length=120)
     purpose: str = Field(min_length=1, max_length=500)
+
+
+class FinancialBridgeDraftInput(BaseModel):
+    """업무→회계 변환 계약 초안.
+
+    계정 코드·산식·근거판은 받지 않는다. 서버가 인증판으로 만든 제안을 다시 계산하고,
+    화면이 본 제안 지문과 같을 때만 초안을 저장한다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    instance_id: str
+    effective_from: str
+    effective_to: str = ""
+    seen_proposal_fingerprint: str
+
+
+class FinancialBridgeApprovalInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instance_id: str
+    seen_fingerprint: str
+    rationale: str
+
+
+class FinancialBridgeRevokeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instance_id: str
+    rationale: str
 
 
 class DiagnosticInput(PathCalcInput):
@@ -648,6 +679,148 @@ def _assert_active_work_kit_app(instance_id: str, app_id: str) -> None:
             status_code=409, detail="운영 중인 업무 앱에서만 전사 시나리오 결과를 저장할 수 있습니다.")
 
 
+def _bridge_context_or_404(p: Principal, instance_id: str, contract_id: str = ""):
+    ctx = _admin_ctx(p, instance_id)
+    if not contract_id:
+        return ctx, None
+    try:
+        item = fbc.financial_bridge_contracts.require(contract_id)
+    except fbc.FinancialBridgeContractError as exc:
+        raise HTTPException(status_code=404, detail="업무-회계 변환 계약을 찾을 수 없습니다.") from exc
+    except fbc.FinancialBridgeStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    actual = (item["tenant_id"], item["instance_id"], item["scope_node_id"], item["entity_mode"])
+    expected = (ctx["tenant_id"], ctx["instance_id"], ctx["scope_node_id"], ctx["entity_mode"])
+    if actual != expected:
+        raise HTTPException(status_code=404, detail="업무-회계 변환 계약을 찾을 수 없습니다.")
+    return ctx, item
+
+
+def _financial_bridge_proposal(ctx: Dict[str, str]) -> Dict[str, Any]:
+    """인증된 MDM-07·EXT-01에서 사용자 입력 없는 브리지 제안을 만든다."""
+    try:
+        seals = loader.active_seals(
+            store, instance_id=ctx["instance_id"],
+            contract_keys=fbc.SOURCE_DATASETS)
+    except Exception as exc:  # noqa: BLE001 — 못 읽은 것을 미준비로 접지 않는다
+        raise HTTPException(
+            status_code=503,
+            detail="업무-회계 변환에 필요한 인증판을 확인할 수 없습니다.") from exc
+    missing = [key for key in fbc.SOURCE_DATASETS if key not in seals]
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=("계정과목과 환율 기준정보를 먼저 인증해야 합니다: "
+                    + ", ".join(missing)))
+    try:
+        rows = loader.load_sealed(
+            store, sealed_snapshots=seals,
+            tenant_id=ctx["tenant_id"], entity_mode=ctx["entity_mode"],
+            scope_node_id=ctx["scope_node_id"])
+        return fbc.build_proposal(
+            account_rows=rows["MDM-07"],
+            account_snapshot_id=seals["MDM-07"],
+            exchange_rate_snapshot_id=seals["EXT-01"])
+    except loader.SealedDatasetError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="업무-회계 변환 기준정보를 읽거나 검증할 수 없습니다.") from exc
+    except fbc.FinancialBridgeContractError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/financial-bridge/proposal")
+async def get_financial_bridge_proposal(
+        instance_id: str, p: Principal = Depends(current_principal)):
+    """사람에게는 계정명과 변환 의미만 보인다. 내부 코드·판 ID는 서버가 보존한다."""
+    ctx, _item = await asyncio.to_thread(_bridge_context_or_404, p, instance_id)
+    proposal = await asyncio.to_thread(_financial_bridge_proposal, ctx)
+    contract = proposal["contract"]
+    return {"status": "success", "data": {
+        "proposal_fingerprint": proposal["proposal_fingerprint"],
+        "model_version": contract["model_version"],
+        "reporting_currency": contract["reporting_currency"],
+        "exchange_rate_source": "인증된 환율 기준정보",
+        "rule_summaries": proposal["rule_summaries"],
+    }}
+
+
+@router.get("/financial-bridge/contracts")
+async def list_financial_bridge_contracts(instance_id: str,
+                                          p: Principal = Depends(current_principal)):
+    """관리자용 계약 목록. 일반 APP-07 응답에는 계정 코드와 내부 ID를 노출하지 않는다."""
+    ctx, _item = await asyncio.to_thread(_bridge_context_or_404, p, instance_id)
+    try:
+        rows = await asyncio.to_thread(
+            fbc.financial_bridge_contracts.list_for,
+            tenant_id=ctx["tenant_id"], instance_id=ctx["instance_id"],
+            scope_node_id=ctx["scope_node_id"], entity_mode=ctx["entity_mode"])
+    except fbc.FinancialBridgeStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "success", "data": {"contracts": rows,
+            "required_rules": list(fbc.REQUIRED_RULES)}}
+
+
+@router.post("/financial-bridge/contracts")
+async def create_financial_bridge_draft(
+        req: FinancialBridgeDraftInput, p: Principal = Depends(current_principal)):
+    """초안만 만든다. 이 경로는 승인 원장 사건을 남기거나 APP-07을 열지 않는다."""
+    ctx, _item = await asyncio.to_thread(_bridge_context_or_404, p, req.instance_id)
+    proposal = await asyncio.to_thread(_financial_bridge_proposal, ctx)
+    if (str(req.seen_proposal_fingerprint or "").strip()
+            != proposal["proposal_fingerprint"]):
+        raise HTTPException(
+            status_code=409,
+            detail="검토한 계정과목 또는 환율 기준정보가 바뀌었습니다 — 다시 확인하십시오.")
+    try:
+        item = await asyncio.to_thread(
+            fbc.financial_bridge_contracts.create_draft,
+            tenant_id=ctx["tenant_id"], instance_id=ctx["instance_id"],
+            scope_node_id=ctx["scope_node_id"], entity_mode=ctx["entity_mode"],
+            contract=proposal["contract"],
+            effective_from=req.effective_from, effective_to=req.effective_to,
+            actor=p.user_id or "")
+    except fbc.FinancialBridgeContractError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except fbc.FinancialBridgeStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "success", "data": item}
+
+
+@router.post("/financial-bridge/contracts/{contract_id}/approve")
+async def approve_financial_bridge_contract(
+        contract_id: str, req: FinancialBridgeApprovalInput,
+        p: Principal = Depends(current_principal)):
+    """사람이 검토한 지문만 승인한다. 화면이 본 뒤 계약이 바뀌면 거부한다."""
+    await asyncio.to_thread(_bridge_context_or_404, p, req.instance_id, contract_id)
+    try:
+        item = await asyncio.to_thread(
+            fbc.financial_bridge_contracts.approve, contract_id,
+            seen_fingerprint=req.seen_fingerprint, actor=p.user_id or "",
+            rationale=req.rationale)
+    except fbc.FinancialBridgeContractError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except fbc.FinancialBridgeStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "success", "data": item}
+
+
+@router.post("/financial-bridge/contracts/{contract_id}/revoke")
+async def revoke_financial_bridge_contract(
+        contract_id: str, req: FinancialBridgeRevokeInput,
+        p: Principal = Depends(current_principal)):
+    await asyncio.to_thread(_bridge_context_or_404, p, req.instance_id, contract_id)
+    try:
+        item = await asyncio.to_thread(
+            fbc.financial_bridge_contracts.revoke, contract_id,
+            actor=p.user_id or "", rationale=req.rationale)
+    except fbc.FinancialBridgeContractError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except fbc.FinancialBridgeStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "success", "data": item}
+
+
 @router.post("/work-scenarios")
 async def create_work_scenario(req: WorkScenarioCreateInput,
                                p: Principal = Depends(current_principal)):
@@ -688,6 +861,22 @@ async def get_work_scenario(scenario_id: str,
     assert_identified(p, "전사 업무 시나리오")
     scenario = await asyncio.to_thread(_work_scenario_or_404, p, scenario_id)
     return {"status": "success", "data": scenario}
+
+
+@router.get("/work-scenarios/{scenario_id}/composition")
+async def compose_work_scenario(scenario_id: str,
+                                p: Principal = Depends(current_principal)):
+    """세 부서 결과를 같은 기준시점·인증판의 전사 운영 영향으로 결속한다."""
+    assert_identified(p, "전사 업무 시나리오 조합")
+    await asyncio.to_thread(_work_scenario_or_404, p, scenario_id)
+    try:
+        composition = await asyncio.to_thread(
+            ews.enterprise_work_scenarios.compose, scenario_id)
+    except ews.WorkScenarioError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ews.WorkScenarioStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "success", "data": composition}
 
 
 @router.post("/work-scenarios/{scenario_id}/contributions/{app_id}")

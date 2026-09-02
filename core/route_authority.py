@@ -205,6 +205,7 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "POST /api/v1/calculation/work-scenarios": (PROJECT_RUN,),
     "GET /api/v1/calculation/work-scenarios": (PROJECT_RUN,),
     "GET /api/v1/calculation/work-scenarios/{scenario_id}": (PROJECT_RUN,),
+    "GET /api/v1/calculation/work-scenarios/{scenario_id}/composition": (PROJECT_RUN,),
     "POST /api/v1/calculation/work-scenarios/{scenario_id}/contributions/{app_id}":
         (PROJECT_RUN,),
     # ★★★ 실행 승인은 **시스템 관리자만**. 「이 산식으로 만든 숫자를 회의에 올려도 되는가」
@@ -212,6 +213,15 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     # ⚠️ `ADMIN_SECURITY` 는 플랫폼 관리자(`is_admin`)에게만 간다 — 데이터·AI 관리자와
     #   부서 역할 어디에도 없다. 새 권한 이름을 지어내지 않았다.
     # ★ 제안서도 관리자 화면이다 — 결속 지문·인증판 id 를 보여 준다.
+    # 업무 지표를 회계 계정으로 옮기는 계약은 계정 코드와 내부 근거를 포함한다.
+    # 일반 시나리오 사용자는 상태만 보고, 작성·승인·철회·상세 조회는 시스템 관리자만 한다.
+    "GET /api/v1/calculation/financial-bridge/proposal": (ADMIN_SECURITY,),
+    "GET /api/v1/calculation/financial-bridge/contracts": (ADMIN_SECURITY,),
+    "POST /api/v1/calculation/financial-bridge/contracts": (ADMIN_SECURITY,),
+    "POST /api/v1/calculation/financial-bridge/contracts/{contract_id}/approve":
+        (ADMIN_SECURITY,),
+    "POST /api/v1/calculation/financial-bridge/contracts/{contract_id}/revoke":
+        (ADMIN_SECURITY,),
     "GET /api/v1/calculation/capabilities": (ADMIN_SECURITY,),
     "POST /api/v1/calculation/capabilities/approve": (ADMIN_SECURITY,),
     "POST /api/v1/calculation/capabilities/{approval_id}/revoke": (ADMIN_SECURITY,),

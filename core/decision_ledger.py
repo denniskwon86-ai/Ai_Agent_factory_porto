@@ -165,6 +165,8 @@ EVENT_TYPES = (
     "CALC_CAPABILITY_APPROVED",
     #: 실행 승인 철회. `parent_event_id` 로 원 승인을 가리킨다.
     "CALC_CAPABILITY_REVOKED",
+    "FINANCIAL_BRIDGE_APPROVED",
+    "FINANCIAL_BRIDGE_REVOKED",
     # ★★★ [G2 M0-3.2b] **계산 기준선 봉인.**
     #
     #   생산-판매 배분·인식 기간·기준 인식일 셋을 **한 봉인**으로 묶는다. 따로 두면
@@ -232,7 +234,7 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
                  # [G2 M0-3.2b] 계산 기준선. 「무엇과 비교해 이연을 재는가」는 산식
                  #   승인과 다른 질문이다.
                  "calc_baseline", "planning_scenario_release", "planning_driver_release",
-                 "knowledge_asset")
+                 "knowledge_asset", "financial_bridge_contract")
 
 
 #: ★★★ [4.1c-B P0-4] **철회 유형 → 허용되는 부모 유형** 표. 한 곳에만 둔다.
@@ -245,6 +247,7 @@ _REVOCATION_PARENTS = {
                                   "ONTOLOGY_RELATION_RETIRED"),
     "DATASET_OWNERSHIP_REVOKED": ("DATASET_OWNERSHIP_APPROVED",),
     "CALC_CAPABILITY_REVOKED": ("CALC_CAPABILITY_APPROVED",),
+    "FINANCIAL_BRIDGE_REVOKED": ("FINANCIAL_BRIDGE_APPROVED",),
     "CALC_BASELINE_REVOKED": ("CALC_BASELINE_SEALED",),
     "PLANNING_SCENARIO_REVOKED": ("PLANNING_SCENARIO_APPROVED",),
     "PLANNING_DRIVER_REVOKED": ("PLANNING_DRIVER_APPROVED",),
@@ -434,6 +437,8 @@ class DecisionLedger:
             "DATASET_OWNERSHIP_REVOKED": "dataset_ownership_binding",
             "CALC_CAPABILITY_APPROVED": "calc_capability",
             "CALC_CAPABILITY_REVOKED": "calc_capability",
+            "FINANCIAL_BRIDGE_APPROVED": "financial_bridge_contract",
+            "FINANCIAL_BRIDGE_REVOKED": "financial_bridge_contract",
             "CALC_BASELINE_SEALED": "calc_baseline",
             "CALC_BASELINE_REVOKED": "calc_baseline",
             "PLANNING_SCENARIO_APPROVED": "planning_scenario_release",

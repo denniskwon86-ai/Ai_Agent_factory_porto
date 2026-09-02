@@ -6,14 +6,15 @@ import { JarvisRail } from '../design/JarvisRail';
 import { listInstances } from '../lib/dataPrepApi';
 import {
   CalculationError, copyPathDiagnostic, createEnterpriseWorkScenario,
-  findImpactPaths, listEnterpriseWorkScenarios, listOntologyObjects,
+  findImpactPaths, getEnterpriseComposition, listEnterpriseWorkScenarios, listOntologyObjects,
   revealPathDiagnostic, runPathCalculation, saveDepartmentContribution,
   runPathDecision,
-  type CalcResult, type CalculationDiagnostic, type DecisionResult, type ImpactPath,
+  type CalcResult, type CalculationDiagnostic, type DecisionResult, type EnterpriseComposition, type ImpactPath,
   type EnterpriseWorkScenario, type OntologyObject, type PathCalcBody,
 } from '../lib/calculationApi';
 import { actingScope, UNKNOWN_SCOPE, type ActingScope } from '../lib/actingScope';
 import { BaseValueFields } from './BaseValueFields';
+import { FinancialBridgePanel } from './FinancialBridgePanel';
 import { BASE_FIELDS, DRIVER_FIELDS, num } from '../lib/calcFields';
 
 // [G2 M0-4] 경로 계산 실행 — **질문을 고르고 답을 본다.**
@@ -153,6 +154,7 @@ export function PathCalcPanel({
   const [workScenarioName, setWorkScenarioName] = useState('');
   const [workScenarioPurpose, setWorkScenarioPurpose] = useState('');
   const [workScenarioNotice, setWorkScenarioNotice] = useState('');
+  const [composition, setComposition] = useState<EnterpriseComposition | null>(null);
   // ★ 기준시점은 데모 날짜를 코드에 박지 않는다. 관계 승인은 벽시계 시각부터 유효한데
   // `type=date`의 00:00 UTC로 묻으면 오늘 오후에 승인한 관계도 «없음»으로 보인다.
   // 현지시각을 분 단위로 받아 실제 순간으로 바꿔 서버에 보낸다.
@@ -350,6 +352,22 @@ export function PathCalcPanel({
     } catch (e: any) {
       setError(e instanceof CalculationError ? e
         : new CalculationError(e?.message || '부서 계산 결과를 저장하지 못했습니다.', 0));
+    } finally { setBusy(''); }
+  }
+
+  async function onComposeEnterpriseScenario() {
+    if (!selectedWorkScenario) return;
+    setBusy('scenario-compose'); setError(null); setWorkScenarioNotice('');
+    try {
+      const got = await getEnterpriseComposition(selectedWorkScenario.scenario_id);
+      setComposition(got);
+      setWorkScenarioNotice(got.status === 'READY'
+        ? '세 부서의 운영 영향을 같은 기준시점과 인증판으로 결합했습니다.'
+        : (got.message || '세 부서 결과가 모두 모여야 전사 영향을 조합할 수 있습니다.'));
+    } catch (e: any) {
+      setComposition(null);
+      setError(e instanceof CalculationError ? e
+        : new CalculationError(e?.message || '전사 운영 영향을 조합하지 못했습니다.', 0));
     } finally { setBusy(''); }
   }
 
@@ -610,7 +628,10 @@ export function PathCalcPanel({
                     color: 'var(--surface-text-muted)', minWidth: 250 }}>
                     전사 시나리오 선택
                     <select value={workScenarioId}
-                      onChange={(e) => { setWorkScenarioId(e.target.value); setWorkScenarioNotice(''); }}
+                      onChange={(e) => {
+                        setWorkScenarioId(e.target.value); setWorkScenarioNotice('');
+                        setComposition(null);
+                      }}
                       style={{ padding: 8, fontSize: 14 }}>
                       <option value="">선택하십시오</option>
                       {workScenarios.map((scenario) => (
@@ -681,10 +702,46 @@ export function PathCalcPanel({
                 </div>
               )}
               {workApp === 'APP-07' && (
-                <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--surface-text-muted)' }}>
-                  전사 통합 앱은 별도 부서 결과를 만들지 않습니다. 위 세 부서 결과의 결합 상태를
-                  확인하고 이후 손익·현금흐름 조합으로 이어집니다.
-                </p>
+                <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                    전사 통합 앱은 별도 부서 결과를 만들지 않습니다. 세 부서가 사용한 기준시점과
+                    인증판을 대조해 하나의 전사 운영 영향으로 결합합니다.
+                  </p>
+                  <div>
+                    <button type="button" className="primary-button"
+                      onClick={onComposeEnterpriseScenario}
+                      disabled={!selectedWorkScenario || busy === 'scenario-compose'}>
+                      {busy === 'scenario-compose' ? '조합 확인 중…' : '전사 운영 영향 조합'}
+                    </button>
+                  </div>
+                  {composition?.status === 'READY' && (
+                    <>
+                      <div style={{ padding: '10px 12px', borderRadius: 6,
+                        border: '1px solid var(--state-success-fg)',
+                        background: 'var(--state-success-bg)', fontSize: 13 }}>
+                        <b style={{ color: 'var(--state-success-fg)' }}>
+                          세 부서 운영 영향 결합 완료
+                        </b>
+                        <div style={{ marginTop: 5, color: 'var(--surface-text)' }}>
+                          {composition.financial_impact?.message}
+                        </div>
+                      </div>
+                      {composition.financial_impact && (
+                        <FinancialBridgePanel
+                          instanceId={instanceId}
+                          effectiveFrom={composition.as_of || instant}
+                          operatorScope={operatorScope}
+                          onChanged={onComposeEnterpriseScenario}
+                        />
+                      )}
+                    </>
+                  )}
+                  {composition?.status === 'BLOCKED' && (
+                    <div style={{ fontSize: 13, color: 'var(--state-warn-fg)' }}>
+                      {composition.message}
+                    </div>
+                  )}
+                </div>
               )}
               {workScenarioNotice && (
                 <div style={{ marginTop: 8, fontSize: 13, color: 'var(--state-success-fg)' }}>

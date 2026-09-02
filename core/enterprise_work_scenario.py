@@ -9,6 +9,7 @@ LLM 0콜.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -26,6 +27,11 @@ APP_SEGMENTS = {
     "APP-06": ("sales", "CALC.PRODUCTION.REVENUE_TIMING.v1"),
 }
 REQUIRED_APPS = tuple(APP_SEGMENTS)
+
+COMPOSITION_READY = "READY"
+COMPOSITION_BLOCKED = "BLOCKED"
+FINANCIAL_BRIDGE_REQUIRED = "FINANCIAL_BRIDGE_REQUIRED"
+FINANCIAL_MODEL_REQUIRED = "FINANCIAL_MODEL_REQUIRED"
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS enterprise_work_scenarios (
@@ -88,9 +94,14 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _fingerprint(value: Any) -> str:
+    return hashlib.sha256(_json(value).encode("utf-8")).hexdigest()
+
+
 class EnterpriseWorkScenarioStore:
-    def __init__(self, repository=None):
+    def __init__(self, repository=None, ledger=None):
         self._repo_override = repository
+        self._ledger_override = ledger
         self._lock = threading.RLock()
 
     @property
@@ -213,6 +224,109 @@ class EnterpriseWorkScenarioStore:
             raise WorkScenarioStoreError(
                 f"전사 업무 시나리오 목록을 읽지 못했습니다: {exc}") from exc
         return [self.require(scenario_id) for scenario_id in ids]
+
+    def compose(self, scenario_id: str) -> Dict[str, Any]:
+        """세 부서의 최신 결과를 하나의 전사 운영 영향으로 결속한다.
+
+        손익·현금흐름은 여기서 만들지 않는다. 업무 지표를 회계 계정으로 옮기는 승인된
+        변환 계약이 없는데 금액을 만들면 숫자 창작이다. 대신 어느 부서 결과가 모였고,
+        공통 기준시점과 겹치는 인증판이 일치하는지를 검증해 다음 관문의 입력을 만든다.
+        """
+        scenario = self.require(scenario_id)
+        latest = scenario["latest_by_app"]
+        missing = [app_id for app_id in REQUIRED_APPS if app_id not in latest]
+        if missing:
+            return {
+                "status": COMPOSITION_BLOCKED,
+                "scenario_id": scenario_id,
+                "reason_code": "DEPARTMENT_RESULTS_REQUIRED",
+                "message": "세 부서의 계산 결과가 모두 모여야 전사 영향을 조합할 수 있습니다.",
+                "missing_department_roles": [APP_SEGMENTS[a][0] for a in missing],
+                "financial_impact": None,
+            }
+
+        rows = [latest[app_id] for app_id in REQUIRED_APPS]
+        as_of_values = sorted({str(row["as_of"]) for row in rows})
+        if len(as_of_values) != 1:
+            raise WorkScenarioError(
+                "부서 계산 결과의 기준시점이 서로 다릅니다 — 같은 전사 시나리오로 "
+                "조합하려면 기준시점을 맞춰 다시 계산해야 합니다.")
+
+        snapshots: Dict[str, str] = {}
+        conflicts: Dict[str, List[str]] = {}
+        for row in rows:
+            for contract_key, snapshot_id in row["used_snapshots"].items():
+                previous = snapshots.get(contract_key)
+                if previous and previous != snapshot_id:
+                    conflicts.setdefault(contract_key, [previous])
+                    if snapshot_id not in conflicts[contract_key]:
+                        conflicts[contract_key].append(snapshot_id)
+                else:
+                    snapshots[contract_key] = snapshot_id
+        if conflicts:
+            raise WorkScenarioError(
+                f"부서 계산이 서로 다른 인증판을 사용했습니다: {conflicts} — 어느 판의 "
+                "전사 결과인지 정할 수 없습니다.")
+
+        departments = []
+        for row in rows:
+            departments.append({
+                "department_role": row["department_role"],
+                "segment_ref": row["segment_ref"],
+                "values": row["values"],
+                "result_fingerprint": row["result_fingerprint"],
+                "path_fingerprint": row["path_fingerprint"],
+            })
+        composition_fp = _fingerprint({
+            "scenario_id": scenario_id,
+            "as_of": as_of_values[0],
+            "departments": departments,
+            "used_snapshots": snapshots,
+        })
+        try:
+            from core.financial_bridge_contract import FinancialBridgeContractStore
+            bridge = FinancialBridgeContractStore(
+                repository=self._repo, ledger=self._ledger_override).effective(
+                    tenant_id=str(scenario["tenant_id"]),
+                    instance_id=str(scenario["instance_id"]),
+                    scope_node_id=str(scenario["scope_node_id"]),
+                    entity_mode=str(scenario["entity_mode"]),
+                    as_of=as_of_values[0])
+        except Exception as exc:  # dependency failures must not look like missing approval
+            from core.financial_bridge_contract import (
+                FinancialBridgeContractError, FinancialBridgeStoreError)
+            if isinstance(exc, FinancialBridgeContractError):
+                raise WorkScenarioError(str(exc)) from exc
+            if isinstance(exc, FinancialBridgeStoreError):
+                raise WorkScenarioStoreError(str(exc)) from exc
+            raise
+
+        financial_impact = {
+            "status": COMPOSITION_BLOCKED,
+            "reason_code": FINANCIAL_BRIDGE_REQUIRED,
+            "message": (
+                "업무 영향은 결합되었습니다. 손익·현금흐름은 승인된 업무-회계 변환 "
+                "계약이 연결된 뒤 계산합니다."),
+        }
+        if bridge:
+            financial_impact = {
+                "status": COMPOSITION_BLOCKED,
+                "reason_code": FINANCIAL_MODEL_REQUIRED,
+                "message": (
+                    "업무-회계 변환 계약은 확인되었습니다. 손익·현금흐름 계산 모델이 "
+                    "연결되기 전에는 재무 수치를 만들지 않습니다."),
+                "contract_state": "APPROVED",
+            }
+        return {
+            "status": COMPOSITION_READY,
+            "scenario_id": scenario_id,
+            "as_of": as_of_values[0],
+            "composition_fingerprint": composition_fp,
+            "department_results": departments,
+            "used_snapshots": snapshots,
+            "financial_impact": financial_impact,
+
+        }
 
     def record_contribution(self, *, scenario_id: str, app_id: str,
                             result: Dict[str, Any], as_of: str,
