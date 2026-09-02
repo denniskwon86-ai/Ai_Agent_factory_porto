@@ -194,7 +194,9 @@ class AsyncFactoryOrchestrator:
             # 슈퍼바이저 인터럽트 발생 시 LangGraph State에 기록하여 UI가 인지하도록 함
             if reason:
                 try:
-                    langgraph_engine = await get_runtime_app()
+                    #: ★ `aupdate_state` 로 **쓴다** — 노드를 모르는 그래프로 쓰면
+                    #:   체크포인트의 다음 노드 정보가 어긋난다.
+                    langgraph_engine = await self._bound_engine(project_id)
                     config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
                     snapshot = await langgraph_engine.aget_state(config)
                     if snapshot.values:
@@ -300,13 +302,57 @@ class AsyncFactoryOrchestrator:
         await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "project_id": pid, "status": "DONE"})
         await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id, "project_id": pid})
 
+
+    async def _bound_engine(self, project_id: str):
+        """이 프로젝트의 **결속된 그래프**를 준다. 템플릿은 파일에서 읽는다.
+
+        ## ⚠️⚠️ [2026-09-03 실가동] 「대기 중인데 대기 없음」의 원인
+
+        조회·사전점검 경로가 `get_runtime_app()` 을 인자 없이 불러 **기본(SW) 그래프**를
+        세우고 그 위에서 체크포인트를 읽었다. 그런데 상태 스키마(`ProjectState`)만
+        공유될 뿐 **토폴로지는 다르다**:
+
+            기본 그래프 노드(NODE_IMPL)              15개
+            mfg_sim 에이전트 16개 중 거기 있는 것    0개  ← 교집합 0
+
+        `snapshot.values` 는 채널에서 복원되므로 토폴로지와 무관하지만, **`snapshot.next`
+        와 `aupdate_state` 는 노드를 안다는 전제 위에 선다.** 그래서 실제로는 `Sim_Designer`
+        직전 인터럽트에 멈춰 있는데 `is_hotl_pending` 이 «다음 노드 없음» 으로 읽어
+        화면·API 가 「대기 없음」이라고 답했다(2026-09-03 실가동 실측).
+
+        ★ **닭이 먼저냐를 파일로 끊는다.** 종전에는 «템플릿을 알려면 상태를 읽어야 하고,
+          상태를 읽으려면 그래프가 필요하다» 는 순환 때문에 기본 그래프를 먼저 세웠다.
+          템플릿은 `project_meta.json` 이 권위 있는 출처이고 스프린트 시작이 이미 거기서
+          읽어 주입한다(`_read_project_template`). 그래프 없이 읽으면 순환이 없다.
+
+        ⚠️ **구성 지문은 넘기지 않는다.** 지문이 어긋나면 `get_runtime_app` 이 예외를 낸다 —
+          실행을 막는 것은 옳지만, **조회까지 막으면 워크플로우가 개정된 순간 대기 중인
+          스프린트가 화면에서 사라진다.** 지금 고치는 결함과 같은 증상이 된다.
+        ⚠️ 읽기 실패는 기본 그래프로 떨어진다 — 조회가 죽는 것보다 낫고, 종전 동작이다.
+        """
+        tid = "default"
+        try:
+            import json
+
+            from core.project_visibility import project_meta_path
+            with open(project_meta_path(f"./projects/{project_id}"), "r",
+                      encoding="utf-8") as f:
+                meta = json.load(f)
+            if isinstance(meta, dict):
+                tid = str(meta.get("template_id") or "default")
+        except Exception as e:
+            print(f"⚠️ [Orchestrator] 템플릿 결속 정보를 읽지 못해 기본 그래프로 조회합니다"
+                  f"({project_id}): {e}")
+        return await get_runtime_app(tid)
+
     async def is_hotl_pending(self, task_id: str, project_id: str) -> bool:
         """해당 태스크 스레드가 HOTL 중단점에서 '대기 중'인지 확인 (SSE 유실 복구용).
         ⚠️ snapshot.next 는 실행 중에도(다음 노드 예정) 차 있어 그것만으로는 오탐이 난다.
         → 스프린트 asyncio 태스크가 '아직 실행 중'이면 HOTL 대기가 아니다(오탐 방지).
         태스크가 끝났는데(또는 재시작으로 없는데) next 가 남아 있으면 = interrupt 에서 멈춘 진짜 HOTL."""
         try:
-            langgraph_engine = await get_runtime_app()
+            #: ★ `next` 를 보므로 **반드시** 이 프로젝트의 그래프여야 한다.
+            langgraph_engine = await self._bound_engine(project_id)
             skey = _skey(project_id, task_id)
             config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
             snapshot = await langgraph_engine.aget_state(config)
@@ -362,7 +408,8 @@ class AsyncFactoryOrchestrator:
           여기는 투영이다. 그래서 실패를 삼키지 않고 돌려주되, 호출부는 이미 기록된
           승인을 되돌리지 않는다(되돌릴 수도 없다. 원장은 추가만 된다)."""
         try:
-            engine = await get_runtime_app()
+            #: ★ 여기도 **쓴다** — 위 `_bound_engine` 의 이유가 그대로 적용된다.
+            engine = await self._bound_engine(project_id)
             await engine.aupdate_state(
                 {"configurable": {"thread_id": _thread(project_id, task_id)}}, updates)
             return True
