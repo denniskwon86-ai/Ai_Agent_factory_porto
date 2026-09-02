@@ -1494,3 +1494,150 @@ def test_계산에서_발간_문서까지_이어진다(env, monkeypatch, isolate
     for absent in ("sensitivity", "reversible", "compliance_risk", "dissent"):
         assert not (src["package"] or {}).get(absent), \
             f"계산이 답하지 않는 «{absent}» 가 채워져 있다"
+
+
+# ── ⑪ 부서 계산 → 같은 전사 업무 시나리오 ───────────────────────────────
+
+def _isolate_work_scenarios(env, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from core import enterprise_work_scenario as ews
+
+    monkeypatch.setattr(
+        ews.enterprise_work_scenarios, "_repo_override",
+        SimpleNamespace(db_path=str(tmp_path / "work-scenarios.db")))
+    # 이 파일의 계산 픽스처는 키트 앱 릴리스까지 만들지 않는다. 활성 상태 판정 자체는
+    # 별도 회귀로 보고, 여기서는 제품 계산과 저장 배선을 관통한다.
+    monkeypatch.setattr(env["cal"], "_assert_active_work_kit_app", lambda *_: None)
+
+
+def _create_work_scenario(env):
+    return _data(_client(env).post("/api/v1/calculation/work-scenarios", json={
+        "instance_id": env["instance_id"],
+        "name": "2026 하반기 원료 수급 대응",
+        "purpose": "구매 지연이 생산·판매와 전사 실적에 미치는 영향 검토",
+    }))
+
+
+def test_전사_시나리오의_조직문맥은_인스턴스가_정한다(
+        env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    scenario = _create_work_scenario(env)
+    assert scenario["tenant_id"] == env["tenant"]
+    assert scenario["scope_node_id"] == env["scope"]
+    assert scenario["instance_id"] == env["instance_id"]
+
+    # 호출자가 조직 문맥을 넣으면 조용히 버리지 않고 거부한다.
+    res = _client(env).post("/api/v1/calculation/work-scenarios", json={
+        "instance_id": env["instance_id"], "name": "x", "purpose": "y",
+        "tenant_id": "tenant-other", "scope_node_id": "plant-other",
+    })
+    assert res.status_code == 422, res.text[:200]
+
+
+def test_세_부서의_실제_계산이_같은_전사_시나리오에_쌓인다(
+        env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    _ready(env, monkeypatch)
+    scenario = _create_work_scenario(env)
+    sid = scenario["scenario_id"]
+
+    expected = {
+        "APP-01": "CALC.LOGISTICS.ARRIVAL_DELAY.v1",
+        "APP-03": "CALC.INVENTORY.MATERIAL_SHORTAGE.v1",
+        "APP-06": "CALC.PRODUCTION.REVENUE_TIMING.v1",
+    }
+    for app_id, segment in expected.items():
+        got = _data(_client(env).post(
+            f"/api/v1/calculation/work-scenarios/{sid}/contributions/{app_id}",
+            json=_body(env)))
+        assert got["calculation"]["status"] == pc.COMPLETE
+        assert got["contribution"]["segment_ref"] == segment
+        assert got["contribution"]["values"]
+
+    complete = _data(_client(env).get(
+        f"/api/v1/calculation/work-scenarios/{sid}"))
+    assert complete["coverage"]["ready_for_enterprise"] is True
+    assert complete["coverage"]["present_apps"] == ["APP-01", "APP-03", "APP-06"]
+    assert len(complete["contributions"]) == 3
+
+
+def test_같은_부서_결과_재시도는_멱등이다(env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    _ready(env, monkeypatch)
+    sid = _create_work_scenario(env)["scenario_id"]
+    url = f"/api/v1/calculation/work-scenarios/{sid}/contributions/APP-01"
+    first = _data(_client(env).post(url, json=_body(env)))["contribution"]
+    again = _data(_client(env).post(url, json=_body(env)))["contribution"]
+    assert first["contribution_id"] == again["contribution_id"]
+    assert again["idempotent"] is True
+
+
+def test_막힌_계산은_전사_시나리오에_저장하지_않는다(
+        env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    _graph(env)
+    _seal_baseline(env)
+    sid = _create_work_scenario(env)["scenario_id"]
+    got = _data(_client(env).post(
+        f"/api/v1/calculation/work-scenarios/{sid}/contributions/APP-01",
+        json=_body(env)))
+    assert got["calculation"]["status"] == pc.BLOCKED
+    assert got["contribution"] is None
+    assert got["scenario"]["contributions"] == []
+
+
+def test_전사_집계앱은_부서_기여를_꾸며_넣지_못한다(
+        env, monkeypatch, tmp_path):
+    from fastapi import HTTPException
+
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    # APP-07 차단은 활성 상태 대역보다 앞의 닫힌 앱-구간 계약에서 일어나야 한다.
+    def contract(app_instance, app_id):
+        if app_id == "APP-07":
+            raise HTTPException(status_code=422, detail="전사 앱은 결과를 집계합니다.")
+    monkeypatch.setattr(env["cal"], "_assert_active_work_kit_app", contract)
+    sid = _create_work_scenario(env)["scenario_id"]
+    res = _client(env).post(
+        f"/api/v1/calculation/work-scenarios/{sid}/contributions/APP-07",
+        json=_body(env))
+    assert res.status_code == 422, res.text[:200]
+
+
+def test_승인된_앱_계약이_없으면_전사_기여를_시작하지_않는다(monkeypatch):
+    from fastapi import HTTPException
+    from core import kit_app_contract as kac
+    import api.routes.calculation_control as cal
+
+    monkeypatch.setattr(kac, "approved", lambda *_: None)
+    with pytest.raises(HTTPException) as caught:
+        cal._assert_active_work_kit_app("ki-a", "APP-01")
+    assert caught.value.status_code == 409
+    assert "승인된 업무 앱 계약" in str(caught.value.detail)
+
+
+def test_앱_계약_저장소_장애는_미승인으로_보이지_않는다(monkeypatch):
+    from fastapi import HTTPException
+    from core import kit_app_contract as kac
+    import api.routes.calculation_control as cal
+
+    def boom(*_):
+        raise RuntimeError("contract database unavailable")
+
+    monkeypatch.setattr(kac, "approved", boom)
+    with pytest.raises(HTTPException) as caught:
+        cal._assert_active_work_kit_app("ki-a", "APP-01")
+    assert caught.value.status_code == 503
+
+
+def test_다른_인스턴스의_계산을_시나리오에_붙일_수_없다(
+        env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    sid = _create_work_scenario(env)["scenario_id"]
+    other = env["store"].create_instance(
+        kit_id=dv.KIT_ID, version=dv.KIT_VERSION,
+        kit_fingerprint=dv.kit_fingerprint(env["store"]),
+        tenant_id=env["tenant"], scope_node_id=env["scope"], entity_mode="REAL")
+    res = _client(env).post(
+        f"/api/v1/calculation/work-scenarios/{sid}/contributions/APP-01",
+        json=_body(env, instance_id=other["instance_id"]))
+    assert res.status_code == 404, res.text[:200]

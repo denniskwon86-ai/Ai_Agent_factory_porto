@@ -309,7 +309,8 @@ def test_업무키트_앱은_새업무_창뿐_아니라_앱운영에서_직접_�
     assert "if (id === 'operate') { setShowKitOperations(false); setSpace('operate'); return; }" in app
     assert "<KitOperationsPanel" in app
     assert "listInstances()" in panel
-    assert '<KitAppPanel instanceId={selected} mode="operate" statusFilter={view} />' in panel
+    assert '<KitAppPanel instanceId={selected} mode="operate" statusFilter={view}' in panel
+    assert 'onOpenSimulation={onOpenSimulation}' in panel
     assert "현재 회사의 업무 앱" in panel
     assert "＋ 새 업무키트 앱" in panel
     assert '<ProductShell module="operate"' in app

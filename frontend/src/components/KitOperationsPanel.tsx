@@ -8,7 +8,12 @@ import { JarvisRail } from '../design/JarvisRail';
 import { getEnterpriseContext } from '../lib/api';
 import { KitAppPanel } from './KitAppPanel';
 
-type Props = { onClose?: () => void; onOpenBuild: () => void; page?: boolean };
+type Props = {
+  onClose?: () => void;
+  onOpenBuild: () => void;
+  onOpenSimulation?: (instanceId: string, appId: string) => void;
+  page?: boolean;
+};
 type OperationsView = 'all' | 'active' | 'candidate' | 'pending';
 
 const OPERATIONS_ITEMS: { id: OperationsView; label: string; hint: string }[] = [
@@ -53,7 +58,9 @@ function instanceStatusLabel(value: unknown): string {
 }
 
 /** 현재 조직에 실제 적용된 업무키트 앱을 찾고 실행하는 제품 진입점. */
-export function KitOperationsPanel({ onClose, onOpenBuild, page = false }: Props) {
+export function KitOperationsPanel({
+  onClose, onOpenBuild, onOpenSimulation, page = false,
+}: Props) {
   const [instances, setInstances] = useState<any[] | null>(null);
   const [selected, setSelected] = useState('');
   const [error, setError] = useState('');
@@ -185,7 +192,8 @@ export function KitOperationsPanel({ onClose, onOpenBuild, page = false }: Props
               {selected && (
                 <div style={{ border: '1px solid var(--surface-border)', borderRadius: 8,
                   background: 'var(--surface-card)' }}>
-                  <KitAppPanel instanceId={selected} mode="operate" statusFilter={view} />
+                  <KitAppPanel instanceId={selected} mode="operate" statusFilter={view}
+                    onOpenSimulation={onOpenSimulation} />
                 </div>
               )}
             </div>

@@ -5,11 +5,12 @@ import { Banner, HubShell, Panel, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
 import { listInstances } from '../lib/dataPrepApi';
 import {
-  CalculationError, copyPathDiagnostic, findImpactPaths, listOntologyObjects,
-  revealPathDiagnostic, runPathCalculation,
+  CalculationError, copyPathDiagnostic, createEnterpriseWorkScenario,
+  findImpactPaths, listEnterpriseWorkScenarios, listOntologyObjects,
+  revealPathDiagnostic, runPathCalculation, saveDepartmentContribution,
   runPathDecision,
   type CalcResult, type CalculationDiagnostic, type DecisionResult, type ImpactPath,
-  type OntologyObject, type PathCalcBody,
+  type EnterpriseWorkScenario, type OntologyObject, type PathCalcBody,
 } from '../lib/calculationApi';
 import { actingScope, UNKNOWN_SCOPE, type ActingScope } from '../lib/actingScope';
 import { BaseValueFields } from './BaseValueFields';
@@ -42,6 +43,13 @@ const DATASET_LABELS: Record<string, string> = {
   'PRC-02': '구매 주문행', 'LOG-02': '선적', 'LOG-03': '운송 이력', 'INV-01': '재고 현황',
   'MFG-01': '생산 계획', 'MDM-05': '자재 소요 기준', 'SLS-01': '판매 주문',
 };
+const WORK_APP_LABELS: Record<string, string> = {
+  'APP-01': '원료 구매·도입',
+  'APP-03': '재고·생산계획',
+  'APP-06': '판매·매출',
+  'APP-07': '전사 통합',
+};
+const DEPARTMENT_WORK_APPS = ['APP-01', 'APP-03', 'APP-06'];
 const objectKey = (object: OntologyObject) =>
   `${object.namespace}:${object.object_type}:${object.object_id}`;
 
@@ -130,9 +138,21 @@ function Metrics({ result }: { result: CalcResult }) {
   );
 }
 
-export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
+export function PathCalcPanel({
+  onClose, page = false, initialInstanceId = '', initialAppId = '',
+}: {
+  onClose: () => void;
+  page?: boolean;
+  initialInstanceId?: string;
+  initialAppId?: string;
+}) {
   const [instances, setInstances] = useState<any[] | null>(null);
   const [instanceId, setInstanceId] = useState('');
+  const [workScenarios, setWorkScenarios] = useState<EnterpriseWorkScenario[]>([]);
+  const [workScenarioId, setWorkScenarioId] = useState('');
+  const [workScenarioName, setWorkScenarioName] = useState('');
+  const [workScenarioPurpose, setWorkScenarioPurpose] = useState('');
+  const [workScenarioNotice, setWorkScenarioNotice] = useState('');
   // ★ 기준시점은 데모 날짜를 코드에 박지 않는다. 관계 승인은 벽시계 시각부터 유효한데
   // `type=date`의 00:00 UTC로 묻으면 오늘 오후에 승인한 관계도 «없음»으로 보인다.
   // 현지시각을 분 단위로 받아 실제 순간으로 바꿔 서버에 보낸다.
@@ -182,15 +202,54 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
 
   useEffect(() => {
     listInstances()
-      .then((r) => setInstances(r.instances || []))
+      .then((r) => {
+        const rows = r.instances || [];
+        setInstances(rows);
+        // 앱 운영에서 들어오면 사용자가 방금 보고 있던 적용본을 이어 쓴다. 다만 서버가
+        // 현재 권한 범위에 돌려준 목록에 있을 때만 고른다 — 전달값 자체를 권한으로 믿지 않는다.
+        if (initialInstanceId && rows.some(
+          (row: any) => String(row.instance_id || '') === initialInstanceId,
+        )) {
+          setInstanceId(initialInstanceId);
+        } else if (rows.length === 1) {
+          setInstanceId(String(rows[0].instance_id || ''));
+        }
+      })
       .catch((e) => setError(new CalculationError(
         e?.message || '키트 인스턴스 목록을 불러오지 못했습니다.', e?.status ?? 0)));
-  }, []);
+  }, [initialInstanceId]);
 
   useEffect(() => {
     actingScope.load().then(setOperatorScope).catch(() => setOperatorScope(UNKNOWN_SCOPE));
     return actingScope.subscribe(setOperatorScope);
   }, []);
+
+  const workApp = WORK_APP_LABELS[initialAppId] ? initialAppId : '';
+  const selectedWorkScenario = workScenarios.find(
+    (scenario) => scenario.scenario_id === workScenarioId,
+  );
+
+  useEffect(() => {
+    let alive = true;
+    setWorkScenarioId('');
+    setWorkScenarioNotice('');
+    if (!workApp || !instanceId) {
+      setWorkScenarios([]);
+      return () => { alive = false; };
+    }
+    listEnterpriseWorkScenarios(instanceId).then((got) => {
+      if (!alive) return;
+      const rows = got.scenarios || [];
+      setWorkScenarios(rows);
+      const open = rows.find((row) => row.status === 'OPEN');
+      if (open) setWorkScenarioId(open.scenario_id);
+    }).catch((e: any) => {
+      if (!alive) return;
+      setError(e instanceof CalculationError ? e
+        : new CalculationError(e?.message || '전사 업무 시나리오를 불러오지 못했습니다.', 0));
+    });
+    return () => { alive = false; };
+  }, [instanceId, workApp]);
 
   const instant = asOf ? new Date(asOf).toISOString() : '';
 
@@ -250,6 +309,49 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
       },
     };
   };
+
+  async function onCreateWorkScenario() {
+    if (!instanceId || !workScenarioName.trim() || !workScenarioPurpose.trim()) return;
+    setBusy('scenario-create'); setError(null); setWorkScenarioNotice('');
+    try {
+      const made = await createEnterpriseWorkScenario({
+        instance_id: instanceId,
+        name: workScenarioName.trim(),
+        purpose: workScenarioPurpose.trim(),
+      });
+      setWorkScenarios((rows) => [made, ...rows]);
+      setWorkScenarioId(made.scenario_id);
+      setWorkScenarioName(''); setWorkScenarioPurpose('');
+      setWorkScenarioNotice('전사 시나리오를 만들었습니다. 부서별 계산 결과를 같은 곳에 저장합니다.');
+    } catch (e: any) {
+      setError(e instanceof CalculationError ? e
+        : new CalculationError(e?.message || '전사 업무 시나리오를 만들지 못했습니다.', 0));
+    } finally { setBusy(''); }
+  }
+
+  async function onSaveDepartmentResult() {
+    const request = pathRequest();
+    if (!request || !selectedWorkScenario || !DEPARTMENT_WORK_APPS.includes(workApp)
+        || result?.status !== 'COMPLETE') return;
+    setBusy('scenario-save'); setError(null); setWorkScenarioNotice('');
+    try {
+      const got = await saveDepartmentContribution(
+        selectedWorkScenario.scenario_id, workApp, request);
+      setResult(got.calculation);
+      if (!got.contribution) {
+        setWorkScenarioNotice('계산이 완료되지 않아 전사 시나리오에는 저장하지 않았습니다.');
+        return;
+      }
+      setWorkScenarios((rows) => rows.map(
+        (row) => row.scenario_id === got.scenario.scenario_id ? got.scenario : row));
+      setWorkScenarioNotice(got.contribution.idempotent
+        ? '같은 계산 결과가 이미 저장되어 있어 중복 기록하지 않았습니다.'
+        : `${WORK_APP_LABELS[workApp]} 결과를 같은 전사 시나리오에 저장했습니다.`);
+    } catch (e: any) {
+      setError(e instanceof CalculationError ? e
+        : new CalculationError(e?.message || '부서 계산 결과를 저장하지 못했습니다.', 0));
+    } finally { setBusy(''); }
+  }
 
   async function onFind() {
     if (!root) return;
@@ -485,6 +587,112 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
             ]} />}
         >
         <Panel className="path-calc-panel" kicker="영향 경로" title="경로 계산 — 질문을 고르고 답을 봅니다">
+          {workApp && (
+            <section style={{
+              border: '1px solid var(--surface-border)', borderRadius: 8,
+              padding: 14, marginBottom: 16, background: 'var(--surface-raised)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12,
+                alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div>
+                  <small style={{ color: 'var(--ls-red)', fontWeight: 800, letterSpacing: '.08em' }}>
+                    ENTERPRISE WORK SCENARIO
+                  </small>
+                  <h3 style={{ margin: '4px 0', fontSize: 18 }}>
+                    {WORK_APP_LABELS[workApp]} · 전사 시나리오
+                  </h3>
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--surface-text-muted)' }}>
+                    부서별 계산을 같은 시나리오에 저장해 전사 영향으로 결합합니다.
+                  </p>
+                </div>
+                {workScenarios.length > 0 && (
+                  <label style={{ display: 'grid', gap: 4, fontSize: 12,
+                    color: 'var(--surface-text-muted)', minWidth: 250 }}>
+                    전사 시나리오 선택
+                    <select value={workScenarioId}
+                      onChange={(e) => { setWorkScenarioId(e.target.value); setWorkScenarioNotice(''); }}
+                      style={{ padding: 8, fontSize: 14 }}>
+                      <option value="">선택하십시오</option>
+                      {workScenarios.map((scenario) => (
+                        <option key={scenario.scenario_id} value={scenario.scenario_id}>
+                          {scenario.name} · {scenario.status === 'OPEN' ? '진행 중' : '종료'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+
+              {selectedWorkScenario && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 13, color: 'var(--surface-text)', marginBottom: 8 }}>
+                    <b>{selectedWorkScenario.name}</b> — {selectedWorkScenario.purpose}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                    gap: 8 }}>
+                    {DEPARTMENT_WORK_APPS.map((appId) => {
+                      const ready = selectedWorkScenario.coverage.present_apps.includes(appId);
+                      return (
+                        <div key={appId} style={{
+                          padding: '8px 10px', borderRadius: 6,
+                          border: `1px solid ${ready ? 'var(--state-success-fg)' : 'var(--surface-border)'}`,
+                          background: ready ? 'var(--state-success-bg)' : 'var(--surface-card)',
+                          fontSize: 13, textAlign: 'center',
+                          color: ready ? 'var(--state-success-fg)' : 'var(--surface-text-muted)',
+                        }}>
+                          {WORK_APP_LABELS[appId]} · {ready ? '결과 저장됨' : '결과 대기'}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700,
+                    color: selectedWorkScenario.coverage.ready_for_enterprise
+                      ? 'var(--state-success-fg)' : 'var(--state-warn-fg)' }}>
+                    {selectedWorkScenario.coverage.ready_for_enterprise
+                      ? '세 부서 결과가 모였습니다 — 전사 조합 준비 완료'
+                      : '세 부서 결과가 모두 모여야 전사 조합을 시작합니다.'}
+                  </div>
+                </div>
+              )}
+
+              {!selectedWorkScenario && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, .7fr) minmax(260px, 1.3fr) auto',
+                  gap: 8, alignItems: 'end', marginTop: 12 }}>
+                  <label style={{ display: 'grid', gap: 4, fontSize: 12,
+                    color: 'var(--surface-text-muted)' }}>
+                    시나리오 이름
+                    <input value={workScenarioName} maxLength={120}
+                      onChange={(e) => setWorkScenarioName(e.target.value)}
+                      placeholder="예: 2026 하반기 원료 수급 대응" style={{ padding: 8 }} />
+                  </label>
+                  <label style={{ display: 'grid', gap: 4, fontSize: 12,
+                    color: 'var(--surface-text-muted)' }}>
+                    검토 목적
+                    <input value={workScenarioPurpose} maxLength={500}
+                      onChange={(e) => setWorkScenarioPurpose(e.target.value)}
+                      placeholder="예: 구매 지연이 생산·판매에 미치는 전사 영향 검토"
+                      style={{ padding: 8 }} />
+                  </label>
+                  <button type="button" className="primary-button" onClick={onCreateWorkScenario}
+                    disabled={!workScenarioName.trim() || !workScenarioPurpose.trim()
+                      || busy === 'scenario-create'}>
+                    {busy === 'scenario-create' ? '만드는 중…' : '전사 시나리오 만들기'}
+                  </button>
+                </div>
+              )}
+              {workApp === 'APP-07' && (
+                <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                  전사 통합 앱은 별도 부서 결과를 만들지 않습니다. 위 세 부서 결과의 결합 상태를
+                  확인하고 이후 손익·현금흐름 조합으로 이어집니다.
+                </p>
+              )}
+              {workScenarioNotice && (
+                <div style={{ marginTop: 8, fontSize: 13, color: 'var(--state-success-fg)' }}>
+                  {workScenarioNotice}
+                </div>
+              )}
+            </section>
+          )}
           <p ref={questionSectionRef} style={{
             fontSize: 13, color: 'var(--surface-text-muted)', margin: '0 0 12px', scrollMarginTop: 12,
           }}>
@@ -776,6 +984,29 @@ export function PathCalcPanel({ onClose, page = false }: { onClose: () => void; 
                     <div style={{ marginTop: 6 }}>승인 산식 판 {Object.keys(result.segment_model_versions).length}개 결속</div>
                   </div>
                 </details>
+
+                {DEPARTMENT_WORK_APPS.includes(workApp) && (
+                  <div style={{
+                    marginTop: 14, padding: 12, borderRadius: 7,
+                    border: '1px solid var(--surface-border)', background: 'var(--surface-raised)',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    gap: 12, flexWrap: 'wrap',
+                  }}>
+                    <div>
+                      <b style={{ fontSize: 14 }}>같은 전사 시나리오에 부서 결과 저장</b>
+                      <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginTop: 3 }}>
+                        {selectedWorkScenario
+                          ? `${selectedWorkScenario.name}에 ${WORK_APP_LABELS[workApp]} 구간 결과와 근거를 저장합니다.`
+                          : '위에서 전사 시나리오를 만들거나 선택해야 저장할 수 있습니다.'}
+                      </div>
+                    </div>
+                    <button type="button" className="primary-button"
+                      onClick={onSaveDepartmentResult}
+                      disabled={!selectedWorkScenario || busy === 'scenario-save'}>
+                      {busy === 'scenario-save' ? '계산·저장 중…' : '부서 결과 저장'}
+                    </button>
+                  </div>
+                )}
 
                 {/* ── [G5] 이 결과로 안건 만들기 ─────────────────────────── */}
                 <div ref={decisionSectionRef} style={{

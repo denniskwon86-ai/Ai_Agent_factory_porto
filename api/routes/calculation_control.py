@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 from typing import Any, Dict, List, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -51,6 +52,7 @@ from core import calc_execution_approval as cea
 from core import demo_readiness
 from core import demo_reset
 from core import demo_vertical_slice as dv
+from core import enterprise_work_scenario as ews
 from core import path_calculation_service as svc
 from core.enterprise_context import audit
 #: ★★ 인스턴스 가시성 판정을 **한 벌만** 쓴다. 같은 판정을 두 벌로 만들면 한쪽만
@@ -98,6 +100,20 @@ class PathCalcInput(BaseModel):
     instance_id: str
     #: 시나리오 손잡이 — ⚠️ 봉인된 키(배분·인식 규칙)를 넣어도 봉인이 이긴다
     assumptions: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkScenarioCreateInput(BaseModel):
+    """전사 시나리오의 사람용 이름과 목적만 받는다.
+
+    조직·tenant·실행 모드는 키트 인스턴스에서 얻는다. 클라이언트가 그 값을 보내게
+    두면 다른 조직 문맥을 자기일관되게 꾸밀 수 있다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    instance_id: str
+    name: str = Field(min_length=1, max_length=120)
+    purpose: str = Field(min_length=1, max_length=500)
 
 
 class DiagnosticInput(PathCalcInput):
@@ -579,6 +595,131 @@ async def calculate_path(req: PathCalcInput, p: Principal = Depends(current_prin
     assert_identified(p, "경로 계산")
     got = await asyncio.to_thread(_calculate, req, p)
     return {"status": "success", "data": got["result"]}
+
+
+def _work_scenario_or_404(p: Principal, scenario_id: str) -> Dict[str, Any]:
+    """보이는 인스턴스에 속한 시나리오만 돌려준다."""
+    try:
+        scenario = ews.enterprise_work_scenarios.get(str(scenario_id or "").strip())
+    except ews.WorkScenarioStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not scenario:
+        raise HTTPException(status_code=404, detail="전사 업무 시나리오를 찾을 수 없습니다.")
+    inst = _instance_or_404(p, str(scenario["instance_id"]))
+    actual = (str(inst["tenant_id"]), str(inst["scope_node_id"]), str(inst["entity_mode"]))
+    expected = (str(scenario["tenant_id"]), str(scenario["scope_node_id"]),
+                str(scenario["entity_mode"]))
+    if actual != expected:
+        raise HTTPException(
+            status_code=503,
+            detail="전사 업무 시나리오의 조직 문맥이 현재 키트 적용 정보와 다릅니다.")
+    return scenario
+
+
+def _assert_active_work_kit_app(instance_id: str, app_id: str) -> None:
+    """운영으로 승격된 부서 앱만 전사 시나리오에 결과를 보탠다."""
+    if app_id not in ews.APP_SEGMENTS:
+        raise HTTPException(
+            status_code=422,
+            detail="부서 계산 결과를 등록할 수 없는 앱입니다. 전사 앱은 결과를 집계합니다.")
+    from core import kit_app_builder as kb
+    from core import kit_app_contract as kac
+    from core import library_paths
+    from core.program_lifecycle import ACTIVE, program_lifecycle
+
+    try:
+        contract = kac.approved(store, instance_id, app_id)
+    except Exception as exc:  # noqa: BLE001 — 못 읽은 것을 미승인으로 접지 않는다
+        raise HTTPException(
+            status_code=503, detail="업무 앱의 승인 계약을 확인할 수 없습니다.") from exc
+    if not contract:
+        raise HTTPException(
+            status_code=409, detail="승인된 업무 앱 계약이 있어야 전사 시나리오에 저장할 수 있습니다.")
+    release_id = kb.release_id_for(instance_id, app_id)
+    if not os.path.exists(library_paths.release_json(release_id)):
+        raise HTTPException(status_code=409, detail="이 업무 앱은 아직 생성되지 않았습니다.")
+    try:
+        state = str(program_lifecycle.get_status(release_id).get("status") or "")
+    except Exception as exc:  # noqa: BLE001 — 못 읽은 상태를 비활성으로 접지 않는다
+        raise HTTPException(
+            status_code=503, detail="업무 앱의 운영 상태를 확인할 수 없습니다.") from exc
+    if state != ACTIVE:
+        raise HTTPException(
+            status_code=409, detail="운영 중인 업무 앱에서만 전사 시나리오 결과를 저장할 수 있습니다.")
+
+
+@router.post("/work-scenarios")
+async def create_work_scenario(req: WorkScenarioCreateInput,
+                               p: Principal = Depends(current_principal)):
+    """같은 키트 적용본 위에 부서 결과가 모일 전사 시나리오를 만든다."""
+    assert_identified(p, "전사 업무 시나리오")
+    inst = await asyncio.to_thread(_instance_or_404, p, req.instance_id)
+    try:
+        scenario = await asyncio.to_thread(
+            ews.enterprise_work_scenarios.create,
+            tenant_id=str(inst["tenant_id"]), instance_id=str(inst["instance_id"]),
+            scope_node_id=str(inst["scope_node_id"]), entity_mode=str(inst["entity_mode"]),
+            name=req.name, purpose=req.purpose, actor=p.user_id or "")
+    except ews.WorkScenarioError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ews.WorkScenarioStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "success", "data": scenario}
+
+
+@router.get("/work-scenarios")
+async def list_work_scenarios(instance_id: str,
+                              p: Principal = Depends(current_principal)):
+    """현재 사용자가 볼 수 있는 한 키트 적용본의 전사 시나리오 목록."""
+    assert_identified(p, "전사 업무 시나리오")
+    inst = await asyncio.to_thread(_instance_or_404, p, instance_id)
+    try:
+        rows = await asyncio.to_thread(
+            ews.enterprise_work_scenarios.list_for,
+            tenant_id=str(inst["tenant_id"]), instance_id=str(inst["instance_id"]))
+    except ews.WorkScenarioStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "success", "data": {"scenarios": rows}}
+
+
+@router.get("/work-scenarios/{scenario_id}")
+async def get_work_scenario(scenario_id: str,
+                            p: Principal = Depends(current_principal)):
+    assert_identified(p, "전사 업무 시나리오")
+    scenario = await asyncio.to_thread(_work_scenario_or_404, p, scenario_id)
+    return {"status": "success", "data": scenario}
+
+
+@router.post("/work-scenarios/{scenario_id}/contributions/{app_id}")
+async def record_work_scenario_contribution(
+        scenario_id: str, app_id: str, req: PathCalcInput,
+        p: Principal = Depends(current_principal)):
+    """제품 계산을 다시 실행해 해당 부서 구간만 전사 시나리오에 봉인한다."""
+    assert_identified(p, "전사 업무 시나리오 기여")
+    scenario = await asyncio.to_thread(_work_scenario_or_404, p, scenario_id)
+    if str(req.instance_id) != str(scenario["instance_id"]):
+        raise HTTPException(status_code=404, detail="전사 업무 시나리오를 찾을 수 없습니다.")
+    await asyncio.to_thread(_assert_active_work_kit_app, req.instance_id, app_id)
+    got = await asyncio.to_thread(_calculate, req, p)
+    result = got["result"]
+    if str(result.get("status") or "") != pc.COMPLETE:
+        return {"status": "success", "data": {
+            "calculation": result, "contribution": None, "scenario": scenario}}
+    try:
+        contribution = await asyncio.to_thread(
+            ews.enterprise_work_scenarios.record_contribution,
+            scenario_id=scenario_id, app_id=app_id, result=result, as_of=req.as_of,
+            tenant_id=got["ctx"]["tenant_id"], instance_id=req.instance_id,
+            scope_node_id=got["ctx"]["scope_node_id"],
+            entity_mode=got["ctx"]["entity_mode"], actor=p.user_id or "")
+        updated = await asyncio.to_thread(
+            ews.enterprise_work_scenarios.require, scenario_id)
+    except ews.WorkScenarioError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ews.WorkScenarioStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "success", "data": {
+        "calculation": result, "contribution": contribution, "scenario": updated}}
 
 
 @router.post("/path/diagnostics/reveal")

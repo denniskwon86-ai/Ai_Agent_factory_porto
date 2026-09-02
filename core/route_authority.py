@@ -200,6 +200,13 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     # ★ 이제 **안건을 저장한다** — 만들기이자 돌리기다. 둘 다 member 권한이므로
     #   `PROJECT_RUN` 하나로 충분하다(`PROJECT_CREATE` 도 member 가 갖는다).
     "POST /api/v1/calculation/path/decision": (PROJECT_RUN,),
+    # 부서별 계산 결과를 하나의 전사 시나리오에 모은다. 결과·지문·판은 클라이언트가
+    # 제출하지 않고 서버 계산 경로가 다시 만든다. 조회도 조직 범위 식별이 필요하다.
+    "POST /api/v1/calculation/work-scenarios": (PROJECT_RUN,),
+    "GET /api/v1/calculation/work-scenarios": (PROJECT_RUN,),
+    "GET /api/v1/calculation/work-scenarios/{scenario_id}": (PROJECT_RUN,),
+    "POST /api/v1/calculation/work-scenarios/{scenario_id}/contributions/{app_id}":
+        (PROJECT_RUN,),
     # ★★★ 실행 승인은 **시스템 관리자만**. 「이 산식으로 만든 숫자를 회의에 올려도 되는가」
     #   를 정하는 일이고, 되돌려도 이미 그 숫자를 본 사람이 있다.
     # ⚠️ `ADMIN_SECURITY` 는 플랫폼 관리자(`is_admin`)에게만 간다 — 데이터·AI 관리자와

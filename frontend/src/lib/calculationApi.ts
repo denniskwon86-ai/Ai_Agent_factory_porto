@@ -281,6 +281,69 @@ export async function runPathCalculation(body: PathCalcBody) {
     }), '경로 계산');
 }
 
+// ── 부서 계산 → 같은 전사 업무 시나리오 ────────────────────────────────
+
+export interface WorkScenarioContribution {
+  contribution_id: string;
+  app_id: 'APP-01' | 'APP-03' | 'APP-06';
+  department_role: 'procurement' | 'production' | 'sales';
+  segment_ref: string;
+  as_of: string;
+  result_fingerprint: string;
+  values: Record<string, Record<string, number | string>>;
+  used_snapshots: Record<string, string>;
+  idempotent?: boolean;
+}
+
+export interface EnterpriseWorkScenario {
+  scenario_id: string;
+  instance_id: string;
+  name: string;
+  purpose: string;
+  status: 'OPEN' | 'CLOSED';
+  contributions: WorkScenarioContribution[];
+  latest_by_app: Partial<Record<'APP-01' | 'APP-03' | 'APP-06', WorkScenarioContribution>>;
+  coverage: {
+    required_apps: string[];
+    present_apps: string[];
+    missing_apps: string[];
+    ready_for_enterprise: boolean;
+  };
+}
+
+export async function createEnterpriseWorkScenario(body: {
+  instance_id: string; name: string; purpose: string;
+}) {
+  return unwrap<EnterpriseWorkScenario>(
+    await apiFetch(`${BASE}/work-scenarios`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }), '전사 업무 시나리오');
+}
+
+export async function listEnterpriseWorkScenarios(instanceId: string) {
+  return unwrap<{ scenarios: EnterpriseWorkScenario[] }>(
+    await apiFetch(`${BASE}/work-scenarios?instance_id=${encodeURIComponent(instanceId)}`),
+    '전사 업무 시나리오 목록');
+}
+
+export async function saveDepartmentContribution(
+  scenarioId: string, appId: string, body: PathCalcBody,
+) {
+  return unwrap<{
+    calculation: CalcResult;
+    contribution: WorkScenarioContribution | null;
+    scenario: EnterpriseWorkScenario;
+  }>(await apiFetch(
+    `${BASE}/work-scenarios/${encodeURIComponent(scenarioId)}`
+      + `/contributions/${encodeURIComponent(appId)}`,
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  ), '부서 계산 결과 저장');
+}
+
 export interface CalculationDiagnostic {
   reason_code: string;
   internal_reasons: string[];

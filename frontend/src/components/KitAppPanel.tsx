@@ -10,7 +10,6 @@ import {
 import {
   datasetDisplayName, KitBusinessView, preferredDatasetName,
 } from './KitBusinessView';
-import { shortId } from '../lib/displayId';
 import { apiFetch } from '../lib/api';
 
 // [2026-08-23] 키트로 앱 만들기 — **여정의 빈 칸.**
@@ -49,6 +48,15 @@ const APP_PRESENTATION: Record<string, { label: string; note?: string }> = {
     label: '공급 위험·대체안',
     note: '등록된 위험 근거를 조회합니다. 위험 계산과 대체 공급사 추천은 지원 대기입니다.',
   },
+};
+
+// 원래 제품 기획의 부서별 시뮬레이션 3종과 전사 조합 앱만 계산 여정으로 연결한다.
+// 단순 조회 앱에 같은 버튼을 그리면 아직 없는 계산을 약속하게 된다.
+const SIMULATION_ACTION: Record<string, string> = {
+  'APP-01': '전사 영향 시뮬레이션',
+  'APP-03': '전사 영향 시뮬레이션',
+  'APP-06': '전사 영향 시뮬레이션',
+  'APP-07': '전사 통합 시뮬레이션 실행',
 };
 
 function appLabel(row: KitAppRow): string {
@@ -233,11 +241,12 @@ function AppViewer({
 }
 
 function AppRow({
-  row, instanceId, onChanged, notice, setNotice, mode, currentUser,
+  row, instanceId, onChanged, notice, setNotice, mode, currentUser, onOpenSimulation,
 }: {
   row: KitAppRow; instanceId: string; onChanged: () => void;
   mode: 'build' | 'operate';
   currentUser: string;
+  onOpenSimulation?: (instanceId: string, appId: string) => void;
   //: ★★★ [2026-08-23 실측] **알림은 부모가 들고 있어야 한다.**
   //:
   //: ⚠️⚠️ 종전에는 이 행의 지역 상태였다. 그런데 성공하면 `onChanged()` 가 목록을
@@ -291,7 +300,6 @@ function AppRow({
         <div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
             <strong style={{ fontSize: 16 }}>{appLabel(row)}</strong>
-            <span style={{ fontSize: 11, color: 'var(--surface-text-muted)' }}>{row.app_id}</span>
           </div>
           {APP_PRESENTATION[row.app_id]?.note && (
             <div style={{ color: 'var(--surface-text-muted)', fontSize: 12, marginTop: 4 }}>
@@ -367,7 +375,7 @@ function AppRow({
               <div style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
                 {/* ★★★ 직무 분리를 화면이 **말한다.** 눌러 보고 403 을 받는 것보다,
                     누르기 전에 아는 편이 낫다. */}
-                {row.drafted_by ? `${row.drafted_by} 님이 만들었습니다 — ` : ''}
+                {row.drafted_by ? '계약 작성자가 만들었습니다 — ' : ''}
                 만든 사람이 아닌 <strong>다른 사람</strong>이 승인해야 합니다.
               </div>
               {draftedByCurrentUser && (
@@ -405,10 +413,8 @@ function AppRow({
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 13, color: 'var(--surface-text-muted)' }}>
                   {mode === 'operate'
-                    ? <span title={row.approved_by ? `승인 기록: ${row.approved_by}` : undefined}>
-                        계약 승인이 확인되었습니다.
-                      </span>
-                    : (row.approved_by ? `${row.approved_by} 님이 승인했습니다.` : '승인되었습니다.')}
+                    ? <span>계약 승인이 확인되었습니다.</span>
+                    : (row.approved_by ? '승인 권한자의 승인이 확인되었습니다.' : '승인되었습니다.')}
                 </span>
                 {mode === 'build' && (
                   <button type="button" disabled={!!busy}
@@ -433,11 +439,6 @@ function AppRow({
                   <div style={{ display: 'grid', gap: 6 }}>
                     <span style={{ color: 'var(--state-success-fg)' }}>
                       ● 만들어졌습니다 — 데이터셋 {row.built_datasets}개
-                      {mode === 'build' && (
-                        <span style={{ color: 'var(--surface-text-muted)', marginLeft: 6, fontSize: 12 }}>
-                          <span title={row.release_id}>{shortId(row.release_id)}</span>
-                        </span>
-                      )}
                     </span>
 
                     {/* ★★★ **만든 것과 쓸 수 있는 것은 다르다.**
@@ -494,6 +495,12 @@ function AppRow({
                         </span>
                         <AppViewer releaseId={row.release_id} appId={row.app_id}
                                    appLabel={appLabel(row)} />
+                        {mode === 'operate' && onOpenSimulation && SIMULATION_ACTION[row.app_id] && (
+                          <button type="button" className="primary-button"
+                            onClick={() => onOpenSimulation(instanceId, row.app_id)}>
+                            {SIMULATION_ACTION[row.app_id]}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -535,11 +542,12 @@ function AppRow({
 }
 
 export function KitAppPanel({
-  instanceId, mode = 'build', statusFilter = 'all',
+  instanceId, mode = 'build', statusFilter = 'all', onOpenSimulation,
 }: {
   instanceId: string;
   mode?: 'build' | 'operate';
   statusFilter?: 'all' | 'active' | 'candidate' | 'pending';
+  onOpenSimulation?: (instanceId: string, appId: string) => void;
 }) {
   const [rows, setRows] = useState<KitAppRow[] | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
@@ -618,6 +626,7 @@ export function KitAppPanel({
             mode={mode}
             currentUser={currentUser}
             notice={notices[row.app_id] ?? null}
+            onOpenSimulation={onOpenSimulation}
             setNotice={(notice) => setNotices((current) => ({
               ...current, [row.app_id]: notice,
             }))}
@@ -689,7 +698,7 @@ export function KitAppPanel({
                     <span className="afs-master-selector-copy">
                       <small style={{ color: lifecycle.tone }}>{lifecycle.label}</small>
                       <strong>{appLabel(row)}</strong>
-                      <span>{row.app_id} · 준비 {READINESS_VIEW[row.readiness_state]?.label || '확인 필요'}</span>
+                      <span>준비 {READINESS_VIEW[row.readiness_state]?.label || '확인 필요'}</span>
                     </span>
                     <span aria-hidden="true">›</span>
                   </button>

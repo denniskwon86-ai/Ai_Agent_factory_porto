@@ -154,6 +154,8 @@ function AppShell() {
   const [dataPrepInitialView, setDataPrepInitialView] = useState<'overview' | 'readiness'>('overview');
   const [showCalcApproval, setShowCalcApproval] = useState(false);
   const [showPathCalc, setShowPathCalc] = useState(false);
+  const [pathCalcInitialInstanceId, setPathCalcInitialInstanceId] = useState('');
+  const [pathCalcInitialAppId, setPathCalcInitialAppId] = useState('');
   const [showScenario, setShowScenario] = useState(false);
   const [showPromotion, setShowPromotion] = useState(false);
   const [showKitOperations, setShowKitOperations] = useState(false);
@@ -316,7 +318,9 @@ function AppShell() {
           onSelect: () => { setShowCalcApproval(false); setSpace('calc'); } },
         { id: 'path-calc', icon: '3️⃣', label: '경로 계산',
           desc: '승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산합니다 — 막히면 무엇이 없는지 말합니다',
-          onSelect: () => { setShowPathCalc(false); setSpace('path'); } },
+          onSelect: () => {
+            setPathCalcInitialAppId(''); setShowPathCalc(false); setSpace('path');
+          } },
         { id: 'decision-pkg', icon: '4️⃣', label: '의사결정 안건',
           desc: '경로 계산에서 만든 안건을 세 관점으로 검토하고 · 실행 책임자와 기한을 확정하고 · 근거 계보를 확인합니다',
           onSelect: () => {
@@ -558,7 +562,10 @@ function AppShell() {
           onClose={() => setShowDataPrep(false)} />)}
       {showCalcApproval && (
         <CalcApprovalPanel onClose={() => setShowCalcApproval(false)} />)}
-      {showPathCalc && <PathCalcPanel onClose={() => setShowPathCalc(false)} />}
+      {showPathCalc && <PathCalcPanel
+        initialInstanceId={pathCalcInitialInstanceId}
+        initialAppId={pathCalcInitialAppId}
+        onClose={() => setShowPathCalc(false)} />}
       {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
       {showPromotion && (
         <ReleasePromotionPanel onClose={() => setShowPromotion(false)} />
@@ -570,6 +577,12 @@ function AppShell() {
             setShowKitOperations(false);
             setSpace('build');
             setBuildStart(true);
+          }}
+          onOpenSimulation={(instanceId, appId) => {
+            setPathCalcInitialInstanceId(instanceId);
+            setPathCalcInitialAppId(appId);
+            setShowKitOperations(false);
+            setShowPathCalc(true);
           }}
         />
       )}
@@ -691,7 +704,9 @@ function AppShell() {
       : space === 'calc'
         ? <CalcApprovalPanel page onClose={() => setSpace('enterprise')} />
         : space === 'path'
-          ? <PathCalcPanel page onClose={() => setSpace('enterprise')} />
+          ? <PathCalcPanel page initialInstanceId={pathCalcInitialInstanceId}
+              initialAppId={pathCalcInitialAppId}
+              onClose={() => setSpace('enterprise')} />
           : space === 'briefing'
             ? <BriefingPanel page onClose={() => setSpace('enterprise')} />
             : space === 'master'
@@ -1017,6 +1032,10 @@ function AppShell() {
             <KitOperationsPanel page onOpenBuild={() => {
               setSpace('build');
               setBuildStart(true);
+            }} onOpenSimulation={(instanceId, appId) => {
+              setPathCalcInitialInstanceId(instanceId);
+              setPathCalcInitialAppId(appId);
+              setSpace('path');
             }} />
           </main>
         </div>
