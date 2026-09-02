@@ -25,6 +25,61 @@ def _load_skill(skill_name: str) -> str:
     return ""
 
 
+def _master_block_text(state_obj: Any) -> str:
+    """이 에이전트에게 줄 **기준정보 본문**.
+
+    ## ⚠️⚠️ [2026-08-29 실측] 같은 필요를 두 경로가 각자 해결했고 한쪽만 연결돼 있었다
+
+    범용 노드는 `state.master_data` 라는 **원시 문자열 칸**만 읽었다. 그 칸을 채우는 곳은
+    `POST /projects/{id}/mega/plan` 하나뿐인데(LLM 이 «추천 지표» 를 지어내 저장한다),
+    실제로는 **프로젝트 63개 전부 비어 있었다.**
+
+    한편 SW 파이프라인은 같은 자리에서 `get_master_context()` 를 부른다 —
+    조직 범위로 거르고 도메인을 유추해 **사내 확정 기준**을 뽑는 확정 조회다.
+    `mfg_sim` 상태로 불러 보면 **8,947자**가 나온다(LME 니켈가 16,500·환율 1,350·
+    직접노무비 35·OEE 임계 0.85·지연 위약률 0.02 …).
+
+    ★★★ 그래서 시뮬레이터 스킬이 「**상상 금지 — 주입된 데이터로 예측하라**」고 명령하는데
+      정작 아무 데이터도 도착하지 않았다. 수행 불가능한 지시였고, 결과는 지어낸 숫자였다
+      (`scenario-01` 의 원가 보고서가 「ERP 에서 수집했습니다」로 시작한다 — 아무것도
+      읽지 않았다).
+
+    ⚠️ 예산은 **SW 파이프라인과 같은 식**을 쓴다(`context_engine.py:74`). 여기서 다시
+      정하면 두 경로가 갈리고, 갈린 쪽이 굶는다. 기준정보 하나가 예산을 다 삼켜 기술
+      명세가 통째로 잘린 사고가 이미 있었다(실측 21,877자 > 20,000자).
+    ⚠️ 확정 조회가 실패해도 **막지 않는다** — 종전의 문자열 칸으로 떨어진다. MEGA 흐름이
+      그 칸을 쓰므로 끊으면 그쪽이 죽는다.
+    """
+    raw = (getattr(state_obj, "master_data", "") or "").strip()
+    try:
+        import config
+        from core.master_data import master_data as _md, _infer_domains
+        #: ⚠️⚠️ **도메인이 정해지지 않으면 주입하지 않는다.**
+        #:
+        #:   `get_master_context` 는 도메인이 비면 «도메인 무관» 으로 전수를 준다. 그러면
+        #:   `content-marketing`·`data-analytics` 같은 템플릿에 **비철금속 제련 기준정보
+        #:   10KB**(LME 니켈가·자용로·BOM·CBAM)가 통째로 들어간다 — 마케팅 콘텐츠를 쓰는
+        #:   에이전트에게 구리 제련 파라미터를 주는 셈이다(실측 10,141자).
+        #:   같은 형태의 사고가 이미 있었다: 도메인·조직범위 미선언 프로젝트에서 «전수» 가
+        #:   곧 «DB 전체» 가 되어 블록 하나가 예산을 삼켰다(`context_engine.py:66` 주석).
+        #: ★ 관련 없는 기준정보는 «없는 것» 보다 나쁘다 — 산출물이 그쪽으로 끌려간다.
+        domains = list(getattr(state_obj, "master_domains", None) or [])
+        if not domains:
+            domains = _infer_domains(getattr(state_obj, "template_id", "") or "")
+        if not domains:
+            return raw
+        ctx_max = getattr(config, "CONTEXT_MAX_LENGTH", 20000)
+        budget = max(8000, int(ctx_max * 0.5))
+        text = (_md.get_master_context(state_obj, max_chars=budget) or "").strip()
+    except Exception as e:
+        print(f"WARN [Universal] 기준정보 확정 조회 실패 - 상태의 값으로 진행합니다: {e}")
+        return raw
+    if not text:
+        return raw
+    #: 둘 다 있으면 **확정 조회를 앞에** 둔다 — 사내 기준이 추천값보다 세다.
+    return (text + (chr(10) * 2) + raw) if raw else text
+
+
 def _format_upstream(artifacts: Dict[str, str], summaries: Dict[str, str], self_id: str) -> str:
     """이전 단계 산출물을 사람이 읽는 블록으로 - 범용 노드가 맥락을 이어 작업하도록.
     직전 노드(가장 마지막 항목)는 원본(artifacts)을 쓰고, 그 이전은 요약본(summaries)을 쓴다."""
@@ -83,7 +138,7 @@ def make_universal_node(agent_id: str):
         upstream = _format_upstream(artifacts, summaries, agent_id)
         
         goal = (getattr(state_obj, "initial_idea", "") or "").strip()
-        master_data = (getattr(state_obj, "master_data", "") or "").strip()
+        master_data = _master_block_text(state_obj)
 
         master_block = f"[전사 마스터 데이터 및 제약사항]\n{master_data}\n\n" if master_data else ""
         format_injection = _get_format_injection(fmt_id) if fmt_id else ""
