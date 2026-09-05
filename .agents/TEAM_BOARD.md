@@ -49,7 +49,7 @@
 ### [BASELINE-HANDOFF-20260905-01] 누적 미커밋 구현 통합 기준선 정리
 - 작성자 / 기록 시각: Codex / 2026-09-05 KST
 - 왜 지금 기록하는가: 전사 시나리오·재무 계산·프로젝트 데이터 결속·온톨로지 표시·업무키트·UI·보고서 출력과 과거 문서 아카이브가 여러 세션의 미커밋 상태로 함께 남아 있어 다음 작업 전 재현 가능한 기준선을 확정하기 위해 기록한다.
-- 상태: **전체 T3 통과·선별 커밋 진행 중** — 상세 정본은 `docs/handoff/LAXS_INTEGRATION_BASELINE_HANDOFF_2026-09-05.md`다.
+- 상태: **전체 T3 통과·기능별 커밋 완료·별도 브랜치 푸시 직전** — 상세 정본은 `docs/handoff/LAXS_INTEGRATION_BASELINE_HANDOFF_2026-09-05.md`다.
 - 결정 및 근거: 누적분 규모 때문에 `codex/baseline-consolidation-20260905`로 분리했다. 시작 HEAD `258f6ab4f`, 기준 원격 `8d8cb124f`, fetch 후 원격 신규 0이다. 런타임 로그·원시자료·DB 사본·환경별 모델 라우팅 정책은 소스에서 제외한다.
 - 영향·주의사항: 과거 보드 이력은 `.agents/archive/TEAM_BOARD_archive_20260818.md`와 `docs/archive/TEAM_BOARD_archive_20260818.md`를 함께 커밋한다. 거절된 스킬 제안 18건은 pending 삭제/rejected 추가를 한 묶음으로 다룬다.
 - 다음 행동 / 담당 / 착수 조건: Codex가 영향 회귀·프런트 빌드·전체 T3·스테이징 감사를 수행한 뒤 새 브랜치로 푸시한다. 다음 작업은 OpenDART 1개 공급자의 read-only preview부터 시작한다.
