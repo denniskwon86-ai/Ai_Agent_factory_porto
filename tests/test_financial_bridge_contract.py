@@ -16,11 +16,11 @@ def _contract(account="1200"):
                              "EXT-01": "snapshot-exchange-rate"},
         "rules": [
             {"rule_id": "purchase_working_capital",
-             "source_metrics": ["in_transit_qty"],
+             "source_metrics": ["in_transit_quantity"],
              "target_account_codes": [account, "2000"],
              "formula_ref": "BRIDGE.PURCHASE_WC.v1", "evidence_refs": ["MDM-07"]},
             {"rule_id": "production_margin",
-             "source_metrics": ["shortage_qty", "producible_qty"],
+             "source_metrics": ["shortage_quantity", "producible_quantity"],
              "target_account_codes": ["5000", "5100"],
              "formula_ref": "BRIDGE.PRODUCTION_MARGIN.v1",
              "evidence_refs": ["MDM-05", "MDM-07"]},
@@ -215,6 +215,8 @@ def test_APP07은_승인전과_승인후_모두_재무숫자를_만들지_않는
         return {
             "status": "COMPLETE", "query_id": "q", "path_fingerprint": "path",
             "request_fingerprint": "request", "result_fingerprint": fp,
+            "baseline_id": "baseline-financial-bridge",
+            "baseline_fingerprint": "baseline-financial-bridge-fp",
             "required_relation_ids": ["rel"], "capability_fingerprints": {segment: "cap"},
             "segment_model_versions": {segment: "model"},
             "used_snapshots": {app_id: "snapshot-" + app_id},

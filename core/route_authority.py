@@ -206,6 +206,7 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "GET /api/v1/calculation/work-scenarios": (PROJECT_RUN,),
     "GET /api/v1/calculation/work-scenarios/{scenario_id}": (PROJECT_RUN,),
     "GET /api/v1/calculation/work-scenarios/{scenario_id}/composition": (PROJECT_RUN,),
+    "POST /api/v1/calculation/work-scenarios/{scenario_id}/decision": (PROJECT_RUN,),
     "POST /api/v1/calculation/work-scenarios/{scenario_id}/contributions/{app_id}":
         (PROJECT_RUN,),
     # ★★★ 실행 승인은 **시스템 관리자만**. 「이 산식으로 만든 숫자를 회의에 올려도 되는가」

@@ -53,6 +53,8 @@ from core import demo_readiness
 from core import demo_reset
 from core import demo_vertical_slice as dv
 from core import enterprise_work_scenario as ews
+from core import enterprise_financial_model as efm
+from core import enterprise_scenario_decision as esd
 from core import financial_bridge_contract as fbc
 from core import path_calculation_service as svc
 from core.enterprise_context import audit
@@ -115,6 +117,17 @@ class WorkScenarioCreateInput(BaseModel):
     instance_id: str
     name: str = Field(min_length=1, max_length=120)
     purpose: str = Field(min_length=1, max_length=500)
+
+
+class WorkScenarioDecisionInput(BaseModel):
+    """APP-07에서 사용자가 본 결과를 안건으로 전환하는 낙관적 잠금 요청."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=500)
+    due_at: str = Field(min_length=1, max_length=64)
+    seen_composition_fingerprint: str = Field(min_length=1, max_length=128)
+    seen_financial_result_fingerprint: str = Field(min_length=1, max_length=128)
 
 
 class FinancialBridgeDraftInput(BaseModel):
@@ -729,6 +742,128 @@ def _financial_bridge_proposal(ctx: Dict[str, str]) -> Dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+def _enterprise_financial_impact(ctx: Dict[str, str], scenario: Dict[str, Any],
+                                 composition: Dict[str, Any]) -> Dict[str, Any]:
+    """승인된 브리지와 봉인된 전사 시나리오만 재무 기간 이동으로 계산한다."""
+    if ((composition.get("financial_impact") or {}).get("reason_code")
+            != ews.FINANCIAL_MODEL_REQUIRED):
+        return composition
+    try:
+        bridge = fbc.financial_bridge_contracts.effective(
+            tenant_id=ctx["tenant_id"], instance_id=ctx["instance_id"],
+            scope_node_id=ctx["scope_node_id"], entity_mode=ctx["entity_mode"],
+            as_of=str(composition.get("as_of") or ""))
+        if not bridge:
+            return composition
+        model_keys = ("FIN-01", "FIN-02")
+        model_seals = loader.active_seals(
+            store, instance_id=ctx["instance_id"], contract_keys=model_keys)
+        missing = [key for key in model_keys if key not in model_seals]
+        if missing:
+            composition["financial_impact"] = {
+                "status": ews.COMPOSITION_BLOCKED,
+                "reason_code": "FINANCIAL_DATA_REQUIRED",
+                "message": "표준원가와 채권·채무 인증 데이터가 준비되어야 재무 영향을 계산할 수 있습니다.",
+                "missing_data_labels": [
+                    {"FIN-01": "표준원가·실제원가", "FIN-02": "채권·채무 일정"}[key]
+                    for key in missing],
+                "contract_state": "APPROVED",
+            }
+            return composition
+        seals = dict(composition.get("used_snapshots") or {})
+        for key, snapshot_id in (
+                bridge.get("contract", {}).get("source_snapshots") or {}).items():
+            previous = seals.get(key)
+            if previous and previous != snapshot_id:
+                raise efm.EnterpriseFinancialModelError(
+                    f"{key} 인증판이 전사 시나리오와 변환 계약에서 다릅니다.")
+            seals[key] = snapshot_id
+        seals.update(model_seals)
+        rows = loader.load_sealed(
+            store, sealed_snapshots=seals,
+            tenant_id=ctx["tenant_id"], entity_mode=ctx["entity_mode"],
+            scope_node_id=ctx["scope_node_id"])
+        composition["financial_impact"] = efm.calculate(
+            composition_fingerprint=str(composition["composition_fingerprint"]),
+            as_of=str(composition["as_of"]),
+            contributions=scenario["latest_by_app"], datasets=rows,
+            bridge_contract=bridge["contract"],
+            bridge_fingerprint=str(bridge["fingerprint"]), source_snapshots=seals)
+        return composition
+    except loader.SealedDatasetError as exc:
+        raise ews.WorkScenarioStoreError(
+            "전사 재무 영향의 인증 데이터를 읽거나 검증할 수 없습니다.") from exc
+    except fbc.FinancialBridgeStoreError as exc:
+        raise ews.WorkScenarioStoreError(str(exc)) from exc
+    except (fbc.FinancialBridgeContractError,
+            efm.EnterpriseFinancialModelError):
+        composition["financial_impact"] = {
+            "status": ews.COMPOSITION_BLOCKED,
+            "reason_code": "FINANCIAL_INPUT_INCOMPLETE",
+            "message": "재무 계산에 필요한 기준선 또는 데이터 연결 조건을 충족하지 못했습니다.",
+            "contract_state": "APPROVED",
+        }
+        return composition
+
+
+def _assert_composition_source(scenario: Dict[str, Any],
+                               composition: Dict[str, Any]) -> None:
+    """조합 지문과 재무 입력이 같은 기여 결과 읽기에서 나온 것인지 확인한다."""
+    if composition.get("status") != ews.COMPOSITION_READY:
+        return
+    latest = scenario.get("latest_by_app") or {}
+    expected_rows = [latest.get(app_id) for app_id in ews.REQUIRED_APPS]
+    if any(not isinstance(row, dict) for row in expected_rows):
+        raise ews.WorkScenarioError(
+            "전사 시나리오가 조합 중 변경되었습니다. 다시 시도해 주세요.")
+    expected_departments = {
+        str(row["segment_ref"]): str(row["result_fingerprint"])
+        for row in expected_rows
+    }
+    actual_departments = {
+        str(row.get("segment_ref") or ""): str(row.get("result_fingerprint") or "")
+        for row in composition.get("department_results") or []
+        if isinstance(row, dict)
+    }
+    expected_as_of = {str(row["as_of"]) for row in expected_rows}
+    expected_baseline_ids = {str(row.get("baseline_id") or "") for row in expected_rows}
+    expected_baseline_fps = {
+        str(row.get("baseline_fingerprint") or "") for row in expected_rows}
+    expected_snapshots: Dict[str, str] = {}
+    snapshot_conflict = False
+    for row in expected_rows:
+        for key, snapshot_id in (row.get("used_snapshots") or {}).items():
+            previous = expected_snapshots.get(str(key))
+            if previous and previous != str(snapshot_id):
+                snapshot_conflict = True
+            expected_snapshots[str(key)] = str(snapshot_id)
+    if (expected_departments != actual_departments
+            or expected_as_of != {str(composition.get("as_of") or "")}
+            or expected_baseline_ids != {str(composition.get("baseline_id") or "")}
+            or expected_baseline_fps
+            != {str(composition.get("baseline_fingerprint") or "")}
+            or snapshot_conflict
+            or expected_snapshots != dict(composition.get("used_snapshots") or {})):
+        raise ews.WorkScenarioError(
+            "전사 시나리오가 조합 중 변경되었습니다. 다시 시도해 주세요.")
+
+
+def _compose_enterprise_scenario(p: Principal, scenario_id: str
+                                 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """가시성 확인부터 재무 계산까지 같은 서버 경로로 수행한다."""
+    _work_scenario_or_404(p, scenario_id)
+    composition = ews.enterprise_work_scenarios.compose(scenario_id)
+    scenario = _work_scenario_or_404(p, scenario_id)
+    _assert_composition_source(scenario, composition)
+    ctx = {
+        "tenant_id": str(scenario["tenant_id"]),
+        "instance_id": str(scenario["instance_id"]),
+        "scope_node_id": str(scenario["scope_node_id"]),
+        "entity_mode": str(scenario["entity_mode"]),
+    }
+    return scenario, _enterprise_financial_impact(ctx, scenario, composition)
+
+
 @router.get("/financial-bridge/proposal")
 async def get_financial_bridge_proposal(
         instance_id: str, p: Principal = Depends(current_principal)):
@@ -868,15 +1003,63 @@ async def compose_work_scenario(scenario_id: str,
                                 p: Principal = Depends(current_principal)):
     """세 부서 결과를 같은 기준시점·인증판의 전사 운영 영향으로 결속한다."""
     assert_identified(p, "전사 업무 시나리오 조합")
-    await asyncio.to_thread(_work_scenario_or_404, p, scenario_id)
     try:
-        composition = await asyncio.to_thread(
-            ews.enterprise_work_scenarios.compose, scenario_id)
+        _scenario, composition = await asyncio.to_thread(
+            _compose_enterprise_scenario, p, scenario_id)
     except ews.WorkScenarioError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ews.WorkScenarioStoreError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"status": "success", "data": composition}
+
+
+@router.post("/work-scenarios/{scenario_id}/decision")
+async def create_work_scenario_decision(
+        scenario_id: str, req: WorkScenarioDecisionInput,
+        p: Principal = Depends(current_principal)):
+    """APP-07에서 본 전사 재무 결과를 같은 지문의 G5 안건으로 저장한다."""
+    assert_identified(p, "전사 시나리오 의사결정 안건")
+    try:
+        scenario, composition = await asyncio.to_thread(
+            _compose_enterprise_scenario, p, scenario_id)
+    except ews.WorkScenarioError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ews.WorkScenarioStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    financial = composition.get("financial_impact") or {}
+    if financial.get("status") != "COMPLETE":
+        return {"status": "success", "data": {
+            "decision": None, "composition": composition}}
+    if (str(composition.get("composition_fingerprint") or "")
+            != req.seen_composition_fingerprint
+            or str(financial.get("result_fingerprint") or "")
+            != req.seen_financial_result_fingerprint):
+        raise HTTPException(
+            status_code=409,
+            detail="화면에서 본 전사 결과가 변경되었습니다. 최신 결과를 다시 확인해 주세요.")
+    try:
+        bound = esd.build(
+            scenario=scenario, composition=composition, question=req.question)
+        from core.decision_case import DecisionCaseError, decision_case
+        saved = await asyncio.to_thread(
+            decision_case.create,
+            question=req.question, created_by=p.user_id or "",
+            baseline_id=str(composition["baseline_id"]), scenario_id=scenario_id,
+            scope_id=str(scenario["scope_node_id"]), package=bound["package"],
+            evidence=bound["evidence"], due_at=req.due_at,
+            tenant_id=str(scenario["tenant_id"]))
+    except (esd.EnterpriseScenarioDecisionError, DecisionCaseError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "success", "data": {
+        "decision": {
+            "decision_id": saved["decision_id"],
+            "status": saved["status"],
+            "package_version": saved["package_version"],
+            "evidence_hash": saved["evidence_hash"],
+        },
+        "composition": composition,
+    }}
 
 
 @router.post("/work-scenarios/{scenario_id}/contributions/{app_id}")
