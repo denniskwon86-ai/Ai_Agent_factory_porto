@@ -114,6 +114,19 @@ def _get_format_injection(format_id: str) -> str:
     return "당신의 최종 결과물은 반드시 <artifact> ... </artifact> 태그 안에 작성하시오. 그 전에 <summary> ... </summary> 태그 안에 핵심 요약을 3줄 이내로 작성하시오."
 
 
+def _business_data_block(state_obj: Any, meta: Dict[str, Any]) -> str:
+    """에이전트가 선언한 데이터 계약만 인증판에서 읽는다."""
+    contracts = list(meta.get("data_contracts") or [])
+    if not contracts:
+        return ""
+    binding = dict(getattr(state_obj, "business_data_binding", {}) or {})
+    if not binding:
+        raise RuntimeError("이 에이전트에 필요한 업무 데이터 적용본이 연결되지 않았습니다.")
+    from core.data_preparation.store import data_preparation_store
+    from core.project_data_context import render_agent_context
+    return render_agent_context(data_preparation_store, binding, contracts)
+
+
 def make_universal_node(agent_id: str):
     """레지스트리 메타로 구동되는 범용 노드 함수를 생성(클로저로 agent_id 고정)."""
 
@@ -128,6 +141,7 @@ def make_universal_node(agent_id: str):
 
         role = meta.get("role", "") or agent_id
         name_ko = meta.get("name_ko", "") or agent_id
+        stage = str(meta.get("stage", "") or agent_id).strip()
         is_heavy = (meta.get("model_tier", "flash") == "pro")
         skill = _load_skill(agent_skill(agent_id, "", template_id=tid))
 
@@ -139,14 +153,17 @@ def make_universal_node(agent_id: str):
         
         goal = (getattr(state_obj, "initial_idea", "") or "").strip()
         master_data = _master_block_text(state_obj)
+        business_data = _business_data_block(state_obj, meta)
 
         master_block = f"[전사 마스터 데이터 및 제약사항]\n{master_data}\n\n" if master_data else ""
+        business_block = f"[업무키트 인증 데이터]\n{business_data}\n\n" if business_data else ""
         format_injection = _get_format_injection(fmt_id) if fmt_id else ""
 
         prompt = (
             f"[당신의 역할]\n{role}\n\n"
             + (f"{skill}\n\n" if skill else "")
             + master_block
+            + business_block
             + f"[프로젝트 목표]\n{goal}\n\n"
             f"[이전 단계 산출물]\n{upstream}\n\n"
             "[지시]\n위 역할에 충실하게, 프로젝트 목표와 이전 단계 산출물을 바탕으로 "
@@ -164,7 +181,11 @@ def make_universal_node(agent_id: str):
         summaries[agent_id] = str(out_summary or "")
         
         print(f"[OK] [Universal] {name_ko} 산출물 생성 (요약 {len(summaries[agent_id])}자, 상세 {len(artifacts[agent_id])}자)")
-        return {"artifacts": artifacts, "artifact_summaries": summaries}
+        return {
+            "artifacts": artifacts,
+            "artifact_summaries": summaries,
+            "current_stage": stage,
+        }
 
     _node.__name__ = f"universal_{agent_id}"
     return _node

@@ -145,6 +145,9 @@ class ProjectState(BaseModel):
     entity_mode: str = Field(default="REAL", description="REAL | VIRTUAL | COMPETITOR_REFERENCE")
     initial_idea: str = Field(default="")
     master_data: str = Field(default="", description="전사 통합 환경변수 및 제약사항 (마스터 데이터)")
+    business_data_binding: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="프로젝트 생성 시 봉인한 업무키트 적용본과 계약별 인증 Snapshot")
     # 범용 플랫폼(T2-b): 이 프로젝트가 실행될 워크플로우 템플릿 id(레지스트리/그래프/스킬 해석의 기준).
     # "default" = 기존 SW 파이프라인(하위호환). 노드는 이 값으로 자기 스킬/그래프를 해석한다.
     template_id: str = Field(default="default")

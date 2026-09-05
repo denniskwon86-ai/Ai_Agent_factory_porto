@@ -109,6 +109,7 @@ class ProjectCreateRequest(BaseModel):
     knowledge_pack_ids: list = []  # 이 프로젝트에 연결할 도메인 지식팩(그라운딩 RAG)
     master_domains: list = []  # [M1] 이 프로젝트에 적용할 기준정보 도메인 태그
     mcp_live_grounding: bool = False  # [M3] 외부 실측값 병기 토글(기본 off)
+    kit_instance_id: str = ""  # 화면에서 고른 조직 적용본. 내부 ID는 사용자가 타이핑하지 않는다.
 
 
 class ProjectKnowledgeRequest(BaseModel):
@@ -454,7 +455,7 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                         runtime_contract_profile: str = None,
                         template_fingerprint: str = None,
                         template_binding_version: str = None,
-                        project_name: str = None) -> None:
+                        project_name: str = None, data_binding: dict = None) -> None:
     """⚠️ 소유권 5필드도 **None 이면 보존**한다(Phase 3).
     이 함수는 템플릿만 바꾸려는 호출부가 많은데, 거기서 소유권이 초기화되면
     프로젝트가 조용히 무소속이 되어 권한 필터에서 사라진다."""
@@ -478,7 +479,7 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
         if (master_domains is None or mcp_live_grounding is None
                 or knowledge_pack_ids is None or _own_missing
                 or template_fingerprint is None or template_binding_version is None
-                or project_name is None):
+                or project_name is None or data_binding is None):
             try:
                 with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
                     _prev = json.load(f) or {}
@@ -515,6 +516,8 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
             knowledge_pack_ids = _prev.get("knowledge_pack_ids", [])
         if project_name is None:
             project_name = str(_prev.get("project_name") or "")
+        if data_binding is None:
+            data_binding = dict(_prev.get("business_data_binding") or {})
 
         tid = template_id or "default"
         previous_tid = str(_prev.get("template_id") or "default")
@@ -577,6 +580,8 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                 "blueprint_id": blueprint_id or "",
                 # [I-4 §3] 계약 절차의 영속 opt-in. 신규 생성 경로만 `"v1"` 을 넘긴다.
                 "runtime_contract_profile": runtime_contract_profile or "",
+                # 실행 때 최신판을 다시 고르지 않는다. 프로젝트 생성 당시 고른 인증판 봉인이다.
+                "business_data_binding": dict(data_binding or {}),
             }, f, ensure_ascii=False, indent=2)
         _sync_project_ownership(workspace_root, owner_dept_id, owner_user_id, visibility, nature)
     except (ProjectOwnershipRequired, TemplateBindingError):
@@ -615,6 +620,19 @@ def _read_project_packs(workspace_root: str) -> list:
         return [p for p in packs if isinstance(p, str)]
     except Exception:
         return []
+
+
+def _read_project_data_binding(workspace_root: str) -> dict:
+    """프로젝트가 봉인한 업무 데이터 결속. 손상은 빈 결속으로 접지 않는다."""
+    try:
+        with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except Exception as exc:
+        raise TemplateBindingError(f"프로젝트 업무 데이터 결속을 읽을 수 없습니다: {exc}") from exc
+    value = data.get("business_data_binding", {})
+    if not isinstance(value, dict):
+        raise TemplateBindingError("프로젝트 업무 데이터 결속 형식이 올바르지 않습니다.")
+    return dict(value)
 
 
 def _read_project_master_domains(workspace_root: str) -> list:
@@ -843,7 +861,7 @@ def provision_project(project_id: str, template_id: str = "default",
                       owner_dept_id: str = "", owner_user_id: str = "",
                       tenant_id: str = None, enterprise_scope_id: str = None,
                       entity_mode: str = None, blueprint_id: str = None,
-                      project_name: str = "") -> str:
+                      project_name: str = "", data_binding: dict = None) -> str:
     """프로젝트 디렉터리와 `project_meta.json` 을 만든다. **`POST /projects` 와 상담사
     `bootstrap-project` 가 공유하는 단일 경로**다.
 
@@ -871,6 +889,7 @@ def provision_project(project_id: str, template_id: str = "default",
                         tenant_id=tenant_id, enterprise_scope_id=enterprise_scope_id,
                         entity_mode=entity_mode, blueprint_id=blueprint_id,
                         project_name=project_name,
+                        data_binding=data_binding,
                         # ★ [I-4 §3] **신규 프로젝트만** 계약 절차를 켠다. 생성 경로가
                         #   하나로 모여 있는 덕에 여기 한 줄이 경계 전부다 — 갱신 경로는
                         #   `None` 으로 두어 기존 값을 보존한다.
@@ -899,13 +918,40 @@ async def create_project(req: ProjectCreateRequest, p: Principal = Depends(curre
     from core.system_ids import allocate
     project_id = (req.project_id or "").strip() or allocate("project")[0]
     project_name = (req.project_name or "").strip() or "새 업무"
+    from core.agent_registry import load_template
+    try:
+        _template = load_template(req.template_id or "default")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="잘못된 template_id 형식입니다.") from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"존재하지 않는 템플릿입니다: {exc.args[0]}") from exc
+    _needs_business_data = any(
+        bool(a.get("enabled", True)) and bool(a.get("data_contracts"))
+        for a in (_template.get("agents") or []))
+    _data_binding = {}
+    if _needs_business_data and not str(req.kit_instance_id or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="이 업무 절차는 인증된 업무 데이터 적용본을 선택해야 시작할 수 있습니다.")
+    if str(req.kit_instance_id or "").strip():
+        from core.data_preparation.store import data_preparation_store
+        from core.project_data_context import ProjectDataBindingError, bind_instance
+        try:
+            _data_binding = bind_instance(
+                data_preparation_store, req.kit_instance_id,
+                tenant_id=ctx.tenant_id, entity_mode=ctx.entity_mode,
+                allowed_scope_nodes=getattr(p.scope, "readable_scope_nodes", ()) or (),
+                unrestricted=bool(getattr(p.scope, "unrestricted", False)))
+        except ProjectDataBindingError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
     try:
         tid = provision_project(
             project_id, req.template_id or "default", req.output_format_id, req.view_type,
             req.knowledge_pack_ids, req.master_domains, req.mcp_live_grounding,
             owner_dept_id=_own_dept, owner_user_id=p.user_id or "",
             tenant_id=ctx.tenant_id, enterprise_scope_id=ctx.enterprise_scope_id or _own_dept,
-            entity_mode=ctx.entity_mode, project_name=project_name)
+            entity_mode=ctx.entity_mode, project_name=project_name,
+            data_binding=_data_binding)
     except ValueError:
         raise HTTPException(status_code=400, detail="잘못된 template_id 형식입니다.")
     except KeyError as e:
@@ -1379,6 +1425,27 @@ async def start_sprint(project_id: str, req: SprintStartRequest,
     _assert_contract_profile_readable(workspace_root, project_id)
     req.project_state_payload["runtime_contract_profile"] = \
         _read_project_runtime_contract_profile(workspace_root)
+
+    # 업무 데이터도 클라이언트 페이로드를 믿지 않고 프로젝트 메타의 봉인만 주입한다.
+    # 실행 때 "현재 최신판"을 다시 고르면 같은 프로젝트가 다른 입력으로 재현된다.
+    from core.agent_registry import load_template as _load_bound_template
+    from core.data_preparation.store import data_preparation_store as _data_store
+    from core.project_data_context import ProjectDataBindingError, validate_binding
+    _runtime_template = _load_bound_template(req.project_state_payload["template_id"])
+    _requires_business_data = any(
+        bool(a.get("enabled", True)) and bool(a.get("data_contracts"))
+        for a in (_runtime_template.get("agents") or []))
+    _business_binding = _read_project_data_binding(workspace_root)
+    if _requires_business_data and not _business_binding:
+        raise HTTPException(
+            status_code=409,
+            detail="이 프로젝트의 업무 데이터 적용본이 결속되지 않았습니다. 새 프로젝트에서 적용본을 선택하십시오.")
+    if _business_binding:
+        try:
+            _business_binding = validate_binding(_data_store, _business_binding)
+        except ProjectDataBindingError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    req.project_state_payload["business_data_binding"] = _business_binding
 
     # ── [2026-08-27] 요구문에 **이 플랫폼의 확정 사실**을 못박는다 ──────────────
     #

@@ -45,7 +45,7 @@ def test_generic_template_builds_linear_universal_graph():
     compiled = wf.compile()
     names = set(compiled.get_graph().nodes.keys())
     # 커스텀 에이전트 3개가 노드로 생성됨(SW 노드는 없음)
-    assert {"Researcher", "Strategist", "Copywriter"} <= names
+    assert {"Researcher", "Strategist", "Copywriter", "__universal_complete__"} <= names
     assert "RFP_Analyst" not in names
     # HOTL 게이트는 hotl_after=True 인 Strategist
     assert ia == ["Strategist"]
@@ -55,6 +55,32 @@ def test_generic_graph_compiles_with_interrupt():
     wf, ia = ag.build_graph_from_registry(_generic_registry())
     compiled = wf.compile(interrupt_after=ia)
     assert type(compiled).__name__ == "CompiledStateGraph"
+
+
+def test_generic_last_hotl_has_a_real_completion_successor():
+    reg = _generic_registry()
+    reg["agents"][-1]["hotl_after"] = True
+    wf, ia = ag.build_graph_from_registry(reg)
+    graph = wf.compile().get_graph()
+
+    assert "Copywriter" in ia
+    assert any(
+        edge.source == "Copywriter" and edge.target == "__universal_complete__"
+        for edge in graph.edges
+    )
+
+
+def test_generic_completion_node_stamps_terminal_success():
+    wf, _ = ag.build_graph_from_registry(_generic_registry())
+    node = wf.nodes["__universal_complete__"].runnable
+    out = node.invoke({})
+
+    assert out == {
+        "terminal_status": "COMPLETED",
+        "terminal_reason": "",
+        "needs_revision": False,
+        "current_stage": "COMPLETED",
+    }
 
 
 def test_mixed_template_with_custom_is_generic():
@@ -96,6 +122,7 @@ def test_universal_node_merges_artifacts_and_uses_context(monkeypatch):
     # 결과가 artifacts[Copywriter] 에 누적되고 기존 상류 산출물은 보존
     assert out["artifacts"]["Copywriter"] == "[산출물:document]"
     assert out["artifacts"]["Researcher"] == "경쟁사 3곳 분석 결과"
+    assert out["current_stage"] == "Copywriter"
     # 프롬프트에 목표 + 상류 산출물이 실렸는지
     assert "신제품 런칭 캠페인" in fake.last_prompt
     assert "경쟁사 3곳 분석 결과" in fake.last_prompt

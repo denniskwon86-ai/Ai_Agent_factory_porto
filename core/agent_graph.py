@@ -505,6 +505,25 @@ def build_graph_from_registry(registry=None):
     else:
         # 범용 선형 파이프라인 - 설정만으로 새 에이전트 타입(마케팅/리서치/문서 등) 실행
         from nodes.universal import make_universal_node
+        completion_node = "__universal_complete__"
+        if completion_node in enabled_ids:
+            raise ValueError(f"예약된 범용 완료 노드 이름은 에이전트 id 로 쓸 수 없습니다: {completion_node}")
+
+        def complete_universal_pipeline(_state: ProjectState) -> dict:
+            """범용 파이프라인의 기술적 END 를 제품의 명시적 완료 상태로 바꾼다.
+
+            마지막 에이전트가 HOTL 이면 그 뒤에 실제 노드가 있어야 ``interrupt_after`` 가
+            사람 검토 지점을 남긴다. END 로 바로 보내면 산출물은 만들어졌는데 검토할 다음
+            단계가 없어져 화면이 영원히 ``대기`` 로 보인다.
+            """
+            return {
+                "terminal_status": "COMPLETED",
+                "terminal_reason": "",
+                "needs_revision": False,
+                "current_stage": "COMPLETED",
+            }
+
+        workflow.add_node(completion_node, complete_universal_pipeline)
         for aid in enabled_ids:
             workflow.add_node(aid, _with_agent_identity(aid, make_universal_node(aid)))
             
@@ -537,20 +556,22 @@ def build_graph_from_registry(registry=None):
                         continue
                     return next_node
                 
-                return END
+                return completion_node
 
             # 조건부 진입점 설정
             workflow.set_conditional_entry_point(
                 lambda s: route_universal(s, ""),
-                {aid: aid for aid in enabled_ids}
+                {aid: aid for aid in enabled_ids} | {completion_node: completion_node}
             )
             
             for a_id in enabled_ids:
                 workflow.add_conditional_edges(
                     a_id,
                     lambda s, current_node=a_id: route_universal(s, current_node),
-                    {aid: aid for aid in enabled_ids} | {END: END}
+                    {aid: aid for aid in enabled_ids} | {completion_node: completion_node}
                 )
+
+            workflow.add_edge(completion_node, END)
             
         # HOTL 중단점 = enabled 노드 중 hotl_after(범용 노드는 모두 add_node 됐으므로 제한 없음)
         interrupt_after = [a["id"] for a in enabled if a.get("hotl_after", False)]
