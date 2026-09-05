@@ -18,6 +18,46 @@
                                                      구현 세부 — **위 넷의 하위다**
 ```
 
+### ★★★ 3주 시연 MVP 병렬개발 통합계획 필독 — Claude Code 포함 전원
+
+> 추가일: 2026-08-15
+> 지시자: Supervisor
+> 적용 사유: Claude Code의 Host Runtime·I-4·BDR 트랙과 Codex의 G2·G4·시연 UI 트랙을
+> 병렬 개발한 뒤 안전하게 하나로 합치기 위해, 통합 순서·게이트·중단·롤백 기준을 단일화한다.
+
+다음 문서는 병렬개발 통합의 실행 정본이다.
+
+- 현재 원본:
+  `C:\WorkSpace\gemini_agent_team_verG\workspace\codex-three-week-mvp\docs\roadmap\PARALLEL_DEVELOPMENT_INTEGRATION_EXECUTION_PLAN_2026-08-15.md`
+- 통합 후 정본 위치:
+  `docs/roadmap/PARALLEL_DEVELOPMENT_INTEGRATION_EXECUTION_PLAN_2026-08-15.md`
+- 실행 인계:
+  `docs/handoff/PARALLEL_INTEGRATION_EXECUTION_HANDOFF_2026-08-15.md`
+
+Claude Code와 다른 팀원은 다음 작업 전 위 문서를 **전문으로 읽고 그대로 수행**한다.
+
+1. I-4 3단계 완료 보고·커밋·인수인계
+2. 병렬 브랜치의 코드 통합, cherry-pick, merge, 기준선 변경
+3. G2 Object Scope·Decision Ledger Resolver 연결
+4. `main.py`·전역 API·전역 UI·내비게이션 연결
+5. G4 계산 어댑터·첫 수직 폐루프·시연 E2E
+
+강제 규칙:
+
+- Claude Code의 I-4 3단계가 원자 커밋되고 `dev`가 clean이 되기 전에는 통합하지 않는다.
+- 기존 `dev` 작업트리에서 직접 합치지 않고 최신 `dev` 기준의 깨끗한 통합 전용 worktree를 사용한다.
+- 병렬 브랜치 전체 merge 및 동기화 merge commit cherry-pick을 금지한다. 계획서가 지정한 기능 커밋만
+  순서대로 적용한다.
+- 코드 통합, 계약 통합, 제품 진입점 연결을 각각 별도 커밋·별도 Gate로 수행한다.
+- `main.py`, `frontend/src/App.tsx`, 전역 라우터·내비게이션은 통합 담당자 한 명만 마지막에 연결한다.
+- 운영 DB로 마이그레이션·카나리를 수행하지 않는다. 별도 worktree·DB 사본·별도 포트를 쓴다.
+- Gate 0~6 중 실패한 Gate가 있으면 다음 단계로 넘어가지 않는다.
+- 사용자 별도 지시 없이는 origin fetch·pull·push를 수행하지 않는다.
+- 완료 보고에는 통합 진척 시각화, Gate 결과, 잔여사항·담당·착수 조건을 반드시 포함한다.
+
+문서가 현재 작업트리에 없다는 이유로 생략하지 않는다. 통합 전에는 위 절대 경로의 원본을 읽고,
+통합 후에는 프로젝트 내부 정본을 읽는다. 별도 요약본을 새 정본으로 만들거나 핵심 규칙을 임의 완화하지 않는다.
+
 ⚠️ **UI 설계서는 최상위 문서가 아니다.** 구체적이고 최신이라는 이유로 그것부터 읽고 정본으로
   삼으면, 「무엇을 만들지」는 알지만 **「지금 그것을 만들 때인가」는 모른 채** 작업하게 된다.
 

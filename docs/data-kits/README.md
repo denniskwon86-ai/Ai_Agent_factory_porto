@@ -18,6 +18,17 @@
 
 ## 구현 및 실행 시작점
 
+### 데이터 키트를 실제 회사 데이터에 결속하는 정본
+
+- [`../architecture/BUSINESS_DATA_BINDING_RUNTIME_DETAILED_DESIGN_2026-08-15.md`](../architecture/BUSINESS_DATA_BINDING_RUNTIME_DETAILED_DESIGN_2026-08-15.md)  
+  기존 시스템·승인 파일·AFS 보완 입력·외부지표·계산 결과를 하나의 키트 계약에 결속하고, 불변 Snapshot·품질·대사·인증·준비도·기준선으로 이어가는 구현 상세설계.
+- [`../architecture/business_data_binding_contract_v1.schema.json`](../architecture/business_data_binding_contract_v1.schema.json)  
+  Data Kit Dataset Contract와 Source Binding의 기계 판독 JSON Schema.
+- [`../architecture/first_vertical_data_binding_profile_v1.example.json`](../architecture/first_vertical_data_binding_profile_v1.example.json)  
+  구매주문·선적 Milestone·시나리오 입력을 각각 파일·기존 시스템·AFS Native에 결속한 첫 수직 폐루프 예시.
+
+비협상 원칙은 **기존 권위 원천이 있으면 AFS에 같은 입력 화면을 만들지 않는 것**이다. 앱은 원천을 직접 호출하지 않고 Host Runtime 표면만 사용하며, 공식 계산은 승인된 Snapshot ID 집합을 고정한다.
+
 ```text
 1. starter_kit_manifest.schema.json
 2. 35개 Dataset ID·의존성 manifest

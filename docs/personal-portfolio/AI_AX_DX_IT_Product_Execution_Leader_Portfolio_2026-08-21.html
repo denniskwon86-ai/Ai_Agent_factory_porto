@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Dennis Kwon - AI, AX, DX, IT Strategy and Execution Leadership Portfolio">
+  <title>Dennis Kwon | AI·AX·DX·IT Product & Execution Leader</title>
+  <style>
+    :root {
+      --navy:#071a2d;
+      --navy-2:#102a46;
+      --ink:#14263a;
+      --muted:#5e7185;
+      --paper:#f3f6f9;
+      --white:#fff;
+      --line:#d7e0e8;
+      --cyan:#00a9b7;
+      --blue:#176bd1;
+      --lime:#b9e357;
+      --gold:#f1b94b;
+      --red:#ce4d5b;
+      --green:#16835e;
+      --soft-blue:#eaf3ff;
+      --soft-cyan:#e5f7f7;
+      --soft-gold:#fff5dc;
+      --shadow:0 18px 48px rgba(7,26,45,.13);
+    }
+    * { box-sizing:border-box; }
+    html { background:#cdd6df; }
+    body {
+      margin:0;
+      color:var(--ink);
+      background:#cdd6df;
+      font-family:"Pretendard","Noto Sans KR","Malgun Gothic",Arial,sans-serif;
+      line-height:1.55;
+      letter-spacing:-.015em;
+      -webkit-print-color-adjust:exact;
+      print-color-adjust:exact;
+    }
+    .page {
+      position:relative;
+      width:210mm;
+      min-height:297mm;
+      margin:14mm auto;
+      padding:17mm 17mm 15mm;
+      overflow:hidden;
+      background:var(--paper);
+      box-shadow:var(--shadow);
+      page-break-after:always;
+    }
+    .page:last-child { page-break-after:auto; }
+    .page.dark {
+      color:#fff;
+      background:
+        radial-gradient(circle at 86% 12%,rgba(0,169,183,.34),transparent 25%),
+        radial-gradient(circle at 9% 88%,rgba(23,107,209,.34),transparent 32%),
+        var(--navy);
+    }
+    .page.dark:before {
+      content:"";
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      opacity:.23;
+      background-image:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px);
+      background-size:16mm 16mm;
+    }
+    .page > * { position:relative; z-index:1; }
+    .topline { display:flex; align-items:center; justify-content:space-between; gap:10mm; }
+    .mark { font-weight:900; font-size:10pt; letter-spacing:.09em; }
+    .mark span { color:var(--lime); }
+    .confidential { color:#92a6b9; font-size:7.6pt; letter-spacing:.08em; text-transform:uppercase; }
+    .eyebrow { color:var(--cyan); font-size:8pt; font-weight:900; letter-spacing:.13em; text-transform:uppercase; }
+    .page-title { margin:3mm 0 2mm; font-size:26pt; line-height:1.14; letter-spacing:-.055em; }
+    .page-lede { max-width:158mm; margin:0; color:var(--muted); font-size:11pt; }
+    .dark .page-lede { color:#c5d4e3; }
+    h1,h2,h3,p { word-break:keep-all; }
+    h1 { margin:0; font-size:35pt; line-height:1.08; letter-spacing:-.075em; }
+    h2 { margin:0; font-size:16pt; line-height:1.3; letter-spacing:-.04em; }
+    h3 { margin:0; font-size:11pt; line-height:1.35; letter-spacing:-.03em; }
+    p { margin:0; }
+    .muted { color:var(--muted); }
+    .hero-name { margin-top:23mm; color:var(--lime); font-size:9pt; font-weight:900; letter-spacing:.16em; }
+    .hero-role { margin-top:5mm; color:#d2dfeb; font-size:12.5pt; font-weight:700; letter-spacing:.02em; }
+    .hero-copy { max-width:159mm; margin-top:9mm; color:#ccdae7; font-size:12pt; }
+    .hero-quote {
+      max-width:166mm;
+      margin-top:13mm;
+      padding:6mm 7mm;
+      border-left:2mm solid var(--lime);
+      border-radius:0 4mm 4mm 0;
+      background:rgba(255,255,255,.08);
+      font-size:15.5pt;
+      font-weight:800;
+      line-height:1.42;
+      letter-spacing:-.045em;
+    }
+    .pill-row { display:flex; flex-wrap:wrap; gap:2.5mm; margin-top:10mm; }
+    .pill { padding:2.1mm 3.5mm; border:1px solid rgba(255,255,255,.18); border-radius:99px; color:#c8d8e8; background:rgba(255,255,255,.06); font-size:8.2pt; font-weight:700; }
+    .proof-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:3mm; margin-top:14mm; }
+    .proof {
+      min-height:29mm;
+      padding:4.5mm;
+      border:1px solid rgba(255,255,255,.16);
+      border-radius:4mm;
+      background:rgba(255,255,255,.07);
+    }
+    .proof b { display:block; color:var(--lime); font-size:17pt; letter-spacing:-.05em; }
+    .proof span { display:block; margin-top:1mm; color:#bed0df; font-size:8pt; line-height:1.42; }
+    .grid { display:grid; gap:4mm; }
+    .grid.two { grid-template-columns:1fr 1fr; }
+    .grid.three { grid-template-columns:repeat(3,1fr); }
+    .grid.four { grid-template-columns:repeat(4,1fr); }
+    .card { padding:5mm; border:1px solid var(--line); border-radius:4.5mm; background:#fff; }
+    .card.accent { border-top:1.8mm solid var(--blue); }
+    .card p { margin-top:2mm; color:var(--muted); font-size:9pt; }
+    .card .label { display:block; margin-bottom:2mm; color:var(--blue); font-size:7.5pt; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
+    .section { margin-top:10mm; }
+    .profile-box { display:grid; grid-template-columns:1.1fr .9fr; gap:5mm; margin-top:9mm; }
+    .profile-main { padding:7mm; border-radius:5mm; color:#fff; background:linear-gradient(145deg,var(--navy-2),#0d2138); }
+    .profile-main h2 { font-size:18pt; }
+    .profile-main p { margin-top:4mm; color:#c8d7e5; font-size:10.3pt; }
+    .role-list { display:grid; gap:2.8mm; }
+    .role-item { padding:4mm; border:1px solid var(--line); border-radius:3.5mm; background:#fff; }
+    .role-item b { display:block; font-size:9.5pt; }
+    .role-item span { display:block; margin-top:1mm; color:var(--muted); font-size:8.2pt; }
+    .before-after { display:grid; grid-template-columns:1fr 10mm 1fr; align-items:stretch; gap:2mm; margin-top:5mm; }
+    .state { padding:5mm; border-radius:4mm; border:1px solid var(--line); background:#fff; }
+    .state.before { background:#f7f8fa; }
+    .state.after { border-color:#b9dde0; background:var(--soft-cyan); }
+    .state b { display:block; margin-bottom:2mm; font-size:8pt; letter-spacing:.08em; }
+    .state ul { margin:0; padding-left:5mm; color:var(--muted); font-size:8.7pt; }
+    .state li { margin:1.4mm 0; }
+    .arrow { display:grid; place-items:center; color:var(--cyan); font-size:20pt; font-weight:900; }
+    .case-banner { margin-top:8mm; padding:6mm; border-radius:5mm; color:#fff; background:linear-gradient(135deg,var(--navy),#164d76); }
+    .case-banner .case-kicker { color:var(--lime); font-size:7.5pt; font-weight:900; letter-spacing:.11em; }
+    .case-banner h2 { margin-top:2mm; font-size:18pt; }
+    .case-banner p { margin-top:2.5mm; color:#c8d8e7; font-size:9.4pt; }
+    .challenge { display:grid; grid-template-columns:.9fr 1.1fr; gap:4mm; margin-top:5mm; }
+    .problem { padding:5mm; border:1px solid #ead0d4; border-radius:4mm; background:#fff6f7; }
+    .problem b { color:var(--red); font-size:8pt; letter-spacing:.1em; }
+    .problem p { margin-top:2mm; color:#6f5358; font-size:9pt; }
+    .thesis { padding:5mm; border:1px solid #b9dfe2; border-radius:4mm; background:var(--soft-cyan); }
+    .thesis b { color:#077b85; font-size:8pt; letter-spacing:.1em; }
+    .thesis p { margin-top:2mm; color:#3f6870; font-size:9pt; }
+    .decision-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:3mm; margin-top:4mm; }
+    .decision { position:relative; min-height:27mm; padding:4mm 4mm 4mm 12mm; border:1px solid var(--line); border-radius:4mm; background:#fff; }
+    .decision i { position:absolute; left:4mm; top:4mm; display:grid; place-items:center; width:6mm; height:6mm; border-radius:50%; color:#fff; background:var(--blue); font-style:normal; font-size:7pt; font-weight:900; }
+    .decision p { margin-top:1.5mm; color:var(--muted); font-size:8.4pt; }
+    .flow { display:grid; grid-template-columns:repeat(5,1fr); gap:2mm; margin-top:4mm; }
+    .flow-step { position:relative; min-height:27mm; padding:4mm 3mm; border-radius:3.5mm; color:#fff; background:var(--navy-2); }
+    .flow-step:not(:last-child):after { content:"›"; position:absolute; right:-2.3mm; top:7mm; z-index:2; color:var(--lime); font-size:16pt; font-weight:900; }
+    .flow-step b { display:block; color:var(--lime); font-size:7pt; letter-spacing:.08em; }
+    .flow-step strong { display:block; margin-top:1.8mm; font-size:9pt; }
+    .flow-step span { display:block; margin-top:1mm; color:#bdd0df; font-size:7.3pt; line-height:1.35; }
+    .evidence-row { display:grid; grid-template-columns:repeat(4,1fr); gap:3mm; margin-top:5mm; }
+    .evidence { padding:4mm; border:1px solid var(--line); border-radius:4mm; background:#fff; }
+    .evidence strong { display:block; color:var(--blue); font-size:14pt; }
+    .evidence span { display:block; margin-top:1mm; color:var(--muted); font-size:7.7pt; }
+    .operating-loop { display:grid; grid-template-columns:repeat(3,1fr); gap:3mm; margin-top:7mm; }
+    .op { min-height:31mm; padding:4.5mm; border:1px solid var(--line); border-radius:4mm; background:#fff; }
+    .op .n { color:var(--cyan); font-size:8pt; font-weight:900; letter-spacing:.1em; }
+    .op h3 { margin-top:1.5mm; }
+    .op p { margin-top:1.5mm; color:var(--muted); font-size:8.4pt; }
+    .signature { margin-top:6mm; padding:6mm; border-radius:5mm; background:var(--navy); color:#fff; }
+    .signature-grid { display:grid; grid-template-columns:.9fr 1.1fr; gap:6mm; align-items:center; }
+    .signature h2 { color:var(--lime); font-size:17pt; }
+    .signature p { margin-top:2mm; color:#c6d6e4; font-size:9pt; }
+    .proof-list { display:grid; gap:2mm; }
+    .proof-list div { display:flex; gap:2.5mm; align-items:flex-start; color:#d2deea; font-size:8.2pt; }
+    .proof-list div:before { content:"✓"; color:var(--lime); font-weight:900; }
+    .timeline { display:grid; gap:4mm; margin-top:8mm; }
+    .phase { display:grid; grid-template-columns:17mm 1fr 50mm; gap:4mm; padding:5mm; border:1px solid var(--line); border-radius:4mm; background:#fff; }
+    .phase-day { display:grid; place-items:center; width:13mm; height:13mm; border-radius:50%; color:var(--lime); background:var(--navy); font-size:9pt; font-weight:900; }
+    .phase p { margin-top:1.3mm; color:var(--muted); font-size:8.5pt; }
+    .deliver { padding:3.5mm; border-radius:3mm; background:var(--soft-blue); color:#3d5f81; font-size:7.8pt; }
+    .deliver b { display:block; margin-bottom:1mm; color:var(--blue); }
+    .fit-grid { display:grid; grid-template-columns:1.1fr .9fr; gap:5mm; margin-top:6mm; }
+    .target { padding:5.5mm; border-radius:4.5mm; background:var(--navy-2); color:#fff; }
+    .target h3 { color:var(--lime); }
+    .target ul { margin:3mm 0 0; padding-left:5mm; color:#c8d7e5; font-size:8.8pt; }
+    .target li { margin:1.5mm 0; }
+    .environment { display:grid; gap:3mm; }
+    .env { padding:4mm; border:1px solid var(--line); border-radius:3.5mm; background:#fff; }
+    .env b { display:block; font-size:9pt; }
+    .env span { display:block; margin-top:1mm; color:var(--muted); font-size:7.8pt; }
+    .register { margin-top:7mm; width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; border:1px solid var(--line); border-radius:4mm; background:#fff; font-size:8.1pt; }
+    .register th,.register td { padding:3.4mm; text-align:left; vertical-align:top; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+    .register th:last-child,.register td:last-child { border-right:0; }
+    .register tr:last-child td { border-bottom:0; }
+    .register th { color:#fff; background:var(--navy-2); font-size:7.4pt; letter-spacing:.04em; }
+    .dark .register td { color:var(--ink); }
+    .status { display:inline-flex; padding:1mm 2mm; border-radius:99px; font-size:6.8pt; font-weight:900; letter-spacing:.05em; }
+    .status.verified { color:#08664c; background:#def4e9; }
+    .status.prototype { color:#225f9f; background:#e5f1ff; }
+    .status.pending { color:#8c6010; background:#fff0cb; }
+    .credibility { display:grid; grid-template-columns:1fr 1fr; gap:4mm; margin-top:6mm; }
+    .boundary { padding:5mm; border-radius:4mm; border:1px solid var(--line); background:#fff; }
+    .dark .boundary { color:var(--ink); }
+    .boundary h3 { margin-bottom:2mm; }
+    .boundary ul { margin:0; padding-left:5mm; color:var(--muted); font-size:8.2pt; }
+    .boundary li { margin:1.3mm 0; }
+    .closing { margin-top:8mm; padding:7mm; border-radius:5mm; color:#fff; background:linear-gradient(135deg,var(--navy),#15507d); }
+    .closing p { margin-top:2.5mm; color:#cad9e7; font-size:9.3pt; }
+    .contact { display:flex; justify-content:space-between; align-items:flex-end; gap:6mm; margin-top:6mm; }
+    .contact strong { display:block; font-size:13pt; }
+    .contact span { color:#bfd0df; font-size:8.2pt; }
+    .version { text-align:right; color:#91a7b9; font-size:7pt; }
+    .footer { position:absolute; left:17mm; right:17mm; bottom:8mm; display:flex; justify-content:space-between; align-items:center; color:#7f91a2; font-size:7pt; }
+    .dark .footer { color:#8198aa; }
+    .footer .page-no { font-weight:900; color:var(--blue); }
+    .dark .footer .page-no { color:var(--lime); }
+    .note { margin-top:4mm; color:#7a8d9f; font-size:7.3pt; }
+    @media screen and (max-width:700px) {
+      .page { width:100%; min-height:auto; margin:0; padding:24px; box-shadow:none; }
+      .proof-strip,.grid.four,.flow,.evidence-row { grid-template-columns:1fr 1fr; }
+      .profile-box,.challenge,.signature-grid,.fit-grid { grid-template-columns:1fr; }
+      .footer { position:static; margin-top:28px; }
+    }
+    @media print {
+      html,body { background:#fff; }
+      .page { width:210mm; height:297mm; min-height:297mm; margin:0; box-shadow:none; }
+    }
+    @page { size:A4 portrait; margin:0; }
+  </style>
+</head>
+<body>
+  <section class="page dark">
+    <div class="topline">
+      <div class="mark">DENNIS KWON <span>PORTFOLIO</span></div>
+      <div class="confidential">Selective disclosure · Non-confidential summary</div>
+    </div>
+    <div class="hero-name">AI · AX · DX · IT STRATEGY & EXECUTION LEADER</div>
+    <h1>복잡한 현업을,<br>통제 가능한 AI 제품과<br>실행 가능한 사업으로.</h1>
+    <p class="hero-role">Enterprise AI Product · Manufacturing AX · Digital Transformation · AI-native Delivery</p>
+    <p class="hero-copy">현업의 문제를 발견하는 데서 멈추지 않고, 제품 전략·데이터·아키텍처·UX·거버넌스·실증·사업화가 하나의 실행 체계로 이어지도록 설계하고 끝까지 밀어붙입니다.</p>
+    <div class="hero-quote">“전략을 보고서에서 끝내지 않고,<br>제품·운영·검증·확산까지 닫습니다.”</div>
+    <div class="pill-row">
+      <span class="pill">Business-to-Tech Translation</span>
+      <span class="pill">Enterprise AI Product</span>
+      <span class="pill">Manufacturing Domain</span>
+      <span class="pill">Governance by Design</span>
+      <span class="pill">0→1 Productization</span>
+    </div>
+    <div class="proof-strip">
+      <div class="proof"><b>4,400+</b><span>최근 검증 기준선의 자동 회귀 검사<br>Prototype evidence</span></div>
+      <div class="proof"><b>35</b><span>합성 제조 업무 데이터 키트<br>No company data</span></div>
+      <div class="proof"><b>7 Layers</b><span>현업 경험부터 통제·실행까지<br>Integrated product model</span></div>
+      <div class="proof"><b>E2E</b><span>브라우저 카나리·불변식 검증<br>Evidence before claims</span></div>
+    </div>
+    <div class="footer"><span>Personal career portfolio · 2026.08</span><span class="page-no">01</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><div class="mark">EXECUTIVE <span>PROFILE</span></div><div class="eyebrow">Why this profile is different</div></div>
+    <h2 class="page-title">AI를 아는 기획자가 아니라,<br>AI 제품을 실제 조직 안에서 성립시키는 사람</h2>
+    <p class="page-lede">채용자가 얻는 것은 한 가지 기술의 전문가가 아니라, 경영 과제를 제품 언어로 바꾸고 현업·IT·보안·경영진을 같은 실행선 위에 세우는 리더십입니다.</p>
+
+    <div class="profile-box">
+      <article class="profile-main">
+        <span class="eyebrow">30-second introduction</span>
+        <h2>현업의 가장 어려운 문제를 찾아<br>통제 가능한 AI 제품으로 전환합니다.</h2>
+        <p>업무와 데이터가 흩어져 의사결정이 느려지는 문제를 구조화하고, AI가 도와야 할 영역과 데이터·규칙·사람이 책임져야 할 영역을 분리합니다. 이후 제품 전략, 실행 로드맵, 아키텍처, 사용자 경험, 품질 게이트와 확산 모델을 하나의 책임 아래 연결합니다.</p>
+      </article>
+      <div class="role-list">
+        <div class="role-item"><b>Business Translator</b><span>현업 병목을 투자·제품·데이터 요구로 번역</span></div>
+        <div class="role-item"><b>Product Architect</b><span>기능보다 운영 가능한 제품 구조를 설계</span></div>
+        <div class="role-item"><b>AI Delivery Orchestrator</b><span>전문화된 AI 작업팀을 검토·증거 중심으로 운영</span></div>
+        <div class="role-item"><b>Transformation Operator</b><span>파일럿·확산·사업화의 다음 결정을 수치화</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <span class="eyebrow">What changes when I join</span>
+      <div class="before-after">
+        <div class="state before"><b>BEFORE · 흔한 AX/DX 과제</b><ul><li>기술·벤더 중심의 PoC</li><li>현업과 IT의 서로 다른 성공 기준</li><li>데이터 품질·권한이 후반에 발견</li><li>시연 뒤 제품 책임과 확산 경로 부재</li></ul></div>
+        <div class="arrow">→</div>
+        <div class="state after"><b>AFTER · 제품 운영체계</b><ul><li>실제 의사결정 문제에서 출발</li><li>업무·데이터·통제·UX를 동시 설계</li><li>검증 가능한 증거로 다음 투자 결정</li><li>재사용 가능한 코어와 확장 경계 확보</li></ul></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <span class="eyebrow">Four signature strengths</span>
+      <div class="grid four" style="margin-top:4mm">
+        <article class="card accent"><span class="label">01 · Strategy</span><h3>문제와 진입점을 고릅니다</h3><p>모든 것을 한 번에 바꾸기보다 가장 중요한 폐루프 하나를 선택합니다.</p></article>
+        <article class="card accent"><span class="label">02 · Product</span><h3>사용될 이유를 설계합니다</h3><p>현업의 이중 입력과 추가 시스템 부담을 제품 단계에서 제거합니다.</p></article>
+        <article class="card accent"><span class="label">03 · Control</span><h3>AI의 경계를 제품화합니다</h3><p>수치·권한·감사·승인은 설명이 아니라 실행 규칙으로 만듭니다.</p></article>
+        <article class="card accent"><span class="label">04 · Scale</span><h3>성공을 사업 자산으로 만듭니다</h3><p>맞춤 구현과 제품 코어를 분리해 다음 조직에서 재사용합니다.</p></article>
+      </div>
+    </div>
+    <div class="footer"><span>Dennis Kwon · AI/AX/DX/IT Product & Execution Leadership</span><span class="page-no">02</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><div class="mark">SELECTED <span>CASE</span></div><div class="eyebrow">Sanitized independent product initiative</div></div>
+    <h2 class="page-title">대표 사례: 현업 AX와 경영 AX를<br>하나의 제품 운영체계로 연결</h2>
+    <p class="page-lede">특정 회사의 소스코드·실데이터·고객 정보를 제외하고, 공개 가능한 제품 판단과 실행 증거만 요약했습니다.</p>
+
+    <div class="case-banner">
+      <div class="case-kicker">THE PRODUCT CHALLENGE</div>
+      <h2>“또 하나의 BI나 레거시를 만들지 않고,<br>현업의 변화와 경영 의사결정을 어떻게 함께 빠르게 만들 것인가?”</h2>
+      <p>다법인·다공장 제조기업을 가정해, 기존 시스템을 존중하면서도 현업이 필요한 기능을 빠르게 만들고 그 결과를 신뢰 가능한 경영 판단으로 연결하는 제품을 설계했습니다.</p>
+    </div>
+
+    <div class="challenge">
+      <div class="problem"><b>WHY MOST ATTEMPTS STALL</b><p>레거시 연계 비용, 현업의 이중 작업, 데이터 품질, AI 환각, 조직 권한, PoC 이후 운영 책임이 각각 다른 프로젝트로 분리됩니다.</p></div>
+      <div class="thesis"><b>PRODUCT THESIS</b><p>기존 시스템의 사실은 다시 입력하지 않고, 현업은 부족한 업무만 보충하며, AI는 제품 생성과 설명을 돕고 경영 수치는 인증된 데이터와 계산 규칙이 책임지게 합니다.</p></div>
+    </div>
+
+    <div class="section" style="margin-top:5mm">
+      <span class="eyebrow">Four decisions that made the product credible</span>
+      <div class="decision-grid">
+        <article class="decision"><i>1</i><h3>Zero Duplicate Entry</h3><p>기존 시스템의 공식 실적을 다시 입력하지 않고, 레거시에 없는 보충 사실만 현업 앱이 생성하도록 경계를 정했습니다.</p></article>
+        <article class="decision"><i>2</i><h3>Deterministic Numbers</h3><p>AI가 경영 숫자를 임의로 만들지 않게 하고, 데이터·기준시점·산식·버전이 계산을 책임지도록 분리했습니다.</p></article>
+        <article class="decision"><i>3</i><h3>Governed User-built Software</h3><p>현업이 만든 앱도 조직 권한·데이터 계약·감사 정책을 자동으로 상속하도록 Host 중심의 실행 모델을 설계했습니다.</p></article>
+        <article class="decision"><i>4</i><h3>Evidence before Scale</h3><p>“동작한다”는 보고보다 격리 카나리·회귀·운영 불변식·실패 대조군으로 다음 투자 조건을 증명했습니다.</p></article>
+      </div>
+    </div>
+
+    <div class="section" style="margin-top:5mm">
+      <span class="eyebrow">Public-safe product view</span>
+      <div class="flow">
+        <div class="flow-step"><b>01 · FRAME</b><strong>업무 문제</strong><span>실제 사용자와 의사결정 질문</span></div>
+        <div class="flow-step"><b>02 · PREPARE</b><strong>신뢰 데이터</strong><span>원천·기준·품질·시점</span></div>
+        <div class="flow-step"><b>03 · BUILD</b><strong>현업 도구</strong><span>AI 보조 앱·시뮬레이터</span></div>
+        <div class="flow-step"><b>04 · DECIDE</b><strong>경영 판단</strong><span>비교·근거·승인·실행</span></div>
+        <div class="flow-step"><b>05 · LEARN</b><strong>효과 환류</strong><span>실적·재사용·다음 투자</span></div>
+      </div>
+    </div>
+
+    <div class="footer"><span>Representative case · Sanitized for external recruiting</span><span class="page-no">03</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><div class="mark">EXECUTION <span>SYSTEM</span></div><div class="eyebrow">How I turn ambiguity into evidence</div></div>
+    <h2 class="page-title">AI를 많이 쓰는 것이 아니라,<br>AI 작업팀이 믿을 만한 결과를 내게 운영합니다</h2>
+    <p class="page-lede">전문화된 AI 에이전트와 사람이 역할을 나누되, 중요한 판단은 교차검토·반대 증명·불변식으로 확인하는 AI-native delivery operating model을 구축했습니다.</p>
+
+    <div class="operating-loop">
+      <article class="op"><span class="n">01 · FRAME</span><h3>문제를 한 문장으로 고정</h3><p>누구의 어떤 판단이 느린지, 성공하면 무엇이 달라지는지 먼저 정의합니다.</p></article>
+      <article class="op"><span class="n">02 · CONTRACT</span><h3>완료 조건과 금지를 명시</h3><p>기능 목록보다 권한·데이터·실패·검증 조건을 먼저 계약으로 만듭니다.</p></article>
+      <article class="op"><span class="n">03 · ORCHESTRATE</span><h3>전문 역할에 일을 분배</h3><p>설계·구현·감사·UX를 분리하고 결과를 하나의 제품 판단으로 통합합니다.</p></article>
+      <article class="op"><span class="n">04 · CHALLENGE</span><h3>초록의 이유를 의심</h3><p>반대 계약과 변이 검사를 사용해 “우연히 통과한 시험”을 제거합니다.</p></article>
+      <article class="op"><span class="n">05 · PROVE</span><h3>실제 경로에서 증명</h3><p>깨끗한 환경·브라우저·데이터 불변식에서 같은 결과가 나는지 확인합니다.</p></article>
+      <article class="op"><span class="n">06 · SCALE</span><h3>다음 투자 조건을 제시</h3><p>기술 완성도가 아니라 사용·재현·재사용·비용의 증거로 확산을 결정합니다.</p></article>
+    </div>
+
+    <div class="signature">
+      <div class="signature-grid">
+        <div><span class="eyebrow">My execution signature</span><h2>“문제가 생기지 않게”보다<br>“문제가 숨지 않게” 설계합니다.</h2><p>복잡한 엔터프라이즈 AI에서 가장 위험한 것은 오류보다 조용한 성공입니다. 그래서 실패가 올바른 원인과 다음 행동을 드러내도록 제품·시험·운영을 함께 설계합니다.</p></div>
+        <div class="proof-list">
+          <div>권한이 꺼진 채 통과하던 테스트 환경을 분리하고 재현 가능하게 정비</div>
+          <div>합성·시험 데이터가 경영 결과에 섞이는 경로를 격리하고 표식화</div>
+          <div>관측자의 장애와 실제 정책 판정을 분리해 운영 실패가 통제로 위장되지 않게 설계</div>
+          <div>코드뿐 아니라 문서·데이터·브라우저 결과를 같은 완료 기준으로 관리</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" style="margin-top:6mm">
+      <span class="eyebrow">What this means for an employer</span>
+      <div class="grid three" style="margin-top:4mm">
+        <article class="card"><span class="label">Faster alignment</span><h3>회의가 실행으로 바뀝니다</h3><p>현업·IT·보안·경영진의 요구를 같은 우선순위와 완료 조건으로 연결합니다.</p></article>
+        <article class="card"><span class="label">Lower delivery risk</span><h3>문제를 일찍 드러냅니다</h3><p>데이터·권한·운영 결함을 파일럿 후반이 아니라 제품 계약 단계에서 발견합니다.</p></article>
+        <article class="card"><span class="label">Reusable capability</span><h3>한 번의 성공을 남깁니다</h3><p>프로젝트 산출물을 다음 조직에서도 쓸 수 있는 제품·키트·운영 규칙으로 전환합니다.</p></article>
+      </div>
+    </div>
+    <div class="footer"><span>AI-native delivery · Human accountability</span><span class="page-no">04</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><div class="mark">FIRST <span>90 DAYS</span></div><div class="eyebrow">A practical transformation mandate</div></div>
+    <h2 class="page-title">입사 후 90일,<br>거대한 비전보다 첫 번째 증거를 만듭니다</h2>
+    <p class="page-lede">새로운 플랫폼을 선언하기 전에 조직이 실제로 중요하게 여기는 의사결정 하나를 선택하고, 반복 사용 가능한 제품과 다음 투자 판단을 함께 만듭니다.</p>
+
+    <div class="timeline">
+      <article class="phase"><div class="phase-day">30</div><div><h3>문제·사용자·데이터 진단</h3><p>현업 인터뷰, 기존 시스템, 수작업, 데이터 소유와 의사결정 병목을 함께 지도화합니다. AI 적용 대상보다 사용되지 않을 이유를 먼저 찾습니다.</p></div><div class="deliver"><b>DELIVERABLE</b>우선순위 Map<br>첫 파일럿 후보<br>데이터·리스크 진단</div></article>
+      <article class="phase"><div class="phase-day">60</div><div><h3>첫 제품 폐루프 설계·실증</h3><p>업무 오너와 목표·입력·사용자 흐름·수치 책임·승인·성공 기준을 확정하고 제한된 프로토타입 또는 파일럿을 실행합니다.</p></div><div class="deliver"><b>DELIVERABLE</b>제품 요구사항<br>UX·아키텍처<br>통제·검증 계획</div></article>
+      <article class="phase"><div class="phase-day">90</div><div><h3>증거 기반 확산 결정</h3><p>사용 여부, 리드타임, 데이터 결손, 재현성, 재사용률, 운영 부담을 측정해 확산·보완·중단 중 다음 결정을 제안합니다.</p></div><div class="deliver"><b>DELIVERABLE</b>실증 리포트<br>제품 로드맵<br>투자·조직 제안</div></article>
+    </div>
+
+    <div class="section">
+      <span class="eyebrow">Best-fit roles</span>
+      <div class="fit-grid">
+        <div class="target"><h3>제가 가장 큰 가치를 만드는 포지션</h3><ul><li>Enterprise AI / AX Strategy & Execution Lead</li><li>Manufacturing AI Product Lead / Product Owner</li><li>Digital Transformation Platform Lead</li><li>AI Productization & New Business Lead</li><li>Industrial Data / Digital Twin Program Lead</li></ul></div>
+        <div class="environment">
+          <div class="env"><b>Mandate</b><span>문제·제품·우선순위에 실제 결정권이 있는 역할</span></div>
+          <div class="env"><b>Access</b><span>현업 오너·데이터 오너와 직접 검증할 수 있는 환경</span></div>
+          <div class="env"><b>Team</b><span>제품·데이터·엔지니어링·도메인이 함께 움직이는 조직</span></div>
+          <div class="env"><b>Ambition</b><span>PoC가 아니라 제품·플랫폼·사업으로 확장하려는 회사</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer"><span>90-day mandate · Problem to evidence</span><span class="page-no">05</span></div>
+  </section>
+
+  <section class="page dark">
+    <div class="topline"><div class="mark">EVIDENCE & <span>TRUST</span></div><div class="confidential">What is proven · What remains to prove</div></div>
+    <h2 class="page-title" style="margin-top:9mm">과장하지 않는 태도까지<br>리더십의 일부라고 믿습니다</h2>
+    <p class="page-lede">현재 자료는 제품 사고와 실행 역량을 보여 주는 비기밀 포트폴리오입니다. 프로토타입에서 검증한 사실과 실제 현장 파일럿에서만 증명할 수 있는 성과를 명확히 구분합니다.</p>
+
+    <table class="register">
+      <thead><tr><th>증거 영역</th><th>현재 제시 가능한 것</th><th>상태</th><th>다음 증명</th></tr></thead>
+      <tbody>
+        <tr><td><b>제품 전략</b></td><td>문제 정의, 제품 경계, 기능 Map, UX 원칙, 단계형 확산 로드맵</td><td><span class="status verified">VERIFIED ARTIFACT</span></td><td>지원 회사의 실제 문제에 맞춘 재구성</td></tr>
+        <tr><td><b>실행 능력</b></td><td>작동하는 프로토타입, 자동 회귀, 브라우저 종단, 운영 불변식</td><td><span class="status prototype">PROTOTYPE PROOF</span></td><td>운영 환경 성능·SLA</td></tr>
+        <tr><td><b>AI 팀 운영</b></td><td>역할 분담, 교차감사, 반대 증명, 단계형 통합·인수인계 체계</td><td><span class="status verified">OPERATING MODEL</span></td><td>실제 조직·팀 규모로 확장</td></tr>
+        <tr><td><b>사업 가치</b></td><td>파일럿 설계, 성공·중단 기준, 재사용·파트너·수익 가설</td><td><span class="status pending">TO VALIDATE</span></td><td>실사용·리드타임·ROI 측정</td></tr>
+      </tbody>
+    </table>
+
+    <div class="credibility">
+      <article class="boundary"><h3>제가 주장하지 않는 것</h3><ul><li>검증되지 않은 고객 ROI·매출·절감률</li><li>합성 데이터를 실제 회사 실적으로 표현하는 것</li><li>프로토타입을 전사 운영 완료 제품으로 표현하는 것</li><li>AI가 경영 판단을 대신한다는 과장</li></ul></article>
+      <article class="boundary"><h3>외부에 공개하지 않는 것</h3><ul><li>회사·고객의 실제 데이터와 내부 문서</li><li>소스코드·계정·설정·보안 구조</li><li>상세 스키마·계약·미공개 알고리즘</li><li>승인되지 않은 회사명·조직명·성과</li></ul></article>
+    </div>
+
+    <div class="closing">
+      <span class="eyebrow">The offer</span>
+      <h2>AI 전략과 현업 실행 사이의 빈 공간을<br>제품과 증거로 채우겠습니다.</h2>
+      <p>귀사가 단순한 AI 도입이 아니라 실제 업무 변화, 재사용 가능한 제품 역량, 새로운 사업 가능성까지 만들고자 한다면 대화를 시작하고 싶습니다.</p>
+      <div class="contact">
+        <div><strong>Dennis Kwon</strong><span>AI · AX · DX · IT Product & Transformation Leader<br>Contact via submitted resume or recruiting channel</span></div>
+        <div class="version">Portfolio Summary v1.0<br>2026.08.21</div>
+      </div>
+    </div>
+    <div class="footer"><span>Selective disclosure · Candidate-owned summary</span><span class="page-no">06</span></div>
+  </section>
+  <script>
+    const previewPage = Number(new URLSearchParams(location.search).get("page"));
+    if (previewPage > 0) {
+      document.querySelectorAll(".page").forEach((page, index) => {
+        page.style.display = index + 1 === previewPage ? "block" : "none";
+        if (index + 1 === previewPage) {
+          page.style.margin = "0";
+          page.style.boxShadow = "none";
+        }
+      });
+      document.documentElement.style.background = "#fff";
+      document.body.style.background = "#fff";
+    }
+  </script>
+</body>
+</html>
