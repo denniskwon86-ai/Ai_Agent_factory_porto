@@ -208,12 +208,3 @@
 {"timestamp": "2026-07-29T12:03:54.155116", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv_canary2", "content": "이전 분할 결과가 비어 있습니다. PRD와 아키텍처를 기준으로 WBS 를 다시 분할하십시오(최소 4개 태스크)."}
 {"timestamp": "2026-07-29T12:05:19.478967", "event_type": "hotl_feedback", "project_id": "test_a1_unitconv_canary3", "content": "[요구 확인 인터뷰 답변]\n1. 변환 이력은 어디에 보존할까요?\n→ 선택: 브라우저 로컬 저장 (서버 구축 없이 각 기기에서 이력을 관리하며, 가장 가볍고 빠르게 구현할 수 있습니다.)\n2. 어떤 기기 환경을 우선 지원할까요?\n→ 선택: 데스크톱 웹 전용 (데스크톱 환경에 최적화하여 개발 효율성을 높이고 MVP(Minimum Viable Product)를 빠르게 구현합니다.)\n3. 입력값 유효성 검사는 어느 수준으로 할까요?\n→ 선택: 양의 실수만 허용, 오류 메시지 표시 (일반적인 사용 시나리오를 커버하며, 잘못된 입력에 대한 명확한 안내를 제공하여 안정성을 확보합니다.)"}
 {"timestamp": "2026-08-07T07:47:02.684852", "event_type": "supervisor_chat", "project_id": "__track_g_probe__", "content": "__track_g_probe__"}
-{"timestamp": "2026-08-23T13:09:47.687894", "event_type": "supervisor_chat", "project_id": "", "content": "지금 가장 급한 것은 무엇입니까?"}
-{"timestamp": "2026-08-23T13:19:10.519762", "event_type": "hotl_feedback", "project_id": "TEST001", "content": "[요구 확인 인터뷰 답변]\n1. 이 거래처 관리 앱은 어떤 형태로 제공될까요?\n→ 선택: 웹 앱 (Web App) (브라우저에서 접근, 설치 불필요. 다양한 기기에서 사용 가능합니다.)\n2. 이 앱을 누가 사용하게 될까요?\n→ 선택: 다중 사용자 (여러 명이 로그인하여 함께 사용하며, 사용자별 권한 관리가 필요할 수 있습니다.)\n3. 등록된 거래처 정보는 어떻게 보존하고 공유할까요?\n→ 선택: 서버 DB 저장 (모든 사용자가 정보를 공유하고 접근할 수 있으며, 백엔드 및 데이터베이스 구축이 필요합니다.)"}
-{"timestamp": "2026-08-23T13:24:47.065977", "event_type": "supervisor_chat", "project_id": "TEST001", "content": "왜 이렇게 오래 걸리나요?"}
-{"timestamp": "2026-08-25T18:02:03.147923", "event_type": "supervisor_chat", "project_id": "", "content": "왜 이 판단입니까?"}
-{"timestamp": "2026-08-25T18:21:23.440154", "event_type": "supervisor_chat", "project_id": "", "content": "데이터가 부족합니까?"}
-{"timestamp": "2026-08-26T20:22:29.155160", "event_type": "supervisor_chat", "project_id": "", "content": "데이터가 부족합니까?"}
-{"timestamp": "2026-08-26T20:43:44.532964", "event_type": "supervisor_chat", "project_id": "TEST001", "content": "안녕"}
-{"timestamp": "2026-08-26T20:48:05.588430", "event_type": "supervisor_chat", "project_id": "TEST001", "content": "한 줄 상태"}
-{"timestamp": "2026-08-31T23:37:55.473512", "event_type": "supervisor_chat", "project_id": "", "content": "시나리오로 보면 어떻게 됩니까?"}
