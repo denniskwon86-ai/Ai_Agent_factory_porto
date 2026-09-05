@@ -206,6 +206,35 @@ def test_an_unknown_entity_mode_is_refused(store):
         _instance(store, entity_mode="아무거나")
 
 
+def test_instance_contract_fingerprint_advances_only_to_the_registered_value(store):
+    inst = _instance(store)
+    old = inst["kit_fingerprint"]
+    store.upsert_kit_version(
+        kit_id="k1", version="1.0.0", name="새 계약", mode="DEMO/SYNTHETIC",
+        source_path="k1-v2.test.json", fingerprint_value="fp-next",
+        profile={"datasets": []})
+
+    out = store.advance_instance_kit_fingerprint(
+        inst["instance_id"], previous_fingerprint=old, next_fingerprint="fp-next")
+    assert out["kit_fingerprint"] == "fp-next"
+    with pytest.raises(m.DataPreparationError):
+        store.advance_instance_kit_fingerprint(
+            inst["instance_id"], previous_fingerprint="fp-next",
+            next_fingerprint="호출자가 지어낸 지문")
+
+
+def test_instance_contract_fingerprint_uses_optimistic_concurrency(store):
+    inst = _instance(store)
+    store.upsert_kit_version(
+        kit_id="k1", version="1.0.0", name="새 계약", mode="DEMO/SYNTHETIC",
+        source_path="k1-v2.test.json", fingerprint_value="fp-next",
+        profile={"datasets": []})
+    with pytest.raises(m.StateConflict):
+        store.advance_instance_kit_fingerprint(
+            inst["instance_id"], previous_fingerprint="stale-read",
+            next_fingerprint="fp-next")
+
+
 def test_listing_shows_only_the_visible_scopes(store):
     a = _instance(store, scope_node_id="n1")
     b = _instance(store, scope_node_id="n2")

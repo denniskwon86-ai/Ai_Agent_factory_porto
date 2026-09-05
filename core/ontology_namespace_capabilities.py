@@ -46,8 +46,8 @@ CONTRACT_OBJECT_TYPES: Dict[str, Tuple[str, ...]] = {
 RESOLVER_OBJECT_TYPES: Dict[str, Tuple[str, ...]] = {
     "ecm": ("organization-node",),
     "mdm": (
-        "account", "bom-line", "equipment", "location", "logistics-reference", "material",
-        "routing-operation", "supplier",
+        "account", "bom-line", "cost-center", "equipment", "location",
+        "logistics-reference", "material", "routing-operation", "supplier",
     ),
     "dataset": (
         "cost-record", "customs-clearance", "finance-document", "inventory-snapshot",
@@ -85,7 +85,7 @@ LABELS = {
 
 NEXT_ACTION = {
     "ecm": "회사·조직 정본 연결 유지와 명칭 변경 지문을 감시",
-    "mdm": "8종 인증판 색인을 물질화하고 원가센터 사람용 명칭 정본을 보완",
+    "mdm": "9종 인증판 색인과 원가센터 집합·명칭 계약을 유지",
     "dataset": "14종 인증판 색인과 표시 계약을 유지하고 현재 정본 물질화를 감시",
     "external": "인증된 대외 관측값 색인을 물질화하고 공표 출처 판을 감시",
     "g4": "승인 동인 판본의 원장·조직 범위 결속을 유지",

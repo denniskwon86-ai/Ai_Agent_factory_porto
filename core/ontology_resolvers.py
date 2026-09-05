@@ -375,14 +375,11 @@ def _resolve_dataset(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
 
 
 def _resolve_mdm(ref: "ObjectRef", ctx: ontology_resolve.ResolveContext):
-    """인증된 기준정보 중 단일키·표시 계약이 확정된 유형만 해석한다.
-
-    복합키 직렬화가 없는 BOM·라우팅과 사람용 명칭이 없는 원가센터는 임의 규칙으로
-    넓히지 않는다. 그 객체가 없다는 뜻이 아니라 **유형 계약이 아직 미완성**이다.
-    """
+    """인증된 기준정보 중 열쇠·집합·표시 계약이 확정된 유형만 해석한다."""
     from core.data_preparation import scope_index
     supported = {target[1] for key in (set(scope_index.REFERENCE_OBJECTS)
-                                      | set(scope_index.COMPOSITE_REFERENCE_OBJECTS))
+                                      | set(scope_index.COMPOSITE_REFERENCE_OBJECTS)
+                                      | set(scope_index.GROUPED_REFERENCE_OBJECTS))
                  for target in scope_index.object_specs(key) if target[0] == "mdm"}
     if ref.object_type not in supported:
         stats.bump("mdm_type_not_wired")

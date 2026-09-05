@@ -349,6 +349,48 @@ def test_a_correction_is_a_new_snapshot(store, binding, tmp_path):
     assert len(store.list_snapshots(binding["instance_id"])) == 2
 
 
+def _reconciled_correction(store, binding, tmp_path):
+    payload = GOOD_CSV + b"2026-01-07,M3,1,50\n"
+    rows = GOOD_ROWS + [{"ordered_at": "2026-01-07", "material_code": "M3",
+                         "quantity": "1", "unit_price": "50"}]
+    snap = _ingest(store, binding, tmp_path, payload=payload, name="po_v2.csv")
+    ss.profile(store, snap["snapshot_id"], rows, GOOD_COLS)
+    ss.standardize(store, snap["snapshot_id"], rows)
+    ss.reconcile(store, snap["snapshot_id"], rows, {"row_count": 3})
+    return store.get_snapshot(snap["snapshot_id"])
+
+
+def test_demo_correction_atomically_replaces_the_certified_snapshot(store, binding,
+                                                                     tmp_path):
+    old = _ingest(store, binding, tmp_path)
+    old = ss.run_pipeline(store, old["snapshot_id"], GOOD_ROWS, GOOD_COLS,
+                          control=CONTROL)
+    new = _reconciled_correction(store, binding, tmp_path)
+
+    out = ss.certify_demo_replacement(store, old["snapshot_id"], new["snapshot_id"])
+
+    assert out["state"] == m.DEMO_CERTIFIED
+    assert store.get_snapshot(old["snapshot_id"])["state"] == m.REVOKED
+    assert ss.verify_raw(old["raw_path"], old["checksum"]), "옛 원문은 그대로 보존한다"
+
+
+def test_demo_replacement_rolls_back_both_states_if_indexing_fails(store, binding,
+                                                                   tmp_path):
+    old = _ingest(store, binding, tmp_path)
+    old = ss.run_pipeline(store, old["snapshot_id"], GOOD_ROWS, GOOD_COLS,
+                          control=CONTROL)
+    new = _reconciled_correction(store, binding, tmp_path)
+
+    def broken_index(_conn, _fresh):
+        raise RuntimeError("index failed")
+
+    with pytest.raises(RuntimeError, match="index failed"):
+        store.replace_demo_snapshot(old["snapshot_id"], new["snapshot_id"],
+                                    on_commit=broken_index)
+    assert store.get_snapshot(old["snapshot_id"])["state"] == m.DEMO_CERTIFIED
+    assert store.get_snapshot(new["snapshot_id"])["state"] == m.RECONCILED
+
+
 # ── 프로파일 ─────────────────────────────────────────────────────────────
 def test_profiling_counts_missing_and_duplicates():
     rows = [{"a": "1", "b": ""}, {"a": "1", "b": ""}, {"a": "2", "b": "x"}]

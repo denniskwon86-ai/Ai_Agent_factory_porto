@@ -95,11 +95,18 @@ INDEX_OBJECTS: Dict[str, Tuple[str, str, str]] = {
 #:
 #: ★ 값에 나타날 수 있는 구분자를 이어 붙이지 않는다. 내부 객체 ID 는 정렬된 JSON
 #: 배열로 직렬화해 `("A|B", "C")` 와 `("A", "B|C")` 가 충돌하지 않게 한다.
-#: ⚠️ `cost-center` 는 단일키지만 같은 센터가 16개 계정행에 반복되고 사람용 정본 명칭이
-#: 없다. 코드 접미사로 이름을 지어내지 않고 별도 명칭 정본이 생길 때까지 제외한다.
 COMPOSITE_REFERENCE_OBJECTS: Dict[str, Tuple[Tuple[str, str, Tuple[str, ...]], ...]] = {
     "MDM-05": (("mdm", "bom-line", ("bom_id", "line_no")),),
     "MDM-06": (("mdm", "routing-operation", ("routing_id", "operation_seq")),),
+}
+
+#: 한 인증판의 여러 행이 같은 객체를 설명하는 집합형 기준정보다. 중복을 임의로 고르지
+#: 않고 이름·tenant·범위가 모두 같을 때만 하나의 객체로 물질화한다.
+GROUPED_REFERENCE_OBJECTS: Dict[
+    str, Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...]
+] = {
+    "MDM-07": (("mdm", "cost-center", ("cost_center_id",),
+                ("cost_center_name", "tenant_id", "scope_node_id")),),
 }
 
 
@@ -120,7 +127,18 @@ def object_specs(dataset_contract_key: str) -> Tuple[Tuple[str, str, Tuple[str, 
     if primary:
         specs.append((primary[0], primary[1], (primary[2],)))
     specs.extend(COMPOSITE_REFERENCE_OBJECTS.get(dataset_contract_key, ()))
+    specs.extend(target[:3] for target in GROUPED_REFERENCE_OBJECTS.get(
+        dataset_contract_key, ()))
     return tuple(specs)
+
+
+def grouped_consistency_columns(dataset_contract_key: str, namespace: str,
+                                object_type: str) -> Tuple[str, ...]:
+    for target_namespace, target_type, _, columns in GROUPED_REFERENCE_OBJECTS.get(
+            dataset_contract_key, ()):
+        if (target_namespace, target_type) == (namespace, object_type):
+            return columns
+    return ()
 
 
 #: ★★★ [2026-08-21] **인증판은 «전체판» 이다.** 각 CSV 는 그 시점의 전 목록이다.
@@ -212,17 +230,30 @@ def plan(snapshot: Dict[str, Any]) -> List[tuple]:
     ignored_owner_columns = 0
     payload = []
     for namespace, object_type, key_columns in targets:
-        seen: Dict[str, int] = {}
+        consistency_columns = grouped_consistency_columns(key, namespace, object_type)
+        seen: Dict[str, Tuple[int, Tuple[str, ...]]] = {}
         for line_no, row in enumerate(rows, start=2):        # 2 = 머리글 다음 줄
             object_id = object_id_for(row, key_columns)
             if not object_id:
                 raise ScopeIndexError(
                     f"{key} {line_no}행: 객체 열쇠({', '.join(key_columns)})가 비어 있습니다 — "
                     "범위를 잇지 못하는 행은 색인할 수 없습니다.")
-            if object_id in seen:
+            signature = tuple(str(row.get(column, "") or "").strip()
+                              for column in consistency_columns)
+            if consistency_columns and any(not value for value in signature):
                 raise ScopeIndexError(
-                    f"{key}: 복합 객체 열쇠가 {seen[object_id]}행과 {line_no}행에 겹칩니다.")
-            seen[object_id] = line_no
+                    f"{key} {line_no}행: 집합형 객체 설명({', '.join(consistency_columns)})이 "
+                    "비어 있습니다.")
+            if object_id in seen:
+                first_line, first_signature = seen[object_id]
+                if not consistency_columns:
+                    raise ScopeIndexError(
+                        f"{key}: 복합 객체 열쇠가 {first_line}행과 {line_no}행에 겹칩니다.")
+                if signature != first_signature:
+                    raise ScopeIndexError(
+                        f"{key}: 집합형 객체 설명이 {first_line}행과 {line_no}행에서 다릅니다.")
+                continue
+            seen[object_id] = (line_no, signature)
 
             tenant = str(row.get("tenant_id", "") or "").strip()
             scope = str(row.get("scope_node_id", "") or "").strip()

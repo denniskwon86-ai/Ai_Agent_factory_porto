@@ -46,6 +46,10 @@ COMMON_FIELDS = [
     "certification_status", "as_of_date", "lineage_id",
 ]
 
+REQUIRED_DATASET_FIELDS = {
+    "MDM-07": {"cost_center_name"},
+}
+
 
 DATASETS: Dict[str, Dict[str, Any]] = {
     "FND-01": {"name": "기업·조직 계층", "keys": ["node_id"], "deps": []},
@@ -404,6 +408,13 @@ def generate_accounts(profile: Profile) -> List[Dict[str, Any]]:
         ("5100", "가공비", "EXPENSE", "CONVERSION_COST"), ("5200", "물류비", "EXPENSE", "LOGISTICS_COST"),
         ("5300", "에너지비", "EXPENSE", "ENERGY_COST"), ("5400", "품질손실", "EXPENSE", "QUALITY_LOSS"),
     ]
+    cost_centers = {
+        "CC-PROC": "원료구매 원가센터",
+        "CC-LOG": "물류 원가센터",
+        "CC-MFG": "생산 원가센터",
+        "CC-FIN": "재무 원가센터",
+        "CC-MGT": "경영관리 원가센터",
+    }
     rows = []
     target = 30 if profile.name == "quick" else 80
     for i in range(target):
@@ -414,6 +425,7 @@ def generate_accounts(profile: Profile) -> List[Dict[str, Any]]:
         cc = ["CC-PROC", "CC-LOG", "CC-MFG", "CC-FIN", "CC-MGT"][i % 5]
         rows.append({"account_id": acc, "account_name": name, "account_type": typ,
                      "cost_element": elem, "cost_center_id": cc,
+                     "cost_center_name": cost_centers[cc],
                      "pnl_line": "REVENUE" if typ == "REVENUE" else "COGS" if elem.endswith("COST") else "OPEX" if typ == "EXPENSE" else "BALANCE_SHEET",
                      "cashflow_line": "OPERATING", "currency": "KRW", "active": True,
                      "_scope": ADV_SCOPE})
@@ -978,7 +990,9 @@ def make_contract(dataset_id: str, rows: Sequence[Mapping[str, Any]]) -> Dict[st
     for key in headers:
         values = [r.get(key) for r in rows[:500]]
         fields.append({"name": key, "type": infer_type(values),
-                       "required": key in COMMON_FIELDS or key in DATASETS[dataset_id]["keys"],
+                       "required": (key in COMMON_FIELDS
+                                    or key in DATASETS[dataset_id]["keys"]
+                                    or key in REQUIRED_DATASET_FIELDS.get(dataset_id, set())),
                        "business_key": key in DATASETS[dataset_id]["keys"],
                        "description": f"{DATASETS[dataset_id]['name']}의 {key}"})
     return {
@@ -1011,6 +1025,8 @@ def app_blueprints() -> List[Dict[str, Any]]:
         {"app_id": "APP-03", "name": "재고·생산 영향 분석", "datasets": ["INV-01","INV-02","MFG-01","MFG-02","MFG-03","QLT-01"]},
         {"app_id": "APP-04", "name": "구매원가·현금 전망", "datasets": ["PRC-01","FIN-01","FIN-02","FIN-03","EXT-01","EXT-02"]},
         {"app_id": "APP-05", "name": "공급 위험·대체안", "datasets": ["MDM-02","PRC-01","PRC-02","EXT-02","EXT-03","SIM-02"]},
+        {"app_id": "APP-06", "name": "판매·납기·매출 영향", "datasets": ["SLS-01","MFG-01","INV-01","FIN-02","FIN-03","EXT-01"]},
+        {"app_id": "APP-07", "name": "전사 시나리오·실적 통합", "datasets": ["PRC-02","LOG-02","INV-01","MFG-01","SLS-01","FIN-01","FIN-02","FIN-03","EXT-01","EXT-02","SIM-01","SIM-02","DEC-01"]},
     ]
 
 
@@ -1044,11 +1060,12 @@ def company_profiles() -> List[Dict[str, Any]]:
             "source_profile_id": "",
             "industry_code": "C24",
             "industry_name": "비철금속·배터리소재 제조",
-            "purpose": "Starter Kit 기준회사와 원료 구매 폐루프 체험",
+            "purpose": "Starter Kit 기준회사와 부서 업무·전사 시나리오 흐름 체험",
             "valid_until": "9999-12-31",
             "organization_blueprint": ["기업집단", "제련법인", "첨단소재법인", "사업부", "공장", "기능부서"],
             "products": ["전기동", "고순도 황산니켈", "배터리급 수산화리튬", "귀금속 부산물"],
-            "recommended_apps": ["APP-01", "APP-02", "APP-03", "APP-04", "APP-05"],
+            "recommended_apps": ["APP-01", "APP-02", "APP-03", "APP-04", "APP-05",
+                                 "APP-06", "APP-07"],
             "default_assumptions": {"baseline": "BASELINE-DEMO-1.0"},
         },
         {

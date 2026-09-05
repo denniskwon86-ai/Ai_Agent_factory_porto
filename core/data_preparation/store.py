@@ -520,6 +520,38 @@ class DataPreparationStore:
                              (binding_id,)).fetchone()
         return self._public(dict(r)) if r else None
 
+    def advance_instance_kit_fingerprint(self, instance_id: str, *,
+                                         previous_fingerprint: str,
+                                         next_fingerprint: str) -> Dict[str, Any]:
+        """동일 키트 판본의 검증된 계약 갱신을 인스턴스에 결속한다.
+
+        등록부가 가리키는 새 지문과 정확히 같아야 하며, 호출자가 읽었던 이전 지문도
+        다시 대조한다. 다른 프로세스가 먼저 바꾼 상태를 덮지 않는다.
+        """
+        if not previous_fingerprint or not next_fingerprint:
+            raise m.DataPreparationError("이전·다음 키트 지문은 모두 필요합니다.")
+        now = _now()
+        with self.transaction() as conn:
+            row = conn.execute("SELECT * FROM kit_instances WHERE instance_id=?",
+                               (instance_id,)).fetchone()
+            if row is None:
+                raise m.DataPreparationError(f"존재하지 않는 키트 인스턴스입니다: {instance_id}")
+            current = str(dict(row).get("kit_fingerprint") or "")
+            if current == next_fingerprint:
+                return self._public(dict(row))
+            if current != previous_fingerprint:
+                raise m.StateConflict("키트 인스턴스 지문이 읽은 뒤 바뀌었습니다.")
+            registered = conn.execute(
+                "SELECT fingerprint FROM kit_registry_versions WHERE kit_id=? AND "
+                "version=? AND status='active'", (row["kit_id"], row["version"])).fetchone()
+            if registered is None or str(registered["fingerprint"] or "") != next_fingerprint:
+                raise m.DataPreparationError("등록부가 다음 키트 지문을 가리키지 않습니다.")
+            conn.execute("UPDATE kit_instances SET kit_fingerprint=?, updated_at=? "
+                         "WHERE instance_id=?", (next_fingerprint, now, instance_id))
+            fresh = conn.execute("SELECT * FROM kit_instances WHERE instance_id=?",
+                                 (instance_id,)).fetchone()
+        return self._public(dict(fresh))
+
     def list_bindings(self, instance_id: str,
                       dataset_contract_key: str = "") -> List[Dict[str, Any]]:
         with self.transaction() as conn:
@@ -677,6 +709,52 @@ class DataPreparationStore:
                 #: ⚠️ 여기서 예외가 나면 **상태 전환도 함께 되돌아간다.** 그것이 의도다.
                 on_commit(conn, dict(out))
         return self._public(dict(out))
+
+    def replace_demo_snapshot(self, old_snapshot_id: str, new_snapshot_id: str,
+                              on_commit: Optional[Any] = None) -> Dict[str, Any]:
+        """검증을 마친 새 시연판으로 기존 인증판을 **원자적으로** 교체한다.
+
+        새 판을 먼저 인증하면 잠깐이라도 같은 객체의 인증판이 둘이 되고, 기존 판을
+        먼저 철회하면 새 판 인증 실패 시 데이터가 사라진다. 두 상태 전이와 새 색인
+        적재를 한 트랜잭션으로 묶어 어느 중간 상태도 독자에게 보이지 않게 한다.
+        원문은 수정하지 않으며 기존 판은 ``REVOKED`` 로 보존한다.
+        """
+        now = _now()
+        with self.transaction() as conn:
+            old = conn.execute(
+                "SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                (old_snapshot_id,)).fetchone()
+            new = conn.execute(
+                "SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                (new_snapshot_id,)).fetchone()
+            if old is None or new is None:
+                raise m.DataPreparationError("교체할 기존판 또는 새 판이 없습니다.")
+            old_row, new_row = dict(old), dict(new)
+            for key in ("instance_id", "binding_id", "dataset_contract_key",
+                        "tenant_id", "scope_node_id", "entity_mode", "data_kind"):
+                if str(old_row.get(key) or "") != str(new_row.get(key) or ""):
+                    raise m.DataPreparationError(
+                        f"서로 다른 자료는 인증판 교체로 묶을 수 없습니다: {key}")
+            if old_row.get("state") != m.DEMO_CERTIFIED:
+                raise m.StateConflict("기존판이 DEMO_CERTIFIED 상태가 아닙니다.")
+            if new_row.get("state") != m.RECONCILED:
+                raise m.StateConflict("새 판은 RECONCILED 상태에서만 교체 인증할 수 있습니다.")
+            if str(new_row.get("data_kind") or "") != m.DATA_KIND_DEMO:
+                raise m.StateConflict("시연용 합성 데이터만 이 교체 경로를 사용할 수 있습니다.")
+
+            conn.execute(
+                "UPDATE dataset_snapshots SET state=?, updated_at=? WHERE snapshot_id=?",
+                (m.REVOKED, now, old_snapshot_id))
+            conn.execute(
+                "UPDATE dataset_snapshots SET state=?, certified_at=?, updated_at=? "
+                "WHERE snapshot_id=?",
+                (m.DEMO_CERTIFIED, now, now, new_snapshot_id))
+            fresh = conn.execute(
+                "SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                (new_snapshot_id,)).fetchone()
+            if on_commit is not None:
+                on_commit(conn, dict(fresh))
+        return self._public(dict(fresh))
 
     # ── 공통 ─────────────────────────────────────────────────────────────
     @staticmethod

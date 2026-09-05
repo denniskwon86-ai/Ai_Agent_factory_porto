@@ -258,6 +258,82 @@ def _top_up_ontology() -> None:
     demo._seed_ontology(tenant, scope, decision_ledger)
 
 
+def _refresh_changed_app_datasets(instance_id: str) -> list[str]:
+    """정본 CSV가 바뀐 **비계산 앱용 데이터셋**을 새 인증판으로 교체한다.
+
+    계산 수직조각은 설치일에 맞춰 날짜를 옮기므로 저장소 원문과 정본 CSV의 체크섬을
+    직접 비교할 수 없다. 그 일곱 계약은 제외하고, 나머지는 파일 바이트가 달라졌을 때만
+    새 판을 만든다. 기존 인증판을 덮지 않고 원자 교체해 이력을 보존한다.
+    """
+    from core import demo_vertical_slice as dv
+    from core.data_preparation import models as m
+    from core.data_preparation import snapshot_service as svc
+    from core.data_preparation.store import data_preparation_store as store
+
+    inst = store.get_instance(instance_id)
+    if not inst:
+        raise ValueError(f"키트 인스턴스를 읽을 수 없습니다: {instance_id}")
+    vertical = set(dv.SLICE_KEYS)
+    changed: list[str] = []
+    for key in (k for k in dv.kit_dataset_keys() if k not in vertical):
+        certified = [s for s in store.list_snapshots(instance_id)
+                     if s.get("dataset_contract_key") == key
+                     and s.get("state") == m.DEMO_CERTIFIED]
+        if not certified:
+            continue
+        if len(certified) != 1:
+            raise m.DataPreparationError(
+                f"{key} 인증판이 {len(certified)}개라 자동 교체할 수 없습니다.")
+        old = certified[0]
+        rows, cols = dv.read_full(key)
+        payload = dv.csv_bytes(rows, cols)
+        if svc.checksum_bytes(payload) == str(old.get("checksum") or ""):
+            continue
+        if str(old.get("data_kind") or "") != m.DATA_KIND_DEMO:
+            raise m.DataPreparationError(
+                f"{key} 는 시연용 합성 데이터가 아니므로 자동 교체하지 않습니다.")
+        binding = store.active_binding(instance_id, key)
+        if not binding:
+            raise m.DataPreparationError(f"{key} 활성 원천 결속이 없습니다.")
+
+        new = svc.ingest(
+            store, binding=binding, payload=payload, file_name=f"{key}.csv",
+            workspace_root=os.path.join(demo.TARGET_ROOT, "raw"),
+            created_by="seed_starter_data")
+        svc.profile(store, new["snapshot_id"], rows, cols)
+        svc.standardize(store, new["snapshot_id"], rows)
+        svc.reconcile(store, new["snapshot_id"], rows, {"row_count": len(rows)})
+        svc.certify_demo_replacement(store, old["snapshot_id"], new["snapshot_id"])
+        changed.append(key)
+    return changed
+
+
+def _sync_kit_contract(instance_id: str) -> bool:
+    """최신 manifest 등록과 인스턴스 지문을 같은 방향으로 전진시킨다."""
+    from core import demo_vertical_slice as dv
+    from core.data_preparation import kit_registry
+    from core.data_preparation.store import data_preparation_store as store
+
+    inst = store.get_instance(instance_id)
+    if not inst:
+        raise ValueError(f"키트 인스턴스를 읽을 수 없습니다: {instance_id}")
+    previous = str(inst.get("kit_fingerprint") or "")
+    manifest = os.path.join(dv.kit_root(), "manifest.json")
+    wanted = kit_registry.file_fingerprint(manifest)
+    registered_before = store.get_kit_version(dv.KIT_ID, dv.KIT_VERSION)
+    if (registered_before
+            and str(registered_before.get("fingerprint") or "") == wanted
+            and previous == wanted):
+        return False
+    registered = dv.register_kit(store)
+    current = str(registered.get("fingerprint") or "")
+    if current == previous:
+        return False
+    store.advance_instance_kit_fingerprint(
+        instance_id, previous_fingerprint=previous, next_fingerprint=current)
+    return True
+
+
 def _ensure_scope_home() -> None:
     """심는 자료의 **조직 범위가 조직도에 존재하게** 한다.
 
@@ -399,6 +475,11 @@ def main() -> int:
         print(f"\n이미 인스턴스가 {len(existing)}개 있습니다 — 보충만 합니다.")
         demo._rewire_ontology_only()
         demo._top_up(existing[0]["instance_id"])
+        changed = _refresh_changed_app_datasets(existing[0]["instance_id"])
+        if changed:
+            print(f"  정본 변경 인증판 교체 {len(changed)}종: {changed}")
+        if _sync_kit_contract(existing[0]["instance_id"]):
+            print("  키트 manifest·앱 구성과 인스턴스 지문을 최신 계약으로 갱신했습니다.")
         _top_up_ownership()
         _top_up_ontology()
     else:

@@ -239,6 +239,51 @@ def test_화면_실행오류는_내부스택을_노출하지_않고_복구행동
     assert "System Crash Prevented" not in boundary
 
 
+def test_범용_워크플로우_산출물은_화면에서_검토하고_release로_저장할_수_있다():
+    vm = _read("frontend/src/factory/factoryViewModel.ts")
+    canvas = _read("frontend/src/factory/AdaptivePhaseCanvas.tsx")
+    artifact = _read("frontend/src/factory/StageArtifactCanvas.tsx")
+    executive_report = _read("frontend/src/factory/ExecutiveReportView.tsx")
+    controls = _read("frontend/src/factory/RunControls.tsx")
+    studio = _read("frontend/src/factory/AdaptiveProductionStudio.tsx")
+    studio_css = _read("frontend/src/factory/studio.css")
+
+    assert "artifactByAgent" in vm
+    assert "out[def.id]" in vm
+    assert "allDeclaredStagesComplete" in vm
+    assert "산출물 생성 완료" in vm
+    assert "kind === 'not_yet' && hasCustomArtifact" in canvas
+    assert "PLAN[id] || (doc ?" in artifact
+    assert "ExecutiveReportView" in artifact and "/REPORT|CFO/.test(id)" in artifact
+    assert "핵심 요약" in executive_report and "전체 보고서" in executive_report
+    assert 'className="report-data-table"' in executive_report
+    assert "글자 크게" in executive_report and "글자 작게" in executive_report
+    assert "인쇄·PDF" in executive_report and "printWindow.print()" in executive_report
+    assert "printing-executive-report" in executive_report
+    assert "document.createElement('iframe')" in executive_report
+    assert "copy.querySelector('.report-view-controls')?.remove()" in executive_report
+    assert "@page { size: A4 portrait;" in studio_css
+    assert "body.printing-executive-report .print-report-root" in studio_css
+    assert "position: static;" in studio_css
+    assert "body.printing-executive-report .report-section-body p" in studio_css
+    assert "page-break-inside: avoid;" in studio_css
+    assert "display: table-header-group;" in studio_css
+    print_css = studio_css[studio_css.index("@media print {"):]
+    assert "overflow: visible !important;" in print_css
+    assert "border-radius: 0;" in print_css
+    assert "blockGroups(section.blocks)" in executive_report
+    assert 'className="report-content-group"' in executive_report
+    assert "page-break-before: always;" in print_css
+    assert "break-inside: avoid-page;" in print_css
+    assert "run.wbsTotal === 0 && !hasDocuments" in controls
+    assert "automaticWideView" in studio
+    assert "실행 구조 함께 보기" in studio and "보고서 넓게 보기" in studio
+    assert "보고서 크게 보기" in studio and "전체 구조 보기" in studio
+    assert "studio-grid.wide-canvas > .work-map { display: none; }" in studio_css
+    assert ".afs-studio.focus-canvas > .project-head" in studio_css
+    assert ".afs-studio.focus-canvas .interaction-dock" in studio_css
+
+
 def test_LAXS_확정_B안이_제품셸과_로그인에_적용되고_파비콘은_별도_마크를_쓴다():
     shell = _read("frontend/src/components/ProductShell.tsx")
     login = _read("frontend/src/components/LoginPage.tsx")
@@ -378,7 +423,9 @@ def test_앱제작_앱운영_시뮬레이션은_좌측메뉴_본문_자비스_3�
 
     assert "items={railItems} activeId={bucket}" in build
     assert "items={railItems} activeId={view}" in operate
-    assert "items={SCENARIO_ITEMS} activeId={stage}" in scenario
+    assert "...SCENARIO_STEPS" in scenario
+    assert "activeId={stage} onSelect={goStage}" in scenario
+    assert "label: '시뮬레이터 관리'" in scenario
     assert "layoutClassName?: string" in shell
     assert ".hub-layout.product-page-shell" in css
     assert ".product-page-shell > .jarvis-rail { display: flex; }" in css
@@ -575,7 +622,7 @@ def test_릴리스_관리도_사람용_이름_상태_시각을_우선하고_감�
     assert "<summary className=\"afs-muted\" style={{ cursor: 'pointer' }}>식별 정보</summary>" in admin
 
 
-def test_프로젝트_제작_화면은_사람용_명칭과_자비스_역할을_쓴다():
+def test_프로젝트_제작_화면은_산출물별_명칭과_자비스_역할을_쓴다():
     app = _read("frontend/src/App.tsx")
     control = _read("frontend/src/components/ControlPanel.tsx")
     timeline = _read("frontend/src/components/TimelinePanel.tsx")
@@ -583,8 +630,10 @@ def test_프로젝트_제작_화면은_사람용_명칭과_자비스_역할을_�
     preview = _read("frontend/src/components/PreviewPanel.tsx")
     hotl = _read("frontend/src/components/HOTLInput.tsx")
 
-    assert "· 앱 제작 작업공간" in app
-    assert "◀ 앱 목록" in app
+    assert "'시뮬레이터 제작 작업공간'" in app
+    assert "'보고서 제작 작업공간'" in app
+    assert "'앱 제작 작업공간'" in app
+    assert "◀ {workbenchParentLabel}" in app
     assert "🧪 병렬 검증" in app
     assert "⚙️ 작업 실행" in control
     assert "❌ 실패" in control and '"TODO"' not in control
@@ -593,6 +642,52 @@ def test_프로젝트_제작_화면은_사람용_명칭과_자비스_역할을_�
     assert "🖥️ 앱 미리보기" in preview
     assert "자비스에게 질문·지시" in hotl
     assert "Target Task:" not in hotl
+
+
+def test_앱_시뮬레이션_보고서의_새작업_진입은_서로_분리된다():
+    app = _read("frontend/src/App.tsx")
+    dialog = _read("frontend/src/components/BuildStartDialog.tsx")
+    kit_apps = _read("frontend/src/components/KitAppPanel.tsx")
+    shell = _read("frontend/src/components/ProductShell.tsx")
+
+    assert "openBuildStart('software_app')" in app
+    assert 'primaryActionLabel="＋ 새 앱"' in app
+    assert "openBuildStart('hybrid_simulation')" in app
+    assert 'primaryActionLabel="＋ 새 시뮬레이터"' in app
+    assert "openBuildStart('document_report')" in app
+    assert 'primaryActionLabel="＋ 새 보고서"' in app
+    assert "String(t.deliverable_type || 'software_app') === deliverableType" in dialog
+    assert "deliverableType === 'hybrid_simulation' ? 'simulation' : 'software'" in dialog
+    assert "matchesStatusFilter(row, statusFilter) && matchesAppKind(row, appKind)" in kit_apps
+    assert "{primaryActionLabel}" in shell
+
+
+def test_기존_앱_시뮬레이터_보고서도_각자_메뉴에서_다시_연다():
+    app = _read("frontend/src/App.tsx")
+    catalog = _read("frontend/src/components/GeneratedProjectCatalog.tsx")
+    scenario = _read("frontend/src/components/ScenarioPanel.tsx")
+    report = _read("frontend/src/features/collaboration/CollaborationHub.tsx")
+
+    assert "const appProjects = projectsFor('software_app')" in app
+    assert "const simulationProjects = projectsFor('hybrid_simulation')" in app
+    assert "const reportProjects = projectsFor('document_report')" in app
+    assert "projects={appProjects as any}" in app
+    assert "generatedProjects={simulationProjects as any}" in app
+    assert "generatedProjects={reportProjects as any}" in app
+    assert "setCurrentProject(id);\n                setShowStudio(true);" in app
+    assert "currentProjectId && currentDeliverableType === 'document_report'" in app
+    assert "label: '시뮬레이터 관리'" in scenario
+    assert 'actionLabel="열기·실행"' in scenario
+    assert "label: '보고서 자동화'" in report
+    assert 'actionLabel="열기·검토"' in report
+    assert "projectsLoad" in catalog and "projectsError" in catalog
+    assert "const PAGE_SIZE = 10" in catalog
+    assert "진행 상태 필터" in catalog
+    assert "/api/v1/telemetry/summary?project=" in catalog
+    assert "encodeURIComponent(selected.id)" in catalog
+    assert "encodeURIComponent(selected.name)" not in catalog
+    assert "onClick={() => onOpen(selected.id)}" in catalog
+    assert "<code>{project.id}" not in catalog, "내부 프로젝트 ID를 사용자 화면에 출력한다"
 
 
 def test_앱_제작_프로젝트는_URL로_새로고침_복원된다():
@@ -922,6 +1017,11 @@ def test_결정_보고는_참여자와_담당자를_조직_표시명으로_선�
     center = _read("frontend/src/features/collaboration/DecisionCenter.tsx")
 
     assert "orgApi.users()" in center
+    assert "String(u.status || '').toUpperCase() === 'ACTIVE'" in center
+    assert "u.status === 'ACTIVE'" not in center
+    assert "const EMPTY_DECISION_CASES: DecisionCase[] = [];" in center
+    assert "const rows = queue.value || EMPTY_DECISION_CASES;" in center
+    assert "const rows = queue.value || [];" not in center
     assert 'placeholder="사용자 ID' not in center
     assert 'placeholder="담당자 ID"' not in center
     assert "personName(p.user_id)" in center

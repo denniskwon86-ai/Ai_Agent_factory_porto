@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
@@ -71,7 +72,11 @@ def add_instructions(wb: Workbook, dataset: Dict[str, Any], contract: Dict[str, 
         ("용도", "검증된 가상기업 샘플을 참고하여 회사 데이터로 교체·등록"),
         ("중요", "이 파일의 예시값은 모두 SYNTHETIC이며 실제 경영 의사결정에 사용할 수 없습니다."),
         ("편집 순서", "1) DATA의 파란 예시행 확인 → 2) 노란 빈 행부터 입력 → 3) VALIDATION 확인 → 4) CHECKS가 PASS인지 확인"),
-        ("필수 범위", "tenant_id와 scope_node_id가 없으면 Fail-closed로 등록이 거부됩니다."),
+        ("필수 범위", "tenant_id·scope_node_id"
+         + ("·cost_center_name" if any(
+             field.get("name") == "cost_center_name" and field.get("required")
+             for field in contract.get("schema", {}).get("fields", [])) else "")
+         + "이 없으면 Fail-closed로 등록이 거부됩니다."),
         ("업무 키", ", ".join(contract.get("business_keys", []))),
         ("선행 데이터", ", ".join(contract.get("dependencies", [])) or "없음"),
         ("분류 원칙", "data_class=SYNTHETIC은 샘플의 출처 분류이며, business_data_kind는 값의 업무 의미(ACTUAL/PLAN 등)입니다."),
@@ -179,6 +184,10 @@ def add_validation(wb: Workbook, contract: Dict[str, Any]) -> None:
         ("VAL-05", "SYNTHETIC 표기가 Actual 출처로 변경되지 않음", "REJECT", "분류 정책"),
         ("VAL-06", "기간·단위·통화가 코드맵과 일치", "QUARANTINE", "MDM·Crosswalk"),
     ]
+    if any(field.get("name") == "cost_center_name" and field.get("required")
+           for field in contract.get("schema", {}).get("fields", [])):
+        rules.append(("VAL-07", "같은 cost_center_id의 명칭·tenant·scope가 모두 일치",
+                      "REJECT", "원가센터 집합 정본"))
     for row in rules:
         ws.append(row)
     header_row(ws, 1, 4)
@@ -187,13 +196,21 @@ def add_validation(wb: Workbook, contract: Dict[str, Any]) -> None:
     style_sheet(ws)
 
 
-def add_checks(wb: Workbook) -> None:
+def add_checks(wb: Workbook, contract: Dict[str, Any]) -> None:
     ws = wb.create_sheet("CHECKS")
     ws.append(["지표", "결과", "판정 기준"])
     ws.append(["입력 행 수", "=COUNTA(DATA!A:A)-1", "1건 이상이면 입력 데이터 존재"])
     ws.append(["SYNTHETIC 표시 행 수", '=COUNTIF(DATA!D:D,"SYNTHETIC")', "샘플 단계에서는 입력 행 수와 동일"])
     ws.append(["분류 일치", '=IF(B2=B3,"PASS","REVIEW")', "PASS여야 함"])
-    ws.append(["범위 누락", '=COUNTBLANK(DATA!C2:INDEX(DATA!C:C,B2+1))', "0이어야 함"])
+    fields = [str(field.get("name") or "")
+              for field in contract.get("schema", {}).get("fields", [])]
+    if "cost_center_name" in fields:
+        name_col = get_column_letter(fields.index("cost_center_name") + 1)
+        missing_formula = (f'=COUNTBLANK(DATA!C2:INDEX(DATA!C:C,B2+1))+'
+                           f'COUNTBLANK(DATA!{name_col}2:INDEX(DATA!{name_col}:{name_col},B2+1))')
+        ws.append(["필수 범위·원가센터 명칭 누락", missing_formula, "0이어야 함"])
+    else:
+        ws.append(["범위 누락", '=COUNTBLANK(DATA!C2:INDEX(DATA!C:C,B2+1))', "0이어야 함"])
     ws.append(["종합", '=IF(AND(B4="PASS",B5=0),"PASS","REVIEW")', "PASS 후 등록"])
     header_row(ws, 1, 3)
     ws.column_dimensions["A"].width = 28
@@ -275,7 +292,7 @@ def main() -> None:
         add_dictionary(wb, contract)
         add_code_map(wb)
         add_validation(wb, contract)
-        add_checks(wb)
+        add_checks(wb, contract)
         path = OUTPUT_ROOT / f"{dataset_id}.xlsx"
         wb.save(path)
         generated.append(path)

@@ -33,7 +33,12 @@ _LOG_PATH = data_path("llm_call_log.jsonl")
 
 
 def _read_records(project: str = "") -> list:
-    """텔레메트리 로그를 읽어 레코드 리스트로 반환(부분 기록 줄은 건너뜀). project 지정 시 필터."""
+    """텔레메트리 로그를 읽어 레코드 리스트로 반환한다.
+
+    ``project`` 는 제품 화면이 사용하는 내부 프로젝트 ID와 구 로그의 표시명 둘 다 받는다.
+    게이트웨이는 두 값을 각각 ``project_id``·``project`` 로 기록하므로 한 필드만 대조하면
+    실제 호출이 있어도 프로젝트 관리 화면에는 0회로 보인다.
+    """
     recs = []
     if not os.path.exists(_LOG_PATH):
         return recs
@@ -47,7 +52,9 @@ def _read_records(project: str = "") -> list:
                     r = json.loads(line)
                 except Exception:
                     continue  # 부분 기록/깨진 줄 skip
-                if project and (r.get("project") or "") != project:
+                if project and project not in {
+                    str(r.get("project_id") or ""), str(r.get("project") or "")
+                }:
                     continue
                 recs.append(_backfill(r))
     except Exception:

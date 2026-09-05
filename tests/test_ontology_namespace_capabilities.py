@@ -16,10 +16,10 @@ def test_runtime_namespace_totals_are_the_actual_product_coverage():
     assert status["namespace_count"] == 7
     assert status["contract_object_type_count"] == 29
     assert status["resolver_available_namespace_count"] == 7
-    assert status["resolver_object_type_count"] == 28
-    assert status["display_object_type_count"] == 28
-    assert status["fully_ready_namespace_count"] == 6
-    assert status["status"] == cap.PARTIAL
+    assert status["resolver_object_type_count"] == 29
+    assert status["display_object_type_count"] == 29
+    assert status["fully_ready_namespace_count"] == 7
+    assert status["status"] == cap.READY
 
 
 def test_status_vocabulary_matches_the_runtime_and_design_contract():
@@ -44,7 +44,9 @@ def test_dataset_counts_come_from_the_real_scope_index_contract():
 
 def test_mdm_and_external_counts_come_from_the_safe_reference_index_contract():
     actual = {}
-    for key in set(scope_index.REFERENCE_OBJECTS) | set(scope_index.COMPOSITE_REFERENCE_OBJECTS):
+    for key in (set(scope_index.REFERENCE_OBJECTS)
+                | set(scope_index.COMPOSITE_REFERENCE_OBJECTS)
+                | set(scope_index.GROUPED_REFERENCE_OBJECTS)):
         for namespace, object_type, _ in scope_index.object_specs(key):
             actual.setdefault(namespace, set()).add(object_type)
     assert tuple(sorted(actual["mdm"])) == cap.RESOLVER_OBJECT_TYPES["mdm"]
@@ -69,7 +71,7 @@ def test_dataset_is_ready_only_after_all_fourteen_contract_types_are_wired():
     assert rows["ecm"]["display_status"] == cap.READY
     assert rows["dataset"]["resolver_status"] == cap.READY
     assert rows["dataset"]["display_status"] == cap.READY
-    assert rows["mdm"]["resolver_status"] == cap.PARTIAL
+    assert rows["mdm"]["resolver_status"] == cap.READY
     assert rows["external"]["resolver_status"] == cap.READY
 
 
@@ -80,7 +82,7 @@ def test_materialization_is_reported_separately_from_implementation():
     })
     rows = {row["namespace"]: row for row in status["namespaces"]}
     assert status["materialized_object_type_count"] == 15
-    assert rows["mdm"]["resolver_object_type_count"] == 8
+    assert rows["mdm"]["resolver_object_type_count"] == 9
     assert rows["mdm"]["materialized_object_type_count"] == 0
     assert "명시적 결속" in rows["mdm"]["message"]
     assert rows["external"]["resolver_status"] == cap.READY
