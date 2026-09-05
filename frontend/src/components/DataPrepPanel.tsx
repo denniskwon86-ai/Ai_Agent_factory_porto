@@ -297,8 +297,8 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                             {ready ? '시연 가능' : '준비 중'}
                           </span>
                           <span style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>
-                            데이터 {k.dataset_count} · 업무키트 {k.business_kit_count}
-                            {' · '}앱 {k.app_count} · 보고서 {k.report_count}
+                            데이터 {k.dataset_count} · 업무영역 {k.business_kit_count}
+                            {' · '}실행 앱 {k.app_count} · 보고서 {k.report_count}
                           </span>
                         </div>
                         <div style={{ color: 'var(--surface-text-muted)', marginTop: 4, fontSize: 12 }}>

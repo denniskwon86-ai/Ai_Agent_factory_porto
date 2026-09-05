@@ -30,6 +30,8 @@ export interface ProjectState {
   supervisor_feedback?: string;
   criteria_log?: any[];
   artifacts?: Record<string, string>;
+  terminal_status?: string;
+  terminal_reason?: string;
   // 메가 프로젝트 / 시뮬레이션 확장 변수
   is_mega_project?: boolean;
   sub_projects_map?: Record<string, string>;
@@ -111,7 +113,7 @@ interface FactoryStore {
   setActiveSprintId: (id: string | null) => void;
   setCurrentProject: (id: string | null) => void;
   fetchProjects: () => Promise<void>;
-  createProject: (name: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean) => Promise<string | null>;
+  createProject: (name: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean, kitInstanceId?: string) => Promise<string | null>;
   createMegaProject: (name: string, templateId?: string) => Promise<string | null>;
   copyProject: (id: string, newName: string) => Promise<string | null>;
   /** 프로젝트 삭제. 기본은 **표시 삭제**(데이터는 남는다), `purge=true` 는 실제 삭제(관리자만). */
@@ -291,7 +293,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  createProject: async (name: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean) => {
+  createProject: async (name: string, templateId?: string, knowledgePackIds?: string[], masterDomains?: string[], mcpLiveGrounding?: boolean, kitInstanceId?: string) => {
     try {
 
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/projects`, {
@@ -302,7 +304,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
           template_id: templateId || get().selectedTemplateId || 'default',
           knowledge_pack_ids: knowledgePackIds || [],
           master_domains: masterDomains || [],
-          mcp_live_grounding: mcpLiveGrounding || false
+          mcp_live_grounding: mcpLiveGrounding || false,
+          kit_instance_id: kitInstanceId || ''
         })
       });
       if (res.ok) {

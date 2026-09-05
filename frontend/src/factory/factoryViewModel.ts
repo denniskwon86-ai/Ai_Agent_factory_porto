@@ -415,7 +415,7 @@ const STAGE_DOC_FIELDS: Record<string, { text: keyof ProjectState; verdict?: key
 };
 
 /** 단계별 산출물을 모은다. **값이 있는 단계만** 키를 만든다(위 주석 참조). */
-function toDocs(st: ProjectState | null): Record<string, FactoryStageDocVm> {
+function toDocs(st: ProjectState | null, defs: StageDef[] | null): Record<string, FactoryStageDocVm> {
   const out: Record<string, FactoryStageDocVm> = {};
   if (!st) return out;
   for (const [stage, f] of Object.entries(STAGE_DOC_FIELDS)) {
@@ -424,6 +424,26 @@ function toDocs(st: ProjectState | null): Record<string, FactoryStageDocVm> {
     // 본문도 판정도 없으면 «아직 없다» 다 — 키를 만들지 않는다.
     if (!text && !verdict) continue;
     out[stage] = { text, verdict };
+  }
+  const artifacts = (st.artifacts || {}) as Record<string, string>;
+  const artifactByAgent = new Map<string, { id: string; text: string }>();
+  for (const [agentId, raw] of Object.entries(artifacts)) {
+    const text = String(raw ?? '').trim();
+    if (!text) continue;
+    artifactByAgent.set(agentId.toLowerCase(), { id: agentId, text });
+    out[agentId.toUpperCase()] = { text, verdict: '' };
+  }
+  for (const def of defs || []) {
+    const found = def.agents
+      .map((agentId) => artifactByAgent.get(agentId))
+      .filter((item): item is { id: string; text: string } => Boolean(item));
+    if (!found.length) continue;
+    out[def.id] = {
+      text: found.length === 1
+        ? found[0].text
+        : found.map((item) => `## ${item.id}\n\n${item.text}`).join('\n\n---\n\n'),
+      verdict: '',
+    };
   }
   return out;
 }
@@ -462,9 +482,19 @@ export function buildFactoryViewModel(
   const projectId = snap.currentProjectId || '';
 
   const defs = stageDefsFrom(snap.currentTemplateData, snap.agentRegistry);
-  const completed = (snap.completed_agents || []).map((a) => String(a).toLowerCase());
+  const artMap = (st?.artifacts || {}) as Record<string, string>;
+  const completed = Array.from(new Set([
+    ...(snap.completed_agents || []).map((a) => String(a).toLowerCase()),
+    ...Object.entries(artMap)
+      .filter(([, value]) => String(value ?? '').trim())
+      .map(([agentId]) => agentId.toLowerCase()),
+  ]));
   const scores = (st?.stage_scores || {}) as Record<string, number>;
-  const currentStage = String(st?.current_stage || '');
+  const declaredCurrentStage = String(st?.current_stage || '');
+  const inferredCurrentStage = [...(defs || [])].reverse().find(
+    (def) => def.agents.some((agentId) => completed.includes(agentId)),
+  )?.id || '';
+  const currentStage = declaredCurrentStage || inferredCurrentStage;
   const hotlAgent = String(snap.hotlTaskId || '').toLowerCase();
   const running = !!snap.activeSprintId || !!snap.hotlTaskId;
   const failedAgent = String(snap.lastSprintFailure?.taskId || '').toLowerCase();
@@ -537,7 +567,6 @@ export function buildFactoryViewModel(
     : [];
 
   // ── 산출물 ────────────────────────────────────────────────────────────
-  const artMap = (st?.artifacts || {}) as Record<string, string>;
   const artifacts: FactoryArtifactVm[] = Object.keys(artMap).map((k) => ({
     id: k,
     type: artifactType(k),
@@ -580,6 +609,11 @@ export function buildFactoryViewModel(
     loadState = 'empty';
     loadReason = '아직 만들어진 것이 없습니다.';
   }
+
+  const docs = toDocs(st, defs);
+  const allDeclaredStagesComplete = Boolean(defs?.length)
+    && (defs || []).every((def) => def.agents.every((agentId) => completed.includes(agentId)));
+  const terminalComplete = st?.terminal_status === 'COMPLETED';
 
   return {
     project: {
@@ -627,7 +661,7 @@ export function buildFactoryViewModel(
       healingRetries: Number(snap.healingRetryCount || 0),
       suspendedTaskId: snap.isSuspendedQuota ? String(snap.suspendedTaskId || '') : '',
     },
-    docs: toDocs(st),
+    docs,
     run: {
       active: running,
       sprintId: String(snap.activeSprintId || ''),
@@ -640,6 +674,7 @@ export function buildFactoryViewModel(
         : snap.isSuspendedQuota ? '쿼터 소진으로 동결'
         : snap.lastSprintFailure ? '마지막 실행 실패'
         : running ? '가동 중'
+        : terminalComplete || allDeclaredStagesComplete ? '산출물 생성 완료'
         : '대기',
     },
     releases: (snap.releases || [])

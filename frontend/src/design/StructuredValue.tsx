@@ -12,6 +12,19 @@ const LABELS: Record<string, string> = {
   compared: '지표 비교', base: '기준', scenario: '시나리오', delta: '변화',
   delta_pct: '변화율', key: '지표 코드', label: '지표', unit: '단위',
   fx_rate_pct: '환율 변동률', lead_time_days: '리드타임', power_price_pct: '전력비 변동률',
+  comparison_basis: '비교 기준', scenario_name: '전사 시나리오',
+  period_impacts: '기간별 영향', department_results: '부서별 결과',
+  department_role: '업무 영역', result_metrics: '결과 지표', affected_items: '영향 항목 수',
+  reporting_currency: '보고 통화', summary: '재무 영향 요약',
+  affected_sales_lines: '영향 판매 항목 수', affected_account_names: '연결 계정',
+  inventory_in_transit_krw: '운송 중 재고 노출액',
+  revenue_timing_exposure_krw: '매출 인식 이동 규모',
+  material_conversion_margin_timing_exposure_krw: '매출-재료·가공비 기여액 이동 규모',
+  cash_receipts_timing_exposure_krw: '현금회수 이동 규모', period: '기간',
+  revenue_delta_krw: '매출 증감',
+  material_conversion_margin_delta_krw: '매출-재료·가공비 기여액 증감',
+  cash_receipts_delta_krw: '현금회수 증감',
+  departments: '연결 업무 영역', certified_datasets: '인증 데이터',
 };
 
 const label = (key: string) => LABELS[key] || key.replaceAll('_', ' ');

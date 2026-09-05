@@ -37,6 +37,10 @@ export type DecisionJarvis = {
 
 type Mode = 'list' | 'detail' | 'create';
 
+// `queue.value` 가 없는 동안에도 같은 배열 정체성을 유지한다. 렌더마다 새 `[]` 를 만들면
+// Jarvis 문맥 effect 가 부모 상태를 다시 쓰고, 결정 검토 요청 중 무한 렌더가 발생한다.
+const EMPTY_DECISION_CASES: DecisionCase[] = [];
+
 function StatusChip({ status }: { status: DecisionCase['status'] }) {
   const s = DECISION_STATUS_KO[status] ?? { label: status, tone: 'muted' };
   return <span className={`state-chip ${s.tone}`}>{s.label}</span>;
@@ -75,7 +79,9 @@ export function DecisionCenter({ onJarvis }: {
     try {
       const result = await orgApi.users();
       if (result.blockedReason) throw new Error(result.blockedReason);
-      setPeople(result.rows.filter((u) => u.status === 'ACTIVE'));
+      // 조직 정본은 상태를 `active` 로 저장한다. 화면 전용 대문자 상수로 비교하면
+      // 정상 사용자 전원이 사라져 참여자·담당자를 한 명도 고를 수 없다.
+      setPeople(result.rows.filter((u) => String(u.status || '').toUpperCase() === 'ACTIVE'));
     } catch {
       setPeople(null);
     }
@@ -90,7 +96,7 @@ export function DecisionCenter({ onJarvis }: {
   }, []);
   // ⚠️ `rows` 는 Jarvis 문맥 effect 의 의존성에 들어간다 — **선언이 사용처보다 앞이어야** 한다.
   //   뒤에 두면 렌더 중 의존성 배열을 평가할 때 TDZ 오류로 화면이 통째로 죽는다.
-  const rows = queue.value || [];
+  const rows = queue.value || EMPTY_DECISION_CASES;
 
   const loadQueue = useCallback(async () => {
     setBusy('불러오는 중'); setErr(null);

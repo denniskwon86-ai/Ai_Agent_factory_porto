@@ -323,6 +323,8 @@ export interface CalcResult {
   status: 'COMPLETE' | 'BLOCKED';
   query_id: string;
   path_fingerprint: string;
+  baseline_id: string;
+  baseline_fingerprint: string;
   required_relation_ids: string[];
   request_fingerprint: string;
   result_fingerprint?: string;
@@ -372,6 +374,8 @@ export interface WorkScenarioContribution {
   segment_ref: string;
   as_of: string;
   result_fingerprint: string;
+  baseline_id: string;
+  baseline_fingerprint: string;
   values: Record<string, Record<string, number | string>>;
   used_snapshots: Record<string, string>;
   idempotent?: boolean;
@@ -400,6 +404,8 @@ export interface EnterpriseComposition {
   message?: string;
   missing_department_roles?: Array<'procurement' | 'production' | 'sales'>;
   as_of?: string;
+  baseline_id?: string;
+  baseline_fingerprint?: string;
   composition_fingerprint?: string;
   department_results?: Array<{
     department_role: 'procurement' | 'production' | 'sales';
@@ -410,10 +416,30 @@ export interface EnterpriseComposition {
   }>;
   used_snapshots?: Record<string, string>;
   financial_impact: null | {
-    status: 'BLOCKED';
-    reason_code: 'FINANCIAL_BRIDGE_REQUIRED' | 'FINANCIAL_MODEL_REQUIRED';
+    status: 'BLOCKED' | 'COMPLETE';
+    reason_code?: 'FINANCIAL_BRIDGE_REQUIRED' | 'FINANCIAL_MODEL_REQUIRED'
+      | 'FINANCIAL_DATA_REQUIRED' | 'FINANCIAL_INPUT_INCOMPLETE';
     message: string;
     contract_state?: 'APPROVED';
+    missing_data_labels?: string[];
+    model_version?: string;
+    bridge_fingerprint?: string;
+    reporting_currency?: 'KRW';
+    result_fingerprint?: string;
+    affected_sales_lines?: number;
+    affected_account_names?: string[];
+    summary?: {
+      inventory_in_transit_krw: number;
+      revenue_timing_exposure_krw: number;
+      material_conversion_margin_timing_exposure_krw: number;
+      cash_receipts_timing_exposure_krw: number;
+    };
+    period_impacts?: Array<{
+      period: string;
+      revenue_delta_krw: number;
+      material_conversion_margin_delta_krw: number;
+      cash_receipts_delta_krw: number;
+    }>;
   };
 }
 
@@ -437,6 +463,35 @@ export async function getEnterpriseComposition(scenarioId: string) {
   return unwrap<EnterpriseComposition>(
     await apiFetch(`${BASE}/work-scenarios/${encodeURIComponent(scenarioId)}/composition`),
     '전사 운영 영향 조합');
+}
+
+export interface EnterpriseDecisionResult {
+  decision: null | {
+    decision_id: string;
+    status: string;
+    package_version: number;
+    evidence_hash: string;
+  };
+  composition: EnterpriseComposition;
+}
+
+/** APP-07에서 화면으로 확인한 전사 결과를 같은 지문의 의사결정 안건으로 저장한다. */
+export async function createEnterpriseDecision(scenarioId: string, body: {
+  question: string;
+  due_at: string;
+  seen_composition_fingerprint: string;
+  seen_financial_result_fingerprint: string;
+}) {
+  return unwrap<EnterpriseDecisionResult>(
+    await apiFetch(
+      `${BASE}/work-scenarios/${encodeURIComponent(scenarioId)}/decision`,
+      {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+    '전사 의사결정 안건',
+  );
 }
 
 export async function saveDepartmentContribution(

@@ -84,6 +84,39 @@ const APP_VIEWS: Record<string, AppView> = {
       'SIM-02': { label: '검토 시나리오', columns: ['scenario_id', 'scenario_name', 'baseline_id', 'driver_id', 'change_value', 'change_unit', 'impact_metrics', 'scenario_period_start', 'scenario_period_end', 'approval_status', 'rationale'] },
     },
   },
+  'APP-06': {
+    title: '판매·납기·매출 영향',
+    description: '수주·생산·재고·출하와 재무 근거를 연결해 납기 지연과 매출 시점 영향을 확인합니다.',
+    defaultDataset: 'SLS-01',
+    datasets: {
+      'SLS-01': { label: '판매·출하 현황', columns: ['sales_line_id', 'customer_id', 'product_id', 'order_date', 'due_date', 'actual_ship_date', 'order_quantity', 'shipped_quantity', 'quantity_uom', 'unit_price', 'currency', 'status'] },
+      'MFG-01': { label: '생산 계획', columns: ['plan_line_id', 'plan_date', 'site_id', 'product_id', 'plan_quantity', 'quantity_uom', 'priority', 'material_requirement', 'status'] },
+      'INV-01': { label: '재고 스냅숏', columns: ['snapshot_date', 'location_id', 'material_id', 'unrestricted_quantity', 'safety_stock_quantity', 'quantity_uom'] },
+      'FIN-02': { label: '매출·수금 문서', columns: ['finance_document_id', 'document_type', 'partner_id', 'reference_id', 'posting_date', 'due_date', 'amount', 'currency', 'paid_at', 'status'] },
+      'FIN-03': { label: '손익·현금 근거', columns: ['document_id', 'posting_date', 'fiscal_period', 'account_id', 'cost_center_id', 'debit_amount', 'credit_amount', 'currency', 'cashflow_line', 'plan_actual'] },
+      'EXT-01': { label: '환율 참고', columns: ['indicator_code', 'observed_at', 'value', 'unit', 'trust_grade'] },
+    },
+  },
+  'APP-07': {
+    title: '전사 시나리오·실적 통합',
+    description: '구매·물류·재고·생산·판매·재무의 같은 인증판을 하나의 전사 시나리오 근거로 확인합니다.',
+    defaultDataset: 'SIM-02',
+    datasets: {
+      'SIM-02': { label: '전사 검토 시나리오', columns: ['scenario_name', 'baseline_id', 'driver_id', 'change_value', 'change_unit', 'impact_metrics', 'scenario_period_start', 'scenario_period_end', 'approval_status', 'rationale'] },
+      'SIM-01': { label: '시뮬레이션 기준선', columns: ['baseline_id', 'baseline_name', 'period_start', 'period_end', 'status'] },
+      'DEC-01': { label: '의사결정 안건', columns: ['decision_title', 'decision_status', 'owner_role', 'due_date', 'rationale'] },
+      'PRC-02': { label: '발주 현황', columns: ['supplier_id', 'material_id', 'order_date', 'due_date', 'order_quantity', 'quantity_uom', 'unit_price', 'currency', 'status'] },
+      'LOG-02': { label: '선적 현황', columns: ['vessel_or_mode', 'origin_port', 'destination_port', 'shipment_quantity', 'quantity_uom', 'etd', 'eta', 'status'] },
+      'INV-01': { label: '재고 스냅숏', columns: ['snapshot_date', 'location_id', 'material_id', 'unrestricted_quantity', 'safety_stock_quantity', 'quantity_uom'] },
+      'MFG-01': { label: '생산 계획', columns: ['plan_date', 'site_id', 'product_id', 'plan_quantity', 'quantity_uom', 'priority', 'material_requirement', 'status'] },
+      'SLS-01': { label: '판매·출하 현황', columns: ['customer_id', 'product_id', 'order_date', 'due_date', 'actual_ship_date', 'order_quantity', 'shipped_quantity', 'quantity_uom', 'unit_price', 'currency', 'status'] },
+      'FIN-01': { label: '제품 원가', columns: ['fiscal_period', 'product_id', 'cost_component', 'standard_unit_cost', 'actual_unit_cost', 'variance_amount', 'currency', 'quantity_uom'] },
+      'FIN-02': { label: '채권·채무', columns: ['document_type', 'partner_id', 'posting_date', 'due_date', 'amount', 'currency', 'paid_at', 'status'] },
+      'FIN-03': { label: '손익·현금 근거', columns: ['posting_date', 'fiscal_period', 'account_id', 'cost_center_id', 'debit_amount', 'credit_amount', 'currency', 'cashflow_line', 'plan_actual'] },
+      'EXT-01': { label: '환율 참고', columns: ['indicator_code', 'observed_at', 'value', 'unit', 'trust_grade'] },
+      'EXT-02': { label: '원자재 가격', columns: ['commodity_code', 'observed_at', 'value', 'unit', 'currency', 'trust_grade'] },
+    },
+  },
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -271,6 +304,26 @@ function metrics(appId: string, dataset: string, rows: BusinessRow[], total: num
       { label: '등록 국가', value: countries.size ? `${countries.size}개` : '국가 근거 없음', hint: '현재 표시 범위의 국가 코드' },
     ];
   }
+  if (appId === 'APP-06' && dataset === 'SLS-01') {
+    const delayed = rows.filter((row) => String(row.actual_ship_date || '')
+      && String(row.due_date || '') && String(row.actual_ship_date) > String(row.due_date)).length;
+    return [
+      { label: '판매 주문행', value: `${total}건`, hint: `${rows.length}건을 현재 화면에서 확인` },
+      { label: '납기 지연', value: `${delayed}건`, hint: '실제 출하일이 약속일보다 늦은 표시 건' },
+      { label: '표시 주문량', value: uom ? `${formatNumber(sum(rows, 'order_quantity'))} ${uom}` : '단위 혼합', hint: uom ? '현재 표시 범위 합계' : '단위별로 나눠 확인 필요' },
+      { label: '출하 완료량', value: uom ? `${formatNumber(sum(rows, 'shipped_quantity'))} ${uom}` : '단위 혼합', hint: uom ? '현재 표시 범위 합계' : '단위별로 나눠 확인 필요' },
+    ];
+  }
+  if (appId === 'APP-07' && dataset === 'SIM-02') {
+    const approved = rows.filter((row) => String(row.approval_status || '').toUpperCase()
+      === 'APPROVED_FOR_DEMO').length;
+    const drivers = new Set(rows.map((row) => String(row.driver_id || '').trim()).filter(Boolean));
+    return [
+      { label: '전사 시나리오', value: `${total}건`, hint: `${rows.length}건을 현재 화면에서 확인` },
+      { label: '시연 검토 완료', value: `${approved}건`, hint: '실제 업무 승인과 구분된 시연 상태' },
+      { label: '변동 요인', value: `${drivers.size}종`, hint: '현재 표시 범위의 시나리오 동인' },
+    ];
+  }
   const statusKey = rows.some((row) => 'status' in row) ? 'status' : '';
   const exceptionCount = statusKey
     ? rows.filter((row) => !['COMPLETED', 'DELIVERED', 'CLEARED', 'PAID', 'CONFIRMED', 'PASS'].includes(String(row.status || '').toUpperCase())).length
@@ -343,7 +396,7 @@ export function KitBusinessView({
           <span style={{
             fontSize: 12, padding: '3px 8px', borderRadius: 999,
             color: 'var(--surface-text-muted)', border: '1px solid var(--surface-border)',
-          }} title={`데이터셋 식별자: ${datasetName}`}>{view?.label || datasetLabel}</span>
+          }}>{view?.label || datasetLabel}</span>
         </div>
       </div>
 

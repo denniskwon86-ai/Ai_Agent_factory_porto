@@ -50,14 +50,9 @@ function DatasetRow({ row }: { row: DatasetReadiness }) {
   return (
     <tr style={{ borderBottom: '1px solid var(--surface-border)' }}>
       <td style={{ padding: '10px 8px', fontSize: 14 }}>
-        {/* ★ 사람이 읽는 이름이 먼저다(설계 §12). 이름이 없으면 계약 이름을 그대로
-            쓰되, 있으면 계약 이름은 아래에 작게 남긴다 — 문의할 때 필요하다. */}
-        {row.label ? (
-          <>
-            <div>{row.label}</div>
-            <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>{row.dataset_contract_key}</div>
-          </>
-        ) : row.dataset_contract_key}
+        {/* 기술 계약키는 화면에 내놓지 않는다. 문의·감사는 서버 로그와 원장 식별자로
+            처리하고, 사용자는 업무 이름만 본다. 이름이 없으면 결손 자체를 말한다. */}
+        {row.label || '이름이 등록되지 않은 업무 데이터'}
       </td>
       <td style={{ padding: '10px 8px', fontSize: 14, color: v.tone, whiteSpace: 'nowrap' }}>
         <span aria-hidden style={{ marginRight: 6 }}>{v.mark}</span>{v.label}
@@ -82,7 +77,7 @@ function OutputRow({ row }: { row: OutputReadiness }) {
   const v = OUTPUT_VIEW[row.state] ?? { label: row.state, tone: 'var(--state-error-fg)' };
   return (
     <li style={{ marginBottom: 10, fontSize: 14 }}>
-      <strong>{row.output}</strong>
+      <strong>{row.label || '이름이 등록되지 않은 업무 결과'}</strong>
       <span style={{ color: v.tone, marginLeft: 8 }}>{v.label}</span>
       {row.user_message && (
         <div style={{ color: 'var(--surface-text-muted)', fontSize: 13, marginTop: 2 }}>{row.user_message}</div>
@@ -198,8 +193,7 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
                 cursor: 'pointer', padding: '10px 12px', display: 'flex', alignItems: 'center',
                 gap: 10, fontSize: 14,
               }}>
-                <strong style={{ minWidth: 78 }}>{group.id}</strong>
-                <span style={{ flex: 1 }}>{group.name}</span>
+                <strong style={{ flex: 1 }}>{group.name}</strong>
                 <span style={{ color: attention ? 'var(--state-warn-fg)' : 'var(--state-success-fg)',
                   fontSize: 13 }}>
                   준비 {ready}/{group.rows.length}{attention ? ` · 확인 ${attention}` : ''}

@@ -241,6 +241,7 @@ export function AdaptivePhaseCanvas({
   vm, shownStageId, shownStageLabel, selections, onToggleChoice,
 }: AdaptivePhaseCanvasProps) {
   const kind = canvasKindOf(shownStageId);
+  const hasCustomArtifact = Boolean(vm.docs[(shownStageId || '').toUpperCase()]);
 
   if (kind === 'clarification') {
     return (
@@ -253,6 +254,9 @@ export function AdaptivePhaseCanvas({
     return <StageArtifactCanvas vm={vm} stageId={shownStageId} stageLabel={shownStageLabel} />;
   }
   if (kind === 'implementation') return <GeneratedAppRuntime vm={vm} />;
+  if (kind === 'not_yet' && hasCustomArtifact) {
+    return <StageArtifactCanvas vm={vm} stageId={shownStageId} stageLabel={shownStageLabel} />;
+  }
 
   const plan = NOT_YET_PLAN[(shownStageId || '').toUpperCase()];
   return (

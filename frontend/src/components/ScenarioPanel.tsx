@@ -9,6 +9,7 @@ import {
 } from '../lib/calcFields';
 import { BaselinePicker, type BaselineChoice } from './BaselinePicker';
 import { BaseValueFields } from './BaseValueFields';
+import { GeneratedProjectCatalog, type GeneratedProjectLink } from './GeneratedProjectCatalog';
 
 // [G4 / Wave H] 시나리오 시뮬레이션 화면 — 파일럿 동선 10~11칸.
 //
@@ -20,16 +21,21 @@ import { BaseValueFields } from './BaseValueFields';
 //   ③ **비율만 크게 보여주지 않는다.** 작은 기준값에서 «+300%» 가 나오고, 그것이
 //      회의에서 실제 규모보다 크게 읽힌다. 값과 비율을 함께 둔다.
 
-type ScenarioStage = 'baseline' | 'base' | 'drivers' | 'results';
+type ScenarioStage = 'library' | 'baseline' | 'base' | 'drivers' | 'results';
 
-const SCENARIO_ITEMS: RailItem[] = [
+const SCENARIO_STEPS: RailItem[] = [
   { id: 'baseline', label: '1. 기준선', hint: '인증된 업무키트와 데이터 판 선택', icon: 'catalog' },
   { id: 'base', label: '2. 기준값', hint: '계산에 사용할 현재 값 확인', icon: 'checklist' },
   { id: 'drivers', label: '3. 변화 가정', hint: '환율·지연·단가 변화 입력', icon: 'revise' },
   { id: 'results', label: '4. 비교 결과', hint: '기준 대비 영향과 재현 지문 확인', icon: 'decision' },
 ];
 
-export function ScenarioPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
+export function ScenarioPanel({ onClose, page = false, generatedProjects = [], onOpenGeneratedProject }: {
+  onClose: () => void;
+  page?: boolean;
+  generatedProjects?: GeneratedProjectLink[];
+  onOpenGeneratedProject?: (id: string) => void;
+}) {
   //: ★ id 를 타이핑하게 하지 않는다 — 고르개가 목록에서 집어 준다.
   const [pick, setPick] = useState<BaselineChoice>({ instanceId: '', snapshotIds: [] });
   const [base, setBase] = useState<Record<string, string>>({});
@@ -37,7 +43,7 @@ export function ScenarioPanel({ onClose, page = false }: { onClose: () => void; 
   const [result, setResult] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [stage, setStage] = useState<ScenarioStage>('baseline');
+  const [stage, setStage] = useState<ScenarioStage>(page ? 'library' : 'baseline');
   const baselineRef = useRef<HTMLDivElement>(null);
   const baseRef = useRef<HTMLDivElement>(null);
   const driversRef = useRef<HTMLDivElement>(null);
@@ -46,6 +52,7 @@ export function ScenarioPanel({ onClose, page = false }: { onClose: () => void; 
   const goStage = (id: string) => {
     const next = id as ScenarioStage;
     setStage(next);
+    if (next === 'library') return;
     const refs = { baseline: baselineRef, base: baseRef, drivers: driversRef, results: resultsRef };
     refs[next].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
@@ -228,7 +235,11 @@ export function ScenarioPanel({ onClose, page = false }: { onClose: () => void; 
     <HubShell layoutClassName="product-page-shell scenario-product-shell"
       kicker="MANAGEMENT DIGITAL TWIN" title="시뮬레이션"
       subtitle="승인된 판과 고정 기준선에서 변화 가정을 비교합니다."
-      items={SCENARIO_ITEMS} activeId={stage} onSelect={goStage}
+      items={[
+        { id: 'library', label: '시뮬레이터 관리', hint: '만든 항목·실적·실행', icon: 'apps',
+          count: generatedProjects.length },
+        ...SCENARIO_STEPS,
+      ]} activeId={stage} onSelect={goStage}
       footer={<div className="inheritance-card">
         <span>REPRODUCIBLE</span>
         <b>같은 기준선 · 같은 입력 · 같은 결과</b>
@@ -260,7 +271,14 @@ export function ScenarioPanel({ onClose, page = false }: { onClose: () => void; 
           '결과를 의사결정에 쓰기 전에 무엇을 확인해야 합니까?',
         ]} />}
     >
-      {workspace}
+      {stage === 'library' ? <GeneratedProjectCatalog
+        kindLabel="시뮬레이터"
+        title="시뮬레이터 관리"
+        description="부서별로 만든 시뮬레이터를 검색하고 진행 상태와 실제 사용실적을 확인한 뒤 다시 실행합니다."
+        emptyText="아직 만든 시뮬레이터가 없습니다. 오른쪽 위 ‘새 시뮬레이터’에서 시작할 수 있습니다."
+        actionLabel="열기·실행"
+        projects={generatedProjects}
+        onOpen={onOpenGeneratedProject || (() => {})} /> : workspace}
     </HubShell>
   );
   return (

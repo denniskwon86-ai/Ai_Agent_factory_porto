@@ -12,7 +12,7 @@
 // ⚠️ 아직 없는 것을 만들어 넣지 않는다. 설계 §5.2 의 «전체 Workflow Map + 앞으로 생성될
 //   단계·산출물·승인 계약» 은 서버가 그 목록을 주지 않으므로, **무엇이 정해지고 무엇이 아직
 //   정해지지 않았는지**를 적는 데서 멈춘다.
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
 import { DataPrepError, listInstances } from '../lib/dataPrepApi';
@@ -25,48 +25,105 @@ export type BuildStartResult = {
   packIds: string[];
   masterDomains: string;
   mcpLiveGrounding: boolean;
+  kitInstanceId: string;
+};
+
+export type BuildDeliverableType = 'software_app' | 'hybrid_simulation' | 'document_report';
+
+const INTENT_COPY: Record<BuildDeliverableType, {
+  dialog: string; kit: string; general: string; submit: string;
+}> = {
+  software_app: {
+    dialog: '새 업무 앱 만들기', kit: '업무키트 기반 앱', general: '일반 앱 제작', submit: '이 조건으로 앱 만들기',
+  },
+  hybrid_simulation: {
+    dialog: '새 시뮬레이터 만들기', kit: '업무키트 기반 시뮬레이터', general: '일반 시뮬레이터 제작', submit: '이 조건으로 시뮬레이터 만들기',
+  },
+  document_report: {
+    dialog: '새 보고서 자동화 만들기', kit: '', general: '보고서 작성 자동화', submit: '이 조건으로 보고서 만들기',
+  },
 };
 
 export function BuildStartDialog({
-  templates, knowledgePacks, packsBlocked, onClose, onCreate, onOpenDataPrep,
+  templates, knowledgePacks, packsBlocked, deliverableType = 'software_app',
+  onClose, onCreate, onOpenDataPrep,
 }: {
-  templates: { template_id: string; name?: string; pipeline_name?: string }[];
+  templates: { template_id?: string; id?: string; name?: string; pipeline_name?: string;
+    deliverable_type?: string }[];
   knowledgePacks: any[];
   packsBlocked: string;
+  deliverableType?: BuildDeliverableType;
   onClose: () => void;
   onCreate: (r: BuildStartResult) => void;
   onOpenDataPrep: () => void;
 }) {
-  const [startMode, setStartMode] = useState<'kit' | 'general'>('kit');
+  const copy = INTENT_COPY[deliverableType];
+  const appTemplates = useMemo(() => templates.filter((t) => (
+    String(t.deliverable_type || 'software_app') === deliverableType
+  )), [templates, deliverableType]);
+  const [startMode, setStartMode] = useState<'kit' | 'general'>(
+    deliverableType === 'software_app' ? 'kit' : 'general');
   const [projectName, setProjectName] = useState('');
   const [isMega, setIsMega] = useState(false);
-  const [templateId, setTemplateId] = useState(templates[0]?.template_id || 'default');
+  const [templateId, setTemplateId] = useState(
+    appTemplates[0]?.template_id || appTemplates[0]?.id || '');
   const [packIds, setPackIds] = useState<string[]>([]);
   const [masterDomains, setMasterDomains] = useState('');
   const [mcp, setMcp] = useState(false);
   const [err, setErr] = useState('');
+  const [dataInstances, setDataInstances] = useState<any[] | null>(null);
+  const [selectedDataInstance, setSelectedDataInstance] = useState('');
+  const [dataError, setDataError] = useState('');
 
   const nameOk = projectName.trim().length >= 2;
-  const selectedTemplate = templates.find((t) => t.template_id === templateId);
+  const requiresBusinessData = deliverableType !== 'software_app';
+  const canSubmit = nameOk && (!requiresBusinessData || Boolean(selectedDataInstance));
+  const selectedTemplate = appTemplates.find((t) => (t.template_id || t.id) === templateId);
   const selectedTemplateName = selectedTemplate?.pipeline_name || selectedTemplate?.name
     || '선택한 업무 절차';
 
   // 템플릿은 화면이 열린 뒤 비동기로 도착할 수 있다. 보이는 첫 옵션과 실제 제출값이
   // 갈라지지 않도록 현재 값이 목록에 없을 때만 첫 정본 값으로 맞춘다.
   useEffect(() => {
-    if (templates.length && !templates.some((t) => t.template_id === templateId)) {
-      setTemplateId(templates[0].template_id);
+    if (appTemplates.length && !appTemplates.some((t) => (t.template_id || t.id) === templateId)) {
+      setTemplateId(appTemplates[0].template_id || appTemplates[0].id || '');
     }
-  }, [templates, templateId]);
+  }, [appTemplates, templateId]);
+
+  useEffect(() => {
+    if (!requiresBusinessData) return;
+    let alive = true;
+    setDataInstances(null);
+    setDataError('');
+    listInstances().then((data) => {
+      if (!alive) return;
+      const rows = data.instances || [];
+      setDataInstances(rows);
+      if (rows.length === 1) setSelectedDataInstance(String(rows[0].instance_id || ''));
+    }).catch((e: unknown) => {
+      if (!alive) return;
+      setDataInstances([]);
+      setDataError((e as DataPrepError)?.message || '업무 데이터 적용본을 확인하지 못했습니다.');
+    });
+    return () => { alive = false; };
+  }, [requiresBusinessData]);
 
   const submit = () => {
     if (!nameOk) {
       setErr('업무 이름을 2자 이상 입력하십시오.');
       return;
     }
+    if (!templateId) {
+      setErr(`${copy.general}에 사용할 업무 진행 절차가 없습니다.`);
+      return;
+    }
+    if (requiresBusinessData && !selectedDataInstance) {
+      setErr('이 업무에 사용할 인증 데이터 적용본을 선택하십시오.');
+      return;
+    }
     onCreate({
       projectName: projectName.trim(), isMega, templateId, packIds,
-      masterDomains, mcpLiveGrounding: mcp,
+      masterDomains, mcpLiveGrounding: mcp, kitInstanceId: selectedDataInstance,
     });
   };
 
@@ -90,9 +147,9 @@ export function BuildStartDialog({
   };
 
   return (
-    <HubDialog label="새 업무 만들기" onClose={onClose}>
+    <HubDialog label={copy.dialog} onClose={onClose}>
       <div className="afs-dialog-bar">
-        <b>새 업무 만들기</b>
+        <b>{copy.dialog}</b>
         <span>무엇을 만들지 정하면 그에 맞는 단계와 승인 지점이 준비됩니다</span>
         <div className="bar-actions">
           <button className="secondary-button" onClick={onClose}>
@@ -103,14 +160,14 @@ export function BuildStartDialog({
 
       <div className="afs-dialog-body" style={{ padding: 24, display: 'flex',
         flexDirection: 'column', gap: 20 }}>
-        <div>
+        {deliverableType === 'software_app' && <div>
           <span style={label}>시작 방식</span>
           <div style={{ display: 'grid', gap: 10,
             gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
             <button style={option(startMode === 'kit')} onClick={() => setStartMode('kit')}>
               <span style={{ fontSize: 20 }}>▦</span>
               <span>
-                <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>업무키트 기반 앱</b>
+                <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>{copy.kit}</b>
                 <span style={{ display: 'block', fontSize: 12,
                   color: 'var(--surface-text-muted)' }}>
                   이 조직에 적용된 패키지의 준비도·계약을 확인하고 시작합니다 · 추천
@@ -120,7 +177,7 @@ export function BuildStartDialog({
             <button style={option(startMode === 'general')} onClick={() => setStartMode('general')}>
               <span style={{ fontSize: 20 }}>＋</span>
               <span>
-                <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>일반 앱 제작</b>
+                <b style={{ fontSize: 14, color: 'var(--surface-text)' }}>{copy.general}</b>
                 <span style={{ display: 'block', fontSize: 12,
                   color: 'var(--surface-text-muted)' }}>
                   업무 절차·지식·기준정보를 직접 골라 새 프로젝트를 만듭니다
@@ -128,10 +185,11 @@ export function BuildStartDialog({
               </span>
             </button>
           </div>
-        </div>
+        </div>}
 
         {startMode === 'kit' ? (
-          <KitStartFlow onOpenDataPrep={onOpenDataPrep} />
+          <KitStartFlow onOpenDataPrep={onOpenDataPrep}
+            appKind={deliverableType === 'hybrid_simulation' ? 'simulation' : 'software'} />
         ) : (<>
         {err && (
           <div style={{ fontSize: 13, padding: '10px 14px', borderRadius: 8,
@@ -180,16 +238,48 @@ export function BuildStartDialog({
           <span style={label}>업무 진행 절차</span>
           <select style={input} value={templateId}
             onChange={(e) => setTemplateId(e.target.value)}>
-            {(templates || []).map((t) => (
-              <option key={t.template_id} value={t.template_id}>
-                {t.pipeline_name || t.name || t.template_id}
-              </option>
-            ))}
+            {appTemplates.map((t) => {
+              const id = t.template_id || t.id || '';
+              return <option key={id} value={id}>
+                {t.pipeline_name || t.name || id}
+              </option>;
+            })}
           </select>
           <p style={{ fontSize: 12, marginTop: 6, color: 'var(--surface-text-muted)' }}>
             어떤 역할이 어떤 순서로 일하고 어디서 사람이 확인하는지가 여기서 정해집니다.
           </p>
         </div>
+
+        {requiresBusinessData && <div>
+          <span style={label}>사용할 업무 데이터</span>
+          {dataError ? (
+            <div style={{ color: 'var(--state-error-fg)', fontSize: 13 }}>{dataError}</div>
+          ) : dataInstances === null ? (
+            <div style={{ color: 'var(--surface-text-muted)', fontSize: 13 }}>
+              인증 데이터 적용본 확인 중…
+            </div>
+          ) : dataInstances.length === 0 ? (
+            <div style={{ padding: 13, borderRadius: 8, background: 'var(--surface-raised)',
+              border: '1px solid var(--surface-border)', fontSize: 13 }}>
+              사용할 수 있는 적용본이 없습니다. 업무 데이터 준비에서 인증판을 먼저 준비하십시오.
+              <button type="button" className="secondary-button" style={{ marginLeft: 10 }}
+                onClick={onOpenDataPrep}>업무 데이터 준비 열기</button>
+            </div>
+          ) : (
+            <select style={input} value={selectedDataInstance}
+              onChange={(e) => { setSelectedDataInstance(e.target.value); setErr(''); }}>
+              <option value="">적용본을 선택하십시오</option>
+              {dataInstances.map((row: any) => (
+                <option key={row.instance_id} value={row.instance_id}>
+                  {row.label || '이름 없는 적용본'} · {row.entity_mode || '문맥 미지정'}
+                </option>
+              ))}
+            </select>
+          )}
+          <p style={{ fontSize: 12, marginTop: 6, color: 'var(--surface-text-muted)' }}>
+            현재 인증된 데이터 판을 프로젝트에 고정합니다. 내부 식별자는 시스템이 관리합니다.
+          </p>
+        </div>}
 
         <div>
           <span style={label}>연결할 지식팩 (선택)</span>
@@ -270,12 +360,13 @@ export function BuildStartDialog({
           alignItems: 'center', flexWrap: 'wrap', position: 'sticky', bottom: 0, zIndex: 2,
           margin: '0 -2px -2px', padding: '12px 2px 2px',
           borderTop: '1px solid var(--surface-border)', background: 'var(--surface-page)' }}>
-          {!nameOk && (
+          {!canSubmit && (
             <span style={{ fontSize: 12.5, color: 'var(--surface-text-muted)',
               marginRight: 'auto' }}>
               {!projectName.trim()
                 ? '맨 위 업무 이름을 입력하면 «이 조건으로 만들기»가 켜집니다.'
-                : '업무 이름은 2자 이상이어야 합니다.'}
+                : !nameOk ? '업무 이름은 2자 이상이어야 합니다.'
+                : '사용할 업무 데이터 적용본을 선택해야 합니다.'}
             </span>
           )}
           <button onClick={onClose} style={{
@@ -283,13 +374,13 @@ export function BuildStartDialog({
             border: '1px solid var(--action-secondary-border)',
             background: 'var(--action-secondary-bg)', color: 'var(--action-secondary-fg)',
           }}>취소</button>
-          <button onClick={submit} disabled={!nameOk}
-            title={nameOk ? '' : '업무 이름을 입력해야 만들 수 있습니다.'} style={{
+          <button onClick={submit} disabled={!canSubmit}
+            title={canSubmit ? '' : '업무 이름과 사용할 데이터 적용본을 확인하십시오.'} style={{
             height: 46, padding: '0 22px', fontSize: 14, fontWeight: 700, borderRadius: 6,
-            cursor: nameOk ? 'pointer' : 'not-allowed', opacity: nameOk ? 1 : .55,
+            cursor: canSubmit ? 'pointer' : 'not-allowed', opacity: canSubmit ? 1 : .55,
             border: '1px solid var(--ls-navy)',
             background: 'var(--action-primary-bg)', color: 'var(--action-primary-fg)',
-          }}>이 조건으로 만들기</button>
+          }}>{copy.submit}</button>
         </div>
         </>)}
       </div>
@@ -302,7 +393,10 @@ export function BuildStartDialog({
  * 임의 `kit_instance_id` 입력을 받지 않는다. 적용본을 골라도 서버가 내려 준 준비도와
  * 계약 상태를 `KitAppPanel`이 다시 확인하며, 승인된 계약 전에는 앱 만들기 행동이 열리지 않는다.
  */
-function KitStartFlow({ onOpenDataPrep }: { onOpenDataPrep: () => void }) {
+function KitStartFlow({ onOpenDataPrep, appKind }: {
+  onOpenDataPrep: () => void;
+  appKind: 'software' | 'simulation';
+}) {
   const [instances, setInstances] = useState<any[] | null>(null);
   const [selected, setSelected] = useState('');
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
@@ -397,7 +491,7 @@ function KitStartFlow({ onOpenDataPrep }: { onOpenDataPrep: () => void }) {
       {selected ? (
         <div style={{ border: '1px solid var(--surface-border)', borderRadius: 8,
           background: 'var(--surface-card)' }}>
-          <KitAppPanel instanceId={selected} />
+          <KitAppPanel instanceId={selected} appKind={appKind} />
         </div>
       ) : (
         <div style={{ padding: 13, borderRadius: 8, background: 'var(--surface-raised)',

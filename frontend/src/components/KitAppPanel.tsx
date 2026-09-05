@@ -89,6 +89,14 @@ function matchesStatusFilter(
   return true;
 }
 
+type KitAppKind = 'all' | 'software' | 'simulation';
+
+function matchesAppKind(row: KitAppRow, appKind: KitAppKind): boolean {
+  if (appKind === 'simulation') return Boolean(SIMULATION_ACTION[row.app_id]);
+  if (appKind === 'software') return !SIMULATION_ACTION[row.app_id];
+  return true;
+}
+
 // ★★★ 계약 상태 셋은 **서로 다른 사실**이다. 하나로 뭉개면 화면이 다음 할 일을
 //   말해 줄 수 없다 — 「없음」은 만들라는 뜻이고 「초안」은 승인을 받으라는 뜻이다.
 function contractView(status: AppContractStatus): { label: string; tone: string } {
@@ -542,11 +550,12 @@ function AppRow({
 }
 
 export function KitAppPanel({
-  instanceId, mode = 'build', statusFilter = 'all', onOpenSimulation,
+  instanceId, mode = 'build', statusFilter = 'all', appKind = 'all', onOpenSimulation,
 }: {
   instanceId: string;
   mode?: 'build' | 'operate';
   statusFilter?: 'all' | 'active' | 'candidate' | 'pending';
+  appKind?: KitAppKind;
   onOpenSimulation?: (instanceId: string, appId: string) => void;
 }) {
   const [rows, setRows] = useState<KitAppRow[] | null>(null);
@@ -586,11 +595,13 @@ export function KitAppPanel({
 
   useEffect(() => {
     if (mode !== 'operate' || !rows) return;
-    const visible = rows.filter((row) => matchesStatusFilter(row, statusFilter));
+    const visible = rows.filter((row) => (
+      matchesStatusFilter(row, statusFilter) && matchesAppKind(row, appKind)
+    ));
     setSelectedAppId((current) => (
       visible.some((row) => row.app_id === current) ? current : (visible[0]?.app_id || '')
     ));
-  }, [mode, rows, statusFilter]);
+  }, [mode, rows, statusFilter, appKind]);
 
   if (loading) return <div style={{ padding: 16 }}>앱 목록을 확인하는 중…</div>;
 
@@ -618,7 +629,9 @@ export function KitAppPanel({
   const activeCount = rows.filter((row) => row.lifecycle_state === 'active').length;
   const candidateCount = rows.filter((row) => row.lifecycle_state === 'candidate').length;
   const pendingCount = rows.filter((row) => row.contract_status === 'DRAFT').length;
-  const shownRows = rows.filter((row) => matchesStatusFilter(row, statusFilter));
+  const shownRows = rows.filter((row) => (
+    matchesStatusFilter(row, statusFilter) && matchesAppKind(row, appKind)
+  ));
   const selectedRow = shownRows.find((row) => row.app_id === selectedAppId) || shownRows[0];
 
   const renderAppRow = (row: KitAppRow) => (
@@ -672,7 +685,9 @@ export function KitAppPanel({
       ) : shownRows.length === 0 ? (
         <div style={{ padding: 14, border: '1px dashed var(--surface-border)',
           borderRadius: 8, color: 'var(--surface-text-muted)', fontSize: 13 }}>
-          이 상태에 해당하는 앱이 없습니다.
+          {appKind === 'simulation' ? '이 업무키트에는 시뮬레이터가 선언되지 않았습니다.'
+            : appKind === 'software' ? '이 업무키트에는 일반 업무 앱이 선언되지 않았습니다.'
+              : '이 상태에 해당하는 앱이 없습니다.'}
         </div>
       ) : mode === 'operate' ? (
         <div className="afs-master-detail">

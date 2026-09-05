@@ -45,6 +45,7 @@ export interface DatasetReadiness {
 
 export interface OutputReadiness {
   output: string;
+  label?: string;
   state: OutputState;
   reason_code: string;
   user_message: string;
