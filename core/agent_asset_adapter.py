@@ -448,6 +448,8 @@ def workflow_summaries(viewer_scopes: Optional[FrozenSet[str]], viewer_user_id: 
             "name": r.get("name_ko") or r["asset_id"],
             "description": r.get("purpose") or "",
             "agent_count": len(body.get("agents") or []),
+            "deliverable_type": body.get("deliverable_type") or "software_app",
+            "simulation_framework": bool(body.get("simulation_framework", False)),
             # ★ `builtin` 은 «default 인가» 를 뜻한다(P1-2 주석 참조) — 조직 자산은 아니다.
             "builtin": False,
             "source": "ORG",

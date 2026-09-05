@@ -1,6 +1,7 @@
 {
   "version": 1,
   "pipeline_name": "마케팅 콘텐츠 제작 파이프라인",
+  "deliverable_type": "document_report",
   "description": "전략 수립부터 카피라이팅, 디자인 기획 및 최종 검수까지 디지털 마케팅 콘텐츠를 자동으로 생성하는 플로우",
   "agents": [
     {
