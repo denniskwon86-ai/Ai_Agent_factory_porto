@@ -42,7 +42,8 @@ core/external_intelligence/            (기존 .py 를 패키지로 — import �
   providers/
     base.py              8 메서드 계약 · SSRF 전송층
     __init__.py          등록부 · 우선순위(기존 표를 읽는다)
-    opendart.py          첫 Provider
+    opendart.py          첫 Provider  — 공시 재무제표 → PUB-01
+    ecos.py              둘째 Provider — 환율·금리·물가 → EXT-01
 
 api/routes/acquisition_control.py      14 라우트 · /api/v1/external/acquisition/*
 frontend/src/components/AcquisitionPanel.tsx
@@ -71,7 +72,7 @@ frontend/src/lib/externalIntelligenceApi.ts   (기존 파일에 덧붙임)
 ```
 오케스트레이터 구현   ✔
 Provider 구현        ✔  OpenDART · ECOS 2개
-fixture 검증         ✔  305건 · 네트워크 0회
+fixture 검증         ✔  390건 · 네트워크 0회
 실제 API 실측        ✘  AFS_OPENDART_API_KEY 가 없다
 실제 데이터 수집      ✘
 격리 DB 적재         ✔  data_acquisition_rows · 전부 UNCERTIFIED
