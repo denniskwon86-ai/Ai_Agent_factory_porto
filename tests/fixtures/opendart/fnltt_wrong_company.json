@@ -1,0 +1,44 @@
+{
+ "status": "000",
+ "message": "정상",
+ "list": [
+  {
+   "rcept_no": "20260316000123",
+   "reprt_code": "11011",
+   "bsns_year": "2025",
+   "corp_code": "00888888",
+   "sj_div": "IS",
+   "sj_nm": "손익계산서",
+   "account_id": "ifrs-full_Revenue",
+   "account_nm": "매출액",
+   "account_detail": "-",
+   "thstrm_nm": "제 10 기",
+   "thstrm_amount": "10,500,000,000",
+   "frmtrm_nm": "제 9 기",
+   "frmtrm_amount": "9,800,000,000",
+   "ord": "1",
+   "currency": "KRW",
+   "fs_div": "CFS",
+   "fs_nm": "연결재무제표"
+  },
+  {
+   "rcept_no": "20260316000123",
+   "reprt_code": "11011",
+   "bsns_year": "2025",
+   "corp_code": "00888888",
+   "sj_div": "IS",
+   "sj_nm": "손익계산서",
+   "account_id": "dart_OperatingIncomeLoss",
+   "account_nm": "영업이익",
+   "account_detail": "-",
+   "thstrm_nm": "제 10 기",
+   "thstrm_amount": "820,000,000",
+   "frmtrm_nm": "제 9 기",
+   "frmtrm_amount": "640,000,000",
+   "ord": "2",
+   "currency": "KRW",
+   "fs_div": "CFS",
+   "fs_nm": "연결재무제표"
+  }
+ ]
+}
