@@ -111,6 +111,54 @@ CREATE TABLE IF NOT EXISTS data_acquisition_raw_objects (
 );
 CREATE INDEX IF NOT EXISTS idx_daq_raw_checksum
     ON data_acquisition_raw_objects(source_id, checksum);
+
+-- 새 데이터 계약 «제안». ★★★ 인증된 키트를 건드리지 않는다 —
+--   사람이 승인해야 계약이 되고, 승인 전에는 적재 대상이 될 수 없다.
+CREATE TABLE IF NOT EXISTS data_contract_proposals (
+    proposal_id      TEXT PRIMARY KEY,
+    contract_key     TEXT NOT NULL,
+    contract_version TEXT NOT NULL DEFAULT '0.1.0',
+    document_json    TEXT NOT NULL,
+    rationale        TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL CHECK (status IN ('PROPOSED','APPROVED','REJECTED')),
+    proposed_by      TEXT NOT NULL,
+    reviewed_by      TEXT NOT NULL DEFAULT '',
+    review_reason    TEXT NOT NULL DEFAULT '',
+    reviewed_at      TEXT NOT NULL DEFAULT '',
+    last_event_id    TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+-- 한 계약 키에 승인본은 하나뿐이다. 둘이면 「이 계약이 무엇인가」에 답이 두 개가 된다.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_contract_proposal_approved
+    ON data_contract_proposals(contract_key) WHERE status='APPROVED';
+
+-- ★ 격리 적재본. 운영 데이터셋이 **아니다** — 지시 14 가 「격리 DB 적재」와
+--   「운영 적용」을 나눠 둔 그 경계다.
+CREATE TABLE IF NOT EXISTS data_acquisition_rows (
+    row_id           TEXT PRIMARY KEY,
+    job_id           TEXT NOT NULL,
+    contract_key     TEXT NOT NULL,
+    business_key     TEXT NOT NULL,
+    tenant_id        TEXT NOT NULL,
+    scope_node_id    TEXT NOT NULL DEFAULT '',
+    data_class       TEXT NOT NULL,
+    data_origin      TEXT NOT NULL,
+    quality_status   TEXT NOT NULL DEFAULT 'RAW',
+    certification_status TEXT NOT NULL DEFAULT 'UNCERTIFIED',
+    as_of_date       TEXT NOT NULL DEFAULT '',
+    lineage_id       TEXT NOT NULL DEFAULT '',
+    payload_json     TEXT NOT NULL,
+    raw_object_ref   TEXT NOT NULL DEFAULT '',
+    checksum         TEXT NOT NULL DEFAULT '',
+    superseded_by    TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL
+);
+-- ★★★ 중복 적재 방지. 같은 계약·테넌트·업무키는 한 번만 들어간다.
+--   ⚠️ 정정공시는 업무키에 접수번호가 들어 있어 **다른 행**이 된다 — 덮어쓰지 않는다.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_daq_row_business_key
+    ON data_acquisition_rows(contract_key, tenant_id, business_key);
+CREATE INDEX IF NOT EXISTS idx_daq_row_job ON data_acquisition_rows(job_id);
 """
 
 
@@ -330,6 +378,178 @@ class AcquisitionStore:
                 "ORDER BY recorded_at LIMIT 1",
                 (str(source_id or ""), str(checksum or ""))).fetchone()
         return dict(row) if row else None
+
+    # ── 계약 제안 ────────────────────────────────────────────────────────
+    def propose_contract(self, document: Mapping[str, Any], *, proposed_by: str,
+                         tenant_id: str = "tenant_default") -> Dict[str, Any]:
+        """새 계약을 제안한다. **승인 전에는 적재 대상이 될 수 없다.**"""
+        self._ready()
+        key = str((document or {}).get("dataset_id") or "").strip()
+        if not key:
+            raise AcquisitionStoreError("계약 문서에 dataset_id 가 없습니다.")
+        if str(document.get("status") or "") != "PROPOSED":
+            #: ⚠️ 이미 승인된 모양의 문서를 제안으로 넣으면 「제안」과 「계약」이 섞인다.
+            raise AcquisitionStoreError(
+                "제안 문서의 status 는 PROPOSED 여야 합니다 — 인증된 계약을 제안 경로로 "
+                "넣지 않습니다.")
+        if self.approved_contract(key):
+            raise AcquisitionStoreError(f"{key} 는 이미 승인된 계약입니다.")
+
+        pid = f"dcp_{uuid.uuid4().hex[:20]}"
+        now = _now()
+        rationale = str((document.get("proposal") or {}).get("rationale") or "")
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO data_contract_proposals (proposal_id, contract_key, "
+                "contract_version, document_json, rationale, status, proposed_by, "
+                "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (pid, key, str(document.get("contract_version") or "0.1.0"),
+                 _dumps(dict(document)), rationale, "PROPOSED", str(proposed_by), now, now))
+        return self.get_contract_proposal(pid)
+
+    def decide_contract(self, proposal_id: str, *, approve: bool, reviewed_by: str,
+                        reason: str = "", tenant_id: str = "tenant_default") -> Dict[str, Any]:
+        """★★★ 사람의 결정. 승인은 원장에 `DATA_CONTRACT_PUBLISHED` 로 남는다."""
+        self._ready()
+        row = self.get_contract_proposal(proposal_id)
+        if row is None:
+            raise AcquisitionStoreError(f"존재하지 않는 계약 제안입니다: {proposal_id}")
+        if row["status"] != "PROPOSED":
+            raise AcquisitionStoreError(
+                f"이미 {row['status']} 인 제안입니다 — 결정을 덮어쓰지 않습니다.")
+        if not approve and not str(reason or "").strip():
+            raise AcquisitionStoreError("거부에는 사유가 필요합니다.")
+        if not str(reviewed_by or "").strip():
+            raise AcquisitionStoreError("누가 결정했는지 없는 승인은 승인이 아닙니다.")
+
+        target = "APPROVED" if approve else "REJECTED"
+        event = self.ledger().append(
+            event_type="DATA_CONTRACT_PUBLISHED" if approve else "DATA_REQUIREMENT_ACCEPTED",
+            subject_type="data_contract", subject_id=row["contract_key"],
+            actor_type="user", actor_id=str(reviewed_by),
+            decision=target, rationale=str(reason or row.get("rationale") or ""),
+            evidence_refs=[{"kind": "contract_proposal", "value": proposal_id}],
+            tenant_id=tenant_id)
+        now = _now()
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE data_contract_proposals SET status=?, reviewed_by=?, review_reason=?, "
+                "reviewed_at=?, last_event_id=?, updated_at=? "
+                "WHERE proposal_id=? AND status='PROPOSED'",
+                (target, str(reviewed_by), str(reason or ""), now,
+                 str(event.get("event_id", "")), now, proposal_id))
+            if cur.rowcount != 1:
+                raise AcquisitionStoreError("그 사이 다른 결정이 기록됐습니다. 다시 읽으십시오.")
+        return self.get_contract_proposal(proposal_id)
+
+    def get_contract_proposal(self, proposal_id: str) -> Optional[Dict[str, Any]]:
+        self._ready()
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM data_contract_proposals WHERE proposal_id=?",
+                               (str(proposal_id),)).fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        out["document"] = _loads(out.pop("document_json", "{}"))
+        return out
+
+    def approved_contract(self, contract_key: str) -> Optional[Dict[str, Any]]:
+        """승인된 계약 문서. **없으면 `None`** — 적재의 전제 조건이다."""
+        self._ready()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM data_contract_proposals WHERE contract_key=? AND status='APPROVED'",
+                (str(contract_key or ""),)).fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        out["document"] = _loads(out.pop("document_json", "{}"))
+        return out
+
+    def list_contract_proposals(self, status: str = "") -> List[Dict[str, Any]]:
+        self._ready()
+        sql = "SELECT * FROM data_contract_proposals"
+        params: Tuple[Any, ...] = ()
+        if status:
+            sql += " WHERE status=?"
+            params = (str(status),)
+        sql += " ORDER BY created_at DESC"
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["document"] = _loads(d.pop("document_json", "{}"))
+            out.append(d)
+        return out
+
+    # ── 격리 적재 ────────────────────────────────────────────────────────
+    def stage_rows(self, job_id: str, rows: Sequence[Mapping[str, Any]]
+                   ) -> Dict[str, Any]:
+        """격리 적재. **중복은 조용히 넘어가지 않고 세어서 돌려준다.**
+
+        ⚠️ `INSERT OR IGNORE` 만 쓰고 건수를 안 세면 「120건 적재」라고 보고한 뒤 실제로는
+          3건만 들어간 상태가 된다. 넣은 것과 이미 있던 것을 **가른다.**"""
+        self._ready()
+        inserted, duplicate = 0, 0
+        now = _now()
+        with self._lock, self._connect() as conn:
+            for r in rows:
+                row_id = f"dar_{uuid.uuid4().hex[:20]}"
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO data_acquisition_rows (row_id, job_id, contract_key, "
+                    "business_key, tenant_id, scope_node_id, data_class, data_origin, "
+                    "quality_status, certification_status, as_of_date, lineage_id, "
+                    "payload_json, raw_object_ref, checksum, superseded_by, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (row_id, str(job_id), str(r.get("contract_key") or ""),
+                     str(r.get("business_key") or ""), str(r.get("tenant_id") or ""),
+                     str(r.get("scope_node_id") or ""), str(r.get("data_class") or ""),
+                     str(r.get("data_origin") or ""), str(r.get("quality_status") or "RAW"),
+                     str(r.get("certification_status") or "UNCERTIFIED"),
+                     str(r.get("as_of_date") or ""), str(r.get("lineage_id") or ""),
+                     _dumps(r.get("payload")), str(r.get("raw_object_ref") or ""),
+                     str(r.get("checksum") or ""), str(r.get("superseded_by") or ""), now))
+                if cur.rowcount == 1:
+                    inserted += 1
+                else:
+                    duplicate += 1
+        return {"inserted": inserted, "duplicate": duplicate,
+                "attempted": inserted + duplicate}
+
+    def staged_rows(self, job_id: str = "", contract_key: str = "",
+                    limit: int = 500) -> List[Dict[str, Any]]:
+        self._ready()
+        where, params = [], []
+        if job_id:
+            where.append("job_id=?")
+            params.append(str(job_id))
+        if contract_key:
+            where.append("contract_key=?")
+            params.append(str(contract_key))
+        sql = "SELECT * FROM data_acquisition_rows"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY created_at, row_id LIMIT ?"
+        params.append(max(1, min(int(limit or 500), 5000)))
+        with self._connect() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["payload"] = _loads(d.pop("payload_json", "{}"))
+            out.append(d)
+        return out
+
+    def staged_count(self, contract_key: str = "") -> int:
+        self._ready()
+        sql = "SELECT COUNT(*) FROM data_acquisition_rows"
+        params: Tuple[Any, ...] = ()
+        if contract_key:
+            sql += " WHERE contract_key=?"
+            params = (str(contract_key),)
+        with self._connect() as conn:
+            return int(conn.execute(sql, params).fetchone()[0])
 
     # ── 조회 ─────────────────────────────────────────────────────────────
     def get(self, job_id: str) -> Optional[Dict[str, Any]]:
