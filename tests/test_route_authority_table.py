@@ -44,6 +44,10 @@ GUARDED_MODULES = [
     "api.routes.baseline_control",
     #: [B2 / M0-3.3] 경로 계산 — 승인된 자료로 경영 판단용 숫자를 내고 안건을 만든다.
     "api.routes.calculation_control",
+    #: [DAO-8] 외부 데이터 수집 — 남의 서버를 부르고 격리 DB 에 행을 넣는다.
+    #:   ⚠️ 새 라우터는 **만들 때 함께** 이 목록에 넣는다. 나중에 넣으면 그 사이에
+    #:     추가된 라우트가 권한 없이 열린다.
+    "api.routes.acquisition_control",
 ]
 
 #: 다른 곳에 이미 판정이 있는 쓰기 라우트를 찾는 표식. `route_authority.EXEMPT` 와 함께 쓴다.

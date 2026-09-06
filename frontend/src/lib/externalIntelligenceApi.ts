@@ -284,3 +284,184 @@ export const externalIntelligenceApi = {
   resolveBaseline: (code: string) => req<ResolvedExternalValue>(
     'GET', `/api/v1/external/value/${encodeURIComponent(code)}?purpose=baseline_plan`),
 };
+
+// ── [DAO-8] 데이터 수집 오케스트레이터 ─────────────────────────────────────
+// ★ 새 파일을 만들지 않는다 — 「외부 원천」을 다루는 클라이언트가 둘이 되면 화면마다
+//   다른 규약을 쓰게 된다. 경로도 기존 `/api/v1/external` 아래다(지시 11).
+
+export type AcquisitionState =
+  | 'DRAFT' | 'DISCOVERING' | 'PLAN_READY' | 'DRY_RUN' | 'REVIEW_REQUIRED'
+  | 'APPLYING' | 'ACTIVE' | 'FAILED' | 'NO_DATA' | 'QUARANTINED' | 'DISABLED';
+
+export type ProviderCard = {
+  provider_id: string;
+  name: string;
+  publisher: string;
+  source_type: string;
+  cost: string;
+  requires_credential: boolean;
+  /** 자격증명이 실제로 설정돼 있는가. 없으면 `excluded` 에 사유가 함께 온다. */
+  credential_configured: boolean;
+  default_trust_grade: string;
+  refresh_frequency: string;
+  coverage_note: string;
+  license_url: string;
+  allowed_usage: string;
+  redistribution_allowed: boolean;
+  target_contract_keys: string[];
+  data_origin: string;
+  /** ★ 「이 값으로 하면 안 되는 것」. 화면이 반드시 함께 보여 준다. */
+  known_limits: string[];
+};
+
+export type AcquisitionCatalog = {
+  providers: ProviderCard[];
+  /** 지시 3 — 선택하지 않은 원천과 **제외 사유**. */
+  excluded: { provider_id: string; reason: string }[];
+  routing_table: Record<string, string>;
+  data_origins: string[];
+  states: AcquisitionState[];
+};
+
+export type InterpretProblem = { field: string; reason: string; got: string };
+
+export type InterpretResult = {
+  ok: boolean;
+  problems: InterpretProblem[];
+  /** 서버가 무시한 값과 그 이유 — 「왜 내가 쓴 대로 안 됐나」의 답. */
+  overridden: InterpretProblem[];
+  resolved_scope_node_id: string;
+  required_grade: string;
+  request: Record<string, unknown> | null;
+};
+
+export type AcquisitionJob = {
+  job_id: string;
+  tenant_id: string;
+  scope_node_id: string;
+  requested_by: string;
+  subject_name: string;
+  purpose: string;
+  status: AcquisitionState;
+  provider_id: string;
+  dataset_ref: string;
+  target_contract_key: string;
+  status_reason: string;
+  failure_kind: string;
+  schedule_rule: string;
+  next_run_at: string;
+  last_success_at: string;
+  is_schedulable: boolean;
+  awaits_human: boolean;
+  request: Record<string, unknown>;
+  plan: Record<string, unknown>;
+  dry_run: Record<string, unknown>;
+  checkpoint: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DryRunReport = {
+  job_id: string;
+  provider_id: string;
+  dataset_ref: string;
+  contract_key: string;
+  chosen_reason: string;
+  excluded_sources: { provider_id: string; reason: string }[];
+  ambiguous_with: string[];
+  expected_rows: number;
+  new_rows: number;
+  duplicate_rows: number;
+  superseded_rows: number;
+  rejected_rows: number;
+  /** 결손 필드와 건수. ★ 0 으로 채우지 않았다는 증거다. */
+  missing_fields: Record<string, number>;
+  mapping_needs_human: string[];
+  mapping_failed: { source: string; target: string; reason: string }[];
+  unit_conversions: Record<string, unknown>[];
+  target_contract_status: string;
+  quarantined: { reason: string; detail: string }[];
+  estimated_bytes: number;
+  refresh_schedule: string;
+  readiness_change_note: string;
+  validation: { name: string; ok: boolean; detail: string }[];
+  /** ★★★ 이 실행이 **하지 않는** 단계와 이유. 화면이 「다 됐다」로 읽지 않게 한다. */
+  pending_stages: { name: string; reason: string }[];
+};
+
+export type ApplyReport = {
+  job_id: string;
+  ok: boolean;
+  /** 일부만 들어갔다 — **성공이 아니다.** */
+  partial: boolean;
+  stages: { name: string; ok: boolean; detail: string; count: number }[];
+  inserted: number;
+  duplicate: number;
+  superseded: number;
+  rejected: number;
+  raw_object_ref: string;
+  pending_stages: { name: string; reason: string }[];
+  failure_kind: string;
+  failure_detail: string;
+};
+
+export type ContractProposal = {
+  proposal_id: string;
+  contract_key: string;
+  contract_version: string;
+  rationale: string;
+  status: 'PROPOSED' | 'APPROVED' | 'REJECTED';
+  proposed_by: string;
+  reviewed_by: string;
+  review_reason: string;
+  document: Record<string, unknown>;
+};
+
+export type StagedRows = {
+  rows: Record<string, unknown>[];
+  count: number;
+  /** ★★★ 「운영 데이터셋이 아니다」 — 화면이 이 문구를 지우지 않는다. */
+  notice: string;
+};
+
+const ACQ = '/api/v1/external/acquisition';
+
+export const acquisitionApi = {
+  catalog: () => req<AcquisitionCatalog>('GET', `${ACQ}/catalog`),
+  interpret: (proposal: Record<string, unknown>, purposeKind = 'scenario') =>
+    req<InterpretResult>('POST', `${ACQ}/interpret`,
+      { proposal, purpose_kind: purposeKind }),
+  createJob: (proposal: Record<string, unknown>, purposeKind = 'scenario') =>
+    req<AcquisitionJob>('POST', `${ACQ}/jobs`, { proposal, purpose_kind: purposeKind }),
+  jobs: (status = '') =>
+    req<AcquisitionJob[]>('GET', `${ACQ}/jobs${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  job: (jobId: string) =>
+    req<AcquisitionJob & { raw_objects: Record<string, unknown>[]; history: Record<string, unknown>[] }>(
+      'GET', `${ACQ}/jobs/${encodeURIComponent(jobId)}`),
+  discover: (jobId: string) =>
+    req<AcquisitionJob>('POST', `${ACQ}/jobs/${encodeURIComponent(jobId)}/discover`),
+  dryRun: (jobId: string, body: { mapping_proposal?: Record<string, unknown>[]; as_of?: string } = {}) =>
+    req<{ job: AcquisitionJob; report: DryRunReport }>(
+      'POST', `${ACQ}/jobs/${encodeURIComponent(jobId)}/dry-run`, body),
+  apply: (jobId: string, asOf = '') =>
+    req<{ job: AcquisitionJob; report: ApplyReport }>(
+      'POST', `${ACQ}/jobs/${encodeURIComponent(jobId)}/apply`, { as_of: asOf }),
+  stagedRows: (jobId: string, limit = 200) =>
+    req<StagedRows>('GET', `${ACQ}/jobs/${encodeURIComponent(jobId)}/rows?limit=${limit}`),
+  contractProposals: (status = '') =>
+    req<ContractProposal[]>('GET',
+      `${ACQ}/contract-proposals${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  proposeContract: (contractKey: string) =>
+    req<ContractProposal>('POST', `${ACQ}/contract-proposals/${encodeURIComponent(contractKey)}`),
+  decideContract: (proposalId: string, approve: boolean, reason = '') =>
+    req<ContractProposal>('POST',
+      `${ACQ}/contract-proposals/${encodeURIComponent(proposalId)}/decision`,
+      { approve, reason }),
+  setSchedule: (jobId: string, scheduleRule: string, nextRunAt: string) =>
+    req<AcquisitionJob>('POST', `${ACQ}/jobs/${encodeURIComponent(jobId)}/schedule`,
+      { schedule_rule: scheduleRule, next_run_at: nextRunAt }),
+  due: (now = '') =>
+    req<AcquisitionJob[]>('GET', `${ACQ}/due${now ? `?now=${encodeURIComponent(now)}` : ''}`),
+  disable: (jobId: string, reason: string) =>
+    req<AcquisitionJob>('POST', `${ACQ}/jobs/${encodeURIComponent(jobId)}/disable`, { reason }),
+};

@@ -580,6 +580,32 @@ class AcquisitionStore:
             rows = conn.execute(sql, tuple(params)).fetchall()
         return [self._public(dict(r)) for r in rows]
 
+    def set_schedule(self, job_id: str, *, schedule_rule: str = "",
+                     next_run_at: str = "") -> Dict[str, Any]:
+        """정기 갱신 일정. **`ACTIVE` 아닌 작업에는 걸 수 없다**(지시 9).
+
+        ⚠️ 상태 전이가 아니므로 원장에 남기지 않는다 — 일정 변경은 결정이 아니라 운영
+          설정이다. 대신 `ACTIVE` 조건을 UPDATE 에 넣어, 그 사이 꺼진 작업에는 안 걸린다."""
+        self._ready()
+        job = self.get(job_id)
+        if job is None:
+            raise AcquisitionStoreError(f"존재하지 않는 수집 작업입니다: {job_id}")
+        if job["status"] not in am.SCHEDULABLE_STATES:
+            raise AcquisitionStoreError(
+                f"{job['status']} 상태에는 일정을 걸 수 없습니다 — "
+                f"{', '.join(am.SCHEDULABLE_STATES)} 만 스케줄러가 움직입니다.")
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE data_acquisition_jobs SET schedule_rule=?, next_run_at=?, updated_at=? "
+                "WHERE job_id=? AND status=?",
+                (str(schedule_rule or ""), str(next_run_at or ""), _now(), str(job_id),
+                 job["status"]))
+            if cur.rowcount != 1:
+                raise AcquisitionStoreError("그 사이 작업 상태가 바뀌었습니다. 다시 읽으십시오.")
+        out = self.get(job_id)
+        assert out is not None
+        return out
+
     def due_for_refresh(self, *, now: str = "", limit: int = 50) -> List[Dict[str, Any]]:
         """스케줄러가 부를 목록. **`ACTIVE` 만** 돌려준다(지시 9).
 
