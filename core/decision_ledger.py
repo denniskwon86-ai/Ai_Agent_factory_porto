@@ -65,6 +65,21 @@ EVENT_TYPES = (
     "ENTITY_CLONED",
     "PERMISSION_GRANTED",
     "EXTERNAL_CONNECTION_APPROVED",
+    # [DAO · 2026-09-05] 외부 데이터 수집 작업의 상태 전이. 주체는 `external_connection` 이다.
+    #   ⚠️ `EXTERNAL_CONNECTION_APPROVED` 를 재사용하지 않는 이유: 그것은 **원천을 쓰기로 한
+    #     결정**(이 출처의 값을 회사 계획에 쓴다)이고, 아래 `..._APPROVED` 는 **이번 수집
+    #     계획을 적용하기로 한 결정**이다. 둘을 한 이름으로 접으면 "원천을 승인한 적 없는데
+    #     승인 기록이 있다" 가 되고, 감사에서 그 차이를 되짚을 수 없다.
+    #   ★ 상태 → 사건 이름의 대응표는 `external_intelligence.acquisition_store` 한 곳에만 둔다.
+    "DATA_ACQUISITION_REQUESTED",
+    "DATA_ACQUISITION_STATE_CHANGED",
+    "DATA_ACQUISITION_REVIEW_REQUESTED",
+    "DATA_ACQUISITION_APPROVED",
+    "DATA_ACQUISITION_ACTIVATED",
+    "DATA_ACQUISITION_FAILED",
+    "DATA_ACQUISITION_NO_DATA",
+    "DATA_ACQUISITION_QUARANTINED",
+    "DATA_ACQUISITION_DISABLED",
     # 파이프라인 연결
     "PROJECT_BOOTSTRAPPED",
     # [CL-1~CL-3 · 2026-08-03] 앱 전달–의사결정–발간 폐쇄루프.
