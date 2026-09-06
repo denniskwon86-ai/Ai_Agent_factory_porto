@@ -37,6 +37,9 @@ from core.external_intelligence.providers import ProviderError, provider_registr
 from core.external_intelligence.raw_store import raw_store
 
 #: Provider 구현을 등록시킨다. import 만으로 등록부에 들어간다.
+#: ⚠️ 새 Provider 를 만들면 **여기에도 추가**한다 — 빠뜨리면 등록부에 없어서
+#:   화면의 원천 목록에 나오지 않고, 요청 관문이 「등록되지 않은 원천」으로 거부한다.
+from core.external_intelligence.providers import ecos as _ecos  # noqa: F401
 from core.external_intelligence.providers import opendart as _opendart  # noqa: F401
 
 WHAT = "외부 데이터 수집"
@@ -279,13 +282,17 @@ async def list_contract_proposals(status: str = "",
 async def propose_contract(contract_key: str, p: Principal = Depends(current_principal)):
     """새 계약을 제안한다. **인증된 키트를 건드리지 않는다.**"""
     assert_can_manage_standard(p)
-    if contract_key.upper() != "PUB-01":
+    #: 계약 키 → 제안 문서를 만드는 규칙. **이 표에 없으면 만들지 않는다** —
+    #: 화면이 임의의 키로 빈 계약을 만들어 내면 그 계약이 무엇인지 아무도 모른다.
+    builders = {"PUB-01": M.pub01_proposal, "EXT-01": M.ext01_public_proposal}
+    builder = builders.get(contract_key.upper())
+    if builder is None:
         raise HTTPException(
             status_code=400,
             detail=(f"{contract_key} 의 제안 문서를 만드는 규칙이 아직 없습니다. "
-                    f"지금은 PUB-01(공개 재무실적)만 제안할 수 있습니다."))
+                    f"지금 제안할 수 있는 것: {', '.join(sorted(builders))}."))
     try:
-        row = acquisition_store.propose_contract(M.pub01_proposal(), proposed_by=_actor(p),
+        row = acquisition_store.propose_contract(builder(), proposed_by=_actor(p),
                                                  tenant_id=_tenant(p))
     except (AcquisitionStoreError, M.MappingError) as exc:
         _err(exc)

@@ -82,9 +82,28 @@ def _rows_for(store, *, contract_key: str, limit: int = 5000) -> List[Dict[str, 
     return list(store.staged_rows(contract_key=contract_key, limit=limit))
 
 
+#: ⚠️⚠️ 계약마다 «기간»·«단위»를 담는 열 이름이 다르다. 이것을 함수 안에 박아 두면
+#:   한 계약에서만 맞고 나머지는 **조용히 빈 값**이 된다(실측: ECOS 를 붙이자 기간과
+#:   단위가 전부 비었다). 그래서 후보 이름을 표로 두고 **찾은 것을 쓴다**.
+_PERIOD_FIELDS = ("bsns_year", "observed_at", "period", "as_of_date")
+_UNIT_FIELDS = ("currency", "unit")
+
+
+def _first_present(payload: Mapping[str, Any], names: Sequence[str],
+                   preferred: str = "") -> str:
+    """지정된 이름이 있으면 그것을, 없으면 후보 중 **실제로 값이 있는** 첫 이름을."""
+    if preferred:
+        return str(payload.get(preferred) or "")
+    for name in names:
+        value = payload.get(name)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
 def answer(store, *, contract_key: str, match: Mapping[str, Any],
            value_field: str = "amount", as_of: str = "",
-           unit_field: str = "currency") -> Answer:
+           unit_field: str = "", period_field: str = "") -> Answer:
     """`match` 를 만족하는 행 하나를 찾아 **값과 출처를 함께** 돌려준다.
 
     ⚠️ 여러 판이 있으면 (정정공시) **가장 최근 발표본**을 고르되, `as_of` 가 있으면 그
@@ -118,8 +137,8 @@ def answer(store, *, contract_key: str, match: Mapping[str, Any],
     return Answer(
         found=True,
         value=payload.get(value_field),
-        unit=str(payload.get(unit_field) or ""),
-        period=str(payload.get("bsns_year") or ""),
+        unit=_first_present(payload, _UNIT_FIELDS, unit_field),
+        period=_first_present(payload, _PERIOD_FIELDS, period_field),
         published_at=chosen["published"],
         vintage_date=str(payload.get("vintage_date") or chosen["published"]),
         source_id=str(payload.get("source_id") or ""),
@@ -140,7 +159,7 @@ def answer(store, *, contract_key: str, match: Mapping[str, Any],
 
 def series(store, *, contract_key: str, match: Mapping[str, Any],
            period_field: str = "bsns_year", value_field: str = "amount",
-           as_of: str = "") -> List[Answer]:
+           as_of: str = "", unit_field: str = "") -> List[Answer]:
     """기간별 값 목록. **각 항목이 자기 출처를 들고 있다.**
 
     ⚠️ 값만 담은 배열을 돌려주지 않는다 — 배열이 되는 순간 출처가 떨어져 나가고,
@@ -151,7 +170,8 @@ def series(store, *, contract_key: str, match: Mapping[str, Any],
     for period in periods:
         found = answer(store, contract_key=contract_key,
                        match=dict(match, **{period_field: period}),
-                       value_field=value_field, as_of=as_of)
+                       value_field=value_field, as_of=as_of,
+                       unit_field=unit_field, period_field=period_field)
         if found.found:
             out.append(found)
     return out

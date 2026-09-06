@@ -393,6 +393,76 @@ def pub01_proposal() -> Dict[str, Any]:
     )
 
 
+#: `EXT-01 환율·금리·물가` 의 도메인 필드. **키트의 EXT-01 과 같은 열 이름**을 쓴다 —
+#: 이름이 갈리면 나중에 두 판을 나란히 놓고 비교할 수 없다.
+EXT01_DOMAIN_FIELDS: Tuple[Dict[str, Any], ...] = (
+    {"name": "observation_id", "type": "string", "required": True,
+     "description": "관측값의 업무 키(통계표:세부항목:시점)"},
+    {"name": "indicator_code", "type": "string", "required": True,
+     "description": "지표 코드(FX_USDKRW · BOK_BASE_RATE · CPI_TOTAL)"},
+    {"name": "stat_code", "type": "string", "required": True, "description": "원천 통계표 코드"},
+    {"name": "item_code", "type": "string", "required": True, "description": "원천 세부항목 코드"},
+    {"name": "item_name", "type": "string", "required": False, "description": "세부항목 이름"},
+    {"name": "observed_at", "type": "string", "required": True, "description": "관측 시점"},
+    {"name": "published_at", "type": "string", "required": False,
+     "description": "발표일 — 원천이 주지 않으면 비운다(받은 날을 적지 않는다)"},
+    {"name": "vintage_date", "type": "string", "required": True,
+     "description": "재현성의 근거(§12.5). 발표일이 없으면 관측 시점을 쓴다"},
+    {"name": "value", "type": "number", "required": True,
+     "description": "값 — 읽지 못한 줄은 적재하지 않는다(0 으로 채우지 않는다)"},
+    {"name": "unit", "type": "string", "required": True, "description": "단위"},
+    {"name": "cycle", "type": "string", "required": False, "description": "공표 주기"},
+    {"name": "source_id", "type": "string", "required": True, "description": "승인된 원천"},
+    {"name": "raw_object_ref", "type": "string", "required": True,
+     "description": "원문 보관소 참조 — 계보의 마지막 고리"},
+    {"name": "trust_grade", "type": "string", "required": True, "description": "원천 등급"},
+)
+
+
+def ext01_public_proposal() -> Dict[str, Any]:
+    """`EXT-01` 을 **공개 통계용으로 고치는 제안**. 인증 키트 파일은 건드리지 않는다.
+
+    ⚠️⚠️ 왜 «고치는 제안» 인가: 키트의 `EXT-01` 은 열 모양이 관측값 그대로인데 분류만
+      `SYNTHETIC`(시연용)이다. ECOS 같은 공표 통계를 그 선언 아래 넣으면 **계약이 거짓말을
+      한다** — 「시연 자료」라고 적힌 그릇에 사실인 값이 담긴다.
+
+    ★ 새 계약 키를 만들지 않는 이유: 라우팅표가 이미 `fx_rate → EXT-01` 이고, 키를 나누면
+      「환율은 어느 계약인가」에 답이 둘이 된다. 담기는 **성격**만 고친다.
+
+    ⚠️ 그래도 정의가 두 곳(키트 파일 · 승인된 제안)에 생긴다. 이것은 **의도된 분리**다 —
+      키트의 것은 시연 데이터셋을, 이쪽은 격리 적재본을 설명한다. 두 저장소가 다르므로
+      한쪽이 다른 쪽을 덮지 않는다(`test_08b` 가 표가 섞이지 않았음을 센다).
+      ★★★ 사람이 「키트에도 공개 자료를 넣겠다」고 정하면 그때는 키트 파일을 고쳐야 하고,
+        이 제안은 폐기해야 한다. 그 결정은 이 코드가 하지 않는다.
+    """
+    return build_contract_proposal(
+        dataset_id="EXT-01", dataset_name="환율·금리·물가(공표 통계)",
+        business_keys=["observation_id"],
+        domain_fields=EXT01_DOMAIN_FIELDS,
+        data_origin=am.ORIGIN_PUBLIC_DISCLOSED,
+        provider_id="ECOS",
+        rationale=(
+            "업무키트의 EXT-01 은 열 모양이 관측값 그대로이지만 분류가 SYNTHETIC(시연용)이다. "
+            "한국은행 공표 통계는 사실이고 PUBLIC_DISCLOSED 이므로, 그 선언 아래 넣으면 계약이 "
+            "말하는 것과 담기는 것이 갈린다. 계약 키는 그대로 두고(라우팅표가 fx_rate → EXT-01) "
+            "담기는 성격만 고친다. ⚠️ 이 계약은 격리 적재본을 설명하며, 키트의 시연 데이터셋을 "
+            "대체하지 않는다 — 두 저장소는 다른 곳이다."),
+    )
+
+
+def observation_row_id(row: Mapping[str, Any]) -> str:
+    """`EXT-01` 의 업무 키. 통계표·세부항목·시점이 같으면 같은 관측값이다.
+
+    ⚠️ 원천이 값을 정정하면 같은 키가 된다 — 관측값은 공시와 달리 «접수번호» 축이 없다.
+      그래서 정정은 **덮어쓰기가 아니라 거부**로 드러난다(중복 적재 방지 인덱스가 잡는다).
+      정정을 반영하려면 사람이 판단해야 한다."""
+    parts = [str(row.get(k) or "") for k in ("stat_code", "item_code", "observed_at")]
+    if not all(parts):
+        raise MappingError(
+            "업무 키를 만들 수 없습니다 — stat_code·item_code·observed_at 가 필요합니다.")
+    return ":".join(parts)
+
+
 def disclosure_row_id(row: Mapping[str, Any]) -> str:
     """`PUB-01` 의 업무 키. **정정공시가 다른 행이 되도록** 접수번호를 포함한다.
 

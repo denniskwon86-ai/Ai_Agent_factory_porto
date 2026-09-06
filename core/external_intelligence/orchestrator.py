@@ -89,6 +89,30 @@ def failure_kind_of(exc: Exception) -> str:
     return am.FAILURE_POLICY
 
 
+def assert_origin_fits(contract: Mapping[str, Any], row_origin: str, *,
+                       contract_key: str) -> None:
+    """★★★ 계약이 **말하는 성격**과 들어올 행의 성격이 같은지.
+
+    ⚠️⚠️ 이 검사가 없으면 시연용으로 선언된 계약(`data_class: SYNTHETIC`)에 공개 통계가
+      들어가고, 그 계약을 읽는 쪽은 **자기가 아는 뜻으로** 읽는다. 「시연 자료」라고 적힌
+      그릇에 사실인 값이 담기면 아무도 그것을 신뢰하지 않거나, 반대로 시연 자료를 사실로
+      읽는다 — 어느 쪽이든 계약이 거짓말을 하게 된다.
+
+    ★ 업무키트의 `EXT-01`(환율·금리·물가)이 실제로 그 경우다: 열 모양은 관측값 그대로인데
+      분류는 `SYNTHETIC` 이다. ECOS 를 붙이려면 **사람이 계약을 고쳐야** 한다."""
+    declared = str((contract.get("classification") or {}).get("data_origin") or "")
+    incoming = str(row_origin or "")
+    if not declared:
+        raise OrchestrationError(
+            f"{contract_key} 계약이 자료 성격을 선언하지 않았습니다 — 무엇이 담기는지 "
+            f"말하지 않는 계약에는 넣지 않습니다.")
+    if declared != incoming:
+        raise OrchestrationError(
+            f"{contract_key} 계약은 «{declared}» 를 담는다고 선언했는데 이 원천은 "
+            f"«{incoming}» 를 냅니다. 억지로 넣지 않습니다 — 계약을 고쳐 승인하거나 "
+            f"다른 계약을 쓰십시오.")
+
+
 @dataclass(frozen=True)
 class StageResult:
     name: str
@@ -301,6 +325,11 @@ class AcquisitionOrchestrator:
                 f"{contract_key or '(대상 계약 없음)'} 이 아직 승인되지 않았습니다. "
                 f"계약 제안을 먼저 승인하십시오 — 승인 전에는 적재 대상이 될 수 없습니다.")
 
+        pid = str(job.get("provider_id") or "")
+        assert_origin_fits(approved.get("document") or {},
+                           self._provider(pid).describe().data_origin,
+                           contract_key=contract_key)
+
         self.store.transition(job_id, am.APPLYING, actor_id=actor_id)
         stages: List[StageResult] = []
         pid = str(job.get("provider_id") or "")
@@ -470,10 +499,18 @@ class AcquisitionOrchestrator:
             return tuple(dict(r) for r in rows), ()
         return dropper(rows, as_of)
 
-    @staticmethod
-    def _business_key(row: Mapping[str, Any], contract_key: str) -> str:
-        if contract_key == "PUB-01":
-            return M.disclosure_row_id(row)
+    #: 계약별 업무 키 규칙. **이 표 하나만 있다** — 호출부가 각자 만들면 같은 행이
+    #: 다른 키를 얻고, 중복 적재 방지 인덱스가 아무것도 막지 못한다.
+    _BUSINESS_KEY_RULES = {
+        "PUB-01": M.disclosure_row_id,
+        "EXT-01": M.observation_row_id,
+    }
+
+    @classmethod
+    def _business_key(cls, row: Mapping[str, Any], contract_key: str) -> str:
+        rule = cls._BUSINESS_KEY_RULES.get(contract_key)
+        if rule is not None:
+            return rule(row)
         #: 계약별 키 규칙이 없으면 내용 해시로 둔다 — **같은 내용은 같은 행**이 되어
         #: 중복 적재를 막는다. ⚠️ 키 규칙이 생기면 그것으로 바꾼다.
         blob = "|".join(f"{k}={row.get(k)}" for k in sorted(row) if not k.startswith("_"))
