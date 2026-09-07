@@ -195,6 +195,57 @@ def _norm_corp(n: str) -> str:
     return s
 
 
+def _cands(n: str) -> set:
+    """
+    이름 비교 후보들. 표기가 여러 갈래라 하나로 모을 수 없다.
+
+    부문명은 「SKC」인데 공정위는 「에스케이씨(주)」로 쓴다. 알파벳 한 글자를
+    한글로 적은 것이라, **끝에 오는 한 글자만** 되돌린다 — 중간까지 바꾸면
+    「에스케이이노베이션」의 「이」가 E 로 변해 망가진다.
+    """
+    n = re.sub(r'\(\s*(주|註)\s*\d+\s*\)', '', n or '')      # 「SK스퀘어(주1)」의 각주
+    base = _norm_corp(n)
+    out = {base}
+    for ko, en in [('씨', 'C'), ('케이', 'K'), ('에스', 'S'), ('디', 'D'),
+                   ('엠', 'M'), ('아이', 'I'), ('오', 'O'), ('엘', 'L')]:
+        if base.endswith(ko) and len(base) > len(ko):
+            out.add(base[:-len(ko)] + en)
+    return {c for c in out if c}
+
+
+def affiliate_index(rows: list[dict]) -> dict:
+    """
+    공정위 소속회사 목록 → 조인용 색인. `{기업집단: {정규화된이름: (A, B, B2단)}}`
+
+    rows 는 `fetch_ftc.py` 가 준 판정 결과다(기업집단명·소속회사명·A세분류…).
+    """
+    idx = {}
+    for r in rows:
+        g = _norm_corp(r.get('기업집단명', ''))
+        val = (r.get('A세분류', ''), r.get('B1주업종', ''), r.get('B1_2단', ''))
+        if not any(val):
+            continue
+        for c in _cands(r.get('소속회사명', '')):
+            idx.setdefault(g, {}).setdefault(c, val)
+    return idx
+
+
+def _affiliate(group: str, seg: str, index: dict):
+    """
+    부문명이 계열사명이면 그 법인의 판정을 가져온다.
+
+    **같은 기업집단 안에서만 찾는다.** 순수 지주회사의 부문은 실제로 그 집단의
+    계열사이고(SK 의 부문이 SK텔레콤·SKC 다), 후보가 좁아 오탐도 줄어든다.
+    """
+    pool = index.get(_norm_corp(group)) if index else None
+    if not pool:
+        return None, None
+    for c in _cands(seg):
+        if c in pool:
+            return c, pool[c]
+    return None, None
+
+
 def _abbrev(parent_name: str, seg: str):
     """회사 고유 약어를 먼저 본다"""
     pk = _norm_corp(parent_name)
@@ -265,12 +316,15 @@ def is_region(name: str) -> bool:
     return bool(지역_패턴.match((name or '').strip()))
 
 
-def classify_segment(name: str, parent: dict | None = None) -> dict:
+def classify_segment(name: str, parent: dict | None = None,
+                     affiliates: dict | None = None) -> dict:
     """
     세그먼트 하나를 판정한다.
 
-    name   : 세그먼트명 (예: '석유화학', 'DS부문', '할인점')
-    parent : 모법인의 판정 결과 (ksic_rules.classify 의 반환). 상속에 쓴다
+    name       : 세그먼트명 (예: '석유화학', 'DS부문', '할인점')
+    parent     : 모법인의 판정 결과 (ksic_rules.classify 의 반환). 상속에 쓴다.
+                 `_법인명` 은 약어 사전에, `_기업집단` 은 계열사 조인에 쓴다
+    affiliates : `affiliate_index()` 가 만든 계열사 색인 (없으면 조인을 건너뛴다)
     """
     nm = (name or '').strip()
     p = parent or {}
@@ -310,6 +364,17 @@ def classify_segment(name: str, parent: dict | None = None) -> dict:
                 out['A세분류'] = a
             out['판정근거'] = f'키워드 「{kw}」' + ('' if a else ' (A 는 모법인 상속)')
             return out
+
+    # 이름으로 판정이 안 되면 **계열사 조인**을 본다. 순수 지주회사의 부문은
+    # 계열사명이라 키워드가 걸리지 않는다. 이름 판정을 먼저 두는 이유는,
+    # 계열사 조인이 신고 KSIC 에 의존해서다 — SKC 는 지주회사로 신고했지만
+    # 실제 사업은 화학·소재다. 키워드가 잡을 수 있으면 그게 더 정확하다
+    hit, val = _affiliate(p.get('_기업집단', ''), nm, affiliates or {})
+    if val:
+        a, b, t = val
+        out.update({'A세분류': a or out['A세분류'], 'B1주업종': b, 'B1_2단': t,
+                    '판정근거': f'계열사 「{hit}」'})
+        return out
 
     out['판정근거'] = '상속 — 키워드 없음'
     return out

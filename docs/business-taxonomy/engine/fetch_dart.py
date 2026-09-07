@@ -19,6 +19,7 @@ DART 사업보고서 → 영업부문(세그먼트) 수집기
 - DART 서버는 DH 키가 작아 Python 기본 SSL 이 거부한다. `SECLEVEL=1` 로 낮춘다
 - 사업보고서 원문은 회사당 수 MB 다. 캐시를 쓴다
 - **서식이 회사마다 다르다.** 표를 못 찾으면 빈 리스트를 돌려주고, 그 회사는 법인 1건으로 남는다
+- `to_ksic()` 로 업종코드도 얻는다. 공정위에 없는 비집단 상장사의 유일한 KSIC 경로다
 """
 from __future__ import annotations
 import io
@@ -64,6 +65,43 @@ def _get(path: str, **params) -> bytes:
 
 def _get_json(path: str, **params) -> dict:
     return json.loads(_get(path, **params).decode('utf-8'))
+
+
+# ────────────────────────────────────────────── 업종코드
+
+# KSIC 대분류 문자는 **앞 2자리 숫자로 완전히 결정된다.** 체계가 그렇게 짜여 있다.
+# DART 는 대분류 문자만 빼고 숫자는 그대로 주므로 되돌릴 수 있다
+_대분류 = [(1, 3, 'A'), (5, 8, 'B'), (10, 34, 'C'), (35, 35, 'D'), (36, 39, 'E'),
+           (41, 42, 'F'), (45, 47, 'G'), (49, 52, 'H'), (55, 56, 'I'), (58, 63, 'J'),
+           (64, 66, 'K'), (68, 68, 'L'), (70, 73, 'M'), (74, 76, 'N'), (84, 84, 'O'),
+           (85, 85, 'P'), (86, 87, 'Q'), (90, 91, 'R'), (94, 96, 'S'), (97, 98, 'T'),
+           (99, 99, 'U')]
+
+
+def to_ksic(induty_code: str) -> str | None:
+    """
+    DART `induty_code` → KSIC. 대분류 문자를 앞 2자리로 복원한다.
+
+        264   → C264      (삼성전자)
+        20111 → C20111    (LG화학)
+        471   → G471      (이마트)
+        58211 → J58211    (펄어비스)
+
+    **자릿수는 회사가 신고한 수준을 따른다**(3~5자리). 공정위 KSIC 와 대조하면
+    중분류(앞 2자리)는 20/22 가 맞았고, 세분류는 신고 수준이 달라 갈린다.
+    그래서 **B 축 2단은 이 값만으로 단정하지 않는 게 안전하다.**
+
+    공정위와 어긋난 2건 중 SK이노베이션은 DART 가 더 정확했다 —
+    DART `C192`(석유정제)가 공정위 `K6499`(지주회사)보다 사업 실질에 가깝다.
+    """
+    c = (induty_code or '').strip()
+    if not c.isdigit() or len(c) < 2:
+        return None
+    n = int(c[:2])
+    for lo, hi, ch in _대분류:
+        if lo <= n <= hi:
+            return ch + c
+    return None
 
 
 # ────────────────────────────────────────────── 고유번호
@@ -291,10 +329,11 @@ def fetch(code: str) -> dict:
         'corp_name': comp.get('corp_name'),
         'stock_code': comp.get('stock_code'),
         'corp_cls': comp.get('corp_cls'),
-        # ⚠️ DART 의 induty_code 는 **대분류 문자가 없고 자릿수도 제각각**이다
-        #    (삼성전자 264 · LG화학 20111 · 이마트 471). 판정에 쓰지 말고
-        #    공정위의 5자리 코드(C2651 형식)를 쓴다. 여기서는 참고로만 싣는다
+        # DART 의 induty_code 는 대분류 문자가 없고 자릿수도 제각각이지만
+        # (삼성전자 264 · LG화학 20111 · 이마트 471) **되돌릴 수 있다** —
+        # to_ksic() 참조. 공정위에 없는 비집단 상장사는 이게 유일한 경로다
         'induty_code': comp.get('induty_code'),
+        'ksic': to_ksic(comp.get('induty_code')),
         'jurir_no': comp.get('jurir_no'),         # 공정위 데이터와 조인하는 키
         'report': rpt.get('report_nm') if rpt else None,
         'rcept_no': rpt.get('rcept_no') if rpt else None,
