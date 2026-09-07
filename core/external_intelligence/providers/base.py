@@ -192,6 +192,11 @@ class NormalizedBatch:
     rows: Tuple[Mapping[str, Any], ...] = ()
     rejected: Tuple[RejectedRow, ...] = ()
     source_row_count: int = 0
+    #: ★★★ **원천이 실제로 준 필드 이름들.** 정규화된 행이 아니라 원문의 것이다.
+    #:   ⚠️ 이것이 없으면 원천 스키마 변경을 볼 수 없다 — 명시적 변환기가 새 열을
+    #:     조용히 버리기 때문에, 정규화 결과만 보면 원천이 바뀌어도 아무 차이가 없다.
+    #:     (실측: 그래서 「새 필드 차단」 관문이 장식이었다.)
+    source_fields: Tuple[str, ...] = ()
 
     @property
     def accounted(self) -> bool:

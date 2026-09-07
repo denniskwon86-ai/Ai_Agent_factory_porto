@@ -430,7 +430,10 @@ class AcquisitionOrchestrator:
                                   "dataset_ref": checkpoint.dataset_ref,
                                   "cursor": checkpoint.cursor,
                                   "covered_from": checkpoint.covered_from,
-                                  "covered_to": checkpoint.covered_to},
+                                  "covered_to": checkpoint.covered_to,
+                                  #: ★★★ 이번에 원천이 준 필드. 다음 정기 갱신이
+                                  #:   **이것과 비교해** 스키마 변경을 알아챈다.
+                                  "source_fields": list(batch.source_fields)},
                    "dry_run": dict(dict(job.get("dry_run") or {}), apply=report.as_dict())})
         return job, report
 

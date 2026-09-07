@@ -35,6 +35,7 @@ from core.external_intelligence.orchestrator import (AcquisitionOrchestrator,
                                                      OrchestrationError)
 from core.external_intelligence.providers import ProviderError, provider_registry
 from core.external_intelligence.raw_store import raw_store
+from core.external_intelligence.refresh_runner import BLOCK_REASONS as _BLOCK_REASONS
 
 #: Provider 구현을 등록시킨다. import 만으로 등록부에 들어간다.
 #: ⚠️ 새 Provider 를 만들면 **여기에도 추가**한다 — 빠뜨리면 등록부에 없어서
@@ -105,6 +106,9 @@ class ContractDecisionRequest(BaseModel):
 class ScheduleRequest(BaseModel):
     schedule_rule: str = ""
     next_run_at: str = ""
+    #: ★★★ 사람 승인 없이 적용해도 되는가. **기본은 아니다** — 켜는 것 자체가 결정이고
+    #:   원장에 남는다. 켜더라도 「처음 승인한 것과 같은 모양일 때만」 적용된다.
+    auto_apply: Optional[bool] = None
 
 
 class DisableRequest(BaseModel):
@@ -351,10 +355,33 @@ async def set_schedule(job_id: str, req: ScheduleRequest,
         raise HTTPException(status_code=404, detail="존재하지 않는 수집 작업입니다.")
     try:
         job = acquisition_store.set_schedule(job_id, schedule_rule=req.schedule_rule,
-                                             next_run_at=req.next_run_at)
+                                             next_run_at=req.next_run_at,
+                                             auto_apply=req.auto_apply,
+                                             actor_id=_actor(p))
     except AcquisitionStoreError as exc:
         _err(exc, status=409)
     return {"status": "success", "data": job}
+
+
+@router.get("/refresh/preview")
+async def refresh_preview(now: str = "", limit: int = 25,
+                          p: Principal = Depends(current_principal)):
+    """운영 스케줄러가 **무엇을 돌게 될지** 미리 본다. 아무것도 바꾸지 않는다.
+
+    ⚠️ 실제 실행은 이 API 가 아니라 `scripts/run_acquisition_refresh.py` 다 —
+      웹 요청으로 돌리면 워커 수만큼 같은 수집이 돈다(지시 9)."""
+    assert_can_manage_standard(p)
+    due = acquisition_store.due_for_refresh(now=now, limit=limit)
+    return {"status": "success", "data": {
+        "considered": len(due),
+        "jobs": [{"job_id": j["job_id"], "provider_id": j["provider_id"],
+                  "contract_key": j["target_contract_key"],
+                  "next_run_at": j["next_run_at"], "schedule_rule": j["schedule_rule"],
+                  "auto_apply": j["auto_apply"]} for j in due],
+        "notice": ("실행은 운영 스케줄러가 `scripts/run_acquisition_refresh.py` 를 부르는 "
+                   "것으로 합니다 — 프로세스 안에 타이머를 두지 않습니다."),
+        "block_reasons": dict(_BLOCK_REASONS),
+    }}
 
 
 @router.get("/due")

@@ -17,7 +17,8 @@ import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../desig
 import { FormField } from '../design/DataFoundationShell';
 import {
   acquisitionApi, type AcquisitionCatalog, type AcquisitionJob, type ApplyReport,
-  type ContractProposal, type DryRunReport, type InterpretResult, type StagedRows,
+  type ContractProposal, type DryRunReport, type InterpretResult, type RefreshPreview,
+  type StagedRows,
 } from '../lib/externalIntelligenceApi';
 
 const STATE_LABEL: Record<string, string> = {
@@ -54,6 +55,7 @@ export function AcquisitionPanel({ canManage }: { canManage: boolean }) {
   const [report, setReport] = useState<DryRunReport | null>(null);
   const [applied, setApplied] = useState<ApplyReport | null>(null);
   const [staged, setStaged] = useState<StagedRows | null>(null);
+  const [refresh, setRefresh] = useState<RefreshPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -67,6 +69,9 @@ export function AcquisitionPanel({ canManage }: { canManage: boolean }) {
     try {
       setProposals(await acquisitionApi.contractProposals());
     } catch { /* 제안 목록은 없어도 화면이 서야 한다 */ }
+    try {
+      setRefresh(await acquisitionApi.refreshPreview());
+    } catch { /* 관리자만 볼 수 있다 — 없어도 화면이 서야 한다 */ }
   }, []);
 
   useEffect(() => { void reload(); }, [reload]);
@@ -120,6 +125,12 @@ export function AcquisitionPanel({ canManage }: { canManage: boolean }) {
   const doProposeContract = (key: string) => run(async () => {
     await acquisitionApi.proposeContract(key);
     setProposals(await acquisitionApi.contractProposals());
+  });
+
+  const doToggleAuto = (job: AcquisitionJob, on: boolean) => run(async () => {
+    await acquisitionApi.setSchedule(job.job_id, job.schedule_rule || 'daily',
+      job.next_run_at, on);
+    await reload();
   });
 
   const doDecide = (proposalId: string, approve: boolean) => run(async () => {
@@ -396,6 +407,56 @@ export function AcquisitionPanel({ canManage }: { canManage: boolean }) {
           {/* ★★★ 서버가 준 고지를 그대로 보여 준다. */}
           <div className="afs-banner" role="note" style={{ fontSize: 12 }}>{staged.notice}</div>
         </>}
+
+        {/* ── 정기 갱신 ──────────────────────────────────────────── */}
+        {refresh && <>
+          <h3 style={{ fontSize: 14, margin: '18px 0 8px' }}>정기 갱신</h3>
+          {/* ★★★ 실행은 화면이 아니라 운영 스케줄러가 한다 — 서버가 준 문구를 지우지 않는다. */}
+          <div className="afs-banner" role="note" style={{ fontSize: 12 }}>{refresh.notice}</div>
+          {refresh.considered === 0
+            ? <div style={{ fontSize: 13, color: '#666', marginTop: 6 }}>
+              지금 돌 차례인 수집 작업이 없습니다.</div>
+            : <div className="afs-table-wrap" style={{ marginTop: 8 }}><table className="afs-table">
+              <thead><tr>
+                <th>작업</th><th>원천</th><th>계약</th><th>다음 실행</th><th>자동 적용</th>
+              </tr></thead>
+              <tbody>{refresh.jobs.map((j) => (
+                <tr key={j.job_id}>
+                  <td style={{ fontSize: 12 }}>{j.job_id}</td>
+                  <td>{j.provider_id}</td>
+                  <td>{j.contract_key}</td>
+                  <td style={{ fontSize: 12 }}>{j.next_run_at || '-'}</td>
+                  <td>{j.auto_apply
+                    ? <span style={{ color: '#8a6d1f' }}>켬 — 모양이 같을 때만</span>
+                    : <span style={{ color: '#666' }}>끔 — 사람이 검토</span>}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>}
+          {/* 자동 적용을 막는 사유는 서버가 준 닫힌 목록을 그대로 보여 준다. */}
+          {Object.keys(refresh.block_reasons).length > 0 && (
+            <details style={{ fontSize: 12, marginTop: 8 }}>
+              <summary>자동 적용이 막히는 경우</summary>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                {Object.entries(refresh.block_reasons).map(([code, why]) => (
+                  <li key={code}><code>{code}</code> — {why}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>}
+
+        {/* 선택한 작업의 자동 적용 전환 — 데이터 관리자만 */}
+        {canManage && selected && selected.status === 'ACTIVE' && (
+          <div style={{ fontSize: 12, marginTop: 8 }}>
+            <button className="ghost-button" disabled={busy}
+              onClick={() => doToggleAuto(selected, !selected.auto_apply)}>
+              {selected.auto_apply ? '자동 적용 끄기' : '자동 적용 켜기'}
+            </button>
+            <span style={{ marginLeft: 8, color: '#8a6d1f' }}>
+              켜도 원천·계약·스키마가 처음 승인한 것과 같을 때만 적용됩니다.
+            </span>
+          </div>
+        )}
 
         {selected && <div style={{ fontSize: 12, color: '#666', marginTop: 10 }}>
           선택된 작업: {STATE_LABEL[selected.status] || selected.status}

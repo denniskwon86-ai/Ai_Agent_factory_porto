@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS data_acquisition_jobs (
     failure_kind     TEXT NOT NULL DEFAULT '',
     schedule_rule    TEXT NOT NULL DEFAULT '',
     next_run_at      TEXT NOT NULL DEFAULT '',
+    -- ★★★ 정기 갱신이 사람 승인 없이 적용되어도 되는가. **기본은 아니다.**
+    --   켜더라도 「처음 승인한 것과 같은 모양일 때만」 적용된다(refresh_runner 의 관문).
+    auto_apply       INTEGER NOT NULL DEFAULT 0,
     last_success_at  TEXT NOT NULL DEFAULT '',
     last_event_id    TEXT NOT NULL DEFAULT '',
     created_at       TEXT NOT NULL,
@@ -200,13 +203,28 @@ class AcquisitionStore:
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
+    #: 이미 만들어진 DB 에 뒤늦게 붙는 열. `CREATE TABLE IF NOT EXISTS` 는 기존 표를
+    #: 고치지 않으므로, **없으면 더한다**. 있으면 조용히 넘어간다.
+    _MIGRATIONS = (
+        ("data_acquisition_jobs", "auto_apply", "INTEGER NOT NULL DEFAULT 0"),
+    )
+
     def _ready(self) -> None:
         if self._ready_done:
             return
         with self._lock:
             with self._connect() as conn:
                 conn.executescript(_DDL)
+                self._migrate(conn)
             self._ready_done = True
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        for table, column, decl in self._MIGRATIONS:
+            existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            if not existing:
+                continue                    # 표가 아직 없다 — DDL 이 만든다
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     def ledger(self):
         if self._ledger is None:
@@ -581,11 +599,13 @@ class AcquisitionStore:
         return [self._public(dict(r)) for r in rows]
 
     def set_schedule(self, job_id: str, *, schedule_rule: str = "",
-                     next_run_at: str = "") -> Dict[str, Any]:
+                     next_run_at: str = "", auto_apply: Optional[bool] = None,
+                     actor_id: str = "") -> Dict[str, Any]:
         """정기 갱신 일정. **`ACTIVE` 아닌 작업에는 걸 수 없다**(지시 9).
 
-        ⚠️ 상태 전이가 아니므로 원장에 남기지 않는다 — 일정 변경은 결정이 아니라 운영
-          설정이다. 대신 `ACTIVE` 조건을 UPDATE 에 넣어, 그 사이 꺼진 작업에는 안 걸린다."""
+        ⚠️ 일정 자체는 상태 전이가 아니라 운영 설정이라 원장에 남기지 않는다. 그러나
+          **`auto_apply` 를 켜는 것은 결정이다** — 「앞으로 사람 없이 적용해도 된다」이므로
+          원장에 남긴다. 누가 켰는지 없으면 나중에 「왜 사람 없이 들어왔지?」에 답할 수 없다."""
         self._ready()
         job = self.get(job_id)
         if job is None:
@@ -594,12 +614,28 @@ class AcquisitionStore:
             raise AcquisitionStoreError(
                 f"{job['status']} 상태에는 일정을 걸 수 없습니다 — "
                 f"{', '.join(am.SCHEDULABLE_STATES)} 만 스케줄러가 움직입니다.")
+        turning_on = bool(auto_apply) and not bool(job.get("auto_apply"))
+        if turning_on and not str(actor_id or "").strip():
+            raise AcquisitionStoreError(
+                "자동 적용을 켜려면 누가 켰는지가 필요합니다 — 사람 없이 들어온 자료의 "
+                "책임자가 없으면 나중에 되짚을 수 없습니다.")
+        if auto_apply is not None and bool(auto_apply) != bool(job.get("auto_apply")):
+            #: ★ 켜고 끄는 것 **둘 다** 결정이다. 끄는 것도 남긴다.
+            self.ledger().append(
+                event_type="DATA_ACQUISITION_STATE_CHANGED",
+                subject_type=LEDGER_SUBJECT_TYPE, subject_id=str(job_id),
+                actor_type="user", actor_id=str(actor_id or "(미상)"),
+                decision=f"자동 적용 {'켬' if auto_apply else '끔'}",
+                rationale=(f"일정 {schedule_rule or '(없음)'} · 다음 {next_run_at or '(없음)'}"),
+                tenant_id=str(job.get("tenant_id") or "tenant_default"))
+
         with self._lock, self._connect() as conn:
             cur = conn.execute(
-                "UPDATE data_acquisition_jobs SET schedule_rule=?, next_run_at=?, updated_at=? "
-                "WHERE job_id=? AND status=?",
-                (str(schedule_rule or ""), str(next_run_at or ""), _now(), str(job_id),
-                 job["status"]))
+                "UPDATE data_acquisition_jobs SET schedule_rule=?, next_run_at=?, "
+                "auto_apply=?, updated_at=? WHERE job_id=? AND status=?",
+                (str(schedule_rule or ""), str(next_run_at or ""),
+                 1 if (job.get("auto_apply") if auto_apply is None else auto_apply) else 0,
+                 _now(), str(job_id), job["status"]))
             if cur.rowcount != 1:
                 raise AcquisitionStoreError("그 사이 작업 상태가 바뀌었습니다. 다시 읽으십시오.")
         out = self.get(job_id)
@@ -630,6 +666,7 @@ class AcquisitionStore:
         out = dict(row)
         for key in ("request_json", "plan_json", "dry_run_json", "checkpoint_json"):
             out[key[:-5]] = _loads(out.pop(key, "{}"))
+        out["auto_apply"] = bool(out.get("auto_apply"))
         out["is_schedulable"] = out.get("status") in am.SCHEDULABLE_STATES
         out["awaits_human"] = out.get("status") in am.HUMAN_GATE_STATES
         return out

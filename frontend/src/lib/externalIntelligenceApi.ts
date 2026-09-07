@@ -350,6 +350,8 @@ export type AcquisitionJob = {
   failure_kind: string;
   schedule_rule: string;
   next_run_at: string;
+  /** 사람 승인 없이 적용해도 되는가. 켜져 있어도 «처음 승인한 것과 같은 모양일 때만» 적용된다. */
+  auto_apply: boolean;
   last_success_at: string;
   is_schedulable: boolean;
   awaits_human: boolean;
@@ -424,6 +426,18 @@ export type StagedRows = {
   notice: string;
 };
 
+export type RefreshPreview = {
+  considered: number;
+  jobs: {
+    job_id: string; provider_id: string; contract_key: string;
+    next_run_at: string; schedule_rule: string; auto_apply: boolean;
+  }[];
+  /** ★ 실행은 화면이 아니라 운영 스케줄러가 한다 — 이 문구를 지우지 않는다. */
+  notice: string;
+  /** 자동 적용을 막는 사유의 닫힌 목록. 화면이 문구를 지어내지 않게 서버가 준다. */
+  block_reasons: Record<string, string>;
+};
+
 const ACQ = '/api/v1/external/acquisition';
 
 export const acquisitionApi = {
@@ -457,9 +471,14 @@ export const acquisitionApi = {
     req<ContractProposal>('POST',
       `${ACQ}/contract-proposals/${encodeURIComponent(proposalId)}/decision`,
       { approve, reason }),
-  setSchedule: (jobId: string, scheduleRule: string, nextRunAt: string) =>
+  setSchedule: (jobId: string, scheduleRule: string, nextRunAt: string,
+                autoApply?: boolean) =>
     req<AcquisitionJob>('POST', `${ACQ}/jobs/${encodeURIComponent(jobId)}/schedule`,
-      { schedule_rule: scheduleRule, next_run_at: nextRunAt }),
+      { schedule_rule: scheduleRule, next_run_at: nextRunAt, auto_apply: autoApply }),
+  /** 운영 스케줄러가 **무엇을 돌게 될지** 미리 본다. 실행은 이 API 가 아니다. */
+  refreshPreview: (now = '') =>
+    req<RefreshPreview>('GET',
+      `${ACQ}/refresh/preview${now ? `?now=${encodeURIComponent(now)}` : ''}`),
   due: (now = '') =>
     req<AcquisitionJob[]>('GET', `${ACQ}/due${now ? `?now=${encodeURIComponent(now)}` : ''}`),
   disable: (jobId: string, reason: string) =>

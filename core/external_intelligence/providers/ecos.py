@@ -330,9 +330,11 @@ class EcosProvider(B.Provider):
                 "unit": str(item.get("UNIT_NAME") or parts.get("unit") or ""),
                 "cycle": str(parts.get("cycle") or ""),
             })
+        seen = sorted({k for it in rows_in for k in it})
         return B.NormalizedBatch(provider_id=self.descriptor.provider_id,
                                  contract_key=CONTRACT_KEY, rows=tuple(rows),
-                                 rejected=tuple(rejected), source_row_count=len(rows_in))
+                                 rejected=tuple(rejected), source_row_count=len(rows_in),
+                                 source_fields=tuple(seen))
 
     # ── ⑥ 검증 — 순수 ──────────────────────────────────────────────────
     def validate(self, batch: B.NormalizedBatch) -> B.ValidationReport:

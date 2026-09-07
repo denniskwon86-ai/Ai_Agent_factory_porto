@@ -281,9 +281,11 @@ class OpenDartProvider(B.Provider):
                                                   item, ensure_ascii=False)[:100]))
                 continue
             rows.append(row)
+        seen = sorted({k for it in items if isinstance(it, dict) for k in it})
         return B.NormalizedBatch(provider_id=self.descriptor.provider_id,
                                  contract_key=CONTRACT_KEY, rows=tuple(rows),
-                                 rejected=tuple(rejected), source_row_count=len(items))
+                                 rejected=tuple(rejected), source_row_count=len(items),
+                                 source_fields=tuple(seen))
 
     # ── ⑥ 검증 — 순수 ──────────────────────────────────────────────────
     def validate(self, batch: B.NormalizedBatch) -> B.ValidationReport:
