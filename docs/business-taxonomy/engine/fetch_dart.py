@@ -104,6 +104,56 @@ def to_ksic(induty_code: str) -> str | None:
     return None
 
 
+# ────────────────────────────────────────────── 법인등록번호 조인
+
+def _jurir(v: str) -> str:
+    """법인등록번호를 숫자만 남긴다. 양쪽 다 13자리지만 표기가 흔들릴 수 있다"""
+    return re.sub(r'\D', '', v or '')
+
+
+def jurir_index(ftc_rows: list[dict]) -> dict:
+    """공정위 소속회사 목록 → `{법인등록번호: 행}`"""
+    idx = {}
+    for r in ftc_rows:
+        k = _jurir(r.get('법인등록번호'))
+        if len(k) == 13:
+            idx.setdefault(k, r)
+    return idx
+
+
+_지주코드 = re.compile(r'^(K6499|M7151|K64992)')
+
+
+def resolve_ksic(corp: dict, ftc_idx: dict | None = None) -> dict:
+    """
+    회사 하나의 KSIC 를 정한다. **법인등록번호로 두 출처를 잇는다.**
+
+    corp    : `fetch()` 또는 `company.json` 의 반환 (jurir_no · induty_code 필요)
+    ftc_idx : `jurir_index()` 가 만든 색인
+
+    이름 조인은 표기 때문에 새는 데가 많다(「에스케이씨(주)」와 「SKC」).
+    법인등록번호는 13자리 숫자라 그런 문제가 없다.
+
+    **공정위를 기본으로 쓴다** — 자릿수가 고르고 재무·종업원수까지 온다.
+    다만 공정위가 **지주회사 코드**(K6499·M7151)인데 DART 가 사업 코드를 주면
+    DART 를 쓴다. SK이노베이션이 그렇다 — 공정위 `K6499` 대 DART `C192`(석유정제)로,
+    지주회사 체제라 개별 신고가 사업 실질을 가린다.
+    """
+    dart = to_ksic(corp.get('induty_code'))
+    k = _jurir(corp.get('jurir_no'))
+    row = (ftc_idx or {}).get(k) if len(k) == 13 else None
+    ftc = ((row or {}).get('KSIC') or '').strip().upper() or None
+
+    if ftc and dart and _지주코드.match(ftc) and not _지주코드.match(dart):
+        return {'ksic': dart, '출처': 'DART(공정위는 지주코드)',
+                'ftc_ksic': ftc, 'dart_ksic': dart, 'ftc_row': row}
+    if ftc:
+        return {'ksic': ftc, '출처': '공정위',
+                'ftc_ksic': ftc, 'dart_ksic': dart, 'ftc_row': row}
+    return {'ksic': dart, '출처': 'DART(공정위에 없음)' if dart else None,
+            'ftc_ksic': None, 'dart_ksic': dart, 'ftc_row': None}
+
+
 # ────────────────────────────────────────────── 고유번호
 
 def corp_code_map(refresh: bool = False) -> dict[str, str]:
