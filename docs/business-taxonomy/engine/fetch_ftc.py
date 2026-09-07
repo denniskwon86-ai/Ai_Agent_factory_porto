@@ -87,6 +87,44 @@ def fetch_api(group_code: str, ym: str = '202605', key: str | None = None) -> li
     return items
 
 
+# ────────────────────────────────────────────── 유일화
+
+def _jurir(v: str) -> str:
+    return re.sub(r'\D', '', v or '')
+
+
+def dedupe(rows: list[dict]) -> list[dict]:
+    """
+    법인등록번호로 유일화한다.
+
+    **업무키트 대상 목록에 같은 회사가 두 번 나오면 안 된다.** 공동 소유 법인이
+    두 집단에 모두 신고되기 때문이다 — 3,539 건에 18 건이 그렇다. 롯데지에스화학
+    ·롯데에스케이에너루트·지에너지처럼 이름에 양쪽이 들어간 합작사다.
+    **지분법상 양쪽 반영은 틀린 게 아니다.**
+
+    다행히 **사업형태 판정은 어느 집단으로 보나 같다**(18 건 전부 동일). 같은
+    법인이니 KSIC 도 같아서다. 그래서 분류에는 영향이 없고 목록 중복만 문제다.
+    집단 소속은 버리지 않고 `기업집단명들` 에 모아 남긴다 — 그룹 단위로 볼 때 쓴다.
+
+    지배 집단을 가려야 할 때의 기준은 README 의 「공동 소유 법인은 어디로
+    귀속시키나」를 따른다.
+    """
+    out, seen = [], {}
+    for r in rows:
+        k = _jurir(r.get('법인등록번호')) or ('name:' + (r.get('소속회사명') or ''))
+        if k in seen:
+            prev = seen[k]
+            g = r.get('기업집단명', '')
+            if g and g not in prev['기업집단명들']:
+                prev['기업집단명들'].append(g)
+            continue
+        rec = dict(r)
+        rec['기업집단명들'] = [r.get('기업집단명', '')] if r.get('기업집단명') else []
+        seen[k] = rec
+        out.append(rec)
+    return out
+
+
 def to_csv(rows: list[dict], path: str) -> None:
     if not rows:
         print('수집된 행이 없다', file=sys.stderr)
