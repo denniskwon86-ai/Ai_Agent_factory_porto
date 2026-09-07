@@ -1,0 +1,21 @@
+{
+ "response": {
+  "header": {
+   "resultCode": "00",
+   "resultMsg": "NORMAL SERVICE."
+  },
+  "body": {
+   "items": {
+    "item": {
+     "baseDt": "20250101",
+     "smp": "121.20",
+     "areaCd": "1",
+     "areaNm": "육지"
+    }
+   },
+   "numOfRows": 10,
+   "pageNo": 1,
+   "totalCount": 1
+  }
+ }
+}

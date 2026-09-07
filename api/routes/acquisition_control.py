@@ -41,6 +41,7 @@ from core.external_intelligence.refresh_runner import BLOCK_REASONS as _BLOCK_RE
 #: ⚠️ 새 Provider 를 만들면 **여기에도 추가**한다 — 빠뜨리면 등록부에 없어서
 #:   화면의 원천 목록에 나오지 않고, 요청 관문이 「등록되지 않은 원천」으로 거부한다.
 from core.external_intelligence.providers import ecos as _ecos  # noqa: F401
+from core.external_intelligence.providers import datagokr as _datagokr  # noqa: F401
 from core.external_intelligence.providers import kosis as _kosis  # noqa: F401
 from core.external_intelligence.providers import opendart as _opendart  # noqa: F401
 

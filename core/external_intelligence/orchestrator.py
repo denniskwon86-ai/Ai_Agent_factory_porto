@@ -52,6 +52,11 @@ STAGE_RECONCILE = "RECONCILED"
 STAGE_STAGE_ROWS = "STAGED_TO_ISOLATED_DB"
 STAGE_LINEAGE = "LINEAGE_RECORDED"
 
+#: 한 수집이 받을 수 있는 최대 쪽수. **끝없는 페이징을 막는다** — 원천이 `has_more` 를
+#: 잘못 주면 영원히 돈다. Provider 쪽에도 상한이 있지만 **여기에도 둔다**(층마다 가정이
+#: 달라야 층이다).
+MAX_COLLECT_PAGES = 50
+
 APPLY_STAGES: Tuple[str, ...] = (STAGE_RAW, STAGE_CHECKSUM, STAGE_NORMALIZE, STAGE_CLASSIFY,
                                  STAGE_QUALITY, STAGE_RECONCILE, STAGE_STAGE_ROWS,
                                  STAGE_LINEAGE)
@@ -278,7 +283,8 @@ class AcquisitionOrchestrator:
 
         try:
             provider = self._provider(pid)
-            result = provider.fetch(candidate)
+            #: ★ 원문은 보관한다(그게 「격리 수집」이다). 쪽이 나뉘면 **쪽마다 따로** 보관한다.
+            results, batch = self._collect(provider, candidate, job_id=job_id, store_raw=True)
         except B.ProviderError as exc:
             #: ★ 「자료 없음」은 장애가 아니다 — 실패 종류를 붙이지 않고 따로 보낸다.
             if type(exc).__name__ == "NoDataFromSource":
@@ -286,14 +292,8 @@ class AcquisitionOrchestrator:
                 raise OrchestrationError(str(exc)) from exc
             self._fail(job_id, actor_id, failure_kind_of(exc), str(exc))
             raise OrchestrationError(str(exc)) from exc
-
-        #: 원문은 보관한다 — 그게 「격리 수집」이다. 적재본과는 다른 곳이다.
-        meta = self.raw.put(result.payload, source_id=pid, requested_url=result.requested_url,
-                            content_type=result.content_type, job_id=job_id,
-                            secrets=provider.secret_values(), fetched_at=result.fetched_at)
-        self.store.record_raw_object(job_id, dict(meta, dataset_ref=result.dataset_ref))
-
-        batch = provider.normalize(result)
+        result = results[0]
+        meta = self.raw.meta(self.store.raw_objects(job_id)[-1]["raw_object_ref"]) or {}
         report = self._build_dry_run(job=job, provider=provider, result=result, batch=batch,
                                      meta=meta, plan=plan, candidate=candidate,
                                      mapping_proposal=mapping_proposal, as_of=as_of)
@@ -338,7 +338,7 @@ class AcquisitionOrchestrator:
 
         try:
             provider = self._provider(pid)
-            result = provider.fetch(candidate)
+            results, batch = self._collect(provider, candidate, job_id=job_id, store_raw=True)
         except B.ProviderError as exc:
             kind = failure_kind_of(exc)
             report = ApplyReport(job_id=job_id, failure_kind=kind, failure_detail=str(exc),
@@ -348,19 +348,23 @@ class AcquisitionOrchestrator:
             job = self._fail(job_id, actor_id, kind, str(exc), report=report)
             return job, report
 
-        # ① 원본 보존 ② 체크섬
-        meta = self.raw.put(result.payload, source_id=pid, requested_url=result.requested_url,
-                            content_type=result.content_type, job_id=job_id,
-                            secrets=provider.secret_values(), fetched_at=result.fetched_at)
-        self.store.record_raw_object(job_id, dict(meta, dataset_ref=result.dataset_ref))
-        stages.append(StageResult(STAGE_RAW, True, meta["raw_object_ref"],
-                                  count=meta["byte_size"]))
-        verified = self.raw.verify(meta["raw_object_ref"])
-        stages.append(StageResult(STAGE_CHECKSUM, bool(verified.get("ok")),
-                                  meta["checksum"][:16] + "…"))
+        # ① 원본 보존 ② 체크섬 — 쪽마다 따로 보관돼 있다
+        kept = self.store.raw_objects(job_id)
+        meta = self.raw.meta(kept[-1]["raw_object_ref"]) or {}
+        result = results[-1]
+        stages.append(StageResult(
+            STAGE_RAW, bool(kept),
+            f"{len(results)}쪽 · {kept[-1]['raw_object_ref']}" if len(results) > 1
+            else str(kept[-1]["raw_object_ref"]),
+            count=sum(int(r.get("byte_size") or 0) for r in kept)))
+        #: ★ 쪽이 여럿이면 **전부** 확인한다 — 마지막 쪽만 보면 앞 쪽의 변조를 놓친다.
+        checks = [self.raw.verify(r["raw_object_ref"]) for r in kept]
+        stages.append(StageResult(
+            STAGE_CHECKSUM, all(c.get("ok") for c in checks),
+            f"{len(checks)}건 확인" if len(checks) > 1
+            else str(kept[-1]["checksum"])[:16] + "…"))
 
-        # ③ 정규화
-        batch = provider.normalize(result)
+        # ③ 정규화 (이미 `_collect` 가 쪽마다 하고 합쳤다)
         stages.append(StageResult(STAGE_NORMALIZE, True,
                                   f"적재 후보 {len(batch.rows)} · 제외 {len(batch.rejected)}",
                                   count=len(batch.rows)))
@@ -436,6 +440,60 @@ class AcquisitionOrchestrator:
                                   "source_fields": list(batch.source_fields)},
                    "dry_run": dict(dict(job.get("dry_run") or {}), apply=report.as_dict())})
         return job, report
+
+    # ── 페이징 ─────────────────────────────────────────────────────────
+    def _collect(self, provider, candidate, *, job_id: str,
+                 store_raw: bool) -> Tuple[List[B.FetchResult], B.NormalizedBatch]:
+        """★★★ 쪽이 나뉜 원천을 **끝까지** 받는다.
+
+        ⚠️⚠️ 쪽을 합쳐 하나의 「원문」으로 만들지 않는다. 그러면 보관된 원문이 **원천이
+          보낸 것이 아니게** 되고 「원천이 이렇게 말했다」가 거짓이 된다 — 계보의 근거가
+          우리가 만든 물건이 된다. **쪽마다 따로 보관**하고, 정규화 결과만 합친다.
+
+        ⚠️ `has_more` 를 안 읽으면 **첫 쪽만 받고 다 받았다고 보고한다.** 그것이 이 함수가
+          생긴 이유다 — `FetchResult.has_more` 는 선언만 돼 있고 아무도 읽지 않았다."""
+        results: List[B.FetchResult] = []
+        rows: List[Mapping[str, Any]] = []
+        rejected: List[B.RejectedRow] = []
+        source_fields: set = set()
+        source_rows = 0
+        page = 0
+        while True:
+            page += 1
+            try:
+                result = provider.fetch(candidate, page=page)
+            except TypeError:
+                #: 쪽을 모르는 Provider — 한 번에 다 준다(앞의 셋이 그렇다).
+                result = provider.fetch(candidate)
+            results.append(result)
+            if store_raw:
+                meta = self.raw.put(
+                    result.payload, source_id=provider.describe().provider_id,
+                    requested_url=result.requested_url, content_type=result.content_type,
+                    job_id=job_id, secrets=provider.secret_values(),
+                    fetched_at=result.fetched_at,
+                    note=f"{page}쪽" if result.page or result.has_more else "")
+                self.store.record_raw_object(job_id, dict(meta, dataset_ref=result.dataset_ref))
+            part = provider.normalize(result)
+            rows.extend(part.rows)
+            #: ⚠️ 제외 사유의 `index` 는 **쪽 안의** 번호다 — 쪽을 밝히지 않으면 어느 줄인지
+            #:   모른다. 그러나 **`reason` 은 건드리지 않는다** — 그것은 비교 가능한 어휘이고,
+            #:   앞에 「1쪽: 」을 붙이면 사유로 세는 시험과 화면이 전부 어긋난다(실측).
+            rejected.extend(
+                B.RejectedRow(r.index, r.reason,
+                              (f"[{page}쪽] {r.detail}" if page > 1 or result.has_more
+                               else r.detail),
+                              r.raw_excerpt) for r in part.rejected)
+            source_fields.update(part.source_fields)
+            source_rows += part.source_row_count
+            if not result.has_more or page >= MAX_COLLECT_PAGES:
+                break
+        merged = B.NormalizedBatch(
+            provider_id=results[0].provider_id if results else "",
+            contract_key=part.contract_key if results else "",
+            rows=tuple(rows), rejected=tuple(rejected), source_row_count=source_rows,
+            source_fields=tuple(sorted(source_fields)))
+        return results, merged
 
     # ── 보조 ───────────────────────────────────────────────────────────
     def _job(self, job_id: str) -> Dict[str, Any]:
