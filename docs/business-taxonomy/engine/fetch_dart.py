@@ -204,15 +204,26 @@ def corp_name_map(refresh: bool = False) -> dict[str, str]:
     raw = _get('corpCode.xml')
     z = zipfile.ZipFile(io.BytesIO(raw))
     xml = z.read(z.namelist()[0]).decode('utf-8', 'replace')
-    out = {}
+
+    rows = []
     for m in re.finditer(r'<list>(.*?)</list>', xml, re.S):
         blk = m.group(1)
         code = re.search(r'<corp_code>(.*?)</corp_code>', blk)
         name = re.search(r'<corp_name>(.*?)</corp_name>', blk)
         if not (code and name):
             continue
-        for c in segment_rules._cands(name.group(1)):
-            out.setdefault(c, code.group(1).strip())
+        stock = (re.search(r'<stock_code>(.*?)</stock_code>', blk) or [None, ''])[1].strip()
+        mod = (re.search(r'<modify_date>(.*?)</modify_date>', blk) or [None, '0'])[1].strip()
+        rows.append((code.group(1).strip(), name.group(1), bool(stock), mod))
+
+    # **상장사를 먼저, 그 다음 수정일 최근 순으로 넣는다.** corpCode 에는 같은 이름이
+    # 여럿 있다 — 「카카오」가 둘인데 종목코드 없는 2017 년 법인이 먼저 나온다.
+    # 그걸 잡으면 사업보고서가 없어 지배 집단 판정이 통째로 실패한다
+    rows.sort(key=lambda r: (not r[2], -int(r[3] or 0)))
+    out = {}
+    for code, name, _, _ in rows:
+        for c in segment_rules._cands(name):
+            out.setdefault(c, code)
     json.dump(out, open(path, 'w', encoding='utf-8'))
     return out
 
@@ -248,7 +259,8 @@ def subsidiaries(rcept_no: str) -> set:
     return out
 
 
-def group_heads(group: str, ftc_rows: list[dict], limit: int = 5) -> list[dict]:
+def group_heads(group: str, ftc_rows: list[dict], limit: int = 5,
+                exclude: set | None = None) -> list[dict]:
     """
     집단의 **지배 후보들.** 종속기업 목록을 확인할 대상이다.
 
@@ -256,6 +268,11 @@ def group_heads(group: str, ftc_rows: list[dict], limit: int = 5) -> list[dict]:
     섞인다 — 태광의 「티투프라이빗에쿼티」, 카카오의 「카카오벤처스」가 그렇다.
     그래서 ① 집단명이 이름에 든 회사 ② 지주회사 ③ 매출 상위를 함께 후보로 둔다.
     애경처럼 집단명(애경)과 지주사명(에이케이홀딩스)이 다른 경우가 있어 셋이 다 필요하다.
+
+    `exclude` 는 후보에서 뺄 법인등록번호다. **귀속이 미정인 중복 법인을 넣어야 한다** —
+    공정위 소속 목록은 지분만 있어도 넣으므로 남의 집단 회사가 섞인다. 「애경산업(주)」이
+    태광에도 신고돼 있어 태광 후보에 들면 「태광이 모두락애경산업을 지배한다」는 결론이
+    난다. 실제로는 애경산업 자체가 애경 소속이다 — 미정인 것을 근거로 쓰면 순환이다.
     """
     import segment_rules
     g = segment_rules._norm_corp(group)
@@ -266,7 +283,9 @@ def group_heads(group: str, ftc_rows: list[dict], limit: int = 5) -> list[dict]:
         except Exception:
             return 0.0
 
-    pool = [r for r in ftc_rows if r.get('기업집단명') == group]
+    ex = exclude or set()
+    pool = [r for r in ftc_rows
+            if r.get('기업집단명') == group and _jurir(r.get('법인등록번호')) not in ex]
     ranked = sorted(pool, key=sales, reverse=True)
     rank = {id(r): i for i, r in enumerate(ranked)}
 
@@ -300,13 +319,18 @@ def controlling_group(name: str, groups: list[str], ftc_rows: list[dict],
     반환: `(집단명 또는 None, 근거 문자열)`
     어느 쪽도 연결하지 않으면 `(None, ...)` — **공동기업이므로 가르지 않는다.**
     """
+    import collections
     import segment_rules
     want = segment_rules._cands(name)
     nmap = corp_name_map()
+    # **여러 집단에 걸친 법인은 귀속이 미정이므로 지배 근거로 쓰지 않는다.**
+    # 자기 자신도 여기 들어가므로 자기 종속기업 목록을 보는 일도 막힌다
+    cnt = collections.Counter(_jurir(r.get('법인등록번호')) for r in ftc_rows)
+    ambiguous = {k for k, v in cnt.items() if v > 1 and len(k) == 13}
     hits, checked = [], []
     for g in groups:
         n = 0
-        for head in group_heads(g, ftc_rows, limit):
+        for head in group_heads(g, ftc_rows, limit, exclude=ambiguous):
             hn = head.get('소속회사명', '')
             cc = next((nmap[c] for c in segment_rules._cands(hn) if c in nmap), None)
             if not cc:
