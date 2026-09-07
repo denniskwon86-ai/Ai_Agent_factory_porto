@@ -559,6 +559,16 @@ class AcquisitionStore:
             out.append(d)
         return out
 
+    def staged_counts(self) -> Dict[str, int]:
+        """계약별 격리 적재 건수. **한 번에 읽는다** — 계약마다 부르면 준비도 화면이
+        열 번 넘게 DB 를 두드린다."""
+        self._ready()
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT contract_key, COUNT(*) FROM data_acquisition_rows "
+                "GROUP BY contract_key").fetchall()
+        return {str(r[0]): int(r[1]) for r in rows}
+
     def staged_count(self, contract_key: str = "") -> int:
         self._ready()
         sql = "SELECT COUNT(*) FROM data_acquisition_rows"
