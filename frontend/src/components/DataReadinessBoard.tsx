@@ -4,6 +4,7 @@ import {
   type DatasetReadiness, type DatasetState, type InstanceReadiness, type OutputReadiness,
 } from '../lib/dataPrepApi';
 import { KitAppPanel } from './KitAppPanel';
+import { KitGettingStarted } from './KitGettingStarted';
 
 // [BDR-5 / Wave H] 데이터 준비 보드 — **「지금 무엇까지 믿고 만들 수 있는가」.**
 //
@@ -41,7 +42,7 @@ function AsOf({ value }: { value: string }) {
   return <span style={{ color: 'var(--surface-text-muted)' }}>{value.slice(0, 16).replace('T', ' ')}</span>;
 }
 
-function DatasetRow({ row }: { row: DatasetReadiness }) {
+function DatasetRow({ row, onPrepare }: { row: DatasetReadiness; onPrepare?: (key: string) => void }) {
   const v = STATE_VIEW[row.state] ?? {
     // ⚠️ 모르는 상태를 «준비됨» 으로 떨어뜨리지 않는다 — 서버가 새 상태를 내면
     //   화면은 그것을 «모른다» 고 말해야 한다.
@@ -66,6 +67,13 @@ function DatasetRow({ row }: { row: DatasetReadiness }) {
         )}
         {row.detail && (
           <div style={{ color: 'var(--state-warn-fg)', fontSize: 12, marginTop: 2 }}>{row.detail}</div>
+        )}
+        {onPrepare && (
+          <button type="button" onClick={() => onPrepare(row.dataset_contract_key)}
+            aria-label={`${row.label || '업무 데이터'} 자료 준비`}
+            style={{ display: 'block', marginTop: 6, padding: '5px 10px', fontSize: 13 }}>
+            자료 준비
+          </button>
         )}
       </td>
       <td style={{ padding: '10px 8px', fontSize: 13 }}><AsOf value={row.as_of} /></td>
@@ -94,7 +102,9 @@ function OutputRow({ row }: { row: OutputReadiness }) {
   );
 }
 
-export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
+export function DataReadinessBoard({ instanceId, refreshKey = 0, onPrepareDataset }: {
+  instanceId: string; refreshKey?: number; onPrepareDataset?: (key: string) => void;
+}) {
   const [data, setData] = useState<InstanceReadiness | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -112,7 +122,7 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
       })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [instanceId]);
+  }, [instanceId, refreshKey]);
 
   // ★ 35개 계약을 한 표로 펴지 않는다. 사용자는 먼저 구매·물류·재고 같은 업무기능을
   // 이해하고, 진단이 필요할 때만 그 안의 계약을 펼친다. 분류는 서버가 준 정본만 쓴다.
@@ -207,6 +217,8 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
                   {group.description}
                 </div>
               )}
+              <KitGettingStarted kitId={data.kit_id} version={data.version} groupId={group.id}
+                canPrepare={Boolean(onPrepareDataset)} />
               <div style={{ overflowX: 'auto', borderTop: '1px solid var(--surface-border)' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
@@ -218,7 +230,7 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {group.rows.map((d) => <DatasetRow key={d.dataset_contract_key} row={d} />)}
+                    {group.rows.map((d) => <DatasetRow key={d.dataset_contract_key} row={d} onPrepare={onPrepareDataset} />)}
                   </tbody>
                 </table>
               </div>
