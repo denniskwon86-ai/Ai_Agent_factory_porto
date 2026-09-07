@@ -47,6 +47,7 @@ core/external_intelligence/            (기존 .py 를 패키지로 — import �
     opendart.py          첫째 — 공시 재무제표   → PUB-01
     ecos.py              둘째 — 환율·금리·물가  → EXT-01
     kosis.py             셋째 — 생산·재고 지수  → EXT-03
+    datagokr.py          넷째 — 공공데이터포털  → EXT-03  (기반 + 서비스별 Provider)
 
 api/routes/acquisition_control.py      15 라우트 · /api/v1/external/acquisition/*
 api/routes/data_preparation_control.py 준비도 응답에 수집 제안을 얹는다(6줄 추가)
@@ -81,8 +82,8 @@ frontend/src/lib/externalIntelligenceApi.ts · dataPrepApi.ts  (기존 파일에
 
 ```
 오케스트레이터 구현   ✔
-Provider 구현        ✔  OpenDART · ECOS · KOSIS 3개
-fixture 검증         ✔  594건 · 네트워크 0회
+Provider 구현        ✔  OpenDART · ECOS · KOSIS · 공공데이터포털(KPX SMP) 4개
+fixture 검증         ✔  677건 · 네트워크 0회
 실제 API 실측        ✘  AFS_OPENDART_API_KEY 가 없다
 실제 데이터 수집      ✘
 격리 DB 적재         ✔  data_acquisition_rows · 전부 UNCERTIFIED
@@ -278,6 +279,74 @@ KOSIS 오류 코드 표를 실측으로 확인하지 못해 그 사실을 알리
 ⚠️ `ERROR_TABLE_VERIFIED = False` 를 **코드·원천 카드·검증 보고서 세 곳**에 남겼다.
   실제 키로 한 번 돌린 뒤 표를 갱신할 것.
 
+## 4-6. 네 번째 원천(공공데이터포털) — 포털 하나가 «여러 원천»이다
+
+앞의 셋은 「기관 하나 = Provider 하나」였다. 공공데이터포털은 아니다. 포털은 창구일 뿐,
+그 뒤에 전력거래소·기상청·관세청이 서로 다른 서비스로 앉아 있다.
+
+★★★ **신뢰등급은 Provider 당 하나다.** `ProviderDescriptor.default_trust_grade` 는 필드가
+  하나뿐인데, 설계서 §4.2 는 **KPX 를 Silver** 로 두고 ECOS·KOSIS 는 Gold 로 둔다. 포털
+  전체를 Provider 하나로 만들면 이 구분이 사라져, 기상청 관측이 KPX 와 같은 등급으로
+  읽힌다. 그래서 이렇게 갈랐다:
+
+    DataGoKrService   기반 — 봉투 해석·인증·오류 방언.  ★ **등록부에 넣지 않는다**
+    KpxSmpProvider    서비스 — 전력거래소 SMP · silver · EXT-03
+
+  다음 서비스(기상청·관세청)는 `DataGoKrService` 를 상속해 엔드포인트·필드표·등급만
+  적으면 된다.
+  ⚠️ 기반 클래스를 등록부에 올리지 말 것. 올리면 「어느 서비스인지 모르는 원천」이 화면에
+    뜨고, 등급이 정해지지 않은 값이 계약으로 들어간다.
+
+### ⚠️ 선언만 해 두고 아무도 안 읽던 필드 — 페이징
+
+`FetchResult.has_more` · `next_cursor` 는 `base.py` 에 **첫날부터 있었지만 읽는 곳이
+0곳이었다.** 앞의 세 원천이 한 번에 다 주는 응답이었기 때문이다. 넷째가 처음으로 나눠
+줬고, 그제서야 이 필드가 장식이었음이 드러났다.
+
+`_collect()` 는 Provider 가 아니라 **오케스트레이터**에 뒀다 — 쪽을 어떻게 이어 붙이든
+원문 보관·거부 집계 규칙은 모든 Provider 에 같아야 하기 때문이다.
+
+    쪽마다 원문을 «따로» 보관한다      3쪽이면 체크섬 3개. 합쳐 보관하면 재현이 깨진다
+    정규화 결과만 합친다               행은 이어 붙이되 원문은 쪽 단위로 남는다
+    MAX_COLLECT_PAGES = 50            서버가 has_more 를 계속 참으로 줘도 멈춘다
+    fetch(page=n) 을 모르는 Provider   TypeError 를 잡아 1쪽만 받는다 (앞의 셋이 그렇다)
+
+### ⚠️ 거부 사유에 쪽 번호를 넣었다가 어휘를 오염시켰다
+
+거부 행의 `reason` 앞에 `"1쪽: "` 을 붙였더니 사유를 비교하던 시험들이 깨졌다. `reason`
+은 **닫힌 어휘**이고 화면·통계가 그것으로 묶는다. 쪽 번호는 사람이 읽는 `detail` 로 옮겼다.
+
+### 네 번째 「자료 없음」 방언 — 그리고 오류가 봉투 «둘»로 온다
+
+    DART   status=013             코드
+    ECOS   RESULT.CODE=INFO-200   코드 (단, HTTP 200 으로)
+    KOSIS  []                     모양
+    포털   resultCode=03          코드 — 단, **봉투가 둘이다**
+
+★ 인증·한도 실패는 `OpenAPI_ServiceResponse.cmmMsgHeader` 로 오고, 그 밖은
+  `response.header.resultCode` 로 온다. 봉투 하나만 보는 판정기는 키 오류를 「알 수 없는
+  응답」으로 읽는다. `read_envelope()` 가 둘을 다 본다.
+
+★ **1건이면 `item` 이 배열이 아니라 객체다** (XML→JSON 변환의 흔적). 한 건짜리 응답을
+  0건으로 읽는 결함이라 fixture 를 따로 뒀다(`single_item.json`).
+
+### ⚠️ 자격 실패가 너무 늦게 나왔다
+
+`discover()` 는 순수 함수라 키를 보지 않았다. 그래서 키가 없어도 「후보」가 나오고
+dry-run 에 가서야 인증 오류가 났다 — 사람이 세 화면 뒤에서 처음 안다. `discover()` 에
+`self.credential()` 을 넣어 **첫 화면에서** 말하게 했다.
+
+### fixture 로 종단까지 확인한 것
+
+    3쪽 · 25행 · 원문 3개(체크섬 3개 각각 검증)
+    3쪽에 있던 값을 계보 질의로 되찾음 — 그 값의 trust_grade == "silver" (앞의 둘은 gold)
+    보관된 메타데이터·URL 에 서비스키 문자열 없음 (퍼센트 인코딩된 형태까지 확인)
+
+### 실측으로 확인하지 못한 것
+
+`SERVICE_VERIFIED = False` — 서비스키 없이 만들었다. 엔드포인트 경로와 필드명은 포털
+문서 기준이고 **실응답과 대조하지 않았다.** §7-B 에서 키를 받으면 이 상수를 지운다.
+
 ## 5. 만들면서 실제로 뚫린 것 넷
 
 **① 퍼센트 인코딩된 비밀키가 디스크에 적혔다.**
@@ -313,9 +382,10 @@ Provider 는 테넌트를 모르는 것이 설계인데 검증기가 그것을 �
 
 | | |
 |---|---|
+| **0** | **T3 재실행** — 아래 §8 의 6,282 는 `432055636` 이전이다 |
 | **A** | `PUB-01` 편입 → 준비도 재평가. ⚠️ **실물 인증 경로가 없다** — §4-3 (거버넌스가 아니라 배선 문제) |
 | **B** | 실제 `AFS_OPENDART_API_KEY` 로 1회 실측 (한도 주의 — 10개년 × 4분기 한 번에 받지 말 것) |
-| **C** | 공공데이터포털·World Bank Provider 추가. **ECOS·KOSIS 완료** |
+| **C** | World Bank Provider 추가. **ECOS·KOSIS·공공데이터포털 완료** |
 | ~~D~~ | ~~스케줄러 배선~~ — 완료(`scripts/run_acquisition_refresh.py`) |
 | **E** | 화면 렌더 확인 — 로그인 뒤라 이번에 눈으로 보지 못했다 |
 | **F** | `sim_marketing` 도메인 내용 업무 검토 (이전 묶음에서 이월) |
@@ -328,12 +398,24 @@ Provider 는 테넌트를 모르는 것이 설계인데 검증기가 그것을 �
 
 ```
 전체 스위트 T3   6,282 passed · 2 skipped · 실패 0         992초 (16:31) · 커밋 7a782aa3e
-                 ★ **이 결과는 최신 커밋의 것이다** — 이후 코드 변경 없음
-수집·준비도 회귀  594건 통과 (87초) · 네트워크 0회 · LLM 0회
+                 ⚠️ **최신이 아니다** — 그 뒤 커밋 2개가 들어왔다(아래 이력)
+수집·준비도 회귀  677건 통과 (67초) · 네트워크 0회 · LLM 0회   ← 최신 `432055636` 에서
 tsc -b           0건
 프로덕션 빌드     성공 · 패널 문구·경로 상수가 번들에 실림 확인
 제품 경로 실측    없는 경로 404 · 수집 라우트 4개 401
 ```
+
+### 「수집·준비도 회귀 677건」의 선택 집합 — 그대로 다시 돌릴 수 있게
+
+⚠️ 중괄호 확장을 쓰지 않았다 — 팀 기본 셸이 PowerShell 이고 거기서는 확장되지 않는다.
+   아래는 bash·PowerShell 어디에 붙여넣어도 같게 돈다(한 줄).
+
+    venv/Scripts/python.exe -m pytest -p no:randomly tests/test_acquisition_api.py tests/test_acquisition_mapping.py tests/test_acquisition_models.py tests/test_acquisition_orchestrator.py tests/test_acquisition_store.py tests/test_external_raw_store.py tests/test_request_interpreter.py tests/test_provider_contract.py tests/test_provider_datagokr.py tests/test_provider_dispatch.py tests/test_provider_ecos.py tests/test_provider_kosis.py tests/test_provider_opendart.py tests/test_refresh_runner.py tests/test_readiness_bridge.py tests/test_data_readiness.py tests/test_source_binding.py tests/test_dataset_snapshot.py tests/test_release_readiness.py tests/test_decision_source_binding.py
+
+⚠️ 앞선 커밋들의 「594건」·「579건」과 이 677건은 **선택이 다르다** — 서로 빼서 증감을
+계산하지 말 것. 위 목록이 지금부터의 기준이다.
+⚠️ pytest 를 동시에 두 개 돌리지 말 것. 이 저장소에서 경합으로 3시간짜리 실행이 나왔고
+멈춘 줄 알았다(실제로는 단독 실행 시 67초).
 
 **정산이 맞는다.**
 
@@ -347,7 +429,9 @@ tsc -b           0건
 
     6,098   4862927b3 이전   기준선 5,793 + 수집 오케스트레이터 305
     6,174   4862927b3        + ECOS 76
-    6,282   7a782aa3e        + 스케줄러 30 · 수집제안 27 · KOSIS 51   ← **현재**
+    6,282   7a782aa3e        + 스케줄러 30 · 수집제안 27 · KOSIS 51
+    (미실시) 744c62373       + Codex 업무키트 시작안내·초기데이터 대사
+    (미실시) 432055636       + 공공데이터포털 36     ← **T3 가 아직 안 본 구간**
 
 ⚠️ **화면이 그려지는 것은 보지 못했다.** 앱이 로그인 뒤에 있고 대리 로그인을 하지 않았다.
 「배선됐다」까지만 주장한다 — §7-E 가 남은 일이다.
@@ -355,7 +439,11 @@ tsc -b           0건
 ⚠️ **이 T3 는 브랜치 `claude/data-acquisition-orchestrator-20260905` 의 것이다.** 기점
 `1bdada5a1`(Codex 기준선) 위에서 돌렸고, 다른 브랜치의 미커밋 작업은 포함하지 않는다.
 
-★ **이번 T3 는 최신 커밋(`7a782aa3e`)에서 돌렸고 그 뒤 코드를 건드리지 않았다.**
+⚠️ **이 T3 는 더 이상 최신이 아니다.** 돌릴 당시에는 최신이었고 그 뒤 코드를 건드리지
+  않았지만, 이후 커밋 2개(`744c62373` · `432055636`)가 들어왔다 — §7-0 이 남은 일이다.
+  그 구간은 **집중 회귀 677건**으로만 확인했다.
+
+★ **앞선 T3 들의 교훈은 그대로 둔다.**
   앞선 두 번은 T3 가 도는 동안 작업을 이어가 결과가 「직전 시점의 것」이 됐다 — 이번에는
   T3 가 끝날 때까지 코드를 손대지 않았다.
   ⚠️ 다음 커밋이 들어오면 이 줄을 다시 갱신할 것. 「거의 최신」인 검증 기록을 최신처럼
