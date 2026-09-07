@@ -130,3 +130,6 @@ demo_data/
 /tmp/
 /output/
 /.codex/runtime-logs/
+
+# 판정 엔진 캐시 (DART 사업보고서 원문 — 수십 MB)
+docs/business-taxonomy/engine/.cache/
