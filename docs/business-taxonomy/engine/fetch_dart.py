@@ -188,6 +188,160 @@ def resolve(code: str) -> str:
     raise KeyError(f'고유번호를 찾지 못했다: {code}')
 
 
+# ────────────────────────────────────────────── 지배 집단 판정
+
+def corp_name_map(refresh: bool = False) -> dict[str, str]:
+    """
+    **회사명 → 고유번호.** 비상장 공시법인도 이름으로 찾을 수 있다.
+    `corp_code_map()` 은 상장사만(종목코드가 있는 것만) 담으므로 이것이 따로 필요하다.
+    """
+    import segment_rules
+    os.makedirs(CACHE, exist_ok=True)
+    path = os.path.join(CACHE, 'corpname.json')
+    if os.path.exists(path) and not refresh:
+        return json.load(open(path, encoding='utf-8'))
+
+    raw = _get('corpCode.xml')
+    z = zipfile.ZipFile(io.BytesIO(raw))
+    xml = z.read(z.namelist()[0]).decode('utf-8', 'replace')
+    out = {}
+    for m in re.finditer(r'<list>(.*?)</list>', xml, re.S):
+        blk = m.group(1)
+        code = re.search(r'<corp_code>(.*?)</corp_code>', blk)
+        name = re.search(r'<corp_name>(.*?)</corp_name>', blk)
+        if not (code and name):
+            continue
+        for c in segment_rules._cands(name.group(1)):
+            out.setdefault(c, code.group(1).strip())
+    json.dump(out, open(path, 'w', encoding='utf-8'))
+    return out
+
+
+_종속헤더 = re.compile(r'(종속기업|연결대상|연결\s*종속|지배지분율)')
+_지분법헤더 = re.compile(r'(관계기업|공동기업|공동약정|지분법적용)')
+
+
+def subsidiaries(rcept_no: str) -> set:
+    """
+    주석의 **종속기업 목록**에서 회사 이름을 뽑는다(정규화된 형태).
+
+    지배 집단 판정의 근거다 — K-IFRS 1110 호에 따라 종속기업으로 **연결하는** 쪽이
+    지배자다. 그래서 **관계기업·공동기업 표는 뺀다** — 그건 지분법이고 지배가 아니다.
+    """
+    import parse_segment
+    import segment_rules
+    xml = note_xml(rcept_no)
+    if not xml:
+        try:
+            xml = document_xml(rcept_no)
+        except Exception:
+            return set()
+    out = set()
+    for rows, _ in parse_segment._tables(xml):
+        head = ' '.join(' '.join(r) for r in rows[:2])
+        if _지분법헤더.search(head) or not _종속헤더.search(head):
+            continue
+        for r in rows[1:]:
+            nm = parse_segment._clean(r[0] if r else '')
+            if 2 <= len(nm) <= 40:
+                out.update(segment_rules._cands(nm))
+    return out
+
+
+def group_heads(group: str, ftc_rows: list[dict], limit: int = 5) -> list[dict]:
+    """
+    집단의 **지배 후보들.** 종속기업 목록을 확인할 대상이다.
+
+    **지주회사만 보면 놓친다.** 묶음노드로 잡히는 K6499 에는 PEF·벤처투자사도
+    섞인다 — 태광의 「티투프라이빗에쿼티」, 카카오의 「카카오벤처스」가 그렇다.
+    그래서 ① 집단명이 이름에 든 회사 ② 지주회사 ③ 매출 상위를 함께 후보로 둔다.
+    애경처럼 집단명(애경)과 지주사명(에이케이홀딩스)이 다른 경우가 있어 셋이 다 필요하다.
+    """
+    import segment_rules
+    g = segment_rules._norm_corp(group)
+
+    def sales(r):
+        try:
+            return float((r.get('매출액') or '0').replace(',', ''))
+        except Exception:
+            return 0.0
+
+    pool = [r for r in ftc_rows if r.get('기업집단명') == group]
+    ranked = sorted(pool, key=sales, reverse=True)
+    rank = {id(r): i for i, r in enumerate(ranked)}
+
+    def score(r):
+        s = 0.0
+        if g and g in segment_rules._norm_corp(r.get('소속회사명', '')):
+            s += 2
+        if r.get('묶음노드') == 'Y':
+            s += 1
+        s += max(0.0, 1.0 - rank[id(r)] / max(1, len(ranked)))
+        return s
+
+    # **지주회사는 무조건 첫 후보로 넣는다.** 점수로만 뽑으면 애경에서 실패한다 —
+    # 집단명이 든 회사(애경케미칼·애경산업…)가 자리를 다 차지하고, 정작 지배자인
+    # 「에이케이홀딩스」는 이름에 「애경」이 없고 매출도 작아 밀린다
+    holds = [r for r in pool if r.get('묶음노드') == 'Y']
+    hid = {id(r) for r in holds}
+    rest = [r for r in sorted(pool, key=score, reverse=True) if id(r) not in hid]
+    return (holds + rest)[:limit]
+
+
+def controlling_group(name: str, groups: list[str], ftc_rows: list[dict],
+                      limit: int = 5) -> tuple:
+    """
+    여러 집단에 걸친 법인의 **지배 집단**을 가린다.
+
+    기준은 K-IFRS 1110 호 지배력이다 — 그 법인을 **종속기업으로 연결하는** 집단이
+    지배자다. 후보 집단마다 지배 후보 회사들의 주석을 훑어 이름이 종속기업 목록에
+    있는지 본다.
+
+    반환: `(집단명 또는 None, 근거 문자열)`
+    어느 쪽도 연결하지 않으면 `(None, ...)` — **공동기업이므로 가르지 않는다.**
+    """
+    import segment_rules
+    want = segment_rules._cands(name)
+    nmap = corp_name_map()
+    hits, checked = [], []
+    for g in groups:
+        n = 0
+        for head in group_heads(g, ftc_rows, limit):
+            hn = head.get('소속회사명', '')
+            cc = next((nmap[c] for c in segment_rules._cands(hn) if c in nmap), None)
+            if not cc:
+                continue
+            rpt = latest_annual(cc)
+            if not rpt:
+                continue
+            try:
+                subs = subsidiaries(rpt['rcept_no'])
+            except Exception:
+                continue
+            if not subs:
+                continue
+            n += 1
+            if want & subs:
+                hits.append((g, hn))
+                break
+        checked.append(f'{g}:{n}곳')
+    tail = ' (확인 ' + ' · '.join(checked) + ')'
+    if len(hits) == 1:
+        return hits[0][0], f'{hits[0][1]} 의 종속기업'
+    if len(hits) > 1:
+        # 양쪽이 연결한다고 나오면 가르지 않는다 — 자료가 어긋난 것이다
+        return None, '양쪽이 종속기업으로 신고: ' + ', '.join(f'{g}({h})' for g, h in hits)
+    # **확인한 곳이 0 이면 「공동기업」이 아니라 「확인 못 함」이다.** 둘을 섞으면
+    # 자료가 없어서 못 가른 것을 공동기업이라 잘못 읽는다
+    if all(c.endswith(':0곳') for c in checked):
+        return None, '확인 못 함 — 종속기업 목록을 읽을 수 있는 회사가 없다' + tail
+    if any(c.endswith(':0곳') for c in checked):
+        # 한쪽만 확인됐다. 「그쪽이 연결하지 않는다」만 알고 반대쪽은 모른다 —
+        # **공동기업이라고 단정하면 안 된다**
+        return None, '한쪽을 확인하지 못했다 — 가르지 않는다' + tail
+    return None, '어느 쪽도 연결하지 않는다 — 공동기업' + tail
+
+
 # ────────────────────────────────────────────── 사업보고서
 
 def latest_annual(corp_code: str, bgn: str = '20240101') -> dict | None:
