@@ -139,29 +139,82 @@ fixture 검증         ✔  390건 · 네트워크 0회
 실행은 `scripts/run_acquisition_refresh.py` 를 **운영 스케줄러가** 부른다. 프로세스 안에
 타이머를 두면 웹 서버가 4개 뜰 때 같은 수집이 4번 돈다. 겹쳐 돌면 파일 잠금으로 건너뛴다.
 
-## 4-3. ⚠️ A(키트 편입)를 멈춘 이유 — 거버넌스 결정이 먼저다
+## 4-3. A(키트 편입)를 멈춘 이유 — **실물 데이터에 인증 경로가 없다**
 
-인수인계 §7-A 는 「`PUB-01` 을 인증 키트에 편입」이었다. 착수 전에 재 봤더니:
+### ⚠️ 앞 판의 이 절은 틀렸다 (2026-09-08 정정)
 
-    create_snapshot 이 요구하는 data_kind ∈ ('DEMO/SYNTHETIC', 'REAL')   ← 둘뿐
-    수집한 공개 자료는 어느 쪽도 아니다(PUBLIC_DISCLOSED)
-    DATA_KINDS 는 운영 파일 28개 · 113곳에서 쓰인다
-    그중 `calc_execution_approval` 이 **「실제 데이터로 경영 계산을 승인할지」** 를
-    이 값으로 가른다
+처음에 나는 이렇게 적었다: 「`DATA_KINDS` 가 둘뿐인데 공개 자료는 어느 쪽도 아니고,
+`calc_execution_approval` 이 그 값으로 **경영 계산 승인을 가른다**. 넓히려면 113곳을
+건드려야 하니 거버넌스 결정이 먼저다.」
 
-**목록을 넓히는 것은 코딩이 아니라 결정이다** — 「공개 통계가 경영 계산을 구동해도 되는가」.
-`REAL` 로 매핑하면 관문의 뜻이 바뀌고, `DEMO/SYNTHETIC` 으로 매핑하면 거짓말이다.
-단독으로 하지 않았다.
+**세 군데가 틀렸다.**
 
-★ 설계가 비워 둔 자리는 확인했다: `models.PROVIDER_CONNECTOR_QUERY` 가 선언돼 있고
-  `source_binding.validate_config` 가 **「계약과 화면 자리만 있고 아직 지원하지 않습니다」**
-  라고 명시한다. 외부 수집 데이터가 들어갈 자리는 거기다.
+    ✘ `calc_execution_approval` 은 `data_kind` 로 막지 않는다.
+      승인 **지문의 구성요소이자 기록 표시**다 — 코드에 그렇게 적혀 있다
+      (`calculation_control.py:402` 「조회 키가 아니라 기록 표시다」).
+    ✘ `DATA_KINDS` 를 넓힐 필요가 없다. 그 값의 뜻은 「시연이냐 실물이냐」이고,
+      ECOS 관측값은 **실물**이니 `REAL` 이 맞다. 「우리 내부 실적이냐」는
+      `data_origin`(PUBLIC_DISCLOSED)이 이미 답한다 — **축이 원래 둘이었다.**
+    ✘ 그러므로 이것은 「공개 통계를 써도 되는가」라는 거버넌스 질문이 아니었다.
 
-### 물어야 할 것 (준비되면)
+`data_kind` 가 실제로 막는 곳은 한 군데다 — `baseline_build.py:113`,
+**한 기준선에 성격이 다른 판을 섞지 못한다.** 그것은 옳은 제약이고 그대로 두면 된다.
 
-    ① 공개 통계·공시 자료가 경영 계산(`calc_execution_approval`)을 구동해도 되는가
-    ② 된다면 DATA_KINDS 에 PUBLIC_DISCLOSED 를 더할 것인가, REAL 로 접을 것인가
-    ③ 실제 회사용 키트(REAL 모드)의 EXT-01 환율은 ECOS 인가 회사 체결환율인가 (§4-1)
+### 진짜 이유 — 이쪽이 훨씬 크다
+
+    SNAPSHOT_STATES  RAW → PROFILED → STANDARDIZED → RECONCILED → DEMO_CERTIFIED
+                                                                   ↑ 유일한 종착
+    latest_certified  DEMO_CERTIFIED 만 인정한다
+    READY             인증판을 요구한다
+    certify_demo      data_kind != DEMO 이면 **거부한다**
+
+★★★ **실물 데이터는 오늘 어떤 경로로도 `READY` 가 될 수 없다.** 공개 통계만이 아니라
+  회사의 진짜 매출 데이터도 똑같이 막힌다.
+
+그리고 이것은 **의도된 경계**다. `snapshot_service.certify_demo` 가 직접 적어 뒀다:
+
+> 시연 인증. **`CERTIFIED ACTUAL` 이 아니다.**
+> 실제 Data Owner 가 없는 상태에서 실적 인증을 주장하면, 그 숫자를 본 사람은 검증된
+> 값이라고 믿는다. 그래서 상태 이름 자체가 `DEMO_CERTIFIED` 다.
+
+### 외생 지표에는 그 Data Owner 가 **이미 있다**
+
+「실제 Data Owner 승인」이 없다는 것은 **내부 데이터**의 이야기다. 우리 매출에는 「이것이
+우리 숫자다」라고 말할 사람이 필요하다. 그러나 **환율의 소유자는 한국은행**이고, 그에
+해당하는 승인 흐름은 이 저장소에 이미 있다.
+
+    approve_source()      「이 출처의 값을 회사 계획에 쓴다」 + **승인자 필수**
+    PURPOSE_MIN_GRADE     용도별 최소 등급 — 미달이면 **값을 아예 주지 않는다**
+                          (경고가 아니다 — `resolve_value` 가 `value=None` 을 준다)
+
+★ 그리고 그 차단기는 **실제로 배선돼 있다** — `outlook_series.py:78` ·
+  `planning_drivers.py:270` · `external_control.py:465` 세 곳이 부른다.
+  (「검사기는 있는데 부르는 곳이 0곳」이 아니다.)
+
+### 그래서 남은 일의 모양이 바뀐다
+
+「거버넌스 결정을 받는다」가 아니라 **「두 승인 개념을 잇는다」** 다:
+
+    ① 외생 지표 계약(EXT-01/02/03)의 인증 권한을 **원천 승인 + 등급 정책**으로 삼는다
+       → `DEMO_CERTIFIED` 옆에 `SOURCE_CERTIFIED`(가칭) 종착을 두거나,
+         `latest_certified` 가 그 경로를 함께 인정하게 한다
+    ② 내부 실적 계약(FIN·MFG·SLS·PRC)은 **손대지 않는다** — 실제 Data Owner 승인 흐름이
+       생길 때까지 `DEMO_CERTIFIED` 만 있는 것이 맞다
+    ③ 기준선 혼합 금지는 그대로 둔다 — 시연 생산실적과 실제 환율이 한 손익에 섞이면
+       그 결과의 성격을 말할 수 없다
+
+⚠️ ①은 **스냅샷 상태 목록을 건드린다**(`data_preparation` 소유). 이 브랜치에서 단독으로
+  하지 않고, 담당 레인과 합의한 뒤에 한다.
+
+★ 설계가 비워 둔 자리도 그대로다: `models.PROVIDER_CONNECTOR_QUERY` 가 선언돼 있고
+  `source_binding.validate_config` 가 「계약과 화면 자리만 있고 아직 지원하지 않습니다」
+  라고 명시한다.
+
+### 그럼에도 사람에게 물어야 할 것 (하나로 줄었다)
+
+    ★ 실제 회사용 키트(REAL 모드)의 EXT-01 환율을 ECOS 매매기준율로 채울지,
+      회사 시스템의 실제 체결환율로 채울지, 둘을 구분해 둘지 (§4-1)
+      — 회계·재무 담당의 판단이고, **그 키트를 만들 때** 물으면 된다.
 
 ## 4-4. 그 대신 한 것 — 지시의 앞 절반
 
@@ -213,7 +266,7 @@ Provider 는 테넌트를 모르는 것이 설계인데 검증기가 그것을 �
 
 | | |
 |---|---|
-| **A** | `PUB-01` 편입 → 준비도 재평가. ⚠️ **먼저 거버넌스 결정이 필요하다** — §4-3 |
+| **A** | `PUB-01` 편입 → 준비도 재평가. ⚠️ **실물 인증 경로가 없다** — §4-3 (거버넌스가 아니라 배선 문제) |
 | **B** | 실제 `AFS_OPENDART_API_KEY` 로 1회 실측 (한도 주의 — 10개년 × 4분기 한 번에 받지 말 것) |
 | **C** | KOSIS·공공데이터포털·World Bank Provider 추가 (`base.Provider` 8메서드 구현). ECOS 완료 |
 | ~~D~~ | ~~스케줄러 배선~~ — 완료(`scripts/run_acquisition_refresh.py`) |
