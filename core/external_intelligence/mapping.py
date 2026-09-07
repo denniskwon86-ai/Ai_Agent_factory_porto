@@ -450,6 +450,58 @@ def ext01_public_proposal() -> Dict[str, Any]:
     )
 
 
+#: `EXT-03 운임·에너지·기상·산업지표` 의 도메인 필드.
+#: ⚠️⚠️ 키트의 `EXT-03` 에는 형제 계약(`EXT-01`)에 있는 **`vintage_date` 가 없다.**
+#:   그것이 없으면 「그 계획이 당시 어떤 발표값을 썼는가」에 답할 수 없다(§12.5).
+#:   세 번째 Provider(KOSIS)를 붙이다 드러났고, 이 제안이 그 열을 **더한다.**
+EXT03_DOMAIN_FIELDS: Tuple[Dict[str, Any], ...] = (
+    {"name": "observation_id", "type": "string", "required": True,
+     "description": "관측값의 업무 키(기관:통계표:분류축:항목:시점)"},
+    {"name": "indicator_code", "type": "string", "required": True, "description": "지표 코드"},
+    {"name": "org_id", "type": "string", "required": True, "description": "작성 기관"},
+    {"name": "tbl_id", "type": "string", "required": True, "description": "통계표"},
+    {"name": "target_ref", "type": "string", "required": True,
+     "description": "무엇에 대한 지표인가(분류축 이름) — 섞으면 다른 계열이 뭉친다"},
+    {"name": "category_code", "type": "string", "required": True, "description": "분류축 코드"},
+    {"name": "item_code", "type": "string", "required": False, "description": "항목 코드"},
+    {"name": "item_name", "type": "string", "required": False, "description": "항목 이름"},
+    {"name": "observed_at", "type": "string", "required": True, "description": "관측 시점"},
+    {"name": "published_at", "type": "string", "required": False,
+     "description": "발표일 — 원천이 주지 않으면 비운다(받은 날을 적지 않는다)"},
+    {"name": "vintage_date", "type": "string", "required": True,
+     "description": "★ 키트 EXT-03 에 없던 열. 재현성의 근거(§12.5)"},
+    {"name": "value", "type": "number", "required": True,
+     "description": "값 — 읽지 못한 줄은 적재하지 않는다(0 으로 채우지 않는다)"},
+    {"name": "unit", "type": "string", "required": True, "description": "단위"},
+    {"name": "cycle", "type": "string", "required": False, "description": "공표 주기"},
+    {"name": "source_id", "type": "string", "required": True, "description": "승인된 원천"},
+    {"name": "raw_object_ref", "type": "string", "required": True,
+     "description": "원문 보관소 참조 — 계보의 마지막 고리"},
+    {"name": "trust_grade", "type": "string", "required": True, "description": "원천 등급"},
+)
+
+
+def ext03_public_proposal() -> Dict[str, Any]:
+    """`EXT-03` 을 공표 통계용으로 고치는 제안. **`vintage_date` 를 더한다.**
+
+    ⚠️⚠️ 키트의 `EXT-03` 은 `EXT-01`·`EXT-02` 와 달리 `vintage_date` 가 없다. 시연 자료
+      에서는 티가 안 나지만, 공표 통계는 **정정 공표**가 있어서 그 열이 없으면 「그 계획이
+      당시 어떤 값을 썼는가」를 재현할 수 없다. 세 번째 Provider 를 붙이다 드러났다."""
+    return build_contract_proposal(
+        dataset_id="EXT-03", dataset_name="운임·에너지·기상·산업지표(공표 통계)",
+        business_keys=["observation_id"],
+        domain_fields=EXT03_DOMAIN_FIELDS,
+        data_origin=am.ORIGIN_PUBLIC_DISCLOSED,
+        provider_id="KOSIS",
+        rationale=(
+            "키트의 EXT-03 은 분류가 SYNTHETIC(시연용)이고, 형제 계약(EXT-01·EXT-02)에 있는 "
+            "vintage_date 가 **빠져 있다**. 공표 통계는 정정 공표가 있으므로 그 열이 없으면 "
+            "「그 계획이 당시 어떤 값을 썼는가」를 재현할 수 없다(§12.5). 계약 키는 그대로 두고"
+            "(라우팅표가 industry_indicator → EXT-03) 성격을 고치고 vintage_date 를 더한다. "
+            "⚠️ 이 계약은 격리 적재본을 설명하며, 키트의 시연 데이터셋을 대체하지 않는다."),
+    )
+
+
 def observation_row_id(row: Mapping[str, Any]) -> str:
     """`EXT-01` 의 업무 키. 통계표·세부항목·시점이 같으면 같은 관측값이다.
 
@@ -460,6 +512,19 @@ def observation_row_id(row: Mapping[str, Any]) -> str:
     if not all(parts):
         raise MappingError(
             "업무 키를 만들 수 없습니다 — stat_code·item_code·observed_at 가 필요합니다.")
+    return ":".join(parts)
+
+
+def indicator_row_id(row: Mapping[str, Any]) -> str:
+    """`EXT-03` 의 업무 키. **분류축이 들어간다.**
+
+    ⚠️ 축을 빼면 「제조업 생산지수」와 「광업 생산지수」가 같은 키가 되어 하나가 다른
+      하나를 덮어쓴다 — 그리고 어느 쪽이 남았는지 아무도 모른다."""
+    parts = [str(row.get(k) or "")
+             for k in ("org_id", "tbl_id", "category_code", "observed_at")]
+    if not all(parts):
+        raise MappingError(
+            "업무 키를 만들 수 없습니다 — org_id·tbl_id·category_code·observed_at 이 필요합니다.")
     return ":".join(parts)
 
 

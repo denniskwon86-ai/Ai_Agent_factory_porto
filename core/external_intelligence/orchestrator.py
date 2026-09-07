@@ -507,6 +507,7 @@ class AcquisitionOrchestrator:
     _BUSINESS_KEY_RULES = {
         "PUB-01": M.disclosure_row_id,
         "EXT-01": M.observation_row_id,
+        "EXT-03": M.indicator_row_id,
     }
 
     @classmethod

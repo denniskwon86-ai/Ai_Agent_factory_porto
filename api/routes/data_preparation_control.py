@@ -839,6 +839,7 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
         from core.external_intelligence import readiness_bridge as _bridge
         from core.external_intelligence.acquisition_store import acquisition_store as _acq
         from core.external_intelligence.providers import ecos as _ecos  # noqa: F401
+        from core.external_intelligence.providers import kosis as _kosis  # noqa: F401
         from core.external_intelligence.providers import opendart as _dart  # noqa: F401
 
         _suggestions = _bridge.suggest(
