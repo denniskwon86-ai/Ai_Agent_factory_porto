@@ -153,7 +153,7 @@ def inspect_rows(data: dict[str, list[dict]], contracts: dict[str, dict]) -> lis
                 inventory=[], production_plan=projected["production_plan"], bom=projected["bom"],
                 as_of=plan["plan_date"],
                 arrival={"metrics": {"available_quantity": {b["input_material_id"]: 0 for b in inputs}}})
-        except (CalcInputError, ValueError, KeyError) as exc:
+        except (CalcInputError, ValueError, KeyError, ArithmeticError) as exc:
             issue("BOM_PRODUCT_RECONCILIATION", "MFG-01", line, str(exc))
 
     balances: dict[tuple, Decimal] = defaultdict(Decimal)
@@ -169,8 +169,8 @@ def inspect_rows(data: dict[str, list[dict]], contracts: dict[str, dict]) -> lis
     return issues
 
 
-def audit_package(root: Path, profile: str = "quick") -> dict:
-    """Read explicit starter assets only; do not open any database or rewrite a manifest."""
+def read_package(root: Path, profile: str = "quick") -> tuple:
+    """Parse the same bytes fingerprinted; no DB or source writes."""
     if profile not in {"quick", "full"}:
         raise ValueError("profile must be quick or full")
     root = root.resolve(strict=True)
@@ -201,6 +201,12 @@ def audit_package(root: Path, profile: str = "quick") -> dict:
         except (OSError, UnicodeError, ValueError, KeyError, csv.Error) as exc:
             data[key] = []
             read_errors.append(dict(code="UNREADABLE_ASSET", dataset=key, line=0, detail=str(exc)))
+    return manifest, data, contracts, files, read_errors
+
+
+def audit_package(root: Path, profile: str = "quick") -> dict:
+    """Read explicit starter assets only; no DB or source writes."""
+    manifest, data, contracts, files, read_errors = read_package(root, profile)
     issues = read_errors + inspect_rows(data, contracts)
     grouped = Counter(classify_dataset(key)["business_kit_id"] for key in data)
     examples = defaultdict(list)

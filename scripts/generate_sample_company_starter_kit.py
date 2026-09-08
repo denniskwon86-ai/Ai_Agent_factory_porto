@@ -369,7 +369,9 @@ def generate_bom(profile: Profile, materials: Sequence[Mapping[str, Any]]) -> Li
     raw_ids = [m["material_id"] for m in materials if m["material_type"] in {"RAW", "CONSUMABLE"}]
     rows = []
     target = 8 if profile.name == "quick" else 30
-    for pidx in range(target):
+    # target은 상한이다. 품목 수를 넘겨 순회하면 같은 기간·같은 배합의
+    # -02 BOM이 생겨 제품 Resolver가 대체판 충돌로 거부한다.
+    for pidx in range(min(target, len(product_ids))):
         product = product_ids[pidx % len(product_ids)]
         lines = recipes.get(product) or [(raw_ids[pidx % len(raw_ids)], 1.05 + (pidx % 5) * 0.03, "INPUT")]
         for line_no, (inp, qty, role) in enumerate(lines, 1):
