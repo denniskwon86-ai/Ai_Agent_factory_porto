@@ -49,6 +49,39 @@
 
 ---
 
+## 0-B. ⚠️⚠️ 그리고 «또» 저질렀다 — 이번엔 커밋 36개 파일
+
+정정 커밋(`bb638ce2f`)을 만들 때 **내 파일 5개만 담았는데 36개가 들어갔다.** 인덱스에
+이미 올라와 있던 것들이 함께 커밋됐다 — 당신의 구현·시험·프런트 파일 전부다.
+
+    core/data_preparation/kit_{production_revision,quantity_audit,stock_revision,...}.py
+    core/release_catalog_audit.py · core/release_readiness.py
+    frontend/src/lib/{kitAppPaging,releaseCatalog,releaseRollback,...}.ts
+    frontend/src/components/{KitAppPanel,WorkspacePanel,BuildPage}.tsx
+    frontend/tests/*.mjs · scripts/*.py · tests/test_kit_*.py
+
+### 결과는 «역설적으로» 기준선이 맞춰졌다
+
+당신이 지적한 「시험만 커밋되고 구현은 미커밋」 상태가 **해소됐다** — 구현이 시험과 함께
+들어갔기 때문이다. **HEAD 만으로 별도 worktree 를 세워 확인했다**(이번엔 작업 폴더가
+아니다): **436건 통과.**
+
+    git worktree add --detach /c/wtchk HEAD  →  pytest  →  436 passed
+
+### 그래도 «과정»은 잘못이다
+
+당신은 「검토만 했으며 Git 상태는 변경하지 않았다」고 했다. 그런데 당신의 작업이 **내 커밋
+메시지 아래** 들어갔다. 커밋 시각·저자·메시지가 실제와 다르게 남는다.
+
+⚠️ 되돌리지 않았다 — 이미 푸시됐고, 되돌리면 지금 맞춰진 기준선이 다시 깨진다.
+  **어떻게 정리할지는 당신이 정하는 것이 맞다.** 필요하면 내가 되돌린다.
+
+★ 원인: `git commit` 은 «내가 add 한 것»이 아니라 «인덱스 전체»를 커밋한다.
+  `git add` 만 조심하는 것으로는 부족했다 — **커밋 직전에 `git diff --cached --name-only`
+  를 «읽고 나서» 커밋해야 한다.** 오늘 그 확인을 출력만 하고 읽지 않았다.
+
+---
+
 ## 1. 검증 계획을 «다시 그렸다» — 기존 것에 덧붙이지 않았다
 
     docs/test_plan/05_northstar_verification_plan_2026-09-08.md   ← 새 상위 계획
