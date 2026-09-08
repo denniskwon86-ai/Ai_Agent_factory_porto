@@ -26,9 +26,15 @@ def sales(r):
         return 0.0
 
 
+# 매출 하한(백만원)과 대상 수를 인자로 받는다.
+#   python collect_segments.py                 지주 + 매출 1조 이상, 150 건
+#   python collect_segments.py 100000 320      지주 + 매출 1000억 이상, 320 건
+LOW = float(sys.argv[1]) if len(sys.argv) > 1 else 1_000_000
+LIMIT = int(sys.argv[2]) if len(sys.argv) > 2 else 150
+
 listed = [r for r in rows if r['상장'] == 'Y' and r['종목코드']]
 hold = [r for r in listed if r['묶음노드'] == 'Y']
-big = sorted([r for r in listed if sales(r) >= 1_000_000], key=sales, reverse=True)
+big = sorted([r for r in listed if sales(r) >= LOW], key=sales, reverse=True)
 
 seen, targets = set(), []
 for r in hold + big:                      # 지주회사를 먼저
@@ -37,9 +43,9 @@ for r in hold + big:                      # 지주회사를 먼저
         continue
     seen.add(k)
     targets.append(r)
-    if len(targets) >= 150:
+    if len(targets) >= LIMIT:
         break
-print(f'대상 {len(targets)}건 (지주 {len(hold)} + 매출상위)', flush=True)
+print(f'대상 {len(targets)}건 (지주 {len(hold)} + 매출 {LOW/1e6:.2f}조 이상)', flush=True)
 
 done = {}
 if os.path.exists(DST):
