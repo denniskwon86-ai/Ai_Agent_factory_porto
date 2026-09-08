@@ -181,14 +181,14 @@ footer code{font-family:var(--mono);font-size:11.5px}
     <select id="fa" aria-label="업태"><option value="">업태 전체</option></select>
     <select id="fb" aria-label="업종"><option value="">업종 전체</option></select>
     <select id="ft" aria-label="품목(2단)"><option value="">품목 전체</option></select>
-    <select id="fp" aria-label="공정(3단)"><option value="">공정 전체</option></select>
+    <select id="fp" aria-label="공정·형태(3단, 제조업)"><option value="">공정·형태 전체</option></select>
     <select id="fv" aria-label="밸류체인"><option value="">밸류체인 전체</option></select>
     <label class="chk"><input type="checkbox" id="fl"> 비상장 공시법인 포함</label>
     <button class="clear" id="rst">초기화</button>
     <span class="sp"></span><span class="cnt" id="cnt"></span>
   </div>
   <div class="tbl-scroll"><table class="ll"><thead><tr>
-    <th>소속그룹</th><th>회사</th><th>사업 단위</th><th>업태</th><th>업종</th><th>품목 › 공정</th><th>밸류체인</th><th style="text-align:right">매출(백만원) · 기준</th>
+    <th>소속그룹</th><th>회사</th><th>사업 단위</th><th>업태</th><th>업종</th><th>품목 › 공정·형태</th><th>밸류체인</th><th style="text-align:right">매출(백만원) · 기준</th>
   </tr></thead><tbody id="tb"></tbody></table></div>
   <div class="empty" id="none" hidden>조건에 맞는 인스턴스가 없다.</div>
 </section>
@@ -348,7 +348,7 @@ function fillOptions(){
     ['#fa', 'a', '업태 전체', r => r.a, i => D.A[i]],
     ['#fb', 'b', '업종 전체', r => r.b, i => D.B[i]],
     ['#ft', 't', '품목 전체', r => r.t2 || null, v => v],
-    ['#fp', 'p', '공정 전체', r => r.t3 || null, v => v],
+    ['#fp', 'p', '공정·형태 전체', r => r.t3 || null, v => v],
     ['#fv', 'v', '밸류체인 전체', r => r.vc, v => v],
   ];
   specs.forEach(([selId, skip, allLabel, get, label]) => {
