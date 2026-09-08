@@ -96,15 +96,25 @@ def build() -> list[dict]:
             continue
         uni[k] = {
             '법인등록번호': k, '회사명': r['소속회사명'], '종목코드': '', 'KSIC': r['KSIC'],
-            'A세분류': r['A세분류'], 'B1주업종': r['B1주업종'], 'B1_2단': r['B1_2단'],
+            'A대분류': r.get('A대분류', ''), 'A세분류': r['A세분류'],
+            'B1주업종': r['B1주업종'], 'B1_2단': r['B1_2단'],
             '묶음노드': r['묶음노드'], '모수계층': r['모수계층'], '매출액': r['매출액'],
             '상장': bool((r.get('기업공개일') or '').strip()), '출처': '공정위',
             '기업집단명들': r.get('기업집단명들') or [],
         }
 
     listed = fetch_listed()
-    same = add = fixed = 0
-    for r in listed:
+    # **비상장 공시법인도 합친다.** 르노코리아는 DART 에 있고 업종코드도 정확한데
+    # (30121 → C30121) 상장이 아니라서 빠져 있었다. 다만 이쪽은 매출을 모르고
+    # SPC·펀드가 대량 섞이므로(64 금융 · 68 부동산) **계층을 갈라 둔다**
+    unlisted = []
+    up = os.path.join(CACHE, 'unlisted.json')
+    if os.path.exists(up):
+        unlisted = [dict(r, _un=True) for r in json.load(io.open(up, encoding='utf-8'))]
+        print(f'비상장 공시법인 {len(unlisted)}건도 합친다')
+
+    same = add = fixed = addu = 0
+    for r in listed + unlisted:
         if r.get('error'):
             continue
         k, ks = _jurir(r.get('jurir')), F.to_ksic(r.get('induty'))
@@ -113,24 +123,32 @@ def build() -> list[dict]:
         cur = uni.get(k)
         if cur:
             same += 1
-            cur['상장'] = True
-            cur['종목코드'] = r['stock']
+            if not r.get('_un'):
+                cur['상장'] = True
+                cur['종목코드'] = r.get('stock', '')
             if F._지주코드.match(cur['KSIC'] or '') and not F._지주코드.match(ks):
                 res = classify(ks, cur.get('매출액') or '1', cur['회사명'], '')
                 cur.update({'KSIC': ks, '출처': '공정위+DART(지주보정)'})
-                cur.update({x: res.get(x, '') for x in ('A세분류', 'B1주업종', 'B1_2단')})
+                cur.update({x: res.get(x, '') for x in ('A대분류', 'A세분류', 'B1주업종', 'B1_2단')})
                 fixed += 1
             continue
         res = classify(ks, '1', r.get('name') or '', '')
         uni[k] = {
-            '법인등록번호': k, '회사명': r.get('name'), '종목코드': r['stock'], 'KSIC': ks,
-            'A세분류': res.get('A세분류', ''), 'B1주업종': res.get('B1주업종', ''),
+            '법인등록번호': k, '회사명': r.get('name'), '종목코드': r.get('stock', ''), 'KSIC': ks,
+            'A대분류': res.get('A대분류', ''), 'A세분류': res.get('A세분류', ''),
+            'B1주업종': res.get('B1주업종', ''),
             'B1_2단': res.get('B1_2단', ''), '묶음노드': res.get('묶음노드', ''),
-            '모수계층': 'T1', '매출액': '', '상장': True, '출처': 'DART',
-            '기업집단명들': [],
+            '모수계층': 'T1u' if r.get('_un') else 'T1', '매출액': '',
+            '상장': not r.get('_un'),
+            '출처': 'DART(비상장)' if r.get('_un') else 'DART', '기업집단명들': [],
         }
-        add += 1
+        if r.get('_un'):
+            addu += 1
+        else:
+            add += 1
     print(f'상장 {len(listed)}건 → 겹침 {same} (지주보정 {fixed}) · 신규 {add}')
+    if unlisted:
+        print(f'비상장 {len(unlisted)}건 → 신규 {addu}')
     print(f'통합 모수 {len(uni)}건')
     return list(uni.values())
 
@@ -143,8 +161,10 @@ def report(rows: list[dict]) -> None:
 
     모수밖(매출 0 인 껍데기)과 묶음노드(지주회사 — 매출이 자회사와 겹친다)는 뺀다.
     """
+    # **T1u(비상장 공시법인)는 기본 집계에서 뺀다.** 매출을 모르고 SPC·펀드가
+    # 섞여 있어 상장사와 같이 세면 셀 분포가 왜곡된다 — 아래에 따로 센다
     live = [r for r in rows
-            if r['A세분류'] and r['모수계층'] != '모수밖' and r['묶음노드'] != 'Y']
+            if r['A세분류'] and r['모수계층'] not in ('모수밖', 'T1u') and r['묶음노드'] != 'Y']
     cells = collections.Counter((r['A세분류'], r['B1주업종']) for r in live)
     tot = len(live)
     print(f'\n사업 인스턴스 {tot}건 · 관측 셀 {len(cells)}칸')
@@ -161,14 +181,26 @@ def report(rows: list[dict]) -> None:
     for (a, b), n in cells.most_common(15):
         print(f'  {n:>5}건  {a:<12} × {b}')
 
-    print('\n=== A 업태별 ===')
+    print('\n=== A 대분류별 ===')
+    for a0, n0 in collections.Counter(r.get('A대분류') or '(없음)' for r in live).most_common():
+        print(f'  {n0:>5}건  {a0}')
+
+    print('\n=== A 업태별(세분류) ===')
     for a, n in collections.Counter(r['A세분류'] for r in live).most_common():
         print(f'  {n:>5}건  {a}')
 
+    u = [r for r in rows if r['모수계층'] == 'T1u' and r['A세분류'] and r['묶음노드'] != 'Y']
+    if u:
+        print(f'\n=== 비상장 공시법인(T1u) {len(u)}건 — 별도 집계 ===')
+        for a2, n2 in collections.Counter(r['A세분류'] for r in u).most_common(8):
+            print(f'  {n2:>5}건  {a2}')
+        print('  매출을 모르므로 규모로 걸러낼 수 없다. SPC·펀드가 섞여 있다')
+
 
 def to_csv(rows: list[dict], path: str = OUT_CSV) -> None:
-    cols = ['법인등록번호', '회사명', '종목코드', 'KSIC', 'A세분류', 'B1주업종', 'B1_2단',
-            '묶음노드', '모수계층', '매출액', '상장', '출처', '기업집단명들']
+    cols = ['법인등록번호', '회사명', '종목코드', 'KSIC', 'A대분류', 'A세분류',
+            'B1주업종', 'B1_2단', '묶음노드', '모수계층', '매출액', '상장',
+            '출처', '기업집단명들']
     with io.open(path, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction='ignore')
         w.writeheader()

@@ -17,6 +17,9 @@
 | `build_universe.py` | **통합 모수** — 공정위 + 상장 법인을 법인등록번호로 이어 셀 분포를 낸다 |
 | `collect_segments.py` | 상위 셀 회사의 부문을 수집한다(지주회사 + 매출 상위) |
 | `apply_segments.py` | 다부문 회사를 부문으로 대체해 인스턴스 목록을 만든다 |
+| `fetch_unlisted.py` | **비상장 공시법인 수집기** — 르노코리아처럼 상장이 아닌 실체를 담는다 |
+| `dump_datasets.py` | 수집 데이터를 `samples/` 에 남긴다 — `.cache/` 는 커밋되지 않는다 |
+| `make_dashboard.py` + `dashboard.tpl.html` | **산업 커버리지 맵** — 격자에서 사업묶음을 고르고 롱리스트를 뽑는다 |
 
 ## 쓰는 법
 
