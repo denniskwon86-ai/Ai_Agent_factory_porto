@@ -27,7 +27,7 @@ ftc = list(csv.DictReader(io.open(os.path.join(SAMP, 'ftc-all-2026-classified.cs
 # 부문을 갈라 놓고도 키트 대상이 못 되니 목적을 놓친다
 AIDX = {}
 for _r in uni:
-    _val = (_r['A세분류'], _r['B1주업종'], _r['B1_2단'])
+    _val = (_r['A세분류'], _r['B1주업종'], _r['B1_2단'], _r.get('B1_3단', ''))
     if not any(_val):
         continue
     for _g in (_r['기업집단명들'] or '').split('|'):
@@ -102,7 +102,7 @@ for r in uni:
         continue
     if sr:
         parent = {'A대분류': r.get('A대분류', ''), 'A세분류': r['A세분류'],
-                  'B1주업종': r['B1주업종'], 'B1_2단': r['B1_2단'],
+                  'B1주업종': r['B1주업종'], 'B1_2단': r['B1_2단'], 'B1_3단': r.get('B1_3단', ''),
                   '_법인명': r['회사명'], '_기업집단': GROUP.get(R._norm_corp(r['회사명']), '')}
         kept = 0
         for s in sr['segments']:
@@ -121,7 +121,7 @@ for r in uni:
                          '계층': r['모수계층'], '소속그룹': r.get('기업집단명들', ''), '종업원수': r.get('종업원수', ''),
                          'A대분류': A대분류.get(j['A세분류'], ''),
                          'A세분류': j['A세분류'], 'B1주업종': j['B1주업종'],
-                         'B1_2단': j['B1_2단'], '매출': s['매출'], '매출기준': seg_basis(sr.get('보고서')), '판정근거': j['판정근거']})
+                         'B1_2단': j['B1_2단'], 'B1_3단': j.get('B1_3단', ''), '매출': s['매출'], '매출기준': seg_basis(sr.get('보고서')), '판정근거': j['판정근거']})
             kept += 1
         replaced += 1
         # 부문이 전부 계열사명이었으면 그 회사는 남는 사업이 없다. 지주회사면
@@ -131,7 +131,7 @@ for r in uni:
                          '계층': r['모수계층'], '소속그룹': r.get('기업집단명들', ''), '종업원수': r.get('종업원수', ''),
                          'A대분류': r.get('A대분류') or A대분류.get(r['A세분류'], ''),
                          'A세분류': r['A세분류'], 'B1주업종': r['B1주업종'],
-                         'B1_2단': r['B1_2단'], '매출': r['매출액'], '매출기준': r.get('매출기준', ''), '판정근거': 'KSIC'})
+                         'B1_2단': r['B1_2단'], 'B1_3단': r.get('B1_3단', ''), '매출': r['매출액'], '매출기준': r.get('매출기준', ''), '판정근거': 'KSIC'})
         continue
     if r['묶음노드'] == 'Y':
         held += 1                              # 부문을 못 얻은 지주회사는 여전히 뺀다
@@ -147,7 +147,7 @@ for r in uni:
                  '계층': r['모수계층'], '소속그룹': r.get('기업집단명들', ''), '종업원수': r.get('종업원수', ''),
                  'A대분류': r.get('A대분류') or A대분류.get(r['A세분류'], ''),
                  'A세분류': r['A세분류'], 'B1주업종': r['B1주업종'],
-                 'B1_2단': r['B1_2단'], '매출': r['매출액'], '매출기준': r.get('매출기준', ''), '판정근거': 'KSIC'})
+                 'B1_2단': r['B1_2단'], 'B1_3단': r.get('B1_3단', ''), '매출': r['매출액'], '매출기준': r.get('매출기준', ''), '판정근거': 'KSIC'})
 
 print(f'세그먼트로 대체한 회사 {replaced}건 · 부문 못 얻은 지주 {held}건 제외')
 if shell:
@@ -191,7 +191,7 @@ json.dump(inst, io.open(os.path.join(HERE, 'instances.json'), 'w', encoding='utf
 dst = os.path.join(SAMP, 'instances-2026.csv')
 with io.open(dst, 'w', encoding='utf-8', newline='') as f:
     w = csv.DictWriter(f, fieldnames=['단위', '계층', '소속그룹', '모법인', '이름',
-                                      'A대분류', 'A세분류', 'B1주업종', 'B1_2단',
+                                      'A대분류', 'A세분류', 'B1주업종', 'B1_2단', 'B1_3단',
                                       '매출', '매출기준', '종업원수', '판정근거'])
     w.writeheader(); w.writerows(inst)
 print(f'\n{len(inst)}건 → {dst}')

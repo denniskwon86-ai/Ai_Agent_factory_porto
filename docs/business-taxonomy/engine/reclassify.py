@@ -25,7 +25,7 @@ CSV_PATH = os.path.join(SAMPLES, 'ftc-all-2026-classified.csv')
 sys.path.insert(0, HERE)
 from ksic_rules import classify  # noqa: E402
 
-FIELDS = ('A대분류', 'A세분류', 'B1주업종', 'B1_2단', '묶음노드', '모수계층', '판정근거')
+FIELDS = ('A대분류', 'A세분류', 'B1주업종', 'B1_2단', 'B1_3단', '묶음노드', '모수계층', '판정근거')
 
 
 def main(dry: bool = False) -> None:

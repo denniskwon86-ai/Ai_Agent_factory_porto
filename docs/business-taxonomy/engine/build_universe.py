@@ -101,7 +101,7 @@ def build() -> list[dict]:
         uni[k] = {
             '법인등록번호': k, '회사명': r['소속회사명'], '종목코드': '', 'KSIC': r['KSIC'],
             'A대분류': r.get('A대분류', ''), 'A세분류': r['A세분류'],
-            'B1주업종': r['B1주업종'], 'B1_2단': r['B1_2단'],
+            'B1주업종': r['B1주업종'], 'B1_2단': r['B1_2단'], 'B1_3단': r.get('B1_3단', ''),
             '묶음노드': r['묶음노드'], '모수계층': r['모수계층'], '매출액': r['매출액'],
             '상장': bool((r.get('기업공개일') or '').strip()), '출처': '공정위',
             '종업원수': (r.get('종업원수') or '').strip(),
@@ -146,7 +146,7 @@ def build() -> list[dict]:
             if F._지주코드.match(cur['KSIC'] or '') and not F._지주코드.match(ks):
                 res = classify(ks, cur.get('매출액') or '1', cur['회사명'], '')
                 cur.update({'KSIC': ks, '출처': '공정위+DART(지주보정)'})
-                cur.update({x: res.get(x, '') for x in ('A대분류', 'A세분류', 'B1주업종', 'B1_2단')})
+                cur.update({x: res.get(x, '') for x in ('A대분류', 'A세분류', 'B1주업종', 'B1_2단', 'B1_3단')})
                 fixed += 1
             continue
         res = classify(ks, '1', r.get('name') or '', '')
@@ -154,7 +154,8 @@ def build() -> list[dict]:
             '법인등록번호': k, '회사명': r.get('name'), '종목코드': r.get('stock', ''), 'KSIC': ks,
             'A대분류': res.get('A대분류', ''), 'A세분류': res.get('A세분류', ''),
             'B1주업종': res.get('B1주업종', ''),
-            'B1_2단': res.get('B1_2단', ''), '묶음노드': res.get('묶음노드', ''),
+            'B1_2단': res.get('B1_2단', ''), 'B1_3단': res.get('B1_3단', ''),
+            '묶음노드': res.get('묶음노드', ''),
             '모수계층': 'T1u' if r.get('_un') else 'T1', '매출액': '',
             '상장': not r.get('_un'),
             '출처': 'DART(비상장)' if r.get('_un') else 'DART', '기업집단명들': [],
@@ -233,7 +234,7 @@ def report(rows: list[dict]) -> None:
 
 def to_csv(rows: list[dict], path: str = OUT_CSV) -> None:
     cols = ['법인등록번호', '회사명', '종목코드', 'KSIC', 'A대분류', 'A세분류',
-            'B1주업종', 'B1_2단', '묶음노드', '모수계층', '매출액', '매출기준', '종업원수', '상장',
+            'B1주업종', 'B1_2단', 'B1_3단', '묶음노드', '모수계층', '매출액', '매출기준', '종업원수', '상장',
             '출처', '기업집단명들']
     with io.open(path, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction='ignore')
