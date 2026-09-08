@@ -128,6 +128,7 @@ table.ll td.num .basis{display:block;font-family:var(--sans);font-size:10.5px;co
 table.ll td.unit .whole{color:var(--ink-3);font-family:var(--mono);font-size:11px;letter-spacing:.05em}
 .tag{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.04em;padding:1px 6px;border-radius:3px;
   border:1px solid var(--accent-2);color:var(--accent-2);white-space:nowrap}
+.tag.hold{border-color:var(--line-2);color:var(--ink-3)}
 .empty{padding:34px 18px;text-align:center;color:var(--ink-3)}
 
 #tip{position:fixed;z-index:9;pointer-events:none;opacity:0;transition:opacity .09s;background:var(--ink);
@@ -184,6 +185,7 @@ footer code{font-family:var(--mono);font-size:11.5px}
     <select id="fp" aria-label="공정·형태(3단, 제조업)"><option value="">공정·형태 전체</option></select>
     <select id="fv" aria-label="밸류체인"><option value="">밸류체인 전체</option></select>
     <label class="chk"><input type="checkbox" id="fl"> 비상장 공시법인 포함</label>
+    <label class="chk"><input type="checkbox" id="fh"> 지주회사 포함</label>
     <button class="clear" id="rst">초기화</button>
     <span class="sp"></span><span class="cnt" id="cnt"></span>
   </div>
@@ -205,14 +207,16 @@ const D = __DATA__;
 const $ = s => document.querySelector(s);
 const fmt = n => n.toLocaleString('ko-KR');
 const SC = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'].map(v => 'var(' + v + ')');
-const all = D.rows.map(r => ({u:r[0], nm:r[1], mo:r[2] < 0 ? '' : D.mo[r[2]],
+const all = D.rows.map(r => ({u:r[0], hold:r[0] === 2, nm:r[1], mo:r[2] < 0 ? '' : D.mo[r[2]],
                               a:r[3], b:r[4], t2:r[5], rev:r[6], un:r[7],
                               gp:r[8] < 0 ? '' : (D.gr || [])[r[8]], basis:r[9] || '', t3:r[10] || '',
                               vc:(r[11] || []).map(x => D.vc[x]), stage:r[12] || 0}));
 /* **격자·커버리지는 T1·T2 만 센다.** T1u(비상장 공시법인)는 매출을 모르고 SPC·펀드가
    대량 섞여 있어 함께 세면 커버리지가 왜곡된다. 롱리스트에서는 필터로 켤 수 있다 —
    르노코리아처럼 명백한 대상이 그쪽에 있기 때문이다 */
-const rows = all.filter(r => !r.un);
+/* 격자·커버리지는 **사업 인스턴스만** 센다 — 묶음(지주회사)은 매출이 자회사와
+   겹쳐서 넣으면 같은 사업이 두 번 세어진다. 롱리스트에는 체크박스로 켠다 (D-38) */
+const rows = all.filter(r => !r.un && !r.hold);
 
 const key = (a,b) => a + '|' + b;
 const cellN = new Map();
@@ -319,7 +323,8 @@ function subset(skip){
   const fg = $('#fg').value;
   const fa = $('#fa').value, fb = $('#fb').value, ft = $('#ft').value, fp = $('#fp').value;
   const fv = $('#fv').value;
-  let out = $('#fl').checked ? all : rows;
+  /* 묶음(지주회사)은 기본으로 빼고 체크박스로 켠다 — 매출이 자회사와 겹친다 */
+  let out = all.filter(r => (!r.un || $('#fl').checked) && (!r.hold || $('#fh').checked));
   if (skip !== 'g' && fg !== '') out = out.filter(r => big(r.a) === fg);
   if (skip !== 'a' && fa !== '') out = out.filter(r => r.a == fa);
   if (skip !== 'b' && fb !== '') out = out.filter(r => r.b == fb);
@@ -411,8 +416,9 @@ function render(){
   $('#tb').innerHTML = out.slice(0,400).map(r => '<tr>'
     + '<td class="gp">' + (r.gp ? r.gp.split('|').join(' · ') : '—') + '</td>'
     + '<td class="nm">' + (r.u ? (r.mo || '—') : r.nm) + '</td>'
-    + '<td class="unit">' + (r.u
+    + '<td class="unit">' + (r.u === 1
         ? r.nm + ' <span class="tag">부문</span>'
+        : r.hold ? '<span class="tag hold">지주 · 집계제외</span>'
         : '<span class="whole">전사</span>') + '</td>'
     + '<td>' + D.A[r.a] + '</td><td>' + D.B[r.b] + '</td>'
     + '<td class="mo">' + (r.t2 || '—') + (r.t3 ? '<span class="t3"> › ' + r.t3 + '</span>' : '') + '</td>'
@@ -423,13 +429,13 @@ function render(){
 /* 품목을 직접 고르면 칸 선택은 그대로 둔다 — 칸 안에서 좁히는 흐름이기 때문이다 */
 ['#ft', '#fp', '#fv'].forEach(s => $(s).addEventListener('input', () => { fillOptions(); chips(); render(); }));
 CHAIN.slice(0, 4).forEach(sid => $(sid).addEventListener('input', () => clearBelow(sid), true));
-['#q', '#fl'].forEach(s => $(s).addEventListener('input', () => { fillOptions(); chips(); render(); }));
+['#q', '#fl', '#fh'].forEach(s => $(s).addEventListener('input', () => { fillOptions(); chips(); render(); }));
 ['#fg','#fa','#fb'].forEach(s => $(s).addEventListener('input', () => {
   sel = null; paintSel(); fillOptions(); chips(); render();
 }));
 $('#rst').addEventListener('click', () => {
   $('#q').value = ''; $('#fg').value = ''; $('#fa').value = '';
-  $('#fb').value = ''; $('#ft').value = ''; $('#fp').value = ''; $('#fv').value = ''; $('#fl').checked = false;
+  $('#fb').value = ''; $('#ft').value = ''; $('#fp').value = ''; $('#fv').value = ''; $('#fl').checked = false; $('#fh').checked = false;
   sel = null; paintSel(); fillOptions(); chips(); render();
 });
 

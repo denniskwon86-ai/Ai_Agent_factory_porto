@@ -51,7 +51,9 @@ rows = []
 for r in inst:
     if not r['A세분류'] or not r['B1주업종']:
         continue
-    rows.append([1 if r['단위'] == '세그먼트' else 0, r['이름'][:40],
+    # 단위 — 0 법인 · 1 세그먼트(부문) · **2 묶음(지주회사)**.
+    # 묶음은 롱리스트에 보이지만 격자·커버리지 집계에서는 뺀다 (D-38)
+    rows.append([2 if r['단위'] == '묶음' else (1 if r['단위'] == '세그먼트' else 0), r['이름'][:40],
                  mi.get(r['모법인'], -1), ai[r['A세분류']], bi[r['B1주업종']],
                  r['B1_2단'][:20], num(r['매출']),
                  1 if r.get('계층') == 'T1u' else 0,
@@ -82,7 +84,8 @@ out = {
         'instances': len(rows),
         'corp': sum(1 for r in rows if r[0] == 0),
         'seg': sum(1 for r in rows if r[0] == 1),
-        'core': sum(1 for r in rows if r[7] == 0),
+        'hold': sum(1 for r in rows if r[0] == 2),
+        'core': sum(1 for r in rows if r[7] == 0 and r[0] != 2),
         'tier1u': sum(1 for r in rows if r[7] == 1),
         'listed': sum(1 for r in uni if r['상장'] == 'Y'),
         'holding': sum(1 for r in uni if r['묶음노드'] == 'Y'),
