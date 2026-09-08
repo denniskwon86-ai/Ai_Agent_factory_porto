@@ -1,5 +1,7 @@
 # 세션 인계 — 검증 계획 재작성과 승격 경로 (2026-09-08 ~ 09)
 
+> **Codex 후속 정리 / 2026-09-09 00:30 KST:** 아래 내용은 Claude 세션 종료 시 기록이다. §4의 1번 **커밋 기준선 정리는 `1194dccd7`로 완료**됐으며, 실제 원격 `e38d95993`에도 포함됨을 확인했다. 현재 미커밋은 실행 로그 `data/interaction_log.jsonl` 추가 10행뿐이고 보존·커밋 제외한다. 최신 검증 구분과 다음 K1-c1 재개점은 [기준선 인계의 §6](WORKTREE_BASELINE_RECONCILIATION_2026-09-09.md)을 따른다. T3·브라우저·실제 원천 미확인은 해소된 것으로 바꾸지 않는다.
+
 - 브랜치: `claude/data-acquisition-orchestrator-20260905` @ `9d8793c00` (원격과 동일)
 - 관련 문서: `DATA_ACQUISITION_ORCHESTRATOR_V0_1_2026-09-05.md`(수집기) ·
   `05_northstar_verification_plan_2026-09-08.md`(검증 계획) ·
