@@ -150,6 +150,20 @@ def test_current_valid_rows_have_no_value_change(candidate):
     assert plans(report) == []
 
 
+def test_quantity_failure_blocks_candidate_even_when_bom_has_no_issues(candidate, monkeypatch):
+    failure = {"status": "FAIL", "issues": [{"code": "Q_STOCK_BALANCE"}], "issue_count": 1}
+    seen = []
+    def check(rows):
+        seen.append(rows["MFG-01"][0]["material_requirement"])
+        return failure
+    monkeypatch.setattr(revision, "inspect_quantity_flow", check)
+    report = revision.propose_revision(*candidate)
+    assert seen == ["20.000"]  # Candidate rows, not stale source rows.
+    assert report["after"]["issue_count"] == 0 and report["held"] == []
+    assert report["quantity_flow"] == failure
+    assert report["candidate_check"] == "FAIL"
+
+
 def test_real_quick_assets_candidate_keeps_ambiguous_boms_without_touching_source():
     def hashes():
         return {str(p.relative_to(KIT)): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -272,7 +286,11 @@ def test_real_quick_exact_copy_candidate_reconciles_all_500_plans():
     before = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in KIT.rglob("*") if p.is_file()}
     report = revision.plan_package_revision(KIT, "quick", resolve_exact_bom_copies=True)
     assert report["status"] == "REVIEW_ONLY"
-    assert report["candidate_check"] == "PASS_CHECKED_SCOPE"
+    # Organization/BOM are reconciled, but the newly checked inventory chain is not.
+    assert report["candidate_check"] == "FAIL"
+    assert report["quantity_flow"]["status"] == "FAIL"
+    assert report["quantity_flow"]["issue_counts"]["Q_UNIT"] > 0
+    assert report["quantity_flow"]["issue_counts"]["Q_NEGATIVE_STOCK"] > 0
     assert report["after"]["issue_count"] == 0 and report["held"] == []
     assert report["change_counts"] == {"FND-01": 3, "MDM-05": 5, "MFG-01": 500}
     assert plans(report)[0]["before"]["material_requirement"] == "66.4"
@@ -293,10 +311,11 @@ def test_cli_explicit_copy_resolution_is_checked_candidate_not_certification(tmp
     target = tmp_path / "candidate.json"
     result = subprocess.run([sys.executable, "-m", "scripts.plan_business_kit_initial_revision",
                              "--resolve-exact-bom-copies", "--report", str(target)], capture_output=True, text=True)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 1, result.stdout + result.stderr
     report = json.loads(target.read_text(encoding="utf-8"))
     assert report["status"] == "REVIEW_ONLY" and report["after"]["issue_count"] == 0
     assert report["bom_copy_rule"] == "exact-bom-copy-against-full/1"
+    assert report["quantity_flow"]["status"] == "FAIL"
 
 
 def test_generator_does_not_pad_bom_count_by_repeating_products():

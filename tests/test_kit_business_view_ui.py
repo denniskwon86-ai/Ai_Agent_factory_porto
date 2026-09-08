@@ -89,7 +89,7 @@ def test_app_panel_passes_identity_and_uses_business_view():
     src = PANEL.read_text(encoding="utf-8")
     assert "<KitBusinessView" in src
     assert "appId={row.app_id}" in src
-    assert "preferredDatasetName(appId, ds)" in src
+    assert "chooseDataset: (datasets) => preferredDatasetName(appId, datasets)" in src
     assert "datasetDisplayName(appId, d)" in src
     assert "asOf={rows.as_of}" in src and "stale={rows.stale}" in src
 

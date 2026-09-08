@@ -155,6 +155,9 @@ def test_inspection_never_rewrites_checked_in_samples():
     assert report["status"] in {"FAIL", "PASS_CHECKED_SCOPE"}
     assert "DART/ECOS actual-source reconciliation" in report["not_verified"]
     assert report["issue_count"] == sum(report["issue_counts"].values())
+    assert report["quantity_flow"]["status"] == "FAIL"
+    assert report["issue_counts"]["Q_UNIT"] == report["quantity_flow"]["issue_counts"]["Q_UNIT"]
+    assert report["quantity_flow"]["population"]["movements"] == 5000
 
 
 def test_missing_csv_reports_failure_not_a_matching_empty_baseline(tmp_path):

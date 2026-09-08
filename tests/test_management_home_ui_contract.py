@@ -130,8 +130,11 @@ def test_회사문맥_변경은_업무키트_목록과_열린_앱을_새_증명�
     assert "setRevision((value) => value + 1)" in operations
     assert "next.tenantId !== contextRef.current.tenantId" in operations
     assert "addEventListener('factory:enterprise-context-changed', refresh)" in app_panel
-    assert "proofRef.current = ''" in app_panel
-    assert "if (open) void load()" in app_panel
+    # 초기화·지연 응답 차단 행동은 frontend/tests/kit-app-paging.test.mjs에서 실행 검증한다.
+    # 여기서는 회사 문맥 이벤트가 실제 조회 상태 관리로 연결되는지 잠근다.
+    assert "if (open) void pager.load()" in app_panel
+    assert "else pager.reset()" in app_panel
+    assert "readRecords: readAppRecords" in app_panel
 
 
 def test_계산승인화면은_살아있는_승인을_승인없음으로_표시하지_않는다():
@@ -485,10 +488,14 @@ def test_릴리스_상세는_키트_앱_이름과_운영상태를_앞세우고_�
     assert "업무 앱 {kitApp.app_id}" not in page
     assert "{selectedRelease.release_id}" not in page
     assert "{selectedProject.id}" not in page
-    assert "운영 중" in page and "운영 후보" in page
+    # 상태 문구는 공통 함수로 이동했다. 반환값은 release-catalog.test.mjs에서 실행 검증한다.
+    assert "releaseLifecycleView as lifecycleView" in page
+    assert "const state = lifecycleView(selectedRelease, kitApp)" in page
+    assert "{state.label}</strong>" in page
     assert "게시 {localTime(selectedRelease.created_at)}" in page
     assert "<summary style={{ cursor: 'pointer' }}>식별 정보</summary>" not in page
-    assert ">앱 실행</button>" in page
+    assert "disabled={!state.executable}" in page
+    assert "if (state.executable) onOpenRelease(releaseId)" in page
     assert ">릴리스 관리</button>" in page
 
 

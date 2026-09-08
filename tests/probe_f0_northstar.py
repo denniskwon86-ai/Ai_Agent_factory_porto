@@ -58,6 +58,7 @@ REPORT = os.path.join(PROJECT_ROOT, "docs", "test_plan", "F0_BREAKS.md")
 MISSING = "MISSING"    # 이음매 자체가 없다 — 만들어야 한다
 EMPTY = "EMPTY"        # 이음매는 있는데 «한 번도 흐른 적이 없다»
 THIN = "THIN"          # 흐르긴 했는데 «거의 안 쓰인다»
+UNUSED = "UNUSED"      # 경로는 «돈다»(시험으로 증명됨). 아무도 쓰지 않았을 뿐이다
 OK = "OK"
 
 
@@ -167,9 +168,16 @@ def test_seam_f4():
     deliv = _count("collaboration.db", "app_deliveries")
     promo = _count("workspace.db", "release_promotions")
     if deliv <= 0:
-        _verdict(EMPTY, seam,
-                 "개인 앱 전달이 0건이다. 승격(`release_promotions`)은 " + str(promo)
-                 + "건 있으나 «사람에게 전달된» 적은 없다 — 생성물이 부서 손에 닿지 않았다.")
+        #: ★ 「0건」이 「끊겼다」는 아니다. 실물 릴리스로 관통시켜 «돈다»는 것을 증명했다
+        #:   (`tests/test_app_delivery_real_release.py` 10건: 생성→전달→수신함→수락).
+        #:   그래서 판정은 «미사용»이지 «끊김»이 아니다.
+        _verdict(UNUSED, seam,
+                 "개인 앱 전달이 0건이다(승격은 " + str(promo) + "건). "
+                 "★ **경로는 돈다** — 실제 라이브러리 릴리스로 생성→전달→수신함→수락까지 "
+                 "관통시켜 증명했다(test_app_delivery_real_release.py). "
+                 "즉 «끊긴 것이 아니라 아무도 쓴 적이 없다». "
+                 "⚠️ 다만 기존 전달 시험 38건은 전부 «가짜 release_lookup» 을 주입했다 — "
+                 "실제 library/ 와 만나는 이음매는 오늘까지 한 번도 검증된 적이 없었다.")
     _verdict(OK, seam, "전달 " + str(deliv) + "건.")
 
 

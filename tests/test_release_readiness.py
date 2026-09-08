@@ -251,12 +251,17 @@ def test_rollback_reports_disable_failure_instead_of_claiming_success(env, monke
     _write_release(lib)
 
     class _Broken:
+        def get_status(self, *a, **k):
+            return {'status': 'active'}
+
         def disable(self, *a, **k):
             raise RuntimeError("db locked")
     out = rd.rollback(REL, "kim", "결과 오류", workspace_impl=ws, lifecycle_impl=_Broken())
     assert out["program_disabled"] is False
     assert "db locked" in out["disable_error"]
-    assert "여전히 사용 가능합니다" in out["limitation"]
+    assert out['outcome'] == 'failed'
+    assert '확인하지 못했습니다' in out['message']
+    assert rd.rollback_history(REL)[0]['outcome'] == 'failed'
 
 
 def test_rollback_revokes_promotion(env):
