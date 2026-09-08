@@ -65,6 +65,7 @@ for i, t in enumerate(todo, 1):
         if not rpt:
             rec['error'] = '사업보고서 없음'
         else:
+            rec['보고서'] = rpt.get('report_nm', '')   # 「사업보고서 (2025.12)」 — 부문 매출의 기준연도
             note = F.note_xml(rpt['rcept_no'])
             if not note:
                 rec['error'] = '주석 못찾음'

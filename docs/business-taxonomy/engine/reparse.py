@@ -50,6 +50,9 @@ def main(dry: bool = False) -> None:
         rec['단일부문'] = P.single_segment(note)
         rec['segments'] = P.parse(note)
         rec['error'] = None
+        # 부문 매출이 **어느 해 사업보고서**에서 왔는지 남긴다 — 「사업보고서 (2025.12)」.
+        # 법인 매출(공정위 2025 개별 · DART 연결)과 나란히 둘 때 기준이 드러나야 한다
+        rec['보고서'] = rpt.get('report_nm', '')
         after = [s['명칭'] for s in rec['segments']]
         if before != after:
             changed.append((rec['회사명'], before, after))

@@ -121,6 +121,7 @@ table.ll td.mo{color:var(--ink-2);font-size:12px}
 table.ll td.gp{font-size:12px;color:var(--ink-2);white-space:nowrap}
 table.ll td.unit{font-size:12.5px}
 table.ll td.num .unk{font-family:var(--sans);font-size:11px;color:var(--ink-3)}
+table.ll td.num .basis{display:block;font-family:var(--sans);font-size:10.5px;color:var(--ink-3);font-weight:400;line-height:1.3;margin-top:1px}
 table.ll td.unit .whole{color:var(--ink-3);font-family:var(--mono);font-size:11px;letter-spacing:.05em}
 .tag{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.04em;padding:1px 6px;border-radius:3px;
   border:1px solid var(--accent-2);color:var(--accent-2);white-space:nowrap}
@@ -170,20 +171,19 @@ footer code{font-family:var(--mono);font-size:11.5px}
 
 <section class="panel">
   <h2>롱리스트</h2>
-  <p class="note" style="margin-bottom:12px">종업원 10명 미만(PFV·개발 SPC)은 기본으로 뺀다 — 업무키트는 조직이 있는 회사에 적용된다. 매출·직원수는 공정위 계열사 신고와 DART 사업보고서 기준이며, 미상은 남긴다.</p>
+  <p class="note" style="margin-bottom:12px">매출은 출처마다 기준이 다르다 — 공정위 계열사는 <b>2025 결산 개별</b>, DART 상장사는 <b>2025 연결</b>(없으면 개별·2024), 사업부문은 <b>사업보고서 연결 부문</b>. 각 행의 매출 아래에 그 기준을 적는다.</p>
   <div class="tools">
     <input id="q" type="search" placeholder="소속그룹·회사·부문명 검색" aria-label="소속그룹·회사·부문명 검색">
     <select id="fg" aria-label="대분류"><option value="">대분류 전체</option></select>
     <select id="fa" aria-label="업태"><option value="">업태 전체</option></select>
     <select id="fb" aria-label="업종"><option value="">업종 전체</option></select>
     <select id="ft" aria-label="품목(2단)"><option value="">품목 전체</option></select>
-    <select id="fe" aria-label="종업원"><option value="10">종업원 10명 이상</option><option value="50">50명 이상</option><option value="300">300명 이상</option><option value="0">종업원 무관</option></select>
     <label class="chk"><input type="checkbox" id="fl"> 비상장 공시법인 포함</label>
     <button class="clear" id="rst">초기화</button>
     <span class="sp"></span><span class="cnt" id="cnt"></span>
   </div>
   <div class="tbl-scroll"><table class="ll"><thead><tr>
-    <th>소속그룹</th><th>회사</th><th>사업 단위</th><th>업태</th><th>업종</th><th>품목</th><th style="text-align:right">매출(백만원)</th>
+    <th>소속그룹</th><th>회사</th><th>사업 단위</th><th>업태</th><th>업종</th><th>품목</th><th style="text-align:right">매출(백만원) · 기준</th>
   </tr></thead><tbody id="tb"></tbody></table></div>
   <div class="empty" id="none" hidden>조건에 맞는 인스턴스가 없다.</div>
 </section>
@@ -202,7 +202,7 @@ const fmt = n => n.toLocaleString('ko-KR');
 const SC = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'].map(v => 'var(' + v + ')');
 const all = D.rows.map(r => ({u:r[0], nm:r[1], mo:r[2] < 0 ? '' : D.mo[r[2]],
                               a:r[3], b:r[4], t2:r[5], rev:r[6], un:r[7],
-                              gp:r[8] < 0 ? '' : (D.gr || [])[r[8]], emp:r[9]}));
+                              gp:r[8] < 0 ? '' : (D.gr || [])[r[8]], basis:r[9] || ''}));
 /* **격자·커버리지는 T1·T2 만 센다.** T1u(비상장 공시법인)는 매출을 모르고 SPC·펀드가
    대량 섞여 있어 함께 세면 커버리지가 왜곡된다. 롱리스트에서는 필터로 켤 수 있다 —
    르노코리아처럼 명백한 대상이 그쪽에 있기 때문이다 */
@@ -313,8 +313,6 @@ function subset(skip){
   const fg = $('#fg').value;
   const fa = $('#fa').value, fb = $('#fb').value, ft = $('#ft').value;
   let out = $('#fl').checked ? all : rows;
-  const fe = +$('#fe').value;                 // 종업원 하한 — 조직이 없는 SPC 를 뺀다
-  if (fe > 0) out = out.filter(r => r.emp < 0 || r.emp >= fe);
   if (skip !== 'g' && fg !== '') out = out.filter(r => big(r.a) === fg);
   if (skip !== 'a' && fa !== '') out = out.filter(r => r.a == fa);
   if (skip !== 'b' && fb !== '') out = out.filter(r => r.b == fb);
@@ -402,18 +400,18 @@ function render(){
         : '<span class="whole">전사</span>') + '</td>'
     + '<td>' + D.A[r.a] + '</td><td>' + D.B[r.b] + '</td>'
     + '<td class="mo">' + (r.t2 || '—') + '</td><td class="num">'
-    + (r.rev ? fmt(r.rev) : (r.un ? '<span class="unk">규모미상</span>' : '—')) + '</td></tr>').join('');
+    + (r.rev ? fmt(r.rev) + '<span class="basis">' + r.basis + '</span>' : (r.un ? '<span class="unk">규모미상</span>' : '—')) + '</td></tr>').join('');
 }
 /* 품목을 직접 고르면 칸 선택은 그대로 둔다 — 칸 안에서 좁히는 흐름이기 때문이다 */
 $('#ft').addEventListener('input', () => { fillOptions(); chips(); render(); });
 CHAIN.slice(0, 3).forEach(sid => $(sid).addEventListener('input', () => clearBelow(sid), true));
-['#q', '#fl', '#fe'].forEach(s => $(s).addEventListener('input', () => { fillOptions(); chips(); render(); }));
+['#q', '#fl'].forEach(s => $(s).addEventListener('input', () => { fillOptions(); chips(); render(); }));
 ['#fg','#fa','#fb'].forEach(s => $(s).addEventListener('input', () => {
   sel = null; paintSel(); fillOptions(); chips(); render();
 }));
 $('#rst').addEventListener('click', () => {
   $('#q').value = ''; $('#fg').value = ''; $('#fa').value = '';
-  $('#fb').value = ''; $('#ft').value = ''; $('#fl').checked = false; $('#fe').value = '10';
+  $('#fb').value = ''; $('#ft').value = ''; $('#fl').checked = false;
   sel = null; paintSel(); fillOptions(); chips(); render();
 });
 

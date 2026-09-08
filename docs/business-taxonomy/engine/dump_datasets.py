@@ -77,7 +77,7 @@ def dump_segments() -> int:
     for r in d:
         base = {'회사명': r['회사명'], '종목코드': r['종목코드'],
                 '법인등록번호': r['법인등록번호'], 'KSIC': r['KSIC'],
-                '묶음노드': r['묶음노드']}
+                '묶음노드': r['묶음노드'], '보고서': r.get('보고서', '')}
         if not r['segments']:
             out.append({**base, '부문명': '', '주요제품': '', '매출': '',
                         '수익행': '', '상태': '단일부문' if r.get('단일부문')
@@ -88,7 +88,7 @@ def dump_segments() -> int:
                         '매출': s.get('매출') if s.get('매출') is not None else '',
                         '수익행': s.get('수익행') or '', '상태': '부문'})
     _write(os.path.join(SAMPLES, 'segments-2026.csv'),
-           ['회사명', '종목코드', '법인등록번호', 'KSIC', '묶음노드',
+           ['회사명', '종목코드', '법인등록번호', 'KSIC', '묶음노드', '보고서',
             '부문명', '주요제품', '매출', '수익행', '상태'], out)
     return len(out)
 

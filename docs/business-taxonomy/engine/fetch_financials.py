@@ -66,6 +66,9 @@ def sales_of(corp_code: str) -> tuple[int | None, str]:
                         v = _n(x.get('thstrm_amount'))
                         if v is not None:
                             return v // 1_000_000, f'{y} {fs} {acct}'
+        # 보고서는 있는데 매출 계정이 없다(금융사·지주). 「없음」과 구분해야 직원수
+        # 호출을 건너뛸지 정할 수 있다
+        return None, f'{y} 계정없음'
     return None, '없음'
 
 
@@ -85,8 +88,15 @@ def employees_of(corp_code: str) -> tuple[int | None, str]:
     return None, '없음'
 
 
-def targets() -> list[dict]:
-    """매출 미상인 상장 법인 — universe 에서 고르고 dart-corp 로 고유번호를 잇는다"""
+def targets(tier: str = 'T1') -> list[dict]:
+    """매출 미상인 법인 — universe 에서 계층(T1 상장 · T1u 비상장)으로 고르고
+    dart-corp 로 고유번호를 잇는다.
+
+    **T1u 는 사업보고서가 있는 회사만 매출이 나온다.** 비상장 공시법인 대부분은
+    감사보고서만 내고(SPC·펀드), 사채 발행 등으로 의무가 생긴 회사(르노코리아·
+    한국지엠·홈플러스)만 사업보고서를 낸다. 확보율은 낮아도 그 회사들이 정확히
+    목표 고객(대기업·중견 비상장)이다. 13,000 건 × 2 회라 하루 한도를 넘는다 —
+    020 이 오면 저장하고 멈추므로 다음 날 같은 명령으로 이어 받는다"""
     uni = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'universe-2026.csv'), encoding='utf-8-sig')))
     corp = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'dart-corp-2026.csv'), encoding='utf-8-sig')))
     by_jurir = {}
@@ -96,7 +106,7 @@ def targets() -> list[dict]:
             by_jurir.setdefault(k, c['고유번호'])
     out = []
     for r in uni:
-        if r['모수계층'] != 'T1' or (r['매출액'] or '').strip() or r['묶음노드'] == 'Y':
+        if r['모수계층'] != tier or (r['매출액'] or '').strip() or r['묶음노드'] == 'Y':
             continue
         cc = by_jurir.get(r['법인등록번호'])
         if cc:
@@ -104,16 +114,16 @@ def targets() -> list[dict]:
     return out
 
 
-def main(limit: int | None = None) -> None:
+def main(limit: int | None = None, tier: str = 'T1') -> None:
     os.makedirs(CACHE, exist_ok=True)
     done = {}
     if os.path.exists(DST):
         for r in json.load(io.open(DST, encoding='utf-8')):
             done[r['법인등록번호']] = r
-    todo = [t for t in targets() if t['법인등록번호'] not in done]
+    todo = [t for t in targets(tier) if t['법인등록번호'] not in done]
     if limit:
         todo = todo[:limit]
-    print(f'대상 {len(todo)}건 (이미 {len(done)}건) · 회사당 API 2회', flush=True)
+    print(f'[{tier}] 대상 {len(todo)}건 (이미 {len(done)}건) · 회사당 API 2회', flush=True)
 
     out = list(done.values())
     t0 = time.time()
@@ -121,15 +131,21 @@ def main(limit: int | None = None) -> None:
         rec = dict(t, 매출액=None, 매출근거='', 종업원수=None, 종업원근거='', error=None)
         try:
             rec['매출액'], rec['매출근거'] = sales_of(t['고유번호'])
-            rec['종업원수'], rec['종업원근거'] = employees_of(t['고유번호'])
+            # 사업보고서가 없으면(013 두 해 연속) 직원 현황도 없다 — 비상장 13,000 건은
+            # 대부분 이 경우라, 여기서 2 회를 아끼면 하루 한도 안에 두 배를 받는다
+            if rec['매출근거'] == '없음':
+                rec['종업원수'], rec['종업원근거'] = None, '없음'
+            else:
+                rec['종업원수'], rec['종업원근거'] = employees_of(t['고유번호'])
         except RuntimeError as e:
             print(f'\n{e} — 여기까지 저장하고 멈춘다', flush=True)
             break
         except Exception as e:
             rec['error'] = f'{type(e).__name__}: {str(e)[:60]}'
-        # **둘 다 없으면 사업보고서가 없는 회사다.** corpCode.xml 은 상장폐지된
-        # 회사와 SPAC(기업인수목적회사)에도 종목코드를 남겨 둔다 — 표본 24 건 중
-        # 7 건(29%)이 그랬다. 이 표시로 모수에서 가려낸다
+        # **둘 다 없으면 사업보고서가 없는 회사다.** 뜻은 계층마다 다르다 —
+        # 상장(T1)이면 상장폐지·미제출이라 모수에서 뺀다(3,470 건 중 937 건).
+        # 비상장(T1u)이면 감사보고서만 내는 정상 회사다 — 모수에 남긴다.
+        # 해석은 build_universe.py 가 한다. 여기서는 사실만 적는다
         rec['사업보고서'] = 'N' if (rec['매출근거'] == '없음' and rec['종업원근거'] == '없음'
                                   and not rec['error']) else 'Y'
         out.append(rec)
@@ -144,5 +160,11 @@ def main(limit: int | None = None) -> None:
 
 
 if __name__ == '__main__':
+    #   python fetch_financials.py            상장(T1) 전부
+    #   python fetch_financials.py T1u        비상장 공시법인 전부 — 하루 한도에 걸리면 멈추고 다음 날 이어 받는다
+    #   python fetch_financials.py T1u 500    앞 500 건만
     sys.stdout.reconfigure(encoding='utf-8')
-    main(int(sys.argv[1]) if len(sys.argv) > 1 else None)
+    args = sys.argv[1:]
+    tier = next((a for a in args if a.startswith('T')), 'T1')
+    limit = next((int(a) for a in args if a.isdigit()), None)
+    main(limit, tier)

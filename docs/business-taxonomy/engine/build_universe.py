@@ -38,6 +38,10 @@ import fetch_ftc as T           # noqa: E402
 from ksic_rules import classify  # noqa: E402
 
 FTC_CSV = os.path.join(SAMPLES, 'ftc-all-2026-classified.csv')
+# 공정위 2026 년 지정 자료의 재무는 **직전 사업연도(2025) 결산 · 개별 기준**이다 —
+# 삼성전자 238,043,009 백만이 DART 2025 개별(OFS)과 일치하고 연결(333조)과는 다르다.
+# 매출을 나란히 둘 때 이 차이가 드러나야 하므로 「매출기준」 열에 적는다
+FTC_FY = '2025'
 OUT_CSV = os.path.join(SAMPLES, 'universe-2026.csv')
 LISTED = os.path.join(CACHE, 'listed.json')
 
@@ -101,6 +105,7 @@ def build() -> list[dict]:
             '묶음노드': r['묶음노드'], '모수계층': r['모수계층'], '매출액': r['매출액'],
             '상장': bool((r.get('기업공개일') or '').strip()), '출처': '공정위',
             '종업원수': (r.get('종업원수') or '').strip(),
+            '매출기준': f'{FTC_FY} 개별(공정위)' if (r.get('매출액') or '').strip() else '',
             '기업집단명들': r.get('기업집단명들') or [],
         }
 
@@ -153,17 +158,22 @@ def build() -> list[dict]:
             '모수계층': 'T1u' if r.get('_un') else 'T1', '매출액': '',
             '상장': not r.get('_un'),
             '출처': 'DART(비상장)' if r.get('_un') else 'DART', '기업집단명들': [],
-            '종업원수': '',
+            '종업원수': '', '매출기준': '',
         }
         f = fin.get(k)
         if f:
             if f.get('매출액') is not None:
                 uni[k]['매출액'] = str(f['매출액'])
+                g = f.get('매출근거', '')            # 「2025 CFS 매출액」 — 연도와 연결/개별
+                uni[k]['매출기준'] = f"{g[:4]} {'연결' if 'CFS' in g else '개별'}(DART)"
                 if f['매출액'] == 0:
                     uni[k]['모수계층'] = '모수밖'      # classify 가 '1' 로 판정했으므로 여기서 잡는다
             if f.get('종업원수') is not None:
                 uni[k]['종업원수'] = str(f['종업원수'])
-            if f.get('사업보고서') == 'N':
+            # **상장사만** 사업보고서 없음 = 상장폐지·미제출로 본다. 비상장 공시법인은
+            # 감사보고서만 내는 게 정상이라(사채 발행사 등만 사업보고서를 낸다) 이 규칙을
+            # 적용하면 T1u 가 거의 전멸한다 — 첫 실행에서 1,000 건이 사라졌다
+            if f.get('사업보고서') == 'N' and not r.get('_un'):
                 uni[k]['모수계층'] = '모수밖'
                 uni[k]['출처'] += '(사업보고서 없음)'
         if r.get('_un'):
@@ -223,7 +233,7 @@ def report(rows: list[dict]) -> None:
 
 def to_csv(rows: list[dict], path: str = OUT_CSV) -> None:
     cols = ['법인등록번호', '회사명', '종목코드', 'KSIC', 'A대분류', 'A세분류',
-            'B1주업종', 'B1_2단', '묶음노드', '모수계층', '매출액', '종업원수', '상장',
+            'B1주업종', 'B1_2단', '묶음노드', '모수계층', '매출액', '매출기준', '종업원수', '상장',
             '출처', '기업집단명들']
     with io.open(path, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction='ignore')
