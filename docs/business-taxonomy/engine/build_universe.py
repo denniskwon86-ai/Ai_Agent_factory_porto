@@ -100,6 +100,7 @@ def build() -> list[dict]:
             'B1주업종': r['B1주업종'], 'B1_2단': r['B1_2단'],
             '묶음노드': r['묶음노드'], '모수계층': r['모수계층'], '매출액': r['매출액'],
             '상장': bool((r.get('기업공개일') or '').strip()), '출처': '공정위',
+            '종업원수': (r.get('종업원수') or '').strip(),
             '기업집단명들': r.get('기업집단명들') or [],
         }
 
@@ -112,6 +113,17 @@ def build() -> list[dict]:
     if os.path.exists(up):
         unlisted = [dict(r, _un=True) for r in json.load(io.open(up, encoding='utf-8'))]
         print(f'비상장 공시법인 {len(unlisted)}건도 합친다')
+
+    # **상장사 매출·직원수 보강.** DART 기업개황에는 재무가 없어 상장 T1 3,452 건의
+    # 매출이 비어 있었다 — 「매출 1,000억 이상」으로 걸면 대기업집단 계열사만 남고
+    # 독립 상장사(목표 고객의 핵심층)가 통째로 빠진다. fetch_financials.py 가
+    # 받아둔 것을 잇는다. 사업보고서가 없는 회사(상장폐지·SPAC)는 모수 밖으로 보낸다
+    fin = {}
+    fp = os.path.join(CACHE, 'financials.json')
+    if os.path.exists(fp):
+        for r in json.load(io.open(fp, encoding='utf-8')):
+            fin[_jurir(r.get('법인등록번호'))] = r
+        print(f'재무 보강 {len(fin)}건 (fetch_financials.py)')
 
     same = add = fixed = addu = 0
     for r in listed + unlisted:
@@ -141,7 +153,19 @@ def build() -> list[dict]:
             '모수계층': 'T1u' if r.get('_un') else 'T1', '매출액': '',
             '상장': not r.get('_un'),
             '출처': 'DART(비상장)' if r.get('_un') else 'DART', '기업집단명들': [],
+            '종업원수': '',
         }
+        f = fin.get(k)
+        if f:
+            if f.get('매출액') is not None:
+                uni[k]['매출액'] = str(f['매출액'])
+                if f['매출액'] == 0:
+                    uni[k]['모수계층'] = '모수밖'      # classify 가 '1' 로 판정했으므로 여기서 잡는다
+            if f.get('종업원수') is not None:
+                uni[k]['종업원수'] = str(f['종업원수'])
+            if f.get('사업보고서') == 'N':
+                uni[k]['모수계층'] = '모수밖'
+                uni[k]['출처'] += '(사업보고서 없음)'
         if r.get('_un'):
             addu += 1
         else:
@@ -199,7 +223,7 @@ def report(rows: list[dict]) -> None:
 
 def to_csv(rows: list[dict], path: str = OUT_CSV) -> None:
     cols = ['법인등록번호', '회사명', '종목코드', 'KSIC', 'A대분류', 'A세분류',
-            'B1주업종', 'B1_2단', '묶음노드', '모수계층', '매출액', '상장',
+            'B1주업종', 'B1_2단', '묶음노드', '모수계층', '매출액', '종업원수', '상장',
             '출처', '기업집단명들']
     with io.open(path, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction='ignore')

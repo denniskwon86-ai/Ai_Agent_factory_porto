@@ -21,6 +21,7 @@
 | `dart-corp-2026.csv` | 공시법인의 업종코드·법인등록번호 | API 2만 회 · 일일 한도에 걸린다 |
 | `segments-2026.csv` | 420 개사의 영업부문 목록 | ZIP 420 건(수 GB) 다운로드 + 파싱 |
 | `dart-reports-2026.csv` | 사업보고서 접수번호 | API 회사 수만큼 |
+| `dart-financials-2026.csv` | 상장사 매출·직원수 (롱리스트 규모 필터) | API 7,000 회 · 하루치 한도의 1/3 |
 
 `universe-2026.csv` · `instances-2026.csv` 는 판정 **결과**라 다른 스크립트가 만든다.
 이쪽은 판정 이전의 **원천 데이터**다 — 판정 규칙을 고쳐도 다시 받을 필요가 없다.
@@ -108,6 +109,22 @@ def dump_reports() -> int:
     return len(out)
 
 
+def dump_financials() -> int:
+    """상장사 매출·직원수 — 롱리스트 규모 필터의 근거. API 7,000 회짜리다"""
+    d = _load('financials.json') or []
+    out = [{'법인등록번호': r['법인등록번호'], '회사명': r['회사명'], '고유번호': r['고유번호'],
+            '매출액_백만원': r['매출액'] if r.get('매출액') is not None else '',
+            '매출근거': r.get('매출근거', ''),
+            '종업원수': r['종업원수'] if r.get('종업원수') is not None else '',
+            '종업원근거': r.get('종업원근거', ''),
+            '사업보고서': r.get('사업보고서', ''), '오류': r.get('error') or ''} for r in d]
+    out.sort(key=lambda r: r['회사명'] or '')
+    _write(os.path.join(SAMPLES, 'dart-financials-2026.csv'),
+           ['법인등록번호', '회사명', '고유번호', '매출액_백만원', '매출근거',
+            '종업원수', '종업원근거', '사업보고서', '오류'], out)
+    return len(out)
+
+
 def dump_cached() -> int:
     """
     받아둔 공시 원문 목록.
@@ -132,6 +149,7 @@ if __name__ == '__main__':
     dump_corp()
     dump_segments()
     dump_reports()
+    dump_financials()
     dump_cached()
     print('\n원천 ZIP 은 .cache/ 에 남긴다 — 248MB 라 저장소에 넣지 않는다.')
     print('접수번호가 위 CSV 에 있으므로 필요할 때 다시 받을 수 있다.')
