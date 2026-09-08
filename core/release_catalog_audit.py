@@ -22,4 +22,3 @@ def inspect_release(release):
             "auth_signals": signals, "reasons": reasons,
             "content_fingerprint": hashlib.sha256(json.dumps(release, sort_keys=True,
                 ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()}
-

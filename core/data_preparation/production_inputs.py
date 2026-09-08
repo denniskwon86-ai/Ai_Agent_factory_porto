@@ -168,4 +168,3 @@ def verify_model(batch, recipes, materials):
     if signature(actual) != signature(expected):
         raise ProductionInputError("INPUT_MODEL_MISMATCH")
     return actual
-
