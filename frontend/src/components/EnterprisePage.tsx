@@ -46,6 +46,7 @@ import {
 import { orgApi, type Dept } from '../lib/orgApi';
 import { DecisionDrawer } from './DecisionDrawer';
 import '../design/enterprise-canvas.css';
+import '../design/enterprise-responsive.css';
 import { ServerText } from '../design/ServerText';
 import { fetchCanvas, type Canvas } from '../lib/canvasApi';
 import { fetchScopeNodes, labelForScope, type ScopeNode } from '../lib/scopeLabel';
@@ -628,6 +629,9 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
               </button>
             </div>
 
+            {/* 단계와 보조카드를 같은 스크롤면에 둬 좁은 화면에서도 열 정렬을 지킨다. */}
+            <div className="thread-map-scroll" tabIndex={0} role="region" aria-label="업무 단계와 보조정보">
+            <div className="thread-map" style={{ minWidth: processCount * 94 }}>
             {/* ★ 업무 단계가 «연결돼 움직인다»는 시안의 핵심 인상.
                 ⚠️ 하늘색 보조 점선은 무엇을 뜻하는지 설명할 수 없어 복원하지 않는다.
                 회색 기반선 = 연결 구조, 붉은 이동선·펄스 = 현재 회사의 실행 흐름이다. */}
@@ -731,7 +735,10 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
               ))}
             </div>
 
-            {/* §5.1 Decision Focus */}
+            </div>
+            </div>
+
+            {/* §5.1 Decision Focus — 지도 높이 다음에 배치하며 위의 카드를 덮지 않는다. */}
             <article className="focus-panel">
               <div className="focus-copy">
                 <small>DECISION POINT{focusLabel ? ` · ${focusLabel}` : ''}</small>
@@ -743,8 +750,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
                 {pickedStep ? (
                   <>
                     <h3>{pickedStep.label}</h3>
-                    {/* ⚠️ 한 줄로 둔다 — 이 패널은 시안에서 214px 이고, 두 줄이 되면
-                        위 오버레이 띠를 덮는다(실측 14px 겹침). */}
+                    {/* 긴 설명은 카드 안에서 스크롤하며 행동 버튼 영역은 보존한다. */}
                     <p>이 단계에 묶인 안건은 아직 없습니다 — 왼쪽에서 안건을 고르십시오.</p>
                   </>
                 ) : (
@@ -779,10 +785,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
                       : '계산 관문은 모두 서 있습니다 — 경로 계산을 돌리면 오른쪽 값이 채워집니다.'}</span>
                   ) : (
                     <>
-                      {/* ★ 한 줄로 둔다 — 이 패널은 시안에서 214px 이고, 여기가 길어지면
-                          위 오버레이 띠와 겹친다(실측 41px 겹침).
-                          ⚠️ 다음 할 일을 **버리지 않는다**: 버튼의 이름으로 남기고, 누르면
-                            그 화면이 같은 말을 다시 한다. */}
+                      {/* 사유는 줄바꿈하고 해결 버튼은 별도 행동으로 남긴다. */}
                       <b>{blockingGate(calcWhy)?.summary || '계산이 아직 돌지 않습니다.'}</b>
                       {GATE_DEST[blockingGate(calcWhy)?.gate || ''] ? (
                         <button type="button" className="impact-why-go"

@@ -1,0 +1,154 @@
+/* 경영 홈의 반응형 배치. 색·타이포·흐름선은 기존 시안을 유지한다.
+ * 실제 헤더 높이를 제외한 남은 공간을 사용한다. 826px 최소 높이나 카드의
+ * 절대 위치로 겹침을 숨기지 않는다. 좁은 창에서는 지도만 가로로 탐색한다.
+ * 다른 제품 화면/모달의 높이 및 셸은 바꾸지 않는다. */
+.enterprise-home {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--surface-page, #f7f7f5);
+}
+.enterprise-home > .afs-product-shell { min-width: 0; }
+.enterprise-home .le-canvas { display: contents; }
+.enterprise-home .workspace {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  grid-template-columns: clamp(224px, 17.5vw, 280px) minmax(0, 1fr) clamp(280px, 22vw, 360px);
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+.enterprise-home .workspace > * { min-width: 0; min-height: 0; }
+.enterprise-home .work-rail { padding: clamp(16px, 2vh, 25px) 18px 14px; }
+.enterprise-home .rail-kicker { font-size: 11px; letter-spacing: .035em; }
+.enterprise-home .work-rail h1 { font-size: clamp(23px, 1.65vw, 28px); }
+.enterprise-home .queue { margin-top: 18px; overscroll-behavior: contain; }
+.enterprise-home .rail-tools button { font-size: 14px; min-height: 40px; }
+.enterprise-home .canvas {
+  overflow: auto;
+  overscroll-behavior: contain;
+  container: home-canvas / inline-size;
+}
+.enterprise-home .canvas-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 18px 24px 16px;
+}
+.enterprise-home .canvas-head > div:first-child { grid-column: 1 / -1; min-width: 0; }
+.enterprise-home .canvas-head h2 { white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
+.enterprise-home .context-stats { grid-column: 1; grid-row: 2; gap: 14px; flex-wrap: wrap; }
+.enterprise-home .context-stats div { min-width: 62px; padding-left: 9px; }
+.enterprise-home .view-switch { grid-column: 2; grid-row: 2; align-self: center; }
+.enterprise-home .enterprise-thread {
+  display: grid;
+  height: auto;
+  gap: 18px;
+  margin: 0 24px;
+  padding: 16px 0 20px;
+}
+.enterprise-home .thread-heading {
+  position: relative;
+  inset: auto;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.enterprise-home .thread-label { flex-wrap: wrap; gap: 4px; white-space: normal; }
+.enterprise-home .thread-map-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 8px 0 6px;
+}
+.enterprise-home .thread-map { position: relative; }
+.enterprise-home .flow-svg { top: 0; pointer-events: none; }
+.enterprise-home .processes { position: relative; inset: auto; padding-top: 14px; }
+.enterprise-home .overlay-strip { position: relative; inset: auto; margin-top: 24px; }
+.enterprise-home .overlay-item { min-height: 68px; }
+.enterprise-home .overlay-item b { font-size: 12px; }
+.enterprise-home .focus-panel {
+  position: relative;
+  inset: auto;
+  height: auto;
+  min-height: 192px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(180px, .85fr);
+  grid-template-rows: auto;
+}
+.enterprise-home .focus-copy { padding: 16px 20px; }
+.enterprise-home .focus-content { max-height: 180px; }
+.enterprise-home .focus-content p { font-size: 13px; }
+.enterprise-home .focus-actions { flex-wrap: wrap; }
+.enterprise-home .focus-actions button { min-height: 36px; font-size: 12px; }
+.enterprise-home .impact-why { align-items: flex-start; flex-wrap: wrap; line-height: 1.45; font-size: 12px; }
+.enterprise-home .impact-why b,
+.enterprise-home .impact-why > span { white-space: normal; overflow-wrap: anywhere; }
+.enterprise-home .impact div { min-width: 0; padding: 12px; }
+.enterprise-home .impact b { overflow-wrap: anywhere; }
+.enterprise-home .foundation { height: auto; min-height: 96px; gap: 12px; padding: 14px 0; margin: 0 24px; }
+.enterprise-home .layers { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.enterprise-home .layer { min-width: 0; padding: 10px; word-break: keep-all; overflow-wrap: anywhere; }
+.enterprise-home .status-bar { position: relative; inset: auto; height: auto; min-height: 42px; flex-wrap: wrap; gap: 8px 14px; padding: 10px 24px; }
+.enterprise-home .status-bar > span { margin-right: 0; }
+.enterprise-home .atlas-head { height: 72px; padding-inline: 18px; }
+.enterprise-home .atlas-body { padding: 18px; }
+.enterprise-home .atlas-input { padding: 12px 16px 16px; }
+.enterprise-home .atlas-input input { font-size: 13px; }
+
+@container home-canvas (max-width: 700px) {
+  .enterprise-home .context-stats { grid-column: 1 / -1; }
+  .enterprise-home .view-switch { grid-row: 3; grid-column: 1 / -1; justify-self: start; }
+  .enterprise-home .focus-panel { grid-template-columns: minmax(0, 1fr); }
+  .enterprise-home .impact { grid-template-columns: repeat(4, minmax(0, 1fr)); border-left: 0; border-top: 1px solid #dfe1e5; }
+  .enterprise-home .impact div { border-bottom: 0; }
+  .enterprise-home .foundation { grid-template-columns: minmax(0, 1fr); }
+}
+@container home-canvas (max-width: 480px) {
+  .enterprise-home .layers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .enterprise-home .canvas-head,
+  .enterprise-home .status-bar { padding-inline: 16px; }
+  .enterprise-home .enterprise-thread,
+  .enterprise-home .foundation { margin-inline: 16px; }
+  .enterprise-home .focus-copy { padding: 14px; }
+  .enterprise-home .impact b { font-size: 15px; }
+}
+/* OS 배율/브라우저 확대 역시 CSS viewport의 폭·높이에 따라 같은 규칙을 사용한다. */
+@media (max-height: 800px) and (min-width: 1101px) {
+  .enterprise-home .work-rail { padding-top: 16px; }
+  .enterprise-home .queue { margin-top: 12px; }
+  .enterprise-home .rail-tools { margin-top: 8px; }
+  .enterprise-home .rail-tools button { margin-top: 5px; padding: 8px 10px; }
+  .enterprise-home .atlas-head { height: 64px; }
+  .enterprise-home .atlas-body { padding: 16px; }
+  .enterprise-home .brief { margin-top: 14px; padding-block: 12px; }
+  .enterprise-home .atlas-actions { gap: 6px; margin-top: 12px; }
+}
+@media (max-width: 1279px) {
+  .enterprise-home > .afs-product-shell { height: auto; grid-template-columns: 180px minmax(160px, 1fr) auto; grid-template-rows: 68px 40px; gap: 0 12px; }
+  .enterprise-home .afs-global-nav { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; overflow-x: auto; }
+  .enterprise-home .afs-shell-actions { grid-column: 3; grid-row: 1; }
+  .enterprise-home .afs-global-nav button { flex: 1 0 auto; }
+}
+/* 세 레일을 억지로 줄이면 본문이 사라진다. 태블릿에서는 비서를 다음 행에 둔다. */
+@media (max-width: 1100px) {
+  .enterprise-home { height: auto; min-height: 100dvh; overflow: visible; grid-template-rows: auto auto; }
+  .enterprise-home .workspace { height: auto; overflow: visible; grid-template-columns: 224px minmax(0, 1fr); grid-template-rows: auto auto; }
+  .enterprise-home .work-rail { max-height: 820px; }
+  .enterprise-home .canvas { overflow: hidden; }
+  .enterprise-home .atlas-rail { grid-column: 1 / -1; height: 480px; }
+}
+@media (max-width: 900px) {
+  .enterprise-home > .afs-product-shell { grid-template-columns: 150px minmax(0, 1fr); grid-template-rows: 64px auto 40px; padding-inline: 10px; }
+  .enterprise-home .afs-shell-actions { grid-column: 1 / -1; grid-row: 2; padding-bottom: 8px; gap: 5px; flex-wrap: wrap; }
+  .enterprise-home .afs-global-nav { grid-row: 3; }
+  .enterprise-home .afs-context { gap: 5px; padding-inline: 6px; }
+  .enterprise-home .afs-context-copy small { font-size: 9px; letter-spacing: 0; }
+}
+@media (max-width: 700px) {
+  .enterprise-home .workspace { grid-template-columns: minmax(0, 1fr); }
+  .enterprise-home .work-rail { max-height: 480px; }
+  .enterprise-home .queue { flex-basis: 150px; }
+  .enterprise-home .canvas { grid-row: 2; }
+  .enterprise-home .atlas-rail { grid-row: 3; }
+}

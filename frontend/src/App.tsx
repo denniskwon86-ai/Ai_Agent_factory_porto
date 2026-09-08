@@ -887,8 +887,7 @@ function AppShell() {
   if (!currentProjectId && space === 'enterprise') {
     return (
       <ErrorBoundary>
-        <div className="afs-scope" style={{ minHeight: '100vh',
-          background: 'var(--surface-page)' }}>
+        <div className="afs-scope enterprise-home">
           {/* ★ [설계 §3.1] Top Bar **72px** · 구조색. ⑥ 상단 회사·사업부·공장 Context 는
               `CompanyContextBar` 가 담당한다(§4.1).
               ⚠️⚠️ [2026-08-23 실측] `afs-topbar` 를 **반드시 붙인다.** 이 바는 구조색(남색)
