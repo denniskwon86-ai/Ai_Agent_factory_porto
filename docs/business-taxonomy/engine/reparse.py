@@ -22,6 +22,7 @@ sys.path.insert(0, HERE)
 os.chdir(HERE)
 import fetch_dart as F          # noqa: E402
 import parse_segment as P       # noqa: E402
+import parse_segment_desc as PD  # noqa: E402
 
 DST = os.path.join(HERE, '.cache', 'segments.json')
 
@@ -53,6 +54,18 @@ def main(dry: bool = False) -> None:
         # 부문 매출이 **어느 해 사업보고서**에서 왔는지 남긴다 — 「사업보고서 (2025.12)」.
         # 법인 매출(공정위 2025 개별 · DART 연결)과 나란히 둘 때 기준이 드러나야 한다
         rec['보고서'] = rpt.get('report_nm', '')
+        # **부문 설명을 본문에서 찾아 붙인다.** 부문명이 약어면 이름으로 판정할 수 없다 —
+        # LG전자 「ES」가 「전력·중전기」로 잘못 들어가 있었다(실제 에어컨·HVAC).
+        # 「사업의 내용」의 부문 정의 표가 답을 갖고 있다. API 를 쓰지 않고 캐시된 ZIP 을 읽는다
+        if len(rec['segments']) >= 2:
+            try:
+                desc = PD.descriptions(F.document_xml(rpt['rcept_no']),
+                                       [s['명칭'] for s in rec['segments']])
+                for s in rec['segments']:
+                    if desc.get(s['명칭']):
+                        s['부문설명'] = desc[s['명칭']]
+            except Exception:
+                pass                   # 본문이 없거나 표를 못 찾으면 그냥 넘어간다
         after = [s['명칭'] for s in rec['segments']]
         if before != after:
             changed.append((rec['회사명'], before, after))

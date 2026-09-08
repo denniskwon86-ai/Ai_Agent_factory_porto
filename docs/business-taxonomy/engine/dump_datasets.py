@@ -85,11 +85,12 @@ def dump_segments() -> int:
             continue
         for s in r['segments']:
             out.append({**base, '부문명': s['명칭'], '주요제품': s.get('주요제품') or '',
+                        '부문설명': s.get('부문설명') or '',
                         '매출': s.get('매출') if s.get('매출') is not None else '',
                         '수익행': s.get('수익행') or '', '상태': '부문'})
     _write(os.path.join(SAMPLES, 'segments-2026.csv'),
            ['회사명', '종목코드', '법인등록번호', 'KSIC', '묶음노드', '보고서',
-            '부문명', '주요제품', '매출', '수익행', '상태'], out)
+            '부문명', '주요제품', '부문설명', '매출', '수익행', '상태'], out)
     return len(out)
 
 

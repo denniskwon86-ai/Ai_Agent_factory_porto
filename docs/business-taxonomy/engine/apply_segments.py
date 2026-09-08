@@ -110,7 +110,8 @@ for r in uni:
             if dup:
                 dropped.append((r['회사명'], s['명칭'], dup))
                 continue                       # 그 계열사가 이미 인스턴스다 — 이중계상
-            j = R.classify_segment(s['명칭'], parent, AIDX)
+            # 부문 설명(본문 정의 표)을 함께 넘긴다 — 부문명 판정이 실패할 때만 쓰인다
+            j = R.classify_segment(s['명칭'], dict(parent, _부문설명=s.get('부문설명', '')), AIDX)
             # **A 만 비었으면 남긴다.** 상속 금지 규칙(지주 모법인 · 업태 불일치)이
             # A 를 비우는데, 그때 버리면 삼성물산 「패션」처럼 실재하는 사업이
             # 소리 없이 사라진다 — 지역 세그먼트(B 도 없다)와는 다르다.
