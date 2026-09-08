@@ -27,21 +27,65 @@ import parse_segment_desc as PD  # noqa: E402
 DST = os.path.join(HERE, '.cache', 'segments.json')
 
 
+def _rcept_index() -> dict:
+    """회사명 → 접수번호. **`reports.json` 캐시에 없는 회사를 위한 대안이다** —
+    `latest_annual` 은 캐시에 없으면 API 를 부르는데 한도가 소진되면 실패한다.
+    그래서 32 건이 매번 「원문 없어 건너뜀」으로 빠졌고, 그 안에 오탐 부문이 남아
+    있었다(신세계푸드 「중단영업조정」·한솔아이원스 「복리후생비」). ZIP 은 캐시에
+    있으므로 접수번호만 알면 API 없이 파싱된다"""
+    import csv
+    import re
+    p = os.path.join(os.path.dirname(HERE), 'samples', 'dart-reports-2026.csv')
+    if not os.path.exists(p):
+        return {}
+    _법인 = re.compile(r'㈜|\(주\)|\(유\)|주식회사|유한회사')
+
+    def key(s):
+        return _법인.sub('', s or '').replace(' ', '').upper()
+    out = {}
+    for r in csv.DictReader(io.open(p, encoding='utf-8-sig')):
+        if r.get('회사명') and r.get('접수번호'):
+            out.setdefault(key(r['회사명']), r['접수번호'])
+    return out
+
+
 def main(dry: bool = False) -> None:
     recs = json.load(io.open(DST, encoding='utf-8'))
-    print(f'{len(recs)}건 다시 파싱한다 (ZIP 은 캐시에서 읽는다)', flush=True)
+    RIDX = _rcept_index()
+    print(f'{len(recs)}건 다시 파싱한다 (ZIP 은 캐시에서 읽는다 · 접수번호 색인 {len(RIDX)}건)',
+          flush=True)
 
     changed, gone, born, skipped = [], 0, 0, 0
     for i, rec in enumerate(recs, 1):
         before = [s['명칭'] for s in rec.get('segments') or []]
         try:
-            cc = F.resolve(rec['종목코드'])
-            rpt = F.latest_annual(cc)
+            rpt = None
+            try:
+                rpt = F.latest_annual(F.resolve(rec['종목코드']))
+            except Exception:
+                pass                   # API 한도 등 — 아래 색인으로 대신한다
+            if not rpt:
+                import re as _re
+                k = _re.sub(r'㈜|\(주\)|\(유\)|주식회사|유한회사', '',
+                            rec['회사명']).replace(' ', '').upper()
+                rc = RIDX.get(k)
+                if rc:
+                    rpt = {'rcept_no': rc, 'report_nm': ''}
             if not rpt:
                 skipped += 1
                 continue
             note = F.note_xml(rpt['rcept_no'])
             if not note:
+                # **주석을 못 읽는 32 건.** ZIP 은 있는데 주석 파일(_00760/_00761)이
+                # 없다(신세계푸드·신세계톰보이). 다시 파싱할 수는 없지만, 옛 결과에
+                # **부문명 필터만 다시 적용**하면 오탐은 걷을 수 있다 — 그러지 않으면
+                # 「중단영업조정」·「집합평가대상채권 금액」이 영원히 남는다
+                keep = [s for s in (rec.get('segments') or []) if P._부문명(s['명칭'])]
+                if len(keep) != len(rec.get('segments') or []):
+                    before = [s['명칭'] for s in rec['segments']]
+                    rec['segments'] = keep
+                    changed.append((rec['회사명'], before, [s['명칭'] for s in keep]))
+                    gone += len(before) - len(keep)
                 skipped += 1
                 continue
         except Exception as e:
