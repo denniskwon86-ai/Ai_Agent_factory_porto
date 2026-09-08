@@ -310,11 +310,29 @@ def test_the_ecos_chain_verifies_to_the_raw_bytes(rig):
 
 # ── 원천 카드가 화면까지 간다 ───────────────────────────────────────────────
 def test_catalog_ranks_both_providers_and_names_missing_credentials():
+    """⚠️ 앞 판은 `chosen == ()` 이었다 — 「키가 없으면 아무것도 못 고른다」.
+
+    그 단언은 **모든 원천이 키를 요구하던 동안만** 참이었고, 다섯째(World Bank Pink
+    Sheet)가 그것을 깼다. 공식 «파일» 원천은 자격증명이 없다.
+    ★ 그래서 이름 목록이 아니라 **규칙**을 단언한다 — 원천이 늘어도 같은 뜻으로 남는다."""
     chosen, excluded = P.provider_registry.ranked(require_credential_present=True, env={})
-    assert chosen == ()
+
+    #: ⚠️ 먼저 «비어 있지 않음»을 본다 — 비면 아래 `all(...)` 이 공허하게 참이 되어
+    #:   이 시험이 아무것도 지키지 않는 채 초록이 된다.
+    assert chosen, "키 없이 쓸 수 있는 원천이 0개면 규칙 ①이 공허해진다"
+    #: 규칙 ① 키 없이 고를 수 있는 것은 «키를 요구하지 않는» 원천뿐이다.
+    assert all(d.requires_credential is False for d in chosen),         [d.provider_id for d in chosen if d.requires_credential]
+    #: 규칙 ② 키를 요구하는 원천은 하나도 빠짐없이 «사유와 함께» 제외된다.
+    need_key = {d.provider_id for d in P.provider_registry.descriptors()
+                if d.requires_credential}
+    assert {e.provider_id for e in excluded} == need_key
+    assert all(e.reason for e in excluded)
+    #: 규칙 ③ 사유가 **어느 환경변수인지** 이름을 댄다 — 「설정하세요」만으로는 못 고친다.
+    by_id = {d.provider_id: d for d in P.provider_registry.descriptors()}
+    assert all(by_id[e.provider_id].credential_env in e.reason for e in excluded)
+
     ids = {e.provider_id for e in excluded}
     assert {"ECOS", "OPENDART"} <= ids
-    assert all(e.reason for e in excluded)
 
     ok, _ = P.provider_registry.ranked(
         require_credential_present=True,
