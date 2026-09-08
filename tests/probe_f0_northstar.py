@@ -75,6 +75,20 @@ def _count(db, table):
         con.close()
 
 
+def _query(db, sql):
+    """운영 DB 읽기 전용 질의. 표가 없으면 빈 목록."""
+    path = os.path.join(LIVE, db)
+    if not os.path.exists(path):
+        return []
+    con = sqlite3.connect("file:" + path.replace(os.sep, "/") + "?mode=ro", uri=True)
+    try:
+        return list(con.execute(sql))
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+
+
 def _routes():
     from fastapi.routing import APIRoute
     return {r.path for r in main.app.routes if isinstance(r, APIRoute)}
@@ -185,21 +199,59 @@ def test_seam_f6():
     _verdict(OK, seam, "동인 " + str(drivers) + "건 · 영향 " + str(impacts) + "건.")
 
 
+# ── 시험 잔여물 — «세기 전에» 걸러야 하는 것 ─────────────────────────────────
+#: ★★★ 이 저장소는 합성 행위자에 `.invalid` 도메인을 쓴다(원장 규약). 운영 DB 에는
+#:   시험이 남긴 그 계정의 행이 쌓여 있고, **원시 카운트로 판정하면 그것에 속는다.**
+#:   실제로 첫 판정이 그렇게 틀렸다 — 아래 `test_residue` 가 그 규모를 기록한다.
+SYNTHETIC = "%.invalid"
+
+
+def test_residue_in_operational_db():
+    """운영 DB 에 남은 시험 잔여물의 규모. **이음매가 아니라 위생 항목이다.**"""
+    seam = "※ 운영 DB 의 시험 잔여물"
+    cases = _count("collaboration.db", "decision_cases")
+    syn_cases = len(_query("collaboration.db",
+                           "SELECT DISTINCT decision_id FROM decision_participants "
+                           "WHERE user_id LIKE '%.invalid'"))
+    pubs_syn = _count("collaboration.db", "publications")
+    jobs = _count("external_intelligence.db", "data_acquisition_jobs")
+    if syn_cases or jobs:
+        _verdict(EMPTY, seam,
+                 "합성 계정(`.invalid`)이 만든 행이 운영 DB 에 남아 있다 — "
+                 "안건 " + str(syn_cases) + "/" + str(cases) + "건 · 수집 작업 "
+                 + str(jobs) + "건(전부 DRAFT). ★ **원시 카운트가 이것에 오염된다.** "
+                 "실제로 이 탐침의 첫 판정이 여기에 속아 「실행 지시가 안 만들어진다」는 "
+                 "거짓 결론을 냈다. 정리 여부는 사람이 정한다(자동 삭제하지 않는다).")
+    _verdict(OK, seam, "잔여물 없음.")
+
+
 # ── F-7  07 비교 → 08 경영 의사결정 ──────────────────────────────────────────
 def test_seam_f7():
+    """⚠️ 원시 카운트로 보면 «안건 256 : 실행 지시 2» 라 끊긴 것처럼 보인다.
+    그러나 249건이 `.invalid` 시험 잔여물이다 — **실제 계정 기준으로 다시 센다.**"""
     seam = "F-7 비교 → 경영 의사결정"
-    cases = _count("collaboration.db", "decision_cases")
-    runs = _count("planning.db", "simulation_runs")
+    real = _query("collaboration.db",
+                  "SELECT COUNT(DISTINCT d.decision_id) FROM decision_cases d "
+                  "JOIN decision_participants p ON p.decision_id = d.decision_id "
+                  "WHERE p.user_id NOT LIKE '%.invalid'")
+    n_real = int(real[0][0]) if real else 0
+    decided = _query("collaboration.db",
+                     "SELECT COUNT(*) FROM decision_cases "
+                     "WHERE status IN ('DECIDED','EFFECT_MEASURED')")
+    n_decided = int(decided[0][0]) if decided else 0
     actions = _count("collaboration.db", "decision_actions")
-    if cases <= 0:
-        _verdict(EMPTY, seam, "안건이 0건 — 비교가 결정으로 이어진 적이 없다.")
-    if actions <= 0 or (cases and actions * 20 < cases):
-        _verdict(THIN, seam,
-                 "안건은 " + str(cases) + "건인데 **실행 지시(`decision_actions`)는 "
-                 + str(actions) + "건**이다(시뮬레이션 실행 " + str(runs) + "건). "
-                 "결정은 쌓이는데 «누가 언제 실행하는가»로 거의 이어지지 않는다 — "
-                 "경영자의 Q3 가 사실상 비어 있다.")
-    _verdict(OK, seam, "안건 " + str(cases) + "건 · 실행 지시 " + str(actions) + "건.")
+    runs = _count("planning.db", "simulation_runs")
+    if n_real <= 0:
+        _verdict(EMPTY, seam, "실제 계정이 참여한 안건이 0건 — 비교가 결정으로 이어진 적이 없다.")
+    if n_decided <= 0:
+        _verdict(EMPTY, seam, "결정까지 간 안건이 0건이다.")
+    if actions <= 0:
+        _verdict(EMPTY, seam,
+                 "결정 " + str(n_decided) + "건인데 실행 지시가 0건 — Q3 로 이어지지 않는다.")
+    _verdict(OK, seam,
+             "실제 계정 안건 " + str(n_real) + "건 · 결정 " + str(n_decided)
+             + "건 · 실행 지시 " + str(actions) + "건(둘 다 효과 측정까지 갔다) · "
+             "시뮬레이션 실행 " + str(runs) + "건. **이음매는 동작한다** — 다만 표본이 작다.")
 
 
 # ── F-0  01 → 08  양 끝 잇기 ─────────────────────────────────────────────────

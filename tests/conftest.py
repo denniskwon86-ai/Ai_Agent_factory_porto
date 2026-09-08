@@ -505,6 +505,22 @@ def _isolate_runtime_telemetry(tmp_path, monkeypatch, _master_db_template,
         isolation_failed("협업 저장소(결정 안건·발간)", e)
 
     try:
+        # ★★★ [2026-09-08 F-0 탐침이 찾아냈다] 수집 저장소·원문 보관소가 **격리되지
+        #   않고 있었다.** 싱글턴이 운영 `data/external_intelligence.db` 를 직접 열어,
+        #   API 시험이 만든 수집 작업 **80건이 운영 DB 에 쌓였다**(09-06~09-08).
+        #   ⚠️ 「시험은 격리된다」는 믿음이 여기서 깨졌다 — 격리는 저장소마다 «명시»해야 한다.
+        from core.external_intelligence import acquisition_store as _aq
+        _aq_db = tmp_path / "external_intelligence.db"
+        monkeypatch.setattr(_aq, "_DB_PATH", str(_aq_db), raising=False)
+        monkeypatch.setattr(_aq.acquisition_store, "db_path", str(_aq_db), raising=False)
+        monkeypatch.setattr(_aq.acquisition_store, "_ready_done", False, raising=False)
+        from core.external_intelligence import raw_store as _rs
+        monkeypatch.setattr(_rs.raw_store, "root", str(tmp_path / "external_raw"),
+                            raising=False)
+    except Exception as e:
+        isolation_failed("수집 저장소·원문 보관소", e)
+
+    try:
         # ⚠️ LLM 캐시는 `core/paths.py` 를 안 거치고 자기 경로를 조립했다(고쳤다).
         #   그래도 **import 시점에 `_init_db()`** 를 부르므로, 뿌리를 안 돌리면 시험이
         #   운영 `data/llm_cache.db` 를 만든다.
