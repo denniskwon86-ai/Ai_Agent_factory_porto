@@ -200,8 +200,18 @@ _기간 = re.compile(r'^(당기|전기|당분기|전분기|당기말|전기말|�
 _회사표기 = re.compile(r'㈜|\(주\)|주식회사|유한회사|법인|기업|Co\.|Inc|Ltd|LLC|GmbH')
 
 
-def _부문명(n: str) -> bool:
-    """이 칸이 부문 이름일 수 있는가"""
+def _부문명(n: str, strict: bool = True) -> bool:
+    """
+    이 칸이 부문 이름일 수 있는가.
+
+    `strict` 는 **회사명을 부문으로 받을지**다. 기본은 받지 않는다 — 종속기업 목록·거래
+    표가 새어들기 때문이다(SK하이닉스의 「SK텔레콤㈜」).
+
+    헤더가 「보고부문」이면 회사명도 받도록 완화해 봤지만 **되돌렸다.** (주)LG 는
+    계열사를 그대로 보고부문으로 쓰는데(4개 부문), 완화하니 그 아래 종속기업 20곳
+    (「D&O CM NANJING」·「D&O CM AMERICA, INC.」…)이 부문으로 잡혔다.
+    **미검출보다 오탐이 해롭다** — 틀린 대상 분류를 만든다. 그래서 LG 는 놓치는 쪽을 택했다.
+    """
     n = (n or '').strip()
     if not n or len(n) > 20:
         return False
@@ -223,7 +233,7 @@ def _부문명(n: str) -> bool:
         return False
     if _기간.match(n.replace(' ', '')):          # 당기·전기
         return False
-    if _회사표기.search(n):                      # 종속기업 목록·거래 표
+    if strict and _회사표기.search(n):           # 종속기업 목록·거래 표
         return False
     return True
 
@@ -351,6 +361,12 @@ def _수익먼저(head: list[str]) -> bool:
                if re.search(r'(매출|수익)', c) and not _수익제외.search(c)), None)
     ii = next((i for i, c in enumerate(txt)
                if re.search(r'(이익|손익|자산|부채|상각)', c)), None)
+    # 「매출및지분법손익」처럼 한 칸이 「매출」과 「손익」을 동시에 가지면 ri == ii 가
+    # 되어 여기서 걸린다. (주)LG 가 그런 헤더인데, `ri <= ii` 로 완화해 봤더니
+    # **종속기업 목록이 부문으로 새어들었다**(「LG CNS Europe B.V.」·「PT. LG CNS
+    # Indonesia」). 해외 법인 표기를 계속 추가하는 건 끝이 없고, 영문 단어 수로 가르면
+    # 「Sales & Trading」 같은 실제 부문이 죽는다. **그래서 완화하지 않는다** —
+    # 미검출보다 오탐이 해롭다
     return ri is not None and (ii is None or ri < ii)
 
 
