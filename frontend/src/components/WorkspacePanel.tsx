@@ -38,6 +38,7 @@ import { HubDialog } from '../design/HubDialog';
 import { Banner, Panel, ScreenHead } from '../design/HubShell';
 import { reportRequestFailure, reportRequestSuccess } from '../lib/backendHealth';
 import { fetchOrgNodes, type FlatNode } from '../lib/governanceApi';
+import { createRollbackRunner } from '../lib/releaseRollback';
 import type {
   Checklist, ChecklistStep, Fork, Gate, GateCheck, Promotion, RollbackResult, Share,
 } from '../lib/workspaceApi';
@@ -94,6 +95,7 @@ const PROMO: Record<string, { label: string; tone: string }> = {
   approved: { label: '오너 승인', tone: 'data' },
   rejected: { label: '반려', tone: 'danger' },
   promoted: { label: '전사 승격', tone: 'success' },
+  revoked: { label: '승격 철회', tone: 'muted' },
 };
 
 /** [설계 §5.4 `/operate/workspace`] 좌측 필터의 세 축. */
@@ -166,6 +168,8 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
   const [rollbackReason, setRollbackReason] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [rollbackOut, setRollbackOut] = useState<RollbackResult | null>(null);
+  const [rollbackBusy, setRollbackBusy] = useState(false);
+  const runRollback = useMemo(createRollbackRunner, []);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   //: [설계 §5.4] 좌측 필터 — 부서(소유 범위) / 상태 / 유형(목표 범위).
@@ -176,7 +180,7 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
   const claim = useLatestOnly();
 
   const confirmPromote = useConfirm<true>();
-  const confirmRollback = useConfirm<true>();
+  const confirmRollback = useConfirm<{ releaseId: string; projectId: string }>();
   const confirmReject = useConfirm<true>();
   const confirmRevoke = useConfirm<Share>();
 
@@ -197,12 +201,11 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
     fetchOrgNodes().then(setOrgNodes).catch(() => setOrgNodes([]));
   }, []);
 
-  const inspect = useCallback(async (rid: string, pid = '', live = liveIntegration) => {
+  const inspect = useCallback(async (rid: string, pid = '', live = liveIntegration, refreshOnly = false) => {
     if (!rid.trim()) { setErr('점검할 릴리스를 선택하십시오.'); return; }
     const isCurrent = claim();   // §6.1 — 요청 직전에 표를 뽑는다
-    setErr(''); setMsg('');
+    if (!refreshOnly) { setErr(''); setMsg(''); setRollbackOut(null); confirmRollback.cancel(); }
     setReleaseId(rid); setProjectId(pid);
-    setRollbackOut(null);
     setGate(loading<Gate>());
     setShares(loading<Share[]>());
     setForks(loading<Fork[]>());
@@ -225,8 +228,8 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
     setMsg(''); setErr('');
     try {
       await fn();
-      setMsg(okMsg);
       await inspect(releaseId, projectId);
+      setMsg(okMsg);
       loadList();
     } catch (e: any) {
       // 백엔드 거절 사유를 그대로 — 요약하면 무엇을 고쳐야 할지가 사라진다.
@@ -308,18 +311,21 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
             <div className="panel-body">
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <select className="afs-select" aria-label="점검할 릴리스" style={{ flex: 1, minWidth: 260 }}
+                  disabled={rollbackBusy}
                   value={releaseId} onChange={(e) => {
                     const id = e.target.value;
                     const picked = releaseOptions.find((row) => row.id === id);
                     setReleaseId(id);
                     setProjectId(picked?.projectId || '');
+                    claim(); setGate(null); setRollbackOut(null); setMsg(''); setErr('');
+                    confirmRollback.cancel(); setRollbackReason('');
                   }}>
                   <option value="">— 릴리스 선택 —</option>
                   {releaseOptions.map((row) => (
                     <option key={row.id} value={row.id}>{row.label || '이름 미등록 릴리스'}</option>
                   ))}
                 </select>
-                <button className="primary-button"
+                <button className="primary-button" disabled={rollbackBusy}
                   onClick={() => inspect(releaseId, projectId)}>게이트 점검</button>
               </div>
               {promotions.status !== 'ok' ? (
@@ -337,7 +343,7 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
               ) : (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {shownPromotions.map((p) => (
-                    <button key={p.promotion_id} className="secondary-button"
+                    <button key={p.promotion_id} className="secondary-button" disabled={rollbackBusy}
                       onClick={() => inspect(p.release_id, p.project_id)}>
                       {releaseLabel(p.release_id)}{' '}
                       <span className={`state-chip ${PROMO[p.status]?.tone || 'muted'}`}>
@@ -351,7 +357,7 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
           </Panel>
 
           {gate && (
-            <>
+            <fieldset disabled={rollbackBusy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
               {/* ★ [설계 §5.4 promotions] 「상단: 릴리스·**소유 범위·목표 범위**」.
                   승격은 «어디서 어디로» 가 전부인데, 그동안 화면 어디에도 없었다. */}
               <div className="promotion-head">
@@ -540,7 +546,10 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
                           받는다. */}
                       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                         <button className="danger-solid"
-                          onClick={() => confirmRollback.ask(true)}>롤백</button>
+                          disabled={rollbackBusy || rollbackOut?.outcome === 'complete'}
+                          onClick={() => { setRollbackReason(''); confirmRollback.ask({ releaseId, projectId }); }}>
+                          {rollbackBusy ? '사용 중단 처리 중…' : rollbackOut?.outcome === 'complete' ? '사용 중단 완료' : '운영에서 내리기'}
+                        </button>
                       </div>
                       {/* ★ [§6.5] 사유를 «비어 있다» 고 경고만 하지 않고 **여기서 받는다** —
                           경고는 읽고 그냥 누를 수 있지만, 입력 자리는 비우면 진행되지 않는다. */}
@@ -552,8 +561,8 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
                           {shares.status === 'ok'
                             ? ` 공유 ${(shares.value || []).length}곳이 끊깁니다.`
                             : ' 공유 현황을 확인하지 못했습니다 — 끊기는 곳이 없다는 뜻이 아닙니다.'}</>}
-                        reversible={<>다시 배포하면 복구되지만, 그 사이 멈춘 업무는
-                          되돌아오지 않습니다.</>}
+                        reversible={<>코드·데이터·이력은 보관됩니다. 이전 버전으로 자동 복원하거나
+                          자료를 삭제하는 동작은 아닙니다. 재사용은 별도 검토 후 처리합니다.</>}
                         approval="운영 담당 권한이 필요합니다. 사유는 감사 기록에 남습니다."
                         reason={{
                           value: rollbackReason,
@@ -562,22 +571,25 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
                           placeholder: '예: 입고 수량이 이중 계상되어 즉시 중단합니다',
                           label: <>롤백 사유 <b>(필수)</b> — 없으면 같은 문제를 반복합니다</>,
                         }}
-                        confirmLabel="롤백"
+                        confirmLabel="사유를 기록하고 사용 중단"
                         onCancel={confirmRollback.cancel}
-                        onConfirm={() => confirmRollback.run(async () => {
-                          setMsg(''); setErr('');
-                          try {
-                            setRollbackOut(await rollbackRelease(releaseId, rollbackReason));
-                            setMsg('롤백을 기록했습니다.');
-                            await inspect(releaseId, projectId);
-                            loadList();
-                          } catch (e: any) {
-                            setErr(e?.message || '롤백하지 못했습니다.');
-                          }
+                        onConfirm={() => confirmRollback.run(async (target) => {
+                          setMsg(''); setErr(''); setRollbackOut(null);
+                          const feedback = await runRollback({
+                            perform: () => rollbackRelease(target.releaseId, rollbackReason.trim()),
+                            refresh: () => Promise.all([
+                              inspect(target.releaseId, target.projectId, liveIntegration, true), loadList(),
+                            ]),
+                            onBusy: setRollbackBusy,
+                          });
+                          if (!feedback) return;
+                          setRollbackOut(feedback.result);
+                          setMsg(feedback.message); setErr(feedback.error);
+                          if (feedback.result?.outcome === 'complete') setRollbackReason('');
                         })} />
                       {rollbackOut && (
-                        <Banner tone="warn" title="롤백의 한계">
-                          {rollbackOut.revoked_promotion ? '전사 승격을 철회했습니다. ' : ''}
+                        <Banner tone={rollbackOut.outcome === 'complete' ? 'info' : 'error'}
+                          title={rollbackOut.message}>
                           {rollbackOut.limitation}
                         </Banner>
                       )}
@@ -665,7 +677,7 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
                   </div>
                 </Panel>
               </div>
-            </>
+            </fieldset>
           )}
         </div>
       </div>

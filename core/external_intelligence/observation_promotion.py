@@ -59,6 +59,16 @@ REJECT_NO_INDICATOR = "등록되지 않은 지표입니다"
 REJECT_NO_VALUE = "값 또는 관측 시점이 없습니다"
 REJECT_ORIGIN = "외생 지표가 아닌 성격입니다"
 REJECT_GATE = "관측값 등록 관문이 거부했습니다"
+#: ★★★ [2026-09-09 Codex 지적] 빈 원천 ID 는 «여기서» 막는다.
+#:   `record_observation()` 은 `if source_id:` 로 감싸 **빈 값이면 승인 검사를 통째로
+#:   건너뛴다.** 즉 아래 관문에 기대면 빈 값이 §12.4 를 우회한다 — 통제는 자기가 막을
+#:   것에 기대면 안 된다. (재현 확인: 빈 source_id 로 관측값이 그냥 등록됐다.)
+REJECT_NO_SOURCE = "원천 ID 가 비어 있습니다"
+#: ⚠️ 장애를 «정상 차단»으로 접지 않는다. 승인 대기와 DB 장애는 다음 행동이 다르다.
+REJECT_ERROR = "처리 중 오류가 났습니다"
+
+#: 저장소가 한 번에 돌려주는 최대 행. **이 수에 닿으면 잘렸을 수 있다.**
+STAGED_READ_LIMIT = 5000
 
 
 @dataclass(frozen=True)
@@ -99,6 +109,12 @@ def _intel():
     return external_intelligence
 
 
+def _policy_errors():
+    """«정책이 막은 것»의 예외 유형. 장애와 갈라야 다음 행동이 갈린다."""
+    from core.external_intelligence import ExternalIntelligenceError
+    return (ExternalIntelligenceError, ValueError)
+
+
 def register_provider_source(descriptor, *, owner_department: str = "") -> Dict[str, Any]:
     """Provider 카드를 «원천»으로 등록한다. **승인하지 않는다**(`enabled=0`).
 
@@ -118,7 +134,13 @@ def register_provider_source(descriptor, *, owner_department: str = "") -> Dict[
         license_type=descriptor.license_url, allowed_usage=descriptor.allowed_usage,
         refresh_frequency=descriptor.refresh_frequency,
         owner_department=owner_department, trust_grade=descriptor.default_trust_grade,
-        note=descriptor.coverage_note)
+        note=descriptor.coverage_note,
+        #: ★★★ [2026-09-09 Codex 지적] **원천 id = provider_id 로 못 박는다.**
+        #:   수집 행은 `orchestrator.py:587` 이 `provider_id`(예: WB_PINK_SHEET)를 담는데
+        #:   등록은 `src_...` 를 발급했다. 그러면 승인 여부 이전에 «존재하지 않는 원천»으로
+        #:   전부 거부된다 — 실제로 그랬다(재현 확인).
+        #:   ⚠️ 매핑표를 따로 두지 않는다. 두면 언젠가 한쪽만 갱신된다.
+        source_id=descriptor.provider_id)
 
 
 def _row_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
@@ -134,10 +156,20 @@ def promote(store, job_id: str, *, actor_id: str, register_missing: bool = False
     ⚠️ 이 함수는 관문을 만들지 않는다 — `record_observation()` 이 거부하면 그 사유를
       그대로 담는다. 승인되지 않은 원천이면 **전부 거부되는 것이 정상**이다."""
     intel = _intel()
-    rows = store.staged_rows(job_id=job_id, limit=5000)
+    rows = store.staged_rows(job_id=job_id, limit=STAGED_READ_LIMIT)
     if not rows:
         return PromotionReport(job_id=job_id, next_actions=(
             "이 작업에 적재된 행이 없습니다. 먼저 dry-run 과 apply 를 완료하십시오.",))
+    #: ★★★ [2026-09-09 Codex 지적] 저장소가 5,000행에서 자른다. 그것을 모르고 세면
+    #:   «실제보다 적게 세면서 accounted=True» 가 된다 — 정산이 거짓말을 한다.
+    #:   ⚠️ 조용히 일부만 올리지 않는다. 아예 멈추고 사람에게 나누라고 말한다.
+    if len(rows) >= STAGED_READ_LIMIT:
+        return PromotionReport(
+            job_id=job_id, contract_key=str(rows[0].get("contract_key") or ""),
+            considered=0, next_actions=(
+                "적재 행이 저장소 조회 한도(" + str(STAGED_READ_LIMIT) + "행)에 닿았습니다 — "
+                "일부만 올리면 정산이 거짓이 되므로 승격을 중단했습니다.",
+                "수집 작업을 기간·품목으로 나누어 다시 만드십시오."))
 
     contract = str(rows[0].get("contract_key") or "")
     if contract not in PROMOTABLE_CONTRACTS:
@@ -186,20 +218,35 @@ def promote(store, job_id: str, *, actor_id: str, register_missing: bool = False
             if code not in registered:
                 registered.append(code)
 
+        source_id = str(payload.get("source_id") or "").strip()
+        if not source_id:
+            #: ★★★ 아래 관문은 빈 값이면 승인 검사를 건너뛴다. 여기서 막지 않으면
+            #:   §12.4 가 «빈 문자열 하나로» 우회된다.
+            rejected.append(Rejected(key, REJECT_NO_SOURCE,
+                                     "원천 ID 가 없으면 승인 여부를 판정할 수 없습니다 — "
+                                     "빈 값은 검사를 건너뛰므로 여기서 막습니다(§12.4)."))
+            continue
+
         try:
             intel.record_observation(
                 indicator_code=code, observed_at=observed_at, value=float(value),
                 vintage=str(payload.get("vintage_date") or observed_at),
                 grade=str(payload.get("trust_grade") or grade_default),
-                source_id=str(payload.get("source_id") or ""),
+                source_id=source_id,
                 published_at=str(payload.get("published_at") or ""),
                 unit=str(payload.get("unit") or ""),
                 #: ★ 계보의 마지막 고리 — 관측값에서 원문 파일까지 되짚는다.
                 source_record_ref=str(row.get("raw_object_ref") or ""),
                 note="수집 작업 " + job_id + " 에서 승격")
             promoted += 1
-        except Exception as exc:                              # noqa: BLE001
+        except _policy_errors() as exc:
+            #: 정책이 «의도적으로» 막은 것 — 승인 대기·등급 미달 등.
             rejected.append(Rejected(key, REJECT_GATE, str(exc)[:220]))
+        except Exception as exc:                              # noqa: BLE001
+            #: ★★★ [2026-09-09 Codex 지적] 장애를 «정상 차단»으로 접지 않는다.
+            #:   DB 장애를 「승인 대기」로 표시하면 사람이 승인하러 가서 헛수고한다.
+            rejected.append(Rejected(key, REJECT_ERROR,
+                                     type(exc).__name__ + ": " + str(exc)[:200]))
 
     actions: List[str] = []
     if missing:
@@ -208,6 +255,16 @@ def promote(store, job_id: str, *, actor_id: str, register_missing: bool = False
     if any(r.reason == REJECT_GATE and "승인되지 않은" in r.detail for r in rejected):
         actions.append("원천이 아직 승인되지 않았습니다 — 데이터 관리자가 승인해야 "
                        "관측값으로 올라갑니다(§12.4).")
+    if any(r.reason == REJECT_GATE and "존재하지 않는 원천" in r.detail for r in rejected):
+        actions.append("원천이 등록돼 있지 않습니다 — `register_provider_source()` 로 먼저 "
+                       "등록하십시오(원천 id 는 provider_id 와 같습니다).")
+    if any(r.reason == REJECT_NO_SOURCE for r in rejected):
+        actions.append("원천 ID 가 빈 행이 있습니다 — 수집 경로가 provider_id 를 싣는지 "
+                       "확인하십시오. 빈 값은 승인 검사를 건너뛰므로 올리지 않습니다.")
+    if any(r.reason == REJECT_ERROR for r in rejected):
+        #: ⚠️ 이것은 «승인하러 가라»가 아니다. 사람을 헛걸음시키지 않는다.
+        actions.append("⚠️ 처리 중 오류가 났습니다 — 정책 거부가 아니라 «장애»입니다. "
+                       "승인으로 풀리지 않으니 로그를 확인하십시오.")
     if promoted:
         actions.append("계획 동인(plan_drivers)에 이 지표를 external_code 로 연결하면 "
                        "시나리오가 실제 관측값으로 계산됩니다.")

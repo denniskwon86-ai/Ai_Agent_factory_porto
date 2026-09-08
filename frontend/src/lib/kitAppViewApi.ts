@@ -58,10 +58,10 @@ export interface AppRecords {
  *   앱에 복사본을 만들지 않는다. 그래서 원천이 바뀌면 앱도 같이 바뀐다.
  */
 export async function readAppRecords(
-  proof: string, name: string, limit = 20,
+  proof: string, name: string, limit = 20, offset = 0,
 ): Promise<AppRecords> {
   const res = await apiFetch(
-    `${APPDATA}/runtime/datasets/${encodeURIComponent(name)}/records?limit=${limit}`,
+    `${APPDATA}/runtime/datasets/${encodeURIComponent(name)}/records?limit=${limit}&offset=${offset}`,
     { headers: { 'X-App-Proof': proof } });
   if (!res.ok) throw new Error(`«${name}» 을(를) 읽지 못했습니다 (${res.status})`);
   const body = await res.json();

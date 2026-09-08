@@ -5,7 +5,7 @@ import { API_BASE_URL } from './api';
 
 /** ⚠️ [이관 F 5/8] 상태 코드를 실어 던진다 — 화면이 «권한이 없어 못 봤다» 와 «서버가 죽었다»
  *  를 구분해야 한다. `closedLoopFetch.ApiError`·`shadowApi` 와 같은 규약이다. */
-export type ApiError = Error & { status?: number };
+export type ApiError = Error & { status?: number; rollback?: RollbackResult };
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(`${API_BASE_URL}${path}`, {
@@ -18,9 +18,10 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     const d = (j as any)?.detail;
     const msg = typeof d === 'string' ? d
       : Array.isArray(d) ? d.map((e: any) => e?.msg || JSON.stringify(e)).join(' · ')
-        : `요청 실패 (${r.status})`;
+        : typeof d?.message === 'string' ? d.message : `요청 실패 (${r.status})`;
     const err = new Error(msg) as ApiError;
     err.status = r.status;
+    if (path === '/api/v1/readiness/rollback' && d?.rollback) err.rollback = d.rollback;
     throw err;
   }
   return j.data as T;
@@ -53,7 +54,7 @@ export type Promotion = {
   from_scope: string;
   target_scope: string;
   project_id: string;
-  status: 'draft' | 'requested' | 'approved' | 'rejected' | 'promoted';
+  status: 'draft' | 'requested' | 'approved' | 'rejected' | 'promoted' | 'revoked';
   requested_by: string;
   data_owner_approved_by: string;
   owner_note: string;
@@ -137,6 +138,10 @@ export type RollbackResult = {
   actor: string;
   reason: string;
   created_at: string;
+  outcome: 'complete' | 'partial' | 'failed';
+  program_disabled: boolean;
+  history_recorded: boolean;
+  message: string;
   // ⚠️ 화면에 반드시 그대로 보여준다 — "롤백했다"가 실제보다 크게 읽히면 아무도 후속
   //   조치를 하지 않는다.
   limitation: string;

@@ -17,6 +17,7 @@ from typing import Any
 from core.calc_models import BOM_INPUT_ROLES, CalcInputError, material_shortage
 from core.calc_projection import PROJECTION_DATASETS, project
 from core.data_preparation.business_kits import classify_dataset
+from core.data_preparation.kit_quantity_audit import inspect_quantity_flow
 
 
 def _number(value: Any) -> Decimal:
@@ -207,7 +208,8 @@ def read_package(root: Path, profile: str = "quick") -> tuple:
 def audit_package(root: Path, profile: str = "quick") -> dict:
     """Read explicit starter assets only; no DB or source writes."""
     manifest, data, contracts, files, read_errors = read_package(root, profile)
-    issues = read_errors + inspect_rows(data, contracts)
+    quantity_flow = inspect_quantity_flow(data)
+    issues = read_errors + inspect_rows(data, contracts) + quantity_flow["issues"]
     grouped = Counter(classify_dataset(key)["business_kit_id"] for key in data)
     examples = defaultdict(list)
     for item in issues:
@@ -220,8 +222,9 @@ def audit_package(root: Path, profile: str = "quick") -> dict:
         "rows": {key: len(rows) for key, rows in data.items()}, "files": files,
         "issue_count": len(issues), "issue_counts": dict(Counter(i["code"] for i in issues)),
         "issue_examples": dict(examples),
+        "quantity_flow": {k: v for k, v in quantity_flow.items() if k != "issues"},
         "not_verified": ["live database bindings and certification", "permissions and browser journey",
                          "full enterprise profit/cash model", "DART/ECOS actual-source reconciliation",
-                         "inventory movement reconciliation", "production-to-sales approved allocation"],
+                         "actual BOM consumption and lot genealogy", "production-to-sales approved allocation"],
         "notice": "Read-only sample inspection; no registration, approval or certification performed.",
     }

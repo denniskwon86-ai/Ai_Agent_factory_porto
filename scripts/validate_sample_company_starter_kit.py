@@ -10,6 +10,14 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.data_preparation.production_inputs import modern, verify_model
+
 
 ROOT = Path(__file__).resolve().parents[1]
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
@@ -40,6 +48,19 @@ class Validation:
     @property
     def passed(self) -> bool:
         return not any(c["status"] == "FAIL" and c["severity"] == "ERROR" for c in self.checks)
+
+
+def production_model_errors(data):
+    bad = []
+    for row in data.get("MFG-02", []):
+        try:
+            if modern(row):
+                verify_model(row, data.get("MDM-05", []), data.get("MDM-01", []))
+            elif abs(f(row["output_quantity"]) / max(f(row["input_quantity"]), 1e-9) - f(row["actual_yield"])) > 0.002:
+                raise ValueError("legacy yield mismatch")
+        except (ValueError, KeyError, ArithmeticError):
+            bad.append(row.get("batch_id"))
+    return bad
 
 
 def validate_profile(profile: str, dataset_ids: Sequence[str], v: Validation) -> Dict[str, int]:
@@ -118,7 +139,7 @@ def validate_profile(profile: str, dataset_ids: Sequence[str], v: Validation) ->
     plans = {r["plan_line_id"]: r for r in data["MFG-01"]}
     batches = data["MFG-02"]
     v.check(f"{profile}:생산계획참조", all(r["plan_line_id"] in plans for r in batches))
-    bad_yield = [r["batch_id"] for r in batches if abs(f(r["output_quantity"]) / max(f(r["input_quantity"]), 1e-9) - f(r["actual_yield"])) > 0.002]
+    bad_yield = production_model_errors(data)
     v.check(f"{profile}:생산수율대사", not bad_yield, f"bad={bad_yield[:5]}")
 
     # Inventory movement → monthly snapshot equality.

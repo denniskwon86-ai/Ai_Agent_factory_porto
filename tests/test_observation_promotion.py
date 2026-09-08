@@ -235,3 +235,84 @@ def test_registering_twice_does_not_duplicate(intel):
     a = OP.register_provider_source(d)
     b = OP.register_provider_source(d)
     assert a["source_id"] == b["source_id"]
+
+
+# ── 【2026-09-09 Codex 지적】 네 결함의 회귀 ──────────────────────────────────
+#: ⚠️ 앞의 시험들이 초록이었던 이유: fixture 가 «진짜 src_… id» 를 주입했다.
+#:   실제 수집 경로는 provider_id 를 싣는다 — 내 말로 쓴 fixture 가 계약을 대신 정의했다.
+
+def test_the_registered_source_id_is_the_provider_id(intel):
+    """★★★ ① 수집 행의 source_id(provider_id)와 등록 원천 id 가 «같아야» 한다.
+
+    다르면 승인 여부 이전에 「존재하지 않는 원천」으로 전부 거부된다(재현 확인)."""
+    from core.external_intelligence.providers import worldbank as W
+    d = W.WorldBankPinkSheetProvider.descriptor
+    src = OP.register_provider_source(d)
+    assert src["source_id"] == d.provider_id, "원천 id 와 provider_id 가 갈리면 사슬이 끊긴다"
+    assert intel.get_source(d.provider_id) is not None
+
+
+def test_the_real_collection_path_source_id_resolves(store, intel):
+    """수집기가 «실제로 싣는» 값으로 승격이 도는가 — fixture 가 아니라."""
+    from core.external_intelligence.providers import worldbank as W
+    d = W.WorldBankPinkSheetProvider.descriptor
+    src = OP.register_provider_source(d)
+    intel.approve_source(src["source_id"], APPROVER)
+    intel.upsert_indicator("WB_COPPER", "구리", required_grade="silver")
+    #: orchestrator.py:587 이 넣는 것과 같은 값 — provider_id 다.
+    job = _stage(store, source_id=d.provider_id)
+    rep = OP.promote(store, job, actor_id=APPROVER)
+    assert rep.promoted == 3, [r.detail for r in rep.rejected]
+
+
+def test_an_empty_source_id_is_refused_here_not_downstream(store, intel):
+    """★★★ ② `record_observation` 은 빈 source_id 면 승인 검사를 «건너뛴다».
+
+    아래 관문에 기대면 §12.4 가 빈 문자열 하나로 우회된다 — 여기서 막는다.
+    (재현 확인: 빈 값으로 관측값이 그냥 등록됐다.)"""
+    intel.upsert_indicator("WB_COPPER", "구리", required_grade="silver")
+    job = _stage(store, source_id="")
+    rep = OP.promote(store, job, actor_id=APPROVER)
+    assert rep.promoted == 0
+    assert {r.reason for r in rep.rejected} == {OP.REJECT_NO_SOURCE}
+    assert intel.list_observations("WB_COPPER") == []
+    assert any("승인 검사를 건너뛰" in a for a in rep.next_actions)
+
+
+def test_the_downstream_gate_really_does_skip_on_empty(intel):
+    """★ 위 시험이 «가상의 위험»이 아님을 증명한다 — 관문이 실제로 건너뛴다."""
+    intel.upsert_indicator("PROBE_SKIP", "탐침", required_grade="silver")
+    intel.record_observation(indicator_code="PROBE_SKIP", observed_at="2025-01",
+                             value=1.0, vintage="2025-01", grade="silver", source_id="")
+    assert intel.list_observations("PROBE_SKIP"), (
+        "관문이 빈 source_id 를 막는다면 이 시험을 지우고 승격의 방어도 재검토할 것")
+
+
+def test_hitting_the_read_limit_stops_instead_of_lying(store, intel):
+    """★★★ ③ 저장소가 5,000행에서 자른다. 일부만 올리면서 accounted=True 면 «정산이 거짓»이다."""
+    src = _approved_source(intel)
+    intel.upsert_indicator("WB_COPPER", "구리", required_grade="silver")
+    job = _stage(store, source_id=src, n=OP.STAGED_READ_LIMIT)
+    rep = OP.promote(store, job, actor_id=APPROVER)
+    assert rep.promoted == 0
+    assert rep.considered == 0
+    assert any("한도" in a for a in rep.next_actions)
+    assert any("나누어" in a for a in rep.next_actions)
+
+
+def test_a_failure_is_not_reported_as_a_policy_block(store, intel, monkeypatch):
+    """★★★ ④ DB 장애를 «승인 대기»로 표시하면 사람이 승인하러 가서 헛수고한다."""
+    src = _approved_source(intel)
+    intel.upsert_indicator("WB_COPPER", "구리", required_grade="silver")
+    job = _stage(store, source_id=src)
+
+    def boom(*a, **k):
+        raise RuntimeError("디스크가 응답하지 않습니다")
+
+    monkeypatch.setattr(intel, "record_observation", boom)
+    rep = OP.promote(store, job, actor_id=APPROVER)
+    assert {r.reason for r in rep.rejected} == {OP.REJECT_ERROR}
+    assert OP.REJECT_GATE not in {r.reason for r in rep.rejected}
+    assert any("장애" in a for a in rep.next_actions)
+    assert not any("승인해야" in a for a in rep.next_actions), \
+        "장애인데 «승인하러 가라»고 하면 헛걸음시킨다"

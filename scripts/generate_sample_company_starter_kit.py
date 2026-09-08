@@ -351,7 +351,7 @@ def generate_locations(profile: Profile) -> List[Dict[str, Any]]:
     if profile.name == "quick":
         # Quick 프로필도 두 실제 사업 범위의 입고 목적지를 모두 포함해야 한다.
         # 그렇지 않으면 구매·물류 데이터가 존재하지 않는 창고를 참조하게 된다.
-        quick_ids = {"LOC-P1-RAW", "LOC-P2-RAW", "LOC-P2-FG"}
+        quick_ids = {"LOC-P1-RAW", "LOC-P1-FG", "LOC-P2-RAW", "LOC-P2-FG"}
         all_rows = [r for r in all_rows if r[0] in quick_ids]
     rows = [{"location_id": a, "site_id": b, "location_name": c, "storage_type": d,
              "capacity_quantity": e, "capacity_uom": "TON", "active": d != "VIRTUAL", "_scope": b}
@@ -681,15 +681,16 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
     shp_by_id = {s["shipment_id"]: s for s in shipments}
     movements: List[Dict[str, Any]] = []
     balances: Dict[tuple[str, str], float] = defaultdict(float)
-    active_locations = [l for l in locations if l["active"]]
+    active_locations = [l for l in locations if str(l["active"]).lower() == "true"]
     material_ids = [m["material_id"] for m in materials]
     # Opening stock keeps production and sales movement sequences physically possible.
     for idx, m in enumerate(materials):
         loc = "LOC-P1-RAW" if m["scope_node_id"] == PLANT1 and m["material_type"] == "RAW" else \
               "LOC-P1-FG" if m["scope_node_id"] == PLANT1 else \
               "LOC-P2-FG" if m["material_type"] == "FINISHED" else "LOC-P2-RAW"
-        if loc not in {l["location_id"] for l in active_locations}:
-            loc = active_locations[idx % len(active_locations)]["location_id"]
+        matches = [l for l in active_locations if l["location_id"] == loc and l["tenant_id"] == m["tenant_id"]]
+        if len(matches) != 1 or matches[0]["scope_node_id"] != m["scope_node_id"]:
+            raise ValueError(f"Opening warehouse unavailable or outside material scope: {loc}")
         qty = 2000.0 if m["material_type"] == "RAW" else 800.0 if m["material_type"] == "FINISHED" else 100.0
         balances[(m["material_id"], loc)] += qty
         movements.append({"movement_id": f"MOV-OPEN-{idx+1:05d}", "movement_date": iso(start),

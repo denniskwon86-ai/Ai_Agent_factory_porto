@@ -208,29 +208,38 @@ def test_seam_f6():
 
 
 # ── 시험 잔여물 — «세기 전에» 걸러야 하는 것 ─────────────────────────────────
-#: ★★★ 이 저장소는 합성 행위자에 `.invalid` 도메인을 쓴다(원장 규약). 운영 DB 에는
-#:   시험이 남긴 그 계정의 행이 쌓여 있고, **원시 카운트로 판정하면 그것에 속는다.**
-#:   실제로 첫 판정이 그렇게 틀렸다 — 아래 `test_residue` 가 그 규모를 기록한다.
-SYNTHETIC = "%.invalid"
+#: ⚠️⚠️ [2026-09-09 Codex 지적] **`.invalid` 도메인으로 «잔여물»을 가르면 안 된다.**
+#:   이 저장소는 «정상» 합성 행위자에도 그 도메인을 쓴다 — `demo.data.owner@afs.invalid`
+#:   는 가상회사 인증을 실존 인물 이름으로 남기지 않으려고 **일부러** 만든 계정이고,
+#:   원장에 `demo.ontology.approver@test.invalid` 의 정상 승인 8건이 있다.
+#:   도메인으로 거르면 **정상 합성 자료까지 숨는다.**
+#:
+#: ★ 그래서 이 탐침은 «분류하지 않는다». 행위자별 분포를 그대로 적고, 무엇이 잔여물인지는
+#:   사람이 판정한다. 아래 두 계정만 «자동 실행기»로 알려져 있어 F-7 계수에서 뺀다.
+AUTOMATION_ACTORS = ("owner@afs.invalid", "runner@afs.invalid")
 
 
 def test_residue_in_operational_db():
     """운영 DB 에 남은 시험 잔여물의 규모. **이음매가 아니라 위생 항목이다.**"""
-    seam = "※ 운영 DB 의 시험 잔여물"
+    seam = "※ 운영 DB 의 행위자 분포"
     cases = _count("collaboration.db", "decision_cases")
-    syn_cases = len(_query("collaboration.db",
-                           "SELECT DISTINCT decision_id FROM decision_participants "
-                           "WHERE user_id LIKE '%.invalid'"))
-    pubs_syn = _count("collaboration.db", "publications")
+    top = _query("collaboration.db",
+                 "SELECT user_id, COUNT(DISTINCT decision_id) n FROM decision_participants "
+                 "GROUP BY 1 ORDER BY n DESC LIMIT 4")
     jobs = _count("external_intelligence.db", "data_acquisition_jobs")
-    if syn_cases or jobs:
+    who = " · ".join(str(r[0])[:28] + " " + str(r[1]) for r in top)
+    auto = sum(int(r[1]) for r in top if str(r[0]) in AUTOMATION_ACTORS)
+    if auto or jobs:
         _verdict(EMPTY, seam,
-                 "합성 계정(`.invalid`)이 만든 행이 운영 DB 에 남아 있다 — "
-                 "안건 " + str(syn_cases) + "/" + str(cases) + "건 · 수집 작업 "
-                 + str(jobs) + "건(전부 DRAFT). ★ **원시 카운트가 이것에 오염된다.** "
-                 "실제로 이 탐침의 첫 판정이 여기에 속아 「실행 지시가 안 만들어진다」는 "
-                 "거짓 결론을 냈다. 정리 여부는 사람이 정한다(자동 삭제하지 않는다).")
-    _verdict(OK, seam, "잔여물 없음.")
+                 "안건 " + str(cases) + "건의 행위자 분포: " + who + ". "
+                 "그중 자동 실행기(" + " · ".join(AUTOMATION_ACTORS) + ") 소유가 "
+                 + str(auto) + "건이고, 수집 작업 " + str(jobs) + "건은 전부 DRAFT 다. "
+                 "★ **원시 카운트가 이것에 오염된다** — 이 탐침의 첫 판정이 여기 속아 "
+                 "「실행 지시가 안 만들어진다」는 거짓 결론을 냈다. "
+                 "⚠️ 다만 `.invalid` 도메인 «자체»는 잔여물 표시가 아니다 — "
+                 "`demo.data.owner@afs.invalid` 처럼 «의도된» 합성 행위자도 그 도메인을 쓴다. "
+                 "분류는 사람이 한다(자동 삭제·자동 제외 모두 하지 않는다).")
+    _verdict(OK, seam, "자동 실행기 소유 행 없음.")
 
 
 # ── F-7  07 비교 → 08 경영 의사결정 ──────────────────────────────────────────
@@ -238,10 +247,12 @@ def test_seam_f7():
     """⚠️ 원시 카운트로 보면 «안건 256 : 실행 지시 2» 라 끊긴 것처럼 보인다.
     그러나 249건이 `.invalid` 시험 잔여물이다 — **실제 계정 기준으로 다시 센다.**"""
     seam = "F-7 비교 → 경영 의사결정"
+    #: ⚠️ 도메인이 아니라 «알려진 자동 실행기 두 계정»만 뺀다 — `.invalid` 로 거르면
+    #:   의도된 합성 행위자(demo.data.owner@afs.invalid)까지 숨는다.
     real = _query("collaboration.db",
                   "SELECT COUNT(DISTINCT d.decision_id) FROM decision_cases d "
                   "JOIN decision_participants p ON p.decision_id = d.decision_id "
-                  "WHERE p.user_id NOT LIKE '%.invalid'")
+                  "WHERE p.user_id NOT IN ('" + "','".join(AUTOMATION_ACTORS) + "')")
     n_real = int(real[0][0]) if real else 0
     decided = _query("collaboration.db",
                      "SELECT COUNT(*) FROM decision_cases "

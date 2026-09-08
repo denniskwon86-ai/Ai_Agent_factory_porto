@@ -7,6 +7,7 @@
   보여줘야 한다 — "롤백했다"가 실제보다 크게 읽히면 아무도 후속 조치를 하지 않는다.
 """
 import asyncio
+import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -68,6 +69,10 @@ async def rollback(req: RollbackRequest, p: Principal = Depends(current_principa
                                       _actor(p), req.reason, req.to_release_id)
     except ReadinessError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except sqlite3.Error:
+        raise HTTPException(status_code=503, detail='롤백 기록 저장소에 연결할 수 없습니다. 잠시 후 다시 시도하십시오.')
+    if out['outcome'] != 'complete':
+        raise HTTPException(status_code=503, detail={'message': out['message'], 'rollback': out})
     return {"status": "success", "data": out}
 
 

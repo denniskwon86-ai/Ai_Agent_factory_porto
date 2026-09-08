@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   approveAppContract, buildKitApp, DataPrepError, draftAppContract, listKitApps,
   promoteKitApp, type AppContractStatus, type KitAppRow,
 } from '../lib/dataPrepApi';
 import {
   issueAppProof, listAppDatasets, readAppRecords,
-  type AppDatasetRow, type AppRecords,
 } from '../lib/kitAppViewApi';
+import { createKitAppPager, emptyKitAppPage, kitAppPageInfo } from '../lib/kitAppPaging';
 import {
   datasetDisplayName, KitBusinessView, preferredDatasetName,
 } from './KitBusinessView';
@@ -135,53 +135,38 @@ function AppViewer({
   releaseId, appId, appLabel,
 }: { releaseId: string; appId: string; appLabel: string }) {
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const [sets, setSets] = useState<AppDatasetRow[] | null>(null);
-  const [picked, setPicked] = useState('');
-  const [rows, setRows] = useState<AppRecords | null>(null);
-  //: ★★★ 증명은 **메모리에만** 둔다 — 저장소·URL·로그 어디에도 두지 않는다.
-  const proofRef = useRef('');
-
-  const load = useCallback(async () => {
-    setBusy(true); setErr('');
-    try {
-      const ds = await listAppDatasets(releaseId);
-      setSets(ds);
-      if (!proofRef.current) proofRef.current = await issueAppProof(releaseId);
-      if (ds.length) {
-        const first = preferredDatasetName(appId, ds);
-        setPicked(first);
-        setRows(await readAppRecords(proofRef.current, first));
-      }
-    } catch (e: any) {
-      //: ⚠️ 사유를 삼키지 않는다. 후보 판이면 403 이고, 그때 할 일은 «운영 전환» 이다.
-      setErr(e?.message || '열지 못했습니다.');
-    } finally { setBusy(false); }
-  }, [appId, releaseId]);
+  const [view, setView] = useState(emptyKitAppPage);
+  const pager = useMemo(() => createKitAppPager({
+    listDatasets: () => listAppDatasets(releaseId),
+    issueProof: () => issueAppProof(releaseId),
+    readRecords: readAppRecords,
+    chooseDataset: (datasets) => preferredDatasetName(appId, datasets),
+    onChange: setView,
+  }), [appId, releaseId]);
+  const { datasets: sets, picked, rows, busy, error: err } = view;
+  const page = kitAppPageInfo(view);
 
   useEffect(() => {
     const refresh = () => {
       // 운영 문맥이 바뀌면 이전 범위에서 발급한 증명을 재사용할 수 없다.
       // 열린 화면도 닫았다 다시 열게 하지 않고 새 문맥으로 즉시 재조회한다.
-      proofRef.current = '';
-      if (open) void load();
+      if (open) void pager.load();
+      else pager.reset();
     };
+    refresh();
     window.addEventListener('factory:enterprise-context-changed', refresh);
-    return () => window.removeEventListener('factory:enterprise-context-changed', refresh);
-  }, [load, open]);
-
-  async function pick(name: string) {
-    setPicked(name); setRows(null); setErr('');
-    try {
-      setRows(await readAppRecords(proofRef.current, name));
-    } catch (e: any) { setErr(e?.message || '읽지 못했습니다.'); }
-  }
+    window.addEventListener('factory:session-changed', refresh);
+    return () => {
+      pager.invalidate();
+      window.removeEventListener('factory:enterprise-context-changed', refresh);
+      window.removeEventListener('factory:session-changed', refresh);
+    };
+  }, [pager, open]);
 
   if (!open) {
     return (
       <button type="button" style={{ fontSize: 13, padding: '5px 12px' }}
-              onClick={() => { setOpen(true); void load(); }}>
+              onClick={() => setOpen(true)}>
         앱 열기
       </button>
     );
@@ -209,7 +194,8 @@ function AppViewer({
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <strong style={{ fontSize: 13 }}>{appLabel}</strong>
         {(sets || []).map((d) => (
-          <button key={d.name} type="button" onClick={() => void pick(d.name)}
+          <button key={d.name} type="button" disabled={busy}
+                  aria-pressed={picked === d.name} onClick={() => void pager.select(d.name)}
                   style={{
                     fontSize: 12, padding: '3px 9px', borderRadius: 6,
                     border: '1px solid var(--surface-border-control)',
@@ -219,20 +205,39 @@ function AppViewer({
             {datasetDisplayName(appId, d)}
           </button>
         ))}
-        <button type="button" onClick={() => setOpen(false)}
+        <button type="button" onClick={() => { pager.reset(); setOpen(false); }}
                 style={{ fontSize: 12, padding: '3px 9px', marginLeft: 'auto' }}>닫기</button>
       </div>
 
-      {busy && <div style={{ fontSize: 13 }}>여는 중…</div>}
+      {busy && <div role="status" style={{ fontSize: 13 }}>자료를 불러오는 중…</div>}
       {err && (
-        <div style={{ fontSize: 13, color: 'var(--state-error-fg)' }}>{err}</div>
+        <div role="alert" style={{ fontSize: 13, color: 'var(--state-error-fg)' }}>
+          {err}
+          <button type="button" disabled={busy} onClick={() => void pager.retry()}
+                  style={{ marginLeft: 8 }}>다시 시도</button>
+        </div>
+      )}
+      {!busy && !err && sets?.length === 0 && (
+        <div style={{ fontSize: 13 }}>이 앱에 연결된 업무 자료가 없습니다.</div>
       )}
       {rows && (
         <div>
-          <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginBottom: 4 }}>
-            {/* ⚠️ 보인 건수를 «전부» 로 읽지 않게 총계를 함께 적는다. */}
-            {flat.length}건 표시 · 총 {rows.total}건
-          </div>
+          <nav aria-label="업무 자료 페이지" style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 12, flexWrap: 'wrap', marginBottom: 12, fontSize: 13,
+          }}>
+            <span role="status" style={{ color: 'var(--surface-text-muted)' }}>
+              {page.total === 0 ? '0건' : `${page.start.toLocaleString()}–${page.end.toLocaleString()}건`}
+              {' 표시 · 총 '}{page.total.toLocaleString()}건
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button type="button" disabled={!page.hasPrevious} onClick={() => void pager.move(-1)}
+                      style={{ minHeight: 32, padding: '4px 12px' }}>이전</button>
+              <span>{page.page.toLocaleString()} / {page.pages.toLocaleString()} 페이지</span>
+              <button type="button" disabled={!page.hasNext} onClick={() => void pager.move(1)}
+                      style={{ minHeight: 32, padding: '4px 12px' }}>다음</button>
+            </div>
+          </nav>
           <KitBusinessView
             appId={appId}
             datasetName={picked}
