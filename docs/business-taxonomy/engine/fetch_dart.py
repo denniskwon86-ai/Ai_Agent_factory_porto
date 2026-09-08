@@ -368,16 +368,41 @@ def controlling_group(name: str, groups: list[str], ftc_rows: list[dict],
 
 # ────────────────────────────────────────────── 사업보고서
 
+_rpt_cache: dict | None = None
+
+
 def latest_annual(corp_code: str, bgn: str = '20240101') -> dict | None:
-    """가장 최근 사업보고서 1건"""
+    """
+    가장 최근 사업보고서 1건.
+
+    **캐시한다.** 이 조회는 파서를 고쳐 다시 돌릴 때마다 회사 수만큼 반복된다 —
+    420 개사를 재파싱하면 420 회다. 공시 ZIP 은 캐시되는데 이 목록만 매번 API 를
+    치고 있었다. 일일 한도(20,000회)도 아껴야 한다.
+    """
+    global _rpt_cache
+    path = os.path.join(CACHE, 'reports.json')
+    if _rpt_cache is None:
+        os.makedirs(CACHE, exist_ok=True)
+        try:
+            _rpt_cache = json.load(open(path, encoding='utf-8'))
+        except Exception:
+            _rpt_cache = {}
+    k = f'{corp_code}:{bgn}'
+    if k in _rpt_cache:
+        return _rpt_cache[k]
+
     d = _get_json('list.json', corp_code=corp_code, bgn_de=bgn,
                   end_de='20991231', pblntf_ty='A', page_count=50)
-    if d.get('status') != '000':
-        return None
-    for it in (d.get('list') or []):
-        if it.get('report_nm', '').startswith('사업보고서'):
-            return it
-    return None
+    hit = None
+    if d.get('status') == '000':
+        for it in (d.get('list') or []):
+            if it.get('report_nm', '').startswith('사업보고서'):
+                hit = it
+                break
+    # 없다는 사실도 캐시한다 — SPAC·폐지 종목을 매번 다시 물어볼 이유가 없다
+    _rpt_cache[k] = hit
+    json.dump(_rpt_cache, open(path, 'w', encoding='utf-8'), ensure_ascii=False)
+    return hit
 
 
 def _zip(rcept_no: str) -> zipfile.ZipFile:
