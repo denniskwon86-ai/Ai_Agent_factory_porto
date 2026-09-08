@@ -73,6 +73,14 @@ def is_affiliate(seg_name: str, parent: str) -> str | None:
         hit = CORP.get(c)
         if hit and R._norm_corp(hit) != pn:
             return hit
+    # **약어는 이름이 겹치지 않아 위에서 못 잡는다.** 삼성전자 「SDC」 부문 29.8 조와
+    # 삼성디스플레이(주) 법인 26 조가 함께 서 있었다 — `_cands('SDC')` 는 {'SDC'} 라
+    # 「삼성디스플레이」와 만나지 않는다. `ABBREV_법인` 대응표로 잇는다 (D-31)
+    for (co, ab), corp in R.ABBREV_법인.items():
+        if co in pn and ab.upper() in seg_name.upper().replace(' ', ''):
+            hit = CORP.get(R._norm_corp(corp))
+            if hit and R._norm_corp(hit) != pn:
+                return hit
     return None
 
 # **부문을 세운 회사와 동명인 껍데기 법인은 세우지 않는다.** DART 기업개황에
