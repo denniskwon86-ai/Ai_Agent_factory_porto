@@ -39,13 +39,16 @@ import re
 # 부문이 아닌 열·행 — 합계·조정·재무용어
 _비부문 = re.compile(
     r'^(합계|총계|계|소계|구분|연결조정|내부거래|조정|제거|공통|미배분|기타|단위'
-    r'|연결후|연결전|당기|전기|당분기|전분기|보고기간|누적'
+    r'|연결후|연결전|당분기|전분기|보고기간|누적'
     r'|주석|제\d'            # 「주 석」 「제 82(당) 기말」 — 재무제표 표의 열 헤더다
     r'|장부|공정가치|수준|등급|Grade|취득|잔액|평가'
     # 「3개월 미만」 「18개월 초과」 — 채권 연령·만기 분석 표의 열이다.
     # KOSDAQ 소형사는 부문 표가 없어서 이런 표가 부문으로 뽑혔다
-    r'|\d+개월|\d+년|\d+일|채권|미수|초과|미만'
-    r'|유동|비유동)')          # 「유동/비유동」 — 자산 분류 표다(에코프로)
+    r'|\d+개월|\d+년|\d+일|\d+\s*[~-]\s*\d+|채권|미수|초과|미만'
+    r'|유동|비유동'            # 「유동/비유동」 — 자산 분류 표다(에코프로)
+    # 「기초금액 → 제각 → 기말금액」 꼴의 변동표. 「구 분」 세로형을 받아들이자
+    # 손상차손 변동표가 부문으로 뽑혔다(LG생활건강·LS일렉트릭·레인보우로보틱스)
+    r'|기초|기말|제각|손상|차손|차익|대체|재분류)')
 _재무행 = re.compile(
     r'(수익|매출|이익|손실|상각|자산|부채|자본|원가|비용|투자|증감|현금|법인세)')
 # 수익 행은 한 표에 여럿 있다. SK이노베이션은 「총매출액·내부매출액·순매출액·
@@ -171,7 +174,7 @@ def _tables(xml: str) -> list[tuple[list[list[str]], float]]:
 
 def _clean(name: str) -> str:
     """부문명 정리 — 각주 표시((*)·(*3)·*1)와 공백을 턴다"""
-    n = re.sub(r'\(\s*\*+\s*\d*\s*\)|\*+\d*', '', name or '').strip()
+    n = re.sub(r'\(\s*\*+\s*\d*\s*\)|\*+\d*|\(\s*주\s*\d+\s*\)', '', name or '').strip()
     return re.sub(r'\s+', ' ', n)
 
 
@@ -181,6 +184,20 @@ def _clean(name: str) -> str:
 _수익원천 = re.compile(
     r'^(상품|제품|용역|재화|서비스|공사|기타)의\s*(공급|제공|이전|판매|매출)$'
     r'|^(한\s*시점|기간에\s*걸쳐)')
+
+
+# 「부문 계」처럼 **뒤에** 합계 표시가 붙는 행. `_비부문` 은 앞만 보므로 놓친다.
+# 「계」 단독 종료를 넣으면 「일반기계」가 걸리니 명시한 말만 잡는다
+_합계행 = re.compile(r'(합계|총계|소계|부문계|누계|전체)$')
+
+# 기간 레이블. **정확히 그 말일 때만** 막는다 — 「전기」를 접두사로 막으면
+# 「전기전자」(HD현대의 보고부문)가 함께 걸린다
+_기간 = re.compile(r'^(당기|전기|당분기|전분기|당기말|전기말|당반기|전반기)$')
+
+# **부문명은 회사명이 아니다.** 「구 분 | 매출액 …」 세로형을 받아들이자
+# 종속기업 거래 표가 부문으로 뽑혔다 — SK하이닉스가 「국내종속기업」·「해외제조법인」
+# ·「SK텔레콤㈜」를 부문으로 내놓았다
+_회사표기 = re.compile(r'㈜|\(주\)|주식회사|유한회사|법인|기업|Co\.|Inc|Ltd|LLC|GmbH')
 
 
 def _부문명(n: str) -> bool:
@@ -194,11 +211,19 @@ def _부문명(n: str) -> bool:
         return False
     if re.fullmatch(r'\d{4}(년|기)?', n):        # 연도 행
         return False
-    if _재무행.search(n):
+    # 공시 표는 자간에 공백을 넣는다. 「자 본 금」·「이 익잉여금」이 자본변동표에서
+    # 부문으로 새어든 게 공백 때문이었다 — **공백을 지운 뒤 검사한다**
+    if _재무행.search(n.replace(' ', '')):
         return False
     if _지역.match(n.replace(' ', '')):         # 지역별 정보 표
         return False
     if _수익원천.match(n):                      # 수익 인식 유형별 분해
+        return False
+    if _합계행.search(n.replace(' ', '')):       # 「부문 계」 같은 합계 행
+        return False
+    if _기간.match(n.replace(' ', '')):          # 당기·전기
+        return False
+    if _회사표기.search(n):                      # 종속기업 목록·거래 표
         return False
     return True
 
@@ -343,14 +368,20 @@ def _revenues_vertical(tables) -> dict[str, int]:
     """
     best: dict[str, int] = {}
     for rows, mult in tables:
-        head = rows[0] if rows else []
-        h0 = _clean(head[0]).replace(' ', '') if head else ''
-        if not re.match(r'^(영업부문|보고부문|사업부문|부문)', h0):
-            continue
-        if not _수익먼저(head):
+        # **헤더 행을 찾아야 한다.** 표의 첫 행이 「(단위:백만원)」 캡션인 경우가
+        # 흔해서 rows[0] 을 헤더로 박으면 HD현대 같은 표를 통째로 놓친다.
+        # 「구 분」으로 시작하는 세로형도 받는다 — 일반 라벨이라 위험해 보이지만
+        # _수익먼저() 가 갈라준다. 가로형 헤더에는 금액 항목이 없고 부문명만 늘어선다
+        hi = None
+        for i, r in enumerate(rows[:3]):
+            h0 = _clean(r[0]).replace(' ', '') if r else ''
+            if re.match(r'^(영업부문|보고부문|사업부문|부문|구분)', h0) and _수익먼저(r):
+                hi = i
+                break
+        if hi is None:
             continue
         got = {}
-        for r in rows[1:]:
+        for r in rows[hi + 1:]:
             ni = None
             for i, c in enumerate(r):
                 if _num(c) is None and _clean(c):
@@ -436,10 +467,13 @@ def parse(xml: str) -> list[dict]:
 def _parse_one(xml: str) -> list[dict]:
     tables = _tables(xml)
     prods = _products(tables)
-    # 가로형(부문이 열)이 주 서식이지만 세로형(부문이 행)도 있다. 많이 잡는 쪽을 쓴다
+    # 가로형(부문이 열)이 주 서식이지만 세로형(부문이 행)도 있다.
+    # **개수가 아니라 매출 합으로 고른다.** 「구 분」으로 시작하는 세로형을 받아들이자
+    # 엉뚱한 표가 섞였는데, 그런 표는 행 수는 많아도 금액이 작다 —
+    # LG생활건강이 가로형 6.4 조 대 세로형 0.01 조였다
     revs, label = _revenues(tables)
     vert = _revenues_vertical(tables)
-    if len(vert) > len(revs):
+    if sum(vert.values()) > sum(revs.values()):
         revs, label = vert, '세로형'
 
     # **매출이 있는 것만 부문으로 인정한다.** 이름만 있는 표는 종속기업 목록일
