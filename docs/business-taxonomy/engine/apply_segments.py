@@ -12,13 +12,11 @@ SAMP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 sys.path.insert(0, ENG); os.chdir(ENG)
 import fetch_dart as F, segment_rules as R
 
-# A 축은 2 단이다 — 대분류(제조·유통·서비스) 아래 세분류가 온다. 세그먼트 판정은
-# 세분류만 내놓으므로 여기서 대분류를 되짚는다
-A대분류 = {}
-for _r in csv.DictReader(io.open(os.path.join(SAMP, 'ftc-all-2026-classified.csv'), encoding='utf-8-sig')):
-    if _r.get('A세분류') and _r.get('A대분류'):
-        A대분류.setdefault(_r['A세분류'], _r['A대분류'])
-A대분류.update({'시공·건설': '제조', '자원채취': '제조', '지주·투자': '서비스'})
+# A 축은 2 단이다 — 대분류(자원·제조·건설·유통·서비스) 아래 세분류가 온다.
+# 세그먼트 판정은 세분류만 내놓으므로 여기서 대분류를 되짚는다.
+# **CSV 에서 유추하지 않고 규칙 모듈을 직접 쓴다** — 표에 없는 세분류가 있으면
+# 대분류가 빈칸으로 남고, 대분류를 5 개로 가른 뒤에는 CSV 가 낡아 어긋난다
+from ksic_rules import A_대분류 as A대분류      # noqa: E402
 
 HERE = os.path.join(ENG, ".cache")
 uni = list(csv.DictReader(io.open(os.path.join(SAMP, 'universe-2026.csv'), encoding='utf-8-sig')))
@@ -68,7 +66,14 @@ def is_affiliate(seg_name: str, parent: str) -> str | None:
             return hit
     return None
 
-inst, replaced, held = [], 0, 0
+# **부문을 세운 회사와 동명인 껍데기 법인은 세우지 않는다.** DART 기업개황에
+# 합병으로 소멸한 법인등록번호가 남아 같은 이름이 두 번 들어온다 — 삼성물산(주)는
+# 1101110015762(현재 · 부문 6 개)와 1101110002975(구 법인, G467)로 잡혔고,
+# 두산건설·미래에셋증권·진흥기업도 그랬다. **매출 없음을 함께 본다** — 동명이인이
+# 82 건이나 있어서(「(주)신세계」 백화점과 동명 건설사) 이름만으로 합치면 오히려 틀린다
+SEGNAME = {R._norm_corp(r['회사명']) for r in uni if seg_map.get(r['법인등록번호'])}
+
+inst, replaced, held, shell = [], 0, 0, []
 dropped = []          # 계열사명이라 뺀 부문 — 이중계상 방지
 for r in uni:
     if r['모수계층'] == '모수밖':
@@ -97,8 +102,12 @@ for r in uni:
                 dropped.append((r['회사명'], s['명칭'], dup))
                 continue                       # 그 계열사가 이미 인스턴스다 — 이중계상
             j = R.classify_segment(s['명칭'], parent, AIDX)
-            if not j['A세분류']:
-                continue                       # 지역 세그먼트 등
+            # **A 만 비었으면 남긴다.** 상속 금지 규칙(지주 모법인 · 업태 불일치)이
+            # A 를 비우는데, 그때 버리면 삼성물산 「패션」처럼 실재하는 사업이
+            # 소리 없이 사라진다 — 지역 세그먼트(B 도 없다)와는 다르다.
+            # 미판정으로 남겨 롱리스트에서 사람이 보게 한다
+            if not j['A세분류'] and not j['B1주업종']:
+                continue                       # 지역 세그먼트 등 — 사업 구분이 아니다
             inst.append({'단위': '세그먼트', '모법인': r['회사명'], '이름': s['명칭'],
                          '계층': r['모수계층'], '소속그룹': r.get('기업집단명들', ''),
                          'A대분류': A대분류.get(j['A세분류'], ''),
@@ -120,6 +129,11 @@ for r in uni:
         continue
     if not r['A세분류']:
         continue
+    # 껍데기 법인 — T1u 는 건드리지 않는다(동명이인일 수 있고 셀 집계에서 이미 빠진다)
+    if (R._norm_corp(r['회사명']) in SEGNAME and not (r['매출액'] or '').strip()
+            and r['모수계층'] != 'T1u'):
+        shell.append(r['회사명'])
+        continue
     inst.append({'단위': '법인', '모법인': '', '이름': r['회사명'],
                  '계층': r['모수계층'], '소속그룹': r.get('기업집단명들', ''),
                  'A대분류': r.get('A대분류') or A대분류.get(r['A세분류'], ''),
@@ -127,6 +141,9 @@ for r in uni:
                  'B1_2단': r['B1_2단'], '매출': r['매출액'], '판정근거': 'KSIC'})
 
 print(f'세그먼트로 대체한 회사 {replaced}건 · 부문 못 얻은 지주 {held}건 제외')
+if shell:
+    print(f'동명 껍데기 법인 {len(shell)}건 제외 (부문이 이미 그 회사를 대표한다): '
+          + ' · '.join(x[:14] for x in shell))
 if dropped:
     print(f'이중계상으로 뺀 부문 {len(dropped)}건 (부문명이 모수 안의 다른 법인이다)')
     for mo, nm, hit in dropped[:8]:
