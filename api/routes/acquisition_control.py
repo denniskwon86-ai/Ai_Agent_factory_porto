@@ -43,6 +43,7 @@ from core.external_intelligence.refresh_runner import BLOCK_REASONS as _BLOCK_RE
 from core.external_intelligence.providers import ecos as _ecos  # noqa: F401
 from core.external_intelligence.providers import datagokr as _datagokr  # noqa: F401
 from core.external_intelligence.providers import kosis as _kosis  # noqa: F401
+from core.external_intelligence.providers import worldbank as _worldbank  # noqa: F401
 from core.external_intelligence.providers import opendart as _opendart  # noqa: F401
 
 WHAT = "외부 데이터 수집"
@@ -291,6 +292,7 @@ async def propose_contract(contract_key: str, p: Principal = Depends(current_pri
     #: 계약 키 → 제안 문서를 만드는 규칙. **이 표에 없으면 만들지 않는다** —
     #: 화면이 임의의 키로 빈 계약을 만들어 내면 그 계약이 무엇인지 아무도 모른다.
     builders = {"PUB-01": M.pub01_proposal, "EXT-01": M.ext01_public_proposal,
+                "EXT-02": M.ext02_public_proposal,
                 "EXT-03": M.ext03_public_proposal}
     builder = builders.get(contract_key.upper())
     if builder is None:

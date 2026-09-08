@@ -48,6 +48,7 @@ core/external_intelligence/            (기존 .py 를 패키지로 — import �
     ecos.py              둘째 — 환율·금리·물가  → EXT-01
     kosis.py             셋째 — 생산·재고 지수  → EXT-03
     datagokr.py          넷째 — 공공데이터포털  → EXT-03  (기반 + 서비스별 Provider)
+    worldbank.py         다섯째 — 국제 원자재가 → EXT-02  ★ 공식 «파일»(xlsx) · 키 없음
 
 api/routes/acquisition_control.py      15 라우트 · /api/v1/external/acquisition/*
 api/routes/data_preparation_control.py 준비도 응답에 수집 제안을 얹는다(6줄 추가)
@@ -82,8 +83,9 @@ frontend/src/lib/externalIntelligenceApi.ts · dataPrepApi.ts  (기존 파일에
 
 ```
 오케스트레이터 구현   ✔
-Provider 구현        ✔  OpenDART · ECOS · KOSIS · 공공데이터포털(KPX SMP) 4개
-fixture 검증         ✔  677건 · 네트워크 0회
+Provider 구현        ✔  OpenDART · ECOS · KOSIS · 공공데이터포털 · World Bank 5개
+                        ★ 지시 4 가 요구한 첫 Provider 목록을 «전부» 채웠다
+fixture 검증         ✔  753건 · 네트워크 0회
 실제 API 실측        ✘  AFS_OPENDART_API_KEY 가 없다
 실제 데이터 수집      ✘
 격리 DB 적재         ✔  data_acquisition_rows · 전부 UNCERTIFIED
@@ -347,10 +349,13 @@ dry-run 에 가서야 인증 오류가 났다 — 사람이 세 화면 뒤에서
 `SERVICE_VERIFIED = False` — 서비스키 없이 만들었다. 엔드포인트 경로와 필드명은 포털
 문서 기준이고 **실응답과 대조하지 않았다.** §7-B 에서 키를 받으면 이 상수를 지운다.
 
-## 4-7. 다섯째(World Bank)는 «착수 전 조사까지만» 했다 — 그런데 그 조사가 다섯 개를 찾았다
+## 4-7. 다섯째 원천(World Bank Pink Sheet) — 처음으로 «API 가 아닌» 원천
 
-⚠️ **코드는 한 줄도 없다.** 사람이 중지를 지시해 파서를 쓰기 전에 멈췄다. 아래는 **버리면
-안 되는 조사 결과**다 — 다음 사람이 이것을 다시 파헤치지 않도록 남긴다.
+★ **2026-09-08 구현 완료.** 신규 시험 76건 통과.
+  ⚠️ 앞 판에서는 「착수 전 조사까지만 · 코드 0줄」이었다 — 사람이 이어서 만들라고 지시해
+    마저 만들었다. **아래 다섯은 코드를 쓰기 «전»에 나온 것**이고, 그 뒤 절이 만들면서
+    나온 것이다. 둘을 갈라 두는 이유: 「미리 안 것」과 「해 보고 안 것」은 다음 원천을
+    붙일 때 쓰임이 다르다.
 
 ### ① 다섯째는 앞의 넷과 «범주»가 다르다 — 처음으로 API 가 아니다
 
@@ -423,7 +428,7 @@ dry-run 에 가서야 인증 오류가 났다 — 사람이 세 화면 뒤에서
     raw_store.put  "wb" 로 쓴다 — 바이너리 가능
     openpyxl 3.1.5 venv 에 있다
 
-### ⚠️⚠️ 다음 사람에게 — 이 원천의 진짜 위험
+### ⚠️⚠️ 이 원천의 진짜 위험 — 그리고 실제로 이대로 지었다
 
 **레이아웃을 실제 파일로 확인할 수 없다.** 네트워크를 쓰지 않았고 실제 워크북이 없다.
 Pink Sheet 는 머리 구역이 여러 행(제목·품목명·단위·코드)이고 결측이 `..` 다.
@@ -449,6 +454,40 @@ Pink Sheet 는 머리 구역이 여러 행(제목·품목명·단위·코드)이
 
 ⚠️ 과거 값이 **소급 정정**된다. 같은 업무 키로 다시 오면 중복으로 거부된다 — EXT-01 과
   같은 성질이고, 반영은 사람이 판단한다.
+
+### 만들면서 드러난 것 — 조사에 없던 셋
+
+**① 정산의 분모가 「파일 전체」가 아니다.**
+앞의 넷은 요청 구간을 URL 에 실어 보내서 **받은 것 = 요청한 것**이었다. 파일 원천은
+1960년부터 전부 오므로 구간 밖 줄이 늘 섞인다. 그것을 「제외」로 세면 매달 거부 700건이
+찍히고 거부 목록이 쓸모없어진다. 그래서 `source_row_count` 는 **구간 안의 줄**이다:
+
+    구간 밖   세지 않는다 (애초에 요청 대상이 아니다)
+    `..`      제외한다 + 사유를 남긴다 (0 으로 채우지 않는다)
+    각주 줄   세지 않는다 (자료 구역이 아니다)
+
+**②★★★ 첫 시험이 «순서 덕분에» 통과하고 있었다.**
+`Lead` 가 `Leaded gasoline` 을 잡지 않는지 보는 시험을 썼는데, 통과한 진짜 이유는
+매칭이 옳아서가 아니라 **`Lead` 열이 왼쪽에 먼저 있어서**였다. 열 순서를 바꾸면 그대로
+틀렸을 수 있다. 그래서 **납 열을 통째로 빼고** 다시 보는 시험을 더했다 — 그때 비로소
+`SeriesNotFound` 가 나야 매칭이 옳다는 것이 증명된다.
+⚠️ 「초록이니 맞다」가 아니다. **초록의 이유가 내가 시험하려던 것인지**를 봐야 한다.
+
+**③ 도메인 필드는 최상위 열이 아니다.** `staged_rows()` 는 `payload` 안에 넣어 준다
+(`trust_grade`·`unit` 등). 최상위에는 `data_origin`·`certification_status` 같은 봉투만 있다.
+
+### 실측으로 확인한 것 · 못 한 것
+
+    확인함   xlsx(바이너리)가 수집→원문보관→체크섬→정규화→검증→적재→계보 까지 관통
+             원문이 `.xlsx` 로 저장된다(`.bin` 이 아니다) · 체크섬 검증 통과
+             적재 행이 silver 등급을 달고 있고 certification_status 는 UNCERTIFIED
+             2025-03 값 9250.0 을 계보 질의로 되찾고 «단위($/mt)까지» 함께 나온다
+             두 번 적용하면 신규 0 · 중복 5 (소급 정정이 덮어쓰지 않는다)
+             자격증명 «없는» 경로가 실제로 열린다 — 앞의 넷은 전부 키가 필요했다
+             스케줄러 진입점·API 등록부·계약제안 빌더·준비도 라우트 4곳 모두 살아 있다
+
+    못 함     실제 Pink Sheet 파일과 대조 (`LAYOUT_VERIFIED = False`)
+             실제 네트워크 호출 0회 — 문서 URL 의 해시가 유효한지 모른다
 
 ## 5. 만들면서 실제로 뚫린 것 넷
 
@@ -488,7 +527,7 @@ Provider 는 테넌트를 모르는 것이 설계인데 검증기가 그것을 �
 | **0** | **T3 재실행** — 아래 §8 의 6,282 는 `432055636` 이전이다 |
 | **A** | `PUB-01` 편입 → 준비도 재평가. ⚠️ **실물 인증 경로가 없다** — §4-3 (거버넌스가 아니라 배선 문제) |
 | **B** | 실제 `AFS_OPENDART_API_KEY` 로 1회 실측 (한도 주의 — 10개년 × 4분기 한 번에 받지 말 것) |
-| **C** | World Bank Provider 추가 — **착수 전 조사만 끝났다(§4-7). 코드 0줄.** 설계 결정 5개는 §4-7 에 확정해 뒀다 |
+| ~~C~~ | ~~World Bank Provider 추가~~ — **완료**(§4-7). 지시 4 의 첫 Provider 5개를 다 채웠다 |
 | **G** | ⚠️ 기존 `_SOURCE_PRIORITY` 가 지시 3 과 순서가 어긋난다 · 닫힌 목록에 「공식 파일」이 없다 — external_intelligence 레인과 합의 (§4-7 ②③) |
 | ~~D~~ | ~~스케줄러 배선~~ — 완료(`scripts/run_acquisition_refresh.py`) |
 | **E** | 화면 렌더 확인 — 로그인 뒤라 이번에 눈으로 보지 못했다 |
@@ -503,7 +542,8 @@ Provider 는 테넌트를 모르는 것이 설계인데 검증기가 그것을 �
 ```
 전체 스위트 T3   6,282 passed · 2 skipped · 실패 0         992초 (16:31) · 커밋 7a782aa3e
                  ⚠️ **최신이 아니다** — 그 뒤 커밋 2개가 들어왔다(아래 이력)
-수집·준비도 회귀  677건 통과 (67초) · 네트워크 0회 · LLM 0회   ← 최신 `432055636` 에서
+수집·준비도 회귀  753건 통과 (64초) · 네트워크 0회 · LLM 0회   ← 최신 커밋에서
+                 정산: 직전 677 + World Bank 76 = 753
 tsc -b           0건
 프로덕션 빌드     성공 · 패널 문구·경로 상수가 번들에 실림 확인
 제품 경로 실측    없는 경로 404 · 수집 라우트 4개 401
@@ -514,9 +554,9 @@ tsc -b           0건
 ⚠️ 중괄호 확장을 쓰지 않았다 — 팀 기본 셸이 PowerShell 이고 거기서는 확장되지 않는다.
    아래는 bash·PowerShell 어디에 붙여넣어도 같게 돈다(한 줄).
 
-    venv/Scripts/python.exe -m pytest -p no:randomly tests/test_acquisition_api.py tests/test_acquisition_mapping.py tests/test_acquisition_models.py tests/test_acquisition_orchestrator.py tests/test_acquisition_store.py tests/test_external_raw_store.py tests/test_request_interpreter.py tests/test_provider_contract.py tests/test_provider_datagokr.py tests/test_provider_dispatch.py tests/test_provider_ecos.py tests/test_provider_kosis.py tests/test_provider_opendart.py tests/test_refresh_runner.py tests/test_readiness_bridge.py tests/test_data_readiness.py tests/test_source_binding.py tests/test_dataset_snapshot.py tests/test_release_readiness.py tests/test_decision_source_binding.py
+    venv/Scripts/python.exe -m pytest -p no:randomly tests/test_acquisition_api.py tests/test_acquisition_mapping.py tests/test_acquisition_models.py tests/test_acquisition_orchestrator.py tests/test_acquisition_store.py tests/test_external_raw_store.py tests/test_request_interpreter.py tests/test_provider_contract.py tests/test_provider_datagokr.py tests/test_provider_dispatch.py tests/test_provider_ecos.py tests/test_provider_kosis.py tests/test_provider_opendart.py tests/test_provider_worldbank.py tests/test_refresh_runner.py tests/test_readiness_bridge.py tests/test_data_readiness.py tests/test_source_binding.py tests/test_dataset_snapshot.py tests/test_release_readiness.py tests/test_decision_source_binding.py
 
-⚠️ 앞선 커밋들의 「594건」·「579건」과 이 677건은 **선택이 다르다** — 서로 빼서 증감을
+⚠️ 앞선 커밋들의 「594건」·「579건」과 이 753건은 **선택이 다르다** — 서로 빼서 증감을
 계산하지 말 것. 위 목록이 지금부터의 기준이다.
 ⚠️ pytest 를 동시에 두 개 돌리지 말 것. 이 저장소에서 경합으로 3시간짜리 실행이 나왔고
 멈춘 줄 알았다(실제로는 단독 실행 시 67초).

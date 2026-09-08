@@ -502,6 +502,63 @@ def ext03_public_proposal() -> Dict[str, Any]:
     )
 
 
+#: `EXT-02 원자재 가격` 의 도메인 필드.
+#: ⚠️⚠️ `price_basis` 가 **형제 계약에 없던 열**이다. Pink Sheet 워크북에 「가격판」과
+#:   「지수판」이 함께 있어서, 이 축이 없으면 `$/mt` 와 `2010=100` 이 **같은 업무 키**가
+#:   되어 하나가 다른 하나를 덮어쓴다 — KOSIS 의 분류축과 같은 교훈이다.
+EXT02_DOMAIN_FIELDS: Tuple[Dict[str, Any], ...] = (
+    {"name": "observation_id", "type": "string", "required": True,
+     "description": "관측값의 업무 키(품목:가격기준:시점)"},
+    {"name": "indicator_code", "type": "string", "required": True,
+     "description": "지표 코드(WB_COPPER · WB_ZINC · WB_CRUDE_BRENT)"},
+    {"name": "commodity_code", "type": "string", "required": True,
+     "description": "품목 코드 — 섞으면 구리와 아연이 한 계열로 뭉친다"},
+    {"name": "commodity_name", "type": "string", "required": False,
+     "description": "원천이 적은 품목 이름(열 머리 그대로)"},
+    {"name": "price_basis", "type": "string", "required": True,
+     "description": "★ 가격기준(nominal_price · index) — 빼면 값과 지수가 같은 키가 된다"},
+    {"name": "observed_at", "type": "string", "required": True, "description": "관측 시점"},
+    {"name": "published_at", "type": "string", "required": False,
+     "description": "발표일 — 원천이 주지 않으면 비운다(받은 날을 적지 않는다)"},
+    {"name": "vintage_date", "type": "string", "required": True,
+     "description": "재현성의 근거(§12.5). 발표일이 없으면 관측 시점을 쓴다"},
+    {"name": "value", "type": "number", "required": True,
+     "description": "값 — 읽지 못한 줄은 적재하지 않는다(0 으로 채우지 않는다)"},
+    {"name": "unit", "type": "string", "required": True, "description": "단위($/mt 등)"},
+    {"name": "cycle", "type": "string", "required": False, "description": "공표 주기"},
+    {"name": "source_id", "type": "string", "required": True, "description": "승인된 원천"},
+    {"name": "raw_object_ref", "type": "string", "required": True,
+     "description": "원문 보관소 참조 — 계보의 마지막 고리"},
+    {"name": "trust_grade", "type": "string", "required": True, "description": "원천 등급"},
+)
+
+
+def ext02_public_proposal() -> Dict[str, Any]:
+    """`EXT-02` 를 공표 국제가격용으로 고치는 제안. **`price_basis` 를 더한다.**
+
+    ⚠️⚠️ 이 계약이 담는 것은 **국제 기준 가격**이지 우리 실구매 단가가 아니다. 설계서
+      §4.2 가 「공급사 계약단가·헤지·프리미엄·물류비를 대체하지 않는다」고 못 박았고,
+      그 제약은 원천 등급(`silver`)으로도 표현된다 — `PURPOSE_MIN_GRADE` 가
+      `baseline_plan`·`official_report` 를 gold 로 요구하므로 **기준 계획에는 못 쓴다.**
+
+    ★ 그래서 이 계약에 「실구매 단가」를 나중에 같이 담으면 안 된다. 그것은 성격이 다르고
+      (내부 실적 = `REAL`) 등급 정책도 다르다 — 담으려면 별도 계약으로 분리해야 한다."""
+    return build_contract_proposal(
+        dataset_id="EXT-02", dataset_name="원자재 국제 기준가격(공표)",
+        business_keys=["observation_id"],
+        domain_fields=EXT02_DOMAIN_FIELDS,
+        data_origin=am.ORIGIN_PUBLIC_DISCLOSED,
+        provider_id="WB_PINK_SHEET",
+        rationale=(
+            "World Bank Pink Sheet 는 공표 자료이므로 PUBLIC_DISCLOSED 이고, 계약 키는 그대로 "
+            "둔다(라우팅표가 commodity_price → EXT-02). 형제 계약에 없던 price_basis 를 더하는 "
+            "이유는 원천 워크북에 「가격판」과 「지수판」이 함께 있어서, 그 축이 없으면 $/mt 와 "
+            "지수가 같은 업무 키가 되어 하나가 다른 하나를 덮어쓰기 때문이다. "
+            "⚠️ 이 계약은 국제 기준 가격이며 실구매 단가를 대체하지 않는다(설계서 §4.2). "
+            "⚠️ 격리 적재본을 설명하며 키트의 시연 데이터셋을 대체하지 않는다."),
+    )
+
+
 def observation_row_id(row: Mapping[str, Any]) -> str:
     """`EXT-01` 의 업무 키. 통계표·세부항목·시점이 같으면 같은 관측값이다.
 
@@ -525,6 +582,23 @@ def indicator_row_id(row: Mapping[str, Any]) -> str:
     if not all(parts):
         raise MappingError(
             "업무 키를 만들 수 없습니다 — org_id·tbl_id·category_code·observed_at 이 필요합니다.")
+    return ":".join(parts)
+
+
+def commodity_row_id(row: Mapping[str, Any]) -> str:
+    """`EXT-02` 의 업무 키. **가격기준이 들어간다.**
+
+    ⚠️ 축을 빼면 「구리 $/mt」와 「구리 지수(2010=100)」가 같은 키가 되어 하나가 다른
+      하나를 덮어쓴다 — 그리고 어느 쪽이 남았는지 아무도 모른다. `EXT-03` 이 분류축으로
+      같은 함정을 피한 것과 같은 이유다.
+
+    ⚠️ Pink Sheet 는 과거 값을 «소급 정정»한다. 정정은 같은 키가 되므로 **덮어쓰기가
+      아니라 거부**로 드러난다(중복 적재 방지 인덱스가 잡는다). 반영은 사람이 판단한다."""
+    parts = [str(row.get(k) or "")
+             for k in ("commodity_code", "price_basis", "observed_at")]
+    if not all(parts):
+        raise MappingError(
+            "업무 키를 만들 수 없습니다 — commodity_code·price_basis·observed_at 이 필요합니다.")
     return ":".join(parts)
 
 

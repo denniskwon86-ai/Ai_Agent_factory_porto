@@ -841,6 +841,7 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
         from core.external_intelligence.providers import ecos as _ecos  # noqa: F401
         from core.external_intelligence.providers import datagokr as _dgk  # noqa: F401
         from core.external_intelligence.providers import kosis as _kosis  # noqa: F401
+        from core.external_intelligence.providers import worldbank as _wb  # noqa: F401
         from core.external_intelligence.providers import opendart as _dart  # noqa: F401
 
         _suggestions = _bridge.suggest(

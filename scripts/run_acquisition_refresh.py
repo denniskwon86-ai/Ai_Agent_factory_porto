@@ -91,6 +91,7 @@ def main(argv=None) -> int:
     from core.external_intelligence.providers import ecos as _ecos  # noqa: F401
     from core.external_intelligence.providers import datagokr as _datagokr  # noqa: F401
     from core.external_intelligence.providers import kosis as _kosis  # noqa: F401
+    from core.external_intelligence.providers import worldbank as _wb  # noqa: F401
     from core.external_intelligence.providers import opendart as _opendart  # noqa: F401
 
     if args.dry:

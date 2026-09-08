@@ -566,6 +566,7 @@ class AcquisitionOrchestrator:
         "PUB-01": M.disclosure_row_id,
         "EXT-01": M.observation_row_id,
         "EXT-03": M.indicator_row_id,
+        "EXT-02": M.commodity_row_id,
     }
 
     @classmethod

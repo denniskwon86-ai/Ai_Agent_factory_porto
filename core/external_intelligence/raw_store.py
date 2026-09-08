@@ -61,6 +61,10 @@ _EXT_BY_TYPE = {
     "application/xml": ".xml",
     "text/xml": ".xml",
     "text/csv": ".csv",
+    #: ★ 다섯째 원천이 처음으로 «바이너리»를 보낸다. 없으면 `.bin` 으로 떨어져
+    #:   사람이 보관된 원문을 열어 볼 수 없다(재현에는 무해하지만 불편하다).
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.ms-excel": ".xls",
     "text/plain": ".txt",
     "text/html": ".html",
     "application/zip": ".zip",
