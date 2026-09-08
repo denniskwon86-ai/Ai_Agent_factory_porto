@@ -35,6 +35,7 @@ CACHE = os.path.join(HERE, '.cache')
 sys.path.insert(0, HERE)
 import fetch_dart as F          # noqa: E402
 import fetch_ftc as T           # noqa: E402
+import valuechain_rules as V    # noqa: E402
 from ksic_rules import classify  # noqa: E402
 
 FTC_CSV = os.path.join(SAMPLES, 'ftc-all-2026-classified.csv')
@@ -184,6 +185,17 @@ def build() -> list[dict]:
     print(f'상장 {len(listed)}건 → 겹침 {same} (지주보정 {fixed}) · 신규 {add}')
     if unlisted:
         print(f'비상장 {len(unlisted)}건 → 신규 {addu}')
+    # **밸류체인·가치사슬 단계를 붙인다** (D-15 · D-25). B축은 내가 다루는 것,
+    # 밸류체인은 내 산출물이 쓰이는 생태계다 — 엔켐(전해액)은 화학이지만 이차전지다.
+    # 밸류체인으로 필터하고 가치사슬 단계로 정렬하면 생태계 안의 층이 재구성된다
+    vc_n = 0
+    for r in uni.values():
+        res = V.classify(r.get('KSIC', ''), r.get('회사명', ''), '', r.get('B1_2단', ''))
+        r['밸류체인'] = list(res['밸류체인'])
+        r['가치사슬단계'] = V.stage(r.get('A세분류', '')) or ''
+        if res['밸류체인']:
+            vc_n += 1
+    print(f'밸류체인 판정 {vc_n}건 / {len(uni)}')
     print(f'통합 모수 {len(uni)}건')
     return list(uni.values())
 
@@ -234,7 +246,8 @@ def report(rows: list[dict]) -> None:
 
 def to_csv(rows: list[dict], path: str = OUT_CSV) -> None:
     cols = ['법인등록번호', '회사명', '종목코드', 'KSIC', 'A대분류', 'A세분류',
-            'B1주업종', 'B1_2단', 'B1_3단', '묶음노드', '모수계층', '매출액', '매출기준', '종업원수', '상장',
+            'B1주업종', 'B1_2단', 'B1_3단', '밸류체인', '가치사슬단계',
+            '묶음노드', '모수계층', '매출액', '매출기준', '종업원수', '상장',
             '출처', '기업집단명들']
     with io.open(path, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction='ignore')
@@ -242,6 +255,7 @@ def to_csv(rows: list[dict], path: str = OUT_CSV) -> None:
         for r in rows:
             rec = dict(r)
             rec['기업집단명들'] = '|'.join(rec.get('기업집단명들') or [])
+            rec['밸류체인'] = '|'.join(rec.get('밸류체인') or [])   # 복수값 — 첫 값이 주 밸류체인
             rec['상장'] = 'Y' if rec.get('상장') else ''
             w.writerow(rec)
     print(f'\n{len(rows)}건 → {path}')

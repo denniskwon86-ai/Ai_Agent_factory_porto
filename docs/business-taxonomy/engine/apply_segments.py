@@ -10,7 +10,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 ENG = os.path.dirname(os.path.abspath(__file__))
 SAMP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "samples")
 sys.path.insert(0, ENG); os.chdir(ENG)
-import fetch_dart as F, segment_rules as R
+import fetch_dart as F, segment_rules as R, valuechain_rules as V
 
 # A 축은 2 단이다 — 대분류(자원·제조·건설·유통·서비스) 아래 세분류가 온다.
 # 세그먼트 판정은 세분류만 내놓으므로 여기서 대분류를 되짚는다.
@@ -159,6 +159,25 @@ if dropped:
         print(f'    {mo[:16]:<18} 「{nm[:14]}」 → 법인 {hit[:20]} 가 이미 있다')
 print(f'인스턴스 {len(inst)}건 (법인 {sum(1 for x in inst if x["단위"]=="법인")} · 세그먼트 {sum(1 for x in inst if x["단위"]=="세그먼트")})')
 
+# **밸류체인은 인스턴스마다 다시 판정한다.** 세그먼트는 부문명이 회사명보다 구체적이다 —
+# 삼성전자 법인은 「반도체」와 「최종소비재」에 걸치지만 「DS 부문」은 반도체 하나다.
+# 그래서 모법인 값을 물려받지 않고 부문명·B축 2단으로 판정한다 (D-25)
+# **세그먼트에는 모법인 KSIC 를 쓰지 않는다.** 그건 모법인 전체의 주업종이라 부문과
+# 다르다 — 포스코퓨처엠(C2820 전지)의 「내화물사업」이 이차전지 밸류체인에 들어갔다.
+# 부문은 부문명과 (이미 판정된) B축 2단으로만 본다
+_uni = {r['회사명']: r for r in uni}
+vc_n = 0
+for x in inst:
+    if x['단위'] == '법인':
+        res = V.classify(_uni.get(x['이름'], {}).get('KSIC', ''), x['이름'], '', x['B1_2단'])
+    else:
+        res = V.classify('', '', x['이름'], x['B1_2단'])
+    x['밸류체인'] = '|'.join(res['밸류체인'])
+    x['가치사슬단계'] = V.stage(x['A세분류']) or ''
+    if res['밸류체인']:
+        vc_n += 1
+print(f'밸류체인 판정 {vc_n}건 / {len(inst)}')
+
 # **셀 분포는 T1·T2 만 센다.** T1u(비상장 공시법인)는 매출을 모르고 SPC·펀드가
 # 대량 섞여 있어 함께 세면 커버리지가 왜곡된다 — 롱리스트에는 남긴다
 core = [x for x in inst if x.get('계층') != 'T1u']
@@ -192,6 +211,7 @@ dst = os.path.join(SAMP, 'instances-2026.csv')
 with io.open(dst, 'w', encoding='utf-8', newline='') as f:
     w = csv.DictWriter(f, fieldnames=['단위', '계층', '소속그룹', '모법인', '이름',
                                       'A대분류', 'A세분류', 'B1주업종', 'B1_2단', 'B1_3단',
+                                      '밸류체인', '가치사슬단계',
                                       '매출', '매출기준', '종업원수', '판정근거'])
     w.writeheader(); w.writerows(inst)
 print(f'\n{len(inst)}건 → {dst}')

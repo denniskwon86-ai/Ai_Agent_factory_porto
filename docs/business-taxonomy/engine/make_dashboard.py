@@ -43,6 +43,10 @@ mi = {v: i for i, v in enumerate(mo)}
 gr = sorted({r.get('소속그룹') for r in inst if r.get('소속그룹')})
 gri = {v: i for i, v in enumerate(gr)}
 
+# 밸류체인 사전 — 행에는 인덱스만 실어 파일 크기를 줄인다
+VC = sorted({x for r in inst for x in (r.get('밸류체인') or '').split('|') if x})
+vci = {v: i for i, v in enumerate(VC)}
+
 rows = []
 for r in inst:
     if not r['A세분류'] or not r['B1주업종']:
@@ -57,7 +61,11 @@ for r in inst:
                  # 종업원수는 필터에서 뺐으므로 행에 싣지 않는다(CSV 에는 남아 있다)
                  r.get('매출기준', ''),
                  # 3 단 — 같은 품목 안의 공정 단계(제련·압연·강관…). 셀은 만들지 않는 필터
-                 (r.get('B1_3단') or '')[:20]])
+                 (r.get('B1_3단') or '')[:20],
+                 # 밸류체인(복수) · 가치사슬 단계. 밸류체인으로 걸러 단계로 정렬하면
+                 # 생태계 안의 층이 재구성된다 — 셀 간 「공급」 엣지가 필요 없다
+                 [vci[x] for x in (r.get('밸류체인') or '').split('|') if x in vci],
+                 int(r['가치사슬단계']) if (r.get('가치사슬단계') or '').strip() else 0])
 
 # KSIC 대분류별 두께 — 산업 커버리지 판단용
 KO = {'A': '농림어업', 'B': '광업', 'C': '제조', 'D': '전기가스', 'E': '수도하수', 'F': '건설',
@@ -80,7 +88,7 @@ out = {
         'holding': sum(1 for r in uni if r['묶음노드'] == 'Y'),
         'outside': sum(1 for r in uni if r['모수계층'] == '모수밖'),
     },
-    'A': A, 'B': B, 'mo': mo, 'rows': rows, 'industry': industry,
+    'A': A, 'B': B, 'mo': mo, 'vc': VC, 'rows': rows, 'industry': industry,
     'G': G, 'sub2big': sub2big, 'gr': gr,
 }
 dst = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.cache', 'dashboard-data.json')
