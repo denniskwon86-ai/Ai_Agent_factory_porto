@@ -151,6 +151,10 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     #   ⚠️ 둘을 같은 권한으로 두면 요청한 사람이 곧 적용하는 사람이 되고, 직무 분리가
     #     이름만 남는다(위 「키트로 앱 만들기」와 같은 이유).
     "POST /api/v1/external/acquisition/interpret": (PROJECT_RUN,),
+    #: 연구자료 «추천» — 읽기 전용 조언이고 아무것도 바꾸지 않는다.
+    #:   ⚠️ 수집이 아니다. 받아오는 행위는 사람이 한다(2026-09-08 결정).
+    "GET /api/v1/external/research/sources": (PROJECT_RUN,),
+    "POST /api/v1/external/research/recommend": (PROJECT_RUN,),
     "POST /api/v1/external/acquisition/jobs": (PROJECT_RUN,),
     "POST /api/v1/external/acquisition/jobs/{job_id}/discover": (PROJECT_RUN,),
     "POST /api/v1/external/acquisition/jobs/{job_id}/dry-run": (PROJECT_RUN,),
