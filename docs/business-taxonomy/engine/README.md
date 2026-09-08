@@ -17,9 +17,25 @@
 | `build_universe.py` | **통합 모수** — 공정위 + 상장 법인을 법인등록번호로 이어 셀 분포를 낸다 |
 | `collect_segments.py` | 상위 셀 회사의 부문을 수집한다(지주회사 + 매출 상위) |
 | `apply_segments.py` | 다부문 회사를 부문으로 대체해 인스턴스 목록을 만든다 |
+| `fetch_ownership.py` | **지배 관계 수집기** — 타법인 출자현황(아래로)·최대주주(위로). 개인은 이름을 지운다 |
+| `apply_ownership.py` | **지배 사슬** — 출자로 손자회사를 잇고 묶음의 지배 사업 영역을 채운다 (D-41) |
 | `fetch_unlisted.py` | **비상장 공시법인 수집기** — 르노코리아처럼 상장이 아닌 실체를 담는다 |
 | `dump_datasets.py` | 수집 데이터를 `samples/` 에 남긴다 — `.cache/` 는 커밋되지 않는다 |
 | `make_dashboard.py` + `dashboard.tpl.html` | **산업 커버리지 맵** — 격자에서 사업묶음을 고르고 롱리스트를 뽑는다 |
+
+## 파이프라인 — 판정 규칙을 고쳤을 때 돌리는 순서
+
+```bash
+python reclassify.py        # 재수집 없이 캐시로 재판정
+python build_universe.py    # 통합 모수
+python apply_segments.py    # 인스턴스(법인·세그먼트·묶음)
+python apply_ownership.py   # 지배 사슬 · 묶음 B축 — instances-2026.csv 를 다시 쓴다
+python dump_datasets.py     # samples/ 로 내보내기
+python make_dashboard.py    # 커버리지 맵 HTML
+```
+
+`apply_ownership.py` 는 **`apply_segments.py` 뒤에 와야 한다** — 그쪽이 만든
+인스턴스를 고치기 때문이다. 순서를 바꾸면 지배법인 열과 묶음 B 축이 사라진다.
 
 ## 쓰는 법
 

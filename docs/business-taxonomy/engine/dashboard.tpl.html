@@ -119,6 +119,7 @@ table.ll td.num{font-family:var(--mono);text-align:right;font-variant-numeric:ta
 table.ll td.nm{font-weight:500;white-space:nowrap}
 table.ll td.mo{color:var(--ink-2);font-size:12px}
 table.ll td.gp{font-size:12px;color:var(--ink-2);white-space:nowrap}
+table.ll td.nm .par{display:block;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);font-weight:400;letter-spacing:-.01em}
 table.ll td.unit{font-size:12.5px}
 table.ll td.num .unk{font-family:var(--sans);font-size:11px;color:var(--ink-3)}
 table.ll td.mo .t3{color:var(--ink-3)}
@@ -177,7 +178,7 @@ footer code{font-family:var(--mono);font-size:11.5px}
   <h2>롱리스트</h2>
   <p class="note" style="margin-bottom:12px">매출은 출처마다 기준이 다르다 — 공정위 계열사는 <b>2025 결산 개별</b>, DART 상장사는 <b>2025 연결</b>(없으면 개별·2024), 사업부문은 <b>사업보고서 연결 부문</b>. 각 행의 매출 아래에 그 기준을 적는다.</p>
   <div class="tools">
-    <input id="q" type="search" placeholder="소속그룹·회사·부문명 검색" aria-label="소속그룹·회사·부문명 검색">
+    <input id="q" type="search" placeholder="소속그룹·회사·부문·지배법인 검색" aria-label="소속그룹·회사·부문·지배법인 검색">
     <select id="fg" aria-label="대분류"><option value="">대분류 전체</option></select>
     <select id="fa" aria-label="업태"><option value="">업태 전체</option></select>
     <select id="fb" aria-label="업종"><option value="">업종 전체</option></select>
@@ -210,7 +211,8 @@ const SC = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'].map(v => 'var(' + 
 const all = D.rows.map(r => ({u:r[0], hold:r[0] === 2, nm:r[1], mo:r[2] < 0 ? '' : D.mo[r[2]],
                               a:r[3], b:r[4], t2:r[5], rev:r[6], un:r[7],
                               gp:r[8] < 0 ? '' : (D.gr || [])[r[8]], basis:r[9] || '', t3:r[10] || '',
-                              vc:(r[11] || []).map(x => D.vc[x]), stage:r[12] || 0}));
+                              vc:(r[11] || []).map(x => D.vc[x]), stage:r[12] || 0,
+                              par:r[13] || ''}));
 /* **격자·커버리지는 T1·T2 만 센다.** T1u(비상장 공시법인)는 매출을 모르고 SPC·펀드가
    대량 섞여 있어 함께 세면 커버리지가 왜곡된다. 롱리스트에서는 필터로 켤 수 있다 —
    르노코리아처럼 명백한 대상이 그쪽에 있기 때문이다 */
@@ -333,7 +335,8 @@ function subset(skip){
   // 밸류체인은 사슬 밖이다 — 업태·업종과 교차해 걸린다(「이차전지 × 소재제조」)
   if (skip !== 'v' && fv !== '') out = out.filter(r => r.vc.includes(fv));
   if (q) out = out.filter(r => r.nm.toLowerCase().includes(q)
-    || r.mo.toLowerCase().includes(q) || (r.gp || '').toLowerCase().includes(q));
+    || r.mo.toLowerCase().includes(q) || (r.gp || '').toLowerCase().includes(q)
+    || (r.par || '').toLowerCase().includes(q));   /* 지배법인으로 검색하면 그 아래가 다 나온다 */
   return out;
 }
 /* **계층 사슬.** 대분류 → 업태 → 업종 → 품목 순으로 좁아진다. 상위를 바꾸거나 풀면
@@ -415,7 +418,8 @@ function render(){
      둘을 한 열에 섞으면 「석유화학」이 회사인지 부문인지 알 수 없다 */
   $('#tb').innerHTML = out.slice(0,400).map(r => '<tr>'
     + '<td class="gp">' + (r.gp ? r.gp.split('|').join(' · ') : '—') + '</td>'
-    + '<td class="nm">' + (r.u ? (r.mo || '—') : r.nm) + '</td>'
+    + '<td class="nm">' + (r.u ? (r.mo || '—') : r.nm)
+        + (r.par ? '<span class="par">◄ ' + r.par + '</span>' : '') + '</td>'
     + '<td class="unit">' + (r.u === 1
         ? r.nm + ' <span class="tag">부문</span>'
         : r.hold ? '<span class="tag hold">지주 · 집계제외</span>'

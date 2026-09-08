@@ -51,10 +51,30 @@ _법인 = re.compile(
     r'Holdings|Group|Co\.', re.I)
 
 
+_모수이름: set[str] = set()
+
+
+def _key(s: str) -> str:
+    """형태 표기를 **먼저** 통째로 뗀다 — 괄호만 지우면 「(주)한진칼」이 「주한진칼」이 된다"""
+    s = re.sub(r'\((주|유|재|사|합)\)|㈜|주식회사|유한회사|합자회사', '', (s or ''))
+    return re.sub(r'[\s.,\-·()]', '', s).lower()
+
+
 def _mask(nm: str) -> str:
-    """개인은 이름을 남기지 않는다 — 지배 구조에 필요한 건 「개인인가」뿐이다"""
+    """
+    개인은 이름을 남기지 않는다 — 지배 구조에 필요한 건 「개인인가」뿐이다.
+
+    **형태 표기만 보면 법인을 개인으로 지운다.** 대한항공의 최대주주는 한진칼인데
+    ㈜·주식회사가 없어 「개인 26.13%」로 저장됐다. 그래서 **모수 회사명과도 대조한다** —
+    공정위 계열사·상장사 명단에 있으면 법인이다. 과잉 마스킹은 안전한 방향의 오류지만
+    데이터 손실이고, 지워진 이름은 재수집 없이 되살릴 수 없다.
+    """
     nm = (nm or '').strip()
-    return nm if _법인.search(nm) else ('개인' if nm else '')
+    if not nm:
+        return ''
+    if _법인.search(nm) or _key(nm) in _모수이름:
+        return nm
+    return '개인'
 
 
 def _n(v) -> int | None:
@@ -124,7 +144,14 @@ def investments(corp_code: str) -> tuple[list[dict], str]:
 
 
 def targets() -> list[dict]:
-    """상장 T1 — 이쪽만 사업보고서를 내므로 출자 목록이 나온다"""
+    """
+    **상장사 전부** — 사업보고서를 내는 것은 상장 여부이지 모수 계층이 아니다.
+
+    처음에 `모수계층 == 'T1'` 로 걸렀다가 414 건을 통째로 놓쳤다. 대기업집단
+    소속 상장사는 T2 로 분류돼 있어서다 — SK(주)·(주)LG·롯데지주·CJ(주)·
+    포스코홀딩스·삼성물산·HD한국조선해양이 전부 거기 있었다. **정작 지배
+    구조를 알고 싶은 회사들이 빠졌다.**
+    """
     uni = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'universe-2026.csv'), encoding='utf-8-sig')))
     corp = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'dart-corp-2026.csv'), encoding='utf-8-sig')))
     by_jurir = {}
@@ -132,9 +159,10 @@ def targets() -> list[dict]:
         k = ''.join(ch for ch in (c.get('법인등록번호') or '') if ch.isdigit())
         if k and c.get('고유번호'):
             by_jurir.setdefault(k, c['고유번호'])
+    _모수이름.update(_key(r['회사명']) for r in uni if r.get('회사명'))
     out = []
     for r in uni:
-        if r['모수계층'] != 'T1':
+        if r['상장'] != 'Y' or r['모수계층'] == '모수밖':
             continue
         cc = by_jurir.get(r['법인등록번호'])
         if cc:
