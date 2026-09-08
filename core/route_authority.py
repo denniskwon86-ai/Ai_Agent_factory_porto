@@ -160,6 +160,8 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "POST /api/v1/external/acquisition/jobs/{job_id}/dry-run": (PROJECT_RUN,),
     #: ★ 되돌릴 수 없는 첫 단계 — 여기서 권한이 한 층 올라간다.
     "POST /api/v1/external/acquisition/jobs/{job_id}/apply": (ADMIN_DATA_ACCESS,),
+    #: [F-6] 승격 = 「이 값을 회사 계획이 읽는 자리에 올린다」 — 적용과 같은 층이다.
+    "POST /api/v1/external/acquisition/jobs/{job_id}/promote": (ADMIN_DATA_ACCESS,),
     #: ★ 새 데이터 계약을 만들고 승인하는 일 — 「이 자료를 무엇으로 부를 것인가」의 결정이다.
     "POST /api/v1/external/acquisition/contract-proposals/{contract_key}":
         (ADMIN_DATA_ACCESS,),

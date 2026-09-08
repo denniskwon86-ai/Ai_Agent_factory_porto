@@ -336,6 +336,39 @@ async def apply(job_id: str, req: ApplyRequest,
     return {"status": "success", "data": {"job": job, "report": report.as_dict()}}
 
 
+class PromoteRequest(BaseModel):
+    """⚠️ `register_missing` 은 «어휘를 만든다». 기본이 False 인 이유가 그것이다."""
+    register_missing: bool = False
+
+
+@router.post("/jobs/{job_id}/promote")
+async def promote_observations(job_id: str, req: PromoteRequest,
+                               p: Principal = Depends(current_principal)):
+    """[F-6] 격리 적재본을 **외생 지표 관측값**으로 올린다 — 계획이 읽는 자리로.
+
+    ## 이것이 여는 것
+
+    지금까지 수집한 값은 `data_acquisition_rows` 에 머물고, 계획 동인은
+    `external_observations` 를 읽었다. 둘을 잇는 코드가 없어서 **환율·원자재가 계획에
+    영향을 주는 경로가 한 번도 연결된 적이 없었다**(F-0 탐침이 찾아냈다).
+
+    ## 여기서 통제를 다시 만들지 않는다
+
+    ★ `record_observation()` 이 이미 강제한다 — vintage 필수 · **승인된 원천만** ·
+      출처보다 높은 등급 금지. 이 라우트는 그 판정을 **그대로 물고 온다.**
+      원천이 승인되지 않았으면 **전부 거부되는 것이 정상**이다(§12.4).
+
+    ⚠️ `EXT-*` 만 올라간다. 공시 재무제표(`PUB-01`)는 지표가 아니라 회사 실적이다."""
+    assert_can_manage_standard(p)
+    from core.external_intelligence import observation_promotion as OP
+    try:
+        report = OP.promote(acquisition_store, job_id, actor_id=_actor(p),
+                            register_missing=req.register_missing)
+    except (OP.PromotionError, AcquisitionStoreError) as exc:
+        _err(exc)
+    return {"status": "success", "data": report.as_dict()}
+
+
 @router.get("/jobs/{job_id}/rows")
 async def staged_rows(job_id: str, limit: int = 200,
                       p: Principal = Depends(current_principal)):
