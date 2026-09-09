@@ -107,10 +107,18 @@ def main() -> None:
     inst = json.load(io.open(os.path.join(CACHE, 'instances.json'), encoding='utf-8'))
     uni = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'universe-2026.csv'), encoding='utf-8-sig')))
 
-    # 모수 이름 색인 — 같은 이름이 여럿이면 먼저 온 것을 쓴다(T1 이 앞에 온다)
+    # 모수 이름 색인. **이름이 겹치면 아예 빼 둔다** — 출자현황 API 는 법인등록번호를
+    # 주지 않아 이름으로만 이을 수 있는데, 동명이인이면 어느 쪽인지 가릴 방법이 없다.
+    # 제련 「(주)지알엠」(LS)과 부동산 「지알엠(주)」가 합쳐져 서울도시가스가 제련사를
+    # 지배하는 것처럼 보였다. 엣지의 1.2%(26 건)를 잃고 나머지의 신뢰를 얻는다 (D-47)
+    _cnt: collections.Counter = collections.Counter(norm(r['회사명']) for r in uni
+                                                    if r['모수계층'] != '모수밖')
     U: dict[str, dict] = {}
     for r in uni:
-        U.setdefault(norm(r['회사명']), r)
+        k = norm(r['회사명'])
+        if _cnt[k] > 1:
+            continue
+        U.setdefault(k, r)
 
     # ── 1. 지배 엣지
     edges, skipped = [], collections.Counter()
