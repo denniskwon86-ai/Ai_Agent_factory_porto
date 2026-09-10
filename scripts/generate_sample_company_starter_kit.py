@@ -19,6 +19,7 @@ import json
 import math
 import random
 import shutil
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -27,6 +28,9 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from core.data_preparation import kit_freeze  # noqa: E402
+
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
 KIT_VERSION = "1.0.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
@@ -1199,7 +1203,11 @@ def quarantine_fixture() -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     return candidates, manifest
 
 
-def build(clean: bool = True) -> Dict[str, Any]:
+def build(clean: bool = True, force: bool = False) -> Dict[str, Any]:
+    # **확정 판본은 다시 만들지 않는다** (P1). 아래 `rmtree` 가 판본 디렉터리를 통째로
+    # 지우므로, 검증이 끝난 판본에 이것을 돌리면 그 판본이 사라졌다가 다른 내용으로
+    # 되살아난다. 실제로 1.0.0 이 그렇게 바뀌었고 아무 오류도 나지 않았다.
+    kit_freeze.guard(str(KIT_ROOT), force=force)
     if clean and KIT_ROOT.exists():
         shutil.rmtree(KIT_ROOT)
     KIT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -1274,8 +1282,10 @@ def build(clean: bool = True) -> Dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-clean", action="store_true", help="기존 키트 디렉터리를 지우지 않음")
+    parser.add_argument("--force", action="store_true",
+                        help="확정 판본이어도 덮어쓴다 — 왜 그래야 하는지 커밋에 남길 것")
     args = parser.parse_args()
-    manifest = build(clean=not args.no_clean)
+    manifest = build(clean=not args.no_clean, force=args.force)
     print(json.dumps({"status": "generated", "kit_root": str(KIT_ROOT),
                       "dataset_count": manifest["dataset_count"],
                       "quick_rows": sum(x.get("rows",0) for x in manifest["file_index"] if x.get("profile")=="quick"),

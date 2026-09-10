@@ -7,11 +7,14 @@ import csv
 import json
 from collections import defaultdict
 from datetime import date
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from core.data_preparation import kit_freeze  # noqa: E402
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
 KIT_VERSION = "1.0.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
@@ -168,6 +171,12 @@ def main() -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     ids = [d["dataset_id"] for d in manifest["datasets"]]
     v = Validation()
+    # **지문 대조를 맨 앞에 둔다** (P1). 검증기 자신이 뒤에서 manifest·보고서를 쓰므로,
+    # 그 뒤에 대조하면 자기가 바꾼 것 때문에 항상 실패한다. 대장이 없는 판본
+    # (아직 동결 전)은 검사하지 않고 지나간다
+    _fp_ok, _fp_problems = kit_freeze.verify(str(KIT_ROOT))
+    v.check("동결:지문대조", _fp_ok,
+            "; ".join(_fp_problems[:6]) if _fp_problems else "대장 없음 또는 일치")
     v.check("manifest:kit_id", manifest.get("kit_id") == KIT_ID)
     v.check("manifest:version", manifest.get("version") == KIT_VERSION)
     v.check("manifest:35개", len(ids) == 35 and len(set(ids)) == 35, f"count={len(ids)}")
@@ -229,6 +238,17 @@ def main() -> None:
         "checks": v.checks,
     }
     out = KIT_ROOT / "validations" / "validation_report.json"
+    # **동결된 판본에는 쓰지 않는다.** 보고서 한 줄(`validated_at`)만 바뀌어도 지문이
+    # 달라져, 검증을 돌릴 때마다 그 판본이 「변경됨」이 된다. 이미 확정된 판본을
+    # 재검증하는 것은 대조가 목적이지 기록 갱신이 아니다
+    _frozen = kit_freeze.is_frozen(str(KIT_ROOT))
+    if _frozen:
+        report["note"] = "동결 판본 — 보고서·manifest 를 갱신하지 않았다"
+        print(json.dumps({"status": report["status"], "frozen": True,
+                          "fingerprint": "PASS" if _fp_ok else "FAIL",
+                          "problems": _fp_problems[:10],
+                          "summary": report["summary"]}, ensure_ascii=False, indent=2))
+        raise SystemExit(0 if v.passed and _fp_ok else 1)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     if v.passed:

@@ -1,7 +1,7 @@
 # 데이터 판본·키트 수명주기 실행계획
 
 - 기준일: 2026-09-10
-- 상태: `DIAGNOSED_PLAN_PROPOSED` — **승인 전, 착수하지 않음**
+- 상태: `P1_DONE` — P1 완료(2026-09-10) · P2 이후 대기
 - 기준 브랜치/커밋: `integration/g2-vertical-loop-20260821` / `7a10af750`
 - 발단: 검증이 끝난 `KIT-MFG-NONFERROUS-PROCUREMENT 1.0.0` 을 in-place 로 수정한 사고
   (`fddf13d59` → `7a10af750` 으로 되돌림)
@@ -76,12 +76,24 @@ DB 로 옮기는 것은 **질의·동시성·참조무결성**을 얻는 일이�
 
 사고 재발을 막는 최소 조치다. P2 이후를 안 하더라도 이것만은 있어야 한다.
 
-| | 작업 | 산출물 |
+| | 작업 | 상태 |
 |---|---|---|
-| P1-1 | 생성기가 **이미 있는 판본 디렉터리에 쓰기를 거부**하게 한다. `--force` 를 줘야만 덮어쓴다 | `generate_sample_company_starter_kit.py` |
-| P1-2 | `manifest.json` 의 `status` 가 `VALIDATED_*`·`APPROVED_*` 면 **거부 대상**으로 판정 | 같은 파일 |
-| P1-3 | 판본 디렉터리에 `.frozen` 표식과 `fingerprint.json`(파일별 sha256)을 남긴다 | 판본별 1 개 |
-| P1-4 | `validate_*` 에 **지문 대조**를 추가 — 파일이 바뀌었으면 검증 실패 | `validate_sample_company_starter_kit.py` |
+| P1-1 | 생성기가 **이미 있는 판본 디렉터리에 쓰기를 거부**. `--force` 를 줘야 덮어쓴다 | ✅ `build()` 앞에 `kit_freeze.guard()` |
+| P1-2 | `manifest.status` 가 `VALIDATED_*`·`APPROVED_*`·`CERTIFIED_*`·`RELEASED_*` 면 거부 | ✅ 표식을 깜빡해도 막히는 이중 안전장치 |
+| P1-3 | `.frozen` 표식과 `fingerprint.json`(파일별 sha256) | ✅ `scripts/freeze_starter_kit.py` |
+| P1-4 | `validate_*` 에 지문 대조 | ✅ **맨 앞에서** 대조한다 — 검증기가 뒤에서 manifest·보고서를 쓰므로 |
+
+### P1 결과 (2026-09-10)
+
+- `core/data_preparation/kit_freeze.py` 신설 · `scripts/freeze_starter_kit.py` 신설
+- **1.0.0 동결 완료** — 175 개 파일 지문, `reason: 검증 PASS 406건`
+- **사고 재현 시험 통과** — 생성기를 그냥 돌리면 `FrozenKitError` + 종료코드 1,
+  `generated_at` 은 `2026-08-11` 그대로, 지문 대조 PASS
+- 검증 406/406 PASS(지문 대조 1 건 추가) · 시험 14 건 신설 · 키트 시험 95 건 통과
+
+**동결 판본에서는 검증기가 보고서·manifest 를 쓰지 않는다.** `validated_at` 한 줄만
+바뀌어도 지문이 달라져, 검증을 돌릴 때마다 그 판본이 「변경됨」이 되기 때문이다.
+확정 판본의 재검증은 **대조가 목적**이지 기록 갱신이 아니다.
 
 ### P2. 생성기가 판본을 여럿 만들 수 있게 한다
 
