@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS kit_registry_versions (
     fingerprint     TEXT NOT NULL,
     profile_json    TEXT NOT NULL DEFAULT '{}',
     status          TEXT NOT NULL DEFAULT 'active',
+    -- 확정 판본인가. 1 이면 **지문이 달라지는 재등록을 거부한다** (P3-2).
+    -- `status` 는 등록부 행의 상태('active')이지 판본의 확정 여부가 아니라 따로 둔다.
+    frozen          INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     UNIQUE (kit_id, version)
@@ -328,6 +331,13 @@ class DataPreparationStore:
                 conn.execute(
                     f"ALTER TABLE object_scope_index ADD COLUMN {col} "
                     f"TEXT NOT NULL DEFAULT ''")
+            #: 판본 동결 열(P3-2). 이 열이 생기기 전에 만들어진 DB 는 기본 0(미동결)이다 —
+            #: **기존 행을 동결로 올리지 않는다.** 확정 여부는 파일의 `.frozen`·
+            #: `manifest.status` 가 정본이고, 다음 등록 때 그 값으로 채워진다.
+            kv_cols = {r[1] for r in conn.execute("PRAGMA table_info(kit_registry_versions)")}
+            if "frozen" not in kv_cols:
+                conn.execute("ALTER TABLE kit_registry_versions ADD COLUMN "
+                             "frozen INTEGER NOT NULL DEFAULT 0")
             #: 소유권 «정본» 표. 색인과 같은 저장소에 두어 한 트랜잭션으로 물질화한다.
             from core.data_preparation import ownership_binding as _ob
             #: ★★★ [4.1c-B P0-2] **DDL 보다 먼저** 구버전 표를 처리한다.
@@ -362,9 +372,20 @@ class DataPreparationStore:
     # ── Kit Registry ─────────────────────────────────────────────────────
     def upsert_kit_version(self, *, kit_id: str, version: str, name: str, mode: str,
                            source_path: str, fingerprint_value: str,
-                           profile: Dict[str, Any]) -> Dict[str, Any]:
-        """키트 판본을 등록한다. 같은 `(kit_id, version)` 은 **내용으로 덮는다** —
-        문서가 고쳐지면 지문이 달라지고, 그 사실이 보여야 한다."""
+                           profile: Dict[str, Any], frozen: bool = False) -> Dict[str, Any]:
+        """키트 판본을 등록한다. 같은 `(kit_id, version)` 은 내용으로 덮되,
+        **동결된 판본의 지문이 달라지면 거부한다** (P3-2).
+
+        ## 왜 「보여 주는 것」으로는 부족한가
+
+        ⚠️ 종전에는 지문이 달라져도 그대로 덮었다 — 「문서가 고쳐지면 지문이 달라지고
+          그 사실이 보여야 한다」는 설계였다. 그러나 **보는 사람이 없으면 아무 일도
+          일어나지 않는다.** 실제로 `VALIDATED_FOR_DEMO` 인 1.0.0 이 재생성으로 바뀌었고
+          어디에서도 오류가 나지 않았다.
+
+        ⚠️ 파일 층(`kit_freeze`)이 이미 막지만, 그것은 **같은 저장소 안의 실수**를 막는다.
+          대장까지 함께 바뀐 경우·다른 머신에서 온 파일은 DB 에 박힌 지문만이 잡는다.
+        """
         if mode not in m.KIT_MODES:
             raise m.DataPreparationError(
                 f"키트 모드는 {list(m.KIT_MODES)} 중 하나여야 합니다 — 시연용 합성 "
@@ -374,19 +395,33 @@ class DataPreparationStore:
                "version": version, "name": name, "mode": mode,
                "source_path": source_path, "fingerprint": fingerprint_value,
                "profile_json": json.dumps(profile, ensure_ascii=False, sort_keys=True),
-               "status": "active", "created_at": now, "updated_at": now}
+               "status": "active", "frozen": 1 if frozen else 0,
+               "created_at": now, "updated_at": now}
         with self.transaction() as conn:
             existing = conn.execute(
-                "SELECT kit_version_id, created_at FROM kit_registry_versions "
-                "WHERE kit_id=? AND version=?", (kit_id, version)).fetchone()
+                "SELECT kit_version_id, created_at, fingerprint, frozen "
+                "FROM kit_registry_versions WHERE kit_id=? AND version=?",
+                (kit_id, version)).fetchone()
             if existing:
+                #: ★★★ 동결 판본은 지문이 바뀌면 등록하지 않는다. 새 판본으로 내야 한다.
+                if existing["frozen"] and existing["fingerprint"] != fingerprint_value:
+                    raise m.StateConflict(
+                        f"동결된 판본이 바뀌었습니다 — {kit_id} {version}\n"
+                        f"  등록된 지문 {existing['fingerprint'][:16]}… → "
+                        f"파일 지문 {fingerprint_value[:16]}…\n"
+                        f"  확정 판본은 그 자리에서 고칠 수 없습니다. 새 판본으로 내거나, "
+                        f"파일이 잘못 바뀐 것이라면 되돌리십시오.")
                 row["kit_version_id"] = existing["kit_version_id"]
                 row["created_at"] = existing["created_at"]
+                #: 한 번 동결된 것은 풀리지 않는다 — 재등록으로 `frozen=0` 이 되면
+                #: 다음 변경이 그대로 통과한다.
+                row["frozen"] = 1 if (frozen or existing["frozen"]) else 0
                 conn.execute(
                     "UPDATE kit_registry_versions SET name=?, mode=?, source_path=?, "
-                    "fingerprint=?, profile_json=?, updated_at=? WHERE kit_version_id=?",
+                    "fingerprint=?, profile_json=?, frozen=?, updated_at=? "
+                    "WHERE kit_version_id=?",
                     (name, mode, source_path, fingerprint_value, row["profile_json"],
-                     now, row["kit_version_id"]))
+                     row["frozen"], now, row["kit_version_id"]))
             else:
                 cols = ", ".join(row)
                 conn.execute(f"INSERT INTO kit_registry_versions ({cols}) VALUES "

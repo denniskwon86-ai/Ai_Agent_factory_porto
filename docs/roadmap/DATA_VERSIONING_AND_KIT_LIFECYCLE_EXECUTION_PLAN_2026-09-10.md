@@ -1,7 +1,7 @@
 # 데이터 판본·키트 수명주기 실행계획
 
 - 기준일: 2026-09-10
-- 상태: `P2_DONE` — P1·P2(P2-4 제외) 완료(2026-09-10) · P2-4 는 도메인 검토 대기
+- 상태: `P3_DONE` — P1·P2·P3 완료(2026-09-10) · P2-4 는 도메인 검토 대기 · P4 남음
 - 기준 브랜치/커밋: `integration/g2-vertical-loop-20260821` / `7a10af750`
 - 발단: 검증이 끝난 `KIT-MFG-NONFERROUS-PROCUREMENT 1.0.0` 을 in-place 로 수정한 사고
   (`fddf13d59` → `7a10af750` 으로 되돌림)
@@ -131,15 +131,44 @@ DB 로 옮기는 것은 **질의·동시성·참조무결성**을 얻는 일이�
 **판본 불일치**(복사해서 만들 때 `version` 을 안 고치는 실수). 시험 12 건으로 고정했고,
 그중 하나가 재생성 대조 자체다.
 
-### P3. 등록·검증을 DB 로 옮긴다
+### P3. 등록부의 불변 판본 보호
 
-질의·동시성·이력을 얻는다. **P1 을 대신하지 않는다**(사실 4).
+**⚠️ P3-1 의 전제가 틀렸다.** 착수해 보니 「키트」가 두 종류이고 등록 경로가 다르다.
 
-| | 작업 | 비고 |
+| | 무엇 | 경로 | 등록부에 들어가나 |
+|---|---|---|---|
+| 운영 템플릿 Profile | 조직에 적용할 데이터 계약 | `docs/data-kits/*.kit.json` (현재 1 개) | **예** — `register_all` 대상 |
+| Starter Package | 샘플 회사·합성 데이터·앱·보고서 묶음 | `starter_kits/{id}/{version}/` | **아니오** — `starter_package_catalog` 은 읽기 전용 |
+
+「운영 등록과 분리한다」는 의도된 설계다(`kit_registry.starter_package_catalog` 주석).
+그래서 **우리가 동결한 1.0.0 은 `register_all` 로 등록할 수 없다** — P3-1 은 성립하지 않는다.
+
+| | 작업 | 상태 |
 |---|---|---|
-| P3-1 | `data_preparation.db` 를 생성하고 1.0.0 을 등록 | 이미 있는 `register_all` 을 쓴다 |
-| P3-2 | `upsert_kit_version` 에 **불변 판본 보호**를 넣는다 — 상태가 `APPROVED`·`ACTIVE` 인 판본의 지문이 달라지면 `StateConflict` | 사실 4 를 고치는 자리 |
-| P3-3 | 판본 목록·상태·지문을 조회하는 화면 또는 CLI | 「지금 무엇이 ACTIVE 인가」가 한눈에 |
+| P3-1 | ~~`data_preparation.db` 생성하고 1.0.0 등록~~ | ❌ **불가** — Starter Package 는 등록부 대상이 아니다 |
+| P3-2 | `upsert_kit_version` 에 불변 판본 보호 | ✅ `frozen` 열 + `StateConflict` |
+| P3-3 | 판본 상태·지문을 드러낸다 | ✅ 카탈로그에 `frozen`·`integrity` · CLI 는 P1 의 `--list` |
+
+### P3 결과 (2026-09-10)
+
+**등록부 보호(P3-2)는 지금 당장 쓰이지 않지만 넣어 둔다.** `docs/data-kits` 의 Profile 도
+확정되면 동결해야 하고, 나중에 Starter Package 를 등록부에 넣기로 하면 그때 필요하다.
+막는 경우 넷을 시험으로 고정했다 — 미동결은 덮어쓰고 · 같은 지문이면 멱등이고 ·
+**동결 판본의 지문이 달라지면 `StateConflict`** 이고 · **`frozen=False` 로 재등록해도
+풀리지 않는다**(풀린다면 보호가 통째로 무력해진다).
+
+**카탈로그가 동결 상태를 드러낸다(P3-3).** 화면에 「확정」이라고만 쓰고 대조 결과를
+숨기면 파일이 바뀐 판본을 확정된 것으로 보여 주게 된다. 그래서 셋을 함께 낸다 —
+`frozen` · `fingerprint_ledger` · `integrity`(`PASS`/`FAIL`/**`UNVERIFIED`**).
+대장이 없으면 「검사하지 않았다」이지 「통과했다」가 아니다.
+
+```
+KIT-MFG-NONFERROUS-PROCUREMENT 1.0.0  AVAILABLE_FOR_DEMO  frozen=True   integrity=PASS
+KIT-MFG-BATTERY-CHEMICAL-...   1.0.0  PREPARING           frozen=False  integrity=UNVERIFIED
+```
+
+**남은 결정** — Starter Package 를 등록부에 넣을 것인가. 넣으면 판본·지문·상태가 한
+곳에서 관리되지만, 「운영 템플릿과 체험 패키지를 섞지 않는다」는 기존 설계와 충돌한다.
 
 ### P4. 분류 데이터에 판본을 준다
 

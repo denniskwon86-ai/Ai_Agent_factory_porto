@@ -49,11 +49,29 @@ class LoadedKit(NamedTuple):
     source_path: str
     fingerprint: str
     profile: Dict[str, Any]
+    #: 확정 판본인가 — Starter Package 의 `.frozen`·`manifest.status` 에서 읽는다.
+    #: 등록부가 이 값으로 **지문이 달라지는 재등록을 거부한다** (P3-2).
+    frozen: bool = False
 
 
 def kits_dir() -> str:
     from core.paths import PROJECT_ROOT
     return os.path.join(PROJECT_ROOT, KITS_DIRNAME)
+
+
+def _freeze_state(version_root: str) -> Dict[str, Any]:
+    """판본 디렉터리의 동결·무결성 상태. 카탈로그 행에 그대로 얹는다."""
+    from core.data_preparation import kit_freeze
+    frozen = kit_freeze.is_frozen(version_root)
+    has_ledger = kit_freeze.load_fingerprints(version_root) is not None
+    ok, problems = kit_freeze.verify(version_root)
+    return {
+        "frozen": frozen,
+        "fingerprint_ledger": has_ledger,
+        #: 대장이 없으면 「검사하지 않았다」이지 「통과했다」가 아니다 — 셋을 구분한다.
+        "integrity": "PASS" if (has_ledger and ok) else ("FAIL" if has_ledger else "UNVERIFIED"),
+        "integrity_problems": problems[:10],
+    }
 
 
 def starter_package_catalog(directory: str = "") -> List[Dict[str, Any]]:
@@ -118,6 +136,10 @@ def starter_package_catalog(directory: str = "") -> List[Dict[str, Any]]:
                 # 준비 중 패키지의 `dataset_count` 숫자만으로 업무기능이 구현됐다고 말하지
                 # 않는다. 실제 데이터 계약 목록이 있는 판에서만 센다.
                 "business_kit_count": len(represented_business_kits(dataset_keys)),
+                # 판본이 확정(동결)됐는가와, 파일이 그 뒤로 바뀌지 않았는가 (P3-3).
+                # ⚠️ 화면에 「확정」이라고만 쓰고 대조 결과를 숨기면, 파일이 바뀐 판본을
+                #   확정된 것으로 보여 주게 된다 — 그것이 이 열들을 함께 내보내는 이유다.
+                **_freeze_state(os.path.join(kit_root, version)),
             })
     # 지금 바로 쓸 수 있는 패키지를 먼저. 준비 중 자산이 첫 선택처럼 보이면 첫 클릭부터 막힌다.
     return sorted(out, key=lambda row: (not bool(row["selectable"]), row["name"]))
@@ -228,7 +250,7 @@ def register_all(store: Any, directory: str = "") -> List[Dict[str, Any]]:
         rows.append(store.upsert_kit_version(
             kit_id=kit.kit_id, version=kit.version, name=kit.name, mode=kit.mode,
             source_path=kit.source_path, fingerprint_value=kit.fingerprint,
-            profile=kit.profile))
+            profile=kit.profile, frozen=kit.frozen))
     return rows
 
 
