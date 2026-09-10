@@ -1,0 +1,42 @@
+# Keep delivered media, source recordings, scripts and production records.
+# Render caches and local browser/server diagnostics stay on the workstation.
+*
+!*/
+!.gitignore
+!.gitattributes
+!*.md
+!*.py
+!*.ps1
+!*.json
+!*.srt
+!*.html
+!*.webm
+!**/*_prompt.txt
+!2026-09-10/LAXS-M_20s_sample.mp4
+!2026-09-10/storyboard.jpg
+!2026-09-10/scene_*.jpg
+!2026-09-10-mainfilm/LAXS-M_mainfilm_final.mp4
+!2026-09-10-mainfilm/LAXS-M_simulation_demo.mp4
+!2026-09-10-mainfilm/LAXS-M_main_narration.mp3
+!2026-09-10-mainfilm/mainfilm_contact_sheet.jpg
+!2026-09-10-mainfilm/audio/*.mp3
+!2026-09-10-creator-film/LAXS-M_creator_picture_review_SILENT.mp4
+!2026-09-10-creator-film/creator_picture_contact_sheet.jpg
+!2026-09-11-final-film/LAXS-M_mainfilm_B_female.mp4
+!2026-09-11-final-film/LAXS-M_B_narration.mp3
+!2026-09-11-final-film/final_contact_sheet.jpg
+!2026-09-11-final-film/*_poster.jpg
+!2026-09-11-final-film/audio/*.wav
+!2026-09-11-final-film/assets/software_without_loading.mp4
+!2026-09-11-final-film/LAXS-M_mainfilm_B_female_verification.txt
+!2026-09-11-voice-audition/*.wav
+!2026-09-11-voice-audition/*.mp3
+
+# Reproducible intermediate audio, transient recordings and machine state.
+**/original_ambient_bed.wav
+**/page@*.webm
+**/server-pids.json
+**/probe*.py
+**/start_capture_server.py
+**/__pycache__/
+**/segments/

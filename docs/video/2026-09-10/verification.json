@@ -1,0 +1,55 @@
+{
+  "file": "LAXS-M_20s_sample.mp4",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "frames_written": 600,
+  "intended_duration_seconds": 20,
+  "decoded_frames": 600,
+  "duration_20_seconds_verified": true,
+  "decode_success": true,
+  "decode_errors": "",
+  "audio_peak_linear": 0.7440964167620501,
+  "voice": "Microsoft Heami Desktop (ko-KR), local Windows TTS",
+  "music": "Original synthesized tones; no third-party music",
+  "narration_segments": [
+    {
+      "scene": 1,
+      "original_seconds": 2.454,
+      "used_seconds": 2.454,
+      "start": 0.25,
+      "text": "흩어진 업무와 데이터."
+    },
+    {
+      "scene": 2,
+      "original_seconds": 2.694,
+      "used_seconds": 2.694,
+      "start": 3.45,
+      "text": "현업의 생각을 업무 앱으로."
+    },
+    {
+      "scene": 3,
+      "original_seconds": 3.029,
+      "used_seconds": 3.029,
+      "start": 7.65,
+      "text": "부서의 데이터를 회사의 지식으로."
+    },
+    {
+      "scene": 4,
+      "original_seconds": 4.014,
+      "used_seconds": 4.014,
+      "start": 12.05,
+      "text": "경영 판단에서, 실행과 학습까지."
+    },
+    {
+      "scene": 5,
+      "original_seconds": 2.796,
+      "used_seconds": 2.796,
+      "start": 16.8,
+      "text": "현업과 경영을 잇는, LAXS-M."
+    }
+  ],
+  "sha256": "66d8d098e8c683a7d9edb61d2910dd839032a83c9073723d602b6d487cf51f88",
+  "bytes": 1519223,
+  "scope": "Concept animation of product vision; no actual product execution or ROI claim"
+}

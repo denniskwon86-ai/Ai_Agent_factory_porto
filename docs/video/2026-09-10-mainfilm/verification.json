@@ -1,0 +1,24 @@
+[
+  {
+    "file": "LAXS-M_mainfilm_final.mp4",
+    "bytes": 12097838,
+    "decode": "passed",
+    "duration": "00:01:35.68",
+    "volume": [
+      "mean_volume: -19.5 dB",
+      "max_volume: -4.7 dB"
+    ],
+    "black_intervals": []
+  },
+  {
+    "file": "LAXS-M_simulation_demo.mp4",
+    "bytes": 4168932,
+    "decode": "passed",
+    "duration": "00:00:25.41",
+    "volume": [
+      "mean_volume: -49.1 dB",
+      "max_volume: -39.4 dB"
+    ],
+    "black_intervals": []
+  }
+]

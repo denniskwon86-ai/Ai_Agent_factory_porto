@@ -1,0 +1,4 @@
+REUSED AUDIO: creator_brand.wav
+No closing synthesis completed; use the following matching script for captions.
+
+랙스 엠은 현업이 직접 만들고 운영하며, 그 데이터를 전사의 판단으로 연결하는 에이엑스 경영 플랫폼입니다.
