@@ -29,11 +29,25 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from core.data_preparation import kit_freeze  # noqa: E402
+import kit_defs  # noqa: E402
 
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
+#: **판본은 `--version` 으로 받는다** (P2). 예전에는 여기에 "1.0.0" 이 박혀 있어서,
+#: 1.1.0 을 내려면 이 줄을 고쳐야 했고 고치는 순간 1.0.0 을 재현할 수 없게 됐다.
+#: `main()`/`build()` 이 아래 셋을 판본에 맞게 다시 세운다.
 KIT_VERSION = "1.0.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
+OVERLAY: kit_defs.KitOverlay = kit_defs.KitOverlay()
+
+
+def use_version(version: str, out: Path | None = None) -> None:
+    """판본을 갈아 끼운다 — 정의(오버레이)와 출력 경로를 함께 바꾼다."""
+    global KIT_VERSION, KIT_ROOT, OVERLAY
+    OVERLAY = kit_defs.load(version)
+    KIT_VERSION = version
+    KIT_ROOT = Path(out) if out else (ROOT / "starter_kits" / KIT_ID / version)
 TENANT_ID = "tenant-afs-demo-materials"
 GROUP_SCOPE = "org-afs-demo-group"
 METALS_SCOPE = "org-afs-metals"
@@ -894,7 +908,7 @@ def generate_simulation_and_decisions() -> tuple[List[Dict[str, Any]], List[Dict
                                 "formula_definition": d, "lag_period_months": e, "output_unit": f,
                                 "formula_version": "1.0.0", "approval_status": "APPROVED_FOR_DEMO",
                                 "effective_from": "2026-08-11", "effective_to": "9999-12-31",
-                                "_scope": GROUP_SCOPE} for a,b,c,d,e,f in driver_defs],
+                                "_scope": GROUP_SCOPE} for a,b,c,d,e,f in OVERLAY.apply_drivers(driver_defs)],
                     kind="REFERENCE", default_scope=GROUP_SCOPE)
     scenarios_def = [
         ("SCN-01", "환율 10% 상승", "DRV-FX", 0.10, "%", "PURCHASE_COST,CASH,GROSS_MARGIN"),
@@ -913,7 +927,8 @@ def generate_simulation_and_decisions() -> tuple[List[Dict[str, Any]], List[Dict
                                   "impact_metrics": f, "scenario_period_start": "2026-09-01",
                                   "scenario_period_end": "2027-12-31", "approval_status": "APPROVED_FOR_DEMO",
                                   "rationale": "제품 기능 검증용 Golden Decision Case", "_scope": GROUP_SCOPE}
-                                 for a,b,c,d,e,f in scenarios_def], kind="SCENARIO", default_scope=GROUP_SCOPE)
+                                 for a,b,c,d,e,f in OVERLAY.apply_scenarios(scenarios_def)],
+                                kind="SCENARIO", default_scope=GROUP_SCOPE)
     decisions = []
     for i, scn in enumerate(scenarios[:3], 1):
         decisions.append({"decision_id": f"DEC-DEMO-{i:03d}", "package_id": f"PKG-DEMO-{i:03d}",
@@ -1235,7 +1250,7 @@ def build(clean: bool = True, force: bool = False) -> Dict[str, Any]:
         write_json(KIT_ROOT / "app_blueprints" / f"{app['app_id']}.json", app)
     for rpt in report_templates():
         write_json(KIT_ROOT / "reports" / f"{rpt['report_id']}.json", rpt)
-    profiles = company_profiles()
+    profiles = OVERLAY.apply_company_profiles(company_profiles())
     for profile in profiles:
         path = KIT_ROOT / "company_profiles" / f"{profile['company_profile_id']}.json"
         write_json(path, profile)
@@ -1273,6 +1288,7 @@ def build(clean: bool = True, force: bool = False) -> Dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "file_index": file_index,
     }
+    manifest = OVERLAY.apply_manifest(manifest)
     write_json(KIT_ROOT / "manifest.json", manifest)
     readme = f"""# {KIT_ID} {KIT_VERSION}\n\n- 회사: AFS 데모소재그룹(명시적 가상기업)\n- 데이터: SYNTHETIC\n- 프로필: Quick 6개월, Full 36개월\n- 데이터셋: {len(DATASETS)}개\n- 주의: 실제 경영 의사결정과 예측 정확도 증명에 사용할 수 없습니다.\n\n1. 데이터 생성: `venv\\Scripts\\python.exe scripts\\generate_sample_company_starter_kit.py`\n2. 데이터 검증: `venv\\Scripts\\python.exe scripts\\validate_sample_company_starter_kit.py`\n3. Excel 생성: `venv\\Scripts\\python.exe scripts\\generate_sample_company_excel_templates.py`\n4. Excel 재계산: `powershell -ExecutionPolicy Bypass -File scripts\\recalculate_sample_company_excel_templates.ps1`\n5. Excel 검증: `venv\\Scripts\\python.exe scripts\\validate_sample_company_excel_templates.py`\n"""
     (KIT_ROOT / "README.md").write_text(readme, encoding="utf-8")
@@ -1281,12 +1297,18 @@ def build(clean: bool = True, force: bool = False) -> Dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--version", default="1.0.0",
+                        help="만들 판본 (scripts/kit_defs/v{판본}.py 가 있어야 한다)")
+    parser.add_argument("--out", default="",
+                        help="다른 경로에 생성 — 동결 판본을 건드리지 않고 대조할 때 쓴다")
     parser.add_argument("--no-clean", action="store_true", help="기존 키트 디렉터리를 지우지 않음")
     parser.add_argument("--force", action="store_true",
                         help="확정 판본이어도 덮어쓴다 — 왜 그래야 하는지 커밋에 남길 것")
     args = parser.parse_args()
+    use_version(args.version, Path(args.out) if args.out else None)
     manifest = build(clean=not args.no_clean, force=args.force)
-    print(json.dumps({"status": "generated", "kit_root": str(KIT_ROOT),
+    print(json.dumps({"status": "generated", "version": args.version,
+                      "kit_root": str(KIT_ROOT),
                       "dataset_count": manifest["dataset_count"],
                       "quick_rows": sum(x.get("rows",0) for x in manifest["file_index"] if x.get("profile")=="quick"),
                       "full_rows": sum(x.get("rows",0) for x in manifest["file_index"] if x.get("profile")=="full")},
