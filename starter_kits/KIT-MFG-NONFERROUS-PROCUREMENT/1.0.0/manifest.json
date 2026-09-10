@@ -577,7 +577,7 @@
       "company_profile_id": "AFS-VIRTUAL-GLOBAL-SMELTING",
       "company_name": "AFS 글로벌 제련법인 진출안",
       "profile_role": "VIRTUAL_OVERSEAS_ENTITY",
-      "industry_code": "C2421"
+      "industry_code": "C2412"
     },
     {
       "company_profile_id": "AFS-VIRTUAL-SMART-POWER",
@@ -609,7 +609,7 @@
     "path": "scripts/generate_sample_company_starter_kit.py",
     "version": "1.0.0"
   },
-  "generated_at": "2026-09-10T00:04:49+00:00",
+  "generated_at": "2026-08-11T10:47:09+00:00",
   "file_index": [
     {
       "path": "samples/quick/FND-01.csv",
@@ -837,8 +837,8 @@
     },
     {
       "path": "samples/quick/SIM-01.csv",
-      "sha256": "63fa33e8bac4d4e88f935a6a29ad57d39ef3baa3bdc4d414b1fcbd8b80117065",
-      "rows": 17,
+      "sha256": "fcbff30b6d15fb91d4aa737d21bc92f243ee4155e6e2735153c1bd1ece0eb8e4",
+      "rows": 12,
       "dataset_id": "SIM-01",
       "profile": "quick"
     },
@@ -1082,8 +1082,8 @@
     },
     {
       "path": "samples/full/SIM-01.csv",
-      "sha256": "63fa33e8bac4d4e88f935a6a29ad57d39ef3baa3bdc4d414b1fcbd8b80117065",
-      "rows": 17,
+      "sha256": "fcbff30b6d15fb91d4aa737d21bc92f243ee4155e6e2735153c1bd1ece0eb8e4",
+      "rows": 12,
       "dataset_id": "SIM-01",
       "profile": "full"
     },
@@ -1334,7 +1334,7 @@
     },
     {
       "path": "company_profiles/AFS-VIRTUAL-GLOBAL-SMELTING.json",
-      "sha256": "697f89de5f1f1d2b702c8d46aa1bbae9c5ca40d5166c902fff231bc1867b6dd2",
+      "sha256": "591d6eb2160b553cd37833466fb0045ce4c0c0e9418e1327dd919c51b5e1a8b7",
       "rows": 1,
       "dataset_id": "COMPANY-PROFILE",
       "profile": "company-profile"
@@ -1366,12 +1366,235 @@
       "rows": 8,
       "dataset_id": "QUARANTINE-MANIFEST",
       "profile": "full-quarantine"
+    },
+    {
+      "path": "templates/excel/FND-01.xlsx",
+      "sha256": "f3d26e810d73e5f5fcc2ca123ab0f2bff25cb511c9af0733f0ecad79d79a8220",
+      "dataset_id": "FND-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/FND-02.xlsx",
+      "sha256": "f7acbedf6270fce1a1a90b52f4f468dcf073baa60612bc11e15097bb0ec417c6",
+      "dataset_id": "FND-02",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/FND-03.xlsx",
+      "sha256": "6af34332358730e6ce795c2ac30612b31281e94b389fc49d50752b66fcec9eb5",
+      "dataset_id": "FND-03",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MDM-01.xlsx",
+      "sha256": "67b947f625f88b52279255210d47d2560ddb3f0b4818cdeecdcb898e43401152",
+      "dataset_id": "MDM-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MDM-02.xlsx",
+      "sha256": "8caf719b6030652e4717003371e5326e9162575df5d028f12320e294894deedd",
+      "dataset_id": "MDM-02",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MDM-03.xlsx",
+      "sha256": "ee544c8d8e80e2fa43a415c28bbe75efc989ab7bb5e01b081ec44ceec392a040",
+      "dataset_id": "MDM-03",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MDM-04.xlsx",
+      "sha256": "32658c9ecb88c05cfef2779fbb88c4062a737a9c82a159c13da3b9c3db23a63f",
+      "dataset_id": "MDM-04",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MDM-05.xlsx",
+      "sha256": "b7bfce6ef42d2db47f4b2ed7408167fe9f5dd67c35fcb9aba38c83c36c368433",
+      "dataset_id": "MDM-05",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MDM-06.xlsx",
+      "sha256": "6643b683bbb98608834280ae5d9a8f0f4527e5de39df731a6bfa6ae2ad33f1f4",
+      "dataset_id": "MDM-06",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MDM-07.xlsx",
+      "sha256": "24c0ce515b536a278ae8116b9226b26eef22bb170ac51c01df33e7c30cda0d65",
+      "dataset_id": "MDM-07",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MDM-08.xlsx",
+      "sha256": "8c003d57827b743a0cd45b174cf5a4e094ef4d41889c026dfeb95e71ba941ca0",
+      "dataset_id": "MDM-08",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/PRC-01.xlsx",
+      "sha256": "8fd8c1d8c36096658c5960660ab3a9e1e6609dbfc15477e5e47eaf50f7b7e5c2",
+      "dataset_id": "PRC-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/PRC-02.xlsx",
+      "sha256": "489e4485153ef9410d9a8aec01f6b8a57fe1b25ba92f94c8de1d50dd5fe31af5",
+      "dataset_id": "PRC-02",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/LOG-01.xlsx",
+      "sha256": "1350e35922ff1c605fa8c40f27a11812a543ea604f96433da9f8b70ec9fbc750",
+      "dataset_id": "LOG-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/LOG-02.xlsx",
+      "sha256": "d7f4aad03b620dd0cbf4c69bd2b67ea79e4720b3f4a9e3c6ee63bcc80f108ac3",
+      "dataset_id": "LOG-02",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/LOG-03.xlsx",
+      "sha256": "2d7d28dc394d23931028bbf9feafc9635db2c6a998f1a628dae416ac85dfb743",
+      "dataset_id": "LOG-03",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/LOG-04.xlsx",
+      "sha256": "a6267f23112d5d43e1373f969a941e0b5024d1f1805b0b824b2adc1be391f767",
+      "dataset_id": "LOG-04",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/LOG-05.xlsx",
+      "sha256": "2475cd68abcbe99e1c1bf5c0a7617fd06c20496306676dd4592d60ca0befbd1d",
+      "dataset_id": "LOG-05",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/INV-01.xlsx",
+      "sha256": "f00840c43209a217501a547a57e87606324b764e7beeb161f31b7eb178dc3c8d",
+      "dataset_id": "INV-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/INV-02.xlsx",
+      "sha256": "d4551d6a2ec50e1a0fe9746b4c7d748cec840fb476de79bb5f55e98c20d2787f",
+      "dataset_id": "INV-02",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MFG-01.xlsx",
+      "sha256": "3bd9e28b0b828f67e14719a6b21e716d490bf400eccb4b34092806b8d9300ede",
+      "dataset_id": "MFG-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MFG-02.xlsx",
+      "sha256": "ac3ad236ab4a20298ea100310f818e74966741217a05185a9b9b2d2b57abae5a",
+      "dataset_id": "MFG-02",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/MFG-03.xlsx",
+      "sha256": "4e819a68800c2793c3a390a663460fd011e1e0a0fbb58d3a09851af58eb79c7f",
+      "dataset_id": "MFG-03",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/QLT-01.xlsx",
+      "sha256": "5e162c64bb0485a3b6e5ecc181fb0fd6c4ace6182aecf202a47b2623420c01b0",
+      "dataset_id": "QLT-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/SLS-01.xlsx",
+      "sha256": "68a79176a91915ee493f459f4e8b81d6e72052a6182f976a445a993ba362b295",
+      "dataset_id": "SLS-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/FIN-01.xlsx",
+      "sha256": "88e118b8b6ea11a01b108e00745a05d31736b5b1a50c1da29f2d03edff5a8abb",
+      "dataset_id": "FIN-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/FIN-02.xlsx",
+      "sha256": "6eccf03d69908c7445391ecaf6f20eb31156f96e5e3e777ea6690b44e729f835",
+      "dataset_id": "FIN-02",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/FIN-03.xlsx",
+      "sha256": "92db74a4e9029927305e8d02ea6d4476cbef222a7b33c2d1ebd96ee2ec0ed00c",
+      "dataset_id": "FIN-03",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/EXT-01.xlsx",
+      "sha256": "df2ef8bc02f431480593488b22cc6e6e2edab39459cccdbc8276347182f564e2",
+      "dataset_id": "EXT-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/EXT-02.xlsx",
+      "sha256": "5d8834212fce7208e24eb675a74399f8f0da16e9041b8443d14231d2d1c2d461",
+      "dataset_id": "EXT-02",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/EXT-03.xlsx",
+      "sha256": "6e46ed6ed25fcf8f7b26b80b5d9eefc98539090ea8d5d85c0475ac5fe50023dd",
+      "dataset_id": "EXT-03",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/KNW-01.xlsx",
+      "sha256": "24d752ce84416234191a6d2d1700e17f7368fadc95cc0167557c9877bbfc44e2",
+      "dataset_id": "KNW-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/SIM-01.xlsx",
+      "sha256": "b12668d419e8ade625a627e859d7f4395e3fb3f5ce06acac27598df2885ad15d",
+      "dataset_id": "SIM-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/SIM-02.xlsx",
+      "sha256": "f935391053e1d1d33e529eb804900fe5e96d70c14c38159b2cfd5fda506f8442",
+      "dataset_id": "SIM-02",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/DEC-01.xlsx",
+      "sha256": "f451f450bab91b4cc4192a8a954bbcb84488b1ff94fd40813a4a596cb0223471",
+      "dataset_id": "DEC-01",
+      "profile": "excel-template"
+    },
+    {
+      "path": "templates/excel/AFS_Starter_Kit_Onboarding_Index.xlsx",
+      "sha256": "941a2620df847ab556f1c3a48d90aaff4841952b0b35438d4d6ed640b7c734c9",
+      "dataset_id": "ONBOARDING-INDEX",
+      "profile": "excel-index"
     }
   ],
   "validation": {
     "status": "PASS",
     "report_path": "validations/validation_report.json",
     "checks": 405,
-    "validated_at": "2026-09-10T00:04:51+00:00"
+    "validated_at": "2026-08-12T14:21:28+00:00"
+  },
+  "excel_templates": {
+    "status": "PASS",
+    "dataset_workbooks": 35,
+    "index_path": "templates/excel/AFS_Starter_Kit_Onboarding_Index.xlsx",
+    "validation_report": "validations/excel_validation_report.json",
+    "formula_cells_checked": 175
   }
 }

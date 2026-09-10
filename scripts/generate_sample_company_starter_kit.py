@@ -885,23 +885,6 @@ def generate_simulation_and_decisions() -> tuple[List[Dict[str, Any]], List[Dict
         ("DRV-CAPEX", "CAPEX", "CASH_BALANCE", "OPENING_CASH+INFLOW-OUTFLOW-CAPEX", 0, "KRW"),
         ("DRV-GM", "REVENUE_AND_COST", "GROSS_MARGIN", "REVENUE-COGS", 0, "KRW"),
         ("DRV-CASH", "AR_AP_TIMING", "ENDING_CASH", "OPENING+COLLECTIONS-PAYMENTS", 1, "KRW"),
-        # ── 비철 제련 특성화 (KIT 1.1.0 초안).
-        #
-        # **제련사는 금속 가격으로 벌지 않는다.** 가격은 헤지로 중립화하고 제련수수료·
-        # 회수율·부산물로 번다. 위의 `DRV-COMMODITY`(LME 가격)만으로는 이 구조가 안 보인다.
-        #
-        # `DRV-YIELD`(생산 수율 = 투입 대비 산출)와 `DRV-RECOVERY`(금속 회수율 = 함유
-        # 금속 대비 회수 금속)는 **다른 것이다.** 합치면 정광 품위 변동이 수율 문제로 보인다.
-        ("DRV-TCRC", "TC_RC_BENCHMARK", "SMELTING_REVENUE",
-         "CONCENTRATE_DMT*TC+PAYABLE_LB*RC", 0, "USD"),
-        ("DRV-GRADE", "CONCENTRATE_GRADE", "CONTAINED_METAL",
-         "CONCENTRATE_DMT*GRADE_PCT", 0, "TON"),
-        ("DRV-RECOVERY", "METAL_RECOVERY_RATE", "RECOVERED_METAL",
-         "CONTAINED_METAL*RECOVERY_RATE", 0, "TON"),
-        ("DRV-BYPRODUCT", "BYPRODUCT_PRICE", "BYPRODUCT_CREDIT",
-         "SULFURIC_ACID_TON*ACID_PRICE+PRECIOUS_OZ*PRECIOUS_PRICE", 0, "KRW"),
-        ("DRV-PREMIUM", "REGIONAL_PREMIUM", "SALES_PRICE",
-         "LME_PRICE+REGIONAL_PREMIUM", 0, "USD/TON"),
     ]
     drivers = stamp("SIM-01", [{"driver_id": a, "input_metric": b, "output_metric": c,
                                 "formula_definition": d, "lag_period_months": e, "output_unit": f,
@@ -1112,10 +1095,7 @@ def company_profiles() -> List[Dict[str, Any]]:
             "company_name": "AFS 글로벌 제련법인 진출안",
             "profile_role": "VIRTUAL_OVERSEAS_ENTITY",
             "source_profile_id": "AFS-DEMO-MATERIALS-GROUP",
-            # KSIC 10 차에서 `C2412` 는 **제강업(철강)**이다. 비철금속 제련·정련은 `C2421`
-            # 이고, LS엠앤엠·고려아연·SNNC 가 실제로 그 코드로 신고한다 — 이름은 맞고
-            # 코드가 틀려 있었다(C2411 제철 · C2412 제강 · C2421 비철제련 · C2422 비철압연)
-            "industry_code": "C2421",
+            "industry_code": "C2412",
             "industry_name": "비철금속 제련·정련",
             "purpose": "해외 원료 산지 인접 제련법인의 물류·환율·투자·연결손익 검증",
             "valid_until": "2032-12-31",
