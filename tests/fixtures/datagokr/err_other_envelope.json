@@ -1,0 +1,9 @@
+{
+ "OpenAPI_ServiceResponse": {
+  "cmmMsgHeader": {
+   "errMsg": "SERVICE ERROR",
+   "returnAuthMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+   "returnReasonCode": "30"
+  }
+ }
+}

@@ -1,0 +1,16 @@
+{
+  "software": {
+    "source": "docs\\video\\2026-09-10-creator-film\\captures\\software.webm",
+    "source_intervals": [
+      [
+        3.982,
+        11.3
+      ],
+      [
+        17.4,
+        20.661
+      ]
+    ],
+    "edit": "Remove loading wait; preserve actual creation configuration and existing PRD. Hold final frame for narration. No generated product UI."
+  }
+}

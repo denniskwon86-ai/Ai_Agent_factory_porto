@@ -1,0 +1,204 @@
+{
+  "schema": "laxs.ownership_review_worksheet.v1",
+  "status": "DECISION_REQUIRED",
+  "executable": false,
+  "installed": false,
+  "review_scope": "K1-c4 battery-plant logistics ownership, not an API request",
+  "parent_logistics_fingerprint": "614f50de68b8e6ccba37ab785ef0ff4387f886f80de8efb56192f823ea3d3ee9",
+  "parent_reference_fingerprint": "44579c8985fd939297627e6f1772319b637cb399f45467b85f6fcd1c939e15df",
+  "observed_tenant_id": "tenant-afs-demo-materials",
+  "observed_entity_mode": "REAL",
+  "observed_scope_node_id": "plant-afs-battery-02",
+  "observed_scope_node": {
+    "node_id": "plant-afs-battery-02",
+    "entity_id": "ent-laxs-mnm-installation",
+    "name_ko": "배터리소재 공장 · 사전검증",
+    "node_type": "site_plant",
+    "default_parent_id": "org-laxs-mnm",
+    "dept_id": "",
+    "effective_from": "",
+    "effective_to": "",
+    "status": "ACTIVE"
+  },
+  "existing_department_candidates": [
+    {
+      "dept_id": "logistics",
+      "name_ko": "물류",
+      "parent_id": "hq",
+      "scope_node_id": "node_41402723bc90",
+      "valid_from": "2026-07-31T00:23:32.107107+00:00",
+      "valid_to": null,
+      "status": "active",
+      "mapped_tenant_id": "tenant_default",
+      "direct_binding_verified": false
+    },
+    {
+      "dept_id": "procurement",
+      "name_ko": "구매",
+      "parent_id": "hq",
+      "scope_node_id": "node_41402723bc90",
+      "valid_from": "2026-07-31T00:23:32.114875+00:00",
+      "valid_to": null,
+      "status": "active",
+      "mapped_tenant_id": "tenant_default",
+      "direct_binding_verified": false
+    },
+    {
+      "dept_id": "production_battery",
+      "name_ko": "배터리소재 생산",
+      "parent_id": "production",
+      "scope_node_id": "node_36c1c7c797e0",
+      "valid_from": "2026-07-31T00:23:32.129564+00:00",
+      "valid_to": null,
+      "status": "active",
+      "mapped_tenant_id": "tenant_default",
+      "direct_binding_verified": false
+    }
+  ],
+  "reference_comparison": {
+    "dept_id": "demo_smelting",
+    "active_manager_roles": 2,
+    "reserved_domain_roles": 2,
+    "regular_user_access_verified": false
+  },
+  "binding_drafts": [
+    {
+      "dataset_contract_key": "PRC-02",
+      "label": "구매 발주",
+      "affected_rows": 918,
+      "recommended_responsibility": "구매",
+      "owner_dept_id": null,
+      "effective_from": null,
+      "effective_to": null,
+      "approver": null,
+      "approval_event_id": null,
+      "blocked_by": [
+        "CONTEXT_ALIGNMENT_DECISION",
+        "OWNER_DEPARTMENT_DECISION",
+        "OPERATOR_ROLE_DECISION",
+        "EFFECTIVE_PERIOD_DECISION"
+      ]
+    },
+    {
+      "dataset_contract_key": "LOG-02",
+      "label": "선적",
+      "affected_rows": 622,
+      "recommended_responsibility": "물류",
+      "owner_dept_id": null,
+      "effective_from": null,
+      "effective_to": null,
+      "approver": null,
+      "approval_event_id": null,
+      "blocked_by": [
+        "CONTEXT_ALIGNMENT_DECISION",
+        "OWNER_DEPARTMENT_DECISION",
+        "OPERATOR_ROLE_DECISION",
+        "EFFECTIVE_PERIOD_DECISION"
+      ]
+    },
+    {
+      "dataset_contract_key": "LOG-03",
+      "label": "선적 사건",
+      "affected_rows": 3732,
+      "recommended_responsibility": "물류",
+      "owner_dept_id": null,
+      "effective_from": null,
+      "effective_to": null,
+      "approver": null,
+      "approval_event_id": null,
+      "blocked_by": [
+        "CONTEXT_ALIGNMENT_DECISION",
+        "OWNER_DEPARTMENT_DECISION",
+        "OPERATOR_ROLE_DECISION",
+        "EFFECTIVE_PERIOD_DECISION"
+      ]
+    },
+    {
+      "dataset_contract_key": "LOG-04",
+      "label": "통관",
+      "affected_rows": 622,
+      "recommended_responsibility": "물류",
+      "owner_dept_id": null,
+      "effective_from": null,
+      "effective_to": null,
+      "approver": null,
+      "approval_event_id": null,
+      "blocked_by": [
+        "CONTEXT_ALIGNMENT_DECISION",
+        "OWNER_DEPARTMENT_DECISION",
+        "OPERATOR_ROLE_DECISION",
+        "EFFECTIVE_PERIOD_DECISION"
+      ]
+    },
+    {
+      "dataset_contract_key": "LOG-05",
+      "label": "입고 운송",
+      "affected_rows": 1244,
+      "recommended_responsibility": "물류",
+      "owner_dept_id": null,
+      "effective_from": null,
+      "effective_to": null,
+      "approver": null,
+      "approval_event_id": null,
+      "blocked_by": [
+        "CONTEXT_ALIGNMENT_DECISION",
+        "OWNER_DEPARTMENT_DECISION",
+        "OPERATOR_ROLE_DECISION",
+        "EFFECTIVE_PERIOD_DECISION"
+      ]
+    }
+  ],
+  "observations": {
+    "existing_target_scope_binding_count": 0,
+    "active_department_count": 13,
+    "active_department_count_includes_test_records": true
+  },
+  "required_decisions": [
+    "기존 사용자 조직과 업무키트의 회사 문맥 정리 방향",
+    "발주=구매·물류4종=물류 책임 분담 여부",
+    "일반 사용자·담당자 역할 배정",
+    "소유권 시행 시점 및 새 인증판의 발효 순서"
+  ],
+  "transition_preconditions": [
+    "No tenant migration, department repointing or role grant without explicit authorization",
+    "Resolve authority, live ledger and overlap through existing product APIs",
+    "Ownership effective_from must be no later than new certification; do not backdate to business-event dates",
+    "Preserve old cases and sealed evidence; verify real ordinary-user access plus negative control"
+  ],
+  "source_file_observation": {
+    "before": {
+      "data\\master\\master.db": "615dc443c85b49653c62677c6560f1e14f62c4383a96deff6211f9dad21e3ec1",
+      "data\\master\\master.db-wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "data\\master\\master.db-shm": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+      "data\\enterprise_context.db": "7dbdbf582efe2c966fe44c1a6d5ea7c46f8bb837d3333982de58e6e640501b4f",
+      "data\\enterprise_context.db-wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "data\\enterprise_context.db-shm": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+      "data\\data_preparation.db": "a265f621b4f0ab2ac1b43858a30b82aa624a10d7a1704fec69da3b8ece7ed6bc",
+      "data\\data_preparation.db-wal": null,
+      "data\\data_preparation.db-shm": null
+    },
+    "after": {
+      "data\\master\\master.db": "615dc443c85b49653c62677c6560f1e14f62c4383a96deff6211f9dad21e3ec1",
+      "data\\master\\master.db-wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "data\\master\\master.db-shm": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+      "data\\enterprise_context.db": "7dbdbf582efe2c966fe44c1a6d5ea7c46f8bb837d3333982de58e6e640501b4f",
+      "data\\enterprise_context.db-wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "data\\enterprise_context.db-shm": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+      "data\\data_preparation.db": "a265f621b4f0ab2ac1b43858a30b82aa624a10d7a1704fec69da3b8ece7ed6bc",
+      "data\\data_preparation.db-wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "data\\data_preparation.db-shm": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+    },
+    "changed_paths": [
+      "data\\data_preparation.db-wal",
+      "data\\data_preparation.db-shm"
+    ],
+    "scope": "three database files and their WAL/SHM; not a full operational invariant"
+  },
+  "not_verified": [
+    "live principal authorization",
+    "ledger approval validity",
+    "cross-database atomic snapshot",
+    "broader tenant migration impact",
+    "installation or browser access"
+  ]
+}

@@ -64,6 +64,10 @@ COMMON_FIELDS = [
     "certification_status", "as_of_date", "lineage_id",
 ]
 
+REQUIRED_DATASET_FIELDS = {
+    "MDM-07": {"cost_center_name"},
+}
+
 
 DATASETS: Dict[str, Dict[str, Any]] = {
     "FND-01": {"name": "기업·조직 계층", "keys": ["node_id"], "deps": []},
@@ -365,7 +369,7 @@ def generate_locations(profile: Profile) -> List[Dict[str, Any]]:
     if profile.name == "quick":
         # Quick 프로필도 두 실제 사업 범위의 입고 목적지를 모두 포함해야 한다.
         # 그렇지 않으면 구매·물류 데이터가 존재하지 않는 창고를 참조하게 된다.
-        quick_ids = {"LOC-P1-RAW", "LOC-P2-RAW", "LOC-P2-FG"}
+        quick_ids = {"LOC-P1-RAW", "LOC-P1-FG", "LOC-P2-RAW", "LOC-P2-FG"}
         all_rows = [r for r in all_rows if r[0] in quick_ids]
     rows = [{"location_id": a, "site_id": b, "location_name": c, "storage_type": d,
              "capacity_quantity": e, "capacity_uom": "TON", "active": d != "VIRTUAL", "_scope": b}
@@ -383,7 +387,9 @@ def generate_bom(profile: Profile, materials: Sequence[Mapping[str, Any]]) -> Li
     raw_ids = [m["material_id"] for m in materials if m["material_type"] in {"RAW", "CONSUMABLE"}]
     rows = []
     target = 8 if profile.name == "quick" else 30
-    for pidx in range(target):
+    # target은 상한이다. 품목 수를 넘겨 순회하면 같은 기간·같은 배합의
+    # -02 BOM이 생겨 제품 Resolver가 대체판 충돌로 거부한다.
+    for pidx in range(min(target, len(product_ids))):
         product = product_ids[pidx % len(product_ids)]
         lines = recipes.get(product) or [(raw_ids[pidx % len(raw_ids)], 1.05 + (pidx % 5) * 0.03, "INPUT")]
         for line_no, (inp, qty, role) in enumerate(lines, 1):
@@ -422,6 +428,13 @@ def generate_accounts(profile: Profile) -> List[Dict[str, Any]]:
         ("5100", "가공비", "EXPENSE", "CONVERSION_COST"), ("5200", "물류비", "EXPENSE", "LOGISTICS_COST"),
         ("5300", "에너지비", "EXPENSE", "ENERGY_COST"), ("5400", "품질손실", "EXPENSE", "QUALITY_LOSS"),
     ]
+    cost_centers = {
+        "CC-PROC": "원료구매 원가센터",
+        "CC-LOG": "물류 원가센터",
+        "CC-MFG": "생산 원가센터",
+        "CC-FIN": "재무 원가센터",
+        "CC-MGT": "경영관리 원가센터",
+    }
     rows = []
     target = 30 if profile.name == "quick" else 80
     for i in range(target):
@@ -432,6 +445,7 @@ def generate_accounts(profile: Profile) -> List[Dict[str, Any]]:
         cc = ["CC-PROC", "CC-LOG", "CC-MFG", "CC-FIN", "CC-MGT"][i % 5]
         rows.append({"account_id": acc, "account_name": name, "account_type": typ,
                      "cost_element": elem, "cost_center_id": cc,
+                     "cost_center_name": cost_centers[cc],
                      "pnl_line": "REVENUE" if typ == "REVENUE" else "COGS" if elem.endswith("COST") else "OPEX" if typ == "EXPENSE" else "BALANCE_SHEET",
                      "cashflow_line": "OPERATING", "currency": "KRW", "active": True,
                      "_scope": ADV_SCOPE})
@@ -685,15 +699,16 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
     shp_by_id = {s["shipment_id"]: s for s in shipments}
     movements: List[Dict[str, Any]] = []
     balances: Dict[tuple[str, str], float] = defaultdict(float)
-    active_locations = [l for l in locations if l["active"]]
+    active_locations = [l for l in locations if str(l["active"]).lower() == "true"]
     material_ids = [m["material_id"] for m in materials]
     # Opening stock keeps production and sales movement sequences physically possible.
     for idx, m in enumerate(materials):
         loc = "LOC-P1-RAW" if m["scope_node_id"] == PLANT1 and m["material_type"] == "RAW" else \
               "LOC-P1-FG" if m["scope_node_id"] == PLANT1 else \
               "LOC-P2-FG" if m["material_type"] == "FINISHED" else "LOC-P2-RAW"
-        if loc not in {l["location_id"] for l in active_locations}:
-            loc = active_locations[idx % len(active_locations)]["location_id"]
+        matches = [l for l in active_locations if l["location_id"] == loc and l["tenant_id"] == m["tenant_id"]]
+        if len(matches) != 1 or matches[0]["scope_node_id"] != m["scope_node_id"]:
+            raise ValueError(f"Opening warehouse unavailable or outside material scope: {loc}")
         qty = 2000.0 if m["material_type"] == "RAW" else 800.0 if m["material_type"] == "FINISHED" else 100.0
         balances[(m["material_id"], loc)] += qty
         movements.append({"movement_id": f"MOV-OPEN-{idx+1:05d}", "movement_date": iso(start),
@@ -997,7 +1012,9 @@ def make_contract(dataset_id: str, rows: Sequence[Mapping[str, Any]]) -> Dict[st
     for key in headers:
         values = [r.get(key) for r in rows[:500]]
         fields.append({"name": key, "type": infer_type(values),
-                       "required": key in COMMON_FIELDS or key in DATASETS[dataset_id]["keys"],
+                       "required": (key in COMMON_FIELDS
+                                    or key in DATASETS[dataset_id]["keys"]
+                                    or key in REQUIRED_DATASET_FIELDS.get(dataset_id, set())),
                        "business_key": key in DATASETS[dataset_id]["keys"],
                        "description": f"{DATASETS[dataset_id]['name']}의 {key}"})
     return {
@@ -1030,6 +1047,8 @@ def app_blueprints() -> List[Dict[str, Any]]:
         {"app_id": "APP-03", "name": "재고·생산 영향 분석", "datasets": ["INV-01","INV-02","MFG-01","MFG-02","MFG-03","QLT-01"]},
         {"app_id": "APP-04", "name": "구매원가·현금 전망", "datasets": ["PRC-01","FIN-01","FIN-02","FIN-03","EXT-01","EXT-02"]},
         {"app_id": "APP-05", "name": "공급 위험·대체안", "datasets": ["MDM-02","PRC-01","PRC-02","EXT-02","EXT-03","SIM-02"]},
+        {"app_id": "APP-06", "name": "판매·납기·매출 영향", "datasets": ["SLS-01","MFG-01","INV-01","FIN-02","FIN-03","EXT-01"]},
+        {"app_id": "APP-07", "name": "전사 시나리오·실적 통합", "datasets": ["PRC-02","LOG-02","INV-01","MFG-01","SLS-01","FIN-01","FIN-02","FIN-03","EXT-01","EXT-02","SIM-01","SIM-02","DEC-01"]},
     ]
 
 
@@ -1063,11 +1082,12 @@ def company_profiles() -> List[Dict[str, Any]]:
             "source_profile_id": "",
             "industry_code": "C24",
             "industry_name": "비철금속·배터리소재 제조",
-            "purpose": "Starter Kit 기준회사와 원료 구매 폐루프 체험",
+            "purpose": "Starter Kit 기준회사와 부서 업무·전사 시나리오 흐름 체험",
             "valid_until": "9999-12-31",
             "organization_blueprint": ["기업집단", "제련법인", "첨단소재법인", "사업부", "공장", "기능부서"],
             "products": ["전기동", "고순도 황산니켈", "배터리급 수산화리튬", "귀금속 부산물"],
-            "recommended_apps": ["APP-01", "APP-02", "APP-03", "APP-04", "APP-05"],
+            "recommended_apps": ["APP-01", "APP-02", "APP-03", "APP-04", "APP-05",
+                                 "APP-06", "APP-07"],
             "default_assumptions": {"baseline": "BASELINE-DEMO-1.0"},
         },
         {

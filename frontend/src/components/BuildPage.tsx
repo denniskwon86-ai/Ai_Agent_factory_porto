@@ -22,6 +22,7 @@ import { useFactoryStore } from '../store/useFactoryStore';
 import { listInstances, listKitApps, type KitAppRow } from '../lib/dataPrepApi';
 import { HubShell, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
+import { catalogReleases, releaseLifecycleView as lifecycleView } from '../lib/releaseCatalog';
 
 //: 문맥 축에서 막힌 사유를 사람 말로. **정상 격리**와 **점검 대상**을 다르게 말한다.
 const CTX_KO: Record<string, string> = {
@@ -151,26 +152,6 @@ function localTime(raw: string): string {
   }).format(date);
 }
 
-function lifecycleView(row: any, kitApp?: KitAppRow) {
-  if (row.lifecycle_status === 'disabled') {
-    return { label: '사용 중단', tone: 'var(--state-error-fg)', detail: row.lifecycle_reason || '' };
-  }
-  if (row.lifecycle_status === 'deprecated') {
-    return { label: '중단 예고', tone: 'var(--state-warn-fg)', detail: row.lifecycle_reason || '' };
-  }
-  if (kitApp?.lifecycle_state === 'active' || row.is_enterprise) {
-    return { label: '운영 중', tone: 'var(--state-success-fg)', detail: '인증된 업무 데이터를 읽습니다.' };
-  }
-  if (kitApp?.lifecycle_state === 'candidate') {
-    return { label: '운영 후보', tone: 'var(--state-warn-fg)', detail: '운영 전환 전의 후보 판입니다.' };
-  }
-  return {
-    label: row.lifecycle_recorded ? '사용 가능' : '사용 상태 미기록',
-    tone: row.lifecycle_recorded ? 'var(--state-success-fg)' : 'var(--surface-text-muted)',
-    detail: row.lifecycle_recorded ? '' : '기존 릴리스로, 관리자의 사용 상태 기록이 없습니다.',
-  };
-}
-
 export function BuildPage({
   projects, releases, companyName, scopeLabel, entityMode,
   onOpenProject, onOpenRelease, onManageRelease, onDeleteProject,
@@ -189,6 +170,7 @@ export function BuildPage({
   const [q, setQ] = useState('');
   const [kitApps, setKitApps] = useState<Record<string, KitAppRow>>({});
   const [selectedKey, setSelectedKey] = useState('');
+  const [includeStopped, setIncludeStopped] = useState(false);
 
   // 키트 앱 릴리스는 `project_name`이 내부 release_id와 같을 수 있다. 그 문자열을 잘라
   // 이름을 만들지 않고, 현재 조직에서 볼 수 있는 적용본의 앱 계약이 준 이름을 결속한다.
@@ -245,11 +227,8 @@ export function BuildPage({
   }, [projects, bucket, q]);
 
   const releaseRows = useMemo(() => {
-    const key = q.trim().toLowerCase();
-    return (releases || []).filter((r: any) => !key
-      || String(r.release_id || '').toLowerCase().includes(key)
-      || String(r.project_name || '').toLowerCase().includes(key));
-  }, [releases, q]);
+    return catalogReleases(releases || [], includeStopped, q);
+  }, [releases, q, includeStopped]);
 
   useEffect(() => {
     const keys = bucket === 'releases'
@@ -265,7 +244,7 @@ export function BuildPage({
     : undefined;
 
   const count = (b: Bucket) => {
-    if (b === 'releases') return (releases || []).length;
+    if (b === 'releases') return catalogReleases(releases || [], includeStopped).length;
     const list = projects || [];
     if (b === 'mega') return list.filter((p) => p.is_mega_project).length;
     if (b === 'mine') return list.filter((p) => !p.is_mega_project).length;
@@ -354,6 +333,11 @@ export function BuildPage({
         {bucket === 'active' && ' — 서버가 실행 상태를 제공하지 않은 항목은 «진행률 집계 전»으로 구분합니다.'}
       </p>
 
+      {bucket === 'releases' && <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+        <input type="checkbox" checked={includeStopped} onChange={(event) => setIncludeStopped(event.target.checked)} />
+        사용 중단 포함 · 보관된 코드와 이력 보기
+      </label>}
+
       {/* 앱 운영과 같은 탐색 문법: 왼쪽 목록에서 고르고 오른쪽에서 상세·행동을 수행한다. */}
       {(bucket === 'releases' ? releaseRows.length === 0 : filtered.length === 0) ? (
         <div style={{ ...card, maxWidth: 560 }}>
@@ -441,7 +425,10 @@ export function BuildPage({
                   {state.detail && <p style={{ color: 'var(--surface-text-muted)' }}>{state.detail}</p>}
                   <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
                     <button className="primary-button"
-                            onClick={() => onOpenRelease(releaseId)}>앱 실행</button>
+                            disabled={!state.executable}
+                            onClick={() => { if (state.executable) onOpenRelease(releaseId); }}>
+                      {!state.executable ? '실행 중단' : selectedRelease.lifecycle_status === 'candidate' ? '후보 미리보기' : '앱 실행'}
+                    </button>
                     <button className="secondary-button"
                             onClick={() => onManageRelease({
                               ...selectedRelease, display_name: displayName,

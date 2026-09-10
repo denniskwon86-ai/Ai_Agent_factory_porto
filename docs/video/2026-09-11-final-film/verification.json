@@ -1,0 +1,11 @@
+{
+  "file": "LAXS-M_mainfilm_B_female.mp4",
+  "bytes": 16512902,
+  "decode": "passed",
+  "duration": "00:02:38.16",
+  "volume": [
+    "mean_volume: -20.2 dB",
+    "max_volume: -4.1 dB"
+  ],
+  "black_intervals": []
+}

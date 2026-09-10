@@ -1,0 +1,47 @@
+{
+ "response": {
+  "header": {
+   "resultCode": "00",
+   "resultMsg": "NORMAL SERVICE."
+  },
+  "body": {
+   "items": {
+    "item": [
+     {
+      "baseDt": "20250101",
+      "smp": "121.20",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250102",
+      "smp": "",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250103",
+      "smp": "-",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "",
+      "smp": "123.00",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250105",
+      "smp": "124.10",
+      "areaCd": "1",
+      "areaNm": "제주"
+     }
+    ]
+   },
+   "numOfRows": 10,
+   "pageNo": 1,
+   "totalCount": 5
+  }
+ }
+}

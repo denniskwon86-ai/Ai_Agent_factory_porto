@@ -1,0 +1,57 @@
+{
+ "StatisticSearch": {
+  "list_total_count": 5,
+  "row": [
+   {
+    "STAT_CODE": "731Y001",
+    "STAT_NAME": "3.1.1. 환율",
+    "ITEM_CODE1": "0000001",
+    "ITEM_NAME1": "원/미국달러(매매기준율)",
+    "UNIT_NAME": "원",
+    "WGT": "",
+    "TIME": "202501",
+    "DATA_VALUE": "1452.3"
+   },
+   {
+    "STAT_CODE": "731Y001",
+    "STAT_NAME": "3.1.1. 환율",
+    "ITEM_CODE1": "0000001",
+    "ITEM_NAME1": "원/미국달러(매매기준율)",
+    "UNIT_NAME": "원",
+    "WGT": "",
+    "TIME": "202502",
+    "DATA_VALUE": ""
+   },
+   {
+    "STAT_CODE": "731Y001",
+    "STAT_NAME": "3.1.1. 환율",
+    "ITEM_CODE1": "0000001",
+    "ITEM_NAME1": "원/미국달러(매매기준율)",
+    "UNIT_NAME": "원",
+    "WGT": "",
+    "TIME": "202503",
+    "DATA_VALUE": "-"
+   },
+   {
+    "STAT_CODE": "731Y001",
+    "STAT_NAME": "3.1.1. 환율",
+    "ITEM_CODE1": "0000001",
+    "ITEM_NAME1": "원/미국달러(매매기준율)",
+    "UNIT_NAME": "원",
+    "WGT": "",
+    "TIME": "",
+    "DATA_VALUE": "1438.5"
+   },
+   {
+    "STAT_CODE": "731Y001",
+    "STAT_NAME": "3.1.1. 환율",
+    "ITEM_CODE1": "0000001",
+    "ITEM_NAME1": "원/미국달러(매매기준율)",
+    "UNIT_NAME": "USD",
+    "WGT": "",
+    "TIME": "202505",
+    "DATA_VALUE": "1425.9"
+   }
+  ]
+ }
+}

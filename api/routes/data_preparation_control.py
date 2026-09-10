@@ -827,8 +827,38 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
          **classify_dataset(str(d.get("dataset_contract_key", "")))}
         for d in (result.get("datasets") or [])
     ]
+
+    #: [DAO-12] 「준비되지 않음」에서 끝내지 않는다 — **어느 원천으로 채울 수 있는지**를
+    #:   함께 준다. ★ 준비도 판정은 위에서 이미 끝났고 여기서 바뀌지 않는다(제안일 뿐이다).
+    #:   ⚠️ 수집 저장소를 못 읽어도 **준비도는 나와야 한다** — 힌트가 본문을 막지 않는다.
+    acquisition_hints: Dict[str, Any] = {"suggestions": [], "summary": {}}
+    try:
+        import os as _os
+
+        from core.external_intelligence import providers as _prov
+        from core.external_intelligence import readiness_bridge as _bridge
+        from core.external_intelligence.acquisition_store import acquisition_store as _acq
+        from core.external_intelligence.providers import ecos as _ecos  # noqa: F401
+        from core.external_intelligence.providers import datagokr as _dgk  # noqa: F401
+        from core.external_intelligence.providers import kosis as _kosis  # noqa: F401
+        from core.external_intelligence.providers import worldbank as _wb  # noqa: F401
+        from core.external_intelligence.providers import opendart as _dart  # noqa: F401
+
+        _suggestions = _bridge.suggest(
+            datasets, descriptors=_prov.provider_registry.descriptors(),
+            collected_by_contract=_acq.staged_counts(), env=_os.environ)
+        acquisition_hints = {"suggestions": [x.as_dict() for x in _suggestions],
+                             "summary": _bridge.summarise(_suggestions)}
+    except Exception as _exc:                 # noqa: BLE001
+        #: 힌트가 없다는 사실을 **조용히 숨기지 않는다** — 「제안이 0건」과 구분되어야 한다.
+        acquisition_hints = {"suggestions": [], "summary": {},
+                             "unavailable_reason": f"{type(_exc).__name__}: {_exc}"[:200]}
+    #: [DAO-12] ⚠️ **봉투 밖에 두면 화면이 못 받는다.** `getReadiness` 가 `unwrap` 으로
+    #:   `data` 만 꺼내므로 형제 자리의 값은 버려진다(실측). `data` 안에 두되 **판정 행에
+    #:   섞지는 않는다** — 섞으면 화면이 제안을 판정으로 읽는다.
     return {"status": "success",
             "data": {**result, "datasets": datasets,
+                     "acquisition_hints": acquisition_hints,
                      "kit_id": inst["kit_id"], "version": inst["version"],
                      "instance_id": instance_id,
                      "data_kind": str(kit.get("mode") or "")}}

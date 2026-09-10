@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS enterprise_work_scenario_contributions (
     path_fingerprint      TEXT NOT NULL,
     request_fingerprint   TEXT NOT NULL,
     result_fingerprint    TEXT NOT NULL,
+    baseline_id           TEXT NOT NULL DEFAULT '',
+    baseline_fingerprint  TEXT NOT NULL DEFAULT '',
     capability_fingerprint TEXT NOT NULL,
     model_version         TEXT NOT NULL,
     values_json           TEXT NOT NULL,
@@ -121,6 +123,16 @@ class EnterpriseWorkScenarioStore:
             conn.execute("PRAGMA busy_timeout=15000")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.executescript(_DDL)
+            # 기존 DB는 기준선 두 열이 없다. 자동으로 값을 꾸미지 않고 빈 값으로
+            # 확장하며, 기존 기여는 compose에서 재계산 대상으로 거부한다.
+            columns = {str(row[1]) for row in conn.execute(
+                "PRAGMA table_info(enterprise_work_scenario_contributions)").fetchall()}
+            for name in ("baseline_id", "baseline_fingerprint"):
+                if name not in columns:
+                    conn.execute(
+                        f"ALTER TABLE enterprise_work_scenario_contributions "
+                        f"ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+            conn.commit()
             return conn
         except (OSError, sqlite3.Error) as exc:
             raise WorkScenarioStoreError(
@@ -251,6 +263,17 @@ class EnterpriseWorkScenarioStore:
             raise WorkScenarioError(
                 "부서 계산 결과의 기준시점이 서로 다릅니다 — 같은 전사 시나리오로 "
                 "조합하려면 기준시점을 맞춰 다시 계산해야 합니다.")
+        baseline_ids = sorted({str(row.get("baseline_id") or "") for row in rows})
+        baseline_fingerprints = sorted({
+            str(row.get("baseline_fingerprint") or "") for row in rows})
+        if (baseline_ids == [""] or baseline_fingerprints == [""]):
+            raise WorkScenarioError(
+                "부서 계산 결과에 기준선 결속이 없습니다 — 같은 기준선으로 다시 계산해 "
+                "전사 시나리오에 저장해야 합니다.")
+        if len(baseline_ids) != 1 or len(baseline_fingerprints) != 1:
+            raise WorkScenarioError(
+                "부서 계산 결과의 기준선이 서로 다릅니다 — 같은 비교 기준으로 다시 계산해야 "
+                "전사 영향으로 조합할 수 있습니다.")
 
         snapshots: Dict[str, str] = {}
         conflicts: Dict[str, List[str]] = {}
@@ -280,6 +303,8 @@ class EnterpriseWorkScenarioStore:
         composition_fp = _fingerprint({
             "scenario_id": scenario_id,
             "as_of": as_of_values[0],
+            "baseline_id": baseline_ids[0],
+            "baseline_fingerprint": baseline_fingerprints[0],
             "departments": departments,
             "used_snapshots": snapshots,
         })
@@ -321,6 +346,8 @@ class EnterpriseWorkScenarioStore:
             "status": COMPOSITION_READY,
             "scenario_id": scenario_id,
             "as_of": as_of_values[0],
+            "baseline_id": baseline_ids[0],
+            "baseline_fingerprint": baseline_fingerprints[0],
             "composition_fingerprint": composition_fp,
             "department_results": departments,
             "used_snapshots": snapshots,
@@ -348,6 +375,8 @@ class EnterpriseWorkScenarioStore:
             "path_fingerprint": result.get("path_fingerprint"),
             "request_fingerprint": result.get("request_fingerprint"),
             "result_fingerprint": result.get("result_fingerprint"),
+            "baseline_id": result.get("baseline_id"),
+            "baseline_fingerprint": result.get("baseline_fingerprint"),
         }
         missing = [key for key, value in required.items() if not str(value or "").strip()]
         if missing:
@@ -397,12 +426,14 @@ class EnterpriseWorkScenarioStore:
                     "INSERT INTO enterprise_work_scenario_contributions "
                     "(contribution_id,scenario_id,app_id,department_role,segment_ref,as_of,"
                     "query_id,path_fingerprint,request_fingerprint,result_fingerprint,"
-                    "capability_fingerprint,model_version,values_json,used_snapshots_json,"
+                    "baseline_id,baseline_fingerprint,capability_fingerprint,model_version,"
+                    "values_json,used_snapshots_json,"
                     "relation_ids_json,assumptions_json,created_by,created_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (contribution_id, scenario_id, app_id, role, segment_ref, as_of,
                      required["query_id"], required["path_fingerprint"],
                      required["request_fingerprint"], required["result_fingerprint"],
+                     required["baseline_id"], required["baseline_fingerprint"],
                      str(cap_fps[segment_ref]), str(versions[segment_ref]),
                      _json(outputs[segment_ref]), _json(used), _json(sorted(rels)),
                      _json(result.get("assumptions_used") or {}), actor, now))

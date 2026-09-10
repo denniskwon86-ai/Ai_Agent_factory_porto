@@ -14,7 +14,8 @@ const now = () => new Date().toISOString();
 const refLabel = (o: OntologyObject) => `${o.namespace}:${o.object_type}:${o.object_id}`;
 const OBJECT_TYPE_LABELS: Record<string, string> = {
   'organization-node': '회사·조직',
-  account: '계정', 'bom-line': 'BOM 구성행', equipment: '설비', location: '위치',
+  account: '계정', 'bom-line': 'BOM 구성행', 'cost-center': '원가센터',
+  equipment: '설비', location: '위치',
   'logistics-reference': '물류 기준', material: '자재',
   'routing-operation': '공정 라우팅', supplier: '공급사',
   'procurement-contract': '조달 계약', 'purchase-order-line': '구매 주문행',

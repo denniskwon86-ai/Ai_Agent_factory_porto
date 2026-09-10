@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { Banner, Panel, ScreenHead } from '../design/HubShell';
+// [DAO-8] 수집 오케스트레이터 — **새 최상위 메뉴를 만들지 않고** 이 화면 안에 붙인다.
+import { AcquisitionPanel } from './AcquisitionPanel';
 import { EmptyOrError, Metric, failed, loading, ok, type Loaded } from '../design/DataState';
 import { ConfirmInline, FormField, useConfirm } from '../design/DataFoundationShell';
 import { actingScope, UNKNOWN_SCOPE, type ActingScope } from '../lib/actingScope';
@@ -1055,6 +1057,10 @@ export function ExternalIntelligenceView() {
           </div>
         </div>
       </Panel>
+      {/* [DAO-8] 자연어 요청 → 원천 추천 → Dry-run → 사람 검토 → 격리 적재.
+          ⚠️ 원천 등록·승인(위 패널)과 **같은 화면**에 둔다 — 나누면 「외부 원천」이
+          두 군데가 되고 사용자는 어느 쪽이 정본인지 알 수 없다. */}
+      <AcquisitionPanel canManage={canWrite} />
     </>
   );
 }

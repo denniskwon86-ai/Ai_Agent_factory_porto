@@ -50,9 +50,9 @@ def _rows(n=3, scope=SCOPE):
             for i in range(1, n + 1)]
 
 
-def _csv(rows):
+def _csv(rows, columns=COLUMNS):
     buf = _io.StringIO()
-    w = csv.DictWriter(buf, fieldnames=COLUMNS, lineterminator="\n")
+    w = csv.DictWriter(buf, fieldnames=columns, lineterminator="\n")
     w.writeheader()
     w.writerows(rows)
     return buf.getvalue().encode("utf-8")
@@ -73,7 +73,8 @@ def indexed(tmp_path, monkeypatch):
     monkeypatch.setattr(decision_ledger, "db_path", str(tmp_path / "ledger.db"),
                         raising=False)
 
-    def certify(rows, *, certified_at=None, key="LOG-02"):
+    def certify(rows, *, certified_at=None, key="LOG-02", columns=None):
+        source_columns = COLUMNS if columns is None else columns
         inst = store.create_instance(
             kit_id="KIT-T", version="1.0.0",
             kit_fingerprint=_register_test_kit(store),
@@ -84,9 +85,10 @@ def indexed(tmp_path, monkeypatch):
             tenant_id=TENANT, scope_node_id=SCOPE, entity_mode="VIRTUAL")
         for target in (m.VALIDATED, m.APPROVED, m.ACTIVE):
             b = store.transition(b["binding_id"], target)
-        snap = svc.ingest(store, binding=b, payload=_csv(rows), file_name=f"{key}.csv",
+        snap = svc.ingest(store, binding=b, payload=_csv(rows, source_columns),
+                          file_name=f"{key}.csv",
                           workspace_root=str(tmp_path / "raw"))
-        final = svc.run_pipeline(store, snap["snapshot_id"], rows, COLUMNS,
+        final = svc.run_pipeline(store, snap["snapshot_id"], rows, source_columns,
                                  control={"row_count": len(rows)})
         if certified_at:
             with store.transaction() as conn:
@@ -130,6 +132,25 @@ def test_업무_ID_로_실제_범위를_찾아낸다(indexed):
     assert res.display_name.startswith("선적 1")
     assert SHIP.object_id not in res.display_name
     assert len(res.display_fingerprint) == 64
+
+
+def test_원가센터는_실제_인증판에서_집합으로_해석된다(indexed):
+    rows = [
+        {"account_id": "1000", "account_name": "현금및현금성자산",
+         "cost_center_id": "CC-PROC", "cost_center_name": "원료구매 원가센터",
+         "tenant_id": TENANT, "scope_node_id": SCOPE},
+        {"account_id": "5000", "account_name": "재료비",
+         "cost_center_id": "CC-PROC", "cost_center_name": "원료구매 원가센터",
+         "tenant_id": TENANT, "scope_node_id": SCOPE},
+    ]
+    snapshot = indexed(rows, key="MDM-07", columns=list(rows[0]))
+    res = R.product_object_scope_resolver(
+        ObjectRef("mdm", "cost-center", "CC-PROC"), _ctx())
+    assert res.status == ontology_resolve.FOUND, res
+    assert res.snapshot_id == snapshot["snapshot_id"]
+    assert res.display_name == "원가센터 1 · 원료구매 원가센터 · 연결 계정 2개"
+    assert "CC-PROC" not in res.display_name
+    assert res.resource_scope.scope_node_id == SCOPE
 
 
 def test_인증판_ID_를_넣으면_찾지_못한다(indexed):

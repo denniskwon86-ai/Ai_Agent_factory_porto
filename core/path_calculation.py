@@ -230,6 +230,10 @@ def _blocked(req: PathCalculationRequest, seg_fps: Mapping[str, str], *,
         #: ★ 막혔어도 **어느 질문이 막혔는가**는 답할 수 있어야 한다.
         "query_id": req.query_id,
         "path_fingerprint": req.path_fingerprint,
+        # 전사 시나리오와 G5가 같은 비교 기준을 증명할 수 있도록 결과에도 보존한다.
+        # request_fingerprint 안에만 숨기면 저장 단계에서 원래 값을 복원할 수 없다.
+        "baseline_id": req.baseline_id,
+        "baseline_fingerprint": req.baseline_fingerprint,
         "required_relation_ids": sorted(req.required_relation_ids),
         "request_fingerprint": request_fingerprint(req, seg_fps),
         #: ★ 수치는 비어 있다. 빈 dict 를 0 으로 읽지 못하게 `metrics` 자체를 비운다.
@@ -476,6 +480,10 @@ def calculate(req: PathCalculationRequest, *,
         #:   그때는 호출자가 경로 id 를 복사해 붙일 수 있다(B1.2-1a 에서 지운 구멍이다).
         "query_id": req.query_id,
         "path_fingerprint": req.path_fingerprint,
+        # 전사 시나리오와 G5가 같은 비교 기준을 증명할 수 있도록 결과에도 보존한다.
+        # request_fingerprint 안에만 숨기면 저장 단계에서 원래 값을 복원할 수 없다.
+        "baseline_id": req.baseline_id,
+        "baseline_fingerprint": req.baseline_fingerprint,
         #: ★ **무엇에 기대어 계산했는가.** 경로의 관계 전부를 그대로 싣는다 — 승인이
         #:   확인된 것만 싣는 것이 아니다(승인은 `relation_approvals` 가 답한다).
         "required_relation_ids": sorted(req.required_relation_ids),
@@ -489,8 +497,14 @@ def calculate(req: PathCalculationRequest, *,
         "segment_model_versions": {ref: cm.MODEL_VERSIONS[ref] for ref in SEGMENTS},
         "path_model_version": req.path_model_version,
         "used_snapshots": used,
-        "assumptions_used": {**arrival.get("assumptions_used", {}),
-                             **shortage.get("assumptions_used", {})},
+        "assumptions_used": {
+            **arrival.get("assumptions_used", {}),
+            **shortage.get("assumptions_used", {}),
+            # 매출 인식 이동을 재무 기간에 옮기려면 어떤 기준일과 비교했는지가
+            # 결과에 남아야 한다. request_fingerprint만으로는 날짜를 복원할 수 없다.
+            "baseline_recognition": dict(
+                req.assumptions.get("baseline_recognition") or {}),
+        },
         "reconciliation": shortage.get("reconciliation", []),
         "blocked": None,
     }

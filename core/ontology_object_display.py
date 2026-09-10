@@ -360,6 +360,16 @@ def _account(row: dict, ordinal: int) -> str:
     return f"계정 {ordinal} · {name or '명칭 확인 필요'} · {kind or '유형 미등록'} · {currency or '통화 미등록'}"
 
 
+def _cost_center(rows: list[dict], ordinal: int) -> str:
+    names = {str(row.get("cost_center_name", "") or "").strip() for row in rows}
+    names.discard("")
+    if len(names) != 1:
+        raise ObjectDisplayIntegrityError("원가센터의 사람용 정본 명칭을 하나로 확정하지 못했습니다.")
+    account_count = len({str(row.get("account_id", "") or "").strip()
+                         for row in rows if str(row.get("account_id", "") or "").strip()})
+    return f"원가센터 {ordinal} · {next(iter(names))} · 연결 계정 {account_count}개"
+
+
 def _logistics_reference(row: dict, ordinal: int) -> str:
     kind = str(row.get("reference_type", "") or "").strip()
     origin = str(row.get("origin", "") or "").strip()
@@ -407,6 +417,10 @@ _TYPE_FORMATTERS: Dict[tuple, Callable[[dict, int], str]] = {
     ("MDM-06", "routing-operation"): _routing_operation,
 }
 
+_GROUP_FORMATTERS = {
+    ("MDM-07", "cost-center"): _cost_center,
+}
+
 
 def describe_dataset_object(*, namespace: str, object_type: str, object_id: str,
                             snapshot_id: str, dataset_contract_key: str,
@@ -414,9 +428,10 @@ def describe_dataset_object(*, namespace: str, object_type: str, object_id: str,
     """Describe one object from the exact certified bytes that resolved its scope."""
     targets = [target for target in scope_index.object_specs(dataset_contract_key)
                if target[:2] == (namespace, object_type)]
+    grouped_formatter = _GROUP_FORMATTERS.get((dataset_contract_key, object_type))
     formatter = (_TYPE_FORMATTERS.get((dataset_contract_key, object_type))
                  or _FORMATTERS.get(dataset_contract_key))
-    if len(targets) != 1 or formatter is None:
+    if len(targets) != 1 or (formatter is None and grouped_formatter is None):
         raise ObjectDisplayIntegrityError(
             f"표시 설명 계약이 없는 데이터셋입니다({dataset_contract_key or '미등록'}).")
     _, _, key_columns = targets[0]
@@ -432,11 +447,25 @@ def describe_dataset_object(*, namespace: str, object_type: str, object_id: str,
 
     matches = [(index, row) for index, row in enumerate(rows, start=1)
                if scope_index.object_id_for(row, key_columns) == object_id]
-    if len(matches) != 1:
+    if not matches or (grouped_formatter is None and len(matches) != 1):
         raise ObjectDisplayIntegrityError(
             "봉인된 원본에서 객체 표시 대상을 하나로 확정하지 못했습니다.")
-    ordinal, row = matches[0]
-    display_name = " ".join(formatter(row, ordinal).split()).strip()
+    if grouped_formatter is not None:
+        consistency_columns = scope_index.grouped_consistency_columns(
+            dataset_contract_key, namespace, object_type)
+        signatures = {tuple(str(row.get(column, "") or "").strip()
+                            for column in consistency_columns)
+                      for _, row in matches}
+        if len(signatures) != 1 or any(not value for value in next(iter(signatures))):
+            raise ObjectDisplayIntegrityError(
+                "봉인된 원본에서 집합형 객체 설명을 하나로 확정하지 못했습니다.")
+        ordered_ids = sorted({scope_index.object_id_for(row, key_columns) for row in rows})
+        ordinal = ordered_ids.index(object_id) + 1
+        display_name = " ".join(grouped_formatter(
+            [row for _, row in matches], ordinal).split()).strip()
+    else:
+        ordinal, row = matches[0]
+        display_name = " ".join(formatter(row, ordinal).split()).strip()
     if not display_name:
         raise ObjectDisplayIntegrityError("객체 표시 설명이 비어 있습니다.")
     if object_id and object_id in display_name:

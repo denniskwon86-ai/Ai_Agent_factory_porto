@@ -1,0 +1,6 @@
+{
+ "RESULT": {
+  "CODE": "ERROR-500",
+  "MESSAGE": "서버 오류입니다."
+ }
+}

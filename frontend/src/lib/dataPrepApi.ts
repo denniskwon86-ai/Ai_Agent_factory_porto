@@ -45,6 +45,7 @@ export interface DatasetReadiness {
 
 export interface OutputReadiness {
   output: string;
+  label?: string;
   state: OutputState;
   reason_code: string;
   user_message: string;
@@ -54,6 +55,8 @@ export interface OutputReadiness {
 }
 
 export interface InstanceReadiness {
+  /** [DAO-12] 부족한 계약을 어느 원천으로 채울 수 있는지. **판정이 아니라 제안이다.** */
+  acquisition_hints?: AcquisitionHints;
   status: 'READY' | 'PARTIAL' | 'BLOCKED';
   as_of: string;
   coverage: { required: number; ready: number; stale: number; blocked: number };
@@ -118,6 +121,36 @@ export async function getInstance(instanceId: string) {
     '키트 인스턴스',
   );
 }
+
+/** [DAO-12] 「준비되지 않음」에서 끝내지 않는다 — 어느 원천으로 채울 수 있는지.
+ *  ★★★ 준비도 «판정» 이 아니라 «제안» 이다. 화면이 둘을 섞으면 수집만 해도 준비된 줄 안다. */
+export type AcquisitionHints = {
+  suggestions: {
+    dataset_contract_key: string;
+    /** 판정은 그대로 실려 온다 — 제안이 덮지 않는다. */
+    readiness_state: string;
+    gap: string;
+    gap_label: string;
+    options: {
+      provider_id: string; name: string; publisher: string; cost: string;
+      trust_grade: string; refresh_frequency: string;
+      requires_credential: boolean; credential_configured: boolean;
+      data_origin: string;
+      /** 「이 값으로 하면 안 되는 것」. 화면이 지우지 않는다. */
+      known_limits: string[];
+    }[];
+    collected_rows: number;
+    /** 결속까지 남은 단계 — 「거의 다 됐다」로 줄이지 않는다. */
+    remaining_steps: string[];
+    actionable: boolean;
+  }[];
+  summary: {
+    total?: number; fillable_by_a_source?: number;
+    collected_but_not_bound?: number; no_provider_yet?: number; notice?: string;
+  };
+  /** 수집 저장소를 못 읽었을 때의 사유. 「제안 0건」과 구분된다. */
+  unavailable_reason?: string;
+};
 
 export async function getReadiness(instanceId: string) {
   return unwrap<InstanceReadiness>(

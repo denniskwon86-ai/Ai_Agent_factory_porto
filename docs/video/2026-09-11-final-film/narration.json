@@ -1,0 +1,151 @@
+{
+  "model": "gemini-3.1-flash-tts-preview",
+  "voice": "Sulafat",
+  "style": "B warm female narrator",
+  "sections": [
+    {
+      "id": "01_question",
+      "title": "하나의 변화, 전사의 영향",
+      "text": "원료 도입이 늦어지면, 생산과 납기, 회사의 현금은 어떻게 달라질까요?",
+      "voice_duration": 6.68,
+      "duration": 8.0,
+      "start": 0,
+      "actual_duration": 8.0,
+      "voice": "Sulafat",
+      "file": "audio\\01_question.wav"
+    },
+    {
+      "id": "creator_brand",
+      "title": "현업이 직접 만들고 운영하는 플랫폼",
+      "text": "랙스 엠은 현업이 직접 만들고 운영하며, 그 데이터를 전사의 판단으로 연결하는 에이엑스 경영 플랫폼입니다.",
+      "kind": "graphic",
+      "duration": 11.5,
+      "voice_duration": 9.44,
+      "start": 8.0,
+      "actual_duration": 11.5,
+      "voice": "Sulafat",
+      "file": "audio\\creator_brand.wav"
+    },
+    {
+      "id": "software",
+      "title": "SW 생성기 — 현업의 요구를 업무 소프트웨어로",
+      "text": "에스더블유 생성기에서 현업이 업무 요구를 직접 정의합니다. 에이아이와 함께 기획부터 설계, 구현과 검토를 진행해, 필요한 업무 소프트웨어를 만듭니다.",
+      "note": "실제 생성 설정 → 기존 제작 사례 조회",
+      "kind": "capture",
+      "duration": 16.0,
+      "voice_duration": 14.24,
+      "start": 19.5,
+      "actual_duration": 16.0,
+      "voice": "Sulafat",
+      "file": "audio\\software.wav"
+    },
+    {
+      "id": "agents",
+      "title": "현업이 직접 만드는 업무 에이전트",
+      "text": "현업은 자기 업무에 맞는 에이전트도 직접 만듭니다. 역할과 필요한 스킬을 정하고, 여러 에이전트를 연결해 업무 실행 흐름을 구성합니다.",
+      "note": "실제 에이전트 생성·역할 설정 · 저장 전 편집판",
+      "kind": "capture",
+      "duration": 15.0,
+      "voice_duration": 12.36,
+      "start": 35.5,
+      "actual_duration": 15.0,
+      "voice": "Sulafat",
+      "file": "audio\\agents.wav"
+    },
+    {
+      "id": "simulators",
+      "title": "업무영역별 담당 현업이 시뮬레이터를 생성·운영",
+      "text": "구매, 생산, 판매의 담당 현업은 자기 업무의 데이터와 규칙으로 시뮬레이터를 직접 생성하고 운영합니다. 반복 실행으로 계획과 예측, 시나리오 결과 데이터를 만들어 냅니다.",
+      "note": "실제 생성 설정 → 기존 시뮬레이터 관리",
+      "kind": "capture",
+      "duration": 18.166666666666668,
+      "voice_duration": 16.84,
+      "start": 50.5,
+      "actual_duration": 18.17,
+      "voice": "Sulafat",
+      "file": "audio\\simulators.wav"
+    },
+    {
+      "id": "04_apps",
+      "title": "업무 앱에서 현장의 데이터를 확인합니다",
+      "text": "업무키트에서 원료 도입 앱을 엽니다. 발주와 선적 현황을 직접 조회하고, 같은 기준으로 업무의 진행 상태를 확인합니다.",
+      "voice_duration": 11.32,
+      "duration": 12.633333333333333,
+      "start": 68.67,
+      "actual_duration": 12.63,
+      "voice": "Sulafat",
+      "file": "audio\\04_apps.wav"
+    },
+    {
+      "id": "data_cycle",
+      "title": "현업의 운영이 전사 데이터의 생산으로",
+      "text": "현업의 운영은 데이터 생산으로 이어집니다. 실적, 계획, 예측과 시나리오를 구분해 축적하고, 전사 판단의 근거로 연결합니다.",
+      "kind": "graphic",
+      "duration": 13.5,
+      "voice_duration": 11.8,
+      "start": 81.3,
+      "actual_duration": 13.5,
+      "voice": "Sulafat",
+      "file": "audio\\data_cycle.wav"
+    },
+    {
+      "id": "05_knowledge",
+      "title": "업무의 관계가 회사 지식으로",
+      "text": "부서의 데이터는 따로 끝나지 않습니다. 구매와 재고, 생산과 판매의 관계를 연결해, 함께 쓸 회사 지식으로 쌓습니다.",
+      "voice_duration": 11.92,
+      "duration": 13.233333333333333,
+      "start": 94.8,
+      "actual_duration": 13.23,
+      "voice": "Sulafat",
+      "file": "audio\\05_knowledge.wav"
+    },
+    {
+      "id": "06_simulation",
+      "title": "가정을 바꾸고 영향을 비교합니다",
+      "text": "이제 가정을 바꿔 봅니다. 원료 도입 지연과 환율 변화를 입력하면, 준비한 시연 기준선에서 생산과 손익, 현금의 영향을 비교합니다.",
+      "voice_duration": 13.72,
+      "duration": 15.033333333333333,
+      "start": 108.03,
+      "actual_duration": 15.03,
+      "voice": "Sulafat",
+      "file": "audio\\06_simulation.wav"
+    },
+    {
+      "id": "07_decision",
+      "title": "근거를 확인하고 사람이 결정합니다",
+      "text": "기존 의사결정 안건도 살펴봅니다. 요청자와 결정자, 영향 부서가 같은 근거를 보고, 책임 있는 사람이 결정합니다.",
+      "voice_duration": 10.72,
+      "duration": 12.033333333333333,
+      "start": 123.06,
+      "actual_duration": 12.03,
+      "voice": "Sulafat",
+      "file": "audio\\07_decision.wav"
+    },
+    {
+      "id": "08_learning",
+      "title": "결정 이후의 결과까지 연결합니다",
+      "text": "결정 이후도 이어집니다. 실행 과제의 담당자와 기한을 확인하고, 기록된 효과를 다음 판단의 근거로 남깁니다.",
+      "voice_duration": 10.2,
+      "duration": 11.5,
+      "start": 135.09,
+      "actual_duration": 11.5,
+      "voice": "Sulafat",
+      "file": "audio\\08_learning.wav"
+    },
+    {
+      "id": "09_close",
+      "title": "회사의 일과 경영 안에 AX를",
+      "text": "랙스 엠은 현업이 직접 만들고 운영하며, 그 데이터를 전사의 판단으로 연결하는 에이엑스 경영 플랫폼입니다.",
+      "voice_duration": 9.44,
+      "duration": 11.533333333333333,
+      "start": 146.59,
+      "actual_duration": 11.53,
+      "reused_from": "creator_brand",
+      "edit_note": "Daily service quota reached; closing repeats the core platform statement in the same selected B voice.",
+      "voice": "Sulafat",
+      "file": "audio\\09_close.wav"
+    }
+  ],
+  "closing_edit": "Core statement reprise using already generated B narration; no new voice or provider.",
+  "total_duration": 158.12
+}

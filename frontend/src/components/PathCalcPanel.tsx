@@ -6,6 +6,7 @@ import { JarvisRail } from '../design/JarvisRail';
 import { listInstances } from '../lib/dataPrepApi';
 import {
   CalculationError, copyPathDiagnostic, createEnterpriseWorkScenario,
+  createEnterpriseDecision,
   findImpactPaths, getEnterpriseComposition, listEnterpriseWorkScenarios, listOntologyObjects,
   revealPathDiagnostic, runPathCalculation, saveDepartmentContribution,
   runPathDecision,
@@ -51,6 +52,17 @@ const WORK_APP_LABELS: Record<string, string> = {
   'APP-07': '전사 통합',
 };
 const DEPARTMENT_WORK_APPS = ['APP-01', 'APP-03', 'APP-06'];
+
+const FINANCIAL_SUMMARY_LABELS: Record<string, string> = {
+  inventory_in_transit_krw: '운송 중 재고 노출액',
+  revenue_timing_exposure_krw: '매출 인식 이동 규모',
+  material_conversion_margin_timing_exposure_krw: '매출-재료·가공비 이동 규모',
+  cash_receipts_timing_exposure_krw: '현금회수 이동 규모',
+};
+
+function krw(value: number) {
+  return `${new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 }).format(value)}원`;
+}
 const objectKey = (object: OntologyObject) =>
   `${object.namespace}:${object.object_type}:${object.object_id}`;
 
@@ -155,6 +167,9 @@ export function PathCalcPanel({
   const [workScenarioPurpose, setWorkScenarioPurpose] = useState('');
   const [workScenarioNotice, setWorkScenarioNotice] = useState('');
   const [composition, setComposition] = useState<EnterpriseComposition | null>(null);
+  const [enterpriseQuestion, setEnterpriseQuestion] = useState('');
+  const [enterpriseDue, setEnterpriseDue] = useState('');
+  const [enterpriseDecisionSaved, setEnterpriseDecisionSaved] = useState(false);
   // ★ 기준시점은 데모 날짜를 코드에 박지 않는다. 관계 승인은 벽시계 시각부터 유효한데
   // `type=date`의 00:00 UTC로 묻으면 오늘 오후에 승인한 관계도 «없음»으로 보인다.
   // 현지시각을 분 단위로 받아 실제 순간으로 바꿔 서버에 보낸다.
@@ -359,6 +374,7 @@ export function PathCalcPanel({
     if (!selectedWorkScenario) return;
     setBusy('scenario-compose'); setError(null); setWorkScenarioNotice('');
     try {
+      setEnterpriseDecisionSaved(false);
       const got = await getEnterpriseComposition(selectedWorkScenario.scenario_id);
       setComposition(got);
       setWorkScenarioNotice(got.status === 'READY'
@@ -368,6 +384,35 @@ export function PathCalcPanel({
       setComposition(null);
       setError(e instanceof CalculationError ? e
         : new CalculationError(e?.message || '전사 운영 영향을 조합하지 못했습니다.', 0));
+    } finally { setBusy(''); }
+  }
+
+  async function onCreateEnterpriseDecision() {
+    const impact = composition?.financial_impact;
+    if (!selectedWorkScenario || composition?.status !== 'READY'
+        || impact?.status !== 'COMPLETE' || !composition.composition_fingerprint
+        || !impact.result_fingerprint || !enterpriseQuestion.trim() || !enterpriseDue) return;
+    setBusy('enterprise-decision'); setError(null); setWorkScenarioNotice('');
+    try {
+      const got = await createEnterpriseDecision(selectedWorkScenario.scenario_id, {
+        question: enterpriseQuestion.trim(),
+        due_at: new Date(`${enterpriseDue}T23:59:59`).toISOString(),
+        seen_composition_fingerprint: composition.composition_fingerprint,
+        seen_financial_result_fingerprint: impact.result_fingerprint,
+      });
+      setComposition(got.composition);
+      if (!got.decision) {
+        setWorkScenarioNotice('재무 영향 계산이 완료된 뒤 의사결정 안건으로 저장할 수 있습니다.');
+        return;
+      }
+      setEnterpriseDecisionSaved(true);
+      setWorkScenarioNotice(
+        '전사 재무 결과를 같은 근거 지문의 의사결정 안건으로 저장했습니다. '
+        + '협업·의사결정·발간 화면에서 검토와 보고서 발간을 이어갈 수 있습니다.',
+      );
+    } catch (e: any) {
+      setError(e instanceof CalculationError ? e
+        : new CalculationError(e?.message || '전사 의사결정 안건을 만들지 못했습니다.', 0));
     } finally { setBusy(''); }
   }
 
@@ -726,6 +771,100 @@ export function PathCalcPanel({
                           {composition.financial_impact?.message}
                         </div>
                       </div>
+                      {composition.financial_impact?.status === 'COMPLETE'
+                        && composition.financial_impact.summary && (
+                        <div style={{ display: 'grid', gap: 10 }}>
+                          <div style={{ display: 'grid',
+                            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                            {Object.entries(composition.financial_impact.summary).map(
+                              ([key, value]) => (
+                                <div key={key} style={{ padding: '10px 12px', borderRadius: 6,
+                                  border: '1px solid var(--surface-border)',
+                                  background: 'var(--surface-card)' }}>
+                                  <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                                    {FINANCIAL_SUMMARY_LABELS[key] || key}
+                                  </div>
+                                  <b style={{ display: 'block', marginTop: 4, fontSize: 16 }}>
+                                    {krw(value)}
+                                  </b>
+                                </div>
+                              ),
+                            )}
+                          </div>
+                          {(composition.financial_impact.period_impacts || []).length > 0 && (
+                            <div style={{ overflowX: 'auto' }}>
+                              <table style={{ width: '100%', borderCollapse: 'collapse',
+                                fontSize: 12 }}>
+                                <thead><tr>
+                                  <th style={{ textAlign: 'left', padding: 6 }}>기간</th>
+                                  <th style={{ textAlign: 'right', padding: 6 }}>매출 증감</th>
+                                  <th style={{ textAlign: 'right', padding: 6 }}>매출-재료·가공비 증감</th>
+                                  <th style={{ textAlign: 'right', padding: 6 }}>현금회수 증감</th>
+                                </tr></thead>
+                                <tbody>
+                                  {composition.financial_impact.period_impacts?.map((row) => (
+                                    <tr key={row.period} style={{
+                                      borderTop: '1px solid var(--surface-border)' }}>
+                                      <td style={{ padding: 6 }}>{row.period}</td>
+                                      <td style={{ textAlign: 'right', padding: 6 }}>
+                                        {krw(row.revenue_delta_krw)}
+                                      </td>
+                                      <td style={{ textAlign: 'right', padding: 6 }}>
+                                        {krw(row.material_conversion_margin_delta_krw)}
+                                      </td>
+                                      <td style={{ textAlign: 'right', padding: 6 }}>
+                                        {krw(row.cash_receipts_delta_krw)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                          <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                            영향 판매행 {composition.financial_impact.affected_sales_lines || 0}건
+                            {' · '}연결 계정 {(composition.financial_impact.affected_account_names || []).join(' · ')}
+                          </div>
+                          <div style={{ paddingTop: 10,
+                            borderTop: '1px solid var(--surface-border)', display: 'grid', gap: 8 }}>
+                            <b style={{ fontSize: 14 }}>의사결정 안건으로 연결</b>
+                            <p style={{ margin: 0, fontSize: 12,
+                              color: 'var(--surface-text-muted)' }}>
+                              화면에서 확인한 조합·재무 결과 지문을 서버가 다시 대조합니다.
+                              시스템 식별자는 자동으로 기록됩니다.
+                            </p>
+                            <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+                              결정할 문장
+                              <input value={enterpriseQuestion} maxLength={500}
+                                onChange={(e) => setEnterpriseQuestion(e.target.value)}
+                                placeholder="예: 원료 도입 지연 대응안을 실행할 것인가?"
+                                style={{ padding: 8 }} />
+                            </label>
+                            <label style={{ display: 'grid', gap: 4, fontSize: 12, maxWidth: 220 }}>
+                              결정 기한
+                              <input type="date" value={enterpriseDue}
+                                onChange={(e) => setEnterpriseDue(e.target.value)}
+                                style={{ padding: 8 }} />
+                            </label>
+                            <div>
+                              <button type="button" className="primary-button"
+                                onClick={onCreateEnterpriseDecision}
+                                disabled={!enterpriseQuestion.trim() || !enterpriseDue
+                                  || busy === 'enterprise-decision' || enterpriseDecisionSaved}>
+                                {busy === 'enterprise-decision' ? '저장 중…'
+                                  : enterpriseDecisionSaved ? '안건 저장 완료'
+                                    : '의사결정 안건으로 저장'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {composition.financial_impact?.status === 'BLOCKED'
+                        && (composition.financial_impact.missing_data_labels || []).length > 0 && (
+                        <div style={{ fontSize: 12, color: 'var(--state-warn-fg)' }}>
+                          준비할 데이터: {composition.financial_impact.missing_data_labels?.join(' · ')}
+                        </div>
+                      )}
                       {composition.financial_impact && (
                         <FinancialBridgePanel
                           instanceId={instanceId}

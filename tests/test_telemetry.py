@@ -71,6 +71,17 @@ def test_read_records_project_filter(tmp_path, monkeypatch):
     assert len(tc._read_records()) == 3
 
 
+def test_read_records_project_filter_accepts_internal_project_id(tmp_path, monkeypatch):
+    """프로젝트 관리 화면은 표시명이 아니라 내부 ID로 실적을 조회한다."""
+    _write_log(tmp_path, [
+        _rec(project="월간 제조원가 분석 보고서", project_id="prj_cost"),
+        _rec(project="전사 시뮬레이션", project_id="prj_sim"),
+    ], monkeypatch)
+    rows = tc._read_records("prj_cost")
+    assert len(rows) == 1
+    assert rows[0]["project"] == "월간 제조원가 분석 보고서"
+
+
 def test_missing_log_file_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(tc, "_LOG_PATH", str(tmp_path / "nope.jsonl"))
     agg = tc.aggregate(tc._read_records())

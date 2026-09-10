@@ -8,6 +8,9 @@
 >
 > 용어: 기술명 `제조 경영 온톨로지` · 제품 설명 `경영 의미 모델` · 화면명 `기업 경영 의미지도`.
 >
+> **상세 설계 기준선**: `docs/architecture/G2_MANUFACTURING_MANAGEMENT_ONTOLOGY_DETAILED_DESIGN_2026-08-13.md`
+> **기계 판독 계약**: `docs/architecture/g2_first_vertical_ontology_contract_v1.json`
+>
 > **개정 2026-08-13 (rev.2) — Codex 교차검토 §12「조건부 승인」의 보정 5건을 본문에 반영했다.**
 > 초판의 판단 중 **세 가지가 틀렸고** 그 자리에 정정 사유를 남긴다(지우지 않는다):
 > ① `entity_types.relations` 를 온톨로지 SSOT 로 본 것 → **허용 관계 후보일 뿐**(§4.1)

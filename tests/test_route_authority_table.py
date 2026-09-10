@@ -39,11 +39,18 @@ GUARDED_MODULES = [
     "api.routes.jarvis_control",
     #: [BDR-2] 새 라우터는 **만들 때 함께** 표에 넣는다 — 나중에 넣으면 그 사이에
     #: 추가된 라우트가 권한 없이 열린다.
+    #: [DAO-15] 연구자료 «추천» — 수집하지 않고 저장하지도 않지만, 표 대조 대상이다.
+    #:   ⚠️ 이 목록에 안 넣으면 표에 적은 항목이 «유령»으로 잡힌다(실제로 걸렸다).
+    "api.routes.research_control",
     "api.routes.data_preparation_control",
     #: [BDR-7 / G2·G4] 기준선·시뮬레이션·의사결정 — 운영으로 쓰는 계산 경로다.
     "api.routes.baseline_control",
     #: [B2 / M0-3.3] 경로 계산 — 승인된 자료로 경영 판단용 숫자를 내고 안건을 만든다.
     "api.routes.calculation_control",
+    #: [DAO-8] 외부 데이터 수집 — 남의 서버를 부르고 격리 DB 에 행을 넣는다.
+    #:   ⚠️ 새 라우터는 **만들 때 함께** 이 목록에 넣는다. 나중에 넣으면 그 사이에
+    #:     추가된 라우트가 권한 없이 열린다.
+    "api.routes.acquisition_control",
 ]
 
 #: 다른 곳에 이미 판정이 있는 쓰기 라우트를 찾는 표식. `route_authority.EXEMPT` 와 함께 쓴다.

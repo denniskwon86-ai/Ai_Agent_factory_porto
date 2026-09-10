@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>시뮬레이터 에이전트 셋 실가동 검증 · 2026-09-03</title>
+  <link rel="stylesheet" href="../../assets/official.css">
+  <style>
+    .compact td,.compact th { padding:11px 12px; }
+    .verdict { font-weight:850; }
+    .pass { color:#0b6659; } .fail { color:#a3112c; } .partial { color:#7a4b08; }
+    .quote { border-left:3px solid var(--line); padding:8px 0 8px 14px; margin:10px 0;
+             font-family:ui-monospace,Consolas,monospace; font-size:13px; line-height:1.7; }
+  </style>
+</head>
+<body>
+  <header class="topbar"><div class="topbar-inner">
+    <a class="brand" href="../index.html">LAXS-<span>M</span></a>
+    <nav class="topnav"><a href="index.html">QA 문서</a><a href="local-browser-audit-2026-08-29.html">브라우저 감사</a></nav>
+  </div></header>
+  <section class="hero"><div class="hero-inner">
+    <p class="eyebrow">Simulator Agent-Set Live Run · v1.0 · 2026-09-03</p>
+    <h1>시뮬레이터는 16/16 완주했고, 결과물에 근거가 생겼습니다.</h1>
+    <p>SW 개발 셋이 아닌 <strong>시뮬레이터·보고서 생성 에이전트 셋</strong>이 끝까지 도는지, 결과물이 쓸 만한지 점검한 기록입니다. 구조 점검 → 0콜 예행 → 실가동 감시 순으로 수행했습니다.</p>
+    <div class="hero-meta"><span>템플릿 mfg_sim · 16 에이전트</span><span>무료 티어 Gemini Flash</span><span>프로젝트 prj_4bf43a310aca691a32ce</span><span>HOTL 게이트 7회</span></div>
+  </div></section>
+  <main class="shell">
+
+    <section>
+      <h2>판정 요약</h2>
+      <div class="grid four">
+        <div class="metric"><strong class="pass">16/16</strong><span>에이전트 완주</span></div>
+        <div class="metric"><strong class="pass">0건</strong><span>중단·정지·재시도 폭풍</span></div>
+        <div class="metric"><strong>$0.20</strong><span>7단계 시점 누계 비용</span></div>
+        <div class="metric"><strong class="fail">0/29</strong><span>보고서 계열 6개 템플릿 스킬</span></div>
+      </div>
+      <div class="callout warn" style="margin-top:18px"><strong>결론</strong><br>
+        <strong>시뮬레이터(mfg_sim)는 검증됐습니다.</strong> 완주하고, 산출물이 기준정보 레코드를 인용하며, 없는 데이터는 「없다」고 적습니다.
+        <strong>보고서 계열 6개 템플릿은 검증되지 않았고 시연에 쓰면 위험합니다</strong> — 에이전트 29개 전부 스킬 본문이 0자라 역할 한 줄로만 돌고, 결과가 화면에 나오지만 내용은 지어낸 것입니다.
+      </div>
+    </section>
+
+    <section>
+      <h2>점검 전 구조에서 찾은 것 (공급자 호출 0건)</h2>
+      <div class="table-wrap"><table class="compact"><thead><tr><th>발견</th><th>내용</th><th>조치</th></tr></thead><tbody>
+        <tr><td>품질 통제가 SW 셋에만 있다</td><td>커스텀 에이전트가 하나라도 있으면 <code>route_universal</code> 선형 파이프라인으로 간다. 범용 노드는 115줄이고 <strong>결정론 게이트 0 · 채점 0 · 품질 텔레메트리 0</strong>이다.</td><td class="verdict">구조로 기록</td></tr>
+        <tr><td>데이터 통로가 끊겨 있었다</td><td>범용 노드는 <code>state.master_data</code> 원시 문자열만 읽었고 그 칸은 <strong>프로젝트 63개 전부 비어</strong> 있었다. 그런데 스킬은 「상상 금지 — 주입된 데이터로 예측하라」고 명령한다 = 수행 불가능한 지시.</td><td class="verdict pass">배선</td></tr>
+        <tr><td>보고서 계열 스킬 부재</td><td>45개 에이전트 중 30개가 스킬 본문 0자. <code>mfg_sim</code> 만 15/16, 나머지 6개 템플릿은 <strong>0/29</strong>.</td><td class="verdict fail">미해결</td></tr>
+        <tr><td>마케팅 에이전트가 연쇄에서 고아</td><td>스킬 없음. 상류는 「다음은 <code>sim_finance</code>」라 하고 하류 입력 목록에도 없었다 — 자리가 없었다.</td><td class="verdict pass">역할 재정의</td></tr>
+        <tr><td>스킬이 없는 데이터를 요구</td><td><code>sim_sales</code> 의 과거 판매 이력·판가 탄력성, <code>sim_logistics</code> 의 부피·팰릿 적재 효율 — 주입 0건.</td><td class="verdict pass">수정</td></tr>
+      </tbody></table></div>
+      <div class="callout" style="margin-top:14px"><strong>실가동 전에 계획을 바꿨습니다.</strong>
+        원래 <code>data-analytics</code> → <code>manufacturing-qc</code> → <code>mfg_sim</code> 순으로 셋을 돌릴 계획이었으나, 앞의 둘은 스킬이 0자라 결과가 이미 예측되므로 <strong>취소</strong>했습니다. 토큰을 아는 답에 쓰지 않았습니다.</div>
+    </section>
+
+    <section>
+      <h2>실가동 중 발견한 P0</h2>
+      <div class="table-wrap"><table class="compact"><thead><tr><th>ID</th><th>증상</th><th>원인</th><th>판정</th></tr></thead><tbody>
+        <tr><td>SIM-P0-01</td><td>실제로는 HOTL 대기 중인데 화면·API 가 「대기 없음」으로 표시</td>
+            <td>조회 경로가 <code>get_runtime_app()</code> 을 인자 없이 불러 <strong>기본(SW) 그래프</strong>로 체크포인트를 읽었다. 상태 스키마는 공유하지만 토폴로지가 다르다 — 기본 그래프 노드 15개와 mfg_sim 에이전트 16개의 <strong>교집합이 0</strong>이라 <code>snapshot.next</code> 를 계산할 수 없다.</td>
+            <td class="verdict pass">수정 · fbb84ff54</td></tr>
+        <tr><td>SIM-P0-02</td><td>주입된 기준정보에 환율·LME 가 없다는 보고</td>
+            <td><strong>재현되지 않음.</strong> 해당 프로젝트의 실제 상태로 블록을 재생하면 <code>exchange_rate_krw_usd=1350</code> · <code>lme_nickel=16500</code> · <code>lme_copper=9500</code> 이 모두 포함된다. <code>Sim_PM</code> 산출물이 레코드 id 를 직접 인용했다.</td>
+            <td class="verdict">반증</td></tr>
+      </tbody></table></div>
+      <div class="callout" style="margin-top:14px"><strong>여섯 곳 중 셋만 고쳤습니다.</strong>
+        같은 함수를 부르는 곳이 여섯이지만 하는 일이 다릅니다. <code>snapshot.next</code> 로 판정하거나 <code>aupdate_state</code> 로 쓰는 셋(<code>is_hotl_pending</code> · <code>pause_sprint</code> · <code>apply_contract_decision</code>)만 결속하고, <code>values</code> 만 읽는 셋은 그대로 두었습니다. 채널은 두 그래프가 공유하기 때문입니다. 그 경계도 회귀로 고정했습니다.
+        <br><br>조회에는 <strong>구성 지문을 넘기지 않습니다.</strong> 넘기면 워크플로우가 개정된 순간 대기 중인 스프린트가 화면에서 사라져 지금 고친 결함과 같은 증상이 됩니다.</div>
+    </section>
+
+    <section>
+      <h2>완주 기록 — 근거가 단계마다 이어졌는가</h2>
+      <div class="table-wrap"><table class="compact"><thead><tr><th>#</th><th>에이전트</th><th>확인된 것</th></tr></thead><tbody>
+        <tr><td>1</td><td>Sim_PM</td><td>기준정보 레코드 <strong>3종 직접 인용</strong>. 파생 시나리오 산술 일치(1350×1.1=1485)</td></tr>
+        <tr><td>2</td><td>Sim_Designer</td><td>변수 <code>id</code> 가 기준정보 키 그대로(<code>lme_copper_price_usd_ton</code>), 기본값 9500</td></tr>
+        <tr><td>3</td><td>Sim_InputCollector</td><td>입력 양식 <strong>7개 기본값 전부 실값</strong> + 허용범위. TC/RC · CBAM 포함</td></tr>
+        <tr><td>5</td><td>Sales_Agent</td><td><strong>「수요 근거 없음」</strong>이라 적음. 사용자가 준 목표 생산량은 받아 씀 — 받은 것과 없는 것을 구분</td></tr>
+        <tr><td>6</td><td>Purchase_Agent</td><td>목표 생산량 + BOM 으로 역산. <code>RM-MHP</code> 11회 인용 — 상류의 빈 자리를 지어내지 않고 다른 정당한 경로로 해결</td></tr>
+        <tr><td>9</td><td>Logistics_Agent</td><td><strong>톤 기준</strong>으로 전환(운임 45/ton · 창고 10,000ton · 3PL 1.5 · 체선료 500)</td></tr>
+        <tr><td>10</td><td>Marketing_Agent</td><td>통화 노출 10회 · 환율 ±5/±10% 민감도 8회 · CBAM 16회 · <strong>광고 판촉 0회</strong>. 업종 교정이 산출에서 지켜짐</td></tr>
+        <tr><td>11</td><td>Finance_Agent</td><td>마케팅의 USD 노출 총액을 <strong>실제로 환산손익에 반영</strong>(8회)</td></tr>
+        <tr><td>13</td><td>Sim_Evaluator</td><td>수치 정합성 <span class="pass">PASS</span>, 현실성 <span class="partial">WARNING</span>, 리스크 5건 등급</td></tr>
+        <tr><td>14</td><td>Supervisor_Agent</td><td>평가사 판정을 덮어쓰지 않고 승인 조건 명시. <strong>번복 조건 3개</strong>를 레코드 id · 임계값과 함께 남김</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section>
+      <h2>원래 질문에 대한 답</h2>
+      <p>이 프로젝트의 질문은 「환율 변동이 영업이익에 미치는 영향」이었습니다.</p>
+      <div class="quote">
+        환율 −5% &nbsp;→ 영업이익 −3,850,000 USD (−39.4%) &nbsp;·&nbsp; HIGH<br>
+        원자재 +10% &nbsp;→ 영업이익 −5,210,000 USD (−53.3%) &nbsp;·&nbsp; HIGH<br>
+        LME −10% &nbsp;→ 영업이익 −4,200,000 USD (−42.9%) &nbsp;·&nbsp; MEDIUM<br>
+        에너지 +10% &nbsp;→ 영업이익 −1,185,000 USD (−12.1%) &nbsp;·&nbsp; LOW
+      </div>
+      <p>그리고 그 판단을 뒤집을 조건이 함께 남았습니다 — 환율이 기준 1,350원에서 5% 이상 하락하거나, <code>RM-MHP-001</code> · <code>RM-CUCON-001</code> 매입가가 10%를 초과해 급등하거나, <code>EQ-CONV-01</code> · <code>EQ-CRY-01</code> 의 OEE 가 85% 미만으로 떨어지면 재실행하여 재판정합니다.</p>
+    </section>
+
+    <section>
+      <h2>전후 대비</h2>
+      <div class="table-wrap"><table class="compact"><thead><tr><th>항목</th><th>점검 시작 시점</th><th>완주 후</th></tr></thead><tbody>
+        <tr><td>데이터 근거</td><td>「ERP 및 회계 시스템에서 수집한 결과입니다」 — 아무것도 읽지 않음</td><td>레코드 id 인용, 수치 일치</td></tr>
+        <tr><td>마케팅 에이전트</td><td>스킬 0자 · 연쇄에서 고아</td><td>통화 노출 · CBAM · 환율 민감도</td></tr>
+        <tr><td>없는 데이터</td><td>지어냄</td><td>「근거 없음」이라 적음</td></tr>
+        <tr><td>최종 판단</td><td>없음</td><td>리스크 5건 등급 + 번복 조건 3개</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section>
+      <h2>남은 위험과 다음 순서</h2>
+      <div class="callout warn"><strong>보고서 계열 6개 템플릿은 시연에 쓰지 마십시오.</strong>
+        <code>content-marketing</code> · <code>data-analytics</code> · <code>manufacturing-cost-analysis</code> · <code>manufacturing-market-forecast</code> · <code>manufacturing-production</code> · <code>manufacturing-qc</code> 의 에이전트 29개는 스킬 본문이 0자입니다. 화면에서 열리고 결과도 나오지만 <strong>역할 한 줄만 갖고 LLM 을 부른 결과</strong>입니다. 또한 <code>content-marketing</code> · <code>data-analytics</code> 는 <code>deliverable_type</code> 이 없어 문서인데 앱으로 표시됩니다.</div>
+      <div class="flow" style="margin-top:18px">
+        <div class="flow-step"><strong>01</strong><br>보고서 계열 스킬 작성</div>
+        <div class="flow-step"><strong>02</strong><br><code>deliverable_type</code> 결측 2건</div>
+        <div class="flow-step"><strong>03</strong><br>키트 인증판 35개 주입 통로</div>
+        <div class="flow-step"><strong>04</strong><br><code>sim_marketing</code> 도메인 검토</div>
+        <div class="flow-step"><strong>05</strong><br>범용 노드 채점 · 게이트</div>
+      </div>
+      <p style="margin-top:14px"><strong>03 이 가장 큽니다.</strong> 키트에 <code>SLS-01</code> 판매 · <code>FIN-01</code> 원가 4,320행 · <code>MFG-02</code> 생산실적 8,000행 · <code>SIM-01</code> Driver 계산식 등 인증판 35개가 있는데, 프로젝트와 키트 인스턴스의 연결이 없어 에이전트에게 도달하지 않습니다. 이번 실가동에서 <code>Sales_Agent</code> 가 「수요 근거 없음」을 적은 것도 그 때문입니다.</p>
+      <p><strong>04 는 업무 검토가 필요합니다.</strong> <code>sim_marketing</code> 의 역할 정의(시장 배분 · 통화 노출 · TC/RC · CBAM)는 이 세션에서 정한 것이며, 데이터에 근거했으나 업무 담당자의 확인을 받지 않았습니다. 첫 초안은 광고선전비 · 판매촉진비로 썼다가, 이 회사의 원가센터 다섯(원료구매 · 물류 · 생산 · 재무 · 경영관리)에 영업 · 마케팅이 없다는 사실에 반박당해 다시 썼습니다.</p>
+    </section>
+
+  </main>
+  <footer class="global-author-credit">작성 : Claude (백엔드) · 실행 승인 : 권혁일(Hyuk il Kwon)</footer>
+</body>
+</html>

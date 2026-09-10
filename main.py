@@ -28,7 +28,8 @@ sys.stderr = StdoutInterceptor(sys.stderr)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.storage_errors import sqlite_storage_unavailable
-from api.routes import factory_control, realtime, format_control, skill_control, knowledge_control, telemetry_control, master_control, catalog_control, glossary_control, lineage_control, contract_control, external_control, benchmark_control, crosswalk_control, mcp_control, standard_control, org_control, advisor_control, ledger_control, enterprise_context_control, reference_control, planning_control, connector_control, briefing_control, shadow_control, workspace_control, readiness_control, program_control, scope_control, sandbox_control, admin_control, agent_governance
+from api.routes import research_control
+from api.routes import acquisition_control, factory_control, realtime, format_control, skill_control, knowledge_control, telemetry_control, master_control, catalog_control, glossary_control, lineage_control, contract_control, external_control, benchmark_control, crosswalk_control, mcp_control, standard_control, org_control, advisor_control, ledger_control, enterprise_context_control, reference_control, planning_control, connector_control, briefing_control, shadow_control, workspace_control, readiness_control, program_control, scope_control, sandbox_control, admin_control, agent_governance
 
 # 슈퍼바이저 데몬 초기화 (백그라운드 이벤트 리스너 등록)
 import core.supervisor_daemon
@@ -202,6 +203,11 @@ app.include_router(glossary_control.router)
 app.include_router(lineage_control.router)
 app.include_router(contract_control.router)
 app.include_router(external_control.router)
+# [DAO-8] 외부 데이터 수집 오케스트레이터 — 대외 인텔리전스 **아래** 경로다.
+#   새 최상위 메뉴를 만들지 않는다(지시 11): 만들면 「외부 원천」이 두 군데가 되고
+#   사용자는 어느 쪽이 정본인지 알 수 없다.
+app.include_router(acquisition_control.router)
+app.include_router(research_control.router)
 app.include_router(crosswalk_control.router)
 # [CL-1] 개인 앱 전달 — 조직 공유·업무 배정·전사 승격과 **별도 경로**다(작업서 §3-1,2).
 app.include_router(app_delivery_control.router)

@@ -14,6 +14,7 @@
 import csv
 import io as _io
 import json
+from pathlib import Path
 
 import pytest
 
@@ -124,12 +125,97 @@ def test_기준정보와_대외정보는_검증된_단일키_유형만_추가한
         "MDM-05": (("mdm", "bom-line", ("bom_id", "line_no")),),
         "MDM-06": (("mdm", "routing-operation", ("routing_id", "operation_seq")),),
     }
+    assert ix.GROUPED_REFERENCE_OBJECTS == {
+        "MDM-07": (("mdm", "cost-center", ("cost_center_id",),
+                    ("cost_center_name", "tenant_id", "scope_node_id")),),
+    }
     assert ix.object_id_for({"bom_id": "A|B", "line_no": "C"},
                             ("bom_id", "line_no")) != ix.object_id_for(
                                 {"bom_id": "A", "line_no": "B|C"},
                                 ("bom_id", "line_no"))
-    # 사람용 명칭 정본이 없는 원가센터는 임의로 열지 않는다.
-    assert "cost-center" not in {value[1] for value in ix.REFERENCE_OBJECTS.values()}
+    assert ("mdm", "cost-center", ("cost_center_id",)) in ix.object_specs("MDM-07")
+
+
+def _mdm07_snapshot(tmp_path, rows):
+    columns = list(rows[0])
+    payload = _csv(rows, columns)
+    path = tmp_path / "MDM-07.csv"
+    path.write_bytes(payload)
+    import hashlib
+    return {
+        "snapshot_id": "ds-mdm07",
+        "dataset_contract_key": "MDM-07",
+        "raw_path": str(path),
+        "checksum": hashlib.sha256(payload).hexdigest(),
+        "tenant_id": TENANT,
+        "entity_mode": "VIRTUAL",
+        "data_kind": "DEMO",
+    }
+
+
+def test_원가센터는_반복_계정행을_하나의_명칭_정본으로_묶는다(tmp_path):
+    rows = [
+        {"account_id": "1000", "cost_center_id": "CC-PROC",
+         "cost_center_name": "원료구매 원가센터",
+         "tenant_id": TENANT, "scope_node_id": SCOPE},
+        {"account_id": "5000", "cost_center_id": "CC-PROC",
+         "cost_center_name": "원료구매 원가센터",
+         "tenant_id": TENANT, "scope_node_id": SCOPE},
+        {"account_id": "5100", "cost_center_id": "CC-MFG",
+         "cost_center_name": "생산 원가센터",
+         "tenant_id": TENANT, "scope_node_id": SCOPE},
+    ]
+    payload = ix.plan(_mdm07_snapshot(tmp_path, rows))
+    account_rows = [row for row in payload if row[1] == "account"]
+    center_rows = [row for row in payload if row[1] == "cost-center"]
+    assert len(account_rows) == 3
+    assert len(center_rows) == 2
+    assert {row[2] for row in center_rows} == {"CC-PROC", "CC-MFG"}
+
+
+@pytest.mark.parametrize("field,bad_value", [
+    ("cost_center_name", ""),
+    ("cost_center_name", "다른 원가센터"),
+    ("scope_node_id", "other-scope"),
+])
+def test_원가센터_집합의_명칭과_범위가_다르면_색인을_세우지_않는다(
+        tmp_path, field, bad_value):
+    rows = [
+        {"account_id": "1000", "cost_center_id": "CC-PROC",
+         "cost_center_name": "원료구매 원가센터",
+         "tenant_id": TENANT, "scope_node_id": SCOPE},
+        {"account_id": "5000", "cost_center_id": "CC-PROC",
+         "cost_center_name": "원료구매 원가센터",
+         "tenant_id": TENANT, "scope_node_id": SCOPE},
+    ]
+    rows[1][field] = bad_value
+    with pytest.raises(ix.ScopeIndexError, match="집합형 객체 설명"):
+        ix.plan(_mdm07_snapshot(tmp_path, rows))
+
+
+def test_저장된_MDM07_샘플과_계약은_원가센터_명칭을_필수로_갖는다():
+    root = (Path(__file__).parents[1] / "starter_kits"
+            / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.0.0")
+    contract = json.loads((root / "contracts" / "MDM-07.contract.json").read_text(
+        encoding="utf-8"))
+    fields = {field["name"]: field for field in contract["schema"]["fields"]}
+    assert fields["cost_center_name"]["required"] is True
+
+    expected = {
+        "CC-PROC": "원료구매 원가센터",
+        "CC-LOG": "물류 원가센터",
+        "CC-MFG": "생산 원가센터",
+        "CC-FIN": "재무 원가센터",
+        "CC-MGT": "경영관리 원가센터",
+    }
+    for profile in ("quick", "full"):
+        with (root / "samples" / profile / "MDM-07.csv").open(
+                encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        grouped = {}
+        for row in rows:
+            grouped.setdefault(row["cost_center_id"], set()).add(row["cost_center_name"])
+        assert grouped == {key: {value} for key, value in expected.items()}
 
 
 def test_구버전_인증판_색인_백필은_명시적이고_멱등이다(store, workspace):

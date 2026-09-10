@@ -49,6 +49,7 @@ _AGENT_FIELDS = {
     "is_end": False,     # 종료점 여부
     "is_framework": False, # 시뮬레이션 프레임워크 고정 에이전트 여부
     "output_format": "", # 포맷 마스터의 출력 양식 ID (빈 값이면 시스템 프롬프트만 사용)
+    "data_contracts": [], # 이 에이전트가 읽을 업무키트 데이터 계약
 }
 
 # 현재 하드코딩 그래프(core/agent_graph.py)와 1:1로 동일한 기본 레지스트리.
@@ -341,6 +342,8 @@ def list_templates() -> List[Dict[str, Any]]:
         "name": base.get("pipeline_name", "기본 워크플로우"),
         "description": base.get("description", ""),
         "agent_count": len(base.get("agents", [])),
+        "deliverable_type": base.get("deliverable_type", "software_app"),
+        "simulation_framework": bool(base.get("simulation_framework", False)),
         "builtin": True,
     }]
     if os.path.isdir(TEMPLATES_DIR):
@@ -359,6 +362,8 @@ def list_templates() -> List[Dict[str, Any]]:
                     "name": reg.get("pipeline_name", tid),
                     "description": reg.get("description", ""),
                     "agent_count": len(reg.get("agents", [])),
+                    "deliverable_type": reg.get("deliverable_type", "software_app"),
+                    "simulation_framework": bool(reg.get("simulation_framework", False)),
                     "builtin": False,
                 })
             except Exception:

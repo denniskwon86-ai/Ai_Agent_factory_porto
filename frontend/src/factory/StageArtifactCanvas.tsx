@@ -21,6 +21,7 @@
  *   없는지 적는다.**
  */
 import { ManualRenderer } from '../components/PreviewPanel';
+import { ExecutiveReportView } from './ExecutiveReportView';
 
 import type { FactoryStudioViewModel } from './factoryViewModel';
 
@@ -96,8 +97,8 @@ const VERDICT_KO: Record<string, string> = {
 
 export function StageArtifactCanvas({ vm, stageId, stageLabel }: StageArtifactCanvasProps) {
   const id = (stageId || '').toUpperCase();
-  const plan = PLAN[id];
   const doc = vm.docs[id];
+  const plan = PLAN[id] || (doc ? { title: stageLabel || id, aux: '' } : undefined);
 
   // ① 이 단계에 산출물 개념이 아예 없다 — 서버가 요약 필드를 주지 않는 단계(UI_DESIGN 등).
   if (!plan) {
@@ -114,7 +115,7 @@ export function StageArtifactCanvas({ vm, stageId, stageLabel }: StageArtifactCa
   }
 
   // ② 서버가 이 단계 요약을 **아예 주지 않는다** — 기다려도 생기지 않는다.
-  if (plan.noSource) {
+  if (plan.noSource && !doc) {
     return (
       <div className="canvas-pending">
         <h3>{plan.title} 요약은 이 화면에 없습니다</h3>
@@ -160,7 +161,11 @@ export function StageArtifactCanvas({ vm, stageId, stageLabel }: StageArtifactCa
 
       {doc.text ? (
         <div className="artifact-body">
-          <ManualRenderer markdown={doc.text} />
+          {/REPORT|CFO/.test(id) ? (
+            <ExecutiveReportView markdown={doc.text} />
+          ) : (
+            <ManualRenderer markdown={doc.text} />
+          )}
         </div>
       ) : (
         <div className="studio-note" data-tone="empty">

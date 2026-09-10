@@ -133,3 +133,21 @@ demo_data/
 
 # 판정 엔진 캐시 (DART 사업보고서 원문 — 수십 MB)
 docs/business-taxonomy/engine/.cache/
+# ===== [2026-09-05] 작업 트리에 쌓여 있던 런타임·백업 덩어리 =====
+# ⚠️ 아래는 «커밋할 뻔했다» 목록이다. 합계 약 108MB 였고 전부 재생성 가능하거나 사본이다.
+#   저장소에 실으면 (1) 클론이 무거워지고 (2) 「어느 쪽이 정본인가」가 흐려진다.
+
+# 원천 CSV 적재 구역(141개·81MB). 키트 인증판의 **입력**이지 산출물이 아니다.
+data/raw/
+# 백필·오염복구 전에 뜬 DB 스냅샷. 위 `data/*.bak_backfill_*` 와 같은 성격이다.
+data/archive/
+data/*.bak_*
+data_backup_*/
+# Codex 세션의 임시 작업물(서버 로그·화면 캡처).
+.codex-tmp/
+
+# ★★ 모델 라우팅 정책 — `openrouter_only` 와 변경 이력(actor·사유)을 담는 **환경의 상태**다.
+#   `core/model_routing_policy.py:37` 이 이 파일을 읽어 LLM 경로를 정한다. 저장소에 실리면
+#   위 `data/scope_policy.json` 과 똑같은 사고가 난다 — 한 환경에서 「쿼터 회피로 한시 전환」한
+#   것이 다른 환경의 라우팅을 덮어쓴다. 파일이 없으면 코드 기본값으로 부팅한다.
+data/model_routing_policy.json

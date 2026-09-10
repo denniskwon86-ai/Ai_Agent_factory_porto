@@ -50,7 +50,8 @@ const NAV_PARENT: Partial<Record<ShellModule, ShellModule>> = {
 };
 
 export function ProductShell({
-  module, company, scope, entityMode, onNav, onContext, onAbout, onSettings, onNewWork, right,
+  module, company, scope, entityMode, onNav, onContext, onAbout, onSettings, onNewWork,
+  primaryActionLabel = '＋ 새 업무', right,
 }: {
   module: ShellModule;
   /** 회사 이름. ⚠️ 없으면 «확인 중» — 없는 값을 지어내지 않는다. */
@@ -62,6 +63,7 @@ export function ProductShell({
   onAbout: () => void;
   onSettings: () => void;
   onNewWork: () => void;
+  primaryActionLabel?: string;
   /** 전체 메뉴처럼 앱에만 있는 것. 시안 행동 칸 **앞**에 놓는다. */
   right?: React.ReactNode;
 }) {
@@ -113,7 +115,7 @@ export function ProductShell({
         <button type="button" className="afs-icon-action" onClick={onSettings}
           aria-label="환경설정" title="환경설정">⚙</button>
         <button type="button" className="afs-primary-action" onClick={onNewWork}>
-          ＋ 새 업무
+          {primaryActionLabel}
         </button>
       </div>
     </header>

@@ -1,0 +1,46 @@
+{
+ "StatisticItemList": {
+  "list_total_count": 3,
+  "row": [
+   {
+    "STAT_CODE": "731Y001",
+    "STAT_NAME": "3.1.1. 환율",
+    "GRP_CODE": "Y",
+    "GRP_NAME": "통화별",
+    "ITEM_CODE": "0000001",
+    "ITEM_NAME": "원/미국달러(매매기준율)",
+    "CYCLE": "M",
+    "START_TIME": "196405",
+    "END_TIME": "202608",
+    "DATA_CNT": "15000",
+    "UNIT_NAME": "원"
+   },
+   {
+    "STAT_CODE": "731Y001",
+    "STAT_NAME": "3.1.1. 환율",
+    "GRP_CODE": "Y",
+    "GRP_NAME": "통화별",
+    "ITEM_CODE": "0000002",
+    "ITEM_NAME": "원/일본엔(100엔)",
+    "CYCLE": "M",
+    "START_TIME": "196405",
+    "END_TIME": "202608",
+    "DATA_CNT": "15000",
+    "UNIT_NAME": "원"
+   },
+   {
+    "STAT_CODE": "731Y001",
+    "STAT_NAME": "3.1.1. 환율",
+    "GRP_CODE": "Y",
+    "GRP_NAME": "통화별",
+    "ITEM_CODE": "0000053",
+    "ITEM_NAME": "원/위안",
+    "CYCLE": "M",
+    "START_TIME": "196405",
+    "END_TIME": "202608",
+    "DATA_CNT": "3000",
+    "UNIT_NAME": "원"
+   }
+  ]
+ }
+}

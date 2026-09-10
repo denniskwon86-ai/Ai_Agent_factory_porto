@@ -24,10 +24,12 @@ import { EmptyOrError, failed, loading, ok, type Loaded } from '../../design/Dat
 import { reportRequestFailure, reportRequestSuccess } from '../../lib/backendHealth';
 import { DecisionCenter, type DecisionJarvis } from './DecisionCenter';
 import { PublicationCenter, type PublicationJarvis } from './PublicationCenter';
+import { GeneratedProjectCatalog, type GeneratedProjectLink }
+  from '../../components/GeneratedProjectCatalog';
 
 // [CL-2] 목표 정보구조(§4)의 «의사결정 센터»를 같은 허브 안에 둔다. 별도 모달을 하나 더 띄우면
 // 사용자는 전달·결정·발간이 서로 다른 제품이라고 읽는다 — 이것들은 하나의 폐루프다.
-type View = 'inbox' | 'apps' | 'deliver' | 'sent' | 'decisions' | 'publications';
+type View = 'automations' | 'inbox' | 'apps' | 'deliver' | 'sent' | 'decisions' | 'publications';
 export type CollaborationReleaseOption = { id: string; label: string };
 
 /** [UIUX-AUDIT-29 §1] **화면 문맥은 활성 모듈을 따라간다.**
@@ -50,6 +52,15 @@ type ModuleContext = {
 };
 
 const MODULE_CONTEXT: Record<View, ModuleContext> = {
+  automations: {
+    dialogLabel: '보고서 자동화 관리',
+    barTitle: '보고서 자동화',
+    barNote: '작성 프로젝트와 발간 결과를 구분해 관리합니다',
+    kicker: 'REPORT AUTOMATION', title: '보고서 자동화 관리',
+    subtitle: '만든 보고서 작성 프로젝트의 진행 상태와 실제 사용실적을 확인하고 다시 엽니다.',
+    guard: { kicker: 'TRACE', title: '작성과 발간은 다른 단계입니다',
+      body: '작성 자동화의 결과가 만들어져도 바로 외부로 나가지 않습니다. 결정 Snapshot과 검토 게이트를 거친 결과만 대내외 발간에서 배포합니다.' },
+  },
   inbox: {
     dialogLabel: '협업 허브 — 받은 앱',
     barTitle: '받은 앱',
@@ -191,10 +202,12 @@ function CapabilityManifestCard({ m }: { m: CapabilityManifest }) {
 }
 
 export function CollaborationHub({ onClose, initialView = 'inbox', releaseOptions = [],
-  page = false }: {
+  generatedProjects = [], onOpenGeneratedProject, page = false }: {
   onClose: () => void;
   initialView?: View;
   releaseOptions?: CollaborationReleaseOption[];
+  generatedProjects?: GeneratedProjectLink[];
+  onOpenGeneratedProject?: (id: string) => void;
   page?: boolean;
 }) {
   const [view, setView] = useState<View>(initialView);
@@ -290,6 +303,8 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseOption
   const deptName = (id?: string) => id ? (deptNames.get(id) || '이름 미등록 조직') : '확인 불가';
 
   const items: RailItem[] = [
+    ...(page ? [{ id: 'automations', label: '보고서 자동화', hint: '만든 항목·실적·작성',
+      icon: 'catalog' as const, count: generatedProjects.length }] : []),
     // 조회에 실패했으면 배지 숫자를 **표시하지 않는다.** «0» 배지는 «없다»로 읽힌다.
     { id: 'inbox', label: '받은 앱', hint: '나에게 전달된 요청', icon: 'inbox',
       count: okData ? pending.length : undefined },
@@ -303,10 +318,14 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseOption
 
   const ctx = MODULE_CONTEXT[view];
   /** 전달 3화면(받은 앱·내 앱·전달·보낸 요청)에서만 허브 자신의 상태를 말한다. */
-  const isCollab = view !== 'decisions' && view !== 'publications';
+  const isCollab = view !== 'automations' && view !== 'decisions' && view !== 'publications';
 
   // Jarvis 문맥 — **선택된 객체**를 그대로 넘긴다. Task ID 를 사용자에게 묻지 않는다(§3-8).
   const jarvisCtx = (() => {
+    if (view === 'automations') {
+      return { title: '보고서 자동화 관리',
+        desc: '만든 보고서 작성 프로젝트와 실제 사용실적을 확인합니다.', ev: [] };
+    }
     if (view === 'publications') {
       return pubCtx
         ? { title: pubCtx.title, desc: pubCtx.desc, ev: pubCtx.ev }
@@ -344,7 +363,14 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseOption
 
   // ★ [지적 4] Jarvis 가 참조하는 객체 = 화면이 강조 중인 객체. 두 값이 갈라지면 사용자는
   //   A 를 보면서 B 에 대한 답을 읽는다 — 가장 발견하기 어려운 오답이다.
-  const jarvisContext: JarvisContext = view === 'publications' ? {
+  const jarvisContext: JarvisContext = view === 'automations' ? {
+    current_module: 'collaboration/report-automations',
+    selected_object_type: 'report_automation_catalog',
+    selected_object_id: '',
+    object_snapshot: { project_count: generatedProjects.length },
+    available_actions: ['보고서 작성 프로젝트 열기', '사용실적 확인'],
+    evidence_refs: [],
+  } : view === 'publications' ? {
     current_module: 'collaboration/publications',
     selected_object_type: 'publication',
     selected_object_id: pubCtx?.objectId || '',
@@ -376,7 +402,11 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseOption
       ? [{ manifest_fingerprint: selected.manifest_fingerprint }] : [],
   };
 
-  const questions = view === 'publications' ? [
+  const questions = view === 'automations' ? [
+    '어떤 보고서 자동화가 최근에 사용됐습니까?',
+    '작성 중인 보고서 프로젝트의 진행 상태는 어떻습니까?',
+    '작성 결과는 어떤 절차를 거쳐 발간됩니까?',
+  ] : view === 'publications' ? [
     '이 보고서는 지금 왜 나갈 수 없습니까?',
     '대외 발간에서 무엇이 제외됩니까?',
     '배포가 실패한 대상이 있습니까?',
@@ -434,6 +464,17 @@ export function CollaborationHub({ onClose, initialView = 'inbox', releaseOption
               </Banner>
             )}
             {isCollab && flash && <Banner tone="info">{flash}</Banner>}
+
+            {view === 'automations' && (
+              <GeneratedProjectCatalog
+                kindLabel="보고서 자동화"
+                title="보고서 자동화 관리"
+                description="만든 보고서 작성 프로젝트를 검색하고 진행 상태와 실제 사용실적을 확인한 뒤 작업을 이어갑니다."
+                emptyText="아직 만든 보고서 자동화가 없습니다. 오른쪽 위 ‘새 보고서’에서 시작할 수 있습니다."
+                actionLabel="열기·검토"
+                projects={generatedProjects}
+                onOpen={onOpenGeneratedProject || (() => {})} />
+            )}
 
             {view === 'inbox' && (
               <InboxScreen list={inbox} state={data} onRetry={load}

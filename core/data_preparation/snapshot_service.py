@@ -319,6 +319,26 @@ def certify_demo(store: Any, snapshot_id: str) -> Dict[str, Any]:
     return store.advance_snapshot(snapshot_id, m.DEMO_CERTIFIED, on_commit=_index)
 
 
+def certify_demo_replacement(store: Any, old_snapshot_id: str,
+                             new_snapshot_id: str) -> Dict[str, Any]:
+    """새 시연판 인증과 기존판 철회를 한 번에 확정한다.
+
+    새 판은 프로파일·표준화·대사를 모두 마친 ``RECONCILED`` 상태여야 한다. 색인도
+    같은 트랜잭션에서 적재되므로 인증된 판인데 객체 색인이 없는 순간이 생기지 않는다.
+    """
+    new = store.get_snapshot(new_snapshot_id)
+    if new is None:
+        raise m.DataPreparationError(f"존재하지 않는 Snapshot 입니다: {new_snapshot_id}")
+    from core.data_preparation import scope_index
+    payload = scope_index.plan(new)
+
+    def _index(conn, fresh):
+        scope_index.write_conn(conn, payload, str(fresh.get("certified_at", "")))
+
+    return store.replace_demo_snapshot(old_snapshot_id, new_snapshot_id,
+                                       on_commit=_index)
+
+
 def display_label(snapshot: Dict[str, Any]) -> str:
     """화면·API·보고서에 붙일 **성격 표시**. 비어 있지 않다.
 

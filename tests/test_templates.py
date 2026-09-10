@@ -1,4 +1,6 @@
 """다중 워크플로우 템플릿(Copy 모델) — 기존 default 보존 + 복사로 신규 생성 검증."""
+from pathlib import Path
+
 import pytest
 import core.agent_registry as ar
 
@@ -17,6 +19,20 @@ def test_list_always_includes_default(isolated):
     default = next(t for t in ar.list_templates() if t["id"] == "default")
     assert default["builtin"] is True
     assert default["agent_count"] == 15  # 14 에이전트 + Requirement_Interviewer(요구확인 인터뷰)
+    assert default["deliverable_type"] == "software_app"
+
+
+def test_template_summaries_separate_apps_simulations_and_reports(monkeypatch):
+    monkeypatch.setattr(ar, "TEMPLATES_DIR", str(Path(__file__).resolve().parents[1] / "templates"))
+    items = {item["id"]: item for item in ar.list_templates()}
+
+    assert items["mfg_sim"]["deliverable_type"] == "hybrid_simulation"
+    assert items["manufacturing-production"]["deliverable_type"] == "hybrid_simulation"
+    assert items["manufacturing-cost-analysis"]["deliverable_type"] == "document_report"
+    assert items["manufacturing-qc"]["deliverable_type"] == "document_report"
+    assert items["content-marketing"]["deliverable_type"] == "document_report"
+    assert items["data-analytics"]["deliverable_type"] == "document_report"
+    assert items["manufacturing-market-forecast"]["deliverable_type"] == "software_app"
 
 
 def test_load_default_equals_load_registry(isolated):

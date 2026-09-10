@@ -27,7 +27,7 @@
 1. **확인하지 못한 것을 통과로 두지 않는다.** 기록이 없으면 `unverifiable` 이며 그것도
    "준비됨"이 아니다. 이 저장소의 관통 원칙이다.
 2. **롤백이 하지 못한 일을 했다고 하지 않는다.** 이 시스템은 배포된 코드를 되돌리지 못한다.
-   할 수 있는 것은 **승격 철회**(전사 → 부서)와 **현행 지정 변경**, 그리고 기록이다.
+   할 수 있는 것은 **사용 중단**과 **승격 철회**, 그리고 기록이다.
    응답에 그 한계를 적는다 — "롤백했다"는 말이 실제보다 크게 읽히면 아무도 후속 조치를 하지
    않는다.
 3. **영향 분석은 승격 여부를 함께 본다.** "3개 노드 영향"과 "전사 승격된 앱 2개 영향"은
@@ -65,6 +65,10 @@ CREATE TABLE IF NOT EXISTS release_rollbacks (
     reason        TEXT NOT NULL,
     actor         TEXT NOT NULL,
     revoked_promotion INTEGER NOT NULL DEFAULT 0,
+    outcome       TEXT NOT NULL DEFAULT 'unknown',
+    program_disabled INTEGER,
+    disable_error TEXT NOT NULL DEFAULT '',
+    promotion_error TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rollback_rel ON release_rollbacks(release_id, created_at DESC);
@@ -109,6 +113,16 @@ class ReleaseReadiness:
             pass
         if self._initialized_path != self.db_path:
             conn.executescript(_DDL)
+            # 과거 행은 성공 여부를 기록하지 않았다. 성공으로 소급 추정하지 않는다.
+            columns = {row[1] for row in conn.execute('PRAGMA table_info(release_rollbacks)')}
+            for name, ddl in (
+                ('outcome', "TEXT NOT NULL DEFAULT 'unknown'"),
+                ('program_disabled', 'INTEGER'),
+                ('disable_error', "TEXT NOT NULL DEFAULT ''"),
+                ('promotion_error', "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if name not in columns:
+                    conn.execute(f'ALTER TABLE release_rollbacks ADD COLUMN {name} {ddl}')
             conn.commit()
             self._initialized_path = self.db_path
         return conn
@@ -311,63 +325,97 @@ class ReleaseReadiness:
         if not (reason or "").strip():
             raise ReadinessError(
                 "reason 은 필수입니다 — 사유 없는 롤백은 같은 문제를 반복하게 만듭니다.")
-        if to_release_id and not _load_release(to_release_id):
+        if not release_id or any(c in release_id for c in ('/', '\\', '..')):
+            raise ReadinessError('유효한 릴리스를 선택하십시오.')
+        if not _load_release(release_id):
+            raise ReadinessError('운영에서 내릴 릴리스를 찾거나 읽을 수 없습니다.')
+        if to_release_id and (any(c in to_release_id for c in ('/', '\\', '..'))
+                              or not _load_release(to_release_id)):
             raise ReadinessError(f"되돌릴 대상 릴리스가 없습니다: {to_release_id}")
+        if to_release_id == release_id:
+            raise ReadinessError('같은 릴리스를 대체본으로 지정할 수 없습니다.')
 
-        revoked = False
-        try:
-            from core.workspace_promotion import workspace as _ws
-            ws = workspace_impl or _ws
-            pr = ws.get_promotion(release_id)
-            if pr and pr.get("status") == "promoted":
-                # ★ `reject_promotion` 이 아니라 `revoke_promotion` 이다. 반려는 아직 승격되지
-                #   않은 신청을 거절하는 문이라 `status<>'promoted'` 로 막혀 있고, 그 문으로는
-                #   롤백이 승격을 내릴 수 없다(실측으로 확인).
-                ws.revoke_promotion(release_id, actor, f"롤백: {reason}")
-                revoked = True
-        except Exception as e:
-            print(f"⚠️ [Readiness] 승격 철회 실패(롤백 기록은 계속): {e}")
+        rid = f"rb_{uuid.uuid4().hex[:12]}"
+        now = _now()
+        # 기록 저장소가 처음부터 불통이면 상태 변경을 시작하지 않는다.
+        # 중간에 프로세스가 멈추면 in_progress가 남으며 완료로 보이지 않는다.
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                'INSERT INTO release_rollbacks(rollback_id,release_id,to_release_id,reason,'
+                'actor,created_at,outcome) VALUES(?,?,?,?,?,?,?)',
+                (rid, release_id, to_release_id, reason, actor, now, 'in_progress'))
 
-        # ★ [사용자 결정 2026-07-30] 사용을 막는다. 되돌리기가 불가능하다는 것이 "아무것도
-        #   못 한다"는 뜻은 아니다 — 더 이상 쓰이지 않게 하는 것은 할 수 있고, 그게 실질적으로
-        #   필요한 조치다. 삭제하지 않는 이유는 다른 사용자의 기록을 고아로 만들기 때문이다.
-        #   실패를 조용히 넘기지 않는다 — "롤백했는데 여전히 쓸 수 있다"가 최악이다.
+        # 사용 중단을 먼저 한다. 이것이 실패하면 승격 상태까지 바꾸지 않는다.
         disabled, disable_error = False, ""
         if disable_program:
             try:
                 from core.program_lifecycle import program_lifecycle as _pl
                 pl = lifecycle_impl or _pl
-                pl.disable(release_id, actor, f"롤백: {reason}",
-                           replacement_release_id=to_release_id,
-                           # 운영자가 이미 내리기로 결정한 상황이다. 의존 목록은 응답에 담긴다.
-                           acknowledge_dependents=True)
+                current = pl.get_status(release_id)
+                # 재시도로 기존 중단 사유·지문·대체본을 지우지 않는다.
+                if current.get('status') != 'disabled' or (
+                    to_release_id and current.get('replacement_release_id') != to_release_id
+                ):
+                    pl.disable(release_id, actor, f"롤백: {reason}",
+                               replacement_release_id=to_release_id,
+                               acknowledge_dependents=True)
+                if pl.get_status(release_id).get('status') != 'disabled':
+                    raise RuntimeError('사용 중단 상태가 저장되지 않았습니다.')
                 disabled = True
             except Exception as e:
                 disable_error = str(e)
                 print(f"⚠️ [Readiness] 프로그램 사용 중단 실패: {e}")
 
-        rid = f"rb_{uuid.uuid4().hex[:12]}"
-        now = _now()
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                "INSERT INTO release_rollbacks(rollback_id,release_id,to_release_id,reason,"
-                "actor,revoked_promotion,created_at) VALUES(?,?,?,?,?,?,?)",
-                (rid, release_id, to_release_id, reason, actor, 1 if revoked else 0, now))
-        return {
+        revoked, promotion_error = False, ''
+        if not disable_error:
+            try:
+                from core.workspace_promotion import workspace as _ws
+                ws = workspace_impl or _ws
+                pr = ws.get_promotion(release_id)
+                if pr and pr.get('status') == 'promoted':
+                    ws.revoke_promotion(release_id, actor, f'롤백: {reason}')
+                    if (ws.get_promotion(release_id) or {}).get('status') != 'revoked':
+                        raise RuntimeError('전사 승격 철회 상태가 저장되지 않았습니다.')
+                    revoked = True
+            except Exception as e:
+                promotion_error = str(e)
+                print(f'⚠️ [Readiness] 전사 승격 철회 확인 실패: {e}')
+
+        outcome = ('failed' if disable_error else
+                   ('partial' if disabled else 'failed') if promotion_error else 'complete')
+        message = ('운영에서 내렸습니다. 원본 코드·데이터·이력은 보관됩니다.'
+                   if disabled and outcome == 'complete' else
+                   '사용은 중단됐지만 전사 승격 철회를 확인하지 못했습니다. 다시 시도하십시오.'
+                   if outcome == 'partial' else
+                   '사용 중단을 확인하지 못했습니다. 현재 상태를 확인한 뒤 다시 시도하십시오.'
+                   if disable_error else
+                   '전사 승격 철회를 확인하지 못했습니다. 다시 시도하십시오.'
+                   if promotion_error else '사용 중단 없이 승격 상태만 처리했습니다.')
+        out = {
             "rollback_id": rid, "release_id": release_id, "to_release_id": to_release_id,
             "revoked_promotion": revoked, "actor": actor, "reason": reason, "created_at": now,
             "program_disabled": disabled, "disable_error": disable_error,
+            'promotion_error': promotion_error, 'outcome': outcome, 'message': message,
+            'history_recorded': True,
             "limitation": (
-                ("사용 중단 처리 완료" if disabled else
-                 f"⚠️ **사용 중단에 실패했습니다({disable_error}) — 이 프로그램은 여전히 "
-                 f"사용 가능합니다.** 수동으로 비활성화하십시오."
-                 if disable_program else "사용 중단은 요청되지 않았습니다")
-                + ("와 전사 승격 철회" if revoked else "")
-                + ". 프로그램은 **삭제하지 않았습니다** — 다른 사용자가 남긴 기록이 "
+                ("전사 승격 철회를 확인했습니다. " if revoked else "")
+                + "프로그램은 **삭제하지 않았습니다** — 다른 사용자가 남긴 기록이 "
                   "고아가 되기 때문입니다. 이 시스템은 **이미 배포된 코드 자체를 되돌리지는 "
                   "못합니다**(실행 중 인스턴스·외부 배포본). 그 되돌림은 별도로 수행하고 "
                   "결과를 확인하십시오."),
         }
+        try:
+            with self._lock, self._connect() as conn:
+                conn.execute(
+                    'UPDATE release_rollbacks SET revoked_promotion=?,outcome=?,'
+                    'program_disabled=?,disable_error=?,promotion_error=? WHERE rollback_id=?',
+                    (int(revoked), outcome, int(disabled), disable_error, promotion_error, rid))
+        except sqlite3.Error:
+            # 이미 내린 앱을 다시 열지 않는다. 최초 요청 기록을 남기고 불완전 결과를 알린다.
+            out.update(outcome='partial' if disabled or revoked else 'failed',
+                       history_recorded=False,
+                       message='처리 결과의 이력 저장을 확인하지 못했습니다. 상태와 이력을 재확인하십시오.')
+        return out
 
     def rollback_history(self, release_id: str = "") -> List[dict]:
         sql, params = "SELECT * FROM release_rollbacks", []

@@ -4,6 +4,7 @@ import {
   type DatasetReadiness, type DatasetState, type InstanceReadiness, type OutputReadiness,
 } from '../lib/dataPrepApi';
 import { KitAppPanel } from './KitAppPanel';
+import { KitGettingStarted } from './KitGettingStarted';
 
 // [BDR-5 / Wave H] 데이터 준비 보드 — **「지금 무엇까지 믿고 만들 수 있는가」.**
 //
@@ -41,7 +42,7 @@ function AsOf({ value }: { value: string }) {
   return <span style={{ color: 'var(--surface-text-muted)' }}>{value.slice(0, 16).replace('T', ' ')}</span>;
 }
 
-function DatasetRow({ row }: { row: DatasetReadiness }) {
+function DatasetRow({ row, onPrepare }: { row: DatasetReadiness; onPrepare?: (key: string) => void }) {
   const v = STATE_VIEW[row.state] ?? {
     // ⚠️ 모르는 상태를 «준비됨» 으로 떨어뜨리지 않는다 — 서버가 새 상태를 내면
     //   화면은 그것을 «모른다» 고 말해야 한다.
@@ -50,14 +51,9 @@ function DatasetRow({ row }: { row: DatasetReadiness }) {
   return (
     <tr style={{ borderBottom: '1px solid var(--surface-border)' }}>
       <td style={{ padding: '10px 8px', fontSize: 14 }}>
-        {/* ★ 사람이 읽는 이름이 먼저다(설계 §12). 이름이 없으면 계약 이름을 그대로
-            쓰되, 있으면 계약 이름은 아래에 작게 남긴다 — 문의할 때 필요하다. */}
-        {row.label ? (
-          <>
-            <div>{row.label}</div>
-            <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>{row.dataset_contract_key}</div>
-          </>
-        ) : row.dataset_contract_key}
+        {/* 기술 계약키는 화면에 내놓지 않는다. 문의·감사는 서버 로그와 원장 식별자로
+            처리하고, 사용자는 업무 이름만 본다. 이름이 없으면 결손 자체를 말한다. */}
+        {row.label || '이름이 등록되지 않은 업무 데이터'}
       </td>
       <td style={{ padding: '10px 8px', fontSize: 14, color: v.tone, whiteSpace: 'nowrap' }}>
         <span aria-hidden style={{ marginRight: 6 }}>{v.mark}</span>{v.label}
@@ -72,6 +68,13 @@ function DatasetRow({ row }: { row: DatasetReadiness }) {
         {row.detail && (
           <div style={{ color: 'var(--state-warn-fg)', fontSize: 12, marginTop: 2 }}>{row.detail}</div>
         )}
+        {onPrepare && (
+          <button type="button" onClick={() => onPrepare(row.dataset_contract_key)}
+            aria-label={`${row.label || '업무 데이터'} 자료 준비`}
+            style={{ display: 'block', marginTop: 6, padding: '5px 10px', fontSize: 13 }}>
+            자료 준비
+          </button>
+        )}
       </td>
       <td style={{ padding: '10px 8px', fontSize: 13 }}><AsOf value={row.as_of} /></td>
     </tr>
@@ -82,7 +85,7 @@ function OutputRow({ row }: { row: OutputReadiness }) {
   const v = OUTPUT_VIEW[row.state] ?? { label: row.state, tone: 'var(--state-error-fg)' };
   return (
     <li style={{ marginBottom: 10, fontSize: 14 }}>
-      <strong>{row.output}</strong>
+      <strong>{row.label || '이름이 등록되지 않은 업무 결과'}</strong>
       <span style={{ color: v.tone, marginLeft: 8 }}>{v.label}</span>
       {row.user_message && (
         <div style={{ color: 'var(--surface-text-muted)', fontSize: 13, marginTop: 2 }}>{row.user_message}</div>
@@ -99,7 +102,9 @@ function OutputRow({ row }: { row: OutputReadiness }) {
   );
 }
 
-export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
+export function DataReadinessBoard({ instanceId, refreshKey = 0, onPrepareDataset }: {
+  instanceId: string; refreshKey?: number; onPrepareDataset?: (key: string) => void;
+}) {
   const [data, setData] = useState<InstanceReadiness | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -117,7 +122,7 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
       })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [instanceId]);
+  }, [instanceId, refreshKey]);
 
   // ★ 35개 계약을 한 표로 펴지 않는다. 사용자는 먼저 구매·물류·재고 같은 업무기능을
   // 이해하고, 진단이 필요할 때만 그 안의 계약을 펼친다. 분류는 서버가 준 정본만 쓴다.
@@ -162,6 +167,9 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
   if (!data) return null;
 
   const c = data.coverage;
+  //: [DAO-12] 제안은 없어도 화면이 서야 한다 — 준비도가 본문이고 이것은 곁이다.
+  const hints = data.acquisition_hints;
+
   return (
     <div style={{ padding: 16 }}>
       {/* ★★★ 성격 표시를 **맨 위에** 둔다 — 빠지면 이 화면의 숫자가 실적으로 읽힌다. */}
@@ -198,8 +206,7 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
                 cursor: 'pointer', padding: '10px 12px', display: 'flex', alignItems: 'center',
                 gap: 10, fontSize: 14,
               }}>
-                <strong style={{ minWidth: 78 }}>{group.id}</strong>
-                <span style={{ flex: 1 }}>{group.name}</span>
+                <strong style={{ flex: 1 }}>{group.name}</strong>
                 <span style={{ color: attention ? 'var(--state-warn-fg)' : 'var(--state-success-fg)',
                   fontSize: 13 }}>
                   준비 {ready}/{group.rows.length}{attention ? ` · 확인 ${attention}` : ''}
@@ -210,6 +217,8 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
                   {group.description}
                 </div>
               )}
+              <KitGettingStarted kitId={data.kit_id} version={data.version} groupId={group.id}
+                canPrepare={Boolean(onPrepareDataset)} />
               <div style={{ overflowX: 'auto', borderTop: '1px solid var(--surface-border)' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
@@ -221,7 +230,7 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {group.rows.map((d) => <DatasetRow key={d.dataset_contract_key} row={d} />)}
+                    {group.rows.map((d) => <DatasetRow key={d.dataset_contract_key} row={d} onPrepare={onPrepareDataset} />)}
                   </tbody>
                 </table>
               </div>
@@ -241,6 +250,69 @@ export function DataReadinessBoard({ instanceId }: { instanceId: string }) {
         <ul style={{ paddingLeft: 18, margin: 0 }}>
           {data.outputs.map((o) => <OutputRow key={o.output} row={o} />)}
         </ul>
+      )}
+
+      {/* ── [DAO-12] 「준비되지 않음」에서 끝내지 않는다 ────────────────
+          ★★★ 이것은 **제안이지 판정이 아니다.** 위의 준비도 숫자는 이 구역 때문에
+            바뀌지 않는다 — 수집만으로는 준비되지 않기 때문이다. */}
+      {hints && hints.suggestions.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <h3 style={{ fontSize: 16, margin: '0 0 4px' }}>부족한 자료를 채우는 방법</h3>
+          {/* 서버가 준 고지를 그대로 — 화면이 문구를 지어내지 않는다. */}
+          {hints.summary.notice && (
+            <div style={{ fontSize: 12, color: 'var(--surface-text-muted)', marginBottom: 8 }}>
+              {hints.summary.notice}
+            </div>
+          )}
+          <div style={{ display: 'grid', gap: 8 }}>
+            {hints.suggestions.map((s) => (
+              <div key={s.dataset_contract_key} style={{
+                border: '1px solid var(--surface-border)', borderRadius: 6, padding: '8px 12px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <strong>{s.dataset_contract_key}</strong>
+                  {/* 판정은 제안 옆에 **그대로** 남는다 */}
+                  <span style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
+                    준비도 {s.readiness_state}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>{s.gap_label}</div>
+                {s.options.map((o) => (
+                  <div key={o.provider_id} style={{ fontSize: 12, marginTop: 6 }}>
+                    · <b>{o.name}</b> ({o.publisher} · {o.cost} · 등급 {o.trust_grade})
+                    {' '}
+                    <span style={{ color: o.credential_configured ? 'inherit' : 'var(--state-warn-fg)' }}>
+                      {o.requires_credential
+                        ? (o.credential_configured ? '인증키 설정됨' : '인증키 없음')
+                        : '인증 불필요'}
+                    </span>
+                    {/* ★★★ 한계를 떼면 고르는 순간 사라진다 */}
+                    {o.known_limits.length > 0 && (
+                      <ul style={{ margin: '2px 0 0', paddingLeft: 18, color: 'var(--state-warn-fg)' }}>
+                        {o.known_limits.map((l) => <li key={l}>{l}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+                {s.collected_rows > 0 && (
+                  <div style={{ fontSize: 12, marginTop: 6 }}>
+                    이미 수집 {s.collected_rows}행 — <b>남은 단계</b>
+                    <ol style={{ margin: '2px 0 0', paddingLeft: 20 }}>
+                      {s.remaining_steps.map((t) => <li key={t}>{t}</li>)}
+                    </ol>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* 힌트를 못 읽었으면 «제안 0건» 과 구분해 말한다 */}
+      {hints?.unavailable_reason && (
+        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--state-warn-fg)' }}>
+          수집 제안을 불러오지 못했습니다({hints.unavailable_reason}) — 준비도 판정은
+          위 내용이 맞습니다.
+        </div>
       )}
 
       {/* ★★★ [2026-08-23] **보여 주기 다음에 «하기» 를 붙인다.**

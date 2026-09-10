@@ -6,6 +6,7 @@ import { HubDialog } from '../design/HubDialog';
 import { HubShell, Panel, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
 import { DataReadinessBoard } from './DataReadinessBoard';
+import { sourceRowCount } from '../lib/kitInputValidation';
 import {
   certifySnapshot, DataPrepError, getInstance, listInstances, listKits,
   listSnapshots, uploadSnapshot,
@@ -55,11 +56,15 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
   const [instance, setInstance] = useState<any | null>(null);
   const [snapshots, setSnapshots] = useState<any[]>([]);
   const [busy, setBusy] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [preparedDataset, setPreparedDataset] = useState('');
+  const [sourceCounts, setSourceCounts] = useState<Record<string, string>>({});
+  const instanceLoadRef = useRef(0);
   //: 계약 이름 → 사람이 읽는 이름. ⚠️ 화면이 제 나름의 번역표를 만들지 않는다 —
   //:   서버가 계약과 함께 준 것만 쓴다(없으면 계약 이름 그대로).
   const labelOf = (key: string) =>
     (instance?.required_datasets || []).find(
-      (d: any) => d.dataset_contract_key === key)?.label || key;
+      (d: any) => d.dataset_contract_key === key)?.label || '이름이 등록되지 않은 업무 데이터';
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [activeSection, setActiveSection] = useState(
     initialView === 'readiness' ? 'instances' : 'packages');
@@ -107,55 +112,80 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
   }, [initialView]);
 
   async function openInstance(id: string) {
+    const load = ++instanceLoadRef.current;
+    setPreparedDataset('');
+    setSourceCounts({});
+    setBusy('');
     setInstanceId(id);
     setInstance(null);
     setSnapshots([]);
     setNotice(null);
     if (!id.trim()) return;
     try {
-      setInstance(await getInstance(id.trim()));
-      setSnapshots((await listSnapshots(id.trim())).snapshots || []);
+      const [nextInstance, nextSnapshots] = await Promise.all([
+        getInstance(id.trim()), listSnapshots(id.trim()),
+      ]);
+      // 다른 적용본을 선택한 뒤 도착한 옛 응답을 새 선택의 자료로 그리지 않는다.
+      if (load !== instanceLoadRef.current) return;
+      setInstance(nextInstance);
+      setSnapshots(nextSnapshots.snapshots || []);
     } catch (e) {
+      if (load !== instanceLoadRef.current) return;
       const err = e as DataPrepError;
       setNotice({ ok: false, text: err?.message || '인스턴스를 열지 못했습니다.' });
     }
   }
 
-  async function onCertify(snapshotId: string, rowCount: number) {
+  async function onCertify(snapshotId: string) {
+    const expectedCount = sourceRowCount(sourceCounts[snapshotId] || '');
+    if (expectedCount === null) {
+      setNotice({ ok: false, text: '원천 자료의 전체 행 수를 확인해 입력하십시오. 머리글은 제외합니다.' });
+      return;
+    }
+    const load = instanceLoadRef.current;
     setBusy(snapshotId);
     setNotice(null);
     try {
-      // ⚠️ 원천 합계를 모르면 **행 수만이라도** 대사한다. 아무것도 안 주면 대사가
-      //   «건너뛴 것» 이 되고, 잘린 파일이 그대로 인증된다.
-      const out = await certifySnapshot(snapshotId, { row_count: rowCount });
+      // 등록된 판의 행 수를 그대로 돌려주면 잘린 파일도 자기 자신과 일치한다.
+      // 사용자가 원천 추출 결과에서 별도로 확인한 통제 합계로만 대사한다.
+      const out = await certifySnapshot(snapshotId, { row_count: expectedCount });
+      if (load !== instanceLoadRef.current) return;
+      setRefreshKey((value) => value + 1);
       setNotice(out.state === 'DEMO_CERTIFIED'
         ? { ok: true, text: `인증됨 — ${out.display_label}` }
         // ★ 격리도 «실패» 가 아니라 **결과**다. 사유를 그대로 옮긴다.
         : { ok: false, text: `${out.state}: ${out.quarantine?.reason || '검사에서 멈췄습니다'}` });
-      setSnapshots((await listSnapshots(instanceId)).snapshots || []);
+      const nextSnapshots = await listSnapshots(instanceId);
+      if (load === instanceLoadRef.current) setSnapshots(nextSnapshots.snapshots || []);
     } catch (e) {
+      if (load !== instanceLoadRef.current) return;
       const err = e as DataPrepError;
       setNotice({ ok: false, text: err?.message || '인증하지 못했습니다.' });
     } finally {
-      setBusy('');
+      if (load === instanceLoadRef.current) setBusy('');
     }
   }
 
   async function onUpload(bindingId: string, file: File | null) {
     if (!file) return;
+    const load = instanceLoadRef.current;
     setBusy(bindingId);
     setNotice(null);
     try {
       const snap = await uploadSnapshot(bindingId, file);
+      if (load !== instanceLoadRef.current) return;
       setNotice({ ok: true, text: `${file.name} — ${snap.row_count}행 등록됨` });
-      setSnapshots((await listSnapshots(instanceId)).snapshots || []);
+      setRefreshKey((value) => value + 1);
+      const nextSnapshots = await listSnapshots(instanceId);
+      if (load === instanceLoadRef.current) setSnapshots(nextSnapshots.snapshots || []);
     } catch (e) {
+      if (load !== instanceLoadRef.current) return;
       // ★★★ 사유를 **그대로** 보여 준다. 「올라가지 않는다」만 남으면 사용자는
       //   파일이 아니라 시스템을 의심한다.
       const err = e as DataPrepError;
       setNotice({ ok: false, text: err?.message || '등록하지 못했습니다.' });
     } finally {
-      setBusy('');
+      if (load === instanceLoadRef.current) setBusy('');
     }
   }
 
@@ -297,8 +327,8 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                             {ready ? '시연 가능' : '준비 중'}
                           </span>
                           <span style={{ color: 'var(--surface-text-muted)', fontSize: 12 }}>
-                            데이터 {k.dataset_count} · 업무키트 {k.business_kit_count}
-                            {' · '}앱 {k.app_count} · 보고서 {k.report_count}
+                            데이터 {k.dataset_count} · 업무영역 {k.business_kit_count}
+                            {' · '}실행 앱 {k.app_count} · 보고서 {k.report_count}
                           </span>
                         </div>
                         <div style={{ color: 'var(--surface-text-muted)', marginTop: 4, fontSize: 12 }}>
@@ -374,7 +404,16 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
 
               {instance && (
                 <div ref={instanceSectionRef} style={{ scrollMarginTop: 12 }}>
-                  <DataReadinessBoard instanceId={instanceId.trim()} />
+                  <DataReadinessBoard instanceId={instanceId.trim()} refreshKey={refreshKey}
+                    onPrepareDataset={(key) => {
+                      setPreparedDataset(key);
+                      setActiveSection('sources');
+                      if (sourceSectionRef.current) {
+                        sourceSectionRef.current.open = true;
+                        sourceSectionRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                        sourceSectionRef.current.querySelector('summary')?.focus();
+                      }
+                    }} />
 
                   {/* 일반 사용자의 첫 질문은 준비도다. 원천·파일·판 관리는 필요할 때만
                       펼치는 관리자 작업으로 둔다. 기능을 숨기지 않고 위계만 바로잡는다. */}
@@ -387,6 +426,17 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                     </summary>
                     <div style={{ padding: '0 12px 12px' }}>
                   <h4 style={{ margin: '8px 0', fontSize: 15 }}>원천 결속과 파일 등록</h4>
+                  {preparedDataset && (
+                    <div style={{ marginBottom: 12, padding: 12, background: 'var(--surface-card)',
+                      borderRadius: 8, fontSize: 14, lineHeight: 1.7 }}>
+                      <strong>{labelOf(preparedDataset)} 자료 준비</strong>
+                      <p style={{ margin: '6px 0' }}>
+                        현재 회사·조직 범위와 자료의 기준일을 확인하십시오. 파일 등록 후 품질·대사 검사를 거쳐야
+                        사용할 수 있습니다. 공개 통계와 합성 예제를 실제 거래로 표시하지 마십시오.
+                      </p>
+                      <button type="button" onClick={() => setPreparedDataset('')}>전체 자료 보기</button>
+                    </div>
+                  )}
                   {(instance.bindings || []).length === 0 ? (
                     <div style={{ fontSize: 14, color: 'var(--surface-text-muted)' }}>
                       아직 원천이 연결되지 않았습니다.
@@ -401,13 +451,10 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                         </tr>
                       </thead>
                       <tbody>
-                        {(instance.bindings || []).map((b: any) => (
+                        {(instance.bindings || []).filter((b: any) => !preparedDataset || b.dataset_contract_key === preparedDataset).map((b: any) => (
                           <tr key={b.binding_id} style={{ borderBottom: '1px solid var(--surface-border)' }}>
                             <td style={{ padding: 8, fontSize: 14 }}>
                               {labelOf(b.dataset_contract_key)}
-                              <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
-                                {b.dataset_contract_key}
-                              </div>
                             </td>
                             <td style={{ padding: 8, fontSize: 14 }}>
                               {b.state}
@@ -436,14 +483,12 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                             남긴다. 연결된 것만 보이면 화면은 「다 됐다」처럼 보인다. */}
                         {(instance.required_datasets || [])
                           .filter((d: any) => !d.bound)
+                          .filter((d: any) => !preparedDataset || d.dataset_contract_key === preparedDataset)
                           .map((d: any) => (
                             <tr key={d.dataset_contract_key}
                                 style={{ borderBottom: '1px solid var(--surface-border)' }}>
                               <td style={{ padding: 8, fontSize: 14 }}>
-                                {d.label || d.dataset_contract_key}
-                                <div style={{ fontSize: 12, color: 'var(--surface-text-muted)' }}>
-                                  {d.dataset_contract_key}
-                                </div>
+                                {d.label || '이름이 등록되지 않은 업무 데이터'}
                               </td>
                               <td style={{ padding: 8, fontSize: 14, color: 'var(--state-warn-fg)' }}>
                                 원천 미지정
@@ -476,8 +521,23 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                                 ⚠️ 이미 인증된 판·격리된 판에는 버튼을 두지 않는다 —
                                   누를 수 없는 버튼은 「고장」으로 읽힌다. */}
                             {s.state === 'RAW' ? (
-                              <button disabled={busy === s.snapshot_id}
-                                onClick={() => onCertify(s.snapshot_id, s.row_count)}
+                              <div style={{ marginTop: 8, lineHeight: 1.7 }}>
+                              <label style={{ display: 'grid', gap: 4, maxWidth: 420 }}>
+                                원천 자료의 전체 행 수 (머리글 제외)
+                                <input type="text" inputMode="numeric" autoComplete="off"
+                                  value={sourceCounts[s.snapshot_id] || ''}
+                                  placeholder="원천 파일·추출 보고서에서 확인한 행 수"
+                                  onChange={(e) => setSourceCounts((values) => ({
+                                    ...values, [s.snapshot_id]: e.target.value,
+                                  }))}
+                                  style={{ padding: '7px 9px', fontSize: 14 }} />
+                              </label>
+                              <div style={{ color: 'var(--surface-text-muted)', fontSize: 13 }}>
+                                위의 등록 행 수를 복사하지 말고 원천 합계를 대조하십시오.
+                                행 수 대사는 금액·수량·업무 연결 대사를 대신하지 않습니다.
+                              </div>
+                              <button disabled={busy === s.snapshot_id || sourceRowCount(sourceCounts[s.snapshot_id] || '') === null}
+                                onClick={() => onCertify(s.snapshot_id)}
                                 style={{
                                   marginTop: 4, padding: '4px 12px', fontSize: 13,
                                   border: '1px solid var(--action-primary-bg)', background: '#fff',
@@ -485,6 +545,7 @@ export function DataPrepPanel({ onClose, initialView = 'overview', page = false 
                                 }}>
                                 {busy === s.snapshot_id ? '검사 중…' : '품질·대사 검사 후 시연 인증'}
                               </button>
+                              </div>
                             ) : s.state === 'QUARANTINED' ? (
                               <div style={{ fontSize: 12, color: 'var(--state-error-fg)', marginTop: 2 }}>
                                 격리됨 — {s.quarantine?.reason || '사유 미기재'}. 고친 파일을 다시 올리십시오.

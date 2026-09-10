@@ -1,0 +1,77 @@
+{
+ "response": {
+  "header": {
+   "resultCode": "00",
+   "resultMsg": "NORMAL SERVICE."
+  },
+  "body": {
+   "items": {
+    "item": [
+     {
+      "baseDt": "20250111",
+      "smp": "128.20",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250112",
+      "smp": "128.90",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250113",
+      "smp": "129.60",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250114",
+      "smp": "130.30",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250115",
+      "smp": "131.00",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250116",
+      "smp": "131.70",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250117",
+      "smp": "132.40",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250118",
+      "smp": "133.10",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250119",
+      "smp": "133.80",
+      "areaCd": "1",
+      "areaNm": "육지"
+     },
+     {
+      "baseDt": "20250120",
+      "smp": "134.50",
+      "areaCd": "1",
+      "areaNm": "육지"
+     }
+    ]
+   },
+   "numOfRows": 10,
+   "pageNo": 2,
+   "totalCount": 25
+  }
+ }
+}

@@ -139,6 +139,56 @@ def test_reference_descriptor_uses_human_fields_not_object_id(
     assert len(descriptor.display_fingerprint) == 64
 
 
+def test_cost_center_descriptor_groups_repeated_account_rows(tmp_path):
+    rows = [
+        {"account_id": "1000", "cost_center_id": "CC-PROC",
+         "cost_center_name": "원료구매 원가센터",
+         "tenant_id": "tenant-a", "scope_node_id": "scope-a"},
+        {"account_id": "5000", "cost_center_id": "CC-PROC",
+         "cost_center_name": "원료구매 원가센터",
+         "tenant_id": "tenant-a", "scope_node_id": "scope-a"},
+        {"account_id": "5100", "cost_center_id": "CC-MFG",
+         "cost_center_name": "생산 원가센터",
+         "tenant_id": "tenant-a", "scope_node_id": "scope-a"},
+    ]
+    stream = io.StringIO()
+    writer = csv.DictWriter(stream, fieldnames=list(rows[0]), lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    payload = stream.getvalue().encode("utf-8")
+    path = tmp_path / "MDM-07.csv"
+    path.write_bytes(payload)
+    descriptor = describe_dataset_object(
+        namespace="mdm", object_type="cost-center", object_id="CC-PROC",
+        snapshot_id="ds-sealed", dataset_contract_key="MDM-07",
+        raw_path=str(path), checksum=checksum_bytes(payload))
+    assert descriptor.display_name == "원가센터 2 · 원료구매 원가센터 · 연결 계정 2개"
+    assert "CC-PROC" not in descriptor.display_name
+
+
+def test_cost_center_descriptor_rejects_conflicting_human_names(tmp_path):
+    rows = [
+        {"account_id": "1000", "cost_center_id": "CC-PROC",
+         "cost_center_name": "원료구매 원가센터",
+         "tenant_id": "tenant-a", "scope_node_id": "scope-a"},
+        {"account_id": "5000", "cost_center_id": "CC-PROC",
+         "cost_center_name": "다른 원가센터",
+         "tenant_id": "tenant-a", "scope_node_id": "scope-a"},
+    ]
+    stream = io.StringIO()
+    writer = csv.DictWriter(stream, fieldnames=list(rows[0]), lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    payload = stream.getvalue().encode("utf-8")
+    path = tmp_path / "MDM-07.csv"
+    path.write_bytes(payload)
+    with pytest.raises(ObjectDisplayIntegrityError, match="집합형 객체 설명"):
+        describe_dataset_object(
+            namespace="mdm", object_type="cost-center", object_id="CC-PROC",
+            snapshot_id="ds-sealed", dataset_contract_key="MDM-07",
+            raw_path=str(path), checksum=checksum_bytes(payload))
+
+
 @pytest.mark.parametrize("contract_key,object_type,key_columns,fields,expected", [
     ("MDM-05", "bom-line", ("bom_id", "line_no"), {
         "bom_id": "BOM-1", "line_no": "10", "component_role": "INPUT",

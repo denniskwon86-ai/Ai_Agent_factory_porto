@@ -60,7 +60,7 @@ import { OperationsGovernanceShell } from './components/OperationsGovernanceShel
 //:   회사 Context 상시 노출은 채택 결정문이 고정 요소로 못박은 항목이다.
 import { useOperatingContext } from './lib/operatingContext';
 import { BuildPage } from './components/BuildPage';
-import { BuildStartDialog } from './components/BuildStartDialog';
+import { BuildStartDialog, type BuildDeliverableType } from './components/BuildStartDialog';
 import { Banner } from './design/HubShell';
 import { HomeNavContext } from './design/HubDialog';
 import {
@@ -147,6 +147,11 @@ function AppShell() {
   }, [space, currentProjectId]);
   // §5.2 «새 업무 만들기» — 생성은 목록면에서 분리된 별도 흐름이다(설계 `/build/start`).
   const [buildStart, setBuildStart] = useState(false);
+  const [buildStartType, setBuildStartType] = useState<BuildDeliverableType>('software_app');
+  const openBuildStart = (type: BuildDeliverableType) => {
+    setBuildStartType(type);
+    setBuildStart(true);
+  };
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
   const [knowledgeInitialView, setKnowledgeInitialView] = useState<KnowledgeView>('packs');
@@ -435,7 +440,37 @@ function AppShell() {
     },
   ];
 
-  const isMegaProject = projects.find(p => p.id === currentProjectId)?.is_mega_project === true;
+  const currentProject = projects.find(p => p.id === currentProjectId);
+  const currentTemplateId = String((currentProject as any)?.template_id || 'default');
+  const deliverableByTemplate = new Map((templates as any[]).map((template) => [
+    String(template?.template_id || template?.id || ''),
+    String(template?.deliverable_type || 'software_app'),
+  ]));
+  const projectsFor = (type: BuildDeliverableType) => templates.length === 0 ? [] : projects.filter(
+    (project) => String(deliverableByTemplate.get(String(project.template_id || 'default'))
+      || 'software_app') === type);
+  const appProjects = projectsFor('software_app');
+  const simulationProjects = projectsFor('hybrid_simulation');
+  const reportProjects = projectsFor('document_report');
+  const currentTemplate = (templates as any[]).find((t) => (
+    String(t?.template_id || t?.id || '') === currentTemplateId
+  ));
+  const currentDeliverableType = String(currentTemplate?.deliverable_type || 'software_app');
+  const workbenchParent = currentDeliverableType === 'hybrid_simulation' ? 'twin'
+    : currentDeliverableType === 'document_report' ? 'report' : 'build';
+  const workbenchParentLabel = currentDeliverableType === 'hybrid_simulation' ? '시뮬레이션'
+    : currentDeliverableType === 'document_report' ? '결정·보고' : '앱 제작';
+  const workbenchLabel = currentDeliverableType === 'hybrid_simulation' ? '시뮬레이터 제작 작업공간'
+    : currentDeliverableType === 'document_report' ? '보고서 제작 작업공간' : '앱 제작 작업공간';
+  const isMegaProject = currentProject?.is_mega_project === true;
+
+  // 보고서 목록뿐 아니라 새로고침·직접 URL 복원에서도 결과 검토 화면을 연다.
+  // 구형 3패널은 SW 제작용이라 범용 artifacts 를 표시하지 못한다.
+  useEffect(() => {
+    if (currentProjectId && currentDeliverableType === 'document_report') {
+      setShowStudio(true);
+    }
+  }, [currentProjectId, currentDeliverableType]);
 
   const handleShellNav = (id: Parameters<React.ComponentProps<typeof ProductShell>['onNav']>[0]) => {
     if (id === 'enterprise') { setSpace('enterprise'); return; }
@@ -554,6 +589,26 @@ function AppShell() {
 
   const overlays = (
     <HomeNavContext.Provider value={goHome}>
+      {buildStart && (
+        <BuildStartDialog
+          deliverableType={buildStartType}
+          templates={templates as any}
+          knowledgePacks={knowledgePacks}
+          packsBlocked={packsBlocked}
+          onClose={() => setBuildStart(false)}
+          onOpenDataPrep={() => { setBuildStart(false); setShowDataPrep(true); }}
+          onCreate={async (r) => {
+            const domains = r.masterDomains.split(',').map((x) => x.trim()).filter(Boolean);
+            const createdProjectId = r.isMega
+              ? await createMegaProject(r.projectName, r.templateId)
+              : await createProject(r.projectName, r.templateId, r.packIds,
+                  domains, r.mcpLiveGrounding, r.kitInstanceId);
+            if (createdProjectId) {
+              setBuildStart(false);
+              setCurrentProject(createdProjectId);
+            }
+          }} />
+      )}
       {showSkillEvolution && (
         <SkillEvolutionPanel onClose={() => setShowSkillEvolution(false)} />
       )}
@@ -576,7 +631,7 @@ function AppShell() {
           onOpenBuild={() => {
             setShowKitOperations(false);
             setSpace('build');
-            setBuildStart(true);
+            openBuildStart('software_app');
           }}
           onOpenSimulation={(instanceId, appId) => {
             setPathCalcInitialInstanceId(instanceId);
@@ -832,8 +887,7 @@ function AppShell() {
   if (!currentProjectId && space === 'enterprise') {
     return (
       <ErrorBoundary>
-        <div className="afs-scope" style={{ minHeight: '100vh',
-          background: 'var(--surface-page)' }}>
+        <div className="afs-scope enterprise-home">
           {/* ★ [설계 §3.1] Top Bar **72px** · 구조색. ⑥ 상단 회사·사업부·공장 Context 는
               `CompanyContextBar` 가 담당한다(§4.1).
               ⚠️⚠️ [2026-08-23 실측] `afs-topbar` 를 **반드시 붙인다.** 이 바는 구조색(남색)
@@ -959,7 +1013,8 @@ function AppShell() {
             onContext={() => setShowContextSwitcher(true)}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
-            onNewWork={() => setSpace('build')}
+            onNewWork={() => openBuildStart('document_report')}
+            primaryActionLabel="＋ 새 보고서"
             right={<>
               <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
                 onConsoleHandled={() => setOpenConsole(false)} />
@@ -968,6 +1023,11 @@ function AppShell() {
           <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
             <CollaborationHub page initialView={collaborationInitialView}
               onClose={() => setSpace('enterprise')}
+              generatedProjects={reportProjects as any}
+              onOpenGeneratedProject={(id) => {
+                setCurrentProject(id);
+                setShowStudio(true);
+              }}
               releaseOptions={releases.filter((r: any) => r.release_id).map((r: any) => ({
                 id: r.release_id,
                 label: r.display_name || r.project_name || '이름 미등록 앱',
@@ -993,14 +1053,17 @@ function AppShell() {
             onContext={() => setShowContextSwitcher(true)}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
-            onNewWork={() => setSpace('build')}
+            onNewWork={() => openBuildStart('hybrid_simulation')}
+            primaryActionLabel="＋ 새 시뮬레이터"
             right={<>
               <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
                 onConsoleHandled={() => setOpenConsole(false)} />
               <GlobalNav primary={primaryNav} groups={navGroups} right={null} />
             </>} />
           <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
-            <ScenarioPanel page onClose={() => setSpace('enterprise')} />
+            <ScenarioPanel page onClose={() => setSpace('enterprise')}
+              generatedProjects={simulationProjects as any}
+              onOpenGeneratedProject={(id) => setCurrentProject(id)} />
           </main>
         </div>
         {overlays}
@@ -1022,7 +1085,8 @@ function AppShell() {
             onContext={() => setShowContextSwitcher(true)}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
-            onNewWork={() => { setSpace('build'); setBuildStart(true); }}
+            onNewWork={() => { setSpace('build'); openBuildStart('software_app'); }}
+            primaryActionLabel="＋ 새 앱"
             right={<>
               <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
                 onConsoleHandled={() => setOpenConsole(false)} />
@@ -1031,7 +1095,7 @@ function AppShell() {
           <main style={{ flex: 1, minHeight: 0, overflow: 'hidden', width: '100%' }}>
             <KitOperationsPanel page onOpenBuild={() => {
               setSpace('build');
-              setBuildStart(true);
+              openBuildStart('software_app');
             }} onOpenSimulation={(instanceId, appId) => {
               setPathCalcInitialInstanceId(instanceId);
               setPathCalcInitialAppId(appId);
@@ -1048,26 +1112,6 @@ function AppShell() {
     return (
       <ErrorBoundary>
         {overlays}
-        {/* §5.2 `/build/start` — 생성은 목록면과 분리된 흐름이다. */}
-        {buildStart && (
-          <BuildStartDialog
-            templates={templates as any}
-            knowledgePacks={knowledgePacks}
-            packsBlocked={packsBlocked}
-            onClose={() => setBuildStart(false)}
-            onOpenDataPrep={() => { setBuildStart(false); setShowDataPrep(true); }}
-            onCreate={async (r) => {
-              const domains = r.masterDomains.split(',').map((x) => x.trim()).filter(Boolean);
-              const createdProjectId = r.isMega
-                ? await createMegaProject(r.projectName, r.templateId)
-                : await createProject(r.projectName, r.templateId, r.packIds,
-                    domains, r.mcpLiveGrounding);
-              if (createdProjectId) {
-                setBuildStart(false);
-                setCurrentProject(createdProjectId);
-              }
-            }} />
-        )}
         <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
           {/* 앱 제작도 경영 홈과 같은 제품 셸을 쓴다. 화면마다 별도 머리 바를 만들면
               브랜드·회사 문맥·메뉴 명칭이 다시 갈라진다. */}
@@ -1079,7 +1123,8 @@ function AppShell() {
             onContext={() => setShowContextSwitcher(true)}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
-            onNewWork={() => setBuildStart(true)}
+            onNewWork={() => openBuildStart('software_app')}
+            primaryActionLabel="＋ 새 앱"
             right={<>
               <SessionBar onGoToOrg={() => setShowOrgChart(true)} openConsole={openConsole}
                 onConsoleHandled={() => setOpenConsole(false)} />
@@ -1101,7 +1146,7 @@ function AppShell() {
                 목록이 먼저 보여야 「이미 있는 것을 여는」 흔한 일이 한 번에 되고, 만들기는
                 결정이 필요한 별도 흐름이 된다. 생성 폼은 `buildStart` 오버레이로 옮겼다. */}
           <BuildPage
-            projects={projects as any}
+            projects={appProjects as any}
             releases={releases}
             companyName={shellCompanyName}
             scopeLabel={shellCtx.scopeLabel}
@@ -1159,15 +1204,15 @@ function AppShell() {
               ⌂ 경영 홈
             </button>
             <button 
-              onClick={() => setCurrentProject(null)}
+              onClick={() => { setCurrentProject(null); setSpace(workbenchParent); }}
               className="text-sm font-bold text-gray-400 hover:text-gray-100 flex items-center gap-1 bg-gray-700 px-3 py-1.5 rounded transition-colors"
-              title="앱 제작 목록으로 돌아갑니다"
+              title={`${workbenchParentLabel} 목록으로 돌아갑니다`}
             >
-              ◀ 앱 목록
+              ◀ {workbenchParentLabel}
             </button>
             <h1 className="text-lg font-bold tracking-tight text-gray-100 flex items-center gap-2 truncate max-w-lg">
-              <span className="text-blue-300 truncate">{projects.find(p => p.id === currentProjectId)?.name || currentProjectId}</span>
-              <span className="text-gray-400 text-sm font-semibold shrink-0">· 앱 제작 작업공간</span>
+              <span className="text-blue-300 truncate">{currentProject?.name || currentProjectId}</span>
+              <span className="text-gray-400 text-sm font-semibold shrink-0">· {workbenchLabel}</span>
             </h1>
           </div>
           <div className="relative flex items-center justify-end gap-2 overflow-x-auto shrink-0">

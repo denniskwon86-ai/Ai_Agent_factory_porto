@@ -33,8 +33,8 @@ REQUIRED_RULES = (
     "currency_translation",
 )
 EXPECTED_SOURCE_METRICS = {
-    "purchase_working_capital": ("in_transit_qty",),
-    "production_margin": ("producible_qty", "shortage_qty"),
+    "purchase_working_capital": ("in_transit_quantity",),
+    "production_margin": ("producible_quantity", "shortage_quantity"),
     "revenue_recognition": ("revenue_shift_days",),
     "currency_translation": (
         "exchange_rate", "reporting_currency", "transaction_currency"),

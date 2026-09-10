@@ -15,8 +15,8 @@ from urllib.parse import urlparse
 from playwright.sync_api import Page, sync_playwright
 
 
-DEMO_USER = "runner@afs.invalid"
-# core/auth.py 의 현재 공통 초기 비밀번호. 데모 계정은 별도 비밀을 만들지 않는다.
+DEMO_USER = "admin"
+# 로컬 사전검증 설치의 관리자 계정. 외부 주소에서는 스크립트가 먼저 차단한다.
 DEMO_PASSWORD = "pass1"
 VIEWPORTS = ((1440, 900), (1280, 720))
 
@@ -56,19 +56,24 @@ def _metrics(page: Page) -> dict:
         real_account_visible: document.body.innerText.includes('@lsmnm.com'),
         placeholder_name_visible: document.body.innerText.includes('Jarvis'),
         permission_excluded_visible: document.body.innerText.includes('권한 범위에서 제외'),
+        operating_context_visible: document.body.innerText.includes('OPERATING CONTEXT')
+          && document.body.innerText.includes('LS MnM'),
         dialogs: document.querySelectorAll('[role="dialog"]').length,
         dialog_bar_visible: !dlg || (!!barRect && barRect.top >= 0 && barRect.bottom <= innerHeight),
         technical_instance_input_visible: !!diagInput && (!diagDetails || diagDetails.open)
           && getComputedStyle(diagInput).visibility !== 'hidden',
         ready_package_visible: document.body.innerText.includes('AFS 데모소재그룹')
           && document.body.innerText.includes('시연 가능'),
-        ready_package_business_kit_count_visible: document.body.innerText.includes('업무키트 8'),
+        ready_package_business_area_count_visible: document.body.innerText.includes('업무영역 8'),
+        ready_package_app_count_visible: document.body.innerText.includes('실행 앱 7'),
         preparing_package_visible: document.body.innerText.includes('AFS 배터리케미컬')
           && document.body.innerText.includes('준비 중'),
         legacy_profile_visible_as_package: document.body.innerText.includes('원료 구매·도입 경영 키트'),
         business_kit_group_count: businessKitGroups.length,
         business_kit_ids: businessKitGroups.map((el) => el.dataset.businessKit),
         business_kit_expanded_count: businessKitGroups.filter((el) => el.open).length,
+        sales_app_visible: document.body.innerText.includes('판매·납기·매출 영향'),
+        enterprise_app_visible: document.body.innerText.includes('전사 시나리오·실적 통합'),
       };
     }""")
 
@@ -86,7 +91,8 @@ def _open_data_prep(page: Page) -> None:
     # 메뉴 버튼의 접근 가능한 이름에는 상태/설명이 함께 붙을 수 있다. 표시 문구를 기준으로 찾되
     # 첫 번째가 아닌 패널 안 실제 항목을 누른다.
     page.locator('[role="menu"] button', has_text="업무 데이터 준비").first.click()
-    page.get_by_role("dialog").wait_for(timeout=15_000)
+    # 현재 제품은 모달이 아니라 전용 페이지로 연다. dialog 역할을 기다리면 기능이 열렸는데도
+    # 감사기만 실패한다 — 화면의 실제 제목을 완료 조건으로 삼는다.
     page.get_by_text("사용 가능한 샘플 기업 패키지", exact=True).wait_for(timeout=15_000)
     page.wait_for_timeout(1_000)
 
@@ -113,8 +119,13 @@ def main() -> int:
             page = context.new_page()
             page.on("console", lambda msg: report["console_errors"].append(msg.text)
                     if msg.type == "error" else None)
-            page.on("requestfailed", lambda req: report["network_failures"].append({
-                "url": req.url, "reason": req.failure or "unknown"}))
+            def record_failed(req):
+                # 페이지 이동·컨텍스트 종료가 진행 중 SSE를 끊는 ERR_ABORTED는 장애가 아니다.
+                if "/ws/timeline" in req.url and req.failure == "net::ERR_ABORTED":
+                    return
+                report["network_failures"].append({
+                    "url": req.url, "reason": req.failure or "unknown"})
+            page.on("requestfailed", record_failed)
             page.goto(args.front, wait_until="networkidle")
 
             key = f"{width}x{height}"
@@ -148,25 +159,31 @@ def main() -> int:
             failed.append(f"{size}: 데이터 준비 실존 계정 노출")
         if screens["home"]["placeholder_name_visible"]:
             failed.append(f"{size}: AI 비서 가칭 노출")
-        if not screens["home"]["permission_excluded_visible"]:
-            failed.append(f"{size}: 권한 밖 Trust 상태 안내 누락")
+        if not screens["home"]["operating_context_visible"]:
+            failed.append(f"{size}: 실제 회사 Operating Context 누락")
         if not screens["data_prep"]["dialog_bar_visible"]:
             failed.append(f"{size}: 작업공간 상단 바 가림")
         if screens["data_prep"]["technical_instance_input_visible"]:
             failed.append(f"{size}: 기술 식별자 기본 노출")
         if not screens["data_prep"]["ready_package_visible"]:
             failed.append(f"{size}: 시연 가능 패키지 누락")
-        if not screens["data_prep"]["ready_package_business_kit_count_visible"]:
-            failed.append(f"{size}: 시연 패키지의 업무키트 8종 모수 누락")
+        if not screens["data_prep"]["ready_package_business_area_count_visible"]:
+            failed.append(f"{size}: 시연 패키지의 업무영역 8종 모수 누락")
+        if not screens["data_prep"]["ready_package_app_count_visible"]:
+            failed.append(f"{size}: 시연 패키지의 실행 앱 7종 모수 누락")
         if not screens["data_prep"]["preparing_package_visible"]:
             failed.append(f"{size}: 준비 중 패키지 누락")
         if screens["data_prep"]["legacy_profile_visible_as_package"]:
             failed.append(f"{size}: 옛 축약 정의가 샘플 패키지로 노출")
         expected_kits = ["FOUNDATION"] + [f"BK-{n:02d}" for n in range(1, 9)]
         if screens["readiness"]["business_kit_ids"] != expected_kits:
-            failed.append(f"{size}: 업무키트 8종+기반팩 분류 불일치")
+            failed.append(f"{size}: 업무영역 8종+기반팩 분류 불일치")
         if screens["readiness"]["business_kit_expanded_count"] != 0:
             failed.append(f"{size}: 세부 데이터 계약이 기본으로 과다 노출")
+        if not screens["readiness"]["sales_app_visible"]:
+            failed.append(f"{size}: 판매·납기·매출 업무 앱 누락")
+        if not screens["readiness"]["enterprise_app_visible"]:
+            failed.append(f"{size}: 전사 시나리오·실적 통합 앱 누락")
     if report["network_failures"]:
         failed.append(f"네트워크 실패 {len(report['network_failures'])}건")
     if report["console_errors"]:

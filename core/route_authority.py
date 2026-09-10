@@ -142,6 +142,35 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "POST /api/v1/data-preparation/ownership/approve": (ADMIN_DATA_ACCESS,),
     "POST /api/v1/data-preparation/ownership/{binding_id}/revoke": (ADMIN_DATA_ACCESS,),
 
+    # ── [DAO-8] 외부 데이터 수집 오케스트레이터 ─────────────────────────
+    #   ★★★ 배정 기준은 **되돌리기 비용**이다(이 표의 원칙 그대로).
+    #     Dry-run 까지는 되돌릴 수 있다 — 격리 적재본에 한 줄도 쓰지 않고, 남는 것은
+    #     원문 보관본뿐이다. 그래서 `PROJECT_RUN`(데이터 사용자).
+    #     적용부터는 아니다 — 격리 DB 에 행이 들어가고 원장에 승인이 남는다.
+    #     그래서 `ADMIN_DATA_ACCESS`(데이터 관리자).
+    #   ⚠️ 둘을 같은 권한으로 두면 요청한 사람이 곧 적용하는 사람이 되고, 직무 분리가
+    #     이름만 남는다(위 「키트로 앱 만들기」와 같은 이유).
+    "POST /api/v1/external/acquisition/interpret": (PROJECT_RUN,),
+    #: 연구자료 «추천» — 읽기 전용 조언이고 아무것도 바꾸지 않는다.
+    #:   ⚠️ 수집이 아니다. 받아오는 행위는 사람이 한다(2026-09-08 결정).
+    "GET /api/v1/external/research/sources": (PROJECT_RUN,),
+    "POST /api/v1/external/research/recommend": (PROJECT_RUN,),
+    "POST /api/v1/external/acquisition/jobs": (PROJECT_RUN,),
+    "POST /api/v1/external/acquisition/jobs/{job_id}/discover": (PROJECT_RUN,),
+    "POST /api/v1/external/acquisition/jobs/{job_id}/dry-run": (PROJECT_RUN,),
+    #: ★ 되돌릴 수 없는 첫 단계 — 여기서 권한이 한 층 올라간다.
+    "POST /api/v1/external/acquisition/jobs/{job_id}/apply": (ADMIN_DATA_ACCESS,),
+    #: [F-6] 승격 = 「이 값을 회사 계획이 읽는 자리에 올린다」 — 적용과 같은 층이다.
+    "POST /api/v1/external/acquisition/jobs/{job_id}/promote": (ADMIN_DATA_ACCESS,),
+    #: ★ 새 데이터 계약을 만들고 승인하는 일 — 「이 자료를 무엇으로 부를 것인가」의 결정이다.
+    "POST /api/v1/external/acquisition/contract-proposals/{contract_key}":
+        (ADMIN_DATA_ACCESS,),
+    "POST /api/v1/external/acquisition/contract-proposals/{proposal_id}/decision":
+        (ADMIN_DATA_ACCESS,),
+    #: ★ 자동 갱신은 **사람 없이 도는 것**을 켜는 일이다 — 가장 높은 층에 둔다.
+    "POST /api/v1/external/acquisition/jobs/{job_id}/schedule": (ADMIN_DATA_ACCESS,),
+    "POST /api/v1/external/acquisition/jobs/{job_id}/disable": (ADMIN_DATA_ACCESS,),
+
     # ── [BDR-7 / G2·G4] 기준선·시뮬레이션·의사결정 ──────────────────────
     #   ★ 기준선을 «고정» 하는 것과 그 위에서 계산하는 것은 둘 다 운영이다.
     #   ⚠️ `GET /impact-path` 는 읽기라 표에 넣지 않는다(표는 쓰기 전용).
@@ -206,6 +235,7 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     "GET /api/v1/calculation/work-scenarios": (PROJECT_RUN,),
     "GET /api/v1/calculation/work-scenarios/{scenario_id}": (PROJECT_RUN,),
     "GET /api/v1/calculation/work-scenarios/{scenario_id}/composition": (PROJECT_RUN,),
+    "POST /api/v1/calculation/work-scenarios/{scenario_id}/decision": (PROJECT_RUN,),
     "POST /api/v1/calculation/work-scenarios/{scenario_id}/contributions/{app_id}":
         (PROJECT_RUN,),
     # ★★★ 실행 승인은 **시스템 관리자만**. 「이 산식으로 만든 숫자를 회의에 올려도 되는가」

@@ -1680,6 +1680,60 @@ def test_전사_조합_API는_실제_세_부서_결과를_결속하고_재무를
     assert got["financial_impact"]["reason_code"] == "FINANCIAL_BRIDGE_REQUIRED"
 
 
+def test_조합_직후_부서결과가_바뀌면_옛_지문으로_재무를_계산하지_않는다():
+    import api.routes.calculation_control as cal
+
+    scenario = {
+        "latest_by_app": {
+            app_id: {
+                "segment_ref": segment,
+                "result_fingerprint": f"new-{app_id}",
+                "as_of": "2026-06-01T00:00:00Z",
+                "used_snapshots": {f"DATA-{app_id}": f"ds-{app_id}"},
+            }
+            for app_id, (_role, segment) in cal.ews.APP_SEGMENTS.items()
+            if app_id in cal.ews.REQUIRED_APPS
+        }
+    }
+    composition = {
+        "status": cal.ews.COMPOSITION_READY,
+        "as_of": "2026-06-01T00:00:00Z",
+        "department_results": [
+            {"segment_ref": row["segment_ref"],
+             "result_fingerprint": row["result_fingerprint"]}
+            for row in scenario["latest_by_app"].values()
+        ],
+        "used_snapshots": {
+            key: value
+            for row in scenario["latest_by_app"].values()
+            for key, value in row["used_snapshots"].items()
+        },
+    }
+    cal._assert_composition_source(scenario, composition)
+
+    scenario["latest_by_app"]["APP-06"]["result_fingerprint"] = "newer-result"
+    with pytest.raises(cal.ews.WorkScenarioError, match="조합 중 변경"):
+        cal._assert_composition_source(scenario, composition)
+
+
+def test_전사_조합_제품라우트가_동시갱신_검사를_실제로_호출한다(
+        env, monkeypatch, tmp_path):
+    import api.routes.calculation_control as cal
+
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    sid = _create_work_scenario(env)["scenario_id"]
+
+    def changed(*_args):
+        raise cal.ews.WorkScenarioError(
+            "전사 시나리오가 조합 중 변경되었습니다. 다시 시도해 주세요.")
+
+    monkeypatch.setattr(cal, "_assert_composition_source", changed)
+    response = _client(env).get(
+        f"/api/v1/calculation/work-scenarios/{sid}/composition")
+    assert response.status_code == 409, response.text[:300]
+    assert "조합 중 변경" in response.text
+
+
 def _seed_financial_bridge_sources(env, tmp_path):
     """제품 제안 경로가 읽는 MDM-07·EXT-01을 실제 인증판으로 세운다."""
     common = {
@@ -1707,8 +1761,10 @@ def _seed_financial_bridge_sources(env, tmp_path):
          "account_type": "EXPENSE", "cost_element": "CONVERSION_COST",
          "currency": "KRW", "active": "True"},
     ]
-    fx = [{**common, "observation_id": "fx-usd-krw-202609",
-           "indicator_code": "USD_KRW", "value": "1330.0", "unit": "KRW/USD"}]
+    fx = [{**common, "observation_id": "fx-usd-krw-202605",
+           "indicator_code": "USD_KRW", "observed_at": "2026-05-31",
+           "published_at": "2026-06-01", "vintage_date": "2026-06-01",
+           "value": "1330.0", "unit": "KRW/USD"}]
     for key, rows in (("MDM-07", accounts), ("EXT-01", fx)):
         columns = list(rows[0])
         binding = env["store"].create_binding(
@@ -1720,6 +1776,59 @@ def _seed_financial_bridge_sources(env, tmp_path):
         snap = svc.ingest(
             env["store"], binding=binding, payload=dv.csv_bytes(rows, columns),
             file_name=f"{key}.csv", workspace_root=str(tmp_path / "bridge-raw"))
+        certified = svc.run_pipeline(
+            env["store"], snap["snapshot_id"], rows, columns,
+            control={"row_count": len(rows)})
+        assert certified["state"] == m.DEMO_CERTIFIED
+
+
+def _seed_financial_model_sources(env, tmp_path):
+    """FIN-01·FIN-02를 제품 인증판으로 세워 재무 모델의 실제 API 경로를 연다."""
+    from datetime import date, timedelta
+    from decimal import Decimal
+
+    common = {
+        "tenant_id": env["tenant"], "scope_node_id": env["scope"],
+        "entity_mode": "REAL", "data_class": "SYNTHETIC",
+        "business_data_kind": "ACTUAL", "data_origin": "SYNTHETIC",
+    }
+    sales = env["slice"]["SLS-01"][0]
+    products = sorted({str(row["product_id"]) for row in sales})
+    costs = []
+    for product in products:
+        for component, amount in (("MATERIAL", "40"), ("CONVERSION", "10")):
+            costs.append({
+                **common, "cost_record_id": f"COST-{product}-{component}",
+                "fiscal_period": "2026-02", "product_id": product,
+                "cost_component": component, "standard_unit_cost": amount,
+                "actual_unit_cost": amount, "variance_amount": "0",
+                "currency": "KRW", "quantity_uom": "TON",
+            })
+    receivables = []
+    for row in sales:
+        due = date.fromisoformat(str(row["due_date"])) + timedelta(days=45)
+        receivables.append({
+            **common, "finance_document_id": f"AR-{row['sales_line_id']}",
+            "document_type": "AR", "partner_id": str(row.get("customer_id") or "CUSTOMER"),
+            "reference_id": str(row["sales_line_id"]), "posting_date": str(row["due_date"]),
+            "due_date": due.isoformat(),
+            "amount": str(Decimal(str(row["order_quantity"]))
+                          * Decimal(str(row["unit_price"]))),
+            "currency": str(row["currency"]),
+            "paid_at": "", "status": "OPEN",
+        })
+
+    for key, rows in (("FIN-01", costs), ("FIN-02", receivables)):
+        columns = list(rows[0])
+        binding = env["store"].create_binding(
+            instance_id=env["instance_id"], dataset_contract_key=key,
+            provider=m.PROVIDER_FILE_SNAPSHOT, config={}, tenant_id=env["tenant"],
+            scope_node_id=env["scope"], entity_mode="REAL")
+        for target in (m.VALIDATED, m.APPROVED, m.ACTIVE):
+            binding = env["store"].transition(binding["binding_id"], target)
+        snap = svc.ingest(
+            env["store"], binding=binding, payload=dv.csv_bytes(rows, columns),
+            file_name=f"{key}.csv", workspace_root=str(tmp_path / "financial-model-raw"))
         certified = svc.run_pipeline(
             env["store"], snap["snapshot_id"], rows, columns,
             control={"row_count": len(rows)})
@@ -1827,7 +1936,7 @@ def test_금융브리지_승인과_철회가_APP07_다음관문에_즉시_반영
         assert response.status_code == 200, response.text[:300]
     composed = _data(_client(env).get(
         f"/api/v1/calculation/work-scenarios/{sid}/composition"))
-    assert composed["financial_impact"]["reason_code"] == "FINANCIAL_MODEL_REQUIRED"
+    assert composed["financial_impact"]["reason_code"] == "FINANCIAL_DATA_REQUIRED"
     assert "values" not in composed["financial_impact"]
 
     revoked = _data(_client(env, approver).post(
@@ -1837,3 +1946,121 @@ def test_금융브리지_승인과_철회가_APP07_다음관문에_즉시_반영
     composed = _data(_client(env).get(
         f"/api/v1/calculation/work-scenarios/{sid}/composition"))
     assert composed["financial_impact"]["reason_code"] == "FINANCIAL_BRIDGE_REQUIRED"
+
+
+def test_승인브리지와_재무인증판이_있으면_APP07이_기간별_손익현금을_계산한다(
+        env, monkeypatch, tmp_path, isolated_side_stores):
+    from core import financial_bridge_contract as fbc
+
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    _ready(env, monkeypatch)
+    _seed_financial_bridge_sources(env, tmp_path)
+    _seed_financial_model_sources(env, tmp_path)
+    admin = _admin(env)
+    draft = _data(admin.post(
+        "/api/v1/calculation/financial-bridge/contracts",
+        json=_financial_bridge_payload(env, admin)))
+    approver = "financial.model.approver@afs.invalid"
+    env["org"].upsert_user(
+        approver, "재무모델 승인자", primary_dept_id=DEPT, is_admin=True, actor="seed")
+    approved = _data(_client(env, approver).post(
+        f"/api/v1/calculation/financial-bridge/contracts/{draft['contract_id']}/approve",
+        json={"instance_id": env["instance_id"],
+              "seen_fingerprint": draft["fingerprint"],
+              "rationale": "전사 재무 기간 이동 산식과 계정 결속 검토"}))
+    assert approved["status"] == fbc.APPROVED
+
+    sid = _create_work_scenario(env)["scenario_id"]
+    for app_id in ("APP-01", "APP-03", "APP-06"):
+        response = _client(env).post(
+            f"/api/v1/calculation/work-scenarios/{sid}/contributions/{app_id}",
+            json=_body(env))
+        assert response.status_code == 200, response.text[:300]
+
+    composition = _data(_client(env).get(
+        f"/api/v1/calculation/work-scenarios/{sid}/composition"))
+    impact = composition["financial_impact"]
+    assert impact["status"] == "COMPLETE", impact
+    assert impact["result_fingerprint"]
+    assert impact["reporting_currency"] == "KRW"
+    assert impact["affected_sales_lines"] >= 1
+    assert impact["period_impacts"]
+    assert set(impact["summary"]) == {
+        "inventory_in_transit_krw", "revenue_timing_exposure_krw",
+        "material_conversion_margin_timing_exposure_krw",
+        "cash_receipts_timing_exposure_krw"}
+    assert "account_code" not in str(impact)
+    assert "snapshot_id" not in str(impact)
+
+    made = _data(_client(env).post(
+        f"/api/v1/calculation/work-scenarios/{sid}/decision", json={
+            "question": "원료 도입 지연 대응안을 실행할 것인가?",
+            "due_at": "2026-06-15T00:00:00Z",
+            "seen_composition_fingerprint": composition["composition_fingerprint"],
+            "seen_financial_result_fingerprint": impact["result_fingerprint"],
+        }))
+    assert made["decision"]["decision_id"]
+
+    from core.decision_case import decision_case
+    from core import publication as pub
+    saved = decision_case.get(made["decision"]["decision_id"], viewer_scopes=None)
+    assert saved["scenario_id"] == sid
+    assert saved["baseline_id"] == composition["baseline_id"]
+    assert saved["evidence"]["composition_fingerprint"] == \
+        composition["composition_fingerprint"]
+    assert saved["evidence"]["financial_result_fingerprint"] == \
+        impact["result_fingerprint"]
+    assert saved["package"]["financial_impact"]["summary"] == impact["summary"]
+
+    draft = pub.publication.create(
+        title="원료 도입 지연 전사 영향 보고", created_by=ACTOR,
+        source_type=pub.SOURCE_DECISION, source_id=saved["decision_id"],
+        scope_id=env["scope"], tenant_id=env["tenant"])
+    rendered = pub.publication.render(
+        draft["publication_id"], ACTOR, viewer_scopes=None)
+    document = rendered["current_version"]["document"]
+    financial_section = next(
+        section for section in document["sections"]
+        if section["key"] == "financial_impact")
+    assert financial_section["value"]["summary"] == impact["summary"]
+    assert document["evidence"]["source_evidence_hash"] == saved["evidence_hash"]
+
+
+def test_APP07_재무계산이_막혀있으면_숫자_안건을_생성하지_않는다(
+        env, monkeypatch, tmp_path):
+    _isolate_work_scenarios(env, monkeypatch, tmp_path)
+    sid = _create_work_scenario(env)["scenario_id"]
+    response = _client(env).post(
+        f"/api/v1/calculation/work-scenarios/{sid}/decision", json={
+            "question": "원료 도입 지연 대응안을 실행할 것인가?",
+            "due_at": "2026-06-15T00:00:00Z",
+            "seen_composition_fingerprint": "old-composition",
+            "seen_financial_result_fingerprint": "old-financial-result",
+        })
+    # 부서 결과가 없는 경우에는 지문 대조 전에 BLOCKED라는 현재 답을 그대로 돌려준다.
+    assert response.status_code == 200
+    assert _data(response)["decision"] is None
+
+
+def test_APP07_안건은_화면에서_본_지문이_달라지면_생성하지_않는다(
+        env, monkeypatch):
+    import api.routes.calculation_control as cal
+
+    scenario = {"scenario_id": "ews-current"}
+    composition = {
+        "status": "READY", "composition_fingerprint": "current-composition",
+        "financial_impact": {
+            "status": "COMPLETE", "result_fingerprint": "current-financial"},
+    }
+    monkeypatch.setattr(
+        cal, "_compose_enterprise_scenario",
+        lambda *_args: (scenario, composition))
+    response = _client(env).post(
+        "/api/v1/calculation/work-scenarios/ews-current/decision", json={
+            "question": "원료 도입 지연 대응안을 실행할 것인가?",
+            "due_at": "2026-06-15T00:00:00Z",
+            "seen_composition_fingerprint": "old-composition",
+            "seen_financial_result_fingerprint": "old-financial",
+        })
+    assert response.status_code == 409
+    assert "최신 결과" in response.text

@@ -89,7 +89,7 @@ def test_app_panel_passes_identity_and_uses_business_view():
     src = PANEL.read_text(encoding="utf-8")
     assert "<KitBusinessView" in src
     assert "appId={row.app_id}" in src
-    assert "preferredDatasetName(appId, ds)" in src
+    assert "chooseDataset: (datasets) => preferredDatasetName(appId, datasets)" in src
     assert "datasetDisplayName(appId, d)" in src
     assert "asOf={rows.as_of}" in src and "stale={rows.stale}" in src
 
@@ -177,3 +177,19 @@ def test_public_app_api_keeps_internal_snapshot_ids_out_of_the_client_contract()
         encoding="utf-8")
     assert "as_of: string" in src and "stale: boolean" in src
     assert "snapshot_id:" not in src
+
+def test_enterprise_app_composes_financials_and_saves_the_same_result_as_a_decision():
+    panel = (ROOT / "frontend" / "src" / "components" /
+             "PathCalcPanel.tsx").read_text(encoding="utf-8")
+    api = (ROOT / "frontend" / "src" / "lib" / "calculationApi.ts").read_text(
+        encoding="utf-8")
+    assert "getEnterpriseComposition" in panel
+    assert "전사 운영 영향 조합" in panel
+    assert "세 부서 운영 영향 결합 완료" in panel
+    assert "composition.financial_impact?.message" in panel
+    assert "createEnterpriseDecision" in panel
+    assert "의사결정 안건으로 저장" in panel
+    assert "seen_composition_fingerprint" in api
+    assert "seen_financial_result_fingerprint" in api
+    assert "FINANCIAL_BRIDGE_REQUIRED" in api
+    assert "/composition`" in api

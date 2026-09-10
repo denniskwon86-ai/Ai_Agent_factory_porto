@@ -629,6 +629,275 @@
   background: var(--surface-card);
   box-shadow: var(--surface-shadow);
 }
+
+/* 재무·의사결정 보고서 전용 표시. 원문은 바꾸지 않고 정보 위계와 표만 임원 보고 형식으로 읽힌다. */
+.afs-studio .executive-report {
+  --report-font-scale: 1;
+  display: grid;
+  gap: 18px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  color: #18243a;
+  font-size: calc(14px * var(--report-font-scale));
+}
+.afs-studio .executive-report.report-font-0 { --report-font-scale: .92; }
+.afs-studio .executive-report.report-font-1 { --report-font-scale: 1; }
+.afs-studio .executive-report.report-font-2 { --report-font-scale: 1.12; }
+.afs-studio .report-view-controls {
+  position: sticky;
+  z-index: 3;
+  top: -16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #d8e0eb;
+  background: rgba(255, 255, 255, .96);
+  backdrop-filter: blur(8px);
+}
+.afs-studio .report-view-switch,
+.afs-studio .report-font-controls { display: flex; align-items: center; gap: 6px; }
+.afs-studio .report-view-controls button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #b9c6d8;
+  border-radius: 6px;
+  color: #263b5b;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.afs-studio .report-view-controls button[aria-pressed='true'] {
+  border-color: var(--ls-navy);
+  color: #fff;
+  background: var(--ls-navy);
+}
+.afs-studio .report-view-controls button:focus-visible,
+.afs-studio .report-expand:focus-visible { outline: 2px solid var(--action-focus-ring); outline-offset: 2px; }
+.afs-studio .report-view-controls button:disabled { opacity: .42; cursor: default; }
+.afs-studio .report-font-controls span { margin-right: 3px; color: #64748b; font-size: 12px; font-weight: 700; }
+.afs-studio .report-title-band {
+  padding: clamp(24px, 4vw, 46px);
+  border-radius: 12px;
+  color: #fff;
+  background: linear-gradient(120deg, #071c3c, #123d6b 72%, #165475);
+  box-shadow: 0 14px 32px rgba(7, 28, 60, .16);
+}
+.afs-studio .report-title-band small { color: #b8d7e8; font-size: .78em; font-weight: 900; letter-spacing: .14em; }
+.afs-studio .report-title-band h1 { max-width: 920px; margin: 10px 0 12px; color: #fff; font-size: 2.05em; line-height: 1.22; letter-spacing: -.025em; }
+.afs-studio .report-title-band p { margin: 0; color: #d9e7f3; font-size: 1em; }
+.afs-studio .report-section-nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.afs-studio .report-section-nav a {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid #dbe3ed;
+  border-radius: 7px;
+  color: #334865;
+  background: #f7f9fc;
+  font-size: .86em;
+  font-weight: 750;
+  text-decoration: none;
+}
+.afs-studio .report-section-nav a:hover { border-color: #8ea4bf; background: #fff; }
+.afs-studio .report-section-nav a span { color: var(--ls-red); font-size: .78em; font-weight: 950; }
+.afs-studio .report-sections { display: grid; gap: 14px; }
+.afs-studio .report-section {
+  scroll-margin-top: 70px;
+  overflow: hidden;
+  border: 1px solid #dbe3ed;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 5px 16px rgba(29, 46, 70, .055);
+}
+.afs-studio .report-section > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f7f9fc;
+}
+.afs-studio .report-section > header span {
+  display: grid;
+  flex: 0 0 32px;
+  place-items: center;
+  height: 32px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--ls-navy);
+  font-size: .72em;
+  font-weight: 900;
+}
+.afs-studio .report-section > header h2 { margin: 0; color: #14243d; font-size: 1.28em; letter-spacing: -.012em; }
+.afs-studio .report-section-emphasis { border-top: 3px solid var(--ls-red); }
+.afs-studio .report-section-emphasis > header { background: #fff7f6; }
+.afs-studio .report-section-emphasis > header span { background: var(--ls-red); }
+.afs-studio .report-section-body { padding: clamp(18px, 2.7vw, 30px); }
+.afs-studio .report-content-group { display: flow-root; }
+.afs-studio .report-section-body h3 { margin: 24px 0 9px; color: #203a5d; font-size: 1.08em; }
+.afs-studio .report-section-body h3:first-child { margin-top: 0; }
+.afs-studio .report-section-body p { margin: 0 0 12px; color: #334155; font-size: 1em; line-height: 1.72; }
+.afs-studio .report-section-body strong { color: #132c50; font-weight: 900; }
+.afs-studio .report-section-body code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: #213855;
+  background: #edf2f7;
+  font-size: .88em;
+}
+.afs-studio .report-section-body ul,
+.afs-studio .report-section-body ol { display: grid; gap: 8px; margin: 8px 0 18px; padding-left: 25px; }
+.afs-studio .report-section-body li { padding-left: 4px; color: #334155; line-height: 1.65; }
+.afs-studio .report-section-body li::marker { color: var(--ls-red); font-weight: 900; }
+.afs-studio .report-callout-line {
+  padding: 11px 13px;
+  border-left: 4px solid #bf2832;
+  border-radius: 5px;
+  background: #fff6f5;
+}
+.afs-studio .report-table-wrap { max-width: 100%; margin: 14px 0 20px; overflow: auto; border: 1px solid #d6dee9; border-radius: 8px; }
+.afs-studio .report-data-table { width: 100%; min-width: 640px; border-collapse: collapse; }
+.afs-studio .report-data-table th,
+.afs-studio .report-data-table td { padding: 11px 13px; border-bottom: 1px solid #e3e9f1; text-align: right; vertical-align: middle; }
+.afs-studio .report-data-table th { color: #fff; background: #183555; font-size: .84em; font-weight: 850; white-space: nowrap; }
+.afs-studio .report-data-table th:first-child,
+.afs-studio .report-data-table td:first-child { text-align: left; font-weight: 800; }
+.afs-studio .report-data-table tbody tr:nth-child(even) { background: #f8fafc; }
+.afs-studio .report-data-table tbody tr:last-child td { border-bottom: 0; font-weight: 850; }
+.afs-studio .report-data-table td[data-tone='positive'] { color: #086a5a; font-weight: 850; }
+.afs-studio .report-data-table td[data-tone='negative'] { color: #a6242d; font-weight: 850; }
+.afs-studio .report-expand {
+  justify-self: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid var(--ls-navy);
+  border-radius: 7px;
+  color: var(--ls-navy);
+  background: #fff;
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+}
+@media (max-width: 720px) {
+  .afs-studio .report-view-controls { align-items: stretch; flex-direction: column; }
+  .afs-studio .report-font-controls { justify-content: flex-end; }
+  .afs-studio .report-title-band h1 { font-size: 1.65em; }
+  .afs-studio .report-section-nav { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 출력은 현재 보고서만 대상으로 한다. 브라우저 출력 창에서 실제 프린터 또는 PDF 저장을 고른다. */
+@media print {
+  @page { size: A4 portrait; margin: 14mm; }
+  html,
+  body.printing-executive-report {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  body.printing-executive-report .print-report-root {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  body.printing-executive-report .executive-report {
+    position: static;
+    display: block;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    font-size: 10.5pt;
+  }
+  body.printing-executive-report .report-view-controls,
+  body.printing-executive-report .report-section-nav,
+  body.printing-executive-report .report-expand { display: none !important; }
+  body.printing-executive-report .report-title-band {
+    margin-bottom: 7mm;
+    padding: 10mm;
+    box-shadow: none;
+  }
+  body.printing-executive-report .report-sections { display: block; }
+  body.printing-executive-report .report-section {
+    margin-bottom: 5mm;
+    overflow: visible !important;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 0;
+    break-inside: auto;
+    box-shadow: none;
+  }
+  /* 대단원은 새 페이지에서 시작한다. 큰 대단원 안에서는 아래 논리 문단 묶음 사이에서 넘긴다. */
+  body.printing-executive-report .report-section + .report-section {
+    break-before: page;
+    page-break-before: always;
+  }
+  body.printing-executive-report .report-section > header {
+    break-inside: avoid;
+    break-after: avoid;
+  }
+  body.printing-executive-report .report-section-body {
+    display: block;
+    overflow: visible !important;
+    padding: 5mm 2mm;
+    break-inside: auto;
+  }
+  body.printing-executive-report .report-content-group {
+    display: block;
+    overflow: visible !important;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+  body.printing-executive-report .report-content-group + .report-content-group {
+    margin-top: 4mm;
+  }
+  /* 문장 묶음은 페이지 경계에서 자르지 않는다. 긴 섹션은 문단·목록 항목 사이에서만 넘긴다. */
+  body.printing-executive-report .report-section-body p,
+  body.printing-executive-report .report-section-body h3,
+  body.printing-executive-report .report-section-body li,
+  body.printing-executive-report .report-callout-line {
+    display: block;
+    overflow: visible !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    orphans: 3;
+    widows: 3;
+  }
+  body.printing-executive-report .report-section-body h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  body.printing-executive-report .report-section-body ul,
+  body.printing-executive-report .report-section-body ol {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+  body.printing-executive-report .report-table-wrap {
+    overflow: visible;
+    break-inside: auto;
+  }
+  body.printing-executive-report .report-data-table thead { display: table-header-group; }
+  body.printing-executive-report .report-data-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  body.printing-executive-report .report-data-table { min-width: 0; font-size: 9pt; }
+  body.printing-executive-report .report-data-table th,
+  body.printing-executive-report .report-data-table td { padding: 2.5mm 3mm; }
+}
 .afs-studio .artifact-aux {
   display: grid;
   gap: 3px;
@@ -849,6 +1118,40 @@
 @media (max-width: 1279px) {
   .afs-studio .studio-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .afs-studio .work-map { border-right: 0; border-bottom: 1px solid var(--surface-border); max-height: 34vh; }
+}
+
+/* 보고서·문서 산출물 집중 보기. 범용 보고서는 WBS가 없으므로 빈 238px 열을 유지하지 않는다.
+ * 사용자가 실행 구조를 함께 보고 싶을 때는 Toolbar에서 즉시 되돌릴 수 있다. */
+.afs-studio .studio-grid.wide-canvas {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.afs-studio .studio-grid.wide-canvas > .work-map { display: none; }
+.afs-studio .studio-grid.wide-canvas .adaptive-canvas { grid-column: 1; }
+.afs-studio .studio-grid.wide-canvas .artifact-body {
+  padding-inline: clamp(22px, 3.5vw, 58px);
+}
+
+/* 보고서 집중 보기. 구성요소를 제거하거나 언마운트하지 않고 CSS로 잠시 접는다.
+ * Toolbar는 남겨 같은 자리에서 전체 구조로 즉시 복귀할 수 있다. */
+.afs-studio.focus-canvas {
+  grid-template-rows: minmax(0, 1fr);
+}
+.afs-studio.focus-canvas > .project-head,
+.afs-studio.focus-canvas > .run-controls,
+.afs-studio.focus-canvas > .stage-map {
+  display: none;
+}
+.afs-studio.focus-canvas .studio-grid {
+  grid-row: 1;
+}
+.afs-studio.focus-canvas .interaction-dock {
+  display: none;
+}
+.afs-studio.focus-canvas .adaptive-canvas,
+.afs-studio.focus-canvas .artifact-canvas {
+  min-height: 0;
+  height: 100%;
 }
 
 /* ── [7단계 전제] 실행 통제 ──────────────────────────────────────────────────

@@ -54,6 +54,8 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
   const [selectedStageId, setSelectedStageId] = useState('');
   const [selectedWbsId, setSelectedWbsId] = useState<string | undefined>(undefined);
   const vm = useFactoryViewModel({ selectedStageId, selectedWbsId });
+  const [wideOverride, setWideOverride] = useState<boolean | null>(null);
+  const [focusView, setFocusView] = useState(false);
 
   // [4단계] 요구 확인 선택 상태를 **여기서** 갖는다. Canvas 가 고르고 Dock 이 제출하므로
   // 둘의 공통 부모가 보관해야 한다(§2.2/§2.3 분업).
@@ -76,13 +78,18 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
   const shownStage = vm.stages.find(
     (s) => s.id === (selectedStageId || vm.currentStageId),
   );
+  const shownStageId = selectedStageId || vm.currentStageId;
+  // 범용 보고서는 WBS를 만들지 않고 agent artifact를 직접 남긴다. 이때 빈 WBS 열을 고정하면
+  // 읽을 본문만 좁아진다. 실제 문서가 있고 WBS가 없으면 넓은 읽기 모드를 기본으로 한다.
+  const automaticWideView = Boolean(vm.docs[(shownStageId || '').toUpperCase()]) && vm.wbs.length === 0;
+  const wideView = wideOverride ?? automaticWideView;
 
   return (
     // `HubDialog` 를 쓴다 — 이관 작업이 자체 `fixed inset-0` 모달을 이것으로 통일했고, Escape
     // 닫기·포커스 트랩·배경 inert·전체화면(100dvh)을 이미 준다. 여기서 다시 만들면 그 계약이
     // 두 벌이 되고, 한쪽만 고쳐지는 날이 온다.
     <HubDialog label="SW 제작 작업공간 (Adaptive Production Studio · 병행 카나리)" onClose={onClose}>
-      <div className="afs-studio">
+      <div className={`afs-studio${focusView ? ' focus-canvas' : ''}`}>
       {/* [§2.1 상시 노출] Project Header — 7단계(3패널 제거)의 전제다. 이것 없이 3패널을
           지우면 사용자가 실행을 멈출 수 없다(§8 기능 게이트). */}
       <ProjectHeader
@@ -103,7 +110,7 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
         onOpenDependencies={() => setInspectorOpen(true)}
       />
 
-      <div className="studio-grid">
+      <div className={`studio-grid${wideView ? ' wide-canvas' : ''}`}>
         <WbsSpine vm={vm} onSelectTask={(id) => setSelectedWbsId((prev) => (prev === id ? undefined : id))} />
 
         <section className="adaptive-canvas">
@@ -115,6 +122,16 @@ export function AdaptiveProductionStudio({ onClose }: AdaptiveProductionStudioPr
                 && ` · ${vm.connection === 'reconnecting' ? '재연결 중' : '연결 끊김'}`}
             </span>
             <div className="spacer" />
+            <button type="button" className="inspector-btn"
+              onClick={() => setFocusView((value) => !value)}
+              aria-pressed={focusView}>
+              {focusView ? '전체 구조 보기' : '보고서 크게 보기'}
+            </button>
+            <button type="button" className="inspector-btn"
+              onClick={() => setWideOverride(!wideView)}
+              aria-pressed={wideView}>
+              {wideView ? '실행 구조 함께 보기' : '보고서 넓게 보기'}
+            </button>
             {/* [5단계] 「근거·상태」 — §2.4 의 다른 입구. 영구 우측 열을 두지 않는 대신 이 버튼이
                 오버레이를 연다. */}
             <button type="button" className="inspector-btn"

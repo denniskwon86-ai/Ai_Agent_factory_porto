@@ -42,7 +42,8 @@ SNAPSHOT_FILE = "config_snapshot.json"
 
 #: 지문 계산에 넣는 에이전트 필드. **실행 결과를 바꾸는 것만.**
 #: ⚠️ `name_ko`·`role` 같은 표시용 필드를 넣지 말 것 — 오탈자 수정이 재컴파일을 부른다.
-_AGENT_KEYS = ("id", "enabled", "hotl_after", "skill", "stage", "model_tier", "llm", "debate")
+_AGENT_KEYS = ("id", "enabled", "hotl_after", "skill", "stage", "model_tier", "llm", "debate",
+               "data_contracts")
 
 
 @dataclass(frozen=True)

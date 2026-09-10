@@ -153,8 +153,9 @@ export function RunControls({ vm }: RunControlsProps) {
   const replanWhy = !vm.docs.PLANNING
     ? '기획 산출물(PRD)이 아직 없습니다 — 나눌 대상이 없습니다.'
     : run.active ? `지금은 «${run.label}» 상태입니다 — 멈춘 뒤에 재분할할 수 있습니다.` : '';
-  const releaseWhy = run.wbsTotal === 0
-    ? 'WBS 가 없어 저장할 산출물이 없습니다.' : '';
+  const hasDocuments = Object.keys(vm.docs || {}).length > 0;
+  const releaseWhy = run.wbsTotal === 0 && !hasDocuments
+    ? '저장할 산출물이 아직 없습니다.' : '';
   // ⚠️ 수정 요구는 **끝난 것이 있어야** 의미가 있다. 완료 0건이면 고칠 대상이 없다
   //   (종전 통제실도 `doneTasks > 0` 일 때만 이 칸을 보여 준다 — 같은 조건을 쓴다).
   const revisionWhy = !pid ? '프로젝트를 먼저 선택하십시오.'

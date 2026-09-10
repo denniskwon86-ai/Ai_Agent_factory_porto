@@ -395,7 +395,7 @@ def test_막힌_사유를_세어_둔다():
     """⚠️ 로그만 남기면 아무도 세지 않는다 — 「왜 경로가 비었나」에 답할 수 있어야 한다."""
     before = R.stats.snapshot().get("mdm_type_not_wired", 0)
     result = R.product_object_scope_resolver(
-        ObjectRef("mdm", "cost-center", "opaque-object"),
+        ObjectRef("mdm", "unknown-reference", "opaque-object"),
         _ctx(tenant_id="tenant", entity_mode="REAL"))
     assert result.status == ontology_resolve.UNAVAILABLE
     assert R.stats.snapshot().get("mdm_type_not_wired", 0) == before + 1
@@ -407,6 +407,7 @@ def test_막힌_사유를_세어_둔다():
     ("mdm", "location"),
     ("mdm", "equipment"),
     ("mdm", "account"),
+    ("mdm", "cost-center"),
     ("mdm", "logistics-reference"),
     ("mdm", "bom-line"),
     ("mdm", "routing-operation"),
@@ -426,14 +427,6 @@ def test_지원_유형은_미배선이_아니라_물질화_필요로_답한다(
         _ctx(tenant_id="tenant", entity_mode="REAL"))
     assert result.status == ontology_resolve.UNAVAILABLE
     assert "물질화" in result.reason
-
-
-def test_사람용_명칭_미완료_원가센터는_명시적으로_차단한다():
-    result = R.product_object_scope_resolver(
-        ObjectRef("mdm", "cost-center", "opaque-object"),
-        _ctx(tenant_id="tenant", entity_mode="REAL"))
-    assert result.status == ontology_resolve.UNAVAILABLE
-    assert "계약" in result.reason
 
 
 def test_g4_driver_is_unbound_until_an_approved_release_exists(monkeypatch):

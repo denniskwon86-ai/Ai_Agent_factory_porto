@@ -1,0 +1,18 @@
+[
+  {
+    "id": "A_announcer",
+    "voice": "Kore",
+    "model": "gemini-3.1-flash-tts-preview",
+    "duration": 12.6,
+    "script": "더 나은 변화는, 현장에서 시작됩니다. 오늘의 작은 경험이 쌓여, 내일의 선택을 바꿉니다. 이제, 다음 가능성을 만나보세요.",
+    "file": "A_announcer.wav"
+  },
+  {
+    "id": "B_warm_narrator",
+    "voice": "Sulafat",
+    "model": "gemini-3.1-flash-tts-preview",
+    "duration": 13.68,
+    "script": "더 나은 변화는, 현장에서 시작됩니다. 오늘의 작은 경험이 쌓여, 내일의 선택을 바꿉니다. 이제, 다음 가능성을 만나보세요.",
+    "file": "B_warm_narrator.wav"
+  }
+]
