@@ -72,7 +72,7 @@
 
 ---
 
-## 3. 고쳐야 할 것 — `industry_code` 가 틀렸다
+## 3. 고친 것 — `industry_code` 가 틀렸다 ✅ 2026-09-10
 
 `company_profiles/AFS-VIRTUAL-GLOBAL-SMELTING.json` 이 이렇게 되어 있다.
 
@@ -93,6 +93,19 @@ C2422 비철금속 압연·압출·연신
 
 `manifest.json` 의 `industry_codes: ["C24"]` 는 맞다(1 차 금속 제조업). 다만 제련
 특화 판본에서는 **`["C2421"]`** 로 좁히는 편이 대상 매칭에 정확하다.
+
+### ⚠️ 정본은 생성기다 — 산출물을 직접 고치면 덮어써진다
+
+`company_profiles/*.json` 과 `samples/**/*.csv` 는 **`scripts/generate_sample_company_starter_kit.py`
+가 만드는 산출물**이다. 프로파일 JSON 을 직접 고쳤더니 재생성 한 번에 되돌아갔다.
+`industry_code` 도 생성기 안에 하드코딩돼 있어 거기를 고쳐야 한다.
+
+### ⚠️ Excel 재계산에는 LibreOffice 가 필요하다
+
+README 의 4 단계(`recalculate_sample_company_excel_templates.ps1`)가 `soffice.com` 을
+찾는다. 없는 환경에서 1·3 단계만 돌리면 **수식 셀이 빈 채로 남아** Excel 검증이 깨진다
+(`SIM-02:...:B4=None`). LibreOffice 가 없으면 `templates/excel/` 은 건드리지 말고
+CSV·프로파일만 재생성한 뒤 Excel 을 원래대로 되돌려야 한다.
 
 ---
 
@@ -140,13 +153,20 @@ C2422 비철금속 압연·압출·연신
 
 ---
 
-## 5. 다음 할 일
+## 5. 진행 상황
 
-1. **도메인 검토** — 2 장의 드라이버·필드·시나리오가 실제 제련 업무와 맞는지.
-   여기부터 확정되지 않으면 아래가 전부 헛돈다.
-2. `AFS-VIRTUAL-GLOBAL-SMELTING.json` 의 `industry_code` 를 `C2421` 로 정정.
-3. 드라이버 5 개를 `SIM-01` 에, 시나리오 4 개를 `SIM-02`·`scenarios/` 에 추가.
-4. 데이터셋 필드 추가 후 `generate_sample_company_starter_kit.py` 재생성 → 검증.
-5. `KIT-MFG-NONFERROUS-SMELTING` 으로 분리할지, 1.1.0 판본으로 심화할지 결정.
-   **후자를 권한다** — 조달·물류·재고·원가 35 개 데이터셋을 그대로 쓰고,
-   제련 고유 요소만 얹으면 되기 때문이다.
+| | 항목 | 상태 |
+|---|---|---|
+| 1 | **도메인 검토** — 2 장의 드라이버·필드·시나리오가 실제 제련 업무와 맞는지 | **미완 · 선행 조건** |
+| 2 | `industry_code` 를 `C2421` 로 정정 | ✅ 2026-09-10 |
+| 3 | 드라이버 5 개를 `SIM-01` 에 추가 | ✅ 2026-09-10 — quick·full 12 → **17 개** |
+| 4 | 시나리오 4 개를 `SIM-02`·`scenarios/` 에 추가 | 미착수 |
+| 5 | 데이터셋 필드(2.2) 추가 후 재생성 | 미착수 |
+| 6 | 분리할지 1.1.0 으로 심화할지 결정 | **심화 권장** — 35 개 데이터셋을 그대로 쓰고 제련 요소만 얹으면 된다 |
+
+2·3 번 반영 후 `validate_sample_company_starter_kit.py` **405/405 PASS**,
+키트 테스트 44 건 통과. Excel 템플릿은 재계산 환경이 없어 손대지 않았다.
+
+**1 번이 여전히 선행 조건이다.** 드라이버 다섯은 산업 문헌 수준의 이해로 세운 것이라,
+TC/RC 를 수익의 본체로 본 것 · 회수율과 생산 수율을 가른 것 · 부산물을 손익 구조의
+일부로 둔 것이 맞는지 확인되어야 4·5 번이 의미를 갖는다.
