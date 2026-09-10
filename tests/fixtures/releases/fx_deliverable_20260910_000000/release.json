@@ -1,0 +1,59 @@
+{
+ "deliverable_type": "software_app",
+ "lifecycle_state": "active",
+ "template_id": "default",
+ "visibility": "dept",
+ "entity_mode": "REAL",
+ "runtime_contract_profile": "v1",
+ "project_id": "FIXTURE",
+ "project_name": "전달 이음매 고정 자료",
+ "tenant_id": "tenant_default",
+ "owner_dept_id": "hq",
+ "created_at": "2026-09-10T00:00:00",
+ "release_id": "fx_deliverable_20260910_000000",
+ "platform_auth_scan": {
+  "ok": true,
+  "summary": {
+   "blocking": 0
+  },
+  "checked_at": "2026-09-10T00:00:00"
+ },
+ "manifest": {
+  "valid": true,
+  "errors": [],
+  "fingerprint": "fx_fingerprint_0001",
+  "manifest": {
+   "version": "1.0",
+   "auth_mode": "PLATFORM_INHERITED",
+   "enterprise_scope_mode": "HOST_CONTEXT",
+   "audit_mode": "PLATFORM_LEDGER",
+   "capabilities": [
+    "customers.create",
+    "customers.delete",
+    "customers.read",
+    "customers.update"
+   ],
+   "required_capabilities": [
+    {
+     "resource": "customers",
+     "actions": [
+      "create",
+      "delete",
+      "read",
+      "update"
+     ]
+    }
+   ],
+   "required_data_scopes": [],
+   "entrypoints": [],
+   "app_class": "departmental",
+   "host_auth_required": true,
+   "standalone_auth": false,
+   "forbidden_features": [
+    "jwt_issuer",
+    "local_login",
+    "local_user_store"
+   ]
+  }
+ }
+}
