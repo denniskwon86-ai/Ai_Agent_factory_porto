@@ -1,0 +1,98 @@
+[
+  {
+    "id": "00_title",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.1_AX_Strategy_and_Adoption_Proposal_16x10.pdf",
+    "page": 1,
+    "text": "LS MnM의 AX 전략과 AX 플랫폼 도입 제안입니다. 현업의 실행과 경영의 판단을 하나로 이어 주는 AX 경영 운영체계, LAXS-M을 소개합니다."
+  },
+  {
+    "id": "01_why_now",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.1_AX_Strategy_and_Adoption_Proposal_16x10.pdf",
+    "page": 4,
+    "text": "원료 가격과 환율, 도입 일정, 전력비가 동시에 움직입니다. 하지만 부서의 판단은 파일과 회의자료에 머물러, 같은 질문에도 서로 다른 기준으로 답하게 됩니다. 실적은 정확하지만, 확인은 늘 사후에 이루어집니다."
+  },
+  {
+    "id": "02_direction",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.1_AX_Strategy_and_Adoption_Proposal_16x10.pdf",
+    "page": 5,
+    "text": "그래서 LAXS-M은 네 가지를 함께 바꿉니다. 현업의 일하는 방식과 전사 데이터 연결, 전사 실적 시뮬레이션, 그리고 판단에서 실행까지입니다. AX는 기술을 도입하는 일이 아니라, 회사의 운영능력을 내재화하는 일입니다."
+  },
+  {
+    "id": "04_architecture",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.0_Product_Feature_Guide_16x10.pdf",
+    "page": 3,
+    "text": "LAXS-M은 세 개의 제품면으로 이루어져 있습니다. 현업 실행을 맡는 앱 팩토리, 전사 의미를 잇는 경영 의미지도, 그리고 경영 판단을 맡는 디지털 트윈입니다. 그 아래에는 권한과 데이터 판, 확정 산식, 감사가 모든 기능에 공통으로 적용되는 신뢰 기반이 있습니다."
+  },
+  {
+    "id": "05_home_assistant",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.0_Product_Feature_Guide_16x10.pdf",
+    "page": 7,
+    "text": "경영 홈에서는 내 권한 범위에 맞는 업무 연결과 의사결정 대기 안건을 한 화면에서 볼 수 있습니다. AI 경영비서는 지금 선택한 문맥의 근거를 바탕으로 답하고, 안건이나 시뮬레이션, 발간 작업으로 바로 이어 줍니다."
+  },
+  {
+    "id": "06_app_creation",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.0_Product_Feature_Guide_16x10.pdf",
+    "page": 8,
+    "text": "업무 목적과 규칙을 업무 언어로 입력하면, 요구 정제부터 작업 분해, 에이전트 실행, 품질 검토, 릴리스까지 한 흐름으로 관리됩니다. 검증을 통과한 결과만 회사의 권한과 데이터 계약을 상속받아 배치됩니다."
+  },
+  {
+    "id": "07_agents",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.0_Product_Feature_Guide_16x10.pdf",
+    "page": 9,
+    "text": "필요한 업무를 설명하면 역할별 에이전트 후보를 추천하고, 실행 순서와 인수인계, 재작업 경로까지 조율합니다. 승인이나 대외 발간, 고위험 변경처럼 중요한 지점은 사람이 직접 확인합니다."
+  },
+  {
+    "id": "08_work_kits",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.0_Product_Feature_Guide_16x10.pdf",
+    "page": 10,
+    "text": "업무키트는 업무별 데이터 계약과 규칙, 관리 화면, 시뮬레이션 결속을 한 묶음으로 제공합니다. 원료매입부터 생산과 판매, 재무, 자금, 인사까지 같은 구조로 빠르게 구성할 수 있습니다."
+  },
+  {
+    "id": "09_data",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.0_Product_Feature_Guide_16x10.pdf",
+    "page": 11,
+    "text": "원천 데이터는 ERP와 MES, LPL에 그대로 두고, 계약과 품질, 소유권, 기준시점을 붙여 인증된 데이터 판으로 봉인합니다. 계산과 판단은 이 판만 사용하기 때문에, 같은 결과를 언제든 다시 재현할 수 있습니다."
+  },
+  {
+    "id": "11_simulation",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.0_Product_Feature_Guide_16x10.pdf",
+    "page": 14,
+    "text": "부서별 시뮬레이션을 같은 기준선에서 조합해, 생산과 재고, 매출, 손익, 현금에 미치는 영향을 함께 비교합니다. 화면의 원료 도입 지연 시나리오는 합성 데모 데이터로 만든 예시이며, 모든 수치는 확정된 산식으로 계산됩니다. AI는 숫자를 지어내지 않습니다."
+  },
+  {
+    "id": "12_decision",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.0_Product_Feature_Guide_16x10.pdf",
+    "page": 15,
+    "text": "시뮬레이션 결과는 근거와 대안, 영향 부서가 함께 묶인 안건이 됩니다. 결정은 근거와 함께 기록되고, 책임과 기한, 실제 효과까지 관리되어 다음 판단의 자산으로 남습니다. 보고서는 같은 결정에서 대상별로 만들어집니다."
+  },
+  {
+    "id": "13_coexist",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.1_AX_Strategy_and_Adoption_Proposal_16x10.pdf",
+    "page": 7,
+    "text": "ERP와 MES, LPL은 교체하지 않습니다. 거래와 실적의 정본은 기존 시스템에 그대로 두고, 검증된 연계 계약으로 필요한 범위만 연결합니다. 같은 숫자에 같은 뜻을 유지하는 것이 원칙입니다."
+  },
+  {
+    "id": "14_roadmap",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.1_AX_Strategy_and_Adoption_Proposal_16x10.pdf",
+    "page": 12,
+    "text": "작게 시작하지만, 확장성은 처음부터 같은 기준으로 설계합니다. 현장 적용에서 전사 확대, 계열사 확산, 그룹 AX 플랫폼까지 네 단계로 나아가며, 판단 리드타임과 재작업, 재사용률, 실행 효과로 성과를 측정합니다."
+  },
+  {
+    "id": "15_90days",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.0_Executive_Summary_16x10.pdf",
+    "page": 6,
+    "text": "첫 90일은 최대 열 명의 사용자와 함께 시작합니다. 30일까지 업무와 데이터를 결속하고, 60일까지 주간 리듬으로 반복 운영하며, 90일에는 효과를 기준선과 비교해 확산안을 확정합니다."
+  },
+  {
+    "id": "16_conclusion",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.1_AX_Strategy_and_Adoption_Proposal_16x10.pdf",
+    "page": 16,
+    "text": "현업이 만들고, 전사 데이터가 연결되며, 경영이 시뮬레이션으로 판단하고, 실행 결과가 다시 회사의 자산이 되는 AX 운영체계. LS MnM의 AX 방향을 실제로 구현하는 플랫폼, LAXS-M을 제안합니다."
+  },
+  {
+    "id": "17_logo",
+    "pdf": "docs/official/current/pdf/LAXS-M_v1.1_AX_Strategy_and_Adoption_Proposal_16x10.pdf",
+    "page": 15,
+    "text": "마지막으로, 이름과 로고의 의미입니다. LAXS는 L과 S 사이에 AX를 심은 이름으로, 랙스라고 읽습니다. LS의 네이비 사이에 AX를 붉게 새겨, AX가 별도 도구가 아니라 LS의 일과 경영 안에 내재화된다는 뜻을 담았습니다. 업무 안의 AX, 전사로 연결된 AX, 그리고 책임 있게 통제되는 AX. 이것이 LAXS가 가리키는 방향입니다."
+  }
+]
