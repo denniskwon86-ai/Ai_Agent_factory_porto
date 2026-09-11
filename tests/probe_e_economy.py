@@ -124,25 +124,54 @@ def cost_can_be_split_by_project() -> Tuple[str, str]:
 
 
 def cost_per_approved_deliverable() -> Tuple[str, str]:
-    """★★★ E-1 이 «문자 그대로» 요구하는 것 — 「**승인된 결과물** 1건당 비용」."""
-    import sqlite3
-    path = os.path.join(PROJECT_ROOT, "data", "collaboration.db")
-    conn = sqlite3.connect("file:%s?mode=ro" % path.replace("\\", "/"), uri=True)
-    try:
-        approved = conn.execute(
-            "SELECT COUNT(*) FROM publications WHERE status='APPROVED'").fetchone()[0]
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(publications)")}
-    finally:
-        conn.close()
-    recs = _records()
-    has_link = any(str(r.get("publication_id") or r.get("decision_id") or "") for r in recs)
-    if not approved:
-        return SHORT, "승인된 발간물 0건 — 분모가 없다"
-    if not has_link and not ({"project_id", "project"} & cols):
-        return SHORT, ("승인 발간물 %d건이지만 **호출과 잇는 키가 없다** — 호출 로그는 "
-                       "`project_id` 로, 발간물은 `source_id`(결정 안건)로 묶인다. "
-                       "둘을 잇는 열이 어느 쪽에도 없어 «1건당 비용» 을 못 낸다" % approved)
-    return OK, "승인 발간물 %d건 · 호출과 연결 가능" % approved
+    """★★★ E-1 이 «문자 그대로» 요구하는 것 — 「**승인된 결과물** 1건당 비용」.
+
+    ⚠️⚠️ [2026-09-11 정정] 첫 판에서 나는 분모를 `publications` 로 잡고 「호출과 잇는 키가
+      없다」고 «미측정» 판정했다. **분모를 잘못 고른 것이었다**(계측기 오류 9번째).
+
+      발간물은 «결정 안건» 에서 나오고 결정 계산 경로는 LLM 0콜이다 — 애초에 LLM 비용이
+      거의 안 붙는 대상이다. LLM 비용이 실제로 붙는 결과물은 **생성된 앱의 릴리스**이고,
+      `library/<project_id>_<시각>/release.json` 이 `project_id` 를 들고 있으며 호출 로그도
+      같은 `project_id` 로 묶인다. **키는 처음부터 있었다.**
+
+    ⚠️ 「1건당」은 «프로젝트당 비용 ÷ 그 프로젝트의 릴리스 수» 다. 한 프로젝트가 릴리스를
+      여럿 내면 호출을 시각으로 나눠 배분해야 더 정확하지만, 그것은 «더 정확한 배분» 이지
+      «측정 가능한가» 의 조건이 아니다 — E-1 이 묻는 것은 후자다."""
+    import collections
+    import glob
+    import json
+
+    releases = []
+    for path in sorted(glob.glob(os.path.join(PROJECT_ROOT, "library", "*", "release.json"))):
+        try:
+            doc = json.load(io.open(path, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        releases.append((str(doc.get("release_id") or ""), str(doc.get("project_id") or "")))
+    if not releases:
+        return SHORT, "릴리스가 0건 — 분모가 없다"
+    linked = [r for r in releases if r[1]]
+    if not linked:
+        return SHORT, ("릴리스 %d건이지만 `project_id` 가 비어 있다 — 호출과 이을 키가 없다"
+                       % len(releases))
+
+    per_project_cost = collections.Counter()
+    for rec in _records():
+        key = str(rec.get("project_id") or rec.get("project") or "")
+        if key and rec.get("cost_estimate_usd") is not None:
+            per_project_cost[key] += float(rec["cost_estimate_usd"])
+    per_project_releases = collections.Counter(pid for _, pid in linked)
+
+    priced = [(rid, pid, per_project_cost[pid] / per_project_releases[pid])
+              for rid, pid in linked if per_project_cost.get(pid)]
+    if not priced:
+        return SHORT, ("릴리스 %d건이 전부 «비용 0» 이다 — 이을 수는 있으나 붙은 호출이 없다"
+                       % len(linked))
+    top = sorted(priced, key=lambda x: -x[2])[:3]
+    return OK, ("릴리스 %d건(키 있는 것 %d건) · 비용이 붙는 것 %d건 · "
+                "상위: %s — «프로젝트당 비용 ÷ 그 프로젝트의 릴리스 수»"
+                % (len(releases), len(linked), len(priced),
+                   ", ".join("%s $%.3f" % (r[0][:22], r[2]) for r in top)))
 
 
 # ══ X-6 · E-2 모델 배분에 근거가 있는가 ════════════════════════════════════
