@@ -12,7 +12,7 @@
   "source_profile_id": "",
   "industry_code": "C24",
   "industry_name": "비철금속·배터리소재 제조",
-  "purpose": "Starter Kit 기준회사와 부서 업무·전사 시나리오 흐름 체험",
+  "purpose": "Starter Kit 기준회사와 원료 구매 폐루프 체험",
   "valid_until": "9999-12-31",
   "organization_blueprint": [
     "기업집단",
@@ -33,9 +33,7 @@
     "APP-02",
     "APP-03",
     "APP-04",
-    "APP-05",
-    "APP-06",
-    "APP-07"
+    "APP-05"
   ],
   "default_assumptions": {
     "baseline": "BASELINE-DEMO-1.0"

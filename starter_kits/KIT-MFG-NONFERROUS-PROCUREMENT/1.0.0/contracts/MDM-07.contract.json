@@ -135,13 +135,6 @@
         "description": "계정·원가요소·원가센터의 cost_center_id"
       },
       {
-        "name": "cost_center_name",
-        "type": "string",
-        "required": true,
-        "business_key": false,
-        "description": "계정·원가요소·원가센터의 cost_center_name"
-      },
-      {
         "name": "pnl_line",
         "type": "string",
         "required": false,

@@ -530,37 +530,6 @@
         "EXT-03",
         "SIM-02"
       ]
-    },
-    {
-      "app_id": "APP-06",
-      "name": "판매·납기·매출 영향",
-      "datasets": [
-        "SLS-01",
-        "MFG-01",
-        "INV-01",
-        "FIN-02",
-        "FIN-03",
-        "EXT-01"
-      ]
-    },
-    {
-      "app_id": "APP-07",
-      "name": "전사 시나리오·실적 통합",
-      "datasets": [
-        "PRC-02",
-        "LOG-02",
-        "INV-01",
-        "MFG-01",
-        "SLS-01",
-        "FIN-01",
-        "FIN-02",
-        "FIN-03",
-        "EXT-01",
-        "EXT-02",
-        "SIM-01",
-        "SIM-02",
-        "DEC-01"
-      ]
     }
   ],
   "report_templates": [
@@ -707,7 +676,7 @@
     },
     {
       "path": "samples/quick/MDM-07.csv",
-      "sha256": "e67e9642b44630886b2d37ad1bbbf20eb55e86a3de31b8da61be30b8565f0289",
+      "sha256": "2fe30cdc9a5ccd4bc3d052a16d690076d98f196b3e61720834fe16ee5003358f",
       "rows": 30,
       "dataset_id": "MDM-07",
       "profile": "quick"
@@ -952,7 +921,7 @@
     },
     {
       "path": "samples/full/MDM-07.csv",
-      "sha256": "7dbcca1267869d9b0672fb8dbe6216ae304a005ab49969c809a5b30853c890c8",
+      "sha256": "aca7770f9e3b9d2cffcf77e26e085cb01cd08f8b43624e3081eb7ba7f07c29db",
       "rows": 80,
       "dataset_id": "MDM-07",
       "profile": "full"
@@ -1188,7 +1157,7 @@
     },
     {
       "path": "contracts/MDM-07.contract.json",
-      "sha256": "4144bfb023369a5bf372fe5e8d71a08f6ef35889ee9a96cce46befc7da3ec699",
+      "sha256": "3edb9a61c87180db4b1539da48d72f6353e0498d8fa7a5c65e03571e1bcc19b5",
       "dataset_id": "MDM-07",
       "profile": "contract"
     },
@@ -1344,7 +1313,7 @@
     },
     {
       "path": "company_profiles/AFS-DEMO-MATERIALS-GROUP.json",
-      "sha256": "c59a6345b7ed45d79cc94ed7354c689349feecb7f0373aca1c8c131dc5d59d56",
+      "sha256": "9dcd752c3e544ad8d66593072ba89eb0b8c040aef2b49ec3be1a533d7571ce5b",
       "rows": 1,
       "dataset_id": "COMPANY-PROFILE",
       "profile": "company-profile"
@@ -1454,7 +1423,7 @@
     },
     {
       "path": "templates/excel/MDM-07.xlsx",
-      "sha256": "1585ad4e7bd79a1a542b7f774433dfbd7208f9c05f2bbb2366c9072b3184dec3",
+      "sha256": "24c0ce515b536a278ae8116b9226b26eef22bb170ac51c01df33e7c30cda0d65",
       "dataset_id": "MDM-07",
       "profile": "excel-template"
     },
