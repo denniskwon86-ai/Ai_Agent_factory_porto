@@ -88,6 +88,12 @@ def load(version: str) -> KitOverlay:
             f"  scripts/kit_defs/{name}.py 를 만드십시오. 기존 판본을 고치는 것이\n"
             f"  아니라 새 판본을 내는 것이 맞는지 먼저 확인하십시오."
         ) from None
+    #: ★ 어떤 판본은 **다시 만들 수 없다.** 생성기 로직이 바뀌면 값 오버레이로는
+    #:   되돌릴 수 없고, 그때 「돌렸더니 그 판본이 나왔는데 내용이 다른」 것이 가장
+    #:   나쁘다. 그런 판본은 `REFUSE` 로 이유를 적고 만들기를 거부한다.
+    refuse = getattr(mod, "REFUSE", "")
+    if refuse:
+        raise SystemExit(refuse)
     overlay = getattr(mod, "OVERLAY", None)
     if not isinstance(overlay, KitOverlay):
         raise SystemExit(f"scripts/kit_defs/{name}.py 에 OVERLAY(KitOverlay) 가 없습니다.")

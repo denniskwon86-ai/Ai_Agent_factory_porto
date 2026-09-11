@@ -1,0 +1,23 @@
+{
+  "record_id": "sim-02-9e8730142988",
+  "tenant_id": "tenant-afs-demo-materials",
+  "scope_node_id": "org-afs-demo-group",
+  "data_class": "SYNTHETIC",
+  "business_data_kind": "SCENARIO",
+  "data_origin": "SYNTHETIC",
+  "quality_status": "PASS",
+  "certification_status": "CERTIFIED_FOR_DEMO",
+  "as_of_date": "2026-08-11",
+  "lineage_id": "lin-bdcb805dc0d3",
+  "scenario_id": "SCN-03",
+  "scenario_name": "해상운임 30% 상승",
+  "baseline_id": "BASELINE-DEMO-1.0",
+  "driver_id": "DRV-FREIGHT",
+  "change_value": 0.3,
+  "change_unit": "%",
+  "impact_metrics": "LANDED_COST,INVENTORY_VALUE",
+  "scenario_period_start": "2026-09-01",
+  "scenario_period_end": "2027-12-31",
+  "approval_status": "APPROVED_FOR_DEMO",
+  "rationale": "제품 기능 검증용 Golden Decision Case"
+}

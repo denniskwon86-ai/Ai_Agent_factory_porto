@@ -1,0 +1,194 @@
+{
+  "dataset_id": "FND-02",
+  "dataset_name": "사용자·역할·권한",
+  "contract_version": "1.1.0",
+  "status": "APPROVED_FOR_DEMO",
+  "scope": {
+    "tenant_required": true,
+    "scope_required": true,
+    "allowed_scope_types": [
+      "ENTERPRISE_GROUP",
+      "LEGAL_ENTITY",
+      "BUSINESS_DIVISION",
+      "PLANT",
+      "DEPARTMENT"
+    ]
+  },
+  "classification": {
+    "data_class": "SYNTHETIC",
+    "data_origin": "SYNTHETIC",
+    "not_for_management_decision": true
+  },
+  "business_keys": [
+    "user_id",
+    "role_id",
+    "scope_node_id"
+  ],
+  "dependencies": [
+    "FND-01"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "record_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "사용자·역할·권한의 record_id"
+      },
+      {
+        "name": "tenant_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "사용자·역할·권한의 tenant_id"
+      },
+      {
+        "name": "scope_node_id",
+        "type": "string",
+        "required": true,
+        "business_key": true,
+        "description": "사용자·역할·권한의 scope_node_id"
+      },
+      {
+        "name": "data_class",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "사용자·역할·권한의 data_class"
+      },
+      {
+        "name": "business_data_kind",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "사용자·역할·권한의 business_data_kind"
+      },
+      {
+        "name": "data_origin",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "사용자·역할·권한의 data_origin"
+      },
+      {
+        "name": "quality_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "사용자·역할·권한의 quality_status"
+      },
+      {
+        "name": "certification_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "사용자·역할·권한의 certification_status"
+      },
+      {
+        "name": "as_of_date",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "사용자·역할·권한의 as_of_date"
+      },
+      {
+        "name": "lineage_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "사용자·역할·권한의 lineage_id"
+      },
+      {
+        "name": "user_id",
+        "type": "string",
+        "required": true,
+        "business_key": true,
+        "description": "사용자·역할·권한의 user_id"
+      },
+      {
+        "name": "display_name",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "사용자·역할·권한의 display_name"
+      },
+      {
+        "name": "department_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "사용자·역할·권한의 department_id"
+      },
+      {
+        "name": "role_id",
+        "type": "string",
+        "required": true,
+        "business_key": true,
+        "description": "사용자·역할·권한의 role_id"
+      },
+      {
+        "name": "scope_node_id_grant",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "사용자·역할·권한의 scope_node_id_grant"
+      },
+      {
+        "name": "capabilities",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "사용자·역할·권한의 capabilities"
+      },
+      {
+        "name": "effect",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "사용자·역할·권한의 effect"
+      },
+      {
+        "name": "effective_from",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "사용자·역할·권한의 effective_from"
+      },
+      {
+        "name": "effective_to",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "사용자·역할·권한의 effective_to"
+      },
+      {
+        "name": "is_example",
+        "type": "boolean",
+        "required": false,
+        "business_key": false,
+        "description": "사용자·역할·권한의 is_example"
+      }
+    ]
+  },
+  "quality": {
+    "required_common_fields": [
+      "record_id",
+      "tenant_id",
+      "scope_node_id",
+      "data_class",
+      "business_data_kind",
+      "data_origin",
+      "quality_status",
+      "certification_status",
+      "as_of_date",
+      "lineage_id"
+    ],
+    "fail_closed_on_scope_missing": true,
+    "quarantine_on_reference_failure": true
+  },
+  "lineage": {
+    "generator": "scripts/generate_sample_company_starter_kit.py",
+    "kit_version": "1.1.0"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "record_id": "sim-02-d06b15ea25f9",
+  "tenant_id": "tenant-afs-demo-materials",
+  "scope_node_id": "org-afs-demo-group",
+  "data_class": "SYNTHETIC",
+  "business_data_kind": "SCENARIO",
+  "data_origin": "SYNTHETIC",
+  "quality_status": "PASS",
+  "certification_status": "CERTIFIED_FOR_DEMO",
+  "as_of_date": "2026-08-11",
+  "lineage_id": "lin-23b8c79610d5",
+  "scenario_id": "SCN-07",
+  "scenario_name": "주요 설비 48시간 정지",
+  "baseline_id": "BASELINE-DEMO-1.0",
+  "driver_id": "DRV-DOWNTIME",
+  "change_value": 48,
+  "change_unit": "HOUR",
+  "impact_metrics": "CAPACITY,SHIPMENT,REVENUE",
+  "scenario_period_start": "2026-09-01",
+  "scenario_period_end": "2027-12-31",
+  "approval_status": "APPROVED_FOR_DEMO",
+  "rationale": "제품 기능 검증용 Golden Decision Case"
+}

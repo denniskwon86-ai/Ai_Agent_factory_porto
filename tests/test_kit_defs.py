@@ -1,7 +1,18 @@
 """[P2] 판본별 정의 — 생성기 하나로 여러 판본을 만들 수 있는가.
 
-이 시험이 지키는 것: **1.0.0 의 재현성.** 생성기에 `KIT_VERSION` 이 박혀 있어
-판본을 늘리려면 그 줄을 고쳐야 했고, 고치는 순간 1.0.0 을 다시 만들 수 없었다.
+이 시험이 지키는 것: 생성기에 `KIT_VERSION` 이 박혀 있어 판본을 늘리려면 그 줄을
+고쳐야 했다.
+
+## ⚠️ 2026-09-11 에 전제 하나가 바뀌었다
+
+처음에는 「1.0.0 을 재생성해도 같아야 한다」를 여기서 지켰다. 그런데 1.1.0 이
+**로직 버그 3 건을 고치면서** 생성기가 달라졌고, 값 오버레이로는 로직을 되돌릴 수
+없다. 그래서 **1.0.0 은 이제 재생성되지 않고, `load("1.0.0")` 이 거부한다.**
+
+1.0.0 을 보증하는 것은 재현 가능성이 아니라 **파일과 지문**이다 —
+`kit_freeze.verify()` 가 그 몫을 맡고 `test_kit_freeze.py` 가 지킨다.
+「돌렸더니 1.0.0 이 나왔는데 내용이 다른」 상황이 가장 나쁘므로, 만들 수 없으면
+만들 수 없다고 말하는 편이 낫다.
 """
 import os
 import sys
@@ -23,10 +34,22 @@ def _overlay(**kw):
 
 # ── 판본 로더
 
-def test_1_0_0_을_불러온다():
-    o = kit_defs.load("1.0.0")
-    assert o.version == "1.0.0"
+def test_현재_판본을_불러온다():
+    o = kit_defs.load("1.1.0")
+    assert o.version == "1.1.0"
     assert o.kit_id == "KIT-MFG-NONFERROUS-PROCUREMENT"
+
+
+def test_1_0_0_은_재생성을_거부한다():
+    """★ 생성기 로직이 바뀐 뒤로 1.0.0 은 다시 만들 수 없다. **조용히 다른 것을
+    내놓는 대신 막는다** — 「1.0.0 을 만들었다」는 말이 거짓이 되면 판본 체계가
+    통째로 무의미해진다."""
+    with pytest.raises(SystemExit) as e:
+        kit_defs.load("1.0.0")
+    msg = str(e.value)
+    assert "동결된 판본" in msg
+    # 무엇을 해야 하는지 알려 줘야 한다 — 막기만 하면 파일을 고쳐서 뚫는다
+    assert "1.1.0" in msg and "fingerprint" not in msg.lower() or "verify" in msg
 
 
 def test_없는_판본은_거부한다():
@@ -59,10 +82,10 @@ def test_OVERLAY_가_없는_정의를_거부한다(monkeypatch):
 
 # ── 1.0.0 오버레이는 비어 있어야 한다
 
-def test_1_0_0_오버레이는_비어있다():
-    """★ 이것이 「생성기의 기본 정의 = 1.0.0」을 보증한다. 여기에 무엇을 더하면
-    동결된 1.0.0 이 재생성 시 달라진다."""
-    o = kit_defs.load("1.0.0")
+def test_현재_판본_오버레이는_비어있다():
+    """★ 이것이 「생성기의 기본 정의 = 현재 판본」을 보증한다. 여기에 무엇을 더하면
+    생성기와 판본 정의가 두 곳으로 갈라진다."""
+    o = kit_defs.load("1.1.0")
     assert list(o.extra_drivers) == []
     assert list(o.extra_scenarios) == []
     assert o.company_profile_patches == {}
@@ -70,7 +93,7 @@ def test_1_0_0_오버레이는_비어있다():
 
 
 def test_빈_오버레이는_기본을_그대로_돌려준다():
-    o = kit_defs.load("1.0.0")
+    o = kit_defs.load("1.1.0")
     base_d = [("DRV-FX", "a", "b", "c", 0, "KRW")]
     base_s = [("SCN-01", "n", "DRV-FX", 0.1, "%", "X")]
     base_p = [{"company_profile_id": "P1", "industry_code": "C2412"}]
@@ -121,40 +144,45 @@ def test_use_version_이_경로와_정의를_함께_바꾼다(tmp_path):
     gen = importlib.import_module("generate_sample_company_starter_kit")
     before = gen.KIT_ROOT
     try:
-        gen.use_version("1.0.0", tmp_path / "여기")
-        assert gen.KIT_VERSION == "1.0.0"
+        gen.use_version("1.1.0", tmp_path / "여기")
+        assert gen.KIT_VERSION == "1.1.0"
         assert gen.KIT_ROOT == tmp_path / "여기"
-        assert gen.OVERLAY.version == "1.0.0"
+        assert gen.OVERLAY.version == "1.1.0"
     finally:
-        gen.use_version("1.0.0", before)
+        gen.use_version("1.1.0", before)
 
 
 def test_available_이_판본을_나열한다():
-    assert "1.0.0" in kit_defs.available()
+    """1.0.0 은 만들 수 없어도 **목록에는 있어야 한다** — 판본이 존재한다는 사실과
+    그것을 다시 만들 수 있다는 것은 다른 문제다."""
+    assert {"1.0.0", "1.1.0"} <= set(kit_defs.available())
 
 
-# ── P2-3: 새 구조가 동결된 1.0.0 을 그대로 재현하는가
+# ── 현재 판본은 되풀이해 만들어도 같은가
 
 @pytest.mark.slow
-def test_새_구조로_재생성해도_1_0_0_데이터가_같다(tmp_path):
-    """★★★ P2 의 핵심 검증. 오버레이 구조로 바꾼 뒤에도 **데이터 파일이 한 글자도
-    달라지지 않아야** 한다. 달라지면 동결된 1.0.0 을 다시 만들 수 없다는 뜻이다.
+def test_현재_판본은_다시_만들어도_같다(tmp_path):
+    """★★★ 생성기가 **결정적**인가. 같은 정의로 두 번 돌렸는데 결과가 다르면
+    (난수 씨앗·시각·딕셔너리 순서가 새면) 판본이라는 말 자체가 성립하지 않는다.
 
     생성기가 만들지 않는 것(Excel·검증보고서)과 생성 시각에 따라 달라지는 것
     (`manifest.json`)은 비교에서 뺀다 — 그것까지 같기를 요구하면 영원히 실패한다.
+
+    ⚠️ 1.0.0 에는 이 시험을 걸 수 없다. 생성기 로직이 바뀌어 **재생성 자체가
+      거부되기** 때문이고, 그 판본은 파일과 지문이 지킨다(`test_kit_freeze.py`).
     """
     import importlib
     from core.data_preparation import kit_freeze as kf
 
     gen = importlib.import_module("generate_sample_company_starter_kit")
-    orig = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.0.0")
+    orig = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.1.0")
     out = tmp_path / "rebuild"
     before = gen.KIT_ROOT
     try:
-        gen.use_version("1.0.0", out)
+        gen.use_version("1.1.0", out)
         gen.build(clean=True)
     finally:
-        gen.use_version("1.0.0", before)
+        gen.use_version("1.1.0", before)
 
     a, b = kf.fingerprint_dir(orig), kf.fingerprint_dir(str(out))
     skip = lambda p: (p.startswith("templates/excel/") or p.startswith("validations/")

@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core.data_preparation import kit_freeze  # noqa: E402
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
-KIT_VERSION = "1.0.0"
+KIT_VERSION = "1.1.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 COMMON = {"record_id", "tenant_id", "scope_node_id", "data_class", "business_data_kind",
           "data_origin", "quality_status", "certification_status", "as_of_date", "lineage_id"}
@@ -289,5 +289,25 @@ def main() -> None:
         raise SystemExit(1)
 
 
+def use_version(version: str) -> None:
+    """검증할 판본을 갈아 끼운다.
+
+    ⚠️ 판본이 하나뿐일 때 쓴 하드코딩이 남아 있었다 — 1.1.0 을 내고도 `--version`
+      없이 돌리면 **말없이 1.0.0 을 검증하고 PASS 를 찍는다.** 새 판본이 검증되지
+      않은 채 통과한 것으로 보이는 쪽이, 안 도는 것보다 나쁘다.
+    """
+    global KIT_VERSION, KIT_ROOT
+    KIT_VERSION = version
+    KIT_ROOT = ROOT / "starter_kits" / KIT_ID / version
+    if not KIT_ROOT.exists():
+        raise SystemExit(f"그런 판본이 없습니다: {KIT_ROOT}")
+
+
 if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--version", default=KIT_VERSION,
+                    help="검증할 판본 (기본: %(default)s)")
+    use_version(ap.parse_args().version)
     main()

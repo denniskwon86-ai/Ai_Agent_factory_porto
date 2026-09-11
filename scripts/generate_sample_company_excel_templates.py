@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -18,8 +19,29 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
-KIT_ROOT = ROOT / "starter_kits" / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.0.0"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from core.data_preparation import kit_freeze  # noqa: E402
+
+KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
+#: ⚠️ 여기가 `1.0.0` 으로 굳어 있었다. 판본이 둘이 된 뒤로는 **무심코 돌리면 동결된
+#:   1.0.0 의 Excel 을 덮어쓴다** — 2026-09-10 사고와 같은 경로다. 기본을 현재
+#:   판본으로 두고, 동결된 곳에는 `--force` 없이 쓰지 못하게 한다.
+KIT_VERSION = "1.1.0"
+KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 OUTPUT_ROOT = KIT_ROOT / "templates" / "excel"
+
+
+def use_version(version: str, *, force: bool = False) -> None:
+    """만들 판본을 갈아 끼운다. **동결된 판본이면 거부한다.**"""
+    global KIT_VERSION, KIT_ROOT, OUTPUT_ROOT
+    root = ROOT / "starter_kits" / KIT_ID / version
+    if not root.exists():
+        raise SystemExit(f"그런 판본이 없습니다: {root}")
+    kit_freeze.guard(str(root), force=force)
+    KIT_VERSION = version
+    KIT_ROOT = root
+    OUTPUT_ROOT = KIT_ROOT / "templates" / "excel"
 
 NAVY = "1B2A41"
 BLUE = "2F6FED"
@@ -68,7 +90,7 @@ def add_instructions(wb: Workbook, dataset: Dict[str, Any], contract: Dict[str, 
     ws.title = "INSTRUCTIONS"
     title(ws, f"{dataset['dataset_id']} · {dataset['name']} 입력 템플릿")
     rows = [
-        ("키트", "KIT-MFG-NONFERROUS-PROCUREMENT 1.0.0"),
+        ("키트", f"{KIT_ID} {KIT_VERSION}"),
         ("용도", "검증된 가상기업 샘플을 참고하여 회사 데이터로 교체·등록"),
         ("중요", "이 파일의 예시값은 모두 SYNTHETIC이며 실제 경영 의사결정에 사용할 수 없습니다."),
         ("편집 순서", "1) DATA의 파란 예시행 확인 → 2) 노란 빈 행부터 입력 → 3) VALIDATION 확인 → 4) CHECKS가 PASS인지 확인"),
@@ -303,4 +325,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--version", default=KIT_VERSION, help="만들 판본 (기본: %(default)s)")
+    ap.add_argument("--force", action="store_true",
+                    help="동결된 판본에도 쓴다 — 확정된 것을 바꾼다는 뜻이다")
+    _a = ap.parse_args()
+    use_version(_a.version, force=_a.force)
     main()

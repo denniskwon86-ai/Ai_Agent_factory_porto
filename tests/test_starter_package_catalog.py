@@ -30,7 +30,7 @@ def test_legacy_operational_profile_is_not_a_starter_package():
 
 
 def test_stored_app_blueprints_match_the_generator_and_cover_sales_and_enterprise():
-    root = (Path("starter_kits") / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.0.0")
+    root = (Path("starter_kits") / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.1.0")
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     generated = app_blueprints()
     assert manifest["app_blueprints"] == generated
@@ -46,7 +46,7 @@ def test_stored_app_blueprints_match_the_generator_and_cover_sales_and_enterpris
 
 
 def test_base_company_recommends_all_seven_executable_apps():
-    path = (Path("starter_kits") / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.0.0"
+    path = (Path("starter_kits") / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.1.0"
             / "company_profiles" / "AFS-DEMO-MATERIALS-GROUP.json")
     profile = json.loads(path.read_text(encoding="utf-8"))
     assert profile["recommended_apps"] == [f"APP-{i:02d}" for i in range(1, 8)]
@@ -54,7 +54,7 @@ def test_base_company_recommends_all_seven_executable_apps():
 
 
 def test_starter_package_file_index_matches_every_stored_asset():
-    root = Path("starter_kits") / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.0.0"
+    root = Path("starter_kits") / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.1.0"
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["file_index"]
     for item in manifest["file_index"]:

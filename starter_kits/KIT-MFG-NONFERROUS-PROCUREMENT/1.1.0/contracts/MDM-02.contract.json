@@ -1,0 +1,187 @@
+{
+  "dataset_id": "MDM-02",
+  "dataset_name": "공급사·파트너",
+  "contract_version": "1.1.0",
+  "status": "APPROVED_FOR_DEMO",
+  "scope": {
+    "tenant_required": true,
+    "scope_required": true,
+    "allowed_scope_types": [
+      "ENTERPRISE_GROUP",
+      "LEGAL_ENTITY",
+      "BUSINESS_DIVISION",
+      "PLANT",
+      "DEPARTMENT"
+    ]
+  },
+  "classification": {
+    "data_class": "SYNTHETIC",
+    "data_origin": "SYNTHETIC",
+    "not_for_management_decision": true
+  },
+  "business_keys": [
+    "supplier_id"
+  ],
+  "dependencies": [
+    "FND-01",
+    "FND-03",
+    "MDM-01"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "record_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 record_id"
+      },
+      {
+        "name": "tenant_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 tenant_id"
+      },
+      {
+        "name": "scope_node_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 scope_node_id"
+      },
+      {
+        "name": "data_class",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 data_class"
+      },
+      {
+        "name": "business_data_kind",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 business_data_kind"
+      },
+      {
+        "name": "data_origin",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 data_origin"
+      },
+      {
+        "name": "quality_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 quality_status"
+      },
+      {
+        "name": "certification_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 certification_status"
+      },
+      {
+        "name": "as_of_date",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 as_of_date"
+      },
+      {
+        "name": "lineage_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공급사·파트너의 lineage_id"
+      },
+      {
+        "name": "supplier_id",
+        "type": "string",
+        "required": true,
+        "business_key": true,
+        "description": "공급사·파트너의 supplier_id"
+      },
+      {
+        "name": "supplier_name",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공급사·파트너의 supplier_name"
+      },
+      {
+        "name": "country_code",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공급사·파트너의 country_code"
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공급사·파트너의 currency"
+      },
+      {
+        "name": "lead_time_days",
+        "type": "integer",
+        "required": false,
+        "business_key": false,
+        "description": "공급사·파트너의 lead_time_days"
+      },
+      {
+        "name": "payment_terms",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공급사·파트너의 payment_terms"
+      },
+      {
+        "name": "risk_grade",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공급사·파트너의 risk_grade"
+      },
+      {
+        "name": "material_ids",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공급사·파트너의 material_ids"
+      },
+      {
+        "name": "active",
+        "type": "boolean",
+        "required": false,
+        "business_key": false,
+        "description": "공급사·파트너의 active"
+      }
+    ]
+  },
+  "quality": {
+    "required_common_fields": [
+      "record_id",
+      "tenant_id",
+      "scope_node_id",
+      "data_class",
+      "business_data_kind",
+      "data_origin",
+      "quality_status",
+      "certification_status",
+      "as_of_date",
+      "lineage_id"
+    ],
+    "fail_closed_on_scope_missing": true,
+    "quarantine_on_reference_failure": true
+  },
+  "lineage": {
+    "generator": "scripts/generate_sample_company_starter_kit.py",
+    "kit_version": "1.1.0"
+  }
+}

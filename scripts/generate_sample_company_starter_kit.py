@@ -37,7 +37,7 @@ KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
 #: **판본은 `--version` 으로 받는다** (P2). 예전에는 여기에 "1.0.0" 이 박혀 있어서,
 #: 1.1.0 을 내려면 이 줄을 고쳐야 했고 고치는 순간 1.0.0 을 재현할 수 없게 됐다.
 #: `main()`/`build()` 이 아래 셋을 판본에 맞게 다시 세운다.
-KIT_VERSION = "1.0.0"
+KIT_VERSION = "1.1.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 OVERLAY: kit_defs.KitOverlay = kit_defs.KitOverlay()
 

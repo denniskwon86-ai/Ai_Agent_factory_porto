@@ -1,0 +1,171 @@
+{
+  "dataset_id": "MDM-04",
+  "dataset_name": "공장·창고·저장 위치",
+  "contract_version": "1.1.0",
+  "status": "APPROVED_FOR_DEMO",
+  "scope": {
+    "tenant_required": true,
+    "scope_required": true,
+    "allowed_scope_types": [
+      "ENTERPRISE_GROUP",
+      "LEGAL_ENTITY",
+      "BUSINESS_DIVISION",
+      "PLANT",
+      "DEPARTMENT"
+    ]
+  },
+  "classification": {
+    "data_class": "SYNTHETIC",
+    "data_origin": "SYNTHETIC",
+    "not_for_management_decision": true
+  },
+  "business_keys": [
+    "location_id"
+  ],
+  "dependencies": [
+    "FND-01"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "record_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 record_id"
+      },
+      {
+        "name": "tenant_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 tenant_id"
+      },
+      {
+        "name": "scope_node_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 scope_node_id"
+      },
+      {
+        "name": "data_class",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 data_class"
+      },
+      {
+        "name": "business_data_kind",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 business_data_kind"
+      },
+      {
+        "name": "data_origin",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 data_origin"
+      },
+      {
+        "name": "quality_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 quality_status"
+      },
+      {
+        "name": "certification_status",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 certification_status"
+      },
+      {
+        "name": "as_of_date",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 as_of_date"
+      },
+      {
+        "name": "lineage_id",
+        "type": "string",
+        "required": true,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 lineage_id"
+      },
+      {
+        "name": "location_id",
+        "type": "string",
+        "required": true,
+        "business_key": true,
+        "description": "공장·창고·저장 위치의 location_id"
+      },
+      {
+        "name": "site_id",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 site_id"
+      },
+      {
+        "name": "location_name",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 location_name"
+      },
+      {
+        "name": "storage_type",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 storage_type"
+      },
+      {
+        "name": "capacity_quantity",
+        "type": "integer",
+        "required": false,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 capacity_quantity"
+      },
+      {
+        "name": "capacity_uom",
+        "type": "string",
+        "required": false,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 capacity_uom"
+      },
+      {
+        "name": "active",
+        "type": "boolean",
+        "required": false,
+        "business_key": false,
+        "description": "공장·창고·저장 위치의 active"
+      }
+    ]
+  },
+  "quality": {
+    "required_common_fields": [
+      "record_id",
+      "tenant_id",
+      "scope_node_id",
+      "data_class",
+      "business_data_kind",
+      "data_origin",
+      "quality_status",
+      "certification_status",
+      "as_of_date",
+      "lineage_id"
+    ],
+    "fail_closed_on_scope_missing": true,
+    "quarantine_on_reference_failure": true
+  },
+  "lineage": {
+    "generator": "scripts/generate_sample_company_starter_kit.py",
+    "kit_version": "1.1.0"
+  }
+}
