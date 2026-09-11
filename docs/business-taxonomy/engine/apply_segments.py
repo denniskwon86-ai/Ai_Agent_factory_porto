@@ -19,9 +19,12 @@ import fetch_dart as F, segment_rules as R, valuechain_rules as V
 from ksic_rules import A_대분류 as A대분류      # noqa: E402
 
 HERE = os.path.join(ENG, ".cache")
-uni = list(csv.DictReader(io.open(os.path.join(SAMP, 'universe-2026.csv'), encoding='utf-8-sig')))
-segs = json.load(io.open(os.path.join(HERE, 'segments.json'), encoding='utf-8'))
-ftc = list(csv.DictReader(io.open(os.path.join(SAMP, 'ftc-all-2026-classified.csv'), encoding='utf-8-sig')))
+# ★ [P4] CSV·캐시 JSON 이 아니라 DB 에서 읽는다. `.cache/segments.json` 은
+#   `.gitignore` 라 그 환경에서만 있었지만, `src_segments` 는 어디서나 있다.
+import taxonomy_io as tx      # noqa: E402
+uni = tx.load('universe')
+segs = tx.load_segments_nested()
+ftc = tx.load('ftc_classified')
 # **계열사 색인은 universe 로 만든다.** 공정위 CSV 로 만들면 지주코드 보정이
 # 빠져서, SK(주)의 「SK이노베이션」 부문이 다시 「지주·투자」로 판정된다 —
 # 부문을 갈라 놓고도 키트 대상이 못 되니 목적을 놓친다
@@ -239,12 +242,6 @@ print('\n=== 세그먼트가 기여한 셀 상위 10 ===')
 for (a, b), n in seg_cells.most_common(10):
     print(f'  {n:>4}건  {a:<12} × {b}')
 
-json.dump(inst, io.open(os.path.join(HERE, 'instances.json'), 'w', encoding='utf-8'), ensure_ascii=False)
-dst = os.path.join(SAMP, 'instances-2026.csv')
-with io.open(dst, 'w', encoding='utf-8', newline='') as f:
-    w = csv.DictWriter(f, fieldnames=['단위', '계층', '소속그룹', '모법인', '이름',
-                                      'A대분류', 'A세분류', 'B1주업종', 'B1_2단', 'B1_3단',
-                                      '밸류체인', '가치사슬단계',
-                                      '매출', '매출기준', '종업원수', '판정근거'])
-    w.writeheader(); w.writerows(inst)
-print(f'\n{len(inst)}건 → {dst}')
+# ★ [P4] `instances-2026.csv` 를 덮어쓰지 않는다. 「지배법인」은 이 단계에서는
+#   비어 있고 `apply_ownership.py` 가 같은 스냅샷에 이어 채운다.
+tx.save('instances', inst, stage='apply_segments')

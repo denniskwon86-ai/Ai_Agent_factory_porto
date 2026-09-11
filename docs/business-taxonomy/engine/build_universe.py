@@ -35,15 +35,14 @@ CACHE = os.path.join(HERE, '.cache')
 sys.path.insert(0, HERE)
 import fetch_dart as F          # noqa: E402
 import fetch_ftc as T           # noqa: E402
+import taxonomy_io as tx        # noqa: E402
 import valuechain_rules as V    # noqa: E402
 from ksic_rules import classify  # noqa: E402
 
-FTC_CSV = os.path.join(SAMPLES, 'ftc-all-2026-classified.csv')
 # 공정위 2026 년 지정 자료의 재무는 **직전 사업연도(2025) 결산 · 개별 기준**이다 —
 # 삼성전자 238,043,009 백만이 DART 2025 개별(OFS)과 일치하고 연결(333조)과는 다르다.
 # 매출을 나란히 둘 때 이 차이가 드러나야 하므로 「매출기준」 열에 적는다
 FTC_FY = '2025'
-OUT_CSV = os.path.join(SAMPLES, 'universe-2026.csv')
 LISTED = os.path.join(CACHE, 'listed.json')
 
 
@@ -90,7 +89,7 @@ def build() -> list[dict]:
     다만 공정위가 지주코드(K6499·M7151)인데 DART 가 사업코드를 주면 DART 로
     고친다. 지주회사 체제라 개별 신고가 실질을 가린 경우다(SK이노베이션·SKC).
     """
-    ftc = list(csv.DictReader(io.open(FTC_CSV, encoding='utf-8-sig')))
+    ftc = tx.load('ftc_classified')          # ★ [P4] CSV 가 아니라 DB 에서
     ftc_u = T.dedupe(ftc)       # 공동 소유 법인이 두 집단에 신고돼 18 건 중복한다
     print(f'공정위 {len(ftc)} → 유일화 {len(ftc_u)}')
 
@@ -110,14 +109,12 @@ def build() -> list[dict]:
             '기업집단명들': r.get('기업집단명들') or [],
         }
 
-    listed = fetch_listed()
+    listed = tx.load_corp()                  # ★ [P4] .cache/listed.json → DB src_corp
     # **비상장 공시법인도 합친다.** 르노코리아는 DART 에 있고 업종코드도 정확한데
     # (30121 → C30121) 상장이 아니라서 빠져 있었다. 다만 이쪽은 매출을 모르고
     # SPC·펀드가 대량 섞이므로(64 금융 · 68 부동산) **계층을 갈라 둔다**
-    unlisted = []
-    up = os.path.join(CACHE, 'unlisted.json')
-    if os.path.exists(up):
-        unlisted = [dict(r, _un=True) for r in json.load(io.open(up, encoding='utf-8'))]
+    unlisted = [dict(r, _un=True) for r in tx.load_corp(unlisted=True)]
+    if unlisted:
         print(f'비상장 공시법인 {len(unlisted)}건도 합친다')
 
     # **상장사 매출·직원수 보강.** DART 기업개황에는 재무가 없어 상장 T1 3,452 건의
@@ -125,10 +122,9 @@ def build() -> list[dict]:
     # 독립 상장사(목표 고객의 핵심층)가 통째로 빠진다. fetch_financials.py 가
     # 받아둔 것을 잇는다. 사업보고서가 없는 회사(상장폐지·SPAC)는 모수 밖으로 보낸다
     fin = {}
-    fp = os.path.join(CACHE, 'financials.json')
-    if os.path.exists(fp):
-        for r in json.load(io.open(fp, encoding='utf-8')):
-            fin[_jurir(r.get('법인등록번호'))] = r
+    for r in tx.load_financials():           # ★ [P4] .cache/financials.json → DB
+        fin[_jurir(r.get('법인등록번호'))] = r
+    if fin:
         print(f'재무 보강 {len(fin)}건 (fetch_financials.py)')
 
     same = add = fixed = addu = 0
@@ -244,25 +240,26 @@ def report(rows: list[dict]) -> None:
         print('  매출을 모르므로 규모로 걸러낼 수 없다. SPC·펀드가 섞여 있다')
 
 
-def to_csv(rows: list[dict], path: str = OUT_CSV) -> None:
-    cols = ['법인등록번호', '회사명', '종목코드', 'KSIC', 'A대분류', 'A세분류',
-            'B1주업종', 'B1_2단', 'B1_3단', '밸류체인', '가치사슬단계',
-            '묶음노드', '모수계층', '매출액', '매출기준', '종업원수', '상장',
-            '출처', '기업집단명들']
-    with io.open(path, 'w', encoding='utf-8', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=cols, extrasaction='ignore')
-        w.writeheader()
-        for r in rows:
-            rec = dict(r)
-            rec['기업집단명들'] = '|'.join(rec.get('기업집단명들') or [])
-            rec['밸류체인'] = '|'.join(rec.get('밸류체인') or [])   # 복수값 — 첫 값이 주 밸류체인
-            rec['상장'] = 'Y' if rec.get('상장') else ''
-            w.writerow(rec)
-    print(f'\n{len(rows)}건 → {path}')
+def flatten(rows: list[dict]) -> list[dict]:
+    """복수값과 불리언을 저장 형태로. 밸류체인은 **첫 값이 주 밸류체인**이다."""
+    out = []
+    for r in rows:
+        rec = dict(r)
+        rec['기업집단명들'] = '|'.join(rec.get('기업집단명들') or [])
+        rec['밸류체인'] = '|'.join(rec.get('밸류체인') or [])
+        rec['상장'] = 'Y' if rec.get('상장') else ''
+        out.append(rec)
+    return out
+
+
+def to_db(rows: list[dict]) -> None:
+    """★ [P4] 예전에는 `samples/universe-2026.csv` 를 덮어썼다. 이제 작업
+    스냅샷에 쓴다 — 동결된 판본이면 예외가 난다."""
+    tx.save('universe', flatten(rows), stage='build_universe')
 
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     universe = build()
     report(universe)
-    to_csv(universe)
+    to_db(universe)

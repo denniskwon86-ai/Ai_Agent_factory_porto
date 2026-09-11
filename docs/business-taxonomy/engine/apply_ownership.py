@@ -57,6 +57,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, '.cache')
 SAMPLES = os.path.join(os.path.dirname(HERE), 'samples')
 
+sys.path.insert(0, HERE)
+import taxonomy_io as tx      # noqa: E402
+
 지배임계 = 30.0
 우세임계 = 0.5
 # 잡힌 자회사들의 매출 합이 이보다 작으면 판정하지 않는다 (백만원 = 1,000 억)
@@ -103,9 +106,11 @@ def _wt(e: dict) -> float:
 
 
 def main() -> None:
-    own = json.load(io.open(os.path.join(CACHE, 'ownership.json'), encoding='utf-8'))
-    inst = json.load(io.open(os.path.join(CACHE, 'instances.json'), encoding='utf-8'))
-    uni = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'universe-2026.csv'), encoding='utf-8-sig')))
+    # ★ [P4] 캐시 JSON·CSV 가 아니라 DB 에서. 같은 작업 스냅샷을 읽고 거기에 쓴다 —
+    #   `apply_segments` 가 방금 넣은 인스턴스에 「지배법인」을 채우는 단계다.
+    own = tx.load_ownership_nested()
+    inst = tx.load('instances')
+    uni = tx.load('universe')
 
     # 모수 이름 색인. **이름이 겹치면 아예 빼 둔다** — 출자현황 API 는 법인등록번호를
     # 주지 않아 이름으로만 이을 수 있는데, 동명이인이면 어느 쪽인지 가릴 방법이 없다.
@@ -149,12 +154,7 @@ def main() -> None:
                 '연도': r.get('출자연도', ''),
             })
     edges.sort(key=lambda e: (e['지배법인'], -e['지분율']))
-    dst = os.path.join(SAMPLES, 'ownership-edges-2026.csv')
-    with io.open(dst, 'w', encoding='utf-8-sig', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=list(edges[0].keys()) if edges else ['지배법인'])
-        w.writeheader()
-        w.writerows(edges)
-    print(f'지배 엣지 {len(edges)}건 → {os.path.basename(dst)}')
+    tx.save('ownership_edges', edges, stage='apply_ownership')
     print(f'  걸러낸 것 — {dict(skipped)}')
 
     # ── 2. 묶음 B축 = 지배 사업 영역
@@ -228,19 +228,9 @@ def main() -> None:
         linked += 1 if p else 0
     print(f'\n인스턴스에 지배법인 표시 {linked}건')
 
-    json.dump(inst, io.open(os.path.join(CACHE, 'instances.json'), 'w', encoding='utf-8'),
-              ensure_ascii=False)
-    # **CSV 도 다시 쓴다.** `apply_segments` 가 쓴 뒤에 우리가 json 만 고치면
-    # 아티팩트·롱리스트에는 반영되지 않는다 (열 순서는 그쪽과 맞춘다)
-    dst2 = os.path.join(SAMPLES, 'instances-2026.csv')
-    with io.open(dst2, 'w', encoding='utf-8', newline='') as f:
-        w2 = csv.DictWriter(f, fieldnames=['단위', '계층', '소속그룹', '모법인', '이름',
-                                           'A대분류', 'A세분류', 'B1주업종', 'B1_2단', 'B1_3단',
-                                           '밸류체인', '가치사슬단계', '매출', '매출기준',
-                                           '종업원수', '지배법인', '판정근거'])
-        w2.writeheader()
-        w2.writerows(inst)
-    print(f'{len(inst)}건 → {os.path.basename(dst2)} (지배법인 열 포함)')
+    # ★ [P4] 예전에는 캐시 json 과 CSV 두 곳에 썼고, **한쪽만 고치면 어긋났다.**
+    #   이제 쓰는 곳이 하나다 — 같은 스냅샷의 `instances` 를 지배법인까지 채워 덮는다.
+    tx.save('instances', inst, stage='apply_ownership')
     print(f'\n묶음 {sum(filled.values())}건 — {dict(filled)}')
     print('\n=== 지배 사업 영역이 정해진 묶음 (지분 큰 순 30) ===')
     for nm, b4, top, two, n, share in sorted(changed, key=lambda x: -x[4])[:30]:

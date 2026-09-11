@@ -14,9 +14,13 @@ Artifact 로 발행해 격자에서 사업묶음을 고르고 롱리스트를 �
 """
 import sys, csv, io, os, json, collections
 sys.stdout.reconfigure(encoding='utf-8')
-BASE = r'C:\AI Workspace\Ai_Agent_factory_porto-dev\docs\business-taxonomy'
-inst = list(csv.DictReader(io.open(os.path.join(BASE, 'samples/instances-2026.csv'), encoding='utf-8-sig')))
-uni = list(csv.DictReader(io.open(os.path.join(BASE, 'samples/universe-2026.csv'), encoding='utf-8-sig')))
+ENG = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(ENG)      # 절대경로 하드코딩을 뺀다 — 다른 기계에서 안 돌았다
+sys.path.insert(0, ENG)
+import taxonomy_io as tx         # noqa: E402
+inst = tx.load('instances')      # ★ [P4] CSV 가 아니라 DB 스냅샷에서
+uni = tx.load('universe')
+print('[대시보드] %s' % tx.summary())
 
 def num(v):
     try:

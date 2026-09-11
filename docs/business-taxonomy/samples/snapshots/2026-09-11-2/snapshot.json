@@ -1,0 +1,37 @@
+{
+  "created_at": "2026-09-11T14:31:27",
+  "engine_sha": "39ed6e6af",
+  "frozen": 1,
+  "frozen_at": "2026-09-11T14:50:44",
+  "frozen_by": "c2067",
+  "frozen_why": "DB 전환 후 첫 판정 · 제련 롱리스트 11 개사의 근거",
+  "inherited_from": "2026-09-11",
+  "label": "파이프라인 실행",
+  "note": "이전 스냅샷 2026-09-11 를 상속",
+  "row_counts": {
+    "ftc_classified": 3539,
+    "instances": 20478,
+    "longlist": 11,
+    "ownership_edges": 2136,
+    "universe": 21613
+  },
+  "rules_fp": "04c02216b0736e15",
+  "snapshot_id": "2026-09-11-2",
+  "source_fp": {
+    "src_corp": "25421fef34b4fd6e:20222",
+    "src_financials": "edf4d226e48ee99c:16554",
+    "src_ftc": "9bdd87bc6a09cbe2:3539",
+    "src_ownership": "c00093b8348d71c4:2920",
+    "src_ownership_holder": "46aa6d7ba94a81b5:25323",
+    "src_ownership_invest": "157401b0202715de:40263",
+    "src_reports": "928822f381edc5ac:715",
+    "src_segments": "ae09e98effda93ec:1463"
+  },
+  "stages": {
+    "apply_ownership": "2026-09-11T14:33:30",
+    "apply_segments": "2026-09-11T14:32:43",
+    "build_universe": "2026-09-11T14:31:33",
+    "longlist:KIT-MFG-NONFERROUS-PROCUREMENT": "2026-09-11T14:41:51",
+    "reclassify": "2026-09-11T14:31:29"
+  }
+}

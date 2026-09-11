@@ -41,6 +41,7 @@ SAMPLES = os.path.join(os.path.dirname(HERE), 'samples')
 
 sys.path.insert(0, HERE)
 import fetch_dart as F  # noqa: E402
+import taxonomy_io as tx  # noqa: E402
 
 # 대분류 문자 → 성격. 불일치가 「서비스↔제조」처럼 성격이 갈릴 때 우선순위를 올린다
 _성격 = {'A': '자원', 'B': '자원', 'C': '제조', 'D': '시설', 'E': '시설', 'F': '건설',
@@ -60,18 +61,15 @@ def _jurir(v: str) -> str:
 
 
 def load() -> tuple[list[dict], dict, dict]:
-    uni = [r for r in csv.DictReader(
-        io.open(os.path.join(SAMPLES, 'universe-2026.csv'), encoding='utf-8-sig'))
+    uni = [r for r in tx.load('universe')
         if r['모수계층'] != '모수밖']
     ftc = {}
-    for r in csv.DictReader(io.open(os.path.join(SAMPLES, 'ftc-all-2026-classified.csv'),
-                                    encoding='utf-8-sig')):
+    for r in tx.load('src_ftc'):          # ★ [P4] 공정위 **원천** KSIC — 판정 전 값
         k = _jurir(r.get('법인등록번호'))
         if k:
             ftc[k] = r.get('KSIC', '')
     dart = {}
-    for r in csv.DictReader(io.open(os.path.join(SAMPLES, 'dart-corp-2026.csv'),
-                                    encoding='utf-8-sig')):
+    for r in tx.load('src_corp'):
         k = _jurir(r.get('법인등록번호'))
         ks = F.to_ksic(r.get('induty_code')) if r.get('induty_code') else None
         if k and ks:
@@ -118,7 +116,8 @@ if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     n = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 30
     rows = audit()
-    p = os.path.join(SAMPLES, 'ksic-audit-2026.csv')
+    p = os.path.join(SAMPLES, 'reports', 'ksic-audit-2026.csv')
+    os.makedirs(os.path.dirname(p), exist_ok=True)
     with io.open(p, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=COLS, extrasaction='ignore')
         w.writeheader()

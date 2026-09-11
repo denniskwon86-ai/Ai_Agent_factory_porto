@@ -1,0 +1,30 @@
+{
+  "created_at": "2026-09-11T14:23:22",
+  "engine_sha": "39ed6e6af",
+  "frozen": 1,
+  "frozen_at": "2026-09-11T14:23:25",
+  "frozen_by": "migrate_to_db",
+  "frozen_why": "CSV 이관 기준 판본",
+  "inherited_from": "",
+  "label": "CSV 이관",
+  "note": "samples/*.csv 를 DB 로 옮긴 첫 판본",
+  "row_counts": {
+    "ftc_classified": 3539,
+    "instances": 20478,
+    "ownership_edges": 2136,
+    "universe": 21613
+  },
+  "rules_fp": "b30bb629d42ba991",
+  "snapshot_id": "2026-09-11",
+  "source_fp": {
+    "src_corp": "25421fef34b4fd6e:20222",
+    "src_financials": "edf4d226e48ee99c:16554",
+    "src_ftc": "9bdd87bc6a09cbe2:3539",
+    "src_ownership": "c00093b8348d71c4:2920",
+    "src_ownership_holder": "46aa6d7ba94a81b5:25323",
+    "src_ownership_invest": "157401b0202715de:40263",
+    "src_reports": "928822f381edc5ac:715",
+    "src_segments": "ae09e98effda93ec:1463"
+  },
+  "stages": {}
+}

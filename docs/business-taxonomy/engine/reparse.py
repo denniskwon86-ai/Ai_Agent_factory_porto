@@ -33,17 +33,16 @@ def _rcept_index() -> dict:
     그래서 32 건이 매번 「원문 없어 건너뜀」으로 빠졌고, 그 안에 오탐 부문이 남아
     있었다(신세계푸드 「중단영업조정」·한솔아이원스 「복리후생비」). ZIP 은 캐시에
     있으므로 접수번호만 알면 API 없이 파싱된다"""
-    import csv
     import re
-    p = os.path.join(os.path.dirname(HERE), 'samples', 'dart-reports-2026.csv')
-    if not os.path.exists(p):
-        return {}
+    import sys as _s
+    _s.path.insert(0, HERE)
+    import taxonomy_io as tx          # * [P4] CSV 가 아니라 DB 원천에서
     _법인 = re.compile(r'㈜|\(주\)|\(유\)|주식회사|유한회사')
 
     def key(s):
         return _법인.sub('', s or '').replace(' ', '').upper()
     out = {}
-    for r in csv.DictReader(io.open(p, encoding='utf-8-sig')):
+    for r in tx.load('src_reports'):
         if r.get('회사명') and r.get('접수번호'):
             out.setdefault(key(r['회사명']), r['접수번호'])
     return out

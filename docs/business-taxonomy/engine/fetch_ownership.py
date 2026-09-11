@@ -41,6 +41,7 @@ DST = os.path.join(CACHE, 'ownership.json')
 
 sys.path.insert(0, HERE)
 import fetch_dart as F  # noqa: E402
+import taxonomy_io as tx  # noqa: E402
 
 YEARS = ('2025', '2024')
 
@@ -152,8 +153,8 @@ def targets() -> list[dict]:
     포스코홀딩스·삼성물산·HD한국조선해양이 전부 거기 있었다. **정작 지배
     구조를 알고 싶은 회사들이 빠졌다.**
     """
-    uni = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'universe-2026.csv'), encoding='utf-8-sig')))
-    corp = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'dart-corp-2026.csv'), encoding='utf-8-sig')))
+    uni = tx.load('universe')            # * [P4] CSV 가 아니라 DB 스냅샷에서
+    corp = tx.load('src_corp')
     by_jurir = {}
     for c in corp:
         k = ''.join(ch for ch in (c.get('법인등록번호') or '') if ch.isdigit())

@@ -110,8 +110,8 @@ if __name__ == '__main__':
     import segment_rules as R
     rcept = sys.argv[1] if len(sys.argv) > 1 else '20260313000662'   # LG전자
     segs = json.load(io.open(os.path.join('.cache', 'segments.json'), encoding='utf-8'))
-    rep = {r['접수번호']: r['회사명'] for r in __import__('csv').DictReader(
-        io.open(os.path.join('..', 'samples', 'dart-reports-2026.csv'), encoding='utf-8-sig'))}
+    import taxonomy_io as tx          # * [P4] CSV 가 아니라 DB 원천에서
+    rep = {r['접수번호']: r['회사명'] for r in tx.load('src_reports')}
     # **두 파일의 회사명 표기가 다르다** — reports 는 「LG전자」, segments 는 「엘지전자(주)」.
     # `_norm_corp` 가 법인표기와 영문/한글 약칭을 맞춰 준다
     회사 = rep.get(rcept, '?')

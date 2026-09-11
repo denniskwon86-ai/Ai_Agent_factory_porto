@@ -33,6 +33,7 @@ DST = os.path.join(CACHE, 'financials.json')
 
 sys.path.insert(0, HERE)
 import fetch_dart as F  # noqa: E402
+import taxonomy_io as tx  # noqa: E402
 
 # 결산연도. 12월 결산사의 2025 사업보고서는 2026년 3월에 나왔다. 없으면 한 해 전
 YEARS = ('2025', '2024')
@@ -97,8 +98,8 @@ def targets(tier: str = 'T1') -> list[dict]:
     한국지엠·홈플러스)만 사업보고서를 낸다. 확보율은 낮아도 그 회사들이 정확히
     목표 고객(대기업·중견 비상장)이다. 13,000 건 × 2 회라 하루 한도를 넘는다 —
     020 이 오면 저장하고 멈추므로 다음 날 같은 명령으로 이어 받는다"""
-    uni = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'universe-2026.csv'), encoding='utf-8-sig')))
-    corp = list(csv.DictReader(io.open(os.path.join(SAMPLES, 'dart-corp-2026.csv'), encoding='utf-8-sig')))
+    uni = tx.load('universe')            # * [P4] CSV 가 아니라 DB 스냅샷에서
+    corp = tx.load('src_corp')
     by_jurir = {}
     for c in corp:
         k = ''.join(ch for ch in (c.get('법인등록번호') or '') if ch.isdigit())

@@ -20,11 +20,12 @@ ENG = os.path.dirname(os.path.abspath(__file__))
 SAMP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "samples")
 sys.path.insert(0, ENG); os.chdir(ENG)
 import fetch_dart as F, parse_segment as P, segment_rules as SR
+import taxonomy_io as tx
 
 HERE = os.path.join(ENG, ".cache")
 DST = os.path.join(HERE, 'segments.json')
 
-rows = list(csv.DictReader(io.open(os.path.join(SAMP, 'universe-2026.csv'), encoding='utf-8-sig')))
+rows = tx.load('universe')               # * [P4] CSV 가 아니라 DB 스냅샷에서
 
 
 def sales(r):
@@ -41,7 +42,7 @@ LOW = float(sys.argv[1]) if len(sys.argv) > 1 else 1_000_000
 LIMIT = int(sys.argv[2]) if len(sys.argv) > 2 else 800
 
 # 법인등록번호 → DART 고유번호. 비상장 공시법인은 종목코드가 없어 이 길로만 닿는다
-_corp = list(csv.DictReader(io.open(os.path.join(SAMP, 'dart-corp-2026.csv'), encoding='utf-8-sig')))
+_corp = tx.load('src_corp')
 BY_JURIR = {}
 for c in _corp:
     k = ''.join(ch for ch in (c.get('법인등록번호') or '') if ch.isdigit())

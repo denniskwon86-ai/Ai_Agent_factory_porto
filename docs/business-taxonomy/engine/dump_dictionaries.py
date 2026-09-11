@@ -41,17 +41,15 @@ DOCS = os.path.dirname(HERE)
 
 sys.path.insert(0, HERE)
 import ksic_rules as K        # noqa: E402
+import taxonomy_io as tx     # noqa: E402
 import segment_rules as R    # noqa: E402
 import valuechain_rules as V  # noqa: E402
 
 
 def _universe() -> dict:
     """회사명(정규화) → 모수 행. 사전 항목이 실제로 무엇으로 판정됐나 보려고 쓴다"""
-    p = os.path.join(SAMPLES, 'universe-2026.csv')
-    if not os.path.exists(p):
-        return {}
     out = {}
-    for r in csv.DictReader(io.open(p, encoding='utf-8-sig')):
+    for r in tx.load('universe'):     # ★ [P4] DB 스냅샷에서
         if r['모수계층'] != '모수밖':
             out.setdefault(R._norm_corp(r['회사명']), r)
     return out
@@ -130,7 +128,8 @@ COLS = ['사전', '키', '판정', '걸린회사', 'KSIC', '매출액_백만원'
 
 
 def to_csv(rows: list[dict]) -> str:
-    p = os.path.join(SAMPLES, 'manual-dictionaries.csv')
+    p = os.path.join(SAMPLES, 'reports', 'manual-dictionaries.csv')
+    os.makedirs(os.path.dirname(p), exist_ok=True)
     with io.open(p, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=COLS, extrasaction='ignore')
         w.writeheader()

@@ -396,8 +396,10 @@ B축과 목적이 다르다 — B는 *내가 다루는 것*, 밸류체인은 *�
 | [SCHEMA-DRAFT.md](SCHEMA-DRAFT.md) | 엔티티 골격 · 이중계상 방지 · 정렬·필터 동작 |
 | [OPEN-DECISIONS.md](OPEN-DECISIONS.md) | 결정 대장 — 확정·보류·미결정 |
 | [DISCUSSION-LOG.md](DISCUSSION-LOG.md) | 라운드별 논의 기록 |
-| **[engine/](engine/)** | **판정 엔진** — KSIC 규칙 + 공정위 수집기 |
-| [samples/](samples/) | KOSPI · KOSDAQ · 기업집단 판정 데이터 |
+| **[engine/](engine/)** | **판정 엔진** — KSIC 규칙 + 공정위 수집기 + DB 저장소 |
+| [samples/sources/](samples/sources/) | 수집물 사본 — 재수집할 때만 바뀐다 |
+| [samples/snapshots/](samples/snapshots/) | **판정 결과 판본별 사본** — 얼면 다시 나오지 않는다 |
+| [samples/reports/](samples/reports/) | 진단·시험 산출물 (KSIC 감사 · 사전 점검) |
 
 ## 실증 — KOSPI 498건 + KOSDAQ 190건
 
@@ -447,8 +449,52 @@ KOSDAQ 에서 **17건**이 들어왔다(덴티움 · 바텍 · 씨젠 · 인바�
 
 [engine/](engine/) 에 규칙과 수집기가 있다.
 
+### 데이터는 DB 에 있다 (2026-09-11 전환)
+
+정본은 **`taxonomy.db`** 다. 예전에는 `samples/*.csv` 가 정본이었는데, 파이프라인이
+그 파일들을 **제자리에서 덮어썼다** — 「전체 대상 모수를 산정한 파일」에 재판정이
+직접 손을 대니 어제 판정과 오늘 판정을 가릴 수 없었다.
+
+| 층 | 어디에 | git |
+|---|---|---|
+| **정본** | `taxonomy.db` (SQLite) | ✗ 20 MB 바이너리라 넣을 수 없다 |
+| **보존** | `samples/sources/` · `samples/snapshots/{판본}/` | ✓ 여기서 DB 를 되살린다 |
+| 수집 캐시 | `engine/.cache/*.json` | ✗ 재수집 가능 |
+
+★ **확정한 판본은 얼린다.** 얼린 스냅샷은 **DB 트리거가** INSERT·UPDATE·DELETE 를
+거부하므로 `sqlite3` 프롬프트에서도 고쳐지지 않고, 동결 자체도 해제할 수 없다.
+고칠 것이 있으면 새 스냅샷을 뜬다 — 직전 결과를 상속받으므로 언제나 완결된 상태다.
+
 ```bash
+python engine/sync_sources.py --status     # 지금 무엇이 얼마나 있나
+python engine/export_snapshot.py --list    # 판본 목록
+python engine/restore_db.py --freeze-all   # 저장소 사본 → DB (새 기계에서 처음)
+```
+
+### 절차
+
+```bash
+# ① 수집 (API 한도에 걸리면 저장하고 멈춘다 — 다음 날 같은 명령으로 이어 받는다)
 python engine/fetch_ftc.py ALL affiliates.csv
+python engine/fetch_financials.py T1u
+python engine/fetch_ownership.py
+python engine/collect_segments.py
+
+# ② 수집물을 DB 원천 표로
+python engine/sync_sources.py
+
+# ③ 판정 — 얼지 않은 최신 스냅샷에 쌓인다. 없으면 새로 뜬다
+python engine/reclassify.py
+python engine/build_universe.py
+python engine/apply_segments.py
+python engine/apply_ownership.py
+
+# ④ 내보내기 — git 에 남는 것은 이 사본이다
+python engine/export_snapshot.py
+python engine/make_dashboard.py
+
+# ⑤ 롱리스트를 판본과 함께
+python engine/make_longlist.py --kit KIT-MFG-NONFERROUS-PROCUREMENT --b3 제련·정련
 ```
 
 **KSIC 코드에서 A·B 축을 규칙으로 판정한다.** 판정 순서는 규칙이 매핑보다 앞선다.
@@ -473,7 +519,7 @@ python engine/fetch_ftc.py ALL affiliates.csv
 | 사용된 셀 | 72개 / 490칸 |
 | **사람 판정과 대조** (LG 63건 전수) | **98% 일치** |
 
-판정 결과 전체: [samples/ftc-all-2026-classified.csv](samples/ftc-all-2026-classified.csv)
+판정 결과 전체: [samples/snapshots/](samples/snapshots/) 의 `ftc_classified.csv`
 
 95%에서 시작해 불일치 3건을 규칙으로 보완해 98%가 됐다.
 **남은 1건은 규칙으로 못 잡는다** — `C2842`(조명장치)만으로는 차량용 부품인지
@@ -498,7 +544,7 @@ python engine/fetch_ftc.py ALL affiliates.csv
 ## 통합 모수와 커버리지 — 어디에 업무키트를 만들 값이 있나
 
 공정위 계열사와 상장 법인을 **법인등록번호로 이어** 하나의 모수를 만들었다
-(`samples/universe-2026.csv` · `engine/` 의 `dedupe()` + `resolve_ksic()` 규칙).
+(`samples/snapshots/{판본}/universe.csv` · `engine/` 의 `dedupe()` + `resolve_ksic()` 규칙).
 
 | | 건수 |
 |---|---|
