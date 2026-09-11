@@ -278,13 +278,33 @@ def test_a_clean_batch_passes_every_check():
     assert report.ok, [c.name for c in report.failures]
 
 
-def test_the_layout_check_is_not_an_always_failing_gate():
-    """★★★ KOSIS 에서 저지른 실수 — 미확인 사실을 `ok=False` 로 두면 정상 자료가 늘 격리된다."""
-    assert W.LAYOUT_VERIFIED is False
+@pytest.mark.parametrize("verified", [True, False])
+def test_the_layout_check_is_not_an_always_failing_gate(monkeypatch, verified):
+    """★★★ KOSIS 에서 저지른 실수 — 미확인 사실을 `ok=False` 로 두면 정상 자료가 늘 격리된다.
+
+    ⚠️ [2026-09-11] 종전에는 `assert W.LAYOUT_VERIFIED is False` 로 **그날의 값**을 박아
+      뒀다. 실측을 끝내고 True 로 바꾸는 순간 이 시험이 깨졌다 — 지키려던 것은 「아직 확인
+      안 했다」가 아니라 **「어느 쪽이든 관문이 되지 않는다」** 였다. 그래서 둘 다 돌린다."""
+    monkeypatch.setattr(W, "LAYOUT_VERIFIED", verified)
     check = [c for c in _provider().validate(_batch()).checks
              if c.name == "레이아웃 실측 여부"][0]
-    assert check.ok is True
-    assert "LAYOUT_VERIFIED" in check.detail
+    assert check.ok is True, "실측 여부는 주의사항이지 품질 결함이 아니다"
+    assert check.detail.strip()
+
+
+def test_the_stated_limits_follow_the_layout_constant():
+    """카드의 «주의사항» 이 상수와 어긋나지 않는다 — 주석이 코드를 대신 주장하면 안 된다.
+
+    ⚠️ 모듈을 reload 해서 양쪽을 돌리려 했더니 **레지스트리가 중복 등록을 막았다**
+      (`provider_id 가 겹칩니다`). 그 방어가 맞다 — 그래서 「지금 상수」와 「지금 문구」가
+      같은 쪽을 가리키는지만 본다. 누군가 조건식을 고정 문자열로 바꾸고 상수만 뒤집으면
+      여기서 걸린다."""
+    limits = " ".join(W.WorldBankPinkSheetProvider.descriptor.known_limits)
+    said_yes = "확인했습니다" in limits
+    said_no = "확인하지 못했습니다" in limits
+    assert said_yes != said_no, "카드가 실측 여부를 두 번 말하거나 한 번도 말하지 않는다"
+    assert said_yes is bool(W.LAYOUT_VERIFIED), (
+        f"LAYOUT_VERIFIED={W.LAYOUT_VERIFIED} 인데 카드 문구는 반대를 말한다")
 
 
 def test_a_batch_without_units_is_a_quality_failure():
@@ -561,3 +581,54 @@ def test_applying_twice_inserts_nothing_new(tmp_path):
     second = _walk(rig)
     assert second["applied"].inserted == 0
     assert second["applied"].duplicate == LOADED
+
+
+# ── ⑧ 요청 낱말 맞추기 — 2026-09-11 실측에서 드러난 결함 ────────────────────
+#
+# ★★★ 실제 워크북을 처음 내려받아 돌려 보다 찾았다. 종전 규칙은 양방향 부분 일치
+#   (`k in w or w in k`)였고, **실제 업무 용어 열한 개가 전부 잘못 걸렸다.**
+#
+#       전기요금 → 금      금리 → 금      변동비 → 구리      연료비 → 납
+#       아연 가격 → 아연 ＋ 납   («아연» 안에 «연» 이 있다)
+#
+#   값을 지어내지는 않지만 **엉뚱한 계열을 말없이 붙인다.** 사용자는 그것이 자기가
+#   요청한 것인 줄 안다 — ④(`Lead` 가 `Leaded gasoline` 을 잡지 않는다)와 같은 종류의
+#   사고가 «요청 쪽 문» 에 열려 있었다. 같은 파일 안에서 한쪽만 막혀 있었던 것이다.
+
+#: 실제 계획·원가 어휘. 한 글자 품목명(금·은·동·연)을 삼키는 것들만 골랐다.
+FALSE_FRIENDS = ("전기요금", "자금 조달", "대금 결제", "은행 이자", "자동차 수요",
+                 "부동산 가격", "노동비", "변동비", "연료비", "금리",
+                 "임금 상승률", "운전자본")
+
+
+@pytest.mark.parametrize("phrase", FALSE_FRIENDS)
+def test_business_words_do_not_match_any_commodity(phrase):
+    """계획 어휘가 품목으로 둔갑하지 않는다."""
+    assert W.match_commodities((phrase,)) == [], (
+        f"«{phrase}» 가 품목에 걸렸다 — 사용자는 이것을 자기가 요청한 계열로 읽는다")
+
+
+@pytest.mark.parametrize("phrase,expected", [
+    ("구리 가격", ["COPPER"]), ("구리가격", ["COPPER"]),
+    ("아연 가격", ["ZINC"]), ("아연가격", ["ZINC"]),
+    ("납 가격", ["LEAD"]),
+    ("전기동", ["COPPER"]),          # LS MnM 의 주력 제품명
+    ("동 가격", ["COPPER"]),         # 한 글자 이름은 «낱말이 통째로 같을 때» 살아 있어야 한다
+    ("금 시세", ["GOLD"]), ("은 가격", ["SILVER"]),
+    ("니켈", ["NICKEL"]), ("알루미늄", ["ALUMINUM"]),
+    ("원유", ["CRUDE_BRENT"]), ("유가", ["CRUDE_BRENT"]),
+    ("copper", ["COPPER"]), ("Copper prices", ["COPPER"]), ("zinc", ["ZINC"]),
+])
+def test_real_requests_still_match(phrase, expected):
+    """거짓 양성을 없애느라 거짓 음성을 만들지 않았는가 — ★ 이쪽이 더 중요하다."""
+    assert [code for code, _ in W.match_commodities((phrase,))] == expected
+
+
+def test_english_keyword_does_not_bleed_into_longer_word():
+    """④ 의 규칙이 «요청 쪽» 에도 선다 — `lead` 가 `leaded` 를 잡지 않는다."""
+    assert W.match_commodities(("leaded gasoline",)) == []
+
+
+def test_unknown_request_matches_nothing():
+    """모르면 비운다 — 지어내지 않는다."""
+    assert W.match_commodities(("모르는 것", "")) == []

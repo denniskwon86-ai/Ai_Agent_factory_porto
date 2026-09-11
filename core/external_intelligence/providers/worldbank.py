@@ -65,7 +65,25 @@ DEFAULT_PATH = ("/en/doc/18675f1d1639c7a34d463f59263ba0a2-0050012025/related/"
 URL_ENV = "AFS_WORLDBANK_PINK_SHEET_URL"
 
 #: ★★★ 실제 워크북과 대조하면 True 로 바꾸고, 어긋난 곳을 이 파일에 적는다.
-LAYOUT_VERIFIED = False
+#:
+#: **2026-09-11 실제 파일로 대조함** (sha256 83a320affafc8351… · 778,415 바이트 ·
+#: HTTP 200 · 4.2초). 대조한 것과 결과:
+#:
+#:     시트 이름      Monthly Prices · Monthly Indices          가정대로 있었다
+#:     판 크기        798행 × 89열
+#:     이름 줄 5 · 단위 줄 6 · 자료 시작 7행                      찾기 함수가 맞혔다
+#:     기간 표기      `1960M01`                                 `normalise_period` 대로
+#:     열 정렬        Copper = 65열 · 단위 `($/mt)`              ★ 독립 대조함(아래)
+#:     값             2016M01 = 4471.79                          파서 결과와 일치
+#:     구리·아연·납    각 120행(2016-01~2025-12) 정상 정규화
+#:
+#: ★ 「독립 대조」란: 파서는 **이름으로** 열을 찾는다. 그래서 openpyxl 로 따로 열어
+#:   `이름이 정확히 'Copper' 인 열`을 손으로 세어 65열 하나뿐임을 확인하고, 그 열의
+#:   2016M01 원값이 파서가 돌려준 값과 같은지 봤다. 이 확인이 없으면 「이름으로 찾았다」는
+#:   주장은 스스로를 증명하는 말이 된다.
+#:
+#: ⚠️ 대조하면서 «요청 쪽» 결함을 하나 찾아 고쳤다 — `match_commodities` 참조.
+LAYOUT_VERIFIED = True
 
 XLSX_CONTENT_TYPE = ("application/vnd.openxmlformats-officedocument"
                      ".spreadsheetml.sheet")
@@ -82,7 +100,7 @@ DEFAULT_BASIS = "nominal_price"
 #:   Pink Sheet 는 70여 개 계열을 담는데, 이름을 넘겨짚어 고르면 엉뚱한 열을 읽는다.
 COMMODITIES: Dict[str, Dict[str, Any]] = {
     "COPPER": {"label": "구리", "indicator_code": "WB_COPPER",
-               "names": ("copper",), "keywords": ("구리", "동", "copper")},
+               "names": ("copper",), "keywords": ("구리", "전기동", "동", "copper")},
     "ZINC": {"label": "아연", "indicator_code": "WB_ZINC",
              "names": ("zinc",), "keywords": ("아연", "zinc")},
     "LEAD": {"label": "납", "indicator_code": "WB_LEAD",
@@ -102,7 +120,13 @@ COMMODITIES: Dict[str, Dict[str, Any]] = {
 }
 
 #: 「값 없음」 표시. ★ 0 으로 채우지 않는다 — 사유와 함께 «뺀다».
-MISSING_MARKERS = ("..", "...", "n/a", "na", "-", "—", "")
+#:
+#: ★ [2026-09-11 실측] 실제 파일이 쓰는 것은 **`…`(U+2026 한 글자)가 6,186번**이고
+#:   `...`(점 셋)은 219번뿐이다. 목록에 한 글자짜리가 빠져 있었다.
+#:   ⚠️ **동작은 원래도 맞았다** — `parse_value` 의 마지막 줄(`_NUM` 불일치 → None)이
+#:     이미 걸러 냈다. 그래도 적는 이유는 이 상수가 «이 파일이 쓰는 표시» 를 사람에게
+#:     알려 주는 자리이기 때문이다. 여기가 비어 있으면 다음 사람이 「점 둘이구나」로 읽는다.
+MISSING_MARKERS = ("..", "...", "…", "n/a", "na", "-", "—", "")
 
 _MONTHLY = re.compile(r"^\s*(\d{4})\s*M\s*(\d{1,2})\s*$", re.IGNORECASE)
 _ANNUAL = re.compile(r"^\s*(\d{4})\s*$")
@@ -279,13 +303,55 @@ def _parts(dataset_ref: str) -> Dict[str, str]:
     return {"commodity": bits[0], "basis": bits[1], "start": bits[2], "end": bits[3]}
 
 
+#: 낱말 쪼개기 — 공백과 문장부호로만 나눈다. 한국어 복합어는 여기서 안 쪼개진다
+#: (「아연가격」은 한 낱말이다). 그 안쪽 처리는 `_keyword_hits` 의 길이 규칙이 맡는다.
+_TOKEN_SPLIT = re.compile(r"[^0-9A-Za-z가-힣]+")
+
+
+def _tokens(text: str) -> List[str]:
+    return [t for t in _TOKEN_SPLIT.split(_norm(text)) if t]
+
+
+def _keyword_hits(keyword: str, tokens: Sequence[str]) -> bool:
+    """이 키워드가 요청 낱말에 걸리는가.
+
+    ★★★ [2026-09-11 실측] 종전 규칙은 `k in w or w in k` 였고, **실제 업무 용어
+      열한 개가 전부 잘못 걸렸다.** 「전기요금」→ 금 · 「금리」→ 금 · 「변동비」→ 구리 ·
+      「아연 가격」→ 아연 **＋ 납**(「아연」 안에 「연」이 있다). 값을 지어내지는 않지만
+      **엉뚱한 계열을 말없이 붙인다** — 이 파일이 `find_series_column` 에서 막아 둔 것과
+      같은 종류의 사고가 요청 쪽 문에 열려 있었다.
+
+    규칙:
+      · **한 글자 키워드**(금·은·동·연)는 **낱말이 통째로 같을 때만** 걸린다.
+        「금」은 「금」에 걸리고 「전기요금」·「금리」·「자금」에는 걸리지 않는다.
+      · 두 글자 이상 한글은 낱말 **안**까지 본다 — 한국어는 「아연가격」처럼 붙여 쓴다.
+      · 영문은 낱말이 통째로 같을 때만. `lead` 가 `leaded` 에 걸리지 않게 한다.
+
+    ⚠️ 한 글자 키워드를 지우지 않는 이유: 「동」·「금」은 실제로 쓰는 이름이다.
+      지우면 「동 가격」이 아무 데도 안 걸린다 — 거짓 양성을 없애려다 거짓 음성을 만든다."""
+    key = _norm(keyword)
+    if not key:
+        return False
+    if key in tokens:
+        return True
+    if len(key) < 2:
+        return False                      # 한 글자 — 통째로 같을 때만 (위에서 이미 봤다)
+    if key.isascii():
+        return False                      # 영문 — 통째로 같을 때만
+    return any(key in t for t in tokens)   # 두 글자 이상 한글만 낱말 안을 본다
+
+
 def match_commodities(indicators: Sequence[str]) -> List[Tuple[str, Dict[str, Any]]]:
-    """요청 지표 이름을 품목으로 맞춘다. **모르면 비운다** — 지어내지 않는다."""
-    wants = [_norm(i) for i in indicators if _norm(i)]
+    """요청 지표 이름을 품목으로 맞춘다. **모르면 비운다** — 지어내지 않는다.
+
+    ⚠️ 모호하면 «더 많이» 가 아니라 «더 적게» 가 맞다. 안 걸리면 사용자가 다시 쓰면 되지만,
+      잘못 걸리면 사용자는 **그것이 자기가 요청한 것인 줄 안다.**"""
+    token_sets = [_tokens(i) for i in indicators]
+    token_sets = [t for t in token_sets if t]
     hits: List[Tuple[str, Dict[str, Any]]] = []
     for code, meta in COMMODITIES.items():
-        keys = [_norm(k) for k in meta["keywords"]] + [_norm(code)]
-        if any(any(k in w or w in k for k in keys) for w in wants):
+        keys = list(meta["keywords"]) + [code]
+        if any(any(_keyword_hits(k, toks) for k in keys) for toks in token_sets):
             hits.append((code, meta))
     return hits
 
@@ -326,8 +392,13 @@ class WorldBankPinkSheetProvider(B.Provider):
             "월 평균값입니다 — 특정 일자의 체결가가 아닙니다.",
             "과거 값이 «소급 정정»될 수 있습니다. 같은 업무 키로 다시 오면 중복으로 거부되며, "
             "반영은 사람이 판단합니다.",
-            "레이아웃을 실제 파일로 확인하지 못했습니다(LAYOUT_VERIFIED=False) — "
-            "품목 열을 못 찾으면 다른 열을 읽는 대신 실패합니다.",
+            #: ★ 상수를 따라간다. 손으로 쓴 문장을 두면 `LAYOUT_VERIFIED` 를 바꾼 날
+            #:   여기만 옛말로 남는다 — 실제로 그럴 뻔했다(2026-09-11).
+            ("레이아웃을 실제 파일로 확인했습니다(2026-09-11). 품목 열은 이름으로 찾으며, "
+             "못 찾으면 다른 열을 읽는 대신 실패합니다."
+             if LAYOUT_VERIFIED else
+             "레이아웃을 실제 파일로 확인하지 못했습니다(LAYOUT_VERIFIED=False) — "
+             "품목 열을 못 찾으면 다른 열을 읽는 대신 실패합니다."),
         ),
     )
 
