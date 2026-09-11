@@ -234,10 +234,10 @@ def test_정체성이_원장_저장과_지문까지_따라간다(tmp_path, monke
     a, b = _pkg("fp_a"), _pkg("fp_b")
     case_a = store.create(question=a.question, created_by="owner@afs.invalid",
                           package={"baseline": "bl_1", "options": ["A", "B"]},
-                          evidence=dict(a.evidence))
+                          evidence=dict(a.evidence), evidence_basis="JUDGMENT")
     case_b = store.create(question=b.question, created_by="owner@afs.invalid",
                           package={"baseline": "bl_1", "options": ["A", "B"]},
-                          evidence=dict(b.evidence))
+                          evidence=dict(b.evidence), evidence_basis="JUDGMENT")
     #: ★ 저장된 근거에 정체성이 **그대로** 있다.
     fetched = store.get(case_a["decision_id"])
     stored = fetched.get("evidence") or fetched.get("evidence_json")
@@ -764,7 +764,7 @@ def test_경로_정체성이_발간까지_따라간다():
     case = dc.decision_case.create(
         question="지연 영향 — 근거 안건(숫자 없음)", created_by="owner@afs.invalid",
         package={"baseline": "bl_1", "options": ["A", "B"]},
-        evidence=dict(ev))
+        evidence=dict(ev), evidence_basis="JUDGMENT")
 
     #: ① Decision Case 에 그대로 저장됐는가.
     fetched = dc.decision_case.get(case["decision_id"])

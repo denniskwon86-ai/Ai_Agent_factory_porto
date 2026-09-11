@@ -150,6 +150,12 @@ def grouped_consistency_columns(dataset_contract_key: str, namespace: str,
 SNAPSHOT_SEMANTICS = "FULL"
 
 
+#: ★★★ [2026-09-11] 인증 종점이 둘이 됐다(시연·원천). SQL 에서는 `is_certified()` 를
+#:   못 쓰므로 **자리표를 한 곳에서 만든다** — 각 질의가 `state=?` 를 직접 쓰면 종점이
+#:   늘어난 날 «한 곳만» 고쳐지고, 안 고쳐진 질의는 실물 판을 조용히 못 본다.
+_CERTIFIED_MARKS = "(" + ",".join("?" * len(m.CERTIFIED_STATES)) + ")"
+_CERTIFIED_ARGS = tuple(m.CERTIFIED_STATES)
+
 def _utc(text: Any) -> str:
     """시각을 **UTC 로 정규화**한 문자열. 못 읽으면 빈 문자열.
 
@@ -359,8 +365,8 @@ def versions(store: Any, namespace: str, object_type: str, object_id: str,
            "AND i.tenant_id=? AND i.entity_mode=?")
     args = [namespace, object_type, object_id, tenant_id, entity_mode]
     if not include_dead:
-        sql += " AND s.state=?"
-        args.append(m.DEMO_CERTIFIED)
+        sql += " AND s.state IN " + _CERTIFIED_MARKS
+        args.extend(_CERTIFIED_ARGS)
     with store.transaction() as conn:
         rows = [dict(r) for r in conn.execute(sql, tuple(args)).fetchall()]
     #: ★ 정렬은 **UTC 로 정규화한 값**으로 한다 — 문자열 정렬은 표기가 섞이면 어긋난다.
@@ -380,8 +386,8 @@ def current_snapshot(store: Any, dataset_contract_key: str, tenant_id: str,
             "  SELECT DISTINCT snapshot_id FROM object_scope_index "
             "  WHERE dataset_contract_key=? AND tenant_id=? AND entity_mode=?) i "
             "JOIN dataset_snapshots s ON s.snapshot_id = i.snapshot_id "
-            "WHERE s.state=?",
-            (dataset_contract_key, tenant_id, entity_mode, m.DEMO_CERTIFIED)).fetchall()]
+            "WHERE s.state IN " + _CERTIFIED_MARKS,
+            (dataset_contract_key, tenant_id, entity_mode) + _CERTIFIED_ARGS).fetchall()]
     live = [(_utc(r["certified_at"]), str(r["snapshot_id"])) for r in rows]
     if as_of_utc:
         live = [x for x in live if x[0] and x[0] <= as_of_utc]
@@ -468,8 +474,8 @@ def materialized_object_types(store: Any) -> Dict[str, Tuple[str, ...]]:
         rows = conn.execute(
             "SELECT DISTINCT i.namespace, i.object_type "
             "FROM object_scope_index i JOIN dataset_snapshots s "
-            "ON s.snapshot_id=i.snapshot_id WHERE s.state=? AND s.status='active'",
-            (m.DEMO_CERTIFIED,)).fetchall()
+            "ON s.snapshot_id=i.snapshot_id WHERE s.state IN " + _CERTIFIED_MARKS +
+            " AND s.status='active'", _CERTIFIED_ARGS).fetchall()
     grouped: Dict[str, set] = {}
     for row in rows:
         grouped.setdefault(str(row[0]), set()).add(str(row[1]))
@@ -488,10 +494,11 @@ def has_unmaterialized_snapshot(store: Any, namespace: str, object_type: str,
     with store.transaction() as conn:
         row = conn.execute(
             "SELECT 1 FROM dataset_snapshots s WHERE s.dataset_contract_key IN (" + marks + ") "
-            "AND s.state=? AND s.status='active' AND s.tenant_id=? AND s.entity_mode=? "
+            "AND s.state IN " + _CERTIFIED_MARKS + " AND s.status='active' "
+            "AND s.tenant_id=? AND s.entity_mode=? "
             "AND NOT EXISTS (SELECT 1 FROM object_scope_index i "
             "WHERE i.snapshot_id=s.snapshot_id AND i.namespace=? AND i.object_type=?) LIMIT 1",
-            (*keys, m.DEMO_CERTIFIED, tenant_id, entity_mode,
+            (*keys, *_CERTIFIED_ARGS, tenant_id, entity_mode,
              namespace, object_type)).fetchone()
     return row is not None
 
@@ -504,9 +511,10 @@ def backfill_supported_snapshots(store: Any) -> Dict[str, int]:
     """
     with store.transaction() as conn:
         snapshots = [dict(row) for row in conn.execute(
-            "SELECT * FROM dataset_snapshots WHERE state=? AND status='active' "
+            "SELECT * FROM dataset_snapshots WHERE state IN " + _CERTIFIED_MARKS +
+            " AND status='active' "
             "ORDER BY dataset_contract_key, certified_at, snapshot_id",
-            (m.DEMO_CERTIFIED,)).fetchall()
+            _CERTIFIED_ARGS).fetchall()
             if object_specs(str(row["dataset_contract_key"]))]
     written: Dict[str, int] = {}
     for snapshot in snapshots:

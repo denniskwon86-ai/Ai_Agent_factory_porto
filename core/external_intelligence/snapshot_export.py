@@ -243,3 +243,64 @@ def _result(row: Mapping[str, Any], rows: Sequence[Mapping[str, str]],
             if not quarantined else
             "격리된 판은 인증 대상이 아닙니다. 고친 파일은 «새 Snapshot» 으로 다시 넣습니다."),
     }
+
+
+def certify_source(store: Any, snapshot_id: str, *, source_id: str,
+                   certified_by: str) -> Dict[str, Any]:
+    """승인된 **공개 원천**의 실물 판을 인증한다 — `SOURCE_CERTIFIED`.
+
+    ## ⚠️⚠️ 이것은 «회사 실적» 인증이 아니다
+
+        DEMO_CERTIFIED     시연 자료
+        SOURCE_CERTIFIED   **출처가 우리가 아닌** 공표 자료      ← 이 함수가 여는 것
+        (없음)             회사 실적(자사 매출·원가·생산)        ← 여전히 종점이 없다
+
+    ★★★ 회사 실적에는 종점을 **열지 않았다.** 그것은 실제 Data Owner 가 「이 숫자가
+      맞다」고 서명하는 일이고, 서명자가 없는 상태에서 열면 시연 자료를 실적으로 읽게
+      만드는 바로 그 사고가 난다. 여기서 여는 것은 **발행 기관이 따로 있는** 자료뿐이고,
+      우리 쪽 책임은 「그 출처를 쓰기로 승인했는가」 하나다.
+
+    ## 왜 이 함수가 `snapshot_service` 가 아니라 여기 있나
+
+    ★ 「원천이 승인됐는가」는 `external_sources` 를 봐야 알고, 그 등록부는 이 레인에 있다.
+      `data_preparation` 이 여기를 import 하면 순환이 된다. 그래서 **정책은 이쪽, 상태와
+      전이는 저쪽**으로 나눴다 —
+      `advance_snapshot()` 이 「RECONCILED 에서만·REAL 자료만」을 스스로 지키고(저장소가
+      자기 상태를 지킨다), 이 함수가 「승인된 원천인가」를 더한다.
+      ⚠️ 층마다 가정이 달라야 층이다 — 한쪽이 다른 쪽을 믿으면 층이 아니라 껍데기다."""
+    from core.data_preparation import models as m
+    from core.external_intelligence import external_intelligence as intel
+
+    if not str(certified_by or "").strip():
+        raise SnapshotExportError(
+            "certified_by 는 필수입니다 — 누가 이 판을 인증했는지 없으면 근거가 없습니다.")
+    sid = str(source_id or "").strip()
+    if not sid:
+        raise SnapshotExportError(
+            "source_id 는 필수입니다 — 어느 원천에서 온 판인지 모르면 «승인된 출처인가» 를 "
+            "물을 수 없습니다.")
+    src = intel.get_source(sid)
+    if src is None:
+        raise SnapshotExportError(f"존재하지 않는 원천입니다: {sid}")
+    if not src.get("enabled"):
+        raise SnapshotExportError(
+            f"승인되지 않은 원천입니다: {sid}(승인자 없음) — 원천 승인은 「이 출처의 값을 "
+            f"회사 계획에 쓴다」는 사람의 결정이고, 그것 없이 인증하면 이 판의 근거가 "
+            f"«아무도 하지 않은 승인» 이 됩니다.")
+
+    row = store.get_snapshot(snapshot_id)
+    if row is None:
+        raise SnapshotExportError(f"존재하지 않는 Snapshot 입니다: {snapshot_id}")
+    out = store.advance_snapshot(snapshot_id, m.SOURCE_CERTIFIED)
+    return {
+        "snapshot_id": out.get("snapshot_id"),
+        "state": out.get("state"),
+        "data_kind": out.get("data_kind"),
+        "certified_at": out.get("certified_at"),
+        "source_id": sid,
+        "source_approved_by": src.get("approved_by"),
+        "certified_by": certified_by,
+        "note": ("이 판은 «발행 기관이 따로 있는 공표 자료» 로 인증됐습니다 — "
+                 "회사 실적 인증이 아닙니다. 원천 승인자는 "
+                 f"{src.get('approved_by')} 입니다."),
+    }

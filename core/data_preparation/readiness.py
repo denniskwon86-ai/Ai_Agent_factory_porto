@@ -142,7 +142,8 @@ def latest_certified(snapshots: List[Dict[str, Any]]) -> Optional[Dict[str, Any]
 
     ⚠️ 「가장 최근 판」이 아니다 — 인증되지 않은 새 판이 인증된 옛 판을 가리면,
       승인 전 데이터가 공식 화면에 오른다."""
-    certified = [s for s in snapshots if str(s.get("state")) == m.DEMO_CERTIFIED]
+    #: ⚠️ 종점이 둘이다(시연·원천). 하나만 보면 실물 판이 «없는 것처럼» 보인다.
+    certified = [s for s in snapshots if m.is_certified(s.get("state"))]
     if not certified:
         return None
     return sorted(certified, key=lambda s: (str(s.get("certified_at") or ""),

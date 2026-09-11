@@ -87,7 +87,7 @@ def load_sealed(store: Any, *, sealed_snapshots: Mapping[str, str],
                 f"읽었는가의 기록이지 무엇을 읽어도 되는가의 허가가 아닙니다.")
         #: ③ 인증판만. 인증 전 판으로 만든 숫자는 검증되지 않은 자료다.
         state = str(row.get("state", ""))
-        if state != m.DEMO_CERTIFIED:
+        if not m.is_certified(state):
             raise SealedDatasetError(
                 f"{key}: 봉인된 판({sid})이 인증 상태가 아닙니다({state}) — 인증 전 "
                 f"자료로 만든 숫자는 검증되지 않았습니다.")
@@ -118,7 +118,7 @@ def active_seals(store: Any, *, instance_id: str, contract_keys: Sequence[str]
     latest: Dict[str, Dict[str, Any]] = {}
     for row in store.list_snapshots(instance_id):
         key = str(row.get("dataset_contract_key", ""))
-        if key not in contract_keys or str(row.get("state", "")) != m.DEMO_CERTIFIED:
+        if key not in contract_keys or not m.is_certified(row.get("state", "")):
             continue
         prev = latest.get(key)
         at = str(row.get("certified_at", "") or row.get("created_at", ""))

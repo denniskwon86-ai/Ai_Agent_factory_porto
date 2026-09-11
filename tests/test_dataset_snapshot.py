@@ -65,9 +65,10 @@ def binding(store):
         tenant_id="t1", scope_node_id="n1", entity_mode="REAL")
 
 
-def _ingest(store, binding, tmp_path, payload=GOOD_CSV, name="po.csv"):
+def _ingest(store, binding, tmp_path, payload=GOOD_CSV, name="po.csv", data_kind=None):
+    kw = {} if data_kind is None else {"data_kind": data_kind}
     return ss.ingest(store, binding=binding, payload=payload, file_name=name,
-                     workspace_root=str(tmp_path), created_by="t_admin@test.invalid")
+                     workspace_root=str(tmp_path), created_by="t_admin@test.invalid", **kw)
 
 
 # ── ① 실패는 0행이 아니다 ───────────────────────────────────────────────
@@ -172,15 +173,63 @@ def test_an_empty_column_is_unknown_not_string():
 
 # ── 전이표 ───────────────────────────────────────────────────────────────
 def test_the_snapshot_transition_table_is_pinned_literally():
+    """★ 표를 통째로 박아 둔다 — 종점을 늘리는 사람이 «반드시» 여기를 보게 한다.
+
+    ⚠️ [2026-09-11] 실제로 걸렸다. `SOURCE_CERTIFIED` 를 더하면서 이 시험이 깨졌고,
+      그래서 「인증 종점이 하나 더 생긴다」는 사실을 지나칠 수 없었다. 이런 시험이
+      «귀찮은 시험» 처럼 보이지만, 그 귀찮음이 목적이다."""
     assert m.SNAPSHOT_TRANSITIONS == {
         "RAW": ("PROFILED", "QUARANTINED"),
         "PROFILED": ("STANDARDIZED", "QUARANTINED"),
         "STANDARDIZED": ("RECONCILED", "QUARANTINED"),
-        "RECONCILED": ("DEMO_CERTIFIED", "QUARANTINED"),
+        #: 대사를 마친 판은 «성격에 맞는» 종점으로 간다 — 어느 쪽인지는 data_kind 가 정한다.
+        "RECONCILED": ("DEMO_CERTIFIED", "SOURCE_CERTIFIED", "QUARANTINED"),
         "DEMO_CERTIFIED": ("REVOKED",),
+        "SOURCE_CERTIFIED": ("REVOKED",),
         "QUARANTINED": (),
         "REVOKED": (),
     }
+
+
+# ── 인증 종점이 «둘» 이다 — 성격이 맞아야 간다 (2026-09-11) ──────────────────
+def test_the_two_certification_endpoints_are_disjoint_by_data_kind():
+    """★★★ 종점마다 허용 성격이 다르다. 섞이면 어느 것이 시연이었는지 가릴 수 없다."""
+    assert m.CERTIFIED_STATES == (m.DEMO_CERTIFIED, m.SOURCE_CERTIFIED)
+    assert m.CERTIFICATION_DATA_KIND[m.DEMO_CERTIFIED] == m.DATA_KIND_DEMO
+    assert m.CERTIFICATION_DATA_KIND[m.SOURCE_CERTIFIED] == m.DATA_KIND_REAL
+
+
+def test_is_certified_covers_both_endpoints():
+    """★ 「인증되었는가」를 묻는 자리는 이 함수를 쓴다 — 상수를 직접 비교하면
+    종점이 늘어난 날 한 곳만 고쳐지고 실물이 조용히 안 보인다."""
+    assert m.is_certified(m.DEMO_CERTIFIED) is True
+    assert m.is_certified(m.SOURCE_CERTIFIED) is True
+    for state in (m.RAW, m.PROFILED, m.STANDARDIZED, m.RECONCILED,
+                  m.QUARANTINED, m.REVOKED, "", None):
+        assert m.is_certified(state) is False
+
+
+def test_real_data_cannot_take_the_demo_endpoint(store, binding, tmp_path):
+    snap = _ingest(store, binding, tmp_path, data_kind=m.DATA_KIND_REAL)
+    sid = snap["snapshot_id"]
+    ss.profile(store, sid, GOOD_ROWS, GOOD_COLS)
+    ss.standardize(store, sid, GOOD_ROWS)
+    ss.reconcile(store, sid, GOOD_ROWS, {"row_count": len(GOOD_ROWS)})
+    with pytest.raises(m.StateConflict) as e:
+        store.advance_snapshot(sid, m.DEMO_CERTIFIED)
+    assert "DEMO/SYNTHETIC» 전용" in str(e.value)
+
+
+def test_demo_data_cannot_take_the_source_endpoint(store, binding, tmp_path):
+    """★ 반대편 — 시연 자료가 «원천 인증» 을 받으면 시연이 실물로 읽힌다."""
+    snap = _ingest(store, binding, tmp_path)
+    sid = snap["snapshot_id"]
+    ss.profile(store, sid, GOOD_ROWS, GOOD_COLS)
+    ss.standardize(store, sid, GOOD_ROWS)
+    ss.reconcile(store, sid, GOOD_ROWS, {"row_count": len(GOOD_ROWS)})
+    with pytest.raises(m.StateConflict) as e:
+        store.advance_snapshot(sid, m.SOURCE_CERTIFIED)
+    assert "REAL» 전용" in str(e.value)
 
 
 # ── ② 잘림 ≠ 전체 ───────────────────────────────────────────────────────

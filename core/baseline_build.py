@@ -78,7 +78,9 @@ def _assert_usable(snap: Dict[str, Any], scope: Dict[str, str]) -> None:
     """이 판이 기준선에 들어갈 수 있는가. **하나라도 어긋나면 던진다.**"""
     sid = str(snap.get("snapshot_id") or "(id 없음)")
     state = str(snap.get("state") or "")
-    if state != dpm.DEMO_CERTIFIED:
+    #: ★ 「인증되었는가」를 묻는 자리다 — 종점 이름을 직접 비교하면 종점이 늘어난 날
+    #:   여기만 안 고쳐져 실물이 조용히 안 보인다.
+    if not dpm.is_certified(state):
         #: ⚠️ 승인 전·격리된 판이 기준선에 들어가면 그 위의 숫자는 아무도 보증하지 않는다.
         raise BaselineError(
             f"{sid}: 인증되지 않은 판은 기준선에 넣지 않습니다(현재 {state or '(모름)'}).")

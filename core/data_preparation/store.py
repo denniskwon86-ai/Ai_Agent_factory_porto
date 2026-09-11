@@ -697,7 +697,19 @@ class DataPreparationStore:
                     sets.append(f"{col}=?")
                     args.append(json.dumps(payload[key] or {}, ensure_ascii=False,
                                            sort_keys=True))
-            if target == m.DEMO_CERTIFIED:
+            if target in m.CERTIFIED_STATES:
+                #: ★★★ 인증 종점마다 «허용되는 자료 성격» 이 다르다. 여기서 막지 않으면
+                #:   시연 자료가 원천 인증을 받거나 실물이 시연 인증을 받는다 — 둘을 섞으면
+                #:   어느 것이 시연이었는지 영영 가릴 수 없다.
+                #: ⚠️ 이 검사를 응용층(`snapshot_service`)에만 두지 «않는다». 저장소가
+                #:   자기 상태를 지키지 못하면, 다른 경로가 하나 생기는 날 조용히 뚫린다.
+                want = m.CERTIFICATION_DATA_KIND.get(target, "")
+                have = str(cur["data_kind"] if "data_kind" in cur.keys() else "")
+                if want and have != want:
+                    raise m.StateConflict(
+                        f"«{have or '성격 미상'}» 자료는 {target} 를 받을 수 없습니다 — "
+                        f"이 종점은 «{want}» 전용입니다. 시연 자료와 실물이 섞이면 "
+                        f"어느 것이 시연이었는지 가릴 수 없습니다.")
                 sets.append("certified_at=?")
                 args.append(now)
             args.append(snapshot_id)

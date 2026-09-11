@@ -139,11 +139,52 @@ PROFILED = "PROFILED"
 STANDARDIZED = "STANDARDIZED"
 RECONCILED = "RECONCILED"
 DEMO_CERTIFIED = "DEMO_CERTIFIED"
+
+#: ★★★ [F-3 후속 · 2026-09-11] **승인된 공개 원천**에서 온 실물 자료의 인증 종점.
+#:
+#: ## 왜 종점이 하나로는 부족했나
+#:
+#: 종전에는 `DEMO_CERTIFIED` 가 유일했고 그것은 시연 자료 전용이다. 그래서 World Bank
+#: Pink Sheet 처럼 **공표된 실물**을 적재해도 `RECONCILED` 에서 멈췄다 — 인증판만 읽는
+#: 기준선·계산·색인이 그 자료를 영영 못 봤다(F-8 이 실측으로 확인한 지점이다).
+#:
+#: ## ⚠️⚠️ 이것은 «회사 실적» 인증이 «아니다»
+#:
+#:     DEMO_CERTIFIED     시연 자료            data_kind = DEMO/SYNTHETIC
+#:     SOURCE_CERTIFIED   승인된 공개 원천의 실물  data_kind = REAL + 원천이 승인돼 있어야
+#:     (없음)             **회사 실적**         ← 여전히 종점이 없다
+#:
+#: ★★★ 회사 실적(자사 매출·원가·생산 실적)에는 **아직 인증 종점이 없고 그대로 둔다.**
+#:   그것은 실제 Data Owner 가 「이 숫자가 맞다」고 서명하는 일이고, 서명자가 없는 상태에서
+#:   종점을 열면 시연 자료를 실적으로 읽게 만드는 바로 그 사고가 난다.
+#:   여기서 여는 것은 **「출처가 우리가 아닌」 공표 자료**뿐이다 — 그 자료의 Data Owner 는
+#:   발행 기관이고, 우리 쪽 책임은 「그 출처를 쓰기로 승인했는가」이며 그 승인은
+#:   `external_sources.approved_by` 에 이미 사람 이름으로 남아 있다.
+SOURCE_CERTIFIED = "SOURCE_CERTIFIED"
+
 QUARANTINED = "QUARANTINED"
 REVOKED = "REVOKED"
 
 SNAPSHOT_STATES: Tuple[str, ...] = (RAW, PROFILED, STANDARDIZED, RECONCILED,
-                                    DEMO_CERTIFIED, QUARANTINED, REVOKED)
+                                    DEMO_CERTIFIED, SOURCE_CERTIFIED, QUARANTINED, REVOKED)
+
+#: ★★★ 「인증되었는가」를 묻는 **유일한 자리**. 상수 하나를 직접 비교하면 종점이 늘어난
+#:   날 «한 곳만» 고쳐지고, 안 고쳐진 곳은 실물을 조용히 못 보게 된다.
+#:   (기억: 예외를 한 곳만 지웠다 · 관문을 두 곳에서 구현하지 않는다)
+#: ⚠️ 「시연 인증인가」를 물어야 하는 자리는 여기를 쓰지 «않는다» — 시연 초기화처럼
+#:   시연 자료만 건드려야 하는 곳은 `DEMO_CERTIFIED` 를 그대로 본다.
+CERTIFIED_STATES: Tuple[str, ...] = (DEMO_CERTIFIED, SOURCE_CERTIFIED)
+
+#: 인증 종점마다 «허용되는 자료 성격». 어긋나면 `advance_snapshot` 이 막는다.
+CERTIFICATION_DATA_KIND = {
+    DEMO_CERTIFIED: "DEMO/SYNTHETIC",
+    SOURCE_CERTIFIED: "REAL",
+}
+
+
+def is_certified(state: Any) -> bool:
+    """이 판이 «인증된» 판인가. 종점 이름을 직접 비교하지 말고 이것을 쓴다."""
+    return str(state or "") in CERTIFIED_STATES
 
 #: ★★★ **인증 뒤에는 앞으로 못 간다.** 정정은 새 Snapshot 을 만든다.
 #:
@@ -155,8 +196,11 @@ SNAPSHOT_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
     RAW: (PROFILED, QUARANTINED),
     PROFILED: (STANDARDIZED, QUARANTINED),
     STANDARDIZED: (RECONCILED, QUARANTINED),
-    RECONCILED: (DEMO_CERTIFIED, QUARANTINED),
+    #: ★ 대사를 마친 판은 «성격에 맞는» 종점으로 간다. 둘 중 어디로 갈지는
+    #:   `data_kind` 가 정하고 `advance_snapshot` 이 확인한다.
+    RECONCILED: (DEMO_CERTIFIED, SOURCE_CERTIFIED, QUARANTINED),
     DEMO_CERTIFIED: (REVOKED,),
+    SOURCE_CERTIFIED: (REVOKED,),
     QUARANTINED: (),
     REVOKED: (),
 }

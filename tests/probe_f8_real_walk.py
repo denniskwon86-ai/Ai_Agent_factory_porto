@@ -135,13 +135,18 @@ def f2_data_to_connection() -> Tuple[str, str]:
     real_only = [s for s in snaps if s.get("data_kind") == "REAL"]
     verdict = R.evaluate_dataset("EXT-02", binding=binding, snapshots=real_only,
                                  now="2026-09-11T00:00:00Z")
+    #: ⚠️ [2026-09-11 정정] 「다음 행동이 비었다 = 침묵」으로 뒀다가 틀렸다(계측기 10번째).
+    #:   `READY` 는 «막혔는데 말을 안 하는» 상태가 아니라 **안 막힌** 상태다 — 다음 행동이
+    #:   없는 게 정상이다. 실물이 인증 종점에 닿을 일이 없다고 가정한 논리였다.
+    state = str(verdict.get("state") or "")
     action = str(verdict.get("next_action") or "")
+    if state == "READY":
+        return FLOWS, ("결속 %d · 수집 작업 %d. EXT-02 실물이 `READY` 다 — "
+                       "막히지 않았으므로 다음 행동이 없는 것이 정상이다" % (binds, jobs))
     if not action:
-        return BLOCKED_SILENT, ("준비 안 된 계약에 «다음 행동» 이 비어 있다: %s"
-                                % verdict.get("state"))
+        return BLOCKED_SILENT, "준비 안 된 계약에 «다음 행동» 이 비어 있다: %s" % state
     return FLOWS, ("결속 %d · 수집 작업 %d. 부족한 계약(EXT-02 실물)에 실제로 "
-                   "다음 행동이 붙는다 — 상태 `%s` → 「%s」"
-                   % (binds, jobs, verdict.get("state"), action))
+                   "다음 행동이 붙는다 — 상태 `%s` → 「%s」" % (binds, jobs, state, action))
 
 
 # ── F-3 연계 → 생성  ★ 오늘 이은 곳 ────────────────────────────────────────
@@ -163,9 +168,17 @@ def f3_connection_to_generation() -> Tuple[str, str]:
                                    now="2026-09-11T00:00:00Z")
     both = R.evaluate_dataset("EXT-02", binding=binding, snapshots=snaps,
                               now="2026-09-11T00:00:00Z")
+    state = str(only_real.get("state") or "")
     action = str(only_real.get("next_action") or "")
+    if state == "READY":
+        #: ★★★ [2026-09-11] 여기가 F-8 이 「막힌다」고 기록했던 바로 그 지점이다.
+        #:   `SOURCE_CERTIFIED`(승인된 공개 원천 전용 종점)를 열어 «흐르게» 됐다.
+        return FLOWS, ("실물 %d행이 `%s` 로 인증되어 준비도 `READY` 다 — "
+                       "인증판만 읽는 기준선·계산·색인이 이제 이 자료를 «본다». "
+                       "시연 판 %d개와 섞이지 않고 나란히 있다"
+                       % (real[0].get("row_count", 0), real[0].get("state"), len(demo)))
     if not action:
-        return BLOCKED_SILENT, "실물 판이 «%s» 인데 다음 행동이 없다" % only_real.get("state")
+        return BLOCKED_SILENT, "실물 판이 «%s» 인데 다음 행동이 없다" % state
 
     #: ⚠️⚠️ 더 날카로운 사실 — 실물을 올려도 준비도는 **시연 판을 가리킨다.**
     mixed_note = ""
@@ -254,12 +267,21 @@ def f8_summary() -> Tuple[str, str]:
     real_snaps = [s for s in DP.list_snapshots(KIT_INSTANCE)
                   if s.get("data_kind") == "REAL"]
     obs = count("external_intelligence.db", "external_observations")
+    #: ★ 실물 판이 «인증 종점» 에 닿았는지로 갈린다.
+    from core.data_preparation import models as dpm
+    certified = [s for s in real_snaps if dpm.is_certified(s.get("state"))]
+    if certified:
+        return FLOWS, (
+            "실물이 **① 수집 → ② 승격(관측값 %d건) → ③ 계획 동인 → ④ 시나리오 계산 → "
+            "⑤ 업무키트 스냅샷 `%s`(%d판)** 까지 **끝까지 흐른다.** "
+            "⚠️ 다만 이 인증은 «발행 기관이 따로 있는 공표 자료» 전용이다 — "
+            "**회사 실적(자사 매출·원가·생산)에는 여전히 인증 종점이 없고**, 그것은 "
+            "실제 Data Owner 가 서명하는 일이라 코드가 열 수 있는 것이 아니다"
+            % (obs, certified[0].get("state"), len(certified)))
     return BLOCKED_EXPLAINED, (
         "실물은 **① 수집 → ② 승격(관측값 %d건) → ③ 계획 동인 → ④ 시나리오 계산**까지 "
-        "돌고, **⑤ 업무키트 스냅샷 `RECONCILED`(%d판)** 에서 멈춘다. "
-        "막는 것은 인증 종점이 `DEMO_CERTIFIED` 하나뿐이라는 사실이고, "
-        "제품이 그 이유를 문장으로 말한다 — **이것이 F-8 의 PASS 조건이다**"
-        % (obs, len(real_snaps)))
+        "돌고, **⑤ 업무키트 스냅샷(%d판)** 에서 멈춘다. 제품이 그 이유를 문장으로 말한다 — "
+        "**이것이 F-8 의 PASS 조건이다**" % (obs, len(real_snaps)))
 
 
 SEAMS: List[Tuple[str, Callable[[], Tuple[str, str]]]] = [

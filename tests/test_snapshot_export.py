@@ -234,3 +234,80 @@ def test_an_observation_without_an_indicator_code_is_refused():
 def test_the_commodity_code_comes_off_the_indicator_code():
     rows = SX.build_rows(OBS, tenant_id="T", scope_node_id="S", as_of_date="2026-09-11")
     assert [r["commodity_code"] for r in rows] == ["COPPER", "ZINC"]
+
+
+# ── 실물 인증 종점 `SOURCE_CERTIFIED` (2026-09-11) ──────────────────────────
+#
+# ⚠️⚠️ 이것은 «회사 실적» 인증이 아니다. 여는 것은 «발행 기관이 따로 있는 공표 자료» 뿐이고,
+#   자사 매출·원가·생산 실적에는 **여전히 종점이 없다** — 그것은 실제 Data Owner 의 서명이다.
+
+class _FakeIntel:
+    """원천 등록부 대역. ⚠️ 진짜 등록부를 쓰면 시험이 운영 DB 를 읽는다."""
+
+    def __init__(self, sources):
+        self._sources = sources
+
+    def get_source(self, source_id):
+        return self._sources.get(source_id)
+
+
+@pytest.fixture()
+def approved_source(monkeypatch):
+    import core.external_intelligence as EI
+    monkeypatch.setattr(EI, "external_intelligence",
+                        _FakeIntel({"WB_PINK_SHEET": {"source_id": "WB_PINK_SHEET",
+                                                      "enabled": 1,
+                                                      "approved_by": "someone@lsmnm.com"},
+                                    "NOT_APPROVED": {"source_id": "NOT_APPROVED",
+                                                     "enabled": 0, "approved_by": ""}}))
+
+
+def test_a_real_snapshot_reaches_the_source_endpoint(store, binding, tmp_path, approved_source):
+    """★★★ F-8 이 「RECONCILED 에서 멈춘다」고 기록한 지점을 «연다»."""
+    out = _export(store, binding, tmp_path)
+    assert out["state"] == m.RECONCILED
+    done = SX.certify_source(store, out["snapshot_id"],
+                             source_id="WB_PINK_SHEET", certified_by="someone@lsmnm.com")
+    assert done["state"] == m.SOURCE_CERTIFIED
+    assert done["data_kind"] == m.DATA_KIND_REAL
+    assert done["certified_at"]
+    assert "회사 실적 인증이 아닙니다" in done["note"]
+
+
+def test_an_unapproved_source_cannot_certify(store, binding, tmp_path, approved_source):
+    """★★★ 원천 승인은 사람의 결정이다 — 그것 없이 인증하면 근거가 «아무도 하지 않은 승인» 이다."""
+    out = _export(store, binding, tmp_path)
+    with pytest.raises(SX.SnapshotExportError) as e:
+        SX.certify_source(store, out["snapshot_id"],
+                          source_id="NOT_APPROVED", certified_by="someone@lsmnm.com")
+    assert "승인되지 않은 원천" in str(e.value)
+
+
+def test_an_unknown_source_cannot_certify(store, binding, tmp_path, approved_source):
+    out = _export(store, binding, tmp_path)
+    with pytest.raises(SX.SnapshotExportError) as e:
+        SX.certify_source(store, out["snapshot_id"], source_id="NOPE",
+                          certified_by="someone@lsmnm.com")
+    assert "존재하지 않는 원천" in str(e.value)
+
+
+@pytest.mark.parametrize("missing", ["source_id", "certified_by"])
+def test_certification_needs_both_the_source_and_a_named_certifier(
+        store, binding, tmp_path, approved_source, missing):
+    out = _export(store, binding, tmp_path)
+    kw = {"source_id": "WB_PINK_SHEET", "certified_by": "someone@lsmnm.com"}
+    kw[missing] = ""
+    with pytest.raises(SX.SnapshotExportError):
+        SX.certify_source(store, out["snapshot_id"], **kw)
+
+
+def test_a_quarantined_snapshot_cannot_be_certified(store, binding, tmp_path,
+                                                    approved_source, monkeypatch):
+    """격리된 판은 인증 대상이 아니다 — 전이표가 막는다(층이 둘이다)."""
+    monkeypatch.setattr(SX, "control_totals",
+                        lambda rows: {"row_count": len(rows) + 1, "sums": {}})
+    out = _export(store, binding, tmp_path)
+    assert out["quarantined"] is True
+    with pytest.raises(m.StateConflict):
+        SX.certify_source(store, out["snapshot_id"], source_id="WB_PINK_SHEET",
+                          certified_by="someone@lsmnm.com")
