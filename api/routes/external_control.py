@@ -430,6 +430,29 @@ async def approve_source(source_id: str, p: Principal = Depends(current_principa
     return {"status": "success", "data": out}
 
 
+
+class SourceOwnerRequest(BaseModel):
+    """⚠️ 소유 부서는 **서버가 정하지 않는다** — 조직 배정은 사람의 판단이다.
+    다만 «고칠 수 있어야» 한다. 종전에는 등록 시점에만 넣을 수 있었다."""
+    owner_department: str = Field(..., min_length=1)
+
+
+@router.post("/sources/{source_id}/owner")
+async def set_source_owner(source_id: str, req: SourceOwnerRequest,
+                           p: Principal = Depends(current_principal)):
+    """원천의 소유 부서를 정한다(§12.4 「다섯 가지」 중 «소유자»).
+
+    ★ 승인(`/approve`)과 나누어 둔다 — 승인은 「이 값을 회사 계획에 쓴다」이고
+      소유는 「누가 관리 책임을 지는가」다. 한 호출로 묶으면 소유자를 바꾸려고
+      승인을 다시 눌러야 한다."""
+    assert_can_manage_standard(p)
+    try:
+        out = await asyncio.to_thread(external_intelligence.set_source_owner,
+                                      source_id, req.owner_department, _actor(p))
+    except ExternalIntelligenceError as e:
+        _err(e)
+    return {"status": "success", "data": out}
+
 @router.post("/observations")
 async def record_observation(req: ObservationRequest,
                              p: Principal = Depends(current_principal)):

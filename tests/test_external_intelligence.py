@@ -205,3 +205,58 @@ def test_readiness_improves_when_gold_arrives(ei):
 def test_unregistered_indicator_is_reported_not_crashed(ei):
     r = ei.resolve_value("no_such_indicator", "baseline_plan")
     assert r["allowed"] is False and "등록되지 않은" in r["reason"]
+
+
+# ── 원천 소유 부서 — T-1 의 「조용한 빈 값」을 막는다 (2026-09-11) ───────────
+def _fresh(tmp_path):
+    from core.external_intelligence import ExternalIntelligence
+    s = ExternalIntelligence(db_path=str(tmp_path / "ei.db"))
+    assert "WorkSpace" not in s.db_path, "운영 저장소를 열었다"
+    return s
+
+
+def test_a_source_registered_without_an_owner_can_be_fixed_later(tmp_path):
+    """★★★ 종전에는 등록 시점에만 소유 부서를 넣을 수 있었다 — 빠뜨리면 «영영» 비었다.
+
+    T-1(「주요 데이터에 다섯 가지가 붙어 있는가」)이 잡으려는 모양이 정확히 그것이고,
+    2026-09-11 실측에서 `WB_PINK_SHEET` 가 실제로 그렇게 걸렸다."""
+    ei = _fresh(tmp_path)
+    src = ei.register_source(name="원천", source_type="CSV", source_id="S1")
+    assert src["owner_department"] == "", "기본값이 빈 문자열이라 조용히 통과한다"
+    out = ei.set_source_owner("S1", "MNM_SHARED", "someone@test.invalid")
+    assert out["owner_department"] == "MNM_SHARED"
+
+
+def test_an_empty_owner_department_is_refused(tmp_path):
+    from core.external_intelligence import ExternalIntelligenceError
+    ei = _fresh(tmp_path)
+    ei.register_source(name="원천", source_type="CSV", source_id="S1")
+    with pytest.raises(ExternalIntelligenceError) as e:
+        ei.set_source_owner("S1", "   ", "someone@test.invalid")
+    assert "아무도 관리하지 않습니다" in str(e.value)
+
+
+def test_changing_the_owner_needs_a_named_actor(tmp_path):
+    """소유자를 바꾸는 것은 «책임자» 를 바꾸는 일이다 — 누가 했는지 없으면 되돌릴 근거도 없다."""
+    from core.external_intelligence import ExternalIntelligenceError
+    ei = _fresh(tmp_path)
+    ei.register_source(name="원천", source_type="CSV", source_id="S1")
+    with pytest.raises(ExternalIntelligenceError):
+        ei.set_source_owner("S1", "MNM_SHARED", "")
+
+
+def test_setting_an_owner_on_a_missing_source_is_refused(tmp_path):
+    from core.external_intelligence import ExternalIntelligenceError
+    ei = _fresh(tmp_path)
+    with pytest.raises(ExternalIntelligenceError) as e:
+        ei.set_source_owner("NOPE", "MNM_SHARED", "someone@test.invalid")
+    assert "존재하지 않는 원천입니다" in str(e.value)
+
+
+def test_setting_an_owner_does_not_approve_the_source(tmp_path):
+    """★ 승인과 소유는 «다른 결정» 이다 — 한쪽이 다른 쪽을 열어 주면 안 된다."""
+    ei = _fresh(tmp_path)
+    ei.register_source(name="원천", source_type="CSV", source_id="S1")
+    out = ei.set_source_owner("S1", "MNM_SHARED", "someone@test.invalid")
+    assert out["enabled"] == 0, "소유 부서를 정했다고 원천이 활성화되면 안 된다"
+    assert out["approved_by"] == ""

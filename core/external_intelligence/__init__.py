@@ -241,6 +241,38 @@ class ExternalIntelligence:
                 raise ExternalIntelligenceError(f"존재하지 않는 원천입니다: {source_id}")
         return self.get_source(source_id)
 
+    def set_source_owner(self, source_id: str, owner_department: str,
+                         changed_by: str) -> dict:
+        """원천의 **소유 부서**를 정한다(§12.4 의 「다섯 가지」 중 «소유자»).
+
+        ## 왜 따로 있는가
+
+        종전에는 `register_source()` 의 인자로만 받았고 **등록 뒤에 채울 길이 없었다.**
+        기본값이 빈 문자열이라 조용히 통과했고, 그렇게 등록된 원천은 제품 안에서
+        영영 소유자가 없었다 — T-1(「주요 데이터에 다섯 가지가 붙어 있는가」)이 잡으려는
+        **「조용한 빈 값」**이 정확히 그 모양이다(2026-09-11 실측에서 걸렸다).
+
+        ⚠️ `approve_source()` 에 얹지 않은 이유: 승인과 소유는 **다른 결정**이다.
+          승인은 「이 출처의 값을 회사 계획에 쓴다」이고 소유는 「누가 관리 책임을 지는가」다.
+          한 호출로 묶으면 소유 부서를 바꾸려고 승인을 다시 눌러야 한다.
+
+        ⚠️ `changed_by` 를 요구한다 — 소유자를 바꾸는 것은 책임자를 바꾸는 일이고,
+          누가 바꿨는지 없으면 되돌릴 근거도 없다."""
+        dept = str(owner_department or "").strip()
+        if not dept:
+            raise ExternalIntelligenceError(
+                "owner_department 는 필수입니다 — 빈 값으로 두면 「소유자 없음」이 "
+                "조용히 남고, 그 원천은 아무도 관리하지 않습니다.")
+        if not str(changed_by or "").strip():
+            raise ExternalIntelligenceError(
+                "changed_by 는 필수입니다 — 누가 소유 부서를 정했는지 없으면 근거가 없습니다.")
+        with self._lock, self._connect() as conn:
+            if not conn.execute(
+                    "UPDATE external_sources SET owner_department=?, updated_at=? "
+                    "WHERE source_id=?", (dept, _now(), source_id)).rowcount:
+                raise ExternalIntelligenceError(f"존재하지 않는 원천입니다: {source_id}")
+        return self.get_source(source_id)
+
     def get_source(self, source_id: str) -> Optional[dict]:
         with self._connect() as conn:
             r = conn.execute("SELECT * FROM external_sources WHERE source_id=?",
