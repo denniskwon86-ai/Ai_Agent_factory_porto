@@ -130,6 +130,8 @@ demo_data/
 /tmp/
 /output/
 /.codex/runtime-logs/
+# Provider RAW snapshots are local runtime data; preserve files on disk.
+/raw/
 
 # ===== [2026-09-05] 작업 트리에 쌓여 있던 런타임·백업 덩어리 =====
 # ⚠️ 아래는 «커밋할 뻔했다» 목록이다. 합계 약 108MB 였고 전부 재생성 가능하거나 사본이다.

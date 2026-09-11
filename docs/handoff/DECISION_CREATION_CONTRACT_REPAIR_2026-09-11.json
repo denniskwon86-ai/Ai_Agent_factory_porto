@@ -1,0 +1,580 @@
+{
+  "schema_version": 2,
+  "assessed_at": "2026-09-11T16:44:06+09:00",
+  "basis_commit": "3ddf4be4ac4e78f6723d3c83ebd941287a70802c",
+  "scope": "현재 작업트리의 제품 전체 10영역. 투입시간·기능 수·상용 준비도 확률이 아닌 동일 가중치 단계 진척.",
+  "method": "16:16 전영역 재산정의 9개 영역은 승계하고 D07 연결 단계만 현행 코드·격리 실제 API·브라우저 요청 캡처 재대입·발간 원천 연결로 재검증했다. 전체 실사용·운영 배포 검증이 아니다.",
+  "stage_names": [
+    "설계",
+    "구현",
+    "연결 검증",
+    "실사용 검증"
+  ],
+  "stage_definitions": {
+    "설계": "영역의 책임·범위·출구 기준이 상위 설계에 명시됨",
+    "구현": "해당 영역의 핵심 경로가 구현되고 검증 증적이 있음. 보조 모듈만 있는 경우 부분 처리",
+    "연결검증": "명시된 대표 제품 경로의 생산자→소비자·권한·상태 연결 증거가 있음. 핵심 소비자 계약이 깨졌으면 재개방",
+    "실사용검증": "영역의 실제 사용자·반복 업무·오류/권한·실데이터 수용 기준까지 검증됨"
+  },
+  "status_definitions": {
+    "완료": "해당 단계의 근거를 이번에 대조하여 인정",
+    "진행부분": "부분 구현·연결 또는 반복검증이 남음; 항상 실행 중이라는 뜻은 아님",
+    "검증미완료": "일부 검증/사용 흔적은 있지만 현행 범위의 단계 통과 증거가 부족",
+    "미착수대기": "해당 후속 수용 단계는 로드맵상 대기이며 착수 증거를 확인하지 못함; 영역 코드가 0이라는 뜻은 아님"
+  },
+  "domains": [
+    {
+      "id": "D01",
+      "name": "기본 기능·UI",
+      "gate": "G1/G3/G7",
+      "previous_score": 3,
+      "stages": [
+        "완료",
+        "완료",
+        "완료",
+        "검증 미완료"
+      ],
+      "reason": "목록·권한·공통 조회 및 페이지 이동의 연결 증적과 현행 코드가 있다. 최신 전체 브라우저 수용 검증은 미완료다.",
+      "evidence": [
+        "frontend/src/components/KitAppPanel.tsx",
+        "docs/handoff/RELEASE_CATALOG_CLEANUP_2026-09-08.md"
+      ],
+      "next": "일반 사용자 진입·페이지 이동·오류·롤백 화면 수용 검증",
+      "score": 3
+    },
+    {
+      "id": "D02",
+      "name": "업무키트",
+      "gate": "G2/G3",
+      "previous_score": 2,
+      "stages": [
+        "완료",
+        "완료",
+        "진행·부분",
+        "검증 미완료"
+      ],
+      "reason": "7앱 구현과 2앱 사전 점검은 있으나 목표 부서 자료의 인증·권한·앱 연결이 닫히지 않았다. 8종 RAW 확보를 앱 완료로 세지 않는다.",
+      "evidence": [
+        "frontend/src/components/KitAppPanel.tsx",
+        "docs/handoff/K1_C5_EXISTING_DEPARTMENT_ALIGNMENT_2026-09-10.md"
+      ],
+      "next": "선행 5종 정렬 후 대상 앱 데이터·권한 연결 및 7앱 수용 검사",
+      "score": 2
+    },
+    {
+      "id": "D03",
+      "name": "현업 데이터 입력·등록",
+      "gate": "G2-D/G3",
+      "previous_score": 2,
+      "stages": [
+        "완료",
+        "완료",
+        "진행·부분",
+        "검증 미완료"
+      ],
+      "reason": "업로드·원천 결속·검사 API와 UI가 존재한다. 회사 실적 인증 정책 계층은 새로 구현됐지만 OWNER_CERTIFIED 종점과 정책 화면은 아직 없다.",
+      "evidence": [
+        "api/routes/data_preparation_control.py",
+        "frontend/src/components/DataPrepPanel.tsx",
+        "core/actual_certification_policy.py",
+        "api/routes/admin_control.py",
+        "docs/handoff/PROPOSAL_ACTUAL_CERTIFICATION_2026-09-11.md"
+      ],
+      "next": "기존 소유권 계층을 재사용한 실적 인증 종점·귀속 기간·정책 화면 및 일반 사용자 입력 검증",
+      "score": 2
+    },
+    {
+      "id": "D04",
+      "name": "초기 데이터 준비",
+      "gate": "G2-D",
+      "previous_score": 2,
+      "stages": [
+        "완료",
+        "완료",
+        "진행·부분",
+        "검증 미완료"
+      ],
+      "reason": "현행 제품 저장소를 사용해 6종·13,900행을 격리 RAW에 적재하고 전수 대사했으므로 설계만이 아닌 구현 완료로 재판정한다. 선행 5종·가격 보류 강제·소유권/인증이 남아 연결 완료는 아니다.",
+      "evidence": [
+        "core/data_preparation/snapshot_service.py",
+        "core/data_preparation/store.py",
+        "docs/handoff/K1_C5_EXISTING_DEPARTMENT_ALIGNMENT_2026-09-10.md",
+        "output/kit-logistics-review-2026-09-10/factory-rehearsal-7h8jvgww/logistics-raw-batch-eweopj4t/batch-result.json",
+        "output/kit-logistics-review-2026-09-10/factory-rehearsal-7h8jvgww/logistics-raw-batch-eweopj4t/verification-notes.json"
+      ],
+      "next": "FND-01/03·MDM-04/08·EXT-02를 한 묶음으로 정렬; 기존 판/원문 보존",
+      "score": 2
+    },
+    {
+      "id": "D05",
+      "name": "외부 공개자료 수집·갱신",
+      "gate": "G2-D/G4",
+      "previous_score": 3,
+      "stages": [
+        "완료",
+        "완료",
+        "완료",
+        "진행·부분"
+      ],
+      "reason": "World Bank 240행의 수집·승격·동인 연결 및 SOURCE_CERTIFIED 판의 실제 실행 기록을 현행 구현과 대조했다. 대표 공개 원천의 제품 서비스 연결은 완료이며 다원천 반복 갱신·운영 화면 사용 검증은 미완이다.",
+      "evidence": [
+        "docs/handoff/SESSION_2026-09-11_WORLDBANK_LIVE_RUN.md",
+        "docs/test_plan/F8_REAL_WALK.md",
+        "core/external_intelligence/snapshot_export.py",
+        "core/data_preparation/models.py",
+        "tests/test_snapshot_export.py"
+      ],
+      "next": "원천·데이터 성격·인증자 표시와 반복 갱신/실패 복구 확인; 다른 Provider 실측은 별도",
+      "score": 3
+    },
+    {
+      "id": "D06",
+      "name": "부서·전사 시뮬레이션",
+      "gate": "G4",
+      "previous_score": 3,
+      "stages": [
+        "완료",
+        "완료",
+        "완료",
+        "검증 미완료"
+      ],
+      "reason": "공개 관측→승인 동인 판본→조직 기준선→시나리오 계산의 대표 경로가 기록되고 현행 코드와 일치한다. 이를 연결 단계로 인정하되 합성 기준선·가정의 업무 적합성과 실제 회사 실적 Replay/전사 검증까지 인정하지 않는다.",
+      "evidence": [
+        "core/planning_drivers.py",
+        "core/planning_engine.py",
+        "core/enterprise_financial_model.py",
+        "docs/test_plan/05_northstar_verification_plan_2026-09-08.md",
+        "docs/test_plan/F8_REAL_WALK.md"
+      ],
+      "next": "같은 회사·기간·업종의 인증 실적을 이용한 Replay/Backtest와 사용자 화면 검증",
+      "score": 3
+    },
+    {
+      "id": "D07",
+      "name": "AI·의사결정·보고·실행",
+      "gate": "G3/G5/G6",
+      "previous_score": 2,
+      "stages": [
+        "완료",
+        "완료",
+        "완료",
+        "검증 미완료"
+      ],
+      "reason": "필수 evidence_basis 선택·전송을 구현하고 서버 실행에서 baseline_id/scenario_id/engine_version을 정본 결속했다. 실제 작성 화면 2뷰포트·8개 캡처 요청을 실제 API에 재대입하여 저장 확인. 실제 임시 원장을 이용해 검토·결정·실행·효과 및 발간 원천 지문/승인/어댑터 미연결 실패/합성 어댑터 성공을 검증했다.",
+      "evidence": [
+        "api/routes/decision_control.py",
+        "core/decision_case.py",
+        "frontend/src/lib/decisionApi.ts",
+        "frontend/src/features/collaboration/DecisionCenter.tsx",
+        "docs/test_plan/F8_REAL_WALK.md",
+        "tests/test_decision_creation_contract.py",
+        "tests/decision_browser_contract_checks.py",
+        "output/decision-ui-r5soclz6/browser-report.json",
+        "output/decision-create-g1kphf05/tests.xml",
+        "output/decision-create-g1kphf05/isolation.json"
+      ],
+      "next": "실사용 단계는 미완료. 실제 인증 사용자·실자료의 반복 수용 검증 및 승인된 외부 게시 어댑터 연결은 별도 범위로 남긴다.",
+      "score": 3
+    },
+    {
+      "id": "D08",
+      "name": "PostgreSQL·서버",
+      "gate": "G7",
+      "previous_score": 1,
+      "stages": [
+        "완료",
+        "진행·부분",
+        "미착수·대기",
+        "미착수·대기"
+      ],
+      "reason": "배포/DB 이관 설계, SQLite 사용처 목록과 선택적 PostgreSQL 체크포인터는 있다. 업무 DB 전체 접근계층·이관·동일 입력 대사·전환/복구 완료 증거는 없다. PostgreSQL 코드가 전혀 없다는 뜻은 아니다.",
+      "evidence": [
+        "docs/roadmap/WEB_DEMO_DEPLOYMENT_EXECUTION_PLAN_2026-08-21.md",
+        "scripts/sqlite_inventory.py",
+        "core/agent_graph.py",
+        "core/data_preparation/store.py"
+      ],
+      "next": "DB-0/1 경계 정리 후 사본 이식·대사·전환/복구; 운영 전환은 별도 승인",
+      "score": 1
+    },
+    {
+      "id": "D09",
+      "name": "파일럿·효과 측정",
+      "gate": "G8",
+      "previous_score": 1,
+      "stages": [
+        "완료",
+        "진행·부분",
+        "미착수·대기",
+        "미착수·대기"
+      ],
+      "reason": "Shadow 비교·승격·비용 측정 도구는 구현돼 있다. 실제 현업 코호트/업무 주기의 Replay→Shadow→Controlled Live와 ROI 수용 증거는 확인되지 않는다. 탐침 22/22나 개발비 계측을 파일럿 완료로 세지 않는다.",
+      "evidence": [
+        "core/shadow_mode.py",
+        "docs/test_plan/E_FINDINGS.md",
+        "docs/roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md"
+      ],
+      "next": "승인된 한 업무·기간·사용자 범위에서 시간/오차/수정량/효과의 기준선과 실측",
+      "score": 1
+    },
+    {
+      "id": "D10",
+      "name": "그룹 확산",
+      "gate": "G9",
+      "previous_score": 1,
+      "stages": [
+        "완료",
+        "진행·부분",
+        "미착수·대기",
+        "미착수·대기"
+      ],
+      "reason": "ECM 조직·가상 복제·Roll-up 구현은 있다. 두 번째 실제 법인에 코드 포크 없이 적용하고 통화·내부거래·지분·기간·권한까지 검증한 확산 패키지 완료 증거는 없다.",
+      "evidence": [
+        "core/enterprise_context/clone_service.py",
+        "core/enterprise_context/rollup.py",
+        "docs/roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md"
+      ],
+      "next": "첫 파일럿 이후 두 번째 법인의 설정/확장팩 복제와 연결 집계·격리 검증",
+      "score": 1
+    }
+  ],
+  "summary": {
+    "total_points": 21,
+    "total_possible": 40,
+    "percent": 52.5,
+    "local_points": 18,
+    "local_possible": 28,
+    "local_percent_exact": 64.28571428571429,
+    "local_percent_rounded": 64,
+    "status_counts": {
+      "완료": 21,
+      "검증 미완료": 6,
+      "진행·부분": 7,
+      "미착수·대기": 6
+    },
+    "previous_points": 20,
+    "net_point_change": 1,
+    "percentage_point_change": 2.5,
+    "fully_completed_domains": 0
+  },
+  "current_checks": {
+    "focused_pytest": {
+      "passed": 115,
+      "failed": 0,
+      "skipped": 0,
+      "report": "output/decision-create-g1kphf05/tests.xml"
+    },
+    "sqlite": {
+      "unique_paths": 151,
+      "all_under": "output/decision-create-g1kphf05",
+      "outside_attempts": 0,
+      "repository_conftest_loaded": false,
+      "operational_connections": 0
+    },
+    "browser": {
+      "viewports": [
+        [
+          1440,
+          900
+        ],
+        [
+          390,
+          844
+        ]
+      ],
+      "captured_submissions": 8,
+      "replayed_actual_api": 8,
+      "page_errors": 0,
+      "external_network_requests": 0,
+      "response": "in-memory synthetic"
+    },
+    "typescript_exit_code": 0,
+    "product_build_exit_code": 0,
+    "product_build_modules": 3503,
+    "build_warnings": [
+      "large chunks",
+      "static and dynamic import overlap: useFactoryStore"
+    ],
+    "full_suite_rerun": false,
+    "real_user_SSO_rerun": false,
+    "external_delivery": false
+  },
+  "separate_metrics": {
+    "RAW_core_datasets": "8/8",
+    "RAW_batch_datasets": "6/6",
+    "upper_department_connection": "2/4",
+    "northstar_verification_plan": "22/22 (타 팀 조사·검증 완료; 전체 사용성 완료 아님)",
+    "prior_pure_tests": "154/154 (직전 RAW 턴)",
+    "latest_team_targeted_tests": "정책 169건 / 인증 관련 723건 (타 팀 보고; 합산하지 않음)",
+    "prior_frozen_T3": "6735 passed, 5 skipped, 3 failed @3b9ab8520; 환경 원인 대조 기록 있음, 전체 통과 아님",
+    "previous_ledger_sentinel_error": "미해결; 운영 DB 접근/재실행하지 않음"
+  },
+  "source_fingerprints": [
+    {
+      "path": "docs/AI_FACTORY_STUDIO_PRODUCT_BIBLE.md",
+      "sha256": "d9c098113da0404f7b8e97cd7c6712bfc694163ad7c02a6383218eb2e3204c1b",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/roadmap/AI_FACTORY_STUDIO_FINAL_COMPLETION_EXECUTION_PLAN_2026-08-03.md",
+      "sha256": "def8bdbb7cf5c24525ab099a1e89d5259fab66d10eed1561ee31caa6d4fe2568",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/handoff/RELEASE_CATALOG_CLEANUP_2026-09-08.md",
+      "sha256": "43347dd52593d28f9042dae154826b5c75c2a791c03ef392535450d9bb3ba890",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/handoff/K1_C5_EXISTING_DEPARTMENT_ALIGNMENT_2026-09-10.md",
+      "sha256": "a2170a54da76b4d6ccffe4bf7e7ef876c9a738baed5357d6cd1d7e95a1a3ed5a",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/test_plan/05_northstar_verification_plan_2026-09-08.md",
+      "sha256": "b794b7f810261fa8b9e350f209860825d6eefae6882e4a6141f4799b2c67adf8",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/test_plan/F8_REAL_WALK.md",
+      "sha256": "5a2d16df8bcf3d4d95d58df2e3f2dc0b2520a0018296be31014f7302244b004d",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/test_plan/E_FINDINGS.md",
+      "sha256": "c9fbf5e2130d4901e3b4bb9fa05f6e6ae336e71e36ed4f588385df1638ceda94",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/handoff/SESSION_2026-09-11_WORLDBANK_LIVE_RUN.md",
+      "sha256": "82c2b8749311181e5608eea5536a01a360f4019975b880e8b6e25c30154f8f59",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/handoff/PROPOSAL_ACTUAL_CERTIFICATION_2026-09-11.md",
+      "sha256": "58925ce815e2c452edfdc0dec183420f1c3154287c10f25e44a50328507c3aad",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/handoff/DATA_ACQUISITION_ORCHESTRATOR_V0_1_2026-09-05.md",
+      "sha256": "ccc721b71ae8b6b6d37786c1f03fcc8b7273327ef61c11c5a3825c9976d58986",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "docs/roadmap/WEB_DEMO_DEPLOYMENT_EXECUTION_PLAN_2026-08-21.md",
+      "sha256": "61413b9385e940b820d5ff99e187f7d29ecc7d4b9f5b3fef266ec3fc94ce015e",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "frontend/src/components/KitAppPanel.tsx",
+      "sha256": "1611a46be04c5c5fde967935c28f5f35deedcaf4155e09aca7c17bab9f45c58c",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "frontend/src/components/DataPrepPanel.tsx",
+      "sha256": "b38bf9a408f7c2cc4b8561b9a21de8a84b5f0dbe0eee5022949d92a7dee021cd",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "frontend/src/components/DataReadinessBoard.tsx",
+      "sha256": "205e5df95bf19757700efc829347de1df5a126fcda48f3fc9fe21ab57c30a4a1",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "frontend/src/lib/dataPrepApi.ts",
+      "sha256": "b16f60f63e79da791568262b646c440e9a32ae9a427049b44d8ac2eec55a9959",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "frontend/src/lib/decisionApi.ts",
+      "sha256": "3623bf814f420ecc1d38010f0ffbafe18be63a9f54b0ee6d77a82645b1ad6703",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "frontend/src/features/collaboration/DecisionCenter.tsx",
+      "sha256": "5986d5ad5a9f226d12540eddf49aad80225ff809555771977ca61cdb41ded97b",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "api/routes/decision_control.py",
+      "sha256": "06a99bf1c67b503551643c68838e3c85d9b4ad1603d5159675fdad91a89d1c73",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "api/routes/data_preparation_control.py",
+      "sha256": "93380ee6be8449cd46976de25c8185a52116d71e92f269ded6f52ebd8c02c6bd",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "api/routes/admin_control.py",
+      "sha256": "bc0ee791fbeb6eccc422fa7a2e2160def16289e6347eef242df38e49ad5d1f82",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/actual_certification_policy.py",
+      "sha256": "6296d97b485db21c76b84a8a602fc43f70763671da0360fb5eda1334778f5db3",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/data_preparation/models.py",
+      "sha256": "9eb7de3ecbfc60e5f7b41fccb186227a8511088fcf2573cb7f6aa56ba9f3cc40",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/data_preparation/snapshot_service.py",
+      "sha256": "c78527550e263bdf5667467abd03e521c6e04607b7090f40f2a4beb543a61698",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/data_preparation/store.py",
+      "sha256": "1a25215085ad90aaf1fb3e0ffd160125a015d913aa2152fcfbfaa4c86ef01428",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/data_preparation/ownership_binding.py",
+      "sha256": "2c2858dc2224a4289a2bce37a12efb16e74818a98325930b9c69bdaecf7b4ec3",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/external_intelligence/snapshot_export.py",
+      "sha256": "8b26dc2173dee551204b52e193d21aca30fc0fd6ed412485be677923b0dafaa8",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/planning_drivers.py",
+      "sha256": "eb07faa1ed7ca8d767f6df9800e23677cce34dca52abaa62de8ab05252e94203",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/planning_engine.py",
+      "sha256": "cc64da59433f8da659749250347b9358d01c8286ff69dc773bab97761bda75f9",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/enterprise_financial_model.py",
+      "sha256": "c8474da291e73d04c89652761830cd0806cd9b4e0794266a4ce9c78cd4aacbc2",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/decision_case.py",
+      "sha256": "da52bd4cb9915a3bc55e1c3983ae03304ce26ac960177b720e29557a59d10926",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/agent_graph.py",
+      "sha256": "49964af058c0e3c496a42f09bc6f898a8fb128c57dd7137ae90eb0541dba5d85",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/shadow_mode.py",
+      "sha256": "d105056566e831313b7b83e997e7355ec25338624611c920264bd819d6d8b8e0",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/enterprise_context/clone_service.py",
+      "sha256": "578dd9d6bf598e6761989d7cf0df4a7e702dfaf3e01d8647bb179e23de756b2c",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/enterprise_context/rollup.py",
+      "sha256": "194a02ca1f3a80d3ac77c0087167001be020a45d79d089ff3cb10f2f8e29df8f",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "scripts/sqlite_inventory.py",
+      "sha256": "0d1c9351b8270afafec2b0e6b5a1420d6f451b2c8eff54802b36630bbe060a2e",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "tests/test_snapshot_export.py",
+      "sha256": "873b79b8af3afaba63047a3359ef597a91140b9a63035bb6b7bfcc2e7356224c",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "tests/test_enterprise_financial_model.py",
+      "sha256": "cfde3a86ca617f29f5ac73568034cab7bef65db3b80f8baff69cdff5401559e1",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "output/kit-logistics-review-2026-09-10/factory-rehearsal-7h8jvgww/logistics-raw-batch-eweopj4t/batch-result.json",
+      "sha256": "4822f3ecff294e4add98afa5a161f41ab2b6dd586a1345bd2239941ccf8914bb",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "output/kit-logistics-review-2026-09-10/factory-rehearsal-7h8jvgww/logistics-raw-batch-eweopj4t/verification-notes.json",
+      "sha256": "88cc9882287b1e5bbe3ba1d1b289a95f5edf2bc4a46aba111fd9f8da0de456f2",
+      "checked_at": "2026-09-11T16:16:44+09:00"
+    },
+    {
+      "path": "core/decision_source_binding.py",
+      "sha256": "11b15188ee2b7769703911f1c0e3d919a78706d50c279abcf2d514557f673207",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "tests/test_decision_creation_contract.py",
+      "sha256": "969b8851747b2401d1e955a1f778f921a03d78436c7e3090f54b46365489e25a",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "tests/decision_browser_contract_checks.py",
+      "sha256": "819749686c483b50481607d50a1a9c6ea785bfcae5743e90825176f1cd14bbe4",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "scripts/verify_decision_creation_isolated.py",
+      "sha256": "ec5aaf5059513343173193c5109446588a47497b9e2bd362177e65f72c8c33e9",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "scripts/verify_decision_create_browser.py",
+      "sha256": "9e084ce39cac9e5ea7076e95bc78882fc9e18ec3da9eb0ba26b5945168887747",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "frontend/tests/decision-create.fixture.tsx",
+      "sha256": "06b0a2c4ba3d8be5a14cae4960ef77786633f9363327db97aa1161eaeeb4288e",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "frontend/tests/decision-create.fixture.html",
+      "sha256": "989e96d28096fef266419cff7fa4246766715fabb1d62ccf8b50ea38495d521e",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "frontend/scripts/build-decision-create-fixture.mjs",
+      "sha256": "3de1a11e92a7d52b48941e4b6174b14e30fddc2efa2d0fef4c7ba459c7830d59",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "output/decision-ui-r5soclz6/browser-report.json",
+      "sha256": "4332213c9a0480f150e830cc8109d81662dcb6711195b51810416a5828403852",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "output/decision-ui-r5soclz6/basis-1440.png",
+      "sha256": "66f8bb6df2f621a5c30718b0003aca165f5053c9085d60ffec4fe7fdab30a40f",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "output/decision-ui-r5soclz6/basis-390.png",
+      "sha256": "6e17ee544805a455bf8c5a6a019dac4d41b9e77cf567006a7f70b44da90c258c",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "output/decision-create-g1kphf05/isolation.json",
+      "sha256": "1cba07d6fd8b3112192dce7ca06ee24dc5c5b5270a6628093b958bbd759fb98a",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "output/decision-create-g1kphf05/tests.xml",
+      "sha256": "5f2407a623fbf9ad5976c26eded2b4ee05b10d872e0fb1633a24530d01a69e82",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    },
+    {
+      "path": "output/decision-create-product-build/index.html",
+      "sha256": "a08b5a5ce6172b5220eeafdf0332df3f26daf684e591f5f6bba26bbcd44f3aab",
+      "checked_at": "2026-09-11T16:44:06+09:00"
+    }
+  ],
+  "parent_assessment": "docs/handoff/PRODUCT_PROGRESS_REASSESSMENT_2026-09-11.json"
+}

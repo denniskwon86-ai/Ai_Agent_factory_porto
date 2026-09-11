@@ -1,0 +1,225 @@
+{
+  "schema_version": 1,
+  "assessed_at": "2026-09-11T17:07:49+09:00",
+  "basis_commit": "3ddf4be4ac4e78f6723d3c83ebd941287a70802c",
+  "parent_assessment": "docs/handoff/DECISION_CREATION_CONTRACT_REPAIR_2026-09-11.json",
+  "method": "D04의 선행자료 정렬 하위 묶음만 검증. 10영역 단계 판정은 직전 정본을 승계하며 전체 전수 재평가가 아니다.",
+  "domains": [
+    {
+      "id": "D01",
+      "name": "기본 기능·UI",
+      "stages": [
+        "완료",
+        "완료",
+        "완료",
+        "검증 미완료"
+      ],
+      "score": 3
+    },
+    {
+      "id": "D02",
+      "name": "업무키트",
+      "stages": [
+        "완료",
+        "완료",
+        "진행·부분",
+        "검증 미완료"
+      ],
+      "score": 2
+    },
+    {
+      "id": "D03",
+      "name": "현업 데이터 입력·등록",
+      "stages": [
+        "완료",
+        "완료",
+        "진행·부분",
+        "검증 미완료"
+      ],
+      "score": 2
+    },
+    {
+      "id": "D04",
+      "name": "초기 데이터 준비",
+      "stages": [
+        "완료",
+        "완료",
+        "진행·부분",
+        "검증 미완료"
+      ],
+      "score": 2
+    },
+    {
+      "id": "D05",
+      "name": "외부 공개자료 수집·갱신",
+      "stages": [
+        "완료",
+        "완료",
+        "완료",
+        "진행·부분"
+      ],
+      "score": 3
+    },
+    {
+      "id": "D06",
+      "name": "부서·전사 시뮬레이션",
+      "stages": [
+        "완료",
+        "완료",
+        "완료",
+        "검증 미완료"
+      ],
+      "score": 3
+    },
+    {
+      "id": "D07",
+      "name": "AI·의사결정·보고·실행",
+      "stages": [
+        "완료",
+        "완료",
+        "완료",
+        "검증 미완료"
+      ],
+      "score": 3
+    },
+    {
+      "id": "D08",
+      "name": "PostgreSQL·서버",
+      "stages": [
+        "완료",
+        "진행·부분",
+        "미착수·대기",
+        "미착수·대기"
+      ],
+      "score": 1
+    },
+    {
+      "id": "D09",
+      "name": "파일럿·효과 측정",
+      "stages": [
+        "완료",
+        "진행·부분",
+        "미착수·대기",
+        "미착수·대기"
+      ],
+      "score": 1
+    },
+    {
+      "id": "D10",
+      "name": "그룹 확산",
+      "stages": [
+        "완료",
+        "진행·부분",
+        "미착수·대기",
+        "미착수·대기"
+      ],
+      "score": 1
+    }
+  ],
+  "summary": {
+    "total_points": 21,
+    "total_possible": 40,
+    "percent": 52.5,
+    "local_points": 18,
+    "local_possible": 28,
+    "local_percent_exact": 64.28571428571429,
+    "local_percent_rounded": 64,
+    "previous_points": 21,
+    "net_point_change": 0
+  },
+  "domain_update": {
+    "id": "D04",
+    "score_before": 2,
+    "score_after": 2,
+    "stage_closed": false,
+    "completed_batch": {
+      "datasets": 5,
+      "row_counts": {
+        "FND-01": 6,
+        "FND-03": 1101,
+        "MDM-04": 7,
+        "MDM-08": 43,
+        "EXT-02": 240
+      },
+      "new_rows": 1397,
+      "new_RAW_snapshots": 6,
+      "new_DRAFT_bindings": 6,
+      "new_instances": 0,
+      "preserved_snapshots": 55,
+      "result_snapshots": 61,
+      "selected_core_plus_foundation_datasets": 13,
+      "selected_snapshots": 21,
+      "selected_rows": 15557,
+      "held_unmapped_warehouse_rows": 1,
+      "source_organization_template_rows_preserved": 15
+    },
+    "remaining": [
+      "가격·조직 시점 보류의 실제 소비 경계 강제",
+      "소유권/인증 승인",
+      "앱·계산 소비 및 실제 사용자 수용 검증"
+    ],
+    "next": "core/data_preparation/readiness.py·scope_index.py·snapshot_service.py의 기존 소비/인증 경계를 검토해 보류 후보가 조회·계산 적격으로 승격되지 않도록 연결한다. 운영 승인·인증은 하지 않는다."
+  },
+  "checks": {
+    "pytest_passed": 186,
+    "pytest_failed": 0,
+    "pytest_skipped": 0,
+    "test_sqlite_connections": 0,
+    "repository_conftest_loaded": false,
+    "independent_artifact_verification": true,
+    "operational_sqlite_connections": 0,
+    "raw_roundtrip_rows": 1397,
+    "structural_reference_issues": 0,
+    "reference_counts": {
+      "TRANSPORT_LOCATION": 2400,
+      "REFERENCE_INCOTERM": 100,
+      "REFERENCE_PAYMENT_TERM": 100,
+      "BENCHMARK_CODE": 100,
+      "ORDER_CALENDAR": 1800
+    },
+    "full_suite_rerun": false,
+    "UI_HTTP_rerun": false,
+    "certification_performed": false,
+    "runtime_hold_enforcement_installed": false
+  },
+  "result_report": "output/kit-logistics-review-2026-09-10/factory-rehearsal-7h8jvgww/foundation-raw-0yag5clt/foundation-result.json",
+  "result_fingerprint": "3c0159d18b63b2b2a4abe2aa25445ba5a48d693cba913690834f3f9c57838800",
+  "source_fingerprints": [
+    {
+      "sha256": "b20a3481a1252d1ebb84d674e6d7e87ada08a3c628a2be46f14573d241dbdf99",
+      "path": "core/data_preparation/kit_foundation_alignment.py"
+    },
+    {
+      "sha256": "a4441646e6b5fb6cce981c6aa37fd25044a460dd7a499bd1173b223364b583a4",
+      "path": "scripts/stage_kit_foundation_batch.py"
+    },
+    {
+      "sha256": "cfe64f914c3d144e4163ec3ce5ca07cd35a5a0215584d61d784e3747dbac0ac7",
+      "path": "scripts/verify_kit_foundation_artifact.py"
+    },
+    {
+      "sha256": "bfededa93b3619a29a7a084f193cf35f3bc72e91292c52af27f06ef156020fb1",
+      "path": "scripts/verify_kit_foundation_tests.py"
+    },
+    {
+      "sha256": "ad5fe38b979e9aa9e09009e1ead2e5d4da461a0bb2b3196c8d7b3294495d490c",
+      "path": "tests/test_kit_foundation_alignment.py"
+    },
+    {
+      "sha256": "d6c2afb1f00ea65b4c00824c2bce981975a12e2206957949bca74974ea32b068",
+      "path": "output/kit-logistics-review-2026-09-10/factory-rehearsal-7h8jvgww/foundation-raw-0yag5clt/foundation-result.json"
+    },
+    {
+      "sha256": "37f0928b89975db965f990b278ab516f37a520998360b2216498a8b99078a969",
+      "path": "output/kit-logistics-review-2026-09-10/factory-rehearsal-7h8jvgww/foundation-raw-0yag5clt/independent-verification.json"
+    },
+    {
+      "sha256": "0d64838a24b3156048feae61260b668cca94a7ee418a11a4e3d018a43ff80570",
+      "path": "output/foundation-tests-9zzw6490/tests.xml"
+    },
+    {
+      "sha256": "9e2088c3a675839768b9245a4394f3a7b516cfc60aafb2fdcdb36a30f9ab5249",
+      "path": "output/foundation-tests-9zzw6490/test-isolation.json"
+    }
+  ]
+}
