@@ -627,3 +627,50 @@ def test_an_oversized_upload_is_refused_before_parsing(client, monkeypatch):
     monkeypatch.setattr(dp, "MAX_UPLOAD_BYTES", 10)
     r = _upload(client, _api_binding()["binding_id"])
     assert r.status_code == 413, r.text
+
+
+# ── 「누가 인증했나」 — certified_at 은 있는데 certified_by 가 없었다 (2026-09-11) ──
+def _to_reconciled(store, binding, tmp_path, data_kind=None):
+    snap = _ingest(store, binding, tmp_path, data_kind=data_kind)
+    sid = snap["snapshot_id"]
+    ss.profile(store, sid, GOOD_ROWS, GOOD_COLS)
+    ss.standardize(store, sid, GOOD_ROWS)
+    ss.reconcile(store, sid, GOOD_ROWS, {"row_count": len(GOOD_ROWS)})
+    return sid
+
+
+def test_certification_without_a_named_certifier_is_refused(store, binding, tmp_path):
+    """★★★ 인증은 「이 판을 써도 된다」는 **사람의 판단**이다.
+
+    ⚠️ 종전에는 `certified_at`(언제)만 남고 «누가» 가 아무 데도 없었다 —
+      `approve_source` 와 같은 종류의 구멍이고, T-1 의 「다섯 가지」 중 소유자가
+      비는 것과 같은 모양이다."""
+    sid = _to_reconciled(store, binding, tmp_path)
+    with pytest.raises(m.DataPreparationError) as e:
+        store.advance_snapshot(sid, m.DEMO_CERTIFIED)
+    assert "certified_by 가 필요합니다" in str(e.value)
+
+
+def test_the_certifier_is_actually_stored(store, binding, tmp_path):
+    """★ 「받았다」와 「저장했다」는 다르다 — 실제로 조회해 본다."""
+    sid = _to_reconciled(store, binding, tmp_path)
+    store.advance_snapshot(sid, m.DEMO_CERTIFIED, certified_by="someone@test.invalid")
+    row = store.get_snapshot(sid)
+    assert row["certified_by"] == "someone@test.invalid"
+    assert row["certified_at"], "언제도 함께 남아야 한다"
+
+
+def test_a_non_certifying_transition_needs_no_certifier(store, binding, tmp_path):
+    """⚠️ 인증이 아닌 전이에까지 이름을 요구하면 파이프라인이 멈춘다."""
+    snap = _ingest(store, binding, tmp_path)
+    out = ss.profile(store, snap["snapshot_id"], GOOD_ROWS, GOOD_COLS)
+    assert out["state"] == m.PROFILED
+    assert out["certified_by"] == ""
+
+
+def test_certify_demo_records_the_setup_actor(store, binding, tmp_path):
+    """시연 인증의 기본 행위자는 «.invalid 합성 계정» 이다 — 대상이 가상회사 자료다."""
+    sid = _to_reconciled(store, binding, tmp_path)
+    out = ss.certify_demo(store, sid)
+    assert out["certified_by"].endswith(".invalid")
+    assert "@" in out["certified_by"]

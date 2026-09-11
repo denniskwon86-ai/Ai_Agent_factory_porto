@@ -112,6 +112,10 @@ CREATE TABLE IF NOT EXISTS dataset_snapshots (
     entity_mode     TEXT NOT NULL,
     created_by      TEXT NOT NULL DEFAULT '',
     certified_at    TEXT NOT NULL DEFAULT '',
+    --: ★★★ [2026-09-11] 「누가 인증했는가」. 종전에는 `certified_at`(언제)만 있고
+    --:   «누가» 가 없었다 — 인증은 「이 판을 써도 된다」는 사람의 판단인데 그 이름이
+    --:   아무 데도 안 남았다. T-1 의 「다섯 가지」 중 «소유자» 와 같은 종류의 구멍이다.
+    certified_by    TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -321,6 +325,11 @@ class DataPreparationStore:
             #:   파일 손상·잠금 오류까지 **「이미 존재함」으로 삼킨다** — 스키마가 반쯤 선
             #:   상태로 서비스가 뜨고, 그 증상은 질의 시점에 엉뚱한 곳에서 터진다.
             #:   「이미 있다」만 넘기고 나머지는 올린다.
+            #: ⚠️ [2026-09-11] `certified_by` 는 나중에 생긴 열이다. 기존 DB 에도 넣는다.
+            snap_cols = {r[1] for r in conn.execute("PRAGMA table_info(dataset_snapshots)")}
+            if "certified_by" not in snap_cols:
+                conn.execute("ALTER TABLE dataset_snapshots ADD COLUMN certified_by "
+                             "TEXT NOT NULL DEFAULT ''")
             existing = {r[1] for r in conn.execute("PRAGMA table_info(object_scope_index)")}
             for col in ("owner_binding_id", "owner_binding_fingerprint"):
                 if col in existing:
@@ -710,8 +719,18 @@ class DataPreparationStore:
                         f"«{have or '성격 미상'}» 자료는 {target} 를 받을 수 없습니다 — "
                         f"이 종점은 «{want}» 전용입니다. 시연 자료와 실물이 섞이면 "
                         f"어느 것이 시연이었는지 가릴 수 없습니다.")
+                #: ★★★ 인증은 「이 판을 써도 된다」는 **사람의 판단**이다. 이름이 없으면
+                #:   나중에 「누가 이걸 통과시켰나」에 답할 수 없다 — `approve_source` 와
+                #:   같은 이유로 필수다.
+                who = str(payload.get("certified_by") or "").strip()
+                if not who:
+                    raise m.DataPreparationError(
+                        f"{target} 에는 certified_by 가 필요합니다 — 인증은 「이 판을 써도 "
+                        f"된다」는 사람의 판단이고, 누가 했는지 없으면 근거가 없습니다.")
                 sets.append("certified_at=?")
                 args.append(now)
+                sets.append("certified_by=?")
+                args.append(who)
             args.append(snapshot_id)
             conn.execute(f"UPDATE dataset_snapshots SET {', '.join(sets)} "
                          f"WHERE snapshot_id=?", tuple(args))
@@ -757,10 +776,16 @@ class DataPreparationStore:
             conn.execute(
                 "UPDATE dataset_snapshots SET state=?, updated_at=? WHERE snapshot_id=?",
                 (m.REVOKED, now, old_snapshot_id))
+            #: ⚠️ [2026-09-11] 이 경로는 raw SQL 이라 `advance_snapshot()` 의 관문을
+            #:   «지나지 않는다». 관문을 한 경로에만 두면 다른 경로가 하나 생기는 날
+            #:   조용히 뚫린다 — 실제로 여기가 그랬다. 인증자를 여기서도 남긴다.
+            #: ★ 교체 인증은 기존 판의 인증자를 이어받는다(같은 자료의 «다음 판» 이므로).
+            #:   기존 판에 이름이 없던 옛 행이면 시연 셋업 행위자로 둔다.
+            who = str(old_row.get("certified_by") or "").strip() or "demo.data.owner@afs.invalid"
             conn.execute(
-                "UPDATE dataset_snapshots SET state=?, certified_at=?, updated_at=? "
-                "WHERE snapshot_id=?",
-                (m.DEMO_CERTIFIED, now, now, new_snapshot_id))
+                "UPDATE dataset_snapshots SET state=?, certified_at=?, certified_by=?, "
+                "updated_at=? WHERE snapshot_id=?",
+                (m.DEMO_CERTIFIED, now, who, now, new_snapshot_id))
             fresh = conn.execute(
                 "SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
                 (new_snapshot_id,)).fetchone()

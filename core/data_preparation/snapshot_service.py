@@ -284,7 +284,7 @@ def reconcile(store: Any, snapshot_id: str, rows: List[Dict[str, str]],
 
 
 # ── 인증 ─────────────────────────────────────────────────────────────────
-def certify_demo(store: Any, snapshot_id: str) -> Dict[str, Any]:
+def certify_demo(store: Any, snapshot_id: str, certified_by: str = "") -> Dict[str, Any]:
     """시연 인증. **`CERTIFIED ACTUAL` 이 아니다.**
 
     ⚠️ 실제 Data Owner 가 없는 상태에서 실적 인증을 주장하면, 그 숫자를 본 사람은
@@ -316,7 +316,10 @@ def certify_demo(store: Any, snapshot_id: str) -> Dict[str, Any]:
     def _index(conn, fresh):
         scope_index.write_conn(conn, payload, str(fresh.get("certified_at", "")))
 
-    return store.advance_snapshot(snapshot_id, m.DEMO_CERTIFIED, on_commit=_index)
+    #: ★ [2026-09-11] 인증자를 남긴다. 시연 인증도 «누가 통과시켰나» 가 필요하다 —
+    #:   기본값은 시연 셋업 행위자다(가상회사 자료이므로 `.invalid` 합성 계정).
+    return store.advance_snapshot(snapshot_id, m.DEMO_CERTIFIED, on_commit=_index,
+                                  certified_by=(certified_by or "demo.data.owner@afs.invalid"))
 
 
 def certify_demo_replacement(store: Any, old_snapshot_id: str,

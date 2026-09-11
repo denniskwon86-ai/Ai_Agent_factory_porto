@@ -34,7 +34,9 @@ def test_changed_app_dataset_is_a_new_snapshot_and_old_raw_survives(tmp_path,
     old = svc.ingest(store, binding=binding, payload=old_payload, file_name="MDM-07.csv",
                      workspace_root=str(tmp_path / "raw"))
     for state in (m.PROFILED, m.STANDARDIZED, m.RECONCILED, m.DEMO_CERTIFIED):
-        old = store.advance_snapshot(old["snapshot_id"], state)
+        #: ★ [2026-09-11] 인증 전이는 «누가 인증했나» 를 요구한다.
+        kw = {"certified_by": "t_setup@test.invalid"} if state == m.DEMO_CERTIFIED else {}
+        old = store.advance_snapshot(old["snapshot_id"], state, **kw)
 
     rows = [{"cost_center_id": "CC-1", "cost_center_name": "구매 원가센터",
              "account_id": "A-1", "tenant_id": "tenant-test",

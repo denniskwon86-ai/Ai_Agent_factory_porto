@@ -311,3 +311,26 @@ def test_a_quarantined_snapshot_cannot_be_certified(store, binding, tmp_path,
     with pytest.raises(m.StateConflict):
         SX.certify_source(store, out["snapshot_id"], source_id="WB_PINK_SHEET",
                           certified_by="someone@lsmnm.com")
+
+
+def test_the_certifier_name_is_stored_not_just_returned(store, binding, tmp_path,
+                                                        approved_source):
+    """★★★ [2026-09-11] 처음엔 `certified_by` 를 «결과에만» 담고 저장하지 않았다 —
+    인자로 받아 놓고 버린 것이다. 사용자가 「내가 인증한다」고 해도 이름이 남을 자리가
+    없었다. 「받았다」와 「저장했다」는 다르다 — **조회해서** 확인한다."""
+    out = _export(store, binding, tmp_path)
+    done = SX.certify_source(store, out["snapshot_id"], source_id="WB_PINK_SHEET",
+                             certified_by="someone@lsmnm.com")
+    assert done["certified_by"] == "someone@lsmnm.com"
+    row = store.get_snapshot(out["snapshot_id"])
+    assert row["certified_by"] == "someone@lsmnm.com", "저장소에 실제로 남아야 한다"
+
+
+def test_the_source_approver_is_carried_into_the_result(store, binding, tmp_path,
+                                                        approved_source):
+    """★ 인증자와 «원천 승인자» 는 다른 사람일 수 있다 — 둘 다 남는다."""
+    out = _export(store, binding, tmp_path)
+    done = SX.certify_source(store, out["snapshot_id"], source_id="WB_PINK_SHEET",
+                             certified_by="certifier@lsmnm.com")
+    assert done["certified_by"] == "certifier@lsmnm.com"
+    assert done["source_approved_by"] == "someone@lsmnm.com"

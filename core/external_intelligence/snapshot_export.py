@@ -291,7 +291,11 @@ def certify_source(store: Any, snapshot_id: str, *, source_id: str,
     row = store.get_snapshot(snapshot_id)
     if row is None:
         raise SnapshotExportError(f"존재하지 않는 Snapshot 입니다: {snapshot_id}")
-    out = store.advance_snapshot(snapshot_id, m.SOURCE_CERTIFIED)
+    #: ⚠️ [2026-09-11] 처음엔 `certified_by` 를 «결과에만» 담고 저장하지 않았다 —
+    #:   인자로 받아 놓고 버린 것이다. 사용자가 「내가 인증한다」고 해도 이름이
+    #:   남을 자리가 없었다. 저장소가 이제 이 값을 «요구» 한다.
+    out = store.advance_snapshot(snapshot_id, m.SOURCE_CERTIFIED,
+                                 certified_by=certified_by)
     return {
         "snapshot_id": out.get("snapshot_id"),
         "state": out.get("state"),
@@ -299,7 +303,7 @@ def certify_source(store: Any, snapshot_id: str, *, source_id: str,
         "certified_at": out.get("certified_at"),
         "source_id": sid,
         "source_approved_by": src.get("approved_by"),
-        "certified_by": certified_by,
+        "certified_by": out.get("certified_by"),
         "note": ("이 판은 «발행 기관이 따로 있는 공표 자료» 로 인증됐습니다 — "
                  "회사 실적 인증이 아닙니다. 원천 승인자는 "
                  f"{src.get('approved_by')} 입니다."),
