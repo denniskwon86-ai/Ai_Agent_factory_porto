@@ -46,6 +46,32 @@
 
 ## 🚀 활성 및 최근 주요 진행 항목
 
+### [EXT-VERIFY-20260911] 외부 원천 실측 관통과 검증 계획 1~5단계 — ⚠️ 보드 기록이 3일 밀렸다
+- 작성자 / 기록 시각: Claude Code / 2026-09-11 KST
+- 왜 지금 기록하는가: 사용자가 **「Codex에서 최종으로 합쳐 정리할 수 있게 공유가 되고 있는지」**를 확인하라고 지시했고, 확인해 보니 **되어 있지 않았다.** 09-09~09-11 사흘치 작업이 `docs/handoff/`·`docs/test_plan/` 에만 있고 이 보드에는 한 줄도 없었다. 규약이 「별도 인수인계 파일을 만드는 것으로 대신하지 않는다」고 못박았는데 내가 그렇게 했다. 그 구멍을 메우는 기록이다.
+- 상태: **부분 완료** — 아래 ①~④ 완료, ⑤ 사람 결정 5건 대기, ⑥ 화면 확인 미착수(Codex 레인)
+- 결정 및 근거:
+  - **① 원천 승인·계약 승인 (사람 결정 2건 수령)** — `WB_PINK_SHEET` 승인(`external_sources` 0→1행, `approved_by=hikwon@lsmnm.com`), `EXT-02` 계약 승인(사유 「국제 원자재 기준가 시나리오 동인 확보」). 제품 경로 그대로 적용(`assert_can_manage_standard` → `_actor(p)`). 커밋 `968ce2c94`.
+    ★ `approved_by` 에는 **표시 이름이 아니라 계정 id** 를 넣었다. 라우트가 `_actor(p)=p.user_id` 를 넘기기 때문이다 — 한글 이름을 넣으면 화면·감사가 못 찾는 값이 하나 생긴다.
+  - **② 실제 파일 1회 수집 → F-6 전 구간 관통** (사용자 다운로드 허가). `thedocs.worldbank.org` · 778,415바이트 · HTTP 200. 구리·아연 각 120행 적재→승격. `external_observations` 0→240행, `plan_drivers` 0→2건. 커밋 `8b9f54d22`. 상세: `docs/handoff/SESSION_2026-09-11_WORLDBANK_LIVE_RUN.md`.
+  - **③ ⚠️ 결함 1건 발견·수정** — `match_commodities` 가 양방향 부분일치라 **실제 업무 용어 11개가 전부 오매칭**했다(「전기요금」→금, 「금리」→금, 「변동비」→구리, 「아연 가격」→아연＋납). 값을 지어내지는 않지만 **엉뚱한 계열을 말없이 붙인다.** 같은 파일이 `find_series_column` 에서 이미 막아 둔 것과 «같은 종류»가 반대편 문에 열려 있었다. 시험 30건 추가, 되돌려 14건이 실제로 깨지는 것 확인. 커밋 `3864f4095`. 같은 커밋에서 `LAYOUT_VERIFIED` 해제(실제 워크북 대조 · Copper 65열 독립 확인).
+  - **④ 검증 계획 1~5단계 완료** — `docs/test_plan/05_northstar_verification_plan_2026-09-08.md` §9-B~9-H.
+    · X-4(데이터 없이 시뮬레이션): 10건 시도 · 샘 0건 (`9a5f484a3`)
+    · X-3(AI에게 진실을 맡기기): 14건 시도 · 샘 0건 (`4129b502d`)
+    · T 트랙: 16건 중 충족 14 · **미달 2** (`4d9334785`)
+    ★ 세 탐침 모두 **차단기를 없애고 다시 돌려 전부 «샘»으로 뒤집히는 것**까지 확인했다(계측기 자체를 먼저 증명).
+- 영향·주의사항:
+  - ⚠️ **운영 DB 가 실제로 바뀌었다** — `data/external_intelligence.db` 에 원천 1건·관측값 240건·적재본 240행·수집작업 2건, `data/planning.db` 에 `plan_drivers` 2건. 시험 잔여물이 아니라 **사람 승인을 거친 실자료**다. 지우지 말 것.
+  - ⚠️ **탐침 3종은 `test_` 로 시작하지 않는다**(`tests/probe_x3_ai_truth.py` · `probe_x4_simulation.py` · `probe_t_trust.py`). T3 에 안 들어간다 — 회귀 시험이 아니라 조사이기 때문이다. T3 건수 정산에 넣지 말 것.
+  - ⚠️ 자동 생성 보고서 3종(`X3_FINDINGS.md`·`X4_FINDINGS.md`·`T_FINDINGS.md`)은 **손으로 고치면 다음 실행에 덮인다.**
+  - ⚠️ **내 계측기가 또 틀렸다(누적 5번째·6번째).** X-3 첫 판의 「샘 1건」은 없는 상수 이름을 `getattr` 기본값과 함께 읽은 탓이었고, T-1 의 `as_of_date` 240행 「미달」은 내 계측표가 거칠었던 탓이었다(Pink Sheet 는 값별 발표일을 안 주고 Provider 가 정직하게 비운 것). **제품은 둘 다 멀쩡했다.**
+  - Codex 의 K1-C1~C5(업무키트) 작업과 **파일이 겹치지 않는다.** 내 변경은 `core/external_intelligence/` · `core/planning_drivers.py`(읽기) · `tests/probe_*` · `docs/test_plan/` · `docs/handoff/` 다.
+- 다음 행동 / 담당 / 착수 조건:
+  - **사용자(결정 5건 대기)** — ⓐ 원천 소유 부서(후보 `MNM_SHARED`; 구리·아연은 동제련·배터리소재 양쪽에 걸려 사업부 중 하나를 고르면 어느 쪽이든 틀리다) ⓑ F-6 탄력도(낙관·중립·비관 3값 권고) ⓒ F-3 착수 허가(A=CONNECTOR_QUERY 구현 / **B=스냅샷 경유 권고** / C=보류) ⓓ T-4 「근거 종류」 정책 ⓔ 나머지 4종 API 키 발급(OpenDART·ECOS·KOSIS·공공데이터포털 — **World Bank 는 키가 필요 없다**)
+  - **Codex** — 이제 **화면에 보여 줄 자료가 생겼다**: `/api/v1/acquisition/jobs`(ACTIVE 2건) · `/jobs/{id}/rows`(각 120행) · `/api/v1/external/sources`(1건) · 관측값 240건. ⚠️ 등급 사유 문구를 지우지 말 것 — `resolve_value` 는 `allowed=False` 일 때 `value=None` 과 **사유**를 함께 준다. 사유를 안 그리면 사용자는 「값이 없다」로 읽고 그것은 「등급이 모자라 막혔다」와 전혀 다른 뜻이다. `known_limits` 5개도 카드에 그대로 실을 것(특히 「국제 기준 가격이며 우리 실구매 단가가 아니다」).
+  - **나(Claude)** — 계획 6단계(X-1·X-2·X-5·X-6 · E 트랙) 착수. 사람 결정 없이 진행 가능.
+- 교대 체크포인트: 마지막 확인 = 관련 회귀 394건 통과(`tests/test_provider_worldbank.py` 외 10파일) + 탐침 3종 실행 · 변경 = `core/external_intelligence/providers/worldbank.py`, `tests/test_provider_worldbank.py`, `tests/probe_*.py` 3종, `docs/test_plan/` 4건, `docs/handoff/` 2건 · 미변경 = Codex 의 K1 업무키트 코드·UI·운영 원시자료·다른 팀원 미커밋분 · 검증 증거 = `X3_FINDINGS.md`·`X4_FINDINGS.md`·`T_FINDINGS.md`(자동 생성) + 계획 §9-F/G/H · 커밋 = `968ce2c94`·`3864f4095`·`8b9f54d22`·`9a5f484a3`·`4129b502d`·`4d9334785` · 푸시 = `8b9f54d22` 까지 완료, 이후 3건 대기 · 재개 지점 = 계획 6단계 X-1 · 금지 범위 = 운영 DB 의 위 실자료 삭제, 탐침을 `test_` 로 개명(T3 예산 초과), 자동 생성 보고서 수기 편집, `LAYOUT_VERIFIED` 를 근거 없이 되돌리기.
+
 ### [WORKTREE-CLEANUP-20260908] UI·업무키트 선별 커밋과 T3 귀속 정리
 - 작성자 / 기록 시각: Codex / 2026-09-08 15:26 KST
 - 왜 지금 기록하는가: 사용자가 Claude T3 진행 보고를 전달하며 공유 작업 트리 정리를 요청했다.
