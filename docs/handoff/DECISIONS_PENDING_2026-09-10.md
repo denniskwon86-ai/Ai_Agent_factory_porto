@@ -8,6 +8,43 @@
 
 ---
 
+## ✅ 결정 ① — **2026-09-11 승인됨 (World Bank 한 건)**
+
+선택지 **C** 로 결정됐다. 사람의 문장: 「World Bank Pink Sheet 원천을 승인한다, 승인자는 권혁일」.
+
+    원천        WB_PINK_SHEET   (source_id = provider_id — Codex 지적 ⓐ 반영분)
+    enabled     0 → 1
+    approved_by hikwon@lsmnm.com          ← ★ 권혁일 «계정 id» 다. 표시 이름이 아니다
+    시각        2026-09-11T04:45:40Z
+    DB          data/external_intelligence.db · external_sources 0행 → 1행
+
+★ `approved_by` 에 「권혁일」이라는 **이름을 넣지 않았다.** 제품 경로
+  (`POST /sources/{id}/approve`)는 `_actor(p) = p.user_id` 를 넘긴다 — 즉 원장에 남는 값은
+  언제나 «계정 id» 다. 여기에만 한글 이름을 넣으면 화면·감사가 찾지 못하는 값이 하나 생긴다.
+
+★ 권한이 실측으로 확인됐고 **빈손이 아니다**:
+
+    hikwon@lsmnm.com     unrestricted=True   → 통과
+    hikwon_17@lsmnm.com  unrestricted=False  → 거부(DA/관리자 전용)
+    (익명)                                    → 거부
+
+★ 격리본 예행에서 관문 3개가 실제로 걸리는 것을 먼저 확인했다 —
+  빈 승인자 거부 · 없는 원천 거부 · 승인 전 `enabled=0`.
+
+⚠️ **아직 열리지 않은 것:** `data_acquisition_rows` 가 **0행**이라 승격할 적재본이 없다.
+  기존 작업 80건은 전부 `DRAFT`·provider 없음(2026-09-06~08 격리 누락 시절의 잔여물)이다.
+  사슬(승격→관측값→계획 동인)을 실제로 돌리려면 **World Bank 파일을 1회 내려받아야** 한다:
+
+      https://thedocs.worldbank.org/en/doc/…/CMO-Historical-Data-Monthly.xlsx
+
+  이 다운로드는 **사람의 별도 허가**가 필요하다(외부 egress). 그때 `LAYOUT_VERIFIED=False`
+  도 함께 해소된다 — 파서가 실제 워크북과 한 번도 대조된 적이 없다.
+
+⚠️ 승인은 **등급 정책을 열지 않는다.** World Bank 는 `silver` 라 여전히
+  기준계획·공식보고에는 못 쓴다. 시나리오·검토·탐지까지다. 설계대로다.
+
+---
+
 ## 결정 ① 원천 승인 — 「이 출처의 값을 회사 계획에 쓴다」
 
 ### 지금 사실
@@ -166,7 +203,7 @@ A 와 B 는 **재현성과 최신성을 맞바꾸는** 선택이고, 그 교환�
 
 | | 결정 | 지금 막는 것 | 가장 가벼운 시작 |
 |---|---|---|---|
-| ① | 원천 승인 | `external_sources` 0건 | **World Bank 하나** — 키가 없어도 된다 |
+| ① | ~~원천 승인~~ **완료(2026-09-11)** | ~~`external_sources` 0건~~ → 1건 승인 | 다음 관문은 «적재본 0행» — 파일 1회 수집 허가 |
 | ② | 탄력도 | 회귀 불가(기간 3개·관측 0건) | 값 하나가 아니라 **낙관·중립·비관 세 값** |
 | ③ | F-3 | `CONNECTOR_QUERY` 가 미지원 한 줄 | **B(스냅샷 경유)** — 새 어휘가 없다 |
 
