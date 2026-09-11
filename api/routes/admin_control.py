@@ -14,7 +14,7 @@
 ⚠️ 이 파일에 경로를 추가할 때 권한 검사를 빠뜨리면 그 경로만 열린 구멍이 된다. 예외는 없다.
 """
 import asyncio
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -238,3 +238,60 @@ async def put_model_routing(req: ModelRoutingRequest,
     return {"status": "success",
             "data": {**out, "chains": mrp.chains(), "history": mrp.history(),
                      "applies": "next_boot"}}
+
+
+# ── 실적 인증 정책 (2026-09-11) ────────────────────────────────────────────
+
+class ActualCertificationPolicyRequest(BaseModel):
+    """실적 인증 정책 한 항목을 바꾼다.
+
+    ⚠️ 「우선은 경영관리팀장으로 해 놓고 나중에 화면에서 바꾼다」가 이 값들의 설계 의도다
+      (사용자 지시 2026-09-11). 코드 기본값은 **초기값이지 정답이 아니다.**"""
+    key: str
+    value: Dict[str, Any]
+    reason: Optional[str] = ""
+
+
+@router.get("/actual-certification-policy")
+async def get_actual_certification_policy(p: Principal = Depends(current_principal)):
+    """실적 인증에 «어떤 종류의 서명» 이 필요하고 «대사 증거로 무엇을 적는가».
+
+    ★★★ 값만 주지 않는다. `sources`(store / code)와 `code_defaults` 를 함께 준다 —
+      관리자가 바꿨다고 믿는데 저장이 안 된 상태를 화면이 볼 수 있어야 한다.
+
+    ★ 검토는 «단계» 가 아니라 «종류» 다. 화면도 결재선이 아니라 **필요한 서명 목록**으로
+      그려야 한다 — 순차로 그리면 부서장이 안 눌렀을 때 임원 자리가 «비활성» 으로 보이고,
+      그러면 사람들은 순서를 기다리다 둘 다 안 누른다."""
+    from core import actual_certification_policy as acp
+
+    _admin(p)
+    return {"status": "success",
+            "data": {**acp.effective(),
+                     "review_kinds": list(acp.REVIEW_KINDS),
+                     "use_kinds": list(acp.USE_KINDS),
+                     "history": acp.history()}}
+
+
+@router.put("/actual-certification-policy")
+async def put_actual_certification_policy(req: ActualCertificationPolicyRequest,
+                                          p: Principal = Depends(current_principal)):
+    """정책을 바꾼다(**코드 배포 없이**).
+
+    ⚠️ 「경영관리팀장」을 「담당임원」으로 바꾸는 것은 **책임자를 바꾸는 일**이다 —
+      누가 바꿨는지가 이력에 남는다.
+
+    ★ 이 정책은 **「누가 승인권자인가」를 정하지 않는다.** 그것은 조직 정본이 정하고
+      `ownership_binding._require_approval_authority()` 가 검사한다. 여기서 정하는 것은
+      「어떤 종류의 서명이 필요한가」와 「그 자리를 뭐라 부르는가」다.
+      ⚠️ 둘을 뭉개면 화면에서 아무 이름이나 넣고 그 사람이 승인권자가 된다."""
+    from core import actual_certification_policy as acp
+
+    actor = _admin(p)
+    try:
+        out = await asyncio.to_thread(acp.update, req.key, dict(req.value),
+                                      actor, req.reason or "")
+    except acp.ActualCertificationPolicyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success",
+            "data": {**out, "history": acp.history(),
+                     "applies": "immediate"}}
