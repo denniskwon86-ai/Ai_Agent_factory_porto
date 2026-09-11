@@ -27,6 +27,16 @@ class DecisionSourceBlocked(DecisionSourceError):
 _BASELINE_LABEL = {"PLAN": "계획", "ACTUAL": "실적", "FORECAST": "예측"}
 
 
+def bind_decision_evidence(source: dict[str, Any], supplied: dict[str, Any]) -> dict[str, Any]:
+    """검증기가 읽는 정본 키도 서버 실행에서 파생한다. 사용자 덮어쓰기는 거부한다."""
+    reserved = {"simulation_binding", "baseline_id", "scenario_id", "engine_version"}
+    if reserved.intersection(supplied):
+        raise ValueError("시뮬레이션 결속은 서버가 기록합니다. 사용자가 덮어쓸 수 없습니다.")
+    binding = dict(source["binding"])
+    return {**supplied, "simulation_binding": binding,
+            **{key: binding[key] for key in ("baseline_id", "scenario_id", "engine_version")}}
+
+
 class DecisionSourceCatalog:
     def __init__(self, store: PlanningStore | None = None):
         self._explicit_store = store
@@ -86,6 +96,10 @@ class DecisionSourceCatalog:
             reasons.append("소유 조직이 결속되지 않았습니다")
         if not (baseline_id and period and baseline_kind):
             reasons.append("기준선 결속 정보가 없는 이전 실행입니다")
+        if not str(row.get("engine_version") or "").strip():
+            reasons.append("계산 버전이 없는 이전 실행입니다")
+        if not str(row.get("input_hash") or "").strip():
+            reasons.append("입력 지문이 없는 이전 실행입니다")
         if metrics.get("complete") is not True:
             reasons.append("계산 결과가 완전하지 않습니다")
         if metrics.get("unapplied_assumptions"):

@@ -19,6 +19,7 @@ from core.decision_case import (UNRESTRICTED, DecisionCaseError, DecisionNotFoun
                                 decision_case)
 from core.decision_source_binding import (DecisionSourceBlocked,
                                           DecisionSourceNotFound,
+                                          bind_decision_evidence,
                                           decision_sources)
 
 router = APIRouter(tags=["Decision"])
@@ -124,11 +125,10 @@ async def create_case(run_id: str, req: CaseCreate,
     except DecisionSourceBlocked as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    if "simulation_binding" in req.evidence:
-        raise HTTPException(
-            status_code=422,
-            detail="시뮬레이션 결속은 서버가 기록합니다. 사용자가 덮어쓸 수 없습니다.")
-    evidence = {**req.evidence, "simulation_binding": source["binding"]}
+    try:
+        evidence = bind_decision_evidence(source, req.evidence)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     try:
         data = decision_case.create(
             question=req.question, created_by=actor, simulation_run_id=run_id,

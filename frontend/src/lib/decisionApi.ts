@@ -19,6 +19,24 @@ export type ResponseStatus = 'AGREE' | 'CONDITIONAL' | 'DISAGREE' | 'NEED_INFO';
 export type Outcome = 'APPROVED' | 'CONDITIONAL' | 'REJECTED' | 'DEFERRED';
 export type ViewKey = 'requester' | 'decider' | 'affected';
 
+export type EvidenceBasis = 'SIMULATION' | 'MEASURED' | 'EXTERNAL' | 'JUDGMENT';
+export type DecisionCreateBody = {
+  question: string; package: Record<string, any>; evidence?: Record<string, any>;
+  due_at?: string; evidence_basis: EvidenceBasis;
+};
+
+export const EVIDENCE_BASIS_KO: Record<EvidenceBasis, { label: string; hint: string }> = {
+  SIMULATION: { label: '시뮬레이션 계산', hint: '선택한 실행의 기준선·시나리오·계산 버전을 서버가 결속합니다.' },
+  MEASURED: { label: '실측 자료', hint: '실제로 측정한 값과 출처를 핵심 근거에 적으십시오.' },
+  EXTERNAL: { label: '외부 공표 자료', hint: '외부 자료의 출처와 적용 조건을 핵심 근거에 적으십시오.' },
+  JUDGMENT: { label: '전문가 판단', hint: '판단에 근거한 결정입니다. 시뮬레이션으로 검증됐다는 뜻이 아닙니다.' },
+};
+
+export function evidenceBasisLabel(basis?: string): string {
+  if (!basis || basis === 'UNSTATED') return '미기재(이전 기록)';
+  return EVIDENCE_BASIS_KO[basis as EvidenceBasis]?.label || '확인 불가';
+}
+
 export type Blocker = { code: string; reason: string };
 
 export type Participant = {
@@ -43,6 +61,7 @@ export type DecisionCase = {
   baseline_id: string; scenario_id: string; question: string;
   package: Record<string, any>; evidence: Record<string, any>;
   evidence_hash: string; package_version: number;
+  evidence_basis?: EvidenceBasis | 'UNSTATED';
   status: DecisionStatus; due_at: string; overdue: boolean;
   outcome: '' | Outcome; outcome_conditions: string; decided_by: string; decided_at: string;
   created_by: string; created_at: string; updated_at: string;
@@ -85,10 +104,7 @@ export type ViewsBundle = {
 export const decisionApi = {
   sources: () => req<DecisionSourceOption[]>('GET', '/api/v1/decisions/sources'),
 
-  create: (runId: string, body: {
-    question: string; package: Record<string, any>; evidence?: Record<string, any>;
-    due_at?: string;
-  }) => req<DecisionCase>(
+  create: (runId: string, body: DecisionCreateBody) => req<DecisionCase>(
     'POST', `/api/v1/simulations/${encodeURIComponent(runId)}/decision-cases`, body),
 
   queue: () => req<DecisionCase[]>('GET', '/api/v1/decisions/queue'),

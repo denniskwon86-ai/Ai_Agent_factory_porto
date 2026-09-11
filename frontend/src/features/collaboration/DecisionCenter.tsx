@@ -19,6 +19,7 @@ import { Banner, Panel, ScreenHead } from '../../design/HubShell';
 import { useLatestOnly } from '../../design/useLatestOnly';
 import {
   decisionApi, DECISION_STATUS_KO, OUTCOME_KO, PACKAGE_FIELDS, RESPONSE_KO, ROLE_KO, VIEW_KO,
+  EVIDENCE_BASIS_KO, evidenceBasisLabel, type EvidenceBasis, type DecisionCreateBody,
   type DecisionAction, type DecisionCase, type DecisionRole, type DecisionSourceOption,
   type Outcome, type ResponseStatus,
   type ViewKey, type ViewSection, type ViewsBundle,
@@ -384,6 +385,7 @@ function DetailScreen({ d, views, view, onView, onBack, onRequestReview, onRespo
           숫자를 보고 회의에 들어간 것이고, 그 회의록은 나중에 재현할 수 없다. */}
       <div className={`identity-bar ${views && !views.same_package ? 'broken' : ''}`}>
         <div><span>문서 버전</span><b>v{d.package_version}</b></div>
+        <div><span>근거 종류</span><b>{evidenceBasisLabel(d.evidence_basis)}</b></div>
         <div><span>근거 지문</span><b title={d.evidence_hash}>{(d.evidence_hash || '').slice(0, 16) || '없음'}</b></div>
         <div><span>세 관점 동일성</span>
           <b>{!views ? '확인 불가' : views.same_package ? '같은 문서' : '⚠ 불일치'}</b></div>
@@ -898,14 +900,11 @@ function ActionPanel({ d, people, personName, onActions, onMeasure }: {
 }
 
 // ── 새 안건 ──────────────────────────────────────────────────────────────────
-function CreateScreen({ sources, onRetrySources, onCancel, onSubmit }: {
+export function CreateScreen({ sources, onRetrySources, onCancel, onSubmit }: {
   sources: Loaded<DecisionSourceOption[]>;
   onRetrySources: () => void;
   onCancel: () => void;
-  onSubmit: (runId: string, body: {
-    question: string; package: Record<string, any>; evidence: Record<string, any>;
-    due_at: string;
-  }) => void;
+  onSubmit: (runId: string, body: DecisionCreateBody) => void;
 }) {
   const [head, setHead] = useState({
     run_id: '', question: '', due_at: '',
@@ -913,6 +912,8 @@ function CreateScreen({ sources, onRetrySources, onCancel, onSubmit }: {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [ev, setEv] = useState<{ key: string; value: string; verified: boolean }[]>([]);
   const [showAll, setShowAll] = useState(false);
+  // 실행 자동 선택과 달리 근거 종류는 사용자가 명시적으로 판단해야 한다.
+  const [basis, setBasis] = useState<EvidenceBasis | ''>('');
 
   const required = PACKAGE_FIELDS.filter((f) => f.required);
   const optional = PACKAGE_FIELDS.filter((f) => !f.required);
@@ -924,7 +925,7 @@ function CreateScreen({ sources, onRetrySources, onCancel, onSubmit }: {
     if (first) setHead((prev) => ({ ...prev, run_id: first.run_id }));
   }, [head.run_id, sourceRows, sources.status]);
 
-  const ready = !!selectedSource?.bindable && !!head.question.trim()
+  const ready = !!basis && !!selectedSource?.bindable && !!head.question.trim()
     && required.every((f) => (fields[f.key] || '').trim());
 
   const build = () => {
@@ -995,6 +996,24 @@ function CreateScreen({ sources, onRetrySources, onCancel, onSubmit }: {
             </div>
           </div>
 
+        </div>
+      </Panel>
+
+      <Panel kicker="BASIS" title="결정의 근거 종류">
+        <div style={{ padding: 15 }}>
+          <label className="field-label" htmlFor="nc-evidence-basis">근거 종류 (필수)</label>
+          <select id="nc-evidence-basis" className="afs-select" value={basis} required
+            aria-describedby="nc-evidence-basis-hint"
+            onChange={(e) => setBasis(Object.hasOwn(EVIDENCE_BASIS_KO, e.target.value)
+              ? e.target.value as EvidenceBasis : '')}>
+            <option value="">— 직접 선택하십시오 —</option>
+            {(Object.keys(EVIDENCE_BASIS_KO) as EvidenceBasis[]).map((key) =>
+              <option key={key} value={key}>{EVIDENCE_BASIS_KO[key].label}</option>)}
+          </select>
+          <p id="nc-evidence-basis-hint" className="hint-line">
+            {basis ? EVIDENCE_BASIS_KO[basis].hint
+              : '실행을 연결했더라도 결정의 근거 종류는 자동으로 정하지 않습니다.'}
+          </p>
         </div>
       </Panel>
 
@@ -1095,10 +1114,11 @@ function CreateScreen({ sources, onRetrySources, onCancel, onSubmit }: {
         <button className="secondary-button" onClick={onCancel}>취소</button>
         <button className="primary-button" disabled={!ready}
           onClick={() => {
+            if (!ready || !basis) return;
             const { pkg, evidence } = build();
             onSubmit(head.run_id.trim(), {
               question: head.question.trim(), package: pkg, evidence,
-              due_at: head.due_at,
+              due_at: head.due_at, evidence_basis: basis,
             });
           }}>
           Decision Package 만들기
