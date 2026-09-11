@@ -157,8 +157,10 @@ def f3_connection_to_generation() -> Tuple[str, str]:
 
     snaps = [s for s in DP.list_snapshots(KIT_INSTANCE)
              if s["dataset_contract_key"] == "EXT-02"]
-    real = [s for s in snaps if s.get("data_kind") == "REAL"]
-    demo = [s for s in snaps if s.get("data_kind") != "REAL"]
+    #: ⚠️ [2026-09-11] 처음엔 `real[0]` 을 집었는데 **철회된 판이 먼저** 나왔다
+    #:   (계측기 11번째). 「REVOKED 로 인증되어」라고 쓰고 있었다 — 살아 있는 판만 본다.
+    real = [s for s in snaps if s.get("data_kind") == "REAL" and s.get("state") != "REVOKED"]
+    demo = [s for s in snaps if s.get("data_kind") != "REAL" and s.get("state") != "REVOKED"]
     if not real:
         return BLOCKED_SILENT, "EXT-02 에 실물 판이 없다 — F-3(B) 가 적재되지 않았다"
 
@@ -173,10 +175,13 @@ def f3_connection_to_generation() -> Tuple[str, str]:
     if state == "READY":
         #: ★★★ [2026-09-11] 여기가 F-8 이 「막힌다」고 기록했던 바로 그 지점이다.
         #:   `SOURCE_CERTIFIED`(승인된 공개 원천 전용 종점)를 열어 «흐르게» 됐다.
-        return FLOWS, ("실물 %d행이 `%s` 로 인증되어 준비도 `READY` 다 — "
+        live = [x for x in real if str(x.get("state")) in ("SOURCE_CERTIFIED", "DEMO_CERTIFIED")]
+        head = live[0] if live else real[0]
+        return FLOWS, ("실물 %d행이 `%s` 로 인증(인증자 %s)되어 준비도 `READY` 다 — "
                        "인증판만 읽는 기준선·계산·색인이 이제 이 자료를 «본다». "
                        "시연 판 %d개와 섞이지 않고 나란히 있다"
-                       % (real[0].get("row_count", 0), real[0].get("state"), len(demo)))
+                       % (head.get("row_count", 0), head.get("state"),
+                          head.get("certified_by") or "(없음)", len(demo)))
     if not action:
         return BLOCKED_SILENT, "실물 판이 «%s» 인데 다음 행동이 없다" % state
 
