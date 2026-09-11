@@ -125,6 +125,53 @@ def add_impact(driver_code: str, account_code: str, elasticity: float,
         conn.close()
 
 
+def remove_impact(driver_code: str, account_code: str, removed_by: str,
+                  reason: str) -> Dict[str, Any]:
+    """파급 계수를 **거둔다**. 잘못 넣은 계수를 고칠 수 있어야 한다.
+
+    ## 왜 필요한가
+
+    종전에는 `add_impact()` 만 있었다 — **더할 수는 있는데 고칠 수가 없었다.**
+    같은 (동인, 계정)에 다시 넣으면 `impacts_of()` 가 둘 다 돌려주고
+    `expand_driver_assumption()` 이 **행마다 가정을 만들어 겹쳐 쌓는다.**
+    즉 「고치려고 다시 넣는」 행동이 조용히 **두 배 적용**이 된다.
+    (2026-09-11: 원가 쪽 탄력도를 과소평가해 부호 방향이 뒤집혔고, 그때 이 구멍이 드러났다.)
+
+    ★★★ **승인된 판본이 있으면 거부한다.** 판본은 불변이어야 한다 — 승인된 계수를
+      밑에서 갈아치우면 「우리가 승인한 그 숫자」가 무엇이었는지 아무도 답할 수 없다.
+      먼저 `planning_driver_release.revoke()` 로 철회하고 고친다.
+
+    ⚠️ `reason` 을 요구한다 — 계수를 거두는 것은 「이 파급이 없다」는 주장이고,
+      근거 없이 지우면 왜 지웠는지 다음 사람이 알 수 없다."""
+    _ensure_schema()
+    if not str(removed_by or "").strip():
+        raise PlanningError("removed_by 는 필수입니다 — 누가 계수를 거뒀는지 없으면 근거가 없습니다.")
+    if not str(reason or "").strip():
+        raise PlanningError("reason 은 필수입니다 — 계수를 거두는 것도 판단이고, "
+                            "근거 없이 지우면 왜 지웠는지 다음 사람이 알 수 없습니다.")
+    from core import planning_driver_release
+    if planning_driver_release.effective_release(driver_code):
+        raise PlanningError(
+            f"승인된 동인 판본이 있어 계수를 고칠 수 없습니다: {driver_code}. "
+            f"먼저 철회(revoke)하십시오 — 승인된 계수를 밑에서 갈아치우면 "
+            f"「우리가 승인한 그 숫자」가 무엇이었는지 답할 수 없습니다.")
+    conn = planning_store._connect()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM driver_impacts WHERE driver_code=? AND account_code=?",
+            (driver_code, account_code))]
+        if not rows:
+            raise PlanningError(f"등록되지 않은 파급 계수입니다: {driver_code}→{account_code}")
+        conn.execute("DELETE FROM driver_impacts WHERE driver_code=? AND account_code=?",
+                     (driver_code, account_code))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"driver_code": driver_code, "account_code": account_code,
+            "removed": len(rows), "removed_by": removed_by, "reason": reason,
+            "previous": [{"elasticity": r["elasticity"], "source": r["source"]} for r in rows]}
+
+
 def list_drivers() -> List[Dict[str, Any]]:
     _ensure_schema()
     conn = planning_store._connect()

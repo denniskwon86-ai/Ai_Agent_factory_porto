@@ -271,3 +271,68 @@ def test_external_lookup_failure_is_reported(store, monkeypatch):
     monkeypatch.setattr(ei, "external_intelligence", _Boom())
     r = dr.resolve_external_change("FX_RATE", baseline_value=1300.0)
     assert r["usable"] is False and "조회에 실패" in r["reason"]
+
+
+# ── 계수를 «고칠» 수 있는가 — 2026-09-11 에 드러난 구멍 ─────────────────────
+def test_a_wrong_coefficient_can_be_withdrawn(store):
+    """★★★ 종전에는 `add_impact()` 만 있었다 — **더할 수는 있는데 고칠 수가 없었다.**
+
+    같은 (동인, 계정)에 다시 넣으면 `impacts_of()` 가 둘 다 돌려주고
+    `expand_driver_assumption()` 이 행마다 가정을 만들어 **겹쳐 쌓는다.**
+    즉 「고치려고 다시 넣는」 행동이 조용히 **두 배 적용**이 된다."""
+    dr.register_driver("D1", "동인", external_code="")
+    dr.add_impact("D1", "5000", 0.80, rationale="첫 판", source="업계자료")
+    out = dr.remove_impact("D1", "5000", "someone@test.invalid", reason="부호 방향이 뒤집혔다")
+    assert out["removed"] == 1
+    assert out["previous"][0]["elasticity"] == 0.80
+    assert dr.impacts_of("D1") == []
+
+
+def test_re_adding_without_removing_stacks(store):
+    """★ 위 시험이 «왜» 필요한지 — 안 거두고 다시 넣으면 두 배가 된다."""
+    dr.register_driver("D1", "동인", external_code="")
+    dr.add_impact("D1", "5000", 0.80, rationale="첫 판", source="업계자료")
+    dr.add_impact("D1", "5000", 0.90, rationale="고친 판", source="업계자료")
+    rows, _ = dr.expand_driver_assumption("D1", 10.0)
+    assert len(rows) == 2, "같은 계정에 두 행이 생겼다 — 합치면 17% 가 적용된다"
+    assert sum(r["value"] for r in rows) == pytest.approx(17.0)
+
+
+def test_an_approved_release_blocks_editing_its_coefficients(store):
+    """★★★ 승인된 계수를 «밑에서» 갈아치우면 「우리가 승인한 그 숫자」에 답할 수 없다."""
+    dr.register_driver("D1", "동인", external_code="")
+    dr.add_impact("D1", "5000", 0.80, rationale="근거", source="업계자료")
+    driver_release.approve("D1", "a@test.invalid", "승인", tenant_id="t",
+                           scope_node_id="n", entity_mode="REAL")
+    with pytest.raises(PlanningError) as e:
+        dr.remove_impact("D1", "5000", "someone@test.invalid", reason="고치고 싶다")
+    assert "먼저 철회" in str(e.value)
+
+
+def test_after_revoking_the_coefficient_can_be_fixed(store):
+    """철회하면 고칠 수 있다 — 순서가 강제될 뿐 막히는 게 아니다."""
+    dr.register_driver("D1", "동인", external_code="")
+    dr.add_impact("D1", "5000", 0.80, rationale="근거", source="업계자료")
+    driver_release.approve("D1", "a@test.invalid", "승인", tenant_id="t",
+                           scope_node_id="n", entity_mode="REAL")
+    driver_release.revoke("D1", "a@test.invalid", "부호가 뒤집혔다")
+    dr.remove_impact("D1", "5000", "a@test.invalid", reason="부호 정정")
+    dr.add_impact("D1", "5000", 0.90, rationale="정정 근거", source="업계자료")
+    assert [i["elasticity"] for i in dr.impacts_of("D1")] == [0.90]
+
+
+def test_withdrawing_a_coefficient_needs_an_actor_and_a_reason(store):
+    """계수를 거두는 것도 «판단» 이다 — 근거 없이 지우면 왜 지웠는지 알 수 없다."""
+    dr.register_driver("D1", "동인", external_code="")
+    dr.add_impact("D1", "5000", 0.80, rationale="근거", source="업계자료")
+    with pytest.raises(PlanningError):
+        dr.remove_impact("D1", "5000", "", reason="사유")
+    with pytest.raises(PlanningError):
+        dr.remove_impact("D1", "5000", "a@test.invalid", reason="")
+
+
+def test_withdrawing_a_missing_coefficient_is_refused(store):
+    dr.register_driver("D1", "동인", external_code="")
+    with pytest.raises(PlanningError) as e:
+        dr.remove_impact("D1", "9999", "a@test.invalid", reason="없는 것")
+    assert "등록되지 않은 파급 계수" in str(e.value)
