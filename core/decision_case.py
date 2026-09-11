@@ -58,6 +58,51 @@ CANCELLED = "CANCELLED"
 #: 결정 가능한 상태. 그 밖에서 `decide` 를 부르면 막는다.
 DECIDABLE_FROM = (REVIEW_REQUESTED, IN_REVIEW, MEETING_REQUESTED)
 
+
+#: ★★★ [T-4 · 2026-09-11] 결정의 «근거 종류». Q4「그 판단은 어떤 데이터·가정·산식·
+#:   승인에 근거했나」가 **침묵으로 끝나지 않게** 한다.
+#:
+#: ## 무엇이 문제였나
+#:
+#: T-4 실측에서 결정 4건 중 2건에 «데이터·가정» 이 없었다. 그런데 파고드니 기록이
+#: 부실한 게 아니라 **관문이 없는** 것이었다 — `create()` 는 `question`·`package.baseline`·
+#: `package.options` 만 요구하고 기준선 지문·가정·산식 판본은 요구하지 않았다.
+#:
+#: ⚠️⚠️ 그렇다고 넷을 **전부 강제하면 안 된다.** 계산에 근거하지 «않는» 정성적 결정도
+#:   정당하게 있어야 하고, 강제하면 그런 결정이 막히거나 사람이 빈칸을 채우게 된다.
+#:
+#: ## 그래서 고른 방법 — 「없다」를 «밝히게» 한다
+#:
+#: 진짜 문제는 「산식에 근거하지 않은 결정」과 「산식 적기를 잊은 결정」이 **똑같이
+#: 보인다**는 것이었다. 근거 종류를 명시하게 하면 Q4 의 답이 침묵이 아니라
+#: **"이 결정은 산식에 근거하지 않았다"** 가 된다.
+BASIS_SIMULATION = "SIMULATION"   # 계산 결과 — 기준선·가정·산식 판본이 증거에 있어야 한다
+BASIS_MEASURED = "MEASURED"       # 실측 자료(MES 이력·계측값 등)
+BASIS_EXTERNAL = "EXTERNAL"       # 외부 공표 자료
+BASIS_JUDGMENT = "JUDGMENT"       # ★ 전문가 판단 — 산식에 근거하지 «않는다»고 밝히는 값
+
+#: ⚠️ 기존 기록 전용. **`EVIDENCE_BASES` 에 «넣지 않는다»** — 새 안건은 이 값을 고를 수
+#:   없다. 그래야 「안 밝힌 것」이 오늘 이후로 **새로 생기지 않는다.**
+BASIS_UNSTATED = "UNSTATED"
+
+EVIDENCE_BASES = (BASIS_SIMULATION, BASIS_MEASURED, BASIS_EXTERNAL, BASIS_JUDGMENT)
+
+#: `SIMULATION` 을 고르면 «실제로 있는지» 본다. 고지문은 차단기가 아니다 —
+#: 선언만 받고 증거를 안 보면 그 선언은 장식이 된다.
+#: ⚠️ 각 줄은 «하나라도 있으면» 통과다. 계산 경로마다 이름이 달라서다
+#:   (부서 합성은 `department_result_fingerprints`, 단일 시뮬레이션은 `baseline_fingerprint`).
+SIMULATION_EVIDENCE_KEYS = {
+    "데이터": ("baseline_id", "baseline_fingerprint", "composition_fingerprint",
+               "department_result_fingerprints"),
+    "가정": ("assumptions", "assumption_set_id", "scenario_id"),
+    #: ⚠️ [2026-09-11] 처음엔 `calc_version`·`engine_version`·`model_version` 만 적었다가
+    #:   실제 안건을 보고 늘렸다 — 부서 합성 경로는 `financial_model_version` 을 쓴다.
+    #:   목록이 좁으면 **정당한 SIMULATION 선언이 거부되고**, 사람은 JUDGMENT 로 내려
+    #:   적게 된다. 그러면 이 관문이 거짓말을 시키는 꼴이 된다.
+    "산식": ("calc_version", "engine_version", "model_version",
+             "financial_model_version", "calculation_model_version"),
+}
+
 #: 참여자 역할 — §CL-BE-03 "요청자/결정자/영향부서 역할 분리".
 #: ⚠️ 하나의 enum 으로 뭉개지 않는다. 요청자는 올린 사람, 결정자는 승인권자, 영향부서는 의견을
 #:   내는 쪽이다. 섞으면 "누가 결정했는가"에 답할 수 없다.
@@ -108,6 +153,7 @@ CREATE TABLE IF NOT EXISTS decision_cases (
     evidence_json    TEXT NOT NULL DEFAULT '{}',
     evidence_hash    TEXT NOT NULL DEFAULT '',
     record_purpose   TEXT NOT NULL DEFAULT 'BUSINESS',
+    evidence_basis   TEXT NOT NULL DEFAULT 'UNSTATED',
     package_version  INTEGER NOT NULL DEFAULT 1,
     status           TEXT NOT NULL DEFAULT 'DRAFT',
     due_at           TEXT NOT NULL DEFAULT '',
@@ -202,6 +248,12 @@ class DecisionCase:
             conn.executescript(_DDL)
             columns = {str(row[1]) for row in conn.execute(
                 "PRAGMA table_info(decision_cases)").fetchall()}
+            if "evidence_basis" not in columns:
+                #: ⚠️ 기존 행은 «UNSTATED» 다. 새 안건은 이 값을 고를 수 없으므로
+                #:   「안 밝힌 것」이 오늘 이후로 새로 생기지 않는다.
+                conn.execute(
+                    "ALTER TABLE decision_cases ADD COLUMN evidence_basis "
+                    "TEXT NOT NULL DEFAULT 'UNSTATED'")
             if "record_purpose" not in columns:
                 conn.execute(
                     "ALTER TABLE decision_cases ADD COLUMN record_purpose "
@@ -223,6 +275,7 @@ class DecisionCase:
                baseline_id: str = "", scenario_id: str = "", scope_id: str = "",
                package: Optional[Dict[str, Any]] = None,
                evidence: Optional[Dict[str, Any]] = None, due_at: str = "",
+               evidence_basis: str = "",
                tenant_id: str = "tenant_default",
                record_purpose: str = PURPOSE_BUSINESS) -> Dict[str, Any]:
         """시뮬레이션 결과에서 Decision Package 를 만든다.
@@ -241,6 +294,23 @@ class DecisionCase:
             raise DecisionCaseError(f"record_purpose 는 {PURPOSES} 중 하나여야 합니다.")
         pkg = package or {}
         ev = evidence or {}
+        basis = str(evidence_basis or "").strip().upper()
+        if basis not in EVIDENCE_BASES:
+            raise DecisionCaseError(
+                f"evidence_basis 는 {EVIDENCE_BASES} 중 하나여야 합니다(받은 값: "
+                f"{evidence_basis!r}). ★ 근거 «종류» 를 밝히지 않으면 「산식에 근거하지 않은 "
+                f"결정」과 「산식 적기를 잊은 결정」이 똑같이 보이고, Q4「그 판단은 무엇에 "
+                f"근거했나」가 침묵으로 끝납니다. 계산에 근거하지 않았다면 "
+                f"'{BASIS_JUDGMENT}' 로 «그렇다고 밝히십시오».")
+        if basis == BASIS_SIMULATION:
+            #: ★★★ 선언만 받고 증거를 안 보면 그 선언은 장식이다 — 실제로 있는지 본다.
+            lacking = [name for name, keys in SIMULATION_EVIDENCE_KEYS.items()
+                       if not any(str((evidence or {}).get(k) or "").strip() for k in keys)]
+            if lacking:
+                raise DecisionCaseError(
+                    f"'{BASIS_SIMULATION}' 이라고 밝혔는데 증거에 {lacking} 가 없습니다. "
+                    f"계산에 근거했다면 기준선·가정·산식 판본이 함께 있어야 합니다 — "
+                    f"없다면 '{BASIS_JUDGMENT}' 가 맞는 값입니다.")
         missing = [k for k in ("baseline", "options") if not pkg.get(k)]
         if missing:
             raise DecisionCaseError(
@@ -252,10 +322,11 @@ class DecisionCase:
         self._store.execute(
             "INSERT INTO decision_cases (decision_id, tenant_id, scope_id, simulation_run_id, "
             "baseline_id, scenario_id, question, package_json, evidence_json, evidence_hash, "
-            "record_purpose, package_version, status, due_at, created_by, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
+            "record_purpose, evidence_basis, package_version, status, due_at, created_by, "
+            "created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
             (did, tenant_id, scope_id, simulation_run_id, baseline_id, scenario_id,
-             question.strip(), canonical_json(pkg), canonical_json(ev), h, purpose, DRAFT,
+             question.strip(), canonical_json(pkg), canonical_json(ev), h, purpose, basis, DRAFT,
              due_at, created_by, now, now))
         # 요청자는 참여자로 자동 등록된다 — 올린 사람이 목록에 없으면 누가 올렸는지 화면에서 사라진다.
         self._store.execute(

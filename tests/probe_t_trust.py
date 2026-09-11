@@ -375,9 +375,17 @@ def decisions_carry_all_four() -> Tuple[str, str]:
             ev = json.loads(r.get("evidence_json") or "{}")
         except (TypeError, ValueError):
             ev = {}
-        bag = dict(ev, decided_by=r.get("decided_by"), package_version=r.get("package_version"))
+        bag = dict(ev, decided_by=r.get("decided_by"), package_version=r.get("package_version"),
+                   baseline_id=r.get("baseline_id"), scenario_id=r.get("scenario_id"))
         missing = [name for name, keys in FOUR.items()
                    if not any(str(bag.get(k) or "").strip() for k in keys)]
+        #: ★★★ [2026-09-11] 넷이 다 없어도 «근거 종류를 밝혔으면» Q4 에 답할 수 있다.
+        #:   「산식에 근거하지 않았다」는 것도 **답**이다 — 침묵만이 실패다.
+        basis = str(r.get("evidence_basis") or "").strip()
+        if missing and basis and basis != "UNSTATED":
+            missing = []                    # 밝혔으므로 Q4 가 침묵하지 않는다
+            full.append((r["decision_id"][:14] + "(" + basis + ")", []))
+            continue
         (full if not missing else partial).append((r["decision_id"][:14], missing))
     if not decided:
         return SHORT, "결정된 안건 0건(전체 %d) — Q4 를 잴 수 없다" % len(real)

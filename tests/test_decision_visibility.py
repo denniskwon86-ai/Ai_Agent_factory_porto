@@ -52,7 +52,8 @@ def svc(tmp_path):
 @pytest.fixture
 def did(svc):
     c = svc.create(question="제3공장을 증설할까요?", created_by="kim", simulation_run_id="run_1",
-                   baseline_id="snap_1", package=PKG, evidence=EV, scope_id=OWNER_SCOPE)
+                   baseline_id="snap_1", package=PKG, evidence=EV, scope_id=OWNER_SCOPE,
+                   evidence_basis="JUDGMENT")
     return c["decision_id"]
 
 
@@ -130,7 +131,8 @@ def test_full_flow_still_works_for_insiders(svc, did):
 def test_empty_scope_case_is_not_company_wide(svc):
     """⚠️ 범위가 빈 안건은 «전사» 가 아니라 «미지정» 이다 — 작성자·참여자만 본다."""
     c = svc.create(question="q", created_by="kim", simulation_run_id="run_1",
-                   baseline_id="snap_1", package=PKG, evidence=EV, scope_id="")
+                   baseline_id="snap_1", package=PKG, evidence=EV, scope_id="",
+                   evidence_basis="JUDGMENT")
     pid = c["decision_id"]
     assert svc.get(pid, "kim", viewer_scopes=OUTSIDER)["decision_id"] == pid
     with pytest.raises(DecisionNotFound):
@@ -191,7 +193,7 @@ def test_create_rejects_foreign_scope(monkeypatch):
             readable_scope_nodes=frozenset({"node_q"}),
         ),
     )
-    request = dc.CaseCreate(question="q", package=PKG)
+    request = dc.CaseCreate(question="q", package=PKG, evidence_basis="JUDGMENT")
     with pytest.raises(HTTPException) as exc:
         asyncio.run(dc.create_case("foreign-run", request, principal))
 

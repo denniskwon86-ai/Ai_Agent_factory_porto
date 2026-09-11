@@ -64,6 +64,9 @@ class CaseCreate(BaseModel):
     package: Dict[str, Any]
     evidence: Dict[str, Any] = {}
     due_at: str = ""
+    #: ★ [T-4] 기본값을 두지 «않는다». 기본값이 있으면 화면이 생각 없이 보내고,
+    #:   그 순간 「산식에 근거하지 않은 결정」과 「적기를 잊은 결정」이 다시 같아진다.
+    evidence_basis: str
     record_purpose: str = "BUSINESS"
 
 
@@ -132,6 +135,7 @@ async def create_case(run_id: str, req: CaseCreate,
             baseline_id=source["baseline_id"], scenario_id=source["scenario_id"],
             scope_id=source["scope_id"],
             package=req.package, evidence=evidence, due_at=req.due_at,
+            evidence_basis=req.evidence_basis,
             record_purpose=req.record_purpose)
     except DecisionCaseError as e:
         _bad(e)

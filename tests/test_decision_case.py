@@ -24,6 +24,9 @@ from core.decision_case import (ACTIONED, DECIDED, DRAFT, EFFECT_MEASURED, EVIDE
                                 OUTCOME_CONDITIONAL, RESPONSE_AGREE, RESPONSE_NEED_INFO,
                                 REVIEW_REQUESTED, ROLE_AFFECTED, ROLE_DECIDER, VIEWS,
                                 DecisionCase, DecisionCaseError, DecisionNotFound,
+                                BASIS_JUDGMENT, BASIS_MEASURED, BASIS_SIMULATION,
+                                BASIS_UNSTATED, EVIDENCE_BASES,
+                                SIMULATION_EVIDENCE_KEYS,
                                 evidence_hash)
 
 PKG = {
@@ -63,8 +66,11 @@ def svc(tmp_path):
 
 
 def _case(svc, **kw):
+    #: ★ [2026-09-11 T-4] 근거 «종류» 가 필수가 됐다. 이 도우미는 «유효한 안건» 을
+    #:   뜻하므로 유효한 값을 싣는다 — 관문 자체는 아래 전용 시험이 «직접» 누른다.
     args = dict(question="제3공장을 증설할까요?", created_by="kim", simulation_run_id="run_1",
-                baseline_id="snap_1", package=PKG, evidence=EV, scope_id="MNM_BATTERY")
+                baseline_id="snap_1", package=PKG, evidence=EV, scope_id="MNM_BATTERY",
+                evidence_basis="JUDGMENT")
     args.update(kw)
     return svc.create(**args)
 
@@ -435,3 +441,82 @@ def test_overdue_is_flagged(svc):
     c = _case(svc, due_at="2026-01-01")
     d = svc.get(c["decision_id"], "kim", today="2026-08-03")
     assert d["overdue"] is True
+
+
+# ── [T-4] 근거 «종류» — Q4 가 침묵으로 끝나지 않게 한다 (2026-09-11) ────────
+_PKG = {"baseline": "무행동 시 변화 없음", "options": ["A안", "B안"]}
+_SIM_EV = {"baseline_fingerprint": "bf1", "assumptions": {"fx": 5}, "calc_version": "1.0.0"}
+
+
+def _mk(svc, **kw):
+    base = dict(question="가동률을 올릴 것인가", created_by="a@test.invalid", package=_PKG)
+    base.update(kw)
+    return svc.create(**base)
+
+
+def test_a_decision_must_state_what_kind_of_basis_it_has(svc):
+    """★★★ T-4 가 찾은 것 — 「산식에 근거하지 않은 결정」과 「산식 적기를 잊은 결정」이
+    **똑같이 보였다.** 근거 종류를 밝히게 하면 Q4 의 답이 침묵이 아니게 된다."""
+    with pytest.raises(DecisionCaseError) as e:
+        _mk(svc)
+    assert "근거" in str(e.value) and "침묵" in str(e.value)
+
+
+def test_an_unknown_basis_is_refused(svc):
+    with pytest.raises(DecisionCaseError):
+        _mk(svc, evidence_basis="GUT_FEELING")
+
+
+def test_a_new_case_cannot_choose_unstated(svc):
+    """★★★ `UNSTATED` 를 닫힌 목록에서 «뺀» 것이 핵심이다 — 기존 행만 그 값을 갖고,
+    「안 밝힌 것」이 오늘 이후로 **새로 생기지 않는다.**"""
+    assert BASIS_UNSTATED not in EVIDENCE_BASES
+    with pytest.raises(DecisionCaseError):
+        _mk(svc, evidence_basis=BASIS_UNSTATED)
+
+
+def test_declaring_simulation_without_the_evidence_is_refused(svc):
+    """★★★ 고지문은 차단기가 아니다 — 선언만 받고 증거를 안 보면 그 선언은 장식이다."""
+    with pytest.raises(DecisionCaseError) as e:
+        _mk(svc, evidence_basis=BASIS_SIMULATION, evidence={"메모": "올려야 함"})
+    assert "['데이터', '가정', '산식']" in str(e.value)
+    assert BASIS_JUDGMENT in str(e.value), "무엇이 맞는 값인지 알려 줘야 한다"
+
+
+@pytest.mark.parametrize("missing", ["데이터", "가정", "산식"])
+def test_simulation_needs_all_three(svc, missing):
+    """셋 중 하나라도 없으면 거부 — 「두 개는 있으니 됐다」가 되면 관문이 흐려진다."""
+    ev = dict(_SIM_EV)
+    for k in SIMULATION_EVIDENCE_KEYS[missing]:
+        ev.pop(k, None)
+    with pytest.raises(DecisionCaseError) as e:
+        _mk(svc, evidence_basis=BASIS_SIMULATION, evidence=ev)
+    assert missing in str(e.value)
+
+
+def test_simulation_with_the_evidence_passes(svc):
+    out = _mk(svc, evidence_basis=BASIS_SIMULATION, evidence=_SIM_EV)
+    assert out["evidence_basis"] == BASIS_SIMULATION
+
+
+def test_a_judgment_decision_is_allowed_and_says_so(svc):
+    """★ 계산에 근거하지 «않는» 정성적 결정도 정당하다 — 막지 않고 «밝히게» 한다."""
+    out = _mk(svc, evidence_basis=BASIS_JUDGMENT, evidence={"현장 판단": "설비 노후"})
+    assert out["evidence_basis"] == BASIS_JUDGMENT
+
+
+def test_a_measured_decision_needs_no_formula(svc):
+    """실측 자료에 근거한 결정에 산식 판본을 요구하면 안 된다."""
+    out = _mk(svc, evidence_basis=BASIS_MEASURED,
+              evidence={"가동률 실적": "MES 이력 2026-01~06 평균 78.3%"})
+    assert out["evidence_basis"] == BASIS_MEASURED
+
+
+@pytest.mark.parametrize("key", ["financial_model_version", "calculation_model_version"])
+def test_alternate_formula_version_names_are_accepted(svc, key):
+    """⚠️ [2026-09-11] 처음엔 `calc_version` 계열만 적었다가 실제 안건을 보고 늘렸다 —
+    부서 합성 경로는 `financial_model_version` 을 쓴다. 목록이 좁으면 **정당한 선언이
+    거부되고** 사람은 JUDGMENT 로 내려 적게 된다. 관문이 거짓말을 시키는 꼴이 된다."""
+    ev = {"baseline_fingerprint": "bf1", "assumptions": {"fx": 5}, key: "2.0.0"}
+    out = _mk(svc, evidence_basis=BASIS_SIMULATION, evidence=ev)
+    assert out["evidence_basis"] == BASIS_SIMULATION
