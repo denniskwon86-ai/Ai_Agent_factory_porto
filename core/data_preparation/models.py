@@ -162,23 +162,38 @@ DEMO_CERTIFIED = "DEMO_CERTIFIED"
 #:   `external_sources.approved_by` 에 이미 사람 이름으로 남아 있다.
 SOURCE_CERTIFIED = "SOURCE_CERTIFIED"
 
+#: ★★★ [M0 · 2026-09-12] **회사 실적**의 인증 종점. 소유 부서가 「이 숫자가 우리 실적이
+#:   맞다」고 서명한 판이다.
+#:
+#: ## 세 종점의 차이 — 숫자의 «책임» 이 누구에게 있는가
+#:
+#:     DEMO_CERTIFIED     시연 자료          책임 없음(시연이다)
+#:     SOURCE_CERTIFIED   공표 자료          **발행 기관**(World Bank 등)
+#:     OWNER_CERTIFIED    **회사 실적**      **우리** — 그래서 대사와 서명이 필요하다
+#:
+#: ⚠️ `SOURCE_CERTIFIED` 를 실적에 재사용하지 «않는» 이유: 그것은 「출처를 믿기로 했다」는
+#:   뜻이고 실적은 「이 숫자가 맞다」는 뜻이다. 섞으면 책임 소재가 섞인다.
+OWNER_CERTIFIED = "OWNER_CERTIFIED"
+
 QUARANTINED = "QUARANTINED"
 REVOKED = "REVOKED"
 
 SNAPSHOT_STATES: Tuple[str, ...] = (RAW, PROFILED, STANDARDIZED, RECONCILED,
-                                    DEMO_CERTIFIED, SOURCE_CERTIFIED, QUARANTINED, REVOKED)
+                                    DEMO_CERTIFIED, SOURCE_CERTIFIED, OWNER_CERTIFIED,
+                                    QUARANTINED, REVOKED)
 
 #: ★★★ 「인증되었는가」를 묻는 **유일한 자리**. 상수 하나를 직접 비교하면 종점이 늘어난
 #:   날 «한 곳만» 고쳐지고, 안 고쳐진 곳은 실물을 조용히 못 보게 된다.
 #:   (기억: 예외를 한 곳만 지웠다 · 관문을 두 곳에서 구현하지 않는다)
 #: ⚠️ 「시연 인증인가」를 물어야 하는 자리는 여기를 쓰지 «않는다» — 시연 초기화처럼
 #:   시연 자료만 건드려야 하는 곳은 `DEMO_CERTIFIED` 를 그대로 본다.
-CERTIFIED_STATES: Tuple[str, ...] = (DEMO_CERTIFIED, SOURCE_CERTIFIED)
+CERTIFIED_STATES: Tuple[str, ...] = (DEMO_CERTIFIED, SOURCE_CERTIFIED, OWNER_CERTIFIED)
 
 #: 인증 종점마다 «허용되는 자료 성격». 어긋나면 `advance_snapshot` 이 막는다.
 CERTIFICATION_DATA_KIND = {
     DEMO_CERTIFIED: "DEMO/SYNTHETIC",
     SOURCE_CERTIFIED: "REAL",
+    OWNER_CERTIFIED: "REAL",
 }
 
 
@@ -198,9 +213,10 @@ SNAPSHOT_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
     STANDARDIZED: (RECONCILED, QUARANTINED),
     #: ★ 대사를 마친 판은 «성격에 맞는» 종점으로 간다. 둘 중 어디로 갈지는
     #:   `data_kind` 가 정하고 `advance_snapshot` 이 확인한다.
-    RECONCILED: (DEMO_CERTIFIED, SOURCE_CERTIFIED, QUARANTINED),
+    RECONCILED: (DEMO_CERTIFIED, SOURCE_CERTIFIED, OWNER_CERTIFIED, QUARANTINED),
     DEMO_CERTIFIED: (REVOKED,),
     SOURCE_CERTIFIED: (REVOKED,),
+    OWNER_CERTIFIED: (REVOKED,),
     QUARANTINED: (),
     REVOKED: (),
 }

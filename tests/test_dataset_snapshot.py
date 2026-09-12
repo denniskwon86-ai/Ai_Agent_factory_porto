@@ -183,27 +183,30 @@ def test_the_snapshot_transition_table_is_pinned_literally():
         "PROFILED": ("STANDARDIZED", "QUARANTINED"),
         "STANDARDIZED": ("RECONCILED", "QUARANTINED"),
         #: 대사를 마친 판은 «성격에 맞는» 종점으로 간다 — 어느 쪽인지는 data_kind 가 정한다.
-        "RECONCILED": ("DEMO_CERTIFIED", "SOURCE_CERTIFIED", "QUARANTINED"),
+        "RECONCILED": ("DEMO_CERTIFIED", "SOURCE_CERTIFIED", "OWNER_CERTIFIED", "QUARANTINED"),
         "DEMO_CERTIFIED": ("REVOKED",),
         "SOURCE_CERTIFIED": ("REVOKED",),
+        "OWNER_CERTIFIED": ("REVOKED",),
         "QUARANTINED": (),
         "REVOKED": (),
     }
 
 
-# ── 인증 종점이 «둘» 이다 — 성격이 맞아야 간다 (2026-09-11) ──────────────────
-def test_the_two_certification_endpoints_are_disjoint_by_data_kind():
+# ── 인증 종점 셋 — 시연/공표 원천/회사 실적의 책임을 구분한다 (2026-09-12) ──────
+def test_the_three_certification_endpoints_preserve_data_kind():
     """★★★ 종점마다 허용 성격이 다르다. 섞이면 어느 것이 시연이었는지 가릴 수 없다."""
-    assert m.CERTIFIED_STATES == (m.DEMO_CERTIFIED, m.SOURCE_CERTIFIED)
+    assert m.CERTIFIED_STATES == (m.DEMO_CERTIFIED, m.SOURCE_CERTIFIED, m.OWNER_CERTIFIED)
     assert m.CERTIFICATION_DATA_KIND[m.DEMO_CERTIFIED] == m.DATA_KIND_DEMO
     assert m.CERTIFICATION_DATA_KIND[m.SOURCE_CERTIFIED] == m.DATA_KIND_REAL
+    assert m.CERTIFICATION_DATA_KIND[m.OWNER_CERTIFIED] == m.DATA_KIND_REAL
 
 
-def test_is_certified_covers_both_endpoints():
+def test_is_certified_covers_all_three_endpoints():
     """★ 「인증되었는가」를 묻는 자리는 이 함수를 쓴다 — 상수를 직접 비교하면
     종점이 늘어난 날 한 곳만 고쳐지고 실물이 조용히 안 보인다."""
     assert m.is_certified(m.DEMO_CERTIFIED) is True
     assert m.is_certified(m.SOURCE_CERTIFIED) is True
+    assert m.is_certified(m.OWNER_CERTIFIED) is True
     for state in (m.RAW, m.PROFILED, m.STANDARDIZED, m.RECONCILED,
                   m.QUARANTINED, m.REVOKED, "", None):
         assert m.is_certified(state) is False

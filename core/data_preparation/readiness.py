@@ -35,6 +35,7 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.data_preparation import models as m
+from core.data_preparation import usage_policy
 
 # ── 데이터셋 준비 상태 ────────────────────────────────────────────────────
 #
@@ -198,6 +199,17 @@ def evaluate_dataset(contract_key: str, *, binding: Optional[Dict[str, Any]],
             want, got = str(scope.get(field, "")), str(binding.get(field, ""))
             if want and got and want != got:
                 return out(UNAVAILABLE, detail="범위 불일치")
+
+    candidate = latest_certified(snapshots) or _latest(snapshots)
+    holds = list(usage_policy.binding_holds(binding))
+    try:
+        usage_policy.require_no_holds(holds)
+        usage_policy.require_no_holds((candidate or {}).get("usage_holds", []))
+    except usage_policy.UsageHoldError as exc:
+        result = out(UNAVAILABLE, snapshot=candidate, detail=str(exc))
+        result.update(reason_code="DATA_USAGE_HOLD", next_action=usage_policy.NEXT_ACTION,
+                      responsible_role="데이터 오너")
+        return result
 
     if str(binding.get("state")) != m.ACTIVE:
         #: 결속은 있으나 아직 활성이 아니다 — 원천을 «고르는 중» 이다.

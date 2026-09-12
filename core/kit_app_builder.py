@@ -252,6 +252,11 @@ def fields_from_certified(store: Any, instance_id: str, contract_key: str) -> Li
     latest = rd.latest_certified(rows)
     if not latest:
         return []
+    from core.data_preparation import usage_policy
+    try:
+        usage_policy.require_usable(store, latest)
+    except usage_policy.UsageHoldError as exc:
+        raise KitAppError(str(exc)) from exc
     raw = latest.get("schema")
     if raw is None:
         import json as _json

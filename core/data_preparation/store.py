@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from core.data_preparation import models as m
+from core.data_preparation import usage_policy
 from core.paths import data_path
 
 _DB_PATH = data_path("data_preparation.db")
@@ -116,8 +117,32 @@ CREATE TABLE IF NOT EXISTS dataset_snapshots (
     --:   «누가» 가 없었다 — 인증은 「이 판을 써도 된다」는 사람의 판단인데 그 이름이
     --:   아무 데도 안 남았다. T-1 의 「다섯 가지」 중 «소유자» 와 같은 종류의 구멍이다.
     certified_by    TEXT NOT NULL DEFAULT '',
+    --: ★★★ [M0 2026-09-12] 실적의 «귀속 기간». 「2026년 8월 실적」은 하나가 아니다 —
+    --:   1차 마감과 조정 후 마감의 숫자가 다르다. 기간이 없으면 「어느 8월을 인증했나」에
+    --:   답할 수 없고, 같은 기간의 판이 둘 생겨도 아무도 모른다.
+    period_from     TEXT NOT NULL DEFAULT '',
+    period_to       TEXT NOT NULL DEFAULT '',
+    --: ★★★ 인증 시점에 «선언한 용도». 이 선언이 필요한 서명 종류를 정하고,
+    --:   **downstream 사용을 제약한다** — `PURPOSE_MIN_GRADE` 와 같은 구조다.
+    --:   OPERATIONAL 로 인증하면 임원 서명은 피하지만 경영 보고에는 못 쓴다.
+    certified_use_kind TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
+);
+
+--: ★★★ [M0] 실적 인증의 «서명». 한 칸으로는 안 된다 — 경영 보고용은 서명이 둘이다.
+--:   `publication_reviews` 와 **같은 모양**이다(종류당 한 명, 병렬).
+--: ⚠️ 병렬이지 순차가 아니다. 순차로 만들면 부서장이 휴가 갈 때 전체가 멈춘다.
+CREATE TABLE IF NOT EXISTS snapshot_certifications (
+    snapshot_id     TEXT NOT NULL,
+    review_kind     TEXT NOT NULL,
+    reviewer_id     TEXT NOT NULL,
+    owner_dept_id   TEXT NOT NULL DEFAULT '',
+    --: 「무엇과 맞춰 봤는가」. 형식은 강제하지 않고 빈 값만 막는다
+    --: (ERP 마다 마감본 특정 방법이 다르다 — 형식을 정하면 그 ERP 전용이 된다).
+    reconciliation_evidence TEXT NOT NULL,
+    signed_at       TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, review_kind)
 );
 -- ★★★ [2026-08-20 §7 3단계] 인증판 → **업무 객체 범위 색인**
 --
@@ -330,6 +355,11 @@ class DataPreparationStore:
             if "certified_by" not in snap_cols:
                 conn.execute("ALTER TABLE dataset_snapshots ADD COLUMN certified_by "
                              "TEXT NOT NULL DEFAULT ''")
+            #: ⚠️ [M0 2026-09-12] 귀속 기간·선언 용도도 나중에 생긴 열이다.
+            for col in ("period_from", "period_to", "certified_use_kind"):
+                if col not in snap_cols:
+                    conn.execute(f"ALTER TABLE dataset_snapshots ADD COLUMN {col} "
+                                 f"TEXT NOT NULL DEFAULT ''")
             existing = {r[1] for r in conn.execute("PRAGMA table_info(object_scope_index)")}
             for col in ("owner_binding_id", "owner_binding_fingerprint"):
                 if col in existing:
@@ -665,13 +695,17 @@ class DataPreparationStore:
         with self.transaction() as conn:
             r = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
                              (snapshot_id,)).fetchone()
-        return self._public(dict(r)) if r else None
+            return self._snapshot_public(conn, dict(r)) if r else None
 
     def list_snapshots(self, instance_id: str) -> List[Dict[str, Any]]:
         with self.transaction() as conn:
             rows = conn.execute("SELECT * FROM dataset_snapshots WHERE instance_id=? "
                                 "ORDER BY created_at ASC", (instance_id,)).fetchall()
-        return [self._public(dict(r)) for r in rows]
+            return [self._snapshot_public(conn, dict(r)) for r in rows]
+
+    def _snapshot_public(self, conn: Any, row: Dict[str, Any]) -> Dict[str, Any]:
+        # 현재 결속의 보류를 투영할 뿐 저장된 상태·본문을 변경하지 않는다.
+        return {**self._public(row), "usage_holds": list(usage_policy.snapshot_holds(conn, row))}
 
     def advance_snapshot(self, snapshot_id: str, target: str,
                          on_commit: Optional[Any] = None,
@@ -691,6 +725,10 @@ class DataPreparationStore:
           답할 수 없다. 정정은 **새 Snapshot** 이다."""
         now = _now()
         with self.transaction() as conn:
+            # SELECT만으로는 SQLite 쓰기 트랜잭션이 시작되지 않는다.
+            # 인증 판정 직후 다른 연결이 보류를 커밋하는 틈을 먼저 잠근다.
+            if target in m.CERTIFIED_STATES:
+                conn.execute("BEGIN IMMEDIATE")
             cur = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
                                (snapshot_id,)).fetchone()
             if cur is None:
@@ -707,6 +745,7 @@ class DataPreparationStore:
                     args.append(json.dumps(payload[key] or {}, ensure_ascii=False,
                                            sort_keys=True))
             if target in m.CERTIFIED_STATES:
+                usage_policy.require_usable_conn(conn, dict(cur))
                 #: ★★★ 인증 종점마다 «허용되는 자료 성격» 이 다르다. 여기서 막지 않으면
                 #:   시연 자료가 원천 인증을 받거나 실물이 시연 인증을 받는다 — 둘을 섞으면
                 #:   어느 것이 시연이었는지 영영 가릴 수 없다.
@@ -752,6 +791,7 @@ class DataPreparationStore:
         """
         now = _now()
         with self.transaction() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             old = conn.execute(
                 "SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
                 (old_snapshot_id,)).fetchone()
@@ -773,6 +813,7 @@ class DataPreparationStore:
             if str(new_row.get("data_kind") or "") != m.DATA_KIND_DEMO:
                 raise m.StateConflict("시연용 합성 데이터만 이 교체 경로를 사용할 수 있습니다.")
 
+            usage_policy.require_usable_conn(conn, new_row)
             conn.execute(
                 "UPDATE dataset_snapshots SET state=?, updated_at=? WHERE snapshot_id=?",
                 (m.REVOKED, now, old_snapshot_id))

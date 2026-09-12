@@ -1366,3 +1366,86 @@ async def build_app(instance_id: str, app_id: str,
            detail=f"release={out.get('release_id')} "
                   f"datasets={len(out.get('datasets') or [])}")
     return {"status": "success", "data": out}
+
+
+# ── [M0 · 2026-09-12] 회사 실적 인증 서명 ──────────────────────────────────
+
+class ActualSignatureRequest(BaseModel):
+    """실적 판에 서명 하나를 남긴다.
+
+    ⚠️ `use_kind` 는 **선언**이고 그 선언이 필요한 서명 종류를 정한다. 그리고
+      **downstream 사용을 제약한다** — `OPERATIONAL` 로 인증하면 임원 서명은 피하지만
+      경영 보고에는 못 쓴다(`PURPOSE_MIN_GRADE` 와 같은 구조).
+    ⚠️ `reviewer_id` 를 받지 «않는다» — 서명자는 요청자 본인이다. 남의 이름으로
+      서명하게 두면 그 서명은 아무 의미가 없다."""
+    review_kind: str
+    use_kind: str
+    reconciliation_evidence: str
+    period_from: str = ""
+    period_to: str = ""
+
+
+@router.get("/snapshots/{snapshot_id}/certifications")
+async def list_actual_certifications(snapshot_id: str,
+                                     p: Principal = Depends(current_principal)):
+    """이 판에 모인 서명들 — 화면이 「누가 눌렀고 누가 «안» 눌렀나」를 그린다.
+
+    ★★★ 「아직 인증 안 됨」만 그리면 아무도 안 누른다. **남은 서명과 그 자리 이름**이
+      보여야 사람이 움직인다(제안서 §4 ③)."""
+    from core import actual_certification_policy as acp
+    from api.deps import assert_can_manage_standard
+
+    assert_can_manage_standard(p)
+    row = store.get_snapshot(snapshot_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="존재하지 않는 Snapshot 입니다.")
+    signed = snapshot_service.actual_certifications(store, snapshot_id)
+    declared = str(row.get("certified_use_kind") or "")
+    required = acp.required_reviews(declared) if declared else []
+    have = {r["review_kind"] for r in signed}
+    missing = [k for k in required if k not in have]
+    return {"status": "success",
+            "data": {"snapshot_id": snapshot_id, "state": row.get("state"),
+                     "data_kind": row.get("data_kind"),
+                     "use_kind": declared, "required": required,
+                     "signatures": signed, "missing": missing,
+                     #: 화면이 「누구에게 요청하나」를 그릴 수 있게 자리 이름을 준다.
+                     "missing_titles": {k: acp.reviewer_title(k) for k in missing},
+                     "period_from": row.get("period_from"),
+                     "period_to": row.get("period_to")}}
+
+
+@router.post("/snapshots/{snapshot_id}/certifications")
+async def sign_actual_certification(snapshot_id: str, req: ActualSignatureRequest,
+                                    p: Principal = Depends(current_principal)):
+    """실적 판에 **서명 하나**를 남긴다. 필요한 종류가 다 모이면 인증이 선다.
+
+    ★ 서명자는 **요청자 본인**이다(`reviewer_id` 를 받지 않는다).
+    ⚠️ 승인권은 `ownership_binding._require_approval_authority()` 가 본다 —
+      여기서 다시 만들지 않는다. 두 벌로 만들면 한쪽만 느슨해지는 날이 온다."""
+    from core import actual_certification_policy as acp
+    from api.deps import assert_can_manage_standard
+
+    assert_can_manage_standard(p)
+    actor = (p.user_id or "").strip()
+    if not actor:
+        raise HTTPException(
+            status_code=401,
+            detail="서명에는 사용자 식별이 필요합니다 — 이름 없는 서명은 서명이 아닙니다.")
+    try:
+        out = await asyncio.to_thread(
+            snapshot_service.sign_actual_certification, store, snapshot_id,
+            review_kind=req.review_kind, actor=actor,
+            reconciliation_evidence=req.reconciliation_evidence,
+            use_kind=req.use_kind, period_from=req.period_from,
+            period_to=req.period_to)
+    except m.StateConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except (m.DataPreparationError, acp.ActualCertificationPolicyError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    _audit("DATA_CONTRACT_PUBLISHED" if out.get("certified") else "DATA_REQUIREMENT_ACCEPTED",
+           resource_id=snapshot_id, actor=actor,
+           outcome="allowed" if out.get("certified") else "pending",
+           detail=f"kind={out.get('review_kind')} use={out.get('use_kind')} "
+                  f"missing={out.get('missing')}")
+    return {"status": "success", "data": out}

@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from core.data_preparation import models as m
 from core.data_preparation import snapshot_service as svc
+from core.data_preparation import usage_policy
 
 
 class SealedDatasetError(Exception):
@@ -92,6 +93,11 @@ def load_sealed(store: Any, *, sealed_snapshots: Mapping[str, str],
                 f"{key}: 봉인된 판({sid})이 인증 상태가 아닙니다({state}) — 인증 전 "
                 f"자료로 만든 숫자는 검증되지 않았습니다.")
 
+        try:
+            usage_policy.require_usable(store, row)
+        except usage_policy.UsageHoldError as exc:
+            raise SealedDatasetError(str(exc)) from exc
+
         #: ④ 원본 체크섬. RAW 는 디스크에 있고 디스크는 바뀔 수 있다.
         #: ★ 제품이 이미 쓰는 `snapshot_service.verify_raw` 를 쓴다 — 같은 판정을 두 벌로
         #:   만들면 한쪽만 고쳐지는 날이 오고, 그날 이 경로만 조용히 헐거워진다.
@@ -125,4 +131,10 @@ def active_seals(store: Any, *, instance_id: str, contract_keys: Sequence[str]
         if prev is None or at > str(prev.get("certified_at", "")
                                     or prev.get("created_at", "")):
             latest[key] = row
+    # 보류된 최신판을 빼고 옛 판으로 조용히 폴백하지 않는다.
+    for row in latest.values():
+        try:
+            usage_policy.require_usable(store, row)
+        except usage_policy.UsageHoldError as exc:
+            raise SealedDatasetError(str(exc)) from exc
     return {k: str(v["snapshot_id"]) for k, v in sorted(latest.items())}

@@ -332,31 +332,36 @@ def test_빌더가_스스로_승인_상태를_적지_않는다():
     assert "'status'] = arc.STATUS_APPROVED" not in src
 
 
-def test_예약된_칸은_앱_필드가_되지_않는다():
+def _certified_schema_store(tmp_path, key, schema):
+    """스키마 검사도 실제 결속·보류 계약을 가진 임시 저장소를 사용한다."""
+    from core.data_preparation.store import DataPreparationStore
+    from core.data_preparation import models as m
+    store = DataPreparationStore(str(tmp_path / "schema.db"))
+    context = dict(tenant_id="test", scope_node_id="test", entity_mode="REAL")
+    binding = store.create_binding(instance_id="ki_1", dataset_contract_key=key,
+                                   provider=m.PROVIDER_FILE_SNAPSHOT, config={}, **context)
+    snap = store.create_snapshot(instance_id="ki_1", binding_id=binding["binding_id"],
+                                 dataset_contract_key=key, schema=schema, **context)
+    for state in (m.PROFILED, m.STANDARDIZED, m.RECONCILED, m.DEMO_CERTIFIED):
+        store.advance_snapshot(snap["snapshot_id"], state, certified_by="schema-test@afs.invalid")
+    return store
+
+
+def test_예약된_칸은_앱_필드가_되지_않는다(tmp_path):
     """★★★ `record_id` 같은 이름을 앱이 쓰면 **감사 표시를 위조**할 수 있다.
 
     ⚠️ 말없이 버리지도 않는다 — 무엇을 뺐는지 남긴다."""
-    class _Store:
-        def list_snapshots(self, _i):
-            return [{"dataset_contract_key": "PRC-01", "state": "DEMO_CERTIFIED",
-                     "certified_at": "2026-01-01T00:00:00+00:00", "snapshot_id": "ds_1",
-                     "schema": [{"name": "record_id", "type": "string"},
-                                {"name": "po_id", "type": "string"}]}]
-
-    out = kb.fields_from_certified(_Store(), "ki_1", "PRC-01")
+    store = _certified_schema_store(tmp_path, "PRC-01", [{"name": "record_id", "type": "string"},
+                                                       {"name": "po_id", "type": "string"}])
+    out = kb.fields_from_certified(store, "ki_1", "PRC-01")
     assert [f["name"] for f in out] == ["po_id"], out
 
 
-def test_모르는_형을_string_으로_뭉개지_않는다():
+def test_모르는_형을_string_으로_뭉개지_않는다(tmp_path):
     """⚠️ 「모르면 string」은 **날짜 열을 글자 열로** 만들고, 기간 필터가 조용히 안 먹는다."""
-    class _Store:
-        def list_snapshots(self, _i):
-            return [{"dataset_contract_key": "X", "state": "DEMO_CERTIFIED",
-                     "certified_at": "2026-01-01T00:00:00+00:00", "snapshot_id": "ds_1",
-                     "schema": [{"name": "c", "type": "geo_point"}]}]
-
+    store = _certified_schema_store(tmp_path, "X", [{"name": "c", "type": "geo_point"}])
     with pytest.raises(kb.KitAppError) as err:
-        kb.fields_from_certified(_Store(), "ki_1", "X")
+        kb.fields_from_certified(store, "ki_1", "X")
     assert "변환 표" in str(err.value)
 
 

@@ -31,9 +31,15 @@ import io
 import os
 import re
 import shutil
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from datetime import datetime, timezone
+from typing import (Any, Dict, List, Mapping,
+                    NamedTuple, Optional, Tuple)
 
 from core.data_preparation import models as m
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
 
 #: 불변 RAW 영역. 여기에 들어간 파일은 **다시 쓰지 않는다.**
 RAW_DIRNAME = "raw"
@@ -298,6 +304,8 @@ def certify_demo(store: Any, snapshot_id: str, certified_by: str = "") -> Dict[s
         raise m.StateConflict(
             f"«{row.get('data_kind')}» 데이터에는 시연 인증을 붙이지 않습니다 — "
             f"시연 자료와 실제 실적이 섞이면 어느 것이 시연이었는지 가릴 수 없습니다.")
+    from core.data_preparation import usage_policy
+    usage_policy.require_usable(store, row)
     #: ★★★ [2026-08-20 §7 3단계] **색인을 먼저 계산하고 그다음에 인증한다.**
     #:
     #: ⚠️⚠️ 순서가 중요하다. 인증부터 하면 「인증은 됐는데 색인이 없는 판」이 생길 수
@@ -332,6 +340,8 @@ def certify_demo_replacement(store: Any, old_snapshot_id: str,
     new = store.get_snapshot(new_snapshot_id)
     if new is None:
         raise m.DataPreparationError(f"존재하지 않는 Snapshot 입니다: {new_snapshot_id}")
+    from core.data_preparation import usage_policy
+    usage_policy.require_usable(store, new)
     from core.data_preparation import scope_index
     payload = scope_index.plan(new)
 
@@ -378,3 +388,230 @@ def run_pipeline(store: Any, snapshot_id: str, rows: List[Dict[str, str]],
     if row["state"] == m.QUARANTINED:
         return row
     return certify_demo(store, snapshot_id)
+
+
+# ── [M0 · 2026-09-12] 회사 실적 인증 — 서명은 «종류» 이고 병렬이다 ──────────
+#
+# ## 왜 `certify_demo` 처럼 한 함수로 안 되나
+#
+# 시연·공표 자료는 **서명이 하나**다. 회사 실적은 용도에 따라 **둘일 수 있다**
+# (부서 운영용은 소유 부서장만, 전사 경영 보고용은 + 임원). 그래서 「서명한다」와
+# 「인증이 선다」를 나눈다 — 필요한 종류가 **다 모였을 때** 판이 인증된다.
+#
+# ★ `publication_reviews` 와 같은 모양이다. 새 어휘를 만들지 않는다.
+#
+# ## ⚠️ 순차가 아니라 병렬이다
+#
+# 순차 결재로 만들면 부서장이 휴가 갈 때 **전체가 멈추고**, 결재선이 조직 개편마다
+# 코드 변경이 된다. 필요한 «종류» 만 정하고 순서는 사람에게 맡긴다.
+
+
+def _owner_dept(store: Any, snapshot: Mapping[str, Any]) -> str:
+    """이 판의 **소유 부서를 «찾는다»**. 받지 않는다.
+
+    ★★★ 인증자를 인자로 그냥 받으면 아무 이름이나 들어간다. `SOURCE_CERTIFIED` 가
+      「원천이 승인됐는가」를 등록부에 «물어본» 것과 같은 모양이어야 한다.
+
+    ⚠️ 결속이 없으면 `UNBOUND` 로 **인증이 서지 않는다.** 「누구 데이터인지 모르는
+      실적」에 서명을 받으면 그 서명은 무엇에 대한 서명인지 알 수 없다."""
+    from core.data_preparation import ownership_binding as ob
+
+    with store.transaction() as conn:
+        binding = ob.resolve(
+            conn,
+            tenant_id=str(snapshot.get("tenant_id") or ""),
+            entity_mode=str(snapshot.get("entity_mode") or ""),
+            dataset_contract_key=str(snapshot.get("dataset_contract_key") or ""),
+            scope_node_id=str(snapshot.get("scope_node_id") or ""))
+    if not binding:
+        raise m.DataPreparationError(
+            f"이 판의 소유 부서가 결속돼 있지 않습니다"
+            f"({snapshot.get('dataset_contract_key')}). 「누구 데이터인지 모르는 실적」에 "
+            f"서명을 받으면 그 서명은 무엇에 대한 것인지 알 수 없습니다 — "
+            f"먼저 데이터셋 소유권을 승인하십시오.")
+    return str(binding.get("owner_dept_id") or "")
+
+
+def sign_actual_certification(store: Any, snapshot_id: str, *, review_kind: str,
+                              actor: str, reconciliation_evidence: str,
+                              use_kind: str, period_from: str = "",
+                              period_to: str = "") -> Dict[str, Any]:
+    """회사 실적 판에 **서명 하나**를 남긴다. 필요한 종류가 다 모이면 인증이 선다.
+
+    ## 관문 넷 — 순서가 곧 규칙이다
+
+        ① 상태·성격   `RECONCILED` 이고 `REAL` 인가          (대사도 안 한 판에 서명 금지)
+        ② 소유        소유 부서를 **찾는다**                  (없으면 UNBOUND 로 막힌다)
+        ③ 승인권      그 사람이 승인권자인가                   (`_require_approval_authority`)
+        ④ 대사 증거   「무엇과 맞춰 봤는가」가 있는가            (정책이 최소 길이만 본다)
+
+    ⚠️ ③ 은 **다시 만들지 않는다.** `ownership_binding` 의 네 관문짜리 함수를 그대로 쓴다 —
+      부트스트랩 우회를 두 번 고친 이력이 있는 함수다. 두 벌로 만들면 한쪽만 느슨해진다.
+
+    ## 용도 선언이 «쓰임을 제약한다»
+
+    `use_kind` 는 인증 시점에 **선언**하는 값이고, 그 선언이 필요한 서명 종류를 정한다.
+    ★★★ 그리고 **downstream 사용을 제약한다** — `OPERATIONAL` 로 인증하면 임원 서명은
+      피하지만 **경영 보고에는 못 쓴다**(`PURPOSE_MIN_GRADE` 와 같은 구조).
+      거짓 선언의 대가가 본인에게 돌아오므로 선언을 막을 필요가 없다.
+
+    ⚠️ 한 판에 두 용도를 섞지 않는다. 이미 선언된 판에 다른 용도로 서명하면 거부한다 —
+      섞이면 「이 판이 무엇으로 인증됐나」에 답할 수 없다."""
+    from core import actual_certification_policy as acp
+    from core.data_preparation import ownership_binding as ob
+
+    kind = str(review_kind or "").strip().upper()
+    if kind not in acp.REVIEW_KINDS:
+        raise m.DataPreparationError(
+            f"서명 종류는 {acp.REVIEW_KINDS} 중 하나여야 합니다: {review_kind!r}")
+    required = acp.required_reviews(use_kind)          # 용도가 틀리면 여기서 막힌다
+
+    row = store.get_snapshot(snapshot_id)
+    if row is None:
+        raise m.DataPreparationError(f"존재하지 않는 Snapshot 입니다: {snapshot_id}")
+
+    #: ★★★ [순서 주의] 「이미 다른 용도로 선언됐는가」를 **서명 종류 검사보다 먼저** 본다.
+    #:   뒤에 두면 MANAGEMENT 로 선언된 판에 `EXECUTIVE + OPERATIONAL` 을 내밀었을 때
+    #:   「OPERATIONAL 실적에는 EXECUTIVE 가 필요 없다」는 **엉뚱한 말**이 나온다 —
+    #:   그 판은 OPERATIONAL 이 아니다. 사람이 읽고 잘못된 곳을 고치게 된다.
+    #:   (2026-09-12: 시험이 이 순서를 잡았다.)
+    declared = str(row.get("certified_use_kind") or "")
+    if declared and declared != str(use_kind).upper():
+        raise m.DataPreparationError(
+            f"이 판은 이미 «{declared}» 로 선언됐습니다 — «{use_kind}» 로 바꿀 수 없습니다. "
+            f"용도가 섞이면 「이 판이 무엇으로 인증됐나」에 답할 수 없습니다.")
+
+    if kind not in required:
+        raise m.DataPreparationError(
+            f"«{use_kind}» 실적에는 {kind} 서명이 필요하지 않습니다(필요: {required}). "
+            f"필요 없는 서명을 받으면 「무엇이 갖춰졌나」를 셀 수 없습니다.")
+    #: ① 대사도 안 한 판에 서명받지 않는다 — 서명이 대사를 대신할 수 없다.
+    if str(row.get("state")) != m.RECONCILED:
+        raise m.StateConflict(
+            f"«{row.get('state')}» 상태에서는 실적 서명을 받을 수 없습니다 — "
+            f"{m.RECONCILED} 를 마친 판에만 서명합니다. 서명이 대사를 대신하지 않습니다.")
+    if str(row.get("data_kind")) != m.DATA_KIND_REAL:
+        raise m.StateConflict(
+            f"«{row.get('data_kind')}» 자료에는 실적 인증을 붙이지 않습니다 — "
+            f"이 종점은 «{m.DATA_KIND_REAL}» 전용입니다.")
+
+    owner_dept = _owner_dept(store, row)               # ② 소유를 «찾는다»
+    ob._require_approval_authority(actor)              # ③ 승인권 — 다시 만들지 않는다
+    evidence = acp.assert_reconciliation_evidence(reconciliation_evidence)   # ④ 대사 증거
+
+    now = _now()
+
+    def _write_signature(conn: Any, _fresh: Any = None) -> None:
+        """서명 한 줄과 «용도·귀속기간» 을 같은 트랜잭션에서 쓴다.
+
+        ★ 인증이 서는 순간(`advance_snapshot`)에는 이 함수가 `on_commit` 으로 불려
+          **상태 전환과 한 번에** 커밋된다. 아직 안 설 때는 아래 IMMEDIATE 안에서 돈다."""
+        conn.execute(
+            "INSERT INTO snapshot_certifications(snapshot_id, review_kind, reviewer_id, "
+            "owner_dept_id, reconciliation_evidence, signed_at) VALUES(?,?,?,?,?,?) "
+            "ON CONFLICT(snapshot_id, review_kind) DO UPDATE SET "
+            "reviewer_id=excluded.reviewer_id, owner_dept_id=excluded.owner_dept_id, "
+            "reconciliation_evidence=excluded.reconciliation_evidence, "
+            "signed_at=excluded.signed_at",
+            (snapshot_id, kind, actor, owner_dept, evidence, now))
+        sets = ["certified_use_kind=?", "updated_at=?"]
+        args: List[Any] = [str(use_kind).upper(), now]
+        #: 귀속 기간은 «처음 서명할 때» 정해지고 그 뒤엔 바뀌지 않는다 —
+        #: 바뀌면 「어느 8월을 인증했나」가 흔들린다.
+        if period_from and not str(row.get("period_from") or ""):
+            sets.append("period_from=?")
+            args.append(period_from)
+        if period_to and not str(row.get("period_to") or ""):
+            sets.append("period_to=?")
+            args.append(period_to)
+        args.append(snapshot_id)
+        conn.execute(f"UPDATE dataset_snapshots SET {', '.join(sets)} WHERE snapshot_id=?",
+                     tuple(args))
+
+    def _signed_kinds(conn: Any) -> List[str]:
+        return [str(r[0]) for r in conn.execute(
+            "SELECT review_kind FROM snapshot_certifications WHERE snapshot_id=?",
+            (snapshot_id,))]
+
+    # ── ⑤ 사용 보류 · 서명/인증 원자성 [2026-09-12, Codex 인계] ──────────────
+    #
+    # ⚠️⚠️ **보류는 서명을 «받기 전에» 본다.** 나중에 보면 부서장은 서명하고 퇴근하고,
+    #   막판에 임원이 벽을 만난다 — 차단이 **틀린 사람에게 틀린 시점에** 도착한다.
+    #
+    # ⚠️⚠️ 그리고 그 검사는 **쓰기와 같은 잠금 안**에 있어야 한다. 밖에서 한 번 보고
+    #   들어가면 그 사이에 다른 연결이 보류를 커밋할 수 있다(`advance_snapshot` 이
+    #   `BEGIN IMMEDIATE` 를 먼저 잡는 이유와 같다). 그래서 미리보기용 사전 검사를
+    #   따로 두지 «않고», 두 경로 각각의 잠금 안에서 한 번씩만 본다.
+    with store.transaction() as conn:
+        already = set(_signed_kinds(conn))
+    #: 이 서명이 마지막인가. 서명은 «지워지지 않으므로» 이 판정은 뒤집히지 않는다 —
+    #: 동시 서명자가 끼어들어도 집합은 커지기만 한다.
+    completes = not [k for k in required if k not in (already | {kind})]
+
+    if completes:
+        #: ★★★ 상태 전환과 마지막 서명을 **한 트랜잭션**에서 커밋한다. 나누면
+        #:   「서명은 다 모였는데 인증은 안 선」 판이 남고, 그걸 본 사람은 누가
+        #:   무엇을 빠뜨렸는지 알 수 없다. 보류·상태 관문은 저장소가 자기 잠금
+        #:   안에서 본다 — 여기서 다시 만들지 않는다.
+        certified = store.advance_snapshot(
+            snapshot_id, m.OWNER_CERTIFIED, on_commit=_write_signature,
+            certified_by=actor)
+        signed = sorted(already | {kind})
+    else:
+        from core.data_preparation import usage_policy
+
+        certified = None
+        with store.transaction() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            fresh = conn.execute(
+                "SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                (snapshot_id,)).fetchone()
+            if fresh is None:
+                raise m.DataPreparationError(f"존재하지 않는 Snapshot 입니다: {snapshot_id}")
+            fresh = dict(fresh)
+            #: 잠금 밖에서 본 상태는 이미 낡았을 수 있다 — 철회된 판에 서명하지 않는다.
+            if str(fresh.get("state")) != m.RECONCILED:
+                raise m.StateConflict(
+                    f"«{fresh.get('state')}» 상태에서는 실적 서명을 받을 수 없습니다 — "
+                    f"{m.RECONCILED} 를 마친 판에만 서명합니다.")
+            usage_policy.require_usable_conn(conn, fresh)
+            _write_signature(conn)
+            signed = _signed_kinds(conn)
+        #: ⚠️ 동시 서명자가 끼어들어 여기서 집합이 완성될 수 있다. 그러면 위 판정이
+        #:   놓친 것이므로 **지금 인증을 세운다.** 이 경로만은 두 트랜잭션이지만,
+        #:   실패해도 서명은 남아 있으므로 같은 서명을 다시 눌러 복구된다.
+        if not [k for k in required if k not in signed]:
+            certified = store.advance_snapshot(snapshot_id, m.OWNER_CERTIFIED,
+                                               certified_by=actor)
+
+    missing = [k for k in required if k not in signed]
+    out: Dict[str, Any] = {
+        "snapshot_id": snapshot_id, "review_kind": kind, "reviewer_id": actor,
+        "owner_dept_id": owner_dept, "use_kind": str(use_kind).upper(),
+        "required": required, "signed": sorted(signed), "missing": missing,
+        "certified": False,
+    }
+    if missing:
+        #: ★ 「아직 인증 안 됐다」를 «누가 안 눌렀는지» 와 함께 돌려준다 — 화면이
+        #:   그것을 그려야 사람이 누른다(제안서 §4 ③).
+        out["next_action"] = "남은 서명: " + ", ".join(
+            "%s(%s)" % (k, acp.reviewer_title(k)) for k in missing)
+        return out
+
+    #: 필요한 종류가 다 모였다 — 인증은 «서명과 같은 트랜잭션에서» 이미 섰다.
+    out["certified"] = True
+    out["state"] = certified.get("state")
+    out["certified_at"] = certified.get("certified_at")
+    out["note"] = (
+        f"«{str(use_kind).upper()}» 용도로 인증됐습니다(서명 {len(signed)}건). "
+        f"⚠️ 이 선언이 쓰임을 제약합니다 — OPERATIONAL 로 인증한 실적은 경영 보고에 "
+        f"쓸 수 없습니다.")
+    return out
+
+
+def actual_certifications(store: Any, snapshot_id: str) -> List[Dict[str, Any]]:
+    """이 판에 모인 서명들. 화면이 「누가 눌렀고 누가 안 눌렀나」를 그릴 때 쓴다."""
+    with store.transaction() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM snapshot_certifications WHERE snapshot_id=? ORDER BY review_kind",
+            (snapshot_id,))]

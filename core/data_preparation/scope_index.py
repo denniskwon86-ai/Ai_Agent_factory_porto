@@ -45,6 +45,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.data_preparation import models as m
+from core.data_preparation import usage_policy
 
 #: ★★★ 계약키 → (namespace, object_type, 업무 레코드 ID 열). **닫힌 표다.**
 #:
@@ -216,6 +217,10 @@ def plan(snapshot: Dict[str, Any]) -> List[tuple]:
 
     ★ 계약키가 `INDEX_OBJECTS` 에 없으면 **빈 목록**이다(설계상 대상 아님).
     ⚠️ 대상인데 세우지 못하면 `ScopeIndexError` — 조용히 0줄로 넘어가지 않는다."""
+    try:
+        usage_policy.require_no_holds(snapshot.get("usage_holds", []))
+    except usage_policy.UsageHoldError as exc:
+        raise ScopeIndexError(str(exc)) from exc
     key = str(snapshot.get("dataset_contract_key", "") or "")
     targets = object_specs(key)
     if not targets:
@@ -315,7 +320,18 @@ def write_conn(conn: Any, payload: List[tuple], certified_at: str) -> int:
     #:   `RESOURCE_UNBOUND` 로 막고, 그것이 「소유를 정하지 않았다」의 정직한 결과다.
     #: ⚠️ 중첩·부서 폐지·원장 장애는 여기서 **터진다**(503). 인증 시점에 막는 것이 맞다 —
     #:   그때는 고칠 사람이 그 자리에 있다. 질의 시점에 터지면 아무도 없다.
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
     from core.data_preparation import ownership_binding as ob
+    for snapshot_id in sorted({row[3] for row in payload}):
+        snapshot = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                                (snapshot_id,)).fetchone()
+        if snapshot is None:
+            raise ScopeIndexError("색인할 Snapshot을 찾을 수 없습니다.")
+        try:
+            usage_policy.require_usable_conn(conn, dict(snapshot))
+        except usage_policy.UsageHoldError as exc:
+            raise ScopeIndexError(str(exc)) from exc
     resolved: Dict[tuple, tuple] = {}
     stamped = []
     for row in payload:
@@ -394,7 +410,19 @@ def current_snapshot(store: Any, dataset_contract_key: str, tenant_id: str,
     if not live:
         return None
     live.sort()
-    return live[-1][1]
+    chosen_id = live[-1][1]
+    _require_snapshot_usable(store, chosen_id)
+    return chosen_id
+
+
+def _require_snapshot_usable(store: Any, snapshot_id: str) -> None:
+    snapshot = store.get_snapshot(snapshot_id)
+    if snapshot is None:
+        raise ScopeIndexError("소비할 Snapshot을 찾을 수 없습니다.")
+    try:
+        usage_policy.require_usable(store, snapshot)
+    except usage_policy.UsageHoldError as exc:
+        raise ScopeIndexError(str(exc)) from exc
 
 
 #: 조회 결과의 종류. ★ 런타임의 `ObjectResolution` 상태와 **같은 어휘**를 쓴다 —
@@ -453,6 +481,7 @@ def lookup(store: Any, namespace: str, object_type: str, object_id: str,
                                tenant_id, entity_mode, cutoff)
     if current and str(chosen.get("snapshot_id")) != current:
         return UNBOUND, None, ()
+    _require_snapshot_usable(store, str(chosen.get("snapshot_id")))
     return FOUND, chosen, ()
 
 
@@ -472,10 +501,11 @@ def materialized_object_types(store: Any) -> Dict[str, Tuple[str, ...]]:
     """
     with store.transaction() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT i.namespace, i.object_type "
+            "SELECT DISTINCT i.namespace, i.object_type, s.* "
             "FROM object_scope_index i JOIN dataset_snapshots s "
             "ON s.snapshot_id=i.snapshot_id WHERE s.state IN " + _CERTIFIED_MARKS +
             " AND s.status='active'", _CERTIFIED_ARGS).fetchall()
+        rows = [row for row in rows if not usage_policy.snapshot_holds(conn, dict(row))]
     grouped: Dict[str, set] = {}
     for row in rows:
         grouped.setdefault(str(row[0]), set()).add(str(row[1]))
@@ -492,15 +522,15 @@ def has_unmaterialized_snapshot(store: Any, namespace: str, object_type: str,
         return False
     marks = ",".join("?" for _ in keys)
     with store.transaction() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM dataset_snapshots s WHERE s.dataset_contract_key IN (" + marks + ") "
+        rows = conn.execute(
+            "SELECT s.* FROM dataset_snapshots s WHERE s.dataset_contract_key IN (" + marks + ") "
             "AND s.state IN " + _CERTIFIED_MARKS + " AND s.status='active' "
             "AND s.tenant_id=? AND s.entity_mode=? "
             "AND NOT EXISTS (SELECT 1 FROM object_scope_index i "
-            "WHERE i.snapshot_id=s.snapshot_id AND i.namespace=? AND i.object_type=?) LIMIT 1",
+            "WHERE i.snapshot_id=s.snapshot_id AND i.namespace=? AND i.object_type=?)",
             (*keys, *_CERTIFIED_ARGS, tenant_id, entity_mode,
-             namespace, object_type)).fetchone()
-    return row is not None
+             namespace, object_type)).fetchall()
+        return any(not usage_policy.snapshot_holds(conn, dict(row)) for row in rows)
 
 
 def backfill_supported_snapshots(store: Any) -> Dict[str, int]:
@@ -518,6 +548,7 @@ def backfill_supported_snapshots(store: Any) -> Dict[str, int]:
             if object_specs(str(row["dataset_contract_key"]))]
     written: Dict[str, int] = {}
     for snapshot in snapshots:
+        _require_snapshot_usable(store, str(snapshot["snapshot_id"]))
         payload = plan(snapshot)
         count = write(store, payload, str(snapshot.get("certified_at", "") or ""))
         written[str(snapshot["dataset_contract_key"])] = count
@@ -544,6 +575,10 @@ def evidence_bound(store: Any, evidence_refs: Any, snapshot_id: str) -> Tuple[bo
             "WHERE snapshot_id=?", (snapshot_id,)).fetchall()}
     if not known:
         return False, f"인증판 {snapshot_id} 에 색인이 없습니다."
+    try:
+        _require_snapshot_usable(store, snapshot_id)
+    except ScopeIndexError as exc:
+        return False, str(exc)
     #: 근거는 `PRC-02.po_line_id` 처럼 **계약키로 시작**한다.
     missing = [r for r in refs if r.split(".", 1)[0] not in known]
     if missing:
