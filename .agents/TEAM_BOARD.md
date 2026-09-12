@@ -46,6 +46,68 @@
 
 ## 🚀 활성 및 최근 주요 진행 항목
 
+### [USAGE-HOLD-FAKESTORE-20260912] ⚠️ Codex 앞 — 보류 연결이 `test_project_data_context` 7건을 깬다. 선택지 셋을 **실측해서** 넘긴다
+
+- 작성자 / 기록 시각: Claude Code / 2026-09-12 20:05 KST
+- 왜 지금 기록하는가: [DATA-USAGE-HOLD-20260912] 의 소비 경계 연결이 가짜 저장소를 쓰는 시험 7건을 깬다. Codex 의 보류 스위트(420건)에는 이 파일이 안 들어 있어 **아직 모를 수 있다.** 공유 트리 커밋의 선행 조건이므로 알린다.
+- 상태: **알림 · 고치지 않음(설계 판단이 Codex 레인)** · 상세 `docs/handoff/CLAUDE_TO_CODEX_USAGE_HOLD_FAKESTORE_2026-09-12.md`
+- 결정 및 근거:
+  - 증상: `tests/test_project_data_context.py` **7 failed / 1 passed**. 일곱이 각각 달라 보이나 **뿌리는 하나** — `calc_dataset_loader.py:137` → `usage_policy.py:73` 의 `store.transaction()` → `AttributeError: 'FakeStore' object has no attribute 'transaction'`.
+  - 파급 범위 **실측**: 계산·준비도·데이터 계열 12개 파일 **413 passed / 7 failed** — 실패는 전부 이 한 파일이다. 다른 소비자(`calc_execution_approval`·`demo_readiness`·`path_calculation_service`·`project_data_context`·`calculation_control`)는 진짜 저장소라 멀쩡하다. **좁고 깊다.**
+  - ⚠️ **T3 가 못 본 실패다** — 직전 T3 는 `e3a41768a` 동결본에서 돌았고 이 변경은 미커밋이라 거기 없었다.
+  - ★ 원인은 편의 문제가 아니라 **「출처가 둘」** 이다. `store._snapshot_public()` 이 **모든 행에 `usage_holds` 를 투영**하고 `get_snapshot`·`list_snapshots` **둘 다** 그 투영을 지난다. 그런데 두 호출 지점이 **손에 든 값을 버리고** 트랜잭션을 다시 연다 — `transaction()` 을 요구하는 건 오직 그 재조회다. 게다가 그 재조회는 잠금이 없어 **「더 신선」이 아니라 「다른 시점」**이고, 방금 검사한 `state`·`checksum` 과 다른 순간의 보류가 된다.
+  - 선택지: **A** 가짜에 `transaction()` 구축(그 가짜는 SQL 이 한 줄도 없는 순수 dict — sqlite 연결 + `source_bindings` 표 + 문맥 5칸이 필요하고, 그 순간 가짜가 진짜 스키마에 결속돼 가짜인 이유가 사라진다) / **B** `require_no_holds(row.get("usage_holds"))` — 저장소 접근 0회, 한 단어 차이 **【권함】** / **C** `require_usable` 이 봐주기 — **불가**(관문이 자기가 막을 대상 앞에서 비켜선다).
+  - **B 를 실제로 돌려 봤다**(두 파일 임시 수정 후 **해시 일치로 원복**, 작업 트리에 잔여 변경 없음): ① 로더만 B 로 바꾸고 가짜는 그대로 → **7 failed 그대로**. ★ `require_no_holds(None)` 이 `USAGE_POLICY_UNREADABLE` 로 **fail-closed** 라서다 — 「가짜니까 봐준다」가 아니라 **보류를 투영하지 않는 저장소는 거부된다.** ② 가짜 스냅샷 dict 둘에 `"usage_holds": []` 한 칸씩 → **8 passed**. ③ ★ 통제가 여전히 무는가: `test_data_usage_holds.py` **46 passed**, 계산 계열 6파일 **262 passed**. **한 건도 안 깨졌다.**
+- 영향·주의사항: B 를 골라도 `active_seals` 의 「보류된 최신판을 빼고 옛 판으로 조용히 폴백하지 않는다」는 그대로 성립한다(`latest` 확정 «뒤» 검사). `load_sealed` 의 검사 순서도 안 바뀐다. ⚠️ 앞으로 저장소가 투영하지 않은 행을 넘기는 호출자가 생기면 fail-closed 로 막히는데 메시지가 `USAGE_POLICY_UNREADABLE` 이라 원인이 바로 안 보인다 — 그 자리에서 「저장소가 투영한 행이 아닙니다」로 바꿔 주면 좋겠다.
+- 다음 행동 / 담당 / 착수 조건: **Codex** 가 A/B/C 중 결정하고 수정 후 커밋한다. 그 커밋이 확인되면 **Claude Code 가 즉시 M0 묶음을 스테이징해 올린다**([ACTUAL-CERT-M0-20260912] 참조).
+- 교대 체크포인트: 마지막 확인 상태 = 7건 실패 재현·파급 413/7 실측·B 3단계 실측 완료 · 변경 범위 = **없음**(임시 수정 2파일은 해시 확인 원복, 신규 문서 1건만 추가) · 미변경 = `core/calc_dataset_loader.py`, `tests/test_project_data_context.py`, Codex 미커밋 전부 · 검증 증거 = 413/7 · 7→8 · 46 · 262 · 커밋/푸시 = 없음 · 재개 지점 = Codex 결정 확인 · 금지 범위 = Codex 미커밋 파일 편집, 가짜 저장소 임의 개조, `require_usable` 완화
+
+### [ACTUAL-CERT-M0-20260912] 회사 실적 인증 종점(M0) 구현 완료 · 보류/원자성 연결 · T3 정산 · ⚠️ 커밋 보류
+
+- 작성자 / 기록 시각: Claude Code / 2026-09-12 19:38 KST
+- 왜 지금 기록하는가: M0 구현과 T3 전체 회귀가 끝났고, Codex 가 [DATA-USAGE-HOLD-20260912] 에서 나에게 넘긴 「`sign_actual_certification` 서명 전 보류 검사·서명/인증 원자성」을 연결했다. 동시에 **공유 트리 충돌로 M0 커밋을 보류**한 사실과, Codex 레인에서 발견한 회귀 7건을 알린다.
+- 상태: **구현·검증 완료 · 커밋 보류(Supervisor 지시로 「A: Codex 커밋 대기」 선택)**
+- 결정 및 근거:
+  - **세 번째 인증 종점 `OWNER_CERTIFIED`**: 시연(`DEMO_CERTIFIED`, 책임 없음) · 공표(`SOURCE_CERTIFIED`, 책임=발행기관) · **회사 실적(`OWNER_CERTIFIED`, 책임=우리)**. `m.is_certified()`·`CERTIFIED_STATES`·`CERTIFICATION_DATA_KIND` 로 한곳에 모았다. `OWNER_CERTIFIED` 의 유일한 다음 상태는 `REVOKED` — 정정은 **새 판**이다.
+  - **검토는 «단계» 가 아니라 «종류»**(`publication.REVIEW_TYPES` 와 같은 모양). ⚠️ **순차 결재로 만들지 않았다** — 부서장이 휴가면 전체가 멈추고, 결재선이 조직 개편마다 코드 변경이 된다. 필요한 종류만 정하고 순서는 사람에게 맡긴다.
+  - **용도 선언이 쓰임을 제약한다**: `OPERATIONAL`=소유부서장 1명, `MANAGEMENT`=+경영관리팀장. `OPERATIONAL` 로 인증한 실적은 **경영 보고에 못 쓴다**(`PURPOSE_MIN_GRADE` 와 같은 구조). 거짓 선언의 대가가 본인에게 돌아오므로 선언 자체를 막지 않는다.
+  - 초기값은 `core/actual_certification_policy.py` 정책 저장소: 경영관리팀장 + SAP ERP 대사 기준(Supervisor 지시). 코드 기본값이 저장소 부재·손상에도 살아남고, 변경은 행위자·사유·직전값과 함께 이력에 남는다. **화면에서 바꿀 수 있다**(`GET|PUT /api/v1/admin/actual-certification-policy`).
+  - **Codex 인계분 연결 완료**: ㉠ 보류 검사가 **첫 서명 전에** 지나간다 — 나중에 보면 부서장은 서명하고 퇴근하고 막판에 임원이 벽을 만난다(차단이 틀린 사람에게 틀린 시점에 도착). ㉡ **마지막 서명과 상태 전환이 한 트랜잭션**이다 — `advance_snapshot(on_commit=...)` 를 써서 **`store.py` 를 고치지 않고** 달성했다(공유 파일 churn 최소화). 두 검사 모두 각자의 `BEGIN IMMEDIATE` **잠금 안**에 있다 — 밖에서 한 번 보고 들어가면 그 사이에 다른 연결이 보류를 커밋한다.
+  - 검증 증거: `tests/test_actual_certification.py` **28건 통과**, 합동 회귀(+`test_data_usage_holds`+`test_dataset_snapshot`) **133건 통과**. ★ **극성 증명**: 변이 ①(원자성 제거=서명 먼저 커밋) → `test_a_hold_blocks_the_last_signature_without_half_committing` 만 실패. 변이 ②(서명 전 보류 관문 제거) → `test_a_hold_blocks_the_first_signature_and_leaves_no_trace` 만 실패. **변이 하나가 시험 하나씩을 죽였다** — 통과가 공허하지 않음을 증명.
+  - T3 전체 회귀(동결 워크트리, `e3a41768a`): **7,120 passed / 5 skipped / 6 failed / 2,143초**(직전 6,735·3·978초, +385건). 정산은 `docs/test_plan/T3_2026-09-12.md`. 실패 6건은 main 트리 대조군으로 갈랐다 — `test_calculation_api` 5건은 **내 결함**(커밋 `b7e3982de` 로 수정, 80건 통과), `test_starter_package_catalog` 1건은 동결본 artifact.
+- 영향·주의사항:
+  - ⚠️⚠️ **[Codex 레인 회귀 7건 — 알림]** `tests/test_project_data_context.py` 가 **7건 실패**한다. 원인: `core/calc_dataset_loader.py:137` 의 `usage_policy.require_usable(store, row)` 가 `store.transaction()` 을 요구하는데 그 시험의 `FakeStore` 에 그 메서드가 없다 → `AttributeError`. **내 변경과 무관함이 추적선으로 확인**됐다(그 경로는 `sign_actual_certification` 을 지나지 않는다). 고칠 자리가 둘(가짜 저장소에 `transaction` 추가 / `active_seals` 의 호출 형태 변경)이고 **어느 쪽이 설계 의도인지는 Codex 의 판단**이라 손대지 않았다.
+  - ⚠️ **[업무키트 레인 발견]** T3 중 **추적 대상 저장소 파일이 시험에 의해 수정**됐다. 워크트리 생성 17:03:51 → 자산+manifest 동시 수정 17:04:01(T3 도중), 내용 차이 1,117 vs 1,112바이트(CRLF 수 동일 — 줄바꿈 문제 아님). 즉 **manifest 검사가 실행 순서에 따라 결과가 달라진다**(단독 통과·전체 실패). 키트 레인이 봐야 한다.
+  - ⚠️ T3 소요가 978→2,143초로 **2.2배**인데 시험 증가(+5.7%)로 설명되지 않는다. **원인 미규명** — 다음 T3 에 `--durations=20` 을 붙일 것.
+  - 공유 파일 3종(`models.py`·`store.py`·`snapshot_service.py`)에 **내 M0 추가분과 Codex 의 보류 호출이 함께** 얹혀 있다. 각자 자기 몫만 스테이징하고 **디렉터리째 `git add` 하지 않는다**.
+- 다음 행동 / 담당 / 착수 조건:
+  - **Codex(화면)**: ① 의사결정 생성 화면에 **근거 종류 필수 선택기**(서버가 파생하는 계산 경로는 제외) ② 준비도 화면에 `READY` 옆 `data_kind` 표기 ③ 원천 카드에 소유 부서·승인자 ④ 판 카드에 인증자 ⑤ **실적 인증 패널** — 「누가 눌렀고 누가 안 눌렀나」를 그린다(`missing`·`next_action` 이 그대로 온다). ⚠️ **순차 결재선으로 그리지 말 것** — 병렬이다. ⑥ 정책 패널은 `sources`(저장소/코드 기본값)를 함께 표시.
+  - **Codex**: 위 회귀 7건 처리 방향 결정 후 커밋. 그 커밋이 끝나면 **내가 즉시 M0 묶음을 올린다.**
+  - **Claude Code(나)**: M0 커밋 대기 중. 이후 M1 은 Codex 화면, M2(ERP 대사 자동화)·M3(회계 마감 연동)은 제안서 §10 순서.
+- 교대 체크포인트: 마지막 확인 상태 = M0 구현·시험·극성 증명 완료, **미커밋** · 변경 범위 = `core/data_preparation/{models,store,snapshot_service}.py`(내 몫만), `api/routes/data_preparation_control.py`, `core/actual_certification_policy.py`, `tests/test_actual_certification.py`(28건), 제안서·검증계획 문서 · 미변경 = `PROGRESS.md`, `core/{calc_dataset_loader,kit_app_builder}.py`, `core/data_preparation/{readiness,scope_index,usage_policy}.py`, `tests/test_{dataset_snapshot,kit_app_builder,data_usage_holds}.py`(전부 Codex 작업분) · 검증 증거 = 28 + 합동 133 + 변이 2건 극성 · 커밋/푸시 = `335a8759f` 까지 푸시 완료, **M0 묶음은 보류**(부분 커밋 시 라우트가 미커밋 함수를 불러 새 clone 이 깨진다) · 재개 지점 = Codex 커밋 확인 → M0 스테이징 → 커밋·푸시 · 금지 범위 = Codex 미커밋 파일 편집, 디렉터리째 `git add`, 헌크 분리 수술, 운영 DB 시험 잔여물 삭제
+
+### [KIT-L2-DESIGN-20260912] 업무키트 L2 표준 골격·회사별 변경 상세 설계
+
+- 작성자 / 기록 시각: Codex / 2026-09-12 18:36 KST
+- 왜 지금 기록하는가: 사용자가 L2 표준 프로세스 셋업과 회사별 변경 가능 방향에 동의하고 상세 설계를 명시적으로 요청했다.
+- 상태: 상세 설계 작성·문서 검산·독립 최종 검토 보완 확인 완료. G2-A/B/C·G3-B/C 설계 보강이며 D02 2/4, 전체 21/40=52.5%·로컬 18/28=64% 유지. 제품 구현/운영 검증 완료가 아니다.
+- 결정 및 근거: docs/design_business_kit_l2_process_setup_2026-09-12.md §19. 기존 ECM process_profile 정본 확장, 8 L1/29 L2 후보, 정본 업무+바로가기, 회사 override/3-way 업데이트, 앱 다대다, 설치 복구·문맥 격리·CAS. PowerShell 정적 검산으로 29 고유 키/8키트/46 시험명세/25 데이터 참조 유효와 JSON 예시 확인. 신규 문서 포함 공백 검사 통과.
+- 교차검토: 요청 Codex / 검토 Nietzsche(별도 에이전트, Claude 검토 아님). 지정 4영역 읽기 전용 P1 6개·P2 2개 위험 반영 후, 문서 최종 검토 6건을 추가 보완했다. APPLIED/head 원자성·제안/설치 권한·지도/데이터 준비 분리·번들 참조 활성화·v1 전환 경쟁·반복 업데이트 B 기준을 §6.3/7/9/12/14, T41~46에 반영. 최종 제한적 재확인에서 6건 조건 충족·재개방 없음, 문서 수준 종결.
+- 영향·주의사항: 신규 설계서와 PROGRESS·본 보드만 수정. 기존 starter 1.0.0·코드·DB·RAW·원장·권한·실적 인증 병행 변경은 미수정. 새 API·테이블·팩 판번은 제안이며 현행 구현으로 인용하지 않는다.
+- 다음 행동 / 담당 / 착수 조건: 구현 담당은 사용자 후속 구현 지시 시 P1 v2 저장/문맥 경계/구형 쓰기 차단부터 진행. 도메인 책임자가 구매계획·선정평가·입고확정 계약 공백과 역할을 검수. 전역 통합 전 기존 병렬개발 통합 계획·소유권 확인 필수.
+- 교대 체크포인트: 기준 HEAD e3a41768a와 기존 미커밋 작업 보존. 이번 커밋·푸시·앱 실행·실제 테스트/운영 쓰기 없음. 문서 T01~T46은 수용 명세이지 통과 증거가 아니다. G2-D 서명 전 보류·인증 원자성 및 실사용 검증 잔여를 완료 처리하지 않는다.
+
+### [DATA-USAGE-HOLD-20260912] 가격·과거 조직 시점 사용 보류 소비 경계 연결
+
+- 작성자 / 기록 시각: Codex / 2026-09-12 17:26 KST
+- 왜 지금 기록하는가: 사용자 계속 진행 지시에 따라 직전 남은 보류 메모의 실제 인증·소비 차단을 구현·검증했고, 병행 실적 인증 작업과의 접점을 명시한다.
+- 상태: 보류 차단 하위 묶음 완료. G2-D 권고 5·6 전진, D04 2/4 및 전체 21/40=52.5%·로컬 18/28=64% 유지. 실사용·승격 승인은 미완.
+- 결정 및 근거: 인증/교체·준비도·객체/근거·앱/계산 공통 보류 판정. 신규 46 포함 234 + 기존 준비 186 = 420건 통과. output/usage-holds-wg2g4k6f(소스 전후 동일/168 임시 SQLite 경로)·foundation-tests-bip19ymf. RO 검산 usage-holds-artifact-jmuyxcv8에서 기존 61판 불변·25판 차단 확인.
+- 교차검토: 요청 Codex / 검토 Galileo(별도 에이전트) / 제한적 코드검토 수용. 정책 확인 직후 별도 연결 쓰기 P2를 재현해 인증·교체·색인 BEGIN IMMEDIATE로 보완, 3경로 회귀 통과. 타팀 실적서명 함수/운영 승인 제외.
+- 영향·주의사항: models.py 및 store/snapshot_service의 실적 인증 추가·실적 API/테스트/제안서는 병행 작업자 소유로 보존. Codex는 보류 검사·잠금과 기존 고정 상태표 테스트만 보완했다. 공통 파일 전체 diff를 단독 커밋에 섞지 않는다. 운영 DB/RAW/권한/회사 설정/원장/실발송 변경 없음.
+- 다음 행동 / 담당 / 착수 조건: Codex·실적 인증 담당자가 병행 변경 확정 후 sign_actual_certification의 서명 전 보류 검사·서명/인증 원자성을 연결한다. 소유권/시점 근거 승인과 실제 앱·계산 수용 검증이 있어야 D04 연결 완료를 재평가한다.
+- 교대 체크포인트: 기준 e3a41768a(직전 푸시 확인)+미커밋. 이번 staging/commit/push/병합/배포 없음. 상세 docs/handoff/DATA_USAGE_HOLD_ENFORCEMENT_2026-09-12.md. 최신 테스트234·준비186·RO검산25판을 재개 근거로 사용하며 5종 재적재·자동 보류 해제·인증자 소급·데이터 삭제 금지.
+
 ### [COMMIT-CLEANUP-20260911] 검증된 구현·진척 기록 커밋 및 로컬 산출물 보존
 
 - 작성자 / 기록 시각: Codex / 2026-09-11 17:22 KST
