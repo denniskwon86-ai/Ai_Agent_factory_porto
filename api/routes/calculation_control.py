@@ -1041,13 +1041,19 @@ async def create_work_scenario_decision(
     try:
         bound = esd.build(
             scenario=scenario, composition=composition, question=req.question)
-        from core.decision_case import DecisionCaseError, decision_case
+        from core.decision_case import (BASIS_SIMULATION, DecisionCaseError,
+                                    decision_case)
         saved = await asyncio.to_thread(
             decision_case.create,
             question=req.question, created_by=p.user_id or "",
             baseline_id=str(composition["baseline_id"]), scenario_id=scenario_id,
             scope_id=str(scenario["scope_node_id"]), package=bound["package"],
             evidence=bound["evidence"], due_at=req.due_at,
+            #: ★★★ [2026-09-12] 근거 «종류» 는 **서버가 정한다.** 이 경로의 증거는
+            #:   서버가 계산에서 파생한 것(기준선 지문·가정·산식 판본)이므로
+            #:   `SIMULATION` 이 사실이다 — 사용자에게 물으면 «틀리게» 답할 수 있고,
+            #:   그 순간 Q4 의 답이 거짓이 된다.
+            evidence_basis=BASIS_SIMULATION,
             tenant_id=str(scenario["tenant_id"]))
     except (esd.EnterpriseScenarioDecisionError, DecisionCaseError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1201,7 +1207,8 @@ async def calculate_and_decide(req: DecisionInput,
     #:   완주」가 성립하지 않는다 — 화면에 잠깐 떴다 사라지는 것은 안건이 아니다.
     #: ⚠️ 결정 문장이 없으면 만들지 않는다. 제목으로 대신하지 않는다(같은 이유로
     #:   `decision_case.create` 도 요구한다).
-    from core.decision_case import DecisionCaseError, decision_case
+    from core.decision_case import (BASIS_SIMULATION, DecisionCaseError,
+                                    decision_case)
 
     #: ⚠️ **여기서 결정 문장을 검사하지 않는다.** `decision_case.create` 가 이미 막고,
     #:   같은 판정을 두 겹으로 두면 어느 것이 실제로 막는지 알 수 없다 — 변이로 확인했다
@@ -1217,7 +1224,13 @@ async def calculate_and_decide(req: DecisionInput,
             package=_decision_sections(
                 {**pkg.public(), "briefing": dp.briefing_lines(pkg)},
                 base, scenario, baseline, req.snapshot_ids),
-            evidence=pkg.evidence, due_at=req.due, tenant_id=got["ctx"]["tenant_id"])
+            evidence=pkg.evidence, due_at=req.due,
+            #: ★★★ [2026-09-12] 근거 «종류» 는 **서버가 정한다.** 이 경로의 증거는
+            #:   서버가 계산에서 파생한 것(기준선 지문·가정·산식 판본)이므로
+            #:   `SIMULATION` 이 사실이다 — 사용자에게 물으면 «틀리게» 답할 수 있고,
+            #:   그 순간 Q4 의 답이 거짓이 된다.
+            evidence_basis=BASIS_SIMULATION,
+            tenant_id=got["ctx"]["tenant_id"])
     except DecisionCaseError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
